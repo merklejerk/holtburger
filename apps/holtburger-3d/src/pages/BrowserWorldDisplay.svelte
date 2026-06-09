@@ -206,8 +206,11 @@
 	let texturePreviewStage = $state<HTMLDivElement | null>(null);
 	let texturePreviewZoom = $state(1);
 	let texturePreviewShowAtlasBounds = $state(true);
+	let selectedTexturePreviewEntryKey = $state<string | null>(null);
 	let texturePreviewDrag = $state<{
 		pointerId: number;
+		startX: number;
+		startY: number;
 		lastX: number;
 		lastY: number;
 	} | null>(null);
@@ -285,7 +288,16 @@
 			0,
 		);
 		if (texturePreviewShowAtlasBounds) {
-			drawTexturePreviewEntryBounds(context, texturePreview.entries);
+			drawTexturePreviewEntryBounds(
+				context,
+				texturePreview.entries,
+				selectedTexturePreviewEntryKey,
+			);
+		} else if (selectedTexturePreviewEntry) {
+			drawTexturePreviewSelectedEntryBounds(
+				context,
+				selectedTexturePreviewEntry,
+			);
 		}
 	});
 
@@ -294,6 +306,7 @@
 	const MAX_TEXTURE_PREVIEW_ZOOM = 32;
 	const TEXTURE_PREVIEW_ZOOM_STEP = 1.25;
 	const TEXTURE_PREVIEW_WHEEL_ZOOM_STEP = 1.08;
+	const TEXTURE_PREVIEW_CLICK_MOVE_THRESHOLD = 4;
 	const worldDisplay = $derived(renderResourceReport.worldDisplay);
 	const sceneGeometryText = $derived(renderResourceReport.sceneGeometryText);
 	const terrainHeightText = $derived(renderResourceReport.terrainHeightText);
@@ -302,6 +315,11 @@
 	);
 	const structuredInteriorText = $derived(
 		renderResourceReport.structuredInteriorText,
+	);
+	const selectedTexturePreviewEntry = $derived(
+		texturePreview?.entries.find(
+			(entry) => entry.sourcePlacementKey === selectedTexturePreviewEntryKey,
+		) ?? null,
 	);
 	const cellIndicatorText = $derived(renderResourceReport.cellIndicatorText);
 	const portalDiagnosticsText = $derived(
@@ -871,6 +889,8 @@
 			}
 			texturePreview = preview;
 			texturePreviewZoom = 1;
+			selectedTexturePreviewEntryKey =
+				preview.entries[0]?.sourcePlacementKey ?? null;
 			void fitTexturePreviewToStage();
 		} catch (error) {
 			texturePreview = null;
@@ -883,6 +903,7 @@
 		texturePreview = null;
 		texturePreviewError = null;
 		texturePreviewDrag = null;
+		selectedTexturePreviewEntryKey = null;
 	}
 
 	async function fitTexturePreviewToStage(): Promise<void> {
@@ -951,6 +972,8 @@
 		texturePreviewStage.setPointerCapture(event.pointerId);
 		texturePreviewDrag = {
 			pointerId: event.pointerId,
+			startX: event.clientX,
+			startY: event.clientY,
 			lastX: event.clientX,
 			lastY: event.clientY,
 		};
@@ -968,6 +991,8 @@
 		texturePreviewStage.scrollTop -= deltaY;
 		texturePreviewDrag = {
 			pointerId: event.pointerId,
+			startX: texturePreviewDrag.startX,
+			startY: texturePreviewDrag.startY,
 			lastX: event.clientX,
 			lastY: event.clientY,
 		};
@@ -978,12 +1003,75 @@
 		if (!texturePreviewStage || texturePreviewDrag?.pointerId !== event.pointerId) {
 			return;
 		}
+		const drag = texturePreviewDrag;
 
 		if (texturePreviewStage.hasPointerCapture(event.pointerId)) {
 			texturePreviewStage.releasePointerCapture(event.pointerId);
 		}
 		texturePreviewDrag = null;
+		if (
+			Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) <=
+			TEXTURE_PREVIEW_CLICK_MOVE_THRESHOLD
+		) {
+			selectTexturePreviewEntryAtPointer(event);
+		}
 		event.preventDefault();
+	}
+
+	function selectTexturePreviewEntry(
+		entry: RenderResourceTexturePagePreview["entries"][number],
+	): void {
+		selectedTexturePreviewEntryKey = entry.sourcePlacementKey;
+	}
+
+	function selectTexturePreviewEntryAtPointer(event: PointerEvent): void {
+		if (!texturePreview || !texturePreviewCanvas) {
+			return;
+		}
+		const canvasRect = texturePreviewCanvas.getBoundingClientRect();
+		if (
+			event.clientX < canvasRect.left ||
+			event.clientX > canvasRect.right ||
+			event.clientY < canvasRect.top ||
+			event.clientY > canvasRect.bottom
+		) {
+			return;
+		}
+		const textureX =
+			((event.clientX - canvasRect.left) / Math.max(canvasRect.width, 1)) *
+			texturePreview.width;
+		const textureY =
+			((event.clientY - canvasRect.top) / Math.max(canvasRect.height, 1)) *
+			texturePreview.height;
+		const entry = findTexturePreviewEntryAtPoint(
+			texturePreview.entries,
+			textureX,
+			textureY,
+		);
+		selectedTexturePreviewEntryKey = entry?.sourcePlacementKey ?? null;
+	}
+
+	function findTexturePreviewEntryAtPoint(
+		entries: readonly RenderResourceTexturePagePreview["entries"][number][],
+		x: number,
+		y: number,
+	): RenderResourceTexturePagePreview["entries"][number] | null {
+		for (let index = entries.length - 1; index >= 0; index -= 1) {
+			const entry = entries[index];
+			if (!entry) {
+				continue;
+			}
+			const [rectX, rectY, rectWidth, rectHeight] = entry.rect;
+			if (
+				x >= rectX &&
+				x < rectX + rectWidth &&
+				y >= rectY &&
+				y < rectY + rectHeight
+			) {
+				return entry;
+			}
+		}
+		return null;
 	}
 
 	function setTexturePreviewZoom(
@@ -1045,6 +1133,7 @@
 	function drawTexturePreviewEntryBounds(
 		context: CanvasRenderingContext2D,
 		entries: readonly RenderResourceTexturePagePreview["entries"][number][],
+		selectedEntryKey: string | null,
 	): void {
 		context.save();
 		context.lineWidth = 1;
@@ -1059,6 +1148,38 @@
 				Math.max(0, height - 1),
 			);
 		}
+		context.restore();
+		const selectedEntry =
+			entries.find((entry) => entry.sourcePlacementKey === selectedEntryKey) ??
+			null;
+		if (selectedEntry) {
+			drawTexturePreviewSelectedEntryBounds(context, selectedEntry);
+		}
+	}
+
+	function drawTexturePreviewSelectedEntryBounds(
+		context: CanvasRenderingContext2D,
+		entry: RenderResourceTexturePagePreview["entries"][number],
+	): void {
+		const [x, y, width, height] = entry.rect;
+		context.save();
+		context.lineWidth = 3;
+		context.strokeStyle = "rgba(255, 216, 102, 1)";
+		context.setLineDash([]);
+		context.strokeRect(
+			x + 1.5,
+			y + 1.5,
+			Math.max(0, width - 3),
+			Math.max(0, height - 3),
+		);
+		context.lineWidth = 1;
+		context.strokeStyle = "rgba(0, 0, 0, 0.9)";
+		context.strokeRect(
+			x + 0.5,
+			y + 0.5,
+			Math.max(0, width - 1),
+			Math.max(0, height - 1),
+		);
 		context.restore();
 	}
 
@@ -2462,34 +2583,80 @@
 							Rects
 						</button>
 					</div>
-					<div
-						bind:this={texturePreviewStage}
-						class:dragging={texturePreviewDrag !== null}
-						class="browser-world-display__texture-preview-stage"
-						role="region"
-						aria-label="Texture preview pan and zoom viewport"
-						onpointerdown={handleTexturePreviewPointerDown}
-						onpointermove={handleTexturePreviewPointerMove}
-						onpointerup={handleTexturePreviewPointerUp}
-						onpointercancel={handleTexturePreviewPointerUp}
-						onwheel={handleTexturePreviewWheel}
-					>
-						<div class="browser-world-display__texture-preview-surface">
-							<div
-								class="browser-world-display__texture-preview-content"
-								style:width={`${texturePreview.width * texturePreviewZoom}px`}
-								style:height={`${texturePreview.height * texturePreviewZoom}px`}
-							>
-								<canvas
-									bind:this={texturePreviewCanvas}
-									aria-label="Texture page preview"
-								></canvas>
-								<span
-									class="browser-world-display__texture-preview-bounds"
-									aria-hidden="true"
-								></span>
+					<div class="browser-world-display__texture-preview-body">
+						<div
+							bind:this={texturePreviewStage}
+							class:dragging={texturePreviewDrag !== null}
+							class="browser-world-display__texture-preview-stage"
+							role="region"
+							aria-label="Texture preview pan and zoom viewport"
+							onpointerdown={handleTexturePreviewPointerDown}
+							onpointermove={handleTexturePreviewPointerMove}
+							onpointerup={handleTexturePreviewPointerUp}
+							onpointercancel={handleTexturePreviewPointerUp}
+							onwheel={handleTexturePreviewWheel}
+						>
+							<div class="browser-world-display__texture-preview-surface">
+								<div
+									class="browser-world-display__texture-preview-content"
+									style:width={`${texturePreview.width * texturePreviewZoom}px`}
+									style:height={`${texturePreview.height * texturePreviewZoom}px`}
+								>
+									<canvas
+										bind:this={texturePreviewCanvas}
+										aria-label="Texture page preview"
+									></canvas>
+									<span
+										class="browser-world-display__texture-preview-bounds"
+										aria-hidden="true"
+									></span>
+								</div>
 							</div>
 						</div>
+						<aside
+							class="browser-world-display__texture-preview-entry-panel"
+							aria-label="Selected atlas entry"
+						>
+							{#if selectedTexturePreviewEntry}
+								<p>Selected Placement</p>
+								<h3 title={selectedTexturePreviewEntry.sourcePlacementKey}>
+									{formatRenderResourceInspectionKeyForDisplay(
+										selectedTexturePreviewEntry.virtualRefKey,
+									)}
+								</h3>
+								<dl>
+									<div>
+										<dt>Source</dt>
+										<dd>{selectedTexturePreviewEntry.sourceAssetId}</dd>
+									</div>
+									<div>
+										<dt>Rect</dt>
+										<dd>[{selectedTexturePreviewEntry.rect.join(", ")}]</dd>
+									</div>
+									<div>
+										<dt>Aliases</dt>
+										<dd>{selectedTexturePreviewEntry.virtualRefKeys.length}</dd>
+									</div>
+									<div>
+										<dt>Source Placement</dt>
+										<dd>{selectedTexturePreviewEntry.sourcePlacementKey}</dd>
+									</div>
+								</dl>
+								<div class="browser-world-display__texture-preview-aliases">
+									<p>Virtual Refs</p>
+									<ul>
+										{#each selectedTexturePreviewEntry.virtualRefKeys as alias}
+											<li title={alias}>
+												{formatRenderResourceInspectionKeyForDisplay(alias)}
+											</li>
+										{/each}
+									</ul>
+								</div>
+							{:else}
+								<p>Selected Placement</p>
+								<h3>No atlas entry selected</h3>
+							{/if}
+						</aside>
 					</div>
 					<div class="browser-world-display__texture-preview-metadata">
 						<dl class="browser-world-display__texture-preview-stats">
@@ -2523,11 +2690,22 @@
 							<summary>Atlas Entries</summary>
 							<dl class="data-list compact-data-list browser-panel__resource-list">
 								{#each texturePreview.entries as entry}
-									<div>
+									<div
+										class:selected={entry.sourcePlacementKey ===
+											selectedTexturePreviewEntryKey}
+									>
 										<dt title={entry.virtualRefKey}>
-											{formatRenderResourceInspectionKeyForDisplay(
-												entry.virtualRefKey,
-											)}
+											<button
+												type="button"
+												class="browser-world-display__texture-preview-entry-button"
+												aria-pressed={entry.sourcePlacementKey ===
+													selectedTexturePreviewEntryKey}
+												onclick={() => selectTexturePreviewEntry(entry)}
+											>
+												{formatRenderResourceInspectionKeyForDisplay(
+													entry.virtualRefKey,
+												)}
+											</button>
 										</dt>
 										<dd>
 											{entry.sourceAssetId}; aliases {entry.virtualRefKeys.length};

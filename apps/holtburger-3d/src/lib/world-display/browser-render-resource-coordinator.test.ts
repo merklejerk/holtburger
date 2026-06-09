@@ -96,7 +96,7 @@ describe("browser render resource coordinator", () => {
 			}),
 		);
 
-		expect(surface.setAssetStateCount).toBe(1);
+		expect(surface.setAssetStateCount).toBe(0);
 
 		store.applyPrunePlan({
 			retainedAssetIds: [formatLandblockOutdoorAssetId(landblockId)],
@@ -124,7 +124,7 @@ describe("browser render resource coordinator", () => {
 			}),
 		);
 
-		expect(surface.setAssetStateCount).toBe(1);
+		expect(surface.setAssetStateCount).toBe(0);
 	});
 });
 
@@ -142,9 +142,6 @@ function createCapturingSurface(): BrowserRenderResourceSurface & {
 	return {
 		committedStaticProductCount: 0,
 		setAssetStateCount: 0,
-		setAssetState() {
-			this.setAssetStateCount += 1;
-		},
 		setRenderSceneContext() {},
 		setRenderChunkTransforms() {},
 		commitStaticLandblockProduct() {

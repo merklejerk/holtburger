@@ -5,7 +5,6 @@ import type {
 import { deriveTerrainFocusLandblockId } from "../assets/scene-asset-request-planner";
 import {
 	countPreparedAssetsByKindFromResolver,
-	createAssetChannelStateSnapshotFromResolver,
 	type PreparedAssetResolver,
 } from "../assets/prepared-asset-store";
 import type { StructuredInteriorCoverage } from "../assets/structured-interior-coverage";
@@ -116,7 +115,6 @@ export interface BrowserRenderResourceReport {
 }
 
 export interface BrowserRenderResourceSurface {
-	setAssetState(assetState: AssetChannelState): void;
 	setRenderSceneContext(
 		context: ReturnType<typeof deriveWorldRenderSceneContext>,
 	): void;
@@ -268,7 +266,6 @@ export class BrowserRenderResourceCoordinator {
 			activeRenderAnchor: input.activeRenderAnchor,
 			browserDestination: input.browserDestination,
 		});
-		const preparedRevision = input.preparedAssetResolver.getPreparedRevision();
 		const terrainSceneSignature = describeTerrainSceneSignature(terrainScene);
 		const staticRenderableSceneSignature =
 			describeStaticRenderableSceneSignature(staticRenderableScene);
@@ -312,17 +309,6 @@ export class BrowserRenderResourceCoordinator {
 		const surface = this.surface;
 		if (surface) {
 			reportTerrainMaterialDiagnostics(terrainScene);
-			this.applySurfaceResource(
-				"asset-state",
-				`prepared:${preparedRevision}`,
-				() =>
-					surface.setAssetState(
-						createAssetChannelStateSnapshotFromResolver(
-							input.assetPresentationState,
-							input.preparedAssetResolver,
-						),
-					),
-			);
 			this.applySurfaceResource(
 				"render-scene-context",
 				describeRenderSceneContextSignature(renderSceneContext),
@@ -414,7 +400,6 @@ export class BrowserRenderResourceCoordinator {
 }
 
 type BrowserRenderResourceSurfaceKey =
-	| "asset-state"
 	| "render-scene-context"
 	| "render-chunk-transforms"
 	| "debug-overlay-scene"

@@ -27,7 +27,12 @@ describe("PreparedAssetStore", () => {
 		expect(events).toEqual([
 			{
 				type: "prepared-assets-updated",
-				assetIds: ["landblock/0102ffff/outdoor"],
+				assets: [
+					{
+						assetId: "landblock/0102ffff/outdoor",
+						kind: "landblock-outdoor",
+					},
+				],
 				preparedRevision: 1,
 				cacheMetadataRevision: 1,
 			},
@@ -90,7 +95,12 @@ describe("PreparedAssetStore", () => {
 		expect(store.resolver.getCacheMetadataRevision()).toBe(2);
 		expect(events.at(-1)).toEqual({
 			type: "prepared-assets-evicted",
-			assetIds: ["landblock/0103ffff/outdoor"],
+			assets: [
+				{
+					assetId: "landblock/0103ffff/outdoor",
+					kind: "landblock-outdoor",
+				},
+			],
 			preparedRevision: 2,
 			cacheMetadataRevision: 2,
 		});

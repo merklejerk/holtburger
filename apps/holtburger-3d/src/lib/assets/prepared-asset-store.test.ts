@@ -52,60 +52,6 @@ describe("PreparedAssetStore", () => {
 		expect(events).toHaveLength(1);
 	});
 
-	it("applies prune plans and emits bounded eviction events", () => {
-		const store = new PreparedAssetStore();
-		const events: PreparedAssetChangeEvent[] = [];
-		store.resolver.subscribe((event) => events.push(event));
-		store.applyPreparedAssets(
-			[
-				createPreparedTerrainAsset(
-					"terrain-a",
-					"landblock/0102ffff/outdoor",
-				),
-				createPreparedTerrainAsset(
-					"terrain-b",
-					"landblock/0103ffff/outdoor",
-				),
-			],
-			1_000,
-		);
-
-		store.applyPrunePlan({
-			retainedAssetIds: ["landblock/0102ffff/outdoor"],
-			evictedAssetIds: ["landblock/0103ffff/outdoor"],
-			cacheMetadataByAssetId: {
-				"landblock/0102ffff/outdoor": {
-					lastPreparedAtMs: 1_000,
-					lastRetainedAtMs: 2_000,
-				},
-			},
-			diagnostics: {
-				prepared: { total: 2, byKind: { "landblock-outdoor": 2 } },
-				hardRetained: { total: 1, byKind: { "landblock-outdoor": 1 } },
-				warmRetained: { total: 0, byKind: {} },
-				retained: { total: 1, byKind: { "landblock-outdoor": 1 } },
-				evicted: { total: 1, byKind: { "landblock-outdoor": 1 } },
-			},
-			nextWarmPruneAtMs: null,
-		});
-
-		expect(store.resolver.has("landblock/0102ffff/outdoor")).toBe(true);
-		expect(store.resolver.has("landblock/0103ffff/outdoor")).toBe(false);
-		expect(store.resolver.getPreparedRevision()).toBe(2);
-		expect(store.resolver.getCacheMetadataRevision()).toBe(2);
-		expect(events.at(-1)).toEqual({
-			type: "prepared-assets-evicted",
-			assets: [
-				{
-					assetId: "landblock/0103ffff/outdoor",
-					kind: "landblock-outdoor",
-				},
-			],
-			preparedRevision: 2,
-			cacheMetadataRevision: 2,
-		});
-	});
-
 	it("applies prune batches without requiring a full retained cache plan", () => {
 		const store = new PreparedAssetStore();
 		const events: PreparedAssetChangeEvent[] = [];

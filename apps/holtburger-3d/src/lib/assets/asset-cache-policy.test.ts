@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-	planPreparedAssetCachePrune,
 	planPreparedAssetCachePruneBatch,
 	planPreparedAssetCachePruneBatchFromResolver,
 } from "./asset-cache-policy";
@@ -15,104 +14,6 @@ import type {
 } from "./types";
 
 describe("asset cache policy", () => {
-	it("retains outdoor active roots and recursively prepared setup/gfx dependencies", () => {
-		const preparedByAssetId = indexPreparedAssets([
-			createPreparedLandblockOutdoorAsset("landblock/0102ffff/outdoor", [
-				"setup-model/02000001",
-			]),
-			createPreparedSetupModelAsset("setup-model/02000001", [
-				"gfx-obj/01000001",
-			]),
-			createPreparedGfxObjAsset("gfx-obj/01000001"),
-			createPreparedGfxObjAsset("gfx-obj/0badcafe"),
-		]);
-
-		const plan = planPreparedAssetCachePrune({
-			preparedByAssetId,
-			cacheMetadataByAssetId: createMetadata(preparedByAssetId, 0),
-			activeCoverageAssetIds: ["landblock/0102ffff/outdoor"],
-			inFlightAssetIds: [],
-			nowMs: 10_000,
-			warmRetainMs: 1_000,
-		});
-
-		expect(plan.retainedAssetIds).toEqual([
-			"gfx-obj/01000001",
-			"landblock/0102ffff/outdoor",
-			"region-render-profile/1",
-			"setup-model/02000001",
-			"terrain-material/1",
-		]);
-		expect(plan.evictedAssetIds).toEqual(["gfx-obj/0badcafe"]);
-		expect(
-			plan.cacheMetadataByAssetId["setup-model/02000001"]?.lastRetainedAtMs,
-		).toBe(10_000);
-	});
-
-	it("retains indoor coverage roots, static dependencies, and in-flight ids", () => {
-		const preparedByAssetId = indexPreparedAssets([
-			createPreparedLandblockOutdoorAsset("landblock/016cffff/outdoor", [
-				"setup-model/02000001",
-			]),
-			createPreparedSetupModelAsset("setup-model/02000001", [
-				"gfx-obj/01000001",
-			]),
-			createPreparedGfxObjAsset("gfx-obj/01000001"),
-			createPreparedGfxObjAsset("gfx-obj/0badcafe"),
-		]);
-
-		const plan = planPreparedAssetCachePrune({
-			preparedByAssetId,
-			cacheMetadataByAssetId: createMetadata(preparedByAssetId, 0),
-			activeCoverageAssetIds: ["landblock/016cffff/outdoor"],
-			inFlightAssetIds: ["landblock/0102ffff/outdoor"],
-			nowMs: 10_000,
-			warmRetainMs: 1_000,
-		});
-
-		expect(plan.retainedAssetIds).toEqual([
-			"gfx-obj/01000001",
-			"landblock/0102ffff/outdoor",
-			"landblock/016cffff/outdoor",
-			"region-render-profile/1",
-			"setup-model/02000001",
-			"terrain-material/1",
-		]);
-		expect(plan.evictedAssetIds).toEqual(["gfx-obj/0badcafe"]);
-	});
-
-	it("keeps warm assets inside the TTL without refreshing their retain timestamp", () => {
-		const preparedByAssetId = indexPreparedAssets([
-			createPreparedGfxObjAsset("gfx-obj/recent1"),
-			createPreparedGfxObjAsset("gfx-obj/expired"),
-		]);
-
-		const plan = planPreparedAssetCachePrune({
-			preparedByAssetId,
-			cacheMetadataByAssetId: {
-				"gfx-obj/recent1": {
-					lastPreparedAtMs: 500,
-					lastRetainedAtMs: 9_500,
-				},
-				"gfx-obj/expired": {
-					lastPreparedAtMs: 500,
-					lastRetainedAtMs: 7_000,
-				},
-			},
-			activeCoverageAssetIds: [],
-			inFlightAssetIds: [],
-			nowMs: 10_000,
-			warmRetainMs: 1_000,
-		});
-
-		expect(plan.retainedAssetIds).toEqual(["gfx-obj/recent1"]);
-		expect(plan.evictedAssetIds).toEqual(["gfx-obj/expired"]);
-		expect(plan.cacheMetadataByAssetId["gfx-obj/recent1"]).toEqual({
-			lastPreparedAtMs: 500,
-			lastRetainedAtMs: 9_500,
-		});
-	});
-
 	it("plans bounded prune batches without evicting hard-retained assets", () => {
 		const preparedByAssetId = indexPreparedAssets([
 			createPreparedLandblockOutdoorAsset("landblock/0102ffff/outdoor", [

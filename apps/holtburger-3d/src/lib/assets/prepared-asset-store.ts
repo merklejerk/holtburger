@@ -2,10 +2,7 @@ import {
 	countPreparedAssetRecordsByKind,
 	countPreparedAssetsByKind,
 } from "./asset-cache-diagnostics";
-import type {
-	PreparedAssetCachePruneBatchPlan,
-	PreparedAssetCachePrunePlan,
-} from "./asset-cache-policy";
+import type { PreparedAssetCachePruneBatchPlan } from "./asset-cache-policy";
 import type {
 	AssetChannelState,
 	PreparedAssetCacheDiagnostics,
@@ -143,52 +140,6 @@ export class PreparedAssetStore {
 				kind: asset.payload.kind,
 			})),
 			preparedRevision: this.preparedRevision,
-			cacheMetadataRevision: this.cacheMetadataRevision,
-		});
-	}
-
-	applyPrunePlan(prunePlan: PreparedAssetCachePrunePlan): void {
-		const retainedAssetIds = new Set(prunePlan.retainedAssetIds);
-		let evictedAnyAsset = false;
-		const evictedAssets: PreparedAssetChangeDescriptor[] = [];
-
-		for (const assetId of [...this.preparedByAssetId.keys()]) {
-			if (retainedAssetIds.has(assetId)) {
-				continue;
-			}
-			const asset = this.preparedByAssetId.get(assetId);
-			if (asset) {
-				evictedAssets.push({
-					assetId,
-					kind: asset.payload.kind,
-				});
-			}
-			this.preparedByAssetId.delete(assetId);
-			evictedAnyAsset = true;
-		}
-
-		this.cacheMetadataByAssetId.clear();
-		for (const [assetId, metadata] of Object.entries(
-			prunePlan.cacheMetadataByAssetId,
-		)) {
-			this.cacheMetadataByAssetId.set(assetId, metadata);
-		}
-		this.cacheDiagnostics = prunePlan.diagnostics;
-		this.cacheMetadataRevision += 1;
-
-		if (evictedAnyAsset) {
-			this.preparedRevision += 1;
-			this.emit({
-				type: "prepared-assets-evicted",
-				assets: evictedAssets,
-				preparedRevision: this.preparedRevision,
-				cacheMetadataRevision: this.cacheMetadataRevision,
-			});
-			return;
-		}
-
-		this.emit({
-			type: "cache-metadata-updated",
 			cacheMetadataRevision: this.cacheMetadataRevision,
 		});
 	}

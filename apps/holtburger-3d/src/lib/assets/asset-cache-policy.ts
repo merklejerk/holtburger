@@ -22,6 +22,7 @@ export interface PreparedAssetCachePrunePlan {
 	evictedAssetIds: string[];
 	cacheMetadataByAssetId: Record<string, PreparedAssetCacheMetadata>;
 	diagnostics: PreparedAssetCacheDiagnostics;
+	nextWarmPruneAtMs: number | null;
 }
 
 export function planPreparedAssetCachePrune(
@@ -29,7 +30,9 @@ export function planPreparedAssetCachePrune(
 ): PreparedAssetCachePrunePlan {
 	const hardRetainedAssetIds = deriveHardRetainedAssetIds(input);
 	const retainedAssetIdSet = new Set(hardRetainedAssetIds);
+	const warmRetainedAssetIds = new Set<string>();
 	const cacheMetadataByAssetId: Record<string, PreparedAssetCacheMetadata> = {};
+	let nextWarmPruneAtMs: number | null = null;
 
 	for (const assetId of hardRetainedAssetIds) {
 		if (!input.preparedByAssetId[assetId]) {
@@ -54,7 +57,13 @@ export function planPreparedAssetCachePrune(
 			input.nowMs - metadata.lastRetainedAtMs <= input.warmRetainMs
 		) {
 			retainedAssetIdSet.add(assetId);
+			warmRetainedAssetIds.add(assetId);
 			cacheMetadataByAssetId[assetId] = metadata;
+			const expiresAtMs = metadata.lastRetainedAtMs + input.warmRetainMs;
+			nextWarmPruneAtMs =
+				nextWarmPruneAtMs === null
+					? expiresAtMs
+					: Math.min(nextWarmPruneAtMs, expiresAtMs);
 			continue;
 		}
 	}
@@ -70,6 +79,15 @@ export function planPreparedAssetCachePrune(
 		cacheMetadataByAssetId,
 		diagnostics: {
 			prepared: countPreparedAssetsByKind(input.preparedByAssetId),
+			hardRetained: countPreparedAssetsByKind(
+				filterPreparedAssets(
+					input.preparedByAssetId,
+					new Set(hardRetainedAssetIds),
+				),
+			),
+			warmRetained: countPreparedAssetsByKind(
+				filterPreparedAssets(input.preparedByAssetId, warmRetainedAssetIds),
+			),
 			retained: countPreparedAssetsByKind(
 				filterPreparedAssets(input.preparedByAssetId, retainedAssetIdSet),
 			),
@@ -77,6 +95,7 @@ export function planPreparedAssetCachePrune(
 				filterPreparedAssets(input.preparedByAssetId, new Set(evictedAssetIds)),
 			),
 		},
+		nextWarmPruneAtMs,
 	};
 }
 

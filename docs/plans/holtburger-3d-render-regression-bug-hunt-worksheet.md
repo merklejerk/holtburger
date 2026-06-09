@@ -2367,6 +2367,357 @@ Progress:
 - Final grep verification found zero remaining matches for `renderableSourceAssetIds`, `serialize_landblock_outdoor_dependencies`, or `serialize_env_cell_dependencies`.
 - Browser runtime report comparison is still pending manual capture. The expected runtime-visible shape from Phase 19 should remain stable: `52` resident products with `25/9/9/9` outdoor-terrain/outdoor-buildings/outdoor-detail/outdoor-env-cells split, with lower worker companion breadth for building/detail jobs that exclude opposite-domain unique static sources.
 
+## Phase 21: Decouple Prepared Asset Ownership From Svelte And Renderer Hot Paths
+
+Status: planned.
+
+Goal:
+
+- Move prepared asset cache ownership out of Svelte-owned reactive state and replace whole-cache renderer sync with targeted, versioned asset/resource invalidation.
+
+Context:
+
+- The current frontend state shape puts the full prepared asset cache in `assetState.preparedByAssetId`.
+- `BrowserWorldDisplay.svelte` observes frontend state updates, passes asset state toward the renderer, and `BrowserRenderResourceCoordinator` currently decides whether to call renderer asset sync by building a signature over all prepared asset ids and cache metadata ids.
+- Renderer `setAssetState()` stores the whole asset state, recommits resident static products, reports metrics, and schedules a frame.
+- `prunePreparedCache()` is synchronous and whole-cache. Applying cache changes through Svelte risks turning a retention/diagnostic task into Svelte reactive churn plus renderer recommit work.
+- The delayed warm-retain prune timer tested after Phase 20 caused periodic main-thread sweeps/freezes and was removed. Independent pruning is still desirable, but only after cache ownership, invalidation, and diagnostics are no longer tied to Svelte hot updates.
+- Diagnostics and metrics do not need immediate consistency. They should be sampled on cadence or on explicit debug-report/inspector requests and allowed to converge.
+- This phase should introduce the prepared asset resolver/event seam needed by the renderer, but it should not also relocate every scene-resource service. Broader runtime ownership belongs in Phase 22.
+
+Out of scope:
+
+- Changing AC DAT asset semantics, landblock asset routes, or static product domain splitting.
+- Reintroducing timer-based whole-cache pruning before the cache can prune incrementally.
+- Hiding the stall by raising TTLs, suppressing diagnostics, or removing cache eviction intent.
+- Preserving the existing Svelte-owned full-cache shape for compatibility. The cleaner cutover is preferred.
+- Moving the landblock product worker pipeline out of `BrowserWorldDisplay.svelte`. Phase 21 may define the product/asset event patterns that make that move cleaner, but Phase 22 owns the lifecycle relocation.
+- Designing a browser-only runtime abstraction. Any new service names and interfaces must also make sense for the future normal game client mode.
+
+### Phase 21A: Measure The Current Hot Path Without Adding More Churn
+
+Status: planned.
+
+Deliverables:
+
+- Add cheap counters and timing samples for:
+  - `prunePreparedCache()` calls, duration, evaluated asset count, evicted count, and caller/source.
+  - renderer asset-sync calls, recommitted product count, and scheduled-frame reason.
+  - coordinator asset-state signature/invalidation decisions.
+- Keep instrumentation bounded: no giant per-asset strings, no full id lists in frame-time paths, and no Svelte reactive recomputation per asset mutation.
+- Expose these values only through sampled diagnostics/debug-report snapshots.
+
+Acceptance criteria:
+
+- Debug reports can show prune count, latest prune duration, latest evaluated/evicted counts, renderer asset-sync count, and recommitted product count.
+- Gathering those diagnostics does not require constructing a signature from every prepared asset id on every cache mutation.
+- The new counters are inert unless diagnostics are sampled.
+
+### Phase 21B: Extract Prepared Asset Cache Into An App-Local Service
+
+Status: planned.
+
+Deliverables:
+
+- Introduce an app-local prepared asset cache/index service outside Svelte store ownership.
+- The service owns prepared records, cache metadata, hard/warm retention state, monotonic revisions, lookup APIs, and typed asset-change events.
+- Expose a readonly `PreparedAssetResolver` from the service. The resolver is a stable reference, not a copied cache object.
+- Expose an immutable planning/debug snapshot adapter only for off-frame migration paths that still require `Record<string, PreparedAssetRecord>` style inputs.
+- Mark the snapshot adapter as transitional unless a caller genuinely needs immutable batch planning. Render hot paths must use resolver lookup/iteration directly.
+- Svelte frontend state keeps only compact presentation snapshots: asset channel status, active/latest asset id, aggregate prepared counts, and sampled cache diagnostics.
+- Asset streaming writes prepared records into the service, then publishes compact snapshots to Svelte on a cadence, explicit debug-report request, or bounded status transition.
+- Renderer-facing code receives the resolver/index as a required constructor-time dependency, not through nullable or repeated `setAssetState()` calls.
+- Asset-change events should be cheap to emit and cheap to observe. Heavy resource sync must be queued, not performed synchronously inside the event callback.
+
+Acceptance criteria:
+
+- Adding or updating a prepared asset no longer replaces a Svelte store value containing the entire prepared cache.
+- Svelte UI can still display asset status/counts from sampled snapshots.
+- Renderer hot paths can look up prepared assets without going through Svelte store state.
+- `WorldDisplay` / renderer construction fails early if no resolver is provided, rather than carrying optional resolver checks through render code.
+- Temporary snapshot/read-model shims are clearly named and tracked for Phase 23 cleanup or promoted to explicit non-render planning APIs.
+
+### Phase 21C: Migrate Scene/Report Inputs Off Full Asset State
+
+Status: planned.
+
+Deliverables:
+
+- Rewire `SceneAssetStreamingController` dependencies to read/write `PreparedAssetStore` instead of `frontendState.asset.preparedByAssetId` and `frontendState.asset.cacheMetadataByAssetId`.
+- Demote `frontendState.asset` to compact presentation state. It should no longer own authoritative prepared records.
+- Migrate `BrowserRenderResourceCoordinator.update()` and scene/report helpers away from `AssetChannelState` inputs. Terrain scene derivation, spatial index construction, picker metadata, report text, and material diagnostics should consume resolver/read-model inputs.
+- Remove the coordinator signature that concatenates all prepared asset ids and cache metadata ids.
+- Track narrow monotonic revisions such as prepared-record revision, cache-retention revision, material-graph revision, terrain-material revision, and static-source revision.
+- Distinguish render-affecting prepared-record changes from diagnostic/cache-metadata-only changes.
+- Define a resolver event contract that can express affected asset ids, asset kinds, revisions, eviction, and diagnostics-only changes.
+- Let renderer/resource coordination subscribe to resolver events directly. `BrowserWorldDisplay.svelte` should not be the middleman for prepared asset invalidation.
+
+Acceptance criteria:
+
+- Cache metadata-only updates do not call renderer `setAssetState()` or recommit products.
+- Prepared asset additions produce bounded invalidation data instead of a whole-cache signature comparison.
+- A setup/model/material asset arrival can be routed to likely dependent products without treating every resident product as dirty by default.
+- The Svelte display layer does not forward prepared-asset invalidation messages to `WorldDisplay`; it only owns UI/presentation state.
+- `describeAssetStateSignature()` and any replacement whole-cache string signature are gone.
+- `BrowserRenderResourceCoordinator` can produce reports/spatial metadata without reading a Svelte-owned full asset cache.
+
+### Phase 21D: Target Renderer Recommit By Dependency
+
+Status: planned.
+
+Deliverables:
+
+- Build or reuse product/resource dependency indexes:
+  - product key to prepared asset ids used by that product
+  - prepared asset id to dependent product/resource keys
+  - material/texture/terrain-specific indexes where needed for finer invalidation
+- Update renderer resource coordination so asset changes recommit only affected products/resources.
+- Queue dirty asset/product work from resolver events and flush it at the top of a render frame or through an explicit renderer public function that can run on a chosen cadence.
+- Make `WorldDisplay.svelte`, `world-display-renderer-contract.ts`, `world-display-renderer.ts`, and `webgl2-world-display-renderer-impl.ts` require a constructor-time `PreparedAssetResolver`.
+- The deferred renderer wrapper must keep the stable resolver reference and install/uninstall resolver subscriptions cleanly when the WebGL implementation loads or disposes.
+- Replace `setAssetState(assetState)` with renderer-owned resolver subscription and dirty-asset flushing.
+- Treat cache-retention diagnostics as presentation state unless an actual prepared record used by a resident resource is evicted.
+- Request a frame only when committed render resources or visible draw state actually changed.
+
+Acceptance criteria:
+
+- Adding a setup appearance no longer recommits terrain resources.
+- Adding a terrain/material dependency no longer recommits unrelated static bundle products.
+- Cache diagnostics sampling does not schedule frames.
+- Eviction of an unused warm asset does not touch renderer resources.
+- Resolver event callbacks do not synchronously rebuild GPU resources; they only mark bounded dirty state.
+- Full-cache `setAssetState()` is no longer part of the renderer contract after this phase, except for explicitly tracked temporary compatibility shims scheduled for Phase 23 deletion.
+
+### Phase 21E: Decouple Diagnostics Sampling From Svelte Reactivity
+
+Status: planned.
+
+Deliverables:
+
+- Move asset/cache diagnostics to cadence-based or explicit on-demand sampling.
+- Ensure Svelte does not sample diagnostics directly in response to every asset-store mutation.
+- Keep expensive debug strings, per-domain summaries, sorted asset lists, and inspector snapshots out of reactive store update handlers.
+- Make debug report generation pull a fresh snapshot from the asset/cache service and renderer when requested.
+- If a UI panel needs periodic updates, use an explicit low-frequency sampler that reads compact service snapshots and updates Svelte independently of asset mutation frequency.
+- Replace `BrowserWorldDisplay.svelte` asset debug summary paths that currently derive text from `assetState` during reactive updates with cadence/on-demand snapshot pulls.
+
+Acceptance criteria:
+
+- Svelte diagnostics sampling is cadence-based or request-based only.
+- Asset store mutations do not synchronously build diagnostic summaries for Svelte.
+- Resource inspector/debug report snapshots can lag briefly and eventually converge.
+- No renderer hot-path dependency is introduced by diagnostic sampling.
+- Browser panel asset/cache/material text can update eventually without subscribing expensive summary generation to every prepared-asset mutation.
+
+### Phase 21F: Reintroduce Independent Pruning Safely
+
+Status: planned.
+
+Deliverables:
+
+- Reintroduce a prune duty cycle only after the prepared cache is no longer Svelte-owned and renderer invalidation is targeted.
+- Make pruning budgeted/incremental or worker-friendly so it cannot sweep thousands of records on the main thread in one turn.
+- Emit small eviction batches and targeted invalidation events.
+- Keep prune diagnostics sampled by cadence/on-demand, not pushed through Svelte per evicted asset.
+
+Acceptance criteria:
+
+- Warm-retain expiry can be enforced without 120-second CPU spikes.
+- Pruning unused warm assets does not trigger whole-cache Svelte updates or whole-scene renderer recommits.
+- Browser runtime profile shows bounded prune work per tick.
+
+Verification:
+
+- Add focused tests for the prepared asset service, revision/invalidation policy, coordinator asset-sync decisions, and renderer recommit targeting.
+- Add regressions proving cache metadata-only updates do not call renderer `setAssetState()` or request frames.
+- Add regressions proving diagnostics sampling can run on cadence/on demand without being triggered by every prepared asset mutation.
+- Add runtime debug evidence showing prune count/duration, renderer asset-sync count, recommit count, and no periodic 120-second freeze.
+- Dry-run course correction: execute Phase 21 in dependency order: store/resolver first, streaming callbacks second, diagnostics sampling third, coordinator/report migration fourth, renderer constructor/subscription fifth, independent prune last.
+- Any transitional adapter, compatibility path, legacy test fixture, or deferred deletion introduced during Phase 21 must be registered in the Phase 23 cleanup worksheet before the phase is marked complete.
+
+## Phase 22: Lift Scene Resource Runtime Out Of Browser Display
+
+Status: planned.
+
+Goal:
+
+- Move scene-resource service ownership out of `BrowserWorldDisplay.svelte` into reusable app/client runtime services that can support both browser mode and the future normal game client mode.
+
+Context:
+
+- Today the raw asset worker pipeline is owned from `App.svelte`: `AssetChannelController` and `SceneAssetStreamingController` are instantiated there and write through `frontendState`.
+- Today the landblock product worker pipeline is owned from `BrowserWorldDisplay.svelte`: it instantiates `StaticLandblockRenderArtifactCoordinator`, receives product commits/evictions, and forwards them to `WorldDisplay`.
+- That means asset preparation and landblock product preparation are sibling pipelines with different owners and a Svelte component acting as product-pipeline lifecycle owner.
+- Phase 21 should create the prepared asset resolver/event seam first. Phase 22 should then relocate the broader scene-resource ownership without preserving browser-display middleman behavior.
+- Runtime service names must avoid browser-only concepts. Browser mode and normal game client mode will have different scene-interest producers, but they will both need prepared assets, landblock products, cache retention, and renderer-facing resource events.
+
+Out of scope:
+
+- Reworking authoritative game/world semantics or server-driven world state.
+- Moving browser-specific controls, panels, inspector UI, camera gestures, or debug presentation out of `apps/holtburger-3d`.
+- Replacing the landblock render worker implementation itself. This phase moves ownership and event wiring, not the worker's artifact construction algorithm.
+- Reintroducing Svelte as the owner of prepared assets or product artifacts under a different name.
+
+### Phase 22A: Define Neutral Runtime Boundaries
+
+Status: planned.
+
+Deliverables:
+
+- Define runtime/service boundaries with client-neutral names. Candidate split:
+  - `PreparedAssetRuntime` or `ClientAssetRuntime` for asset channel, prepared asset store, streaming, retention, and diagnostics snapshots.
+  - `LandblockProductRuntime` for desired product planning, worker client, product store, and product events.
+  - optional `SceneResourceRuntime` composition that owns both when a mode wants one lifecycle object.
+- Keep browser-mode policies outside these services. A browser controller can declare scene interest; the runtime should not own browser UI workflow.
+- Define lifecycle APIs for `syncSceneInterest()`, `dispose()`, diagnostics sampling, and event subscriptions.
+
+Acceptance criteria:
+
+- The new runtime boundary can be instantiated by browser mode today and plausibly by normal client mode later.
+- No new runtime service name includes `Browser` unless it is truly browser-mode-only.
+- `App.svelte` or a small composition module owns service construction/disposal, but does not grow behavior-heavy orchestration code.
+
+### Phase 22B: Move Landblock Product Ownership Out Of Browser Display
+
+Status: planned.
+
+Deliverables:
+
+- Add product-store events before moving ownership, so the migration can prove event delivery while `BrowserWorldDisplay.svelte` still owns the coordinator.
+- Move `StaticLandblockRenderArtifactCoordinator` ownership out of `BrowserWorldDisplay.svelte`.
+- Let the landblock product runtime own the coordinator, worker client, product store, in-flight state, product diagnostics, and product events.
+- Convert product commit/evict/clear notifications into product-store events that `WorldDisplay` can subscribe to directly or receive through a required constructor-time product source.
+- Keep heavy product commits queued for renderer-controlled sync points where needed.
+
+Acceptance criteria:
+
+- `BrowserWorldDisplay.svelte` no longer instantiates `StaticLandblockRenderArtifactCoordinator`.
+- `BrowserWorldDisplay.svelte` no longer forwards worker completion into `worldDisplaySurface.commitStaticLandblockProduct(...)`.
+- Landblock product commits/evictions still reach the renderer, but through a stable product source/event subscription rather than browser-display imperative forwarding.
+- Product event tests pass both before and after moving coordinator ownership.
+
+### Phase 22C: Pass Runtime Sources Into World Display At Construction
+
+Status: planned.
+
+Deliverables:
+
+- Require `WorldDisplay` / renderer construction to receive:
+  - `PreparedAssetResolver`
+  - landblock product source/store or product event stream
+  - any other renderer-required runtime source that is not browser presentation state
+- Remove repeated full-state `setAssetState()` wiring once Phase 21 resolver events replace it.
+- Keep browser presentation inputs as explicit display props or commands: camera, render style, debug toggles, picker state, and selected renderable.
+
+Acceptance criteria:
+
+- Renderer dependencies needed for resource lookup are constructor-time required dependencies.
+- Browser presentation changes remain separate from asset/product runtime changes.
+- `WorldDisplay` owns derived GPU resources and dirty queues, not authoritative prepared asset or product stores.
+
+### Phase 22D: Split Mode Controllers From Resource Runtime
+
+Status: planned.
+
+Deliverables:
+
+- Keep browser-mode scene-interest production in browser-mode code: destination, LoD radii, debug artifact filters, and browser camera policies.
+- Add a mode-neutral scene-interest DTO/event shape that browser mode can emit today and normal client mode can emit later.
+- Ensure the runtime consumes scene interest without knowing whether it came from browser navigation or future client/server world state.
+- Split `BrowserWorldDisplay.svelte`'s current `scheduleCurrentSceneResourceUpdate()` responsibilities into:
+  - scene-interest sync for asset/product runtime work
+  - presentation-only render-resource updates for picker, camera, debug overlay, panel state, and selected renderable state
+- Ensure presentation-only changes cannot resync the landblock product worker pipeline.
+
+Acceptance criteria:
+
+- Browser mode can still drive the same default outdoor scene coverage.
+- The runtime API has no dependency on Svelte stores or browser-only UI state.
+- Future client mode can reuse the resource runtime without adopting browser panels or browser navigation policy.
+- Picker/camera/debug-panel changes do not call landblock product runtime sync unless scene interest actually changed.
+
+Verification:
+
+- Add focused tests for runtime lifecycle, scene-interest sync, product event delivery, and cleanup/disposal.
+- Add regressions proving product events reach `WorldDisplay` without `BrowserWorldDisplay.svelte` forwarding methods.
+- Run full TypeScript verification after moving ownership:
+  - `npm run --prefix apps/holtburger-3d test:ts`
+  - `npm run --prefix apps/holtburger-3d lint:ts`
+  - `npm run --prefix apps/holtburger-3d check`
+- Runtime browser report should preserve the Phase 20/21 product-domain counts and avoid reintroducing asset-cache Svelte churn.
+- Dry-run course correction: execute Phase 22 in dependency order: product-store events first, neutral runtime wrapper second, constructor-time `WorldDisplay` product source third, coordinator ownership move fourth, scene-interest/presentation split fifth, imperative forwarding removal last.
+- Any temporary dual path, product forwarding bridge, runtime composition shim, or delayed deletion introduced during Phase 22 must be registered in the Phase 23 cleanup worksheet before the phase is marked complete.
+
+## Phase 23: Cleanup Worksheet For Transitional Shims And Legacy Ownership Paths
+
+Status: living worksheet.
+
+Goal:
+
+- Track and delete every temporary compatibility shim and obsolete ownership path introduced during Phases 21 and 22, leaving the final runtime boundaries explicit and unambiguous.
+
+Context:
+
+- Phase 21 may temporarily expose immutable read-model snapshots so existing off-frame planners can migrate away from `Record<string, PreparedAssetRecord>` inputs safely.
+- Phase 21 may briefly carry renderer or coordinator compatibility seams while `setAssetState()` and full-cache signatures are removed.
+- Phase 22 may briefly carry product event subscriptions alongside existing browser-display forwarding while ownership moves out of `BrowserWorldDisplay.svelte`.
+- These shims are useful only as migration scaffolding. They must not become the new architecture by inertia.
+- This phase is a living worksheet. Phases 21 and 22 must add rows here as soon as they introduce transitional debt, including owner, deletion condition, and verification.
+
+Worksheet rules:
+
+- Add a row before ending any implementation phase that introduces transitional structure.
+- Prefer deleting the debt in the same phase. If it cannot be deleted immediately, record why and what proves it can be removed later.
+- Do not mark Phase 21 or 22 complete with untracked compatibility code.
+- Keep entries concrete: name files/symbols, not vague systems.
+- When an entry is removed, change status to `removed`, keep the row for historical traceability, and link the verification command or grep result in notes.
+
+Cleanup ledger:
+
+| Status | Introduced By | Debt / Shim | Location | Removal Condition | Verification |
+| --- | --- | --- | --- | --- | --- |
+| planned | Phase 21 | Transitional immutable prepared-asset snapshot/read-model adapter for callers that still require `Record<string, PreparedAssetRecord>` inputs. | TBD | All render hot paths use `PreparedAssetResolver`; remaining snapshot use is either deleted or renamed as explicit off-frame planning API. | `rg` confirms no renderer hot-path imports of the snapshot adapter. |
+| planned | Phase 21 | Temporary renderer/coordinator compatibility path around full-cache `setAssetState(assetState)`. | TBD | `WorldDisplay` and renderer receive constructor-time resolver and subscribe to resolver events directly. | `rg "setAssetState"` has no runtime matches outside deleted/intentional docs. |
+| planned | Phase 21 | Whole-cache asset-state signatures. | `browser-render-resource-coordinator.ts` / successors | Resolver revisions and dirty queues replace all sorted/joined asset-id signatures. | `rg "describeAssetStateSignature|preparedByAssetId.*sort\\(\\).*join"` has no runtime matches. |
+| planned | Phase 22 | Temporary dual path where product-store events and browser-display product forwarding both exist. | TBD | Product events are the only path from landblock product runtime to `WorldDisplay` / renderer. | `rg "commitStaticLandblockProduct|evictStaticLandblockProduct|clearStaticLandblockProducts"` has no browser-display forwarding matches. |
+| planned | Phase 22 | Runtime ownership bridge while `StaticLandblockRenderArtifactCoordinator` is moved out of `BrowserWorldDisplay.svelte`. | TBD | Neutral runtime owns coordinator/store/worker lifecycle. | `rg "new StaticLandblockRenderArtifactCoordinator" apps/holtburger-3d/src/pages/BrowserWorldDisplay.svelte` has no matches. |
+| planned | Phase 22 | Temporary shared scene-resource update function that can trigger product sync from presentation-only changes. | `BrowserWorldDisplay.svelte` / successors | Scene-interest sync and presentation-only updates are separate call paths. | Tests or grep prove picker/camera/debug handlers do not call product runtime sync. |
+
+Deliverables:
+
+- Delete any compatibility API that keeps `AssetChannelState.preparedByAssetId` or `cacheMetadataByAssetId` as Svelte-owned authoritative state.
+- Delete full-cache renderer update APIs and tests, including `setAssetState(assetState)` paths in `WorldDisplay`, renderer contracts, deferred renderer wrappers, and WebGL renderer implementation.
+- Delete whole-cache signature helpers such as `describeAssetStateSignature()` and any successor that sorts/joins all asset ids.
+- Delete browser-display product forwarding methods once product events are the only path:
+  - `commitStaticLandblockProduct(...)`
+  - `evictStaticLandblockProduct(...)`
+  - `clearStaticLandblockProducts()`
+  - associated `worldDisplaySurface?.commit/evict/clear...` forwarding call sites
+- Delete or rename transitional snapshot/read-model helpers:
+  - if a helper is only compatibility glue, remove it
+  - if it remains necessary for off-frame planning, rename it as an explicit immutable planning snapshot API and keep it out of renderer hot paths
+- Delete old tests and fixtures that assert the legacy Svelte-owned cache shape or browser-display product forwarding behavior.
+- Remove `legacy`, `compat`, `shim`, `temporary`, and old-structure TODO markers introduced by these phases unless they describe a still-valid, separately planned issue.
+- Ensure `BrowserWorldDisplay.svelte` owns browser presentation and scene-interest declaration only; it must not own prepared asset stores, product stores, asset workers, or landblock product workers.
+- Ensure `App.svelte` or a small composition module owns lifecycle construction/disposal only; behavior-heavy orchestration belongs in neutral runtime services.
+
+Acceptance criteria:
+
+- `rg "setAssetState|describeAssetStateSignature|preparedByAssetId.*frontendState|cacheMetadataByAssetId.*frontendState"` has no matches except intentional tests/docs or explicitly named immutable planning snapshot APIs.
+- `rg "commitStaticLandblockProduct|evictStaticLandblockProduct|clearStaticLandblockProducts"` no longer finds browser-display forwarding paths.
+- `BrowserWorldDisplay.svelte` has no direct `StaticLandblockRenderArtifactCoordinator` construction.
+- Renderer resource lookup depends on `PreparedAssetResolver` and product source/event subscriptions, not Svelte store state.
+- Diagnostics and resource inspector snapshots remain cadence/on-demand and do not subscribe expensive summary generation to asset mutations.
+
+Verification:
+
+- Add cleanup regression tests proving legacy APIs are absent where practical.
+- Run full TypeScript verification:
+  - `npm run --prefix apps/holtburger-3d test:ts`
+  - `npm run --prefix apps/holtburger-3d lint:ts`
+  - `npm run --prefix apps/holtburger-3d check`
+- Browser runtime report should preserve rendered product/resource counts while showing no periodic prune stalls and no asset-cache Svelte churn.
+
 ## Findings
 
 - Phase 1 diagnostics are installed and verified.
@@ -2432,4 +2783,7 @@ Progress:
 - Phase 18 implementation completed: terrain atlas planning now derives `terrain-color` and `terrain-mask` usage cohorts from resident tile/draw-slice layer plans and passes those constraints into a generic cohort-aware atlas planner. The Phase 17 global terrain `minimize-textures` workaround was removed; terrain buckets now use memory-minimizing adaptive packing constrained by actual draw-unit co-usage.
 - Planned Phase 19 structural fix: the prepared `landblock/<id>/outdoor` asset route is coarse, but the worker render product should not be. The overloaded `"outdoor"` product currently lets terrain-radius requests build building/detail static bundles outside their intended LoD domains; split outdoor render products will keep source asset loading unchanged while removing unnecessary derived CPU/GPU work.
 - Planned Phase 20 structural cleanup: outdoor/env-cell prepared payloads should carry structured facts, not duplicated flattened dependency summaries. Dependency expansion and render-product companion loading should derive source/material roots from `statics[]` and `surfaces[]`, enabling domain-scoped worker loading without adding kinded dependency summary fields.
+- Post-Phase 20 runtime reports showed two diagnostic/retention follow-ups:
+  - Prepared cache diagnostics could remain at `retained == prepared` indefinitely after scene loading because the warm-retain TTL only re-evaluates during scene sync/request cycles. Cache diagnostics now split retained assets into hard-retained and warm-retained buckets. A delayed warm-expiry prune was tested and removed because it caused periodic main-thread sweeps/freezes; eviction needs an incremental or worker-friendly design before it can run on idle timers.
+  - `Missing region render profile region-render-profile/1; landscape detail disabled.` persisted even after `region-render-profile/1` was prepared because terrain material fallback samples were append-only across terrain derived-state refreshes. Terrain refresh now clears current fallback diagnostics before recomputing them and records fallback count/samples together.
 - Remaining suspected issues: static bundle payloads are too large, static bundle asset closure is too broad, and `setAssetState` still triggers costly static product recommits.

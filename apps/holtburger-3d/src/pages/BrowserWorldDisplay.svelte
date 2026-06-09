@@ -2430,7 +2430,7 @@
 			return `Prepared ${preparedCounts.total} (${formatPreparedAssetKindCounts(preparedCounts)}); waiting for first prune sample.`;
 		}
 
-		return `Prepared ${cacheDiagnostics.prepared.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.prepared)}); retained ${cacheDiagnostics.retained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.retained)}); evicted ${cacheDiagnostics.evicted.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.evicted)}).`;
+		return `Prepared ${cacheDiagnostics.prepared.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.prepared)}); retained ${cacheDiagnostics.retained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.retained)}); hard ${cacheDiagnostics.hardRetained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.hardRetained)}); warm ${cacheDiagnostics.warmRetained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.warmRetained)}); evicted ${cacheDiagnostics.evicted.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.evicted)}).`;
 	}
 
 	function describeGfxObjRenderDiagnostics(): string | null {

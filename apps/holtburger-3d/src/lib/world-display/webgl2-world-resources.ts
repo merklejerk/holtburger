@@ -53,6 +53,7 @@ import {
 	createEmptyTexturePageAtlasPlan,
 	createTexturePageDetailAtlasPlacementsByEntryKey,
 	createTexturePageAtlasPlacementsByEntryKey,
+	type TexturePageAtlasCohort,
 	type TexturePageAtlasDetailCandidate,
 	type TexturePageAtlasRgbaCandidate,
 	type TexturePageAtlasPlan,
@@ -516,6 +517,7 @@ function refreshWebgl2TerrainProductDerivedState({
 		policy: DEFAULT_WEBGL2_COMPACTION_FAMILY_PLANNING_POLICY,
 		extraRgbaAtlasCandidates: terrainPageCandidates.rgbaCandidates,
 		extraDetailAtlasCandidates: terrainPageCandidates.detailCandidates,
+		extraTexturePageAtlasCohorts: terrainPageCandidates.cohorts,
 	}).texturePageAtlasPlan;
 	syncWebgl2TerrainTexturePageResources({
 		gl,
@@ -1150,15 +1152,18 @@ function collectTerrainTexturePageAtlasCandidates({
 }): {
 	rgbaCandidates: TexturePageAtlasRgbaCandidate[];
 	detailCandidates: TexturePageAtlasDetailCandidate[];
+	cohorts: TexturePageAtlasCohort[];
 	blockersByTerrainTileId: ReadonlyMap<string, readonly string[]>;
 	refCount: number;
 } {
 	const rgbaCandidates: TexturePageAtlasRgbaCandidate[] = [];
 	const detailCandidates: TexturePageAtlasDetailCandidate[] = [];
+	const cohorts: TexturePageAtlasCohort[] = [];
 	const blockersByTerrainTileId = new Map<string, string[]>();
 	let refCount = 0;
 	for (const tile of terrainTiles) {
 		tile.detailPlan = null;
+		cohorts.push(...createTerrainTexturePageAtlasCohorts(tile));
 		const refs = collectTerrainTileTextureRefs(tile);
 		refCount += refs.length;
 		if (refs.length === 0) {
@@ -1205,6 +1210,7 @@ function collectTerrainTexturePageAtlasCandidates({
 	return {
 		rgbaCandidates,
 		detailCandidates,
+		cohorts,
 		blockersByTerrainTileId,
 		refCount,
 	};
@@ -1382,6 +1388,94 @@ function collectTerrainTileTextureRefs(
 	);
 }
 
+function createTerrainTexturePageAtlasCohorts(
+	tile: Webgl2TerrainTileResource,
+): TexturePageAtlasCohort[] {
+	const cohorts: TexturePageAtlasCohort[] = [];
+	if (tile.layerPlan) {
+		cohorts.push(
+			...createTerrainLayerPlanTexturePageAtlasCohorts({
+				ownerKey: `${tile.id}/tile`,
+				layerPlan: tile.layerPlan,
+			}),
+		);
+	}
+	for (const slice of tile.drawSlices) {
+		cohorts.push(
+			...createTerrainLayerPlanTexturePageAtlasCohorts({
+				ownerKey: `${slice.id}/slice`,
+				layerPlan: slice.layerPlan,
+			}),
+		);
+	}
+	return cohorts;
+}
+
+function createTerrainLayerPlanTexturePageAtlasCohorts({
+	ownerKey,
+	layerPlan,
+}: {
+	ownerKey: string;
+	layerPlan: TerrainTileLayerPlan;
+}): TexturePageAtlasCohort[] {
+	return [
+		createTerrainLayerPlanTexturePageAtlasCohort({
+			key: `${ownerKey}/terrain-color`,
+			bucket: "terrain-color",
+			refs: collectTerrainLayerPlanTextureRefsByRole(layerPlan, "color"),
+		}),
+		createTerrainLayerPlanTexturePageAtlasCohort({
+			key: `${ownerKey}/terrain-mask`,
+			bucket: "terrain-mask",
+			refs: collectTerrainLayerPlanTextureRefsByRole(layerPlan, "mask"),
+		}),
+	].filter((cohort): cohort is TexturePageAtlasCohort => cohort !== null);
+}
+
+function createTerrainLayerPlanTexturePageAtlasCohort({
+	key,
+	bucket,
+	refs,
+}: {
+	key: string;
+	bucket: TexturePageAtlasCohort["bucket"];
+	refs: readonly TerrainBlendTextureRef[];
+}): TexturePageAtlasCohort | null {
+	const atlasEntryKeys = uniqueSortedStrings(
+		refs.map(describeTerrainBlendTextureAtlasEntryKey),
+	);
+	if (atlasEntryKeys.length === 0) {
+		return null;
+	}
+	return { key, bucket, atlasEntryKeys };
+}
+
+function collectTerrainLayerPlanTextureRefsByRole(
+	layerPlan: TerrainTileLayerPlan,
+	role: TerrainBlendTextureRef["role"],
+): TerrainBlendTextureRef[] {
+	const refs = layerPlan.layerEntries.flatMap((entry) =>
+		role === "color"
+			? [
+					entry.plan.base,
+					...entry.plan.overlays.map((overlay) => overlay.terrain),
+					...entry.plan.roads.map((road) => road.road),
+				]
+			: [
+					...entry.plan.overlays.map((overlay) => overlay.alpha),
+					...entry.plan.roads.map((road) => road.alpha),
+				],
+	);
+	const refsByKey = new Map(
+		refs.map((ref) => [describeTerrainBlendTextureAtlasEntryKey(ref), ref] as const),
+	);
+	return [...refsByKey.values()].sort((left, right) =>
+		describeTerrainBlendTextureAtlasEntryKey(left).localeCompare(
+			describeTerrainBlendTextureAtlasEntryKey(right),
+		),
+	);
+}
+
 function createTerrainTexturePageReadiness({
 	assetState,
 	ref,
@@ -1520,6 +1614,10 @@ function describeTerrainTexturePageRefKey(ref: TerrainBlendTextureRef): string {
 		ref.wrap,
 		ref.tiling,
 	].join("|");
+}
+
+function uniqueSortedStrings(values: readonly string[]): string[] {
+	return [...new Set(values.filter((value) => value.length > 0))].sort();
 }
 
 function addTerrainTilePageBlocker(

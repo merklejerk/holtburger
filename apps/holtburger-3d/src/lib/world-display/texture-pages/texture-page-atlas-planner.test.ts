@@ -81,6 +81,83 @@ describe("planTexturePageAtlas", () => {
 		).toEqual([["static-detail-entry"], ["terrain-detail-entry"]]);
 	});
 
+	it("uses a short stable key derived from the canonical layout signature", () => {
+		const candidates = [
+			createRgbaCandidate({
+				candidateId: "b",
+				entryKey: "entry-b",
+				bucket: "static-base-color",
+			}),
+			createRgbaCandidate({
+				candidateId: "a",
+				entryKey: "entry-a",
+				bucket: "static-base-color",
+			}),
+		];
+		const first = planTexturePageAtlas({
+			rgbaCandidates: candidates,
+			detailCandidates: [],
+			policy: createPolicy(),
+		});
+		const second = planTexturePageAtlas({
+			rgbaCandidates: [...candidates].reverse(),
+			detailCandidates: [],
+			policy: createPolicy(),
+		});
+
+		expect(first.key).toMatch(/^texture-page-atlas\/[0-9a-f]{16}$/);
+		expect(second.key).toBe(first.key);
+		expect(first.key).not.toContain("entry-a");
+		expect(first.key).not.toContain("rgba-page");
+	});
+
+	it("changes the short key when cohort constraints change atlas layout", () => {
+		const rgbaCandidates = [
+			createRgbaCandidate({
+				candidateId: "wide",
+				entryKey: "terrain-wide",
+				bucket: "terrain-color",
+				width: 300,
+				height: 8,
+			}),
+			createRgbaCandidate({
+				candidateId: "small",
+				entryKey: "terrain-small",
+				bucket: "terrain-color",
+				width: 8,
+				height: 8,
+			}),
+		];
+		const unconstrained = planTexturePageAtlas({
+			rgbaCandidates,
+			detailCandidates: [],
+			policy: {
+				...createPolicy(),
+				baseGutterPixels: 0,
+				maxAtlasTextureSize: 512,
+			},
+		});
+		const constrained = planTexturePageAtlas({
+			rgbaCandidates,
+			detailCandidates: [],
+			cohorts: [
+				{
+					key: "terrain-unit",
+					bucket: "terrain-color",
+					atlasEntryKeys: ["terrain-small", "terrain-wide"],
+				},
+			],
+			policy: {
+				...createPolicy(),
+				baseGutterPixels: 0,
+				maxAtlasTextureSize: 512,
+			},
+		});
+
+		expect(constrained.key).toMatch(/^texture-page-atlas\/[0-9a-f]{16}$/);
+		expect(constrained.key).not.toBe(unconstrained.key);
+	});
+
 	it("uses wider gutters for mipmapped terrain atlas buckets", () => {
 		const plan = planTexturePageAtlas({
 			rgbaCandidates: [
@@ -157,7 +234,7 @@ describe("planTexturePageAtlas", () => {
 		});
 	});
 
-	it("prefers fewer terrain atlas textures over smaller terrain page allocation", () => {
+	it("keeps terrain cohort atlas entries on one page", () => {
 		const plan = planTexturePageAtlas({
 			rgbaCandidates: [
 				createRgbaCandidate({
@@ -176,6 +253,13 @@ describe("planTexturePageAtlas", () => {
 				}),
 			],
 			detailCandidates: [],
+			cohorts: [
+				{
+					key: "terrain-tile",
+					bucket: "terrain-color",
+					atlasEntryKeys: ["terrain-small", "terrain-wide"],
+				},
+			],
 			policy: {
 				...createPolicy(),
 				baseGutterPixels: 0,
@@ -194,6 +278,51 @@ describe("planTexturePageAtlas", () => {
 				.map((placement) => placement.atlasEntryKey)
 				.sort(),
 		).toEqual(["terrain-small", "terrain-wide"]);
+	});
+
+	it("allows independent terrain atlas entries to use smaller pages without cohorts", () => {
+		const plan = planTexturePageAtlas({
+			rgbaCandidates: [
+				createRgbaCandidate({
+					candidateId: "wide-a",
+					entryKey: "terrain-wide-a",
+					bucket: "terrain-color",
+					width: 300,
+					height: 8,
+				}),
+				createRgbaCandidate({
+					candidateId: "wide-b",
+					entryKey: "terrain-wide-b",
+					bucket: "terrain-color",
+					width: 300,
+					height: 8,
+				}),
+				createRgbaCandidate({
+					candidateId: "wide-c",
+					entryKey: "terrain-wide-c",
+					bucket: "terrain-color",
+					width: 300,
+					height: 8,
+				}),
+			],
+			detailCandidates: [],
+			policy: {
+				...createPolicy(),
+				baseGutterPixels: 0,
+				maxAtlasTextureSize: 512,
+			},
+		});
+
+		const terrainColorPages = plan.buckets.find(
+			(bucket) => bucket.bucket === "terrain-color",
+		)?.atlasTextures;
+
+		expect(terrainColorPages).toHaveLength(3);
+		expect(terrainColorPages?.map((page) => page.width * page.height)).toEqual([
+			512 * 256,
+			512 * 256,
+			512 * 256,
+		]);
 	});
 });
 

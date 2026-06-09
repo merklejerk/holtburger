@@ -10,6 +10,7 @@ import {
 	createTexturePageAtlasPlacementsByEntryKey,
 	createTexturePageDetailAtlasPlacementsByEntryKey,
 	planTexturePageAtlas,
+	type TexturePageAtlasCohort,
 	type TexturePageAtlasDetailCandidate,
 	type TexturePageAtlasRgbaCandidate,
 	type TexturePageAtlasPlan,
@@ -336,6 +337,7 @@ export function planCompactionFamilies(options: {
 	policy: CompactionFamilyPlanningPolicy;
 	extraRgbaAtlasCandidates?: readonly TexturePageAtlasRgbaCandidate[];
 	extraDetailAtlasCandidates?: readonly TexturePageAtlasDetailCandidate[];
+	extraTexturePageAtlasCohorts?: readonly TexturePageAtlasCohort[];
 }): CompactionFamilyPlan {
 	const rgbaAtlasCandidates = collectRgbaTexturePageAtlasCandidates(
 		options.candidates,
@@ -385,6 +387,7 @@ export function planCompactionFamilies(options: {
 			})),
 			...(options.extraDetailAtlasCandidates ?? []),
 		],
+		cohorts: options.extraTexturePageAtlasCohorts ?? [],
 		policy: options.policy,
 	});
 	const rgbaAtlasReadyCandidateIds = new Set(

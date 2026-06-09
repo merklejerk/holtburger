@@ -1,6 +1,6 @@
 import {
 	planAtlasLayout,
-	type AtlasLayoutPageSelection,
+	type AtlasLayoutCohort,
 	type AtlasTexturePage,
 	type AtlasTexturePlacement,
 } from "./atlas-layout-planner";
@@ -26,6 +26,12 @@ export interface TexturePageAtlasDetailCandidate {
 	candidateId: string;
 	bucket?: TexturePageBucket;
 	detailAtlasEntry: RgbaTexturePageDetailAtlasEntry | null;
+}
+
+export interface TexturePageAtlasCohort {
+	key: string;
+	bucket: TexturePageBucket;
+	atlasEntryKeys: readonly string[];
 }
 
 type TexturePageAtlasFailureReason =
@@ -102,6 +108,7 @@ export function createTexturePageDetailAtlasPlacementsByEntryKey(
 export function planTexturePageAtlas(options: {
 	rgbaCandidates: readonly TexturePageAtlasRgbaCandidate[];
 	detailCandidates: readonly TexturePageAtlasDetailCandidate[];
+	cohorts?: readonly TexturePageAtlasCohort[];
 	policy: CompactionFamilyPlanningPolicy;
 }): TexturePageAtlasPlan {
 	const failures: TexturePageAtlasFailure[] = [];
@@ -116,9 +123,11 @@ export function planTexturePageAtlas(options: {
 	const detailCandidatesByBucket = groupDetailCandidatesByBucket(
 		options.detailCandidates,
 	);
+	const cohortsByBucket = groupCohortsByBucket(options.cohorts ?? []);
 	const buckets = uniqueSortedBuckets([
 		...rgbaCandidatesByBucket.keys(),
 		...detailCandidatesByBucket.keys(),
+		...cohortsByBucket.keys(),
 	]);
 	for (const bucket of buckets) {
 		const rgbaBucketCandidates = rgbaCandidatesByBucket.get(bucket) ?? [];
@@ -127,6 +136,7 @@ export function planTexturePageAtlas(options: {
 			bucket,
 			rgbaCandidates: rgbaBucketCandidates,
 			detailCandidates: detailBucketCandidates,
+			cohorts: cohortsByBucket.get(bucket) ?? [],
 			policy: options.policy,
 			failures,
 		});
@@ -176,12 +186,14 @@ function planTexturePageAtlasBucket({
 	bucket,
 	rgbaCandidates,
 	detailCandidates,
+	cohorts,
 	policy,
 	failures,
 }: {
 	bucket: TexturePageBucket;
 	rgbaCandidates: readonly TexturePageAtlasRgbaCandidate[];
 	detailCandidates: readonly TexturePageAtlasDetailCandidate[];
+	cohorts: readonly TexturePageAtlasCohort[];
 	policy: CompactionFamilyPlanningPolicy;
 	failures: TexturePageAtlasFailure[];
 }): {
@@ -192,6 +204,10 @@ function planTexturePageAtlasBucket({
 	usedDetailEntryKeys: ReadonlySet<string>;
 } {
 	const atlasEntries = dedupeRgbaTexturePageEntries(rgbaCandidates);
+	const atlasLayoutCohorts = filterTexturePageAtlasCohorts({
+		cohorts,
+		entryKeys: new Set(atlasEntries.map((record) => record.key)),
+	});
 	const layout = planAtlasLayout({
 		entries: atlasEntries.map((record) => ({
 			key: record.key,
@@ -203,8 +219,8 @@ function planTexturePageAtlasBucket({
 			maxTextureSize: policy.maxAtlasTextureSize,
 			maxTextureCount: policy.maxAtlasTextureCount,
 			gutterPixels: policy.baseGutterPixels,
-			pageSelection: resolveTexturePageBucketAtlasPageSelection(bucket),
 		},
+		cohorts: atlasLayoutCohorts,
 	});
 	const basePlaced = rgbaCandidates.filter((candidate) =>
 		layout.placementsByEntryKey.has(candidate.texturePageReadiness.atlasEntryKey),
@@ -241,7 +257,6 @@ function planTexturePageAtlasBucket({
 			maxTextureSize: policy.maxAtlasTextureSize,
 			maxTextureCount: policy.maxAtlasTextureCount,
 			gutterPixels: policy.baseGutterPixels,
-			pageSelection: resolveTexturePageBucketAtlasPageSelection(bucket),
 		},
 	});
 	const rgbaReady = basePlaced.filter((candidate) =>
@@ -312,14 +327,6 @@ function resolveTexturePageBucketGutterPixels(
 	return policy.baseGutterPixels;
 }
 
-function resolveTexturePageBucketAtlasPageSelection(
-	bucket: TexturePageBucket,
-): AtlasLayoutPageSelection {
-	return bucket === "terrain-color" || bucket === "terrain-mask"
-		? "minimize-textures"
-		: "minimize-memory";
-}
-
 function isDetailAtlasReady(
 	candidate: TexturePageAtlasDetailCandidate,
 	placementsByEntryKey: ReadonlyMap<string, unknown>,
@@ -384,6 +391,35 @@ function groupDetailCandidatesByBucket(
 	return groups;
 }
 
+function groupCohortsByBucket(
+	cohorts: readonly TexturePageAtlasCohort[],
+): Map<TexturePageBucket, TexturePageAtlasCohort[]> {
+	const groups = new Map<TexturePageBucket, TexturePageAtlasCohort[]>();
+	for (const cohort of cohorts) {
+		const group = groups.get(cohort.bucket) ?? [];
+		group.push(cohort);
+		groups.set(cohort.bucket, group);
+	}
+	return groups;
+}
+
+function filterTexturePageAtlasCohorts({
+	cohorts,
+	entryKeys,
+}: {
+	cohorts: readonly TexturePageAtlasCohort[];
+	entryKeys: ReadonlySet<string>;
+}): AtlasLayoutCohort[] {
+	return cohorts
+		.map((cohort) => ({
+			key: cohort.key,
+			entryKeys: uniqueSortedStrings(
+				cohort.atlasEntryKeys.filter((key) => entryKeys.has(key)),
+			),
+		}))
+		.filter((cohort) => cohort.entryKeys.length > 0);
+}
+
 function uniqueSortedBuckets(
 	buckets: Iterable<TexturePageBucket>,
 ): TexturePageBucket[] {
@@ -411,7 +447,7 @@ function describeTexturePageAtlasPlanKey(options: {
 	policy: CompactionFamilyPlanningPolicy;
 	bucketPlans: readonly TexturePageBucketPlan[];
 }): string {
-	return [
+	const signature = [
 		"texture-page-atlas",
 		`size=${options.policy.maxAtlasTextureSize}`,
 		`textures=${options.policy.maxAtlasTextureCount}`,
@@ -420,10 +456,49 @@ function describeTexturePageAtlasPlanKey(options: {
 			`bucket=${plan.bucket}`,
 			...plan.atlasEntryRecords.map((record) => record.key),
 			...plan.detailAtlasEntryRecords.map((entry) => `detail=${entry.key}`),
+			...plan.atlasTextures.map((page) =>
+				describeAtlasTexturePagePlanKey("rgba-page", page),
+			),
+			...plan.detailAtlasTextures.map((page) =>
+				describeAtlasTexturePagePlanKey("detail-page", page),
+			),
 		]),
 	].join("|");
+	return `texture-page-atlas/${hashTexturePageAtlasPlanSignature(signature)}`;
+}
+
+function describeAtlasTexturePagePlanKey(
+	prefix: string,
+	page: AtlasTexturePage,
+): string {
+	return [
+		prefix,
+		page.textureIndex,
+		`${page.width}x${page.height}`,
+		...page.placements.map((placement) =>
+			[
+				placement.atlasEntryKey,
+				placement.x,
+				placement.y,
+				placement.width,
+				placement.height,
+				placement.gutterPixels,
+			].join("@"),
+		),
+	].join(":");
 }
 
 function uniqueSortedStrings(values: readonly string[]): string[] {
 	return [...new Set(values.filter((value) => value.length > 0))].sort();
+}
+
+function hashTexturePageAtlasPlanSignature(signature: string): string {
+	let hash = 0xcbf29ce484222325n;
+	const prime = 0x100000001b3n;
+	const mask = 0xffffffffffffffffn;
+	for (let index = 0; index < signature.length; index += 1) {
+		hash ^= BigInt(signature.charCodeAt(index));
+		hash = (hash * prime) & mask;
+	}
+	return hash.toString(16).padStart(16, "0");
 }

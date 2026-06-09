@@ -131,6 +131,98 @@ describe("atlas layout planner", () => {
 		assertNoPaddedOverlaps(textureCountPlan.texturePages);
 	});
 
+	it("keeps cohort entries on the same page while minimizing memory", () => {
+		const plan = planAtlasLayout({
+			entries: [
+				{ key: "small", width: 8, height: 8 },
+				{ key: "wide", width: 300, height: 8 },
+			],
+			policy: { maxTextureSize: 512, maxTextureCount: 4, gutterPixels: 0 },
+			cohorts: [{ key: "terrain-unit", entryKeys: ["small", "wide"] }],
+		});
+
+		expect(plan.overflows).toEqual([]);
+		expect(plan.texturePages).toHaveLength(1);
+		expect(plan.texturePages[0]).toMatchObject({ width: 512, height: 8 });
+		expect(
+			new Set(
+				["small", "wide"].map(
+					(key) => plan.placementsByEntryKey.get(key)?.textureIndex,
+				),
+			),
+		).toEqual(new Set([0]));
+		assertNoPaddedOverlaps(plan.texturePages);
+	});
+
+	it("allows independent cohorts to use separate smaller pages", () => {
+		const plan = planAtlasLayout({
+			entries: [
+				{ key: "a-small", width: 8, height: 8 },
+				{ key: "a-wide", width: 300, height: 200 },
+				{ key: "b-small", width: 8, height: 8 },
+				{ key: "b-wide", width: 300, height: 200 },
+				{ key: "c-small", width: 8, height: 8 },
+				{ key: "c-wide", width: 300, height: 200 },
+			],
+			policy: { maxTextureSize: 512, maxTextureCount: 4, gutterPixels: 0 },
+			cohorts: [
+				{ key: "terrain-a", entryKeys: ["a-small", "a-wide"] },
+				{ key: "terrain-b", entryKeys: ["b-small", "b-wide"] },
+				{ key: "terrain-c", entryKeys: ["c-small", "c-wide"] },
+			],
+		});
+
+		expect(plan.overflows).toEqual([]);
+		expect(plan.texturePages).toHaveLength(3);
+		for (const cohort of [
+			["a-small", "a-wide"],
+			["b-small", "b-wide"],
+			["c-small", "c-wide"],
+		]) {
+			expect(
+				new Set(
+					cohort.map((key) => plan.placementsByEntryKey.get(key)?.textureIndex),
+				).size,
+			).toBe(1);
+		}
+		assertNoPaddedOverlaps(plan.texturePages);
+	});
+
+	it("merges overlapping cohorts transitively", () => {
+		const plan = planAtlasLayout({
+			entries: [
+				{ key: "a", width: 12, height: 12 },
+				{ key: "b", width: 12, height: 12 },
+				{ key: "c", width: 12, height: 12 },
+			],
+			policy: { maxTextureSize: 64, maxTextureCount: 4, gutterPixels: 0 },
+			cohorts: [
+				{ key: "first", entryKeys: ["a", "b"] },
+				{ key: "second", entryKeys: ["b", "c"] },
+			],
+		});
+
+		expect(plan.overflows).toEqual([]);
+		expect(
+			new Set(
+				["a", "b", "c"].map(
+					(key) => plan.placementsByEntryKey.get(key)?.textureIndex,
+				),
+			),
+		).toEqual(new Set([0]));
+		assertNoPaddedOverlaps(plan.texturePages);
+	});
+
+	it("rejects cohorts that reference unknown entries", () => {
+		expect(() =>
+			planAtlasLayout({
+				entries: [{ key: "known", width: 8, height: 8 }],
+				policy: { maxTextureSize: 16, maxTextureCount: 1, gutterPixels: 0 },
+				cohorts: [{ key: "bad", entryKeys: ["known", "missing"] }],
+			}),
+		).toThrow(/unknown entry missing/);
+	});
+
 	it("reports multiple pages and atlas-full overflows deterministically", () => {
 		const plan = planAtlasLayout({
 			entries: [

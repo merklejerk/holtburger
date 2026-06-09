@@ -96,7 +96,7 @@ Verification:
 
 ## Phase 2: Baseline Measurement
 
-Status: in progress.
+Status: completed.
 
 Run an unrestricted baseline with:
 
@@ -175,7 +175,7 @@ Record:
 
 ## Phase 5: Fix Confirmed Root Cause
 
-Status: in progress.
+Status: completed.
 
 Once a failing slice is isolated:
 
@@ -1705,7 +1705,7 @@ Verification notes:
 
 ## Phase 17: Deterministic Adaptive MaxRects Atlas Packing
 
-Status: planned.
+Status: completed.
 
 Goal:
 
@@ -1920,7 +1920,7 @@ Implementation notes:
 
 ## Phase 18: Terrain Usage-Cohort Atlas Planning
 
-Status: planned.
+Status: completed.
 
 Goal:
 
@@ -1941,7 +1941,7 @@ Out of scope:
 
 ### Phase 18A: Model Terrain Atlas Cohorts
 
-Status: planned.
+Status: completed.
 
 Deliverables:
 
@@ -1960,9 +1960,14 @@ Acceptance criteria:
 - Cohort extraction is deterministic and independent of pcode input order.
 - Cohort extraction does not change texture ref identity, source bytes, tiling, or wrap policy.
 
+Progress:
+
+- Implemented terrain atlas cohorts at the renderer texture-page planning boundary. Cohorts are derived from resident `Webgl2TerrainTileResource.layerPlan` and `Webgl2TerrainTileDrawSliceResource.layerPlan`, grouped separately for `terrain-color` and `terrain-mask`.
+- Cohort refs are expressed as atlas entry keys only; texture source identity, bytes, wrap, and tiling remain owned by the existing terrain texture readiness path.
+
 ### Phase 18B: Add Cohort-Constrained Atlas Planning
 
-Status: planned.
+Status: completed.
 
 Deliverables:
 
@@ -1971,6 +1976,7 @@ Deliverables:
   - all entries in a cohort must land on the same atlas texture page
   - entries can still be individually placed within that page
   - the page-size candidate is invalid for that cohort if the cohort cannot fit within one page
+- Overlapping cohorts must merge into connected components before packing. A shared texture ref can participate in multiple terrain draw units; duplicating the texture placement or splitting either draw unit would be incorrect, so the co-usage graph is the real constraint.
 - Keep adaptive page-size selection and MaxRects placement for entries inside a cohort.
 - Preserve existing overflow semantics:
   - oversized individual entries still report `source-too-large`
@@ -1981,13 +1987,19 @@ Deliverables:
 Acceptance criteria:
 
 - A test case where unconstrained adaptive packing would split terrain refs across multiple small pages now keeps each terrain cohort on one page.
-- A test case with two independent terrain cohorts can use separate smaller pages when that is memory-efficient and does not break either draw unit.
+- A test case with independent terrain cohorts can use separate smaller pages when that is memory-efficient and does not break any draw unit.
 - Existing static atlas tests continue to use unconstrained adaptive packing.
 - The temporary `pageSelection: "minimize-textures"` terrain policy is removed or limited to a documented fallback path that tests do not rely on.
 
+Progress:
+
+- Added optional generic atlas layout cohorts. Overlapping cohorts are merged into connected components before packing, so a shared texture ref is placed once and every connected draw-unit constraint stays co-located.
+- Added transactional unit placement: a cohort/component is committed to a page only if all of its entries fit that page.
+- Removed the Phase 17 terrain `minimize-textures` bucket bias from texture-page atlas planning; terrain now uses memory-minimizing adaptive packing plus explicit usage constraints.
+
 ### Phase 18C: Wire Terrain Product Atlas Cohorts
 
-Status: planned.
+Status: completed.
 
 Deliverables:
 
@@ -2002,9 +2014,16 @@ Acceptance criteria:
 - Existing report blocker class `terrain tile one-draw path requires N terrain color atlas textures` is absent for fitting cohorts.
 - Cohort-aware planning does not increase terrain page count for simple single-ref terrain tiles.
 
+Progress:
+
+- Threaded terrain cohorts through `planCompactionFamilies()` into `planTexturePageAtlas()`.
+- Bucket-level cohort filtering keeps only ready atlas entry keys before calling the generic planner; missing terrain refs continue through the existing terrain blocker path instead of becoming planner-internal errors.
+- Course correction: `TexturePageAtlasPlan.key` now hashes a canonical signature that includes atlas page dimensions and placement signatures. Cohort constraints can change texture page layouts without changing candidate IDs, so candidate-only keys could have retained stale GPU texture pages during hot resource sync; using a hash keeps the actual resource key inspector-friendly without dropping invalidation entropy.
+- Focused Phase 18 verification passed for atlas layout, texture-page atlas planning, terrain render artifacts, and WebGL2 world submit tests.
+
 ### Phase 18D: Verification And Cleanup
 
-Status: planned.
+Status: completed.
 
 Deliverables:
 
@@ -2021,6 +2040,21 @@ Acceptance criteria:
   - `npm run --prefix apps/holtburger-3d lint:ts`
   - `npm run --prefix apps/holtburger-3d check`
 - Browser debug report for `0xda55ffff` terrain no longer shows fitting tiles blocked by multi-texture terrain color/mask atlas requirements.
+
+Progress:
+
+- Focused verification passed:
+  - `npm run --prefix apps/holtburger-3d test:ts -- src/lib/world-display/atlas-layout-planner.test.ts src/lib/world-display/texture-pages/texture-page-atlas-planner.test.ts src/lib/world-display/terrain-render-artifact.test.ts src/lib/world-display/webgl2-world-submit.test.ts`
+- TypeScript verification passed:
+  - `npm run --prefix apps/holtburger-3d check`
+- Full verification passed:
+  - `npm run --prefix apps/holtburger-3d test:ts`
+  - `npm run --prefix apps/holtburger-3d lint:ts`
+  - `npm run --prefix apps/holtburger-3d check`
+
+Notes:
+
+- Browser debug-report validation for `0xda55ffff` is still pending manual runtime inspection. The code path now expresses the required terrain co-location constraint structurally, but the worksheet should keep that runtime report as the final visual confirmation target.
 
 ## Findings
 
@@ -2084,4 +2118,5 @@ Acceptance criteria:
 - Phase 17 implementation completed: `planAtlasLayout()` now uses deterministic offline non-rotating MaxRects packing with adaptive power-of-two page-size selection. The planner keeps key-sorted diagnostics stable, uses source placement rectangles for coverage, supports rectangular/smaller pages, and no longer treats `maxTextureSize` as the allocation size unless the selected layout actually needs it.
 - Phase 17 course correction: terrain atlas buckets cannot optimize page bytes independently from texture count because the one-draw terrain submit path is limited to one color atlas texture and one mask atlas texture per tile. The planner now supports an explicit page-selection objective; terrain color/mask buckets prefer fewer textures, while static atlases retain memory-minimizing adaptive packing.
 - Planned Phase 18 structural fix: terrain atlas packing should be usage-cohort-aware instead of globally texture-count-biased. Terrain refs sampled together by one terrain tile/draw slice need to be co-located on one page per bucket; independent terrain cohorts can still use adaptive memory-efficient pages.
+- Phase 18 implementation completed: terrain atlas planning now derives `terrain-color` and `terrain-mask` usage cohorts from resident tile/draw-slice layer plans and passes those constraints into a generic cohort-aware atlas planner. The Phase 17 global terrain `minimize-textures` workaround was removed; terrain buckets now use memory-minimizing adaptive packing constrained by actual draw-unit co-usage.
 - Remaining suspected issues: static bundle payloads are too large, static bundle asset closure is too broad, and `setAssetState` still triggers costly static product recommits.

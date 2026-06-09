@@ -8,6 +8,7 @@
 		type BrowserLocationSelection,
 	} from "../app/browser-mode";
 	import type { AssetChannelState } from "../lib/assets/types";
+	import type { PreparedAssetResolver } from "../lib/assets/prepared-asset-store";
 	import {
 		buildSceneCameraRenderRay,
 		buildBrowserFreeCameraFrame,
@@ -49,6 +50,7 @@
 		countPreparedAssetsByKind,
 		formatPreparedAssetKindCounts,
 	} from "../lib/assets/asset-cache-diagnostics";
+	import { getPreparedAssetHotPathDiagnosticsSnapshot } from "../lib/assets/prepared-asset-hot-path-diagnostics";
 	import { describeMaterialAssetDiagnostics } from "../lib/assets/material-diagnostics";
 	import type {
 		RenderSpatialItemKind,
@@ -87,6 +89,12 @@
 		label: string;
 		value: string;
 	}
+
+	let {
+		preparedAssetResolver,
+	}: {
+		preparedAssetResolver: PreparedAssetResolver;
+	} = $props();
 
 	interface BrowserPanelSection {
 		title: string;
@@ -438,7 +446,7 @@
 		const performanceText = renderMetrics?.performance
 			? `${renderMetrics.performance.fps.toFixed(1)} FPS, ${renderMetrics.performance.frameMs.toFixed(1)} ms/frame, ${renderMetrics.performance.renderMs.toFixed(1)} ms render`
 			: "waiting for performance sample";
-		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; static product resources ${debug.staticLandblockProductCount} products (${staticProductDomains}), ${debug.staticBundleLayerResourceCount} bundle layers (${staticBundleProductDomains}), ${debug.structuredInteriorCellResourceCount} interior cells (${structuredInteriorProductDomains}), ${debug.terrainProductResourceCount} terrain products (${terrainProductDomains}), ${debug.transitionPortalMaskResourceCount} portal masks; retained tris ${debug.renderTriangles}. Material surfaces: submitted ${debug.materialSurfaceSubmittedCount} (${materialSurfaceSubmittedByDomain}), draws ${materialSurfaceDrawsByDomain}, tris ${materialSurfaceTrianglesByDomain}, skipped ${debug.materialSurfaceSkippedCount} (${materialSurfaceSkippedByDomain}; reasons ${materialSurfaceSkipReasons}; families ${materialSurfaceSkippedFamilies}; alpha ${materialSurfaceSkippedAlphaPolicies}; bindings ${materialSurfaceSkippedBindingUsages})${materialSurfaceSubmitFallbackSamples ? `, fallbacks ${materialSurfaceSubmitFallbackSamples}` : ""}. Static bundle layers: selected ${debug.visibleStaticBundleLayerCount}, submitted layers ${debug.staticBundleLayerSubmittedCount}, objects ${debug.staticBundleSelectedObjectRecordCount}/${debug.staticBundleSelectedSourceObjectCount}, hints ${debug.staticBundleSelectedSpatialHintCount}, geometry ${debug.staticBundleSelectedCompactedBatchCount} compacted/${debug.staticBundleSelectedDirectEntryCount} direct, candidate ${debug.staticBundleGeometryCandidateCount} entries/${debug.staticBundleGeometryCandidateTriangleCount} tris, empty layers ${debug.staticBundleSelectedNoGeometryLayerCount}, unsubmitted layers ${debug.staticBundleSelectedUnsubmittedLayerCount}, missing-material geometry ${debug.staticBundleSelectedMissingMaterialGeometryCount}${staticBundleLayerCoverageSamples ? `, samples ${staticBundleLayerCoverageSamples}` : ""}. Static bundle materials: records ${debug.staticBundleMaterialRecordCount}, families ${staticBundleMaterialFamilies}, alpha ${staticBundleAlphaPolicies}, bindings ${debug.staticBundleMaterialBaseColorBindingCount} base/${debug.staticBundleMaterialIndexedBindingCount} indexed (${staticBundleBindingUsages}), submitted alpha ${summarizeRecord(debug.materialSurfaceSubmittedAlphaPolicyCounts)}. Terrain family: visible ${debug.visibleTerrainTileCount}, ready ${debug.visibleTerrainOneDrawReadyTileCount}, blocked ${debug.visibleTerrainOneDrawBlockedTileCount}, ready slices ${debug.visibleTerrainDrawSliceReadyCount}, shader draws ${debug.terrainOneDrawShaderDrawCallCount}, submitted tiles ${debug.terrainOneDrawSubmittedTileCount}, submitted slices ${debug.terrainDrawSliceSubmittedCount}, tris ${debug.terrainOneDrawSubmittedTriangleCount}, atlas refs ${debug.terrainAtlasRefCount}, atlas candidates ${debug.terrainAtlasCandidateCount}, atlas blocker tiles ${debug.terrainAtlasBlockerTileCount}${terrainOneDrawBlockerSamples ? `, blockers ${terrainOneDrawBlockerSamples}` : ""}${terrainOneDrawSubmitFallbackSamples ? `, submit fallbacks ${terrainOneDrawSubmitFallbackSamples}` : ""}. Materials ${debug.materialCount}, textures ${debug.textureResourceCount}, indexed textures ${debug.indexedTextureResourceCount}, palettes ${debug.paletteResourceCount}; texture pages ${debug.texturePageBindingCount} bindings (${texturePageBuckets}), atlas failures ${debug.atlasFailureReasonCount}${atlasFailureSamples ? ` (${atlasFailureSamples})` : ""}. Render blockers ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.resourcePolicy}, base ${debug.baseSceneDomain}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
+		return `Perf ${performanceText}. Diagnosis: ${diagnosis}. Draw pressure ${debug.renderCalls} visible draws from ${candidateBatchCount} candidate ${drawGroupTerm}; asset syncs ${debug.rendererAssetSyncCount}, latest recommitted ${debug.latestRendererAssetSyncRecommittedProductCount} product${debug.latestRendererAssetSyncRecommittedProductCount === 1 ? "" : "s"}, scheduled frame ${debug.latestRendererAssetSyncScheduledFrame ? "yes" : "no"}; static product resources ${debug.staticLandblockProductCount} products (${staticProductDomains}), ${debug.staticBundleLayerResourceCount} bundle layers (${staticBundleProductDomains}), ${debug.structuredInteriorCellResourceCount} interior cells (${structuredInteriorProductDomains}), ${debug.terrainProductResourceCount} terrain products (${terrainProductDomains}), ${debug.transitionPortalMaskResourceCount} portal masks; retained tris ${debug.renderTriangles}. Material surfaces: submitted ${debug.materialSurfaceSubmittedCount} (${materialSurfaceSubmittedByDomain}), draws ${materialSurfaceDrawsByDomain}, tris ${materialSurfaceTrianglesByDomain}, skipped ${debug.materialSurfaceSkippedCount} (${materialSurfaceSkippedByDomain}; reasons ${materialSurfaceSkipReasons}; families ${materialSurfaceSkippedFamilies}; alpha ${materialSurfaceSkippedAlphaPolicies}; bindings ${materialSurfaceSkippedBindingUsages})${materialSurfaceSubmitFallbackSamples ? `, fallbacks ${materialSurfaceSubmitFallbackSamples}` : ""}. Static bundle layers: selected ${debug.visibleStaticBundleLayerCount}, submitted layers ${debug.staticBundleLayerSubmittedCount}, objects ${debug.staticBundleSelectedObjectRecordCount}/${debug.staticBundleSelectedSourceObjectCount}, hints ${debug.staticBundleSelectedSpatialHintCount}, geometry ${debug.staticBundleSelectedCompactedBatchCount} compacted/${debug.staticBundleSelectedDirectEntryCount} direct, candidate ${debug.staticBundleGeometryCandidateCount} entries/${debug.staticBundleGeometryCandidateTriangleCount} tris, empty layers ${debug.staticBundleSelectedNoGeometryLayerCount}, unsubmitted layers ${debug.staticBundleSelectedUnsubmittedLayerCount}, missing-material geometry ${debug.staticBundleSelectedMissingMaterialGeometryCount}${staticBundleLayerCoverageSamples ? `, samples ${staticBundleLayerCoverageSamples}` : ""}. Static bundle materials: records ${debug.staticBundleMaterialRecordCount}, families ${staticBundleMaterialFamilies}, alpha ${staticBundleAlphaPolicies}, bindings ${debug.staticBundleMaterialBaseColorBindingCount} base/${debug.staticBundleMaterialIndexedBindingCount} indexed (${staticBundleBindingUsages}), submitted alpha ${summarizeRecord(debug.materialSurfaceSubmittedAlphaPolicyCounts)}. Terrain family: visible ${debug.visibleTerrainTileCount}, ready ${debug.visibleTerrainOneDrawReadyTileCount}, blocked ${debug.visibleTerrainOneDrawBlockedTileCount}, ready slices ${debug.visibleTerrainDrawSliceReadyCount}, shader draws ${debug.terrainOneDrawShaderDrawCallCount}, submitted tiles ${debug.terrainOneDrawSubmittedTileCount}, submitted slices ${debug.terrainDrawSliceSubmittedCount}, tris ${debug.terrainOneDrawSubmittedTriangleCount}, atlas refs ${debug.terrainAtlasRefCount}, atlas candidates ${debug.terrainAtlasCandidateCount}, atlas blocker tiles ${debug.terrainAtlasBlockerTileCount}${terrainOneDrawBlockerSamples ? `, blockers ${terrainOneDrawBlockerSamples}` : ""}${terrainOneDrawSubmitFallbackSamples ? `, submit fallbacks ${terrainOneDrawSubmitFallbackSamples}` : ""}. Materials ${debug.materialCount}, textures ${debug.textureResourceCount}, indexed textures ${debug.indexedTextureResourceCount}, palettes ${debug.paletteResourceCount}; texture pages ${debug.texturePageBindingCount} bindings (${texturePageBuckets}), atlas failures ${debug.atlasFailureReasonCount}${atlasFailureSamples ? ` (${atlasFailureSamples})` : ""}. Render blockers ${debug.fallbackReasonCount}${fallbackSamples ? ` (${fallbackSamples})` : ""}. Policy ${debug.resourcePolicy}, base ${debug.baseSceneDomain}, transition depth ${debug.transitionPortalMaxDepth}; canvas ${debug.canvasWidth}x${debug.canvasHeight} @${debug.pixelRatio.toFixed(2)}.`;
 	});
 	const sceneContextText = $derived(renderResourceReport.sceneContextText);
 	const cameraResidencyText = $derived.by(() => {
@@ -2422,15 +2430,25 @@
 	}
 
 	function describeAssetCacheDebugState(): string {
+		const hotPathDiagnostics = getPreparedAssetHotPathDiagnosticsSnapshot();
+		const latestPrune = hotPathDiagnostics.latestPrune;
+		const latestSignatureCheck =
+			hotPathDiagnostics.latestAssetStateSignatureCheck;
+		const pruneText = latestPrune
+			? `prunes ${hotPathDiagnostics.pruneCallCount}, latest ${latestPrune.durationMs.toFixed(1)} ms over ${latestPrune.evaluatedAssetCount} asset${latestPrune.evaluatedAssetCount === 1 ? "" : "s"}, evicted ${latestPrune.evictedAssetCount}`
+			: `prunes ${hotPathDiagnostics.pruneCallCount}, no prune sample`;
+		const signatureText = latestSignatureCheck
+			? `asset-state signature checks ${hotPathDiagnostics.assetStateSignatureCheckCount}, latest ${latestSignatureCheck.changed ? "changed" : "unchanged"} over ${latestSignatureCheck.preparedAssetCount} prepared/${latestSignatureCheck.cacheMetadataCount} metadata`
+			: `asset-state signature checks ${hotPathDiagnostics.assetStateSignatureCheckCount}, no signature sample`;
 		const cacheDiagnostics = assetState.cacheDiagnostics;
 		if (!cacheDiagnostics) {
 			const preparedCounts = countPreparedAssetsByKind(
 				assetState.preparedByAssetId,
 			);
-			return `Prepared ${preparedCounts.total} (${formatPreparedAssetKindCounts(preparedCounts)}); waiting for first prune sample.`;
+			return `Prepared ${preparedCounts.total} (${formatPreparedAssetKindCounts(preparedCounts)}); waiting for first prune sample; ${pruneText}; ${signatureText}.`;
 		}
 
-		return `Prepared ${cacheDiagnostics.prepared.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.prepared)}); retained ${cacheDiagnostics.retained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.retained)}); hard ${cacheDiagnostics.hardRetained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.hardRetained)}); warm ${cacheDiagnostics.warmRetained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.warmRetained)}); evicted ${cacheDiagnostics.evicted.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.evicted)}).`;
+		return `Prepared ${cacheDiagnostics.prepared.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.prepared)}); retained ${cacheDiagnostics.retained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.retained)}); hard ${cacheDiagnostics.hardRetained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.hardRetained)}); warm ${cacheDiagnostics.warmRetained.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.warmRetained)}); evicted ${cacheDiagnostics.evicted.total} (${formatPreparedAssetKindCounts(cacheDiagnostics.evicted)}); ${pruneText}; ${signatureText}.`;
 	}
 
 	function describeGfxObjRenderDiagnostics(): string | null {
@@ -2491,6 +2509,7 @@
 >
 	<WorldDisplay
 		bind:this={worldDisplaySurface}
+		{preparedAssetResolver}
 		onCameraFrameChange={handleRendererCameraFrameChange}
 		onRenderMetricsChange={handleRenderMetricsChange}
 		onCameraResidencyChange={handleRendererCameraResidencyChange}

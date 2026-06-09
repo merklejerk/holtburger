@@ -20,6 +20,7 @@ import {
 	planPreparedAssetCachePrune,
 	type PreparedAssetCachePrunePlan,
 } from "./asset-cache-policy";
+import { recordPreparedAssetPruneDiagnostics } from "./prepared-asset-hot-path-diagnostics";
 import {
 	createSceneCoverageRequests,
 	deriveSceneCoverageAssetIds,
@@ -239,12 +240,22 @@ export class SceneAssetStreamingController {
 			return;
 		}
 
+		const startedAtMs = performance.now();
 		const preparedByAssetId = this.deps.getPreparedByAssetId();
 		const prunePlan = this.planPreparedCachePrune(input, preparedByAssetId);
+		const completedAtMs = this.deps.nowMs?.() ?? Date.now();
+		recordPreparedAssetPruneDiagnostics({
+			source: "scene-asset-streaming-controller",
+			durationMs: performance.now() - startedAtMs,
+			evaluatedAssetCount: Object.keys(preparedByAssetId).length,
+			evictedAssetCount: prunePlan.evictedAssetIds.length,
+			retainedAssetCount: prunePlan.retainedAssetIds.length,
+			completedAtMs,
+		});
 
 		this.deps.debugLog("asset-cache-prune", {
-			retainedAssetIds: prunePlan.retainedAssetIds,
-			evictedAssetIds: prunePlan.evictedAssetIds,
+			retainedAssetCount: prunePlan.retainedAssetIds.length,
+			evictedAssetCount: prunePlan.evictedAssetIds.length,
 			diagnostics: prunePlan.diagnostics,
 		});
 		profileBrowserJsScope("asset-stream.applyAssetCachePrune", () => {

@@ -10,6 +10,7 @@ import type { TerrainSceneModel } from "./terrain-scene";
 import type { TransitionPortalCandidateModel } from "./transition-portal-work-items";
 import type { Webgl2WorldSubmitMetrics } from "./webgl2-world-submit";
 import type { Webgl2WorldResourceStore } from "./webgl2-world-resources";
+import { getPreparedAssetHotPathDiagnosticsSnapshot } from "../assets/prepared-asset-hot-path-diagnostics";
 
 export interface Webgl2RenderMetricsInput {
 	terrainScene: TerrainSceneModel;
@@ -65,6 +66,7 @@ export interface Webgl2RenderMetricsInput {
 export function createWebgl2RenderMetrics(
 	input: Webgl2RenderMetricsInput,
 ): WorldRenderMetrics {
+	const assetHotPathDiagnostics = getPreparedAssetHotPathDiagnosticsSnapshot();
 	return {
 		bounds: input.sceneBounds,
 		cameraFrame: input.cameraFrame,
@@ -143,6 +145,13 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.terrainAtlasCandidateCount ?? 0,
 			terrainAtlasBlockerTileCount:
 				input.worldStore?.terrainAtlasBlockerTileCount ?? 0,
+			rendererAssetSyncCount:
+				assetHotPathDiagnostics.rendererAssetSyncCallCount,
+			latestRendererAssetSyncRecommittedProductCount:
+				assetHotPathDiagnostics.latestRendererAssetSync
+					?.recommittedProductCount ?? 0,
+			latestRendererAssetSyncScheduledFrame:
+				assetHotPathDiagnostics.latestRendererAssetSync?.scheduledFrame ?? false,
 			staticLandblockProductCount: input.worldStore
 				? new Set(collectStaticLandblockProductIdentityKeys(input.worldStore))
 						.size

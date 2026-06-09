@@ -2369,7 +2369,7 @@ Progress:
 
 ## Phase 21: Decouple Prepared Asset Ownership From Svelte And Renderer Hot Paths
 
-Status: planned.
+Status: in progress.
 
 Goal:
 
@@ -2396,7 +2396,7 @@ Out of scope:
 
 ### Phase 21A: Measure The Current Hot Path Without Adding More Churn
 
-Status: planned.
+Status: complete.
 
 Deliverables:
 
@@ -2413,9 +2413,24 @@ Acceptance criteria:
 - Gathering those diagnostics does not require constructing a signature from every prepared asset id on every cache mutation.
 - The new counters are inert unless diagnostics are sampled.
 
+Implementation notes:
+
+- Added bounded hot-path samples in `prepared-asset-hot-path-diagnostics.ts`.
+- `SceneAssetStreamingController.prunePreparedCache()` records source, duration, evaluated count, retained count, and evicted count. Its verbose debug log no longer dumps retained/evicted id lists.
+- `BrowserRenderResourceCoordinator` records current full-cache signature decisions and counts so Phase 21C can prove that path is gone.
+- WebGL renderer `setAssetState()` records renderer asset-sync count, recommitted product count, and scheduled-frame state.
+- Browser debug reports now include prune/signature samples in the Asset Pipeline cache row and renderer asset-sync samples in the Render Pipeline renderer row.
+
+Verification:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/assets/prepared-asset-store.test.ts src/lib/assets/scene-asset-streaming-controller.test.ts src/lib/world-display/browser-render-resource-coordinator.test.ts`
+- `npm run --prefix apps/holtburger-3d test:ts`
+- `npm run --prefix apps/holtburger-3d lint:ts`
+- `npm run --prefix apps/holtburger-3d check`
+
 ### Phase 21B: Extract Prepared Asset Cache Into An App-Local Service
 
-Status: planned.
+Status: complete with tracked transitional shims.
 
 Deliverables:
 
@@ -2436,6 +2451,22 @@ Acceptance criteria:
 - Renderer hot paths can look up prepared assets without going through Svelte store state.
 - `WorldDisplay` / renderer construction fails early if no resolver is provided, rather than carrying optional resolver checks through render code.
 - Temporary snapshot/read-model shims are clearly named and tracked for Phase 23 cleanup or promoted to explicit non-render planning APIs.
+
+Implementation notes:
+
+- Added `PreparedAssetStore` and stable `PreparedAssetResolver` in `prepared-asset-store.ts`.
+- The store owns prepared records, cache metadata, cache diagnostics, monotonic prepared/cache revisions, typed change events, resolver lookup/iteration APIs, and explicit immutable legacy snapshots.
+- `App.svelte` now constructs the app-local prepared asset store and routes `SceneAssetStreamingController` reads/writes through it instead of reading from `frontendState.asset.preparedByAssetId` / `cacheMetadataByAssetId`.
+- `WorldDisplay` and renderer construction now require a constructor-time `PreparedAssetResolver`; the WebGL implementation fails early if it is missing.
+- Existing render/report/planner code still receives a legacy record-shaped snapshot bridge. This is intentionally tracked in Phase 23 because Phase 21C/21D own the broader migration away from `AssetChannelState` and `setAssetState()`.
+- The full Svelte `AssetChannelState` mirror still exists for current browser report/render compatibility, so the strict "compact presentation only" shape is not complete until Phase 21C/21E. The authoritative owner is now the app-local store; the remaining mirror is compatibility debt, not the intended architecture.
+
+Verification:
+
+- `npm run --prefix apps/holtburger-3d test:ts -- src/lib/assets/prepared-asset-store.test.ts src/lib/assets/scene-asset-streaming-controller.test.ts src/lib/world-display/browser-render-resource-coordinator.test.ts`
+- `npm run --prefix apps/holtburger-3d test:ts`
+- `npm run --prefix apps/holtburger-3d lint:ts`
+- `npm run --prefix apps/holtburger-3d check`
 
 ### Phase 21C: Migrate Scene/Report Inputs Off Full Asset State
 
@@ -2676,9 +2707,10 @@ Cleanup ledger:
 
 | Status | Introduced By | Debt / Shim | Location | Removal Condition | Verification |
 | --- | --- | --- | --- | --- | --- |
-| planned | Phase 21 | Transitional immutable prepared-asset snapshot/read-model adapter for callers that still require `Record<string, PreparedAssetRecord>` inputs. | TBD | All render hot paths use `PreparedAssetResolver`; remaining snapshot use is either deleted or renamed as explicit off-frame planning API. | `rg` confirms no renderer hot-path imports of the snapshot adapter. |
-| planned | Phase 21 | Temporary renderer/coordinator compatibility path around full-cache `setAssetState(assetState)`. | TBD | `WorldDisplay` and renderer receive constructor-time resolver and subscribe to resolver events directly. | `rg "setAssetState"` has no runtime matches outside deleted/intentional docs. |
-| planned | Phase 21 | Whole-cache asset-state signatures. | `browser-render-resource-coordinator.ts` / successors | Resolver revisions and dirty queues replace all sorted/joined asset-id signatures. | `rg "describeAssetStateSignature|preparedByAssetId.*sort\\(\\).*join"` has no runtime matches. |
+| active | Phase 21B | Transitional immutable prepared-asset snapshot/read-model adapter for callers that still require `Record<string, PreparedAssetRecord>` inputs. | `prepared-asset-store.ts` (`createLegacySnapshot()`, `createLegacyAssetStateSnapshot()`), `App.svelte` streaming deps | All render hot paths use `PreparedAssetResolver`; remaining snapshot use is either deleted or renamed as explicit off-frame planning API. | `rg` confirms no renderer hot-path imports of the snapshot adapter. |
+| active | Phase 21B | Svelte still mirrors full `AssetChannelState.preparedByAssetId` / `cacheMetadataByAssetId` for browser report/render compatibility. The app-local store is now authoritative, but the Svelte shape is not compact yet. | `frontend-state.ts`, `asset-state.ts`, `BrowserWorldDisplay.svelte` | Phase 21C/21E demote `frontendState.asset` to compact presentation state and move report/material diagnostics to resolver/read-model pulls. | `rg "preparedByAssetId|cacheMetadataByAssetId" apps/holtburger-3d/src/app apps/holtburger-3d/src/pages/BrowserWorldDisplay.svelte` shows no authoritative cache ownership paths. |
+| active | Phase 21B | Temporary renderer/coordinator compatibility path around full-cache `setAssetState(assetState)`. | `WorldDisplay.svelte`, `world-display-renderer-contract.ts`, `world-display-renderer.ts`, `webgl2-world-display-renderer-impl.ts`, `browser-render-resource-coordinator.ts` | `WorldDisplay` and renderer subscribe to resolver events directly and flush dirty assets/products without full-cache `AssetChannelState` pushes. | `rg "setAssetState"` has no runtime matches outside deleted/intentional docs. |
+| active | Phase 21A | Whole-cache asset-state signatures, now instrumented so Phase 21C can verify removal. | `browser-render-resource-coordinator.ts` (`describeAssetStateSignature`) | Resolver revisions and dirty queues replace all sorted/joined asset-id signatures. | `rg "describeAssetStateSignature|preparedByAssetId.*sort\\(\\).*join"` has no runtime matches. |
 | planned | Phase 22 | Temporary dual path where product-store events and browser-display product forwarding both exist. | TBD | Product events are the only path from landblock product runtime to `WorldDisplay` / renderer. | `rg "commitStaticLandblockProduct|evictStaticLandblockProduct|clearStaticLandblockProducts"` has no browser-display forwarding matches. |
 | planned | Phase 22 | Runtime ownership bridge while `StaticLandblockRenderArtifactCoordinator` is moved out of `BrowserWorldDisplay.svelte`. | TBD | Neutral runtime owns coordinator/store/worker lifecycle. | `rg "new StaticLandblockRenderArtifactCoordinator" apps/holtburger-3d/src/pages/BrowserWorldDisplay.svelte` has no matches. |
 | planned | Phase 22 | Temporary shared scene-resource update function that can trigger product sync from presentation-only changes. | `BrowserWorldDisplay.svelte` / successors | Scene-interest sync and presentation-only updates are separate call paths. | Tests or grep prove picker/camera/debug handlers do not call product runtime sync. |

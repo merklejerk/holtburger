@@ -1,4 +1,5 @@
 import type { AssetChannelState } from "../assets/types";
+import type { PreparedAssetResolver } from "../assets/prepared-asset-store";
 import type { SceneCameraFrame } from "./camera";
 import type { WorldDebugOverlayModel } from "./debug-overlays";
 import type { NormalizedViewportPoint } from "./model";
@@ -29,6 +30,7 @@ import type { LandblockRenderProductWorkerResult } from "./landblock-render-prod
 
 export interface WorldDisplayRendererOptions {
 	assetState: AssetChannelState;
+	preparedAssetResolver: PreparedAssetResolver;
 	staticLandblockRenderProducts: StaticLandblockRenderProductSet;
 	debugOverlayScene: WorldDebugOverlayModel;
 	renderSceneContext: WorldRenderSceneContext;

@@ -93,6 +93,9 @@ interface WorldRenderDebugMetrics {
 	terrainAtlasRefCount: number;
 	terrainAtlasCandidateCount: number;
 	terrainAtlasBlockerTileCount: number;
+	rendererAssetSyncCount: number;
+	latestRendererAssetSyncRecommittedProductCount: number;
+	latestRendererAssetSyncScheduledFrame: boolean;
 	staticLandblockProductCount: number;
 	staticLandblockProductDomainCounts: Record<string, number>;
 	staticBundleProductResourceCount: number;

@@ -8,7 +8,7 @@ The core implementation problem is not "how do we rewrite everything." It is "ho
 
 ## Goal
 
-Build a V2 frontend island that can visually prove terrain-first static rendering, worker-owned source resolution/baking, domain atlas sharing, explicit renderer updates, and framework-light runtime ownership before replacing the current browser world display.
+Build a V2 frontend island that can visually prove landblock-owned static rendering, worker-owned source resolution/baking, domain atlas sharing, explicit renderer updates, and framework-light runtime ownership before replacing the current browser world display. Outdoor terrain remains the first outdoor visual slice, but dungeon landblocks must be first-class topology/env-cell scopes rather than a late special case.
 
 ## Scope
 
@@ -418,6 +418,7 @@ Decisions and course corrections:
 
 Debt and follow-up:
 
+- Phase 5A must correct the remaining terrain-first bias by adding first-class landblock topology and dungeon/env-cell foundation before the geometry bake path hardens around outdoor-only assumptions.
 - Phase 6 must replace the fake baker path with a geometry-only terrain bake worker and expand the terrain resolver payload from summary mesh facts into the full bake-ready mesh records the baker needs.
 - If worker asset diagnostics become necessary, add an explicit worker snapshot/event path instead of reaching into the worker-local asset service from Svelte or the renderer.
 
@@ -428,9 +429,44 @@ Verification:
 - `cd apps/holtburger-3d && npm run test:ts`
 - `rg -n "from \"\\.\\./\\.\\./(lib/assets|lib/world-display|app|workers)|from \"\\.\\./\\.\\./workers|from \"\\.\\./\\.\\./lib/assets|from \"\\.\\./\\.\\./lib/world-display|from \"\\.\\./\\.\\./app" src/v2` returned no matches.
 
+### Phase 5A: Landblock Topology And Dungeon Foundation
+
+Purpose: correct the early terrain-first bias before bake and renderer contracts harden. Dungeon support is first-class landblock support: a dungeon landblock is still an owning `XXYYFFFF` landblock with `XXYYFFFE` topology and `XXYY0100+` env-cell content, not an unrelated late interior mode.
+
+Deliverables:
+
+- Static domain/request vocabulary that can represent landblock topology and dungeon/env-cell static content without treating all non-terrain work as a generic `envCells` bucket.
+- Resolver job simplification that removes semantic `revision`, `policyRevision`, `resident-now`, `prefetch`, and focus labels from resolver-facing inputs. Keep any async correlation id coordinator-owned and opaque.
+- Typed runtime identities for landblock topology, landblock classification, env-cell membership, env-cell source identity, environment identity, cell-structure identity, portal links, visible-cell refs, and topology/env-cell spatial facts.
+- Demand planning correction so outdoor landblock demand and dungeon/interior interest compile to landblock-owned scheduled resolver jobs. Dungeon input should select the owning landblock; current env-cell remains scene/navigation/visibility context unless a later partial-loading policy proves resolver input needs it.
+- Resolver payload contract sketches for:
+  - landblock topology payloads,
+  - dungeon/env-cell shell payloads,
+  - env-cell static object seeds,
+  - portal/interior/visibility records as peer output facts.
+- Host/preparation support review for V2-owned `landblock-topology` and `env-cell` prepared payloads. Add missing V2 preparation families only if the Phase 5A contracts need them immediately.
+- Harness command/snapshot shape for an interior/env-cell focus request, showing owning landblock, selected env-cell, classification, env-cell count, visible-cell count, portal count, and missing typed refs.
+- Tests proving env-cell IDs derive from landblock topology, dungeon requests remain landblock-owned, and no topology/env-cell payload uses host route strings as semantic identity.
+
+Acceptance criteria:
+
+- V2 contracts can express a pure dungeon landblock without requesting outdoor terrain.
+- Outdoor-linked interiors and pure dungeon landblocks share topology/env-cell source concepts while keeping scene-entry policy separate.
+- Resolver jobs are idempotent for a given scope/domain/source state and contain concrete typed IDs/domains, not browser state, camera state, interest radii, scheduling priority, residency labels, or broad policy revisions.
+- Stale-result rejection is still supported by coordinator-owned job correlation, not by making resolver jobs care about generations.
+- The next bake phases can add terrain and env-cell geometry through the same static coordinator/baker/renderer seams without terrain-specific fields leaking into generic static structures.
+- The V2 harness can request or at least represent a known dungeon/interior focus and surface topology/env-cell resolver facts without Svelte owning topology state.
+
+Implementation notes:
+
+- This phase is intentionally inserted after Phase 5 because the real terrain resolver wiring is complete but no bake/result/renderer geometry contract has been locked yet.
+- Current V2 already has `revision` and `policyRevision` fields on `StaticWorkRequest`. Treat that as Phase 1 scaffolding to revisit, not as the desired final shape. `revision` is useful as coordinator stale-result correlation; `policyRevision` is not yet justified for resolver jobs.
+- Use existing local evidence as ground truth: ACViewer documents `0xFFFF` landblocks, `0xFFFE` LandblockInfo, and `0x0100+` EnvCells; `holtburger-content` already classifies landblocks as outdoor or dungeon from topology facts; V1 product planning already sends dungeon destinations through a landblock-owned `dungeon-env-cells` product path.
+- Do not build full portal rendering here. The goal is to lay down identities, planning, resolver payload shape, and harness visibility so later geometry and portal phases do not need to unwind outdoor-only assumptions.
+
 ### Phase 6: Geometry-Only Terrain Bake
 
-Purpose: prove the bake boundary and renderer input shape with real terrain geometry before texture placement enters the picture.
+Purpose: prove the bake boundary and renderer input shape with real terrain geometry after Phase 5A has made landblock topology and dungeon/env-cell support first-class in the contracts.
 
 Deliverables:
 
@@ -445,6 +481,7 @@ Deliverables:
 Acceptance criteria:
 
 - A terrain bake result can be produced from real terrain resolver output without consulting Svelte, renderer state, or host route strings.
+- Terrain bake/result contracts coexist with Phase 5A topology/env-cell contracts without making terrain the implicit shape of all static draw units.
 - Draw units contain renderer-facing geometry and material-family data, not old render-product artifacts.
 - Static spatial/source records are top-level peers of draw units.
 - The baker uses bake-local identities and build revisions; it does not assign renderer texture refs, GPU IDs, or atlas IDs.
@@ -575,12 +612,12 @@ Acceptance criteria:
 
 ### Phase 13: Env Cells, Interiors, Portals, And Visibility Records
 
-Purpose: bring over indoor/static visibility requirements without folding them into a generic draw-unit blob.
+Purpose: enrich the first-class topology/env-cell foundation with broader portal, visibility, and interior traversal behavior without folding those records into a generic draw-unit blob.
 
 Deliverables:
 
 - Env-cell static work requests.
-- Resolver and baker support for structured interiors and portal masks.
+- Resolver and baker support for structured interiors, visible-cell traversal policy, and portal masks beyond the Phase 5A foundation.
 - Static visibility records.
 - Static portal/interior records.
 - Renderer support for applying/removing these records independently from terrain/object geometry.
@@ -589,6 +626,7 @@ Deliverables:
 Acceptance criteria:
 
 - Interior and portal data enters the renderer as committed static records, not renderer-owned dependency walks.
+- Dungeon landblocks continue to use landblock-owned topology/env-cell domains rather than a separate renderer architecture.
 - Visibility records can update culling/visibility structures independently of texture placement updates.
 - Static BVH/spatial records are committed alongside other peer static result fields.
 
@@ -643,10 +681,11 @@ The V2 harness should always provide:
 Manual verification milestones should be explicit:
 
 - Phase 5: real Tauri-backed resolver data is visible as payload facts, not fake status churn.
-- Phase 7: first meaningful visual milestone, one real landblock renders as flat/debug terrain geometry.
-- Phase 8: one real landblock renders with direct terrain textures through texture-manager-owned refs.
+- Phase 5A: topology/env-cell facts for a known dungeon or interior focus are visible as landblock-owned payload facts.
+- Phase 7: first meaningful outdoor visual milestone, one real outdoor landblock renders as flat/debug terrain geometry.
+- Phase 8: one real outdoor landblock renders with direct terrain textures through texture-manager-owned refs.
 - Phase 10: terrain material behavior is credible enough to compare against v1 terrain blend/layer behavior.
-- Phase 11 and later: static enrichment, picking, interiors, and dynamic seeds become visually inspectable one slice at a time.
+- Phase 11 and later: static enrichment, picking, broader portal/visibility behavior, and dynamic seeds become visually inspectable one slice at a time.
 
 The harness should not:
 
@@ -661,11 +700,15 @@ The harness should not:
 
 Risk: the static coordinator becomes a new god object.
 
-Mitigation: keep it as control plane only. It schedules, tracks revisions, asks for atlas snapshots, commits/rejects results, and publishes snapshots. It does not classify materials, walk source dependencies, compact geometry, or allocate texture refs.
+Mitigation: keep it as control plane only. It schedules, owns opaque async job correlation for stale-result rejection, asks for atlas snapshots, commits/rejects results, and publishes snapshots. It does not classify materials, walk source dependencies, compact geometry, or allocate texture refs.
 
 Risk: the fake-worker phase creates contracts that real terrain cannot satisfy.
 
 Mitigation: keep Phase 1 contracts intentionally small and validate them immediately with the Phase 4 terrain resolver. Do not add broad generic fields until terrain or static object data proves the need.
+
+Risk: resolver jobs inherit lifecycle and policy scaffolding from early fake-worker tests.
+
+Mitigation: Phase 5A makes resolver jobs idempotent source-resolution inputs. Coordinator revisions/generations stay opaque correlation outside resolver semantics; bake/atlas policy keys are introduced later only where output actually depends on policy.
 
 Risk: the resolver payload becomes a renamed render product.
 
@@ -682,6 +725,10 @@ Mitigation: Phase 7 intentionally renders geometry-only terrain. Phase 8 adds di
 Risk: terrain-specific behavior leaks into generic static structures.
 
 Mitigation: terrain gets a dedicated adapter and draw-unit variant. Shared vocabulary is allowed; fake universality is not.
+
+Risk: dungeon support becomes a late interior bolt-on.
+
+Mitigation: Phase 5A makes landblock topology and dungeon/env-cell source identity first-class before bake and renderer contracts harden. Dungeon landblocks are planned as landblock-owned topology/env-cell scopes and do not request outdoor terrain.
 
 Risk: legacy code shapes V2 by gravity.
 
@@ -710,12 +757,13 @@ Mitigation: make static-authored dynamic seeds the first dynamic requirement. Th
 ## Open Questions
 
 - Which known landblock should be the standard terrain visual verification target?
+- Which known dungeon landblock/env-cell should be the standard topology and geometry verification target?
 - How soon should Playwright/screenshot regression coverage be introduced for the V2 harness?
 
 ## Decisions And Course Corrections
 
 - 2026-06-10: Plan starts with a V2 island and visual harness. Svelte appears early for verification, but owns no runtime, asset, static, atlas, or renderer behavior.
-- 2026-06-10: First vertical slice is terrain-first static rendering. Atlas ownership is introduced before broad static object enrichment so landblock-local texture assumptions do not creep back in.
+- 2026-06-10: First outdoor vertical slice is terrain-first static rendering. Atlas ownership is introduced before broad static object enrichment so landblock-local texture assumptions do not creep back in.
 - 2026-06-10: Dry run against current `App.svelte` found that Phase 0 needs an explicit `/browser-v2` route that bypasses legacy startup and Tauri debug-config reads.
 - 2026-06-10: Dry run against current worker/shared modules found useful extraction candidates, but no drop-in V2 asset module. Existing shared code imports legacy asset/world-display concepts and must be extracted into V2-owned or neutral modules before V2 can use it.
 - 2026-06-10: Phase 2 introduced a V2 preparation wrapper that imported legacy `src/workers/shared/asset-prepare.ts`. That is now classified as an isolation regression, and Phase 3 exists to remove it before terrain resolver work proceeds.
@@ -724,3 +772,5 @@ Mitigation: make static-authored dynamic seeds the first dynamic requirement. Th
 - 2026-06-10: Phase 3 removed legacy preparation imports, but review found host route strings and response-route regex preparation could still leak semantic string identity into resolver/baker/renderer records. Rather than create a standalone cleanup phase before those records exist, the typed-identity guidance is now woven into the resolver, bake, atlas, and enrichment phases where it first matters.
 - 2026-06-10: Review of remaining phases against v1 terrain/product/render code found that the old Phase 5 hid too much complexity under "terrain bake with minimal texture placement." The plan now splits real resolver wiring, geometry bake, geometry rendering, direct texture placement, atlas sharing, and terrain material parity into separate milestones.
 - 2026-06-10: Manual verification is now treated as a milestone property, not a generic harness promise. The first meaningful visual check is geometry-only terrain rendering; resolver status panels are useful for debugging but not proof of rendering.
+- 2026-06-10: Review against ACViewer docs, `holtburger-content` landblock topology assembly, and V1 product planning found that dungeon support must be first-class landblock topology/env-cell support. Phase 5A was inserted before geometry bake so dungeon landblocks do not become a late renderer special case.
+- 2026-06-10: Review of `revision`, `policyRevision`, `resident-now`, and `prefetch` found that they were leaking coordinator scheduling and stale-result machinery into resolver semantics. Phase 5A should simplify resolver-facing jobs to idempotent scope/domain inputs with opaque coordinator-owned correlation.

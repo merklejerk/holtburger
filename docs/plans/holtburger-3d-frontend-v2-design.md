@@ -447,7 +447,7 @@ The core rule is simple: each layer receives facts from the layer below, adds ex
 - Browser UI is a consumer. It does not own asset hydration, baking, renderer lifecycle, or renderer state diffing.
 - Runtime is orchestration. It translates user/client intent into service commands and publishes snapshots, but it does not decode assets, bake geometry, or upload WebGL resources.
 - Asset service owns asset identity, cache, in-flight dedupe, shared preparation rules, committed prepared-asset leases, warm retention, and failure/retry semantics. It is a logical owner, not necessarily a dedicated worker boundary.
-- Static coordinator owns landblock-scoped static demand. It expands scene interest into concrete static work requests by landblock/env-cell/domain, schedules resolver and baker workers, coordinates domain atlas registry snapshots, and commits completed output.
+- Static coordinator owns landblock-scoped static demand. It expands scene interest into concrete static work requests by landblock/domain and env-cell focus where needed, schedules resolver and baker workers, coordinates domain atlas registry snapshots, and commits completed output.
 - Static scope resolver workers own IO-heavy static source resolution. They resolve concrete static work requests into bakeable payloads by reading/fetching needed source assets, walking static dependencies, identifying referenced textures/surfaces, and producing source spatial facts and static-authored dynamic seeds.
 - Static bake workers own CPU-heavy static baking. They consume resolved static scope payloads plus scoped domain atlas snapshots, then produce static draw-unit bake records, atlas registry updates, and peer static records for spatial, visibility, portal/interior, source-mapping, and dynamic-seed output.
 - Dynamic service owns entity/object render readiness. It hydrates dynamic visual resources and publishes instance state without static landblock baking.
@@ -467,10 +467,11 @@ The earlier vocabulary table was intentionally expansive. After the research pas
 | Runtime resource identity | Typed internal identity used by resolver payloads, bake inputs/results, texture-manager state, renderer deltas, dynamic records, and source mappings. Discriminants such as `kind` are closed string-literal unions, never arbitrary `string`. | semantic asset ID string, route-derived identity |
 | Opaque cache key | Branded/canonical key derived from a typed runtime identity for local `Map`/cache indexing. It is not accepted as public semantic identity. | string map key, record key |
 | Scene interest | Client demand: location, retention, visibility, quality, and policy. | scene resource interest, browser LOD state, coverage request |
-| Static scope | Static world ownership key, usually landblock or env-cell anchored. | landblock product scope, render artifact identity |
-| Static work request | Concrete static request: scope plus domain, priority, and policy revision. It never contains camera state or interest radii. | desired product, desired layer, landblock render product request |
+| Landblock topology | Landblock-owned topology facts from `XXYYFFFE`: classification, env-cell membership, portal/link metadata, restriction facts, and topology spatial hints. Dungeon landblocks are first-class landblock topology packs whose visible static content is env-cell based. | topology sidecar, indoor env-cell discovery, dungeon special case |
+| Static scope | Static world ownership key, usually landblock anchored, with env-cell focus/records inside landblock topology when resolving dungeon or interior content. | landblock product scope, render artifact identity |
+| Static resolver job | Idempotent resolver input: scope plus source domain. It never contains camera state, interest radii, residency labels, scheduling priority, or broad policy revision. Coordinator-owned job ids may wrap resolver jobs for async correlation, but those ids are not resolver semantics. | desired product, desired layer, landblock render product request |
 | Static scope payload | Resolver output for one static work request: resolved source records, material facts, referenced texture keys, source spatial facts, and dynamic seeds. | prepared closure, product roots, companion closure |
-| Static domain | Static rendering/residency domain such as outdoor terrain, outdoor buildings, outdoor detail, env-cell static, portal mask, or dungeon env cells. | landblock render product, bundle kind |
+| Static domain | Static rendering/residency domain such as outdoor terrain, landblock topology, env-cell static, outdoor buildings/detail, portal mask, or dungeon env cells. Domains express which landblock-owned source family is being resolved, not whether the landblock is "outdoor" or "dungeon". | landblock render product, bundle kind |
 | Static draw unit | Renderer-ingestible static submission unit: domain, shader family, state, logical texture refs, placement revision assumptions, compacted geometry, and draw slices. | artifact, compacted batch, static bundle layer, material slice |
 | Static spatial record | Static-scope geometry/spatial fact used for culling, picking, inspection, or BVH binding. | spatial hint, local BVH sidecar, BVH item binding |
 | Static visibility record | Static-scope visibility fact for object/cell visibility and renderer visibility structures. | object visibility record, cell visibility record |
@@ -645,25 +646,53 @@ sequenceDiagram
 
 Scene interest is demand, not work. Services may lag behind it while they converge. That lag is visible in snapshots, but convergence is owned by services, not by Svelte.
 
-The static side must compile scene interest into concrete requests before worker work starts. Current landblock LoD is a set of domain radii, not a mesh-detail tier:
+Dungeon support is first-class landblock support, not a late special renderer mode. Client cell data still uses landblock ownership: `XXYYFFFF` for the landblock, `XXYYFFFE` for landblock info/topology, and `XXYY0100+` for env cells. Outdoor landblocks add terrain and outdoor static source families; dungeon landblocks primarily resolve topology and env-cell content. V2 should keep that common landblock ownership visible in request planning, payload identity, residency, eviction, and renderer chunking.
+
+The static side must compile scene interest into concrete resolver jobs before worker work starts. Current landblock LoD is a set of domain radii, not a mesh-detail tier. Keep three layers separate:
 
 ```text
-SceneInterest:
-  focus landblock
+Outdoor scene interest:
+  current outdoor landblock 0xAAAAFFFF
   terrain radius
   buildings radius
   detail radius
-  env-cell radius
+  env-cell/topology radius
 
-Static work requests:
-  landblock 0xAAAA0000 / outdoor-terrain / resident-now
-  landblock 0xAAAA0001 / outdoor-terrain / prefetch
-  landblock 0xAAAA0000 / outdoor-buildings / resident-now
-  landblock 0xAAAA0000 / outdoor-detail / resident-now
-  env-cell 0xAAAA0123 / env-cell-static / resident-now
+Coordinator scheduling:
+  landblock 0xAAAAFFFF / priority 0
+  landblock 0xAAABFFFF / priority 10
+
+Static resolver jobs:
+  landblock 0xAAAAFFFF / outdoor-static
+  landblock 0xAAABFFFF / outdoor-static
+
+Resolver asset/preparation requests:
+  landblock 0xAAAAFFFF / outdoor
+  landblock 0xAAAAFFFF / topology
+  terrain material ...
+  env-cell 0xAAAA0100 ...
 ```
 
-Workers receive only concrete scope/domain requests. They do not receive interest radii, camera state, browser state, or Svelte state.
+```text
+Dungeon scene interest:
+  dungeon landblock 0xBBBBFFFF
+  current env-cell 0xBBBB0123
+
+Coordinator scheduling:
+  landblock 0xBBBBFFFF / priority 0
+
+Static resolver jobs:
+  landblock 0xBBBBFFFF / dungeon-static
+
+Resolver asset/preparation requests:
+  landblock 0xBBBBFFFF / topology
+  env-cell 0xBBBB0100
+  env-cell 0xBBBB0101
+  environment ...
+  cell-structure ...
+```
+
+Workers receive only concrete resolver jobs. They do not receive interest radii, camera state, browser state, Svelte state, or lifecycle labels such as `resident-now` and `prefetch`. Resolver jobs should be idempotent: the same scope/domain against the same source data should produce the same payload. Stale-result rejection belongs to the coordinator's async job tracking, not to resolver semantics.
 
 ### Asset Hydration Flow
 
@@ -694,7 +723,7 @@ Pending asset demand is not the same thing as a prepared-asset lease. An in-flig
 
 Prepared-asset leases begin only after a prepared asset is committed to the asset service cache. Resident static draw units, active resolver/baker jobs that need committed prepared data, dynamic resources, and explicit inspection/debug captures can hold leases. Unleased prepared assets may still be warm-retained by cache policy, but warm retention is a cache optimization rather than consumer ownership.
 
-### Static Terrain-First Flow
+### Static Landblock-First Flow
 
 ```mermaid
 sequenceDiagram
@@ -708,7 +737,9 @@ sequenceDiagram
 
   Runtime->>Static: applyInterest(domain radii)
   Static->>Static: derive concrete static work requests
-  Static->>Resolver: resolve outdoor-terrain request
+  Static->>Resolver: resolve landblock-topology request
+  Resolver-->>Static: classification + env-cell membership + portal/link refs
+  Static->>Resolver: resolve outdoor-terrain request, if outdoor terrain is present
   Resolver-->>Static: missing typed refs, if blocked
   Static->>Assets: hydrate missing terrain-critical refs
   Assets-->>Static: prepared refs available
@@ -720,20 +751,20 @@ sequenceDiagram
   Static->>Textures: commit domain atlas updates + texture uses
   Textures-->>Static: texture refs / placement table revision
   Static->>Renderer: addStaticDrawUnits(scope, units with texture refs)
-  Static->>Resolver: resolve building/detail/env-cell requests
+  Static->>Resolver: resolve building/detail/env-cell/dungeon requests
   Resolver-->>Static: enrichment payloads + dynamic seeds
   Static->>Baker: bake enrichment payloads by domain lock
   Baker-->>Static: enrichment draw units + atlas updates + static records
   Static->>Renderer: replaceStaticDrawUnits(scope/domain, units)
 ```
 
-The first visible result should not wait for every static object dependency. Terrain gets a privileged fast path because it establishes world readability. Static objects, interiors, portal masks, and richer overlays can enrich the same scope afterward.
+The first visible outdoor result should not wait for every static object dependency. Terrain gets a privileged fast path because it establishes outdoor world readability. Dungeon readability comes from the parallel landblock-topology/env-cell path: a dungeon landblock can render without outdoor terrain, but it should still be planned, retained, and evicted as a landblock-owned static scope.
 
 ### Static Resolution And Bake Flow
 
 ```mermaid
 flowchart TB
-  Request["Concrete static work request<br/>scope + domain + priority + policy"]
+  Request["Static resolver job<br/>scope + source domain"]
   Resolver["Static scope resolver workers<br/>parallel IO/source resolution"]
   Payload["Static scope payload<br/>source records + material facts + texture keys + spatial facts + dynamic seeds"]
   Atlas["Texture/atlas manager<br/>domain atlas snapshot for referenced textures"]
@@ -752,13 +783,15 @@ flowchart TB
 
 Baking is static-only. It combines the old atlas and VAO-compaction concerns into one compatibility problem: if two surfaces cannot share shader family, pass/order class, sampler/device state, logical texture binding layout, capacity limits, and domain, they do not share a static draw unit. Static draw units bind texture refs and placement revisions, not physical atlas pages.
 
-The resolver is parallel and IO-bound. It reads/fetches source assets through the shared asset service/host boundary, runs the shared preparation library locally when needed, walks dependencies for one concrete static work request, and emits a compact payload. The main thread does not inspect heavy geometry or walk closures; it uses the payload's referenced textures to ask the texture/atlas manager for a scoped domain atlas snapshot.
+The resolver is parallel and IO-bound. It reads/fetches source assets through the shared asset service/host boundary, runs the shared preparation library locally when needed, walks dependencies for one concrete static resolver job, and emits a compact payload. The main thread does not inspect heavy geometry or walk closures; it uses the payload's referenced textures to ask the texture/atlas manager for a scoped domain atlas snapshot.
 
 The baker is CPU-bound. It consumes one static scope payload plus a scoped domain atlas snapshot, performs material-family classification, domain atlas updates, compatibility bucketing, geometry compaction, and draw-slice/source mapping. Baker jobs are serialized per domain atlas revision and may run in parallel across domains with independent atlas registries.
 
 The baker does not assign texture refs, renderer IDs, or GPU IDs. It emits bake-local texture uses, domain atlas registry updates, static draw-unit bake records, and peer static records. Static records include spatial records, visibility records, portal/interior records, source mappings, and static-authored dynamic seeds when the source scope contains animated or otherwise dynamic-authored content. The texture/atlas manager resolves bake-local texture uses to texture refs when committing the result; the renderer mirrors those refs into GPU placement state.
 
 Terrain is a dedicated static resolution and baking path, not just a generic static renderable family. Terrain baking still follows the same resolver -> atlas snapshot -> baker -> texture manager -> renderer ownership chain, but the terrain adapter owns terrain-specific work: terrain mesh extraction, blend/mask/detail planning, road overlays, terrain draw slices, terrain fallback geometry, terrain BVH bindings, and terrain shader binding layout.
+
+Landblock topology and env-cell static content are likewise first-class static resolution paths. Topology resolution owns landblock classification, env-cell membership, portal/link facts, and topology spatial records. Env-cell resolution owns environment/cell-structure geometry, visible-cell facts, local placement, indoor static objects, portal apertures, and env-cell-local BVHs. Outdoor interiors and pure dungeon landblocks should share this topology/env-cell path; the difference is scene entry and which source families are present, not a separate renderer architecture.
 
 Current-code `product` and `layer` vocabulary maps roughly to scheduling and output partitioning:
 
@@ -1175,7 +1208,7 @@ When V2 needs string keys for `Map`/cache indexing, those keys should be opaque/
 
 Prepared/resolved records should translate host DTO route strings into typed runtime resource identities before entering static resolver payloads or bake inputs. Runtime-facing discriminants such as `kind` must be closed string-literal unions, never arbitrary `string`.
 
-Minimum first visible outdoor terrain does not require static objects. It requires the cell landblock terrain mesh, region profile/material table, and the surface textures/render surfaces needed by visible terrain pcodes and alpha/detail layers. Static object, structured interior, portal mask, and dynamic renderable hydration can trail terrain.
+Minimum first visible outdoor terrain does not require static objects. It requires the cell landblock terrain mesh, region profile/material table, and the surface textures/render surfaces needed by visible terrain pcodes and alpha/detail layers. Minimum first visible dungeon content does not require outdoor terrain. It requires landblock topology, env-cell membership from landblock info, the selected or resident env-cell payloads, and their environment/cell-structure geometry. Static object enrichment, portal mask refinement, and dynamic renderable hydration can trail those first visible slices.
 
 The current dedicated asset worker is not enough evidence for a dedicated V2 asset-prepare worker. Current `asset-worker.ts` does useful work: host binary lookup bridging, payload validation/routing, provenance normalization, a few payload reshapes, transferable collection, and `PreparedAssetRecord` emission. But much of the current static-heavy path immediately needs another worker, and the static landblock worker already duplicates host lookup, `prepareAssetPayload`, and companion closure walking. That suggests the durable abstraction is a shared asset preparation library plus asset-service ownership of identity/cache/dedupe, not a mandatory physical asset-prepare worker.
 
@@ -1185,20 +1218,21 @@ The performance conclusion is not a magic number yet. The failed larger `audit_s
 
 ### Static Work Requests
 
-Current landblock LoD is domain residency radii, not a mesh LoD tier. `SceneResourceInterest` carries `terrain`, `buildings`, `detail`, and `envCells` radii. `deriveOutdoorSceneInterest` clamps them so buildings and detail do not exceed terrain coverage, and product planning turns them into concrete landblock products.
+Current landblock LoD is domain residency radii, not a mesh LoD tier. `SceneResourceInterest` carries `terrain`, `buildings`, `detail`, and `envCells` radii for outdoor coverage, while dungeon/interior destinations select an owning landblock pack plus a current env-cell focus. `deriveOutdoorSceneInterest` clamps outdoor buildings and detail so they do not exceed terrain coverage, and product planning turns demand into concrete landblock products.
 
-V2 should preserve that behavior while changing the worker contract. Resolver and baker jobs should receive concrete landblock/env-cell IDs and domains, not interest radii. The coordinator compiles radii into static work requests; workers operate on requests.
+V2 should preserve the "compile demand before workers" behavior while making dungeon landblocks first-class. Resolver jobs should receive concrete landblock IDs and source domains, not interest radii, current-camera state, scheduling labels, or generic policy revisions. Dungeon scenes have a single owning landblock; current env-cell belongs to scene interest/navigation/visibility policy and should not become resolver job identity unless V2 later chooses partial dungeon loading. The coordinator compiles outdoor radii and dungeon/interior interest into scheduled jobs; workers operate on idempotent resolver jobs.
 
 Current-code mapping:
 
 - `LandblockRenderProduct` is the scheduled domain/result unit: `outdoor-terrain`, `outdoor-buildings`, `outdoor-detail`, `outdoor-env-cells`, or `dungeon-env-cells`.
 - `StaticObjectBundleArtifact` / static bundle layer is an output partition used by some products: `outdoor-buildings`, `outdoor-detail`, or `env-cell-static`.
+- Older V1 decisions already found that dungeon behavior stays on the detailed env-cell product path and does not request an outdoor product. V2 should carry that lesson forward as landblock topology plus env-cell static domains, not as a late "interior" bolt-on.
 
-V2 does not need both words as core vocabulary. Prefer static work requests for scheduling and static bake results plus domain-specific output partitions for worker output.
+V2 does not need both words as core vocabulary. Prefer scheduled resolver jobs for source resolution, static bake inputs/results for baking, and domain-specific output partitions for worker output. Coordinator job ids are for async correlation and stale-result rejection only.
 
 Static work should split into two dedicated services:
 
-- Static scope resolver workers: parallel, IO-bound source resolution against concrete static work requests.
+- Static scope resolver workers: parallel, IO-bound source resolution against concrete idempotent resolver jobs.
 - Static bake workers: CPU-bound material/atlas/geometry baking against scoped domain atlas snapshots.
 
 The main thread sits between them because it owns shared atlas registry state. It should feed the baker only the domain atlas snapshot relevant to the static scope payload's referenced surfaces/textures.

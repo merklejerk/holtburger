@@ -238,6 +238,141 @@ ul {
 	align-items: start;
 }
 
+.browser-v2 {
+	position: relative;
+	min-height: 100vh;
+	background: #080d13;
+}
+
+.browser-v2__canvas {
+	display: block;
+	width: 100vw;
+	height: 100vh;
+}
+
+.browser-v2__panel {
+	position: absolute;
+	top: 1rem;
+	left: 1rem;
+	display: grid;
+	gap: 0.85rem;
+	width: min(24rem, calc(100vw - 2rem));
+	box-sizing: border-box;
+	padding: 0.9rem;
+	border: 1px solid rgba(162, 183, 209, 0.18);
+	border-radius: 8px;
+	background: rgba(8, 16, 26, 0.86);
+	color: #e8ecf3;
+	box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28);
+	backdrop-filter: blur(10px);
+}
+
+.browser-v2__panel h1 {
+	margin: 0;
+	font-size: 1.25rem;
+	line-height: 1.1;
+}
+
+.browser-v2__error {
+	margin: 0;
+	padding: 0.65rem;
+	border: 1px solid rgba(255, 135, 135, 0.35);
+	border-radius: 6px;
+	background: rgba(122, 20, 28, 0.24);
+	color: #ffd8d8;
+}
+
+.browser-v2__field {
+	display: grid;
+	gap: 0.35rem;
+	color: #90a8c7;
+	font-size: 0.78rem;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+}
+
+.browser-v2__field input {
+	box-sizing: border-box;
+	width: 100%;
+	padding: 0.5rem 0.6rem;
+	border: 1px solid rgba(162, 183, 209, 0.18);
+	border-radius: 6px;
+	background: rgba(2, 7, 12, 0.7);
+	color: #e8ecf3;
+	font:
+		0.9rem/1.2 "Iosevka",
+		"Iosevka Aile",
+		monospace;
+}
+
+.browser-v2__toggles {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 0.5rem;
+}
+
+.browser-v2__toggles label {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+	min-width: 0;
+	padding: 0.45rem 0.5rem;
+	border: 1px solid rgba(162, 183, 209, 0.14);
+	border-radius: 6px;
+	background: rgba(220, 232, 249, 0.06);
+	color: #d2dde9;
+	font-size: 0.84rem;
+}
+
+.browser-v2__toggles span {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.browser-v2__request {
+	padding: 0.55rem 0.7rem;
+	border: 1px solid rgba(140, 190, 255, 0.45);
+	border-radius: 6px;
+	background: rgba(44, 110, 184, 0.55);
+	color: #f4f8ff;
+	font: inherit;
+	font-weight: 700;
+	cursor: pointer;
+}
+
+.browser-v2__request:disabled {
+	cursor: not-allowed;
+	opacity: 0.48;
+}
+
+.browser-v2__status {
+	display: grid;
+	gap: 0.4rem;
+	margin: 0;
+	font:
+		0.78rem/1.25 "Iosevka",
+		"Iosevka Aile",
+		monospace;
+}
+
+.browser-v2__status div {
+	display: grid;
+	grid-template-columns: minmax(6rem, 0.4fr) minmax(0, 1fr);
+	gap: 0.6rem;
+	min-width: 0;
+}
+
+.browser-v2__status dt {
+	color: #90a8c7;
+}
+
+.browser-v2__status dd {
+	min-width: 0;
+	margin: 0;
+	color: #edf4ff;
+	overflow-wrap: anywhere;
+}
+
 .browser-world-display__inspector-rows dt {
 	color: #90a8c7;
 	font-size: 0.78rem;

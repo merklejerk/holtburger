@@ -383,6 +383,8 @@ Verification:
 
 ### Phase 5: Real Terrain Resolver Wiring
 
+Status: complete.
+
 Purpose: replace the fake resolver path with the real terrain resolver for one concrete landblock, while keeping baking/rendering out of scope.
 
 Deliverables:
@@ -400,6 +402,31 @@ Acceptance criteria:
 - Plain Vite still launches `/browser-v2` without Tauri and reports host/resolver unavailability honestly.
 - No V2 code imports legacy worker bridge, asset worker, world-display renderer, prepared store, or landblock render-product modules.
 - Resolver payloads and runtime snapshots do not use host route strings as semantic identity.
+
+Implementation notes:
+
+- Added a V2-only static resolver host bridge so resolver workers can request typed `HostAssetKey` lookups from the main-thread `RuntimeHost` without importing the legacy worker bridge or asset worker.
+- Added a static resolver worker entry that composes a worker-local `HostBackedAssetService` with the Phase 4 `TerrainStaticScopeResolver`. This keeps fetch/prepare dedupe/cache behavior inside the asset service shape while source resolution runs off the render thread.
+- Updated browser V2 runtime composition so Tauri mode routes terrain landblock requests through the real resolver worker. Plain Vite keeps the fake resolver path because Tauri host lookup is unavailable there.
+- Kept the immediate fake baker in place. Phase 5 proves real resolver output only; Phase 6 owns real terrain bake input/output.
+- Added runtime snapshot projection for the latest terrain payload summary and latest resolver failure so the harness can show real mesh/material/texture-use facts without Svelte owning resolver state.
+
+Decisions and course corrections:
+
+- Worker-local asset service cache state is not currently mirrored into the main runtime `assets` snapshot. The harness still shows resolver payload facts and failures, but detailed worker asset cache diagnostics should wait until real resolver pressure proves which facts matter.
+- Non-terrain static domains still route to the fake resolver in Tauri mode. Phase 5 is terrain-only; buildings, detail, and env-cell real resolution remain later-phase work.
+
+Debt and follow-up:
+
+- Phase 6 must replace the fake baker path with a geometry-only terrain bake worker and expand the terrain resolver payload from summary mesh facts into the full bake-ready mesh records the baker needs.
+- If worker asset diagnostics become necessary, add an explicit worker snapshot/event path instead of reaching into the worker-local asset service from Svelte or the renderer.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run test:ts`
+- `rg -n "from \"\\.\\./\\.\\./(lib/assets|lib/world-display|app|workers)|from \"\\.\\./\\.\\./workers|from \"\\.\\./\\.\\./lib/assets|from \"\\.\\./\\.\\./lib/world-display|from \"\\.\\./\\.\\./app" src/v2` returned no matches.
 
 ### Phase 6: Geometry-Only Terrain Bake
 

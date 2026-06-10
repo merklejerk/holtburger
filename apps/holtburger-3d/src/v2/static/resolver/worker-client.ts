@@ -5,7 +5,7 @@ import type {
 } from "../contracts";
 import type {
 	StaticResolverWorkerPort,
-	StaticResolverWorkerResponse,
+	StaticResolverWorkerThreadMessage,
 } from "./protocol";
 
 interface PendingResolverRequest {
@@ -17,7 +17,7 @@ export class StaticResolverWorkerClient implements StaticResolverClient {
 	readonly #port: StaticResolverWorkerPort;
 	readonly #pending = new Map<string, PendingResolverRequest>();
 	readonly #onMessage = (
-		event: MessageEvent<StaticResolverWorkerResponse>,
+		event: MessageEvent<StaticResolverWorkerThreadMessage>,
 	): void => {
 		this.#handleResponse(event.data);
 	};
@@ -52,7 +52,14 @@ export class StaticResolverWorkerClient implements StaticResolverClient {
 		this.#pending.clear();
 	}
 
-	#handleResponse(response: StaticResolverWorkerResponse): void {
+	#handleResponse(response: StaticResolverWorkerThreadMessage): void {
+		if (
+			response.kind !== "static-scope-resolved" &&
+			response.kind !== "static-scope-resolve-failed"
+		) {
+			return;
+		}
+
 		const pending = this.#pending.get(response.requestId);
 		if (!pending) {
 			return;

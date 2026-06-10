@@ -153,6 +153,27 @@
 				</dd>
 			</div>
 			<div>
+				<dt>Terrain payload</dt>
+				<dd>
+					{#if snapshot?.static.latestTerrainPayload}
+						lb {snapshot.static.latestTerrainPayload.landblockId
+							.toString(16)
+							.padStart(8, "0")} region
+						{snapshot.static.latestTerrainPayload.regionNumber} mesh
+						{snapshot.static.latestTerrainPayload.vertexCount}v/{snapshot.static
+							.latestTerrainPayload.triangleCount}t tex
+						{snapshot.static.latestTerrainPayload.textureUseCount} missing
+						{snapshot.static.latestTerrainPayload.missingRefCount}
+					{:else}
+						none
+					{/if}
+				</dd>
+			</div>
+			<div>
+				<dt>Resolver failure</dt>
+				<dd>{snapshot?.static.latestResolverFailure?.message ?? "none"}</dd>
+			</div>
+			<div>
 				<dt>Host</dt>
 				<dd>{snapshot?.host.isAvailable ? "tauri" : "unavailable"}</dd>
 			</div>

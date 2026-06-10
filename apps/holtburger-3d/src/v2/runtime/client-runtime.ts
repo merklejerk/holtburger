@@ -8,6 +8,7 @@ import {
 	getOutdoorLandblockCoords,
 	normalizeOutdoorLandblockId,
 } from "../../lib/landblocks";
+import { TextureManager } from "../textures/texture-manager";
 import {
 	ImmediateStaticBakerClient,
 	ImmediateStaticResolverClient,
@@ -80,6 +81,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #renderer: Renderer;
 	readonly #host: RuntimeHost;
 	readonly #assetService: AssetService;
+	readonly #textureManager: TextureManager;
 	readonly #staticCoordinator: StaticCoordinator;
 	readonly #listeners = new Set<RuntimeSnapshotListener>();
 	readonly #unsubscribeRenderer: () => void;
@@ -100,6 +102,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#renderer = renderer;
 		this.#host = host;
 		this.#assetService = assetService;
+		this.#textureManager = new TextureManager({ assetService });
 		this.#staticCoordinator = staticCoordinator;
 		this.#lastRendererSnapshot = {
 			backend: "webgl2",
@@ -133,6 +136,16 @@ class ClientRuntimeImpl implements ClientRuntime {
 				removedDrawUnitIds: delta.removedDrawUnitIds,
 				revision: delta.revision,
 			});
+			void this.#textureManager
+				.applyStaticCommitDelta(delta)
+				.then((textureUpdate) => {
+					if (textureUpdate) {
+						this.#renderer.applyTexturePlacementUpdate(textureUpdate);
+					}
+				})
+				.catch((error: unknown) => {
+					console.error("V2 texture placement update failed.", error);
+				});
 		});
 	}
 

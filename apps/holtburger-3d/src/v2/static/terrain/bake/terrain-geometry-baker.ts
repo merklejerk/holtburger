@@ -1,6 +1,7 @@
 import type {
 	StaticBakeInput,
 	StaticBakeResult,
+	StaticBakeTextureUse,
 	StaticBakerClient,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMeshTriangleFacts,
@@ -30,6 +31,7 @@ export function bakeTerrainGeometry(input: StaticBakeInput): StaticBakeResult {
 		input.work.workId,
 		input.payload.scope,
 	);
+	const textureUses = createTerrainBakeTextureUses(input, drawUnit);
 
 	return {
 		atlasRegistryUpdates: [],
@@ -42,6 +44,7 @@ export function bakeTerrainGeometry(input: StaticBakeInput): StaticBakeResult {
 		),
 		staticSpatialRecords: [`${drawUnit.drawUnitId}:bounds`],
 		staticVisibilityRecords: [],
+		textureUses,
 		work: input.work,
 	};
 }
@@ -51,11 +54,26 @@ function createTerrainGeometryDrawUnit(
 	payload: TerrainStaticScopePayload,
 ): TerrainGeometryStaticDrawUnit {
 	const positions = new Float32Array(payload.mesh.triangles.length * 9);
+	const texCoords = new Float32Array(payload.mesh.triangles.length * 6);
 	const sourceTriangleIds: string[] = [];
+	const primaryTextureUse = payload.textureUses.find(
+		(textureUse) => textureUse.preparedTextureUse !== null,
+	);
+	const textureUseIds = payload.textureUses
+		.filter((textureUse) => textureUse.preparedTextureUse !== null)
+		.map((textureUse) => {
+			const preparedTextureUse = textureUse.preparedTextureUse;
+			if (!preparedTextureUse) {
+				throw new Error("Prepared texture use disappeared during terrain bake.");
+			}
+
+			return createTerrainTextureUseId(workId, preparedTextureUse.renderSurfaceId);
+		});
 
 	for (const [triangleIndex, triangle] of payload.mesh.triangles.entries()) {
 		writeTrianglePositions(
 			positions,
+			texCoords,
 			triangleIndex,
 			triangle,
 			payload.mesh.vertices,
@@ -73,9 +91,19 @@ function createTerrainGeometryDrawUnit(
 		indices: createSequentialIndices(vertexCount),
 		kind: "terrain-geometry",
 		landblockId: payload.landblock.landblockId,
-		materialFamily: "terrain-debug-flat",
+		materialFamily: primaryTextureUse
+			? "terrain-direct-texture"
+			: "terrain-debug-flat",
+		primaryTextureUseId: primaryTextureUse?.preparedTextureUse
+			? createTerrainTextureUseId(
+					workId,
+					primaryTextureUse.preparedTextureUse.renderSurfaceId,
+				)
+			: null,
 		positions,
 		sourceTriangleIds,
+		texCoords,
+		textureUseIds,
 		triangleCount: payload.mesh.triangles.length,
 		vertexCount,
 	};
@@ -83,6 +111,7 @@ function createTerrainGeometryDrawUnit(
 
 function writeTrianglePositions(
 	positions: Float32Array,
+	texCoords: Float32Array,
 	triangleIndex: number,
 	triangle: TerrainMeshTriangleFacts,
 	vertices: readonly TerrainMeshVertexFacts[],
@@ -100,7 +129,45 @@ function writeTrianglePositions(
 		positions[targetOffset] = vertex.x;
 		positions[targetOffset + 1] = vertex.z;
 		positions[targetOffset + 2] = -vertex.y;
+
+		const texCoordOffset = triangleIndex * 6 + corner * 2;
+		texCoords[texCoordOffset] = vertex.x / 192;
+		texCoords[texCoordOffset + 1] = vertex.y / 192;
 	}
+}
+
+function createTerrainBakeTextureUses(
+	input: StaticBakeInput,
+	drawUnit: TerrainGeometryStaticDrawUnit,
+): readonly StaticBakeTextureUse[] {
+	if (input.payload.scope.kind !== "terrain") {
+		return [];
+	}
+
+	return input.payload.scope.textureUses.flatMap((textureUse) => {
+		if (!textureUse.preparedTextureUse) {
+			return [];
+		}
+
+		return [
+			{
+				domain: "outdoor-terrain",
+				ownerDrawUnitIds: [drawUnit.drawUnitId],
+				source: textureUse.preparedTextureUse,
+				textureUseId: createTerrainTextureUseId(
+					input.work.workId,
+					textureUse.preparedTextureUse.renderSurfaceId,
+				),
+			},
+		];
+	});
+}
+
+function createTerrainTextureUseId(
+	workId: string,
+	renderSurfaceId: number,
+): string {
+	return `${workId}:prepared-texture:${renderSurfaceId.toString(16).padStart(8, "0")}`;
 }
 
 function createSequentialIndices(vertexCount: number): Uint16Array | Uint32Array {

@@ -223,6 +223,7 @@ function createFakeStaticBakeResult(
 		staticSourceMappings: result.staticSourceMappings ?? [],
 		staticSpatialRecords: result.staticSpatialRecords ?? [],
 		staticVisibilityRecords: result.staticVisibilityRecords ?? [],
+		textureUses: result.textureUses ?? [],
 		work: input.work,
 	};
 }

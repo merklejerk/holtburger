@@ -145,6 +145,7 @@ function createResult(input: StaticBakeInput): StaticBakeResult {
 		staticSourceMappings: [],
 		staticSpatialRecords: [],
 		staticVisibilityRecords: [],
+		textureUses: [],
 		work: input.work,
 	};
 }

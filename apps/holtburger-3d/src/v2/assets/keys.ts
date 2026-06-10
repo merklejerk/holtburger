@@ -13,6 +13,7 @@ const HEX32_ROUTE_KINDS = new Set<HostAssetKeyKind>([
 	"env-cell",
 	"gfx-obj",
 	"setup-model",
+	"setup-appearance",
 	"material",
 	"surface-texture",
 	"render-surface",
@@ -94,15 +95,27 @@ export function parseHostAssetId(assetId: string): HostAssetKey {
 		return createRawHostAssetKey(assetId);
 	}
 
-	return createHostAssetKey(kind, id);
+	if (kind === "prepared-texture" && id.includes("?")) {
+		return createHostAssetKey(kind, id);
+	}
+
+	if (HEX32_ROUTE_KINDS.has(kind)) {
+		return createHostAssetKey(kind, Number.parseInt(id, 16));
+	}
+
+	return createHostAssetKey(kind, Number.parseInt(id, 10));
 }
 
 function normalizeAssetKeyId(
 	kind: HostAssetKeyKind,
 	id: string | number,
 ): string {
-	if (kind === "raw" || typeof id === "string") {
+	if (kind === "raw" || (kind === "prepared-texture" && typeof id === "string")) {
 		return `${id}`.trim();
+	}
+
+	if (typeof id !== "number") {
+		throw new Error(`${kind} route id must be numeric: ${id}`);
 	}
 
 	if (kind === "landblock-outdoor" || kind === "landblock-topology") {

@@ -1,3 +1,4 @@
+import { createBrowserRuntimeHost } from "../host/tauri-runtime-host";
 import { createWebgl2Renderer } from "../renderer/webgl2/webgl2-renderer";
 import {
 	createClientRuntime,
@@ -8,6 +9,7 @@ export function createBrowserV2Runtime(
 	canvas: HTMLCanvasElement,
 ): ClientRuntime {
 	const renderer = createWebgl2Renderer(canvas);
+	const host = createBrowserRuntimeHost();
 
-	return createClientRuntime({ renderer });
+	return createClientRuntime({ host, renderer });
 }

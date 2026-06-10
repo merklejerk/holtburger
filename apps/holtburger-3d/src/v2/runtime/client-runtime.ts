@@ -1,3 +1,6 @@
+import { HostBackedAssetService } from "../assets/asset-service";
+import type { AssetService, AssetServiceSnapshot } from "../assets/contracts";
+import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
 import type { Renderer, RendererSnapshot } from "../renderer/types";
 import type { FrameState } from "../renderer/types";
 import {
@@ -20,6 +23,8 @@ export interface StaticWorkCommand {
 export interface RuntimeSnapshot {
 	readonly status: "idle" | "static-active" | "disposed";
 	readonly lastStaticRequest: StaticWorkCommand | null;
+	readonly assets: AssetServiceSnapshot;
+	readonly host: RuntimeHostSnapshot;
 	readonly renderer: RendererSnapshot;
 	readonly static: StaticCoordinatorSnapshot;
 }
@@ -35,6 +40,8 @@ export interface ClientRuntime {
 
 export interface ClientRuntimeOptions {
 	readonly renderer: Renderer;
+	readonly host: RuntimeHost;
+	readonly assetService?: AssetService;
 	readonly staticCoordinator?: StaticCoordinator;
 }
 
@@ -47,12 +54,21 @@ export function createClientRuntime(
 			baker: new ImmediateStaticBakerClient(),
 			resolver: new ImmediateStaticResolverClient(),
 		});
+	const assetService =
+		options.assetService ?? new HostBackedAssetService({ host: options.host });
 
-	return new ClientRuntimeImpl(options.renderer, staticCoordinator);
+	return new ClientRuntimeImpl(
+		options.renderer,
+		options.host,
+		assetService,
+		staticCoordinator,
+	);
 }
 
 class ClientRuntimeImpl implements ClientRuntime {
 	readonly #renderer: Renderer;
+	readonly #host: RuntimeHost;
+	readonly #assetService: AssetService;
 	readonly #staticCoordinator: StaticCoordinator;
 	readonly #listeners = new Set<RuntimeSnapshotListener>();
 	readonly #unsubscribeRenderer: () => void;
@@ -62,8 +78,15 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#lastStaticRequest: StaticWorkCommand | null = null;
 	#disposed = false;
 
-	constructor(renderer: Renderer, staticCoordinator: StaticCoordinator) {
+	constructor(
+		renderer: Renderer,
+		host: RuntimeHost,
+		assetService: AssetService,
+		staticCoordinator: StaticCoordinator,
+	) {
 		this.#renderer = renderer;
+		this.#host = host;
+		this.#assetService = assetService;
 		this.#staticCoordinator = staticCoordinator;
 		this.#lastRendererSnapshot = {
 			backend: "webgl2",
@@ -129,6 +152,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 	#createSnapshot(): RuntimeSnapshot {
 		return {
+			assets: this.#assetService.createSnapshot(),
+			host: this.#host.createSnapshot(),
 			lastStaticRequest: this.#lastStaticRequest,
 			renderer: this.#lastRendererSnapshot,
 			static: this.#lastStaticSnapshot,

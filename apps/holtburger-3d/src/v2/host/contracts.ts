@@ -1,7 +1,7 @@
 import type { HostAssetKey, PreparedAsset } from "../assets/contracts";
 
 export interface RuntimeHost {
-	lookupAsset(key: HostAssetKey): Promise<PreparedAsset>;
+	lookupAsset(key: HostAssetKey, revision: number): Promise<PreparedAsset>;
 	createSnapshot(): RuntimeHostSnapshot;
 }
 

@@ -1,3 +1,5 @@
+import type { StaticDrawUnit } from "../static/contracts";
+
 export interface FrameState {
 	readonly camera: {
 		readonly position: readonly [number, number, number];
@@ -8,9 +10,14 @@ export interface FrameState {
 }
 
 export interface StaticResidencyDelta {
-	readonly addedDrawUnitIds: readonly string[];
+	readonly addedDrawUnitPlacements: readonly StaticDrawUnitPlacement[];
 	readonly removedDrawUnitIds: readonly string[];
 	readonly revision: number;
+}
+
+export interface StaticDrawUnitPlacement {
+	readonly drawUnit: StaticDrawUnit;
+	readonly translation: readonly [number, number, number];
 }
 
 export interface DynamicResidencyDelta {
@@ -36,6 +43,9 @@ export interface RendererSnapshot {
 	readonly isRunning: boolean;
 	readonly backend: "webgl2";
 	readonly error: string | null;
+	readonly staticDrawUnits: number;
+	readonly terrainDrawUnits: number;
+	readonly renderedTriangles: number;
 }
 
 export type RendererSnapshotListener = (snapshot: RendererSnapshot) => void;

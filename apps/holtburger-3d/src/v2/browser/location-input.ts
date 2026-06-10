@@ -4,6 +4,7 @@ import {
 	normalizeOutdoorLandblockId,
 } from "../../lib/landblocks";
 import type { StaticWorkCommand } from "../runtime/client-runtime";
+import type { StaticLodRadii } from "../static/contracts";
 
 export type V2LandblockInputMode = "outdoor" | "dungeon";
 
@@ -85,6 +86,7 @@ export function inferV2LandblockInputMode(
 export function createStaticWorkCommandFromLocation(
 	location: V2ParsedLocationInput,
 	domains: readonly StaticWorkCommand["domains"][number][],
+	lod?: Partial<StaticLodRadii>,
 ): StaticWorkCommand {
 	if (location.kind === "interior-cell") {
 		return {
@@ -98,6 +100,7 @@ export function createStaticWorkCommandFromLocation(
 	return {
 		domains,
 		landblockId: `0x${formatHex32(location.landblockId)}`,
+		...(lod ? { lod } : {}),
 		locationKind: "outdoor-landblock",
 	};
 }

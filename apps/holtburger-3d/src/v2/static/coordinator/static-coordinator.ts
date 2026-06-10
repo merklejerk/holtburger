@@ -3,6 +3,7 @@ import type {
 	StaticBakeInput,
 	StaticBakeResult,
 	StaticBakerClient,
+	StaticCoordinatorCommitDelta,
 	StaticCoordinatorSnapshot,
 	StaticDemand,
 	DungeonStaticPayloadSummary,
@@ -18,6 +19,9 @@ import { describeStaticScopeKey, planScheduledStaticWork } from "../demand-plann
 
 export type StaticCoordinatorListener = (
 	snapshot: StaticCoordinatorSnapshot,
+) => void;
+export type StaticCoordinatorCommitListener = (
+	delta: StaticCoordinatorCommitDelta,
 ) => void;
 
 export interface StaticCoordinatorOptions {
@@ -35,7 +39,9 @@ export class StaticCoordinator {
 		payload: StaticScopePayload,
 	) => DomainAtlasSnapshot;
 	readonly #listeners = new Set<StaticCoordinatorListener>();
+	readonly #commitListeners = new Set<StaticCoordinatorCommitListener>();
 	readonly #activeWork = new Map<string, MutableScheduledStaticWorkStatus>();
+	readonly #residentDrawUnitIds = new Set<string>();
 	#revision = 0;
 	#disposed = false;
 	#committed = 0;
@@ -59,6 +65,7 @@ export class StaticCoordinator {
 		this.#assertActive();
 		this.#revision += 1;
 		this.#activeWork.clear();
+		this.#evictResidentDrawUnits();
 
 		const workItems = planScheduledStaticWork(demand, this.#revision);
 
@@ -88,6 +95,14 @@ export class StaticCoordinator {
 
 		return () => {
 			this.#listeners.delete(listener);
+		};
+	}
+
+	subscribeCommits(listener: StaticCoordinatorCommitListener): () => void {
+		this.#commitListeners.add(listener);
+
+		return () => {
+			this.#commitListeners.delete(listener);
 		};
 	}
 
@@ -121,8 +136,10 @@ export class StaticCoordinator {
 		disposeIfAvailable(this.#resolver);
 		disposeIfAvailable(this.#baker);
 		this.#activeWork.clear();
+		this.#evictResidentDrawUnits();
 		this.#emit();
 		this.#listeners.clear();
+		this.#commitListeners.clear();
 	}
 
 	async #resolveThenBake(work: ScheduledStaticWork): Promise<void> {
@@ -183,8 +200,31 @@ export class StaticCoordinator {
 
 		status.status = "committed";
 		this.#committed += 1;
-		this.#committedDrawUnits += result.drawUnits.length;
+		for (const drawUnit of result.drawUnits) {
+			this.#residentDrawUnitIds.add(drawUnit.drawUnitId);
+		}
+		this.#committedDrawUnits = this.#residentDrawUnitIds.size;
+		this.#emitCommitDelta({
+			addedDrawUnits: result.drawUnits,
+			removedDrawUnitIds: [],
+			revision: result.work.revision,
+		});
 		this.#emit();
+	}
+
+	#evictResidentDrawUnits(): void {
+		if (this.#residentDrawUnitIds.size === 0) {
+			return;
+		}
+
+		const removedDrawUnitIds = Array.from(this.#residentDrawUnitIds);
+		this.#residentDrawUnitIds.clear();
+		this.#committedDrawUnits = 0;
+		this.#emitCommitDelta({
+			addedDrawUnits: [],
+			removedDrawUnitIds,
+			revision: this.#revision,
+		});
 	}
 
 	#markFailedIfCurrent(work: ScheduledStaticWork, message: string): void {
@@ -288,6 +328,12 @@ export class StaticCoordinator {
 
 		for (const listener of this.#listeners) {
 			listener(snapshot);
+		}
+	}
+
+	#emitCommitDelta(delta: StaticCoordinatorCommitDelta): void {
+		for (const listener of this.#commitListeners) {
+			listener(delta);
 		}
 	}
 }

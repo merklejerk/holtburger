@@ -4,6 +4,11 @@ import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
 import type { Renderer, RendererSnapshot } from "../renderer/types";
 import type { FrameState } from "../renderer/types";
 import {
+	OUTDOOR_LANDBLOCK_WORLD_SIZE,
+	getOutdoorLandblockCoords,
+	normalizeOutdoorLandblockId,
+} from "../../lib/landblocks";
+import {
 	ImmediateStaticBakerClient,
 	ImmediateStaticResolverClient,
 } from "../static/fake-workers";
@@ -11,6 +16,7 @@ import { StaticCoordinator } from "../static/coordinator/static-coordinator";
 import type {
 	StaticCoordinatorSnapshot,
 	StaticDemand,
+	StaticDrawUnit,
 	StaticLodRadii,
 } from "../static/contracts";
 
@@ -19,6 +25,7 @@ export type ManualStaticDomain = "terrain" | "buildings" | "detail" | "topology"
 export interface StaticWorkCommand {
 	readonly landblockId: string;
 	readonly domains: readonly ManualStaticDomain[];
+	readonly lod?: Partial<StaticLodRadii>;
 	readonly locationKind?: "outdoor-landblock" | "interior-cell";
 	readonly envCellId?: string;
 }
@@ -36,6 +43,7 @@ export type RuntimeSnapshotListener = (snapshot: RuntimeSnapshot) => void;
 
 export interface ClientRuntime {
 	requestStaticWork(command: StaticWorkCommand): void;
+	evictStaticWork(): void;
 	updateFrameState(state: FrameState): void;
 	subscribe(listener: RuntimeSnapshotListener): () => void;
 	dispose(): void;
@@ -76,9 +84,11 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #listeners = new Set<RuntimeSnapshotListener>();
 	readonly #unsubscribeRenderer: () => void;
 	readonly #unsubscribeStaticCoordinator: () => void;
+	readonly #unsubscribeStaticCommits: () => void;
 	#lastRendererSnapshot: RendererSnapshot;
 	#lastStaticSnapshot: StaticCoordinatorSnapshot;
 	#lastStaticRequest: StaticWorkCommand | null = null;
+	#renderAnchorLandblockId: number | null = null;
 	#disposed = false;
 
 	constructor(
@@ -98,6 +108,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 			error: null,
 			frameCount: 0,
 			isRunning: true,
+			renderedTriangles: 0,
+			staticDrawUnits: 0,
+			terrainDrawUnits: 0,
 		};
 		this.#lastStaticSnapshot = staticCoordinator.createSnapshot();
 		this.#unsubscribeRenderer = renderer.subscribe((snapshot) => {
@@ -108,14 +121,49 @@ class ClientRuntimeImpl implements ClientRuntime {
 			this.#lastStaticSnapshot = snapshot;
 			this.#emit();
 		});
+		this.#unsubscribeStaticCommits = staticCoordinator.subscribeCommits((delta) => {
+			this.#renderer.applyStaticDelta({
+				addedDrawUnitPlacements: delta.addedDrawUnits.map((drawUnit) => ({
+					drawUnit,
+					translation: createStaticDrawUnitTranslation(
+						drawUnit,
+						this.#renderAnchorLandblockId,
+					),
+				})),
+				removedDrawUnitIds: delta.removedDrawUnitIds,
+				revision: delta.revision,
+			});
+		});
 	}
 
 	requestStaticWork(command: StaticWorkCommand): void {
 		this.#assertActive();
 		this.#lastStaticRequest = normalizeStaticWorkCommand(command);
+		this.#renderAnchorLandblockId =
+			this.#lastStaticRequest.locationKind === "outdoor-landblock"
+				? normalizeOutdoorLandblockId(
+						parseLandblockInput(this.#lastStaticRequest.landblockId),
+					)
+				: null;
 		this.#staticCoordinator.requestStaticDemand(
 			createManualStaticDemand(this.#lastStaticRequest),
 		);
+		this.#emit();
+	}
+
+	evictStaticWork(): void {
+		this.#assertActive();
+		this.#lastStaticRequest = null;
+		this.#renderAnchorLandblockId = null;
+		this.#staticCoordinator.requestStaticDemand({
+			location: null,
+			lod: {
+				buildings: -1,
+				detail: -1,
+				terrain: -1,
+				topology: -1,
+			},
+		});
 		this.#emit();
 	}
 
@@ -141,6 +189,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#disposed = true;
 		this.#unsubscribeRenderer();
 		this.#unsubscribeStaticCoordinator();
+		this.#unsubscribeStaticCommits();
 		this.#staticCoordinator.dispose();
 		this.#renderer.dispose();
 		this.#emit();
@@ -184,16 +233,25 @@ function normalizeStaticWorkCommand(command: StaticWorkCommand): StaticWorkComma
 		domains,
 		envCellId: command.envCellId?.trim(),
 		landblockId: command.landblockId.trim(),
+		...(command.lod ? { lod: command.lod } : {}),
 		locationKind: command.locationKind,
 	};
 }
 
 function createManualStaticDemand(command: StaticWorkCommand): StaticDemand {
 	const lod: StaticLodRadii = {
-		buildings: command.domains.includes("buildings") ? 0 : -1,
-		detail: command.domains.includes("detail") ? 0 : -1,
-		terrain: command.domains.includes("terrain") ? 0 : -1,
-		topology: command.domains.includes("topology") ? 0 : -1,
+		buildings: command.domains.includes("buildings")
+			? (command.lod?.buildings ?? 0)
+			: -1,
+		detail: command.domains.includes("detail")
+			? (command.lod?.detail ?? 0)
+			: -1,
+		terrain: command.domains.includes("terrain")
+			? (command.lod?.terrain ?? 0)
+			: -1,
+		topology: command.domains.includes("topology")
+			? (command.lod?.topology ?? 0)
+			: -1,
 	};
 
 	if (command.locationKind === "interior-cell") {
@@ -226,4 +284,30 @@ function parseLandblockInput(value: string): number {
 	}
 
 	return parsed >>> 0;
+}
+
+function createStaticDrawUnitTranslation(
+	drawUnit: StaticDrawUnit,
+	focusLandblockId: number | null,
+): readonly [number, number, number] {
+	if (drawUnit.kind !== "terrain-geometry" || focusLandblockId === null) {
+		return [0, 0, 0];
+	}
+
+	const drawUnitCoords = getOutdoorLandblockCoords(drawUnit.landblockId);
+	const focusCoords = getOutdoorLandblockCoords(focusLandblockId);
+
+	return [
+		normalizeZero(
+			(drawUnitCoords.x - focusCoords.x) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+		),
+		0,
+		normalizeZero(
+			-(drawUnitCoords.y - focusCoords.y) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
+		),
+	];
+}
+
+function normalizeZero(value: number): number {
+	return Object.is(value, -0) ? 0 : value;
 }

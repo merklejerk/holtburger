@@ -230,7 +230,10 @@ function createEmptyAtlasSnapshotForPayload(
 	return {
 		domain: payload.request.domain,
 		revision: payload.request.revision,
-		textureKeys: payload.referencedTextureKeys,
+		textureUses:
+			payload.scope.kind === "placeholder"
+				? payload.scope.referencedTextureUses
+				: payload.scope.textureUses.map((textureUse) => textureUse.texture),
 	};
 }
 

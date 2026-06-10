@@ -327,6 +327,8 @@ Verification:
 
 ### Phase 4: Terrain Resolver Slice
 
+Status: complete.
+
 Purpose: make the first real worker path read source data and produce a terrain-specific static scope payload.
 
 Deliverables:
@@ -350,6 +352,35 @@ Acceptance criteria:
 - Host asset route strings are absent from resolver payloads except as explicitly named provenance/debug text.
 - No resolver payload identity widens `kind` to arbitrary `string`; every discriminant is a closed string-literal union.
 
+Implementation notes:
+
+- Replaced the Phase 1 `referencedTextureKeys: string[]` placeholder with typed static resource identities and terrain-specific scope payload records.
+- Added closed-union terrain-slice identities for landblock sources, terrain materials, region render profiles, surface textures, render surfaces, prepared texture uses, and palettes.
+- Added a V2-owned terrain resolver core that accepts concrete terrain landblock work requests, asks `AssetService` for the needed prepared host DTOs, immediately translates host route dependencies into typed runtime identities, and emits terrain mesh/source/material/texture/spatial facts.
+- Added typed missing dependency reporting for surface/render/palette dependencies. Root landblock/material/profile lookup failure still fails the resolver job because there is no meaningful terrain payload without those roots.
+- Added a static resolver worker protocol, postMessage client, and handler. The protocol carries concrete `StaticWorkRequest` records, not camera interest or browser radius state.
+- Kept the runtime default on the fake resolver/baker until the V2 worker host-lookup bridge exists. The Phase 4 resolver is worker-protocol-ready, but the actual browser worker instance still needs a V2 host bridge before it can replace the fake runtime path.
+
+Decisions and course corrections:
+
+- Terrain resolver payloads intentionally do not carry raw host DTOs. Host DTO dependency route strings are consumed at the resolver boundary and converted into typed identities before entering `StaticScopePayload`.
+- The resolver identifies intended prepared texture uses but does not prepare texture bytes yet. Phase 5 owns the bake/texture-manager path that turns prepared texture uses into texture refs, atlas placement, and renderer updates.
+- Local resolver maps may use opaque derived keys internally, but public resolver payload identity remains structured typed data.
+- The worker protocol was introduced before runtime worker construction because the missing piece is not resolver behavior; it is a clean V2 host lookup bridge for worker contexts. Pulling in the old worker bridge remains prohibited.
+
+Debt and follow-up:
+
+- Phase 5 must add the V2 worker host-lookup bridge or equivalent worker-local host adapter before the runtime default can use the terrain resolver for real Tauri-backed data.
+- `StaticCoordinator` still creates atlas snapshots directly from payload texture-use facts. Phase 5/6 must move this to the texture/atlas manager boundary.
+- The terrain resolver currently summarizes mesh geometry facts instead of carrying the full bake-ready terrain mesh. Phase 5 should replace or extend this with exactly the terrain bake input fields needed by the terrain baker.
+- Prepared texture use policy is intentionally conservative (`rgba8`, `retail4`, `srgb` for color/detail and `data` for masks). Phase 5 should validate this against the terrain material/bake requirements before rendering.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run test:ts`
+
 ### Phase 5: Terrain Bake Slice With Minimal Texture Placement
 
 Purpose: render one terrain landblock through the real resolver -> baker -> texture manager -> renderer chain.
@@ -357,6 +388,7 @@ Purpose: render one terrain landblock through the real resolver -> baker -> text
 Deliverables:
 
 - Static bake worker protocol and client.
+- V2 worker host-lookup bridge or worker-local host adapter for static resolver/baker workers, without importing legacy worker bridge modules.
 - Terrain bake adapter for terrain mesh extraction, draw slices, fallback geometry, and terrain shader binding layout.
 - Texture/atlas manager skeleton with logical texture refs, direct-texture-as-degenerate-atlas placement, placement revisions, and renderer placement updates.
 - Bake-local typed texture use identities or handles. Bake inputs/results must not route by host asset strings.

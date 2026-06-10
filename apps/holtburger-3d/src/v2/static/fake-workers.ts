@@ -32,7 +32,9 @@ export class DeferredStaticResolverClient implements StaticResolverClient {
 
 	complete(
 		requestId: string,
-		payload: Partial<Omit<StaticScopePayload, "request">> = {},
+		payload: Partial<Omit<StaticScopePayload, "request" | "scope">> & {
+			readonly scope?: StaticScopePayload["scope"];
+		} = {},
 	): void {
 		const request = this.#pending.find((candidate) => candidate.requestId === requestId);
 		const resolver = this.#resolvers.get(requestId);
@@ -43,8 +45,11 @@ export class DeferredStaticResolverClient implements StaticResolverClient {
 
 		this.#resolvers.delete(requestId);
 		resolver.resolve({
-			referencedTextureKeys: payload.referencedTextureKeys ?? [],
 			request,
+			scope: payload.scope ?? {
+				kind: "placeholder",
+				referencedTextureUses: [],
+			},
 			sourceRevision: payload.sourceRevision ?? request.revision,
 		});
 	}
@@ -115,8 +120,20 @@ export class DeferredStaticBakerClient implements StaticBakerClient {
 export class ImmediateStaticResolverClient implements StaticResolverClient {
 	async resolve(request: StaticWorkRequest): Promise<StaticScopePayload> {
 		return {
-			referencedTextureKeys: [`${request.domain}:placeholder-texture`],
 			request,
+			scope: {
+				kind: "placeholder",
+				referencedTextureUses: [
+					{
+						kind: "prepared-texture-use",
+						colorSpace: "srgb",
+						mipPolicy: "retail4",
+						outputFormat: "rgba8",
+						renderSurfaceId: request.revision,
+						usage: "color",
+					},
+				],
+			},
 			sourceRevision: request.revision,
 		};
 	}
@@ -130,12 +147,12 @@ export class ImmediateStaticBakerClient implements StaticBakerClient {
 
 export function createEmptyAtlasSnapshot(
 	request: StaticWorkRequest,
-	textureKeys: readonly string[],
+	textureUses: DomainAtlasSnapshot["textureUses"],
 ): DomainAtlasSnapshot {
 	return {
 		domain: request.domain,
 		revision: request.revision,
-		textureKeys,
+		textureUses,
 	};
 }
 

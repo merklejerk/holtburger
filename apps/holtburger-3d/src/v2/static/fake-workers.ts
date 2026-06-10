@@ -4,12 +4,17 @@ import type {
 	StaticBakeResult,
 	StaticBakerClient,
 	StaticResolverClient,
+	StaticResolverJob,
 	StaticScopePayload,
-	StaticWorkRequest,
+	ScheduledStaticWork,
 } from "./contracts";
 
 export class DeferredStaticResolverClient implements StaticResolverClient {
-	readonly #pending: StaticWorkRequest[] = [];
+	readonly #pending: {
+		readonly requestId: string;
+		readonly job: StaticResolverJob;
+		readonly revision: number;
+	}[] = [];
 	readonly #resolvers = new Map<
 		string,
 		{
@@ -18,21 +23,28 @@ export class DeferredStaticResolverClient implements StaticResolverClient {
 		}
 	>();
 
-	resolve(request: StaticWorkRequest): Promise<StaticScopePayload> {
-		this.#pending.push(request);
+	resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
+		const revision = this.#pending.length + 1;
+		const requestId = `fake-resolver:${revision}:${describeFakeResolverRequestId(job)}`;
+
+		this.#pending.push({ job, requestId, revision });
 
 		return new Promise((resolve, reject) => {
-			this.#resolvers.set(request.requestId, { reject, resolve });
+			this.#resolvers.set(requestId, { reject, resolve });
 		});
 	}
 
-	get pendingRequests(): readonly StaticWorkRequest[] {
+	get pendingRequests(): readonly {
+		readonly requestId: string;
+		readonly job: StaticResolverJob;
+		readonly revision: number;
+	}[] {
 		return this.#pending;
 	}
 
 	complete(
 		requestId: string,
-		payload: Partial<Omit<StaticScopePayload, "request" | "scope">> & {
+		payload: Partial<Omit<StaticScopePayload, "job" | "scope">> & {
 			readonly scope?: StaticScopePayload["scope"];
 		} = {},
 	): void {
@@ -45,7 +57,7 @@ export class DeferredStaticResolverClient implements StaticResolverClient {
 
 		this.#resolvers.delete(requestId);
 		resolver.resolve({
-			request,
+			job: request.job,
 			scope: payload.scope ?? {
 				kind: "placeholder",
 				referencedTextureUses: [],
@@ -80,7 +92,7 @@ export class DeferredStaticBakerClient implements StaticBakerClient {
 		this.#pending.push(input);
 
 		return new Promise((resolve, reject) => {
-			this.#resolvers.set(input.request.requestId, { reject, resolve });
+			this.#resolvers.set(input.work.workId, { reject, resolve });
 		});
 	}
 
@@ -89,38 +101,79 @@ export class DeferredStaticBakerClient implements StaticBakerClient {
 	}
 
 	complete(
-		requestId: string,
-		result: Partial<Omit<StaticBakeResult, "request">> = {},
+		workId: string,
+		result: Partial<Omit<StaticBakeResult, "work">> = {},
 	): void {
-		const input = this.#pending.find(
-			(candidate) => candidate.request.requestId === requestId,
-		);
-		const resolver = this.#resolvers.get(requestId);
+		const input = this.#pending.find((candidate) => candidate.work.workId === workId);
+		const resolver = this.#resolvers.get(workId);
 
 		if (!input || !resolver) {
-			throw new Error(`No pending bake request exists for ${requestId}.`);
+			throw new Error(`No pending bake work exists for ${workId}.`);
 		}
 
-		this.#resolvers.delete(requestId);
+		this.#resolvers.delete(workId);
 		resolver.resolve(createFakeStaticBakeResult(input, result));
 	}
 
-	fail(requestId: string, error: Error): void {
-		const resolver = this.#resolvers.get(requestId);
+	fail(workId: string, error: Error): void {
+		const resolver = this.#resolvers.get(workId);
 
 		if (!resolver) {
-			throw new Error(`No pending bake request exists for ${requestId}.`);
+			throw new Error(`No pending bake work exists for ${workId}.`);
 		}
 
-		this.#resolvers.delete(requestId);
+		this.#resolvers.delete(workId);
 		resolver.reject(error);
 	}
 }
 
 export class ImmediateStaticResolverClient implements StaticResolverClient {
-	async resolve(request: StaticWorkRequest): Promise<StaticScopePayload> {
+	async resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
+		if (job.domain === "landblock-topology" && job.scope.kind === "landblock") {
+			return {
+				job,
+				scope: {
+					classification: "outdoor",
+					envCells: [],
+					kind: "landblock-topology",
+					landblock: {
+						kind: "landblock-source",
+						landblockId: job.scope.landblockId,
+						source: "topology",
+					},
+					missingRefs: [],
+					portalLinks: [],
+					residencySpatial: {
+						coordinateSpace: "landblock-topology-residency",
+						envCellResidencyBvhItemCount: 0,
+						envCellResidencyBvhNodeCount: 0,
+					},
+				},
+				sourceRevision: createStableFakeRenderSurfaceId(job),
+			};
+		}
+
+		if (job.domain === "dungeon-static" && job.scope.kind === "landblock") {
+			return {
+				job,
+				scope: {
+					classification: "dungeon",
+					envCells: [],
+					kind: "dungeon-static",
+					landblock: {
+						kind: "landblock-source",
+						landblockId: job.scope.landblockId,
+						source: "topology",
+					},
+					missingRefs: [],
+					portalLinks: [],
+				},
+				sourceRevision: createStableFakeRenderSurfaceId(job),
+			};
+		}
+
 		return {
-			request,
+			job,
 			scope: {
 				kind: "placeholder",
 				referencedTextureUses: [
@@ -129,12 +182,12 @@ export class ImmediateStaticResolverClient implements StaticResolverClient {
 						colorSpace: "srgb",
 						mipPolicy: "retail4",
 						outputFormat: "rgba8",
-						renderSurfaceId: request.revision,
+						renderSurfaceId: createStableFakeRenderSurfaceId(job),
 						usage: "color",
 					},
 				],
 			},
-			sourceRevision: request.revision,
+			sourceRevision: createStableFakeRenderSurfaceId(job),
 		};
 	}
 }
@@ -146,31 +199,58 @@ export class ImmediateStaticBakerClient implements StaticBakerClient {
 }
 
 export function createEmptyAtlasSnapshot(
-	request: StaticWorkRequest,
+	work: ScheduledStaticWork,
 	textureUses: DomainAtlasSnapshot["textureUses"],
 ): DomainAtlasSnapshot {
 	return {
-		domain: request.domain,
-		revision: request.revision,
+		domain: work.job.domain,
+		revision: 0,
 		textureUses,
 	};
 }
 
 function createFakeStaticBakeResult(
 	input: StaticBakeInput,
-	result: Partial<Omit<StaticBakeResult, "request">> = {},
+	result: Partial<Omit<StaticBakeResult, "work">> = {},
 ): StaticBakeResult {
 	return {
 		atlasRegistryUpdates: result.atlasRegistryUpdates ?? [],
-		buildRevision: result.buildRevision ?? input.request.revision,
+		buildRevision: result.buildRevision ?? input.payload.sourceRevision,
 		drawUnitIds: result.drawUnitIds ?? [
-			`${input.request.requestId}:fake-draw-unit`,
+			`${input.work.workId}:fake-draw-unit`,
 		],
-		request: input.request,
 		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds ?? [],
 		staticPortalInteriorRecords: result.staticPortalInteriorRecords ?? [],
 		staticSourceMappings: result.staticSourceMappings ?? [],
 		staticSpatialRecords: result.staticSpatialRecords ?? [],
 		staticVisibilityRecords: result.staticVisibilityRecords ?? [],
+		work: input.work,
 	};
+}
+
+function describeFakeResolverRequestId(job: StaticResolverJob): string {
+	return `${describeFakeScope(job.scope)}:${job.domain}`;
+}
+
+function describeFakeScope(scope: StaticResolverJob["scope"]): string {
+	return `landblock:${formatHex32(scope.landblockId)}`;
+}
+
+function createStableFakeRenderSurfaceId(job: StaticResolverJob): number {
+	return hashText(`${describeFakeScope(job.scope)}:${job.domain}`);
+}
+
+function hashText(value: string): number {
+	let hash = 2166136261;
+
+	for (let index = 0; index < value.length; index += 1) {
+		hash ^= value.charCodeAt(index);
+		hash = Math.imul(hash, 16777619);
+	}
+
+	return hash >>> 0;
+}
+
+function formatHex32(value: number): string {
+	return (value >>> 0).toString(16).padStart(8, "0");
 }

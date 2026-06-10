@@ -14,7 +14,7 @@ export async function handleStaticResolverWorkerRequest(
 	}
 
 	try {
-		const payload = await resolver.resolve(message.request);
+		const payload = await resolver.resolve(message.job);
 		postMessage({
 			kind: "static-scope-resolved",
 			payload,

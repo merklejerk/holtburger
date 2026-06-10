@@ -1,7 +1,7 @@
 import type {
+	StaticResolverJob,
 	StaticResolverClient,
 	StaticScopePayload,
-	StaticWorkRequest,
 } from "../contracts";
 import type {
 	StaticResolverWorkerPort,
@@ -16,6 +16,7 @@ interface PendingResolverRequest {
 export class StaticResolverWorkerClient implements StaticResolverClient {
 	readonly #port: StaticResolverWorkerPort;
 	readonly #pending = new Map<string, PendingResolverRequest>();
+	#nextRequestIndex = 0;
 	readonly #onMessage = (
 		event: MessageEvent<StaticResolverWorkerThreadMessage>,
 	): void => {
@@ -27,19 +28,16 @@ export class StaticResolverWorkerClient implements StaticResolverClient {
 		this.#port.addEventListener("message", this.#onMessage);
 	}
 
-	resolve(request: StaticWorkRequest): Promise<StaticScopePayload> {
-		if (this.#pending.has(request.requestId)) {
-			throw new Error(
-				`Static resolver worker already has an in-flight request ${request.requestId}.`,
-			);
-		}
+	resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
+		const requestId = `resolver-job:${this.#nextRequestIndex}`;
+		this.#nextRequestIndex += 1;
 
 		return new Promise((resolve, reject) => {
-			this.#pending.set(request.requestId, { reject, resolve });
+			this.#pending.set(requestId, { reject, resolve });
 			this.#port.postMessage({
+				job,
 				kind: "resolve-static-scope",
-				request,
-				requestId: request.requestId,
+				requestId,
 			});
 		});
 	}

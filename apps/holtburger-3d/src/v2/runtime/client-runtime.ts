@@ -11,13 +11,16 @@ import { StaticCoordinator } from "../static/coordinator/static-coordinator";
 import type {
 	StaticCoordinatorSnapshot,
 	StaticDemand,
-	StaticDomain,
 	StaticLodRadii,
 } from "../static/contracts";
 
+export type ManualStaticDomain = "terrain" | "buildings" | "detail" | "topology";
+
 export interface StaticWorkCommand {
 	readonly landblockId: string;
-	readonly domains: readonly StaticDomain[];
+	readonly domains: readonly ManualStaticDomain[];
+	readonly locationKind?: "outdoor-landblock" | "interior-cell";
+	readonly envCellId?: string;
 }
 
 export interface RuntimeSnapshot {
@@ -179,7 +182,9 @@ function normalizeStaticWorkCommand(command: StaticWorkCommand): StaticWorkComma
 
 	return {
 		domains,
+		envCellId: command.envCellId?.trim(),
 		landblockId: command.landblockId.trim(),
+		locationKind: command.locationKind,
 	};
 }
 
@@ -187,9 +192,20 @@ function createManualStaticDemand(command: StaticWorkCommand): StaticDemand {
 	const lod: StaticLodRadii = {
 		buildings: command.domains.includes("buildings") ? 0 : -1,
 		detail: command.domains.includes("detail") ? 0 : -1,
-		envCells: command.domains.includes("envCells") ? 0 : -1,
 		terrain: command.domains.includes("terrain") ? 0 : -1,
+		topology: command.domains.includes("topology") ? 0 : -1,
 	};
+
+	if (command.locationKind === "interior-cell") {
+		return {
+			location: {
+				envCellId: parseLandblockInput(command.envCellId ?? command.landblockId),
+				kind: "interior-cell",
+				landblockId: parseLandblockInput(command.landblockId),
+			},
+			lod,
+		};
+	}
 
 	return {
 		location: {
@@ -197,7 +213,6 @@ function createManualStaticDemand(command: StaticWorkCommand): StaticDemand {
 			landblockId: parseLandblockInput(command.landblockId),
 		},
 		lod,
-		policyRevision: 1,
 	};
 }
 

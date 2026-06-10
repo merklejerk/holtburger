@@ -12,14 +12,17 @@ describe("V2 static coordinator", () => {
 		const baker = new DeferredStaticBakerClient();
 		const coordinator = new StaticCoordinator({ baker, resolver });
 
-		const [firstRequest] = coordinator.requestStaticDemand(
+		const [firstWork] = coordinator.requestStaticDemand(
 			createSingleTerrainDemand(0xda55ffff),
 		);
-		const [secondRequest] = coordinator.requestStaticDemand(
+		const [secondWork] = coordinator.requestStaticDemand(
 			createSingleTerrainDemand(0xda56ffff),
 		);
+		const firstResolverRequest = resolver.pendingRequests[0];
+		const secondResolverRequest = resolver.pendingRequests[1];
 
-		resolver.complete(firstRequest.requestId);
+		expect(firstWork.job).toEqual(firstResolverRequest?.job);
+		resolver.complete(firstResolverRequest?.requestId ?? "");
 		await flushPromises();
 
 		expect(coordinator.createSnapshot()).toMatchObject({
@@ -28,9 +31,9 @@ describe("V2 static coordinator", () => {
 		});
 		expect(baker.pendingInputs).toHaveLength(0);
 
-		resolver.complete(secondRequest.requestId);
+		resolver.complete(secondResolverRequest?.requestId ?? "");
 		await flushPromises();
-		baker.complete(secondRequest.requestId);
+		baker.complete(secondWork.workId);
 		await flushPromises();
 
 		expect(coordinator.createSnapshot()).toMatchObject({
@@ -45,16 +48,16 @@ describe("V2 static coordinator", () => {
 		const baker = new DeferredStaticBakerClient();
 		const coordinator = new StaticCoordinator({ baker, resolver });
 
-		const [firstRequest] = coordinator.requestStaticDemand(
+		const [firstWork] = coordinator.requestStaticDemand(
 			createSingleTerrainDemand(0xda55ffff),
 		);
-		resolver.complete(firstRequest.requestId);
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
 
 		expect(baker.pendingInputs).toHaveLength(1);
 
 		coordinator.requestStaticDemand(createSingleTerrainDemand(0xda56ffff));
-		baker.complete(firstRequest.requestId);
+		baker.complete(firstWork.workId);
 		await flushPromises();
 
 		expect(coordinator.createSnapshot()).toMatchObject({
@@ -70,14 +73,14 @@ describe("V2 static coordinator", () => {
 
 		coordinator.requestStaticDemand(createSingleTerrainDemand(0xda55ffff));
 
-		expect(coordinator.createSnapshot().activeRequests).toEqual([
+		expect(coordinator.createSnapshot().activeWork).toEqual([
 			{
-				domain: "terrain",
+				domain: "outdoor-terrain",
 				failureMessage: null,
-				requestId: "1:landblock:da55ffff:terrain",
 				revision: 1,
 				scopeKey: "landblock:da55ffff",
 				status: "resolving",
+				workId: "1:landblock:da55ffff:outdoor-terrain",
 			},
 		]);
 		expect(JSON.stringify(coordinator.createSnapshot())).not.toContain("lease");
@@ -93,10 +96,9 @@ function createSingleTerrainDemand(landblockId: number): StaticDemand {
 		lod: {
 			buildings: -1,
 			detail: -1,
-			envCells: -1,
 			terrain: 0,
+			topology: -1,
 		},
-		policyRevision: 1,
 	};
 }
 

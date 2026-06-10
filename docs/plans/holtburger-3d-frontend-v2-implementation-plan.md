@@ -164,7 +164,8 @@ Deliverables:
   - `RuntimeHost`
   - `AssetService`
   - `StaticDemand`
-  - `StaticWorkRequest`
+  - `ScheduledStaticWork`
+  - `StaticResolverJob`
   - `StaticScopePayload`
   - `StaticBakeInput`
   - `StaticBakeResult`
@@ -172,7 +173,7 @@ Deliverables:
   - `TexturePlacementUpdate`
   - `SamplerPolicyUpdate`
   - `FrameState`
-- Runtime-side static demand planner that maps browser/client interest and LB LoD radii into concrete terrain/building/detail/env-cell work requests. Workers still receive only concrete IDs/domains.
+- Runtime-side static demand planner that maps browser/client interest and LB LoD radii into scheduled static work. Resolver workers receive only idempotent `StaticResolverJob` inputs with concrete landblock scope and domain.
 - Static coordinator with request revisioning, cancellation/supersession, and stale-result rejection.
 - Fake resolver and fake baker clients for deterministic tests.
 - Harness projection of runtime facts such as requested, resolving, baking, committed, rendered, and failed.
@@ -358,7 +359,7 @@ Implementation notes:
 - Added closed-union terrain-slice identities for landblock sources, terrain materials, region render profiles, surface textures, render surfaces, prepared texture uses, and palettes.
 - Added a V2-owned terrain resolver core that accepts concrete terrain landblock work requests, asks `AssetService` for the needed prepared host DTOs, immediately translates host route dependencies into typed runtime identities, and emits terrain mesh/source/material/texture/spatial facts.
 - Added typed missing dependency reporting for surface/render/palette dependencies. Root landblock/material/profile lookup failure still fails the resolver job because there is no meaningful terrain payload without those roots.
-- Added a static resolver worker protocol, postMessage client, and handler. The protocol carries concrete `StaticWorkRequest` records, not camera interest or browser radius state.
+- Added a static resolver worker protocol, postMessage client, and handler. The protocol carries concrete `StaticResolverJob` records plus transport-only request ids, not scheduled work envelopes, camera interest, or browser radius state.
 - Kept the runtime default on the fake resolver/baker until the V2 worker host-lookup bridge exists. The Phase 4 resolver is worker-protocol-ready, but the actual browser worker instance still needs a V2 host bridge before it can replace the fake runtime path.
 
 Decisions and course corrections:
@@ -431,6 +432,8 @@ Verification:
 
 ### Phase 5A: Landblock Topology And Dungeon Foundation
 
+Status: complete.
+
 Purpose: correct the early terrain-first bias before bake and renderer contracts harden. Dungeon support is first-class landblock support: a dungeon landblock is still an owning `XXYYFFFF` landblock with `XXYYFFFE` topology and `XXYY0100+` env-cell content, not an unrelated late interior mode.
 
 Deliverables:
@@ -460,9 +463,34 @@ Acceptance criteria:
 Implementation notes:
 
 - This phase is intentionally inserted after Phase 5 because the real terrain resolver wiring is complete but no bake/result/renderer geometry contract has been locked yet.
-- Current V2 already has `revision` and `policyRevision` fields on `StaticWorkRequest`. Treat that as Phase 1 scaffolding to revisit, not as the desired final shape. `revision` is useful as coordinator stale-result correlation; `policyRevision` is not yet justified for resolver jobs.
+- Replaced the old resolver-facing request shape with a coordinator-owned `ScheduledStaticWork` envelope plus an idempotent `StaticResolverJob`. The envelope keeps `workId`, `revision`, and `priority`; resolver clients, workers, and payloads receive only landblock `scope` plus concrete static domain.
+- Corrected `StaticResolverJob.scope` to be landblock-only. Env-cell ids may appear in scene/demand context and topology payload facts, but they are not top-level static resolver job identity.
+- Removed `policyRevision` from V2 static demand/work contracts. Stale async result rejection now stays tied to coordinator request envelopes, while the worker protocol uses transport-only correlation ids.
+- Replaced the generic `envCells` static domain with explicit `landblock-topology` and `dungeon-static` domains. Outdoor terrain/building/detail domains are named as outdoor source families instead of pretending to be universal static concepts.
+- Added typed topology/dungeon payload contracts for landblock classification, env-cell source identity, environment identity, cell-structure identity, portal endpoint/link facts, topology residency spatial facts, and env-cell local spatial facts.
+- Updated demand planning so dungeon/interior demand compiles to one landblock-owned `dungeon-static` job. The current env-cell remains scene/navigation context and does not become resolver job identity.
+- V2 asset preparation already supports `landblock-topology` host payloads. `env-cell` host payload parsing is still not wired into the V2 preparation parser because Phase 5A only needed typed resolver payload contracts and fake shell representation; real env-cell host-backed resolution should be added when the dungeon/topology resolver starts loading those assets.
+- Updated the harness command vocabulary from `envCells` to `topology` and added snapshot slots for topology and dungeon payload summaries.
 - Use existing local evidence as ground truth: ACViewer documents `0xFFFF` landblocks, `0xFFFE` LandblockInfo, and `0x0100+` EnvCells; `holtburger-content` already classifies landblocks as outdoor or dungeon from topology facts; V1 product planning already sends dungeon destinations through a landblock-owned `dungeon-env-cells` product path.
 - Do not build full portal rendering here. The goal is to lay down identities, planning, resolver payload shape, and harness visibility so later geometry and portal phases do not need to unwind outdoor-only assumptions.
+
+Decisions and course corrections:
+
+- Kept `revision` in `StaticCoordinatorSnapshot` and scheduled request status because it is coordinator observability, not resolver semantics.
+- Left real `landblock-topology`/`env-cell` host-backed resolution for a later resolver phase. Building it now would pull geometry/material preparation forward before the Phase 6 bake boundary is settled.
+- The immediate fake resolver now emits topology and dungeon shell payloads for those domains so the coordinator and harness can represent the concepts without Svelte owning topology state.
+
+Debt and follow-up:
+
+- Add a host-backed topology/dungeon resolver that loads `landblock-topology` and then selected/all `env-cell` payloads using the typed contracts from this phase.
+- Add V2 preparation parser support for `env-cell` host routes when the resolver actually consumes env-cell payloads.
+- Add UI affordance for manual interior/dungeon command entry when manual visual verification starts exercising dungeon scenes directly.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 6: Geometry-Only Terrain Bake
 

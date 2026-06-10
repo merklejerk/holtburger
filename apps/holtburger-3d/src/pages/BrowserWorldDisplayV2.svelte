@@ -3,9 +3,9 @@
 	import { createBrowserV2Runtime } from "../v2/browser/create-browser-v2-runtime";
 	import type {
 		ClientRuntime,
+		ManualStaticDomain,
 		RuntimeSnapshot,
 	} from "../v2/runtime/client-runtime";
-	import type { StaticDomain } from "../v2/static/contracts";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let runtime: ClientRuntime | null = $state(null);
@@ -14,7 +14,7 @@
 	let terrainEnabled = $state(true);
 	let buildingsEnabled = $state(false);
 	let detailEnabled = $state(false);
-	let envCellsEnabled = $state(false);
+	let topologyEnabled = $state(false);
 	let snapshot = $state<RuntimeSnapshot | null>(null);
 
 	onMount(() => {
@@ -61,8 +61,8 @@
 		});
 	}
 
-	function selectedDomains(): StaticDomain[] {
-		const domains: StaticDomain[] = [];
+	function selectedDomains(): ManualStaticDomain[] {
+		const domains: ManualStaticDomain[] = [];
 
 		if (terrainEnabled) {
 			domains.push("terrain");
@@ -73,8 +73,8 @@
 		if (detailEnabled) {
 			domains.push("detail");
 		}
-		if (envCellsEnabled) {
-			domains.push("envCells");
+		if (topologyEnabled) {
+			domains.push("topology");
 		}
 
 		return domains;
@@ -121,8 +121,8 @@
 				<span>Detail</span>
 			</label>
 			<label>
-				<input bind:checked={envCellsEnabled} type="checkbox" />
-				<span>Env cells</span>
+				<input bind:checked={topologyEnabled} type="checkbox" />
+				<span>Topology</span>
 			</label>
 		</div>
 
@@ -172,6 +172,39 @@
 			<div>
 				<dt>Resolver failure</dt>
 				<dd>{snapshot?.static.latestResolverFailure?.message ?? "none"}</dd>
+			</div>
+			<div>
+				<dt>Topology payload</dt>
+				<dd>
+					{#if snapshot?.static.latestLandblockTopologyPayload}
+						lb {snapshot.static.latestLandblockTopologyPayload.landblockId
+							.toString(16)
+							.padStart(8, "0")}
+						{snapshot.static.latestLandblockTopologyPayload.classification} cells
+						{snapshot.static.latestLandblockTopologyPayload.envCellCount} visible
+						{snapshot.static.latestLandblockTopologyPayload.visibleCellCount} links
+						{snapshot.static.latestLandblockTopologyPayload.portalLinkCount} missing
+						{snapshot.static.latestLandblockTopologyPayload.missingRefCount}
+					{:else}
+						none
+					{/if}
+				</dd>
+			</div>
+			<div>
+				<dt>Dungeon payload</dt>
+				<dd>
+					{#if snapshot?.static.latestDungeonPayload}
+						lb {snapshot.static.latestDungeonPayload.landblockId
+							.toString(16)
+							.padStart(8, "0")} cells
+						{snapshot.static.latestDungeonPayload.envCellCount} visible
+						{snapshot.static.latestDungeonPayload.visibleCellCount} portals
+						{snapshot.static.latestDungeonPayload.portalCount} missing
+						{snapshot.static.latestDungeonPayload.missingRefCount}
+					{:else}
+						none
+					{/if}
+				</dd>
 			</div>
 			<div>
 				<dt>Host</dt>

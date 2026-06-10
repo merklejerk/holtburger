@@ -1,11 +1,11 @@
 import type { HostAssetKey, PreparedAsset } from "../../assets/contracts";
-import type { StaticScopePayload, StaticWorkRequest } from "../contracts";
+import type { StaticResolverJob, StaticScopePayload } from "../contracts";
 
 export type StaticResolverWorkerMainMessage =
 	| {
 			readonly kind: "resolve-static-scope";
 			readonly requestId: string;
-			readonly request: StaticWorkRequest;
+			readonly job: StaticResolverJob;
 	  }
 	| {
 			readonly kind: "host-asset-lookup-resolved";

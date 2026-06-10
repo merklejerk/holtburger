@@ -6,75 +6,75 @@ import type {
 	StaticDemand,
 	StaticDomain,
 	StaticLodRadii,
-	StaticScope,
-	StaticWorkRequest,
+	StaticResolverJob,
+	StaticResolverScope,
+	ScheduledStaticWork,
 } from "./contracts";
 
 const domainPriorities: Record<StaticDomain, number> = {
-	terrain: 0,
-	buildings: 10,
-	detail: 20,
-	envCells: 30,
+	"outdoor-terrain": 0,
+	"landblock-topology": 5,
+	"outdoor-buildings": 10,
+	"outdoor-detail": 20,
+	"dungeon-static": 0,
 };
 
-export function planStaticWorkRequests(
+export function planScheduledStaticWork(
 	demand: StaticDemand,
 	revision: number,
-): StaticWorkRequest[] {
+): ScheduledStaticWork[] {
 	if (!demand.location) {
 		return [];
 	}
 
 	if (demand.location.kind === "interior-cell") {
+		const landblockId = normalizeOutdoorLandblockId(demand.location.landblockId);
+
 		return [
-			createStaticWorkRequest({
-				domain: "envCells",
-				policyRevision: demand.policyRevision,
-				priority: domainPriorities.envCells,
-				revision,
-				scope: {
-					envCellId: demand.location.envCellId,
-					kind: "env-cell",
-					landblockId: normalizeOutdoorLandblockId(demand.location.landblockId),
+			createScheduledStaticWork({
+				job: {
+					domain: "dungeon-static",
+					scope: {
+						kind: "landblock",
+						landblockId,
+					},
 				},
+				priority: domainPriorities["dungeon-static"],
+				revision,
 			}),
 		];
 	}
 
 	const lod = normalizeOutdoorLodRadii(demand.lod);
 	const landblockId = normalizeOutdoorLandblockId(demand.location.landblockId);
-	const requests: StaticWorkRequest[] = [];
+	const work: ScheduledStaticWork[] = [];
 
-	addOutdoorDomainRequests(requests, {
-		domain: "terrain",
+	addOutdoorDomainRequests(work, {
+		domain: "outdoor-terrain",
 		focusLandblockId: landblockId,
-		policyRevision: demand.policyRevision,
 		radius: lod.terrain,
 		revision,
 	});
-	addOutdoorDomainRequests(requests, {
-		domain: "buildings",
+	addOutdoorDomainRequests(work, {
+		domain: "outdoor-buildings",
 		focusLandblockId: landblockId,
-		policyRevision: demand.policyRevision,
 		radius: lod.buildings,
 		revision,
 	});
-	addOutdoorDomainRequests(requests, {
-		domain: "detail",
+	addOutdoorDomainRequests(work, {
+		domain: "outdoor-detail",
 		focusLandblockId: landblockId,
-		policyRevision: demand.policyRevision,
 		radius: lod.detail,
 		revision,
 	});
-	addOutdoorDomainRequests(requests, {
-		domain: "envCells",
+	addOutdoorDomainRequests(work, {
+		domain: "landblock-topology",
 		focusLandblockId: landblockId,
-		policyRevision: demand.policyRevision,
-		radius: lod.envCells,
+		radius: lod.topology,
 		revision,
 	});
 
-	return requests.sort(compareStaticWorkRequests);
+	return work.sort(compareScheduledStaticWork);
 }
 
 export function normalizeOutdoorLodRadii(lod: StaticLodRadii): StaticLodRadii {
@@ -84,16 +84,15 @@ export function normalizeOutdoorLodRadii(lod: StaticLodRadii): StaticLodRadii {
 		terrain,
 		buildings: Math.min(normalizeRadius(lod.buildings), terrain),
 		detail: Math.min(normalizeRadius(lod.detail), terrain),
-		envCells: Math.min(normalizeRadius(lod.envCells), terrain),
+		topology: Math.min(normalizeRadius(lod.topology), terrain),
 	};
 }
 
 function addOutdoorDomainRequests(
-	requests: StaticWorkRequest[],
+	work: ScheduledStaticWork[],
 	input: {
 		readonly domain: StaticDomain;
 		readonly focusLandblockId: number;
-		readonly policyRevision: number;
 		readonly radius: number;
 		readonly revision: number;
 	},
@@ -106,57 +105,50 @@ function addOutdoorDomainRequests(
 		input.focusLandblockId,
 		input.radius,
 	)) {
-		requests.push(
-			createStaticWorkRequest({
-				domain: input.domain,
-				policyRevision: input.policyRevision,
+		work.push(
+			createScheduledStaticWork({
+				job: {
+					domain: input.domain,
+					scope: {
+						kind: "landblock",
+						landblockId: landblock.landblockId,
+					},
+				},
 				priority: domainPriorities[input.domain] + landblock.distance,
 				revision: input.revision,
-				scope: {
-					kind: "landblock",
-					landblockId: landblock.landblockId,
-				},
 			}),
 		);
 	}
 }
 
-function createStaticWorkRequest(input: {
-	readonly domain: StaticDomain;
-	readonly policyRevision: number;
+function createScheduledStaticWork(input: {
+	readonly job: StaticResolverJob;
 	readonly priority: number;
 	readonly revision: number;
-	readonly scope: StaticScope;
-}): StaticWorkRequest {
-	const scopeKey = describeStaticScopeKey(input.scope);
+}): ScheduledStaticWork {
+	const scopeKey = describeStaticScopeKey(input.job.scope);
 
 	return {
-		domain: input.domain,
-		policyRevision: input.policyRevision,
+		job: input.job,
 		priority: input.priority,
-		requestId: `${input.revision}:${scopeKey}:${input.domain}`,
+		workId: `${input.revision}:${scopeKey}:${input.job.domain}`,
 		revision: input.revision,
-		scope: input.scope,
 	};
 }
 
-export function describeStaticScopeKey(scope: StaticScope): string {
-	if (scope.kind === "env-cell") {
-		return `env-cell:${formatHex32(scope.envCellId)}`;
-	}
-
+export function describeStaticScopeKey(scope: StaticResolverScope): string {
 	return `landblock:${formatHex32(scope.landblockId)}`;
 }
 
-function compareStaticWorkRequests(
-	left: StaticWorkRequest,
-	right: StaticWorkRequest,
+function compareScheduledStaticWork(
+	left: ScheduledStaticWork,
+	right: ScheduledStaticWork,
 ): number {
 	if (left.priority !== right.priority) {
 		return left.priority - right.priority;
 	}
 
-	return left.requestId.localeCompare(right.requestId);
+	return left.workId.localeCompare(right.workId);
 }
 
 function normalizeRadius(value: number): number {

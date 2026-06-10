@@ -7,6 +7,28 @@ export interface FrameState {
 	readonly timeSeconds: number;
 }
 
+export interface StaticResidencyDelta {
+	readonly addedDrawUnitIds: readonly string[];
+	readonly removedDrawUnitIds: readonly string[];
+	readonly revision: number;
+}
+
+export interface DynamicResidencyDelta {
+	readonly addedInstanceIds: readonly string[];
+	readonly removedInstanceIds: readonly string[];
+	readonly revision: number;
+}
+
+export interface TexturePlacementUpdate {
+	readonly textureRefIds: readonly string[];
+	readonly revision: number;
+}
+
+export interface SamplerPolicyUpdate {
+	readonly policyId: string;
+	readonly revision: number;
+}
+
 export interface RendererSnapshot {
 	readonly canvasWidth: number;
 	readonly canvasHeight: number;
@@ -19,6 +41,10 @@ export interface RendererSnapshot {
 export type RendererSnapshotListener = (snapshot: RendererSnapshot) => void;
 
 export interface Renderer {
+	applyStaticDelta(delta: StaticResidencyDelta): void;
+	applyDynamicDelta(delta: DynamicResidencyDelta): void;
+	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void;
+	applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void;
 	updateFrameState(state: FrameState): void;
 	subscribe(listener: RendererSnapshotListener): () => void;
 	dispose(): void;

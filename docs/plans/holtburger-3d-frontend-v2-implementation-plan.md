@@ -145,6 +145,8 @@ Verification:
 
 ### Phase 1: Contracts, Fake Workers, And Stale Result Rules
 
+Status: complete.
+
 Purpose: lock down the control-plane semantics before real asset IO and baking make failures expensive.
 
 Deliverables:
@@ -175,6 +177,37 @@ Acceptance criteria:
 - Harness can request a fake landblock and show the control flow progressing.
 - No real asset dependency walking exists on the render thread.
 - Harness status labels are derived snapshot projections, not required enum names for internal service state.
+
+Implementation notes:
+
+- Added V2 contracts for renderer updates, runtime snapshots, host lookup, asset service lifecycle, static demand, static work requests, resolver payloads, bake inputs, bake results, and static coordinator snapshots.
+- Added a runtime-side static demand planner that clamps outdoor LB LoD radii before creating concrete landblock/domain work requests. Worker requests carry scope/domain/priority/revision/policy only, not camera state or radii.
+- Added a runtime-owned static coordinator with request revisions, supersession by newer demand, resolver scheduling, baker scheduling, and stale resolver/baker result rejection.
+- Added fake immediate and deferred resolver/baker clients so tests and the Phase 1 harness can prove the control flow without host IO or asset walking.
+- Added a small in-memory asset service to prove the lifecycle rule that pending preparation tracks waiters/revisions and prepared-asset leases only exist after commit.
+- Updated the V2 harness to project static coordinator snapshot facts from the runtime instead of inventing Svelte-owned lifecycle state.
+
+Decisions and course corrections:
+
+- The Phase 0 `StaticWorkCommand` shape was kept as a manual harness command, but it now compiles into `StaticDemand` before reaching the static coordinator. This preserves the planned runtime-owned interest-to-request translation without making Svelte speak coordinator internals.
+- Manual domain checkboxes use negative LoD radii as a temporary internal "domain not requested" sentinel before planning. Normal scene-interest LoD behavior still treats `0` as "center landblock", which matches the current LB LoD model.
+- Renderer update methods were added to the contract now, but the WebGL2 renderer implementation intentionally treats them as no-ops until static, dynamic, texture, and sampler residency are real. This avoids inventing fake renderer state just to satisfy Phase 1.
+- The Phase 1 `AssetService` is an in-memory lifecycle proof, not the Phase 2 host-backed service. It exists to pin down waiters/revisions versus leases before host DTO parsing and shared preparation enter the picture.
+- `RuntimeHost` is only a contract in Phase 1. Host availability and Tauri/browser lookup behavior remain Phase 2 work.
+
+Debt and follow-up:
+
+- The static coordinator currently clears active request rows on supersession but keeps cumulative committed/stale counters. Phase 2 or Phase 3 should decide which counters are runtime lifetime metrics, which are current-demand facts, and which belong only in diagnostic snapshots.
+- The harness manual landblock command only represents a single outdoor landblock and selected domains. Real browser/client interest needs a separate command path that carries location plus LB LoD policy without leaking UI controls into runtime contracts.
+- The coordinator currently creates a placeholder atlas snapshot from resolver payload texture keys. Phase 4/5 must replace this with the texture/atlas manager boundary before any real baker output is committed.
+- Static coordinator cancellation is currently logical supersession, not worker cancellation. Real resolver and baker worker clients should add abort/cancel signals once worker protocols exist.
+- The renderer contract includes dynamic and sampler update methods before those services exist. Keep them as contract placeholders only; do not add renderer-side fake state in later phases unless a real consumer arrives.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 2: Shared Asset Service And Host Lookup
 

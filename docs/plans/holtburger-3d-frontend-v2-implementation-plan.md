@@ -104,6 +104,8 @@ apps/holtburger-3d/src/pages/BrowserWorldDisplayV2.svelte
 
 ### Phase 0: V2 Island And Visual Harness
 
+Status: complete.
+
 Purpose: create a safe place to build and verify V2 without entangling it with `WorldDisplay`.
 
 Deliverables:
@@ -124,6 +126,22 @@ Acceptance criteria:
 - Svelte calls runtime commands but does not derive static dependencies, atlas state, or renderer deltas.
 - V2 runtime can be constructed and disposed without Svelte-specific APIs.
 - The V2 harness does not import `WorldDisplay.svelte`, `WorldDisplayRenderer`, `PreparedAssetStore`, or `StaticLandblockRenderArtifactCoordinator`.
+
+Implementation notes:
+
+- Added an isolated Phase 0 island under `apps/holtburger-3d/src/v2/` with runtime, renderer, browser, and reserved service boundaries.
+- Added `/browser-v2` as a route that bypasses legacy scene runtime construction and the legacy Tauri debug-config startup path.
+- Moved legacy `PreparedAssetStore` construction inside the old `/browser` route startup path so `/browser-v2` does not instantiate the old asset store.
+- The Phase 0 renderer only owns WebGL2 context setup, canvas resizing, clear rendering, frame loop, and renderer snapshots. Static work commands are recorded by the runtime but intentionally do not resolve assets, plan atlases, or emit renderer deltas yet.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run test:ts`
+- `rg "WorldDisplay|WorldDisplayRenderer|PreparedAssetStore|StaticLandblockRenderArtifactCoordinator" apps/holtburger-3d/src/v2 apps/holtburger-3d/src/pages/BrowserWorldDisplayV2.svelte` returned no matches.
+- `curl -sS -I http://127.0.0.1:1420/browser-v2` returned `HTTP/1.1 200 OK` when run outside the sandbox against the Vite dev server.
+- Headless Chrome screenshot with SwiftShader showed the V2 harness with `renderer=webgl2`, a populated canvas size, and advancing frame count.
 
 ### Phase 1: Contracts, Fake Workers, And Stale Result Rules
 

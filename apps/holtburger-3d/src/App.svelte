@@ -14,15 +14,17 @@
 	import { readDebugConfig } from "./lib/host/tauri";
 	import { StaticLandblockRenderArtifactCoordinator } from "./lib/world-display/static-landblock-render-artifact-coordinator";
 	import BrowserWorldDisplay from "./pages/BrowserWorldDisplay.svelte";
+	import BrowserWorldDisplayV2 from "./pages/BrowserWorldDisplayV2.svelte";
 
 	const tauriLaunchCommand = "npm run tauri:dev";
 	const currentRoute =
 		typeof window === "undefined" ? "/browser" : window.location.pathname;
 	const isBrowserRoute = currentRoute === "/" || currentRoute === "/browser";
+	const isBrowserV2Route = currentRoute === "/browser-v2";
 	let startupError = $state<string | null>(null);
 	let verboseDiagnostics = false;
 	let sceneResourceRuntime = $state<SceneResourceRuntime | null>(null);
-	const preparedAssetStore = new PreparedAssetStore();
+	let preparedAssetStore = $state<PreparedAssetStore | null>(null);
 	let latestFrontendState = $state(get(frontendState));
 
 	onMount(() => {
@@ -31,17 +33,19 @@
 		}
 
 		const assetChannel = new AssetChannelController();
+		const routePreparedAssetStore = new PreparedAssetStore();
+		preparedAssetStore = routePreparedAssetStore;
 		const sceneStreamer = new SceneAssetStreamingController({
 			assetChannel,
-			preparedAssetResolver: preparedAssetStore.resolver,
+			preparedAssetResolver: routePreparedAssetStore.resolver,
 			markAssetsPending: (requests) =>
 				frontendState.markAssetsPending(requests),
 			applyPreparedAssets: (assets) => {
-				preparedAssetStore.applyPreparedAssets(assets);
+				routePreparedAssetStore.applyPreparedAssets(assets);
 				frontendState.applyPreparedAssets(assets);
 			},
 			applyAssetCachePruneBatch: (prunePlan) => {
-				preparedAssetStore.applyPruneBatch(prunePlan);
+				routePreparedAssetStore.applyPruneBatch(prunePlan);
 			},
 			applyAssetError: (request, message) =>
 				frontendState.applyAssetError(request, message),
@@ -88,6 +92,7 @@
 			browserSceneResourceController.dispose();
 			runtime.dispose();
 			sceneResourceRuntime = null;
+			preparedAssetStore = null;
 			assetChannel.dispose();
 		};
 	});
@@ -110,11 +115,16 @@
 </svelte:head>
 
 <main class="viewer-shell">
-	{#if !isBrowserRoute}
+	{#if isBrowserV2Route}
+		<BrowserWorldDisplayV2 />
+	{:else if !isBrowserRoute}
 		<section class="viewer-unavailable">
 			<p class="kicker">Route Reserved</p>
 			<h1>Client mode is not implemented yet.</h1>
-			<p class="lede">Open /browser to use the standalone scene browser.</p>
+			<p class="lede">
+				Open /browser for the current scene browser or /browser-v2 for the V2
+				harness.
+			</p>
 		</section>
 	{:else if startupError}
 		<section class="viewer-unavailable">
@@ -126,7 +136,7 @@
 			</p>
 			<pre>{tauriLaunchCommand}</pre>
 		</section>
-	{:else if !sceneResourceRuntime}
+	{:else if !sceneResourceRuntime || !preparedAssetStore}
 		<section class="viewer-unavailable">
 			<p class="kicker">Scene Runtime</p>
 			<h1>Preparing scene resources.</h1>

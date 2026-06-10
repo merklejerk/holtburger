@@ -85,9 +85,12 @@ export class TerrainStaticScopeResolver {
 					maxHeight: landblock.terrain.maxHeight,
 					minHeight: landblock.terrain.minHeight,
 					quadCount: landblock.terrain.quads.length,
+					quads: landblock.terrain.quads,
 					tileSize: landblock.terrain.tileSize,
 					triangleCount: landblock.terrain.triangles.length,
+					triangles: landblock.terrain.triangles,
 					vertexCount: landblock.terrain.vertices.length,
+					vertices: landblock.terrain.vertices,
 				},
 				missingRefs: textureUses.missingRefs,
 				regionRenderProfile: {

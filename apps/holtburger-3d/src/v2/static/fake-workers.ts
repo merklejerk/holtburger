@@ -3,6 +3,7 @@ import type {
 	StaticBakeInput,
 	StaticBakeResult,
 	StaticBakerClient,
+	StaticDrawUnit,
 	StaticResolverClient,
 	StaticResolverJob,
 	StaticScopePayload,
@@ -216,15 +217,20 @@ function createFakeStaticBakeResult(
 	return {
 		atlasRegistryUpdates: result.atlasRegistryUpdates ?? [],
 		buildRevision: result.buildRevision ?? input.payload.sourceRevision,
-		drawUnitIds: result.drawUnitIds ?? [
-			`${input.work.workId}:fake-draw-unit`,
-		],
+		drawUnits: result.drawUnits ?? [createPlaceholderDrawUnit(input.work.workId)],
 		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds ?? [],
 		staticPortalInteriorRecords: result.staticPortalInteriorRecords ?? [],
 		staticSourceMappings: result.staticSourceMappings ?? [],
 		staticSpatialRecords: result.staticSpatialRecords ?? [],
 		staticVisibilityRecords: result.staticVisibilityRecords ?? [],
 		work: input.work,
+	};
+}
+
+function createPlaceholderDrawUnit(workId: string): StaticDrawUnit {
+	return {
+		drawUnitId: `${workId}:fake-draw-unit`,
+		kind: "placeholder",
 	};
 }
 

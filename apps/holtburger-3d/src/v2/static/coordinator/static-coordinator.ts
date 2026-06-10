@@ -183,7 +183,7 @@ export class StaticCoordinator {
 
 		status.status = "committed";
 		this.#committed += 1;
-		this.#committedDrawUnits += result.drawUnitIds.length;
+		this.#committedDrawUnits += result.drawUnits.length;
 		this.#emit();
 	}
 

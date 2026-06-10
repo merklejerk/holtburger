@@ -494,6 +494,8 @@ Verification:
 
 ### Phase 6: Geometry-Only Terrain Bake
 
+Status: complete.
+
 Purpose: prove the bake boundary and renderer input shape with real terrain geometry after Phase 5A has made landblock topology and dungeon/env-cell support first-class in the contracts.
 
 Deliverables:
@@ -514,6 +516,21 @@ Acceptance criteria:
 - Static spatial/source records are top-level peers of draw units.
 - The baker uses bake-local identities and build revisions; it does not assign renderer texture refs, GPU IDs, or atlas IDs.
 - Geometry-only bake tests cover at least one multi-triangle landblock fixture and one index-width boundary case.
+
+Implementation notes:
+
+- Expanded `TerrainStaticScopePayload.mesh` from summary counts into bake-ready terrain mesh facts: vertices, triangles, and quads are now carried through the resolver boundary as typed source facts.
+- Replaced the placeholder-only bake result draw-unit identity list with typed `StaticDrawUnit` records. The first concrete variant is `TerrainGeometryStaticDrawUnit`, which contains renderer-facing positions, indices, index type, material family, coordinate space, and source triangle ids.
+- Added a `TerrainGeometryStaticBaker` that consumes only `outdoor-terrain` / `terrain` payloads, emits a texture-free `terrain-debug-flat` draw unit, converts source vertices into V1-compatible render-local coordinates `(x, z, -y)`, and chooses `Uint16Array` vs `Uint32Array` by baked vertex capacity.
+- Added the static bake worker protocol, postMessage client, worker handler, and terrain bake worker entry. The protocol carries `StaticBakeInput` plus a transport-only request id; it does not add resolver job revisions, renderer handles, GPU ids, or atlas ids.
+- Routed Tauri browser-mode terrain baking through the new static bake worker while keeping placeholder domains on the immediate fake baker. Resolver and baker worker lifecycles are disposed independently.
+- Kept topology and dungeon payload variants as first-class peers. The terrain baker rejects non-terrain payloads instead of becoming the default shape for all static domains.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 7: Geometry-Only Terrain Renderer
 
@@ -802,3 +819,4 @@ Mitigation: make static-authored dynamic seeds the first dynamic requirement. Th
 - 2026-06-10: Manual verification is now treated as a milestone property, not a generic harness promise. The first meaningful visual check is geometry-only terrain rendering; resolver status panels are useful for debugging but not proof of rendering.
 - 2026-06-10: Review against ACViewer docs, `holtburger-content` landblock topology assembly, and V1 product planning found that dungeon support must be first-class landblock topology/env-cell support. Phase 5A was inserted before geometry bake so dungeon landblocks do not become a late renderer special case.
 - 2026-06-10: Review of `revision`, `policyRevision`, `resident-now`, and `prefetch` found that they were leaking coordinator scheduling and stale-result machinery into resolver semantics. Phase 5A should simplify resolver-facing jobs to idempotent scope/domain inputs with opaque coordinator-owned correlation.
+- 2026-06-10: V2 browser harness input was corrected to preserve V1-style location semantics: one flexible location field accepts coordinates, landblock prefixes, full landblock ids, and env-cell ids; unambiguous inputs auto-infer outdoor vs dungeon focus, while four-hex landblock prefixes keep the outdoor/dungeon focus toggle. Full non-`FFFF` cell ids always compile to interior-cell demand. This keeps dungeon support first-class before the renderer can draw dungeon geometry.

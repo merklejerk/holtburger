@@ -1,6 +1,13 @@
 <script lang="ts">
 	import { onMount } from "svelte";
 	import { createBrowserV2Runtime } from "../v2/browser/create-browser-v2-runtime";
+	import {
+		createStaticWorkCommandFromLocation,
+		inferV2LandblockInputMode,
+		isV2LandblockPrefixInput,
+		parseV2LocationInput,
+		type V2LandblockInputMode,
+	} from "../v2/browser/location-input";
 	import type {
 		ClientRuntime,
 		ManualStaticDomain,
@@ -10,12 +17,18 @@
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let runtime: ClientRuntime | null = $state(null);
 	let startupError = $state<string | null>(null);
-	let landblockId = $state("0000");
+	let locationInput = $state("0000");
+	let landblockInputMode = $state<V2LandblockInputMode>("outdoor");
 	let terrainEnabled = $state(true);
 	let buildingsEnabled = $state(false);
 	let detailEnabled = $state(false);
 	let topologyEnabled = $state(false);
 	let snapshot = $state<RuntimeSnapshot | null>(null);
+	const parsedLocation = $derived(
+		parseV2LocationInput(locationInput, landblockInputMode),
+	);
+	const parsedIsInterior = $derived(parsedLocation?.kind === "interior-cell");
+	const canToggleLandblockMode = $derived(isV2LandblockPrefixInput(locationInput));
 
 	onMount(() => {
 		if (!canvasElement) {
@@ -51,14 +64,39 @@
 	});
 
 	function requestStaticWork(): void {
-		if (!runtime) {
+		if (!runtime || !parsedLocation) {
 			return;
 		}
 
-		runtime.requestStaticWork({
-			domains: selectedDomains(),
-			landblockId,
-		});
+		runtime.requestStaticWork(
+			createStaticWorkCommandFromLocation(parsedLocation, selectedDomains()),
+		);
+	}
+
+	function handleLocationInput(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		locationInput = input.value;
+		landblockInputMode = inferV2LandblockInputMode(
+			locationInput,
+			landblockInputMode,
+		);
+	}
+
+	function toggleLandblockInputMode(): void {
+		if (!canToggleLandblockMode) {
+			return;
+		}
+
+		landblockInputMode =
+			landblockInputMode === "dungeon" ? "outdoor" : "dungeon";
+	}
+
+	function canRequestStaticWork(): boolean {
+		if (!runtime || !parsedLocation) {
+			return false;
+		}
+
+		return parsedLocation.kind === "interior-cell" || selectedDomains().length > 0;
 	}
 
 	function selectedDomains(): ManualStaticDomain[] {
@@ -103,32 +141,76 @@
 		{/if}
 
 		<label class="browser-v2__field">
-			<span>Landblock</span>
-			<input bind:value={landblockId} autocomplete="off" spellcheck="false" />
+			<span>Location</span>
+			<input
+				autocomplete="off"
+				placeholder="33.50S, 72.80E, 0xda55, or 0xda550123"
+				spellcheck="false"
+				value={locationInput}
+				oninput={handleLocationInput}
+			/>
 		</label>
+
+		<div class="browser-v2__toggles" aria-label="Landblock focus mode">
+			<label>
+				<input
+					checked={landblockInputMode === "outdoor"}
+					disabled={!canToggleLandblockMode}
+					name="browser-v2-landblock-mode"
+					type="radio"
+					onchange={() => {
+						landblockInputMode = "outdoor";
+					}}
+				/>
+				<span>Outdoor</span>
+			</label>
+			<label>
+				<input
+					checked={landblockInputMode === "dungeon"}
+					disabled={!canToggleLandblockMode}
+					name="browser-v2-landblock-mode"
+					type="radio"
+					onchange={() => {
+						landblockInputMode = "dungeon";
+					}}
+				/>
+				<span>Dungeon</span>
+			</label>
+			<button
+				disabled={!canToggleLandblockMode}
+				type="button"
+				onclick={toggleLandblockInputMode}
+			>
+				Toggle
+			</button>
+		</div>
 
 		<div class="browser-v2__toggles" aria-label="Static domains">
 			<label>
-				<input bind:checked={terrainEnabled} type="checkbox" />
+				<input bind:checked={terrainEnabled} disabled={parsedIsInterior} type="checkbox" />
 				<span>Terrain</span>
 			</label>
 			<label>
-				<input bind:checked={buildingsEnabled} type="checkbox" />
+				<input
+					bind:checked={buildingsEnabled}
+					disabled={parsedIsInterior}
+					type="checkbox"
+				/>
 				<span>Buildings</span>
 			</label>
 			<label>
-				<input bind:checked={detailEnabled} type="checkbox" />
+				<input bind:checked={detailEnabled} disabled={parsedIsInterior} type="checkbox" />
 				<span>Detail</span>
 			</label>
 			<label>
-				<input bind:checked={topologyEnabled} type="checkbox" />
+				<input bind:checked={topologyEnabled} disabled={parsedIsInterior} type="checkbox" />
 				<span>Topology</span>
 			</label>
 		</div>
 
 		<button
 			class="browser-v2__request"
-			disabled={!runtime || selectedDomains().length === 0}
+			disabled={!canRequestStaticWork()}
 			type="button"
 			onclick={requestStaticWork}
 		>
@@ -136,6 +218,20 @@
 		</button>
 
 		<dl class="browser-v2__status">
+			<div>
+				<dt>Parsed</dt>
+				<dd>{parsedLocation?.label ?? "invalid"}</dd>
+			</div>
+			<div>
+				<dt>Mode</dt>
+				<dd>
+					{parsedLocation?.kind === "interior-cell"
+						? "interior cell"
+						: parsedLocation?.kind === "outdoor-landblock"
+							? "outdoor landblock"
+							: "unknown"}
+				</dd>
+			</div>
 			<div>
 				<dt>Status</dt>
 				<dd>{snapshot?.status ?? "starting"}</dd>
@@ -241,6 +337,9 @@
 				<dd>
 					{#if snapshot?.lastStaticRequest}
 						{snapshot.lastStaticRequest.landblockId}
+						{#if snapshot.lastStaticRequest.envCellId}
+							/ {snapshot.lastStaticRequest.envCellId}
+						{/if}
 						({snapshot.lastStaticRequest.domains.join(", ")})
 					{:else}
 						none

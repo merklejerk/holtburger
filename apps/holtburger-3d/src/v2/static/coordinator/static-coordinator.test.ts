@@ -3,7 +3,11 @@ import {
 	DeferredStaticBakerClient,
 	DeferredStaticResolverClient,
 } from "../fake-workers";
-import type { StaticDemand } from "../contracts";
+import type {
+	StaticCoordinatorCommitDelta,
+	StaticDemand,
+	StaticDrawUnit,
+} from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
 
 describe("V2 static coordinator", () => {
@@ -85,6 +89,50 @@ describe("V2 static coordinator", () => {
 		]);
 		expect(JSON.stringify(coordinator.createSnapshot())).not.toContain("lease");
 	});
+
+	it("emits committed draw-unit deltas and eviction deltas", async () => {
+		const resolver = new DeferredStaticResolverClient();
+		const baker = new DeferredStaticBakerClient();
+		const coordinator = new StaticCoordinator({ baker, resolver });
+		const deltas: StaticCoordinatorCommitDelta[] = [];
+		coordinator.subscribeCommits((delta) => deltas.push(delta));
+
+		const [work] = coordinator.requestStaticDemand(
+			createSingleTerrainDemand(0xda55ffff),
+		);
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
+		await flushPromises();
+		baker.complete(work.workId, {
+			drawUnits: [createPlaceholderDrawUnit("terrain-a")],
+		});
+		await flushPromises();
+
+		expect(deltas).toEqual([
+			{
+				addedDrawUnits: [createPlaceholderDrawUnit("terrain-a")],
+				removedDrawUnitIds: [],
+				revision: 1,
+			},
+		]);
+		expect(coordinator.createSnapshot().committedDrawUnits).toBe(1);
+
+		coordinator.requestStaticDemand({
+			location: null,
+			lod: {
+				buildings: -1,
+				detail: -1,
+				terrain: -1,
+				topology: -1,
+			},
+		});
+
+		expect(deltas.at(-1)).toEqual({
+			addedDrawUnits: [],
+			removedDrawUnitIds: ["terrain-a"],
+			revision: 2,
+		});
+		expect(coordinator.createSnapshot().committedDrawUnits).toBe(0);
+	});
 });
 
 function createSingleTerrainDemand(landblockId: number): StaticDemand {
@@ -105,4 +153,11 @@ function createSingleTerrainDemand(landblockId: number): StaticDemand {
 async function flushPromises(): Promise<void> {
 	await Promise.resolve();
 	await Promise.resolve();
+}
+
+function createPlaceholderDrawUnit(drawUnitId: string): StaticDrawUnit {
+	return {
+		drawUnitId,
+		kind: "placeholder",
+	};
 }

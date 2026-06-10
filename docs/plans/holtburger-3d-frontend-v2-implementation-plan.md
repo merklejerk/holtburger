@@ -534,6 +534,8 @@ Verification:
 
 ### Phase 7: Geometry-Only Terrain Renderer
 
+Status: complete.
+
 Purpose: make the first real pixels appear by rendering geometry-only terrain from V2 static deltas.
 
 Deliverables:
@@ -552,6 +554,24 @@ Acceptance criteria:
 - Rendering does not route through `WorldDisplay.svelte`, `WorldDisplayRenderer`, `StaticLandblockProductSource`, terrain scene models, or current landblock render product events.
 - The renderer consumes committed static deltas. It does not fetch assets, walk dependencies, plan materials, or allocate bake-local identities.
 - This phase is considered the first meaningful manual visual verification milestone.
+
+Implementation notes:
+
+- Corrected `StaticResidencyDelta` from a draw-unit-id-only placeholder into the actual renderer ingestion contract: added deltas now carry typed `StaticDrawUnit` records, while removal deltas carry draw-unit ids.
+- Added `StaticCoordinator` commit listeners and resident draw-unit tracking. Fresh static demand and explicit empty demand evict resident draw units and emit removal deltas; stale resolver/bake results still do not reach renderer residency.
+- Wired `ClientRuntime` to forward committed static deltas to the renderer and added `evictStaticWork()` for the harness eviction path.
+- Implemented the minimal V2 WebGL2 terrain resource path: `terrain-geometry` draw units upload positions/indices into VAO/VBO/IBO resources, render with a flat debug shader, use depth testing, and dispose GPU buffers on eviction.
+- Added a V2-owned camera/view/projection path using small local matrix helpers. The renderer still does not import `WorldDisplay.svelte`, `WorldDisplayRenderer`, legacy terrain scene models, or render-product events.
+- Added V2 harness controls for request, evict, reset camera, and renderer status counters for static draw units, terrain draw units, and submitted terrain triangles.
+- Added V1-inspired V2 harness tabs and coverage controls. The UI now surfaces outdoor domain coverage distances for terrain, buildings, detail, and topology while keeping dungeon/interior requests single-landblock. These controls are residency radii, not terrain mesh-detail LoD.
+- Added renderer-local terrain placement for coverage rings. Runtime derives per-draw-unit translations from the active outdoor focus landblock; the renderer consumes placements and does not own anchor/rebase policy.
+- Manual visual verification remains a user-run milestone. Automated verification for this phase covers the coordinator-to-runtime-to-renderer static delta path and eviction semantics.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 8: Minimal Texture Manager And Direct Terrain Textures
 

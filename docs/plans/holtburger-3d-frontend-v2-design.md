@@ -445,13 +445,13 @@ The core rule is simple: each layer receives facts from the layer below, adds ex
 ### Design Principles
 
 - Browser UI is a consumer. It does not own asset hydration, baking, renderer lifecycle, or renderer state diffing.
-- Runtime is orchestration. It translates user/client intent into service commands and publishes snapshots, but it does not decode assets, bake geometry, or upload WebGL resources.
+- Runtime is orchestration. It translates user/client intent into service commands and publishes snapshots, but it does not decode assets, bake geometry, or upload WebGL resources. Runtime also owns scene anchoring/rebasing policy: it converts canonical static/dynamic records into renderer-local placements before renderer ingestion.
 - Asset service owns asset identity, cache, in-flight dedupe, shared preparation rules, committed prepared-asset leases, warm retention, and failure/retry semantics. It is a logical owner, not necessarily a dedicated worker boundary.
 - Static coordinator owns landblock-scoped static demand. It expands scene interest into concrete static work requests by landblock/domain and env-cell focus where needed, schedules resolver and baker workers, coordinates domain atlas registry snapshots, and commits completed output.
 - Static scope resolver workers own IO-heavy static source resolution. They resolve concrete static work requests into bakeable payloads by reading/fetching needed source assets, walking static dependencies, identifying referenced textures/surfaces, and producing source spatial facts and static-authored dynamic seeds.
 - Static bake workers own CPU-heavy static baking. They consume resolved static scope payloads plus scoped domain atlas snapshots, then produce static draw-unit bake records, atlas registry updates, and peer static records for spatial, visibility, portal/interior, source-mapping, and dynamic-seed output.
 - Dynamic service owns entity/object render readiness. It hydrates dynamic visual resources and publishes instance state without static landblock baking.
-- Renderer owns GPU residency and drawing. It consumes committed static and dynamic records; it does not fetch host assets, walk dependency closures, or classify AC materials.
+- Renderer owns GPU residency and drawing. It consumes committed static/dynamic placements and frame state; it does not fetch host assets, walk dependency closures, classify AC materials, or choose scene anchors/rebase policy.
 - Diagnostics observe. They do not define required fields in core protocols.
 
 ### Minimal Vocabulary
@@ -467,12 +467,14 @@ The earlier vocabulary table was intentionally expansive. After the research pas
 | Runtime resource identity | Typed internal identity used by resolver payloads, bake inputs/results, texture-manager state, renderer deltas, dynamic records, and source mappings. Discriminants such as `kind` are closed string-literal unions, never arbitrary `string`. | semantic asset ID string, route-derived identity |
 | Opaque cache key | Branded/canonical key derived from a typed runtime identity for local `Map`/cache indexing. It is not accepted as public semantic identity. | string map key, record key |
 | Scene interest | Client demand: location, retention, visibility, quality, and policy. | scene resource interest, browser LOD state, coverage request |
+| Scene anchor | Runtime-owned local-origin policy for mapping canonical landblock/env-cell/world records into renderer-local coordinates. Outdoor anchoring uses a focus landblock and 192-meter landblock offsets; dungeon/interior anchoring uses the owning landblock/env-cell context. | renderer anchor, camera-owned rebase, chunk root policy |
+| Renderer-local placement | Runtime-produced translation/transform attached to renderer residency deltas. It tells the renderer where a static draw unit or dynamic instance lives in the current local scene. It is not source identity and is not resolver/baker input. | chunk root transform, renderer anchor field |
 | Landblock topology | Landblock-owned topology facts from `XXYYFFFE`: classification, env-cell membership, portal/link metadata, restriction facts, and topology spatial hints. Dungeon landblocks are first-class landblock topology packs whose visible static content is env-cell based. | topology sidecar, indoor env-cell discovery, dungeon special case |
 | Static scope | Static world ownership key, usually landblock anchored, with env-cell focus/records inside landblock topology when resolving dungeon or interior content. | landblock product scope, render artifact identity |
 | Static resolver job | Idempotent resolver input: scope plus source domain. It never contains camera state, interest radii, residency labels, scheduling priority, or broad policy revision. Coordinator-owned job ids may wrap resolver jobs for async correlation, but those ids are not resolver semantics. | desired product, desired layer, landblock render product request |
 | Static scope payload | Resolver output for one static work request: resolved source records, material facts, referenced texture keys, source spatial facts, and dynamic seeds. | prepared closure, product roots, companion closure |
 | Static domain | Static rendering/residency domain such as outdoor terrain, landblock topology, env-cell static, outdoor buildings/detail, portal mask, or dungeon env cells. Domains express which landblock-owned source family is being resolved, not whether the landblock is "outdoor" or "dungeon". | landblock render product, bundle kind |
-| Static draw unit | Renderer-ingestible static submission unit: domain, shader family, state, logical texture refs, placement revision assumptions, compacted geometry, and draw slices. | artifact, compacted batch, static bundle layer, material slice |
+| Static draw unit | Renderer-ingestible static submission unit in canonical static-scope coordinates: domain, shader family, state, logical texture refs, placement revision assumptions, compacted geometry, and draw slices. Draw units carry ownership identity; runtime attaches renderer-local placement during commit. | artifact, compacted batch, static bundle layer, material slice |
 | Static spatial record | Static-scope geometry/spatial fact used for culling, picking, inspection, or BVH binding. | spatial hint, local BVH sidecar, BVH item binding |
 | Static visibility record | Static-scope visibility fact for object/cell visibility and renderer visibility structures. | object visibility record, cell visibility record |
 | Static portal/interior record | Static-scope portal, env-cell, structured-interior, aperture, and cell-structure facts. | detailed landblock sidecars, portal links, cell metadata |
@@ -1261,6 +1263,20 @@ The current implementation has three separate BVH/spatial concepts that should s
 
 V2 static deltas should include renderer-ingestible spatial metadata rather than forcing the renderer to pull prepared assets for BVH queries. Resolver workers produce source spatial facts; baker workers produce draw/source mappings and BVH item bindings; the renderer builds and owns the live culling/picking structures from committed deltas.
 
+### Scene Anchoring And Renderer-Local Placement
+
+AC static source data is landblock/env-cell owned, but the renderer should not use global outdoor coordinates directly. The client needs a local origin so nearby landblocks, env cells, dynamics, camera, culling, and picking stay numerically stable and easy to inspect. V1 already proved the useful outdoor rule: a focus/anchor landblock is local origin, neighboring outdoor chunks are translated by `(chunkX - anchorX) * 192` in renderer X and `-(chunkY - anchorY) * 192` in renderer Z.
+
+That rule is domain policy, not WebGL policy:
+
+- Scene interest chooses the focus landblock or current interior/env-cell context.
+- Static coordinator schedules and commits canonical landblock/env-cell-owned output. It should not bake a browser camera anchor into source payloads or static bake results.
+- Runtime owns the active scene anchor and converts committed canonical output into renderer-local placements. When the anchor changes, runtime either rebases existing placements/camera state or evicts and recommits with new placements, depending on the phase and supported workflow.
+- Renderer consumes placements. It may cache uploaded GPU resources using draw-unit/resource identity, but it should not infer landblock offsets, select anchors, or mutate source identities.
+- Picking, culling, debug overlays, BVH bindings, and dynamic instance transforms must use the same renderer-local placement layer so static and dynamic records agree spatially.
+
+Renderer-local placement is therefore a normal residency-delta field: add/replace deltas carry draw units plus placement transforms; remove deltas carry renderer/resource ids. Anchor ids may appear in runtime/debug snapshots, but they should not be accepted by renderer APIs as a policy input.
+
 HBA material audit results from `dats/assets.hba`:
 
 - 6,152 material records: 153 solid, 5,999 textured.
@@ -1309,15 +1325,15 @@ Texture/atlas manager indexes may use opaque/branded canonical string keys inter
 
 The current renderer boundary is too setter-heavy. The replacement should separate long-lived resource residency from frame/update input:
 
-- Residency updates: add/remove/replace static draw units, dynamic resource handles, texture/atlas pages, debug overlays.
+- Residency updates: add/remove/replace static draw-unit placements, dynamic resource handles/placements, texture/atlas pages, debug overlays.
 - Resource policy updates: texture placement revisions, sampler policy revisions, and renderer capability changes that should not require rebaking geometry.
 - Frame/update input: camera, visible domains, frame render policy, selection, dynamic instance transforms/state.
 - Query APIs: picking and resource inspection.
 - Debug APIs: explicit opt-in report capture and texture/page preview.
 
-V2 should use explicit residency deltas plus frame state as the primary renderer contract. A `RenderScene`-like value may still be useful as an inspection snapshot, but not as the normal update mechanism.
+V2 should use explicit residency deltas plus frame state as the primary renderer contract. Static add deltas carry canonical draw units with runtime-produced renderer-local placements; static remove deltas carry draw-unit/resource ids. A `RenderScene`-like value may still be useful as an inspection snapshot, but not as the normal update mechanism.
 
-After static draw units are baked, the renderer only needs landblock knowledge for ownership, transforms, culling/picking metadata, visibility domains, and eviction. It should not resolve landblock dependencies or classify materials.
+After static draw units are baked, the renderer only needs ownership ids for resource/debug association, renderer-local placement transforms for drawing, and spatial metadata for culling/picking. It should not resolve landblock dependencies, classify materials, choose a scene anchor, or derive landblock translations from source ids.
 
 ### Diagnostics And Debug Workflows
 
@@ -1411,7 +1427,7 @@ Mitigation: when semantics are uncertain, verify against ACE, ACViewer, checked-
 - Static scope resolver workers perform IO-heavy source resolution and static dependency walking off the render thread.
 - Static bake workers perform CPU-heavy material/atlas/geometry baking off the render thread.
 - Baker jobs are serialized by domain atlas revision and can parallelize across independent domains.
-- Static landblock draw units are baked before renderer upload and combine logical texture refs, material family, sampler/device state, domain, compacted geometry, and draw slices. Static deltas also carry peer records for spatial, visibility, portal/interior, BVH, and source-mapping facts.
+- Static landblock draw units are baked before renderer upload and combine logical texture refs, material family, sampler/device state, domain, compacted geometry, and draw slices. Runtime attaches renderer-local placements during residency commit. Static deltas also carry peer records for spatial, visibility, portal/interior, BVH, and source-mapping facts.
 - Worker bake output uses bake-local texture-use IDs; texture refs are assigned by the texture/atlas manager during commit and mirrored by the renderer for GPU placement.
 - Opaque string cache keys are allowed only when derived from typed identities; public service/worker/renderer APIs do not accept arbitrary strings as resource identity.
 - Dynamic renderables can enter the render scene without static landblock baking, packed static VAOs, or static landblock atlases.
@@ -1441,3 +1457,4 @@ Mitigation: when semantics are uncertain, verify against ACE, ACViewer, checked-
 - 2026-06-10: Terrain has a dedicated static resolution and baking path. It follows the same ownership chain as other static domains, but terrain-specific mesh, blend/mask/detail, draw-slice, fallback, and BVH rules belong in a terrain bake adapter.
 - 2026-06-10: Draw units bind logical texture refs and placement revisions, not physical atlas pages. Placement changes and sampler policy changes are renderer/resource updates and should not require geometry rebaking.
 - 2026-06-10: Host asset route strings are boundary transport/provenance, not runtime resource identity. Typed identities or runtime-assigned handles are required for resolver payloads, bake outputs, texture manager state, renderer deltas, dynamic records, and source mappings; opaque string cache keys must be derived from typed identities.
+- 2026-06-10: Scene anchoring and landblock rebasing are runtime/domain policy, not renderer policy. Static resolver/baker outputs remain canonical landblock/env-cell-owned records; runtime converts committed draw units and dynamic instances into renderer-local placements before renderer ingestion.

@@ -398,6 +398,12 @@ export interface StaticCoordinatorSnapshot {
 	readonly latestResolverFailure: StaticResolverFailureSnapshot | null;
 }
 
+export interface StaticCoordinatorCommitDelta {
+	readonly addedDrawUnits: readonly StaticDrawUnit[];
+	readonly removedDrawUnitIds: readonly string[];
+	readonly revision: number;
+}
+
 export interface ScheduledStaticWorkStatus {
 	readonly workId: string;
 	readonly revision: number;

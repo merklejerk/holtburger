@@ -4,8 +4,8 @@
 	import type {
 		ClientRuntime,
 		RuntimeSnapshot,
-		StaticDomain,
 	} from "../v2/runtime/client-runtime";
+	import type { StaticDomain } from "../v2/static/contracts";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let runtime: ClientRuntime | null = $state(null);
@@ -139,6 +139,18 @@
 			<div>
 				<dt>Status</dt>
 				<dd>{snapshot?.status ?? "starting"}</dd>
+			</div>
+			<div>
+				<dt>Static</dt>
+				<dd>
+					{#if snapshot}
+						r{snapshot.static.revision} req {snapshot.static.requested} res
+						{snapshot.static.resolving} bake {snapshot.static.baking} commit
+						{snapshot.static.committed}
+					{:else}
+						pending
+					{/if}
+				</dd>
 			</div>
 			<div>
 				<dt>Renderer</dt>

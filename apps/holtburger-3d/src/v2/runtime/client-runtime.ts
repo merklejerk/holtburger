@@ -1,6 +1,16 @@
-import type { FrameState, Renderer, RendererSnapshot } from "../renderer/types";
-
-export type StaticDomain = "terrain" | "buildings" | "detail" | "envCells";
+import type { Renderer, RendererSnapshot } from "../renderer/types";
+import type { FrameState } from "../renderer/types";
+import {
+	ImmediateStaticBakerClient,
+	ImmediateStaticResolverClient,
+} from "../static/fake-workers";
+import { StaticCoordinator } from "../static/coordinator/static-coordinator";
+import type {
+	StaticCoordinatorSnapshot,
+	StaticDemand,
+	StaticDomain,
+	StaticLodRadii,
+} from "../static/contracts";
 
 export interface StaticWorkCommand {
 	readonly landblockId: string;
@@ -8,9 +18,10 @@ export interface StaticWorkCommand {
 }
 
 export interface RuntimeSnapshot {
-	readonly status: "idle" | "static-requested" | "disposed";
+	readonly status: "idle" | "static-active" | "disposed";
 	readonly lastStaticRequest: StaticWorkCommand | null;
 	readonly renderer: RendererSnapshot;
+	readonly static: StaticCoordinatorSnapshot;
 }
 
 export type RuntimeSnapshotListener = (snapshot: RuntimeSnapshot) => void;
@@ -24,24 +35,36 @@ export interface ClientRuntime {
 
 export interface ClientRuntimeOptions {
 	readonly renderer: Renderer;
+	readonly staticCoordinator?: StaticCoordinator;
 }
 
 export function createClientRuntime(
 	options: ClientRuntimeOptions,
 ): ClientRuntime {
-	return new ClientRuntimeImpl(options.renderer);
+	const staticCoordinator =
+		options.staticCoordinator ??
+		new StaticCoordinator({
+			baker: new ImmediateStaticBakerClient(),
+			resolver: new ImmediateStaticResolverClient(),
+		});
+
+	return new ClientRuntimeImpl(options.renderer, staticCoordinator);
 }
 
 class ClientRuntimeImpl implements ClientRuntime {
 	readonly #renderer: Renderer;
+	readonly #staticCoordinator: StaticCoordinator;
 	readonly #listeners = new Set<RuntimeSnapshotListener>();
 	readonly #unsubscribeRenderer: () => void;
+	readonly #unsubscribeStaticCoordinator: () => void;
 	#lastRendererSnapshot: RendererSnapshot;
+	#lastStaticSnapshot: StaticCoordinatorSnapshot;
 	#lastStaticRequest: StaticWorkCommand | null = null;
 	#disposed = false;
 
-	constructor(renderer: Renderer) {
+	constructor(renderer: Renderer, staticCoordinator: StaticCoordinator) {
 		this.#renderer = renderer;
+		this.#staticCoordinator = staticCoordinator;
 		this.#lastRendererSnapshot = {
 			backend: "webgl2",
 			canvasWidth: 0,
@@ -50,8 +73,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 			frameCount: 0,
 			isRunning: true,
 		};
+		this.#lastStaticSnapshot = staticCoordinator.createSnapshot();
 		this.#unsubscribeRenderer = renderer.subscribe((snapshot) => {
 			this.#lastRendererSnapshot = snapshot;
+			this.#emit();
+		});
+		this.#unsubscribeStaticCoordinator = staticCoordinator.subscribe((snapshot) => {
+			this.#lastStaticSnapshot = snapshot;
 			this.#emit();
 		});
 	}
@@ -59,6 +87,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 	requestStaticWork(command: StaticWorkCommand): void {
 		this.#assertActive();
 		this.#lastStaticRequest = normalizeStaticWorkCommand(command);
+		this.#staticCoordinator.requestStaticDemand(
+			createManualStaticDemand(this.#lastStaticRequest),
+		);
 		this.#emit();
 	}
 
@@ -83,6 +114,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 		this.#disposed = true;
 		this.#unsubscribeRenderer();
+		this.#unsubscribeStaticCoordinator();
+		this.#staticCoordinator.dispose();
 		this.#renderer.dispose();
 		this.#emit();
 		this.#listeners.clear();
@@ -98,10 +131,11 @@ class ClientRuntimeImpl implements ClientRuntime {
 		return {
 			lastStaticRequest: this.#lastStaticRequest,
 			renderer: this.#lastRendererSnapshot,
+			static: this.#lastStaticSnapshot,
 			status: this.#disposed
 				? "disposed"
-				: this.#lastStaticRequest
-					? "static-requested"
+				: this.#lastStaticSnapshot.requested > 0
+					? "static-active"
 					: "idle",
 		};
 	}
@@ -122,4 +156,34 @@ function normalizeStaticWorkCommand(command: StaticWorkCommand): StaticWorkComma
 		domains,
 		landblockId: command.landblockId.trim(),
 	};
+}
+
+function createManualStaticDemand(command: StaticWorkCommand): StaticDemand {
+	const lod: StaticLodRadii = {
+		buildings: command.domains.includes("buildings") ? 0 : -1,
+		detail: command.domains.includes("detail") ? 0 : -1,
+		envCells: command.domains.includes("envCells") ? 0 : -1,
+		terrain: command.domains.includes("terrain") ? 0 : -1,
+	};
+
+	return {
+		location: {
+			kind: "outdoor-landblock",
+			landblockId: parseLandblockInput(command.landblockId),
+		},
+		lod,
+		policyRevision: 1,
+	};
+}
+
+function parseLandblockInput(value: string): number {
+	const trimmed = value.trim();
+	const normalized = trimmed.startsWith("0x") ? trimmed.slice(2) : trimmed;
+	const parsed = Number.parseInt(normalized, 16);
+
+	if (!Number.isFinite(parsed)) {
+		throw new Error(`Invalid landblock id: ${value}`);
+	}
+
+	return parsed >>> 0;
 }

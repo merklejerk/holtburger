@@ -45,6 +45,22 @@ class Webgl2Renderer implements Renderer {
 		this.#startFrameLoop();
 	}
 
+	applyStaticDelta(): void {
+		// Phase 1 establishes the imperative renderer seam before static GPU upload exists.
+	}
+
+	applyDynamicDelta(): void {
+		// Dynamic renderer residency starts after static pipeline contracts are proven.
+	}
+
+	applyTexturePlacementUpdate(): void {
+		// Texture placement mirroring starts when the texture/atlas manager lands.
+	}
+
+	applySamplerPolicyUpdate(): void {
+		// Sampler policy changes are part of the renderer contract, not Phase 1 behavior.
+	}
+
 	updateFrameState(state: FrameState): void {
 		this.#frameState = state;
 	}

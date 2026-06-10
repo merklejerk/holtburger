@@ -156,12 +156,45 @@ export type StaticTextureUseIdentity =
 export interface TerrainMeshSourceFacts {
 	readonly gridSize: number;
 	readonly tileSize: number;
+	readonly vertices: readonly TerrainMeshVertexFacts[];
+	readonly triangles: readonly TerrainMeshTriangleFacts[];
+	readonly quads: readonly TerrainMeshQuadFacts[];
 	readonly vertexCount: number;
 	readonly triangleCount: number;
 	readonly quadCount: number;
 	readonly minHeight: number;
 	readonly maxHeight: number;
 	readonly bounds: StaticBounds | null;
+}
+
+export interface TerrainMeshVertexFacts {
+	readonly x: number;
+	readonly y: number;
+	readonly z: number;
+}
+
+export interface TerrainMeshTriangleFacts {
+	readonly terrainTriangleId: string;
+	readonly quadIndex: number;
+	readonly triangleInQuad: 0 | 1;
+	readonly vertexIndices: readonly [number, number, number];
+	readonly averageHeight: number;
+	readonly bounds: StaticBounds;
+}
+
+export interface TerrainMeshQuadFacts {
+	readonly terrainQuadId: string;
+	readonly row: number;
+	readonly col: number;
+	readonly quadIndex: number;
+	readonly sourceTerrainIndices: readonly [number, number, number, number];
+	readonly vertexIndices: readonly [number, number, number, number];
+	readonly triangleIndices: readonly [number, number];
+	readonly diagonal: "southwest-northeast" | "southeast-northwest";
+	readonly cornerTerrainCodes: readonly [number, number, number, number];
+	readonly pcode: number;
+	readonly averageHeight: number;
+	readonly bounds: StaticBounds;
 }
 
 export interface StaticBounds {
@@ -308,7 +341,7 @@ export interface StaticBakeInput {
 
 export interface StaticBakeResult {
 	readonly work: ScheduledStaticWork;
-	readonly drawUnitIds: readonly string[];
+	readonly drawUnits: readonly StaticDrawUnit[];
 	readonly atlasRegistryUpdates: readonly string[];
 	readonly staticSpatialRecords: readonly string[];
 	readonly staticVisibilityRecords: readonly string[];
@@ -316,6 +349,28 @@ export interface StaticBakeResult {
 	readonly staticSourceMappings: readonly string[];
 	readonly staticAuthoredDynamicSeeds: readonly string[];
 	readonly buildRevision: number;
+}
+
+export type StaticDrawUnit = TerrainGeometryStaticDrawUnit | PlaceholderStaticDrawUnit;
+
+export interface PlaceholderStaticDrawUnit {
+	readonly kind: "placeholder";
+	readonly drawUnitId: string;
+}
+
+export interface TerrainGeometryStaticDrawUnit {
+	readonly kind: "terrain-geometry";
+	readonly drawUnitId: string;
+	readonly landblockId: number;
+	readonly domain: "outdoor-terrain";
+	readonly materialFamily: "terrain-debug-flat";
+	readonly coordinateSpace: "landblock-render-local";
+	readonly positions: Float32Array;
+	readonly indices: Uint16Array | Uint32Array;
+	readonly indexType: "uint16" | "uint32";
+	readonly vertexCount: number;
+	readonly triangleCount: number;
+	readonly sourceTriangleIds: readonly string[];
 }
 
 export interface StaticResolverClient {

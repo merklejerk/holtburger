@@ -207,7 +207,7 @@ Debt and follow-up:
 
 - The static coordinator currently clears active request rows on supersession but keeps cumulative committed/stale counters. Phase 2 or Phase 3 should decide which counters are runtime lifetime metrics, which are current-demand facts, and which belong only in diagnostic snapshots.
 - The harness manual landblock command only represents a single outdoor landblock and selected domains. Real browser/client interest needs a separate command path that carries location plus LB LoD policy without leaking UI controls into runtime contracts.
-- The coordinator currently creates a placeholder atlas snapshot from resolver payload texture keys. Phase 5/6 must replace this with the texture/atlas manager boundary before any real baker output is committed.
+- The coordinator currently creates a placeholder atlas snapshot from resolver payload texture-use facts. Phases 8/9 must replace this with the texture/atlas manager boundary before textured baker output is committed.
 - Static coordinator cancellation is currently logical supersession, not worker cancellation. Real resolver and baker worker clients should add abort/cancel signals once worker protocols exist.
 - The renderer contract includes dynamic and sampler update methods before those services exist. Keep them as contract placeholders only; do not add renderer-side fake state in later phases unless a real consumer arrives.
 
@@ -335,7 +335,7 @@ Deliverables:
 
 - Static scope resolver worker protocol and client.
 - Terrain resolver adapter for one concrete landblock terrain request.
-- Payload records for terrain mesh source facts, terrain texture keys, masks/detail facts, and source spatial facts.
+- Payload records for terrain mesh source facts, typed terrain texture-use facts, masks/detail facts, and source spatial facts.
 - Typed closed-union runtime identities for terrain-slice resolver payloads, including landblock source identity, terrain material identity, region render profile identity, surface texture identity, render surface identity, prepared texture use identity, and palette identity.
 - Translation from host DTO route strings into typed runtime identities before data enters resolver payloads or bake inputs.
 - Coordinator scheduling from concrete landblock/domain requests to resolver jobs.
@@ -364,16 +364,16 @@ Implementation notes:
 Decisions and course corrections:
 
 - Terrain resolver payloads intentionally do not carry raw host DTOs. Host DTO dependency route strings are consumed at the resolver boundary and converted into typed identities before entering `StaticScopePayload`.
-- The resolver identifies intended prepared texture uses but does not prepare texture bytes yet. Phase 5 owns the bake/texture-manager path that turns prepared texture uses into texture refs, atlas placement, and renderer updates.
+- The resolver identifies intended prepared texture uses but does not prepare texture bytes yet. Phases 6, 8, and 10 own the bake, texture-manager, and terrain-material paths that turn prepared texture uses into draw units, texture refs, placement, and renderer updates.
 - Local resolver maps may use opaque derived keys internally, but public resolver payload identity remains structured typed data.
 - The worker protocol was introduced before runtime worker construction because the missing piece is not resolver behavior; it is a clean V2 host lookup bridge for worker contexts. Pulling in the old worker bridge remains prohibited.
 
 Debt and follow-up:
 
 - Phase 5 must add the V2 worker host-lookup bridge or equivalent worker-local host adapter before the runtime default can use the terrain resolver for real Tauri-backed data.
-- `StaticCoordinator` still creates atlas snapshots directly from payload texture-use facts. Phase 5/6 must move this to the texture/atlas manager boundary.
-- The terrain resolver currently summarizes mesh geometry facts instead of carrying the full bake-ready terrain mesh. Phase 5 should replace or extend this with exactly the terrain bake input fields needed by the terrain baker.
-- Prepared texture use policy is intentionally conservative (`rgba8`, `retail4`, `srgb` for color/detail and `data` for masks). Phase 5 should validate this against the terrain material/bake requirements before rendering.
+- `StaticCoordinator` still creates atlas snapshots directly from payload texture-use facts. Phases 8 and 9 must move this to the texture/atlas manager boundary.
+- The terrain resolver currently summarizes mesh geometry facts instead of carrying the full bake-ready terrain mesh. Phase 6 should replace or extend this with exactly the terrain bake input fields needed by the terrain baker.
+- Prepared texture use policy is intentionally conservative (`rgba8`, `retail4`, `srgb` for color/detail and `data` for masks). Phases 8 and 10 should validate this against texture upload and terrain material requirements before treating textured terrain as credible.
 
 Verification:
 
@@ -381,36 +381,97 @@ Verification:
 - `cd apps/holtburger-3d && npm run lint:ts`
 - `cd apps/holtburger-3d && npm run test:ts`
 
-### Phase 5: Terrain Bake Slice With Minimal Texture Placement
+### Phase 5: Real Terrain Resolver Wiring
 
-Purpose: render one terrain landblock through the real resolver -> baker -> texture manager -> renderer chain.
+Purpose: replace the fake resolver path with the real terrain resolver for one concrete landblock, while keeping baking/rendering out of scope.
+
+Deliverables:
+
+- V2 worker host-lookup bridge or worker-local host adapter for static resolver workers, without importing legacy worker bridge modules.
+- Browser worker construction for the static scope resolver protocol introduced in Phase 4.
+- Runtime composition that uses the real terrain resolver for terrain landblock requests when a Tauri host is available, and keeps the fake resolver only as a plain-browser fallback.
+- Harness-visible resolver output summary for the latest terrain payload: landblock, region, mesh counts, texture-use counts, and typed missing refs.
+- Explicit resolver failure surfacing in runtime snapshots.
+
+Acceptance criteria:
+
+- `Request Static Scope` for terrain performs real host lookup and terrain dependency resolution off the render thread in Tauri mode.
+- The harness can manually verify real scene data exists before rendering by showing non-fake mesh/material/texture-use counts for the requested landblock.
+- Plain Vite still launches `/browser-v2` without Tauri and reports host/resolver unavailability honestly.
+- No V2 code imports legacy worker bridge, asset worker, world-display renderer, prepared store, or landblock render-product modules.
+- Resolver payloads and runtime snapshots do not use host route strings as semantic identity.
+
+### Phase 6: Geometry-Only Terrain Bake
+
+Purpose: prove the bake boundary and renderer input shape with real terrain geometry before texture placement enters the picture.
 
 Deliverables:
 
 - Static bake worker protocol and client.
-- V2 worker host-lookup bridge or worker-local host adapter for static resolver/baker workers, without importing legacy worker bridge modules.
-- Terrain bake adapter for terrain mesh extraction, draw slices, fallback geometry, and terrain shader binding layout.
-- Texture/atlas manager skeleton with logical texture refs, direct-texture-as-degenerate-atlas placement, placement revisions, and renderer placement updates.
-- Bake-local typed texture use identities or handles. Bake inputs/results must not route by host asset strings.
-- Fresh minimal V2 WebGL2 renderer path that consumes `applyStaticDelta`, `applyTexturePlacementUpdate`, `applySamplerPolicyUpdate`, and `updateFrameState`.
-- Targeted read-only audit for low-level math, camera, and GL helper behavior from `src/lib/world-display`. Any useful leaf helper must be moved or copied into a V2-owned or neutral module before V2 imports it.
+- Terrain bake adapter that consumes `TerrainStaticScopePayload` and emits geometry-only terrain draw units.
+- Terrain bake input records carrying the full terrain mesh facts needed for baking, not just Phase 4 summary counts.
+- Minimal static bake result shape for draw units, spatial records, source mappings, and build revision.
+- Geometry-only terrain material family, intentionally flat/debug-colored and texture-free.
+- Static coordinator path from real terrain resolver payload to terrain bake result, still without texture/atlas manager participation.
+- Tests for terrain mesh conversion, coordinate conversion, index-buffer type selection, draw-unit identity shape, and stale bake result rejection.
 
 Acceptance criteria:
 
-- The V2 harness renders one terrain landblock with real source data.
-- The renderer receives texture refs and placement updates rather than prepared asset resolvers.
-- Baker output uses bake-local texture uses; texture refs are assigned only during texture/atlas manager commit.
-- Geometry rebake is not required for a placement-table-only update.
-- V2 rendering does not route through `WorldDisplay.svelte`, `WorldDisplayRenderer`, `StaticLandblockProductSource`, or current landblock render product events.
-- Bake inputs/results, draw units, source mappings, and renderer deltas do not carry host route strings as semantic identity.
+- A terrain bake result can be produced from real terrain resolver output without consulting Svelte, renderer state, or host route strings.
+- Draw units contain renderer-facing geometry and material-family data, not old render-product artifacts.
+- Static spatial/source records are top-level peers of draw units.
+- The baker uses bake-local identities and build revisions; it does not assign renderer texture refs, GPU IDs, or atlas IDs.
+- Geometry-only bake tests cover at least one multi-triangle landblock fixture and one index-width boundary case.
 
-### Phase 6: Domain Atlas Sharing And Revisions
+### Phase 7: Geometry-Only Terrain Renderer
 
-Purpose: make atlas lifecycle correct before adding more static content.
+Purpose: make the first real pixels appear by rendering geometry-only terrain from V2 static deltas.
 
 Deliverables:
 
-- Domain atlas registry snapshots scoped to referenced texture keys.
+- Minimal V2 WebGL2 static draw-unit resource path for terrain geometry.
+- `applyStaticDelta` implementation for adding/removing geometry-only terrain scopes.
+- Camera/view/projection path sufficient to inspect one outdoor landblock.
+- Basic depth test, clear, viewport resize, and one flat/debug terrain shader.
+- Harness controls for request, evict, reset camera, and render status.
+- Targeted read-only audit for low-level math/camera/GL helper behavior from `src/lib/world-display`. Useful leaf logic must be copied into V2-owned or neutral modules before V2 imports it.
+
+Acceptance criteria:
+
+- The V2 harness renders one requested landblock as real terrain geometry with a flat/debug material.
+- Pressing request/evict visibly adds/removes the terrain without refreshing the page.
+- Rendering does not route through `WorldDisplay.svelte`, `WorldDisplayRenderer`, `StaticLandblockProductSource`, terrain scene models, or current landblock render product events.
+- The renderer consumes committed static deltas. It does not fetch assets, walk dependencies, plan materials, or allocate bake-local identities.
+- This phase is considered the first meaningful manual visual verification milestone.
+
+### Phase 8: Minimal Texture Manager And Direct Terrain Textures
+
+Purpose: add the real texture/ref ownership seam using direct-texture-as-degenerate-atlas placement before any atlas sharing or repacking.
+
+Deliverables:
+
+- Texture manager skeleton with runtime-owned logical texture refs, placement table, placement revisions, and renderer placement updates.
+- Direct terrain texture placement for terrain color/mask/detail uses; each direct texture behaves as a degenerate atlas rect.
+- Texture upload data path for the prepared/render-surface formats needed by the first terrain landblock.
+- Terrain bake output that references bake-local texture uses; texture refs are assigned only when the texture manager commits the bake result.
+- Renderer support for `applyTexturePlacementUpdate`, `applySamplerPolicyUpdate`, and terrain shader bindings for direct placements.
+- Tests proving geometry does not rebake when only placement-table state changes.
+
+Acceptance criteria:
+
+- The V2 harness renders one terrain landblock with real terrain textures through texture-manager-owned refs.
+- Baker output does not contain renderer texture refs, GPU IDs, or host route strings.
+- Renderer texture placement updates are independent from static geometry deltas.
+- Direct texture placement and texture ref lifetime are owned by the runtime texture manager, not the renderer and not Svelte.
+- Unsupported texture formats fail explicitly with typed reasons rather than silently falling back to fake colors.
+
+### Phase 9: Domain Atlas Sharing And Revisions
+
+Purpose: make atlas lifecycle correct after direct texture placement is proven and before broad static enrichment increases texture pressure.
+
+Deliverables:
+
+- Domain atlas registry snapshots scoped to referenced typed texture uses.
 - Baker support for consuming scoped snapshots and emitting new or revised domain atlas registry records.
 - Texture/atlas manager commit/reject/rebase rules for atlas updates.
 - Placement revision assumptions on static draw units.
@@ -426,16 +487,35 @@ Acceptance criteria:
 - Renderer texture placement updates remain separate from static geometry deltas.
 - Atlas and texture manager state use typed identities, runtime-assigned handles, or opaque/branded cache keys derived from typed identities, not host route strings.
 
-### Phase 7: Static Object Enrichment
+### Phase 10: Terrain Material Parity
 
-Purpose: add non-terrain static content only after the terrain and atlas seams are proven.
+Purpose: close the gap between "textured terrain appears" and "terrain material behavior is credible enough to build on."
 
 Deliverables:
 
-- Resolver support for static object/building/detail dependencies.
-- Typed runtime identity variants for any new static object asset families this phase introduces.
-- Material-family classification in the baker.
-- Static draw units for compatible shader family, sampler state, binding layout, device state, domain, and compacted geometry.
+- V2 terrain pcode decoding and layer selection based on the rules currently evidenced by `terrain-blend-plan.ts`.
+- Terrain draw-slice planning for the material/shader layer limit.
+- Terrain color, alpha mask, road, and detail texture roles represented as typed bake-local texture uses.
+- Terrain shader/material-family rules for the first credible terrain material path.
+- Tests for pcode decoding, alpha/road selector rotation, layer slicing, and texture role classification.
+
+Acceptance criteria:
+
+- Terrain material output is driven by typed material-family classification, not route-string diagnostics or renderer-side prepared-asset reads.
+- Terrain draw units bucket by compatible shader, sampler bindings, sampler state, device state, domain, and texture placement assumptions.
+- Terrain can fall back deliberately for unsupported material cases with visible/typed reasons.
+- V2 tests cover the pcode/layer cases that v1 currently encoded in terrain blend and tile planning.
+
+### Phase 11: Static Object First Slice
+
+Purpose: add one narrow non-terrain outdoor static-object slice after terrain, texture refs, and material-family seams are proven.
+
+Deliverables:
+
+- Resolver support for the smallest useful outdoor static-object dependency set.
+- Typed runtime identity variants for the new static object asset families this phase introduces.
+- Static object material-family classifier for the first supported material families only.
+- Static object geometry bake into draw units using the same renderer delta path as terrain.
 - Static spatial records and source mappings as top-level bake result fields.
 - Picking/inspection source mapping for rendered static objects.
 
@@ -447,9 +527,28 @@ Acceptance criteria:
 - Material-family rules are expressed as code-owned classifiers, not stringly diagnostics.
 - New static object identities are typed closed-union variants; no generic string fallback is introduced.
 
-### Phase 8: Env Cells, Interiors, Portals, And Visibility Records
+### Phase 12: Static Object Breadth And Compaction
 
-Purpose: bring over the indoor/static visibility requirements without folding them into a generic draw-unit blob.
+Purpose: broaden static object coverage only after the first object slice proves the shared draw-unit path.
+
+Deliverables:
+
+- Additional static object/building/detail asset-family support as needed by selected verification landblocks.
+- Draw-unit batching/compaction by compatible shader family, sampler bindings, sampler state, device state, domain, and placement revision assumptions.
+- Static BVH/spatial record integration for terrain and static objects.
+- Lease accounting from resident static draw units to texture refs/placements.
+- Tests around material-family eligibility, compaction boundaries, eviction, and source mapping.
+
+Acceptance criteria:
+
+- Multiple static object material families can coexist without creating non-isomorphic renderer paths.
+- Compaction is a bake concern and does not require renderer-side asset dependency knowledge.
+- Removing a static scope releases geometry and texture placement leases.
+- Static object enrichment remains independent from Svelte state and browser UX policy.
+
+### Phase 13: Env Cells, Interiors, Portals, And Visibility Records
+
+Purpose: bring over indoor/static visibility requirements without folding them into a generic draw-unit blob.
 
 Deliverables:
 
@@ -457,7 +556,7 @@ Deliverables:
 - Resolver and baker support for structured interiors and portal masks.
 - Static visibility records.
 - Static portal/interior records.
-- Renderer support for applying/removing these records independently from terrain.
+- Renderer support for applying/removing these records independently from terrain/object geometry.
 - Targeted visual harness controls for env-cell/domain loading.
 
 Acceptance criteria:
@@ -466,7 +565,7 @@ Acceptance criteria:
 - Visibility records can update culling/visibility structures independently of texture placement updates.
 - Static BVH/spatial records are committed alongside other peer static result fields.
 
-### Phase 9: Static-Authored Dynamic Seeds
+### Phase 14: Static-Authored Dynamic Seeds
 
 Purpose: start the dynamic path from real static-authored animation needs rather than abstract future creature rendering.
 
@@ -483,7 +582,7 @@ Acceptance criteria:
 - Dynamic service owns animation/resource/instance state.
 - Static coordinator owns only the seed lifetime relationship to the static scope.
 
-### Phase 10: Browser UX Cutover And Legacy Removal
+### Phase 15: Browser UX Cutover And Legacy Removal
 
 Purpose: replace the old browser world display only after V2 can carry the important behavior.
 
@@ -514,6 +613,14 @@ The V2 harness should always provide:
 - A way to request, supersede, and evict scopes.
 - A way to inspect the latest runtime snapshot and selected renderer object once picking exists.
 
+Manual verification milestones should be explicit:
+
+- Phase 5: real Tauri-backed resolver data is visible as payload facts, not fake status churn.
+- Phase 7: first meaningful visual milestone, one real landblock renders as flat/debug terrain geometry.
+- Phase 8: one real landblock renders with direct terrain textures through texture-manager-owned refs.
+- Phase 10: terrain material behavior is credible enough to compare against v1 terrain blend/layer behavior.
+- Phase 11 and later: static enrichment, picking, interiors, and dynamic seeds become visually inspectable one slice at a time.
+
 The harness should not:
 
 - Hold authoritative asset lifecycle state.
@@ -539,7 +646,11 @@ Mitigation: design the terrain resolver payload and terrain bake input together.
 
 Risk: atlas sharing delays first visible rendering.
 
-Mitigation: Phase 5 may use direct-texture-as-degenerate-atlas placement for one landblock, but the ownership model must already be the real one: logical texture refs owned by the texture/atlas manager and placement updates mirrored by the renderer.
+Mitigation: Phase 8 uses direct-texture-as-degenerate-atlas placement for one landblock, and Phase 9 handles shared atlas revisions only after direct placement works. The ownership model must already be the real one in Phase 8: logical texture refs owned by the texture manager and placement updates mirrored by the renderer.
+
+Risk: first visible rendering gets blocked by material parity.
+
+Mitigation: Phase 7 intentionally renders geometry-only terrain. Phase 8 adds direct textures. Phase 10 then closes material parity. Do not require terrain pcode/layer/material completeness before proving geometry submission.
 
 Risk: terrain-specific behavior leaks into generic static structures.
 
@@ -584,3 +695,5 @@ Mitigation: make static-authored dynamic seeds the first dynamic requirement. Th
 - 2026-06-10: Dry run against current renderer contracts found that V2 should start with a fresh minimal renderer facade. Current `WorldDisplayRenderer` is product/resolver/diagnostic-shaped and should not be reused as the V2 renderer API.
 - 2026-06-10: Dry run against current landblock planning confirmed LB LoD should remain runtime-side demand planning. Workers receive concrete landblock/env-cell/domain requests after radii are resolved.
 - 2026-06-10: Phase 3 removed legacy preparation imports, but review found host route strings and response-route regex preparation could still leak semantic string identity into resolver/baker/renderer records. Rather than create a standalone cleanup phase before those records exist, the typed-identity guidance is now woven into the resolver, bake, atlas, and enrichment phases where it first matters.
+- 2026-06-10: Review of remaining phases against v1 terrain/product/render code found that the old Phase 5 hid too much complexity under "terrain bake with minimal texture placement." The plan now splits real resolver wiring, geometry bake, geometry rendering, direct texture placement, atlas sharing, and terrain material parity into separate milestones.
+- 2026-06-10: Manual verification is now treated as a milestone property, not a generic harness promise. The first meaningful visual check is geometry-only terrain rendering; resolver status panels are useful for debugging but not proof of rendering.

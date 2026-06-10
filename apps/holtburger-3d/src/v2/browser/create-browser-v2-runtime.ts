@@ -7,9 +7,9 @@ import {
 } from "../runtime/client-runtime";
 import { StaticCoordinator } from "../static/coordinator/static-coordinator";
 import type {
+	StaticResolverJob,
 	StaticResolverClient,
 	StaticScopePayload,
-	StaticWorkRequest,
 } from "../static/contracts";
 import {
 	ImmediateStaticBakerClient,
@@ -71,16 +71,16 @@ class BrowserStaticResolver implements StaticResolverClient {
 		this.#onDispose = options.onDispose;
 	}
 
-	resolve(request: StaticWorkRequest): Promise<StaticScopePayload> {
+	resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
 		if (this.#disposed) {
 			return Promise.reject(new Error("BrowserStaticResolver has been disposed."));
 		}
 
-		if (request.domain === "terrain" && request.scope.kind === "landblock") {
-			return this.#terrainResolver.resolve(request);
+		if (job.domain === "outdoor-terrain" && job.scope.kind === "landblock") {
+			return this.#terrainResolver.resolve(job);
 		}
 
-		return this.#placeholderResolver.resolve(request);
+		return this.#placeholderResolver.resolve(job);
 	}
 
 	dispose(): void {

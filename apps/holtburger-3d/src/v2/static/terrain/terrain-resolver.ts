@@ -11,9 +11,9 @@ import { createHostAssetKey } from "../../assets/keys";
 import type {
 	PaletteIdentity,
 	RegionDetailRoleFacts,
+	StaticResolverJob,
 	StaticResourceIdentity,
 	StaticScopePayload,
-	StaticWorkRequest,
 	TerrainSourceSpatialFacts,
 	TerrainTextureUseFacts,
 } from "../contracts";
@@ -42,16 +42,16 @@ export class TerrainStaticScopeResolver {
 		this.#assetService = options.assetService;
 	}
 
-	async resolve(request: StaticWorkRequest): Promise<StaticScopePayload> {
-		if (request.domain !== "terrain" || request.scope.kind !== "landblock") {
+	async resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
+		if (job.domain !== "outdoor-terrain" || job.scope.kind !== "landblock") {
 			throw new Error(
-				`Terrain resolver only supports landblock terrain requests. Received ${request.scope.kind}/${request.domain}.`,
+				`Terrain resolver only supports outdoor landblock terrain jobs. Received ${job.scope.kind}/${job.domain}.`,
 			);
 		}
 
 		const landblock = await this.#loadPayload(
 			"landblock-outdoor",
-			request.scope.landblockId,
+			job.scope.landblockId,
 			"landblock-outdoor",
 		);
 		const terrainMaterial = await this.#loadPayload(
@@ -71,7 +71,7 @@ export class TerrainStaticScopeResolver {
 		);
 
 		return {
-			request,
+			job,
 			scope: {
 				kind: "terrain",
 				landblock: {
@@ -106,7 +106,6 @@ export class TerrainStaticScopeResolver {
 				textureUses: textureUses.facts,
 			},
 			sourceRevision: Math.max(
-				request.revision,
 				landblock.regionNumber,
 				textureUses.sourceRevision,
 			),

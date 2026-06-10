@@ -5,14 +5,16 @@ import type {
 	StaticBakerClient,
 	StaticCoordinatorSnapshot,
 	StaticDemand,
+	DungeonStaticPayloadSummary,
+	LandblockTopologyPayloadSummary,
 	StaticResolverFailureSnapshot,
 	StaticResolverClient,
 	StaticScopePayload,
 	TerrainStaticScopePayloadSummary,
-	StaticWorkRequest,
-	StaticWorkRequestStatus,
+	ScheduledStaticWork,
+	ScheduledStaticWorkStatus,
 } from "../contracts";
-import { describeStaticScopeKey, planStaticWorkRequests } from "../demand-planner";
+import { describeStaticScopeKey, planScheduledStaticWork } from "../demand-planner";
 
 export type StaticCoordinatorListener = (
 	snapshot: StaticCoordinatorSnapshot,
@@ -33,7 +35,7 @@ export class StaticCoordinator {
 		payload: StaticScopePayload,
 	) => DomainAtlasSnapshot;
 	readonly #listeners = new Set<StaticCoordinatorListener>();
-	readonly #activeRequests = new Map<string, MutableStaticWorkRequestStatus>();
+	readonly #activeWork = new Map<string, MutableScheduledStaticWorkStatus>();
 	#revision = 0;
 	#disposed = false;
 	#committed = 0;
@@ -42,6 +44,8 @@ export class StaticCoordinator {
 	#staleBakeResults = 0;
 	#committedDrawUnits = 0;
 	#latestTerrainPayload: TerrainStaticScopePayloadSummary | null = null;
+	#latestLandblockTopologyPayload: LandblockTopologyPayloadSummary | null = null;
+	#latestDungeonPayload: DungeonStaticPayloadSummary | null = null;
 	#latestResolverFailure: StaticResolverFailureSnapshot | null = null;
 
 	constructor(options: StaticCoordinatorOptions) {
@@ -51,31 +55,31 @@ export class StaticCoordinator {
 			options.createAtlasSnapshot ?? createEmptyAtlasSnapshotForPayload;
 	}
 
-	requestStaticDemand(demand: StaticDemand): readonly StaticWorkRequest[] {
+	requestStaticDemand(demand: StaticDemand): readonly ScheduledStaticWork[] {
 		this.#assertActive();
 		this.#revision += 1;
-		this.#activeRequests.clear();
+		this.#activeWork.clear();
 
-		const requests = planStaticWorkRequests(demand, this.#revision);
+		const workItems = planScheduledStaticWork(demand, this.#revision);
 
-		for (const request of requests) {
-			this.#activeRequests.set(request.requestId, {
-				domain: request.domain,
+		for (const work of workItems) {
+			this.#activeWork.set(work.workId, {
+				domain: work.job.domain,
 				failureMessage: null,
-				requestId: request.requestId,
-				revision: request.revision,
-				scopeKey: describeStaticScopeKey(request.scope),
+				workId: work.workId,
+				revision: work.revision,
+				scopeKey: describeStaticScopeKey(work.job.scope),
 				status: "requested",
 			});
 		}
 
 		this.#emit();
 
-		for (const request of requests) {
-			void this.#resolveThenBake(request);
+		for (const work of workItems) {
+			void this.#resolveThenBake(work);
 		}
 
-		return requests;
+		return workItems;
 	}
 
 	subscribe(listener: StaticCoordinatorListener): () => void {
@@ -88,18 +92,20 @@ export class StaticCoordinator {
 	}
 
 	createSnapshot(): StaticCoordinatorSnapshot {
-		const activeRequests = Array.from(this.#activeRequests.values());
+		const activeWork = Array.from(this.#activeWork.values());
 
 		return {
-			activeRequests,
-			baking: countStatus(activeRequests, "baking"),
+			activeWork,
+			baking: countStatus(activeWork, "baking"),
 			committed: this.#committed,
 			committedDrawUnits: this.#committedDrawUnits,
 			failed: this.#failed,
+			latestDungeonPayload: this.#latestDungeonPayload,
+			latestLandblockTopologyPayload: this.#latestLandblockTopologyPayload,
 			latestResolverFailure: this.#latestResolverFailure,
 			latestTerrainPayload: this.#latestTerrainPayload,
-			requested: activeRequests.length,
-			resolving: countStatus(activeRequests, "resolving"),
+			requested: activeWork.length,
+			resolving: countStatus(activeWork, "resolving"),
 			revision: this.#revision,
 			staleBakeResults: this.#staleBakeResults,
 			staleResolverResults: this.#staleResolverResults,
@@ -114,38 +120,38 @@ export class StaticCoordinator {
 		this.#disposed = true;
 		disposeIfAvailable(this.#resolver);
 		disposeIfAvailable(this.#baker);
-		this.#activeRequests.clear();
+		this.#activeWork.clear();
 		this.#emit();
 		this.#listeners.clear();
 	}
 
-	async #resolveThenBake(request: StaticWorkRequest): Promise<void> {
-		this.#setStatus(request, "resolving");
+	async #resolveThenBake(work: ScheduledStaticWork): Promise<void> {
+		this.#setStatus(work, "resolving");
 
 		let payload: StaticScopePayload;
 		try {
-			payload = await this.#resolver.resolve(request);
+			payload = await this.#resolver.resolve(work.job);
 		} catch (error: unknown) {
 			this.#markFailedIfCurrent(
-				request,
+				work,
 				error instanceof Error ? error.message : String(error),
 			);
 			return;
 		}
 
-		if (!this.#isCurrent(request)) {
+		if (!this.#isCurrent(work)) {
 			this.#staleResolverResults += 1;
 			this.#emit();
 			return;
 		}
 
 		this.#recordResolvedPayload(payload);
-		this.#setStatus(request, "baking");
+		this.#setStatus(work, "baking");
 
 		const bakeInput: StaticBakeInput = {
 			atlasSnapshot: this.#createAtlasSnapshot(payload),
 			payload,
-			request,
+			work,
 		};
 
 		let result: StaticBakeResult;
@@ -153,13 +159,13 @@ export class StaticCoordinator {
 			result = await this.#baker.bake(bakeInput);
 		} catch (error: unknown) {
 			this.#markFailedIfCurrent(
-				request,
+				work,
 				error instanceof Error ? error.message : String(error),
 			);
 			return;
 		}
 
-		if (!this.#isCurrent(result.request)) {
+		if (!this.#isCurrent(result.work)) {
 			this.#staleBakeResults += 1;
 			this.#emit();
 			return;
@@ -169,7 +175,7 @@ export class StaticCoordinator {
 	}
 
 	#commit(result: StaticBakeResult): void {
-		const status = this.#activeRequests.get(result.request.requestId);
+		const status = this.#activeWork.get(result.work.workId);
 
 		if (!status) {
 			return;
@@ -181,55 +187,79 @@ export class StaticCoordinator {
 		this.#emit();
 	}
 
-	#markFailedIfCurrent(request: StaticWorkRequest, message: string): void {
-		if (!this.#isCurrent(request)) {
+	#markFailedIfCurrent(work: ScheduledStaticWork, message: string): void {
+		if (!this.#isCurrent(work)) {
 			return;
 		}
 
-		const status = this.#activeRequests.get(request.requestId);
+		const status = this.#activeWork.get(work.workId);
 
 		if (status) {
 			status.status = "failed";
 			status.failureMessage = message;
 			this.#failed += 1;
 			this.#latestResolverFailure = {
-				domain: request.domain,
+				domain: work.job.domain,
 				message,
-				requestId: request.requestId,
-				revision: request.revision,
-				scopeKey: describeStaticScopeKey(request.scope),
+				workId: work.workId,
+				revision: work.revision,
+				scopeKey: describeStaticScopeKey(work.job.scope),
 			};
 			this.#emit();
 		}
 	}
 
 	#recordResolvedPayload(payload: StaticScopePayload): void {
-		if (payload.scope.kind !== "terrain") {
-			return;
+		if (payload.scope.kind === "terrain") {
+			this.#latestTerrainPayload = {
+				landblockId: payload.scope.landblock.landblockId,
+				missingRefCount: payload.scope.missingRefs.length,
+				quadCount: payload.scope.mesh.quadCount,
+				regionNumber: payload.scope.terrainMaterial.identity.regionNumber,
+				textureUseCount: payload.scope.textureUses.length,
+				triangleCount: payload.scope.mesh.triangleCount,
+				vertexCount: payload.scope.mesh.vertexCount,
+			};
 		}
 
-		this.#latestTerrainPayload = {
-			landblockId: payload.scope.landblock.landblockId,
-			missingRefCount: payload.scope.missingRefs.length,
-			quadCount: payload.scope.mesh.quadCount,
-			regionNumber: payload.scope.terrainMaterial.identity.regionNumber,
-			textureUseCount: payload.scope.textureUses.length,
-			triangleCount: payload.scope.mesh.triangleCount,
-			vertexCount: payload.scope.mesh.vertexCount,
-		};
+		if (payload.scope.kind === "landblock-topology") {
+			this.#latestLandblockTopologyPayload = {
+				classification: payload.scope.classification,
+				envCellCount: payload.scope.envCells.length,
+				landblockId: payload.scope.landblock.landblockId,
+				missingRefCount: payload.scope.missingRefs.length,
+				portalLinkCount: payload.scope.portalLinks.length,
+				visibleCellCount: countDistinctVisibleEnvCells(payload.scope.envCells),
+			};
+		}
+
+		if (payload.scope.kind === "dungeon-static") {
+			this.#latestDungeonPayload = {
+				envCellCount: payload.scope.envCells.length,
+				landblockId: payload.scope.landblock.landblockId,
+				missingRefCount: payload.scope.missingRefs.length,
+				portalCount: payload.scope.envCells.reduce(
+					(count, envCell) => count + envCell.portalCount,
+					0,
+				),
+				selectedEnvCellId: null,
+				visibleCellCount: countDistinctVisibleEnvCells(payload.scope.envCells),
+			};
+		}
+
 		this.#latestResolverFailure = null;
 		this.#emit();
 	}
 
 	#setStatus(
-		request: StaticWorkRequest,
-		status: MutableStaticWorkRequestStatus["status"],
+		work: ScheduledStaticWork,
+		status: MutableScheduledStaticWorkStatus["status"],
 	): void {
-		if (!this.#isCurrent(request)) {
+		if (!this.#isCurrent(work)) {
 			return;
 		}
 
-		const current = this.#activeRequests.get(request.requestId);
+		const current = this.#activeWork.get(work.workId);
 
 		if (!current) {
 			return;
@@ -239,11 +269,11 @@ export class StaticCoordinator {
 		this.#emit();
 	}
 
-	#isCurrent(request: StaticWorkRequest): boolean {
+	#isCurrent(work: ScheduledStaticWork): boolean {
 		return (
 			!this.#disposed &&
-			request.revision === this.#revision &&
-			this.#activeRequests.has(request.requestId)
+			work.revision === this.#revision &&
+			this.#activeWork.has(work.workId)
 		);
 	}
 
@@ -262,26 +292,44 @@ export class StaticCoordinator {
 	}
 }
 
-type MutableStaticWorkRequestStatus = {
-	-readonly [Key in keyof StaticWorkRequestStatus]: StaticWorkRequestStatus[Key];
+type MutableScheduledStaticWorkStatus = {
+	-readonly [Key in keyof ScheduledStaticWorkStatus]: ScheduledStaticWorkStatus[Key];
 };
 
 function createEmptyAtlasSnapshotForPayload(
 	payload: StaticScopePayload,
 ): DomainAtlasSnapshot {
 	return {
-		domain: payload.request.domain,
-		revision: payload.request.revision,
+		domain: payload.job.domain,
+		revision: payload.sourceRevision,
 		textureUses:
 			payload.scope.kind === "placeholder"
 				? payload.scope.referencedTextureUses
-				: payload.scope.textureUses.map((textureUse) => textureUse.texture),
+				: payload.scope.kind === "terrain"
+					? payload.scope.textureUses.map((textureUse) => textureUse.texture)
+					: [],
 	};
 }
 
+function countDistinctVisibleEnvCells(
+	envCells: readonly {
+		readonly visibleEnvCellIds: readonly number[];
+	}[],
+): number {
+	const visible = new Set<number>();
+
+	for (const envCell of envCells) {
+		for (const envCellId of envCell.visibleEnvCellIds) {
+			visible.add(envCellId);
+		}
+	}
+
+	return visible.size;
+}
+
 function countStatus(
-	requests: readonly StaticWorkRequestStatus[],
-	status: StaticWorkRequestStatus["status"],
+	requests: readonly ScheduledStaticWorkStatus[],
+	status: ScheduledStaticWorkStatus["status"],
 ): number {
 	return requests.filter((request) => request.status === status).length;
 }

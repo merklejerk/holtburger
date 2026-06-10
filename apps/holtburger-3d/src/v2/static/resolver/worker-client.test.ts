@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { StaticScopePayload, StaticWorkRequest } from "../contracts";
+import type { StaticResolverJob, StaticScopePayload } from "../contracts";
 import type {
 	StaticResolverWorkerPort,
 	StaticResolverWorkerRequest,
@@ -12,32 +12,32 @@ describe("V2 static resolver worker protocol", () => {
 	it("posts concrete static work requests and resolves returned payloads", async () => {
 		const port = new FixtureWorkerPort();
 		const client = new StaticResolverWorkerClient(port);
-		const request = createRequest();
-		const pending = client.resolve(request);
+		const job = createJob();
+		const pending = client.resolve(job);
 
 		expect(port.requests).toEqual([
 			{
+				job,
 				kind: "resolve-static-scope",
-				request,
-				requestId: request.requestId,
+				requestId: "resolver-job:0",
 			},
 		]);
 
 		port.emit({
 			kind: "static-scope-resolved",
-			payload: createPayload(request),
-			requestId: request.requestId,
+			payload: createPayload(job),
+			requestId: "resolver-job:0",
 		});
 
 		await expect(pending).resolves.toMatchObject({
-			request,
+			job,
 			scope: { kind: "placeholder" },
 		});
 		client.dispose();
 	});
 
 	it("turns resolver handler failures into typed worker responses", async () => {
-		const request = createRequest();
+		const job = createJob();
 		const responses: StaticResolverWorkerResponse[] = [];
 
 		await handleStaticResolverWorkerRequest(
@@ -47,9 +47,9 @@ describe("V2 static resolver worker protocol", () => {
 				},
 			},
 			{
+				job,
 				kind: "resolve-static-scope",
-				request,
-				requestId: request.requestId,
+				requestId: "transport:1",
 			},
 			(response) => responses.push(response),
 		);
@@ -58,7 +58,7 @@ describe("V2 static resolver worker protocol", () => {
 			{
 				kind: "static-scope-resolve-failed",
 				message: "missing terrain root",
-				requestId: request.requestId,
+				requestId: "transport:1",
 			},
 		]);
 	});
@@ -96,13 +96,9 @@ class FixtureWorkerPort implements StaticResolverWorkerPort {
 	}
 }
 
-function createRequest(): StaticWorkRequest {
+function createJob(): StaticResolverJob {
 	return {
-		domain: "terrain",
-		policyRevision: 1,
-		priority: 0,
-		requestId: "1:landblock:da55ffff:terrain",
-		revision: 1,
+		domain: "outdoor-terrain",
 		scope: {
 			kind: "landblock",
 			landblockId: 0xda55ffff,
@@ -110,13 +106,13 @@ function createRequest(): StaticWorkRequest {
 	};
 }
 
-function createPayload(request: StaticWorkRequest): StaticScopePayload {
+function createPayload(job: StaticResolverJob): StaticScopePayload {
 	return {
-		request,
+		job,
 		scope: {
 			kind: "placeholder",
 			referencedTextureUses: [],
 		},
-		sourceRevision: request.revision,
+		sourceRevision: 1,
 	};
 }

@@ -1,21 +1,20 @@
-export type StaticDomain = "terrain" | "buildings" | "detail" | "envCells";
+export type StaticDomain =
+	| "outdoor-terrain"
+	| "outdoor-buildings"
+	| "outdoor-detail"
+	| "landblock-topology"
+	| "dungeon-static";
 
-export type StaticScope =
-	| {
-			readonly kind: "landblock";
-			readonly landblockId: number;
-	  }
-	| {
-			readonly kind: "env-cell";
-			readonly landblockId: number;
-			readonly envCellId: number;
-	  };
+export interface StaticResolverScope {
+	readonly kind: "landblock";
+	readonly landblockId: number;
+}
 
 export interface StaticLodRadii {
 	readonly terrain: number;
 	readonly buildings: number;
 	readonly detail: number;
-	readonly envCells: number;
+	readonly topology: number;
 }
 
 export type StaticDemandLocation =
@@ -32,25 +31,29 @@ export type StaticDemandLocation =
 export interface StaticDemand {
 	readonly location: StaticDemandLocation | null;
 	readonly lod: StaticLodRadii;
-	readonly policyRevision: number;
 }
 
-export interface StaticWorkRequest {
-	readonly requestId: string;
-	readonly revision: number;
-	readonly scope: StaticScope;
+export interface StaticResolverJob {
+	readonly scope: StaticResolverScope;
 	readonly domain: StaticDomain;
+}
+
+export interface ScheduledStaticWork {
+	readonly workId: string;
+	readonly revision: number;
+	readonly job: StaticResolverJob;
 	readonly priority: number;
-	readonly policyRevision: number;
 }
 
 export interface StaticScopePayload {
-	readonly request: StaticWorkRequest;
+	readonly job: StaticResolverJob;
 	readonly scope: StaticScopePayloadBody;
 	readonly sourceRevision: number;
 }
 
 export type StaticScopePayloadBody =
+	| DungeonStaticScopePayload
+	| LandblockTopologyStaticScopePayload
 	| TerrainStaticScopePayload
 	| PlaceholderStaticScopePayload;
 
@@ -71,6 +74,9 @@ export interface TerrainStaticScopePayload {
 }
 
 export type StaticResourceIdentity =
+	| CellStructureIdentity
+	| EnvCellSourceIdentity
+	| EnvironmentIdentity
 	| LandblockSourceIdentity
 	| TerrainMaterialIdentity
 	| RegionRenderProfileIdentity
@@ -83,6 +89,23 @@ export interface LandblockSourceIdentity {
 	readonly kind: "landblock-source";
 	readonly source: "outdoor" | "topology";
 	readonly landblockId: number;
+}
+
+export type LandblockClassification = "outdoor" | "dungeon";
+
+export interface EnvCellSourceIdentity {
+	readonly kind: "env-cell-source";
+	readonly envCellId: number;
+}
+
+export interface EnvironmentIdentity {
+	readonly kind: "environment";
+	readonly environmentId: number;
+}
+
+export interface CellStructureIdentity {
+	readonly kind: "cell-structure";
+	readonly cellStructureId: number;
 }
 
 export interface TerrainMaterialIdentity {
@@ -193,6 +216,84 @@ export interface TerrainSourceSpatialFacts {
 	readonly terrainBvhItemCount: number;
 }
 
+export interface LandblockTopologyStaticScopePayload {
+	readonly kind: "landblock-topology";
+	readonly landblock: LandblockSourceIdentity;
+	readonly classification: LandblockClassification;
+	readonly envCells: readonly LandblockTopologyEnvCellFacts[];
+	readonly portalLinks: readonly LandblockPortalLinkFacts[];
+	readonly residencySpatial: LandblockTopologySpatialFacts;
+	readonly missingRefs: readonly StaticResourceIdentity[];
+}
+
+export interface DungeonStaticScopePayload {
+	readonly kind: "dungeon-static";
+	readonly landblock: LandblockSourceIdentity;
+	readonly classification: "dungeon";
+	readonly envCells: readonly EnvCellStaticFacts[];
+	readonly portalLinks: readonly LandblockPortalLinkFacts[];
+	readonly missingRefs: readonly StaticResourceIdentity[];
+}
+
+export interface LandblockTopologyEnvCellFacts {
+	readonly identity: EnvCellSourceIdentity;
+	readonly landblockId: number;
+	readonly memberId: string;
+	readonly visibleEnvCellIds: readonly number[];
+	readonly restrictionObjectId: number | null;
+	readonly seenOutside: boolean | null;
+}
+
+export interface EnvCellStaticFacts {
+	readonly identity: EnvCellSourceIdentity;
+	readonly landblockId: number;
+	readonly environment: EnvironmentIdentity;
+	readonly cellStructure: CellStructureIdentity;
+	readonly visibleEnvCellIds: readonly number[];
+	readonly portalCount: number;
+	readonly portalApertureCount: number;
+	readonly staticObjectSeedCount: number;
+	readonly renderGeometryPolygonCount: number;
+	readonly localSpatial: EnvCellSpatialFacts;
+}
+
+export interface LandblockPortalLinkFacts {
+	readonly linkId: string;
+	readonly source: PortalEndpointIdentity;
+	readonly target: PortalEndpointIdentity;
+	readonly flags: number;
+	readonly sourceIndex: number;
+	readonly polygonId: number | null;
+}
+
+export type PortalEndpointIdentity =
+	| {
+			readonly kind: "landblock-building";
+			readonly instanceId: string;
+			readonly portalId: string;
+	  }
+	| {
+			readonly kind: "env-cell";
+			readonly envCellId: number;
+			readonly portalId: string;
+	  }
+	| {
+			readonly kind: "outside";
+			readonly landblockId: number;
+	  };
+
+export interface LandblockTopologySpatialFacts {
+	readonly coordinateSpace: "landblock-topology-residency";
+	readonly envCellResidencyBvhNodeCount: number;
+	readonly envCellResidencyBvhItemCount: number;
+}
+
+export interface EnvCellSpatialFacts {
+	readonly coordinateSpace: "env-cell-local";
+	readonly localBvhNodeCount: number;
+	readonly localBvhItemCount: number;
+}
+
 export interface DomainAtlasSnapshot {
 	readonly domain: StaticDomain;
 	readonly revision: number;
@@ -200,13 +301,13 @@ export interface DomainAtlasSnapshot {
 }
 
 export interface StaticBakeInput {
-	readonly request: StaticWorkRequest;
+	readonly work: ScheduledStaticWork;
 	readonly payload: StaticScopePayload;
 	readonly atlasSnapshot: DomainAtlasSnapshot;
 }
 
 export interface StaticBakeResult {
-	readonly request: StaticWorkRequest;
+	readonly work: ScheduledStaticWork;
 	readonly drawUnitIds: readonly string[];
 	readonly atlasRegistryUpdates: readonly string[];
 	readonly staticSpatialRecords: readonly string[];
@@ -218,7 +319,7 @@ export interface StaticBakeResult {
 }
 
 export interface StaticResolverClient {
-	resolve(request: StaticWorkRequest): Promise<StaticScopePayload>;
+	resolve(job: StaticResolverJob): Promise<StaticScopePayload>;
 }
 
 export interface StaticBakerClient {
@@ -235,18 +336,38 @@ export interface StaticCoordinatorSnapshot {
 	readonly staleResolverResults: number;
 	readonly staleBakeResults: number;
 	readonly committedDrawUnits: number;
-	readonly activeRequests: readonly StaticWorkRequestStatus[];
+	readonly activeWork: readonly ScheduledStaticWorkStatus[];
 	readonly latestTerrainPayload: TerrainStaticScopePayloadSummary | null;
+	readonly latestLandblockTopologyPayload: LandblockTopologyPayloadSummary | null;
+	readonly latestDungeonPayload: DungeonStaticPayloadSummary | null;
 	readonly latestResolverFailure: StaticResolverFailureSnapshot | null;
 }
 
-export interface StaticWorkRequestStatus {
-	readonly requestId: string;
+export interface ScheduledStaticWorkStatus {
+	readonly workId: string;
 	readonly revision: number;
 	readonly domain: StaticDomain;
 	readonly scopeKey: string;
 	readonly status: "requested" | "resolving" | "baking" | "committed" | "failed";
 	readonly failureMessage: string | null;
+}
+
+export interface LandblockTopologyPayloadSummary {
+	readonly landblockId: number;
+	readonly classification: LandblockClassification;
+	readonly envCellCount: number;
+	readonly visibleCellCount: number;
+	readonly portalLinkCount: number;
+	readonly missingRefCount: number;
+}
+
+export interface DungeonStaticPayloadSummary {
+	readonly landblockId: number;
+	readonly selectedEnvCellId: number | null;
+	readonly envCellCount: number;
+	readonly visibleCellCount: number;
+	readonly portalCount: number;
+	readonly missingRefCount: number;
 }
 
 export interface TerrainStaticScopePayloadSummary {
@@ -260,7 +381,7 @@ export interface TerrainStaticScopePayloadSummary {
 }
 
 export interface StaticResolverFailureSnapshot {
-	readonly requestId: string;
+	readonly workId: string;
 	readonly revision: number;
 	readonly domain: StaticDomain;
 	readonly scopeKey: string;

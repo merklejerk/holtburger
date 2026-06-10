@@ -15,7 +15,7 @@ import type {
 	PreparedAssetLease,
 } from "../../assets/contracts";
 import { createHostAssetKey, describeHostAssetKey } from "../../assets/keys";
-import type { StaticWorkRequest } from "../contracts";
+import type { StaticResolverJob } from "../contracts";
 import { TerrainStaticScopeResolver } from "./terrain-resolver";
 
 describe("V2 terrain static resolver", () => {
@@ -272,13 +272,9 @@ function createPreparedAsset(
 	};
 }
 
-function createTerrainRequest(): StaticWorkRequest {
+function createTerrainRequest(): StaticResolverJob {
 	return {
-		domain: "terrain",
-		policyRevision: 1,
-		priority: 0,
-		requestId: "1:landblock:da55ffff:terrain",
-		revision: 1,
+		domain: "outdoor-terrain",
 		scope: {
 			kind: "landblock",
 			landblockId: 0xda55ffff,

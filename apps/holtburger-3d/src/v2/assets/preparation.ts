@@ -2,9 +2,9 @@ import type {
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
 } from "../../lib/host/contracts";
-import { prepareAssetPayload } from "../../workers/shared/asset-prepare";
 import type { HostAssetKey, PreparedAsset } from "./contracts";
 import { formatHostAssetId } from "./keys";
+import { prepareTerrainSliceAssetPayload } from "./preparation/route-payloads";
 
 export interface PrepareHostAssetOptions {
 	readonly key: HostAssetKey;
@@ -33,11 +33,20 @@ export function prepareHostAssetResponse({
 	now = () => new Date(),
 }: PrepareHostAssetOptions): PreparedAsset {
 	const request = createHostAssetLookupRequest(key, requestId);
-	const prepared = prepareAssetPayload(request, response);
+	if (response.requestId !== request.requestId) {
+		throw new Error(
+			`Host response request id ${response.requestId} did not match ${request.requestId}.`,
+		);
+	}
+	if (response.assetId !== request.assetId) {
+		throw new Error(
+			`Host response asset id ${response.assetId} did not match ${request.assetId}.`,
+		);
+	}
 
 	return {
 		key,
-		payload: prepared.payload,
+		payload: prepareTerrainSliceAssetPayload(response),
 		preparedAt: now().toISOString(),
 		revision,
 		sourceAssetId: response.assetId,

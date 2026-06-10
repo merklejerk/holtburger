@@ -77,6 +77,9 @@ Verification commands to use as the implementation grows:
 - V2 implementation code under `src/v2/` must not import from the legacy frontend implementation under `src/lib/assets/`, `src/lib/world-display/`, `src/app/`, `src/workers/`, `src/pages/BrowserWorldDisplay.svelte`, or other legacy browser-display implementation folders.
 - The only allowed cross-boundary imports from V2 are stable external/shared boundaries that are not legacy frontend architecture: Tauri host command adapters, host DTO schemas, generated/static data contracts, and small pure leaf utilities that have been explicitly moved or promoted out of legacy folders first.
 - If V2 needs useful logic from legacy frontend code, the logic must be copied/extracted into V2-owned modules or promoted to a neutral shared location in the same phase. Temporary wrapper imports from legacy modules are prohibited.
+- Runtime asset/resource identity inside V2 must be typed data, not host route strings. Discriminant fields such as `kind` must be closed string-literal unions, never arbitrary `string`.
+- Host route strings may exist only as transport/provenance at the host/preparation boundary. Resolver payloads, bake inputs/results, atlas records, draw units, source mappings, texture-manager state, renderer deltas, and dynamic records must use typed internal identities or runtime-assigned handles.
+- V2 resolver, baker, texture, and renderer paths must route by typed keys/records, not by regex matching asset ID strings.
 
 ## Proposed Directory Shape
 
@@ -204,7 +207,7 @@ Debt and follow-up:
 
 - The static coordinator currently clears active request rows on supersession but keeps cumulative committed/stale counters. Phase 2 or Phase 3 should decide which counters are runtime lifetime metrics, which are current-demand facts, and which belong only in diagnostic snapshots.
 - The harness manual landblock command only represents a single outdoor landblock and selected domains. Real browser/client interest needs a separate command path that carries location plus LB LoD policy without leaking UI controls into runtime contracts.
-- The coordinator currently creates a placeholder atlas snapshot from resolver payload texture keys. Phase 4/5 must replace this with the texture/atlas manager boundary before any real baker output is committed.
+- The coordinator currently creates a placeholder atlas snapshot from resolver payload texture keys. Phase 5/6 must replace this with the texture/atlas manager boundary before any real baker output is committed.
 - Static coordinator cancellation is currently logical supersession, not worker cancellation. Real resolver and baker worker clients should add abort/cancel signals once worker protocols exist.
 - The renderer contract includes dynamic and sampler update methods before those services exist. Keep them as contract placeholders only; do not add renderer-side fake state in later phases unless a real consumer arrives.
 
@@ -272,6 +275,8 @@ Verification:
 
 ### Phase 3: Remove Legacy Imports From V2 Asset Preparation
 
+Status: complete.
+
 Purpose: fix the Phase 2 isolation regression before adding real resolver or baker code.
 
 Deliverables:
@@ -302,10 +307,16 @@ Acceptance criteria:
 Decisions and course corrections:
 
 - This phase exists because the Phase 2 wrapper import from legacy preparation was too permissive. The architecture needs a hard import rule now, before the resolver and baker create more gravity around that shortcut.
+- Added a V2-owned route preparation table for terrain-slice asset families. It imports host DTO schemas as the host boundary source of truth, but it does not import old worker helpers, prepared asset records, dependency walkers, stores, diagnostics, or world-display code.
+- Removed the V2 import of `src/workers/shared/asset-prepare.ts`.
+- Added a V2 import-boundary test so the prohibited legacy directories are checked by `npm run test:ts`, not only by manual grep.
+- Kept V2 preparation deliberately narrow. Unsupported routes fail hard until a later phase adds the needed family with an explicit V2-owned preparer.
 
 Debt and follow-up:
 
 - This phase should not attempt to port every legacy asset preparer. Only copy/extract what Phase 4 terrain resolution/baking will use. Additional asset families belong to later static object and dynamic phases.
+- V2 route preparation currently returns host DTO-shaped payloads plus normalized schema transforms. Phase 4 should introduce terrain resolver payload types that consume these DTOs without letting raw host DTOs become renderer-facing records.
+- If Phase 4 needs batched asset lookup, add it at the `RuntimeHost`/worker bridge boundary without weakening the no-legacy-import rule.
 
 Verification:
 
@@ -323,9 +334,12 @@ Deliverables:
 - Static scope resolver worker protocol and client.
 - Terrain resolver adapter for one concrete landblock terrain request.
 - Payload records for terrain mesh source facts, terrain texture keys, masks/detail facts, and source spatial facts.
+- Typed closed-union runtime identities for terrain-slice resolver payloads, including landblock source identity, terrain material identity, region render profile identity, surface texture identity, render surface identity, prepared texture use identity, and palette identity.
+- Translation from host DTO route strings into typed runtime identities before data enters resolver payloads or bake inputs.
 - Coordinator scheduling from concrete landblock/domain requests to resolver jobs.
 - A paired terrain bake contract sketch kept in the same review loop as the resolver payload. Terrain payload fields should exist because the terrain baker consumes them, not because current artifacts happen to contain them.
 - Tests or harness fixtures for terrain payload shape.
+- Tests proving resolver payloads do not use host asset route strings as semantic identity.
 
 Acceptance criteria:
 
@@ -333,6 +347,8 @@ Acceptance criteria:
 - Worker requests are concrete IDs/domains, not interest radii.
 - A terrain scope payload can be produced for a known landblock.
 - Missing dependencies are reported as typed missing refs, not resolved by hidden main-thread work.
+- Host asset route strings are absent from resolver payloads except as explicitly named provenance/debug text.
+- No resolver payload identity widens `kind` to arbitrary `string`; every discriminant is a closed string-literal union.
 
 ### Phase 5: Terrain Bake Slice With Minimal Texture Placement
 
@@ -343,6 +359,7 @@ Deliverables:
 - Static bake worker protocol and client.
 - Terrain bake adapter for terrain mesh extraction, draw slices, fallback geometry, and terrain shader binding layout.
 - Texture/atlas manager skeleton with logical texture refs, direct-texture-as-degenerate-atlas placement, placement revisions, and renderer placement updates.
+- Bake-local typed texture use identities or handles. Bake inputs/results must not route by host asset strings.
 - Fresh minimal V2 WebGL2 renderer path that consumes `applyStaticDelta`, `applyTexturePlacementUpdate`, `applySamplerPolicyUpdate`, and `updateFrameState`.
 - Targeted read-only audit for low-level math, camera, and GL helper behavior from `src/lib/world-display`. Any useful leaf helper must be moved or copied into a V2-owned or neutral module before V2 imports it.
 
@@ -353,6 +370,7 @@ Acceptance criteria:
 - Baker output uses bake-local texture uses; texture refs are assigned only during texture/atlas manager commit.
 - Geometry rebake is not required for a placement-table-only update.
 - V2 rendering does not route through `WorldDisplay.svelte`, `WorldDisplayRenderer`, `StaticLandblockProductSource`, or current landblock render product events.
+- Bake inputs/results, draw units, source mappings, and renderer deltas do not carry host route strings as semantic identity.
 
 ### Phase 6: Domain Atlas Sharing And Revisions
 
@@ -365,6 +383,7 @@ Deliverables:
 - Texture/atlas manager commit/reject/rebase rules for atlas updates.
 - Placement revision assumptions on static draw units.
 - Lease accounting from resident draw units to texture refs/placements.
+- Opaque or branded canonical cache keys derived from typed identities where `Map` keys need strings. Do not accept arbitrary caller-provided strings as resource identity.
 - Tests for atlas reuse across multiple landblocks in the same domain.
 
 Acceptance criteria:
@@ -373,6 +392,7 @@ Acceptance criteria:
 - A stale atlas update cannot corrupt the active registry.
 - Removing a static scope releases texture placement leases.
 - Renderer texture placement updates remain separate from static geometry deltas.
+- Atlas and texture manager state use typed identities, runtime-assigned handles, or opaque/branded cache keys derived from typed identities, not host route strings.
 
 ### Phase 7: Static Object Enrichment
 
@@ -381,6 +401,7 @@ Purpose: add non-terrain static content only after the terrain and atlas seams a
 Deliverables:
 
 - Resolver support for static object/building/detail dependencies.
+- Typed runtime identity variants for any new static object asset families this phase introduces.
 - Material-family classification in the baker.
 - Static draw units for compatible shader family, sampler state, binding layout, device state, domain, and compacted geometry.
 - Static spatial records and source mappings as top-level bake result fields.
@@ -392,6 +413,7 @@ Acceptance criteria:
 - Static draw units do not carry unrelated spatial/source metadata internally.
 - Picker/inspection can map a draw slice back to source identity without consulting Svelte state.
 - Material-family rules are expressed as code-owned classifiers, not stringly diagnostics.
+- New static object identities are typed closed-union variants; no generic string fallback is introduced.
 
 ### Phase 8: Env Cells, Interiors, Portals, And Visibility Records
 
@@ -529,3 +551,4 @@ Mitigation: make static-authored dynamic seeds the first dynamic requirement. Th
 - 2026-06-10: Phase 2 introduced a V2 preparation wrapper that imported legacy `src/workers/shared/asset-prepare.ts`. That is now classified as an isolation regression, and Phase 3 exists to remove it before terrain resolver work proceeds.
 - 2026-06-10: Dry run against current renderer contracts found that V2 should start with a fresh minimal renderer facade. Current `WorldDisplayRenderer` is product/resolver/diagnostic-shaped and should not be reused as the V2 renderer API.
 - 2026-06-10: Dry run against current landblock planning confirmed LB LoD should remain runtime-side demand planning. Workers receive concrete landblock/env-cell/domain requests after radii are resolved.
+- 2026-06-10: Phase 3 removed legacy preparation imports, but review found host route strings and response-route regex preparation could still leak semantic string identity into resolver/baker/renderer records. Rather than create a standalone cleanup phase before those records exist, the typed-identity guidance is now woven into the resolver, bake, atlas, and enrichment phases where it first matters.

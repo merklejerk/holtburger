@@ -460,9 +460,12 @@ The earlier vocabulary table was intentionally expansive. After the research pas
 
 | Term | Meaning | Replaces / clarifies |
 | --- | --- | --- |
-| Host asset | Raw host payload addressed by typed asset identity. | binary envelope, DTO payload, string asset ID |
+| Host asset | Raw host payload addressed through the host adapter. Host route strings are transport labels, not runtime resource identity. | binary envelope, DTO payload, string asset ID |
+| Host route string | Host/Tauri transport address such as a landblock, palette, or prepared-texture route. It may appear at the host/preparation boundary and in explicit provenance/debug fields only. | string asset ID, route asset ID |
 | Prepared asset | Decoded and normalized frontend data derived from host assets by the shared preparation library. | prepared record, asset payload, renderer asset read model |
 | Asset service | Logical owner of typed asset identity, host fetch policy, prepared cache, in-flight dedupe, committed prepared-asset leases, warm retention, failure/retry semantics, and shared preparation semantics. It need not be a physical worker. | asset channel, asset streamer, asset prepare worker |
+| Runtime resource identity | Typed internal identity used by resolver payloads, bake inputs/results, texture-manager state, renderer deltas, dynamic records, and source mappings. Discriminants such as `kind` are closed string-literal unions, never arbitrary `string`. | semantic asset ID string, route-derived identity |
+| Opaque cache key | Branded/canonical key derived from a typed runtime identity for local `Map`/cache indexing. It is not accepted as public semantic identity. | string map key, record key |
 | Scene interest | Client demand: location, retention, visibility, quality, and policy. | scene resource interest, browser LOD state, coverage request |
 | Static scope | Static world ownership key, usually landblock or env-cell anchored. | landblock product scope, render artifact identity |
 | Static work request | Concrete static request: scope plus domain, priority, and policy revision. It never contains camera state or interest radii. | desired product, desired layer, landblock render product request |
@@ -472,11 +475,11 @@ The earlier vocabulary table was intentionally expansive. After the research pas
 | Static spatial record | Static-scope geometry/spatial fact used for culling, picking, inspection, or BVH binding. | spatial hint, local BVH sidecar, BVH item binding |
 | Static visibility record | Static-scope visibility fact for object/cell visibility and renderer visibility structures. | object visibility record, cell visibility record |
 | Static portal/interior record | Static-scope portal, env-cell, structured-interior, aperture, and cell-structure facts. | detailed landblock sidecars, portal links, cell metadata |
-| Static source mapping | Static-scope mapping from draw units/slices/records back to source landblock, env-cell, object, material, and asset identities. | object records, part hints, diagnostic source metadata |
+| Static source mapping | Static-scope mapping from draw units/slices/records back to source landblock, env-cell, object, material, and typed runtime resource identities. Host route strings may appear only as explicit provenance/debug text. | object records, part hints, diagnostic source metadata |
 | Static-authored dynamic seed | Static-scope authored dynamic instance seed whose resource hydration and animation state are owned by the dynamic service. | animated static object, rotating windmill seed |
 | Static bake result | Worker output for one static work request: draw units, bake-local texture uses, domain atlas registry updates, static spatial records, static visibility records, static portal/interior records, static source mappings, static-authored dynamic seeds, and source/build revisions. | landblock render product worker result, render artifacts |
 | Dynamic instance | Renderer-visible entity/object instance with transform, appearance state, animation/motion state, and resource refs. | future dynamic renderable, dynamic material placeholder |
-| Texture key | Stable prepared texture identity plus sampling/format constraints. | render surface ID, virtual texture ref, atlas entry key |
+| Texture key | Stable typed prepared texture identity plus sampling/format constraints. It is not a host route string. | render surface ID, virtual texture ref, atlas entry key |
 | Bake texture use | Bake-local handle for one material texture role in one bake result. It is resolved to texture-manager-owned texture refs during commit. | virtual texture ref, texture page ref |
 | Domain atlas registry | Shared atlas placement state for one static domain. It is shared across scopes inside that domain, not globally by default. | texture page store, atlas cache |
 | Domain atlas snapshot | Scoped serializable view of one domain atlas registry for the textures referenced by one static scope payload. | texture pages, atlas inputs |
@@ -1166,7 +1169,11 @@ Frontend policy:
 - Texture preparation policy, detail texture enablement, atlas policy, and renderer capability fallback.
 - Diagnostics, debug panels, and one-frame reports.
 
-Asset identity should be structured internally. The Rust side already has typed request shapes such as `ContentAssetRequest` and `SetupAppearanceRequest`; the TS side relies too heavily on string IDs and parsing. V2 should use typed asset refs in service/worker boundaries and only serialize to strings for logs, stable keys, cache keys, and UI.
+Asset identity should be structured internally. The Rust side already has typed request shapes such as `ContentAssetRequest` and `SetupAppearanceRequest`; the TS side relies too heavily on string IDs and parsing. V2 should use typed asset refs in service/worker boundaries. Host route strings are allowed at the host adapter/preparation boundary for transport and validation, and as explicit provenance/debug text, but they must not become resolver, baker, texture-manager, renderer, or dynamic-service identity.
+
+When V2 needs string keys for `Map`/cache indexing, those keys should be opaque/branded canonical strings derived from typed identities by a single local function. Callers should pass typed identities, not arbitrary strings. `Record<string, T>` should be avoided for semantic resource maps because it makes every string look valid.
+
+Prepared/resolved records should translate host DTO route strings into typed runtime resource identities before entering static resolver payloads or bake inputs. Runtime-facing discriminants such as `kind` must be closed string-literal unions, never arbitrary `string`.
 
 Minimum first visible outdoor terrain does not require static objects. It requires the cell landblock terrain mesh, region profile/material table, and the surface textures/render surfaces needed by visible terrain pcodes and alpha/detail layers. Static object, structured interior, portal mask, and dynamic renderable hydration can trail terrain.
 
@@ -1206,9 +1213,9 @@ Terrain, static objects, structured interiors, and portal masks should not be fo
 - Static objects and structured interiors can likely share the closest model: baked geometry plus material slices and peer static records.
 - Portal masks are a special transition/visibility domain, not a normal material family.
 
-Static records should be enough for culling, picking, portal/interior traversal, debug inspection, and ownership: source instance IDs, owner landblock/env cell, bounds or BVH item refs, draw-slice to source mapping, material references, cell visibility records, portal links/apertures, and interior cell metadata. They should not become a renderer-owned scene graph.
+Static records should be enough for culling, picking, portal/interior traversal, debug inspection, and ownership: source instance IDs, owner landblock/env cell, bounds or BVH item refs, draw-slice to source mapping, typed material/resource references, cell visibility records, portal links/apertures, and interior cell metadata. They should not become a renderer-owned scene graph. They should also not carry host route strings as semantic identity; route strings belong only in explicitly named provenance/debug fields.
 
-Worker output should use bake-local texture-use IDs rather than renderer texture handles. The commit/resource step maps bake-local texture uses to texture-manager-owned texture refs and placement-table entries. This keeps worker output independent of renderer ID allocation while still allowing the baker to validate compatibility against a concrete domain atlas snapshot.
+Worker output should use bake-local typed texture-use IDs rather than renderer texture handles or host asset route strings. The commit/resource step maps bake-local texture uses to texture-manager-owned texture refs and placement-table entries. This keeps worker output independent of renderer ID allocation while still allowing the baker to validate compatibility against a concrete domain atlas snapshot.
 
 ### Static BVH And Spatial Metadata
 
@@ -1250,7 +1257,7 @@ The source facts support shared texture residency; landblock-local atlas ownersh
 
 The material audit shows many repeated static render-surface references, and a 256-landblock outdoor sample showed extreme neighbor overlap in a biased low-variety region: 125 textured landblocks, 3 global render surfaces, all reused, 57 of 58 neighbor pairs overlapping. This sample is not representative enough to size caches, but it validates that landblock-local atlas packing can duplicate common textures.
 
-Static bake jobs cannot be texture-placement blind if draw-unit compatibility depends on binding layout, atlas bucket, sampler state, material-table capacity, or placement revision. They should receive a scoped domain atlas snapshot, use bake-local texture-use IDs, and emit domain atlas registry updates plus draw-unit bake records that reference those local uses. The texture/atlas manager commits the updates by allocating texture refs and placement-table entries.
+Static bake jobs cannot be texture-placement blind if draw-unit compatibility depends on binding layout, atlas bucket, sampler state, material-table capacity, or placement revision. They should receive a scoped domain atlas snapshot, use bake-local typed texture-use IDs, and emit domain atlas registry updates plus draw-unit bake records that reference those local uses. The texture/atlas manager commits the updates by allocating texture refs and placement-table entries.
 
 The worker should not label atlas output as a delta type such as create/revise/repack. That lifecycle decision belongs to the texture/atlas manager, which compares baker output to current domain atlas state and either commits, rebases, retries, or rejects stale results.
 
@@ -1261,6 +1268,8 @@ Eviction should follow split ownership:
 - Geometry: landblock/env-cell scoped, evicted with scene interest and retention policy.
 - Texture refs and placements: shared, lease-counted across resident draw units and dynamic resources.
 - GPU atlas pages: renderer/resource scoped, rebuilt or compacted independently of source geometry when residency changes.
+
+Texture/atlas manager indexes may use opaque/branded canonical string keys internally when `Map` keys need strings, but those keys must be derived from typed texture/resource identities and must not be accepted as public semantic IDs. Host route strings should not be atlas keys, draw-unit texture bindings, renderer texture refs, or placement-table identities.
 
 ### Renderer Contract
 
@@ -1335,6 +1344,10 @@ Risk: Worker protocols become another pile of magic strings.
 
 Mitigation: centralize typed worker RPC contracts, keep static work requests concrete, and avoid dated protocol names.
 
+Risk: Host asset route strings become runtime resource identity.
+
+Mitigation: treat host route strings as transport/provenance only. Resolver payloads, bake inputs/results, atlas records, draw units, source mappings, texture-manager state, renderer deltas, and dynamic records use typed internal identities, runtime-assigned handles, or opaque/branded cache keys derived from typed identities.
+
 Risk: Dropping the dedicated asset-prepare worker creates divergent asset preparation paths.
 
 Mitigation: keep asset preparation as shared library code and keep asset identity, cache, in-flight dedupe, committed prepared-asset leases, warm retention, source revisions, and failure semantics owned by the asset service. Resolver and dynamic workers may execute preparation locally, but they must not own private asset registries.
@@ -1360,11 +1373,13 @@ Mitigation: when semantics are uncertain, verify against ACE, ACViewer, checked-
 - The design does not require a dedicated asset-prepare worker; asset preparation is shared library behavior governed by the asset service.
 - Resolver and dynamic workers can prepare host payloads locally without creating private asset registries or divergent preparation logic.
 - Static work requests contain concrete landblock/env-cell IDs and domains, not interest radii or browser state.
+- Runtime-facing resource identities use typed data and closed string-literal discriminants. Host route strings do not appear as semantic identity outside host/preparation boundaries.
 - Static scope resolver workers perform IO-heavy source resolution and static dependency walking off the render thread.
 - Static bake workers perform CPU-heavy material/atlas/geometry baking off the render thread.
 - Baker jobs are serialized by domain atlas revision and can parallelize across independent domains.
 - Static landblock draw units are baked before renderer upload and combine logical texture refs, material family, sampler/device state, domain, compacted geometry, and draw slices. Static deltas also carry peer records for spatial, visibility, portal/interior, BVH, and source-mapping facts.
 - Worker bake output uses bake-local texture-use IDs; texture refs are assigned by the texture/atlas manager during commit and mirrored by the renderer for GPU placement.
+- Opaque string cache keys are allowed only when derived from typed identities; public service/worker/renderer APIs do not accept arbitrary strings as resource identity.
 - Dynamic renderables can enter the render scene without static landblock baking, packed static VAOs, or static landblock atlases.
 - Static-authored animated objects can enter the dynamic path as scope-owned dynamic seeds.
 - Texture atlas policy can share compatible texture placements across scopes inside a static domain through leases from resident draw units and dynamic resources.
@@ -1391,3 +1406,4 @@ Mitigation: when semantics are uncertain, verify against ACE, ACViewer, checked-
 - 2026-06-10: Static bake results are broader than draw units. They also carry peer static records for spatial metadata, source mappings, visibility records, portal/interior facts, BVH item bindings, and static-authored dynamic seeds.
 - 2026-06-10: Terrain has a dedicated static resolution and baking path. It follows the same ownership chain as other static domains, but terrain-specific mesh, blend/mask/detail, draw-slice, fallback, and BVH rules belong in a terrain bake adapter.
 - 2026-06-10: Draw units bind logical texture refs and placement revisions, not physical atlas pages. Placement changes and sampler policy changes are renderer/resource updates and should not require geometry rebaking.
+- 2026-06-10: Host asset route strings are boundary transport/provenance, not runtime resource identity. Typed identities or runtime-assigned handles are required for resolver payloads, bake outputs, texture manager state, renderer deltas, dynamic records, and source mappings; opaque string cache keys must be derived from typed identities.

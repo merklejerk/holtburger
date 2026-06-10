@@ -1,12 +1,12 @@
 import type { StaticResolverClient } from "../contracts";
 import type {
-	StaticResolverWorkerRequest,
+	StaticResolverWorkerMainMessage,
 	StaticResolverWorkerResponse,
 } from "./protocol";
 
 export async function handleStaticResolverWorkerRequest(
 	resolver: StaticResolverClient,
-	message: StaticResolverWorkerRequest,
+	message: StaticResolverWorkerMainMessage,
 	postMessage: (response: StaticResolverWorkerResponse) => void,
 ): Promise<void> {
 	if (message.kind !== "resolve-static-scope") {

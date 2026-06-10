@@ -73,6 +73,7 @@ describe("V2 static coordinator", () => {
 		expect(coordinator.createSnapshot().activeRequests).toEqual([
 			{
 				domain: "terrain",
+				failureMessage: null,
 				requestId: "1:landblock:da55ffff:terrain",
 				revision: 1,
 				scopeKey: "landblock:da55ffff",

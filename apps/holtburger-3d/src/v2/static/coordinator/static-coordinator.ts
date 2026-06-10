@@ -5,8 +5,10 @@ import type {
 	StaticBakerClient,
 	StaticCoordinatorSnapshot,
 	StaticDemand,
+	StaticResolverFailureSnapshot,
 	StaticResolverClient,
 	StaticScopePayload,
+	TerrainStaticScopePayloadSummary,
 	StaticWorkRequest,
 	StaticWorkRequestStatus,
 } from "../contracts";
@@ -39,6 +41,8 @@ export class StaticCoordinator {
 	#staleResolverResults = 0;
 	#staleBakeResults = 0;
 	#committedDrawUnits = 0;
+	#latestTerrainPayload: TerrainStaticScopePayloadSummary | null = null;
+	#latestResolverFailure: StaticResolverFailureSnapshot | null = null;
 
 	constructor(options: StaticCoordinatorOptions) {
 		this.#resolver = options.resolver;
@@ -57,6 +61,7 @@ export class StaticCoordinator {
 		for (const request of requests) {
 			this.#activeRequests.set(request.requestId, {
 				domain: request.domain,
+				failureMessage: null,
 				requestId: request.requestId,
 				revision: request.revision,
 				scopeKey: describeStaticScopeKey(request.scope),
@@ -91,6 +96,8 @@ export class StaticCoordinator {
 			committed: this.#committed,
 			committedDrawUnits: this.#committedDrawUnits,
 			failed: this.#failed,
+			latestResolverFailure: this.#latestResolverFailure,
+			latestTerrainPayload: this.#latestTerrainPayload,
 			requested: activeRequests.length,
 			resolving: countStatus(activeRequests, "resolving"),
 			revision: this.#revision,
@@ -105,6 +112,8 @@ export class StaticCoordinator {
 		}
 
 		this.#disposed = true;
+		disposeIfAvailable(this.#resolver);
+		disposeIfAvailable(this.#baker);
 		this.#activeRequests.clear();
 		this.#emit();
 		this.#listeners.clear();
@@ -116,8 +125,11 @@ export class StaticCoordinator {
 		let payload: StaticScopePayload;
 		try {
 			payload = await this.#resolver.resolve(request);
-		} catch {
-			this.#markFailedIfCurrent(request);
+		} catch (error: unknown) {
+			this.#markFailedIfCurrent(
+				request,
+				error instanceof Error ? error.message : String(error),
+			);
 			return;
 		}
 
@@ -127,6 +139,7 @@ export class StaticCoordinator {
 			return;
 		}
 
+		this.#recordResolvedPayload(payload);
 		this.#setStatus(request, "baking");
 
 		const bakeInput: StaticBakeInput = {
@@ -138,8 +151,11 @@ export class StaticCoordinator {
 		let result: StaticBakeResult;
 		try {
 			result = await this.#baker.bake(bakeInput);
-		} catch {
-			this.#markFailedIfCurrent(request);
+		} catch (error: unknown) {
+			this.#markFailedIfCurrent(
+				request,
+				error instanceof Error ? error.message : String(error),
+			);
 			return;
 		}
 
@@ -165,7 +181,7 @@ export class StaticCoordinator {
 		this.#emit();
 	}
 
-	#markFailedIfCurrent(request: StaticWorkRequest): void {
+	#markFailedIfCurrent(request: StaticWorkRequest, message: string): void {
 		if (!this.#isCurrent(request)) {
 			return;
 		}
@@ -174,9 +190,35 @@ export class StaticCoordinator {
 
 		if (status) {
 			status.status = "failed";
+			status.failureMessage = message;
 			this.#failed += 1;
+			this.#latestResolverFailure = {
+				domain: request.domain,
+				message,
+				requestId: request.requestId,
+				revision: request.revision,
+				scopeKey: describeStaticScopeKey(request.scope),
+			};
 			this.#emit();
 		}
+	}
+
+	#recordResolvedPayload(payload: StaticScopePayload): void {
+		if (payload.scope.kind !== "terrain") {
+			return;
+		}
+
+		this.#latestTerrainPayload = {
+			landblockId: payload.scope.landblock.landblockId,
+			missingRefCount: payload.scope.missingRefs.length,
+			quadCount: payload.scope.mesh.quadCount,
+			regionNumber: payload.scope.terrainMaterial.identity.regionNumber,
+			textureUseCount: payload.scope.textureUses.length,
+			triangleCount: payload.scope.mesh.triangleCount,
+			vertexCount: payload.scope.mesh.vertexCount,
+		};
+		this.#latestResolverFailure = null;
+		this.#emit();
 	}
 
 	#setStatus(
@@ -242,4 +284,15 @@ function countStatus(
 	status: StaticWorkRequestStatus["status"],
 ): number {
 	return requests.filter((request) => request.status === status).length;
+}
+
+function disposeIfAvailable(value: unknown): void {
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		"dispose" in value &&
+		typeof value.dispose === "function"
+	) {
+		value.dispose();
+	}
 }

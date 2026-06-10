@@ -236,6 +236,8 @@ export interface StaticCoordinatorSnapshot {
 	readonly staleBakeResults: number;
 	readonly committedDrawUnits: number;
 	readonly activeRequests: readonly StaticWorkRequestStatus[];
+	readonly latestTerrainPayload: TerrainStaticScopePayloadSummary | null;
+	readonly latestResolverFailure: StaticResolverFailureSnapshot | null;
 }
 
 export interface StaticWorkRequestStatus {
@@ -244,4 +246,23 @@ export interface StaticWorkRequestStatus {
 	readonly domain: StaticDomain;
 	readonly scopeKey: string;
 	readonly status: "requested" | "resolving" | "baking" | "committed" | "failed";
+	readonly failureMessage: string | null;
+}
+
+export interface TerrainStaticScopePayloadSummary {
+	readonly landblockId: number;
+	readonly regionNumber: number;
+	readonly vertexCount: number;
+	readonly triangleCount: number;
+	readonly quadCount: number;
+	readonly textureUseCount: number;
+	readonly missingRefCount: number;
+}
+
+export interface StaticResolverFailureSnapshot {
+	readonly requestId: string;
+	readonly revision: number;
+	readonly domain: StaticDomain;
+	readonly scopeKey: string;
+	readonly message: string;
 }

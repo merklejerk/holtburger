@@ -153,6 +153,20 @@
 				</dd>
 			</div>
 			<div>
+				<dt>Host</dt>
+				<dd>{snapshot?.host.isAvailable ? "tauri" : "unavailable"}</dd>
+			</div>
+			<div>
+				<dt>Assets</dt>
+				<dd>
+					{#if snapshot}
+						p{snapshot.assets.pending.length} c{snapshot.assets.committed.length} f{snapshot.assets.failures.length}
+					{:else}
+						pending
+					{/if}
+				</dd>
+			</div>
+			<div>
 				<dt>Renderer</dt>
 				<dd>{snapshot?.renderer.backend ?? "none"}</dd>
 			</div>

@@ -49,6 +49,8 @@ Current implementation references, for behavior/parity only:
 - `apps/holtburger-3d/src/workers/static-landblock-render-worker.ts`
 - `apps/holtburger-3d/src/workers/asset-worker.ts`
 
+These files may be read as evidence. V2 implementation code must not import from them.
+
 Reference implementation sources:
 
 - `ACViewer/` for DAT/rendering behavior.
@@ -72,6 +74,9 @@ Verification commands to use as the implementation grows:
 - Terrain is the first visible slice and has a dedicated terrain resolution/bake adapter.
 - Diagnostics must be consumers of snapshots and inspection APIs, not drivers of service interfaces.
 - Every phase must either prove a seam with tests or prove a visible result in the V2 harness.
+- V2 implementation code under `src/v2/` must not import from the legacy frontend implementation under `src/lib/assets/`, `src/lib/world-display/`, `src/app/`, `src/workers/`, `src/pages/BrowserWorldDisplay.svelte`, or other legacy browser-display implementation folders.
+- The only allowed cross-boundary imports from V2 are stable external/shared boundaries that are not legacy frontend architecture: Tauri host command adapters, host DTO schemas, generated/static data contracts, and small pure leaf utilities that have been explicitly moved or promoted out of legacy folders first.
+- If V2 needs useful logic from legacy frontend code, the logic must be copied/extracted into V2-owned modules or promoted to a neutral shared location in the same phase. Temporary wrapper imports from legacy modules are prohibited.
 
 ## Proposed Directory Shape
 
@@ -211,6 +216,8 @@ Verification:
 
 ### Phase 2: Shared Asset Service And Host Lookup
 
+Status: complete.
+
 Purpose: replace the old asset-prepare-worker assumption with shared preparation code plus explicit asset-service ownership.
 
 Deliverables:
@@ -235,7 +242,79 @@ Acceptance criteria:
 - The V2 harness can display asset fetch/prepare status from runtime snapshots without owning asset state.
 - No V2 runtime contract exposes `PreparedAssetStore`, `PreparedAssetResolver`, current render-product diagnostics, or old asset presentation state.
 
-### Phase 3: Terrain Resolver Slice
+Implementation notes:
+
+- Added V2 host asset key helpers that keep V2 keys structured while formatting to the existing host route strings only at the adapter boundary.
+- Added a Tauri runtime host adapter behind `RuntimeHost`, plus an unavailable browser host so Phase 0/1-style plain Vite launches still work and report host state honestly.
+- Replaced the Phase 1 caller-supplied-load asset service with a host-backed asset service that owns in-flight request dedupe, committed prepared cache entries, committed-only leases, warm retention, pruning, and failure snapshots.
+- Added a V2 preparation wrapper that creates host lookup requests and returns V2 `PreparedAsset` records without exposing old prepared-store, prepared-resolver, render-product, or presentation-state types in V2 contracts.
+- Runtime snapshots now include `host` and `assets`, and the V2 harness displays coarse host/asset counts as snapshot projections.
+
+Decisions and course corrections:
+
+- `AssetService.requestPreparedAsset` no longer accepts an arbitrary load callback. The service owns the host fetch/prepare path because letting callers provide loads made the lifecycle easy to test but too loose for the actual architecture.
+- `RuntimeHost.lookupAsset` returns a V2 `PreparedAsset`, not a raw DTO. The Tauri adapter is responsible for translating typed V2 asset keys to old host routes and preparing the response.
+- Course correction: the V2 preparation wrapper currently delegates to the existing route-validated `prepareAssetPayload` implementation. This violates the V2 isolation rule and must be fixed before terrain resolver work starts.
+- The asset service sets warm retention immediately after commit for unleased assets. Acquiring a lease pins the entry, and releasing the last lease starts a new warm-retention window.
+
+Debt and follow-up:
+
+- Immediate debt: remove the V2 import from `src/workers/shared/asset-prepare.ts` and replace it with V2-owned preparation modules before any new resolver/baker phase proceeds.
+- The host adapter supports single-asset lookup. Resolver workers will likely need batched host lookups or a worker-local bridge in Phase 4 to avoid request-per-dependency overhead.
+- Asset snapshot counters are coarse. Do not add detailed diagnostics until real resolver usage shows which facts matter.
+- Warm retention has a manual prune method but no runtime timer or pressure policy yet. Add pruning when real residency/eviction policy exists.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run test:ts`
+
+### Phase 3: Remove Legacy Imports From V2 Asset Preparation
+
+Purpose: fix the Phase 2 isolation regression before adding real resolver or baker code.
+
+Deliverables:
+
+- V2-owned asset preparation modules under `src/v2/assets/preparation/` or an equivalent V2-owned structure.
+- Route-specific V2 preparation for only the asset families needed by the next terrain slice:
+  - landblock outdoor,
+  - landblock topology,
+  - terrain material,
+  - region render profile,
+  - render surface,
+  - surface texture,
+  - prepared texture,
+  - palette.
+- V2-owned route/schema validation that may import host DTO schemas but must not import legacy prepared asset records, legacy dependency walkers, old asset stores, old worker helpers, old diagnostics, or world-display code.
+- Removal of the `src/v2/assets/preparation.ts` import from `src/workers/shared/asset-prepare.ts`.
+- A static import-boundary test or scriptable check that fails if `src/v2/` imports from prohibited legacy frontend directories.
+- Tests covering the terrain-slice preparation families and the import-boundary rule.
+
+Acceptance criteria:
+
+- `src/v2/` has zero imports from `src/workers/`, `src/lib/assets/`, `src/lib/world-display/`, `src/app/`, and old Svelte browser display modules.
+- V2 may still import host DTO schemas and Tauri host command adapters only if those are treated as host boundary code, not asset/render architecture.
+- Palette and typed-array normalization still work through V2-owned code.
+- Route mismatch failures remain hard failures with useful messages.
+- Phase 2 asset service and host adapter tests still pass after removing the legacy preparation dependency.
+
+Decisions and course corrections:
+
+- This phase exists because the Phase 2 wrapper import from legacy preparation was too permissive. The architecture needs a hard import rule now, before the resolver and baker create more gravity around that shortcut.
+
+Debt and follow-up:
+
+- This phase should not attempt to port every legacy asset preparer. Only copy/extract what Phase 4 terrain resolution/baking will use. Additional asset families belong to later static object and dynamic phases.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run test:ts`
+- `rg 'from "\\.\\./\\.\\./(lib/assets|lib/world-display|app|workers)|from "\\.\\./\\.\\./workers|from "\\.\\./\\.\\./lib/assets|from "\\.\\./\\.\\./lib/world-display|from "\\.\\./\\.\\./app' apps/holtburger-3d/src/v2` returns no matches, or an equivalent checked test passes.
+
+### Phase 4: Terrain Resolver Slice
 
 Purpose: make the first real worker path read source data and produce a terrain-specific static scope payload.
 
@@ -255,7 +334,7 @@ Acceptance criteria:
 - A terrain scope payload can be produced for a known landblock.
 - Missing dependencies are reported as typed missing refs, not resolved by hidden main-thread work.
 
-### Phase 4: Terrain Bake Slice With Minimal Texture Placement
+### Phase 5: Terrain Bake Slice With Minimal Texture Placement
 
 Purpose: render one terrain landblock through the real resolver -> baker -> texture manager -> renderer chain.
 
@@ -265,7 +344,7 @@ Deliverables:
 - Terrain bake adapter for terrain mesh extraction, draw slices, fallback geometry, and terrain shader binding layout.
 - Texture/atlas manager skeleton with logical texture refs, direct-texture-as-degenerate-atlas placement, placement revisions, and renderer placement updates.
 - Fresh minimal V2 WebGL2 renderer path that consumes `applyStaticDelta`, `applyTexturePlacementUpdate`, `applySamplerPolicyUpdate`, and `updateFrameState`.
-- Targeted reuse audit for low-level math, camera, and GL helpers from `src/lib/world-display`. Reuse only leaf helpers that do not depend on current render products, prepared asset resolvers, or diagnostic metrics.
+- Targeted read-only audit for low-level math, camera, and GL helper behavior from `src/lib/world-display`. Any useful leaf helper must be moved or copied into a V2-owned or neutral module before V2 imports it.
 
 Acceptance criteria:
 
@@ -275,7 +354,7 @@ Acceptance criteria:
 - Geometry rebake is not required for a placement-table-only update.
 - V2 rendering does not route through `WorldDisplay.svelte`, `WorldDisplayRenderer`, `StaticLandblockProductSource`, or current landblock render product events.
 
-### Phase 5: Domain Atlas Sharing And Revisions
+### Phase 6: Domain Atlas Sharing And Revisions
 
 Purpose: make atlas lifecycle correct before adding more static content.
 
@@ -295,7 +374,7 @@ Acceptance criteria:
 - Removing a static scope releases texture placement leases.
 - Renderer texture placement updates remain separate from static geometry deltas.
 
-### Phase 6: Static Object Enrichment
+### Phase 7: Static Object Enrichment
 
 Purpose: add non-terrain static content only after the terrain and atlas seams are proven.
 
@@ -314,7 +393,7 @@ Acceptance criteria:
 - Picker/inspection can map a draw slice back to source identity without consulting Svelte state.
 - Material-family rules are expressed as code-owned classifiers, not stringly diagnostics.
 
-### Phase 7: Env Cells, Interiors, Portals, And Visibility Records
+### Phase 8: Env Cells, Interiors, Portals, And Visibility Records
 
 Purpose: bring over the indoor/static visibility requirements without folding them into a generic draw-unit blob.
 
@@ -333,7 +412,7 @@ Acceptance criteria:
 - Visibility records can update culling/visibility structures independently of texture placement updates.
 - Static BVH/spatial records are committed alongside other peer static result fields.
 
-### Phase 8: Static-Authored Dynamic Seeds
+### Phase 9: Static-Authored Dynamic Seeds
 
 Purpose: start the dynamic path from real static-authored animation needs rather than abstract future creature rendering.
 
@@ -350,7 +429,7 @@ Acceptance criteria:
 - Dynamic service owns animation/resource/instance state.
 - Static coordinator owns only the seed lifetime relationship to the static scope.
 
-### Phase 9: Browser UX Cutover And Legacy Removal
+### Phase 10: Browser UX Cutover And Legacy Removal
 
 Purpose: replace the old browser world display only after V2 can carry the important behavior.
 
@@ -398,7 +477,7 @@ Mitigation: keep it as control plane only. It schedules, tracks revisions, asks 
 
 Risk: the fake-worker phase creates contracts that real terrain cannot satisfy.
 
-Mitigation: keep Phase 1 contracts intentionally small and validate them immediately with the Phase 3 terrain resolver. Do not add broad generic fields until terrain or static object data proves the need.
+Mitigation: keep Phase 1 contracts intentionally small and validate them immediately with the Phase 4 terrain resolver. Do not add broad generic fields until terrain or static object data proves the need.
 
 Risk: the resolver payload becomes a renamed render product.
 
@@ -406,7 +485,7 @@ Mitigation: design the terrain resolver payload and terrain bake input together.
 
 Risk: atlas sharing delays first visible rendering.
 
-Mitigation: Phase 4 may use direct-texture-as-degenerate-atlas placement for one landblock, but the ownership model must already be the real one: logical texture refs owned by the texture/atlas manager and placement updates mirrored by the renderer.
+Mitigation: Phase 5 may use direct-texture-as-degenerate-atlas placement for one landblock, but the ownership model must already be the real one: logical texture refs owned by the texture/atlas manager and placement updates mirrored by the renderer.
 
 Risk: terrain-specific behavior leaks into generic static structures.
 
@@ -446,6 +525,7 @@ Mitigation: make static-authored dynamic seeds the first dynamic requirement. Th
 - 2026-06-10: Plan starts with a V2 island and visual harness. Svelte appears early for verification, but owns no runtime, asset, static, atlas, or renderer behavior.
 - 2026-06-10: First vertical slice is terrain-first static rendering. Atlas ownership is introduced before broad static object enrichment so landblock-local texture assumptions do not creep back in.
 - 2026-06-10: Dry run against current `App.svelte` found that Phase 0 needs an explicit `/browser-v2` route that bypasses legacy startup and Tauri debug-config reads.
-- 2026-06-10: Dry run against current worker/shared modules found useful extraction candidates, but no drop-in V2 asset module. Existing shared code imports legacy asset/world-display concepts and must be wrapped or extracted selectively.
+- 2026-06-10: Dry run against current worker/shared modules found useful extraction candidates, but no drop-in V2 asset module. Existing shared code imports legacy asset/world-display concepts and must be extracted into V2-owned or neutral modules before V2 can use it.
+- 2026-06-10: Phase 2 introduced a V2 preparation wrapper that imported legacy `src/workers/shared/asset-prepare.ts`. That is now classified as an isolation regression, and Phase 3 exists to remove it before terrain resolver work proceeds.
 - 2026-06-10: Dry run against current renderer contracts found that V2 should start with a fresh minimal renderer facade. Current `WorldDisplayRenderer` is product/resolver/diagnostic-shaped and should not be reused as the V2 renderer API.
 - 2026-06-10: Dry run against current landblock planning confirmed LB LoD should remain runtime-side demand planning. Workers receive concrete landblock/env-cell/domain requests after radii are resolved.

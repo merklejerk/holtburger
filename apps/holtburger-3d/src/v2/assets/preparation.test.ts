@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AssetLookupResponseDto } from "../../lib/host/contracts";
 import type { HostAssetKey } from "./contracts";
+import { prepareTerrainSliceAssetPayload } from "./preparation/route-payloads";
 import {
 	createHostAssetLookupRequest,
 	prepareHostAssetResponse,
@@ -60,5 +61,66 @@ describe("V2 host asset preparation", () => {
 			sourceAssetId: "palette/04000001",
 		});
 		expect(prepared.payload).toMatchObject({ kind: "palette" });
+		expect(prepared.payload).toMatchObject({
+			colorsArgb: expect.any(Uint32Array),
+		});
+	});
+
+	it("fails hard when a host response id does not match the requested key", () => {
+		const key: HostAssetKey = {
+			id: "04000001",
+			kind: "palette",
+		};
+
+		expect(() =>
+			prepareHostAssetResponse({
+				key,
+				requestId: "request-1",
+				response: {
+					assetId: "palette/04000002",
+					payload: {},
+					payloadKind: "json",
+					requestId: "request-1",
+				},
+				revision: 1,
+			}),
+		).toThrow("Host response asset id palette/04000002 did not match");
+	});
+
+	it("recognizes every terrain-slice route and reports route-specific schema failures", () => {
+		const routes = [
+			["landblock/da55ffff/outdoor", "landblock-outdoor"],
+			["landblock/da55ffff/topology", "landblock-topology"],
+			["terrain-material/1", "terrain-material"],
+			["region-render-profile/1", "region-render-profile"],
+			["surface-texture/06000001", "surface-texture"],
+			["render-surface/06000001", "render-surface"],
+			["prepared-texture/06000001?usage=color", "prepared-texture"],
+			["palette/04000001", "palette"],
+		] as const;
+
+		for (const [assetId, expectedKind] of routes) {
+			expect(() =>
+				prepareTerrainSliceAssetPayload({
+					assetId,
+					payload: { kind: "definitely-wrong" },
+					payloadKind: "json",
+					requestId: "request-1",
+				}),
+			).toThrow(
+				`Asset ${assetId} matched the ${expectedKind} route but its payload failed the ${expectedKind} contract`,
+			);
+		}
+	});
+
+	it("rejects routes outside the terrain-slice preparation set", () => {
+		expect(() =>
+			prepareTerrainSliceAssetPayload({
+				assetId: "gfx-obj/01000001",
+				payload: {},
+				payloadKind: "json",
+				requestId: "request-1",
+			}),
+		).toThrow("V2 asset preparation does not support host asset route");
 	});
 });

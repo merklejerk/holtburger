@@ -208,6 +208,7 @@ export class StaticCoordinator {
 			addedDrawUnits: result.drawUnits,
 			removedDrawUnitIds: [],
 			revision: result.work.revision,
+			textureUses: result.textureUses,
 		});
 		this.#emit();
 	}
@@ -224,6 +225,7 @@ export class StaticCoordinator {
 			addedDrawUnits: [],
 			removedDrawUnitIds,
 			revision: this.#revision,
+			textureUses: [],
 		});
 	}
 

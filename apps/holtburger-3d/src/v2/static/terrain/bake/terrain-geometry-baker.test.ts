@@ -21,6 +21,7 @@ describe("V2 terrain geometry baker", () => {
 			kind: "terrain-geometry",
 			landblockId: 0xda55ffff,
 			materialFamily: "terrain-debug-flat",
+			primaryTextureUseId: null,
 			triangleCount: 2,
 			vertexCount: 6,
 		});
@@ -31,6 +32,11 @@ describe("V2 terrain geometry baker", () => {
 		expect(drawUnit.indices).toBeInstanceOf(Uint16Array);
 		expect(Array.from(drawUnit.indices)).toEqual([0, 1, 2, 3, 4, 5]);
 		expect(drawUnit.sourceTriangleIds).toEqual(["t0", "t1"]);
+		expect(Array.from(drawUnit.texCoords)).toEqual([
+			0, 0, 0.125, 0, 0, 0.125,
+			0.125, 0, 0.125, 0.125, 0, 0.125,
+		]);
+		expect(drawUnit.textureUseIds).toEqual([]);
 		expect(result).toMatchObject({
 			atlasRegistryUpdates: [],
 			buildRevision: 42,
@@ -40,6 +46,7 @@ describe("V2 terrain geometry baker", () => {
 				"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:bounds",
 			],
 			staticVisibilityRecords: [],
+			textureUses: [],
 			work: input.work,
 		});
 		expect(result.staticSourceMappings).toEqual([
@@ -77,6 +84,39 @@ describe("V2 terrain geometry baker", () => {
 		expect(drawUnit.indices).toBeInstanceOf(Uint16Array);
 		expect(drawUnit.indices[65_534]).toBe(65_534);
 	});
+
+	it("emits bake-local prepared texture uses without renderer texture refs", () => {
+		const input = createTerrainBakeInput({ includeTextureUse: true });
+
+		const result = bakeTerrainGeometry(input);
+		const drawUnit = requireTerrainDrawUnit(result.drawUnits[0]);
+
+		expect(drawUnit).toMatchObject({
+			materialFamily: "terrain-direct-texture",
+			primaryTextureUseId:
+				"7:landblock:da55ffff:outdoor-terrain:prepared-texture:06000010",
+			textureUseIds: [
+				"7:landblock:da55ffff:outdoor-terrain:prepared-texture:06000010",
+			],
+		});
+		expect(result.textureUses).toEqual([
+			{
+				domain: "outdoor-terrain",
+				ownerDrawUnitIds: [drawUnit.drawUnitId],
+				source: {
+					colorSpace: "srgb",
+					kind: "prepared-texture-use",
+					mipPolicy: "retail4",
+					outputFormat: "rgba8",
+					renderSurfaceId: 0x06000010,
+					usage: "color",
+				},
+				textureUseId:
+					"7:landblock:da55ffff:outdoor-terrain:prepared-texture:06000010",
+			},
+		]);
+		expect(JSON.stringify(result)).not.toContain("texture-ref");
+	});
 });
 
 function requireTerrainDrawUnit(
@@ -96,6 +136,7 @@ function requireTerrainDrawUnit(
 
 function createTerrainBakeInput(
 	options: {
+		readonly includeTextureUse?: boolean;
 		readonly triangleCount?: number;
 	} = {},
 ): StaticBakeInput {
@@ -148,7 +189,30 @@ function createTerrainBakeInput(
 			roadAlphaMapCount: 0,
 			terrainTypeCount: 0,
 		},
-		textureUses: [],
+		textureUses: options.includeTextureUse
+			? [
+					{
+						palette: null,
+						preparedTextureUse: {
+							colorSpace: "srgb",
+							kind: "prepared-texture-use",
+							mipPolicy: "retail4",
+							outputFormat: "rgba8",
+							renderSurfaceId: 0x06000010,
+							usage: "color",
+						},
+						renderSurface: {
+							kind: "render-surface",
+							renderSurfaceId: 0x06000010,
+						},
+						role: "terrain-base",
+						texture: {
+							kind: "surface-texture",
+							surfaceTextureId: 0x05000010,
+						},
+					},
+				]
+			: [],
 	};
 
 	return {

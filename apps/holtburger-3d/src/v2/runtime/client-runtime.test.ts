@@ -171,8 +171,11 @@ function createTerrainDrawUnit(
 		kind: "terrain-geometry",
 		landblockId,
 		materialFamily: "terrain-debug-flat",
+		primaryTextureUseId: null,
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
 		sourceTriangleIds: ["triangle-a"],
+		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+		textureUseIds: [],
 		triangleCount: 1,
 		vertexCount: 3,
 	};

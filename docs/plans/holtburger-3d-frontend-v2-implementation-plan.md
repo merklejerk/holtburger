@@ -575,6 +575,8 @@ Verification:
 
 ### Phase 8: Minimal Texture Manager And Direct Terrain Textures
 
+Status: complete.
+
 Purpose: add the real texture/ref ownership seam using direct-texture-as-degenerate-atlas placement before any atlas sharing or repacking.
 
 Deliverables:
@@ -593,6 +595,32 @@ Acceptance criteria:
 - Renderer texture placement updates are independent from static geometry deltas.
 - Direct texture placement and texture ref lifetime are owned by the runtime texture manager, not the renderer and not Svelte.
 - Unsupported texture formats fail explicitly with typed reasons rather than silently falling back to fake colors.
+
+Implementation notes:
+
+- Added bake-local `StaticBakeTextureUse` peer output to static bake results. Terrain draw units now carry UVs plus bake-local texture-use IDs, while renderer texture refs remain absent from baker output.
+- Added a V2 runtime `TextureManager` that consumes coordinator commit deltas, requests prepared texture bytes through the asset service, assigns runtime-owned direct texture refs, owns placement revisions, tracks draw-unit ownership, and emits renderer placement updates.
+- Updated the renderer texture update contract from placeholder texture-ref IDs to explicit direct placement upload records, removals, and terrain draw-unit bindings.
+- Implemented WebGL2 direct RGBA texture upload and terrain shader binding. Terrain still falls back to the debug flat color until placement data arrives.
+- Corrected V2 host asset key parsing so prepared texture query policy can be preserved at the host boundary while ordinary host routes still become typed numeric IDs.
+
+Decisions and course corrections:
+
+- Phase 8 intentionally binds a first prepared terrain texture directly over baked terrain UVs. It proves the ownership seam and renderer upload path, but it is not terrain material parity: pcode-driven layer selection, masks, detail textures, road overlays, and blend behavior remain Phase 10 work.
+- Unsupported prepared texture formats currently fail hard at the texture manager boundary. The first direct path only accepts `rgba8`; compressed upload policy belongs in the later terrain material/atlas phases.
+- Texture placement updates are asynchronous after static geometry commit. This keeps geometry residency independent from texture preparation and avoids texture work in renderer hot paths.
+
+Debt and follow-up:
+
+- Replace the first-texture terrain binding with real terrain material selection and blend inputs in Phase 10.
+- Add domain atlas sharing, placement reuse, and lease accounting in Phase 9. The current manager removes direct placements by draw-unit ownership and does not yet dedupe compatible uses across scopes.
+- Surface texture-manager snapshot facts in the harness once atlas sharing makes the diagnostic values meaningful.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 9: Domain Atlas Sharing And Revisions
 

@@ -342,6 +342,7 @@ export interface StaticBakeInput {
 export interface StaticBakeResult {
 	readonly work: ScheduledStaticWork;
 	readonly drawUnits: readonly StaticDrawUnit[];
+	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly atlasRegistryUpdates: readonly string[];
 	readonly staticSpatialRecords: readonly string[];
 	readonly staticVisibilityRecords: readonly string[];
@@ -363,14 +364,24 @@ export interface TerrainGeometryStaticDrawUnit {
 	readonly drawUnitId: string;
 	readonly landblockId: number;
 	readonly domain: "outdoor-terrain";
-	readonly materialFamily: "terrain-debug-flat";
+	readonly materialFamily: "terrain-debug-flat" | "terrain-direct-texture";
 	readonly coordinateSpace: "landblock-render-local";
 	readonly positions: Float32Array;
+	readonly texCoords: Float32Array;
 	readonly indices: Uint16Array | Uint32Array;
 	readonly indexType: "uint16" | "uint32";
 	readonly vertexCount: number;
 	readonly triangleCount: number;
 	readonly sourceTriangleIds: readonly string[];
+	readonly primaryTextureUseId: string | null;
+	readonly textureUseIds: readonly string[];
+}
+
+export interface StaticBakeTextureUse {
+	readonly textureUseId: string;
+	readonly domain: StaticDomain;
+	readonly ownerDrawUnitIds: readonly string[];
+	readonly source: PreparedTextureUseIdentity;
 }
 
 export interface StaticResolverClient {
@@ -401,6 +412,7 @@ export interface StaticCoordinatorSnapshot {
 export interface StaticCoordinatorCommitDelta {
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
 	readonly removedDrawUnitIds: readonly string[];
+	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly revision: number;
 }
 

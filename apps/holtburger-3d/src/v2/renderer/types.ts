@@ -27,8 +27,28 @@ export interface DynamicResidencyDelta {
 }
 
 export interface TexturePlacementUpdate {
-	readonly textureRefIds: readonly string[];
+	readonly placements: readonly TexturePlacement[];
+	readonly removedTextureRefIds: readonly string[];
+	readonly drawUnitBindings: readonly TerrainTextureBinding[];
 	readonly revision: number;
+}
+
+export interface TexturePlacement {
+	readonly textureRefId: string;
+	readonly textureUseId: string;
+	readonly placementRevision: number;
+	readonly kind: "direct-texture";
+	readonly width: number;
+	readonly height: number;
+	readonly format: "rgba8";
+	readonly pixels: Uint8Array;
+	readonly rect: readonly [number, number, number, number];
+}
+
+export interface TerrainTextureBinding {
+	readonly drawUnitId: string;
+	readonly textureUseId: string;
+	readonly textureRefId: string;
 }
 
 export interface SamplerPolicyUpdate {

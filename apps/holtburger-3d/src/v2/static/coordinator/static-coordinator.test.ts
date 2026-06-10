@@ -112,6 +112,7 @@ describe("V2 static coordinator", () => {
 				addedDrawUnits: [createPlaceholderDrawUnit("terrain-a")],
 				removedDrawUnitIds: [],
 				revision: 1,
+				textureUses: [],
 			},
 		]);
 		expect(coordinator.createSnapshot().committedDrawUnits).toBe(1);
@@ -130,6 +131,7 @@ describe("V2 static coordinator", () => {
 			addedDrawUnits: [],
 			removedDrawUnitIds: ["terrain-a"],
 			revision: 2,
+			textureUses: [],
 		});
 		expect(coordinator.createSnapshot().committedDrawUnits).toBe(0);
 	});

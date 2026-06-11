@@ -21,7 +21,7 @@ import {
 	planScheduledStaticWork,
 } from "../demand-planner";
 
-const DEFAULT_STATIC_BATCH_MAX_PAYLOADS = 8;
+const DEFAULT_STATIC_BATCH_MAX_PAYLOADS = 10;
 const DEFAULT_STATIC_BATCH_MAX_WAIT_MS = 500;
 
 export type StaticCoordinatorListener = (

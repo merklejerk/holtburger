@@ -113,41 +113,36 @@ export class TextureManager {
 		const placements: RuntimeTexturePlacement[] = [];
 		const drawUnitBindings: TerrainTextureBinding[] = [];
 		const rolePageSlots = new TerrainDrawUnitRolePageSlots();
-		const pendingPlacements = new Map<
-			StaticBatchTextureKey,
-			PendingTexturePlacement
-		>();
+		const pendingPlacements = new Map<string, PendingTexturePlacement>();
 
 		for (const textureUse of delta.textureUses) {
-			const placement = await this.#stageTexturePlacement(
+			const staged = await this.#stageTexturePlacement(
 				textureUse,
 				pendingPlacements,
 			);
-			const entry = placement.entry ?? null;
-
 			for (const drawUnitId of textureUse.ownerDrawUnitIds) {
 				let textureKeys = this.#textureKeysByDrawUnitId.get(drawUnitId);
 				if (!textureKeys) {
 					textureKeys = new Set<StaticBatchTextureKey>();
 					this.#textureKeysByDrawUnitId.set(drawUnitId, textureKeys);
 				}
-				if (!textureKeys.has(placement.textureKey)) {
-					textureKeys.add(placement.textureKey);
-					if (entry) {
-						entry.leaseCount += 1;
+				if (!textureKeys.has(staged.textureKey)) {
+					textureKeys.add(staged.textureKey);
+					if (staged.entry) {
+						staged.entry.leaseCount += 1;
 					} else {
-						placement.pendingLeaseCount += 1;
+						staged.pending.pendingLeaseCount += 1;
 					}
 				}
 			}
 		}
 
-		const packedPlacements = await this.#packPendingTexturePlacements([
-			...pendingPlacements.values(),
-		]);
+		const packedPlacements = await this.#packPendingTexturePlacements(
+			uniquePendingTexturePlacements(pendingPlacements),
+		);
 		placements.push(...packedPlacements);
 
-		for (const placement of pendingPlacements.values()) {
+		for (const placement of uniquePendingTexturePlacements(pendingPlacements)) {
 			const entry = placement.entry;
 			if (!entry) {
 				throw new Error(
@@ -230,7 +225,7 @@ export class TextureManager {
 				}
 
 				const registry = this.#getRegistry(entry.domain, entry.staticBatchId);
-				registry.entries.delete(textureKey);
+				deleteRegistryEntryAliases(registry, entry);
 				registry.revision += 1;
 				if (!this.#hasTextureRef(entry.textureRefId)) {
 					removedTextureRefIds.push(entry.textureRefId);
@@ -243,7 +238,7 @@ export class TextureManager {
 
 	async #stageTexturePlacement(
 		textureUse: StaticBakeTextureUse,
-		pendingPlacements: Map<StaticBatchTextureKey, PendingTexturePlacement>,
+		pendingPlacements: Map<string, PendingTexturePlacement>,
 	): Promise<StagedTexturePlacement> {
 		const registry = this.#getRegistry(
 			textureUse.domain,
@@ -254,15 +249,33 @@ export class TextureManager {
 		if (existing) {
 			return {
 				entry: existing,
-				pendingLeaseCount: 0,
 				textureKey,
 			};
 		}
 
-		const pending = pendingPlacements.get(textureKey);
+		const existingSourceEntry = findRegistryEntryBySource(
+			registry,
+			textureUse.source,
+		);
+		if (existingSourceEntry) {
+			registry.entries.set(textureKey, existingSourceEntry);
+			return {
+				entry: existingSourceEntry,
+				textureKey,
+			};
+		}
+
+		const placementKey = createStaticBatchSourcePlacementKey(textureUse);
+		const pending = pendingPlacements.get(placementKey);
 		if (pending) {
 			addPendingPlacementOwners(pending, textureUse.ownerDrawUnitIds);
-			return pending;
+			pending.textureKeys.add(textureKey);
+			pendingPlacements.set(textureKey, pending);
+			return {
+				entry: null,
+				pending,
+				textureKey,
+			};
 		}
 
 		const prepared = await this.#assetService.requestPreparedAsset(
@@ -282,13 +295,18 @@ export class TextureManager {
 			samplerPolicy,
 			source,
 			staticBatchId: textureUse.staticBatchId,
-			textureKey,
+			textureKeys: new Set([textureKey]),
 			textureUse,
 			ownerDrawUnitIds: new Set(textureUse.ownerDrawUnitIds),
 		};
+		pendingPlacements.set(placementKey, staged);
 		pendingPlacements.set(textureKey, staged);
 
-		return staged;
+		return {
+			entry: null,
+			pending: staged,
+			textureKey,
+		};
 	}
 
 	async #packPendingTexturePlacements(
@@ -383,7 +401,7 @@ export class TextureManager {
 					wrapT: group.pagePolicy.wrapT,
 					width: page.width,
 				});
-				for (const entry of pageEntries) {
+					for (const entry of pageEntries) {
 					const rect = rectByTextureUseId.get(entry.textureUse.textureUseId);
 					if (!rect) {
 						throw new Error(
@@ -401,10 +419,12 @@ export class TextureManager {
 						textureRefId,
 						textureWidth: page.width,
 					};
-					this.#getRegistry(entry.domain, entry.staticBatchId).entries.set(
-						entry.textureKey,
-						entry.entry,
-					);
+					for (const textureKey of entry.textureKeys) {
+						this.#getRegistry(entry.domain, entry.staticBatchId).entries.set(
+							textureKey,
+							entry.entry,
+						);
+					}
 				}
 			}
 			registry.revision = placementRevision;
@@ -490,20 +510,25 @@ interface StaticBatchTextureRegistryEntry {
 }
 
 type StagedTexturePlacement =
-	| PendingTexturePlacement
-	| ExistingTexturePlacement;
+	| ExistingTexturePlacement
+	| PendingStagedTexturePlacement;
 
 interface ExistingTexturePlacement {
 	readonly textureKey: StaticBatchTextureKey;
 	readonly entry: StaticBatchTextureRegistryEntry;
-	pendingLeaseCount: 0;
+}
+
+interface PendingStagedTexturePlacement {
+	readonly textureKey: StaticBatchTextureKey;
+	readonly entry: null;
+	readonly pending: PendingTexturePlacement;
 }
 
 interface PendingTexturePlacement {
 	readonly domain: StaticDomain;
 	readonly staticBatchId: string;
 	readonly textureUse: StaticBakeTextureUse;
-	readonly textureKey: StaticBatchTextureKey;
+	readonly textureKeys: Set<StaticBatchTextureKey>;
 	readonly source: ReturnType<typeof prepareDirectRgbaTextureSource>;
 	readonly pagePolicy: RuntimeTexturePagePolicy;
 	readonly samplerPolicy: RuntimeTextureSamplerPolicy;
@@ -562,6 +587,17 @@ function findRegistryEntryBySource(
 	return null;
 }
 
+function deleteRegistryEntryAliases(
+	registry: StaticBatchTextureRegistry,
+	entry: StaticBatchTextureRegistryEntry,
+): void {
+	for (const [textureKey, candidate] of registry.entries) {
+		if (candidate === entry) {
+			registry.entries.delete(textureKey);
+		}
+	}
+}
+
 function isSamePreparedTextureUse(
 	left: PreparedTextureUseIdentity,
 	right: PreparedTextureUseIdentity,
@@ -582,6 +618,25 @@ function createStaticBatchTextureKey(
 		textureUse.staticBatchId,
 		textureUse.textureUseId,
 	].join(":") as StaticBatchTextureKey;
+}
+
+function createStaticBatchSourcePlacementKey(
+	textureUse: StaticBakeTextureUse,
+): string {
+	return [
+		textureUse.domain,
+		textureUse.staticBatchId,
+		createPreparedTextureUseKey(textureUse.source),
+	].join(":");
+}
+
+function createPreparedTextureUseKey(source: PreparedTextureUseIdentity): string {
+	return [
+		source.kind,
+		source.renderSurfaceId.toString(16).padStart(8, "0"),
+		source.usage,
+		source.outputFormat,
+	].join(":");
 }
 
 function createTextureRefId(
@@ -635,6 +690,12 @@ function groupPendingTexturePlacements(
 	}
 
 	return [...groups.values()];
+}
+
+function uniquePendingTexturePlacements(
+	placementsByKey: ReadonlyMap<string, PendingTexturePlacement>,
+): readonly PendingTexturePlacement[] {
+	return [...new Set(placementsByKey.values())];
 }
 
 function addPendingPlacementOwners(

@@ -7,11 +7,18 @@ import type {
 	TerrainTextureBinding,
 	TexturePlacementUpdate,
 } from "../types";
-import type { TerrainGeometryStaticDrawUnit } from "../../static/contracts";
+import type {
+	TerrainGeometryStaticDrawUnit,
+	TerrainMaterialTextureRoleBinding,
+} from "../../static/contracts";
 import {
 	type TextureFilteringMode,
 	type TextureWrapMode,
 } from "../../textures/sampling-policy";
+
+const TERRAIN_LAYERED_MAX_LAYER_ENTRIES = 8;
+const TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER = 3;
+const TERRAIN_LAYERED_MAX_ROADS_PER_LAYER = 2;
 
 const defaultFrameState: FrameState = {
 	camera: {
@@ -25,13 +32,18 @@ const defaultFrameState: FrameState = {
 const TERRAIN_VERTEX_SHADER = `#version 300 es
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec2 texCoord;
+layout(location = 2) in float layerSlot;
 
 uniform mat4 uModelViewProjection;
 
 out vec2 vTexCoord;
+out vec3 vWorldPosition;
+flat out int vLayerSlot;
 
 void main() {
 	vTexCoord = texCoord;
+	vWorldPosition = position;
+	vLayerSlot = int(layerSlot);
 	gl_Position = uModelViewProjection * vec4(position, 1.0);
 }
 `;
@@ -44,12 +56,147 @@ uniform sampler2D uTexture;
 uniform vec4 uTextureRect;
 uniform vec2 uTextureSize;
 uniform bool uUseTexture;
+uniform int uMaterialMode;
+uniform sampler2D uColorAtlasTexture;
+uniform vec2 uColorAtlasSize;
+uniform sampler2D uMaskAtlasTexture;
+uniform vec2 uMaskAtlasSize;
+uniform sampler2D uDetailAtlasTexture;
+uniform vec2 uDetailAtlasSize;
+uniform vec4 uDetailAtlasRect;
+uniform float uDetailTiling;
+uniform float uDetailFadeNear;
+uniform float uDetailFadeFar;
+uniform int uDetailEnabled;
+uniform vec3 uCameraPosition;
+uniform vec4 uLayerBaseColorRects[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES}];
+uniform float uLayerBaseTilings[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES}];
+uniform vec4 uLayerOverlayColorRects[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER}];
+uniform vec4 uLayerOverlayMaskRects[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER}];
+uniform float uLayerOverlayTilings[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER}];
+uniform int uLayerOverlayRotations[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER}];
+uniform int uLayerOverlayCounts[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES}];
+uniform vec4 uLayerRoadColorRects[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES}];
+uniform vec4 uLayerRoadMaskRects[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_ROADS_PER_LAYER}];
+uniform float uLayerRoadTilings[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES}];
+uniform int uLayerRoadRotations[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_ROADS_PER_LAYER}];
+uniform int uLayerRoadCounts[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES}];
 
 in vec2 vTexCoord;
+in vec3 vWorldPosition;
+flat in int vLayerSlot;
 
 out vec4 fragColor;
 
+vec2 legacyAlphaUv(vec2 uv) {
+	return vec2(uv.x, 1.0 - uv.y);
+}
+
+vec2 rotateLegacyAlphaUv(vec2 uv, int rotation) {
+	if (rotation == 1) {
+		return vec2(1.0 - uv.y, uv.x);
+	}
+	if (rotation == 2) {
+		return vec2(1.0 - uv.x, 1.0 - uv.y);
+	}
+	if (rotation == 3) {
+		return vec2(uv.y, 1.0 - uv.x);
+	}
+	return uv;
+}
+
+vec4 sampleAtlasRect(sampler2D atlasTexture, vec2 atlasSize, vec4 rect, vec2 localUv, vec2 gradX, vec2 gradY) {
+	vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
+	vec2 atlasGradX = gradX * rect.zw / atlasSize;
+	vec2 atlasGradY = gradY * rect.zw / atlasSize;
+	return textureGrad(atlasTexture, atlasUv, atlasGradX, atlasGradY);
+}
+
+vec4 sampleRepeatingColor(vec4 rect, float tiling) {
+	vec2 tiledUv = vTexCoord * tiling;
+	return sampleAtlasRect(
+		uColorAtlasTexture,
+		uColorAtlasSize,
+		rect,
+		fract(tiledUv),
+		dFdx(tiledUv),
+		dFdy(tiledUv)
+	);
+}
+
+vec4 sampleRepeatingDetail() {
+	vec2 tiledUv = vTexCoord * uDetailTiling;
+	return sampleAtlasRect(
+		uDetailAtlasTexture,
+		uDetailAtlasSize,
+		uDetailAtlasRect,
+		fract(tiledUv),
+		dFdx(tiledUv),
+		dFdy(tiledUv)
+	);
+}
+
+float terrainDetailFade() {
+	float cameraDistance = length(vWorldPosition - uCameraPosition);
+	return clamp(
+		(uDetailFadeFar - cameraDistance) / max(uDetailFadeFar - uDetailFadeNear, 0.0001),
+		0.0,
+		1.0
+	);
+}
+
+float sampleMask(vec4 rect, int rotation) {
+	vec2 maskUv = rotateLegacyAlphaUv(legacyAlphaUv(vTexCoord), rotation);
+	vec2 atlasUv = (rect.xy + maskUv * rect.zw) / uMaskAtlasSize;
+	return texture(uMaskAtlasTexture, atlasUv).r;
+}
+
+vec4 sampleLayeredTerrain() {
+	int layer = clamp(vLayerSlot, 0, ${TERRAIN_LAYERED_MAX_LAYER_ENTRIES - 1});
+	vec4 color = sampleRepeatingColor(uLayerBaseColorRects[layer], uLayerBaseTilings[layer]);
+	for (int overlayIndex = 0; overlayIndex < ${TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER}; overlayIndex += 1) {
+		if (overlayIndex >= uLayerOverlayCounts[layer]) {
+			break;
+		}
+		int index = layer * ${TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER} + overlayIndex;
+		vec4 overlayColor = sampleRepeatingColor(
+			uLayerOverlayColorRects[index],
+			uLayerOverlayTilings[index]
+		);
+		float alpha = sampleMask(uLayerOverlayMaskRects[index], uLayerOverlayRotations[index]);
+		color = mix(color, overlayColor, clamp(1.0 - alpha, 0.0, 1.0));
+	}
+	if (uLayerRoadCounts[layer] > 0) {
+		vec4 roadColor = sampleRepeatingColor(
+			uLayerRoadColorRects[layer],
+			uLayerRoadTilings[layer]
+		);
+		int roadBaseIndex = layer * ${TERRAIN_LAYERED_MAX_ROADS_PER_LAYER};
+		float roadAlpha = 1.0 - sampleMask(
+			uLayerRoadMaskRects[roadBaseIndex],
+			uLayerRoadRotations[roadBaseIndex]
+		);
+		if (uLayerRoadCounts[layer] > 1) {
+			roadAlpha = 1.0 - (
+				sampleMask(uLayerRoadMaskRects[roadBaseIndex], uLayerRoadRotations[roadBaseIndex]) *
+				sampleMask(uLayerRoadMaskRects[roadBaseIndex + 1], uLayerRoadRotations[roadBaseIndex + 1])
+			);
+		}
+		color = mix(color, roadColor, clamp(roadAlpha, 0.0, 1.0));
+	}
+	if (uDetailEnabled == 1) {
+		vec4 detailColor = sampleRepeatingDetail();
+		float detailWeight = clamp(detailColor.a * terrainDetailFade(), 0.0, 1.0);
+		color.rgb = mix(color.rgb, detailColor.rgb, detailWeight);
+	}
+	return vec4(color.rgb, 1.0);
+}
+
 void main() {
+	if (uMaterialMode == 2) {
+		fragColor = sampleLayeredTerrain();
+		return;
+	}
 	vec2 localUv = fract(vTexCoord);
 	vec2 atlasUv = (uTextureRect.xy + localUv * uTextureRect.zw) / uTextureSize;
 	vec2 atlasGradX = dFdx(vTexCoord) * uTextureRect.zw / uTextureSize;
@@ -80,7 +227,11 @@ class Webgl2Renderer implements Renderer {
 	readonly #listeners = new Set<RendererSnapshotListener>();
 	readonly #terrainResources = new Map<string, TerrainGeometryResource>();
 	readonly #textures = new Map<string, WebGLTexture>();
-	readonly #terrainTextureBindings = new Map<string, TerrainTextureBinding>();
+	readonly #terrainTextureBindings = new Map<
+		string,
+		Map<string, TerrainTextureBinding>
+	>();
+	readonly #warnedLayeredFallbackDrawUnitIds = new Set<string>();
 	readonly #terrainProgram: TerrainGeometryProgram;
 	#animationFrameId: number | null = null;
 	#disposed = false;
@@ -104,6 +255,7 @@ class Webgl2Renderer implements Renderer {
 			resource.dispose();
 			this.#terrainResources.delete(drawUnitId);
 			this.#terrainTextureBindings.delete(drawUnitId);
+			this.#warnedLayeredFallbackDrawUnitIds.delete(drawUnitId);
 		}
 
 		for (const placement of delta.addedDrawUnitPlacements) {
@@ -151,7 +303,10 @@ class Webgl2Renderer implements Renderer {
 		}
 
 		for (const binding of update.drawUnitBindings) {
-			this.#terrainTextureBindings.set(binding.drawUnitId, binding);
+			const bindings =
+				this.#terrainTextureBindings.get(binding.drawUnitId) ?? new Map();
+			bindings.set(binding.textureUseId, binding);
+			this.#terrainTextureBindings.set(binding.drawUnitId, bindings);
 		}
 	}
 
@@ -189,6 +344,7 @@ class Webgl2Renderer implements Renderer {
 		this.#terrainResources.clear();
 		this.#textures.clear();
 		this.#terrainTextureBindings.clear();
+		this.#warnedLayeredFallbackDrawUnitIds.clear();
 		this.#terrainProgram.dispose();
 		this.#listeners.clear();
 	}
@@ -252,13 +408,30 @@ class Webgl2Renderer implements Renderer {
 		gl.uniform4f(this.#terrainProgram.uniforms.uColor, 0.22, 0.72, 0.42, 1);
 
 		for (const resource of this.#terrainResources.values()) {
-			const binding = this.#terrainTextureBindings.get(resource.drawUnitId);
+			const bindings =
+				this.#terrainTextureBindings.get(resource.drawUnitId) ?? new Map();
+			const binding = resource.primaryTextureUseId
+				? bindings.get(resource.primaryTextureUseId)
+				: undefined;
 			const texture = binding
 				? (this.#textures.get(binding.textureRefId) ?? null)
 				: null;
 			const useTexture =
 				resource.materialFamily === "terrain-single-base-color" &&
 				texture !== null;
+			const useLayered =
+				resource.materialFamily === "terrain-layered" &&
+				uploadTerrainLayeredUniforms(
+					gl,
+					this.#terrainProgram,
+					resource,
+					bindings,
+					this.#textures,
+					this.#frameState,
+				);
+			if (resource.materialFamily === "terrain-layered" && !useLayered) {
+				this.#warnTerrainLayeredFallback(resource);
+			}
 			gl.activeTexture(gl.TEXTURE0);
 			gl.bindTexture(gl.TEXTURE_2D, useTexture ? texture : null);
 			gl.uniform1i(this.#terrainProgram.uniforms.uTexture, 0);
@@ -277,6 +450,10 @@ class Webgl2Renderer implements Renderer {
 			gl.uniform1i(
 				this.#terrainProgram.uniforms.uUseTexture,
 				useTexture ? 1 : 0,
+			);
+			gl.uniform1i(
+				this.#terrainProgram.uniforms.uMaterialMode,
+				useLayered ? 2 : useTexture ? 1 : 0,
 			);
 			gl.bindVertexArray(resource.vertexArray);
 			gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
@@ -327,12 +504,52 @@ class Webgl2Renderer implements Renderer {
 			listener(snapshot);
 		}
 	}
+
+	#warnTerrainLayeredFallback(resource: TerrainGeometryResource): void {
+		if (this.#warnedLayeredFallbackDrawUnitIds.has(resource.drawUnitId)) {
+			return;
+		}
+		this.#warnedLayeredFallbackDrawUnitIds.add(resource.drawUnitId);
+		console.warn(
+			`V2 terrain draw unit ${resource.drawUnitId} rendered with terrain-debug-flat because its layered material could not be fully satisfied.`,
+			{
+				materialFamily: resource.materialFamily,
+				reason:
+					"Missing texture binding/residency or more than one packed page for a color or mask role.",
+			},
+		);
+	}
 }
 
 interface TerrainGeometryProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly uColor: WebGLUniformLocation;
+		readonly uCameraPosition: WebGLUniformLocation;
+		readonly uColorAtlasSize: WebGLUniformLocation;
+		readonly uColorAtlasTexture: WebGLUniformLocation;
+		readonly uDetailAtlasRect: WebGLUniformLocation;
+		readonly uDetailAtlasSize: WebGLUniformLocation;
+		readonly uDetailAtlasTexture: WebGLUniformLocation;
+		readonly uDetailEnabled: WebGLUniformLocation;
+		readonly uDetailFadeFar: WebGLUniformLocation;
+		readonly uDetailFadeNear: WebGLUniformLocation;
+		readonly uDetailTiling: WebGLUniformLocation;
+		readonly uLayerBaseColorRects: WebGLUniformLocation;
+		readonly uLayerBaseTilings: WebGLUniformLocation;
+		readonly uLayerOverlayColorRects: WebGLUniformLocation;
+		readonly uLayerOverlayCounts: WebGLUniformLocation;
+		readonly uLayerOverlayMaskRects: WebGLUniformLocation;
+		readonly uLayerOverlayRotations: WebGLUniformLocation;
+		readonly uLayerOverlayTilings: WebGLUniformLocation;
+		readonly uLayerRoadColorRects: WebGLUniformLocation;
+		readonly uLayerRoadCounts: WebGLUniformLocation;
+		readonly uLayerRoadMaskRects: WebGLUniformLocation;
+		readonly uLayerRoadRotations: WebGLUniformLocation;
+		readonly uLayerRoadTilings: WebGLUniformLocation;
+		readonly uMaskAtlasSize: WebGLUniformLocation;
+		readonly uMaskAtlasTexture: WebGLUniformLocation;
+		readonly uMaterialMode: WebGLUniformLocation;
 		readonly uModelViewProjection: WebGLUniformLocation;
 		readonly uTexture: WebGLUniformLocation;
 		readonly uTextureRect: WebGLUniformLocation;
@@ -346,9 +563,12 @@ interface TerrainGeometryResource {
 	readonly vertexArray: WebGLVertexArrayObject;
 	readonly positionBuffer: WebGLBuffer;
 	readonly texCoordBuffer: WebGLBuffer;
+	readonly layerSlotBuffer: WebGLBuffer;
 	readonly indexBuffer: WebGLBuffer;
 	readonly drawUnitId: string;
 	readonly materialFamily: TerrainGeometryStaticDrawUnit["materialFamily"];
+	readonly primaryTextureUseId: string | null;
+	readonly terrainMaterialPlan: TerrainGeometryStaticDrawUnit["terrainMaterialPlan"];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
@@ -388,7 +608,44 @@ function createTerrainGeometryProgram(
 	return {
 		program,
 		uniforms: {
+			uCameraPosition: requireUniform(gl, program, "uCameraPosition"),
 			uColor: requireUniform(gl, program, "uColor"),
+			uColorAtlasSize: requireUniform(gl, program, "uColorAtlasSize"),
+			uColorAtlasTexture: requireUniform(gl, program, "uColorAtlasTexture"),
+			uDetailAtlasRect: requireUniform(gl, program, "uDetailAtlasRect"),
+			uDetailAtlasSize: requireUniform(gl, program, "uDetailAtlasSize"),
+			uDetailAtlasTexture: requireUniform(gl, program, "uDetailAtlasTexture"),
+			uDetailEnabled: requireUniform(gl, program, "uDetailEnabled"),
+			uDetailFadeFar: requireUniform(gl, program, "uDetailFadeFar"),
+			uDetailFadeNear: requireUniform(gl, program, "uDetailFadeNear"),
+			uDetailTiling: requireUniform(gl, program, "uDetailTiling"),
+			uLayerBaseColorRects: requireUniform(gl, program, "uLayerBaseColorRects"),
+			uLayerBaseTilings: requireUniform(gl, program, "uLayerBaseTilings"),
+			uLayerOverlayColorRects: requireUniform(
+				gl,
+				program,
+				"uLayerOverlayColorRects",
+			),
+			uLayerOverlayCounts: requireUniform(gl, program, "uLayerOverlayCounts"),
+			uLayerOverlayMaskRects: requireUniform(
+				gl,
+				program,
+				"uLayerOverlayMaskRects",
+			),
+			uLayerOverlayRotations: requireUniform(
+				gl,
+				program,
+				"uLayerOverlayRotations",
+			),
+			uLayerOverlayTilings: requireUniform(gl, program, "uLayerOverlayTilings"),
+			uLayerRoadColorRects: requireUniform(gl, program, "uLayerRoadColorRects"),
+			uLayerRoadCounts: requireUniform(gl, program, "uLayerRoadCounts"),
+			uLayerRoadMaskRects: requireUniform(gl, program, "uLayerRoadMaskRects"),
+			uLayerRoadRotations: requireUniform(gl, program, "uLayerRoadRotations"),
+			uLayerRoadTilings: requireUniform(gl, program, "uLayerRoadTilings"),
+			uMaskAtlasSize: requireUniform(gl, program, "uMaskAtlasSize"),
+			uMaskAtlasTexture: requireUniform(gl, program, "uMaskAtlasTexture"),
+			uMaterialMode: requireUniform(gl, program, "uMaterialMode"),
 			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
 			uTexture: requireUniform(gl, program, "uTexture"),
 			uTextureRect: requireUniform(gl, program, "uTextureRect"),
@@ -409,8 +666,15 @@ function createTerrainGeometryResource(
 	const vertexArray = gl.createVertexArray();
 	const positionBuffer = gl.createBuffer();
 	const texCoordBuffer = gl.createBuffer();
+	const layerSlotBuffer = gl.createBuffer();
 	const indexBuffer = gl.createBuffer();
-	if (!vertexArray || !positionBuffer || !texCoordBuffer || !indexBuffer) {
+	if (
+		!vertexArray ||
+		!positionBuffer ||
+		!texCoordBuffer ||
+		!layerSlotBuffer ||
+		!indexBuffer
+	) {
 		if (vertexArray) {
 			gl.deleteVertexArray(vertexArray);
 		}
@@ -419,6 +683,9 @@ function createTerrainGeometryResource(
 		}
 		if (texCoordBuffer) {
 			gl.deleteBuffer(texCoordBuffer);
+		}
+		if (layerSlotBuffer) {
+			gl.deleteBuffer(layerSlotBuffer);
 		}
 		if (indexBuffer) {
 			gl.deleteBuffer(indexBuffer);
@@ -441,6 +708,11 @@ function createTerrainGeometryResource(
 	gl.enableVertexAttribArray(1);
 	gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
 
+	gl.bindBuffer(gl.ARRAY_BUFFER, layerSlotBuffer);
+	gl.bufferData(gl.ARRAY_BUFFER, drawUnit.layerSlots, gl.STATIC_DRAW);
+	gl.enableVertexAttribArray(2);
+	gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
+
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, drawUnit.indices, gl.STATIC_DRAW);
 	gl.bindVertexArray(null);
@@ -454,6 +726,9 @@ function createTerrainGeometryResource(
 		indexType:
 			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
 		materialFamily: drawUnit.materialFamily,
+		primaryTextureUseId: drawUnit.primaryTextureUseId,
+		terrainMaterialPlan: drawUnit.terrainMaterialPlan,
+		layerSlotBuffer,
 		positionBuffer,
 		texCoordBuffer,
 		triangleCount: drawUnit.triangleCount,
@@ -461,6 +736,7 @@ function createTerrainGeometryResource(
 		dispose() {
 			gl.deleteBuffer(positionBuffer);
 			gl.deleteBuffer(texCoordBuffer);
+			gl.deleteBuffer(layerSlotBuffer);
 			gl.deleteBuffer(indexBuffer);
 			gl.deleteVertexArray(vertexArray);
 		},
@@ -483,6 +759,277 @@ function translateTerrainPositions(
 	}
 
 	return translated;
+}
+
+function uploadTerrainLayeredUniforms(
+	gl: WebGL2RenderingContext,
+	program: TerrainGeometryProgram,
+	resource: TerrainGeometryResource,
+	bindings: ReadonlyMap<string, TerrainTextureBinding>,
+	textures: ReadonlyMap<string, WebGLTexture>,
+	frameState: FrameState,
+): boolean {
+	const plan = resource.terrainMaterialPlan;
+	if (!plan) {
+		return false;
+	}
+
+	const colorBindings = new Map<string, TerrainTextureBinding>();
+	const maskBindings = new Map<string, TerrainTextureBinding>();
+	let detailBinding: TerrainTextureBinding | null = null;
+
+	for (const entry of plan.layerEntries) {
+		if (!collectPageBinding(entry.base, bindings, colorBindings)) {
+			return false;
+		}
+		for (const overlay of entry.overlays) {
+			if (
+				!collectPageBinding(overlay.terrain, bindings, colorBindings) ||
+				!collectPageBinding(overlay.alpha, bindings, maskBindings)
+			) {
+				return false;
+			}
+		}
+		for (const road of entry.roads) {
+			if (
+				!collectPageBinding(road.road, bindings, colorBindings) ||
+				!collectPageBinding(road.alpha, bindings, maskBindings)
+			) {
+				return false;
+			}
+		}
+	}
+
+	for (const detailRole of plan.detailRoles) {
+		const binding = detailRole.texture.textureUseId
+			? bindings.get(detailRole.texture.textureUseId)
+			: undefined;
+		if (!binding) {
+			return false;
+		}
+		if (detailBinding && detailBinding.textureRefId !== binding.textureRefId) {
+			return false;
+		}
+		detailBinding = binding;
+	}
+
+	if (colorBindings.size !== 1 || maskBindings.size > 1) {
+		return false;
+	}
+
+	const colorBinding = firstMapValue(colorBindings);
+	const maskBinding = firstMapValue(maskBindings);
+	const colorTexture = colorBinding
+		? (textures.get(colorBinding.textureRefId) ?? null)
+		: null;
+	const maskTexture = maskBinding
+		? (textures.get(maskBinding.textureRefId) ?? null)
+		: null;
+	const detailTexture = detailBinding
+		? (textures.get(detailBinding.textureRefId) ?? null)
+		: null;
+	if (
+		!colorBinding ||
+		!colorTexture ||
+		(maskBindings.size > 0 && !maskTexture)
+	) {
+		return false;
+	}
+	if (detailBinding && !detailTexture) {
+		return false;
+	}
+
+	gl.activeTexture(gl.TEXTURE1);
+	gl.bindTexture(gl.TEXTURE_2D, colorTexture);
+	gl.uniform1i(program.uniforms.uColorAtlasTexture, 1);
+	gl.uniform2f(
+		program.uniforms.uColorAtlasSize,
+		colorBinding.textureWidth,
+		colorBinding.textureHeight,
+	);
+	gl.activeTexture(gl.TEXTURE2);
+	gl.bindTexture(gl.TEXTURE_2D, maskTexture);
+	gl.uniform1i(program.uniforms.uMaskAtlasTexture, 2);
+	gl.uniform2f(
+		program.uniforms.uMaskAtlasSize,
+		maskBinding?.textureWidth ?? 1,
+		maskBinding?.textureHeight ?? 1,
+	);
+	gl.activeTexture(gl.TEXTURE3);
+	gl.bindTexture(gl.TEXTURE_2D, detailTexture);
+	gl.uniform1i(program.uniforms.uDetailAtlasTexture, 3);
+	gl.uniform2f(
+		program.uniforms.uDetailAtlasSize,
+		detailBinding?.textureWidth ?? 1,
+		detailBinding?.textureHeight ?? 1,
+	);
+
+	uploadTerrainLayerRectUniforms(gl, program, plan, bindings);
+	uploadTerrainDetailUniforms(gl, program, plan, bindings, detailBinding);
+	gl.uniform3f(
+		program.uniforms.uCameraPosition,
+		frameState.camera.position[0],
+		frameState.camera.position[1],
+		frameState.camera.position[2],
+	);
+
+	return true;
+}
+
+function collectPageBinding(
+	role: TerrainMaterialTextureRoleBinding,
+	bindings: ReadonlyMap<string, TerrainTextureBinding>,
+	pageBindings: Map<string, TerrainTextureBinding>,
+): boolean {
+	if (!role.textureUseId) {
+		return false;
+	}
+	const binding = bindings.get(role.textureUseId);
+	if (!binding) {
+		return false;
+	}
+	pageBindings.set(binding.textureRefId, binding);
+	return true;
+}
+
+function uploadTerrainLayerRectUniforms(
+	gl: WebGL2RenderingContext,
+	program: TerrainGeometryProgram,
+	plan: NonNullable<TerrainGeometryResource["terrainMaterialPlan"]>,
+	bindings: ReadonlyMap<string, TerrainTextureBinding>,
+): void {
+	const baseColorRects = new Float32Array(
+		TERRAIN_LAYERED_MAX_LAYER_ENTRIES * 4,
+	);
+	const baseTilings = new Float32Array(TERRAIN_LAYERED_MAX_LAYER_ENTRIES);
+	const overlayColorRects = new Float32Array(
+		TERRAIN_LAYERED_MAX_LAYER_ENTRIES *
+			TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER *
+			4,
+	);
+	const overlayMaskRects = new Float32Array(
+		TERRAIN_LAYERED_MAX_LAYER_ENTRIES *
+			TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER *
+			4,
+	);
+	const overlayTilings = new Float32Array(
+		TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER,
+	);
+	const overlayRotations = new Int32Array(
+		TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER,
+	);
+	const overlayCounts = new Int32Array(TERRAIN_LAYERED_MAX_LAYER_ENTRIES);
+	const roadColorRects = new Float32Array(
+		TERRAIN_LAYERED_MAX_LAYER_ENTRIES * 4,
+	);
+	const roadMaskRects = new Float32Array(
+		TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_ROADS_PER_LAYER * 4,
+	);
+	const roadTilings = new Float32Array(TERRAIN_LAYERED_MAX_LAYER_ENTRIES);
+	const roadRotations = new Int32Array(
+		TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_ROADS_PER_LAYER,
+	);
+	const roadCounts = new Int32Array(TERRAIN_LAYERED_MAX_LAYER_ENTRIES);
+
+	for (const layer of plan.layerEntries) {
+		baseColorRects.set(
+			resolveBindingRect(bindings, layer.base),
+			layer.slot * 4,
+		);
+		baseTilings[layer.slot] = layer.base.tiling;
+		overlayCounts[layer.slot] = Math.min(
+			layer.overlays.length,
+			TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER,
+		);
+		for (const [overlayIndex, overlay] of layer.overlays
+			.slice(0, TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER)
+			.entries()) {
+			const index =
+				layer.slot * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER + overlayIndex;
+			overlayColorRects.set(
+				resolveBindingRect(bindings, overlay.terrain),
+				index * 4,
+			);
+			overlayMaskRects.set(
+				resolveBindingRect(bindings, overlay.alpha),
+				index * 4,
+			);
+			overlayTilings[index] = overlay.terrain.tiling;
+			overlayRotations[index] = overlay.rotation;
+		}
+		roadCounts[layer.slot] = Math.min(
+			layer.roads.length,
+			TERRAIN_LAYERED_MAX_ROADS_PER_LAYER,
+		);
+		const roadTexture = layer.roads[0]?.road ?? null;
+		if (roadTexture) {
+			roadColorRects.set(
+				resolveBindingRect(bindings, roadTexture),
+				layer.slot * 4,
+			);
+			roadTilings[layer.slot] = roadTexture.tiling;
+		}
+		for (const [roadIndex, road] of layer.roads
+			.slice(0, TERRAIN_LAYERED_MAX_ROADS_PER_LAYER)
+			.entries()) {
+			const index =
+				layer.slot * TERRAIN_LAYERED_MAX_ROADS_PER_LAYER + roadIndex;
+			roadMaskRects.set(resolveBindingRect(bindings, road.alpha), index * 4);
+			roadRotations[index] = road.rotation;
+		}
+	}
+
+	gl.uniform4fv(program.uniforms.uLayerBaseColorRects, baseColorRects);
+	gl.uniform1fv(program.uniforms.uLayerBaseTilings, baseTilings);
+	gl.uniform4fv(program.uniforms.uLayerOverlayColorRects, overlayColorRects);
+	gl.uniform4fv(program.uniforms.uLayerOverlayMaskRects, overlayMaskRects);
+	gl.uniform1fv(program.uniforms.uLayerOverlayTilings, overlayTilings);
+	gl.uniform1iv(program.uniforms.uLayerOverlayRotations, overlayRotations);
+	gl.uniform1iv(program.uniforms.uLayerOverlayCounts, overlayCounts);
+	gl.uniform4fv(program.uniforms.uLayerRoadColorRects, roadColorRects);
+	gl.uniform4fv(program.uniforms.uLayerRoadMaskRects, roadMaskRects);
+	gl.uniform1fv(program.uniforms.uLayerRoadTilings, roadTilings);
+	gl.uniform1iv(program.uniforms.uLayerRoadRotations, roadRotations);
+	gl.uniform1iv(program.uniforms.uLayerRoadCounts, roadCounts);
+}
+
+function uploadTerrainDetailUniforms(
+	gl: WebGL2RenderingContext,
+	program: TerrainGeometryProgram,
+	plan: NonNullable<TerrainGeometryResource["terrainMaterialPlan"]>,
+	bindings: ReadonlyMap<string, TerrainTextureBinding>,
+	detailBinding: TerrainTextureBinding | null,
+): void {
+	const detailRole = plan.detailRoles[0] ?? null;
+	const detailRect = detailRole
+		? resolveBindingRect(bindings, detailRole.texture)
+		: ([0, 0, 1, 1] as const);
+	gl.uniform1i(
+		program.uniforms.uDetailEnabled,
+		detailRole && detailBinding ? 1 : 0,
+	);
+	gl.uniform4fv(program.uniforms.uDetailAtlasRect, detailRect);
+	gl.uniform1f(program.uniforms.uDetailTiling, detailRole?.texture.tiling ?? 1);
+	gl.uniform1f(program.uniforms.uDetailFadeNear, detailRole?.fadeNear ?? 0);
+	gl.uniform1f(program.uniforms.uDetailFadeFar, detailRole?.fadeFar ?? 1);
+}
+
+function resolveBindingRect(
+	bindings: ReadonlyMap<string, TerrainTextureBinding>,
+	role: TerrainMaterialTextureRoleBinding,
+): readonly [number, number, number, number] {
+	if (!role.textureUseId) {
+		return [0, 0, 1, 1];
+	}
+
+	return bindings.get(role.textureUseId)?.rect ?? [0, 0, 1, 1];
+}
+
+function firstMapValue<K, V>(map: ReadonlyMap<K, V>): V | null {
+	for (const value of map.values()) {
+		return value;
+	}
+	return null;
 }
 
 function createDirectTexture(
@@ -616,7 +1163,9 @@ function requireUniform(
 	program: WebGLProgram,
 	name: string,
 ): WebGLUniformLocation {
-	const uniform = gl.getUniformLocation(program, name);
+	const uniform =
+		gl.getUniformLocation(program, name) ??
+		gl.getUniformLocation(program, `${name}[0]`);
 	if (!uniform) {
 		throw new Error(`V2 terrain geometry shader is missing uniform ${name}.`);
 	}

@@ -71,6 +71,9 @@ function createTerrainGeometryDrawUnits(
 		payload,
 	});
 	const slices = createTerrainGeometrySlices(payload, terrainMaterialPlan);
+	const pcodeByQuadIndex = new Map(
+		payload.mesh.quads.map((quad) => [quad.quadIndex, quad.pcode] as const),
+	);
 
 	return slices.map((slice) =>
 		createTerrainGeometryDrawUnit({
@@ -79,6 +82,7 @@ function createTerrainGeometryDrawUnits(
 					? `${workId}:terrain-geometry`
 					: `${workId}:terrain-geometry:${slice.slice.sliceId.replaceAll("/", "-")}`,
 			landblockId: payload.landblock.landblockId,
+			pcodeByQuadIndex,
 			placementRevisionAssumption,
 			terrainMaterialPlan: slice.plan,
 			triangles: slice.triangles,
@@ -90,6 +94,7 @@ function createTerrainGeometryDrawUnits(
 function createTerrainGeometryDrawUnit({
 	drawUnitId,
 	landblockId,
+	pcodeByQuadIndex,
 	placementRevisionAssumption,
 	terrainMaterialPlan,
 	triangles,
@@ -97,6 +102,7 @@ function createTerrainGeometryDrawUnit({
 }: {
 	readonly drawUnitId: string;
 	readonly landblockId: number;
+	readonly pcodeByQuadIndex: ReadonlyMap<number, number>;
 	readonly placementRevisionAssumption: number;
 	readonly terrainMaterialPlan: TerrainMaterialLayerPlan | null;
 	readonly triangles: readonly TerrainMeshTriangleFacts[];
@@ -104,17 +110,25 @@ function createTerrainGeometryDrawUnit({
 }): TerrainGeometryStaticDrawUnit {
 	const positions = new Float32Array(triangles.length * 9);
 	const texCoords = new Float32Array(triangles.length * 6);
+	const layerSlots = new Float32Array(triangles.length * 3);
 	const sourceTriangleIds: string[] = [];
 	const material = classifyTerrainMaterialFamily({
 		domain: "outdoor-terrain",
 		placementRevisionAssumption,
 		plan: terrainMaterialPlan,
 	});
+	const layerSlotByPcode = new Map(
+		terrainMaterialPlan?.layerEntries.map(
+			(entry) => [entry.pcode, entry.slot] as const,
+		) ?? [],
+	);
 
 	for (const [triangleIndex, triangle] of triangles.entries()) {
 		writeTrianglePositions(
+			layerSlots,
 			positions,
 			texCoords,
+			layerSlotByPcode.get(pcodeByQuadIndex.get(triangle.quadIndex) ?? 0) ?? 0,
 			triangleIndex,
 			triangle,
 			vertices,
@@ -132,6 +146,7 @@ function createTerrainGeometryDrawUnit({
 		indices: createSequentialIndices(vertexCount),
 		kind: "terrain-geometry",
 		landblockId,
+		layerSlots,
 		materialBucketKey: material.materialBucketKey,
 		materialFamily: material.materialFamily,
 		primaryTextureUseId: material.primaryTextureUseId,
@@ -239,8 +254,10 @@ function isFallbackReasonRelevantToSlice(
 }
 
 function writeTrianglePositions(
+	layerSlots: Float32Array,
 	positions: Float32Array,
 	texCoords: Float32Array,
+	layerSlot: number,
 	triangleIndex: number,
 	triangle: TerrainMeshTriangleFacts,
 	vertices: readonly TerrainMeshVertexFacts[],
@@ -262,6 +279,8 @@ function writeTrianglePositions(
 		const texCoordOffset = triangleIndex * 6 + corner * 2;
 		texCoords[texCoordOffset] = vertex.x / 192;
 		texCoords[texCoordOffset + 1] = vertex.y / 192;
+
+		layerSlots[triangleIndex * 3 + corner] = layerSlot;
 	}
 }
 

@@ -29,7 +29,7 @@ describe("V2 terrain material family classifier", () => {
 		});
 	});
 
-	it("falls back explicitly when terrain needs unsupported overlay bindings", () => {
+	it("classifies prepared overlay bindings as layered terrain", () => {
 		const classification = classifyTerrainMaterialFamily({
 			domain: "outdoor-terrain",
 			placementRevisionAssumption: 42,
@@ -57,20 +57,19 @@ describe("V2 terrain material family classifier", () => {
 
 		expect(classification).toMatchObject({
 			materialBucketKey:
-				"shader:terrain-debug-flat|domain:outdoor-terrain|sampler:none|placement:none",
-			materialFamily: "terrain-debug-flat",
-			primaryTextureUseId: null,
-			textureUseIds: [],
+				"shader:terrain-layered|domain:outdoor-terrain|sampler:color-mask-detail|placement:42|signature:test-plan",
+			materialFamily: "terrain-layered",
+			primaryTextureUseId: "terrain-base:06000010",
+			textureUseIds: [
+				"terrain-base:06000010",
+				"terrain-base:06000030",
+				"terrain-alpha:06000020",
+			],
 		});
-		expect(classification.terrainFallbackReasons).toEqual([
-			expect.objectContaining({
-				code: "unsupported-material-binding",
-				pcode: 33825,
-			}),
-		]);
+		expect(classification.terrainFallbackReasons).toEqual([]);
 	});
 
-	it("falls back when one draw unit would require multiple base textures", () => {
+	it("classifies multiple prepared base textures as layered terrain", () => {
 		const classification = classifyTerrainMaterialFamily({
 			domain: "outdoor-terrain",
 			placementRevisionAssumption: 42,
@@ -88,12 +87,76 @@ describe("V2 terrain material family classifier", () => {
 			}),
 		});
 
+		expect(classification).toMatchObject({
+			materialFamily: "terrain-layered",
+			primaryTextureUseId: "terrain-base:06000010",
+			textureUseIds: ["terrain-base:06000010", "terrain-base:06000020"],
+		});
+		expect(classification.terrainFallbackReasons).toEqual([]);
+	});
+
+	it("classifies prepared landscape detail as layered terrain", () => {
+		const classification = classifyTerrainMaterialFamily({
+			domain: "outdoor-terrain",
+			placementRevisionAssumption: 42,
+			plan: createPlan({
+				detailRoles: [
+					{
+						fadeFar: 64,
+						fadeNear: 8,
+						role: "landscape",
+						texture: createTextureRole({
+							role: "detail",
+							textureUseId: "detail:06000040",
+						}),
+					},
+				],
+				layerEntries: [
+					createLayerEntry({
+						textureUseId: "terrain-base:06000010",
+					}),
+				],
+			}),
+		});
+
+		expect(classification).toMatchObject({
+			materialFamily: "terrain-layered",
+			textureUseIds: ["terrain-base:06000010", "detail:06000040"],
+		});
+	});
+
+	it("falls back when a layered binding is missing its prepared texture use", () => {
+		const classification = classifyTerrainMaterialFamily({
+			domain: "outdoor-terrain",
+			placementRevisionAssumption: 42,
+			plan: createPlan({
+				layerEntries: [
+					createLayerEntry({
+						overlays: [
+							{
+								alpha: createTextureRole({
+									role: "terrain-alpha",
+									textureUseId: null,
+									wrap: "clamp",
+								}),
+								rotation: 1,
+								terrain: createTextureRole({
+									textureUseId: "terrain-base:06000030",
+								}),
+							},
+						],
+						textureUseId: "terrain-base:06000010",
+					}),
+				],
+			}),
+		});
+
 		expect(classification.materialFamily).toBe("terrain-debug-flat");
 		expect(classification.terrainFallbackReasons).toEqual([
 			expect.objectContaining({
 				code: "unsupported-material-binding",
-				message:
-					"Terrain material plan uses multiple base textures in one draw unit.",
+				message: "Terrain material binding requires a prepared texture use.",
+				pcode: 33825,
 			}),
 		]);
 	});
@@ -147,7 +210,12 @@ function createTextureRole({
 	tiling = 1,
 	wrap = "repeat",
 }: {
-	readonly role?: "terrain-base" | "terrain-alpha";
+	readonly role?:
+		| "terrain-base"
+		| "terrain-alpha"
+		| "road"
+		| "road-alpha"
+		| "detail";
 	readonly texture?: SurfaceTextureIdentity;
 	readonly textureUseId: string | null;
 	readonly tiling?: number;

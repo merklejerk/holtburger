@@ -395,11 +395,15 @@ export interface TerrainGeometryStaticDrawUnit {
 	readonly drawUnitId: string;
 	readonly landblockId: number;
 	readonly domain: "outdoor-terrain";
-	readonly materialFamily: "terrain-debug-flat" | "terrain-single-base-color";
+	readonly materialFamily:
+		| "terrain-debug-flat"
+		| "terrain-single-base-color"
+		| "terrain-layered";
 	readonly materialBucketKey: string;
 	readonly coordinateSpace: "landblock-render-local";
 	readonly positions: Float32Array;
 	readonly texCoords: Float32Array;
+	readonly layerSlots: Float32Array;
 	readonly indices: Uint16Array | Uint32Array;
 	readonly indexType: "uint16" | "uint32";
 	readonly vertexCount: number;

@@ -2,8 +2,13 @@ import type {
 	TerrainMaterialFallbackReason,
 	TerrainMaterialLayerEntry,
 	TerrainMaterialLayerPlan,
+	TerrainMaterialTextureRoleBinding,
 	TerrainGeometryStaticDrawUnit,
 } from "../../contracts";
+
+const MAX_LAYER_ENTRIES = 8;
+const MAX_OVERLAYS_PER_LAYER = 3;
+const MAX_ROADS_PER_LAYER = 2;
 
 export type TerrainMaterialFamilyClassification = Pick<
 	TerrainGeometryStaticDrawUnit,
@@ -54,6 +59,22 @@ export function classifyTerrainMaterialFamily({
 		});
 	}
 
+	if (requiresLayeredMaterial(plan)) {
+		return {
+			materialBucketKey: [
+				"shader:terrain-layered",
+				`domain:${domain}`,
+				"sampler:color-mask-detail",
+				`placement:${placementRevisionAssumption}`,
+				`signature:${plan.signature}`,
+			].join("|"),
+			materialFamily: "terrain-layered",
+			primaryTextureUseId,
+			terrainFallbackReasons: [],
+			textureUseIds: collectTerrainLayeredTextureUseIds(plan),
+		};
+	}
+
 	return {
 		materialBucketKey: [
 			"shader:terrain-single-base-color",
@@ -84,38 +105,124 @@ function findUnsupportedBindingReason(
 			plan.layerEntries[0] ?? null,
 		);
 	}
-	if (plan.detailRoles.length > 0) {
+	if (plan.layerEntries.length > MAX_LAYER_ENTRIES) {
 		return createUnsupportedBindingReason(
-			"Terrain detail bindings require the Phase 10B4 terrain material shader.",
+			`Terrain material draw slice requires ${plan.layerEntries.length} layer entries; shader limit is ${MAX_LAYER_ENTRIES}.`,
 			plan.layerEntries[0] ?? null,
 		);
 	}
+	if (plan.detailRoles.length > 1) {
+		return createUnsupportedBindingReason(
+			"Terrain material family supports at most one landscape detail binding.",
+			plan.layerEntries[0] ?? null,
+		);
+	}
+	for (const detailRole of plan.detailRoles) {
+		const missingReason = findMissingTextureUseReason(
+			detailRole.texture,
+			"Terrain detail material binding requires a prepared texture use.",
+			null,
+		);
+		if (missingReason) {
+			return missingReason;
+		}
+	}
 
-	const baseTextureUseIds = new Set<string>();
 	for (const entry of plan.layerEntries) {
-		if (
-			entry.overlays.length > 0 ||
-			entry.roads.length > 0 ||
-			entry.base.textureUseId === null ||
-			entry.base.wrap !== "repeat" ||
-			entry.base.tiling !== 1
-		) {
+		if (entry.overlays.length > MAX_OVERLAYS_PER_LAYER) {
 			return createUnsupportedBindingReason(
-				"Terrain material entry requires overlay, road, missing, clamped, or tiled binding support.",
+				`Terrain material entry requires ${entry.overlays.length} overlays; shader limit is ${MAX_OVERLAYS_PER_LAYER}.`,
 				entry,
 			);
 		}
-		baseTextureUseIds.add(entry.base.textureUseId);
-	}
-
-	if (baseTextureUseIds.size !== 1) {
-		return createUnsupportedBindingReason(
-			"Terrain material plan uses multiple base textures in one draw unit.",
-			plan.layerEntries[0] ?? null,
-		);
+		if (entry.roads.length > MAX_ROADS_PER_LAYER) {
+			return createUnsupportedBindingReason(
+				`Terrain material entry requires ${entry.roads.length} road masks; shader limit is ${MAX_ROADS_PER_LAYER}.`,
+				entry,
+			);
+		}
+		for (const binding of collectLayerEntryTextureBindings(entry)) {
+			const missingReason = findMissingTextureUseReason(
+				binding,
+				"Terrain material binding requires a prepared texture use.",
+				entry,
+			);
+			if (missingReason) {
+				return missingReason;
+			}
+			if (
+				binding.wrap === "clamp" &&
+				binding.role !== "terrain-alpha" &&
+				binding.role !== "road-alpha"
+			) {
+				return createUnsupportedBindingReason(
+					"Terrain material family only supports clamped sampling for alpha masks.",
+					entry,
+				);
+			}
+		}
 	}
 
 	return null;
+}
+
+function requiresLayeredMaterial(plan: TerrainMaterialLayerPlan): boolean {
+	if (plan.detailRoles.length > 0 || plan.layerEntries.length > 1) {
+		return true;
+	}
+	const onlyEntry = plan.layerEntries[0];
+	return (
+		(onlyEntry?.overlays.length ?? 0) > 0 ||
+		(onlyEntry?.roads.length ?? 0) > 0 ||
+		onlyEntry?.base.tiling !== 1
+	);
+}
+
+function collectTerrainLayeredTextureUseIds(
+	plan: TerrainMaterialLayerPlan,
+): readonly string[] {
+	const textureUseIds = new Set<string>();
+	for (const entry of plan.layerEntries) {
+		for (const binding of collectLayerEntryTextureBindings(entry)) {
+			if (binding.textureUseId) {
+				textureUseIds.add(binding.textureUseId);
+			}
+		}
+	}
+	for (const detailRole of plan.detailRoles) {
+		if (detailRole.texture.textureUseId) {
+			textureUseIds.add(detailRole.texture.textureUseId);
+		}
+	}
+
+	return [...textureUseIds];
+}
+
+function collectLayerEntryTextureBindings(
+	entry: TerrainMaterialLayerEntry,
+): readonly TerrainMaterialTextureRoleBinding[] {
+	return [
+		entry.base,
+		...entry.overlays.flatMap((overlay) => [overlay.terrain, overlay.alpha]),
+		...entry.roads.flatMap((road) => [road.road, road.alpha]),
+	];
+}
+
+function findMissingTextureUseReason(
+	binding: TerrainMaterialTextureRoleBinding,
+	message: string,
+	entry: TerrainMaterialLayerEntry | null,
+): TerrainMaterialFallbackReason | null {
+	if (binding.textureUseId) {
+		return null;
+	}
+
+	return {
+		code: "unsupported-material-binding",
+		message,
+		pcode: entry?.pcode ?? null,
+		texture: binding.texture,
+	};
 }
 
 function createDebugFlatClassification({

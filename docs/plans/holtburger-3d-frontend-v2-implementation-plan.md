@@ -8,7 +8,7 @@ The core implementation problem is not "how do we rewrite everything." It is "ho
 
 ## Goal
 
-Build a V2 frontend island that can visually prove landblock-owned static rendering, worker-owned source resolution/baking, domain atlas sharing, explicit renderer updates, and framework-light runtime ownership before replacing the current browser world display. Outdoor terrain remains the first outdoor visual slice, but dungeon landblocks must be first-class topology/env-cell scopes rather than a late special case.
+Build a V2 frontend island that can visually prove landblock-owned static rendering, worker-owned source resolution/baking, batch-scoped atlas sharing, explicit renderer updates, and framework-light runtime ownership before replacing the current browser world display. Outdoor terrain remains the first outdoor visual slice, but dungeon landblocks must be first-class topology/env-cell scopes rather than a late special case.
 
 ## Scope
 
@@ -20,7 +20,7 @@ In scope:
 - Static work requests by concrete landblock/env-cell/domain IDs.
 - Static scope resolver workers and static bake workers.
 - Shared asset preparation code and asset-service-owned identity/cache/dedupe semantics.
-- Texture/atlas manager ownership of logical texture refs, atlas registries, snapshots, placement revisions, and leases.
+- Texture/atlas manager ownership of logical texture refs, batch atlas groups, snapshots, placement revisions, and leases.
 - WebGL2 renderer input through explicit static, dynamic, texture, sampler, and frame updates.
 - Terrain-first visible rendering, then static enrichment.
 - Focused tests around contracts, stale-result rejection, atlas commits, leases, and renderer input construction.
@@ -620,7 +620,7 @@ Decisions and course corrections:
 Debt and follow-up:
 
 - Replace `terrain-phase8-texture-probe` with real terrain material selection and blend inputs in Phases 10A-10C. The probe material family should not survive as a canonical terrain path.
-- Add texture source cleanup, texture-packing worker protocol, domain atlas sharing, placement reuse, and lease accounting in Phases 9A-9B. The current manager removes direct placements by draw-unit ownership and does not yet dedupe compatible uses across scopes.
+- Add texture source cleanup, texture-packing worker protocol, atlas sharing, placement reuse, and lease accounting in Phases 9A-9B. The current manager removes direct placements by draw-unit ownership and does not yet dedupe compatible uses across scopes.
 - Surface texture-manager snapshot facts in the harness once atlas sharing makes the diagnostic values meaningful.
 
 Verification:
@@ -708,6 +708,7 @@ Implementation notes:
 
 - Added placement snapshots to `DomainAtlasSnapshot`. Runtime now wires the static coordinator's atlas snapshot provider to the texture manager so bake inputs see the texture manager's current domain registry revision and scoped prepared texture placements.
 - Added `placementRevisionAssumption` to bake-local `StaticBakeTextureUse` output. The terrain geometry baker derives the assumption from the domain atlas snapshot revision it consumed.
+- 2026-06-11 course correction: these Phase 9B names describe the implemented historical model. Phase 10B4C replaces domain-global placement snapshots with submitted batch atlas groups as the design target.
 - Reworked `TextureManager` from bake-local texture-use placement storage to domain registries keyed by branded canonical keys derived from typed prepared texture identities. Host route strings are still transport-only at the asset/preparation boundary.
 - Added lease accounting from resident draw units to domain texture registry entries. Compatible repeated texture uses bind to the same runtime texture ref, and a texture ref is removed only after the last owning draw unit evicts.
 - Added stale placement requirement handling. If a bake result asks for a new placement against an old domain revision, the texture manager rejects it; if the requested texture already exists, the manager rebases the binding to the active placement.
@@ -770,7 +771,7 @@ Review references:
 Implementation notes:
 
 - The Phase 8 probe remains present and reachable in normal textured terrain bake output as `terrain-phase8-texture-probe`. It is explicitly temporary debt, not canonical terrain material vocabulary. Phase 10B owns removing or replacing it from normal terrain bake output.
-- The implemented ownership cut mostly matches the design doc: static bake output carries bake-local texture uses plus placement revision assumptions; `TextureManager` owns domain registries, runtime texture refs, reuse, lease accounting, stale revision rejection, and renderer placement updates; the WebGL2 renderer uploads committed texture placements and binds texture refs without host lookup or atlas planning.
+- The implemented ownership cut mostly matches the pre-10B4C design doc: static bake output carries bake-local texture uses plus placement revision assumptions; `TextureManager` owns domain registries, runtime texture refs, reuse, lease accounting, stale revision rejection, and renderer placement updates; the WebGL2 renderer uploads committed texture placements and binds texture refs without host lookup or atlas planning. Phase 10B4C updates this to batch atlas groups.
 - The main design mismatch is physical worker construction for texture packing. The texture-packing protocol/client/handler exists, and `TextureManager` depends on a `TexturePacker` interface, but runtime composition still defaults to the in-process `ShelfTexturePacker`. Phase 10A may proceed because role/layer planning can be proven in bake contracts and tests without physical packing-worker construction. Phase 10B must wire browser `TexturePackingWorkerClient` before multi-source terrain atlas pages become the normal material path; the in-process shelf packer should remain a test/plain-browser fallback only.
 - V1 terrain parity is not a single-texture problem. The parity baseline decodes pcode terrain corners, chooses base/overlay terrain layers, selects terrain alpha masks by tcode and deterministic pcode PRNG, selects road masks/rotations, assigns bounded layer slots, slices overflow cases, and applies landscape detail as a separate region-global detail role with tiling/fade semantics.
 - V2 resolver payloads already carry useful Phase 10A source facts such as pcodes, terrain material counts, pcode encoding, texture-use roles, and region detail role facts. The missing piece is bake-owned terrain role/layer planning that converts those facts into typed bake-local texture uses, layer tables, fallback reasons, and draw slices without importing V1 modules or reintroducing renderer-side prepared-asset reads.
@@ -1046,7 +1047,7 @@ Verification:
 
 ### Phase 10B4B3: Terrain Overlay Mask Road And Detail Binding
 
-Status: pending.
+Status: completed.
 
 Purpose: bind the remaining Phase 10A terrain material roles through WebGL2 material inputs now that slice partitioning, rect-aware sampling, and multi-source page ownership are real.
 
@@ -1061,6 +1062,49 @@ Acceptance criteria:
 - Terrain layer-overflow diagnostics distinguish "landblock has too many recipes for the current unsliced path" from "one draw slice still exceeds the proven material-binding limit."
 - Supported overlay, road, mask, and landscape-detail terrain cases render through typed material families instead of debug-flat fallback.
 - Mask/raw pages remain exact/no-mip unless a mask-safe policy is explicitly proven.
+
+Implementation notes:
+
+- 2026-06-11: Terrain geometry draw units now carry a per-vertex `layerSlots` stream derived from slice-local pcode/material entries. The renderer no longer has to infer pcode or tolerate incomplete material tables after geometry is resident.
+- 2026-06-11: Added the V2 `terrain-layered` material family. The classifier now accepts prepared multi-base, overlay/mask, road/mask, and single landscape-detail bindings when they fit the current shader limits, while preserving the simpler `terrain-single-base-color` family for the trivial one-base case.
+- 2026-06-11: The WebGL2 terrain renderer now stores texture bindings per draw unit and per texture-use ID instead of overwriting one binding per draw unit. Layered terrain uploads v1-shaped material tables for base color rects, overlay color/mask rects, road color/mask rects, tiling, alpha rotation, and optional detail fade/tiling.
+- 2026-06-11: If a resident `terrain-layered` draw unit cannot be fully satisfied by the current binding/page shape, WebGL2 emits a de-duplicated console warning and renders the debug-flat fallback instead of silently sampling partial material state.
+- 2026-06-11: Spicy caveat: the current layered shader intentionally mirrors the v1 submit shape of one color atlas, one mask atlas, and optional detail atlas per draw unit. If a V2 draw unit's packed bindings span multiple color pages or multiple mask pages, the renderer will not pretend that is valid; it falls back instead of sampling the wrong page. A later terrain page rebasing or material-slice phase may need to guarantee one page per role or split draw units further.
+- 2026-06-11: Spicy caveat: road/detail parity is now wired through typed material tables, but it still needs Phase 10C visual review against ACE/ACViewer/v1 targets before treating the blend math and detail fade as visually final.
+- 2026-06-11: Spicy course correction: manual terrain streaming exposed that the domain-global atlas revision model is the wrong default. Multiple landblock terrain bakes can assume the same domain atlas revision, then fail materialization after another commit advances the shared revision. The design goal is now batch-scoped static atlas groups: draw units stay landblock/env-cell scoped for culling and eviction, while atlas pages are shared only inside the submitted batch and may duplicate source textures across later batches.
+
+Verification:
+
+- `npm run test:ts -- src/v2/static/terrain/bake/terrain-material-family-classifier.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts src/v2/textures/texture-manager.test.ts`
+- `npm run check`
+
+### Phase 10B4C: Batch-Scoped Static Atlas Groups
+
+Status: pending.
+
+Purpose: course-correct the texture/atlas ownership model before sampler lifecycle and visual parity work build on the stale domain-global atlas registry shape.
+
+Deliverables:
+
+- Static coordinator/runtime batching for newly resolved static scope payloads by domain, with explicit batch ids and a flush policy for max payload count, max wait time, priority, and demand supersession.
+- Batch bake input/output shape that lets one worker job bake multiple new terrain payloads while preserving landblock/slice-scoped draw-unit ids and source mappings.
+- TextureManager registry changes from domain-global placement state to `domain + staticBatchId` batch atlas groups, while retaining texture-manager ownership of texture refs, leases, sampler/page policy, and texture-packing worker jobs.
+- Batch materialization that stages all texture uses from the submitted batch, packs compatible uses together, commits one batch atlas group/update, and then applies the static residency delta.
+- Eviction semantics where removing one landblock draw unit releases its leases but does not evict batch atlas pages still referenced by other draw units from the same batch.
+- Tests proving two independent terrain batches can materialize without stale domain-atlas revision rejection, while draw-unit residency remains landblock scoped.
+
+Acceptance criteria:
+
+- No `outdoor-terrain atlas revision N, active revision M` materialization failures occur from independent terrain batches sharing the same previous domain revision.
+- Atlas texture sharing happens within a submitted batch; later batches may intentionally duplicate source textures rather than mutate earlier batch atlas groups.
+- Renderer culling/residency surfaces remain draw-unit/landblock scoped and do not become batch-scoped.
+- Static object and dungeon/static future phases can reuse the same batch atlas group model instead of adding terrain-only coordination.
+
+Implementation notes:
+
+- 2026-06-11: This phase supersedes the earlier domain-scoped atlas registry default. The new default is batch-scoped atlas groups under the texture/atlas manager, with cross-batch sharing reserved as an explicit future optimization.
+- 2026-06-11: Do not move atlas registry ownership into static bake workers. Static bake workers may consume batch placement snapshots and emit placement requirements; texture-packing workers may compute rect/page layout and page pixels; TextureManager owns batch atlas group state, texture refs, leases, and renderer placement updates.
+- 2026-06-11: If the batch-scoped API shape is substantially different from the current coordinator, bake, or texture-manager components, prefer deleting and replacing those components with batch-native versions over coercing the domain-global registry model through compatibility shims. The goal is a clean ownership cut, not preserving the current implementation shape.
 
 ### Phase 10B5: Sampler Policy Update Lifecycle
 
@@ -1376,9 +1420,9 @@ Risk: the resolver payload becomes a renamed render product.
 
 Mitigation: design the terrain resolver payload and terrain bake input together. If a field is not consumed by the terrain baker, texture/atlas manager, coordinator, renderer, or a named static record, keep it out.
 
-Risk: atlas sharing delays first visible rendering.
+Risk: batch atlas sharing delays first visible rendering.
 
-Mitigation: Phase 8 uses direct-texture-as-degenerate-atlas placement for one landblock. Phase 9A adds the texture source and packing-worker boundary, and Phase 9B handles shared atlas revisions only after direct placement works. The ownership model must already be the real one in Phase 8: logical texture refs owned by the texture manager and placement updates mirrored by the renderer.
+Mitigation: Phase 8 uses direct-texture-as-degenerate-atlas placement for one landblock. Phase 9A adds the texture source and packing-worker boundary, Phase 9B proves texture-manager-owned placement, and Phase 10B4C replaces domain-global sharing with submitted batch atlas groups. The ownership model must stay the real one throughout: logical texture refs owned by the texture manager and placement updates mirrored by the renderer.
 
 Risk: first visible rendering gets blocked by material parity.
 
@@ -1413,7 +1457,7 @@ Mitigation: picking, inspection, frame metrics, terrain visual parity, dungeon v
 - The V2 browser path can render terrain, static objects, interiors/portals, and static-authored dynamic seeds through the new runtime/worker/atlas/renderer seams.
 - Svelte remains a presentation harness and browser UX layer.
 - Static workers run expensive source resolution and baking off the render thread.
-- Texture sharing is domain-scoped and lease-counted independently of landblock lifetime.
+- Texture sharing is batch-scoped and lease-counted independently of individual landblock draw-unit lifetime.
 - Renderer APIs are imperative and explicit.
 - Old world-display render-product and asset-prepare-worker assumptions are removed or no longer used by browser world rendering.
 - `cd apps/holtburger-3d && npm run check`

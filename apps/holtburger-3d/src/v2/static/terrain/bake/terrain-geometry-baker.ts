@@ -8,6 +8,7 @@ import type {
 	TerrainMaterialDrawSlice,
 	TerrainMaterialFallbackReason,
 	TerrainMaterialLayerPlan,
+	TerrainMeshQuadFacts,
 	TerrainMeshTriangleFacts,
 	TerrainMeshVertexFacts,
 	TerrainStaticScopePayload,
@@ -106,6 +107,9 @@ function createTerrainGeometryDrawUnits(
 	const pcodeByQuadIndex = new Map(
 		payload.mesh.quads.map((quad) => [quad.quadIndex, quad.pcode] as const),
 	);
+	const quadByIndex = new Map(
+		payload.mesh.quads.map((quad) => [quad.quadIndex, quad] as const),
+	);
 
 	return slices.map((slice) =>
 		createTerrainGeometryDrawUnit({
@@ -115,6 +119,7 @@ function createTerrainGeometryDrawUnits(
 					: `${workId}:terrain-geometry:${slice.slice.sliceId.replaceAll("/", "-")}`,
 			landblockId: payload.landblock.landblockId,
 			pcodeByQuadIndex,
+			quadByIndex,
 			staticBatchId,
 			terrainMaterialPlan: slice.plan,
 			triangles: slice.triangles,
@@ -127,6 +132,7 @@ function createTerrainGeometryDrawUnit({
 	drawUnitId,
 	landblockId,
 	pcodeByQuadIndex,
+	quadByIndex,
 	staticBatchId,
 	terrainMaterialPlan,
 	triangles,
@@ -135,6 +141,7 @@ function createTerrainGeometryDrawUnit({
 	readonly drawUnitId: string;
 	readonly landblockId: number;
 	readonly pcodeByQuadIndex: ReadonlyMap<number, number>;
+	readonly quadByIndex: ReadonlyMap<number, TerrainMeshQuadFacts>;
 	readonly staticBatchId: string;
 	readonly terrainMaterialPlan: TerrainMaterialLayerPlan | null;
 	readonly triangles: readonly TerrainMeshTriangleFacts[];
@@ -163,6 +170,7 @@ function createTerrainGeometryDrawUnit({
 			layerSlotByPcode.get(pcodeByQuadIndex.get(triangle.quadIndex) ?? 0) ?? 0,
 			triangleIndex,
 			triangle,
+			quadByIndex,
 			vertices,
 		);
 		sourceTriangleIds.push(triangle.terrainTriangleId);
@@ -292,8 +300,16 @@ function writeTrianglePositions(
 	layerSlot: number,
 	triangleIndex: number,
 	triangle: TerrainMeshTriangleFacts,
+	quadByIndex: ReadonlyMap<number, TerrainMeshQuadFacts>,
 	vertices: readonly TerrainMeshVertexFacts[],
 ): void {
+	const quad = quadByIndex.get(triangle.quadIndex);
+	if (!quad) {
+		throw new Error(
+			`Terrain triangle ${triangle.terrainTriangleId} references missing quad ${triangle.quadIndex}.`,
+		);
+	}
+
 	for (let corner = 0; corner < triangle.vertexIndices.length; corner += 1) {
 		const sourceVertexIndex = triangle.vertexIndices[corner];
 		const vertex = vertices[sourceVertexIndex];
@@ -309,10 +325,32 @@ function writeTrianglePositions(
 		positions[targetOffset + 2] = -vertex.y;
 
 		const texCoordOffset = triangleIndex * 6 + corner * 2;
-		texCoords[texCoordOffset] = vertex.x / 192;
-		texCoords[texCoordOffset + 1] = vertex.y / 192;
+		const uv = terrainQuadUv(quad, sourceVertexIndex);
+		texCoords[texCoordOffset] = uv[0];
+		texCoords[texCoordOffset + 1] = uv[1];
 
 		layerSlots[triangleIndex * 3 + corner] = layerSlot;
+	}
+}
+
+function terrainQuadUv(
+	quad: TerrainMeshQuadFacts,
+	vertexIndex: number,
+): readonly [number, number] {
+	const cornerIndex = quad.vertexIndices.indexOf(vertexIndex);
+	switch (cornerIndex) {
+		case 0:
+			return [0, 0];
+		case 1:
+			return [1, 0];
+		case 2:
+			return [1, 1];
+		case 3:
+			return [0, 1];
+		default:
+			throw new Error(
+				`Terrain quad ${quad.terrainQuadId} does not contain vertex ${vertexIndex}.`,
+			);
 	}
 }
 

@@ -34,7 +34,7 @@ describe("V2 terrain geometry baker", () => {
 		expect(Array.from(drawUnit.indices)).toEqual([0, 1, 2, 3, 4, 5]);
 		expect(drawUnit.sourceTriangleIds).toEqual(["t0", "t1"]);
 		expect(Array.from(drawUnit.texCoords)).toEqual([
-			0, 0, 0.125, 0, 0, 0.125, 0.125, 0, 0.125, 0.125, 0, 0.125,
+			0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1,
 		]);
 		expect(Array.from(drawUnit.layerSlots)).toEqual([0, 0, 0, 0, 0, 0]);
 		expect(drawUnit.textureUseIds).toEqual([]);

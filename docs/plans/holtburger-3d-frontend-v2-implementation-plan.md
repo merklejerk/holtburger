@@ -1080,6 +1080,74 @@ Verification:
 - `npm run test:ts -- src/v2/static/terrain/bake/terrain-material-family-classifier.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts src/v2/textures/texture-manager.test.ts`
 - `npm run check`
 
+### Phase 10B4B4: Draw-Unit Scoped Packing Cohorts
+
+Status: completed.
+
+Purpose: correct the over-constrained packing invariant where a batch/page-class job treated every new texture use as one cohort, forcing unrelated landblocks to fit on one physical atlas page.
+
+Deliverables:
+
+- Texture packing jobs remain batch-scoped so new landblocks can share atlas pages within the submitted batch.
+- Texture packing cohorts are derived from draw-unit texture ownership, not from the whole page-class group.
+- Tests prove independent draw units in one batch produce independent cohorts while one draw unit's multi-texture material requirements stay grouped.
+
+Acceptance criteria:
+
+- A terrain color cohort must not contain texture uses owned only by unrelated terrain draw units.
+- The packer may still place independent draw-unit cohorts on the same page when they fit naturally.
+- If a single draw unit's required role page cannot fit, that remains an explicit terrain material-slice partitioning problem rather than a batch-wide cohort failure.
+
+Implementation notes:
+
+- 2026-06-11: `TextureManager` now tracks pending placement owners across deduped source textures before packing. This prevents pending source dedupe from losing later draw-unit owners.
+- 2026-06-11: Texture packing cohorts now use draw-unit scoped keys inside each batch/page-class job. Batch-scoped atlas sharing remains intact, but unrelated landblocks are no longer forced into the same cohort or physical page.
+- 2026-06-11: Manual streaming exposed the remaining transitive merge case: source-level pending placement dedupe could still bridge unrelated draw-unit cohorts when two landblocks used the same prepared source. `TextureManager` now keeps atlas placement identity scoped to the logical texture use while prepared asset requests remain source-keyed, allowing duplicate placement of the same source texture when cohort constraints require it.
+- 2026-06-11: Spicy caveat: duplicate logical placements intentionally trade atlas memory for correctness. If this becomes noisy, the optimization belongs in a smarter packer that duplicates only when cohorts would otherwise merge across draw units, not in source-level placement dedupe before packing.
+
+Verification:
+
+- `npm run test:ts -- src/v2/textures/texture-manager.test.ts src/v2/textures/packing/atlas-layout.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+
+### Phase 10B4B5: Terrain Role-Page Capacity Slicing
+
+Status: completed.
+
+Purpose: keep terrain draw units structurally compatible with the renderer's one-color-page-per-draw-unit binding model before texture packing/materialization.
+
+Deliverables:
+
+- Terrain material draw slicing accounts for both shader layer-table capacity and same-page terrain color texture capacity.
+- The default terrain color capacity is a named planner limit of four unique color texture refs per draw slice, matching the current V1-gutter-safe `2048` page budget for `512x512` terrain textures.
+- Terrain geometry baking emits additional landblock-scoped draw units when a landblock's material plan would otherwise require too many color textures for one atlas page.
+- Tests prove color-ref capacity slicing and texture-use ownership assignment across the resulting draw units.
+
+Acceptance criteria:
+
+- A terrain draw unit should not emit a color-page packing cohort with five ordinary `512x512` terrain color textures and `96px` gutters.
+- Batch-scoped atlas sharing and draw-unit-scoped cohorts from Phase 10B4B4 remain intact.
+- If a single pcode/layer entry alone exceeds the color-page capacity, the slice remains unsupported rather than being hidden by a texture-manager workaround.
+
+Implementation notes:
+
+- 2026-06-11: `TerrainMaterialLayerPlanner` now partitions draw slices by renderer role-page capacity, not only by shader layer-entry count. The greedy splitter preserves pcode ordering and keeps each slice within the configured layer-entry and color-ref limits when possible.
+- 2026-06-11: `TerrainGeometryStaticBaker` automatically inherits the capacity slices because draw units are already emitted from `TerrainMaterialLayerPlan.drawSlices`. Nine unique terrain base pcodes now bake as `4/4/1` material slices rather than the previous `8/1` layer-table-only split.
+- 2026-06-11: Spicy caveat: the four-color-ref limit is conservative and assumes the current terrain page size/gutter/source-size profile. A future dimension-aware planner could accept exact prepared dimensions and gutter policy to reduce over-splitting, but the current rule keeps correctness local to the terrain material partitioner.
+- 2026-06-11: Manual streaming exposed that this phase is not a structural fix. Geometry slicing can still be re-merged by texture-use identity when two slices share a source texture, such as a road texture. The atlas-layout cohort builder correctly treats overlapping cohorts as one connected component, so shared entries can force all sibling slice refs back onto one page. Treat this phase as an interim guard only; Phase 10B4D replaces the one-page terrain role binding contract.
+
+Verification:
+
+- `npm run test:ts -- src/v2/static/terrain/bake/terrain-material-layer-planner.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts`
+- `npm run test:ts -- src/v2/textures/texture-manager.test.ts src/v2/textures/packing/atlas-layout.test.ts`
+
+### Phase 10B4B6: Multi-Page Terrain Role Bindings
+
+Status: superseded by Phase 10B4D.
+
+Purpose: retained as a decision record only. The original phase bundled root-cause reproduction, placement policy, renderer shader work, temporary-cap cleanup, and diagnostics into one oversized implementation step. Phase 10B4D splits the same architecture correction into focused subphases after the completed batch-scoped atlas work.
+
 ### Phase 10B4C: Batch-Scoped Static Atlas Groups
 
 Status: in progress; split into subphases.
@@ -1169,9 +1237,133 @@ Verification:
 
 - `npm run test:ts -- src/v2/static/coordinator/static-coordinator.test.ts src/v2/static/bake/worker-client.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts src/v2/textures/texture-manager.test.ts`
 
+### Phase 10B4D: Multi-Page Terrain Role Binding Correction
+
+Status: planned; next terrain correction sequence.
+
+Purpose: replace the renderer-driven "all terrain color refs in a draw unit must fit on one physical atlas page" invariant with explicit bounded multi-page terrain role bindings.
+
+Root cause:
+
+- Current `terrain-layered` rendering binds one color atlas texture, one mask atlas texture, and one optional detail atlas texture per draw unit.
+- Phase 10B4B5 slices terrain geometry by a conservative color-ref count, but texture-use identity is still source-scoped within the work item. If two slices share one source texture, for example a road color texture, they share one logical texture-use entry.
+- Draw-unit scoped packing cohorts then overlap on that shared entry. The atlas layout planner intentionally unions overlapping cohorts into one connected same-page component, so two individually valid slices can become one impossible cohort such as `road + four terrain-base refs`.
+- Increasing atlas size, duplicating source textures blindly, or adding more pcode-level slicing only moves the failure. The real invariant is that a terrain material draw unit needs a bounded number of role pages, not necessarily one role page.
+
+Non-goals:
+
+- Do not make shared road textures slice-local by default. That would avoid the specific cohort merge, but it preserves the wrong one-page contract and trades correctness for duplicated atlas memory.
+- Do not raise `MAX_RUNTIME_ATLAS_PAGE_SIZE` again as the solution. The source of truth is renderer binding capacity, not the current landblock that happened to fit or fail.
+- Do not remove landblock/env-cell scoped draw-unit ownership. Atlases remain batch-scoped resources; terrain geometry/VAOs remain landblock scoped for culling, picking, inspection, and eviction.
+
+#### Phase 10B4D1: Root Repro And Binding Contract Resteer
+
+Status: planned.
+
+Deliverables:
+
+- Add a focused regression test for sibling terrain slices that share a road color texture and currently transitive-merge their color refs into one impossible same-page cohort.
+- Introduce named renderer capacity constants for terrain role pages, for example `MAX_TERRAIN_COLOR_PAGES_PER_DRAW` and `MAX_TERRAIN_MASK_PAGES_PER_DRAW`.
+- Add or refine typed terrain binding metadata so each base, overlay, road, and mask binding can eventually carry both an atlas rect and a draw-local page slot.
+- Update the design doc's terrain/static draw-unit compatibility language to name role-page capacity as a renderer binding constraint distinct from atlas packing capacity.
+
+Acceptance:
+
+- The root failure can be reproduced without live manual streaming.
+- The plan/design no longer describe one physical atlas page per terrain role as the long-term terrain material invariant.
+- No shader behavior is changed in this subphase unless the contract cannot be expressed without a tiny type scaffold.
+
+Verification:
+
+- Targeted terrain bake / texture-manager / atlas-layout tests for the shared-road cohort merge.
+
+#### Phase 10B4D2: Terrain Placement Policy Decoupling
+
+Status: planned.
+
+Deliverables:
+
+- Change terrain texture placement/materialization so terrain color and mask entries do not require same-page cohorts merely because they are used by one terrain draw unit.
+- Resolve draw-local color and mask page slots from committed texture placements, and fail locally if a draw unit exceeds the named page-slot limits.
+- Keep batch-scoped atlas sharing and landblock-scoped draw-unit ownership intact.
+- Update materialization diagnostics to distinguish texture packing exhaustion from renderer page-slot overflow.
+
+Acceptance:
+
+- A terrain landblock whose slices share a road color texture can materialize without forcing `road + all sibling base refs` onto one color atlas page.
+- Texture packing may place terrain color refs across multiple batch atlas pages when that is the natural layout.
+- Page-slot overflow rejects or falls back only the affected draw unit(s), not unrelated draw units from the same static commit.
+
+Verification:
+
+- Targeted texture-manager/materialization tests covering shared terrain refs, multi-page placements, and page-slot overflow diagnostics.
+
+#### Phase 10B4D3: WebGL2 Multi-Page Terrain Shader Binding
+
+Status: planned.
+
+Deliverables:
+
+- Change the V2 WebGL2 terrain shader/uniform model from single `uColorAtlasTexture` / `uMaskAtlasTexture` bindings to bounded color and mask page slots.
+- Use explicit unrolled sampler selection or generated switch helpers rather than relying on dynamic sampler-array indexing portability.
+- Upload per-binding page slots and rects for base, overlay, road, and mask roles.
+- Preserve the existing terrain detail role as a separate binding path unless implementation proves it should share the same page-slot machinery.
+
+Acceptance:
+
+- A single terrain pcode/layer entry that requires base, up to three overlays, and road color can render when its color refs are placed across multiple color atlas pages, provided the resolved page count is within the renderer limit.
+- The renderer no longer falls back merely because `terrain-layered` color bindings span multiple color page texture refs.
+- Existing single-page terrain still renders through the same material family without a separate compatibility path.
+
+Verification:
+
+- Renderer/resource tests proving layered terrain can bind at least two color page slots and select the correct page per base/overlay/road binding.
+- Targeted runtime/renderer tests for single-page and multi-page terrain material submissions.
+
+#### Phase 10B4D4: Planner Cap Cleanup And Page-Slot Slicing
+
+Status: planned.
+
+Deliverables:
+
+- Relax, remove, or demote the Phase 10B4B5 four-color-ref cap once multi-page terrain binding is live.
+- Keep layer-table slicing for shader layer capacity and landblock culling granularity.
+- Add page-slot overflow slicing only when a draw unit exceeds the renderer's named color or mask page-slot capacity.
+- Remove or rewrite tests that encode the temporary four-color-ref cap as a final terrain truth.
+
+Acceptance:
+
+- Terrain slicing is driven by shader layer capacity, draw-unit ownership/culling needs, and page-slot overflow, not by an approximate "four color refs fit one page" rule.
+- Single pcode/layer entries are not incorrectly marked unsupported just because they need more than one color atlas page.
+
+Verification:
+
+- Targeted terrain layer-planner and geometry-baker tests for layer capacity, page-slot overflow, and single-pcode multi-page eligibility.
+
+#### Phase 10B4D5: Diagnostics And Manual Terrain Recheck
+
+Status: planned.
+
+Deliverables:
+
+- Runtime or harness diagnostics for terrain role page counts, page-slot overflow, texture placement failures, fallback reasons, sampler policy, and mip status.
+- Manual visual recheck of the previously failing landblocks, including the shared-road/terrain-base cohort failure and the grazing-angle gutter artifacts.
+- Update the plan with any remaining visual parity blockers before entering Phase 10C.
+
+Acceptance:
+
+- Texture placement and page-slot failures are visible through runtime/harness diagnostics or snapshots, not only `console.error`.
+- Manual terrain review confirms landblocks no longer disappear due to same-page terrain color cohort failures.
+- Remaining terrain visual issues are tracked as Phase 10C visual parity items, not hidden inside the architecture correction.
+
+Verification:
+
+- Targeted diagnostics tests where appropriate; no tests for debug-only console logging.
+- Manual visual checklist entries recorded in this plan or the terrain visual parity notes.
+
 ### Phase 10B5: Sampler Policy Update Lifecycle
 
-Status: pending.
+Status: pending; follows Phase 10B4D because sampler updates must handle multi-page terrain role bindings.
 
 Purpose: make filtering changes a renderer/resource update instead of a geometry rebake.
 
@@ -1188,7 +1380,7 @@ Acceptance criteria:
 
 ### Phase 10B6: Terrain Texture Diagnostics And Failure Surfacing
 
-Status: pending.
+Status: pending; partially pulled forward into Phase 10B4D5 for terrain role-page failures.
 
 Purpose: expose terrain material, texture placement, fallback, and sampler failures outside the console before visual parity work.
 

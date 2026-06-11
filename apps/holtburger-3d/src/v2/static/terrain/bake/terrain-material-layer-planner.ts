@@ -13,6 +13,7 @@ import type {
 } from "../../contracts";
 
 const DEFAULT_TERRAIN_LAYER_LIMIT = 8;
+const DEFAULT_TERRAIN_COLOR_TEXTURE_REF_LIMIT = 4;
 const ROAD_TYPE_TERRAIN_CODE = 3;
 const TERRAIN_CODE_MASK = 0x1f;
 const ROAD_CORNER_MASKS = [0x0c00_0000, 0x0300_0000, 0x00c0_0000, 0x0030_0000];
@@ -20,12 +21,14 @@ const ROAD_CORNER_MASKS = [0x0c00_0000, 0x0300_0000, 0x00c0_0000, 0x0030_0000];
 export interface TerrainMaterialLayerPlannerOptions {
 	readonly payload: TerrainStaticScopePayload;
 	readonly createTextureUseId: (textureUse: TerrainTextureUseFacts) => string;
+	readonly maxColorTextureRefsPerSlice?: number;
 	readonly maxLayerEntries?: number;
 }
 
 export function buildTerrainMaterialLayerPlan({
 	payload,
 	createTextureUseId,
+	maxColorTextureRefsPerSlice = DEFAULT_TERRAIN_COLOR_TEXTURE_REF_LIMIT,
 	maxLayerEntries = DEFAULT_TERRAIN_LAYER_LIMIT,
 }: TerrainMaterialLayerPlannerOptions): TerrainMaterialLayerPlan | null {
 	const pcodes = uniqueSortedNumbers(
@@ -43,6 +46,7 @@ export function buildTerrainMaterialLayerPlan({
 	const drawSlices = createDrawSlices(
 		layerEntries,
 		maxLayerEntries,
+		maxColorTextureRefsPerSlice,
 		context.fallbackReasons,
 	);
 
@@ -280,9 +284,15 @@ function createDetailRoles(
 function createDrawSlices(
 	layerEntries: readonly TerrainMaterialLayerEntry[],
 	maxLayerEntries: number,
+	maxColorTextureRefsPerSlice: number,
 	fallbackReasons: TerrainMaterialFallbackReason[],
 ): readonly TerrainMaterialDrawSlice[] {
-	if (layerEntries.length <= maxLayerEntries) {
+	const requiresMultipleSlices = requiresMultipleDrawSlices(
+		layerEntries,
+		maxLayerEntries,
+		maxColorTextureRefsPerSlice,
+	);
+	if (!requiresMultipleSlices) {
 		return [
 			{
 				layerSlots: layerEntries.map((entry) => entry.slot),
@@ -295,31 +305,97 @@ function createDrawSlices(
 
 	fallbackReasons.push({
 		code: "layer-overflow",
-		message: `Terrain material requires ${layerEntries.length} layer entries; limit is ${maxLayerEntries}.`,
+		message: `Terrain material requires multiple draw slices for ${layerEntries.length} layer entries and ${countColorTextureRefs(layerEntries)} color texture refs; limits are ${maxLayerEntries} layer entries and ${maxColorTextureRefsPerSlice} color refs per slice.`,
 		pcode: null,
 		texture: null,
 	});
 
 	const slices: TerrainMaterialDrawSlice[] = [];
-	for (
-		let firstLayerIndex = 0;
-		firstLayerIndex < layerEntries.length;
-		firstLayerIndex += maxLayerEntries
-	) {
-		const sliceEntries = layerEntries.slice(
-			firstLayerIndex,
-			firstLayerIndex + maxLayerEntries,
-		);
-		const sliceIndex = slices.length;
-		slices.push({
-			layerSlots: sliceEntries.map((entry) => entry.slot),
-			pcodes: sliceEntries.map((entry) => entry.pcode),
-			reason: `terrain material layer overflow slice ${sliceIndex + 1}`,
-			sliceId: `slice/${sliceIndex}`,
-		});
+	let sliceEntries: TerrainMaterialLayerEntry[] = [];
+	for (const entry of layerEntries) {
+		const entryColorRefCount = countColorTextureRefs([entry]);
+		if (entryColorRefCount > maxColorTextureRefsPerSlice) {
+			fallbackReasons.push({
+				code: "unsupported-material-binding",
+				message: `Terrain material pcode ${entry.pcode} requires ${entryColorRefCount} color texture refs; limit is ${maxColorTextureRefsPerSlice}.`,
+				pcode: entry.pcode,
+				texture: entry.base.texture,
+			});
+		}
+
+		const nextEntries = [...sliceEntries, entry];
+		if (
+			sliceEntries.length > 0 &&
+			requiresMultipleDrawSlices(
+				nextEntries,
+				maxLayerEntries,
+				maxColorTextureRefsPerSlice,
+			)
+		) {
+			pushDrawSlice(slices, sliceEntries);
+			sliceEntries = [entry];
+			continue;
+		}
+
+		sliceEntries = nextEntries;
+	}
+
+	if (sliceEntries.length > 0) {
+		pushDrawSlice(slices, sliceEntries);
 	}
 
 	return slices;
+}
+
+function pushDrawSlice(
+	slices: TerrainMaterialDrawSlice[],
+	sliceEntries: readonly TerrainMaterialLayerEntry[],
+): void {
+	const sliceIndex = slices.length;
+	slices.push({
+		layerSlots: sliceEntries.map((entry) => entry.slot),
+		pcodes: sliceEntries.map((entry) => entry.pcode),
+		reason: `terrain material capacity slice ${sliceIndex + 1}`,
+		sliceId: `slice/${sliceIndex}`,
+	});
+}
+
+function requiresMultipleDrawSlices(
+	layerEntries: readonly TerrainMaterialLayerEntry[],
+	maxLayerEntries: number,
+	maxColorTextureRefsPerSlice: number,
+): boolean {
+	return (
+		layerEntries.length > maxLayerEntries ||
+		countColorTextureRefs(layerEntries) > maxColorTextureRefsPerSlice
+	);
+}
+
+function countColorTextureRefs(
+	layerEntries: readonly TerrainMaterialLayerEntry[],
+): number {
+	return new Set(layerEntries.flatMap(collectColorTextureBindingKeys)).size;
+}
+
+function collectColorTextureBindingKeys(
+	entry: TerrainMaterialLayerEntry,
+): readonly string[] {
+	return [
+		createTextureBindingKey(entry.base),
+		...entry.overlays.map((overlay) =>
+			createTextureBindingKey(overlay.terrain),
+		),
+		...entry.roads.map((road) => createTextureBindingKey(road.road)),
+	];
+}
+
+function createTextureBindingKey(
+	binding: TerrainMaterialTextureRoleBinding,
+): string {
+	return (
+		binding.textureUseId ??
+		`${binding.role}:${binding.texture.surfaceTextureId.toString(16).padStart(8, "0")}`
+	);
 }
 
 function createTextureBinding({

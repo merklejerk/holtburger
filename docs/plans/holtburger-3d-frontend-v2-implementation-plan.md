@@ -884,7 +884,7 @@ Verification:
 
 ### Phase 10B2: Atomic Materialized Static Commit
 
-Status: pending.
+Status: complete.
 
 Purpose: stop adding normal terrain/static draw units to the renderer before their required initial texture and material bindings are ready.
 
@@ -906,6 +906,15 @@ Acceptance criteria:
 Implementation notes:
 
 - 2026-06-11: Course correction: initial texture placement independence was conflated with first renderer residency. Keep later repack/sampler updates independent, but make the initial renderer add atomic with required material/texture readiness so we do not keep extending half-ready renderable complexity.
+- 2026-06-11: Runtime static commit handling now queues materialization by static revision. For each commit, the runtime resolves texture-manager placement/binding output first, applies the texture placement update to the renderer when present, and only then applies the static residency delta. This preserves renderer revision order across async texture work and prevents normal textured draw units from entering renderer residency before their initial bindings exist.
+- 2026-06-11: Runtime snapshots now include `staticMaterialization` with pending, committed, and failed materialization revisions. Failed texture/materialization commits are visible in snapshots and do not add normal draw units to renderer residency.
+- 2026-06-11: Focused runtime tests now prove that textured terrain draw units are withheld until prepared texture placement resolves, texture updates are applied before first static residency, failed texture materialization stays out of renderer residency, and explicit fallback/debug draw units without texture uses still commit through the same path.
+- 2026-06-11: Spicy caveat: the runtime boundary is now atomic from the renderer's point of view, but `TextureManager.applyStaticCommitDelta` still mutates registry/lease state incrementally while resolving multiple texture uses. A mid-commit failure after one texture succeeds could leave texture-manager bookkeeping ahead of renderer residency. Phase 10B6 or an immediate cleanup phase should make texture-manager commit staging transactional before terrain material families start emitting many texture uses per draw unit.
+
+Verification:
+
+- `npm run test:ts -- src/v2/runtime/client-runtime.test.ts`
+- `npm run test:ts -- src/v2/runtime/client-runtime.test.ts src/v2/textures/texture-manager.test.ts src/v2/textures/packing/atlas-layout.test.ts src/v2/textures/packing/packer.test.ts src/v2/textures/packing/worker-client.test.ts src/v2/textures/sampling-policy.test.ts src/v2/static/coordinator/static-coordinator.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts`
 
 ### Phase 10B3: Terrain Material Family Cutover
 

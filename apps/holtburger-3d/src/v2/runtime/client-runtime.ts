@@ -143,11 +143,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#diagnostics = diagnostics;
 		this.#textureManager = new TextureManager({ assetService, texturePacker });
 		this.#staticCoordinator = staticCoordinator;
-		this.#staticCoordinator.setAtlasSnapshotProvider((payload, staticBatchId) =>
-			this.#textureManager.createStaticAtlasBatchSnapshot(
-				payload,
-				staticBatchId,
-			),
+		this.#staticCoordinator.setAtlasSnapshotProvider(
+			(payloads, staticBatchId) =>
+				this.#textureManager.createStaticAtlasBatchSnapshot(
+					payloads,
+					staticBatchId,
+				),
 		);
 		this.#lastRendererSnapshot = {
 			backend: "webgl2",

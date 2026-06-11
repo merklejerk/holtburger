@@ -9,20 +9,20 @@ export async function handleStaticBakeWorkerRequest(
 	message: StaticBakeWorkerMainMessage,
 	postMessage: (response: StaticBakeWorkerResponse) => void,
 ): Promise<void> {
-	if (message.kind !== "bake-static-scope") {
+	if (message.kind !== "bake-static-batch") {
 		return;
 	}
 
 	try {
 		const result = await baker.bake(message.input);
 		postMessage({
-			kind: "static-scope-baked",
+			kind: "static-batch-baked",
 			requestId: message.requestId,
 			result,
 		});
 	} catch (error: unknown) {
 		postMessage({
-			kind: "static-scope-bake-failed",
+			kind: "static-batch-bake-failed",
 			message: error instanceof Error ? error.message : String(error),
 			requestId: message.requestId,
 		});

@@ -93,6 +93,33 @@ describe("V2 atlas layout planner", () => {
 		});
 	});
 
+	it("tries larger page candidates before failing a cohort", () => {
+		const entries = [
+			{ height: 512, key: "terrain-base-a", width: 512 },
+			{ height: 512, key: "terrain-base-b", width: 512 },
+			{ height: 512, key: "terrain-road", width: 512 },
+		];
+		const constrained = planAtlasLayout({
+			cohorts: [
+				{
+					entryKeys: ["terrain-base-a", "terrain-base-b", "terrain-road"],
+					key: "terrain-layer",
+				},
+			],
+			entries,
+			policy: {
+				...createPolicy(),
+				gutterPixels: 4,
+				maxTextureSize: 2048,
+				pageSelection: "minimize-textures",
+			},
+		});
+
+		expect(constrained.overflows).toEqual([]);
+		expect(constrained.texturePages).toHaveLength(1);
+		expect(constrained.texturePages[0]?.width).toBeGreaterThan(1024);
+	});
+
 	it("reports source-too-large and atlas-full overflows", () => {
 		const sourceTooLarge = planAtlasLayout({
 			entries: [{ height: 65, key: "too-large", width: 65 }],

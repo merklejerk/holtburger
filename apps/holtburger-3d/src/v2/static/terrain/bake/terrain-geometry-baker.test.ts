@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
-	StaticBakeInput,
+	StaticBakeBatchInput,
 	TerrainGeometryStaticDrawUnit,
 	TerrainStaticScopePayload,
 } from "../../contracts";
@@ -59,7 +59,7 @@ describe("V2 terrain geometry baker", () => {
 			],
 			staticVisibilityRecords: [],
 			textureUses: [],
-			work: input.work,
+			works: [input.items[0]?.work],
 		});
 		expect(result.staticSourceMappings).toEqual([
 			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:source:t0",
@@ -218,10 +218,34 @@ describe("V2 terrain geometry baker", () => {
 			],
 		});
 	});
+
+	it("bakes multiple terrain payloads as one static atlas batch", () => {
+		const input = createTerrainBakeInput(
+			{ includeTextureUse: true },
+			{
+				includeSecondLandblock: true,
+			},
+		);
+
+		const result = bakeTerrainGeometry(input);
+
+		expect(result.staticBatchId).toBe("batch-a");
+		expect(result.works.map((work) => work.workId)).toEqual([
+			"7:landblock:da55ffff:outdoor-terrain",
+			"7:landblock:da56ffff:outdoor-terrain",
+		]);
+		expect(result.drawUnits.map((drawUnit) => drawUnit.drawUnitId)).toEqual([
+			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
+			"7:landblock:da56ffff:outdoor-terrain:terrain-geometry",
+		]);
+		expect(
+			new Set(result.textureUses.map((textureUse) => textureUse.staticBatchId)),
+		).toEqual(new Set(["batch-a"]));
+	});
 });
 
 function requireTerrainDrawUnit(
-	drawUnit: StaticBakeInput["payload"] extends never ? never : unknown,
+	drawUnit: unknown,
 ): TerrainGeometryStaticDrawUnit {
 	if (
 		typeof drawUnit !== "object" ||
@@ -243,24 +267,79 @@ function createTerrainBakeInput(
 		readonly triangleCount?: number;
 		readonly textureUseSurfaceTextureIds?: readonly number[];
 	} = {},
-): StaticBakeInput {
-	const work = {
+	batchOptions: {
+		readonly includeSecondLandblock?: boolean;
+	} = {},
+): StaticBakeBatchInput {
+	const work = createTerrainWork(0xda55ffff);
+	const payload = createTerrainPayload(options, 0xda55ffff);
+	const items = [
+		{
+			payload: {
+				job: work.job,
+				scope: payload,
+				sourceRevision: 42,
+			},
+			work,
+		},
+	];
+	if (batchOptions.includeSecondLandblock) {
+		const secondWork = createTerrainWork(0xda56ffff);
+		items.push({
+			payload: {
+				job: secondWork.job,
+				scope: createTerrainPayload(options, 0xda56ffff),
+				sourceRevision: 43,
+			},
+			work: secondWork,
+		});
+	}
+
+	return {
+		atlasSnapshot: {
+			domain: "outdoor-terrain",
+			placements: [],
+			staticBatchId: "batch-a",
+			textureUses: [],
+		},
+		domain: "outdoor-terrain",
+		items,
+		revision: 7,
+		staticBatchId: "batch-a",
+	};
+}
+
+function createTerrainWork(landblockId: number) {
+	const landblockHex = landblockId.toString(16).padStart(8, "0");
+	return {
 		job: {
 			domain: "outdoor-terrain" as const,
 			scope: {
 				kind: "landblock" as const,
-				landblockId: 0xda55ffff,
+				landblockId,
 			},
 		},
 		priority: 0,
 		revision: 7,
-		workId: "7:landblock:da55ffff:outdoor-terrain",
+		workId: `7:landblock:${landblockHex}:outdoor-terrain`,
 	};
-	const payload: TerrainStaticScopePayload = {
+}
+
+function createTerrainPayload(
+	options: {
+		readonly includeTextureUse?: boolean;
+		readonly pcodes?: readonly number[];
+		readonly terrainTypeCodes?: readonly number[];
+		readonly triangleCount?: number;
+		readonly textureUseSurfaceTextureIds?: readonly number[];
+	},
+	landblockId: number,
+): TerrainStaticScopePayload {
+	return {
 		kind: "terrain",
 		landblock: {
 			kind: "landblock-source",
-			landblockId: 0xda55ffff,
+			landblockId,
 			source: "outdoor",
 		},
 		mesh: createTerrainMesh({
@@ -300,22 +379,6 @@ function createTerrainBakeInput(
 			terrainTypes: createTerrainTypes(options),
 		},
 		textureUses: createTerrainTextureUses(options),
-	};
-
-	return {
-		atlasSnapshot: {
-			domain: "outdoor-terrain",
-			placements: [],
-			staticBatchId: "batch-a",
-			textureUses: [],
-		},
-		payload: {
-			job: work.job,
-			scope: payload,
-			sourceRevision: 42,
-		},
-		staticBatchId: "batch-a",
-		work,
 	};
 }
 

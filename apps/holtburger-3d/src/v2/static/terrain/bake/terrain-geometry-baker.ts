@@ -1,6 +1,7 @@
 import type {
-	StaticBakeInput,
-	StaticBakeResult,
+	StaticBakeBatchInput,
+	StaticBakeBatchItem,
+	StaticBakeBatchResult,
 	StaticBakeTextureUse,
 	StaticBakerClient,
 	TerrainGeometryStaticDrawUnit,
@@ -18,32 +19,34 @@ import { buildTerrainMaterialLayerPlan } from "./terrain-material-layer-planner"
 const UINT16_MAX_INDEX = 65_535;
 
 export class TerrainGeometryStaticBaker implements StaticBakerClient {
-	async bake(input: StaticBakeInput): Promise<StaticBakeResult> {
+	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
 		return bakeTerrainGeometry(input);
 	}
 }
 
-export function bakeTerrainGeometry(input: StaticBakeInput): StaticBakeResult {
-	if (
-		input.work.job.domain !== "outdoor-terrain" ||
-		input.payload.scope.kind !== "terrain"
-	) {
+export function bakeTerrainGeometry(
+	input: StaticBakeBatchInput,
+): StaticBakeBatchResult {
+	if (input.domain !== "outdoor-terrain") {
 		throw new Error(
-			`Terrain geometry baker only supports outdoor terrain payloads. Received ${input.work.job.domain}/${input.payload.scope.kind}.`,
+			`Terrain geometry baker only supports outdoor terrain batches. Received ${input.domain}.`,
 		);
 	}
 
-	const drawUnits = createTerrainGeometryDrawUnits(
-		input.work.workId,
-		input.payload.scope,
-		input.staticBatchId,
+	const itemResults = input.items.map((item) =>
+		bakeTerrainGeometryItem(input, item),
 	);
-	const textureUses = createTerrainBakeTextureUses(input, drawUnits);
+	const drawUnits = itemResults.flatMap((result) => result.drawUnits);
 
 	return {
 		atlasRegistryUpdates: [],
-		buildRevision: input.payload.sourceRevision,
+		buildRevision: Math.max(
+			...input.items.map((item) => item.payload.sourceRevision),
+			0,
+		),
+		domain: input.domain,
 		drawUnits,
+		revision: input.revision,
 		staticAuthoredDynamicSeeds: [],
 		staticPortalInteriorRecords: [],
 		staticSourceMappings: drawUnits.flatMap((drawUnit) =>
@@ -56,8 +59,36 @@ export function bakeTerrainGeometry(input: StaticBakeInput): StaticBakeResult {
 		),
 		staticVisibilityRecords: [],
 		staticBatchId: input.staticBatchId,
-		textureUses,
-		work: input.work,
+		textureUses: itemResults.flatMap((result) => result.textureUses),
+		works: input.items.map((item) => item.work),
+	};
+}
+
+function bakeTerrainGeometryItem(
+	input: StaticBakeBatchInput,
+	item: StaticBakeBatchItem,
+): {
+	readonly drawUnits: readonly TerrainGeometryStaticDrawUnit[];
+	readonly textureUses: readonly StaticBakeTextureUse[];
+} {
+	if (
+		item.work.job.domain !== "outdoor-terrain" ||
+		item.payload.scope.kind !== "terrain"
+	) {
+		throw new Error(
+			`Terrain geometry baker only supports outdoor terrain payloads. Received ${item.work.job.domain}/${item.payload.scope.kind}.`,
+		);
+	}
+
+	const drawUnits = createTerrainGeometryDrawUnits(
+		item.work.workId,
+		item.payload.scope,
+		input.staticBatchId,
+	);
+
+	return {
+		drawUnits,
+		textureUses: createTerrainBakeTextureUses(input, item, drawUnits),
 	};
 }
 
@@ -286,22 +317,23 @@ function writeTrianglePositions(
 }
 
 function createTerrainBakeTextureUses(
-	input: StaticBakeInput,
+	input: StaticBakeBatchInput,
+	item: StaticBakeBatchItem,
 	drawUnits: readonly TerrainGeometryStaticDrawUnit[],
 ): readonly StaticBakeTextureUse[] {
-	if (input.payload.scope.kind !== "terrain") {
+	if (item.payload.scope.kind !== "terrain") {
 		return [];
 	}
 
 	const textureUsesById = new Map<string, StaticBakeTextureUse>();
 	for (const drawUnit of drawUnits) {
 		const boundTextureUseIds = new Set(drawUnit.textureUseIds);
-		for (const textureUse of input.payload.scope.textureUses) {
+		for (const textureUse of item.payload.scope.textureUses) {
 			if (!textureUse.preparedTextureUse) {
 				continue;
 			}
 			const textureUseId = createTerrainTextureUseId(
-				input.work.workId,
+				item.work.workId,
 				textureUse,
 			);
 			if (!boundTextureUseIds.has(textureUseId)) {

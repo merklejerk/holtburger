@@ -385,7 +385,7 @@ function packEntriesInPageSize(options: {
 		const newPagePlacement = tryPlaceUnitOnPage(unit, page);
 		if (newPagePlacement === null) {
 			atlasFullOverflows.push(
-				...createAtlasFullOverflows(unit, options.policy),
+				...createAtlasUnitPageOverflows(unit, options.pageSize),
 			);
 			continue;
 		}
@@ -497,6 +497,24 @@ function createAtlasFullOverflows(
 				unit.entries.length === 1
 					? `atlas entry ${entry.entry.key} did not fit in ${policy.maxTextureCount} atlas textures`
 					: `atlas entry ${entry.entry.key} belongs to cohort ${unit.key}, which did not fit in ${policy.maxTextureCount} atlas textures`,
+			reason: "atlas-full" as const,
+		}))
+		.sort((left, right) =>
+			left.atlasEntryKey.localeCompare(right.atlasEntryKey),
+		);
+}
+
+function createAtlasUnitPageOverflows(
+	unit: AtlasPackingUnit,
+	pageSize: AtlasPageSizeCandidate,
+): AtlasLayoutOverflow[] {
+	return unit.entries
+		.map((entry) => ({
+			atlasEntryKey: entry.entry.key,
+			detail:
+				unit.entries.length === 1
+					? `atlas entry ${entry.entry.key} did not fit on a ${pageSize.width}x${pageSize.height} atlas texture`
+					: `atlas entry ${entry.entry.key} belongs to cohort ${unit.key}, which did not fit together on one ${pageSize.width}x${pageSize.height} atlas texture`,
 			reason: "atlas-full" as const,
 		}))
 		.sort((left, right) =>

@@ -1,7 +1,8 @@
 import type {
 	StaticAtlasBatchSnapshot,
-	StaticBakeInput,
-	StaticBakeResult,
+	StaticBakeBatchInput,
+	StaticBakeBatchResult,
+	StaticBakeBatchItem,
 	StaticBakerClient,
 	StaticCoordinatorCommitDelta,
 	StaticCoordinatorSnapshot,
@@ -15,7 +16,13 @@ import type {
 	ScheduledStaticWork,
 	ScheduledStaticWorkStatus,
 } from "../contracts";
-import { describeStaticScopeKey, planScheduledStaticWork } from "../demand-planner";
+import {
+	describeStaticScopeKey,
+	planScheduledStaticWork,
+} from "../demand-planner";
+
+const DEFAULT_STATIC_BATCH_MAX_PAYLOADS = 8;
+const DEFAULT_STATIC_BATCH_MAX_WAIT_MS = 500;
 
 export type StaticCoordinatorListener = (
 	snapshot: StaticCoordinatorSnapshot,
@@ -27,22 +34,30 @@ export type StaticCoordinatorCommitListener = (
 export interface StaticCoordinatorOptions {
 	readonly resolver: StaticResolverClient;
 	readonly baker: StaticBakerClient;
+	readonly batching?: Partial<StaticCoordinatorBatchingOptions>;
 	readonly createAtlasSnapshot?: (
-		payload: StaticScopePayload,
+		payloads: readonly StaticScopePayload[],
 		staticBatchId: string,
 	) => StaticAtlasBatchSnapshot;
+}
+
+export interface StaticCoordinatorBatchingOptions {
+	readonly maxPayloadsPerBatch: number;
+	readonly maxWaitMs: number;
 }
 
 export class StaticCoordinator {
 	readonly #resolver: StaticResolverClient;
 	readonly #baker: StaticBakerClient;
+	readonly #batching: StaticCoordinatorBatchingOptions;
 	#createAtlasSnapshot: (
-		payload: StaticScopePayload,
+		payloads: readonly StaticScopePayload[],
 		staticBatchId: string,
 	) => StaticAtlasBatchSnapshot;
 	readonly #listeners = new Set<StaticCoordinatorListener>();
 	readonly #commitListeners = new Set<StaticCoordinatorCommitListener>();
 	readonly #activeWork = new Map<string, MutableScheduledStaticWorkStatus>();
+	readonly #pendingBatches = new Map<string, PendingStaticBakeBatch>();
 	readonly #residentDrawUnitIds = new Set<string>();
 	#revision = 0;
 	#disposed = false;
@@ -52,20 +67,28 @@ export class StaticCoordinator {
 	#staleBakeResults = 0;
 	#committedDrawUnits = 0;
 	#latestTerrainPayload: TerrainStaticScopePayloadSummary | null = null;
-	#latestLandblockTopologyPayload: LandblockTopologyPayloadSummary | null = null;
+	#latestLandblockTopologyPayload: LandblockTopologyPayloadSummary | null =
+		null;
 	#latestDungeonPayload: DungeonStaticPayloadSummary | null = null;
 	#latestResolverFailure: StaticResolverFailureSnapshot | null = null;
 
 	constructor(options: StaticCoordinatorOptions) {
 		this.#resolver = options.resolver;
 		this.#baker = options.baker;
+		this.#batching = {
+			maxPayloadsPerBatch:
+				options.batching?.maxPayloadsPerBatch ??
+				DEFAULT_STATIC_BATCH_MAX_PAYLOADS,
+			maxWaitMs:
+				options.batching?.maxWaitMs ?? DEFAULT_STATIC_BATCH_MAX_WAIT_MS,
+		};
 		this.#createAtlasSnapshot =
 			options.createAtlasSnapshot ?? createEmptyAtlasSnapshotForPayload;
 	}
 
 	setAtlasSnapshotProvider(
 		createAtlasSnapshot: (
-			payload: StaticScopePayload,
+			payloads: readonly StaticScopePayload[],
 			staticBatchId: string,
 		) => StaticAtlasBatchSnapshot,
 	): void {
@@ -147,6 +170,12 @@ export class StaticCoordinator {
 		disposeIfAvailable(this.#resolver);
 		disposeIfAvailable(this.#baker);
 		this.#activeWork.clear();
+		for (const pendingBatch of this.#pendingBatches.values()) {
+			if (pendingBatch.timeoutId) {
+				clearTimeout(pendingBatch.timeoutId);
+			}
+		}
+		this.#pendingBatches.clear();
 		this.#evictResidentDrawUnits();
 		this.#emit();
 		this.#listeners.clear();
@@ -174,29 +203,95 @@ export class StaticCoordinator {
 		}
 
 		this.#recordResolvedPayload(payload);
-		this.#setStatus(work, "baking");
-		const staticBatchId = createStaticBatchId(work);
+		this.#enqueueBakePayload(work, payload);
+	}
 
-		const bakeInput: StaticBakeInput = {
-			atlasSnapshot: this.#createAtlasSnapshot(payload, staticBatchId),
-			payload,
-			staticBatchId,
-			work,
-		};
+	#enqueueBakePayload(
+		work: ScheduledStaticWork,
+		payload: StaticScopePayload,
+	): void {
+		const batchKey = createPendingBatchKey(work);
+		let pendingBatch = this.#pendingBatches.get(batchKey);
+		if (!pendingBatch) {
+			const timeoutId =
+				this.#batching.maxWaitMs > 0
+					? setTimeout(
+							() => this.#flushPendingBatch(batchKey),
+							this.#batching.maxWaitMs,
+						)
+					: null;
+			if (!timeoutId) {
+				queueMicrotask(() => void this.#flushPendingBatch(batchKey));
+			}
+			pendingBatch = {
+				domain: work.job.domain,
+				items: [],
+				revision: work.revision,
+				timeoutId,
+			};
+			this.#pendingBatches.set(batchKey, pendingBatch);
+		}
 
-		let result: StaticBakeResult;
-		try {
-			result = await this.#baker.bake(bakeInput);
-		} catch (error: unknown) {
-			this.#markFailedIfCurrent(
-				work,
-				error instanceof Error ? error.message : String(error),
-			);
+		pendingBatch.items.push({ payload, work });
+		if (pendingBatch.items.length >= this.#batching.maxPayloadsPerBatch) {
+			this.#flushPendingBatch(batchKey);
+		}
+	}
+
+	async #flushPendingBatch(batchKey: string): Promise<void> {
+		const pendingBatch = this.#pendingBatches.get(batchKey);
+		if (!pendingBatch) {
 			return;
 		}
 
-		if (!this.#isCurrent(result.work)) {
-			this.#staleBakeResults += 1;
+		this.#pendingBatches.delete(batchKey);
+		if (pendingBatch.timeoutId) {
+			clearTimeout(pendingBatch.timeoutId);
+		}
+
+		const items = pendingBatch.items.filter((item) =>
+			this.#isCurrent(item.work),
+		);
+		if (items.length === 0) {
+			return;
+		}
+
+		for (const item of items) {
+			this.#setStatus(item.work, "baking");
+		}
+
+		const staticBatchId = createStaticBatchId({
+			domain: pendingBatch.domain,
+			items,
+			revision: pendingBatch.revision,
+		});
+		const bakeInput: StaticBakeBatchInput = {
+			atlasSnapshot: this.#createAtlasSnapshot(
+				items.map((item) => item.payload),
+				staticBatchId,
+			),
+			domain: pendingBatch.domain,
+			items,
+			revision: pendingBatch.revision,
+			staticBatchId,
+		};
+
+		let result: StaticBakeBatchResult;
+		try {
+			result = await this.#baker.bake(bakeInput);
+		} catch (error: unknown) {
+			for (const item of items) {
+				this.#markFailedIfCurrent(
+					item.work,
+					error instanceof Error ? error.message : String(error),
+				);
+			}
+			return;
+		}
+
+		const currentWorks = result.works.filter((work) => this.#isCurrent(work));
+		if (currentWorks.length !== result.works.length) {
+			this.#staleBakeResults += result.works.length - currentWorks.length;
 			this.#emit();
 			return;
 		}
@@ -204,15 +299,15 @@ export class StaticCoordinator {
 		this.#commit(result);
 	}
 
-	#commit(result: StaticBakeResult): void {
-		const status = this.#activeWork.get(result.work.workId);
-
-		if (!status) {
-			return;
+	#commit(result: StaticBakeBatchResult): void {
+		for (const work of result.works) {
+			const status = this.#activeWork.get(work.workId);
+			if (!status) {
+				continue;
+			}
+			status.status = "committed";
+			this.#committed += 1;
 		}
-
-		status.status = "committed";
-		this.#committed += 1;
 		for (const drawUnit of result.drawUnits) {
 			this.#residentDrawUnitIds.add(drawUnit.drawUnitId);
 		}
@@ -220,7 +315,7 @@ export class StaticCoordinator {
 		this.#emitCommitDelta({
 			addedDrawUnits: result.drawUnits,
 			removedDrawUnitIds: [],
-			revision: result.work.revision,
+			revision: result.revision,
 			staticBatchId: result.staticBatchId,
 			textureUses: result.textureUses,
 		});
@@ -359,30 +454,52 @@ type MutableScheduledStaticWorkStatus = {
 	-readonly [Key in keyof ScheduledStaticWorkStatus]: ScheduledStaticWorkStatus[Key];
 };
 
+interface PendingStaticBakeBatch {
+	readonly domain: ScheduledStaticWork["job"]["domain"];
+	readonly revision: number;
+	readonly items: StaticBakeBatchItem[];
+	readonly timeoutId: ReturnType<typeof setTimeout> | null;
+}
+
 function createEmptyAtlasSnapshotForPayload(
-	payload: StaticScopePayload,
+	payloads: readonly StaticScopePayload[],
 	staticBatchId: string,
 ): StaticAtlasBatchSnapshot {
+	const firstPayload = payloads[0];
+
 	return {
-		domain: payload.job.domain,
+		domain: firstPayload?.job.domain ?? "outdoor-terrain",
 		placements: [],
 		staticBatchId,
-		textureUses:
+		textureUses: payloads.flatMap((payload) =>
 			payload.scope.kind === "placeholder"
 				? payload.scope.referencedTextureUses
 				: payload.scope.kind === "terrain"
 					? payload.scope.textureUses.map((textureUse) => textureUse.texture)
 					: [],
+		),
 	};
 }
 
-function createStaticBatchId(work: ScheduledStaticWork): string {
+function createStaticBatchId(input: {
+	readonly domain: ScheduledStaticWork["job"]["domain"];
+	readonly revision: number;
+	readonly items: readonly StaticBakeBatchItem[];
+}): string {
+	const scopeKeys = input.items.map((item) =>
+		describeStaticScopeKey(item.work.job.scope),
+	);
 	return [
 		"static-batch",
-		work.revision.toString(),
-		describeStaticScopeKey(work.job.scope),
-		work.job.domain,
+		input.revision.toString(),
+		input.domain,
+		scopeKeys[0] ?? "empty",
+		input.items.length.toString(),
 	].join(":");
+}
+
+function createPendingBatchKey(work: ScheduledStaticWork): string {
+	return [work.revision.toString(), work.job.domain].join(":");
 }
 
 function createEvictionStaticBatchId(revision: number): string {

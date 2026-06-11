@@ -82,13 +82,7 @@ export class TextureManager {
 					return [];
 				}
 
-				const entry = registry.entries.get(
-					createStaticBatchTextureKey(
-						firstPayload.job.domain,
-						staticBatchId,
-						textureUse,
-					),
-				);
+				const entry = findRegistryEntryBySource(registry, textureUse);
 				return entry
 					? [
 							{
@@ -155,11 +149,7 @@ export class TextureManager {
 		}
 
 		for (const textureUse of delta.textureUses) {
-			const textureKey = createStaticBatchTextureKey(
-				textureUse.domain,
-				textureUse.staticBatchId,
-				textureUse.source,
-			);
+			const textureKey = createStaticBatchTextureKey(textureUse);
 			const entry =
 				this.#getRegistry(
 					textureUse.domain,
@@ -241,11 +231,7 @@ export class TextureManager {
 			textureUse.domain,
 			textureUse.staticBatchId,
 		);
-		const textureKey = createStaticBatchTextureKey(
-			textureUse.domain,
-			textureUse.staticBatchId,
-			textureUse.source,
-		);
+		const textureKey = createStaticBatchTextureKey(textureUse);
 		const existing = registry.entries.get(textureKey);
 		if (existing) {
 			return {
@@ -257,6 +243,7 @@ export class TextureManager {
 
 		const pending = pendingPlacements.get(textureKey);
 		if (pending) {
+			addPendingPlacementOwners(pending, textureUse.ownerDrawUnitIds);
 			return pending;
 		}
 
@@ -279,6 +266,7 @@ export class TextureManager {
 			staticBatchId: textureUse.staticBatchId,
 			textureKey,
 			textureUse,
+			ownerDrawUnitIds: new Set(textureUse.ownerDrawUnitIds),
 		};
 		pendingPlacements.set(textureKey, staged);
 
@@ -293,14 +281,7 @@ export class TextureManager {
 			const registry = this.#getRegistry(group.domain, group.staticBatchId);
 			const placementRevision = registry.revision + 1;
 			const packed = await this.#texturePacker.pack({
-				cohorts: [
-					{
-						key: group.pageClassKey,
-						textureUseIds: group.entries.map(
-							(entry) => entry.textureUse.textureUseId,
-						),
-					},
-				],
+				cohorts: createDrawUnitTexturePackingCohorts(group),
 				domain: group.domain,
 				jobId: `texture-pack:${group.staticBatchId}:${group.pageClassKey}:${placementRevision}`,
 				page: createTexturePackingPageConstraints(group),
@@ -358,7 +339,7 @@ export class TextureManager {
 						? createTextureRefId(
 								group.domain,
 								group.staticBatchId,
-								firstEntry.textureUse.source,
+								firstEntry.textureUse,
 							)
 						: createTexturePageRefId(
 								group.domain,
@@ -508,6 +489,7 @@ interface PendingTexturePlacement {
 	readonly source: ReturnType<typeof prepareDirectRgbaTextureSource>;
 	readonly pagePolicy: RuntimeTexturePagePolicy;
 	readonly samplerPolicy: RuntimeTextureSamplerPolicy;
+	readonly ownerDrawUnitIds: Set<string>;
 	entry: StaticBatchTextureRegistryEntry | null;
 	pendingLeaseCount: number;
 }
@@ -543,34 +525,49 @@ function createStaticBatchRegistryKey(
 	return [domain, staticBatchId].join(":") as StaticBatchRegistryKey;
 }
 
-function createStaticBatchTextureKey(
-	domain: StaticDomain,
-	staticBatchId: string,
+function findRegistryEntryBySource(
+	registry: StaticBatchTextureRegistry,
 	source: PreparedTextureUseIdentity,
+): StaticBatchTextureRegistryEntry | null {
+	for (const entry of registry.entries.values()) {
+		if (isSamePreparedTextureUse(entry.source, source)) {
+			return entry;
+		}
+	}
+
+	return null;
+}
+
+function isSamePreparedTextureUse(
+	left: PreparedTextureUseIdentity,
+	right: PreparedTextureUseIdentity,
+): boolean {
+	return (
+		left.kind === right.kind &&
+		left.renderSurfaceId === right.renderSurfaceId &&
+		left.usage === right.usage &&
+		left.outputFormat === right.outputFormat
+	);
+}
+
+function createStaticBatchTextureKey(
+	textureUse: StaticBakeTextureUse,
 ): StaticBatchTextureKey {
 	return [
-		domain,
-		staticBatchId,
-		source.kind,
-		source.renderSurfaceId.toString(16).padStart(8, "0"),
-		source.usage,
-		source.outputFormat,
+		textureUse.domain,
+		textureUse.staticBatchId,
+		textureUse.textureUseId,
 	].join(":") as StaticBatchTextureKey;
 }
 
 function createTextureRefId(
 	domain: StaticDomain,
 	staticBatchId: string,
-	source: PreparedTextureUseIdentity,
+	textureUse: StaticBakeTextureUse,
 ): string {
-	return [
-		"texture-ref",
-		domain,
-		staticBatchId,
-		source.renderSurfaceId.toString(16).padStart(8, "0"),
-		source.usage,
-		source.outputFormat,
-	].join(":");
+	return ["texture-ref", domain, staticBatchId, textureUse.textureUseId].join(
+		":",
+	);
 }
 
 function createTexturePageRefId(
@@ -614,6 +611,35 @@ function groupPendingTexturePlacements(
 	}
 
 	return [...groups.values()];
+}
+
+function addPendingPlacementOwners(
+	placement: PendingTexturePlacement,
+	ownerDrawUnitIds: readonly string[],
+): void {
+	for (const ownerDrawUnitId of ownerDrawUnitIds) {
+		placement.ownerDrawUnitIds.add(ownerDrawUnitId);
+	}
+}
+
+function createDrawUnitTexturePackingCohorts(
+	group: PendingTexturePlacementGroup,
+): NonNullable<TexturePackingJob["cohorts"]> {
+	const textureUseIdsByDrawUnitId = new Map<string, string[]>();
+	for (const entry of group.entries) {
+		for (const drawUnitId of entry.ownerDrawUnitIds) {
+			const textureUseIds = textureUseIdsByDrawUnitId.get(drawUnitId) ?? [];
+			textureUseIds.push(entry.textureUse.textureUseId);
+			textureUseIdsByDrawUnitId.set(drawUnitId, textureUseIds);
+		}
+	}
+
+	return [...textureUseIdsByDrawUnitId.entries()]
+		.map(([drawUnitId, textureUseIds]) => ({
+			key: `${group.pageClassKey}|draw-unit:${drawUnitId}`,
+			textureUseIds: uniqueSortedStrings(textureUseIds),
+		}))
+		.sort((left, right) => left.key.localeCompare(right.key));
 }
 
 function createTexturePageClassKey(
@@ -681,4 +707,8 @@ function getRuntimeTexturePageGutterPixels(
 		pagePolicy.sampleClass === "rgba-detail"
 		? FILTERABLE_ATLAS_GUTTER_PIXELS
 		: EXACT_ATLAS_GUTTER_PIXELS;
+}
+
+function uniqueSortedStrings(values: readonly string[]): readonly string[] {
+	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }

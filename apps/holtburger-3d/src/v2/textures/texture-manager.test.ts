@@ -19,7 +19,7 @@ import type {
 import { TextureManager } from "./texture-manager";
 
 const STABLE_TEXTURE_REF_ID =
-	"texture-ref:outdoor-terrain:batch-a:06000010:color:rgba8";
+	"texture-ref:outdoor-terrain:batch-a:terrain-a:prepared-texture:06000010";
 
 describe("V2 texture manager", () => {
 	it("turns bake-local texture uses into runtime-owned direct placements", async () => {
@@ -129,10 +129,10 @@ describe("V2 texture manager", () => {
 			{
 				cohorts: [
 					{
-						textureUseIds: [
-							"terrain-a:prepared-texture:06000010",
-							"terrain-b:prepared-texture:06000020",
-						],
+						textureUseIds: ["terrain-a:prepared-texture:06000010"],
+					},
+					{
+						textureUseIds: ["terrain-b:prepared-texture:06000020"],
 					},
 				],
 				page: {
@@ -170,7 +170,119 @@ describe("V2 texture manager", () => {
 		expect(update?.placements[0]?.textureRefId).toContain("texture-page-ref");
 	});
 
-	it("carries atlas rect metadata on initial and reused draw-unit bindings", async () => {
+	it("scopes texture packing cohorts to draw-unit ownership within a batch", async () => {
+		const assetService = new FixtureAssetService();
+		const texturePacker = new FixtureTexturePacker({
+			pageHeight: 512,
+			pageWidth: 512,
+			pixels: new Uint8Array(512 * 512 * 4),
+			rect: [96, 96, 1, 1],
+		});
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedDrawUnitIds: [],
+			revision: 1,
+			staticBatchId: "batch-a",
+			textureUses: [
+				createTextureUseCommit({
+					drawUnitId: "terrain-a",
+					renderSurfaceId: 0x06000010,
+					textureUseId: "terrain-a:prepared-texture:06000010",
+				}),
+				createTextureUseCommit({
+					drawUnitId: "terrain-a",
+					renderSurfaceId: 0x06000020,
+					textureUseId: "terrain-a:prepared-texture:06000020",
+				}),
+				createTextureUseCommit({
+					drawUnitId: "terrain-b",
+					renderSurfaceId: 0x06000030,
+					textureUseId: "terrain-b:prepared-texture:06000030",
+				}),
+				createTextureUseCommit({
+					drawUnitId: "terrain-b",
+					renderSurfaceId: 0x06000040,
+					textureUseId: "terrain-b:prepared-texture:06000040",
+				}),
+			],
+		});
+
+		expect(texturePacker.jobs[0]?.cohorts).toEqual([
+			{
+				key: expect.stringContaining("draw-unit:terrain-a"),
+				textureUseIds: [
+					"terrain-a:prepared-texture:06000010",
+					"terrain-a:prepared-texture:06000020",
+				],
+			},
+			{
+				key: expect.stringContaining("draw-unit:terrain-b"),
+				textureUseIds: [
+					"terrain-b:prepared-texture:06000030",
+					"terrain-b:prepared-texture:06000040",
+				],
+			},
+		]);
+		expect(
+			texturePacker.jobs[0]?.sources.map((source) => source.textureUseId),
+		).toEqual([
+			"terrain-a:prepared-texture:06000010",
+			"terrain-a:prepared-texture:06000020",
+			"terrain-b:prepared-texture:06000030",
+			"terrain-b:prepared-texture:06000040",
+		]);
+	});
+
+	it("keeps shared prepared sources as separate logical packing entries when cohorts differ", async () => {
+		const assetService = new FixtureAssetService();
+		const texturePacker = new FixtureTexturePacker({
+			pageHeight: 512,
+			pageWidth: 512,
+			pixels: new Uint8Array(512 * 512 * 4),
+			rect: [96, 96, 1, 1],
+		});
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedDrawUnitIds: [],
+			revision: 1,
+			staticBatchId: "batch-a",
+			textureUses: [
+				createTextureUseCommit({
+					drawUnitId: "terrain-a",
+					renderSurfaceId: 0x06000010,
+					textureUseId: "terrain-a:prepared-texture:06000010",
+				}),
+				createTextureUseCommit({
+					drawUnitId: "terrain-b",
+					renderSurfaceId: 0x06000010,
+					textureUseId: "terrain-b:prepared-texture:06000010",
+				}),
+			],
+		});
+
+		expect(
+			texturePacker.jobs[0]?.sources.map((source) => source.textureUseId),
+		).toEqual([
+			"terrain-a:prepared-texture:06000010",
+			"terrain-b:prepared-texture:06000010",
+		]);
+		expect(texturePacker.jobs[0]?.cohorts).toEqual([
+			{
+				key: expect.stringContaining("draw-unit:terrain-a"),
+				textureUseIds: ["terrain-a:prepared-texture:06000010"],
+			},
+			{
+				key: expect.stringContaining("draw-unit:terrain-b"),
+				textureUseIds: ["terrain-b:prepared-texture:06000010"],
+			},
+		]);
+	});
+
+	it("carries atlas rect metadata on duplicate logical texture placements", async () => {
 		const assetService = new FixtureAssetService();
 		const texturePacker = new FixtureTexturePacker({
 			pageHeight: 4,
@@ -221,7 +333,16 @@ describe("V2 texture manager", () => {
 					textureWidth: 4,
 				},
 			],
-			placements: [],
+			placements: [
+				{
+					height: 4,
+					rect: [2, 1, 1, 1],
+					textureRefId:
+						"texture-ref:outdoor-terrain:batch-a:terrain-b:prepared-texture:06000010",
+					textureUseId: "terrain-b:prepared-texture:06000010",
+					width: 4,
+				},
+			],
 		});
 	});
 
@@ -249,7 +370,7 @@ describe("V2 texture manager", () => {
 		});
 	});
 
-	it("reuses compatible batch placements across draw units", async () => {
+	it("duplicates logical placements across draw units that share prepared source", async () => {
 		const assetService = new FixtureAssetService();
 		const textureManager = new TextureManager({ assetService });
 
@@ -268,17 +389,24 @@ describe("V2 texture manager", () => {
 			}),
 		);
 
-		expect(assetService.requestedKeys).toHaveLength(1);
+		expect(assetService.requestedKeys).toHaveLength(2);
 		expect(firstUpdate?.placements).toHaveLength(1);
 		expect(secondUpdate).toMatchObject({
 			drawUnitBindings: [
 				{
 					drawUnitId: "terrain-b",
-					textureRefId: STABLE_TEXTURE_REF_ID,
+					textureRefId:
+						"texture-ref:outdoor-terrain:batch-a:terrain-b:prepared-texture:06000010",
 					textureUseId: "terrain-b:prepared-texture:06000010",
 				},
 			],
-			placements: [],
+			placements: [
+				{
+					textureRefId:
+						"texture-ref:outdoor-terrain:batch-a:terrain-b:prepared-texture:06000010",
+					textureUseId: "terrain-b:prepared-texture:06000010",
+				},
+			],
 			removedTextureRefIds: [],
 			revision: 2,
 		});
@@ -290,7 +418,11 @@ describe("V2 texture manager", () => {
 			staticBatchId: "batch-a",
 			textureUses: [],
 		});
-		expect(removeFirstUpdate).toBeNull();
+		expect(removeFirstUpdate).toMatchObject({
+			removedTextureRefIds: [
+				"texture-ref:outdoor-terrain:batch-a:terrain-a:prepared-texture:06000010",
+			],
+		});
 
 		const removeSecondUpdate = await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
@@ -300,7 +432,9 @@ describe("V2 texture manager", () => {
 			textureUses: [],
 		});
 		expect(removeSecondUpdate).toMatchObject({
-			removedTextureRefIds: [STABLE_TEXTURE_REF_ID],
+			removedTextureRefIds: [
+				"texture-ref:outdoor-terrain:batch-a:terrain-b:prepared-texture:06000010",
+			],
 		});
 	});
 
@@ -329,13 +463,13 @@ describe("V2 texture manager", () => {
 				{
 					drawUnitId: "terrain-b",
 					textureRefId:
-						"texture-ref:outdoor-terrain:batch-b:06000010:color:rgba8",
+						"texture-ref:outdoor-terrain:batch-b:terrain-b:prepared-texture:06000010",
 				},
 			],
 			placements: [
 				{
 					textureRefId:
-						"texture-ref:outdoor-terrain:batch-b:06000010:color:rgba8",
+						"texture-ref:outdoor-terrain:batch-b:terrain-b:prepared-texture:06000010",
 				},
 			],
 		});

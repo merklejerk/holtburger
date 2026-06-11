@@ -156,20 +156,25 @@ describe("V2 terrain geometry baker", () => {
 		const result = bakeTerrainGeometry(input);
 		const drawUnits = result.drawUnits.map(requireTerrainDrawUnit);
 
-		expect(drawUnits).toHaveLength(2);
+		expect(drawUnits).toHaveLength(3);
 		expect(drawUnits.map((drawUnit) => drawUnit.drawUnitId)).toEqual([
 			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-0",
 			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-1",
+			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-2",
 		]);
 		expect(drawUnits.map((drawUnit) => drawUnit.triangleCount)).toEqual([
-			16, 2,
+			8, 8, 2,
 		]);
-		expect(drawUnits[0]?.terrainMaterialPlan?.layerEntries).toHaveLength(8);
-		expect(drawUnits[1]?.terrainMaterialPlan?.layerEntries).toHaveLength(1);
+		expect(drawUnits[0]?.terrainMaterialPlan?.layerEntries).toHaveLength(4);
+		expect(drawUnits[1]?.terrainMaterialPlan?.layerEntries).toHaveLength(4);
+		expect(drawUnits[2]?.terrainMaterialPlan?.layerEntries).toHaveLength(1);
 		expect(Array.from(drawUnits[0]?.layerSlots ?? [])).toEqual(
-			Array.from({ length: 48 }, (_value, index) => Math.floor(index / 6)),
+			Array.from({ length: 24 }, (_value, index) => Math.floor(index / 6)),
 		);
-		expect(Array.from(drawUnits[1]?.layerSlots ?? [])).toEqual([
+		expect(Array.from(drawUnits[1]?.layerSlots ?? [])).toEqual(
+			Array.from({ length: 24 }, (_value, index) => Math.floor(index / 6)),
+		);
+		expect(Array.from(drawUnits[2]?.layerSlots ?? [])).toEqual([
 			0, 0, 0, 0, 0, 0,
 		]);
 		expect(
@@ -201,20 +206,30 @@ describe("V2 terrain geometry baker", () => {
 		expect(result.drawUnits.map((drawUnit) => drawUnit.drawUnitId)).toEqual([
 			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-0",
 			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-1",
+			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-2",
 		]);
 		expect(result.textureUses).toHaveLength(9);
 		expect(
 			result.textureUses
-				.slice(0, 8)
+				.slice(0, 4)
 				.map((textureUse) => textureUse.ownerDrawUnitIds),
 		).toEqual(
-			Array.from({ length: 8 }, () => [
+			Array.from({ length: 4 }, () => [
 				"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-0",
+			]),
+		);
+		expect(
+			result.textureUses
+				.slice(4, 8)
+				.map((textureUse) => textureUse.ownerDrawUnitIds),
+		).toEqual(
+			Array.from({ length: 4 }, () => [
+				"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-1",
 			]),
 		);
 		expect(result.textureUses[8]).toMatchObject({
 			ownerDrawUnitIds: [
-				"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-1",
+				"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-2",
 			],
 		});
 	});

@@ -116,16 +116,49 @@ describe("V2 terrain material layer planner", () => {
 		expect(plan?.drawSlices).toEqual([
 			expect.objectContaining({
 				layerSlots: [0, 1],
-				reason: "terrain material layer overflow slice 1",
+				reason: "terrain material capacity slice 1",
 			}),
 			expect.objectContaining({
 				layerSlots: [2],
-				reason: "terrain material layer overflow slice 2",
+				reason: "terrain material capacity slice 2",
 			}),
 		]);
 		expect(plan?.fallbackReasons).toEqual([
 			expect.objectContaining({
 				code: "layer-overflow",
+			}),
+		]);
+	});
+
+	it("partitions draw slices by same-page color texture capacity", () => {
+		const payload = createTerrainPayload({
+			pcodes: [
+				encodeTerrainPcode([1, 1, 1, 1]),
+				encodeTerrainPcode([2, 2, 2, 2]),
+				encodeTerrainPcode([3, 3, 3, 3]),
+			],
+		});
+
+		const plan = buildTerrainMaterialLayerPlan({
+			createTextureUseId,
+			maxColorTextureRefsPerSlice: 2,
+			payload,
+		});
+
+		expect(plan?.drawSlices).toEqual([
+			expect.objectContaining({
+				layerSlots: [0, 1],
+				reason: "terrain material capacity slice 1",
+			}),
+			expect.objectContaining({
+				layerSlots: [2],
+				reason: "terrain material capacity slice 2",
+			}),
+		]);
+		expect(plan?.fallbackReasons).toEqual([
+			expect.objectContaining({
+				code: "layer-overflow",
+				message: expect.stringContaining("color texture refs"),
 			}),
 		]);
 	});

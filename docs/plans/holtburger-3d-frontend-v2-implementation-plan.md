@@ -1388,6 +1388,28 @@ Failed to close:
 - Planner-side "page-slot overflow slicing" is intentionally not implemented as a speculative color-ref count. If exact page-slot overflow needs pre-render slicing, it should happen after texture placement metadata exists, not in the terrain source-material planner.
 - Phase 10B4D5 still needs better diagnostics/snapshots for role-page counts and overflow; D4 only removed the stale planning heuristic.
 
+#### Phase 10B4D4A: Same-Batch Texture Source Deduplication
+
+Status: completed.
+
+Purpose: reduce terrain/static atlas VRAM within the batch-scoped atlas architecture by deduplicating identical prepared texture sources inside one submitted static atlas batch.
+
+Implementation notes:
+
+- Texture manager staging now distinguishes bake-local texture-use keys from batch-local prepared-source placement keys.
+- Multiple bake-local texture-use ids that share the same prepared source, domain, static batch, and sampler/page policy now pack as one atlas source entry and map their local draw-unit bindings to the shared registry entry.
+- Registry lease/removal handling deletes all local aliases for a shared entry when the final lease is released.
+- Cross-batch duplication remains intentional; later batches still receive distinct atlas groups unless a future cross-batch cache is explicitly designed.
+
+Verification:
+
+- Texture-manager tests cover same-batch prepared-source dedupe, shared placement reuse across draw units, alias lease removal, and preservation of cross-batch duplication.
+
+Failed to close:
+
+- This does not tune `DEFAULT_STATIC_BATCH_MAX_PAYLOADS` or `DEFAULT_STATIC_BATCH_MAX_WAIT_MS`. Larger batches may still reduce cross-batch duplication, but should be tuned after diagnostics show whether same-batch dedupe was enough.
+- Runtime diagnostics still need VRAM/atlas-page visibility in Phase 10B4D5.
+
 #### Phase 10B4D5: Diagnostics And Manual Terrain Recheck
 
 Status: planned; next.

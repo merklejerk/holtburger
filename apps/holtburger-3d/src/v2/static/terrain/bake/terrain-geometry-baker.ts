@@ -9,6 +9,7 @@ import type {
 	TerrainStaticScopePayload,
 	TerrainTextureUseFacts,
 } from "../../contracts";
+import { classifyTerrainMaterialFamily } from "./terrain-material-family-classifier";
 import { buildTerrainMaterialLayerPlan } from "./terrain-material-layer-planner";
 
 const UINT16_MAX_INDEX = 65_535;
@@ -32,6 +33,7 @@ export function bakeTerrainGeometry(input: StaticBakeInput): StaticBakeResult {
 	const drawUnit = createTerrainGeometryDrawUnit(
 		input.work.workId,
 		input.payload.scope,
+		input.atlasSnapshot.revision,
 	);
 	const textureUses = createTerrainBakeTextureUses(input, drawUnit);
 
@@ -54,20 +56,20 @@ export function bakeTerrainGeometry(input: StaticBakeInput): StaticBakeResult {
 function createTerrainGeometryDrawUnit(
 	workId: string,
 	payload: TerrainStaticScopePayload,
+	placementRevisionAssumption: number,
 ): TerrainGeometryStaticDrawUnit {
 	const positions = new Float32Array(payload.mesh.triangles.length * 9);
 	const texCoords = new Float32Array(payload.mesh.triangles.length * 6);
 	const sourceTriangleIds: string[] = [];
-	const primaryTextureUse = payload.textureUses.find(
-		(textureUse) => textureUse.preparedTextureUse !== null,
-	);
-	const textureUseIds = payload.textureUses
-		.filter((textureUse) => textureUse.preparedTextureUse !== null)
-		.map((textureUse) => createTerrainTextureUseId(workId, textureUse));
 	const terrainMaterialPlan = buildTerrainMaterialLayerPlan({
 		createTextureUseId: (textureUse) =>
 			createTerrainTextureUseId(workId, textureUse),
 		payload,
+	});
+	const material = classifyTerrainMaterialFamily({
+		domain: "outdoor-terrain",
+		placementRevisionAssumption,
+		plan: terrainMaterialPlan,
 	});
 
 	for (const [triangleIndex, triangle] of payload.mesh.triangles.entries()) {
@@ -91,18 +93,15 @@ function createTerrainGeometryDrawUnit(
 		indices: createSequentialIndices(vertexCount),
 		kind: "terrain-geometry",
 		landblockId: payload.landblock.landblockId,
-		materialFamily: primaryTextureUse
-			? "terrain-phase8-texture-probe"
-			: "terrain-debug-flat",
-		primaryTextureUseId: primaryTextureUse?.preparedTextureUse
-			? createTerrainTextureUseId(workId, primaryTextureUse)
-			: null,
+		materialBucketKey: material.materialBucketKey,
+		materialFamily: material.materialFamily,
+		primaryTextureUseId: material.primaryTextureUseId,
 		positions,
 		sourceTriangleIds,
-		terrainFallbackReasons: terrainMaterialPlan?.fallbackReasons ?? [],
+		terrainFallbackReasons: material.terrainFallbackReasons,
 		terrainMaterialPlan,
 		texCoords,
-		textureUseIds,
+		textureUseIds: material.textureUseIds,
 		triangleCount: payload.mesh.triangles.length,
 		vertexCount,
 	};
@@ -143,8 +142,16 @@ function createTerrainBakeTextureUses(
 		return [];
 	}
 
+	const boundTextureUseIds = new Set(drawUnit.textureUseIds);
 	return input.payload.scope.textureUses.flatMap((textureUse) => {
 		if (!textureUse.preparedTextureUse) {
+			return [];
+		}
+		const textureUseId = createTerrainTextureUseId(
+			input.work.workId,
+			textureUse,
+		);
+		if (!boundTextureUseIds.has(textureUseId)) {
 			return [];
 		}
 
@@ -154,7 +161,7 @@ function createTerrainBakeTextureUses(
 				ownerDrawUnitIds: [drawUnit.drawUnitId],
 				placementRevisionAssumption: input.atlasSnapshot.revision,
 				source: textureUse.preparedTextureUse,
-				textureUseId: createTerrainTextureUseId(input.work.workId, textureUse),
+				textureUseId,
 			},
 		];
 	});

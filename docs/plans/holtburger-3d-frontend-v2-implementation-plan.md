@@ -75,6 +75,7 @@ Each implementation phase should run `check`, `lint:ts`, `lint:dead`, and `test:
 - The renderer consumes committed records and imperative updates. It does not fetch host assets, walk dependencies, or plan atlases.
 - The texture/atlas manager owns logical texture refs. Workers do not allocate renderer IDs, GPU IDs, or final texture ref IDs.
 - Static bake output uses top-level peer result fields: draw units, bake-local texture uses, placement requirements/assumptions, spatial records, visibility records, portal/interior records, source mappings, and dynamic seeds. Atlas pixel buffers are produced by texture-packing workers under texture/atlas manager ownership, not by static bake workers.
+- Static baking must partition every static domain into bounded compatibility slices before renderer residency. Terrain, buildings, detail objects, env-cell geometry, and later portal/interior geometry may use domain-specific draw-unit variants, but none may assume one source scope can fit into one renderer material table or one draw unit.
 - Terrain is the first visible slice and has a dedicated terrain resolution/bake adapter.
 - Diagnostics must be consumers of snapshots and inspection APIs, not drivers of service interfaces.
 - Every phase must either prove a seam with tests or prove a visible result in the V2 harness.
@@ -918,7 +919,7 @@ Verification:
 
 ### Phase 10B3: Terrain Material Family Cutover
 
-Status: pending.
+Status: complete.
 
 Purpose: replace the temporary Phase 8 terrain probe family with typed terrain material-family output driven by Phase 10A terrain material plans.
 
@@ -935,6 +936,22 @@ Acceptance criteria:
 - Terrain material output is driven by typed material-family classification and texture role bindings.
 - Phase 10A terrain fallback reasons remain typed and visible in bake output; missing bindings do not silently degrade to the old probe family.
 
+Implementation notes:
+
+- 2026-06-11: Removed `terrain-phase8-texture-probe` from the V2 terrain draw-unit contract. Normal V2 terrain bake output now emits either `terrain-single-base-color` or explicit `terrain-debug-flat` fallback.
+- 2026-06-11: Added a V2 terrain material-family classifier. The first textured family only accepts terrain material plans that can be represented by the current renderer: one repeat-wrapped prepared base color texture, one placement-revision assumption, no overlays, roads, detail roles, missing bindings, layer fallbacks, multiple base textures, or non-1 tiling. The classifier emits a material bucket key that includes shader family, domain, sampler class, placement revision, and bound texture-use identity.
+- 2026-06-11: Terrain geometry baking now emits texture uses only for the material family's bound texture-use IDs. Unsupported material plans remain as typed fallback output with `unsupported-material-binding` where the Phase 10B3 renderer cannot bind the plan.
+- 2026-06-11: WebGL2 terrain rendering now gates texture sampling on the typed material family instead of treating any draw-unit texture binding as permission to sample. This makes debug fallback explicit rather than an accidental missing/incomplete material state.
+- 2026-06-11: Spicy caveat: this phase intentionally narrows textured terrain coverage while removing the probe. Real AC terrain with overlays, roads, detail, multiple base pages, or non-1 tiling will render debug-flat until Phase 10B4 adds atlas rect/material shader binding. That is less visually complete than the probe in some cases, but architecturally cleaner because unsupported material parity is explicit and typed.
+- 2026-06-11: Runtime now emits structured warning diagnostics when static materialization fails or when a terrain draw unit enters renderer residency with typed fallback reasons. The default diagnostics adapter writes one-shot `console.warn` messages for manual visual review, while snapshots and typed fallback data remain the durable diagnostic path.
+- 2026-06-11: Centralized runtime warning policy behind a `RuntimeDiagnostics` sink so upcoming 10B4 atlas/material binding failures can report through one path instead of adding bespoke console calls.
+- 2026-06-11: Manual review of `0xdb57ffff` exposed a misleading `layer-overflow` warning: "21 layer entries; limit is 8." This should not be treated as an impossible AC terrain material target. It means the current V2 bake path is planning one landblock-wide terrain material table/draw unit across 21 unique pcode recipes. V1 avoids this by slicing/grouping terrain work; Phase 10B4 must split terrain geometry by compatible pcode/material slice before binding atlas pages instead of requiring one draw unit to satisfy every landblock recipe.
+
+Verification:
+
+- `npm run test:ts -- src/v2/static/terrain/bake/terrain-material-family-classifier.test.ts src/v2/static/terrain/bake/terrain-material-layer-planner.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts src/v2/runtime/client-runtime.test.ts src/v2/textures/texture-manager.test.ts src/v2/textures/packing/atlas-layout.test.ts src/v2/textures/packing/packer.test.ts src/v2/textures/packing/worker-client.test.ts src/v2/textures/sampling-policy.test.ts src/v2/import-boundary.test.ts`
+- `npm run check`
+
 ### Phase 10B4: Terrain Atlas Binding And Rect UVs
 
 Status: pending.
@@ -943,13 +960,18 @@ Purpose: bind Phase 10A terrain material plans to packed V2 texture pages in Web
 
 Deliverables:
 
+- Terrain geometry slicing by compatible pcode/material entries before atlas binding, so a landblock with many unique pcode recipes becomes multiple bounded draw units or draw slices instead of one impossible material table.
+- Terrain partitioning implemented as a small compatibility-candidate pipeline with a domain-specific candidate adapter and reusable bucket/capacity/sort/source-slice mechanics where practical. Any terrain-only assumptions in the partitioner must be named so Phase 11 can either extract the shared utility cleanly or justify a parallel implementation.
 - V2 terrain bucket/page-class planning above the lower-level atlas packer so terrain color, mask, and detail pages get role-specific capacity and gutter policy.
 - WebGL2 shader inputs, texture bindings, sampler policy, material uniforms, and atlas rect UV transforms for terrain base/overlay/mask/road/detail behavior.
 - True multi-source packed terrain pages, including atlas rect transforms before relying on generated mipmaps for atlas pages that contain more than one rect.
-- Tests for renderer binding construction, atlas rect transform behavior, page-class policy, and no V1 `world-display` imports from runtime V2 code.
+- Tests for terrain pcode/material slice partitioning, renderer binding construction, atlas rect transform behavior, page-class policy, and no V1 `world-display` imports from runtime V2 code.
 
 Acceptance criteria:
 
+- A landblock with more unique pcode/material recipes than one renderer material table can bind is partitioned into bounded terrain draw slices/draw units, not reported as an unattainable single-material requirement.
+- Terrain layer-overflow diagnostics distinguish "landblock has too many recipes for the current unsliced path" from "one draw slice still exceeds the proven material-binding limit."
+- The terrain partitioner exposes or documents the reusable compatibility facts: shader/material family, pass/order class, sampler/device state, binding layout, placement revision assumption, capacity limit, stable sort key, source-slice mapping, and fallback diagnostic shape.
 - V2 terrain can bind packed pages with multiple rects without sampling neighboring rects or gutter-only regions.
 - Terrain color/detail pages can use generated GPU mipmaps only after page gutters/padding and rect transforms are in place.
 - Mask/raw pages remain exact/no-mip unless a mask-safe policy is explicitly proven.
@@ -1013,10 +1035,12 @@ Deliverables:
 - Compare V2 terrain geometry, material, texture, camera anchor, and diagnostics behavior against v1 harness expectations.
 - Update later static object, inspection, dungeon, and cutover phases based on the terrain parity findings.
 - Decide whether any terrain cleanup must happen before Phase 11 to avoid baking temporary terrain concepts into generic static structures.
+- Decide whether the terrain partitioner should be extracted into a shared V2 static bake partitioning helper before Phase 11, or document the exact terrain-specific reasons a parallel static-object partitioner is cleaner.
 
 Acceptance criteria:
 
 - Phase 11 starts only after temporary terrain concepts are either removed, isolated, or explicitly tracked as cleanup debt.
+- Phase 11 starts with an explicit partitioning decision: reuse/extract the terrain-proven compatibility partitioner, or record why static objects need a deliberately parallel implementation.
 - The plan records any remaining terrain parity gap that is intentionally deferred past static object work.
 
 ### Phase 11: Static Object First Slice
@@ -1028,6 +1052,8 @@ Deliverables:
 - Resolver support for the smallest useful outdoor static-object dependency set.
 - Typed runtime identity variants for the new static object asset families this phase introduces.
 - Static object material-family classifier for the first supported material families only.
+- Static object compatibility partitioner that groups source surfaces/instances by shader family, pass/order class, sampler state, binding layout, placement assumptions, and bounded material-table capacity before draw-unit emission.
+- Static object partitioning should reuse the terrain-proven compatibility partitioner helpers when the shape matches. If it does not, the implementation notes must identify the non-isomorphic facts rather than quietly duplicating the whole algorithm.
 - Static object geometry bake into draw units using the same renderer delta path as terrain.
 - Static spatial records and source mappings as top-level bake result fields.
 - Picking/inspection source mapping for rendered static objects.
@@ -1038,6 +1064,8 @@ Acceptance criteria:
 - Static draw units do not carry unrelated spatial/source metadata internally.
 - Picker/inspection can map a draw slice back to source identity without consulting Svelte state.
 - Material-family rules are expressed as code-owned classifiers, not stringly diagnostics.
+- Static object bake output uses bounded draw slices/draw units for incompatible material groups; it must not repeat the pre-10B4 terrain mistake of treating one source scope as one material table.
+- Static object partitioning tests should mirror the terrain partitioning tests for stable ordering, capacity overflow, fallback diagnostics, and source-slice mapping where the compatibility facts are shared.
 - New static object identities are typed closed-union variants; no generic string fallback is introduced.
 
 ### Phase 12: Static Object Breadth And Compaction
@@ -1047,14 +1075,16 @@ Purpose: broaden static object coverage only after the first object slice proves
 Deliverables:
 
 - Additional static object/building/detail asset-family support as needed by selected verification landblocks.
-- Draw-unit batching/compaction by compatible shader family, sampler bindings, sampler state, device state, domain, and placement revision assumptions.
+- Draw-unit batching/compaction by compatible shader family, pass/order class, sampler bindings, sampler state, device state, domain, bounded material-table capacity, and placement revision assumptions.
+- Shared static bake partitioning helpers for compatibility-key construction, stable bucket sorting, bounded capacity partitioning, source-slice mapping, and fallback diagnostics, unless a domain-specific implementation records concrete non-isomorphic facts. Reuse should be based on compatibility facts, not by forcing unrelated domains into one draw-unit struct.
 - Static BVH/spatial record integration for terrain and static objects.
 - Lease accounting from resident static draw units to texture refs/placements.
-- Tests around material-family eligibility, compaction boundaries, eviction, and source mapping.
+- Tests around material-family eligibility, capacity partitioning, compaction boundaries, eviction, and source mapping.
 
 Acceptance criteria:
 
 - Multiple static object material families can coexist without creating non-isomorphic renderer paths.
+- Buildings/detail/env-cell static objects that exceed one material table or binding layout are split into bounded draw slices/draw units with typed diagnostics, not silently dropped or rendered through a catch-all fallback.
 - Compaction is a bake concern and does not require renderer-side asset dependency knowledge.
 - Removing a static scope releases geometry and texture placement leases.
 - Static object enrichment remains independent from Svelte state and browser UX policy.

@@ -20,6 +20,8 @@ describe("V2 terrain geometry baker", () => {
 			indexType: "uint16",
 			kind: "terrain-geometry",
 			landblockId: 0xda55ffff,
+			materialBucketKey:
+				"shader:terrain-debug-flat|domain:outdoor-terrain|sampler:none|placement:none",
 			materialFamily: "terrain-debug-flat",
 			primaryTextureUseId: null,
 			triangleCount: 2,
@@ -101,7 +103,9 @@ describe("V2 terrain geometry baker", () => {
 		const drawUnit = requireTerrainDrawUnit(result.drawUnits[0]);
 
 		expect(drawUnit).toMatchObject({
-			materialFamily: "terrain-phase8-texture-probe",
+			materialBucketKey:
+				"shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|placement:42|texture:7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:color:06000010",
+			materialFamily: "terrain-single-base-color",
 			primaryTextureUseId:
 				"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:color:06000010",
 			textureUseIds: [

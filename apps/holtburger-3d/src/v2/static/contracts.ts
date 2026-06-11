@@ -395,9 +395,8 @@ export interface TerrainGeometryStaticDrawUnit {
 	readonly drawUnitId: string;
 	readonly landblockId: number;
 	readonly domain: "outdoor-terrain";
-	readonly materialFamily:
-		| "terrain-debug-flat"
-		| "terrain-phase8-texture-probe";
+	readonly materialFamily: "terrain-debug-flat" | "terrain-single-base-color";
+	readonly materialBucketKey: string;
 	readonly coordinateSpace: "landblock-render-local";
 	readonly positions: Float32Array;
 	readonly texCoords: Float32Array;
@@ -472,7 +471,8 @@ export interface TerrainMaterialFallbackReason {
 		| "missing-road-alpha"
 		| "missing-texture-use"
 		| "layer-overflow"
-		| "invalid-detail-role";
+		| "invalid-detail-role"
+		| "unsupported-material-binding";
 	readonly message: string;
 	readonly pcode: number | null;
 	readonly texture: SurfaceTextureIdentity | null;

@@ -115,6 +115,7 @@ function createInput(): StaticBakeInput {
 	return {
 		atlasSnapshot: {
 			domain: "outdoor-terrain",
+			placements: [],
 			revision: 0,
 			textureUses: [],
 		},

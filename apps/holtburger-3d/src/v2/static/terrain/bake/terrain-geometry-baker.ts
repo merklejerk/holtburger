@@ -153,6 +153,7 @@ function createTerrainBakeTextureUses(
 			{
 				domain: "outdoor-terrain",
 				ownerDrawUnitIds: [drawUnit.drawUnitId],
+				placementRevisionAssumption: input.atlasSnapshot.revision,
 				source: textureUse.preparedTextureUse,
 				textureUseId: createTerrainTextureUseId(
 					input.work.workId,

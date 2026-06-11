@@ -205,6 +205,7 @@ export function createEmptyAtlasSnapshot(
 ): DomainAtlasSnapshot {
 	return {
 		domain: work.job.domain,
+		placements: [],
 		revision: 0,
 		textureUses,
 	};

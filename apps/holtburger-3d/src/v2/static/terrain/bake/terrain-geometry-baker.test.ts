@@ -103,6 +103,7 @@ describe("V2 terrain geometry baker", () => {
 			{
 				domain: "outdoor-terrain",
 				ownerDrawUnitIds: [drawUnit.drawUnitId],
+				placementRevisionAssumption: 42,
 				source: {
 					colorSpace: "linear",
 					kind: "prepared-texture-use",
@@ -218,6 +219,7 @@ function createTerrainBakeInput(
 	return {
 		atlasSnapshot: {
 			domain: "outdoor-terrain",
+			placements: [],
 			revision: 42,
 			textureUses: [],
 		},

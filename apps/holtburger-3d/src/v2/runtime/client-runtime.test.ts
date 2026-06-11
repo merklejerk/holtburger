@@ -73,6 +73,60 @@ describe("V2 client runtime", () => {
 		runtime.dispose();
 	});
 
+	it("creates an on-demand diagnostics report across runtime domains", () => {
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer: new FakeRenderer(),
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker: new DeferredStaticBakerClient(),
+				resolver: new DeferredStaticResolverClient(),
+			}),
+		});
+
+		runtime.requestStaticWork({
+			domains: ["terrain"],
+			landblockId: "0xda55ffff",
+			locationKind: "outdoor-landblock",
+		});
+
+		expect(runtime.createDiagnosticsReport()).toMatchObject({
+			domains: [
+				{
+					kind: "renderer",
+				},
+				{
+					kind: "static-coordinator",
+					summary: {
+						committed: 0,
+						requested: 1,
+						resolving: 1,
+					},
+				},
+				{
+					kind: "texture-atlas",
+					summary: {
+						approximateBytes: 0,
+						batchCount: 0,
+						entryAliasCount: 0,
+						multiSourcePageCount: 0,
+						texturePageCount: 0,
+					},
+				},
+			],
+			kind: "runtime-diagnostics-report",
+			runtime: {
+				lastStaticRequest: "outdoor-landblock|0xda55ffff|terrain",
+				pendingStaticMaterializationRevisions: [],
+				status: "static-active",
+			},
+		});
+		expect(JSON.stringify(runtime.createDiagnosticsReport())).not.toContain(
+			"activeWork",
+		);
+		runtime.dispose();
+	});
+
 	it("forwards committed static draw units and eviction deltas to the renderer", async () => {
 		const renderer = new FakeRenderer();
 		const resolver = new DeferredStaticResolverClient();

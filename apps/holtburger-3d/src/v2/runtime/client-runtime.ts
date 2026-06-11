@@ -18,6 +18,8 @@ import type { TexturePacker } from "../textures/packing/packer";
 import {
 	createConsoleRuntimeDiagnostics,
 	type RuntimeDiagnostics,
+	type RuntimeDiagnosticsReport,
+	type StaticCoordinatorDiagnosticsReport,
 } from "./diagnostics";
 import {
 	ImmediateStaticBakerClient,
@@ -30,7 +32,10 @@ import type {
 	StaticDemand,
 	StaticDrawUnit,
 	StaticLodRadii,
+	ScheduledStaticWorkStatus,
 } from "../static/contracts";
+
+const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
 
 export type ManualStaticDomain =
 	| "terrain"
@@ -73,6 +78,7 @@ export interface ClientRuntime {
 	requestStaticWork(command: StaticWorkCommand): void;
 	evictStaticWork(): void;
 	updateFrameState(state: FrameState): void;
+	createDiagnosticsReport(): RuntimeDiagnosticsReport;
 	subscribe(listener: RuntimeSnapshotListener): () => void;
 	dispose(): void;
 }
@@ -213,6 +219,38 @@ class ClientRuntimeImpl implements ClientRuntime {
 	updateFrameState(state: FrameState): void {
 		this.#assertActive();
 		this.#renderer.updateFrameState(state);
+	}
+
+	createDiagnosticsReport(): RuntimeDiagnosticsReport {
+		const snapshot = this.#createSnapshot();
+
+		return {
+			domains: [
+				{
+					kind: "renderer",
+					summary: this.#lastRendererSnapshot,
+				},
+				{
+					kind: "static-coordinator",
+					...createStaticCoordinatorDiagnosticsReport(
+						this.#lastStaticSnapshot,
+					),
+				},
+				this.#textureManager.createDiagnosticsReport(),
+			],
+			kind: "runtime-diagnostics-report",
+			runtime: {
+				committedStaticMaterializationRevisions:
+					snapshot.staticMaterialization.committedRevisions,
+				failedStaticMaterializations: snapshot.staticMaterialization.failed,
+				lastStaticRequest: snapshot.lastStaticRequest
+					? createStaticRequestSummary(snapshot.lastStaticRequest)
+					: null,
+				pendingStaticMaterializationRevisions:
+					snapshot.staticMaterialization.pendingRevisions,
+				status: snapshot.status,
+			},
+		};
 	}
 
 	subscribe(listener: RuntimeSnapshotListener): () => void {
@@ -400,6 +438,98 @@ function normalizeStaticWorkCommand(
 		...(command.lod ? { lod: command.lod } : {}),
 		locationKind: command.locationKind,
 	};
+}
+
+function createStaticRequestSummary(command: StaticWorkCommand): string {
+	return [
+		command.locationKind ?? "outdoor-landblock",
+		command.landblockId,
+		command.domains.join(","),
+	].join("|");
+}
+
+function createStaticCoordinatorDiagnosticsReport(
+	snapshot: StaticCoordinatorSnapshot,
+): Omit<StaticCoordinatorDiagnosticsReport, "kind"> {
+	const inFlightWork = snapshot.activeWork
+		.filter(isInFlightStaticWorkStatus)
+		.map((work) => createStaticCoordinatorWorkDiagnostics(work));
+	const recentFailures = snapshot.activeWork
+		.filter(isFailedStaticWorkStatus)
+		.slice(-STATIC_DIAGNOSTICS_FAILURE_LIMIT)
+		.map((work) => createStaticCoordinatorWorkDiagnostics(work));
+
+	return {
+		inFlightWork,
+		recentFailures,
+		summary: {
+			baking: snapshot.baking,
+			committed: snapshot.committed,
+			committedDrawUnits: snapshot.committedDrawUnits,
+			failed: snapshot.failed,
+			latestDungeonPayload: snapshot.latestDungeonPayload
+				? `lb ${formatHex(snapshot.latestDungeonPayload.landblockId)} cells ${snapshot.latestDungeonPayload.envCellCount} visible ${snapshot.latestDungeonPayload.visibleCellCount} portals ${snapshot.latestDungeonPayload.portalCount} missing ${snapshot.latestDungeonPayload.missingRefCount}`
+				: null,
+			latestLandblockTopologyPayload: snapshot.latestLandblockTopologyPayload
+				? `lb ${formatHex(snapshot.latestLandblockTopologyPayload.landblockId)} ${snapshot.latestLandblockTopologyPayload.classification} cells ${snapshot.latestLandblockTopologyPayload.envCellCount} visible ${snapshot.latestLandblockTopologyPayload.visibleCellCount} links ${snapshot.latestLandblockTopologyPayload.portalLinkCount} missing ${snapshot.latestLandblockTopologyPayload.missingRefCount}`
+				: null,
+			latestResolverFailure: snapshot.latestResolverFailure
+				? `${snapshot.latestResolverFailure.workId}: ${snapshot.latestResolverFailure.message}`
+				: null,
+			latestTerrainPayload: snapshot.latestTerrainPayload
+				? `lb ${formatHex(snapshot.latestTerrainPayload.landblockId)} region ${snapshot.latestTerrainPayload.regionNumber} mesh ${snapshot.latestTerrainPayload.vertexCount}v/${snapshot.latestTerrainPayload.triangleCount}t quads ${snapshot.latestTerrainPayload.quadCount} tex ${snapshot.latestTerrainPayload.textureUseCount} missing ${snapshot.latestTerrainPayload.missingRefCount}`
+				: null,
+			requested: snapshot.requested,
+			resolving: snapshot.resolving,
+			revision: snapshot.revision,
+			staleBakeResults: snapshot.staleBakeResults,
+			staleResolverResults: snapshot.staleResolverResults,
+		},
+	};
+}
+
+type StaticCoordinatorReportWorkStatus = Exclude<
+	ScheduledStaticWorkStatus["status"],
+	"committed"
+>;
+
+type StaticCoordinatorReportWork = ScheduledStaticWorkStatus & {
+	readonly status: StaticCoordinatorReportWorkStatus;
+};
+
+function isInFlightStaticWorkStatus(
+	work: ScheduledStaticWorkStatus,
+): work is ScheduledStaticWorkStatus & {
+	readonly status: "baking" | "requested" | "resolving";
+} {
+	return (
+		work.status === "requested" ||
+		work.status === "resolving" ||
+		work.status === "baking"
+	);
+}
+
+function isFailedStaticWorkStatus(
+	work: ScheduledStaticWorkStatus,
+): work is ScheduledStaticWorkStatus & { readonly status: "failed" } {
+	return work.status === "failed";
+}
+
+function createStaticCoordinatorWorkDiagnostics(
+	work: StaticCoordinatorReportWork,
+): StaticCoordinatorDiagnosticsReport["inFlightWork"][number] {
+	return {
+		domain: work.domain,
+		failureMessage: work.failureMessage,
+		revision: work.revision,
+		scopeKey: work.scopeKey,
+		status: work.status,
+		workId: work.workId,
+	};
+}
+
+function formatHex(value: number): string {
+	return `0x${value.toString(16).padStart(8, "0")}`;
 }
 
 function createManualStaticDemand(command: StaticWorkCommand): StaticDemand {

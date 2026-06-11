@@ -4,6 +4,13 @@ import {
 	prepareDirectRgbaTextureSource,
 } from "../assets/preparation/prepared-texture-source";
 import type {
+	TerrainRolePageOverflowDiagnostics,
+	TerrainRolePageUsageDiagnostics,
+	TextureAtlasBatchDiagnostics,
+	TextureAtlasDiagnosticsReport,
+	TextureAtlasPageDiagnostics,
+} from "../runtime/diagnostics";
+import type {
 	TerrainTextureBinding,
 	TerrainTextureRolePageKind,
 	TexturePlacementUpdate,
@@ -37,6 +44,8 @@ const TERRAIN_COLOR_ATLAS_GUTTER_PIXELS = 96;
 const TERRAIN_MASK_ATLAS_GUTTER_PIXELS = 16;
 const MAX_RUNTIME_ATLAS_PAGE_SIZE = 2048;
 const TERRAIN_COLOR_ATLAS_FILL_RGBA = [128, 128, 128, 255] as const;
+const RECENT_TERRAIN_ROLE_PAGE_OVERFLOW_LIMIT = 16;
+const TERRAIN_ROLE_PAGE_OUTLIER_LIMIT = 16;
 
 interface TextureManagerOptions {
 	readonly assetService: AssetService;
@@ -56,6 +65,7 @@ export class TextureManager {
 		string,
 		Set<StaticBatchTextureKey>
 	>();
+	#recentRolePageOverflows: TerrainRolePageOverflowDiagnostics[] = [];
 	#revision = 0;
 
 	constructor(options: TextureManagerOptions) {
@@ -66,6 +76,44 @@ export class TextureManager {
 
 	dispose(): void {
 		this.#texturePacker.dispose?.();
+	}
+
+	createDiagnosticsReport(): TextureAtlasDiagnosticsReport {
+		const batches = Array.from(this.#batchRegistries.values())
+			.sort((left, right) =>
+				[left.domain, left.staticBatchId].join("|").localeCompare(
+					[right.domain, right.staticBatchId].join("|"),
+				),
+			)
+			.map((registry, index) =>
+				createTextureAtlasBatchDiagnostics(registry, index),
+			);
+		const textureRefs = new Map<string, TextureAtlasPageDiagnostics>();
+		for (const batch of batches) {
+			for (const page of batch.pages) {
+				textureRefs.set(`${batch.batchId}:${page.pageId}`, page);
+			}
+		}
+
+		return {
+			batches,
+			kind: "texture-atlas",
+			recentRolePageOverflows: this.#recentRolePageOverflows,
+			summary: {
+				approximateBytes: sumNumbers(
+					Array.from(textureRefs.values(), (page) => page.approximateBytes),
+				),
+				batchCount: batches.length,
+				entryAliasCount: sumNumbers(
+					batches.map((batch) => batch.entryAliasCount),
+				),
+				multiSourcePageCount: sumNumbers(
+					batches.map((batch) => batch.multiSourcePageCount),
+				),
+				texturePageCount: textureRefs.size,
+			},
+			terrainRolePages: this.#createTerrainRolePageUsageDiagnostics(),
+		};
 	}
 
 	createStaticAtlasBatchSnapshot(
@@ -112,7 +160,13 @@ export class TextureManager {
 		);
 		const placements: RuntimeTexturePlacement[] = [];
 		const drawUnitBindings: TerrainTextureBinding[] = [];
-		const rolePageSlots = new TerrainDrawUnitRolePageSlots();
+		const rolePageSlots = new TerrainDrawUnitRolePageSlots((overflow) => {
+			this.#recentRolePageOverflows = appendBounded(
+				this.#recentRolePageOverflows,
+				overflow,
+				RECENT_TERRAIN_ROLE_PAGE_OVERFLOW_LIMIT,
+			);
+		});
 		const pendingPlacements = new Map<string, PendingTexturePlacement>();
 
 		for (const textureUse of delta.textureUses) {
@@ -401,7 +455,7 @@ export class TextureManager {
 					wrapT: group.pagePolicy.wrapT,
 					width: page.width,
 				});
-					for (const entry of pageEntries) {
+				for (const entry of pageEntries) {
 					const rect = rectByTextureUseId.get(entry.textureUse.textureUseId);
 					if (!rect) {
 						throw new Error(
@@ -409,15 +463,23 @@ export class TextureManager {
 						);
 					}
 					entry.entry = {
+						anisotropy: group.samplerPolicy.anisotropy,
 						domain: entry.domain,
+						filteringMode: group.samplerPolicy.filteringMode,
+						format: page.format,
 						leaseCount: 0,
+						mipmapsGenerated: group.samplerPolicy.generateMipmaps,
 						placementRevision,
 						rect: rect.rect,
+						sampleClass: group.pagePolicy.sampleClass,
+						samplerPolicyKey: group.samplerPolicy.policyKey,
 						source: entry.textureUse.source,
 						staticBatchId: entry.staticBatchId,
 						textureHeight: page.height,
 						textureRefId,
 						textureWidth: page.width,
+						wrapS: group.pagePolicy.wrapS,
+						wrapT: group.pagePolicy.wrapT,
 					};
 					for (const textureKey of entry.textureKeys) {
 						this.#getRegistry(entry.domain, entry.staticBatchId).entries.set(
@@ -479,6 +541,50 @@ export class TextureManager {
 
 		return null;
 	}
+
+	#createTerrainRolePageUsageDiagnostics(): TerrainRolePageUsageDiagnostics {
+		const usages = Array.from(this.#textureKeysByDrawUnitId.entries())
+			.map(([drawUnitId, textureKeys]) => {
+				const pagesByKind = {
+					color: new Set<string>(),
+					detail: new Set<string>(),
+					mask: new Set<string>(),
+				};
+				for (const textureKey of textureKeys) {
+					const entry = this.#findEntry(textureKey);
+					if (!entry) {
+						continue;
+					}
+					pagesByKind[createTerrainTextureRolePageKind(entry.source.usage)].add(
+						entry.textureRefId,
+					);
+				}
+
+				return {
+					colorPages: pagesByKind.color.size,
+					detailPages: pagesByKind.detail.size,
+					drawUnitId,
+					maskPages: pagesByKind.mask.size,
+				};
+			})
+			.sort((left, right) => left.drawUnitId.localeCompare(right.drawUnitId));
+		const outliers = usages.filter(
+			(usage) =>
+				usage.colorPages > 1 || usage.maskPages > 1 || usage.maskPages === 0,
+		);
+
+		return {
+			drawUnitCount: usages.length,
+			maxColorPages: maxNumbers(usages.map((usage) => usage.colorPages)),
+			maxDetailPages: maxNumbers(usages.map((usage) => usage.detailPages)),
+			maxMaskPages: maxNumbers(usages.map((usage) => usage.maskPages)),
+			missingMaskDrawUnits: usages.filter((usage) => usage.maskPages === 0)
+				.length,
+			multiColorDrawUnits: usages.filter((usage) => usage.colorPages > 1).length,
+			multiMaskDrawUnits: usages.filter((usage) => usage.maskPages > 1).length,
+			outliers: outliers.slice(0, TERRAIN_ROLE_PAGE_OUTLIER_LIMIT),
+		};
+	}
 }
 
 type RuntimeTexturePlacement = TexturePlacementUpdate["placements"][number];
@@ -498,14 +604,22 @@ interface StaticBatchTextureRegistry {
 }
 
 interface StaticBatchTextureRegistryEntry {
+	readonly anisotropy: number;
 	readonly domain: StaticDomain;
+	readonly filteringMode: TextureFilteringMode;
+	readonly format: RuntimeTexturePlacement["format"];
 	readonly staticBatchId: string;
 	readonly source: PreparedTextureUseIdentity;
 	readonly textureRefId: string;
 	readonly placementRevision: number;
+	readonly mipmapsGenerated: boolean;
+	readonly sampleClass: RuntimeTexturePagePolicy["sampleClass"];
+	readonly samplerPolicyKey: string;
 	readonly textureWidth: number;
 	readonly textureHeight: number;
 	readonly rect: readonly [number, number, number, number];
+	readonly wrapS: RuntimeTexturePagePolicy["wrapS"];
+	readonly wrapT: RuntimeTexturePagePolicy["wrapT"];
 	leaseCount: number;
 }
 
@@ -812,6 +926,127 @@ function uniqueSortedStrings(values: readonly string[]): readonly string[] {
 	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
+function createTextureAtlasBatchDiagnostics(
+	registry: StaticBatchTextureRegistry,
+	batchIndex: number,
+): TextureAtlasBatchDiagnostics {
+	const entries = Array.from(registry.entries.values());
+	const pages = createTextureAtlasPageDiagnostics(entries);
+
+	return {
+		approximateBytes: sumNumbers(pages.map((page) => page.approximateBytes)),
+		batchId: `batch-${batchIndex + 1}`,
+		domain: registry.domain,
+		entryAliasCount: registry.entries.size,
+		multiSourcePageCount: pages.filter((page) => page.uniqueSourceCount > 1)
+			.length,
+		pages,
+		revision: registry.revision,
+		texturePageCount: pages.length,
+		uniqueSourceCount: countUniqueSources(entries),
+	};
+}
+
+function createTextureAtlasPageDiagnostics(
+	entries: readonly StaticBatchTextureRegistryEntry[],
+): readonly TextureAtlasPageDiagnostics[] {
+	const entriesByTextureRef = new Map<
+		string,
+		StaticBatchTextureRegistryEntry[]
+	>();
+	for (const entry of entries) {
+		const pageEntries = entriesByTextureRef.get(entry.textureRefId) ?? [];
+		pageEntries.push(entry);
+		entriesByTextureRef.set(entry.textureRefId, pageEntries);
+	}
+
+	return Array.from(entriesByTextureRef.entries())
+		.map(([, pageEntries], pageIndex) => {
+			const firstEntry = pageEntries[0];
+			if (!firstEntry) {
+				throw new Error("Texture diagnostics page has no registry entries.");
+			}
+
+			return {
+				anisotropy: firstEntry.anisotropy,
+				approximateBytes: estimateRgba8TextureBytes(
+					firstEntry.textureWidth,
+					firstEntry.textureHeight,
+					firstEntry.mipmapsGenerated,
+				),
+				entryAliasCount: pageEntries.length,
+				filteringMode: firstEntry.filteringMode,
+				format: firstEntry.format,
+				height: firstEntry.textureHeight,
+				mipmapsGenerated: firstEntry.mipmapsGenerated,
+				pageId: `page-${pageIndex + 1}`,
+				sampleClass: firstEntry.sampleClass,
+				samplerPolicyKey: firstEntry.samplerPolicyKey,
+				totalLeaseCount: sumNumbers(
+					uniqueRegistryEntries(pageEntries).map((entry) => entry.leaseCount),
+				),
+				uniqueSourceCount: countUniqueSources(pageEntries),
+				width: firstEntry.textureWidth,
+				wrapS: firstEntry.wrapS,
+				wrapT: firstEntry.wrapT,
+			};
+		})
+		.sort((left, right) => left.pageId.localeCompare(right.pageId));
+}
+
+function countUniqueSources(
+	entries: readonly StaticBatchTextureRegistryEntry[],
+): number {
+	const sources = new Set(
+		entries.map((entry) => createPreparedTextureUseKey(entry.source)),
+	);
+
+	return sources.size;
+}
+
+function uniqueRegistryEntries(
+	entries: readonly StaticBatchTextureRegistryEntry[],
+): readonly StaticBatchTextureRegistryEntry[] {
+	return Array.from(new Set(entries));
+}
+
+function estimateRgba8TextureBytes(
+	width: number,
+	height: number,
+	includeMipmaps: boolean,
+): number {
+	let bytes = width * height * 4;
+	if (!includeMipmaps) {
+		return bytes;
+	}
+
+	let mipWidth = width;
+	let mipHeight = height;
+	while (mipWidth > 1 || mipHeight > 1) {
+		mipWidth = Math.max(1, Math.floor(mipWidth / 2));
+		mipHeight = Math.max(1, Math.floor(mipHeight / 2));
+		bytes += mipWidth * mipHeight * 4;
+	}
+
+	return bytes;
+}
+
+function sumNumbers(values: readonly number[]): number {
+	return values.reduce((sum, value) => sum + value, 0);
+}
+
+function maxNumbers(values: readonly number[]): number {
+	return values.length === 0 ? 0 : Math.max(...values);
+}
+
+function appendBounded<T>(
+	values: readonly T[],
+	value: T,
+	limit: number,
+): T[] {
+	return [...values, value].slice(-limit);
+}
+
 function createTerrainTextureRolePageKind(
 	usage: PreparedTextureUseIdentity["usage"],
 ): TerrainTextureRolePageKind {
@@ -828,6 +1063,15 @@ function createTerrainTextureRolePageKind(
 class TerrainDrawUnitRolePageSlots {
 	readonly #slotKeysByDrawUnitAndKind = new Map<string, string[]>();
 	readonly #overflowKeys = new Set<string>();
+	readonly #recordOverflow: (
+		overflow: TerrainRolePageOverflowDiagnostics,
+	) => void;
+
+	constructor(
+		recordOverflow: (overflow: TerrainRolePageOverflowDiagnostics) => void,
+	) {
+		this.#recordOverflow = recordOverflow;
+	}
 
 	resolveSlot(
 		input: TerrainRolePageSlotInput,
@@ -847,6 +1091,12 @@ class TerrainDrawUnitRolePageSlots {
 		const maxSlots = getMaxTerrainRolePageSlots(kind);
 		if (slots.length >= maxSlots) {
 			this.#overflowKeys.add(drawUnitKindKey);
+			this.#recordOverflow({
+				drawUnitId: input.drawUnitId,
+				kind,
+				maxSlots,
+				textureRefId: input.textureRefId,
+			});
 			console.warn(
 				`V2 terrain draw unit ${input.drawUnitId} exceeded ${kind} role-page capacity ${maxSlots}; bindings for that role are omitted for local fallback.`,
 				{

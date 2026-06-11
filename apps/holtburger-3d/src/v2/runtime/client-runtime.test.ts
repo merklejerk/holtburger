@@ -25,11 +25,17 @@ import {
 	DeferredStaticResolverClient,
 } from "../static/fake-workers";
 import { createClientRuntime, type RuntimeSnapshot } from "./client-runtime";
+import type { RuntimeDiagnostics } from "./diagnostics";
+
+const silentDiagnostics: RuntimeDiagnostics = {
+	warn() {},
+};
 
 describe("V2 client runtime", () => {
 	it("passes manual domain coverage radii into static demand planning", () => {
 		const resolver = new DeferredStaticResolverClient();
 		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
 			host: new FakeRuntimeHost(),
 			renderer: new FakeRenderer(),
 			staticCoordinator: new StaticCoordinator({
@@ -73,6 +79,7 @@ describe("V2 client runtime", () => {
 		const baker = new DeferredStaticBakerClient();
 		const staticCoordinator = new StaticCoordinator({ baker, resolver });
 		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
 			host: new FakeRuntimeHost(),
 			renderer,
 			staticCoordinator,
@@ -122,6 +129,7 @@ describe("V2 client runtime", () => {
 		const staticCoordinator = new StaticCoordinator({ baker, resolver });
 		const runtime = createClientRuntime({
 			assetService,
+			diagnostics: silentDiagnostics,
 			host: new FakeRuntimeHost(),
 			renderer,
 			staticCoordinator,
@@ -181,6 +189,7 @@ describe("V2 client runtime", () => {
 		const staticCoordinator = new StaticCoordinator({ baker, resolver });
 		const runtime = createClientRuntime({
 			assetService,
+			diagnostics: silentDiagnostics,
 			host: new FakeRuntimeHost(),
 			renderer,
 			staticCoordinator,
@@ -362,8 +371,11 @@ function createTerrainDrawUnit(
 		indices: new Uint16Array([0, 1, 2]),
 		kind: "terrain-geometry",
 		landblockId,
+		materialBucketKey: options.primaryTextureUseId
+			? `shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|placement:0|texture:${options.primaryTextureUseId}`
+			: "shader:terrain-debug-flat|domain:outdoor-terrain|sampler:none|placement:none",
 		materialFamily: options.primaryTextureUseId
-			? "terrain-phase8-texture-probe"
+			? "terrain-single-base-color"
 			: "terrain-debug-flat",
 		primaryTextureUseId: options.primaryTextureUseId ?? null,
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),

@@ -16,6 +16,10 @@ import {
 import { TextureManager } from "../textures/texture-manager";
 import type { TexturePacker } from "../textures/packing/packer";
 import {
+	createConsoleRuntimeDiagnostics,
+	type RuntimeDiagnostics,
+} from "./diagnostics";
+import {
 	ImmediateStaticBakerClient,
 	ImmediateStaticResolverClient,
 } from "../static/fake-workers";
@@ -77,6 +81,7 @@ export interface ClientRuntimeOptions {
 	readonly renderer: Renderer;
 	readonly host: RuntimeHost;
 	readonly assetService?: AssetService;
+	readonly diagnostics?: RuntimeDiagnostics;
 	readonly staticCoordinator?: StaticCoordinator;
 	readonly texturePacker?: TexturePacker;
 }
@@ -99,6 +104,7 @@ export function createClientRuntime(
 		assetService,
 		staticCoordinator,
 		options.texturePacker,
+		options.diagnostics ?? createConsoleRuntimeDiagnostics(),
 	);
 }
 
@@ -106,6 +112,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #renderer: Renderer;
 	readonly #host: RuntimeHost;
 	readonly #assetService: AssetService;
+	readonly #diagnostics: RuntimeDiagnostics;
 	readonly #textureManager: TextureManager;
 	readonly #staticCoordinator: StaticCoordinator;
 	readonly #listeners = new Set<RuntimeSnapshotListener>();
@@ -128,10 +135,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 		assetService: AssetService,
 		staticCoordinator: StaticCoordinator,
 		texturePacker: TexturePacker | undefined,
+		diagnostics: RuntimeDiagnostics,
 	) {
 		this.#renderer = renderer;
 		this.#host = host;
 		this.#assetService = assetService;
+		this.#diagnostics = diagnostics;
 		this.#textureManager = new TextureManager({ assetService, texturePacker });
 		this.#staticCoordinator = staticCoordinator;
 		this.#staticCoordinator.setAtlasSnapshotProvider((payload) =>
@@ -286,6 +295,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			delta,
 			this.#renderAnchorLandblockId,
 		);
+		this.#warnAboutStaticFallbacks(delta);
 		applyMaterializedStaticCommit(this.#renderer, textureUpdate, staticDelta);
 		this.#pendingStaticMaterializations.delete(delta.revision);
 		this.#committedStaticMaterializations = appendBoundedRevision(
@@ -302,7 +312,33 @@ class ClientRuntimeImpl implements ClientRuntime {
 			this.#failedStaticMaterializations,
 			{ message, revision },
 		);
+		this.#diagnostics.warn({
+			error,
+			kind: "static-materialization-failed",
+			message,
+			revision,
+		});
 		this.#emit();
+	}
+
+	#warnAboutStaticFallbacks(delta: StaticCoordinatorCommitDelta): void {
+		for (const drawUnit of delta.addedDrawUnits) {
+			if (
+				drawUnit.kind !== "terrain-geometry" ||
+				drawUnit.terrainFallbackReasons.length === 0
+			) {
+				continue;
+			}
+
+			this.#diagnostics.warn({
+				drawUnitId: drawUnit.drawUnitId,
+				kind: "terrain-renderable-fallback",
+				materialBucketKey: drawUnit.materialBucketKey,
+				materialFamily: drawUnit.materialFamily,
+				reasons: drawUnit.terrainFallbackReasons,
+				revision: delta.revision,
+			});
+		}
 	}
 }
 

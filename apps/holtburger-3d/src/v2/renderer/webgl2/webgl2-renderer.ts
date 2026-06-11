@@ -253,10 +253,16 @@ class Webgl2Renderer implements Renderer {
 			const texture = textureRefId
 				? (this.#textures.get(textureRefId) ?? null)
 				: null;
+			const useTexture =
+				resource.materialFamily === "terrain-single-base-color" &&
+				texture !== null;
 			gl.activeTexture(gl.TEXTURE0);
-			gl.bindTexture(gl.TEXTURE_2D, texture);
+			gl.bindTexture(gl.TEXTURE_2D, useTexture ? texture : null);
 			gl.uniform1i(this.#terrainProgram.uniforms.uTexture, 0);
-			gl.uniform1i(this.#terrainProgram.uniforms.uUseTexture, texture ? 1 : 0);
+			gl.uniform1i(
+				this.#terrainProgram.uniforms.uUseTexture,
+				useTexture ? 1 : 0,
+			);
 			gl.bindVertexArray(resource.vertexArray);
 			gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
 		}
@@ -325,6 +331,7 @@ interface TerrainGeometryResource {
 	readonly texCoordBuffer: WebGLBuffer;
 	readonly indexBuffer: WebGLBuffer;
 	readonly drawUnitId: string;
+	readonly materialFamily: TerrainGeometryStaticDrawUnit["materialFamily"];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
@@ -427,6 +434,7 @@ function createTerrainGeometryResource(
 		indexCount: drawUnit.indices.length,
 		indexType:
 			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
+		materialFamily: drawUnit.materialFamily,
 		positionBuffer,
 		texCoordBuffer,
 		triangleCount: drawUnit.triangleCount,

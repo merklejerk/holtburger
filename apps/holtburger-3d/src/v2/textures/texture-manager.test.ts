@@ -22,7 +22,7 @@ const STABLE_TEXTURE_REF_ID =
 	"texture-ref:outdoor-terrain:batch-a:terrain-a:prepared-texture:06000010";
 
 describe("V2 texture manager", () => {
-	it("turns bake-local texture uses into runtime-owned direct placements", async () => {
+	it("turns bake-local texture uses into runtime-owned texture page placements", async () => {
 		const assetService = new FixtureAssetService();
 		const texturePacker = new FixtureTexturePacker();
 		const textureManager = new TextureManager({ assetService, texturePacker });
@@ -53,7 +53,6 @@ describe("V2 texture manager", () => {
 					format: "rgba8",
 					filteringMode: "anisotropic-4x",
 					height: 256,
-					kind: "direct-texture",
 					mipmapsGenerated: true,
 					anisotropy: 4,
 					placementRevision: 1,
@@ -169,6 +168,43 @@ describe("V2 texture manager", () => {
 				],
 			},
 		});
+	});
+
+	it("updates resident texture page sampler policy without repacking", async () => {
+		const assetService = new FixtureAssetService();
+		const texturePacker = new FixtureTexturePacker({
+			pageHeight: 16,
+			pageWidth: 16,
+			rect: [4, 4, 1, 1],
+		});
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		await textureManager.applyStaticCommitDelta(
+			createCommitDelta({ outputFormat: "rgba8" }),
+		);
+		const update = textureManager.setFilteringMode("nearest");
+
+		expect(update).toEqual({
+			policies: [
+				{
+					anisotropy: 1,
+					filteringMode: "nearest",
+					mipmapsGenerated: false,
+					samplerPolicyKey: "sample=rgba-color;filter=nearest;mips=off;aniso=1",
+					textureRefId: STABLE_TEXTURE_REF_ID,
+				},
+			],
+			revision: 2,
+		});
+		expect(texturePacker.jobs).toHaveLength(1);
+		expect(textureManager.createDiagnosticsReport().batches[0]?.pages[0]).toMatchObject(
+			{
+				anisotropy: 1,
+				filteringMode: "nearest",
+				mipmapsGenerated: false,
+				samplerPolicyKey: "sample=rgba-color;filter=nearest;mips=off;aniso=1",
+			},
+		);
 	});
 
 	it("records terrain role-page overflow in the on-demand diagnostics report", async () => {

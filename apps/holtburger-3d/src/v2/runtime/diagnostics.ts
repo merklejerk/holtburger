@@ -25,6 +25,7 @@ export interface RuntimeDiagnosticsReport {
 
 export interface RuntimeDiagnosticsRuntimeSummary {
 	readonly status: "idle" | "static-active" | "disposed";
+	readonly textureFilteringMode: TextureFilteringMode;
 	readonly lastStaticRequest: string | null;
 	readonly pendingStaticMaterializationRevisions: readonly number[];
 	readonly committedStaticMaterializationRevisions: readonly number[];

@@ -11,6 +11,7 @@ import type {
 	Renderer,
 	RendererSnapshot,
 	RendererSnapshotListener,
+	SamplerPolicyUpdate,
 	StaticResidencyDelta,
 	TexturePlacementUpdate,
 } from "../renderer/types";
@@ -241,6 +242,70 @@ describe("V2 client runtime", () => {
 		runtime.dispose();
 	});
 
+	it("updates resident texture sampler policy without rebaking static draw units", async () => {
+		const renderer = new FakeRenderer();
+		const resolver = new DeferredStaticResolverClient();
+		const baker = new DeferredStaticBakerClient();
+		const assetService = new DeferredAssetService();
+		const staticCoordinator = createImmediateStaticCoordinator({
+			baker,
+			resolver,
+		});
+		const runtime = createClientRuntime({
+			assetService,
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator,
+		});
+		const textureUse = createPreparedTextureUse();
+		const drawUnit = createTerrainDrawUnit("terrain-textured", 0xda55ffff, {
+			primaryTextureUseId: "terrain-textured:prepared-texture:06000010",
+			textureUseIds: ["terrain-textured:prepared-texture:06000010"],
+		});
+
+		runtime.requestStaticWork({
+			domains: ["terrain"],
+			landblockId: "0xda55ffff",
+			locationKind: "outdoor-landblock",
+		});
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
+		await flushPromises();
+		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
+			drawUnits: [drawUnit],
+			textureUses: [createBakeTextureUse(drawUnit.drawUnitId, textureUse)],
+		});
+		await flushPromises();
+		assetService.resolveNext(
+			createPreparedTextureAsset(assetService.pendingKeys[0] ?? failKey()),
+		);
+		await flushPromises();
+
+		runtime.setTextureFilteringMode("nearest");
+
+		expect(renderer.samplerPolicyUpdates).toEqual([
+			{
+				policies: [
+					{
+						anisotropy: 1,
+						filteringMode: "nearest",
+						mipmapsGenerated: false,
+						samplerPolicyKey:
+							"sample=rgba-color;filter=nearest;mips=off;aniso=1",
+						textureRefId:
+							"texture-ref:outdoor-terrain:batch-a:terrain-textured:prepared-texture:06000010",
+					},
+				],
+				revision: 2,
+			},
+		]);
+		expect(renderer.staticDeltas).toHaveLength(1);
+		expect(runtime.createDiagnosticsReport().runtime.textureFilteringMode).toBe(
+			"nearest",
+		);
+		runtime.dispose();
+	});
+
 	it("keeps failed texture materialization out of renderer residency", async () => {
 		const renderer = new FakeRenderer();
 		const resolver = new DeferredStaticResolverClient();
@@ -298,6 +363,7 @@ describe("V2 client runtime", () => {
 class FakeRenderer implements Renderer {
 	readonly staticDeltas: StaticResidencyDelta[] = [];
 	readonly textureUpdates: TexturePlacementUpdate[] = [];
+	readonly samplerPolicyUpdates: SamplerPolicyUpdate[] = [];
 	readonly events: string[] = [];
 	#snapshot: RendererSnapshot = {
 		backend: "webgl2",
@@ -335,7 +401,10 @@ class FakeRenderer implements Renderer {
 				.join(",")}`,
 		);
 	}
-	applySamplerPolicyUpdate(): void {}
+	applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void {
+		this.samplerPolicyUpdates.push(update);
+		this.events.push(`sampler:${update.revision}:${update.policies.length}`);
+	}
 	updateFrameState(): void {}
 
 	subscribe(listener: RendererSnapshotListener): () => void {

@@ -167,12 +167,8 @@ export class TerrainStaticScopeResolver {
 				palette,
 				preparedTextureUse: renderSurfaceIdentity
 					? createPreparedTextureUseIdentity({
-							colorSpace:
-								surfaceRole.role === "terrain-alpha" ||
-								surfaceRole.role === "road-alpha"
-									? "data"
-									: "srgb",
-							mipPolicy: "retail4",
+							colorSpace: "linear",
+							mipPolicy: "none",
 							outputFormat: "rgba8",
 							renderSurfaceId: renderSurfaceIdentity.renderSurfaceId,
 							usage:

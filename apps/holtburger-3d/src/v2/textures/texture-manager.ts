@@ -110,9 +110,19 @@ export class TextureManager {
 				`Prepared texture ${textureUse.textureUseId} has no mip level 0.`,
 			);
 		}
-		if (levelZero.format !== "rgba8") {
+		if (
+			payload.outputFormat !== "rgba8" ||
+			payload.mipPolicy !== "none" ||
+			payload.colorSpace !== "linear"
+		) {
 			throw new Error(
-				`Prepared texture ${textureUse.textureUseId} uses unsupported direct texture format ${levelZero.format}. Only rgba8 is supported in Phase 8.`,
+				`Prepared texture ${textureUse.textureUseId} uses unsupported direct texture policy ${payload.outputFormat}/${payload.mipPolicy}/${payload.colorSpace}. Only rgba8/none/linear is supported in Phase 8.`,
+			);
+		}
+		const expectedByteLength = levelZero.width * levelZero.height * 4;
+		if (levelZero.bytes.byteLength !== expectedByteLength) {
+			throw new Error(
+				`Prepared texture ${textureUse.textureUseId} expected ${expectedByteLength} rgba8 bytes, got ${levelZero.bytes.byteLength}.`,
 			);
 		}
 
@@ -136,9 +146,9 @@ type RuntimeTexturePlacement = TexturePlacementUpdate["placements"][number];
 
 function createPreparedTextureHostKey(source: PreparedTextureUseIdentity) {
 	const query = new URLSearchParams({
-		colorSpace: source.colorSpace,
-		mipPolicy: source.mipPolicy,
-		outputFormat: source.outputFormat,
+		cs: source.colorSpace,
+		mips: source.mipPolicy,
+		out: source.outputFormat,
 		usage: source.usage,
 	});
 

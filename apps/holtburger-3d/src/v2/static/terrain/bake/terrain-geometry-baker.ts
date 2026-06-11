@@ -92,7 +92,7 @@ function createTerrainGeometryDrawUnit(
 		kind: "terrain-geometry",
 		landblockId: payload.landblock.landblockId,
 		materialFamily: primaryTextureUse
-			? "terrain-direct-texture"
+			? "terrain-phase8-texture-probe"
 			: "terrain-debug-flat",
 		primaryTextureUseId: primaryTextureUse?.preparedTextureUse
 			? createTerrainTextureUseId(

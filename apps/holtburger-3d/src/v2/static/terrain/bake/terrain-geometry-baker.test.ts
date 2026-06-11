@@ -36,6 +36,7 @@ describe("V2 terrain geometry baker", () => {
 		expect(Array.from(drawUnit.texCoords)).toEqual([
 			0, 0, 0.125, 0, 0, 0.125, 0.125, 0, 0.125, 0.125, 0, 0.125,
 		]);
+		expect(Array.from(drawUnit.layerSlots)).toEqual([0, 0, 0, 0, 0, 0]);
 		expect(drawUnit.textureUseIds).toEqual([]);
 		expect(drawUnit.terrainMaterialPlan).toEqual(
 			expect.objectContaining({
@@ -165,6 +166,12 @@ describe("V2 terrain geometry baker", () => {
 		]);
 		expect(drawUnits[0]?.terrainMaterialPlan?.layerEntries).toHaveLength(8);
 		expect(drawUnits[1]?.terrainMaterialPlan?.layerEntries).toHaveLength(1);
+		expect(Array.from(drawUnits[0]?.layerSlots ?? [])).toEqual(
+			Array.from({ length: 48 }, (_value, index) => Math.floor(index / 6)),
+		);
+		expect(Array.from(drawUnits[1]?.layerSlots ?? [])).toEqual([
+			0, 0, 0, 0, 0, 0,
+		]);
 		expect(
 			drawUnits.flatMap((drawUnit) => drawUnit.terrainFallbackReasons),
 		).not.toEqual(
@@ -195,8 +202,17 @@ describe("V2 terrain geometry baker", () => {
 			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-0",
 			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-1",
 		]);
-		expect(result.textureUses).toHaveLength(1);
-		expect(result.textureUses[0]).toMatchObject({
+		expect(result.textureUses).toHaveLength(9);
+		expect(
+			result.textureUses
+				.slice(0, 8)
+				.map((textureUse) => textureUse.ownerDrawUnitIds),
+		).toEqual(
+			Array.from({ length: 8 }, () => [
+				"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-0",
+			]),
+		);
+		expect(result.textureUses[8]).toMatchObject({
 			ownerDrawUnitIds: [
 				"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-1",
 			],

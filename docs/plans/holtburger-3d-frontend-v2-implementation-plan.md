@@ -1410,19 +1410,26 @@ Failed to close:
 - This does not tune `DEFAULT_STATIC_BATCH_MAX_PAYLOADS` or `DEFAULT_STATIC_BATCH_MAX_WAIT_MS`. Larger batches may still reduce cross-batch duplication, but should be tuned after diagnostics show whether same-batch dedupe was enough.
 - Runtime diagnostics still need VRAM/atlas-page visibility in Phase 10B4D5.
 
-#### Phase 10B4D5: Diagnostics And Manual Terrain Recheck
+#### Phase 10B4D5: On-Demand Diagnostics Foundation And Terrain Recheck
 
 Status: planned; next.
 
+Purpose: add a quiet, on-demand diagnostics product foundation without letting diagnostics define hot-path APIs or runtime ownership. Terrain/atlas reporting is the first concrete report because it is the current source of correctness and VRAM pressure questions.
+
 Deliverables:
 
-- Runtime or harness diagnostics for terrain role page counts, page-slot overflow, texture placement failures, fallback reasons, sampler policy, and mip status.
+- A non-intrusive runtime or harness diagnostic report surface that can grow across domains such as terrain, static objects, renderer residency, asset/prepared-cache state, worker queues, picking/inspection, and dynamic objects.
+- The first report covers terrain role page counts, atlas page/ref counts, approximate texture memory, page-slot overflow, texture placement failures, fallback reasons, sampler policy, and mip status.
+- Reports are assembled on demand from existing subsystem-owned state. Avoid always-on counters, per-frame aggregation, bake-worker output fields, renderer binding fields, or lifecycle hooks that exist only to feed diagnostics.
+- Keep reports intentionally summarized: domain totals first, then targeted drill-down for failing or selected landblocks/draw units/resources. Prefer bounded arrays and explicit truncation over v1-style noisy dumps.
 - Manual visual recheck of the previously failing landblocks, including the shared-road/terrain-base cohort failure and the grazing-angle gutter artifacts.
 - Update the plan with any remaining visual parity blockers before entering Phase 10C.
 
 Acceptance:
 
+- The diagnostic surface has a domain-extensible shape and does not hard-code terrain/atlas as the only diagnostic product.
 - Texture placement and page-slot failures are visible through runtime/harness diagnostics or snapshots, not only `console.error`.
+- Texture/atlas memory pressure can be inspected on demand without adding hot-path metrics collection or diagnostic-owned lifecycle state.
 - Manual terrain review confirms landblocks no longer disappear due to same-page terrain color cohort failures.
 - Remaining terrain visual issues are tracked as Phase 10C visual parity items, not hidden inside the architecture correction.
 
@@ -1430,6 +1437,13 @@ Verification:
 
 - Targeted diagnostics tests where appropriate; no tests for debug-only console logging.
 - Manual visual checklist entries recorded in this plan or the terrain visual parity notes.
+
+Guardrails:
+
+- Diagnostics observe existing ownership boundaries; they do not introduce required protocol fields, renderer commit inputs, bake result fields, or coordinator control flow.
+- Treat v1 diagnostics as a behavior reference for useful questions, not as an API shape to copy.
+- If a useful number requires hot-path accounting, defer it unless it can be derived lazily from existing residency, atlas registry, or renderer resource state.
+- Diagnostic report modules may share presentation/query conventions, but subsystem ownership stays local: diagnostics request snapshots; they do not become the source of truth for runtime state.
 
 ### Phase 10B5: Sampler Policy Update Lifecycle
 

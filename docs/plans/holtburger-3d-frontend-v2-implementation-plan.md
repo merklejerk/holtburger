@@ -982,17 +982,46 @@ Verification:
 
 - `npm run test:ts -- src/v2/static/terrain/bake/terrain-geometry-baker.test.ts src/v2/static/terrain/bake/terrain-material-family-classifier.test.ts src/v2/runtime/client-runtime.test.ts`
 
-### Phase 10B4B: Terrain Atlas Binding And Rect UVs
+### Phase 10B4B1: Terrain Rect-Aware Texture Bindings
+
+Status: completed.
+
+Purpose: make the first supported terrain texture family consume atlas rect metadata instead of assuming the bound texture covers the whole page.
+
+Deliverables:
+
+- Runtime texture bindings carry atlas rect and page-size metadata from `TextureManager` to the renderer.
+- WebGL2 terrain shader applies rect UV transforms for `terrain-single-base-color` sampling.
+- Tests proving rect metadata survives initial texture upload and reused placement binding.
+
+Acceptance criteria:
+
+- A terrain draw unit bound to a sub-rect texture placement samples through the placement rect instead of raw full-page UVs.
+- Reused texture placements still provide rect/page-size metadata to later draw-unit bindings without re-uploading the page.
+- No V1 `world-display` imports are added to runtime V2 code.
+
+Implementation notes:
+
+- 2026-06-11: Added rect-aware `TerrainTextureBinding` metadata: `rect`, `textureWidth`, and `textureHeight`.
+- 2026-06-11: `TextureManager` now stores placement rect/page-size metadata in the domain registry and includes it on every draw-unit binding, including bindings that reuse an existing placement and therefore do not upload a new page.
+- 2026-06-11: The V2 WebGL2 terrain shader now samples `terrain-single-base-color` through `(rect.xy + fract(uv) * rect.zw) / pageSize` and uses `textureGrad` so repeated terrain UVs do not derive gradients from the discontinuous atlas-space `fract` result.
+- 2026-06-11: Spicy caveat: this phase makes the shader rect-aware, but the normal texture-manager path still packs one texture use per page/job. It does not yet create true multi-source terrain atlas pages, role-specific page classes, or gutter policy.
+
+Verification:
+
+- `npm run test:ts -- src/v2/textures/texture-manager.test.ts src/v2/runtime/client-runtime.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts src/v2/import-boundary.test.ts`
+
+### Phase 10B4B2: Terrain Page-Class Planning And Multi-Source Pages
 
 Status: pending.
 
-Purpose: bind Phase 10A terrain material plans to packed V2 texture pages in WebGL2 without relying on direct full-page texture assumptions.
+Purpose: bind Phase 10A terrain material plans to packed V2 texture pages in WebGL2 without relying on one texture use per page/job.
 
 Deliverables:
 
 - V2 terrain bucket/page-class planning above the lower-level atlas packer so terrain color, mask, and detail pages get role-specific capacity and gutter policy.
-- WebGL2 shader inputs, texture bindings, sampler policy, material uniforms, and atlas rect UV transforms for terrain base/overlay/mask/road/detail behavior.
 - True multi-source packed terrain pages, including atlas rect transforms before relying on generated mipmaps for atlas pages that contain more than one rect.
+- WebGL2 shader inputs, texture bindings, sampler policy, material uniforms, and atlas rect UV transforms for terrain overlay/mask/road/detail behavior.
 - Tests for renderer binding construction, atlas rect transform behavior, page-class policy, and no V1 `world-display` imports from runtime V2 code.
 
 Acceptance criteria:

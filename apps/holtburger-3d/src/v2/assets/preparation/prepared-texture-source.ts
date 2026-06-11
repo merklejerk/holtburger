@@ -7,8 +7,6 @@ export interface DirectRgbaTextureSource {
 	readonly kind: "direct-rgba-texture-source";
 	readonly renderSurfaceId: number;
 	readonly usage: PreparedTextureUseIdentity["usage"];
-	readonly colorSpace: "linear";
-	readonly mipPolicy: "none";
 	readonly outputFormat: "rgba8";
 	readonly width: number;
 	readonly height: number;
@@ -19,8 +17,8 @@ export function createPreparedTextureHostKey(
 	source: PreparedTextureUseIdentity,
 ): HostAssetKey {
 	const query = new URLSearchParams({
-		cs: source.colorSpace,
-		mips: source.mipPolicy,
+		cs: "linear",
+		mips: "none",
 		out: source.outputFormat,
 		usage: source.usage,
 	});
@@ -61,10 +59,8 @@ export function prepareDirectRgbaTextureSource(
 	}
 
 	return {
-		colorSpace: "linear",
 		height: levelZero.height,
 		kind: "direct-rgba-texture-source",
-		mipPolicy: "none",
 		outputFormat: "rgba8",
 		pixels: levelZero.bytes,
 		renderSurfaceId: payload.renderSurfaceId,
@@ -91,9 +87,7 @@ function parsePreparedTexturePayload(
 	if (
 		candidate.renderSurfaceId !== expectedUse.renderSurfaceId ||
 		candidate.usage !== expectedUse.usage ||
-		candidate.outputFormat !== expectedUse.outputFormat ||
-		candidate.mipPolicy !== expectedUse.mipPolicy ||
-		candidate.colorSpace !== expectedUse.colorSpace
+		candidate.outputFormat !== expectedUse.outputFormat
 	) {
 		throw new Error(
 			`Prepared texture payload for render surface ${formatRenderSurfaceId(expectedUse.renderSurfaceId)} does not match the requested texture-use policy.`,

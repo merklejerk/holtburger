@@ -14,6 +14,9 @@ import type {
 	StaticResolverJob,
 	StaticResourceIdentity,
 	StaticScopePayload,
+	TerrainAlphaMapFacts,
+	TerrainMaterialTypeFacts,
+	TerrainRoadAlphaMapFacts,
 	TerrainSourceSpatialFacts,
 	TerrainTextureUseFacts,
 } from "../contracts";
@@ -104,7 +107,10 @@ export class TerrainStaticScopeResolver {
 					materialKind: terrainMaterial.materialKind,
 					pcodeEncoding: terrainMaterial.pcodeEncoding,
 					roadAlphaMapCount: terrainMaterial.roadAlphaMaps.length,
+					roadAlphaMaps: createTerrainRoadAlphaMapFacts(terrainMaterial),
+					terrainAlphaMaps: createTerrainAlphaMapFacts(terrainMaterial),
 					terrainTypeCount: terrainMaterial.terrainTypes.length,
+					terrainTypes: createTerrainTypeFacts(terrainMaterial),
 				},
 				textureUses: textureUses.facts,
 			},
@@ -123,7 +129,10 @@ export class TerrainStaticScopeResolver {
 		readonly missingRefs: readonly StaticResourceIdentity[];
 		readonly sourceRevision: number;
 	}> {
-		const surfaceRoles = collectSurfaceRoles(terrainMaterial, regionRenderProfile);
+		const surfaceRoles = collectSurfaceRoles(
+			terrainMaterial,
+			regionRenderProfile,
+		);
 		const facts: TerrainTextureUseFacts[] = [];
 		const missingRefs: StaticResourceIdentity[] = [];
 		let sourceRevision = 0;
@@ -156,7 +165,10 @@ export class TerrainStaticScopeResolver {
 						renderSurfaceIdentity.renderSurfaceId,
 						"render-surface",
 					);
-					sourceRevision = Math.max(sourceRevision, renderSurface.sourceByteLength);
+					sourceRevision = Math.max(
+						sourceRevision,
+						renderSurface.sourceByteLength,
+					);
 					palette = await this.#resolvePalette(renderSurface, missingRefs);
 				} catch {
 					missingRefs.push(renderSurfaceIdentity);
@@ -167,8 +179,6 @@ export class TerrainStaticScopeResolver {
 				palette,
 				preparedTextureUse: renderSurfaceIdentity
 					? createPreparedTextureUseIdentity({
-							colorSpace: "linear",
-							mipPolicy: "none",
 							outputFormat: "rgba8",
 							renderSurfaceId: renderSurfaceIdentity.renderSurfaceId,
 							usage:
@@ -302,6 +312,48 @@ function createRegionDetailRoles(
 	});
 }
 
+function createTerrainTypeFacts(
+	terrainMaterial: TerrainMaterialPayloadDto,
+): readonly TerrainMaterialTypeFacts[] {
+	return terrainMaterial.terrainTypes.map((entry) => ({
+		terrainCode: entry.terrainType,
+		texture: requireSurfaceTextureIdentity(entry.textureAssetId),
+		tiling: entry.tiling,
+	}));
+}
+
+function createTerrainAlphaMapFacts(
+	terrainMaterial: TerrainMaterialPayloadDto,
+): readonly TerrainAlphaMapFacts[] {
+	return terrainMaterial.terrainAlphaMaps.map((entry) => ({
+		alphaIndex: entry.alphaIndex,
+		selector: entry.selector,
+		texture: requireSurfaceTextureIdentity(entry.alphaTextureAssetId),
+	}));
+}
+
+function createTerrainRoadAlphaMapFacts(
+	terrainMaterial: TerrainMaterialPayloadDto,
+): readonly TerrainRoadAlphaMapFacts[] {
+	return terrainMaterial.roadAlphaMaps.map((entry) => ({
+		alphaTexture: requireSurfaceTextureIdentity(entry.alphaTextureAssetId),
+		roadIndex: entry.roadIndex,
+		roadTexture: requireSurfaceTextureIdentity(entry.roadTextureAssetId),
+		selector: entry.selector,
+	}));
+}
+
+function requireSurfaceTextureIdentity(
+	assetId: string,
+): ReturnType<typeof createSurfaceTextureIdentity> {
+	const identity = parseTerrainSliceDependencyRoute(assetId);
+	if (identity.kind !== "surface-texture") {
+		throw new Error(`Terrain material expected a surface texture route.`);
+	}
+
+	return identity;
+}
+
 function createTerrainSourceSpatialFacts(
 	landblock: LandblockOutdoorPayloadDto,
 ): TerrainSourceSpatialFacts {
@@ -313,7 +365,9 @@ function createTerrainSourceSpatialFacts(
 	};
 }
 
-function parseFirstPaletteDependency(assetIds: readonly string[]): number | null {
+function parseFirstPaletteDependency(
+	assetIds: readonly string[],
+): number | null {
 	for (const assetId of assetIds) {
 		const identity = parseTerrainSliceDependencyRoute(assetId);
 		if (identity.kind === "palette") {
@@ -330,7 +384,9 @@ function createTerrainResolverCacheKey(
 	return JSON.stringify(identity) as TerrainResolverCacheKey;
 }
 
-function requirePreparedPayloadKind<TKind extends TerrainPreparedPayload["kind"]>(
+function requirePreparedPayloadKind<
+	TKind extends TerrainPreparedPayload["kind"],
+>(
 	asset: PreparedAsset,
 	expectedKind: TKind,
 ): Extract<TerrainPreparedPayload, { readonly kind: TKind }> {

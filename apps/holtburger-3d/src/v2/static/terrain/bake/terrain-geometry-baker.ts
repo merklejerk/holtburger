@@ -7,7 +7,9 @@ import type {
 	TerrainMeshTriangleFacts,
 	TerrainMeshVertexFacts,
 	TerrainStaticScopePayload,
+	TerrainTextureUseFacts,
 } from "../../contracts";
+import { buildTerrainMaterialLayerPlan } from "./terrain-material-layer-planner";
 
 const UINT16_MAX_INDEX = 65_535;
 
@@ -61,14 +63,12 @@ function createTerrainGeometryDrawUnit(
 	);
 	const textureUseIds = payload.textureUses
 		.filter((textureUse) => textureUse.preparedTextureUse !== null)
-		.map((textureUse) => {
-			const preparedTextureUse = textureUse.preparedTextureUse;
-			if (!preparedTextureUse) {
-				throw new Error("Prepared texture use disappeared during terrain bake.");
-			}
-
-			return createTerrainTextureUseId(workId, preparedTextureUse.renderSurfaceId);
-		});
+		.map((textureUse) => createTerrainTextureUseId(workId, textureUse));
+	const terrainMaterialPlan = buildTerrainMaterialLayerPlan({
+		createTextureUseId: (textureUse) =>
+			createTerrainTextureUseId(workId, textureUse),
+		payload,
+	});
 
 	for (const [triangleIndex, triangle] of payload.mesh.triangles.entries()) {
 		writeTrianglePositions(
@@ -95,13 +95,12 @@ function createTerrainGeometryDrawUnit(
 			? "terrain-phase8-texture-probe"
 			: "terrain-debug-flat",
 		primaryTextureUseId: primaryTextureUse?.preparedTextureUse
-			? createTerrainTextureUseId(
-					workId,
-					primaryTextureUse.preparedTextureUse.renderSurfaceId,
-				)
+			? createTerrainTextureUseId(workId, primaryTextureUse)
 			: null,
 		positions,
 		sourceTriangleIds,
+		terrainFallbackReasons: terrainMaterialPlan?.fallbackReasons ?? [],
+		terrainMaterialPlan,
 		texCoords,
 		textureUseIds,
 		triangleCount: payload.mesh.triangles.length,
@@ -155,10 +154,7 @@ function createTerrainBakeTextureUses(
 				ownerDrawUnitIds: [drawUnit.drawUnitId],
 				placementRevisionAssumption: input.atlasSnapshot.revision,
 				source: textureUse.preparedTextureUse,
-				textureUseId: createTerrainTextureUseId(
-					input.work.workId,
-					textureUse.preparedTextureUse.renderSurfaceId,
-				),
+				textureUseId: createTerrainTextureUseId(input.work.workId, textureUse),
 			},
 		];
 	});
@@ -166,13 +162,26 @@ function createTerrainBakeTextureUses(
 
 function createTerrainTextureUseId(
 	workId: string,
-	renderSurfaceId: number,
+	textureUse: TerrainTextureUseFacts,
 ): string {
-	return `${workId}:prepared-texture:${renderSurfaceId.toString(16).padStart(8, "0")}`;
+	if (!textureUse.preparedTextureUse) {
+		throw new Error("Prepared texture use disappeared during terrain bake.");
+	}
+
+	return [
+		workId,
+		"prepared-texture",
+		textureUse.role,
+		textureUse.preparedTextureUse.usage,
+		textureUse.preparedTextureUse.renderSurfaceId.toString(16).padStart(8, "0"),
+	].join(":");
 }
 
-function createSequentialIndices(vertexCount: number): Uint16Array | Uint32Array {
-	const IndexArray = vertexCount - 1 <= UINT16_MAX_INDEX ? Uint16Array : Uint32Array;
+function createSequentialIndices(
+	vertexCount: number,
+): Uint16Array | Uint32Array {
+	const IndexArray =
+		vertexCount - 1 <= UINT16_MAX_INDEX ? Uint16Array : Uint32Array;
 	const indices = new IndexArray(vertexCount);
 
 	for (let index = 0; index < vertexCount; index += 1) {

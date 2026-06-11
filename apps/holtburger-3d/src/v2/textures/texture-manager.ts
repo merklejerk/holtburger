@@ -101,7 +101,8 @@ export class TextureManager {
 
 		for (const domain of dirtyDomains) {
 			const registry = this.#getRegistry(domain);
-			const startingRevision = startingDomainRevisions.get(domain) ?? registry.revision;
+			const startingRevision =
+				startingDomainRevisions.get(domain) ?? registry.revision;
 			registry.revision = startingRevision + 1;
 		}
 
@@ -167,7 +168,10 @@ export class TextureManager {
 			textureUse.domain,
 			registry.revision,
 		);
-		const textureKey = createDomainTextureKey(textureUse.domain, textureUse.source);
+		const textureKey = createDomainTextureKey(
+			textureUse.domain,
+			textureUse.source,
+		);
 		const existing = registry.entries.get(textureKey);
 		if (existing) {
 			return {
@@ -188,7 +192,10 @@ export class TextureManager {
 		);
 		const source = prepareDirectRgbaTextureSource(prepared, textureUse.source);
 		const placementRevision = startingRevision + 1;
-		const textureRefId = createTextureRefId(textureUse.domain, textureUse.source);
+		const textureRefId = createTextureRefId(
+			textureUse.domain,
+			textureUse.source,
+		);
 		const packed = await this.#texturePacker.pack({
 			domain: textureUse.domain,
 			jobId: `texture-pack:${textureKey}`,
@@ -323,8 +330,6 @@ function createDomainTextureKey(
 		source.renderSurfaceId.toString(16).padStart(8, "0"),
 		source.usage,
 		source.outputFormat,
-		source.mipPolicy,
-		source.colorSpace,
 	].join(":") as DomainTextureKey;
 }
 
@@ -338,8 +343,6 @@ function createTextureRefId(
 		source.renderSurfaceId.toString(16).padStart(8, "0"),
 		source.usage,
 		source.outputFormat,
-		source.mipPolicy,
-		source.colorSpace,
 	].join(":");
 }
 

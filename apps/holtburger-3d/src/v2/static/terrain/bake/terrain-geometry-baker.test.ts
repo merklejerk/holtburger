@@ -26,17 +26,26 @@ describe("V2 terrain geometry baker", () => {
 			vertexCount: 6,
 		});
 		expect(Array.from(drawUnit.positions)).toEqual([
-			0, 0, -0, 24, 1, -0, 0, 2, -24,
-			24, 1, -0, 24, 3, -24, 0, 2, -24,
+			0, 0, -0, 24, 1, -0, 0, 2, -24, 24, 1, -0, 24, 3, -24, 0, 2, -24,
 		]);
 		expect(drawUnit.indices).toBeInstanceOf(Uint16Array);
 		expect(Array.from(drawUnit.indices)).toEqual([0, 1, 2, 3, 4, 5]);
 		expect(drawUnit.sourceTriangleIds).toEqual(["t0", "t1"]);
 		expect(Array.from(drawUnit.texCoords)).toEqual([
-			0, 0, 0.125, 0, 0, 0.125,
-			0.125, 0, 0.125, 0.125, 0, 0.125,
+			0, 0, 0.125, 0, 0, 0.125, 0.125, 0, 0.125, 0.125, 0, 0.125,
 		]);
 		expect(drawUnit.textureUseIds).toEqual([]);
+		expect(drawUnit.terrainMaterialPlan).toEqual(
+			expect.objectContaining({
+				layerEntries: [],
+			}),
+		);
+		expect(drawUnit.terrainFallbackReasons).toEqual([
+			expect.objectContaining({
+				code: "missing-terrain-type",
+				pcode: 33825,
+			}),
+		]);
 		expect(result).toMatchObject({
 			atlasRegistryUpdates: [],
 			buildRevision: 42,
@@ -94,26 +103,37 @@ describe("V2 terrain geometry baker", () => {
 		expect(drawUnit).toMatchObject({
 			materialFamily: "terrain-phase8-texture-probe",
 			primaryTextureUseId:
-				"7:landblock:da55ffff:outdoor-terrain:prepared-texture:06000010",
+				"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:color:06000010",
 			textureUseIds: [
-				"7:landblock:da55ffff:outdoor-terrain:prepared-texture:06000010",
+				"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:color:06000010",
 			],
 		});
+		expect(drawUnit.terrainMaterialPlan?.layerEntries).toEqual([
+			expect.objectContaining({
+				allRoad: false,
+				base: expect.objectContaining({
+					role: "terrain-base",
+					textureUseId:
+						"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:color:06000010",
+					wrap: "repeat",
+				}),
+				pcode: 33825,
+				slot: 0,
+			}),
+		]);
 		expect(result.textureUses).toEqual([
 			{
 				domain: "outdoor-terrain",
 				ownerDrawUnitIds: [drawUnit.drawUnitId],
 				placementRevisionAssumption: 42,
 				source: {
-					colorSpace: "linear",
 					kind: "prepared-texture-use",
-					mipPolicy: "none",
 					outputFormat: "rgba8",
 					renderSurfaceId: 0x06000010,
 					usage: "color",
 				},
 				textureUseId:
-					"7:landblock:da55ffff:outdoor-terrain:prepared-texture:06000010",
+					"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:color:06000010",
 			},
 		]);
 		expect(JSON.stringify(result)).not.toContain("texture-ref");
@@ -187,17 +207,29 @@ function createTerrainBakeInput(
 				sizeBitMask: 0,
 				terrainCodeBits: 5,
 			},
+			roadAlphaMaps: [],
 			roadAlphaMapCount: 0,
+			terrainAlphaMaps: [],
 			terrainTypeCount: 0,
+			terrainTypes: options.includeTextureUse
+				? [
+						{
+							terrainCode: 1,
+							texture: {
+								kind: "surface-texture",
+								surfaceTextureId: 0x05000010,
+							},
+							tiling: 1,
+						},
+					]
+				: [],
 		},
 		textureUses: options.includeTextureUse
 			? [
 					{
 						palette: null,
 						preparedTextureUse: {
-							colorSpace: "linear",
 							kind: "prepared-texture-use",
-							mipPolicy: "none",
 							outputFormat: "rgba8",
 							renderSurfaceId: 0x06000010,
 							usage: "color",
@@ -232,7 +264,9 @@ function createTerrainBakeInput(
 	};
 }
 
-function createTerrainMesh(triangleCount: number): TerrainStaticScopePayload["mesh"] {
+function createTerrainMesh(
+	triangleCount: number,
+): TerrainStaticScopePayload["mesh"] {
 	const triangles = Array.from({ length: triangleCount }, (_value, index) => ({
 		averageHeight: 1,
 		bounds: {
@@ -243,9 +277,7 @@ function createTerrainMesh(triangleCount: number): TerrainStaticScopePayload["me
 		terrainTriangleId: `t${index}`,
 		triangleInQuad: (index % 2) as 0 | 1,
 		vertexIndices:
-			index % 2 === 0
-				? ([0, 1, 2] as const)
-				: ([1, 3, 2] as const),
+			index % 2 === 0 ? ([0, 1, 2] as const) : ([1, 3, 2] as const),
 	}));
 
 	return {
@@ -267,7 +299,7 @@ function createTerrainMesh(triangleCount: number): TerrainStaticScopePayload["me
 				col: 0,
 				cornerTerrainCodes: [1, 1, 1, 1],
 				diagonal: "southwest-northeast",
-				pcode: 1,
+				pcode: 33825,
 				quadIndex: 0,
 				row: 0,
 				sourceTerrainIndices: [0, 1, 2, 3],

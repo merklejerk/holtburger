@@ -24,10 +24,8 @@ describe("V2 prepared texture source preparation", () => {
 		);
 
 		expect(source).toMatchObject({
-			colorSpace: "linear",
 			height: 1,
 			kind: "direct-rgba-texture-source",
-			mipPolicy: "none",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000010,
 			usage: "color",
@@ -49,7 +47,7 @@ describe("V2 prepared texture source preparation", () => {
 		expect(() =>
 			prepareDirectRgbaTextureSource(
 				createPreparedAsset({ colorSpace: "srgb", outputFormat: "rgba8" }),
-				createTextureUse({ colorSpace: "srgb" }),
+				createTextureUse(),
 			),
 		).toThrow("unsupported direct texture policy rgba8/none/srgb");
 	});
@@ -68,9 +66,7 @@ function createTextureUse(
 	overrides: Partial<PreparedTextureUseIdentity> = {},
 ): PreparedTextureUseIdentity {
 	return {
-		colorSpace: "linear",
 		kind: "prepared-texture-use",
-		mipPolicy: "none",
 		outputFormat: "rgba8",
 		renderSurfaceId: 0x06000010,
 		usage: "color",

@@ -12,11 +12,14 @@ import type {
 	StaticScopePayload,
 } from "../static/contracts";
 import type { TexturePacker } from "./packing/packer";
-import type { TexturePackingJob, TexturePackingResult } from "./packing/protocol";
+import type {
+	TexturePackingJob,
+	TexturePackingResult,
+} from "./packing/protocol";
 import { TextureManager } from "./texture-manager";
 
 const STABLE_TEXTURE_REF_ID =
-	"texture-ref:outdoor-terrain:06000010:color:rgba8:none:linear";
+	"texture-ref:outdoor-terrain:06000010:color:rgba8";
 
 describe("V2 texture manager", () => {
 	it("turns bake-local texture uses into runtime-owned direct placements", async () => {
@@ -275,9 +278,11 @@ class FixtureAssetService implements AssetService {
 		const outputFormat = key.id.includes("dxt1") ? "dxt1" : "rgba8";
 		return {
 			key,
-			payload: createPreparedTexturePayload(this.#payloadOptions ?? {
-				outputFormat,
-			}),
+			payload: createPreparedTexturePayload(
+				this.#payloadOptions ?? {
+					outputFormat,
+				},
+			),
 			preparedAt: "test",
 			revision: 1,
 			sourceAssetId: `prepared-texture/${key.id}`,
@@ -353,9 +358,7 @@ function createCommitDelta(options: {
 				ownerDrawUnitIds: [drawUnitId],
 				placementRevisionAssumption: options.placementRevisionAssumption ?? 0,
 				source: {
-					colorSpace: "linear",
 					kind: "prepared-texture-use",
-					mipPolicy: "none",
 					outputFormat: options.outputFormat,
 					renderSurfaceId,
 					usage: "color",
@@ -368,9 +371,7 @@ function createCommitDelta(options: {
 
 function createTextureUse(renderSurfaceId: number): PreparedTextureUseIdentity {
 	return {
-		colorSpace: "linear",
 		kind: "prepared-texture-use",
-		mipPolicy: "none",
 		outputFormat: "rgba8",
 		renderSurfaceId,
 		usage: "color",

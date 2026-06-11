@@ -130,16 +130,12 @@ export interface RenderSurfaceIdentity {
 
 export type PreparedTextureUsage = "color" | "detail" | "mask" | "raw";
 export type PreparedTextureOutputFormat = "dxt1" | "dxt3" | "dxt5" | "rgba8";
-export type PreparedTextureMipPolicy = "none" | "retail4";
-export type PreparedTextureColorSpace = "srgb" | "data" | "linear" | "source";
 
 export interface PreparedTextureUseIdentity {
 	readonly kind: "prepared-texture-use";
 	readonly renderSurfaceId: number;
 	readonly usage: PreparedTextureUsage;
 	readonly outputFormat: PreparedTextureOutputFormat;
-	readonly mipPolicy: PreparedTextureMipPolicy;
-	readonly colorSpace: PreparedTextureColorSpace;
 }
 
 export interface PaletteIdentity {
@@ -214,11 +210,33 @@ export interface TerrainMaterialSourceFacts {
 	readonly terrainTypeCount: number;
 	readonly alphaMapCount: number;
 	readonly roadAlphaMapCount: number;
+	readonly terrainTypes: readonly TerrainMaterialTypeFacts[];
+	readonly terrainAlphaMaps: readonly TerrainAlphaMapFacts[];
+	readonly roadAlphaMaps: readonly TerrainRoadAlphaMapFacts[];
 	readonly pcodeEncoding: {
 		readonly terrainCodeBits: 5;
 		readonly roadCodeBits: 2;
 		readonly sizeBitMask: number;
 	};
+}
+
+export interface TerrainMaterialTypeFacts {
+	readonly terrainCode: number;
+	readonly texture: SurfaceTextureIdentity;
+	readonly tiling: number;
+}
+
+export interface TerrainAlphaMapFacts {
+	readonly alphaIndex: number;
+	readonly texture: SurfaceTextureIdentity;
+	readonly selector: number;
+}
+
+export interface TerrainRoadAlphaMapFacts {
+	readonly roadIndex: number;
+	readonly roadTexture: SurfaceTextureIdentity;
+	readonly alphaTexture: SurfaceTextureIdentity;
+	readonly selector: number;
 }
 
 export interface RegionRenderProfileSourceFacts {
@@ -235,7 +253,12 @@ export interface RegionDetailRoleFacts {
 }
 
 export interface TerrainTextureUseFacts {
-	readonly role: "terrain-base" | "terrain-alpha" | "road" | "road-alpha" | "detail";
+	readonly role:
+		| "terrain-base"
+		| "terrain-alpha"
+		| "road"
+		| "road-alpha"
+		| "detail";
 	readonly texture: SurfaceTextureIdentity;
 	readonly renderSurface: RenderSurfaceIdentity | null;
 	readonly preparedTextureUse: PreparedTextureUseIdentity | null;
@@ -358,7 +381,9 @@ export interface StaticBakeResult {
 	readonly buildRevision: number;
 }
 
-export type StaticDrawUnit = TerrainGeometryStaticDrawUnit | PlaceholderStaticDrawUnit;
+export type StaticDrawUnit =
+	| TerrainGeometryStaticDrawUnit
+	| PlaceholderStaticDrawUnit;
 
 export interface PlaceholderStaticDrawUnit {
 	readonly kind: "placeholder";
@@ -370,7 +395,9 @@ export interface TerrainGeometryStaticDrawUnit {
 	readonly drawUnitId: string;
 	readonly landblockId: number;
 	readonly domain: "outdoor-terrain";
-	readonly materialFamily: "terrain-debug-flat" | "terrain-phase8-texture-probe";
+	readonly materialFamily:
+		| "terrain-debug-flat"
+		| "terrain-phase8-texture-probe";
 	readonly coordinateSpace: "landblock-render-local";
 	readonly positions: Float32Array;
 	readonly texCoords: Float32Array;
@@ -381,6 +408,74 @@ export interface TerrainGeometryStaticDrawUnit {
 	readonly sourceTriangleIds: readonly string[];
 	readonly primaryTextureUseId: string | null;
 	readonly textureUseIds: readonly string[];
+	readonly terrainMaterialPlan: TerrainMaterialLayerPlan | null;
+	readonly terrainFallbackReasons: readonly TerrainMaterialFallbackReason[];
+}
+
+export interface TerrainMaterialLayerPlan {
+	readonly signature: string;
+	readonly layerEntries: readonly TerrainMaterialLayerEntry[];
+	readonly drawSlices: readonly TerrainMaterialDrawSlice[];
+	readonly detailRoles: readonly TerrainMaterialDetailRole[];
+	readonly fallbackReasons: readonly TerrainMaterialFallbackReason[];
+}
+
+export interface TerrainMaterialLayerEntry {
+	readonly slot: number;
+	readonly pcode: number;
+	readonly base: TerrainMaterialTextureRoleBinding;
+	readonly overlays: readonly TerrainMaterialOverlayBinding[];
+	readonly roads: readonly TerrainMaterialRoadBinding[];
+	readonly allRoad: boolean;
+	readonly colorRefCount: number;
+	readonly maskRefCount: number;
+}
+
+export interface TerrainMaterialTextureRoleBinding {
+	readonly role: TerrainTextureUseFacts["role"];
+	readonly texture: SurfaceTextureIdentity;
+	readonly textureUseId: string | null;
+	readonly tiling: number;
+	readonly wrap: "repeat" | "clamp";
+}
+
+export interface TerrainMaterialOverlayBinding {
+	readonly terrain: TerrainMaterialTextureRoleBinding;
+	readonly alpha: TerrainMaterialTextureRoleBinding;
+	readonly rotation: number;
+}
+
+export interface TerrainMaterialRoadBinding {
+	readonly road: TerrainMaterialTextureRoleBinding;
+	readonly alpha: TerrainMaterialTextureRoleBinding;
+	readonly rotation: number;
+}
+
+export interface TerrainMaterialDetailRole {
+	readonly role: RegionDetailRoleFacts["role"];
+	readonly texture: TerrainMaterialTextureRoleBinding;
+	readonly fadeNear: number;
+	readonly fadeFar: number;
+}
+
+export interface TerrainMaterialDrawSlice {
+	readonly sliceId: string;
+	readonly reason: string;
+	readonly layerSlots: readonly number[];
+	readonly pcodes: readonly number[];
+}
+
+export interface TerrainMaterialFallbackReason {
+	readonly code:
+		| "missing-terrain-type"
+		| "missing-terrain-alpha"
+		| "missing-road-alpha"
+		| "missing-texture-use"
+		| "layer-overflow"
+		| "invalid-detail-role";
+	readonly message: string;
+	readonly pcode: number | null;
+	readonly texture: SurfaceTextureIdentity | null;
 }
 
 export interface StaticBakeTextureUse {
@@ -428,7 +523,12 @@ export interface ScheduledStaticWorkStatus {
 	readonly revision: number;
 	readonly domain: StaticDomain;
 	readonly scopeKey: string;
-	readonly status: "requested" | "resolving" | "baking" | "committed" | "failed";
+	readonly status:
+		| "requested"
+		| "resolving"
+		| "baking"
+		| "committed"
+		| "failed";
 	readonly failureMessage: string | null;
 }
 

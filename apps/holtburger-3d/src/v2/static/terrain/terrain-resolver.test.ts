@@ -92,9 +92,7 @@ describe("V2 terrain static resolver", () => {
 			expect.arrayContaining([
 				expect.objectContaining({
 					preparedTextureUse: expect.objectContaining({
-						colorSpace: "linear",
 						kind: "prepared-texture-use",
-						mipPolicy: "none",
 						outputFormat: "rgba8",
 						renderSurfaceId: 0x06000010,
 						usage: "color",
@@ -111,9 +109,7 @@ describe("V2 terrain static resolver", () => {
 				}),
 				expect.objectContaining({
 					preparedTextureUse: expect.objectContaining({
-						colorSpace: "linear",
 						kind: "prepared-texture-use",
-						mipPolicy: "none",
 						outputFormat: "rgba8",
 						usage: "mask",
 					}),

@@ -1,7 +1,5 @@
 import type {
 	PaletteIdentity,
-	PreparedTextureColorSpace,
-	PreparedTextureMipPolicy,
 	PreparedTextureOutputFormat,
 	PreparedTextureUseIdentity,
 	PreparedTextureUsage,
@@ -47,7 +45,10 @@ export function createRenderSurfaceIdentity(
 ): RenderSurfaceIdentity {
 	return {
 		kind: "render-surface",
-		renderSurfaceId: assertNonnegativeInteger(renderSurfaceId, "renderSurfaceId"),
+		renderSurfaceId: assertNonnegativeInteger(
+			renderSurfaceId,
+			"renderSurfaceId",
+		),
 	};
 }
 
@@ -62,13 +63,9 @@ export function createPreparedTextureUseIdentity(options: {
 	readonly renderSurfaceId: number;
 	readonly usage: PreparedTextureUsage;
 	readonly outputFormat: PreparedTextureOutputFormat;
-	readonly mipPolicy: PreparedTextureMipPolicy;
-	readonly colorSpace: PreparedTextureColorSpace;
 }): PreparedTextureUseIdentity {
 	return {
-		colorSpace: options.colorSpace,
 		kind: "prepared-texture-use",
-		mipPolicy: options.mipPolicy,
 		outputFormat: options.outputFormat,
 		renderSurfaceId: assertNonnegativeInteger(
 			options.renderSurfaceId,
@@ -81,7 +78,9 @@ export function createPreparedTextureUseIdentity(options: {
 export function parseTerrainSliceDependencyRoute(
 	assetId: string,
 ): StaticResourceIdentity {
-	const surfaceTextureMatch = /^surface-texture\/([0-9a-fA-F]{8})$/.exec(assetId);
+	const surfaceTextureMatch = /^surface-texture\/([0-9a-fA-F]{8})$/.exec(
+		assetId,
+	);
 	if (surfaceTextureMatch) {
 		return createSurfaceTextureIdentity(
 			Number.parseInt(surfaceTextureMatch[1] as string, 16),
@@ -97,7 +96,9 @@ export function parseTerrainSliceDependencyRoute(
 
 	const paletteMatch = /^palette\/([0-9a-fA-F]{8})$/.exec(assetId);
 	if (paletteMatch) {
-		return createPaletteIdentity(Number.parseInt(paletteMatch[1] as string, 16));
+		return createPaletteIdentity(
+			Number.parseInt(paletteMatch[1] as string, 16),
+		);
 	}
 
 	throw new Error(`Unsupported terrain dependency host route: ${assetId}`);

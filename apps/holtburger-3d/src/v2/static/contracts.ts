@@ -350,26 +350,27 @@ export interface EnvCellSpatialFacts {
 	readonly localBvhItemCount: number;
 }
 
-export interface DomainAtlasSnapshot {
+export interface StaticAtlasBatchSnapshot {
+	readonly staticBatchId: string;
 	readonly domain: StaticDomain;
-	readonly revision: number;
 	readonly textureUses: readonly StaticTextureUseIdentity[];
-	readonly placements: readonly DomainAtlasPlacementSnapshot[];
+	readonly placements: readonly StaticAtlasBatchPlacementSnapshot[];
 }
 
-interface DomainAtlasPlacementSnapshot {
+interface StaticAtlasBatchPlacementSnapshot {
 	readonly texture: PreparedTextureUseIdentity;
-	readonly placementRevision: number;
 }
 
 export interface StaticBakeInput {
 	readonly work: ScheduledStaticWork;
 	readonly payload: StaticScopePayload;
-	readonly atlasSnapshot: DomainAtlasSnapshot;
+	readonly atlasSnapshot: StaticAtlasBatchSnapshot;
+	readonly staticBatchId: string;
 }
 
 export interface StaticBakeResult {
 	readonly work: ScheduledStaticWork;
+	readonly staticBatchId: string;
 	readonly drawUnits: readonly StaticDrawUnit[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly atlasRegistryUpdates: readonly string[];
@@ -484,10 +485,10 @@ export interface TerrainMaterialFallbackReason {
 
 export interface StaticBakeTextureUse {
 	readonly textureUseId: string;
+	readonly staticBatchId: string;
 	readonly domain: StaticDomain;
 	readonly ownerDrawUnitIds: readonly string[];
 	readonly source: PreparedTextureUseIdentity;
-	readonly placementRevisionAssumption: number;
 }
 
 export interface StaticResolverClient {
@@ -516,6 +517,7 @@ export interface StaticCoordinatorSnapshot {
 }
 
 export interface StaticCoordinatorCommitDelta {
+	readonly staticBatchId: string;
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
 	readonly removedDrawUnitIds: readonly string[];
 	readonly textureUses: readonly StaticBakeTextureUse[];

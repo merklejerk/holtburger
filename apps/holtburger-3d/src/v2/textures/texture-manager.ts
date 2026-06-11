@@ -5,7 +5,7 @@ import {
 } from "../assets/preparation/prepared-texture-source";
 import type { TexturePlacementUpdate } from "../renderer/types";
 import type {
-	DomainAtlasSnapshot,
+	StaticAtlasBatchSnapshot,
 	PreparedTextureUseIdentity,
 	StaticScopePayload,
 	StaticTextureUseIdentity,
@@ -36,8 +36,11 @@ export class TextureManager {
 	readonly #assetService: AssetService;
 	readonly #filteringMode: TextureFilteringMode;
 	readonly #texturePacker: TexturePacker;
-	readonly #domainRegistries = new Map<StaticDomain, DomainTextureRegistry>();
-	readonly #textureKeysByDrawUnitId = new Map<string, Set<DomainTextureKey>>();
+	readonly #batchRegistries = new Map<
+		StaticBatchRegistryKey,
+		StaticBatchTextureRegistry
+	>();
+	readonly #textureKeysByDrawUnitId = new Map<string, Set<StaticBatchTextureKey>>();
 	#revision = 0;
 
 	constructor(options: TextureManagerOptions) {
@@ -50,9 +53,12 @@ export class TextureManager {
 		this.#texturePacker.dispose?.();
 	}
 
-	createDomainAtlasSnapshot(payload: StaticScopePayload): DomainAtlasSnapshot {
+	createStaticAtlasBatchSnapshot(
+		payload: StaticScopePayload,
+		staticBatchId: string,
+	): StaticAtlasBatchSnapshot {
 		const textureUses = collectPayloadTextureUses(payload);
-		const registry = this.#getRegistry(payload.job.domain);
+		const registry = this.#getRegistry(payload.job.domain, staticBatchId);
 
 		return {
 			domain: payload.job.domain,
@@ -62,18 +68,21 @@ export class TextureManager {
 				}
 
 				const entry = registry.entries.get(
-					createDomainTextureKey(payload.job.domain, textureUse),
+					createStaticBatchTextureKey(
+						payload.job.domain,
+						staticBatchId,
+						textureUse,
+					),
 				);
 				return entry
 					? [
 							{
-								placementRevision: entry.placementRevision,
 								texture: entry.source,
 							},
 						]
 					: [];
 			}),
-			revision: registry.revision,
+			staticBatchId,
 			textureUses,
 		};
 	}
@@ -86,17 +95,14 @@ export class TextureManager {
 		);
 		const placements: RuntimeTexturePlacement[] = [];
 		const drawUnitBindings = [];
-		const startingDomainRevisions = new Map<StaticDomain, number>();
-		const dirtyDomains = new Set<StaticDomain>();
 		const pendingPlacements = new Map<
-			DomainTextureKey,
+			StaticBatchTextureKey,
 			PendingTexturePlacement
 		>();
 
 		for (const textureUse of delta.textureUses) {
 			const placement = await this.#stageTexturePlacement(
 				textureUse,
-				startingDomainRevisions,
 				pendingPlacements,
 			);
 			const entry = placement.entry ?? null;
@@ -104,7 +110,7 @@ export class TextureManager {
 			for (const drawUnitId of textureUse.ownerDrawUnitIds) {
 				let textureKeys = this.#textureKeysByDrawUnitId.get(drawUnitId);
 				if (!textureKeys) {
-					textureKeys = new Set<DomainTextureKey>();
+					textureKeys = new Set<StaticBatchTextureKey>();
 					this.#textureKeysByDrawUnitId.set(drawUnitId, textureKeys);
 				}
 				if (!textureKeys.has(placement.textureKey)) {
@@ -120,8 +126,6 @@ export class TextureManager {
 
 		const packedPlacements = await this.#packPendingTexturePlacements(
 			[...pendingPlacements.values()],
-			startingDomainRevisions,
-			dirtyDomains,
 		);
 		placements.push(...packedPlacements);
 
@@ -136,12 +140,16 @@ export class TextureManager {
 		}
 
 		for (const textureUse of delta.textureUses) {
-			const textureKey = createDomainTextureKey(
+			const textureKey = createStaticBatchTextureKey(
 				textureUse.domain,
+				textureUse.staticBatchId,
 				textureUse.source,
 			);
 			const entry =
-				this.#getRegistry(textureUse.domain).entries.get(textureKey) ??
+				this.#getRegistry(
+					textureUse.domain,
+					textureUse.staticBatchId,
+				).entries.get(textureKey) ??
 				pendingPlacements.get(textureKey)?.entry;
 			if (!entry) {
 				continue;
@@ -156,13 +164,6 @@ export class TextureManager {
 					textureUseId: textureUse.textureUseId,
 				});
 			}
-		}
-
-		for (const domain of dirtyDomains) {
-			const registry = this.#getRegistry(domain);
-			const startingRevision =
-				startingDomainRevisions.get(domain) ?? registry.revision;
-			registry.revision = startingRevision + 1;
 		}
 
 		if (
@@ -206,7 +207,7 @@ export class TextureManager {
 					continue;
 				}
 
-				const registry = this.#getRegistry(entry.domain);
+				const registry = this.#getRegistry(entry.domain, entry.staticBatchId);
 				registry.entries.delete(textureKey);
 				registry.revision += 1;
 				if (!this.#hasTextureRef(entry.textureRefId)) {
@@ -220,17 +221,15 @@ export class TextureManager {
 
 	async #stageTexturePlacement(
 		textureUse: StaticBakeTextureUse,
-		startingDomainRevisions: Map<StaticDomain, number>,
-		pendingPlacements: Map<DomainTextureKey, PendingTexturePlacement>,
+		pendingPlacements: Map<StaticBatchTextureKey, PendingTexturePlacement>,
 	): Promise<StagedTexturePlacement> {
-		const registry = this.#getRegistry(textureUse.domain);
-		const startingRevision = getStartingDomainRevision(
-			startingDomainRevisions,
+		const registry = this.#getRegistry(
 			textureUse.domain,
-			registry.revision,
+			textureUse.staticBatchId,
 		);
-		const textureKey = createDomainTextureKey(
+		const textureKey = createStaticBatchTextureKey(
 			textureUse.domain,
+			textureUse.staticBatchId,
 			textureUse.source,
 		);
 		const existing = registry.entries.get(textureKey);
@@ -242,11 +241,6 @@ export class TextureManager {
 			};
 		}
 
-		if (textureUse.placementRevisionAssumption !== startingRevision) {
-			throw new Error(
-				`Texture use ${textureUse.textureUseId} assumed ${textureUse.domain} atlas revision ${textureUse.placementRevisionAssumption}, but the active revision is ${startingRevision}.`,
-			);
-		}
 		const pending = pendingPlacements.get(textureKey);
 		if (pending) {
 			return pending;
@@ -268,6 +262,7 @@ export class TextureManager {
 			pendingLeaseCount: 0,
 			samplerPolicy,
 			source,
+			staticBatchId: textureUse.staticBatchId,
 			textureKey,
 			textureUse,
 		};
@@ -278,15 +273,11 @@ export class TextureManager {
 
 	async #packPendingTexturePlacements(
 		pendingPlacements: readonly PendingTexturePlacement[],
-		startingDomainRevisions: Map<StaticDomain, number>,
-		dirtyDomains: Set<StaticDomain>,
 	): Promise<readonly RuntimeTexturePlacement[]> {
 		const runtimePlacements: RuntimeTexturePlacement[] = [];
 		for (const group of groupPendingTexturePlacements(pendingPlacements)) {
-			const startingRevision =
-				startingDomainRevisions.get(group.domain) ??
-				this.#getRegistry(group.domain).revision;
-			const placementRevision = startingRevision + 1;
+			const registry = this.#getRegistry(group.domain, group.staticBatchId);
+			const placementRevision = registry.revision + 1;
 			const packed = await this.#texturePacker.pack({
 				cohorts: [
 					{
@@ -297,7 +288,7 @@ export class TextureManager {
 					},
 				],
 				domain: group.domain,
-				jobId: `texture-pack:${group.pageClassKey}:${placementRevision}`,
+				jobId: `texture-pack:${group.staticBatchId}:${group.pageClassKey}:${placementRevision}`,
 				page: createTexturePackingPageConstraints(group.entries),
 				placementRevision,
 				sources: group.entries.map((entry) => ({
@@ -350,8 +341,17 @@ export class TextureManager {
 				}
 				const textureRefId =
 					pageEntries.length === 1
-						? createTextureRefId(group.domain, firstEntry.textureUse.source)
-						: createTexturePageRefId(group.domain, group.pageClassKey, pageId);
+						? createTextureRefId(
+								group.domain,
+								group.staticBatchId,
+								firstEntry.textureUse.source,
+							)
+						: createTexturePageRefId(
+								group.domain,
+								group.staticBatchId,
+								group.pageClassKey,
+								pageId,
+							);
 				runtimePlacements.push({
 					anisotropy: group.samplerPolicy.anisotropy,
 					filteringMode: group.samplerPolicy.filteringMode,
@@ -383,24 +383,25 @@ export class TextureManager {
 						placementRevision,
 						rect: rect.rect,
 						source: entry.textureUse.source,
+						staticBatchId: entry.staticBatchId,
 						textureHeight: page.height,
 						textureRefId,
 						textureWidth: page.width,
 					};
-					this.#getRegistry(entry.domain).entries.set(
+					this.#getRegistry(entry.domain, entry.staticBatchId).entries.set(
 						entry.textureKey,
 						entry.entry,
 					);
-					dirtyDomains.add(entry.domain);
 				}
 			}
+			registry.revision = placementRevision;
 		}
 
 		return runtimePlacements;
 	}
 
 	#hasTextureRef(textureRefId: string): boolean {
-		for (const registry of this.#domainRegistries.values()) {
+		for (const registry of this.#batchRegistries.values()) {
 			for (const entry of registry.entries.values()) {
 				if (entry.textureRefId === textureRefId) {
 					return true;
@@ -411,21 +412,32 @@ export class TextureManager {
 		return false;
 	}
 
-	#getRegistry(domain: StaticDomain): DomainTextureRegistry {
-		let registry = this.#domainRegistries.get(domain);
+	#getRegistry(
+		domain: StaticDomain,
+		staticBatchId: string,
+	): StaticBatchTextureRegistry {
+		const registryKey = createStaticBatchRegistryKey(domain, staticBatchId);
+		let registry = this.#batchRegistries.get(registryKey);
 		if (!registry) {
 			registry = {
-				entries: new Map<DomainTextureKey, DomainTextureRegistryEntry>(),
+				domain,
+				entries: new Map<
+					StaticBatchTextureKey,
+					StaticBatchTextureRegistryEntry
+				>(),
 				revision: 0,
+				staticBatchId,
 			};
-			this.#domainRegistries.set(domain, registry);
+			this.#batchRegistries.set(registryKey, registry);
 		}
 
 		return registry;
 	}
 
-	#findEntry(textureKey: DomainTextureKey): DomainTextureRegistryEntry | null {
-		for (const registry of this.#domainRegistries.values()) {
+	#findEntry(
+		textureKey: StaticBatchTextureKey,
+	): StaticBatchTextureRegistryEntry | null {
+		for (const registry of this.#batchRegistries.values()) {
 			const entry = registry.entries.get(textureKey);
 			if (entry) {
 				return entry;
@@ -438,15 +450,23 @@ export class TextureManager {
 
 type RuntimeTexturePlacement = TexturePlacementUpdate["placements"][number];
 
-type DomainTextureKey = string & { readonly __brand: "DomainTextureKey" };
+type StaticBatchRegistryKey = string & {
+	readonly __brand: "StaticBatchRegistryKey";
+};
+type StaticBatchTextureKey = string & {
+	readonly __brand: "StaticBatchTextureKey";
+};
 
-interface DomainTextureRegistry {
+interface StaticBatchTextureRegistry {
+	readonly domain: StaticDomain;
+	readonly staticBatchId: string;
 	revision: number;
-	readonly entries: Map<DomainTextureKey, DomainTextureRegistryEntry>;
+	readonly entries: Map<StaticBatchTextureKey, StaticBatchTextureRegistryEntry>;
 }
 
-interface DomainTextureRegistryEntry {
+interface StaticBatchTextureRegistryEntry {
 	readonly domain: StaticDomain;
+	readonly staticBatchId: string;
 	readonly source: PreparedTextureUseIdentity;
 	readonly textureRefId: string;
 	readonly placementRevision: number;
@@ -461,24 +481,26 @@ type StagedTexturePlacement =
 	| ExistingTexturePlacement;
 
 interface ExistingTexturePlacement {
-	readonly textureKey: DomainTextureKey;
-	readonly entry: DomainTextureRegistryEntry;
+	readonly textureKey: StaticBatchTextureKey;
+	readonly entry: StaticBatchTextureRegistryEntry;
 	pendingLeaseCount: 0;
 }
 
 interface PendingTexturePlacement {
 	readonly domain: StaticDomain;
+	readonly staticBatchId: string;
 	readonly textureUse: StaticBakeTextureUse;
-	readonly textureKey: DomainTextureKey;
+	readonly textureKey: StaticBatchTextureKey;
 	readonly source: ReturnType<typeof prepareDirectRgbaTextureSource>;
 	readonly pagePolicy: RuntimeTexturePagePolicy;
 	readonly samplerPolicy: RuntimeTextureSamplerPolicy;
-	entry: DomainTextureRegistryEntry | null;
+	entry: StaticBatchTextureRegistryEntry | null;
 	pendingLeaseCount: number;
 }
 
 interface PendingTexturePlacementGroup {
 	readonly domain: StaticDomain;
+	readonly staticBatchId: string;
 	readonly pageClassKey: string;
 	readonly pagePolicy: RuntimeTexturePagePolicy;
 	readonly samplerPolicy: RuntimeTextureSamplerPolicy;
@@ -500,26 +522,37 @@ function collectPayloadTextureUses(
 	return [];
 }
 
-function createDomainTextureKey(
+function createStaticBatchRegistryKey(
 	domain: StaticDomain,
+	staticBatchId: string,
+): StaticBatchRegistryKey {
+	return [domain, staticBatchId].join(":") as StaticBatchRegistryKey;
+}
+
+function createStaticBatchTextureKey(
+	domain: StaticDomain,
+	staticBatchId: string,
 	source: PreparedTextureUseIdentity,
-): DomainTextureKey {
+): StaticBatchTextureKey {
 	return [
 		domain,
+		staticBatchId,
 		source.kind,
 		source.renderSurfaceId.toString(16).padStart(8, "0"),
 		source.usage,
 		source.outputFormat,
-	].join(":") as DomainTextureKey;
+	].join(":") as StaticBatchTextureKey;
 }
 
 function createTextureRefId(
 	domain: StaticDomain,
+	staticBatchId: string,
 	source: PreparedTextureUseIdentity,
 ): string {
 	return [
 		"texture-ref",
 		domain,
+		staticBatchId,
 		source.renderSurfaceId.toString(16).padStart(8, "0"),
 		source.usage,
 		source.outputFormat,
@@ -528,10 +561,13 @@ function createTextureRefId(
 
 function createTexturePageRefId(
 	domain: StaticDomain,
+	staticBatchId: string,
 	pageClassKey: string,
 	pageId: string,
 ): string {
-	return ["texture-page-ref", domain, pageClassKey, pageId].join(":");
+	return ["texture-page-ref", domain, staticBatchId, pageClassKey, pageId].join(
+		":",
+	);
 }
 
 function groupPendingTexturePlacements(
@@ -543,7 +579,7 @@ function groupPendingTexturePlacements(
 			placement.pagePolicy,
 			placement.samplerPolicy,
 		);
-		const groupKey = `${placement.domain}|${pageClassKey}`;
+		const groupKey = `${placement.domain}|${placement.staticBatchId}|${pageClassKey}`;
 		const existing = groups.get(groupKey);
 		if (existing) {
 			groups.set(groupKey, {
@@ -559,6 +595,7 @@ function groupPendingTexturePlacements(
 			pageClassKey,
 			pagePolicy: placement.pagePolicy,
 			samplerPolicy: placement.samplerPolicy,
+			staticBatchId: placement.staticBatchId,
 		});
 	}
 
@@ -630,18 +667,4 @@ function nextPowerOfTwo(value: number): number {
 	}
 
 	return power;
-}
-
-function getStartingDomainRevision(
-	startingDomainRevisions: Map<StaticDomain, number>,
-	domain: StaticDomain,
-	currentRevision: number,
-): number {
-	const existing = startingDomainRevisions.get(domain);
-	if (existing !== undefined) {
-		return existing;
-	}
-
-	startingDomainRevisions.set(domain, currentRevision);
-	return currentRevision;
 }

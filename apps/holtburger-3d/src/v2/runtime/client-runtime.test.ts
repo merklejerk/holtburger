@@ -405,8 +405,8 @@ function createBakeTextureUse(
 	return {
 		domain: "outdoor-terrain",
 		ownerDrawUnitIds: [drawUnitId],
-		placementRevisionAssumption: 0,
 		source,
+		staticBatchId: "batch-a",
 		textureUseId: `${drawUnitId}:prepared-texture:${source.renderSurfaceId
 			.toString(16)
 			.padStart(8, "0")}`,

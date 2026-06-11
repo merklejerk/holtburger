@@ -142,6 +142,66 @@ describe("V2 terrain geometry baker", () => {
 		]);
 		expect(JSON.stringify(result)).not.toContain("texture-ref");
 	});
+
+	it("partitions terrain geometry by bounded material draw slices", () => {
+		const pcodes = Array.from({ length: 9 }, (_value, index) =>
+			encodeTerrainPcode(index + 1),
+		);
+		const input = createTerrainBakeInput({
+			pcodes,
+			terrainTypeCodes: pcodes.map((pcode) => decodeRepeatedTerrainCode(pcode)),
+		});
+
+		const result = bakeTerrainGeometry(input);
+		const drawUnits = result.drawUnits.map(requireTerrainDrawUnit);
+
+		expect(drawUnits).toHaveLength(2);
+		expect(drawUnits.map((drawUnit) => drawUnit.drawUnitId)).toEqual([
+			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-0",
+			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-1",
+		]);
+		expect(drawUnits.map((drawUnit) => drawUnit.triangleCount)).toEqual([
+			16, 2,
+		]);
+		expect(drawUnits[0]?.terrainMaterialPlan?.layerEntries).toHaveLength(8);
+		expect(drawUnits[1]?.terrainMaterialPlan?.layerEntries).toHaveLength(1);
+		expect(
+			drawUnits.flatMap((drawUnit) => drawUnit.terrainFallbackReasons),
+		).not.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					code: "layer-overflow",
+				}),
+			]),
+		);
+		expect(result.staticSourceMappings).toHaveLength(18);
+	});
+
+	it("assigns terrain texture-use owners to the material slice that binds them", () => {
+		const pcodes = Array.from({ length: 9 }, (_value, index) =>
+			encodeTerrainPcode(index + 1),
+		);
+		const input = createTerrainBakeInput({
+			pcodes,
+			terrainTypeCodes: pcodes.map((pcode) => decodeRepeatedTerrainCode(pcode)),
+			textureUseSurfaceTextureIds: pcodes.map(
+				(pcode) => 0x05000000 + decodeRepeatedTerrainCode(pcode),
+			),
+		});
+
+		const result = bakeTerrainGeometry(input);
+
+		expect(result.drawUnits.map((drawUnit) => drawUnit.drawUnitId)).toEqual([
+			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-0",
+			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-1",
+		]);
+		expect(result.textureUses).toHaveLength(1);
+		expect(result.textureUses[0]).toMatchObject({
+			ownerDrawUnitIds: [
+				"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-1",
+			],
+		});
+	});
 });
 
 function requireTerrainDrawUnit(
@@ -162,7 +222,10 @@ function requireTerrainDrawUnit(
 function createTerrainBakeInput(
 	options: {
 		readonly includeTextureUse?: boolean;
+		readonly pcodes?: readonly number[];
+		readonly terrainTypeCodes?: readonly number[];
 		readonly triangleCount?: number;
+		readonly textureUseSurfaceTextureIds?: readonly number[];
 	} = {},
 ): StaticBakeInput {
 	const work = {
@@ -184,7 +247,10 @@ function createTerrainBakeInput(
 			landblockId: 0xda55ffff,
 			source: "outdoor",
 		},
-		mesh: createTerrainMesh(options.triangleCount ?? 2),
+		mesh: createTerrainMesh({
+			pcodes: options.pcodes,
+			triangleCount: options.triangleCount,
+		}),
 		missingRefs: [],
 		regionRenderProfile: {
 			detailRoles: [],
@@ -215,41 +281,9 @@ function createTerrainBakeInput(
 			roadAlphaMapCount: 0,
 			terrainAlphaMaps: [],
 			terrainTypeCount: 0,
-			terrainTypes: options.includeTextureUse
-				? [
-						{
-							terrainCode: 1,
-							texture: {
-								kind: "surface-texture",
-								surfaceTextureId: 0x05000010,
-							},
-							tiling: 1,
-						},
-					]
-				: [],
+			terrainTypes: createTerrainTypes(options),
 		},
-		textureUses: options.includeTextureUse
-			? [
-					{
-						palette: null,
-						preparedTextureUse: {
-							kind: "prepared-texture-use",
-							outputFormat: "rgba8",
-							renderSurfaceId: 0x06000010,
-							usage: "color",
-						},
-						renderSurface: {
-							kind: "render-surface",
-							renderSurfaceId: 0x06000010,
-						},
-						role: "terrain-base",
-						texture: {
-							kind: "surface-texture",
-							surfaceTextureId: 0x05000010,
-						},
-					},
-				]
-			: [],
+		textureUses: createTerrainTextureUses(options),
 	};
 
 	return {
@@ -268,8 +302,88 @@ function createTerrainBakeInput(
 	};
 }
 
-function createTerrainMesh(
+function createTerrainMesh({
+	pcodes = [encodeTerrainPcode(1)],
+	triangleCount,
+}: {
+	readonly pcodes?: readonly number[];
+	readonly triangleCount?: number;
+}): TerrainStaticScopePayload["mesh"] {
+	if (triangleCount !== undefined) {
+		return createRepeatedTerrainMesh(
+			triangleCount,
+			pcodes[0] ?? encodeTerrainPcode(1),
+		);
+	}
+
+	const vertices = [
+		{ x: 0, y: 0, z: 0 },
+		{ x: 24, y: 0, z: 1 },
+		{ x: 0, y: 24, z: 2 },
+		{ x: 24, y: 24, z: 3 },
+	];
+	const quads = pcodes.map((pcode, quadIndex) => ({
+		averageHeight: 1,
+		bounds: {
+			max: { x: 24, y: 24, z: 3 },
+			min: { x: 0, y: 0, z: 0 },
+		},
+		col: quadIndex,
+		cornerTerrainCodes: [
+			decodeRepeatedTerrainCode(pcode),
+			decodeRepeatedTerrainCode(pcode),
+			decodeRepeatedTerrainCode(pcode),
+			decodeRepeatedTerrainCode(pcode),
+		] as const,
+		diagonal: "southwest-northeast" as const,
+		pcode,
+		quadIndex,
+		row: 0,
+		sourceTerrainIndices: [0, 1, 2, 3] as const,
+		terrainQuadId: `q${quadIndex}`,
+		triangleIndices: [quadIndex * 2, quadIndex * 2 + 1] as const,
+		vertexIndices: [0, 1, 2, 3] as const,
+	}));
+	const triangles = quads.flatMap((quad) => [
+		{
+			averageHeight: 1,
+			bounds: quad.bounds,
+			quadIndex: quad.quadIndex,
+			terrainTriangleId: `t${quad.quadIndex * 2}`,
+			triangleInQuad: 0 as const,
+			vertexIndices: [0, 1, 2] as const,
+		},
+		{
+			averageHeight: 1,
+			bounds: quad.bounds,
+			quadIndex: quad.quadIndex,
+			terrainTriangleId: `t${quad.quadIndex * 2 + 1}`,
+			triangleInQuad: 1 as const,
+			vertexIndices: [1, 3, 2] as const,
+		},
+	]);
+
+	return {
+		bounds: {
+			max: { x: 24, y: 24, z: 3 },
+			min: { x: 0, y: 0, z: 0 },
+		},
+		gridSize: 2,
+		maxHeight: 3,
+		minHeight: 0,
+		quadCount: quads.length,
+		quads,
+		tileSize: 24,
+		triangleCount: triangles.length,
+		triangles,
+		vertexCount: vertices.length,
+		vertices,
+	};
+}
+
+function createRepeatedTerrainMesh(
 	triangleCount: number,
+	pcode: number,
 ): TerrainStaticScopePayload["mesh"] {
 	const triangles = Array.from({ length: triangleCount }, (_value, index) => ({
 		averageHeight: 1,
@@ -301,9 +415,14 @@ function createTerrainMesh(
 					min: { x: 0, y: 0, z: 0 },
 				},
 				col: 0,
-				cornerTerrainCodes: [1, 1, 1, 1],
+				cornerTerrainCodes: [
+					decodeRepeatedTerrainCode(pcode),
+					decodeRepeatedTerrainCode(pcode),
+					decodeRepeatedTerrainCode(pcode),
+					decodeRepeatedTerrainCode(pcode),
+				],
 				diagonal: "southwest-northeast",
-				pcode: 33825,
+				pcode,
 				quadIndex: 0,
 				row: 0,
 				sourceTerrainIndices: [0, 1, 2, 3],
@@ -323,4 +442,94 @@ function createTerrainMesh(
 			{ x: 24, y: 24, z: 3 },
 		],
 	};
+}
+
+function createTerrainTypes(options: {
+	readonly includeTextureUse?: boolean;
+	readonly terrainTypeCodes?: readonly number[];
+}): TerrainStaticScopePayload["terrainMaterial"]["terrainTypes"] {
+	if (options.terrainTypeCodes) {
+		return options.terrainTypeCodes.map((terrainCode) => ({
+			terrainCode,
+			texture: {
+				kind: "surface-texture",
+				surfaceTextureId: 0x05000000 + terrainCode,
+			},
+			tiling: 1,
+		}));
+	}
+	if (!options.includeTextureUse) {
+		return [];
+	}
+
+	return [
+		{
+			terrainCode: 1,
+			texture: {
+				kind: "surface-texture",
+				surfaceTextureId: 0x05000010,
+			},
+			tiling: 1,
+		},
+	];
+}
+
+function createTerrainTextureUses(options: {
+	readonly includeTextureUse?: boolean;
+	readonly textureUseSurfaceTextureIds?: readonly number[];
+}): TerrainStaticScopePayload["textureUses"] {
+	if (options.textureUseSurfaceTextureIds) {
+		return options.textureUseSurfaceTextureIds.map((surfaceTextureId) => ({
+			palette: null,
+			preparedTextureUse: {
+				kind: "prepared-texture-use",
+				outputFormat: "rgba8",
+				renderSurfaceId: 0x01000000 + surfaceTextureId,
+				usage: "color",
+			},
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x01000000 + surfaceTextureId,
+			},
+			role: "terrain-base",
+			texture: {
+				kind: "surface-texture",
+				surfaceTextureId,
+			},
+		}));
+	}
+	if (!options.includeTextureUse) {
+		return [];
+	}
+
+	return [
+		{
+			palette: null,
+			preparedTextureUse: {
+				kind: "prepared-texture-use",
+				outputFormat: "rgba8",
+				renderSurfaceId: 0x06000010,
+				usage: "color",
+			},
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000010,
+			},
+			role: "terrain-base",
+			texture: {
+				kind: "surface-texture",
+				surfaceTextureId: 0x05000010,
+			},
+		},
+	];
+}
+
+function encodeTerrainPcode(terrainCode: number): number {
+	return (
+		(terrainCode << 15) | (terrainCode << 10) | (terrainCode << 5) | terrainCode
+	);
+}
+
+function decodeRepeatedTerrainCode(pcode: number): number {
+	return pcode & 0x1f;
 }

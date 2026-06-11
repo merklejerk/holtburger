@@ -13,15 +13,22 @@ import type {
 	StaticCoordinatorCommitDelta,
 	StaticDomain,
 } from "../static/contracts";
-import { ShelfTexturePacker, type TexturePacker } from "./packing/packer";
+import { AtlasTexturePacker, type TexturePacker } from "./packing/packer";
+import {
+	createRuntimeTexturePagePolicy,
+	createRuntimeTextureSamplerPolicy,
+	type TextureFilteringMode,
+} from "./sampling-policy";
 
 interface TextureManagerOptions {
 	readonly assetService: AssetService;
+	readonly filteringMode?: TextureFilteringMode;
 	readonly texturePacker?: TexturePacker;
 }
 
 export class TextureManager {
 	readonly #assetService: AssetService;
+	readonly #filteringMode: TextureFilteringMode;
 	readonly #texturePacker: TexturePacker;
 	readonly #domainRegistries = new Map<StaticDomain, DomainTextureRegistry>();
 	readonly #textureKeysByDrawUnitId = new Map<string, Set<DomainTextureKey>>();
@@ -29,7 +36,12 @@ export class TextureManager {
 
 	constructor(options: TextureManagerOptions) {
 		this.#assetService = options.assetService;
-		this.#texturePacker = options.texturePacker ?? new ShelfTexturePacker();
+		this.#filteringMode = options.filteringMode ?? "anisotropic-4x";
+		this.#texturePacker = options.texturePacker ?? new AtlasTexturePacker();
+	}
+
+	dispose(): void {
+		this.#texturePacker.dispose?.();
 	}
 
 	createDomainAtlasSnapshot(payload: StaticScopePayload): DomainAtlasSnapshot {
@@ -222,15 +234,27 @@ export class TextureManager {
 			);
 		}
 
+		const pagePolicy = createRuntimeTexturePagePolicy(textureUse.source);
+		const samplerPolicy = createRuntimeTextureSamplerPolicy({
+			filteringMode: this.#filteringMode,
+			sampleClass: pagePolicy.sampleClass,
+		});
 		const placement: RuntimeTexturePlacement = {
+			anisotropy: samplerPolicy.anisotropy,
+			filteringMode: samplerPolicy.filteringMode,
 			format: page.format,
 			height: page.height,
 			kind: "direct-texture",
+			mipmapsGenerated: samplerPolicy.generateMipmaps,
 			pixels: page.pixels,
 			placementRevision,
 			rect: rect.rect,
+			sampleClass: pagePolicy.sampleClass,
+			samplerPolicyKey: samplerPolicy.policyKey,
 			textureRefId,
 			textureUseId: textureUse.textureUseId,
+			wrapS: pagePolicy.wrapS,
+			wrapT: pagePolicy.wrapT,
 			width: page.width,
 		};
 		const entry: DomainTextureRegistryEntry = {

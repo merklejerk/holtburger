@@ -21,6 +21,7 @@ import {
 import { StaticBakeWorkerClient } from "../static/bake/worker-client";
 import { createStaticResolverMainHostBridge } from "../static/resolver/host-bridge";
 import { StaticResolverWorkerClient } from "../static/resolver/worker-client";
+import { WorkerTexturePacker } from "../textures/packing/worker-client";
 
 export function createBrowserV2Runtime(
 	canvas: HTMLCanvasElement,
@@ -31,8 +32,27 @@ export function createBrowserV2Runtime(
 	const staticCoordinator = hostSnapshot.isAvailable
 		? createTauriStaticCoordinator(host)
 		: undefined;
+	const texturePackingWorker = hostSnapshot.isAvailable
+		? new Worker(
+				new URL(
+					"../textures/packing/texture-packing.worker.ts",
+					import.meta.url,
+				),
+				{ type: "module" },
+			)
+		: null;
+	const texturePacker = texturePackingWorker
+		? new WorkerTexturePacker(texturePackingWorker, {
+				disposePort: () => texturePackingWorker.terminate(),
+			})
+		: undefined;
 
-	return createClientRuntime({ host, renderer, staticCoordinator });
+	return createClientRuntime({
+		host,
+		renderer,
+		staticCoordinator,
+		texturePacker,
+	});
 }
 
 function createTauriStaticCoordinator(host: RuntimeHost): StaticCoordinator {
@@ -91,7 +111,9 @@ class BrowserStaticResolver implements StaticResolverClient {
 
 	resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
 		if (this.#disposed) {
-			return Promise.reject(new Error("BrowserStaticResolver has been disposed."));
+			return Promise.reject(
+				new Error("BrowserStaticResolver has been disposed."),
+			);
 		}
 
 		if (job.domain === "outdoor-terrain" && job.scope.kind === "landblock") {

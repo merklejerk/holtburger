@@ -4,6 +4,7 @@ import type {
 	TexturePackingWorkerPort,
 	TexturePackingWorkerThreadMessage,
 } from "./protocol";
+import type { TexturePacker } from "./packer";
 
 interface PendingPackingRequest {
 	readonly resolve: (result: TexturePackingResult) => void;
@@ -86,5 +87,27 @@ export class TexturePackingWorkerClient {
 		}
 
 		pending.resolve(response.result);
+	}
+}
+
+export class WorkerTexturePacker implements TexturePacker {
+	readonly #client: TexturePackingWorkerClient;
+	readonly #disposePort: (() => void) | null;
+
+	constructor(
+		port: TexturePackingWorkerPort,
+		options: { readonly disposePort?: () => void } = {},
+	) {
+		this.#client = new TexturePackingWorkerClient(port);
+		this.#disposePort = options.disposePort ?? null;
+	}
+
+	async pack(job: TexturePackingJob): Promise<TexturePackingResult> {
+		return this.#client.pack(job).result;
+	}
+
+	dispose(): void {
+		this.#client.dispose();
+		this.#disposePort?.();
 	}
 }

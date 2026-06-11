@@ -7,7 +7,10 @@ import type {
 	TexturePackingWorkerResponse,
 	TexturePackingWorkerPort,
 } from "./protocol";
-import { TexturePackingWorkerClient } from "./worker-client";
+import {
+	TexturePackingWorkerClient,
+	WorkerTexturePacker,
+} from "./worker-client";
 import { handleTexturePackingWorkerRequest } from "./worker-handler";
 
 describe("V2 texture packing worker protocol", () => {
@@ -111,9 +114,9 @@ describe("V2 texture packing worker protocol", () => {
 				pages: [
 					{
 						format: "rgba8",
-						height: 2,
+						height: 1,
 						pageId: "pack-job:1:page:0",
-						width: 2,
+						width: 1,
 					},
 				],
 				rects: [
@@ -130,7 +133,33 @@ describe("V2 texture packing worker protocol", () => {
 				(responses[0] as { result: TexturePackingResult }).result.pages[0]
 					?.pixels ?? [],
 			),
-		).toEqual([255, 128, 0, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+		).toEqual([255, 128, 0, 255]);
+	});
+
+	it("adapts the request client to the texture packer interface", async () => {
+		const port = new FixtureWorkerPort();
+		const packer = new WorkerTexturePacker(port);
+		const job = createPackingJob();
+		const resultPromise = packer.pack(job);
+
+		expect(port.requests).toEqual([
+			{
+				job,
+				kind: "pack-textures",
+				requestId: "texture-pack:0",
+			},
+		]);
+
+		port.emit({
+			kind: "textures-packed",
+			requestId: "texture-pack:0",
+			result: createPackingResult(job),
+		});
+
+		await expect(resultPromise).resolves.toMatchObject({
+			jobId: "pack-job:1",
+		});
+		packer.dispose();
 	});
 
 	it("turns packer failures into typed worker responses", async () => {

@@ -1,4 +1,9 @@
 import type { StaticDrawUnit } from "../static/contracts";
+import type {
+	TextureFilteringMode,
+	TexturePageSampleClass,
+	TextureWrapMode,
+} from "../textures/sampling-policy";
 
 export interface FrameState {
 	readonly camera: {
@@ -38,6 +43,13 @@ export interface TexturePlacement {
 	readonly textureUseId: string;
 	readonly placementRevision: number;
 	readonly kind: "direct-texture";
+	readonly filteringMode: TextureFilteringMode;
+	readonly sampleClass: TexturePageSampleClass;
+	readonly samplerPolicyKey: string;
+	readonly mipmapsGenerated: boolean;
+	readonly anisotropy: number;
+	readonly wrapS: TextureWrapMode;
+	readonly wrapT: TextureWrapMode;
 	readonly width: number;
 	readonly height: number;
 	readonly format: "rgba8";

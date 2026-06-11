@@ -7,6 +7,10 @@ import type {
 	TexturePlacementUpdate,
 } from "../types";
 import type { TerrainGeometryStaticDrawUnit } from "../../static/contracts";
+import {
+	type TextureFilteringMode,
+	type TextureWrapMode,
+} from "../../textures/sampling-policy";
 
 const defaultFrameState: FrameState = {
 	camera: {
@@ -100,9 +104,7 @@ class Webgl2Renderer implements Renderer {
 				continue;
 			}
 
-			this.#terrainResources
-				.get(drawUnit.drawUnitId)
-				?.dispose();
+			this.#terrainResources.get(drawUnit.drawUnitId)?.dispose();
 			this.#terrainResources.set(
 				drawUnit.drawUnitId,
 				createTerrainGeometryResource(
@@ -141,7 +143,10 @@ class Webgl2Renderer implements Renderer {
 		}
 
 		for (const binding of update.drawUnitBindings) {
-			this.#terrainTextureBindings.set(binding.drawUnitId, binding.textureRefId);
+			this.#terrainTextureBindings.set(
+				binding.drawUnitId,
+				binding.textureRefId,
+			);
 		}
 	}
 
@@ -234,11 +239,17 @@ class Webgl2Renderer implements Renderer {
 		);
 
 		gl.useProgram(this.#terrainProgram.program);
-		gl.uniformMatrix4fv(this.#terrainProgram.uniforms.uModelViewProjection, false, mvp);
+		gl.uniformMatrix4fv(
+			this.#terrainProgram.uniforms.uModelViewProjection,
+			false,
+			mvp,
+		);
 		gl.uniform4f(this.#terrainProgram.uniforms.uColor, 0.22, 0.72, 0.42, 1);
 
 		for (const resource of this.#terrainResources.values()) {
-			const textureRefId = this.#terrainTextureBindings.get(resource.drawUnitId);
+			const textureRefId = this.#terrainTextureBindings.get(
+				resource.drawUnitId,
+			);
 			const texture = textureRefId
 				? (this.#textures.get(textureRefId) ?? null)
 				: null;
@@ -323,8 +334,16 @@ interface TerrainGeometryResource {
 function createTerrainGeometryProgram(
 	gl: WebGL2RenderingContext,
 ): TerrainGeometryProgram {
-	const vertexShader = compileShader(gl, gl.VERTEX_SHADER, TERRAIN_VERTEX_SHADER);
-	const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, TERRAIN_FRAGMENT_SHADER);
+	const vertexShader = compileShader(
+		gl,
+		gl.VERTEX_SHADER,
+		TERRAIN_VERTEX_SHADER,
+	);
+	const fragmentShader = compileShader(
+		gl,
+		gl.FRAGMENT_SHADER,
+		TERRAIN_FRAGMENT_SHADER,
+	);
 	const program = gl.createProgram();
 	if (!program) {
 		throw new Error("Failed to create V2 terrain geometry shader program.");
@@ -385,10 +404,7 @@ function createTerrainGeometryResource(
 	gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
 	gl.bufferData(
 		gl.ARRAY_BUFFER,
-		translateTerrainPositions(
-			drawUnit.positions,
-			translation,
-		),
+		translateTerrainPositions(drawUnit.positions, translation),
 		gl.STATIC_DRAW,
 	);
 	gl.enableVertexAttribArray(0);
@@ -409,7 +425,8 @@ function createTerrainGeometryResource(
 		drawUnitId: drawUnit.drawUnitId,
 		indexBuffer,
 		indexCount: drawUnit.indices.length,
-		indexType: drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
+		indexType:
+			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
 		positionBuffer,
 		texCoordBuffer,
 		triangleCount: drawUnit.triangleCount,
@@ -457,10 +474,26 @@ function createDirectTexture(
 	}
 
 	gl.bindTexture(gl.TEXTURE_2D, texture);
-	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+	gl.texParameteri(
+		gl.TEXTURE_2D,
+		gl.TEXTURE_MIN_FILTER,
+		getMinFilter(gl, placement.filteringMode, placement.mipmapsGenerated),
+	);
+	gl.texParameteri(
+		gl.TEXTURE_2D,
+		gl.TEXTURE_MAG_FILTER,
+		getMagFilter(gl, placement.filteringMode),
+	);
+	gl.texParameteri(
+		gl.TEXTURE_2D,
+		gl.TEXTURE_WRAP_S,
+		getWrapMode(gl, placement.wrapS),
+	);
+	gl.texParameteri(
+		gl.TEXTURE_2D,
+		gl.TEXTURE_WRAP_T,
+		getWrapMode(gl, placement.wrapT),
+	);
 	gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
 	gl.texImage2D(
 		gl.TEXTURE_2D,
@@ -473,9 +506,62 @@ function createDirectTexture(
 		gl.UNSIGNED_BYTE,
 		placement.pixels,
 	);
+	if (placement.mipmapsGenerated) {
+		gl.generateMipmap(gl.TEXTURE_2D);
+	}
+	applyAnisotropy(gl, placement.anisotropy);
 	gl.bindTexture(gl.TEXTURE_2D, null);
 
 	return texture;
+}
+
+function getMinFilter(
+	gl: WebGL2RenderingContext,
+	filteringMode: TextureFilteringMode,
+	generateMipmaps: boolean,
+): GLenum {
+	if (filteringMode === "nearest") {
+		return gl.NEAREST;
+	}
+
+	return generateMipmaps ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR;
+}
+
+function getMagFilter(
+	gl: WebGL2RenderingContext,
+	filteringMode: TextureFilteringMode,
+): GLenum {
+	return filteringMode === "nearest" ? gl.NEAREST : gl.LINEAR;
+}
+
+function getWrapMode(
+	gl: WebGL2RenderingContext,
+	wrapMode: TextureWrapMode,
+): GLenum {
+	return wrapMode === "repeat" ? gl.REPEAT : gl.CLAMP_TO_EDGE;
+}
+
+function applyAnisotropy(gl: WebGL2RenderingContext, anisotropy: number): void {
+	if (anisotropy <= 1) {
+		return;
+	}
+
+	const extension =
+		gl.getExtension("EXT_texture_filter_anisotropic") ??
+		gl.getExtension("WEBKIT_EXT_texture_filter_anisotropic") ??
+		gl.getExtension("MOZ_EXT_texture_filter_anisotropic");
+	if (!extension) {
+		return;
+	}
+
+	const maxAnisotropy = gl.getParameter(
+		extension.MAX_TEXTURE_MAX_ANISOTROPY_EXT,
+	) as number;
+	gl.texParameterf(
+		gl.TEXTURE_2D,
+		extension.TEXTURE_MAX_ANISOTROPY_EXT,
+		Math.min(anisotropy, maxAnisotropy),
+	);
 }
 
 function compileShader(
@@ -530,10 +616,22 @@ function createPerspectiveMatrix(
 	const rangeInv = 1 / (near - far);
 
 	return new Float32Array([
-		f / aspectRatio, 0, 0, 0,
-		0, f, 0, 0,
-		0, 0, (near + far) * rangeInv, -1,
-		0, 0, near * far * rangeInv * 2, 0,
+		f / aspectRatio,
+		0,
+		0,
+		0,
+		0,
+		f,
+		0,
+		0,
+		0,
+		0,
+		(near + far) * rangeInv,
+		-1,
+		0,
+		0,
+		near * far * rangeInv * 2,
+		0,
 	]);
 }
 
@@ -570,10 +668,22 @@ function createLookAtMatrix(
 	const yAxis = crossVec3(zAxis, xAxis);
 
 	return new Float32Array([
-		xAxis[0], yAxis[0], zAxis[0], 0,
-		xAxis[1], yAxis[1], zAxis[1], 0,
-		xAxis[2], yAxis[2], zAxis[2], 0,
-		-dotVec3(xAxis, eye), -dotVec3(yAxis, eye), -dotVec3(zAxis, eye), 1,
+		xAxis[0],
+		yAxis[0],
+		zAxis[0],
+		0,
+		xAxis[1],
+		yAxis[1],
+		zAxis[1],
+		0,
+		xAxis[2],
+		yAxis[2],
+		zAxis[2],
+		0,
+		-dotVec3(xAxis, eye),
+		-dotVec3(yAxis, eye),
+		-dotVec3(zAxis, eye),
+		1,
 	]);
 }
 

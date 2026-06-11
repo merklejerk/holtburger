@@ -1,30 +1,22 @@
-import type {
-	TexturePackingJob,
-	TexturePackingPagePixels,
-	TexturePackingRect,
-	TexturePackingResult,
-} from "./protocol";
+import type { TexturePackingJob, TexturePackingResult } from "./protocol";
+import { planAtlasLayout } from "./atlas-layout";
 
 export interface TexturePacker {
 	pack(job: TexturePackingJob): Promise<TexturePackingResult>;
+	dispose?(): void;
 }
 
-export class ShelfTexturePacker implements TexturePacker {
+export class AtlasTexturePacker implements TexturePacker {
 	async pack(job: TexturePackingJob): Promise<TexturePackingResult> {
-		return packDirectRgbaTextures(job);
+		return packRgbaTexturesWithAtlasLayout(job);
 	}
 }
 
-function packDirectRgbaTextures(job: TexturePackingJob): TexturePackingResult {
-		const pages: TexturePackingPagePixels[] = [];
-		const rects: TexturePackingRect[] = [];
-	let pageIndex = 0;
-	let pagePixels = createBlankPage(job.page.width, job.page.height);
-	let cursorX = 0;
-	let cursorY = 0;
-	let rowHeight = 0;
-	let pageId = createPageId(job.jobId, pageIndex);
+export class ShelfTexturePacker extends AtlasTexturePacker {}
 
+function packRgbaTexturesWithAtlasLayout(
+	job: TexturePackingJob,
+): TexturePackingResult {
 	for (const entry of job.sources) {
 		const { source } = entry;
 		if (source.outputFormat !== job.page.format) {
@@ -32,61 +24,75 @@ function packDirectRgbaTextures(job: TexturePackingJob): TexturePackingResult {
 				`Texture packing job ${job.jobId} expected ${job.page.format} sources, got ${source.outputFormat}.`,
 			);
 		}
-		if (source.width > job.page.width || source.height > job.page.height) {
-			throw new Error(
-				`Texture ${entry.textureUseId} ${source.width}x${source.height} does not fit ${job.page.width}x${job.page.height} atlas pages.`,
-			);
-		}
+	}
 
-		if (cursorX + source.width > job.page.width) {
-			cursorX = 0;
-			cursorY += rowHeight;
-			rowHeight = 0;
-		}
+	const layout = planAtlasLayout({
+		cohorts: (job.cohorts ?? []).map((cohort) => ({
+			entryKeys: cohort.textureUseIds,
+			key: cohort.key,
+		})),
+		entries: job.sources.map((entry) => ({
+			height: entry.source.height,
+			key: entry.textureUseId,
+			width: entry.source.width,
+		})),
+		policy: {
+			gutterPixels: job.page.gutterPixels ?? 0,
+			maxTextureCount: job.page.maxTextureCount ?? Number.MAX_SAFE_INTEGER,
+			maxTextureSize: Math.max(job.page.width, job.page.height),
+			pageSelection: job.page.pageSelection,
+		},
+	});
+	if (layout.overflows.length > 0) {
+		const overflow = layout.overflows[0];
+		throw new Error(
+			`Texture packing job ${job.jobId} could not place ${overflow?.atlasEntryKey ?? "a texture"}: ${overflow?.detail ?? "atlas capacity was exceeded"}.`,
+		);
+	}
 
-		if (cursorY + source.height > job.page.height) {
-			pages.push({
-				format: job.page.format,
-				height: job.page.height,
-				pageId,
-				pixels: pagePixels,
-				width: job.page.width,
+	const sourceByTextureUseId = new Map(
+		job.sources.map((entry) => [entry.textureUseId, entry.source] as const),
+	);
+	const pages = layout.texturePages.map((layoutPage) => {
+		const pagePixels = createBlankPage(layoutPage.width, layoutPage.height);
+		for (const placement of layoutPage.placements) {
+			const source = sourceByTextureUseId.get(placement.atlasEntryKey);
+			if (!source) {
+				throw new Error(
+					`Texture packing job ${job.jobId} layout referenced unknown source ${placement.atlasEntryKey}.`,
+				);
+			}
+			blitRgbaWithGutter({
+				destination: pagePixels,
+				destinationWidth: layoutPage.width,
+				gutterPixels: placement.gutterPixels,
+				source: source.pixels,
+				sourceHeight: source.height,
+				sourceWidth: source.width,
+				x: placement.x,
+				y: placement.y,
 			});
-			pageIndex += 1;
-			pageId = createPageId(job.jobId, pageIndex);
-			pagePixels = createBlankPage(job.page.width, job.page.height);
-			cursorX = 0;
-			cursorY = 0;
-			rowHeight = 0;
 		}
-
-		blitRgba({
-			destination: pagePixels,
-			destinationWidth: job.page.width,
-			source: source.pixels,
-			sourceHeight: source.height,
-			sourceWidth: source.width,
-			x: cursorX,
-			y: cursorY,
-		});
-		rects.push({
-			pageId,
-			rect: [cursorX, cursorY, source.width, source.height] as const,
-			textureUseId: entry.textureUseId,
-		});
-		cursorX += source.width;
-		rowHeight = Math.max(rowHeight, source.height);
-	}
-
-	if (job.sources.length > 0) {
-		pages.push({
+		return {
 			format: job.page.format,
-			height: job.page.height,
-			pageId,
+			height: layoutPage.height,
+			pageId: createPageId(job.jobId, layoutPage.textureIndex),
 			pixels: pagePixels,
-			width: job.page.width,
-		});
-	}
+			width: layoutPage.width,
+		};
+	});
+	const rects = layout.texturePages.flatMap((layoutPage) =>
+		layoutPage.placements.map((placement) => ({
+			pageId: createPageId(job.jobId, layoutPage.textureIndex),
+			rect: [
+				placement.x,
+				placement.y,
+				placement.width,
+				placement.height,
+			] as const,
+			textureUseId: placement.atlasEntryKey,
+		})),
+	);
 
 	return {
 		domain: job.domain,
@@ -105,7 +111,7 @@ function createPageId(jobId: string, pageIndex: number): string {
 	return `${jobId}:page:${pageIndex}`;
 }
 
-function blitRgba(options: {
+function blitRgbaWithGutter(options: {
 	readonly destination: Uint8Array;
 	readonly destinationWidth: number;
 	readonly source: Uint8Array;
@@ -113,17 +119,32 @@ function blitRgba(options: {
 	readonly sourceHeight: number;
 	readonly x: number;
 	readonly y: number;
+	readonly gutterPixels: number;
 }): void {
-	for (let row = 0; row < options.sourceHeight; row += 1) {
-		const sourceOffset = row * options.sourceWidth * 4;
-		const destinationOffset =
-			((options.y + row) * options.destinationWidth + options.x) * 4;
-		options.destination.set(
-			options.source.subarray(
-				sourceOffset,
-				sourceOffset + options.sourceWidth * 4,
-			),
-			destinationOffset,
-		);
+	for (
+		let row = -options.gutterPixels;
+		row < options.sourceHeight + options.gutterPixels;
+		row += 1
+	) {
+		const sourceY = clamp(row, 0, options.sourceHeight - 1);
+		const destinationY = options.y + row;
+		for (
+			let column = -options.gutterPixels;
+			column < options.sourceWidth + options.gutterPixels;
+			column += 1
+		) {
+			const sourceX = clamp(column, 0, options.sourceWidth - 1);
+			const sourceOffset = (sourceY * options.sourceWidth + sourceX) * 4;
+			const destinationOffset =
+				(destinationY * options.destinationWidth + options.x + column) * 4;
+			options.destination.set(
+				options.source.subarray(sourceOffset, sourceOffset + 4),
+				destinationOffset,
+			);
+		}
 	}
+}
+
+function clamp(value: number, min: number, max: number): number {
+	return Math.min(Math.max(value, min), max);
 }

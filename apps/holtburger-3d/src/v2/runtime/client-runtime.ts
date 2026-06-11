@@ -9,6 +9,7 @@ import {
 	normalizeOutdoorLandblockId,
 } from "../../lib/landblocks";
 import { TextureManager } from "../textures/texture-manager";
+import type { TexturePacker } from "../textures/packing/packer";
 import {
 	ImmediateStaticBakerClient,
 	ImmediateStaticResolverClient,
@@ -21,7 +22,11 @@ import type {
 	StaticLodRadii,
 } from "../static/contracts";
 
-export type ManualStaticDomain = "terrain" | "buildings" | "detail" | "topology";
+export type ManualStaticDomain =
+	| "terrain"
+	| "buildings"
+	| "detail"
+	| "topology";
 
 export interface StaticWorkCommand {
 	readonly landblockId: string;
@@ -55,6 +60,7 @@ export interface ClientRuntimeOptions {
 	readonly host: RuntimeHost;
 	readonly assetService?: AssetService;
 	readonly staticCoordinator?: StaticCoordinator;
+	readonly texturePacker?: TexturePacker;
 }
 
 export function createClientRuntime(
@@ -74,6 +80,7 @@ export function createClientRuntime(
 		options.host,
 		assetService,
 		staticCoordinator,
+		options.texturePacker,
 	);
 }
 
@@ -98,11 +105,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 		host: RuntimeHost,
 		assetService: AssetService,
 		staticCoordinator: StaticCoordinator,
+		texturePacker: TexturePacker | undefined,
 	) {
 		this.#renderer = renderer;
 		this.#host = host;
 		this.#assetService = assetService;
-		this.#textureManager = new TextureManager({ assetService });
+		this.#textureManager = new TextureManager({ assetService, texturePacker });
 		this.#staticCoordinator = staticCoordinator;
 		this.#staticCoordinator.setAtlasSnapshotProvider((payload) =>
 			this.#textureManager.createDomainAtlasSnapshot(payload),
@@ -123,33 +131,37 @@ class ClientRuntimeImpl implements ClientRuntime {
 			this.#lastRendererSnapshot = snapshot;
 			this.#emit();
 		});
-		this.#unsubscribeStaticCoordinator = staticCoordinator.subscribe((snapshot) => {
-			this.#lastStaticSnapshot = snapshot;
-			this.#emit();
-		});
-		this.#unsubscribeStaticCommits = staticCoordinator.subscribeCommits((delta) => {
-			this.#renderer.applyStaticDelta({
-				addedDrawUnitPlacements: delta.addedDrawUnits.map((drawUnit) => ({
-					drawUnit,
-					translation: createStaticDrawUnitTranslation(
+		this.#unsubscribeStaticCoordinator = staticCoordinator.subscribe(
+			(snapshot) => {
+				this.#lastStaticSnapshot = snapshot;
+				this.#emit();
+			},
+		);
+		this.#unsubscribeStaticCommits = staticCoordinator.subscribeCommits(
+			(delta) => {
+				this.#renderer.applyStaticDelta({
+					addedDrawUnitPlacements: delta.addedDrawUnits.map((drawUnit) => ({
 						drawUnit,
-						this.#renderAnchorLandblockId,
-					),
-				})),
-				removedDrawUnitIds: delta.removedDrawUnitIds,
-				revision: delta.revision,
-			});
-			void this.#textureManager
-				.applyStaticCommitDelta(delta)
-				.then((textureUpdate) => {
-					if (textureUpdate) {
-						this.#renderer.applyTexturePlacementUpdate(textureUpdate);
-					}
-				})
-				.catch((error: unknown) => {
-					console.error("V2 texture placement update failed.", error);
+						translation: createStaticDrawUnitTranslation(
+							drawUnit,
+							this.#renderAnchorLandblockId,
+						),
+					})),
+					removedDrawUnitIds: delta.removedDrawUnitIds,
+					revision: delta.revision,
 				});
-		});
+				void this.#textureManager
+					.applyStaticCommitDelta(delta)
+					.then((textureUpdate) => {
+						if (textureUpdate) {
+							this.#renderer.applyTexturePlacementUpdate(textureUpdate);
+						}
+					})
+					.catch((error: unknown) => {
+						console.error("V2 texture placement update failed.", error);
+					});
+			},
+		);
 	}
 
 	requestStaticWork(command: StaticWorkCommand): void {
@@ -207,6 +219,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#unsubscribeStaticCoordinator();
 		this.#unsubscribeStaticCommits();
 		this.#staticCoordinator.dispose();
+		this.#textureManager.dispose();
 		this.#renderer.dispose();
 		this.#emit();
 		this.#listeners.clear();
@@ -242,7 +255,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 	}
 }
 
-function normalizeStaticWorkCommand(command: StaticWorkCommand): StaticWorkCommand {
+function normalizeStaticWorkCommand(
+	command: StaticWorkCommand,
+): StaticWorkCommand {
 	const domains = Array.from(new Set(command.domains)).sort();
 
 	return {
@@ -273,7 +288,9 @@ function createManualStaticDemand(command: StaticWorkCommand): StaticDemand {
 	if (command.locationKind === "interior-cell") {
 		return {
 			location: {
-				envCellId: parseLandblockInput(command.envCellId ?? command.landblockId),
+				envCellId: parseLandblockInput(
+					command.envCellId ?? command.landblockId,
+				),
 				kind: "interior-cell",
 				landblockId: parseLandblockInput(command.landblockId),
 			},

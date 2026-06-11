@@ -5,6 +5,9 @@ import type {
 	TextureWrapMode,
 } from "../textures/sampling-policy";
 
+export const MAX_TERRAIN_COLOR_PAGES_PER_DRAW = 4;
+export const MAX_TERRAIN_MASK_PAGES_PER_DRAW = 4;
+
 export interface FrameState {
 	readonly camera: {
 		readonly position: readonly [number, number, number];
@@ -61,9 +64,17 @@ export interface TerrainTextureBinding {
 	readonly drawUnitId: string;
 	readonly textureUseId: string;
 	readonly textureRefId: string;
+	readonly rolePage: TerrainTextureRolePageSlot;
 	readonly textureWidth: number;
 	readonly textureHeight: number;
 	readonly rect: readonly [number, number, number, number];
+}
+
+export type TerrainTextureRolePageKind = "color" | "detail" | "mask";
+
+export interface TerrainTextureRolePageSlot {
+	readonly kind: TerrainTextureRolePageKind;
+	readonly slot: number;
 }
 
 export interface SamplerPolicyUpdate {

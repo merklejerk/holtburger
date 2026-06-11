@@ -120,6 +120,77 @@ describe("V2 atlas layout planner", () => {
 		expect(constrained.texturePages[0]?.width).toBeGreaterThan(1024);
 	});
 
+	it("reproduces shared terrain road cohorts re-merging sibling slices", () => {
+		const entries = [
+			{ height: 1024, key: "terrain-base-a", width: 1024 },
+			{ height: 1024, key: "terrain-base-b", width: 1024 },
+			{ height: 1024, key: "terrain-base-c", width: 1024 },
+			{ height: 1024, key: "terrain-base-d", width: 1024 },
+			{ height: 1024, key: "terrain-road", width: 1024 },
+		];
+		const firstSlice = planAtlasLayout({
+			cohorts: [
+				{
+					entryKeys: ["terrain-base-a", "terrain-base-b", "terrain-road"],
+					key: "terrain-slice-a",
+				},
+			],
+			entries,
+			policy: {
+				...createPolicy(),
+				maxTextureSize: 2048,
+			},
+		});
+		const secondSlice = planAtlasLayout({
+			cohorts: [
+				{
+					entryKeys: ["terrain-base-c", "terrain-base-d", "terrain-road"],
+					key: "terrain-slice-b",
+				},
+			],
+			entries,
+			policy: {
+				...createPolicy(),
+				maxTextureSize: 2048,
+			},
+		});
+		const mergedSlices = planAtlasLayout({
+			cohorts: [
+				{
+					entryKeys: ["terrain-base-a", "terrain-base-b", "terrain-road"],
+					key: "terrain-slice-a",
+				},
+				{
+					entryKeys: ["terrain-base-c", "terrain-base-d", "terrain-road"],
+					key: "terrain-slice-b",
+				},
+			],
+			entries,
+			policy: {
+				...createPolicy(),
+				maxTextureSize: 2048,
+			},
+		});
+
+		expect(firstSlice.overflows).toEqual([]);
+		expect(secondSlice.overflows).toEqual([]);
+		expect(mergedSlices.overflows).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					atlasEntryKey: "terrain-base-a",
+					detail: expect.stringContaining(
+						"terrain-base-a+terrain-base-b+terrain-base-c+terrain-base-d+terrain-road",
+					),
+					reason: "atlas-full",
+				}),
+				expect.objectContaining({
+					atlasEntryKey: "terrain-road",
+					reason: "atlas-full",
+				}),
+			]),
+		);
+	});
+
 	it("reports source-too-large and atlas-full overflows", () => {
 		const sourceTooLarge = planAtlasLayout({
 			entries: [{ height: 65, key: "too-large", width: 65 }],

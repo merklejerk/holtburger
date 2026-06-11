@@ -3,7 +3,15 @@ import {
 	createPreparedTextureHostKey,
 	prepareDirectRgbaTextureSource,
 } from "../assets/preparation/prepared-texture-source";
-import type { TexturePlacementUpdate } from "../renderer/types";
+import type {
+	TerrainTextureBinding,
+	TerrainTextureRolePageKind,
+	TexturePlacementUpdate,
+} from "../renderer/types";
+import {
+	MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
+	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
+} from "../renderer/types";
 import type {
 	StaticAtlasBatchSnapshot,
 	PreparedTextureUseIdentity,
@@ -103,7 +111,8 @@ export class TextureManager {
 			delta.removedDrawUnitIds,
 		);
 		const placements: RuntimeTexturePlacement[] = [];
-		const drawUnitBindings = [];
+		const drawUnitBindings: TerrainTextureBinding[] = [];
+		const rolePageSlots = new TerrainDrawUnitRolePageSlots();
 		const pendingPlacements = new Map<
 			StaticBatchTextureKey,
 			PendingTexturePlacement
@@ -159,9 +168,18 @@ export class TextureManager {
 				continue;
 			}
 			for (const drawUnitId of textureUse.ownerDrawUnitIds) {
+				const rolePage = rolePageSlots.resolveSlot({
+					drawUnitId,
+					textureRefId: entry.textureRefId,
+					usage: textureUse.source.usage,
+				});
+				if (!rolePage) {
+					continue;
+				}
 				drawUnitBindings.push({
 					drawUnitId,
 					rect: entry.rect,
+					rolePage,
 					textureHeight: entry.textureHeight,
 					textureRefId: entry.textureRefId,
 					textureWidth: entry.textureWidth,
@@ -281,7 +299,7 @@ export class TextureManager {
 			const registry = this.#getRegistry(group.domain, group.staticBatchId);
 			const placementRevision = registry.revision + 1;
 			const packed = await this.#texturePacker.pack({
-				cohorts: createDrawUnitTexturePackingCohorts(group),
+				cohorts: createTexturePackingCohorts(group),
 				domain: group.domain,
 				jobId: `texture-pack:${group.staticBatchId}:${group.pageClassKey}:${placementRevision}`,
 				page: createTexturePackingPageConstraints(group),
@@ -503,6 +521,12 @@ interface PendingTexturePlacementGroup {
 	readonly entries: readonly PendingTexturePlacement[];
 }
 
+interface TerrainRolePageSlotInput {
+	readonly drawUnitId: string;
+	readonly textureRefId: string;
+	readonly usage: PreparedTextureUseIdentity["usage"];
+}
+
 function collectPayloadTextureUses(
 	payload: StaticScopePayload,
 ): readonly StaticTextureUseIdentity[] {
@@ -622,9 +646,13 @@ function addPendingPlacementOwners(
 	}
 }
 
-function createDrawUnitTexturePackingCohorts(
+function createTexturePackingCohorts(
 	group: PendingTexturePlacementGroup,
-): NonNullable<TexturePackingJob["cohorts"]> {
+): TexturePackingJob["cohorts"] {
+	if (shouldUseIndependentTerrainPacking(group)) {
+		return undefined;
+	}
+
 	const textureUseIdsByDrawUnitId = new Map<string, string[]>();
 	for (const entry of group.entries) {
 		for (const drawUnitId of entry.ownerDrawUnitIds) {
@@ -640,6 +668,16 @@ function createDrawUnitTexturePackingCohorts(
 			textureUseIds: uniqueSortedStrings(textureUseIds),
 		}))
 		.sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function shouldUseIndependentTerrainPacking(
+	group: PendingTexturePlacementGroup,
+): boolean {
+	return (
+		group.domain === "outdoor-terrain" &&
+		(group.pagePolicy.sampleClass === "rgba-color" ||
+			group.pagePolicy.sampleClass === "rgba-mask")
+	);
 }
 
 function createTexturePageClassKey(
@@ -711,4 +749,68 @@ function getRuntimeTexturePageGutterPixels(
 
 function uniqueSortedStrings(values: readonly string[]): readonly string[] {
 	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
+function createTerrainTextureRolePageKind(
+	usage: PreparedTextureUseIdentity["usage"],
+): TerrainTextureRolePageKind {
+	if (usage === "mask") {
+		return "mask";
+	}
+	if (usage === "detail") {
+		return "detail";
+	}
+
+	return "color";
+}
+
+class TerrainDrawUnitRolePageSlots {
+	readonly #slotKeysByDrawUnitAndKind = new Map<string, string[]>();
+	readonly #overflowKeys = new Set<string>();
+
+	resolveSlot(
+		input: TerrainRolePageSlotInput,
+	): TerrainTextureBinding["rolePage"] | null {
+		const kind = createTerrainTextureRolePageKind(input.usage);
+		const drawUnitKindKey = `${input.drawUnitId}:${kind}`;
+		if (this.#overflowKeys.has(drawUnitKindKey)) {
+			return null;
+		}
+
+		const slots = this.#slotKeysByDrawUnitAndKind.get(drawUnitKindKey) ?? [];
+		const existingSlot = slots.indexOf(input.textureRefId);
+		if (existingSlot >= 0) {
+			return { kind, slot: existingSlot };
+		}
+
+		const maxSlots = getMaxTerrainRolePageSlots(kind);
+		if (slots.length >= maxSlots) {
+			this.#overflowKeys.add(drawUnitKindKey);
+			console.warn(
+				`V2 terrain draw unit ${input.drawUnitId} exceeded ${kind} role-page capacity ${maxSlots}; bindings for that role are omitted for local fallback.`,
+				{
+					kind,
+					maxSlots,
+					textureRefId: input.textureRefId,
+				},
+			);
+			return null;
+		}
+
+		slots.push(input.textureRefId);
+		this.#slotKeysByDrawUnitAndKind.set(drawUnitKindKey, slots);
+
+		return { kind, slot: slots.length - 1 };
+	}
+}
+
+function getMaxTerrainRolePageSlots(kind: TerrainTextureRolePageKind): number {
+	if (kind === "color") {
+		return MAX_TERRAIN_COLOR_PAGES_PER_DRAW;
+	}
+	if (kind === "mask") {
+		return MAX_TERRAIN_MASK_PAGES_PER_DRAW;
+	}
+
+	return 1;
 }

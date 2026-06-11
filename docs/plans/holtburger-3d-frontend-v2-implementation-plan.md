@@ -1258,7 +1258,7 @@ Non-goals:
 
 #### Phase 10B4D1: Root Repro And Binding Contract Resteer
 
-Status: planned.
+Status: completed.
 
 Deliverables:
 
@@ -1277,9 +1277,19 @@ Verification:
 
 - Targeted terrain bake / texture-manager / atlas-layout tests for the shared-road cohort merge.
 
+Implementation notes:
+
+- Added an `atlas-layout` regression that reproduces the shared-road sibling-slice failure without live streaming: each terrain slice is individually packable, but the shared road entry causes cohort union to demand `road + all sibling base refs` on one page.
+- Added named renderer capacity constants for terrain color and mask role pages and threaded terrain texture bindings with a draw-local `rolePage` slot. The current materializer still assigns slot `0`; later Phase 10B4D work owns multi-slot assignment and shader usage.
+- Updated the design doc to state the corrected invariant: terrain draw-unit compatibility is bounded by renderer role-page capacity, not by one physical atlas page per terrain role.
+
+Failed to close:
+
+- No production packing/materialization behavior changed in this phase. The live missing-landblock failure is still expected until Phase 10B4D2 decouples terrain packing cohorts from one-page draw-unit assumptions.
+
 #### Phase 10B4D2: Terrain Placement Policy Decoupling
 
-Status: planned.
+Status: completed.
 
 Deliverables:
 
@@ -1298,9 +1308,21 @@ Verification:
 
 - Targeted texture-manager/materialization tests covering shared terrain refs, multi-page placements, and page-slot overflow diagnostics.
 
+Implementation notes:
+
+- Changed terrain color and mask texture packing so `outdoor-terrain` color/mask groups no longer emit draw-unit same-page cohorts. Non-terrain static groups still use draw-unit cohorts.
+- Added draw-local terrain role-page slot assignment from committed texture placements. Color and mask slots are bounded by `MAX_TERRAIN_COLOR_PAGES_PER_DRAW` and `MAX_TERRAIN_MASK_PAGES_PER_DRAW`; overflow omits bindings only for the affected draw unit role so unrelated draw units in the same commit can still materialize.
+- Added focused texture-manager tests for cohort-free terrain color packing, multi-page role slot assignment, and local page-slot overflow.
+- Updated the WebGL2 fallback warning to distinguish missing bindings, role-page overflow, and multi-page terrain role bindings that are waiting on Phase 10B4D3 shader support.
+
+Failed to close:
+
+- Multi-page terrain draw units still render through the debug fallback until Phase 10B4D3 changes the WebGL2 shader/uniform model to bind and sample multiple color/mask page slots.
+- The page-slot overflow path currently warns and omits affected bindings rather than producing a richer structured diagnostic snapshot. Phase 10B4D5 remains the right place to centralize/report that more cleanly.
+
 #### Phase 10B4D3: WebGL2 Multi-Page Terrain Shader Binding
 
-Status: planned.
+Status: completed.
 
 Deliverables:
 
@@ -1320,9 +1342,23 @@ Verification:
 - Renderer/resource tests proving layered terrain can bind at least two color page slots and select the correct page per base/overlay/road binding.
 - Targeted runtime/renderer tests for single-page and multi-page terrain material submissions.
 
+Implementation notes:
+
+- Replaced the single `terrain-layered` color/mask sampler uniforms with bounded explicit page-slot samplers (`uColorAtlasTexture0..3` and `uMaskAtlasTexture0..3`) plus per-slot atlas size arrays.
+- Added unrolled GLSL selection helpers for color and mask page sampling instead of relying on dynamic sampler-array indexing.
+- Added per-role page-slot uniform arrays for base colors, overlay colors, overlay masks, road colors, and road masks. Rect arrays remain the atlas rect path; page arrays now choose the draw-local page slot.
+- Updated WebGL2 upload to collect terrain bindings by draw-local `rolePage`, bind all color/mask page slots to deterministic texture units, and reject only missing residency, slot conflicts, or out-of-range slot metadata.
+- Kept detail texture binding on its existing dedicated path.
+- Added a renderer shader contract test to prevent regression to the old single color/mask sampler model.
+
+Failed to close:
+
+- The automated test is source-contract level, not an actual browser/WebGL shader compile or screenshot test. Manual visual validation is still required, especially because shader syntax and sampler limits are only truly proven in a WebGL2 context.
+- Phase 10B4D4 still needs to clean up the temporary planner color-ref cap so geometry slicing is driven by layer capacity and actual page-slot capacity rather than the interim four-color-ref heuristic.
+
 #### Phase 10B4D4: Planner Cap Cleanup And Page-Slot Slicing
 
-Status: planned.
+Status: planned; next.
 
 Deliverables:
 

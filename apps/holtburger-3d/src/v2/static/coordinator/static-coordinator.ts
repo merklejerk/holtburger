@@ -35,7 +35,7 @@ export interface StaticCoordinatorOptions {
 export class StaticCoordinator {
 	readonly #resolver: StaticResolverClient;
 	readonly #baker: StaticBakerClient;
-	readonly #createAtlasSnapshot: (
+	#createAtlasSnapshot: (
 		payload: StaticScopePayload,
 	) => DomainAtlasSnapshot;
 	readonly #listeners = new Set<StaticCoordinatorListener>();
@@ -59,6 +59,12 @@ export class StaticCoordinator {
 		this.#baker = options.baker;
 		this.#createAtlasSnapshot =
 			options.createAtlasSnapshot ?? createEmptyAtlasSnapshotForPayload;
+	}
+
+	setAtlasSnapshotProvider(
+		createAtlasSnapshot: (payload: StaticScopePayload) => DomainAtlasSnapshot,
+	): void {
+		this.#createAtlasSnapshot = createAtlasSnapshot;
 	}
 
 	requestStaticDemand(demand: StaticDemand): readonly ScheduledStaticWork[] {
@@ -349,6 +355,7 @@ function createEmptyAtlasSnapshotForPayload(
 ): DomainAtlasSnapshot {
 	return {
 		domain: payload.job.domain,
+		placements: [],
 		revision: payload.sourceRevision,
 		textureUses:
 			payload.scope.kind === "placeholder"

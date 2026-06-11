@@ -331,6 +331,12 @@ export interface DomainAtlasSnapshot {
 	readonly domain: StaticDomain;
 	readonly revision: number;
 	readonly textureUses: readonly StaticTextureUseIdentity[];
+	readonly placements: readonly DomainAtlasPlacementSnapshot[];
+}
+
+interface DomainAtlasPlacementSnapshot {
+	readonly texture: PreparedTextureUseIdentity;
+	readonly placementRevision: number;
 }
 
 export interface StaticBakeInput {
@@ -382,6 +388,7 @@ export interface StaticBakeTextureUse {
 	readonly domain: StaticDomain;
 	readonly ownerDrawUnitIds: readonly string[];
 	readonly source: PreparedTextureUseIdentity;
+	readonly placementRevisionAssumption: number;
 }
 
 export interface StaticResolverClient {

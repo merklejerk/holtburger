@@ -678,6 +678,8 @@ Verification:
 
 ### Phase 9B: Domain Atlas Registry, Placement Revisions, And Leases
 
+Status: complete.
+
 Purpose: make atlas lifecycle correct after direct texture placement is proven and before broad static enrichment increases texture pressure.
 
 Deliverables:
@@ -699,6 +701,34 @@ Acceptance criteria:
 - Static bake results do not contain atlas pixel buffers and do not assign physical atlas pages.
 - Atlas pixel packing runs through the texture-packing worker from Phase 9A, while final WebGL upload remains renderer-owned on the GL thread.
 - Atlas and texture manager state use typed identities, runtime-assigned handles, or opaque/branded cache keys derived from typed identities, not host route strings.
+
+Implementation notes:
+
+- Added placement snapshots to `DomainAtlasSnapshot`. Runtime now wires the static coordinator's atlas snapshot provider to the texture manager so bake inputs see the texture manager's current domain registry revision and scoped prepared texture placements.
+- Added `placementRevisionAssumption` to bake-local `StaticBakeTextureUse` output. The terrain geometry baker derives the assumption from the domain atlas snapshot revision it consumed.
+- Reworked `TextureManager` from bake-local texture-use placement storage to domain registries keyed by branded canonical keys derived from typed prepared texture identities. Host route strings are still transport-only at the asset/preparation boundary.
+- Added lease accounting from resident draw units to domain texture registry entries. Compatible repeated texture uses bind to the same runtime texture ref, and a texture ref is removed only after the last owning draw unit evicts.
+- Added stale placement requirement handling. If a bake result asks for a new placement against an old domain revision, the texture manager rejects it; if the requested texture already exists, the manager rebases the binding to the active placement.
+- New placement pixel assembly now goes through the Phase 9A packing boundary. For Phase 9B this remains a degenerate one-source page, which preserves the direct-texture visual path while proving the manager-to-packer ownership flow.
+
+Decisions and course corrections:
+
+- Domain registry revision advances as a batch for newly accepted placements from one static commit delta. This avoids making the second new texture in the same bake result appear stale just because the first one was accepted.
+- Texture refs are now stable per domain/prepared texture identity instead of per bake-local texture-use id. Bake-local ids remain draw-unit binding handles only.
+- Physical browser `Worker` construction for texture packing is still not wired into runtime composition. The texture manager depends on the packer interface and can be backed by the worker client later without changing static bake output or renderer upload ownership.
+
+Debt and follow-up:
+
+- Phase 9C should decide whether the degenerate one-source page path is sufficient to carry into terrain material parity or whether physical texture-packing worker construction should happen before Phase 10A.
+- Phase 10A/10B still need real terrain texture role grouping and material binding rules before broad atlas pages become meaningful.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- texture-manager texture packing terrain-geometry-baker static-coordinator worker-client`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead` currently fails on the existing app baseline. Phase 9B-introduced Knip findings were removed; remaining findings are pre-existing legacy/V2 contract exports and should be handled by a dedicated Knip baseline cleanup/config pass.
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 9C: Plan Reassessment And Atlas Steering
 

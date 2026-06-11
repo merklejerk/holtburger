@@ -374,7 +374,7 @@ Debt and follow-up:
 - Phase 5 must add the V2 worker host-lookup bridge or equivalent worker-local host adapter before the runtime default can use the terrain resolver for real Tauri-backed data.
 - `StaticCoordinator` still creates placement snapshots directly from payload texture-use facts. Phases 8 and 9 must move this to the texture/atlas manager boundary.
 - The terrain resolver currently summarizes mesh geometry facts instead of carrying the full bake-ready terrain mesh. Phase 6 should replace or extend this with exactly the terrain bake input fields needed by the terrain baker.
-- Prepared texture use policy is intentionally conservative and must stay host-valid. Phase 8 uses normalized `rgba8` / `none` / `linear` for the probe path; Phase 10 should validate terrain-specific color/mask/detail policy against texture upload and material requirements before treating textured terrain as credible.
+- Prepared texture use policy is intentionally conservative and must stay host-valid. Phase 8 uses normalized `rgba8` / `none` / `linear` for the probe path; Phases 10A-10C should validate terrain-specific color/mask/detail policy against texture upload and material requirements before treating textured terrain as credible.
 
 Verification:
 
@@ -606,7 +606,7 @@ Implementation notes:
 
 Decisions and course corrections:
 
-- Phase 8 intentionally binds a first prepared terrain texture directly over baked terrain UVs through `terrain-phase8-texture-probe`. It proves the ownership seam and renderer upload path, but it is not terrain material parity: pcode-driven layer selection, masks, detail textures, road overlays, and blend behavior remain Phase 10 work.
+- Phase 8 intentionally binds a first prepared terrain texture directly over baked terrain UVs through `terrain-phase8-texture-probe`. It proves the ownership seam and renderer upload path, but it is not terrain material parity: pcode-driven layer selection, masks, detail textures, road overlays, and blend behavior remain Phase 10A-10C work.
 - Unsupported prepared texture formats currently fail hard at the texture manager boundary. The first direct path only accepts `rgba8`; compressed upload policy belongs in the later terrain material/atlas phases.
 - Texture placement updates are asynchronous after static geometry commit. This keeps geometry residency independent from texture preparation and avoids texture work in renderer hot paths.
 - Course correction: V2 initially generated prepared texture routes with descriptive query keys (`outputFormat`, `mipPolicy`, `colorSpace`), but the host prepared-texture boundary expects the established route query keys (`out`, `mips`, `cs`). V2 now preserves that transport spelling only at the host key boundary while keeping internal texture-use identity typed.
@@ -614,8 +614,8 @@ Decisions and course corrections:
 
 Debt and follow-up:
 
-- Replace `terrain-phase8-texture-probe` with real terrain material selection and blend inputs in Phase 10. The probe material family should not survive as a canonical terrain path.
-- Add domain atlas sharing, placement reuse, and lease accounting in Phase 9. The current manager removes direct placements by draw-unit ownership and does not yet dedupe compatible uses across scopes.
+- Replace `terrain-phase8-texture-probe` with real terrain material selection and blend inputs in Phases 10A-10C. The probe material family should not survive as a canonical terrain path.
+- Add texture source cleanup, texture-packing worker protocol, domain atlas sharing, placement reuse, and lease accounting in Phases 9A-9B. The current manager removes direct placements by draw-unit ownership and does not yet dedupe compatible uses across scopes.
 - Surface texture-manager snapshot facts in the harness once atlas sharing makes the diagnostic values meaningful.
 
 Verification:
@@ -624,17 +624,35 @@ Verification:
 - `cd apps/holtburger-3d && npm run check`
 - `cd apps/holtburger-3d && npm run test:ts`
 
-### Phase 9: Domain Atlas Sharing, Placement Revisions, And Packing Worker
+### Phase 9A: Texture Source Boundary And Packing Worker Protocol
 
-Purpose: make atlas lifecycle correct after direct texture placement is proven and before broad static enrichment increases texture pressure, without moving atlas pixel packing into static bake workers or the main-thread texture manager.
+Purpose: cleanly separate host prepared-texture DTO interpretation from texture/atlas manager ownership, then introduce the worker boundary that will own atlas pixel assembly.
+
+Deliverables:
+
+- V2-owned prepared texture source module that converts host prepared-texture payloads into typed direct texture sources and owns host DTO policy validation.
+- Texture manager updated to consume typed texture sources instead of validating host DTO shape inline.
+- Texture-packing worker protocol/client owned by the texture/atlas manager.
+- Packing job input records that carry prepared texture sources, typed texture-use requirements, page constraints, and sampler/format policy without host route strings.
+- Packing worker result records that return atlas page pixel buffers and rect metadata, not renderer texture refs, GPU IDs, or static bake records.
+- Tests for host payload conversion, byte-length validation, unsupported policy failures, packing protocol request/result shape, and stale/canceled packing result discard.
+
+Acceptance criteria:
+
+- Texture manager no longer owns host prepared-texture DTO parsing.
+- Prepared texture source validation remains hard-fail and typed at the asset/preparation boundary.
+- Texture-packing jobs can be scheduled and canceled without touching static bake workers or renderer state.
+- Packing worker output contains atlas pixels plus metadata only; final texture refs and WebGL upload remain outside the worker.
+
+### Phase 9B: Domain Atlas Registry, Placement Revisions, And Leases
+
+Purpose: make atlas lifecycle correct after direct texture placement is proven and before broad static enrichment increases texture pressure.
 
 Deliverables:
 
 - Domain placement/atlas registry snapshots scoped to referenced typed texture uses.
 - Baker support for consuming scoped placement snapshots and emitting draw-unit placement requirements/assumptions, not atlas page pixels.
 - Texture/atlas manager commit/reject/rebase rules for placement requirements and atlas registry updates.
-- Texture-packing worker protocol/client owned by the texture/atlas manager.
-- Texture-packing worker support for taking prepared texture sources plus packing jobs and returning atlas page pixel buffers plus rect metadata.
 - Placement revision assumptions on static draw units.
 - Lease accounting from resident draw units to texture refs/placements.
 - Opaque or branded canonical cache keys derived from typed identities where `Map` keys need strings. Do not accept arbitrary caller-provided strings as resource identity.
@@ -647,29 +665,92 @@ Acceptance criteria:
 - Removing a static scope releases texture placement leases.
 - Renderer texture placement updates remain separate from static geometry deltas.
 - Static bake results do not contain atlas pixel buffers and do not assign physical atlas pages.
-- Atlas pixel packing runs through the texture-packing worker, while final WebGL upload remains renderer-owned on the GL thread.
+- Atlas pixel packing runs through the texture-packing worker from Phase 9A, while final WebGL upload remains renderer-owned on the GL thread.
 - Atlas and texture manager state use typed identities, runtime-assigned handles, or opaque/branded cache keys derived from typed identities, not host route strings.
 
-### Phase 10: Terrain Material Parity
+### Phase 9C: Plan Reassessment And Atlas Steering
 
-Purpose: close the gap between "textured terrain appears" and "terrain material behavior is credible enough to build on."
+Purpose: reassess the plan after atlas ownership is real, before terrain parity builds on any accidental Phase 8/9 shortcuts.
 
 Deliverables:
 
-- V2 terrain pcode decoding and layer selection based on the rules currently evidenced by `terrain-blend-plan.ts`.
-- Terrain draw-slice planning for the material/shader layer limit.
-- Terrain color, alpha mask, road, and detail texture roles represented as typed bake-local texture uses.
-- Terrain shader/material-family rules for the first credible terrain material path.
-- Removal or replacement of the Phase 8 `terrain-phase8-texture-probe` material family.
-- Tests for pcode decoding, alpha/road selector rotation, layer slicing, and texture role classification.
+- Review Phase 8 direct-texture probe code and identify anything that became canonical accidentally.
+- Compare implemented texture/atlas ownership against the design doc's texture/atlas manager, static baker, texture-packing worker, and renderer ownership cuts.
+- Update this implementation plan with any required terrain-material, diagnostics, or cleanup course corrections before Phase 10A starts.
+- Record open risks around atlas capacity, repacking latency, upload pressure, and worker message payload size.
 
 Acceptance criteria:
 
-- Terrain material output is driven by typed material-family classification, not route-string diagnostics or renderer-side prepared-asset reads.
+- The plan explicitly says whether `terrain-phase8-texture-probe` remains only as temporary debt or has been removed.
+- Any mismatches between implementation and design doc are documented with a next-phase owner.
+- Verification targets for Phase 10C terrain visual comparison are named or tracked as open questions.
+
+### Phase 10A: Terrain Texture Roles, Pcode, And Layer Planning
+
+Purpose: replace the Phase 8 "one texture over the whole mesh" probe with source-driven terrain texture-role interpretation.
+
+Deliverables:
+
+- V2 terrain pcode decoding and layer selection based on rules evidenced by v1 terrain blend/tile planning.
+- Terrain color, alpha mask, road, and detail texture roles represented as typed bake-local texture uses.
+- Terrain draw-slice planning for material/shader layer limits.
+- Tests for pcode decoding, alpha/road selector rotation, layer slicing, texture role classification, missing role fallback, and representative known-landblock cases.
+
+Acceptance criteria:
+
+- Terrain texture roles are resolved before renderer ingestion and do not depend on route-string diagnostics or renderer-side prepared-asset reads.
+- Bake-local texture uses distinguish base color, alpha/mask, road, and detail roles where source data requires them.
+- Unsupported role combinations produce visible/typed fallback reasons instead of silently degrading to flat terrain.
+
+### Phase 10B: Terrain Shader And Material Binding Parity
+
+Purpose: implement the first credible V2 terrain material path using the texture roles and placement assumptions from Phase 10A.
+
+Deliverables:
+
+- Terrain shader/material-family rules for the first credible terrain material path.
+- WebGL2 shader inputs, texture bindings, sampler policy, and material uniforms for terrain base/mask/detail behavior.
+- Terrain draw-unit bucketing by compatible shader, sampler bindings, sampler state, device state, domain, and texture placement assumptions.
+- Removal or replacement of the Phase 8 `terrain-phase8-texture-probe` material family from normal terrain bake output.
+- Tests for material-family classification, renderer binding construction, sampler policy updates, and geometry-not-rebaked placement changes.
+
+Acceptance criteria:
+
 - `terrain-phase8-texture-probe` is removed or unreachable from normal terrain bake output.
-- Terrain draw units bucket by compatible shader, sampler bindings, sampler state, device state, domain, and texture placement assumptions.
-- Terrain can fall back deliberately for unsupported material cases with visible/typed reasons.
-- V2 tests cover the pcode/layer cases that v1 currently encoded in terrain blend and tile planning.
+- Terrain material output is driven by typed material-family classification and texture role bindings.
+- Placement changes and sampler policy changes remain renderer/resource updates and do not require geometry rebaking.
+
+### Phase 10C: Terrain Visual Parity Pass
+
+Purpose: compare V2 terrain rendering against v1 behavior on selected targets and close the most visible gaps before adding broad static object pressure.
+
+Deliverables:
+
+- Named outdoor terrain verification landblocks covering ordinary terrain, alpha/mask use, road use, detail texture use, and fallback cases.
+- Manual visual comparison checklist against v1 harness behavior for those targets.
+- Targeted automated tests for any parity gaps that can be reduced to deterministic material, placement, or bake rules.
+- Runtime or harness surfacing for terrain fallback reasons and texture placement failures.
+
+Acceptance criteria:
+
+- V2 terrain is no longer expected to look flat green or single-texture stretched in normal supported cases.
+- Known unsupported terrain material cases are visible as typed fallback diagnostics.
+- Remaining terrain parity gaps are documented with owners before static object phases begin.
+
+### Phase 10D: Plan Reassessment And Terrain Steering
+
+Purpose: reassess the plan after terrain parity work, before static object and dungeon breadth multiply the number of material and inspection paths.
+
+Deliverables:
+
+- Compare V2 terrain geometry, material, texture, camera anchor, and diagnostics behavior against v1 harness expectations.
+- Update later static object, inspection, dungeon, and cutover phases based on the terrain parity findings.
+- Decide whether any terrain cleanup must happen before Phase 11 to avoid baking temporary terrain concepts into generic static structures.
+
+Acceptance criteria:
+
+- Phase 11 starts only after temporary terrain concepts are either removed, isolated, or explicitly tracked as cleanup debt.
+- The plan records any remaining terrain parity gap that is intentionally deferred past static object work.
 
 ### Phase 11: Static Object First Slice
 
@@ -711,18 +792,68 @@ Acceptance criteria:
 - Removing a static scope releases geometry and texture placement leases.
 - Static object enrichment remains independent from Svelte state and browser UX policy.
 
-### Phase 13: Env Cells, Interiors, Portals, And Visibility Records
+### Phase 12A: Picking, Inspection, Metrics, And Debug Snapshot Parity
 
-Purpose: enrich the first-class topology/env-cell foundation with broader portal, visibility, and interior traversal behavior without folding those records into a generic draw-unit blob.
+Purpose: make v1-style browser inspection and frame diagnostics explicit instead of burying them in the final cutover phase.
 
 Deliverables:
 
-- Env-cell static work requests.
-- Resolver and baker support for structured interiors, visible-cell traversal policy, and portal masks beyond the Phase 5A foundation.
-- Static visibility records.
-- Static portal/interior records.
-- Renderer support for applying/removing these records independently from terrain/object geometry.
-- Targeted visual harness controls for env-cell/domain loading.
+- Renderer picking path for terrain and supported static object draw units.
+- Static source mapping display path that can map picked draw slices back to typed landblock/env-cell/object/material/resource identities without consulting Svelte-owned state.
+- Texture/material inspection snapshots backed by texture/atlas manager and renderer debug APIs.
+- Global FPS/frame-time overlay and runtime snapshot fields for renderer timing, static residency, texture placement, and latest texture/material failures.
+- Tests for source mapping records, pick result identity shape, and debug snapshot construction where deterministic.
+
+Acceptance criteria:
+
+- Picking/inspection consumes committed static records and renderer query APIs, not prepared assets or Svelte mirrors.
+- Frame timing and texture/material failures are visible outside the console.
+- Diagnostics remain consumers of snapshots/debug APIs and do not become required control-plane fields.
+
+### Phase 12B: Plan Reassessment Before Dungeon And Dynamic Breadth
+
+Purpose: reassess after outdoor terrain and static object rendering are credible, before dungeon/interior and dynamic work expand the shape.
+
+Deliverables:
+
+- Compare implemented terrain/static object/inspection behavior against the design doc and v1 harness expectations.
+- Update dungeon, dynamic, and cutover phases with any required material, picking, BVH, or texture/atlas follow-up.
+- Revalidate that static draw-unit, spatial, visibility, portal, and source-mapping peer records are still separate and not collapsing into a renderer-owned scene graph.
+
+Acceptance criteria:
+
+- The next dungeon/interior phase has named verification targets or explicit open questions for them.
+- Any static object or inspection debt that would distort dungeon support is addressed or scheduled before Phase 13A.
+
+### Phase 13A: Host-Backed Topology And Env-Cell Resolution
+
+Purpose: turn the Phase 5A dungeon/topology contracts into real host-backed resolver output before rendering dungeon geometry.
+
+Deliverables:
+
+- V2 preparation parser support for `env-cell` host routes.
+- Host-backed topology/dungeon resolver that loads landblock topology, derives env-cell membership, and resolves selected/all env-cell payloads for one dungeon landblock.
+- Resolver payload records for environment, cell-structure, portal links, visible-cell refs, env-cell spatial facts, and typed missing refs.
+- Harness summary for known dungeon/interior focus: owning landblock, current env-cell, env-cell count, visible-cell count, portal count, missing typed refs.
+- Tests proving dungeon requests remain landblock-owned and env-cell IDs do not become top-level resolver jobs.
+
+Acceptance criteria:
+
+- A pure dungeon landblock can resolve topology/env-cell source facts without requesting outdoor terrain.
+- Resolver payloads use typed runtime identities and no host route strings as semantic identity.
+- Missing env-cell dependencies are surfaced as typed refs and do not trigger renderer-owned dependency walks.
+
+### Phase 13B: Interior Geometry, Portal, And Visibility Rendering
+
+Purpose: render structured interiors and portal/visibility records through the same static coordinator/baker/renderer seams as outdoor static work.
+
+Deliverables:
+
+- Static bake support for env-cell/interior geometry and portal mask records.
+- Static visibility records and portal/interior records as peer static bake result fields.
+- Renderer support for applying/removing visibility and portal/interior records independently from terrain/object geometry.
+- Dungeon/interior anchoring and renderer-local placement policy consistent with the runtime-owned scene anchor model.
+- Targeted visual harness controls for dungeon/env-cell loading and visibility inspection.
 
 Acceptance criteria:
 
@@ -730,6 +861,21 @@ Acceptance criteria:
 - Dungeon landblocks continue to use landblock-owned topology/env-cell domains rather than a separate renderer architecture.
 - Visibility records can update culling/visibility structures independently of texture placement updates.
 - Static BVH/spatial records are committed alongside other peer static result fields.
+
+### Phase 13C: Dungeon Visual Parity And Steering
+
+Purpose: compare dungeon/interior behavior against v1 and steer the remaining dynamic/cutover plan before final browser replacement work.
+
+Deliverables:
+
+- Named dungeon/interior verification targets covering ordinary env-cell geometry, portal visibility, visible-cell traversal, and fallback cases.
+- Manual visual comparison checklist against v1 harness behavior for those targets.
+- Update this plan with any remaining dungeon parity gaps before dynamic seeds or cutover.
+
+Acceptance criteria:
+
+- V2 can visually inspect at least one real dungeon/interior target through the new topology/env-cell pipeline.
+- Remaining dungeon parity gaps are typed and scheduled rather than hidden under cutover.
 
 ### Phase 14: Static-Authored Dynamic Seeds
 
@@ -747,6 +893,21 @@ Acceptance criteria:
 - A static-scoped animated object can be resident, animated, and evicted without static VAO/atlas rebake.
 - Dynamic service owns animation/resource/instance state.
 - Static coordinator owns only the seed lifetime relationship to the static scope.
+
+### Phase 14A: Plan Reassessment Before Cutover
+
+Purpose: perform a final design-vs-implementation check before replacing the old browser display.
+
+Deliverables:
+
+- Review V2 behavior against v1 feature expectations: terrain, outdoor static objects, dungeon/interior support, camera controls, picking, texture/resource inspection, frame metrics, eviction, and diagnostics.
+- Identify old browser/world-display features that are intentionally not ported and document why.
+- Update Phase 15 with final cutover blockers, cleanup targets, and required verification commands.
+
+Acceptance criteria:
+
+- Browser cutover starts with an explicit known-gap list, not a vague "minimal panels" promise.
+- Any remaining legacy dependency needed by `/browser` is either scheduled for removal or documented as intentionally retained outside the V2 replacement scope.
 
 ### Phase 15: Browser UX Cutover And Legacy Removal
 
@@ -785,8 +946,25 @@ Manual verification milestones should be explicit:
 - Phase 5A: topology/env-cell facts for a known dungeon or interior focus are visible as landblock-owned payload facts.
 - Phase 7: first meaningful outdoor visual milestone, one real outdoor landblock renders as flat/debug terrain geometry.
 - Phase 8: one real outdoor landblock renders with direct terrain textures through texture-manager-owned refs.
-- Phase 10: terrain material behavior is credible enough to compare against v1 terrain blend/layer behavior.
-- Phase 11 and later: static enrichment, picking, broader portal/visibility behavior, and dynamic seeds become visually inspectable one slice at a time.
+- Phase 9C: atlas ownership is reassessed before terrain material work builds on it.
+- Phase 10C: terrain material behavior is credible enough to compare against v1 terrain blend/layer behavior on named targets.
+- Phase 10D: terrain parity findings steer static object, inspection, dungeon, and cutover scope before broader enrichment starts.
+- Phase 12A: picking, inspection, texture/material snapshots, and frame timing are visible through V2-owned runtime/renderer APIs.
+- Phase 12B: outdoor terrain/static object behavior is reassessed before dungeon/interior and dynamic breadth.
+- Phase 13C: dungeon/interior behavior is compared against v1 on named targets before dynamic and cutover work.
+- Phase 14A: final design-vs-implementation reassessment happens before replacing the old browser display.
+
+## Plan Reassessment Cadence
+
+This plan should be reassessed after every major ownership boundary becomes real, not only after visual milestones. Reassessment phases are intentionally part of the implementation plan because the remaining work can otherwise hide broad parity gaps under phase names such as "terrain material" or "cutover."
+
+Each reassessment phase should:
+
+- compare the implemented code against the design doc ownership model;
+- compare visible behavior against the v1 harness where v1 has relevant behavior;
+- identify temporary concepts that risk becoming canonical;
+- update later phases before the next implementation phase starts;
+- record known gaps, explicit deferrals, and cleanup owners.
 
 The harness should not:
 
@@ -817,11 +995,11 @@ Mitigation: design the terrain resolver payload and terrain bake input together.
 
 Risk: atlas sharing delays first visible rendering.
 
-Mitigation: Phase 8 uses direct-texture-as-degenerate-atlas placement for one landblock, and Phase 9 handles shared atlas revisions only after direct placement works. The ownership model must already be the real one in Phase 8: logical texture refs owned by the texture manager and placement updates mirrored by the renderer.
+Mitigation: Phase 8 uses direct-texture-as-degenerate-atlas placement for one landblock. Phase 9A adds the texture source and packing-worker boundary, and Phase 9B handles shared atlas revisions only after direct placement works. The ownership model must already be the real one in Phase 8: logical texture refs owned by the texture manager and placement updates mirrored by the renderer.
 
 Risk: first visible rendering gets blocked by material parity.
 
-Mitigation: Phase 7 intentionally renders geometry-only terrain. Phase 8 adds direct textures. Phase 10 then closes material parity. Do not require terrain pcode/layer/material completeness before proving geometry submission.
+Mitigation: Phase 7 intentionally renders geometry-only terrain. Phase 8 adds direct textures. Phases 10A-10C then close terrain material parity in source-role, shader-binding, and visual-comparison passes. Do not require terrain pcode/layer/material completeness before proving geometry submission.
 
 Risk: terrain-specific behavior leaks into generic static structures.
 
@@ -843,6 +1021,10 @@ Risk: dynamic rendering stays hand-wavy too long.
 
 Mitigation: make static-authored dynamic seeds the first dynamic requirement. That gives the dynamic service real input without needing the full entity/player rendering system.
 
+Risk: parity work hides inside final cutover.
+
+Mitigation: picking, inspection, frame metrics, terrain visual parity, dungeon visual parity, and plan reassessment now have explicit phases before cutover. Phase 15 should be a route/UX replacement and cleanup phase, not the first time missing v1 behavior is discovered.
+
 ## Definition Of Done
 
 - The V2 browser path can render terrain, static objects, interiors/portals, and static-authored dynamic seeds through the new runtime/worker/atlas/renderer seams.
@@ -858,6 +1040,7 @@ Mitigation: make static-authored dynamic seeds the first dynamic requirement. Th
 ## Open Questions
 
 - Which known landblock should be the standard terrain visual verification target?
+- Which known outdoor static-object landblock should be the standard static enrichment verification target?
 - Which known dungeon landblock/env-cell should be the standard topology and geometry verification target?
 - How soon should Playwright/screenshot regression coverage be introduced for the V2 harness?
 
@@ -877,3 +1060,5 @@ Mitigation: make static-authored dynamic seeds the first dynamic requirement. Th
 - 2026-06-10: Review of `revision`, `policyRevision`, `resident-now`, and `prefetch` found that they were leaking coordinator scheduling and stale-result machinery into resolver semantics. Phase 5A should simplify resolver-facing jobs to idempotent scope/domain inputs with opaque coordinator-owned correlation.
 - 2026-06-10: V2 browser harness input was corrected to preserve V1-style location semantics: one flexible location field accepts coordinates, landblock prefixes, full landblock ids, and env-cell ids; unambiguous inputs auto-infer outdoor vs dungeon focus, while four-hex landblock prefixes keep the outdoor/dungeon focus toggle. Full non-`FFFF` cell ids always compile to interior-cell demand. This keeps dungeon support first-class before the renderer can draw dungeon geometry.
 - 2026-06-11: Atlas pixel packing should not be owned by static bake workers or the main-thread texture manager. Static bakers emit bake-local texture uses and placement requirements/assumptions; the texture/atlas manager owns atlas policy and delegates pixel assembly to texture-packing workers, while the renderer only performs final WebGL upload.
+- 2026-06-11: Review of the remaining phases found the plan aligned with the design doc but too coarse for v1 parity. Phase 9 is split into texture-source/packing-worker and atlas-registry work; Phase 10 is split into terrain role interpretation, shader/material binding, visual parity, and steering; picking/inspection/metrics parity and dungeon visual parity are explicit pre-cutover milestones.
+- 2026-06-11: Plan reassessment is now a recurring implementation activity. Steering phases after atlas, terrain, outdoor static/inspection, dungeon, and pre-cutover work must update this plan before the next major phase starts.

@@ -7,6 +7,10 @@ import type {
 	TerrainTextureBinding,
 	TexturePlacementUpdate,
 } from "../types";
+import {
+	MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
+	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
+} from "../types";
 import type {
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialTextureRoleBinding,
@@ -20,6 +24,11 @@ const TERRAIN_LAYERED_MAX_LAYER_ENTRIES = 8;
 const TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER = 3;
 const TERRAIN_LAYERED_MAX_ROADS_PER_LAYER = 2;
 const TERRAIN_ATLAS_MIP_GRADIENT_SCALE = 0.5;
+const TERRAIN_COLOR_TEXTURE_UNIT_BASE = 1;
+const TERRAIN_MASK_TEXTURE_UNIT_BASE =
+	TERRAIN_COLOR_TEXTURE_UNIT_BASE + MAX_TERRAIN_COLOR_PAGES_PER_DRAW;
+const TERRAIN_DETAIL_TEXTURE_UNIT =
+	TERRAIN_MASK_TEXTURE_UNIT_BASE + MAX_TERRAIN_MASK_PAGES_PER_DRAW;
 
 const defaultFrameState: FrameState = {
 	camera: {
@@ -49,7 +58,7 @@ void main() {
 }
 `;
 
-const TERRAIN_FRAGMENT_SHADER = `#version 300 es
+export const TERRAIN_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 
 uniform vec4 uColor;
@@ -58,10 +67,16 @@ uniform vec4 uTextureRect;
 uniform vec2 uTextureSize;
 uniform bool uUseTexture;
 uniform int uMaterialMode;
-uniform sampler2D uColorAtlasTexture;
-uniform vec2 uColorAtlasSize;
-uniform sampler2D uMaskAtlasTexture;
-uniform vec2 uMaskAtlasSize;
+uniform sampler2D uColorAtlasTexture0;
+uniform sampler2D uColorAtlasTexture1;
+uniform sampler2D uColorAtlasTexture2;
+uniform sampler2D uColorAtlasTexture3;
+uniform vec2 uColorAtlasSizes[${MAX_TERRAIN_COLOR_PAGES_PER_DRAW}];
+uniform sampler2D uMaskAtlasTexture0;
+uniform sampler2D uMaskAtlasTexture1;
+uniform sampler2D uMaskAtlasTexture2;
+uniform sampler2D uMaskAtlasTexture3;
+uniform vec2 uMaskAtlasSizes[${MAX_TERRAIN_MASK_PAGES_PER_DRAW}];
 uniform sampler2D uDetailAtlasTexture;
 uniform vec2 uDetailAtlasSize;
 uniform vec4 uDetailAtlasRect;
@@ -71,14 +86,19 @@ uniform float uDetailFadeFar;
 uniform int uDetailEnabled;
 uniform vec3 uCameraPosition;
 uniform vec4 uLayerBaseColorRects[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES}];
+uniform int uLayerBaseColorPages[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES}];
 uniform float uLayerBaseTilings[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES}];
 uniform vec4 uLayerOverlayColorRects[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER}];
+uniform int uLayerOverlayColorPages[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER}];
 uniform vec4 uLayerOverlayMaskRects[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER}];
+uniform int uLayerOverlayMaskPages[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER}];
 uniform float uLayerOverlayTilings[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER}];
 uniform int uLayerOverlayRotations[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER}];
 uniform int uLayerOverlayCounts[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES}];
 uniform vec4 uLayerRoadColorRects[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES}];
+uniform int uLayerRoadColorPages[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES}];
 uniform vec4 uLayerRoadMaskRects[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_ROADS_PER_LAYER}];
+uniform int uLayerRoadMaskPages[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_ROADS_PER_LAYER}];
 uniform float uLayerRoadTilings[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES}];
 uniform int uLayerRoadRotations[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_ROADS_PER_LAYER}];
 uniform int uLayerRoadCounts[${TERRAIN_LAYERED_MAX_LAYER_ENTRIES}];
@@ -113,11 +133,45 @@ vec4 sampleAtlasRect(sampler2D atlasTexture, vec2 atlasSize, vec4 rect, vec2 loc
 	return textureGrad(atlasTexture, atlasUv, atlasGradX, atlasGradY);
 }
 
-vec4 sampleRepeatingColor(vec4 rect, float tiling) {
+vec4 sampleColorPage(int page, vec4 rect, vec2 localUv, vec2 gradX, vec2 gradY) {
+	if (page == 1) {
+		return sampleAtlasRect(uColorAtlasTexture1, uColorAtlasSizes[1], rect, localUv, gradX, gradY);
+	}
+	if (page == 2) {
+		return sampleAtlasRect(uColorAtlasTexture2, uColorAtlasSizes[2], rect, localUv, gradX, gradY);
+	}
+	if (page == 3) {
+		return sampleAtlasRect(uColorAtlasTexture3, uColorAtlasSizes[3], rect, localUv, gradX, gradY);
+	}
+	return sampleAtlasRect(uColorAtlasTexture0, uColorAtlasSizes[0], rect, localUv, gradX, gradY);
+}
+
+float sampleMaskPage(int page, vec4 rect, vec2 localUv) {
+	vec2 atlasSize = uMaskAtlasSizes[0];
+	vec2 atlasUv = vec2(0.0);
+	if (page == 1) {
+		atlasSize = uMaskAtlasSizes[1];
+		atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
+		return texture(uMaskAtlasTexture1, atlasUv).r;
+	}
+	if (page == 2) {
+		atlasSize = uMaskAtlasSizes[2];
+		atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
+		return texture(uMaskAtlasTexture2, atlasUv).r;
+	}
+	if (page == 3) {
+		atlasSize = uMaskAtlasSizes[3];
+		atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
+		return texture(uMaskAtlasTexture3, atlasUv).r;
+	}
+	atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
+	return texture(uMaskAtlasTexture0, atlasUv).r;
+}
+
+vec4 sampleRepeatingColor(int page, vec4 rect, float tiling) {
 	vec2 tiledUv = vTexCoord * tiling;
-	return sampleAtlasRect(
-		uColorAtlasTexture,
-		uColorAtlasSize,
+	return sampleColorPage(
+		page,
 		rect,
 		fract(tiledUv),
 		dFdx(tiledUv),
@@ -146,41 +200,51 @@ float terrainDetailFade() {
 	);
 }
 
-float sampleMask(vec4 rect, int rotation) {
+float sampleMask(int page, vec4 rect, int rotation) {
 	vec2 maskUv = rotateLegacyAlphaUv(legacyAlphaUv(vTexCoord), rotation);
-	vec2 atlasUv = (rect.xy + maskUv * rect.zw) / uMaskAtlasSize;
-	return texture(uMaskAtlasTexture, atlasUv).r;
+	return sampleMaskPage(page, rect, maskUv);
 }
 
 vec4 sampleLayeredTerrain() {
 	int layer = clamp(vLayerSlot, 0, ${TERRAIN_LAYERED_MAX_LAYER_ENTRIES - 1});
-	vec4 color = sampleRepeatingColor(uLayerBaseColorRects[layer], uLayerBaseTilings[layer]);
+	vec4 color = sampleRepeatingColor(
+		uLayerBaseColorPages[layer],
+		uLayerBaseColorRects[layer],
+		uLayerBaseTilings[layer]
+	);
 	for (int overlayIndex = 0; overlayIndex < ${TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER}; overlayIndex += 1) {
 		if (overlayIndex >= uLayerOverlayCounts[layer]) {
 			break;
 		}
 		int index = layer * ${TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER} + overlayIndex;
 		vec4 overlayColor = sampleRepeatingColor(
+			uLayerOverlayColorPages[index],
 			uLayerOverlayColorRects[index],
 			uLayerOverlayTilings[index]
 		);
-		float alpha = sampleMask(uLayerOverlayMaskRects[index], uLayerOverlayRotations[index]);
+		float alpha = sampleMask(
+			uLayerOverlayMaskPages[index],
+			uLayerOverlayMaskRects[index],
+			uLayerOverlayRotations[index]
+		);
 		color = mix(color, overlayColor, clamp(1.0 - alpha, 0.0, 1.0));
 	}
 	if (uLayerRoadCounts[layer] > 0) {
 		vec4 roadColor = sampleRepeatingColor(
+			uLayerRoadColorPages[layer],
 			uLayerRoadColorRects[layer],
 			uLayerRoadTilings[layer]
 		);
 		int roadBaseIndex = layer * ${TERRAIN_LAYERED_MAX_ROADS_PER_LAYER};
 		float roadAlpha = 1.0 - sampleMask(
+			uLayerRoadMaskPages[roadBaseIndex],
 			uLayerRoadMaskRects[roadBaseIndex],
 			uLayerRoadRotations[roadBaseIndex]
 		);
 		if (uLayerRoadCounts[layer] > 1) {
 			roadAlpha = 1.0 - (
-				sampleMask(uLayerRoadMaskRects[roadBaseIndex], uLayerRoadRotations[roadBaseIndex]) *
-				sampleMask(uLayerRoadMaskRects[roadBaseIndex + 1], uLayerRoadRotations[roadBaseIndex + 1])
+				sampleMask(uLayerRoadMaskPages[roadBaseIndex], uLayerRoadMaskRects[roadBaseIndex], uLayerRoadRotations[roadBaseIndex]) *
+				sampleMask(uLayerRoadMaskPages[roadBaseIndex + 1], uLayerRoadMaskRects[roadBaseIndex + 1], uLayerRoadRotations[roadBaseIndex + 1])
 			);
 		}
 		color = mix(color, roadColor, clamp(roadAlpha, 0.0, 1.0));
@@ -516,7 +580,7 @@ class Webgl2Renderer implements Renderer {
 			{
 				materialFamily: resource.materialFamily,
 				reason:
-					"Missing texture binding/residency or more than one packed page for a color or mask role.",
+					"Missing texture binding/residency, terrain role-page overflow, or a multi-page terrain role binding that the current WebGL2 shader cannot sample yet.",
 			},
 		);
 	}
@@ -527,8 +591,8 @@ interface TerrainGeometryProgram {
 	readonly uniforms: {
 		readonly uColor: WebGLUniformLocation;
 		readonly uCameraPosition: WebGLUniformLocation;
-		readonly uColorAtlasSize: WebGLUniformLocation;
-		readonly uColorAtlasTexture: WebGLUniformLocation;
+		readonly uColorAtlasSizes: WebGLUniformLocation;
+		readonly uColorAtlasTextures: readonly WebGLUniformLocation[];
 		readonly uDetailAtlasRect: WebGLUniformLocation;
 		readonly uDetailAtlasSize: WebGLUniformLocation;
 		readonly uDetailAtlasTexture: WebGLUniformLocation;
@@ -536,20 +600,25 @@ interface TerrainGeometryProgram {
 		readonly uDetailFadeFar: WebGLUniformLocation;
 		readonly uDetailFadeNear: WebGLUniformLocation;
 		readonly uDetailTiling: WebGLUniformLocation;
+		readonly uLayerBaseColorPages: WebGLUniformLocation;
 		readonly uLayerBaseColorRects: WebGLUniformLocation;
 		readonly uLayerBaseTilings: WebGLUniformLocation;
+		readonly uLayerOverlayColorPages: WebGLUniformLocation;
 		readonly uLayerOverlayColorRects: WebGLUniformLocation;
 		readonly uLayerOverlayCounts: WebGLUniformLocation;
+		readonly uLayerOverlayMaskPages: WebGLUniformLocation;
 		readonly uLayerOverlayMaskRects: WebGLUniformLocation;
 		readonly uLayerOverlayRotations: WebGLUniformLocation;
 		readonly uLayerOverlayTilings: WebGLUniformLocation;
+		readonly uLayerRoadColorPages: WebGLUniformLocation;
 		readonly uLayerRoadColorRects: WebGLUniformLocation;
 		readonly uLayerRoadCounts: WebGLUniformLocation;
+		readonly uLayerRoadMaskPages: WebGLUniformLocation;
 		readonly uLayerRoadMaskRects: WebGLUniformLocation;
 		readonly uLayerRoadRotations: WebGLUniformLocation;
 		readonly uLayerRoadTilings: WebGLUniformLocation;
-		readonly uMaskAtlasSize: WebGLUniformLocation;
-		readonly uMaskAtlasTexture: WebGLUniformLocation;
+		readonly uMaskAtlasSizes: WebGLUniformLocation;
+		readonly uMaskAtlasTextures: readonly WebGLUniformLocation[];
 		readonly uMaterialMode: WebGLUniformLocation;
 		readonly uModelViewProjection: WebGLUniformLocation;
 		readonly uTexture: WebGLUniformLocation;
@@ -574,6 +643,16 @@ interface TerrainGeometryResource {
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
 	dispose(): void;
+}
+
+interface TerrainLayeredPageBindings {
+	readonly color: (TerrainLayeredPageBinding | null)[];
+	readonly mask: (TerrainLayeredPageBinding | null)[];
+}
+
+interface TerrainLayeredPageBinding {
+	readonly binding: TerrainTextureBinding;
+	readonly texture: WebGLTexture;
 }
 
 function createTerrainGeometryProgram(
@@ -611,8 +690,13 @@ function createTerrainGeometryProgram(
 		uniforms: {
 			uCameraPosition: requireUniform(gl, program, "uCameraPosition"),
 			uColor: requireUniform(gl, program, "uColor"),
-			uColorAtlasSize: requireUniform(gl, program, "uColorAtlasSize"),
-			uColorAtlasTexture: requireUniform(gl, program, "uColorAtlasTexture"),
+			uColorAtlasSizes: requireUniform(gl, program, "uColorAtlasSizes"),
+			uColorAtlasTextures: createTerrainRolePageTextureUniforms(
+				gl,
+				program,
+				"uColorAtlasTexture",
+				MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
+			),
 			uDetailAtlasRect: requireUniform(gl, program, "uDetailAtlasRect"),
 			uDetailAtlasSize: requireUniform(gl, program, "uDetailAtlasSize"),
 			uDetailAtlasTexture: requireUniform(gl, program, "uDetailAtlasTexture"),
@@ -620,14 +704,25 @@ function createTerrainGeometryProgram(
 			uDetailFadeFar: requireUniform(gl, program, "uDetailFadeFar"),
 			uDetailFadeNear: requireUniform(gl, program, "uDetailFadeNear"),
 			uDetailTiling: requireUniform(gl, program, "uDetailTiling"),
+			uLayerBaseColorPages: requireUniform(gl, program, "uLayerBaseColorPages"),
 			uLayerBaseColorRects: requireUniform(gl, program, "uLayerBaseColorRects"),
 			uLayerBaseTilings: requireUniform(gl, program, "uLayerBaseTilings"),
+			uLayerOverlayColorPages: requireUniform(
+				gl,
+				program,
+				"uLayerOverlayColorPages",
+			),
 			uLayerOverlayColorRects: requireUniform(
 				gl,
 				program,
 				"uLayerOverlayColorRects",
 			),
 			uLayerOverlayCounts: requireUniform(gl, program, "uLayerOverlayCounts"),
+			uLayerOverlayMaskPages: requireUniform(
+				gl,
+				program,
+				"uLayerOverlayMaskPages",
+			),
 			uLayerOverlayMaskRects: requireUniform(
 				gl,
 				program,
@@ -639,13 +734,20 @@ function createTerrainGeometryProgram(
 				"uLayerOverlayRotations",
 			),
 			uLayerOverlayTilings: requireUniform(gl, program, "uLayerOverlayTilings"),
+			uLayerRoadColorPages: requireUniform(gl, program, "uLayerRoadColorPages"),
 			uLayerRoadColorRects: requireUniform(gl, program, "uLayerRoadColorRects"),
 			uLayerRoadCounts: requireUniform(gl, program, "uLayerRoadCounts"),
+			uLayerRoadMaskPages: requireUniform(gl, program, "uLayerRoadMaskPages"),
 			uLayerRoadMaskRects: requireUniform(gl, program, "uLayerRoadMaskRects"),
 			uLayerRoadRotations: requireUniform(gl, program, "uLayerRoadRotations"),
 			uLayerRoadTilings: requireUniform(gl, program, "uLayerRoadTilings"),
-			uMaskAtlasSize: requireUniform(gl, program, "uMaskAtlasSize"),
-			uMaskAtlasTexture: requireUniform(gl, program, "uMaskAtlasTexture"),
+			uMaskAtlasSizes: requireUniform(gl, program, "uMaskAtlasSizes"),
+			uMaskAtlasTextures: createTerrainRolePageTextureUniforms(
+				gl,
+				program,
+				"uMaskAtlasTexture",
+				MAX_TERRAIN_MASK_PAGES_PER_DRAW,
+			),
 			uMaterialMode: requireUniform(gl, program, "uMaterialMode"),
 			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
 			uTexture: requireUniform(gl, program, "uTexture"),
@@ -775,26 +877,30 @@ function uploadTerrainLayeredUniforms(
 		return false;
 	}
 
-	const colorBindings = new Map<string, TerrainTextureBinding>();
-	const maskBindings = new Map<string, TerrainTextureBinding>();
+	const pageBindings = createTerrainLayeredPageBindings();
 	let detailBinding: TerrainTextureBinding | null = null;
 
 	for (const entry of plan.layerEntries) {
-		if (!collectPageBinding(entry.base, bindings, colorBindings)) {
+		if (!collectPageBinding(entry.base, bindings, textures, pageBindings)) {
 			return false;
 		}
 		for (const overlay of entry.overlays) {
 			if (
-				!collectPageBinding(overlay.terrain, bindings, colorBindings) ||
-				!collectPageBinding(overlay.alpha, bindings, maskBindings)
+				!collectPageBinding(
+					overlay.terrain,
+					bindings,
+					textures,
+					pageBindings,
+				) ||
+				!collectPageBinding(overlay.alpha, bindings, textures, pageBindings)
 			) {
 				return false;
 			}
 		}
 		for (const road of entry.roads) {
 			if (
-				!collectPageBinding(road.road, bindings, colorBindings) ||
-				!collectPageBinding(road.alpha, bindings, maskBindings)
+				!collectPageBinding(road.road, bindings, textures, pageBindings) ||
+				!collectPageBinding(road.alpha, bindings, textures, pageBindings)
 			) {
 				return false;
 			}
@@ -814,51 +920,30 @@ function uploadTerrainLayeredUniforms(
 		detailBinding = binding;
 	}
 
-	if (colorBindings.size !== 1 || maskBindings.size > 1) {
-		return false;
-	}
-
-	const colorBinding = firstMapValue(colorBindings);
-	const maskBinding = firstMapValue(maskBindings);
-	const colorTexture = colorBinding
-		? (textures.get(colorBinding.textureRefId) ?? null)
-		: null;
-	const maskTexture = maskBinding
-		? (textures.get(maskBinding.textureRefId) ?? null)
-		: null;
 	const detailTexture = detailBinding
 		? (textures.get(detailBinding.textureRefId) ?? null)
 		: null;
-	if (
-		!colorBinding ||
-		!colorTexture ||
-		(maskBindings.size > 0 && !maskTexture)
-	) {
-		return false;
-	}
 	if (detailBinding && !detailTexture) {
 		return false;
 	}
 
-	gl.activeTexture(gl.TEXTURE1);
-	gl.bindTexture(gl.TEXTURE_2D, colorTexture);
-	gl.uniform1i(program.uniforms.uColorAtlasTexture, 1);
-	gl.uniform2f(
-		program.uniforms.uColorAtlasSize,
-		colorBinding.textureWidth,
-		colorBinding.textureHeight,
+	uploadTerrainRolePageBindings(
+		gl,
+		program.uniforms.uColorAtlasTextures,
+		program.uniforms.uColorAtlasSizes,
+		pageBindings.color,
+		TERRAIN_COLOR_TEXTURE_UNIT_BASE,
 	);
-	gl.activeTexture(gl.TEXTURE2);
-	gl.bindTexture(gl.TEXTURE_2D, maskTexture);
-	gl.uniform1i(program.uniforms.uMaskAtlasTexture, 2);
-	gl.uniform2f(
-		program.uniforms.uMaskAtlasSize,
-		maskBinding?.textureWidth ?? 1,
-		maskBinding?.textureHeight ?? 1,
+	uploadTerrainRolePageBindings(
+		gl,
+		program.uniforms.uMaskAtlasTextures,
+		program.uniforms.uMaskAtlasSizes,
+		pageBindings.mask,
+		TERRAIN_MASK_TEXTURE_UNIT_BASE,
 	);
-	gl.activeTexture(gl.TEXTURE3);
+	gl.activeTexture(gl.TEXTURE0 + TERRAIN_DETAIL_TEXTURE_UNIT);
 	gl.bindTexture(gl.TEXTURE_2D, detailTexture);
-	gl.uniform1i(program.uniforms.uDetailAtlasTexture, 3);
+	gl.uniform1i(program.uniforms.uDetailAtlasTexture, TERRAIN_DETAIL_TEXTURE_UNIT);
 	gl.uniform2f(
 		program.uniforms.uDetailAtlasSize,
 		detailBinding?.textureWidth ?? 1,
@@ -880,7 +965,8 @@ function uploadTerrainLayeredUniforms(
 function collectPageBinding(
 	role: TerrainMaterialTextureRoleBinding,
 	bindings: ReadonlyMap<string, TerrainTextureBinding>,
-	pageBindings: Map<string, TerrainTextureBinding>,
+	textures: ReadonlyMap<string, WebGLTexture>,
+	pageBindings: TerrainLayeredPageBindings,
 ): boolean {
 	if (!role.textureUseId) {
 		return false;
@@ -889,8 +975,55 @@ function collectPageBinding(
 	if (!binding) {
 		return false;
 	}
-	pageBindings.set(binding.textureRefId, binding);
+	const texture = textures.get(binding.textureRefId);
+	if (!texture) {
+		return false;
+	}
+	const pages =
+		binding.rolePage.kind === "mask" ? pageBindings.mask : pageBindings.color;
+	const maxSlots =
+		binding.rolePage.kind === "mask"
+			? MAX_TERRAIN_MASK_PAGES_PER_DRAW
+			: MAX_TERRAIN_COLOR_PAGES_PER_DRAW;
+	if (binding.rolePage.slot < 0 || binding.rolePage.slot >= maxSlots) {
+		return false;
+	}
+	const existing = pages[binding.rolePage.slot] ?? null;
+	if (existing && existing.binding.textureRefId !== binding.textureRefId) {
+		return false;
+	}
+	pages[binding.rolePage.slot] = {
+		binding,
+		texture,
+	};
 	return true;
+}
+
+function createTerrainLayeredPageBindings(): TerrainLayeredPageBindings {
+	return {
+		color: Array.from({ length: MAX_TERRAIN_COLOR_PAGES_PER_DRAW }, () => null),
+		mask: Array.from({ length: MAX_TERRAIN_MASK_PAGES_PER_DRAW }, () => null),
+	};
+}
+
+function uploadTerrainRolePageBindings(
+	gl: WebGL2RenderingContext,
+	samplerUniforms: readonly WebGLUniformLocation[],
+	sizeUniform: WebGLUniformLocation,
+	pages: readonly (TerrainLayeredPageBinding | null)[],
+	textureUnitBase: number,
+): void {
+	const sizes = new Float32Array(pages.length * 2);
+	for (const [slot, uniform] of samplerUniforms.entries()) {
+		const page = pages[slot] ?? null;
+		const textureUnit = textureUnitBase + slot;
+		gl.activeTexture(gl.TEXTURE0 + textureUnit);
+		gl.bindTexture(gl.TEXTURE_2D, page?.texture ?? null);
+		gl.uniform1i(uniform, textureUnit);
+		sizes[slot * 2] = page?.binding.textureWidth ?? 1;
+		sizes[slot * 2 + 1] = page?.binding.textureHeight ?? 1;
+	}
+	gl.uniform2fv(sizeUniform, sizes);
 }
 
 function uploadTerrainLayerRectUniforms(
@@ -902,16 +1035,23 @@ function uploadTerrainLayerRectUniforms(
 	const baseColorRects = new Float32Array(
 		TERRAIN_LAYERED_MAX_LAYER_ENTRIES * 4,
 	);
+	const baseColorPages = new Int32Array(TERRAIN_LAYERED_MAX_LAYER_ENTRIES);
 	const baseTilings = new Float32Array(TERRAIN_LAYERED_MAX_LAYER_ENTRIES);
 	const overlayColorRects = new Float32Array(
 		TERRAIN_LAYERED_MAX_LAYER_ENTRIES *
 			TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER *
 			4,
 	);
+	const overlayColorPages = new Int32Array(
+		TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER,
+	);
 	const overlayMaskRects = new Float32Array(
 		TERRAIN_LAYERED_MAX_LAYER_ENTRIES *
 			TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER *
 			4,
+	);
+	const overlayMaskPages = new Int32Array(
+		TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER,
 	);
 	const overlayTilings = new Float32Array(
 		TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER,
@@ -923,8 +1063,12 @@ function uploadTerrainLayerRectUniforms(
 	const roadColorRects = new Float32Array(
 		TERRAIN_LAYERED_MAX_LAYER_ENTRIES * 4,
 	);
+	const roadColorPages = new Int32Array(TERRAIN_LAYERED_MAX_LAYER_ENTRIES);
 	const roadMaskRects = new Float32Array(
 		TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_ROADS_PER_LAYER * 4,
+	);
+	const roadMaskPages = new Int32Array(
+		TERRAIN_LAYERED_MAX_LAYER_ENTRIES * TERRAIN_LAYERED_MAX_ROADS_PER_LAYER,
 	);
 	const roadTilings = new Float32Array(TERRAIN_LAYERED_MAX_LAYER_ENTRIES);
 	const roadRotations = new Int32Array(
@@ -937,6 +1081,7 @@ function uploadTerrainLayerRectUniforms(
 			resolveBindingRect(bindings, layer.base),
 			layer.slot * 4,
 		);
+		baseColorPages[layer.slot] = resolveBindingPage(bindings, layer.base);
 		baseTilings[layer.slot] = layer.base.tiling;
 		overlayCounts[layer.slot] = Math.min(
 			layer.overlays.length,
@@ -951,10 +1096,15 @@ function uploadTerrainLayerRectUniforms(
 				resolveBindingRect(bindings, overlay.terrain),
 				index * 4,
 			);
+			overlayColorPages[index] = resolveBindingPage(
+				bindings,
+				overlay.terrain,
+			);
 			overlayMaskRects.set(
 				resolveBindingRect(bindings, overlay.alpha),
 				index * 4,
 			);
+			overlayMaskPages[index] = resolveBindingPage(bindings, overlay.alpha);
 			overlayTilings[index] = overlay.terrain.tiling;
 			overlayRotations[index] = overlay.rotation;
 		}
@@ -968,6 +1118,7 @@ function uploadTerrainLayerRectUniforms(
 				resolveBindingRect(bindings, roadTexture),
 				layer.slot * 4,
 			);
+			roadColorPages[layer.slot] = resolveBindingPage(bindings, roadTexture);
 			roadTilings[layer.slot] = roadTexture.tiling;
 		}
 		for (const [roadIndex, road] of layer.roads
@@ -976,18 +1127,24 @@ function uploadTerrainLayerRectUniforms(
 			const index =
 				layer.slot * TERRAIN_LAYERED_MAX_ROADS_PER_LAYER + roadIndex;
 			roadMaskRects.set(resolveBindingRect(bindings, road.alpha), index * 4);
+			roadMaskPages[index] = resolveBindingPage(bindings, road.alpha);
 			roadRotations[index] = road.rotation;
 		}
 	}
 
+	gl.uniform1iv(program.uniforms.uLayerBaseColorPages, baseColorPages);
 	gl.uniform4fv(program.uniforms.uLayerBaseColorRects, baseColorRects);
 	gl.uniform1fv(program.uniforms.uLayerBaseTilings, baseTilings);
+	gl.uniform1iv(program.uniforms.uLayerOverlayColorPages, overlayColorPages);
 	gl.uniform4fv(program.uniforms.uLayerOverlayColorRects, overlayColorRects);
+	gl.uniform1iv(program.uniforms.uLayerOverlayMaskPages, overlayMaskPages);
 	gl.uniform4fv(program.uniforms.uLayerOverlayMaskRects, overlayMaskRects);
 	gl.uniform1fv(program.uniforms.uLayerOverlayTilings, overlayTilings);
 	gl.uniform1iv(program.uniforms.uLayerOverlayRotations, overlayRotations);
 	gl.uniform1iv(program.uniforms.uLayerOverlayCounts, overlayCounts);
+	gl.uniform1iv(program.uniforms.uLayerRoadColorPages, roadColorPages);
 	gl.uniform4fv(program.uniforms.uLayerRoadColorRects, roadColorRects);
+	gl.uniform1iv(program.uniforms.uLayerRoadMaskPages, roadMaskPages);
 	gl.uniform4fv(program.uniforms.uLayerRoadMaskRects, roadMaskRects);
 	gl.uniform1fv(program.uniforms.uLayerRoadTilings, roadTilings);
 	gl.uniform1iv(program.uniforms.uLayerRoadRotations, roadRotations);
@@ -1026,11 +1183,15 @@ function resolveBindingRect(
 	return bindings.get(role.textureUseId)?.rect ?? [0, 0, 1, 1];
 }
 
-function firstMapValue<K, V>(map: ReadonlyMap<K, V>): V | null {
-	for (const value of map.values()) {
-		return value;
+function resolveBindingPage(
+	bindings: ReadonlyMap<string, TerrainTextureBinding>,
+	role: TerrainMaterialTextureRoleBinding,
+): number {
+	if (!role.textureUseId) {
+		return 0;
 	}
-	return null;
+
+	return bindings.get(role.textureUseId)?.rolePage.slot ?? 0;
 }
 
 function createDirectTexture(
@@ -1172,6 +1333,17 @@ function requireUniform(
 	}
 
 	return uniform;
+}
+
+function createTerrainRolePageTextureUniforms(
+	gl: WebGL2RenderingContext,
+	program: WebGLProgram,
+	prefix: string,
+	count: number,
+): readonly WebGLUniformLocation[] {
+	return Array.from({ length: count }, (_, slot) =>
+		requireUniform(gl, program, `${prefix}${slot}`),
+	);
 }
 
 function createModelViewProjectionMatrix(

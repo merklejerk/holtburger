@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
 	AssetService,
 	AssetServiceSnapshot,
@@ -127,14 +127,6 @@ describe("V2 texture manager", () => {
 
 		expect(texturePacker.jobs).toMatchObject([
 			{
-				cohorts: [
-					{
-						textureUseIds: ["terrain-a:prepared-texture:06000010"],
-					},
-					{
-						textureUseIds: ["terrain-b:prepared-texture:06000020"],
-					},
-				],
 				page: {
 					fillRgba: [128, 128, 128, 255],
 					format: "rgba8",
@@ -154,6 +146,7 @@ describe("V2 texture manager", () => {
 				],
 			},
 		]);
+		expect(texturePacker.jobs[0]?.cohorts).toBeUndefined();
 		expect(update?.placements).toHaveLength(1);
 		expect(update?.drawUnitBindings).toEqual([
 			expect.objectContaining({
@@ -170,7 +163,47 @@ describe("V2 texture manager", () => {
 		expect(update?.placements[0]?.textureRefId).toContain("texture-page-ref");
 	});
 
-	it("scopes texture packing cohorts to draw-unit ownership within a batch", async () => {
+	it("does not force terrain color refs into draw-unit same-page cohorts", async () => {
+		const assetService = new FixtureAssetService();
+		const texturePacker = new FixtureTexturePacker();
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedDrawUnitIds: [],
+			revision: 1,
+			staticBatchId: "batch-a",
+			textureUses: [
+				createTextureUseCommit({
+					drawUnitId: "terrain-slice-a",
+					renderSurfaceId: 0x06000010,
+					textureUseId: "terrain-base-a",
+				}),
+				createTextureUseCommit({
+					drawUnitId: "terrain-slice-a",
+					renderSurfaceId: 0x06000011,
+					textureUseId: "terrain-road",
+				}),
+				createTextureUseCommit({
+					drawUnitId: "terrain-slice-b",
+					renderSurfaceId: 0x06000012,
+					textureUseId: "terrain-base-b",
+				}),
+				createTextureUseCommit({
+					drawUnitId: "terrain-slice-b",
+					renderSurfaceId: 0x06000011,
+					textureUseId: "terrain-road",
+				}),
+			],
+		});
+
+		expect(texturePacker.jobs[0]?.cohorts).toBeUndefined();
+		expect(
+			texturePacker.jobs[0]?.sources.map((source) => source.textureUseId),
+		).toEqual(["terrain-base-a", "terrain-road", "terrain-base-b"]);
+	});
+
+	it("scopes non-terrain texture packing cohorts to draw-unit ownership within a batch", async () => {
 		const assetService = new FixtureAssetService();
 		const texturePacker = new FixtureTexturePacker({
 			pageHeight: 512,
@@ -187,21 +220,25 @@ describe("V2 texture manager", () => {
 			staticBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
+					domain: "outdoor-buildings",
 					drawUnitId: "terrain-a",
 					renderSurfaceId: 0x06000010,
 					textureUseId: "terrain-a:prepared-texture:06000010",
 				}),
 				createTextureUseCommit({
+					domain: "outdoor-buildings",
 					drawUnitId: "terrain-a",
 					renderSurfaceId: 0x06000020,
 					textureUseId: "terrain-a:prepared-texture:06000020",
 				}),
 				createTextureUseCommit({
+					domain: "outdoor-buildings",
 					drawUnitId: "terrain-b",
 					renderSurfaceId: 0x06000030,
 					textureUseId: "terrain-b:prepared-texture:06000030",
 				}),
 				createTextureUseCommit({
+					domain: "outdoor-buildings",
 					drawUnitId: "terrain-b",
 					renderSurfaceId: 0x06000040,
 					textureUseId: "terrain-b:prepared-texture:06000040",
@@ -252,11 +289,13 @@ describe("V2 texture manager", () => {
 			staticBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
+					domain: "outdoor-buildings",
 					drawUnitId: "terrain-a",
 					renderSurfaceId: 0x06000010,
 					textureUseId: "terrain-a:prepared-texture:06000010",
 				}),
 				createTextureUseCommit({
+					domain: "outdoor-buildings",
 					drawUnitId: "terrain-b",
 					renderSurfaceId: 0x06000010,
 					textureUseId: "terrain-b:prepared-texture:06000010",
@@ -344,6 +383,128 @@ describe("V2 texture manager", () => {
 				},
 			],
 		});
+	});
+
+	it("assigns draw-local terrain role-page slots from committed placements", async () => {
+		const assetService = new FixtureAssetService();
+		const texturePacker = new FixtureTexturePacker({
+			rectsByTextureUseId: new Map([
+				[
+					"terrain-a:prepared-texture:06000010",
+					{
+						pageHeight: 512,
+						pageId: "page:0",
+						pageWidth: 512,
+						rect: [96, 96, 1, 1],
+					},
+				],
+				[
+					"terrain-a:prepared-texture:06000020",
+					{
+						pageHeight: 512,
+						pageId: "page:1",
+						pageWidth: 512,
+						rect: [96, 96, 1, 1],
+					},
+				],
+			]),
+		});
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		const update = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedDrawUnitIds: [],
+			revision: 1,
+			staticBatchId: "batch-a",
+			textureUses: [
+				createTextureUseCommit({
+					drawUnitId: "terrain-a",
+					renderSurfaceId: 0x06000010,
+					textureUseId: "terrain-a:prepared-texture:06000010",
+				}),
+				createTextureUseCommit({
+					drawUnitId: "terrain-a",
+					renderSurfaceId: 0x06000020,
+					textureUseId: "terrain-a:prepared-texture:06000020",
+				}),
+			],
+		});
+
+		expect(update?.drawUnitBindings).toEqual([
+			expect.objectContaining({
+				rolePage: { kind: "color", slot: 0 },
+				textureUseId: "terrain-a:prepared-texture:06000010",
+			}),
+			expect.objectContaining({
+				rolePage: { kind: "color", slot: 1 },
+				textureUseId: "terrain-a:prepared-texture:06000020",
+			}),
+		]);
+	});
+
+	it("keeps terrain role-page overflow local to the affected draw unit", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const assetService = new FixtureAssetService();
+			const rectsByTextureUseId = new Map<
+				string,
+				FixtureTexturePackerRectPlacement
+			>();
+			for (let index = 0; index < 5; index += 1) {
+				rectsByTextureUseId.set(`overflow-texture-${index}`, {
+					pageHeight: 512,
+					pageId: `overflow-page:${index}`,
+					pageWidth: 512,
+					rect: [96, 96, 1, 1],
+				});
+			}
+			rectsByTextureUseId.set("unrelated-texture", {
+				pageHeight: 512,
+				pageId: "unrelated-page",
+				pageWidth: 512,
+				rect: [96, 96, 1, 1],
+			});
+			const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
+			const textureManager = new TextureManager({ assetService, texturePacker });
+
+			const update = await textureManager.applyStaticCommitDelta({
+				addedDrawUnits: [],
+				removedDrawUnitIds: [],
+				revision: 1,
+				staticBatchId: "batch-a",
+				textureUses: [
+					...Array.from({ length: 5 }, (_, index) =>
+						createTextureUseCommit({
+							drawUnitId: "terrain-overflow",
+							renderSurfaceId: 0x06000010 + index,
+							textureUseId: `overflow-texture-${index}`,
+						}),
+					),
+					createTextureUseCommit({
+						drawUnitId: "terrain-ok",
+						renderSurfaceId: 0x06000030,
+						textureUseId: "unrelated-texture",
+					}),
+				],
+			});
+
+			expect(
+				update?.drawUnitBindings.filter(
+					(binding) => binding.drawUnitId === "terrain-overflow",
+				),
+			).toHaveLength(4);
+			expect(update?.drawUnitBindings).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						drawUnitId: "terrain-ok",
+						rolePage: { kind: "color", slot: 0 },
+						textureUseId: "unrelated-texture",
+					}),
+				]),
+			);
+		} finally {
+			warnSpy.mockRestore();
+		}
 	});
 
 	it("removes texture refs by draw-unit ownership without requiring rebaked geometry", async () => {
@@ -645,6 +806,41 @@ class FixtureTexturePacker implements TexturePacker {
 
 	async pack(job: TexturePackingJob): Promise<TexturePackingResult> {
 		this.jobs.push(job);
+		if (this.#options.rectsByTextureUseId) {
+			const pagesById = new Map<string, TexturePackingResult["pages"][number]>();
+			const rects: TexturePackingResult["rects"] = [];
+			for (const source of job.sources) {
+				const placement = this.#options.rectsByTextureUseId.get(
+					source.textureUseId,
+				);
+				if (!placement) {
+					throw new Error(
+						`Missing fixture rect placement for ${source.textureUseId}.`,
+					);
+				}
+				pagesById.set(placement.pageId, {
+					format: "rgba8",
+					height: placement.pageHeight,
+					pageId: placement.pageId,
+					pixels: new Uint8Array(placement.pageWidth * placement.pageHeight * 4),
+					width: placement.pageWidth,
+				});
+				rects.push({
+					pageId: placement.pageId,
+					rect: placement.rect,
+					textureUseId: source.textureUseId,
+				});
+			}
+
+			return {
+				domain: job.domain,
+				jobId: job.jobId,
+				pages: [...pagesById.values()],
+				placementRevision: job.placementRevision,
+				rects,
+			};
+		}
+
 		const pageWidth =
 			this.#options.pageWidth ?? createFixturePageSide(job, "width");
 		const pageHeight =
@@ -685,6 +881,17 @@ interface FixtureTexturePackerOptions {
 	readonly pageHeight?: number;
 	readonly pixels?: Uint8Array;
 	readonly rect?: readonly [number, number, number, number];
+	readonly rectsByTextureUseId?: ReadonlyMap<
+		string,
+		FixtureTexturePackerRectPlacement
+	>;
+}
+
+interface FixtureTexturePackerRectPlacement {
+	readonly pageId: string;
+	readonly pageWidth: number;
+	readonly pageHeight: number;
+	readonly rect: readonly [number, number, number, number];
 }
 
 function createFixturePagePixels(
@@ -754,6 +961,7 @@ function createCommitDelta(options: {
 }
 
 function createTextureUseCommit(options: {
+	readonly domain?: StaticCoordinatorCommitDelta["textureUses"][number]["domain"];
 	readonly drawUnitId: string;
 	readonly outputFormat?: "rgba8" | "dxt1";
 	readonly renderSurfaceId: number;
@@ -762,7 +970,7 @@ function createTextureUseCommit(options: {
 	readonly usage?: PreparedTextureUseIdentity["usage"];
 }): StaticCoordinatorCommitDelta["textureUses"][number] {
 	return {
-		domain: "outdoor-terrain",
+		domain: options.domain ?? "outdoor-terrain",
 		ownerDrawUnitIds: [options.drawUnitId],
 		source: {
 			kind: "prepared-texture-use",

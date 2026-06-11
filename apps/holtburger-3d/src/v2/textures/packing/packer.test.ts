@@ -41,7 +41,7 @@ describe("V2 atlas texture packer", () => {
 		]);
 	});
 
-	it("duplicates edge pixels into explicit gutter padding", async () => {
+	it("duplicates clamped edge pixels into explicit gutter padding", async () => {
 		const result = await new AtlasTexturePacker().pack({
 			...createJob(),
 			page: {
@@ -82,6 +82,63 @@ describe("V2 atlas texture packer", () => {
 		expect(
 			readRedChannel(result.pages[0]?.pixels ?? new Uint8Array(), 4),
 		).toEqual([1, 1, 2, 2, 1, 1, 2, 2, 3, 3, 4, 4, 3, 3, 4, 4]);
+	});
+
+	it("wraps repeatable source pixels into explicit gutter padding", async () => {
+		const result = await new AtlasTexturePacker().pack({
+			...createJob(),
+			page: {
+				format: "rgba8",
+				gutterEdgeMode: "repeat",
+				gutterPixels: 1,
+				height: 8,
+				width: 8,
+			},
+			sources: [
+				{
+					source: {
+						height: 2,
+						kind: "direct-rgba-texture-source",
+						outputFormat: "rgba8",
+						pixels: new Uint8Array([
+							1, 0, 0, 255, 2, 0, 0, 255, 3, 0, 0, 255, 4, 0, 0, 255,
+						]),
+						renderSurfaceId: 0x06000010,
+						usage: "color",
+						width: 2,
+					},
+					textureUseId: "terrain-color",
+				},
+			],
+		});
+
+		expect(
+			readRedChannel(result.pages[0]?.pixels ?? new Uint8Array(), 4),
+		).toEqual([4, 3, 4, 3, 2, 1, 2, 1, 4, 3, 4, 3, 2, 1, 2, 1]);
+	});
+
+	it("fills unused atlas pixels with the requested page color", async () => {
+		const result = await new AtlasTexturePacker().pack({
+			...createJob(),
+			page: {
+				fillRgba: [128, 128, 128, 255],
+				format: "rgba8",
+				height: 8,
+				pageSelection: "minimize-textures",
+				width: 8,
+			},
+			sources: [
+				createSource("terrain-color-a", 2, 2, [10, 0, 0, 255]),
+				createSource("terrain-color-b", 1, 1, [20, 0, 0, 255]),
+			],
+		});
+
+		expect(
+			hasRgbaPixel(
+				result.pages[0]?.pixels ?? new Uint8Array(),
+				[128, 128, 128, 255],
+			),
+		).toBe(true);
 	});
 
 	it("fails explicitly when atlas capacity is exhausted", async () => {
@@ -148,4 +205,22 @@ function readRedChannel(pixels: Uint8Array, width: number): number[] {
 	}
 	expect(values).toHaveLength(width * width);
 	return values;
+}
+
+function hasRgbaPixel(
+	pixels: Uint8Array,
+	rgba: readonly [number, number, number, number],
+): boolean {
+	for (let offset = 0; offset < pixels.length; offset += 4) {
+		if (
+			pixels[offset] === rgba[0] &&
+			pixels[offset + 1] === rgba[1] &&
+			pixels[offset + 2] === rgba[2] &&
+			pixels[offset + 3] === rgba[3]
+		) {
+			return true;
+		}
+	}
+
+	return false;
 }

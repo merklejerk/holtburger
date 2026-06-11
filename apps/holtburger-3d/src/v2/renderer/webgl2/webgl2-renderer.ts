@@ -19,6 +19,7 @@ import {
 const TERRAIN_LAYERED_MAX_LAYER_ENTRIES = 8;
 const TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER = 3;
 const TERRAIN_LAYERED_MAX_ROADS_PER_LAYER = 2;
+const TERRAIN_ATLAS_MIP_GRADIENT_SCALE = 0.5;
 
 const defaultFrameState: FrameState = {
 	camera: {
@@ -107,8 +108,8 @@ vec2 rotateLegacyAlphaUv(vec2 uv, int rotation) {
 
 vec4 sampleAtlasRect(sampler2D atlasTexture, vec2 atlasSize, vec4 rect, vec2 localUv, vec2 gradX, vec2 gradY) {
 	vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
-	vec2 atlasGradX = gradX * rect.zw / atlasSize;
-	vec2 atlasGradY = gradY * rect.zw / atlasSize;
+	vec2 atlasGradX = gradX * rect.zw / atlasSize * ${TERRAIN_ATLAS_MIP_GRADIENT_SCALE.toFixed(8)};
+	vec2 atlasGradY = gradY * rect.zw / atlasSize * ${TERRAIN_ATLAS_MIP_GRADIENT_SCALE.toFixed(8)};
 	return textureGrad(atlasTexture, atlasUv, atlasGradX, atlasGradY);
 }
 
@@ -199,8 +200,8 @@ void main() {
 	}
 	vec2 localUv = fract(vTexCoord);
 	vec2 atlasUv = (uTextureRect.xy + localUv * uTextureRect.zw) / uTextureSize;
-	vec2 atlasGradX = dFdx(vTexCoord) * uTextureRect.zw / uTextureSize;
-	vec2 atlasGradY = dFdy(vTexCoord) * uTextureRect.zw / uTextureSize;
+	vec2 atlasGradX = dFdx(vTexCoord) * uTextureRect.zw / uTextureSize * ${TERRAIN_ATLAS_MIP_GRADIENT_SCALE.toFixed(8)};
+	vec2 atlasGradY = dFdy(vTexCoord) * uTextureRect.zw / uTextureSize * ${TERRAIN_ATLAS_MIP_GRADIENT_SCALE.toFixed(8)};
 	vec4 textureColor = textureGrad(uTexture, atlasUv, atlasGradX, atlasGradY);
 	fragColor = uUseTexture ? textureColor : uColor;
 }

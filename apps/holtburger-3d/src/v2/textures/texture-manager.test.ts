@@ -42,9 +42,9 @@ describe("V2 texture manager", () => {
 				{
 					drawUnitId: "terrain-a",
 					rect: [0, 0, 1, 1],
-					textureHeight: 16,
+					textureHeight: 256,
 					textureRefId: STABLE_TEXTURE_REF_ID,
-					textureWidth: 16,
+					textureWidth: 256,
 					textureUseId: "terrain-a:prepared-texture:06000010",
 				},
 			],
@@ -52,7 +52,7 @@ describe("V2 texture manager", () => {
 				{
 					format: "rgba8",
 					filteringMode: "anisotropic-4x",
-					height: 16,
+					height: 256,
 					kind: "direct-texture",
 					mipmapsGenerated: true,
 					anisotropy: 4,
@@ -65,7 +65,7 @@ describe("V2 texture manager", () => {
 					textureUseId: "terrain-a:prepared-texture:06000010",
 					wrapS: "repeat",
 					wrapT: "repeat",
-					width: 16,
+					width: 256,
 				},
 			],
 			removedTextureRefIds: [],
@@ -78,8 +78,10 @@ describe("V2 texture manager", () => {
 			{
 				domain: "outdoor-terrain",
 				page: {
+					fillRgba: [128, 128, 128, 255],
 					format: "rgba8",
-					gutterPixels: 4,
+					gutterEdgeMode: "repeat",
+					gutterPixels: 96,
 					height: 2048,
 					pageSelection: "minimize-textures",
 					width: 2048,
@@ -134,8 +136,10 @@ describe("V2 texture manager", () => {
 					},
 				],
 				page: {
+					fillRgba: [128, 128, 128, 255],
 					format: "rgba8",
-					gutterPixels: 4,
+					gutterEdgeMode: "repeat",
+					gutterPixels: 96,
 					height: 2048,
 					pageSelection: "minimize-textures",
 					width: 2048,
@@ -389,8 +393,10 @@ describe("V2 texture manager", () => {
 	});
 
 	it("keeps exact mask pages out of generated mip policy", async () => {
+		const texturePacker = new FixtureTexturePacker();
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
+			texturePacker,
 		});
 
 		const update = await textureManager.applyStaticCommitDelta(
@@ -409,6 +415,10 @@ describe("V2 texture manager", () => {
 				"sample=rgba-mask;filter=anisotropic-4x;mips=off;aniso=4",
 			wrapS: "clamp-to-edge",
 			wrapT: "clamp-to-edge",
+		});
+		expect(texturePacker.jobs[0]?.page).toMatchObject({
+			gutterEdgeMode: "clamp",
+			gutterPixels: 16,
 		});
 	});
 

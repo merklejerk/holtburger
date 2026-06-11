@@ -952,7 +952,37 @@ Verification:
 - `npm run test:ts -- src/v2/static/terrain/bake/terrain-material-family-classifier.test.ts src/v2/static/terrain/bake/terrain-material-layer-planner.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts src/v2/runtime/client-runtime.test.ts src/v2/textures/texture-manager.test.ts src/v2/textures/packing/atlas-layout.test.ts src/v2/textures/packing/packer.test.ts src/v2/textures/packing/worker-client.test.ts src/v2/textures/sampling-policy.test.ts src/v2/import-boundary.test.ts`
 - `npm run check`
 
-### Phase 10B4: Terrain Atlas Binding And Rect UVs
+### Phase 10B4A: Terrain Material Slice Partitioning
+
+Status: completed.
+
+Purpose: correct the terrain bake shape before atlas binding by committing bounded material-compatible terrain draw units instead of one landblock-wide material table.
+
+Deliverables:
+
+- Terrain geometry slicing by compatible pcode/material entries before atlas binding, so a landblock with many unique pcode recipes becomes multiple bounded draw units or draw slices instead of one impossible material table.
+- Terrain partitioning implemented as a small compatibility-candidate pipeline with a domain-specific candidate adapter and reusable bucket/capacity/sort/source-slice mechanics where practical. Any terrain-only assumptions in the partitioner must be named so Phase 11 can either extract the shared utility cleanly or justify a parallel implementation.
+- Tests for terrain pcode/material slice partitioning and texture-use owner assignment.
+
+Acceptance criteria:
+
+- A landblock with more unique pcode/material recipes than one renderer material table can bind is partitioned into bounded terrain draw slices/draw units, not reported as an unattainable single-material requirement.
+- The terrain partitioner exposes or documents the reusable compatibility facts: shader/material family, pass/order class, sampler/device state, binding layout, placement revision assumption, capacity limit, stable sort key, source-slice mapping, and fallback diagnostic shape.
+
+Implementation notes:
+
+- 2026-06-11: Split the original Phase 10B4 into 10B4A and 10B4B. The atlas rect/shader work was too much to honestly close in the same step as the immediate draw-unit course correction.
+- 2026-06-11: `TerrainGeometryStaticBaker` now consumes `TerrainMaterialLayerPlan.drawSlices` and emits one terrain draw unit per material slice. Each draw unit gets a slice-local material plan with local layer slots, source triangles filtered by the slice pcodes, and source/spatial records keyed to the slice draw-unit id.
+- 2026-06-11: Slice-local terrain fallback reasons intentionally drop the landblock-wide `layer-overflow` reason after successful geometry partitioning. Remaining fallback reasons stay scoped by pcode when possible; pcode-null reasons still apply to every slice until richer shader binding can decide otherwise.
+- 2026-06-11: Bake texture-use output now assigns owners by the draw units that actually bind a texture use. Multiple draw units can share one bake texture-use record through `ownerDrawUnitIds`, but the current `terrain-single-base-color` classifier still binds only single-base slices.
+- 2026-06-11: Reusable partitioning facts exposed by the current terrain implementation are: material family via classifier, sampler/device state via material bucket key, binding layout through `textureUseIds`/`primaryTextureUseId`, placement revision assumption from the domain atlas snapshot, capacity limit from `TerrainMaterialLayerPlan.drawSlices`, stable pcode ordering from the layer planner, source-slice mapping through filtered `sourceTriangleIds`/`staticSourceMappings`, and fallback diagnostic shape via typed `TerrainMaterialFallbackReason`.
+- 2026-06-11: Spicy caveat: this is still a terrain-owned partitioner, not a shared static partitioning helper. Phase 10D/11 must decide whether to extract the reusable bucket/capacity/sort/source-slice mechanics before static objects copy the shape.
+
+Verification:
+
+- `npm run test:ts -- src/v2/static/terrain/bake/terrain-geometry-baker.test.ts src/v2/static/terrain/bake/terrain-material-family-classifier.test.ts src/v2/runtime/client-runtime.test.ts`
+
+### Phase 10B4B: Terrain Atlas Binding And Rect UVs
 
 Status: pending.
 
@@ -960,18 +990,14 @@ Purpose: bind Phase 10A terrain material plans to packed V2 texture pages in Web
 
 Deliverables:
 
-- Terrain geometry slicing by compatible pcode/material entries before atlas binding, so a landblock with many unique pcode recipes becomes multiple bounded draw units or draw slices instead of one impossible material table.
-- Terrain partitioning implemented as a small compatibility-candidate pipeline with a domain-specific candidate adapter and reusable bucket/capacity/sort/source-slice mechanics where practical. Any terrain-only assumptions in the partitioner must be named so Phase 11 can either extract the shared utility cleanly or justify a parallel implementation.
 - V2 terrain bucket/page-class planning above the lower-level atlas packer so terrain color, mask, and detail pages get role-specific capacity and gutter policy.
 - WebGL2 shader inputs, texture bindings, sampler policy, material uniforms, and atlas rect UV transforms for terrain base/overlay/mask/road/detail behavior.
 - True multi-source packed terrain pages, including atlas rect transforms before relying on generated mipmaps for atlas pages that contain more than one rect.
-- Tests for terrain pcode/material slice partitioning, renderer binding construction, atlas rect transform behavior, page-class policy, and no V1 `world-display` imports from runtime V2 code.
+- Tests for renderer binding construction, atlas rect transform behavior, page-class policy, and no V1 `world-display` imports from runtime V2 code.
 
 Acceptance criteria:
 
-- A landblock with more unique pcode/material recipes than one renderer material table can bind is partitioned into bounded terrain draw slices/draw units, not reported as an unattainable single-material requirement.
 - Terrain layer-overflow diagnostics distinguish "landblock has too many recipes for the current unsliced path" from "one draw slice still exceeds the proven material-binding limit."
-- The terrain partitioner exposes or documents the reusable compatibility facts: shader/material family, pass/order class, sampler/device state, binding layout, placement revision assumption, capacity limit, stable sort key, source-slice mapping, and fallback diagnostic shape.
 - V2 terrain can bind packed pages with multiple rects without sampling neighboring rects or gutter-only regions.
 - Terrain color/detail pages can use generated GPU mipmaps only after page gutters/padding and rect transforms are in place.
 - Mask/raw pages remain exact/no-mip unless a mask-safe policy is explicitly proven.

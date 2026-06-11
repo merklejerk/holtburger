@@ -1013,7 +1013,7 @@ Verification:
 
 ### Phase 10B4B2: Terrain Page-Class Planning And Multi-Source Pages
 
-Status: pending.
+Status: completed.
 
 Purpose: bind Phase 10A terrain material plans to packed V2 texture pages in WebGL2 without relying on one texture use per page/job.
 
@@ -1021,14 +1021,45 @@ Deliverables:
 
 - V2 terrain bucket/page-class planning above the lower-level atlas packer so terrain color, mask, and detail pages get role-specific capacity and gutter policy.
 - True multi-source packed terrain pages, including atlas rect transforms before relying on generated mipmaps for atlas pages that contain more than one rect.
+- Tests for page-class policy, multi-source packing, shared page texture refs, atlas rect binding metadata, and no V1 `world-display` imports from runtime V2 code.
+
+Acceptance criteria:
+
+- V2 terrain can bind packed pages with multiple rects without sampling neighboring rects or gutter-only regions.
+- Terrain color/detail pages can use generated GPU mipmaps only after page gutters/padding and rect transforms are in place.
+- Mask/raw pages remain exact/no-mip unless a mask-safe policy is explicitly proven.
+
+Implementation notes:
+
+- 2026-06-11: `TextureManager` now stages all new texture uses in a commit, groups compatible entries by domain, sample class, wrap state, and sampler policy, then submits one multi-source packing job per page class instead of one packing job per texture use.
+- 2026-06-11: Color/detail page classes now request a named filterable atlas gutter policy, currently `4px`, and can generate mipmaps after packing. This value is expected to be tuned visually. Mask/raw page classes remain clamp/exact with zero gutter and no generated mips.
+- 2026-06-11: Packed page texture refs are shared by every texture entry placed on the same page. Draw-unit bindings carry their own rect/page-size metadata from Phase 10B4B1, so multiple draw units can bind different rects from one uploaded page.
+- 2026-06-11: Texture eviction now checks whether another live registry entry still references the same page texture before emitting a renderer removal. This prevents deleting shared page textures when only one entry on the page is evicted.
+- 2026-06-11: Spicy caveat: `TextureManager.applyStaticCommitDelta` still mutates draw-unit texture ownership before all staged host reads/packing complete. Registry/page commits are staged better than before, but the draw-unit ownership map is not fully transactional yet. This was already a Phase 10B2 caveat and remains real.
+- 2026-06-11: Spicy caveat: this phase proves true multi-source page ownership and page-class policy, but it still only feeds the current `terrain-single-base-color` material family. Overlay, mask, road, detail uniform tables and shader behavior remain a separate material-binding slice.
+
+Verification:
+
+- `npm run test:ts -- src/v2/textures/texture-manager.test.ts src/v2/textures/packing/packer.test.ts src/v2/textures/packing/atlas-layout.test.ts src/v2/textures/packing/worker-client.test.ts src/v2/runtime/client-runtime.test.ts src/v2/static/terrain/bake/terrain-material-layer-planner.test.ts src/v2/static/terrain/bake/terrain-material-family-classifier.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts src/v2/import-boundary.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+
+### Phase 10B4B3: Terrain Overlay Mask Road And Detail Binding
+
+Status: pending.
+
+Purpose: bind the remaining Phase 10A terrain material roles through WebGL2 material inputs now that slice partitioning, rect-aware sampling, and multi-source page ownership are real.
+
+Deliverables:
+
 - WebGL2 shader inputs, texture bindings, sampler policy, material uniforms, and atlas rect UV transforms for terrain overlay/mask/road/detail behavior.
-- Tests for renderer binding construction, atlas rect transform behavior, page-class policy, and no V1 `world-display` imports from runtime V2 code.
+- Terrain material-family classification beyond `terrain-single-base-color`, with bounded layer tables that map slice-local pcodes to base/overlay/road/detail bindings.
+- Tests for renderer binding construction, atlas rect transform behavior for mask/detail roles, page-class policy, and no V1 `world-display` imports from runtime V2 code.
 
 Acceptance criteria:
 
 - Terrain layer-overflow diagnostics distinguish "landblock has too many recipes for the current unsliced path" from "one draw slice still exceeds the proven material-binding limit."
-- V2 terrain can bind packed pages with multiple rects without sampling neighboring rects or gutter-only regions.
-- Terrain color/detail pages can use generated GPU mipmaps only after page gutters/padding and rect transforms are in place.
+- Supported overlay, road, mask, and landscape-detail terrain cases render through typed material families instead of debug-flat fallback.
 - Mask/raw pages remain exact/no-mip unless a mask-safe policy is explicitly proven.
 
 ### Phase 10B5: Sampler Policy Update Lifecycle

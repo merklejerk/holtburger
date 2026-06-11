@@ -42,9 +42,9 @@ describe("V2 texture manager", () => {
 				{
 					drawUnitId: "terrain-a",
 					rect: [0, 0, 1, 1],
-					textureHeight: 1,
+					textureHeight: 16,
 					textureRefId: STABLE_TEXTURE_REF_ID,
-					textureWidth: 1,
+					textureWidth: 16,
 					textureUseId: "terrain-a:prepared-texture:06000010",
 				},
 			],
@@ -52,7 +52,7 @@ describe("V2 texture manager", () => {
 				{
 					format: "rgba8",
 					filteringMode: "anisotropic-4x",
-					height: 1,
+					height: 16,
 					kind: "direct-texture",
 					mipmapsGenerated: true,
 					anisotropy: 4,
@@ -65,22 +65,24 @@ describe("V2 texture manager", () => {
 					textureUseId: "terrain-a:prepared-texture:06000010",
 					wrapS: "repeat",
 					wrapT: "repeat",
-					width: 1,
+					width: 16,
 				},
 			],
 			removedTextureRefIds: [],
 			revision: 1,
 		});
-		expect(Array.from(update?.placements[0]?.pixels ?? [])).toEqual([
-			255, 128, 0, 255,
-		]);
+		expect(Array.from(update?.placements[0]?.pixels.slice(0, 4) ?? [])).toEqual(
+			[255, 128, 0, 255],
+		);
 		expect(texturePacker.jobs).toMatchObject([
 			{
 				domain: "outdoor-terrain",
 				page: {
 					format: "rgba8",
-					height: 1,
-					width: 1,
+					gutterPixels: 4,
+					height: 16,
+					pageSelection: "minimize-textures",
+					width: 16,
 				},
 				placementRevision: 1,
 				sources: [
@@ -90,6 +92,77 @@ describe("V2 texture manager", () => {
 				],
 			},
 		]);
+	});
+
+	it("packs compatible new texture uses into one shared page placement", async () => {
+		const assetService = new FixtureAssetService();
+		const texturePacker = new FixtureTexturePacker({
+			pageHeight: 16,
+			pageWidth: 16,
+			pixels: new Uint8Array(16 * 16 * 4),
+			rect: [4, 4, 1, 1],
+		});
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		const update = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedDrawUnitIds: [],
+			revision: 1,
+			textureUses: [
+				createTextureUseCommit({
+					drawUnitId: "terrain-a",
+					renderSurfaceId: 0x06000010,
+					textureUseId: "terrain-a:prepared-texture:06000010",
+				}),
+				createTextureUseCommit({
+					drawUnitId: "terrain-b",
+					renderSurfaceId: 0x06000020,
+					textureUseId: "terrain-b:prepared-texture:06000020",
+				}),
+			],
+		});
+
+		expect(texturePacker.jobs).toMatchObject([
+			{
+				cohorts: [
+					{
+						textureUseIds: [
+							"terrain-a:prepared-texture:06000010",
+							"terrain-b:prepared-texture:06000020",
+						],
+					},
+				],
+				page: {
+					format: "rgba8",
+					gutterPixels: 4,
+					height: 16,
+					pageSelection: "minimize-textures",
+					width: 16,
+				},
+				sources: [
+					{
+						textureUseId: "terrain-a:prepared-texture:06000010",
+					},
+					{
+						textureUseId: "terrain-b:prepared-texture:06000020",
+					},
+				],
+			},
+		]);
+		expect(update?.placements).toHaveLength(1);
+		expect(update?.drawUnitBindings).toEqual([
+			expect.objectContaining({
+				drawUnitId: "terrain-a",
+				rect: [4, 4, 1, 1],
+				textureRefId: update?.placements[0]?.textureRefId,
+			}),
+			expect.objectContaining({
+				drawUnitId: "terrain-b",
+				rect: [4, 4, 1, 1],
+				textureRefId: update?.placements[0]?.textureRefId,
+			}),
+		]);
+		expect(update?.placements[0]?.textureRefId).toContain("texture-page-ref");
 	});
 
 	it("carries atlas rect metadata on initial and reused draw-unit bindings", async () => {
@@ -390,6 +463,7 @@ class FixtureAssetService implements AssetService {
 			payload: createPreparedTexturePayload(
 				this.#payloadOptions ?? {
 					outputFormat,
+					renderSurfaceId: getPreparedTextureRenderSurfaceId(key),
 					usage: getPreparedTextureUsage(key),
 				},
 			),
@@ -440,8 +514,11 @@ class FixtureTexturePacker implements TexturePacker {
 					pageId: `${job.jobId}:page:0`,
 					pixels:
 						this.#options.pixels ??
-						job.sources[0]?.source.pixels ??
-						new Uint8Array(),
+						createFixturePagePixels(
+							pageWidth,
+							pageHeight,
+							job.sources[0]?.source.pixels,
+						),
 					width: pageWidth,
 				},
 			],
@@ -464,6 +541,19 @@ interface FixtureTexturePackerOptions {
 	readonly rect?: readonly [number, number, number, number];
 }
 
+function createFixturePagePixels(
+	width: number,
+	height: number,
+	sourcePixels: Uint8Array | undefined,
+): Uint8Array {
+	const pixels = new Uint8Array(width * height * 4);
+	if (sourcePixels) {
+		pixels.set(sourcePixels.subarray(0, 4), 0);
+	}
+
+	return pixels;
+}
+
 function createCommitDelta(options: {
 	readonly drawUnitId?: string;
 	readonly outputFormat: "rgba8" | "dxt1";
@@ -483,19 +573,37 @@ function createCommitDelta(options: {
 		removedDrawUnitIds: [],
 		revision: 1,
 		textureUses: [
-			{
-				domain: "outdoor-terrain",
-				ownerDrawUnitIds: [drawUnitId],
-				placementRevisionAssumption: options.placementRevisionAssumption ?? 0,
-				source: {
-					kind: "prepared-texture-use",
-					outputFormat: options.outputFormat,
-					renderSurfaceId,
-					usage: options.usage ?? "color",
-				},
+			createTextureUseCommit({
+				drawUnitId,
+				outputFormat: options.outputFormat,
+				placementRevisionAssumption: options.placementRevisionAssumption,
+				renderSurfaceId,
 				textureUseId,
-			},
+				usage: options.usage,
+			}),
 		],
+	};
+}
+
+function createTextureUseCommit(options: {
+	readonly drawUnitId: string;
+	readonly outputFormat?: "rgba8" | "dxt1";
+	readonly placementRevisionAssumption?: number;
+	readonly renderSurfaceId: number;
+	readonly textureUseId: string;
+	readonly usage?: PreparedTextureUseIdentity["usage"];
+}): StaticCoordinatorCommitDelta["textureUses"][number] {
+	return {
+		domain: "outdoor-terrain",
+		ownerDrawUnitIds: [options.drawUnitId],
+		placementRevisionAssumption: options.placementRevisionAssumption ?? 0,
+		source: {
+			kind: "prepared-texture-use",
+			outputFormat: options.outputFormat ?? "rgba8",
+			renderSurfaceId: options.renderSurfaceId,
+			usage: options.usage ?? "color",
+		},
+		textureUseId: options.textureUseId,
 	};
 }
 
@@ -577,6 +685,7 @@ interface PreparedTexturePayloadOptions {
 	readonly byteLength?: number;
 	readonly levelFormat?: string;
 	readonly outputFormat: "rgba8" | "dxt1";
+	readonly renderSurfaceId?: number;
 	readonly usage?: PreparedTextureUseIdentity["usage"];
 }
 
@@ -600,9 +709,13 @@ function createPreparedTexturePayload(options: PreparedTexturePayloadOptions) {
 		],
 		mipPolicy: "none",
 		outputFormat: options.outputFormat,
-		renderSurfaceId: 0x06000010,
+		renderSurfaceId: options.renderSurfaceId ?? 0x06000010,
 		usage: options.usage ?? "color",
 	};
+}
+
+function getPreparedTextureRenderSurfaceId(key: HostAssetKey): number {
+	return Number.parseInt(key.id.slice(0, 8), 16);
 }
 
 function getPreparedTextureUsage(

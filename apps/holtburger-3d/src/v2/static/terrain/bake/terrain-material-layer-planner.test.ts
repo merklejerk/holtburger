@@ -130,37 +130,32 @@ describe("V2 terrain material layer planner", () => {
 		]);
 	});
 
-	it("partitions draw slices by same-page color texture capacity", () => {
+	it("keeps a single multi-page-eligible pcode in one draw slice", () => {
+		const pcode = encodeTerrainPcode([1, 2, 3, 4]) | 0x0030_0000;
 		const payload = createTerrainPayload({
-			pcodes: [
-				encodeTerrainPcode([1, 1, 1, 1]),
-				encodeTerrainPcode([2, 2, 2, 2]),
-				encodeTerrainPcode([3, 3, 3, 3]),
+			pcodes: [pcode],
+			roadAlphaSelectors: [
+				{ alphaTextureId: 0x05000202, roadTextureId: 0x05000201, selector: 1 },
 			],
+			terrainAlphaSelectors: [
+				{ alphaIndex: 0, selector: 2, textureId: 0x05000102 },
+				{ alphaIndex: 1, selector: 4, textureId: 0x05000103 },
+				{ alphaIndex: 2, selector: 8, textureId: 0x05000104 },
+			],
+			terrainTypeCodes: [1, 2, 3, 4],
 		});
 
-		const plan = buildTerrainMaterialLayerPlan({
-			createTextureUseId,
-			maxColorTextureRefsPerSlice: 2,
-			payload,
-		});
+		const plan = requirePlan(payload);
 
 		expect(plan?.drawSlices).toEqual([
 			expect.objectContaining({
-				layerSlots: [0, 1],
-				reason: "terrain material capacity slice 1",
-			}),
-			expect.objectContaining({
-				layerSlots: [2],
-				reason: "terrain material capacity slice 2",
+				layerSlots: [0],
+				pcodes: [pcode],
+				reason: "terrain material fits shader layer limit",
 			}),
 		]);
-		expect(plan?.fallbackReasons).toEqual([
-			expect.objectContaining({
-				code: "layer-overflow",
-				message: expect.stringContaining("color texture refs"),
-			}),
-		]);
+		expect(plan.layerEntries[0]?.colorRefCount).toBe(5);
+		expect(plan.fallbackReasons).toEqual([]);
 	});
 
 	it("reports missing texture uses without host route strings", () => {
@@ -205,6 +200,7 @@ function createTerrainPayload({
 	pcodes,
 	roadAlphaSelectors = [],
 	terrainAlphaSelectors = [],
+	terrainTypeCodes = [1, 2, 3],
 }: {
 	readonly includeTextureUses?: boolean;
 	readonly pcodes: readonly number[];
@@ -218,12 +214,13 @@ function createTerrainPayload({
 		readonly selector: number;
 		readonly textureId: number;
 	}[];
+	readonly terrainTypeCodes?: readonly number[];
 }): TerrainStaticScopePayload {
-	const terrainTypes = [
-		{ terrainCode: 1, texture: surfaceTexture(0x05000101), tiling: 2 },
-		{ terrainCode: 2, texture: surfaceTexture(0x05000111), tiling: 3 },
-		{ terrainCode: 3, texture: surfaceTexture(0x05000121), tiling: 4 },
-	];
+	const terrainTypes = terrainTypeCodes.map((terrainCode) => ({
+		terrainCode,
+		texture: surfaceTexture(0x05000101 + (terrainCode - 1) * 0x10),
+		tiling: terrainCode + 1,
+	}));
 	const textureUses = includeTextureUses
 		? [
 				...terrainTypes.map((terrain) =>

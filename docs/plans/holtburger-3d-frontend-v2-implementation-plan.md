@@ -1412,7 +1412,7 @@ Failed to close:
 
 #### Phase 10B4D5: On-Demand Diagnostics Foundation And Terrain Recheck
 
-Status: planned; next.
+Status: completed.
 
 Purpose: add a quiet, on-demand diagnostics product foundation without letting diagnostics define hot-path APIs or runtime ownership. Terrain/atlas reporting is the first concrete report because it is the current source of correctness and VRAM pressure questions.
 
@@ -1444,6 +1444,24 @@ Guardrails:
 - Treat v1 diagnostics as a behavior reference for useful questions, not as an API shape to copy.
 - If a useful number requires hot-path accounting, defer it unless it can be derived lazily from existing residency, atlas registry, or renderer resource state.
 - Diagnostic report modules may share presentation/query conventions, but subsystem ownership stays local: diagnostics request snapshots; they do not become the source of truth for runtime state.
+
+Implemented:
+
+- Added a domain-extensible `RuntimeDiagnosticsReport` shape and `ClientRuntime.createDiagnosticsReport()` composition point.
+- Added an on-demand texture/atlas report from `TextureManager` that derives batch/page/ref counts, entry aliases, unique sources, sampler policy, mip status, role-page usage, and approximate RGBA8 texture bytes including generated mip chains from existing registry state.
+- Added bounded structured reporting for terrain role-page overflow. The existing console warning remains, but the report now exposes the same failure fact without scraping logs.
+- Wired the V2 browser Status tab to generate the report on demand and display it in a modal with a copy action.
+- Replaced the raw static-coordinator snapshot dump with a compact report summary. The diagnostics report now omits committed `activeWork` entries, includes only in-flight work and bounded failed-work samples, and avoids serializing coverage-sized committed work lists into the modal.
+- Compacted texture/atlas diagnostics so the default report uses short batch/page ids and aggregate terrain role-page counts with bounded outliers instead of full texture refs and one row per draw unit.
+- Renamed diagnostic texture counts to texture-page language and added `multiSourcePageCount`, so the report treats one-source pages as degenerate atlas pages instead of reintroducing a direct-texture vs atlas-page split.
+- Added tests for runtime report composition, atlas diagnostics derivation, and role-page overflow diagnostics.
+- 2026-06-11: User manual visual review over 25 terrain landblocks / 68 terrain draw units reported no visible issues. The copied report showed no materialization failures, no role-page overflows, no stale resolver/bake results, 3 texture-page batches, 12 texture pages, and approximately 180 MiB of texture-page memory.
+
+Follow-up notes:
+
+- No separate harness command consumes `createDiagnosticsReport()` yet; the browser panel now covers the immediate v1-style report workflow.
+- Diagnostics do not yet include prepared-cache residency, worker queue state, static object residency breakdowns, picking, or dynamic object reports. The report shape is ready for those domains, but they should be added when their phases need them.
+- The renderer placement contract still spells texture-page uploads as `kind: "direct-texture"`. Diagnostics no longer expose that distinction, but a future cleanup should rename the runtime placement kind to texture-page terminology.
 
 ### Phase 10B5: Sampler Policy Update Lifecycle
 

@@ -55,6 +55,10 @@
 	let topologyRadius = $state(DEFAULT_ENV_CELL_LOD_RADIUS);
 	let snapshot = $state<RuntimeSnapshot | null>(null);
 	let cameraState = $state<V2FreeCameraState>(createV2FreeCameraState());
+	let diagnosticsReportText = $state<string | null>(null);
+	let diagnosticsReportCopyStatus = $state<"copied" | "failed" | "ready">(
+		"ready",
+	);
 	let perfOverlay = $state({
 		fps: 0,
 		frameMs: 0,
@@ -239,6 +243,56 @@
 		panelCollapsed = !panelCollapsed;
 	}
 
+	function openDiagnosticsReport(): void {
+		if (!runtime) {
+			return;
+		}
+
+		diagnosticsReportText = JSON.stringify(
+			runtime.createDiagnosticsReport(),
+			null,
+			2,
+		);
+		diagnosticsReportCopyStatus = "ready";
+	}
+
+	function closeDiagnosticsReport(): void {
+		diagnosticsReportText = null;
+		diagnosticsReportCopyStatus = "ready";
+	}
+
+	async function copyDiagnosticsReport(): Promise<void> {
+		if (diagnosticsReportText === null) {
+			return;
+		}
+
+		try {
+			if (navigator.clipboard) {
+				await navigator.clipboard.writeText(diagnosticsReportText);
+			} else {
+				copyTextWithSelectionFallback(diagnosticsReportText);
+			}
+			diagnosticsReportCopyStatus = "copied";
+		} catch {
+			diagnosticsReportCopyStatus = "failed";
+		}
+	}
+
+	function copyTextWithSelectionFallback(text: string): void {
+		const textarea = document.createElement("textarea");
+		textarea.value = text;
+		textarea.style.position = "fixed";
+		textarea.style.left = "-9999px";
+		textarea.setAttribute("readonly", "");
+		document.body.appendChild(textarea);
+		textarea.select();
+		const copied = document.execCommand("copy");
+		textarea.remove();
+		if (!copied) {
+			throw new Error("Clipboard fallback copy failed.");
+		}
+	}
+
 	function scheduleStaticInterestRefresh(): void {
 		clearStaticInterestRefresh();
 		if (!runtime || !parsedLocation || !canRequestStaticWork()) {
@@ -304,7 +358,8 @@
 	function isControlPanelEvent(event: Event): boolean {
 		return (
 			event.target instanceof Element &&
-			event.target.closest(".browser-v2__panel") !== null
+			(event.target.closest(".browser-v2__panel") !== null ||
+				event.target.closest(".browser-v2__modal-backdrop") !== null)
 		);
 	}
 
@@ -691,7 +746,7 @@
 						</label>
 					</div>
 
-					<div class="browser-v2__actions">
+					<div class="browser-v2__actions browser-v2__actions--single">
 						<button
 							class="browser-v2__request"
 							disabled={!canRequestStaticWork()}
@@ -779,6 +834,12 @@
 				</div>
 			{:else}
 				<div class="browser-v2__tab-panel" role="tabpanel">
+					<div class="browser-v2__actions">
+						<button disabled={!runtime} type="button" onclick={openDiagnosticsReport}>
+							Diagnostics Report
+						</button>
+					</div>
+
 					<dl class="browser-v2__status">
 						<div>
 							<dt>Status</dt>
@@ -846,6 +907,39 @@
 			{/if}
 		{/if}
 	</aside>
+
+	{#if diagnosticsReportText !== null}
+		<div class="browser-v2__modal-backdrop">
+			<div
+				class="browser-v2__diagnostics-modal"
+				role="dialog"
+				aria-modal="true"
+				aria-labelledby="browser-v2-diagnostics-title"
+			>
+				<div class="browser-v2__diagnostics-header">
+					<div>
+						<p>On-demand diagnostics</p>
+						<h2 id="browser-v2-diagnostics-title">Runtime Report</h2>
+					</div>
+					<button type="button" onclick={closeDiagnosticsReport}>Close</button>
+				</div>
+				<textarea readonly spellcheck="false" value={diagnosticsReportText}
+				></textarea>
+				<div class="browser-v2__diagnostics-actions">
+					<span>
+						{diagnosticsReportCopyStatus === "copied"
+							? "Copied."
+							: diagnosticsReportCopyStatus === "failed"
+								? "Copy failed."
+								: "Ready to copy."}
+					</span>
+					<button type="button" onclick={() => void copyDiagnosticsReport()}>
+						Copy
+					</button>
+				</div>
+			</div>
+		</div>
+	{/if}
 </section>
 
 <style>
@@ -1072,6 +1166,10 @@
 		grid-template-columns: 1fr 0.65fr 0.9fr;
 	}
 
+	.browser-v2__actions--single {
+		grid-template-columns: 1fr;
+	}
+
 	.browser-v2__toggles label {
 		display: flex;
 		align-items: center;
@@ -1145,6 +1243,86 @@
 		font-size: 12px;
 	}
 
+	.browser-v2__modal-backdrop {
+		position: absolute;
+		inset: 0;
+		z-index: 4;
+		display: grid;
+		place-items: center;
+		padding: 16px;
+		background: rgba(0, 0, 0, 0.46);
+		pointer-events: auto;
+	}
+
+	.browser-v2__diagnostics-modal {
+		display: grid;
+		grid-template-rows: auto minmax(240px, 1fr) auto;
+		gap: 10px;
+		width: min(920px, calc(100vw - 32px));
+		height: min(680px, calc(100vh - 32px));
+		box-sizing: border-box;
+		padding: 12px;
+		border: 1px solid rgba(91, 255, 187, 0.52);
+		border-radius: 6px;
+		background:
+			linear-gradient(180deg, rgba(9, 27, 23, 0.98), rgba(4, 12, 11, 0.97)),
+			rgba(4, 12, 11, 0.97);
+		box-shadow:
+			0 0 0 1px rgba(0, 0, 0, 0.8),
+			0 24px 70px rgba(0, 0, 0, 0.58),
+			0 0 42px rgba(57, 255, 170, 0.13);
+		color: #d9ffe8;
+	}
+
+	.browser-v2__diagnostics-header,
+	.browser-v2__diagnostics-actions {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		min-width: 0;
+	}
+
+	.browser-v2__diagnostics-header p {
+		margin: 0 0 2px;
+		color: #75ffd1;
+		font-size: 10px;
+		line-height: 1.2;
+		text-transform: uppercase;
+		letter-spacing: 0;
+	}
+
+	.browser-v2__diagnostics-header h2 {
+		margin: 0;
+		color: #f1fff6;
+		font-size: 16px;
+		line-height: 1.2;
+		letter-spacing: 0;
+	}
+
+	.browser-v2__diagnostics-modal textarea {
+		width: 100%;
+		min-width: 0;
+		min-height: 0;
+		box-sizing: border-box;
+		resize: none;
+		padding: 10px;
+		border: 1px solid rgba(91, 255, 187, 0.25);
+		border-radius: 4px;
+		background: rgba(1, 9, 8, 0.88);
+		color: #f1fff6;
+		font: 11px/1.45 "IBM Plex Mono", "SFMono-Regular", Consolas,
+			"Liberation Mono", monospace;
+		outline: none;
+		white-space: pre;
+	}
+
+	.browser-v2__diagnostics-actions span {
+		min-width: 0;
+		color: #fff7cf;
+		font-size: 12px;
+	}
+
 	@media (max-width: 720px) {
 		.browser-v2__panel {
 			left: 10px;
@@ -1172,6 +1350,15 @@
 
 		.browser-v2__status div {
 			grid-template-columns: 1fr;
+		}
+
+		.browser-v2__modal-backdrop {
+			padding: 10px;
+		}
+
+		.browser-v2__diagnostics-modal {
+			width: calc(100vw - 20px);
+			height: calc(100vh - 20px);
 		}
 	}
 </style>

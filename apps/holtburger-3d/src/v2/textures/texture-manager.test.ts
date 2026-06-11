@@ -96,6 +96,133 @@ describe("V2 texture manager", () => {
 		]);
 	});
 
+	it("derives an on-demand atlas diagnostics report from committed registry state", async () => {
+		const assetService = new FixtureAssetService();
+		const texturePacker = new FixtureTexturePacker({
+			pageHeight: 16,
+			pageWidth: 16,
+			rect: [4, 4, 1, 1],
+		});
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		await textureManager.applyStaticCommitDelta(
+			createCommitDelta({ outputFormat: "rgba8" }),
+		);
+
+		expect(textureManager.createDiagnosticsReport()).toMatchObject({
+			batches: [
+				{
+					approximateBytes: 1364,
+					batchId: "batch-1",
+					domain: "outdoor-terrain",
+					entryAliasCount: 1,
+					multiSourcePageCount: 0,
+					pages: [
+						{
+							anisotropy: 4,
+							approximateBytes: 1364,
+							entryAliasCount: 1,
+							filteringMode: "anisotropic-4x",
+							format: "rgba8",
+							height: 16,
+							mipmapsGenerated: true,
+							pageId: "page-1",
+							sampleClass: "rgba-color",
+							samplerPolicyKey:
+								"sample=rgba-color;filter=anisotropic-4x;mips=on;aniso=4",
+							totalLeaseCount: 1,
+							uniqueSourceCount: 1,
+							width: 16,
+							wrapS: "repeat",
+							wrapT: "repeat",
+						},
+					],
+					revision: 1,
+					texturePageCount: 1,
+					uniqueSourceCount: 1,
+				},
+			],
+			kind: "texture-atlas",
+			recentRolePageOverflows: [],
+			summary: {
+				approximateBytes: 1364,
+				batchCount: 1,
+				entryAliasCount: 1,
+				multiSourcePageCount: 0,
+				texturePageCount: 1,
+			},
+			terrainRolePages: {
+				drawUnitCount: 1,
+				maxColorPages: 1,
+				maxDetailPages: 0,
+				maxMaskPages: 0,
+				missingMaskDrawUnits: 1,
+				multiColorDrawUnits: 0,
+				multiMaskDrawUnits: 0,
+				outliers: [
+					{
+						colorPages: 1,
+						detailPages: 0,
+						drawUnitId: "terrain-a",
+						maskPages: 0,
+					},
+				],
+			},
+		});
+	});
+
+	it("records terrain role-page overflow in the on-demand diagnostics report", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const assetService = new FixtureAssetService();
+		const textureUses = [0x06000010, 0x06000020, 0x06000030, 0x06000040, 0x06000050]
+			.map((renderSurfaceId) =>
+				createTextureUseCommit({
+					drawUnitId: "terrain-overflow",
+					renderSurfaceId,
+					textureUseId: `terrain-overflow:prepared-texture:${renderSurfaceId.toString(16).padStart(8, "0")}`,
+				}),
+			);
+		const texturePacker = new FixtureTexturePacker({
+			rectsByTextureUseId: new Map(
+				textureUses.map((textureUse, index) => [
+					textureUse.textureUseId,
+					{
+						pageHeight: 16,
+						pageId: `page-${index}`,
+						pageWidth: 16,
+						rect: [0, 0, 1, 1],
+					},
+				]),
+			),
+		});
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		try {
+			const update = await textureManager.applyStaticCommitDelta({
+				addedDrawUnits: [],
+				removedDrawUnitIds: [],
+				revision: 1,
+				staticBatchId: "batch-a",
+				textureUses,
+			});
+
+			expect(update?.drawUnitBindings).toHaveLength(4);
+			expect(
+				textureManager.createDiagnosticsReport().recentRolePageOverflows,
+			).toEqual([
+				{
+					drawUnitId: "terrain-overflow",
+					kind: "color",
+					maxSlots: 4,
+					textureRefId:
+						"texture-ref:outdoor-terrain:batch-a:terrain-overflow:prepared-texture:06000050",
+				},
+			]);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
 	it("packs compatible new texture uses into one shared page placement", async () => {
 		const assetService = new FixtureAssetService();
 		const texturePacker = new FixtureTexturePacker({

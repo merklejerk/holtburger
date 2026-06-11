@@ -1,5 +1,5 @@
 import type {
-	DomainAtlasSnapshot,
+	StaticAtlasBatchSnapshot,
 	StaticBakeInput,
 	StaticBakeResult,
 	StaticBakerClient,
@@ -29,7 +29,8 @@ export interface StaticCoordinatorOptions {
 	readonly baker: StaticBakerClient;
 	readonly createAtlasSnapshot?: (
 		payload: StaticScopePayload,
-	) => DomainAtlasSnapshot;
+		staticBatchId: string,
+	) => StaticAtlasBatchSnapshot;
 }
 
 export class StaticCoordinator {
@@ -37,7 +38,8 @@ export class StaticCoordinator {
 	readonly #baker: StaticBakerClient;
 	#createAtlasSnapshot: (
 		payload: StaticScopePayload,
-	) => DomainAtlasSnapshot;
+		staticBatchId: string,
+	) => StaticAtlasBatchSnapshot;
 	readonly #listeners = new Set<StaticCoordinatorListener>();
 	readonly #commitListeners = new Set<StaticCoordinatorCommitListener>();
 	readonly #activeWork = new Map<string, MutableScheduledStaticWorkStatus>();
@@ -62,7 +64,10 @@ export class StaticCoordinator {
 	}
 
 	setAtlasSnapshotProvider(
-		createAtlasSnapshot: (payload: StaticScopePayload) => DomainAtlasSnapshot,
+		createAtlasSnapshot: (
+			payload: StaticScopePayload,
+			staticBatchId: string,
+		) => StaticAtlasBatchSnapshot,
 	): void {
 		this.#createAtlasSnapshot = createAtlasSnapshot;
 	}
@@ -170,10 +175,12 @@ export class StaticCoordinator {
 
 		this.#recordResolvedPayload(payload);
 		this.#setStatus(work, "baking");
+		const staticBatchId = createStaticBatchId(work);
 
 		const bakeInput: StaticBakeInput = {
-			atlasSnapshot: this.#createAtlasSnapshot(payload),
+			atlasSnapshot: this.#createAtlasSnapshot(payload, staticBatchId),
 			payload,
+			staticBatchId,
 			work,
 		};
 
@@ -214,6 +221,7 @@ export class StaticCoordinator {
 			addedDrawUnits: result.drawUnits,
 			removedDrawUnitIds: [],
 			revision: result.work.revision,
+			staticBatchId: result.staticBatchId,
 			textureUses: result.textureUses,
 		});
 		this.#emit();
@@ -231,6 +239,7 @@ export class StaticCoordinator {
 			addedDrawUnits: [],
 			removedDrawUnitIds,
 			revision: this.#revision,
+			staticBatchId: createEvictionStaticBatchId(this.#revision),
 			textureUses: [],
 		});
 	}
@@ -352,11 +361,12 @@ type MutableScheduledStaticWorkStatus = {
 
 function createEmptyAtlasSnapshotForPayload(
 	payload: StaticScopePayload,
-): DomainAtlasSnapshot {
+	staticBatchId: string,
+): StaticAtlasBatchSnapshot {
 	return {
 		domain: payload.job.domain,
 		placements: [],
-		revision: payload.sourceRevision,
+		staticBatchId,
 		textureUses:
 			payload.scope.kind === "placeholder"
 				? payload.scope.referencedTextureUses
@@ -364,6 +374,19 @@ function createEmptyAtlasSnapshotForPayload(
 					? payload.scope.textureUses.map((textureUse) => textureUse.texture)
 					: [],
 	};
+}
+
+function createStaticBatchId(work: ScheduledStaticWork): string {
+	return [
+		"static-batch",
+		work.revision.toString(),
+		describeStaticScopeKey(work.job.scope),
+		work.job.domain,
+	].join(":");
+}
+
+function createEvictionStaticBatchId(revision: number): string {
+	return ["static-batch", revision.toString(), "evict"].join(":");
 }
 
 function countDistinctVisibleEnvCells(

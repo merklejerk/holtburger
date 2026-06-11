@@ -21,13 +21,13 @@ export type TerrainMaterialFamilyClassification = Pick<
 
 export interface TerrainMaterialFamilyClassifierOptions {
 	readonly domain: TerrainGeometryStaticDrawUnit["domain"];
-	readonly placementRevisionAssumption: number;
+	readonly staticBatchId: string;
 	readonly plan: TerrainMaterialLayerPlan | null;
 }
 
 export function classifyTerrainMaterialFamily({
 	domain,
-	placementRevisionAssumption,
+	staticBatchId,
 	plan,
 }: TerrainMaterialFamilyClassifierOptions): TerrainMaterialFamilyClassification {
 	if (!plan || plan.layerEntries.length === 0) {
@@ -65,7 +65,7 @@ export function classifyTerrainMaterialFamily({
 				"shader:terrain-layered",
 				`domain:${domain}`,
 				"sampler:color-mask-detail",
-				`placement:${placementRevisionAssumption}`,
+				`batch:${staticBatchId}`,
 				`signature:${plan.signature}`,
 			].join("|"),
 			materialFamily: "terrain-layered",
@@ -80,7 +80,7 @@ export function classifyTerrainMaterialFamily({
 			"shader:terrain-single-base-color",
 			`domain:${domain}`,
 			"sampler:color-repeat-filterable",
-			`placement:${placementRevisionAssumption}`,
+			`batch:${staticBatchId}`,
 			`texture:${primaryTextureUseId}`,
 		].join("|"),
 		materialFamily: "terrain-single-base-color",

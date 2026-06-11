@@ -112,6 +112,7 @@ describe("V2 static coordinator", () => {
 				addedDrawUnits: [createPlaceholderDrawUnit("terrain-a")],
 				removedDrawUnitIds: [],
 				revision: 1,
+				staticBatchId: "static-batch:1:landblock:da55ffff:outdoor-terrain",
 				textureUses: [],
 			},
 		]);
@@ -131,6 +132,7 @@ describe("V2 static coordinator", () => {
 			addedDrawUnits: [],
 			removedDrawUnitIds: ["terrain-a"],
 			revision: 2,
+			staticBatchId: "static-batch:2:evict",
 			textureUses: [],
 		});
 		expect(coordinator.createSnapshot().committedDrawUnits).toBe(0);

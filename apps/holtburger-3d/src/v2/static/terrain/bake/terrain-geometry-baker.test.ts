@@ -105,7 +105,7 @@ describe("V2 terrain geometry baker", () => {
 
 		expect(drawUnit).toMatchObject({
 			materialBucketKey:
-				"shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|placement:42|texture:7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:color:06000010",
+				"shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|batch:batch-a|texture:7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:color:06000010",
 			materialFamily: "terrain-single-base-color",
 			primaryTextureUseId:
 				"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:color:06000010",
@@ -130,7 +130,7 @@ describe("V2 terrain geometry baker", () => {
 			{
 				domain: "outdoor-terrain",
 				ownerDrawUnitIds: [drawUnit.drawUnitId],
-				placementRevisionAssumption: 42,
+				staticBatchId: "batch-a",
 				source: {
 					kind: "prepared-texture-use",
 					outputFormat: "rgba8",
@@ -306,7 +306,7 @@ function createTerrainBakeInput(
 		atlasSnapshot: {
 			domain: "outdoor-terrain",
 			placements: [],
-			revision: 42,
+			staticBatchId: "batch-a",
 			textureUses: [],
 		},
 		payload: {
@@ -314,6 +314,7 @@ function createTerrainBakeInput(
 			scope: payload,
 			sourceRevision: 42,
 		},
+		staticBatchId: "batch-a",
 		work,
 	};
 }

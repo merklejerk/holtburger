@@ -116,7 +116,7 @@ function createInput(): StaticBakeInput {
 		atlasSnapshot: {
 			domain: "outdoor-terrain",
 			placements: [],
-			revision: 0,
+			staticBatchId: "batch-a",
 			textureUses: [],
 		},
 		payload: {
@@ -127,6 +127,7 @@ function createInput(): StaticBakeInput {
 			},
 			sourceRevision: 1,
 		},
+		staticBatchId: "batch-a",
 		work,
 	};
 }
@@ -146,6 +147,7 @@ function createResult(input: StaticBakeInput): StaticBakeResult {
 		staticSourceMappings: [],
 		staticSpatialRecords: [],
 		staticVisibilityRecords: [],
+		staticBatchId: input.staticBatchId,
 		textureUses: [],
 		work: input.work,
 	};

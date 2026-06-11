@@ -1,5 +1,5 @@
 import type {
-	DomainAtlasSnapshot,
+	StaticAtlasBatchSnapshot,
 	StaticBakeInput,
 	StaticBakeResult,
 	StaticBakerClient,
@@ -203,12 +203,13 @@ export class ImmediateStaticBakerClient implements StaticBakerClient {
 
 export function createEmptyAtlasSnapshot(
 	work: ScheduledStaticWork,
-	textureUses: DomainAtlasSnapshot["textureUses"],
-): DomainAtlasSnapshot {
+	staticBatchId: string,
+	textureUses: StaticAtlasBatchSnapshot["textureUses"],
+): StaticAtlasBatchSnapshot {
 	return {
 		domain: work.job.domain,
 		placements: [],
-		revision: 0,
+		staticBatchId,
 		textureUses,
 	};
 }
@@ -228,6 +229,7 @@ function createFakeStaticBakeResult(
 		staticSourceMappings: result.staticSourceMappings ?? [],
 		staticSpatialRecords: result.staticSpatialRecords ?? [],
 		staticVisibilityRecords: result.staticVisibilityRecords ?? [],
+		staticBatchId: input.staticBatchId,
 		textureUses: result.textureUses ?? [],
 		work: input.work,
 	};

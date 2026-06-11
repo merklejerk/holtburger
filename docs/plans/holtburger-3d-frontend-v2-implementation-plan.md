@@ -1080,7 +1080,7 @@ Verification:
 
 ### Phase 10B4C: Batch-Scoped Static Atlas Groups
 
-Status: pending.
+Status: in progress; split into subphases.
 
 Purpose: course-correct the texture/atlas ownership model before sampler lifecycle and visual parity work build on the stale domain-global atlas registry shape.
 
@@ -1105,6 +1105,53 @@ Implementation notes:
 - 2026-06-11: This phase supersedes the earlier domain-scoped atlas registry default. The new default is batch-scoped atlas groups under the texture/atlas manager, with cross-batch sharing reserved as an explicit future optimization.
 - 2026-06-11: Do not move atlas registry ownership into static bake workers. Static bake workers may consume batch placement snapshots and emit placement requirements; texture-packing workers may compute rect/page layout and page pixels; TextureManager owns batch atlas group state, texture refs, leases, and renderer placement updates.
 - 2026-06-11: If the batch-scoped API shape is substantially different from the current coordinator, bake, or texture-manager components, prefer deleting and replacing those components with batch-native versions over coercing the domain-global registry model through compatibility shims. The goal is a clean ownership cut, not preserving the current implementation shape.
+
+#### Phase 10B4C1: Batch-Native Texture Materialization Contracts
+
+Status: completed.
+
+Deliverables:
+
+- Replaced `DomainAtlasSnapshot` with `StaticAtlasBatchSnapshot` in V2 static bake contracts.
+- Added explicit `staticBatchId` ownership to bake inputs, bake results, commit deltas, and bake-local texture uses.
+- Replaced TextureManager domain-global registries with `domain + staticBatchId` batch atlas registries.
+- Removed `placementRevisionAssumption` and the stale `outdoor-terrain atlas revision N, active revision M` rejection path from texture materialization.
+- Scoped texture ref ids to the static batch so later batches can intentionally duplicate the same source texture without aliasing renderer resources.
+- Updated terrain material bucket keys to include the submitted static batch instead of a domain placement revision.
+
+Acceptance:
+
+- Independent static batches can materialize the same prepared texture source without stale revision rejection.
+- Texture reuse still happens within one static batch.
+- Removing one draw unit releases only its own leases and does not remove a batch texture ref while another draw unit in that batch still references it.
+
+Implementation notes:
+
+- 2026-06-11: This subphase intentionally keeps the current coordinator at one bake work item per submitted static batch. It removes the global atlas contention bug first, then leaves multi-payload batch scheduling as the next cut.
+- 2026-06-11: Spicy but expected: tests that previously asserted cross-draw-unit domain reuse and stale-revision rejection were inverted. They now assert intra-batch reuse and cross-batch duplication.
+- 2026-06-11: Static bake workers still receive one `StaticBakeInput`. The contract is batch-native, but worker/coordinator multi-payload jobs have not landed yet.
+
+Verification:
+
+- `npm run test:ts -- src/v2/textures/texture-manager.test.ts src/v2/static/coordinator/static-coordinator.test.ts src/v2/static/bake/worker-client.test.ts src/v2/runtime/client-runtime.test.ts src/v2/static/terrain/bake/terrain-material-family-classifier.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts`
+- `npm run check`
+
+#### Phase 10B4C2: Multi-Payload Static Batch Scheduling
+
+Status: pending.
+
+Deliverables:
+
+- Replace the current one-work-item batch submission with coordinator-side grouping of newly resolved payloads by static domain.
+- Add `StaticBakeBatchInput`/`StaticBakeBatchResult` worker protocol shapes, or delete and replace the current one-scope worker client/handler if the batch-native shape is cleaner.
+- Preserve landblock/env-cell draw-unit ids inside each submitted batch while sharing atlas pages across the batch.
+- Add flush policy controls for max payload count, max wait time, priority, and demand supersession.
+
+Acceptance:
+
+- Two newly resolved terrain landblocks can be submitted as one static atlas batch and share compatible atlas pages inside that batch.
+- Later terrain batches receive distinct batch atlas groups and may duplicate sources.
+- Static object and dungeon/static future phases can reuse the same batch submission path.
 
 ### Phase 10B5: Sampler Policy Update Lifecycle
 

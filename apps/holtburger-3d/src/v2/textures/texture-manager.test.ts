@@ -19,7 +19,7 @@ import type {
 import { TextureManager } from "./texture-manager";
 
 const STABLE_TEXTURE_REF_ID =
-	"texture-ref:outdoor-terrain:06000010:color:rgba8";
+	"texture-ref:outdoor-terrain:batch-a:06000010:color:rgba8";
 
 describe("V2 texture manager", () => {
 	it("turns bake-local texture uses into runtime-owned direct placements", async () => {
@@ -108,6 +108,7 @@ describe("V2 texture manager", () => {
 			addedDrawUnits: [],
 			removedDrawUnitIds: [],
 			revision: 1,
+			staticBatchId: "batch-a",
 			textureUses: [
 				createTextureUseCommit({
 					drawUnitId: "terrain-a",
@@ -186,7 +187,6 @@ describe("V2 texture manager", () => {
 			createCommitDelta({
 				drawUnitId: "terrain-b",
 				outputFormat: "rgba8",
-				placementRevisionAssumption: 0,
 				textureUseId: "terrain-b:prepared-texture:06000010",
 			}),
 		);
@@ -233,6 +233,7 @@ describe("V2 texture manager", () => {
 			addedDrawUnits: [],
 			removedDrawUnitIds: ["terrain-a"],
 			revision: 2,
+			staticBatchId: "batch-a",
 			textureUses: [],
 		});
 
@@ -244,7 +245,7 @@ describe("V2 texture manager", () => {
 		});
 	});
 
-	it("reuses compatible domain placements across draw units", async () => {
+	it("reuses compatible batch placements across draw units", async () => {
 		const assetService = new FixtureAssetService();
 		const textureManager = new TextureManager({ assetService });
 
@@ -259,7 +260,6 @@ describe("V2 texture manager", () => {
 			createCommitDelta({
 				drawUnitId: "terrain-b",
 				outputFormat: "rgba8",
-				placementRevisionAssumption: 0,
 				textureUseId: "terrain-b:prepared-texture:06000010",
 			}),
 		);
@@ -283,6 +283,7 @@ describe("V2 texture manager", () => {
 			addedDrawUnits: [],
 			removedDrawUnitIds: ["terrain-a"],
 			revision: 3,
+			staticBatchId: "batch-a",
 			textureUses: [],
 		});
 		expect(removeFirstUpdate).toBeNull();
@@ -291,6 +292,7 @@ describe("V2 texture manager", () => {
 			addedDrawUnits: [],
 			removedDrawUnitIds: ["terrain-b"],
 			revision: 4,
+			staticBatchId: "batch-a",
 			textureUses: [],
 		});
 		expect(removeSecondUpdate).toMatchObject({
@@ -298,58 +300,55 @@ describe("V2 texture manager", () => {
 		});
 	});
 
-	it("rejects stale new placement requirements without corrupting the active registry", async () => {
+	it("duplicates compatible textures across independent static batches", async () => {
+		const assetService = new FixtureAssetService();
 		const textureManager = new TextureManager({
-			assetService: new FixtureAssetService(),
+			assetService,
 		});
 
-		await textureManager.applyStaticCommitDelta(
+		const firstUpdate = await textureManager.applyStaticCommitDelta(
 			createCommitDelta({ outputFormat: "rgba8" }),
 		);
-
-		await expect(
-			textureManager.applyStaticCommitDelta(
-				createCommitDelta({
-					outputFormat: "rgba8",
-					placementRevisionAssumption: 0,
-					renderSurfaceId: 0x06000020,
-					textureUseId: "terrain-b:prepared-texture:06000020",
-				}),
-			),
-		).rejects.toThrow(
-			"assumed outdoor-terrain atlas revision 0, but the active revision is 1",
+		const secondUpdate = await textureManager.applyStaticCommitDelta(
+			createCommitDelta({
+				drawUnitId: "terrain-b",
+				outputFormat: "rgba8",
+				staticBatchId: "batch-b",
+				textureUseId: "terrain-b:prepared-texture:06000010",
+			}),
 		);
 
-		const snapshot = textureManager.createDomainAtlasSnapshot(
-			createTerrainPayload([
-				createTextureUse(0x06000010),
-				createTextureUse(0x06000020),
-			]),
-		);
-		expect(snapshot).toMatchObject({
-			domain: "outdoor-terrain",
-			placements: [
+		expect(assetService.requestedKeys).toHaveLength(2);
+		expect(firstUpdate?.placements).toHaveLength(1);
+		expect(secondUpdate).toMatchObject({
+			drawUnitBindings: [
 				{
-					placementRevision: 1,
-					texture: {
-						renderSurfaceId: 0x06000010,
-					},
+					drawUnitId: "terrain-b",
+					textureRefId:
+						"texture-ref:outdoor-terrain:batch-b:06000010:color:rgba8",
 				},
 			],
-			revision: 1,
+			placements: [
+				{
+					textureRefId:
+						"texture-ref:outdoor-terrain:batch-b:06000010:color:rgba8",
+				},
+			],
 		});
 	});
 
-	it("creates scoped domain atlas snapshots from typed payload texture uses", async () => {
+	it("creates scoped static atlas batch snapshots from typed payload texture uses", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
 		});
 		const payload = createTerrainPayload([createTextureUse(0x06000010)]);
 
-		expect(textureManager.createDomainAtlasSnapshot(payload)).toEqual({
+		expect(
+			textureManager.createStaticAtlasBatchSnapshot(payload, "batch-a"),
+		).toEqual({
 			domain: "outdoor-terrain",
 			placements: [],
-			revision: 0,
+			staticBatchId: "batch-a",
 			textureUses: [createTextureUse(0x06000010)],
 		});
 
@@ -357,18 +356,19 @@ describe("V2 texture manager", () => {
 			createCommitDelta({ outputFormat: "rgba8" }),
 		);
 
-		expect(textureManager.createDomainAtlasSnapshot(payload)).toMatchObject({
+		expect(
+			textureManager.createStaticAtlasBatchSnapshot(payload, "batch-a"),
+		).toMatchObject({
 			domain: "outdoor-terrain",
 			placements: [
 				{
-					placementRevision: 1,
 					texture: {
 						kind: "prepared-texture-use",
 						renderSurfaceId: 0x06000010,
 					},
 				},
 			],
-			revision: 1,
+			staticBatchId: "batch-a",
 			textureUses: [createTextureUse(0x06000010)],
 		});
 	});
@@ -557,8 +557,8 @@ function createFixturePagePixels(
 function createCommitDelta(options: {
 	readonly drawUnitId?: string;
 	readonly outputFormat: "rgba8" | "dxt1";
-	readonly placementRevisionAssumption?: number;
 	readonly renderSurfaceId?: number;
+	readonly staticBatchId?: string;
 	readonly textureUseId?: string;
 	readonly usage?: PreparedTextureUseIdentity["usage"];
 }): StaticCoordinatorCommitDelta {
@@ -572,12 +572,13 @@ function createCommitDelta(options: {
 		addedDrawUnits: [],
 		removedDrawUnitIds: [],
 		revision: 1,
+		staticBatchId: options.staticBatchId ?? "batch-a",
 		textureUses: [
 			createTextureUseCommit({
 				drawUnitId,
 				outputFormat: options.outputFormat,
-				placementRevisionAssumption: options.placementRevisionAssumption,
 				renderSurfaceId,
+				staticBatchId: options.staticBatchId,
 				textureUseId,
 				usage: options.usage,
 			}),
@@ -588,21 +589,21 @@ function createCommitDelta(options: {
 function createTextureUseCommit(options: {
 	readonly drawUnitId: string;
 	readonly outputFormat?: "rgba8" | "dxt1";
-	readonly placementRevisionAssumption?: number;
 	readonly renderSurfaceId: number;
+	readonly staticBatchId?: string;
 	readonly textureUseId: string;
 	readonly usage?: PreparedTextureUseIdentity["usage"];
 }): StaticCoordinatorCommitDelta["textureUses"][number] {
 	return {
 		domain: "outdoor-terrain",
 		ownerDrawUnitIds: [options.drawUnitId],
-		placementRevisionAssumption: options.placementRevisionAssumption ?? 0,
 		source: {
 			kind: "prepared-texture-use",
 			outputFormat: options.outputFormat ?? "rgba8",
 			renderSurfaceId: options.renderSurfaceId,
 			usage: options.usage ?? "color",
 		},
+		staticBatchId: options.staticBatchId ?? "batch-a",
 		textureUseId: options.textureUseId,
 	};
 }

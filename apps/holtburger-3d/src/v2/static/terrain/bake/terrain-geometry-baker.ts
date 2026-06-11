@@ -36,7 +36,7 @@ export function bakeTerrainGeometry(input: StaticBakeInput): StaticBakeResult {
 	const drawUnits = createTerrainGeometryDrawUnits(
 		input.work.workId,
 		input.payload.scope,
-		input.atlasSnapshot.revision,
+		input.staticBatchId,
 	);
 	const textureUses = createTerrainBakeTextureUses(input, drawUnits);
 
@@ -55,6 +55,7 @@ export function bakeTerrainGeometry(input: StaticBakeInput): StaticBakeResult {
 			(drawUnit) => `${drawUnit.drawUnitId}:bounds`,
 		),
 		staticVisibilityRecords: [],
+		staticBatchId: input.staticBatchId,
 		textureUses,
 		work: input.work,
 	};
@@ -63,7 +64,7 @@ export function bakeTerrainGeometry(input: StaticBakeInput): StaticBakeResult {
 function createTerrainGeometryDrawUnits(
 	workId: string,
 	payload: TerrainStaticScopePayload,
-	placementRevisionAssumption: number,
+	staticBatchId: string,
 ): readonly TerrainGeometryStaticDrawUnit[] {
 	const terrainMaterialPlan = buildTerrainMaterialLayerPlan({
 		createTextureUseId: (textureUse) =>
@@ -83,7 +84,7 @@ function createTerrainGeometryDrawUnits(
 					: `${workId}:terrain-geometry:${slice.slice.sliceId.replaceAll("/", "-")}`,
 			landblockId: payload.landblock.landblockId,
 			pcodeByQuadIndex,
-			placementRevisionAssumption,
+			staticBatchId,
 			terrainMaterialPlan: slice.plan,
 			triangles: slice.triangles,
 			vertices: payload.mesh.vertices,
@@ -95,7 +96,7 @@ function createTerrainGeometryDrawUnit({
 	drawUnitId,
 	landblockId,
 	pcodeByQuadIndex,
-	placementRevisionAssumption,
+	staticBatchId,
 	terrainMaterialPlan,
 	triangles,
 	vertices,
@@ -103,7 +104,7 @@ function createTerrainGeometryDrawUnit({
 	readonly drawUnitId: string;
 	readonly landblockId: number;
 	readonly pcodeByQuadIndex: ReadonlyMap<number, number>;
-	readonly placementRevisionAssumption: number;
+	readonly staticBatchId: string;
 	readonly terrainMaterialPlan: TerrainMaterialLayerPlan | null;
 	readonly triangles: readonly TerrainMeshTriangleFacts[];
 	readonly vertices: readonly TerrainMeshVertexFacts[];
@@ -114,8 +115,8 @@ function createTerrainGeometryDrawUnit({
 	const sourceTriangleIds: string[] = [];
 	const material = classifyTerrainMaterialFamily({
 		domain: "outdoor-terrain",
-		placementRevisionAssumption,
 		plan: terrainMaterialPlan,
+		staticBatchId,
 	});
 	const layerSlotByPcode = new Map(
 		terrainMaterialPlan?.layerEntries.map(
@@ -319,8 +320,8 @@ function createTerrainBakeTextureUses(
 			textureUsesById.set(textureUseId, {
 				domain: "outdoor-terrain",
 				ownerDrawUnitIds: [drawUnit.drawUnitId],
-				placementRevisionAssumption: input.atlasSnapshot.revision,
 				source: textureUse.preparedTextureUse,
+				staticBatchId: input.staticBatchId,
 				textureUseId,
 			});
 		}

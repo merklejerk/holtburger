@@ -9,7 +9,7 @@ describe("V2 terrain material family classifier", () => {
 	it("classifies a single repeat color base as the first textured terrain family", () => {
 		const classification = classifyTerrainMaterialFamily({
 			domain: "outdoor-terrain",
-			placementRevisionAssumption: 42,
+			staticBatchId: "batch-a",
 			plan: createPlan({
 				layerEntries: [
 					createLayerEntry({
@@ -21,7 +21,7 @@ describe("V2 terrain material family classifier", () => {
 
 		expect(classification).toEqual({
 			materialBucketKey:
-				"shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|placement:42|texture:terrain-base:06000010",
+				"shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|batch:batch-a|texture:terrain-base:06000010",
 			materialFamily: "terrain-single-base-color",
 			primaryTextureUseId: "terrain-base:06000010",
 			terrainFallbackReasons: [],
@@ -32,7 +32,7 @@ describe("V2 terrain material family classifier", () => {
 	it("classifies prepared overlay bindings as layered terrain", () => {
 		const classification = classifyTerrainMaterialFamily({
 			domain: "outdoor-terrain",
-			placementRevisionAssumption: 42,
+			staticBatchId: "batch-a",
 			plan: createPlan({
 				layerEntries: [
 					createLayerEntry({
@@ -57,7 +57,7 @@ describe("V2 terrain material family classifier", () => {
 
 		expect(classification).toMatchObject({
 			materialBucketKey:
-				"shader:terrain-layered|domain:outdoor-terrain|sampler:color-mask-detail|placement:42|signature:test-plan",
+				"shader:terrain-layered|domain:outdoor-terrain|sampler:color-mask-detail|batch:batch-a|signature:test-plan",
 			materialFamily: "terrain-layered",
 			primaryTextureUseId: "terrain-base:06000010",
 			textureUseIds: [
@@ -72,7 +72,7 @@ describe("V2 terrain material family classifier", () => {
 	it("classifies multiple prepared base textures as layered terrain", () => {
 		const classification = classifyTerrainMaterialFamily({
 			domain: "outdoor-terrain",
-			placementRevisionAssumption: 42,
+			staticBatchId: "batch-a",
 			plan: createPlan({
 				layerEntries: [
 					createLayerEntry({
@@ -98,7 +98,7 @@ describe("V2 terrain material family classifier", () => {
 	it("classifies prepared landscape detail as layered terrain", () => {
 		const classification = classifyTerrainMaterialFamily({
 			domain: "outdoor-terrain",
-			placementRevisionAssumption: 42,
+			staticBatchId: "batch-a",
 			plan: createPlan({
 				detailRoles: [
 					{
@@ -128,7 +128,7 @@ describe("V2 terrain material family classifier", () => {
 	it("falls back when a layered binding is missing its prepared texture use", () => {
 		const classification = classifyTerrainMaterialFamily({
 			domain: "outdoor-terrain",
-			placementRevisionAssumption: 42,
+			staticBatchId: "batch-a",
 			plan: createPlan({
 				layerEntries: [
 					createLayerEntry({

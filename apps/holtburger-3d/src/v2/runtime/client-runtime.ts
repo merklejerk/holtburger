@@ -1,7 +1,12 @@
 import { HostBackedAssetService } from "../assets/asset-service";
 import type { AssetService, AssetServiceSnapshot } from "../assets/contracts";
 import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
-import type { Renderer, RendererSnapshot } from "../renderer/types";
+import type {
+	Renderer,
+	RendererSnapshot,
+	StaticResidencyDelta,
+	TexturePlacementUpdate,
+} from "../renderer/types";
 import type { FrameState } from "../renderer/types";
 import {
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
@@ -17,6 +22,7 @@ import {
 import { StaticCoordinator } from "../static/coordinator/static-coordinator";
 import type {
 	StaticCoordinatorSnapshot,
+	StaticCoordinatorCommitDelta,
 	StaticDemand,
 	StaticDrawUnit,
 	StaticLodRadii,
@@ -43,9 +49,21 @@ export interface RuntimeSnapshot {
 	readonly host: RuntimeHostSnapshot;
 	readonly renderer: RendererSnapshot;
 	readonly static: StaticCoordinatorSnapshot;
+	readonly staticMaterialization: StaticMaterializationSnapshot;
 }
 
 export type RuntimeSnapshotListener = (snapshot: RuntimeSnapshot) => void;
+
+interface StaticMaterializationSnapshot {
+	readonly pendingRevisions: readonly number[];
+	readonly committedRevisions: readonly number[];
+	readonly failed: readonly StaticMaterializationFailureSnapshot[];
+}
+
+interface StaticMaterializationFailureSnapshot {
+	readonly revision: number;
+	readonly message: string;
+}
 
 export interface ClientRuntime {
 	requestStaticWork(command: StaticWorkCommand): void;
@@ -98,6 +116,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#lastStaticSnapshot: StaticCoordinatorSnapshot;
 	#lastStaticRequest: StaticWorkCommand | null = null;
 	#renderAnchorLandblockId: number | null = null;
+	#staticMaterializationQueue: Promise<void> = Promise.resolve();
+	#pendingStaticMaterializations = new Set<number>();
+	#committedStaticMaterializations: number[] = [];
+	#failedStaticMaterializations: StaticMaterializationFailureSnapshot[] = [];
 	#disposed = false;
 
 	constructor(
@@ -139,27 +161,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		);
 		this.#unsubscribeStaticCommits = staticCoordinator.subscribeCommits(
 			(delta) => {
-				this.#renderer.applyStaticDelta({
-					addedDrawUnitPlacements: delta.addedDrawUnits.map((drawUnit) => ({
-						drawUnit,
-						translation: createStaticDrawUnitTranslation(
-							drawUnit,
-							this.#renderAnchorLandblockId,
-						),
-					})),
-					removedDrawUnitIds: delta.removedDrawUnitIds,
-					revision: delta.revision,
-				});
-				void this.#textureManager
-					.applyStaticCommitDelta(delta)
-					.then((textureUpdate) => {
-						if (textureUpdate) {
-							this.#renderer.applyTexturePlacementUpdate(textureUpdate);
-						}
-					})
-					.catch((error: unknown) => {
-						console.error("V2 texture placement update failed.", error);
-					});
+				this.#enqueueStaticMaterialization(delta);
 			},
 		);
 	}
@@ -238,6 +240,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 			lastStaticRequest: this.#lastStaticRequest,
 			renderer: this.#lastRendererSnapshot,
 			static: this.#lastStaticSnapshot,
+			staticMaterialization: {
+				committedRevisions: this.#committedStaticMaterializations,
+				failed: this.#failedStaticMaterializations,
+				pendingRevisions: Array.from(this.#pendingStaticMaterializations).sort(
+					(a, b) => a - b,
+				),
+			},
 			status: this.#disposed
 				? "disposed"
 				: this.#lastStaticSnapshot.requested > 0
@@ -253,6 +262,90 @@ class ClientRuntimeImpl implements ClientRuntime {
 			listener(snapshot);
 		}
 	}
+
+	#enqueueStaticMaterialization(delta: StaticCoordinatorCommitDelta): void {
+		this.#pendingStaticMaterializations.add(delta.revision);
+		this.#emit();
+		this.#staticMaterializationQueue = this.#staticMaterializationQueue
+			.then(() => this.#materializeStaticCommit(delta))
+			.catch((error: unknown) => {
+				this.#recordStaticMaterializationFailure(delta.revision, error);
+			});
+	}
+
+	async #materializeStaticCommit(
+		delta: StaticCoordinatorCommitDelta,
+	): Promise<void> {
+		const textureUpdate =
+			await this.#textureManager.applyStaticCommitDelta(delta);
+		if (this.#disposed) {
+			return;
+		}
+
+		const staticDelta = createStaticResidencyDelta(
+			delta,
+			this.#renderAnchorLandblockId,
+		);
+		applyMaterializedStaticCommit(this.#renderer, textureUpdate, staticDelta);
+		this.#pendingStaticMaterializations.delete(delta.revision);
+		this.#committedStaticMaterializations = appendBoundedRevision(
+			this.#committedStaticMaterializations,
+			delta.revision,
+		);
+		this.#emit();
+	}
+
+	#recordStaticMaterializationFailure(revision: number, error: unknown): void {
+		this.#pendingStaticMaterializations.delete(revision);
+		const message = error instanceof Error ? error.message : String(error);
+		this.#failedStaticMaterializations = appendBoundedFailure(
+			this.#failedStaticMaterializations,
+			{ message, revision },
+		);
+		this.#emit();
+	}
+}
+
+function applyMaterializedStaticCommit(
+	renderer: Renderer,
+	textureUpdate: TexturePlacementUpdate | null,
+	staticDelta: StaticResidencyDelta,
+): void {
+	if (textureUpdate) {
+		renderer.applyTexturePlacementUpdate(textureUpdate);
+	}
+	renderer.applyStaticDelta(staticDelta);
+}
+
+function createStaticResidencyDelta(
+	delta: StaticCoordinatorCommitDelta,
+	renderAnchorLandblockId: number | null,
+): StaticResidencyDelta {
+	return {
+		addedDrawUnitPlacements: delta.addedDrawUnits.map((drawUnit) => ({
+			drawUnit,
+			translation: createStaticDrawUnitTranslation(
+				drawUnit,
+				renderAnchorLandblockId,
+			),
+		})),
+		removedDrawUnitIds: delta.removedDrawUnitIds,
+		revision: delta.revision,
+	};
+}
+
+function appendBoundedRevision(
+	revisions: readonly number[],
+	revision: number,
+): number[] {
+	return [...revisions, revision].slice(-8);
+}
+
+function appendBoundedFailure(
+	failures: readonly StaticMaterializationFailureSnapshot[],
+	failure: StaticMaterializationFailureSnapshot,
+): StaticMaterializationFailureSnapshot[] {
+	return [...failures, failure].slice(-8);
 }
 
 function normalizeStaticWorkCommand(

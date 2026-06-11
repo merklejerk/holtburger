@@ -48,12 +48,20 @@ describe("V2 texture manager", () => {
 			placements: [
 				{
 					format: "rgba8",
+					filteringMode: "anisotropic-4x",
 					height: 1,
 					kind: "direct-texture",
+					mipmapsGenerated: true,
+					anisotropy: 4,
 					placementRevision: 1,
 					rect: [0, 0, 1, 1],
+					sampleClass: "rgba-color",
+					samplerPolicyKey:
+						"sample=rgba-color;filter=anisotropic-4x;mips=on;aniso=4",
 					textureRefId: STABLE_TEXTURE_REF_ID,
 					textureUseId: "terrain-a:prepared-texture:06000010",
+					wrapS: "repeat",
+					wrapT: "repeat",
 					width: 1,
 				},
 			],
@@ -248,6 +256,48 @@ describe("V2 texture manager", () => {
 		expect(update?.placements).toHaveLength(1);
 	});
 
+	it("keeps exact mask pages out of generated mip policy", async () => {
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+		});
+
+		const update = await textureManager.applyStaticCommitDelta(
+			createCommitDelta({
+				outputFormat: "rgba8",
+				usage: "mask",
+			}),
+		);
+
+		expect(update?.placements[0]).toMatchObject({
+			anisotropy: 4,
+			filteringMode: "anisotropic-4x",
+			mipmapsGenerated: false,
+			sampleClass: "rgba-mask",
+			samplerPolicyKey:
+				"sample=rgba-mask;filter=anisotropic-4x;mips=off;aniso=4",
+			wrapS: "clamp-to-edge",
+			wrapT: "clamp-to-edge",
+		});
+	});
+
+	it("carries nearest filtering as placement policy instead of rebaking geometry", async () => {
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+			filteringMode: "nearest",
+		});
+
+		const update = await textureManager.applyStaticCommitDelta(
+			createCommitDelta({ outputFormat: "rgba8" }),
+		);
+
+		expect(update?.placements[0]).toMatchObject({
+			anisotropy: 1,
+			filteringMode: "nearest",
+			mipmapsGenerated: false,
+			samplerPolicyKey: "sample=rgba-color;filter=nearest;mips=off;aniso=1",
+		});
+	});
+
 	it("fails explicitly when normalized rgba8 byte length is invalid", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService({
@@ -281,6 +331,7 @@ class FixtureAssetService implements AssetService {
 			payload: createPreparedTexturePayload(
 				this.#payloadOptions ?? {
 					outputFormat,
+					usage: getPreparedTextureUsage(key),
 				},
 			),
 			preparedAt: "test",
@@ -341,6 +392,7 @@ function createCommitDelta(options: {
 	readonly placementRevisionAssumption?: number;
 	readonly renderSurfaceId?: number;
 	readonly textureUseId?: string;
+	readonly usage?: PreparedTextureUseIdentity["usage"];
 }): StaticCoordinatorCommitDelta {
 	const drawUnitId = options.drawUnitId ?? "terrain-a";
 	const renderSurfaceId = options.renderSurfaceId ?? 0x06000010;
@@ -361,7 +413,7 @@ function createCommitDelta(options: {
 					kind: "prepared-texture-use",
 					outputFormat: options.outputFormat,
 					renderSurfaceId,
-					usage: "color",
+					usage: options.usage ?? "color",
 				},
 				textureUseId,
 			},
@@ -447,6 +499,7 @@ interface PreparedTexturePayloadOptions {
 	readonly byteLength?: number;
 	readonly levelFormat?: string;
 	readonly outputFormat: "rgba8" | "dxt1";
+	readonly usage?: PreparedTextureUseIdentity["usage"];
 }
 
 function createPreparedTexturePayload(options: PreparedTexturePayloadOptions) {
@@ -470,6 +523,22 @@ function createPreparedTexturePayload(options: PreparedTexturePayloadOptions) {
 		mipPolicy: "none",
 		outputFormat: options.outputFormat,
 		renderSurfaceId: 0x06000010,
-		usage: "color",
+		usage: options.usage ?? "color",
 	};
+}
+
+function getPreparedTextureUsage(
+	key: HostAssetKey,
+): PreparedTextureUseIdentity["usage"] {
+	if (key.id.includes("usage=detail")) {
+		return "detail";
+	}
+	if (key.id.includes("usage=mask")) {
+		return "mask";
+	}
+	if (key.id.includes("usage=raw")) {
+		return "raw";
+	}
+
+	return "color";
 }

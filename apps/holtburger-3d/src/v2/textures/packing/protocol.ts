@@ -6,6 +6,7 @@ export interface TexturePackingJob {
 	readonly domain: StaticDomain;
 	readonly placementRevision: number;
 	readonly page: TexturePackingPageConstraints;
+	readonly cohorts?: readonly TexturePackingCohort[];
 	readonly sources: readonly TexturePackingSource[];
 }
 
@@ -13,6 +14,14 @@ interface TexturePackingPageConstraints {
 	readonly width: number;
 	readonly height: number;
 	readonly format: "rgba8";
+	readonly gutterPixels?: number;
+	readonly maxTextureCount?: number;
+	readonly pageSelection?: "minimize-memory" | "minimize-textures";
+}
+
+interface TexturePackingCohort {
+	readonly key: string;
+	readonly textureUseIds: readonly string[];
 }
 
 interface TexturePackingSource {
@@ -28,7 +37,7 @@ export interface TexturePackingResult {
 	readonly rects: readonly TexturePackingRect[];
 }
 
-export interface TexturePackingPagePixels {
+interface TexturePackingPagePixels {
 	readonly pageId: string;
 	readonly width: number;
 	readonly height: number;
@@ -36,7 +45,7 @@ export interface TexturePackingPagePixels {
 	readonly pixels: Uint8Array;
 }
 
-export interface TexturePackingRect {
+interface TexturePackingRect {
 	readonly textureUseId: string;
 	readonly pageId: string;
 	readonly rect: readonly [number, number, number, number];
@@ -77,5 +86,13 @@ export interface TexturePackingWorkerPort {
 	removeEventListener(
 		type: "message",
 		listener: (event: MessageEvent<TexturePackingWorkerThreadMessage>) => void,
+	): void;
+}
+
+export interface TexturePackingWorkerGlobalPort {
+	postMessage(message: TexturePackingWorkerThreadMessage): void;
+	addEventListener(
+		type: "message",
+		listener: (event: MessageEvent<TexturePackingWorkerMainMessage>) => void,
 	): void;
 }

@@ -65,6 +65,7 @@ Verification commands to use as the implementation grows:
 - `cd apps/holtburger-3d && npm run test:ts`
 
 Each implementation phase should run `check`, `lint:ts`, `lint:dead`, and `test:ts` before being marked complete. Until the existing Knip baseline is cleaned or explicitly configured, `lint:dead` failures must be recorded and any new findings introduced by the phase must be fixed before moving on.
+
 - Browser visual verification through the V2 harness.
 
 ## Non-Negotiable Rules
@@ -840,31 +841,142 @@ Verification:
 - `npm run test:ts -- src/v2/static/terrain/bake/terrain-material-layer-planner.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts src/v2/static/terrain/terrain-resolver.test.ts src/v2/import-boundary.test.ts`
 - `npm run check`
 
-### Phase 10B: Terrain Shader And Material Binding Parity
+### Phase 10B1: Texture Packing And Sampling Policy Foundation
 
-Purpose: implement the first credible V2 terrain material path using the texture roles and placement assumptions from Phase 10A.
+Status: complete.
+
+Purpose: make V2 texture packing, sampler policy, and GPU upload semantics real enough for terrain material binding to build on.
 
 Deliverables:
 
-- Browser runtime wiring for `TexturePackingWorkerClient` before multi-source terrain atlas pages become the normal material path. The in-process shelf packer may remain only as a test/plain-browser fallback.
-- Terrain shader/material-family rules for the first credible terrain material path.
-- WebGL2 shader inputs, texture bindings, sampler policy, and material uniforms for terrain base/mask/detail behavior.
+- Browser runtime wiring for `TexturePackingWorkerClient` before multi-source terrain atlas pages become the normal material path.
+- V2-owned runtime texture page policy for prepared texture usages.
 - Explicit packed-page mip generation policy for terrain color/detail pages, with level-zero host prepared pixels as the only V2 prepared texture input.
 - V2 texture filtering policy equivalent to the useful V1 behavior: nearest, linear, and anisotropic filtering modes; generated GPU mipmaps for filtered color/detail packed pages; no generated mipmaps for exact/data/mask pages unless a mask-safe policy is explicitly proven.
-- Atlas packing requirements for mipped terrain pages, including gutters/padding wide enough to avoid cross-rect bleed after GPU mip generation.
-- Renderer sampler-policy update path that can regenerate missing packed-page mipmaps and update sampler parameters without rebaking terrain geometry or reallocating draw units.
+- V2-owned atlas layout and packing behavior ported from the useful lower-level V1 texture-page planner behavior, without imports from V1 renderer modules in normal V2 runtime code.
+- Tests for texture-packing worker runtime construction/fallback, host level-zero texture requests, packed-page mip generation, no-mip exact/data page policy, V1-derived layout/gutter/capacity behavior, and geometry-not-rebaked placement metadata changes.
+
+Acceptance criteria:
+
+- V2 terrain prepared texture identity remains free of source mip-chain and color-space policy. The only host mip/color-space transport spelling is the prepared-texture boundary's level-zero linear request; any visible mipmapping or exact/data/color sampling behavior comes from packed-page renderer policy after atlas assembly.
+- Browser V2 runtime can use worker-backed texture packing, and runtime disposal tears down worker-backed packers.
+- Default V2 packing uses the V1-derived `AtlasTexturePacker`; `ShelfTexturePacker` is not the normal terrain atlas path and remains only as a compatibility alias or narrow fallback.
+- Texture placement output carries sample class, filtering mode, anisotropy, mip generation status, wrap mode, and sampler-policy key.
+- WebGL2 direct texture upload applies placement wrap/filter policy, generates GPU mipmaps only when the placement says they were generated, and applies anisotropic filtering when the browser extension is available.
+
+Implementation notes:
+
+- 2026-06-11: Browser V2 runtime now constructs a physical texture-packing worker and passes a worker-backed `TexturePacker` into `TextureManager` when the Tauri host is available. Runtime disposal now disposes the texture manager so worker-backed packers can tear down their worker.
+- 2026-06-11: Added V2-owned runtime texture page policy for prepared texture usages. `color` and `detail` pages are repeat/filterable and can receive generated GPU mipmaps under filtered modes. `mask` and `raw` pages are clamped/exact and do not generate mipmaps. This keeps mip behavior as renderer/page policy and keeps source prepared texture identity free of source mip-chain policy.
+- 2026-06-11: `TexturePlacement` now carries sample class, filtering mode, anisotropy, mip generation status, wrap mode, and sampler-policy key. This avoids a bug where the renderer could otherwise infer anisotropic filtering even if the texture manager emitted a nearest-filter placement.
+- 2026-06-11: WebGL2 direct texture upload now applies placement wrap/filter policy, generates GPU mipmaps only when the placement says they were generated, and applies anisotropic filtering when the browser extension is available.
+- 2026-06-11: Ported the lower-level V1 atlas layout behavior into V2-owned texture packing code. V2 packing now uses deterministic power-of-two page selection, max-rect free-space placement, optional cohort constraints, source-too-large/atlas-full overflow reporting, and explicit gutter pixel duplication. Browser worker packing and default `TextureManager` packing use `AtlasTexturePacker`; `ShelfTexturePacker` remains only as a compatibility alias for old tests/call sites.
+- 2026-06-11: Spicy caveat: V2 renderer sampling still ignores placement rect transforms. The packer can now emit padded or multi-rect pages, but the current direct terrain shader path is only visually safe for no-gutter direct placements until the material binding step applies atlas rect UV transforms.
+
+Verification:
+
+- `npm run test:ts -- src/v2/textures/packing/atlas-layout.test.ts src/v2/textures/packing/packer.test.ts src/v2/textures/packing/worker-client.test.ts src/v2/textures/sampling-policy.test.ts src/v2/textures/texture-manager.test.ts src/v2/runtime/client-runtime.test.ts src/v2/static/terrain/bake/terrain-material-layer-planner.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts src/v2/import-boundary.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- Prettier check on touched files.
+- `git diff --check`
+- `npm run lint:dead` still fails on the existing baseline only; new atlas/protocol exports were made private and are no longer listed.
+
+### Phase 10B2: Atomic Materialized Static Commit
+
+Status: pending.
+
+Purpose: stop adding normal terrain/static draw units to the renderer before their required initial texture and material bindings are ready.
+
+Deliverables:
+
+- Runtime/static commit ordering change so initial renderer `applyStaticDelta` for materialized draw units happens only after required texture placement/binding commit succeeds.
+- A clear split between normal materialized draw units and intentional fallback/debug draw units. Fallback output must be explicit in bake/commit data, not an implicit renderer state caused by missing texture bindings.
+- Texture manager commit result that can provide initial draw-unit texture bindings before the renderer sees the corresponding draw units.
+- Runtime failure path for rejected/stale/missing texture placements that prevents half-ready normal draw units from entering renderer residency.
+- Focused tests proving a textured terrain draw unit is not added to the renderer before required texture placement is ready, and that fallback/debug draw units can still be added intentionally.
+
+Acceptance criteria:
+
+- Normal textured terrain does not briefly render as flat/untextured only because texture placement is still pending.
+- Renderer code no longer needs to support incomplete normal terrain materials for initial residency; incomplete material states are represented as explicit fallback/debug products or rejected commits.
+- Placement changes after initial residency can still update renderer resources independently without rebaking geometry.
+- Static coordinator/runtime snapshots can distinguish pending materialization, committed residency, and failed materialization.
+
+Implementation notes:
+
+- 2026-06-11: Course correction: initial texture placement independence was conflated with first renderer residency. Keep later repack/sampler updates independent, but make the initial renderer add atomic with required material/texture readiness so we do not keep extending half-ready renderable complexity.
+
+### Phase 10B3: Terrain Material Family Cutover
+
+Status: pending.
+
+Purpose: replace the temporary Phase 8 terrain probe family with typed terrain material-family output driven by Phase 10A terrain material plans.
+
+Deliverables:
+
+- Terrain shader/material-family rules for the first credible terrain material path.
 - Terrain draw-unit bucketing by compatible shader, sampler bindings, sampler state, device state, domain, and texture placement assumptions.
 - Removal or replacement of the Phase 8 `terrain-phase8-texture-probe` material family from normal terrain bake output.
-- Tests for texture-packing worker runtime construction/fallback, material-family classification, renderer binding construction, host level-zero texture requests, packed-page mip generation, no-mip exact/data page policy, sampler policy updates, texture placement failure surfacing, and geometry-not-rebaked placement changes.
+- Tests for material-family classification, terrain draw-unit bucketing, and fallback behavior when a material plan cannot bind.
 
 Acceptance criteria:
 
 - `terrain-phase8-texture-probe` is removed or unreachable from normal terrain bake output.
 - Terrain material output is driven by typed material-family classification and texture role bindings.
+- Phase 10A terrain fallback reasons remain typed and visible in bake output; missing bindings do not silently degrade to the old probe family.
+
+### Phase 10B4: Terrain Atlas Binding And Rect UVs
+
+Status: pending.
+
+Purpose: bind Phase 10A terrain material plans to packed V2 texture pages in WebGL2 without relying on direct full-page texture assumptions.
+
+Deliverables:
+
+- V2 terrain bucket/page-class planning above the lower-level atlas packer so terrain color, mask, and detail pages get role-specific capacity and gutter policy.
+- WebGL2 shader inputs, texture bindings, sampler policy, material uniforms, and atlas rect UV transforms for terrain base/overlay/mask/road/detail behavior.
+- True multi-source packed terrain pages, including atlas rect transforms before relying on generated mipmaps for atlas pages that contain more than one rect.
+- Tests for renderer binding construction, atlas rect transform behavior, page-class policy, and no V1 `world-display` imports from runtime V2 code.
+
+Acceptance criteria:
+
+- V2 terrain can bind packed pages with multiple rects without sampling neighboring rects or gutter-only regions.
+- Terrain color/detail pages can use generated GPU mipmaps only after page gutters/padding and rect transforms are in place.
+- Mask/raw pages remain exact/no-mip unless a mask-safe policy is explicitly proven.
+
+### Phase 10B5: Sampler Policy Update Lifecycle
+
+Status: pending.
+
+Purpose: make filtering changes a renderer/resource update instead of a geometry rebake.
+
+Deliverables:
+
+- Renderer sampler-policy update path that can regenerate missing packed-page mipmaps and update sampler parameters without rebaking terrain geometry or reallocating draw units.
+- Runtime/API path for nearest, linear, and anisotropic filtering updates.
+- Tests proving sampler policy changes update resident texture/page resources without rebaking terrain geometry or reallocating draw units.
+
+Acceptance criteria:
+
 - Placement changes and sampler policy changes remain renderer/resource updates and do not require geometry rebaking.
-- V2 terrain prepared texture identity remains free of source mip-chain and color-space policy. The only host mip/color-space transport spelling is the prepared-texture boundary's level-zero linear request; any visible mipmapping or exact/data/color sampling behavior comes from packed-page renderer policy after atlas assembly.
 - Filtering changes can be applied as renderer resource-policy changes, and the resulting texture/page inspection data exposes whether mipmaps were generated.
+
+### Phase 10B6: Terrain Texture Diagnostics And Failure Surfacing
+
+Status: pending.
+
+Purpose: expose terrain material, texture placement, fallback, and sampler failures outside the console before visual parity work.
+
+Deliverables:
+
+- Runtime or harness diagnostics for terrain fallback reasons, texture placement failures, page policy, mip status, and texture bindings.
+- Tests or harness checks that placement failures and unsupported material binding cases are visible in snapshots/diagnostics.
+
+Acceptance criteria:
+
 - Texture placement failures are visible through runtime/harness diagnostics or snapshots, not only `console.error`.
+- Terrain material and texture diagnostics are specific enough to drive Phase 10C manual visual review.
 
 ### Phase 10C: Terrain Visual Parity Pass
 

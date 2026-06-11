@@ -61,7 +61,10 @@ Verification commands to use as the implementation grows:
 
 - `cd apps/holtburger-3d && npm run check`
 - `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
 - `cd apps/holtburger-3d && npm run test:ts`
+
+Each implementation phase should run `check`, `lint:ts`, `lint:dead`, and `test:ts` before being marked complete. Until the existing Knip baseline is cleaned or explicitly configured, `lint:dead` failures must be recorded and any new findings introduced by the phase must be fixed before moving on.
 - Browser visual verification through the V2 harness.
 
 ## Non-Negotiable Rules
@@ -626,6 +629,8 @@ Verification:
 
 ### Phase 9A: Texture Source Boundary And Packing Worker Protocol
 
+Status: complete.
+
 Purpose: cleanly separate host prepared-texture DTO interpretation from texture/atlas manager ownership, then introduce the worker boundary that will own atlas pixel assembly.
 
 Deliverables:
@@ -643,6 +648,33 @@ Acceptance criteria:
 - Prepared texture source validation remains hard-fail and typed at the asset/preparation boundary.
 - Texture-packing jobs can be scheduled and canceled without touching static bake workers or renderer state.
 - Packing worker output contains atlas pixels plus metadata only; final texture refs and WebGL upload remain outside the worker.
+
+Implementation notes:
+
+- Added a V2-owned prepared texture source boundary under `src/v2/assets/preparation/`. It owns prepared-texture host route construction, request/payload policy matching, normalized direct RGBA source validation, mip-level selection, and byte-length validation.
+- Updated `TextureManager` so it requests prepared texture assets and consumes `DirectRgbaTextureSource` records. It no longer parses host prepared-texture DTOs or validates DTO fields inline.
+- Added a texture-packing protocol/client/handler under `src/v2/textures/packing/`. The request shape carries typed direct texture sources, page constraints, static domain, and placement revision; the result shape carries atlas page pixels and rect metadata only.
+- Added cancellation semantics to the packing worker client. Canceled requests reject locally, post a `cancel-texture-pack` message, and discard late worker responses.
+- Added a deterministic shelf packer as the narrow Phase 9A worker implementation proof. It is intentionally not the final atlas registry/repack policy; Phase 9B owns commit/rebase/reuse behavior.
+
+Decisions and course corrections:
+
+- The prepared texture payload boundary now follows the ownership model discussed after Phase 8: asset/preparation code validates host DTO shape and normalized pixel policy; the texture manager owns refs/placements/lifetimes.
+- Direct RGBA validation still accepts host level format labels such as `A8R8G8B8` by validating the normalized prepared policy plus byte length rather than treating the host pixel-format label as the semantic output format.
+- The packing worker protocol deliberately does not mention renderer texture refs, GPU ids, draw-unit records, or static bake results. Those remain texture/atlas manager, renderer, and static coordinator concerns.
+
+Debt and follow-up:
+
+- Phase 9B must wire the packing worker into domain atlas registry commit/rebase/reject behavior and placement leases. Phase 9A only proves the worker boundary and payload shape.
+- Runtime still reports texture placement failures through `console.error`; Phase 10C or Phase 12A should surface texture/material failures in runtime or harness diagnostics.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- prepared-texture-source texture packing`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead` currently fails on the existing app baseline. Phase 9A-introduced Knip findings were removed; remaining findings are pre-existing legacy/V2 contract exports and should be handled by a dedicated Knip baseline cleanup/config pass.
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 9B: Domain Atlas Registry, Placement Revisions, And Leases
 
@@ -1035,6 +1067,7 @@ Mitigation: picking, inspection, frame metrics, terrain visual parity, dungeon v
 - Old world-display render-product and asset-prepare-worker assumptions are removed or no longer used by browser world rendering.
 - `cd apps/holtburger-3d && npm run check`
 - `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
 - `cd apps/holtburger-3d && npm run test:ts`
 
 ## Open Questions
@@ -1062,3 +1095,4 @@ Mitigation: picking, inspection, frame metrics, terrain visual parity, dungeon v
 - 2026-06-11: Atlas pixel packing should not be owned by static bake workers or the main-thread texture manager. Static bakers emit bake-local texture uses and placement requirements/assumptions; the texture/atlas manager owns atlas policy and delegates pixel assembly to texture-packing workers, while the renderer only performs final WebGL upload.
 - 2026-06-11: Review of the remaining phases found the plan aligned with the design doc but too coarse for v1 parity. Phase 9 is split into texture-source/packing-worker and atlas-registry work; Phase 10 is split into terrain role interpretation, shader/material binding, visual parity, and steering; picking/inspection/metrics parity and dungeon visual parity are explicit pre-cutover milestones.
 - 2026-06-11: Plan reassessment is now a recurring implementation activity. Steering phases after atlas, terrain, outdoor static/inspection, dungeon, and pre-cutover work must update this plan before the next major phase starts.
+- 2026-06-11: Phase verification now includes Knip through `npm run lint:dead`. The current app Knip baseline is not clean, so phases must run it, fix any newly introduced findings, and record remaining baseline failures until a dedicated cleanup/config pass makes it a hard green gate.

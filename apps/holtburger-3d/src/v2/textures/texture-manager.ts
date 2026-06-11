@@ -1,8 +1,10 @@
 import type { AssetService } from "../assets/contracts";
-import { createHostAssetKey } from "../assets/keys";
+import {
+	createPreparedTextureHostKey,
+	prepareDirectRgbaTextureSource,
+} from "../assets/preparation/prepared-texture-source";
 import type { TexturePlacementUpdate } from "../renderer/types";
 import type {
-	PreparedTextureUseIdentity,
 	StaticBakeTextureUse,
 	StaticCoordinatorCommitDelta,
 } from "../static/contracts";
@@ -103,39 +105,18 @@ export class TextureManager {
 		const prepared = await this.#assetService.requestPreparedAsset(
 			createPreparedTextureHostKey(textureUse.source),
 		);
-		const payload = parsePreparedTexturePayload(prepared.payload, textureUse.source);
-		const levelZero = payload.levels.find((level) => level.level === 0);
-		if (!levelZero) {
-			throw new Error(
-				`Prepared texture ${textureUse.textureUseId} has no mip level 0.`,
-			);
-		}
-		if (
-			payload.outputFormat !== "rgba8" ||
-			payload.mipPolicy !== "none" ||
-			payload.colorSpace !== "linear"
-		) {
-			throw new Error(
-				`Prepared texture ${textureUse.textureUseId} uses unsupported direct texture policy ${payload.outputFormat}/${payload.mipPolicy}/${payload.colorSpace}. Only rgba8/none/linear is supported in Phase 8.`,
-			);
-		}
-		const expectedByteLength = levelZero.width * levelZero.height * 4;
-		if (levelZero.bytes.byteLength !== expectedByteLength) {
-			throw new Error(
-				`Prepared texture ${textureUse.textureUseId} expected ${expectedByteLength} rgba8 bytes, got ${levelZero.bytes.byteLength}.`,
-			);
-		}
+		const source = prepareDirectRgbaTextureSource(prepared, textureUse.source);
 
 		const placement: RuntimeTexturePlacement = {
 			format: "rgba8",
-			height: levelZero.height,
+			height: source.height,
 			kind: "direct-texture",
-			pixels: levelZero.bytes,
+			pixels: source.pixels,
 			placementRevision: 1,
-			rect: [0, 0, levelZero.width, levelZero.height],
+			rect: [0, 0, source.width, source.height],
 			textureRefId: `texture-ref:${textureUse.textureUseId}`,
 			textureUseId: textureUse.textureUseId,
-			width: levelZero.width,
+			width: source.width,
 		};
 		this.#placementsByTextureUseId.set(textureUse.textureUseId, placement);
 		return placement;
@@ -143,65 +124,3 @@ export class TextureManager {
 }
 
 type RuntimeTexturePlacement = TexturePlacementUpdate["placements"][number];
-
-function createPreparedTextureHostKey(source: PreparedTextureUseIdentity) {
-	const query = new URLSearchParams({
-		cs: source.colorSpace,
-		mips: source.mipPolicy,
-		out: source.outputFormat,
-		usage: source.usage,
-	});
-
-	return createHostAssetKey(
-		"prepared-texture",
-		`${source.renderSurfaceId.toString(16).padStart(8, "0")}?${query.toString()}`,
-	);
-}
-
-function parsePreparedTexturePayload(
-	payload: unknown,
-	source: PreparedTextureUseIdentity,
-): PreparedTexturePayloadLike {
-	if (
-		typeof payload !== "object" ||
-		payload === null ||
-		(payload as { kind?: unknown }).kind !== "prepared-texture"
-	) {
-		throw new Error(
-			`Prepared texture payload for render surface ${source.renderSurfaceId} is not a prepared-texture payload.`,
-		);
-	}
-
-	const candidate = payload as PreparedTexturePayloadLike;
-	if (
-		candidate.renderSurfaceId !== source.renderSurfaceId ||
-		candidate.usage !== source.usage ||
-		candidate.outputFormat !== source.outputFormat ||
-		candidate.mipPolicy !== source.mipPolicy ||
-		candidate.colorSpace !== source.colorSpace
-	) {
-		throw new Error(
-			`Prepared texture payload for render surface ${source.renderSurfaceId} does not match the requested texture-use policy.`,
-		);
-	}
-
-	return candidate;
-}
-
-interface PreparedTexturePayloadLike {
-	readonly kind: "prepared-texture";
-	readonly renderSurfaceId: number;
-	readonly usage: string;
-	readonly outputFormat: string;
-	readonly mipPolicy: string;
-	readonly colorSpace: string;
-	readonly levels: readonly PreparedTextureLevelLike[];
-}
-
-interface PreparedTextureLevelLike {
-	readonly level: number;
-	readonly width: number;
-	readonly height: number;
-	readonly format: string;
-	readonly bytes: Uint8Array;
-}

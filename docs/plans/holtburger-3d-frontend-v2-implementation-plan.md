@@ -1120,7 +1120,7 @@ Purpose: keep terrain draw units structurally compatible with the renderer's one
 Deliverables:
 
 - Terrain material draw slicing accounts for both shader layer-table capacity and same-page terrain color texture capacity.
-- The default terrain color capacity is a named planner limit of four unique color texture refs per draw slice, matching the current V1-gutter-safe `2048` page budget for `512x512` terrain textures.
+- 2026-06-11 update: the terrain color-ref planner cap was an interim one-page atlas guard and is superseded by bounded renderer role-page slots. Terrain planning should slice by shader layer capacity and ownership/culling needs; texture placement/materialization owns page-slot overflow.
 - Terrain geometry baking emits additional landblock-scoped draw units when a landblock's material plan would otherwise require too many color textures for one atlas page.
 - Tests prove color-ref capacity slicing and texture-use ownership assignment across the resulting draw units.
 
@@ -1358,7 +1358,7 @@ Failed to close:
 
 #### Phase 10B4D4: Planner Cap Cleanup And Page-Slot Slicing
 
-Status: planned; next.
+Status: completed.
 
 Deliverables:
 
@@ -1376,9 +1376,21 @@ Verification:
 
 - Targeted terrain layer-planner and geometry-baker tests for layer capacity, page-slot overflow, and single-pcode multi-page eligibility.
 
+Implementation notes:
+
+- Removed the temporary `maxColorTextureRefsPerSlice` planner option and the default four-color-ref terrain slice cap.
+- Terrain draw slices are now driven by shader layer-entry capacity only. A single pcode/layer entry with base, three overlays, and road color remains eligible for one material layer entry instead of being marked unsupported by an approximate color-ref count.
+- Rewrote stale planner and geometry-baker tests that encoded the old one-page color-ref heuristic. Geometry-baker ownership now follows the layer-limit split: 9 unique repeated-base pcodes become 8 + 1 layer slices, not 4 + 4 + 1 color-ref slices.
+- Left runtime page-slot overflow enforcement in the texture/materialization path where committed atlas placements and draw-local page slots are actually known.
+
+Failed to close:
+
+- Planner-side "page-slot overflow slicing" is intentionally not implemented as a speculative color-ref count. If exact page-slot overflow needs pre-render slicing, it should happen after texture placement metadata exists, not in the terrain source-material planner.
+- Phase 10B4D5 still needs better diagnostics/snapshots for role-page counts and overflow; D4 only removed the stale planning heuristic.
+
 #### Phase 10B4D5: Diagnostics And Manual Terrain Recheck
 
-Status: planned.
+Status: planned; next.
 
 Deliverables:
 

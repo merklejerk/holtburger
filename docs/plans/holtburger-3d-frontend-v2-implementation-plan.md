@@ -732,6 +732,8 @@ Verification:
 
 ### Phase 9C: Plan Reassessment And Atlas Steering
 
+Status: complete.
+
 Purpose: reassess the plan after atlas ownership is real, before terrain parity builds on any accidental Phase 8/9 shortcuts.
 
 Deliverables:
@@ -747,22 +749,74 @@ Acceptance criteria:
 - Any mismatches between implementation and design doc are documented with a next-phase owner.
 - Verification targets for Phase 10C terrain visual comparison are named or tracked as open questions.
 
+Review references:
+
+- V2 texture/atlas path:
+  - `apps/holtburger-3d/src/v2/textures/texture-manager.ts`
+  - `apps/holtburger-3d/src/v2/textures/packing/`
+  - `apps/holtburger-3d/src/v2/static/terrain/bake/terrain-geometry-baker.ts`
+  - `apps/holtburger-3d/src/v2/renderer/webgl2/webgl2-renderer.ts`
+  - `apps/holtburger-3d/src/v2/runtime/client-runtime.ts`
+- V1 parity path:
+  - `apps/holtburger-3d/src/lib/world-display/terrain-blend-plan.ts`
+  - `apps/holtburger-3d/src/lib/world-display/terrain-tile-plan.ts`
+  - `apps/holtburger-3d/src/lib/world-display/region-detail-overlays.ts`
+  - `apps/holtburger-3d/src/lib/world-display/webgl2/families/terrain-family-submit.ts`
+  - `docs/plans/holtburger-3d-materials-texturing-strategy.md`
+  - `docs/plans/holtburger-3d-terrain-rendering-implementation-plan.md`
+
+Implementation notes:
+
+- The Phase 8 probe remains present and reachable in normal textured terrain bake output as `terrain-phase8-texture-probe`. It is explicitly temporary debt, not canonical terrain material vocabulary. Phase 10B owns removing or replacing it from normal terrain bake output.
+- The implemented ownership cut mostly matches the design doc: static bake output carries bake-local texture uses plus placement revision assumptions; `TextureManager` owns domain registries, runtime texture refs, reuse, lease accounting, stale revision rejection, and renderer placement updates; the WebGL2 renderer uploads committed texture placements and binds texture refs without host lookup or atlas planning.
+- The main design mismatch is physical worker construction for texture packing. The texture-packing protocol/client/handler exists, and `TextureManager` depends on a `TexturePacker` interface, but runtime composition still defaults to the in-process `ShelfTexturePacker`. Phase 10A may proceed because role/layer planning can be proven in bake contracts and tests without physical packing-worker construction. Phase 10B must wire browser `TexturePackingWorkerClient` before multi-source terrain atlas pages become the normal material path; the in-process shelf packer should remain a test/plain-browser fallback only.
+- V1 terrain parity is not a single-texture problem. The parity baseline decodes pcode terrain corners, chooses base/overlay terrain layers, selects terrain alpha masks by tcode and deterministic pcode PRNG, selects road masks/rotations, assigns bounded layer slots, slices overflow cases, and applies landscape detail as a separate region-global detail role with tiling/fade semantics.
+- V2 resolver payloads already carry useful Phase 10A source facts such as pcodes, terrain material counts, pcode encoding, texture-use roles, and region detail role facts. The missing piece is bake-owned terrain role/layer planning that converts those facts into typed bake-local texture uses, layer tables, fallback reasons, and draw slices without importing V1 modules or reintroducing renderer-side prepared-asset reads.
+
+Decisions and course corrections:
+
+- Do not remove `terrain-phase8-texture-probe` in Phase 9C. Removing it without the Phase 10A/10B replacement would regress the only textured V2 terrain proof. Keep it boxed as named debt and delete it from normal output in Phase 10B.
+- Do not block Phase 10A on physical browser texture-packing worker wiring. Phase 10A is a source interpretation and bake-contract phase. Blocking it on worker construction would couple control-plane steering to runtime plumbing that is only load-bearing once multi-source terrain material pages are committed.
+- Phase 10A should port the behavior semantics, not the old architecture. The V1 files are parity references; V2 must implement V2-owned terrain planning modules under `src/v2/` and keep Svelte, renderer, old prepared stores, old render products, and host route strings out of the semantic path.
+- Terrain detail remains separate from pcode base/overlay/road blending. Phase 10A may represent landscape detail as a typed terrain detail role/use, but Phase 10B should bind it as a separate material/shader input rather than folding it into pcode layer selection.
+
+Risks recorded:
+
+- Atlas capacity: the current degenerate one-source page path has not proven packed terrain color/mask/detail page capacity. Phase 10B must keep layer/page overflow explicit and Phase 10C must surface fallback reasons.
+- Repacking latency: domain registry revisions and lease accounting exist, but no real repack/rebase pressure has been tested. Phase 10B should avoid designing broad repack policy until terrain role pressure proves which placements must share pages.
+- Upload pressure: the renderer currently uploads committed direct placements immediately on the GL thread. Phase 10B/10C should watch for terrain material work turning one landblock request into many placement uploads and should expose failures outside `console.error`.
+- Worker message payload size: the protocol can carry atlas page pixels, but large packed terrain pages may copy substantial `Uint8Array` payloads. Physical worker wiring should use transferables before broad terrain/static texture pressure lands.
+- Visual target uncertainty: terrain material parity is ultimately visual. `0xda55ffff` is the known manual baseline landblock and may be used as the primary Phase 10C visual target because the user already assesses it manually. Additional targets should be added only when visual review shows `0xda55ffff` does not exercise an important case such as roads, landscape detail, alpha/mask behavior, or fallback/overflow diagnostics.
+
+Verification:
+
+- Read-only reassessment against the V2 files and V1 parity references listed above.
+- No code tests were run because Phase 9C changed planning documentation only.
+
 ### Phase 10A: Terrain Texture Roles, Pcode, And Layer Planning
 
 Purpose: replace the Phase 8 "one texture over the whole mesh" probe with source-driven terrain texture-role interpretation.
 
 Deliverables:
 
-- V2 terrain pcode decoding and layer selection based on rules evidenced by v1 terrain blend/tile planning.
-- Terrain color, alpha mask, road, and detail texture roles represented as typed bake-local texture uses.
-- Terrain draw-slice planning for material/shader layer limits.
-- Tests for pcode decoding, alpha/road selector rotation, layer slicing, texture role classification, missing role fallback, and representative known-landblock cases.
+- V2-owned terrain pcode decoding and layer selection based on the behavior evidenced by V1 terrain blend/tile planning:
+  - terrain corner code decoding;
+  - repeated-corner base/overlay selection;
+  - deterministic terrain alpha-map selection and rotation;
+  - road-code selection, all-road handling, road alpha-map selection, and rotation;
+  - terrain tiling normalization.
+- Typed terrain layer-plan records that map source quad pcodes to bounded layer slots and describe base color, terrain overlay color/mask, road color/mask, and landscape detail roles without host route strings.
+- Terrain color, alpha mask, road, road-alpha, and landscape detail roles represented as typed bake-local texture uses with role-specific sampler/wrap/color-space requirements.
+- Terrain draw-slice planning for material/shader layer limits, including explicit fallback reasons when a tile exceeds supported layer/role capacity.
+- V2-owned tests for pcode decoding, repeated-corner layer selection, alpha/road selector rotation, all-road selection, layer slicing, texture role classification, missing role fallback, and representative synthetic known-landblock cases.
+- A short audit that confirms no Phase 10A module imports V1 `world-display`, legacy asset stores, old render products, or renderer-side prepared-asset read models.
 
 Acceptance criteria:
 
 - Terrain texture roles are resolved before renderer ingestion and do not depend on route-string diagnostics or renderer-side prepared-asset reads.
 - Bake-local texture uses distinguish base color, alpha/mask, road, and detail roles where source data requires them.
 - Unsupported role combinations produce visible/typed fallback reasons instead of silently degrading to flat terrain.
+- `terrain-phase8-texture-probe` may still exist after Phase 10A, but Phase 10A output must make it mechanically replaceable by Phase 10B without changing resolver payloads or renderer ownership.
 
 ### Phase 10B: Terrain Shader And Material Binding Parity
 
@@ -770,17 +824,19 @@ Purpose: implement the first credible V2 terrain material path using the texture
 
 Deliverables:
 
+- Browser runtime wiring for `TexturePackingWorkerClient` before multi-source terrain atlas pages become the normal material path. The in-process shelf packer may remain only as a test/plain-browser fallback.
 - Terrain shader/material-family rules for the first credible terrain material path.
 - WebGL2 shader inputs, texture bindings, sampler policy, and material uniforms for terrain base/mask/detail behavior.
 - Terrain draw-unit bucketing by compatible shader, sampler bindings, sampler state, device state, domain, and texture placement assumptions.
 - Removal or replacement of the Phase 8 `terrain-phase8-texture-probe` material family from normal terrain bake output.
-- Tests for material-family classification, renderer binding construction, sampler policy updates, and geometry-not-rebaked placement changes.
+- Tests for texture-packing worker runtime construction/fallback, material-family classification, renderer binding construction, sampler policy updates, texture placement failure surfacing, and geometry-not-rebaked placement changes.
 
 Acceptance criteria:
 
 - `terrain-phase8-texture-probe` is removed or unreachable from normal terrain bake output.
 - Terrain material output is driven by typed material-family classification and texture role bindings.
 - Placement changes and sampler policy changes remain renderer/resource updates and do not require geometry rebaking.
+- Texture placement failures are visible through runtime/harness diagnostics or snapshots, not only `console.error`.
 
 ### Phase 10C: Terrain Visual Parity Pass
 
@@ -788,8 +844,8 @@ Purpose: compare V2 terrain rendering against v1 behavior on selected targets an
 
 Deliverables:
 
-- Named outdoor terrain verification landblocks covering ordinary terrain, alpha/mask use, road use, detail texture use, and fallback cases.
-- Manual visual comparison checklist against v1 harness behavior for those targets.
+- Manual visual comparison checklist against v1 harness behavior, with `0xda55ffff` as the primary known baseline target.
+- Additional outdoor terrain verification landblocks only if manual review of `0xda55ffff` does not cover important cases such as alpha/mask use, road use, landscape detail use, or fallback/overflow diagnostics.
 - Targeted automated tests for any parity gaps that can be reduced to deterministic material, placement, or bake rules.
 - Runtime or harness surfacing for terrain fallback reasons and texture placement failures.
 

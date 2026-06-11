@@ -1473,12 +1473,23 @@ Deliverables:
 
 - Renderer sampler-policy update path that can regenerate missing packed-page mipmaps and update sampler parameters without rebaking terrain geometry or reallocating draw units.
 - Runtime/API path for nearest, linear, and anisotropic filtering updates.
+- Browser Status/UI control that surfaces the active texture filtering mode and lets the user request nearest, linear, or anisotropic filtering without exposing texture pages, placements, or renderer internals to Svelte.
+- Diagnostics/report output that includes the active requested filtering mode alongside per-page realized filtering facts, so manual visual review can distinguish "requested policy" from "what this resident page currently uses."
 - Tests proving sampler policy changes update resident texture/page resources without rebaking terrain geometry or reallocating draw units.
 
 Acceptance criteria:
 
 - Placement changes and sampler policy changes remain renderer/resource updates and do not require geometry rebaking.
 - Filtering changes can be applied as renderer resource-policy changes, and the resulting texture/page inspection data exposes whether mipmaps were generated.
+- The browser UI displays the current filtering mode and invokes a runtime command such as `setTextureFilteringMode(mode)`; it does not call the renderer or texture manager directly.
+- Changing filtering mode updates resident texture-page sampler state and/or page mip realization without replacing static draw units, changing draw-unit ids, or scheduling resolver/baker work.
+
+Implementation shape notes:
+
+- Treat filtering mode as runtime-owned render/resource policy. Svelte owns only the selected UI value and forwards commands; the runtime owns policy revisioning; the texture/atlas manager owns logical sampler policy derivation for texture pages; the renderer owns WebGL sampler/mipmap application.
+- Prefer a narrow command/update pair over setter sprawl: one runtime command for the user's requested filtering mode, one texture-manager method to produce the affected texture-page policy update, and one renderer update carrying concrete page refs plus realized sampler policy facts.
+- Do not make the UI aware of atlas batches, texture-page ids, terrain role pages, mip generation rules, or anisotropy extension availability. Those remain diagnostics/inspection facts.
+- If the current placement contract makes this awkward, rename and reshape the texture-page placement/update contract directly instead of preserving `direct-texture` naming or adding compatibility shims.
 
 ### Phase 10B6: Terrain Texture Diagnostics And Failure Surfacing
 

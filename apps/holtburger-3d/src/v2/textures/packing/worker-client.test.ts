@@ -185,7 +185,9 @@ class FixtureWorkerPort implements TexturePackingWorkerPort {
 	}
 
 	emit(response: TexturePackingWorkerResponse): void {
-		const event = { data: response } as MessageEvent<TexturePackingWorkerResponse>;
+		const event = {
+			data: response,
+		} as MessageEvent<TexturePackingWorkerResponse>;
 		for (const listener of this.#listeners) {
 			listener(event);
 		}
@@ -205,10 +207,8 @@ function createPackingJob(): TexturePackingJob {
 		sources: [
 			{
 				source: {
-					colorSpace: "linear",
 					height: 1,
 					kind: "direct-rgba-texture-source",
-					mipPolicy: "none",
 					outputFormat: "rgba8",
 					pixels: new Uint8Array([255, 128, 0, 255]),
 					renderSurfaceId: 0x06000010,

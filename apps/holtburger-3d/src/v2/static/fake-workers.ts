@@ -49,7 +49,9 @@ export class DeferredStaticResolverClient implements StaticResolverClient {
 			readonly scope?: StaticScopePayload["scope"];
 		} = {},
 	): void {
-		const request = this.#pending.find((candidate) => candidate.requestId === requestId);
+		const request = this.#pending.find(
+			(candidate) => candidate.requestId === requestId,
+		);
 		const resolver = this.#resolvers.get(requestId);
 
 		if (!request || !resolver) {
@@ -105,7 +107,9 @@ export class DeferredStaticBakerClient implements StaticBakerClient {
 		workId: string,
 		result: Partial<Omit<StaticBakeResult, "work">> = {},
 	): void {
-		const input = this.#pending.find((candidate) => candidate.work.workId === workId);
+		const input = this.#pending.find(
+			(candidate) => candidate.work.workId === workId,
+		);
 		const resolver = this.#resolvers.get(workId);
 
 		if (!input || !resolver) {
@@ -180,8 +184,6 @@ export class ImmediateStaticResolverClient implements StaticResolverClient {
 				referencedTextureUses: [
 					{
 						kind: "prepared-texture-use",
-						colorSpace: "linear",
-						mipPolicy: "none",
 						outputFormat: "rgba8",
 						renderSurfaceId: createStableFakeRenderSurfaceId(job),
 						usage: "color",
@@ -218,7 +220,9 @@ function createFakeStaticBakeResult(
 	return {
 		atlasRegistryUpdates: result.atlasRegistryUpdates ?? [],
 		buildRevision: result.buildRevision ?? input.payload.sourceRevision,
-		drawUnits: result.drawUnits ?? [createPlaceholderDrawUnit(input.work.workId)],
+		drawUnits: result.drawUnits ?? [
+			createPlaceholderDrawUnit(input.work.workId),
+		],
 		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds ?? [],
 		staticPortalInteriorRecords: result.staticPortalInteriorRecords ?? [],
 		staticSourceMappings: result.staticSourceMappings ?? [],

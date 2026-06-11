@@ -174,6 +174,8 @@ function createTerrainDrawUnit(
 		primaryTextureUseId: null,
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
 		sourceTriangleIds: ["triangle-a"],
+		terrainFallbackReasons: [],
+		terrainMaterialPlan: null,
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
 		textureUseIds: [],
 		triangleCount: 1,

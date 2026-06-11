@@ -612,8 +612,8 @@ Decisions and course corrections:
 - Phase 8 intentionally binds a first prepared terrain texture directly over baked terrain UVs through `terrain-phase8-texture-probe`. It proves the ownership seam and renderer upload path, but it is not terrain material parity: pcode-driven layer selection, masks, detail textures, road overlays, and blend behavior remain Phase 10A-10C work.
 - Unsupported prepared texture formats currently fail hard at the texture manager boundary. The first direct path only accepts `rgba8`; compressed upload policy belongs in the later terrain material/atlas phases.
 - Texture placement updates are asynchronous after static geometry commit. This keeps geometry residency independent from texture preparation and avoids texture work in renderer hot paths.
-- Course correction: V2 initially generated prepared texture routes with descriptive query keys (`outputFormat`, `mipPolicy`, `colorSpace`), but the host prepared-texture boundary expects the established route query keys (`out`, `mips`, `cs`). V2 now preserves that transport spelling only at the host key boundary while keeping internal texture-use identity typed.
-- Course correction: the Phase 8 probe requests normalized prepared textures as `rgba8` / `none` / `linear`, which matches host validation. Earlier `rgba8` / `retail4` / `srgb` requests were invalid because `retail4` is for compressed prepared textures.
+- Course correction: V2 initially generated prepared texture routes with descriptive query keys, but the host prepared-texture boundary expects the established route query keys (`out`, `mips`, `cs`). V2 now preserves that transport spelling only at the host key boundary while keeping internal texture-use identity typed.
+- Course correction: the Phase 8 probe requests normalized prepared textures as `rgba8` / `none` / `linear`, which matches the V2 policy that frontend packing requests level-zero prepared pixels and generates any required packed-page GPU mipmaps after atlas assembly. Source-authored mip chains are intentionally not part of V2 frontend texture identity or sampler policy.
 
 Debt and follow-up:
 
@@ -795,6 +795,8 @@ Verification:
 
 ### Phase 10A: Terrain Texture Roles, Pcode, And Layer Planning
 
+Status: complete.
+
 Purpose: replace the Phase 8 "one texture over the whole mesh" probe with source-driven terrain texture-role interpretation.
 
 Deliverables:
@@ -818,6 +820,26 @@ Acceptance criteria:
 - Unsupported role combinations produce visible/typed fallback reasons instead of silently degrading to flat terrain.
 - `terrain-phase8-texture-probe` may still exist after Phase 10A, but Phase 10A output must make it mechanically replaceable by Phase 10B without changing resolver payloads or renderer ownership.
 
+Implementation notes:
+
+- Added V2-owned terrain material source facts to resolver payloads: terrain material type entries, terrain alpha-map entries, and road alpha-map entries now cross the resolver/baker boundary as typed identities instead of host route strings.
+- Added a pure V2 terrain material layer planner under `apps/holtburger-3d/src/v2/static/terrain/bake/` that implements the V1 parity rules for terrain-code decoding, repeated-corner base/overlay selection, deterministic terrain alpha-map selection and rotation, road/all-road selection, road alpha-map rotation, terrain tiling normalization, landscape detail role planning, bounded layer slots, overflow draw slices, and typed fallback reasons.
+- Terrain geometry bake output now carries `terrainMaterialPlan` and `terrainFallbackReasons` on the terrain draw unit. The draw unit still uses `terrain-phase8-texture-probe` when a primary prepared texture exists; Phase 10B owns replacing that probe material family with real shader/material binding.
+- Bake-local terrain texture-use IDs now include role and prepared usage as well as render-surface ID. This prevents color/mask/detail roles from colliding if source data reuses a render surface with different sampler or shader meaning.
+- V2 prepared texture-use identity no longer carries source mip-chain or color-space policy. Prepared texture host requests always ask for level-zero linear pixels at the host boundary; packed-page GPU mip generation and exact/data/color sampling behavior are renderer/page policies owned by Phase 10B.
+
+Decisions and course corrections:
+
+- Phase 10A did not bind the new terrain material plan in WebGL2. That remains Phase 10B, because this phase is the source-interpretation and bake-contract step.
+- Landscape detail is represented as a separate terrain material detail role with tiling and fade data. Building/environment/object detail roles are not folded into terrain pcode layer selection.
+- Missing material facts, missing prepared texture uses, invalid detail roles, and layer overflow now remain typed fallback reasons on bake output instead of becoming route-string diagnostics or silent flat-terrain degradation.
+- Source-authored mip-chain and color-space selection were removed from V2 frontend architecture. The only remaining `mips` and `cs` spellings are host transport query/payload fields owned by the prepared-texture boundary.
+
+Verification:
+
+- `npm run test:ts -- src/v2/static/terrain/bake/terrain-material-layer-planner.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts src/v2/static/terrain/terrain-resolver.test.ts src/v2/import-boundary.test.ts`
+- `npm run check`
+
 ### Phase 10B: Terrain Shader And Material Binding Parity
 
 Purpose: implement the first credible V2 terrain material path using the texture roles and placement assumptions from Phase 10A.
@@ -827,15 +849,21 @@ Deliverables:
 - Browser runtime wiring for `TexturePackingWorkerClient` before multi-source terrain atlas pages become the normal material path. The in-process shelf packer may remain only as a test/plain-browser fallback.
 - Terrain shader/material-family rules for the first credible terrain material path.
 - WebGL2 shader inputs, texture bindings, sampler policy, and material uniforms for terrain base/mask/detail behavior.
+- Explicit packed-page mip generation policy for terrain color/detail pages, with level-zero host prepared pixels as the only V2 prepared texture input.
+- V2 texture filtering policy equivalent to the useful V1 behavior: nearest, linear, and anisotropic filtering modes; generated GPU mipmaps for filtered color/detail packed pages; no generated mipmaps for exact/data/mask pages unless a mask-safe policy is explicitly proven.
+- Atlas packing requirements for mipped terrain pages, including gutters/padding wide enough to avoid cross-rect bleed after GPU mip generation.
+- Renderer sampler-policy update path that can regenerate missing packed-page mipmaps and update sampler parameters without rebaking terrain geometry or reallocating draw units.
 - Terrain draw-unit bucketing by compatible shader, sampler bindings, sampler state, device state, domain, and texture placement assumptions.
 - Removal or replacement of the Phase 8 `terrain-phase8-texture-probe` material family from normal terrain bake output.
-- Tests for texture-packing worker runtime construction/fallback, material-family classification, renderer binding construction, sampler policy updates, texture placement failure surfacing, and geometry-not-rebaked placement changes.
+- Tests for texture-packing worker runtime construction/fallback, material-family classification, renderer binding construction, host level-zero texture requests, packed-page mip generation, no-mip exact/data page policy, sampler policy updates, texture placement failure surfacing, and geometry-not-rebaked placement changes.
 
 Acceptance criteria:
 
 - `terrain-phase8-texture-probe` is removed or unreachable from normal terrain bake output.
 - Terrain material output is driven by typed material-family classification and texture role bindings.
 - Placement changes and sampler policy changes remain renderer/resource updates and do not require geometry rebaking.
+- V2 terrain prepared texture identity remains free of source mip-chain and color-space policy. The only host mip/color-space transport spelling is the prepared-texture boundary's level-zero linear request; any visible mipmapping or exact/data/color sampling behavior comes from packed-page renderer policy after atlas assembly.
+- Filtering changes can be applied as renderer resource-policy changes, and the resulting texture/page inspection data exposes whether mipmaps were generated.
 - Texture placement failures are visible through runtime/harness diagnostics or snapshots, not only `console.error`.
 
 ### Phase 10C: Terrain Visual Parity Pass

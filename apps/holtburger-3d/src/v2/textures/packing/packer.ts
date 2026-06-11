@@ -54,7 +54,11 @@ function packRgbaTexturesWithAtlasLayout(
 		job.sources.map((entry) => [entry.textureUseId, entry.source] as const),
 	);
 	const pages = layout.texturePages.map((layoutPage) => {
-		const pagePixels = createBlankPage(layoutPage.width, layoutPage.height);
+		const pagePixels = createBlankPage(
+			layoutPage.width,
+			layoutPage.height,
+			job.page.fillRgba,
+		);
 		for (const placement of layoutPage.placements) {
 			const source = sourceByTextureUseId.get(placement.atlasEntryKey);
 			if (!source) {
@@ -65,6 +69,7 @@ function packRgbaTexturesWithAtlasLayout(
 			blitRgbaWithGutter({
 				destination: pagePixels,
 				destinationWidth: layoutPage.width,
+				edgeMode: job.page.gutterEdgeMode ?? "clamp",
 				gutterPixels: placement.gutterPixels,
 				source: source.pixels,
 				sourceHeight: source.height,
@@ -103,8 +108,24 @@ function packRgbaTexturesWithAtlasLayout(
 	};
 }
 
-function createBlankPage(width: number, height: number): Uint8Array {
-	return new Uint8Array(width * height * 4);
+function createBlankPage(
+	width: number,
+	height: number,
+	fillRgba?: readonly [number, number, number, number],
+): Uint8Array {
+	const pixels = new Uint8Array(width * height * 4);
+	if (!fillRgba) {
+		return pixels;
+	}
+
+	for (let offset = 0; offset < pixels.length; offset += 4) {
+		pixels[offset] = fillRgba[0];
+		pixels[offset + 1] = fillRgba[1];
+		pixels[offset + 2] = fillRgba[2];
+		pixels[offset + 3] = fillRgba[3];
+	}
+
+	return pixels;
 }
 
 function createPageId(jobId: string, pageIndex: number): string {
@@ -114,6 +135,7 @@ function createPageId(jobId: string, pageIndex: number): string {
 function blitRgbaWithGutter(options: {
 	readonly destination: Uint8Array;
 	readonly destinationWidth: number;
+	readonly edgeMode: "clamp" | "repeat";
 	readonly source: Uint8Array;
 	readonly sourceWidth: number;
 	readonly sourceHeight: number;
@@ -126,14 +148,22 @@ function blitRgbaWithGutter(options: {
 		row < options.sourceHeight + options.gutterPixels;
 		row += 1
 	) {
-		const sourceY = clamp(row, 0, options.sourceHeight - 1);
+		const sourceY = resolveGutterSourceCoordinate(
+			row,
+			options.sourceHeight,
+			options.edgeMode,
+		);
 		const destinationY = options.y + row;
 		for (
 			let column = -options.gutterPixels;
 			column < options.sourceWidth + options.gutterPixels;
 			column += 1
 		) {
-			const sourceX = clamp(column, 0, options.sourceWidth - 1);
+			const sourceX = resolveGutterSourceCoordinate(
+				column,
+				options.sourceWidth,
+				options.edgeMode,
+			);
 			const sourceOffset = (sourceY * options.sourceWidth + sourceX) * 4;
 			const destinationOffset =
 				(destinationY * options.destinationWidth + options.x + column) * 4;
@@ -143,6 +173,18 @@ function blitRgbaWithGutter(options: {
 			);
 		}
 	}
+}
+
+function resolveGutterSourceCoordinate(
+	value: number,
+	size: number,
+	edgeMode: "clamp" | "repeat",
+): number {
+	if (edgeMode === "repeat") {
+		return ((value % size) + size) % size;
+	}
+
+	return clamp(value, 0, size - 1);
 }
 
 function clamp(value: number, min: number, max: number): number {

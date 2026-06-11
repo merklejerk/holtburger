@@ -14,6 +14,8 @@ interface TexturePackingPageConstraints {
 	readonly width: number;
 	readonly height: number;
 	readonly format: "rgba8";
+	readonly fillRgba?: readonly [number, number, number, number];
+	readonly gutterEdgeMode?: "clamp" | "repeat";
 	readonly gutterPixels?: number;
 	readonly maxTextureCount?: number;
 	readonly pageSelection?: "minimize-memory" | "minimize-textures";

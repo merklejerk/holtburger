@@ -25,7 +25,10 @@ import {
 
 const FILTERABLE_ATLAS_GUTTER_PIXELS = 4;
 const EXACT_ATLAS_GUTTER_PIXELS = 0;
+const TERRAIN_COLOR_ATLAS_GUTTER_PIXELS = 96;
+const TERRAIN_MASK_ATLAS_GUTTER_PIXELS = 16;
 const MAX_RUNTIME_ATLAS_PAGE_SIZE = 2048;
+const TERRAIN_COLOR_ATLAS_FILL_RGBA = [128, 128, 128, 255] as const;
 
 interface TextureManagerOptions {
 	readonly assetService: AssetService;
@@ -300,7 +303,7 @@ export class TextureManager {
 				],
 				domain: group.domain,
 				jobId: `texture-pack:${group.staticBatchId}:${group.pageClassKey}:${placementRevision}`,
-				page: createTexturePackingPageConstraints(group.entries),
+				page: createTexturePackingPageConstraints(group),
 				placementRevision,
 				sources: group.entries.map((entry) => ({
 					source: entry.source,
@@ -624,17 +627,29 @@ function createTexturePageClassKey(
 	].join("|");
 }
 
-function createTexturePackingPageConstraints(
-	entries: readonly PendingTexturePlacement[],
-): TexturePackingJob["page"] {
+function createTexturePackingPageConstraints({
+	domain,
+	entries,
+	pagePolicy,
+}: PendingTexturePlacementGroup): TexturePackingJob["page"] {
 	const gutterPixels = Math.max(
 		...entries.map((entry) =>
-			getRuntimeTexturePageGutterPixels(entry.pagePolicy),
+			getRuntimeTexturePageGutterPixels(domain, entry.pagePolicy),
 		),
 	);
 
+	const shouldUseTerrainColorFill =
+		domain === "outdoor-terrain" && pagePolicy.sampleClass === "rgba-color";
+
 	return {
+		...(shouldUseTerrainColorFill
+			? { fillRgba: TERRAIN_COLOR_ATLAS_FILL_RGBA }
+			: {}),
 		format: "rgba8",
+		gutterEdgeMode:
+			pagePolicy.wrapS === "repeat" && pagePolicy.wrapT === "repeat"
+				? "repeat"
+				: "clamp",
 		gutterPixels,
 		height: MAX_RUNTIME_ATLAS_PAGE_SIZE,
 		pageSelection: "minimize-textures",
@@ -643,8 +658,25 @@ function createTexturePackingPageConstraints(
 }
 
 function getRuntimeTexturePageGutterPixels(
+	domain: StaticDomain,
 	pagePolicy: RuntimeTexturePagePolicy,
 ): number {
+	if (domain === "outdoor-terrain") {
+		if (pagePolicy.sampleClass === "rgba-color") {
+			return Math.max(
+				FILTERABLE_ATLAS_GUTTER_PIXELS,
+				TERRAIN_COLOR_ATLAS_GUTTER_PIXELS,
+			);
+		}
+
+		if (pagePolicy.sampleClass === "rgba-mask") {
+			return Math.max(
+				EXACT_ATLAS_GUTTER_PIXELS,
+				TERRAIN_MASK_ATLAS_GUTTER_PIXELS,
+			);
+		}
+	}
+
 	return pagePolicy.sampleClass === "rgba-color" ||
 		pagePolicy.sampleClass === "rgba-detail"
 		? FILTERABLE_ATLAS_GUTTER_PIXELS

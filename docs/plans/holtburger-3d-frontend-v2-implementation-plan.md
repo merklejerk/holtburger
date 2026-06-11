@@ -70,7 +70,7 @@ Verification commands to use as the implementation grows:
 - Workers receive concrete static work requests, not camera radius or browser-mode interest policy.
 - The renderer consumes committed records and imperative updates. It does not fetch host assets, walk dependencies, or plan atlases.
 - The texture/atlas manager owns logical texture refs. Workers do not allocate renderer IDs, GPU IDs, or final texture ref IDs.
-- Static bake output uses top-level peer result fields: draw units, atlas updates, spatial records, visibility records, portal/interior records, source mappings, and dynamic seeds.
+- Static bake output uses top-level peer result fields: draw units, bake-local texture uses, placement requirements/assumptions, spatial records, visibility records, portal/interior records, source mappings, and dynamic seeds. Atlas pixel buffers are produced by texture-packing workers under texture/atlas manager ownership, not by static bake workers.
 - Terrain is the first visible slice and has a dedicated terrain resolution/bake adapter.
 - Diagnostics must be consumers of snapshots and inspection APIs, not drivers of service interfaces.
 - Every phase must either prove a seam with tests or prove a visible result in the V2 harness.
@@ -208,7 +208,7 @@ Debt and follow-up:
 
 - The static coordinator currently clears active request rows on supersession but keeps cumulative committed/stale counters. Phase 2 or Phase 3 should decide which counters are runtime lifetime metrics, which are current-demand facts, and which belong only in diagnostic snapshots.
 - The harness manual landblock command only represents a single outdoor landblock and selected domains. Real browser/client interest needs a separate command path that carries location plus LB LoD policy without leaking UI controls into runtime contracts.
-- The coordinator currently creates a placeholder atlas snapshot from resolver payload texture-use facts. Phases 8/9 must replace this with the texture/atlas manager boundary before textured baker output is committed.
+- The coordinator currently creates a placeholder placement snapshot from resolver payload texture-use facts. Phases 8/9 must replace this with the texture/atlas manager boundary before textured baker output is committed.
 - Static coordinator cancellation is currently logical supersession, not worker cancellation. Real resolver and baker worker clients should add abort/cancel signals once worker protocols exist.
 - The renderer contract includes dynamic and sampler update methods before those services exist. Keep them as contract placeholders only; do not add renderer-side fake state in later phases unless a real consumer arrives.
 
@@ -372,9 +372,9 @@ Decisions and course corrections:
 Debt and follow-up:
 
 - Phase 5 must add the V2 worker host-lookup bridge or equivalent worker-local host adapter before the runtime default can use the terrain resolver for real Tauri-backed data.
-- `StaticCoordinator` still creates atlas snapshots directly from payload texture-use facts. Phases 8 and 9 must move this to the texture/atlas manager boundary.
+- `StaticCoordinator` still creates placement snapshots directly from payload texture-use facts. Phases 8 and 9 must move this to the texture/atlas manager boundary.
 - The terrain resolver currently summarizes mesh geometry facts instead of carrying the full bake-ready terrain mesh. Phase 6 should replace or extend this with exactly the terrain bake input fields needed by the terrain baker.
-- Prepared texture use policy is intentionally conservative (`rgba8`, `retail4`, `srgb` for color/detail and `data` for masks). Phases 8 and 10 should validate this against texture upload and terrain material requirements before treating textured terrain as credible.
+- Prepared texture use policy is intentionally conservative and must stay host-valid. Phase 8 uses normalized `rgba8` / `none` / `linear` for the probe path; Phase 10 should validate terrain-specific color/mask/detail policy against texture upload and material requirements before treating textured terrain as credible.
 
 Verification:
 
@@ -573,16 +573,16 @@ Verification:
 - `cd apps/holtburger-3d && npm run check`
 - `cd apps/holtburger-3d && npm run test:ts`
 
-### Phase 8: Minimal Texture Manager And Direct Terrain Textures
+### Phase 8: Minimal Texture Manager And Direct Terrain Texture Probe
 
 Status: complete.
 
-Purpose: add the real texture/ref ownership seam using direct-texture-as-degenerate-atlas placement before any atlas sharing or repacking.
+Purpose: add the real texture/ref ownership seam using direct-texture-as-degenerate-atlas placement before any atlas sharing or repacking. The terrain material path in this phase is a probe only.
 
 Deliverables:
 
 - Texture manager skeleton with runtime-owned logical texture refs, placement table, placement revisions, and renderer placement updates.
-- Direct terrain texture placement for terrain color/mask/detail uses; each direct texture behaves as a degenerate atlas rect.
+- Direct terrain texture placement for terrain texture uses; each direct texture behaves as a degenerate atlas rect.
 - Texture upload data path for the prepared/render-surface formats needed by the first terrain landblock.
 - Terrain bake output that references bake-local texture uses; texture refs are assigned only when the texture manager commits the bake result.
 - Renderer support for `applyTexturePlacementUpdate`, `applySamplerPolicyUpdate`, and terrain shader bindings for direct placements.
@@ -590,7 +590,7 @@ Deliverables:
 
 Acceptance criteria:
 
-- The V2 harness renders one terrain landblock with real terrain textures through texture-manager-owned refs.
+- The V2 harness renders one terrain landblock with a probe terrain texture through texture-manager-owned refs.
 - Baker output does not contain renderer texture refs, GPU IDs, or host route strings.
 - Renderer texture placement updates are independent from static geometry deltas.
 - Direct texture placement and texture ref lifetime are owned by the runtime texture manager, not the renderer and not Svelte.
@@ -601,18 +601,20 @@ Implementation notes:
 - Added bake-local `StaticBakeTextureUse` peer output to static bake results. Terrain draw units now carry UVs plus bake-local texture-use IDs, while renderer texture refs remain absent from baker output.
 - Added a V2 runtime `TextureManager` that consumes coordinator commit deltas, requests prepared texture bytes through the asset service, assigns runtime-owned direct texture refs, owns placement revisions, tracks draw-unit ownership, and emits renderer placement updates.
 - Updated the renderer texture update contract from placeholder texture-ref IDs to explicit direct placement upload records, removals, and terrain draw-unit bindings.
-- Implemented WebGL2 direct RGBA texture upload and terrain shader binding. Terrain still falls back to the debug flat color until placement data arrives.
+- Implemented WebGL2 direct RGBA texture upload and probe terrain shader binding. Terrain still falls back to the debug flat color until placement data arrives.
 - Corrected V2 host asset key parsing so prepared texture query policy can be preserved at the host boundary while ordinary host routes still become typed numeric IDs.
 
 Decisions and course corrections:
 
-- Phase 8 intentionally binds a first prepared terrain texture directly over baked terrain UVs. It proves the ownership seam and renderer upload path, but it is not terrain material parity: pcode-driven layer selection, masks, detail textures, road overlays, and blend behavior remain Phase 10 work.
+- Phase 8 intentionally binds a first prepared terrain texture directly over baked terrain UVs through `terrain-phase8-texture-probe`. It proves the ownership seam and renderer upload path, but it is not terrain material parity: pcode-driven layer selection, masks, detail textures, road overlays, and blend behavior remain Phase 10 work.
 - Unsupported prepared texture formats currently fail hard at the texture manager boundary. The first direct path only accepts `rgba8`; compressed upload policy belongs in the later terrain material/atlas phases.
 - Texture placement updates are asynchronous after static geometry commit. This keeps geometry residency independent from texture preparation and avoids texture work in renderer hot paths.
+- Course correction: V2 initially generated prepared texture routes with descriptive query keys (`outputFormat`, `mipPolicy`, `colorSpace`), but the host prepared-texture boundary expects the established route query keys (`out`, `mips`, `cs`). V2 now preserves that transport spelling only at the host key boundary while keeping internal texture-use identity typed.
+- Course correction: the Phase 8 probe requests normalized prepared textures as `rgba8` / `none` / `linear`, which matches host validation. Earlier `rgba8` / `retail4` / `srgb` requests were invalid because `retail4` is for compressed prepared textures.
 
 Debt and follow-up:
 
-- Replace the first-texture terrain binding with real terrain material selection and blend inputs in Phase 10.
+- Replace `terrain-phase8-texture-probe` with real terrain material selection and blend inputs in Phase 10. The probe material family should not survive as a canonical terrain path.
 - Add domain atlas sharing, placement reuse, and lease accounting in Phase 9. The current manager removes direct placements by draw-unit ownership and does not yet dedupe compatible uses across scopes.
 - Surface texture-manager snapshot facts in the harness once atlas sharing makes the diagnostic values meaningful.
 
@@ -622,15 +624,17 @@ Verification:
 - `cd apps/holtburger-3d && npm run check`
 - `cd apps/holtburger-3d && npm run test:ts`
 
-### Phase 9: Domain Atlas Sharing And Revisions
+### Phase 9: Domain Atlas Sharing, Placement Revisions, And Packing Worker
 
-Purpose: make atlas lifecycle correct after direct texture placement is proven and before broad static enrichment increases texture pressure.
+Purpose: make atlas lifecycle correct after direct texture placement is proven and before broad static enrichment increases texture pressure, without moving atlas pixel packing into static bake workers or the main-thread texture manager.
 
 Deliverables:
 
-- Domain atlas registry snapshots scoped to referenced typed texture uses.
-- Baker support for consuming scoped snapshots and emitting new or revised domain atlas registry records.
-- Texture/atlas manager commit/reject/rebase rules for atlas updates.
+- Domain placement/atlas registry snapshots scoped to referenced typed texture uses.
+- Baker support for consuming scoped placement snapshots and emitting draw-unit placement requirements/assumptions, not atlas page pixels.
+- Texture/atlas manager commit/reject/rebase rules for placement requirements and atlas registry updates.
+- Texture-packing worker protocol/client owned by the texture/atlas manager.
+- Texture-packing worker support for taking prepared texture sources plus packing jobs and returning atlas page pixel buffers plus rect metadata.
 - Placement revision assumptions on static draw units.
 - Lease accounting from resident draw units to texture refs/placements.
 - Opaque or branded canonical cache keys derived from typed identities where `Map` keys need strings. Do not accept arbitrary caller-provided strings as resource identity.
@@ -642,6 +646,8 @@ Acceptance criteria:
 - A stale atlas update cannot corrupt the active registry.
 - Removing a static scope releases texture placement leases.
 - Renderer texture placement updates remain separate from static geometry deltas.
+- Static bake results do not contain atlas pixel buffers and do not assign physical atlas pages.
+- Atlas pixel packing runs through the texture-packing worker, while final WebGL upload remains renderer-owned on the GL thread.
 - Atlas and texture manager state use typed identities, runtime-assigned handles, or opaque/branded cache keys derived from typed identities, not host route strings.
 
 ### Phase 10: Terrain Material Parity
@@ -654,11 +660,13 @@ Deliverables:
 - Terrain draw-slice planning for the material/shader layer limit.
 - Terrain color, alpha mask, road, and detail texture roles represented as typed bake-local texture uses.
 - Terrain shader/material-family rules for the first credible terrain material path.
+- Removal or replacement of the Phase 8 `terrain-phase8-texture-probe` material family.
 - Tests for pcode decoding, alpha/road selector rotation, layer slicing, and texture role classification.
 
 Acceptance criteria:
 
 - Terrain material output is driven by typed material-family classification, not route-string diagnostics or renderer-side prepared-asset reads.
+- `terrain-phase8-texture-probe` is removed or unreachable from normal terrain bake output.
 - Terrain draw units bucket by compatible shader, sampler bindings, sampler state, device state, domain, and texture placement assumptions.
 - Terrain can fall back deliberately for unsupported material cases with visible/typed reasons.
 - V2 tests cover the pcode/layer cases that v1 currently encoded in terrain blend and tile planning.
@@ -793,7 +801,7 @@ The harness should not:
 
 Risk: the static coordinator becomes a new god object.
 
-Mitigation: keep it as control plane only. It schedules, owns opaque async job correlation for stale-result rejection, asks for atlas snapshots, commits/rejects results, and publishes snapshots. It does not classify materials, walk source dependencies, compact geometry, or allocate texture refs.
+Mitigation: keep it as control plane only. It schedules, owns opaque async job correlation for stale-result rejection, asks for placement snapshots, commits/rejects results, and publishes snapshots. It does not classify materials, walk source dependencies, compact geometry, allocate texture refs, or pack atlas pixels.
 
 Risk: the fake-worker phase creates contracts that real terrain cannot satisfy.
 
@@ -868,3 +876,4 @@ Mitigation: make static-authored dynamic seeds the first dynamic requirement. Th
 - 2026-06-10: Review against ACViewer docs, `holtburger-content` landblock topology assembly, and V1 product planning found that dungeon support must be first-class landblock topology/env-cell support. Phase 5A was inserted before geometry bake so dungeon landblocks do not become a late renderer special case.
 - 2026-06-10: Review of `revision`, `policyRevision`, `resident-now`, and `prefetch` found that they were leaking coordinator scheduling and stale-result machinery into resolver semantics. Phase 5A should simplify resolver-facing jobs to idempotent scope/domain inputs with opaque coordinator-owned correlation.
 - 2026-06-10: V2 browser harness input was corrected to preserve V1-style location semantics: one flexible location field accepts coordinates, landblock prefixes, full landblock ids, and env-cell ids; unambiguous inputs auto-infer outdoor vs dungeon focus, while four-hex landblock prefixes keep the outdoor/dungeon focus toggle. Full non-`FFFF` cell ids always compile to interior-cell demand. This keeps dungeon support first-class before the renderer can draw dungeon geometry.
+- 2026-06-11: Atlas pixel packing should not be owned by static bake workers or the main-thread texture manager. Static bakers emit bake-local texture uses and placement requirements/assumptions; the texture/atlas manager owns atlas policy and delegates pixel assembly to texture-packing workers, while the renderer only performs final WebGL upload.

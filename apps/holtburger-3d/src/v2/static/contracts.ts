@@ -364,7 +364,7 @@ export interface TerrainGeometryStaticDrawUnit {
 	readonly drawUnitId: string;
 	readonly landblockId: number;
 	readonly domain: "outdoor-terrain";
-	readonly materialFamily: "terrain-debug-flat" | "terrain-direct-texture";
+	readonly materialFamily: "terrain-debug-flat" | "terrain-phase8-texture-probe";
 	readonly coordinateSpace: "landblock-render-local";
 	readonly positions: Float32Array;
 	readonly texCoords: Float32Array;

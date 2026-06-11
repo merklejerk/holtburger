@@ -447,9 +447,9 @@ The core rule is simple: each layer receives facts from the layer below, adds ex
 - Browser UI is a consumer. It does not own asset hydration, baking, renderer lifecycle, or renderer state diffing.
 - Runtime is orchestration. It translates user/client intent into service commands and publishes snapshots, but it does not decode assets, bake geometry, or upload WebGL resources. Runtime also owns scene anchoring/rebasing policy: it converts canonical static/dynamic records into renderer-local placements before renderer ingestion.
 - Asset service owns asset identity, cache, in-flight dedupe, shared preparation rules, committed prepared-asset leases, warm retention, and failure/retry semantics. It is a logical owner, not necessarily a dedicated worker boundary.
-- Static coordinator owns landblock-scoped static demand. It expands scene interest into concrete static work requests by landblock/domain and env-cell focus where needed, schedules resolver and baker workers, coordinates domain atlas registry snapshots, and commits completed output.
+- Static coordinator owns landblock-scoped static demand. It expands scene interest into concrete static work requests by landblock/domain and env-cell focus where needed, schedules resolver and baker workers, requests texture/atlas placement snapshots, and commits completed output.
 - Static scope resolver workers own IO-heavy static source resolution. They resolve concrete static work requests into bakeable payloads by reading/fetching needed source assets, walking static dependencies, identifying referenced textures/surfaces, and producing source spatial facts and static-authored dynamic seeds.
-- Static bake workers own CPU-heavy static baking. They consume resolved static scope payloads plus scoped domain atlas snapshots, then produce static draw-unit bake records, atlas registry updates, and peer static records for spatial, visibility, portal/interior, source-mapping, and dynamic-seed output.
+- Static bake workers own CPU-heavy static baking. They consume resolved static scope payloads plus scoped domain placement snapshots, then produce static draw-unit bake records, placement requirements/assumptions, and peer static records for spatial, visibility, portal/interior, source-mapping, and dynamic-seed output.
 - Dynamic service owns entity/object render readiness. It hydrates dynamic visual resources and publishes instance state without static landblock baking.
 - Renderer owns GPU residency and drawing. It consumes committed static/dynamic placements and frame state; it does not fetch host assets, walk dependency closures, classify AC materials, or choose scene anchors/rebase policy.
 - Diagnostics observe. They do not define required fields in core protocols.
@@ -480,12 +480,12 @@ The earlier vocabulary table was intentionally expansive. After the research pas
 | Static portal/interior record | Static-scope portal, env-cell, structured-interior, aperture, and cell-structure facts. | detailed landblock sidecars, portal links, cell metadata |
 | Static source mapping | Static-scope mapping from draw units/slices/records back to source landblock, env-cell, object, material, and typed runtime resource identities. Host route strings may appear only as explicit provenance/debug text. | object records, part hints, diagnostic source metadata |
 | Static-authored dynamic seed | Static-scope authored dynamic instance seed whose resource hydration and animation state are owned by the dynamic service. | animated static object, rotating windmill seed |
-| Static bake result | Worker output for one static work request: draw units, bake-local texture uses, domain atlas registry updates, static spatial records, static visibility records, static portal/interior records, static source mappings, static-authored dynamic seeds, and source/build revisions. | landblock render product worker result, render artifacts |
+| Static bake result | Worker output for one static work request: draw units, bake-local texture uses, placement requirements/assumptions, static spatial records, static visibility records, static portal/interior records, static source mappings, static-authored dynamic seeds, and source/build revisions. It does not contain atlas pixel buffers or final texture refs. | landblock render product worker result, render artifacts |
 | Dynamic instance | Renderer-visible entity/object instance with transform, appearance state, animation/motion state, and resource refs. | future dynamic renderable, dynamic material placeholder |
 | Texture key | Stable typed prepared texture identity plus sampling/format constraints. It is not a host route string. | render surface ID, virtual texture ref, atlas entry key |
 | Bake texture use | Bake-local handle for one material texture role in one bake result. It is resolved to texture-manager-owned texture refs during commit. | virtual texture ref, texture page ref |
 | Domain atlas registry | Shared atlas placement state for one static domain. It is shared across scopes inside that domain, not globally by default. | texture page store, atlas cache |
-| Domain atlas snapshot | Scoped serializable view of one domain atlas registry for the textures referenced by one static scope payload. | texture pages, atlas inputs |
+| Domain placement snapshot | Scoped serializable view of one domain atlas/placement registry for the textures referenced by one static scope payload. | texture pages, atlas inputs |
 | Render update | Imperative renderer input split into resource changes and frame state. | renderer setters, render scene snapshot, product events |
 | Runtime snapshot | Coarse UI/client observation emitted by runtime. | Svelte store state, metrics callbacks, panel state |
 | Diagnostic event | Optional structured observation. | debug payloads, temporary regression fields, report-only metadata |
@@ -497,7 +497,7 @@ Terms demoted from core vocabulary:
 - `Coverage`: useful internally as a planner result, not a system-level noun.
 - `Asset closure`: an implementation detail of hydration, not a public runtime concept.
 - `Product` and `layer`: current-code scheduling/output terms. In V2, prefer static work requests, static bake results, and output partitions unless a narrower term earns its keep.
-- `Atlas delta`: unnecessary lifecycle labeling in worker output. The baker emits atlas registry updates for a domain snapshot; the texture/atlas manager decides whether to commit, retry, or reject stale results.
+- `Atlas delta`: unnecessary lifecycle labeling in worker output. The baker emits placement requirements/assumptions for a domain snapshot; the texture/atlas manager decides whether to commit, retry, reject stale results, or enqueue texture-packing work.
 - `Sync`, `ready`, and `pending`: too vague without a target. Prefer `request`, `prepare`, `bake`, `upload`, `resident`, or `evict`.
 
 ### V2 Topology
@@ -563,8 +563,8 @@ The browser and future client sit at the same level. Browser-specific UI can be 
 | Asset service | Typed asset identity, host fetch policy, shared preparation library, in-flight dedupe, prepared cache, committed prepared-asset leases, warm retention, failure/retry semantics. | Static bake bucketing, dynamic instance state, GPU upload, mandatory dedicated prepare worker. |
 | Static coordinator | Expanding interest radii into concrete static work requests, scheduling resolver/baker jobs, retaining committed static output, rejecting stale results. | Dependency walking on the render thread, texture handle allocation, WebGL upload. |
 | Static scope resolver workers | IO-heavy static source resolution, static dependency walking, missing typed dependency discovery, referenced texture/surface discovery, source spatial facts, static-authored dynamic seeds, static scope payloads. | Scene interest radii, atlas mutation, material-family packing, geometry compaction, renderer handle allocation, GPU objects. |
-| Texture/atlas manager | Logical texture refs, domain atlas registries, scoped domain atlas snapshots, placement table, leases from resident draw units, direct-texture-as-degenerate-atlas policy. | Static source walking, material classification, geometry compaction, Svelte/UI state. |
-| Static bake workers | CPU-heavy material-family classification, domain atlas update proposal, draw-unit compatibility bucketing, geometry compaction, draw-slice/source mapping, static record production, and static bake results. | HBA/source dependency walking, scene interest radii, cache pruning, renderer handle allocation, GPU objects. |
+| Texture/atlas manager | Logical texture refs, domain atlas registries, scoped domain placement snapshots, placement table, leases from resident draw units, direct-texture-as-degenerate-atlas policy, and texture-packing worker orchestration. | Static source walking, material classification, geometry compaction, Svelte/UI state, WebGL upload. |
+| Static bake workers | CPU-heavy material-family classification, placement requirement/assumption output, draw-unit compatibility bucketing, geometry compaction, draw-slice/source mapping, static record production, and static bake results. | HBA/source dependency walking, scene interest radii, cache pruning, renderer handle allocation, GPU objects, atlas pixel packing. |
 | Dynamic service | Dynamic visual resource hydration and dynamic instance updates. | Static landblock baking, static atlas policy, browser selection UX. |
 | Renderer | GPU resources, render updates, frame loop, picking, targeted inspection. | Dependency walking, host lookup, Svelte state, scene interest policy. |
 | Diagnostics observer | Bounded events, derived debug snapshots, reports. | Required pipeline fields or control flow. |
@@ -734,6 +734,7 @@ sequenceDiagram
   participant Assets as Asset Service
   participant Resolver as Static Scope Resolver
   participant Textures as Texture/Atlas Manager
+  participant Packer as Texture Packing Worker
   participant Baker as Static Bake Worker
   participant Renderer as Renderer
 
@@ -747,16 +748,18 @@ sequenceDiagram
   Assets-->>Static: prepared refs available
   Static->>Resolver: resolve outdoor-terrain request
   Resolver-->>Static: static scope payload + referenced textures
-  Static->>Textures: create scoped domain atlas snapshot
-  Static->>Baker: bake payload with domain atlas snapshot
-  Baker-->>Static: draw units + atlas updates + static records
-  Static->>Textures: commit domain atlas updates + texture uses
+  Static->>Textures: create scoped domain placement snapshot
+  Static->>Baker: bake payload with placement snapshot
+  Baker-->>Static: draw units + placement requirements + static records
+  Static->>Textures: commit placement requirements + texture uses
+  Textures->>Packer: pack/repack atlas pages if needed
+  Packer-->>Textures: atlas page pixels + rect metadata
   Textures-->>Static: texture refs / placement table revision
   Static->>Renderer: addStaticDrawUnits(scope, units with texture refs)
   Static->>Resolver: resolve building/detail/env-cell/dungeon requests
   Resolver-->>Static: enrichment payloads + dynamic seeds
   Static->>Baker: bake enrichment payloads by domain lock
-  Baker-->>Static: enrichment draw units + atlas updates + static records
+  Baker-->>Static: enrichment draw units + placement requirements + static records
   Static->>Renderer: replaceStaticDrawUnits(scope/domain, units)
 ```
 
@@ -769,29 +772,33 @@ flowchart TB
   Request["Static resolver job<br/>scope + source domain"]
   Resolver["Static scope resolver workers<br/>parallel IO/source resolution"]
   Payload["Static scope payload<br/>source records + material facts + texture keys + spatial facts + dynamic seeds"]
-  Atlas["Texture/atlas manager<br/>domain atlas snapshot for referenced textures"]
+  Atlas["Texture/atlas manager<br/>domain placement snapshot for referenced textures"]
   Baker["Static bake workers<br/>serialized per domain atlas revision"]
   Classify["Classify material family<br/>small AC-derived table"]
   Bucket["Bucket compatibility<br/>domain + pass + family + state + texture uses"]
-  Pack["Update domain atlas state<br/>domain-scoped creates/updates"]
+  Placement["Emit placement requirements<br/>texture-use assumptions + UV transforms"]
   Compact["Compact geometry<br/>buffers + draw slices"]
-  Product["Static bake result<br/>draw units + atlas updates + static records"]
+  Product["Static bake result<br/>draw units + placement requirements + static records"]
+  Packer["Texture packing worker<br/>atlas page pixels + rect metadata"]
+  Commit["Texture/atlas manager commit<br/>refs + leases + placement table"]
 
   Request --> Resolver --> Payload
   Payload --> Atlas --> Baker
   Payload --> Baker
-  Baker --> Classify --> Bucket --> Pack --> Compact --> Product
+  Baker --> Classify --> Bucket --> Placement --> Compact --> Product
+  Product --> Commit
+  Commit --> Packer --> Commit
 ```
 
-Baking is static-only. It combines the old atlas and VAO-compaction concerns into one compatibility problem: if two surfaces cannot share shader family, pass/order class, sampler/device state, logical texture binding layout, capacity limits, and domain, they do not share a static draw unit. Static draw units bind texture refs and placement revisions, not physical atlas pages.
+Baking is static-only. It combines material classification and VAO-compaction concerns into one compatibility problem: if two surfaces cannot share shader family, pass/order class, sampler/device state, logical texture binding layout, capacity limits, and domain, they do not share a static draw unit. Static draw units reference bake-local texture uses, placement assumptions, and UV transforms. They do not bind physical atlas pages, renderer texture refs, GPU IDs, or raw texture pixels.
 
-The resolver is parallel and IO-bound. It reads/fetches source assets through the shared asset service/host boundary, runs the shared preparation library locally when needed, walks dependencies for one concrete static resolver job, and emits a compact payload. The main thread does not inspect heavy geometry or walk closures; it uses the payload's referenced textures to ask the texture/atlas manager for a scoped domain atlas snapshot.
+The resolver is parallel and IO-bound. It reads/fetches source assets through the shared asset service/host boundary, runs the shared preparation library locally when needed, walks dependencies for one concrete static resolver job, and emits a compact payload. The main thread does not inspect heavy geometry or walk closures; it uses the payload's referenced textures to ask the texture/atlas manager for a scoped domain placement snapshot.
 
-The baker is CPU-bound. It consumes one static scope payload plus a scoped domain atlas snapshot, performs material-family classification, domain atlas updates, compatibility bucketing, geometry compaction, and draw-slice/source mapping. Baker jobs are serialized per domain atlas revision and may run in parallel across domains with independent atlas registries.
+The baker is CPU-bound. It consumes one static scope payload plus a scoped domain placement snapshot, performs material-family classification, compatibility bucketing, geometry compaction, placement-assumption recording, and draw-slice/source mapping. Baker jobs are serialized per domain placement snapshot where output depends on placement assumptions, and may run in parallel across domains with independent placement registries.
 
-The baker does not assign texture refs, renderer IDs, or GPU IDs. It emits bake-local texture uses, domain atlas registry updates, static draw-unit bake records, and peer static records. Static records include spatial records, visibility records, portal/interior records, source mappings, and static-authored dynamic seeds when the source scope contains animated or otherwise dynamic-authored content. The texture/atlas manager resolves bake-local texture uses to texture refs when committing the result; the renderer mirrors those refs into GPU placement state.
+The baker does not assign texture refs, renderer IDs, GPU IDs, physical atlas pages, or atlas pixel buffers. It emits bake-local texture uses, placement requirements/assumptions, static draw-unit bake records, and peer static records. Static records include spatial records, visibility records, portal/interior records, source mappings, and static-authored dynamic seeds when the source scope contains animated or otherwise dynamic-authored content. The texture/atlas manager resolves bake-local texture uses to texture refs and placement-table entries when committing the result. If new or repacked atlas pages are needed, the texture/atlas manager delegates pixel packing to a texture-packing worker and then sends committed placement updates to the renderer.
 
-Terrain is a dedicated static resolution and baking path, not just a generic static renderable family. Terrain baking still follows the same resolver -> atlas snapshot -> baker -> texture manager -> renderer ownership chain, but the terrain adapter owns terrain-specific work: terrain mesh extraction, blend/mask/detail planning, road overlays, terrain draw slices, terrain fallback geometry, terrain BVH bindings, and terrain shader binding layout.
+Terrain is a dedicated static resolution and baking path, not just a generic static renderable family. Terrain baking still follows the same resolver -> placement snapshot -> baker -> texture manager -> renderer ownership chain, but the terrain adapter owns terrain-specific work: terrain mesh extraction, blend/mask/detail planning, road overlays, terrain draw slices, terrain fallback geometry, terrain BVH bindings, and terrain shader binding layout.
 
 Landblock topology and env-cell static content are likewise first-class static resolution paths. Topology resolution owns landblock classification, env-cell membership, portal/link facts, and topology spatial records. Env-cell resolution owns environment/cell-structure geometry, visible-cell facts, local placement, indoor static objects, portal apertures, and env-cell-local BVHs. Outdoor interiors and pure dungeon landblocks should share this topology/env-cell path; the difference is scene entry and which source families are present, not a separate renderer architecture.
 
@@ -1009,15 +1016,20 @@ Domain atlas commit sequence:
 sequenceDiagram
   participant Static as Static Coordinator
   participant Atlas as Texture/Atlas Manager
+  participant Packer as Texture Packing Worker
   participant Baker as Static Bake Worker
   participant Renderer as Renderer
 
   Static->>Atlas: request scoped domain snapshot(texture keys)
   Atlas-->>Static: snapshot(domain, revision, relevant placements/pages)
-  Static->>Baker: bake(scope payload, atlas snapshot)
-  Baker-->>Static: bake result(domain revision, atlas updates, texture uses)
-  Static->>Atlas: commit atlas updates + texture uses
+  Static->>Baker: bake(scope payload, placement snapshot)
+  Baker-->>Static: bake result(domain revision, placement requirements, texture uses)
+  Static->>Atlas: commit placement requirements + texture uses
   Atlas->>Atlas: validate domain revision, assign texture refs, update leases
+  opt new or repacked atlas pages needed
+    Atlas->>Packer: pack prepared texture sources
+    Packer-->>Atlas: atlas page pixels + rect metadata
+  end
   alt accepted
     Atlas-->>Static: committed texture refs + placement revision
     Atlas->>Renderer: applyTexturePlacementUpdate(update)
@@ -1093,7 +1105,7 @@ sequenceDiagram
 
 ### Texture Residency
 
-Texture reuse should be handled below static scope ownership and above raw GPU upload. Resolver output reports referenced texture keys. The texture/atlas manager creates a scoped domain atlas snapshot for those keys. The baker consumes that snapshot and emits domain atlas registry updates plus bake-local texture uses. The texture/atlas manager maps those uses to texture refs and maintains the current placement table. The renderer mirrors committed texture refs into GPU texture placement state.
+Texture reuse should be handled below static scope ownership and above raw GPU upload. Resolver output reports referenced texture keys. The texture/atlas manager creates a scoped domain placement snapshot for those keys. The baker consumes that snapshot and emits placement requirements/assumptions plus bake-local texture uses. The texture/atlas manager maps those uses to texture refs, maintains the current placement table, and delegates atlas page pixel assembly to a texture-packing worker when direct placement is insufficient. The renderer mirrors committed texture refs into GPU texture placement state and performs final WebGL upload.
 
 ```mermaid
 flowchart LR
@@ -1101,9 +1113,10 @@ flowchart LR
   TextureKey["Texture key<br/>identity + sampling constraints"]
   ScopePayload["Static scope payload<br/>referenced texture keys"]
   DomainRegistry["Domain atlas registry<br/>shared within one static domain"]
-  DomainSnapshot["Scoped domain atlas snapshot<br/>only referenced textures/pages"]
+  DomainSnapshot["Scoped domain placement snapshot<br/>only referenced textures/pages"]
   BakeUse["Bake texture use<br/>local to one bake result"]
-  AtlasUpdate["Domain atlas registry updates<br/>creates/updates/remaps"]
+  PlacementReq["Placement requirements<br/>assumptions + UV transforms"]
+  PackingWorker["Texture packing worker<br/>atlas page pixels + rect metadata"]
   TextureRef["Texture ref<br/>owned by texture manager"]
   Placement["Placement table<br/>ref -> page/rect/direct"]
   StaticUnits["Committed static draw units<br/>reference texture refs"]
@@ -1116,8 +1129,10 @@ flowchart LR
   ScopePayload --> DomainRegistry
   DomainRegistry --> DomainSnapshot
   DomainSnapshot --> BakeUse
-  BakeUse --> AtlasUpdate
-  AtlasUpdate --> TextureRef
+  BakeUse --> PlacementReq
+  PlacementReq --> TextureRef
+  TextureRef --> PackingWorker
+  PackingWorker --> Placement
   TextureRef --> Placement
   TextureRef --> StaticUnits
   TextureRef --> DynamicResources
@@ -1235,9 +1250,9 @@ V2 does not need both words as core vocabulary. Prefer scheduled resolver jobs f
 Static work should split into two dedicated services:
 
 - Static scope resolver workers: parallel, IO-bound source resolution against concrete idempotent resolver jobs.
-- Static bake workers: CPU-bound material/atlas/geometry baking against scoped domain atlas snapshots.
+- Static bake workers: CPU-bound material classification, placement-assumption handling, and geometry baking against scoped domain placement snapshots.
 
-The main thread sits between them because it owns shared atlas registry state. It should feed the baker only the domain atlas snapshot relevant to the static scope payload's referenced surfaces/textures.
+The main thread/runtime control plane sits between them because the texture/atlas manager owns shared atlas registry and placement state. It should feed the baker only the domain placement snapshot relevant to the static scope payload's referenced surfaces/textures; atlas pixel assembly is delegated to texture-packing workers.
 
 ### Static Draw Units
 
@@ -1251,7 +1266,7 @@ Terrain, static objects, structured interiors, and portal masks should not be fo
 
 Static records should be enough for culling, picking, portal/interior traversal, debug inspection, and ownership: source instance IDs, owner landblock/env cell, bounds or BVH item refs, draw-slice to source mapping, typed material/resource references, cell visibility records, portal links/apertures, and interior cell metadata. They should not become a renderer-owned scene graph. They should also not carry host route strings as semantic identity; route strings belong only in explicitly named provenance/debug fields.
 
-Worker output should use bake-local typed texture-use IDs rather than renderer texture handles or host asset route strings. The commit/resource step maps bake-local texture uses to texture-manager-owned texture refs and placement-table entries. This keeps worker output independent of renderer ID allocation while still allowing the baker to validate compatibility against a concrete domain atlas snapshot.
+Worker output should use bake-local typed texture-use IDs rather than renderer texture handles or host asset route strings. Static bake output may reference placement assumptions from a scoped texture/atlas placement snapshot, but it should not contain atlas page pixels or own final placement-table mutation. The commit/resource step maps bake-local texture uses to texture-manager-owned texture refs and placement-table entries. This keeps worker output independent of renderer ID allocation while still allowing the baker to validate compatibility against a concrete domain placement snapshot.
 
 ### Static BVH And Spatial Metadata
 
@@ -1307,11 +1322,13 @@ The source facts support shared texture residency; landblock-local atlas ownersh
 
 The material audit shows many repeated static render-surface references, and a 256-landblock outdoor sample showed extreme neighbor overlap in a biased low-variety region: 125 textured landblocks, 3 global render surfaces, all reused, 57 of 58 neighbor pairs overlapping. This sample is not representative enough to size caches, but it validates that landblock-local atlas packing can duplicate common textures.
 
-Static bake jobs cannot be texture-placement blind if draw-unit compatibility depends on binding layout, atlas bucket, sampler state, material-table capacity, or placement revision. They should receive a scoped domain atlas snapshot, use bake-local typed texture-use IDs, and emit domain atlas registry updates plus draw-unit bake records that reference those local uses. The texture/atlas manager commits the updates by allocating texture refs and placement-table entries.
+Static bake jobs cannot be texture-placement blind if draw-unit compatibility depends on binding layout, atlas bucket, sampler state, material-table capacity, or placement revision. They should receive a scoped domain placement snapshot, use bake-local typed texture-use IDs, and emit draw-unit bake records with placement requirements/assumptions that reference those local uses. The texture/atlas manager owns final atlas registry mutation, texture refs, placement-table entries, and lease accounting.
 
-The worker should not label atlas output as a delta type such as create/revise/repack. That lifecycle decision belongs to the texture/atlas manager, which compares baker output to current domain atlas state and either commits, rebases, retries, or rejects stale results.
+Static bake workers should not label atlas output as a delta type such as create/revise/repack, and should not output atlas pixel buffers. That lifecycle decision belongs to the texture/atlas manager, which compares baker output to current domain atlas state and either commits, rebases, retries, or rejects stale results.
 
-Baker jobs must be serialized for a domain atlas revision. They may run in parallel across domains because base/detail/palette atlas buckets are domain-scoped by default. Cross-domain texture sharing should be a later explicit optimization, not a default coupling.
+Atlas pixel packing is a separate texture-packing worker concern owned by the texture/atlas manager. The texture/atlas manager supplies prepared texture sources and packing jobs to that worker, receives atlas page pixel buffers plus rect metadata, and then emits renderer texture placement updates. This keeps expensive pixel packing off the main thread while keeping atlas policy, refs, leases, stale-result rejection, and placement revisions in one runtime-owned service. The renderer still performs final WebGL upload on the GL-owning thread.
+
+Baker jobs that depend on placement assumptions must be serialized for a domain placement revision. Texture-packing jobs may run independently under texture/atlas manager control and can be canceled or discarded if their placement revision goes stale. Static bake jobs may run in parallel across domains because base/detail/palette atlas buckets are domain-scoped by default. Cross-domain texture sharing should be a later explicit optimization, not a default coupling.
 
 Eviction should follow split ownership:
 
@@ -1372,7 +1389,7 @@ Mitigation: enforce vocabulary, module ownership, and "Svelte is not runtime" ru
 
 Risk: Shared atlas residency becomes harder than landblock-local atlas packing.
 
-Mitigation: make atlas state a shared texture/atlas-manager concern scoped by static domain. Resolvers emit referenced texture keys; the manager creates scoped domain atlas snapshots; bakers emit domain atlas updates with bake-local texture-use IDs; the manager commits texture refs, placements, leases, and renderer GPU realization updates.
+Mitigation: make atlas state a shared texture/atlas-manager concern scoped by static domain. Resolvers emit referenced texture keys; the manager creates scoped domain placement snapshots; bakers emit placement requirements/assumptions with bake-local texture-use IDs; the manager commits texture refs, placements, leases, delegates atlas pixel packing to texture-packing workers, and emits renderer GPU realization updates.
 
 Risk: Dynamic renderables inherit static landblock bake assumptions.
 
@@ -1408,7 +1425,7 @@ Mitigation: static coordinators compile interest into concrete scope/domain requ
 
 Risk: Baker serialization becomes a streaming bottleneck.
 
-Mitigation: serialize baker jobs by domain atlas revision, not globally. Domain-scoped atlas registries allow baker workers to run in parallel across independent static domains.
+Mitigation: serialize baker jobs by domain placement revision when output depends on placement assumptions, not globally. Domain-scoped placement registries allow baker workers to run in parallel across independent static domains, while atlas pixel packing runs in texture-packing workers under texture/atlas manager control.
 
 Risk: V2 diverges from game-data truth.
 
@@ -1425,10 +1442,11 @@ Mitigation: when semantics are uncertain, verify against ACE, ACViewer, checked-
 - Static work requests contain concrete landblock/env-cell IDs and domains, not interest radii or browser state.
 - Runtime-facing resource identities use typed data and closed string-literal discriminants. Host route strings do not appear as semantic identity outside host/preparation boundaries.
 - Static scope resolver workers perform IO-heavy source resolution and static dependency walking off the render thread.
-- Static bake workers perform CPU-heavy material/atlas/geometry baking off the render thread.
-- Baker jobs are serialized by domain atlas revision and can parallelize across independent domains.
-- Static landblock draw units are baked before renderer upload and combine logical texture refs, material family, sampler/device state, domain, compacted geometry, and draw slices. Runtime attaches renderer-local placements during residency commit. Static deltas also carry peer records for spatial, visibility, portal/interior, BVH, and source-mapping facts.
+- Static bake workers perform CPU-heavy material classification, placement-assumption handling, and geometry baking off the render thread. They do not pack atlas pixels.
+- Baker jobs are serialized by domain placement revision where needed and can parallelize across independent domains.
+- Static landblock draw units are baked before renderer upload and combine bake-local texture uses, material family, sampler/device state, domain, compacted geometry, draw slices, and placement assumptions. Runtime attaches renderer-local placements during residency commit. Static deltas also carry peer records for spatial, visibility, portal/interior, BVH, and source-mapping facts.
 - Worker bake output uses bake-local texture-use IDs; texture refs are assigned by the texture/atlas manager during commit and mirrored by the renderer for GPU placement.
+- Texture atlas pixel packing is delegated to texture-packing workers owned by the texture/atlas manager; the renderer performs final WebGL upload only.
 - Opaque string cache keys are allowed only when derived from typed identities; public service/worker/renderer APIs do not accept arbitrary strings as resource identity.
 - Dynamic renderables can enter the render scene without static landblock baking, packed static VAOs, or static landblock atlases.
 - Static-authored animated objects can enter the dynamic path as scope-owned dynamic seeds.
@@ -1449,12 +1467,13 @@ Mitigation: when semantics are uncertain, verify against ACE, ACViewer, checked-
 - 2026-06-09: Demote `RenderScene` from primary renderer contract to optional inspection snapshot. Normal renderer input should be explicit static deltas, dynamic deltas, and frame state.
 - 2026-06-09: Static workers receive concrete landblock/env-cell/domain requests, not interest radii. Current landblock LoD is domain residency radii, not a mesh LoD tier.
 - 2026-06-09: Static work splits into dedicated static scope resolver workers and static bake workers. Static coordination is not permission to walk dependencies or expand static scopes on the render thread.
-- 2026-06-09: Worker bake output uses bake-local texture-use IDs and domain atlas registry updates. Renderer texture refs and placement lifecycles belong to the texture/atlas manager.
+- 2026-06-09: Worker bake output uses bake-local texture-use IDs and placement requirements/assumptions. Renderer texture refs, atlas registry mutation, placement lifecycles, and texture-packing jobs belong to the texture/atlas manager.
 - 2026-06-09: Current `product` and `layer` vocabulary maps to scheduling/result units and output partitions, but V2 should prefer static work requests, bake results, and domain-specific partitions.
-- 2026-06-09: Domain-scoped atlas registries are the default sharing unit. Baker jobs serialize per domain atlas revision and may parallelize across independent domains.
+- 2026-06-09: Domain-scoped atlas registries are the default sharing unit. Baker jobs serialize per domain placement revision when needed and may parallelize across independent domains; atlas pixel packing is delegated to texture-packing workers.
 - 2026-06-09: A dedicated asset-prepare worker is not a required V2 actor. Keep shared asset preparation code and asset-service ownership of identity/cache/dedupe; let resolver and dynamic workers execute preparation locally when that avoids unnecessary worker-boundary portering.
 - 2026-06-10: Static bake results are broader than draw units. They also carry peer static records for spatial metadata, source mappings, visibility records, portal/interior facts, BVH item bindings, and static-authored dynamic seeds.
 - 2026-06-10: Terrain has a dedicated static resolution and baking path. It follows the same ownership chain as other static domains, but terrain-specific mesh, blend/mask/detail, draw-slice, fallback, and BVH rules belong in a terrain bake adapter.
 - 2026-06-10: Draw units bind logical texture refs and placement revisions, not physical atlas pages. Placement changes and sampler policy changes are renderer/resource updates and should not require geometry rebaking.
 - 2026-06-10: Host asset route strings are boundary transport/provenance, not runtime resource identity. Typed identities or runtime-assigned handles are required for resolver payloads, bake outputs, texture manager state, renderer deltas, dynamic records, and source mappings; opaque string cache keys must be derived from typed identities.
 - 2026-06-10: Scene anchoring and landblock rebasing are runtime/domain policy, not renderer policy. Static resolver/baker outputs remain canonical landblock/env-cell-owned records; runtime converts committed draw units and dynamic instances into renderer-local placements before renderer ingestion.
+- 2026-06-11: Static bake workers should not output atlas pixel buffers. Texture/atlas manager owns atlas policy, refs, leases, stale/rebase rules, and delegates atlas pixel assembly to texture-packing workers; the renderer only uploads committed texture pages on the GL-owning thread.

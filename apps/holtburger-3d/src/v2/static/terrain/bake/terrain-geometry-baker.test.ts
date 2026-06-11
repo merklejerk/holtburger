@@ -92,7 +92,7 @@ describe("V2 terrain geometry baker", () => {
 		const drawUnit = requireTerrainDrawUnit(result.drawUnits[0]);
 
 		expect(drawUnit).toMatchObject({
-			materialFamily: "terrain-direct-texture",
+			materialFamily: "terrain-phase8-texture-probe",
 			primaryTextureUseId:
 				"7:landblock:da55ffff:outdoor-terrain:prepared-texture:06000010",
 			textureUseIds: [
@@ -104,9 +104,9 @@ describe("V2 terrain geometry baker", () => {
 				domain: "outdoor-terrain",
 				ownerDrawUnitIds: [drawUnit.drawUnitId],
 				source: {
-					colorSpace: "srgb",
+					colorSpace: "linear",
 					kind: "prepared-texture-use",
-					mipPolicy: "retail4",
+					mipPolicy: "none",
 					outputFormat: "rgba8",
 					renderSurfaceId: 0x06000010,
 					usage: "color",
@@ -194,9 +194,9 @@ function createTerrainBakeInput(
 					{
 						palette: null,
 						preparedTextureUse: {
-							colorSpace: "srgb",
+							colorSpace: "linear",
 							kind: "prepared-texture-use",
-							mipPolicy: "retail4",
+							mipPolicy: "none",
 							outputFormat: "rgba8",
 							renderSurfaceId: 0x06000010,
 							usage: "color",

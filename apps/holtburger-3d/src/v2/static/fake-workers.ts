@@ -180,8 +180,8 @@ export class ImmediateStaticResolverClient implements StaticResolverClient {
 				referencedTextureUses: [
 					{
 						kind: "prepared-texture-use",
-						colorSpace: "srgb",
-						mipPolicy: "retail4",
+						colorSpace: "linear",
+						mipPolicy: "none",
 						outputFormat: "rgba8",
 						renderSurfaceId: createStableFakeRenderSurfaceId(job),
 						usage: "color",

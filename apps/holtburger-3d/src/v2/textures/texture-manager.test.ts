@@ -16,13 +16,13 @@ describe("V2 texture manager", () => {
 
 		const update = await textureManager.applyStaticCommitDelta(
 			createCommitDelta({
-				format: "rgba8",
+				outputFormat: "rgba8",
 			}),
 		);
 
 		expect(assetService.requestedKeys).toEqual([
 			{
-				id: "06000010?colorSpace=srgb&mipPolicy=retail4&outputFormat=rgba8&usage=color",
+				id: "06000010?cs=linear&mips=none&out=rgba8&usage=color",
 				kind: "prepared-texture",
 			},
 		]);
@@ -58,7 +58,9 @@ describe("V2 texture manager", () => {
 			assetService: new FixtureAssetService(),
 		});
 
-		await textureManager.applyStaticCommitDelta(createCommitDelta({ format: "rgba8" }));
+		await textureManager.applyStaticCommitDelta(
+			createCommitDelta({ outputFormat: "rgba8" }),
+		);
 		const update = await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedDrawUnitIds: ["terrain-a"],
@@ -74,27 +76,54 @@ describe("V2 texture manager", () => {
 		});
 	});
 
-	it("fails explicitly for unsupported direct texture formats", async () => {
+	it("accepts host pixel-format labels when the prepared policy is normalized rgba8", async () => {
 		const textureManager = new TextureManager({
-			assetService: new FixtureAssetService(),
+			assetService: new FixtureAssetService({
+				levelFormat: "A8R8G8B8",
+				outputFormat: "rgba8",
+			}),
+		});
+
+		const update = await textureManager.applyStaticCommitDelta(
+			createCommitDelta({ outputFormat: "rgba8" }),
+		);
+
+		expect(update?.placements).toHaveLength(1);
+	});
+
+	it("fails explicitly when normalized rgba8 byte length is invalid", async () => {
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService({
+				byteLength: 3,
+				outputFormat: "rgba8",
+			}),
 		});
 
 		await expect(
-			textureManager.applyStaticCommitDelta(createCommitDelta({ format: "dxt1" })),
-		).rejects.toThrow("unsupported direct texture format dxt1");
+			textureManager.applyStaticCommitDelta(
+				createCommitDelta({ outputFormat: "rgba8" }),
+			),
+		).rejects.toThrow("expected 4 rgba8 bytes, got 3");
 	});
 });
 
 class FixtureAssetService implements AssetService {
 	readonly requestedKeys: HostAssetKey[] = [];
+	readonly #payloadOptions: PreparedTexturePayloadOptions | null;
+
+	constructor(payloadOptions: PreparedTexturePayloadOptions | null = null) {
+		this.#payloadOptions = payloadOptions;
+	}
 
 	async requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
 		this.requestedKeys.push(key);
 
-		const format = key.id.includes("dxt1") ? "dxt1" : "rgba8";
+		const outputFormat = key.id.includes("dxt1") ? "dxt1" : "rgba8";
 		return {
 			key,
-			payload: createPreparedTexturePayload(format),
+			payload: createPreparedTexturePayload(this.#payloadOptions ?? {
+				outputFormat,
+			}),
 			preparedAt: "test",
 			revision: 1,
 			sourceAssetId: `prepared-texture/${key.id}`,
@@ -120,7 +149,7 @@ class FixtureAssetService implements AssetService {
 }
 
 function createCommitDelta(options: {
-	readonly format: "rgba8" | "dxt1";
+	readonly outputFormat: "rgba8" | "dxt1";
 }): StaticCoordinatorCommitDelta {
 	return {
 		addedDrawUnits: [],
@@ -131,10 +160,10 @@ function createCommitDelta(options: {
 				domain: "outdoor-terrain",
 				ownerDrawUnitIds: ["terrain-a"],
 				source: {
-					colorSpace: "srgb",
+					colorSpace: "linear",
 					kind: "prepared-texture-use",
-					mipPolicy: "retail4",
-					outputFormat: options.format,
+					mipPolicy: "none",
+					outputFormat: options.outputFormat,
 					renderSurfaceId: 0x06000010,
 					usage: "color",
 				},
@@ -144,21 +173,32 @@ function createCommitDelta(options: {
 	};
 }
 
-function createPreparedTexturePayload(format: "rgba8" | "dxt1") {
+interface PreparedTexturePayloadOptions {
+	readonly byteLength?: number;
+	readonly levelFormat?: string;
+	readonly outputFormat: "rgba8" | "dxt1";
+}
+
+function createPreparedTexturePayload(options: PreparedTexturePayloadOptions) {
+	const bytes =
+		options.byteLength === undefined
+			? new Uint8Array([255, 128, 0, 255])
+			: new Uint8Array(options.byteLength).fill(255);
+
 	return {
-		colorSpace: "srgb",
+		colorSpace: "linear",
 		kind: "prepared-texture",
 		levels: [
 			{
-				bytes: new Uint8Array([255, 128, 0, 255]),
-				format,
+				bytes,
+				format: options.levelFormat ?? "A8R8G8B8",
 				height: 1,
 				level: 0,
 				width: 1,
 			},
 		],
-		mipPolicy: "retail4",
-		outputFormat: format,
+		mipPolicy: "none",
+		outputFormat: options.outputFormat,
 		renderSurfaceId: 0x06000010,
 		usage: "color",
 	};

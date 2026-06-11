@@ -4,6 +4,7 @@ import type {
 	RendererSnapshot,
 	RendererSnapshotListener,
 	StaticResidencyDelta,
+	TerrainTextureBinding,
 	TexturePlacementUpdate,
 } from "../types";
 import type { TerrainGeometryStaticDrawUnit } from "../../static/contracts";
@@ -40,6 +41,8 @@ precision highp float;
 
 uniform vec4 uColor;
 uniform sampler2D uTexture;
+uniform vec4 uTextureRect;
+uniform vec2 uTextureSize;
 uniform bool uUseTexture;
 
 in vec2 vTexCoord;
@@ -47,7 +50,11 @@ in vec2 vTexCoord;
 out vec4 fragColor;
 
 void main() {
-	vec4 textureColor = texture(uTexture, vTexCoord);
+	vec2 localUv = fract(vTexCoord);
+	vec2 atlasUv = (uTextureRect.xy + localUv * uTextureRect.zw) / uTextureSize;
+	vec2 atlasGradX = dFdx(vTexCoord) * uTextureRect.zw / uTextureSize;
+	vec2 atlasGradY = dFdy(vTexCoord) * uTextureRect.zw / uTextureSize;
+	vec4 textureColor = textureGrad(uTexture, atlasUv, atlasGradX, atlasGradY);
 	fragColor = uUseTexture ? textureColor : uColor;
 }
 `;
@@ -73,7 +80,7 @@ class Webgl2Renderer implements Renderer {
 	readonly #listeners = new Set<RendererSnapshotListener>();
 	readonly #terrainResources = new Map<string, TerrainGeometryResource>();
 	readonly #textures = new Map<string, WebGLTexture>();
-	readonly #terrainTextureBindings = new Map<string, string>();
+	readonly #terrainTextureBindings = new Map<string, TerrainTextureBinding>();
 	readonly #terrainProgram: TerrainGeometryProgram;
 	#animationFrameId: number | null = null;
 	#disposed = false;
@@ -96,6 +103,7 @@ class Webgl2Renderer implements Renderer {
 			}
 			resource.dispose();
 			this.#terrainResources.delete(drawUnitId);
+			this.#terrainTextureBindings.delete(drawUnitId);
 		}
 
 		for (const placement of delta.addedDrawUnitPlacements) {
@@ -143,10 +151,7 @@ class Webgl2Renderer implements Renderer {
 		}
 
 		for (const binding of update.drawUnitBindings) {
-			this.#terrainTextureBindings.set(
-				binding.drawUnitId,
-				binding.textureRefId,
-			);
+			this.#terrainTextureBindings.set(binding.drawUnitId, binding);
 		}
 	}
 
@@ -247,11 +252,9 @@ class Webgl2Renderer implements Renderer {
 		gl.uniform4f(this.#terrainProgram.uniforms.uColor, 0.22, 0.72, 0.42, 1);
 
 		for (const resource of this.#terrainResources.values()) {
-			const textureRefId = this.#terrainTextureBindings.get(
-				resource.drawUnitId,
-			);
-			const texture = textureRefId
-				? (this.#textures.get(textureRefId) ?? null)
+			const binding = this.#terrainTextureBindings.get(resource.drawUnitId);
+			const texture = binding
+				? (this.#textures.get(binding.textureRefId) ?? null)
 				: null;
 			const useTexture =
 				resource.materialFamily === "terrain-single-base-color" &&
@@ -259,6 +262,18 @@ class Webgl2Renderer implements Renderer {
 			gl.activeTexture(gl.TEXTURE0);
 			gl.bindTexture(gl.TEXTURE_2D, useTexture ? texture : null);
 			gl.uniform1i(this.#terrainProgram.uniforms.uTexture, 0);
+			gl.uniform4f(
+				this.#terrainProgram.uniforms.uTextureRect,
+				binding?.rect[0] ?? 0,
+				binding?.rect[1] ?? 0,
+				binding?.rect[2] ?? 1,
+				binding?.rect[3] ?? 1,
+			);
+			gl.uniform2f(
+				this.#terrainProgram.uniforms.uTextureSize,
+				binding?.textureWidth ?? 1,
+				binding?.textureHeight ?? 1,
+			);
 			gl.uniform1i(
 				this.#terrainProgram.uniforms.uUseTexture,
 				useTexture ? 1 : 0,
@@ -320,6 +335,8 @@ interface TerrainGeometryProgram {
 		readonly uColor: WebGLUniformLocation;
 		readonly uModelViewProjection: WebGLUniformLocation;
 		readonly uTexture: WebGLUniformLocation;
+		readonly uTextureRect: WebGLUniformLocation;
+		readonly uTextureSize: WebGLUniformLocation;
 		readonly uUseTexture: WebGLUniformLocation;
 	};
 	dispose(): void;
@@ -374,6 +391,8 @@ function createTerrainGeometryProgram(
 			uColor: requireUniform(gl, program, "uColor"),
 			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
 			uTexture: requireUniform(gl, program, "uTexture"),
+			uTextureRect: requireUniform(gl, program, "uTextureRect"),
+			uTextureSize: requireUniform(gl, program, "uTextureSize"),
 			uUseTexture: requireUniform(gl, program, "uUseTexture"),
 		},
 		dispose() {

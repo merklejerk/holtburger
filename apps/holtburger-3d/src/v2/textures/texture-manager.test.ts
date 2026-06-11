@@ -41,7 +41,10 @@ describe("V2 texture manager", () => {
 			drawUnitBindings: [
 				{
 					drawUnitId: "terrain-a",
+					rect: [0, 0, 1, 1],
+					textureHeight: 1,
 					textureRefId: STABLE_TEXTURE_REF_ID,
+					textureWidth: 1,
 					textureUseId: "terrain-a:prepared-texture:06000010",
 				},
 			],
@@ -87,6 +90,62 @@ describe("V2 texture manager", () => {
 				],
 			},
 		]);
+	});
+
+	it("carries atlas rect metadata on initial and reused draw-unit bindings", async () => {
+		const assetService = new FixtureAssetService();
+		const texturePacker = new FixtureTexturePacker({
+			pageHeight: 4,
+			pageWidth: 4,
+			pixels: new Uint8Array(4 * 4 * 4),
+			rect: [2, 1, 1, 1],
+		});
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		const firstUpdate = await textureManager.applyStaticCommitDelta(
+			createCommitDelta({
+				drawUnitId: "terrain-a",
+				outputFormat: "rgba8",
+				textureUseId: "terrain-a:prepared-texture:06000010",
+			}),
+		);
+		const secondUpdate = await textureManager.applyStaticCommitDelta(
+			createCommitDelta({
+				drawUnitId: "terrain-b",
+				outputFormat: "rgba8",
+				placementRevisionAssumption: 0,
+				textureUseId: "terrain-b:prepared-texture:06000010",
+			}),
+		);
+
+		expect(firstUpdate).toMatchObject({
+			drawUnitBindings: [
+				{
+					drawUnitId: "terrain-a",
+					rect: [2, 1, 1, 1],
+					textureHeight: 4,
+					textureWidth: 4,
+				},
+			],
+			placements: [
+				{
+					height: 4,
+					rect: [2, 1, 1, 1],
+					width: 4,
+				},
+			],
+		});
+		expect(secondUpdate).toMatchObject({
+			drawUnitBindings: [
+				{
+					drawUnitId: "terrain-b",
+					rect: [2, 1, 1, 1],
+					textureHeight: 4,
+					textureWidth: 4,
+				},
+			],
+			placements: [],
+		});
 	});
 
 	it("removes texture refs by draw-unit ownership without requiring rebaked geometry", async () => {
@@ -360,9 +419,16 @@ class FixtureAssetService implements AssetService {
 
 class FixtureTexturePacker implements TexturePacker {
 	readonly jobs: TexturePackingJob[] = [];
+	readonly #options: FixtureTexturePackerOptions;
+
+	constructor(options: FixtureTexturePackerOptions = {}) {
+		this.#options = options;
+	}
 
 	async pack(job: TexturePackingJob): Promise<TexturePackingResult> {
 		this.jobs.push(job);
+		const pageWidth = this.#options.pageWidth ?? job.page.width;
+		const pageHeight = this.#options.pageHeight ?? job.page.height;
 
 		return {
 			domain: job.domain,
@@ -370,20 +436,32 @@ class FixtureTexturePacker implements TexturePacker {
 			pages: [
 				{
 					format: "rgba8",
-					height: job.page.height,
+					height: pageHeight,
 					pageId: `${job.jobId}:page:0`,
-					pixels: job.sources[0]?.source.pixels ?? new Uint8Array(),
-					width: job.page.width,
+					pixels:
+						this.#options.pixels ??
+						job.sources[0]?.source.pixels ??
+						new Uint8Array(),
+					width: pageWidth,
 				},
 			],
 			placementRevision: job.placementRevision,
 			rects: job.sources.map((source) => ({
 				pageId: `${job.jobId}:page:0`,
-				rect: [0, 0, source.source.width, source.source.height] as const,
+				rect:
+					this.#options.rect ??
+					([0, 0, source.source.width, source.source.height] as const),
 				textureUseId: source.textureUseId,
 			})),
 		};
 	}
+}
+
+interface FixtureTexturePackerOptions {
+	readonly pageWidth?: number;
+	readonly pageHeight?: number;
+	readonly pixels?: Uint8Array;
+	readonly rect?: readonly [number, number, number, number];
 }
 
 function createCommitDelta(options: {

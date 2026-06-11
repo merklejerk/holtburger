@@ -61,6 +61,9 @@ export interface TerrainTextureBinding {
 	readonly drawUnitId: string;
 	readonly textureUseId: string;
 	readonly textureRefId: string;
+	readonly textureWidth: number;
+	readonly textureHeight: number;
+	readonly rect: readonly [number, number, number, number];
 }
 
 export interface SamplerPolicyUpdate {

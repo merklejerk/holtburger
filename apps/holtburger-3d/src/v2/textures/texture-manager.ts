@@ -105,7 +105,10 @@ export class TextureManager {
 				}
 				drawUnitBindings.push({
 					drawUnitId,
+					rect: placement.entry.rect,
+					textureHeight: placement.entry.textureHeight,
 					textureRefId: placement.entry.textureRefId,
+					textureWidth: placement.entry.textureWidth,
 					textureUseId: textureUse.textureUseId,
 				});
 			}
@@ -261,8 +264,11 @@ export class TextureManager {
 			domain: textureUse.domain,
 			leaseCount: 0,
 			placementRevision,
+			rect: rect.rect,
 			source: textureUse.source,
+			textureHeight: page.height,
 			textureRefId,
+			textureWidth: page.width,
 		};
 		registry.entries.set(textureKey, entry);
 		dirtyDomains.add(textureUse.domain);
@@ -313,6 +319,9 @@ interface DomainTextureRegistryEntry {
 	readonly source: PreparedTextureUseIdentity;
 	readonly textureRefId: string;
 	readonly placementRevision: number;
+	readonly textureWidth: number;
+	readonly textureHeight: number;
+	readonly rect: readonly [number, number, number, number];
 	leaseCount: number;
 }
 

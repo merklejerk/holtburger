@@ -7,8 +7,8 @@ import {
 } from "../runtime/client-runtime";
 import { StaticCoordinator } from "../static/coordinator/static-coordinator";
 import type {
-	StaticBakeInput,
-	StaticBakeResult,
+	StaticBakeBatchInput,
+	StaticBakeBatchResult,
 	StaticBakerClient,
 	StaticResolverJob,
 	StaticResolverClient,
@@ -149,15 +149,12 @@ class BrowserStaticBaker implements StaticBakerClient {
 		this.#onDispose = options.onDispose;
 	}
 
-	bake(input: StaticBakeInput): Promise<StaticBakeResult> {
+	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
 		if (this.#disposed) {
 			return Promise.reject(new Error("BrowserStaticBaker has been disposed."));
 		}
 
-		if (
-			input.work.job.domain === "outdoor-terrain" &&
-			input.payload.scope.kind === "terrain"
-		) {
+		if (input.domain === "outdoor-terrain") {
 			return this.#terrainBaker.bake(input);
 		}
 

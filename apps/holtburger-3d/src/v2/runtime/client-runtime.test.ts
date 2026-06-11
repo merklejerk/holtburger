@@ -38,7 +38,7 @@ describe("V2 client runtime", () => {
 			diagnostics: silentDiagnostics,
 			host: new FakeRuntimeHost(),
 			renderer: new FakeRenderer(),
-			staticCoordinator: new StaticCoordinator({
+			staticCoordinator: createImmediateStaticCoordinator({
 				baker: new DeferredStaticBakerClient(),
 				resolver,
 			}),
@@ -77,7 +77,10 @@ describe("V2 client runtime", () => {
 		const renderer = new FakeRenderer();
 		const resolver = new DeferredStaticResolverClient();
 		const baker = new DeferredStaticBakerClient();
-		const staticCoordinator = new StaticCoordinator({ baker, resolver });
+		const staticCoordinator = createImmediateStaticCoordinator({
+			baker,
+			resolver,
+		});
 		const runtime = createClientRuntime({
 			diagnostics: silentDiagnostics,
 			host: new FakeRuntimeHost(),
@@ -126,7 +129,10 @@ describe("V2 client runtime", () => {
 		const resolver = new DeferredStaticResolverClient();
 		const baker = new DeferredStaticBakerClient();
 		const assetService = new DeferredAssetService();
-		const staticCoordinator = new StaticCoordinator({ baker, resolver });
+		const staticCoordinator = createImmediateStaticCoordinator({
+			baker,
+			resolver,
+		});
 		const runtime = createClientRuntime({
 			assetService,
 			diagnostics: silentDiagnostics,
@@ -186,7 +192,10 @@ describe("V2 client runtime", () => {
 		const resolver = new DeferredStaticResolverClient();
 		const baker = new DeferredStaticBakerClient();
 		const assetService = new DeferredAssetService();
-		const staticCoordinator = new StaticCoordinator({ baker, resolver });
+		const staticCoordinator = createImmediateStaticCoordinator({
+			baker,
+			resolver,
+		});
 		const runtime = createClientRuntime({
 			assetService,
 			diagnostics: silentDiagnostics,
@@ -396,6 +405,20 @@ function createPreparedTextureUse(): PreparedTextureUseIdentity {
 		renderSurfaceId: 0x06000010,
 		usage: "color",
 	};
+}
+
+function createImmediateStaticCoordinator(options: {
+	readonly baker: DeferredStaticBakerClient;
+	readonly resolver: DeferredStaticResolverClient;
+}): StaticCoordinator {
+	return new StaticCoordinator({
+		baker: options.baker,
+		batching: {
+			maxPayloadsPerBatch: 8,
+			maxWaitMs: 0,
+		},
+		resolver: options.resolver,
+	});
 }
 
 function createBakeTextureUse(

@@ -14,7 +14,11 @@ describe("V2 static coordinator", () => {
 	it("rejects stale resolver results after a newer demand revision supersedes them", async () => {
 		const resolver = new DeferredStaticResolverClient();
 		const baker = new DeferredStaticBakerClient();
-		const coordinator = new StaticCoordinator({ baker, resolver });
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
 
 		const [firstWork] = coordinator.requestStaticDemand(
 			createSingleTerrainDemand(0xda55ffff),
@@ -50,7 +54,11 @@ describe("V2 static coordinator", () => {
 	it("rejects stale bake results after a newer demand revision supersedes them", async () => {
 		const resolver = new DeferredStaticResolverClient();
 		const baker = new DeferredStaticBakerClient();
-		const coordinator = new StaticCoordinator({ baker, resolver });
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
 
 		const [firstWork] = coordinator.requestStaticDemand(
 			createSingleTerrainDemand(0xda55ffff),
@@ -73,7 +81,11 @@ describe("V2 static coordinator", () => {
 	it("tracks revisions on pending work without asset lease concepts", () => {
 		const resolver = new DeferredStaticResolverClient();
 		const baker = new DeferredStaticBakerClient();
-		const coordinator = new StaticCoordinator({ baker, resolver });
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
 
 		coordinator.requestStaticDemand(createSingleTerrainDemand(0xda55ffff));
 
@@ -93,7 +105,11 @@ describe("V2 static coordinator", () => {
 	it("emits committed draw-unit deltas and eviction deltas", async () => {
 		const resolver = new DeferredStaticResolverClient();
 		const baker = new DeferredStaticBakerClient();
-		const coordinator = new StaticCoordinator({ baker, resolver });
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
 		const deltas: StaticCoordinatorCommitDelta[] = [];
 		coordinator.subscribeCommits((delta) => deltas.push(delta));
 
@@ -112,7 +128,7 @@ describe("V2 static coordinator", () => {
 				addedDrawUnits: [createPlaceholderDrawUnit("terrain-a")],
 				removedDrawUnitIds: [],
 				revision: 1,
-				staticBatchId: "static-batch:1:landblock:da55ffff:outdoor-terrain",
+				staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
 				textureUses: [],
 			},
 		]);
@@ -136,6 +152,57 @@ describe("V2 static coordinator", () => {
 			textureUses: [],
 		});
 		expect(coordinator.createSnapshot().committedDrawUnits).toBe(0);
+	});
+
+	it("groups same-domain resolved payloads into one static bake batch", async () => {
+		const resolver = new DeferredStaticResolverClient();
+		const baker = new DeferredStaticBakerClient();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: {
+				maxPayloadsPerBatch: 8,
+				maxWaitMs: 0,
+			},
+			resolver,
+		});
+
+		const work = coordinator.requestStaticDemand({
+			location: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+			lod: {
+				buildings: -1,
+				detail: -1,
+				terrain: 1,
+				topology: -1,
+			},
+		});
+		const terrainWork = work.filter(
+			(item) => item.job.domain === "outdoor-terrain",
+		);
+
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
+		resolver.complete(resolver.pendingRequests[1]?.requestId ?? "");
+		await flushPromises();
+
+		expect(baker.pendingInputs).toHaveLength(1);
+		expect(baker.pendingInputs[0]).toMatchObject({
+			domain: "outdoor-terrain",
+			revision: 1,
+			staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:2",
+		});
+		expect(
+			baker.pendingInputs[0]?.items.map((item) => item.work.workId),
+		).toEqual(terrainWork.slice(0, 2).map((item) => item.workId));
+
+		baker.complete(baker.pendingInputs[0]?.staticBatchId ?? "");
+		await flushPromises();
+
+		expect(coordinator.createSnapshot()).toMatchObject({
+			committed: 2,
+			committedDrawUnits: 2,
+		});
 	});
 });
 

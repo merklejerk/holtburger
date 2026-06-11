@@ -1,6 +1,6 @@
 import type {
-	StaticBakeInput,
-	StaticBakeResult,
+	StaticBakeBatchInput,
+	StaticBakeBatchResult,
 	StaticBakerClient,
 } from "../contracts";
 import type {
@@ -9,7 +9,7 @@ import type {
 } from "./protocol";
 
 interface PendingBakeRequest {
-	readonly resolve: (result: StaticBakeResult) => void;
+	readonly resolve: (result: StaticBakeBatchResult) => void;
 	readonly reject: (error: Error) => void;
 }
 
@@ -28,7 +28,7 @@ export class StaticBakeWorkerClient implements StaticBakerClient {
 		this.#port.addEventListener("message", this.#onMessage);
 	}
 
-	bake(input: StaticBakeInput): Promise<StaticBakeResult> {
+	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
 		const requestId = `bake-job:${this.#nextRequestIndex}`;
 		this.#nextRequestIndex += 1;
 
@@ -36,7 +36,7 @@ export class StaticBakeWorkerClient implements StaticBakerClient {
 			this.#pending.set(requestId, { reject, resolve });
 			this.#port.postMessage({
 				input,
-				kind: "bake-static-scope",
+				kind: "bake-static-batch",
 				requestId,
 			});
 		});
@@ -57,7 +57,7 @@ export class StaticBakeWorkerClient implements StaticBakerClient {
 		}
 
 		this.#pending.delete(response.requestId);
-		if (response.kind === "static-scope-bake-failed") {
+		if (response.kind === "static-batch-bake-failed") {
 			pending.reject(new Error(response.message));
 			return;
 		}

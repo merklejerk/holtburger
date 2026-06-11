@@ -80,9 +80,9 @@ describe("V2 texture manager", () => {
 				page: {
 					format: "rgba8",
 					gutterPixels: 4,
-					height: 16,
+					height: 2048,
 					pageSelection: "minimize-textures",
-					width: 16,
+					width: 2048,
 				},
 				placementRevision: 1,
 				sources: [
@@ -136,9 +136,9 @@ describe("V2 texture manager", () => {
 				page: {
 					format: "rgba8",
 					gutterPixels: 4,
-					height: 16,
+					height: 2048,
 					pageSelection: "minimize-textures",
-					width: 16,
+					width: 2048,
 				},
 				sources: [
 					{
@@ -344,7 +344,7 @@ describe("V2 texture manager", () => {
 		const payload = createTerrainPayload([createTextureUse(0x06000010)]);
 
 		expect(
-			textureManager.createStaticAtlasBatchSnapshot(payload, "batch-a"),
+			textureManager.createStaticAtlasBatchSnapshot([payload], "batch-a"),
 		).toEqual({
 			domain: "outdoor-terrain",
 			placements: [],
@@ -357,7 +357,7 @@ describe("V2 texture manager", () => {
 		);
 
 		expect(
-			textureManager.createStaticAtlasBatchSnapshot(payload, "batch-a"),
+			textureManager.createStaticAtlasBatchSnapshot([payload], "batch-a"),
 		).toMatchObject({
 			domain: "outdoor-terrain",
 			placements: [
@@ -501,8 +501,10 @@ class FixtureTexturePacker implements TexturePacker {
 
 	async pack(job: TexturePackingJob): Promise<TexturePackingResult> {
 		this.jobs.push(job);
-		const pageWidth = this.#options.pageWidth ?? job.page.width;
-		const pageHeight = this.#options.pageHeight ?? job.page.height;
+		const pageWidth =
+			this.#options.pageWidth ?? createFixturePageSide(job, "width");
+		const pageHeight =
+			this.#options.pageHeight ?? createFixturePageSide(job, "height");
 
 		return {
 			domain: job.domain,
@@ -552,6 +554,27 @@ function createFixturePagePixels(
 	}
 
 	return pixels;
+}
+
+function createFixturePageSide(
+	job: TexturePackingJob,
+	dimension: "height" | "width",
+): number {
+	const gutterPixels = job.page.gutterPixels ?? 0;
+	const minSide = Math.max(
+		1,
+		...job.sources.map((source) => source.source[dimension] + gutterPixels * 2),
+	);
+	return Math.min(nextPowerOfTwo(minSide), job.page[dimension]);
+}
+
+function nextPowerOfTwo(value: number): number {
+	let power = 1;
+	while (power < value) {
+		power *= 2;
+	}
+
+	return power;
 }
 
 function createCommitDelta(options: {

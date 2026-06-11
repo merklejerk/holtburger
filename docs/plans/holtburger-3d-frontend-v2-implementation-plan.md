@@ -1129,7 +1129,7 @@ Implementation notes:
 
 - 2026-06-11: This subphase intentionally keeps the current coordinator at one bake work item per submitted static batch. It removes the global atlas contention bug first, then leaves multi-payload batch scheduling as the next cut.
 - 2026-06-11: Spicy but expected: tests that previously asserted cross-draw-unit domain reuse and stale-revision rejection were inverted. They now assert intra-batch reuse and cross-batch duplication.
-- 2026-06-11: Static bake workers still receive one `StaticBakeInput`. The contract is batch-native, but worker/coordinator multi-payload jobs have not landed yet.
+- 2026-06-11: Superseded by Phase 10B4C2: static bake workers now receive `StaticBakeBatchInput` and can process multiple payloads in one submitted batch.
 
 Verification:
 
@@ -1138,7 +1138,7 @@ Verification:
 
 #### Phase 10B4C2: Multi-Payload Static Batch Scheduling
 
-Status: pending.
+Status: completed.
 
 Deliverables:
 
@@ -1152,6 +1152,20 @@ Acceptance:
 - Two newly resolved terrain landblocks can be submitted as one static atlas batch and share compatible atlas pages inside that batch.
 - Later terrain batches receive distinct batch atlas groups and may duplicate sources.
 - Static object and dungeon/static future phases can reuse the same batch submission path.
+
+Implementation notes:
+
+- 2026-06-11: Replaced the one-scope static baker contract with `StaticBakeBatchInput`/`StaticBakeBatchResult`. Static bake worker messages now use `bake-static-batch`/`static-batch-baked`, so the worker API shape matches the design doc instead of carrying a compatibility shim.
+- 2026-06-11: The static coordinator now groups resolved payloads by `revision + domain` into pending static bake batches. The default flush policy is named in code as `DEFAULT_STATIC_BATCH_MAX_PAYLOADS` and `DEFAULT_STATIC_BATCH_MAX_WAIT_MS`; tests can configure `maxWaitMs: 0` for deterministic microtask flushing.
+- 2026-06-11: Terrain baking now accepts multiple terrain payloads in one batch, while keeping each draw unit id and source mapping scoped to its original landblock work id.
+- 2026-06-11: Spicy but intentional: the old `bake-static-scope` worker protocol was deleted rather than wrapped. The current API is cleaner and makes static-object/dungeon future adapters batch-shaped from the start.
+- 2026-06-11: Root archetype for future static bake domains: atlases are scoped to submitted static batches, while geometry/VAO draw units stay scoped to their owning landblock/env-cell for culling, picking, inspection, and eviction. Static object, dungeon, topology, and later detail bake adapters should start from this model rather than adding domain-specific atlas lifetime rules.
+- 2026-06-11: Failed to close: non-terrain static domains still use placeholder bake output. Demand supersession is revision-safe. Runtime-facing flush configuration and priority-weight tuning are intentionally not planned until real streaming behavior shows demand for them.
+- 2026-06-11: Manual terrain streaming exposed that area-derived runtime atlas page constraints could be too small for a terrain material cohort that must fit together on one page. Runtime texture packing now advertises the named max atlas page capacity and lets the packer minimize the actual allocated page size.
+
+Verification:
+
+- `npm run test:ts -- src/v2/static/coordinator/static-coordinator.test.ts src/v2/static/bake/worker-client.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts src/v2/textures/texture-manager.test.ts`
 
 ### Phase 10B5: Sampler Policy Update Lifecycle
 

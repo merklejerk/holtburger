@@ -25,6 +25,7 @@ import {
 
 const FILTERABLE_ATLAS_GUTTER_PIXELS = 4;
 const EXACT_ATLAS_GUTTER_PIXELS = 0;
+const MAX_RUNTIME_ATLAS_PAGE_SIZE = 2048;
 
 interface TextureManagerOptions {
 	readonly assetService: AssetService;
@@ -40,7 +41,10 @@ export class TextureManager {
 		StaticBatchRegistryKey,
 		StaticBatchTextureRegistry
 	>();
-	readonly #textureKeysByDrawUnitId = new Map<string, Set<StaticBatchTextureKey>>();
+	readonly #textureKeysByDrawUnitId = new Map<
+		string,
+		Set<StaticBatchTextureKey>
+	>();
 	#revision = 0;
 
 	constructor(options: TextureManagerOptions) {
@@ -54,14 +58,22 @@ export class TextureManager {
 	}
 
 	createStaticAtlasBatchSnapshot(
-		payload: StaticScopePayload,
+		payloads: readonly StaticScopePayload[],
 		staticBatchId: string,
 	): StaticAtlasBatchSnapshot {
-		const textureUses = collectPayloadTextureUses(payload);
-		const registry = this.#getRegistry(payload.job.domain, staticBatchId);
+		const firstPayload = payloads[0];
+		if (!firstPayload) {
+			throw new Error(
+				"Cannot create a static atlas batch snapshot without payloads.",
+			);
+		}
+		const textureUses = payloads.flatMap((payload) =>
+			collectPayloadTextureUses(payload),
+		);
+		const registry = this.#getRegistry(firstPayload.job.domain, staticBatchId);
 
 		return {
-			domain: payload.job.domain,
+			domain: firstPayload.job.domain,
 			placements: textureUses.flatMap((textureUse) => {
 				if (textureUse.kind !== "prepared-texture-use") {
 					return [];
@@ -69,7 +81,7 @@ export class TextureManager {
 
 				const entry = registry.entries.get(
 					createStaticBatchTextureKey(
-						payload.job.domain,
+						firstPayload.job.domain,
 						staticBatchId,
 						textureUse,
 					),
@@ -124,9 +136,9 @@ export class TextureManager {
 			}
 		}
 
-		const packedPlacements = await this.#packPendingTexturePlacements(
-			[...pendingPlacements.values()],
-		);
+		const packedPlacements = await this.#packPendingTexturePlacements([
+			...pendingPlacements.values(),
+		]);
 		placements.push(...packedPlacements);
 
 		for (const placement of pendingPlacements.values()) {
@@ -149,8 +161,7 @@ export class TextureManager {
 				this.#getRegistry(
 					textureUse.domain,
 					textureUse.staticBatchId,
-				).entries.get(textureKey) ??
-				pendingPlacements.get(textureKey)?.entry;
+				).entries.get(textureKey) ?? pendingPlacements.get(textureKey)?.entry;
 			if (!entry) {
 				continue;
 			}
@@ -621,33 +632,13 @@ function createTexturePackingPageConstraints(
 			getRuntimeTexturePageGutterPixels(entry.pagePolicy),
 		),
 	);
-	const paddedWidths = entries.map(
-		(entry) => entry.source.width + gutterPixels * 2,
-	);
-	const paddedHeights = entries.map(
-		(entry) => entry.source.height + gutterPixels * 2,
-	);
-	const totalPaddedArea = entries.reduce(
-		(total, entry) =>
-			total +
-			(entry.source.width + gutterPixels * 2) *
-				(entry.source.height + gutterPixels * 2),
-		0,
-	);
-	const minSide = Math.max(
-		1,
-		...paddedWidths,
-		...paddedHeights,
-		Math.ceil(Math.sqrt(totalPaddedArea)),
-	);
-	const pageSide = Math.min(nextPowerOfTwo(minSide), 2048);
 
 	return {
 		format: "rgba8",
 		gutterPixels,
-		height: pageSide,
+		height: MAX_RUNTIME_ATLAS_PAGE_SIZE,
 		pageSelection: "minimize-textures",
-		width: pageSide,
+		width: MAX_RUNTIME_ATLAS_PAGE_SIZE,
 	};
 }
 
@@ -658,13 +649,4 @@ function getRuntimeTexturePageGutterPixels(
 		pagePolicy.sampleClass === "rgba-detail"
 		? FILTERABLE_ATLAS_GUTTER_PIXELS
 		: EXACT_ATLAS_GUTTER_PIXELS;
-}
-
-function nextPowerOfTwo(value: number): number {
-	let power = 1;
-	while (power < value) {
-		power *= 2;
-	}
-
-	return power;
 }

@@ -1,7 +1,7 @@
 import type {
 	StaticAtlasBatchSnapshot,
-	StaticBakeInput,
-	StaticBakeResult,
+	StaticBakeBatchInput,
+	StaticBakeBatchResult,
 	StaticBakerClient,
 	StaticDrawUnit,
 	StaticResolverClient,
@@ -82,52 +82,64 @@ export class DeferredStaticResolverClient implements StaticResolverClient {
 }
 
 export class DeferredStaticBakerClient implements StaticBakerClient {
-	readonly #pending: StaticBakeInput[] = [];
+	readonly #pending: StaticBakeBatchInput[] = [];
 	readonly #resolvers = new Map<
 		string,
 		{
-			readonly resolve: (result: StaticBakeResult) => void;
+			readonly resolve: (result: StaticBakeBatchResult) => void;
 			readonly reject: (error: Error) => void;
 		}
 	>();
 
-	bake(input: StaticBakeInput): Promise<StaticBakeResult> {
+	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
 		this.#pending.push(input);
 
 		return new Promise((resolve, reject) => {
-			this.#resolvers.set(input.work.workId, { reject, resolve });
+			this.#resolvers.set(input.staticBatchId, { reject, resolve });
 		});
 	}
 
-	get pendingInputs(): readonly StaticBakeInput[] {
+	get pendingInputs(): readonly StaticBakeBatchInput[] {
 		return this.#pending;
 	}
 
 	complete(
-		workId: string,
-		result: Partial<Omit<StaticBakeResult, "work">> = {},
+		staticBatchId: string,
+		result: Partial<
+			Omit<
+				StaticBakeBatchResult,
+				"domain" | "revision" | "staticBatchId" | "works"
+			>
+		> = {},
 	): void {
 		const input = this.#pending.find(
-			(candidate) => candidate.work.workId === workId,
+			(candidate) =>
+				candidate.staticBatchId === staticBatchId ||
+				candidate.items.some((item) => item.work.workId === staticBatchId),
 		);
-		const resolver = this.#resolvers.get(workId);
+		const resolver = input ? this.#resolvers.get(input.staticBatchId) : null;
 
 		if (!input || !resolver) {
-			throw new Error(`No pending bake work exists for ${workId}.`);
+			throw new Error(`No pending bake batch exists for ${staticBatchId}.`);
 		}
 
-		this.#resolvers.delete(workId);
+		this.#resolvers.delete(input.staticBatchId);
 		resolver.resolve(createFakeStaticBakeResult(input, result));
 	}
 
-	fail(workId: string, error: Error): void {
-		const resolver = this.#resolvers.get(workId);
+	fail(staticBatchId: string, error: Error): void {
+		const input = this.#pending.find(
+			(candidate) =>
+				candidate.staticBatchId === staticBatchId ||
+				candidate.items.some((item) => item.work.workId === staticBatchId),
+		);
+		const resolver = input ? this.#resolvers.get(input.staticBatchId) : null;
 
-		if (!resolver) {
-			throw new Error(`No pending bake work exists for ${workId}.`);
+		if (!input || !resolver) {
+			throw new Error(`No pending bake batch exists for ${staticBatchId}.`);
 		}
 
-		this.#resolvers.delete(workId);
+		this.#resolvers.delete(input.staticBatchId);
 		resolver.reject(error);
 	}
 }
@@ -196,7 +208,7 @@ export class ImmediateStaticResolverClient implements StaticResolverClient {
 }
 
 export class ImmediateStaticBakerClient implements StaticBakerClient {
-	async bake(input: StaticBakeInput): Promise<StaticBakeResult> {
+	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
 		return createFakeStaticBakeResult(input);
 	}
 }
@@ -215,15 +227,24 @@ export function createEmptyAtlasSnapshot(
 }
 
 function createFakeStaticBakeResult(
-	input: StaticBakeInput,
-	result: Partial<Omit<StaticBakeResult, "work">> = {},
-): StaticBakeResult {
+	input: StaticBakeBatchInput,
+	result: Partial<
+		Omit<
+			StaticBakeBatchResult,
+			"domain" | "revision" | "staticBatchId" | "works"
+		>
+	> = {},
+): StaticBakeBatchResult {
 	return {
 		atlasRegistryUpdates: result.atlasRegistryUpdates ?? [],
-		buildRevision: result.buildRevision ?? input.payload.sourceRevision,
+		buildRevision:
+			result.buildRevision ??
+			Math.max(...input.items.map((item) => item.payload.sourceRevision), 0),
+		domain: input.domain,
 		drawUnits: result.drawUnits ?? [
-			createPlaceholderDrawUnit(input.work.workId),
+			...input.items.map((item) => createPlaceholderDrawUnit(item.work.workId)),
 		],
+		revision: input.revision,
 		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds ?? [],
 		staticPortalInteriorRecords: result.staticPortalInteriorRecords ?? [],
 		staticSourceMappings: result.staticSourceMappings ?? [],
@@ -231,7 +252,7 @@ function createFakeStaticBakeResult(
 		staticVisibilityRecords: result.staticVisibilityRecords ?? [],
 		staticBatchId: input.staticBatchId,
 		textureUses: result.textureUses ?? [],
-		work: input.work,
+		works: input.items.map((item) => item.work),
 	};
 }
 

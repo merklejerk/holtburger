@@ -1,19 +1,19 @@
-import type { StaticBakeInput, StaticBakeResult } from "../contracts";
+import type { StaticBakeBatchInput, StaticBakeBatchResult } from "../contracts";
 
 export type StaticBakeWorkerMainMessage = {
-	readonly kind: "bake-static-scope";
+	readonly kind: "bake-static-batch";
 	readonly requestId: string;
-	readonly input: StaticBakeInput;
+	readonly input: StaticBakeBatchInput;
 };
 
 export type StaticBakeWorkerThreadMessage =
 	| {
-			readonly kind: "static-scope-baked";
+			readonly kind: "static-batch-baked";
 			readonly requestId: string;
-			readonly result: StaticBakeResult;
+			readonly result: StaticBakeBatchResult;
 	  }
 	| {
-			readonly kind: "static-scope-bake-failed";
+			readonly kind: "static-batch-bake-failed";
 			readonly requestId: string;
 			readonly message: string;
 	  };

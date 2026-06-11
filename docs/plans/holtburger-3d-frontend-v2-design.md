@@ -1148,7 +1148,7 @@ flowchart LR
 
 Draw units bind texture refs, not physical atlas pages. A direct texture is represented as a degenerate atlas placement. Repacking is possible because refs can resolve to new placements without rewriting draw-unit geometry.
 
-The hard lifecycle rule is that draw units are landblock/env-cell-owned output, while atlases are batch-owned resources:
+The hard lifecycle rule is that draw units are landblock/env-cell-owned output, while atlases are batch-owned resources. This is the root archetype for static baking domains: terrain, outdoor static objects, dungeon/env-cell static geometry, topology-derived renderables, and later detail domains should share batch-scoped atlas lifetimes with landblock/env-cell-scoped geometry/VAO ownership unless a future optimization explicitly proves a narrower exception:
 
 ```text
 static scope residency:

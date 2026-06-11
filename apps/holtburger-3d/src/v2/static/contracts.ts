@@ -361,16 +361,24 @@ interface StaticAtlasBatchPlacementSnapshot {
 	readonly texture: PreparedTextureUseIdentity;
 }
 
-export interface StaticBakeInput {
+export interface StaticBakeBatchItem {
 	readonly work: ScheduledStaticWork;
 	readonly payload: StaticScopePayload;
+}
+
+export interface StaticBakeBatchInput {
 	readonly atlasSnapshot: StaticAtlasBatchSnapshot;
+	readonly domain: StaticDomain;
+	readonly items: readonly StaticBakeBatchItem[];
+	readonly revision: number;
 	readonly staticBatchId: string;
 }
 
-export interface StaticBakeResult {
-	readonly work: ScheduledStaticWork;
+export interface StaticBakeBatchResult {
 	readonly staticBatchId: string;
+	readonly domain: StaticDomain;
+	readonly revision: number;
+	readonly works: readonly ScheduledStaticWork[];
 	readonly drawUnits: readonly StaticDrawUnit[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly atlasRegistryUpdates: readonly string[];
@@ -496,7 +504,7 @@ export interface StaticResolverClient {
 }
 
 export interface StaticBakerClient {
-	bake(input: StaticBakeInput): Promise<StaticBakeResult>;
+	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult>;
 }
 
 export interface StaticCoordinatorSnapshot {

@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { StaticBakeInput, StaticBakeResult } from "../contracts";
-import {
-	StaticBakeWorkerClient,
-} from "./worker-client";
+import type { StaticBakeBatchInput, StaticBakeBatchResult } from "../contracts";
+import { StaticBakeWorkerClient } from "./worker-client";
 import type {
 	StaticBakeWorkerPort,
 	StaticBakeWorkerRequest,
@@ -20,20 +18,20 @@ describe("V2 static bake worker protocol", () => {
 		expect(port.requests).toEqual([
 			{
 				input,
-				kind: "bake-static-scope",
+				kind: "bake-static-batch",
 				requestId: "bake-job:0",
 			},
 		]);
 
 		port.emit({
-			kind: "static-scope-baked",
+			kind: "static-batch-baked",
 			requestId: "bake-job:0",
 			result: createResult(input),
 		});
 
 		await expect(pending).resolves.toMatchObject({
 			drawUnits: [{ kind: "placeholder" }],
-			work: input.work,
+			works: [input.items[0]?.work],
 		});
 		client.dispose();
 	});
@@ -44,13 +42,13 @@ describe("V2 static bake worker protocol", () => {
 
 		await handleStaticBakeWorkerRequest(
 			{
-				async bake(): Promise<StaticBakeResult> {
+				async bake(): Promise<StaticBakeBatchResult> {
 					throw new Error("unsupported bake payload");
 				},
 			},
 			{
 				input,
-				kind: "bake-static-scope",
+				kind: "bake-static-batch",
 				requestId: "transport:1",
 			},
 			(response) => responses.push(response),
@@ -58,7 +56,7 @@ describe("V2 static bake worker protocol", () => {
 
 		expect(responses).toEqual([
 			{
-				kind: "static-scope-bake-failed",
+				kind: "static-batch-bake-failed",
 				message: "unsupported bake payload",
 				requestId: "transport:1",
 			},
@@ -98,7 +96,7 @@ class FixtureWorkerPort implements StaticBakeWorkerPort {
 	}
 }
 
-function createInput(): StaticBakeInput {
+function createInput(): StaticBakeBatchInput {
 	const work = {
 		job: {
 			domain: "outdoor-terrain" as const,
@@ -119,29 +117,37 @@ function createInput(): StaticBakeInput {
 			staticBatchId: "batch-a",
 			textureUses: [],
 		},
-		payload: {
-			job: work.job,
-			scope: {
-				kind: "placeholder",
-				referencedTextureUses: [],
+		domain: "outdoor-terrain",
+		items: [
+			{
+				payload: {
+					job: work.job,
+					scope: {
+						kind: "placeholder",
+						referencedTextureUses: [],
+					},
+					sourceRevision: 1,
+				},
+				work,
 			},
-			sourceRevision: 1,
-		},
+		],
+		revision: 1,
 		staticBatchId: "batch-a",
-		work,
 	};
 }
 
-function createResult(input: StaticBakeInput): StaticBakeResult {
+function createResult(input: StaticBakeBatchInput): StaticBakeBatchResult {
 	return {
 		atlasRegistryUpdates: [],
 		buildRevision: 1,
+		domain: input.domain,
 		drawUnits: [
 			{
 				drawUnitId: "placeholder",
 				kind: "placeholder",
 			},
 		],
+		revision: input.revision,
 		staticAuthoredDynamicSeeds: [],
 		staticPortalInteriorRecords: [],
 		staticSourceMappings: [],
@@ -149,6 +155,6 @@ function createResult(input: StaticBakeInput): StaticBakeResult {
 		staticVisibilityRecords: [],
 		staticBatchId: input.staticBatchId,
 		textureUses: [],
-		work: input.work,
+		works: input.items.map((item) => item.work),
 	};
 }

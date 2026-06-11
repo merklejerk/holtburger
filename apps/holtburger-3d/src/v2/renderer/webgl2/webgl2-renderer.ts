@@ -3,6 +3,7 @@ import type {
 	Renderer,
 	RendererSnapshot,
 	RendererSnapshotListener,
+	SamplerPolicyUpdate,
 	StaticResidencyDelta,
 	TerrainTextureBinding,
 	TexturePlacementUpdate,
@@ -359,7 +360,7 @@ class Webgl2Renderer implements Renderer {
 		}
 
 		for (const placement of update.placements) {
-			const texture = createDirectTexture(gl, placement);
+			const texture = createTexturePage(gl, placement);
 			const previousTexture = this.#textures.get(placement.textureRefId);
 			if (previousTexture) {
 				gl.deleteTexture(previousTexture);
@@ -375,8 +376,15 @@ class Webgl2Renderer implements Renderer {
 		}
 	}
 
-	applySamplerPolicyUpdate(): void {
-		// Sampler policy changes are part of the renderer contract, not Phase 1 behavior.
+	applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void {
+		const gl = this.#gl;
+		for (const policy of update.policies) {
+			const texture = this.#textures.get(policy.textureRefId);
+			if (!texture) {
+				continue;
+			}
+			applyTextureSamplerPolicy(gl, texture, policy);
+		}
 	}
 
 	updateFrameState(state: FrameState): void {
@@ -1194,13 +1202,13 @@ function resolveBindingPage(
 	return bindings.get(role.textureUseId)?.rolePage.slot ?? 0;
 }
 
-function createDirectTexture(
+function createTexturePage(
 	gl: WebGL2RenderingContext,
 	placement: TexturePlacementUpdate["placements"][number],
 ): WebGLTexture {
 	if (placement.format !== "rgba8") {
 		throw new Error(
-			`V2 WebGL2 renderer only supports rgba8 direct textures. Received ${placement.format}.`,
+			`V2 WebGL2 renderer only supports rgba8 texture pages. Received ${placement.format}.`,
 		);
 	}
 
@@ -1251,6 +1259,29 @@ function createDirectTexture(
 	return texture;
 }
 
+function applyTextureSamplerPolicy(
+	gl: WebGL2RenderingContext,
+	texture: WebGLTexture,
+	policy: SamplerPolicyUpdate["policies"][number],
+): void {
+	gl.bindTexture(gl.TEXTURE_2D, texture);
+	gl.texParameteri(
+		gl.TEXTURE_2D,
+		gl.TEXTURE_MIN_FILTER,
+		getMinFilter(gl, policy.filteringMode, policy.mipmapsGenerated),
+	);
+	gl.texParameteri(
+		gl.TEXTURE_2D,
+		gl.TEXTURE_MAG_FILTER,
+		getMagFilter(gl, policy.filteringMode),
+	);
+	if (policy.mipmapsGenerated) {
+		gl.generateMipmap(gl.TEXTURE_2D);
+	}
+	applyAnisotropy(gl, policy.anisotropy);
+	gl.bindTexture(gl.TEXTURE_2D, null);
+}
+
 function getMinFilter(
 	gl: WebGL2RenderingContext,
 	filteringMode: TextureFilteringMode,
@@ -1278,10 +1309,6 @@ function getWrapMode(
 }
 
 function applyAnisotropy(gl: WebGL2RenderingContext, anisotropy: number): void {
-	if (anisotropy <= 1) {
-		return;
-	}
-
 	const extension =
 		gl.getExtension("EXT_texture_filter_anisotropic") ??
 		gl.getExtension("WEBKIT_EXT_texture_filter_anisotropic") ??
@@ -1296,7 +1323,7 @@ function applyAnisotropy(gl: WebGL2RenderingContext, anisotropy: number): void {
 	gl.texParameterf(
 		gl.TEXTURE_2D,
 		extension.TEXTURE_MAX_ANISOTROPY_EXT,
-		Math.min(anisotropy, maxAnisotropy),
+		Math.min(Math.max(anisotropy, 1), maxAnisotropy),
 	);
 }
 

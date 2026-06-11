@@ -15,6 +15,7 @@ import {
 } from "../../lib/landblocks";
 import { TextureManager } from "../textures/texture-manager";
 import type { TexturePacker } from "../textures/packing/packer";
+import type { TextureFilteringMode } from "../textures/sampling-policy";
 import {
 	createConsoleRuntimeDiagnostics,
 	type RuntimeDiagnostics,
@@ -53,6 +54,7 @@ export interface StaticWorkCommand {
 
 export interface RuntimeSnapshot {
 	readonly status: "idle" | "static-active" | "disposed";
+	readonly renderPolicy: RuntimeRenderPolicySnapshot;
 	readonly lastStaticRequest: StaticWorkCommand | null;
 	readonly assets: AssetServiceSnapshot;
 	readonly host: RuntimeHostSnapshot;
@@ -62,6 +64,10 @@ export interface RuntimeSnapshot {
 }
 
 export type RuntimeSnapshotListener = (snapshot: RuntimeSnapshot) => void;
+
+export interface RuntimeRenderPolicySnapshot {
+	readonly textureFilteringMode: TextureFilteringMode;
+}
 
 interface StaticMaterializationSnapshot {
 	readonly pendingRevisions: readonly number[];
@@ -77,6 +83,7 @@ interface StaticMaterializationFailureSnapshot {
 export interface ClientRuntime {
 	requestStaticWork(command: StaticWorkCommand): void;
 	evictStaticWork(): void;
+	setTextureFilteringMode(filteringMode: TextureFilteringMode): void;
 	updateFrameState(state: FrameState): void;
 	createDiagnosticsReport(): RuntimeDiagnosticsReport;
 	subscribe(listener: RuntimeSnapshotListener): () => void;
@@ -216,6 +223,15 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#emit();
 	}
 
+	setTextureFilteringMode(filteringMode: TextureFilteringMode): void {
+		this.#assertActive();
+		const samplerUpdate = this.#textureManager.setFilteringMode(filteringMode);
+		if (samplerUpdate) {
+			this.#renderer.applySamplerPolicyUpdate(samplerUpdate);
+		}
+		this.#emit();
+	}
+
 	updateFrameState(state: FrameState): void {
 		this.#assertActive();
 		this.#renderer.updateFrameState(state);
@@ -249,6 +265,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				pendingStaticMaterializationRevisions:
 					snapshot.staticMaterialization.pendingRevisions,
 				status: snapshot.status,
+				textureFilteringMode: snapshot.renderPolicy.textureFilteringMode,
 			},
 		};
 	}
@@ -289,6 +306,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 			assets: this.#assetService.createSnapshot(),
 			host: this.#host.createSnapshot(),
 			lastStaticRequest: this.#lastStaticRequest,
+			renderPolicy: {
+				textureFilteringMode: this.#textureManager.filteringMode,
+			},
 			renderer: this.#lastRendererSnapshot,
 			static: this.#lastStaticSnapshot,
 			staticMaterialization: {

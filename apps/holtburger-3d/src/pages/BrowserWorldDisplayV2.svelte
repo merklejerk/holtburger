@@ -29,11 +29,17 @@
 		ManualStaticDomain,
 		RuntimeSnapshot,
 	} from "../v2/runtime/client-runtime";
+	import type { TextureFilteringMode } from "../v2/textures/sampling-policy";
 
 	type BrowserV2PanelTab = "navigate" | "coverage" | "static" | "status";
 
 	const STATIC_INTEREST_REFRESH_DEBOUNCE_MS = 250;
 	const PERF_OVERLAY_SAMPLE_MS = 500;
+	const TEXTURE_FILTERING_OPTIONS: readonly TextureFilteringMode[] = [
+		"nearest",
+		"linear",
+		"anisotropic-4x",
+	];
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
 	let rootElement: HTMLElement | null = $state(null);
@@ -59,6 +65,8 @@
 	let diagnosticsReportCopyStatus = $state<"copied" | "failed" | "ready">(
 		"ready",
 	);
+	let selectedTextureFilteringMode =
+		$state<TextureFilteringMode>("anisotropic-4x");
 	let perfOverlay = $state({
 		fps: 0,
 		frameMs: 0,
@@ -92,6 +100,8 @@
 			});
 			const unsubscribe = runtime.subscribe((nextSnapshot) => {
 				snapshot = nextSnapshot;
+				selectedTextureFilteringMode =
+					nextSnapshot.renderPolicy.textureFilteringMode;
 				updatePerfOverlay(nextSnapshot);
 			});
 			const frameInterval = window.setInterval(() => {
@@ -259,6 +269,13 @@
 	function closeDiagnosticsReport(): void {
 		diagnosticsReportText = null;
 		diagnosticsReportCopyStatus = "ready";
+	}
+
+	function setTextureFilteringMode(event: Event): void {
+		const nextMode = (event.currentTarget as HTMLSelectElement)
+			.value as TextureFilteringMode;
+		selectedTextureFilteringMode = nextMode;
+		runtime?.setTextureFilteringMode(nextMode);
 	}
 
 	async function copyDiagnosticsReport(): Promise<void> {
@@ -835,12 +852,28 @@
 			{:else}
 				<div class="browser-v2__tab-panel" role="tabpanel">
 					<div class="browser-v2__actions">
+						<label class="browser-v2__field browser-v2__field--inline">
+							<span>Filtering</span>
+							<select
+								bind:value={selectedTextureFilteringMode}
+								disabled={!runtime}
+								onchange={setTextureFilteringMode}
+							>
+								{#each TEXTURE_FILTERING_OPTIONS as option}
+									<option value={option}>{option}</option>
+								{/each}
+							</select>
+						</label>
 						<button disabled={!runtime} type="button" onclick={openDiagnosticsReport}>
 							Diagnostics Report
 						</button>
 					</div>
 
 					<dl class="browser-v2__status">
+						<div>
+							<dt>Filtering</dt>
+							<dd>{snapshot?.renderPolicy.textureFilteringMode ?? "starting"}</dd>
+						</div>
 						<div>
 							<dt>Status</dt>
 							<dd>{snapshot?.status ?? "starting"}</dd>
@@ -1131,6 +1164,11 @@
 		gap: 5px;
 	}
 
+	.browser-v2__field--inline {
+		align-items: center;
+		grid-template-columns: auto minmax(0, 1fr);
+	}
+
 	.browser-v2__field span,
 	.browser-v2__range span {
 		color: #75ffd1;
@@ -1138,7 +1176,8 @@
 		text-transform: uppercase;
 	}
 
-	.browser-v2__field input {
+	.browser-v2__field input,
+	.browser-v2__field select {
 		width: 100%;
 		box-sizing: border-box;
 		border: 1px solid rgba(91, 255, 187, 0.48);
@@ -1150,7 +1189,8 @@
 		outline: none;
 	}
 
-	.browser-v2__field input:focus {
+	.browser-v2__field input:focus,
+	.browser-v2__field select:focus {
 		border-color: #ffd666;
 		box-shadow: 0 0 0 2px rgba(255, 214, 102, 0.16);
 	}

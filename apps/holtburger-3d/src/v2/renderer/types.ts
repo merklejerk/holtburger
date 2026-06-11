@@ -45,7 +45,6 @@ export interface TexturePlacement {
 	readonly textureRefId: string;
 	readonly textureUseId: string;
 	readonly placementRevision: number;
-	readonly kind: "direct-texture";
 	readonly filteringMode: TextureFilteringMode;
 	readonly sampleClass: TexturePageSampleClass;
 	readonly samplerPolicyKey: string;
@@ -78,8 +77,16 @@ export interface TerrainTextureRolePageSlot {
 }
 
 export interface SamplerPolicyUpdate {
-	readonly policyId: string;
+	readonly policies: readonly TextureSamplerPolicy[];
 	readonly revision: number;
+}
+
+export interface TextureSamplerPolicy {
+	readonly textureRefId: string;
+	readonly filteringMode: TextureFilteringMode;
+	readonly samplerPolicyKey: string;
+	readonly mipmapsGenerated: boolean;
+	readonly anisotropy: number;
 }
 
 export interface RendererSnapshot {

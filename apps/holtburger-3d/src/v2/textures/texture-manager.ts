@@ -11,6 +11,7 @@ import type {
 	TextureAtlasPageDiagnostics,
 } from "../runtime/diagnostics";
 import type {
+	SamplerPolicyUpdate,
 	TerrainTextureBinding,
 	TerrainTextureRolePageKind,
 	TexturePlacementUpdate,
@@ -55,7 +56,6 @@ interface TextureManagerOptions {
 
 export class TextureManager {
 	readonly #assetService: AssetService;
-	readonly #filteringMode: TextureFilteringMode;
 	readonly #texturePacker: TexturePacker;
 	readonly #batchRegistries = new Map<
 		StaticBatchRegistryKey,
@@ -66,6 +66,7 @@ export class TextureManager {
 		Set<StaticBatchTextureKey>
 	>();
 	#recentRolePageOverflows: TerrainRolePageOverflowDiagnostics[] = [];
+	#filteringMode: TextureFilteringMode;
 	#revision = 0;
 
 	constructor(options: TextureManagerOptions) {
@@ -74,8 +75,59 @@ export class TextureManager {
 		this.#texturePacker = options.texturePacker ?? new AtlasTexturePacker();
 	}
 
+	get filteringMode(): TextureFilteringMode {
+		return this.#filteringMode;
+	}
+
 	dispose(): void {
 		this.#texturePacker.dispose?.();
+	}
+
+	setFilteringMode(
+		filteringMode: TextureFilteringMode,
+	): SamplerPolicyUpdate | null {
+		if (this.#filteringMode === filteringMode) {
+			return null;
+		}
+
+		this.#filteringMode = filteringMode;
+		const policiesByTextureRefId = new Map<
+			string,
+			SamplerPolicyUpdate["policies"][number]
+		>();
+
+		for (const registry of this.#batchRegistries.values()) {
+			for (const entry of uniqueSortedRegistryEntries(registry)) {
+				const samplerPolicy = createRuntimeTextureSamplerPolicy({
+					filteringMode,
+					sampleClass: entry.sampleClass,
+				});
+				entry.anisotropy = samplerPolicy.anisotropy;
+				entry.filteringMode = samplerPolicy.filteringMode;
+				entry.mipmapsGenerated = samplerPolicy.generateMipmaps;
+				entry.samplerPolicyKey = samplerPolicy.policyKey;
+				policiesByTextureRefId.set(entry.textureRefId, {
+					anisotropy: samplerPolicy.anisotropy,
+					filteringMode: samplerPolicy.filteringMode,
+					mipmapsGenerated: samplerPolicy.generateMipmaps,
+					samplerPolicyKey: samplerPolicy.policyKey,
+					textureRefId: entry.textureRefId,
+				});
+			}
+		}
+
+		if (policiesByTextureRefId.size === 0) {
+			return null;
+		}
+
+		this.#revision += 1;
+
+		return {
+			policies: Array.from(policiesByTextureRefId.values()).sort((left, right) =>
+				left.textureRefId.localeCompare(right.textureRefId),
+			),
+			revision: this.#revision,
+		};
 	}
 
 	createDiagnosticsReport(): TextureAtlasDiagnosticsReport {
@@ -442,7 +494,6 @@ export class TextureManager {
 					filteringMode: group.samplerPolicy.filteringMode,
 					format: page.format,
 					height: page.height,
-					kind: "direct-texture",
 					mipmapsGenerated: group.samplerPolicy.generateMipmaps,
 					pixels: page.pixels,
 					placementRevision,
@@ -604,17 +655,17 @@ interface StaticBatchTextureRegistry {
 }
 
 interface StaticBatchTextureRegistryEntry {
-	readonly anisotropy: number;
+	anisotropy: number;
 	readonly domain: StaticDomain;
-	readonly filteringMode: TextureFilteringMode;
+	filteringMode: TextureFilteringMode;
 	readonly format: RuntimeTexturePlacement["format"];
 	readonly staticBatchId: string;
 	readonly source: PreparedTextureUseIdentity;
 	readonly textureRefId: string;
 	readonly placementRevision: number;
-	readonly mipmapsGenerated: boolean;
+	mipmapsGenerated: boolean;
 	readonly sampleClass: RuntimeTexturePagePolicy["sampleClass"];
-	readonly samplerPolicyKey: string;
+	samplerPolicyKey: string;
 	readonly textureWidth: number;
 	readonly textureHeight: number;
 	readonly rect: readonly [number, number, number, number];
@@ -699,6 +750,14 @@ function findRegistryEntryBySource(
 	}
 
 	return null;
+}
+
+function uniqueSortedRegistryEntries(
+	registry: StaticBatchTextureRegistry,
+): readonly StaticBatchTextureRegistryEntry[] {
+	return Array.from(new Set(registry.entries.values())).sort((left, right) =>
+		left.textureRefId.localeCompare(right.textureRefId),
+	);
 }
 
 function deleteRegistryEntryAliases(

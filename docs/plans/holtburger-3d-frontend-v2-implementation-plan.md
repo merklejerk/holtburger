@@ -1461,11 +1461,11 @@ Follow-up notes:
 
 - No separate harness command consumes `createDiagnosticsReport()` yet; the browser panel now covers the immediate v1-style report workflow.
 - Diagnostics do not yet include prepared-cache residency, worker queue state, static object residency breakdowns, picking, or dynamic object reports. The report shape is ready for those domains, but they should be added when their phases need them.
-- The renderer placement contract still spells texture-page uploads as `kind: "direct-texture"`. Diagnostics no longer expose that distinction, but a future cleanup should rename the runtime placement kind to texture-page terminology.
+- 2026-06-11 cleanup: the live renderer placement contract no longer carries the single-value `kind: "direct-texture"` discriminator. Runtime placement uploads are treated as texture-page uploads, including one-source pages.
 
 ### Phase 10B5: Sampler Policy Update Lifecycle
 
-Status: pending; follows Phase 10B4D because sampler updates must handle multi-page terrain role bindings.
+Status: completed.
 
 Purpose: make filtering changes a renderer/resource update instead of a geometry rebake.
 
@@ -1490,6 +1490,21 @@ Implementation shape notes:
 - Prefer a narrow command/update pair over setter sprawl: one runtime command for the user's requested filtering mode, one texture-manager method to produce the affected texture-page policy update, and one renderer update carrying concrete page refs plus realized sampler policy facts.
 - Do not make the UI aware of atlas batches, texture-page ids, terrain role pages, mip generation rules, or anisotropy extension availability. Those remain diagnostics/inspection facts.
 - If the current placement contract makes this awkward, rename and reshape the texture-page placement/update contract directly instead of preserving `direct-texture` naming or adding compatibility shims.
+
+Implemented:
+
+- Added a concrete renderer `SamplerPolicyUpdate` payload carrying texture-page refs plus realized filtering mode, sampler key, mip usage, and anisotropy.
+- Added `TextureManager.setFilteringMode()` as the runtime-owned sampler policy transition point. It updates resident texture-page policy metadata, emits a renderer sampler update, and leaves packing/geometry residency untouched.
+- Added `ClientRuntime.setTextureFilteringMode()` plus a runtime snapshot `renderPolicy.textureFilteringMode` field and diagnostics `runtime.textureFilteringMode` field.
+- Added WebGL2 in-place sampler updates for resident texture pages. The renderer updates min/mag filters, regenerates mipmaps when the new policy uses them, and resets anisotropy down to `1` when leaving anisotropic mode.
+- Wired the browser Status tab to show and change filtering mode through the runtime command only. Svelte does not know about texture pages, atlas batches, mip rules, or renderer internals.
+- Added tests proving texture manager sampler updates do not repack and runtime sampler changes do not emit another static draw-unit delta.
+
+Follow-up notes:
+
+- Switching from linear/anisotropic filtering back to nearest does not reclaim GPU mip storage that may already have been generated; it only changes sampler state so those levels are no longer used. Reclaiming that VRAM would require a texture reallocation/re-upload path and should be handled separately if diagnostics show it matters.
+- Follow-up cleanup removed the internal `direct-texture` placement discriminator and renamed the WebGL upload helper to texture-page terminology.
+- No browser manual visual pass was run by the agent. The UI path is wired and compile-checked; final visual preference for nearest/linear/anisotropic remains user-reviewed.
 
 ### Phase 10B6: Terrain Texture Diagnostics And Failure Surfacing
 

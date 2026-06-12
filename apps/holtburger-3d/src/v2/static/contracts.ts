@@ -221,6 +221,13 @@ export type StaticTextureUseIdentity =
 	| PaletteIdentity
 	| MaterialTextureDataUseIdentity;
 
+type StaticTextureWrapMode = "repeat" | "clamp-to-edge";
+
+export interface StaticBakeTextureSamplingPolicy {
+	readonly wrapS: StaticTextureWrapMode;
+	readonly wrapT: StaticTextureWrapMode;
+}
+
 interface TerrainMeshSourceFacts {
 	readonly gridSize: number;
 	readonly tileSize: number;
@@ -750,6 +757,7 @@ export interface StaticBakeTextureUse {
 	readonly domain: StaticDomain;
 	readonly ownerDrawUnitIds: readonly string[];
 	readonly source: MaterialTextureDataUseIdentity;
+	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
 }
 
 export interface StaticResolver {

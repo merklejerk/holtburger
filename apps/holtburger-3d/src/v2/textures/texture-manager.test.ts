@@ -9,6 +9,7 @@ import type {
 import type {
 	PreparedRgbaRenderSurfaceTextureUseIdentity,
 	PreparedRgbaRenderSurfaceTextureUsage,
+	StaticBakeTextureSamplingPolicy,
 	StaticCoordinatorCommitDelta,
 	StaticScopePayload,
 } from "../static/contracts";
@@ -859,6 +860,85 @@ describe("V2 texture manager", () => {
 		});
 	});
 
+	it("keeps static object color textures filterable while preserving clamp wrapping", async () => {
+		const texturePacker = new FixtureTexturePacker();
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+			texturePacker,
+		});
+
+		const update = await textureManager.applyStaticCommitDelta(
+			createCommitDelta({
+				domain: "outdoor-buildings",
+				outputFormat: "rgba8",
+				samplingPolicy: {
+					wrapS: "clamp-to-edge",
+					wrapT: "clamp-to-edge",
+				},
+				usage: "rgba-color",
+			}),
+		);
+
+		expect(update?.placements[0]).toMatchObject({
+			anisotropy: 4,
+			filteringMode: "anisotropic-4x",
+			mipmapsGenerated: true,
+			sampleClass: "rgba-color",
+			samplerPolicyKey:
+				"sample=rgba-color;filter=anisotropic-4x;mips=on;aniso=4",
+			wrapS: "clamp-to-edge",
+			wrapT: "clamp-to-edge",
+		});
+		expect(texturePacker.jobs[0]?.page).toMatchObject({
+			gutterEdgeMode: "clamp",
+			gutterPixels: 4,
+		});
+	});
+
+	it("does not alias repeat and clamp static object color placements", async () => {
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+		});
+
+		const update = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedDrawUnitIds: [],
+			revision: 1,
+			staticBatchId: "batch-a",
+			textureUses: [
+				createTextureUseCommit({
+					domain: "outdoor-buildings",
+					drawUnitId: "building-clamp",
+					renderSurfaceId: 0x06000010,
+					samplingPolicy: {
+						wrapS: "clamp-to-edge",
+						wrapT: "clamp-to-edge",
+					},
+					textureUseId: "building-clamp:06000010",
+					usage: "rgba-color",
+				}),
+				createTextureUseCommit({
+					domain: "outdoor-buildings",
+					drawUnitId: "building-repeat",
+					renderSurfaceId: 0x06000010,
+					samplingPolicy: {
+						wrapS: "repeat",
+						wrapT: "repeat",
+					},
+					textureUseId: "building-repeat:06000010",
+					usage: "rgba-color",
+				}),
+			],
+		});
+
+		expect(update?.placements.map((placement) => placement.wrapS).sort()).toEqual(
+			["clamp-to-edge", "repeat"],
+		);
+		expect(
+			update?.drawUnitBindings.map((binding) => binding.textureRefId),
+		).toHaveLength(2);
+	});
+
 	it("carries nearest filtering as placement policy instead of rebaking geometry", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
@@ -1071,9 +1151,11 @@ function nextPowerOfTwo(value: number): number {
 }
 
 function createCommitDelta(options: {
+	readonly domain?: StaticCoordinatorCommitDelta["textureUses"][number]["domain"];
 	readonly drawUnitId?: string;
 	readonly outputFormat: "rgba8" | "dxt1";
 	readonly renderSurfaceId?: number;
+	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
 	readonly staticBatchId?: string;
 	readonly textureUseId?: string;
 	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
@@ -1091,9 +1173,11 @@ function createCommitDelta(options: {
 		staticBatchId: options.staticBatchId ?? "batch-a",
 		textureUses: [
 			createTextureUseCommit({
+				domain: options.domain,
 				drawUnitId,
 				outputFormat: options.outputFormat,
 				renderSurfaceId,
+				samplingPolicy: options.samplingPolicy,
 				staticBatchId: options.staticBatchId,
 				textureUseId,
 				usage: options.usage,
@@ -1107,6 +1191,7 @@ function createTextureUseCommit(options: {
 	readonly drawUnitId: string;
 	readonly outputFormat?: "rgba8" | "dxt1";
 	readonly renderSurfaceId: number;
+	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
 	readonly staticBatchId?: string;
 	readonly textureUseId: string;
 	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
@@ -1122,6 +1207,7 @@ function createTextureUseCommit(options: {
 			},
 			usage: options.usage ?? "rgba-color",
 		},
+		samplingPolicy: options.samplingPolicy,
 		staticBatchId: options.staticBatchId ?? "batch-a",
 		textureUseId: options.textureUseId,
 	};

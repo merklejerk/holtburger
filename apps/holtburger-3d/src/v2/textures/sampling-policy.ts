@@ -1,4 +1,7 @@
-import type { PreparedRgbaRenderSurfaceTextureUseIdentity } from "../static/contracts";
+import type {
+	PreparedRgbaRenderSurfaceTextureUseIdentity,
+	StaticBakeTextureSamplingPolicy,
+} from "../static/contracts";
 
 export type TextureFilteringMode = "nearest" | "linear" | "anisotropic-4x";
 
@@ -25,31 +28,39 @@ export interface RuntimeTextureSamplerPolicy {
 
 export function createRuntimeTexturePagePolicy(
 	source: PreparedRgbaRenderSurfaceTextureUseIdentity,
+	samplingPolicy?: StaticBakeTextureSamplingPolicy,
 ): RuntimeTexturePagePolicy {
+	const wrapOverride = samplingPolicy
+		? {
+				wrapS: samplingPolicy.wrapS,
+				wrapT: samplingPolicy.wrapT,
+			}
+		: null;
+
 	switch (source.usage) {
 		case "rgba-color":
 			return {
 				sampleClass: "rgba-color",
-				wrapS: "repeat",
-				wrapT: "repeat",
+				wrapS: wrapOverride?.wrapS ?? "repeat",
+				wrapT: wrapOverride?.wrapT ?? "repeat",
 			};
 		case "rgba-detail":
 			return {
 				sampleClass: "rgba-detail",
-				wrapS: "repeat",
-				wrapT: "repeat",
+				wrapS: wrapOverride?.wrapS ?? "repeat",
+				wrapT: wrapOverride?.wrapT ?? "repeat",
 			};
 		case "rgba-mask":
 			return {
 				sampleClass: "rgba-mask",
-				wrapS: "clamp-to-edge",
-				wrapT: "clamp-to-edge",
+				wrapS: wrapOverride?.wrapS ?? "clamp-to-edge",
+				wrapT: wrapOverride?.wrapT ?? "clamp-to-edge",
 			};
 		case "rgba-raw":
 			return {
 				sampleClass: "rgba-exact",
-				wrapS: "clamp-to-edge",
-				wrapT: "clamp-to-edge",
+				wrapS: wrapOverride?.wrapS ?? "clamp-to-edge",
+				wrapT: wrapOverride?.wrapT ?? "clamp-to-edge",
 			};
 	}
 }

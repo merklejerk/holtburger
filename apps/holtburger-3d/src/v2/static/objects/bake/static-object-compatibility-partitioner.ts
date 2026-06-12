@@ -28,6 +28,7 @@ export interface StaticObjectCompatibilityPartition {
 	readonly renderCoverage: StaticObjectMaterialPlan["renderCoverage"];
 	readonly pass: StaticObjectMaterialPlan["pass"];
 	readonly alphaMode: StaticObjectMaterialPlan["alphaPolicy"]["mode"];
+	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly textureRoleLayoutKey: string;
 	readonly materialIds: readonly number[];
 	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
@@ -44,8 +45,12 @@ export interface StaticObjectCompatibilityTriangle {
 	readonly gfxObj: StaticObjectSourceIdentity;
 	readonly partIndex: number;
 	readonly polygonId: number;
+	readonly geometrySurfaceId: number;
+	readonly materialVariantSignature: string | null;
 	readonly material: StaticMaterialSourceIdentity;
 }
+
+type StaticObjectTextureWrapMode = "clamp" | "repeat";
 
 interface StaticObjectTriangleCandidate {
 	readonly sourceTriangleId: string;
@@ -63,6 +68,9 @@ interface StaticObjectTriangleCandidate {
 	readonly objectKey: string;
 	readonly partIndex: number;
 	readonly polygonId: number;
+	readonly geometrySurfaceId: number;
+	readonly materialVariantSignature: string | null;
+	readonly textureWrapMode: StaticObjectTextureWrapMode;
 }
 
 export function partitionStaticObjectCompatibility(
@@ -128,6 +136,11 @@ function createTriangleCandidates(
 						`Static object triangle ${createObjectKey(object.identity)}:part:${part.partIndex}:polygon:${triangle.polygonId} has no resolved material slot.`,
 					);
 				}
+				if (triangle.geometrySurfaceId === null) {
+					throw new Error(
+						`Static object triangle ${createObjectKey(object.identity)}:part:${part.partIndex}:polygon:${triangle.polygonId} has no geometry surface id after material resolution.`,
+					);
+				}
 
 				const plan = materialById.get(createMaterialKey(material));
 				if (!plan) {
@@ -143,21 +156,29 @@ function createTriangleCandidates(
 				const gfxKey = createSourceKey(part.gfxObj);
 				const materialKey = createMaterialKey(material);
 				const objectKey = createObjectKey(object.identity);
+				const materialVariantSignature =
+					triangle.materialVariantSignature ?? null;
+				const textureWrapMode = resolveTextureWrapMode(
+					materialVariantSignature,
+				);
 				const compatibilityKey = createCompatibilityKey({
 					gfxKey,
 					plan,
 					sourceKey,
+					textureWrapMode,
 					textureRoleLayoutKey,
 				});
 
 				candidates.push({
 					compatibilityKey,
+					geometrySurfaceId: triangle.geometrySurfaceId,
 					gfxObj: part.gfxObj,
 					gfxKey,
 					material,
 					materialId: material.materialId,
 					materialKey,
 					materialPlan: plan,
+					materialVariantSignature,
 					object: object.identity,
 					objectKey,
 					partIndex: part.partIndex,
@@ -168,7 +189,10 @@ function createTriangleCandidates(
 						objectKey,
 						`part:${part.partIndex}`,
 						`polygon:${triangle.polygonId}`,
+						`geometry-surface:${triangle.geometrySurfaceId}`,
+						`variant:${materialVariantSignature ?? "base"}`,
 					].join(":"),
+					textureWrapMode,
 					textureRoleLayoutKey,
 				});
 			}
@@ -318,9 +342,12 @@ function createCompatibilityPartition(options: {
 		sourceTriangleIds: options.candidates.map(
 			(candidate) => candidate.sourceTriangleId,
 		),
+		textureWrapMode: first.textureWrapMode,
 		triangles: options.candidates.map((candidate) => ({
+			geometrySurfaceId: candidate.geometrySurfaceId,
 			gfxObj: candidate.gfxObj,
 			material: candidate.material,
+			materialVariantSignature: candidate.materialVariantSignature,
 			object: candidate.object,
 			partIndex: candidate.partIndex,
 			polygonId: candidate.polygonId,
@@ -337,6 +364,7 @@ function createCompatibilityKey(options: {
 	readonly plan: StaticObjectMaterialPlan;
 	readonly sourceKey: string;
 	readonly gfxKey: string;
+	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly textureRoleLayoutKey: string;
 }): string {
 	return [
@@ -345,6 +373,7 @@ function createCompatibilityKey(options: {
 		`pass:${options.plan.pass}`,
 		`alpha:${options.plan.alphaPolicy.mode}`,
 		`blend:${options.plan.blend.mode}`,
+		`wrap:${options.textureWrapMode}`,
 		`roles:${options.textureRoleLayoutKey}`,
 		`source:${options.sourceKey}`,
 		`gfx:${options.gfxKey}`,
@@ -410,8 +439,20 @@ function compareTriangleCandidates(
 		left.compatibilityKey.localeCompare(right.compatibilityKey) ||
 		left.objectKey.localeCompare(right.objectKey) ||
 		left.partIndex - right.partIndex ||
-		left.polygonId - right.polygonId
+		left.polygonId - right.polygonId ||
+		left.geometrySurfaceId - right.geometrySurfaceId ||
+		(left.materialVariantSignature ?? "").localeCompare(
+			right.materialVariantSignature ?? "",
+		)
 	);
+}
+
+function resolveTextureWrapMode(
+	materialVariantSignature: string | null,
+): StaticObjectTextureWrapMode {
+	return materialVariantSignature?.includes("sampler=repeat")
+		? "repeat"
+		: "clamp";
 }
 
 function compareObjects(

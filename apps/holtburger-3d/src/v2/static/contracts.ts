@@ -671,6 +671,7 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly vertexCount: number;
 	readonly triangleCount: number;
 	readonly primaryTextureUseId: string;
+	readonly primaryTextureWrapMode: "clamp" | "repeat";
 	readonly textureUseIds: readonly string[];
 	readonly materialIds: readonly number[];
 }

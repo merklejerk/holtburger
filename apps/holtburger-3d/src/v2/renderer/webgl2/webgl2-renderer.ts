@@ -80,7 +80,9 @@ precision highp float;
 
 uniform sampler2D uTexture;
 uniform vec4 uTextureRect;
+uniform vec2 uTextureSize;
 uniform int uUseTexture;
+uniform int uWrapMode;
 
 in vec2 vTexCoord;
 
@@ -92,7 +94,8 @@ void main() {
 		return;
 	}
 
-	vec2 atlasUv = uTextureRect.xy + clamp(vTexCoord, vec2(0.0), vec2(1.0)) * uTextureRect.zw;
+	vec2 localUv = uWrapMode == 1 ? fract(vTexCoord) : clamp(vTexCoord, vec2(0.0), vec2(1.0));
+	vec2 atlasUv = (uTextureRect.xy + localUv * uTextureRect.zw) / uTextureSize;
 	fragColor = texture(uTexture, atlasUv);
 }
 `;
@@ -643,9 +646,18 @@ class Webgl2Renderer implements Renderer {
 				binding?.rect[2] ?? 1,
 				binding?.rect[3] ?? 1,
 			);
+			gl.uniform2f(
+				this.#staticObjectProgram.uniforms.uTextureSize,
+				binding?.textureWidth ?? 1,
+				binding?.textureHeight ?? 1,
+			);
 			gl.uniform1i(
 				this.#staticObjectProgram.uniforms.uUseTexture,
 				texture ? 1 : 0,
+			);
+			gl.uniform1i(
+				this.#staticObjectProgram.uniforms.uWrapMode,
+				resource.primaryTextureWrapMode === "repeat" ? 1 : 0,
 			);
 			gl.bindVertexArray(resource.vertexArray);
 			gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
@@ -764,7 +776,9 @@ interface StaticObjectGeometryProgram {
 		readonly uModelViewProjection: WebGLUniformLocation;
 		readonly uTexture: WebGLUniformLocation;
 		readonly uTextureRect: WebGLUniformLocation;
+		readonly uTextureSize: WebGLUniformLocation;
 		readonly uUseTexture: WebGLUniformLocation;
+		readonly uWrapMode: WebGLUniformLocation;
 	};
 	dispose(): void;
 }
@@ -792,6 +806,7 @@ interface StaticObjectGeometryResource {
 	readonly indexBuffer: WebGLBuffer;
 	readonly drawUnitId: string;
 	readonly primaryTextureUseId: string;
+	readonly primaryTextureWrapMode: StaticObjectGeometryStaticDrawUnit["primaryTextureWrapMode"];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
@@ -958,7 +973,9 @@ function createStaticObjectGeometryProgram(
 			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
 			uTexture: requireUniform(gl, program, "uTexture"),
 			uTextureRect: requireUniform(gl, program, "uTextureRect"),
+			uTextureSize: requireUniform(gl, program, "uTextureSize"),
 			uUseTexture: requireUniform(gl, program, "uUseTexture"),
+			uWrapMode: requireUniform(gl, program, "uWrapMode"),
 		},
 		dispose() {
 			gl.deleteProgram(program);
@@ -1107,6 +1124,7 @@ function createStaticObjectGeometryResource(
 			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
 		positionBuffer,
 		primaryTextureUseId: drawUnit.primaryTextureUseId,
+		primaryTextureWrapMode: drawUnit.primaryTextureWrapMode,
 		texCoordBuffer,
 		triangleCount: drawUnit.triangleCount,
 		vertexArray,

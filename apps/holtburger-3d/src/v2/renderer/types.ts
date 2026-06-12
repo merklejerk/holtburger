@@ -37,7 +37,7 @@ interface DynamicResidencyDelta {
 export interface TexturePlacementUpdate {
 	readonly placements: readonly TexturePlacement[];
 	readonly removedTextureRefIds: readonly string[];
-	readonly drawUnitBindings: readonly TerrainTextureBinding[];
+	readonly drawUnitBindings: readonly TextureDrawUnitBinding[];
 	readonly revision: number;
 }
 
@@ -59,11 +59,11 @@ export interface TexturePlacement {
 	readonly rect: readonly [number, number, number, number];
 }
 
-export interface TerrainTextureBinding {
+export interface TextureDrawUnitBinding {
 	readonly drawUnitId: string;
 	readonly textureUseId: string;
 	readonly textureRefId: string;
-	readonly rolePage: TerrainTextureRolePageSlot;
+	readonly rolePage: TextureRolePageSlot;
 	readonly textureWidth: number;
 	readonly textureHeight: number;
 	readonly rect: readonly [number, number, number, number];
@@ -71,7 +71,7 @@ export interface TerrainTextureBinding {
 
 export type TerrainTextureRolePageKind = "color" | "detail" | "mask";
 
-interface TerrainTextureRolePageSlot {
+interface TextureRolePageSlot {
 	readonly kind: TerrainTextureRolePageKind;
 	readonly slot: number;
 }

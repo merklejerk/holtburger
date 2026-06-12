@@ -5,7 +5,7 @@ import type {
 	RendererSnapshotListener,
 	SamplerPolicyUpdate,
 	StaticResidencyDelta,
-	TerrainTextureBinding,
+	TextureDrawUnitBinding,
 	TexturePlacementUpdate,
 } from "../types";
 import {
@@ -13,6 +13,7 @@ import {
 	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
 } from "../types";
 import type {
+	StaticObjectGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialTextureRoleBinding,
 } from "../../static/contracts";
@@ -30,6 +31,7 @@ const TERRAIN_MASK_TEXTURE_UNIT_BASE =
 	TERRAIN_COLOR_TEXTURE_UNIT_BASE + MAX_TERRAIN_COLOR_PAGES_PER_DRAW;
 const TERRAIN_DETAIL_TEXTURE_UNIT =
 	TERRAIN_MASK_TEXTURE_UNIT_BASE + MAX_TERRAIN_MASK_PAGES_PER_DRAW;
+const STATIC_OBJECT_TEXTURE_UNIT = 0;
 
 const defaultFrameState: FrameState = {
 	camera: {
@@ -56,6 +58,42 @@ void main() {
 	vWorldPosition = position;
 	vLayerSlot = int(layerSlot);
 	gl_Position = uModelViewProjection * vec4(position, 1.0);
+}
+`;
+
+const STATIC_OBJECT_VERTEX_SHADER = `#version 300 es
+layout(location = 0) in vec3 position;
+layout(location = 1) in vec2 texCoord;
+
+uniform mat4 uModelViewProjection;
+
+out vec2 vTexCoord;
+
+void main() {
+	vTexCoord = texCoord;
+	gl_Position = uModelViewProjection * vec4(position, 1.0);
+}
+`;
+
+const STATIC_OBJECT_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+uniform sampler2D uTexture;
+uniform vec4 uTextureRect;
+uniform int uUseTexture;
+
+in vec2 vTexCoord;
+
+out vec4 fragColor;
+
+void main() {
+	if (uUseTexture == 0) {
+		fragColor = vec4(1.0, 0.0, 1.0, 1.0);
+		return;
+	}
+
+	vec2 atlasUv = uTextureRect.xy + clamp(vTexCoord, vec2(0.0), vec2(1.0)) * uTextureRect.zw;
+	fragColor = texture(uTexture, atlasUv);
 }
 `;
 
@@ -292,13 +330,18 @@ class Webgl2Renderer implements Renderer {
 	readonly #gl: WebGL2RenderingContext;
 	readonly #listeners = new Set<RendererSnapshotListener>();
 	readonly #terrainResources = new Map<string, TerrainGeometryResource>();
-	readonly #textures = new Map<string, WebGLTexture>();
-	readonly #terrainTextureBindings = new Map<
+	readonly #staticObjectResources = new Map<
 		string,
-		Map<string, TerrainTextureBinding>
+		StaticObjectGeometryResource
+	>();
+	readonly #textures = new Map<string, WebGLTexture>();
+	readonly #textureBindings = new Map<
+		string,
+		Map<string, TextureDrawUnitBinding>
 	>();
 	readonly #warnedLayeredFallbackDrawUnitIds = new Set<string>();
 	readonly #terrainProgram: TerrainGeometryProgram;
+	readonly #staticObjectProgram: StaticObjectGeometryProgram;
 	#animationFrameId: number | null = null;
 	#disposed = false;
 	#frameCount = 0;
@@ -310,36 +353,52 @@ class Webgl2Renderer implements Renderer {
 		this.#canvas = canvas;
 		this.#gl = gl;
 		this.#terrainProgram = createTerrainGeometryProgram(gl);
+		this.#staticObjectProgram = createStaticObjectGeometryProgram(gl);
 		this.#startFrameLoop();
 	}
 
 	applyStaticDelta(delta: StaticResidencyDelta): void {
 		for (const drawUnitId of delta.removedDrawUnitIds) {
-			const resource = this.#terrainResources.get(drawUnitId);
-			if (!resource) {
-				continue;
+			const terrainResource = this.#terrainResources.get(drawUnitId);
+			if (terrainResource) {
+				terrainResource.dispose();
+				this.#terrainResources.delete(drawUnitId);
+				this.#warnedLayeredFallbackDrawUnitIds.delete(drawUnitId);
 			}
-			resource.dispose();
-			this.#terrainResources.delete(drawUnitId);
-			this.#terrainTextureBindings.delete(drawUnitId);
-			this.#warnedLayeredFallbackDrawUnitIds.delete(drawUnitId);
+			const staticObjectResource = this.#staticObjectResources.get(drawUnitId);
+			if (staticObjectResource) {
+				staticObjectResource.dispose();
+				this.#staticObjectResources.delete(drawUnitId);
+			}
+			this.#textureBindings.delete(drawUnitId);
 		}
 
 		for (const placement of delta.addedDrawUnitPlacements) {
 			const { drawUnit } = placement;
-			if (drawUnit.kind !== "terrain-geometry") {
-				continue;
-			}
-
 			this.#terrainResources.get(drawUnit.drawUnitId)?.dispose();
-			this.#terrainResources.set(
-				drawUnit.drawUnitId,
-				createTerrainGeometryResource(
-					this.#gl,
-					drawUnit,
-					placement.translation,
-				),
-			);
+			this.#staticObjectResources.get(drawUnit.drawUnitId)?.dispose();
+			this.#terrainResources.delete(drawUnit.drawUnitId);
+			this.#staticObjectResources.delete(drawUnit.drawUnitId);
+
+			if (drawUnit.kind === "terrain-geometry") {
+				this.#terrainResources.set(
+					drawUnit.drawUnitId,
+					createTerrainGeometryResource(
+						this.#gl,
+						drawUnit,
+						placement.translation,
+					),
+				);
+			} else if (drawUnit.kind === "static-object-geometry") {
+				this.#staticObjectResources.set(
+					drawUnit.drawUnitId,
+					createStaticObjectGeometryResource(
+						this.#gl,
+						drawUnit,
+						placement.translation,
+					),
+				);
+			}
 		}
 
 		this.#emit();
@@ -371,9 +430,9 @@ class Webgl2Renderer implements Renderer {
 
 		for (const binding of update.drawUnitBindings) {
 			const bindings =
-				this.#terrainTextureBindings.get(binding.drawUnitId) ?? new Map();
+				this.#textureBindings.get(binding.drawUnitId) ?? new Map();
 			bindings.set(binding.textureUseId, binding);
-			this.#terrainTextureBindings.set(binding.drawUnitId, bindings);
+			this.#textureBindings.set(binding.drawUnitId, bindings);
 		}
 	}
 
@@ -412,14 +471,19 @@ class Webgl2Renderer implements Renderer {
 		for (const resource of this.#terrainResources.values()) {
 			resource.dispose();
 		}
+		for (const resource of this.#staticObjectResources.values()) {
+			resource.dispose();
+		}
 		for (const texture of this.#textures.values()) {
 			this.#gl.deleteTexture(texture);
 		}
 		this.#terrainResources.clear();
+		this.#staticObjectResources.clear();
 		this.#textures.clear();
-		this.#terrainTextureBindings.clear();
+		this.#textureBindings.clear();
 		this.#warnedLayeredFallbackDrawUnitIds.clear();
 		this.#terrainProgram.dispose();
+		this.#staticObjectProgram.dispose();
 		this.#listeners.clear();
 	}
 
@@ -460,6 +524,7 @@ class Webgl2Renderer implements Renderer {
 		gl.clearDepth(1);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 		this.#drawTerrain();
+		this.#drawStaticObjects();
 
 		this.#frameCount += 1;
 	}
@@ -485,7 +550,7 @@ class Webgl2Renderer implements Renderer {
 
 		for (const resource of this.#terrainResources.values()) {
 			const bindings =
-				this.#terrainTextureBindings.get(resource.drawUnitId) ?? new Map();
+				this.#textureBindings.get(resource.drawUnitId) ?? new Map();
 			const binding = resource.primaryTextureUseId
 				? bindings.get(resource.primaryTextureUseId)
 				: undefined;
@@ -539,6 +604,57 @@ class Webgl2Renderer implements Renderer {
 		gl.bindTexture(gl.TEXTURE_2D, null);
 	}
 
+	#drawStaticObjects(): void {
+		if (this.#staticObjectResources.size === 0) {
+			return;
+		}
+
+		const gl = this.#gl;
+		const mvp = createModelViewProjectionMatrix(
+			this.#frameState,
+			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight),
+		);
+
+		gl.useProgram(this.#staticObjectProgram.program);
+		gl.uniformMatrix4fv(
+			this.#staticObjectProgram.uniforms.uModelViewProjection,
+			false,
+			mvp,
+		);
+
+		for (const resource of this.#staticObjectResources.values()) {
+			const bindings =
+				this.#textureBindings.get(resource.drawUnitId) ?? new Map();
+			const binding = bindings.get(resource.primaryTextureUseId);
+			const texture = binding
+				? (this.#textures.get(binding.textureRefId) ?? null)
+				: null;
+
+			gl.activeTexture(gl.TEXTURE0 + STATIC_OBJECT_TEXTURE_UNIT);
+			gl.bindTexture(gl.TEXTURE_2D, texture);
+			gl.uniform1i(
+				this.#staticObjectProgram.uniforms.uTexture,
+				STATIC_OBJECT_TEXTURE_UNIT,
+			);
+			gl.uniform4f(
+				this.#staticObjectProgram.uniforms.uTextureRect,
+				binding?.rect[0] ?? 0,
+				binding?.rect[1] ?? 0,
+				binding?.rect[2] ?? 1,
+				binding?.rect[3] ?? 1,
+			);
+			gl.uniform1i(
+				this.#staticObjectProgram.uniforms.uUseTexture,
+				texture ? 1 : 0,
+			);
+			gl.bindVertexArray(resource.vertexArray);
+			gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
+		}
+
+		gl.bindVertexArray(null);
+		gl.bindTexture(gl.TEXTURE_2D, null);
+	}
+
 	#resizeToDisplaySize(): void {
 		const devicePixelRatio = window.devicePixelRatio || 1;
 		const width = Math.max(
@@ -565,11 +681,12 @@ class Webgl2Renderer implements Renderer {
 			frameCount: this.#frameCount,
 			frameHandlerMs: this.#frameHandlerMs,
 			isRunning: !this.#disposed,
-			renderedTriangles: Array.from(this.#terrainResources.values()).reduce(
-				(total, resource) => total + resource.triangleCount,
-				0,
-			),
-			staticDrawUnits: this.#terrainResources.size,
+			renderedTriangles: sumRenderedTriangles([
+				...this.#terrainResources.values(),
+				...this.#staticObjectResources.values(),
+			]),
+			staticDrawUnits:
+				this.#terrainResources.size + this.#staticObjectResources.size,
 			terrainDrawUnits: this.#terrainResources.size,
 		};
 	}
@@ -641,6 +758,17 @@ interface TerrainGeometryProgram {
 	dispose(): void;
 }
 
+interface StaticObjectGeometryProgram {
+	readonly program: WebGLProgram;
+	readonly uniforms: {
+		readonly uModelViewProjection: WebGLUniformLocation;
+		readonly uTexture: WebGLUniformLocation;
+		readonly uTextureRect: WebGLUniformLocation;
+		readonly uUseTexture: WebGLUniformLocation;
+	};
+	dispose(): void;
+}
+
 interface TerrainGeometryResource {
 	readonly vertexArray: WebGLVertexArrayObject;
 	readonly positionBuffer: WebGLBuffer;
@@ -657,13 +785,30 @@ interface TerrainGeometryResource {
 	dispose(): void;
 }
 
+interface StaticObjectGeometryResource {
+	readonly vertexArray: WebGLVertexArrayObject;
+	readonly positionBuffer: WebGLBuffer;
+	readonly texCoordBuffer: WebGLBuffer;
+	readonly indexBuffer: WebGLBuffer;
+	readonly drawUnitId: string;
+	readonly primaryTextureUseId: string;
+	readonly indexCount: number;
+	readonly indexType: GLenum;
+	readonly triangleCount: number;
+	dispose(): void;
+}
+
+interface RenderedTriangleResource {
+	readonly triangleCount: number;
+}
+
 interface TerrainLayeredPageBindings {
 	readonly color: (TerrainLayeredPageBinding | null)[];
 	readonly mask: (TerrainLayeredPageBinding | null)[];
 }
 
 interface TerrainLayeredPageBinding {
-	readonly binding: TerrainTextureBinding;
+	readonly binding: TextureDrawUnitBinding;
 	readonly texture: WebGLTexture;
 }
 
@@ -773,6 +918,54 @@ function createTerrainGeometryProgram(
 	};
 }
 
+function createStaticObjectGeometryProgram(
+	gl: WebGL2RenderingContext,
+): StaticObjectGeometryProgram {
+	const vertexShader = compileShader(
+		gl,
+		gl.VERTEX_SHADER,
+		STATIC_OBJECT_VERTEX_SHADER,
+	);
+	const fragmentShader = compileShader(
+		gl,
+		gl.FRAGMENT_SHADER,
+		STATIC_OBJECT_FRAGMENT_SHADER,
+	);
+	const program = gl.createProgram();
+	if (!program) {
+		throw new Error(
+			"Failed to create V2 static object geometry shader program.",
+		);
+	}
+
+	gl.attachShader(program, vertexShader);
+	gl.attachShader(program, fragmentShader);
+	gl.linkProgram(program);
+	gl.deleteShader(vertexShader);
+	gl.deleteShader(fragmentShader);
+
+	if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+		const message = gl.getProgramInfoLog(program) ?? "unknown link error";
+		gl.deleteProgram(program);
+		throw new Error(
+			`Failed to link V2 static object geometry shader: ${message}`,
+		);
+	}
+
+	return {
+		program,
+		uniforms: {
+			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
+			uTexture: requireUniform(gl, program, "uTexture"),
+			uTextureRect: requireUniform(gl, program, "uTextureRect"),
+			uUseTexture: requireUniform(gl, program, "uUseTexture"),
+		},
+		dispose() {
+			gl.deleteProgram(program);
+		},
+	};
+}
+
 function createTerrainGeometryResource(
 	gl: WebGL2RenderingContext,
 	drawUnit: TerrainGeometryStaticDrawUnit,
@@ -858,7 +1051,82 @@ function createTerrainGeometryResource(
 	};
 }
 
+function createStaticObjectGeometryResource(
+	gl: WebGL2RenderingContext,
+	drawUnit: StaticObjectGeometryStaticDrawUnit,
+	translation: readonly [number, number, number],
+): StaticObjectGeometryResource {
+	const vertexArray = gl.createVertexArray();
+	const positionBuffer = gl.createBuffer();
+	const texCoordBuffer = gl.createBuffer();
+	const indexBuffer = gl.createBuffer();
+	if (!vertexArray || !positionBuffer || !texCoordBuffer || !indexBuffer) {
+		if (vertexArray) {
+			gl.deleteVertexArray(vertexArray);
+		}
+		if (positionBuffer) {
+			gl.deleteBuffer(positionBuffer);
+		}
+		if (texCoordBuffer) {
+			gl.deleteBuffer(texCoordBuffer);
+		}
+		if (indexBuffer) {
+			gl.deleteBuffer(indexBuffer);
+		}
+		throw new Error(
+			`Failed to create GPU buffers for static object ${drawUnit.drawUnitId}.`,
+		);
+	}
+
+	gl.bindVertexArray(vertexArray);
+	gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+	gl.bufferData(
+		gl.ARRAY_BUFFER,
+		translatePositions(drawUnit.positions, translation),
+		gl.STATIC_DRAW,
+	);
+	gl.enableVertexAttribArray(0);
+	gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+
+	gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+	gl.bufferData(gl.ARRAY_BUFFER, drawUnit.texCoords, gl.STATIC_DRAW);
+	gl.enableVertexAttribArray(1);
+	gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+
+	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, drawUnit.indices, gl.STATIC_DRAW);
+	gl.bindVertexArray(null);
+	gl.bindBuffer(gl.ARRAY_BUFFER, null);
+	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+
+	return {
+		drawUnitId: drawUnit.drawUnitId,
+		indexBuffer,
+		indexCount: drawUnit.indices.length,
+		indexType:
+			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
+		positionBuffer,
+		primaryTextureUseId: drawUnit.primaryTextureUseId,
+		texCoordBuffer,
+		triangleCount: drawUnit.triangleCount,
+		vertexArray,
+		dispose() {
+			gl.deleteBuffer(positionBuffer);
+			gl.deleteBuffer(texCoordBuffer);
+			gl.deleteBuffer(indexBuffer);
+			gl.deleteVertexArray(vertexArray);
+		},
+	};
+}
+
 function translateTerrainPositions(
+	positions: Float32Array,
+	translation: readonly [number, number, number],
+): Float32Array {
+	return translatePositions(positions, translation);
+}
+
+function translatePositions(
 	positions: Float32Array,
 	translation: readonly [number, number, number],
 ): Float32Array {
@@ -876,11 +1144,20 @@ function translateTerrainPositions(
 	return translated;
 }
 
+function sumRenderedTriangles(
+	resources: readonly RenderedTriangleResource[],
+): number {
+	return resources.reduce(
+		(total, resource) => total + resource.triangleCount,
+		0,
+	);
+}
+
 function uploadTerrainLayeredUniforms(
 	gl: WebGL2RenderingContext,
 	program: TerrainGeometryProgram,
 	resource: TerrainGeometryResource,
-	bindings: ReadonlyMap<string, TerrainTextureBinding>,
+	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 	frameState: FrameState,
 ): boolean {
@@ -890,7 +1167,7 @@ function uploadTerrainLayeredUniforms(
 	}
 
 	const pageBindings = createTerrainLayeredPageBindings();
-	let detailBinding: TerrainTextureBinding | null = null;
+	let detailBinding: TextureDrawUnitBinding | null = null;
 
 	for (const entry of plan.layerEntries) {
 		if (!collectPageBinding(entry.base, bindings, textures, pageBindings)) {
@@ -979,7 +1256,7 @@ function uploadTerrainLayeredUniforms(
 
 function collectPageBinding(
 	role: TerrainMaterialTextureRoleBinding,
-	bindings: ReadonlyMap<string, TerrainTextureBinding>,
+	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 	pageBindings: TerrainLayeredPageBindings,
 ): boolean {
@@ -1045,7 +1322,7 @@ function uploadTerrainLayerRectUniforms(
 	gl: WebGL2RenderingContext,
 	program: TerrainGeometryProgram,
 	plan: NonNullable<TerrainGeometryResource["terrainMaterialPlan"]>,
-	bindings: ReadonlyMap<string, TerrainTextureBinding>,
+	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
 ): void {
 	const baseColorRects = new Float32Array(
 		TERRAIN_LAYERED_MAX_LAYER_ENTRIES * 4,
@@ -1167,8 +1444,8 @@ function uploadTerrainDetailUniforms(
 	gl: WebGL2RenderingContext,
 	program: TerrainGeometryProgram,
 	plan: NonNullable<TerrainGeometryResource["terrainMaterialPlan"]>,
-	bindings: ReadonlyMap<string, TerrainTextureBinding>,
-	detailBinding: TerrainTextureBinding | null,
+	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	detailBinding: TextureDrawUnitBinding | null,
 ): void {
 	const detailRole = plan.detailRoles[0] ?? null;
 	const detailRect = detailRole
@@ -1185,7 +1462,7 @@ function uploadTerrainDetailUniforms(
 }
 
 function resolveBindingRect(
-	bindings: ReadonlyMap<string, TerrainTextureBinding>,
+	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
 	role: TerrainMaterialTextureRoleBinding,
 ): readonly [number, number, number, number] {
 	if (!role.textureUseId) {
@@ -1196,7 +1473,7 @@ function resolveBindingRect(
 }
 
 function resolveBindingPage(
-	bindings: ReadonlyMap<string, TerrainTextureBinding>,
+	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
 	role: TerrainMaterialTextureRoleBinding,
 ): number {
 	if (!role.textureUseId) {

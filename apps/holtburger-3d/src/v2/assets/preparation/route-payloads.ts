@@ -3,20 +3,28 @@ import type {
 	AssetLookupResponseDto,
 	LandblockOutdoorPayloadDto,
 	LandblockTopologyPayloadDto,
+	GfxObjPayloadDto,
+	MaterialRecipePayloadDto,
 	PalettePayloadDto,
 	PreparedTexturePayloadDto,
 	RegionRenderProfilePayloadDto,
 	RenderSurfacePayloadDto,
+	SetupAppearancePayloadDto,
+	SetupModelPayloadDto,
 	SurfaceTexturePayloadDto,
 	TerrainMaterialPayloadDto,
 } from "../../../lib/host/contracts";
 import {
+	gfxObjPayloadDtoSchema,
 	landblockOutdoorPayloadDtoSchema,
 	landblockTopologyPayloadDtoSchema,
+	materialRecipePayloadDtoSchema,
 	palettePayloadDtoSchema,
 	preparedTexturePayloadDtoSchema,
 	regionRenderProfilePayloadDtoSchema,
 	renderSurfacePayloadDtoSchema,
+	setupAppearancePayloadDtoSchema,
+	setupModelPayloadDtoSchema,
 	surfaceTexturePayloadDtoSchema,
 	terrainMaterialPayloadDtoSchema,
 } from "../../../lib/host/contracts";
@@ -24,6 +32,10 @@ import {
 export type V2PreparedAssetPayload =
 	| LandblockOutdoorPayloadDto
 	| LandblockTopologyPayloadDto
+	| GfxObjPayloadDto
+	| SetupModelPayloadDto
+	| SetupAppearancePayloadDto
+	| MaterialRecipePayloadDto
 	| TerrainMaterialPayloadDto
 	| RegionRenderProfilePayloadDto
 	| SurfaceTexturePayloadDto
@@ -45,7 +57,7 @@ interface RoutePayloadParser<TPayload extends V2PreparedAssetPayload> {
 	readonly schema: PayloadSchema<TPayload>;
 }
 
-const TERRAIN_SLICE_PAYLOAD_PARSERS: readonly RoutePayloadParser<V2PreparedAssetPayload>[] =
+const V2_PAYLOAD_PARSERS: readonly RoutePayloadParser<V2PreparedAssetPayload>[] =
 	[
 		{
 			expectedKind: "landblock-outdoor",
@@ -56,6 +68,26 @@ const TERRAIN_SLICE_PAYLOAD_PARSERS: readonly RoutePayloadParser<V2PreparedAsset
 			expectedKind: "landblock-topology",
 			route: /^landblock\/[0-9a-fA-F]{8}\/topology$/,
 			schema: landblockTopologyPayloadDtoSchema,
+		},
+		{
+			expectedKind: "gfx-obj",
+			route: /^gfx-obj\/[0-9a-fA-F]{8}$/,
+			schema: gfxObjPayloadDtoSchema,
+		},
+		{
+			expectedKind: "setup-model",
+			route: /^setup-model\/[0-9a-fA-F]{8}$/,
+			schema: setupModelPayloadDtoSchema,
+		},
+		{
+			expectedKind: "setup-appearance",
+			route: /^setup-appearance\/[0-9a-fA-F]{8}$/,
+			schema: setupAppearancePayloadDtoSchema,
+		},
+		{
+			expectedKind: "material-recipe",
+			route: /^material\/[0-9a-fA-F]{8}$/,
+			schema: materialRecipePayloadDtoSchema,
 		},
 		{
 			expectedKind: "terrain-material",
@@ -89,10 +121,10 @@ const TERRAIN_SLICE_PAYLOAD_PARSERS: readonly RoutePayloadParser<V2PreparedAsset
 		},
 	];
 
-export function prepareTerrainSliceAssetPayload(
+export function prepareV2StaticAssetPayload(
 	response: AssetLookupResponseDto,
 ): V2PreparedAssetPayload {
-	const parser = TERRAIN_SLICE_PAYLOAD_PARSERS.find((candidate) =>
+	const parser = V2_PAYLOAD_PARSERS.find((candidate) =>
 		candidate.route.test(response.assetId),
 	);
 

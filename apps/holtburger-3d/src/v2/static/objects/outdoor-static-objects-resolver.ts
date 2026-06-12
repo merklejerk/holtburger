@@ -115,33 +115,35 @@ export class OutdoorStaticObjectsResolver {
 				source,
 			]),
 		);
-		const objects = selectedObjects.map((object): StaticObjectInstanceFacts => {
-			const source = createStaticObjectSourceIdentity(
-				parseHostAssetId(object.sourceAssetId),
-			);
-			return {
-				debug: { sourceAssetId: object.sourceAssetId },
-				generated: object.generated
-					? {
-							sceneId: object.generated.sceneId,
-							sceneTemplateIndex: object.generated.sceneTemplateIndex,
-							terrainIndex: object.generated.terrainIndex,
-						}
-					: null,
-				identity: createStaticObjectInstanceIdentity({
-					instanceId: object.instanceId,
-					landblockId: landblock.payload.landblockId,
-					objectKind: object.kind,
-				}),
-				instanceBounds: object.instanceBounds,
-				localPlacement: object.localPlacement,
-				portalCount: object.building?.portals.length ?? 0,
-				source,
-				sourceBounds: object.sourceBounds,
-				sourceIndex: object.sourceIndex,
-				sourceScale: object.sourceScale,
-			};
-		});
+		const objects = selectedObjects
+			.map((object): StaticObjectInstanceFacts => {
+				const source = createStaticObjectSourceIdentity(
+					parseHostAssetId(object.sourceAssetId),
+				);
+				return {
+					debug: { sourceAssetId: object.sourceAssetId },
+					generated: object.generated
+						? {
+								sceneId: object.generated.sceneId,
+								sceneTemplateIndex: object.generated.sceneTemplateIndex,
+								terrainIndex: object.generated.terrainIndex,
+							}
+						: null,
+					identity: createStaticObjectInstanceIdentity({
+						instanceId: object.instanceId,
+						landblockId: landblock.payload.landblockId,
+						objectKind: object.kind,
+					}),
+					instanceBounds: object.instanceBounds,
+					localPlacement: object.localPlacement,
+					portalCount: object.building?.portals.length ?? 0,
+					source,
+					sourceBounds: object.sourceBounds,
+					sourceIndex: object.sourceIndex,
+					sourceScale: object.sourceScale,
+				};
+			})
+			.filter((object) => sourceByKey.has(createSourceCacheKey(object.source)));
 		const materialSlots = createObjectMaterialSlotFacts({
 			objects,
 			sourceByKey,

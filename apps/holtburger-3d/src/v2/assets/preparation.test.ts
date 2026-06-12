@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AssetLookupResponseDto } from "../../lib/host/contracts";
 import type { HostAssetKey } from "./contracts";
-import { prepareTerrainSliceAssetPayload } from "./preparation/route-payloads";
+import { prepareV2StaticAssetPayload } from "./preparation/route-payloads";
 import {
 	createHostAssetLookupRequest,
 	prepareHostAssetResponse,
@@ -87,10 +87,14 @@ describe("V2 host asset preparation", () => {
 		).toThrow("Host response asset id palette/04000002 did not match");
 	});
 
-	it("recognizes every terrain-slice route and reports route-specific schema failures", () => {
+	it("recognizes every V2 static asset route and reports route-specific schema failures", () => {
 		const routes = [
 			["landblock/da55ffff/outdoor", "landblock-outdoor"],
 			["landblock/da55ffff/topology", "landblock-topology"],
+			["gfx-obj/01000001", "gfx-obj"],
+			["setup-model/02000001", "setup-model"],
+			["setup-appearance/02000001", "setup-appearance"],
+			["material/08000001", "material-recipe"],
 			["terrain-material/1", "terrain-material"],
 			["region-render-profile/1", "region-render-profile"],
 			["surface-texture/06000001", "surface-texture"],
@@ -101,7 +105,7 @@ describe("V2 host asset preparation", () => {
 
 		for (const [assetId, expectedKind] of routes) {
 			expect(() =>
-				prepareTerrainSliceAssetPayload({
+				prepareV2StaticAssetPayload({
 					assetId,
 					payload: { kind: "definitely-wrong" },
 					payloadKind: "json",
@@ -113,10 +117,10 @@ describe("V2 host asset preparation", () => {
 		}
 	});
 
-	it("rejects routes outside the terrain-slice preparation set", () => {
+	it("rejects routes outside the V2 static preparation set", () => {
 		expect(() =>
-			prepareTerrainSliceAssetPayload({
-				assetId: "gfx-obj/01000001",
+			prepareV2StaticAssetPayload({
+				assetId: "unknown-static/01000001",
 				payload: {},
 				payloadKind: "json",
 				requestId: "request-1",

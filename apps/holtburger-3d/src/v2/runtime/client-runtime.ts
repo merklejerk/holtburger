@@ -644,7 +644,11 @@ function createStaticDrawUnitTranslation(
 	drawUnit: StaticDrawUnit,
 	focusLandblockId: number | null,
 ): readonly [number, number, number] {
-	if (drawUnit.kind !== "terrain-geometry" || focusLandblockId === null) {
+	if (
+		(drawUnit.kind !== "terrain-geometry" &&
+			drawUnit.kind !== "static-object-geometry") ||
+		focusLandblockId === null
+	) {
 		return [0, 0, 0];
 	}
 

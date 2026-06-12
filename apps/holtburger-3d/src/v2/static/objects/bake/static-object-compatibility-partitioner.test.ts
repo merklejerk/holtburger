@@ -31,8 +31,9 @@ describe("V2 static object compatibility partitioner", () => {
 			),
 			[0x08000010 + STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE],
 		]);
-		expect(plan.partitions.flatMap((partition) => partition.sourceTriangleIds))
-			.toHaveLength(materialCount);
+		expect(
+			plan.partitions.flatMap((partition) => partition.sourceTriangleIds),
+		).toHaveLength(materialCount);
 	});
 
 	it("keeps unsupported-but-classified source geometry represented in partitions", () => {
@@ -46,9 +47,7 @@ describe("V2 static object compatibility partitioner", () => {
 			expect.objectContaining({
 				family: "unsupported",
 				renderCoverage: "unsupported",
-				sourceTriangleIds: [
-					"da55ffff:building:building-0:part:0:polygon:0",
-				],
+				sourceTriangleIds: ["da55ffff:building:building-0:part:0:polygon:0"],
 			}),
 		]);
 	});
@@ -82,7 +81,7 @@ describe("V2 static object compatibility partitioner", () => {
 		);
 	});
 
-	it("bakes static object partitions into non-rendered draw units and stageable texture uses", () => {
+	it("bakes opaque texture-rgba partitions into rendered draw units and stageable texture uses", () => {
 		const payload = createPayload({
 			materials: [createTexturedMaterial(0x08000010)],
 			textureRefs: createRgbaTextureRefs(),
@@ -95,7 +94,11 @@ describe("V2 static object compatibility partitioner", () => {
 			expect.objectContaining({
 				drawUnitId:
 					"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0",
-				kind: "placeholder",
+				kind: "static-object-geometry",
+				materialFamily: "texture-rgba",
+				materialPass: "opaque",
+				primaryTextureUseId:
+					"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-raw",
 			}),
 		]);
 		expect(result.textureUses).toEqual([
@@ -121,10 +124,35 @@ describe("V2 static object compatibility partitioner", () => {
 			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:bounds:1t",
 		]);
 	});
+
+	it("bakes static object placement and source scale into render-local positions", () => {
+		const payload = createPayload({
+			materials: [createTexturedMaterial(0x08000010)],
+			objectPlacement: createPlacement({ x: 10, y: 20, z: 30 }),
+			sourceScale: { x: 2, y: 3, z: 4 },
+			textureRefs: createRgbaTextureRefs(),
+		});
+		const input = createBakeInput(payload);
+
+		const result = bakeStaticObjectCompatibility(input);
+		const drawUnit = result.drawUnits[0];
+
+		expect(drawUnit).toMatchObject({ kind: "static-object-geometry" });
+		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
+			throw new Error("Expected static object geometry draw unit.");
+		}
+		expect(Array.from(drawUnit.positions.slice(0, 3))).toEqual([12, 34, -17]);
+	});
 });
 
 function createPayload(options: {
 	readonly materials: readonly StaticObjectMaterialSourceFacts[];
+	readonly objectPlacement?: ReturnType<typeof createPlacement>;
+	readonly sourceScale?: {
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	};
 	readonly textureRefs?: readonly StaticObjectTextureRefFacts[];
 }): OutdoorStaticObjectsScopePayload {
 	return {
@@ -160,12 +188,12 @@ function createPayload(options: {
 				generated: null,
 				identity: createObjectIdentity(),
 				instanceBounds: null,
-				localPlacement: createPlacement(),
+				localPlacement: options.objectPlacement ?? createPlacement(),
 				portalCount: 0,
 				source: createSourceIdentity(),
 				sourceBounds: null,
 				sourceIndex: 0,
-				sourceScale: { x: 1, y: 1, z: 1 },
+				sourceScale: options.sourceScale ?? { x: 1, y: 1, z: 1 },
 			},
 		],
 		regionRenderProfile: {
@@ -199,7 +227,7 @@ function createPayload(options: {
 						normals: new Float32Array(options.materials.length * 9),
 						partIndex: 0,
 						physicsPolygonCount: 0,
-						positions: new Float32Array(options.materials.length * 9),
+						positions: createPartPositions(options.materials.length),
 						renderTriangleCount: options.materials.length,
 						scale: { x: 1, y: 1, z: 1 },
 						skippedPolygonCount: 0,
@@ -341,7 +369,9 @@ function createRgbaTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 	];
 }
 
-function createMaterialIdentity(materialId: number): StaticMaterialSourceIdentity {
+function createMaterialIdentity(
+	materialId: number,
+): StaticMaterialSourceIdentity {
 	return {
 		kind: "static-material-source",
 		materialId,
@@ -373,9 +403,37 @@ function createGfxObjIdentity() {
 	};
 }
 
-function createPlacement() {
+function createPartPositions(triangleCount: number): Float32Array {
+	const positions = new Float32Array(triangleCount * 9);
+	for (
+		let triangleIndex = 0;
+		triangleIndex < triangleCount;
+		triangleIndex += 1
+	) {
+		const offset = triangleIndex * 9;
+		positions[offset] = 1;
+		positions[offset + 1] = 1;
+		positions[offset + 2] = 1;
+		positions[offset + 3] = 0;
+		positions[offset + 4] = 1;
+		positions[offset + 5] = 1;
+		positions[offset + 6] = 1;
+		positions[offset + 7] = 0;
+		positions[offset + 8] = 1;
+	}
+
+	return positions;
+}
+
+function createPlacement(
+	origin: { readonly x: number; readonly y: number; readonly z: number } = {
+		x: 0,
+		y: 0,
+		z: 0,
+	},
+) {
 	return {
 		orientation: { w: 1, x: 0, y: 0, z: 0 },
-		origin: { x: 0, y: 0, z: 0 },
+		origin,
 	};
 }

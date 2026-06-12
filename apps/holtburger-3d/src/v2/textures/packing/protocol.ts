@@ -1,5 +1,6 @@
-import type { DirectRgbaTextureSource } from "../../assets/preparation/prepared-texture-source";
 import type { StaticDomain } from "../../static/contracts";
+
+export type TexturePackingPageFormat = "rgba8" | "r8ui" | "r16ui";
 
 export interface TexturePackingJob {
 	readonly jobId: string;
@@ -13,7 +14,7 @@ export interface TexturePackingJob {
 interface TexturePackingPageConstraints {
 	readonly width: number;
 	readonly height: number;
-	readonly format: "rgba8";
+	readonly format: TexturePackingPageFormat;
 	readonly fillRgba?: readonly [number, number, number, number];
 	readonly gutterEdgeMode?: "clamp" | "repeat";
 	readonly gutterPixels?: number;
@@ -28,7 +29,15 @@ interface TexturePackingCohort {
 
 interface TexturePackingSource {
 	readonly textureUseId: string;
-	readonly source: DirectRgbaTextureSource;
+	readonly source: TexturePackingPixelSource;
+}
+
+export interface TexturePackingPixelSource {
+	readonly kind: "texture-packing-pixel-source";
+	readonly format: TexturePackingPageFormat;
+	readonly width: number;
+	readonly height: number;
+	readonly pixels: Uint8Array;
 }
 
 export interface TexturePackingResult {
@@ -43,7 +52,7 @@ interface TexturePackingPagePixels {
 	readonly pageId: string;
 	readonly width: number;
 	readonly height: number;
-	readonly format: "rgba8";
+	readonly format: TexturePackingPageFormat;
 	readonly pixels: Uint8Array;
 }
 

@@ -53,14 +53,12 @@ describe("V2 atlas texture packer", () => {
 			sources: [
 				{
 					source: {
+						format: "rgba8",
 						height: 2,
-						kind: "direct-rgba-texture-source",
-						outputFormat: "rgba8",
+						kind: "texture-packing-pixel-source",
 						pixels: new Uint8Array([
 							1, 0, 0, 255, 2, 0, 0, 255, 3, 0, 0, 255, 4, 0, 0, 255,
 						]),
-						renderSurfaceId: 0x06000010,
-						usage: "color",
 						width: 2,
 					},
 					textureUseId: "terrain-color",
@@ -97,14 +95,12 @@ describe("V2 atlas texture packer", () => {
 			sources: [
 				{
 					source: {
+						format: "rgba8",
 						height: 2,
-						kind: "direct-rgba-texture-source",
-						outputFormat: "rgba8",
+						kind: "texture-packing-pixel-source",
 						pixels: new Uint8Array([
 							1, 0, 0, 255, 2, 0, 0, 255, 3, 0, 0, 255, 4, 0, 0, 255,
 						]),
-						renderSurfaceId: 0x06000010,
-						usage: "color",
 						width: 2,
 					},
 					textureUseId: "terrain-color",
@@ -158,6 +154,136 @@ describe("V2 atlas texture packer", () => {
 			}),
 		).rejects.toThrow("could not place b");
 	});
+
+	it("packs byte-index sources with the same atlas layout path", async () => {
+		const result = await new AtlasTexturePacker().pack({
+			...createJob(),
+			page: {
+				format: "r8ui",
+				gutterPixels: 1,
+				height: 8,
+				width: 8,
+			},
+			sources: [
+				{
+					source: {
+						format: "r8ui",
+						height: 2,
+						kind: "texture-packing-pixel-source",
+						pixels: new Uint8Array([1, 2, 3, 4]),
+						width: 2,
+					},
+					textureUseId: "index8",
+				},
+			],
+		});
+
+		expect(result.pages[0]).toMatchObject({
+			format: "r8ui",
+			height: 4,
+			width: 4,
+		});
+		expect(Array.from(result.pages[0]?.pixels ?? [])).toEqual([
+			1, 1, 2, 2, 1, 1, 2, 2, 3, 3, 4, 4, 3, 3, 4, 4,
+		]);
+	});
+
+	it("packs two-byte index sources without RGBA stride assumptions", async () => {
+		const result = await new AtlasTexturePacker().pack({
+			...createJob(),
+			page: {
+				format: "r16ui",
+				height: 8,
+				width: 8,
+			},
+			sources: [
+				{
+					source: {
+						format: "r16ui",
+						height: 1,
+						kind: "texture-packing-pixel-source",
+						pixels: new Uint8Array([0x34, 0x12, 0x78, 0x56]),
+						width: 2,
+					},
+					textureUseId: "index16",
+				},
+			],
+		});
+
+		expect(result.pages[0]).toMatchObject({
+			format: "r16ui",
+			height: 1,
+			width: 2,
+		});
+		expect(Array.from(result.pages[0]?.pixels ?? [])).toEqual([
+			0x34, 0x12, 0x78, 0x56,
+		]);
+	});
+
+	it("fails explicitly when a source format does not match the page format", async () => {
+		await expect(
+			new AtlasTexturePacker().pack({
+				...createJob(),
+				page: {
+					format: "r8ui",
+					height: 8,
+					width: 8,
+				},
+				sources: [createSource("rgba", 1, 1, [1, 2, 3, 4])],
+			}),
+		).rejects.toThrow("expected r8ui sources, got rgba8");
+	});
+
+	it("fails explicitly when source bytes do not match the typed format", async () => {
+		await expect(
+			new AtlasTexturePacker().pack({
+				...createJob(),
+				page: {
+					format: "r16ui",
+					height: 8,
+					width: 8,
+				},
+				sources: [
+					{
+						source: {
+							format: "r16ui",
+							height: 1,
+							kind: "texture-packing-pixel-source",
+							pixels: new Uint8Array([1]),
+							width: 1,
+						},
+						textureUseId: "short-index16",
+					},
+				],
+			}),
+		).rejects.toThrow("expected 2 bytes for r16ui, got 1");
+	});
+
+	it("keeps rgba fill policy constrained to rgba pages", async () => {
+		await expect(
+			new AtlasTexturePacker().pack({
+				...createJob(),
+				page: {
+					fillRgba: [1, 2, 3, 4],
+					format: "r8ui",
+					height: 8,
+					width: 8,
+				},
+				sources: [
+					{
+						source: {
+							format: "r8ui",
+							height: 1,
+							kind: "texture-packing-pixel-source",
+							pixels: new Uint8Array([1]),
+							width: 1,
+						},
+						textureUseId: "index8",
+					},
+				],
+			}),
+		).rejects.toThrow("cannot use RGBA fill pixels");
+	});
 });
 
 function createJob(): TexturePackingJob {
@@ -186,12 +312,10 @@ function createSource(
 	}
 	return {
 		source: {
+			format: "rgba8",
 			height,
-			kind: "direct-rgba-texture-source",
-			outputFormat: "rgba8",
+			kind: "texture-packing-pixel-source",
 			pixels,
-			renderSurfaceId: 0x06000010,
-			usage: "color",
 			width,
 		},
 		textureUseId,

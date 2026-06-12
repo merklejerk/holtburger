@@ -1,4 +1,8 @@
-import type { TexturePackingJob, TexturePackingResult } from "./protocol";
+import type {
+	TexturePackingJob,
+	TexturePackingPageFormat,
+	TexturePackingResult,
+} from "./protocol";
 import { planAtlasLayout } from "./atlas-layout";
 
 export interface TexturePacker {
@@ -8,22 +12,21 @@ export interface TexturePacker {
 
 export class AtlasTexturePacker implements TexturePacker {
 	async pack(job: TexturePackingJob): Promise<TexturePackingResult> {
-		return packRgbaTexturesWithAtlasLayout(job);
+		return packTexturesWithAtlasLayout(job);
 	}
 }
 
 export class ShelfTexturePacker extends AtlasTexturePacker {}
 
-function packRgbaTexturesWithAtlasLayout(
-	job: TexturePackingJob,
-): TexturePackingResult {
+function packTexturesWithAtlasLayout(job: TexturePackingJob): TexturePackingResult {
 	for (const entry of job.sources) {
 		const { source } = entry;
-		if (source.outputFormat !== job.page.format) {
+		if (source.format !== job.page.format) {
 			throw new Error(
-				`Texture packing job ${job.jobId} expected ${job.page.format} sources, got ${source.outputFormat}.`,
+				`Texture packing job ${job.jobId} expected ${job.page.format} sources, got ${source.format}.`,
 			);
 		}
+		assertPixelLengthMatchesFormat(job.jobId, entry.textureUseId, source);
 	}
 
 	const layout = planAtlasLayout({
@@ -54,11 +57,12 @@ function packRgbaTexturesWithAtlasLayout(
 		job.sources.map((entry) => [entry.textureUseId, entry.source] as const),
 	);
 	const pages = layout.texturePages.map((layoutPage) => {
-		const pagePixels = createBlankPage(
-			layoutPage.width,
-			layoutPage.height,
-			job.page.fillRgba,
-		);
+		const pagePixels = createBlankPage({
+			fillRgba: job.page.fillRgba,
+			format: job.page.format,
+			height: layoutPage.height,
+			width: layoutPage.width,
+		});
 		for (const placement of layoutPage.placements) {
 			const source = sourceByTextureUseId.get(placement.atlasEntryKey);
 			if (!source) {
@@ -66,10 +70,11 @@ function packRgbaTexturesWithAtlasLayout(
 					`Texture packing job ${job.jobId} layout referenced unknown source ${placement.atlasEntryKey}.`,
 				);
 			}
-			blitRgbaWithGutter({
+			blitTextureWithGutter({
 				destination: pagePixels,
 				destinationWidth: layoutPage.width,
 				edgeMode: job.page.gutterEdgeMode ?? "clamp",
+				format: job.page.format,
 				gutterPixels: placement.gutterPixels,
 				source: source.pixels,
 				sourceHeight: source.height,
@@ -108,21 +113,28 @@ function packRgbaTexturesWithAtlasLayout(
 	};
 }
 
-function createBlankPage(
-	width: number,
-	height: number,
-	fillRgba?: readonly [number, number, number, number],
-): Uint8Array {
-	const pixels = new Uint8Array(width * height * 4);
-	if (!fillRgba) {
+function createBlankPage(options: {
+	readonly width: number;
+	readonly height: number;
+	readonly format: TexturePackingPageFormat;
+	readonly fillRgba?: readonly [number, number, number, number];
+}): Uint8Array {
+	const bytesPerPixel = getBytesPerPixel(options.format);
+	const pixels = new Uint8Array(options.width * options.height * bytesPerPixel);
+	if (options.fillRgba && options.format !== "rgba8") {
+		throw new Error(
+			`Texture packing page format ${options.format} cannot use RGBA fill pixels.`,
+		);
+	}
+	if (!options.fillRgba) {
 		return pixels;
 	}
 
 	for (let offset = 0; offset < pixels.length; offset += 4) {
-		pixels[offset] = fillRgba[0];
-		pixels[offset + 1] = fillRgba[1];
-		pixels[offset + 2] = fillRgba[2];
-		pixels[offset + 3] = fillRgba[3];
+		pixels[offset] = options.fillRgba[0];
+		pixels[offset + 1] = options.fillRgba[1];
+		pixels[offset + 2] = options.fillRgba[2];
+		pixels[offset + 3] = options.fillRgba[3];
 	}
 
 	return pixels;
@@ -132,10 +144,11 @@ function createPageId(jobId: string, pageIndex: number): string {
 	return `${jobId}:page:${pageIndex}`;
 }
 
-function blitRgbaWithGutter(options: {
+function blitTextureWithGutter(options: {
 	readonly destination: Uint8Array;
 	readonly destinationWidth: number;
 	readonly edgeMode: "clamp" | "repeat";
+	readonly format: TexturePackingPageFormat;
 	readonly source: Uint8Array;
 	readonly sourceWidth: number;
 	readonly sourceHeight: number;
@@ -143,6 +156,7 @@ function blitRgbaWithGutter(options: {
 	readonly y: number;
 	readonly gutterPixels: number;
 }): void {
+	const bytesPerPixel = getBytesPerPixel(options.format);
 	for (
 		let row = -options.gutterPixels;
 		row < options.sourceHeight + options.gutterPixels;
@@ -164,13 +178,44 @@ function blitRgbaWithGutter(options: {
 				options.sourceWidth,
 				options.edgeMode,
 			);
-			const sourceOffset = (sourceY * options.sourceWidth + sourceX) * 4;
+			const sourceOffset =
+				(sourceY * options.sourceWidth + sourceX) * bytesPerPixel;
 			const destinationOffset =
-				(destinationY * options.destinationWidth + options.x + column) * 4;
+				(destinationY * options.destinationWidth + options.x + column) *
+				bytesPerPixel;
 			options.destination.set(
-				options.source.subarray(sourceOffset, sourceOffset + 4),
+				options.source.subarray(sourceOffset, sourceOffset + bytesPerPixel),
 				destinationOffset,
 			);
+		}
+	}
+}
+
+function assertPixelLengthMatchesFormat(
+	jobId: string,
+	textureUseId: string,
+	source: TexturePackingJob["sources"][number]["source"],
+): void {
+	const expectedLength =
+		source.width * source.height * getBytesPerPixel(source.format);
+	if (source.pixels.byteLength !== expectedLength) {
+		throw new Error(
+			`Texture packing job ${jobId} source ${textureUseId} expected ${expectedLength} bytes for ${source.format}, got ${source.pixels.byteLength}.`,
+		);
+	}
+}
+
+function getBytesPerPixel(format: TexturePackingPageFormat): number {
+	switch (format) {
+		case "rgba8":
+			return 4;
+		case "r8ui":
+			return 1;
+		case "r16ui":
+			return 2;
+		default: {
+			const exhaustive: never = format;
+			throw new Error(`Unsupported texture packing page format ${exhaustive}.`);
 		}
 	}
 }

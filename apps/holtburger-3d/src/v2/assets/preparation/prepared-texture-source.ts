@@ -185,12 +185,51 @@ export function prepareDirectPaletteTextureSource(
 		MaterialTextureDataUseIdentity,
 		{ readonly kind: "palette-texture-use" }
 	>,
+	subPaletteAssets: readonly PreparedAsset[] = [],
 ): DirectPaletteTextureSource {
 	const payload = palettePayloadDtoSchema.parse(prepared.payload);
 	const expectedPalette = expectedUse.palette.paletteId;
 	if (payload.paletteId !== expectedPalette) {
 		throw new Error(
 			`Palette payload ${formatPaletteId(payload.paletteId)} does not match requested palette ${formatPaletteId(expectedPalette)}.`,
+		);
+	}
+
+	const colorsArgb = new Uint32Array(payload.colorsArgb);
+	for (const subPalette of expectedUse.subPalettes ?? []) {
+		const subPaletteAsset = subPaletteAssets.find((asset) => {
+			const candidate = palettePayloadDtoSchema.safeParse(asset.payload);
+			return (
+				candidate.success &&
+				candidate.data.paletteId === subPalette.palette.paletteId
+			);
+		});
+		if (!subPaletteAsset) {
+			throw new Error(
+				`Palette ${formatPaletteId(expectedPalette)} subpalette ${formatPaletteId(subPalette.palette.paletteId)} was not prepared.`,
+			);
+		}
+		const subPalettePayload = palettePayloadDtoSchema.parse(
+			subPaletteAsset.payload,
+		);
+		const subPaletteLastIndexExclusive =
+			subPalette.firstIndex + subPalette.indexCount;
+		if (
+			subPalette.firstIndex < 0 ||
+			subPalette.indexCount <= 0 ||
+			subPaletteLastIndexExclusive > colorsArgb.length ||
+			subPaletteLastIndexExclusive > subPalettePayload.colorsArgb.length
+		) {
+			throw new Error(
+				`Palette ${formatPaletteId(expectedPalette)} subpalette ${formatPaletteId(subPalette.palette.paletteId)} range ${subPalette.firstIndex}+${subPalette.indexCount} is invalid for derived palette composition.`,
+			);
+		}
+		colorsArgb.set(
+			subPalettePayload.colorsArgb.subarray(
+				subPalette.firstIndex,
+				subPaletteLastIndexExclusive,
+			),
+			subPalette.firstIndex,
 		);
 	}
 
@@ -215,7 +254,7 @@ export function prepareDirectPaletteTextureSource(
 		outputFormat: "rgba8",
 		paletteId: expectedPalette,
 		pixels: paletteArgbToRgbaBytes(
-			payload.colorsArgb.subarray(firstIndex, lastIndexExclusive),
+			colorsArgb.subarray(firstIndex, lastIndexExclusive),
 		),
 		usage: "palette-rgba",
 		width: indexCount,

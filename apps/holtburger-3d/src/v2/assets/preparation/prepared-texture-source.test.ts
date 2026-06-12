@@ -151,6 +151,7 @@ describe("V2 prepared texture source preparation", () => {
 					kind: "palette",
 					paletteId: 0x04000010,
 				},
+				subPalettes: [],
 				usage: "palette-rgba",
 			},
 		);
@@ -167,6 +168,49 @@ describe("V2 prepared texture source preparation", () => {
 		});
 		expect(Array.from(source.pixels)).toEqual([
 			0x44, 0x55, 0x66, 0x80, 0xaa, 0xbb, 0xcc, 0xff,
+		]);
+	});
+
+	it("composes palette payloads with authored subpalette replacement ranges", () => {
+		const source = prepareDirectPaletteTextureSource(
+			createPalettePreparedAsset(),
+			{
+				firstIndex: 0,
+				indexCount: 3,
+				kind: "palette-texture-use",
+				palette: {
+					kind: "palette",
+					paletteId: 0x04000010,
+				},
+				subPalettes: [
+					{
+						firstIndex: 1,
+						indexCount: 1,
+						palette: {
+							kind: "palette",
+							paletteId: 0x04000020,
+						},
+					},
+				],
+				usage: "palette-rgba",
+			},
+			[
+				createPalettePreparedAsset({
+					colorsArgb: [0xff000000, 0xff778899, 0xffffffff],
+					paletteId: 0x04000020,
+				}),
+			],
+		);
+
+		expect(source).toMatchObject({
+			firstIndex: 0,
+			indexCount: 3,
+			width: 3,
+		});
+		expect(Array.from(source.pixels)).toEqual([
+			0x11, 0x22, 0x33, 0xff,
+			0x77, 0x88, 0x99, 0xff,
+			0xaa, 0xbb, 0xcc, 0xff,
 		]);
 	});
 });
@@ -206,17 +250,25 @@ function createPreparedAsset(options: {
 	};
 }
 
-function createPalettePreparedAsset(): PreparedAsset {
+function createPalettePreparedAsset(
+	options: {
+		readonly colorsArgb?: readonly number[];
+		readonly paletteId?: number;
+	} = {},
+): PreparedAsset {
+	const paletteId = options.paletteId ?? 0x04000010;
 	return {
 		key: {
-			id: "04000010",
+			id: paletteId.toString(16).padStart(8, "0"),
 			kind: "palette",
 		},
 		payload: {
-			colorCount: 3,
-			colorsArgb: Uint32Array.from([0xff112233, 0x80445566, 0xffaabbcc]),
+			colorCount: options.colorsArgb?.length ?? 3,
+			colorsArgb: Uint32Array.from(
+				options.colorsArgb ?? [0xff112233, 0x80445566, 0xffaabbcc],
+			),
 			kind: "palette",
-			paletteId: 0x04000010,
+			paletteId,
 			provenance: {
 				detail: null,
 				errorCode: null,
@@ -228,7 +280,7 @@ function createPalettePreparedAsset(): PreparedAsset {
 		},
 		preparedAt: "test",
 		revision: 1,
-		sourceAssetId: "palette/04000010",
+		sourceAssetId: `palette/${paletteId.toString(16).padStart(8, "0")}`,
 	};
 }
 

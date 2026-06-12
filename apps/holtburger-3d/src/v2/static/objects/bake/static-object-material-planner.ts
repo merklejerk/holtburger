@@ -8,6 +8,7 @@ import type {
 	RenderSurfaceIdentity,
 	StaticMaterialSourceIdentity,
 	StaticObjectMaterialSourceFacts,
+	StaticObjectPaletteViewFacts,
 	StaticObjectTextureRefFacts,
 	SurfaceTextureIdentity,
 } from "../../contracts";
@@ -60,6 +61,7 @@ export interface StaticObjectMaterialPipelinePlan {
 
 export interface StaticObjectMaterialPlan {
 	readonly material: StaticMaterialSourceIdentity;
+	readonly materialUseKey: string;
 	readonly family: StaticObjectMaterialFamily;
 	readonly renderCoverage: StaticObjectMaterialRenderCoverage;
 	readonly pass: StaticObjectMaterialPass;
@@ -149,18 +151,60 @@ interface StaticObjectMaterialBlendFacts {
 
 interface StaticObjectMaterialContext {
 	readonly material: StaticObjectMaterialSourceFacts;
+	readonly paletteOverride?: PaletteIdentity | null;
+	readonly paletteViews?: readonly StaticObjectPaletteViewFacts[];
 	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
 }
 
 export function planStaticObjectMaterials(
 	payload: OutdoorStaticObjectsScopePayload,
 ): StaticObjectMaterialPipelinePlan {
-	const materialPlans = payload.materialSources.map((material) =>
-		classifyStaticObjectMaterial({
+	const materialById = new Map(
+		payload.materialSources.map((material) => [
+			createStaticMaterialSourceKey(material.identity),
 			material,
-			textureRefs: payload.textureRefs,
-		}),
+		]),
 	);
+	const plannedMaterialKeys = new Set<string>();
+	const materialPlans: StaticObjectMaterialPlan[] = [];
+	for (const slot of payload.materialSlots) {
+		const material = materialById.get(createStaticMaterialSourceKey(slot.material));
+		if (!material) {
+			continue;
+		}
+		const planKey = createStaticObjectMaterialUseKey(
+			material.identity,
+			slot.paletteOverride,
+			slot.paletteViews,
+		);
+		if (plannedMaterialKeys.has(planKey)) {
+			continue;
+		}
+		plannedMaterialKeys.add(planKey);
+		materialPlans.push(
+			classifyStaticObjectMaterial({
+				material,
+				paletteOverride: slot.paletteOverride,
+				paletteViews: slot.paletteViews,
+				textureRefs: payload.textureRefs,
+			}),
+		);
+	}
+	for (const material of payload.materialSources) {
+		const planKey = createStaticObjectMaterialUseKey(material.identity, null, []);
+		if (plannedMaterialKeys.has(planKey)) {
+			continue;
+		}
+		plannedMaterialKeys.add(planKey);
+		materialPlans.push(
+			classifyStaticObjectMaterial({
+				material,
+				paletteOverride: null,
+				paletteViews: [],
+				textureRefs: payload.textureRefs,
+			}),
+		);
+	}
 	const detailRoles = payload.regionRenderProfile.detailRoles
 		.filter((role) => role.role !== "landscape")
 		.map(createDetailRolePlan);
@@ -187,6 +231,11 @@ export function classifyStaticObjectMaterial(
 		color: resolveMaterialColor(context.material, behavior),
 		emissiveColor: resolveMaterialEmissiveColor(behavior),
 		material: context.material.identity,
+		materialUseKey: createStaticObjectMaterialUseKey(
+			context.material.identity,
+			context.paletteOverride ?? null,
+			context.paletteViews ?? [],
+		),
 		pass: resolveMaterialPass(behavior),
 	};
 	const unsupportedFlagReasons = behavior.unsupportedSurfaceFlags.map((flag) =>
@@ -249,7 +298,10 @@ export function classifyStaticObjectMaterial(
 
 	const indexedFormat = indexedTextureFormat(renderSurfaceRef.formatRaw);
 	if (indexedFormat) {
-		const palette = context.material.source.palette ?? renderSurfaceRef.palette;
+		const palette =
+			context.paletteOverride ??
+			context.material.source.palette ??
+			renderSurfaceRef.palette;
 		if (!palette) {
 			const reason = createFallbackReason({
 				code: "missing-palette",
@@ -273,6 +325,10 @@ export function classifyStaticObjectMaterial(
 						texture: context.material.source.texture,
 					}),
 				];
+		const paletteView = resolvePaletteView(
+			palette,
+			context.paletteViews ?? [],
+		);
 		return createTexturePlan({
 			...basePlan,
 			family:
@@ -302,13 +358,14 @@ export function classifyStaticObjectMaterial(
 				},
 				{
 					dataUse: {
-						firstIndex: DEFAULT_PALETTE_FIRST_INDEX,
-						indexCount: DEFAULT_PALETTE_INDEX_COUNT,
+						firstIndex: paletteView.firstIndex,
+						indexCount: paletteView.indexCount,
 						kind: "palette-texture-use",
-						palette,
+						palette: paletteView.palette,
+						subPalettes: paletteView.subPalettes,
 						usage: "palette-rgba",
 					},
-					palette,
+					palette: paletteView.palette,
 					role: "palette-rgba",
 				},
 			],
@@ -363,6 +420,7 @@ function createTexturePlan(
 		| "family"
 		| "fallbackReasons"
 		| "material"
+		| "materialUseKey"
 		| "pass"
 		| "renderCoverage"
 		| "textureRoles"
@@ -379,10 +437,79 @@ function createTexturePlan(
 	};
 }
 
+function resolvePaletteView(
+	basePalette: PaletteIdentity,
+	paletteViews: readonly StaticObjectPaletteViewFacts[],
+): PaletteDataUseIdentity {
+	return {
+		firstIndex: DEFAULT_PALETTE_FIRST_INDEX,
+		indexCount: DEFAULT_PALETTE_INDEX_COUNT,
+		kind: "palette-texture-use",
+		palette: basePalette,
+		subPalettes: sortPaletteViews(paletteViews),
+		usage: "palette-rgba",
+	};
+}
+
+export function createStaticObjectMaterialUseKey(
+	material: StaticMaterialSourceIdentity,
+	paletteOverride: PaletteIdentity | null,
+	paletteViews: readonly StaticObjectPaletteViewFacts[],
+): string {
+	return [
+		createStaticMaterialSourceKey(material),
+		`palette-override:${paletteOverride ? formatHex32(paletteOverride.paletteId) : "base"}`,
+		createStaticObjectPaletteViewsKey(paletteViews),
+	].join("|");
+}
+
+function createStaticObjectPaletteViewsKey(
+	paletteViews: readonly StaticObjectPaletteViewFacts[],
+): string {
+	if (paletteViews.length === 0) {
+		return "palette-views:none";
+	}
+
+	return [
+		"palette-views",
+		...sortPaletteViews(paletteViews).map(
+			(view) =>
+				`${formatHex32(view.palette.paletteId)}:${view.firstIndex}-${view.indexCount}`,
+		),
+	].join(":");
+}
+
+function sortPaletteViews(
+	paletteViews: readonly StaticObjectPaletteViewFacts[],
+): readonly StaticObjectPaletteViewFacts[] {
+	return [...paletteViews].sort(
+		(left, right) =>
+			left.firstIndex - right.firstIndex ||
+			left.indexCount - right.indexCount ||
+			left.palette.paletteId - right.palette.paletteId,
+	);
+}
+
+function createStaticMaterialSourceKey(
+	material: StaticMaterialSourceIdentity,
+): string {
+	return formatHex32(material.materialId);
+}
+
+function formatHex32(value: number): string {
+	return value.toString(16).padStart(8, "0");
+}
+
 function createUnsupportedPlan(
 	basePlan: Pick<
 		StaticObjectMaterialPlan,
-		"alphaPolicy" | "blend" | "color" | "emissiveColor" | "material" | "pass"
+		| "alphaPolicy"
+		| "blend"
+		| "color"
+		| "emissiveColor"
+		| "material"
+		| "materialUseKey"
+		| "pass"
 	>,
 	fallbackReasons: readonly StaticObjectMaterialFallbackReason[],
 ): StaticObjectMaterialPlan {

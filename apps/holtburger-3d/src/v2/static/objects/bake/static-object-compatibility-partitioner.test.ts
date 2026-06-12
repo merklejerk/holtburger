@@ -4,6 +4,7 @@ import type {
 	StaticBakeBatchInput,
 	StaticMaterialSourceIdentity,
 	StaticObjectMaterialSourceFacts,
+	StaticObjectPaletteViewFacts,
 	StaticObjectTextureRefFacts,
 } from "../../contracts";
 import { bakeStaticObjectCompatibility } from "./static-object-compatibility-baker";
@@ -343,6 +344,49 @@ describe("V2 static object compatibility partitioner", () => {
 		);
 	});
 
+	it("keeps indexed material partitions distinct by authored palette replacements", () => {
+		const material = createIndexedMaterial(0x08000013);
+		const payload = createPayload({
+			materials: [material, material],
+			paletteViews: [createPaletteViews(16, 32), createPaletteViews(64, 32)],
+			textureRefs: createIndexedTextureRefs(),
+		});
+
+		const plan = partitionStaticObjectCompatibility(payload);
+
+		expect(plan.partitions).toHaveLength(2);
+		expect(
+			plan.partitions.map((partition) => {
+				const paletteUse = partition.textureDataUses.find(
+					(dataUse) => dataUse.kind === "palette-texture-use",
+				);
+				if (!paletteUse || paletteUse.kind !== "palette-texture-use") {
+					throw new Error("Expected indexed partition palette data use.");
+				}
+				return {
+					firstIndex: paletteUse.firstIndex,
+					indexCount: paletteUse.indexCount,
+					subPalettes: paletteUse.subPalettes.map((subPalette) => ({
+						firstIndex: subPalette.firstIndex,
+						indexCount: subPalette.indexCount,
+						paletteId: subPalette.palette.paletteId,
+					})),
+				};
+			}),
+		).toEqual([
+			{
+				firstIndex: 0,
+				indexCount: 256,
+				subPalettes: [{ firstIndex: 16, indexCount: 32, paletteId: 0x04000010 }],
+			},
+			{
+				firstIndex: 0,
+				indexCount: 256,
+				subPalettes: [{ firstIndex: 64, indexCount: 32, paletteId: 0x04000010 }],
+			},
+		]);
+	});
+
 	it("bakes static object placement and source scale into render-local positions", () => {
 		const payload = createPayload({
 			materials: [createTexturedMaterial(0x08000010)],
@@ -513,6 +557,7 @@ function createPayload(options: {
 		readonly y: number;
 		readonly z: number;
 	};
+	readonly paletteViews?: readonly (readonly StaticObjectPaletteViewFacts[])[];
 	readonly textureRefs?: readonly StaticObjectTextureRefFacts[];
 }): OutdoorStaticObjectsScopePayload {
 	return {
@@ -539,6 +584,8 @@ function createPayload(options: {
 			material: material.identity,
 			materialVariantSignature: null,
 			object: createObjectIdentity(),
+			paletteOverride: null,
+			paletteViews: options.paletteViews?.[index] ?? [],
 			source: createSourceIdentity(),
 		})),
 		materialSources: options.materials,
@@ -584,6 +631,8 @@ function createPayload(options: {
 							material: material.identity,
 							materialSurfaceId: material.surfaceId,
 							materialVariantSignature: null,
+							paletteOverride: null,
+							paletteViews: options.paletteViews?.[index] ?? [],
 							slotIndex: index,
 						})),
 						normals: new Float32Array(options.materials.length * 9),
@@ -801,6 +850,22 @@ function createIndexedTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 			},
 			role: "render-surface",
 			width: 32,
+		},
+	];
+}
+
+function createPaletteViews(
+	firstIndex: number,
+	indexCount: number,
+): readonly StaticObjectPaletteViewFacts[] {
+	return [
+		{
+			firstIndex,
+			indexCount,
+			palette: {
+				kind: "palette",
+				paletteId: 0x04000010,
+			},
 		},
 	];
 }

@@ -2535,7 +2535,7 @@ Failed to close:
 
 ### Phase 11E2B: Indexed Palette Views And Visual Parity
 
-Status: planned.
+Status: completed.
 
 Purpose: close indexed/paletted material parity after the core data-texture path by deriving authored palette ranges/shades and validating real indexed building targets.
 
@@ -2557,6 +2557,35 @@ Acceptance criteria:
 - Palette-view identity is part of compatibility and texture-use identity, so two surfaces using the same palette asset with different authored ranges do not accidentally share the same lookup table.
 - A non-zero `firstIndex` and non-256 `indexCount` palette view is covered by tests through resolver/material planning, texture-use identity, atlas packing, and WebGL palette rect sampling.
 - Missing or unsupported palette-view metadata remains a typed render-deferred/unsupported material reason, not a silent full-palette fallback.
+
+Closed:
+
+- Setup appearance `subPalettes` now produce typed static-object palette-view facts (`palette`, `firstIndex`, `indexCount`) and attach them to both scope-level material slots and part-local material slots.
+- Setup appearance `paletteId` now flows as a material-slot base palette override, matching the v1 appearance palette-selection model.
+- The outdoor static-object resolver loads the referenced base override and subpalette assets so missing authored palette views are reported through normal missing-ref diagnostics instead of being invisible source metadata.
+- Static-object material planning now treats material use as `material DID + base palette override + replacement palette ranges`, not just material DID. Indexed/paletted plans emit full derived `palette-rgba` data uses that carry the ordered subpalette replacement ranges.
+- Texture preparation now mirrors v1's `createDerivedPaletteData` behavior: copy the selected base palette, then overwrite each authored subpalette range before packing the palette lookup texture.
+- Compatibility partitioning now keys triangle material plans by the explicit material-use key, so the same material with different base overrides or replacement ranges stays distinct through partitioning and texture-use collection.
+- Tests cover setup subpalette propagation, non-zero replacement ranges in material planning, texture-manager derived palette composition, and two same-material indexed partitions with different palette replacement ranges.
+
+Spicy bits:
+
+- The primary parity reference for this phase is v1's `createDerivedPaletteData` path. ACViewer/retail-style `IndexToColor` is corroborating ground truth, but the V2 implementation intentionally follows the v1 model that already existed in this repo.
+- Palette-view identity is intentionally a material-use key, not a page/atlas key. The same palette range can still share packed texture data, but triangles must not merge into the wrong material binding when their authored ranges differ.
+- Replacement ranges still pack as one derived palette lookup texture for the material use, not as independent palette slices. That keeps shader lookup simple and matches v1's full-palette derivation.
+
+Failed to close:
+
+- Palette-set/shade selection remains a host/content-side concern. V2 now consumes the prepared setup appearance `paletteId` and `subPalettes`, but it does not independently re-evaluate clothing palette tables in the frontend.
+- No new manual visual pass was run against a confirmed non-default/non-full indexed building target during this implementation pass.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- src/v2/assets/preparation/prepared-texture-source.test.ts src/v2/static/objects/bake/static-object-material-planner.test.ts src/v2/static/objects/bake/static-object-compatibility-partitioner.test.ts src/v2/static/objects/outdoor-static-objects-resolver.test.ts src/v2/textures/texture-manager.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 11E3: Translucent And Additive Static Passes
 

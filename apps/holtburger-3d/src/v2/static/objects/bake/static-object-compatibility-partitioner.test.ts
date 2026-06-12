@@ -116,7 +116,7 @@ describe("V2 static object compatibility partitioner", () => {
 				materialFamily: "texture-rgba",
 				materialPass: "opaque",
 				primaryTextureUseId:
-					"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-raw",
+					"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:wrap:clamp",
 			}),
 		]);
 		expect(result.textureUses).toEqual([
@@ -131,7 +131,11 @@ describe("V2 static object compatibility partitioner", () => {
 						kind: "render-surface",
 						renderSurfaceId: 0x06000010,
 					},
-					usage: "rgba-raw",
+					usage: "rgba-color",
+				},
+				samplingPolicy: {
+					wrapS: "clamp-to-edge",
+					wrapT: "clamp-to-edge",
 				},
 			}),
 		]);
@@ -227,6 +231,28 @@ describe("V2 static object compatibility partitioner", () => {
 		expect(drawUnits.map((drawUnit) => drawUnit.primaryTextureWrapMode)).toEqual([
 			"clamp",
 			"repeat",
+		]);
+		expect(result.textureUses.map((textureUse) => ({
+			id: textureUse.textureUseId,
+			samplingPolicy: textureUse.samplingPolicy,
+			usage: textureUse.source.usage,
+		}))).toEqual([
+			{
+				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:wrap:clamp",
+				samplingPolicy: {
+					wrapS: "clamp-to-edge",
+					wrapT: "clamp-to-edge",
+				},
+				usage: "rgba-color",
+			},
+			{
+				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:wrap:repeat",
+				samplingPolicy: {
+					wrapS: "repeat",
+					wrapT: "repeat",
+				},
+				usage: "rgba-color",
+			},
 		]);
 		expect(drawUnits.map((drawUnit) => Array.from(drawUnit.positions.slice(0, 3)))).toEqual([
 			[1, 1, 1],

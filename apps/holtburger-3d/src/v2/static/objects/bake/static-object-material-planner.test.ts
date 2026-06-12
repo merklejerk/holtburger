@@ -40,7 +40,7 @@ describe("V2 static object material planner", () => {
 		]);
 	});
 
-	it("plans non-indexed texture materials as raw rgba base-color roles", () => {
+	it("plans non-indexed texture materials as filterable rgba base-color roles", () => {
 		const plan = classifyStaticObjectMaterial({
 			material: createTexturedMaterial(),
 			textureRefs: createTextureRefs({ formatRaw: 1, paletteId: null }),
@@ -61,7 +61,7 @@ describe("V2 static object material planner", () => {
 							kind: "render-surface",
 							renderSurfaceId: 0x06000010,
 						},
-						usage: "rgba-raw",
+						usage: "rgba-color",
 					},
 					renderSurface: {
 						kind: "render-surface",

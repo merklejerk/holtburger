@@ -204,7 +204,11 @@ export class TextureManager {
 					return [];
 				}
 
-				const entry = findRegistryEntryBySource(registry, textureUse);
+				const entry = findRegistryEntryBySource(
+					registry,
+					textureUse,
+					createRuntimeTexturePagePolicy(textureUse),
+				);
 				return entry
 					? [
 							{
@@ -375,7 +379,15 @@ export class TextureManager {
 			};
 		}
 
-		const existingSourceEntry = findRegistryEntryBySource(registry, source);
+		const pagePolicy = createRuntimeTexturePagePolicy(
+			source,
+			textureUse.samplingPolicy,
+		);
+		const existingSourceEntry = findRegistryEntryBySource(
+			registry,
+			source,
+			pagePolicy,
+		);
 		if (existingSourceEntry) {
 			registry.entries.set(textureKey, existingSourceEntry);
 			return {
@@ -401,7 +413,6 @@ export class TextureManager {
 			createPreparedTextureHostKey(source),
 		);
 		const directSource = prepareDirectRgbaTextureSource(prepared, source);
-		const pagePolicy = createRuntimeTexturePagePolicy(source);
 		const samplerPolicy = createRuntimeTextureSamplerPolicy({
 			filteringMode: this.#filteringMode,
 			sampleClass: pagePolicy.sampleClass,
@@ -814,9 +825,15 @@ function createStaticBatchRegistryKey(
 function findRegistryEntryBySource(
 	registry: StaticBatchTextureRegistry,
 	source: PreparedRgbaRenderSurfaceTextureUseIdentity,
+	pagePolicy: RuntimeTexturePagePolicy,
 ): StaticBatchTextureRegistryEntry | null {
 	for (const entry of registry.entries.values()) {
-		if (isSamePreparedTextureUse(entry.source, source)) {
+		if (
+			isSamePreparedTextureUse(entry.source, source) &&
+			entry.sampleClass === pagePolicy.sampleClass &&
+			entry.wrapS === pagePolicy.wrapS &&
+			entry.wrapT === pagePolicy.wrapT
+		) {
 			return entry;
 		}
 	}
@@ -874,6 +891,7 @@ function createStaticBatchSourcePlacementKey(
 		createPreparedTextureUseKey(
 			asPreparedRgbaRenderSurfaceTextureUse(textureUse.source),
 		),
+		createTextureUseSamplingKey(textureUse),
 	].join(":");
 }
 
@@ -885,6 +903,15 @@ function createPreparedTextureUseKey(
 		source.renderSurface.renderSurfaceId.toString(16).padStart(8, "0"),
 		source.usage,
 	].join(":");
+}
+
+function createTextureUseSamplingKey(textureUse: StaticBakeTextureUse): string {
+	const samplingPolicy = textureUse.samplingPolicy;
+	if (!samplingPolicy) {
+		return "sampling:default";
+	}
+
+	return `sampling:wrap=${samplingPolicy.wrapS},${samplingPolicy.wrapT}`;
 }
 
 function isPreparedRgbaRenderSurfaceTextureUse(

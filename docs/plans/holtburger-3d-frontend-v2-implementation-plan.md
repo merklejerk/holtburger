@@ -2182,7 +2182,7 @@ Verification:
 
 ### Phase 11D1: Static Object Color Texture Sampling Policy
 
-Status: planned; immediate next phase.
+Status: complete.
 
 Purpose: correct the first static-object rendering slice's texture contract so ordinary diffuse/base-color RGBA textures are filterable color resources with authored clamp/repeat sampler intent, not exact/no-mip data resources.
 
@@ -2219,6 +2219,40 @@ Dry-run findings:
 Dry-run conclusion:
 
 - Treat this as a contract correction, not a visual-tuning pass. The implementation should make usage answer "what kind of data is this?" and sampler policy answer "how may it be sampled?" without overloading `rgba-raw` as a workaround for unknown wrap behavior.
+
+Implementation notes:
+
+- Added a bake-time `StaticBakeTextureSamplingPolicy` to texture uses so sampler/wrap intent can travel with a texture use without changing the semantic prepared-texture usage. The helper wrap type remains private to avoid exporting implementation detail only used to compose the public policy.
+- Static object non-indexed `texture-rgba` base-color material roles now emit `rgba-color` data uses instead of `rgba-raw`. `rgba-raw` remains available for exact/data RGBA paths and still maps to the runtime `rgba-exact` sample class.
+- Static object texture-use ids now include authored wrap intent (`wrap:clamp` or `wrap:repeat`), and emitted bake texture uses carry matching `repeat` or `clamp-to-edge` sampling policy. This prevents repeat/clamp variants of the same render surface from aliasing before packing.
+- Runtime texture page policy now accepts an explicit sampling policy override. `rgba-color` keeps its generic filterable/mip-capable color semantics while supporting either repeat or clamp wrapping.
+- Texture manager source aliasing and pending placement keys now include realized page policy/sampling facts, so existing packed entries are reused only when source, sample class, and wrap policy match.
+- Added tests proving static object base-color roles use `rgba-color`, clamp/repeat partitions produce distinct texture uses, static object color placements remain mip-capable under anisotropic filtering, and clamp/repeat static object placements do not alias.
+
+Decisions and course corrections:
+
+- `rgba-color` is treated as a generic filterable color contract, not a terrain contract. Terrain is still the heaviest current user, but static object diffuse/base-color textures now use the same semantic usage.
+- Wrap policy was kept as bake/placement policy instead of creating fake usages like `rgba-color-clamp`. Usage answers what the bytes mean; sampling policy answers how the bytes may be sampled.
+- The static-object shader's existing repeat handling remains in place. This phase still prevents incompatible texture-object wrap state from aliasing, but shader-side repeat is still useful for atlas-local repeat before rect mapping.
+
+Spicy findings:
+
+- The earlier `rgba-raw` choice was a useful conservative seam while 11D was proving geometry, atlas rects, and transforms, but it became misleading as soon as buildings rendered. It encoded "we do not know sampler policy yet" as "this is exact RGBA data," which is the wrong abstraction.
+- `createStaticAtlasBatchSnapshot` still only reconstructs default source page policy because static object source payloads do not currently contribute atlas snapshot texture-use facts. That is fine for the current terrain-oriented snapshot flow, but future static-object inspection should not rely on source-only lookup if it needs authored wrap policy.
+- Texture-atlas diagnostics still report terrain role-page usage for every draw unit, including static object draw units. That predates this phase and remains noisy for static objects; it should become a domain-specific diagnostic rather than overloading terrain role names.
+
+Failed to close:
+
+- No static object lighting/material color modulation, detail overlays, indexed/paletted upload, palette subranges, or translucent/additive pass support was added. Those remain Phase 11E work.
+- This phase did not add a static-object-specific atlas role-page diagnostic. The existing diagnostics will show `sampleClass`, wrapping, filtering mode, and mip status correctly, but the `terrainRolePages` subsection still treats static object draw units as terrain role outliers.
+- Manual browser visual verification is still needed to confirm the mip/filtering improvement on live building textures.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- static-object-material-planner.test.ts static-object-compatibility-partitioner.test.ts texture-manager.test.ts sampling-policy.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
 
 ### Phase 11E: Static Object Material Family Expansion
 

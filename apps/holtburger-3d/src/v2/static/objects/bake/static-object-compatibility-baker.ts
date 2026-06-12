@@ -5,6 +5,7 @@ import type {
 	StaticBakeBatchInput,
 	StaticBakeBatchItem,
 	StaticBakeBatchResult,
+	StaticBakeTextureSamplingPolicy,
 	StaticBakeTextureUse,
 	StaticBaker,
 	StaticDrawUnit,
@@ -181,6 +182,7 @@ function createStaticObjectGeometryDrawUnit(options: {
 	const textureUseId = createStaticObjectTextureUseId(
 		options.work,
 		options.textureUse,
+		options.partition.textureWrapMode,
 	);
 
 	return {
@@ -348,6 +350,7 @@ function createStaticObjectBakeTextureUses(options: {
 			const textureUseId = createStaticObjectTextureUseId(
 				options.work,
 				dataUse,
+				partition.textureWrapMode,
 			);
 			const existing = textureUsesById.get(textureUseId);
 			if (existing) {
@@ -361,6 +364,9 @@ function createStaticObjectBakeTextureUses(options: {
 			textureUsesById.set(textureUseId, {
 				domain: options.work.job.domain,
 				ownerDrawUnitIds: [drawUnitId],
+				samplingPolicy: createStaticObjectSamplingPolicy(
+					partition.textureWrapMode,
+				),
 				source: dataUse,
 				staticBatchId: options.staticBatchId,
 				textureUseId,
@@ -376,12 +382,24 @@ function createStaticObjectBakeTextureUses(options: {
 function createStaticObjectTextureUseId(
 	work: ScheduledStaticWork,
 	dataUse: MaterialTextureDataUseIdentity,
+	textureWrapMode: StaticObjectCompatibilityPartition["textureWrapMode"],
 ): string {
 	return [
 		work.workId,
 		"static-object-texture",
 		createMaterialTextureDataUseKey(dataUse),
+		`wrap:${textureWrapMode}`,
 	].join(":");
+}
+
+function createStaticObjectSamplingPolicy(
+	textureWrapMode: StaticObjectCompatibilityPartition["textureWrapMode"],
+): StaticBakeTextureSamplingPolicy {
+	const wrap = textureWrapMode === "repeat" ? "repeat" : "clamp-to-edge";
+	return {
+		wrapS: wrap,
+		wrapT: wrap,
+	};
 }
 
 function mergeTextureUses(
@@ -414,7 +432,7 @@ function isCurrentlyStageableStaticObjectDataUse(
 ): boolean {
 	return (
 		dataUse.kind === "prepared-render-surface-texture-use" &&
-		dataUse.usage === "rgba-raw"
+		dataUse.usage === "rgba-color"
 	);
 }
 

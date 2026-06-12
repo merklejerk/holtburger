@@ -326,7 +326,7 @@ export function classifyStaticObjectMaterial(
 				dataUse: {
 					kind: "prepared-render-surface-texture-use",
 					renderSurface: renderSurfaceRef.renderSurface,
-					usage: "rgba-raw",
+					usage: "rgba-color",
 				},
 				renderSurface: renderSurfaceRef.renderSurface,
 				role: "base-color",

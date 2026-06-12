@@ -68,6 +68,19 @@ describe("V2 runtime texture sampling policy", () => {
 			wrapT: "clamp-to-edge",
 		});
 	});
+
+	it("allows authored sampling policy to override color wrapping without changing sample class", () => {
+		expect(
+			createRuntimeTexturePagePolicy(createUse("rgba-color"), {
+				wrapS: "clamp-to-edge",
+				wrapT: "clamp-to-edge",
+			}),
+		).toEqual({
+			sampleClass: "rgba-color",
+			wrapS: "clamp-to-edge",
+			wrapT: "clamp-to-edge",
+		});
+	});
 });
 
 function createUse(

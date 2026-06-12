@@ -87,6 +87,7 @@ uniform usampler2D uIndexTexture;
 uniform sampler2D uPaletteTexture;
 uniform vec4 uTextureRect;
 uniform vec4 uIndexTextureRect;
+uniform vec4 uPaletteTextureRect;
 uniform vec2 uTextureSize;
 uniform vec2 uIndexTextureSize;
 uniform vec2 uPaletteTextureSize;
@@ -116,8 +117,9 @@ void main() {
 		vec2 localUv = uWrapMode == 1 ? fract(vTexCoord) : clamp(vTexCoord, vec2(0.0), vec2(1.0));
 		vec2 indexUv = (uIndexTextureRect.xy + localUv * uIndexTextureRect.zw) / uIndexTextureSize;
 		float paletteIndex = float(texture(uIndexTexture, indexUv).r) - uPaletteFirstIndex;
-		float paletteU = (clamp(paletteIndex, 0.0, max(uPaletteTextureSize.x - 1.0, 0.0)) + 0.5) / uPaletteTextureSize.x;
-		baseColor = texture(uPaletteTexture, vec2(paletteU, 0.5 / uPaletteTextureSize.y));
+		float paletteLocalX = clamp(paletteIndex, 0.0, max(uPaletteTextureRect.z - 1.0, 0.0));
+		vec2 paletteUv = (uPaletteTextureRect.xy + vec2(paletteLocalX + 0.5, 0.5)) / uPaletteTextureSize;
+		baseColor = texture(uPaletteTexture, paletteUv);
 	}
 
 	fragColor = vec4(
@@ -730,6 +732,13 @@ class Webgl2Renderer implements Renderer {
 				paletteBinding?.textureWidth ?? 1,
 				paletteBinding?.textureHeight ?? 1,
 			);
+			gl.uniform4f(
+				this.#staticObjectProgram.uniforms.uPaletteTextureRect,
+				paletteBinding?.rect[0] ?? 0,
+				paletteBinding?.rect[1] ?? 0,
+				paletteBinding?.rect[2] ?? 1,
+				paletteBinding?.rect[3] ?? 1,
+			);
 			gl.uniform1f(
 				this.#staticObjectProgram.uniforms.uPaletteFirstIndex,
 				resource.paletteFirstIndex,
@@ -875,6 +884,7 @@ interface StaticObjectGeometryProgram {
 		readonly uModelViewProjection: WebGLUniformLocation;
 		readonly uPaletteFirstIndex: WebGLUniformLocation;
 		readonly uPaletteTexture: WebGLUniformLocation;
+		readonly uPaletteTextureRect: WebGLUniformLocation;
 		readonly uPaletteTextureSize: WebGLUniformLocation;
 		readonly uTexture: WebGLUniformLocation;
 		readonly uTextureRect: WebGLUniformLocation;
@@ -1092,6 +1102,11 @@ function createStaticObjectGeometryProgram(
 			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
 			uPaletteFirstIndex: requireUniform(gl, program, "uPaletteFirstIndex"),
 			uPaletteTexture: requireUniform(gl, program, "uPaletteTexture"),
+			uPaletteTextureRect: requireUniform(
+				gl,
+				program,
+				"uPaletteTextureRect",
+			),
 			uPaletteTextureSize: requireUniform(
 				gl,
 				program,

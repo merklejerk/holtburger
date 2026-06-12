@@ -2452,7 +2452,7 @@ Failed to close:
 
 ### Phase 11E2A2: Indexed And Palette Data Atlas Families
 
-Status: planned.
+Status: complete.
 
 Purpose: move indexed texture data and palette lookup data from direct single-source placements into typed atlas pages.
 
@@ -2477,6 +2477,20 @@ Spicy notes:
 
 - Packed palettes are still data textures, not color-surface textures. They must use nearest/no-mip sampler policy and exact texel addressing even though their physical page format is `rgba8`.
 - This phase intentionally treats the current direct index/palette placement path as an interim correctness bridge, not as final architecture.
+
+Closed:
+
+- `index8`, `index16`, and `palette-rgba` texture uses now route through the texture packer instead of the old direct placement bridge.
+- Page format selection is semantic: `index8` packs to `r8ui`, `index16` packs to `r16ui`, and palette views pack to nearest/no-mip `rgba8` data pages.
+- The direct data-placement commit path was removed from `TextureManager`; packed registry entries now own index, palette, and RGBA pages through the same placement/update path.
+- Static-object indexed/paletted shader sampling now uses the packed palette rect (`uPaletteTextureRect`) plus `uPaletteFirstIndex`, so palette views no longer assume that the palette page starts at x=0.
+- Texture atlas diagnostics now summarize page formats and sampler policy distribution per domain alongside sample-class, mip, wrap, page, source, and byte summaries.
+- Tests now assert typed index/palette pack jobs, exact packed palette bytes, nearest/no-mip sampler policy, registry/binding behavior, and diagnostics format/sample/sampler summaries.
+
+Failed to close:
+
+- No live WebGL screenshot or browser visual pass was run for this phase; validation is via typecheck, unit tests, and existing WebGL upload code paths.
+- Palette subrange derivation is still limited by the current full/default palette-view metadata model; Phase 11E2B remains responsible for richer palette-view derivation and non-zero range coverage.
 
 ### Phase 11E2A3: Virtual Wrap Parity
 

@@ -115,6 +115,25 @@ export class OutdoorStaticObjectsResolver {
 		const sourceResolution = await this.#resolveSourceAssets(
 			selectedObjects.map((object) => object.sourceAssetId),
 		);
+		const paletteSources = new Map(
+			sourceResolution.paletteSources.map((source) => [
+				createPaletteCacheKey(source.palette),
+				source,
+			]),
+		);
+		const textureRefs = new Map(
+			sourceResolution.textureRefs.map((ref) => [
+				createTextureRefCacheKey(ref),
+				ref,
+			]),
+		);
+		const missingRefs = [...sourceResolution.missingRefs];
+		const detailTextureRevision = await this.#resolveRegionDetailTextureRefs({
+			missingRefs,
+			paletteSources,
+			profile: regionRenderProfile.payload,
+			textureRefs,
+		});
 		const sourceByKey = new Map(
 			sourceResolution.sourceAssets.map((source) => [
 				createSourceCacheKey(source.identity),
@@ -164,9 +183,9 @@ export class OutdoorStaticObjectsResolver {
 			},
 			materialSlots,
 			materialSources: sourceResolution.materialSources,
-			missingRefs: sourceResolution.missingRefs,
+			missingRefs,
 			objects,
-			paletteSources: sourceResolution.paletteSources,
+			paletteSources: [...paletteSources.values()],
 			regionRenderProfile: {
 				detailRoles: createRegionDetailRoles(regionRenderProfile.payload),
 				identity: {
@@ -181,7 +200,7 @@ export class OutdoorStaticObjectsResolver {
 				outdoorBvhItemCount: landblock.payload.outdoorBvh?.items.length ?? 0,
 				outdoorBvhNodeCount: landblock.payload.outdoorBvh?.nodes.length ?? 0,
 			},
-			textureRefs: sourceResolution.textureRefs,
+			textureRefs: [...textureRefs.values()],
 		};
 
 		return {
@@ -191,6 +210,7 @@ export class OutdoorStaticObjectsResolver {
 				landblock.asset.revision,
 				regionRenderProfile.asset.revision,
 				sourceResolution.sourceRevision,
+				detailTextureRevision,
 			),
 		};
 	}
@@ -575,39 +595,88 @@ export class OutdoorStaticObjectsResolver {
 			return;
 		}
 
-		const texture = createSurfaceTextureIdentity(material.source.surfaceTextureId);
+		await this.#resolveSurfaceTextureRef({
+			missingRefs,
+			palette:
+				material.source.paletteId === null
+					? null
+					: createPaletteIdentity(material.source.paletteId),
+			paletteSources,
+			selectedRenderSurfaceId: material.source.selectedRenderSurfaceId,
+			texture: createSurfaceTextureIdentity(material.source.surfaceTextureId),
+			textureRefs,
+		});
+	}
+
+	async #resolveRegionDetailTextureRefs(options: {
+		readonly profile: RegionRenderProfilePayloadDto;
+		readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
+		readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
+		readonly missingRefs: StaticResourceIdentity[];
+	}): Promise<number> {
+		let sourceRevision = 0;
+		for (const role of Object.values(options.profile.detailRoles)) {
+			if (!role) {
+				continue;
+			}
+			sourceRevision = Math.max(
+				sourceRevision,
+				await this.#resolveSurfaceTextureRef({
+					missingRefs: options.missingRefs,
+					palette: null,
+					paletteSources: options.paletteSources,
+					selectedRenderSurfaceId: null,
+					texture: createSurfaceTextureIdentity(role.textureDid),
+					textureRefs: options.textureRefs,
+				}),
+			);
+		}
+		return sourceRevision;
+	}
+
+	async #resolveSurfaceTextureRef(options: {
+		readonly texture: SurfaceTextureIdentity;
+		readonly selectedRenderSurfaceId: number | null;
+		readonly palette: PaletteIdentity | null;
+		readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
+		readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
+		readonly missingRefs: StaticResourceIdentity[];
+	}): Promise<number> {
 		let surfaceTexture: LoadedPayload<"surface-texture">;
 		try {
 			surfaceTexture = await this.#loadPayload(
-				createHostAssetKey("surface-texture", texture.surfaceTextureId),
+				createHostAssetKey("surface-texture", options.texture.surfaceTextureId),
 				"surface-texture",
 			);
 		} catch {
-			missingRefs.push(texture);
-			return;
+			options.missingRefs.push(options.texture);
+			return 0;
 		}
 
 		const renderSurfaceId =
-			material.source.selectedRenderSurfaceId ??
+			options.selectedRenderSurfaceId ??
 			surfaceTexture.payload.selectedRenderSurfaceId ??
 			surfaceTexture.payload.renderSurfaceIds[0] ??
 			null;
 		const renderSurface =
 			renderSurfaceId === null ? null : createRenderSurfaceIdentity(renderSurfaceId);
-		let palette =
-			material.source.paletteId === null
-				? null
-				: createPaletteIdentity(material.source.paletteId);
+		let palette = options.palette;
 
-		textureRefs.set(createTextureRefCacheKey({ role: "surface-texture", texture }), {
-			palette,
-			renderSurface,
-			role: "surface-texture",
-			texture,
-		});
+		options.textureRefs.set(
+			createTextureRefCacheKey({
+				role: "surface-texture",
+				texture: options.texture,
+			}),
+			{
+				palette,
+				renderSurface,
+				role: "surface-texture",
+				texture: options.texture,
+			},
+		);
 
 		if (renderSurface === null) {
-			return;
+			return 0;
 		}
 
 		try {
@@ -620,7 +689,7 @@ export class OutdoorStaticObjectsResolver {
 				(loadedRenderSurface.payload.defaultPaletteId === null
 					? null
 					: createPaletteIdentity(loadedRenderSurface.payload.defaultPaletteId));
-			textureRefs.set(
+			options.textureRefs.set(
 				createTextureRefCacheKey({ role: "render-surface", renderSurface }),
 				{
 					format: loadedRenderSurface.payload.format,
@@ -637,10 +706,16 @@ export class OutdoorStaticObjectsResolver {
 				},
 			);
 			if (palette) {
-				await this.#loadPalette(palette, paletteSources, missingRefs);
+				await this.#loadPalette(
+					palette,
+					options.paletteSources,
+					options.missingRefs,
+				);
 			}
+			return loadedRenderSurface.payload.sourceByteLength;
 		} catch {
-			missingRefs.push(renderSurface);
+			options.missingRefs.push(renderSurface);
+			return 0;
 		}
 	}
 

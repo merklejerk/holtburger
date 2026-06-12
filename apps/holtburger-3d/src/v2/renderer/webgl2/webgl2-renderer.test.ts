@@ -79,7 +79,7 @@ describe("V2 WebGL2 static object detail shader contract", () => {
 			"vec2 localUv = fract(uv * uDetailTiling);",
 		);
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
-			"rgb *= sampleDetailOverlay(vTexCoord).rgb;",
+			"rgb = clamp(rgb * (detailColor.rgb + (1.0 - detailAlpha)), vec3(0.0), vec3(1.0));",
 		);
 	});
 });

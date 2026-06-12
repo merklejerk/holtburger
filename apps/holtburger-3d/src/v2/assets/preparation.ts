@@ -4,7 +4,7 @@ import type {
 } from "../../lib/host/contracts";
 import type { HostAssetKey, PreparedAsset } from "./contracts";
 import { formatHostAssetId } from "./keys";
-import { prepareTerrainSliceAssetPayload } from "./preparation/route-payloads";
+import { prepareV2StaticAssetPayload } from "./preparation/route-payloads";
 
 export interface PrepareHostAssetOptions {
 	readonly key: HostAssetKey;
@@ -46,7 +46,7 @@ export function prepareHostAssetResponse({
 
 	return {
 		key,
-		payload: prepareTerrainSliceAssetPayload(response),
+		payload: prepareV2StaticAssetPayload(response),
 		preparedAt: now().toISOString(),
 		revision,
 		sourceAssetId: response.assetId,

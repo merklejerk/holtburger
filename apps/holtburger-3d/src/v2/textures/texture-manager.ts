@@ -12,7 +12,7 @@ import type {
 } from "../runtime/diagnostics";
 import type {
 	SamplerPolicyUpdate,
-	TerrainTextureBinding,
+	TextureDrawUnitBinding,
 	TerrainTextureRolePageKind,
 	TexturePlacementUpdate,
 } from "../renderer/types";
@@ -225,7 +225,7 @@ export class TextureManager {
 			delta.removedDrawUnitIds,
 		);
 		const placements: RuntimeTexturePlacement[] = [];
-		const drawUnitBindings: TerrainTextureBinding[] = [];
+		const drawUnitBindings: TextureDrawUnitBinding[] = [];
 		const rolePageSlots = new TerrainDrawUnitRolePageSlots((overflow) => {
 			this.#recentRolePageOverflows = appendBounded(
 				this.#recentRolePageOverflows,
@@ -375,10 +375,7 @@ export class TextureManager {
 			};
 		}
 
-		const existingSourceEntry = findRegistryEntryBySource(
-			registry,
-			source,
-		);
+		const existingSourceEntry = findRegistryEntryBySource(registry, source);
 		if (existingSourceEntry) {
 			registry.entries.set(textureKey, existingSourceEntry);
 			return {
@@ -852,7 +849,8 @@ function isSamePreparedTextureUse(
 ): boolean {
 	return (
 		left.kind === right.kind &&
-		left.renderSurface.renderSurfaceId === right.renderSurface.renderSurfaceId &&
+		left.renderSurface.renderSurfaceId ===
+			right.renderSurface.renderSurfaceId &&
 		left.usage === right.usage
 	);
 }
@@ -1277,7 +1275,7 @@ class TerrainDrawUnitRolePageSlots {
 
 	resolveSlot(
 		input: TerrainRolePageSlotInput,
-	): TerrainTextureBinding["rolePage"] | null {
+	): TextureDrawUnitBinding["rolePage"] | null {
 		const kind = createTerrainTextureRolePageKind(input.usage);
 		const drawUnitKindKey = `${input.drawUnitId}:${kind}`;
 		if (this.#overflowKeys.has(drawUnitKindKey)) {

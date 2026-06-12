@@ -21,6 +21,7 @@ import {
 	createHostAssetKey,
 	describeHostAssetKey,
 	formatHostAssetId,
+	parseHostAssetId,
 } from "../../assets/keys";
 import type { StaticResolverJob } from "../contracts";
 import { OutdoorStaticObjectsResolver } from "./outdoor-static-objects-resolver";
@@ -229,6 +230,39 @@ describe("V2 outdoor static object resolver", () => {
 		expect(withoutDebug).not.toContain("render-surface/");
 		expect(withoutDebug).not.toContain("palette/");
 	});
+
+	it("excludes objects whose source asset could not be resolved", async () => {
+		const assetService = new FixtureAssetService([
+			createPreparedAsset(
+				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createLandblockOutdoorPayload({ buildingSourceAssetId: "gfx-obj/01000020" }),
+			),
+			createPreparedAsset(
+				createHostAssetKey("region-render-profile", 1),
+				createRegionRenderProfilePayload(),
+			),
+		]);
+
+		const payload = await new OutdoorStaticObjectsResolver({
+			assetService,
+		}).resolve(createBuildingRequest());
+
+		expect(payload.scope.kind).toBe("outdoor-static-objects");
+		if (payload.scope.kind !== "outdoor-static-objects") {
+			throw new Error("expected outdoor static object payload");
+		}
+
+		expect(payload.scope.objects).toEqual([]);
+		expect(payload.scope.sourceAssets).toEqual([]);
+		expect(payload.scope.materialSlots).toEqual([]);
+		expect(payload.scope.missingRefs).toEqual([
+			{
+				kind: "static-object-source",
+				sourceAssetKind: "gfx-obj",
+				sourceDid: 0x01000020,
+			},
+		]);
+	});
 });
 
 class FixtureAssetService implements AssetService {
@@ -291,7 +325,12 @@ function createBuildingRequest(): StaticResolverJob {
 	};
 }
 
-function createLandblockOutdoorPayload(): LandblockOutdoorPayloadDto {
+function createLandblockOutdoorPayload(
+	options: { readonly buildingSourceAssetId?: string } = {},
+): LandblockOutdoorPayloadDto {
+	const buildingSourceAssetId =
+		options.buildingSourceAssetId ?? "setup-model/02000010";
+	const buildingSourceKey = parseHostAssetId(buildingSourceAssetId);
 	return {
 		classification: "outdoor",
 		diagnostics: { errors: [], omissions: [], sourceRecords: [] },
@@ -315,9 +354,9 @@ function createLandblockOutdoorPayload(): LandblockOutdoorPayloadDto {
 				instanceId: "building-0",
 				kind: "building",
 				localPlacement: createPlacement(),
-				sourceAssetId: "setup-model/02000010",
+				sourceAssetId: buildingSourceAssetId,
 				sourceBounds: createBounds(),
-				sourceDid: 0x02000010,
+				sourceDid: Number.parseInt(buildingSourceKey.id, 16) >>> 0,
 				sourceIndex: 0,
 				sourceScale: { x: 1, y: 1, z: 1 },
 			},

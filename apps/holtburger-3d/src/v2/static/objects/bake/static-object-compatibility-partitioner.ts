@@ -31,14 +31,29 @@ export interface StaticObjectCompatibilityPartition {
 	readonly textureRoleLayoutKey: string;
 	readonly materialIds: readonly number[];
 	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
+	readonly triangles: readonly StaticObjectCompatibilityTriangle[];
 	readonly sourceTriangleIds: readonly string[];
 	readonly triangleCount: number;
 	readonly reason: string;
 }
 
+export interface StaticObjectCompatibilityTriangle {
+	readonly sourceTriangleId: string;
+	readonly object: StaticObjectInstanceIdentity;
+	readonly source: StaticObjectSourceIdentity;
+	readonly gfxObj: StaticObjectSourceIdentity;
+	readonly partIndex: number;
+	readonly polygonId: number;
+	readonly material: StaticMaterialSourceIdentity;
+}
+
 interface StaticObjectTriangleCandidate {
 	readonly sourceTriangleId: string;
 	readonly compatibilityKey: string;
+	readonly object: StaticObjectInstanceIdentity;
+	readonly source: StaticObjectSourceIdentity;
+	readonly gfxObj: StaticObjectSourceIdentity;
+	readonly material: StaticMaterialSourceIdentity;
 	readonly materialKey: string;
 	readonly materialId: number;
 	readonly materialPlan: StaticObjectMaterialPlan;
@@ -137,13 +152,17 @@ function createTriangleCandidates(
 
 				candidates.push({
 					compatibilityKey,
+					gfxObj: part.gfxObj,
 					gfxKey,
+					material,
 					materialId: material.materialId,
 					materialKey,
 					materialPlan: plan,
+					object: object.identity,
 					objectKey,
 					partIndex: part.partIndex,
 					polygonId: triangle.polygonId,
+					source: object.source,
 					sourceKey,
 					sourceTriangleId: [
 						objectKey,
@@ -299,6 +318,15 @@ function createCompatibilityPartition(options: {
 		sourceTriangleIds: options.candidates.map(
 			(candidate) => candidate.sourceTriangleId,
 		),
+		triangles: options.candidates.map((candidate) => ({
+			gfxObj: candidate.gfxObj,
+			material: candidate.material,
+			object: candidate.object,
+			partIndex: candidate.partIndex,
+			polygonId: candidate.polygonId,
+			source: candidate.source,
+			sourceTriangleId: candidate.sourceTriangleId,
+		})),
 		textureDataUses,
 		textureRoleLayoutKey: first.textureRoleLayoutKey,
 		triangleCount: options.candidates.length,
@@ -387,12 +415,20 @@ function compareTriangleCandidates(
 }
 
 function compareObjects(
-	left: { readonly identity: StaticObjectInstanceIdentity; readonly sourceIndex: number },
-	right: { readonly identity: StaticObjectInstanceIdentity; readonly sourceIndex: number },
+	left: {
+		readonly identity: StaticObjectInstanceIdentity;
+		readonly sourceIndex: number;
+	},
+	right: {
+		readonly identity: StaticObjectInstanceIdentity;
+		readonly sourceIndex: number;
+	},
 ): number {
 	return (
 		left.sourceIndex - right.sourceIndex ||
-		createObjectKey(left.identity).localeCompare(createObjectKey(right.identity))
+		createObjectKey(left.identity).localeCompare(
+			createObjectKey(right.identity),
+		)
 	);
 }
 

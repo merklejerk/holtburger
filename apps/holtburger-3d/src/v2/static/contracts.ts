@@ -194,13 +194,11 @@ export interface PreparedRenderSurfaceTextureUseIdentity {
 	readonly usage: PreparedRenderSurfaceTextureUsage;
 }
 
-export interface PreparedRgbaRenderSurfaceTextureUseIdentity
-	extends PreparedRenderSurfaceTextureUseIdentity {
+export interface PreparedRgbaRenderSurfaceTextureUseIdentity extends PreparedRenderSurfaceTextureUseIdentity {
 	readonly usage: PreparedRgbaRenderSurfaceTextureUsage;
 }
 
-export interface PreparedIndexRenderSurfaceTextureUseIdentity
-	extends PreparedRenderSurfaceTextureUseIdentity {
+export interface PreparedIndexRenderSurfaceTextureUseIdentity extends PreparedRenderSurfaceTextureUseIdentity {
 	readonly usage: PreparedIndexRenderSurfaceTextureUsage;
 }
 
@@ -622,6 +620,7 @@ export interface StaticBakeBatchResult {
 
 export type StaticDrawUnit =
 	| TerrainGeometryStaticDrawUnit
+	| StaticObjectGeometryStaticDrawUnit
 	| PlaceholderStaticDrawUnit;
 
 interface PlaceholderStaticDrawUnit {
@@ -652,6 +651,26 @@ export interface TerrainGeometryStaticDrawUnit {
 	readonly textureUseIds: readonly string[];
 	readonly terrainMaterialPlan: TerrainMaterialLayerPlan | null;
 	readonly terrainFallbackReasons: readonly TerrainMaterialFallbackReason[];
+}
+
+export interface StaticObjectGeometryStaticDrawUnit {
+	readonly kind: "static-object-geometry";
+	readonly drawUnitId: string;
+	readonly landblockId: number;
+	readonly domain: "outdoor-buildings" | "outdoor-detail";
+	readonly materialFamily: "texture-rgba";
+	readonly materialPass: "opaque";
+	readonly materialBucketKey: string;
+	readonly coordinateSpace: "landblock-render-local";
+	readonly positions: Float32Array;
+	readonly texCoords: Float32Array;
+	readonly indices: Uint16Array | Uint32Array;
+	readonly indexType: "uint16" | "uint32";
+	readonly vertexCount: number;
+	readonly triangleCount: number;
+	readonly primaryTextureUseId: string;
+	readonly textureUseIds: readonly string[];
+	readonly materialIds: readonly number[];
 }
 
 export interface TerrainMaterialLayerPlan {

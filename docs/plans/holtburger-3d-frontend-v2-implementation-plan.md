@@ -2101,7 +2101,7 @@ Verification:
 
 ### Phase 11D: First Rendered Outdoor Building Family
 
-Status: planned.
+Status: complete.
 
 Purpose: render opaque `texture-rgba` outdoor building partitions through the V2 residency path while the broader material pipeline remains explicit.
 
@@ -2132,6 +2132,43 @@ Dry-run findings:
 Dry-run conclusion:
 
 - 11D should narrow renderer support to opaque `texture-rgba` while preserving explicit fallback for every other classified-but-render-deferred or unsupported family. Alpha/clip, indexed/paletted, solid-color, translucent, additive, and detail-overlay support move to 11E unless opaque `texture-rgba` rendering exposes a required blocker.
+
+Implementation notes:
+
+- Added `StaticObjectGeometryStaticDrawUnit` as the first real static object draw-unit variant. It is intentionally narrow: landblock-render-local geometry, opaque `texture-rgba`, one primary `rgba-raw` base texture use, material ids, and renderer-ready buffers.
+- Extended the 11C compatibility partition records with typed triangle refs so the object baker can build geometry from source payloads without parsing source mapping strings.
+- The static object baker now emits real geometry draw units for partitions whose family is `texture-rgba`, pass is `opaque`, render coverage is `classified-render-candidate`, and texture data use is a single stageable `rgba-raw` prepared render surface. Other partitions still emit placeholders plus source/spatial records.
+- Baked object placement, setup/default part placements, and source/part scale into render-local positions before renderer residency. A focused test locks the v1 placement/scale parity example.
+- Renamed the renderer texture binding contract from terrain-specific `TerrainTextureBinding` to generic `TextureDrawUnitBinding`; terrain role-page data still rides on that binding for terrain layered materials.
+- Added a WebGL2 static-object opaque texture shader, GPU resource path, draw loop, residency disposal, and renderer snapshot accounting for static object draw units/triangles.
+- Runtime draw-unit translation now applies focused-landblock offsets to both terrain and static object geometry draw units.
+- Immediate live-data correction: source resolution now excludes outdoor static objects whose top-level source asset could not be resolved while preserving the missing source identity in `missingRefs`. Missing external source assets should not poison an otherwise valid static object bake batch.
+- Immediate live-data correction: generalized V2 host payload preparation beyond the terrain slice routes. `gfx-obj`, `setup-model`, `setup-appearance`, and `material/<did>` now parse through the shared V2 static asset preparation whitelist, so outdoor building source assets can actually reach the resolver.
+
+Spicy findings:
+
+- The first static-object shader path is intentionally unlit and opaque. This is enough to prove residency, atlas binding, and transform shape, but not final visual parity for material lighting or blend behavior.
+- Static object source scale is not a plain render-space diagonal scale. The bake path uses an explicit source-axis scale matrix to match the v1 placement/scale parity fixture; that axis basis should be treated carefully if we later extract shared transform helpers.
+- The texture manager role-page helper is still terrain-named internally because terrain layered materials need color/detail/mask page slot limits. The renderer-facing binding name is now generic; deeper role-page generalization should wait until non-terrain multi-role object families arrive.
+- Manual V2 diagnostics showed `outdoor-buildings` payloads with objects but zero source assets, then bake failures from missing source geometry. The fix belongs at the resolver payload boundary, not the renderer: only source-resolved objects should reach compatibility partitioning.
+- Follow-up manual diagnostics then showed `objects 0 sources 0 ... missing 17`; the filter was working, but every source asset was still missing because V2 asset preparation rejected static object source routes as unsupported terrain-slice outsiders. The route whitelist was the actual second blocker.
+
+Failed to close:
+
+- Indexed/paletted data texture upload, palette views/subranges, alpha/clip, translucent/additive passes, solid-color rendering, detail overlays, lighting/material color modulation, and broader outdoor-detail/env-cell static rendering remain Phase 11E/12 work.
+- The compatibility key still includes concrete texture data-use identity, so the first object draw-unit path remains conservative about sharing material tables across different base textures.
+- This phase was verified by unit/type/lint tests, but browser visual verification of rendered buildings still needs a manual V2 harness pass.
+- If a coverage area only contains building members whose source assets are missing from the host/prepared asset path, those buildings will still not render; they should now be reported as missing refs without failing unrelated building batches.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts -- preparation`
+- `cd apps/holtburger-3d && npm run test:ts -- outdoor-static-objects-resolver`
+- `cd apps/holtburger-3d && npm run test:ts -- static-object-compatibility-partitioner`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 11E: Static Object Material Family Expansion
 

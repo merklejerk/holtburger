@@ -1,11 +1,11 @@
-import type { StaticBakerClient } from "../contracts";
+import type { StaticBaker } from "../contracts";
 import type {
 	StaticBakeWorkerMainMessage,
 	StaticBakeWorkerResponse,
 } from "./protocol";
 
 export async function handleStaticBakeWorkerRequest(
-	baker: StaticBakerClient,
+	baker: StaticBaker,
 	message: StaticBakeWorkerMainMessage,
 	postMessage: (response: StaticBakeWorkerResponse) => void,
 ): Promise<void> {

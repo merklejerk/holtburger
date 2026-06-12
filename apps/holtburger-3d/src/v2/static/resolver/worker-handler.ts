@@ -1,11 +1,11 @@
-import type { StaticResolverClient } from "../contracts";
+import type { StaticResolver } from "../contracts";
 import type {
 	StaticResolverWorkerMainMessage,
 	StaticResolverWorkerResponse,
 } from "./protocol";
 
 export async function handleStaticResolverWorkerRequest(
-	resolver: StaticResolverClient,
+	resolver: StaticResolver,
 	message: StaticResolverWorkerMainMessage,
 	postMessage: (response: StaticResolverWorkerResponse) => void,
 ): Promise<void> {

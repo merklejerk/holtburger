@@ -30,7 +30,10 @@ import type {
 	StaticDomain,
 } from "../static/contracts";
 import { AtlasTexturePacker, type TexturePacker } from "./packing/packer";
-import type { TexturePackingJob } from "./packing/protocol";
+import type {
+	TexturePackingJob,
+	TexturePackingResult,
+} from "./packing/protocol";
 import {
 	createRuntimeTexturePagePolicy,
 	createRuntimeTextureSamplerPolicy,
@@ -47,16 +50,19 @@ const MAX_RUNTIME_ATLAS_PAGE_SIZE = 2048;
 const TERRAIN_COLOR_ATLAS_FILL_RGBA = [128, 128, 128, 255] as const;
 const RECENT_TERRAIN_ROLE_PAGE_OVERFLOW_LIMIT = 16;
 const TERRAIN_ROLE_PAGE_OUTLIER_LIMIT = 16;
+const DEFAULT_TEXTURE_PACK_GROUP_MAX_CONCURRENCY = 8;
 
 interface TextureManagerOptions {
 	readonly assetService: AssetService;
 	readonly filteringMode?: TextureFilteringMode;
+	readonly packGroupMaxConcurrency?: number;
 	readonly texturePacker?: TexturePacker;
 }
 
 export class TextureManager {
 	readonly #assetService: AssetService;
 	readonly #texturePacker: TexturePacker;
+	readonly #packGroupMaxConcurrency: number;
 	readonly #batchRegistries = new Map<
 		StaticBatchRegistryKey,
 		StaticBatchTextureRegistry
@@ -73,6 +79,13 @@ export class TextureManager {
 		this.#assetService = options.assetService;
 		this.#filteringMode = options.filteringMode ?? "anisotropic-4x";
 		this.#texturePacker = options.texturePacker ?? new AtlasTexturePacker();
+		this.#packGroupMaxConcurrency =
+			options.packGroupMaxConcurrency ??
+			DEFAULT_TEXTURE_PACK_GROUP_MAX_CONCURRENCY;
+		assertPositiveInteger(
+			this.#packGroupMaxConcurrency,
+			"texture pack group max concurrency",
+		);
 	}
 
 	get filteringMode(): TextureFilteringMode {
@@ -123,8 +136,8 @@ export class TextureManager {
 		this.#revision += 1;
 
 		return {
-			policies: Array.from(policiesByTextureRefId.values()).sort((left, right) =>
-				left.textureRefId.localeCompare(right.textureRefId),
+			policies: Array.from(policiesByTextureRefId.values()).sort(
+				(left, right) => left.textureRefId.localeCompare(right.textureRefId),
 			),
 			revision: this.#revision,
 		};
@@ -133,9 +146,9 @@ export class TextureManager {
 	createDiagnosticsReport(): TextureAtlasDiagnosticsReport {
 		const batches = Array.from(this.#batchRegistries.values())
 			.sort((left, right) =>
-				[left.domain, left.staticBatchId].join("|").localeCompare(
-					[right.domain, right.staticBatchId].join("|"),
-				),
+				[left.domain, left.staticBatchId]
+					.join("|")
+					.localeCompare([right.domain, right.staticBatchId].join("|")),
 			)
 			.map((registry, index) =>
 				createTextureAtlasBatchDiagnostics(registry, index),
@@ -419,129 +432,174 @@ export class TextureManager {
 		pendingPlacements: readonly PendingTexturePlacement[],
 	): Promise<readonly RuntimeTexturePlacement[]> {
 		const runtimePlacements: RuntimeTexturePlacement[] = [];
-		for (const group of groupPendingTexturePlacements(pendingPlacements)) {
-			const registry = this.#getRegistry(group.domain, group.staticBatchId);
-			const placementRevision = registry.revision + 1;
-			const packed = await this.#texturePacker.pack({
-				cohorts: createTexturePackingCohorts(group),
-				domain: group.domain,
-				jobId: `texture-pack:${group.staticBatchId}:${group.pageClassKey}:${placementRevision}`,
-				page: createTexturePackingPageConstraints(group),
-				placementRevision,
-				sources: group.entries.map((entry) => ({
-					source: entry.source,
-					textureUseId: entry.textureUse.textureUseId,
-				})),
-			});
-			const pageById = new Map(packed.pages.map((page) => [page.pageId, page]));
-			const rectByTextureUseId = new Map(
-				packed.rects.map((rect) => [rect.textureUseId, rect] as const),
-			);
-			const entriesByPageId = new Map<string, PendingTexturePlacement[]>();
+		const plannedGroups = this.#planPendingTexturePackingGroups(
+			groupPendingTexturePlacements(pendingPlacements),
+		);
+		const packedGroups = await mapWithConcurrency(
+			plannedGroups,
+			this.#packGroupMaxConcurrency,
+			async (plannedGroup) => ({
+				...plannedGroup,
+				packed: await this.#texturePacker.pack(plannedGroup.job),
+			}),
+		);
 
-			for (const entry of group.entries) {
+		for (const packedGroup of packedGroups) {
+			runtimePlacements.push(
+				...this.#commitPackedTexturePlacementGroup(packedGroup),
+			);
+		}
+
+		return runtimePlacements;
+	}
+
+	#planPendingTexturePackingGroups(
+		groups: readonly PendingTexturePlacementGroup[],
+	): readonly PlannedPendingTexturePlacementGroup[] {
+		const nextRevisionByRegistry = new Map<StaticBatchRegistryKey, number>();
+
+		return groups.map((group) => {
+			const registryKey = createStaticBatchRegistryKey(
+				group.domain,
+				group.staticBatchId,
+			);
+			const currentRevision =
+				nextRevisionByRegistry.get(registryKey) ??
+				this.#getRegistry(group.domain, group.staticBatchId).revision;
+			const placementRevision = currentRevision + 1;
+			nextRevisionByRegistry.set(registryKey, placementRevision);
+
+			return {
+				group,
+				job: {
+					cohorts: createTexturePackingCohorts(group),
+					domain: group.domain,
+					jobId: `texture-pack:${group.staticBatchId}:${group.pageClassKey}:${placementRevision}`,
+					page: createTexturePackingPageConstraints(group),
+					placementRevision,
+					sources: group.entries.map((entry) => ({
+						source: entry.source,
+						textureUseId: entry.textureUse.textureUseId,
+					})),
+				},
+				placementRevision,
+			};
+		});
+	}
+
+	#commitPackedTexturePlacementGroup(
+		packedGroup: PackedPendingTexturePlacementGroup,
+	): readonly RuntimeTexturePlacement[] {
+		const { group, packed, placementRevision } = packedGroup;
+		const runtimePlacements: RuntimeTexturePlacement[] = [];
+		const pageById = new Map(packed.pages.map((page) => [page.pageId, page]));
+		const rectByTextureUseId = new Map(
+			packed.rects.map((rect) => [rect.textureUseId, rect] as const),
+		);
+		const entriesByPageId = new Map<string, PendingTexturePlacement[]>();
+
+		for (const entry of group.entries) {
+			const rect = rectByTextureUseId.get(entry.textureUse.textureUseId);
+			if (!rect) {
+				throw new Error(
+					`Texture packing job for ${entry.textureUse.textureUseId} did not return a rect.`,
+				);
+			}
+			const page = pageById.get(rect.pageId);
+			if (!page) {
+				throw new Error(
+					`Texture packing job for ${entry.textureUse.textureUseId} returned unknown page ${rect.pageId}.`,
+				);
+			}
+			const pageEntries = entriesByPageId.get(page.pageId) ?? [];
+			pageEntries.push(entry);
+			entriesByPageId.set(page.pageId, pageEntries);
+		}
+
+		for (const [pageId, pageEntries] of entriesByPageId) {
+			const page = pageById.get(pageId);
+			if (!page) {
+				throw new Error(`Texture packing job returned unknown page ${pageId}.`);
+			}
+			const firstEntry = pageEntries[0];
+			if (!firstEntry) {
+				continue;
+			}
+			const firstRect = rectByTextureUseId.get(
+				firstEntry.textureUse.textureUseId,
+			);
+			if (!firstRect) {
+				throw new Error(
+					`Texture packing job for ${firstEntry.textureUse.textureUseId} did not return a rect.`,
+				);
+			}
+			const textureRefId =
+				pageEntries.length === 1
+					? createTextureRefId(
+							group.domain,
+							group.staticBatchId,
+							firstEntry.textureUse,
+						)
+					: createTexturePageRefId(
+							group.domain,
+							group.staticBatchId,
+							group.pageClassKey,
+							pageId,
+						);
+			runtimePlacements.push({
+				anisotropy: group.samplerPolicy.anisotropy,
+				filteringMode: group.samplerPolicy.filteringMode,
+				format: page.format,
+				height: page.height,
+				mipmapsGenerated: group.samplerPolicy.generateMipmaps,
+				pixels: page.pixels,
+				placementRevision,
+				rect: firstRect.rect,
+				sampleClass: group.pagePolicy.sampleClass,
+				samplerPolicyKey: group.samplerPolicy.policyKey,
+				textureRefId,
+				textureUseId: firstEntry.textureUse.textureUseId,
+				wrapS: group.pagePolicy.wrapS,
+				wrapT: group.pagePolicy.wrapT,
+				width: page.width,
+			});
+			for (const entry of pageEntries) {
 				const rect = rectByTextureUseId.get(entry.textureUse.textureUseId);
 				if (!rect) {
 					throw new Error(
 						`Texture packing job for ${entry.textureUse.textureUseId} did not return a rect.`,
 					);
 				}
-				const page = pageById.get(rect.pageId);
-				if (!page) {
-					throw new Error(
-						`Texture packing job for ${entry.textureUse.textureUseId} returned unknown page ${rect.pageId}.`,
-					);
-				}
-				const pageEntries = entriesByPageId.get(page.pageId) ?? [];
-				pageEntries.push(entry);
-				entriesByPageId.set(page.pageId, pageEntries);
-			}
-
-			for (const [pageId, pageEntries] of entriesByPageId) {
-				const page = pageById.get(pageId);
-				if (!page) {
-					throw new Error(
-						`Texture packing job returned unknown page ${pageId}.`,
-					);
-				}
-				const firstEntry = pageEntries[0];
-				if (!firstEntry) {
-					continue;
-				}
-				const firstRect = rectByTextureUseId.get(
-					firstEntry.textureUse.textureUseId,
-				);
-				if (!firstRect) {
-					throw new Error(
-						`Texture packing job for ${firstEntry.textureUse.textureUseId} did not return a rect.`,
-					);
-				}
-				const textureRefId =
-					pageEntries.length === 1
-						? createTextureRefId(
-								group.domain,
-								group.staticBatchId,
-								firstEntry.textureUse,
-							)
-						: createTexturePageRefId(
-								group.domain,
-								group.staticBatchId,
-								group.pageClassKey,
-								pageId,
-							);
-				runtimePlacements.push({
+				entry.entry = {
 					anisotropy: group.samplerPolicy.anisotropy,
+					domain: entry.domain,
 					filteringMode: group.samplerPolicy.filteringMode,
 					format: page.format,
-					height: page.height,
+					leaseCount: 0,
 					mipmapsGenerated: group.samplerPolicy.generateMipmaps,
-					pixels: page.pixels,
 					placementRevision,
-					rect: firstRect.rect,
+					rect: rect.rect,
 					sampleClass: group.pagePolicy.sampleClass,
 					samplerPolicyKey: group.samplerPolicy.policyKey,
+					source: entry.textureUse.source,
+					staticBatchId: entry.staticBatchId,
+					textureHeight: page.height,
 					textureRefId,
-					textureUseId: firstEntry.textureUse.textureUseId,
+					textureWidth: page.width,
 					wrapS: group.pagePolicy.wrapS,
 					wrapT: group.pagePolicy.wrapT,
-					width: page.width,
-				});
-				for (const entry of pageEntries) {
-					const rect = rectByTextureUseId.get(entry.textureUse.textureUseId);
-					if (!rect) {
-						throw new Error(
-							`Texture packing job for ${entry.textureUse.textureUseId} did not return a rect.`,
-						);
-					}
-					entry.entry = {
-						anisotropy: group.samplerPolicy.anisotropy,
-						domain: entry.domain,
-						filteringMode: group.samplerPolicy.filteringMode,
-						format: page.format,
-						leaseCount: 0,
-						mipmapsGenerated: group.samplerPolicy.generateMipmaps,
-						placementRevision,
-						rect: rect.rect,
-						sampleClass: group.pagePolicy.sampleClass,
-						samplerPolicyKey: group.samplerPolicy.policyKey,
-						source: entry.textureUse.source,
-						staticBatchId: entry.staticBatchId,
-						textureHeight: page.height,
-						textureRefId,
-						textureWidth: page.width,
-						wrapS: group.pagePolicy.wrapS,
-						wrapT: group.pagePolicy.wrapT,
-					};
-					for (const textureKey of entry.textureKeys) {
-						this.#getRegistry(entry.domain, entry.staticBatchId).entries.set(
-							textureKey,
-							entry.entry,
-						);
-					}
+				};
+				for (const textureKey of entry.textureKeys) {
+					this.#getRegistry(entry.domain, entry.staticBatchId).entries.set(
+						textureKey,
+						entry.entry,
+					);
 				}
 			}
-			registry.revision = placementRevision;
 		}
+
+		const registry = this.#getRegistry(group.domain, group.staticBatchId);
+		registry.revision = Math.max(registry.revision, placementRevision);
 
 		return runtimePlacements;
 	}
@@ -631,7 +689,8 @@ export class TextureManager {
 			maxMaskPages: maxNumbers(usages.map((usage) => usage.maskPages)),
 			missingMaskDrawUnits: usages.filter((usage) => usage.maskPages === 0)
 				.length,
-			multiColorDrawUnits: usages.filter((usage) => usage.colorPages > 1).length,
+			multiColorDrawUnits: usages.filter((usage) => usage.colorPages > 1)
+				.length,
 			multiMaskDrawUnits: usages.filter((usage) => usage.maskPages > 1).length,
 			outliers: outliers.slice(0, TERRAIN_ROLE_PAGE_OUTLIER_LIMIT),
 		};
@@ -709,6 +768,16 @@ interface PendingTexturePlacementGroup {
 	readonly pagePolicy: RuntimeTexturePagePolicy;
 	readonly samplerPolicy: RuntimeTextureSamplerPolicy;
 	readonly entries: readonly PendingTexturePlacement[];
+}
+
+interface PlannedPendingTexturePlacementGroup {
+	readonly group: PendingTexturePlacementGroup;
+	readonly job: TexturePackingJob;
+	readonly placementRevision: number;
+}
+
+interface PackedPendingTexturePlacementGroup extends PlannedPendingTexturePlacementGroup {
+	readonly packed: TexturePackingResult;
 }
 
 interface TerrainRolePageSlotInput {
@@ -803,7 +872,9 @@ function createStaticBatchSourcePlacementKey(
 	].join(":");
 }
 
-function createPreparedTextureUseKey(source: PreparedTextureUseIdentity): string {
+function createPreparedTextureUseKey(
+	source: PreparedTextureUseIdentity,
+): string {
 	return [
 		source.kind,
 		source.renderSurfaceId.toString(16).padStart(8, "0"),
@@ -877,6 +948,52 @@ function addPendingPlacementOwners(
 ): void {
 	for (const ownerDrawUnitId of ownerDrawUnitIds) {
 		placement.ownerDrawUnitIds.add(ownerDrawUnitId);
+	}
+}
+
+async function mapWithConcurrency<Input, Output>(
+	inputs: readonly Input[],
+	maxConcurrency: number,
+	map: (input: Input, index: number) => Promise<Output>,
+): Promise<readonly Output[]> {
+	assertPositiveInteger(maxConcurrency, "max concurrency");
+	if (maxConcurrency === 1) {
+		const results: Output[] = [];
+		for (let index = 0; index < inputs.length; index += 1) {
+			results.push(await map(inputs[index] as Input, index));
+		}
+
+		return results;
+	}
+
+	const results: Output[] = [];
+	let nextIndex = 0;
+
+	async function worker(): Promise<void> {
+		for (;;) {
+			const index = nextIndex;
+			nextIndex += 1;
+			if (index >= inputs.length) {
+				return;
+			}
+
+			const input = inputs[index] as Input;
+			results[index] = await map(input, index);
+		}
+	}
+
+	await Promise.all(
+		Array.from({ length: Math.min(maxConcurrency, inputs.length) }, () =>
+			worker(),
+		),
+	);
+
+	return results;
+}
+
+function assertPositiveInteger(value: number, label: string): void {
+	if (!Number.isInteger(value) || value < 1) {
+		throw new Error(`${label} must be a positive integer. Received ${value}.`);
 	}
 }
 
@@ -1098,11 +1215,7 @@ function maxNumbers(values: readonly number[]): number {
 	return values.length === 0 ? 0 : Math.max(...values);
 }
 
-function appendBounded<T>(
-	values: readonly T[],
-	value: T,
-	limit: number,
-): T[] {
+function appendBounded<T>(values: readonly T[], value: T, limit: number): T[] {
 	return [...values, value].slice(-limit);
 }
 

@@ -25,8 +25,8 @@ import {
 	type TerrainTextureFallbackDiagnostics,
 } from "./diagnostics";
 import {
-	ImmediateStaticBakerClient,
-	ImmediateStaticResolverClient,
+	ImmediateStaticBaker,
+	ImmediateStaticResolver,
 } from "../static/fake-workers";
 import { StaticCoordinator } from "../static/coordinator/static-coordinator";
 import type {
@@ -108,8 +108,8 @@ export function createClientRuntime(
 	const staticCoordinator =
 		options.staticCoordinator ??
 		new StaticCoordinator({
-			baker: new ImmediateStaticBakerClient(),
-			resolver: new ImmediateStaticResolverClient(),
+			baker: new ImmediateStaticBaker(),
+			resolver: new ImmediateStaticResolver(),
 		});
 	const assetService =
 		options.assetService ?? new HostBackedAssetService({ host: options.host });

@@ -41,7 +41,7 @@ export interface TexturePlacementUpdate {
 	readonly revision: number;
 }
 
-export interface TexturePlacement {
+interface TexturePlacement {
 	readonly textureRefId: string;
 	readonly textureUseId: string;
 	readonly placementRevision: number;

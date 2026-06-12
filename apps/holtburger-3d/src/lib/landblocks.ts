@@ -37,10 +37,16 @@ export function buildOutdoorCoverageLandblocks(
 ): OutdoorCoverageLandblock[] {
 	const center = getOutdoorLandblockCoords(focusLandblockId);
 	const radius = Math.max(0, Math.trunc(landblockRadius));
+	const radiusSquared = radius * radius;
 	const landblocks: OutdoorCoverageLandblock[] = [];
 
 	for (let offsetY = -radius; offsetY <= radius; offsetY += 1) {
 		for (let offsetX = -radius; offsetX <= radius; offsetX += 1) {
+			const distanceSquared = offsetX * offsetX + offsetY * offsetY;
+			if (distanceSquared > radiusSquared) {
+				continue;
+			}
+
 			const nextX = center.x + offsetX;
 			const nextY = center.y + offsetY;
 
@@ -52,7 +58,7 @@ export function buildOutdoorCoverageLandblocks(
 				landblockId: makeOutdoorLandblockId(nextX, nextY),
 				offsetX,
 				offsetY,
-				distance: Math.abs(offsetX) + Math.abs(offsetY),
+				distance: Math.sqrt(distanceSquared),
 			});
 		}
 	}

@@ -23,6 +23,7 @@
 		isV2LandblockPrefixInput,
 		parseV2LocationInput,
 		type V2LandblockInputMode,
+		type V2ParsedLocationInput,
 	} from "../v2/browser/location-input";
 	import type {
 		ClientRuntime,
@@ -57,10 +58,11 @@
 	let panelCollapsed = $state(false);
 	let locationInput = $state("0000");
 	let landblockInputMode = $state<V2LandblockInputMode>("outdoor");
+	let submittedStaticLocation = $state<V2ParsedLocationInput | null>(null);
 	let terrainEnabled = $state(true);
-	let buildingsEnabled = $state(false);
-	let detailEnabled = $state(false);
-	let topologyEnabled = $state(false);
+	let buildingsEnabled = $state(true);
+	let detailEnabled = $state(true);
+	let topologyEnabled = $state(true);
 	let terrainRadius = $state(DEFAULT_TERRAIN_LOD_RADIUS);
 	let buildingRadius = $state(DEFAULT_BUILDING_LOD_RADIUS);
 	let detailRadius = $state(DEFAULT_DETAIL_LOD_RADIUS);
@@ -141,8 +143,17 @@
 			return;
 		}
 
+		submittedStaticLocation = parsedLocation;
+		requestStaticWorkForLocation(parsedLocation);
+	}
+
+	function requestStaticWorkForLocation(location: V2ParsedLocationInput): void {
+		if (!runtime) {
+			return;
+		}
+
 		runtime.requestStaticWork(
-			createStaticWorkCommandFromLocation(parsedLocation, selectedDomains(), {
+			createStaticWorkCommandFromLocation(location, selectedDomains(), {
 				buildings: buildingRadius,
 				detail: detailRadius,
 				terrain: terrainRadius,
@@ -158,6 +169,7 @@
 
 	function evictStaticWork(): void {
 		clearStaticInterestRefresh();
+		submittedStaticLocation = null;
 		runtime?.evictStaticWork();
 	}
 
@@ -172,7 +184,6 @@
 			locationInput,
 			landblockInputMode,
 		);
-		scheduleStaticInterestRefresh();
 	}
 
 	function handleTerrainRadiusInput(event: Event): void {
@@ -216,12 +227,10 @@
 
 	function handleOutdoorModeChange(): void {
 		landblockInputMode = "outdoor";
-		scheduleStaticInterestRefresh();
 	}
 
 	function handleDungeonModeChange(): void {
 		landblockInputMode = "dungeon";
-		scheduleStaticInterestRefresh();
 	}
 
 	function handleStaticDomainChange(): void {
@@ -320,13 +329,22 @@
 
 	function scheduleStaticInterestRefresh(): void {
 		clearStaticInterestRefresh();
-		if (!runtime || !parsedLocation || !canRequestStaticWork()) {
+		if (!runtime || !submittedStaticLocation) {
+			return;
+		}
+
+		if (
+			submittedStaticLocation.kind !== "interior-cell" &&
+			selectedDomains().length === 0
+		) {
 			return;
 		}
 
 		staticInterestRefreshTimer = window.setTimeout(() => {
 			staticInterestRefreshTimer = null;
-			requestStaticWork();
+			if (submittedStaticLocation) {
+				requestStaticWorkForLocation(submittedStaticLocation);
+			}
 		}, STATIC_INTEREST_REFRESH_DEBOUNCE_MS);
 	}
 

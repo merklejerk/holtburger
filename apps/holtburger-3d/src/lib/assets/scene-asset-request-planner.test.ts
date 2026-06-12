@@ -39,19 +39,15 @@ describe("scene asset request planner", () => {
 		);
 
 		expect(requests.map((request) => request.assetId)).toEqual([
-			"landblock/d954ffff/outdoor",
 			"landblock/d955ffff/outdoor",
-			"landblock/d956ffff/outdoor",
 			"landblock/da54ffff/outdoor",
 			"landblock/da55ffff/outdoor",
 			"landblock/da56ffff/outdoor",
-			"landblock/db54ffff/outdoor",
 			"landblock/db55ffff/outdoor",
-			"landblock/db56ffff/outdoor",
 			"landblock/da55ffff/topology",
 		]);
 		expect(requests[0]?.requestId).toBe(
-			"streaming-7-outdoor-landblock-da55ffff-outdoor-landblock/d954ffff/outdoor",
+			"streaming-7-outdoor-landblock-da55ffff-outdoor-landblock/d955ffff/outdoor",
 		);
 	});
 

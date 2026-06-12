@@ -94,5 +94,17 @@ export function unionOutdoorSceneLandblockIds(
 }
 
 export function countOutdoorSceneLodTiles(radius: number): number {
-	return (clampOutdoorSceneLodRadius(radius) * 2 + 1) ** 2;
+	const clampedRadius = clampOutdoorSceneLodRadius(radius);
+	const radiusSquared = clampedRadius * clampedRadius;
+	let tileCount = 0;
+
+	for (let offsetY = -clampedRadius; offsetY <= clampedRadius; offsetY += 1) {
+		for (let offsetX = -clampedRadius; offsetX <= clampedRadius; offsetX += 1) {
+			if (offsetX * offsetX + offsetY * offsetY <= radiusSquared) {
+				tileCount += 1;
+			}
+		}
+	}
+
+	return tileCount;
 }

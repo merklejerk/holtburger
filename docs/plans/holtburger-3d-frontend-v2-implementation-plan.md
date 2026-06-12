@@ -2228,6 +2228,7 @@ Implementation notes:
 - Runtime texture page policy now accepts an explicit sampling policy override. `rgba-color` keeps its generic filterable/mip-capable color semantics while supporting either repeat or clamp wrapping.
 - Texture manager source aliasing and pending placement keys now include realized page policy/sampling facts, so existing packed entries are reused only when source, sample class, and wrap policy match.
 - Added tests proving static object base-color roles use `rgba-color`, clamp/repeat partitions produce distinct texture uses, static object color placements remain mip-capable under anisotropic filtering, and clamp/repeat static object placements do not alias.
+- Follow-up diagnostics correction: default texture-atlas diagnostics now report compact totals and `byDomain` summaries instead of dumping literal batches, pages, and terrain role-page outliers. Static object color texture health is visible through domain summaries for sample classes, wrap modes, and mipped/unmipped page counts.
 
 Decisions and course corrections:
 
@@ -2239,12 +2240,11 @@ Spicy findings:
 
 - The earlier `rgba-raw` choice was a useful conservative seam while 11D was proving geometry, atlas rects, and transforms, but it became misleading as soon as buildings rendered. It encoded "we do not know sampler policy yet" as "this is exact RGBA data," which is the wrong abstraction.
 - `createStaticAtlasBatchSnapshot` still only reconstructs default source page policy because static object source payloads do not currently contribute atlas snapshot texture-use facts. That is fine for the current terrain-oriented snapshot flow, but future static-object inspection should not rely on source-only lookup if it needs authored wrap policy.
-- Texture-atlas diagnostics still report terrain role-page usage for every draw unit, including static object draw units. That predates this phase and remains noisy for static objects; it should become a domain-specific diagnostic rather than overloading terrain role names.
+- Texture-atlas diagnostics were too noisy even before static objects: literal page dumps and outlier lists made the default report hard to scan. The default surface now keeps those details private and promotes aggregate health facts instead.
 
 Failed to close:
 
 - No static object lighting/material color modulation, detail overlays, indexed/paletted upload, palette subranges, or translucent/additive pass support was added. Those remain Phase 11E work.
-- This phase did not add a static-object-specific atlas role-page diagnostic. The existing diagnostics will show `sampleClass`, wrapping, filtering mode, and mip status correctly, but the `terrainRolePages` subsection still treats static object draw units as terrain role outliers.
 - Manual browser visual verification is still needed to confirm the mip/filtering improvement on live building textures.
 
 Verification:
@@ -2253,6 +2253,7 @@ Verification:
 - `cd apps/holtburger-3d && npm run check`
 - `cd apps/holtburger-3d && npm run lint:ts`
 - `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts -- texture-manager.test.ts`
 
 ### Phase 11E: Static Object Material Family Expansion
 

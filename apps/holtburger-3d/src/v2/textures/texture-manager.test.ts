@@ -111,64 +111,40 @@ describe("V2 texture manager", () => {
 		);
 
 		expect(textureManager.createDiagnosticsReport()).toMatchObject({
-			batches: [
+			byDomain: [
 				{
 					approximateBytes: 1364,
-					batchId: "batch-1",
+					activeBatchCount: 1,
+					batchCount: 1,
 					domain: "outdoor-terrain",
+					emptyBatchCount: 0,
 					entryAliasCount: 1,
+					mipmappedPageCount: 1,
 					multiSourcePageCount: 0,
-					pages: [
-						{
-							anisotropy: 4,
-							approximateBytes: 1364,
-							entryAliasCount: 1,
-							filteringMode: "anisotropic-4x",
-							format: "rgba8",
-							height: 16,
-							mipmapsGenerated: true,
-							pageId: "page-1",
-							sampleClass: "rgba-color",
-							samplerPolicyKey:
-								"sample=rgba-color;filter=anisotropic-4x;mips=on;aniso=4",
-							totalLeaseCount: 1,
-							uniqueSourceCount: 1,
-							width: 16,
-							wrapS: "repeat",
-							wrapT: "repeat",
-						},
-					],
-					revision: 1,
+					sampleClasses: {
+						"rgba-color": 1,
+					},
 					texturePageCount: 1,
 					uniqueSourceCount: 1,
+					unmippedPageCount: 0,
+					wrapModes: {
+						repeat: 1,
+					},
 				},
 			],
 			kind: "texture-atlas",
-			recentRolePageOverflows: [],
 			summary: {
 				approximateBytes: 1364,
+				activeBatchCount: 1,
 				batchCount: 1,
+				emptyBatchCount: 0,
 				entryAliasCount: 1,
+				mipmappedPageCount: 1,
 				multiSourcePageCount: 0,
 				texturePageCount: 1,
+				unmippedPageCount: 0,
 			},
-			terrainRolePages: {
-				drawUnitCount: 1,
-				maxColorPages: 1,
-				maxDetailPages: 0,
-				maxMaskPages: 0,
-				missingMaskDrawUnits: 1,
-				multiColorDrawUnits: 0,
-				multiMaskDrawUnits: 0,
-				outliers: [
-					{
-						colorPages: 1,
-						detailPages: 0,
-						drawUnitId: "terrain-a",
-						maskPages: 0,
-					},
-				],
-			},
+			warnings: [],
 		});
 	});
 
@@ -199,14 +175,10 @@ describe("V2 texture manager", () => {
 			revision: 2,
 		});
 		expect(texturePacker.jobs).toHaveLength(1);
-		expect(textureManager.createDiagnosticsReport().batches[0]?.pages[0]).toMatchObject(
-			{
-				anisotropy: 1,
-				filteringMode: "nearest",
-				mipmapsGenerated: false,
-				samplerPolicyKey: "sample=rgba-color;filter=nearest;mips=off;aniso=1",
-			},
-		);
+		expect(textureManager.createDiagnosticsReport().byDomain[0]).toMatchObject({
+			mipmappedPageCount: 0,
+			unmippedPageCount: 1,
+		});
 	});
 
 	it("records terrain role-page overflow in the on-demand diagnostics report", async () => {
@@ -245,15 +217,12 @@ describe("V2 texture manager", () => {
 			});
 
 			expect(update?.drawUnitBindings).toHaveLength(4);
-			expect(
-				textureManager.createDiagnosticsReport().recentRolePageOverflows,
-			).toEqual([
+			expect(textureManager.createDiagnosticsReport().warnings).toEqual([
 				{
-					drawUnitId: "terrain-overflow",
-					kind: "color",
-					maxSlots: 4,
-					textureRefId:
-						"texture-ref:outdoor-terrain:batch-a:terrain-overflow:prepared-texture:06000050",
+					count: 1,
+					kind: "terrain-role-page-overflow",
+					latestDrawUnitId: "terrain-overflow",
+					latestRole: "color",
 				},
 			]);
 		} finally {
@@ -893,6 +862,19 @@ describe("V2 texture manager", () => {
 			gutterEdgeMode: "clamp",
 			gutterPixels: 4,
 		});
+		expect(textureManager.createDiagnosticsReport().byDomain).toEqual([
+			expect.objectContaining({
+				domain: "outdoor-buildings",
+				mipmappedPageCount: 1,
+				sampleClasses: expect.objectContaining({
+					"rgba-color": 1,
+				}),
+				unmippedPageCount: 0,
+				wrapModes: expect.objectContaining({
+					"clamp-to-edge": 1,
+				}),
+			}),
+		]);
 	});
 
 	it("does not alias repeat and clamp static object color placements", async () => {

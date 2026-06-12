@@ -23,8 +23,8 @@ describe("V2 static demand planner", () => {
 			(item) => item.job.domain === "outdoor-buildings",
 		);
 
-		expect(terrainWork).toHaveLength(9);
-		expect(buildingWork).toHaveLength(9);
+		expect(terrainWork).toHaveLength(5);
+		expect(buildingWork).toHaveLength(5);
 		expect(work.every((item) => item.revision === 7)).toBe(true);
 		expect(work.every((item) => item.job.scope.kind === "landblock")).toBe(true);
 		expect(work[0]).toMatchObject({

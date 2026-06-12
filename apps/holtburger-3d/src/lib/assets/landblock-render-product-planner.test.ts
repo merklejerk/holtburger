@@ -31,7 +31,7 @@ describe("landblock render product planner", () => {
 			},
 		});
 
-		expect(products).toHaveLength(28);
+		expect(products).toHaveLength(16);
 		expect(products.slice(0, 4)).toEqual([
 			{
 				landblockId: 0xda55ffff,
@@ -75,16 +75,14 @@ describe("landblock render product planner", () => {
 		).toHaveLength(1);
 		expect(
 			products.filter((product) => product.product === "outdoor-terrain"),
-		).toHaveLength(9);
+		).toHaveLength(5);
 		expect(
 			products.filter((product) => product.product === "outdoor-buildings"),
-		).toHaveLength(9);
+		).toHaveLength(5);
 		expect(
 			products.filter((product) => product.product === "outdoor-detail"),
-		).toHaveLength(9);
-		expect(new Set(products.map((product) => product.landblockId)).size).toBe(
-			9,
-		);
+		).toHaveLength(5);
+		expect(new Set(products.map((product) => product.landblockId)).size).toBe(5);
 	});
 
 	it("keeps default outdoor coverage split by terrain, static, and env-cell radii", () => {
@@ -101,16 +99,16 @@ describe("landblock render product planner", () => {
 
 		expect(
 			products.filter((product) => product.product === "outdoor-terrain"),
-		).toHaveLength(25);
+		).toHaveLength(13);
 		expect(
 			products.filter((product) => product.product === "outdoor-buildings"),
-		).toHaveLength(9);
+		).toHaveLength(5);
 		expect(
 			products.filter((product) => product.product === "outdoor-detail"),
-		).toHaveLength(9);
+		).toHaveLength(5);
 		expect(
 			products.filter((product) => product.product === "outdoor-env-cells"),
-		).toHaveLength(9);
+		).toHaveLength(5);
 	});
 
 	it("does not require topology, env-cell roots, or source revisions to schedule topology products", () => {

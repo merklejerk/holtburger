@@ -1,7 +1,6 @@
 import type {
 	RendererSnapshot,
 	TerrainTextureRolePageKind,
-	TexturePlacement,
 } from "../renderer/types";
 import type {
 	StaticDomain,
@@ -11,6 +10,7 @@ import type {
 import type {
 	TextureFilteringMode,
 	TexturePageSampleClass,
+	TextureWrapMode,
 } from "../textures/sampling-policy";
 
 export interface RuntimeDiagnostics {
@@ -84,47 +84,45 @@ interface StaticCoordinatorWorkDiagnostics {
 export interface TextureAtlasDiagnosticsReport {
 	readonly kind: "texture-atlas";
 	readonly summary: TextureAtlasDiagnosticsSummary;
-	readonly batches: readonly TextureAtlasBatchDiagnostics[];
-	readonly terrainRolePages: TerrainRolePageUsageDiagnostics;
-	readonly recentRolePageOverflows: readonly TerrainRolePageOverflowDiagnostics[];
+	readonly byDomain: readonly TextureAtlasDomainDiagnostics[];
+	readonly warnings: readonly TextureAtlasWarningDiagnostics[];
 }
 
 interface TextureAtlasDiagnosticsSummary {
 	readonly batchCount: number;
+	readonly activeBatchCount: number;
+	readonly emptyBatchCount: number;
 	readonly texturePageCount: number;
 	readonly multiSourcePageCount: number;
 	readonly entryAliasCount: number;
+	readonly mipmappedPageCount: number;
+	readonly unmippedPageCount: number;
 	readonly approximateBytes: number;
 }
 
-export interface TextureAtlasBatchDiagnostics {
-	readonly batchId: string;
+interface TextureAtlasDomainDiagnostics {
 	readonly domain: StaticDomain;
-	readonly revision: number;
+	readonly batchCount: number;
+	readonly activeBatchCount: number;
+	readonly emptyBatchCount: number;
 	readonly entryAliasCount: number;
 	readonly uniqueSourceCount: number;
 	readonly texturePageCount: number;
 	readonly multiSourcePageCount: number;
+	readonly mipmappedPageCount: number;
+	readonly unmippedPageCount: number;
 	readonly approximateBytes: number;
-	readonly pages: readonly TextureAtlasPageDiagnostics[];
+	readonly sampleClasses: Record<TexturePageSampleClass, number>;
+	readonly wrapModes: Record<TextureWrapMode, number>;
 }
 
-export interface TextureAtlasPageDiagnostics {
-	readonly pageId: string;
-	readonly width: number;
-	readonly height: number;
-	readonly format: TexturePlacement["format"];
-	readonly approximateBytes: number;
-	readonly entryAliasCount: number;
-	readonly uniqueSourceCount: number;
-	readonly totalLeaseCount: number;
-	readonly sampleClass: TexturePageSampleClass;
-	readonly samplerPolicyKey: string;
-	readonly filteringMode: TextureFilteringMode;
-	readonly mipmapsGenerated: boolean;
-	readonly anisotropy: number;
-	readonly wrapS: TexturePlacement["wrapS"];
-	readonly wrapT: TexturePlacement["wrapT"];
+type TextureAtlasWarningDiagnostics = TerrainRolePageOverflowSummaryDiagnostics;
+
+interface TerrainRolePageOverflowSummaryDiagnostics {
+	readonly kind: "terrain-role-page-overflow";
+	readonly count: number;
+	readonly latestDrawUnitId: string | null;
+	readonly latestRole: TerrainTextureRolePageKind | null;
 }
 
 export interface TerrainTextureDiagnosticsReport {
@@ -143,24 +141,6 @@ export interface TerrainTextureFallbackDiagnostics {
 	readonly materialFamily: TerrainGeometryStaticDrawUnit["materialFamily"];
 	readonly materialBucketKey: string;
 	readonly reasons: readonly TerrainMaterialFallbackReason[];
-}
-
-export interface TerrainRolePageUsageDiagnostics {
-	readonly drawUnitCount: number;
-	readonly maxColorPages: number;
-	readonly maxMaskPages: number;
-	readonly maxDetailPages: number;
-	readonly multiColorDrawUnits: number;
-	readonly multiMaskDrawUnits: number;
-	readonly missingMaskDrawUnits: number;
-	readonly outliers: readonly TerrainRolePageOutlierDiagnostics[];
-}
-
-interface TerrainRolePageOutlierDiagnostics {
-	readonly drawUnitId: string;
-	readonly colorPages: number;
-	readonly maskPages: number;
-	readonly detailPages: number;
 }
 
 export interface TerrainRolePageOverflowDiagnostics {

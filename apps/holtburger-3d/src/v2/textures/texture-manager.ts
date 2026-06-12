@@ -5,10 +5,7 @@ import {
 } from "../assets/preparation/prepared-texture-source";
 import type {
 	TerrainRolePageOverflowDiagnostics,
-	TerrainRolePageUsageDiagnostics,
-	TextureAtlasBatchDiagnostics,
 	TextureAtlasDiagnosticsReport,
-	TextureAtlasPageDiagnostics,
 } from "../runtime/diagnostics";
 import type {
 	SamplerPolicyUpdate,
@@ -50,7 +47,6 @@ const TERRAIN_MASK_ATLAS_GUTTER_PIXELS = 16;
 const MAX_RUNTIME_ATLAS_PAGE_SIZE = 2048;
 const TERRAIN_COLOR_ATLAS_FILL_RGBA = [128, 128, 128, 255] as const;
 const RECENT_TERRAIN_ROLE_PAGE_OVERFLOW_LIMIT = 16;
-const TERRAIN_ROLE_PAGE_OUTLIER_LIMIT = 16;
 const DEFAULT_TEXTURE_PACK_GROUP_MAX_CONCURRENCY = 8;
 
 interface TextureManagerOptions {
@@ -154,31 +150,40 @@ export class TextureManager {
 			.map((registry, index) =>
 				createTextureAtlasBatchDiagnostics(registry, index),
 			);
-		const textureRefs = new Map<string, TextureAtlasPageDiagnostics>();
+		const textureRefs = new Map<string, TextureAtlasPageFacts>();
 		for (const batch of batches) {
 			for (const page of batch.pages) {
 				textureRefs.set(`${batch.batchId}:${page.pageId}`, page);
 			}
 		}
+		const pages = batches.flatMap((batch) => batch.pages);
+		const activeBatchCount = batches.filter(
+			(batch) => batch.texturePageCount > 0,
+		).length;
 
 		return {
-			batches,
+			byDomain: createTextureAtlasDomainDiagnostics(batches),
 			kind: "texture-atlas",
-			recentRolePageOverflows: this.#recentRolePageOverflows,
 			summary: {
 				approximateBytes: sumNumbers(
 					Array.from(textureRefs.values(), (page) => page.approximateBytes),
 				),
+				activeBatchCount,
 				batchCount: batches.length,
+				emptyBatchCount: batches.length - activeBatchCount,
 				entryAliasCount: sumNumbers(
 					batches.map((batch) => batch.entryAliasCount),
 				),
+				mipmappedPageCount: pages.filter((page) => page.mipmapsGenerated)
+					.length,
 				multiSourcePageCount: sumNumbers(
 					batches.map((batch) => batch.multiSourcePageCount),
 				),
 				texturePageCount: textureRefs.size,
+				unmippedPageCount: pages.filter((page) => !page.mipmapsGenerated)
+					.length,
 			},
-			terrainRolePages: this.#createTerrainRolePageUsageDiagnostics(),
+			warnings: createTextureAtlasWarnings(this.#recentRolePageOverflows),
 		};
 	}
 
@@ -665,50 +670,6 @@ export class TextureManager {
 		return null;
 	}
 
-	#createTerrainRolePageUsageDiagnostics(): TerrainRolePageUsageDiagnostics {
-		const usages = Array.from(this.#textureKeysByDrawUnitId.entries())
-			.map(([drawUnitId, textureKeys]) => {
-				const pagesByKind = {
-					color: new Set<string>(),
-					detail: new Set<string>(),
-					mask: new Set<string>(),
-				};
-				for (const textureKey of textureKeys) {
-					const entry = this.#findEntry(textureKey);
-					if (!entry) {
-						continue;
-					}
-					pagesByKind[createTerrainTextureRolePageKind(entry.source.usage)].add(
-						entry.textureRefId,
-					);
-				}
-
-				return {
-					colorPages: pagesByKind.color.size,
-					detailPages: pagesByKind.detail.size,
-					drawUnitId,
-					maskPages: pagesByKind.mask.size,
-				};
-			})
-			.sort((left, right) => left.drawUnitId.localeCompare(right.drawUnitId));
-		const outliers = usages.filter(
-			(usage) =>
-				usage.colorPages > 1 || usage.maskPages > 1 || usage.maskPages === 0,
-		);
-
-		return {
-			drawUnitCount: usages.length,
-			maxColorPages: maxNumbers(usages.map((usage) => usage.colorPages)),
-			maxDetailPages: maxNumbers(usages.map((usage) => usage.detailPages)),
-			maxMaskPages: maxNumbers(usages.map((usage) => usage.maskPages)),
-			missingMaskDrawUnits: usages.filter((usage) => usage.maskPages === 0)
-				.length,
-			multiColorDrawUnits: usages.filter((usage) => usage.colorPages > 1)
-				.length,
-			multiMaskDrawUnits: usages.filter((usage) => usage.maskPages > 1).length,
-			outliers: outliers.slice(0, TERRAIN_ROLE_PAGE_OUTLIER_LIMIT),
-		};
-	}
 }
 
 type RuntimeTexturePlacement = TexturePlacementUpdate["placements"][number];
@@ -745,6 +706,27 @@ interface StaticBatchTextureRegistryEntry {
 	readonly wrapS: RuntimeTexturePagePolicy["wrapS"];
 	readonly wrapT: RuntimeTexturePagePolicy["wrapT"];
 	leaseCount: number;
+}
+
+interface TextureAtlasBatchFacts {
+	readonly batchId: string;
+	readonly domain: StaticDomain;
+	readonly entryAliasCount: number;
+	readonly uniqueSourceCount: number;
+	readonly texturePageCount: number;
+	readonly multiSourcePageCount: number;
+	readonly approximateBytes: number;
+	readonly pages: readonly TextureAtlasPageFacts[];
+}
+
+interface TextureAtlasPageFacts {
+	readonly pageId: string;
+	readonly approximateBytes: number;
+	readonly uniqueSourceCount: number;
+	readonly sampleClass: RuntimeTexturePagePolicy["sampleClass"];
+	readonly mipmapsGenerated: boolean;
+	readonly wrapS: RuntimeTexturePagePolicy["wrapS"];
+	readonly wrapT: RuntimeTexturePagePolicy["wrapT"];
 }
 
 type StagedTexturePlacement =
@@ -1160,7 +1142,7 @@ function uniqueSortedStrings(values: readonly string[]): readonly string[] {
 function createTextureAtlasBatchDiagnostics(
 	registry: StaticBatchTextureRegistry,
 	batchIndex: number,
-): TextureAtlasBatchDiagnostics {
+): TextureAtlasBatchFacts {
 	const entries = Array.from(registry.entries.values());
 	const pages = createTextureAtlasPageDiagnostics(entries);
 
@@ -1172,7 +1154,6 @@ function createTextureAtlasBatchDiagnostics(
 		multiSourcePageCount: pages.filter((page) => page.uniqueSourceCount > 1)
 			.length,
 		pages,
-		revision: registry.revision,
 		texturePageCount: pages.length,
 		uniqueSourceCount: countUniqueSources(entries),
 	};
@@ -1180,7 +1161,7 @@ function createTextureAtlasBatchDiagnostics(
 
 function createTextureAtlasPageDiagnostics(
 	entries: readonly StaticBatchTextureRegistryEntry[],
-): readonly TextureAtlasPageDiagnostics[] {
+): readonly TextureAtlasPageFacts[] {
 	const entriesByTextureRef = new Map<
 		string,
 		StaticBatchTextureRegistryEntry[]
@@ -1199,30 +1180,116 @@ function createTextureAtlasPageDiagnostics(
 			}
 
 			return {
-				anisotropy: firstEntry.anisotropy,
 				approximateBytes: estimateRgba8TextureBytes(
 					firstEntry.textureWidth,
 					firstEntry.textureHeight,
 					firstEntry.mipmapsGenerated,
 				),
-				entryAliasCount: pageEntries.length,
-				filteringMode: firstEntry.filteringMode,
-				format: firstEntry.format,
-				height: firstEntry.textureHeight,
 				mipmapsGenerated: firstEntry.mipmapsGenerated,
 				pageId: `page-${pageIndex + 1}`,
 				sampleClass: firstEntry.sampleClass,
-				samplerPolicyKey: firstEntry.samplerPolicyKey,
-				totalLeaseCount: sumNumbers(
-					uniqueRegistryEntries(pageEntries).map((entry) => entry.leaseCount),
-				),
 				uniqueSourceCount: countUniqueSources(pageEntries),
-				width: firstEntry.textureWidth,
 				wrapS: firstEntry.wrapS,
 				wrapT: firstEntry.wrapT,
 			};
 		})
 		.sort((left, right) => left.pageId.localeCompare(right.pageId));
+}
+
+function createTextureAtlasDomainDiagnostics(
+	batches: readonly TextureAtlasBatchFacts[],
+): TextureAtlasDiagnosticsReport["byDomain"] {
+	const batchesByDomain = new Map<StaticDomain, TextureAtlasBatchFacts[]>();
+	for (const batch of batches) {
+		const domainBatches = batchesByDomain.get(batch.domain) ?? [];
+		domainBatches.push(batch);
+		batchesByDomain.set(batch.domain, domainBatches);
+	}
+
+	return Array.from(batchesByDomain.entries())
+		.map(([domain, domainBatches]) => {
+			const pages = domainBatches.flatMap((batch) => batch.pages);
+			const activeBatchCount = domainBatches.filter(
+				(batch) => batch.texturePageCount > 0,
+			).length;
+
+			return {
+				activeBatchCount,
+				approximateBytes: sumNumbers(
+					pages.map((page) => page.approximateBytes),
+				),
+				batchCount: domainBatches.length,
+				domain,
+				emptyBatchCount: domainBatches.length - activeBatchCount,
+				entryAliasCount: sumNumbers(
+					domainBatches.map((batch) => batch.entryAliasCount),
+				),
+				mipmappedPageCount: pages.filter((page) => page.mipmapsGenerated)
+					.length,
+				multiSourcePageCount: sumNumbers(
+					domainBatches.map((batch) => batch.multiSourcePageCount),
+				),
+				sampleClasses: countSampleClasses(pages),
+				texturePageCount: pages.length,
+				uniqueSourceCount: countUniqueDomainSources(domainBatches),
+				unmippedPageCount: pages.filter((page) => !page.mipmapsGenerated)
+					.length,
+				wrapModes: countWrapModes(pages),
+			};
+		})
+		.sort((left, right) => left.domain.localeCompare(right.domain));
+}
+
+function createTextureAtlasWarnings(
+	recentRolePageOverflows: readonly TerrainRolePageOverflowDiagnostics[],
+): TextureAtlasDiagnosticsReport["warnings"] {
+	if (recentRolePageOverflows.length === 0) {
+		return [];
+	}
+
+	const latest = recentRolePageOverflows.at(-1);
+	return [
+		{
+			count: recentRolePageOverflows.length,
+			kind: "terrain-role-page-overflow",
+			latestDrawUnitId: latest?.drawUnitId ?? null,
+			latestRole: latest?.kind ?? null,
+		},
+	];
+}
+
+function countSampleClasses(
+	pages: readonly TextureAtlasPageFacts[],
+): TextureAtlasDiagnosticsReport["byDomain"][number]["sampleClasses"] {
+	return {
+		"rgba-color": pages.filter((page) => page.sampleClass === "rgba-color")
+			.length,
+		"rgba-detail": pages.filter((page) => page.sampleClass === "rgba-detail")
+			.length,
+		"rgba-exact": pages.filter((page) => page.sampleClass === "rgba-exact")
+			.length,
+		"rgba-mask": pages.filter((page) => page.sampleClass === "rgba-mask")
+			.length,
+	};
+}
+
+function countWrapModes(
+	pages: readonly TextureAtlasPageFacts[],
+): TextureAtlasDiagnosticsReport["byDomain"][number]["wrapModes"] {
+	return {
+		"clamp-to-edge": pages.filter(
+			(page) => page.wrapS === "clamp-to-edge" && page.wrapT === "clamp-to-edge",
+		).length,
+		repeat: pages.filter(
+			(page) => page.wrapS === "repeat" && page.wrapT === "repeat",
+		).length,
+	};
+}
+
+function countUniqueDomainSources(
+	batches: readonly TextureAtlasBatchFacts[],
+): number {
+	return sumNumbers(batches.map((batch) => batch.uniqueSourceCount));
 }
 
 function countUniqueSources(
@@ -1233,12 +1300,6 @@ function countUniqueSources(
 	);
 
 	return sources.size;
-}
-
-function uniqueRegistryEntries(
-	entries: readonly StaticBatchTextureRegistryEntry[],
-): readonly StaticBatchTextureRegistryEntry[] {
-	return Array.from(new Set(entries));
 }
 
 function estimateRgba8TextureBytes(
@@ -1264,10 +1325,6 @@ function estimateRgba8TextureBytes(
 
 function sumNumbers(values: readonly number[]): number {
 	return values.reduce((sum, value) => sum + value, 0);
-}
-
-function maxNumbers(values: readonly number[]): number {
-	return values.length === 0 ? 0 : Math.max(...values);
 }
 
 function appendBounded<T>(values: readonly T[], value: T, limit: number): T[] {

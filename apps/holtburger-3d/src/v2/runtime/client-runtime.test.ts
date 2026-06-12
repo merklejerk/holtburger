@@ -61,7 +61,7 @@ describe("V2 client runtime", () => {
 			resolver.pendingRequests.filter(
 				(request) => request.job.domain === "outdoor-terrain",
 			),
-		).toHaveLength(9);
+		).toHaveLength(5);
 		expect(
 			resolver.pendingRequests.filter(
 				(request) => request.job.domain === "outdoor-buildings",

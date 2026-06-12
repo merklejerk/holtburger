@@ -33,7 +33,7 @@ import {
 	WorkerTexturePacker,
 } from "../textures/packing/worker-client";
 
-const DEFAULT_STATIC_RESOLVER_WORKER_COUNT = 3;
+const DEFAULT_STATIC_RESOLVER_WORKER_COUNT = 2;
 const DEFAULT_STATIC_BAKER_WORKER_COUNT = 2;
 const DEFAULT_TEXTURE_PACKING_WORKER_COUNT = 2;
 

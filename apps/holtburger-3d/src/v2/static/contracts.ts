@@ -661,7 +661,7 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly landblockId: number;
 	readonly domain: "outdoor-buildings" | "outdoor-detail";
 	readonly materialFamily: "texture-rgba";
-	readonly materialPass: "opaque";
+	readonly materialPass: "opaque" | "alpha-test";
 	readonly materialBucketKey: string;
 	readonly coordinateSpace: "landblock-render-local";
 	readonly positions: Float32Array;
@@ -670,6 +670,7 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly indexType: "uint16" | "uint32";
 	readonly vertexCount: number;
 	readonly triangleCount: number;
+	readonly alphaTest: number;
 	readonly primaryTextureUseId: string;
 	readonly primaryTextureWrapMode: "clamp" | "repeat";
 	readonly textureUseIds: readonly string[];

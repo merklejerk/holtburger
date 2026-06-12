@@ -149,7 +149,7 @@ function getRenderableOpaqueRgbaTextureUse(
 ): MaterialTextureDataUseIdentity | null {
 	if (
 		partition.family !== "texture-rgba" ||
-		partition.pass !== "opaque" ||
+		(partition.pass !== "opaque" && partition.pass !== "alpha-test") ||
 		partition.renderCoverage !== "classified-render-candidate"
 	) {
 		return null;
@@ -194,8 +194,10 @@ function createStaticObjectGeometryDrawUnit(options: {
 		materialBucketKey: options.partition.compatibilityKey,
 		materialFamily: "texture-rgba",
 		materialIds: options.partition.materialIds,
-		materialPass: "opaque",
+		materialPass:
+			options.partition.pass === "alpha-test" ? "alpha-test" : "opaque",
 		positions: geometry.positions,
+		alphaTest: options.partition.alphaTest,
 		primaryTextureUseId: textureUseId,
 		primaryTextureWrapMode: options.partition.textureWrapMode,
 		texCoords: geometry.texCoords,
@@ -287,6 +289,7 @@ function bakeStaticObjectPartitionGeometry(
 		const sourceTriangle = part.triangles.find(
 			(candidate) =>
 				candidate.polygonId === triangle.polygonId &&
+				candidate.firstVertex === triangle.firstVertex &&
 				candidate.geometrySurfaceId === triangle.geometrySurfaceId &&
 				candidate.materialVariantSignature === triangle.materialVariantSignature,
 		);

@@ -81,6 +81,7 @@ precision highp float;
 uniform sampler2D uTexture;
 uniform vec4 uTextureRect;
 uniform vec2 uTextureSize;
+uniform float uAlphaTest;
 uniform int uUseTexture;
 uniform int uWrapMode;
 
@@ -97,6 +98,9 @@ void main() {
 	vec2 localUv = uWrapMode == 1 ? fract(vTexCoord) : clamp(vTexCoord, vec2(0.0), vec2(1.0));
 	vec2 atlasUv = (uTextureRect.xy + localUv * uTextureRect.zw) / uTextureSize;
 	fragColor = texture(uTexture, atlasUv);
+	if (fragColor.a < uAlphaTest) {
+		discard;
+	}
 }
 `;
 
@@ -659,6 +663,10 @@ class Webgl2Renderer implements Renderer {
 				this.#staticObjectProgram.uniforms.uWrapMode,
 				resource.primaryTextureWrapMode === "repeat" ? 1 : 0,
 			);
+			gl.uniform1f(
+				this.#staticObjectProgram.uniforms.uAlphaTest,
+				resource.alphaTest,
+			);
 			gl.bindVertexArray(resource.vertexArray);
 			gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
 		}
@@ -773,6 +781,7 @@ interface TerrainGeometryProgram {
 interface StaticObjectGeometryProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
+		readonly uAlphaTest: WebGLUniformLocation;
 		readonly uModelViewProjection: WebGLUniformLocation;
 		readonly uTexture: WebGLUniformLocation;
 		readonly uTextureRect: WebGLUniformLocation;
@@ -805,6 +814,7 @@ interface StaticObjectGeometryResource {
 	readonly texCoordBuffer: WebGLBuffer;
 	readonly indexBuffer: WebGLBuffer;
 	readonly drawUnitId: string;
+	readonly alphaTest: number;
 	readonly primaryTextureUseId: string;
 	readonly primaryTextureWrapMode: StaticObjectGeometryStaticDrawUnit["primaryTextureWrapMode"];
 	readonly indexCount: number;
@@ -970,6 +980,7 @@ function createStaticObjectGeometryProgram(
 	return {
 		program,
 		uniforms: {
+			uAlphaTest: requireUniform(gl, program, "uAlphaTest"),
 			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
 			uTexture: requireUniform(gl, program, "uTexture"),
 			uTextureRect: requireUniform(gl, program, "uTextureRect"),
@@ -1117,6 +1128,7 @@ function createStaticObjectGeometryResource(
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
 
 	return {
+		alphaTest: drawUnit.alphaTest,
 		drawUnitId: drawUnit.drawUnitId,
 		indexBuffer,
 		indexCount: drawUnit.indices.length,

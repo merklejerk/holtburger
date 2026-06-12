@@ -14,7 +14,7 @@ export const RENDER_RESOURCE_INSPECTION_OWNER_KIND = {
 	terrain: "terrain",
 } as const;
 
-export type RenderResourceInspectionOwnerKind =
+type RenderResourceInspectionOwnerKind =
 	(typeof RENDER_RESOURCE_INSPECTION_OWNER_KIND)[keyof typeof RENDER_RESOURCE_INSPECTION_OWNER_KIND];
 
 type MaterialResourceInspectionOwnerKind = Extract<
@@ -33,7 +33,7 @@ export interface RenderResourceInspectionSnapshot {
 	readonly geometry: readonly RenderResourceInspectionGeometry[];
 }
 
-export interface RenderResourceInspectionSummary {
+interface RenderResourceInspectionSummary {
 	readonly staticBundleLayerCount: number;
 	readonly structuredInteriorCellCount: number;
 	readonly texturePageCount: number;
@@ -43,7 +43,7 @@ export interface RenderResourceInspectionSummary {
 	readonly texturePageEntryCount: number;
 }
 
-export interface RenderResourceInspectionStaticBundleLayer {
+interface RenderResourceInspectionStaticBundleLayer {
 	readonly key: string;
 	readonly scope: string;
 	readonly landblockId: number;
@@ -58,7 +58,7 @@ export interface RenderResourceInspectionStaticBundleLayer {
 	readonly triangleCount: number;
 }
 
-export interface RenderResourceInspectionStructuredInteriorCell {
+interface RenderResourceInspectionStructuredInteriorCell {
 	readonly key: string;
 	readonly artifactKey: string;
 	readonly landblockId: number;
@@ -70,7 +70,7 @@ export interface RenderResourceInspectionStructuredInteriorCell {
 	readonly triangleCount: number;
 }
 
-export interface RenderResourceInspectionTexturePage {
+interface RenderResourceInspectionTexturePage {
 	readonly key: string;
 	readonly ownerKind: RenderResourceInspectionOwnerKind;
 	readonly ownerKey: string;
@@ -94,7 +94,7 @@ export interface RenderResourceTexturePageIdentity {
 	readonly texturePageKey: string;
 }
 
-export interface RenderResourceTexturePreviewEntry {
+interface RenderResourceTexturePreviewEntry {
 	readonly sourcePlacementKey: string;
 	readonly virtualRefKey: string;
 	readonly virtualRefKeys: readonly string[];
@@ -117,7 +117,7 @@ export interface RenderResourceTexturePagePreview {
 	readonly entries: readonly RenderResourceTexturePreviewEntry[];
 }
 
-export interface RenderResourceInspectionMaterial {
+interface RenderResourceInspectionMaterial {
 	readonly key: string;
 	readonly ownerKind: MaterialResourceInspectionOwnerKind;
 	readonly ownerKey: string;
@@ -140,7 +140,7 @@ type RenderResourceInspectionMaterialBase = Omit<
 	| "referencedTriangleCount"
 >;
 
-export interface RenderResourceInspectionGeometry {
+interface RenderResourceInspectionGeometry {
 	readonly key: string;
 	readonly ownerKind: MaterialResourceInspectionOwnerKind;
 	readonly ownerKey: string;

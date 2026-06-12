@@ -45,7 +45,7 @@ export function describeSceneResourceInterestKey(
 	].join(":");
 }
 
-export function describeSceneResourceLocationIdentity(
+function describeSceneResourceLocationIdentity(
 	location: SceneResourceLocation | null,
 ): string | null {
 	if (!location) {

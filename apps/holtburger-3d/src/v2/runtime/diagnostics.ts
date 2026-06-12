@@ -23,7 +23,7 @@ export interface RuntimeDiagnosticsReport {
 	readonly domains: readonly RuntimeDiagnosticsDomainReport[];
 }
 
-export interface RuntimeDiagnosticsRuntimeSummary {
+interface RuntimeDiagnosticsRuntimeSummary {
 	readonly status: "idle" | "static-active" | "disposed";
 	readonly textureFilteringMode: TextureFilteringMode;
 	readonly lastStaticRequest: string | null;
@@ -32,18 +32,18 @@ export interface RuntimeDiagnosticsRuntimeSummary {
 	readonly failedStaticMaterializations: readonly RuntimeDiagnosticsFailure[];
 }
 
-export interface RuntimeDiagnosticsFailure {
+interface RuntimeDiagnosticsFailure {
 	readonly revision: number;
 	readonly message: string;
 }
 
-export type RuntimeDiagnosticsDomainReport =
+type RuntimeDiagnosticsDomainReport =
 	| RendererDiagnosticsReport
 	| StaticCoordinatorDiagnosticsReport
 	| TerrainTextureDiagnosticsReport
 	| TextureAtlasDiagnosticsReport;
 
-export interface RendererDiagnosticsReport {
+interface RendererDiagnosticsReport {
 	readonly kind: "renderer";
 	readonly summary: RendererSnapshot;
 }
@@ -55,7 +55,7 @@ export interface StaticCoordinatorDiagnosticsReport {
 	readonly recentFailures: readonly StaticCoordinatorWorkDiagnostics[];
 }
 
-export interface StaticCoordinatorDiagnosticsSummary {
+interface StaticCoordinatorDiagnosticsSummary {
 	readonly revision: number;
 	readonly requested: number;
 	readonly resolving: number;
@@ -71,7 +71,7 @@ export interface StaticCoordinatorDiagnosticsSummary {
 	readonly latestResolverFailure: string | null;
 }
 
-export interface StaticCoordinatorWorkDiagnostics {
+interface StaticCoordinatorWorkDiagnostics {
 	readonly workId: string;
 	readonly revision: number;
 	readonly domain: StaticDomain;
@@ -88,7 +88,7 @@ export interface TextureAtlasDiagnosticsReport {
 	readonly recentRolePageOverflows: readonly TerrainRolePageOverflowDiagnostics[];
 }
 
-export interface TextureAtlasDiagnosticsSummary {
+interface TextureAtlasDiagnosticsSummary {
 	readonly batchCount: number;
 	readonly texturePageCount: number;
 	readonly multiSourcePageCount: number;
@@ -132,7 +132,7 @@ export interface TerrainTextureDiagnosticsReport {
 	readonly recentFallbacks: readonly TerrainTextureFallbackDiagnostics[];
 }
 
-export interface TerrainTextureDiagnosticsSummary {
+interface TerrainTextureDiagnosticsSummary {
 	readonly recentFallbackCount: number;
 }
 
@@ -155,7 +155,7 @@ export interface TerrainRolePageUsageDiagnostics {
 	readonly outliers: readonly TerrainRolePageOutlierDiagnostics[];
 }
 
-export interface TerrainRolePageOutlierDiagnostics {
+interface TerrainRolePageOutlierDiagnostics {
 	readonly drawUnitId: string;
 	readonly colorPages: number;
 	readonly maskPages: number;

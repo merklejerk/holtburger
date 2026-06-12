@@ -302,6 +302,7 @@ class Webgl2Renderer implements Renderer {
 	#animationFrameId: number | null = null;
 	#disposed = false;
 	#frameCount = 0;
+	#frameHandlerMs = 0;
 	#frameState = defaultFrameState;
 	#error: string | null = null;
 
@@ -428,6 +429,7 @@ class Webgl2Renderer implements Renderer {
 				return;
 			}
 
+			const startedAt = performance.now();
 			try {
 				this.#render(timestampMilliseconds / 1000);
 			} catch (error) {
@@ -436,6 +438,8 @@ class Webgl2Renderer implements Renderer {
 				this.dispose();
 				return;
 			}
+			this.#frameHandlerMs = performance.now() - startedAt;
+			this.#emit();
 
 			this.#animationFrameId = requestAnimationFrame(renderFrame);
 		};
@@ -458,7 +462,6 @@ class Webgl2Renderer implements Renderer {
 		this.#drawTerrain();
 
 		this.#frameCount += 1;
-		this.#emit();
 	}
 
 	#drawTerrain(): void {
@@ -560,6 +563,7 @@ class Webgl2Renderer implements Renderer {
 			canvasHeight: this.#canvas.height,
 			error: this.#error,
 			frameCount: this.#frameCount,
+			frameHandlerMs: this.#frameHandlerMs,
 			isRunning: !this.#disposed,
 			renderedTriangles: Array.from(this.#terrainResources.values()).reduce(
 				(total, resource) => total + resource.triangleCount,
@@ -951,7 +955,10 @@ function uploadTerrainLayeredUniforms(
 	);
 	gl.activeTexture(gl.TEXTURE0 + TERRAIN_DETAIL_TEXTURE_UNIT);
 	gl.bindTexture(gl.TEXTURE_2D, detailTexture);
-	gl.uniform1i(program.uniforms.uDetailAtlasTexture, TERRAIN_DETAIL_TEXTURE_UNIT);
+	gl.uniform1i(
+		program.uniforms.uDetailAtlasTexture,
+		TERRAIN_DETAIL_TEXTURE_UNIT,
+	);
 	gl.uniform2f(
 		program.uniforms.uDetailAtlasSize,
 		detailBinding?.textureWidth ?? 1,
@@ -1104,10 +1111,7 @@ function uploadTerrainLayerRectUniforms(
 				resolveBindingRect(bindings, overlay.terrain),
 				index * 4,
 			);
-			overlayColorPages[index] = resolveBindingPage(
-				bindings,
-				overlay.terrain,
-			);
+			overlayColorPages[index] = resolveBindingPage(bindings, overlay.terrain);
 			overlayMaskRects.set(
 				resolveBindingRect(bindings, overlay.alpha),
 				index * 4,

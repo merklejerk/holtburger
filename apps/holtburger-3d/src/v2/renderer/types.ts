@@ -23,12 +23,12 @@ export interface StaticResidencyDelta {
 	readonly revision: number;
 }
 
-export interface StaticDrawUnitPlacement {
+interface StaticDrawUnitPlacement {
 	readonly drawUnit: StaticDrawUnit;
 	readonly translation: readonly [number, number, number];
 }
 
-export interface DynamicResidencyDelta {
+interface DynamicResidencyDelta {
 	readonly addedInstanceIds: readonly string[];
 	readonly removedInstanceIds: readonly string[];
 	readonly revision: number;
@@ -71,7 +71,7 @@ export interface TerrainTextureBinding {
 
 export type TerrainTextureRolePageKind = "color" | "detail" | "mask";
 
-export interface TerrainTextureRolePageSlot {
+interface TerrainTextureRolePageSlot {
 	readonly kind: TerrainTextureRolePageKind;
 	readonly slot: number;
 }
@@ -81,7 +81,7 @@ export interface SamplerPolicyUpdate {
 	readonly revision: number;
 }
 
-export interface TextureSamplerPolicy {
+interface TextureSamplerPolicy {
 	readonly textureRefId: string;
 	readonly filteringMode: TextureFilteringMode;
 	readonly samplerPolicyKey: string;
@@ -93,6 +93,7 @@ export interface RendererSnapshot {
 	readonly canvasWidth: number;
 	readonly canvasHeight: number;
 	readonly frameCount: number;
+	readonly frameHandlerMs: number;
 	readonly isRunning: boolean;
 	readonly backend: "webgl2";
 	readonly error: string | null;

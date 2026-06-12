@@ -159,12 +159,12 @@ export interface Webgl2WorldSubmitMetrics {
 	structuredInteriorShellTriangleCount: number;
 }
 
-export const WEBGL2_MATERIAL_DRAW_DOMAIN = {
+const WEBGL2_MATERIAL_DRAW_DOMAIN = {
 	staticBundle: "static-bundle",
 	structuredInterior: "structured-interior",
 } as const;
 
-export type Webgl2MaterialDrawDomain =
+type Webgl2MaterialDrawDomain =
 	(typeof WEBGL2_MATERIAL_DRAW_DOMAIN)[keyof typeof WEBGL2_MATERIAL_DRAW_DOMAIN];
 
 const EMPTY_SUBMIT_METRICS: Webgl2WorldSubmitMetrics = {

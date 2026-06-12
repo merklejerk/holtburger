@@ -66,9 +66,9 @@ export interface RuntimeSnapshot {
 	readonly staticMaterialization: StaticMaterializationSnapshot;
 }
 
-export type RuntimeSnapshotListener = (snapshot: RuntimeSnapshot) => void;
+type RuntimeSnapshotListener = (snapshot: RuntimeSnapshot) => void;
 
-export interface RuntimeRenderPolicySnapshot {
+interface RuntimeRenderPolicySnapshot {
 	readonly textureFilteringMode: TextureFilteringMode;
 }
 
@@ -173,6 +173,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			canvasHeight: 0,
 			error: null,
 			frameCount: 0,
+			frameHandlerMs: 0,
 			isRunning: true,
 			renderedTriangles: 0,
 			staticDrawUnits: 0,
@@ -252,9 +253,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				},
 				{
 					kind: "static-coordinator",
-					...createStaticCoordinatorDiagnosticsReport(
-						this.#lastStaticSnapshot,
-					),
+					...createStaticCoordinatorDiagnosticsReport(this.#lastStaticSnapshot),
 				},
 				this.#textureManager.createDiagnosticsReport(),
 				createTerrainTextureDiagnosticsReport(
@@ -477,11 +476,7 @@ function appendBoundedFailure(
 	return [...failures, failure].slice(-8);
 }
 
-function appendBounded<T>(
-	entries: readonly T[],
-	entry: T,
-	limit: number,
-): T[] {
+function appendBounded<T>(entries: readonly T[], entry: T, limit: number): T[] {
 	return [...entries, entry].slice(-limit);
 }
 

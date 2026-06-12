@@ -12,7 +12,7 @@ declare global {
 	}
 }
 
-export class TauriRuntimeHost implements RuntimeHost {
+class TauriRuntimeHost implements RuntimeHost {
 	#lastFailure: string | null = null;
 	#nextRequestIndex = 1;
 
@@ -46,7 +46,7 @@ export class TauriRuntimeHost implements RuntimeHost {
 	}
 }
 
-export class UnavailableRuntimeHost implements RuntimeHost {
+class UnavailableRuntimeHost implements RuntimeHost {
 	constructor(private readonly message = "Tauri host is unavailable.") {}
 
 	lookupAsset(): Promise<PreparedAsset> {

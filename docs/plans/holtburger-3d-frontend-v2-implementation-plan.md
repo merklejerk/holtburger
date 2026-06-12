@@ -1920,7 +1920,7 @@ Verification:
 
 ### Phase 11B2B: Prepared Render-Surface Index Sources
 
-Status: planned.
+Status: complete.
 
 Purpose: extend prepared render-surface sourcing so indexed material inputs can enter the same texture/data-use pipeline as RGBA material inputs.
 
@@ -1947,6 +1947,41 @@ Design notes:
 - v1 does not use `prepared-texture/*` for indexed materials; it reads raw `render-surface/*` bytes and raw `palette/*` data, then builds `indexed-texels` and `palette-lookup` data texture pages. Extending the prepared render-surface route for index data is a V2 simplification for isomorphic texture-use flow, not direct v1 plumbing.
 - Rust currently has normalized `R8` prepared texture support, but that path is for A8/landscape-alpha-like surfaces. Do not assume it already supports P8/index16 material index data without verifying and adding tests.
 - `index16` may need a two-byte logical data shape. If WebGL upload is deferred, still preserve this in identity/page policy so 11C can partition correctly.
+
+Implementation notes:
+
+- Exported concrete V2 prepared render-surface identity variants for RGBA and index sources while keeping leaf usage aliases internal so the public contract stays small.
+- Extended the frontend host DTO/schema so prepared texture payloads can represent `r8` and `index16` output formats.
+- Added V2 host-key/source helpers for indexed render-surface data:
+  - `index8` derives `prepared-texture/<surface>?usage=raw&out=r8&mips=none&cs=data`,
+  - `index16` derives `prepared-texture/<surface>?usage=raw&out=index16&mips=none&cs=data`.
+- Added `DirectIndexTextureSource` validation for prepared index payloads. It verifies semantic usage, source format (`P8` for `index8`, `Index16` for `index16`), byte width, and level-zero byte length before exposing index bytes to later stages.
+- Extended the Tauri prepared-texture adapter:
+  - P8 render surfaces can be preserved through `out=r8`/`cs=data`,
+  - Index16 render surfaces can be preserved through the new `out=index16`/`cs=data` path,
+  - neither path decodes indexed texels to RGBA or routes palettes through `prepared-texture/*`.
+
+Spicy findings:
+
+- The existing Rust `R8` path was alpha-only despite the route parser already accepting `out=r8`. P8 needed to be explicitly allowed; otherwise V2 would have had a TypeScript contract that the host could not satisfy.
+- `index16` should not be squeezed through `r8`. The phase added a named `index16` prepared output instead of inventing a hidden two-channel packing convention.
+- Knip again flagged exported leaf usage aliases that were only used through exported interfaces. Those aliases were kept internal rather than ignored.
+
+Failed to close:
+
+- Palette lookup data is still frontend-derived but not yet emitted by the static material planner as a generalized `palette-rgba` data use. That remains 11B2C.
+- Indexed/paletted static material planner output still uses the current bespoke role records until 11B2C cuts it over to prepared index data use plus palette data use.
+- The texture manager and renderer still do not stage or upload index/palette data textures. That remains later material/rendering work.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
+- `cargo fmt --check`
+- `cargo test -p holtburger-3d adapter::prepared_texture`
+- `cargo clippy -p holtburger-3d --all-targets -- -D warnings`
 
 ### Phase 11B2C: Static Material Planner Texture-Use Cutover
 

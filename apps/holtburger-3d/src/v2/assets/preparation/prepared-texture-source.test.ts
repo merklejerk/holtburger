@@ -4,6 +4,7 @@ import type { PreparedRenderSurfaceTextureUseIdentity } from "../../static/contr
 import {
 	createPreparedTextureHostKey,
 	prepareDirectIndexTextureSource,
+	prepareDirectPaletteTextureSource,
 	prepareDirectRgbaTextureSource,
 } from "./prepared-texture-source";
 
@@ -138,6 +139,36 @@ describe("V2 prepared texture source preparation", () => {
 			),
 		).toThrow("does not match index8");
 	});
+
+	it("converts palette payload ranges into direct rgba lookup sources", () => {
+		const source = prepareDirectPaletteTextureSource(
+			createPalettePreparedAsset(),
+			{
+				firstIndex: 1,
+				indexCount: 2,
+				kind: "palette-texture-use",
+				palette: {
+					kind: "palette",
+					paletteId: 0x04000010,
+				},
+				usage: "palette-rgba",
+			},
+		);
+
+		expect(source).toMatchObject({
+			firstIndex: 1,
+			height: 1,
+			indexCount: 2,
+			kind: "direct-palette-texture-source",
+			outputFormat: "rgba8",
+			paletteId: 0x04000010,
+			usage: "palette-rgba",
+			width: 2,
+		});
+		expect(Array.from(source.pixels)).toEqual([
+			0x44, 0x55, 0x66, 0x80, 0xaa, 0xbb, 0xcc, 0xff,
+		]);
+	});
 });
 
 function createTextureUse(
@@ -172,6 +203,32 @@ function createPreparedAsset(options: {
 		preparedAt: "test",
 		revision: 1,
 		sourceAssetId: "prepared-texture/06000010",
+	};
+}
+
+function createPalettePreparedAsset(): PreparedAsset {
+	return {
+		key: {
+			id: "04000010",
+			kind: "palette",
+		},
+		payload: {
+			colorCount: 3,
+			colorsArgb: Uint32Array.from([0xff112233, 0x80445566, 0xffaabbcc]),
+			kind: "palette",
+			paletteId: 0x04000010,
+			provenance: {
+				detail: null,
+				errorCode: null,
+				source: "repo-local-hba",
+				sourceAssetKind: "palette",
+			},
+			residencyKind: "unknown",
+			sourceAssetKind: "palette",
+		},
+		preparedAt: "test",
+		revision: 1,
+		sourceAssetId: "palette/04000010",
 	};
 }
 

@@ -244,14 +244,14 @@ describe("V2 static object compatibility partitioner", () => {
 
 		expect(result.materialCoverage).toEqual([
 			expect.objectContaining({
-				deferredTriangleCount: 2,
+				deferredTriangleCount: 1,
 				detailRoleCount: 0,
 				domain: "outdoor-buildings",
 				fallbackReasonCount: 2,
 				landblockId: 0xda55ffff,
 				materialCount: 6,
 				partitionCount: 6,
-				renderedTriangleCount: 3,
+				renderedTriangleCount: 4,
 				triangleCount: 6,
 				unsupportedTriangleCount: 1,
 			}),
@@ -273,7 +273,7 @@ describe("V2 static object compatibility partitioner", () => {
 				}),
 				expect.objectContaining({
 					family: "indexed-paletted",
-					outcome: "render-deferred",
+					outcome: "rendered",
 					pass: "opaque",
 					triangleCount: 1,
 				}),
@@ -296,11 +296,51 @@ describe("V2 static object compatibility partitioner", () => {
 			{ code: "unsupported-surface-flag", count: 1 },
 		]);
 		expect(result.materialCoverage[0]?.unrenderedBuckets[0]).toMatchObject({
-			family: "indexed-paletted",
+			family: "texture-rgba",
 			outcome: "render-deferred",
-			pass: "opaque",
+			pass: "transparent",
 			triangleCount: 1,
 		});
+	});
+
+	it("bakes indexed paletted partitions with separate index and palette texture uses", () => {
+		const payload = createPayload({
+			materials: [createIndexedMaterial(0x08000013)],
+			textureRefs: createIndexedTextureRefs(),
+		});
+		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+		const drawUnit = result.drawUnits[0];
+
+		expect(drawUnit).toMatchObject({
+			kind: "static-object-geometry",
+			materialFamily: "indexed-paletted",
+			primaryTextureUseId: null,
+		});
+		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
+			throw new Error("Expected indexed static object geometry draw unit.");
+		}
+		expect(drawUnit.indexTextureUseId).toContain("index8");
+		expect(drawUnit.paletteTextureUseId).toContain("palette-texture-use");
+		expect(drawUnit.paletteFirstIndex).toBe(0);
+		expect(drawUnit.textureUseIds).toHaveLength(2);
+		expect(drawUnit.textureUseIds).toEqual(
+			expect.arrayContaining([
+				drawUnit.indexTextureUseId,
+				drawUnit.paletteTextureUseId,
+			]),
+		);
+		expect(result.textureUses.map((textureUse) => textureUse.source)).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					kind: "prepared-render-surface-texture-use",
+					usage: "index8",
+				}),
+				expect.objectContaining({
+					kind: "palette-texture-use",
+					usage: "palette-rgba",
+				}),
+			]),
+		);
 	});
 
 	it("bakes static object placement and source scale into render-local positions", () => {

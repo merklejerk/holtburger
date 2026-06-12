@@ -103,7 +103,7 @@ describe("V2 static object material planner", () => {
 		expect(plan).toMatchObject({
 			family: "indexed-paletted",
 			pass: "opaque",
-			renderCoverage: "classified-render-deferred",
+			renderCoverage: "classified-render-candidate",
 			textureRoles: [
 				{
 					dataUse: {
@@ -152,7 +152,7 @@ describe("V2 static object material planner", () => {
 
 		expect(plan).toMatchObject({
 			family: "indexed-paletted",
-			renderCoverage: "classified-render-deferred",
+			renderCoverage: "classified-render-candidate",
 			textureRoles: [
 				{
 					dataUse: {

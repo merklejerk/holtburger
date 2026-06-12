@@ -953,6 +953,111 @@ describe("V2 texture manager", () => {
 			),
 		).rejects.toThrow("expected 4 rgba8 bytes, got 3");
 	});
+
+	it("commits indexed and palette data uses as direct nearest-sampled placements", async () => {
+		const assetService = new FixtureAssetService();
+		const texturePacker = new FixtureTexturePacker();
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		const update = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedDrawUnitIds: [],
+			revision: 1,
+			staticBatchId: "batch-a",
+			textureUses: [
+				{
+					domain: "outdoor-buildings",
+					ownerDrawUnitIds: ["static-a"],
+					samplingPolicy: {
+						wrapS: "repeat",
+						wrapT: "repeat",
+					},
+					source: {
+						kind: "prepared-render-surface-texture-use",
+						renderSurface: {
+							kind: "render-surface",
+							renderSurfaceId: 0x06000010,
+						},
+						usage: "index8",
+					},
+					staticBatchId: "batch-a",
+					textureUseId: "static-a:index",
+				},
+				{
+					domain: "outdoor-buildings",
+					ownerDrawUnitIds: ["static-a"],
+					source: {
+						firstIndex: 1,
+						indexCount: 2,
+						kind: "palette-texture-use",
+						palette: {
+							kind: "palette",
+							paletteId: 0x04000010,
+						},
+						usage: "palette-rgba",
+					},
+					staticBatchId: "batch-a",
+					textureUseId: "static-a:palette",
+				},
+			],
+		});
+
+		expect(assetService.requestedKeys).toEqual([
+			{
+				id: "06000010?cs=data&mips=none&out=r8&usage=raw",
+				kind: "prepared-texture",
+			},
+			{
+				id: "04000010",
+				kind: "palette",
+			},
+		]);
+		expect(texturePacker.jobs).toHaveLength(0);
+		expect(update?.placements).toMatchObject([
+			{
+				filteringMode: "nearest",
+				format: "r8ui",
+				height: 1,
+				mipmapsGenerated: false,
+				rect: [0, 0, 2, 1],
+				sampleClass: "index8",
+				samplerPolicyKey: "sample=index8;filter=nearest;mips=off;aniso=1",
+				textureUseId: "static-a:index",
+				width: 2,
+				wrapS: "repeat",
+				wrapT: "repeat",
+			},
+			{
+				filteringMode: "nearest",
+				format: "rgba8",
+				height: 1,
+				mipmapsGenerated: false,
+				rect: [0, 0, 2, 1],
+				sampleClass: "palette-rgba",
+				samplerPolicyKey:
+					"sample=palette-rgba;filter=nearest;mips=off;aniso=1",
+				textureUseId: "static-a:palette",
+				width: 2,
+				wrapS: "clamp-to-edge",
+				wrapT: "clamp-to-edge",
+			},
+		]);
+		expect(update?.drawUnitBindings).toMatchObject([
+			{
+				drawUnitId: "static-a",
+				rolePage: { kind: "static-index", slot: 0 },
+				textureUseId: "static-a:index",
+			},
+			{
+				drawUnitId: "static-a",
+				rolePage: { kind: "static-palette", slot: 0 },
+				textureUseId: "static-a:palette",
+			},
+		]);
+		expect(Array.from(update?.placements[1]?.pixels ?? [])).toEqual([
+			0x44, 0x55, 0x66, 0x80, 0xaa, 0xbb, 0xcc, 0xff,
+		]);
+	});
 });
 
 class FixtureAssetService implements AssetService {
@@ -966,15 +1071,22 @@ class FixtureAssetService implements AssetService {
 	async requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
 		this.requestedKeys.push(key);
 
-		const outputFormat = key.id.includes("dxt1") ? "dxt1" : "rgba8";
+		if (key.kind === "palette") {
+			return {
+				key,
+				payload: createPalettePayload(),
+				preparedAt: "test",
+				revision: 1,
+				sourceAssetId: `palette/${key.id}`,
+			};
+		}
+
+		const outputFormat = getPreparedTextureOutputFormat(key);
 		return {
 			key,
 			payload: createPreparedTexturePayload(
-				this.#payloadOptions ?? {
-					outputFormat,
-					renderSurfaceId: getPreparedTextureRenderSurfaceId(key),
-					usage: getPreparedTextureUsage(key),
-				},
+				this.#payloadOptions ??
+					createPreparedTexturePayloadOptionsFromKey(key, outputFormat),
 			),
 			preparedAt: "test",
 			revision: 1,
@@ -998,6 +1110,42 @@ class FixtureAssetService implements AssetService {
 			pending: [],
 		};
 	}
+}
+
+function createPreparedTexturePayloadOptionsFromKey(
+	key: HostAssetKey,
+	outputFormat: PreparedTexturePayloadOptions["outputFormat"],
+): PreparedTexturePayloadOptions {
+	if (outputFormat === "r8") {
+		return {
+			byteLength: 2,
+			colorSpace: "data",
+			levelFormat: "P8",
+			outputFormat,
+			renderSurfaceId: getPreparedTextureRenderSurfaceId(key),
+			sourceFormatRaw: 0x29,
+			usage: "raw",
+			width: 2,
+		};
+	}
+	if (outputFormat === "index16") {
+		return {
+			byteLength: 4,
+			colorSpace: "data",
+			levelFormat: "Index16",
+			outputFormat,
+			renderSurfaceId: getPreparedTextureRenderSurfaceId(key),
+			sourceFormatRaw: 0x65,
+			usage: "raw",
+			width: 2,
+		};
+	}
+
+	return {
+		outputFormat,
+		renderSurfaceId: getPreparedTextureRenderSurfaceId(key),
+		usage: getPreparedTextureUsage(key),
+	};
 }
 
 class FixtureTexturePacker implements TexturePacker {
@@ -1277,10 +1425,13 @@ function createTerrainPayload(
 
 interface PreparedTexturePayloadOptions {
 	readonly byteLength?: number;
+	readonly colorSpace?: "data" | "linear";
 	readonly levelFormat?: string;
-	readonly outputFormat: "rgba8" | "dxt1";
+	readonly outputFormat: "dxt1" | "index16" | "r8" | "rgba8";
 	readonly renderSurfaceId?: number;
+	readonly sourceFormatRaw?: number;
 	readonly usage?: "color" | "detail" | "mask" | "raw";
+	readonly width?: number;
 }
 
 function createPreparedTexturePayload(options: PreparedTexturePayloadOptions) {
@@ -1290,22 +1441,57 @@ function createPreparedTexturePayload(options: PreparedTexturePayloadOptions) {
 			: new Uint8Array(options.byteLength).fill(255);
 
 	return {
-		colorSpace: "linear",
+		colorSpace: options.colorSpace ?? "linear",
 		kind: "prepared-texture",
 		levels: [
 			{
 				bytes,
 				format: options.levelFormat ?? "A8R8G8B8",
+				formatRaw: 0,
 				height: 1,
 				level: 0,
-				width: 1,
+				width: options.width ?? 1,
 			},
 		],
 		mipPolicy: "none",
 		outputFormat: options.outputFormat,
 		renderSurfaceId: options.renderSurfaceId ?? 0x06000010,
+		sourceFormat: options.levelFormat ?? "A8R8G8B8",
+		sourceFormatRaw: options.sourceFormatRaw ?? 0,
 		usage: options.usage ?? "color",
 	};
+}
+
+function createPalettePayload() {
+	return {
+		colorCount: 3,
+		colorsArgb: Uint32Array.from([0xff112233, 0x80445566, 0xffaabbcc]),
+		kind: "palette",
+		paletteId: 0x04000010,
+		provenance: {
+			detail: null,
+			errorCode: null,
+			source: "repo-local-hba",
+			sourceAssetKind: "palette",
+		},
+		residencyKind: "unknown",
+		sourceAssetKind: "palette",
+	};
+}
+
+function getPreparedTextureOutputFormat(
+	key: HostAssetKey,
+): PreparedTexturePayloadOptions["outputFormat"] {
+	if (key.id.includes("out=dxt1")) {
+		return "dxt1";
+	}
+	if (key.id.includes("out=r8")) {
+		return "r8";
+	}
+	if (key.id.includes("out=index16")) {
+		return "index16";
+	}
+	return "rgba8";
 }
 
 function getPreparedTextureRenderSurfaceId(key: HostAssetKey): number {

@@ -1,7 +1,10 @@
 import { createHostAssetKey } from "../keys";
 import type { HostAssetKey, PreparedAsset } from "../contracts";
 import type { PreparedTexturePayloadDto } from "../../../lib/host/contracts";
+import { palettePayloadDtoSchema } from "../../../lib/host/contracts";
 import type {
+	MaterialTextureDataUseIdentity,
+	PaletteIdentity,
 	PreparedIndexRenderSurfaceTextureUseIdentity,
 	PreparedRgbaRenderSurfaceTextureUseIdentity,
 	PreparedRgbaRenderSurfaceTextureUsage,
@@ -31,6 +34,23 @@ export interface DirectIndexTextureSource {
 	readonly bytesPerIndex: 1 | 2;
 	readonly indices: Uint8Array;
 }
+
+export interface DirectPaletteTextureSource {
+	readonly kind: "direct-palette-texture-source";
+	readonly paletteId: number;
+	readonly usage: "palette-rgba";
+	readonly outputFormat: "rgba8";
+	readonly width: number;
+	readonly height: 1;
+	readonly firstIndex: number;
+	readonly indexCount: number;
+	readonly pixels: Uint8Array;
+}
+
+export type DirectMaterialTextureSource =
+	| DirectIndexTextureSource
+	| DirectPaletteTextureSource
+	| DirectRgbaTextureSource;
 
 export function createPreparedTextureHostKey(
 	source: PreparedRenderSurfaceTextureUseIdentity,
@@ -138,6 +158,70 @@ export function prepareDirectIndexTextureSource(
 	};
 }
 
+export function prepareDirectMaterialTextureSource(
+	prepared: PreparedAsset,
+	expectedUse: MaterialTextureDataUseIdentity,
+): DirectMaterialTextureSource {
+	if (expectedUse.kind === "palette-texture-use") {
+		return prepareDirectPaletteTextureSource(prepared, expectedUse);
+	}
+
+	if (isPreparedIndexTextureUse(expectedUse)) {
+		return prepareDirectIndexTextureSource(prepared, expectedUse);
+	}
+
+	if (isPreparedRgbaTextureUse(expectedUse)) {
+		return prepareDirectRgbaTextureSource(prepared, expectedUse);
+	}
+
+	throw new Error(
+		`Prepared texture use ${expectedUse.kind}:${expectedUse.usage} is not stageable.`,
+	);
+}
+
+export function prepareDirectPaletteTextureSource(
+	prepared: PreparedAsset,
+	expectedUse: Extract<
+		MaterialTextureDataUseIdentity,
+		{ readonly kind: "palette-texture-use" }
+	>,
+): DirectPaletteTextureSource {
+	const payload = palettePayloadDtoSchema.parse(prepared.payload);
+	const expectedPalette = expectedUse.palette.paletteId;
+	if (payload.paletteId !== expectedPalette) {
+		throw new Error(
+			`Palette payload ${formatPaletteId(payload.paletteId)} does not match requested palette ${formatPaletteId(expectedPalette)}.`,
+		);
+	}
+
+	const firstIndex = expectedUse.firstIndex;
+	const indexCount = expectedUse.indexCount;
+	const lastIndexExclusive = firstIndex + indexCount;
+	if (
+		firstIndex < 0 ||
+		indexCount <= 0 ||
+		lastIndexExclusive > payload.colorsArgb.length
+	) {
+		throw new Error(
+			`Palette ${formatPaletteId(expectedPalette)} range ${firstIndex}+${indexCount} exceeds ${payload.colorsArgb.length} colors.`,
+		);
+	}
+
+	return {
+		firstIndex,
+		height: 1,
+		indexCount,
+		kind: "direct-palette-texture-source",
+		outputFormat: "rgba8",
+		paletteId: expectedPalette,
+		pixels: paletteArgbToRgbaBytes(
+			payload.colorsArgb.subarray(firstIndex, lastIndexExclusive),
+		),
+		usage: "palette-rgba",
+		width: indexCount,
+	};
+}
+
 function getPreparedIndexHostPolicy(
 	usage: PreparedIndexRenderSurfaceTextureUseIdentity["usage"],
 ): {
@@ -222,4 +306,38 @@ function isExpectedIndexSourceFormat(
 
 function formatRenderSurfaceId(renderSurfaceId: number): string {
 	return renderSurfaceId.toString(16).padStart(8, "0");
+}
+
+function isPreparedIndexTextureUse(
+	use: PreparedRenderSurfaceTextureUseIdentity,
+): use is PreparedIndexRenderSurfaceTextureUseIdentity {
+	return use.usage === "index8" || use.usage === "index16";
+}
+
+function isPreparedRgbaTextureUse(
+	use: PreparedRenderSurfaceTextureUseIdentity,
+): use is PreparedRgbaRenderSurfaceTextureUseIdentity {
+	return (
+		use.usage === "rgba-color" ||
+		use.usage === "rgba-detail" ||
+		use.usage === "rgba-mask" ||
+		use.usage === "rgba-raw"
+	);
+}
+
+function formatPaletteId(paletteId: PaletteIdentity["paletteId"]): string {
+	return paletteId.toString(16).padStart(8, "0");
+}
+
+function paletteArgbToRgbaBytes(colorsArgb: Uint32Array): Uint8Array {
+	const pixels = new Uint8Array(colorsArgb.length * 4);
+	for (let index = 0; index < colorsArgb.length; index += 1) {
+		const argb = colorsArgb[index] ?? 0;
+		const offset = index * 4;
+		pixels[offset] = (argb >>> 16) & 0xff;
+		pixels[offset + 1] = (argb >>> 8) & 0xff;
+		pixels[offset + 2] = argb & 0xff;
+		pixels[offset + 3] = (argb >>> 24) & 0xff;
+	}
+	return pixels;
 }

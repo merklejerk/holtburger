@@ -67,6 +67,44 @@ describe("V2 runtime texture sampling policy", () => {
 			wrapS: "clamp-to-edge",
 			wrapT: "clamp-to-edge",
 		});
+		expect(createRuntimeTexturePagePolicy(createUse("index8"))).toEqual({
+			sampleClass: "index8",
+			wrapS: "clamp-to-edge",
+			wrapT: "clamp-to-edge",
+		});
+		expect(createRuntimeTexturePagePolicy(createUse("index16"))).toEqual({
+			sampleClass: "index16",
+			wrapS: "clamp-to-edge",
+			wrapT: "clamp-to-edge",
+		});
+		expect(createRuntimeTexturePagePolicy(createPaletteUse())).toEqual({
+			sampleClass: "palette-rgba",
+			wrapS: "clamp-to-edge",
+			wrapT: "clamp-to-edge",
+		});
+	});
+
+	it("forces data texture sampler policy to nearest without mipmaps", () => {
+		expect(
+			createRuntimeTextureSamplerPolicy({
+				filteringMode: "anisotropic-4x",
+				sampleClass: "index8",
+			}),
+		).toEqual({
+			anisotropy: 1,
+			filteringMode: "nearest",
+			generateMipmaps: false,
+			policyKey: "sample=index8;filter=nearest;mips=off;aniso=1",
+		});
+		expect(
+			createRuntimeTextureSamplerPolicy({
+				filteringMode: "linear",
+				sampleClass: "palette-rgba",
+			}),
+		).toMatchObject({
+			filteringMode: "nearest",
+			policyKey: "sample=palette-rgba;filter=nearest;mips=off;aniso=1",
+		});
 	});
 
 	it("allows authored sampling policy to override color wrapping without changing sample class", () => {
@@ -84,7 +122,13 @@ describe("V2 runtime texture sampling policy", () => {
 });
 
 function createUse(
-	usage: "rgba-color" | "rgba-detail" | "rgba-mask" | "rgba-raw",
+	usage:
+		| "index16"
+		| "index8"
+		| "rgba-color"
+		| "rgba-detail"
+		| "rgba-mask"
+		| "rgba-raw",
 ) {
 	return {
 		kind: "prepared-render-surface-texture-use" as const,
@@ -93,5 +137,18 @@ function createUse(
 			renderSurfaceId: 0x06000010,
 		},
 		usage,
+	};
+}
+
+function createPaletteUse() {
+	return {
+		firstIndex: 0,
+		indexCount: 256,
+		kind: "palette-texture-use" as const,
+		palette: {
+			kind: "palette" as const,
+			paletteId: 0x04000010,
+		},
+		usage: "palette-rgba" as const,
 	};
 }

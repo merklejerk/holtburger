@@ -54,7 +54,7 @@ interface TexturePlacement {
 	readonly wrapT: TextureWrapMode;
 	readonly width: number;
 	readonly height: number;
-	readonly format: "rgba8";
+	readonly format: "rgba8" | "r8ui" | "r16ui";
 	readonly pixels: Uint8Array;
 	readonly rect: readonly [number, number, number, number];
 }
@@ -69,10 +69,21 @@ export interface TextureDrawUnitBinding {
 	readonly rect: readonly [number, number, number, number];
 }
 
-export type TerrainTextureRolePageKind = "color" | "detail" | "mask";
+type TextureRolePageKind =
+	| "color"
+	| "detail"
+	| "mask"
+	| "static-base-color"
+	| "static-index"
+	| "static-palette";
+
+export type TerrainTextureRolePageKind = Extract<
+	TextureRolePageKind,
+	"color" | "detail" | "mask"
+>;
 
 interface TextureRolePageSlot {
-	readonly kind: TerrainTextureRolePageKind;
+	readonly kind: TextureRolePageKind;
 	readonly slot: number;
 }
 

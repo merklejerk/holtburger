@@ -32,6 +32,8 @@ const TERRAIN_MASK_TEXTURE_UNIT_BASE =
 const TERRAIN_DETAIL_TEXTURE_UNIT =
 	TERRAIN_MASK_TEXTURE_UNIT_BASE + MAX_TERRAIN_MASK_PAGES_PER_DRAW;
 const STATIC_OBJECT_TEXTURE_UNIT = 0;
+const STATIC_OBJECT_INDEX_TEXTURE_UNIT = 1;
+const STATIC_OBJECT_PALETTE_TEXTURE_UNIT = 2;
 
 const defaultFrameState: FrameState = {
 	camera: {
@@ -77,10 +79,18 @@ void main() {
 
 const STATIC_OBJECT_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
+precision highp int;
+precision highp usampler2D;
 
 uniform sampler2D uTexture;
+uniform usampler2D uIndexTexture;
+uniform sampler2D uPaletteTexture;
 uniform vec4 uTextureRect;
+uniform vec4 uIndexTextureRect;
 uniform vec2 uTextureSize;
+uniform vec2 uIndexTextureSize;
+uniform vec2 uPaletteTextureSize;
+uniform float uPaletteFirstIndex;
 uniform float uAlphaTest;
 uniform vec4 uMaterialColor;
 uniform vec3 uMaterialEmissiveColor;
@@ -102,6 +112,12 @@ void main() {
 		vec2 localUv = uWrapMode == 1 ? fract(vTexCoord) : clamp(vTexCoord, vec2(0.0), vec2(1.0));
 		vec2 atlasUv = (uTextureRect.xy + localUv * uTextureRect.zw) / uTextureSize;
 		baseColor = texture(uTexture, atlasUv);
+	} else if (uMaterialMode == 3) {
+		vec2 localUv = uWrapMode == 1 ? fract(vTexCoord) : clamp(vTexCoord, vec2(0.0), vec2(1.0));
+		vec2 indexUv = (uIndexTextureRect.xy + localUv * uIndexTextureRect.zw) / uIndexTextureSize;
+		float paletteIndex = float(texture(uIndexTexture, indexUv).r) - uPaletteFirstIndex;
+		float paletteU = (clamp(paletteIndex, 0.0, max(uPaletteTextureSize.x - 1.0, 0.0)) + 0.5) / uPaletteTextureSize.x;
+		baseColor = texture(uPaletteTexture, vec2(paletteU, 0.5 / uPaletteTextureSize.y));
 	}
 
 	fragColor = vec4(
@@ -645,16 +661,45 @@ class Webgl2Renderer implements Renderer {
 			const binding = resource.primaryTextureUseId
 				? bindings.get(resource.primaryTextureUseId)
 				: null;
+			const indexBinding = resource.indexTextureUseId
+				? bindings.get(resource.indexTextureUseId)
+				: null;
+			const paletteBinding = resource.paletteTextureUseId
+				? bindings.get(resource.paletteTextureUseId)
+				: null;
 			const texture = binding
 				? (this.#textures.get(binding.textureRefId) ?? null)
 				: null;
-			const materialMode = resolveStaticObjectMaterialMode(resource, texture);
+			const indexTexture = indexBinding
+				? (this.#textures.get(indexBinding.textureRefId) ?? null)
+				: null;
+			const paletteTexture = paletteBinding
+				? (this.#textures.get(paletteBinding.textureRefId) ?? null)
+				: null;
+			const materialMode = resolveStaticObjectMaterialMode(
+				resource,
+				texture,
+				indexTexture,
+				paletteTexture,
+			);
 
 			gl.activeTexture(gl.TEXTURE0 + STATIC_OBJECT_TEXTURE_UNIT);
 			gl.bindTexture(gl.TEXTURE_2D, texture);
 			gl.uniform1i(
 				this.#staticObjectProgram.uniforms.uTexture,
 				STATIC_OBJECT_TEXTURE_UNIT,
+			);
+			gl.activeTexture(gl.TEXTURE0 + STATIC_OBJECT_INDEX_TEXTURE_UNIT);
+			gl.bindTexture(gl.TEXTURE_2D, indexTexture);
+			gl.uniform1i(
+				this.#staticObjectProgram.uniforms.uIndexTexture,
+				STATIC_OBJECT_INDEX_TEXTURE_UNIT,
+			);
+			gl.activeTexture(gl.TEXTURE0 + STATIC_OBJECT_PALETTE_TEXTURE_UNIT);
+			gl.bindTexture(gl.TEXTURE_2D, paletteTexture);
+			gl.uniform1i(
+				this.#staticObjectProgram.uniforms.uPaletteTexture,
+				STATIC_OBJECT_PALETTE_TEXTURE_UNIT,
 			);
 			gl.uniform4f(
 				this.#staticObjectProgram.uniforms.uTextureRect,
@@ -667,6 +712,27 @@ class Webgl2Renderer implements Renderer {
 				this.#staticObjectProgram.uniforms.uTextureSize,
 				binding?.textureWidth ?? 1,
 				binding?.textureHeight ?? 1,
+			);
+			gl.uniform4f(
+				this.#staticObjectProgram.uniforms.uIndexTextureRect,
+				indexBinding?.rect[0] ?? 0,
+				indexBinding?.rect[1] ?? 0,
+				indexBinding?.rect[2] ?? 1,
+				indexBinding?.rect[3] ?? 1,
+			);
+			gl.uniform2f(
+				this.#staticObjectProgram.uniforms.uIndexTextureSize,
+				indexBinding?.textureWidth ?? 1,
+				indexBinding?.textureHeight ?? 1,
+			);
+			gl.uniform2f(
+				this.#staticObjectProgram.uniforms.uPaletteTextureSize,
+				paletteBinding?.textureWidth ?? 1,
+				paletteBinding?.textureHeight ?? 1,
+			);
+			gl.uniform1f(
+				this.#staticObjectProgram.uniforms.uPaletteFirstIndex,
+				resource.paletteFirstIndex,
 			);
 			gl.uniform4fv(
 				this.#staticObjectProgram.uniforms.uMaterialColor,
@@ -800,10 +866,16 @@ interface StaticObjectGeometryProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly uAlphaTest: WebGLUniformLocation;
+		readonly uIndexTexture: WebGLUniformLocation;
+		readonly uIndexTextureRect: WebGLUniformLocation;
+		readonly uIndexTextureSize: WebGLUniformLocation;
 		readonly uMaterialColor: WebGLUniformLocation;
 		readonly uMaterialEmissiveColor: WebGLUniformLocation;
 		readonly uMaterialMode: WebGLUniformLocation;
 		readonly uModelViewProjection: WebGLUniformLocation;
+		readonly uPaletteFirstIndex: WebGLUniformLocation;
+		readonly uPaletteTexture: WebGLUniformLocation;
+		readonly uPaletteTextureSize: WebGLUniformLocation;
 		readonly uTexture: WebGLUniformLocation;
 		readonly uTextureRect: WebGLUniformLocation;
 		readonly uTextureSize: WebGLUniformLocation;
@@ -838,6 +910,9 @@ interface StaticObjectGeometryResource {
 	readonly materialColor: StaticObjectGeometryStaticDrawUnit["materialColor"];
 	readonly materialEmissiveColor: StaticObjectGeometryStaticDrawUnit["materialEmissiveColor"];
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
+	readonly indexTextureUseId: string | null;
+	readonly paletteFirstIndex: number;
+	readonly paletteTextureUseId: string | null;
 	readonly primaryTextureUseId: string | null;
 	readonly primaryTextureWrapMode: StaticObjectGeometryStaticDrawUnit["primaryTextureWrapMode"];
 	readonly indexCount: number;
@@ -1004,6 +1079,9 @@ function createStaticObjectGeometryProgram(
 		program,
 		uniforms: {
 			uAlphaTest: requireUniform(gl, program, "uAlphaTest"),
+			uIndexTexture: requireUniform(gl, program, "uIndexTexture"),
+			uIndexTextureRect: requireUniform(gl, program, "uIndexTextureRect"),
+			uIndexTextureSize: requireUniform(gl, program, "uIndexTextureSize"),
 			uMaterialColor: requireUniform(gl, program, "uMaterialColor"),
 			uMaterialEmissiveColor: requireUniform(
 				gl,
@@ -1012,6 +1090,13 @@ function createStaticObjectGeometryProgram(
 			),
 			uMaterialMode: requireUniform(gl, program, "uMaterialMode"),
 			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
+			uPaletteFirstIndex: requireUniform(gl, program, "uPaletteFirstIndex"),
+			uPaletteTexture: requireUniform(gl, program, "uPaletteTexture"),
+			uPaletteTextureSize: requireUniform(
+				gl,
+				program,
+				"uPaletteTextureSize",
+			),
 			uTexture: requireUniform(gl, program, "uTexture"),
 			uTextureRect: requireUniform(gl, program, "uTextureRect"),
 			uTextureSize: requireUniform(gl, program, "uTextureSize"),
@@ -1163,9 +1248,12 @@ function createStaticObjectGeometryResource(
 		indexCount: drawUnit.indices.length,
 		indexType:
 			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
+		indexTextureUseId: drawUnit.indexTextureUseId,
 		materialColor: drawUnit.materialColor,
 		materialEmissiveColor: drawUnit.materialEmissiveColor,
 		materialFamily: drawUnit.materialFamily,
+		paletteFirstIndex: drawUnit.paletteFirstIndex,
+		paletteTextureUseId: drawUnit.paletteTextureUseId,
 		positionBuffer,
 		primaryTextureUseId: drawUnit.primaryTextureUseId,
 		primaryTextureWrapMode: drawUnit.primaryTextureWrapMode,
@@ -1184,9 +1272,14 @@ function createStaticObjectGeometryResource(
 function resolveStaticObjectMaterialMode(
 	resource: StaticObjectGeometryResource,
 	texture: WebGLTexture | null,
+	indexTexture: WebGLTexture | null,
+	paletteTexture: WebGLTexture | null,
 ): number {
 	if (resource.materialFamily === "flat-color") {
 		return 0;
+	}
+	if (resource.materialFamily === "indexed-paletted") {
+		return indexTexture && paletteTexture ? 3 : 2;
 	}
 
 	return texture ? 1 : 2;
@@ -1560,12 +1653,6 @@ function createTexturePage(
 	gl: WebGL2RenderingContext,
 	placement: TexturePlacementUpdate["placements"][number],
 ): WebGLTexture {
-	if (placement.format !== "rgba8") {
-		throw new Error(
-			`V2 WebGL2 renderer only supports rgba8 texture pages. Received ${placement.format}.`,
-		);
-	}
-
 	const texture = gl.createTexture();
 	if (!texture) {
 		throw new Error(`Failed to create texture ${placement.textureRefId}.`);
@@ -1593,17 +1680,7 @@ function createTexturePage(
 		getWrapMode(gl, placement.wrapT),
 	);
 	gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-	gl.texImage2D(
-		gl.TEXTURE_2D,
-		0,
-		gl.RGBA,
-		placement.width,
-		placement.height,
-		0,
-		gl.RGBA,
-		gl.UNSIGNED_BYTE,
-		placement.pixels,
-	);
+	uploadTexturePixels(gl, placement);
 	if (placement.mipmapsGenerated) {
 		gl.generateMipmap(gl.TEXTURE_2D);
 	}
@@ -1611,6 +1688,65 @@ function createTexturePage(
 	gl.bindTexture(gl.TEXTURE_2D, null);
 
 	return texture;
+}
+
+function uploadTexturePixels(
+	gl: WebGL2RenderingContext,
+	placement: TexturePlacementUpdate["placements"][number],
+): void {
+	switch (placement.format) {
+		case "rgba8":
+			gl.texImage2D(
+				gl.TEXTURE_2D,
+				0,
+				gl.RGBA,
+				placement.width,
+				placement.height,
+				0,
+				gl.RGBA,
+				gl.UNSIGNED_BYTE,
+				placement.pixels,
+			);
+			return;
+		case "r8ui":
+			gl.texImage2D(
+				gl.TEXTURE_2D,
+				0,
+				gl.R8UI,
+				placement.width,
+				placement.height,
+				0,
+				gl.RED_INTEGER,
+				gl.UNSIGNED_BYTE,
+				placement.pixels,
+			);
+			return;
+		case "r16ui":
+			gl.texImage2D(
+				gl.TEXTURE_2D,
+				0,
+				gl.R16UI,
+				placement.width,
+				placement.height,
+				0,
+				gl.RED_INTEGER,
+				gl.UNSIGNED_SHORT,
+				uint16TexturePixels(placement.pixels),
+			);
+			return;
+	}
+}
+
+function uint16TexturePixels(pixels: Uint8Array): Uint16Array {
+	if (pixels.byteOffset % Uint16Array.BYTES_PER_ELEMENT === 0) {
+		return new Uint16Array(
+			pixels.buffer,
+			pixels.byteOffset,
+			pixels.byteLength / Uint16Array.BYTES_PER_ELEMENT,
+		);
+	}
+
+	return new Uint16Array(pixels.slice().buffer);
 }
 
 function applyTextureSamplerPolicy(

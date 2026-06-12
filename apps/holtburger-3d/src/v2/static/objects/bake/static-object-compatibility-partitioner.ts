@@ -4,11 +4,13 @@ import type {
 	StaticMaterialCoverageReport,
 	StaticMaterialSourceIdentity,
 	StaticObjectInstanceIdentity,
+	StaticObjectMaterialSlotFacts,
 	StaticObjectPartSourceFacts,
 	StaticObjectSourceIdentity,
 } from "../../contracts";
 import { createStaticObjectMaterialCoverageReport } from "./static-object-material-coverage";
 import {
+	createStaticObjectMaterialUseKey,
 	planStaticObjectMaterials,
 	type StaticObjectMaterialFallbackReason,
 	type StaticObjectMaterialPlan,
@@ -87,10 +89,7 @@ export function partitionStaticObjectCompatibility(
 ): StaticObjectCompatibilityPartitionPlan {
 	const materialPlan = planStaticObjectMaterials(payload);
 	const materialById = new Map(
-		materialPlan.materialPlans.map((plan) => [
-			createMaterialKey(plan.material),
-			plan,
-		]),
+		materialPlan.materialPlans.map((plan) => [plan.materialUseKey, plan]),
 	);
 	const candidates = [...createTriangleCandidates(payload, materialById)].sort(
 		compareTriangleCandidates,
@@ -141,11 +140,11 @@ function createTriangleCandidates(
 			for (const triangle of [...part.triangles].sort(
 				(left, right) => left.polygonId - right.polygonId,
 			)) {
-				const material = materialSlots.resolveMaterial(object.identity, part, {
+				const materialSlot = materialSlots.resolveMaterialSlot(object.identity, part, {
 					geometrySurfaceId: triangle.geometrySurfaceId,
 					materialVariantSignature: triangle.materialVariantSignature,
 				});
-				if (!material) {
+				if (!materialSlot) {
 					throw new Error(
 						`Static object triangle ${createObjectKey(object.identity)}:part:${part.partIndex}:polygon:${triangle.polygonId} has no resolved material slot.`,
 					);
@@ -156,10 +155,16 @@ function createTriangleCandidates(
 					);
 				}
 
-				const plan = materialById.get(createMaterialKey(material));
+				const plan = materialById.get(
+					createStaticObjectMaterialUseKey(
+						materialSlot.material,
+						materialSlot.paletteOverride,
+						materialSlot.paletteViews,
+					),
+				);
 				if (!plan) {
 					throw new Error(
-						`Static object triangle ${createObjectKey(object.identity)}:part:${part.partIndex}:polygon:${triangle.polygonId} references material ${createMaterialKey(material)} without a material plan.`,
+						`Static object triangle ${createObjectKey(object.identity)}:part:${part.partIndex}:polygon:${triangle.polygonId} references material ${createMaterialKey(materialSlot.material)} without a material plan.`,
 					);
 				}
 
@@ -169,7 +174,11 @@ function createTriangleCandidates(
 				const materialColorKey = createMaterialColorKey(plan);
 				const sourceKey = createSourceKey(object.source);
 				const gfxKey = createSourceKey(part.gfxObj);
-				const materialKey = createMaterialKey(material);
+				const materialKey = createStaticObjectMaterialUseKey(
+					materialSlot.material,
+					materialSlot.paletteOverride,
+					materialSlot.paletteViews,
+				);
 				const objectKey = createObjectKey(object.identity);
 				const materialVariantSignature =
 					triangle.materialVariantSignature ?? null;
@@ -191,9 +200,9 @@ function createTriangleCandidates(
 					gfxObj: part.gfxObj,
 					gfxKey,
 					firstVertex: triangle.firstVertex,
-					material,
+					material: materialSlot.material,
 					materialColorKey,
-					materialId: material.materialId,
+					materialId: materialSlot.material.materialId,
 					materialKey,
 					materialPlan: plan,
 					materialVariantSignature,
@@ -224,7 +233,7 @@ function createTriangleCandidates(
 class MaterialSlotIndex {
 	readonly #slotsByObjectPartSurface = new Map<
 		string,
-		StaticMaterialSourceIdentity
+		StaticObjectMaterialSlotFacts
 	>();
 
 	constructor(payload: OutdoorStaticObjectsScopePayload) {
@@ -236,19 +245,19 @@ class MaterialSlotIndex {
 					partIndex: slot.identity.part.partIndex,
 					geometrySurfaceId: slot.identity.geometrySurfaceId,
 				}),
-				slot.material,
+				slot,
 			);
 		}
 	}
 
-	resolveMaterial(
+	resolveMaterialSlot(
 		object: StaticObjectInstanceIdentity,
 		part: StaticObjectPartSourceFacts,
 		triangle: {
 			readonly geometrySurfaceId: number | null;
 			readonly materialVariantSignature: string | null;
 		},
-	): StaticMaterialSourceIdentity | null {
+	): StaticObjectMaterialSlotFacts | StaticObjectPartSourceFacts["materialSlots"][number] | null {
 		if (triangle.geometrySurfaceId === null) {
 			return null;
 		}
@@ -266,7 +275,7 @@ class MaterialSlotIndex {
 				(slot) =>
 					slot.geometrySurfaceId === triangle.geometrySurfaceId &&
 					slot.materialVariantSignature === triangle.materialVariantSignature,
-			)?.material ??
+			) ??
 			null
 		);
 	}
@@ -439,6 +448,7 @@ export function createMaterialTextureDataUseKey(
 			dataUse.kind,
 			formatHex32(dataUse.palette.paletteId),
 			`range:${dataUse.firstIndex}-${dataUse.indexCount}`,
+			createPaletteTextureSubPalettesKey(dataUse.subPalettes ?? []),
 			dataUse.usage,
 		].join(":");
 	}
@@ -447,6 +457,24 @@ export function createMaterialTextureDataUseKey(
 		dataUse.kind,
 		formatHex32(dataUse.renderSurface.renderSurfaceId),
 		dataUse.usage,
+	].join(":");
+}
+
+function createPaletteTextureSubPalettesKey(
+	subPalettes: Extract<
+		MaterialTextureDataUseIdentity,
+		{ readonly kind: "palette-texture-use" }
+	>["subPalettes"],
+): string {
+	if (subPalettes.length === 0) {
+		return "sub:none";
+	}
+	return [
+		"sub",
+		...subPalettes.map(
+			(subPalette) =>
+				`${formatHex32(subPalette.palette.paletteId)}@${subPalette.firstIndex}+${subPalette.indexCount}`,
+		),
 	].join(":");
 }
 

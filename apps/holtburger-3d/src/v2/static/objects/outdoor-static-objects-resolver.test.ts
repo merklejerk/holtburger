@@ -43,7 +43,16 @@ describe("V2 outdoor static object resolver", () => {
 			),
 			createPreparedAsset(
 				createHostAssetKey("setup-appearance", 0x02000010),
-				createSetupAppearancePayload(),
+				createSetupAppearancePayload({
+					paletteId: 0x04000030,
+					subPalettes: [
+						{
+							numColors: 32,
+							offset: 16,
+							subId: 0x04000020,
+						},
+					],
+				}),
 			),
 			createPreparedAsset(
 				createHostAssetKey("gfx-obj", 0x01000020),
@@ -64,6 +73,20 @@ describe("V2 outdoor static object resolver", () => {
 			createPreparedAsset(createHostAssetKey("palette", 0x04000010), {
 				kind: "palette",
 				paletteId: 0x04000010,
+				provenance: createProvenance("palette"),
+				residencyKind: "unknown",
+				sourceAssetKind: "palette",
+			} satisfies PalettePayloadDto),
+			createPreparedAsset(createHostAssetKey("palette", 0x04000020), {
+				kind: "palette",
+				paletteId: 0x04000020,
+				provenance: createProvenance("palette"),
+				residencyKind: "unknown",
+				sourceAssetKind: "palette",
+			} satisfies PalettePayloadDto),
+			createPreparedAsset(createHostAssetKey("palette", 0x04000030), {
+				kind: "palette",
+				paletteId: 0x04000030,
 				provenance: createProvenance("palette"),
 				residencyKind: "unknown",
 				sourceAssetKind: "palette",
@@ -136,6 +159,36 @@ describe("V2 outdoor static object resolver", () => {
 				kind: "static-material-source",
 				materialId: 0x08000011,
 			},
+			paletteOverride: {
+				kind: "palette",
+				paletteId: 0x04000030,
+			},
+			paletteViews: [
+				{
+					firstIndex: 16,
+					indexCount: 32,
+					palette: {
+						kind: "palette",
+						paletteId: 0x04000020,
+					},
+				},
+			],
+		});
+		expect(payload.scope.sourceAssets[0]?.parts[0]?.materialSlots[0]).toMatchObject({
+			paletteOverride: {
+				kind: "palette",
+				paletteId: 0x04000030,
+			},
+			paletteViews: [
+				{
+					firstIndex: 16,
+					indexCount: 32,
+					palette: {
+						kind: "palette",
+						paletteId: 0x04000020,
+					},
+				},
+			],
 		});
 		expect(payload.scope.materialSources).toEqual([
 			expect.objectContaining({
@@ -536,7 +589,12 @@ function createRegionRenderProfilePayload(): RegionRenderProfilePayloadDto {
 	};
 }
 
-function createSetupAppearancePayload(): SetupAppearancePayloadDto {
+function createSetupAppearancePayload(
+	options: {
+		readonly paletteId?: number | null;
+		readonly subPalettes?: SetupAppearancePayloadDto["subPalettes"];
+	} = {},
+): SetupAppearancePayloadDto {
 	return {
 		animPartChanges: [],
 		appearanceKey: "setup-appearance/02000010",
@@ -545,7 +603,7 @@ function createSetupAppearancePayload(): SetupAppearancePayloadDto {
 			paletteAssetIds: [],
 		},
 		kind: "setup-appearance",
-		paletteId: null,
+		paletteId: options.paletteId ?? null,
 		parts: [
 			{
 				gfxObjAssetId: "gfx-obj/01000020",
@@ -564,7 +622,7 @@ function createSetupAppearancePayload(): SetupAppearancePayloadDto {
 		residencyKind: "unknown",
 		setupModelId: 0x02000010,
 		sourceAssetKind: "setup-appearance",
-		subPalettes: [],
+		subPalettes: options.subPalettes ?? [],
 		textureChanges: [],
 	};
 }

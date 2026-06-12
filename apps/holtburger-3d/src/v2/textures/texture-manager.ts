@@ -2,6 +2,7 @@ import type { AssetService } from "../assets/contracts";
 import { createHostAssetKey } from "../assets/keys";
 import {
 	createPreparedTextureHostKey,
+	prepareDirectPaletteTextureSource,
 	prepareDirectMaterialTextureSource,
 } from "../assets/preparation/prepared-texture-source";
 import type { DirectMaterialTextureSource } from "../assets/preparation/prepared-texture-source";
@@ -425,10 +426,7 @@ export class TextureManager {
 			};
 		}
 
-		const prepared = await this.#assetService.requestPreparedAsset(
-			createMaterialTextureHostKey(source),
-		);
-		const directSource = prepareDirectMaterialTextureSource(prepared, source);
+		const directSource = await this.#prepareMaterialTextureSource(source);
 		const samplerPolicy = createRuntimeTextureSamplerPolicy({
 			filteringMode: this.#filteringMode,
 			sampleClass: pagePolicy.sampleClass,
@@ -453,6 +451,30 @@ export class TextureManager {
 			pending: staged,
 			textureKey,
 		};
+	}
+
+	async #prepareMaterialTextureSource(
+		source: MaterialTextureDataUseIdentity,
+	): Promise<DirectMaterialTextureSource> {
+		const prepared = await this.#assetService.requestPreparedAsset(
+			createMaterialTextureHostKey(source),
+		);
+		if (source.kind !== "palette-texture-use") {
+			return prepareDirectMaterialTextureSource(prepared, source);
+		}
+
+		const subPaletteAssets = await Promise.all(
+			(source.subPalettes ?? []).map((subPalette) =>
+				this.#assetService.requestPreparedAsset(
+					createHostAssetKey("palette", subPalette.palette.paletteId),
+				),
+			),
+		);
+		return prepareDirectPaletteTextureSource(
+			prepared,
+			source,
+			subPaletteAssets,
+		);
 	}
 
 	async #packPendingTexturePlacements(
@@ -887,7 +909,8 @@ function isSameMaterialTextureDataUse(
 		return (
 			left.palette.paletteId === right.palette.paletteId &&
 			left.firstIndex === right.firstIndex &&
-			left.indexCount === right.indexCount
+			left.indexCount === right.indexCount &&
+			isSamePaletteTextureSubPalettes(left.subPalettes, right.subPalettes)
 		);
 	}
 
@@ -952,6 +975,7 @@ function createMaterialTextureDataUseKey(
 			source.kind,
 			source.palette.paletteId.toString(16).padStart(8, "0"),
 			`range:${source.firstIndex}-${source.indexCount}`,
+			createPaletteTextureSubPalettesKey(source.subPalettes),
 			source.usage,
 		].join(":");
 	}
@@ -963,6 +987,50 @@ function createMaterialTextureDataUseKey(
 			source.usage,
 		].join(":")
 	);
+}
+
+function isSamePaletteTextureSubPalettes(
+	left: Extract<
+		MaterialTextureDataUseIdentity,
+		{ readonly kind: "palette-texture-use" }
+	>["subPalettes"] | undefined,
+	right: Extract<
+		MaterialTextureDataUseIdentity,
+		{ readonly kind: "palette-texture-use" }
+	>["subPalettes"] | undefined,
+): boolean {
+	const leftSubPalettes = left ?? [];
+	const rightSubPalettes = right ?? [];
+	if (leftSubPalettes.length !== rightSubPalettes.length) {
+		return false;
+	}
+	return leftSubPalettes.every((leftPalette, index) => {
+		const rightPalette = rightSubPalettes[index];
+		return (
+			rightPalette !== undefined &&
+			leftPalette.palette.paletteId === rightPalette.palette.paletteId &&
+			leftPalette.firstIndex === rightPalette.firstIndex &&
+			leftPalette.indexCount === rightPalette.indexCount
+		);
+	});
+}
+
+function createPaletteTextureSubPalettesKey(
+	subPalettes: Extract<
+		MaterialTextureDataUseIdentity,
+		{ readonly kind: "palette-texture-use" }
+	>["subPalettes"] | undefined,
+): string {
+	if (!subPalettes || subPalettes.length === 0) {
+		return "sub:none";
+	}
+	return [
+		"sub",
+		...subPalettes.map(
+			(subPalette) =>
+				`${subPalette.palette.paletteId.toString(16).padStart(8, "0")}@${subPalette.firstIndex}+${subPalette.indexCount}`,
+		),
+	].join(":");
 }
 
 function createStaticBatchTextureKey(

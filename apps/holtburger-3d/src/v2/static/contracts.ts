@@ -171,6 +171,12 @@ export interface PaletteIdentity {
 	readonly paletteId: number;
 }
 
+export interface StaticObjectPaletteViewFacts {
+	readonly palette: PaletteIdentity;
+	readonly firstIndex: number;
+	readonly indexCount: number;
+}
+
 type PreparedRenderSurfaceTextureUsage =
 	| "rgba-color"
 	| "rgba-detail"
@@ -209,6 +215,7 @@ interface PaletteTextureUseIdentity {
 	readonly usage: "palette-rgba";
 	readonly firstIndex: number;
 	readonly indexCount: number;
+	readonly subPalettes: readonly StaticObjectPaletteViewFacts[];
 }
 
 export type MaterialTextureDataUseIdentity =
@@ -429,6 +436,8 @@ export interface StaticObjectPartMaterialSlotFacts {
 	readonly materialSurfaceId: number;
 	readonly material: StaticMaterialSourceIdentity;
 	readonly materialVariantSignature: string | null;
+	readonly paletteOverride: PaletteIdentity | null;
+	readonly paletteViews: readonly StaticObjectPaletteViewFacts[];
 }
 
 export interface StaticObjectMaterialSlotFacts {
@@ -438,6 +447,8 @@ export interface StaticObjectMaterialSlotFacts {
 	readonly gfxObj: StaticObjectSourceIdentity;
 	readonly material: StaticMaterialSourceIdentity;
 	readonly materialVariantSignature: string | null;
+	readonly paletteOverride: PaletteIdentity | null;
+	readonly paletteViews: readonly StaticObjectPaletteViewFacts[];
 }
 
 export interface StaticObjectMaterialSourceFacts {

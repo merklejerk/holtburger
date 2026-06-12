@@ -1216,6 +1216,57 @@ describe("V2 texture manager", () => {
 			0x44, 0x55, 0x66, 0x80, 0xaa, 0xbb, 0xcc, 0xff,
 		]);
 	});
+
+	it("composes packed palette data from authored subpalette replacements", async () => {
+		const assetService = new FixtureAssetService();
+		const texturePacker = new FixtureTexturePacker();
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		const update = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedDrawUnitIds: [],
+			revision: 1,
+			staticBatchId: "batch-a",
+			textureUses: [
+				{
+					domain: "outdoor-buildings",
+					ownerDrawUnitIds: ["static-a"],
+					source: {
+						firstIndex: 0,
+						indexCount: 3,
+						kind: "palette-texture-use",
+						palette: {
+							kind: "palette",
+							paletteId: 0x04000010,
+						},
+						subPalettes: [
+							{
+								firstIndex: 1,
+								indexCount: 1,
+								palette: {
+									kind: "palette",
+									paletteId: 0x04000020,
+								},
+							},
+						],
+						usage: "palette-rgba",
+					},
+					staticBatchId: "batch-a",
+					textureUseId: "static-a:palette",
+				},
+			],
+		});
+
+		expect(assetService.requestedKeys).toEqual([
+			{ id: "04000010", kind: "palette" },
+			{ id: "04000020", kind: "palette" },
+		]);
+		expect(Array.from(update?.placements[0]?.pixels.slice(0, 12) ?? [])).toEqual([
+			0x11, 0x22, 0x33, 0xff,
+			0x77, 0x88, 0x99, 0xff,
+			0xaa, 0xbb, 0xcc, 0xff,
+		]);
+	});
 });
 
 class FixtureAssetService implements AssetService {
@@ -1232,7 +1283,7 @@ class FixtureAssetService implements AssetService {
 		if (key.kind === "palette") {
 			return {
 				key,
-				payload: createPalettePayload(),
+				payload: createPalettePayload(key.id),
 				preparedAt: "test",
 				revision: 1,
 				sourceAssetId: `palette/${key.id}`,
@@ -1644,12 +1695,17 @@ function createPreparedTexturePayload(options: PreparedTexturePayloadOptions) {
 	};
 }
 
-function createPalettePayload() {
+function createPalettePayload(id = "04000010") {
+	const paletteId = Number.parseInt(id, 16);
+	const colorsArgb =
+		paletteId === 0x04000020
+			? [0xff000000, 0xff778899, 0xffffffff]
+			: [0xff112233, 0x80445566, 0xffaabbcc];
 	return {
-		colorCount: 3,
-		colorsArgb: Uint32Array.from([0xff112233, 0x80445566, 0xffaabbcc]),
+		colorCount: colorsArgb.length,
+		colorsArgb: Uint32Array.from(colorsArgb),
 		kind: "palette",
-		paletteId: 0x04000010,
+		paletteId,
 		provenance: {
 			detail: null,
 			errorCode: null,

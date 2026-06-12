@@ -25,6 +25,7 @@ import type {
 	StaticObjectInstanceIdentity,
 	StaticObjectMaterialSlotFacts,
 	StaticObjectMaterialSourceFacts,
+	StaticObjectPaletteViewFacts,
 	StaticObjectPartIdentity,
 	StaticObjectPartMaterialSlotFacts,
 	StaticObjectPartSourceFacts,
@@ -76,6 +77,8 @@ interface StaticObjectMaterialSlotInput {
 	readonly materialSurfaceId: number;
 	readonly materialId: number;
 	readonly materialVariantSignature: string | null;
+	readonly paletteOverride: StaticObjectPaletteViewFacts["palette"] | null;
+	readonly paletteViews: readonly StaticObjectPaletteViewFacts[];
 }
 
 export interface OutdoorStaticObjectsResolverOptions {
@@ -303,6 +306,17 @@ export class OutdoorStaticObjectsResolver {
 			options.missingRefs,
 		);
 		const parts = setupAppearance?.payload.parts ?? options.setupModel.parts;
+		const paletteOverride =
+			setupAppearance?.payload.paletteId == null
+				? null
+				: createPaletteIdentity(setupAppearance.payload.paletteId);
+		const paletteViews = createStaticObjectPaletteViews(
+			setupAppearance?.payload.subPalettes ?? [],
+		);
+		if (paletteOverride) {
+			await this.#loadPalette(paletteOverride, options.missingRefs);
+		}
+		await this.#loadPaletteViews(paletteViews, options.missingRefs);
 		const facts: StaticObjectPartSourceFacts[] = [];
 
 		for (const part of parts) {
@@ -338,6 +352,8 @@ export class OutdoorStaticObjectsResolver {
 										materialId: parseMaterialAssetId(slot.materialAssetId),
 										materialSurfaceId: slot.surfaceId,
 										materialVariantSignature: null,
+										paletteOverride,
+										paletteViews,
 										slotIndex: slot.slotIndex,
 									})),
 								})
@@ -419,6 +435,8 @@ export class OutdoorStaticObjectsResolver {
 					materialId: surfaceId,
 					materialSurfaceId: surfaceId,
 					materialVariantSignature: null,
+					paletteOverride: null,
+					paletteViews: [],
 					slotIndex,
 				})),
 			});
@@ -436,6 +454,8 @@ export class OutdoorStaticObjectsResolver {
 					geometrySurfaceId: slot.geometrySurfaceId,
 					materialSurfaceId: slot.materialSurfaceId,
 					materialVariantSignature: slot.materialVariantSignature,
+					paletteOverride: slot.paletteOverride,
+					paletteViews: slot.paletteViews,
 					slotIndex: slot.slotIndex,
 				};
 			}),
@@ -595,6 +615,15 @@ export class OutdoorStaticObjectsResolver {
 		}
 	}
 
+	async #loadPaletteViews(
+		paletteViews: readonly StaticObjectPaletteViewFacts[],
+		missingRefs: StaticResourceIdentity[],
+	): Promise<void> {
+		for (const paletteView of paletteViews) {
+			await this.#loadPalette(paletteView.palette, missingRefs);
+		}
+	}
+
 	async #tryLoadSetupAppearance(
 		setupModelId: number,
 		missingRefs: StaticResourceIdentity[],
@@ -667,6 +696,8 @@ function createObjectMaterialSlotFacts(options: {
 					material: slot.material,
 					materialVariantSignature: slot.materialVariantSignature,
 					object: object.identity,
+					paletteOverride: slot.paletteOverride,
+					paletteViews: slot.paletteViews,
 					source: object.source,
 				};
 			}),
@@ -786,6 +817,23 @@ function createRegionDetailRoles(
 			},
 		];
 	});
+}
+
+function createStaticObjectPaletteViews(
+	subPalettes: readonly SetupAppearancePayloadDto["subPalettes"][number][],
+): readonly StaticObjectPaletteViewFacts[] {
+	return subPalettes
+		.map((subPalette) => ({
+			firstIndex: subPalette.offset,
+			indexCount: subPalette.numColors,
+			palette: createPaletteIdentity(subPalette.subId),
+		}))
+		.sort(
+			(left, right) =>
+				left.palette.paletteId - right.palette.paletteId ||
+				left.firstIndex - right.firstIndex ||
+				left.indexCount - right.indexCount,
+		);
 }
 
 function parseMaterialAssetId(assetId: string): number {

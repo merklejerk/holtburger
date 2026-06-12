@@ -144,6 +144,54 @@ describe("V2 static object material planner", () => {
 		});
 	});
 
+	it("uses authored palette views as derived palette replacement ranges", () => {
+		const plan = classifyStaticObjectMaterial({
+			material: createTexturedMaterial({
+				paletteId: 0x04000020,
+			}),
+			paletteViews: [
+				{
+					firstIndex: 16,
+					indexCount: 32,
+					palette: {
+						kind: "palette",
+						paletteId: 0x04000030,
+					},
+				},
+			],
+			textureRefs: createTextureRefs({ formatRaw: 0x29, paletteId: 0x04000010 }),
+		});
+
+		expect(plan.materialUseKey).toContain("04000030:16-32");
+		expect(plan.textureRoles).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					dataUse: {
+						firstIndex: 0,
+						indexCount: 256,
+						kind: "palette-texture-use",
+						palette: {
+							kind: "palette",
+							paletteId: 0x04000020,
+						},
+						subPalettes: [
+							{
+								firstIndex: 16,
+								indexCount: 32,
+								palette: {
+									kind: "palette",
+									paletteId: 0x04000030,
+								},
+							},
+						],
+						usage: "palette-rgba",
+					},
+					role: "palette-rgba",
+				}),
+			]),
+		);
+	});
+
 	it("plans indexed Index16 materials as index16 data uses", () => {
 		const plan = classifyStaticObjectMaterial({
 			material: createTexturedMaterial(),

@@ -289,6 +289,75 @@ describe("V2 static object compatibility partitioner", () => {
 		expect(result.textureUses).toHaveLength(1);
 	});
 
+	it("keeps compatible opaque object ownership as metadata without splitting batches", () => {
+		const payload = duplicateObjectInstance(
+			createPayload({
+				materials: [createTexturedMaterial(0x08000010)],
+				textureRefs: createRgbaTextureRefs(),
+			}),
+		);
+
+		const plan = partitionStaticObjectCompatibility(payload);
+
+		expect(plan.partitions).toHaveLength(1);
+		expect(plan.partitions[0]).toMatchObject({
+			partitionAxes: {
+				ownership: {
+					objectPartKey: null,
+				},
+				sort: {
+					policy: "opaque-batchable",
+				},
+				visibility: {
+					key: "visibility:landblock-static-neutral",
+					policy: "landblock-static-neutral",
+				},
+			},
+			triangleCount: 2,
+		});
+		expect(plan.partitions[0]?.sourceTriangleIds).toEqual([
+			"da55ffff:building:building-0:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
+			"da55ffff:building:building-1:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
+		]);
+	});
+
+	it("uses object part ownership as a hard partition axis for transparent static policy", () => {
+		const payload = duplicateObjectInstance(
+			createPayload({
+				materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x10 })],
+				textureRefs: createRgbaTextureRefs(),
+			}),
+		);
+
+		const plan = partitionStaticObjectCompatibility(payload);
+
+		expect(plan.partitions).toHaveLength(2);
+		expect(
+			plan.partitions.map((partition) => partition.partitionAxes),
+		).toMatchObject([
+			{
+				ownership: {
+					objectPartKey: "da55ffff:building:building-0:part:0",
+				},
+				sort: {
+					policy: "transparent-object-part-sortable",
+				},
+			},
+			{
+				ownership: {
+					objectPartKey: "da55ffff:building:building-1:part:0",
+				},
+				sort: {
+					policy: "transparent-object-part-sortable",
+				},
+			},
+		]);
+		expect(plan.partitions.map((partition) => partition.triangleCount)).toEqual([
+			1,
+			1,
+		]);
+	});
+
 	it("reports compact material coverage by rendered, deferred, and unsupported buckets", () => {
 		const payload = createPayload({
 			materials: [
@@ -615,6 +684,39 @@ describe("V2 static object compatibility partitioner", () => {
 		]);
 	});
 });
+
+function duplicateObjectInstance(
+	payload: OutdoorStaticObjectsScopePayload,
+): OutdoorStaticObjectsScopePayload {
+	const object = payload.objects[0];
+	if (!object) {
+		throw new Error("Fixture payload did not create an object.");
+	}
+	const duplicateObject = {
+		...object,
+		identity: createObjectIdentity({ instanceId: "building-1" }),
+		sourceIndex: object.sourceIndex + 1,
+	};
+
+	return {
+		...payload,
+		materialSlots: [
+			...payload.materialSlots,
+			...payload.materialSlots.map((slot) => ({
+				...slot,
+				identity: {
+					...slot.identity,
+					part: {
+						...slot.identity.part,
+						object: duplicateObject.identity,
+					},
+				},
+				object: duplicateObject.identity,
+			})),
+		],
+		objects: [...payload.objects, duplicateObject],
+	};
+}
 
 function createPayload(options: {
 	readonly materials: readonly StaticObjectMaterialSourceFacts[];
@@ -993,9 +1095,11 @@ function createMaterialIdentity(
 	};
 }
 
-function createObjectIdentity() {
+function createObjectIdentity(
+	options: { readonly instanceId?: string } = {},
+) {
 	return {
-		instanceId: "building-0",
+		instanceId: options.instanceId ?? "building-0",
 		kind: "static-object-instance" as const,
 		landblockId: 0xda55ffff,
 		objectKind: "building" as const,

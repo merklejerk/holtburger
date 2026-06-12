@@ -2714,7 +2714,7 @@ Phase 11E4 dry-run course correction:
 
 ### Phase 11E4A: Static Object Partition Axes
 
-Status: planned.
+Status: complete.
 
 Purpose: reshape static object partitioning so future material, sorting, and visibility axes can be added deliberately instead of overloading one material compatibility key.
 
@@ -2746,6 +2746,100 @@ Acceptance criteria:
 - Alpha-test/cutout remains an opaque/depth-writing batchable pass, not a transparent sorting path.
 - Repeated compatible opaque/cutout objects still compact together where they do today; this phase must not create a silent draw-unit explosion.
 
+Closed:
+
+- Refactored the static object compatibility partitioner around explicit material, ownership, sort, visibility, and capacity axes while preserving the existing rendered `outdoor-buildings` draw-unit behavior.
+- Added a policy-built compatibility key: opaque and alpha-test/cutout partitions remain batchable across compatible object instances, while transparent/additive policy includes object/part ownership as a hard partition axis.
+- Added a neutral landblock visibility axis placeholder so later env-cell resident/visible-cell partition keys can plug into the same grouping flow instead of replacing it.
+- Added tests proving compatible opaque object instances still compact into one partition, and matching transparent object instances split into object/part-sortable partitions.
+- Re-ran the explicit V2 static object import check; no `world-display` references exist under the static object path.
+
+Spicy notes:
+
+- Partition-level ownership cannot honestly claim a single object id for opaque/cutout batches, because those batches may contain many compatible object instances. The implemented axis therefore records batchable ownership scope for opaque/cutout and only records object/part ownership when the sort policy requires it.
+- Follow-up discussion caught that 11E4A was still too conservative by keeping `sourceKey` and `gfxKey` as hard compatibility-key parts for opaque/cutout partitions. Those are provenance/source-mapping facts, not inherent render compatibility facts, when baked geometry is concatenated and material/texture/render-state layout matches. Phase 11E4A1 corrects that before `outdoor-detail` expands source coverage.
+- The new `partitionAxes` field is intentionally not exported as a public named type yet. The partition object exposes the facts to local code/tests, but the type name stays internal until 11E4C-11E4E prove which pieces become renderer-facing contract.
+
+Failed to close:
+
+- True blended materials are still render-deferred. 11E4A only shaped partition policy and metadata; 11E4C-11E4E still own blended render-state contracts, transparent draw units, and renderer ordering.
+- No live browser screenshot or GPU visual pass was run for this internal partitioner refactor.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- src/v2/static/objects/bake/static-object-compatibility-partitioner.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
+- `cd apps/holtburger-3d && rg -n "world-display" src/v2/static/objects src/v2/static/objects/bake` returned no matches.
+
+### Phase 11E4A1: Batchable Source Ownership Course Correct
+
+Status: planned.
+
+Purpose: remove source/gfx identity from opaque and alpha-test/cutout hard partition compatibility when the current single-binding static-object draw-unit contract can already render the merged geometry, while preserving source/gfx/object/part facts for mappings, diagnostics, picking, inspection, and future transparent sorting.
+
+Dry-run findings:
+
+- `sourceKey` and `gfxKey` are provenance/source lookup facts. The baker can already concatenate geometry from multiple sources/gfx objects because every baked triangle carries `source`, `gfxObj`, `object`, and `partIndex`, and `StaticObjectBakeSourceIndex.getPart(...)` resolves geometry per triangle.
+- The current static-object renderer is still a single material-binding draw path, not a real material-table draw path. `StaticObjectGeometryStaticDrawUnit` has one `primaryTextureUseId`, one `indexTextureUseId`, one `paletteTextureUseId`, one `detailTextureUseId`, one `materialColor`, one `materialEmissiveColor`, one `alphaTest`, and one wrap mode for the whole draw unit.
+- `textureRoleLayoutKey` currently includes concrete texture/data-use identities via `createTextureRoleLayoutKey(...)`, so materials using texture A and texture B do not merge even if A and B land in the same atlas page. That is correct for the current renderer, because the shader receives one rect/binding set per draw unit.
+- `materialIds` and `STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE` look like a material table, but there is no per-vertex/per-triangle material selector or shader-side material table yet. In practice, current rendered partitions are single-binding compatibility buckets plus source/material diagnostics.
+- Therefore 11E4A1 should only remove source/gfx as hard keys from passes where every actual renderer-binding axis remains identical. Cross-texture or cross-material-constant batching needs a separate material-binding-table phase, not this source-ownership course correction.
+
+Current steering:
+
+- 11E4A correctly avoided object-instance partitioning for opaque/cutout batches, but it still includes `sourceKey` and `gfxKey` in every compatibility key.
+- Baked static object draw units concatenate geometry. Different source assets or gfx objects are not inherently incompatible when the material family, concrete texture/data-use bindings, material constants, render state, sampler/wrap policy, visibility scope, and capacity constraints match.
+- Source identity, gfx identity, object instance, and part identity should remain typed ownership/provenance facts on candidates and source mappings. They should become hard partition keys only when a policy needs them, such as object/part transparent sorting or future visibility/culling requirements.
+- This course correction should happen before `outdoor-detail` generated scenery, because generated scenery will multiply source/gfx diversity and would otherwise bake against an over-partitioned shape.
+- Do not remove concrete texture/data-use identity, material color/emissive constants, alpha-test threshold, indexed palette range, detail texture identity, or wrap policy from the hard key in this phase. Those are still true current renderer-binding constraints.
+
+Deliverables:
+
+- Adjust the partition compatibility-key builder so opaque and alpha-test/cutout policies do not include `sourceKey` or `gfxKey` as hard grouping keys.
+- Keep source/gfx/object/part facts in partition triangle records, source mappings, and `partitionAxes.ownership` metadata.
+- Preserve transparent/additive object/part-sortable policy as the place where object/part identity becomes a hard grouping key.
+- Add tests proving compatible opaque or alpha-test triangles from different source/gfx identities can compact into one partition when all current renderer-binding axes match.
+- Add tests proving source mappings still identify each triangle's original source/gfx/object/part facts after cross-source compaction.
+- Add tests proving different concrete texture/data-use identities still split under the current single-binding renderer contract.
+- Add tests proving transparent/additive candidates still do not merge across object/part sort units.
+
+Acceptance criteria:
+
+- Opaque/cutout compatibility keys are renderer-binding compatibility keys, not provenance keys.
+- Existing rendered output remains valid; expected draw-unit counts may decrease only where previous partitions differed solely by source/gfx identity and had identical material/texture binding facts.
+- Source/gfx provenance remains available for diagnostics and future inspection despite broader render compaction.
+- Cross-texture/material-table batching is explicitly left to a later phase with renderer and draw-unit contract changes.
+- No `outdoor-detail` resolver/runtime work starts until this over-partitioning correction is closed.
+
+### Phase 11E4A2: Static Object Material Binding Table Resteer
+
+Status: planned.
+
+Purpose: decide whether and how static object draw units should batch multiple material/texture bindings inside one draw unit, instead of treating every concrete texture/data-use identity and material constant set as a hard draw-unit split.
+
+Current steering:
+
+- Design language talks about material-table capacity, but the current static-object renderer does not actually consume a material table.
+- The current draw unit carries `materialIds`, but no per-triangle material index, material table entries, texture rect table, palette table, or shader-side selector. One draw unit currently has one active base/index/palette/detail binding set.
+- Atlas co-residency alone is not enough to merge textures A/B/C. The renderer needs a per-triangle or per-vertex selector that maps geometry to the correct material/texture rect, plus bounded tables that can be uploaded as uniforms, textures, or vertex attributes.
+- This phase should be a resteer before true blended draw-unit work. If the static renderer stays single-binding for now, later phases should call that out honestly and keep concrete texture/data-use identity as a hard key.
+
+Deliverables:
+
+- Audit current static-object draw-unit fields, shader uniforms, and texture binding updates to document the exact gap between `materialIds` diagnostics and a real renderer material table.
+- Decide whether to add a material-binding-table phase before transparent draw units, defer it until after `outdoor-detail`, or explicitly keep static objects single-binding for the current parity slice.
+- If adding material-binding tables now, define the draw-unit contract additions: per-triangle/per-vertex material selector, bounded material entries, texture/data-use entry table, palette/detail entry handling, and renderer upload path.
+- If deferring, update 11E4C-11E4E and Phase 12 wording so "material-table capacity" is not mistaken for implemented multi-texture batching.
+
+Acceptance criteria:
+
+- The plan no longer implies that textures A/B/C can batch merely because they share an atlas page.
+- There is a concrete decision on whether cross-texture static object batching is in scope before transparent object/part draw units.
+- Future partition keys distinguish renderer-binding constraints from provenance facts and from not-yet-implemented material-table capacity.
+
 ### Phase 11E4B: Outdoor Detail Generated Scenery Cutout
 
 Status: planned.
@@ -2755,6 +2849,7 @@ Purpose: fast-track the `outdoor-detail` domain so generated scenery, especially
 Current steering:
 
 - `outdoor-detail` is already a V2 static domain and the bake worker accepts it, but the source resolver currently only supports `outdoor-buildings` and filters landblock statics to `kind === "building"`.
+- Phase 11E4A1 must close first so generated scenery does not amplify over-partitioning by source/gfx provenance. Phase 11E4A2 may close as a decision-only resteer if cross-texture material tables are deferred.
 - Browser-mode routing currently sends `outdoor-detail` work to placeholder resolver/baker paths even though demand planning schedules it. This must be changed in the same phase as resolver support, or generated scenery will never render in the live app.
 - Host outdoor statics distinguish `building` and `generated-scenery`; most outdoor trees/foliage should arrive through generated scenery.
 - This phase should prove generated scenery and alpha-test coverage without broadening into env-cell statics or true blended sorting.

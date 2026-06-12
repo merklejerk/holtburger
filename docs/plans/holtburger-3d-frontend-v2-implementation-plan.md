@@ -2907,7 +2907,7 @@ Verification:
 
 ### Phase 11E4A3: Static Object Material Binding Tables
 
-Status: in progress; Phase 11E4A3a and Phase 11E4A3b complete.
+Status: in progress; Phase 11E4A3a, Phase 11E4A3b, and Phase 11E4A3b1 complete.
 
 Purpose: recover V1-style cross-material static-object compaction before `outdoor-detail` generated scenery and transparent object/part sorting broaden the static-object surface area.
 
@@ -2951,11 +2951,11 @@ Implementation split:
   - Status: complete on 2026-06-12 for the explicit runtime materialization boundary and binding validation. Actual static-object fine partitioning by committed pages/role slots remains in 11E4A3d-11E4A3e after the table draw-unit contract exists.
 - Phase 11E4A3b1: Table Contract Cutover Resteer.
   - Re-check whether 11E4A3c should add table fields directly to `StaticObjectGeometryStaticDrawUnit` or introduce a materialized static-object draw-unit subtype/adapter first. The new runtime materializer validates committed bindings for existing draw units, but cannot fine-split static-object table candidates until the draw-unit contract can represent table entries and selector streams.
-  - Status: next.
+  - Status: complete on 2026-06-12.
 - Phase 11E4A3c: Table Contract And One-Entry Renderer Cutover.
-  - Add `StaticObjectMaterialTableEntry`-style contract fields and a `materialSlotIndices` selector stream to `StaticObjectGeometryStaticDrawUnit`.
-  - Convert materialized one-entry draw units to the table contract without loosening coarse partitioning yet.
-  - Convert WebGL2 static-object upload and shader uniforms to consume the table path for the one-entry case.
+  - Add `StaticObjectMaterialTableEntry`-style contract fields and a `materialSlotIndices` selector stream directly to `StaticObjectGeometryStaticDrawUnit`; do not introduce a public parallel `StaticObjectTableGeometryStaticDrawUnit` subtype.
+  - Convert materialized one-entry draw units to the table contract without loosening coarse partitioning yet. Keep current singular fields only as derived compatibility/debug summaries until cleanup, not as a second renderer path.
+  - Convert WebGL2 static-object upload and shader uniforms to consume the table path for the one-entry case, using one entry and one selector value per vertex.
   - Update existing static-object tests to prove opaque, alpha-test, indexed-paletted, and detail-overlay rendering still use equivalent draw units.
 - Phase 11E4A3d: Static Object Role Slots.
   - Add static-object draw-local role slot assignment in the texture manager/materializer for base-color, index, palette, and detail roles instead of hardcoding slot `0`.
@@ -3005,6 +3005,7 @@ Spicy bits:
 - Phase 11E4A3a intentionally keeps the final compatibility key conservative by including the concrete `materialEntryKey`. Texture A/B still become separate final partitions today even when their coarse table schema matches. The important course correction is that the partitioner now exposes the distinction between table schema and concrete material entry, so 11E4A3b/11E4A3e can move that split to placement-aware materialization instead of doing it prematurely in the coarse baker.
 - The one-entry compatibility path is still a bridge, not a destination. Keeping it too long would recreate parallel renderer contracts; Phase 11E4A3 should cut it over decisively once the table contract exists.
 - Phase 11E4A3b exposed that the existing runtime already had an async "static materialization" queue, but it was only sequencing texture placement before forwarding original baked draw units. The new `materializeStaticCommit` boundary now consumes committed texture bindings and rejects textured draw units with missing bindings before renderer residency. That is the right insertion point for later fine partitioning, but it deliberately does not pretend to split table candidates before the table draw-unit contract exists.
+- Phase 11E4A3b1 chooses direct contract extension over a new public materialized static-object subtype. V1's parity shape is one compacted geometry layout carrying material-slot selectors, and the V2 design already expects static-object draw units to grow bounded material entries/selectors. A separate public subtype would preserve the old single-binding path as a parallel contract and make renderer/static inspection support both shapes. Internal helper/adapters during implementation are fine; the renderer-facing contract should become table-capable in place.
 
 Failed to close:
 
@@ -3019,6 +3020,12 @@ Phase 11E4A3b execution notes:
 - Moved static draw-unit translation out of `client-runtime.ts` and into the materializer so future fine materialization can preserve placement/source records while rewriting draw units.
 - Added binding completeness validation: a textured terrain/static-object draw unit must have committed texture bindings for every declared `textureUseId` before it can enter renderer residency.
 - Added focused materializer tests covering successful textured materialization, missing binding rejection, and untextured draw units without texture updates.
+
+Phase 11E4A3b1 execution notes:
+
+- Re-checked the V1 compaction shape in `apps/holtburger-3d/src/lib/world-display/compaction/compacted-geometry.ts`: V1 uses one compacted geometry batch layout with `materialSlotIndices`, draw slices, and material-slot records rather than a separate public draw-unit subtype for one-entry versus table-backed geometry.
+- Re-checked the current V2 WebGL2 static-object path: it has one `StaticObjectGeometryResource`, one static-object shader pair, and singular material/texture uniforms. Introducing a second renderer-facing subtype now would require duplicated upload/draw/inspection branches before table batching is even active.
+- Decision: 11E4A3c should extend `StaticObjectGeometryStaticDrawUnit` in place with table entries and selectors. The current singular fields may remain temporarily as derived summaries so existing diagnostics/tests stay legible during cutover, but they should not define a separate compatibility path after the shader consumes the table contract.
 
 ### Phase 11E4B: Outdoor Detail Generated Scenery Cutout
 

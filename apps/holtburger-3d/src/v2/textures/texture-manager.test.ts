@@ -18,6 +18,7 @@ import type {
 	TexturePackingJob,
 	TexturePackingResult,
 } from "./packing/protocol";
+import { MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW } from "../renderer/types";
 import { TextureManager } from "./texture-manager";
 
 const STABLE_TEXTURE_REF_ID =
@@ -627,6 +628,135 @@ describe("V2 texture manager", () => {
 					}),
 				]),
 			);
+		} finally {
+			warnSpy.mockRestore();
+		}
+	});
+
+	it("assigns static object base-color role pages per draw unit", async () => {
+		const assetService = new FixtureAssetService();
+		const rectsByTextureUseId = new Map<
+			string,
+			FixtureTexturePackerRectPlacement
+		>([
+			[
+				"static-a:base:0",
+				{
+					pageHeight: 512,
+					pageId: "static-base-page:0",
+					pageWidth: 512,
+					rect: [96, 96, 1, 1],
+				},
+			],
+			[
+				"static-a:base:1",
+				{
+					pageHeight: 512,
+					pageId: "static-base-page:1",
+					pageWidth: 512,
+					rect: [96, 96, 1, 1],
+				},
+			],
+		]);
+		const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
+		const textureManager = new TextureManager({ assetService, texturePacker });
+
+		const update = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedDrawUnitIds: [],
+			revision: 1,
+			staticBatchId: "batch-a",
+			textureUses: [
+				createTextureUseCommit({
+					domain: "outdoor-buildings",
+					drawUnitId: "static-a",
+					renderSurfaceId: 0x06000010,
+					textureUseId: "static-a:base:0",
+					usage: "rgba-color",
+				}),
+				createTextureUseCommit({
+					domain: "outdoor-buildings",
+					drawUnitId: "static-a",
+					renderSurfaceId: 0x06000020,
+					textureUseId: "static-a:base:1",
+					usage: "rgba-color",
+				}),
+			],
+		});
+
+		expect(update?.drawUnitBindings).toEqual([
+			expect.objectContaining({
+				drawUnitId: "static-a",
+				rolePage: { kind: "static-base-color", slot: 0 },
+				textureUseId: "static-a:base:0",
+			}),
+			expect.objectContaining({
+				drawUnitId: "static-a",
+				rolePage: { kind: "static-base-color", slot: 1 },
+				textureUseId: "static-a:base:1",
+			}),
+		]);
+	});
+
+	it("records static object role-page overflow without collapsing to slot zero", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const assetService = new FixtureAssetService();
+			const textureUses = Array.from(
+				{ length: MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW + 1 },
+				(_, index) =>
+					createTextureUseCommit({
+						domain: "outdoor-buildings",
+						drawUnitId: "static-overflow",
+						renderSurfaceId: 0x06000010 + index,
+						textureUseId: `static-overflow:base:${index}`,
+						usage: "rgba-color",
+					}),
+			);
+			const rectsByTextureUseId = new Map<
+				string,
+				FixtureTexturePackerRectPlacement
+			>(
+				textureUses.map((textureUse, index) => [
+					textureUse.textureUseId,
+					{
+						pageHeight: 512,
+						pageId: `static-overflow-page:${index}`,
+						pageWidth: 512,
+						rect: [96, 96, 1, 1],
+					},
+				]),
+			);
+			const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
+			const textureManager = new TextureManager({ assetService, texturePacker });
+
+			const update = await textureManager.applyStaticCommitDelta({
+				addedDrawUnits: [],
+				removedDrawUnitIds: [],
+				revision: 1,
+				staticBatchId: "batch-a",
+				textureUses,
+			});
+
+			expect(update?.drawUnitBindings).toHaveLength(
+				MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
+			);
+			expect(
+				update?.drawUnitBindings.map((binding) => binding.rolePage),
+			).toEqual([
+				{ kind: "static-base-color", slot: 0 },
+				{ kind: "static-base-color", slot: 1 },
+				{ kind: "static-base-color", slot: 2 },
+				{ kind: "static-base-color", slot: 3 },
+			]);
+			expect(textureManager.createDiagnosticsReport().warnings).toEqual([
+				{
+					count: 1,
+					kind: "static-object-role-page-overflow",
+					latestDrawUnitId: "static-overflow",
+					latestRole: "static-base-color",
+				},
+			]);
 		} finally {
 			warnSpy.mockRestore();
 		}

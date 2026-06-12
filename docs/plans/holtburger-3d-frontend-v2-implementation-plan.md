@@ -2907,7 +2907,7 @@ Verification:
 
 ### Phase 11E4A3: Static Object Material Binding Tables
 
-Status: in progress; Phase 11E4A3a through Phase 11E4A3c complete.
+Status: in progress; Phase 11E4A3a through Phase 11E4A3d1 complete.
 
 Purpose: recover V1-style cross-material static-object compaction before `outdoor-detail` generated scenery and transparent object/part sorting broaden the static-object surface area.
 
@@ -2958,10 +2958,13 @@ Implementation split:
   - Convert WebGL2 static-object upload and shader uniforms to consume the table path for the one-entry case, using one entry and one selector value per vertex.
   - Update existing static-object tests to prove opaque, alpha-test, indexed-paletted, and detail-overlay rendering still use equivalent draw units.
   - Status: complete on 2026-06-12 for the one-entry table contract and shader/upload cutover.
-- Phase 11E4A3d: Static Object Role Slots.
+- Phase 11E4A3d1: Static Object Role Slot Assignment.
   - Add static-object draw-local role slot assignment in the texture manager/materializer for base-color, index, palette, and detail roles instead of hardcoding slot `0`.
   - Add fixed static object role-page limits and overflow diagnostics/tests.
+  - Status: complete on 2026-06-12 for texture-manager role-slot assignment, fixed static role-page limits, and typed diagnostics/tests.
+- Phase 11E4A3d2: Static Object Role Slot Renderer Tables.
   - Teach the renderer to bind static object role slot textures and upload material-entry rect/page arrays from committed `TextureDrawUnitBinding` records.
+  - Keep this as a separate shader/material-entry contract step from slot assignment because WebGL2 sampler/page-array expansion needs focused shader tests and a browser/GPU smoke pass.
 - Phase 11E4A3e: Multi-Entry Partitioning And Selector Baking.
   - Batch table-compatible opaque/alpha-test entries across concrete texture/data-use identities at the coarse stage.
   - Emit selector values in baked/materialized geometry and material-entry tables in stable order.
@@ -3008,11 +3011,13 @@ Spicy bits:
 - Phase 11E4A3b exposed that the existing runtime already had an async "static materialization" queue, but it was only sequencing texture placement before forwarding original baked draw units. The new `materializeStaticCommit` boundary now consumes committed texture bindings and rejects textured draw units with missing bindings before renderer residency. That is the right insertion point for later fine partitioning, but it deliberately does not pretend to split table candidates before the table draw-unit contract exists.
 - Phase 11E4A3b1 chooses direct contract extension over a new public materialized static-object subtype. V1's parity shape is one compacted geometry layout carrying material-slot selectors, and the V2 design already expects static-object draw units to grow bounded material entries/selectors. A separate public subtype would preserve the old single-binding path as a parallel contract and make renderer/static inspection support both shapes. Internal helper/adapters during implementation are fine; the renderer-facing contract should become table-capable in place.
 - Phase 11E4A3c uses one-entry uniform arrays in the WebGL2 static-object shader. That is intentionally not the final role-slot/table capacity design; it proves the renderer consumes material-slot selectors and material entries before 11E4A3d expands texture role pages and 11E4A3e allows multi-entry coarse partitions.
+- Phase 11E4A3d1 split static role-slot assignment from renderer multi-slot sampling. The texture manager can now produce draw-unit-local static slots and overflow diagnostics, but the WebGL2 static-object shader still samples one texture/page per role until 11E4A3d2 uploads role-page arrays and material-entry page selectors.
 
 Failed to close:
 
-- Multi-entry renderer material tables are not implemented yet. Phase 11E4A3c added the one-entry table contract and selector path, but final static-object partitions still remain one concrete material entry each until 11E4A3d-11E4A3e add role slots and loosen coarse partitioning.
+- Multi-entry renderer material tables are not implemented yet. Phase 11E4A3c added the one-entry table contract and selector path, and Phase 11E4A3d1 added static role-slot assignment, but final static-object partitions still remain one concrete material entry each until 11E4A3d2-11E4A3e add renderer page arrays and loosen coarse partitioning.
 - Fine partitioning by actual committed texture refs/pages is not implemented yet because the current materializer still receives already-materialized one-entry static-object draw units.
+- The renderer still binds only one static texture/index/palette/detail sampler and rect per role. Role slots greater than zero are now represented in `TextureDrawUnitBinding`, but they are not yet sampled by the static-object shader. Current coarse partitioning keeps live draw units one-entry, so this is a staged contract step rather than a broadened renderer behavior.
 - The derived singular static-object fields remain in `StaticObjectGeometryStaticDrawUnit` as temporary compatibility/debug summaries. They are explicitly cleanup targets for 11E4A3f once tests and renderer code stop consuming them.
 - `outdoor-detail` generated scenery remains blocked behind this phase to avoid multiplying draw-unit churn for foliage.
 - True blended/additive support remains blocked behind 11E4C-11E4E.
@@ -3037,6 +3042,14 @@ Phase 11E4A3c execution notes:
 - Updated the WebGL2 static-object vertex shader/resource upload to bind the selector stream at attribute location `2`, matching the V1 compacted geometry parity shape.
 - Updated the WebGL2 static-object fragment shader to consume one-entry material-table uniform arrays for material mode, color/emissive, alpha test, indexed format, palette first index, detail tiling/enabled state, and wrap mode.
 - Added focused static-object bake assertions proving the one-entry material table and selector stream are emitted for existing opaque texture-RGBA output.
+
+Phase 11E4A3d1 execution notes:
+
+- Added fixed renderer-owned static object role-page limits for base-color, index, palette, and detail roles.
+- Replaced static-object slot-zero binding stubs in the texture manager with draw-unit-local role slot assignment. Static base/index/palette/detail bindings now reuse a slot for the same committed texture ref and allocate the next slot for distinct committed refs.
+- Added typed static-object role-page overflow diagnostics to the texture atlas diagnostics report. Overflow omits excess bindings for that draw unit/role instead of collapsing them to slot zero.
+- Added focused texture-manager tests proving static object base-color pages receive distinct slots and over-capacity static role pages report `static-object-role-page-overflow`.
+- Split the remaining renderer-side shader/material-entry page-array work into Phase 11E4A3d2 because sampler-array/page-selector upload is a larger WebGL2 contract change than slot assignment.
 
 ### Phase 11E4B: Outdoor Detail Generated Scenery Cutout
 

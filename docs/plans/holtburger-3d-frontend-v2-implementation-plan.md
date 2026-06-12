@@ -2289,7 +2289,7 @@ Dry-run findings:
 - v1 already has separate submit paths for indexed P8/P16 and texture-page materials. V2 should not duplicate that shape blindly, but it should expect indexed/palette support to require explicit renderer programs or explicit shader branches.
 - 11B2C made palette views representable through explicit range fields, but current planner output still uses a full 256-entry fallback until resolver/material facts expose the richer subpalette view. 11E should close that semantic gap for indexed/paletted rendering.
 - Detail overlays should be added as a material-role extension that composes with existing static families, not as a separate source-domain feature.
-- `outdoor-detail` and `env-cell-static` should remain out of Phase 11E unless a rendered material family requires a source sample from those domains. Breadth belongs in Phase 12.
+- `outdoor-detail` generated scenery should move forward once alpha-test/cutout coverage needs real foliage targets. Broader explicit-object `outdoor-detail` and `env-cell-static` breadth belongs in Phase 12 unless a focused material slice proves it must arrive earlier.
 - Each new rendered family should add a focused visual target. Static material parity is too varied to validate with one landblock.
 
 Dry-run conclusion:
@@ -2385,7 +2385,7 @@ Acceptance criteria:
 
 Implementation notes:
 
-- Opaque and alpha-test static-object `indexed-paletted` material plans are now render candidates when both a stageable index texture use and palette texture use are present. Translucent/additive indexed materials remain render-deferred for Phase 11E4.
+- Opaque and alpha-test static-object `indexed-paletted` material plans are now render candidates when both a stageable index texture use and palette texture use are present. Translucent/additive indexed materials remain render-deferred for the Phase 11E4C-11E4E blended-material sequence.
 - The texture manager stages `index8`, `index16`, and `palette-rgba` through the same `StaticBakeTextureUse` commit path as RGBA textures. Index and palette data commit as direct single-source placements under texture-manager-owned refs/leases because the RGBA atlas packer is not the correct vehicle for integer index data.
 - Runtime texture policy now has explicit `index8`, `index16`, and `palette-rgba` sample classes. These force nearest filtering, no mipmaps, and anisotropy 1 even when the global texture filter is linear or anisotropic.
 - WebGL2 static-object rendering has a typed indexed/paletted material mode with explicit index and palette lookup textures. Missing index or palette residency renders magenta instead of silently falling back.
@@ -2621,7 +2621,7 @@ Acceptance criteria:
 Spicy notes:
 
 - The v1 `RG8` `index16` upload is not neighbor packing. It stores the low/high bytes of one 16-bit index texel; neighbors are sampled as four separate texels in shader.
-- This phase should not broaden material family support. Detail overlays remain Phase 11E3 work, and translucent/additive indexed materials remain Phase 11E4 work unless the shader parity fix reveals a strictly necessary contract correction.
+- This phase should not broaden material family support. Detail overlays remain Phase 11E3 work, and translucent/additive indexed materials remain Phase 11E4C-11E4E work unless the shader parity fix reveals a strictly necessary contract correction.
 - `RG8` is the chosen V2 parity format for `index16`. It has better practical compatibility than `R16UI` because it stays on the ordinary normalized `sampler2D` path while preserving exact low/high index bytes through shader reconstruction.
 
 Closed:
@@ -2655,7 +2655,7 @@ Current steering:
 
 - This phase was swapped ahead of translucent/additive pass support after 11E2C because it has a concrete observed target and lower render-state risk. Manual diagnostics on `0xda55ffff` showed `detailRoleCount: 3` and `detail-overlay-render-deferred: 3`, with all outdoor-building triangles otherwise rendered.
 - Treat material-coverage fallback diagnostics as the phase's main progress signal: the detail-overlay fallback count should drop only when the detail role is actually resolved, packed, bound, and sampled.
-- Scope detail overlays to already-renderable static material/pass combinations first: opaque/alpha-test `texture-rgba`, opaque `indexed-paletted`, and opaque `flat-color` if the composition contract is straightforward. A detail overlay attached to translucent/additive material must remain render-deferred until Phase 11E4 owns blend/depth ordering.
+- Scope detail overlays to already-renderable static material/pass combinations first: opaque/alpha-test `texture-rgba`, opaque `indexed-paletted`, and opaque `flat-color` if the composition contract is straightforward. A detail overlay attached to translucent/additive material must remain render-deferred until the Phase 11E4C-11E4E blended-material sequence owns blend/depth ordering.
 - Preserve the current static object source-domain boundary. Detail overlays are material roles on static object surfaces; they are not a reason to pull the broader `outdoor-detail` source domain into this phase.
 
 Deliverables:
@@ -2678,7 +2678,7 @@ Acceptance criteria:
 Closed:
 
 - Static object detail overlays are now resolved from region detail role facts through static-object texture refs. The outdoor static resolver explicitly resolves region-profile detail surface/render-surface dependencies into those refs, so resolved building detail roles emit `rgba-detail` prepared render-surface uses; unresolved roles remain explicit `missing-detail-render-surface` diagnostics.
-- Detail overlays compose as material texture roles on already-renderable outdoor-building materials instead of creating an `outdoor-detail` source-domain shortcut. Translucent/additive materials still defer detail composition until Phase 11E4 owns blend/depth ordering.
+- Detail overlays compose as material texture roles on already-renderable outdoor-building materials instead of creating an `outdoor-detail` source-domain shortcut. Translucent/additive materials still defer detail composition until the Phase 11E4C-11E4E blended-material sequence owns blend/depth ordering.
 - Compatibility keys and material bucket keys include the detail role texture identity and tiling, so surfaces with different detail bindings do not merge into one draw unit.
 - Static-object bake output now carries `detailTextureUseId` and `detailTextureTiling`. Detail texture uses stage through the normal texture manager/atlas path with repeat sampling independent from the base material's clamp/repeat intent.
 - Renderer texture role pages now include `static-detail`; the WebGL2 static-object shader binds a fourth static texture unit and applies the v1 static detail formula `base * (detail.rgb + (1 - detail.a))`, so detail alpha controls how much the overlay modulates the material-modulated base RGB.
@@ -2687,13 +2687,13 @@ Closed:
 Spicy bits:
 
 - Detail wrap is intentionally independent from base material wrap. V1 static detail refs are repeat-wrapped, so the V2 bake path forces `rgba-detail` static object uses to `wrap:repeat` even when the base material variant is clamp.
-- The first slice only composes the `building` role for `outdoor-buildings`. `object` detail remains disabled/deferred, matching the v1 role policy, and `outdoor-detail` / `env-cell-static` breadth remains Phase 12 territory.
+- The first slice only composes the `building` role for `outdoor-buildings`. `object` detail remains disabled/deferred, matching the v1 role policy. `outdoor-detail` generated scenery is now scheduled for Phase 11E4B, while broader explicit-object `outdoor-detail` and `env-cell-static` breadth remains Phase 12 territory.
 - The shader currently implements building detail's constant v1 static detail composition. It carries tiling now, but does not invent distance fade behavior for static building detail roles.
 
 Failed to close:
 
 - No live browser screenshot or GPU pixel test was run in this pass; validation is focused unit coverage, typecheck, lint, dead-code, and full TypeScript test coverage.
-- Detail overlays attached to translucent/additive materials remain deferred until Phase 11E4 implements pass ordering and depth/blend behavior.
+- Detail overlays attached to translucent/additive materials remain deferred until the Phase 11E4C-11E4E blended-material sequence implements pass ordering and depth/blend behavior.
 
 Verification:
 
@@ -2703,31 +2703,161 @@ Verification:
 - `cd apps/holtburger-3d && npm run lint:dead`
 - `cd apps/holtburger-3d && npm run test:ts`
 
-### Phase 11E4: Translucent And Additive Static Passes
+Phase 11E4 dry-run course correction:
+
+- The current browser runtime only routes `outdoor-terrain` and `outdoor-buildings` through the real resolver/baker worker path. `outdoor-detail` is already scheduled by demand planning, but it currently falls back to placeholders in browser mode. Phase 11E4B therefore needs runtime routing in addition to resolver support.
+- The current static resolver worker only dispatches `outdoor-buildings` to `OutdoorStaticObjectsResolver`, and the resolver itself rejects every non-`outdoor-buildings` job. Phase 11E4B must update both gates.
+- The static-object baker already accepts `outdoor-detail`, and `StaticObjectGeometryStaticDrawUnit.domain` already includes `outdoor-detail`, so 11E4B should reuse the existing bake product shape instead of inventing a second object pipeline.
+- The current partitioner includes source/gfx identity in a single flat compatibility key, but not object identity. That is correct for compacting opaque/alpha-test repeated objects and should not be accidentally undone. Phase 11E4A should make source ownership explicit as metadata and policy input, while only forcing object/part partitioning when the sort policy requires it.
+- The current draw-unit contract only permits `materialPass: "opaque" | "alpha-test"`, and `isRenderableStaticObjectPartition` explicitly filters to those passes. Phase 11E4C can expose typed blended render-state facts while keeping true blended output deferred; Phase 11E4D owns widening baked static-object draw units to carry transparent/additive pass state and sort metadata.
+- The WebGL2 renderer currently draws all static-object resources in insertion order with depth testing enabled and no explicit blend/depth-mask scheduling. Phase 11E4E must introduce a separate depth-writing static pass and a transparent/additive pass, sort only transparent object/part resources each frame, and restore GL state after the pass.
+
+### Phase 11E4A: Static Object Partition Axes
 
 Status: planned.
 
-Purpose: add static object pass-order and blend/depth handling for translucent/additive materials after opaque, alpha-test, solid, indexed, and detail-overlay paths are structurally separated.
+Purpose: reshape static object partitioning so future material, sorting, and visibility axes can be added deliberately instead of overloading one material compatibility key.
 
 Current steering:
 
-- This phase was moved after detail overlays because the current audited `0xda55ffff` target showed transparent material counts but zero transparent triangles. It is useful for classification sanity only, not blend rendering validation.
-- Before implementation, identify or audit a landblock with actual translucent/additive static-object triangle coverage so visual verification exercises real blended geometry.
-- Fold in detail-overlay composition only where pass ordering is already correct. Do not mix detail overlay implementation questions with blend sorting questions if that would obscure either diagnostic signal.
+- The current static object partitioner is good enough for opaque outdoor buildings, but its single flat compatibility key mixes material compatibility with source ownership and has no explicit sort/visibility partition axis.
+- V2 should keep the design-doc shape in mind: static draw units are domain-owned output records with material/render compatibility, pass/order constraints, source mappings, spatial records, visibility records, and renderer-ingestible metadata as separate facts.
+- This phase should preserve current rendered output. It is an internal shape correction before `outdoor-detail`, blended materials, and later env-cell visibility partitioning increase pressure on the partitioner.
 
 Deliverables:
 
-- Render-state/pass partitioning for translucent, inverse-alpha, additive, and related blend cases.
-- Renderer pass ordering and depth-write/depth-test behavior for static object translucent/additive draw units.
-- Tests proving translucent/additive classification, partition splitting, draw ordering, renderer state setup, and fallback behavior.
-- Visual verification on audited landblocks with nonzero translucent/additive static triangles.
+- Refactor static object candidate/partition construction around named partition axes:
+  - material/render compatibility axis: shader family, pass, alpha policy, blend state, sampler/wrap state, texture-role layout, material color/emissive constants;
+  - source/ownership axis: landblock/env-cell domain ownership, source asset, gfx object, object instance, and part identity as typed facts;
+  - sort axis: opaque batchable, alpha-test batchable, or transparent object/part sortable;
+  - visibility axis placeholder: a typed, currently neutral key that can later carry env-cell/resident-cell visibility flags without rewriting material bucketing;
+  - capacity axis: bounded material-table slicing.
+- Introduce a partition policy/signature builder that decides which axes participate in the grouping key for a given pass. Opaque and alpha-test/cutout policy should remain batchable across compatible object instances; transparent policy should be prepared to use object/part ownership as a grouping key.
+- Preserve existing static source mappings and spatial-record output while making their source ownership inputs come from the typed axes instead of re-parsing the flat compatibility key.
+- Keep existing opaque/alpha-test building output behavior unchanged.
+- Add tests proving that changing material compatibility, sort policy, visibility key, or material-table capacity creates deterministic partitions.
+- Add tests proving object/part ownership is carried as metadata but does not split compatible opaque/alpha-test batches until the partition policy is transparent object/part sortable.
+- Add tests proving no V2 imports from legacy `world-display` are introduced while porting partition vocabulary.
+
+Acceptance criteria:
+
+- Existing `outdoor-buildings` unit tests continue to pass with equivalent draw-unit counts, source mappings, texture uses, and material coverage for opaque/alpha-test cases.
+- The partitioner exposes enough typed structure that transparent object/part sorting and env-cell visibility partitioning can be added without replacing the core grouping flow.
+- Alpha-test/cutout remains an opaque/depth-writing batchable pass, not a transparent sorting path.
+- Repeated compatible opaque/cutout objects still compact together where they do today; this phase must not create a silent draw-unit explosion.
+
+### Phase 11E4B: Outdoor Detail Generated Scenery Cutout
+
+Status: planned.
+
+Purpose: fast-track the `outdoor-detail` domain so generated scenery, especially tree foliage, exercises the existing alpha-test/cutout static path before true blended transparency work.
+
+Current steering:
+
+- `outdoor-detail` is already a V2 static domain and the bake worker accepts it, but the source resolver currently only supports `outdoor-buildings` and filters landblock statics to `kind === "building"`.
+- Browser-mode routing currently sends `outdoor-detail` work to placeholder resolver/baker paths even though demand planning schedules it. This must be changed in the same phase as resolver support, or generated scenery will never render in the live app.
+- Host outdoor statics distinguish `building` and `generated-scenery`; most outdoor trees/foliage should arrive through generated scenery.
+- This phase should prove generated scenery and alpha-test coverage without broadening into env-cell statics or true blended sorting.
+- Generated scenery should not inherit the `building` detail-overlay role. Keep outdoor-detail detail-overlay composition disabled unless v1 evidence proves an object/detail role policy for this domain.
+
+Deliverables:
+
+- Resolver support for `outdoor-detail` jobs that selects generated-scenery members from the landblock outdoor payload.
+- Scope payloads for `outdoor-detail` that reuse the static object source/material/texture fact model while preserving `domain: "outdoor-detail"` and generated-scenery provenance.
+- Static resolver worker routing and browser runtime resolver/baker routing for `outdoor-detail` so scheduled detail jobs use the real resolver and static-object baker instead of placeholders.
+- Empty-subset handling for outdoor landblocks with no generated scenery: return a valid `outdoor-detail` static object payload and zero draw units rather than failing the scheduled work item.
+- Tests proving generated-scenery instances resolve, material slots and texture refs are preserved, and missing generated dependencies remain typed missing refs.
+- Bake tests proving `outdoor-detail` alpha-test/cutout partitions produce renderable static object draw units through the existing opaque/depth-writing path.
+- Runtime routing tests proving `outdoor-detail` uses the source resolver/worker baker in browser mode.
+- Harness/material-coverage diagnostics for a known landblock with generated-scenery tree/foliage coverage.
+
+Acceptance criteria:
+
+- `outdoor-detail` no longer fails at the resolver boundary for supported generated-scenery landblocks.
+- Tree/foliage-style alpha-test materials are rendered as alpha-test/cutout static object draw units, not transparent blended draw units.
+- `outdoor-buildings` behavior remains unchanged.
+- `outdoor-detail` breadth remains limited to generated scenery unless explicit-object evidence requires a narrow inclusion.
+- Landblocks without generated scenery produce no-op `outdoor-detail` results instead of resolver/baker errors.
+
+### Phase 11E4C: Static Blended Material Contract
+
+Status: planned.
+
+Purpose: represent true translucent, inverse-alpha, and additive static materials as typed render-state facts without pretending they are opaque-compatible baked batches.
+
+Current steering:
+
+- Earlier V1/V2 material work established that alpha-test/cutout materials are depth-writing discard materials, while true alpha-blended/translucent/additive materials need sortable transparent submissions.
+- Do not sort blended materials at triangle level. The target granularity is object/part-level draw units with a stable sort center/bounds.
+- This phase is contract and classification work. Renderer sorting arrives later.
+- The material planner already derives private blend/depth facts and currently marks non-depth-writing static materials as `classified-render-deferred`. This phase should make that render-state contract explicit and reusable without prematurely turning blended partitions into rendered draw units.
+
+Deliverables:
+
+- Typed static object render-state contract for blend mode, blend enablement, source/destination factors, depth write, alpha test, and pass/order class.
+- Material planner changes that expose renderable alpha-test/cutout and currently deferred true blended materials using the V1 blend-factor parity matrix.
+- Partition metadata that marks true blended candidates as object/part sortable and render-deferred instead of material-table batchable rendered output.
+- Coverage diagnostics that preserve deferred true blended triangle counts by family, pass, and blend mode, including indexed-paletted blended materials.
+- Tests proving alpha-test remains opaque/depth-writing and true blended/additive modes carry the expected typed render-state facts.
 
 Acceptance criteria:
 
 - Blend support is expressed through typed pass/render-state contracts, not shader-side ad hoc flags alone.
+- True blended materials remain diagnostic-backed until object/part sortable draw units and renderer ordering are implemented.
+- Coverage diagnostics distinguish alpha-test/cutout rendered triangles from true blended deferred triangles.
+- No renderer path consumes transparent/additive static-object draw units before 11E4D/11E4E owns their draw-unit and pass semantics.
+
+### Phase 11E4D: Object/Part Transparent Static Draw Units
+
+Status: planned.
+
+Purpose: emit renderer-ingestible transparent/additive static object draw units at object/part granularity so the renderer can sort them by distance.
+
+Deliverables:
+
+- Partition policy that splits true blended/additive static materials by object instance, source/gfx part, render state, texture-role layout, and capacity constraints.
+- Static-object draw-unit contract changes that allow transparent/additive material passes and carry the typed render state from 11E4C.
+- Sort metadata on transparent draw units, including renderer-local sort center/bounds source facts sufficient for back-to-front ordering.
+- Source mappings and spatial records for transparent object/part draw units.
+- Geometry bake support that computes sort center/bounds in the same landblock-render-local coordinate space as the baked positions, using object/part bounds when available and baked vertex bounds as the hard fallback.
+- Texture-use ownership support for transparent/additive draw units without merging texture ownership across order-dependent object/part units.
+- Tests proving blended triangles from different objects or parts do not merge into one order-dependent draw unit, while compatible opaque/alpha-test geometry still batches normally.
+
+Acceptance criteria:
+
+- Transparent/additive draw units are never triangle-level sorted by default.
+- Transparent/additive draw units carry enough object/part identity and bounds/sort metadata for renderer ordering and future inspection.
+- Existing opaque/alpha-test compaction remains deterministic and unaffected.
+- Renderability gates are updated intentionally: true blended partitions become renderer-ingestible only when they have the required render state, texture layout, object/part sort metadata, and stageable texture uses.
+
+### Phase 11E4E: Transparent Renderer Pass And Visual Review
+
+Status: planned.
+
+Purpose: render object/part-level transparent/additive static draw units after opaque and alpha-test passes using camera-distance sorting and V1 blend-factor parity.
+
+Current steering:
+
+- Before claiming visual parity, identify or audit a landblock with actual translucent/additive static-object triangle coverage. The earlier `0xda55ffff` target showed transparent material counts but zero transparent triangles, so it is useful for classification sanity only.
+- Sorting is object/part-level, not triangle-level. Any artifacts from intersecting transparent surfaces must be documented rather than hidden.
+
+Deliverables:
+
+- Renderer pass scheduler/order for static objects: opaque, alpha-test/cutout, then transparent/additive.
+- Back-to-front sort for transparent/additive object/part draw units using renderer-local camera distance and draw-unit sort metadata.
+- WebGL2 depth/blend state mapping for the typed static object render-state contract.
+- Renderer resource storage changes that can identify depth-writing static resources separately from transparent/additive resources without changing terrain rendering order.
+- Tests proving pass order, depth-write/depth-test behavior, blend-factor mapping, stable tie-breaking, and fallback behavior.
+- GL-state hygiene checks or tests proving blend/depth-mask state is restored after the transparent pass.
+- Visual verification on audited landblocks with nonzero translucent/additive static triangles.
+
+Acceptance criteria:
+
 - Opaque/alpha-test draw ordering remains deterministic and unaffected.
+- Transparent/additive draw units render after depth-writing passes with depth test enabled and depth write disabled unless the typed render state explicitly says otherwise.
 - Material coverage diagnostics identify a nonzero blended/static triangle target before claiming visual parity.
-- Any sorting limitations are explicitly documented before moving to Phase 12.
+- Object/part sorting limitations are explicitly documented before moving to Phase 12.
+- Transparent sorting is recalculated from the active camera each frame, but only for transparent/additive static resources.
 
 ### Phase 11E5: Static Material Family Resteer
 
@@ -2737,9 +2867,9 @@ Purpose: reassess static material parity before broadening static-object source 
 
 Deliverables:
 
-- Updated inventory of rendered, render-deferred, and unsupported static object material families after 11E1-11E4.
+- Updated inventory of rendered, render-deferred, and unsupported static object material families after 11E1-11E4E.
 - Explicit list of remaining unsupported material flags/source cases, with examples and planned destination phase.
-- Decision on whether Phase 12 can safely broaden source coverage to `outdoor-detail` / `env-cell-static`, or whether another focused material slice is required first.
+- Decision on whether Phase 12 can safely broaden source coverage to explicit-object `outdoor-detail` / `env-cell-static`, or whether another focused material slice is required first.
 - Plan updates for Phase 12 if material-table capacity, pass sorting, palette views, detail roles, or diagnostics changed the expected compaction work.
 
 Acceptance criteria:

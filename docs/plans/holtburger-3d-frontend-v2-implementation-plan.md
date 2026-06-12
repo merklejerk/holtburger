@@ -2846,7 +2846,7 @@ Verification:
 
 ### Phase 11E4A2: Static Object Material Binding Table Resteer
 
-Status: planned.
+Status: complete.
 
 Purpose: decide whether and how static object draw units should batch multiple material/texture bindings inside one draw unit, instead of treating every concrete texture/data-use identity and material constant set as a hard draw-unit split.
 
@@ -2870,6 +2870,125 @@ Acceptance criteria:
 - There is a concrete decision on whether cross-texture static object batching is in scope before transparent object/part draw units.
 - Future partition keys distinguish renderer-binding constraints from provenance facts and from not-yet-implemented material-table capacity.
 
+Decision:
+
+- Original audit decision was to defer real static-object material-binding tables until after the focused `outdoor-detail` generated-scenery slice and object/part transparent sorting work. Follow-up steering reversed that schedule: material-binding tables should be paid down sooner, before `outdoor-detail` multiplies source/material variety.
+- Promote real static-object material-binding tables into the immediate Phase 11E4A3, before Phase 11E4B. Until 11E4A3 lands, concrete texture/data-use identity, material color/emissive constants, palette view/range, detail texture identity/tiling, alpha-test threshold, and wrap policy remain hard renderer-binding partition keys.
+- Treat `materialIds` and `STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE` as coverage/diagnostic/capacity scaffolding in the current static-object path, not as proof that one draw unit can currently select among multiple materials at render time.
+- Preserve the V1 parity target: the old world-display compaction path had `position-uv-material-slot` geometry, bounded material-table partitions, and tests proving material-table overflow is partitioned rather than bypassed. V2 should recover that capability with a complete draw-unit/shader/renderer contract, not by half-adding table vocabulary ahead of renderer support.
+
+Audit findings:
+
+- `StaticObjectGeometryStaticDrawUnit` currently exposes `materialPass: "opaque" | "alpha-test"`, one `primaryTextureUseId`, one `indexTextureUseId`, one `paletteTextureUseId`, one `detailTextureUseId`, one `materialColor`, one `materialEmissiveColor`, one `alphaTest`, one `paletteFirstIndex`, and one `primaryTextureWrapMode`.
+- The WebGL2 static-object shader takes one texture rect per role (`uTextureRect`, `uIndexTextureRect`, `uPaletteTextureRect`, `uDetailTextureRect`), one `uMaterialColor`, one `uMaterialEmissiveColor`, one `uAlphaTest`, one `uPaletteFirstIndex`, and one `uWrapMode`.
+- The WebGL2 static-object resource path uploads only position and texcoord vertex buffers for static objects. There is no material-slot/index vertex attribute, no material-entry uniform/texture buffer, no per-triangle material selector, and no texture-rect table.
+- The current renderer resolves texture bindings by draw-unit texture-use ids. It cannot select texture A for some triangles and texture B for other triangles inside the same static-object draw unit even if both textures share an atlas page.
+
+Closed:
+
+- Completed the draw-unit, shader, renderer-binding, and V1 parity audit.
+- Documented the current single-binding limitation and the complete renderer contract required to remove it.
+- Follow-up steering promoted material-binding tables into Phase 11E4A3 before `outdoor-detail` generated scenery.
+- Updated 11E4B-11E4E and Phase 12 wording so current static-object batching does not imply cross-texture/material-table batching before Phase 11E4A3 lands.
+
+Spicy notes:
+
+- The phrase "material-table capacity" was too easy to misread as implemented renderer behavior. In current V2 static objects, capacity slicing exists as scaffolding around compatibility buckets; the renderer still consumes a single material binding set.
+- Implementing tables now would be a real renderer contract change, not a partitioner tweak. It needs material selector attributes or equivalent, bounded table uploads, texture/data-use entry tables, palette/detail handling, shader branches/lookups, and tests around overflow and binding-slot limits.
+
+Failed to close:
+
+- V2 still lacks V1-style cross-texture static-object compaction inside one draw unit.
+- No code changes or runtime visual pass were made in this phase; it is a decision/resteering phase. Phase 11E4A3 now owns the implementation.
+
+Verification:
+
+- Code audit only; no tests were run for this docs/plan-only phase.
+
+### Phase 11E4A3: Static Object Material Binding Tables
+
+Status: planned.
+
+Purpose: recover V1-style cross-material static-object compaction before `outdoor-detail` generated scenery and transparent object/part sorting broaden the static-object surface area.
+
+Current steering:
+
+- This is the implementation destination for the material-table parity gap identified in Phase 11E4A2.
+- Do not start by extracting V1 world-display helpers wholesale. Port the behavior shape: bounded material entries, material selector data in compacted geometry, texture/data-use table entries, draw-slice limits, and overflow diagnostics.
+- Physical atlas co-residency is necessary but not sufficient. The draw unit must carry renderer-visible selectors that map each vertex/triangle to the correct material entry and texture/palette/detail rects.
+- Keep the one-entry/single-binding case efficient and compatible. Existing static-object draw units should become the degenerate one-material-table-entry case, not a parallel renderer path.
+- Scope this phase to order-independent opaque and alpha-test/cutout static object draw units. True blended/additive object/part sorting remains Phase 11E4C-11E4E, but those phases should build on the table-capable binding contract where useful.
+- Mirror V1 render-family separation first. Do not try to merge `flat-color`, `texture-rgba`, and `indexed-paletted` into one mega-table in this phase. The important first win is merging compatible entries within the same table family, especially `texture-rgba` texture A/B/C cases and indexed-paletted entries with distinct index/palette data.
+- Use a two-stage static-object table pipeline instead of pretending the baker can know final atlas topology: coarse material compatibility planning before packing, then placement-aware fine materialization after texture packing resolves texture refs/pages/rects.
+
+Dry-run findings:
+
+- The current `StaticObjectGeometryStaticDrawUnit` is single-binding: one base/index/palette/detail texture-use id, one material color/emissive set, one alpha threshold, one palette first index, and one wrap mode.
+- The current WebGL2 static-object shader is also single-binding: one sampler/rect per role and one `uMaterialMode`. It has no material selector attribute and no material-entry uniform arrays.
+- Static object GPU upload currently creates only position and texcoord buffers. Terrain already has the closest pattern for selectors through `layerSlots`; static objects need a parallel material-slot selector stream.
+- The texture manager already has draw-unit-local role-page slot vocabulary, but static object roles are hardcoded to slot `0`. Material tables need static-object role slots per draw unit, otherwise texture A/B/C can only work when they collapse to the same bound texture role by accident.
+- Full atlas-page awareness is only known after texture packing/commit. The earlier dry-run idea of splitting by bounded unique texture-use slots in the baker is safe but too conservative and still leaks placement concerns into the wrong stage.
+- The cleaner shape is `coarse partition -> texture pack/resolve placements -> fine materialization`. Coarse partition groups by logical compatibility and table-family/schema facts. Fine materialization consumes actual placement records, assigns draw-local role slots, and splits only when the final texture refs/pages exceed role-slot or table-entry capacity.
+- A texture that cannot fit in a shared atlas page does not inherently invalidate the draw unit; direct placement or a separate page is still just a texture ref/page slot to the renderer. The invalidation/split case is when one coarse partition needs more committed pages for a role than the renderer role-slot limit can bind.
+- Use fixed static-object role slot limits, likely 4 slots per role family (`base-color`, `index`, `palette`, `detail`) as the first WebGL2-safe shape. That fits the WebGL2 minimum fragment texture-unit budget when implemented with explicit sampler uniforms, while still allowing common A/B/C batching. Larger limits can be raised after a renderer capability query or texture-array/table-texture design exists.
+- Existing `textureRoleLayoutKey` includes concrete texture/data-use identities, so it must split into a table-family/schema key and a per-material-entry key. The compatibility key should group by table family/schema, pass/order, sort/visibility/ownership policy, and capacity; the material table should carry concrete texture/data-use identities, material constants, palette range, detail state, alpha threshold, and wrap mode.
+- Vertex-level selectors are simpler than triangle-level selectors because static object baking already emits duplicated vertices per triangle. Write the material slot index to all three vertices for a triangle; the shader can read one float/int attribute and index material-entry arrays.
+- The one-entry case should use the same table shader path as multi-entry draw units. Do not keep a second single-binding static-object renderer path; otherwise later transparent/static inspection work will have to support both.
+- Detail overlays are part of the table entry. A shared building detail role should consume one detail role slot across many entries where possible; distinct detail texture uses or tiling/fade facts are table-entry compatibility facts.
+- Indexed-paletted entries need both index and palette role slots, indexed format, palette first index/range, and exact lookup semantics. They should remain a separate table family from RGBA entries in this phase.
+
+Implementation split:
+
+- Phase 11E4A3a: Coarse Table Plan Contract.
+  - Add a static-object coarse table plan/result that carries source triangles, table-family/schema compatibility, candidate material entries, material-entry keys, texture-use ownership, and source mappings without claiming final atlas page slots.
+  - Split `textureRoleLayoutKey` into role schema/table-family compatibility and concrete material-entry identity.
+  - Keep the current final draw-unit path as the materialized output for one-entry compatibility while the new plan shape is introduced behind tests.
+- Phase 11E4A3b: Placement-Aware Materialization Boundary.
+  - Add a materialization step after texture placement/commit data exists, or refactor the static coordinator/texture manager boundary so final static-object draw units are produced from coarse plans plus committed texture bindings.
+  - Fine-partition coarse table candidates by actual texture refs/pages, draw-local role-slot limits, and material-entry limits.
+  - Preserve static source/spatial records across materialization so inspection and picking do not depend on pre-materialized temporary ids.
+- Phase 11E4A3c: Table Contract And One-Entry Renderer Cutover.
+  - Add `StaticObjectMaterialTableEntry`-style contract fields and a `materialSlotIndices` selector stream to `StaticObjectGeometryStaticDrawUnit`.
+  - Convert materialized one-entry draw units to the table contract without loosening coarse partitioning yet.
+  - Convert WebGL2 static-object upload and shader uniforms to consume the table path for the one-entry case.
+  - Update existing static-object tests to prove opaque, alpha-test, indexed-paletted, and detail-overlay rendering still use equivalent draw units.
+- Phase 11E4A3d: Static Object Role Slots.
+  - Add static-object draw-local role slot assignment in the texture manager/materializer for base-color, index, palette, and detail roles instead of hardcoding slot `0`.
+  - Add fixed static object role-page limits and overflow diagnostics/tests.
+  - Teach the renderer to bind static object role slot textures and upload material-entry rect/page arrays from committed `TextureDrawUnitBinding` records.
+- Phase 11E4A3e: Multi-Entry Partitioning And Selector Baking.
+  - Batch table-compatible opaque/alpha-test entries across concrete texture/data-use identities at the coarse stage.
+  - Emit selector values in baked/materialized geometry and material-entry tables in stable order.
+  - Split fine materialized draw units only when committed page slots or table-entry capacity require it.
+  - Preserve object/part sortable transparent policy as a hard split for later 11E4C-11E4E work.
+- Phase 11E4A3f: Parity, Diagnostics, And Cleanup.
+  - Port V1 parity expectations around RGBA and indexed material-table overflow partitioning rather than bypassing.
+  - Add tests proving texture A/B/C merge into one draw unit when role-slot/table capacity allows, and split deterministically when it does not.
+  - Remove or downgrade legacy singular draw-unit fields once no renderer/test path consumes them, or clearly mark any retained singular fields as derived debug summaries.
+  - Run full V2 app verification plus a browser/GPU smoke test if the WebGL2 shader contract changes are nontrivial.
+
+Deliverables:
+
+- Static-object draw-unit contract additions for bounded material entries and a per-vertex or per-triangle material selector.
+- Coarse baker support that groups logically compatible material-table candidates without requiring final atlas page knowledge.
+- Placement-aware materialization support that fine-partitions by actual texture refs/pages, emits selector data, and partitions over capacity without dropping candidates.
+- Renderer upload support for the selector buffer plus material/texture/palette/detail entry tables.
+- Shader support for selecting material constants, alpha threshold, texture rects, palette ranges, detail roles, and wrap policy from the table.
+- Texture-use ownership and placement binding support where one draw unit may own multiple base/index/palette/detail texture uses.
+- Tests porting the V1 parity expectations: RGBA and indexed material-table overflow partitions instead of bypassing, atlas-capacity overflow stays distinct from material-table overflow, and unrelated source/gfx provenance does not split table-compatible batches.
+- Regression tests proving the one-entry case still renders current opaque, alpha-test, indexed-paletted, and detail-overlay static object draw units.
+
+Acceptance criteria:
+
+- Textures A/B/C can share a static-object draw unit only when the material-binding table has entries for each and geometry carries selectors that choose the correct entry.
+- Existing single-binding draw units remain valid as the one-entry table case.
+- Material-table capacity failures are typed diagnostics or capacity splits, not silent fallbacks.
+- Static-object role-slot overflow is deterministic at materialization/commit boundaries and covered by tests; the renderer must not silently bind the wrong page or draw missing material entries as if they were valid.
+- The baker does not partition by physical atlas page. Physical page/rect decisions happen in the texture/placement stage, and final legal draw units are produced by the fine materializer.
+- `texture-rgba` and `indexed-paletted` table batching are separate render-family paths unless/until a later phase proves cross-family table merging is useful and safe.
+- `outdoor-buildings` behavior remains correct while draw-unit counts may decrease where previous partitions differed only by table-capable renderer-binding entries.
+- Phase 11E4B starts only after generated scenery can use the table-capable static-object path.
+
 ### Phase 11E4B: Outdoor Detail Generated Scenery Cutout
 
 Status: planned.
@@ -2879,7 +2998,7 @@ Purpose: fast-track the `outdoor-detail` domain so generated scenery, especially
 Current steering:
 
 - `outdoor-detail` is already a V2 static domain and the bake worker accepts it, but the source resolver currently only supports `outdoor-buildings` and filters landblock statics to `kind === "building"`.
-- Phase 11E4A1 must close first so generated scenery does not amplify over-partitioning by source/gfx provenance. Phase 11E4A2 may close as a decision-only resteer if cross-texture material tables are deferred.
+- Phase 11E4A1 closed source/gfx over-partitioning. Phase 11E4A2 identified the single-binding renderer gap, and follow-up steering promoted material-binding tables into Phase 11E4A3. `outdoor-detail` generated scenery should wait for the table-capable static-object path so foliage does not amplify avoidable draw-unit churn.
 - Browser-mode routing currently sends `outdoor-detail` work to placeholder resolver/baker paths even though demand planning schedules it. This must be changed in the same phase as resolver support, or generated scenery will never render in the live app.
 - Host outdoor statics distinguish `building` and `generated-scenery`; most outdoor trees/foliage should arrive through generated scenery.
 - This phase should prove generated scenery and alpha-test coverage without broadening into env-cell statics or true blended sorting.
@@ -2916,12 +3035,13 @@ Current steering:
 - Do not sort blended materials at triangle level. The target granularity is object/part-level draw units with a stable sort center/bounds.
 - This phase is contract and classification work. Renderer sorting arrives later.
 - The material planner already derives private blend/depth facts and currently marks non-depth-writing static materials as `classified-render-deferred`. This phase should make that render-state contract explicit and reusable without prematurely turning blended partitions into rendered draw units.
+- Build blended render-state facts on top of the table-capable static-object binding contract from Phase 11E4A3. Do not treat blended ordering as triangle-level sorting or as a reason to bypass material-table capacity limits.
 
 Deliverables:
 
 - Typed static object render-state contract for blend mode, blend enablement, source/destination factors, depth write, alpha test, and pass/order class.
 - Material planner changes that expose renderable alpha-test/cutout and currently deferred true blended materials using the V1 blend-factor parity matrix.
-- Partition metadata that marks true blended candidates as object/part sortable and render-deferred instead of material-table batchable rendered output.
+- Partition metadata that marks true blended candidates as object/part sortable and render-deferred instead of order-independent batchable rendered output.
 - Coverage diagnostics that preserve deferred true blended triangle counts by family, pass, and blend mode, including indexed-paletted blended materials.
 - Tests proving alpha-test remains opaque/depth-writing and true blended/additive modes carry the expected typed render-state facts.
 
@@ -2940,7 +3060,7 @@ Purpose: emit renderer-ingestible transparent/additive static object draw units 
 
 Deliverables:
 
-- Partition policy that splits true blended/additive static materials by object instance, source/gfx part, render state, texture-role layout, and capacity constraints.
+- Partition policy that splits true blended/additive static materials by object instance, source/gfx part, render state, table-compatible texture/material binding layout, and material-table capacity constraints.
 - Static-object draw-unit contract changes that allow transparent/additive material passes and carry the typed render state from 11E4C.
 - Sort metadata on transparent draw units, including renderer-local sort center/bounds source facts sufficient for back-to-front ordering.
 - Source mappings and spatial records for transparent object/part draw units.
@@ -2972,6 +3092,7 @@ Deliverables:
 - Back-to-front sort for transparent/additive object/part draw units using renderer-local camera distance and draw-unit sort metadata.
 - WebGL2 depth/blend state mapping for the typed static object render-state contract.
 - Renderer resource storage changes that can identify depth-writing static resources separately from transparent/additive resources without changing terrain rendering order.
+- Preserve the Phase 11E4A3 table-capable static-object material path while adding transparent pass ordering; do not regress opaque/alpha-test table batching while adding transparent resource buckets.
 - Tests proving pass order, depth-write/depth-test behavior, blend-factor mapping, stable tie-breaking, and fallback behavior.
 - GL-state hygiene checks or tests proving blend/depth-mask state is restored after the transparent pass.
 - Visual verification on audited landblocks with nonzero translucent/additive static triangles.
@@ -2995,7 +3116,7 @@ Deliverables:
 - Updated inventory of rendered, render-deferred, and unsupported static object material families after 11E1-11E4E.
 - Explicit list of remaining unsupported material flags/source cases, with examples and planned destination phase.
 - Decision on whether Phase 12 can safely broaden source coverage to explicit-object `outdoor-detail` / `env-cell-static`, or whether another focused material slice is required first.
-- Plan updates for Phase 12 if material-table capacity, pass sorting, palette views, detail roles, or diagnostics changed the expected compaction work.
+- Plan updates for Phase 12 if material-table constraints, pass sorting, palette views, detail roles, or diagnostics changed the expected compaction work.
 
 Acceptance criteria:
 
@@ -3009,7 +3130,7 @@ Purpose: broaden static object coverage only after outdoor building source, mate
 Deliverables:
 
 - Additional static object/building/detail/env-cell asset-family support as needed by selected verification landblocks.
-- Draw-unit batching/compaction by compatible shader family, pass/order class, sampler bindings, sampler state, device state, domain, bounded material-table capacity, and placement revision assumptions.
+- Draw-unit batching/compaction by compatible shader family, pass/order class, table-compatible renderer-binding layout, sampler state, device state, domain, bounded material-table constraints, and placement revision assumptions.
 - Shared static bake partitioning helpers for compatibility-key construction, stable bucket sorting, bounded capacity partitioning, source-slice mapping, and fallback diagnostics, unless a domain-specific implementation records concrete non-isomorphic facts. Reuse should be based on compatibility facts, not by forcing unrelated domains into one draw-unit struct.
 - Static BVH/spatial record integration for terrain and static objects.
 - Lease accounting from resident static draw units to texture refs/placements.
@@ -3018,7 +3139,7 @@ Deliverables:
 Acceptance criteria:
 
 - Multiple static object material families can coexist without creating non-isomorphic renderer paths.
-- Buildings/detail/env-cell static objects that exceed one material table or binding layout are split into bounded draw slices/draw units with typed diagnostics, not silently dropped or rendered through a catch-all fallback.
+- Buildings/detail/env-cell static objects that exceed material-table or binding-layout capacity are split into bounded draw units with typed diagnostics, not silently dropped or rendered through a catch-all fallback.
 - Compaction is a bake concern and does not require renderer-side asset dependency knowledge.
 - Removing a static scope releases geometry and texture placement leases.
 - Static object enrichment remains independent from Svelte state and browser UX policy.
@@ -3055,6 +3176,32 @@ Acceptance criteria:
 
 - The next dungeon/interior phase has named verification targets or explicit open questions for them.
 - Any static object or inspection debt that would distort dungeon support is addressed or scheduled before Phase 13A.
+
+### Phase 12C: Static Object Material Binding Tables
+
+Status: superseded by Phase 11E4A3.
+
+Purpose: historical placeholder for V1-style cross-material/static-object compaction. Follow-up steering pulled this work forward into Phase 11E4A3 before `outdoor-detail` and transparent sorting.
+
+Current steering:
+
+- This is no longer the destination for the material-table parity gap identified in Phase 11E4A2. Use Phase 11E4A3.
+- Do not start by extracting V1 world-display helpers wholesale. Port the behavior shape: bounded material entries, material selector data in compacted geometry, texture/data-use table entries, draw-slice limits, and overflow diagnostics.
+- Physical atlas co-residency is necessary but not sufficient. The draw unit must carry renderer-visible selectors that map each vertex/triangle to the correct material entry and texture/palette/detail rects.
+
+Deliverables:
+
+- Static-object draw-unit contract additions for bounded material entries and a per-vertex or per-triangle material selector.
+- Baker support that groups compatible renderer-binding table entries, emits selector data, and partitions over capacity without dropping candidates.
+- Renderer upload support for the selector buffer plus material/texture/palette/detail entry tables.
+- Shader support for selecting material constants, alpha threshold, texture rects, palette ranges, detail roles, and wrap policy from the table.
+- Tests porting the V1 parity expectations: RGBA and indexed material-table overflow partitions instead of bypassing, atlas-capacity overflow stays distinct from material-table overflow, and unrelated source/gfx provenance does not split table-compatible batches.
+
+Acceptance criteria:
+
+- Textures A/B/C can share a static-object draw unit only when the material-binding table has entries for each and geometry carries selectors that choose the correct entry.
+- Existing single-binding draw units remain valid as the one-entry table case.
+- Material-table capacity failures are typed diagnostics or capacity splits, not silent fallbacks.
 
 ### Phase 13A: Host-Backed Topology And Env-Cell Resolution
 

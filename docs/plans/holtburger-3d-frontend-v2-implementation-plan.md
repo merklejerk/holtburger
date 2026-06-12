@@ -1803,7 +1803,7 @@ Implemented:
 - Added V2-owned static object material planning under `apps/holtburger-3d/src/v2/static/objects/bake/static-object-material-planner.ts`.
 - Added classifier/planner output for static material families `flat-color`, `texture-rgba`, `indexed-paletted`, and `unsupported`, with a separate `renderCoverage` axis so classification coverage is not confused with renderer support.
 - Added static material pass/alpha/blend facts for opaque, alpha-test/clip, translucent, inverse-alpha, additive, and opacity-derived translucent cases using the v1 material behavior as the parity reference.
-- Added bake-local material texture-role planning for direct RGBA base-color textures via `PreparedTextureUseIdentity` and indexed/paletted materials via explicit `indexed-texels` plus `palette-lookup` roles instead of overloading prepared texture use for indexed data.
+- Added bake-local material texture-role planning for direct RGBA base-color textures and indexed/paletted materials. The initial role shape was later generalized by 11B2A-11B2C into prepared render-surface and palette data-use identities.
 - Added classified-but-render-deferred treatment for translucent/additive pass ordering and static object detail overlay roles. Detail overlay facts keep role, texture, tiling, and fade data without importing terrain detail vocabulary.
 - Enriched `StaticObjectTextureRefFacts` render-surface records with width, height, format string, and raw format code so the classifier can honestly identify indexed/paletted inputs and preserve source dimensions.
 - Added focused tests for solid color, non-indexed texture, indexed/paletted texture, translucent render-deferred texture, unsupported detail surface flags, classified static detail roles, and missing render-surface fallback diagnostics.
@@ -1985,7 +1985,7 @@ Verification:
 
 ### Phase 11B2C: Static Material Planner Texture-Use Cutover
 
-Status: planned.
+Status: complete.
 
 Purpose: make static material classification emit the generalized texture/data-use roles so 11C partitions against the real material input layout.
 
@@ -2011,6 +2011,32 @@ Acceptance criteria:
 Failed-to-close target from 11B:
 
 - 11B correctly avoided collapsing indexed/paletted materials into prepared RGBA, but it did so by adding side-channel material texture roles. 11B2A-11B2C must make that distinction first-class in the shared texture-use contract so 11C does not partition against the wrong abstraction.
+
+Implementation notes:
+
+- Cut the static object material planner over from planner-only `indexed-texels` / `palette-lookup` records to generalized material data-use identities.
+- Direct RGBA static materials now expose their prepared render-surface use through a consistent `dataUse` role field.
+- Indexed P8 and Index16 static materials now emit a `base-index` role with a prepared render-surface index data use (`index8` or `index16`) plus a `palette-rgba` role with a frontend-derived palette data use.
+- Palette data-use range is explicit and named at the planner boundary (`firstIndex=0`, `indexCount=256`) so later data-texture upload does not infer palette shape from role names.
+- Detail overlay roles remain explicit render-deferred placeholders. They still preserve their source texture and typed fallback reason without borrowing terrain material vocabulary.
+
+Spicy findings:
+
+- The old role names were the main smell, not the index/palette split itself. Keeping two roles is still structurally correct because indexed materials genuinely have two material inputs: index texels and palette colors.
+- Palette payload bytes are still not consumed here. This phase records the palette data-use identity and range only; actual palette data-texture creation belongs to the renderer/data-texture upload phases.
+
+Failed to close:
+
+- Static object draw-unit emission and renderer upload for indexed/palette data textures remain deferred to 11C/11D/11E as planned.
+- Palette subranges/shades are represented by the explicit range fields but not yet derived from richer palette-view metadata. If later resolver payloads expose subpalette views, this planner should fill those fields instead of always using the full 256-entry palette.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run test:ts -- static-object-material-planner`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 11C: Static Object Compatibility Partitioning
 
@@ -2071,6 +2097,7 @@ Dry-run findings:
 - Current V2 WebGL2 renderer is terrain-focused; static object rendering requires a new draw-unit variant, buffer upload path, material binding path, and removal/disposal path.
 - Texture manager can already commit batch-scoped atlas pages and sampler policy for terrain-style texture uses, but static material roles may include prepared color pages, indexed texel pages, palette lookup pages, detail overlays, and non-color/exact data. 11D should start only with the roles required by the selected first rendered family.
 - The first rendered family should be chosen from real 11A payload evidence, not assumed. If outdoor buildings in the target coverage are mostly indexed/paletted or clip/alpha, rendering "opaque textured" first may not prove much visually.
+- If the selected first rendered family is indexed/paletted, palette-view/subrange derivation moves from 11E into 11D because full 256-entry palette defaults would not be enough to claim visual parity for that family.
 - Direct/degenerate texture pages and atlas pages should remain the same renderer contract. Do not reintroduce a separate direct-texture path for static objects.
 - Failure messages can stay in console/runtime diagnostics, but materialization failure must not silently drop entire landblocks.
 
@@ -2087,6 +2114,7 @@ Purpose: expand rendered static-object material families after the first family 
 Deliverables:
 
 - Incremental renderer support for additional classified static material families: alpha/clip, blended/translucent, indexed/paletted, detail overlays, and source-specific render-state variants as evidence demands.
+- Indexed/paletted expansion derives `palette-rgba` `firstIndex` / `indexCount` from setup appearance, subpalette, palette-set/shade, or equivalent palette-view metadata instead of defaulting every palette use to the full 256-entry range.
 - Focused tests per newly rendered material family for classification, partitioning, texture-use planning, renderer binding/upload, and fallback behavior.
 - Manual visual comparison against v1 for selected landblocks that exercise the newly supported family.
 
@@ -2094,12 +2122,14 @@ Acceptance criteria:
 
 - Multiple static object material families can coexist without creating non-isomorphic renderer paths.
 - New material-family support is added by extending typed classifiers, partitioning keys, and renderer families, not by adding catch-all material branches.
+- Indexed/paletted static materials are not considered parity-complete while palette subranges/shades still rely on the full 256-entry fallback.
 - Remaining unsupported material families are explicitly tracked before moving broad static-object/detail/env-cell scope into Phase 12.
 
 Dry-run findings:
 
 - The highest-risk expansions are indexed/paletted and alpha/translucency because they affect texture roles, shader programs, pass ordering, sampler/mip policy, sorting/blending, and material table shape.
 - v1 already has separate submit paths for indexed P8/P16 and texture-page materials. V2 should not duplicate that shape blindly, but it should expect indexed/palette support to require explicit renderer programs or explicit shader branches.
+- 11B2C made palette views representable through explicit range fields, but current planner output still uses a full 256-entry fallback until resolver/material facts expose the richer subpalette view. 11E should close that semantic gap for indexed/paletted rendering.
 - Detail overlays should be added as a material-role extension that composes with existing static families, not as a separate source-domain feature.
 - `outdoor-detail` and `env-cell-static` should remain out of Phase 11E unless a rendered material family requires a source sample from those domains. Breadth belongs in Phase 12.
 - Each new rendered family should add a focused visual target. Static material parity is too varied to validate with one landblock.

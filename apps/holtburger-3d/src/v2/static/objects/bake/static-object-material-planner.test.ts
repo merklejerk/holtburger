@@ -55,7 +55,7 @@ describe("V2 static object material planner", () => {
 			renderCoverage: "classified-render-candidate",
 			textureRoles: [
 				{
-					preparedTextureUse: {
+					dataUse: {
 						kind: "prepared-render-surface-texture-use",
 						renderSurface: {
 							kind: "render-surface",
@@ -77,7 +77,7 @@ describe("V2 static object material planner", () => {
 		});
 	});
 
-	it("preserves indexed texel and palette lookup roles", () => {
+	it("plans indexed P8 materials as index and palette data uses", () => {
 		const plan = classifyStaticObjectMaterial({
 			material: createTexturedMaterial({
 				paletteId: 0x04000020,
@@ -91,24 +91,97 @@ describe("V2 static object material planner", () => {
 			renderCoverage: "classified-render-deferred",
 			textureRoles: [
 				{
+					dataUse: {
+						kind: "prepared-render-surface-texture-use",
+						renderSurface: {
+							kind: "render-surface",
+							renderSurfaceId: 0x06000010,
+						},
+						usage: "index8",
+					},
 					height: 32,
 					indexedFormat: "p8",
 					renderSurface: {
 						kind: "render-surface",
 						renderSurfaceId: 0x06000010,
 					},
-					role: "indexed-texels",
+					role: "base-index",
 					width: 64,
 				},
 				{
+					dataUse: {
+						firstIndex: 0,
+						indexCount: 256,
+						kind: "palette-texture-use",
+						palette: {
+							kind: "palette",
+							paletteId: 0x04000020,
+						},
+						usage: "palette-rgba",
+					},
 					palette: {
 						kind: "palette",
 						paletteId: 0x04000020,
 					},
-					role: "palette-lookup",
+					role: "palette-rgba",
 				},
 			],
 		});
+	});
+
+	it("plans indexed Index16 materials as index16 data uses", () => {
+		const plan = classifyStaticObjectMaterial({
+			material: createTexturedMaterial(),
+			textureRefs: createTextureRefs({ formatRaw: 0x65, paletteId: 0x04000010 }),
+		});
+
+		expect(plan).toMatchObject({
+			family: "indexed-paletted",
+			renderCoverage: "classified-render-deferred",
+			textureRoles: [
+				{
+					dataUse: {
+						kind: "prepared-render-surface-texture-use",
+						renderSurface: {
+							kind: "render-surface",
+							renderSurfaceId: 0x06000010,
+						},
+						usage: "index16",
+					},
+					indexedFormat: "index16",
+					role: "base-index",
+				},
+				{
+					dataUse: {
+						kind: "palette-texture-use",
+						palette: {
+							kind: "palette",
+							paletteId: 0x04000010,
+						},
+						usage: "palette-rgba",
+					},
+					role: "palette-rgba",
+				},
+			],
+		});
+	});
+
+	it("rejects indexed materials without a material or render-surface palette", () => {
+		const plan = classifyStaticObjectMaterial({
+			material: createTexturedMaterial(),
+			textureRefs: createTextureRefs({ formatRaw: 0x29, paletteId: null }),
+		});
+
+		expect(plan).toMatchObject({
+			family: "unsupported",
+			renderCoverage: "unsupported",
+			textureRoles: [],
+		});
+		expect(plan.fallbackReasons).toEqual([
+			expect.objectContaining({
+				code: "missing-palette",
+			}),
+		]);
 	});
 
 	it("marks translucent texture materials render-deferred without losing roles", () => {
@@ -333,7 +406,12 @@ function createTextureRefs(options: {
 			},
 		},
 		{
-			format: options.formatRaw === 0x29 ? "p8" : "rgba",
+			format:
+				options.formatRaw === 0x29
+					? "p8"
+					: options.formatRaw === 0x65
+						? "index16"
+						: "rgba",
 			formatRaw: options.formatRaw,
 			height: 32,
 			palette,

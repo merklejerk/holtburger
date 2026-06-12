@@ -1,6 +1,8 @@
 import type {
 	OutdoorStaticObjectsScopePayload,
 	PaletteIdentity,
+	MaterialTextureDataUseIdentity,
+	PreparedIndexRenderSurfaceTextureUseIdentity,
 	PreparedRgbaRenderSurfaceTextureUseIdentity,
 	RegionDetailRoleFacts,
 	RenderSurfaceIdentity,
@@ -22,6 +24,8 @@ const SURFACE_TYPE_ADDITIVE = 0x10000;
 const SURFACE_TYPE_DETAIL = 0x20000;
 const PIXEL_FORMAT_P8 = 0x29;
 const PIXEL_FORMAT_INDEX16 = 0x65;
+const DEFAULT_PALETTE_FIRST_INDEX = 0;
+const DEFAULT_PALETTE_INDEX_COUNT = 256;
 const DIRECT_CLIP_MAP_ALPHA_TEST = 200 / BYTE_MAX;
 const INDEXED_CLIP_MAP_ALPHA_TEST = 100 / BYTE_MAX;
 
@@ -41,6 +45,11 @@ type StaticObjectMaterialPass =
 	| "alpha-test"
 	| "transparent"
 	| "additive";
+
+type PaletteDataUseIdentity = Extract<
+	MaterialTextureDataUseIdentity,
+	{ readonly kind: "palette-texture-use" }
+>;
 
 export interface StaticObjectMaterialPipelinePlan {
 	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
@@ -67,19 +76,21 @@ type StaticObjectMaterialTextureUseRole =
 			readonly role: "base-color";
 			readonly texture: SurfaceTextureIdentity;
 			readonly renderSurface: RenderSurfaceIdentity;
-			readonly preparedTextureUse: PreparedRgbaRenderSurfaceTextureUseIdentity;
+			readonly dataUse: PreparedRgbaRenderSurfaceTextureUseIdentity;
 	  }
 	| {
-			readonly role: "indexed-texels";
+			readonly role: "base-index";
 			readonly texture: SurfaceTextureIdentity;
 			readonly renderSurface: RenderSurfaceIdentity;
+			readonly dataUse: PreparedIndexRenderSurfaceTextureUseIdentity;
 			readonly indexedFormat: "p8" | "index16";
 			readonly width: number;
 			readonly height: number;
 	  }
 	| {
-			readonly role: "palette-lookup";
+			readonly role: "palette-rgba";
 			readonly palette: PaletteIdentity;
+			readonly dataUse: PaletteDataUseIdentity;
 	  };
 
 interface StaticObjectDetailRolePlan {
@@ -260,16 +271,28 @@ export function classifyStaticObjectMaterial(
 					: "unsupported",
 			textureRoles: [
 				{
+					dataUse: {
+						kind: "prepared-render-surface-texture-use",
+						renderSurface: renderSurfaceRef.renderSurface,
+						usage: indexedFormat === "p8" ? "index8" : "index16",
+					},
 					height: renderSurfaceRef.height,
 					indexedFormat,
 					renderSurface: renderSurfaceRef.renderSurface,
-					role: "indexed-texels",
+					role: "base-index",
 					texture: context.material.source.texture,
 					width: renderSurfaceRef.width,
 				},
 				{
+					dataUse: {
+						firstIndex: DEFAULT_PALETTE_FIRST_INDEX,
+						indexCount: DEFAULT_PALETTE_INDEX_COUNT,
+						kind: "palette-texture-use",
+						palette,
+						usage: "palette-rgba",
+					},
 					palette,
-					role: "palette-lookup",
+					role: "palette-rgba",
 				},
 			],
 		});
@@ -300,7 +323,7 @@ export function classifyStaticObjectMaterial(
 					: "classified-render-candidate",
 		textureRoles: [
 			{
-				preparedTextureUse: {
+				dataUse: {
 					kind: "prepared-render-surface-texture-use",
 					renderSurface: renderSurfaceRef.renderSurface,
 					usage: "rgba-raw",

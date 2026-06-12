@@ -2107,7 +2107,7 @@ Purpose: render opaque `texture-rgba` outdoor building partitions through the V2
 
 Deliverables:
 
-- Static object geometry bake into real draw units for 11C partitions whose material family is `texture-rgba`, pass is `opaque`, render coverage is `classified-render-candidate`, and texture role layout is the direct `rgba-raw` base-color role.
+- Static object geometry bake into real draw units for 11C partitions whose material family is `texture-rgba`, pass is `opaque` or `alpha-test`, render coverage is `classified-render-candidate`, and texture role layout is the direct `rgba-raw` base-color role.
 - Texture-manager integration for the `rgba-raw` static object bake-local texture uses, batch-scoped atlas pages, sampler policy, leases, and renderer placement updates.
 - WebGL2 static-object renderer path for opaque `texture-rgba` buildings using the same explicit residency-delta model as terrain.
 - Unsupported/deferred partitions continue to produce source mappings and diagnostics but do not become renderable geometry draw units in this phase.
@@ -2115,7 +2115,7 @@ Deliverables:
 
 Acceptance criteria:
 
-- Opaque `texture-rgba` outdoor building partitions render in V2 without blocking terrain residency.
+- Opaque and alpha-test `texture-rgba` outdoor building partitions render in V2 without blocking terrain residency.
 - 11D does not add a generic static-object shader matrix; it adds only the material-family shader and binding path required for opaque direct RGBA textured buildings.
 - Unsupported classified families are surfaced as typed fallback diagnostics rather than appearing as missing landblocks with no explanation.
 - Compaction remains a bake concern and does not require renderer-side asset dependency knowledge.
@@ -2131,13 +2131,13 @@ Dry-run findings:
 
 Dry-run conclusion:
 
-- 11D should narrow renderer support to opaque `texture-rgba` while preserving explicit fallback for every other classified-but-render-deferred or unsupported family. Alpha/clip, indexed/paletted, solid-color, translucent, additive, and detail-overlay support move to 11E unless opaque `texture-rgba` rendering exposes a required blocker.
+- 11D should narrow renderer support to opaque and alpha-test `texture-rgba` while preserving explicit fallback for every other classified-but-render-deferred or unsupported family. Indexed/paletted, solid-color, translucent, additive, and detail-overlay support move to 11E unless the first `texture-rgba` rendering pass exposes a required blocker.
 
 Implementation notes:
 
 - Added `StaticObjectGeometryStaticDrawUnit` as the first real static object draw-unit variant. It is intentionally narrow: landblock-render-local geometry, opaque `texture-rgba`, one primary `rgba-raw` base texture use, material ids, and renderer-ready buffers.
 - Extended the 11C compatibility partition records with typed triangle refs so the object baker can build geometry from source payloads without parsing source mapping strings.
-- The static object baker now emits real geometry draw units for partitions whose family is `texture-rgba`, pass is `opaque`, render coverage is `classified-render-candidate`, and texture data use is a single stageable `rgba-raw` prepared render surface. Other partitions still emit placeholders plus source/spatial records.
+- The static object baker now emits real geometry draw units for partitions whose family is `texture-rgba`, pass is `opaque` or `alpha-test`, render coverage is `classified-render-candidate`, and texture data use is a single stageable `rgba-raw` prepared render surface. Other partitions still emit placeholders plus source/spatial records.
 - Baked object placement, setup/default part placements, and source/part scale into render-local positions before renderer residency. A focused test locks the v1 placement/scale parity example.
 - Renamed the renderer texture binding contract from terrain-specific `TerrainTextureBinding` to generic `TextureDrawUnitBinding`; terrain role-page data still rides on that binding for terrain layered materials.
 - Added a WebGL2 static-object opaque texture shader, GPU resource path, draw loop, residency disposal, and renderer snapshot accounting for static object draw units/triangles.
@@ -2145,10 +2145,11 @@ Implementation notes:
 - Immediate live-data correction: source resolution now excludes outdoor static objects whose top-level source asset could not be resolved while preserving the missing source identity in `missingRefs`. Missing external source assets should not poison an otherwise valid static object bake batch.
 - Immediate live-data correction: generalized V2 host payload preparation beyond the terrain slice routes. `gfx-obj`, `setup-model`, `setup-appearance`, and `material/<did>` now parse through the shared V2 static asset preparation whitelist, so outdoor building source assets can actually reach the resolver.
 - Immediate live-data correction: split static object material-slot identity into geometry slot ids and material surface ids. Prepared polygon geometry reports the geometry surface/slot index, while setup appearance slots map that slot to a concrete material/surface DID. The resolver now expands slots across geometry material variants before baking, and the compatibility partitioner resolves triangles by geometry slot id instead of comparing geometry slot ids to material surface DIDs.
-- Immediate visual correction: static object compatibility triangles now carry full source triangle identity: polygon id, geometry surface id, and material variant signature. The baker uses that full identity instead of `polygonId` alone, so repeated polygon ids across slots/variants cannot select the wrong vertex range.
+- Immediate visual correction: static object compatibility triangles now carry exact source triangle identity: polygon id, prepared geometry `firstVertex`, geometry surface id, and material variant signature. The baker uses that full identity instead of `polygonId` alone, so repeated polygon ids across slots/variants and fan-triangulated polygons cannot select the wrong vertex range.
 - Immediate visual correction: static object partitions now split authored `sampler=repeat` and clamp variants into separate draw units, and the static-object shader applies repeat with `fract()` before mapping local UVs into the atlas rect.
 - Immediate visual correction: the static-object shader now treats texture binding rects as pixel-space atlas rects, matching terrain and texture-manager contracts, and divides by the atlas texture size before sampling.
 - Immediate visual correction: the V2 static-object bake path now uses the same AC/source axis scale basis as the proven static bundle builder: source X stays render X, source Z maps to render Y, and source Y maps to render Z after AC placement. The parity test now uses asymmetric source vertices so this mapping cannot pass accidentally.
+- Immediate capability correction: alpha-test `texture-rgba` partitions now become renderable draw units instead of placeholders. The same static-object shader path handles opaque and clip-map materials with a per-draw alpha discard threshold, but manual building inspection showed this was not the cause of the visible missing-triangle pattern.
 
 Spicy findings:
 
@@ -2158,11 +2159,12 @@ Spicy findings:
 - Manual V2 diagnostics showed `outdoor-buildings` payloads with objects but zero source assets, then bake failures from missing source geometry. The fix belongs at the resolver payload boundary, not the renderer: only source-resolved objects should reach compatibility partitioning.
 - Follow-up manual diagnostics then showed `objects 0 sources 0 ... missing 17`; the filter was working, but every source asset was still missing because V2 asset preparation rejected static object source routes as unsupported terrain-slice outsiders. The route whitelist was the actual second blocker.
 - Follow-up manual diagnostics then showed healthy source/material counts but bake failures like `has no resolved material slot`. The payload was valid; V2 had flattened two different concepts named `surfaceId`. This phase corrected the contract so setup appearance slot `slotIndex` owns geometry lookup and material `surfaceId` remains material provenance.
-- First successful visual diagnostics showed rendered buildings, but black/patchy/folded-looking output. Three concrete bugs were fixed from that pass: static object atlas rects were sampled as normalized UVs instead of pixel rects, baked geometry selected source triangles by polygon id alone instead of the full geometry slot/material variant identity, and the cloned V2 source scale matrix used the wrong source-axis basis.
+- First successful visual diagnostics showed rendered buildings, but black/patchy/folded-looking output. Four concrete bugs were fixed from that pass: static object atlas rects were sampled as normalized UVs instead of pixel rects, baked geometry selected source triangles by polygon id alone instead of exact prepared triangle identity, the cloned V2 source scale matrix used the wrong source-axis basis, and alpha-test `texture-rgba` partitions were still placeholdered by the initial opaque-only render gate.
+- Follow-up manual visual inspection showed correct textures and upright buildings, but missing faces remained on known non-alpha-test buildings. The root cause was the triangle identity still being lossy for fan-triangulated polygons: multiple triangles from the same polygon/surface/variant shared the same lookup key, so the baker repeatedly copied the first fan triangle and skipped later vertex ranges. `firstVertex` is now part of the compatibility identity and bake lookup.
 
 Failed to close:
 
-- Indexed/paletted data texture upload, palette views/subranges, alpha/clip, translucent/additive passes, solid-color rendering, detail overlays, lighting/material color modulation, and broader outdoor-detail/env-cell static rendering remain Phase 11E/12 work.
+- Indexed/paletted data texture upload, palette views/subranges, translucent/additive passes, solid-color rendering, detail overlays, lighting/material color modulation, and broader outdoor-detail/env-cell static rendering remain Phase 11E/12 work.
 - The compatibility key still includes concrete texture data-use identity, so the first object draw-unit path remains conservative about sharing material tables across different base textures.
 - This phase was verified by unit/type/lint tests, but browser visual verification of rendered buildings still needs a manual V2 harness pass.
 - If a coverage area only contains building members whose source assets are missing from the host/prepared asset path, those buildings will still not render; they should now be reported as missing refs without failing unrelated building batches.

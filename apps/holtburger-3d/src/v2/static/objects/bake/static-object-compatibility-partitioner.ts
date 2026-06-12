@@ -28,6 +28,7 @@ export interface StaticObjectCompatibilityPartition {
 	readonly renderCoverage: StaticObjectMaterialPlan["renderCoverage"];
 	readonly pass: StaticObjectMaterialPlan["pass"];
 	readonly alphaMode: StaticObjectMaterialPlan["alphaPolicy"]["mode"];
+	readonly alphaTest: StaticObjectMaterialPlan["alphaPolicy"]["alphaTest"];
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly textureRoleLayoutKey: string;
 	readonly materialIds: readonly number[];
@@ -45,6 +46,7 @@ export interface StaticObjectCompatibilityTriangle {
 	readonly gfxObj: StaticObjectSourceIdentity;
 	readonly partIndex: number;
 	readonly polygonId: number;
+	readonly firstVertex: number;
 	readonly geometrySurfaceId: number;
 	readonly materialVariantSignature: string | null;
 	readonly material: StaticMaterialSourceIdentity;
@@ -68,6 +70,7 @@ interface StaticObjectTriangleCandidate {
 	readonly objectKey: string;
 	readonly partIndex: number;
 	readonly polygonId: number;
+	readonly firstVertex: number;
 	readonly geometrySurfaceId: number;
 	readonly materialVariantSignature: string | null;
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
@@ -174,6 +177,7 @@ function createTriangleCandidates(
 					geometrySurfaceId: triangle.geometrySurfaceId,
 					gfxObj: part.gfxObj,
 					gfxKey,
+					firstVertex: triangle.firstVertex,
 					material,
 					materialId: material.materialId,
 					materialKey,
@@ -189,6 +193,7 @@ function createTriangleCandidates(
 						objectKey,
 						`part:${part.partIndex}`,
 						`polygon:${triangle.polygonId}`,
+						`first-vertex:${triangle.firstVertex}`,
 						`geometry-surface:${triangle.geometrySurfaceId}`,
 						`variant:${materialVariantSignature ?? "base"}`,
 					].join(":"),
@@ -329,6 +334,7 @@ function createCompatibilityPartition(options: {
 
 	return {
 		alphaMode: first.materialPlan.alphaPolicy.mode,
+		alphaTest: first.materialPlan.alphaPolicy.alphaTest,
 		compatibilityKey: options.compatibilityKey,
 		family: first.materialPlan.family,
 		materialIds,
@@ -344,6 +350,7 @@ function createCompatibilityPartition(options: {
 		),
 		textureWrapMode: first.textureWrapMode,
 		triangles: options.candidates.map((candidate) => ({
+			firstVertex: candidate.firstVertex,
 			geometrySurfaceId: candidate.geometrySurfaceId,
 			gfxObj: candidate.gfxObj,
 			material: candidate.material,
@@ -440,6 +447,7 @@ function compareTriangleCandidates(
 		left.objectKey.localeCompare(right.objectKey) ||
 		left.partIndex - right.partIndex ||
 		left.polygonId - right.polygonId ||
+		left.firstVertex - right.firstVertex ||
 		left.geometrySurfaceId - right.geometrySurfaceId ||
 		(left.materialVariantSignature ?? "").localeCompare(
 			right.materialVariantSignature ?? "",

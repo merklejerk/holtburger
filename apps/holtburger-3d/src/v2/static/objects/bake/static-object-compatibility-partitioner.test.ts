@@ -48,7 +48,7 @@ describe("V2 static object compatibility partitioner", () => {
 				family: "unsupported",
 				renderCoverage: "unsupported",
 				sourceTriangleIds: [
-					"da55ffff:building:building-0:part:0:polygon:0:geometry-surface:0:variant:base",
+					"da55ffff:building:building-0:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
 				],
 			}),
 		]);
@@ -65,7 +65,7 @@ describe("V2 static object compatibility partitioner", () => {
 		expect(plan.partitions[0]).toMatchObject({
 			materialIds: [0x08000010],
 			sourceTriangleIds: [
-				"da55ffff:building:building-0:part:0:polygon:0:geometry-surface:0:variant:base",
+				"da55ffff:building:building-0:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
 			],
 		});
 	});
@@ -136,11 +136,30 @@ describe("V2 static object compatibility partitioner", () => {
 			}),
 		]);
 		expect(result.staticSourceMappings).toEqual([
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:da55ffff:building:building-0:part:0:polygon:0:geometry-surface:0:variant:base",
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:da55ffff:building:building-0:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
 		]);
 		expect(result.staticSpatialRecords).toEqual([
 			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:bounds:1t",
 		]);
+	});
+
+	it("bakes alpha-test texture-rgba partitions into rendered draw units", () => {
+		const payload = createPayload({
+			materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x4 })],
+			textureRefs: createRgbaTextureRefs(),
+		});
+		const input = createBakeInput(payload);
+
+		const result = bakeStaticObjectCompatibility(input);
+		const drawUnit = result.drawUnits[0];
+
+		expect(drawUnit).toMatchObject({
+			alphaTest: 200 / 255,
+			kind: "static-object-geometry",
+			materialFamily: "texture-rgba",
+			materialPass: "alpha-test",
+		});
+		expect(result.textureUses).toHaveLength(1);
 	});
 
 	it("bakes static object placement and source scale into render-local positions", () => {
@@ -214,8 +233,70 @@ describe("V2 static object compatibility partitioner", () => {
 			[2, 1, 1],
 		]);
 		expect(result.staticSourceMappings).toEqual([
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:da55ffff:building:building-0:part:0:polygon:0:geometry-surface:0:variant:base",
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-1-0:source:da55ffff:building:building-0:part:0:polygon:0:geometry-surface:1:variant:sampler=repeat",
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:da55ffff:building:building-0:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-1-0:source:da55ffff:building:building-0:part:0:polygon:0:first-vertex:3:geometry-surface:1:variant:sampler=repeat",
+		]);
+	});
+
+	it("bakes fan triangles from the same polygon and material as distinct geometry", () => {
+		const payload = createPayload({
+			materials: [createTexturedMaterial(0x08000010)],
+			partPositions: createPartPositions(2),
+			textureRefs: createRgbaTextureRefs(),
+		});
+		const source = payload.sourceAssets[0];
+		const part = source?.parts[0];
+		if (!source || !part) {
+			throw new Error("Fixture payload did not create a source part.");
+		}
+		const updatedPart = {
+			...part,
+			renderTriangleCount: 2,
+			triangles: [
+				{
+					firstVertex: 0,
+					geometrySurfaceId: 0,
+					materialVariantSignature: null,
+					polygonId: 7,
+				},
+				{
+					firstVertex: 3,
+					geometrySurfaceId: 0,
+					materialVariantSignature: null,
+					polygonId: 7,
+				},
+			],
+		};
+		const input = createBakeInput({
+			...payload,
+			sourceAssets: [
+				{
+					...source,
+					parts: [updatedPart],
+					renderTriangleCount: 2,
+				},
+			],
+		});
+
+		const result = bakeStaticObjectCompatibility(input);
+		const drawUnit = result.drawUnits.find(
+			(candidate) => candidate.kind === "static-object-geometry",
+		);
+
+		expect(drawUnit).toMatchObject({
+			kind: "static-object-geometry",
+			triangleCount: 2,
+		});
+		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
+			throw new Error("Expected static object geometry draw unit.");
+		}
+		expect(Array.from(drawUnit.positions.slice(0, 18))).toEqual([
+			1, 1, 1, 0, 1, 1, 1, 0, 1,
+			2, 1, 1, 0, 1, 1, 1, 0, 1,
+		]);
+		expect(result.staticSourceMappings).toEqual([
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:da55ffff:building:building-0:part:0:polygon:7:first-vertex:0:geometry-surface:0:variant:base",
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:da55ffff:building:building-0:part:0:polygon:7:first-vertex:3:geometry-surface:0:variant:base",
 		]);
 	});
 });
@@ -396,6 +477,7 @@ function createSolidMaterial(
 
 function createTexturedMaterial(
 	materialId: number,
+	options: { readonly surfaceType?: number } = {},
 ): StaticObjectMaterialSourceFacts {
 	return {
 		diffuse: 1,
@@ -415,7 +497,7 @@ function createTexturedMaterial(
 			},
 		},
 		surfaceId: materialId,
-		surfaceType: 0,
+		surfaceType: options.surfaceType ?? 0,
 		translucency: 0,
 	};
 }

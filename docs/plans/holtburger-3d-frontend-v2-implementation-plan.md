@@ -2907,7 +2907,7 @@ Verification:
 
 ### Phase 11E4A3: Static Object Material Binding Tables
 
-Status: in progress; Phase 11E4A3a, Phase 11E4A3b, and Phase 11E4A3b1 complete.
+Status: in progress; Phase 11E4A3a through Phase 11E4A3c complete.
 
 Purpose: recover V1-style cross-material static-object compaction before `outdoor-detail` generated scenery and transparent object/part sorting broaden the static-object surface area.
 
@@ -2957,6 +2957,7 @@ Implementation split:
   - Convert materialized one-entry draw units to the table contract without loosening coarse partitioning yet. Keep current singular fields only as derived compatibility/debug summaries until cleanup, not as a second renderer path.
   - Convert WebGL2 static-object upload and shader uniforms to consume the table path for the one-entry case, using one entry and one selector value per vertex.
   - Update existing static-object tests to prove opaque, alpha-test, indexed-paletted, and detail-overlay rendering still use equivalent draw units.
+  - Status: complete on 2026-06-12 for the one-entry table contract and shader/upload cutover.
 - Phase 11E4A3d: Static Object Role Slots.
   - Add static-object draw-local role slot assignment in the texture manager/materializer for base-color, index, palette, and detail roles instead of hardcoding slot `0`.
   - Add fixed static object role-page limits and overflow diagnostics/tests.
@@ -3006,11 +3007,13 @@ Spicy bits:
 - The one-entry compatibility path is still a bridge, not a destination. Keeping it too long would recreate parallel renderer contracts; Phase 11E4A3 should cut it over decisively once the table contract exists.
 - Phase 11E4A3b exposed that the existing runtime already had an async "static materialization" queue, but it was only sequencing texture placement before forwarding original baked draw units. The new `materializeStaticCommit` boundary now consumes committed texture bindings and rejects textured draw units with missing bindings before renderer residency. That is the right insertion point for later fine partitioning, but it deliberately does not pretend to split table candidates before the table draw-unit contract exists.
 - Phase 11E4A3b1 chooses direct contract extension over a new public materialized static-object subtype. V1's parity shape is one compacted geometry layout carrying material-slot selectors, and the V2 design already expects static-object draw units to grow bounded material entries/selectors. A separate public subtype would preserve the old single-binding path as a parallel contract and make renderer/static inspection support both shapes. Internal helper/adapters during implementation are fine; the renderer-facing contract should become table-capable in place.
+- Phase 11E4A3c uses one-entry uniform arrays in the WebGL2 static-object shader. That is intentionally not the final role-slot/table capacity design; it proves the renderer consumes material-slot selectors and material entries before 11E4A3d expands texture role pages and 11E4A3e allows multi-entry coarse partitions.
 
 Failed to close:
 
-- Real renderer material tables are not implemented yet. Phase 11E4A3a added the coarse table-plan contract, and Phase 11E4A3b added an explicit runtime materialization boundary after texture placement, but final static-object draw units still use the current one-entry/single-binding renderer path until 11E4A3c-11E4A3e move table fields, selector baking, role slots, and shader consumption forward.
-- Fine partitioning by actual committed texture refs/pages is not implemented yet because the current static-object draw-unit contract cannot represent multiple material entries or selector streams.
+- Multi-entry renderer material tables are not implemented yet. Phase 11E4A3c added the one-entry table contract and selector path, but final static-object partitions still remain one concrete material entry each until 11E4A3d-11E4A3e add role slots and loosen coarse partitioning.
+- Fine partitioning by actual committed texture refs/pages is not implemented yet because the current materializer still receives already-materialized one-entry static-object draw units.
+- The derived singular static-object fields remain in `StaticObjectGeometryStaticDrawUnit` as temporary compatibility/debug summaries. They are explicitly cleanup targets for 11E4A3f once tests and renderer code stop consuming them.
 - `outdoor-detail` generated scenery remains blocked behind this phase to avoid multiplying draw-unit churn for foliage.
 - True blended/additive support remains blocked behind 11E4C-11E4E.
 
@@ -3026,6 +3029,14 @@ Phase 11E4A3b1 execution notes:
 - Re-checked the V1 compaction shape in `apps/holtburger-3d/src/lib/world-display/compaction/compacted-geometry.ts`: V1 uses one compacted geometry batch layout with `materialSlotIndices`, draw slices, and material-slot records rather than a separate public draw-unit subtype for one-entry versus table-backed geometry.
 - Re-checked the current V2 WebGL2 static-object path: it has one `StaticObjectGeometryResource`, one static-object shader pair, and singular material/texture uniforms. Introducing a second renderer-facing subtype now would require duplicated upload/draw/inspection branches before table batching is even active.
 - Decision: 11E4A3c should extend `StaticObjectGeometryStaticDrawUnit` in place with table entries and selectors. The current singular fields may remain temporarily as derived summaries so existing diagnostics/tests stay legible during cutover, but they should not define a separate compatibility path after the shader consumes the table contract.
+
+Phase 11E4A3c execution notes:
+
+- Added `StaticObjectMaterialTableEntry`, `materialEntries`, and `materialSlotIndices` to `StaticObjectGeometryStaticDrawUnit`. Current singular material/texture fields are documented as temporary derived summaries.
+- Updated the static-object compatibility baker to emit a one-entry material table for each currently renderable partition and a slot-zero selector stream for every baked vertex.
+- Updated the WebGL2 static-object vertex shader/resource upload to bind the selector stream at attribute location `2`, matching the V1 compacted geometry parity shape.
+- Updated the WebGL2 static-object fragment shader to consume one-entry material-table uniform arrays for material mode, color/emissive, alpha test, indexed format, palette first index, detail tiling/enabled state, and wrap mode.
+- Added focused static-object bake assertions proving the one-entry material table and selector stream are emitted for existing opaque texture-RGBA output.
 
 ### Phase 11E4B: Outdoor Detail Generated Scenery Cutout
 

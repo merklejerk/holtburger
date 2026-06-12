@@ -67,13 +67,16 @@ void main() {
 const STATIC_OBJECT_VERTEX_SHADER = `#version 300 es
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec2 texCoord;
+layout(location = 2) in float materialSlot;
 
 uniform mat4 uModelViewProjection;
 
 out vec2 vTexCoord;
+flat out int vMaterialSlot;
 
 void main() {
 	vTexCoord = texCoord;
+	vMaterialSlot = int(materialSlot);
 	gl_Position = uModelViewProjection * vec4(position, 1.0);
 }
 `;
@@ -93,28 +96,33 @@ uniform vec4 uDetailTextureRect;
 uniform vec2 uTextureSize;
 uniform vec2 uPaletteTextureSize;
 uniform vec2 uDetailTextureSize;
-uniform float uPaletteFirstIndex;
-uniform float uDetailTiling;
-uniform int uDetailEnabled;
-uniform float uAlphaTest;
-uniform vec4 uMaterialColor;
-uniform vec3 uMaterialEmissiveColor;
-uniform int uIndexedTextureFormat;
-uniform int uMaterialMode;
-uniform int uWrapMode;
+uniform float uMaterialPaletteFirstIndices[1];
+uniform float uMaterialDetailTilings[1];
+uniform int uMaterialDetailEnabled[1];
+uniform float uMaterialAlphaTests[1];
+uniform vec4 uMaterialColors[1];
+uniform vec3 uMaterialEmissiveColors[1];
+uniform int uMaterialIndexedTextureFormats[1];
+uniform int uMaterialModes[1];
+uniform int uMaterialWrapModes[1];
 
 in vec2 vTexCoord;
+flat in int vMaterialSlot;
 
 out vec4 fragColor;
 
+int materialSlot() {
+	return clamp(vMaterialSlot, 0, 0);
+}
+
 vec2 resolveWrappedUv(vec2 uv) {
-	return uWrapMode == 1 ? fract(uv) : clamp(uv, vec2(0.0), vec2(0.999999));
+	return uMaterialWrapModes[materialSlot()] == 1 ? fract(uv) : clamp(uv, vec2(0.0), vec2(0.999999));
 }
 
 ivec2 resolveIndexSampleCoord(ivec2 baseCoord, ivec2 offset) {
 	ivec2 size = ivec2(uIndexTextureRect.zw);
 	ivec2 coord = baseCoord + offset;
-	if (uWrapMode == 1) {
+	if (uMaterialWrapModes[materialSlot()] == 1) {
 		coord = ivec2(
 			((coord.x % size.x) + size.x) % size.x,
 			((coord.y % size.y) + size.y) % size.y
@@ -128,14 +136,14 @@ ivec2 resolveIndexSampleCoord(ivec2 baseCoord, ivec2 offset) {
 float paletteIndexAt(ivec2 coord) {
 	ivec2 atlasCoord = ivec2(floor(uIndexTextureRect.xy + vec2(0.5))) + coord;
 	vec4 packed = texelFetch(uIndexTexture, atlasCoord, 0) * 255.0;
-	if (uIndexedTextureFormat == 1) {
+	if (uMaterialIndexedTextureFormats[materialSlot()] == 1) {
 		return floor(packed.r + 0.5) + floor(packed.g + 0.5) * 256.0;
 	}
 	return floor(packed.r + 0.5);
 }
 
 vec4 paletteColor(float index) {
-	float paletteIndex = index - uPaletteFirstIndex;
+	float paletteIndex = index - uMaterialPaletteFirstIndices[materialSlot()];
 	float paletteLocalX = clamp(paletteIndex, 0.0, max(uPaletteTextureRect.z - 1.0, 0.0));
 	vec2 paletteUv = (uPaletteTextureRect.xy + vec2(paletteLocalX + 0.5, 0.5)) / uPaletteTextureSize;
 	return texture(uPaletteTexture, paletteUv);
@@ -159,28 +167,30 @@ vec4 sampleIndexedPaletteLinear(vec2 uv) {
 }
 
 vec4 sampleDetailOverlay(vec2 uv) {
-	vec2 localUv = fract(uv * uDetailTiling);
+	vec2 localUv = fract(uv * uMaterialDetailTilings[materialSlot()]);
 	vec2 atlasUv = (uDetailTextureRect.xy + localUv * uDetailTextureRect.zw) / uDetailTextureSize;
 	return texture(uDetailTexture, atlasUv);
 }
 
 void main() {
-	if (uMaterialMode == 2) {
+	int slot = materialSlot();
+	int materialMode = uMaterialModes[slot];
+	if (materialMode == 2) {
 		fragColor = vec4(1.0, 0.0, 1.0, 1.0);
 		return;
 	}
 
 	vec4 baseColor = vec4(1.0);
-	if (uMaterialMode == 1) {
+	if (materialMode == 1) {
 		vec2 localUv = resolveWrappedUv(vTexCoord);
 		vec2 atlasUv = (uTextureRect.xy + localUv * uTextureRect.zw) / uTextureSize;
 		baseColor = texture(uTexture, atlasUv);
-	} else if (uMaterialMode == 3) {
+	} else if (materialMode == 3) {
 		baseColor = sampleIndexedPaletteLinear(vTexCoord);
 	}
 
-	vec3 rgb = min(baseColor.rgb * uMaterialColor.rgb + uMaterialEmissiveColor, vec3(1.0));
-	if (uDetailEnabled == 1) {
+	vec3 rgb = min(baseColor.rgb * uMaterialColors[slot].rgb + uMaterialEmissiveColors[slot], vec3(1.0));
+	if (uMaterialDetailEnabled[slot] == 1) {
 		vec4 detailColor = sampleDetailOverlay(vTexCoord);
 		float detailAlpha = clamp(detailColor.a, 0.0, 1.0);
 		rgb = clamp(rgb * (detailColor.rgb + (1.0 - detailAlpha)), vec3(0.0), vec3(1.0));
@@ -188,9 +198,9 @@ void main() {
 
 	fragColor = vec4(
 		rgb,
-		baseColor.a * uMaterialColor.a
+		baseColor.a * uMaterialColors[slot].a
 	);
-	if (fragColor.a < uAlphaTest) {
+	if (fragColor.a < uMaterialAlphaTests[slot]) {
 		discard;
 	}
 }
@@ -810,10 +820,6 @@ class Webgl2Renderer implements Renderer {
 				paletteBinding?.rect[2] ?? 1,
 				paletteBinding?.rect[3] ?? 1,
 			);
-			gl.uniform1f(
-				this.#staticObjectProgram.uniforms.uPaletteFirstIndex,
-				resource.paletteFirstIndex,
-			);
 			gl.uniform4f(
 				this.#staticObjectProgram.uniforms.uDetailTextureRect,
 				detailBinding?.rect[0] ?? 0,
@@ -826,34 +832,47 @@ class Webgl2Renderer implements Renderer {
 				detailBinding?.textureWidth ?? 1,
 				detailBinding?.textureHeight ?? 1,
 			);
-			gl.uniform1f(
-				this.#staticObjectProgram.uniforms.uDetailTiling,
-				resource.detailTextureTiling,
-			);
-			gl.uniform1i(
-				this.#staticObjectProgram.uniforms.uDetailEnabled,
-				detailTexture ? 1 : 0,
-			);
-			gl.uniform1i(
-				this.#staticObjectProgram.uniforms.uIndexedTextureFormat,
-				resource.indexedTextureFormat === "index16" ? 1 : 0,
+			const materialEntry = resource.materialEntries[0];
+			if (!materialEntry) {
+				throw new Error(
+					`Static object resource ${resource.drawUnitId} has no material table entries.`,
+				);
+			}
+			gl.uniform1fv(
+				this.#staticObjectProgram.uniforms.uMaterialAlphaTests,
+				[materialEntry.alphaTest],
 			);
 			gl.uniform4fv(
-				this.#staticObjectProgram.uniforms.uMaterialColor,
-				resource.materialColor,
+				this.#staticObjectProgram.uniforms.uMaterialColors,
+				materialEntry.materialColor,
+			);
+			gl.uniform1iv(
+				this.#staticObjectProgram.uniforms.uMaterialDetailEnabled,
+				[detailTexture ? 1 : 0],
+			);
+			gl.uniform1fv(
+				this.#staticObjectProgram.uniforms.uMaterialDetailTilings,
+				[materialEntry.detailTextureTiling],
 			);
 			gl.uniform3fv(
-				this.#staticObjectProgram.uniforms.uMaterialEmissiveColor,
-				resource.materialEmissiveColor,
+				this.#staticObjectProgram.uniforms.uMaterialEmissiveColors,
+				materialEntry.materialEmissiveColor,
 			);
-			gl.uniform1i(this.#staticObjectProgram.uniforms.uMaterialMode, materialMode);
-			gl.uniform1i(
-				this.#staticObjectProgram.uniforms.uWrapMode,
-				resource.primaryTextureWrapMode === "repeat" ? 1 : 0,
+			gl.uniform1iv(
+				this.#staticObjectProgram.uniforms.uMaterialIndexedTextureFormats,
+				[materialEntry.indexedTextureFormat === "index16" ? 1 : 0],
 			);
-			gl.uniform1f(
-				this.#staticObjectProgram.uniforms.uAlphaTest,
-				resource.alphaTest,
+			gl.uniform1iv(
+				this.#staticObjectProgram.uniforms.uMaterialModes,
+				[materialMode],
+			);
+			gl.uniform1fv(
+				this.#staticObjectProgram.uniforms.uMaterialPaletteFirstIndices,
+				[materialEntry.paletteFirstIndex],
+			);
+			gl.uniform1iv(
+				this.#staticObjectProgram.uniforms.uMaterialWrapModes,
+				[materialEntry.primaryTextureWrapMode === "repeat" ? 1 : 0],
 			);
 			gl.bindVertexArray(resource.vertexArray);
 			gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
@@ -969,27 +988,27 @@ interface TerrainGeometryProgram {
 interface StaticObjectGeometryProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
-		readonly uAlphaTest: WebGLUniformLocation;
-		readonly uDetailEnabled: WebGLUniformLocation;
 		readonly uDetailTexture: WebGLUniformLocation;
 		readonly uDetailTextureRect: WebGLUniformLocation;
 		readonly uDetailTextureSize: WebGLUniformLocation;
-		readonly uDetailTiling: WebGLUniformLocation;
 		readonly uIndexTexture: WebGLUniformLocation;
 		readonly uIndexTextureRect: WebGLUniformLocation;
-		readonly uIndexedTextureFormat: WebGLUniformLocation;
-		readonly uMaterialColor: WebGLUniformLocation;
-		readonly uMaterialEmissiveColor: WebGLUniformLocation;
-		readonly uMaterialMode: WebGLUniformLocation;
+		readonly uMaterialAlphaTests: WebGLUniformLocation;
+		readonly uMaterialColors: WebGLUniformLocation;
+		readonly uMaterialDetailEnabled: WebGLUniformLocation;
+		readonly uMaterialDetailTilings: WebGLUniformLocation;
+		readonly uMaterialEmissiveColors: WebGLUniformLocation;
+		readonly uMaterialIndexedTextureFormats: WebGLUniformLocation;
+		readonly uMaterialModes: WebGLUniformLocation;
+		readonly uMaterialPaletteFirstIndices: WebGLUniformLocation;
+		readonly uMaterialWrapModes: WebGLUniformLocation;
 		readonly uModelViewProjection: WebGLUniformLocation;
-		readonly uPaletteFirstIndex: WebGLUniformLocation;
 		readonly uPaletteTexture: WebGLUniformLocation;
 		readonly uPaletteTextureRect: WebGLUniformLocation;
 		readonly uPaletteTextureSize: WebGLUniformLocation;
 		readonly uTexture: WebGLUniformLocation;
 		readonly uTextureRect: WebGLUniformLocation;
 		readonly uTextureSize: WebGLUniformLocation;
-		readonly uWrapMode: WebGLUniformLocation;
 	};
 	dispose(): void;
 }
@@ -1014,20 +1033,15 @@ interface StaticObjectGeometryResource {
 	readonly vertexArray: WebGLVertexArrayObject;
 	readonly positionBuffer: WebGLBuffer;
 	readonly texCoordBuffer: WebGLBuffer;
+	readonly materialSlotBuffer: WebGLBuffer;
 	readonly indexBuffer: WebGLBuffer;
 	readonly drawUnitId: string;
-	readonly alphaTest: number;
-	readonly materialColor: StaticObjectGeometryStaticDrawUnit["materialColor"];
-	readonly materialEmissiveColor: StaticObjectGeometryStaticDrawUnit["materialEmissiveColor"];
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
-	readonly detailTextureTiling: number;
+	readonly materialEntries: StaticObjectGeometryStaticDrawUnit["materialEntries"];
 	readonly detailTextureUseId: string | null;
 	readonly indexTextureUseId: string | null;
-	readonly indexedTextureFormat: StaticObjectGeometryStaticDrawUnit["indexedTextureFormat"];
-	readonly paletteFirstIndex: number;
 	readonly paletteTextureUseId: string | null;
 	readonly primaryTextureUseId: string | null;
-	readonly primaryTextureWrapMode: StaticObjectGeometryStaticDrawUnit["primaryTextureWrapMode"];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
@@ -1191,28 +1205,49 @@ function createStaticObjectGeometryProgram(
 	return {
 		program,
 		uniforms: {
-			uAlphaTest: requireUniform(gl, program, "uAlphaTest"),
-			uDetailEnabled: requireUniform(gl, program, "uDetailEnabled"),
 			uDetailTexture: requireUniform(gl, program, "uDetailTexture"),
 			uDetailTextureRect: requireUniform(gl, program, "uDetailTextureRect"),
 			uDetailTextureSize: requireUniform(gl, program, "uDetailTextureSize"),
-			uDetailTiling: requireUniform(gl, program, "uDetailTiling"),
 			uIndexTexture: requireUniform(gl, program, "uIndexTexture"),
 			uIndexTextureRect: requireUniform(gl, program, "uIndexTextureRect"),
-			uIndexedTextureFormat: requireUniform(
+			uMaterialAlphaTests: requireUniform(
 				gl,
 				program,
-				"uIndexedTextureFormat",
+				"uMaterialAlphaTests[0]",
 			),
-			uMaterialColor: requireUniform(gl, program, "uMaterialColor"),
-			uMaterialEmissiveColor: requireUniform(
+			uMaterialColors: requireUniform(gl, program, "uMaterialColors[0]"),
+			uMaterialDetailEnabled: requireUniform(
 				gl,
 				program,
-				"uMaterialEmissiveColor",
+				"uMaterialDetailEnabled[0]",
 			),
-			uMaterialMode: requireUniform(gl, program, "uMaterialMode"),
+			uMaterialDetailTilings: requireUniform(
+				gl,
+				program,
+				"uMaterialDetailTilings[0]",
+			),
+			uMaterialEmissiveColors: requireUniform(
+				gl,
+				program,
+				"uMaterialEmissiveColors[0]",
+			),
+			uMaterialIndexedTextureFormats: requireUniform(
+				gl,
+				program,
+				"uMaterialIndexedTextureFormats[0]",
+			),
+			uMaterialModes: requireUniform(gl, program, "uMaterialModes[0]"),
+			uMaterialPaletteFirstIndices: requireUniform(
+				gl,
+				program,
+				"uMaterialPaletteFirstIndices[0]",
+			),
+			uMaterialWrapModes: requireUniform(
+				gl,
+				program,
+				"uMaterialWrapModes[0]",
+			),
 			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
-			uPaletteFirstIndex: requireUniform(gl, program, "uPaletteFirstIndex"),
 			uPaletteTexture: requireUniform(gl, program, "uPaletteTexture"),
 			uPaletteTextureRect: requireUniform(
 				gl,
@@ -1227,7 +1262,6 @@ function createStaticObjectGeometryProgram(
 			uTexture: requireUniform(gl, program, "uTexture"),
 			uTextureRect: requireUniform(gl, program, "uTextureRect"),
 			uTextureSize: requireUniform(gl, program, "uTextureSize"),
-			uWrapMode: requireUniform(gl, program, "uWrapMode"),
 		},
 		dispose() {
 			gl.deleteProgram(program);
@@ -1328,8 +1362,15 @@ function createStaticObjectGeometryResource(
 	const vertexArray = gl.createVertexArray();
 	const positionBuffer = gl.createBuffer();
 	const texCoordBuffer = gl.createBuffer();
+	const materialSlotBuffer = gl.createBuffer();
 	const indexBuffer = gl.createBuffer();
-	if (!vertexArray || !positionBuffer || !texCoordBuffer || !indexBuffer) {
+	if (
+		!vertexArray ||
+		!positionBuffer ||
+		!texCoordBuffer ||
+		!materialSlotBuffer ||
+		!indexBuffer
+	) {
 		if (vertexArray) {
 			gl.deleteVertexArray(vertexArray);
 		}
@@ -1338,6 +1379,9 @@ function createStaticObjectGeometryResource(
 		}
 		if (texCoordBuffer) {
 			gl.deleteBuffer(texCoordBuffer);
+		}
+		if (materialSlotBuffer) {
+			gl.deleteBuffer(materialSlotBuffer);
 		}
 		if (indexBuffer) {
 			gl.deleteBuffer(indexBuffer);
@@ -1362,6 +1406,11 @@ function createStaticObjectGeometryResource(
 	gl.enableVertexAttribArray(1);
 	gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
 
+	gl.bindBuffer(gl.ARRAY_BUFFER, materialSlotBuffer);
+	gl.bufferData(gl.ARRAY_BUFFER, drawUnit.materialSlotIndices, gl.STATIC_DRAW);
+	gl.enableVertexAttribArray(2);
+	gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
+
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, drawUnit.indices, gl.STATIC_DRAW);
 	gl.bindVertexArray(null);
@@ -1369,30 +1418,26 @@ function createStaticObjectGeometryResource(
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
 
 	return {
-		alphaTest: drawUnit.alphaTest,
 		drawUnitId: drawUnit.drawUnitId,
 		indexBuffer,
 		indexCount: drawUnit.indices.length,
 		indexType:
 			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
-		detailTextureTiling: drawUnit.detailTextureTiling,
 		detailTextureUseId: drawUnit.detailTextureUseId,
 		indexTextureUseId: drawUnit.indexTextureUseId,
-		indexedTextureFormat: drawUnit.indexedTextureFormat,
-		materialColor: drawUnit.materialColor,
-		materialEmissiveColor: drawUnit.materialEmissiveColor,
+		materialEntries: drawUnit.materialEntries,
 		materialFamily: drawUnit.materialFamily,
-		paletteFirstIndex: drawUnit.paletteFirstIndex,
 		paletteTextureUseId: drawUnit.paletteTextureUseId,
+		materialSlotBuffer,
 		positionBuffer,
 		primaryTextureUseId: drawUnit.primaryTextureUseId,
-		primaryTextureWrapMode: drawUnit.primaryTextureWrapMode,
 		texCoordBuffer,
 		triangleCount: drawUnit.triangleCount,
 		vertexArray,
 		dispose() {
 			gl.deleteBuffer(positionBuffer);
 			gl.deleteBuffer(texCoordBuffer);
+			gl.deleteBuffer(materialSlotBuffer);
 			gl.deleteBuffer(indexBuffer);
 			gl.deleteVertexArray(vertexArray);
 		},

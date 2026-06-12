@@ -1171,10 +1171,14 @@ class FixtureTexturePacker implements TexturePacker {
 					);
 				}
 				pagesById.set(placement.pageId, {
-					format: "rgba8",
+					format: job.page.format,
 					height: placement.pageHeight,
 					pageId: placement.pageId,
-					pixels: new Uint8Array(placement.pageWidth * placement.pageHeight * 4),
+					pixels: new Uint8Array(
+						placement.pageWidth *
+							placement.pageHeight *
+							getTexturePackingFormatBytesPerPixel(job.page.format),
+					),
 					width: placement.pageWidth,
 				});
 				rects.push({
@@ -1203,7 +1207,7 @@ class FixtureTexturePacker implements TexturePacker {
 			jobId: job.jobId,
 			pages: [
 				{
-					format: "rgba8",
+					format: job.page.format,
 					height: pageHeight,
 					pageId: `${job.jobId}:page:0`,
 					pixels:
@@ -1257,6 +1261,23 @@ function createFixturePagePixels(
 	}
 
 	return pixels;
+}
+
+function getTexturePackingFormatBytesPerPixel(
+	format: TexturePackingJob["page"]["format"],
+): number {
+	switch (format) {
+		case "rgba8":
+			return 4;
+		case "r8ui":
+			return 1;
+		case "r16ui":
+			return 2;
+		default: {
+			const exhaustive: never = format;
+			throw new Error(`Unsupported texture packing format ${exhaustive}.`);
+		}
+	}
 }
 
 function createFixturePageSide(

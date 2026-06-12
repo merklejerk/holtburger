@@ -4,10 +4,7 @@ import {
 	createPreparedTextureHostKey,
 	prepareDirectMaterialTextureSource,
 } from "../assets/preparation/prepared-texture-source";
-import type {
-	DirectMaterialTextureSource,
-	DirectRgbaTextureSource,
-} from "../assets/preparation/prepared-texture-source";
+import type { DirectMaterialTextureSource } from "../assets/preparation/prepared-texture-source";
 import type {
 	TerrainRolePageOverflowDiagnostics,
 	TextureAtlasDiagnosticsReport,
@@ -35,6 +32,7 @@ import type {
 import { AtlasTexturePacker, type TexturePacker } from "./packing/packer";
 import type {
 	TexturePackingJob,
+	TexturePackingPixelSource,
 	TexturePackingResult,
 } from "./packing/protocol";
 import {
@@ -587,7 +585,7 @@ export class TextureManager {
 					page: createTexturePackingPageConstraints(group),
 					placementRevision,
 					sources: group.entries.map((entry) => ({
-						source: asDirectRgbaTextureSource(entry.source),
+						source: createTexturePackingPixelSource(entry.source),
 						textureUseId: entry.textureUse.textureUseId,
 					})),
 				},
@@ -979,15 +977,21 @@ function shouldCommitDirectPlacement(
 	);
 }
 
-function asDirectRgbaTextureSource(
+function createTexturePackingPixelSource(
 	source: DirectMaterialTextureSource,
-): DirectRgbaTextureSource {
+): TexturePackingPixelSource {
 	if (source.kind === "direct-rgba-texture-source") {
-		return source;
+		return {
+			format: "rgba8",
+			height: source.height,
+			kind: "texture-packing-pixel-source",
+			pixels: source.pixels,
+			width: source.width,
+		};
 	}
 
 	throw new Error(
-		`Texture source ${source.kind} cannot be submitted to the RGBA atlas packer.`,
+		`Texture source ${source.kind} cannot be submitted to the atlas packer until typed data atlas routing is enabled.`,
 	);
 }
 

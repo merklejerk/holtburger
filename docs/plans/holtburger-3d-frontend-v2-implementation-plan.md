@@ -2412,7 +2412,7 @@ Verification:
 
 ### Phase 11E2A1: Typed Atlas Packer Foundation
 
-Status: planned.
+Status: complete.
 
 Purpose: make the texture packing worker/protocol format-generic without changing current placement behavior yet.
 
@@ -2437,6 +2437,18 @@ Spicy notes:
 
 - This phase is an architectural refactor with intentionally boring behavior. If index/palette behavior changes here, the phase is doing too much.
 - Naming should move away from RGBA-specific concepts where the code is now format-generic, but avoid broad "universal" names if the implementation still has real page-format constraints.
+
+Closed:
+
+- The texture-packing worker protocol now accepts generic `TexturePackingPixelSource` entries and typed page formats instead of importing `DirectRgbaTextureSource` at the worker boundary.
+- The atlas packer now uses typed bytes-per-pixel allocation/copy logic for `rgba8`, `r8ui`, and `r16ui`; RGBA fill remains explicitly constrained to `rgba8` pages.
+- The texture manager still routes only RGBA material textures into atlas packing. `index8`, `index16`, and `palette-rgba` remain direct placements until Phase 11E2A2.
+- Tests now cover RGBA behavior, typed `r8ui`/`r16ui` packing support, format mismatch failures, invalid typed byte lengths, worker protocol typing, and the texture-manager direct-placement split.
+
+Failed to close:
+
+- Indexed and palette data are not atlas-packed yet. This is intentional for Phase 11E2A1 and remains the core target of Phase 11E2A2.
+- The production grouping/page-policy path still only creates `rgba8` packing jobs because non-RGBA data uses are deliberately gated out before pack planning.
 
 ### Phase 11E2A2: Indexed And Palette Data Atlas Families
 

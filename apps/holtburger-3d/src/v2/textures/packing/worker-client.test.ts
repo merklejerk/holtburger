@@ -236,12 +236,10 @@ function createPackingJob(): TexturePackingJob {
 		sources: [
 			{
 				source: {
+					format: "rgba8",
 					height: 1,
-					kind: "direct-rgba-texture-source",
-					outputFormat: "rgba8",
+					kind: "texture-packing-pixel-source",
 					pixels: new Uint8Array([255, 128, 0, 255]),
-					renderSurfaceId: 0x06000010,
-					usage: "color",
 					width: 1,
 				},
 				textureUseId: "terrain-a:prepared-texture:06000010",

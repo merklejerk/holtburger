@@ -72,7 +72,9 @@ interface StaticObjectOwnershipAxis {
 	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
 	readonly landblockId: number;
 	readonly sourceKey: string;
+	readonly sourceKeys: readonly string[];
 	readonly gfxKey: string;
+	readonly gfxKeys: readonly string[];
 	readonly objectPartKey: string | null;
 }
 
@@ -414,7 +416,7 @@ function createCompatibilityPartition(options: {
 		materialEmissiveColor: first.materialPlan.emissiveColor,
 		materialIds,
 		pass: first.materialPlan.pass,
-		partitionAxes: first.partitionAxes,
+		partitionAxes: createPartitionSliceAxes(first.partitionAxes, options.candidates),
 		reason:
 			materialIds.length > STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE
 				? "material table overflow partition"
@@ -441,6 +443,24 @@ function createCompatibilityPartition(options: {
 		textureDataUses,
 		textureRoleLayoutKey: first.textureRoleLayoutKey,
 		triangleCount: options.candidates.length,
+	};
+}
+
+function createPartitionSliceAxes(
+	axes: StaticObjectCompatibilityPartitionAxes,
+	candidates: readonly StaticObjectTriangleCandidate[],
+): StaticObjectCompatibilityPartitionAxes {
+	return {
+		...axes,
+		ownership: {
+			...axes.ownership,
+			gfxKeys: uniqueSortedStrings(
+				candidates.map((candidate) => candidate.gfxKey),
+			),
+			sourceKeys: uniqueSortedStrings(
+				candidates.map((candidate) => candidate.sourceKey),
+			),
+		},
 	};
 }
 
@@ -517,8 +537,7 @@ function createOwnershipAxis(options: {
 	const keyParts = [
 		`domain:${options.domain}`,
 		`landblock:${formatHex32(options.landblockId)}`,
-		`source:${options.sourceKey}`,
-		`gfx:${options.gfxKey}`,
+		objectPartKey ? "scope:object-part" : "scope:batchable",
 	];
 	if (objectPartKey) {
 		keyParts.push(`object-part:${objectPartKey}`);
@@ -527,10 +546,12 @@ function createOwnershipAxis(options: {
 	return {
 		domain: options.domain,
 		gfxKey: options.gfxKey,
+		gfxKeys: [options.gfxKey],
 		key: keyParts.join("|"),
 		landblockId: options.landblockId,
 		objectPartKey,
 		sourceKey: options.sourceKey,
+		sourceKeys: [options.sourceKey],
 	};
 }
 
@@ -562,8 +583,7 @@ function createPartitionCompatibilityKey(
 		axes.material.key,
 		axes.sort.key,
 		axes.visibility.key,
-		`source:${axes.ownership.sourceKey}`,
-		`gfx:${axes.ownership.gfxKey}`,
+		axes.ownership.key,
 	];
 
 	if (axes.sort.policy === "transparent-object-part-sortable") {
@@ -575,9 +595,7 @@ function createPartitionCompatibilityKey(
 		compatibilityKeyParts.push(`object-part:${axes.ownership.objectPartKey}`);
 	}
 
-	return [
-		...compatibilityKeyParts,
-	].join("|");
+	return compatibilityKeyParts.join("|");
 }
 
 function createMaterialColorKey(plan: StaticObjectMaterialPlan): string {
@@ -668,6 +686,10 @@ function uniqueTextureDataUses(
 
 function uniqueSorted(values: readonly number[]): readonly number[] {
 	return [...new Set(values)].sort((left, right) => left - right);
+}
+
+function uniqueSortedStrings(values: readonly string[]): readonly string[] {
+	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
 function compareTriangleCandidates(

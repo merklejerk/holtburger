@@ -2776,7 +2776,7 @@ Verification:
 
 ### Phase 11E4A1: Batchable Source Ownership Course Correct
 
-Status: planned.
+Status: complete.
 
 Purpose: remove source/gfx identity from opaque and alpha-test/cutout hard partition compatibility when the current single-binding static-object draw-unit contract can already render the merged geometry, while preserving source/gfx/object/part facts for mappings, diagnostics, picking, inspection, and future transparent sorting.
 
@@ -2813,6 +2813,36 @@ Acceptance criteria:
 - Source/gfx provenance remains available for diagnostics and future inspection despite broader render compaction.
 - Cross-texture/material-table batching is explicitly left to a later phase with renderer and draw-unit contract changes.
 - No `outdoor-detail` resolver/runtime work starts until this over-partitioning correction is closed.
+
+Closed:
+
+- Removed `sourceKey` and `gfxKey` from the static object hard compatibility key for batchable opaque and alpha-test/cutout partitions. The key now uses material/render compatibility, sort policy, visibility policy, and an ownership scope key that is `scope:batchable` unless object/part sorting is required.
+- Kept transparent/additive policy object/part-sortable. Transparent compatibility still requires `objectPartKey`, so repeated transparent object parts remain separate sortable draw units.
+- Added aggregate `partitionAxes.ownership.sourceKeys` and `partitionAxes.ownership.gfxKeys` so a cross-source batch can honestly describe all contributing source/gfx provenance instead of exposing only the first candidate's source.
+- Enriched static object `staticSourceMappings` strings to include source asset identity, gfx object identity, object identity, part, polygon, first vertex, geometry surface, and material variant. This keeps provenance visible after cross-source/gfx compaction.
+- Added tests proving compatible opaque and alpha-test geometry from different source/gfx identities compact into one partition when renderer-binding facts match.
+- Added tests proving different concrete texture/data-use identities still split under the current single-binding renderer contract.
+- Added bake-level coverage proving enriched source/gfx provenance survives in source mappings after cross-source compaction.
+
+Spicy notes:
+
+- `partitionAxes.ownership.sourceKey` and `gfxKey` still exist as candidate-local first-source metadata for now, but batchable partitions should use the aggregate `sourceKeys`/`gfxKeys` arrays for truthful provenance. Future public renderer/debug contracts should avoid relying on the singular fields for batchable partitions.
+- `staticSourceMappings` are still string records, not typed source-mapping structs. They are now less lossy, but a later inspection/picking pass should probably replace these strings with typed records instead of teaching more code to parse them.
+- This phase deliberately did not merge textures A/B/C just because they may share an atlas page. The current static-object draw unit and shader are still single-binding, so concrete texture/data-use identity remains a real hard partition key. That decision stays queued for Phase 11E4A2.
+
+Failed to close:
+
+- No material-binding-table contract was added. `materialIds` remains diagnostic/capacity metadata for this path, not a real per-triangle/per-vertex material selector.
+- No live browser/GPU visual pass was run. This was verified as a baker/partitioner behavior change only.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- src/v2/static/objects/bake/static-object-compatibility-partitioner.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
+- `cd apps/holtburger-3d && rg -n "world-display" src/v2/static/objects src/v2/static/objects/bake` returned no matches.
 
 ### Phase 11E4A2: Static Object Material Binding Table Resteer
 

@@ -153,8 +153,12 @@ interface TextureAtlasDomainDiagnostics {
 	readonly unmippedPageCount: number;
 	readonly approximateBytes: number;
 	readonly sampleClasses: Record<TexturePageSampleClass, number>;
+	readonly formats: Record<TextureAtlasPageFormat, number>;
+	readonly samplerPolicies: Record<string, number>;
 	readonly wrapModes: Record<TextureWrapMode, number>;
 }
+
+type TextureAtlasPageFormat = "rgba8" | "r8ui" | "r16ui";
 
 type TextureAtlasWarningDiagnostics = TerrainRolePageOverflowSummaryDiagnostics;
 

@@ -954,7 +954,7 @@ describe("V2 texture manager", () => {
 		).rejects.toThrow("expected 4 rgba8 bytes, got 3");
 	});
 
-	it("commits indexed and palette data uses as direct nearest-sampled placements", async () => {
+	it("packs indexed and palette data uses as nearest-sampled atlas pages", async () => {
 		const assetService = new FixtureAssetService();
 		const texturePacker = new FixtureTexturePacker();
 		const textureManager = new TextureManager({ assetService, texturePacker });
@@ -1012,7 +1012,44 @@ describe("V2 texture manager", () => {
 				kind: "palette",
 			},
 		]);
-		expect(texturePacker.jobs).toHaveLength(0);
+		expect(texturePacker.jobs).toHaveLength(2);
+		expect(texturePacker.jobs.map((job) => job.page.format).sort()).toEqual([
+			"r8ui",
+			"rgba8",
+		]);
+		expect(texturePacker.jobs.map((job) => job.page.gutterPixels)).toEqual([
+			0, 0,
+		]);
+		expect(texturePacker.jobs).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					page: expect.objectContaining({ format: "r8ui" }),
+					sources: [
+						expect.objectContaining({
+							source: expect.objectContaining({
+								format: "r8ui",
+								pixels: new Uint8Array([255, 255]),
+							}),
+							textureUseId: "static-a:index",
+						}),
+					],
+				}),
+				expect.objectContaining({
+					page: expect.objectContaining({ format: "rgba8" }),
+					sources: [
+						expect.objectContaining({
+							source: expect.objectContaining({
+								format: "rgba8",
+								pixels: new Uint8Array([
+									0x44, 0x55, 0x66, 0x80, 0xaa, 0xbb, 0xcc, 0xff,
+								]),
+							}),
+							textureUseId: "static-a:palette",
+						}),
+					],
+				}),
+			]),
+		);
 		expect(update?.placements).toMatchObject([
 			{
 				filteringMode: "nearest",
@@ -1053,6 +1090,24 @@ describe("V2 texture manager", () => {
 				rolePage: { kind: "static-palette", slot: 0 },
 				textureUseId: "static-a:palette",
 			},
+		]);
+		expect(textureManager.createDiagnosticsReport().byDomain).toEqual([
+			expect.objectContaining({
+				domain: "outdoor-buildings",
+				formats: expect.objectContaining({
+					r8ui: 1,
+					rgba8: 1,
+				}),
+				sampleClasses: expect.objectContaining({
+					index8: 1,
+					"palette-rgba": 1,
+				}),
+				samplerPolicies: expect.objectContaining({
+					"sample=index8;filter=nearest;mips=off;aniso=1": 1,
+					"sample=palette-rgba;filter=nearest;mips=off;aniso=1": 1,
+				}),
+				unmippedPageCount: 2,
+			}),
 		]);
 		expect(Array.from(update?.placements[1]?.pixels ?? [])).toEqual([
 			0x44, 0x55, 0x66, 0x80, 0xaa, 0xbb, 0xcc, 0xff,
@@ -1215,6 +1270,7 @@ class FixtureTexturePacker implements TexturePacker {
 						createFixturePagePixels(
 							pageWidth,
 							pageHeight,
+							job.page.format,
 							job.sources[0]?.source.pixels,
 						),
 					width: pageWidth,
@@ -1253,11 +1309,13 @@ interface FixtureTexturePackerRectPlacement {
 function createFixturePagePixels(
 	width: number,
 	height: number,
+	format: TexturePackingJob["page"]["format"],
 	sourcePixels: Uint8Array | undefined,
 ): Uint8Array {
-	const pixels = new Uint8Array(width * height * 4);
+	const bytesPerPixel = getTexturePackingFormatBytesPerPixel(format);
+	const pixels = new Uint8Array(width * height * bytesPerPixel);
 	if (sourcePixels) {
-		pixels.set(sourcePixels.subarray(0, 4), 0);
+		pixels.set(sourcePixels.subarray(0, pixels.length), 0);
 	}
 
 	return pixels;

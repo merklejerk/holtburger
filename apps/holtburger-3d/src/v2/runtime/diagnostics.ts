@@ -1,5 +1,6 @@
 import type {
 	RendererSnapshot,
+	StaticObjectTextureRolePageKind,
 	TerrainTextureRolePageKind,
 } from "../renderer/types";
 import type {
@@ -162,13 +163,22 @@ interface TextureAtlasDomainDiagnostics {
 
 type TextureAtlasPageFormat = "rgba8" | "r8" | "rg8";
 
-type TextureAtlasWarningDiagnostics = TerrainRolePageOverflowSummaryDiagnostics;
+type TextureAtlasWarningDiagnostics =
+	| TerrainRolePageOverflowSummaryDiagnostics
+	| StaticObjectRolePageOverflowSummaryDiagnostics;
 
 interface TerrainRolePageOverflowSummaryDiagnostics {
 	readonly kind: "terrain-role-page-overflow";
 	readonly count: number;
 	readonly latestDrawUnitId: string | null;
 	readonly latestRole: TerrainTextureRolePageKind | null;
+}
+
+interface StaticObjectRolePageOverflowSummaryDiagnostics {
+	readonly kind: "static-object-role-page-overflow";
+	readonly count: number;
+	readonly latestDrawUnitId: string | null;
+	readonly latestRole: StaticObjectTextureRolePageKind | null;
 }
 
 export interface TerrainTextureDiagnosticsReport {
@@ -192,6 +202,13 @@ export interface TerrainTextureFallbackDiagnostics {
 export interface TerrainRolePageOverflowDiagnostics {
 	readonly drawUnitId: string;
 	readonly kind: TerrainTextureRolePageKind;
+	readonly maxSlots: number;
+	readonly textureRefId: string;
+}
+
+export interface StaticObjectRolePageOverflowDiagnostics {
+	readonly drawUnitId: string;
+	readonly kind: StaticObjectTextureRolePageKind;
 	readonly maxSlots: number;
 	readonly textureRefId: string;
 }

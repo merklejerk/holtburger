@@ -81,7 +81,7 @@ describe("V2 texture manager", () => {
 				page: {
 					fillRgba: [128, 128, 128, 255],
 					format: "rgba8",
-					gutterEdgeMode: "repeat",
+					gutterEdgeMode: "clamp",
 					gutterPixels: 96,
 					height: 2048,
 					pageSelection: "minimize-textures",
@@ -90,6 +90,7 @@ describe("V2 texture manager", () => {
 				placementRevision: 1,
 				sources: [
 					{
+						gutterEdgeMode: "repeat",
 						textureUseId: "terrain-a:prepared-texture:06000010",
 					},
 				],
@@ -264,7 +265,7 @@ describe("V2 texture manager", () => {
 				page: {
 					fillRgba: [128, 128, 128, 255],
 					format: "rgba8",
-					gutterEdgeMode: "repeat",
+					gutterEdgeMode: "clamp",
 					gutterPixels: 96,
 					height: 2048,
 					pageSelection: "minimize-textures",
@@ -272,9 +273,11 @@ describe("V2 texture manager", () => {
 				},
 				sources: [
 					{
+						gutterEdgeMode: "repeat",
 						textureUseId: "terrain-a:prepared-texture:06000010",
 					},
 					{
+						gutterEdgeMode: "repeat",
 						textureUseId: "terrain-b:prepared-texture:06000020",
 					},
 				],
@@ -877,9 +880,11 @@ describe("V2 texture manager", () => {
 		]);
 	});
 
-	it("does not alias repeat and clamp static object color placements", async () => {
+	it("shares static object clamp and repeat color uses in one virtual-wrap atlas page", async () => {
+		const texturePacker = new FixtureTexturePacker();
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
+			texturePacker,
 		});
 
 		const update = await textureManager.applyStaticCommitDelta({
@@ -902,6 +907,91 @@ describe("V2 texture manager", () => {
 				createTextureUseCommit({
 					domain: "outdoor-buildings",
 					drawUnitId: "building-repeat",
+					renderSurfaceId: 0x06000020,
+					samplingPolicy: {
+						wrapS: "repeat",
+						wrapT: "repeat",
+					},
+					textureUseId: "building-repeat:06000020",
+					usage: "rgba-color",
+				}),
+			],
+		});
+
+		expect(texturePacker.jobs).toHaveLength(1);
+		expect(texturePacker.jobs[0]).toMatchObject({
+			page: {
+				gutterEdgeMode: "clamp",
+				gutterPixels: 4,
+			},
+			sources: [
+				{
+					gutterEdgeMode: "clamp",
+					textureUseId: "building-clamp:06000010",
+				},
+				{
+					gutterEdgeMode: "repeat",
+					textureUseId: "building-repeat:06000020",
+				},
+			],
+		});
+		expect(update?.placements).toMatchObject([
+			{
+				textureUseId: "building-clamp:06000010",
+				wrapS: "clamp-to-edge",
+				wrapT: "clamp-to-edge",
+			},
+		]);
+		expect(
+			new Set(update?.drawUnitBindings.map((binding) => binding.textureRefId)),
+		).toHaveProperty("size", 1);
+		expect(textureManager.createDiagnosticsReport().byDomain).toEqual([
+			expect.objectContaining({
+				domain: "outdoor-buildings",
+				texturePageCount: 1,
+				wrapModes: {
+					"clamp-to-edge": 1,
+					repeat: 1,
+				},
+			}),
+		]);
+	});
+
+	it("reuses a static object atlas rect for later authored wrap aliases", async () => {
+		const texturePacker = new FixtureTexturePacker();
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+			texturePacker,
+		});
+
+		const firstUpdate = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedDrawUnitIds: [],
+			revision: 1,
+			staticBatchId: "batch-a",
+			textureUses: [
+				createTextureUseCommit({
+					domain: "outdoor-buildings",
+					drawUnitId: "building-clamp",
+					renderSurfaceId: 0x06000010,
+					samplingPolicy: {
+						wrapS: "clamp-to-edge",
+						wrapT: "clamp-to-edge",
+					},
+					textureUseId: "building-clamp:06000010",
+					usage: "rgba-color",
+				}),
+			],
+		});
+		const secondUpdate = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedDrawUnitIds: [],
+			revision: 2,
+			staticBatchId: "batch-a",
+			textureUses: [
+				createTextureUseCommit({
+					domain: "outdoor-buildings",
+					drawUnitId: "building-repeat",
 					renderSurfaceId: 0x06000010,
 					samplingPolicy: {
 						wrapS: "repeat",
@@ -913,12 +1003,25 @@ describe("V2 texture manager", () => {
 			],
 		});
 
-		expect(update?.placements.map((placement) => placement.wrapS).sort()).toEqual(
-			["clamp-to-edge", "repeat"],
-		);
-		expect(
-			update?.drawUnitBindings.map((binding) => binding.textureRefId),
-		).toHaveLength(2);
+		expect(texturePacker.jobs).toHaveLength(1);
+		expect(secondUpdate?.placements).toEqual([]);
+		expect(secondUpdate?.drawUnitBindings).toMatchObject([
+			{
+				drawUnitId: "building-repeat",
+				textureRefId: firstUpdate?.placements[0]?.textureRefId,
+				textureUseId: "building-repeat:06000010",
+			},
+		]);
+		expect(textureManager.createDiagnosticsReport().byDomain).toEqual([
+			expect.objectContaining({
+				domain: "outdoor-buildings",
+				texturePageCount: 1,
+				wrapModes: {
+					"clamp-to-edge": 1,
+					repeat: 1,
+				},
+			}),
+		]);
 	});
 
 	it("carries nearest filtering as placement policy instead of rebaking geometry", async () => {
@@ -1061,8 +1164,8 @@ describe("V2 texture manager", () => {
 				samplerPolicyKey: "sample=index8;filter=nearest;mips=off;aniso=1",
 				textureUseId: "static-a:index",
 				width: 2,
-				wrapS: "repeat",
-				wrapT: "repeat",
+				wrapS: "clamp-to-edge",
+				wrapT: "clamp-to-edge",
 			},
 			{
 				filteringMode: "nearest",

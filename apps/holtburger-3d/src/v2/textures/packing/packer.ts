@@ -54,7 +54,7 @@ function packTexturesWithAtlasLayout(job: TexturePackingJob): TexturePackingResu
 	}
 
 	const sourceByTextureUseId = new Map(
-		job.sources.map((entry) => [entry.textureUseId, entry.source] as const),
+		job.sources.map((entry) => [entry.textureUseId, entry] as const),
 	);
 	const pages = layout.texturePages.map((layoutPage) => {
 		const pagePixels = createBlankPage({
@@ -64,16 +64,17 @@ function packTexturesWithAtlasLayout(job: TexturePackingJob): TexturePackingResu
 			width: layoutPage.width,
 		});
 		for (const placement of layoutPage.placements) {
-			const source = sourceByTextureUseId.get(placement.atlasEntryKey);
-			if (!source) {
+			const entry = sourceByTextureUseId.get(placement.atlasEntryKey);
+			if (!entry) {
 				throw new Error(
 					`Texture packing job ${job.jobId} layout referenced unknown source ${placement.atlasEntryKey}.`,
 				);
 			}
+			const { source } = entry;
 			blitTextureWithGutter({
 				destination: pagePixels,
 				destinationWidth: layoutPage.width,
-				edgeMode: job.page.gutterEdgeMode ?? "clamp",
+				edgeMode: entry.gutterEdgeMode ?? job.page.gutterEdgeMode ?? "clamp",
 				format: job.page.format,
 				gutterPixels: placement.gutterPixels,
 				source: source.pixels,

@@ -2527,10 +2527,10 @@ Closed:
 - Existing same-source static texture placements can be reused across later clamp/repeat authored wrap aliases without repacking, while diagnostics still count both wrap intents.
 - Texture atlas diagnostics now count wrap modes from registry entries/texture-use intent rather than page objects, so the summary no longer implies wrap mode is a physical atlas bucket.
 - Tests now prove static clamp/repeat color uses share one page, later authored wrap aliases reuse the existing rect, source-level gutter edge mode works, and terrain retains its existing physical wrap behavior.
+- Manual visual inspection on `0xda55ffff` with `buildings,detail,terrain,topology` enabled found the scene visually stable after virtual-wrap packing. Runtime diagnostics showed outdoor-building `rgba-color`, `palette-rgba`, and `index16` pages present with no static coordinator failures.
 
 Failed to close:
 
-- No live WebGL screenshot or browser visual pass was run for this phase; validation is via typecheck, lint, dead-code lint, and unit tests.
 - Terrain virtual-wrap parity remains intentionally unclaimed. Terrain continues to use its current page-role shader/packing behavior until a terrain-specific phase proves wrap can be removed from those physical buckets too.
 
 ### Phase 11E2B: Indexed Palette Views And Visual Parity
@@ -2539,17 +2539,23 @@ Status: planned.
 
 Purpose: close indexed/paletted material parity after the core data-texture path by deriving authored palette ranges/shades and validating real indexed building targets.
 
+Current steering:
+
+- The core indexed/paletted upload/render path is now live. Manual diagnostics on `0xda55ffff` showed rendered outdoor-building `indexed-paletted` coverage with packed `index16` and `palette-rgba` pages and no missing texture refs.
+- This phase should focus on palette-view correctness, not basic texture upload. The primary unknown is whether authored palette ranges, sub-palettes, and shade selection are represented losslessly instead of falling back to full/default palette views.
+
 Deliverables:
 
 - Palette view/subrange derivation from setup appearance `subPalettes`, palette-set/shade data, or the equivalent source metadata that actually controls AC indexed static-object material color selection.
 - Resolver/material-slot contract updates so palette range facts attach to the material use that needs them rather than staying as source-level appearance metadata.
 - Tests proving non-full-range palette uses flow through material planning, compatibility keys, texture manager placement, and WebGL shader palette offset.
-- Manual visual verification on audited landblocks that contain indexed/paletted building materials.
+- Manual visual verification on audited landblocks that contain indexed/paletted building materials, including at least one non-default or non-full palette view if available.
 
 Acceptance criteria:
 
 - Indexed/paletted materials are not marked parity-complete while palette subranges/shades still rely on the full 256-entry fallback.
 - Palette-view identity is part of compatibility and texture-use identity, so two surfaces using the same palette asset with different authored ranges do not accidentally share the same lookup table.
+- A non-zero `firstIndex` and non-256 `indexCount` palette view is covered by tests through resolver/material planning, texture-use identity, atlas packing, and WebGL palette rect sampling.
 - Missing or unsupported palette-view metadata remains a typed render-deferred/unsupported material reason, not a silent full-palette fallback.
 
 ### Phase 11E3: Translucent And Additive Static Passes
@@ -2558,17 +2564,23 @@ Status: planned.
 
 Purpose: add static object pass-order and blend/depth handling for translucent/additive materials after opaque, alpha-test, solid, and indexed data paths are structurally separated.
 
+Current steering:
+
+- Do not use `0xda55ffff` as the primary visual proof target for this phase. The latest diagnostics showed `flat-color transparent` material counts but zero transparent triangles, so it is useful for classification sanity only, not blend rendering validation.
+- Before implementation, identify or audit a landblock with actual translucent/additive static-object triangle coverage so visual verification exercises real blended geometry.
+
 Deliverables:
 
 - Render-state/pass partitioning for translucent, inverse-alpha, additive, and related blend cases.
 - Renderer pass ordering and depth-write/depth-test behavior for static object translucent/additive draw units.
 - Tests proving translucent/additive classification, partition splitting, draw ordering, renderer state setup, and fallback behavior.
-- Visual verification on audited landblocks with translucent/additive static materials.
+- Visual verification on audited landblocks with nonzero translucent/additive static triangles.
 
 Acceptance criteria:
 
 - Blend support is expressed through typed pass/render-state contracts, not shader-side ad hoc flags alone.
 - Opaque/alpha-test draw ordering remains deterministic and unaffected.
+- Material coverage diagnostics identify a nonzero blended/static triangle target before claiming visual parity.
 - Any sorting limitations are explicitly documented before moving to Phase 12.
 
 ### Phase 11E4: Static Detail Overlay Composition
@@ -2576,6 +2588,11 @@ Acceptance criteria:
 Status: planned.
 
 Purpose: render static object detail overlays as material-role composition rather than broadening source domains prematurely.
+
+Current steering:
+
+- This phase has a concrete observed target. Manual diagnostics on `0xda55ffff` showed `detailRoleCount: 3` and `detail-overlay-render-deferred: 3`, with all outdoor-building triangles otherwise rendered.
+- Treat material-coverage fallback diagnostics as the phase's main progress signal: the detail-overlay fallback count should drop only when the detail role is actually resolved, packed, bound, and sampled.
 
 Deliverables:
 
@@ -2589,6 +2606,7 @@ Acceptance criteria:
 
 - Detail overlays are represented as additional material roles, not as a separate source-domain shortcut.
 - `outdoor-detail` and `env-cell-static` breadth remains out of scope unless a detail material role demonstrably requires a narrow source-resolution addition.
+- `detail-overlay-render-deferred` material-coverage fallbacks drop for audited targets only when detail overlay rendering is actually active, not merely hidden or reclassified.
 - Unsupported or unresolved detail roles remain explicitly diagnostic.
 
 ### Phase 11E5: Static Material Family Resteer

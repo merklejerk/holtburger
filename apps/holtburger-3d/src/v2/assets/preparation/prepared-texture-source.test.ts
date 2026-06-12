@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PreparedAsset } from "../contracts";
-import type { PreparedTextureUseIdentity } from "../../static/contracts";
+import type { PreparedRgbaRenderSurfaceTextureUseIdentity } from "../../static/contracts";
 import {
 	createPreparedTextureHostKey,
 	prepareDirectRgbaTextureSource,
@@ -28,7 +28,7 @@ describe("V2 prepared texture source preparation", () => {
 			kind: "direct-rgba-texture-source",
 			outputFormat: "rgba8",
 			renderSurfaceId: 0x06000010,
-			usage: "color",
+			usage: "rgba-color",
 			width: 1,
 		});
 		expect(Array.from(source.pixels)).toEqual([255, 128, 0, 255]);
@@ -63,13 +63,15 @@ describe("V2 prepared texture source preparation", () => {
 });
 
 function createTextureUse(
-	overrides: Partial<PreparedTextureUseIdentity> = {},
-): PreparedTextureUseIdentity {
+	overrides: Partial<PreparedRgbaRenderSurfaceTextureUseIdentity> = {},
+): PreparedRgbaRenderSurfaceTextureUseIdentity {
 	return {
-		kind: "prepared-texture-use",
-		outputFormat: "rgba8",
-		renderSurfaceId: 0x06000010,
-		usage: "color",
+		kind: "prepared-render-surface-texture-use",
+		renderSurface: {
+			kind: "render-surface",
+			renderSurfaceId: 0x06000010,
+		},
+		usage: "rgba-color",
 		...overrides,
 	};
 }
@@ -82,10 +84,7 @@ function createPreparedAsset(options: {
 }): PreparedAsset {
 	return {
 		key: createPreparedTextureHostKey(
-			createTextureUse({
-				colorSpace: options.colorSpace ?? "linear",
-				outputFormat: options.outputFormat,
-			}),
+			createTextureUse(),
 		),
 		payload: createPreparedTexturePayload(options),
 		preparedAt: "test",

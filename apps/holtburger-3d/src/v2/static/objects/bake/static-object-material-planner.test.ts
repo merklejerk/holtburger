@@ -56,10 +56,12 @@ describe("V2 static object material planner", () => {
 			textureRoles: [
 				{
 					preparedTextureUse: {
-						kind: "prepared-texture-use",
-						outputFormat: "rgba8",
-						renderSurfaceId: 0x06000010,
-						usage: "raw",
+						kind: "prepared-render-surface-texture-use",
+						renderSurface: {
+							kind: "render-surface",
+							renderSurfaceId: 0x06000010,
+						},
+						usage: "rgba-raw",
 					},
 					renderSurface: {
 						kind: "render-surface",

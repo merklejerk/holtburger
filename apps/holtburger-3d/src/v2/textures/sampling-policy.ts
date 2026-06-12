@@ -1,4 +1,4 @@
-import type { PreparedTextureUseIdentity } from "../static/contracts";
+import type { PreparedRgbaRenderSurfaceTextureUseIdentity } from "../static/contracts";
 
 export type TextureFilteringMode = "nearest" | "linear" | "anisotropic-4x";
 
@@ -24,28 +24,28 @@ export interface RuntimeTextureSamplerPolicy {
 }
 
 export function createRuntimeTexturePagePolicy(
-	source: PreparedTextureUseIdentity,
+	source: PreparedRgbaRenderSurfaceTextureUseIdentity,
 ): RuntimeTexturePagePolicy {
 	switch (source.usage) {
-		case "color":
+		case "rgba-color":
 			return {
 				sampleClass: "rgba-color",
 				wrapS: "repeat",
 				wrapT: "repeat",
 			};
-		case "detail":
+		case "rgba-detail":
 			return {
 				sampleClass: "rgba-detail",
 				wrapS: "repeat",
 				wrapT: "repeat",
 			};
-		case "mask":
+		case "rgba-mask":
 			return {
 				sampleClass: "rgba-mask",
 				wrapS: "clamp-to-edge",
 				wrapT: "clamp-to-edge",
 			};
-		case "raw":
+		case "rgba-raw":
 			return {
 				sampleClass: "rgba-exact",
 				wrapS: "clamp-to-edge",

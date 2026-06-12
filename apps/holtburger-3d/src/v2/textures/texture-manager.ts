@@ -22,7 +22,8 @@ import {
 } from "../renderer/types";
 import type {
 	StaticAtlasBatchSnapshot,
-	PreparedTextureUseIdentity,
+	MaterialTextureDataUseIdentity,
+	PreparedRgbaRenderSurfaceTextureUseIdentity,
 	StaticScopePayload,
 	StaticTextureUseIdentity,
 	StaticBakeTextureUse,
@@ -199,7 +200,7 @@ export class TextureManager {
 		return {
 			domain: firstPayload.job.domain,
 			placements: textureUses.flatMap((textureUse) => {
-				if (textureUse.kind !== "prepared-texture-use") {
+				if (!isPreparedRgbaRenderSurfaceTextureUse(textureUse)) {
 					return [];
 				}
 
@@ -281,11 +282,12 @@ export class TextureManager {
 			if (!entry) {
 				continue;
 			}
+			const source = asPreparedRgbaRenderSurfaceTextureUse(textureUse.source);
 			for (const drawUnitId of textureUse.ownerDrawUnitIds) {
 				const rolePage = rolePageSlots.resolveSlot({
 					drawUnitId,
 					textureRefId: entry.textureRefId,
-					usage: textureUse.source.usage,
+					usage: source.usage,
 				});
 				if (!rolePage) {
 					continue;
@@ -359,6 +361,7 @@ export class TextureManager {
 		textureUse: StaticBakeTextureUse,
 		pendingPlacements: Map<string, PendingTexturePlacement>,
 	): Promise<StagedTexturePlacement> {
+		const source = asPreparedRgbaRenderSurfaceTextureUse(textureUse.source);
 		const registry = this.#getRegistry(
 			textureUse.domain,
 			textureUse.staticBatchId,
@@ -374,7 +377,7 @@ export class TextureManager {
 
 		const existingSourceEntry = findRegistryEntryBySource(
 			registry,
-			textureUse.source,
+			source,
 		);
 		if (existingSourceEntry) {
 			registry.entries.set(textureKey, existingSourceEntry);
@@ -398,10 +401,10 @@ export class TextureManager {
 		}
 
 		const prepared = await this.#assetService.requestPreparedAsset(
-			createPreparedTextureHostKey(textureUse.source),
+			createPreparedTextureHostKey(source),
 		);
-		const source = prepareDirectRgbaTextureSource(prepared, textureUse.source);
-		const pagePolicy = createRuntimeTexturePagePolicy(textureUse.source);
+		const directSource = prepareDirectRgbaTextureSource(prepared, source);
+		const pagePolicy = createRuntimeTexturePagePolicy(source);
 		const samplerPolicy = createRuntimeTextureSamplerPolicy({
 			filteringMode: this.#filteringMode,
 			sampleClass: pagePolicy.sampleClass,
@@ -412,7 +415,7 @@ export class TextureManager {
 			pagePolicy,
 			pendingLeaseCount: 0,
 			samplerPolicy,
-			source,
+			source: directSource,
 			staticBatchId: textureUse.staticBatchId,
 			textureKeys: new Set([textureKey]),
 			textureUse,
@@ -570,7 +573,7 @@ export class TextureManager {
 						`Texture packing job for ${entry.textureUse.textureUseId} did not return a rect.`,
 					);
 				}
-				entry.entry = {
+				const registryEntry: StaticBatchTextureRegistryEntry = {
 					anisotropy: group.samplerPolicy.anisotropy,
 					domain: entry.domain,
 					filteringMode: group.samplerPolicy.filteringMode,
@@ -581,7 +584,9 @@ export class TextureManager {
 					rect: rect.rect,
 					sampleClass: group.pagePolicy.sampleClass,
 					samplerPolicyKey: group.samplerPolicy.policyKey,
-					source: entry.textureUse.source,
+					source: asPreparedRgbaRenderSurfaceTextureUse(
+						entry.textureUse.source,
+					),
 					staticBatchId: entry.staticBatchId,
 					textureHeight: page.height,
 					textureRefId,
@@ -589,10 +594,11 @@ export class TextureManager {
 					wrapS: group.pagePolicy.wrapS,
 					wrapT: group.pagePolicy.wrapT,
 				};
+				entry.entry = registryEntry;
 				for (const textureKey of entry.textureKeys) {
 					this.#getRegistry(entry.domain, entry.staticBatchId).entries.set(
 						textureKey,
-						entry.entry,
+						registryEntry,
 					);
 				}
 			}
@@ -719,7 +725,7 @@ interface StaticBatchTextureRegistryEntry {
 	filteringMode: TextureFilteringMode;
 	readonly format: RuntimeTexturePlacement["format"];
 	readonly staticBatchId: string;
-	readonly source: PreparedTextureUseIdentity;
+	readonly source: PreparedRgbaRenderSurfaceTextureUseIdentity;
 	readonly textureRefId: string;
 	readonly placementRevision: number;
 	mipmapsGenerated: boolean;
@@ -783,7 +789,7 @@ interface PackedPendingTexturePlacementGroup extends PlannedPendingTexturePlacem
 interface TerrainRolePageSlotInput {
 	readonly drawUnitId: string;
 	readonly textureRefId: string;
-	readonly usage: PreparedTextureUseIdentity["usage"];
+	readonly usage: PreparedRgbaRenderSurfaceTextureUseIdentity["usage"];
 }
 
 function collectPayloadTextureUses(
@@ -810,7 +816,7 @@ function createStaticBatchRegistryKey(
 
 function findRegistryEntryBySource(
 	registry: StaticBatchTextureRegistry,
-	source: PreparedTextureUseIdentity,
+	source: PreparedRgbaRenderSurfaceTextureUseIdentity,
 ): StaticBatchTextureRegistryEntry | null {
 	for (const entry of registry.entries.values()) {
 		if (isSamePreparedTextureUse(entry.source, source)) {
@@ -841,14 +847,13 @@ function deleteRegistryEntryAliases(
 }
 
 function isSamePreparedTextureUse(
-	left: PreparedTextureUseIdentity,
-	right: PreparedTextureUseIdentity,
+	left: PreparedRgbaRenderSurfaceTextureUseIdentity,
+	right: PreparedRgbaRenderSurfaceTextureUseIdentity,
 ): boolean {
 	return (
 		left.kind === right.kind &&
-		left.renderSurfaceId === right.renderSurfaceId &&
-		left.usage === right.usage &&
-		left.outputFormat === right.outputFormat
+		left.renderSurface.renderSurfaceId === right.renderSurface.renderSurfaceId &&
+		left.usage === right.usage
 	);
 }
 
@@ -868,19 +873,44 @@ function createStaticBatchSourcePlacementKey(
 	return [
 		textureUse.domain,
 		textureUse.staticBatchId,
-		createPreparedTextureUseKey(textureUse.source),
+		createPreparedTextureUseKey(
+			asPreparedRgbaRenderSurfaceTextureUse(textureUse.source),
+		),
 	].join(":");
 }
 
 function createPreparedTextureUseKey(
-	source: PreparedTextureUseIdentity,
+	source: PreparedRgbaRenderSurfaceTextureUseIdentity,
 ): string {
 	return [
 		source.kind,
-		source.renderSurfaceId.toString(16).padStart(8, "0"),
+		source.renderSurface.renderSurfaceId.toString(16).padStart(8, "0"),
 		source.usage,
-		source.outputFormat,
 	].join(":");
+}
+
+function isPreparedRgbaRenderSurfaceTextureUse(
+	source: StaticTextureUseIdentity,
+): source is PreparedRgbaRenderSurfaceTextureUseIdentity {
+	return (
+		source.kind === "prepared-render-surface-texture-use" &&
+		(source.usage === "rgba-color" ||
+			source.usage === "rgba-detail" ||
+			source.usage === "rgba-mask" ||
+			source.usage === "rgba-raw")
+	);
+}
+
+function asPreparedRgbaRenderSurfaceTextureUse(
+	source: MaterialTextureDataUseIdentity,
+): PreparedRgbaRenderSurfaceTextureUseIdentity {
+	if (isPreparedRgbaRenderSurfaceTextureUse(source)) {
+		return source;
+	}
+
+	throw new Error(
+		`Texture data use ${source.kind}:${source.usage} cannot be staged by the current RGBA atlas path.`,
+	);
 }
 
 function createTextureRefId(
@@ -1220,12 +1250,12 @@ function appendBounded<T>(values: readonly T[], value: T, limit: number): T[] {
 }
 
 function createTerrainTextureRolePageKind(
-	usage: PreparedTextureUseIdentity["usage"],
+	usage: PreparedRgbaRenderSurfaceTextureUseIdentity["usage"],
 ): TerrainTextureRolePageKind {
-	if (usage === "mask") {
+	if (usage === "rgba-mask") {
 		return "mask";
 	}
-	if (usage === "detail") {
+	if (usage === "rgba-detail") {
 		return "detail";
 	}
 

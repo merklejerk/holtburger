@@ -305,15 +305,17 @@ function createTextureUse(
 	return {
 		palette: null,
 		preparedTextureUse: {
-			kind: "prepared-texture-use",
-			outputFormat: "rgba8",
-			renderSurfaceId: texture.surfaceTextureId + 0x0100_0000,
+			kind: "prepared-render-surface-texture-use",
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: texture.surfaceTextureId + 0x0100_0000,
+			},
 			usage:
 				role === "terrain-alpha" || role === "road-alpha"
-					? "mask"
+					? "rgba-mask"
 					: role === "detail"
-						? "detail"
-						: "color",
+						? "rgba-detail"
+						: "rgba-color",
 		},
 		renderSurface: {
 			kind: "render-surface",

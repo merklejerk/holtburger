@@ -88,8 +88,8 @@ export type StaticResourceIdentity =
 	| RegionRenderProfileIdentity
 	| SurfaceTextureIdentity
 	| RenderSurfaceIdentity
-	| PreparedTextureUseIdentity
-	| PaletteIdentity;
+	| PaletteIdentity
+	| MaterialTextureDataUseIdentity;
 
 interface LandblockSourceIdentity {
 	readonly kind: "landblock-source";
@@ -165,26 +165,52 @@ export interface RenderSurfaceIdentity {
 	readonly renderSurfaceId: number;
 }
 
-export type PreparedTextureUsage = "color" | "detail" | "mask" | "raw";
-export type PreparedTextureOutputFormat = "dxt1" | "dxt3" | "dxt5" | "rgba8";
-
-export interface PreparedTextureUseIdentity {
-	readonly kind: "prepared-texture-use";
-	readonly renderSurfaceId: number;
-	readonly usage: PreparedTextureUsage;
-	readonly outputFormat: PreparedTextureOutputFormat;
-}
-
 export interface PaletteIdentity {
 	readonly kind: "palette";
 	readonly paletteId: number;
 }
 
+type PreparedRenderSurfaceTextureUsage =
+	| "rgba-color"
+	| "rgba-detail"
+	| "rgba-mask"
+	| "rgba-raw"
+	| "index8"
+	| "index16";
+
+export type PreparedRgbaRenderSurfaceTextureUsage = Extract<
+	PreparedRenderSurfaceTextureUsage,
+	"rgba-color" | "rgba-detail" | "rgba-mask" | "rgba-raw"
+>;
+
+interface PreparedRenderSurfaceTextureUseIdentity {
+	readonly kind: "prepared-render-surface-texture-use";
+	readonly renderSurface: RenderSurfaceIdentity;
+	readonly usage: PreparedRenderSurfaceTextureUsage;
+}
+
+export interface PreparedRgbaRenderSurfaceTextureUseIdentity
+	extends PreparedRenderSurfaceTextureUseIdentity {
+	readonly usage: PreparedRgbaRenderSurfaceTextureUsage;
+}
+
+interface PaletteTextureUseIdentity {
+	readonly kind: "palette-texture-use";
+	readonly palette: PaletteIdentity;
+	readonly usage: "palette-rgba";
+	readonly firstIndex: number;
+	readonly indexCount: number;
+}
+
+export type MaterialTextureDataUseIdentity =
+	| PreparedRenderSurfaceTextureUseIdentity
+	| PaletteTextureUseIdentity;
+
 export type StaticTextureUseIdentity =
 	| SurfaceTextureIdentity
 	| RenderSurfaceIdentity
-	| PreparedTextureUseIdentity
-	| PaletteIdentity;
+	| PaletteIdentity
+	| MaterialTextureDataUseIdentity;
 
 interface TerrainMeshSourceFacts {
 	readonly gridSize: number;
@@ -298,7 +324,7 @@ export interface TerrainTextureUseFacts {
 		| "detail";
 	readonly texture: SurfaceTextureIdentity;
 	readonly renderSurface: RenderSurfaceIdentity | null;
-	readonly preparedTextureUse: PreparedTextureUseIdentity | null;
+	readonly preparedTextureUse: PreparedRgbaRenderSurfaceTextureUseIdentity | null;
 	readonly palette: PaletteIdentity | null;
 }
 
@@ -552,7 +578,7 @@ export interface StaticAtlasBatchSnapshot {
 }
 
 interface StaticAtlasBatchPlacementSnapshot {
-	readonly texture: PreparedTextureUseIdentity;
+	readonly texture: PreparedRgbaRenderSurfaceTextureUseIdentity;
 }
 
 export interface StaticBakeBatchItem {
@@ -690,7 +716,7 @@ export interface StaticBakeTextureUse {
 	readonly staticBatchId: string;
 	readonly domain: StaticDomain;
 	readonly ownerDrawUnitIds: readonly string[];
-	readonly source: PreparedTextureUseIdentity;
+	readonly source: MaterialTextureDataUseIdentity;
 }
 
 export interface StaticResolver {

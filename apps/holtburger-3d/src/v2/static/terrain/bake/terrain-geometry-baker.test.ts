@@ -105,12 +105,12 @@ describe("V2 terrain geometry baker", () => {
 
 		expect(drawUnit).toMatchObject({
 			materialBucketKey:
-				"shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|batch:batch-a|texture:7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:color:06000010",
+				"shader:terrain-single-base-color|domain:outdoor-terrain|sampler:color-repeat-filterable|batch:batch-a|texture:7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:rgba-color:06000010",
 			materialFamily: "terrain-single-base-color",
 			primaryTextureUseId:
-				"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:color:06000010",
+				"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:rgba-color:06000010",
 			textureUseIds: [
-				"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:color:06000010",
+				"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:rgba-color:06000010",
 			],
 		});
 		expect(drawUnit.terrainMaterialPlan?.layerEntries).toEqual([
@@ -119,7 +119,7 @@ describe("V2 terrain geometry baker", () => {
 				base: expect.objectContaining({
 					role: "terrain-base",
 					textureUseId:
-						"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:color:06000010",
+						"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:rgba-color:06000010",
 					wrap: "repeat",
 				}),
 				pcode: 33825,
@@ -132,13 +132,15 @@ describe("V2 terrain geometry baker", () => {
 				ownerDrawUnitIds: [drawUnit.drawUnitId],
 				staticBatchId: "batch-a",
 				source: {
-					kind: "prepared-texture-use",
-					outputFormat: "rgba8",
-					renderSurfaceId: 0x06000010,
-					usage: "color",
+					kind: "prepared-render-surface-texture-use",
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000010,
+					},
+					usage: "rgba-color",
 				},
 				textureUseId:
-					"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:color:06000010",
+					"7:landblock:da55ffff:outdoor-terrain:prepared-texture:terrain-base:rgba-color:06000010",
 			},
 		]);
 		expect(JSON.stringify(result)).not.toContain("texture-ref");
@@ -560,10 +562,12 @@ function createTerrainTextureUses(options: {
 		return options.textureUseSurfaceTextureIds.map((surfaceTextureId) => ({
 			palette: null,
 			preparedTextureUse: {
-				kind: "prepared-texture-use",
-				outputFormat: "rgba8",
-				renderSurfaceId: 0x01000000 + surfaceTextureId,
-				usage: "color",
+				kind: "prepared-render-surface-texture-use",
+				renderSurface: {
+					kind: "render-surface",
+					renderSurfaceId: 0x01000000 + surfaceTextureId,
+				},
+				usage: "rgba-color",
 			},
 			renderSurface: {
 				kind: "render-surface",
@@ -584,10 +588,12 @@ function createTerrainTextureUses(options: {
 		{
 			palette: null,
 			preparedTextureUse: {
-				kind: "prepared-texture-use",
-				outputFormat: "rgba8",
-				renderSurfaceId: 0x06000010,
-				usage: "color",
+				kind: "prepared-render-surface-texture-use",
+				renderSurface: {
+					kind: "render-surface",
+					renderSurfaceId: 0x06000010,
+				},
+				usage: "rgba-color",
 			},
 			renderSurface: {
 				kind: "render-surface",

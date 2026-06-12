@@ -1837,7 +1837,7 @@ Verification:
 
 ### Phase 11B2A: Generalized Texture/Data-Use Contract
 
-Status: planned.
+Status: complete.
 
 Purpose: correct the material texture-use identity before static object partitioning depends on a terrain/RGBA-shaped abstraction.
 
@@ -1890,6 +1890,34 @@ Dry-run conclusion:
   - delete the old type or demote it to an implementation detail before moving to 11B2B.
   This should be a decisive cutover inside V2; avoid carrying old and new texture-use identities past the end of 11B2A.
 
+Implementation notes:
+
+- Replaced the old exported `PreparedTextureUseIdentity` contract with a generalized `MaterialTextureDataUseIdentity` union plus a public `PreparedRgbaRenderSurfaceTextureUseIdentity` for the currently packable RGBA prepared render-surface path.
+- The new prepared render-surface identity is keyed by typed `RenderSurfaceIdentity` and semantic usage (`rgba-color`, `rgba-detail`, `rgba-mask`, `rgba-raw`, with `index8`/`index16` reserved in the internal union). Physical host output format is no longer part of the material identity; `prepared-texture/*` host query fields are derived by the preparation boundary.
+- Added first-class palette texture/data-use representation in the contract (`palette-rgba`, keyed by typed palette identity plus index range). It is representable but not yet staged by the RGBA atlas manager.
+- Migrated terrain resolver/baker texture uses, terrain role-page mapping, texture-manager source dedupe keys, atlas snapshot filtering, sampling/page policy, and diagnostics-facing tests to the generalized identity.
+- Migrated direct RGBA static object material classification to emit the new prepared render-surface identity for `rgba-raw`, so Phase 11C does not inherit the deleted old type for non-indexed static materials.
+- Kept the current texture packing/upload path explicitly RGBA-only. `TextureManager` now narrows to `PreparedRgbaRenderSurfaceTextureUseIdentity` at staging/registry boundaries and fails loudly if index or palette data is accidentally routed into the RGBA atlas path.
+
+Spicy findings:
+
+- Knip flagged internal leaf identity exports that were only consumed transitively through the exported union. Instead of ignoring them, the leaf prepared render-surface and palette interfaces were made internal and the public surface was kept smaller.
+- Bake-local texture-use IDs now include semantic usage such as `rgba-color` where they fingerprint the source contract. Opaque renderer handles still use the broader `prepared-texture` label where that is just a stable local namespace.
+- The terrain/direct-RGBA static path is now structurally cleaner, but the physical asset and atlas pipeline still only understands RGBA pages. That is intentional for 11B2A, not a completed indexed-material pipeline.
+
+Failed to close:
+
+- `index8`/`index16` prepared render-surface host support remains 11B2B.
+- Indexed/paletted static material planner cutover remains 11B2C. The planner still has bespoke indexed/palette role records until prepared index sources and frontend-derived palette data sources are wired through the generalized material data-use model.
+- WebGL data-texture upload and actual indexed/palette static object rendering remain later 11D/11E work.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
+
 ### Phase 11B2B: Prepared Render-Surface Index Sources
 
 Status: planned.
@@ -1933,7 +1961,7 @@ Scope:
 
 Deliverables:
 
-- Direct RGBA static materials emit prepared render-surface RGBA data uses.
+- Direct RGBA static materials already emit prepared render-surface RGBA data uses as of 11B2A; keep that path intact while migrating the remaining indexed/palette roles.
 - Indexed/paletted static materials emit one prepared render-surface index data use plus one frontend-derived palette data use.
 - Palette lookup data remains frontend-derived from resolved `palette/*` payloads and optional palette view/range metadata, not a host `prepared-texture/*` route.
 - Static detail overlay roles emit generalized texture/data-use requirements or explicit render-deferred placeholders without terrain-specific vocabulary.

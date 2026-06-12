@@ -413,7 +413,9 @@ function createTerrainTextureUseId(
 		"prepared-texture",
 		textureUse.role,
 		textureUse.preparedTextureUse.usage,
-		textureUse.preparedTextureUse.renderSurfaceId.toString(16).padStart(8, "0"),
+		textureUse.preparedTextureUse.renderSurface.renderSurfaceId
+			.toString(16)
+			.padStart(8, "0"),
 	].join(":");
 }
 

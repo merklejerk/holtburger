@@ -66,6 +66,7 @@ interface StaticCoordinatorDiagnosticsSummary {
 	readonly staleBakeResults: number;
 	readonly committedDrawUnits: number;
 	readonly latestTerrainPayload: string | null;
+	readonly latestOutdoorStaticObjectsPayload: string | null;
 	readonly latestLandblockTopologyPayload: string | null;
 	readonly latestDungeonPayload: string | null;
 	readonly latestResolverFailure: string | null;

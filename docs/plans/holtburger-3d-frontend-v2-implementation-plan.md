@@ -962,7 +962,7 @@ Purpose: correct the terrain bake shape before atlas binding by committing bound
 Deliverables:
 
 - Terrain geometry slicing by compatible pcode/material entries before atlas binding, so a landblock with many unique pcode recipes becomes multiple bounded draw units or draw slices instead of one impossible material table.
-- Terrain partitioning implemented as a small compatibility-candidate pipeline with a domain-specific candidate adapter and reusable bucket/capacity/sort/source-slice mechanics where practical. Any terrain-only assumptions in the partitioner must be named so Phase 11 can either extract the shared utility cleanly or justify a parallel implementation.
+- Terrain partitioning implemented as a small compatibility-candidate pipeline with a domain-specific candidate adapter and reusable bucket/capacity/sort/source-slice mechanics where practical. Any terrain-only assumptions in the partitioner must be named so Phase 11C can either extract the shared utility cleanly or justify a parallel implementation.
 - Tests for terrain pcode/material slice partitioning and texture-use owner assignment.
 
 Acceptance criteria:
@@ -1657,53 +1657,249 @@ Failed to close:
 
 ### Phase 10D: Plan Reassessment And Terrain Steering
 
+Status: completed on 2026-06-11.
+
 Purpose: reassess the plan after terrain parity work, before static object and dungeon breadth multiply the number of material and inspection paths.
 
 Deliverables:
 
 - Compare V2 terrain geometry, material, texture, camera anchor, and diagnostics behavior against v1 harness expectations.
 - Update later static object, inspection, dungeon, and cutover phases based on the terrain parity findings.
-- Decide whether any terrain cleanup must happen before Phase 11 to avoid baking temporary terrain concepts into generic static structures.
-- Decide whether the terrain partitioner should be extracted into a shared V2 static bake partitioning helper before Phase 11, or document the exact terrain-specific reasons a parallel static-object partitioner is cleaner.
+- Decide whether any terrain cleanup must happen before Phase 11A to avoid baking temporary terrain concepts into generic static structures.
+- Decide whether the terrain partitioner should be extracted into a shared V2 static bake partitioning helper before Phase 11C, or document the exact terrain-specific reasons a parallel static-object partitioner is cleaner.
 
 Acceptance criteria:
 
-- Phase 11 starts only after temporary terrain concepts are either removed, isolated, or explicitly tracked as cleanup debt.
-- Phase 11 starts with an explicit partitioning decision: reuse/extract the terrain-proven compatibility partitioner, or record why static objects need a deliberately parallel implementation.
+- Phase 11A starts only after temporary terrain concepts are either removed, isolated, or explicitly tracked as cleanup debt.
+- Phase 11C starts with an explicit partitioning decision: reuse/extract the terrain-proven compatibility partitioner, or record why static objects need a deliberately parallel implementation.
 - The plan records any remaining terrain parity gap that is intentionally deferred past static object work.
 
-### Phase 11: Static Object First Slice
+Completion notes:
 
-Purpose: add one narrow non-terrain outdoor static-object slice after terrain, texture refs, and material-family seams are proven.
+- V2 terrain is accepted for the current visual parity gate by manual review. The inspected path covers landblock-local geometry, v1-shaped terrain pcode/material interpretation, road and detail composition, batch-scoped atlas pages, terrain-specific atlas gutter/fill policy, sampler filtering policy, runtime-owned landblock anchor placement, on-demand diagnostics, and console warnings for failed materialization/fallback cases.
+- The remaining known parity gap is process/tooling, not a currently visible terrain rendering defect: there is still no automated visual regression target for terrain. Keep terrain visual checks manual until a stable screenshot harness becomes worth maintaining.
+- No terrain cleanup blocks Phase 11A. Terrain-specific concepts are currently isolated under the terrain resolver/baker/material classifier/planner and renderer terrain family. The important temporary lesson is tracked as design debt: do not promote terrain pcode/layer/road/detail terms into generic static object contracts.
+- Partitioning decision: do not extract the terrain partitioner into a shared helper before Phase 11C. The current terrain planner is too coupled to AC terrain pcodes, alpha-map selection, road/detail roles, terrain role-page capacity, and slice-local layer-slot remapping. Phase 11C should implement a deliberately parallel static-object compatibility partitioner using the same compatibility vocabulary, then Phase 12 can extract shared helpers only from facts proven by at least two domains.
+- Reusable facts that Phase 11B/11C should mirror are shader/material family, pass/order class, sampler/device policy, logical texture binding layout, placement/batch assumptions, bounded material-table capacity, stable bucket ordering, source-slice mapping, and typed fallback diagnostics.
+- Spicy steering: the old v1 diagnostics surface was useful for manual review but too noisy to drive architecture. V2 should keep diagnostics on-demand and event/snapshot based; the static object phases should not add hot-path counters just to imitate v1 report density.
+
+Failed to close:
+
+- No code cleanup or helper extraction was performed in this phase. That is intentional; extracting before static objects would be premature and would likely force terrain-shaped abstractions onto non-terrain geometry.
+- No automated terrain visual test was added.
+
+### Phase 11A: Outdoor Building Source Payloads
+
+Status: complete.
+
+Purpose: add the first non-terrain source-domain resolver path without pretending source-domain scope also solves static material rendering.
+
+Scope:
+
+- In scope: `outdoor-buildings` landblock static object source resolution, typed V2 payloads, source geometry/material/texture facts, object/source ownership, spatial/source mapping facts, and resolver/coordinator wiring.
+- Out of scope: `outdoor-detail`, `env-cell-static`, dungeon/interior geometry, WebGL rendering, material-family rendering parity, and generic shared partitioner extraction.
 
 Deliverables:
 
-- Resolver support for the smallest useful outdoor static-object dependency set.
-- Typed runtime identity variants for the new static object asset families this phase introduces.
-- Static object material-family classifier for the first supported material families only.
-- Static object compatibility partitioner that groups source surfaces/instances by shader family, pass/order class, sampler state, binding layout, placement assumptions, and bounded material-table capacity before draw-unit emission.
-- Static object partitioning should reuse the terrain-proven compatibility partitioner helpers when the shape matches. If it does not, the implementation notes must identify the non-isomorphic facts rather than quietly duplicating the whole algorithm.
-- Static object geometry bake into draw units using the same renderer delta path as terrain.
-- Static spatial records and source mappings as top-level bake result fields.
-- Picking/inspection source mapping for rendered static objects.
+- Resolver support for `outdoor-buildings` jobs using the same resolver -> batch -> baker ownership chain as terrain.
+- Typed runtime identities for outdoor static object source records, object instances, material surfaces, texture references, and explicit provenance/debug fields where host route strings are still useful.
+- V2 payload records that preserve enough source facts for the full static material pipeline: solid color, textured surfaces, clip/alpha/translucency flags, palette/indexed facts, detail overlay facts, sampler/wrap requirements, render/pass hints, object placement, and source spatial records.
+- Tests proving `outdoor-buildings` requests produce typed payloads and do not route through terrain-specific contracts.
 
 Acceptance criteria:
 
-- Terrain can render first while static objects enrich the same scope afterward.
-- Static draw units do not carry unrelated spatial/source metadata internally.
-- Picker/inspection can map a draw slice back to source identity without consulting Svelte state.
+- Terrain can render first while outdoor building payload resolution enriches the same scope afterward.
+- Static object payloads use typed closed-union identities; no generic string fallback is introduced.
+- Payloads retain full material/source facts even if later render phases initially support only a subset.
+- Resolver output does not require Svelte state, renderer state, or old v1 product stores.
+
+Dry-run findings:
+
+- V2 already schedules `outdoor-buildings` work through `StaticDemand`/`StaticDomain`, but `StaticScopePayloadBody` has no static-object payload variant yet. This phase must add a real payload variant before resolver work can be meaningful.
+- `StaticResourceIdentity` currently has terrain, topology, env-cell, render-surface, prepared-texture, and palette identities, but not static object/source instance/material-slot identities. Add those as typed identities instead of carrying v1 asset route strings forward.
+- The default atlas snapshot helper only discovers placeholder and terrain texture uses. 11A should preserve material/texture facts in payloads, but texture-use extraction for baking belongs in 11B/11C after material roles are typed.
+- `StaticCoordinator` has terrain/topology/dungeon summary fields only. Either add a small building payload summary here or explicitly defer richer building summaries to on-demand diagnostics; do not revive v1-style hot-path metric sprawl.
+- v1's `StaticObjectBundleArtifact` proves the payload needs object records, part hints/source ownership, render chunks/bounds, material records, texture refs, and diagnostics. In V2 these should be split into source payload facts first; texture pages/material records become bake/texture-manager outputs later.
+
+Dry-run conclusion:
+
+- 11A is contract and resolver plumbing only. It should stop before bake/render output and should fail loudly if a building payload cannot preserve the material/source facts later phases need.
+
+Implementation notes:
+
+- Added a typed `outdoor-static-objects` static scope payload variant for `outdoor-buildings`. The payload carries landblock ownership, object instance records, source asset records, per-part geometry arrays and render-triangle surface facts, material slots, material recipe facts, region detail overlay roles, surface/render-surface/palette texture refs, source spatial counts, missing typed refs, and explicit debug provenance for original host asset ids.
+- Added typed static object/resource identities for source assets, object instances, object parts, material sources, and material slots. Host route strings are not used as semantic identity; they are retained only in `debug.sourceAssetId` provenance fields.
+- Added `OutdoorStaticObjectsResolver` under V2 static object code. It loads the outdoor landblock, selects building members only, loads the region render profile for detail-role facts, loads setup-model or gfx source assets, applies setup-appearance material slots when available, preserves raw gfx surface fallback for direct/fallback paths, loads material recipes, resolves texture/render-surface/palette refs, and reports missing dependencies as typed identities.
+- Wired the static resolver worker as a small router for `outdoor-terrain` and `outdoor-buildings`. Browser runtime now sends `outdoor-buildings` through the worker-backed source resolver while still sending non-rendering bake output through the placeholder baker until 11B/11C/11D own classification, partitioning, and rendering.
+- Added compact coordinator/runtime diagnostics for the latest outdoor static payload: landblock, domain, object count, source count, material slot/source count, texture ref count, and missing ref count. This keeps the on-demand report useful without reintroducing v1-style noisy hot-path metric pressure.
+- Added focused resolver tests proving outdoor building requests produce typed source/material/texture payload facts, ignore `outdoor-detail` members, keep host routes out of semantic identity fields, and apply setup-appearance material overrides instead of blindly using raw gfx surface material ids.
+- Added coordinator coverage proving outdoor static payloads record a compact snapshot summary and do not route through terrain-shaped contracts.
+
+Decisions and course corrections:
+
+- `outdoor-buildings` is treated literally in 11A: only landblock members whose source kind is `building` are selected. Explicit objects and generated scenery remain for `outdoor-detail` instead of being pulled into this phase under a misleading domain name.
+- The bake path remains intentionally non-rendering for `outdoor-buildings`. 11A proves resolver/source payload shape only; material classification, compatibility partitioning, texture-use extraction, and renderer residency stay in 11B-11D.
+- Setup-appearance material slots are authoritative when present. Raw gfx `surfaceIds` remain a fallback/direct-gfx source path, but setup-model buildings must preserve appearance-level material overrides because v1 does the same before compaction/rendering.
+- Several helper types used only to compose exported payload contracts were kept private after `lint:dead` flagged them. The public contract exports now reflect only cross-module types that callers actually name.
+
+Spicy findings:
+
+- The existing browser resolver variable was still terrain-named even though it now needs to serve multiple source domains. It is now treated as a source resolver at the browser routing boundary, but the factory argument remains `terrainResolver` for a small internal naming wart. This is not behavior debt, but Phase 11B/11C should rename the constructor option if the router grows another domain.
+- Source payloads now carry geometry arrays across the resolver -> baker boundary for static object parts. That is architecturally consistent with V2 worker-owned baking, but it increases message pressure once broad static coverage turns on. Phase 11C should watch batch sizing and transferability rather than assuming terrain-sized payload costs.
+- Source revision is still a coarse resolver revision value, not a precise content hash over every loaded dependency. Existing static coordinator semantics only need monotonic/stale gating today, but future cache invalidation should not pretend this is a full dependency fingerprint.
+
+Failed to close:
+
+- No static material-family classifier yet. 11A preserves material recipe/source facts; 11B must classify solid, texture, alpha/translucency, indexed/palette, detail, sampler, and unsupported cases.
+- No static object compatibility partitioner, draw-unit emission, texture-use extraction, or renderer path. Those remain 11C/11D.
+- `outdoor-detail` and `env-cell-static` are not resolved by the new resolver yet. The payload shape is deliberately compatible with those future domains, but 11A only wires `outdoor-buildings`.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- src/v2/static/objects/outdoor-static-objects-resolver.test.ts src/v2/static/coordinator/static-coordinator.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+
+### Phase 11B: Static Material Pipeline Foundation
+
+Status: planned.
+
+Purpose: classify the full static material universe before deciding which families render first, so unsupported material cases are explicit rather than invisible scope cuts.
+
+Scope:
+
+- In scope: V2 static material facts, material-family classification, render pass/order keys, texture-use role planning, palette/indexed facts, alpha/translucency/clip policy facts, sampler/device policy, material-table capacity facts, and typed fallback diagnostics.
+- Out of scope: complete WebGL shader support for every classified family, renderer upload for outdoor buildings, source resolver breadth beyond `outdoor-buildings`, and generic partitioner extraction.
+
+Deliverables:
+
+- Static object material-family classifier that can classify or explicitly reject all static material source shapes observed in outdoor building payloads.
+- Material-family outputs that separate classification coverage from rendering coverage. Unsupported families must carry typed fallback reasons instead of being dropped or hidden behind a catch-all debug material.
+- Bake-local texture-use role records for static material roles, including base color/image, clip/alpha, palette/indexed, detail overlay, and any renderer-state-driving roles the source data exposes.
+- Tests covering representative source material shapes and fallback diagnostics for unsupported or incomplete dependencies.
+
+Acceptance criteria:
+
 - Material-family rules are expressed as code-owned classifiers, not stringly diagnostics.
+- Classification preserves full source/material facts needed by later renderer phases.
+- Unsupported material families are visible as typed fallback/diagnostic output.
+- The classifier does not import terrain pcode/layer/road/detail concepts.
+
+Dry-run findings:
+
+- v1's material path is not just opaque texture vs solid. It carries flat color, texture-page, transparent/opacity alpha policies, indexed-paletted texels, palette lookup textures, detail overlays, sampling/wrap variants, render-state keys, material variants, and explicit fallback reasons.
+- Static material texture routes in v1 separate prepared texture routes, indexed texel routes, and palette lookup routes. V2 should model these as typed bake-local texture roles rather than overloading `PreparedTextureUseIdentity` for every material path.
+- Indexed/paletted materials are a first-class classification concern even if WebGL support lands later. They need palette identity, indexed format, clip threshold, source dimensions, and mip/filter policy facts preserved early.
+- Detail overlays are not terrain-only. v1 static bundle and structured interior records carry detail overlay descriptors. V2 static material classification must preserve detail role/fade/tiling facts without folding them into terrain detail terminology.
+- 11B can be pure classifier/planner logic with tests. It should not require texture packing, renderer upload, or a working outdoor building renderer.
+
+Dry-run conclusion:
+
+- 11B should classify the full material universe and emit typed unsupported/render-deferred reasons. It should not scope the classifier to the first rendered family, because doing so would hide material gaps until renderer work and recreate the old diagnostics-driven mess.
+
+### Phase 11C: Static Object Compatibility Partitioning
+
+Status: planned.
+
+Purpose: build a static-object-owned compatibility partitioner after material classification, mirroring terrain's proven vocabulary without extracting terrain-shaped helpers too early.
+
+Deliverables:
+
+- Static object compatibility partitioner that groups source surfaces/instances by shader/material family, pass/order class, sampler/device policy, logical texture binding layout, palette/indexed state, alpha/translucency/clip policy, placement/batch assumptions, source ownership, and bounded material-table capacity before draw-unit emission.
+- Static object partitioning stays parallel to terrain rather than extracted from terrain up front. Reuse terrain's compatibility vocabulary and test expectations, but keep static-object source facts, material-table rules, instance grouping, and fallback diagnostics object-owned until Phase 12 proves a shared helper shape.
+- Stable ordering rules for buckets and slices so bake output is deterministic.
+- Static source mappings and spatial records as top-level bake result fields.
+- Tests mirroring terrain partitioning tests for stable ordering, capacity overflow, fallback diagnostics, and source-slice mapping where the compatibility facts are shared, without importing terrain pcode/layer concepts.
+
+Acceptance criteria:
+
 - Static object bake output uses bounded draw slices/draw units for incompatible material groups; it must not repeat the pre-10B4 terrain mistake of treating one source scope as one material table.
-- Static object partitioning tests should mirror the terrain partitioning tests for stable ordering, capacity overflow, fallback diagnostics, and source-slice mapping where the compatibility facts are shared.
-- New static object identities are typed closed-union variants; no generic string fallback is introduced.
+- Static draw units do not carry unrelated spatial/source metadata internally.
+- Static object partitioning can represent unsupported-but-classified families without silently dropping source geometry.
+- The implementation records any concrete non-isomorphic facts that prevent later extraction into shared helpers.
+
+Dry-run findings:
+
+- `StaticDrawUnit` currently only supports terrain and placeholder variants. 11C needs either a non-rendered/static-object bake record shape or a planned `StaticObjectGeometryStaticDrawUnit` variant gated from renderer upload until 11D.
+- The existing `StaticBakeBatchResult` already has top-level `staticSpatialRecords`, `staticSourceMappings`, visibility, portal/interior, and dynamic-seed arrays. Use those peer fields for object/source records instead of hiding mapping data inside draw units.
+- v1 compacts static bundle geometry by render chunk, family key, material record key, and object keys. V2 partitioning should translate that into domain/source ownership, material family, pass/order, sampler/device policy, texture-role layout, palette/indexed state, alpha policy, placement assumptions, and material-table capacity.
+- Outdoor buildings and later detail/env-cell statics share material compatibility concepts but not source topology. Keep object-owned source facts in this phase and wait until Phase 12 to extract only proven common bucket/sort/capacity helpers.
+- Unsupported-but-classified families still need source-slice/mapping output. Otherwise diagnostics will say "unsupported" but picking/inspection will not know what was skipped.
+
+Dry-run conclusion:
+
+- 11C is the real "avoid terrain's old mistake" phase. It should produce deterministic object-owned partitions and mappings even for render-deferred families, but renderer residency should still wait for 11D.
+
+### Phase 11D: First Rendered Outdoor Building Families
+
+Status: planned.
+
+Purpose: render the first low-risk outdoor building material families through the V2 residency path while the broader material pipeline remains explicit.
+
+Deliverables:
+
+- Static object geometry bake into draw units for the first supported render families, likely opaque textured and/or solid opaque after source-payload inspection confirms the best target.
+- Texture-manager integration for static object bake-local texture uses, batch-scoped atlas pages, sampler policy, leases, and renderer placement updates.
+- WebGL2 static-object renderer path for the first supported family/families using the same explicit residency-delta model as terrain.
+- Console/runtime diagnostics for classified-but-unsupported static object material families and materialization failures.
+
+Acceptance criteria:
+
+- The selected outdoor building material family renders in V2 without blocking terrain residency.
+- Unsupported classified families are surfaced as typed fallback diagnostics rather than appearing as missing landblocks with no explanation.
+- Compaction remains a bake concern and does not require renderer-side asset dependency knowledge.
+- Removing a static scope releases geometry and texture placement leases.
+
+Dry-run findings:
+
+- Current V2 WebGL2 renderer is terrain-focused; static object rendering requires a new draw-unit variant, buffer upload path, material binding path, and removal/disposal path.
+- Texture manager can already commit batch-scoped atlas pages and sampler policy for terrain-style texture uses, but static material roles may include prepared color pages, indexed texel pages, palette lookup pages, detail overlays, and non-color/exact data. 11D should start only with the roles required by the selected first rendered family.
+- The first rendered family should be chosen from real 11A payload evidence, not assumed. If outdoor buildings in the target coverage are mostly indexed/paletted or clip/alpha, rendering "opaque textured" first may not prove much visually.
+- Direct/degenerate texture pages and atlas pages should remain the same renderer contract. Do not reintroduce a separate direct-texture path for static objects.
+- Failure messages can stay in console/runtime diagnostics, but materialization failure must not silently drop entire landblocks.
+
+Dry-run conclusion:
+
+- 11D should be implemented only after 11A-11C provide evidence for a good first rendered family. The phase should narrow renderer support to that family while preserving explicit fallback for all classified-but-render-deferred families.
+
+### Phase 11E: Static Object Material Family Expansion
+
+Status: planned.
+
+Purpose: expand rendered static-object material families after the first family proves the source, material, partitioning, texture, and renderer seams.
+
+Deliverables:
+
+- Incremental renderer support for additional classified static material families: alpha/clip, blended/translucent, indexed/paletted, detail overlays, and source-specific render-state variants as evidence demands.
+- Focused tests per newly rendered material family for classification, partitioning, texture-use planning, renderer binding/upload, and fallback behavior.
+- Manual visual comparison against v1 for selected landblocks that exercise the newly supported family.
+
+Acceptance criteria:
+
+- Multiple static object material families can coexist without creating non-isomorphic renderer paths.
+- New material-family support is added by extending typed classifiers, partitioning keys, and renderer families, not by adding catch-all material branches.
+- Remaining unsupported material families are explicitly tracked before moving broad static-object/detail/env-cell scope into Phase 12.
+
+Dry-run findings:
+
+- The highest-risk expansions are indexed/paletted and alpha/translucency because they affect texture roles, shader programs, pass ordering, sampler/mip policy, sorting/blending, and material table shape.
+- v1 already has separate submit paths for indexed P8/P16 and texture-page materials. V2 should not duplicate that shape blindly, but it should expect indexed/palette support to require explicit renderer programs or explicit shader branches.
+- Detail overlays should be added as a material-role extension that composes with existing static families, not as a separate source-domain feature.
+- `outdoor-detail` and `env-cell-static` should remain out of Phase 11E unless a rendered material family requires a source sample from those domains. Breadth belongs in Phase 12.
+- Each new rendered family should add a focused visual target. Static material parity is too varied to validate with one landblock.
+
+Dry-run conclusion:
+
+- 11E is a sequence of small material-family render slices, not one monolithic "finish all static materials" task. Stop before Phase 12 only when unsupported families are explicitly enumerated and no longer block the chosen breadth targets.
 
 ### Phase 12: Static Object Breadth And Compaction
 
-Purpose: broaden static object coverage only after the first object slice proves the shared draw-unit path.
+Purpose: broaden static object coverage only after outdoor building source, material classification, partitioning, and at least the first rendered material families prove the shared draw-unit path.
 
 Deliverables:
 
-- Additional static object/building/detail asset-family support as needed by selected verification landblocks.
+- Additional static object/building/detail/env-cell asset-family support as needed by selected verification landblocks.
 - Draw-unit batching/compaction by compatible shader family, pass/order class, sampler bindings, sampler state, device state, domain, bounded material-table capacity, and placement revision assumptions.
 - Shared static bake partitioning helpers for compatibility-key construction, stable bucket sorting, bounded capacity partitioning, source-slice mapping, and fallback diagnostics, unless a domain-specific implementation records concrete non-isomorphic facts. Reuse should be based on compatibility facts, not by forcing unrelated domains into one draw-unit struct.
 - Static BVH/spatial record integration for terrain and static objects.

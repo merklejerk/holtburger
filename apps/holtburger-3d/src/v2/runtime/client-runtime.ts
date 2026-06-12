@@ -527,6 +527,10 @@ function createStaticCoordinatorDiagnosticsReport(
 			latestLandblockTopologyPayload: snapshot.latestLandblockTopologyPayload
 				? `lb ${formatHex(snapshot.latestLandblockTopologyPayload.landblockId)} ${snapshot.latestLandblockTopologyPayload.classification} cells ${snapshot.latestLandblockTopologyPayload.envCellCount} visible ${snapshot.latestLandblockTopologyPayload.visibleCellCount} links ${snapshot.latestLandblockTopologyPayload.portalLinkCount} missing ${snapshot.latestLandblockTopologyPayload.missingRefCount}`
 				: null,
+			latestOutdoorStaticObjectsPayload:
+				snapshot.latestOutdoorStaticObjectsPayload
+					? `lb ${formatHex(snapshot.latestOutdoorStaticObjectsPayload.landblockId)} ${snapshot.latestOutdoorStaticObjectsPayload.domain} objects ${snapshot.latestOutdoorStaticObjectsPayload.objectCount} sources ${snapshot.latestOutdoorStaticObjectsPayload.sourceAssetCount} slots ${snapshot.latestOutdoorStaticObjectsPayload.materialSlotCount} materials ${snapshot.latestOutdoorStaticObjectsPayload.materialSourceCount} tex ${snapshot.latestOutdoorStaticObjectsPayload.textureRefCount} missing ${snapshot.latestOutdoorStaticObjectsPayload.missingRefCount}`
+					: null,
 			latestResolverFailure: snapshot.latestResolverFailure
 				? `${snapshot.latestResolverFailure.workId}: ${snapshot.latestResolverFailure.message}`
 				: null,

@@ -148,7 +148,7 @@ function assertPositiveInteger(value: number, label: string): void {
 }
 
 class BrowserStaticResolver implements StaticResolver {
-	readonly #terrainResolver: StaticResolver;
+	readonly #sourceResolver: StaticResolver;
 	readonly #placeholderResolver: StaticResolver;
 	#disposed = false;
 
@@ -156,7 +156,7 @@ class BrowserStaticResolver implements StaticResolver {
 		readonly terrainResolver: StaticResolver;
 		readonly placeholderResolver: StaticResolver;
 	}) {
-		this.#terrainResolver = options.terrainResolver;
+		this.#sourceResolver = options.terrainResolver;
 		this.#placeholderResolver = options.placeholderResolver;
 	}
 
@@ -167,8 +167,12 @@ class BrowserStaticResolver implements StaticResolver {
 			);
 		}
 
-		if (job.domain === "outdoor-terrain" && job.scope.kind === "landblock") {
-			return this.#terrainResolver.resolve(job);
+		if (
+			(job.domain === "outdoor-terrain" ||
+				job.domain === "outdoor-buildings") &&
+			job.scope.kind === "landblock"
+		) {
+			return this.#sourceResolver.resolve(job);
 		}
 
 		return this.#placeholderResolver.resolve(job);
@@ -180,7 +184,7 @@ class BrowserStaticResolver implements StaticResolver {
 		}
 
 		this.#disposed = true;
-		disposeIfAvailable(this.#terrainResolver);
+		disposeIfAvailable(this.#sourceResolver);
 		disposeIfAvailable(this.#placeholderResolver);
 	}
 }

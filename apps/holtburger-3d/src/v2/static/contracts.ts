@@ -54,6 +54,7 @@ export interface StaticScopePayload {
 type StaticScopePayloadBody =
 	| DungeonStaticScopePayload
 	| LandblockTopologyStaticScopePayload
+	| OutdoorStaticObjectsScopePayload
 	| TerrainStaticScopePayload
 	| PlaceholderStaticScopePayload;
 
@@ -78,6 +79,11 @@ export type StaticResourceIdentity =
 	| EnvCellSourceIdentity
 	| EnvironmentIdentity
 	| LandblockSourceIdentity
+	| StaticObjectInstanceIdentity
+	| StaticObjectPartIdentity
+	| StaticObjectSourceIdentity
+	| StaticMaterialSourceIdentity
+	| StaticMaterialSlotIdentity
 	| TerrainMaterialIdentity
 	| RegionRenderProfileIdentity
 	| SurfaceTextureIdentity
@@ -106,6 +112,37 @@ interface EnvironmentIdentity {
 interface CellStructureIdentity {
 	readonly kind: "cell-structure";
 	readonly cellStructureId: number;
+}
+
+export interface StaticObjectSourceIdentity {
+	readonly kind: "static-object-source";
+	readonly sourceAssetKind: "gfx-obj" | "setup-model" | "setup-appearance";
+	readonly sourceDid: number;
+}
+
+export interface StaticObjectInstanceIdentity {
+	readonly kind: "static-object-instance";
+	readonly landblockId: number;
+	readonly instanceId: string;
+	readonly objectKind: "explicit-object" | "building" | "generated-scenery";
+}
+
+export interface StaticObjectPartIdentity {
+	readonly kind: "static-object-part";
+	readonly object: StaticObjectInstanceIdentity;
+	readonly partIndex: number;
+}
+
+export interface StaticMaterialSourceIdentity {
+	readonly kind: "static-material-source";
+	readonly materialId: number;
+}
+
+export interface StaticMaterialSlotIdentity {
+	readonly kind: "static-material-slot";
+	readonly part: StaticObjectPartIdentity;
+	readonly slotIndex: number;
+	readonly surfaceId: number;
 }
 
 export interface TerrainMaterialIdentity {
@@ -270,6 +307,159 @@ export interface TerrainSourceSpatialFacts {
 	readonly bounds: StaticBounds | null;
 	readonly terrainBvhNodeCount: number;
 	readonly terrainBvhItemCount: number;
+}
+
+export interface OutdoorStaticObjectsScopePayload {
+	readonly kind: "outdoor-static-objects";
+	readonly domain: "outdoor-buildings" | "outdoor-detail";
+	readonly landblock: LandblockSourceIdentity;
+	readonly regionRenderProfile: StaticObjectRegionRenderProfileFacts;
+	readonly objects: readonly StaticObjectInstanceFacts[];
+	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
+	readonly materialSlots: readonly StaticObjectMaterialSlotFacts[];
+	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
+	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
+	readonly missingRefs: readonly StaticResourceIdentity[];
+	readonly sourceSpatial: OutdoorStaticSourceSpatialFacts;
+}
+
+interface StaticObjectRegionRenderProfileFacts {
+	readonly identity: RegionRenderProfileIdentity;
+	readonly detailRoles: readonly RegionDetailRoleFacts[];
+}
+
+export interface StaticObjectInstanceFacts {
+	readonly identity: StaticObjectInstanceIdentity;
+	readonly source: StaticObjectSourceIdentity;
+	readonly sourceIndex: number;
+	readonly localPlacement: StaticPlacementTransform;
+	readonly sourceScale: StaticVec3;
+	readonly sourceBounds: StaticBounds | null;
+	readonly instanceBounds: StaticBounds | null;
+	readonly portalCount: number;
+	readonly generated: StaticObjectGeneratedFacts | null;
+	readonly debug: StaticObjectDebugProvenance;
+}
+
+export interface StaticObjectSourceAssetFacts {
+	readonly identity: StaticObjectSourceIdentity;
+	readonly sourceAssetKind: StaticObjectSourceIdentity["sourceAssetKind"];
+	readonly partCount: number;
+	readonly materialSlotCount: number;
+	readonly renderTriangleCount: number;
+	readonly skippedPolygonCount: number;
+	readonly invalidPolygonCount: number;
+	readonly physicsPolygonCount: number;
+	readonly bounds: StaticBounds | null;
+	readonly parts: readonly StaticObjectPartSourceFacts[];
+	readonly debug: StaticObjectDebugProvenance;
+}
+
+export interface StaticObjectPartSourceFacts {
+	readonly partIndex: number;
+	readonly source: StaticObjectSourceIdentity;
+	readonly gfxObj: StaticObjectSourceIdentity;
+	readonly materialSlotCount: number;
+	readonly renderTriangleCount: number;
+	readonly skippedPolygonCount: number;
+	readonly invalidPolygonCount: number;
+	readonly physicsPolygonCount: number;
+	readonly bounds: StaticBounds | null;
+	readonly positions: Float32Array;
+	readonly normals: Float32Array;
+	readonly texCoords: Float32Array;
+	readonly triangles: readonly StaticObjectPartTriangleFacts[];
+	readonly defaultPlacements: readonly StaticPlacementTransform[];
+	readonly scale: StaticVec3;
+	readonly materialSlots: readonly StaticObjectPartMaterialSlotFacts[];
+}
+
+interface StaticObjectPartTriangleFacts {
+	readonly polygonId: number;
+	readonly surfaceId: number | null;
+	readonly materialVariantSignature: string | null;
+	readonly firstVertex: number;
+}
+
+export interface StaticObjectPartMaterialSlotFacts {
+	readonly slotIndex: number;
+	readonly surfaceId: number;
+	readonly material: StaticMaterialSourceIdentity;
+	readonly materialVariantSignature: string | null;
+}
+
+export interface StaticObjectMaterialSlotFacts {
+	readonly identity: StaticMaterialSlotIdentity;
+	readonly object: StaticObjectInstanceIdentity;
+	readonly source: StaticObjectSourceIdentity;
+	readonly gfxObj: StaticObjectSourceIdentity;
+	readonly material: StaticMaterialSourceIdentity;
+	readonly materialVariantSignature: string | null;
+}
+
+export interface StaticObjectMaterialSourceFacts {
+	readonly identity: StaticMaterialSourceIdentity;
+	readonly surfaceId: number;
+	readonly surfaceType: number;
+	readonly source: StaticObjectMaterialSourceKindFacts;
+	readonly translucency: number;
+	readonly luminosity: number;
+	readonly diffuse: number;
+}
+
+type StaticObjectMaterialSourceKindFacts =
+	| {
+			readonly kind: "solid-color";
+			readonly argb: number;
+	  }
+	| {
+			readonly kind: "texture";
+			readonly texture: SurfaceTextureIdentity;
+			readonly selectedRenderSurface: RenderSurfaceIdentity | null;
+			readonly palette: PaletteIdentity | null;
+			readonly renderSurfaceDefaultPalettes: readonly PaletteIdentity[];
+	  };
+
+export type StaticObjectTextureRefFacts =
+	| {
+			readonly role: "surface-texture";
+			readonly texture: SurfaceTextureIdentity;
+			readonly renderSurface: RenderSurfaceIdentity | null;
+			readonly palette: PaletteIdentity | null;
+	  }
+	| {
+			readonly role: "render-surface";
+			readonly renderSurface: RenderSurfaceIdentity;
+			readonly palette: PaletteIdentity | null;
+	  };
+
+interface StaticObjectGeneratedFacts {
+	readonly terrainIndex: number;
+	readonly sceneId: number;
+	readonly sceneTemplateIndex: number;
+}
+
+interface OutdoorStaticSourceSpatialFacts {
+	readonly coordinateSpace: "landblock-render-local";
+	readonly bounds: StaticBounds | null;
+	readonly outdoorBvhNodeCount: number;
+	readonly outdoorBvhItemCount: number;
+}
+
+interface StaticPlacementTransform {
+	readonly origin: StaticVec3;
+	readonly orientation: StaticQuaternion;
+}
+
+interface StaticQuaternion {
+	readonly w: number;
+	readonly x: number;
+	readonly y: number;
+	readonly z: number;
+}
+
+interface StaticObjectDebugProvenance {
+	readonly sourceAssetId: string;
 }
 
 interface LandblockTopologyStaticScopePayload {
@@ -519,6 +709,7 @@ export interface StaticCoordinatorSnapshot {
 	readonly committedDrawUnits: number;
 	readonly activeWork: readonly ScheduledStaticWorkStatus[];
 	readonly latestTerrainPayload: TerrainStaticScopePayloadSummary | null;
+	readonly latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null;
 	readonly latestLandblockTopologyPayload: LandblockTopologyPayloadSummary | null;
 	readonly latestDungeonPayload: DungeonStaticPayloadSummary | null;
 	readonly latestResolverFailure: StaticResolverFailureSnapshot | null;
@@ -571,6 +762,17 @@ export interface TerrainStaticScopePayloadSummary {
 	readonly triangleCount: number;
 	readonly quadCount: number;
 	readonly textureUseCount: number;
+	readonly missingRefCount: number;
+}
+
+export interface OutdoorStaticObjectsPayloadSummary {
+	readonly landblockId: number;
+	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
+	readonly objectCount: number;
+	readonly sourceAssetCount: number;
+	readonly materialSlotCount: number;
+	readonly materialSourceCount: number;
+	readonly textureRefCount: number;
 	readonly missingRefCount: number;
 }
 

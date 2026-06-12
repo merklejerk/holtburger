@@ -204,6 +204,187 @@ describe("V2 static coordinator", () => {
 			committedDrawUnits: 2,
 		});
 	});
+
+	it("records compact outdoor static object payload summaries", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+
+		const work = coordinator.requestStaticDemand({
+			location: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+			lod: {
+				buildings: 0,
+				detail: -1,
+				terrain: 0,
+				topology: -1,
+			},
+		});
+		const buildingWork = work.find(
+			(item) => item.job.domain === "outdoor-buildings",
+		);
+		const buildingResolverRequest = resolver.pendingRequests.find(
+			(request) => request.job.domain === "outdoor-buildings",
+		);
+
+		resolver.complete(buildingResolverRequest?.requestId ?? "", {
+			scope: {
+				domain: "outdoor-buildings",
+				kind: "outdoor-static-objects",
+				landblock: {
+					kind: "landblock-source",
+					landblockId: 0xda55ffff,
+					source: "outdoor",
+				},
+				materialSlots: [
+					{
+						gfxObj: {
+							kind: "static-object-source",
+							sourceAssetKind: "gfx-obj",
+							sourceDid: 0x01000020,
+						},
+						identity: {
+							kind: "static-material-slot",
+							part: {
+								kind: "static-object-part",
+								object: {
+									instanceId: "building-0",
+									kind: "static-object-instance",
+									landblockId: 0xda55ffff,
+									objectKind: "building",
+								},
+								partIndex: 0,
+							},
+							slotIndex: 0,
+							surfaceId: 0x08000010,
+						},
+						material: {
+							kind: "static-material-source",
+							materialId: 0x08000010,
+						},
+						materialVariantSignature: null,
+						object: {
+							instanceId: "building-0",
+							kind: "static-object-instance",
+							landblockId: 0xda55ffff,
+							objectKind: "building",
+						},
+						source: {
+							kind: "static-object-source",
+							sourceAssetKind: "setup-model",
+							sourceDid: 0x02000010,
+						},
+					},
+				],
+				materialSources: [
+					{
+						diffuse: 1,
+						identity: {
+							kind: "static-material-source",
+							materialId: 0x08000010,
+						},
+						luminosity: 0,
+						source: { argb: 0xffffffff, kind: "solid-color" },
+						surfaceId: 0x08000010,
+						surfaceType: 0,
+						translucency: 0,
+					},
+				],
+				missingRefs: [],
+				objects: [
+					{
+						debug: { sourceAssetId: "setup-model/02000010" },
+						generated: null,
+						identity: {
+							instanceId: "building-0",
+							kind: "static-object-instance",
+							landblockId: 0xda55ffff,
+							objectKind: "building",
+						},
+						instanceBounds: null,
+						localPlacement: {
+							orientation: { w: 1, x: 0, y: 0, z: 0 },
+							origin: { x: 0, y: 0, z: 0 },
+						},
+						portalCount: 0,
+						source: {
+							kind: "static-object-source",
+							sourceAssetKind: "setup-model",
+							sourceDid: 0x02000010,
+						},
+						sourceBounds: null,
+						sourceIndex: 0,
+						sourceScale: { x: 1, y: 1, z: 1 },
+					},
+				],
+				regionRenderProfile: {
+					detailRoles: [],
+					identity: {
+						kind: "region-render-profile",
+						regionNumber: 1,
+					},
+				},
+				sourceAssets: [
+					{
+						bounds: null,
+						debug: { sourceAssetId: "setup-model/02000010" },
+						identity: {
+							kind: "static-object-source",
+							sourceAssetKind: "setup-model",
+							sourceDid: 0x02000010,
+						},
+						invalidPolygonCount: 0,
+						materialSlotCount: 1,
+						partCount: 0,
+						parts: [],
+						physicsPolygonCount: 0,
+						renderTriangleCount: 0,
+						skippedPolygonCount: 0,
+						sourceAssetKind: "setup-model",
+					},
+				],
+				sourceSpatial: {
+					bounds: null,
+					coordinateSpace: "landblock-render-local",
+					outdoorBvhItemCount: 1,
+					outdoorBvhNodeCount: 0,
+				},
+				textureRefs: [
+					{
+						palette: null,
+						renderSurface: null,
+						role: "surface-texture",
+						texture: {
+							kind: "surface-texture",
+							surfaceTextureId: 0x05000010,
+						},
+					},
+				],
+			},
+		});
+		await flushPromises();
+		baker.complete(buildingWork?.workId ?? "");
+		await flushPromises();
+
+		expect(coordinator.createSnapshot()).toMatchObject({
+			latestOutdoorStaticObjectsPayload: {
+				domain: "outdoor-buildings",
+				landblockId: 0xda55ffff,
+				materialSlotCount: 1,
+				materialSourceCount: 1,
+				missingRefCount: 0,
+				objectCount: 1,
+				sourceAssetCount: 1,
+				textureRefCount: 1,
+			},
+		});
+	});
 });
 
 function createSingleTerrainDemand(landblockId: number): StaticDemand {

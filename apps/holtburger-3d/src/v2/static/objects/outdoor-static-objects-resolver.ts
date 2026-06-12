@@ -72,7 +72,8 @@ interface SourceResolution {
 
 interface StaticObjectMaterialSlotInput {
 	readonly slotIndex: number;
-	readonly surfaceId: number;
+	readonly geometrySurfaceId: number;
+	readonly materialSurfaceId: number;
 	readonly materialId: number;
 	readonly materialVariantSignature: string | null;
 }
@@ -330,12 +331,16 @@ export class OutdoorStaticObjectsResolver {
 					gfxObjAssetId,
 					materialSlots:
 						"materialSlots" in part
-							? part.materialSlots.map((slot) => ({
-									materialId: parseMaterialAssetId(slot.materialAssetId),
-									materialVariantSignature: null,
-									slotIndex: slot.slotIndex,
-									surfaceId: slot.surfaceId,
-								}))
+							? expandStaticObjectMaterialVariants({
+									gfxObj: gfxObj.payload,
+									materialSlots: part.materialSlots.map((slot) => ({
+										geometrySurfaceId: slot.slotIndex,
+										materialId: parseMaterialAssetId(slot.materialAssetId),
+										materialSurfaceId: slot.surfaceId,
+										materialVariantSignature: null,
+										slotIndex: slot.slotIndex,
+									})),
+								})
 							: undefined,
 					materialSources: options.materialSources,
 					missingRefs: options.missingRefs,
@@ -391,9 +396,9 @@ export class OutdoorStaticObjectsResolver {
 			texCoords: toFloat32Array(options.gfxObj.renderGeometry.uvs),
 			triangles: options.gfxObj.renderGeometry.triangles.map((triangle) => ({
 				firstVertex: triangle.firstVertex,
+				geometrySurfaceId: triangle.surfaceId,
 				materialVariantSignature: triangle.materialVariantSignature ?? null,
 				polygonId: triangle.polygonId,
-				surfaceId: triangle.surfaceId,
 			})),
 		};
 	}
@@ -407,12 +412,16 @@ export class OutdoorStaticObjectsResolver {
 	}): Promise<readonly StaticObjectPartMaterialSlotFacts[]> {
 		const materialSlots =
 			options.materialSlots ??
-			options.gfxObj.surfaceIds.map((surfaceId, slotIndex) => ({
-				materialId: surfaceId,
-				materialVariantSignature: null,
-				slotIndex,
-				surfaceId,
-			}));
+			expandStaticObjectMaterialVariants({
+				gfxObj: options.gfxObj,
+				materialSlots: options.gfxObj.surfaceIds.map((surfaceId, slotIndex) => ({
+					geometrySurfaceId: slotIndex,
+					materialId: surfaceId,
+					materialSurfaceId: surfaceId,
+					materialVariantSignature: null,
+					slotIndex,
+				})),
+			});
 		const slots = await Promise.all(
 			materialSlots.map(async (slot) => {
 				const material = createStaticMaterialSourceIdentity(slot.materialId);
@@ -424,9 +433,10 @@ export class OutdoorStaticObjectsResolver {
 				});
 				return {
 					material,
+					geometrySurfaceId: slot.geometrySurfaceId,
+					materialSurfaceId: slot.materialSurfaceId,
 					materialVariantSignature: slot.materialVariantSignature,
 					slotIndex: slot.slotIndex,
-					surfaceId: slot.surfaceId,
 				};
 			}),
 		);
@@ -647,8 +657,9 @@ function createObjectMaterialSlotFacts(options: {
 				const identity: StaticMaterialSlotIdentity = {
 					kind: "static-material-slot",
 					part: partIdentity,
+					geometrySurfaceId: slot.geometrySurfaceId,
+					materialSurfaceId: slot.materialSurfaceId,
 					slotIndex: slot.slotIndex,
-					surfaceId: slot.surfaceId,
 				};
 				return {
 					gfxObj: part.gfxObj,
@@ -661,6 +672,58 @@ function createObjectMaterialSlotFacts(options: {
 			}),
 		);
 	});
+}
+
+function expandStaticObjectMaterialVariants(options: {
+	readonly gfxObj: GfxObjPayloadDto;
+	readonly materialSlots: readonly Omit<
+		StaticObjectMaterialSlotInput,
+		"materialVariantSignature"
+	>[];
+}): readonly StaticObjectMaterialSlotInput[] {
+	const variantsByGeometrySurface = collectGeometryMaterialVariants(
+		options.gfxObj,
+	);
+
+	return options.materialSlots.flatMap((slot) => {
+		const variants = variantsByGeometrySurface.get(slot.geometrySurfaceId);
+		if (!variants || variants.size === 0) {
+			return [{ ...slot, materialVariantSignature: null }];
+		}
+
+		return [...variants]
+			.sort(compareMaterialVariantSignatures)
+			.map((materialVariantSignature) => ({
+				...slot,
+				materialVariantSignature,
+			}));
+	});
+}
+
+function collectGeometryMaterialVariants(
+	gfxObj: GfxObjPayloadDto,
+): ReadonlyMap<number, ReadonlySet<string | null>> {
+	const variantsByGeometrySurface = new Map<number, Set<string | null>>();
+
+	for (const triangle of gfxObj.renderGeometry.triangles) {
+		if (triangle.surfaceId === null) {
+			continue;
+		}
+		const variants =
+			variantsByGeometrySurface.get(triangle.surfaceId) ??
+			new Set<string | null>();
+		variants.add(triangle.materialVariantSignature ?? null);
+		variantsByGeometrySurface.set(triangle.surfaceId, variants);
+	}
+
+	return variantsByGeometrySurface;
+}
+
+function compareMaterialVariantSignatures(
+	left: string | null,
+	right: string | null,
+): number {
+	return (left ?? "").localeCompare(right ?? "");
 }
 
 function createStaticObjectSourceIdentity(key: HostAssetKey): StaticObjectSourceIdentity {

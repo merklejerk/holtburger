@@ -120,8 +120,8 @@ function createTriangleCandidates(
 				(left, right) => left.polygonId - right.polygonId,
 			)) {
 				const material = materialSlots.resolveMaterial(object.identity, part, {
+					geometrySurfaceId: triangle.geometrySurfaceId,
 					materialVariantSignature: triangle.materialVariantSignature,
-					surfaceId: triangle.surfaceId,
 				});
 				if (!material) {
 					throw new Error(
@@ -191,7 +191,7 @@ class MaterialSlotIndex {
 					materialVariantSignature: slot.materialVariantSignature,
 					object: slot.object,
 					partIndex: slot.identity.part.partIndex,
-					surfaceId: slot.identity.surfaceId,
+					geometrySurfaceId: slot.identity.geometrySurfaceId,
 				}),
 				slot.material,
 			);
@@ -202,26 +202,26 @@ class MaterialSlotIndex {
 		object: StaticObjectInstanceIdentity,
 		part: StaticObjectPartSourceFacts,
 		triangle: {
-			readonly surfaceId: number | null;
+			readonly geometrySurfaceId: number | null;
 			readonly materialVariantSignature: string | null;
 		},
 	): StaticMaterialSourceIdentity | null {
-		if (triangle.surfaceId === null) {
+		if (triangle.geometrySurfaceId === null) {
 			return null;
 		}
 
 		return (
 			this.#slotsByObjectPartSurface.get(
 				createMaterialSlotKey({
+					geometrySurfaceId: triangle.geometrySurfaceId,
 					materialVariantSignature: triangle.materialVariantSignature,
 					object,
 					partIndex: part.partIndex,
-					surfaceId: triangle.surfaceId,
 				}),
 			) ??
 			part.materialSlots.find(
 				(slot) =>
-					slot.surfaceId === triangle.surfaceId &&
+					slot.geometrySurfaceId === triangle.geometrySurfaceId &&
 					slot.materialVariantSignature === triangle.materialVariantSignature,
 			)?.material ??
 			null
@@ -435,13 +435,13 @@ function compareObjects(
 function createMaterialSlotKey(options: {
 	readonly object: StaticObjectInstanceIdentity;
 	readonly partIndex: number;
-	readonly surfaceId: number;
+	readonly geometrySurfaceId: number;
 	readonly materialVariantSignature: string | null;
 }): string {
 	return [
 		createObjectKey(options.object),
 		`part:${options.partIndex}`,
-		`surface:${formatHex32(options.surfaceId)}`,
+		`geometry-surface:${formatHex32(options.geometrySurfaceId)}`,
 		`variant:${options.materialVariantSignature ?? "none"}`,
 	].join("|");
 }

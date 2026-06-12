@@ -52,6 +52,20 @@ describe("V2 static object compatibility partitioner", () => {
 		]);
 	});
 
+	it("resolves geometry surface slots independently from material surface ids", () => {
+		const payload = createPayload({
+			materials: [createSolidMaterial(0x08000010)],
+		});
+
+		const plan = partitionStaticObjectCompatibility(payload);
+
+		expect(plan.partitions).toHaveLength(1);
+		expect(plan.partitions[0]).toMatchObject({
+			materialIds: [0x08000010],
+			sourceTriangleIds: ["da55ffff:building:building-0:part:0:polygon:0"],
+		});
+	});
+
 	it("fails hard when source geometry has no resolved material slot", () => {
 		const material = createSolidMaterial(0x08000010);
 		const basePayload = createPayload({ materials: [material] });
@@ -172,8 +186,9 @@ function createPayload(options: {
 					object: createObjectIdentity(),
 					partIndex: 0,
 				},
+				geometrySurfaceId: index,
+				materialSurfaceId: material.surfaceId,
 				slotIndex: index,
-				surfaceId: material.surfaceId,
 			},
 			material: material.identity,
 			materialVariantSignature: null,
@@ -219,10 +234,11 @@ function createPayload(options: {
 						invalidPolygonCount: 0,
 						materialSlotCount: options.materials.length,
 						materialSlots: options.materials.map((material, index) => ({
+							geometrySurfaceId: index,
 							material: material.identity,
+							materialSurfaceId: material.surfaceId,
 							materialVariantSignature: null,
 							slotIndex: index,
-							surfaceId: material.surfaceId,
 						})),
 						normals: new Float32Array(options.materials.length * 9),
 						partIndex: 0,
@@ -235,9 +251,9 @@ function createPayload(options: {
 						texCoords: new Float32Array(options.materials.length * 6),
 						triangles: options.materials.map((material, index) => ({
 							firstVertex: index * 3,
+							geometrySurfaceId: index,
 							materialVariantSignature: null,
 							polygonId: index,
-							surfaceId: material.surfaceId,
 						})),
 					},
 				],

@@ -71,7 +71,7 @@ export interface StaticObjectMaterialPlan {
 	readonly fallbackReasons: readonly StaticObjectMaterialFallbackReason[];
 }
 
-type StaticObjectMaterialTextureUseRole =
+export type StaticObjectMaterialTextureUseRole =
 	| {
 			readonly role: "base-color";
 			readonly texture: SurfaceTextureIdentity;
@@ -103,7 +103,7 @@ interface StaticObjectDetailRolePlan {
 	readonly fallbackReasons: readonly StaticObjectMaterialFallbackReason[];
 }
 
-interface StaticObjectMaterialFallbackReason {
+export interface StaticObjectMaterialFallbackReason {
 	readonly code:
 		| "missing-material-texture"
 		| "missing-render-surface"

@@ -2040,7 +2040,7 @@ Verification:
 
 ### Phase 11C: Static Object Compatibility Partitioning
 
-Status: planned.
+Status: complete.
 
 Purpose: build a static-object-owned compatibility partitioner after material classification and generalized texture/data-use identity, mirroring terrain's proven vocabulary without extracting terrain-shaped helpers too early.
 
@@ -2072,22 +2072,51 @@ Dry-run conclusion:
 
 - 11C is the real "avoid terrain's old mistake" phase. It should produce deterministic object-owned partitions and mappings even for render-deferred families, but renderer residency should still wait for 11D.
 
-### Phase 11D: First Rendered Outdoor Building Families
+Implementation notes:
+
+- Added an object-owned compatibility partitioner under `src/v2/static/objects/bake/` that groups static object triangles by material family, render coverage, pass, alpha/blend behavior, texture/data-use layout, and source/gfx ownership.
+- Added bounded material-table slicing with `STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE = 8`; compatible solid-material geometry now splits before renderer residency instead of assuming one source scope can fit one draw unit.
+- Added a static object compatibility baker that emits one non-rendered placeholder draw unit per partition, plus top-level `staticSourceMappings` and `staticSpatialRecords` for inspection. The draw units intentionally do not carry source/spatial metadata.
+- Static object bake texture uses are emitted only for currently stageable render-candidate `rgba-raw` data uses. Indexed/palette data-use identities still participate in compatibility partitioning, but are not sent to the current RGBA atlas manager until the indexed/palette upload path exists.
+- Routed `outdoor-buildings` bake batches through the worker-backed static bake path. The static bake worker now routes terrain batches to the terrain geometry baker and outdoor static object batches to the compatibility baker.
+
+Spicy findings:
+
+- The static material planner's exported surface needed to grow only at the real baker seam. Knip caught the over-exported leaf types, so the final public surface remains narrow: the planner result, fallback reason, and texture role shapes consumed across modules.
+- The compatibility key includes concrete texture data-use identity, so two otherwise similar textured materials with different render surfaces do not incorrectly share one material layout yet. That is conservative and may be loosened later if 11D/11E introduce a material table that can bind multiple texture entries per draw unit cleanly.
+- Object partitioning is deliberately parallel to terrain. The overlap is vocabulary, not helper code yet; terrain still has pcode/layer-slot assumptions that would make a shared helper premature.
+
+Failed to close:
+
+- Static object draw units are still non-rendered placeholders. 11D owns the first real static object geometry draw-unit variant, buffer upload, material binding, and renderer removal path.
+- Indexed/paletted and palette data textures are represented in compatibility data but not emitted as texture-manager stageable uses. 11E remains responsible for data-texture upload and palette-view/subrange parity unless 11D selects an indexed/paletted first family.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts -- static-object-compatibility-partitioner`
+- `cd apps/holtburger-3d && npm run test:ts`
+
+### Phase 11D: First Rendered Outdoor Building Family
 
 Status: planned.
 
-Purpose: render the first low-risk outdoor building material families through the V2 residency path while the broader material pipeline remains explicit.
+Purpose: render opaque `texture-rgba` outdoor building partitions through the V2 residency path while the broader material pipeline remains explicit.
 
 Deliverables:
 
-- Static object geometry bake into draw units for the first supported render families, likely opaque textured and/or solid opaque after source-payload inspection confirms the best target.
-- Texture-manager integration for static object bake-local texture uses, batch-scoped atlas pages, sampler policy, leases, and renderer placement updates.
-- WebGL2 static-object renderer path for the first supported family/families using the same explicit residency-delta model as terrain.
+- Static object geometry bake into real draw units for 11C partitions whose material family is `texture-rgba`, pass is `opaque`, render coverage is `classified-render-candidate`, and texture role layout is the direct `rgba-raw` base-color role.
+- Texture-manager integration for the `rgba-raw` static object bake-local texture uses, batch-scoped atlas pages, sampler policy, leases, and renderer placement updates.
+- WebGL2 static-object renderer path for opaque `texture-rgba` buildings using the same explicit residency-delta model as terrain.
+- Unsupported/deferred partitions continue to produce source mappings and diagnostics but do not become renderable geometry draw units in this phase.
 - Console/runtime diagnostics for classified-but-unsupported static object material families and materialization failures.
 
 Acceptance criteria:
 
-- The selected outdoor building material family renders in V2 without blocking terrain residency.
+- Opaque `texture-rgba` outdoor building partitions render in V2 without blocking terrain residency.
+- 11D does not add a generic static-object shader matrix; it adds only the material-family shader and binding path required for opaque direct RGBA textured buildings.
 - Unsupported classified families are surfaced as typed fallback diagnostics rather than appearing as missing landblocks with no explanation.
 - Compaction remains a bake concern and does not require renderer-side asset dependency knowledge.
 - Removing a static scope releases geometry and texture placement leases.
@@ -2095,15 +2124,14 @@ Acceptance criteria:
 Dry-run findings:
 
 - Current V2 WebGL2 renderer is terrain-focused; static object rendering requires a new draw-unit variant, buffer upload path, material binding path, and removal/disposal path.
-- Texture manager can already commit batch-scoped atlas pages and sampler policy for terrain-style texture uses, but static material roles may include prepared color pages, indexed texel pages, palette lookup pages, detail overlays, and non-color/exact data. 11D should start only with the roles required by the selected first rendered family.
-- The first rendered family should be chosen from real 11A payload evidence, not assumed. If outdoor buildings in the target coverage are mostly indexed/paletted or clip/alpha, rendering "opaque textured" first may not prove much visually.
-- If the selected first rendered family is indexed/paletted, palette-view/subrange derivation moves from 11E into 11D because full 256-entry palette defaults would not be enough to claim visual parity for that family.
+- Texture manager can already commit batch-scoped atlas pages and sampler policy for terrain-style texture uses, but static material roles may include prepared color pages, indexed texel pages, palette lookup pages, detail overlays, and non-color/exact data. 11D should start only with the `rgba-raw` prepared render-surface role required by opaque `texture-rgba`.
+- The first rendered family is now intentionally fixed to opaque `texture-rgba` because it is the common outdoor building case and provides the highest visual value for the first renderer seam.
 - Direct/degenerate texture pages and atlas pages should remain the same renderer contract. Do not reintroduce a separate direct-texture path for static objects.
 - Failure messages can stay in console/runtime diagnostics, but materialization failure must not silently drop entire landblocks.
 
 Dry-run conclusion:
 
-- 11D should be implemented only after 11A-11C provide evidence for a good first rendered family. The phase should narrow renderer support to that family while preserving explicit fallback for all classified-but-render-deferred families.
+- 11D should narrow renderer support to opaque `texture-rgba` while preserving explicit fallback for every other classified-but-render-deferred or unsupported family. Alpha/clip, indexed/paletted, solid-color, translucent, additive, and detail-overlay support move to 11E unless opaque `texture-rgba` rendering exposes a required blocker.
 
 ### Phase 11E: Static Object Material Family Expansion
 

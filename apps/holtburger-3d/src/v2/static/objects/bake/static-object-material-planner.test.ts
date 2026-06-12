@@ -1,0 +1,346 @@
+import { describe, expect, it } from "vitest";
+import type {
+	OutdoorStaticObjectsScopePayload,
+	StaticObjectMaterialSourceFacts,
+	StaticObjectTextureRefFacts,
+} from "../../contracts";
+import {
+	classifyStaticObjectMaterial,
+	planStaticObjectMaterials,
+} from "./static-object-material-planner";
+
+describe("V2 static object material planner", () => {
+	it("classifies solid-color materials without texture roles", () => {
+		const plan = classifyStaticObjectMaterial({
+			material: createMaterial({
+				source: {
+					argb: 0xff336699,
+					kind: "solid-color",
+				},
+			}),
+			textureRefs: [],
+		});
+
+		expect(plan).toMatchObject({
+			alphaPolicy: {
+				alphaTest: 0,
+				mode: "opaque",
+				opacity: 1,
+			},
+			family: "flat-color",
+			pass: "opaque",
+			renderCoverage: "classified-render-candidate",
+			textureRoles: [],
+		});
+		expect(plan.color).toEqual([
+			0x33 / 255,
+			0x66 / 255,
+			0x99 / 255,
+			1,
+		]);
+	});
+
+	it("plans non-indexed texture materials as raw rgba base-color roles", () => {
+		const plan = classifyStaticObjectMaterial({
+			material: createTexturedMaterial(),
+			textureRefs: createTextureRefs({ formatRaw: 1, paletteId: null }),
+		});
+
+		expect(plan).toMatchObject({
+			alphaPolicy: {
+				mode: "opaque",
+			},
+			family: "texture-rgba",
+			pass: "opaque",
+			renderCoverage: "classified-render-candidate",
+			textureRoles: [
+				{
+					preparedTextureUse: {
+						kind: "prepared-texture-use",
+						outputFormat: "rgba8",
+						renderSurfaceId: 0x06000010,
+						usage: "raw",
+					},
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000010,
+					},
+					role: "base-color",
+					texture: {
+						kind: "surface-texture",
+						surfaceTextureId: 0x05000010,
+					},
+				},
+			],
+		});
+	});
+
+	it("preserves indexed texel and palette lookup roles", () => {
+		const plan = classifyStaticObjectMaterial({
+			material: createTexturedMaterial({
+				paletteId: 0x04000020,
+			}),
+			textureRefs: createTextureRefs({ formatRaw: 0x29, paletteId: 0x04000010 }),
+		});
+
+		expect(plan).toMatchObject({
+			family: "indexed-paletted",
+			pass: "opaque",
+			renderCoverage: "classified-render-deferred",
+			textureRoles: [
+				{
+					height: 32,
+					indexedFormat: "p8",
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000010,
+					},
+					role: "indexed-texels",
+					width: 64,
+				},
+				{
+					palette: {
+						kind: "palette",
+						paletteId: 0x04000020,
+					},
+					role: "palette-lookup",
+				},
+			],
+		});
+	});
+
+	it("marks translucent texture materials render-deferred without losing roles", () => {
+		const plan = classifyStaticObjectMaterial({
+			material: createTexturedMaterial({
+				surfaceType: 0x100,
+			}),
+			textureRefs: createTextureRefs({ formatRaw: 1, paletteId: null }),
+		});
+
+		expect(plan).toMatchObject({
+			family: "texture-rgba",
+			pass: "transparent",
+			renderCoverage: "classified-render-deferred",
+			textureRoles: [
+				expect.objectContaining({
+					role: "base-color",
+				}),
+			],
+		});
+		expect(plan.fallbackReasons).toEqual([
+			expect.objectContaining({
+				code: "translucent-render-deferred",
+			}),
+		]);
+	});
+
+	it("reports unsupported detail surface flags explicitly", () => {
+		const plan = classifyStaticObjectMaterial({
+			material: createTexturedMaterial({
+				surfaceType: 0x20000,
+			}),
+			textureRefs: createTextureRefs({ formatRaw: 1, paletteId: null }),
+		});
+
+		expect(plan).toMatchObject({
+			family: "unsupported",
+			renderCoverage: "unsupported",
+		});
+		expect(plan.fallbackReasons).toEqual([
+			expect.objectContaining({
+				code: "unsupported-surface-flag",
+			}),
+		]);
+	});
+
+	it("keeps building detail roles as classified render-deferred material inputs", () => {
+		const plan = planStaticObjectMaterials(createPayload());
+
+		expect(plan.detailRoles).toEqual([
+			{
+				fadeFar: 256,
+				fadeNear: 128,
+				fallbackReasons: [
+					expect.objectContaining({
+						code: "detail-overlay-render-deferred",
+					}),
+				],
+				renderCoverage: "classified-render-deferred",
+				role: "building",
+				texture: {
+					kind: "surface-texture",
+					surfaceTextureId: 0x05000020,
+				},
+				tiling: 8,
+			},
+		]);
+		expect(plan.fallbackReasons).toEqual([
+			expect.objectContaining({
+				code: "detail-overlay-render-deferred",
+			}),
+		]);
+	});
+
+	it("rejects textured materials whose selected render surface was not resolved", () => {
+		const plan = classifyStaticObjectMaterial({
+			material: createTexturedMaterial(),
+			textureRefs: [
+				{
+					palette: null,
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000010,
+					},
+					role: "surface-texture",
+					texture: {
+						kind: "surface-texture",
+						surfaceTextureId: 0x05000010,
+					},
+				},
+			],
+		});
+
+		expect(plan).toMatchObject({
+			family: "unsupported",
+			renderCoverage: "unsupported",
+		});
+		expect(plan.fallbackReasons).toEqual([
+			expect.objectContaining({
+				code: "missing-render-surface",
+			}),
+		]);
+	});
+});
+
+function createPayload(): OutdoorStaticObjectsScopePayload {
+	const material = createTexturedMaterial();
+	return {
+		domain: "outdoor-buildings",
+		kind: "outdoor-static-objects",
+		landblock: {
+			kind: "landblock-source",
+			landblockId: 0xda55ffff,
+			source: "outdoor",
+		},
+		materialSlots: [],
+		materialSources: [material],
+		missingRefs: [],
+		objects: [],
+		regionRenderProfile: {
+			detailRoles: [
+				{
+					fadeFar: 256,
+					fadeNear: 128,
+					role: "building",
+					texture: {
+						kind: "surface-texture",
+						surfaceTextureId: 0x05000020,
+					},
+					tiling: 8,
+				},
+			],
+			identity: {
+				kind: "region-render-profile",
+				regionNumber: 1,
+			},
+		},
+		sourceAssets: [],
+		sourceSpatial: {
+			bounds: null,
+			coordinateSpace: "landblock-render-local",
+			outdoorBvhItemCount: 0,
+			outdoorBvhNodeCount: 0,
+		},
+		textureRefs: createTextureRefs({ formatRaw: 1, paletteId: null }),
+	};
+}
+
+function createTexturedMaterial(
+	overrides: {
+		readonly surfaceType?: number;
+		readonly paletteId?: number | null;
+	} = {},
+): StaticObjectMaterialSourceFacts {
+	return createMaterial({
+		source: {
+			kind: "texture",
+			palette:
+				overrides.paletteId === undefined || overrides.paletteId === null
+					? null
+					: {
+							kind: "palette",
+							paletteId: overrides.paletteId,
+						},
+			renderSurfaceDefaultPalettes: [],
+			selectedRenderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000010,
+			},
+			texture: {
+				kind: "surface-texture",
+				surfaceTextureId: 0x05000010,
+			},
+		},
+		surfaceType: overrides.surfaceType,
+	});
+}
+
+function createMaterial(
+	overrides: Partial<StaticObjectMaterialSourceFacts> = {},
+): StaticObjectMaterialSourceFacts {
+	return {
+		diffuse: 1,
+		identity: {
+			kind: "static-material-source",
+			materialId: 0x08000010,
+		},
+		luminosity: 0,
+		source: {
+			argb: 0xffffffff,
+			kind: "solid-color",
+		},
+		surfaceId: 0x08000010,
+		surfaceType: 0,
+		translucency: 0,
+		...overrides,
+	};
+}
+
+function createTextureRefs(options: {
+	readonly formatRaw: number;
+	readonly paletteId: number | null;
+}): StaticObjectTextureRefFacts[] {
+	const palette =
+		options.paletteId === null
+			? null
+			: {
+					kind: "palette" as const,
+					paletteId: options.paletteId,
+				};
+	return [
+		{
+			palette,
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000010,
+			},
+			role: "surface-texture",
+			texture: {
+				kind: "surface-texture",
+				surfaceTextureId: 0x05000010,
+			},
+		},
+		{
+			format: options.formatRaw === 0x29 ? "p8" : "rgba",
+			formatRaw: options.formatRaw,
+			height: 32,
+			palette,
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000010,
+			},
+			role: "render-surface",
+			width: 64,
+		},
+	];
+}

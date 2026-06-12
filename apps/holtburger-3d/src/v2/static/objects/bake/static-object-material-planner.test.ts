@@ -18,6 +18,7 @@ describe("V2 static object material planner", () => {
 					kind: "solid-color",
 				},
 			}),
+			paletteSources: [],
 			textureRefs: [],
 		});
 
@@ -48,6 +49,7 @@ describe("V2 static object material planner", () => {
 				luminosity: 0.75,
 				surfaceType: 0x20 | 0x40,
 			}),
+			paletteSources: [],
 			textureRefs: createTextureRefs({ formatRaw: 1, paletteId: null }),
 		});
 
@@ -58,6 +60,7 @@ describe("V2 static object material planner", () => {
 	it("plans non-indexed texture materials as filterable rgba base-color roles", () => {
 		const plan = classifyStaticObjectMaterial({
 			material: createTexturedMaterial(),
+			paletteSources: [],
 			textureRefs: createTextureRefs({ formatRaw: 1, paletteId: null }),
 		});
 
@@ -97,6 +100,7 @@ describe("V2 static object material planner", () => {
 			material: createTexturedMaterial({
 				paletteId: 0x04000020,
 			}),
+			paletteSources: createPaletteSources({ paletteId: 0x04000020 }),
 			textureRefs: createTextureRefs({ formatRaw: 0x29, paletteId: 0x04000010 }),
 		});
 
@@ -149,6 +153,10 @@ describe("V2 static object material planner", () => {
 			material: createTexturedMaterial({
 				paletteId: 0x04000020,
 			}),
+			paletteSources: createPaletteSources({
+				paletteId: 0x04000020,
+				colorCount: 258,
+			}),
 			paletteViews: [
 				{
 					firstIndex: 16,
@@ -168,7 +176,7 @@ describe("V2 static object material planner", () => {
 				expect.objectContaining({
 					dataUse: {
 						firstIndex: 0,
-						indexCount: 256,
+						indexCount: 258,
 						kind: "palette-texture-use",
 						palette: {
 							kind: "palette",
@@ -195,6 +203,7 @@ describe("V2 static object material planner", () => {
 	it("plans indexed Index16 materials as index16 data uses", () => {
 		const plan = classifyStaticObjectMaterial({
 			material: createTexturedMaterial(),
+			paletteSources: createPaletteSources({ paletteId: 0x04000010 }),
 			textureRefs: createTextureRefs({ formatRaw: 0x65, paletteId: 0x04000010 }),
 		});
 
@@ -229,9 +238,36 @@ describe("V2 static object material planner", () => {
 		});
 	});
 
+	it("rejects indexed materials when texel indices exceed palette width", () => {
+		const plan = classifyStaticObjectMaterial({
+			material: createTexturedMaterial(),
+			paletteSources: createPaletteSources({
+				colorCount: 256,
+				paletteId: 0x04000010,
+			}),
+			textureRefs: createTextureRefs({
+				formatRaw: 0x65,
+				indexedMaxIndex: 257,
+				paletteId: 0x04000010,
+			}),
+		});
+
+		expect(plan).toMatchObject({
+			family: "unsupported",
+			renderCoverage: "unsupported",
+			textureRoles: [],
+		});
+		expect(plan.fallbackReasons).toEqual([
+			expect.objectContaining({
+				code: "palette-index-out-of-range",
+			}),
+		]);
+	});
+
 	it("rejects indexed materials without a material or render-surface palette", () => {
 		const plan = classifyStaticObjectMaterial({
 			material: createTexturedMaterial(),
+			paletteSources: [],
 			textureRefs: createTextureRefs({ formatRaw: 0x29, paletteId: null }),
 		});
 
@@ -252,6 +288,7 @@ describe("V2 static object material planner", () => {
 			material: createTexturedMaterial({
 				surfaceType: 0x100,
 			}),
+			paletteSources: [],
 			textureRefs: createTextureRefs({ formatRaw: 1, paletteId: null }),
 		});
 
@@ -277,6 +314,7 @@ describe("V2 static object material planner", () => {
 			material: createTexturedMaterial({
 				surfaceType: 0x20000,
 			}),
+			paletteSources: [],
 			textureRefs: createTextureRefs({ formatRaw: 1, paletteId: null }),
 		});
 
@@ -322,6 +360,7 @@ describe("V2 static object material planner", () => {
 	it("rejects textured materials whose selected render surface was not resolved", () => {
 		const plan = classifyStaticObjectMaterial({
 			material: createTexturedMaterial(),
+			paletteSources: [],
 			textureRefs: [
 				{
 					palette: null,
@@ -364,6 +403,7 @@ function createPayload(): OutdoorStaticObjectsScopePayload {
 		materialSources: [material],
 		missingRefs: [],
 		objects: [],
+		paletteSources: [],
 		regionRenderProfile: {
 			detailRoles: [
 				{
@@ -450,6 +490,7 @@ function createMaterial(
 
 function createTextureRefs(options: {
 	readonly formatRaw: number;
+	readonly indexedMaxIndex?: number;
 	readonly paletteId: number | null;
 }): StaticObjectTextureRefFacts[] {
 	const palette =
@@ -481,6 +522,9 @@ function createTextureRefs(options: {
 						: "rgba",
 			formatRaw: options.formatRaw,
 			height: 32,
+			indexedMaxIndex:
+				options.indexedMaxIndex ??
+				(options.formatRaw === 0x29 || options.formatRaw === 0x65 ? 42 : null),
 			palette,
 			renderSurface: {
 				kind: "render-surface",
@@ -488,6 +532,21 @@ function createTextureRefs(options: {
 			},
 			role: "render-surface",
 			width: 64,
+		},
+	];
+}
+
+function createPaletteSources(options: {
+	readonly paletteId: number;
+	readonly colorCount?: number;
+}) {
+	return [
+		{
+			colorCount: options.colorCount ?? 256,
+			palette: {
+				kind: "palette" as const,
+				paletteId: options.paletteId,
+			},
 		},
 	];
 }

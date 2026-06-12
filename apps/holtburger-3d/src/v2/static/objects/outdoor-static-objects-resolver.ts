@@ -32,6 +32,7 @@ import type {
 	RegionDetailRoleFacts,
 	StaticObjectSourceAssetFacts,
 	StaticObjectSourceIdentity,
+	StaticObjectPaletteSourceFacts,
 	StaticObjectTextureRefFacts,
 	StaticResourceIdentity,
 	StaticResolverJob,
@@ -65,6 +66,7 @@ interface LoadedPayload<
 
 interface SourceResolution {
 	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
+	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
 	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
 	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
 	readonly missingRefs: readonly StaticResourceIdentity[];
@@ -164,6 +166,7 @@ export class OutdoorStaticObjectsResolver {
 			materialSources: sourceResolution.materialSources,
 			missingRefs: sourceResolution.missingRefs,
 			objects,
+			paletteSources: sourceResolution.paletteSources,
 			regionRenderProfile: {
 				detailRoles: createRegionDetailRoles(regionRenderProfile.payload),
 				identity: {
@@ -197,6 +200,7 @@ export class OutdoorStaticObjectsResolver {
 	): Promise<SourceResolution> {
 		const sourceAssets = new Map<string, StaticObjectSourceAssetFacts>();
 		const materialSources = new Map<string, StaticObjectMaterialSourceFacts>();
+		const paletteSources = new Map<string, StaticObjectPaletteSourceFacts>();
 		const textureRefs = new Map<string, StaticObjectTextureRefFacts>();
 		const missingRefs: StaticResourceIdentity[] = [];
 		let sourceRevision = 0;
@@ -212,6 +216,7 @@ export class OutdoorStaticObjectsResolver {
 					identity,
 					materialSources,
 					missingRefs,
+					paletteSources,
 					source,
 					textureRefs,
 				});
@@ -225,6 +230,7 @@ export class OutdoorStaticObjectsResolver {
 		return {
 			materialSources: [...materialSources.values()],
 			missingRefs,
+			paletteSources: [...paletteSources.values()],
 			sourceAssets: [...sourceAssets.values()],
 			sourceRevision,
 			textureRefs: [...textureRefs.values()],
@@ -235,6 +241,7 @@ export class OutdoorStaticObjectsResolver {
 		readonly identity: StaticObjectSourceIdentity;
 		readonly source: LoadedPayload<"gfx-obj" | "setup-model">;
 		readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
+		readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
 		readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
 		readonly missingRefs: StaticResourceIdentity[];
 	}): Promise<StaticObjectSourceAssetFacts> {
@@ -245,12 +252,14 @@ export class OutdoorStaticObjectsResolver {
 						gfxObj: options.source.payload,
 						materialSources: options.materialSources,
 						missingRefs: options.missingRefs,
+						paletteSources: options.paletteSources,
 						source: options.identity,
 						textureRefs: options.textureRefs,
 					})
 				: await this.#createSetupModelParts({
 						materialSources: options.materialSources,
 						missingRefs: options.missingRefs,
+						paletteSources: options.paletteSources,
 						setupModel: options.source.payload,
 						source: options.identity,
 						textureRefs: options.textureRefs,
@@ -276,6 +285,7 @@ export class OutdoorStaticObjectsResolver {
 		readonly gfxObjAssetId: string;
 		readonly gfxObj: GfxObjPayloadDto;
 		readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
+		readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
 		readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
 		readonly missingRefs: StaticResourceIdentity[];
 	}): Promise<readonly StaticObjectPartSourceFacts[]> {
@@ -286,6 +296,7 @@ export class OutdoorStaticObjectsResolver {
 				gfxObjAssetId: options.gfxObjAssetId,
 				materialSources: options.materialSources,
 				missingRefs: options.missingRefs,
+				paletteSources: options.paletteSources,
 				partIndex: 0,
 				scale: UNIT_SCALE,
 				source: options.source,
@@ -298,6 +309,7 @@ export class OutdoorStaticObjectsResolver {
 		readonly source: StaticObjectSourceIdentity;
 		readonly setupModel: SetupModelPayloadDto;
 		readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
+		readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
 		readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
 		readonly missingRefs: StaticResourceIdentity[];
 	}): Promise<readonly StaticObjectPartSourceFacts[]> {
@@ -314,9 +326,17 @@ export class OutdoorStaticObjectsResolver {
 			setupAppearance?.payload.subPalettes ?? [],
 		);
 		if (paletteOverride) {
-			await this.#loadPalette(paletteOverride, options.missingRefs);
+			await this.#loadPalette(
+				paletteOverride,
+				options.paletteSources,
+				options.missingRefs,
+			);
 		}
-		await this.#loadPaletteViews(paletteViews, options.missingRefs);
+		await this.#loadPaletteViews(
+			paletteViews,
+			options.paletteSources,
+			options.missingRefs,
+		);
 		const facts: StaticObjectPartSourceFacts[] = [];
 
 		for (const part of parts) {
@@ -360,6 +380,7 @@ export class OutdoorStaticObjectsResolver {
 							: undefined,
 					materialSources: options.materialSources,
 					missingRefs: options.missingRefs,
+					paletteSources: options.paletteSources,
 					partIndex: part.partIndex,
 					scale: setupPart?.scale ?? UNIT_SCALE,
 					source: options.source,
@@ -380,6 +401,7 @@ export class OutdoorStaticObjectsResolver {
 		readonly scale: StaticObjectPartSourceFacts["scale"];
 		readonly materialSlots?: readonly StaticObjectMaterialSlotInput[];
 		readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
+		readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
 		readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
 		readonly missingRefs: StaticResourceIdentity[];
 	}): Promise<StaticObjectPartSourceFacts> {
@@ -391,6 +413,7 @@ export class OutdoorStaticObjectsResolver {
 			materialSlots: options.materialSlots,
 			materialSources: options.materialSources,
 			missingRefs: options.missingRefs,
+			paletteSources: options.paletteSources,
 			textureRefs: options.textureRefs,
 		});
 
@@ -423,6 +446,7 @@ export class OutdoorStaticObjectsResolver {
 		readonly gfxObj: GfxObjPayloadDto;
 		readonly materialSlots?: readonly StaticObjectMaterialSlotInput[];
 		readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
+		readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
 		readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
 		readonly missingRefs: StaticResourceIdentity[];
 	}): Promise<readonly StaticObjectPartMaterialSlotFacts[]> {
@@ -447,6 +471,7 @@ export class OutdoorStaticObjectsResolver {
 					material,
 					materialSources: options.materialSources,
 					missingRefs: options.missingRefs,
+					paletteSources: options.paletteSources,
 					textureRefs: options.textureRefs,
 				});
 				return {
@@ -467,6 +492,7 @@ export class OutdoorStaticObjectsResolver {
 	async #loadMaterialSource(options: {
 		readonly material: StaticMaterialSourceIdentity;
 		readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
+		readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
 		readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
 		readonly missingRefs: StaticResourceIdentity[];
 	}): Promise<void> {
@@ -523,8 +549,17 @@ export class OutdoorStaticObjectsResolver {
 			translucency: material.payload.translucency,
 		});
 
+		if (source.kind === "texture" && source.palette) {
+			await this.#loadPalette(
+				source.palette,
+				options.paletteSources,
+				options.missingRefs,
+			);
+		}
+
 		await this.#resolveMaterialTextureRefs(
 			material.payload,
+			options.paletteSources,
 			options.textureRefs,
 			options.missingRefs,
 		);
@@ -532,6 +567,7 @@ export class OutdoorStaticObjectsResolver {
 
 	async #resolveMaterialTextureRefs(
 		material: MaterialRecipePayloadDto,
+		paletteSources: Map<string, StaticObjectPaletteSourceFacts>,
 		textureRefs: Map<string, StaticObjectTextureRefFacts>,
 		missingRefs: StaticResourceIdentity[],
 	): Promise<void> {
@@ -590,6 +626,10 @@ export class OutdoorStaticObjectsResolver {
 					format: loadedRenderSurface.payload.format,
 					formatRaw: loadedRenderSurface.payload.formatRaw,
 					height: loadedRenderSurface.payload.height,
+					indexedMaxIndex: scanIndexedMaxIndex(
+						loadedRenderSurface.payload.sourceBytes,
+						loadedRenderSurface.payload.formatRaw,
+					),
 					palette,
 					renderSurface,
 					role: "render-surface",
@@ -597,7 +637,7 @@ export class OutdoorStaticObjectsResolver {
 				},
 			);
 			if (palette) {
-				await this.#loadPalette(palette, missingRefs);
+				await this.#loadPalette(palette, paletteSources, missingRefs);
 			}
 		} catch {
 			missingRefs.push(renderSurface);
@@ -606,10 +646,22 @@ export class OutdoorStaticObjectsResolver {
 
 	async #loadPalette(
 		palette: PaletteIdentity,
+		paletteSources: Map<string, StaticObjectPaletteSourceFacts>,
 		missingRefs: StaticResourceIdentity[],
 	): Promise<void> {
+		const key = createPaletteCacheKey(palette);
+		if (paletteSources.has(key)) {
+			return;
+		}
 		try {
-			await this.#loadPayload(createHostAssetKey("palette", palette.paletteId), "palette");
+			const loaded = await this.#loadPayload(
+				createHostAssetKey("palette", palette.paletteId),
+				"palette",
+			);
+			paletteSources.set(key, {
+				colorCount: loaded.payload.colorCount,
+				palette,
+			});
 		} catch {
 			missingRefs.push(palette);
 		}
@@ -617,10 +669,11 @@ export class OutdoorStaticObjectsResolver {
 
 	async #loadPaletteViews(
 		paletteViews: readonly StaticObjectPaletteViewFacts[],
+		paletteSources: Map<string, StaticObjectPaletteSourceFacts>,
 		missingRefs: StaticResourceIdentity[],
 	): Promise<void> {
 		for (const paletteView of paletteViews) {
-			await this.#loadPalette(paletteView.palette, missingRefs);
+			await this.#loadPalette(paletteView.palette, paletteSources, missingRefs);
 		}
 	}
 
@@ -911,6 +964,10 @@ function createMaterialCacheKey(identity: StaticMaterialSourceIdentity): string 
 	return `${identity.materialId}`;
 }
 
+function createPaletteCacheKey(identity: PaletteIdentity): string {
+	return `${identity.paletteId}`;
+}
+
 function createTextureRefCacheKey(
 	ref:
 		| { readonly role: "surface-texture"; readonly texture: SurfaceTextureIdentity }
@@ -938,3 +995,30 @@ function requirePreparedPayloadKind<
 }
 
 const UNIT_SCALE = { x: 1, y: 1, z: 1 };
+
+const PIXEL_FORMAT_P8 = 0x29;
+const PIXEL_FORMAT_INDEX16 = 0x65;
+
+function scanIndexedMaxIndex(bytes: Uint8Array, formatRaw: number): number | null {
+	if (formatRaw === PIXEL_FORMAT_P8) {
+		let maxIndex = 0;
+		for (const index of bytes) {
+			maxIndex = Math.max(maxIndex, index);
+		}
+		return maxIndex;
+	}
+	if (formatRaw !== PIXEL_FORMAT_INDEX16) {
+		return null;
+	}
+	if (bytes.byteLength % Uint16Array.BYTES_PER_ELEMENT !== 0) {
+		throw new Error(
+			`Index16 render surface byte length ${bytes.byteLength} is not 16-bit aligned.`,
+		);
+	}
+	let maxIndex = 0;
+	for (let offset = 0; offset < bytes.byteLength; offset += 2) {
+		const index = bytes[offset] | ((bytes[offset + 1] ?? 0) << 8);
+		maxIndex = Math.max(maxIndex, index);
+	}
+	return maxIndex;
+}

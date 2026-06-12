@@ -202,6 +202,7 @@ export class ImmediateStaticResolver implements StaticResolver {
 					materialSources: [],
 					missingRefs: [],
 					objects: [],
+					paletteSources: [],
 					regionRenderProfile: {
 						detailRoles: [],
 						identity: {

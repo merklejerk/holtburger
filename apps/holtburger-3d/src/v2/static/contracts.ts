@@ -177,6 +177,11 @@ export interface StaticObjectPaletteViewFacts {
 	readonly indexCount: number;
 }
 
+export interface StaticObjectPaletteSourceFacts {
+	readonly palette: PaletteIdentity;
+	readonly colorCount: number;
+}
+
 type PreparedRenderSurfaceTextureUsage =
 	| "rgba-color"
 	| "rgba-detail"
@@ -365,6 +370,7 @@ export interface OutdoorStaticObjectsScopePayload {
 	readonly regionRenderProfile: StaticObjectRegionRenderProfileFacts;
 	readonly objects: readonly StaticObjectInstanceFacts[];
 	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
+	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
 	readonly materialSlots: readonly StaticObjectMaterialSlotFacts[];
 	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
 	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
@@ -488,6 +494,7 @@ export type StaticObjectTextureRefFacts =
 			readonly height: number;
 			readonly format: string;
 			readonly formatRaw: number;
+			readonly indexedMaxIndex: number | null;
 			readonly palette: PaletteIdentity | null;
 	  };
 

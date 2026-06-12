@@ -74,6 +74,7 @@ type TextureRolePageKind =
 	| "detail"
 	| "mask"
 	| "static-base-color"
+	| "static-detail"
 	| "static-index"
 	| "static-palette";
 

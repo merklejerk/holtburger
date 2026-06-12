@@ -34,6 +34,7 @@ const TERRAIN_DETAIL_TEXTURE_UNIT =
 const STATIC_OBJECT_TEXTURE_UNIT = 0;
 const STATIC_OBJECT_INDEX_TEXTURE_UNIT = 1;
 const STATIC_OBJECT_PALETTE_TEXTURE_UNIT = 2;
+const STATIC_OBJECT_DETAIL_TEXTURE_UNIT = 3;
 
 const defaultFrameState: FrameState = {
 	camera: {
@@ -84,12 +85,17 @@ precision highp int;
 uniform sampler2D uTexture;
 uniform sampler2D uIndexTexture;
 uniform sampler2D uPaletteTexture;
+uniform sampler2D uDetailTexture;
 uniform vec4 uTextureRect;
 uniform vec4 uIndexTextureRect;
 uniform vec4 uPaletteTextureRect;
+uniform vec4 uDetailTextureRect;
 uniform vec2 uTextureSize;
 uniform vec2 uPaletteTextureSize;
+uniform vec2 uDetailTextureSize;
 uniform float uPaletteFirstIndex;
+uniform float uDetailTiling;
+uniform int uDetailEnabled;
 uniform float uAlphaTest;
 uniform vec4 uMaterialColor;
 uniform vec3 uMaterialEmissiveColor;
@@ -152,6 +158,12 @@ vec4 sampleIndexedPaletteLinear(vec2 uv) {
 	return mix(top, bottom, blend.y);
 }
 
+vec4 sampleDetailOverlay(vec2 uv) {
+	vec2 localUv = fract(uv * uDetailTiling);
+	vec2 atlasUv = (uDetailTextureRect.xy + localUv * uDetailTextureRect.zw) / uDetailTextureSize;
+	return texture(uDetailTexture, atlasUv);
+}
+
 void main() {
 	if (uMaterialMode == 2) {
 		fragColor = vec4(1.0, 0.0, 1.0, 1.0);
@@ -167,8 +179,13 @@ void main() {
 		baseColor = sampleIndexedPaletteLinear(vTexCoord);
 	}
 
+	vec3 rgb = min(baseColor.rgb * uMaterialColor.rgb + uMaterialEmissiveColor, vec3(1.0));
+	if (uDetailEnabled == 1) {
+		rgb *= sampleDetailOverlay(vTexCoord).rgb;
+	}
+
 	fragColor = vec4(
-		min(baseColor.rgb * uMaterialColor.rgb + uMaterialEmissiveColor, vec3(1.0)),
+		rgb,
 		baseColor.a * uMaterialColor.a
 	);
 	if (fragColor.a < uAlphaTest) {
@@ -714,6 +731,9 @@ class Webgl2Renderer implements Renderer {
 			const paletteBinding = resource.paletteTextureUseId
 				? bindings.get(resource.paletteTextureUseId)
 				: null;
+			const detailBinding = resource.detailTextureUseId
+				? bindings.get(resource.detailTextureUseId)
+				: null;
 			const texture = binding
 				? (this.#textures.get(binding.textureRefId) ?? null)
 				: null;
@@ -722,6 +742,9 @@ class Webgl2Renderer implements Renderer {
 				: null;
 			const paletteTexture = paletteBinding
 				? (this.#textures.get(paletteBinding.textureRefId) ?? null)
+				: null;
+			const detailTexture = detailBinding
+				? (this.#textures.get(detailBinding.textureRefId) ?? null)
 				: null;
 			const materialMode = resolveStaticObjectMaterialMode(
 				resource,
@@ -747,6 +770,12 @@ class Webgl2Renderer implements Renderer {
 			gl.uniform1i(
 				this.#staticObjectProgram.uniforms.uPaletteTexture,
 				STATIC_OBJECT_PALETTE_TEXTURE_UNIT,
+			);
+			gl.activeTexture(gl.TEXTURE0 + STATIC_OBJECT_DETAIL_TEXTURE_UNIT);
+			gl.bindTexture(gl.TEXTURE_2D, detailTexture);
+			gl.uniform1i(
+				this.#staticObjectProgram.uniforms.uDetailTexture,
+				STATIC_OBJECT_DETAIL_TEXTURE_UNIT,
 			);
 			gl.uniform4f(
 				this.#staticObjectProgram.uniforms.uTextureRect,
@@ -782,6 +811,26 @@ class Webgl2Renderer implements Renderer {
 			gl.uniform1f(
 				this.#staticObjectProgram.uniforms.uPaletteFirstIndex,
 				resource.paletteFirstIndex,
+			);
+			gl.uniform4f(
+				this.#staticObjectProgram.uniforms.uDetailTextureRect,
+				detailBinding?.rect[0] ?? 0,
+				detailBinding?.rect[1] ?? 0,
+				detailBinding?.rect[2] ?? 1,
+				detailBinding?.rect[3] ?? 1,
+			);
+			gl.uniform2f(
+				this.#staticObjectProgram.uniforms.uDetailTextureSize,
+				detailBinding?.textureWidth ?? 1,
+				detailBinding?.textureHeight ?? 1,
+			);
+			gl.uniform1f(
+				this.#staticObjectProgram.uniforms.uDetailTiling,
+				resource.detailTextureTiling,
+			);
+			gl.uniform1i(
+				this.#staticObjectProgram.uniforms.uDetailEnabled,
+				detailTexture ? 1 : 0,
 			);
 			gl.uniform1i(
 				this.#staticObjectProgram.uniforms.uIndexedTextureFormat,
@@ -919,6 +968,11 @@ interface StaticObjectGeometryProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly uAlphaTest: WebGLUniformLocation;
+		readonly uDetailEnabled: WebGLUniformLocation;
+		readonly uDetailTexture: WebGLUniformLocation;
+		readonly uDetailTextureRect: WebGLUniformLocation;
+		readonly uDetailTextureSize: WebGLUniformLocation;
+		readonly uDetailTiling: WebGLUniformLocation;
 		readonly uIndexTexture: WebGLUniformLocation;
 		readonly uIndexTextureRect: WebGLUniformLocation;
 		readonly uIndexedTextureFormat: WebGLUniformLocation;
@@ -964,6 +1018,8 @@ interface StaticObjectGeometryResource {
 	readonly materialColor: StaticObjectGeometryStaticDrawUnit["materialColor"];
 	readonly materialEmissiveColor: StaticObjectGeometryStaticDrawUnit["materialEmissiveColor"];
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
+	readonly detailTextureTiling: number;
+	readonly detailTextureUseId: string | null;
 	readonly indexTextureUseId: string | null;
 	readonly indexedTextureFormat: StaticObjectGeometryStaticDrawUnit["indexedTextureFormat"];
 	readonly paletteFirstIndex: number;
@@ -1134,6 +1190,11 @@ function createStaticObjectGeometryProgram(
 		program,
 		uniforms: {
 			uAlphaTest: requireUniform(gl, program, "uAlphaTest"),
+			uDetailEnabled: requireUniform(gl, program, "uDetailEnabled"),
+			uDetailTexture: requireUniform(gl, program, "uDetailTexture"),
+			uDetailTextureRect: requireUniform(gl, program, "uDetailTextureRect"),
+			uDetailTextureSize: requireUniform(gl, program, "uDetailTextureSize"),
+			uDetailTiling: requireUniform(gl, program, "uDetailTiling"),
 			uIndexTexture: requireUniform(gl, program, "uIndexTexture"),
 			uIndexTextureRect: requireUniform(gl, program, "uIndexTextureRect"),
 			uIndexedTextureFormat: requireUniform(
@@ -1312,6 +1373,8 @@ function createStaticObjectGeometryResource(
 		indexCount: drawUnit.indices.length,
 		indexType:
 			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
+		detailTextureTiling: drawUnit.detailTextureTiling,
+		detailTextureUseId: drawUnit.detailTextureUseId,
 		indexTextureUseId: drawUnit.indexTextureUseId,
 		indexedTextureFormat: drawUnit.indexedTextureFormat,
 		materialColor: drawUnit.materialColor,

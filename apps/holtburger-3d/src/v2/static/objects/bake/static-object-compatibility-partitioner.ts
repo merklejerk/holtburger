@@ -37,6 +37,7 @@ export interface StaticObjectCompatibilityPartition {
 	readonly materialColor: StaticObjectMaterialPlan["color"];
 	readonly materialEmissiveColor: StaticObjectMaterialPlan["emissiveColor"];
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
+	readonly detailTextureTiling: number;
 	readonly textureRoleLayoutKey: string;
 	readonly materialIds: readonly number[];
 	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
@@ -369,6 +370,7 @@ function createCompatibilityPartition(options: {
 				? "material table overflow partition"
 				: "compatible static object material partition",
 		renderCoverage: first.materialPlan.renderCoverage,
+		detailTextureTiling: resolveDetailTextureTiling(first.materialPlan),
 		sliceId: `slice/${options.compatibilityIndex}/${options.sliceIndex}`,
 		sourceTriangleIds: options.candidates.map(
 			(candidate) => candidate.sourceTriangleId,
@@ -435,9 +437,18 @@ function createTextureRoleLayoutKey(
 	return roles
 		.map((role) => {
 			const dataUseKey = createMaterialTextureDataUseKey(role.dataUse);
-			return `${role.role}:${dataUseKey}`;
+			const detailSuffix =
+				role.role === "detail-overlay" ? `:tiling=${role.tiling}` : "";
+			return `${role.role}:${dataUseKey}${detailSuffix}`;
 		})
 		.join(",");
+}
+
+function resolveDetailTextureTiling(plan: StaticObjectMaterialPlan): number {
+	const detailRole = plan.textureRoles.find(
+		(role) => role.role === "detail-overlay",
+	);
+	return detailRole?.role === "detail-overlay" ? detailRole.tiling : 1;
 }
 
 export function createMaterialTextureDataUseKey(

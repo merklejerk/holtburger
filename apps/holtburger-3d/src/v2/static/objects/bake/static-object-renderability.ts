@@ -53,6 +53,7 @@ export function isCurrentlyStageableStaticObjectDataUse(
 	return (
 		dataUse?.kind === "prepared-render-surface-texture-use" &&
 		(dataUse.usage === "rgba-color" ||
+			dataUse.usage === "rgba-detail" ||
 			dataUse.usage === "index8" ||
 			dataUse.usage === "index16")
 	) || dataUse?.kind === "palette-texture-use";
@@ -61,14 +62,16 @@ export function isCurrentlyStageableStaticObjectDataUse(
 function isCurrentlyStageableStaticObjectDataUseLayout(
 	dataUses: readonly MaterialTextureDataUseIdentity[],
 ): boolean {
-	if (
-		dataUses.length === 1 &&
-		dataUses[0]?.kind === "prepared-render-surface-texture-use" &&
-		dataUses[0].usage === "rgba-color"
-	) {
-		return true;
-	}
-
+	const colorUseCount = dataUses.filter(
+		(use) =>
+			use.kind === "prepared-render-surface-texture-use" &&
+			use.usage === "rgba-color",
+	).length;
+	const detailUseCount = dataUses.filter(
+		(use) =>
+			use.kind === "prepared-render-surface-texture-use" &&
+			use.usage === "rgba-detail",
+	).length;
 	const indexUseCount = dataUses.filter(
 		(use) =>
 			use.kind === "prepared-render-surface-texture-use" &&
@@ -78,9 +81,18 @@ function isCurrentlyStageableStaticObjectDataUseLayout(
 		(use) => use.kind === "palette-texture-use",
 	).length;
 
+	if (
+		(dataUses.length === 1 || dataUses.length === 2) &&
+		colorUseCount === 1 &&
+		detailUseCount === dataUses.length - 1
+	) {
+		return true;
+	}
+
 	return (
-		dataUses.length === 2 &&
+		(dataUses.length === 2 || dataUses.length === 3) &&
 		indexUseCount === 1 &&
-		paletteUseCount === 1
+		paletteUseCount === 1 &&
+		(dataUses.length === 2 ? detailUseCount === 0 : detailUseCount === 1)
 	);
 }

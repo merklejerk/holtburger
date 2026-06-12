@@ -10,6 +10,7 @@ import type {
 	StaticBaker,
 	StaticDrawUnit,
 	StaticObjectGeometryStaticDrawUnit,
+	StaticObjectMaterialTableEntry,
 	StaticObjectInstanceIdentity,
 	StaticObjectPartSourceFacts,
 	StaticObjectSourceIdentity,
@@ -223,8 +224,16 @@ function createStaticObjectGeometryDrawUnit(options: {
 			textureUse.kind === "prepared-render-surface-texture-use" &&
 			textureUse.usage === "rgba-detail",
 	);
+	const materialEntry = createStaticObjectMaterialTableEntry({
+		detailTextureUse,
+		indexTextureUse,
+		options,
+		paletteTextureUse,
+		primaryTextureUse,
+	});
 
 	return {
+		alphaTest: materialEntry.alphaTest,
 		coordinateSpace: "landblock-render-local",
 		domain: options.work.job.domain as "outdoor-buildings" | "outdoor-detail",
 		drawUnitId: `${options.work.workId}:static-object-partition:${options.partition.sliceId.replaceAll("/", "-")}`,
@@ -233,60 +242,91 @@ function createStaticObjectGeometryDrawUnit(options: {
 		kind: "static-object-geometry",
 		landblockId: options.payload.landblock.landblockId,
 		materialBucketKey: options.partition.compatibilityKey,
-		materialColor: options.partition.materialColor,
-		materialEmissiveColor: options.partition.materialEmissiveColor,
+		materialColor: materialEntry.materialColor,
+		materialEmissiveColor: materialEntry.materialEmissiveColor,
+		materialEntries: [materialEntry],
 		materialFamily: resolveRenderableStaticObjectFamily(options.partition),
 		materialIds: options.partition.materialIds,
 		materialPass: resolveRenderableStaticObjectPass(options.partition),
+		detailTextureTiling: materialEntry.detailTextureTiling,
+		detailTextureUseId: materialEntry.detailTextureUseId,
+		positions: geometry.positions,
+		indexTextureUseId: materialEntry.indexTextureUseId,
+		indexedTextureFormat: materialEntry.indexedTextureFormat,
+		paletteFirstIndex: materialEntry.paletteFirstIndex,
+		paletteTextureUseId: materialEntry.paletteTextureUseId,
+		primaryTextureUseId: materialEntry.primaryTextureUseId,
+		primaryTextureWrapMode: materialEntry.primaryTextureWrapMode,
+		texCoords: geometry.texCoords,
+		materialSlotIndices: geometry.materialSlotIndices,
+		textureUseIds,
+		triangleCount: options.partition.triangleCount,
+		vertexCount: options.partition.triangleCount * 3,
+	};
+}
+
+function createStaticObjectMaterialTableEntry(parameters: {
+	readonly options: {
+		readonly work: ScheduledStaticWork;
+		readonly partition: StaticObjectCompatibilityPartition;
+	};
+	readonly primaryTextureUse: MaterialTextureDataUseIdentity | undefined;
+	readonly indexTextureUse: MaterialTextureDataUseIdentity | undefined;
+	readonly paletteTextureUse: MaterialTextureDataUseIdentity | undefined;
+	readonly detailTextureUse: MaterialTextureDataUseIdentity | undefined;
+}): StaticObjectMaterialTableEntry {
+	const { options } = parameters;
+	const indexedTextureFormat =
+		parameters.indexTextureUse?.kind === "prepared-render-surface-texture-use"
+			? parameters.indexTextureUse.usage === "index16"
+				? "index16"
+				: "p8"
+			: null;
+
+	return {
+		alphaTest: options.partition.alphaTest,
 		detailTextureTiling: options.partition.detailTextureTiling,
-		detailTextureUseId: detailTextureUse
+		detailTextureUseId: parameters.detailTextureUse
 			? createStaticObjectTextureUseId(
 					options.work,
-					detailTextureUse,
+					parameters.detailTextureUse,
 					resolveStaticObjectTextureUseWrapMode(
-						detailTextureUse,
+						parameters.detailTextureUse,
 						options.partition.textureWrapMode,
 					),
 				)
 			: null,
-		positions: geometry.positions,
-		alphaTest: options.partition.alphaTest,
-		indexTextureUseId: indexTextureUse
+		indexedTextureFormat,
+		indexTextureUseId: parameters.indexTextureUse
 			? createStaticObjectTextureUseId(
 					options.work,
-					indexTextureUse,
+					parameters.indexTextureUse,
 					options.partition.textureWrapMode,
 				)
 			: null,
-		indexedTextureFormat:
-			indexTextureUse?.kind === "prepared-render-surface-texture-use"
-				? indexTextureUse.usage === "index16"
-					? "index16"
-					: "p8"
-				: null,
+		materialColor: options.partition.materialColor,
+		materialEmissiveColor: options.partition.materialEmissiveColor,
+		materialIds: options.partition.materialIds,
 		paletteFirstIndex:
-			paletteTextureUse?.kind === "palette-texture-use"
-				? paletteTextureUse.firstIndex
+			parameters.paletteTextureUse?.kind === "palette-texture-use"
+				? parameters.paletteTextureUse.firstIndex
 				: 0,
-		paletteTextureUseId: paletteTextureUse
+		paletteTextureUseId: parameters.paletteTextureUse
 			? createStaticObjectTextureUseId(
 					options.work,
-					paletteTextureUse,
+					parameters.paletteTextureUse,
 					options.partition.textureWrapMode,
 				)
 			: null,
-		primaryTextureUseId: primaryTextureUse
+		primaryTextureUseId: parameters.primaryTextureUse
 			? createStaticObjectTextureUseId(
 					options.work,
-					primaryTextureUse,
+					parameters.primaryTextureUse,
 					options.partition.textureWrapMode,
 				)
 			: null,
 		primaryTextureWrapMode: options.partition.textureWrapMode,
-		texCoords: geometry.texCoords,
-		textureUseIds,
-		triangleCount: options.partition.triangleCount,
-		vertexCount: options.partition.triangleCount * 3,
+		slot: 0,
 	};
 }
 
@@ -383,11 +423,13 @@ function bakeStaticObjectPartitionGeometry(
 ): {
 	readonly positions: Float32Array;
 	readonly texCoords: Float32Array;
+	readonly materialSlotIndices: Float32Array;
 	readonly indices: Uint16Array | Uint32Array;
 } {
 	const vertexCount = triangles.length * 3;
 	const positions = new Float32Array(vertexCount * 3);
 	const texCoords = new Float32Array(vertexCount * 2);
+	const materialSlotIndices = new Float32Array(vertexCount);
 	const indices = createIndexArray(vertexCount);
 
 	for (const [triangleIndex, triangle] of triangles.entries()) {
@@ -433,6 +475,7 @@ function bakeStaticObjectPartitionGeometry(
 
 	return {
 		indices,
+		materialSlotIndices,
 		positions,
 		texCoords,
 	};

@@ -755,10 +755,74 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly coordinateSpace: "landblock-render-local";
 	readonly positions: Float32Array;
 	readonly texCoords: Float32Array;
+	readonly materialSlotIndices: Float32Array;
 	readonly indices: Uint16Array | Uint32Array;
 	readonly indexType: "uint16" | "uint32";
 	readonly vertexCount: number;
 	readonly triangleCount: number;
+	readonly materialEntries: readonly StaticObjectMaterialTableEntry[];
+	/**
+	 * Derived one-entry summary retained while the renderer/test surface cuts over
+	 * to materialEntries and materialSlotIndices.
+	 */
+	readonly alphaTest: number;
+	/**
+	 * Derived one-entry summary retained while the renderer/test surface cuts over
+	 * to materialEntries and materialSlotIndices.
+	 */
+	readonly materialColor: readonly [number, number, number, number];
+	/**
+	 * Derived one-entry summary retained while the renderer/test surface cuts over
+	 * to materialEntries and materialSlotIndices.
+	 */
+	readonly materialEmissiveColor: readonly [number, number, number];
+	/**
+	 * Derived one-entry summary retained while the renderer/test surface cuts over
+	 * to materialEntries and materialSlotIndices.
+	 */
+	readonly primaryTextureUseId: string | null;
+	/**
+	 * Derived one-entry summary retained while the renderer/test surface cuts over
+	 * to materialEntries and materialSlotIndices.
+	 */
+	readonly indexTextureUseId: string | null;
+	/**
+	 * Derived one-entry summary retained while the renderer/test surface cuts over
+	 * to materialEntries and materialSlotIndices.
+	 */
+	readonly indexedTextureFormat: "p8" | "index16" | null;
+	/**
+	 * Derived one-entry summary retained while the renderer/test surface cuts over
+	 * to materialEntries and materialSlotIndices.
+	 */
+	readonly paletteTextureUseId: string | null;
+	/**
+	 * Derived one-entry summary retained while the renderer/test surface cuts over
+	 * to materialEntries and materialSlotIndices.
+	 */
+	readonly paletteFirstIndex: number;
+	/**
+	 * Derived one-entry summary retained while the renderer/test surface cuts over
+	 * to materialEntries and materialSlotIndices.
+	 */
+	readonly detailTextureUseId: string | null;
+	/**
+	 * Derived one-entry summary retained while the renderer/test surface cuts over
+	 * to materialEntries and materialSlotIndices.
+	 */
+	readonly detailTextureTiling: number;
+	/**
+	 * Derived one-entry summary retained while the renderer/test surface cuts over
+	 * to materialEntries and materialSlotIndices.
+	 */
+	readonly primaryTextureWrapMode: "clamp" | "repeat";
+	readonly textureUseIds: readonly string[];
+	readonly materialIds: readonly number[];
+}
+
+export interface StaticObjectMaterialTableEntry {
+	readonly slot: number;
+	readonly materialIds: readonly number[];
 	readonly alphaTest: number;
 	readonly materialColor: readonly [number, number, number, number];
 	readonly materialEmissiveColor: readonly [number, number, number];
@@ -770,8 +834,6 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly detailTextureUseId: string | null;
 	readonly detailTextureTiling: number;
 	readonly primaryTextureWrapMode: "clamp" | "repeat";
-	readonly textureUseIds: readonly string[];
-	readonly materialIds: readonly number[];
 }
 
 export interface TerrainMaterialLayerPlan {

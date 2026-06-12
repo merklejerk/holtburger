@@ -59,7 +59,10 @@ describe("V2 WebGL2 static object indexed shader contract", () => {
 
 	it("reconstructs index16 pages from normalized RG8 low and high bytes", () => {
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
-			"uniform int uIndexedTextureFormat;",
+			"uniform int uMaterialIndexedTextureFormats[1];",
+		);
+		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
+			"if (uMaterialIndexedTextureFormats[materialSlot()] == 1)",
 		);
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
 			"floor(packed.r + 0.5) + floor(packed.g + 0.5) * 256.0",
@@ -76,7 +79,7 @@ describe("V2 WebGL2 static object detail shader contract", () => {
 			"vec4 sampleDetailOverlay(vec2 uv)",
 		);
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
-			"vec2 localUv = fract(uv * uDetailTiling);",
+			"vec2 localUv = fract(uv * uMaterialDetailTilings[materialSlot()]);",
 		);
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
 			"rgb = clamp(rgb * (detailColor.rgb + (1.0 - detailAlpha)), vec3(0.0), vec3(1.0));",

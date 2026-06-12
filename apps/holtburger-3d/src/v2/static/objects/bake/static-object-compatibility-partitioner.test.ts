@@ -116,9 +116,32 @@ describe("V2 static object compatibility partitioner", () => {
 				kind: "static-object-geometry",
 				materialFamily: "texture-rgba",
 				materialPass: "opaque",
+				materialSlotIndices: new Float32Array([0, 0, 0]),
 				primaryTextureUseId:
 					"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:wrap:clamp",
 			}),
+		]);
+		const drawUnit = result.drawUnits[0];
+		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
+			throw new Error("Expected static object geometry draw unit.");
+		}
+		expect(drawUnit.materialEntries).toEqual([
+			{
+				alphaTest: 0,
+				detailTextureTiling: 1,
+				detailTextureUseId: null,
+				indexedTextureFormat: null,
+				indexTextureUseId: null,
+				materialColor: [1, 1, 1, 1],
+				materialEmissiveColor: [0, 0, 0],
+				materialIds: [0x08000010],
+				paletteFirstIndex: 0,
+				paletteTextureUseId: null,
+				primaryTextureUseId:
+					"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:wrap:clamp",
+				primaryTextureWrapMode: "clamp",
+				slot: 0,
+			},
 		]);
 		expect(result.textureUses).toEqual([
 			expect.objectContaining({

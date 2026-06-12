@@ -430,6 +430,10 @@ export type StaticObjectTextureRefFacts =
 	| {
 			readonly role: "render-surface";
 			readonly renderSurface: RenderSurfaceIdentity;
+			readonly width: number;
+			readonly height: number;
+			readonly format: string;
+			readonly formatRaw: number;
 			readonly palette: PaletteIdentity | null;
 	  };
 

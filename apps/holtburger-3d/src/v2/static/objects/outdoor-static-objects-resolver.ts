@@ -555,9 +555,13 @@ export class OutdoorStaticObjectsResolver {
 			textureRefs.set(
 				createTextureRefCacheKey({ role: "render-surface", renderSurface }),
 				{
+					format: loadedRenderSurface.payload.format,
+					formatRaw: loadedRenderSurface.payload.formatRaw,
+					height: loadedRenderSurface.payload.height,
 					palette,
 					renderSurface,
 					role: "render-surface",
+					width: loadedRenderSurface.payload.width,
 				},
 			);
 			if (palette) {

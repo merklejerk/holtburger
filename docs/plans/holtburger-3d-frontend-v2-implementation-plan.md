@@ -1763,7 +1763,7 @@ Verification:
 
 ### Phase 11B: Static Material Pipeline Foundation
 
-Status: planned.
+Status: complete.
 
 Purpose: classify the full static material universe before deciding which families render first, so unsupported material cases are explicit rather than invisible scope cuts.
 
@@ -1798,11 +1798,162 @@ Dry-run conclusion:
 
 - 11B should classify the full material universe and emit typed unsupported/render-deferred reasons. It should not scope the classifier to the first rendered family, because doing so would hide material gaps until renderer work and recreate the old diagnostics-driven mess.
 
+Implemented:
+
+- Added V2-owned static object material planning under `apps/holtburger-3d/src/v2/static/objects/bake/static-object-material-planner.ts`.
+- Added classifier/planner output for static material families `flat-color`, `texture-rgba`, `indexed-paletted`, and `unsupported`, with a separate `renderCoverage` axis so classification coverage is not confused with renderer support.
+- Added static material pass/alpha/blend facts for opaque, alpha-test/clip, translucent, inverse-alpha, additive, and opacity-derived translucent cases using the v1 material behavior as the parity reference.
+- Added bake-local material texture-role planning for direct RGBA base-color textures via `PreparedTextureUseIdentity` and indexed/paletted materials via explicit `indexed-texels` plus `palette-lookup` roles instead of overloading prepared texture use for indexed data.
+- Added classified-but-render-deferred treatment for translucent/additive pass ordering and static object detail overlay roles. Detail overlay facts keep role, texture, tiling, and fade data without importing terrain detail vocabulary.
+- Enriched `StaticObjectTextureRefFacts` render-surface records with width, height, format string, and raw format code so the classifier can honestly identify indexed/paletted inputs and preserve source dimensions.
+- Added focused tests for solid color, non-indexed texture, indexed/paletted texture, translucent render-deferred texture, unsupported detail surface flags, classified static detail roles, and missing render-surface fallback diagnostics.
+
+Decisions and course corrections:
+
+- 11B stays pure classifier/planner logic. It does not emit draw units, request atlas placements, upload textures, or select the first rendered building family.
+- Static material roles deliberately model direct RGBA and indexed/palette data differently. `PreparedTextureUseIdentity` remains appropriate for prepared RGBA texture bytes; indexed texels and palette lookups are classified as distinct bake-local roles for later renderer/texture-manager work.
+- Render-surface dimensions and raw format had to move into the 11A source payload contract. Without that, indexed/paletted classification would have been guesswork based only on palette presence, which is not structurally correct.
+- Knip forced helper subtype visibility back to private until 11C/11D consume them across module boundaries. The public surface is intentionally small for now: the planner functions and top-level plan shapes.
+
+Spicy findings:
+
+- The 11A payload shape was close but not sufficient for material classification: it preserved typed render-surface identity and palette identity, but not render-surface format/dimensions. That would have hidden indexed/paletted support behind either a bogus texture family or a later resolver rewrite.
+- The current static detail role source facts are classified and preserved, but the source resolver still does not expand those region detail surface textures into resolved render-surface refs. That is acceptable for 11B because detail overlays are render-deferred, but 11D/11E will need detail-role texture resolution before rendering them.
+- Translucent/additive static materials now classify as real material facts but render-deferred. This is intentional: pass ordering and depth-write behavior belong in the renderer/partitioning phases, not a catch-all material branch.
+
+Failed to close:
+
+- No static object compatibility partitioner yet. 11C must consume these material plans and group surfaces/instances by family, pass/order, sampler/device policy, texture-role layout, palette/indexed state, placement assumptions, source ownership, and material-table capacity.
+- No outdoor building draw-unit emission or renderer path yet. 11D still owns the first rendered static object family.
+- Detail overlay textures are not fully resolved into render-surface/palette refs by the source resolver yet; the classifier preserves/defer these roles rather than pretending they are render-ready.
+- Texture sampler/wrap policy for static material variants is represented only at the family/pass/role level in 11B. Exact atlas page policy and renderer sampler binding still belong to 11C/11D.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- src/v2/static/objects/outdoor-static-objects-resolver.test.ts src/v2/static/objects/bake/static-object-material-planner.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+
+### Phase 11B2A: Generalized Texture/Data-Use Contract
+
+Status: planned.
+
+Purpose: correct the material texture-use identity before static object partitioning depends on a terrain/RGBA-shaped abstraction.
+
+Scope:
+
+- In scope: replace or generalize `PreparedTextureUseIdentity` into an isomorphic material texture/data-use identity model that can represent prepared render-surface RGBA roles, prepared render-surface indexed roles, and frontend-derived palette lookup roles without collapsing source semantics too early.
+- Out of scope: host support for indexed prepared routes, rendering indexed/paletted static materials, changing physical atlas packing strategy, adding user-facing controls, or implementing static object draw units.
+
+Deliverables:
+
+- A closed-union material texture/data-use identity model with at least:
+  - prepared render-surface roles such as `rgba-color`, `rgba-detail`, `rgba-mask`, `rgba-raw`, `index8`, and `index16`,
+  - frontend-derived palette roles keyed by palette identity and optional palette view/range metadata when needed.
+- Usage/sample-class policy where semantic usage implies the default logical data shape and sample class. Avoid keeping `outputFormat` as a broad material identity axis when it is only a physical preparation/upload detail.
+- Updated terrain texture-use construction, texture-manager collection, source-key/dedupe helpers, page policy, diagnostics, and tests to consume the generalized identity model without losing existing terrain behavior.
+- A terrain adapter that maps generalized render-surface roles back to terrain role-page slots (`color`, `detail`, `mask`) without teaching terrain code about palette/index roles.
+- Migration tests proving current terrain color/mask/detail behavior is unchanged.
+
+Acceptance criteria:
+
+- Terrain uses the generalized texture/data-use contract for its existing prepared render-surface roles.
+- Palette lookup data can be represented as a first-class material texture/data use without pretending it is a render surface or host prepared texture.
+- `usage` or role semantics define the logical data shape; physical output/upload format is either derived by policy or kept at a lower preparation/upload layer with a clear reason.
+- Existing terrain texture manager, packing, sampler, and renderer tests still pass with no visual behavior change.
+
+Design notes:
+
+- The current `PreparedTextureUseIdentity` is too narrow because it is keyed only by `renderSurfaceId` and carries `usage: color/detail/mask/raw` plus `outputFormat`. That made sense for terrain RGBA/mask/detail, but static indexed materials need index data plus palette data.
+- The likely shape is a closed union such as `prepared-render-surface-use` plus `palette-texture-use` or `palette-data-use`. Render-surface uses carry semantic usage like `rgba-color`, `rgba-detail`, `rgba-mask`, `rgba-raw`, `index8`, or `index16`; palette uses carry `palette-rgba` plus palette-view metadata if setup appearance/sub-palette support requires it.
+- The contract should distinguish logical material input identity from physical upload format. For example, `index8` may later upload as an 8-bit data texture or be expanded to RGBA as a temporary renderer policy, but that choice should not erase the indexed material identity.
+- Palette lookup should stay frontend-derived from resolved `palette/*` payloads for now. Do not route palettes through `prepared-texture/*`, because palettes are not render surfaces. This avoids replacing one abstraction lie with another.
+
+Dry-run findings:
+
+- Current contract touch points are concentrated but load-bearing: `PreparedTextureUseIdentity` is declared in `src/v2/static/contracts.ts`, constructed by terrain resolver/helpers, converted to host `prepared-texture/*` keys by `src/v2/assets/preparation/prepared-texture-source.ts`, collected and placed by `src/v2/textures/texture-manager.ts`, packed through `src/v2/textures/packing/protocol.ts` / `packer.ts`, and uploaded as `rgba8` pages by the WebGL2 renderer.
+- `TextureManager` currently filters batch snapshot uses to `kind === "prepared-texture-use"` and uses `renderSurfaceId + usage + outputFormat` for source dedupe. A generalized contract needs a replacement source-key function that handles render-surface uses and palette uses uniformly without depending on `renderSurfaceId`.
+- The existing texture placement pipeline is physically RGBA-page-only: `DirectRgbaTextureSource`, `TexturePackingJob.page.format: "rgba8"`, `TexturePlacement.format: "rgba8"`, and WebGL2 upload all assume RGBA8 pixels. 11B2 should not try to make renderer upload arbitrary index/palette texture formats yet; it should separate logical material data-use identity from physical page/upload realization.
+- Host support is asymmetric. Tauri already supports raw `render-surface/*` and `palette/*` payloads, and Rust `prepared_texture.rs` supports an `R8` output path, but the frontend prepared-texture DTO/schema currently only admits `dxt1 | dxt3 | dxt5 | rgba8`. Host/index route expansion belongs in 11B2B, not this contract migration.
+- Palette lookup data should probably be frontend-derived from resolved `palette/*` payloads instead of routed through `prepared-texture/*`, because palettes are not render surfaces. This argues for a source union such as render-surface data uses plus palette data uses, with a small preparation policy adapter that knows which host asset(s) each source kind needs.
+- `usage` should be renamed or normalized to avoid mixing old terrain names with data shape. A candidate axis is `role`/`usage` values like `rgba-color`, `rgba-detail`, `rgba-mask`, `rgba-raw`, `index8`, `index16`, and `palette-rgba`; physical host query fields like `out=rgba8`, `out=r8`, `cs=linear/data`, and `mips=none` should be derived by a policy resolver, not embedded as broad material identity unless semantically required.
+- Terrain role-page binding currently maps `usage` to `color | detail | mask`. The migration should keep a small terrain adapter that maps generalized uses back to terrain role-page slots, rather than teaching terrain code about palette/index roles.
+
+Dry-run conclusion:
+
+- Split the correction before 11C. 11B2A should introduce the generalized identity, migrate terrain without visual change, and update keying/sampling/page-policy helpers. 11B2B should add prepared render-surface index route support. 11B2C should cut the static material planner over to the generalized roles and frontend-derived palette sources. Actual WebGL data-texture upload for indexed/palette static rendering remains 11D/11E.
+- The cleanest implementation path is likely:
+  - add the new closed-union identity and source-key helpers beside the old type,
+  - migrate terrain constructors/tests and texture-manager source-key/page-policy call sites,
+  - replace `PreparedTextureUseIdentity` in bake/texture-manager contracts once tests prove parity,
+  - delete the old type or demote it to an implementation detail before moving to 11B2B.
+  This should be a decisive cutover inside V2; avoid carrying old and new texture-use identities past the end of 11B2A.
+
+### Phase 11B2B: Prepared Render-Surface Index Sources
+
+Status: planned.
+
+Purpose: extend prepared render-surface sourcing so indexed material inputs can enter the same texture/data-use pipeline as RGBA material inputs.
+
+Scope:
+
+- In scope: prepared render-surface support for `index8` and `index16` uses, TypeScript/Rust host contract alignment, host-key policy derivation, source validation, and focused tests.
+- Out of scope: palette preparation through host routes, static object renderer support, and arbitrary non-render-surface prepared asset routes.
+
+Deliverables:
+
+- Prepared render-surface usage policy where `index8` and `index16` imply the logical data shape, expected source format, color space/data policy, and physical host output format.
+- Frontend prepared-texture DTO/schema and helper updates so host-supported data formats such as `r8` are accurately represented.
+- Rust host route/prepare behavior for indexed render-surface sources if existing `prepared_texture.rs` support is insufficient for P8/index16 material surfaces. Preserve v1 semantics: indexed texels are data, not decoded RGBA color.
+- Texture-manager/page-policy tests proving index uses can be keyed, deduped, and either logically deferred or staged without colliding with RGBA roles.
+
+Acceptance criteria:
+
+- `index8` and `index16` render-surface uses can be represented and validated through the prepared render-surface route.
+- Usage semantics imply output/data policy. Call sites do not manually choose unrelated `outputFormat` values.
+- Existing terrain prepared render-surface behavior remains unchanged.
+
+Design notes:
+
+- v1 does not use `prepared-texture/*` for indexed materials; it reads raw `render-surface/*` bytes and raw `palette/*` data, then builds `indexed-texels` and `palette-lookup` data texture pages. Extending the prepared render-surface route for index data is a V2 simplification for isomorphic texture-use flow, not direct v1 plumbing.
+- Rust currently has normalized `R8` prepared texture support, but that path is for A8/landscape-alpha-like surfaces. Do not assume it already supports P8/index16 material index data without verifying and adding tests.
+- `index16` may need a two-byte logical data shape. If WebGL upload is deferred, still preserve this in identity/page policy so 11C can partition correctly.
+
+### Phase 11B2C: Static Material Planner Texture-Use Cutover
+
+Status: planned.
+
+Purpose: make static material classification emit the generalized texture/data-use roles so 11C partitions against the real material input layout.
+
+Scope:
+
+- In scope: static object material planner output shape, frontend-derived palette texture sources from resolved `palette/*` payloads, indexed/palette role migration, detail role placeholders, and tests.
+- Out of scope: static object draw-unit emission, renderer upload for indexed/palette pages, and host palette prepared routes.
+
+Deliverables:
+
+- Direct RGBA static materials emit prepared render-surface RGBA data uses.
+- Indexed/paletted static materials emit one prepared render-surface index data use plus one frontend-derived palette data use.
+- Palette lookup data remains frontend-derived from resolved `palette/*` payloads and optional palette view/range metadata, not a host `prepared-texture/*` route.
+- Static detail overlay roles emit generalized texture/data-use requirements or explicit render-deferred placeholders without terrain-specific vocabulary.
+- Tests proving static RGBA, indexed P8, indexed index16, palette fallback, missing palette, and detail-overlay cases all use the same generalized texture/data-use contract.
+
+Acceptance criteria:
+
+- Indexed/paletted static materials no longer carry bespoke planner-only `indexed-texels` / `palette-lookup` side-channel records solely because the old identity was render-surface/RGBA-only.
+- 11C can group by texture-role layout using the generalized texture/data-use contract.
+- Unsupported/render-deferred static material families still preserve source facts and typed fallback reasons.
+
+Failed-to-close target from 11B:
+
+- 11B correctly avoided collapsing indexed/paletted materials into prepared RGBA, but it did so by adding side-channel material texture roles. 11B2A-11B2C must make that distinction first-class in the shared texture-use contract so 11C does not partition against the wrong abstraction.
+
 ### Phase 11C: Static Object Compatibility Partitioning
 
 Status: planned.
 
-Purpose: build a static-object-owned compatibility partitioner after material classification, mirroring terrain's proven vocabulary without extracting terrain-shaped helpers too early.
+Purpose: build a static-object-owned compatibility partitioner after material classification and generalized texture/data-use identity, mirroring terrain's proven vocabulary without extracting terrain-shaped helpers too early.
 
 Deliverables:
 
@@ -1817,6 +1968,7 @@ Acceptance criteria:
 - Static object bake output uses bounded draw slices/draw units for incompatible material groups; it must not repeat the pre-10B4 terrain mistake of treating one source scope as one material table.
 - Static draw units do not carry unrelated spatial/source metadata internally.
 - Static object partitioning can represent unsupported-but-classified families without silently dropping source geometry.
+- Static object texture-role layout is expressed through the generalized 11B2 texture/data-use contract, not through one-off indexed/palette side channels.
 - The implementation records any concrete non-isomorphic facts that prevent later extraction into shared helpers.
 
 Dry-run findings:

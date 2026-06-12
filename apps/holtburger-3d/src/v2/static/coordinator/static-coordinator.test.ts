@@ -7,6 +7,7 @@ import type {
 	StaticCoordinatorCommitDelta,
 	StaticDemand,
 	StaticDrawUnit,
+	StaticMaterialCoverageReport,
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
 
@@ -385,6 +386,42 @@ describe("V2 static coordinator", () => {
 			},
 		});
 	});
+
+	it("publishes latest material coverage by current static domain", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+
+		const [work] = coordinator.requestStaticDemand(
+			createSingleTerrainDemand(0xda55ffff),
+		);
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
+		await flushPromises();
+		baker.complete(work?.workId ?? "", {
+			materialCoverage: [createMaterialCoverage("outdoor-terrain")],
+		});
+		await flushPromises();
+
+		expect(coordinator.createSnapshot().materialCoverage).toEqual([
+			createMaterialCoverage("outdoor-terrain"),
+		]);
+
+		coordinator.requestStaticDemand({
+			location: null,
+			lod: {
+				buildings: -1,
+				detail: -1,
+				terrain: -1,
+				topology: -1,
+			},
+		});
+
+		expect(coordinator.createSnapshot().materialCoverage).toEqual([]);
+	});
 });
 
 function createSingleTerrainDemand(landblockId: number): StaticDemand {
@@ -411,5 +448,25 @@ function createPlaceholderDrawUnit(drawUnitId: string): StaticDrawUnit {
 	return {
 		drawUnitId,
 		kind: "placeholder",
+	};
+}
+
+function createMaterialCoverage(
+	domain: StaticMaterialCoverageReport["domain"],
+): StaticMaterialCoverageReport {
+	return {
+		buckets: [],
+		deferredTriangleCount: 0,
+		detailRoleCount: 0,
+		domain,
+		fallbackReasonCount: 0,
+		fallbackReasonCounts: [],
+		landblockId: 0xda55ffff,
+		materialCount: 0,
+		partitionCount: 0,
+		renderedTriangleCount: 0,
+		triangleCount: 0,
+		unrenderedBuckets: [],
+		unsupportedTriangleCount: 0,
 	};
 }

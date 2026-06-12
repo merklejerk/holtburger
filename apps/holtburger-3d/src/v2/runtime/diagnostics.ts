@@ -4,6 +4,9 @@ import type {
 } from "../renderer/types";
 import type {
 	StaticDomain,
+	StaticMaterialCoverageFamily,
+	StaticMaterialCoveragePass,
+	StaticMaterialRenderOutcome,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialFallbackReason,
 } from "../static/contracts";
@@ -51,6 +54,7 @@ interface RendererDiagnosticsReport {
 export interface StaticCoordinatorDiagnosticsReport {
 	readonly kind: "static-coordinator";
 	readonly summary: StaticCoordinatorDiagnosticsSummary;
+	readonly materialCoverage: readonly StaticMaterialCoverageDiagnostics[];
 	readonly inFlightWork: readonly StaticCoordinatorWorkDiagnostics[];
 	readonly recentFailures: readonly StaticCoordinatorWorkDiagnostics[];
 }
@@ -79,6 +83,42 @@ interface StaticCoordinatorWorkDiagnostics {
 	readonly scopeKey: string;
 	readonly status: "requested" | "resolving" | "baking" | "failed";
 	readonly failureMessage: string | null;
+}
+
+interface StaticMaterialCoverageDiagnostics {
+	readonly domain: StaticDomain;
+	readonly landblockId: string | null;
+	readonly materialCount: number;
+	readonly partitionCount: number;
+	readonly triangleCount: number;
+	readonly renderedTriangles: number;
+	readonly deferredTriangles: number;
+	readonly unsupportedTriangles: number;
+	readonly detailRoleCount: number;
+	readonly fallbackReasonCount: number;
+	readonly buckets: readonly StaticMaterialCoverageBucketDiagnostics[];
+	readonly fallbackReasons: Record<string, number>;
+	readonly unrenderedBuckets: readonly StaticMaterialUnrenderedBucketDiagnostics[];
+}
+
+interface StaticMaterialCoverageBucketDiagnostics {
+	readonly family: StaticMaterialCoverageFamily;
+	readonly pass: StaticMaterialCoveragePass;
+	readonly outcome: StaticMaterialRenderOutcome;
+	readonly materials: number;
+	readonly partitions: number;
+	readonly triangles: number;
+	readonly textureRoles: number;
+}
+
+interface StaticMaterialUnrenderedBucketDiagnostics {
+	readonly family: StaticMaterialCoverageFamily;
+	readonly pass: StaticMaterialCoveragePass;
+	readonly outcome: Exclude<StaticMaterialRenderOutcome, "rendered">;
+	readonly materials: number;
+	readonly partitions: number;
+	readonly triangles: number;
+	readonly reasonCodes: readonly string[];
 }
 
 export interface TextureAtlasDiagnosticsReport {

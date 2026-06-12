@@ -7,6 +7,8 @@ import type {
 	StaticCoordinatorCommitDelta,
 	StaticCoordinatorSnapshot,
 	StaticDemand,
+	StaticDomain,
+	StaticMaterialCoverageReport,
 	DungeonStaticPayloadSummary,
 	LandblockTopologyPayloadSummary,
 	OutdoorStaticObjectsPayloadSummary,
@@ -73,6 +75,10 @@ export class StaticCoordinator {
 	#latestLandblockTopologyPayload: LandblockTopologyPayloadSummary | null =
 		null;
 	#latestDungeonPayload: DungeonStaticPayloadSummary | null = null;
+	readonly #latestMaterialCoverageByDomain = new Map<
+		StaticDomain,
+		StaticMaterialCoverageReport
+	>();
 	#latestResolverFailure: StaticResolverFailureSnapshot | null = null;
 
 	constructor(options: StaticCoordinatorOptions) {
@@ -102,6 +108,7 @@ export class StaticCoordinator {
 		this.#assertActive();
 		this.#revision += 1;
 		this.#activeWork.clear();
+		this.#latestMaterialCoverageByDomain.clear();
 		this.#evictResidentDrawUnits();
 
 		const workItems = planScheduledStaticWork(demand, this.#revision);
@@ -154,6 +161,9 @@ export class StaticCoordinator {
 			failed: this.#failed,
 			latestDungeonPayload: this.#latestDungeonPayload,
 			latestLandblockTopologyPayload: this.#latestLandblockTopologyPayload,
+			materialCoverage: Array.from(
+				this.#latestMaterialCoverageByDomain.values(),
+			).sort((left, right) => left.domain.localeCompare(right.domain)),
 			latestOutdoorStaticObjectsPayload:
 				this.#latestOutdoorStaticObjectsPayload,
 			latestResolverFailure: this.#latestResolverFailure,
@@ -315,6 +325,9 @@ export class StaticCoordinator {
 		}
 		for (const drawUnit of result.drawUnits) {
 			this.#residentDrawUnitIds.add(drawUnit.drawUnitId);
+		}
+		for (const coverage of result.materialCoverage) {
+			this.#latestMaterialCoverageByDomain.set(coverage.domain, coverage);
 		}
 		this.#committedDrawUnits = this.#residentDrawUnitIds.size;
 		this.#emitCommitDelta({

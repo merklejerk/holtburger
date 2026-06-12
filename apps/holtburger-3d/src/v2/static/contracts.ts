@@ -618,6 +618,7 @@ export interface StaticBakeBatchResult {
 	readonly works: readonly ScheduledStaticWork[];
 	readonly drawUnits: readonly StaticDrawUnit[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
+	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly atlasRegistryUpdates: readonly string[];
 	readonly staticSpatialRecords: readonly string[];
 	readonly staticVisibilityRecords: readonly string[];
@@ -625,6 +626,64 @@ export interface StaticBakeBatchResult {
 	readonly staticSourceMappings: readonly string[];
 	readonly staticAuthoredDynamicSeeds: readonly string[];
 	readonly buildRevision: number;
+}
+
+export type StaticMaterialCoverageFamily =
+	| "flat-color"
+	| "texture-rgba"
+	| "indexed-paletted"
+	| "unsupported";
+
+export type StaticMaterialCoveragePass =
+	| "opaque"
+	| "alpha-test"
+	| "transparent"
+	| "additive";
+
+export type StaticMaterialRenderOutcome =
+	| "rendered"
+	| "render-deferred"
+	| "unsupported";
+
+export interface StaticMaterialCoverageReport {
+	readonly domain: StaticDomain;
+	readonly landblockId: number | null;
+	readonly materialCount: number;
+	readonly partitionCount: number;
+	readonly triangleCount: number;
+	readonly renderedTriangleCount: number;
+	readonly deferredTriangleCount: number;
+	readonly unsupportedTriangleCount: number;
+	readonly detailRoleCount: number;
+	readonly fallbackReasonCount: number;
+	readonly buckets: readonly StaticMaterialCoverageBucket[];
+	readonly fallbackReasonCounts: readonly StaticMaterialFallbackReasonCount[];
+	readonly unrenderedBuckets: readonly StaticMaterialUnrenderedBucket[];
+}
+
+export interface StaticMaterialCoverageBucket {
+	readonly family: StaticMaterialCoverageFamily;
+	readonly pass: StaticMaterialCoveragePass;
+	readonly outcome: StaticMaterialRenderOutcome;
+	readonly materialCount: number;
+	readonly partitionCount: number;
+	readonly triangleCount: number;
+	readonly textureRoleCount: number;
+}
+
+interface StaticMaterialFallbackReasonCount {
+	readonly code: string;
+	readonly count: number;
+}
+
+export interface StaticMaterialUnrenderedBucket {
+	readonly family: StaticMaterialCoverageFamily;
+	readonly pass: StaticMaterialCoveragePass;
+	readonly outcome: Exclude<StaticMaterialRenderOutcome, "rendered">;
+	readonly materialCount: number;
+	readonly partitionCount: number;
+	readonly triangleCount: number;
+	readonly reasonCodes: readonly string[];
 }
 
 export type StaticDrawUnit =
@@ -783,6 +842,7 @@ export interface StaticCoordinatorSnapshot {
 	readonly latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null;
 	readonly latestLandblockTopologyPayload: LandblockTopologyPayloadSummary | null;
 	readonly latestDungeonPayload: DungeonStaticPayloadSummary | null;
+	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly latestResolverFailure: StaticResolverFailureSnapshot | null;
 }
 

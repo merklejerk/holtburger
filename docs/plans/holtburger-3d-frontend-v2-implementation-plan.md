@@ -2257,7 +2257,7 @@ Verification:
 
 ### Phase 11E0: Static Object Material Coverage Audit
 
-Status: planned.
+Status: complete.
 
 Purpose: measure the remaining static-object material surface before adding more renderer paths, so Phase 11E expands by evidence instead of guesswork.
 
@@ -2295,6 +2295,31 @@ Dry-run findings:
 Dry-run conclusion:
 
 - 11E is split into small material-family render slices. Start with audit, then implement one renderer/material expansion at a time. Stop before Phase 12 only when unsupported families are explicitly enumerated and no longer block the chosen breadth targets.
+
+Implementation notes:
+
+- Added `StaticMaterialCoverageReport` as a required `StaticBakeBatchResult` contract field. Static material coverage is now produced by the static-object bake path from the same compatibility partition plan that emits draw units, rather than being inferred later from renderer residency.
+- Static object coverage reports summarize material family, pass, current render outcome (`rendered`, `render-deferred`, `unsupported`), material count, partition count, triangle count, texture role count, fallback reason counts, and bounded ranked unrendered buckets.
+- The coordinator keeps the latest coverage report per current static domain and clears it on new demand revisions so default diagnostics do not retain stale historical material facts.
+- Runtime diagnostics now expose compact static material coverage under the static coordinator report. They do not list raw material IDs, texture pages, or source rows by default.
+- The audit outcome deliberately distinguishes planner `classified-render-candidate` from actual current renderer support. `texture-rgba` opaque/alpha-test partitions are counted as rendered; flat-color, indexed/paletted, translucent/additive, and detail-derived cases remain render-deferred or unsupported until their own phases land.
+
+Next-slice recommendation:
+
+- Keep Phase 11E1 first. Solid color and color modulation are still the lowest-risk expansion because they require no new texture upload format, no palette shader, and no translucent pass ordering. The new `materialCoverage.unrenderedBuckets` diagnostics should be checked against live landblocks before implementing 11E2 or 11E3; if indexed/paletted dominates real triangle counts by a wide margin, use the Phase 11E5 resteer to reconsider order after 11E1.
+
+Failed to close:
+
+- No new material family was rendered in this audit phase by design.
+- No live `da55` runtime report was sampled by this implementation pass, so the plan records the intended diagnostic interpretation but not a new real-world frequency table.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- static-object-compatibility-partitioner.test.ts static-coordinator.test.ts worker-client.test.ts terrain-geometry-baker.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 11E1: Solid Color And Material Color Modulation
 

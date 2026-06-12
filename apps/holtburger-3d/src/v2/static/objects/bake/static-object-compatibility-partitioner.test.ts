@@ -166,6 +166,86 @@ describe("V2 static object compatibility partitioner", () => {
 		expect(result.textureUses).toHaveLength(1);
 	});
 
+	it("reports compact material coverage by rendered, deferred, and unsupported buckets", () => {
+		const payload = createPayload({
+			materials: [
+				createTexturedMaterial(0x08000010),
+				createTexturedMaterial(0x08000011, { surfaceType: 0x4 }),
+				createSolidMaterial(0x08000012),
+				createIndexedMaterial(0x08000013),
+				createTexturedMaterial(0x08000014, { surfaceType: 0x10 }),
+				createSolidMaterial(0x08000015, { surfaceType: 0x20000 }),
+			],
+			textureRefs: [
+				...createRgbaTextureRefs(),
+				...createIndexedTextureRefs(),
+			],
+		});
+		const input = createBakeInput(payload);
+
+		const result = bakeStaticObjectCompatibility(input);
+
+		expect(result.materialCoverage).toEqual([
+			expect.objectContaining({
+				deferredTriangleCount: 3,
+				detailRoleCount: 0,
+				domain: "outdoor-buildings",
+				fallbackReasonCount: 2,
+				landblockId: 0xda55ffff,
+				materialCount: 6,
+				partitionCount: 6,
+				renderedTriangleCount: 2,
+				triangleCount: 6,
+				unsupportedTriangleCount: 1,
+			}),
+		]);
+		expect(result.materialCoverage[0]?.buckets).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					family: "texture-rgba",
+					materialCount: 1,
+					outcome: "rendered",
+					pass: "alpha-test",
+					triangleCount: 1,
+				}),
+				expect.objectContaining({
+					family: "flat-color",
+					outcome: "render-deferred",
+					pass: "opaque",
+					triangleCount: 1,
+				}),
+				expect.objectContaining({
+					family: "indexed-paletted",
+					outcome: "render-deferred",
+					pass: "opaque",
+					triangleCount: 1,
+				}),
+				expect.objectContaining({
+					family: "texture-rgba",
+					outcome: "render-deferred",
+					pass: "transparent",
+					triangleCount: 1,
+				}),
+				expect.objectContaining({
+					family: "unsupported",
+					outcome: "unsupported",
+					pass: "opaque",
+					triangleCount: 1,
+				}),
+			]),
+		);
+		expect(result.materialCoverage[0]?.fallbackReasonCounts).toEqual([
+			{ code: "translucent-render-deferred", count: 1 },
+			{ code: "unsupported-surface-flag", count: 1 },
+		]);
+		expect(result.materialCoverage[0]?.unrenderedBuckets[0]).toMatchObject({
+			family: "flat-color",
+			outcome: "render-deferred",
+			pass: "opaque",
+			triangleCount: 1,
+		});
+	});
+
 	it("bakes static object placement and source scale into render-local positions", () => {
 		const payload = createPayload({
 			materials: [createTexturedMaterial(0x08000010)],
@@ -528,6 +608,33 @@ function createTexturedMaterial(
 	};
 }
 
+function createIndexedMaterial(materialId: number): StaticObjectMaterialSourceFacts {
+	return {
+		diffuse: 1,
+		identity: createMaterialIdentity(materialId),
+		luminosity: 0,
+		source: {
+			kind: "texture",
+			palette: {
+				kind: "palette",
+				paletteId: 0x04000010,
+			},
+			renderSurfaceDefaultPalettes: [],
+			selectedRenderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000020,
+			},
+			texture: {
+				kind: "surface-texture",
+				surfaceTextureId: 0x05000020,
+			},
+		},
+		surfaceId: materialId,
+		surfaceType: 0,
+		translucency: 0,
+	};
+}
+
 function createRgbaTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 	return [
 		{
@@ -550,6 +657,41 @@ function createRgbaTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 			renderSurface: {
 				kind: "render-surface",
 				renderSurfaceId: 0x06000010,
+			},
+			role: "render-surface",
+			width: 32,
+		},
+	];
+}
+
+function createIndexedTextureRefs(): readonly StaticObjectTextureRefFacts[] {
+	return [
+		{
+			palette: {
+				kind: "palette",
+				paletteId: 0x04000010,
+			},
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000020,
+			},
+			role: "surface-texture",
+			texture: {
+				kind: "surface-texture",
+				surfaceTextureId: 0x05000020,
+			},
+		},
+		{
+			format: "p8",
+			formatRaw: 0x29,
+			height: 32,
+			palette: {
+				kind: "palette",
+				paletteId: 0x04000010,
+			},
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000020,
 			},
 			role: "render-surface",
 			width: 32,

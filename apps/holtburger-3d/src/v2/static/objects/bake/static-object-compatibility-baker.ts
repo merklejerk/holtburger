@@ -20,6 +20,10 @@ import {
 	type StaticObjectCompatibilityPartition,
 	type StaticObjectCompatibilityTriangle,
 } from "./static-object-compatibility-partitioner";
+import {
+	isCurrentlyStageableStaticObjectDataUse,
+	isRenderableStaticObjectPartition,
+} from "./static-object-renderability";
 
 export class StaticObjectCompatibilityBaker implements StaticBaker {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
@@ -52,6 +56,7 @@ export function bakeStaticObjectCompatibility(
 		),
 		domain: input.domain,
 		drawUnits,
+		materialCoverage: itemResults.map((result) => result.materialCoverage),
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: [],
 		staticBatchId: input.staticBatchId,
@@ -75,6 +80,7 @@ function bakeStaticObjectCompatibilityItem(
 	item: StaticBakeBatchItem,
 ): {
 	readonly drawUnits: readonly StaticDrawUnit[];
+	readonly materialCoverage: StaticBakeBatchResult["materialCoverage"][number];
 	readonly sourceMappings: readonly string[];
 	readonly spatialRecords: readonly string[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
@@ -103,6 +109,7 @@ function bakeStaticObjectCompatibilityItem(
 
 	return {
 		drawUnits,
+		materialCoverage: partitionPlan.materialCoverage,
 		sourceMappings: partitionPlan.partitions.flatMap((partition) => {
 			const drawUnitId = drawUnitIdBySliceId.get(partition.sliceId);
 			if (!drawUnitId) {
@@ -148,20 +155,12 @@ function createPartitionDrawUnit(
 function getRenderableOpaqueRgbaTextureUse(
 	partition: StaticObjectCompatibilityPartition,
 ): MaterialTextureDataUseIdentity | null {
-	if (
-		partition.family !== "texture-rgba" ||
-		(partition.pass !== "opaque" && partition.pass !== "alpha-test") ||
-		partition.renderCoverage !== "classified-render-candidate"
-	) {
+	if (!isRenderableStaticObjectPartition(partition)) {
 		return null;
 	}
 
 	const [textureUse] = partition.textureDataUses;
-	if (
-		!textureUse ||
-		partition.textureDataUses.length !== 1 ||
-		!isCurrentlyStageableStaticObjectDataUse(textureUse)
-	) {
+	if (!textureUse) {
 		return null;
 	}
 
@@ -424,15 +423,6 @@ function mergeTextureUses(
 
 	return [...merged.values()].sort((left, right) =>
 		left.textureUseId.localeCompare(right.textureUseId),
-	);
-}
-
-function isCurrentlyStageableStaticObjectDataUse(
-	dataUse: MaterialTextureDataUseIdentity,
-): boolean {
-	return (
-		dataUse.kind === "prepared-render-surface-texture-use" &&
-		dataUse.usage === "rgba-color"
 	);
 }
 

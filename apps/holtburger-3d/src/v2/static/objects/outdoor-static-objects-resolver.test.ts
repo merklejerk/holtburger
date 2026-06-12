@@ -64,11 +64,29 @@ describe("V2 outdoor static object resolver", () => {
 			),
 			createPreparedAsset(
 				createHostAssetKey("surface-texture", 0x05000010),
-				createSurfaceTexturePayload(),
+				createSurfaceTexturePayload({
+					renderSurfaceId: 0x06000010,
+					surfaceTextureId: 0x05000010,
+				}),
+			),
+			createPreparedAsset(
+				createHostAssetKey("surface-texture", 0x05000020),
+				createSurfaceTexturePayload({
+					renderSurfaceId: 0x06000020,
+					surfaceTextureId: 0x05000020,
+				}),
 			),
 			createPreparedAsset(
 				createHostAssetKey("render-surface", 0x06000010),
-				createRenderSurfacePayload(),
+				createRenderSurfacePayload({
+					renderSurfaceId: 0x06000010,
+				}),
+			),
+			createPreparedAsset(
+				createHostAssetKey("render-surface", 0x06000020),
+				createRenderSurfacePayload({
+					renderSurfaceId: 0x06000020,
+				}),
 			),
 			createPreparedAsset(createHostAssetKey("palette", 0x04000010), {
 				kind: "palette",
@@ -222,6 +240,32 @@ describe("V2 outdoor static object resolver", () => {
 					palette: {
 						kind: "palette",
 						paletteId: 0x04000010,
+					},
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000010,
+					},
+					role: "render-surface",
+				}),
+				expect.objectContaining({
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000020,
+					},
+					role: "surface-texture",
+					texture: {
+						kind: "surface-texture",
+						surfaceTextureId: 0x05000020,
+					},
+				}),
+				expect.objectContaining({
+					palette: {
+						kind: "palette",
+						paletteId: 0x04000010,
+					},
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000020,
 					},
 					role: "render-surface",
 				}),
@@ -383,6 +427,26 @@ describe("V2 outdoor static object resolver", () => {
 				createHostAssetKey("region-render-profile", 1),
 				createRegionRenderProfilePayload(),
 			),
+			createPreparedAsset(
+				createHostAssetKey("surface-texture", 0x05000020),
+				createSurfaceTexturePayload({
+					renderSurfaceId: 0x06000020,
+					surfaceTextureId: 0x05000020,
+				}),
+			),
+			createPreparedAsset(
+				createHostAssetKey("render-surface", 0x06000020),
+				createRenderSurfacePayload({
+					renderSurfaceId: 0x06000020,
+				}),
+			),
+			createPreparedAsset(createHostAssetKey("palette", 0x04000010), {
+				kind: "palette",
+				paletteId: 0x04000010,
+				provenance: createProvenance("palette"),
+				residencyKind: "unknown",
+				sourceAssetKind: "palette",
+			} satisfies PalettePayloadDto),
 		]);
 
 		const payload = await new OutdoorStaticObjectsResolver({
@@ -692,22 +756,36 @@ function createMaterialPayload(): MaterialRecipePayloadDto {
 	};
 }
 
-function createSurfaceTexturePayload(): SurfaceTexturePayloadDto {
+function createSurfaceTexturePayload(options: {
+	readonly surfaceTextureId: number;
+	readonly renderSurfaceId: number;
+} = {
+	renderSurfaceId: 0x06000010,
+	surfaceTextureId: 0x05000010,
+}): SurfaceTexturePayloadDto {
 	return {
-		dependencies: { renderSurfaceAssetIds: ["render-surface/06000010"] },
+		dependencies: {
+			renderSurfaceAssetIds: [
+				`render-surface/${options.renderSurfaceId.toString(16).padStart(8, "0")}`,
+			],
+		},
 		kind: "surface-texture",
 		provenance: createProvenance("surface-texture"),
-		renderSurfaceIds: [0x06000010],
+		renderSurfaceIds: [options.renderSurfaceId],
 		residencyKind: "unknown",
-		selectedRenderSurfaceId: 0x06000010,
+		selectedRenderSurfaceId: options.renderSurfaceId,
 		sourceAssetKind: "surface-texture",
-		surfaceTextureId: 0x05000010,
+		surfaceTextureId: options.surfaceTextureId,
 		textureType: 0,
 		unknown: 0,
 	};
 }
 
-function createRenderSurfacePayload(): RenderSurfacePayloadDto {
+function createRenderSurfacePayload(options: {
+	readonly renderSurfaceId: number;
+} = {
+	renderSurfaceId: 0x06000010,
+}): RenderSurfacePayloadDto {
 	return {
 		defaultPaletteId: 0x04000010,
 		dependencies: { paletteAssetIds: ["palette/04000010"] },
@@ -716,7 +794,7 @@ function createRenderSurfacePayload(): RenderSurfacePayloadDto {
 		height: 1,
 		kind: "render-surface",
 		provenance: createProvenance("render-surface"),
-		renderSurfaceId: 0x06000010,
+		renderSurfaceId: options.renderSurfaceId,
 		residencyKind: "unknown",
 		sourceAssetKind: "render-surface",
 		sourceByteLength: 1,

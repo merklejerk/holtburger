@@ -2677,18 +2677,18 @@ Acceptance criteria:
 
 Closed:
 
-- Static object detail overlays are now resolved from region detail role facts through the existing static-object texture refs. Resolved building detail roles emit `rgba-detail` prepared render-surface uses; unresolved roles remain explicit `missing-detail-render-surface` diagnostics.
+- Static object detail overlays are now resolved from region detail role facts through static-object texture refs. The outdoor static resolver explicitly resolves region-profile detail surface/render-surface dependencies into those refs, so resolved building detail roles emit `rgba-detail` prepared render-surface uses; unresolved roles remain explicit `missing-detail-render-surface` diagnostics.
 - Detail overlays compose as material texture roles on already-renderable outdoor-building materials instead of creating an `outdoor-detail` source-domain shortcut. Translucent/additive materials still defer detail composition until Phase 11E4 owns blend/depth ordering.
 - Compatibility keys and material bucket keys include the detail role texture identity and tiling, so surfaces with different detail bindings do not merge into one draw unit.
 - Static-object bake output now carries `detailTextureUseId` and `detailTextureTiling`. Detail texture uses stage through the normal texture manager/atlas path with repeat sampling independent from the base material's clamp/repeat intent.
-- Renderer texture role pages now include `static-detail`; the WebGL2 static-object shader binds a fourth static texture unit and applies v1-style `dst-color` detail composition by multiplying the material-modulated base RGB by the repeat-sampled detail RGB.
+- Renderer texture role pages now include `static-detail`; the WebGL2 static-object shader binds a fourth static texture unit and applies the v1 static detail formula `base * (detail.rgb + (1 - detail.a))`, so detail alpha controls how much the overlay modulates the material-modulated base RGB.
 - Material coverage drops `detail-overlay-render-deferred` only when the detail role is resolved and composed. Missing detail render-surface facts remain visible as fallback diagnostics.
 
 Spicy bits:
 
 - Detail wrap is intentionally independent from base material wrap. V1 static detail refs are repeat-wrapped, so the V2 bake path forces `rgba-detail` static object uses to `wrap:repeat` even when the base material variant is clamp.
 - The first slice only composes the `building` role for `outdoor-buildings`. `object` detail remains disabled/deferred, matching the v1 role policy, and `outdoor-detail` / `env-cell-static` breadth remains Phase 12 territory.
-- The shader currently implements building detail's constant `dst-color` composition. It carries tiling now, but does not invent distance fade behavior for static building detail roles.
+- The shader currently implements building detail's constant v1 static detail composition. It carries tiling now, but does not invent distance fade behavior for static building detail roles.
 
 Failed to close:
 

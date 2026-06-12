@@ -181,7 +181,9 @@ void main() {
 
 	vec3 rgb = min(baseColor.rgb * uMaterialColor.rgb + uMaterialEmissiveColor, vec3(1.0));
 	if (uDetailEnabled == 1) {
-		rgb *= sampleDetailOverlay(vTexCoord).rgb;
+		vec4 detailColor = sampleDetailOverlay(vTexCoord);
+		float detailAlpha = clamp(detailColor.a, 0.0, 1.0);
+		rgb = clamp(rgb * (detailColor.rgb + (1.0 - detailAlpha)), vec3(0.0), vec3(1.0));
 	}
 
 	fragColor = vec4(

@@ -2144,6 +2144,7 @@ Implementation notes:
 - Runtime draw-unit translation now applies focused-landblock offsets to both terrain and static object geometry draw units.
 - Immediate live-data correction: source resolution now excludes outdoor static objects whose top-level source asset could not be resolved while preserving the missing source identity in `missingRefs`. Missing external source assets should not poison an otherwise valid static object bake batch.
 - Immediate live-data correction: generalized V2 host payload preparation beyond the terrain slice routes. `gfx-obj`, `setup-model`, `setup-appearance`, and `material/<did>` now parse through the shared V2 static asset preparation whitelist, so outdoor building source assets can actually reach the resolver.
+- Immediate live-data correction: split static object material-slot identity into geometry slot ids and material surface ids. Prepared polygon geometry reports the geometry surface/slot index, while setup appearance slots map that slot to a concrete material/surface DID. The resolver now expands slots across geometry material variants before baking, and the compatibility partitioner resolves triangles by geometry slot id instead of comparing geometry slot ids to material surface DIDs.
 
 Spicy findings:
 
@@ -2152,6 +2153,7 @@ Spicy findings:
 - The texture manager role-page helper is still terrain-named internally because terrain layered materials need color/detail/mask page slot limits. The renderer-facing binding name is now generic; deeper role-page generalization should wait until non-terrain multi-role object families arrive.
 - Manual V2 diagnostics showed `outdoor-buildings` payloads with objects but zero source assets, then bake failures from missing source geometry. The fix belongs at the resolver payload boundary, not the renderer: only source-resolved objects should reach compatibility partitioning.
 - Follow-up manual diagnostics then showed `objects 0 sources 0 ... missing 17`; the filter was working, but every source asset was still missing because V2 asset preparation rejected static object source routes as unsupported terrain-slice outsiders. The route whitelist was the actual second blocker.
+- Follow-up manual diagnostics then showed healthy source/material counts but bake failures like `has no resolved material slot`. The payload was valid; V2 had flattened two different concepts named `surfaceId`. This phase corrected the contract so setup appearance slot `slotIndex` owns geometry lookup and material `surfaceId` remains material provenance.
 
 Failed to close:
 

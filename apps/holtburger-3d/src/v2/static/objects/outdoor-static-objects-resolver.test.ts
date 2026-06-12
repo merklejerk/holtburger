@@ -128,6 +128,10 @@ describe("V2 outdoor static object resolver", () => {
 			},
 		]);
 		expect(payload.scope.materialSlots[0]).toMatchObject({
+			identity: {
+				geometrySurfaceId: 0,
+				materialSurfaceId: 0x08000010,
+			},
 			material: {
 				kind: "static-material-source",
 				materialId: 0x08000011,
@@ -171,6 +175,91 @@ describe("V2 outdoor static object resolver", () => {
 			]),
 		);
 		expect(payload.scope.missingRefs).toEqual([]);
+	});
+
+	it("expands setup appearance material slots across geometry material variants", async () => {
+		const gfxObj = createGfxObjPayload();
+		const assetService = new FixtureAssetService([
+			createPreparedAsset(
+				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createLandblockOutdoorPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("region-render-profile", 1),
+				createRegionRenderProfilePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("setup-model", 0x02000010),
+				createSetupModelPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("setup-appearance", 0x02000010),
+				createSetupAppearancePayload(),
+			),
+			createPreparedAsset(createHostAssetKey("gfx-obj", 0x01000020), {
+				...gfxObj,
+				renderGeometry: {
+					...gfxObj.renderGeometry,
+					triangles: [
+						{
+							firstVertex: 0,
+							materialVariantSignature: "sampler=repeat",
+							polygonId: 7,
+							surfaceId: 0,
+						},
+					],
+				},
+			}),
+			createPreparedAsset(
+				createHostAssetKey("material", 0x08000011),
+				createMaterialPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("surface-texture", 0x05000010),
+				createSurfaceTexturePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("render-surface", 0x06000010),
+				createRenderSurfacePayload(),
+			),
+			createPreparedAsset(createHostAssetKey("palette", 0x04000010), {
+				kind: "palette",
+				paletteId: 0x04000010,
+				provenance: createProvenance("palette"),
+				residencyKind: "unknown",
+				sourceAssetKind: "palette",
+			} satisfies PalettePayloadDto),
+		]);
+
+		const payload = await new OutdoorStaticObjectsResolver({
+			assetService,
+		}).resolve(createBuildingRequest());
+
+		expect(payload.scope.kind).toBe("outdoor-static-objects");
+		if (payload.scope.kind !== "outdoor-static-objects") {
+			throw new Error("expected outdoor static object payload");
+		}
+
+		expect(payload.scope.materialSlots).toEqual([
+			expect.objectContaining({
+				identity: expect.objectContaining({
+					geometrySurfaceId: 0,
+					materialSurfaceId: 0x08000010,
+					slotIndex: 0,
+				}),
+				material: {
+					kind: "static-material-source",
+					materialId: 0x08000011,
+				},
+				materialVariantSignature: "sampler=repeat",
+			}),
+		]);
+		expect(
+			payload.scope.sourceAssets[0]?.parts[0]?.triangles[0],
+		).toMatchObject({
+			geometrySurfaceId: 0,
+			materialVariantSignature: "sampler=repeat",
+		});
 	});
 
 	it("keeps host routes confined to debug provenance", async () => {

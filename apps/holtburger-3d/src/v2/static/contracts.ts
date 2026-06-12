@@ -142,7 +142,8 @@ export interface StaticMaterialSlotIdentity {
 	readonly kind: "static-material-slot";
 	readonly part: StaticObjectPartIdentity;
 	readonly slotIndex: number;
-	readonly surfaceId: number;
+	readonly geometrySurfaceId: number;
+	readonly materialSurfaceId: number;
 }
 
 export interface TerrainMaterialIdentity {
@@ -410,14 +411,15 @@ export interface StaticObjectPartSourceFacts {
 
 interface StaticObjectPartTriangleFacts {
 	readonly polygonId: number;
-	readonly surfaceId: number | null;
+	readonly geometrySurfaceId: number | null;
 	readonly materialVariantSignature: string | null;
 	readonly firstVertex: number;
 }
 
 export interface StaticObjectPartMaterialSlotFacts {
 	readonly slotIndex: number;
-	readonly surfaceId: number;
+	readonly geometrySurfaceId: number;
+	readonly materialSurfaceId: number;
 	readonly material: StaticMaterialSourceIdentity;
 	readonly materialVariantSignature: string | null;
 }

@@ -136,12 +136,11 @@ function createPartitionDrawUnit(
 	payload: OutdoorStaticObjectsScopePayload,
 	partition: StaticObjectCompatibilityPartition,
 ): StaticDrawUnit {
-	const textureUse = getRenderableOpaqueRgbaTextureUse(partition);
-	if (textureUse) {
+	if (isRenderableStaticObjectPartition(partition)) {
 		return createStaticObjectGeometryDrawUnit({
 			partition,
 			payload,
-			textureUse,
+			textureUse: getRenderableTextureUse(partition),
 			work,
 		});
 	}
@@ -152,16 +151,18 @@ function createPartitionDrawUnit(
 	};
 }
 
-function getRenderableOpaqueRgbaTextureUse(
+function getRenderableTextureUse(
 	partition: StaticObjectCompatibilityPartition,
 ): MaterialTextureDataUseIdentity | null {
-	if (!isRenderableStaticObjectPartition(partition)) {
+	if (partition.family === "flat-color") {
 		return null;
 	}
 
 	const [textureUse] = partition.textureDataUses;
 	if (!textureUse) {
-		return null;
+		throw new Error(
+			`Renderable static object texture partition ${partition.sliceId} has no texture data use.`,
+		);
 	}
 
 	return textureUse;
@@ -171,18 +172,20 @@ function createStaticObjectGeometryDrawUnit(options: {
 	readonly work: ScheduledStaticWork;
 	readonly payload: OutdoorStaticObjectsScopePayload;
 	readonly partition: StaticObjectCompatibilityPartition;
-	readonly textureUse: MaterialTextureDataUseIdentity;
+	readonly textureUse: MaterialTextureDataUseIdentity | null;
 }): StaticObjectGeometryStaticDrawUnit {
 	const sourceIndex = new StaticObjectBakeSourceIndex(options.payload);
 	const geometry = bakeStaticObjectPartitionGeometry(
 		options.partition.triangles,
 		sourceIndex,
 	);
-	const textureUseId = createStaticObjectTextureUseId(
-		options.work,
-		options.textureUse,
-		options.partition.textureWrapMode,
-	);
+	const textureUseId = options.textureUse
+		? createStaticObjectTextureUseId(
+				options.work,
+				options.textureUse,
+				options.partition.textureWrapMode,
+			)
+		: null;
 
 	return {
 		coordinateSpace: "landblock-render-local",
@@ -193,19 +196,44 @@ function createStaticObjectGeometryDrawUnit(options: {
 		kind: "static-object-geometry",
 		landblockId: options.payload.landblock.landblockId,
 		materialBucketKey: options.partition.compatibilityKey,
-		materialFamily: "texture-rgba",
+		materialColor: options.partition.materialColor,
+		materialEmissiveColor: options.partition.materialEmissiveColor,
+		materialFamily: resolveRenderableStaticObjectFamily(options.partition),
 		materialIds: options.partition.materialIds,
-		materialPass:
-			options.partition.pass === "alpha-test" ? "alpha-test" : "opaque",
+		materialPass: resolveRenderableStaticObjectPass(options.partition),
 		positions: geometry.positions,
 		alphaTest: options.partition.alphaTest,
 		primaryTextureUseId: textureUseId,
 		primaryTextureWrapMode: options.partition.textureWrapMode,
 		texCoords: geometry.texCoords,
-		textureUseIds: [textureUseId],
+		textureUseIds: textureUseId ? [textureUseId] : [],
 		triangleCount: options.partition.triangleCount,
 		vertexCount: options.partition.triangleCount * 3,
 	};
+}
+
+function resolveRenderableStaticObjectFamily(
+	partition: StaticObjectCompatibilityPartition,
+): StaticObjectGeometryStaticDrawUnit["materialFamily"] {
+	if (partition.family === "flat-color" || partition.family === "texture-rgba") {
+		return partition.family;
+	}
+
+	throw new Error(
+		`Static object partition ${partition.sliceId} has unrenderable family ${partition.family}.`,
+	);
+}
+
+function resolveRenderableStaticObjectPass(
+	partition: StaticObjectCompatibilityPartition,
+): StaticObjectGeometryStaticDrawUnit["materialPass"] {
+	if (partition.pass === "opaque" || partition.pass === "alpha-test") {
+		return partition.pass;
+	}
+
+	throw new Error(
+		`Static object partition ${partition.sliceId} has unrenderable pass ${partition.pass}.`,
+	);
 }
 
 class StaticObjectBakeSourceIndex {

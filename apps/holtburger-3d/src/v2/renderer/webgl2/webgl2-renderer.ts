@@ -82,7 +82,9 @@ uniform sampler2D uTexture;
 uniform vec4 uTextureRect;
 uniform vec2 uTextureSize;
 uniform float uAlphaTest;
-uniform int uUseTexture;
+uniform vec4 uMaterialColor;
+uniform vec3 uMaterialEmissiveColor;
+uniform int uMaterialMode;
 uniform int uWrapMode;
 
 in vec2 vTexCoord;
@@ -90,14 +92,22 @@ in vec2 vTexCoord;
 out vec4 fragColor;
 
 void main() {
-	if (uUseTexture == 0) {
+	if (uMaterialMode == 2) {
 		fragColor = vec4(1.0, 0.0, 1.0, 1.0);
 		return;
 	}
 
-	vec2 localUv = uWrapMode == 1 ? fract(vTexCoord) : clamp(vTexCoord, vec2(0.0), vec2(1.0));
-	vec2 atlasUv = (uTextureRect.xy + localUv * uTextureRect.zw) / uTextureSize;
-	fragColor = texture(uTexture, atlasUv);
+	vec4 baseColor = vec4(1.0);
+	if (uMaterialMode == 1) {
+		vec2 localUv = uWrapMode == 1 ? fract(vTexCoord) : clamp(vTexCoord, vec2(0.0), vec2(1.0));
+		vec2 atlasUv = (uTextureRect.xy + localUv * uTextureRect.zw) / uTextureSize;
+		baseColor = texture(uTexture, atlasUv);
+	}
+
+	fragColor = vec4(
+		min(baseColor.rgb * uMaterialColor.rgb + uMaterialEmissiveColor, vec3(1.0)),
+		baseColor.a * uMaterialColor.a
+	);
 	if (fragColor.a < uAlphaTest) {
 		discard;
 	}
@@ -632,10 +642,13 @@ class Webgl2Renderer implements Renderer {
 		for (const resource of this.#staticObjectResources.values()) {
 			const bindings =
 				this.#textureBindings.get(resource.drawUnitId) ?? new Map();
-			const binding = bindings.get(resource.primaryTextureUseId);
+			const binding = resource.primaryTextureUseId
+				? bindings.get(resource.primaryTextureUseId)
+				: null;
 			const texture = binding
 				? (this.#textures.get(binding.textureRefId) ?? null)
 				: null;
+			const materialMode = resolveStaticObjectMaterialMode(resource, texture);
 
 			gl.activeTexture(gl.TEXTURE0 + STATIC_OBJECT_TEXTURE_UNIT);
 			gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -655,10 +668,15 @@ class Webgl2Renderer implements Renderer {
 				binding?.textureWidth ?? 1,
 				binding?.textureHeight ?? 1,
 			);
-			gl.uniform1i(
-				this.#staticObjectProgram.uniforms.uUseTexture,
-				texture ? 1 : 0,
+			gl.uniform4fv(
+				this.#staticObjectProgram.uniforms.uMaterialColor,
+				resource.materialColor,
 			);
+			gl.uniform3fv(
+				this.#staticObjectProgram.uniforms.uMaterialEmissiveColor,
+				resource.materialEmissiveColor,
+			);
+			gl.uniform1i(this.#staticObjectProgram.uniforms.uMaterialMode, materialMode);
 			gl.uniform1i(
 				this.#staticObjectProgram.uniforms.uWrapMode,
 				resource.primaryTextureWrapMode === "repeat" ? 1 : 0,
@@ -782,11 +800,13 @@ interface StaticObjectGeometryProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly uAlphaTest: WebGLUniformLocation;
+		readonly uMaterialColor: WebGLUniformLocation;
+		readonly uMaterialEmissiveColor: WebGLUniformLocation;
+		readonly uMaterialMode: WebGLUniformLocation;
 		readonly uModelViewProjection: WebGLUniformLocation;
 		readonly uTexture: WebGLUniformLocation;
 		readonly uTextureRect: WebGLUniformLocation;
 		readonly uTextureSize: WebGLUniformLocation;
-		readonly uUseTexture: WebGLUniformLocation;
 		readonly uWrapMode: WebGLUniformLocation;
 	};
 	dispose(): void;
@@ -815,7 +835,10 @@ interface StaticObjectGeometryResource {
 	readonly indexBuffer: WebGLBuffer;
 	readonly drawUnitId: string;
 	readonly alphaTest: number;
-	readonly primaryTextureUseId: string;
+	readonly materialColor: StaticObjectGeometryStaticDrawUnit["materialColor"];
+	readonly materialEmissiveColor: StaticObjectGeometryStaticDrawUnit["materialEmissiveColor"];
+	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
+	readonly primaryTextureUseId: string | null;
 	readonly primaryTextureWrapMode: StaticObjectGeometryStaticDrawUnit["primaryTextureWrapMode"];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
@@ -981,11 +1004,17 @@ function createStaticObjectGeometryProgram(
 		program,
 		uniforms: {
 			uAlphaTest: requireUniform(gl, program, "uAlphaTest"),
+			uMaterialColor: requireUniform(gl, program, "uMaterialColor"),
+			uMaterialEmissiveColor: requireUniform(
+				gl,
+				program,
+				"uMaterialEmissiveColor",
+			),
+			uMaterialMode: requireUniform(gl, program, "uMaterialMode"),
 			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
 			uTexture: requireUniform(gl, program, "uTexture"),
 			uTextureRect: requireUniform(gl, program, "uTextureRect"),
 			uTextureSize: requireUniform(gl, program, "uTextureSize"),
-			uUseTexture: requireUniform(gl, program, "uUseTexture"),
 			uWrapMode: requireUniform(gl, program, "uWrapMode"),
 		},
 		dispose() {
@@ -1134,6 +1163,9 @@ function createStaticObjectGeometryResource(
 		indexCount: drawUnit.indices.length,
 		indexType:
 			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
+		materialColor: drawUnit.materialColor,
+		materialEmissiveColor: drawUnit.materialEmissiveColor,
+		materialFamily: drawUnit.materialFamily,
 		positionBuffer,
 		primaryTextureUseId: drawUnit.primaryTextureUseId,
 		primaryTextureWrapMode: drawUnit.primaryTextureWrapMode,
@@ -1147,6 +1179,17 @@ function createStaticObjectGeometryResource(
 			gl.deleteVertexArray(vertexArray);
 		},
 	};
+}
+
+function resolveStaticObjectMaterialMode(
+	resource: StaticObjectGeometryResource,
+	texture: WebGLTexture | null,
+): number {
+	if (resource.materialFamily === "flat-color") {
+		return 0;
+	}
+
+	return texture ? 1 : 2;
 }
 
 function translateTerrainPositions(

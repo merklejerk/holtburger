@@ -66,6 +66,7 @@ export interface StaticObjectMaterialPlan {
 	readonly alphaPolicy: StaticObjectMaterialAlphaPolicy;
 	readonly blend: StaticObjectMaterialBlendFacts;
 	readonly color: readonly [number, number, number, number];
+	readonly emissiveColor: readonly [number, number, number];
 	readonly textureRoles: readonly StaticObjectMaterialTextureUseRole[];
 	readonly materialBucketKey: string;
 	readonly fallbackReasons: readonly StaticObjectMaterialFallbackReason[];
@@ -184,6 +185,7 @@ export function classifyStaticObjectMaterial(
 		alphaPolicy: behavior.alphaPolicy,
 		blend: behavior.blend,
 		color: resolveMaterialColor(context.material, behavior),
+		emissiveColor: resolveMaterialEmissiveColor(behavior),
 		material: context.material.identity,
 		pass: resolveMaterialPass(behavior),
 	};
@@ -342,6 +344,7 @@ function createTexturePlan(
 		| "alphaPolicy"
 		| "blend"
 		| "color"
+		| "emissiveColor"
 		| "family"
 		| "fallbackReasons"
 		| "material"
@@ -364,7 +367,7 @@ function createTexturePlan(
 function createUnsupportedPlan(
 	basePlan: Pick<
 		StaticObjectMaterialPlan,
-		"alphaPolicy" | "blend" | "color" | "material" | "pass"
+		"alphaPolicy" | "blend" | "color" | "emissiveColor" | "material" | "pass"
 	>,
 	fallbackReasons: readonly StaticObjectMaterialFallbackReason[],
 ): StaticObjectMaterialPlan {
@@ -593,6 +596,16 @@ function resolveMaterialColor(
 		color[1] * behavior.diffuseScale,
 		color[2] * behavior.diffuseScale,
 		color[3] * behavior.alphaPolicy.opacity,
+	];
+}
+
+function resolveMaterialEmissiveColor(
+	behavior: ReturnType<typeof deriveMaterialBehavior>,
+): readonly [number, number, number] {
+	return [
+		behavior.emissiveScale,
+		behavior.emissiveScale,
+		behavior.emissiveScale,
 	];
 }
 

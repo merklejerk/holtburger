@@ -147,6 +147,63 @@ describe("V2 static object compatibility partitioner", () => {
 		]);
 	});
 
+	it("bakes opaque flat-color partitions into rendered draw units without texture uses", () => {
+		const payload = createPayload({
+			materials: [
+				createSolidMaterial(0x08000010, {
+					argb: 0xff336699,
+					diffuse: 0.5,
+					luminosity: 0.25,
+					surfaceType: 0x20 | 0x40,
+				}),
+			],
+		});
+		const input = createBakeInput(payload);
+
+		const result = bakeStaticObjectCompatibility(input);
+
+		expect(result.drawUnits).toEqual([
+			expect.objectContaining({
+				kind: "static-object-geometry",
+				materialColor: [
+					(0x33 / 255) * 0.5,
+					(0x66 / 255) * 0.5,
+					(0x99 / 255) * 0.5,
+					1,
+				],
+				materialEmissiveColor: [0.25, 0.25, 0.25],
+				materialFamily: "flat-color",
+				primaryTextureUseId: null,
+				textureUseIds: [],
+			}),
+		]);
+		expect(result.textureUses).toEqual([]);
+	});
+
+	it("splits static object partitions by material color constants", () => {
+		const payload = createPayload({
+			materials: [
+				createTexturedMaterial(0x08000010, {
+					diffuse: 0.5,
+					surfaceType: 0x20,
+				}),
+				createTexturedMaterial(0x08000011, {
+					diffuse: 0.75,
+					surfaceType: 0x20,
+				}),
+			],
+			textureRefs: createRgbaTextureRefs(),
+		});
+
+		const plan = partitionStaticObjectCompatibility(payload);
+
+		expect(plan.partitions).toHaveLength(2);
+		expect(plan.partitions.map((partition) => partition.materialColor)).toEqual([
+			[0.5, 0.5, 0.5, 1],
+			[0.75, 0.75, 0.75, 1],
+		]);
+	});
+
 	it("bakes alpha-test texture-rgba partitions into rendered draw units", () => {
 		const payload = createPayload({
 			materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x4 })],
@@ -187,14 +244,14 @@ describe("V2 static object compatibility partitioner", () => {
 
 		expect(result.materialCoverage).toEqual([
 			expect.objectContaining({
-				deferredTriangleCount: 3,
+				deferredTriangleCount: 2,
 				detailRoleCount: 0,
 				domain: "outdoor-buildings",
 				fallbackReasonCount: 2,
 				landblockId: 0xda55ffff,
 				materialCount: 6,
 				partitionCount: 6,
-				renderedTriangleCount: 2,
+				renderedTriangleCount: 3,
 				triangleCount: 6,
 				unsupportedTriangleCount: 1,
 			}),
@@ -210,7 +267,7 @@ describe("V2 static object compatibility partitioner", () => {
 				}),
 				expect.objectContaining({
 					family: "flat-color",
-					outcome: "render-deferred",
+					outcome: "rendered",
 					pass: "opaque",
 					triangleCount: 1,
 				}),
@@ -239,7 +296,7 @@ describe("V2 static object compatibility partitioner", () => {
 			{ code: "unsupported-surface-flag", count: 1 },
 		]);
 		expect(result.materialCoverage[0]?.unrenderedBuckets[0]).toMatchObject({
-			family: "flat-color",
+			family: "indexed-paletted",
 			outcome: "render-deferred",
 			pass: "opaque",
 			triangleCount: 1,
@@ -565,14 +622,19 @@ function createBakeInput(
 
 function createSolidMaterial(
 	materialId: number,
-	options: { readonly surfaceType?: number } = {},
+	options: {
+		readonly argb?: number;
+		readonly diffuse?: number;
+		readonly luminosity?: number;
+		readonly surfaceType?: number;
+	} = {},
 ): StaticObjectMaterialSourceFacts {
 	return {
-		diffuse: 1,
+		diffuse: options.diffuse ?? 1,
 		identity: createMaterialIdentity(materialId),
-		luminosity: 0,
+		luminosity: options.luminosity ?? 0,
 		source: {
-			argb: 0xffffffff,
+			argb: options.argb ?? 0xffffffff,
 			kind: "solid-color",
 		},
 		surfaceId: materialId,
@@ -583,12 +645,16 @@ function createSolidMaterial(
 
 function createTexturedMaterial(
 	materialId: number,
-	options: { readonly surfaceType?: number } = {},
+	options: {
+		readonly diffuse?: number;
+		readonly luminosity?: number;
+		readonly surfaceType?: number;
+	} = {},
 ): StaticObjectMaterialSourceFacts {
 	return {
-		diffuse: 1,
+		diffuse: options.diffuse ?? 1,
 		identity: createMaterialIdentity(materialId),
-		luminosity: 0,
+		luminosity: options.luminosity ?? 0,
 		source: {
 			kind: "texture",
 			palette: null,

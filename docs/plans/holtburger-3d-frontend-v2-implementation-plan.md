@@ -2323,7 +2323,7 @@ Verification:
 
 ### Phase 11E1: Solid Color And Material Color Modulation
 
-Status: planned.
+Status: complete.
 
 Purpose: add the lowest-risk non-texture static material support and begin applying material color facts that affect current building parity.
 
@@ -2340,6 +2340,31 @@ Acceptance criteria:
 - Solid-color support extends typed material family/render-state handling; it does not add a catch-all material path.
 - Existing `texture-rgba` opaque/alpha-test rendering remains unchanged except for intentional material color modulation.
 - Unsupported blend/translucency/detail/indexed cases remain explicit render-deferred or unsupported records.
+
+Implementation notes:
+
+- Static object geometry draw units now support typed `flat-color` and `texture-rgba` material families. `flat-color` draw units carry no texture use or atlas lease; `texture-rgba` draw units still require a stageable `rgba-color` prepared render-surface use.
+- Static material plans now expose both diffuse/opacity color and luminosity-derived emissive color constants. The compatibility key includes those constants so surfaces with different material modulation are not merged into one uniform-backed draw unit before a shader material table exists.
+- The WebGL2 static-object shader now has explicit material modes: flat color, sampled texture, and missing-texture debug magenta. This keeps missing texture bindings loud while allowing real non-textured surfaces to render without fake pages.
+- Static material coverage now counts opaque `flat-color` partitions as rendered rather than render-deferred.
+
+Spicy bits:
+
+- Luminosity is applied as an additive emissive color in the current unlit static-object shader. That matches the existing v1 material behavior shape (`color` plus emissive intensity), but final lighting parity may need adjustment once the V2 renderer grows real lighting/material tables.
+- Material constants are currently draw-unit-wide uniforms. That is correct but conservative: different color/emissive constants split compatibility even when texture/layout otherwise match. A future material table can recover batching without lying about material state.
+
+Failed to close:
+
+- Manual visual verification on a live audited landblock with obvious solid-color static surfaces was not performed in this pass.
+- Indexed/paletted, translucent/additive, detail overlays, palette subranges, and richer material-table batching remain in later 11E phases.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- static-object-material-planner.test.ts static-object-compatibility-partitioner.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 11E2: Indexed And Paletted Static Data Textures
 

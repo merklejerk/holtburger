@@ -726,7 +726,7 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly drawUnitId: string;
 	readonly landblockId: number;
 	readonly domain: "outdoor-buildings" | "outdoor-detail";
-	readonly materialFamily: "texture-rgba";
+	readonly materialFamily: "flat-color" | "texture-rgba";
 	readonly materialPass: "opaque" | "alpha-test";
 	readonly materialBucketKey: string;
 	readonly coordinateSpace: "landblock-render-local";
@@ -737,7 +737,9 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly vertexCount: number;
 	readonly triangleCount: number;
 	readonly alphaTest: number;
-	readonly primaryTextureUseId: string;
+	readonly materialColor: readonly [number, number, number, number];
+	readonly materialEmissiveColor: readonly [number, number, number];
+	readonly primaryTextureUseId: string | null;
 	readonly primaryTextureWrapMode: "clamp" | "repeat";
 	readonly textureUseIds: readonly string[];
 	readonly materialIds: readonly number[];

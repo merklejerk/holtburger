@@ -879,7 +879,7 @@ export const preparedTexturePayloadDtoSchema = z.object({
 	sourceAssetKind: z.literal("prepared-texture"),
 	renderSurfaceId: z.number().int().nonnegative(),
 	usage: z.enum(["color", "detail", "mask", "raw"]),
-	outputFormat: z.enum(["dxt1", "dxt3", "dxt5", "rgba8"]),
+	outputFormat: z.enum(["dxt1", "dxt3", "dxt5", "index16", "r8", "rgba8"]),
 	mipPolicy: z.enum(["none", "retail4"]),
 	colorSpace: z.enum(["srgb", "data", "linear", "source"]),
 	sourceFormatRaw: z.number().int().nonnegative(),

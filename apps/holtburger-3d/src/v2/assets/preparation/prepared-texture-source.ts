@@ -2,9 +2,14 @@ import { createHostAssetKey } from "../keys";
 import type { HostAssetKey, PreparedAsset } from "../contracts";
 import type { PreparedTexturePayloadDto } from "../../../lib/host/contracts";
 import type {
+	PreparedIndexRenderSurfaceTextureUseIdentity,
 	PreparedRgbaRenderSurfaceTextureUseIdentity,
 	PreparedRgbaRenderSurfaceTextureUsage,
+	PreparedRenderSurfaceTextureUseIdentity,
 } from "../../static/contracts";
+
+const PIXEL_FORMAT_P8 = 0x29;
+const PIXEL_FORMAT_INDEX16 = 0x65;
 
 export interface DirectRgbaTextureSource {
 	readonly kind: "direct-rgba-texture-source";
@@ -16,12 +21,23 @@ export interface DirectRgbaTextureSource {
 	readonly pixels: Uint8Array;
 }
 
+export interface DirectIndexTextureSource {
+	readonly kind: "direct-index-texture-source";
+	readonly renderSurfaceId: number;
+	readonly usage: "index8" | "index16";
+	readonly outputFormat: "r8" | "index16";
+	readonly width: number;
+	readonly height: number;
+	readonly bytesPerIndex: 1 | 2;
+	readonly indices: Uint8Array;
+}
+
 export function createPreparedTextureHostKey(
-	source: PreparedRgbaRenderSurfaceTextureUseIdentity,
+	source: PreparedRenderSurfaceTextureUseIdentity,
 ): HostAssetKey {
-	const policy = getPreparedRgbaHostPolicy(source.usage);
+	const policy = getPreparedTextureHostPolicy(source.usage);
 	const query = new URLSearchParams({
-		cs: "linear",
+		cs: policy.colorSpace,
 		mips: "none",
 		out: policy.outputFormat,
 		usage: policy.hostUsage,
@@ -73,11 +89,79 @@ export function prepareDirectRgbaTextureSource(
 	};
 }
 
+export function prepareDirectIndexTextureSource(
+	prepared: PreparedAsset,
+	expectedUse: PreparedIndexRenderSurfaceTextureUseIdentity,
+): DirectIndexTextureSource {
+	const payload = parsePreparedTexturePayload(prepared.payload, expectedUse);
+	const policy = getPreparedIndexHostPolicy(expectedUse.usage);
+	if (
+		payload.outputFormat !== policy.outputFormat ||
+		payload.mipPolicy !== "none" ||
+		payload.colorSpace !== "data"
+	) {
+		throw new Error(
+			`Prepared texture ${formatRenderSurfaceId(expectedUse.renderSurface.renderSurfaceId)} uses unsupported index texture policy ${payload.outputFormat}/${payload.mipPolicy}/${payload.colorSpace}. Only ${policy.outputFormat}/none/data is supported for ${expectedUse.usage} sources.`,
+		);
+	}
+
+	if (!isExpectedIndexSourceFormat(payload, expectedUse.usage)) {
+		throw new Error(
+			`Prepared texture ${formatRenderSurfaceId(expectedUse.renderSurface.renderSurfaceId)} source format ${payload.sourceFormat}/${payload.sourceFormatRaw} does not match ${expectedUse.usage}.`,
+		);
+	}
+
+	const levelZero = payload.levels.find((level) => level.level === 0);
+	if (!levelZero) {
+		throw new Error(
+			`Prepared texture ${formatRenderSurfaceId(expectedUse.renderSurface.renderSurfaceId)} has no mip level 0.`,
+		);
+	}
+
+	const bytesPerIndex = expectedUse.usage === "index16" ? 2 : 1;
+	const expectedByteLength = levelZero.width * levelZero.height * bytesPerIndex;
+	if (levelZero.bytes.byteLength !== expectedByteLength) {
+		throw new Error(
+			`Prepared texture ${formatRenderSurfaceId(expectedUse.renderSurface.renderSurfaceId)} expected ${expectedByteLength} ${expectedUse.usage} bytes, got ${levelZero.bytes.byteLength}.`,
+		);
+	}
+
+	return {
+		bytesPerIndex,
+		height: levelZero.height,
+		indices: levelZero.bytes,
+		kind: "direct-index-texture-source",
+		outputFormat: policy.outputFormat,
+		renderSurfaceId: payload.renderSurfaceId,
+		usage: expectedUse.usage,
+		width: levelZero.width,
+	};
+}
+
+function getPreparedIndexHostPolicy(
+	usage: PreparedIndexRenderSurfaceTextureUseIdentity["usage"],
+): {
+	readonly hostUsage: PreparedTexturePayloadDto["usage"];
+	readonly outputFormat: DirectIndexTextureSource["outputFormat"];
+	readonly colorSpace: "data";
+} {
+	const policy = getPreparedTextureHostPolicy(usage);
+	if (policy.outputFormat !== "r8" && policy.outputFormat !== "index16") {
+		throw new Error(`Prepared index usage ${usage} resolved to ${policy.outputFormat}.`);
+	}
+
+	return {
+		colorSpace: "data",
+		hostUsage: policy.hostUsage,
+		outputFormat: policy.outputFormat,
+	};
+}
+
 function parsePreparedTexturePayload(
 	payload: unknown,
-	expectedUse: PreparedRgbaRenderSurfaceTextureUseIdentity,
+	expectedUse: PreparedRenderSurfaceTextureUseIdentity,
 ): PreparedTexturePayloadDto {
-	const policy = getPreparedRgbaHostPolicy(expectedUse.usage);
+	const policy = getPreparedTextureHostPolicy(expectedUse.usage);
 	if (
 		typeof payload !== "object" ||
 		payload === null ||
@@ -102,22 +186,38 @@ function parsePreparedTexturePayload(
 	return candidate;
 }
 
-function getPreparedRgbaHostPolicy(
-	usage: PreparedRgbaRenderSurfaceTextureUsage,
+function getPreparedTextureHostPolicy(
+	usage: PreparedRenderSurfaceTextureUseIdentity["usage"],
 ): {
 	readonly hostUsage: PreparedTexturePayloadDto["usage"];
-	readonly outputFormat: "rgba8";
+	readonly outputFormat: PreparedTexturePayloadDto["outputFormat"];
+	readonly colorSpace: PreparedTexturePayloadDto["colorSpace"];
 } {
 	switch (usage) {
 		case "rgba-color":
-			return { hostUsage: "color", outputFormat: "rgba8" };
+			return { colorSpace: "linear", hostUsage: "color", outputFormat: "rgba8" };
 		case "rgba-detail":
-			return { hostUsage: "detail", outputFormat: "rgba8" };
+			return { colorSpace: "linear", hostUsage: "detail", outputFormat: "rgba8" };
 		case "rgba-mask":
-			return { hostUsage: "mask", outputFormat: "rgba8" };
+			return { colorSpace: "linear", hostUsage: "mask", outputFormat: "rgba8" };
 		case "rgba-raw":
-			return { hostUsage: "raw", outputFormat: "rgba8" };
+			return { colorSpace: "linear", hostUsage: "raw", outputFormat: "rgba8" };
+		case "index8":
+			return { colorSpace: "data", hostUsage: "raw", outputFormat: "r8" };
+		case "index16":
+			return { colorSpace: "data", hostUsage: "raw", outputFormat: "index16" };
 	}
+}
+
+function isExpectedIndexSourceFormat(
+	payload: PreparedTexturePayloadDto,
+	usage: PreparedIndexRenderSurfaceTextureUseIdentity["usage"],
+): boolean {
+	if (usage === "index8") {
+		return payload.sourceFormatRaw === PIXEL_FORMAT_P8;
+	}
+
+	return payload.sourceFormatRaw === PIXEL_FORMAT_INDEX16;
 }
 
 function formatRenderSurfaceId(renderSurfaceId: number): string {

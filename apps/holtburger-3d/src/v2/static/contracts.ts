@@ -183,7 +183,12 @@ export type PreparedRgbaRenderSurfaceTextureUsage = Extract<
 	"rgba-color" | "rgba-detail" | "rgba-mask" | "rgba-raw"
 >;
 
-interface PreparedRenderSurfaceTextureUseIdentity {
+type PreparedIndexRenderSurfaceTextureUsage = Extract<
+	PreparedRenderSurfaceTextureUsage,
+	"index8" | "index16"
+>;
+
+export interface PreparedRenderSurfaceTextureUseIdentity {
 	readonly kind: "prepared-render-surface-texture-use";
 	readonly renderSurface: RenderSurfaceIdentity;
 	readonly usage: PreparedRenderSurfaceTextureUsage;
@@ -192,6 +197,11 @@ interface PreparedRenderSurfaceTextureUseIdentity {
 export interface PreparedRgbaRenderSurfaceTextureUseIdentity
 	extends PreparedRenderSurfaceTextureUseIdentity {
 	readonly usage: PreparedRgbaRenderSurfaceTextureUsage;
+}
+
+export interface PreparedIndexRenderSurfaceTextureUseIdentity
+	extends PreparedRenderSurfaceTextureUseIdentity {
+	readonly usage: PreparedIndexRenderSurfaceTextureUsage;
 }
 
 interface PaletteTextureUseIdentity {

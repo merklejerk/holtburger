@@ -2907,7 +2907,7 @@ Verification:
 
 ### Phase 11E4A3: Static Object Material Binding Tables
 
-Status: planned.
+Status: in progress; Phase 11E4A3a complete.
 
 Purpose: recover V1-style cross-material static-object compaction before `outdoor-detail` generated scenery and transparent object/part sorting broaden the static-object surface area.
 
@@ -2943,10 +2943,12 @@ Implementation split:
   - Add a static-object coarse table plan/result that carries source triangles, table-family/schema compatibility, candidate material entries, material-entry keys, texture-use ownership, and source mappings without claiming final atlas page slots.
   - Split `textureRoleLayoutKey` into role schema/table-family compatibility and concrete material-entry identity.
   - Keep the current final draw-unit path as the materialized output for one-entry compatibility while the new plan shape is introduced behind tests.
+  - Status: complete on 2026-06-12.
 - Phase 11E4A3b: Placement-Aware Materialization Boundary.
   - Add a materialization step after texture placement/commit data exists, or refactor the static coordinator/texture manager boundary so final static-object draw units are produced from coarse plans plus committed texture bindings.
   - Fine-partition coarse table candidates by actual texture refs/pages, draw-local role-slot limits, and material-entry limits.
   - Preserve static source/spatial records across materialization so inspection and picking do not depend on pre-materialized temporary ids.
+  - Status: next.
 - Phase 11E4A3c: Table Contract And One-Entry Renderer Cutover.
   - Add `StaticObjectMaterialTableEntry`-style contract fields and a `materialSlotIndices` selector stream to `StaticObjectGeometryStaticDrawUnit`.
   - Convert materialized one-entry draw units to the table contract without loosening coarse partitioning yet.
@@ -2988,6 +2990,23 @@ Acceptance criteria:
 - `texture-rgba` and `indexed-paletted` table batching are separate render-family paths unless/until a later phase proves cross-family table merging is useful and safe.
 - `outdoor-buildings` behavior remains correct while draw-unit counts may decrease where previous partitions differed only by table-capable renderer-binding entries.
 - Phase 11E4B starts only after generated scenery can use the table-capable static-object path.
+
+Phase 11E4A3a execution notes:
+
+- Added `StaticObjectCoarseTablePlan` and `StaticObjectCoarseMaterialEntry` to the static-object compatibility partitioner. Each partition now carries table family/schema facts, concrete material-entry keys, entry texture-use ownership, source triangle ids, and the existing partition axes without claiming final atlas pages or renderer texture refs.
+- Split the old overloaded texture role identity into `textureRoleSchemaKey` for table-family/schema compatibility and `materialEntryKey`/legacy `textureRoleLayoutKey` for concrete material identity. The current final compatibility key still includes `materialEntryKey` so renderer behavior does not broaden before the placement-aware materializer exists.
+- Updated the texture A/B partitioner test to prove that distinct concrete texture uses share the same coarse table schema but remain separate final partitions under the current single-binding renderer contract.
+
+Spicy bits:
+
+- Phase 11E4A3a intentionally keeps the final compatibility key conservative by including the concrete `materialEntryKey`. Texture A/B still become separate final partitions today even when their coarse table schema matches. The important course correction is that the partitioner now exposes the distinction between table schema and concrete material entry, so 11E4A3b/11E4A3e can move that split to placement-aware materialization instead of doing it prematurely in the coarse baker.
+- The one-entry compatibility path is still a bridge, not a destination. Keeping it too long would recreate parallel renderer contracts; Phase 11E4A3 should cut it over decisively once the table contract exists.
+
+Failed to close:
+
+- Real renderer material tables are not implemented yet. Phase 11E4A3a added the coarse table-plan contract, but final static-object draw units still use the current one-entry/single-binding renderer path until 11E4A3b-11E4A3e move materialization, selector baking, role slots, and shader consumption forward.
+- `outdoor-detail` generated scenery remains blocked behind this phase to avoid multiplying draw-unit churn for foliage.
+- True blended/additive support remains blocked behind 11E4C-11E4E.
 
 ### Phase 11E4B: Outdoor Detail Generated Scenery Cutout
 

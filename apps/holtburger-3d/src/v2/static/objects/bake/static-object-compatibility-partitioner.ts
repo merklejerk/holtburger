@@ -30,6 +30,7 @@ export interface StaticObjectCompatibilityPartition {
 	readonly sliceId: string;
 	readonly compatibilityKey: string;
 	readonly partitionAxes: StaticObjectCompatibilityPartitionAxes;
+	readonly coarseTablePlan: StaticObjectCoarseTablePlan;
 	readonly family: StaticObjectMaterialPlan["family"];
 	readonly renderCoverage: StaticObjectMaterialPlan["renderCoverage"];
 	readonly pass: StaticObjectMaterialPlan["pass"];
@@ -39,13 +40,41 @@ export interface StaticObjectCompatibilityPartition {
 	readonly materialEmissiveColor: StaticObjectMaterialPlan["emissiveColor"];
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly detailTextureTiling: number;
+	readonly textureRoleSchemaKey: string;
 	readonly textureRoleLayoutKey: string;
 	readonly materialIds: readonly number[];
+	readonly materialEntryKeys: readonly string[];
 	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
 	readonly triangles: readonly StaticObjectCompatibilityTriangle[];
 	readonly sourceTriangleIds: readonly string[];
 	readonly triangleCount: number;
 	readonly reason: string;
+}
+
+interface StaticObjectCoarseTablePlan {
+	readonly tableFamily: StaticObjectMaterialPlan["family"];
+	readonly tableSchemaKey: string;
+	readonly renderCoverage: StaticObjectMaterialPlan["renderCoverage"];
+	readonly pass: StaticObjectMaterialPlan["pass"];
+	readonly sortPolicy: StaticObjectSortAxis["policy"];
+	readonly visibilityPolicy: StaticObjectVisibilityAxis["policy"];
+	readonly entries: readonly StaticObjectCoarseMaterialEntry[];
+	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
+	readonly sourceTriangleIds: readonly string[];
+}
+
+interface StaticObjectCoarseMaterialEntry {
+	readonly materialEntryKey: string;
+	readonly materialUseKey: string;
+	readonly materialId: number;
+	readonly materialColor: StaticObjectMaterialPlan["color"];
+	readonly materialEmissiveColor: StaticObjectMaterialPlan["emissiveColor"];
+	readonly alphaMode: StaticObjectMaterialPlan["alphaPolicy"]["mode"];
+	readonly alphaTest: StaticObjectMaterialPlan["alphaPolicy"]["alphaTest"];
+	readonly textureWrapMode: StaticObjectTextureWrapMode;
+	readonly detailTextureTiling: number;
+	readonly textureRoles: readonly StaticObjectMaterialTextureUseRole[];
+	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
 }
 
 interface StaticObjectCompatibilityPartitionAxes {
@@ -62,8 +91,10 @@ interface StaticObjectMaterialCompatibilityAxis {
 	readonly pass: StaticObjectMaterialPlan["pass"];
 	readonly alphaMode: StaticObjectMaterialPlan["alphaPolicy"]["mode"];
 	readonly blendMode: StaticObjectMaterialPlan["blend"]["mode"];
+	readonly materialEntryKey: string;
 	readonly materialColorKey: string;
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
+	readonly textureRoleSchemaKey: string;
 	readonly textureRoleLayoutKey: string;
 }
 
@@ -118,6 +149,8 @@ interface StaticObjectTriangleCandidate {
 	readonly materialId: number;
 	readonly materialPlan: StaticObjectMaterialPlan;
 	readonly materialColorKey: string;
+	readonly materialEntryKey: string;
+	readonly textureRoleSchemaKey: string;
 	readonly textureRoleLayoutKey: string;
 	readonly sourceKey: string;
 	readonly gfxKey: string;
@@ -214,9 +247,8 @@ function createTriangleCandidates(
 					);
 				}
 
-				const textureRoleLayoutKey = createTextureRoleLayoutKey(
-					plan.textureRoles,
-				);
+				const textureRoleSchemaKey = createTextureRoleSchemaKey(plan.textureRoles);
+				const textureRoleLayoutKey = createTextureRoleLayoutKey(plan.textureRoles);
 				const materialColorKey = createMaterialColorKey(plan);
 				const sourceKey = createSourceKey(object.source);
 				const gfxKey = createSourceKey(part.gfxObj);
@@ -231,6 +263,12 @@ function createTriangleCandidates(
 				const textureWrapMode = resolveTextureWrapMode(
 					materialVariantSignature,
 				);
+				const materialEntryKey = createMaterialEntryKey({
+					materialColorKey,
+					plan,
+					textureRoleLayoutKey,
+					textureWrapMode,
+				});
 				const partitionAxes = createPartitionAxes({
 					domain: payload.domain,
 					gfxKey,
@@ -238,8 +276,10 @@ function createTriangleCandidates(
 					materialColorKey,
 					objectKey,
 					partIndex: part.partIndex,
+					materialEntryKey,
 					plan,
 					sourceKey,
+					textureRoleSchemaKey,
 					textureRoleLayoutKey,
 					textureWrapMode,
 				});
@@ -253,6 +293,7 @@ function createTriangleCandidates(
 					firstVertex: triangle.firstVertex,
 					material: materialSlot.material,
 					materialColorKey,
+					materialEntryKey,
 					materialId: materialSlot.material.materialId,
 					materialKey,
 					materialPlan: plan,
@@ -273,6 +314,7 @@ function createTriangleCandidates(
 						`variant:${materialVariantSignature ?? "base"}`,
 					].join(":"),
 					textureWrapMode,
+					textureRoleSchemaKey,
 					textureRoleLayoutKey,
 				});
 			}
@@ -401,22 +443,39 @@ function createCompatibilityPartition(options: {
 	const materialIds = uniqueSorted(
 		options.candidates.map((candidate) => candidate.materialId),
 	);
+	const materialEntryKeys = uniqueSortedStrings(
+		options.candidates.map((candidate) => candidate.materialEntryKey),
+	);
 	const textureDataUses = uniqueTextureDataUses(
 		options.candidates.flatMap((candidate) =>
 			candidate.materialPlan.textureRoles.map((role) => role.dataUse),
 		),
+	);
+	const partitionAxes = createPartitionSliceAxes(
+		first.partitionAxes,
+		options.candidates,
+	);
+	const sourceTriangleIds = options.candidates.map(
+		(candidate) => candidate.sourceTriangleId,
 	);
 
 	return {
 		alphaMode: first.materialPlan.alphaPolicy.mode,
 		alphaTest: first.materialPlan.alphaPolicy.alphaTest,
 		compatibilityKey: options.compatibilityKey,
+		coarseTablePlan: createCoarseTablePlan({
+			candidates: options.candidates,
+			partitionAxes,
+			sourceTriangleIds,
+			textureDataUses,
+		}),
 		family: first.materialPlan.family,
 		materialColor: first.materialPlan.color,
 		materialEmissiveColor: first.materialPlan.emissiveColor,
 		materialIds,
+		materialEntryKeys,
 		pass: first.materialPlan.pass,
-		partitionAxes: createPartitionSliceAxes(first.partitionAxes, options.candidates),
+		partitionAxes,
 		reason:
 			materialIds.length > STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE
 				? "material table overflow partition"
@@ -424,9 +483,7 @@ function createCompatibilityPartition(options: {
 		renderCoverage: first.materialPlan.renderCoverage,
 		detailTextureTiling: resolveDetailTextureTiling(first.materialPlan),
 		sliceId: `slice/${options.compatibilityIndex}/${options.sliceIndex}`,
-		sourceTriangleIds: options.candidates.map(
-			(candidate) => candidate.sourceTriangleId,
-		),
+		sourceTriangleIds,
 		textureWrapMode: first.textureWrapMode,
 		triangles: options.candidates.map((candidate) => ({
 			firstVertex: candidate.firstVertex,
@@ -441,8 +498,54 @@ function createCompatibilityPartition(options: {
 			sourceTriangleId: candidate.sourceTriangleId,
 		})),
 		textureDataUses,
+		textureRoleSchemaKey: first.textureRoleSchemaKey,
 		textureRoleLayoutKey: first.textureRoleLayoutKey,
 		triangleCount: options.candidates.length,
+	};
+}
+
+function createCoarseTablePlan(options: {
+	readonly candidates: readonly StaticObjectTriangleCandidate[];
+	readonly partitionAxes: StaticObjectCompatibilityPartitionAxes;
+	readonly sourceTriangleIds: readonly string[];
+	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
+}): StaticObjectCoarseTablePlan {
+	const entriesByKey = new Map<string, StaticObjectCoarseMaterialEntry>();
+
+	for (const candidate of options.candidates) {
+		if (entriesByKey.has(candidate.materialEntryKey)) {
+			continue;
+		}
+
+		entriesByKey.set(candidate.materialEntryKey, {
+			alphaMode: candidate.materialPlan.alphaPolicy.mode,
+			alphaTest: candidate.materialPlan.alphaPolicy.alphaTest,
+			detailTextureTiling: resolveDetailTextureTiling(candidate.materialPlan),
+			materialColor: candidate.materialPlan.color,
+			materialEmissiveColor: candidate.materialPlan.emissiveColor,
+			materialEntryKey: candidate.materialEntryKey,
+			materialId: candidate.materialId,
+			materialUseKey: candidate.materialKey,
+			textureDataUses: uniqueTextureDataUses(
+				candidate.materialPlan.textureRoles.map((role) => role.dataUse),
+			),
+			textureRoles: candidate.materialPlan.textureRoles,
+			textureWrapMode: candidate.textureWrapMode,
+		});
+	}
+
+	return {
+		entries: [...entriesByKey.entries()]
+			.sort(([left], [right]) => left.localeCompare(right))
+			.map(([, entry]) => entry),
+		pass: options.partitionAxes.material.pass,
+		renderCoverage: options.partitionAxes.material.renderCoverage,
+		sortPolicy: options.partitionAxes.sort.policy,
+		sourceTriangleIds: options.sourceTriangleIds,
+		tableFamily: options.partitionAxes.material.family,
+		tableSchemaKey: options.partitionAxes.material.textureRoleSchemaKey,
+		textureDataUses: options.textureDataUses,
+		visibilityPolicy: options.partitionAxes.visibility.policy,
 	};
 }
 
@@ -472,8 +575,10 @@ function createPartitionAxes(options: {
 	readonly gfxKey: string;
 	readonly objectKey: string;
 	readonly partIndex: number;
+	readonly materialEntryKey: string;
 	readonly materialColorKey: string;
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
+	readonly textureRoleSchemaKey: string;
 	readonly textureRoleLayoutKey: string;
 }): StaticObjectCompatibilityPartitionAxes {
 	const material = createMaterialCompatibilityAxis(options);
@@ -494,8 +599,10 @@ function createPartitionAxes(options: {
 
 function createMaterialCompatibilityAxis(options: {
 	readonly plan: StaticObjectMaterialPlan;
+	readonly materialEntryKey: string;
 	readonly materialColorKey: string;
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
+	readonly textureRoleSchemaKey: string;
 	readonly textureRoleLayoutKey: string;
 }): StaticObjectMaterialCompatibilityAxis {
 	const key = [
@@ -504,9 +611,7 @@ function createMaterialCompatibilityAxis(options: {
 		`pass:${options.plan.pass}`,
 		`alpha:${options.plan.alphaPolicy.mode}`,
 		`blend:${options.plan.blend.mode}`,
-		`color:${options.materialColorKey}`,
-		`wrap:${options.textureWrapMode}`,
-		`roles:${options.textureRoleLayoutKey}`,
+		`entry:${options.materialEntryKey}`,
 	].join("|");
 
 	return {
@@ -514,9 +619,11 @@ function createMaterialCompatibilityAxis(options: {
 		blendMode: options.plan.blend.mode,
 		family: options.plan.family,
 		key,
+		materialEntryKey: options.materialEntryKey,
 		materialColorKey: options.materialColorKey,
 		pass: options.plan.pass,
 		renderCoverage: options.plan.renderCoverage,
+		textureRoleSchemaKey: options.textureRoleSchemaKey,
 		textureRoleLayoutKey: options.textureRoleLayoutKey,
 		textureWrapMode: options.textureWrapMode,
 	};
@@ -605,6 +712,23 @@ function createMaterialColorKey(plan: StaticObjectMaterialPlan): string {
 	].join(",");
 }
 
+function createMaterialEntryKey(options: {
+	readonly plan: StaticObjectMaterialPlan;
+	readonly materialColorKey: string;
+	readonly textureWrapMode: StaticObjectTextureWrapMode;
+	readonly textureRoleLayoutKey: string;
+}): string {
+	return [
+		`color:${options.materialColorKey}`,
+		`wrap:${options.textureWrapMode}`,
+		`roles:${options.textureRoleLayoutKey}`,
+		`alpha-test:${formatMaterialScalar(options.plan.alphaPolicy.alphaTest)}`,
+		`detail-tiling:${formatMaterialScalar(
+			resolveDetailTextureTiling(options.plan),
+		)}`,
+	].join("|");
+}
+
 function formatMaterialScalar(value: number): string {
 	return value.toFixed(6);
 }
@@ -624,6 +748,36 @@ function createTextureRoleLayoutKey(
 			return `${role.role}:${dataUseKey}${detailSuffix}`;
 		})
 		.join(",");
+}
+
+function createTextureRoleSchemaKey(
+	roles: readonly StaticObjectMaterialTextureUseRole[],
+): string {
+	if (roles.length === 0) {
+		return "none";
+	}
+
+	return roles
+		.map((role) => {
+			const detailSuffix =
+				role.role === "detail-overlay" ? `:tiling=${role.tiling}` : "";
+			return `${role.role}:${createTextureDataUseSchemaKey(role.dataUse)}${detailSuffix}`;
+		})
+		.join(",");
+}
+
+function createTextureDataUseSchemaKey(
+	dataUse: MaterialTextureDataUseIdentity,
+): string {
+	if (dataUse.kind === "palette-texture-use") {
+		return [
+			dataUse.kind,
+			`range:${dataUse.firstIndex}-${dataUse.indexCount}`,
+			dataUse.usage,
+		].join(":");
+	}
+
+	return [dataUse.kind, dataUse.usage].join(":");
 }
 
 function resolveDetailTextureTiling(plan: StaticObjectMaterialPlan): number {

@@ -2306,7 +2306,7 @@ Implementation notes:
 
 Next-slice recommendation:
 
-- Keep Phase 11E1 first. Solid color and color modulation are still the lowest-risk expansion because they require no new texture upload format, no palette shader, and no translucent pass ordering. The new `materialCoverage.unrenderedBuckets` diagnostics should be checked against live landblocks before implementing 11E2 or 11E3; if indexed/paletted dominates real triangle counts by a wide margin, use the Phase 11E5 resteer to reconsider order after 11E1.
+- Keep Phase 11E1 first. Solid color and color modulation are still the lowest-risk expansion because they require no new texture upload format, no palette shader, and no translucent pass ordering. The new `materialCoverage.unrenderedBuckets` diagnostics should be checked against live landblocks before implementing later 11E material slices; if indexed/paletted dominates real triangle counts by a wide margin, use the Phase 11E5 resteer to reconsider order after 11E1.
 
 Failed to close:
 
@@ -2385,7 +2385,7 @@ Acceptance criteria:
 
 Implementation notes:
 
-- Opaque and alpha-test static-object `indexed-paletted` material plans are now render candidates when both a stageable index texture use and palette texture use are present. Translucent/additive indexed materials remain render-deferred for Phase 11E3.
+- Opaque and alpha-test static-object `indexed-paletted` material plans are now render candidates when both a stageable index texture use and palette texture use are present. Translucent/additive indexed materials remain render-deferred for Phase 11E4.
 - The texture manager stages `index8`, `index16`, and `palette-rgba` through the same `StaticBakeTextureUse` commit path as RGBA textures. Index and palette data commit as direct single-source placements under texture-manager-owned refs/leases because the RGBA atlas packer is not the correct vehicle for integer index data.
 - Runtime texture policy now has explicit `index8`, `index16`, and `palette-rgba` sample classes. These force nearest filtering, no mipmaps, and anisotropy 1 even when the global texture filter is linear or anisotropic.
 - WebGL2 static-object rendering has a typed indexed/paletted material mode with explicit index and palette lookup textures. Missing index or palette residency renders magenta instead of silently falling back.
@@ -2621,7 +2621,7 @@ Acceptance criteria:
 Spicy notes:
 
 - The v1 `RG8` `index16` upload is not neighbor packing. It stores the low/high bytes of one 16-bit index texel; neighbors are sampled as four separate texels in shader.
-- This phase should not broaden material family support. Translucent/additive indexed materials and detail overlays remain Phase 11E3/11E4 work unless the shader parity fix reveals a strictly necessary contract correction.
+- This phase should not broaden material family support. Detail overlays remain Phase 11E3 work, and translucent/additive indexed materials remain Phase 11E4 work unless the shader parity fix reveals a strictly necessary contract correction.
 - `RG8` is the chosen V2 parity format for `index16`. It has better practical compatibility than `R16UI` because it stays on the ordinary normalized `sampler2D` path while preserving exact low/high index bytes through shader reconstruction.
 
 Closed:
@@ -2645,16 +2645,47 @@ Verification:
 - `cd apps/holtburger-3d && npm run lint:dead`
 - `cd apps/holtburger-3d && npm run test:ts`
 
-### Phase 11E3: Translucent And Additive Static Passes
+### Phase 11E3: Static Detail Overlay Composition
 
 Status: planned.
 
-Purpose: add static object pass-order and blend/depth handling for translucent/additive materials after opaque, alpha-test, solid, and indexed data paths are structurally separated.
+Purpose: render static object detail overlays as material-role composition rather than broadening source domains prematurely.
 
 Current steering:
 
-- Do not use `0xda55ffff` as the primary visual proof target for this phase. The latest diagnostics showed `flat-color transparent` material counts but zero transparent triangles, so it is useful for classification sanity only, not blend rendering validation.
+- This phase was swapped ahead of translucent/additive pass support after 11E2C because it has a concrete observed target and lower render-state risk. Manual diagnostics on `0xda55ffff` showed `detailRoleCount: 3` and `detail-overlay-render-deferred: 3`, with all outdoor-building triangles otherwise rendered.
+- Treat material-coverage fallback diagnostics as the phase's main progress signal: the detail-overlay fallback count should drop only when the detail role is actually resolved, packed, bound, and sampled.
+- Scope detail overlays to already-renderable static material/pass combinations first: opaque/alpha-test `texture-rgba`, opaque `indexed-paletted`, and opaque `flat-color` if the composition contract is straightforward. A detail overlay attached to translucent/additive material must remain render-deferred until Phase 11E4 owns blend/depth ordering.
+- Preserve the current static object source-domain boundary. Detail overlays are material roles on static object surfaces; they are not a reason to pull the broader `outdoor-detail` source domain into this phase.
+
+Deliverables:
+
+- Resolver/material facts needed to resolve static detail role textures when present.
+- Material planner and compatibility partition support for detail overlay roles composed with existing static families.
+- Texture-use planning and renderer shader support for detail overlay bindings, tiling, fade, sampler policy, and the v1-style composition mode for static detail roles.
+- Diagnostics that distinguish unresolved detail role texture facts from detail roles that are resolved but still intentionally deferred by pass/family limits.
+- Tests covering detail-role classification, texture resolution, texture-use identity, partitioning, renderer binding, shader composition, and fallback behavior.
+- Visual verification on audited landblocks with detail-overlay static materials.
+
+Acceptance criteria:
+
+- Detail overlays are represented as additional material roles, not as a separate source-domain shortcut.
+- `outdoor-detail` and `env-cell-static` breadth remains out of scope unless a detail material role demonstrably requires a narrow source-resolution addition.
+- `detail-overlay-render-deferred` material-coverage fallbacks drop for audited targets only when detail overlay rendering is actually active, not merely hidden or reclassified.
+- Unsupported or unresolved detail roles remain explicitly diagnostic.
+- Existing opaque/alpha-test, flat-color, and indexed/paletted base material rendering remains visually stable when no detail overlay applies.
+
+### Phase 11E4: Translucent And Additive Static Passes
+
+Status: planned.
+
+Purpose: add static object pass-order and blend/depth handling for translucent/additive materials after opaque, alpha-test, solid, indexed, and detail-overlay paths are structurally separated.
+
+Current steering:
+
+- This phase was moved after detail overlays because the current audited `0xda55ffff` target showed transparent material counts but zero transparent triangles. It is useful for classification sanity only, not blend rendering validation.
 - Before implementation, identify or audit a landblock with actual translucent/additive static-object triangle coverage so visual verification exercises real blended geometry.
+- Fold in detail-overlay composition only where pass ordering is already correct. Do not mix detail overlay implementation questions with blend sorting questions if that would obscure either diagnostic signal.
 
 Deliverables:
 
@@ -2669,32 +2700,6 @@ Acceptance criteria:
 - Opaque/alpha-test draw ordering remains deterministic and unaffected.
 - Material coverage diagnostics identify a nonzero blended/static triangle target before claiming visual parity.
 - Any sorting limitations are explicitly documented before moving to Phase 12.
-
-### Phase 11E4: Static Detail Overlay Composition
-
-Status: planned.
-
-Purpose: render static object detail overlays as material-role composition rather than broadening source domains prematurely.
-
-Current steering:
-
-- This phase has a concrete observed target. Manual diagnostics on `0xda55ffff` showed `detailRoleCount: 3` and `detail-overlay-render-deferred: 3`, with all outdoor-building triangles otherwise rendered.
-- Treat material-coverage fallback diagnostics as the phase's main progress signal: the detail-overlay fallback count should drop only when the detail role is actually resolved, packed, bound, and sampled.
-
-Deliverables:
-
-- Resolver/material facts needed to resolve static detail role textures when present.
-- Material planner and compatibility partition support for detail overlay roles composed with existing static families.
-- Texture-use planning and renderer shader support for detail overlay bindings, tiling, fade, and sampler policy.
-- Tests covering detail-role classification, texture resolution, partitioning, renderer binding, and fallback behavior.
-- Visual verification on audited landblocks with detail-overlay static materials.
-
-Acceptance criteria:
-
-- Detail overlays are represented as additional material roles, not as a separate source-domain shortcut.
-- `outdoor-detail` and `env-cell-static` breadth remains out of scope unless a detail material role demonstrably requires a narrow source-resolution addition.
-- `detail-overlay-render-deferred` material-coverage fallbacks drop for audited targets only when detail overlay rendering is actually active, not merely hidden or reclassified.
-- Unsupported or unresolved detail roles remain explicitly diagnostic.
 
 ### Phase 11E5: Static Material Family Resteer
 

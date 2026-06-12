@@ -40,6 +40,7 @@ export interface RuntimeDiagnosticsFailure {
 export type RuntimeDiagnosticsDomainReport =
 	| RendererDiagnosticsReport
 	| StaticCoordinatorDiagnosticsReport
+	| TerrainTextureDiagnosticsReport
 	| TextureAtlasDiagnosticsReport;
 
 export interface RendererDiagnosticsReport {
@@ -123,6 +124,24 @@ export interface TextureAtlasPageDiagnostics {
 	readonly anisotropy: number;
 	readonly wrapS: TexturePlacement["wrapS"];
 	readonly wrapT: TexturePlacement["wrapT"];
+}
+
+export interface TerrainTextureDiagnosticsReport {
+	readonly kind: "terrain-textures";
+	readonly summary: TerrainTextureDiagnosticsSummary;
+	readonly recentFallbacks: readonly TerrainTextureFallbackDiagnostics[];
+}
+
+export interface TerrainTextureDiagnosticsSummary {
+	readonly recentFallbackCount: number;
+}
+
+export interface TerrainTextureFallbackDiagnostics {
+	readonly revision: number;
+	readonly drawUnitId: string;
+	readonly materialFamily: TerrainGeometryStaticDrawUnit["materialFamily"];
+	readonly materialBucketKey: string;
+	readonly reasons: readonly TerrainMaterialFallbackReason[];
 }
 
 export interface TerrainRolePageUsageDiagnostics {

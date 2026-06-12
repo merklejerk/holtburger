@@ -1508,7 +1508,7 @@ Follow-up notes:
 
 ### Phase 10B6: Terrain Texture Diagnostics And Failure Surfacing
 
-Status: pending; partially pulled forward into Phase 10B4D5 for terrain role-page failures.
+Status: completed.
 
 Purpose: expose terrain material, texture placement, fallback, and sampler failures outside the console before visual parity work.
 
@@ -1521,6 +1521,19 @@ Acceptance criteria:
 
 - Texture placement failures are visible through runtime/harness diagnostics or snapshots, not only `console.error`.
 - Terrain material and texture diagnostics are specific enough to drive Phase 10C manual visual review.
+
+Implemented:
+
+- Added a `terrain-textures` domain to the on-demand runtime diagnostics report.
+- Runtime now records bounded recent terrain material fallback samples with revision, draw-unit id, material family, material bucket key, and typed fallback reasons.
+- Generic static materialization failures stay in console warnings and the existing runtime summary instead of being duplicated into the terrain texture report.
+- Existing texture-atlas diagnostics continue to expose page policy, mip status, sampler policy, role-page usage, and recent role-page overflows.
+- Added tests proving unsupported/fallback terrain material reasons are visible in diagnostics reports and failed texture materialization remains visible through the existing runtime summary.
+
+Follow-up notes:
+
+- This phase intentionally did not add a new always-visible UI panel or hot-path metrics. The Status tab's on-demand report remains the inspection path.
+- Texture/materialization failures are acceptable as console warnings plus the runtime summary for now. Add a separate static-materialization diagnostics domain only if those failures need richer structured inspection later.
 
 ### Phase 10C: Terrain Visual Parity Pass
 

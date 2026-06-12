@@ -20,6 +20,7 @@ import type {
 	PreparedTextureUseIdentity,
 	StaticBakeTextureUse,
 	TerrainGeometryStaticDrawUnit,
+	TerrainMaterialFallbackReason,
 } from "../static/contracts";
 import {
 	DeferredStaticBakerClient,
@@ -92,29 +93,35 @@ describe("V2 client runtime", () => {
 		});
 
 		expect(runtime.createDiagnosticsReport()).toMatchObject({
-			domains: [
-				{
+			domains: expect.arrayContaining([
+				expect.objectContaining({
 					kind: "renderer",
-				},
-				{
+				}),
+				expect.objectContaining({
 					kind: "static-coordinator",
-					summary: {
+					summary: expect.objectContaining({
 						committed: 0,
 						requested: 1,
 						resolving: 1,
-					},
-				},
-				{
+					}),
+				}),
+				expect.objectContaining({
 					kind: "texture-atlas",
-					summary: {
+					summary: expect.objectContaining({
 						approximateBytes: 0,
 						batchCount: 0,
 						entryAliasCount: 0,
 						multiSourcePageCount: 0,
 						texturePageCount: 0,
+					}),
+				}),
+				expect.objectContaining({
+					kind: "terrain-textures",
+					summary: {
+						recentFallbackCount: 0,
 					},
-				},
-			],
+				}),
+			]),
 			kind: "runtime-diagnostics-report",
 			runtime: {
 				lastStaticRequest: "outdoor-landblock|0xda55ffff|terrain",
@@ -355,7 +362,71 @@ describe("V2 client runtime", () => {
 			failed: [{ message: "prepared texture unavailable", revision: 1 }],
 			pendingRevisions: [],
 		});
+		expect(runtime.createDiagnosticsReport().runtime.failedStaticMaterializations).toEqual([
+			{ message: "prepared texture unavailable", revision: 1 },
+		]);
+		expect(runtime.createDiagnosticsReport().domains).toContainEqual({
+			kind: "terrain-textures",
+			recentFallbacks: [],
+			summary: {
+				recentFallbackCount: 0,
+			},
+		});
 		unsubscribe();
+		runtime.dispose();
+	});
+
+	it("surfaces terrain material fallback reasons in diagnostics reports", async () => {
+		const renderer = new FakeRenderer();
+		const resolver = new DeferredStaticResolverClient();
+		const baker = new DeferredStaticBakerClient();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker,
+				resolver,
+			}),
+		});
+		const fallbackReason: TerrainMaterialFallbackReason = {
+			code: "unsupported-material-binding",
+			message: "Terrain material binding requires a prepared texture use.",
+			pcode: 33825,
+		};
+
+		runtime.requestStaticWork({
+			domains: ["terrain"],
+			landblockId: "0xda55ffff",
+			locationKind: "outdoor-landblock",
+		});
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
+		await flushPromises();
+		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
+			drawUnits: [
+				createTerrainDrawUnit("terrain-fallback", 0xda55ffff, {
+					fallbackReasons: [fallbackReason],
+				}),
+			],
+		});
+		await flushPromises();
+
+		expect(runtime.createDiagnosticsReport().domains).toContainEqual({
+			kind: "terrain-textures",
+			recentFallbacks: [
+				{
+					drawUnitId: "terrain-fallback",
+					materialBucketKey:
+						"shader:terrain-debug-flat|domain:outdoor-terrain|sampler:none|placement:none",
+					materialFamily: "terrain-debug-flat",
+					reasons: [fallbackReason],
+					revision: 1,
+				},
+			],
+			summary: {
+				recentFallbackCount: 1,
+			},
+		});
 		runtime.dispose();
 	});
 });
@@ -491,6 +562,7 @@ function createTerrainDrawUnit(
 	drawUnitId: string,
 	landblockId: number,
 	options: {
+		readonly fallbackReasons?: readonly TerrainMaterialFallbackReason[];
 		readonly primaryTextureUseId?: string | null;
 		readonly textureUseIds?: readonly string[];
 	} = {},
@@ -512,7 +584,7 @@ function createTerrainDrawUnit(
 		primaryTextureUseId: options.primaryTextureUseId ?? null,
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
 		sourceTriangleIds: ["triangle-a"],
-		terrainFallbackReasons: [],
+		terrainFallbackReasons: options.fallbackReasons ?? [],
 		terrainMaterialPlan: null,
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
 		textureUseIds: options.textureUseIds ?? [],

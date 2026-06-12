@@ -21,6 +21,8 @@ import {
 	type RuntimeDiagnostics,
 	type RuntimeDiagnosticsReport,
 	type StaticCoordinatorDiagnosticsReport,
+	type TerrainTextureDiagnosticsReport,
+	type TerrainTextureFallbackDiagnostics,
 } from "./diagnostics";
 import {
 	ImmediateStaticBakerClient,
@@ -37,6 +39,7 @@ import type {
 } from "../static/contracts";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
+const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
 
 export type ManualStaticDomain =
 	| "terrain"
@@ -140,6 +143,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#pendingStaticMaterializations = new Set<number>();
 	#committedStaticMaterializations: number[] = [];
 	#failedStaticMaterializations: StaticMaterializationFailureSnapshot[] = [];
+	#recentTerrainTextureFallbacks: TerrainTextureFallbackDiagnostics[] = [];
 	#disposed = false;
 
 	constructor(
@@ -253,6 +257,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 					),
 				},
 				this.#textureManager.createDiagnosticsReport(),
+				createTerrainTextureDiagnosticsReport(
+					this.#recentTerrainTextureFallbacks,
+				),
 			],
 			kind: "runtime-diagnostics-report",
 			runtime: {
@@ -392,16 +399,40 @@ class ClientRuntimeImpl implements ClientRuntime {
 				continue;
 			}
 
-			this.#diagnostics.warn({
+			const fallback: TerrainTextureFallbackDiagnostics = {
 				drawUnitId: drawUnit.drawUnitId,
-				kind: "terrain-renderable-fallback",
 				materialBucketKey: drawUnit.materialBucketKey,
 				materialFamily: drawUnit.materialFamily,
 				reasons: drawUnit.terrainFallbackReasons,
 				revision: delta.revision,
+			};
+			this.#recentTerrainTextureFallbacks = appendBounded(
+				this.#recentTerrainTextureFallbacks,
+				fallback,
+				TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT,
+			);
+			this.#diagnostics.warn({
+				drawUnitId: fallback.drawUnitId,
+				kind: "terrain-renderable-fallback",
+				materialBucketKey: fallback.materialBucketKey,
+				materialFamily: fallback.materialFamily,
+				reasons: fallback.reasons,
+				revision: fallback.revision,
 			});
 		}
 	}
+}
+
+function createTerrainTextureDiagnosticsReport(
+	recentFallbacks: readonly TerrainTextureFallbackDiagnostics[],
+): TerrainTextureDiagnosticsReport {
+	return {
+		kind: "terrain-textures",
+		recentFallbacks,
+		summary: {
+			recentFallbackCount: recentFallbacks.length,
+		},
+	};
 }
 
 function applyMaterializedStaticCommit(
@@ -444,6 +475,14 @@ function appendBoundedFailure(
 	failure: StaticMaterializationFailureSnapshot,
 ): StaticMaterializationFailureSnapshot[] {
 	return [...failures, failure].slice(-8);
+}
+
+function appendBounded<T>(
+	entries: readonly T[],
+	entry: T,
+	limit: number,
+): T[] {
+	return [...entries, entry].slice(-limit);
 }
 
 function normalizeStaticWorkCommand(

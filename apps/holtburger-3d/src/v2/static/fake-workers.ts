@@ -266,6 +266,7 @@ function createFakeStaticBakeResult(
 		drawUnits: result.drawUnits ?? [
 			...input.items.map((item) => createPlaceholderDrawUnit(item.work.workId)),
 		],
+		materialCoverage: result.materialCoverage ?? [],
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds ?? [],
 		staticPortalInteriorRecords: result.staticPortalInteriorRecords ?? [],

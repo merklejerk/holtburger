@@ -47,6 +47,7 @@ export function bakeTerrainGeometry(
 		),
 		domain: input.domain,
 		drawUnits,
+		materialCoverage: [],
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: [],
 		staticPortalInteriorRecords: [],

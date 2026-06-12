@@ -147,6 +147,7 @@ function createResult(input: StaticBakeBatchInput): StaticBakeBatchResult {
 				kind: "placeholder",
 			},
 		],
+		materialCoverage: [],
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: [],
 		staticPortalInteriorRecords: [],

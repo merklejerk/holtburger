@@ -35,6 +35,7 @@ import type {
 	StaticDemand,
 	StaticDrawUnit,
 	StaticLodRadii,
+	StaticMaterialCoverageReport,
 	ScheduledStaticWorkStatus,
 } from "../static/contracts";
 
@@ -515,6 +516,9 @@ function createStaticCoordinatorDiagnosticsReport(
 
 	return {
 		inFlightWork,
+		materialCoverage: snapshot.materialCoverage.map(
+			createStaticMaterialCoverageDiagnostics,
+		),
 		recentFailures,
 		summary: {
 			baking: snapshot.baking,
@@ -543,6 +547,48 @@ function createStaticCoordinatorDiagnosticsReport(
 			staleBakeResults: snapshot.staleBakeResults,
 			staleResolverResults: snapshot.staleResolverResults,
 		},
+	};
+}
+
+function createStaticMaterialCoverageDiagnostics(
+	coverage: StaticMaterialCoverageReport,
+): StaticCoordinatorDiagnosticsReport["materialCoverage"][number] {
+	return {
+		buckets: coverage.buckets.map((bucket) => ({
+			family: bucket.family,
+			materials: bucket.materialCount,
+			outcome: bucket.outcome,
+			partitions: bucket.partitionCount,
+			pass: bucket.pass,
+			textureRoles: bucket.textureRoleCount,
+			triangles: bucket.triangleCount,
+		})),
+		deferredTriangles: coverage.deferredTriangleCount,
+		detailRoleCount: coverage.detailRoleCount,
+		domain: coverage.domain,
+		fallbackReasonCount: coverage.fallbackReasonCount,
+		fallbackReasons: Object.fromEntries(
+			coverage.fallbackReasonCounts.map((reason) => [
+				reason.code,
+				reason.count,
+			]),
+		),
+		landblockId:
+			coverage.landblockId === null ? null : formatHex(coverage.landblockId),
+		materialCount: coverage.materialCount,
+		partitionCount: coverage.partitionCount,
+		renderedTriangles: coverage.renderedTriangleCount,
+		triangleCount: coverage.triangleCount,
+		unrenderedBuckets: coverage.unrenderedBuckets.map((bucket) => ({
+			family: bucket.family,
+			materials: bucket.materialCount,
+			outcome: bucket.outcome,
+			partitions: bucket.partitionCount,
+			pass: bucket.pass,
+			reasonCodes: bucket.reasonCodes,
+			triangles: bucket.triangleCount,
+		})),
+		unsupportedTriangles: coverage.unsupportedTriangleCount,
 	};
 }
 

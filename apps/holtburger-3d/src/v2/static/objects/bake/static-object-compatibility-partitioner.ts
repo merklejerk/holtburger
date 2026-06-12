@@ -1,11 +1,13 @@
 import type {
 	MaterialTextureDataUseIdentity,
 	OutdoorStaticObjectsScopePayload,
+	StaticMaterialCoverageReport,
 	StaticMaterialSourceIdentity,
 	StaticObjectInstanceIdentity,
 	StaticObjectPartSourceFacts,
 	StaticObjectSourceIdentity,
 } from "../../contracts";
+import { createStaticObjectMaterialCoverageReport } from "./static-object-material-coverage";
 import {
 	planStaticObjectMaterials,
 	type StaticObjectMaterialFallbackReason,
@@ -19,6 +21,7 @@ export interface StaticObjectCompatibilityPartitionPlan {
 	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
 	readonly partitions: readonly StaticObjectCompatibilityPartition[];
 	readonly fallbackReasons: readonly StaticObjectMaterialFallbackReason[];
+	readonly materialCoverage: StaticMaterialCoverageReport;
 }
 
 export interface StaticObjectCompatibilityPartition {
@@ -99,6 +102,11 @@ export function partitionStaticObjectCompatibility(
 	return {
 		domain: payload.domain,
 		fallbackReasons: materialPlan.fallbackReasons,
+		materialCoverage: createStaticObjectMaterialCoverageReport({
+			materialPlan,
+			partitions,
+			payload,
+		}),
 		partitions,
 	};
 }

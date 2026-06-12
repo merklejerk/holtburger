@@ -82,12 +82,11 @@ describe("V2 atlas texture packer", () => {
 		).toEqual([1, 1, 2, 2, 1, 1, 2, 2, 3, 3, 4, 4, 3, 3, 4, 4]);
 	});
 
-	it("wraps repeatable source pixels into explicit gutter padding", async () => {
+	it("wraps repeatable source pixels into explicit source-level gutter padding", async () => {
 		const result = await new AtlasTexturePacker().pack({
 			...createJob(),
 			page: {
 				format: "rgba8",
-				gutterEdgeMode: "repeat",
 				gutterPixels: 1,
 				height: 8,
 				width: 8,
@@ -103,6 +102,7 @@ describe("V2 atlas texture packer", () => {
 						]),
 						width: 2,
 					},
+					gutterEdgeMode: "repeat",
 					textureUseId: "terrain-color",
 				},
 			],

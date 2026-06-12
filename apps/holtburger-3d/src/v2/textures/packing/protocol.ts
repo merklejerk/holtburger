@@ -29,6 +29,7 @@ interface TexturePackingCohort {
 
 interface TexturePackingSource {
 	readonly textureUseId: string;
+	readonly gutterEdgeMode?: "clamp" | "repeat";
 	readonly source: TexturePackingPixelSource;
 }
 

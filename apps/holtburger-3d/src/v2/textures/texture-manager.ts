@@ -217,6 +217,7 @@ export class TextureManager {
 					registry,
 					textureUse,
 					createRuntimeTexturePagePolicy(textureUse),
+					firstPayload.job.domain,
 				);
 				return entry
 					? [
@@ -397,11 +398,16 @@ export class TextureManager {
 			registry,
 			source,
 			pagePolicy,
+			textureUse.domain,
 		);
 		if (existingSourceEntry) {
-			registry.entries.set(textureKey, existingSourceEntry);
+			const registryEntry = createRegistryEntryAliasForPagePolicy(
+				existingSourceEntry,
+				pagePolicy,
+			);
+			registry.entries.set(textureKey, registryEntry);
 			return {
-				entry: existingSourceEntry,
+				entry: registryEntry,
 				textureKey,
 			};
 		}
@@ -499,6 +505,9 @@ export class TextureManager {
 					page: createTexturePackingPageConstraints(group),
 					placementRevision,
 					sources: group.entries.map((entry) => ({
+						gutterEdgeMode: createTexturePackingSourceGutterEdgeMode(
+							entry.pagePolicy,
+						),
 						source: createTexturePackingPixelSource(entry.source),
 						textureUseId: entry.textureUse.textureUseId,
 					})),
@@ -554,6 +563,7 @@ export class TextureManager {
 					`Texture packing job for ${firstEntry.textureUse.textureUseId} did not return a rect.`,
 				);
 			}
+			const physicalWrapMode = createPhysicalTexturePageWrapMode(group);
 			const textureRefId =
 				pageEntries.length === 1
 					? createTextureRefId(
@@ -580,8 +590,8 @@ export class TextureManager {
 				samplerPolicyKey: group.samplerPolicy.policyKey,
 				textureRefId,
 				textureUseId: firstEntry.textureUse.textureUseId,
-				wrapS: group.pagePolicy.wrapS,
-				wrapT: group.pagePolicy.wrapT,
+				wrapS: physicalWrapMode.wrapS,
+				wrapT: physicalWrapMode.wrapT,
 				width: page.width,
 			});
 			for (const entry of pageEntries) {
@@ -607,8 +617,8 @@ export class TextureManager {
 					textureHeight: page.height,
 					textureRefId,
 					textureWidth: page.width,
-					wrapS: group.pagePolicy.wrapS,
-					wrapT: group.pagePolicy.wrapT,
+					wrapS: entry.pagePolicy.wrapS,
+					wrapT: entry.pagePolicy.wrapT,
 				};
 				entry.entry = registryEntry;
 				for (const textureKey of entry.textureKeys) {
@@ -720,6 +730,7 @@ interface TextureAtlasBatchFacts {
 	readonly multiSourcePageCount: number;
 	readonly approximateBytes: number;
 	readonly pages: readonly TextureAtlasPageFacts[];
+	readonly wrapModes: Record<RuntimeTexturePagePolicy["wrapS"], number>;
 }
 
 interface TextureAtlasPageFacts {
@@ -813,19 +824,36 @@ function findRegistryEntryBySource(
 	registry: StaticBatchTextureRegistry,
 	source: MaterialTextureDataUseIdentity,
 	pagePolicy: RuntimeTexturePagePolicy,
+	domain: StaticDomain,
 ): StaticBatchTextureRegistryEntry | null {
 	for (const entry of registry.entries.values()) {
 		if (
 			isSameMaterialTextureDataUse(entry.source, source) &&
 			entry.sampleClass === pagePolicy.sampleClass &&
-			entry.wrapS === pagePolicy.wrapS &&
-			entry.wrapT === pagePolicy.wrapT
+			(usesShaderVirtualWrap(domain, pagePolicy) ||
+				(entry.wrapS === pagePolicy.wrapS && entry.wrapT === pagePolicy.wrapT))
 		) {
 			return entry;
 		}
 	}
 
 	return null;
+}
+
+function createRegistryEntryAliasForPagePolicy(
+	entry: StaticBatchTextureRegistryEntry,
+	pagePolicy: RuntimeTexturePagePolicy,
+): StaticBatchTextureRegistryEntry {
+	if (entry.wrapS === pagePolicy.wrapS && entry.wrapT === pagePolicy.wrapT) {
+		return entry;
+	}
+
+	return {
+		...entry,
+		leaseCount: 0,
+		wrapS: pagePolicy.wrapS,
+		wrapT: pagePolicy.wrapT,
+	};
 }
 
 function uniqueSortedRegistryEntries(
@@ -1006,6 +1034,7 @@ function groupPendingTexturePlacements(
 	const groups = new Map<string, PendingTexturePlacementGroup>();
 	for (const placement of placements) {
 		const pageClassKey = createTexturePageClassKey(
+			placement.domain,
 			placement.pagePolicy,
 			placement.samplerPolicy,
 		);
@@ -1128,14 +1157,19 @@ function shouldUseIndependentTerrainPacking(
 }
 
 function createTexturePageClassKey(
+	domain: StaticDomain,
 	pagePolicy: RuntimeTexturePagePolicy,
 	samplerPolicy: RuntimeTextureSamplerPolicy,
 ): string {
-	return [
+	const keyParts = [
 		`sample:${pagePolicy.sampleClass}`,
-		`wrap:${pagePolicy.wrapS},${pagePolicy.wrapT}`,
 		`sampler:${samplerPolicy.policyKey}`,
-	].join("|");
+	];
+	if (!usesShaderVirtualWrap(domain, pagePolicy)) {
+		keyParts.splice(1, 0, `wrap:${pagePolicy.wrapS},${pagePolicy.wrapT}`);
+	}
+
+	return keyParts.join("|");
 }
 
 function createTexturePackingPageConstraints({
@@ -1157,15 +1191,43 @@ function createTexturePackingPageConstraints({
 			? { fillRgba: TERRAIN_COLOR_ATLAS_FILL_RGBA }
 			: {}),
 		format: createTexturePackingPageFormat(pagePolicy.sampleClass),
-		gutterEdgeMode:
-			pagePolicy.wrapS === "repeat" && pagePolicy.wrapT === "repeat"
-				? "repeat"
-				: "clamp",
+		gutterEdgeMode: "clamp",
 		gutterPixels,
 		height: MAX_RUNTIME_ATLAS_PAGE_SIZE,
 		pageSelection: "minimize-textures",
 		width: MAX_RUNTIME_ATLAS_PAGE_SIZE,
 	};
+}
+
+function createTexturePackingSourceGutterEdgeMode(
+	pagePolicy: RuntimeTexturePagePolicy,
+): TexturePackingJob["sources"][number]["gutterEdgeMode"] {
+	return pagePolicy.wrapS === "repeat" && pagePolicy.wrapT === "repeat"
+		? "repeat"
+		: "clamp";
+}
+
+function createPhysicalTexturePageWrapMode(
+	group: PendingTexturePlacementGroup,
+): Pick<RuntimeTexturePagePolicy, "wrapS" | "wrapT"> {
+	if (usesShaderVirtualWrap(group.domain, group.pagePolicy)) {
+		return {
+			wrapS: "clamp-to-edge",
+			wrapT: "clamp-to-edge",
+		};
+	}
+
+	return {
+		wrapS: group.pagePolicy.wrapS,
+		wrapT: group.pagePolicy.wrapT,
+	};
+}
+
+function usesShaderVirtualWrap(
+	domain: StaticDomain,
+	pagePolicy: RuntimeTexturePagePolicy,
+): boolean {
+	return domain !== "outdoor-terrain" && pagePolicy.sampleClass !== "rgba-mask";
 }
 
 function createTexturePackingPageFormat(
@@ -1236,6 +1298,7 @@ function createTextureAtlasBatchDiagnostics(
 		pages,
 		texturePageCount: pages.length,
 		uniqueSourceCount: countUniqueSources(entries),
+		wrapModes: countWrapModesForEntries(entries),
 	};
 }
 
@@ -1319,7 +1382,7 @@ function createTextureAtlasDomainDiagnostics(
 				uniqueSourceCount: countUniqueDomainSources(domainBatches),
 				unmippedPageCount: pages.filter((page) => !page.mipmapsGenerated)
 					.length,
-				wrapModes: countWrapModes(pages),
+				wrapModes: sumWrapModes(domainBatches),
 			};
 		})
 		.sort((left, right) => left.domain.localeCompare(right.domain));
@@ -1384,15 +1447,27 @@ function countSampleClasses(
 	};
 }
 
-function countWrapModes(
-	pages: readonly TextureAtlasPageFacts[],
+function sumWrapModes(
+	batches: readonly TextureAtlasBatchFacts[],
 ): TextureAtlasDiagnosticsReport["byDomain"][number]["wrapModes"] {
 	return {
-		"clamp-to-edge": pages.filter(
-			(page) => page.wrapS === "clamp-to-edge" && page.wrapT === "clamp-to-edge",
+		"clamp-to-edge": sumNumbers(
+			batches.map((batch) => batch.wrapModes["clamp-to-edge"]),
+		),
+		repeat: sumNumbers(batches.map((batch) => batch.wrapModes.repeat)),
+	};
+}
+
+function countWrapModesForEntries(
+	entries: readonly StaticBatchTextureRegistryEntry[],
+): TextureAtlasDiagnosticsReport["byDomain"][number]["wrapModes"] {
+	return {
+		"clamp-to-edge": entries.filter(
+			(entry) =>
+				entry.wrapS === "clamp-to-edge" && entry.wrapT === "clamp-to-edge",
 		).length,
-		repeat: pages.filter(
-			(page) => page.wrapS === "repeat" && page.wrapT === "repeat",
+		repeat: entries.filter(
+			(entry) => entry.wrapS === "repeat" && entry.wrapT === "repeat",
 		).length,
 	};
 }

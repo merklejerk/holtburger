@@ -2494,7 +2494,7 @@ Failed to close:
 
 ### Phase 11E2A3: Virtual Wrap Parity
 
-Status: planned.
+Status: completed.
 
 Purpose: restore v1-style shader-local clamp/repeat semantics so wrap intent does not unnecessarily split physical atlas pages.
 
@@ -2518,6 +2518,20 @@ Spicy notes:
 
 - Gutter policy and virtual wrap are related but not identical. The parity goal is shader-local wrap; any remaining gutter work should be explicit per-placement sampling/edge policy, not a hidden page bucket rule.
 - Terrain may need separate handling if its shader path already virtualizes some roles differently from static objects. Do not force fake universality; make the shared atlas rule explicit where it truly applies.
+
+Closed:
+
+- Static-object atlas page family keys now omit wrap mode when the renderer path uses shader-local virtual wrap. Terrain still keeps wrap in the physical bucket key until its shader/page-role path is proven equivalent.
+- Texture packing jobs now carry source-level gutter edge mode so repeat and clamp sources can share a page while still getting correct gutter pixels.
+- Runtime texture placements use clamp-to-edge as the physical page upload policy for virtual-wrap-capable static pages; authored wrap stays on the static object draw resource and registry entry.
+- Existing same-source static texture placements can be reused across later clamp/repeat authored wrap aliases without repacking, while diagnostics still count both wrap intents.
+- Texture atlas diagnostics now count wrap modes from registry entries/texture-use intent rather than page objects, so the summary no longer implies wrap mode is a physical atlas bucket.
+- Tests now prove static clamp/repeat color uses share one page, later authored wrap aliases reuse the existing rect, source-level gutter edge mode works, and terrain retains its existing physical wrap behavior.
+
+Failed to close:
+
+- No live WebGL screenshot or browser visual pass was run for this phase; validation is via typecheck, lint, dead-code lint, and unit tests.
+- Terrain virtual-wrap parity remains intentionally unclaimed. Terrain continues to use its current page-role shader/packing behavior until a terrain-specific phase proves wrap can be removed from those physical buckets too.
 
 ### Phase 11E2B: Indexed Palette Views And Visual Parity
 

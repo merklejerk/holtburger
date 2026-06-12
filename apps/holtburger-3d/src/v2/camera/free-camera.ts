@@ -28,7 +28,7 @@ export interface V2FreeCameraConfig {
 	readonly panScalePerPixelAtFocusDistance: number;
 }
 
-export const DEFAULT_V2_FREE_CAMERA_CONFIG: V2FreeCameraConfig = {
+const DEFAULT_V2_FREE_CAMERA_CONFIG: V2FreeCameraConfig = {
 	defaultPosition: [96, 120, 260],
 	defaultYawRadians: 0,
 	defaultPitchRadians: -0.45,

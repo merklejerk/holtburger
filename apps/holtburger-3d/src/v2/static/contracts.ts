@@ -17,7 +17,7 @@ export interface StaticLodRadii {
 	readonly topology: number;
 }
 
-export type StaticDemandLocation =
+type StaticDemandLocation =
 	| {
 			readonly kind: "outdoor-landblock";
 			readonly landblockId: number;
@@ -51,13 +51,13 @@ export interface StaticScopePayload {
 	readonly sourceRevision: number;
 }
 
-export type StaticScopePayloadBody =
+type StaticScopePayloadBody =
 	| DungeonStaticScopePayload
 	| LandblockTopologyStaticScopePayload
 	| TerrainStaticScopePayload
 	| PlaceholderStaticScopePayload;
 
-export interface PlaceholderStaticScopePayload {
+interface PlaceholderStaticScopePayload {
 	readonly kind: "placeholder";
 	readonly referencedTextureUses: readonly StaticTextureUseIdentity[];
 }
@@ -85,25 +85,25 @@ export type StaticResourceIdentity =
 	| PreparedTextureUseIdentity
 	| PaletteIdentity;
 
-export interface LandblockSourceIdentity {
+interface LandblockSourceIdentity {
 	readonly kind: "landblock-source";
 	readonly source: "outdoor" | "topology";
 	readonly landblockId: number;
 }
 
-export type LandblockClassification = "outdoor" | "dungeon";
+type LandblockClassification = "outdoor" | "dungeon";
 
-export interface EnvCellSourceIdentity {
+interface EnvCellSourceIdentity {
 	readonly kind: "env-cell-source";
 	readonly envCellId: number;
 }
 
-export interface EnvironmentIdentity {
+interface EnvironmentIdentity {
 	readonly kind: "environment";
 	readonly environmentId: number;
 }
 
-export interface CellStructureIdentity {
+interface CellStructureIdentity {
 	readonly kind: "cell-structure";
 	readonly cellStructureId: number;
 }
@@ -149,7 +149,7 @@ export type StaticTextureUseIdentity =
 	| PreparedTextureUseIdentity
 	| PaletteIdentity;
 
-export interface TerrainMeshSourceFacts {
+interface TerrainMeshSourceFacts {
 	readonly gridSize: number;
 	readonly tileSize: number;
 	readonly vertices: readonly TerrainMeshVertexFacts[];
@@ -193,12 +193,12 @@ export interface TerrainMeshQuadFacts {
 	readonly bounds: StaticBounds;
 }
 
-export interface StaticBounds {
+interface StaticBounds {
 	readonly min: StaticVec3;
 	readonly max: StaticVec3;
 }
 
-export interface StaticVec3 {
+interface StaticVec3 {
 	readonly x: number;
 	readonly y: number;
 	readonly z: number;
@@ -239,7 +239,7 @@ export interface TerrainRoadAlphaMapFacts {
 	readonly selector: number;
 }
 
-export interface RegionRenderProfileSourceFacts {
+interface RegionRenderProfileSourceFacts {
 	readonly identity: RegionRenderProfileIdentity;
 	readonly detailRoles: readonly RegionDetailRoleFacts[];
 }
@@ -272,7 +272,7 @@ export interface TerrainSourceSpatialFacts {
 	readonly terrainBvhItemCount: number;
 }
 
-export interface LandblockTopologyStaticScopePayload {
+interface LandblockTopologyStaticScopePayload {
 	readonly kind: "landblock-topology";
 	readonly landblock: LandblockSourceIdentity;
 	readonly classification: LandblockClassification;
@@ -282,7 +282,7 @@ export interface LandblockTopologyStaticScopePayload {
 	readonly missingRefs: readonly StaticResourceIdentity[];
 }
 
-export interface DungeonStaticScopePayload {
+interface DungeonStaticScopePayload {
 	readonly kind: "dungeon-static";
 	readonly landblock: LandblockSourceIdentity;
 	readonly classification: "dungeon";
@@ -291,7 +291,7 @@ export interface DungeonStaticScopePayload {
 	readonly missingRefs: readonly StaticResourceIdentity[];
 }
 
-export interface LandblockTopologyEnvCellFacts {
+interface LandblockTopologyEnvCellFacts {
 	readonly identity: EnvCellSourceIdentity;
 	readonly landblockId: number;
 	readonly memberId: string;
@@ -300,7 +300,7 @@ export interface LandblockTopologyEnvCellFacts {
 	readonly seenOutside: boolean | null;
 }
 
-export interface EnvCellStaticFacts {
+interface EnvCellStaticFacts {
 	readonly identity: EnvCellSourceIdentity;
 	readonly landblockId: number;
 	readonly environment: EnvironmentIdentity;
@@ -313,7 +313,7 @@ export interface EnvCellStaticFacts {
 	readonly localSpatial: EnvCellSpatialFacts;
 }
 
-export interface LandblockPortalLinkFacts {
+interface LandblockPortalLinkFacts {
 	readonly linkId: string;
 	readonly source: PortalEndpointIdentity;
 	readonly target: PortalEndpointIdentity;
@@ -322,7 +322,7 @@ export interface LandblockPortalLinkFacts {
 	readonly polygonId: number | null;
 }
 
-export type PortalEndpointIdentity =
+type PortalEndpointIdentity =
 	| {
 			readonly kind: "landblock-building";
 			readonly instanceId: string;
@@ -338,13 +338,13 @@ export type PortalEndpointIdentity =
 			readonly landblockId: number;
 	  };
 
-export interface LandblockTopologySpatialFacts {
+interface LandblockTopologySpatialFacts {
 	readonly coordinateSpace: "landblock-topology-residency";
 	readonly envCellResidencyBvhNodeCount: number;
 	readonly envCellResidencyBvhItemCount: number;
 }
 
-export interface EnvCellSpatialFacts {
+interface EnvCellSpatialFacts {
 	readonly coordinateSpace: "env-cell-local";
 	readonly localBvhNodeCount: number;
 	readonly localBvhItemCount: number;
@@ -394,7 +394,7 @@ export type StaticDrawUnit =
 	| TerrainGeometryStaticDrawUnit
 	| PlaceholderStaticDrawUnit;
 
-export interface PlaceholderStaticDrawUnit {
+interface PlaceholderStaticDrawUnit {
 	readonly kind: "placeholder";
 	readonly drawUnitId: string;
 }
@@ -451,19 +451,19 @@ export interface TerrainMaterialTextureRoleBinding {
 	readonly wrap: "repeat" | "clamp";
 }
 
-export interface TerrainMaterialOverlayBinding {
+interface TerrainMaterialOverlayBinding {
 	readonly terrain: TerrainMaterialTextureRoleBinding;
 	readonly alpha: TerrainMaterialTextureRoleBinding;
 	readonly rotation: number;
 }
 
-export interface TerrainMaterialRoadBinding {
+interface TerrainMaterialRoadBinding {
 	readonly road: TerrainMaterialTextureRoleBinding;
 	readonly alpha: TerrainMaterialTextureRoleBinding;
 	readonly rotation: number;
 }
 
-export interface TerrainMaterialDetailRole {
+interface TerrainMaterialDetailRole {
 	readonly role: RegionDetailRoleFacts["role"];
 	readonly texture: TerrainMaterialTextureRoleBinding;
 	readonly fadeNear: number;

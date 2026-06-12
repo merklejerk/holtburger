@@ -280,7 +280,7 @@ export function deriveVisibleMaterialAssetIdsForBrowserDestination(input: {
 	});
 }
 
-export function deriveAllVisibleMaterialAssetIdsForSceneInterest(input: {
+function deriveAllVisibleMaterialAssetIdsForSceneInterest(input: {
 	sceneInterest: SceneResourceInterest;
 	preparedAssets: PreparedAssetResolver;
 	materialTexturePreparationPolicy?: MaterialTexturePreparationPolicy;
@@ -621,7 +621,7 @@ function createStaticRenderableAssetRequests(
 	];
 }
 
-export function deriveTopologyEnvCellIdsForLandblocks(
+function deriveTopologyEnvCellIdsForLandblocks(
 	preparedAssets: PreparedAssetResolver,
 	activeLandblockIds: ReadonlySet<number>,
 ): Set<number> {

@@ -18,7 +18,7 @@ export const WORLD_RENDER_CATEGORY = {
 	debugOverlay: "debug-overlay",
 } as const;
 
-export type WorldRenderCategory =
+type WorldRenderCategory =
 	(typeof WORLD_RENDER_CATEGORY)[keyof typeof WORLD_RENDER_CATEGORY];
 
 export const WORLD_RENDER_CANDIDATE_KIND = {
@@ -27,7 +27,7 @@ export const WORLD_RENDER_CANDIDATE_KIND = {
 	portalMask: "portal-mask",
 } as const;
 
-export type WorldRenderCandidateKind =
+type WorldRenderCandidateKind =
 	(typeof WORLD_RENDER_CANDIDATE_KIND)[keyof typeof WORLD_RENDER_CANDIDATE_KIND];
 
 export const WORLD_RENDER_DRAW_KIND = {
@@ -36,14 +36,11 @@ export const WORLD_RENDER_DRAW_KIND = {
 	transitionPortalMask: "transition-portal-mask",
 } as const;
 
-export type WorldRenderDrawKind =
-	(typeof WORLD_RENDER_DRAW_KIND)[keyof typeof WORLD_RENDER_DRAW_KIND];
-
 export const WORLD_RENDER_PASS_ID = {
 	world: "world",
 } as const;
 
-export type WorldRenderPassId =
+type WorldRenderPassId =
 	(typeof WORLD_RENDER_PASS_ID)[keyof typeof WORLD_RENDER_PASS_ID];
 
 export interface WorldRenderCandidate {
@@ -76,7 +73,7 @@ interface SelectedWorldRenderDraw {
 	category: WorldRenderCategory;
 }
 
-export interface WorldRenderPass {
+interface WorldRenderPass {
 	id: WorldRenderPassId;
 	draws: WorldRenderDraw[];
 }

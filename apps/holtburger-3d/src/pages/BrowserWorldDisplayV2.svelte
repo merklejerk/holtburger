@@ -30,11 +30,17 @@
 		RuntimeSnapshot,
 	} from "../v2/runtime/client-runtime";
 	import type { TextureFilteringMode } from "../v2/textures/sampling-policy";
+	import PerformanceOverlay from "../v2/ui/PerformanceOverlay.svelte";
+	import {
+		PerformanceMetricsTracker,
+		type PerformanceMetricsSnapshot,
+	} from "../v2/ui/performance-metrics";
 
-	type BrowserV2PanelTab = "navigate" | "coverage" | "static" | "status";
+	type BrowserV2PanelTab = "navigate" | "settings" | "debug";
 
 	const STATIC_INTEREST_REFRESH_DEBOUNCE_MS = 250;
 	const PERF_OVERLAY_SAMPLE_MS = 500;
+	const PERF_OVERLAY_EMA_ALPHA = 0.18;
 	const TEXTURE_FILTERING_OPTIONS: readonly TextureFilteringMode[] = [
 		"nearest",
 		"linear",
@@ -67,15 +73,15 @@
 	);
 	let selectedTextureFilteringMode =
 		$state<TextureFilteringMode>("anisotropic-4x");
-	let perfOverlay = $state({
+	let performanceMetrics = $state<PerformanceMetricsSnapshot>({
 		fps: 0,
 		frameMs: 0,
-		frameCount: 0,
+		handlerMs: 0,
 	});
-	let perfSample = {
-		frameCount: 0,
-		timeMs: 0,
-	};
+	const performanceMetricsTracker = new PerformanceMetricsTracker({
+		emaAlpha: PERF_OVERLAY_EMA_ALPHA,
+		sampleMs: PERF_OVERLAY_SAMPLE_MS,
+	});
 	const parsedLocation = $derived(
 		parseV2LocationInput(locationInput, landblockInputMode),
 	);
@@ -102,7 +108,9 @@
 				snapshot = nextSnapshot;
 				selectedTextureFilteringMode =
 					nextSnapshot.renderPolicy.textureFilteringMode;
-				updatePerfOverlay(nextSnapshot);
+				performanceMetrics = performanceMetricsTracker.update(
+					nextSnapshot.renderer,
+				);
 			});
 			const frameInterval = window.setInterval(() => {
 				runtime?.updateFrameState({
@@ -331,41 +339,6 @@
 		staticInterestRefreshTimer = null;
 	}
 
-	function updatePerfOverlay(nextSnapshot: RuntimeSnapshot): void {
-		const nowMs = performance.now();
-		if (perfSample.timeMs === 0) {
-			perfSample = {
-				frameCount: nextSnapshot.renderer.frameCount,
-				timeMs: nowMs,
-			};
-			perfOverlay = {
-				...perfOverlay,
-				frameCount: nextSnapshot.renderer.frameCount,
-			};
-			return;
-		}
-
-		const elapsedMs = nowMs - perfSample.timeMs;
-		const frameDelta = nextSnapshot.renderer.frameCount - perfSample.frameCount;
-		if (elapsedMs < PERF_OVERLAY_SAMPLE_MS || frameDelta <= 0) {
-			perfOverlay = {
-				...perfOverlay,
-				frameCount: nextSnapshot.renderer.frameCount,
-			};
-			return;
-		}
-
-		perfOverlay = {
-			fps: (frameDelta * 1000) / elapsedMs,
-			frameCount: nextSnapshot.renderer.frameCount,
-			frameMs: elapsedMs / frameDelta,
-		};
-		perfSample = {
-			frameCount: nextSnapshot.renderer.frameCount,
-			timeMs: nowMs,
-		};
-	}
-
 	function formatCameraPosition(
 		position: readonly [number, number, number],
 	): string {
@@ -481,11 +454,7 @@
 >
 	<canvas bind:this={canvasElement} class="browser-v2__canvas"></canvas>
 
-	<div class="browser-v2__perf" aria-label="Renderer performance">
-		<span>{perfOverlay.fps.toFixed(1)} FPS</span>
-		<span>{perfOverlay.frameMs.toFixed(1)} ms</span>
-		<span>f{perfOverlay.frameCount}</span>
-	</div>
+	<PerformanceOverlay metrics={performanceMetrics} />
 
 	<aside
 		class:browser-v2__panel--collapsed={panelCollapsed}
@@ -527,44 +496,39 @@
 					type="button"
 					role="tab"
 					aria-selected={activeTab === "navigate"}
+					aria-label="Navigate"
+					title="Navigate"
 					onclick={() => {
 						activeTab = "navigate";
 					}}
 				>
-					Navigate
+					<span aria-hidden="true">⌖</span>
 				</button>
 				<button
-					class:active={activeTab === "static"}
+					class:active={activeTab === "settings"}
 					type="button"
 					role="tab"
-					aria-selected={activeTab === "static"}
+					aria-selected={activeTab === "settings"}
+					aria-label="Settings"
+					title="Settings"
 					onclick={() => {
-						activeTab = "static";
+						activeTab = "settings";
 					}}
 				>
-					Static
+					<span aria-hidden="true">⚙</span>
 				</button>
 				<button
-					class:active={activeTab === "coverage"}
+					class:active={activeTab === "debug"}
 					type="button"
 					role="tab"
-					aria-selected={activeTab === "coverage"}
+					aria-selected={activeTab === "debug"}
+					aria-label="Debug"
+					title="Debug"
 					onclick={() => {
-						activeTab = "coverage";
+						activeTab = "debug";
 					}}
 				>
-					Coverage
-				</button>
-				<button
-					class:active={activeTab === "status"}
-					type="button"
-					role="tab"
-					aria-selected={activeTab === "status"}
-					onclick={() => {
-						activeTab = "status";
-					}}
-				>
-					Status
+					<span aria-hidden="true">◌</span>
 				</button>
 			</div>
 
@@ -645,8 +609,60 @@
 						</button>
 					</form>
 				</div>
-			{:else if activeTab === "coverage"}
+			{:else if activeTab === "settings"}
 				<div class="browser-v2__tab-panel" role="tabpanel">
+					<div class="browser-v2__toggles" aria-label="Static domains">
+						<label>
+							<input
+								bind:checked={terrainEnabled}
+								disabled={parsedIsInterior}
+								type="checkbox"
+								onchange={handleStaticDomainChange}
+							/>
+							<span>Terrain</span>
+						</label>
+						<label>
+							<input
+								bind:checked={buildingsEnabled}
+								disabled={parsedIsInterior}
+								type="checkbox"
+								onchange={handleStaticDomainChange}
+							/>
+							<span>Buildings</span>
+						</label>
+						<label>
+							<input
+								bind:checked={detailEnabled}
+								disabled={parsedIsInterior}
+								type="checkbox"
+								onchange={handleStaticDomainChange}
+							/>
+							<span>Detail</span>
+						</label>
+						<label>
+							<input
+								bind:checked={topologyEnabled}
+								disabled={parsedIsInterior}
+								type="checkbox"
+								onchange={handleStaticDomainChange}
+							/>
+							<span>Topology</span>
+						</label>
+					</div>
+
+					<label class="browser-v2__field">
+						<span>Filtering</span>
+						<select
+							bind:value={selectedTextureFilteringMode}
+							disabled={!runtime}
+							onchange={setTextureFilteringMode}
+						>
+							{#each TEXTURE_FILTERING_OPTIONS as option}
+								<option value={option}>{option}</option>
+							{/each}
+						</select>
+					</label>
+
 					<label class="browser-v2__range">
 						<span>Terrain distance</span>
 						<strong>
@@ -721,57 +737,8 @@
 							</dd>
 						</div>
 					</dl>
-				</div>
-			{:else if activeTab === "static"}
-				<div class="browser-v2__tab-panel" role="tabpanel">
-					<div class="browser-v2__toggles" aria-label="Static domains">
-						<label>
-							<input
-								bind:checked={terrainEnabled}
-								disabled={parsedIsInterior}
-								type="checkbox"
-								onchange={handleStaticDomainChange}
-							/>
-							<span>Terrain</span>
-						</label>
-						<label>
-							<input
-								bind:checked={buildingsEnabled}
-								disabled={parsedIsInterior}
-								type="checkbox"
-								onchange={handleStaticDomainChange}
-							/>
-							<span>Buildings</span>
-						</label>
-						<label>
-							<input
-								bind:checked={detailEnabled}
-								disabled={parsedIsInterior}
-								type="checkbox"
-								onchange={handleStaticDomainChange}
-							/>
-							<span>Detail</span>
-						</label>
-						<label>
-							<input
-								bind:checked={topologyEnabled}
-								disabled={parsedIsInterior}
-								type="checkbox"
-								onchange={handleStaticDomainChange}
-							/>
-							<span>Topology</span>
-						</label>
-					</div>
 
 					<div class="browser-v2__actions browser-v2__actions--single">
-						<button
-							class="browser-v2__request"
-							disabled={!canRequestStaticWork()}
-							type="button"
-							onclick={requestStaticWork}
-						>
-							Request Static Scope
-						</button>
 						<button disabled={!runtime} type="button" onclick={evictStaticWork}>
 							Evict
 						</button>
@@ -779,8 +746,26 @@
 							Reset Camera
 						</button>
 					</div>
+				</div>
+			{:else}
+				<div class="browser-v2__tab-panel" role="tabpanel">
+					<div class="browser-v2__actions browser-v2__actions--single">
+						<button
+							disabled={!runtime}
+							type="button"
+							onclick={openDiagnosticsReport}
+						>
+							Diagnostics Report
+						</button>
+					</div>
 
 					<dl class="browser-v2__status">
+						<div>
+							<dt>Filtering</dt>
+							<dd>
+								{snapshot?.renderPolicy.textureFilteringMode ?? "starting"}
+							</dd>
+						</div>
 						<div>
 							<dt>Static</dt>
 							<dd>
@@ -792,6 +777,35 @@
 									pending
 								{/if}
 							</dd>
+						</div>
+						<div>
+							<dt>Status</dt>
+							<dd>{snapshot?.status ?? "starting"}</dd>
+						</div>
+						<div>
+							<dt>Resolver failure</dt>
+							<dd>
+								{snapshot?.static.latestResolverFailure?.message ?? "none"}
+							</dd>
+						</div>
+						<div>
+							<dt>Host</dt>
+							<dd>{snapshot?.host.isAvailable ? "tauri" : "unavailable"}</dd>
+						</div>
+						<div>
+							<dt>Assets</dt>
+							<dd>
+								{#if snapshot}
+									p{snapshot.assets.pending.length} c{snapshot.assets.committed
+										.length} f{snapshot.assets.failures.length}
+								{:else}
+									pending
+								{/if}
+							</dd>
+						</div>
+						<div>
+							<dt>Renderer</dt>
+							<dd>{snapshot?.renderer.backend ?? "none"}</dd>
 						</div>
 						<div>
 							<dt>Terrain payload</dt>
@@ -847,62 +861,6 @@
 								{/if}
 							</dd>
 						</div>
-					</dl>
-				</div>
-			{:else}
-				<div class="browser-v2__tab-panel" role="tabpanel">
-					<div class="browser-v2__actions">
-						<label class="browser-v2__field browser-v2__field--inline">
-							<span>Filtering</span>
-							<select
-								bind:value={selectedTextureFilteringMode}
-								disabled={!runtime}
-								onchange={setTextureFilteringMode}
-							>
-								{#each TEXTURE_FILTERING_OPTIONS as option}
-									<option value={option}>{option}</option>
-								{/each}
-							</select>
-						</label>
-						<button disabled={!runtime} type="button" onclick={openDiagnosticsReport}>
-							Diagnostics Report
-						</button>
-					</div>
-
-					<dl class="browser-v2__status">
-						<div>
-							<dt>Filtering</dt>
-							<dd>{snapshot?.renderPolicy.textureFilteringMode ?? "starting"}</dd>
-						</div>
-						<div>
-							<dt>Status</dt>
-							<dd>{snapshot?.status ?? "starting"}</dd>
-						</div>
-						<div>
-							<dt>Resolver failure</dt>
-							<dd>
-								{snapshot?.static.latestResolverFailure?.message ?? "none"}
-							</dd>
-						</div>
-						<div>
-							<dt>Host</dt>
-							<dd>{snapshot?.host.isAvailable ? "tauri" : "unavailable"}</dd>
-						</div>
-						<div>
-							<dt>Assets</dt>
-							<dd>
-								{#if snapshot}
-									p{snapshot.assets.pending.length} c{snapshot.assets.committed
-										.length} f{snapshot.assets.failures.length}
-								{:else}
-									pending
-								{/if}
-							</dd>
-						</div>
-						<div>
-							<dt>Renderer</dt>
-							<dd>{snapshot?.renderer.backend ?? "none"}</dd>
-						</div>
 						<div>
 							<dt>Camera</dt>
 							<dd>
@@ -932,8 +890,12 @@
 							</dd>
 						</div>
 						<div>
-							<dt>Frames</dt>
-							<dd>{snapshot?.renderer.frameCount ?? 0}</dd>
+							<dt>Frame handler</dt>
+							<dd>
+								{snapshot
+									? `${snapshot.renderer.frameHandlerMs.toFixed(2)} ms`
+									: "pending"}
+							</dd>
 						</div>
 					</dl>
 				</div>
@@ -1005,27 +967,6 @@
 		height: 100%;
 	}
 
-	.browser-v2__perf {
-		position: absolute;
-		top: 16px;
-		left: 16px;
-		z-index: 1;
-		display: flex;
-		gap: 8px;
-		align-items: center;
-		padding: 6px 8px;
-		border: 1px solid rgba(255, 214, 102, 0.65);
-		border-radius: 4px;
-		background: rgba(4, 12, 11, 0.86);
-		box-shadow:
-			0 0 0 1px rgba(0, 0, 0, 0.7),
-			0 10px 28px rgba(0, 0, 0, 0.38);
-		color: #fff7cf;
-		font-size: 11px;
-		line-height: 1;
-		pointer-events: none;
-	}
-
 	.browser-v2__panel {
 		position: absolute;
 		top: 16px;
@@ -1090,7 +1031,8 @@
 	}
 
 	button,
-	input {
+	input,
+	select {
 		font: inherit;
 	}
 
@@ -1120,7 +1062,8 @@
 	}
 
 	.browser-v2 button:disabled,
-	input:disabled {
+	input:disabled,
+	select:disabled {
 		cursor: not-allowed;
 		opacity: 0.48;
 	}
@@ -1135,7 +1078,7 @@
 
 	.browser-v2__tabs {
 		display: grid;
-		grid-template-columns: repeat(4, minmax(0, 1fr));
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 5px;
 		margin-bottom: 10px;
 	}
@@ -1143,7 +1086,8 @@
 	.browser-v2__tabs button {
 		min-height: 28px;
 		padding: 0 6px;
-		font-size: 11px;
+		font-size: 15px;
+		line-height: 1;
 	}
 
 	.browser-v2__tab-panel {
@@ -1164,11 +1108,6 @@
 		gap: 5px;
 	}
 
-	.browser-v2__field--inline {
-		align-items: center;
-		grid-template-columns: auto minmax(0, 1fr);
-	}
-
 	.browser-v2__field span,
 	.browser-v2__range span {
 		color: #75ffd1;
@@ -1178,15 +1117,36 @@
 
 	.browser-v2__field input,
 	.browser-v2__field select {
+		appearance: none;
 		width: 100%;
+		min-width: 0;
 		box-sizing: border-box;
 		border: 1px solid rgba(91, 255, 187, 0.48);
 		border-radius: 4px;
-		background: rgba(1, 9, 8, 0.9);
+		background:
+			linear-gradient(180deg, rgba(9, 38, 31, 0.96), rgba(1, 9, 8, 0.94)),
+			rgba(1, 9, 8, 0.94);
 		color: #f1fff6;
 		padding: 7px 9px;
 		font-size: 12px;
 		outline: none;
+		color-scheme: dark;
+	}
+
+	.browser-v2__field select {
+		padding-right: 26px;
+		background:
+			linear-gradient(45deg, transparent 50%, #75ffd1 50%) right 12px top 12px /
+				5px 5px no-repeat,
+			linear-gradient(135deg, #75ffd1 50%, transparent 50%) right 7px top 12px /
+				5px 5px no-repeat,
+			linear-gradient(180deg, rgba(9, 38, 31, 0.96), rgba(1, 9, 8, 0.94)),
+			rgba(1, 9, 8, 0.94);
+	}
+
+	.browser-v2__field select option {
+		background: #06130f;
+		color: #f1fff6;
 	}
 
 	.browser-v2__field input:focus,
@@ -1200,10 +1160,6 @@
 		display: grid;
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 		gap: 6px;
-	}
-
-	.browser-v2__actions {
-		grid-template-columns: 1fr 0.65fr 0.9fr;
 	}
 
 	.browser-v2__actions--single {
@@ -1351,8 +1307,12 @@
 		border-radius: 4px;
 		background: rgba(1, 9, 8, 0.88);
 		color: #f1fff6;
-		font: 11px/1.45 "IBM Plex Mono", "SFMono-Regular", Consolas,
-			"Liberation Mono", monospace;
+		font:
+			11px/1.45 "IBM Plex Mono",
+			"SFMono-Regular",
+			Consolas,
+			"Liberation Mono",
+			monospace;
 		outline: none;
 		white-space: pre;
 	}
@@ -1377,10 +1337,6 @@
 			right: 10px;
 			width: auto;
 			max-height: none;
-		}
-
-		.browser-v2__tabs {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
 
 		.browser-v2__actions,

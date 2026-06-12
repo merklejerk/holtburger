@@ -5,7 +5,7 @@ export interface AtlasLayoutPolicy {
 	pageSelection?: AtlasLayoutPageSelection;
 }
 
-export type AtlasLayoutPageSelection = "minimize-memory" | "minimize-textures";
+type AtlasLayoutPageSelection = "minimize-memory" | "minimize-textures";
 
 export interface AtlasLayoutEntry {
 	key: string;

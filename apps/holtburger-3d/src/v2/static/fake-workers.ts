@@ -1,5 +1,4 @@
 import type {
-	StaticAtlasBatchSnapshot,
 	StaticBakeBatchInput,
 	StaticBakeBatchResult,
 	StaticBakerClient,
@@ -7,7 +6,6 @@ import type {
 	StaticResolverClient,
 	StaticResolverJob,
 	StaticScopePayload,
-	ScheduledStaticWork,
 } from "./contracts";
 
 export class DeferredStaticResolverClient implements StaticResolverClient {
@@ -211,19 +209,6 @@ export class ImmediateStaticBakerClient implements StaticBakerClient {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
 		return createFakeStaticBakeResult(input);
 	}
-}
-
-export function createEmptyAtlasSnapshot(
-	work: ScheduledStaticWork,
-	staticBatchId: string,
-	textureUses: StaticAtlasBatchSnapshot["textureUses"],
-): StaticAtlasBatchSnapshot {
-	return {
-		domain: work.job.domain,
-		placements: [],
-		staticBatchId,
-		textureUses,
-	};
 }
 
 function createFakeStaticBakeResult(

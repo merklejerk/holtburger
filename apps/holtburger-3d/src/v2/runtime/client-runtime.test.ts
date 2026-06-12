@@ -362,9 +362,9 @@ describe("V2 client runtime", () => {
 			failed: [{ message: "prepared texture unavailable", revision: 1 }],
 			pendingRevisions: [],
 		});
-		expect(runtime.createDiagnosticsReport().runtime.failedStaticMaterializations).toEqual([
-			{ message: "prepared texture unavailable", revision: 1 },
-		]);
+		expect(
+			runtime.createDiagnosticsReport().runtime.failedStaticMaterializations,
+		).toEqual([{ message: "prepared texture unavailable", revision: 1 }]);
 		expect(runtime.createDiagnosticsReport().domains).toContainEqual({
 			kind: "terrain-textures",
 			recentFallbacks: [],
@@ -442,6 +442,7 @@ class FakeRenderer implements Renderer {
 		canvasWidth: 1,
 		error: null,
 		frameCount: 0,
+		frameHandlerMs: 0,
 		isRunning: true,
 		renderedTriangles: 0,
 		staticDrawUnits: 0,

@@ -46,11 +46,6 @@ export type StaticResolverWorkerResponse = Extract<
 	{ readonly kind: "static-scope-resolved" | "static-scope-resolve-failed" }
 >;
 
-export type StaticResolverHostLookupRequest = Extract<
-	StaticResolverWorkerThreadMessage,
-	{ readonly kind: "host-asset-lookup-requested" }
->;
-
 export type StaticResolverHostLookupResponse = Extract<
 	StaticResolverWorkerMainMessage,
 	{

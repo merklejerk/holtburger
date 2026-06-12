@@ -861,14 +861,6 @@ export interface PreparedAssetDependencyStatus {
 	pendingAssetIds: string[];
 }
 
-export function describePreparedAssetPayload(
-	payload: PreparedAssetPayload,
-): string {
-	return "debugPresentation" in payload
-		? (payload.debugPresentation?.primitive ?? payload.kind)
-		: payload.kind;
-}
-
 export function getPreparedAssetDependencies(
 	asset: PreparedAssetRecord,
 ): PreparedAssetDependency[] {
@@ -1000,48 +992,6 @@ function uniqueSortedAssetIds(
 	assetIds: readonly string[],
 ): PreparedAssetDependency[] {
 	return [...new Set(assetIds)].sort().map((assetId) => ({ assetId }));
-}
-
-export function derivePreparedAssetDependencyStatus(
-	asset: PreparedAssetRecord,
-	preparedByAssetId: Record<string, PreparedAssetRecord>,
-	pendingAssetIds: string[] = [],
-): PreparedAssetDependencyStatus {
-	const pendingAssetIdSet = new Set(pendingAssetIds);
-	const dependencyAssetIds = getPreparedAssetDependencies(asset).map(
-		(dependency) => dependency.assetId,
-	);
-	const readyAssetIds = dependencyAssetIds.filter(
-		(assetId) => preparedByAssetId[assetId] !== undefined,
-	);
-	const missingAssetIds = dependencyAssetIds.filter(
-		(assetId) =>
-			preparedByAssetId[assetId] === undefined &&
-			!pendingAssetIdSet.has(assetId),
-	);
-	const pendingDependencyAssetIds = dependencyAssetIds.filter(
-		(assetId) =>
-			preparedByAssetId[assetId] === undefined &&
-			pendingAssetIdSet.has(assetId),
-	);
-
-	if (missingAssetIds.length === 0 && pendingDependencyAssetIds.length === 0) {
-		return {
-			status: "ready",
-			dependencyAssetIds,
-			readyAssetIds,
-			missingAssetIds,
-			pendingAssetIds: pendingDependencyAssetIds,
-		};
-	}
-
-	return {
-		status: readyAssetIds.length > 0 ? "partial-ready" : "awaiting-dependency",
-		dependencyAssetIds,
-		readyAssetIds,
-		missingAssetIds,
-		pendingAssetIds: pendingDependencyAssetIds,
-	};
 }
 
 type AssetActivityStatus = "requested" | "prepared" | "failed";

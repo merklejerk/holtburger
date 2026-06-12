@@ -56,7 +56,7 @@ export type VirtualTexturePageEntryRole = TexturePageEntryRole;
 
 export type VirtualTexturePageSampleClass = TexturePageSampleClass;
 
-export type StaticBundleIndexedTextureFormat = IndexedTextureFormat;
+type StaticBundleIndexedTextureFormat = IndexedTextureFormat;
 
 export interface VirtualTexturePageRef {
 	key: string;
@@ -73,7 +73,7 @@ export interface VirtualTexturePageRef {
 	bytes?: Uint8Array;
 }
 
-export type StaticBundleTexturePageKind = TexturePageKind;
+type StaticBundleTexturePageKind = TexturePageKind;
 
 interface StaticBundleTexturePageEntry {
 	sourcePlacementKey: string;

@@ -11,30 +11,26 @@ export type TexturePageSampleClass =
 	| "palette-data"
 	| "control-data";
 export type TexturePageWrapMode = "clamp" | "repeat";
-export type TexturePageFilterPolicy = "linear" | "nearest" | "material-policy";
-export type TexturePageMipPolicy = "generated" | "none" | "material-policy";
+type TexturePageFilterPolicy = "linear" | "nearest" | "material-policy";
+type TexturePageMipPolicy = "generated" | "none" | "material-policy";
 export type TexturePageSamplingDomain = "color" | "data" | "control";
 export type TexturePageLookupPolicy =
 	| "color-filtered"
 	| "exact"
 	| "control-filtered";
 
-export const STATIC_TEXTURE_PAGE_BUCKETS = [
-	"static-base-color",
-	"static-detail",
-	"static-indexed-texels",
-	"static-palette-lookup",
-	"static-alpha-control",
-] as const;
-
-export const TERRAIN_TEXTURE_PAGE_BUCKETS = [
+const TERRAIN_TEXTURE_PAGE_BUCKETS = [
 	"terrain-color",
 	"terrain-mask",
 	"terrain-detail",
 ] as const;
 
 export type StaticTexturePageBucket =
-	(typeof STATIC_TEXTURE_PAGE_BUCKETS)[number];
+	| "static-base-color"
+	| "static-detail"
+	| "static-indexed-texels"
+	| "static-palette-lookup"
+	| "static-alpha-control";
 
 export type TerrainTexturePageBucket =
 	(typeof TERRAIN_TEXTURE_PAGE_BUCKETS)[number];
@@ -87,7 +83,7 @@ export function deriveStaticTexturePageBucket(options: {
 	);
 }
 
-export interface TexturePageSamplingPolicy {
+interface TexturePageSamplingPolicy {
 	wrapS: TexturePageWrapMode;
 	wrapT: TexturePageWrapMode;
 	minFilter: TexturePageFilterPolicy;
@@ -97,7 +93,7 @@ export interface TexturePageSamplingPolicy {
 	lookup: TexturePageLookupPolicy;
 }
 
-export type TexturePageBindingSource =
+type TexturePageBindingSource =
 	| "standalone-direct-texture"
 	| "shared-packed-page"
 	| "detail-overlay"

@@ -7,7 +7,7 @@ export type RenderUploadDiagnosticFamily =
 	| "cell-structures"
 	| "portal-masks";
 
-export type RenderFamilyDiagnosticFamily = RenderUploadDiagnosticFamily;
+type RenderFamilyDiagnosticFamily = RenderUploadDiagnosticFamily;
 
 export type RenderArtifactDiagnosticFamily =
 	| "terrain"

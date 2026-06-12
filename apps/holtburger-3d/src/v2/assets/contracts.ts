@@ -45,13 +45,13 @@ export interface AssetServiceSnapshot {
 	readonly failures: readonly FailedAssetSnapshot[];
 }
 
-export interface PendingAssetSnapshot {
+interface PendingAssetSnapshot {
 	readonly key: HostAssetKey;
 	readonly revision: number;
 	readonly waiterCount: number;
 }
 
-export interface CommittedAssetSnapshot {
+interface CommittedAssetSnapshot {
 	readonly key: HostAssetKey;
 	readonly revision: number;
 	readonly leaseCount: number;

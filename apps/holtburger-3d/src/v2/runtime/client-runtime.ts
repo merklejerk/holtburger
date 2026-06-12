@@ -4,15 +4,9 @@ import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
 import type {
 	Renderer,
 	RendererSnapshot,
-	StaticResidencyDelta,
-	TexturePlacementUpdate,
 } from "../renderer/types";
 import type { FrameState } from "../renderer/types";
-import {
-	OUTDOOR_LANDBLOCK_WORLD_SIZE,
-	getOutdoorLandblockCoords,
-	normalizeOutdoorLandblockId,
-} from "../../lib/landblocks";
+import { normalizeOutdoorLandblockId } from "../../lib/landblocks";
 import { TextureManager } from "../textures/texture-manager";
 import type { TexturePacker } from "../textures/packing/packer";
 import type { TextureFilteringMode } from "../textures/sampling-policy";
@@ -33,11 +27,14 @@ import type {
 	StaticCoordinatorSnapshot,
 	StaticCoordinatorCommitDelta,
 	StaticDemand,
-	StaticDrawUnit,
 	StaticLodRadii,
 	StaticMaterialCoverageReport,
 	ScheduledStaticWorkStatus,
 } from "../static/contracts";
+import {
+	materializeStaticCommit,
+	type StaticMaterializationResult,
+} from "./static-materializer";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
@@ -360,12 +357,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 			return;
 		}
 
-		const staticDelta = createStaticResidencyDelta(
-			delta,
-			this.#renderAnchorLandblockId,
-		);
+		const materialized = materializeStaticCommit({
+			commit: delta,
+			renderAnchorLandblockId: this.#renderAnchorLandblockId,
+			textureUpdate,
+		});
 		this.#warnAboutStaticFallbacks(delta);
-		applyMaterializedStaticCommit(this.#renderer, textureUpdate, staticDelta);
+		applyMaterializedStaticCommit(this.#renderer, materialized);
 		this.#pendingStaticMaterializations.delete(delta.revision);
 		this.#committedStaticMaterializations = appendBoundedRevision(
 			this.#committedStaticMaterializations,
@@ -437,30 +435,12 @@ function createTerrainTextureDiagnosticsReport(
 
 function applyMaterializedStaticCommit(
 	renderer: Renderer,
-	textureUpdate: TexturePlacementUpdate | null,
-	staticDelta: StaticResidencyDelta,
+	materialized: StaticMaterializationResult,
 ): void {
-	if (textureUpdate) {
-		renderer.applyTexturePlacementUpdate(textureUpdate);
+	if (materialized.textureUpdate) {
+		renderer.applyTexturePlacementUpdate(materialized.textureUpdate);
 	}
-	renderer.applyStaticDelta(staticDelta);
-}
-
-function createStaticResidencyDelta(
-	delta: StaticCoordinatorCommitDelta,
-	renderAnchorLandblockId: number | null,
-): StaticResidencyDelta {
-	return {
-		addedDrawUnitPlacements: delta.addedDrawUnits.map((drawUnit) => ({
-			drawUnit,
-			translation: createStaticDrawUnitTranslation(
-				drawUnit,
-				renderAnchorLandblockId,
-			),
-		})),
-		removedDrawUnitIds: delta.removedDrawUnitIds,
-		revision: delta.revision,
-	};
+	renderer.applyStaticDelta(materialized.staticDelta);
 }
 
 function appendBoundedRevision(
@@ -685,34 +665,4 @@ function parseLandblockInput(value: string): number {
 	}
 
 	return parsed >>> 0;
-}
-
-function createStaticDrawUnitTranslation(
-	drawUnit: StaticDrawUnit,
-	focusLandblockId: number | null,
-): readonly [number, number, number] {
-	if (
-		(drawUnit.kind !== "terrain-geometry" &&
-			drawUnit.kind !== "static-object-geometry") ||
-		focusLandblockId === null
-	) {
-		return [0, 0, 0];
-	}
-
-	const drawUnitCoords = getOutdoorLandblockCoords(drawUnit.landblockId);
-	const focusCoords = getOutdoorLandblockCoords(focusLandblockId);
-
-	return [
-		normalizeZero(
-			(drawUnitCoords.x - focusCoords.x) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-		),
-		0,
-		normalizeZero(
-			-(drawUnitCoords.y - focusCoords.y) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-		),
-	];
-}
-
-function normalizeZero(value: number): number {
-	return Object.is(value, -0) ? 0 : value;
 }

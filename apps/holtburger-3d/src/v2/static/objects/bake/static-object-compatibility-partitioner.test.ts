@@ -417,7 +417,7 @@ describe("V2 static object compatibility partitioner", () => {
 		});
 	});
 
-	it("keeps different concrete texture data uses split under the single-binding renderer contract", () => {
+	it("keeps concrete texture uses as entry keys under a shared coarse table schema", () => {
 		const payload = createPayload({
 			materials: [
 				createTexturedMaterial(0x08000010),
@@ -439,6 +439,20 @@ describe("V2 static object compatibility partitioner", () => {
 
 		expect(plan.partitions).toHaveLength(2);
 		expect(
+			plan.partitions.map(
+				(partition) => partition.partitionAxes.material.textureRoleSchemaKey,
+			),
+		).toEqual([
+			"base-color:prepared-render-surface-texture-use:rgba-color",
+			"base-color:prepared-render-surface-texture-use:rgba-color",
+		]);
+		expect(
+			plan.partitions.map((partition) => partition.textureRoleSchemaKey),
+		).toEqual([
+			"base-color:prepared-render-surface-texture-use:rgba-color",
+			"base-color:prepared-render-surface-texture-use:rgba-color",
+		]);
+		expect(
 			plan.partitions.map((partition) =>
 				partition.textureDataUses.map((dataUse) =>
 					dataUse.kind === "prepared-render-surface-texture-use"
@@ -447,6 +461,30 @@ describe("V2 static object compatibility partitioner", () => {
 				),
 			),
 		).toEqual([[0x06000010], [0x06000011]]);
+		expect(
+			plan.partitions.map((partition) => ({
+				entryCount: partition.coarseTablePlan.entries.length,
+				entryKeys: partition.materialEntryKeys,
+				tableSchemaKey: partition.coarseTablePlan.tableSchemaKey,
+			})),
+		).toEqual([
+			{
+				entryCount: 1,
+				entryKeys: [
+					"color:1.000000,1.000000,1.000000,1.000000,0.000000,0.000000,0.000000|wrap:clamp|roles:base-color:prepared-render-surface-texture-use:06000010:rgba-color|alpha-test:0.000000|detail-tiling:1.000000",
+				],
+				tableSchemaKey:
+					"base-color:prepared-render-surface-texture-use:rgba-color",
+			},
+			{
+				entryCount: 1,
+				entryKeys: [
+					"color:1.000000,1.000000,1.000000,1.000000,0.000000,0.000000,0.000000|wrap:clamp|roles:base-color:prepared-render-surface-texture-use:06000011:rgba-color|alpha-test:0.000000|detail-tiling:1.000000",
+				],
+				tableSchemaKey:
+					"base-color:prepared-render-surface-texture-use:rgba-color",
+			},
+		]);
 	});
 
 	it("uses object part ownership as a hard partition axis for transparent static policy", () => {

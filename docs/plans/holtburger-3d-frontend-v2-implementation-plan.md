@@ -1226,7 +1226,7 @@ Acceptance:
 Implementation notes:
 
 - 2026-06-11: Replaced the one-scope static baker contract with `StaticBakeBatchInput`/`StaticBakeBatchResult`. Static bake worker messages now use `bake-static-batch`/`static-batch-baked`, so the worker API shape matches the design doc instead of carrying a compatibility shim.
-- 2026-06-11: The static coordinator now groups resolved payloads by `revision + domain` into pending static bake batches. The default flush policy is named in code as `DEFAULT_STATIC_BATCH_MAX_PAYLOADS` and `DEFAULT_STATIC_BATCH_MAX_WAIT_MS`; tests can configure `maxWaitMs: 0` for deterministic microtask flushing.
+- 2026-06-11: The static coordinator now groups resolved payloads by `revision + domain` into pending static bake batches. The default flush policy is named in code as `DEFAULT_STATIC_BATCH_MAX_PAYLOADS` and `DEFAULT_STATIC_BATCH_COALESCE_DELAY_MS`; tests can configure `maxWaitMs: 0` for deterministic microtask flushing.
 - 2026-06-11: Terrain baking now accepts multiple terrain payloads in one batch, while keeping each draw unit id and source mapping scoped to its original landblock work id.
 - 2026-06-11: Spicy but intentional: the old `bake-static-scope` worker protocol was deleted rather than wrapped. The current API is cleaner and makes static-object/dungeon future adapters batch-shaped from the start.
 - 2026-06-11: Root archetype for future static bake domains: atlases are scoped to submitted static batches, while geometry/VAO draw units stay scoped to their owning landblock/env-cell for culling, picking, inspection, and eviction. Static object, dungeon, topology, and later detail bake adapters should start from this model rather than adding domain-specific atlas lifetime rules.
@@ -1407,7 +1407,7 @@ Verification:
 
 Failed to close:
 
-- This does not tune `DEFAULT_STATIC_BATCH_MAX_PAYLOADS` or `DEFAULT_STATIC_BATCH_MAX_WAIT_MS`. Larger batches may still reduce cross-batch duplication, but should be tuned after diagnostics show whether same-batch dedupe was enough.
+- This does not tune `DEFAULT_STATIC_BATCH_MAX_PAYLOADS` or `DEFAULT_STATIC_BATCH_COALESCE_DELAY_MS`. Larger batches may still reduce cross-batch duplication, but should be tuned after diagnostics show whether same-batch dedupe was enough.
 - Runtime diagnostics still need VRAM/atlas-page visibility in Phase 10B4D5.
 
 #### Phase 10B4D5: On-Demand Diagnostics Foundation And Terrain Recheck
@@ -1534,6 +1534,97 @@ Follow-up notes:
 
 - This phase intentionally did not add a new always-visible UI panel or hot-path metrics. The Status tab's on-demand report remains the inspection path.
 - Texture/materialization failures are acceptable as console warnings plus the runtime summary for now. Add a separate static-materialization diagnostics domain only if those failures need richer structured inspection later.
+
+### Phase 10B7: Service Naming And Worker Adapter Topology
+
+Status: completed on 2026-06-11.
+
+Purpose: course-correct resolver/baker/packer service naming and adapter placement before terrain parity, static object baking, and future client mode multiply worker orchestration paths.
+
+Deliverables:
+
+- Rename abstract service interfaces so orchestration depends on service names, not transport names:
+  - `StaticResolverClient` -> `StaticResolver`,
+  - `StaticBakerClient` -> `StaticBaker`,
+  - keep `TexturePacker` as the texture service interface.
+- Rename fake/local implementations to service-oriented names where useful:
+  - e.g. `ImmediateStaticResolver`, `DeferredStaticResolver`, `ImmediateStaticBaker`, `DeferredStaticBaker`.
+- Keep main-thread worker transport adapters explicitly named as adapters/clients:
+  - `StaticResolverWorkerClient`,
+  - `StaticBakeWorkerClient`,
+  - `WorkerTexturePacker` / `TexturePackingWorkerClient`.
+- Introduce pool-ready adapter seams beside the existing worker clients, not inside the coordinator, texture manager, or worker-side service implementations.
+- Surface worker/concurrency limits as named constants near the adapter or coordinator that owns them, so they are easy to find and tune without adding UI/config churn.
+- Ensure `StaticCoordinator` depends only on `StaticResolver` and `StaticBaker`.
+- Ensure `TextureManager` depends only on `TexturePacker`.
+- Keep worker-side handlers dumb: receive one message, call one concrete service, post one response.
+- Add or update tests/import-boundary checks so runtime composition can swap local, single-worker, or later worker-pool adapters without changing coordinator/texture-manager logic.
+- Update the design/plan docs with the final naming decisions and any remaining pool-adapter follow-up.
+
+Acceptance criteria:
+
+- No abstract orchestration contract is named `*Client` unless it actually owns a transport/client boundary.
+- `StaticCoordinator` has no knowledge of worker ports, worker counts, pool dispatch, or browser runtime composition.
+- `TextureManager` has no knowledge of worker ports, worker counts, pool dispatch, or browser runtime composition.
+- Existing terrain resolver, terrain baker, and texture packer worker paths still function through browser runtime composition.
+- Resolver worker count, baker worker count, texture-packing worker count, static batch payload limit, static batch coalesce delay, and pack-group concurrency limit are all represented by named constants rather than hardcoded literals.
+- `npm run lint:dead` passes without broad export-ignore config.
+- Focused tests prove deferred/local fake services and worker clients still satisfy the renamed service contracts.
+
+Implementation shape notes:
+
+- Do this as a decisive rename/cutover rather than compatibility aliases. The codebase is still small enough that keeping old names would only preserve misleading vocabulary.
+- The worker-pool work in this phase should be seam placement. This phase did land minimal round-robin `WorkerPoolStaticResolver`, `WorkerPoolStaticBaker`, and `WorkerPoolTexturePacker` adapters with adapter-owned disposal; richer scheduling, priority, and telemetry remain intentionally out of scope.
+- Future pool adapters should live on the main-thread side near existing worker clients:
+  - `src/v2/static/resolver/`,
+  - `src/v2/static/bake/`,
+  - `src/v2/textures/packing/`.
+- Runtime/browser composition chooses local, single-worker, or pooled adapters. Worker entry files should not know whether they are one worker in a pool.
+- Named defaults should be code constants, not UI controls:
+  - resolver worker count,
+  - baker worker count,
+  - texture-packing worker count,
+  - static batch max payloads,
+  - static batch max wait/coalesce delay,
+  - texture pack-group max concurrency.
+- Avoid adding priority weights, flush configuration UI, or worker-count UI in this phase. Keep scheduling policy owned by the coordinator/runtime until a measured need appears.
+
+Spicy notes to preserve:
+
+- Current resolver and baker interfaces are named `*Client` even when the coordinator only needs abstract services. Texture packing is cleaner at the service boundary (`TexturePacker`) but still has a worker-client transport layer underneath. The mismatch is now confusing enough to fix before adding more domains.
+- Before this phase, worker clients could track multiple pending requests and the coordinator already launched resolver work concurrently, but browser runtime still constructed one resolver worker, one bake worker, and one texture-packing worker. That was off-main-thread execution, not a multi-worker service pool.
+- Before this phase, `TextureManager.#packPendingTexturePlacements` awaited pack groups serially with no named concurrency policy. Pool-ready naming alone would not have made packing parallel, so this phase introduced an explicit `pack-group` concurrency limit and a bounded-concurrency implementation.
+
+Dry-run findings:
+
+- Rename blast radius is moderate and mechanical. The current symbols appear in `src/v2/static/contracts.ts`, `src/v2/static/fake-workers.ts`, `src/v2/static/coordinator/static-coordinator.ts`, resolver/bake worker clients and handlers, `src/v2/static/terrain/bake/terrain-geometry-baker.ts`, browser runtime composition, runtime defaults, and focused tests.
+- Do the service-interface rename first, then fake/local implementation renames, then test imports. Avoid temporary aliases; TypeScript should find every missed call site.
+- Existing static batch constants already exist as `DEFAULT_STATIC_BATCH_MAX_PAYLOADS` and `DEFAULT_STATIC_BATCH_COALESCE_DELAY_MS`; this phase kept them named and renamed `WAIT_MS` to the clearer coalesce-delay name.
+- Browser runtime worker creation currently has three direct `new Worker(...)` calls. Introduce named worker-count constants there, even if they initially stay `1`, and route creation through tiny helper functions so later pool adapters can replace single-worker construction without changing `createClientRuntime` or `StaticCoordinator`.
+- Texture pack-group concurrency now has `DEFAULT_TEXTURE_PACK_GROUP_MAX_CONCURRENCY` owned by `TextureManager`. The default remains `1`, but the implementation now has a bounded-concurrency pack path that commits registry state sequentially after pack results resolve.
+- A minimal resolver/baker/packer worker-pool implementation landed in this phase. Actual tuning remains a code-constant decision; no UI/config surface was added.
+- Expected verification targets: `src/v2/static/coordinator/static-coordinator.test.ts`, `src/v2/runtime/client-runtime.test.ts`, `src/v2/static/resolver/worker-client.test.ts`, `src/v2/static/bake/worker-client.test.ts`, `src/v2/textures/packing/worker-client.test.ts`, `src/v2/textures/texture-manager.test.ts`, plus `check`, `lint:ts`, and `lint:dead`.
+
+Implementation notes:
+
+- `StaticResolverClient` and `StaticBakerClient` were decisively renamed to `StaticResolver` and `StaticBaker`; fake/local implementations were renamed to `ImmediateStaticResolver`, `DeferredStaticResolver`, `ImmediateStaticBaker`, and `DeferredStaticBaker`.
+- `StaticCoordinator` now depends only on `StaticResolver`/`StaticBaker`; worker counts and worker construction live in browser runtime composition.
+- Browser runtime now owns `DEFAULT_STATIC_RESOLVER_WORKER_COUNT`, `DEFAULT_STATIC_BAKER_WORKER_COUNT`, and `DEFAULT_TEXTURE_PACKING_WORKER_COUNT`, and constructs worker-backed pools through small factory functions.
+- Worker-side handlers remain one-message/one-service-call hosts. Pooling is entirely main-thread adapter composition.
+- `TextureManager` still depends only on `TexturePacker`. Pack-group concurrency is owned by `DEFAULT_TEXTURE_PACK_GROUP_MAX_CONCURRENCY`; registry mutations are committed deterministically after packing so concurrent pack jobs do not race texture residency state.
+- Runtime tests now drain one event-loop turn instead of encoding a fixed number of promise continuations. The old helper was brittle once texture materialization gained an extra legitimate async boundary.
+
+Verification:
+
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
+- `npm exec vitest -- run src/v2/static/coordinator/static-coordinator.test.ts src/v2/runtime/client-runtime.test.ts src/v2/static/resolver/worker-client.test.ts src/v2/static/bake/worker-client.test.ts src/v2/textures/packing/worker-client.test.ts src/v2/textures/texture-manager.test.ts`
+
+Failed to close:
+
+- No user-facing or diagnostics UI for worker counts was added by design.
+- No priority scheduling, adaptive worker counts, or per-domain queue telemetry was added. The new pools are deliberately simple round-robin adapters.
 
 ### Phase 10C: Terrain Visual Parity Pass
 
@@ -1887,3 +1978,4 @@ Mitigation: picking, inspection, frame metrics, terrain visual parity, dungeon v
 - 2026-06-11: Review of the remaining phases found the plan aligned with the design doc but too coarse for v1 parity. Phase 9 is split into texture-source/packing-worker and atlas-registry work; Phase 10 is split into terrain role interpretation, shader/material binding, visual parity, and steering; picking/inspection/metrics parity and dungeon visual parity are explicit pre-cutover milestones.
 - 2026-06-11: Plan reassessment is now a recurring implementation activity. Steering phases after atlas, terrain, outdoor static/inspection, dungeon, and pre-cutover work must update this plan before the next major phase starts.
 - 2026-06-11: Phase verification now includes Knip through `npm run lint:dead`. The current app Knip baseline is not clean, so phases must run it, fix any newly introduced findings, and record remaining baseline failures until a dedicated cleanup/config pass makes it a hard green gate.
+- 2026-06-11: Resolver, baker, and packer abstract interfaces should use service names, not `*Client` names. Worker clients and future worker-pool adapters are main-thread transport/composition concerns; the static coordinator and texture manager should depend only on service interfaces.

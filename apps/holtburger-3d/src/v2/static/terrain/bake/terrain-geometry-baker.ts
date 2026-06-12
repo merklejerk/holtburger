@@ -3,7 +3,7 @@ import type {
 	StaticBakeBatchItem,
 	StaticBakeBatchResult,
 	StaticBakeTextureUse,
-	StaticBakerClient,
+	StaticBaker,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialDrawSlice,
 	TerrainMaterialFallbackReason,
@@ -19,7 +19,7 @@ import { buildTerrainMaterialLayerPlan } from "./terrain-material-layer-planner"
 
 const UINT16_MAX_INDEX = 65_535;
 
-export class TerrainGeometryStaticBaker implements StaticBakerClient {
+export class TerrainGeometryStaticBaker implements StaticBaker {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
 		return bakeTerrainGeometry(input);
 	}

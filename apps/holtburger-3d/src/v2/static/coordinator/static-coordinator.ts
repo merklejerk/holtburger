@@ -3,14 +3,14 @@ import type {
 	StaticBakeBatchInput,
 	StaticBakeBatchResult,
 	StaticBakeBatchItem,
-	StaticBakerClient,
+	StaticBaker,
 	StaticCoordinatorCommitDelta,
 	StaticCoordinatorSnapshot,
 	StaticDemand,
 	DungeonStaticPayloadSummary,
 	LandblockTopologyPayloadSummary,
 	StaticResolverFailureSnapshot,
-	StaticResolverClient,
+	StaticResolver,
 	StaticScopePayload,
 	TerrainStaticScopePayloadSummary,
 	ScheduledStaticWork,
@@ -22,7 +22,7 @@ import {
 } from "../demand-planner";
 
 const DEFAULT_STATIC_BATCH_MAX_PAYLOADS = 10;
-const DEFAULT_STATIC_BATCH_MAX_WAIT_MS = 500;
+const DEFAULT_STATIC_BATCH_COALESCE_DELAY_MS = 500;
 
 export type StaticCoordinatorListener = (
 	snapshot: StaticCoordinatorSnapshot,
@@ -32,8 +32,8 @@ export type StaticCoordinatorCommitListener = (
 ) => void;
 
 export interface StaticCoordinatorOptions {
-	readonly resolver: StaticResolverClient;
-	readonly baker: StaticBakerClient;
+	readonly resolver: StaticResolver;
+	readonly baker: StaticBaker;
 	readonly batching?: Partial<StaticCoordinatorBatchingOptions>;
 	readonly createAtlasSnapshot?: (
 		payloads: readonly StaticScopePayload[],
@@ -47,8 +47,8 @@ export interface StaticCoordinatorBatchingOptions {
 }
 
 export class StaticCoordinator {
-	readonly #resolver: StaticResolverClient;
-	readonly #baker: StaticBakerClient;
+	readonly #resolver: StaticResolver;
+	readonly #baker: StaticBaker;
 	readonly #batching: StaticCoordinatorBatchingOptions;
 	#createAtlasSnapshot: (
 		payloads: readonly StaticScopePayload[],
@@ -80,7 +80,7 @@ export class StaticCoordinator {
 				options.batching?.maxPayloadsPerBatch ??
 				DEFAULT_STATIC_BATCH_MAX_PAYLOADS,
 			maxWaitMs:
-				options.batching?.maxWaitMs ?? DEFAULT_STATIC_BATCH_MAX_WAIT_MS,
+				options.batching?.maxWaitMs ?? DEFAULT_STATIC_BATCH_COALESCE_DELAY_MS,
 		};
 		this.#createAtlasSnapshot =
 			options.createAtlasSnapshot ?? createEmptyAtlasSnapshotForPayload;

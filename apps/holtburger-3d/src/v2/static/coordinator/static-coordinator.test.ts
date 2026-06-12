@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-	DeferredStaticBakerClient,
-	DeferredStaticResolverClient,
+	DeferredStaticBaker,
+	DeferredStaticResolver,
 } from "../fake-workers";
 import type {
 	StaticCoordinatorCommitDelta,
@@ -12,8 +12,8 @@ import { StaticCoordinator } from "./static-coordinator";
 
 describe("V2 static coordinator", () => {
 	it("rejects stale resolver results after a newer demand revision supersedes them", async () => {
-		const resolver = new DeferredStaticResolverClient();
-		const baker = new DeferredStaticBakerClient();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
@@ -52,8 +52,8 @@ describe("V2 static coordinator", () => {
 	});
 
 	it("rejects stale bake results after a newer demand revision supersedes them", async () => {
-		const resolver = new DeferredStaticResolverClient();
-		const baker = new DeferredStaticBakerClient();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
@@ -79,8 +79,8 @@ describe("V2 static coordinator", () => {
 	});
 
 	it("tracks revisions on pending work without asset lease concepts", () => {
-		const resolver = new DeferredStaticResolverClient();
-		const baker = new DeferredStaticBakerClient();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
@@ -103,8 +103,8 @@ describe("V2 static coordinator", () => {
 	});
 
 	it("emits committed draw-unit deltas and eviction deltas", async () => {
-		const resolver = new DeferredStaticResolverClient();
-		const baker = new DeferredStaticBakerClient();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
@@ -155,8 +155,8 @@ describe("V2 static coordinator", () => {
 	});
 
 	it("groups same-domain resolved payloads into one static bake batch", async () => {
-		const resolver = new DeferredStaticResolverClient();
-		const baker = new DeferredStaticBakerClient();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
 			baker,
 			batching: {

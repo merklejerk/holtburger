@@ -499,11 +499,11 @@ export interface StaticBakeTextureUse {
 	readonly source: PreparedTextureUseIdentity;
 }
 
-export interface StaticResolverClient {
+export interface StaticResolver {
 	resolve(job: StaticResolverJob): Promise<StaticScopePayload>;
 }
 
-export interface StaticBakerClient {
+export interface StaticBaker {
 	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult>;
 }
 

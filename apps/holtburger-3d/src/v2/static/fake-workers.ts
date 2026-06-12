@@ -1,14 +1,14 @@
 import type {
 	StaticBakeBatchInput,
 	StaticBakeBatchResult,
-	StaticBakerClient,
+	StaticBaker,
 	StaticDrawUnit,
-	StaticResolverClient,
+	StaticResolver,
 	StaticResolverJob,
 	StaticScopePayload,
 } from "./contracts";
 
-export class DeferredStaticResolverClient implements StaticResolverClient {
+export class DeferredStaticResolver implements StaticResolver {
 	readonly #pending: {
 		readonly requestId: string;
 		readonly job: StaticResolverJob;
@@ -79,7 +79,7 @@ export class DeferredStaticResolverClient implements StaticResolverClient {
 	}
 }
 
-export class DeferredStaticBakerClient implements StaticBakerClient {
+export class DeferredStaticBaker implements StaticBaker {
 	readonly #pending: StaticBakeBatchInput[] = [];
 	readonly #resolvers = new Map<
 		string,
@@ -142,7 +142,7 @@ export class DeferredStaticBakerClient implements StaticBakerClient {
 	}
 }
 
-export class ImmediateStaticResolverClient implements StaticResolverClient {
+export class ImmediateStaticResolver implements StaticResolver {
 	async resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
 		if (job.domain === "landblock-topology" && job.scope.kind === "landblock") {
 			return {
@@ -205,7 +205,7 @@ export class ImmediateStaticResolverClient implements StaticResolverClient {
 	}
 }
 
-export class ImmediateStaticBakerClient implements StaticBakerClient {
+export class ImmediateStaticBaker implements StaticBaker {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
 		return createFakeStaticBakeResult(input);
 	}

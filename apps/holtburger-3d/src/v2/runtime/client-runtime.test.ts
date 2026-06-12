@@ -23,8 +23,8 @@ import type {
 	TerrainMaterialFallbackReason,
 } from "../static/contracts";
 import {
-	DeferredStaticBakerClient,
-	DeferredStaticResolverClient,
+	DeferredStaticBaker,
+	DeferredStaticResolver,
 } from "../static/fake-workers";
 import { createClientRuntime, type RuntimeSnapshot } from "./client-runtime";
 import type { RuntimeDiagnostics } from "./diagnostics";
@@ -35,13 +35,13 @@ const silentDiagnostics: RuntimeDiagnostics = {
 
 describe("V2 client runtime", () => {
 	it("passes manual domain coverage radii into static demand planning", () => {
-		const resolver = new DeferredStaticResolverClient();
+		const resolver = new DeferredStaticResolver();
 		const runtime = createClientRuntime({
 			diagnostics: silentDiagnostics,
 			host: new FakeRuntimeHost(),
 			renderer: new FakeRenderer(),
 			staticCoordinator: createImmediateStaticCoordinator({
-				baker: new DeferredStaticBakerClient(),
+				baker: new DeferredStaticBaker(),
 				resolver,
 			}),
 		});
@@ -81,8 +81,8 @@ describe("V2 client runtime", () => {
 			host: new FakeRuntimeHost(),
 			renderer: new FakeRenderer(),
 			staticCoordinator: createImmediateStaticCoordinator({
-				baker: new DeferredStaticBakerClient(),
-				resolver: new DeferredStaticResolverClient(),
+				baker: new DeferredStaticBaker(),
+				resolver: new DeferredStaticResolver(),
 			}),
 		});
 
@@ -137,8 +137,8 @@ describe("V2 client runtime", () => {
 
 	it("forwards committed static draw units and eviction deltas to the renderer", async () => {
 		const renderer = new FakeRenderer();
-		const resolver = new DeferredStaticResolverClient();
-		const baker = new DeferredStaticBakerClient();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
 		const staticCoordinator = createImmediateStaticCoordinator({
 			baker,
 			resolver,
@@ -188,8 +188,8 @@ describe("V2 client runtime", () => {
 
 	it("does not add textured static draw units before texture materialization is ready", async () => {
 		const renderer = new FakeRenderer();
-		const resolver = new DeferredStaticResolverClient();
-		const baker = new DeferredStaticBakerClient();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
 		const assetService = new DeferredAssetService();
 		const staticCoordinator = createImmediateStaticCoordinator({
 			baker,
@@ -251,8 +251,8 @@ describe("V2 client runtime", () => {
 
 	it("updates resident texture sampler policy without rebaking static draw units", async () => {
 		const renderer = new FakeRenderer();
-		const resolver = new DeferredStaticResolverClient();
-		const baker = new DeferredStaticBakerClient();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
 		const assetService = new DeferredAssetService();
 		const staticCoordinator = createImmediateStaticCoordinator({
 			baker,
@@ -315,8 +315,8 @@ describe("V2 client runtime", () => {
 
 	it("keeps failed texture materialization out of renderer residency", async () => {
 		const renderer = new FakeRenderer();
-		const resolver = new DeferredStaticResolverClient();
-		const baker = new DeferredStaticBakerClient();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
 		const assetService = new DeferredAssetService();
 		const staticCoordinator = createImmediateStaticCoordinator({
 			baker,
@@ -378,8 +378,8 @@ describe("V2 client runtime", () => {
 
 	it("surfaces terrain material fallback reasons in diagnostics reports", async () => {
 		const renderer = new FakeRenderer();
-		const resolver = new DeferredStaticResolverClient();
-		const baker = new DeferredStaticBakerClient();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
 		const runtime = createClientRuntime({
 			diagnostics: silentDiagnostics,
 			host: new FakeRuntimeHost(),
@@ -604,8 +604,8 @@ function createPreparedTextureUse(): PreparedTextureUseIdentity {
 }
 
 function createImmediateStaticCoordinator(options: {
-	readonly baker: DeferredStaticBakerClient;
-	readonly resolver: DeferredStaticResolverClient;
+	readonly baker: DeferredStaticBaker;
+	readonly resolver: DeferredStaticResolver;
 }): StaticCoordinator {
 	return new StaticCoordinator({
 		baker: options.baker,
@@ -703,9 +703,5 @@ function failKey(): never {
 }
 
 async function flushPromises(): Promise<void> {
-	await Promise.resolve();
-	await Promise.resolve();
-	await Promise.resolve();
-	await Promise.resolve();
-	await Promise.resolve();
+	await new Promise((resolve) => setTimeout(resolve, 0));
 }

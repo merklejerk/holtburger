@@ -9,19 +9,33 @@ import { StaticCoordinator } from "../static/coordinator/static-coordinator";
 import type {
 	StaticBakeBatchInput,
 	StaticBakeBatchResult,
-	StaticBakerClient,
+	StaticBaker,
 	StaticResolverJob,
-	StaticResolverClient,
+	StaticResolver,
 	StaticScopePayload,
 } from "../static/contracts";
 import {
-	ImmediateStaticBakerClient,
-	ImmediateStaticResolverClient,
+	ImmediateStaticBaker,
+	ImmediateStaticResolver,
 } from "../static/fake-workers";
-import { StaticBakeWorkerClient } from "../static/bake/worker-client";
+import {
+	StaticBakeWorkerClient,
+	WorkerPoolStaticBaker,
+} from "../static/bake/worker-client";
 import { createStaticResolverMainHostBridge } from "../static/resolver/host-bridge";
-import { StaticResolverWorkerClient } from "../static/resolver/worker-client";
-import { WorkerTexturePacker } from "../textures/packing/worker-client";
+import {
+	StaticResolverWorkerClient,
+	WorkerPoolStaticResolver,
+} from "../static/resolver/worker-client";
+import type { TexturePacker } from "../textures/packing/packer";
+import {
+	WorkerPoolTexturePacker,
+	WorkerTexturePacker,
+} from "../textures/packing/worker-client";
+
+const DEFAULT_STATIC_RESOLVER_WORKER_COUNT = 3;
+const DEFAULT_STATIC_BAKER_WORKER_COUNT = 2;
+const DEFAULT_TEXTURE_PACKING_WORKER_COUNT = 2;
 
 export function createBrowserV2Runtime(
 	canvas: HTMLCanvasElement,
@@ -32,19 +46,8 @@ export function createBrowserV2Runtime(
 	const staticCoordinator = hostSnapshot.isAvailable
 		? createTauriStaticCoordinator(host)
 		: undefined;
-	const texturePackingWorker = hostSnapshot.isAvailable
-		? new Worker(
-				new URL(
-					"../textures/packing/texture-packing.worker.ts",
-					import.meta.url,
-				),
-				{ type: "module" },
-			)
-		: null;
-	const texturePacker = texturePackingWorker
-		? new WorkerTexturePacker(texturePackingWorker, {
-				disposePort: () => texturePackingWorker.terminate(),
-			})
+	const texturePacker = hostSnapshot.isAvailable
+		? createWorkerTexturePacker(DEFAULT_TEXTURE_PACKING_WORKER_COUNT)
 		: undefined;
 
 	return createClientRuntime({
@@ -56,33 +59,20 @@ export function createBrowserV2Runtime(
 }
 
 function createTauriStaticCoordinator(host: RuntimeHost): StaticCoordinator {
-	const worker = new Worker(
-		new URL("../static/resolver/static-resolver.worker.ts", import.meta.url),
-		{ type: "module" },
+	const terrainResolver = createWorkerStaticResolver(
+		host,
+		DEFAULT_STATIC_RESOLVER_WORKER_COUNT,
 	);
-	const bakeWorker = new Worker(
-		new URL("../static/bake/static-bake.worker.ts", import.meta.url),
-		{ type: "module" },
+	const terrainBaker = createWorkerStaticBaker(
+		DEFAULT_STATIC_BAKER_WORKER_COUNT,
 	);
-	const bridge = createStaticResolverMainHostBridge(worker, host);
-	const terrainResolver = new StaticResolverWorkerClient(worker);
-	const terrainBaker = new StaticBakeWorkerClient(bakeWorker);
-	const placeholderBaker = new ImmediateStaticBakerClient();
-	const placeholderResolver = new ImmediateStaticResolverClient();
+	const placeholderBaker = new ImmediateStaticBaker();
+	const placeholderResolver = new ImmediateStaticResolver();
 	const resolver = new BrowserStaticResolver({
 		placeholderResolver,
 		terrainResolver,
-		onDispose: () => {
-			terrainResolver.dispose();
-			bridge.dispose();
-			worker.terminate();
-		},
 	});
 	const baker = new BrowserStaticBaker({
-		onDispose: () => {
-			terrainBaker.dispose();
-			bakeWorker.terminate();
-		},
 		placeholderBaker,
 		terrainBaker,
 	});
@@ -93,20 +83,81 @@ function createTauriStaticCoordinator(host: RuntimeHost): StaticCoordinator {
 	});
 }
 
-class BrowserStaticResolver implements StaticResolverClient {
-	readonly #terrainResolver: StaticResolverClient;
-	readonly #placeholderResolver: StaticResolverClient;
-	readonly #onDispose: () => void;
+function createWorkerStaticResolver(
+	host: RuntimeHost,
+	workerCount: number,
+): StaticResolver {
+	assertPositiveInteger(workerCount, "static resolver worker count");
+
+	const resolvers = Array.from({ length: workerCount }, () => {
+		const worker = new Worker(
+			new URL("../static/resolver/static-resolver.worker.ts", import.meta.url),
+			{ type: "module" },
+		);
+		const bridge = createStaticResolverMainHostBridge(worker, host);
+
+		return new StaticResolverWorkerClient(worker, {
+			disposePort: () => {
+				bridge.dispose();
+				worker.terminate();
+			},
+		});
+	});
+
+	return new WorkerPoolStaticResolver(resolvers);
+}
+
+function createWorkerStaticBaker(workerCount: number): StaticBaker {
+	assertPositiveInteger(workerCount, "static baker worker count");
+
+	const bakers = Array.from({ length: workerCount }, () => {
+		const worker = new Worker(
+			new URL("../static/bake/static-bake.worker.ts", import.meta.url),
+			{ type: "module" },
+		);
+
+		return new StaticBakeWorkerClient(worker, {
+			disposePort: () => worker.terminate(),
+		});
+	});
+
+	return new WorkerPoolStaticBaker(bakers);
+}
+
+function createWorkerTexturePacker(workerCount: number): TexturePacker {
+	assertPositiveInteger(workerCount, "texture packing worker count");
+
+	const packers = Array.from({ length: workerCount }, () => {
+		const worker = new Worker(
+			new URL("../textures/packing/texture-packing.worker.ts", import.meta.url),
+			{ type: "module" },
+		);
+
+		return new WorkerTexturePacker(worker, {
+			disposePort: () => worker.terminate(),
+		});
+	});
+
+	return new WorkerPoolTexturePacker(packers);
+}
+
+function assertPositiveInteger(value: number, label: string): void {
+	if (!Number.isInteger(value) || value < 1) {
+		throw new Error(`${label} must be a positive integer. Received ${value}.`);
+	}
+}
+
+class BrowserStaticResolver implements StaticResolver {
+	readonly #terrainResolver: StaticResolver;
+	readonly #placeholderResolver: StaticResolver;
 	#disposed = false;
 
 	constructor(options: {
-		readonly terrainResolver: StaticResolverClient;
-		readonly placeholderResolver: StaticResolverClient;
-		readonly onDispose: () => void;
+		readonly terrainResolver: StaticResolver;
+		readonly placeholderResolver: StaticResolver;
 	}) {
 		this.#terrainResolver = options.terrainResolver;
 		this.#placeholderResolver = options.placeholderResolver;
-		this.#onDispose = options.onDispose;
 	}
 
 	resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
@@ -129,24 +180,22 @@ class BrowserStaticResolver implements StaticResolverClient {
 		}
 
 		this.#disposed = true;
-		this.#onDispose();
+		disposeIfAvailable(this.#terrainResolver);
+		disposeIfAvailable(this.#placeholderResolver);
 	}
 }
 
-class BrowserStaticBaker implements StaticBakerClient {
-	readonly #terrainBaker: StaticBakerClient;
-	readonly #placeholderBaker: StaticBakerClient;
-	readonly #onDispose: () => void;
+class BrowserStaticBaker implements StaticBaker {
+	readonly #terrainBaker: StaticBaker;
+	readonly #placeholderBaker: StaticBaker;
 	#disposed = false;
 
 	constructor(options: {
-		readonly terrainBaker: StaticBakerClient;
-		readonly placeholderBaker: StaticBakerClient;
-		readonly onDispose: () => void;
+		readonly terrainBaker: StaticBaker;
+		readonly placeholderBaker: StaticBaker;
 	}) {
 		this.#terrainBaker = options.terrainBaker;
 		this.#placeholderBaker = options.placeholderBaker;
-		this.#onDispose = options.onDispose;
 	}
 
 	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
@@ -167,6 +216,18 @@ class BrowserStaticBaker implements StaticBakerClient {
 		}
 
 		this.#disposed = true;
-		this.#onDispose();
+		disposeIfAvailable(this.#terrainBaker);
+		disposeIfAvailable(this.#placeholderBaker);
+	}
+}
+
+function disposeIfAvailable(value: unknown): void {
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		"dispose" in value &&
+		typeof value.dispose === "function"
+	) {
+		value.dispose();
 	}
 }

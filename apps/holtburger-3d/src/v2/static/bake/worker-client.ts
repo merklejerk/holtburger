@@ -1,7 +1,7 @@
 import type {
 	StaticBakeBatchInput,
 	StaticBakeBatchResult,
-	StaticBakerClient,
+	StaticBaker,
 } from "../contracts";
 import type {
 	StaticBakeWorkerPort,
@@ -13,22 +13,36 @@ interface PendingBakeRequest {
 	readonly reject: (error: Error) => void;
 }
 
-export class StaticBakeWorkerClient implements StaticBakerClient {
+interface StaticBakeWorkerClientOptions {
+	readonly disposePort?: () => void;
+}
+
+export class StaticBakeWorkerClient implements StaticBaker {
 	readonly #port: StaticBakeWorkerPort;
+	readonly #disposePort: (() => void) | null;
 	readonly #pending = new Map<string, PendingBakeRequest>();
 	#nextRequestIndex = 0;
+	#disposed = false;
 	readonly #onMessage = (
 		event: MessageEvent<StaticBakeWorkerThreadMessage>,
 	): void => {
 		this.#handleResponse(event.data);
 	};
 
-	constructor(port: StaticBakeWorkerPort) {
+	constructor(
+		port: StaticBakeWorkerPort,
+		options: StaticBakeWorkerClientOptions = {},
+	) {
 		this.#port = port;
+		this.#disposePort = options.disposePort ?? null;
 		this.#port.addEventListener("message", this.#onMessage);
 	}
 
 	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
+		if (this.#disposed) {
+			return Promise.reject(new Error("Static bake worker client was disposed."));
+		}
+
 		const requestId = `bake-job:${this.#nextRequestIndex}`;
 		this.#nextRequestIndex += 1;
 
@@ -43,11 +57,17 @@ export class StaticBakeWorkerClient implements StaticBakerClient {
 	}
 
 	dispose(): void {
+		if (this.#disposed) {
+			return;
+		}
+
+		this.#disposed = true;
 		this.#port.removeEventListener("message", this.#onMessage);
 		for (const pending of this.#pending.values()) {
 			pending.reject(new Error("Static bake worker client was disposed."));
 		}
 		this.#pending.clear();
+		this.#disposePort?.();
 	}
 
 	#handleResponse(response: StaticBakeWorkerThreadMessage): void {
@@ -63,5 +83,60 @@ export class StaticBakeWorkerClient implements StaticBakerClient {
 		}
 
 		pending.resolve(response.result);
+	}
+}
+
+export class WorkerPoolStaticBaker implements StaticBaker {
+	readonly #bakers: readonly StaticBaker[];
+	#nextBakerIndex = 0;
+	#disposed = false;
+
+	constructor(bakers: readonly StaticBaker[]) {
+		if (bakers.length === 0) {
+			throw new Error("WorkerPoolStaticBaker requires at least one baker.");
+		}
+
+		this.#bakers = bakers;
+	}
+
+	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
+		if (this.#disposed) {
+			return Promise.reject(
+				new Error("WorkerPoolStaticBaker has been disposed."),
+			);
+		}
+
+		const baker = this.#bakers[this.#nextBakerIndex];
+		if (!baker) {
+			return Promise.reject(
+				new Error("WorkerPoolStaticBaker has no active baker."),
+			);
+		}
+
+		this.#nextBakerIndex = (this.#nextBakerIndex + 1) % this.#bakers.length;
+
+		return baker.bake(input);
+	}
+
+	dispose(): void {
+		if (this.#disposed) {
+			return;
+		}
+
+		this.#disposed = true;
+		for (const baker of this.#bakers) {
+			disposeIfAvailable(baker);
+		}
+	}
+}
+
+function disposeIfAvailable(value: unknown): void {
+	if (
+		typeof value === "object" &&
+		value !== null &&
+		"dispose" in value &&
+		typeof value.dispose === "function"
+	) {
+		value.dispose();
 	}
 }

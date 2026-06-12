@@ -222,6 +222,12 @@ function createStaticObjectGeometryDrawUnit(options: {
 					options.partition.textureWrapMode,
 				)
 			: null,
+		indexedTextureFormat:
+			indexTextureUse?.kind === "prepared-render-surface-texture-use"
+				? indexTextureUse.usage === "index16"
+					? "index16"
+					: "p8"
+				: null,
 		paletteFirstIndex:
 			paletteTextureUse?.kind === "palette-texture-use"
 				? paletteTextureUse.firstIndex

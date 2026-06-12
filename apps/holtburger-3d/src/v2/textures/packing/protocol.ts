@@ -1,6 +1,6 @@
 import type { StaticDomain } from "../../static/contracts";
 
-export type TexturePackingPageFormat = "rgba8" | "r8ui" | "r16ui";
+export type TexturePackingPageFormat = "rgba8" | "r8" | "rg8";
 
 export interface TexturePackingJob {
 	readonly jobId: string;

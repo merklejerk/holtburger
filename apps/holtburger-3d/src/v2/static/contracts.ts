@@ -663,6 +663,10 @@ export type StaticMaterialRenderOutcome =
 	| "render-deferred"
 	| "unsupported";
 
+export type StaticMaterialCoverageFilteringMode =
+	| "none"
+	| "shader-palette-linear";
+
 export interface StaticMaterialCoverageReport {
 	readonly domain: StaticDomain;
 	readonly landblockId: number | null;
@@ -683,6 +687,7 @@ export interface StaticMaterialCoverageBucket {
 	readonly family: StaticMaterialCoverageFamily;
 	readonly pass: StaticMaterialCoveragePass;
 	readonly outcome: StaticMaterialRenderOutcome;
+	readonly filteringMode: StaticMaterialCoverageFilteringMode;
 	readonly materialCount: number;
 	readonly partitionCount: number;
 	readonly triangleCount: number;
@@ -759,6 +764,7 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly materialEmissiveColor: readonly [number, number, number];
 	readonly primaryTextureUseId: string | null;
 	readonly indexTextureUseId: string | null;
+	readonly indexedTextureFormat: "p8" | "index16" | null;
 	readonly paletteTextureUseId: string | null;
 	readonly paletteFirstIndex: number;
 	readonly primaryTextureWrapMode: "clamp" | "repeat";

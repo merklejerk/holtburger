@@ -4,6 +4,7 @@ import type {
 } from "../renderer/types";
 import type {
 	StaticDomain,
+	StaticMaterialCoverageFilteringMode,
 	StaticMaterialCoverageFamily,
 	StaticMaterialCoveragePass,
 	StaticMaterialRenderOutcome,
@@ -105,6 +106,7 @@ interface StaticMaterialCoverageBucketDiagnostics {
 	readonly family: StaticMaterialCoverageFamily;
 	readonly pass: StaticMaterialCoveragePass;
 	readonly outcome: StaticMaterialRenderOutcome;
+	readonly filteringMode: StaticMaterialCoverageFilteringMode;
 	readonly materials: number;
 	readonly partitions: number;
 	readonly triangles: number;
@@ -158,7 +160,7 @@ interface TextureAtlasDomainDiagnostics {
 	readonly wrapModes: Record<TextureWrapMode, number>;
 }
 
-type TextureAtlasPageFormat = "rgba8" | "r8ui" | "r16ui";
+type TextureAtlasPageFormat = "rgba8" | "r8" | "rg8";
 
 type TextureAtlasWarningDiagnostics = TerrainRolePageOverflowSummaryDiagnostics;
 

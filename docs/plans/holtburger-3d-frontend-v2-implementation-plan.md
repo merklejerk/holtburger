@@ -2164,6 +2164,7 @@ Spicy findings:
 
 Failed to close:
 
+- Ordinary static object diffuse/base-color textures currently travel as `rgba-raw`, which derives the exact/no-mip `rgba-exact` runtime page class. That proved the first renderer seam safely, but it is now known contract debt: normal static object color textures need filterable/mip-capable `rgba-color` semantics while preserving authored clamp/repeat sampler intent. Phase 11D1 owns this correction before broader material-family expansion.
 - Indexed/paletted data texture upload, palette views/subranges, translucent/additive passes, solid-color rendering, detail overlays, lighting/material color modulation, and broader outdoor-detail/env-cell static rendering remain Phase 11E/12 work.
 - The compatibility key still includes concrete texture data-use identity, so the first object draw-unit path remains conservative about sharing material tables across different base textures.
 - This phase was verified by unit/type/lint tests, but browser visual verification of rendered buildings still needs a manual V2 harness pass.
@@ -2178,6 +2179,46 @@ Verification:
 - `cd apps/holtburger-3d && npm run test:ts -- outdoor-static-objects-resolver`
 - `cd apps/holtburger-3d && npm run test:ts -- static-object-compatibility-partitioner`
 - `cd apps/holtburger-3d && npm run test:ts`
+
+### Phase 11D1: Static Object Color Texture Sampling Policy
+
+Status: planned; immediate next phase.
+
+Purpose: correct the first static-object rendering slice's texture contract so ordinary diffuse/base-color RGBA textures are filterable color resources with authored clamp/repeat sampler intent, not exact/no-mip data resources.
+
+Scope:
+
+- In scope: static object direct RGBA base-color texture-use semantics, sampler/wrap policy propagation from prepared polygon material variants, texture manager page policy for static color pages, partitioning keys where sampler policy affects compatibility, diagnostics/tests for realized filtering and mip status.
+- Out of scope: indexed/paletted upload, palette views/subranges, translucent/additive pass ordering, static detail overlays, lighting/material color modulation, outdoor-detail/env-cell breadth, and source-authored mip-chain selection.
+
+Deliverables:
+
+- Reclassify normal opaque/clip `texture-rgba` static object base-color roles from `rgba-raw` to `rgba-color` when the render surface is ordinary color.
+- Preserve `rgba-raw` for exact/data-like RGBA uses where filtering or generated mipmaps would be semantically wrong.
+- Carry authored static sampler intent into the texture/page policy. Existing prepared polygon material variants already distinguish legacy `sampler=repeat` from clamp; the V2 texture-use/placement contract must preserve that fact instead of letting `rgba-color` imply repeat unconditionally.
+- Extend runtime texture page policy so `rgba-color` can be filterable/mip-capable with either `repeat` or `clamp-to-edge` wrapping as dictated by static object material/triangle compatibility.
+- Ensure static object compatibility partitioning includes sampler/wrap intent wherever it affects atlas page policy or renderer sampler state.
+- Update diagnostics and tests so outdoor-building pages expose `sampleClass: "rgba-color"`, the active filtering mode, generated mipmaps under linear/anisotropic filtering, and the expected wrap mode for repeat and clamp variants.
+
+Acceptance criteria:
+
+- `rgba-color` is documented and tested as a generic filterable color usage, not a terrain-specific usage.
+- `rgba-raw` no longer appears for ordinary opaque building diffuse/base-color textures.
+- Static object pages using `rgba-color` generate GPU mipmaps when the runtime filtering mode is linear or anisotropic, and do not generate mipmaps when filtering is nearest.
+- Repeat and clamp static object surfaces can coexist without sharing an incompatible sampler/page policy.
+- Renderer upload remains driven by texture placements and sampler updates; no direct/static-object-only texture upload path is introduced.
+
+Dry-run findings:
+
+- `holtburger-content` already derives legacy sampler material variants from polygon stippling bits: repeat sides produce the repeat variant and other sides clamp. V2 receives this as `materialVariantSignature`, so this phase should not rediscover sampler intent from host assets.
+- The current V2 policy maps semantic `rgba-raw` to runtime `rgba-exact`, which clamps and disables generated mips. That was conservative for 11D, but it is now visibly wrong for normal building base-color minification.
+- Existing `rgba-color` behavior is not terrain-specific by name or concept. Terrain happened to exercise it first; static object diffuse/base-color should use the same semantic class with domain-appropriate wrap policy.
+- The current texture page policy derives wrap only from usage. This phase likely needs either a texture-use policy extension or a placement grouping key that carries wrap policy separately from color/data semantics.
+- Since WebGL sampler wrap is texture-object state, repeat and clamp entries cannot safely share one physical page/texture object unless the shader implements per-entry wrap before atlas mapping. Static objects already apply repeat in shader for repeat variants; this phase should decide whether that remains the correct shape for mixed atlas pages or whether page policy must split repeat/clamp pages.
+
+Dry-run conclusion:
+
+- Treat this as a contract correction, not a visual-tuning pass. The implementation should make usage answer "what kind of data is this?" and sampler policy answer "how may it be sampled?" without overloading `rgba-raw` as a workaround for unknown wrap behavior.
 
 ### Phase 11E: Static Object Material Family Expansion
 

@@ -2907,7 +2907,7 @@ Verification:
 
 ### Phase 11E4A3: Static Object Material Binding Tables
 
-Status: in progress; Phase 11E4A3a complete.
+Status: in progress; Phase 11E4A3a and Phase 11E4A3b complete.
 
 Purpose: recover V1-style cross-material static-object compaction before `outdoor-detail` generated scenery and transparent object/part sorting broaden the static-object surface area.
 
@@ -2948,6 +2948,9 @@ Implementation split:
   - Add a materialization step after texture placement/commit data exists, or refactor the static coordinator/texture manager boundary so final static-object draw units are produced from coarse plans plus committed texture bindings.
   - Fine-partition coarse table candidates by actual texture refs/pages, draw-local role-slot limits, and material-entry limits.
   - Preserve static source/spatial records across materialization so inspection and picking do not depend on pre-materialized temporary ids.
+  - Status: complete on 2026-06-12 for the explicit runtime materialization boundary and binding validation. Actual static-object fine partitioning by committed pages/role slots remains in 11E4A3d-11E4A3e after the table draw-unit contract exists.
+- Phase 11E4A3b1: Table Contract Cutover Resteer.
+  - Re-check whether 11E4A3c should add table fields directly to `StaticObjectGeometryStaticDrawUnit` or introduce a materialized static-object draw-unit subtype/adapter first. The new runtime materializer validates committed bindings for existing draw units, but cannot fine-split static-object table candidates until the draw-unit contract can represent table entries and selector streams.
   - Status: next.
 - Phase 11E4A3c: Table Contract And One-Entry Renderer Cutover.
   - Add `StaticObjectMaterialTableEntry`-style contract fields and a `materialSlotIndices` selector stream to `StaticObjectGeometryStaticDrawUnit`.
@@ -3001,12 +3004,21 @@ Spicy bits:
 
 - Phase 11E4A3a intentionally keeps the final compatibility key conservative by including the concrete `materialEntryKey`. Texture A/B still become separate final partitions today even when their coarse table schema matches. The important course correction is that the partitioner now exposes the distinction between table schema and concrete material entry, so 11E4A3b/11E4A3e can move that split to placement-aware materialization instead of doing it prematurely in the coarse baker.
 - The one-entry compatibility path is still a bridge, not a destination. Keeping it too long would recreate parallel renderer contracts; Phase 11E4A3 should cut it over decisively once the table contract exists.
+- Phase 11E4A3b exposed that the existing runtime already had an async "static materialization" queue, but it was only sequencing texture placement before forwarding original baked draw units. The new `materializeStaticCommit` boundary now consumes committed texture bindings and rejects textured draw units with missing bindings before renderer residency. That is the right insertion point for later fine partitioning, but it deliberately does not pretend to split table candidates before the table draw-unit contract exists.
 
 Failed to close:
 
-- Real renderer material tables are not implemented yet. Phase 11E4A3a added the coarse table-plan contract, but final static-object draw units still use the current one-entry/single-binding renderer path until 11E4A3b-11E4A3e move materialization, selector baking, role slots, and shader consumption forward.
+- Real renderer material tables are not implemented yet. Phase 11E4A3a added the coarse table-plan contract, and Phase 11E4A3b added an explicit runtime materialization boundary after texture placement, but final static-object draw units still use the current one-entry/single-binding renderer path until 11E4A3c-11E4A3e move table fields, selector baking, role slots, and shader consumption forward.
+- Fine partitioning by actual committed texture refs/pages is not implemented yet because the current static-object draw-unit contract cannot represent multiple material entries or selector streams.
 - `outdoor-detail` generated scenery remains blocked behind this phase to avoid multiplying draw-unit churn for foliage.
 - True blended/additive support remains blocked behind 11E4C-11E4E.
+
+Phase 11E4A3b execution notes:
+
+- Added `runtime/static-materializer.ts` as the explicit placement-aware boundary. It takes a `StaticCoordinatorCommitDelta`, the committed `TexturePlacementUpdate`, and the render anchor, then produces the renderer `StaticResidencyDelta`.
+- Moved static draw-unit translation out of `client-runtime.ts` and into the materializer so future fine materialization can preserve placement/source records while rewriting draw units.
+- Added binding completeness validation: a textured terrain/static-object draw unit must have committed texture bindings for every declared `textureUseId` before it can enter renderer residency.
+- Added focused materializer tests covering successful textured materialization, missing binding rejection, and untextured draw units without texture updates.
 
 ### Phase 11E4B: Outdoor Detail Generated Scenery Cutout
 

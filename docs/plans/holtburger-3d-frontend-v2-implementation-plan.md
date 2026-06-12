@@ -2647,7 +2647,7 @@ Verification:
 
 ### Phase 11E3: Static Detail Overlay Composition
 
-Status: planned.
+Status: complete.
 
 Purpose: render static object detail overlays as material-role composition rather than broadening source domains prematurely.
 
@@ -2674,6 +2674,34 @@ Acceptance criteria:
 - `detail-overlay-render-deferred` material-coverage fallbacks drop for audited targets only when detail overlay rendering is actually active, not merely hidden or reclassified.
 - Unsupported or unresolved detail roles remain explicitly diagnostic.
 - Existing opaque/alpha-test, flat-color, and indexed/paletted base material rendering remains visually stable when no detail overlay applies.
+
+Closed:
+
+- Static object detail overlays are now resolved from region detail role facts through the existing static-object texture refs. Resolved building detail roles emit `rgba-detail` prepared render-surface uses; unresolved roles remain explicit `missing-detail-render-surface` diagnostics.
+- Detail overlays compose as material texture roles on already-renderable outdoor-building materials instead of creating an `outdoor-detail` source-domain shortcut. Translucent/additive materials still defer detail composition until Phase 11E4 owns blend/depth ordering.
+- Compatibility keys and material bucket keys include the detail role texture identity and tiling, so surfaces with different detail bindings do not merge into one draw unit.
+- Static-object bake output now carries `detailTextureUseId` and `detailTextureTiling`. Detail texture uses stage through the normal texture manager/atlas path with repeat sampling independent from the base material's clamp/repeat intent.
+- Renderer texture role pages now include `static-detail`; the WebGL2 static-object shader binds a fourth static texture unit and applies v1-style `dst-color` detail composition by multiplying the material-modulated base RGB by the repeat-sampled detail RGB.
+- Material coverage drops `detail-overlay-render-deferred` only when the detail role is resolved and composed. Missing detail render-surface facts remain visible as fallback diagnostics.
+
+Spicy bits:
+
+- Detail wrap is intentionally independent from base material wrap. V1 static detail refs are repeat-wrapped, so the V2 bake path forces `rgba-detail` static object uses to `wrap:repeat` even when the base material variant is clamp.
+- The first slice only composes the `building` role for `outdoor-buildings`. `object` detail remains disabled/deferred, matching the v1 role policy, and `outdoor-detail` / `env-cell-static` breadth remains Phase 12 territory.
+- The shader currently implements building detail's constant `dst-color` composition. It carries tiling now, but does not invent distance fade behavior for static building detail roles.
+
+Failed to close:
+
+- No live browser screenshot or GPU pixel test was run in this pass; validation is focused unit coverage, typecheck, lint, dead-code, and full TypeScript test coverage.
+- Detail overlays attached to translucent/additive materials remain deferred until Phase 11E4 implements pass ordering and depth/blend behavior.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- src/v2/static/objects/bake/static-object-material-planner.test.ts src/v2/static/objects/bake/static-object-compatibility-partitioner.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts src/v2/textures/texture-manager.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 11E4: Translucent And Additive Static Passes
 

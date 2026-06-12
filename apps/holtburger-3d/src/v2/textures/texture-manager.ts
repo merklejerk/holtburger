@@ -1635,6 +1635,10 @@ function resolveTextureRolePageSlot(options: {
 		return { kind: "static-index", slot: 0 };
 	}
 
+	if (options.source.usage === "rgba-detail") {
+		return { kind: "static-detail", slot: 0 };
+	}
+
 	return { kind: "static-base-color", slot: 0 };
 }
 

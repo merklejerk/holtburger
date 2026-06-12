@@ -148,6 +148,71 @@ describe("V2 static object compatibility partitioner", () => {
 		]);
 	});
 
+	it("composes resolved building detail overlays into rendered draw units", () => {
+		const payload = createPayload({
+			detailRoles: [
+				{
+					fadeFar: 1,
+					fadeNear: 0,
+					role: "building",
+					texture: {
+						kind: "surface-texture",
+						surfaceTextureId: 0x05000030,
+					},
+					tiling: 7,
+				},
+			],
+			materials: [createTexturedMaterial(0x08000010)],
+			textureRefs: [...createRgbaTextureRefs(), ...createDetailTextureRefs()],
+		});
+		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+		const drawUnit = result.drawUnits.find(
+			(candidate) => candidate.kind === "static-object-geometry",
+		);
+
+		expect(drawUnit).toMatchObject({
+			detailTextureTiling: 7,
+			detailTextureUseId:
+				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:wrap:repeat",
+			kind: "static-object-geometry",
+			textureUseIds: [
+				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:wrap:clamp",
+				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:wrap:repeat",
+			],
+		});
+		expect(
+			result.textureUses.map((textureUse) => ({
+				id: textureUse.textureUseId,
+				samplingPolicy: textureUse.samplingPolicy,
+				source: textureUse.source,
+			})),
+		).toEqual([
+			expect.objectContaining({
+				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:wrap:clamp",
+			}),
+			{
+				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:wrap:repeat",
+				samplingPolicy: {
+					wrapS: "repeat",
+					wrapT: "repeat",
+				},
+				source: {
+					kind: "prepared-render-surface-texture-use",
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000030,
+					},
+					usage: "rgba-detail",
+				},
+			},
+		]);
+		expect(result.materialCoverage[0]).toMatchObject({
+			detailRoleCount: 1,
+			fallbackReasonCounts: [],
+			fallbackReasonCount: 0,
+		});
+	});
+
 	it("bakes opaque flat-color partitions into rendered draw units without texture uses", () => {
 		const payload = createPayload({
 			materials: [
@@ -561,6 +626,7 @@ function createPayload(options: {
 		readonly z: number;
 	};
 	readonly paletteViews?: readonly (readonly StaticObjectPaletteViewFacts[])[];
+	readonly detailRoles?: OutdoorStaticObjectsScopePayload["regionRenderProfile"]["detailRoles"];
 	readonly textureRefs?: readonly StaticObjectTextureRefFacts[];
 }): OutdoorStaticObjectsScopePayload {
 	return {
@@ -609,7 +675,7 @@ function createPayload(options: {
 		],
 		paletteSources: createPaletteSources(),
 		regionRenderProfile: {
-			detailRoles: [],
+			detailRoles: options.detailRoles ?? [],
 			identity: {
 				kind: "region-render-profile",
 				regionNumber: 1,
@@ -820,6 +886,36 @@ function createRgbaTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 			},
 			role: "render-surface",
 			width: 32,
+		},
+	];
+}
+
+function createDetailTextureRefs(): readonly StaticObjectTextureRefFacts[] {
+	return [
+		{
+			palette: null,
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000030,
+			},
+			role: "surface-texture",
+			texture: {
+				kind: "surface-texture",
+				surfaceTextureId: 0x05000030,
+			},
+		},
+		{
+			format: "rgba",
+			formatRaw: 1,
+			height: 16,
+			indexedMaxIndex: null,
+			palette: null,
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000030,
+			},
+			role: "render-surface",
+			width: 16,
 		},
 	];
 }

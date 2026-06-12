@@ -767,6 +767,8 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly indexedTextureFormat: "p8" | "index16" | null;
 	readonly paletteTextureUseId: string | null;
 	readonly paletteFirstIndex: number;
+	readonly detailTextureUseId: string | null;
+	readonly detailTextureTiling: number;
 	readonly primaryTextureWrapMode: "clamp" | "repeat";
 	readonly textureUseIds: readonly string[];
 	readonly materialIds: readonly number[];

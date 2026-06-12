@@ -329,19 +329,21 @@ describe("V2 static object material planner", () => {
 		]);
 	});
 
-	it("keeps building detail roles as classified render-deferred material inputs", () => {
+	it("keeps unresolved building detail roles diagnostic", () => {
 		const plan = planStaticObjectMaterials(createPayload());
 
 		expect(plan.detailRoles).toEqual([
 			{
+				dataUse: null,
 				fadeFar: 256,
 				fadeNear: 128,
 				fallbackReasons: [
 					expect.objectContaining({
-						code: "detail-overlay-render-deferred",
+						code: "missing-detail-render-surface",
 					}),
 				],
 				renderCoverage: "classified-render-deferred",
+				renderSurface: null,
 				role: "building",
 				texture: {
 					kind: "surface-texture",
@@ -352,9 +354,58 @@ describe("V2 static object material planner", () => {
 		]);
 		expect(plan.fallbackReasons).toEqual([
 			expect.objectContaining({
-				code: "detail-overlay-render-deferred",
+				code: "missing-detail-render-surface",
 			}),
 		]);
+	});
+
+	it("composes resolved building detail roles onto renderable static materials", () => {
+		const payload = {
+			...createPayload(),
+			textureRefs: [
+				...createTextureRefs({ formatRaw: 1, paletteId: null }),
+				...createDetailTextureRefs(),
+			],
+		} satisfies OutdoorStaticObjectsScopePayload;
+
+		const plan = planStaticObjectMaterials(payload);
+
+		expect(plan.detailRoles).toEqual([
+			expect.objectContaining({
+				dataUse: {
+					kind: "prepared-render-surface-texture-use",
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000020,
+					},
+					usage: "rgba-detail",
+				},
+				fallbackReasons: [],
+				renderCoverage: "classified-render-candidate",
+				renderSurface: {
+					kind: "render-surface",
+					renderSurfaceId: 0x06000020,
+				},
+			}),
+		]);
+		expect(plan.materialPlans[0]?.textureRoles).toEqual([
+			expect.objectContaining({
+				role: "base-color",
+			}),
+			expect.objectContaining({
+				dataUse: {
+					kind: "prepared-render-surface-texture-use",
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000020,
+					},
+					usage: "rgba-detail",
+				},
+				role: "detail-overlay",
+				tiling: 8,
+			}),
+		]);
+		expect(plan.fallbackReasons).toEqual([]);
 	});
 
 	it("rejects textured materials whose selected render surface was not resolved", () => {
@@ -532,6 +583,36 @@ function createTextureRefs(options: {
 			},
 			role: "render-surface",
 			width: 64,
+		},
+	];
+}
+
+function createDetailTextureRefs(): StaticObjectTextureRefFacts[] {
+	return [
+		{
+			palette: null,
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000020,
+			},
+			role: "surface-texture",
+			texture: {
+				kind: "surface-texture",
+				surfaceTextureId: 0x05000020,
+			},
+		},
+		{
+			format: "rgba",
+			formatRaw: 1,
+			height: 16,
+			indexedMaxIndex: null,
+			palette: null,
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000020,
+			},
+			role: "render-surface",
+			width: 16,
 		},
 	];
 }

@@ -66,3 +66,20 @@ describe("V2 WebGL2 static object indexed shader contract", () => {
 		);
 	});
 });
+
+describe("V2 WebGL2 static object detail shader contract", () => {
+	it("composes detail overlays as a second repeat-sampled material role", () => {
+		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
+			"uniform sampler2D uDetailTexture;",
+		);
+		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
+			"vec4 sampleDetailOverlay(vec2 uv)",
+		);
+		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
+			"vec2 localUv = fract(uv * uDetailTiling);",
+		);
+		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
+			"rgb *= sampleDetailOverlay(vTexCoord).rgb;",
+		);
+	});
+});

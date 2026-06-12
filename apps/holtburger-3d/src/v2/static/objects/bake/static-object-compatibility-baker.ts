@@ -180,9 +180,12 @@ function createStaticObjectGeometryDrawUnit(options: {
 	);
 	const textureUseIds = options.textureUses.map((textureUse) =>
 		createStaticObjectTextureUseId(
-				options.work,
+			options.work,
 			textureUse,
+			resolveStaticObjectTextureUseWrapMode(
+				textureUse,
 				options.partition.textureWrapMode,
+			),
 		),
 	);
 	const primaryTextureUse = options.textureUses.find(
@@ -197,6 +200,11 @@ function createStaticObjectGeometryDrawUnit(options: {
 	);
 	const paletteTextureUse = options.textureUses.find(
 		(textureUse) => textureUse.kind === "palette-texture-use",
+	);
+	const detailTextureUse = options.textureUses.find(
+		(textureUse) =>
+			textureUse.kind === "prepared-render-surface-texture-use" &&
+			textureUse.usage === "rgba-detail",
 	);
 
 	return {
@@ -213,6 +221,17 @@ function createStaticObjectGeometryDrawUnit(options: {
 		materialFamily: resolveRenderableStaticObjectFamily(options.partition),
 		materialIds: options.partition.materialIds,
 		materialPass: resolveRenderableStaticObjectPass(options.partition),
+		detailTextureTiling: options.partition.detailTextureTiling,
+		detailTextureUseId: detailTextureUse
+			? createStaticObjectTextureUseId(
+					options.work,
+					detailTextureUse,
+					resolveStaticObjectTextureUseWrapMode(
+						detailTextureUse,
+						options.partition.textureWrapMode,
+					),
+				)
+			: null,
 		positions: geometry.positions,
 		alphaTest: options.partition.alphaTest,
 		indexTextureUseId: indexTextureUse
@@ -423,7 +442,10 @@ function createStaticObjectBakeTextureUses(options: {
 			const textureUseId = createStaticObjectTextureUseId(
 				options.work,
 				dataUse,
-				partition.textureWrapMode,
+				resolveStaticObjectTextureUseWrapMode(
+					dataUse,
+					partition.textureWrapMode,
+				),
 			);
 			const existing = textureUsesById.get(textureUseId);
 			if (existing) {
@@ -438,7 +460,10 @@ function createStaticObjectBakeTextureUses(options: {
 				domain: options.work.job.domain,
 				ownerDrawUnitIds: [drawUnitId],
 				samplingPolicy: createStaticObjectSamplingPolicy(
-					partition.textureWrapMode,
+					resolveStaticObjectTextureUseWrapMode(
+						dataUse,
+						partition.textureWrapMode,
+					),
 				),
 				source: dataUse,
 				staticBatchId: options.staticBatchId,
@@ -463,6 +488,16 @@ function createStaticObjectTextureUseId(
 		createMaterialTextureDataUseKey(dataUse),
 		`wrap:${textureWrapMode}`,
 	].join(":");
+}
+
+function resolveStaticObjectTextureUseWrapMode(
+	dataUse: MaterialTextureDataUseIdentity,
+	fallbackWrapMode: StaticObjectCompatibilityPartition["textureWrapMode"],
+): StaticObjectCompatibilityPartition["textureWrapMode"] {
+	return dataUse.kind === "prepared-render-surface-texture-use" &&
+		dataUse.usage === "rgba-detail"
+		? "repeat"
+		: fallbackWrapMode;
 }
 
 function createStaticObjectSamplingPolicy(

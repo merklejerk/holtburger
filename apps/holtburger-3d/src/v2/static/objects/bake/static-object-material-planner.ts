@@ -94,21 +94,35 @@ export type StaticObjectMaterialTextureUseRole =
 			readonly role: "palette-rgba";
 			readonly palette: PaletteIdentity;
 			readonly dataUse: PaletteDataUseIdentity;
+	  }
+	| {
+			readonly role: "detail-overlay";
+			readonly texture: SurfaceTextureIdentity;
+			readonly renderSurface: RenderSurfaceIdentity;
+			readonly dataUse: PreparedRgbaRenderSurfaceTextureUseIdentity;
+			readonly tiling: number;
+			readonly fadeNear: number;
+			readonly fadeFar: number;
 	  };
 
 interface StaticObjectDetailRolePlan {
 	readonly role: RegionDetailRoleFacts["role"];
 	readonly texture: SurfaceTextureIdentity;
+	readonly renderSurface: RenderSurfaceIdentity | null;
+	readonly dataUse: PreparedRgbaRenderSurfaceTextureUseIdentity | null;
 	readonly tiling: number;
 	readonly fadeNear: number;
 	readonly fadeFar: number;
-	readonly renderCoverage: "classified-render-deferred";
+	readonly renderCoverage:
+		| "classified-render-candidate"
+		| "classified-render-deferred";
 	readonly fallbackReasons: readonly StaticObjectMaterialFallbackReason[];
 }
 
 export interface StaticObjectMaterialFallbackReason {
 	readonly code:
 		| "missing-material-texture"
+		| "missing-detail-render-surface"
 		| "missing-render-surface"
 		| "missing-palette"
 		| "palette-index-out-of-range"
@@ -168,7 +182,7 @@ export function planStaticObjectMaterials(
 		]),
 	);
 	const plannedMaterialKeys = new Set<string>();
-	const materialPlans: StaticObjectMaterialPlan[] = [];
+	const rawMaterialPlans: StaticObjectMaterialPlan[] = [];
 	for (const slot of payload.materialSlots) {
 		const material = materialById.get(createStaticMaterialSourceKey(slot.material));
 		if (!material) {
@@ -183,7 +197,7 @@ export function planStaticObjectMaterials(
 			continue;
 		}
 		plannedMaterialKeys.add(planKey);
-		materialPlans.push(
+		rawMaterialPlans.push(
 			classifyStaticObjectMaterial({
 				material,
 				paletteOverride: slot.paletteOverride,
@@ -199,7 +213,7 @@ export function planStaticObjectMaterials(
 			continue;
 		}
 		plannedMaterialKeys.add(planKey);
-		materialPlans.push(
+		rawMaterialPlans.push(
 			classifyStaticObjectMaterial({
 				material,
 				paletteOverride: null,
@@ -211,7 +225,10 @@ export function planStaticObjectMaterials(
 	}
 	const detailRoles = payload.regionRenderProfile.detailRoles
 		.filter((role) => role.role !== "landscape")
-		.map(createDetailRolePlan);
+		.map((role) => createDetailRolePlan(role, payload.textureRefs));
+	const materialPlans = rawMaterialPlans.map((plan) =>
+		composeStaticDetailRoles(plan, payload.domain, detailRoles),
+	);
 	const fallbackReasons = [
 		...materialPlans.flatMap((plan) => plan.fallbackReasons),
 		...detailRoles.flatMap((role) => role.fallbackReasons),
@@ -262,6 +279,7 @@ export function classifyStaticObjectMaterial(
 					unsupportedFlagReasons.length === 0 ? "flat-color" : "unsupported",
 				material: context.material.identity,
 				pass: resolveMaterialPass(behavior),
+				textureRoles: [],
 			}),
 			renderCoverage:
 				unsupportedFlagReasons.length === 0
@@ -442,6 +460,77 @@ export function classifyStaticObjectMaterial(
 	});
 }
 
+function composeStaticDetailRoles(
+	plan: StaticObjectMaterialPlan,
+	domain: OutdoorStaticObjectsScopePayload["domain"],
+	detailRoles: readonly StaticObjectDetailRolePlan[],
+): StaticObjectMaterialPlan {
+	const detailRole = resolveComposableDetailRole(domain, detailRoles);
+	if (!detailRole) {
+		return plan;
+	}
+
+	if (plan.renderCoverage !== "classified-render-candidate") {
+		return {
+			...plan,
+			fallbackReasons: [
+				...plan.fallbackReasons,
+				createFallbackReason({
+					code: "detail-overlay-render-deferred",
+					material: plan.material,
+					message:
+						"Static object detail overlay is deferred until this material pass is renderable.",
+					texture: detailRole.texture,
+				}),
+			],
+		};
+	}
+
+	if (!detailRole.dataUse || !detailRole.renderSurface) {
+		return plan;
+	}
+
+	const textureRoles: readonly StaticObjectMaterialTextureUseRole[] = [
+		...plan.textureRoles,
+		{
+			dataUse: detailRole.dataUse,
+			fadeFar: detailRole.fadeFar,
+			fadeNear: detailRole.fadeNear,
+			renderSurface: detailRole.renderSurface,
+			role: "detail-overlay",
+			texture: detailRole.texture,
+			tiling: detailRole.tiling,
+		},
+	];
+
+	return {
+		...plan,
+		materialBucketKey: createMaterialBucketKey({
+			alphaPolicy: plan.alphaPolicy.mode,
+			family: plan.family,
+			material: plan.material,
+			pass: plan.pass,
+			textureRoles,
+		}),
+		textureRoles,
+	};
+}
+
+function resolveComposableDetailRole(
+	domain: OutdoorStaticObjectsScopePayload["domain"],
+	detailRoles: readonly StaticObjectDetailRolePlan[],
+): StaticObjectDetailRolePlan | null {
+	if (domain !== "outdoor-buildings") {
+		return null;
+	}
+
+	const detailRole =
+		detailRoles.find((role) => role.role === "building") ?? null;
+	return detailRole?.renderCoverage === "classified-render-candidate"
+		? detailRole
+		: null;
+}
+
 function createTexturePlan(
 	options: Pick<
 		StaticObjectMaterialPlan,
@@ -465,6 +554,7 @@ function createTexturePlan(
 			family: options.family,
 			material: options.material,
 			pass: options.pass,
+			textureRoles: options.textureRoles,
 		}),
 	};
 }
@@ -565,6 +655,7 @@ function createUnsupportedPlan(
 			family: "unsupported",
 			material: basePlan.material,
 			pass: basePlan.pass,
+			textureRoles: [],
 		}),
 		renderCoverage: "unsupported",
 		textureRoles: [],
@@ -573,19 +664,63 @@ function createUnsupportedPlan(
 
 function createDetailRolePlan(
 	role: RegionDetailRoleFacts,
+	textureRefs: readonly StaticObjectTextureRefFacts[],
 ): StaticObjectDetailRolePlan {
+	if (role.role !== "building" && role.role !== "environment") {
+		return {
+			dataUse: null,
+			fadeFar: role.fadeFar,
+			fadeNear: role.fadeNear,
+			fallbackReasons: [
+				createFallbackReason({
+					code: "detail-overlay-render-deferred",
+					message:
+						"Static object detail overlay role is not renderable for this static object family yet.",
+					texture: role.texture,
+				}),
+			],
+			renderCoverage: "classified-render-deferred",
+			renderSurface: null,
+			role: role.role,
+			texture: role.texture,
+			tiling: role.tiling,
+		};
+	}
+
+	const textureRef = findSurfaceTextureRef(textureRefs, role.texture);
+	const renderSurface = textureRef?.renderSurface ?? null;
+	if (!renderSurface || !findRenderSurfaceRef(textureRefs, renderSurface)) {
+		return {
+			dataUse: null,
+			fadeFar: role.fadeFar,
+			fadeNear: role.fadeNear,
+			fallbackReasons: [
+				createFallbackReason({
+					code: "missing-detail-render-surface",
+					message:
+						"Static object detail overlay texture has no resolved render surface.",
+					texture: role.texture,
+				}),
+			],
+			renderCoverage: "classified-render-deferred",
+			renderSurface: null,
+			role: role.role,
+			texture: role.texture,
+			tiling: role.tiling,
+		};
+	}
+
 	return {
+		dataUse: {
+			kind: "prepared-render-surface-texture-use",
+			renderSurface,
+			usage: "rgba-detail",
+		},
 		fadeFar: role.fadeFar,
 		fadeNear: role.fadeNear,
-		fallbackReasons: [
-			createFallbackReason({
-				code: "detail-overlay-render-deferred",
-				message:
-					"Static object detail overlay roles are classified but deferred until material-role composition lands.",
-				texture: role.texture,
-			}),
-		],
-		renderCoverage: "classified-render-deferred",
+		fallbackReasons: [],
+		renderCoverage: "classified-render-candidate",
+		renderSurface,
 		role: role.role,
 		texture: role.texture,
 		tiling: role.tiling,
@@ -842,6 +977,7 @@ function createMaterialBucketKey(options: {
 	readonly material: StaticMaterialSourceIdentity;
 	readonly pass: StaticObjectMaterialPass;
 	readonly alphaPolicy: StaticObjectMaterialAlphaPolicy["mode"];
+	readonly textureRoles: readonly StaticObjectMaterialTextureUseRole[];
 }): string {
 	return [
 		`family:${options.family}`,
@@ -849,7 +985,39 @@ function createMaterialBucketKey(options: {
 		`pass:${options.pass}`,
 		`alpha:${options.alphaPolicy}`,
 		`material:${options.material.materialId.toString(16).padStart(8, "0")}`,
+		`roles:${createTextureRoleSignature(options.textureRoles)}`,
 	].join("|");
+}
+
+function createTextureRoleSignature(
+	roles: readonly StaticObjectMaterialTextureUseRole[],
+): string {
+	if (roles.length === 0) {
+		return "none";
+	}
+
+	return roles
+		.map((role) => `${role.role}:${createTextureRoleDataUseSignature(role)}`)
+		.join(",");
+}
+
+function createTextureRoleDataUseSignature(
+	role: StaticObjectMaterialTextureUseRole,
+): string {
+	const detailSuffix =
+		role.role === "detail-overlay" ? `:tiling=${role.tiling}` : "";
+	if (role.dataUse.kind === "palette-texture-use") {
+		return [
+			formatHex32(role.dataUse.palette.paletteId),
+			`${role.dataUse.firstIndex}-${role.dataUse.indexCount}`,
+			role.dataUse.usage,
+		].join(":") + detailSuffix;
+	}
+
+	return [
+		formatHex32(role.dataUse.renderSurface.renderSurfaceId),
+		role.dataUse.usage,
+	].join(":") + detailSuffix;
 }
 
 function createFallbackReason(options: {

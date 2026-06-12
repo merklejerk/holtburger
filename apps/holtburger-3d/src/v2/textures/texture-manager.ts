@@ -1,7 +1,12 @@
 import type { AssetService } from "../assets/contracts";
+import { createHostAssetKey } from "../assets/keys";
 import {
 	createPreparedTextureHostKey,
-	prepareDirectRgbaTextureSource,
+	prepareDirectMaterialTextureSource,
+} from "../assets/preparation/prepared-texture-source";
+import type {
+	DirectMaterialTextureSource,
+	DirectRgbaTextureSource,
 } from "../assets/preparation/prepared-texture-source";
 import type {
 	TerrainRolePageOverflowDiagnostics,
@@ -217,7 +222,7 @@ export class TextureManager {
 				return entry
 					? [
 							{
-								texture: entry.source,
+								texture: textureUse,
 							},
 						]
 					: [];
@@ -291,12 +296,13 @@ export class TextureManager {
 			if (!entry) {
 				continue;
 			}
-			const source = asPreparedRgbaRenderSurfaceTextureUse(textureUse.source);
 			for (const drawUnitId of textureUse.ownerDrawUnitIds) {
-				const rolePage = rolePageSlots.resolveSlot({
+				const rolePage = resolveTextureRolePageSlot({
+					domain: textureUse.domain,
 					drawUnitId,
+					rolePageSlots,
+					source: textureUse.source,
 					textureRefId: entry.textureRefId,
-					usage: source.usage,
 				});
 				if (!rolePage) {
 					continue;
@@ -370,7 +376,7 @@ export class TextureManager {
 		textureUse: StaticBakeTextureUse,
 		pendingPlacements: Map<string, PendingTexturePlacement>,
 	): Promise<StagedTexturePlacement> {
-		const source = asPreparedRgbaRenderSurfaceTextureUse(textureUse.source);
+		const source = textureUse.source;
 		const registry = this.#getRegistry(
 			textureUse.domain,
 			textureUse.staticBatchId,
@@ -415,9 +421,9 @@ export class TextureManager {
 		}
 
 		const prepared = await this.#assetService.requestPreparedAsset(
-			createPreparedTextureHostKey(source),
+			createMaterialTextureHostKey(source),
 		);
-		const directSource = prepareDirectRgbaTextureSource(prepared, source);
+		const directSource = prepareDirectMaterialTextureSource(prepared, source);
 		const samplerPolicy = createRuntimeTextureSamplerPolicy({
 			filteringMode: this.#filteringMode,
 			sampleClass: pagePolicy.sampleClass,
@@ -448,8 +454,15 @@ export class TextureManager {
 		pendingPlacements: readonly PendingTexturePlacement[],
 	): Promise<readonly RuntimeTexturePlacement[]> {
 		const runtimePlacements: RuntimeTexturePlacement[] = [];
+		const directPlacements = pendingPlacements.filter(shouldCommitDirectPlacement);
+		runtimePlacements.push(
+			...this.#commitDirectTexturePlacements(directPlacements),
+		);
+		const packablePlacements = pendingPlacements.filter(
+			(placement) => !shouldCommitDirectPlacement(placement),
+		);
 		const plannedGroups = this.#planPendingTexturePackingGroups(
-			groupPendingTexturePlacements(pendingPlacements),
+			groupPendingTexturePlacements(packablePlacements),
 		);
 		const packedGroups = await mapWithConcurrency(
 			plannedGroups,
@@ -464,6 +477,86 @@ export class TextureManager {
 			runtimePlacements.push(
 				...this.#commitPackedTexturePlacementGroup(packedGroup),
 			);
+		}
+
+		return runtimePlacements;
+	}
+
+	#commitDirectTexturePlacements(
+		placements: readonly PendingTexturePlacement[],
+	): readonly RuntimeTexturePlacement[] {
+		const runtimePlacements: RuntimeTexturePlacement[] = [];
+		const nextRevisionByRegistry = new Map<StaticBatchRegistryKey, number>();
+
+		for (const placement of placements) {
+			const registryKey = createStaticBatchRegistryKey(
+				placement.domain,
+				placement.staticBatchId,
+			);
+			const currentRevision =
+				nextRevisionByRegistry.get(registryKey) ??
+				this.#getRegistry(placement.domain, placement.staticBatchId).revision;
+			const placementRevision = currentRevision + 1;
+			nextRevisionByRegistry.set(registryKey, placementRevision);
+
+			const textureRefId = createTextureRefId(
+				placement.domain,
+				placement.staticBatchId,
+				placement.textureUse,
+			);
+			const textureWidth = placement.source.width;
+			const textureHeight = placement.source.height;
+			const rect = [0, 0, textureWidth, textureHeight] as const;
+			const registryEntry: StaticBatchTextureRegistryEntry = {
+				anisotropy: placement.samplerPolicy.anisotropy,
+				domain: placement.domain,
+				filteringMode: placement.samplerPolicy.filteringMode,
+				format: getTextureSourcePlacementFormat(placement.source),
+				leaseCount: 0,
+				mipmapsGenerated: placement.samplerPolicy.generateMipmaps,
+				placementRevision,
+				rect,
+				sampleClass: placement.pagePolicy.sampleClass,
+				samplerPolicyKey: placement.samplerPolicy.policyKey,
+				source: placement.textureUse.source,
+				staticBatchId: placement.staticBatchId,
+				textureHeight,
+				textureRefId,
+				textureWidth,
+				wrapS: placement.pagePolicy.wrapS,
+				wrapT: placement.pagePolicy.wrapT,
+			};
+			placement.entry = registryEntry;
+			for (const textureKey of placement.textureKeys) {
+				this.#getRegistry(placement.domain, placement.staticBatchId).entries.set(
+					textureKey,
+					registryEntry,
+				);
+			}
+			runtimePlacements.push({
+				anisotropy: placement.samplerPolicy.anisotropy,
+				filteringMode: placement.samplerPolicy.filteringMode,
+				format: registryEntry.format,
+				height: textureHeight,
+				mipmapsGenerated: placement.samplerPolicy.generateMipmaps,
+				pixels: getTextureSourcePlacementPixels(placement.source),
+				placementRevision,
+				rect,
+				sampleClass: placement.pagePolicy.sampleClass,
+				samplerPolicyKey: placement.samplerPolicy.policyKey,
+				textureRefId,
+				textureUseId: placement.textureUse.textureUseId,
+				wrapS: placement.pagePolicy.wrapS,
+				wrapT: placement.pagePolicy.wrapT,
+				width: textureWidth,
+			});
+		}
+
+		for (const [registryKey, revision] of nextRevisionByRegistry) {
+			const registry = this.#batchRegistries.get(registryKey);
+			if (registry) {
+				registry.revision = Math.max(registry.revision, revision);
+			}
 		}
 
 		return runtimePlacements;
@@ -494,7 +587,7 @@ export class TextureManager {
 					page: createTexturePackingPageConstraints(group),
 					placementRevision,
 					sources: group.entries.map((entry) => ({
-						source: entry.source,
+						source: asDirectRgbaTextureSource(entry.source),
 						textureUseId: entry.textureUse.textureUseId,
 					})),
 				},
@@ -597,9 +690,7 @@ export class TextureManager {
 					rect: rect.rect,
 					sampleClass: group.pagePolicy.sampleClass,
 					samplerPolicyKey: group.samplerPolicy.policyKey,
-					source: asPreparedRgbaRenderSurfaceTextureUse(
-						entry.textureUse.source,
-					),
+					source: entry.textureUse.source,
 					staticBatchId: entry.staticBatchId,
 					textureHeight: page.height,
 					textureRefId,
@@ -694,7 +785,7 @@ interface StaticBatchTextureRegistryEntry {
 	filteringMode: TextureFilteringMode;
 	readonly format: RuntimeTexturePlacement["format"];
 	readonly staticBatchId: string;
-	readonly source: PreparedRgbaRenderSurfaceTextureUseIdentity;
+	readonly source: MaterialTextureDataUseIdentity;
 	readonly textureRefId: string;
 	readonly placementRevision: number;
 	mipmapsGenerated: boolean;
@@ -749,7 +840,7 @@ interface PendingTexturePlacement {
 	readonly staticBatchId: string;
 	readonly textureUse: StaticBakeTextureUse;
 	readonly textureKeys: Set<StaticBatchTextureKey>;
-	readonly source: ReturnType<typeof prepareDirectRgbaTextureSource>;
+	readonly source: DirectMaterialTextureSource;
 	readonly pagePolicy: RuntimeTexturePagePolicy;
 	readonly samplerPolicy: RuntimeTextureSamplerPolicy;
 	readonly ownerDrawUnitIds: Set<string>;
@@ -779,7 +870,7 @@ interface PackedPendingTexturePlacementGroup extends PlannedPendingTexturePlacem
 interface TerrainRolePageSlotInput {
 	readonly drawUnitId: string;
 	readonly textureRefId: string;
-	readonly usage: PreparedRgbaRenderSurfaceTextureUseIdentity["usage"];
+	readonly usage: MaterialTextureDataUseIdentity["usage"];
 }
 
 function collectPayloadTextureUses(
@@ -806,12 +897,12 @@ function createStaticBatchRegistryKey(
 
 function findRegistryEntryBySource(
 	registry: StaticBatchTextureRegistry,
-	source: PreparedRgbaRenderSurfaceTextureUseIdentity,
+	source: MaterialTextureDataUseIdentity,
 	pagePolicy: RuntimeTexturePagePolicy,
 ): StaticBatchTextureRegistryEntry | null {
 	for (const entry of registry.entries.values()) {
 		if (
-			isSamePreparedTextureUse(entry.source, source) &&
+			isSameMaterialTextureDataUse(entry.source, source) &&
 			entry.sampleClass === pagePolicy.sampleClass &&
 			entry.wrapS === pagePolicy.wrapS &&
 			entry.wrapT === pagePolicy.wrapT
@@ -842,15 +933,102 @@ function deleteRegistryEntryAliases(
 	}
 }
 
-function isSamePreparedTextureUse(
-	left: PreparedRgbaRenderSurfaceTextureUseIdentity,
-	right: PreparedRgbaRenderSurfaceTextureUseIdentity,
+function isSameMaterialTextureDataUse(
+	left: MaterialTextureDataUseIdentity,
+	right: MaterialTextureDataUseIdentity,
+): boolean {
+	if (left.kind !== right.kind || left.usage !== right.usage) {
+		return false;
+	}
+
+	if (left.kind === "palette-texture-use" && right.kind === "palette-texture-use") {
+		return (
+			left.palette.paletteId === right.palette.paletteId &&
+			left.firstIndex === right.firstIndex &&
+			left.indexCount === right.indexCount
+		);
+	}
+
+	if (
+		left.kind === "prepared-render-surface-texture-use" &&
+		right.kind === "prepared-render-surface-texture-use"
+	) {
+		return (
+			left.renderSurface.renderSurfaceId ===
+			right.renderSurface.renderSurfaceId
+		);
+	}
+
+	return false;
+}
+
+function createMaterialTextureHostKey(source: MaterialTextureDataUseIdentity) {
+	if (source.kind === "palette-texture-use") {
+		return createHostAssetKey("palette", source.palette.paletteId);
+	}
+
+	return createPreparedTextureHostKey(source);
+}
+
+function shouldCommitDirectPlacement(
+	placement: PendingTexturePlacement,
 ): boolean {
 	return (
-		left.kind === right.kind &&
-		left.renderSurface.renderSurfaceId ===
-			right.renderSurface.renderSurfaceId &&
-		left.usage === right.usage
+		placement.source.kind === "direct-index-texture-source" ||
+		placement.source.kind === "direct-palette-texture-source"
+	);
+}
+
+function asDirectRgbaTextureSource(
+	source: DirectMaterialTextureSource,
+): DirectRgbaTextureSource {
+	if (source.kind === "direct-rgba-texture-source") {
+		return source;
+	}
+
+	throw new Error(
+		`Texture source ${source.kind} cannot be submitted to the RGBA atlas packer.`,
+	);
+}
+
+function getTextureSourcePlacementFormat(
+	source: DirectMaterialTextureSource,
+): RuntimeTexturePlacement["format"] {
+	if (source.kind === "direct-index-texture-source") {
+		return source.usage === "index8" ? "r8ui" : "r16ui";
+	}
+
+	return "rgba8";
+}
+
+function getTextureSourcePlacementPixels(
+	source: DirectMaterialTextureSource,
+): Uint8Array {
+	if (source.kind === "direct-index-texture-source") {
+		return source.indices;
+	}
+
+	return source.pixels;
+}
+
+function createMaterialTextureDataUseKey(
+	source: MaterialTextureDataUseIdentity,
+): string {
+	if (source.kind === "palette-texture-use") {
+		return [
+			source.kind,
+			source.palette.paletteId.toString(16).padStart(8, "0"),
+			`range:${source.firstIndex}-${source.indexCount}`,
+			source.usage,
+		].join(":");
+	}
+
+	return (
+		[
+			source.kind,
+			source.renderSurface.renderSurfaceId.toString(16).padStart(8, "0"),
+			source.usage,
+		].join(":")
 	);
 }
 
@@ -870,20 +1048,8 @@ function createStaticBatchSourcePlacementKey(
 	return [
 		textureUse.domain,
 		textureUse.staticBatchId,
-		createPreparedTextureUseKey(
-			asPreparedRgbaRenderSurfaceTextureUse(textureUse.source),
-		),
+		createMaterialTextureDataUseKey(textureUse.source),
 		createTextureUseSamplingKey(textureUse),
-	].join(":");
-}
-
-function createPreparedTextureUseKey(
-	source: PreparedRgbaRenderSurfaceTextureUseIdentity,
-): string {
-	return [
-		source.kind,
-		source.renderSurface.renderSurfaceId.toString(16).padStart(8, "0"),
-		source.usage,
 	].join(":");
 }
 
@@ -905,18 +1071,6 @@ function isPreparedRgbaRenderSurfaceTextureUse(
 			source.usage === "rgba-detail" ||
 			source.usage === "rgba-mask" ||
 			source.usage === "rgba-raw")
-	);
-}
-
-function asPreparedRgbaRenderSurfaceTextureUse(
-	source: MaterialTextureDataUseIdentity,
-): PreparedRgbaRenderSurfaceTextureUseIdentity {
-	if (isPreparedRgbaRenderSurfaceTextureUse(source)) {
-		return source;
-	}
-
-	throw new Error(
-		`Texture data use ${source.kind}:${source.usage} cannot be staged by the current RGBA atlas path.`,
 	);
 }
 
@@ -1180,9 +1334,10 @@ function createTextureAtlasPageDiagnostics(
 			}
 
 			return {
-				approximateBytes: estimateRgba8TextureBytes(
+				approximateBytes: estimateTextureBytes(
 					firstEntry.textureWidth,
 					firstEntry.textureHeight,
+					firstEntry.format,
 					firstEntry.mipmapsGenerated,
 				),
 				mipmapsGenerated: firstEntry.mipmapsGenerated,
@@ -1262,6 +1417,11 @@ function countSampleClasses(
 	pages: readonly TextureAtlasPageFacts[],
 ): TextureAtlasDiagnosticsReport["byDomain"][number]["sampleClasses"] {
 	return {
+		index8: pages.filter((page) => page.sampleClass === "index8").length,
+		index16: pages.filter((page) => page.sampleClass === "index16").length,
+		"palette-rgba": pages.filter(
+			(page) => page.sampleClass === "palette-rgba",
+		).length,
 		"rgba-color": pages.filter((page) => page.sampleClass === "rgba-color")
 			.length,
 		"rgba-detail": pages.filter((page) => page.sampleClass === "rgba-detail")
@@ -1296,18 +1456,19 @@ function countUniqueSources(
 	entries: readonly StaticBatchTextureRegistryEntry[],
 ): number {
 	const sources = new Set(
-		entries.map((entry) => createPreparedTextureUseKey(entry.source)),
+		entries.map((entry) => createMaterialTextureDataUseKey(entry.source)),
 	);
 
 	return sources.size;
 }
 
-function estimateRgba8TextureBytes(
+function estimateTextureBytes(
 	width: number,
 	height: number,
+	format: RuntimeTexturePlacement["format"],
 	includeMipmaps: boolean,
 ): number {
-	let bytes = width * height * 4;
+	let bytes = width * height * getTextureFormatBytesPerPixel(format);
 	if (!includeMipmaps) {
 		return bytes;
 	}
@@ -1317,10 +1478,23 @@ function estimateRgba8TextureBytes(
 	while (mipWidth > 1 || mipHeight > 1) {
 		mipWidth = Math.max(1, Math.floor(mipWidth / 2));
 		mipHeight = Math.max(1, Math.floor(mipHeight / 2));
-		bytes += mipWidth * mipHeight * 4;
+		bytes += mipWidth * mipHeight * getTextureFormatBytesPerPixel(format);
 	}
 
 	return bytes;
+}
+
+function getTextureFormatBytesPerPixel(
+	format: RuntimeTexturePlacement["format"],
+): number {
+	switch (format) {
+		case "r8ui":
+			return 1;
+		case "r16ui":
+			return 2;
+		case "rgba8":
+			return 4;
+	}
 }
 
 function sumNumbers(values: readonly number[]): number {
@@ -1332,7 +1506,7 @@ function appendBounded<T>(values: readonly T[], value: T, limit: number): T[] {
 }
 
 function createTerrainTextureRolePageKind(
-	usage: PreparedRgbaRenderSurfaceTextureUseIdentity["usage"],
+	usage: MaterialTextureDataUseIdentity["usage"],
 ): TerrainTextureRolePageKind {
 	if (usage === "rgba-mask") {
 		return "mask";
@@ -1342,6 +1516,32 @@ function createTerrainTextureRolePageKind(
 	}
 
 	return "color";
+}
+
+function resolveTextureRolePageSlot(options: {
+	readonly domain: StaticDomain;
+	readonly drawUnitId: string;
+	readonly rolePageSlots: TerrainDrawUnitRolePageSlots;
+	readonly source: MaterialTextureDataUseIdentity;
+	readonly textureRefId: string;
+}): TextureDrawUnitBinding["rolePage"] | null {
+	if (options.domain === "outdoor-terrain") {
+		return options.rolePageSlots.resolveSlot({
+			drawUnitId: options.drawUnitId,
+			textureRefId: options.textureRefId,
+			usage: options.source.usage,
+		});
+	}
+
+	if (options.source.kind === "palette-texture-use") {
+		return { kind: "static-palette", slot: 0 };
+	}
+
+	if (options.source.usage === "index8" || options.source.usage === "index16") {
+		return { kind: "static-index", slot: 0 };
+	}
+
+	return { kind: "static-base-color", slot: 0 };
 }
 
 class TerrainDrawUnitRolePageSlots {

@@ -17,11 +17,12 @@ export function isRenderableStaticObjectMaterialPlan(
 	}
 
 	return (
-		plan.family === "texture-rgba" &&
+		(plan.family === "texture-rgba" || plan.family === "indexed-paletted") &&
 		(plan.pass === "opaque" || plan.pass === "alpha-test") &&
 		plan.renderCoverage === "classified-render-candidate" &&
-		plan.textureRoles.length === 1 &&
-		isCurrentlyStageableStaticObjectDataUse(plan.textureRoles[0]?.dataUse)
+		isCurrentlyStageableStaticObjectDataUseLayout(
+			plan.textureRoles.map((role) => role.dataUse),
+		)
 	);
 }
 
@@ -38,11 +39,11 @@ export function isRenderableStaticObjectPartition(
 	}
 
 	return (
-		partition.family === "texture-rgba" &&
+		(partition.family === "texture-rgba" ||
+			partition.family === "indexed-paletted") &&
 		(partition.pass === "opaque" || partition.pass === "alpha-test") &&
 		partition.renderCoverage === "classified-render-candidate" &&
-		partition.textureDataUses.length === 1 &&
-		isCurrentlyStageableStaticObjectDataUse(partition.textureDataUses[0])
+		isCurrentlyStageableStaticObjectDataUseLayout(partition.textureDataUses)
 	);
 }
 
@@ -51,6 +52,35 @@ export function isCurrentlyStageableStaticObjectDataUse(
 ): boolean {
 	return (
 		dataUse?.kind === "prepared-render-surface-texture-use" &&
-		dataUse.usage === "rgba-color"
+		(dataUse.usage === "rgba-color" ||
+			dataUse.usage === "index8" ||
+			dataUse.usage === "index16")
+	) || dataUse?.kind === "palette-texture-use";
+}
+
+function isCurrentlyStageableStaticObjectDataUseLayout(
+	dataUses: readonly MaterialTextureDataUseIdentity[],
+): boolean {
+	if (
+		dataUses.length === 1 &&
+		dataUses[0]?.kind === "prepared-render-surface-texture-use" &&
+		dataUses[0].usage === "rgba-color"
+	) {
+		return true;
+	}
+
+	const indexUseCount = dataUses.filter(
+		(use) =>
+			use.kind === "prepared-render-surface-texture-use" &&
+			(use.usage === "index8" || use.usage === "index16"),
+	).length;
+	const paletteUseCount = dataUses.filter(
+		(use) => use.kind === "palette-texture-use",
+	).length;
+
+	return (
+		dataUses.length === 2 &&
+		indexUseCount === 1 &&
+		paletteUseCount === 1
 	);
 }

@@ -1,11 +1,14 @@
 import type {
-	PreparedRgbaRenderSurfaceTextureUseIdentity,
+	MaterialTextureDataUseIdentity,
 	StaticBakeTextureSamplingPolicy,
 } from "../static/contracts";
 
 export type TextureFilteringMode = "nearest" | "linear" | "anisotropic-4x";
 
 export type TexturePageSampleClass =
+	| "index8"
+	| "index16"
+	| "palette-rgba"
 	| "rgba-color"
 	| "rgba-detail"
 	| "rgba-mask"
@@ -27,7 +30,7 @@ export interface RuntimeTextureSamplerPolicy {
 }
 
 export function createRuntimeTexturePagePolicy(
-	source: PreparedRgbaRenderSurfaceTextureUseIdentity,
+	source: MaterialTextureDataUseIdentity,
 	samplingPolicy?: StaticBakeTextureSamplingPolicy,
 ): RuntimeTexturePagePolicy {
 	const wrapOverride = samplingPolicy
@@ -37,7 +40,27 @@ export function createRuntimeTexturePagePolicy(
 			}
 		: null;
 
+	if (source.kind === "palette-texture-use") {
+		return {
+			sampleClass: "palette-rgba",
+			wrapS: "clamp-to-edge",
+			wrapT: "clamp-to-edge",
+		};
+	}
+
 	switch (source.usage) {
+		case "index8":
+			return {
+				sampleClass: "index8",
+				wrapS: wrapOverride?.wrapS ?? "clamp-to-edge",
+				wrapT: wrapOverride?.wrapT ?? "clamp-to-edge",
+			};
+		case "index16":
+			return {
+				sampleClass: "index16",
+				wrapS: wrapOverride?.wrapS ?? "clamp-to-edge",
+				wrapT: wrapOverride?.wrapT ?? "clamp-to-edge",
+			};
 		case "rgba-color":
 			return {
 				sampleClass: "rgba-color",
@@ -69,22 +92,33 @@ export function createRuntimeTextureSamplerPolicy(options: {
 	readonly sampleClass: TexturePageSampleClass;
 	readonly filteringMode: TextureFilteringMode;
 }): RuntimeTextureSamplerPolicy {
+	const filteringMode = isDataSampleClass(options.sampleClass)
+		? "nearest"
+		: options.filteringMode;
 	const generateMipmaps =
-		options.filteringMode !== "nearest" &&
+		filteringMode !== "nearest" &&
 		(options.sampleClass === "rgba-color" ||
 			options.sampleClass === "rgba-detail");
-	const anisotropy = options.filteringMode === "anisotropic-4x" ? 4 : 1;
+	const anisotropy = filteringMode === "anisotropic-4x" ? 4 : 1;
 	const policyKey = [
 		`sample=${options.sampleClass}`,
-		`filter=${options.filteringMode}`,
+		`filter=${filteringMode}`,
 		`mips=${generateMipmaps ? "on" : "off"}`,
 		`aniso=${anisotropy}`,
 	].join(";");
 
 	return {
 		anisotropy,
-		filteringMode: options.filteringMode,
+		filteringMode,
 		generateMipmaps,
 		policyKey,
 	};
+}
+
+function isDataSampleClass(sampleClass: TexturePageSampleClass): boolean {
+	return (
+		sampleClass === "index8" ||
+		sampleClass === "index16" ||
+		sampleClass === "palette-rgba"
+	);
 }

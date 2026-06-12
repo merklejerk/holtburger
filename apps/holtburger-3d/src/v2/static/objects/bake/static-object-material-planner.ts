@@ -260,17 +260,32 @@ export function classifyStaticObjectMaterial(
 			});
 			return createUnsupportedPlan(basePlan, [reason, ...unsupportedFlagReasons]);
 		}
+		const indexedDeferredReasons = behavior.blend.depthWrite
+			? []
+			: [
+					createFallbackReason({
+						code: "translucent-render-deferred",
+						material: context.material.identity,
+						message:
+							"Indexed static material requires translucent/additive pass ordering; rendering is deferred until the static object renderer supports that pass.",
+						palette,
+						renderSurface: renderSurfaceRef.renderSurface,
+						texture: context.material.source.texture,
+					}),
+				];
 		return createTexturePlan({
 			...basePlan,
 			family:
 				unsupportedFlagReasons.length === 0
 					? "indexed-paletted"
 					: "unsupported",
-			fallbackReasons: unsupportedFlagReasons,
+			fallbackReasons: [...indexedDeferredReasons, ...unsupportedFlagReasons],
 			renderCoverage:
-				unsupportedFlagReasons.length === 0
-					? "classified-render-deferred"
-					: "unsupported",
+				unsupportedFlagReasons.length > 0
+					? "unsupported"
+					: indexedDeferredReasons.length > 0
+						? "classified-render-deferred"
+						: "classified-render-candidate",
 			textureRoles: [
 				{
 					dataUse: {

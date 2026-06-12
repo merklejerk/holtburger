@@ -1628,6 +1628,8 @@ Failed to close:
 
 ### Phase 10C: Terrain Visual Parity Pass
 
+Status: completed on 2026-06-11.
+
 Purpose: compare V2 terrain rendering against v1 behavior on selected targets and close the most visible gaps before adding broad static object pressure.
 
 Deliverables:
@@ -1642,6 +1644,16 @@ Acceptance criteria:
 - V2 terrain is no longer expected to look flat green or single-texture stretched in normal supported cases.
 - Known unsupported terrain material cases are visible as typed fallback diagnostics.
 - Remaining terrain parity gaps are documented with owners before static object phases begin.
+
+Completion notes:
+
+- Manual inspection against the current V2 terrain path looked good enough to close the phase. This phase intentionally relied on visual review rather than screenshot automation because the remaining acceptance signal was visual terrain parity against v1 behavior.
+- Terrain now renders with the expected base/road/detail composition in the inspected coverage, and the earlier atlas gutter, detail-pass, layer partitioning, and atlas packing failures are no longer blocking manual inspection.
+- No new deterministic parity gap was identified that needs a targeted automated test before the next steering pass.
+
+Failed to close:
+
+- No automated visual regression harness was added for this phase. Keep future visual parity checks manual unless a stable screenshot target becomes worth maintaining.
 
 ### Phase 10D: Plan Reassessment And Terrain Steering
 

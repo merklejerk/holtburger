@@ -38,6 +38,21 @@ describe("V2 static object material planner", () => {
 			0x99 / 255,
 			1,
 		]);
+		expect(plan.emissiveColor).toEqual([0, 0, 0]);
+	});
+
+	it("maps diffuse and luminosity flags into material color constants", () => {
+		const plan = classifyStaticObjectMaterial({
+			material: createTexturedMaterial({
+				diffuse: 0.5,
+				luminosity: 0.75,
+				surfaceType: 0x20 | 0x40,
+			}),
+			textureRefs: createTextureRefs({ formatRaw: 1, paletteId: null }),
+		});
+
+		expect(plan.color).toEqual([0.5, 0.5, 0.5, 1]);
+		expect(plan.emissiveColor).toEqual([0.75, 0.75, 0.75]);
 	});
 
 	it("plans non-indexed texture materials as filterable rgba base-color roles", () => {
@@ -332,11 +347,15 @@ function createPayload(): OutdoorStaticObjectsScopePayload {
 
 function createTexturedMaterial(
 	overrides: {
+		readonly diffuse?: number;
+		readonly luminosity?: number;
 		readonly surfaceType?: number;
 		readonly paletteId?: number | null;
 	} = {},
 ): StaticObjectMaterialSourceFacts {
 	return createMaterial({
+		diffuse: overrides.diffuse ?? 1,
+		luminosity: overrides.luminosity ?? 0,
 		source: {
 			kind: "texture",
 			palette:

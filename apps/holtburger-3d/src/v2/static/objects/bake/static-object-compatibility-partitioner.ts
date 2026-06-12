@@ -32,6 +32,8 @@ export interface StaticObjectCompatibilityPartition {
 	readonly pass: StaticObjectMaterialPlan["pass"];
 	readonly alphaMode: StaticObjectMaterialPlan["alphaPolicy"]["mode"];
 	readonly alphaTest: StaticObjectMaterialPlan["alphaPolicy"]["alphaTest"];
+	readonly materialColor: StaticObjectMaterialPlan["color"];
+	readonly materialEmissiveColor: StaticObjectMaterialPlan["emissiveColor"];
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly textureRoleLayoutKey: string;
 	readonly materialIds: readonly number[];
@@ -67,6 +69,7 @@ interface StaticObjectTriangleCandidate {
 	readonly materialKey: string;
 	readonly materialId: number;
 	readonly materialPlan: StaticObjectMaterialPlan;
+	readonly materialColorKey: string;
 	readonly textureRoleLayoutKey: string;
 	readonly sourceKey: string;
 	readonly gfxKey: string;
@@ -163,6 +166,7 @@ function createTriangleCandidates(
 				const textureRoleLayoutKey = createTextureRoleLayoutKey(
 					plan.textureRoles,
 				);
+				const materialColorKey = createMaterialColorKey(plan);
 				const sourceKey = createSourceKey(object.source);
 				const gfxKey = createSourceKey(part.gfxObj);
 				const materialKey = createMaterialKey(material);
@@ -175,6 +179,7 @@ function createTriangleCandidates(
 				const compatibilityKey = createCompatibilityKey({
 					gfxKey,
 					plan,
+					materialColorKey,
 					sourceKey,
 					textureWrapMode,
 					textureRoleLayoutKey,
@@ -187,6 +192,7 @@ function createTriangleCandidates(
 					gfxKey,
 					firstVertex: triangle.firstVertex,
 					material,
+					materialColorKey,
 					materialId: material.materialId,
 					materialKey,
 					materialPlan: plan,
@@ -345,6 +351,8 @@ function createCompatibilityPartition(options: {
 		alphaTest: first.materialPlan.alphaPolicy.alphaTest,
 		compatibilityKey: options.compatibilityKey,
 		family: first.materialPlan.family,
+		materialColor: first.materialPlan.color,
+		materialEmissiveColor: first.materialPlan.emissiveColor,
 		materialIds,
 		pass: first.materialPlan.pass,
 		reason:
@@ -379,6 +387,7 @@ function createCompatibilityKey(options: {
 	readonly plan: StaticObjectMaterialPlan;
 	readonly sourceKey: string;
 	readonly gfxKey: string;
+	readonly materialColorKey: string;
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly textureRoleLayoutKey: string;
 }): string {
@@ -388,11 +397,23 @@ function createCompatibilityKey(options: {
 		`pass:${options.plan.pass}`,
 		`alpha:${options.plan.alphaPolicy.mode}`,
 		`blend:${options.plan.blend.mode}`,
+		`color:${options.materialColorKey}`,
 		`wrap:${options.textureWrapMode}`,
 		`roles:${options.textureRoleLayoutKey}`,
 		`source:${options.sourceKey}`,
 		`gfx:${options.gfxKey}`,
 	].join("|");
+}
+
+function createMaterialColorKey(plan: StaticObjectMaterialPlan): string {
+	return [
+		...plan.color.map(formatMaterialScalar),
+		...plan.emissiveColor.map(formatMaterialScalar),
+	].join(",");
+}
+
+function formatMaterialScalar(value: number): string {
+	return value.toFixed(6);
 }
 
 function createTextureRoleLayoutKey(

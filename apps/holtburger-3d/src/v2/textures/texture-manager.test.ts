@@ -1117,7 +1117,7 @@ describe("V2 texture manager", () => {
 		]);
 		expect(texturePacker.jobs).toHaveLength(2);
 		expect(texturePacker.jobs.map((job) => job.page.format).sort()).toEqual([
-			"r8ui",
+			"r8",
 			"rgba8",
 		]);
 		expect(texturePacker.jobs.map((job) => job.page.gutterPixels)).toEqual([
@@ -1126,11 +1126,11 @@ describe("V2 texture manager", () => {
 		expect(texturePacker.jobs).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
-					page: expect.objectContaining({ format: "r8ui" }),
+					page: expect.objectContaining({ format: "r8" }),
 					sources: [
 						expect.objectContaining({
 							source: expect.objectContaining({
-								format: "r8ui",
+								format: "r8",
 								pixels: new Uint8Array([255, 255]),
 							}),
 							textureUseId: "static-a:index",
@@ -1156,7 +1156,7 @@ describe("V2 texture manager", () => {
 		expect(update?.placements).toMatchObject([
 			{
 				filteringMode: "nearest",
-				format: "r8ui",
+				format: "r8",
 				height: 1,
 				mipmapsGenerated: false,
 				rect: [0, 0, 2, 1],
@@ -1198,7 +1198,7 @@ describe("V2 texture manager", () => {
 			expect.objectContaining({
 				domain: "outdoor-buildings",
 				formats: expect.objectContaining({
-					r8ui: 1,
+					r8: 1,
 					rgba8: 1,
 				}),
 				sampleClasses: expect.objectContaining({
@@ -1481,9 +1481,9 @@ function getTexturePackingFormatBytesPerPixel(
 	switch (format) {
 		case "rgba8":
 			return 4;
-		case "r8ui":
+		case "r8":
 			return 1;
-		case "r16ui":
+		case "rg8":
 			return 2;
 		default: {
 			const exhaustive: never = format;

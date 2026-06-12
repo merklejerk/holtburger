@@ -261,6 +261,7 @@ describe("V2 static object compatibility partitioner", () => {
 			expect.arrayContaining([
 				expect.objectContaining({
 					family: "texture-rgba",
+					filteringMode: "none",
 					materialCount: 1,
 					outcome: "rendered",
 					pass: "alpha-test",
@@ -274,6 +275,7 @@ describe("V2 static object compatibility partitioner", () => {
 				}),
 				expect.objectContaining({
 					family: "indexed-paletted",
+					filteringMode: "shader-palette-linear",
 					outcome: "rendered",
 					pass: "opaque",
 					triangleCount: 1,
@@ -313,6 +315,7 @@ describe("V2 static object compatibility partitioner", () => {
 		const drawUnit = result.drawUnits[0];
 
 		expect(drawUnit).toMatchObject({
+			indexedTextureFormat: "p8",
 			kind: "static-object-geometry",
 			materialFamily: "indexed-paletted",
 			primaryTextureUseId: null,

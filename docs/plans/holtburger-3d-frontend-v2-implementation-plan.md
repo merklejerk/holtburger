@@ -2388,12 +2388,12 @@ Implementation notes:
 - Opaque and alpha-test static-object `indexed-paletted` material plans are now render candidates when both a stageable index texture use and palette texture use are present. Translucent/additive indexed materials remain render-deferred for Phase 11E3.
 - The texture manager stages `index8`, `index16`, and `palette-rgba` through the same `StaticBakeTextureUse` commit path as RGBA textures. Index and palette data commit as direct single-source placements under texture-manager-owned refs/leases because the RGBA atlas packer is not the correct vehicle for integer index data.
 - Runtime texture policy now has explicit `index8`, `index16`, and `palette-rgba` sample classes. These force nearest filtering, no mipmaps, and anisotropy 1 even when the global texture filter is linear or anisotropic.
-- WebGL2 static-object rendering now has a typed indexed/paletted material mode with a `usampler2D` index texture and RGBA palette lookup texture. Missing index or palette residency renders magenta instead of silently falling back.
+- WebGL2 static-object rendering has a typed indexed/paletted material mode with explicit index and palette lookup textures. Missing index or palette residency renders magenta instead of silently falling back.
 - Static-object draw units now carry separate `indexTextureUseId`, `paletteTextureUseId`, and `paletteFirstIndex` fields. `primaryTextureUseId` remains the direct RGBA base-color slot.
 
 Spicy bits:
 
-- `index16` is uploaded as an integer `R16UI` texture and sampled through `usampler2D`. This keeps index values lossless and avoids the normalized-color path entirely.
+- This phase originally used integer index pages; Phase 11E2C corrects that toward the v1-compatible normalized `R8`/`RG8` path with shader reconstruction.
 - Index/palette pages intentionally bypass the current RGBA-only atlas packer but not the texture manager. They still receive texture refs, placement updates, draw-unit bindings, leases, diagnostics, and sampler policy through the same owner boundary.
 - Palette range support is representable in the `palette-rgba` data-use identity and preparation path, but current outdoor-building resolver output still emits full 256-entry palette uses because setup appearance subpalette facts are not yet attached to material slots.
 
@@ -2419,7 +2419,7 @@ Purpose: make the texture packing worker/protocol format-generic without changin
 Deliverables:
 
 - Generalize the texture packing protocol and packer implementation from `DirectRgbaTextureSource` / `format: "rgba8"` to typed texture sources and page formats.
-- Introduce typed atlas source/page abstractions for at least `rgba8`, `r8ui`, and `r16ui`, but keep only existing RGBA placements routed through packing in this phase.
+- Introduce typed atlas source/page abstractions for at least `rgba8`, `r8`, and `rg8`, but keep only existing RGBA placements routed through packing in this phase.
 - Keep reusable layout planning, page sizing, rect allocation, cohort grouping, worker scheduling, and pack result shape independent from source pixel format.
 - Add typed blank-page allocation and typed blit/copy helpers behind the existing RGBA behavior.
 - Keep current direct `index8`, `index16`, and `palette-rgba` placement behavior unchanged until Phase 11E2A2.
@@ -2441,9 +2441,9 @@ Spicy notes:
 Closed:
 
 - The texture-packing worker protocol now accepts generic `TexturePackingPixelSource` entries and typed page formats instead of importing `DirectRgbaTextureSource` at the worker boundary.
-- The atlas packer now uses typed bytes-per-pixel allocation/copy logic for `rgba8`, `r8ui`, and `r16ui`; RGBA fill remains explicitly constrained to `rgba8` pages.
+- The atlas packer now uses typed bytes-per-pixel allocation/copy logic for `rgba8`, `r8`, and `rg8`; RGBA fill remains explicitly constrained to `rgba8` pages.
 - The texture manager still routes only RGBA material textures into atlas packing. `index8`, `index16`, and `palette-rgba` remain direct placements until Phase 11E2A2.
-- Tests now cover RGBA behavior, typed `r8ui`/`r16ui` packing support, format mismatch failures, invalid typed byte lengths, worker protocol typing, and the texture-manager direct-placement split.
+- Tests now cover RGBA behavior, typed `r8`/`rg8` packing support, format mismatch failures, invalid typed byte lengths, worker protocol typing, and the texture-manager direct-placement split.
 
 Failed to close:
 
@@ -2458,20 +2458,20 @@ Purpose: move indexed texture data and palette lookup data from direct single-so
 
 Deliverables:
 
-- Route `index8` and `index16` texture uses through typed atlas packing into `R8UI` and `R16UI` pages while preserving nearest/no-mip/integer sampler policy.
+- Route `index8` and `index16` texture uses through typed atlas packing into `R8` and `RG8` pages while preserving nearest/no-mip exact data lookup policy.
 - Route `palette-rgba` texture uses through a typed `RGBA8` data atlas family while preserving nearest/no-mip/exact lookup policy.
-- Add renderer placement/upload support for packed `r8ui`, `r16ui`, and palette `rgba8` atlas pages, including correct WebGL internal format/type and sampler setup.
+- Add renderer placement/upload support for packed `r8`, `rg8`, and palette `rgba8` atlas pages, including correct WebGL internal format/type and sampler setup.
 - Add static-object shader-side palette lookup against a packed palette rect. Palette lookup must use the palette view's rect origin plus palette index/offset, not freeform normalized UV sampling.
 - Update texture-manager diagnostics so typed atlas family summaries include page format, sample class, sampler policy, mip status, and source counts for index and palette pages.
 - Remove or sharply narrow the direct data-placement path once typed atlas packing owns index and palette data. If direct placement remains as a degenerate fallback, document exactly when it is allowed.
 
 Acceptance criteria:
 
-- `index8` and `index16` can be packed into `R8UI` and `R16UI` atlas pages without normalized-color conversion or data loss.
+- `index8` and `index16` can be packed into `R8` and `RG8` atlas pages without byte-level index data loss.
 - `palette-rgba` palette views are packed into `RGBA8` data atlas pages without filtering, mipmapping, gutter bleed, or palette-entry offset errors.
 - Static-object indexed/paletted rendering reads palette entries from packed palette rects exactly; palette entry `N` resolves to the intended palette-view entry, including non-zero `firstIndex` views once Phase 11E2B lands.
 - Existing opaque indexed/paletted building rendering remains visually equivalent or better after moving from direct data textures to packed data pages.
-- Tests cover typed data packing, integer texture upload, packed palette rect lookup, diagnostics, and lease/ref behavior for packed index and palette pages.
+- Tests cover typed data packing, byte-channel index upload/reconstruction, packed palette rect lookup, diagnostics, and lease/ref behavior for packed index and palette pages.
 
 Spicy notes:
 
@@ -2481,7 +2481,7 @@ Spicy notes:
 Closed:
 
 - `index8`, `index16`, and `palette-rgba` texture uses now route through the texture packer instead of the old direct placement bridge.
-- Page format selection is semantic: `index8` packs to `r8ui`, `index16` packs to `r16ui`, and palette views pack to nearest/no-mip `rgba8` data pages.
+- Page format selection is semantic: `index8` packs to `r8`, `index16` packs to `rg8`, and palette views pack to nearest/no-mip `rgba8` data pages.
 - The direct data-placement commit path was removed from `TextureManager`; packed registry entries now own index, palette, and RGBA pages through the same placement/update path.
 - Static-object indexed/paletted shader sampling now uses the packed palette rect (`uPaletteTextureRect`) plus `uPaletteFirstIndex`, so palette views no longer assume that the palette page starts at x=0.
 - Texture atlas diagnostics now summarize page formats and sampler policy distribution per domain alongside sample-class, mip, wrap, page, source, and byte summaries.
@@ -2491,6 +2491,7 @@ Failed to close:
 
 - No live WebGL screenshot or browser visual pass was run for this phase; validation is via typecheck, unit tests, and existing WebGL upload code paths.
 - Palette subrange derivation is still limited by the current full/default palette-view metadata model; Phase 11E2B remains responsible for richer palette-view derivation and non-zero range coverage.
+- Indexed/paletted sampling was visually correct enough for manual inspection, but it did not yet match v1's shader-side palette-linear filtering. Phase 11E2C closes that parity correction before broader static material work continues.
 
 ### Phase 11E2A3: Virtual Wrap Parity
 
@@ -2578,10 +2579,67 @@ Failed to close:
 
 - Palette-set/shade selection remains a host/content-side concern. V2 now consumes the prepared setup appearance `paletteId` and `subPalettes`, but it does not independently re-evaluate clothing palette tables in the frontend.
 - No new manual visual pass was run against a confirmed non-default/non-full indexed building target during this implementation pass.
+- Indexed/paletted texture filtering still used the then-current V2 single-sample lookup path. V1 performs manual four-tap palette-space filtering in shader; Phase 11E2C closes that parity gap.
 
 Verification:
 
 - `cd apps/holtburger-3d && npm run test:ts -- src/v2/assets/preparation/prepared-texture-source.test.ts src/v2/static/objects/bake/static-object-material-planner.test.ts src/v2/static/objects/bake/static-object-compatibility-partitioner.test.ts src/v2/static/objects/outdoor-static-objects-resolver.test.ts src/v2/textures/texture-manager.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
+
+### Phase 11E2C: Indexed Palette-Linear Shader Parity
+
+Status: completed.
+
+Purpose: match v1 indexed/paletted material filtering by blending palette-resolved colors in shader instead of sampling one nearest index or filtering raw index data.
+
+Ground truth:
+
+- `apps/holtburger-3d/src/lib/world-display/webgl2-world-display-renderer-impl.ts` `INDEXED_P8_WORLD_FRAGMENT_SHADER` and `INDEXED_P16_WORLD_FRAGMENT_SHADER`.
+- `apps/holtburger-3d/src/lib/world-display/render-material-strategy.ts` indexed sampling key `filter=shader-linear`.
+- `apps/holtburger-3d/src/lib/world-display/webgl2/resources/static-bundle-layer-resources.ts` v1 `index16` upload format (`RG8`, two normalized byte channels for one 16-bit index).
+
+Deliverables:
+
+- Replace the V2 static-object indexed/paletted single-sample lookup with v1-style shader palette-linear sampling: resolve local UV, fetch the four neighboring index texels with `texelFetch`, convert each index through the palette rect, then bilinearly mix the resulting colors.
+- Preserve exact nearest/no-mip sampler policy for index and palette atlas pages. The filtering is shader logic over palette-resolved colors, not hardware filtering of index or palette data.
+- Implement the `index16` upload parity path by switching V2 packed `index16` pages to v1-compatible `RG8` normalized sampler reconstruction.
+- Keep virtual clamp/repeat handling from Phase 11E2A3 in the palette-linear shader path, including correct neighbor coordinate wrapping/clamping at atlas rect boundaries.
+- Add focused WebGL/shader contract tests for p8 and index16 indexed materials that prove four-neighbor sampling, palette rect offset, wrap behavior, and `index16` reconstruction/upload format.
+- Update diagnostics or material coverage summaries to identify indexed/paletted filtering as `shader-palette-linear` so runtime reports stop implying plain nearest index lookup.
+
+Acceptance criteria:
+
+- Indexed/paletted static object materials use shader-side palette-linear filtering equivalent to v1 for p8 and index16 pages.
+- Raw index values are never hardware-filtered.
+- Packed palette rects and non-zero `paletteFirstIndex` remain exact after palette-linear sampling.
+- Manual visual inspection of known indexed/paletted outdoor-building targets remains correct, with smoother indexed texture sampling than the current nearest/single-sample path.
+- Tests cover both `index16` texture format behavior and the parity-driven pixel-format migration.
+
+Spicy notes:
+
+- The v1 `RG8` `index16` upload is not neighbor packing. It stores the low/high bytes of one 16-bit index texel; neighbors are sampled as four separate texels in shader.
+- This phase should not broaden material family support. Translucent/additive indexed materials and detail overlays remain Phase 11E3/11E4 work unless the shader parity fix reveals a strictly necessary contract correction.
+- `RG8` is the chosen V2 parity format for `index16`. It has better practical compatibility than `R16UI` because it stays on the ordinary normalized `sampler2D` path while preserving exact low/high index bytes through shader reconstruction.
+
+Closed:
+
+- Static-object indexed/paletted rendering now samples four neighboring index texels with `texelFetch`, resolves each through the packed palette rect, and blends palette-resolved colors in shader.
+- Virtual clamp/repeat handling is shared by direct RGBA and indexed/paletted static-object sampling, so wrap intent is applied before mapping local UVs into the atlas rect.
+- Packed `index16` pages now upload as normalized `RG8`; the shader reconstructs the 16-bit palette index from low/high bytes. `index8` remains normalized `R8`.
+- Static-object draw units now carry `indexedTextureFormat` so the renderer can select p8 versus index16 reconstruction without inferring from texture IDs.
+- Material coverage diagnostics now report `filteringMode: "shader-palette-linear"` for rendered indexed/paletted buckets.
+- Tests cover shader contract structure, RG8 reconstruction, indexed draw-unit format metadata, typed packer paths, texture-manager packing/placement behavior, and runtime diagnostics projection.
+
+Failed to close:
+
+- No live browser screenshot or GPU pixel test was run in this pass; validation is focused TypeScript/unit coverage plus existing manual visual confirmation before this parity tweak.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- src/v2/textures/packing/packer.test.ts src/v2/textures/texture-manager.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts src/v2/static/objects/bake/static-object-compatibility-partitioner.test.ts src/v2/runtime/client-runtime.test.ts`
 - `cd apps/holtburger-3d && npm run check`
 - `cd apps/holtburger-3d && npm run lint:ts`
 - `cd apps/holtburger-3d && npm run lint:dead`

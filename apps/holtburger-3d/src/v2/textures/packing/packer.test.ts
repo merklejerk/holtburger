@@ -159,7 +159,7 @@ describe("V2 atlas texture packer", () => {
 		const result = await new AtlasTexturePacker().pack({
 			...createJob(),
 			page: {
-				format: "r8ui",
+				format: "r8",
 				gutterPixels: 1,
 				height: 8,
 				width: 8,
@@ -167,7 +167,7 @@ describe("V2 atlas texture packer", () => {
 			sources: [
 				{
 					source: {
-						format: "r8ui",
+						format: "r8",
 						height: 2,
 						kind: "texture-packing-pixel-source",
 						pixels: new Uint8Array([1, 2, 3, 4]),
@@ -179,7 +179,7 @@ describe("V2 atlas texture packer", () => {
 		});
 
 		expect(result.pages[0]).toMatchObject({
-			format: "r8ui",
+			format: "r8",
 			height: 4,
 			width: 4,
 		});
@@ -192,14 +192,14 @@ describe("V2 atlas texture packer", () => {
 		const result = await new AtlasTexturePacker().pack({
 			...createJob(),
 			page: {
-				format: "r16ui",
+				format: "rg8",
 				height: 8,
 				width: 8,
 			},
 			sources: [
 				{
 					source: {
-						format: "r16ui",
+						format: "rg8",
 						height: 1,
 						kind: "texture-packing-pixel-source",
 						pixels: new Uint8Array([0x34, 0x12, 0x78, 0x56]),
@@ -211,7 +211,7 @@ describe("V2 atlas texture packer", () => {
 		});
 
 		expect(result.pages[0]).toMatchObject({
-			format: "r16ui",
+			format: "rg8",
 			height: 1,
 			width: 2,
 		});
@@ -225,13 +225,13 @@ describe("V2 atlas texture packer", () => {
 			new AtlasTexturePacker().pack({
 				...createJob(),
 				page: {
-					format: "r8ui",
+					format: "r8",
 					height: 8,
 					width: 8,
 				},
 				sources: [createSource("rgba", 1, 1, [1, 2, 3, 4])],
 			}),
-		).rejects.toThrow("expected r8ui sources, got rgba8");
+		).rejects.toThrow("expected r8 sources, got rgba8");
 	});
 
 	it("fails explicitly when source bytes do not match the typed format", async () => {
@@ -239,14 +239,14 @@ describe("V2 atlas texture packer", () => {
 			new AtlasTexturePacker().pack({
 				...createJob(),
 				page: {
-					format: "r16ui",
+					format: "rg8",
 					height: 8,
 					width: 8,
 				},
 				sources: [
 					{
 						source: {
-							format: "r16ui",
+							format: "rg8",
 							height: 1,
 							kind: "texture-packing-pixel-source",
 							pixels: new Uint8Array([1]),
@@ -256,7 +256,7 @@ describe("V2 atlas texture packer", () => {
 					},
 				],
 			}),
-		).rejects.toThrow("expected 2 bytes for r16ui, got 1");
+		).rejects.toThrow("expected 2 bytes for rg8, got 1");
 	});
 
 	it("keeps rgba fill policy constrained to rgba pages", async () => {
@@ -265,14 +265,14 @@ describe("V2 atlas texture packer", () => {
 				...createJob(),
 				page: {
 					fillRgba: [1, 2, 3, 4],
-					format: "r8ui",
+					format: "r8",
 					height: 8,
 					width: 8,
 				},
 				sources: [
 					{
 						source: {
-							format: "r8ui",
+							format: "r8",
 							height: 1,
 							kind: "texture-packing-pixel-source",
 							pixels: new Uint8Array([1]),

@@ -210,9 +210,9 @@ function getBytesPerPixel(format: TexturePackingPageFormat): number {
 	switch (format) {
 		case "rgba8":
 			return 4;
-		case "r8ui":
+		case "r8":
 			return 1;
-		case "r16ui":
+		case "rg8":
 			return 2;
 		default: {
 			const exhaustive: never = format;

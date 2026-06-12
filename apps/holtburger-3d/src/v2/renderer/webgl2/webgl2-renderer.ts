@@ -77,30 +77,80 @@ void main() {
 }
 `;
 
-const STATIC_OBJECT_FRAGMENT_SHADER = `#version 300 es
+export const STATIC_OBJECT_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 precision highp int;
-precision highp usampler2D;
 
 uniform sampler2D uTexture;
-uniform usampler2D uIndexTexture;
+uniform sampler2D uIndexTexture;
 uniform sampler2D uPaletteTexture;
 uniform vec4 uTextureRect;
 uniform vec4 uIndexTextureRect;
 uniform vec4 uPaletteTextureRect;
 uniform vec2 uTextureSize;
-uniform vec2 uIndexTextureSize;
 uniform vec2 uPaletteTextureSize;
 uniform float uPaletteFirstIndex;
 uniform float uAlphaTest;
 uniform vec4 uMaterialColor;
 uniform vec3 uMaterialEmissiveColor;
+uniform int uIndexedTextureFormat;
 uniform int uMaterialMode;
 uniform int uWrapMode;
 
 in vec2 vTexCoord;
 
 out vec4 fragColor;
+
+vec2 resolveWrappedUv(vec2 uv) {
+	return uWrapMode == 1 ? fract(uv) : clamp(uv, vec2(0.0), vec2(0.999999));
+}
+
+ivec2 resolveIndexSampleCoord(ivec2 baseCoord, ivec2 offset) {
+	ivec2 size = ivec2(uIndexTextureRect.zw);
+	ivec2 coord = baseCoord + offset;
+	if (uWrapMode == 1) {
+		coord = ivec2(
+			((coord.x % size.x) + size.x) % size.x,
+			((coord.y % size.y) + size.y) % size.y
+		);
+	} else {
+		coord = clamp(coord, ivec2(0), size - ivec2(1));
+	}
+	return coord;
+}
+
+float paletteIndexAt(ivec2 coord) {
+	ivec2 atlasCoord = ivec2(floor(uIndexTextureRect.xy + vec2(0.5))) + coord;
+	vec4 packed = texelFetch(uIndexTexture, atlasCoord, 0) * 255.0;
+	if (uIndexedTextureFormat == 1) {
+		return floor(packed.r + 0.5) + floor(packed.g + 0.5) * 256.0;
+	}
+	return floor(packed.r + 0.5);
+}
+
+vec4 paletteColor(float index) {
+	float paletteIndex = index - uPaletteFirstIndex;
+	float paletteLocalX = clamp(paletteIndex, 0.0, max(uPaletteTextureRect.z - 1.0, 0.0));
+	vec2 paletteUv = (uPaletteTextureRect.xy + vec2(paletteLocalX + 0.5, 0.5)) / uPaletteTextureSize;
+	return texture(uPaletteTexture, paletteUv);
+}
+
+vec4 sampleIndexedPaletteLinear(vec2 uv) {
+	vec2 texelPosition = resolveWrappedUv(uv) * uIndexTextureRect.zw;
+	ivec2 baseCoord = ivec2(floor(texelPosition));
+	vec2 blend = fract(texelPosition);
+	vec4 top = mix(
+		paletteColor(paletteIndexAt(resolveIndexSampleCoord(baseCoord, ivec2(0, 0)))),
+		paletteColor(paletteIndexAt(resolveIndexSampleCoord(baseCoord, ivec2(1, 0)))),
+		blend.x
+	);
+	vec4 bottom = mix(
+		paletteColor(paletteIndexAt(resolveIndexSampleCoord(baseCoord, ivec2(0, 1)))),
+		paletteColor(paletteIndexAt(resolveIndexSampleCoord(baseCoord, ivec2(1, 1)))),
+		blend.x
+	);
+	return mix(top, bottom, blend.y);
+}
 
 void main() {
 	if (uMaterialMode == 2) {
@@ -110,16 +160,11 @@ void main() {
 
 	vec4 baseColor = vec4(1.0);
 	if (uMaterialMode == 1) {
-		vec2 localUv = uWrapMode == 1 ? fract(vTexCoord) : clamp(vTexCoord, vec2(0.0), vec2(1.0));
+		vec2 localUv = resolveWrappedUv(vTexCoord);
 		vec2 atlasUv = (uTextureRect.xy + localUv * uTextureRect.zw) / uTextureSize;
 		baseColor = texture(uTexture, atlasUv);
 	} else if (uMaterialMode == 3) {
-		vec2 localUv = uWrapMode == 1 ? fract(vTexCoord) : clamp(vTexCoord, vec2(0.0), vec2(1.0));
-		vec2 indexUv = (uIndexTextureRect.xy + localUv * uIndexTextureRect.zw) / uIndexTextureSize;
-		float paletteIndex = float(texture(uIndexTexture, indexUv).r) - uPaletteFirstIndex;
-		float paletteLocalX = clamp(paletteIndex, 0.0, max(uPaletteTextureRect.z - 1.0, 0.0));
-		vec2 paletteUv = (uPaletteTextureRect.xy + vec2(paletteLocalX + 0.5, 0.5)) / uPaletteTextureSize;
-		baseColor = texture(uPaletteTexture, paletteUv);
+		baseColor = sampleIndexedPaletteLinear(vTexCoord);
 	}
 
 	fragColor = vec4(
@@ -723,11 +768,6 @@ class Webgl2Renderer implements Renderer {
 				indexBinding?.rect[3] ?? 1,
 			);
 			gl.uniform2f(
-				this.#staticObjectProgram.uniforms.uIndexTextureSize,
-				indexBinding?.textureWidth ?? 1,
-				indexBinding?.textureHeight ?? 1,
-			);
-			gl.uniform2f(
 				this.#staticObjectProgram.uniforms.uPaletteTextureSize,
 				paletteBinding?.textureWidth ?? 1,
 				paletteBinding?.textureHeight ?? 1,
@@ -742,6 +782,10 @@ class Webgl2Renderer implements Renderer {
 			gl.uniform1f(
 				this.#staticObjectProgram.uniforms.uPaletteFirstIndex,
 				resource.paletteFirstIndex,
+			);
+			gl.uniform1i(
+				this.#staticObjectProgram.uniforms.uIndexedTextureFormat,
+				resource.indexedTextureFormat === "index16" ? 1 : 0,
 			);
 			gl.uniform4fv(
 				this.#staticObjectProgram.uniforms.uMaterialColor,
@@ -877,7 +921,7 @@ interface StaticObjectGeometryProgram {
 		readonly uAlphaTest: WebGLUniformLocation;
 		readonly uIndexTexture: WebGLUniformLocation;
 		readonly uIndexTextureRect: WebGLUniformLocation;
-		readonly uIndexTextureSize: WebGLUniformLocation;
+		readonly uIndexedTextureFormat: WebGLUniformLocation;
 		readonly uMaterialColor: WebGLUniformLocation;
 		readonly uMaterialEmissiveColor: WebGLUniformLocation;
 		readonly uMaterialMode: WebGLUniformLocation;
@@ -921,6 +965,7 @@ interface StaticObjectGeometryResource {
 	readonly materialEmissiveColor: StaticObjectGeometryStaticDrawUnit["materialEmissiveColor"];
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly indexTextureUseId: string | null;
+	readonly indexedTextureFormat: StaticObjectGeometryStaticDrawUnit["indexedTextureFormat"];
 	readonly paletteFirstIndex: number;
 	readonly paletteTextureUseId: string | null;
 	readonly primaryTextureUseId: string | null;
@@ -1091,7 +1136,11 @@ function createStaticObjectGeometryProgram(
 			uAlphaTest: requireUniform(gl, program, "uAlphaTest"),
 			uIndexTexture: requireUniform(gl, program, "uIndexTexture"),
 			uIndexTextureRect: requireUniform(gl, program, "uIndexTextureRect"),
-			uIndexTextureSize: requireUniform(gl, program, "uIndexTextureSize"),
+			uIndexedTextureFormat: requireUniform(
+				gl,
+				program,
+				"uIndexedTextureFormat",
+			),
 			uMaterialColor: requireUniform(gl, program, "uMaterialColor"),
 			uMaterialEmissiveColor: requireUniform(
 				gl,
@@ -1264,6 +1313,7 @@ function createStaticObjectGeometryResource(
 		indexType:
 			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
 		indexTextureUseId: drawUnit.indexTextureUseId,
+		indexedTextureFormat: drawUnit.indexedTextureFormat,
 		materialColor: drawUnit.materialColor,
 		materialEmissiveColor: drawUnit.materialEmissiveColor,
 		materialFamily: drawUnit.materialFamily,
@@ -1723,45 +1773,33 @@ function uploadTexturePixels(
 				placement.pixels,
 			);
 			return;
-		case "r8ui":
+		case "r8":
 			gl.texImage2D(
 				gl.TEXTURE_2D,
 				0,
-				gl.R8UI,
+				gl.R8,
 				placement.width,
 				placement.height,
 				0,
-				gl.RED_INTEGER,
+				gl.RED,
 				gl.UNSIGNED_BYTE,
 				placement.pixels,
 			);
 			return;
-		case "r16ui":
+		case "rg8":
 			gl.texImage2D(
 				gl.TEXTURE_2D,
 				0,
-				gl.R16UI,
+				gl.RG8,
 				placement.width,
 				placement.height,
 				0,
-				gl.RED_INTEGER,
-				gl.UNSIGNED_SHORT,
-				uint16TexturePixels(placement.pixels),
+				gl.RG,
+				gl.UNSIGNED_BYTE,
+				placement.pixels,
 			);
 			return;
 	}
-}
-
-function uint16TexturePixels(pixels: Uint8Array): Uint16Array {
-	if (pixels.byteOffset % Uint16Array.BYTES_PER_ELEMENT === 0) {
-		return new Uint16Array(
-			pixels.buffer,
-			pixels.byteOffset,
-			pixels.byteLength / Uint16Array.BYTES_PER_ELEMENT,
-		);
-	}
-
-	return new Uint16Array(pixels.slice().buffer);
 }
 
 function applyTextureSamplerPolicy(

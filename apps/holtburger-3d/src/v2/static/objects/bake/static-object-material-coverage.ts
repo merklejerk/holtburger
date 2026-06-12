@@ -2,6 +2,7 @@ import type {
 	OutdoorStaticObjectsScopePayload,
 	StaticMaterialCoverageBucket,
 	StaticMaterialCoverageFamily,
+	StaticMaterialCoverageFilteringMode,
 	StaticMaterialCoveragePass,
 	StaticMaterialCoverageReport,
 	StaticMaterialRenderOutcome,
@@ -125,6 +126,7 @@ function getOrCreateBucket(
 
 	const bucket: MutableCoverageBucket = {
 		family,
+		filteringMode: resolveCoverageFilteringMode(family, outcome),
 		materialCount: 0,
 		outcome,
 		partitionCount: 0,
@@ -135,6 +137,15 @@ function getOrCreateBucket(
 	buckets.set(key, bucket);
 
 	return bucket;
+}
+
+function resolveCoverageFilteringMode(
+	family: StaticMaterialCoverageFamily,
+	outcome: StaticMaterialRenderOutcome,
+): StaticMaterialCoverageFilteringMode {
+	return family === "indexed-paletted" && outcome === "rendered"
+		? "shader-palette-linear"
+		: "none";
 }
 
 function createBucketKey(options: {

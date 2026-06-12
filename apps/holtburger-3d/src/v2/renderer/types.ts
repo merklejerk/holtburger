@@ -54,7 +54,7 @@ interface TexturePlacement {
 	readonly wrapT: TextureWrapMode;
 	readonly width: number;
 	readonly height: number;
-	readonly format: "rgba8" | "r8ui" | "r16ui";
+	readonly format: "rgba8" | "r8" | "rg8";
 	readonly pixels: Uint8Array;
 	readonly rect: readonly [number, number, number, number];
 }

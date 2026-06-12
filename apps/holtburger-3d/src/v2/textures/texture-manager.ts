@@ -950,7 +950,7 @@ function createTexturePackingPixelSource(
 
 	if (source.kind === "direct-index-texture-source") {
 		return {
-			format: source.usage === "index8" ? "r8ui" : "r16ui",
+			format: source.usage === "index8" ? "r8" : "rg8",
 			height: source.height,
 			kind: "texture-packing-pixel-source",
 			pixels: source.indices,
@@ -1303,9 +1303,9 @@ function createTexturePackingPageFormat(
 ): TexturePackingPageFormat {
 	switch (sampleClass) {
 		case "index8":
-			return "r8ui";
+			return "r8";
 		case "index16":
-			return "r16ui";
+			return "rg8";
 		case "palette-rgba":
 		case "rgba-color":
 		case "rgba-detail":
@@ -1478,8 +1478,8 @@ function countFormats(
 	pages: readonly TextureAtlasPageFacts[],
 ): TextureAtlasDiagnosticsReport["byDomain"][number]["formats"] {
 	return {
-		r16ui: pages.filter((page) => page.format === "r16ui").length,
-		r8ui: pages.filter((page) => page.format === "r8ui").length,
+		rg8: pages.filter((page) => page.format === "rg8").length,
+		r8: pages.filter((page) => page.format === "r8").length,
 		rgba8: pages.filter((page) => page.format === "rgba8").length,
 	};
 }
@@ -1582,9 +1582,9 @@ function getTextureFormatBytesPerPixel(
 	format: RuntimeTexturePlacement["format"],
 ): number {
 	switch (format) {
-		case "r8ui":
+		case "r8":
 			return 1;
-		case "r16ui":
+		case "rg8":
 			return 2;
 		case "rgba8":
 			return 4;

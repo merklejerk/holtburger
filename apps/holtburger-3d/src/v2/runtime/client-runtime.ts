@@ -556,6 +556,7 @@ function createStaticMaterialCoverageDiagnostics(
 	return {
 		buckets: coverage.buckets.map((bucket) => ({
 			family: bucket.family,
+			filteringMode: bucket.filteringMode,
 			materials: bucket.materialCount,
 			outcome: bucket.outcome,
 			partitions: bucket.partitionCount,

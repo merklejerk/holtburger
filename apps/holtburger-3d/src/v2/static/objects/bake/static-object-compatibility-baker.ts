@@ -197,6 +197,7 @@ function createStaticObjectGeometryDrawUnit(options: {
 		materialPass: "opaque",
 		positions: geometry.positions,
 		primaryTextureUseId: textureUseId,
+		primaryTextureWrapMode: options.partition.textureWrapMode,
 		texCoords: geometry.texCoords,
 		textureUseIds: [textureUseId],
 		triangleCount: options.partition.triangleCount,
@@ -284,7 +285,10 @@ function bakeStaticObjectPartitionGeometry(
 			triangle.partIndex,
 		);
 		const sourceTriangle = part.triangles.find(
-			(candidate) => candidate.polygonId === triangle.polygonId,
+			(candidate) =>
+				candidate.polygonId === triangle.polygonId &&
+				candidate.geometrySurfaceId === triangle.geometrySurfaceId &&
+				candidate.materialVariantSignature === triangle.materialVariantSignature,
 		);
 		if (!sourceTriangle) {
 			throw new Error(
@@ -488,7 +492,7 @@ function buildAcPlacementMatrix(
 	scale: { readonly x: number; readonly y: number; readonly z: number },
 ): Float32Array {
 	const rotation = buildAcRotationMatrix(placement.orientation);
-	const scaleMatrix = createRenderScaleMatrix(scale);
+	const scaleMatrix = createPlacementScaleMatrix(scale);
 	const transform = multiplyMat4(rotation, scaleMatrix);
 	transform[12] = placement.origin.x;
 	transform[13] = placement.origin.z;
@@ -552,31 +556,6 @@ function buildQuaternionRotationMatrix(quaternion: {
 	]);
 }
 
-function createRenderScaleMatrix(scale: {
-	readonly x: number;
-	readonly y: number;
-	readonly z: number;
-}): Float32Array {
-	return new Float32Array([
-		scale.x,
-		0,
-		0,
-		0,
-		0,
-		scale.y,
-		0,
-		0,
-		0,
-		0,
-		scale.z,
-		0,
-		0,
-		0,
-		0,
-		1,
-	]);
-}
-
 function createStaticObjectSourceScaleMatrix(scale: {
 	readonly x: number;
 	readonly y: number;
@@ -588,12 +567,37 @@ function createStaticObjectSourceScaleMatrix(scale: {
 		0,
 		0,
 		0,
+		scale.z,
+		0,
+		0,
+		0,
 		0,
 		scale.y,
 		0,
 		0,
-		scale.z,
 		0,
+		0,
+		1,
+	]);
+}
+
+function createPlacementScaleMatrix(scale: {
+	readonly x: number;
+	readonly y: number;
+	readonly z: number;
+}): Float32Array {
+	return new Float32Array([
+		scale.x,
+		0,
+		0,
+		0,
+		0,
+		scale.y,
+		0,
+		0,
+		0,
+		0,
+		scale.z,
 		0,
 		0,
 		0,

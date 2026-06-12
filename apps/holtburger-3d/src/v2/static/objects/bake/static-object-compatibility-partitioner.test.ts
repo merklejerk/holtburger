@@ -47,7 +47,9 @@ describe("V2 static object compatibility partitioner", () => {
 			expect.objectContaining({
 				family: "unsupported",
 				renderCoverage: "unsupported",
-				sourceTriangleIds: ["da55ffff:building:building-0:part:0:polygon:0"],
+				sourceTriangleIds: [
+					"da55ffff:building:building-0:part:0:polygon:0:geometry-surface:0:variant:base",
+				],
 			}),
 		]);
 	});
@@ -62,7 +64,9 @@ describe("V2 static object compatibility partitioner", () => {
 		expect(plan.partitions).toHaveLength(1);
 		expect(plan.partitions[0]).toMatchObject({
 			materialIds: [0x08000010],
-			sourceTriangleIds: ["da55ffff:building:building-0:part:0:polygon:0"],
+			sourceTriangleIds: [
+				"da55ffff:building:building-0:part:0:polygon:0:geometry-surface:0:variant:base",
+			],
 		});
 	});
 
@@ -132,7 +136,7 @@ describe("V2 static object compatibility partitioner", () => {
 			}),
 		]);
 		expect(result.staticSourceMappings).toEqual([
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:da55ffff:building:building-0:part:0:polygon:0",
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:da55ffff:building:building-0:part:0:polygon:0:geometry-surface:0:variant:base",
 		]);
 		expect(result.staticSpatialRecords).toEqual([
 			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:bounds:1t",
@@ -143,6 +147,7 @@ describe("V2 static object compatibility partitioner", () => {
 		const payload = createPayload({
 			materials: [createTexturedMaterial(0x08000010)],
 			objectPlacement: createPlacement({ x: 10, y: 20, z: 30 }),
+			partPositions: new Float32Array([0, 1, 0, 0, 0, 1, 1, 0, 0]),
 			sourceScale: { x: 2, y: 3, z: 4 },
 			textureRefs: createRgbaTextureRefs(),
 		});
@@ -155,13 +160,70 @@ describe("V2 static object compatibility partitioner", () => {
 		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
 			throw new Error("Expected static object geometry draw unit.");
 		}
-		expect(Array.from(drawUnit.positions.slice(0, 3))).toEqual([12, 34, -17]);
+		expect(Array.from(drawUnit.positions.slice(0, 9))).toEqual([
+			10, 34, -20, 10, 30, -17, 12, 30, -20,
+		]);
+	});
+
+	it("bakes duplicate polygon ids by geometry surface and material variant", () => {
+		const payload = createPayload({
+			materials: [
+				createTexturedMaterial(0x08000010),
+				createTexturedMaterial(0x08000011),
+			],
+			textureRefs: createRgbaTextureRefs(),
+		});
+		const source = payload.sourceAssets[0];
+		const part = source?.parts[0];
+		if (!source || !part) {
+			throw new Error("Fixture payload did not create a source part.");
+		}
+		const updatedPart = {
+			...part,
+			materialSlots: part.materialSlots.map((slot, index) => ({
+				...slot,
+				materialVariantSignature: index === 1 ? "sampler=repeat" : null,
+			})),
+			triangles: part.triangles.map((triangle, index) => ({
+				...triangle,
+				materialVariantSignature: index === 1 ? "sampler=repeat" : null,
+				polygonId: 0,
+			})),
+		};
+		const input = createBakeInput({
+			...payload,
+			materialSlots: payload.materialSlots.map((slot, index) => ({
+				...slot,
+				materialVariantSignature: index === 1 ? "sampler=repeat" : null,
+			})),
+			sourceAssets: [{ ...source, parts: [updatedPart] }],
+		});
+
+		const result = bakeStaticObjectCompatibility(input);
+		const drawUnits = result.drawUnits.filter(
+			(drawUnit) => drawUnit.kind === "static-object-geometry",
+		);
+
+		expect(drawUnits).toHaveLength(2);
+		expect(drawUnits.map((drawUnit) => drawUnit.primaryTextureWrapMode)).toEqual([
+			"clamp",
+			"repeat",
+		]);
+		expect(drawUnits.map((drawUnit) => Array.from(drawUnit.positions.slice(0, 3)))).toEqual([
+			[1, 1, 1],
+			[2, 1, 1],
+		]);
+		expect(result.staticSourceMappings).toEqual([
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:da55ffff:building:building-0:part:0:polygon:0:geometry-surface:0:variant:base",
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-1-0:source:da55ffff:building:building-0:part:0:polygon:0:geometry-surface:1:variant:sampler=repeat",
+		]);
 	});
 });
 
 function createPayload(options: {
 	readonly materials: readonly StaticObjectMaterialSourceFacts[];
 	readonly objectPlacement?: ReturnType<typeof createPlacement>;
+	readonly partPositions?: Float32Array;
 	readonly sourceScale?: {
 		readonly x: number;
 		readonly y: number;
@@ -243,7 +305,9 @@ function createPayload(options: {
 						normals: new Float32Array(options.materials.length * 9),
 						partIndex: 0,
 						physicsPolygonCount: 0,
-						positions: createPartPositions(options.materials.length),
+						positions:
+							options.partPositions ??
+							createPartPositions(options.materials.length),
 						renderTriangleCount: options.materials.length,
 						scale: { x: 1, y: 1, z: 1 },
 						skippedPolygonCount: 0,
@@ -427,7 +491,7 @@ function createPartPositions(triangleCount: number): Float32Array {
 		triangleIndex += 1
 	) {
 		const offset = triangleIndex * 9;
-		positions[offset] = 1;
+		positions[offset] = 1 + triangleIndex;
 		positions[offset + 1] = 1;
 		positions[offset + 2] = 1;
 		positions[offset + 3] = 0;

@@ -8,6 +8,7 @@ import type {
 	RenderSurfaceIdentity,
 	StaticMaterialSourceIdentity,
 	StaticObjectMaterialSourceFacts,
+	StaticObjectPaletteSourceFacts,
 	StaticObjectPaletteViewFacts,
 	StaticObjectTextureRefFacts,
 	SurfaceTextureIdentity,
@@ -26,7 +27,6 @@ const SURFACE_TYPE_DETAIL = 0x20000;
 const PIXEL_FORMAT_P8 = 0x29;
 const PIXEL_FORMAT_INDEX16 = 0x65;
 const DEFAULT_PALETTE_FIRST_INDEX = 0;
-const DEFAULT_PALETTE_INDEX_COUNT = 256;
 const DIRECT_CLIP_MAP_ALPHA_TEST = 200 / BYTE_MAX;
 const INDEXED_CLIP_MAP_ALPHA_TEST = 100 / BYTE_MAX;
 
@@ -111,6 +111,7 @@ export interface StaticObjectMaterialFallbackReason {
 		| "missing-material-texture"
 		| "missing-render-surface"
 		| "missing-palette"
+		| "palette-index-out-of-range"
 		| "detail-overlay-render-deferred"
 		| "translucent-render-deferred"
 		| "unsupported-surface-flag";
@@ -153,6 +154,7 @@ interface StaticObjectMaterialContext {
 	readonly material: StaticObjectMaterialSourceFacts;
 	readonly paletteOverride?: PaletteIdentity | null;
 	readonly paletteViews?: readonly StaticObjectPaletteViewFacts[];
+	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
 	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
 }
 
@@ -186,6 +188,7 @@ export function planStaticObjectMaterials(
 				material,
 				paletteOverride: slot.paletteOverride,
 				paletteViews: slot.paletteViews,
+				paletteSources: payload.paletteSources,
 				textureRefs: payload.textureRefs,
 			}),
 		);
@@ -201,6 +204,7 @@ export function planStaticObjectMaterials(
 				material,
 				paletteOverride: null,
 				paletteViews: [],
+				paletteSources: payload.paletteSources,
 				textureRefs: payload.textureRefs,
 			}),
 		);
@@ -312,6 +316,33 @@ export function classifyStaticObjectMaterial(
 			});
 			return createUnsupportedPlan(basePlan, [reason, ...unsupportedFlagReasons]);
 		}
+		const paletteSource = findPaletteSource(context.paletteSources, palette);
+		if (!paletteSource) {
+			const reason = createFallbackReason({
+				code: "missing-palette",
+				material: context.material.identity,
+				message:
+					"Indexed static material palette was selected but no palette source metadata was resolved.",
+				palette,
+				renderSurface: renderSurfaceRef.renderSurface,
+				texture: context.material.source.texture,
+			});
+			return createUnsupportedPlan(basePlan, [reason, ...unsupportedFlagReasons]);
+		}
+		if (
+			renderSurfaceRef.indexedMaxIndex !== null &&
+			renderSurfaceRef.indexedMaxIndex >= paletteSource.colorCount
+		) {
+			const reason = createFallbackReason({
+				code: "palette-index-out-of-range",
+				material: context.material.identity,
+				message: `Indexed static material references palette index ${renderSurfaceRef.indexedMaxIndex}, but palette ${formatHex32(palette.paletteId)} has ${paletteSource.colorCount} colors.`,
+				palette,
+				renderSurface: renderSurfaceRef.renderSurface,
+				texture: context.material.source.texture,
+			});
+			return createUnsupportedPlan(basePlan, [reason, ...unsupportedFlagReasons]);
+		}
 		const indexedDeferredReasons = behavior.blend.depthWrite
 			? []
 			: [
@@ -327,6 +358,7 @@ export function classifyStaticObjectMaterial(
 				];
 		const paletteView = resolvePaletteView(
 			palette,
+			paletteSource.colorCount,
 			context.paletteViews ?? [],
 		);
 		return createTexturePlan({
@@ -439,16 +471,27 @@ function createTexturePlan(
 
 function resolvePaletteView(
 	basePalette: PaletteIdentity,
+	colorCount: number,
 	paletteViews: readonly StaticObjectPaletteViewFacts[],
 ): PaletteDataUseIdentity {
 	return {
 		firstIndex: DEFAULT_PALETTE_FIRST_INDEX,
-		indexCount: DEFAULT_PALETTE_INDEX_COUNT,
+		indexCount: colorCount,
 		kind: "palette-texture-use",
 		palette: basePalette,
 		subPalettes: sortPaletteViews(paletteViews),
 		usage: "palette-rgba",
 	};
+}
+
+function findPaletteSource(
+	paletteSources: readonly StaticObjectPaletteSourceFacts[],
+	palette: PaletteIdentity,
+): StaticObjectPaletteSourceFacts | null {
+	return (
+		paletteSources.find((source) => source.palette.paletteId === palette.paletteId) ??
+		null
+	);
 }
 
 export function createStaticObjectMaterialUseKey(

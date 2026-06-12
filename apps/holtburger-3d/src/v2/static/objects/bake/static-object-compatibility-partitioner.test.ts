@@ -604,6 +604,7 @@ function createPayload(options: {
 				sourceScale: options.sourceScale ?? { x: 1, y: 1, z: 1 },
 			},
 		],
+		paletteSources: createPaletteSources(),
 		regionRenderProfile: {
 			detailRoles: [],
 			identity: {
@@ -808,6 +809,7 @@ function createRgbaTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 			format: "rgba",
 			formatRaw: 1,
 			height: 32,
+			indexedMaxIndex: null,
 			palette: null,
 			renderSurface: {
 				kind: "render-surface",
@@ -840,6 +842,7 @@ function createIndexedTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 			format: "p8",
 			formatRaw: 0x29,
 			height: 32,
+			indexedMaxIndex: 42,
 			palette: {
 				kind: "palette",
 				paletteId: 0x04000010,
@@ -850,6 +853,18 @@ function createIndexedTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 			},
 			role: "render-surface",
 			width: 32,
+		},
+	];
+}
+
+function createPaletteSources() {
+	return [
+		{
+			colorCount: 256,
+			palette: {
+				kind: "palette" as const,
+				paletteId: 0x04000010,
+			},
 		},
 	];
 }

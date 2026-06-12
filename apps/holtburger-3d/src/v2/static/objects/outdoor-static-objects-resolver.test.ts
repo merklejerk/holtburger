@@ -1,0 +1,582 @@
+import { describe, expect, it } from "vitest";
+import type {
+	GfxObjPayloadDto,
+	LandblockOutdoorPayloadDto,
+	MaterialRecipePayloadDto,
+	PalettePayloadDto,
+	RegionRenderProfilePayloadDto,
+	RenderSurfacePayloadDto,
+	SetupAppearancePayloadDto,
+	SetupModelPayloadDto,
+	SurfaceTexturePayloadDto,
+} from "../../../lib/host/contracts";
+import type {
+	AssetService,
+	AssetServiceSnapshot,
+	HostAssetKey,
+	PreparedAsset,
+	PreparedAssetLease,
+} from "../../assets/contracts";
+import {
+	createHostAssetKey,
+	describeHostAssetKey,
+	formatHostAssetId,
+} from "../../assets/keys";
+import type { StaticResolverJob } from "../contracts";
+import { OutdoorStaticObjectsResolver } from "./outdoor-static-objects-resolver";
+
+describe("V2 outdoor static object resolver", () => {
+	it("resolves outdoor building source, geometry, material, and texture facts", async () => {
+		const assetService = new FixtureAssetService([
+			createPreparedAsset(
+				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createLandblockOutdoorPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("region-render-profile", 1),
+				createRegionRenderProfilePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("setup-model", 0x02000010),
+				createSetupModelPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("setup-appearance", 0x02000010),
+				createSetupAppearancePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("gfx-obj", 0x01000020),
+				createGfxObjPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("material", 0x08000011),
+				createMaterialPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("surface-texture", 0x05000010),
+				createSurfaceTexturePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("render-surface", 0x06000010),
+				createRenderSurfacePayload(),
+			),
+			createPreparedAsset(createHostAssetKey("palette", 0x04000010), {
+				kind: "palette",
+				paletteId: 0x04000010,
+				provenance: createProvenance("palette"),
+				residencyKind: "unknown",
+				sourceAssetKind: "palette",
+			} satisfies PalettePayloadDto),
+		]);
+
+		const payload = await new OutdoorStaticObjectsResolver({
+			assetService,
+		}).resolve(createBuildingRequest());
+
+		expect(payload.scope.kind).toBe("outdoor-static-objects");
+		if (payload.scope.kind !== "outdoor-static-objects") {
+			throw new Error("expected outdoor static object payload");
+		}
+
+		expect(payload.scope.domain).toBe("outdoor-buildings");
+		expect(payload.scope.objects).toHaveLength(1);
+		expect(payload.scope.objects[0]).toMatchObject({
+			identity: {
+				instanceId: "building-0",
+				kind: "static-object-instance",
+				landblockId: 0xda55ffff,
+				objectKind: "building",
+			},
+			source: {
+				kind: "static-object-source",
+				sourceAssetKind: "setup-model",
+				sourceDid: 0x02000010,
+			},
+		});
+		expect(payload.scope.sourceAssets).toHaveLength(1);
+		expect(payload.scope.sourceAssets[0]).toMatchObject({
+			identity: {
+				kind: "static-object-source",
+				sourceAssetKind: "setup-model",
+				sourceDid: 0x02000010,
+			},
+			materialSlotCount: 1,
+			partCount: 1,
+			renderTriangleCount: 1,
+		});
+		expect(payload.scope.sourceAssets[0]?.parts[0]).toMatchObject({
+			gfxObj: {
+				kind: "static-object-source",
+				sourceAssetKind: "gfx-obj",
+				sourceDid: 0x01000020,
+			},
+			materialSlotCount: 1,
+			renderTriangleCount: 1,
+		});
+		expect(payload.scope.materialSlots).toHaveLength(1);
+		expect(payload.scope.regionRenderProfile.detailRoles).toEqual([
+			{
+				fadeFar: 256,
+				fadeNear: 128,
+				role: "building",
+				texture: {
+					kind: "surface-texture",
+					surfaceTextureId: 0x05000020,
+				},
+				tiling: 8,
+			},
+		]);
+		expect(payload.scope.materialSlots[0]).toMatchObject({
+			material: {
+				kind: "static-material-source",
+				materialId: 0x08000011,
+			},
+		});
+		expect(payload.scope.materialSources).toEqual([
+			expect.objectContaining({
+				identity: {
+					kind: "static-material-source",
+					materialId: 0x08000011,
+				},
+				source: expect.objectContaining({
+					kind: "texture",
+					texture: {
+						kind: "surface-texture",
+						surfaceTextureId: 0x05000010,
+					},
+				}),
+			}),
+		]);
+		expect(payload.scope.textureRefs).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000010,
+					},
+					role: "surface-texture",
+					texture: {
+						kind: "surface-texture",
+						surfaceTextureId: 0x05000010,
+					},
+				}),
+				expect.objectContaining({
+					palette: {
+						kind: "palette",
+						paletteId: 0x04000010,
+					},
+					role: "render-surface",
+				}),
+			]),
+		);
+		expect(payload.scope.missingRefs).toEqual([]);
+	});
+
+	it("keeps host routes confined to debug provenance", async () => {
+		const assetService = new FixtureAssetService([
+			createPreparedAsset(
+				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createLandblockOutdoorPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("region-render-profile", 1),
+				createRegionRenderProfilePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("setup-model", 0x02000010),
+				createSetupModelPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("setup-appearance", 0x02000010),
+				createSetupAppearancePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("gfx-obj", 0x01000020),
+				createGfxObjPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("material", 0x08000011),
+				createMaterialPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("surface-texture", 0x05000010),
+				createSurfaceTexturePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("render-surface", 0x06000010),
+				createRenderSurfacePayload(),
+			),
+			createPreparedAsset(createHostAssetKey("palette", 0x04000010), {
+				kind: "palette",
+				paletteId: 0x04000010,
+				provenance: createProvenance("palette"),
+				residencyKind: "unknown",
+				sourceAssetKind: "palette",
+			} satisfies PalettePayloadDto),
+		]);
+
+		const payload = await new OutdoorStaticObjectsResolver({
+			assetService,
+		}).resolve(createBuildingRequest());
+		const withoutDebug = JSON.stringify(payload.scope, (key, value) =>
+			key === "debug" ? undefined : value,
+		);
+
+		expect(withoutDebug).not.toContain("setup-model/");
+		expect(withoutDebug).not.toContain("gfx-obj/");
+		expect(withoutDebug).not.toContain("material/");
+		expect(withoutDebug).not.toContain("surface-texture/");
+		expect(withoutDebug).not.toContain("render-surface/");
+		expect(withoutDebug).not.toContain("palette/");
+	});
+});
+
+class FixtureAssetService implements AssetService {
+	readonly #assets = new Map<string, PreparedAsset>();
+
+	constructor(assets: readonly PreparedAsset[]) {
+		for (const asset of assets) {
+			this.#assets.set(describeHostAssetKey(asset.key), asset);
+		}
+	}
+
+	async requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
+		const asset = this.#assets.get(describeHostAssetKey(key));
+		if (!asset) {
+			throw new Error(`Missing fixture asset ${describeHostAssetKey(key)}.`);
+		}
+
+		return asset;
+	}
+
+	acquirePreparedAssetLease(key: HostAssetKey): PreparedAssetLease {
+		throw new Error(
+			`FixtureAssetService does not support leases for ${describeHostAssetKey(
+				key,
+			)}.`,
+		);
+	}
+
+	pruneExpiredWarmAssets(): void {}
+
+	createSnapshot(): AssetServiceSnapshot {
+		return {
+			committed: [],
+			failures: [],
+			pending: [],
+		};
+	}
+}
+
+function createPreparedAsset(
+	key: HostAssetKey,
+	payload: PreparedAsset["payload"],
+): PreparedAsset {
+	return {
+		key,
+		payload,
+		preparedAt: "2026-06-11T00:00:00.000Z",
+		revision: 1,
+		sourceAssetId: formatHostAssetId(key),
+	};
+}
+
+function createBuildingRequest(): StaticResolverJob {
+	return {
+		domain: "outdoor-buildings",
+		scope: {
+			kind: "landblock",
+			landblockId: 0xda55ffff,
+		},
+	};
+}
+
+function createLandblockOutdoorPayload(): LandblockOutdoorPayloadDto {
+	return {
+		classification: "outdoor",
+		diagnostics: { errors: [], omissions: [], sourceRecords: [] },
+		kind: "landblock-outdoor",
+		landblockId: 0xda55ffff,
+		outdoorBvh: {
+			coordinateSpace: "landblock-render-local",
+			items: [{ instanceId: "building-0", kind: "building" }],
+			nodes: [],
+		},
+		provenance: createProvenance("landblock-outdoor"),
+		regionId: 1,
+		regionNumber: 1,
+		residencyKind: "outdoor-landblock",
+		sourceAssetKind: "landblock-outdoor",
+		statics: [
+			{
+				building: { numLeaves: 1, portals: [] },
+				generated: null,
+				instanceBounds: createBounds(),
+				instanceId: "building-0",
+				kind: "building",
+				localPlacement: createPlacement(),
+				sourceAssetId: "setup-model/02000010",
+				sourceBounds: createBounds(),
+				sourceDid: 0x02000010,
+				sourceIndex: 0,
+				sourceScale: { x: 1, y: 1, z: 1 },
+			},
+			{
+				building: null,
+				generated: { sceneId: 1, sceneTemplateIndex: 0, terrainIndex: 0 },
+				instanceBounds: createBounds(),
+				instanceId: "detail-0",
+				kind: "generated-scenery",
+				localPlacement: createPlacement(),
+				sourceAssetId: "gfx-obj/01000030",
+				sourceBounds: createBounds(),
+				sourceDid: 0x01000030,
+				sourceIndex: 1,
+				sourceScale: { x: 1, y: 1, z: 1 },
+			},
+		],
+		terrain: createTerrainStub(),
+	};
+}
+
+function createSetupModelPayload(): SetupModelPayloadDto {
+	return {
+		collisionWitness: { cylSphereCount: 0, sphereCount: 0 },
+		connectionPoints: [],
+		defaultAnimation: null,
+		defaultMotionTable: null,
+		defaultScript: null,
+		defaultScriptTable: null,
+		defaultSoundTable: null,
+		dependencies: { gfxObjAssetIds: ["gfx-obj/01000020"] },
+		flags: null,
+		height: null,
+		holdingLocations: [],
+		kind: "setup-model",
+		lights: [],
+		parts: [
+			{
+				gfxObjAssetId: "gfx-obj/01000020",
+				gfxObjId: 0x01000020,
+				parentIndex: null,
+				partIndex: 0,
+				scale: null,
+			},
+		],
+		placementSets: [],
+		provenance: createProvenance("setup-model"),
+		radius: null,
+		residencyKind: "unknown",
+		selectionSphere: null,
+		setupModelId: 0x02000010,
+		sortingSphere: null,
+		sourceAssetKind: "setup-model",
+		stepDown: null,
+		stepUp: null,
+	};
+}
+
+function createRegionRenderProfilePayload(): RegionRenderProfilePayloadDto {
+	const buildingDetailRole = {
+		fadeFar: 256,
+		fadeNear: 128,
+		role: "building" as const,
+		sourceTerrainDescIndex: 0,
+		textureAssetId: "surface-texture/05000020",
+		textureDid: 0x05000020,
+		tiling: 8,
+	};
+
+	return {
+		dependencies: {
+			paletteAssetIds: [],
+			renderSurfaceAssetIds: ["render-surface/06000020"],
+			surfaceTextureAssetIds: ["surface-texture/05000020"],
+		},
+		detailRoles: {
+			building: buildingDetailRole,
+			environment: null,
+			landscape: null,
+			object: null,
+		},
+		kind: "region-render-profile",
+		provenance: createProvenance("region-render-profile"),
+		regionId: 1,
+		regionNumber: 1,
+		residencyKind: "unknown",
+		sourceAssetKind: "region-render-profile",
+	};
+}
+
+function createSetupAppearancePayload(): SetupAppearancePayloadDto {
+	return {
+		animPartChanges: [],
+		appearanceKey: "setup-appearance/02000010",
+		dependencies: {
+			materialAssetIds: ["material/08000011"],
+			paletteAssetIds: [],
+		},
+		kind: "setup-appearance",
+		paletteId: null,
+		parts: [
+			{
+				gfxObjAssetId: "gfx-obj/01000020",
+				gfxObjId: 0x01000020,
+				materialSlots: [
+					{
+						materialAssetId: "material/08000011",
+						slotIndex: 0,
+						surfaceId: 0x08000010,
+					},
+				],
+				partIndex: 0,
+			},
+		],
+		provenance: createProvenance("setup-appearance"),
+		residencyKind: "unknown",
+		setupModelId: 0x02000010,
+		sourceAssetKind: "setup-appearance",
+		subPalettes: [],
+		textureChanges: [],
+	};
+}
+
+function createGfxObjPayload(): GfxObjPayloadDto {
+	return {
+		dependencies: { materialAssetIds: ["material/08000010"] },
+		didDegrade: null,
+		drawingBsp: null,
+		drawingPolygons: [],
+		flags: null,
+		gfxObjId: 0x01000020,
+		kind: "gfx-obj",
+		physicsWitness: { hasBsp: false, polygonCount: 1, rootKind: null },
+		provenance: createProvenance("gfx-obj"),
+		renderGeometry: {
+			bounds: createBounds(),
+			invalidPolygons: [],
+			normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+			positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+			skippedPolygonCount: 0,
+			sourceId: 0x01000020,
+			surfaceIds: [0x08000010],
+			triangleCount: 1,
+			triangles: [
+				{
+					firstVertex: 0,
+					materialVariantSignature: null,
+					polygonId: 7,
+					surfaceId: 0x08000010,
+				},
+			],
+			uvs: [0, 0, 1, 0, 0, 1],
+			vertexCount: 3,
+		},
+		residencyKind: "unknown",
+		sortCenter: null,
+		sourceAssetKind: "gfx-obj",
+		surfaceIds: [0x08000010],
+		vertexArray: { vertices: [] },
+	};
+}
+
+function createMaterialPayload(): MaterialRecipePayloadDto {
+	return {
+		dependencies: {
+			paletteAssetIds: ["palette/04000010"],
+			renderSurfaceAssetIds: ["render-surface/06000010"],
+			surfaceTextureAssetIds: ["surface-texture/05000010"],
+		},
+		diffuse: 1,
+		kind: "material-recipe",
+		luminosity: 0,
+		provenance: createProvenance("material-recipe"),
+		residencyKind: "unknown",
+		source: {
+			kind: "texture",
+			paletteId: null,
+			renderSurfaceDefaultPaletteIds: [0x04000010],
+			selectedRenderSurfaceId: 0x06000010,
+			surfaceTextureId: 0x05000010,
+		},
+		sourceAssetKind: "material-recipe",
+		surfaceId: 0x08000011,
+		surfaceType: 0,
+		translucency: 0,
+	};
+}
+
+function createSurfaceTexturePayload(): SurfaceTexturePayloadDto {
+	return {
+		dependencies: { renderSurfaceAssetIds: ["render-surface/06000010"] },
+		kind: "surface-texture",
+		provenance: createProvenance("surface-texture"),
+		renderSurfaceIds: [0x06000010],
+		residencyKind: "unknown",
+		selectedRenderSurfaceId: 0x06000010,
+		sourceAssetKind: "surface-texture",
+		surfaceTextureId: 0x05000010,
+		textureType: 0,
+		unknown: 0,
+	};
+}
+
+function createRenderSurfacePayload(): RenderSurfacePayloadDto {
+	return {
+		defaultPaletteId: 0x04000010,
+		dependencies: { paletteAssetIds: ["palette/04000010"] },
+		format: "p8",
+		formatRaw: 1,
+		height: 1,
+		kind: "render-surface",
+		provenance: createProvenance("render-surface"),
+		renderSurfaceId: 0x06000010,
+		residencyKind: "unknown",
+		sourceAssetKind: "render-surface",
+		sourceByteLength: 1,
+		sourceBytes: new Uint8Array([0]),
+		unknown: 0,
+		width: 1,
+	};
+}
+
+function createTerrainStub(): LandblockOutdoorPayloadDto["terrain"] {
+	return {
+		bounds: createBounds(),
+		gridSize: 2,
+		maxHeight: 0,
+		minHeight: 0,
+		quads: [],
+		terrainBvh: {
+			coordinateSpace: "landblock-outdoor-terrain-local",
+			items: [],
+			nodes: [],
+		},
+		tileSize: 24,
+		triangles: [],
+		vertices: [],
+	};
+}
+
+function createBounds() {
+	return {
+		max: { x: 1, y: 1, z: 1 },
+		min: { x: 0, y: 0, z: 0 },
+	};
+}
+
+function createPlacement() {
+	return {
+		orientation: { w: 1, x: 0, y: 0, z: 0 },
+		origin: { x: 0, y: 0, z: 0 },
+	};
+}
+
+function createProvenance(sourceAssetKind: string) {
+	return {
+		detail: null,
+		errorCode: null,
+		source: "repo-local-hba" as const,
+		sourceAssetKind,
+	};
+}

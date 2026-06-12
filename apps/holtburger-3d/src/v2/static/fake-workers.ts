@@ -187,6 +187,41 @@ export class ImmediateStaticResolver implements StaticResolver {
 			};
 		}
 
+		if (job.domain === "outdoor-buildings" && job.scope.kind === "landblock") {
+			return {
+				job,
+				scope: {
+					domain: "outdoor-buildings",
+					kind: "outdoor-static-objects",
+					landblock: {
+						kind: "landblock-source",
+						landblockId: job.scope.landblockId,
+						source: "outdoor",
+					},
+					materialSlots: [],
+					materialSources: [],
+					missingRefs: [],
+					objects: [],
+					regionRenderProfile: {
+						detailRoles: [],
+						identity: {
+							kind: "region-render-profile",
+							regionNumber: 0,
+						},
+					},
+					sourceAssets: [],
+					sourceSpatial: {
+						bounds: null,
+						coordinateSpace: "landblock-render-local",
+						outdoorBvhItemCount: 0,
+						outdoorBvhNodeCount: 0,
+					},
+					textureRefs: [],
+				},
+				sourceRevision: createStableFakeRenderSurfaceId(job),
+			};
+		}
+
 		return {
 			job,
 			scope: {

@@ -9,6 +9,7 @@ import type {
 	StaticDemand,
 	DungeonStaticPayloadSummary,
 	LandblockTopologyPayloadSummary,
+	OutdoorStaticObjectsPayloadSummary,
 	StaticResolverFailureSnapshot,
 	StaticResolver,
 	StaticScopePayload,
@@ -67,6 +68,8 @@ export class StaticCoordinator {
 	#staleBakeResults = 0;
 	#committedDrawUnits = 0;
 	#latestTerrainPayload: TerrainStaticScopePayloadSummary | null = null;
+	#latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null =
+		null;
 	#latestLandblockTopologyPayload: LandblockTopologyPayloadSummary | null =
 		null;
 	#latestDungeonPayload: DungeonStaticPayloadSummary | null = null;
@@ -151,6 +154,8 @@ export class StaticCoordinator {
 			failed: this.#failed,
 			latestDungeonPayload: this.#latestDungeonPayload,
 			latestLandblockTopologyPayload: this.#latestLandblockTopologyPayload,
+			latestOutdoorStaticObjectsPayload:
+				this.#latestOutdoorStaticObjectsPayload,
 			latestResolverFailure: this.#latestResolverFailure,
 			latestTerrainPayload: this.#latestTerrainPayload,
 			requested: activeWork.length,
@@ -382,6 +387,19 @@ export class StaticCoordinator {
 				missingRefCount: payload.scope.missingRefs.length,
 				portalLinkCount: payload.scope.portalLinks.length,
 				visibleCellCount: countDistinctVisibleEnvCells(payload.scope.envCells),
+			};
+		}
+
+		if (payload.scope.kind === "outdoor-static-objects") {
+			this.#latestOutdoorStaticObjectsPayload = {
+				domain: payload.scope.domain,
+				landblockId: payload.scope.landblock.landblockId,
+				materialSlotCount: payload.scope.materialSlots.length,
+				materialSourceCount: payload.scope.materialSources.length,
+				missingRefCount: payload.scope.missingRefs.length,
+				objectCount: payload.scope.objects.length,
+				sourceAssetCount: payload.scope.sourceAssets.length,
+				textureRefCount: payload.scope.textureRefs.length,
 			};
 		}
 

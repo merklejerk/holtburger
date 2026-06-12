@@ -228,10 +228,12 @@ export class ImmediateStaticResolver implements StaticResolver {
 				kind: "placeholder",
 				referencedTextureUses: [
 					{
-						kind: "prepared-texture-use",
-						outputFormat: "rgba8",
-						renderSurfaceId: createStableFakeRenderSurfaceId(job),
-						usage: "color",
+						kind: "prepared-render-surface-texture-use",
+						renderSurface: {
+							kind: "render-surface",
+							renderSurfaceId: createStableFakeRenderSurfaceId(job),
+						},
+						usage: "rgba-color",
 					},
 				],
 			},

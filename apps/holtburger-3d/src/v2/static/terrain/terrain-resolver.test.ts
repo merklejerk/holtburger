@@ -92,10 +92,12 @@ describe("V2 terrain static resolver", () => {
 			expect.arrayContaining([
 				expect.objectContaining({
 					preparedTextureUse: expect.objectContaining({
-						kind: "prepared-texture-use",
-						outputFormat: "rgba8",
-						renderSurfaceId: 0x06000010,
-						usage: "color",
+						kind: "prepared-render-surface-texture-use",
+						renderSurface: {
+							kind: "render-surface",
+							renderSurfaceId: 0x06000010,
+						},
+						usage: "rgba-color",
 					}),
 					renderSurface: {
 						kind: "render-surface",
@@ -109,9 +111,8 @@ describe("V2 terrain static resolver", () => {
 				}),
 				expect.objectContaining({
 					preparedTextureUse: expect.objectContaining({
-						kind: "prepared-texture-use",
-						outputFormat: "rgba8",
-						usage: "mask",
+						kind: "prepared-render-surface-texture-use",
+						usage: "rgba-mask",
 					}),
 					role: "terrain-alpha",
 					texture: {

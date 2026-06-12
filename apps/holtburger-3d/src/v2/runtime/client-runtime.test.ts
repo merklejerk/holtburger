@@ -17,7 +17,7 @@ import type {
 } from "../renderer/types";
 import { StaticCoordinator } from "../static/coordinator/static-coordinator";
 import type {
-	PreparedTextureUseIdentity,
+	PreparedRgbaRenderSurfaceTextureUseIdentity,
 	StaticBakeTextureUse,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialFallbackReason,
@@ -594,12 +594,14 @@ function createTerrainDrawUnit(
 	};
 }
 
-function createPreparedTextureUse(): PreparedTextureUseIdentity {
+function createPreparedTextureUse(): PreparedRgbaRenderSurfaceTextureUseIdentity {
 	return {
-		kind: "prepared-texture-use",
-		outputFormat: "rgba8",
-		renderSurfaceId: 0x06000010,
-		usage: "color",
+		kind: "prepared-render-surface-texture-use",
+		renderSurface: {
+			kind: "render-surface",
+			renderSurfaceId: 0x06000010,
+		},
+		usage: "rgba-color",
 	};
 }
 
@@ -619,14 +621,14 @@ function createImmediateStaticCoordinator(options: {
 
 function createBakeTextureUse(
 	drawUnitId: string,
-	source: PreparedTextureUseIdentity,
+	source: PreparedRgbaRenderSurfaceTextureUseIdentity,
 ): StaticBakeTextureUse {
 	return {
 		domain: "outdoor-terrain",
 		ownerDrawUnitIds: [drawUnitId],
 		source,
 		staticBatchId: "batch-a",
-		textureUseId: `${drawUnitId}:prepared-texture:${source.renderSurfaceId
+		textureUseId: `${drawUnitId}:prepared-texture:${source.renderSurface.renderSurfaceId
 			.toString(16)
 			.padStart(8, "0")}`,
 	};

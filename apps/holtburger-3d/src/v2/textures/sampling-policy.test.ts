@@ -47,22 +47,22 @@ describe("V2 runtime texture sampling policy", () => {
 	});
 
 	it("maps prepared texture usage to page sample classes and wrapping", () => {
-		expect(createRuntimeTexturePagePolicy(createUse("color"))).toEqual({
+		expect(createRuntimeTexturePagePolicy(createUse("rgba-color"))).toEqual({
 			sampleClass: "rgba-color",
 			wrapS: "repeat",
 			wrapT: "repeat",
 		});
-		expect(createRuntimeTexturePagePolicy(createUse("detail"))).toEqual({
+		expect(createRuntimeTexturePagePolicy(createUse("rgba-detail"))).toEqual({
 			sampleClass: "rgba-detail",
 			wrapS: "repeat",
 			wrapT: "repeat",
 		});
-		expect(createRuntimeTexturePagePolicy(createUse("mask"))).toEqual({
+		expect(createRuntimeTexturePagePolicy(createUse("rgba-mask"))).toEqual({
 			sampleClass: "rgba-mask",
 			wrapS: "clamp-to-edge",
 			wrapT: "clamp-to-edge",
 		});
-		expect(createRuntimeTexturePagePolicy(createUse("raw"))).toEqual({
+		expect(createRuntimeTexturePagePolicy(createUse("rgba-raw"))).toEqual({
 			sampleClass: "rgba-exact",
 			wrapS: "clamp-to-edge",
 			wrapT: "clamp-to-edge",
@@ -70,11 +70,15 @@ describe("V2 runtime texture sampling policy", () => {
 	});
 });
 
-function createUse(usage: "color" | "detail" | "mask" | "raw") {
+function createUse(
+	usage: "rgba-color" | "rgba-detail" | "rgba-mask" | "rgba-raw",
+) {
 	return {
-		kind: "prepared-texture-use" as const,
-		outputFormat: "rgba8" as const,
-		renderSurfaceId: 0x06000010,
+		kind: "prepared-render-surface-texture-use" as const,
+		renderSurface: {
+			kind: "render-surface" as const,
+			renderSurfaceId: 0x06000010,
+		},
 		usage,
 	};
 }

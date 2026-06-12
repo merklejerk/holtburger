@@ -1,7 +1,7 @@
 import type {
 	OutdoorStaticObjectsScopePayload,
 	PaletteIdentity,
-	PreparedTextureUseIdentity,
+	PreparedRgbaRenderSurfaceTextureUseIdentity,
 	RegionDetailRoleFacts,
 	RenderSurfaceIdentity,
 	StaticMaterialSourceIdentity,
@@ -67,7 +67,7 @@ type StaticObjectMaterialTextureUseRole =
 			readonly role: "base-color";
 			readonly texture: SurfaceTextureIdentity;
 			readonly renderSurface: RenderSurfaceIdentity;
-			readonly preparedTextureUse: PreparedTextureUseIdentity;
+			readonly preparedTextureUse: PreparedRgbaRenderSurfaceTextureUseIdentity;
 	  }
 	| {
 			readonly role: "indexed-texels";
@@ -301,10 +301,9 @@ export function classifyStaticObjectMaterial(
 		textureRoles: [
 			{
 				preparedTextureUse: {
-					kind: "prepared-texture-use",
-					outputFormat: "rgba8",
-					renderSurfaceId: renderSurfaceRef.renderSurface.renderSurfaceId,
-					usage: "raw",
+					kind: "prepared-render-surface-texture-use",
+					renderSurface: renderSurfaceRef.renderSurface,
+					usage: "rgba-raw",
 				},
 				renderSurface: renderSurfaceRef.renderSurface,
 				role: "base-color",

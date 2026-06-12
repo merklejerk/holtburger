@@ -1,8 +1,7 @@
 import type {
 	PaletteIdentity,
-	PreparedTextureOutputFormat,
-	PreparedTextureUseIdentity,
-	PreparedTextureUsage,
+	PreparedRgbaRenderSurfaceTextureUseIdentity,
+	PreparedRgbaRenderSurfaceTextureUsage,
 	RegionRenderProfileIdentity,
 	RenderSurfaceIdentity,
 	StaticResourceIdentity,
@@ -59,18 +58,13 @@ export function createPaletteIdentity(paletteId: number): PaletteIdentity {
 	};
 }
 
-export function createPreparedTextureUseIdentity(options: {
+export function createPreparedRenderSurfaceTextureUseIdentity(options: {
 	readonly renderSurfaceId: number;
-	readonly usage: PreparedTextureUsage;
-	readonly outputFormat: PreparedTextureOutputFormat;
-}): PreparedTextureUseIdentity {
+	readonly usage: PreparedRgbaRenderSurfaceTextureUsage;
+}): PreparedRgbaRenderSurfaceTextureUseIdentity {
 	return {
-		kind: "prepared-texture-use",
-		outputFormat: options.outputFormat,
-		renderSurfaceId: assertNonnegativeInteger(
-			options.renderSurfaceId,
-			"renderSurfaceId",
-		),
+		kind: "prepared-render-surface-texture-use",
+		renderSurface: createRenderSurfaceIdentity(options.renderSurfaceId),
 		usage: options.usage,
 	};
 }

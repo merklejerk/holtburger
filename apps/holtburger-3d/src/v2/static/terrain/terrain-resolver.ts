@@ -22,7 +22,7 @@ import type {
 } from "../contracts";
 import {
 	createPaletteIdentity,
-	createPreparedTextureUseIdentity,
+	createPreparedRenderSurfaceTextureUseIdentity,
 	createRegionRenderProfileIdentity,
 	createRenderSurfaceIdentity,
 	createSurfaceTextureIdentity,
@@ -178,16 +178,15 @@ export class TerrainStaticScopeResolver {
 			facts.push({
 				palette,
 				preparedTextureUse: renderSurfaceIdentity
-					? createPreparedTextureUseIdentity({
-							outputFormat: "rgba8",
+					? createPreparedRenderSurfaceTextureUseIdentity({
 							renderSurfaceId: renderSurfaceIdentity.renderSurfaceId,
 							usage:
 								surfaceRole.role === "detail"
-									? "detail"
+									? "rgba-detail"
 									: surfaceRole.role === "terrain-alpha" ||
 										  surfaceRole.role === "road-alpha"
-										? "mask"
-										: "color",
+										? "rgba-mask"
+										: "rgba-color",
 						})
 					: null,
 				renderSurface: renderSurfaceIdentity,

@@ -7,7 +7,8 @@ import type {
 	PreparedAssetLease,
 } from "../assets/contracts";
 import type {
-	PreparedTextureUseIdentity,
+	PreparedRgbaRenderSurfaceTextureUseIdentity,
+	PreparedRgbaRenderSurfaceTextureUsage,
 	StaticCoordinatorCommitDelta,
 	StaticScopePayload,
 } from "../static/contracts";
@@ -800,8 +801,11 @@ describe("V2 texture manager", () => {
 			placements: [
 				{
 					texture: {
-						kind: "prepared-texture-use",
-						renderSurfaceId: 0x06000010,
+						kind: "prepared-render-surface-texture-use",
+						renderSurface: {
+							kind: "render-surface",
+							renderSurfaceId: 0x06000010,
+						},
 					},
 				},
 			],
@@ -835,7 +839,7 @@ describe("V2 texture manager", () => {
 		const update = await textureManager.applyStaticCommitDelta(
 			createCommitDelta({
 				outputFormat: "rgba8",
-				usage: "mask",
+				usage: "rgba-mask",
 			}),
 		);
 
@@ -1072,7 +1076,7 @@ function createCommitDelta(options: {
 	readonly renderSurfaceId?: number;
 	readonly staticBatchId?: string;
 	readonly textureUseId?: string;
-	readonly usage?: PreparedTextureUseIdentity["usage"];
+	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
 }): StaticCoordinatorCommitDelta {
 	const drawUnitId = options.drawUnitId ?? "terrain-a";
 	const renderSurfaceId = options.renderSurfaceId ?? 0x06000010;
@@ -1105,33 +1109,39 @@ function createTextureUseCommit(options: {
 	readonly renderSurfaceId: number;
 	readonly staticBatchId?: string;
 	readonly textureUseId: string;
-	readonly usage?: PreparedTextureUseIdentity["usage"];
+	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
 }): StaticCoordinatorCommitDelta["textureUses"][number] {
 	return {
 		domain: options.domain ?? "outdoor-terrain",
 		ownerDrawUnitIds: [options.drawUnitId],
 		source: {
-			kind: "prepared-texture-use",
-			outputFormat: options.outputFormat ?? "rgba8",
-			renderSurfaceId: options.renderSurfaceId,
-			usage: options.usage ?? "color",
+			kind: "prepared-render-surface-texture-use",
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: options.renderSurfaceId,
+			},
+			usage: options.usage ?? "rgba-color",
 		},
 		staticBatchId: options.staticBatchId ?? "batch-a",
 		textureUseId: options.textureUseId,
 	};
 }
 
-function createTextureUse(renderSurfaceId: number): PreparedTextureUseIdentity {
+function createTextureUse(
+	renderSurfaceId: number,
+): PreparedRgbaRenderSurfaceTextureUseIdentity {
 	return {
-		kind: "prepared-texture-use",
-		outputFormat: "rgba8",
-		renderSurfaceId,
-		usage: "color",
+		kind: "prepared-render-surface-texture-use",
+		renderSurface: {
+			kind: "render-surface",
+			renderSurfaceId,
+		},
+		usage: "rgba-color",
 	};
 }
 
 function createTerrainPayload(
-	textureUses: readonly PreparedTextureUseIdentity[],
+	textureUses: readonly PreparedRgbaRenderSurfaceTextureUseIdentity[],
 ): StaticScopePayload {
 	return {
 		job: {
@@ -1185,9 +1195,11 @@ function createTerrainPayload(
 			textureUses: textureUses.map((texture) => ({
 				preparedTextureUse: texture,
 				role: "terrain-base",
+				renderSurface: texture.renderSurface,
+				palette: null,
 				texture: {
 					kind: "surface-texture",
-					surfaceTextureId: texture.renderSurfaceId,
+					surfaceTextureId: texture.renderSurface.renderSurfaceId,
 				},
 			})),
 		},
@@ -1200,7 +1212,7 @@ interface PreparedTexturePayloadOptions {
 	readonly levelFormat?: string;
 	readonly outputFormat: "rgba8" | "dxt1";
 	readonly renderSurfaceId?: number;
-	readonly usage?: PreparedTextureUseIdentity["usage"];
+	readonly usage?: "color" | "detail" | "mask" | "raw";
 }
 
 function createPreparedTexturePayload(options: PreparedTexturePayloadOptions) {
@@ -1234,7 +1246,7 @@ function getPreparedTextureRenderSurfaceId(key: HostAssetKey): number {
 
 function getPreparedTextureUsage(
 	key: HostAssetKey,
-): PreparedTextureUseIdentity["usage"] {
+): "color" | "detail" | "mask" | "raw" {
 	if (key.id.includes("usage=detail")) {
 		return "detail";
 	}

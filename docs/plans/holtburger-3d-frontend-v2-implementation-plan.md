@@ -2255,29 +2255,37 @@ Verification:
 - `cd apps/holtburger-3d && npm run lint:dead`
 - `cd apps/holtburger-3d && npm run test:ts -- texture-manager.test.ts`
 
-### Phase 11E: Static Object Material Family Expansion
+### Phase 11E0: Static Object Material Coverage Audit
 
 Status: planned.
 
-Purpose: expand rendered static-object material families after the first family proves the source, material, partitioning, texture, and renderer seams.
+Purpose: measure the remaining static-object material surface before adding more renderer paths, so Phase 11E expands by evidence instead of guesswork.
 
 Deliverables:
 
-- Incremental renderer support for additional classified static material families: alpha/clip, blended/translucent, indexed/paletted, detail overlays, and source-specific render-state variants as evidence demands.
-- Indexed/paletted expansion derives `palette-rgba` `firstIndex` / `indexCount` from setup appearance, subpalette, palette-set/shade, or equivalent palette-view metadata instead of defaulting every palette use to the full 256-entry range.
-- Focused tests per newly rendered material family for classification, partitioning, texture-use planning, renderer binding/upload, and fallback behavior.
-- Manual visual comparison against v1 for selected landblocks that exercise the newly supported family.
+- Static object material diagnostics that summarize, by domain and material family/pass, how many triangles/partitions are rendered, render-deferred, or unsupported.
+- Focused live-sample inventory for outdoor buildings covering at least:
+  - rendered opaque `texture-rgba`;
+  - rendered alpha-test `texture-rgba`;
+  - solid-color materials;
+  - indexed/paletted materials;
+  - translucent/additive materials;
+  - detail-overlay roles;
+  - unsupported material flags.
+- A ranked next-slice recommendation based on observed frequency, visual impact, renderer risk, and whether source/resolver facts are already present.
+- Updated 11E1-11E5 notes if the audit changes the safest implementation order.
 
 Acceptance criteria:
 
-- Multiple static object material families can coexist without creating non-isomorphic renderer paths.
-- New material-family support is added by extending typed classifiers, partitioning keys, and renderer families, not by adding catch-all material branches.
-- Indexed/paletted static materials are not considered parity-complete while palette subranges/shades still rely on the full 256-entry fallback.
-- Remaining unsupported material families are explicitly tracked before moving broad static-object/detail/env-cell scope into Phase 12.
+- The default diagnostics stay compact; detailed material samples are either bounded or available only through an explicit debug report.
+- The audit distinguishes already-rendered `texture-rgba` alpha-test/clip support from not-yet-rendered families.
+- The plan records a concrete first expansion target before any new renderer family code is added.
+- No new renderer material family is implemented in this audit phase.
 
 Dry-run findings:
 
-- The highest-risk expansions are indexed/paletted and alpha/translucency because they affect texture roles, shader programs, pass ordering, sampler/mip policy, sorting/blending, and material table shape.
+- `texture-rgba` opaque and alpha-test are already rendered by 11D/11D1. 11E should not treat alpha/clip as a new family; it should only tune or verify that path if the audit finds visual mismatches.
+- The highest-risk expansions are indexed/paletted and translucent/additive because they affect texture roles, shader programs, pass ordering, sampler/mip policy, sorting/blending, material table shape, and possibly texture upload formats.
 - v1 already has separate submit paths for indexed P8/P16 and texture-page materials. V2 should not duplicate that shape blindly, but it should expect indexed/palette support to require explicit renderer programs or explicit shader branches.
 - 11B2C made palette views representable through explicit range fields, but current planner output still uses a full 256-entry fallback until resolver/material facts expose the richer subpalette view. 11E should close that semantic gap for indexed/paletted rendering.
 - Detail overlays should be added as a material-role extension that composes with existing static families, not as a separate source-domain feature.
@@ -2286,7 +2294,104 @@ Dry-run findings:
 
 Dry-run conclusion:
 
-- 11E is a sequence of small material-family render slices, not one monolithic "finish all static materials" task. Stop before Phase 12 only when unsupported families are explicitly enumerated and no longer block the chosen breadth targets.
+- 11E is split into small material-family render slices. Start with audit, then implement one renderer/material expansion at a time. Stop before Phase 12 only when unsupported families are explicitly enumerated and no longer block the chosen breadth targets.
+
+### Phase 11E1: Solid Color And Material Color Modulation
+
+Status: planned.
+
+Purpose: add the lowest-risk non-texture static material support and begin applying material color facts that affect current building parity.
+
+Deliverables:
+
+- Renderable static-object draw units for classified solid-color materials.
+- Renderer binding/shader support for static solid-color partitions without routing through fake texture pages.
+- Material color modulation for already-rendered direct RGBA static objects where AC material facts make it necessary, including diffuse/luminosity inputs that can be applied without pass-order changes.
+- Tests proving solid-color classification, partitioning, draw-unit emission, renderer upload, and fallback behavior.
+- Visual verification on an audited landblock that contains solid-color static surfaces.
+
+Acceptance criteria:
+
+- Solid-color support extends typed material family/render-state handling; it does not add a catch-all material path.
+- Existing `texture-rgba` opaque/alpha-test rendering remains unchanged except for intentional material color modulation.
+- Unsupported blend/translucency/detail/indexed cases remain explicit render-deferred or unsupported records.
+
+### Phase 11E2: Indexed And Paletted Static Data Textures
+
+Status: planned.
+
+Purpose: render indexed/paletted static object materials through the generalized data-use contract instead of collapsing them to prepared RGBA or leaving them render-deferred.
+
+Deliverables:
+
+- Texture manager and renderer support for stageable index data uses (`index8` / `index16`) plus palette lookup data uses (`palette-rgba`) as required by static object materials.
+- Static-object renderer shader/binding support for indexed/paletted material partitions.
+- Palette view/subrange derivation from setup appearance, subpalette, palette-set/shade, or equivalent source metadata instead of defaulting every palette use to the full 256-entry range.
+- Tests covering classifier output, compatibility keys, texture/data-use planning, texture manager upload/placement, renderer binding, and fallback for missing palette facts.
+- Visual verification on audited landblocks with indexed/paletted building materials.
+
+Acceptance criteria:
+
+- Indexed/paletted materials are not marked parity-complete while palette subranges/shades still rely on the full 256-entry fallback.
+- Index and palette data remain logical data uses; no direct static-object-only upload bypass is introduced.
+- Filter/mip policy for indexed data is explicit and palette-safe.
+
+### Phase 11E3: Translucent And Additive Static Passes
+
+Status: planned.
+
+Purpose: add static object pass-order and blend/depth handling for translucent/additive materials after opaque, alpha-test, solid, and indexed data paths are structurally separated.
+
+Deliverables:
+
+- Render-state/pass partitioning for translucent, inverse-alpha, additive, and related blend cases.
+- Renderer pass ordering and depth-write/depth-test behavior for static object translucent/additive draw units.
+- Tests proving translucent/additive classification, partition splitting, draw ordering, renderer state setup, and fallback behavior.
+- Visual verification on audited landblocks with translucent/additive static materials.
+
+Acceptance criteria:
+
+- Blend support is expressed through typed pass/render-state contracts, not shader-side ad hoc flags alone.
+- Opaque/alpha-test draw ordering remains deterministic and unaffected.
+- Any sorting limitations are explicitly documented before moving to Phase 12.
+
+### Phase 11E4: Static Detail Overlay Composition
+
+Status: planned.
+
+Purpose: render static object detail overlays as material-role composition rather than broadening source domains prematurely.
+
+Deliverables:
+
+- Resolver/material facts needed to resolve static detail role textures when present.
+- Material planner and compatibility partition support for detail overlay roles composed with existing static families.
+- Texture-use planning and renderer shader support for detail overlay bindings, tiling, fade, and sampler policy.
+- Tests covering detail-role classification, texture resolution, partitioning, renderer binding, and fallback behavior.
+- Visual verification on audited landblocks with detail-overlay static materials.
+
+Acceptance criteria:
+
+- Detail overlays are represented as additional material roles, not as a separate source-domain shortcut.
+- `outdoor-detail` and `env-cell-static` breadth remains out of scope unless a detail material role demonstrably requires a narrow source-resolution addition.
+- Unsupported or unresolved detail roles remain explicitly diagnostic.
+
+### Phase 11E5: Static Material Family Resteer
+
+Status: planned.
+
+Purpose: reassess static material parity before broadening static-object source coverage in Phase 12.
+
+Deliverables:
+
+- Updated inventory of rendered, render-deferred, and unsupported static object material families after 11E1-11E4.
+- Explicit list of remaining unsupported material flags/source cases, with examples and planned destination phase.
+- Decision on whether Phase 12 can safely broaden source coverage to `outdoor-detail` / `env-cell-static`, or whether another focused material slice is required first.
+- Plan updates for Phase 12 if material-table capacity, pass sorting, palette views, detail roles, or diagnostics changed the expected compaction work.
+
+Acceptance criteria:
+
+- Remaining material gaps are typed and scheduled, not hidden behind fallback rendering.
+- Phase 12 starts only after current outdoor-building material support is credible enough that breadth work will not multiply unknown renderer failures.
 
 ### Phase 12: Static Object Breadth And Compaction
 

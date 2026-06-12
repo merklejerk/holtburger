@@ -63,7 +63,7 @@ function createTauriStaticCoordinator(host: RuntimeHost): StaticCoordinator {
 		host,
 		DEFAULT_STATIC_RESOLVER_WORKER_COUNT,
 	);
-	const terrainBaker = createWorkerStaticBaker(
+	const workerBaker = createWorkerStaticBaker(
 		DEFAULT_STATIC_BAKER_WORKER_COUNT,
 	);
 	const placeholderBaker = new ImmediateStaticBaker();
@@ -74,7 +74,7 @@ function createTauriStaticCoordinator(host: RuntimeHost): StaticCoordinator {
 	});
 	const baker = new BrowserStaticBaker({
 		placeholderBaker,
-		terrainBaker,
+		workerBaker,
 	});
 
 	return new StaticCoordinator({
@@ -190,15 +190,15 @@ class BrowserStaticResolver implements StaticResolver {
 }
 
 class BrowserStaticBaker implements StaticBaker {
-	readonly #terrainBaker: StaticBaker;
+	readonly #workerBaker: StaticBaker;
 	readonly #placeholderBaker: StaticBaker;
 	#disposed = false;
 
 	constructor(options: {
-		readonly terrainBaker: StaticBaker;
+		readonly workerBaker: StaticBaker;
 		readonly placeholderBaker: StaticBaker;
 	}) {
-		this.#terrainBaker = options.terrainBaker;
+		this.#workerBaker = options.workerBaker;
 		this.#placeholderBaker = options.placeholderBaker;
 	}
 
@@ -207,8 +207,8 @@ class BrowserStaticBaker implements StaticBaker {
 			return Promise.reject(new Error("BrowserStaticBaker has been disposed."));
 		}
 
-		if (input.domain === "outdoor-terrain") {
-			return this.#terrainBaker.bake(input);
+		if (input.domain === "outdoor-terrain" || input.domain === "outdoor-buildings") {
+			return this.#workerBaker.bake(input);
 		}
 
 		return this.#placeholderBaker.bake(input);
@@ -220,7 +220,7 @@ class BrowserStaticBaker implements StaticBaker {
 		}
 
 		this.#disposed = true;
-		disposeIfAvailable(this.#terrainBaker);
+		disposeIfAvailable(this.#workerBaker);
 		disposeIfAvailable(this.#placeholderBaker);
 	}
 }

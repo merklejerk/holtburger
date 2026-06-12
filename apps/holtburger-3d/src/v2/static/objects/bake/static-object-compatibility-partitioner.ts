@@ -29,6 +29,7 @@ export interface StaticObjectCompatibilityPartitionPlan {
 export interface StaticObjectCompatibilityPartition {
 	readonly sliceId: string;
 	readonly compatibilityKey: string;
+	readonly partitionAxes: StaticObjectCompatibilityPartitionAxes;
 	readonly family: StaticObjectMaterialPlan["family"];
 	readonly renderCoverage: StaticObjectMaterialPlan["renderCoverage"];
 	readonly pass: StaticObjectMaterialPlan["pass"];
@@ -45,6 +46,47 @@ export interface StaticObjectCompatibilityPartition {
 	readonly sourceTriangleIds: readonly string[];
 	readonly triangleCount: number;
 	readonly reason: string;
+}
+
+interface StaticObjectCompatibilityPartitionAxes {
+	readonly material: StaticObjectMaterialCompatibilityAxis;
+	readonly ownership: StaticObjectOwnershipAxis;
+	readonly sort: StaticObjectSortAxis;
+	readonly visibility: StaticObjectVisibilityAxis;
+}
+
+interface StaticObjectMaterialCompatibilityAxis {
+	readonly key: string;
+	readonly family: StaticObjectMaterialPlan["family"];
+	readonly renderCoverage: StaticObjectMaterialPlan["renderCoverage"];
+	readonly pass: StaticObjectMaterialPlan["pass"];
+	readonly alphaMode: StaticObjectMaterialPlan["alphaPolicy"]["mode"];
+	readonly blendMode: StaticObjectMaterialPlan["blend"]["mode"];
+	readonly materialColorKey: string;
+	readonly textureWrapMode: StaticObjectTextureWrapMode;
+	readonly textureRoleLayoutKey: string;
+}
+
+interface StaticObjectOwnershipAxis {
+	readonly key: string;
+	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
+	readonly landblockId: number;
+	readonly sourceKey: string;
+	readonly gfxKey: string;
+	readonly objectPartKey: string | null;
+}
+
+interface StaticObjectSortAxis {
+	readonly policy:
+		| "opaque-batchable"
+		| "alpha-test-batchable"
+		| "transparent-object-part-sortable";
+	readonly key: string;
+}
+
+interface StaticObjectVisibilityAxis {
+	readonly policy: "landblock-static-neutral";
+	readonly key: string;
 }
 
 export interface StaticObjectCompatibilityTriangle {
@@ -65,6 +107,7 @@ type StaticObjectTextureWrapMode = "clamp" | "repeat";
 interface StaticObjectTriangleCandidate {
 	readonly sourceTriangleId: string;
 	readonly compatibilityKey: string;
+	readonly partitionAxes: StaticObjectCompatibilityPartitionAxes;
 	readonly object: StaticObjectInstanceIdentity;
 	readonly source: StaticObjectSourceIdentity;
 	readonly gfxObj: StaticObjectSourceIdentity;
@@ -186,14 +229,19 @@ function createTriangleCandidates(
 				const textureWrapMode = resolveTextureWrapMode(
 					materialVariantSignature,
 				);
-				const compatibilityKey = createCompatibilityKey({
+				const partitionAxes = createPartitionAxes({
+					domain: payload.domain,
 					gfxKey,
-					plan,
+					landblockId: payload.landblock.landblockId,
 					materialColorKey,
+					objectKey,
+					partIndex: part.partIndex,
+					plan,
 					sourceKey,
-					textureWrapMode,
 					textureRoleLayoutKey,
+					textureWrapMode,
 				});
+				const compatibilityKey = createPartitionCompatibilityKey(partitionAxes);
 
 				candidates.push({
 					compatibilityKey,
@@ -209,6 +257,7 @@ function createTriangleCandidates(
 					materialVariantSignature,
 					object: object.identity,
 					objectKey,
+					partitionAxes,
 					partIndex: part.partIndex,
 					polygonId: triangle.polygonId,
 					source: object.source,
@@ -365,6 +414,7 @@ function createCompatibilityPartition(options: {
 		materialEmissiveColor: first.materialPlan.emissiveColor,
 		materialIds,
 		pass: first.materialPlan.pass,
+		partitionAxes: first.partitionAxes,
 		reason:
 			materialIds.length > STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE
 				? "material table overflow partition"
@@ -394,15 +444,41 @@ function createCompatibilityPartition(options: {
 	};
 }
 
-function createCompatibilityKey(options: {
+function createPartitionAxes(options: {
+	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
 	readonly plan: StaticObjectMaterialPlan;
+	readonly landblockId: number;
 	readonly sourceKey: string;
 	readonly gfxKey: string;
+	readonly objectKey: string;
+	readonly partIndex: number;
 	readonly materialColorKey: string;
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly textureRoleLayoutKey: string;
-}): string {
-	return [
+}): StaticObjectCompatibilityPartitionAxes {
+	const material = createMaterialCompatibilityAxis(options);
+	const sort = createSortAxis(options.plan);
+	const ownership = createOwnershipAxis({
+		...options,
+		includeObjectPart: sort.policy === "transparent-object-part-sortable",
+	});
+	const visibility = createVisibilityAxis();
+
+	return {
+		material,
+		ownership,
+		sort,
+		visibility,
+	};
+}
+
+function createMaterialCompatibilityAxis(options: {
+	readonly plan: StaticObjectMaterialPlan;
+	readonly materialColorKey: string;
+	readonly textureWrapMode: StaticObjectTextureWrapMode;
+	readonly textureRoleLayoutKey: string;
+}): StaticObjectMaterialCompatibilityAxis {
+	const key = [
 		`family:${options.plan.family}`,
 		`coverage:${options.plan.renderCoverage}`,
 		`pass:${options.plan.pass}`,
@@ -411,8 +487,96 @@ function createCompatibilityKey(options: {
 		`color:${options.materialColorKey}`,
 		`wrap:${options.textureWrapMode}`,
 		`roles:${options.textureRoleLayoutKey}`,
+	].join("|");
+
+	return {
+		alphaMode: options.plan.alphaPolicy.mode,
+		blendMode: options.plan.blend.mode,
+		family: options.plan.family,
+		key,
+		materialColorKey: options.materialColorKey,
+		pass: options.plan.pass,
+		renderCoverage: options.plan.renderCoverage,
+		textureRoleLayoutKey: options.textureRoleLayoutKey,
+		textureWrapMode: options.textureWrapMode,
+	};
+}
+
+function createOwnershipAxis(options: {
+	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
+	readonly landblockId: number;
+	readonly sourceKey: string;
+	readonly gfxKey: string;
+	readonly objectKey: string;
+	readonly partIndex: number;
+	readonly includeObjectPart: boolean;
+}): StaticObjectOwnershipAxis {
+	const objectPartKey = options.includeObjectPart
+		? `${options.objectKey}:part:${options.partIndex}`
+		: null;
+	const keyParts = [
+		`domain:${options.domain}`,
+		`landblock:${formatHex32(options.landblockId)}`,
 		`source:${options.sourceKey}`,
 		`gfx:${options.gfxKey}`,
+	];
+	if (objectPartKey) {
+		keyParts.push(`object-part:${objectPartKey}`);
+	}
+
+	return {
+		domain: options.domain,
+		gfxKey: options.gfxKey,
+		key: keyParts.join("|"),
+		landblockId: options.landblockId,
+		objectPartKey,
+		sourceKey: options.sourceKey,
+	};
+}
+
+function createSortAxis(plan: StaticObjectMaterialPlan): StaticObjectSortAxis {
+	const policy =
+		plan.pass === "transparent" || plan.pass === "additive"
+			? "transparent-object-part-sortable"
+			: plan.pass === "alpha-test"
+				? "alpha-test-batchable"
+				: "opaque-batchable";
+
+	return {
+		key: `sort:${policy}`,
+		policy,
+	};
+}
+
+function createVisibilityAxis(): StaticObjectVisibilityAxis {
+	return {
+		key: "visibility:landblock-static-neutral",
+		policy: "landblock-static-neutral",
+	};
+}
+
+function createPartitionCompatibilityKey(
+	axes: StaticObjectCompatibilityPartitionAxes,
+): string {
+	const compatibilityKeyParts = [
+		axes.material.key,
+		axes.sort.key,
+		axes.visibility.key,
+		`source:${axes.ownership.sourceKey}`,
+		`gfx:${axes.ownership.gfxKey}`,
+	];
+
+	if (axes.sort.policy === "transparent-object-part-sortable") {
+		if (!axes.ownership.objectPartKey) {
+			throw new Error(
+				"Transparent static object compatibility requires an object/part ownership key.",
+			);
+		}
+		compatibilityKeyParts.push(`object-part:${axes.ownership.objectPartKey}`);
+	}
+
+	return [
+		...compatibilityKeyParts,
 	].join("|");
 }
 

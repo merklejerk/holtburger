@@ -115,8 +115,8 @@ function bakeStaticObjectCompatibilityItem(
 			if (!drawUnitId) {
 				return [];
 			}
-			return partition.sourceTriangleIds.map(
-				(sourceTriangleId) => `${drawUnitId}:source:${sourceTriangleId}`,
+			return partition.triangles.map((triangle) =>
+				createStaticObjectSourceMapping(drawUnitId, triangle),
 			);
 		}),
 		spatialRecords: partitionPlan.partitions.map((partition) => {
@@ -129,6 +129,23 @@ function bakeStaticObjectCompatibilityItem(
 			work: item.work,
 		}),
 	};
+}
+
+function createStaticObjectSourceMapping(
+	drawUnitId: string,
+	triangle: StaticObjectCompatibilityTriangle,
+): string {
+	return [
+		drawUnitId,
+		`source:${createSourceKey(triangle.source)}`,
+		`gfx:${createSourceKey(triangle.gfxObj)}`,
+		`object:${createObjectKey(triangle.object)}`,
+		`part:${triangle.partIndex}`,
+		`polygon:${triangle.polygonId}`,
+		`first-vertex:${triangle.firstVertex}`,
+		`geometry-surface:${triangle.geometrySurfaceId}`,
+		`variant:${triangle.materialVariantSignature ?? "base"}`,
+	].join(":");
 }
 
 function createPartitionDrawUnit(

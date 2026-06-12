@@ -141,7 +141,7 @@ describe("V2 static object compatibility partitioner", () => {
 			}),
 		]);
 		expect(result.staticSourceMappings).toEqual([
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:da55ffff:building:building-0:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
 		]);
 		expect(result.staticSpatialRecords).toEqual([
 			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:bounds:1t",
@@ -319,6 +319,134 @@ describe("V2 static object compatibility partitioner", () => {
 			"da55ffff:building:building-0:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
 			"da55ffff:building:building-1:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
 		]);
+	});
+
+	it("compacts compatible opaque geometry from different source and gfx identities", () => {
+		const payload = duplicateObjectWithDistinctSourceGfx(
+			createPayload({
+				materials: [createTexturedMaterial(0x08000010)],
+				textureRefs: createRgbaTextureRefs(),
+			}),
+		);
+
+		const plan = partitionStaticObjectCompatibility(payload);
+
+		expect(plan.partitions).toHaveLength(1);
+		expect(plan.partitions[0]).toMatchObject({
+			partitionAxes: {
+				ownership: {
+					gfxKeys: [
+						"static-object-source:gfx-obj:01000020",
+						"static-object-source:gfx-obj:01000021",
+					],
+					objectPartKey: null,
+					sourceKeys: [
+						"static-object-source:setup-model:02000010",
+						"static-object-source:setup-model:02000011",
+					],
+				},
+				sort: {
+					policy: "opaque-batchable",
+				},
+			},
+			triangleCount: 2,
+		});
+		expect(
+			plan.partitions[0]?.triangles.map((triangle) => ({
+				gfxObj: triangle.gfxObj,
+				object: triangle.object,
+				source: triangle.source,
+			})),
+		).toEqual([
+			{
+				gfxObj: createGfxObjIdentity(),
+				object: createObjectIdentity(),
+				source: createSourceIdentity(),
+			},
+			{
+				gfxObj: createGfxObjIdentity({ sourceDid: 0x01000021 }),
+				object: createObjectIdentity({ instanceId: "building-1" }),
+				source: createSourceIdentity({ sourceDid: 0x02000011 }),
+			},
+		]);
+	});
+
+	it("keeps source and gfx provenance in source mappings after cross-source compaction", () => {
+		const payload = duplicateObjectWithDistinctSourceGfx(
+			createPayload({
+				materials: [createTexturedMaterial(0x08000010)],
+				textureRefs: createRgbaTextureRefs(),
+			}),
+		);
+
+		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+
+		expect(result.drawUnits).toHaveLength(1);
+		expect(result.staticSourceMappings).toEqual([
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000011:gfx:static-object-source:gfx-obj:01000021:object:da55ffff:building:building-1:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
+		]);
+	});
+
+	it("compacts compatible alpha-test geometry from different source and gfx identities", () => {
+		const payload = duplicateObjectWithDistinctSourceGfx(
+			createPayload({
+				materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x4 })],
+				textureRefs: createRgbaTextureRefs(),
+			}),
+		);
+
+		const plan = partitionStaticObjectCompatibility(payload);
+
+		expect(plan.partitions).toHaveLength(1);
+		expect(plan.partitions[0]).toMatchObject({
+			pass: "alpha-test",
+			partitionAxes: {
+				ownership: {
+					objectPartKey: null,
+					sourceKeys: [
+						"static-object-source:setup-model:02000010",
+						"static-object-source:setup-model:02000011",
+					],
+				},
+				sort: {
+					policy: "alpha-test-batchable",
+				},
+			},
+			triangleCount: 2,
+		});
+	});
+
+	it("keeps different concrete texture data uses split under the single-binding renderer contract", () => {
+		const payload = createPayload({
+			materials: [
+				createTexturedMaterial(0x08000010),
+				createTexturedMaterial(0x08000011, {
+					renderSurfaceId: 0x06000011,
+					surfaceTextureId: 0x05000011,
+				}),
+			],
+			textureRefs: [
+				...createRgbaTextureRefs(),
+				...createRgbaTextureRefs({
+					renderSurfaceId: 0x06000011,
+					surfaceTextureId: 0x05000011,
+				}),
+			],
+		});
+
+		const plan = partitionStaticObjectCompatibility(payload);
+
+		expect(plan.partitions).toHaveLength(2);
+		expect(
+			plan.partitions.map((partition) =>
+				partition.textureDataUses.map((dataUse) =>
+					dataUse.kind === "prepared-render-surface-texture-use"
+						? dataUse.renderSurface.renderSurfaceId
+						: null,
+				),
+			),
+		).toEqual([[0x06000010], [0x06000011]]);
 	});
 
 	it("uses object part ownership as a hard partition axis for transparent static policy", () => {
@@ -617,8 +745,8 @@ describe("V2 static object compatibility partitioner", () => {
 			[2, 1, 1],
 		]);
 		expect(result.staticSourceMappings).toEqual([
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:da55ffff:building:building-0:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-1-0:source:da55ffff:building:building-0:part:0:polygon:0:first-vertex:3:geometry-surface:1:variant:sampler=repeat",
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-1-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:0:first-vertex:3:geometry-surface:1:variant:sampler=repeat",
 		]);
 	});
 
@@ -679,8 +807,8 @@ describe("V2 static object compatibility partitioner", () => {
 			2, 1, 1, 0, 1, 1, 1, 0, 1,
 		]);
 		expect(result.staticSourceMappings).toEqual([
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:da55ffff:building:building-0:part:0:polygon:7:first-vertex:0:geometry-surface:0:variant:base",
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:da55ffff:building:building-0:part:0:polygon:7:first-vertex:3:geometry-surface:0:variant:base",
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:7:first-vertex:0:geometry-surface:0:variant:base",
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:7:first-vertex:3:geometry-surface:0:variant:base",
 		]);
 	});
 });
@@ -715,6 +843,63 @@ function duplicateObjectInstance(
 			})),
 		],
 		objects: [...payload.objects, duplicateObject],
+	};
+}
+
+function duplicateObjectWithDistinctSourceGfx(
+	payload: OutdoorStaticObjectsScopePayload,
+): OutdoorStaticObjectsScopePayload {
+	const object = payload.objects[0];
+	const sourceAsset = payload.sourceAssets[0];
+	const part = sourceAsset?.parts[0];
+	if (!object || !sourceAsset || !part) {
+		throw new Error("Fixture payload did not create an object source part.");
+	}
+
+	const source = createSourceIdentity({ sourceDid: 0x02000011 });
+	const gfxObj = createGfxObjIdentity({ sourceDid: 0x01000021 });
+	const duplicateObject = {
+		...object,
+		debug: { sourceAssetId: "setup-model/02000011" },
+		identity: createObjectIdentity({ instanceId: "building-1" }),
+		source,
+		sourceIndex: object.sourceIndex + 1,
+	};
+
+	return {
+		...payload,
+		materialSlots: [
+			...payload.materialSlots,
+			...payload.materialSlots.map((slot) => ({
+				...slot,
+				gfxObj,
+				identity: {
+					...slot.identity,
+					part: {
+						...slot.identity.part,
+						object: duplicateObject.identity,
+					},
+				},
+				object: duplicateObject.identity,
+				source,
+			})),
+		],
+		objects: [...payload.objects, duplicateObject],
+		sourceAssets: [
+			...payload.sourceAssets,
+			{
+				...sourceAsset,
+				debug: { sourceAssetId: "setup-model/02000011" },
+				identity: source,
+				parts: [
+					{
+						...part,
+						gfxObj,
+						source,
+					},
+				],
+			},
+		],
 	};
 }
 
@@ -909,9 +1094,14 @@ function createTexturedMaterial(
 	options: {
 		readonly diffuse?: number;
 		readonly luminosity?: number;
+		readonly renderSurfaceId?: number;
 		readonly surfaceType?: number;
+		readonly surfaceTextureId?: number;
 	} = {},
 ): StaticObjectMaterialSourceFacts {
+	const renderSurfaceId = options.renderSurfaceId ?? 0x06000010;
+	const surfaceTextureId = options.surfaceTextureId ?? 0x05000010;
+
 	return {
 		diffuse: options.diffuse ?? 1,
 		identity: createMaterialIdentity(materialId),
@@ -922,11 +1112,11 @@ function createTexturedMaterial(
 			renderSurfaceDefaultPalettes: [],
 			selectedRenderSurface: {
 				kind: "render-surface",
-				renderSurfaceId: 0x06000010,
+				renderSurfaceId,
 			},
 			texture: {
 				kind: "surface-texture",
-				surfaceTextureId: 0x05000010,
+				surfaceTextureId,
 			},
 		},
 		surfaceId: materialId,
@@ -962,18 +1152,26 @@ function createIndexedMaterial(materialId: number): StaticObjectMaterialSourceFa
 	};
 }
 
-function createRgbaTextureRefs(): readonly StaticObjectTextureRefFacts[] {
+function createRgbaTextureRefs(
+	options: {
+		readonly renderSurfaceId?: number;
+		readonly surfaceTextureId?: number;
+	} = {},
+): readonly StaticObjectTextureRefFacts[] {
+	const renderSurfaceId = options.renderSurfaceId ?? 0x06000010;
+	const surfaceTextureId = options.surfaceTextureId ?? 0x05000010;
+
 	return [
 		{
 			palette: null,
 			renderSurface: {
 				kind: "render-surface",
-				renderSurfaceId: 0x06000010,
+				renderSurfaceId,
 			},
 			role: "surface-texture",
 			texture: {
 				kind: "surface-texture",
-				surfaceTextureId: 0x05000010,
+				surfaceTextureId,
 			},
 		},
 		{
@@ -984,7 +1182,7 @@ function createRgbaTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 			palette: null,
 			renderSurface: {
 				kind: "render-surface",
-				renderSurfaceId: 0x06000010,
+				renderSurfaceId,
 			},
 			role: "render-surface",
 			width: 32,
@@ -1106,19 +1304,23 @@ function createObjectIdentity(
 	};
 }
 
-function createSourceIdentity() {
+function createSourceIdentity(
+	options: { readonly sourceDid?: number } = {},
+) {
 	return {
 		kind: "static-object-source" as const,
 		sourceAssetKind: "setup-model" as const,
-		sourceDid: 0x02000010,
+		sourceDid: options.sourceDid ?? 0x02000010,
 	};
 }
 
-function createGfxObjIdentity() {
+function createGfxObjIdentity(
+	options: { readonly sourceDid?: number } = {},
+) {
 	return {
 		kind: "static-object-source" as const,
 		sourceAssetKind: "gfx-obj" as const,
-		sourceDid: 0x01000020,
+		sourceDid: options.sourceDid ?? 0x01000020,
 	};
 }
 

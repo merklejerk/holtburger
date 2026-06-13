@@ -74,6 +74,38 @@ describe("V2 static scene query", () => {
 		expect(query.createSnapshot().outdoorRecordCount).toBe(0);
 	});
 
+	it("can ignore targets whose bounds contain the pick ray origin", () => {
+		const query = new StaticSceneQuery();
+		query.ingestOutdoorStaticObjects(
+			createOutdoorStaticObjectsPayload({ includeContainingObject: true }),
+		);
+
+		const containingHit = query.pickRay({
+			context: { kind: "outdoor" },
+			ray: {
+				direction: { x: 0, y: 0, z: -1 },
+				origin: { x: 0, y: 0, z: 0 },
+			},
+		});
+		const filteredHit = query.pickRay({
+			context: { kind: "outdoor" },
+			filters: { ignoreContainingOrigin: true },
+			ray: {
+				direction: { x: 0, y: 0, z: -1 },
+				origin: { x: 0, y: 0, z: 0 },
+			},
+		});
+
+		expect(containingHit).toMatchObject({
+			distance: 0,
+			instanceId: "outdoor-containing-0",
+		});
+		expect(filteredHit).toMatchObject({
+			distance: 4,
+			instanceId: "outdoor-static-0",
+		});
+	});
+
 	it("does not flatten outdoor and env-cell scene contexts", () => {
 		const query = new StaticSceneQuery();
 		query.ingestOutdoorStaticObjects(createOutdoorStaticObjectsPayload());
@@ -178,11 +210,37 @@ describe("V2 static scene query", () => {
 });
 
 function createOutdoorStaticObjectsPayload(options: {
+	readonly includeContainingObject?: boolean;
 	readonly includeBvh?: boolean;
 	readonly landblockId?: number;
 } = {}): OutdoorStaticObjectsScopePayload {
 	const landblockId = options.landblockId ?? 0xda55ffff;
 	const includeBvh = options.includeBvh ?? true;
+	const object = createOutdoorStaticObject({
+		instanceBounds: {
+			max: { x: 1, y: 1, z: -4 },
+			min: { x: -1, y: -1, z: -5 },
+		},
+		instanceId: "outdoor-static-0",
+		landblockId,
+		sourceDid: 0x02000010,
+		sourceIndex: 0,
+	});
+	const objects = options.includeContainingObject
+		? [
+				createOutdoorStaticObject({
+					instanceBounds: {
+						max: { x: 2, y: 2, z: 2 },
+						min: { x: -2, y: -2, z: -2 },
+					},
+					instanceId: "outdoor-containing-0",
+					landblockId,
+					sourceDid: 0x02000011,
+					sourceIndex: 1,
+				}),
+				object,
+			]
+		: [object];
 	return {
 		domain: "outdoor-detail",
 		kind: "outdoor-static-objects",
@@ -194,35 +252,7 @@ function createOutdoorStaticObjectsPayload(options: {
 		materialSlots: [],
 		materialSources: [],
 		missingRefs: [],
-		objects: [
-			{
-				debug: { sourceAssetId: "setup-model/02000010" },
-				generated: null,
-				identity: {
-					instanceId: "outdoor-static-0",
-					kind: "static-object-instance",
-					landblockId,
-					objectKind: "explicit-object",
-				},
-				instanceBounds: {
-					max: { x: 1, y: 1, z: -4 },
-					min: { x: -1, y: -1, z: -5 },
-				},
-				localPlacement: createPlacement(),
-				portalCount: 0,
-				source: {
-					kind: "static-object-source",
-					sourceAssetKind: "setup-model",
-					sourceDid: 0x02000010,
-				},
-				sourceBounds: {
-					max: { x: 1, y: 1, z: 1 },
-					min: { x: -1, y: -1, z: -1 },
-				},
-				sourceIndex: 0,
-				sourceScale: { x: 1, y: 1, z: 1 },
-			},
-		],
+		objects,
 		paletteSources: [],
 		regionRenderProfile: {
 			detailRoles: [],
@@ -238,47 +268,39 @@ function createOutdoorStaticObjectsPayload(options: {
 			outdoorBvh: includeBvh
 				? {
 						coordinateSpace: "landblock-render-local",
-						items: [
-							{
-								bvhItemIndex: 0,
-								instanceId: "outdoor-static-0",
-								kind: "static",
-								object: {
-									debug: { sourceAssetId: "setup-model/02000010" },
-									generated: null,
-									identity: {
-										instanceId: "outdoor-static-0",
-										kind: "static-object-instance",
-										landblockId,
-										objectKind: "explicit-object",
-									},
-									instanceBounds: {
-										max: { x: 1, y: 1, z: -4 },
-										min: { x: -1, y: -1, z: -5 },
-									},
-									localPlacement: createPlacement(),
-									portalCount: 0,
-									source: {
-										kind: "static-object-source",
-										sourceAssetKind: "setup-model",
-										sourceDid: 0x02000010,
-									},
-									sourceBounds: {
-										max: { x: 1, y: 1, z: 1 },
-										min: { x: -1, y: -1, z: -1 },
-									},
-									sourceIndex: 0,
-									sourceScale: { x: 1, y: 1, z: 1 },
-								},
-							},
-						],
+						items: objects.map((object, bvhItemIndex) => ({
+							bvhItemIndex,
+							instanceId: object.identity.instanceId,
+							kind: "static",
+							object,
+						})),
 						nodes: [
 							{
 								bounds: {
-									max: { x: 1, y: 1, z: -4 },
-									min: { x: -1, y: -1, z: -5 },
+									max: {
+										x: Math.max(
+											...objects.map((entry) => entry.instanceBounds?.max.x ?? 0),
+										),
+										y: Math.max(
+											...objects.map((entry) => entry.instanceBounds?.max.y ?? 0),
+										),
+										z: Math.max(
+											...objects.map((entry) => entry.instanceBounds?.max.z ?? 0),
+										),
+									},
+									min: {
+										x: Math.min(
+											...objects.map((entry) => entry.instanceBounds?.min.x ?? 0),
+										),
+										y: Math.min(
+											...objects.map((entry) => entry.instanceBounds?.min.y ?? 0),
+										),
+										z: Math.min(
+											...objects.map((entry) => entry.instanceBounds?.min.z ?? 0),
+										),
+									},
 								},
-								itemIndices: [0],
+								itemIndices: objects.map((_object, index) => index),
 								kindMask: {
 									building: false,
 									domain: "outdoor-static",
@@ -290,10 +312,46 @@ function createOutdoorStaticObjectsPayload(options: {
 						],
 					}
 				: null,
-			outdoorBvhItemCount: includeBvh ? 1 : 0,
+			outdoorBvhItemCount: includeBvh ? objects.length : 0,
 			outdoorBvhNodeCount: includeBvh ? 1 : 0,
 		},
 		textureRefs: [],
+	};
+}
+
+function createOutdoorStaticObject(input: {
+	readonly instanceBounds: NonNullable<
+		OutdoorStaticObjectsScopePayload["objects"][number]["instanceBounds"]
+	>;
+	readonly instanceId: string;
+	readonly landblockId: number;
+	readonly sourceDid: number;
+	readonly sourceIndex: number;
+}): OutdoorStaticObjectsScopePayload["objects"][number] {
+	const sourceAssetId = `setup-model/${input.sourceDid.toString(16).padStart(8, "0")}`;
+	return {
+		debug: { sourceAssetId },
+		generated: null,
+		identity: {
+			instanceId: input.instanceId,
+			kind: "static-object-instance",
+			landblockId: input.landblockId,
+			objectKind: "explicit-object",
+		},
+		instanceBounds: input.instanceBounds,
+		localPlacement: createPlacement(),
+		portalCount: 0,
+		source: {
+			kind: "static-object-source",
+			sourceAssetKind: "setup-model",
+			sourceDid: input.sourceDid,
+		},
+		sourceBounds: {
+			max: { x: 1, y: 1, z: 1 },
+			min: { x: -1, y: -1, z: -1 },
+		},
+		sourceIndex: input.sourceIndex,
+		sourceScale: { x: 1, y: 1, z: 1 },
 	};
 }
 

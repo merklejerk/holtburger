@@ -34,6 +34,7 @@ export interface StaticScenePickRequest {
 interface StaticScenePickFilters {
 	readonly itemKinds?: readonly StaticScenePickHit["itemKind"][];
 	readonly domains?: readonly StaticScenePickHit["domain"][];
+	readonly ignoreContainingOrigin?: boolean;
 }
 
 export type StaticScenePickHit =
@@ -442,7 +443,7 @@ export class StaticSceneQuery {
 						sourceAssetId: item.object.debug.sourceAssetId,
 						sourceIndex: item.object.sourceIndex,
 					};
-					if (matchesFilters(hit, request.filters)) {
+					if (matchesFilters(hit, request.filters, ray.origin)) {
 						hits.push(hit);
 					}
 				}
@@ -519,7 +520,7 @@ export class StaticSceneQuery {
 					hitPoint: pointOnRay(ray, distance),
 					queryPath: "source-bvh",
 				};
-				if (matchesFilters(hit, request.filters)) {
+				if (matchesFilters(hit, request.filters, ray.origin)) {
 					hits.push(hit);
 				}
 			}
@@ -619,10 +620,12 @@ function traverseBvhPoint(
 function matchesFilters(
 	hit: StaticScenePickHit,
 	filters: StaticScenePickFilters | undefined,
+	rayOrigin: StaticSceneVec3,
 ): boolean {
 	return (
 		(!filters?.itemKinds || filters.itemKinds.includes(hit.itemKind)) &&
-		(!filters?.domains || filters.domains.includes(hit.domain))
+		(!filters?.domains || filters.domains.includes(hit.domain)) &&
+		(!filters?.ignoreContainingOrigin || !containsPoint(hit.bounds, rayOrigin))
 	);
 }
 

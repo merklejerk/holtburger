@@ -9,6 +9,7 @@ const V2_RENDERER_VERTICAL_FOV_RADIANS = Math.PI / 3;
 export interface BrowserStaticPickRayInput {
 	readonly camera: FrameState["camera"];
 	readonly context: StaticScenePickContext;
+	readonly filters?: StaticScenePickRequest["filters"];
 	readonly clientX: number;
 	readonly clientY: number;
 	readonly viewport: DOMRectLike;
@@ -43,6 +44,7 @@ export function createBrowserStaticPickRay(
 
 	return {
 		context: input.context,
+		filters: input.filters,
 		ray: {
 			direction,
 			origin: {

@@ -2273,7 +2273,7 @@ Deliverables:
   - detail-overlay roles;
   - unsupported material flags.
 - A ranked next-slice recommendation based on observed frequency, visual impact, renderer risk, and whether source/resolver facts are already present.
-- Updated 11E1-11E5 notes if the audit changes the safest implementation order.
+- Updated 11E follow-up notes if the audit changes the safest implementation order.
 
 Acceptance criteria:
 
@@ -2306,7 +2306,7 @@ Implementation notes:
 
 Next-slice recommendation:
 
-- Keep Phase 11E1 first. Solid color and color modulation are still the lowest-risk expansion because they require no new texture upload format, no palette shader, and no translucent pass ordering. The new `materialCoverage.unrenderedBuckets` diagnostics should be checked against live landblocks before implementing later 11E material slices; if indexed/paletted dominates real triangle counts by a wide margin, use the Phase 11E5 resteer to reconsider order after 11E1.
+- Keep Phase 11E1 first. Solid color and color modulation are still the lowest-risk expansion because they require no new texture upload format, no palette shader, and no translucent pass ordering. The new `materialCoverage.unrenderedBuckets` diagnostics should be checked against live landblocks before implementing later material slices; if indexed/paletted dominates real triangle counts by a wide margin, use Phase 12B reassessment to reconsider ordering before dungeon/dynamic breadth.
 
 Failed to close:
 
@@ -3504,7 +3504,7 @@ Phase 11E4E verification:
 
 ### Phase 12A0: Landblock Env-Cell Bundle Host Route
 
-Status: completed on 2026-06-13. Pulled forward as the next immediate phase before 11E5 because the explicit-object cutout/black-background investigation needs object-level picking evidence, and V2 should not copy v1's topology-plus-N-env-cell request pattern.
+Status: completed on 2026-06-13. Pulled forward as the next immediate phase before Phase 12 breadth because the explicit-object cutout/black-background investigation needs object-level picking evidence, and V2 should not copy v1's topology-plus-N-env-cell request pattern.
 
 Purpose: add a host-backed, landblock-owned env-cell source bundle route so V2 can load and understand outdoor-linked interiors and pure dungeon interiors through one isomorphic source boundary.
 
@@ -3710,7 +3710,7 @@ Acceptance criteria:
 
 ### Phase 12A2: Env-Cell-Aware Static Scene Query And Browser Picker Diagnostics
 
-Status: completed as an ownership/API slice on 2026-06-13, but immediately course-corrected by Phase 12A3 before 11E5. The first implementation proved runtime ownership, source-only env-cell ingestion, and browser-owned picker presentation, but it did not satisfy the intended BVH-backed spatial-index requirement.
+Status: completed as an ownership/API slice on 2026-06-13, but immediately course-corrected by Phase 12A3 before Phase 12 breadth. The first implementation proved runtime ownership, source-only env-cell ingestion, and browser-owned picker presentation, but it did not satisfy the intended BVH-backed spatial-index requirement.
 
 Purpose: add the runtime-owned static scene query service that can ingest committed outdoor static records plus resolved `landblock-env-cells` source facts, answer context-aware static `pickRay` requests for outdoor and env-cell scenes, and feed browser-owned object-level picker diagnostics without putting semantic picking policy into the renderer.
 
@@ -3787,7 +3787,7 @@ Acceptance criteria:
 
 ### Phase 12A3: BVH-Backed Static Scene Query Course Correct
 
-Status: completed on 2026-06-13. Immediate corrective phase after 12A2 and before 11E5.
+Status: completed on 2026-06-13. Immediate corrective phase after 12A2 and before Phase 12 breadth.
 
 Purpose: replace the temporary linear AABB query backing with a runtime-owned static scene query that preserves and traverses host/prepared BVHs, keeps object-grained hit identity, and handles request-anchor/root-transform behavior without rebuilding static BVHs in the frontend.
 
@@ -3829,7 +3829,7 @@ Acceptance criteria:
 - Hits remain object-grained and include stable object/source/material diagnostic hooks sufficient for the black-background/cutout investigation.
 - The WebGL renderer remains uninvolved in semantic picking and does not gain AC object/source/BVH ownership.
 - `landblock-env-cells` remains source/query-only until env-cell geometry baking in Phase 13A; the BVH course correction must not reintroduce placeholder bake or empty atlas batches.
-- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and focused static-scene query/runtime tests pass before returning to 11E5.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and focused static-scene query/runtime tests pass before returning to Phase 12 breadth.
 
 Implementation notes:
 
@@ -3849,7 +3849,7 @@ Verification:
 
 ### Phase 12A4: Landblock Env-Cell Host Bundle Resteer
 
-Status: complete on 2026-06-13. Phase 12A5 remains the next implementation phase before returning to 11E5.
+Status: complete on 2026-06-13. Phase 12A5 remains the next implementation phase before returning to Phase 12 breadth.
 
 Purpose: decouple the V2 `landblock-env-cells` host asset contract from V1 topology/standalone-env-cell route shapes before adding smarter env-cell BVHs and query behavior. The host can still reuse low-level DAT decode and preparation helpers, but the public V2 bundle should stop exposing topology-route artifacts.
 
@@ -3960,7 +3960,7 @@ Phase 12A4 verification:
 
 ### Phase 12A5: Landblock-Wide Env-Cell BVH And Residency Query Course Correct
 
-Status: complete on 2026-06-13. Phase 11E5 is the next planned phase.
+Status: complete on 2026-06-13. Phase 12 is the next planned phase.
 
 Purpose: upgrade the normalized `landblock-env-cells` source bundle from flat env-cell spatial records into a true landblock-wide env-cell BVH plus per-cell local BVHs, then make runtime env-cell queries use that landblock BVH as the broad phase for initial residency, ray picking, and future visibility/frustum traversal.
 
@@ -4005,7 +4005,7 @@ Acceptance criteria:
 - Initial env-cell residency can be established from the landblock-wide env-cell BVH without relying on portal traversal or renderer draw state.
 - Portal walking remains a semantic visibility step layered on top of residency/broad-phase candidates; it is not conflated with Euclidean BVH inclusion.
 - No renderer draw-unit, frontend-computed bounds, or flat seed/root fallback path is introduced.
-- `cargo check`, Tauri host tests for the route/schema, `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and focused static-scene query/env-cell resolver tests pass before returning to 11E5.
+- `cargo check`, Tauri host tests for the route/schema, `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and focused static-scene query/env-cell resolver tests pass before returning to Phase 12 breadth.
 
 Phase 12A5 execution notes:
 
@@ -4041,24 +4041,6 @@ Phase 12A5 verification:
 - `cd apps/holtburger-3d && npm run lint:ts`
 - `cd apps/holtburger-3d && npm run lint:dead`
 - `cd apps/holtburger-3d && npm run test:ts`
-
-### Phase 11E5: Static Material Family Resteer
-
-Status: planned. Deferred behind the Phase 12A0-12A5 sequence on 2026-06-13 so browser/game-client picking can identify suspect explicit-object cutout materials before the remaining material-family resteer.
-
-Purpose: reassess static material parity after explicit-object coverage and target-scoped blended material work, before broadening static-object source coverage in Phase 12.
-
-Deliverables:
-
-- Updated inventory of rendered, render-deferred, and unsupported static object material families after 11E1-11E4E, including explicit outdoor objects.
-- Explicit list of remaining unsupported material flags/source cases, with examples and planned destination phase.
-- Decision on whether Phase 12 can safely broaden source coverage to explicit-object `outdoor-detail` / `env-cell-static`, or whether another focused material slice is required first.
-- Plan updates for Phase 12 if material-table constraints, pass sorting, palette views, detail roles, or diagnostics changed the expected compaction work.
-
-Acceptance criteria:
-
-- Remaining material gaps are typed and scheduled, not hidden behind fallback rendering.
-- Phase 12 starts only after current outdoor-building material support is credible enough that breadth work will not multiply unknown renderer failures.
 
 ### Phase 12: Static Object Breadth And Compaction
 

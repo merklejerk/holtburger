@@ -19,7 +19,6 @@ describe("V2 static coordinator", () => {
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
 			resolver,
 		});
-
 		const [firstWork] = coordinator.requestStaticDemand(
 			createSingleTerrainDemand(0xda55ffff),
 		);
@@ -225,6 +224,8 @@ describe("V2 static coordinator", () => {
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
 			resolver,
 		});
+		const sourcePayloads: StaticCoordinatorSourcePayloadDelta[] = [];
+		coordinator.subscribeSourcePayloads((delta) => sourcePayloads.push(delta));
 
 		const work = coordinator.requestStaticDemand({
 			location: {
@@ -364,6 +365,7 @@ describe("V2 static coordinator", () => {
 				sourceSpatial: {
 					bounds: null,
 					coordinateSpace: "landblock-render-local",
+					outdoorBvh: null,
 					outdoorBvhItemCount: 1,
 					outdoorBvhNodeCount: 0,
 				},
@@ -384,6 +386,21 @@ describe("V2 static coordinator", () => {
 		baker.complete(buildingWork?.workId ?? "");
 		await flushPromises();
 
+		expect(sourcePayloads).toMatchObject([
+			{
+				payload: {
+					scope: {
+						kind: "outdoor-static-objects",
+						landblock: {
+							landblockId: 0xda55ffff,
+						},
+					},
+				},
+				work: {
+					workId: "1:landblock:da55ffff:outdoor-buildings",
+				},
+			},
+		]);
 		expect(coordinator.createSnapshot()).toMatchObject({
 			latestOutdoorStaticObjectsPayload: {
 				domain: "outdoor-buildings",

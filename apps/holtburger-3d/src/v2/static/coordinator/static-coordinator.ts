@@ -232,17 +232,19 @@ export class StaticCoordinator {
 		}
 
 		this.#recordResolvedPayload(payload);
+		this.#emitSourcePayloadDelta({
+			payload,
+			revision: work.revision,
+			work,
+		});
 		if (isSourceOnlyPayload(payload)) {
-			this.#commitSourcePayload(work, payload);
+			this.#commitSourcePayload(work);
 			return;
 		}
 		this.#enqueueBakePayload(work, payload);
 	}
 
-	#commitSourcePayload(
-		work: ScheduledStaticWork,
-		payload: StaticScopePayload,
-	): void {
+	#commitSourcePayload(work: ScheduledStaticWork): void {
 		const status = this.#activeWork.get(work.workId);
 		if (!status) {
 			return;
@@ -250,11 +252,6 @@ export class StaticCoordinator {
 
 		status.status = "source-committed";
 		this.#committed += 1;
-		this.#emitSourcePayloadDelta({
-			payload,
-			revision: work.revision,
-			work,
-		});
 		this.#emit();
 	}
 

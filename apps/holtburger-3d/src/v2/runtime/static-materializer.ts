@@ -1,8 +1,4 @@
 import {
-	OUTDOOR_LANDBLOCK_WORLD_SIZE,
-	getOutdoorLandblockCoords,
-} from "../../lib/landblocks";
-import {
 	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
 	MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW,
 	MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW,
@@ -20,6 +16,7 @@ import type {
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectMaterialTableEntry,
 } from "../static/contracts";
+import { createOutdoorLandblockRootTranslation } from "./static-placement";
 
 export interface StaticMaterializationInput {
 	readonly commit: StaticCoordinatorCommitDelta;
@@ -779,20 +776,8 @@ function createStaticDrawUnitTranslation(
 		return [0, 0, 0];
 	}
 
-	const drawUnitCoords = getOutdoorLandblockCoords(drawUnit.landblockId);
-	const focusCoords = getOutdoorLandblockCoords(focusLandblockId);
-
-	return [
-		normalizeZero(
-			(drawUnitCoords.x - focusCoords.x) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-		),
-		0,
-		normalizeZero(
-			-(drawUnitCoords.y - focusCoords.y) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-		),
-	];
-}
-
-function normalizeZero(value: number): number {
-	return Object.is(value, -0) ? 0 : value;
+	return createOutdoorLandblockRootTranslation(
+		drawUnit.landblockId,
+		focusLandblockId,
+	);
 }

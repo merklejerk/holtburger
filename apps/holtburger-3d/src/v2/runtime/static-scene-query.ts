@@ -1,10 +1,13 @@
-import type { StaticResidencyDelta } from "../renderer/types";
 import type {
 	LandblockEnvCellsStaticScopePayload,
+	OutdoorStaticObjectsScopePayload,
 	StaticBounds,
-	StaticObjectGeometryStaticDrawUnit,
+	StaticObjectInstanceFacts,
+	StaticPlacementTransform,
 	StaticScopePayload,
+	StaticVec3,
 } from "../static/contracts";
+import { createOutdoorLandblockRootTranslation } from "./static-placement";
 
 export interface StaticSceneRay {
 	readonly origin: StaticSceneVec3;
@@ -34,26 +37,26 @@ interface StaticScenePickFilters {
 }
 
 export type StaticScenePickHit =
-	| OutdoorStaticScenePickHit
+	| OutdoorStaticObjectScenePickHit
 	| EnvCellStaticScenePickHit;
 
-export interface OutdoorStaticScenePickHit {
+export interface OutdoorStaticObjectScenePickHit {
 	readonly kind: "static-scene-pick-hit";
-	readonly itemKind: "outdoor-static-draw-unit";
+	readonly itemKind: "outdoor-static-object";
 	readonly context: Extract<StaticScenePickContext, { readonly kind: "outdoor" }>;
-	readonly domain: StaticObjectGeometryStaticDrawUnit["domain"];
+	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
 	readonly distance: number;
 	readonly hitPoint: StaticSceneVec3;
 	readonly bounds: StaticBounds;
-	readonly drawUnitId: string;
 	readonly landblockId: number;
-	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
-	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
-	readonly materialIds: readonly number[];
-	readonly alphaTest: number;
-	readonly renderState: StaticObjectGeometryStaticDrawUnit["renderState"];
-	readonly textureUseIds: readonly string[];
-	readonly sourceMappingRecords: readonly string[];
+	readonly instanceId: string;
+	readonly objectKind: StaticObjectInstanceFacts["identity"]["objectKind"];
+	readonly source: StaticObjectInstanceFacts["source"];
+	readonly sourceIndex: number;
+	readonly sourceAssetId: string;
+	readonly bvhItemIndex: number;
+	readonly bvhItemKind: "static" | "building";
+	readonly queryPath: "source-bvh";
 }
 
 export interface EnvCellStaticScenePickHit {
@@ -74,6 +77,8 @@ export interface EnvCellStaticScenePickHit {
 	};
 	readonly sourceIndex: number;
 	readonly debugSourceAssetId: string;
+	readonly bvhItemIndex: number | null;
+	readonly queryPath: "source-bvh";
 }
 
 export interface StaticSceneQuerySnapshot {
@@ -82,70 +87,126 @@ export interface StaticSceneQuerySnapshot {
 	readonly envCellLandblockCount: number;
 }
 
+export interface StaticSceneQuerySourcePayloadOptions {
+	readonly outdoorAnchorLandblockId?: number | null;
+}
+
 interface StaticSceneVec3 {
 	readonly x: number;
 	readonly y: number;
 	readonly z: number;
 }
 
-interface OutdoorStaticQueryRecord {
-	readonly bounds: StaticBounds;
-	readonly context: Extract<StaticScenePickContext, { readonly kind: "outdoor" }>;
-	readonly drawUnit: StaticObjectGeometryStaticDrawUnit;
+type BvhNode = NonNullable<
+	OutdoorStaticObjectsScopePayload["sourceSpatial"]["outdoorBvh"]
+>["nodes"][number];
+
+interface OutdoorStaticBvhRoot {
+	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
+	readonly landblockId: number;
+	readonly translation: readonly [number, number, number];
+	readonly nodes: readonly BvhNode[];
+	readonly items: readonly (OutdoorStaticBvhRuntimeItem | null)[];
 }
 
-interface EnvCellStaticQueryRecord {
+interface OutdoorStaticBvhRuntimeItem {
+	readonly bvhItemIndex: number;
+	readonly kind: "static" | "building";
+	readonly object: StaticObjectInstanceFacts;
+}
+
+interface EnvCellBvhRoot {
+	readonly acceptedEnvCellIds: readonly number[];
+	readonly envCellId: number;
+	readonly landblockId: number;
+	readonly placement: StaticPlacementTransform;
+	readonly nodes: readonly BvhNode[];
+	readonly items: readonly (EnvCellBvhRuntimeItem | null)[];
+}
+
+type EnvCellBvhRuntimeItem =
+	| {
+			readonly kind: "static";
+			readonly bvhItemIndex: number;
+			readonly seed: EnvCellStaticSeedRuntimeRecord;
+	  }
+	| {
+			readonly kind: "portal" | "render-geometry";
+			readonly bvhItemIndex: number;
+			readonly sourceItem: unknown;
+	  };
+
+interface EnvCellStaticSeedRuntimeRecord {
 	readonly bounds: StaticBounds;
 	readonly envCellId: number;
 	readonly hit: Omit<EnvCellStaticScenePickHit, "distance" | "hitPoint">;
 }
 
 export class StaticSceneQuery {
-	readonly #outdoorRecordsByDrawUnitId = new Map<
+	readonly #outdoorBvhRootsByDomainAndLandblock = new Map<
 		string,
-		OutdoorStaticQueryRecord
+		OutdoorStaticBvhRoot
 	>();
-	readonly #envCellRecordsByLandblockId = new Map<
+	readonly #envCellRootsByLandblockId = new Map<
 		number,
-		readonly EnvCellStaticQueryRecord[]
+		readonly EnvCellBvhRoot[]
 	>();
 
-	ingestStaticResidencyDelta(delta: StaticResidencyDelta): void {
-		for (const drawUnitId of delta.removedDrawUnitIds) {
-			this.#outdoorRecordsByDrawUnitId.delete(drawUnitId);
-		}
-
-		for (const placement of delta.addedDrawUnitPlacements) {
-			const drawUnit = placement.drawUnit;
-			if (drawUnit.kind !== "static-object-geometry") {
-				continue;
-			}
-
-			const localBounds =
-				drawUnit.sort.bounds ?? computePositionBounds(drawUnit.positions);
-			if (!localBounds) {
-				continue;
-			}
-
-			this.#outdoorRecordsByDrawUnitId.set(drawUnit.drawUnitId, {
-				bounds: translateBounds(localBounds, placement.translation),
-				context: { kind: "outdoor" },
-				drawUnit,
-			});
-		}
-	}
-
-	ingestSourcePayload(payload: StaticScopePayload): void {
-		if (payload.scope.kind !== "landblock-env-cells") {
+	ingestSourcePayload(
+		payload: StaticScopePayload,
+		options: StaticSceneQuerySourcePayloadOptions = {},
+	): void {
+		if (payload.scope.kind === "outdoor-static-objects") {
+			this.ingestOutdoorStaticObjects(
+				payload.scope,
+				options.outdoorAnchorLandblockId ?? null,
+			);
 			return;
 		}
 
-		this.ingestLandblockEnvCells(payload.scope);
+		if (payload.scope.kind === "landblock-env-cells") {
+			this.ingestLandblockEnvCells(payload.scope);
+		}
+	}
+
+	ingestOutdoorStaticObjects(
+		payload: OutdoorStaticObjectsScopePayload,
+		outdoorAnchorLandblockId: number | null = null,
+	): void {
+		const rootKey = createOutdoorRootKey(
+			payload.domain,
+			payload.landblock.landblockId,
+		);
+		const bvh = payload.sourceSpatial.outdoorBvh;
+		if (!bvh || bvh.nodes.length === 0) {
+			this.#outdoorBvhRootsByDomainAndLandblock.delete(rootKey);
+			return;
+		}
+
+		const items = bvh.items.map((item): OutdoorStaticBvhRuntimeItem | null =>
+			item.object
+				? {
+						bvhItemIndex: item.bvhItemIndex,
+						kind: item.kind,
+						object: item.object,
+					}
+				: null,
+		);
+		this.#outdoorBvhRootsByDomainAndLandblock.set(rootKey, {
+			domain: payload.domain,
+			items,
+			landblockId: payload.landblock.landblockId,
+			nodes: bvh.nodes,
+			translation: createOutdoorLandblockRootTranslation(
+				payload.landblock.landblockId,
+				outdoorAnchorLandblockId,
+			),
+		});
 	}
 
 	ingestLandblockEnvCells(payload: LandblockEnvCellsStaticScopePayload): void {
 		const acceptedEnvCellIds = new Set(payload.acceptedEnvCellIds);
-		const records: EnvCellStaticQueryRecord[] = [];
+		const roots: EnvCellBvhRoot[] = [];
 
 		for (const envCell of payload.envCells) {
 			const envCellId = envCell.identity.envCellId;
@@ -156,41 +217,78 @@ export class StaticSceneQuery {
 				continue;
 			}
 
-			for (const seed of envCell.staticObjectSeeds) {
-				if (!seed.instanceBounds) {
-					continue;
+			const seedsByInstanceId = new Map(
+				envCell.staticObjectSeeds.flatMap((seed): [
+					string,
+					EnvCellStaticSeedRuntimeRecord,
+				][] => {
+					if (!seed.instanceBounds) {
+						return [];
+					}
+					return [
+						[
+							seed.identity.instanceId,
+							{
+								bounds: seed.instanceBounds,
+								envCellId,
+								hit: {
+									bounds: transformBounds(seed.instanceBounds, envCell.localPlacement),
+									bvhItemIndex: null,
+									context: {
+										acceptedEnvCellIds: payload.acceptedEnvCellIds,
+										envCellId,
+										kind: "env-cell",
+										landblockId: payload.landblock.landblockId,
+									},
+									debugSourceAssetId: seed.debug.sourceAssetId,
+									domain: "landblock-env-cells",
+									envCellId,
+									instanceId: seed.identity.instanceId,
+									itemKind: "env-cell-static-object",
+									kind: "static-scene-pick-hit",
+									landblockId: payload.landblock.landblockId,
+									objectKind: seed.identity.objectKind,
+									queryPath: "source-bvh",
+									source: seed.source,
+									sourceIndex: seed.sourceIndex,
+								},
+							},
+						],
+					];
+				}),
+			);
+
+			const bvh = envCell.localSpatial.localBvh;
+			const items = bvh.items.map((item, bvhItemIndex): EnvCellBvhRuntimeItem | null => {
+				if (item.kind === "static") {
+					const seed = seedsByInstanceId.get(item.instanceId);
+					if (seed) {
+						return {
+							bvhItemIndex,
+							kind: "static",
+							seed,
+						};
+					}
+					return null;
 				}
 
-				records.push({
-					bounds: seed.instanceBounds,
-					envCellId,
-					hit: {
-						bounds: seed.instanceBounds,
-						context: {
-							acceptedEnvCellIds: payload.acceptedEnvCellIds,
-							envCellId,
-							kind: "env-cell",
-							landblockId: payload.landblock.landblockId,
-						},
-						debugSourceAssetId: seed.debug.sourceAssetId,
-						domain: "landblock-env-cells",
-						envCellId,
-						instanceId: seed.identity.instanceId,
-						itemKind: "env-cell-static-object",
-						kind: "static-scene-pick-hit",
-						landblockId: payload.landblock.landblockId,
-						objectKind: seed.identity.objectKind,
-						source: seed.source,
-						sourceIndex: seed.sourceIndex,
-					},
-				});
-			}
+				return {
+					bvhItemIndex,
+					kind: item.kind,
+					sourceItem: item,
+				};
+			});
+			roots.push({
+				acceptedEnvCellIds: payload.acceptedEnvCellIds,
+				envCellId,
+				items,
+				landblockId: payload.landblock.landblockId,
+				nodes: bvh.nodes,
+				placement: envCell.localPlacement,
+			});
 		}
 
-		this.#envCellRecordsByLandblockId.set(
-			payload.landblock.landblockId,
-			records,
-		);
+		this.#envCellRootsByLandblockId.set(payload.landblock.landblockId, roots);
 	}
 
 	pickRay(request: StaticScenePickRequest): StaticScenePickHit | null {
@@ -205,53 +303,77 @@ export class StaticSceneQuery {
 
 	createSnapshot(): StaticSceneQuerySnapshot {
 		let envCellRecordCount = 0;
-		for (const records of this.#envCellRecordsByLandblockId.values()) {
-			envCellRecordCount += records.length;
+		for (const roots of this.#envCellRootsByLandblockId.values()) {
+			envCellRecordCount += roots.reduce(
+				(count, root) =>
+					count +
+					root.items.filter((item) => item?.kind === "static").length,
+				0,
+			);
 		}
 
+		const outdoorBvhRecordCount = [...this.#outdoorBvhRootsByDomainAndLandblock.values()].reduce(
+			(count, root) => count + root.items.filter(Boolean).length,
+			0,
+		);
+
 		return {
-			envCellLandblockCount: this.#envCellRecordsByLandblockId.size,
+			envCellLandblockCount: this.#envCellRootsByLandblockId.size,
 			envCellRecordCount,
-			outdoorRecordCount: this.#outdoorRecordsByDrawUnitId.size,
+			outdoorRecordCount: outdoorBvhRecordCount,
 		};
 	}
 
 	clear(): void {
-		this.#outdoorRecordsByDrawUnitId.clear();
-		this.#envCellRecordsByLandblockId.clear();
+		this.#outdoorBvhRootsByDomainAndLandblock.clear();
+		this.#envCellRootsByLandblockId.clear();
 	}
 
 	#pickOutdoor(
 		ray: StaticSceneRay,
 		request: StaticScenePickRequest,
-	): OutdoorStaticScenePickHit[] {
-		const hits: OutdoorStaticScenePickHit[] = [];
-		for (const record of this.#outdoorRecordsByDrawUnitId.values()) {
-			const distance = intersectRayBounds(ray, record.bounds);
-			if (distance === null) {
-				continue;
-			}
+	): OutdoorStaticObjectScenePickHit[] {
+		const hits: OutdoorStaticObjectScenePickHit[] = [];
 
-			const hit: OutdoorStaticScenePickHit = {
-				alphaTest: record.drawUnit.alphaTest,
-				bounds: record.bounds,
-				context: record.context,
-				distance,
-				domain: record.drawUnit.domain,
-				drawUnitId: record.drawUnit.drawUnitId,
-				hitPoint: pointOnRay(ray, distance),
-				itemKind: "outdoor-static-draw-unit",
-				kind: "static-scene-pick-hit",
-				landblockId: record.drawUnit.landblockId,
-				materialFamily: record.drawUnit.materialFamily,
-				materialIds: record.drawUnit.materialIds,
-				materialPass: record.drawUnit.materialPass,
-				renderState: record.drawUnit.renderState,
-				sourceMappingRecords: record.drawUnit.sourceMappingRecords,
-				textureUseIds: record.drawUnit.textureUseIds,
-			};
-			if (matchesFilters(hit, request.filters)) {
-				hits.push(hit);
+		for (const root of this.#outdoorBvhRootsByDomainAndLandblock.values()) {
+			const localRay = translateRay(ray, negateTranslation(root.translation));
+			for (const candidate of traverseBvh(root.nodes, localRay)) {
+				for (const itemIndex of candidate.itemIndices) {
+					const item = root.items[itemIndex];
+					if (!item?.object.instanceBounds) {
+						continue;
+					}
+
+					const distance = intersectRayBounds(
+						localRay,
+						item.object.instanceBounds,
+					);
+					if (distance === null) {
+						continue;
+					}
+
+					const hit: OutdoorStaticObjectScenePickHit = {
+						bounds: translateBounds(item.object.instanceBounds, root.translation),
+						bvhItemIndex: item.bvhItemIndex,
+						bvhItemKind: item.kind,
+						context: { kind: "outdoor" },
+						distance,
+						domain: root.domain,
+						hitPoint: pointOnRay(ray, distance),
+						instanceId: item.object.identity.instanceId,
+						itemKind: "outdoor-static-object",
+						kind: "static-scene-pick-hit",
+						landblockId: root.landblockId,
+						objectKind: item.object.identity.objectKind,
+						queryPath: "source-bvh",
+						source: item.object.source,
+						sourceAssetId: item.object.debug.sourceAssetId,
+						sourceIndex: item.object.sourceIndex,
+					};
+					if (matchesFilters(hit, request.filters)) {
+						hits.push(hit);
+					}
+				}
 			}
 		}
 
@@ -266,35 +388,96 @@ export class StaticSceneQuery {
 			return [];
 		}
 
-		const records =
-			this.#envCellRecordsByLandblockId.get(request.context.landblockId) ?? [];
+		const roots =
+			this.#envCellRootsByLandblockId.get(request.context.landblockId) ?? [];
 		const acceptedEnvCellIds = new Set(
 			request.context.acceptedEnvCellIds ?? [request.context.envCellId],
 		);
 		const hits: EnvCellStaticScenePickHit[] = [];
 
-		for (const record of records) {
-			if (!acceptedEnvCellIds.has(record.envCellId)) {
+		for (const root of roots) {
+			if (!acceptedEnvCellIds.has(root.envCellId)) {
 				continue;
 			}
 
-			const distance = intersectRayBounds(ray, record.bounds);
-			if (distance === null) {
-				continue;
-			}
+			const localRay = transformRayToLocal(ray, root.placement);
+			for (const candidate of traverseBvh(root.nodes, localRay)) {
+				for (const itemIndex of candidate.itemIndices) {
+					const item = root.items[itemIndex];
+					if (item?.kind !== "static") {
+						continue;
+					}
 
-			const hit: EnvCellStaticScenePickHit = {
-				...record.hit,
-				distance,
-				hitPoint: pointOnRay(ray, distance),
-			};
-			if (matchesFilters(hit, request.filters)) {
-				hits.push(hit);
+					const distance = intersectRayBounds(localRay, item.seed.bounds);
+					if (distance === null) {
+						continue;
+					}
+
+					const hit: EnvCellStaticScenePickHit = {
+						...item.seed.hit,
+						bvhItemIndex: item.bvhItemIndex,
+						distance,
+						hitPoint: pointOnRay(ray, distance),
+						queryPath: "source-bvh",
+					};
+					if (matchesFilters(hit, request.filters)) {
+						hits.push(hit);
+					}
+				}
 			}
 		}
 
 		return hits;
 	}
+}
+
+interface BvhCandidate {
+	readonly distance: number;
+	readonly itemIndices: readonly number[];
+	readonly nodeIndex: number;
+}
+
+function traverseBvh(
+	nodes: readonly BvhNode[],
+	ray: StaticSceneRay,
+): readonly BvhCandidate[] {
+	if (nodes.length === 0) {
+		return [];
+	}
+
+	const candidates: BvhCandidate[] = [];
+	const stack = [0];
+	while (stack.length > 0) {
+		const nodeIndex = stack.pop() ?? 0;
+		const node = nodes[nodeIndex];
+		if (!node) {
+			continue;
+		}
+
+		const distance = intersectRayBounds(ray, node.bounds);
+		if (distance === null) {
+			continue;
+		}
+
+		if (node.itemIndices.length > 0) {
+			candidates.push({
+				distance,
+				itemIndices: node.itemIndices,
+				nodeIndex,
+			});
+		}
+		if (node.right !== null) {
+			stack.push(node.right);
+		}
+		if (node.left !== null) {
+			stack.push(node.left);
+		}
+	}
+
+	return candidates.sort(
+		(left, right) =>
+			left.distance - right.distance || left.nodeIndex - right.nodeIndex,
+	);
 }
 
 function matchesFilters(
@@ -319,9 +502,18 @@ function comparePickHits(
 }
 
 function describeHitStableId(hit: StaticScenePickHit): string {
-	return hit.itemKind === "outdoor-static-draw-unit"
-		? hit.drawUnitId
-		: `${hit.landblockId}:${hit.envCellId}:${hit.instanceId}`;
+	if (hit.itemKind === "outdoor-static-object") {
+		return `${hit.landblockId}:${hit.domain}:${hit.instanceId}`;
+	}
+
+	return `${hit.landblockId}:${hit.envCellId}:${hit.instanceId}`;
+}
+
+function createOutdoorRootKey(
+	domain: OutdoorStaticObjectsScopePayload["domain"],
+	landblockId: number,
+): string {
+	return `${domain}:${landblockId.toString(16)}`;
 }
 
 function normalizeRay(ray: StaticSceneRay): StaticSceneRay {
@@ -377,6 +569,71 @@ function pointOnRay(ray: StaticSceneRay, distance: number): StaticSceneVec3 {
 	};
 }
 
+function translateRay(
+	ray: StaticSceneRay,
+	translation: readonly [number, number, number],
+): StaticSceneRay {
+	return {
+		direction: ray.direction,
+		origin: {
+			x: ray.origin.x + translation[0],
+			y: ray.origin.y + translation[1],
+			z: ray.origin.z + translation[2],
+		},
+	};
+}
+
+function negateTranslation(
+	translation: readonly [number, number, number],
+): readonly [number, number, number] {
+	return [-translation[0], -translation[1], -translation[2]];
+}
+
+function transformRayToLocal(
+	ray: StaticSceneRay,
+	placement: StaticPlacementTransform,
+): StaticSceneRay {
+	const translatedOrigin = {
+		x: ray.origin.x - placement.origin.x,
+		y: ray.origin.y - placement.origin.y,
+		z: ray.origin.z - placement.origin.z,
+	};
+	return {
+		direction: rotateVec3ByInverseQuaternion(
+			ray.direction,
+			placement.orientation,
+		),
+		origin: rotateVec3ByInverseQuaternion(
+			translatedOrigin,
+			placement.orientation,
+		),
+	};
+}
+
+function transformBounds(
+	bounds: StaticBounds,
+	placement: StaticPlacementTransform,
+): StaticBounds {
+	const corners: StaticSceneVec3[] = [];
+	for (const x of [bounds.min.x, bounds.max.x]) {
+		for (const y of [bounds.min.y, bounds.max.y]) {
+			for (const z of [bounds.min.z, bounds.max.z]) {
+				const rotated = rotateVec3ByQuaternion(
+					{ x, y, z },
+					placement.orientation,
+				);
+				corners.push({
+					x: rotated.x + placement.origin.x,
+					y: rotated.y + placement.origin.y,
+					z: rotated.z + placement.origin.z,
+				});
+			}
+		}
+	}
+
+	return boundsFromPoints(corners);
+}
+
 function translateBounds(
 	bounds: StaticBounds,
 	translation: readonly [number, number, number],
@@ -395,11 +652,7 @@ function translateBounds(
 	};
 }
 
-function computePositionBounds(positions: Float32Array): StaticBounds | null {
-	if (positions.length < 3) {
-		return null;
-	}
-
+function boundsFromPoints(points: readonly StaticSceneVec3[]): StaticBounds {
 	let minX = Number.POSITIVE_INFINITY;
 	let minY = Number.POSITIVE_INFINITY;
 	let minZ = Number.POSITIVE_INFINITY;
@@ -407,22 +660,51 @@ function computePositionBounds(positions: Float32Array): StaticBounds | null {
 	let maxY = Number.NEGATIVE_INFINITY;
 	let maxZ = Number.NEGATIVE_INFINITY;
 
-	for (let index = 0; index < positions.length; index += 3) {
-		const x = positions[index] ?? 0;
-		const y = positions[index + 1] ?? 0;
-		const z = positions[index + 2] ?? 0;
-		minX = Math.min(minX, x);
-		minY = Math.min(minY, y);
-		minZ = Math.min(minZ, z);
-		maxX = Math.max(maxX, x);
-		maxY = Math.max(maxY, y);
-		maxZ = Math.max(maxZ, z);
+	for (const point of points) {
+		minX = Math.min(minX, point.x);
+		minY = Math.min(minY, point.y);
+		minZ = Math.min(minZ, point.z);
+		maxX = Math.max(maxX, point.x);
+		maxY = Math.max(maxY, point.y);
+		maxZ = Math.max(maxZ, point.z);
 	}
 
 	return {
 		max: { x: maxX, y: maxY, z: maxZ },
 		min: { x: minX, y: minY, z: minZ },
 	};
+}
+
+function rotateVec3ByQuaternion(
+	vector: StaticVec3,
+	quaternion: StaticPlacementTransform["orientation"],
+): StaticSceneVec3 {
+	const qx = quaternion.x;
+	const qy = quaternion.y;
+	const qz = quaternion.z;
+	const qw = quaternion.w;
+	const ix = qw * vector.x + qy * vector.z - qz * vector.y;
+	const iy = qw * vector.y + qz * vector.x - qx * vector.z;
+	const iz = qw * vector.z + qx * vector.y - qy * vector.x;
+	const iw = -qx * vector.x - qy * vector.y - qz * vector.z;
+
+	return {
+		x: ix * qw + iw * -qx + iy * -qz - iz * -qy,
+		y: iy * qw + iw * -qy + iz * -qx - ix * -qz,
+		z: iz * qw + iw * -qz + ix * -qy - iy * -qx,
+	};
+}
+
+function rotateVec3ByInverseQuaternion(
+	vector: StaticVec3,
+	quaternion: StaticPlacementTransform["orientation"],
+): StaticSceneVec3 {
+	return rotateVec3ByQuaternion(vector, {
+		w: quaternion.w,
+		x: -quaternion.x,
+		y: -quaternion.y,
+		z: -quaternion.z,
+	});
 }
 
 function normalizeVec3(vector: StaticSceneVec3): StaticSceneVec3 {

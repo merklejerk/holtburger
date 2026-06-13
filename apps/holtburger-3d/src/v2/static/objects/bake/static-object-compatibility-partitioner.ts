@@ -66,7 +66,7 @@ interface StaticObjectCoarseTablePlan {
 interface StaticObjectCoarseMaterialEntry {
 	readonly materialEntryKey: string;
 	readonly materialUseKey: string;
-	readonly materialId: number;
+	readonly materialIds: readonly number[];
 	readonly materialColor: StaticObjectMaterialPlan["color"];
 	readonly materialEmissiveColor: StaticObjectMaterialPlan["emissiveColor"];
 	readonly alphaMode: StaticObjectMaterialPlan["alphaPolicy"]["mode"];
@@ -127,6 +127,7 @@ export interface StaticObjectCompatibilityTriangle {
 	readonly object: StaticObjectInstanceIdentity;
 	readonly source: StaticObjectSourceIdentity;
 	readonly gfxObj: StaticObjectSourceIdentity;
+	readonly materialEntryKey: string;
 	readonly partIndex: number;
 	readonly polygonId: number;
 	readonly firstVertex: number;
@@ -403,7 +404,7 @@ function createCompatibilitySlices(
 
 	for (const candidate of candidates) {
 		if (
-			!currentMaterialKeys.has(candidate.materialKey) &&
+			!currentMaterialKeys.has(candidate.materialEntryKey) &&
 			currentMaterialKeys.size >= STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE
 		) {
 			slices.push(currentSlice);
@@ -412,7 +413,7 @@ function createCompatibilitySlices(
 		}
 
 		currentSlice.push(candidate);
-		currentMaterialKeys.add(candidate.materialKey);
+		currentMaterialKeys.add(candidate.materialEntryKey);
 	}
 
 	if (currentSlice.length > 0) {
@@ -490,6 +491,7 @@ function createCompatibilityPartition(options: {
 			geometrySurfaceId: candidate.geometrySurfaceId,
 			gfxObj: candidate.gfxObj,
 			material: candidate.material,
+			materialEntryKey: candidate.materialEntryKey,
 			materialVariantSignature: candidate.materialVariantSignature,
 			object: candidate.object,
 			partIndex: candidate.partIndex,
@@ -510,10 +512,15 @@ function createCoarseTablePlan(options: {
 	readonly sourceTriangleIds: readonly string[];
 	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
 }): StaticObjectCoarseTablePlan {
-	const entriesByKey = new Map<string, StaticObjectCoarseMaterialEntry>();
+	const entriesByKey = new Map<
+		string,
+		StaticObjectCoarseMaterialEntry & { readonly materialIdSet: Set<number> }
+	>();
 
 	for (const candidate of options.candidates) {
-		if (entriesByKey.has(candidate.materialEntryKey)) {
+		const existing = entriesByKey.get(candidate.materialEntryKey);
+		if (existing) {
+			existing.materialIdSet.add(candidate.materialId);
 			continue;
 		}
 
@@ -524,7 +531,8 @@ function createCoarseTablePlan(options: {
 			materialColor: candidate.materialPlan.color,
 			materialEmissiveColor: candidate.materialPlan.emissiveColor,
 			materialEntryKey: candidate.materialEntryKey,
-			materialId: candidate.materialId,
+			materialIds: [candidate.materialId],
+			materialIdSet: new Set([candidate.materialId]),
 			materialUseKey: candidate.materialKey,
 			textureDataUses: uniqueTextureDataUses(
 				candidate.materialPlan.textureRoles.map((role) => role.dataUse),
@@ -537,7 +545,13 @@ function createCoarseTablePlan(options: {
 	return {
 		entries: [...entriesByKey.entries()]
 			.sort(([left], [right]) => left.localeCompare(right))
-			.map(([, entry]) => entry),
+			.map(([, entry]) => {
+				const { materialIdSet, ...coarseEntry } = entry;
+				return {
+					...coarseEntry,
+					materialIds: uniqueSorted([...materialIdSet]),
+				};
+			}),
 		pass: options.partitionAxes.material.pass,
 		renderCoverage: options.partitionAxes.material.renderCoverage,
 		sortPolicy: options.partitionAxes.sort.policy,
@@ -581,8 +595,12 @@ function createPartitionAxes(options: {
 	readonly textureRoleSchemaKey: string;
 	readonly textureRoleLayoutKey: string;
 }): StaticObjectCompatibilityPartitionAxes {
-	const material = createMaterialCompatibilityAxis(options);
 	const sort = createSortAxis(options.plan);
+	const material = createMaterialCompatibilityAxis({
+		...options,
+		includeConcreteEntryInKey:
+			sort.policy === "transparent-object-part-sortable",
+	});
 	const ownership = createOwnershipAxis({
 		...options,
 		includeObjectPart: sort.policy === "transparent-object-part-sortable",
@@ -601,6 +619,7 @@ function createMaterialCompatibilityAxis(options: {
 	readonly plan: StaticObjectMaterialPlan;
 	readonly materialEntryKey: string;
 	readonly materialColorKey: string;
+	readonly includeConcreteEntryInKey: boolean;
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly textureRoleSchemaKey: string;
 	readonly textureRoleLayoutKey: string;
@@ -611,7 +630,9 @@ function createMaterialCompatibilityAxis(options: {
 		`pass:${options.plan.pass}`,
 		`alpha:${options.plan.alphaPolicy.mode}`,
 		`blend:${options.plan.blend.mode}`,
-		`entry:${options.materialEntryKey}`,
+		options.includeConcreteEntryInKey
+			? `entry:${options.materialEntryKey}`
+			: `schema:${options.textureRoleSchemaKey}`,
 	].join("|");
 
 	return {

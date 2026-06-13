@@ -18,7 +18,10 @@ describe("V2 static object compatibility partitioner", () => {
 		const materialCount = STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE + 1;
 		const payload = createPayload({
 			materials: Array.from({ length: materialCount }, (_, index) =>
-				createSolidMaterial(0x08000010 + index),
+				createSolidMaterial(0x08000010 + index, {
+					diffuse: (index + 1) / materialCount,
+					surfaceType: 0x20,
+				}),
 			),
 		});
 
@@ -118,7 +121,7 @@ describe("V2 static object compatibility partitioner", () => {
 				materialPass: "opaque",
 				materialSlotIndices: new Float32Array([0, 0, 0]),
 				primaryTextureUseId:
-					"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:wrap:clamp",
+					"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color",
 			}),
 		]);
 		const drawUnit = result.drawUnits[0];
@@ -138,7 +141,7 @@ describe("V2 static object compatibility partitioner", () => {
 				paletteFirstIndex: 0,
 				paletteTextureUseId: null,
 				primaryTextureUseId:
-					"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:wrap:clamp",
+					"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color",
 				primaryTextureWrapMode: "clamp",
 				slot: 0,
 			},
@@ -196,11 +199,11 @@ describe("V2 static object compatibility partitioner", () => {
 		expect(drawUnit).toMatchObject({
 			detailTextureTiling: 7,
 			detailTextureUseId:
-				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:wrap:repeat",
+				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail",
 			kind: "static-object-geometry",
 			textureUseIds: [
-				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:wrap:clamp",
-				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:wrap:repeat",
+				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color",
+				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail",
 			],
 		});
 		expect(
@@ -211,13 +214,13 @@ describe("V2 static object compatibility partitioner", () => {
 			})),
 		).toEqual([
 			expect.objectContaining({
-				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:wrap:clamp",
+				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color",
 			}),
 			{
-				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:wrap:repeat",
+				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail",
 				samplingPolicy: {
-					wrapS: "repeat",
-					wrapT: "repeat",
+					wrapS: "clamp-to-edge",
+					wrapT: "clamp-to-edge",
 				},
 				source: {
 					kind: "prepared-render-surface-texture-use",
@@ -269,7 +272,7 @@ describe("V2 static object compatibility partitioner", () => {
 		expect(result.textureUses).toEqual([]);
 	});
 
-	it("splits static object partitions by material color constants", () => {
+	it("keeps material color constants as table entries inside compatible partitions", () => {
 		const payload = createPayload({
 			materials: [
 				createTexturedMaterial(0x08000010, {
@@ -286,8 +289,12 @@ describe("V2 static object compatibility partitioner", () => {
 
 		const plan = partitionStaticObjectCompatibility(payload);
 
-		expect(plan.partitions).toHaveLength(2);
-		expect(plan.partitions.map((partition) => partition.materialColor)).toEqual([
+		expect(plan.partitions).toHaveLength(1);
+		expect(
+			plan.partitions[0]?.coarseTablePlan.entries.map(
+				(entry) => entry.materialColor,
+			),
+		).toEqual([
 			[0.5, 0.5, 0.5, 1],
 			[0.75, 0.75, 0.75, 1],
 		]);
@@ -440,7 +447,7 @@ describe("V2 static object compatibility partitioner", () => {
 		});
 	});
 
-	it("keeps concrete texture uses as entry keys under a shared coarse table schema", () => {
+	it("compacts concrete texture uses as entries under a shared coarse table schema", () => {
 		const payload = createPayload({
 			materials: [
 				createTexturedMaterial(0x08000010),
@@ -460,30 +467,24 @@ describe("V2 static object compatibility partitioner", () => {
 
 		const plan = partitionStaticObjectCompatibility(payload);
 
-		expect(plan.partitions).toHaveLength(2);
+		expect(plan.partitions).toHaveLength(1);
 		expect(
 			plan.partitions.map(
 				(partition) => partition.partitionAxes.material.textureRoleSchemaKey,
 			),
-		).toEqual([
-			"base-color:prepared-render-surface-texture-use:rgba-color",
-			"base-color:prepared-render-surface-texture-use:rgba-color",
-		]);
+		).toEqual(["base-color:prepared-render-surface-texture-use:rgba-color"]);
 		expect(
 			plan.partitions.map((partition) => partition.textureRoleSchemaKey),
-		).toEqual([
-			"base-color:prepared-render-surface-texture-use:rgba-color",
-			"base-color:prepared-render-surface-texture-use:rgba-color",
-		]);
+		).toEqual(["base-color:prepared-render-surface-texture-use:rgba-color"]);
 		expect(
-			plan.partitions.map((partition) =>
+			plan.partitions.flatMap((partition) =>
 				partition.textureDataUses.map((dataUse) =>
 					dataUse.kind === "prepared-render-surface-texture-use"
 						? dataUse.renderSurface.renderSurfaceId
 						: null,
 				),
 			),
-		).toEqual([[0x06000010], [0x06000011]]);
+		).toEqual([0x06000010, 0x06000011]);
 		expect(
 			plan.partitions.map((partition) => ({
 				entryCount: partition.coarseTablePlan.entries.length,
@@ -492,21 +493,33 @@ describe("V2 static object compatibility partitioner", () => {
 			})),
 		).toEqual([
 			{
-				entryCount: 1,
+				entryCount: 2,
 				entryKeys: [
 					"color:1.000000,1.000000,1.000000,1.000000,0.000000,0.000000,0.000000|wrap:clamp|roles:base-color:prepared-render-surface-texture-use:06000010:rgba-color|alpha-test:0.000000|detail-tiling:1.000000",
-				],
-				tableSchemaKey:
-					"base-color:prepared-render-surface-texture-use:rgba-color",
-			},
-			{
-				entryCount: 1,
-				entryKeys: [
 					"color:1.000000,1.000000,1.000000,1.000000,0.000000,0.000000,0.000000|wrap:clamp|roles:base-color:prepared-render-surface-texture-use:06000011:rgba-color|alpha-test:0.000000|detail-tiling:1.000000",
 				],
 				tableSchemaKey:
 					"base-color:prepared-render-surface-texture-use:rgba-color",
 			},
+		]);
+
+		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+		const drawUnit = result.drawUnits[0];
+		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
+			throw new Error("Expected static object geometry draw unit.");
+		}
+		expect(result.drawUnits).toHaveLength(1);
+		expect(drawUnit.materialEntries.map((entry) => entry.primaryTextureUseId)).toEqual([
+			"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color",
+			"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color",
+		]);
+		expect(Array.from(drawUnit.materialSlotIndices)).toEqual([
+			0, 0, 0,
+			1, 1, 1,
+		]);
+		expect(drawUnit.textureUseIds).toEqual([
+			"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color",
+			"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color",
 		]);
 	});
 
@@ -680,10 +693,10 @@ describe("V2 static object compatibility partitioner", () => {
 
 		const plan = partitionStaticObjectCompatibility(payload);
 
-		expect(plan.partitions).toHaveLength(2);
+		expect(plan.partitions).toHaveLength(1);
 		expect(
-			plan.partitions.map((partition) => {
-				const paletteUse = partition.textureDataUses.find(
+			plan.partitions[0]?.coarseTablePlan.entries.map((entry) => {
+				const paletteUse = entry.textureDataUses.find(
 					(dataUse) => dataUse.kind === "palette-texture-use",
 				);
 				if (!paletteUse || paletteUse.kind !== "palette-texture-use") {
@@ -774,40 +787,41 @@ describe("V2 static object compatibility partitioner", () => {
 			(drawUnit) => drawUnit.kind === "static-object-geometry",
 		);
 
-		expect(drawUnits).toHaveLength(2);
-		expect(drawUnits.map((drawUnit) => drawUnit.primaryTextureWrapMode)).toEqual([
-			"clamp",
-			"repeat",
-		]);
+		expect(drawUnits).toHaveLength(1);
+		expect(
+			drawUnits[0]?.kind === "static-object-geometry"
+				? drawUnits[0].materialEntries.map(
+						(entry) => entry.primaryTextureWrapMode,
+					)
+				: [],
+		).toEqual(["clamp", "repeat"]);
 		expect(result.textureUses.map((textureUse) => ({
 			id: textureUse.textureUseId,
 			samplingPolicy: textureUse.samplingPolicy,
 			usage: textureUse.source.usage,
 		}))).toEqual([
 			{
-				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:wrap:clamp",
+				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color",
 				samplingPolicy: {
 					wrapS: "clamp-to-edge",
 					wrapT: "clamp-to-edge",
 				},
 				usage: "rgba-color",
 			},
-			{
-				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:wrap:repeat",
-				samplingPolicy: {
-					wrapS: "repeat",
-					wrapT: "repeat",
-				},
-				usage: "rgba-color",
-			},
 		]);
-		expect(drawUnits.map((drawUnit) => Array.from(drawUnit.positions.slice(0, 3)))).toEqual([
-			[1, 1, 1],
-			[2, 1, 1],
-		]);
+		expect(
+			drawUnits[0]?.kind === "static-object-geometry"
+				? Array.from(drawUnits[0].materialSlotIndices)
+				: [],
+		).toEqual([0, 0, 0, 1, 1, 1]);
+		expect(
+			drawUnits[0]?.kind === "static-object-geometry"
+				? Array.from(drawUnits[0].positions.slice(0, 18))
+				: [],
+		).toEqual([1, 1, 1, 0, 1, 1, 1, 0, 1, 2, 1, 1, 0, 1, 1, 1, 0, 1]);
 		expect(result.staticSourceMappings).toEqual([
 			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-1-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:0:first-vertex:3:geometry-surface:1:variant:sampler=repeat",
+			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:0:first-vertex:3:geometry-surface:1:variant:sampler=repeat",
 		]);
 	});
 

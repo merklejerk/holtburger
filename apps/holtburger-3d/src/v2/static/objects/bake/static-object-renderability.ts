@@ -33,7 +33,9 @@ export function isRenderableStaticObjectPartition(
 		partition.family === "flat-color" &&
 		(partition.pass === "opaque" || partition.pass === "alpha-test") &&
 		partition.renderCoverage === "classified-render-candidate" &&
-		partition.textureDataUses.length === 0
+		partition.coarseTablePlan.entries.every(
+			(entry) => entry.textureDataUses.length === 0,
+		)
 	) {
 		return true;
 	}
@@ -43,7 +45,9 @@ export function isRenderableStaticObjectPartition(
 			partition.family === "indexed-paletted") &&
 		(partition.pass === "opaque" || partition.pass === "alpha-test") &&
 		partition.renderCoverage === "classified-render-candidate" &&
-		isCurrentlyStageableStaticObjectDataUseLayout(partition.textureDataUses)
+		partition.coarseTablePlan.entries.every((entry) =>
+			isCurrentlyStageableStaticObjectDataUseLayout(entry.textureDataUses),
+		)
 	);
 }
 

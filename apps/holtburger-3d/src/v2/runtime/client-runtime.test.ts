@@ -19,6 +19,7 @@ import { StaticCoordinator } from "../static/coordinator/static-coordinator";
 import type {
 	PreparedRgbaRenderSurfaceTextureUseIdentity,
 	StaticBakeTextureUse,
+	StaticMaterialCoverageReport,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialFallbackReason,
 } from "../static/contracts";
@@ -435,6 +436,58 @@ describe("V2 client runtime", () => {
 		});
 		runtime.dispose();
 	});
+
+	it("warns when committed static coverage contains deferred blended materials", async () => {
+		const warnings: unknown[] = [];
+		const diagnostics: RuntimeDiagnostics = {
+			warn(event) {
+				warnings.push(event);
+			},
+		};
+		const renderer = new FakeRenderer();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const runtime = createClientRuntime({
+			diagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker,
+				resolver,
+			}),
+		});
+
+		runtime.requestStaticWork({
+			domains: ["terrain"],
+			landblockId: "0xda55ffff",
+			locationKind: "outdoor-landblock",
+		});
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
+		await flushPromises();
+		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
+			materialCoverage: [createDeferredBlendedMaterialCoverage()],
+		});
+		await flushPromises();
+
+		expect(warnings).toContainEqual({
+			buckets: [
+				{
+					family: "texture-rgba",
+					materialCount: 1,
+					outcome: "render-deferred",
+					partitionCount: 99,
+					pass: "transparent",
+					reasonCodes: ["translucent-render-deferred"],
+					triangleCount: 1584,
+				},
+			],
+			domain: "outdoor-detail",
+			kind: "static-material-coverage-deferred",
+			landblockId: 0xda55ffff,
+			revision: 1,
+		});
+		runtime.dispose();
+	});
 });
 
 class FakeRenderer implements Renderer {
@@ -637,6 +690,47 @@ function createBakeTextureUse(
 		textureUseId: `${drawUnitId}:prepared-texture:${source.renderSurface.renderSurfaceId
 			.toString(16)
 			.padStart(8, "0")}`,
+	};
+}
+
+function createDeferredBlendedMaterialCoverage(): StaticMaterialCoverageReport {
+	return {
+		buckets: [
+			{
+				family: "texture-rgba",
+				filteringMode: "none",
+				materialCount: 1,
+				outcome: "render-deferred",
+				partitionCount: 99,
+				pass: "transparent",
+				textureRoleCount: 1,
+				triangleCount: 1584,
+			},
+		],
+		deferredTriangleCount: 1584,
+		detailRoleCount: 0,
+		domain: "outdoor-detail",
+		fallbackReasonCount: 1,
+		fallbackReasonCounts: [
+			{ code: "translucent-render-deferred", count: 1 },
+		],
+		landblockId: 0xda55ffff,
+		materialCount: 1,
+		partitionCount: 99,
+		renderedTriangleCount: 0,
+		triangleCount: 1584,
+		unrenderedBuckets: [
+			{
+				family: "texture-rgba",
+				materialCount: 1,
+				outcome: "render-deferred",
+				partitionCount: 99,
+				pass: "transparent",
+				reasonCodes: ["translucent-render-deferred"],
+				triangleCount: 1584,
+			},
+		],
+		unsupportedTriangleCount: 0,
 	};
 }
 

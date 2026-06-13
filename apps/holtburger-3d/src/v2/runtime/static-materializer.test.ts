@@ -179,6 +179,7 @@ function createCommitDelta(options: {
 }): StaticCoordinatorCommitDelta {
 	return {
 		addedDrawUnits: options.addedDrawUnits,
+		materialCoverage: [],
 		removedDrawUnitIds: [],
 		revision: 7,
 		staticAuthoredDynamicSeeds: [],

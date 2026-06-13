@@ -334,7 +334,12 @@ export class StaticCoordinator {
 			addedDrawUnits: result.drawUnits,
 			removedDrawUnitIds: [],
 			revision: result.revision,
+			staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds,
 			staticBatchId: result.staticBatchId,
+			staticPortalInteriorRecords: result.staticPortalInteriorRecords,
+			staticSourceMappings: result.staticSourceMappings,
+			staticSpatialRecords: result.staticSpatialRecords,
+			staticVisibilityRecords: result.staticVisibilityRecords,
 			textureUses: result.textureUses,
 		});
 		this.#emit();
@@ -352,7 +357,12 @@ export class StaticCoordinator {
 			addedDrawUnits: [],
 			removedDrawUnitIds,
 			revision: this.#revision,
+			staticAuthoredDynamicSeeds: [],
 			staticBatchId: createEvictionStaticBatchId(this.#revision),
+			staticPortalInteriorRecords: [],
+			staticSourceMappings: [],
+			staticSpatialRecords: [],
+			staticVisibilityRecords: [],
 			textureUses: [],
 		});
 	}

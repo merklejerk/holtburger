@@ -74,6 +74,8 @@ interface StaticMaterializationSnapshot {
 	readonly pendingRevisions: readonly number[];
 	readonly committedRevisions: readonly number[];
 	readonly failed: readonly StaticMaterializationFailureSnapshot[];
+	readonly materializedDrawUnits: number;
+	readonly sourceDrawUnits: number;
 }
 
 interface StaticMaterializationFailureSnapshot {
@@ -270,8 +272,11 @@ class ClientRuntimeImpl implements ClientRuntime {
 				lastStaticRequest: snapshot.lastStaticRequest
 					? createStaticRequestSummary(snapshot.lastStaticRequest)
 					: null,
+				materializedStaticDrawUnits:
+					snapshot.staticMaterialization.materializedDrawUnits,
 				pendingStaticMaterializationRevisions:
 					snapshot.staticMaterialization.pendingRevisions,
+				sourceStaticDrawUnits: snapshot.staticMaterialization.sourceDrawUnits,
 				status: snapshot.status,
 				textureFilteringMode: snapshot.renderPolicy.textureFilteringMode,
 			},
@@ -322,9 +327,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 			staticMaterialization: {
 				committedRevisions: this.#committedStaticMaterializations,
 				failed: this.#failedStaticMaterializations,
+				materializedDrawUnits: countMaterializedDrawUnits(
+					this.#materializedDrawUnitIdsBySourceDrawUnitId,
+				),
 				pendingRevisions: Array.from(this.#pendingStaticMaterializations).sort(
 					(a, b) => a - b,
 				),
+				sourceDrawUnits: this.#materializedDrawUnitIdsBySourceDrawUnitId.size,
 			},
 			status: this.#disposed
 				? "disposed"
@@ -470,6 +479,15 @@ function appendBoundedRevision(
 	revision: number,
 ): number[] {
 	return [...revisions, revision].slice(-8);
+}
+
+function countMaterializedDrawUnits(
+	drawUnitIdsBySourceDrawUnitId: ReadonlyMap<string, readonly string[]>,
+): number {
+	return [...drawUnitIdsBySourceDrawUnitId.values()].reduce(
+		(count, drawUnitIds) => count + drawUnitIds.length,
+		0,
+	);
 }
 
 function appendBoundedFailure(

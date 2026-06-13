@@ -741,6 +741,9 @@ describe("V2 texture manager", () => {
 			expect(update?.drawUnitBindings).toHaveLength(
 				MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
 			);
+			expect(update?.textureUsePlacements.map((placement) => placement.textureUseId)).toEqual(
+				textureUses.map((textureUse) => textureUse.textureUseId),
+			);
 			expect(
 				update?.drawUnitBindings.map((binding) => binding.rolePage),
 			).toEqual([

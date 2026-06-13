@@ -3149,7 +3149,7 @@ Phase 11E4A3f failed to close:
 
 ### Phase 11E4B: Outdoor Detail Generated Scenery Cutout
 
-Status: complete on 2026-06-13. Phase 11E4C is the next implementation phase.
+Status: complete on 2026-06-13. Phase 11E4B1 is the next implementation phase.
 
 Purpose: fast-track the `outdoor-detail` domain so generated scenery, especially tree foliage, exercises the existing alpha-test/cutout static path before true blended transparency work.
 
@@ -3198,6 +3198,38 @@ Phase 11E4B failed to close:
 
 - No live browser/manual diagnostics were rerun on a known tree/foliage-heavy landblock. Unit coverage proves the source and bake path; visual foliage parity still needs a target landblock diagnostic pass.
 - The phase did not audit generated-scenery density across DATs or choose a canonical foliage verification landblock.
+
+### Phase 11E4B1: Outdoor Detail Atlas Cohort Pagination
+
+Status: planned.
+
+Purpose: course-correct the live `outdoor-detail` foliage failure where a large generated-scenery `rgba-color` packing cohort can fail static materialization before any detail draw units reach renderer residency.
+
+Current steering:
+
+- A live browser smoke after 11E4B showed `outdoor-detail` resolving and baking far enough to enter texture packing, then failing materialization because one generated-scenery `rgba-color` cohort spanning multiple detail landblocks did not fit together on one atlas page.
+- Runtime atlas page constraints already allow up to `2048x2048`; the warning mentioning `1024x1024` reflects the selected failed page-size candidate diagnostic, not the global maximum.
+- Static object rendering and materialization already support several base-color role pages per draw unit. The broken invariant is the texture packer's same-page cohort rule, which currently treats a cohort as one physical-page unit even when renderer role-page materialization could consume multiple committed pages.
+- This phase should keep the default batch-scoped atlas architecture intact. Do not redesign cross-batch sharing or static-object material tables here.
+
+Deliverables:
+
+- Texture packing/layout changes so an oversized same-page cohort can either paginate across multiple atlas pages within renderer role-page capacity or be split into smaller legal cohorts before failing the whole static commit.
+- Diagnostics that distinguish:
+  - one texture/source too large for the maximum atlas page;
+  - a cohort requiring multiple pages;
+  - a draw unit exceeding renderer role-page capacity after placement-aware fine materialization.
+- Regression tests reproducing an `outdoor-detail`-style `rgba-color` cohort that fits within `2048x2048`/multi-page policy but fails under the old one-page cohort rule.
+- Regression tests proving the packer still escalates to larger candidates up to `2048x2048` before reporting failure, and reports the actual relevant max/candidate context clearly.
+- Materialization/texture-manager tests proving a paginated or split `outdoor-detail` base-color cohort does not fail the entire static materialization revision when the resulting draw units stay within static-object role-page limits.
+
+Acceptance criteria:
+
+- Large generated-scenery texture cohorts no longer fail solely because all cohort entries cannot fit on one physical atlas page.
+- A true source-too-large texture still fails explicitly and does not masquerade as a cohort pagination problem.
+- The warning/error text no longer implies the runtime only supports `1024x1024` when `2048x2048` candidates were considered.
+- `outdoor-detail` draw units can enter renderer residency for foliage-heavy batches when their final materialized role-page count is legal.
+- Terrain road/mask cohort behavior and existing outdoor-building texture packing behavior remain covered by tests and unchanged unless the test evidence requires a shared fix.
 
 ### Phase 11E4C: Static Blended Material Contract
 

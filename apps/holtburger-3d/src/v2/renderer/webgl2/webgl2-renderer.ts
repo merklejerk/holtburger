@@ -20,6 +20,8 @@ import {
 import type {
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectMaterialTableEntry,
+	StaticObjectRenderState,
+	StaticObjectSortMetadata,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialTextureRoleBinding,
 } from "../../static/contracts";
@@ -846,63 +848,83 @@ class Webgl2Renderer implements Renderer {
 			mvp,
 		);
 
+		applyStaticObjectDepthWritingState(gl);
 		for (const resource of this.#staticObjectResources.values()) {
-			if (
-				resource.materialPass === "transparent" ||
-				resource.materialPass === "additive"
-			) {
+			if (isTransparentStaticObjectResource(resource)) {
 				continue;
 			}
-			const bindings =
-				this.#textureBindings.get(resource.drawUnitId) ?? new Map();
-			const pageBindings = createStaticObjectPageBindings(
-				resource,
-				bindings,
-				this.#textures,
-			);
+			this.#drawStaticObjectResource(resource);
+		}
 
-			uploadStaticObjectRolePageBindings(
-				gl,
-				this.#staticObjectProgram.uniforms.uStaticBaseColorTextures,
-				this.#staticObjectProgram.uniforms.uStaticBaseColorSizes,
-				pageBindings.baseColor,
-				STATIC_OBJECT_BASE_COLOR_TEXTURE_UNIT_BASE,
+		const transparentResources = Array.from(
+			this.#staticObjectResources.values(),
+		)
+			.filter(isTransparentStaticObjectResource)
+			.sort((left, right) =>
+				compareStaticObjectTransparentDrawOrder(
+					left,
+					right,
+					this.#frameState.camera.position,
+				),
 			);
-			uploadStaticObjectRolePageBindings(
-				gl,
-				this.#staticObjectProgram.uniforms.uStaticIndexTextures,
-				null,
-				pageBindings.index,
-				STATIC_OBJECT_INDEX_TEXTURE_UNIT_BASE,
-			);
-			uploadStaticObjectRolePageBindings(
-				gl,
-				this.#staticObjectProgram.uniforms.uStaticPaletteTextures,
-				this.#staticObjectProgram.uniforms.uStaticPaletteSizes,
-				pageBindings.palette,
-				STATIC_OBJECT_PALETTE_TEXTURE_UNIT_BASE,
-			);
-			uploadStaticObjectRolePageBindings(
-				gl,
-				this.#staticObjectProgram.uniforms.uStaticDetailTextures,
-				this.#staticObjectProgram.uniforms.uStaticDetailSizes,
-				pageBindings.detail,
-				STATIC_OBJECT_DETAIL_TEXTURE_UNIT_BASE,
-			);
-
-			uploadStaticObjectMaterialTableUniforms(
-				gl,
-				this.#staticObjectProgram,
-				resource,
-				bindings,
-				this.#textures,
-			);
-			gl.bindVertexArray(resource.vertexArray);
-			gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
+		for (const resource of transparentResources) {
+			applyStaticObjectRenderState(gl, resource.renderState);
+			this.#drawStaticObjectResource(resource);
 		}
 
 		gl.bindVertexArray(null);
 		gl.bindTexture(gl.TEXTURE_2D, null);
+		restoreStaticObjectRenderState(gl);
+	}
+
+	#drawStaticObjectResource(resource: StaticObjectGeometryResource): void {
+		const gl = this.#gl;
+		const bindings =
+			this.#textureBindings.get(resource.drawUnitId) ?? new Map();
+		const pageBindings = createStaticObjectPageBindings(
+			resource,
+			bindings,
+			this.#textures,
+		);
+
+		uploadStaticObjectRolePageBindings(
+			gl,
+			this.#staticObjectProgram.uniforms.uStaticBaseColorTextures,
+			this.#staticObjectProgram.uniforms.uStaticBaseColorSizes,
+			pageBindings.baseColor,
+			STATIC_OBJECT_BASE_COLOR_TEXTURE_UNIT_BASE,
+		);
+		uploadStaticObjectRolePageBindings(
+			gl,
+			this.#staticObjectProgram.uniforms.uStaticIndexTextures,
+			null,
+			pageBindings.index,
+			STATIC_OBJECT_INDEX_TEXTURE_UNIT_BASE,
+		);
+		uploadStaticObjectRolePageBindings(
+			gl,
+			this.#staticObjectProgram.uniforms.uStaticPaletteTextures,
+			this.#staticObjectProgram.uniforms.uStaticPaletteSizes,
+			pageBindings.palette,
+			STATIC_OBJECT_PALETTE_TEXTURE_UNIT_BASE,
+		);
+		uploadStaticObjectRolePageBindings(
+			gl,
+			this.#staticObjectProgram.uniforms.uStaticDetailTextures,
+			this.#staticObjectProgram.uniforms.uStaticDetailSizes,
+			pageBindings.detail,
+			STATIC_OBJECT_DETAIL_TEXTURE_UNIT_BASE,
+		);
+
+		uploadStaticObjectMaterialTableUniforms(
+			gl,
+			this.#staticObjectProgram,
+			resource,
+			bindings,
+			this.#textures,
+		);
+		gl.bindVertexArray(resource.vertexArray);
+		gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
 	}
 
 	#resizeToDisplaySize(): void {
@@ -1066,6 +1088,9 @@ interface StaticObjectGeometryResource {
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
 	readonly materialEntries: StaticObjectGeometryStaticDrawUnit["materialEntries"];
+	readonly renderState: StaticObjectRenderState;
+	readonly sortCenter: StaticObjectSortMetadata["center"];
+	readonly sortPolicy: StaticObjectSortMetadata["policy"];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
@@ -1524,6 +1549,9 @@ function createStaticObjectGeometryResource(
 		materialPass: drawUnit.materialPass,
 		materialSlotBuffer,
 		positionBuffer,
+		renderState: drawUnit.renderState,
+		sortCenter: translatePoint(drawUnit.sort.center, translation),
+		sortPolicy: drawUnit.sort.policy,
 		texCoordBuffer,
 		triangleCount: drawUnit.triangleCount,
 		vertexArray,
@@ -1891,6 +1919,17 @@ function translateTerrainPositions(
 	return translatePositions(positions, translation);
 }
 
+function translatePoint(
+	point: readonly [number, number, number],
+	translation: readonly [number, number, number],
+): readonly [number, number, number] {
+	return [
+		point[0] + translation[0],
+		point[1] + translation[1],
+		point[2] + translation[2],
+	];
+}
+
 function translatePositions(
 	positions: Float32Array,
 	translation: readonly [number, number, number],
@@ -1916,6 +1955,96 @@ function sumRenderedTriangles(
 		(total, resource) => total + resource.triangleCount,
 		0,
 	);
+}
+
+interface StaticObjectDrawOrderResource {
+	readonly drawUnitId: string;
+	readonly sortCenter: readonly [number, number, number];
+}
+
+export function compareStaticObjectTransparentDrawOrder(
+	left: StaticObjectDrawOrderResource,
+	right: StaticObjectDrawOrderResource,
+	cameraPosition: readonly [number, number, number],
+): number {
+	const leftDistance = distanceSquared(left.sortCenter, cameraPosition);
+	const rightDistance = distanceSquared(right.sortCenter, cameraPosition);
+	const distanceOrder = rightDistance - leftDistance;
+
+	return distanceOrder === 0
+		? left.drawUnitId.localeCompare(right.drawUnitId)
+		: distanceOrder;
+}
+
+export function resolveStaticObjectBlendFactor(
+	gl: WebGL2RenderingContext,
+	factor: NonNullable<StaticObjectRenderState["blend"]["srcFactor"]>,
+): GLenum {
+	switch (factor) {
+		case "one":
+			return gl.ONE;
+		case "src-alpha":
+			return gl.SRC_ALPHA;
+		case "one-minus-src-alpha":
+			return gl.ONE_MINUS_SRC_ALPHA;
+	}
+}
+
+function distanceSquared(
+	left: readonly [number, number, number],
+	right: readonly [number, number, number],
+): number {
+	const deltaX = left[0] - right[0];
+	const deltaY = left[1] - right[1];
+	const deltaZ = left[2] - right[2];
+
+	return deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+}
+
+function isTransparentStaticObjectResource(
+	resource: StaticObjectGeometryResource,
+): boolean {
+	return (
+		resource.sortPolicy === "object-part-back-to-front" ||
+		resource.materialPass === "transparent" ||
+		resource.materialPass === "additive"
+	);
+}
+
+function applyStaticObjectDepthWritingState(
+	gl: WebGL2RenderingContext,
+): void {
+	gl.enable(gl.DEPTH_TEST);
+	gl.depthMask(true);
+	gl.disable(gl.BLEND);
+}
+
+function applyStaticObjectRenderState(
+	gl: WebGL2RenderingContext,
+	renderState: StaticObjectRenderState,
+): void {
+	gl.enable(gl.DEPTH_TEST);
+	gl.depthMask(renderState.depthWrite);
+	if (!renderState.blend.enabled) {
+		gl.disable(gl.BLEND);
+		return;
+	}
+	if (!renderState.blend.srcFactor || !renderState.blend.dstFactor) {
+		throw new Error(
+			`Static object blend mode ${renderState.blend.mode} is enabled without concrete blend factors.`,
+		);
+	}
+	gl.enable(gl.BLEND);
+	gl.blendFunc(
+		resolveStaticObjectBlendFactor(gl, renderState.blend.srcFactor),
+		resolveStaticObjectBlendFactor(gl, renderState.blend.dstFactor),
+	);
+}
+
+function restoreStaticObjectRenderState(gl: WebGL2RenderingContext): void {
+	gl.depthMask(true);
+	gl.disable(gl.BLEND);
+	gl.blendFunc(gl.ONE, gl.ZERO);
 }
 
 function uploadTerrainLayeredUniforms(

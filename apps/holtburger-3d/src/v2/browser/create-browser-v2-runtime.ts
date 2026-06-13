@@ -167,11 +167,7 @@ class BrowserStaticResolver implements StaticResolver {
 			);
 		}
 
-		if (
-			(job.domain === "outdoor-terrain" ||
-				job.domain === "outdoor-buildings") &&
-			job.scope.kind === "landblock"
-		) {
+		if (shouldUseBrowserSourceResolver(job)) {
 			return this.#sourceResolver.resolve(job);
 		}
 
@@ -207,7 +203,7 @@ class BrowserStaticBaker implements StaticBaker {
 			return Promise.reject(new Error("BrowserStaticBaker has been disposed."));
 		}
 
-		if (input.domain === "outdoor-terrain" || input.domain === "outdoor-buildings") {
+		if (shouldUseBrowserWorkerBaker(input.domain)) {
 			return this.#workerBaker.bake(input);
 		}
 
@@ -223,6 +219,25 @@ class BrowserStaticBaker implements StaticBaker {
 		disposeIfAvailable(this.#workerBaker);
 		disposeIfAvailable(this.#placeholderBaker);
 	}
+}
+
+export function shouldUseBrowserSourceResolver(job: StaticResolverJob): boolean {
+	return (
+		(job.domain === "outdoor-terrain" ||
+			job.domain === "outdoor-buildings" ||
+			job.domain === "outdoor-detail") &&
+		job.scope.kind === "landblock"
+	);
+}
+
+export function shouldUseBrowserWorkerBaker(
+	domain: StaticBakeBatchInput["domain"],
+): boolean {
+	return (
+		domain === "outdoor-terrain" ||
+		domain === "outdoor-buildings" ||
+		domain === "outdoor-detail"
+	);
 }
 
 function disposeIfAvailable(value: unknown): void {

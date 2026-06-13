@@ -319,6 +319,31 @@ describe("V2 static object compatibility partitioner", () => {
 		expect(result.textureUses).toHaveLength(1);
 	});
 
+	it("bakes outdoor-detail alpha-test generated scenery into rendered draw units", () => {
+		const payload = createPayload({
+			domain: "outdoor-detail",
+			materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x4 })],
+			textureRefs: createRgbaTextureRefs(),
+		});
+		const input = createBakeInput(payload);
+
+		const result = bakeStaticObjectCompatibility(input);
+		const drawUnit = result.drawUnits[0];
+
+		expect(drawUnit).toMatchObject({
+			domain: "outdoor-detail",
+			kind: "static-object-geometry",
+			materialFamily: "texture-rgba",
+			materialPass: "alpha-test",
+		});
+		expect(result.materialCoverage[0]).toMatchObject({
+			domain: "outdoor-detail",
+			renderedTriangleCount: 1,
+			triangleCount: 1,
+		});
+		expect(result.textureUses).toHaveLength(1);
+	});
+
 	it("keeps compatible opaque object ownership as metadata without splitting batches", () => {
 		const payload = duplicateObjectInstance(
 			createPayload({
@@ -979,6 +1004,7 @@ function duplicateObjectWithDistinctSourceGfx(
 }
 
 function createPayload(options: {
+	readonly domain?: OutdoorStaticObjectsScopePayload["domain"];
 	readonly materials: readonly StaticObjectMaterialSourceFacts[];
 	readonly objectPlacement?: ReturnType<typeof createPlacement>;
 	readonly partPositions?: Float32Array;
@@ -991,8 +1017,14 @@ function createPayload(options: {
 	readonly detailRoles?: OutdoorStaticObjectsScopePayload["regionRenderProfile"]["detailRoles"];
 	readonly textureRefs?: readonly StaticObjectTextureRefFacts[];
 }): OutdoorStaticObjectsScopePayload {
+	const domain = options.domain ?? "outdoor-buildings";
+	const objectIdentity = createObjectIdentity({
+		instanceId: domain === "outdoor-detail" ? "detail-0" : "building-0",
+		objectKind: domain === "outdoor-detail" ? "generated-scenery" : "building",
+	});
+
 	return {
-		domain: "outdoor-buildings",
+		domain,
 		kind: "outdoor-static-objects",
 		landblock: {
 			kind: "landblock-source",
@@ -1005,7 +1037,7 @@ function createPayload(options: {
 				kind: "static-material-slot",
 				part: {
 					kind: "static-object-part",
-					object: createObjectIdentity(),
+					object: objectIdentity,
 					partIndex: 0,
 				},
 				geometrySurfaceId: index,
@@ -1014,7 +1046,7 @@ function createPayload(options: {
 			},
 			material: material.identity,
 			materialVariantSignature: null,
-			object: createObjectIdentity(),
+			object: objectIdentity,
 			paletteOverride: null,
 			paletteViews: options.paletteViews?.[index] ?? [],
 			source: createSourceIdentity(),
@@ -1024,8 +1056,11 @@ function createPayload(options: {
 		objects: [
 			{
 				debug: { sourceAssetId: "setup-model/02000010" },
-				generated: null,
-				identity: createObjectIdentity(),
+				generated:
+					domain === "outdoor-detail"
+						? { sceneId: 1, sceneTemplateIndex: 0, terrainIndex: 0 }
+						: null,
+				identity: objectIdentity,
 				instanceBounds: null,
 				localPlacement: options.objectPlacement ?? createPlacement(),
 				portalCount: 0,
@@ -1105,9 +1140,10 @@ function createPayload(options: {
 function createBakeInput(
 	payload: OutdoorStaticObjectsScopePayload,
 ): StaticBakeBatchInput {
+	const domain = payload.domain;
 	const work = {
 		job: {
-			domain: "outdoor-buildings" as const,
+			domain,
 			scope: {
 				kind: "landblock" as const,
 				landblockId: 0xda55ffff,
@@ -1115,17 +1151,17 @@ function createBakeInput(
 		},
 		priority: 0,
 		revision: 1,
-		workId: "1:landblock:da55ffff:outdoor-buildings",
+		workId: `1:landblock:da55ffff:${domain}`,
 	};
 
 	return {
 		atlasSnapshot: {
-			domain: "outdoor-buildings",
+			domain,
 			placements: [],
 			staticBatchId: "static-batch:objects",
 			textureUses: [],
 		},
-		domain: "outdoor-buildings",
+		domain,
 		items: [
 			{
 				payload: {
@@ -1369,13 +1405,16 @@ function createMaterialIdentity(
 }
 
 function createObjectIdentity(
-	options: { readonly instanceId?: string } = {},
+	options: {
+		readonly instanceId?: string;
+		readonly objectKind?: "building" | "generated-scenery";
+	} = {},
 ) {
 	return {
 		instanceId: options.instanceId ?? "building-0",
 		kind: "static-object-instance" as const,
 		landblockId: 0xda55ffff,
-		objectKind: "building" as const,
+		objectKind: options.objectKind ?? "building",
 	};
 }
 

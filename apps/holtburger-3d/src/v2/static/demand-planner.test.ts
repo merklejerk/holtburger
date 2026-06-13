@@ -10,8 +10,8 @@ describe("V2 static demand planner", () => {
 			createOutdoorDemand(focusLandblockId, {
 				buildings: 9,
 				detail: 1,
+				envCells: 0,
 				terrain: 1,
-				topology: 0,
 			}),
 			7,
 		);
@@ -44,8 +44,8 @@ describe("V2 static demand planner", () => {
 			createOutdoorDemand(0xda55ffff, {
 				buildings: -1,
 				detail: -1,
+				envCells: -1,
 				terrain: 0,
-				topology: -1,
 			}),
 			3,
 		);
@@ -67,18 +67,47 @@ describe("V2 static demand planner", () => {
 			normalizeOutdoorLodRadii({
 				buildings: 3.9,
 				detail: 2.1,
+				envCells: 9,
 				terrain: 1.8,
-				topology: 9,
 			}),
 		).toEqual({
 			buildings: 1,
 			detail: 1,
+			envCells: 1,
 			terrain: 1,
-			topology: 1,
 		});
 	});
 
-	it("plans dungeon/interior demand as one landblock-owned resolver job", () => {
+	it("plans outdoor env-cell demand from env-cell coverage radius", () => {
+		const work = planScheduledStaticWork(
+			createOutdoorDemand(0xda55ffff, {
+				buildings: -1,
+				detail: -1,
+				envCells: 1,
+				terrain: 1,
+			}),
+			4,
+		);
+
+		const envCellWork = work.filter(
+			(item) => item.job.domain === "landblock-env-cells",
+		);
+
+		expect(envCellWork).toHaveLength(5);
+		expect(envCellWork[0]).toMatchObject({
+			job: {
+				domain: "landblock-env-cells",
+				scope: {
+					kind: "landblock",
+					landblockId: 0xda55ffff,
+				},
+			},
+			priority: 5,
+			workId: "4:landblock:da55ffff:landblock-env-cells",
+		});
+	});
+
+	it("plans dungeon/interior demand as one landblock-owned env-cell resolver job", () => {
 		const work = planScheduledStaticWork(
 			{
 				location: {
@@ -89,8 +118,8 @@ describe("V2 static demand planner", () => {
 				lod: {
 					buildings: -1,
 					detail: -1,
+					envCells: -1,
 					terrain: -1,
-					topology: -1,
 				},
 			},
 			12,
@@ -99,15 +128,15 @@ describe("V2 static demand planner", () => {
 		expect(work).toEqual([
 			{
 				job: {
-					domain: "dungeon-static",
+					domain: "landblock-env-cells",
 					scope: {
 						kind: "landblock",
 						landblockId: 0xda55ffff,
 					},
 				},
-				priority: 0,
+				priority: 5,
 				revision: 12,
-				workId: "12:landblock:da55ffff:dungeon-static",
+				workId: "12:landblock:da55ffff:landblock-env-cells",
 			},
 		]);
 	});

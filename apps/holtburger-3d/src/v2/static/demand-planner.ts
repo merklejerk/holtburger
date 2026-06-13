@@ -13,10 +13,9 @@ import type {
 
 const domainPriorities: Record<StaticDomain, number> = {
 	"outdoor-terrain": 0,
-	"landblock-topology": 5,
+	"landblock-env-cells": 5,
 	"outdoor-buildings": 10,
 	"outdoor-detail": 20,
-	"dungeon-static": 0,
 };
 
 export function planScheduledStaticWork(
@@ -33,13 +32,13 @@ export function planScheduledStaticWork(
 		return [
 			createScheduledStaticWork({
 				job: {
-					domain: "dungeon-static",
+					domain: "landblock-env-cells",
 					scope: {
 						kind: "landblock",
 						landblockId,
 					},
 				},
-				priority: domainPriorities["dungeon-static"],
+				priority: domainPriorities["landblock-env-cells"],
 				revision,
 			}),
 		];
@@ -68,9 +67,9 @@ export function planScheduledStaticWork(
 		revision,
 	});
 	addOutdoorDomainRequests(work, {
-		domain: "landblock-topology",
+		domain: "landblock-env-cells",
 		focusLandblockId: landblockId,
-		radius: lod.topology,
+		radius: lod.envCells,
 		revision,
 	});
 
@@ -84,7 +83,7 @@ export function normalizeOutdoorLodRadii(lod: StaticLodRadii): StaticLodRadii {
 		terrain,
 		buildings: Math.min(normalizeRadius(lod.buildings), terrain),
 		detail: Math.min(normalizeRadius(lod.detail), terrain),
-		topology: Math.min(normalizeRadius(lod.topology), terrain),
+		envCells: Math.min(normalizeRadius(lod.envCells), terrain),
 	};
 }
 

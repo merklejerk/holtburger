@@ -48,13 +48,13 @@ describe("V2 client runtime", () => {
 		});
 
 		runtime.requestStaticWork({
-			domains: ["buildings", "terrain", "topology"],
+			domains: ["buildings", "terrain", "env-cells"],
 			landblockId: "0xda55ffff",
 			locationKind: "outdoor-landblock",
 			lod: {
 				buildings: 0,
 				terrain: 1,
-				topology: 0,
+				envCells: 0,
 			},
 		});
 
@@ -70,7 +70,7 @@ describe("V2 client runtime", () => {
 		).toHaveLength(1);
 		expect(
 			resolver.pendingRequests.filter(
-				(request) => request.job.domain === "landblock-topology",
+				(request) => request.job.domain === "landblock-env-cells",
 			),
 		).toHaveLength(1);
 		runtime.dispose();
@@ -486,6 +486,55 @@ describe("V2 client runtime", () => {
 			landblockId: 0xda55ffff,
 			revision: 1,
 		});
+		runtime.dispose();
+	});
+
+	it("reports static resolver failures through runtime diagnostics", async () => {
+		const warnings: unknown[] = [];
+		const diagnostics: RuntimeDiagnostics = {
+			warn(event) {
+				warnings.push(event);
+			},
+		};
+		const resolver = new DeferredStaticResolver();
+		const runtime = createClientRuntime({
+			diagnostics,
+			host: new FakeRuntimeHost(),
+			renderer: new FakeRenderer(),
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker: new DeferredStaticBaker(),
+				resolver,
+			}),
+		});
+		let latestSnapshot: RuntimeSnapshot | null = null;
+		const unsubscribe = runtime.subscribe((snapshot) => {
+			latestSnapshot = snapshot;
+		});
+
+		runtime.requestStaticWork({
+			domains: ["terrain"],
+			landblockId: "0xda55ffff",
+			locationKind: "outdoor-landblock",
+		});
+		resolver.fail(
+			resolver.pendingRequests[0]?.requestId ?? "",
+			new Error("landblock env-cell bundle unavailable"),
+		);
+		await flushPromises();
+
+		expect(warnings).toContainEqual({
+			domain: "outdoor-terrain",
+			kind: "static-resolver-failed",
+			message: "landblock env-cell bundle unavailable",
+			revision: 1,
+			scopeKey: "landblock:da55ffff",
+			workId: "1:landblock:da55ffff:outdoor-terrain",
+		});
+		expect(latestSnapshot?.static.latestResolverFailure).toMatchObject({
+			message: "landblock env-cell bundle unavailable",
+			workId: "1:landblock:da55ffff:outdoor-terrain",
+		});
+		unsubscribe();
 		runtime.dispose();
 	});
 });

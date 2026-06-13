@@ -3,7 +3,6 @@ import type {
 	AssetLookupResponseDto,
 	LandblockEnvCellsPayloadDto,
 	LandblockOutdoorPayloadDto,
-	LandblockTopologyPayloadDto,
 	GfxObjPayloadDto,
 	MaterialRecipePayloadDto,
 	PalettePayloadDto,
@@ -19,7 +18,6 @@ import {
 	gfxObjPayloadDtoSchema,
 	landblockEnvCellsPayloadDtoSchema,
 	landblockOutdoorPayloadDtoSchema,
-	landblockTopologyPayloadDtoSchema,
 	materialRecipePayloadDtoSchema,
 	palettePayloadDtoSchema,
 	preparedTexturePayloadDtoSchema,
@@ -33,7 +31,6 @@ import {
 
 export type V2PreparedAssetPayload =
 	| LandblockOutdoorPayloadDto
-	| LandblockTopologyPayloadDto
 	| LandblockEnvCellsPayloadDto
 	| GfxObjPayloadDto
 	| SetupModelPayloadDto
@@ -66,11 +63,6 @@ const V2_PAYLOAD_PARSERS: readonly RoutePayloadParser<V2PreparedAssetPayload>[] 
 			expectedKind: "landblock-outdoor",
 			route: /^landblock\/[0-9a-fA-F]{8}\/outdoor$/,
 			schema: landblockOutdoorPayloadDtoSchema,
-		},
-		{
-			expectedKind: "landblock-topology",
-			route: /^landblock\/[0-9a-fA-F]{8}\/topology$/,
-			schema: landblockTopologyPayloadDtoSchema,
 		},
 		{
 			expectedKind: "landblock-env-cells",

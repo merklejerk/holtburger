@@ -9,8 +9,7 @@ import type {
 	StaticDemand,
 	StaticDomain,
 	StaticMaterialCoverageReport,
-	DungeonStaticPayloadSummary,
-	LandblockTopologyPayloadSummary,
+	LandblockEnvCellsPayloadSummary,
 	OutdoorStaticObjectsPayloadSummary,
 	StaticResolverFailureSnapshot,
 	StaticResolver,
@@ -72,9 +71,7 @@ export class StaticCoordinator {
 	#latestTerrainPayload: TerrainStaticScopePayloadSummary | null = null;
 	#latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null =
 		null;
-	#latestLandblockTopologyPayload: LandblockTopologyPayloadSummary | null =
-		null;
-	#latestDungeonPayload: DungeonStaticPayloadSummary | null = null;
+	#latestLandblockEnvCellsPayload: LandblockEnvCellsPayloadSummary | null = null;
 	readonly #latestMaterialCoverageByDomain = new Map<
 		StaticDomain,
 		StaticMaterialCoverageReport
@@ -159,8 +156,7 @@ export class StaticCoordinator {
 			committed: this.#committed,
 			committedDrawUnits: this.#committedDrawUnits,
 			failed: this.#failed,
-			latestDungeonPayload: this.#latestDungeonPayload,
-			latestLandblockTopologyPayload: this.#latestLandblockTopologyPayload,
+			latestLandblockEnvCellsPayload: this.#latestLandblockEnvCellsPayload,
 			materialCoverage: Array.from(
 				this.#latestMaterialCoverageByDomain.values(),
 			).sort((left, right) => left.domain.localeCompare(right.domain)),
@@ -404,17 +400,6 @@ export class StaticCoordinator {
 			};
 		}
 
-		if (payload.scope.kind === "landblock-topology") {
-			this.#latestLandblockTopologyPayload = {
-				classification: payload.scope.classification,
-				envCellCount: payload.scope.envCells.length,
-				landblockId: payload.scope.landblock.landblockId,
-				missingRefCount: payload.scope.missingRefs.length,
-				portalLinkCount: payload.scope.portalLinks.length,
-				visibleCellCount: countDistinctVisibleEnvCells(payload.scope.envCells),
-			};
-		}
-
 		if (payload.scope.kind === "outdoor-static-objects") {
 			this.#latestOutdoorStaticObjectsPayload = {
 				domain: payload.scope.domain,
@@ -429,16 +414,24 @@ export class StaticCoordinator {
 			};
 		}
 
-		if (payload.scope.kind === "dungeon-static") {
-			this.#latestDungeonPayload = {
+		if (payload.scope.kind === "landblock-env-cells") {
+			this.#latestLandblockEnvCellsPayload = {
+				acceptedEnvCellCount: payload.scope.acceptedEnvCellIds.length,
+				classification: payload.scope.classification,
 				envCellCount: payload.scope.envCells.length,
 				landblockId: payload.scope.landblock.landblockId,
 				missingRefCount: payload.scope.missingRefs.length,
 				portalCount: payload.scope.envCells.reduce(
-					(count, envCell) => count + envCell.portalCount,
+					(count, envCell) => count + envCell.portals.length,
 					0,
 				),
-				selectedEnvCellId: null,
+				portalLinkCount: payload.scope.portalLinks.length,
+				staticObjectSeedCount: payload.scope.envCells.reduce(
+					(count, envCell) => count + envCell.staticObjectSeeds.length,
+					0,
+				),
+				visibilityDiagnosticCount:
+					payload.scope.visibilityDiagnostics.length,
 				visibleCellCount: countDistinctVisibleEnvCells(payload.scope.envCells),
 			};
 		}

@@ -18,16 +18,16 @@ describe("browser V2 runtime routing", () => {
 		expect(shouldUseBrowserWorkerBaker("outdoor-detail")).toBe(true);
 	});
 
-	it("keeps unsupported browser static domains on placeholder paths", () => {
+	it("routes env-cell bundles through source resolver and placeholder baker", () => {
 		expect(
 			shouldUseBrowserSourceResolver({
-				domain: "landblock-topology",
+				domain: "landblock-env-cells",
 				scope: {
 					kind: "landblock",
 					landblockId: 0xda55ffff,
 				},
 			}),
-		).toBe(false);
-		expect(shouldUseBrowserWorkerBaker("landblock-topology")).toBe(false);
+		).toBe(true);
+		expect(shouldUseBrowserWorkerBaker("landblock-env-cells")).toBe(false);
 	});
 });

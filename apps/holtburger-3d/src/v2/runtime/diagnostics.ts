@@ -76,8 +76,7 @@ interface StaticCoordinatorDiagnosticsSummary {
 	readonly committedDrawUnits: number;
 	readonly latestTerrainPayload: string | null;
 	readonly latestOutdoorStaticObjectsPayload: string | null;
-	readonly latestLandblockTopologyPayload: string | null;
-	readonly latestDungeonPayload: string | null;
+	readonly latestLandblockEnvCellsPayload: string | null;
 	readonly latestResolverFailure: string | null;
 }
 
@@ -217,9 +216,19 @@ export interface StaticObjectRolePageOverflowDiagnostics {
 }
 
 type RuntimeWarningEvent =
+	| StaticResolverFailedWarning
 	| StaticMaterializationFailedWarning
 	| StaticMaterialCoverageDeferredWarning
 	| TerrainRenderableFallbackWarning;
+
+interface StaticResolverFailedWarning {
+	readonly kind: "static-resolver-failed";
+	readonly revision: number;
+	readonly workId: string;
+	readonly domain: StaticDomain;
+	readonly scopeKey: string;
+	readonly message: string;
+}
 
 interface StaticMaterializationFailedWarning {
 	readonly kind: "static-materialization-failed";
@@ -255,6 +264,15 @@ class ConsoleRuntimeDiagnostics implements RuntimeDiagnostics {
 
 	warn(event: RuntimeWarningEvent): void {
 		switch (event.kind) {
+			case "static-resolver-failed":
+				console.error(
+					`V2 static resolver work ${event.workId} failed; static content for ${event.scopeKey}/${event.domain} was not resolved.`,
+					{
+						message: event.message,
+						revision: event.revision,
+					},
+				);
+				return;
 			case "static-materialization-failed":
 				console.warn(
 					`V2 static materialization revision ${event.revision} failed; draw units from this commit were not added to renderer residency.`,

@@ -144,44 +144,36 @@ export class DeferredStaticBaker implements StaticBaker {
 
 export class ImmediateStaticResolver implements StaticResolver {
 	async resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
-		if (job.domain === "landblock-topology" && job.scope.kind === "landblock") {
+		if (job.domain === "landblock-env-cells" && job.scope.kind === "landblock") {
 			return {
 				job,
 				scope: {
-					classification: "outdoor",
-					envCells: [],
-					kind: "landblock-topology",
-					landblock: {
-						kind: "landblock-source",
-						landblockId: job.scope.landblockId,
-						source: "topology",
-					},
-					missingRefs: [],
-					portalLinks: [],
-					residencySpatial: {
-						coordinateSpace: "landblock-topology-residency",
-						envCellResidencyBvhItemCount: 0,
-						envCellResidencyBvhNodeCount: 0,
-					},
-				},
-				sourceRevision: createStableFakeRenderSurfaceId(job),
-			};
-		}
-
-		if (job.domain === "dungeon-static" && job.scope.kind === "landblock") {
-			return {
-				job,
-				scope: {
+					acceptedEnvCellIds: [],
 					classification: "dungeon",
 					envCells: [],
-					kind: "dungeon-static",
+					kind: "landblock-env-cells",
 					landblock: {
 						kind: "landblock-source",
 						landblockId: job.scope.landblockId,
-						source: "topology",
+						source: "env-cells",
 					},
 					missingRefs: [],
 					portalLinks: [],
+					regionRenderProfile: {
+						kind: "region-render-profile",
+						regionNumber: 0,
+					},
+					residencySpatial: {
+						coordinateSpace: "landblock-env-cell-residency",
+						envCellResidencyBvhItemCount: 0,
+						envCellResidencyBvhNodeCount: 0,
+						residencyBvh: {
+							coordinateSpace: "landblock-env-cell-residency",
+							items: [],
+							nodes: [],
+						},
+					},
+					visibilityDiagnostics: [],
 				},
 				sourceRevision: createStableFakeRenderSurfaceId(job),
 			};

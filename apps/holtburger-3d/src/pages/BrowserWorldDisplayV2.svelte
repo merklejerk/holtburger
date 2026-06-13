@@ -62,11 +62,11 @@
 	let terrainEnabled = $state(true);
 	let buildingsEnabled = $state(true);
 	let detailEnabled = $state(true);
-	let topologyEnabled = $state(true);
+	let envCellsEnabled = $state(true);
 	let terrainRadius = $state(DEFAULT_TERRAIN_LOD_RADIUS);
 	let buildingRadius = $state(DEFAULT_BUILDING_LOD_RADIUS);
 	let detailRadius = $state(DEFAULT_DETAIL_LOD_RADIUS);
-	let topologyRadius = $state(DEFAULT_ENV_CELL_LOD_RADIUS);
+	let envCellRadius = $state(DEFAULT_ENV_CELL_LOD_RADIUS);
 	let snapshot = $state<RuntimeSnapshot | null>(null);
 	let cameraState = $state<V2FreeCameraState>(createV2FreeCameraState());
 	let diagnosticsReportText = $state<string | null>(null);
@@ -157,7 +157,7 @@
 				buildings: buildingRadius,
 				detail: detailRadius,
 				terrain: terrainRadius,
-				topology: topologyRadius,
+				envCells: envCellRadius,
 			}),
 		);
 	}
@@ -192,7 +192,7 @@
 		terrainRadius = nextTerrainRadius;
 		buildingRadius = Math.min(buildingRadius, nextTerrainRadius);
 		detailRadius = Math.min(detailRadius, buildingRadius);
-		topologyRadius = Math.min(topologyRadius, nextTerrainRadius);
+		envCellRadius = Math.min(envCellRadius, nextTerrainRadius);
 		scheduleStaticInterestRefresh();
 	}
 
@@ -216,9 +216,9 @@
 		scheduleStaticInterestRefresh();
 	}
 
-	function handleTopologyRadiusInput(event: Event): void {
+	function handleEnvCellRadiusInput(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
-		topologyRadius = Math.min(
+		envCellRadius = Math.min(
 			clampOutdoorSceneLodRadius(Number(input.value)),
 			terrainRadius,
 		);
@@ -259,8 +259,8 @@
 		if (detailEnabled) {
 			domains.push("detail");
 		}
-		if (topologyEnabled) {
-			domains.push("topology");
+		if (envCellsEnabled) {
+			domains.push("env-cells");
 		}
 
 		return domains;
@@ -659,12 +659,12 @@
 						</label>
 						<label>
 							<input
-								bind:checked={topologyEnabled}
+								bind:checked={envCellsEnabled}
 								disabled={parsedIsInterior}
 								type="checkbox"
 								onchange={handleStaticDomainChange}
 							/>
-							<span>Topology</span>
+							<span>Env Cells</span>
 						</label>
 					</div>
 
@@ -730,9 +730,9 @@
 					</label>
 
 					<label class="browser-v2__range">
-						<span>Topology distance</span>
+						<span>Env-cell distance</span>
 						<strong>
-							{topologyRadius} out ({countOutdoorSceneLodTiles(topologyRadius)} tiles)
+							{envCellRadius} out ({countOutdoorSceneLodTiles(envCellRadius)} tiles)
 						</strong>
 						<input
 							disabled={parsedIsInterior}
@@ -740,8 +740,8 @@
 							min={MIN_OUTDOOR_SCENE_LOD_RADIUS}
 							step="1"
 							type="range"
-							value={topologyRadius}
-							oninput={handleTopologyRadiusInput}
+							value={envCellRadius}
+							oninput={handleEnvCellRadiusInput}
 						/>
 					</label>
 
@@ -843,37 +843,27 @@
 							</dd>
 						</div>
 						<div>
-							<dt>Topology payload</dt>
+							<dt>Env-cell payload</dt>
 							<dd>
-								{#if snapshot?.static.latestLandblockTopologyPayload}
-									lb {snapshot.static.latestLandblockTopologyPayload.landblockId
+								{#if snapshot?.static.latestLandblockEnvCellsPayload}
+									lb {snapshot.static.latestLandblockEnvCellsPayload.landblockId
 										.toString(16)
 										.padStart(8, "0")}
-									{snapshot.static.latestLandblockTopologyPayload
+									{snapshot.static.latestLandblockEnvCellsPayload
 										.classification} cells
-									{snapshot.static.latestLandblockTopologyPayload.envCellCount} visible
-									{snapshot.static.latestLandblockTopologyPayload
-										.visibleCellCount} links
-									{snapshot.static.latestLandblockTopologyPayload
-										.portalLinkCount} missing
-									{snapshot.static.latestLandblockTopologyPayload
-										.missingRefCount}
-								{:else}
-									none
-								{/if}
-							</dd>
-						</div>
-						<div>
-							<dt>Dungeon payload</dt>
-							<dd>
-								{#if snapshot?.static.latestDungeonPayload}
-									lb {snapshot.static.latestDungeonPayload.landblockId
-										.toString(16)
-										.padStart(8, "0")} cells
-									{snapshot.static.latestDungeonPayload.envCellCount} visible
-									{snapshot.static.latestDungeonPayload.visibleCellCount} portals
-									{snapshot.static.latestDungeonPayload.portalCount} missing
-									{snapshot.static.latestDungeonPayload.missingRefCount}
+									{snapshot.static.latestLandblockEnvCellsPayload.envCellCount}
+									accepted
+									{snapshot.static.latestLandblockEnvCellsPayload
+										.acceptedEnvCellCount} visible
+									{snapshot.static.latestLandblockEnvCellsPayload
+										.visibleCellCount} portals
+									{snapshot.static.latestLandblockEnvCellsPayload.portalCount}
+									links
+									{snapshot.static.latestLandblockEnvCellsPayload.portalLinkCount}
+									seeds
+									{snapshot.static.latestLandblockEnvCellsPayload
+										.staticObjectSeedCount} missing
+									{snapshot.static.latestLandblockEnvCellsPayload.missingRefCount}
 								{:else}
 									none
 								{/if}

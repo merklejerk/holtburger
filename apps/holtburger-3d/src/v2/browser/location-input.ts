@@ -90,7 +90,7 @@ export function createStaticWorkCommandFromLocation(
 ): StaticWorkCommand {
 	if (location.kind === "interior-cell") {
 		return {
-			domains: ["topology"],
+			domains: ["env-cells"],
 			envCellId: `0x${formatHex32(location.envCellId)}`,
 			landblockId: `0x${formatHex32(location.landblockId)}`,
 			locationKind: "interior-cell",

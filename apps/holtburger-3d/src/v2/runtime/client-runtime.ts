@@ -33,6 +33,12 @@ import {
 	materializeStaticCommit,
 	type StaticMaterializationResult,
 } from "./static-materializer";
+import {
+	StaticSceneQuery,
+	type StaticScenePickRequest,
+	type StaticScenePickHit,
+	type StaticSceneQuerySnapshot,
+} from "./static-scene-query";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
@@ -60,6 +66,7 @@ export interface RuntimeSnapshot {
 	readonly host: RuntimeHostSnapshot;
 	readonly renderer: RendererSnapshot;
 	readonly static: StaticCoordinatorSnapshot;
+	readonly staticSceneQuery: StaticSceneQuerySnapshot;
 	readonly staticMaterialization: StaticMaterializationSnapshot;
 }
 
@@ -85,6 +92,7 @@ interface StaticMaterializationFailureSnapshot {
 export interface ClientRuntime {
 	requestStaticWork(command: StaticWorkCommand): void;
 	evictStaticWork(): void;
+	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null;
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void;
 	updateFrameState(state: FrameState): void;
 	createDiagnosticsReport(): RuntimeDiagnosticsReport;
@@ -130,10 +138,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #diagnostics: RuntimeDiagnostics;
 	readonly #textureManager: TextureManager;
 	readonly #staticCoordinator: StaticCoordinator;
+	readonly #staticSceneQuery = new StaticSceneQuery();
 	readonly #listeners = new Set<RuntimeSnapshotListener>();
 	readonly #unsubscribeRenderer: () => void;
 	readonly #unsubscribeStaticCoordinator: () => void;
 	readonly #unsubscribeStaticCommits: () => void;
+	readonly #unsubscribeStaticSourcePayloads: () => void;
 	#lastRendererSnapshot: RendererSnapshot;
 	#lastStaticSnapshot: StaticCoordinatorSnapshot;
 	#lastStaticRequest: StaticWorkCommand | null = null;
@@ -200,6 +210,11 @@ class ClientRuntimeImpl implements ClientRuntime {
 				this.#enqueueStaticMaterialization(delta);
 			},
 		);
+		this.#unsubscribeStaticSourcePayloads =
+			staticCoordinator.subscribeSourcePayloads((delta) => {
+				this.#staticSceneQuery.ingestSourcePayload(delta.payload);
+				this.#emit();
+			});
 	}
 
 	requestStaticWork(command: StaticWorkCommand): void {
@@ -211,6 +226,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 						parseLandblockInput(this.#lastStaticRequest.landblockId),
 					)
 				: null;
+		this.#staticSceneQuery.clear();
 		this.#staticCoordinator.requestStaticDemand(
 			createManualStaticDemand(this.#lastStaticRequest),
 		);
@@ -221,6 +237,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#assertActive();
 		this.#lastStaticRequest = null;
 		this.#renderAnchorLandblockId = null;
+		this.#staticSceneQuery.clear();
 		this.#staticCoordinator.requestStaticDemand({
 			location: null,
 			lod: {
@@ -231,6 +248,11 @@ class ClientRuntimeImpl implements ClientRuntime {
 			},
 		});
 		this.#emit();
+	}
+
+	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null {
+		this.#assertActive();
+		return this.#staticSceneQuery.pickRay(request);
 	}
 
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void {
@@ -302,6 +324,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#unsubscribeRenderer();
 		this.#unsubscribeStaticCoordinator();
 		this.#unsubscribeStaticCommits();
+		this.#unsubscribeStaticSourcePayloads();
 		this.#staticCoordinator.dispose();
 		this.#textureManager.dispose();
 		this.#renderer.dispose();
@@ -325,6 +348,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			},
 			renderer: this.#lastRendererSnapshot,
 			static: this.#lastStaticSnapshot,
+			staticSceneQuery: this.#staticSceneQuery.createSnapshot(),
 			staticMaterialization: {
 				committedRevisions: this.#committedStaticMaterializations,
 				failed: this.#failedStaticMaterializations,
@@ -429,6 +453,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			textureUpdate,
 		});
 		this.#updateMaterializedDrawUnitIdMappings(delta, materialized);
+		this.#staticSceneQuery.ingestStaticResidencyDelta(materialized.staticDelta);
 		this.#warnAboutStaticFallbacks(delta);
 		applyMaterializedStaticCommit(this.#renderer, materialized);
 		this.#pendingStaticMaterializations.delete(delta.revision);
@@ -673,7 +698,7 @@ function createStaticMaterialCoverageDiagnostics(
 
 type StaticCoordinatorReportWorkStatus = Exclude<
 	ScheduledStaticWorkStatus["status"],
-	"committed"
+	"committed" | "source-committed"
 >;
 
 type StaticCoordinatorReportWork = ScheduledStaticWorkStatus & {

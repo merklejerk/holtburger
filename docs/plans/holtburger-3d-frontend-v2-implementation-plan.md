@@ -3710,7 +3710,7 @@ Acceptance criteria:
 
 ### Phase 12A2: Env-Cell-Aware Static Scene Query And Browser Picker Diagnostics
 
-Status: planned. Follows Phase 12A1 and remains ahead of 11E5.
+Status: completed as an ownership/API slice on 2026-06-13, but immediately course-corrected by Phase 12A3 before 11E5. The first implementation proved runtime ownership, source-only env-cell ingestion, and browser-owned picker presentation, but it did not satisfy the intended BVH-backed spatial-index requirement.
 
 Purpose: add the runtime-owned static scene query service that can ingest committed outdoor static records plus resolved `landblock-env-cells` source facts, answer context-aware static `pickRay` requests for outdoor and env-cell scenes, and feed browser-owned object-level picker diagnostics without putting semantic picking policy into the renderer.
 
@@ -3744,6 +3744,35 @@ Deliverables:
 - Tests proving resolved `landblock-env-cells` source facts can populate query state without scheduling a placeholder bake or creating empty texture-atlas batches.
 - Design/plan note if any host BVH payload is insufficient and a fallback to baked draw-unit bounds is required.
 
+Implementation notes:
+
+- Added a runtime-owned `StaticSceneQuery` service with separate outdoor and env-cell query record stores. The first query primitive is `pickRay`; the backing implementation is intentionally simple AABB scanning so the API and scene-context model can land before a broader BVH/frustum/portal traversal implementation.
+- Added source-only coordinator commits for `landblock-env-cells`. Resolved env-cell bundles now emit source payload deltas and mark the work `source-committed` instead of entering placeholder bake/materialization. This removes misleading empty `landblock-env-cells` texture-atlas batches when the runtime only needs query/source facts.
+- Wired the client runtime to ingest source payload deltas into the static scene query and materialized static residency deltas into outdoor query records. The runtime exposes `pickStaticRay(...)`; Svelte/browser code only builds a ray and displays neutral hit facts.
+- Added browser pick-ray construction that mirrors the V2 renderer camera convention and FOV. The harness now updates a selected static diagnostic on non-drag primary clicks.
+- Outdoor picking currently indexes materialized static-object draw-unit bounds and source mapping strings because the committed static-object sidecar records are still string-shaped. This is sufficient for object/material-family diagnostics but not exact part/triangle identity.
+- Env-cell picking indexes static object seed `instanceBounds` from the resolved `landblock-env-cells` bundle. The host local BVH item records identify render geometry/static/portal items, but the current query slice does not walk BVH node bounds yet; broad env-cell visibility/frustum traversal remains future work.
+
+Phase 12A2 spicy bits:
+
+- `committed` in the static coordinator now includes both draw-output commits and source-only commits. The active work row distinguishes these as `committed` versus `source-committed`, and draw-unit counts remain zero for source-only env-cell ingestion.
+- The query service is context-aware but not acceleration-optimized yet. That is deliberate: the data ownership and context gates are more important in this phase than prematurely implementing a full broad-phase tree.
+- Outdoor object identity is only as good as the current materialized draw-unit/source-mapping records. If black-background/cutout diagnosis needs per-object material slots beyond these records, add structured committed static sidecars before deepening picker UI.
+
+Phase 12A2 failed to close:
+
+- Outdoor picking does not use the Rust/host-provided `outdoorBvh`; the V2 outdoor static resolver currently collapses that payload to node/item counts. This is not acceptable as the steady-state spatial query path because the host already provides object-grained static BVHs.
+- Env-cell picking preserves `localBvh` facts but indexes static object seed bounds directly instead of traversing the env-cell local BVH nodes/items.
+- Query records are stored in renderer-local placement space without an explicit reusable BVH root transform/reanchor model. This is too fragile for scene anchor/rebase behavior.
+- Draw-unit bounds and frontend-computed bounds are fallback/debug facts only. They must not remain the primary object-picking or broad-visibility index.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- static-scene-query static-picking static-coordinator client-runtime create-browser-v2-runtime`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+
 Acceptance criteria:
 
 - Browser mode can click the suspected black-background explicit object and produce enough diagnostics to decide whether the issue is material classification, missing texture alpha/palette alpha, or another decode/render path.
@@ -3756,9 +3785,54 @@ Acceptance criteria:
 - `landblock-env-cells` no longer appears as misleading empty texture-atlas work when the runtime only ingests source/query facts.
 - The data flow is compatible with future frustum culling: committed static scene records feed a query/index layer, and renderer residency remains downstream of scene/culling decisions.
 
+### Phase 12A3: BVH-Backed Static Scene Query Course Correct
+
+Status: planned. Immediate corrective phase after 12A2 and before 11E5.
+
+Purpose: replace the temporary linear AABB query backing with a runtime-owned static scene query that preserves and traverses host/prepared BVHs, keeps object-grained hit identity, and handles request-anchor/root-transform behavior without rebuilding static BVHs in the frontend.
+
+Current steering:
+
+- The host/Rust asset pipeline already provides static spatial acceleration data. V2 should preserve and use it rather than recomputing or flattening it into draw-unit bounds.
+- Object-level resolution is sufficient for this phase. Do not broaden into part/triangle picking unless a later inspection feature proves the need.
+- Prepared BVHs are source/static facts. The runtime query service owns live query state and root transforms; the renderer still does not own semantic picking or AC source identity.
+- V2 does not have live follow-mode rebasing yet. This phase should implement request-anchor/root-transform behavior that is compatible with future rebase/follow mode without pretending that camera-driven reanchoring exists today. For outdoor landblocks, the same canonical landblock BVH can be queried through a root translation derived from the active requested outdoor anchor. For env cells, query rays should be transformed into the env-cell/local root context or traversed with the cell root transform.
+- Draw-unit bounds may remain a fallback for payloads without BVHs or for renderer-output diagnostics, but tests must prove normal outdoor/env-cell picking uses BVH traversal.
+
+Deliverables:
+
+- Preserve host `outdoorBvh.nodes/items` in V2 outdoor static source payloads instead of reducing them to counts. Keep counts as summaries only.
+- Add typed outdoor BVH item facts that map each BVH item to object-grained `StaticObjectInstanceFacts` identity, source, object kind, bounds, and debug provenance.
+- Preserve and expose env-cell `localBvh.nodes/items` as queryable records keyed to env-cell static object seeds, render-geometry items, and portals. The first object-picking slice can return static object items only, but the index shape must not discard render/portal item identity.
+- Generalize static coordinator source-payload publication so outdoor static-object payloads can feed the query service before/independently of bake/materialization. `landblock-env-cells` remains source-only, but outdoor object source payloads should also be available to the query layer without waiting for renderer draw-unit output.
+- Add a shared BVH traversal helper for ray-vs-node AABB traversal with deterministic candidate ordering and no frontend BVH rebuild.
+- Refactor `StaticSceneQuery` around BVH roots:
+  - outdoor landblock roots with canonical source BVH plus current root translation,
+  - env-cell roots with cell-local BVH plus env-cell/root transform,
+  - scene-context gates for `outdoor` and `env-cell`,
+  - fallback linear records only when a payload lacks BVH data.
+- Extract/shared runtime static placement helpers so renderer materialization and query-root placement use the same outdoor landblock-to-anchor translation math.
+- Add explicit request-anchor/root-transform handling so a new static request can replace root placements or query transforms without rebuilding BVH nodes/items. This should be testable independently from WebGL renderer upload and should leave full camera-driven follow/rebase policy to a later phase.
+- Keep browser picker integration unchanged except for richer hit diagnostics. Browser mode still builds the ray and formats the neutral hit record; it does not own BVH traversal.
+- Tests proving outdoor static picking traverses `outdoorBvh` and returns object-grained hits without consulting draw-unit bounds.
+- Tests proving env-cell picking traverses the env-cell local BVH and respects the accepted/current cell context.
+- Tests proving outdoor static-object source payloads populate query roots without relying on materialized static-object draw units.
+- Tests proving request-anchor/root translation behavior: the same BVH root can move relative to renderer-local space and the pick result remains correct after replacing the root transform.
+- Tests proving draw-unit-bound fallback is only used for records without BVH data.
+
+Acceptance criteria:
+
+- Normal outdoor object picking uses preserved host `outdoorBvh` nodes/items, not materialized draw-unit bounds.
+- Normal env-cell object picking uses preserved env-cell `localBvh` nodes/items, not a flat scan over all seed bounds.
+- BVH roots remain canonical/source-owned with runtime root transforms; request-anchor changes do not rebuild static BVHs, and the shape remains compatible with later follow-mode rebase work.
+- Hits remain object-grained and include stable object/source/material diagnostic hooks sufficient for the black-background/cutout investigation.
+- The WebGL renderer remains uninvolved in semantic picking and does not gain AC object/source/BVH ownership.
+- `landblock-env-cells` remains source/query-only until env-cell geometry baking in Phase 13A; the BVH course correction must not reintroduce placeholder bake or empty atlas batches.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and focused static-scene query/runtime tests pass before returning to 11E5.
+
 ### Phase 11E5: Static Material Family Resteer
 
-Status: planned. Deferred behind the Phase 12A0-12A2 sequence on 2026-06-13 so browser/game-client picking can identify suspect explicit-object cutout materials before the remaining material-family resteer.
+Status: planned. Deferred behind the Phase 12A0-12A3 sequence on 2026-06-13 so browser/game-client picking can identify suspect explicit-object cutout materials before the remaining material-family resteer.
 
 Purpose: reassess static material parity after explicit-object coverage and target-scoped blended material work, before broadening static-object source coverage in Phase 12.
 
@@ -3962,7 +4036,7 @@ Manual verification milestones should be explicit:
 - Phase 9C: atlas ownership is reassessed before terrain material work builds on it.
 - Phase 10C: terrain material behavior is credible enough to compare against v1 terrain blend/layer behavior on named targets.
 - Phase 10D: terrain parity findings steer static object, inspection, dungeon, and cutover scope before broader enrichment starts.
-- Phase 12A0-12A2: bundled env-cell source loading, cell-level visibility traversal, runtime/static-scene `pickRay`, and browser-owned picker diagnostics can identify object-level static hits without renderer-owned semantic picking.
+- Phase 12A0-12A3: bundled env-cell source loading, cell-level visibility traversal, BVH-backed runtime/static-scene `pickRay`, root-transform/reanchor behavior, and browser-owned picker diagnostics can identify object-level static hits without renderer-owned semantic picking.
 - Phase 12B: outdoor terrain/static object behavior is reassessed before dungeon/interior and dynamic breadth.
 - Phase 13C: dungeon/interior behavior is compared against v1 on named targets before dynamic and cutover work.
 - Phase 14A: final design-vs-implementation reassessment happens before replacing the old browser display.

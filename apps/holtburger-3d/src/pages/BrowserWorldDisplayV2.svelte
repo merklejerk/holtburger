@@ -17,6 +17,7 @@
 		type V2FreeCameraState,
 	} from "../v2/camera/free-camera";
 	import { createBrowserV2Runtime } from "../v2/browser/create-browser-v2-runtime";
+	import { createBrowserStaticPickRay } from "../v2/browser/static-picking";
 	import {
 		createStaticWorkCommandFromLocation,
 		inferV2LandblockInputMode,
@@ -30,6 +31,7 @@
 		ManualStaticDomain,
 		RuntimeSnapshot,
 	} from "../v2/runtime/client-runtime";
+	import type { StaticScenePickHit } from "../v2/runtime/static-scene-query";
 	import type { TextureFilteringMode } from "../v2/textures/sampling-policy";
 	import PerformanceOverlay from "../v2/ui/PerformanceOverlay.svelte";
 	import {
@@ -42,6 +44,7 @@
 	const STATIC_INTEREST_REFRESH_DEBOUNCE_MS = 250;
 	const PERF_OVERLAY_SAMPLE_MS = 500;
 	const PERF_OVERLAY_EMA_ALPHA = 0.18;
+	const STATIC_PICK_CLICK_DRAG_THRESHOLD_PX = 3;
 	const TEXTURE_FILTERING_OPTIONS: readonly TextureFilteringMode[] = [
 		"nearest",
 		"linear",
@@ -70,6 +73,14 @@
 	let snapshot = $state<RuntimeSnapshot | null>(null);
 	let cameraState = $state<V2FreeCameraState>(createV2FreeCameraState());
 	let diagnosticsReportText = $state<string | null>(null);
+	let selectedStaticPick = $state<StaticScenePickHit | null>(null);
+	let pickPointerCandidate: {
+		readonly pointerId: number;
+		readonly startX: number;
+		readonly startY: number;
+		readonly context: V2ParsedLocationInput | null;
+		moved: boolean;
+	} | null = null;
 	let diagnosticsReportCopyStatus = $state<"copied" | "failed" | "ready">(
 		"ready",
 	);
@@ -144,6 +155,7 @@
 		}
 
 		submittedStaticLocation = parsedLocation;
+		selectedStaticPick = null;
 		requestStaticWorkForLocation(parsedLocation);
 	}
 
@@ -170,6 +182,7 @@
 	function evictStaticWork(): void {
 		clearStaticInterestRefresh();
 		submittedStaticLocation = null;
+		selectedStaticPick = null;
 		runtime?.evictStaticWork();
 	}
 
@@ -376,6 +389,16 @@
 			return;
 		}
 
+		if (event.button === 0) {
+			pickPointerCandidate = {
+				context: submittedStaticLocation,
+				moved: false,
+				pointerId: event.pointerId,
+				startX: event.clientX,
+				startY: event.clientY,
+			};
+		}
+
 		if (cameraController?.handlePointerDown(event, rootElement)) {
 			event.preventDefault();
 		}
@@ -385,6 +408,8 @@
 		if (isControlPanelEvent(event)) {
 			return;
 		}
+
+		updatePickPointerCandidate(event);
 
 		if (cameraController?.handlePointerMove(event)) {
 			event.preventDefault();
@@ -396,8 +421,13 @@
 			return;
 		}
 
+		const pickCandidate = pickPointerCandidate;
+		pickPointerCandidate = null;
 		if (cameraController?.handlePointerUp(event, rootElement)) {
 			event.preventDefault();
+		}
+		if (pickCandidate && shouldPickFromPointerUp(event, pickCandidate)) {
+			pickStaticAtPointer(event, pickCandidate.context);
 		}
 	}
 
@@ -439,12 +469,87 @@
 
 	function handleViewportBlur(): void {
 		cameraController?.handleBlur();
+		pickPointerCandidate = null;
 	}
 
 	function handleViewportContextMenu(event: MouseEvent): void {
 		if (!isControlPanelEvent(event)) {
 			event.preventDefault();
 		}
+	}
+
+	function updatePickPointerCandidate(event: PointerEvent): void {
+		if (
+			!pickPointerCandidate ||
+			pickPointerCandidate.pointerId !== event.pointerId
+		) {
+			return;
+		}
+
+		const distance = Math.hypot(
+			event.clientX - pickPointerCandidate.startX,
+			event.clientY - pickPointerCandidate.startY,
+		);
+		if (distance > STATIC_PICK_CLICK_DRAG_THRESHOLD_PX) {
+			pickPointerCandidate.moved = true;
+		}
+	}
+
+	function shouldPickFromPointerUp(
+		event: PointerEvent,
+		candidate: NonNullable<typeof pickPointerCandidate>,
+	): boolean {
+		return (
+			event.pointerId === candidate.pointerId &&
+			event.button === 0 &&
+			!candidate.moved
+		);
+	}
+
+	function pickStaticAtPointer(
+		event: PointerEvent,
+		contextLocation: V2ParsedLocationInput | null,
+	): void {
+		if (!runtime || !canvasElement || !contextLocation) {
+			selectedStaticPick = null;
+			return;
+		}
+
+		const context =
+			contextLocation.kind === "interior-cell"
+				? {
+						envCellId: contextLocation.envCellId,
+						kind: "env-cell" as const,
+						landblockId: contextLocation.landblockId,
+					}
+				: { kind: "outdoor" as const };
+		selectedStaticPick = runtime.pickStaticRay(
+			createBrowserStaticPickRay({
+				camera:
+					cameraController?.createFrameStateCamera() ??
+					createV2FreeCameraFrameStateCamera(cameraState),
+				clientX: event.clientX,
+				clientY: event.clientY,
+				context,
+				viewport: canvasElement.getBoundingClientRect(),
+			}),
+		);
+	}
+
+	function formatStaticPickSummary(hit: StaticScenePickHit | null): string {
+		if (!hit) {
+			return "none";
+		}
+
+		if (hit.itemKind === "outdoor-static-draw-unit") {
+			return `${hit.domain} ${hit.drawUnitId} ${hit.materialFamily}/${hit.materialPass} d=${hit.distance.toFixed(2)} materials ${hit.materialIds.map(formatHexId).join(",")}`;
+		}
+
+		return `env-cell ${formatHexId(hit.envCellId)} ${hit.instanceId} ${hit.source.sourceAssetKind}:${formatHexId(hit.source.sourceDid)} d=${hit.distance.toFixed(2)}`;
+	}
+
+	function formatHexId(value: number): string {
+		return `0x${value.toString(16).padStart(8, "0")}`;
 	}
 </script>
 
@@ -805,6 +910,22 @@
 							<dd>
 								{snapshot?.static.latestResolverFailure?.message ?? "none"}
 							</dd>
+						</div>
+						<div>
+							<dt>Scene query</dt>
+							<dd>
+								{#if snapshot}
+									out {snapshot.staticSceneQuery.outdoorRecordCount} env
+									{snapshot.staticSceneQuery.envCellRecordCount} lb
+									{snapshot.staticSceneQuery.envCellLandblockCount}
+								{:else}
+									pending
+								{/if}
+							</dd>
+						</div>
+						<div>
+							<dt>Selected static</dt>
+							<dd>{formatStaticPickSummary(selectedStaticPick)}</dd>
 						</div>
 						<div>
 							<dt>Host</dt>

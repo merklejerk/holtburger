@@ -138,6 +138,60 @@ describe("V2 client runtime", () => {
 		runtime.dispose();
 	});
 
+	it("ingests env-cell source facts without static materialization or atlas batches", async () => {
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer: new FakeRenderer(),
+		});
+
+		runtime.requestStaticWork({
+			domains: ["env-cells"],
+			envCellId: "0xda550100",
+			landblockId: "0xda55ffff",
+			locationKind: "interior-cell",
+		});
+		await flushPromises();
+
+		expect(runtime.createDiagnosticsReport()).toMatchObject({
+			domains: expect.arrayContaining([
+				expect.objectContaining({
+					kind: "texture-atlas",
+					summary: expect.objectContaining({
+						batchCount: 0,
+						emptyBatchCount: 0,
+					}),
+				}),
+			]),
+			runtime: expect.objectContaining({
+				committedStaticMaterializationRevisions: [],
+				materializedStaticDrawUnits: 0,
+				pendingStaticMaterializationRevisions: [],
+				sourceStaticDrawUnits: 0,
+			}),
+		});
+		runtime.dispose();
+	});
+
+	it("exposes runtime-owned static ray picking", async () => {
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer: new FakeRenderer(),
+		});
+
+		expect(
+			runtime.pickStaticRay({
+				context: { kind: "outdoor" },
+				ray: {
+					direction: { x: 0, y: 0, z: -1 },
+					origin: { x: 0, y: 0, z: 0 },
+				},
+			}),
+		).toBeNull();
+		runtime.dispose();
+	});
+
 	it("forwards committed static draw units and eviction deltas to the renderer", async () => {
 		const renderer = new FakeRenderer();
 		const resolver = new DeferredStaticResolver();

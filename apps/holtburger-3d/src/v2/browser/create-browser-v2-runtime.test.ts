@@ -18,7 +18,7 @@ describe("browser V2 runtime routing", () => {
 		expect(shouldUseBrowserWorkerBaker("outdoor-detail")).toBe(true);
 	});
 
-	it("routes env-cell bundles through source resolver and placeholder baker", () => {
+	it("routes env-cell bundles through source resolver without worker baking", () => {
 		expect(
 			shouldUseBrowserSourceResolver({
 				domain: "landblock-env-cells",

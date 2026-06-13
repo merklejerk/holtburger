@@ -33,7 +33,12 @@ export interface StaticMaterializationInput {
 
 export interface StaticMaterializationResult {
 	readonly drawUnitIdMappings: readonly StaticMaterializedDrawUnitIdMapping[];
+	readonly staticAuthoredDynamicSeeds: readonly string[];
 	readonly staticDelta: StaticResidencyDelta;
+	readonly staticPortalInteriorRecords: readonly string[];
+	readonly staticSourceMappings: readonly string[];
+	readonly staticSpatialRecords: readonly string[];
+	readonly staticVisibilityRecords: readonly string[];
 	readonly textureUpdate: TexturePlacementUpdate | null;
 }
 
@@ -61,6 +66,7 @@ export function materializeStaticCommit(
 
 	return {
 		drawUnitIdMappings: finePartitioned.drawUnitIdMappings,
+		...materializeStaticSidecars(input.commit, finePartitioned),
 		staticDelta: {
 			addedDrawUnitPlacements: finePartitioned.drawUnits.map((drawUnit) => ({
 				drawUnit,
@@ -124,6 +130,63 @@ function finePartitionStaticDrawUnits(
 interface RemappedStaticObjectDrawUnit {
 	readonly drawUnits: readonly StaticObjectGeometryStaticDrawUnit[];
 	readonly sourceDrawUnitId: string;
+}
+
+function materializeStaticSidecars(
+	commit: StaticCoordinatorCommitDelta,
+	finePartitioned: {
+		readonly remappedStaticObjectDrawUnits: readonly RemappedStaticObjectDrawUnit[];
+	},
+): Pick<
+	StaticMaterializationResult,
+	| "staticAuthoredDynamicSeeds"
+	| "staticPortalInteriorRecords"
+	| "staticSourceMappings"
+	| "staticSpatialRecords"
+	| "staticVisibilityRecords"
+> {
+	const remappedSourceDrawUnitIds = new Set(
+		finePartitioned.remappedStaticObjectDrawUnits.map(
+			(mapping) => mapping.sourceDrawUnitId,
+		),
+	);
+	const staticObjectDrawUnits = finePartitioned.remappedStaticObjectDrawUnits
+		.flatMap((mapping) => mapping.drawUnits);
+
+	return {
+		staticAuthoredDynamicSeeds: commit.staticAuthoredDynamicSeeds,
+		staticPortalInteriorRecords: commit.staticPortalInteriorRecords,
+		staticSourceMappings: [
+			...commit.staticSourceMappings.filter(
+				(record) => !hasAnyRecordDrawUnitId(record, remappedSourceDrawUnitIds),
+			),
+			...staticObjectDrawUnits.flatMap(
+				(drawUnit) => drawUnit.sourceMappingRecords,
+			),
+		],
+		staticSpatialRecords: [
+			...commit.staticSpatialRecords.filter(
+				(record) => !hasAnyRecordDrawUnitId(record, remappedSourceDrawUnitIds),
+			),
+			...staticObjectDrawUnits.flatMap((drawUnit) =>
+				drawUnit.spatialRecord ? [drawUnit.spatialRecord] : [],
+			),
+		],
+		staticVisibilityRecords: commit.staticVisibilityRecords,
+	};
+}
+
+function hasAnyRecordDrawUnitId(
+	record: string,
+	drawUnitIds: ReadonlySet<string>,
+): boolean {
+	for (const drawUnitId of drawUnitIds) {
+		if (record.startsWith(`${drawUnitId}:`)) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 function splitStaticObjectDrawUnit(
@@ -267,6 +330,7 @@ function remapStaticObjectDrawUnit(
 		drawUnit,
 		slotBySourceSlot,
 	);
+	const drawUnitId = createFineStaticDrawUnitId(drawUnit.drawUnitId, sliceIndex);
 	const summary = materialEntries[0] ?? drawUnit.materialEntries[0];
 	const textureUseIds = uniqueSortedStrings(
 		materialEntries.flatMap((entry) =>
@@ -287,7 +351,7 @@ function remapStaticObjectDrawUnit(
 			summary?.detailTextureTiling ?? drawUnit.detailTextureTiling,
 		detailTextureUseId:
 			summary?.detailTextureUseId ?? drawUnit.detailTextureUseId,
-		drawUnitId: createFineStaticDrawUnitId(drawUnit.drawUnitId, sliceIndex),
+		drawUnitId,
 		indexTextureUseId: summary?.indexTextureUseId ?? drawUnit.indexTextureUseId,
 		indexedTextureFormat:
 			summary?.indexedTextureFormat ?? drawUnit.indexedTextureFormat,
@@ -305,6 +369,10 @@ function remapStaticObjectDrawUnit(
 			summary?.primaryTextureUseId ?? drawUnit.primaryTextureUseId,
 		primaryTextureWrapMode:
 			summary?.primaryTextureWrapMode ?? drawUnit.primaryTextureWrapMode,
+		sourceMappingRecords: geometry.sourceMappingRecords.map((record) =>
+			replaceRecordDrawUnitId(record, drawUnit.drawUnitId, drawUnitId),
+		),
+		spatialRecord: `${drawUnitId}:bounds:${geometry.triangleCount}t`,
 		textureUseIds,
 	};
 }
@@ -318,6 +386,7 @@ function copyStaticObjectGeometryForMaterialSlots(
 	| "indexType"
 	| "materialSlotIndices"
 	| "positions"
+	| "sourceMappingRecords"
 	| "texCoords"
 	| "triangleCount"
 	| "vertexCount"
@@ -326,6 +395,7 @@ function copyStaticObjectGeometryForMaterialSlots(
 	const texCoords: number[] = [];
 	const materialSlotIndices: number[] = [];
 	const indices: number[] = [];
+	const sourceMappingRecords: string[] = [];
 	let triangleCount = 0;
 
 	for (
@@ -343,6 +413,12 @@ function copyStaticObjectGeometryForMaterialSlots(
 			continue;
 		}
 
+		const sourceTriangleIndex = indexOffset / 3;
+		const sourceMappingRecord =
+			drawUnit.sourceMappingRecords[sourceTriangleIndex];
+		if (sourceMappingRecord) {
+			sourceMappingRecords.push(sourceMappingRecord);
+		}
 		triangleCount += 1;
 
 		for (let corner = 0; corner < 3; corner += 1) {
@@ -373,10 +449,21 @@ function copyStaticObjectGeometryForMaterialSlots(
 		indexType,
 		materialSlotIndices: new Float32Array(materialSlotIndices),
 		positions: new Float32Array(positions),
+		sourceMappingRecords,
 		texCoords: new Float32Array(texCoords),
 		triangleCount,
 		vertexCount,
 	};
+}
+
+function replaceRecordDrawUnitId(
+	record: string,
+	sourceDrawUnitId: string,
+	targetDrawUnitId: string,
+): string {
+	return record.startsWith(`${sourceDrawUnitId}:`)
+		? `${targetDrawUnitId}:${record.slice(sourceDrawUnitId.length + 1)}`
+		: record;
 }
 
 function createFineStaticDrawUnitId(drawUnitId: string, sliceIndex: number): string {
@@ -406,6 +493,15 @@ function createTextureBindingFactsByTextureUseId(
 			textureRefId: placement.textureRefId,
 			textureUseId: placement.textureUseId,
 			textureWidth: placement.width,
+		});
+	}
+	for (const placement of textureUpdate.textureUsePlacements) {
+		bindings.set(placement.textureUseId, {
+			rect: placement.rect,
+			textureHeight: placement.textureHeight,
+			textureRefId: placement.textureRefId,
+			textureUseId: placement.textureUseId,
+			textureWidth: placement.textureWidth,
 		});
 	}
 	for (const binding of textureUpdate.drawUnitBindings) {

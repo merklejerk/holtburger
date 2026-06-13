@@ -17,6 +17,7 @@ import type {
 	TextureDrawUnitBinding,
 	TerrainTextureRolePageKind,
 	TexturePlacementUpdate,
+	TextureUsePlacement,
 } from "../renderer/types";
 import {
 	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
@@ -254,6 +255,7 @@ export class TextureManager {
 		);
 		const placements: RuntimeTexturePlacement[] = [];
 		const drawUnitBindings: TextureDrawUnitBinding[] = [];
+		const textureUsePlacements: TextureUsePlacement[] = [];
 		const terrainRolePageSlots = new TerrainDrawUnitRolePageSlots((overflow) => {
 			this.#recentTerrainRolePageOverflows = appendBounded(
 				this.#recentTerrainRolePageOverflows,
@@ -319,6 +321,13 @@ export class TextureManager {
 			if (!entry) {
 				continue;
 			}
+			textureUsePlacements.push({
+				rect: entry.rect,
+				textureHeight: entry.textureHeight,
+				textureRefId: entry.textureRefId,
+				textureUseId: textureUse.textureUseId,
+				textureWidth: entry.textureWidth,
+			});
 			for (const drawUnitId of textureUse.ownerDrawUnitIds) {
 				const rolePage = resolveTextureRolePageSlot({
 					domain: textureUse.domain,
@@ -346,6 +355,7 @@ export class TextureManager {
 		if (
 			placements.length === 0 &&
 			removedTextureRefIds.length === 0 &&
+			textureUsePlacements.length === 0 &&
 			drawUnitBindings.length === 0
 		) {
 			return null;
@@ -357,6 +367,7 @@ export class TextureManager {
 			drawUnitBindings,
 			placements,
 			removedTextureRefIds,
+			textureUsePlacements,
 			revision: this.#revision,
 		};
 	}

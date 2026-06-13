@@ -42,6 +42,7 @@ interface DynamicResidencyDelta {
 export interface TexturePlacementUpdate {
 	readonly placements: readonly TexturePlacement[];
 	readonly removedTextureRefIds: readonly string[];
+	readonly textureUsePlacements: readonly TextureUsePlacement[];
 	readonly drawUnitBindings: readonly TextureDrawUnitBinding[];
 	readonly revision: number;
 }
@@ -69,6 +70,14 @@ export interface TextureDrawUnitBinding {
 	readonly textureUseId: string;
 	readonly textureRefId: string;
 	readonly rolePage: TextureRolePageSlot;
+	readonly textureWidth: number;
+	readonly textureHeight: number;
+	readonly rect: readonly [number, number, number, number];
+}
+
+export interface TextureUsePlacement {
+	readonly textureUseId: string;
+	readonly textureRefId: string;
 	readonly textureWidth: number;
 	readonly textureHeight: number;
 	readonly rect: readonly [number, number, number, number];

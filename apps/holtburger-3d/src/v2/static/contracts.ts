@@ -760,6 +760,8 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly indexType: "uint16" | "uint32";
 	readonly vertexCount: number;
 	readonly triangleCount: number;
+	readonly sourceMappingRecords: readonly string[];
+	readonly spatialRecord: string | null;
 	readonly materialEntries: readonly StaticObjectMaterialTableEntry[];
 	/**
 	 * Derived one-entry summary retained while the renderer/test surface cuts over
@@ -944,6 +946,11 @@ export interface StaticCoordinatorCommitDelta {
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
 	readonly removedDrawUnitIds: readonly string[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
+	readonly staticSpatialRecords: readonly string[];
+	readonly staticVisibilityRecords: readonly string[];
+	readonly staticPortalInteriorRecords: readonly string[];
+	readonly staticSourceMappings: readonly string[];
+	readonly staticAuthoredDynamicSeeds: readonly string[];
 	readonly revision: number;
 }
 

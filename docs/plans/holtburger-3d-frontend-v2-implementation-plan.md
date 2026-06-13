@@ -2907,7 +2907,7 @@ Verification:
 
 ### Phase 11E4A3: Static Object Material Binding Tables
 
-Status: in progress; Phase 11E4A3a through Phase 11E4A3e complete. Phase 11E4A3f is the next implementation phase.
+Status: complete on 2026-06-12. Phase 11E4B is the next implementation phase.
 
 Purpose: recover V1-style cross-material static-object compaction before `outdoor-detail` generated scenery and transparent object/part sorting broaden the static-object surface area.
 
@@ -2984,9 +2984,13 @@ Implementation split:
   - Status: complete on 2026-06-12 for runtime fine splitting of renderer draw units, material table/selector remapping, texture binding remapping from committed placement facts, and eviction-id expansion. Source/spatial metadata remapping remains a follow-up because the runtime commit delta does not carry those records.
 - Phase 11E4A3f: Parity, Diagnostics, And Cleanup.
   - Port V1 parity expectations around RGBA and indexed material-table overflow partitioning rather than bypassing.
+  - Close or deliberately codify the fine-split provenance contract before enabling `outdoor-detail`: either carry `staticSourceMappings`/`staticSpatialRecords` through the runtime materialization boundary and rewrite them for `source#fine-*` draw-unit ids, or explicitly keep picking/inspection keyed to coarse source draw units with tests proving diagnostics do not lie.
+  - Tighten the texture-manager/materializer handoff so static-object fine splitting can reason from committed texture-use placement facts even when the original coarse draw unit would overflow role-page binding assignment.
+  - Clarify diagnostics semantics for coarse committed draw-unit counts versus post-materialization renderer draw-unit counts, so live reports do not imply a batching regression when fine splitting adds legal renderer slices.
   - Add live/manual diagnostic expectations proving texture A/B/C merge into fewer draw units when role-slot/table capacity allows, and split deterministically when it does not.
   - Remove or downgrade legacy singular draw-unit fields once no renderer/test path consumes them, or clearly mark any retained singular fields as derived debug summaries.
   - Run full V2 app verification plus a browser/GPU smoke test if the WebGL2 shader contract changes are nontrivial.
+  - Status: complete on 2026-06-12 for fine-split provenance sidecars, committed texture-use placement facts, coarse/materialized draw-unit diagnostics, and focused parity tests. Legacy singular draw-unit fields remain documented derived summaries until a later renderer/debug cleanup can remove them without broad churn.
 
 Outstanding Phase 11E4A3 dry run, 2026-06-12:
 
@@ -3119,9 +3123,29 @@ Phase 11E4A3e spicy bits:
 
 Phase 11E4A3e failed to close:
 
-- Source mappings and spatial records are not remapped across fine-split ids because those records are not present at the runtime materialization boundary. Phase 11E4A3f should either extend the commit delta to carry them through materialization or explicitly keep picking/inspection keyed to coarse draw units until a later source-record materialization pass.
+- Source mappings and spatial records were not remapped across fine-split ids because those records were not present at the runtime materialization boundary. Phase 11E4A3f extended the commit/materialization contract and static-object draw-unit sidecars so fine-split provenance now follows materialized ids.
 - No live browser/manual diagnostics were rerun after the fine splitter. The expected common-landblock numbers should not drop further unless a coarse draw unit exceeds role-page/material-entry capacity; this phase is mainly a correctness guard for legal renderer residency.
-- Texture-manager static role-page overflow diagnostics can still appear for cases where an over-capacity texture use is already resident and no placement/binding fact reaches the materializer. Closing that fully needs a tighter texture-manager handoff: committed texture-use placement facts independent of original draw-unit role-slot success.
+- Texture-manager static role-page overflow diagnostics could still appear for cases where an over-capacity texture use was already resident and no placement/binding fact reached the materializer. Phase 11E4A3f added committed texture-use placement facts independent of original draw-unit role-slot success.
+
+Phase 11E4A3f execution notes:
+
+- Added `sourceMappingRecords` and `spatialRecord` to static-object geometry draw units, populated by the static-object baker from the same partition triangle order used for geometry baking.
+- Extended `StaticCoordinatorCommitDelta` to carry static source mappings, spatial records, visibility records, portal/interior records, and authored dynamic seeds through the runtime materialization boundary.
+- Updated placement-aware materialization to slice static-object source mapping records in the same triangle loop that slices geometry and selectors, then rewrite fine-split ids such as `source#fine-1` into materialized source/spatial sidecars.
+- Added committed `textureUsePlacements` to `TexturePlacementUpdate`. Texture manager now emits per-texture-use page/rect facts independently from draw-unit role-page binding success, so the materializer can fine-split even when the original coarse role binding would overflow.
+- Added runtime diagnostics for `sourceStaticDrawUnits` and `materializedStaticDrawUnits`, making coarse coordinator counts distinct from post-materialization renderer submission counts.
+- Added focused tests proving fine-split source/spatial records follow the materialized draw-unit ids and proving texture manager overflow still exposes every committed texture-use placement.
+
+Phase 11E4A3f spicy bits:
+
+- Static-object spatial records are still lightweight string summaries (`drawUnitId:bounds:Nt`), not true recomputed bounds. Fine splitting now keeps ids and triangle counts honest, but actual per-slice bounds would require carrying numeric bounds through the bake/materialization contract.
+- The temporary singular static-object summary fields remain. They are documented as derived summaries and renderer code reads material tables, but deleting them now would be broader cleanup than this phase needed.
+- Runtime now materializes sidecars, but no downstream V2 picker/inspection system consumes them yet. The contract is ready; proving UI behavior waits for the future inspection/picking surface.
+
+Phase 11E4A3f failed to close:
+
+- No live browser/manual diagnostics were rerun for an outdoor-buildings landblock after the provenance/diagnostics cleanup.
+- Browser/GPU smoke was not rerun because this phase did not change shader code or WebGL upload layout.
 
 ### Phase 11E4B: Outdoor Detail Generated Scenery Cutout
 

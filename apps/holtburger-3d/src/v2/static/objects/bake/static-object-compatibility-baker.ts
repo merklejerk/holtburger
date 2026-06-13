@@ -107,23 +107,46 @@ function bakeStaticObjectCompatibilityItem(
 			drawUnits[index]?.drawUnitId ?? "",
 		]),
 	);
+	const sourceMappingsBySliceId = new Map(
+		partitionPlan.partitions.map((partition) => {
+			const drawUnitId = drawUnitIdBySliceId.get(partition.sliceId);
+			return [
+				partition.sliceId,
+				drawUnitId
+					? partition.triangles.map((triangle) =>
+							createStaticObjectSourceMapping(drawUnitId, triangle),
+						)
+					: [],
+			] as const;
+		}),
+	);
+	const spatialRecordBySliceId = new Map(
+		partitionPlan.partitions.map((partition) => {
+			const drawUnitId = drawUnitIdBySliceId.get(partition.sliceId);
+			return [
+				partition.sliceId,
+				`${drawUnitId ?? partition.sliceId}:bounds:${partition.triangleCount}t`,
+			] as const;
+		}),
+	);
 
 	return {
-		drawUnits,
-		materialCoverage: partitionPlan.materialCoverage,
-		sourceMappings: partitionPlan.partitions.flatMap((partition) => {
-			const drawUnitId = drawUnitIdBySliceId.get(partition.sliceId);
-			if (!drawUnitId) {
-				return [];
+		drawUnits: drawUnits.map((drawUnit, index) => {
+			const partition = partitionPlan.partitions[index];
+			if (drawUnit.kind !== "static-object-geometry" || !partition) {
+				return drawUnit;
 			}
-			return partition.triangles.map((triangle) =>
-				createStaticObjectSourceMapping(drawUnitId, triangle),
-			);
+
+			return {
+				...drawUnit,
+				sourceMappingRecords:
+					sourceMappingsBySliceId.get(partition.sliceId) ?? [],
+				spatialRecord: spatialRecordBySliceId.get(partition.sliceId) ?? null,
+			};
 		}),
-		spatialRecords: partitionPlan.partitions.map((partition) => {
-			const drawUnitId = drawUnitIdBySliceId.get(partition.sliceId);
-			return `${drawUnitId ?? partition.sliceId}:bounds:${partition.triangleCount}t`;
-		}),
+		materialCoverage: partitionPlan.materialCoverage,
+		sourceMappings: [...sourceMappingsBySliceId.values()].flat(),
+		spatialRecords: [...spatialRecordBySliceId.values()],
 		textureUses: createStaticObjectBakeTextureUses({
 			partitions: partitionPlan.partitions,
 			staticBatchId: input.staticBatchId,
@@ -228,6 +251,8 @@ function createStaticObjectGeometryDrawUnit(options: {
 		paletteTextureUseId: materialEntry.paletteTextureUseId,
 		primaryTextureUseId: materialEntry.primaryTextureUseId,
 		primaryTextureWrapMode: materialEntry.primaryTextureWrapMode,
+		sourceMappingRecords: [],
+		spatialRecord: null,
 		texCoords: geometry.texCoords,
 		materialSlotIndices: geometry.materialSlotIndices,
 		textureUseIds,

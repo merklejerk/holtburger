@@ -129,7 +129,12 @@ describe("V2 static coordinator", () => {
 				addedDrawUnits: [createPlaceholderDrawUnit("terrain-a")],
 				removedDrawUnitIds: [],
 				revision: 1,
+				staticAuthoredDynamicSeeds: [],
 				staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
+				staticPortalInteriorRecords: [],
+				staticSourceMappings: [],
+				staticSpatialRecords: [],
+				staticVisibilityRecords: [],
 				textureUses: [],
 			},
 		]);
@@ -149,7 +154,12 @@ describe("V2 static coordinator", () => {
 			addedDrawUnits: [],
 			removedDrawUnitIds: ["terrain-a"],
 			revision: 2,
+			staticAuthoredDynamicSeeds: [],
 			staticBatchId: "static-batch:2:evict",
+			staticPortalInteriorRecords: [],
+			staticSourceMappings: [],
+			staticSpatialRecords: [],
+			staticVisibilityRecords: [],
 			textureUses: [],
 		});
 		expect(coordinator.createSnapshot().committedDrawUnits).toBe(0);

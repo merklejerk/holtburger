@@ -125,7 +125,9 @@ describe("V2 client runtime", () => {
 			kind: "runtime-diagnostics-report",
 			runtime: {
 				lastStaticRequest: "outdoor-landblock|0xda55ffff|terrain",
+				materializedStaticDrawUnits: 0,
 				pendingStaticMaterializationRevisions: [],
+				sourceStaticDrawUnits: 0,
 				status: "static-active",
 			},
 		});
@@ -243,7 +245,9 @@ describe("V2 client runtime", () => {
 		expect(snapshots.at(-1)?.staticMaterialization).toEqual({
 			committedRevisions: [1],
 			failed: [],
+			materializedDrawUnits: 1,
 			pendingRevisions: [],
+			sourceDrawUnits: 1,
 		});
 		unsubscribe();
 		runtime.dispose();
@@ -360,7 +364,9 @@ describe("V2 client runtime", () => {
 		expect(snapshots.at(-1)?.staticMaterialization).toEqual({
 			committedRevisions: [],
 			failed: [{ message: "prepared texture unavailable", revision: 1 }],
+			materializedDrawUnits: 0,
 			pendingRevisions: [],
+			sourceDrawUnits: 0,
 		});
 		expect(
 			runtime.createDiagnosticsReport().runtime.failedStaticMaterializations,

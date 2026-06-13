@@ -35,6 +35,8 @@ interface RuntimeDiagnosticsRuntimeSummary {
 	readonly pendingStaticMaterializationRevisions: readonly number[];
 	readonly committedStaticMaterializationRevisions: readonly number[];
 	readonly failedStaticMaterializations: readonly RuntimeDiagnosticsFailure[];
+	readonly sourceStaticDrawUnits: number;
+	readonly materializedStaticDrawUnits: number;
 }
 
 interface RuntimeDiagnosticsFailure {

@@ -28,6 +28,8 @@ describe("V2 static materializer", () => {
 		});
 
 		expect(materialized.textureUpdate).toBe(textureUpdate);
+		expect(materialized.staticSourceMappings).toEqual([]);
+		expect(materialized.staticSpatialRecords).toEqual([]);
 		expect(materialized.staticDelta).toEqual({
 			addedDrawUnitPlacements: [
 				{
@@ -130,6 +132,17 @@ describe("V2 static materializer", () => {
 				rolePage: { kind: "static-base-color", slot: 0 },
 			},
 		]);
+		expect(materialized.staticSourceMappings).toEqual([
+			"static-table:source:0",
+			"static-table:source:1",
+			"static-table:source:2",
+			"static-table:source:3",
+			"static-table#fine-1:source:4",
+		]);
+		expect(materialized.staticSpatialRecords).toEqual([
+			"static-table:bounds:4t",
+			"static-table#fine-1:bounds:1t",
+		]);
 	});
 
 	it("expands removed static draw unit ids through previous materialization mappings", () => {
@@ -138,7 +151,12 @@ describe("V2 static materializer", () => {
 				addedDrawUnits: [],
 				removedDrawUnitIds: ["static-table"],
 				revision: 8,
+				staticAuthoredDynamicSeeds: [],
 				staticBatchId: "batch-a",
+				staticPortalInteriorRecords: [],
+				staticSourceMappings: [],
+				staticSpatialRecords: [],
+				staticVisibilityRecords: [],
 				textureUses: [],
 			},
 			materializedDrawUnitIdsBySourceDrawUnitId: new Map([
@@ -163,7 +181,12 @@ function createCommitDelta(options: {
 		addedDrawUnits: options.addedDrawUnits,
 		removedDrawUnitIds: [],
 		revision: 7,
+		staticAuthoredDynamicSeeds: [],
 		staticBatchId: "batch-a",
+		staticPortalInteriorRecords: [],
+		staticSourceMappings: [],
+		staticSpatialRecords: [],
+		staticVisibilityRecords: [],
 		textureUses: options.textureUses,
 	};
 }
@@ -253,10 +276,19 @@ function createTexturePlacementUpdate(
 				textureUseId,
 				textureWidth: 1,
 			},
-		],
+			],
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,
+		textureUsePlacements: [
+			{
+				rect: [0, 0, 1, 1],
+				textureHeight: 1,
+				textureRefId: "texture-ref-a",
+				textureUseId,
+				textureWidth: 1,
+			},
+		],
 	};
 }
 
@@ -307,6 +339,11 @@ function createStaticObjectDrawUnit(
 		positions: new Float32Array(positions),
 		primaryTextureUseId: textureUseIds[0] ?? null,
 		primaryTextureWrapMode: "clamp",
+		sourceMappingRecords: Array.from(
+			{ length: materialCount },
+			(_, index) => `${drawUnitId}:source:${index}`,
+		),
+		spatialRecord: `${drawUnitId}:bounds:${materialCount}t`,
 		texCoords: new Float32Array(texCoords),
 		textureUseIds,
 		triangleCount: materialCount,
@@ -340,7 +377,10 @@ function createStaticObjectTexturePlacementUpdate(
 ): TexturePlacementUpdate {
 	return {
 		drawUnitBindings: [],
-		placements: drawUnit.textureUseIds.map((textureUseId, index) => ({
+		placements: [],
+		removedTextureRefIds: [],
+		revision: 3,
+		textureUsePlacements: drawUnit.textureUseIds.map((textureUseId, index) => ({
 			anisotropy: 1,
 			filteringMode: "nearest",
 			format: "rgba8",
@@ -357,7 +397,5 @@ function createStaticObjectTexturePlacementUpdate(
 			wrapS: "clamp-to-edge",
 			wrapT: "clamp-to-edge",
 		})),
-		removedTextureRefIds: [],
-		revision: 3,
 	};
 }

@@ -27,7 +27,9 @@ export function planScheduledStaticWork(
 	}
 
 	if (demand.location.kind === "interior-cell") {
-		const landblockId = normalizeOutdoorLandblockId(demand.location.landblockId);
+		const landblockId = normalizeOutdoorLandblockId(
+			demand.location.landblockId,
+		);
 
 		return [
 			createScheduledStaticWork({

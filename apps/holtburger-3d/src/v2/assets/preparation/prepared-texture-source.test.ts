@@ -17,16 +17,18 @@ describe("V2 prepared texture source preparation", () => {
 	});
 
 	it("derives index prepared texture transport policy from semantic usage", () => {
-		expect(createPreparedTextureHostKey(createTextureUse({ usage: "index8" })))
-			.toEqual({
-				id: "06000010?cs=data&mips=none&out=r8&usage=raw",
-				kind: "prepared-texture",
-			});
-		expect(createPreparedTextureHostKey(createTextureUse({ usage: "index16" })))
-			.toEqual({
-				id: "06000010?cs=data&mips=none&out=index16&usage=raw",
-				kind: "prepared-texture",
-			});
+		expect(
+			createPreparedTextureHostKey(createTextureUse({ usage: "index8" })),
+		).toEqual({
+			id: "06000010?cs=data&mips=none&out=r8&usage=raw",
+			kind: "prepared-texture",
+		});
+		expect(
+			createPreparedTextureHostKey(createTextureUse({ usage: "index16" })),
+		).toEqual({
+			id: "06000010?cs=data&mips=none&out=index16&usage=raw",
+			kind: "prepared-texture",
+		});
 	});
 
 	it("converts normalized rgba8 payloads into direct texture sources", () => {
@@ -208,9 +210,7 @@ describe("V2 prepared texture source preparation", () => {
 			width: 3,
 		});
 		expect(Array.from(source.pixels)).toEqual([
-			0x11, 0x22, 0x33, 0xff,
-			0x77, 0x88, 0x99, 0xff,
-			0xaa, 0xbb, 0xcc, 0xff,
+			0x11, 0x22, 0x33, 0xff, 0x77, 0x88, 0x99, 0xff, 0xaa, 0xbb, 0xcc, 0xff,
 		]);
 	});
 });
@@ -240,9 +240,7 @@ function createPreparedAsset(options: {
 	readonly width?: number;
 }): PreparedAsset {
 	return {
-		key: createPreparedTextureHostKey(
-			createTextureUse(),
-		),
+		key: createPreparedTextureHostKey(createTextureUse()),
 		payload: createPreparedTexturePayload(options),
 		preparedAt: "test",
 		revision: 1,

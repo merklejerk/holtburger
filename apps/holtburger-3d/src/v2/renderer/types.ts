@@ -99,10 +99,7 @@ export type TerrainTextureRolePageKind = Extract<
 
 export type StaticObjectTextureRolePageKind = Extract<
 	TextureRolePageKind,
-	| "static-base-color"
-	| "static-detail"
-	| "static-index"
-	| "static-palette"
+	"static-base-color" | "static-detail" | "static-index" | "static-palette"
 >;
 
 interface TextureRolePageSlot {

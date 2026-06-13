@@ -3,9 +3,7 @@ import {
 	formatStaticLandblockProductKey,
 	type StaticLandblockProductKey,
 } from "../../landblock-render-product";
-import {
-	type RenderVec4,
-} from "../../render-math";
+import { type RenderVec4 } from "../../render-math";
 import { buildPolygonSetRenderGeometry } from "../../indexed-render-geometry";
 import type { StaticBundleTexturePage } from "../../static-bundle-layer";
 import {
@@ -176,7 +174,8 @@ export function evictWebgl2StructuredInteriorProductResources({
 	productKey: StaticLandblockProductKey;
 }): void {
 	const productIdentityKey = formatStaticLandblockProductKey(productKey);
-	for (const cellKey of store.cellKeysByProductKey.get(productIdentityKey) ?? []) {
+	for (const cellKey of store.cellKeysByProductKey.get(productIdentityKey) ??
+		[]) {
 		store.cellsByKey.get(cellKey)?.dispose();
 		store.cellsByKey.delete(cellKey);
 	}
@@ -315,10 +314,7 @@ function createWebgl2StructuredInteriorCellResource({
 			: null;
 	const triangleCount =
 		materialSlices.length > 0
-			? materialSlices.reduce(
-					(total, slice) => total + slice.triangleCount,
-					0,
-				)
+			? materialSlices.reduce((total, slice) => total + slice.triangleCount, 0)
 			: (fallbackShell?.triangleCount ?? 0);
 	return {
 		key: describeStructuredInteriorResourceKey(artifact, cell),
@@ -511,10 +507,10 @@ function describeStructuredInteriorProductResourceSignature(
 ): string {
 	return [
 		artifact.key,
-		artifact.structuredInteriorTexturePages.map(describeTexturePageKey).join(","),
-		artifact.structuredInteriorTexturePageRefs
-			.map((ref) => ref.key)
+		artifact.structuredInteriorTexturePages
+			.map(describeTexturePageKey)
 			.join(","),
+		artifact.structuredInteriorTexturePageRefs.map((ref) => ref.key).join(","),
 		artifact.structuredInteriorMaterialRecords
 			.map((record) => record.key)
 			.join(","),

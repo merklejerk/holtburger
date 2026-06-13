@@ -18,7 +18,9 @@ export class AtlasTexturePacker implements TexturePacker {
 
 export class ShelfTexturePacker extends AtlasTexturePacker {}
 
-function packTexturesWithAtlasLayout(job: TexturePackingJob): TexturePackingResult {
+function packTexturesWithAtlasLayout(
+	job: TexturePackingJob,
+): TexturePackingResult {
 	for (const entry of job.sources) {
 		const { source } = entry;
 		if (source.format !== job.page.format) {

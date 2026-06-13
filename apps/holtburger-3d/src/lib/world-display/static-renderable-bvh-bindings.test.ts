@@ -68,7 +68,9 @@ describe("static renderable BVH bindings", () => {
 	});
 
 	it("formats stable static render batch ids", () => {
-		expect(staticRenderableBatchId("group/a")).toBe("static-renderable:group/a");
+		expect(staticRenderableBatchId("group/a")).toBe(
+			"static-renderable:group/a",
+		);
 	});
 });
 

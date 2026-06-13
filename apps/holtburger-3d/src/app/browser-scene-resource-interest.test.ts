@@ -4,7 +4,10 @@ import {
 	createSceneResourceInterestFromBrowserDestination,
 	createSceneResourceInterestFromBrowserMode,
 } from "./browser-scene-resource-interest";
-import { createBrowserModeState, parseBrowserLocationInput } from "./browser-mode";
+import {
+	createBrowserModeState,
+	parseBrowserLocationInput,
+} from "./browser-mode";
 import { describeSceneResourceInterestKey } from "../lib/scene-runtime/scene-resource-interest";
 
 describe("browser scene resource interest adapter", () => {
@@ -35,9 +38,7 @@ describe("browser scene resource interest adapter", () => {
 			describeSceneResourceInterestKey(
 				createSceneResourceInterestFromBrowserMode(browserMode),
 			),
-		).toBe(
-			"outdoor:0xda55ffff:terrain-0:buildings--1:detail--1:env-cells--1",
-		);
+		).toBe("outdoor:0xda55ffff:terrain-0:buildings--1:detail--1:env-cells--1");
 	});
 
 	it("keeps the browser adapter one-way from browser state into neutral scene interest", () => {
@@ -58,8 +59,6 @@ describe("browser scene resource interest adapter", () => {
 					envCellLodRadius: 0,
 				}),
 			),
-		).toBe(
-			"interior:0xda550155:terrain-0:buildings-0:detail-0:env-cells-0",
-		);
+		).toBe("interior:0xda550155:terrain-0:buildings-0:detail-0:env-cells-0");
 	});
 });

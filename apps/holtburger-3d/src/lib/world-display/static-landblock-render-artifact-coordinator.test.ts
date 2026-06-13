@@ -23,7 +23,8 @@ describe("static landblock render artifact coordinator", () => {
 			onProductCommitted: (result) => {
 				committedRequestIds.push(result.requestId);
 			},
-			onStoreChanged: (productSet) => productSets.push(productSet.residentCount),
+			onStoreChanged: (productSet) =>
+				productSets.push(productSet.residentCount),
 		});
 
 		coordinator.syncSceneInterest(
@@ -129,7 +130,11 @@ describe("static landblock render artifact coordinator", () => {
 
 	it("submits dungeon env-cell products for indoor destinations", () => {
 		const client = new MockLandblockProductClient();
-		const destination = parseBrowserLocationInput("da550100", "manual", "dungeon");
+		const destination = parseBrowserLocationInput(
+			"da550100",
+			"manual",
+			"dungeon",
+		);
 		expect(destination).not.toBeNull();
 		const coordinator = new StaticLandblockRenderArtifactCoordinator({
 			client,

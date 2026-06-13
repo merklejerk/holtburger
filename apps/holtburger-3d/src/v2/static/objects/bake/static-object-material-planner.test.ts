@@ -33,12 +33,7 @@ describe("V2 static object material planner", () => {
 			renderCoverage: "classified-render-candidate",
 			textureRoles: [],
 		});
-		expect(plan.color).toEqual([
-			0x33 / 255,
-			0x66 / 255,
-			0x99 / 255,
-			1,
-		]);
+		expect(plan.color).toEqual([0x33 / 255, 0x66 / 255, 0x99 / 255, 1]);
 		expect(plan.emissiveColor).toEqual([0, 0, 0]);
 	});
 
@@ -101,7 +96,10 @@ describe("V2 static object material planner", () => {
 				paletteId: 0x04000020,
 			}),
 			paletteSources: createPaletteSources({ paletteId: 0x04000020 }),
-			textureRefs: createTextureRefs({ formatRaw: 0x29, paletteId: 0x04000010 }),
+			textureRefs: createTextureRefs({
+				formatRaw: 0x29,
+				paletteId: 0x04000010,
+			}),
 		});
 
 		expect(plan).toMatchObject({
@@ -167,7 +165,10 @@ describe("V2 static object material planner", () => {
 					},
 				},
 			],
-			textureRefs: createTextureRefs({ formatRaw: 0x29, paletteId: 0x04000010 }),
+			textureRefs: createTextureRefs({
+				formatRaw: 0x29,
+				paletteId: 0x04000010,
+			}),
 		});
 
 		expect(plan.materialUseKey).toContain("04000030:16-32");
@@ -204,7 +205,10 @@ describe("V2 static object material planner", () => {
 		const plan = classifyStaticObjectMaterial({
 			material: createTexturedMaterial(),
 			paletteSources: createPaletteSources({ paletteId: 0x04000010 }),
-			textureRefs: createTextureRefs({ formatRaw: 0x65, paletteId: 0x04000010 }),
+			textureRefs: createTextureRefs({
+				formatRaw: 0x65,
+				paletteId: 0x04000010,
+			}),
 		});
 
 		expect(plan).toMatchObject({

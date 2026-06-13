@@ -150,8 +150,10 @@ function materializeStaticSidecars(
 			(mapping) => mapping.sourceDrawUnitId,
 		),
 	);
-	const staticObjectDrawUnits = finePartitioned.remappedStaticObjectDrawUnits
-		.flatMap((mapping) => mapping.drawUnits);
+	const staticObjectDrawUnits =
+		finePartitioned.remappedStaticObjectDrawUnits.flatMap(
+			(mapping) => mapping.drawUnits,
+		);
 
 	return {
 		staticAuthoredDynamicSeeds: commit.staticAuthoredDynamicSeeds,
@@ -193,7 +195,10 @@ function splitStaticObjectDrawUnit(
 	drawUnit: StaticObjectGeometryStaticDrawUnit,
 	bindings: ReadonlyMap<string, StaticTextureBindingFacts>,
 ): readonly StaticObjectGeometryStaticDrawUnit[] {
-	const slices = createStaticObjectMaterialSlices(drawUnit.materialEntries, bindings);
+	const slices = createStaticObjectMaterialSlices(
+		drawUnit.materialEntries,
+		bindings,
+	);
 	if (slices.length === 1) {
 		return [remapStaticObjectDrawUnit(drawUnit, slices[0]!, 0)];
 	}
@@ -307,7 +312,9 @@ function createEmptyStaticRolePageSets(): StaticRolePageSets {
 	};
 }
 
-function cloneStaticRolePageSets(pages: StaticRolePageSets): StaticRolePageSets {
+function cloneStaticRolePageSets(
+	pages: StaticRolePageSets,
+): StaticRolePageSets {
 	return {
 		baseColor: new Set(pages.baseColor),
 		detail: new Set(pages.detail),
@@ -330,7 +337,10 @@ function remapStaticObjectDrawUnit(
 		drawUnit,
 		slotBySourceSlot,
 	);
-	const drawUnitId = createFineStaticDrawUnitId(drawUnit.drawUnitId, sliceIndex);
+	const drawUnitId = createFineStaticDrawUnitId(
+		drawUnit.drawUnitId,
+		sliceIndex,
+	);
 	const summary = materialEntries[0] ?? drawUnit.materialEntries[0];
 	const textureUseIds = uniqueSortedStrings(
 		materialEntries.flatMap((entry) =>
@@ -467,7 +477,10 @@ function replaceRecordDrawUnitId(
 		: record;
 }
 
-function createFineStaticDrawUnitId(drawUnitId: string, sliceIndex: number): string {
+function createFineStaticDrawUnitId(
+	drawUnitId: string,
+	sliceIndex: number,
+): string {
 	return sliceIndex === 0 ? drawUnitId : `${drawUnitId}#fine-${sliceIndex}`;
 }
 
@@ -540,7 +553,10 @@ function materializeTextureUpdate(
 
 	for (const mapping of remappedStaticObjectDrawUnits) {
 		for (const drawUnit of mapping.drawUnits) {
-			for (const binding of createStaticObjectDrawUnitBindings(drawUnit, bindings)) {
+			for (const binding of createStaticObjectDrawUnitBindings(
+				drawUnit,
+				bindings,
+			)) {
 				remappedBindings.push(binding);
 			}
 		}
@@ -560,7 +576,9 @@ function createStaticObjectDrawUnitBindings(
 	const drawUnitBindings: TextureDrawUnitBinding[] = [];
 	const seenTextureUseIds = new Set<string>();
 
-	for (const roleUse of drawUnit.materialEntries.flatMap(createStaticRoleTextureUses)) {
+	for (const roleUse of drawUnit.materialEntries.flatMap(
+		createStaticRoleTextureUses,
+	)) {
 		if (seenTextureUseIds.has(roleUse.textureUseId)) {
 			continue;
 		}

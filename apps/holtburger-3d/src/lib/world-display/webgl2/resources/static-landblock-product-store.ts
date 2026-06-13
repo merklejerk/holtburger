@@ -11,7 +11,10 @@ import type { RenderChunkTransform } from "../../render-anchor";
 import type { TextureFilteringMode } from "../../texture-pages/texture-sampling-policy";
 
 export interface Webgl2StaticLandblockProductStore {
-	readonly productsByKey: ReadonlyMap<string, Webgl2StaticLandblockProductResource>;
+	readonly productsByKey: ReadonlyMap<
+		string,
+		Webgl2StaticLandblockProductResource
+	>;
 	commitProduct(
 		result: LandblockRenderProductWorkerResult,
 		resources?: Webgl2StaticLandblockProductFamilyResources,

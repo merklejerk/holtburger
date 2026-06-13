@@ -270,7 +270,9 @@ function getPreparedIndexHostPolicy(
 } {
 	const policy = getPreparedTextureHostPolicy(usage);
 	if (policy.outputFormat !== "r8" && policy.outputFormat !== "index16") {
-		throw new Error(`Prepared index usage ${usage} resolved to ${policy.outputFormat}.`);
+		throw new Error(
+			`Prepared index usage ${usage} resolved to ${policy.outputFormat}.`,
+		);
 	}
 
 	return {
@@ -318,9 +320,17 @@ function getPreparedTextureHostPolicy(
 } {
 	switch (usage) {
 		case "rgba-color":
-			return { colorSpace: "linear", hostUsage: "color", outputFormat: "rgba8" };
+			return {
+				colorSpace: "linear",
+				hostUsage: "color",
+				outputFormat: "rgba8",
+			};
 		case "rgba-detail":
-			return { colorSpace: "linear", hostUsage: "detail", outputFormat: "rgba8" };
+			return {
+				colorSpace: "linear",
+				hostUsage: "detail",
+				outputFormat: "rgba8",
+			};
 		case "rgba-mask":
 			return { colorSpace: "linear", hostUsage: "mask", outputFormat: "rgba8" };
 		case "rgba-raw":

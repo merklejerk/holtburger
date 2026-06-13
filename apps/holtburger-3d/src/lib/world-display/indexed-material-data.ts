@@ -290,8 +290,8 @@ export function resolveIndexedMaterialData(options: {
 		materialAssetId: options.slot.materialAssetId,
 		materialAsset: recipeAsset,
 		renderSurfaceAssetId: resolvedSurface.assetId,
-		renderSurfaceAsset: options.assetReadModel.get(resolvedSurface.assetId) ??
-			undefined,
+		renderSurfaceAsset:
+			options.assetReadModel.get(resolvedSurface.assetId) ?? undefined,
 		palette,
 		paletteAsset,
 		appearance: options.appearance,

@@ -219,12 +219,8 @@ export function submitWebgl2TerrainFamilyTiles({
 		gl.uniformMatrix4fv(
 			program.uniforms.uModelViewProjection,
 			false,
-				multiplyMat4Into(
-					modelViewProjection,
-					viewProjectionMatrix,
-					modelMatrix,
-				),
-			);
+			multiplyMat4Into(modelViewProjection, viewProjectionMatrix, modelMatrix),
+		);
 		gl.uniformMatrix4fv(program.uniforms.uModelMatrix, false, modelMatrix);
 		gl.drawElements(gl.TRIANGLES, tile.vertexCount, tile.indexType, 0);
 	}
@@ -247,10 +243,8 @@ function createTerrainTileFamilySubmitPlan(
 		return null;
 	}
 	const maskAtlasTexture =
-		singleTerrainTexturePage(
-			tile.texturePageBindings,
-			"terrain-mask",
-		) ?? colorAtlasTexture;
+		singleTerrainTexturePage(tile.texturePageBindings, "terrain-mask") ??
+		colorAtlasTexture;
 	const detailAtlasTexture = singleTerrainTexturePage(
 		tile.texturePageBindings,
 		"terrain-detail",

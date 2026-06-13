@@ -98,12 +98,7 @@ export function buildStaticBundleLayerTexturePages(options: {
 					indexedFormat: sourcePlacement.indexedFormat,
 					samplingDomain: sourcePlacement.samplingDomain,
 					lookup: sourcePlacement.lookup,
-					rect: [
-						placement.x,
-						placement.y,
-						placement.width,
-						placement.height,
-					],
+					rect: [placement.x, placement.y, placement.width, placement.height],
 				})),
 			});
 		}
@@ -158,9 +153,7 @@ export function createStaticBundleTexturePageDescriptor(
 			lookup: ref.lookup,
 		},
 		source:
-			ref.role === "detail"
-				? "detail-overlay"
-				: "standalone-direct-texture",
+			ref.role === "detail" ? "detail-overlay" : "standalone-direct-texture",
 	};
 }
 
@@ -232,7 +225,9 @@ function validateSourcePlacementRefs(
 ): void {
 	const [firstRef] = refs;
 	if (!firstRef) {
-		throw new Error(`Texture page source placement ${sourcePlacementKey} has no refs.`);
+		throw new Error(
+			`Texture page source placement ${sourcePlacementKey} has no refs.`,
+		);
 	}
 	for (const ref of refs) {
 		if (
@@ -244,7 +239,8 @@ function validateSourcePlacementRefs(
 			ref.height !== firstRef.height ||
 			ref.samplingDomain !== firstRef.samplingDomain ||
 			ref.lookup !== firstRef.lookup ||
-			describeTextureRefByteIdentity(ref) !== describeTextureRefByteIdentity(firstRef)
+			describeTextureRefByteIdentity(ref) !==
+				describeTextureRefByteIdentity(firstRef)
 		) {
 			throw new Error(
 				`Texture page source placement ${sourcePlacementKey} contains incompatible refs.`,

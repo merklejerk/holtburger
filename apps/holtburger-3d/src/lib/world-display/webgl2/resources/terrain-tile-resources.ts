@@ -91,8 +91,7 @@ export interface Webgl2TerrainTileTexturePageBinding {
 	texturePage?: Webgl2TerrainTexturePageResource | null;
 }
 
-export interface Webgl2TerrainTexturePageResource
-	extends Webgl2ResidentTexturePageResource {
+export interface Webgl2TerrainTexturePageResource extends Webgl2ResidentTexturePageResource {
 	bucket: Webgl2TerrainTileTexturePageBinding["bucket"];
 	textureIndex: number;
 	pixelStats: TexturePagePixelStats;

@@ -110,12 +110,12 @@ function planOutdoorStaticBundleLayers(
 	}
 
 	const envCellIds = deriveStructuredInteriorCoverageFromLookup(
-			{
-				kind: "landblock-closure",
-				seedEnvCellIds: [
-					...deriveTopologyEnvCellIdsForLandblocksFromAssets(
-						[...preparedAssets.values()],
-						new Set(interest.envCellLandblockIds),
+		{
+			kind: "landblock-closure",
+			seedEnvCellIds: [
+				...deriveTopologyEnvCellIdsForLandblocksFromAssets(
+					[...preparedAssets.values()],
+					new Set(interest.envCellLandblockIds),
 				),
 			],
 		},

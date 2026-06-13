@@ -45,9 +45,7 @@ export function collectLandblockOutdoorRenderableSourceAssetIdsForDomain(
 ): string[] {
 	return uniqueSortedAssetIds(
 		payload.statics
-			.filter((member) =>
-				isOutdoorStaticMemberIncludedInDomain(member, domain),
-			)
+			.filter((member) => isOutdoorStaticMemberIncludedInDomain(member, domain))
 			.map((member) => member.sourceAssetId),
 	);
 }

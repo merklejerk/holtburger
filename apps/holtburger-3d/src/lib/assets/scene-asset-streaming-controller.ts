@@ -156,21 +156,21 @@ export class SceneAssetStreamingController implements ClientAssetRuntime {
 			return;
 		}
 
-			const preparedAssets = this.deps.preparedAssetResolver;
-			this.latestActiveCoverageAssetIds = deriveSceneCoverageAssetIds(
-				sceneInterest,
-				preparedAssets,
-				NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
-			);
+		const preparedAssets = this.deps.preparedAssetResolver;
+		this.latestActiveCoverageAssetIds = deriveSceneCoverageAssetIds(
+			sceneInterest,
+			preparedAssets,
+			NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
+		);
 		const requests = profileBrowserJsScope(
 			`asset-stream.planRequests.${priority}`,
 			() =>
 				createSceneCoverageRequests(
 					{
-							requestRevision: this.requestRevision,
-							sceneInterest,
-							preparedAssets,
-							pendingAssetIds: [...this.inFlightAssetIds],
+						requestRevision: this.requestRevision,
+						sceneInterest,
+						preparedAssets,
+						pendingAssetIds: [...this.inFlightAssetIds],
 						materialTexturePreparationPolicy:
 							NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
 					},
@@ -179,26 +179,26 @@ export class SceneAssetStreamingController implements ClientAssetRuntime {
 		);
 
 		this.deps.debugLog("scene-coverage", {
-				priority,
-				requestRevision: this.requestRevision,
-				sceneInterest: describeSceneResourceInterestKey(sceneInterest),
-				preparedCount: preparedAssets.getPreparedCount(),
-				inFlightAssetIds: [...this.inFlightAssetIds],
-				requestAssetIds: requests.map((request) => request.assetId),
-			});
+			priority,
+			requestRevision: this.requestRevision,
+			sceneInterest: describeSceneResourceInterestKey(sceneInterest),
+			preparedCount: preparedAssets.getPreparedCount(),
+			inFlightAssetIds: [...this.inFlightAssetIds],
+			requestAssetIds: requests.map((request) => request.assetId),
+		});
 		reportMaterialGraphRequests({
-				priority,
-				requestRevision: this.requestRevision,
-				requests,
-				preparedAssets,
-				inFlightAssetIds: [...this.inFlightAssetIds],
-			});
+			priority,
+			requestRevision: this.requestRevision,
+			requests,
+			preparedAssets,
+			inFlightAssetIds: [...this.inFlightAssetIds],
+		});
 		reportMaterialPlannerMismatch({
 			priority,
-				requestRevision: this.requestRevision,
-				sceneInterest,
-				preparedAssets,
-				pendingAssetIds: [...this.inFlightAssetIds],
+			requestRevision: this.requestRevision,
+			sceneInterest,
+			preparedAssets,
+			pendingAssetIds: [...this.inFlightAssetIds],
 			requests,
 			materialTexturePreparationPolicy:
 				NORMALIZED_MATERIAL_TEXTURE_PREPARATION_POLICY,
@@ -327,11 +327,11 @@ export class SceneAssetStreamingController implements ClientAssetRuntime {
 						hydrationKind === "direct"
 							? [await this.deps.assetChannel.prepareAsset(request)]
 							: (
-										await this.deps.assetChannel.prepareAssetGraph(
-											request,
-											this.deps.preparedAssetResolver,
-										)
-									).preparedAssets;
+									await this.deps.assetChannel.prepareAssetGraph(
+										request,
+										this.deps.preparedAssetResolver,
+									)
+								).preparedAssets;
 					recordPreparedAssetOutputShape(hydrationKind, assets);
 					return assets;
 				},
@@ -349,13 +349,13 @@ export class SceneAssetStreamingController implements ClientAssetRuntime {
 			const detail = {
 				request,
 				hydrationKind,
-					message,
-					messageChunks: chunkDiagnosticString(message),
-					preparedAssetCounts: countPreparedAssetsByKind(
-						this.deps.preparedAssetResolver.values(),
-					),
-					inFlightAssetIds: [...this.inFlightAssetIds],
-				};
+				message,
+				messageChunks: chunkDiagnosticString(message),
+				preparedAssetCounts: countPreparedAssetsByKind(
+					this.deps.preparedAssetResolver.values(),
+				),
+				inFlightAssetIds: [...this.inFlightAssetIds],
+			};
 			console.error("[holtburger-3d][asset-graph][diag-2026-05-24a]", detail);
 			this.deps.debugLog("asset-error", detail);
 			if (!this.disposed) {
@@ -442,13 +442,13 @@ function reportMaterialGraphRequests(options: {
 	console.info("[holtburger-3d][asset-graph][material-requested]", {
 		priority: options.priority,
 		requestRevision: options.requestRevision,
-			requestCount: materialRequests.length,
-			requestAssetIds: materialRequests
-				.map((request) => request.assetId)
-				.slice(0, 32),
-			preparedAssetCounts: countPreparedAssetsByKind(
-				options.preparedAssets.values(),
-			),
+		requestCount: materialRequests.length,
+		requestAssetIds: materialRequests
+			.map((request) => request.assetId)
+			.slice(0, 32),
+		preparedAssetCounts: countPreparedAssetsByKind(
+			options.preparedAssets.values(),
+		),
 		inFlightMaterialAssetIds: options.inFlightAssetIds
 			.filter((assetId) => assetId.startsWith("material/"))
 			.slice(0, 32),
@@ -471,26 +471,27 @@ function reportMaterialPlannerMismatch(options: {
 		return;
 	}
 
-	const visibleMaterialAssetIds =
-			deriveVisibleMaterialAssetIdsForSceneInterest({
-				sceneInterest: options.sceneInterest,
-				preparedAssets: options.preparedAssets,
-				pendingAssetIds: options.pendingAssetIds,
+	const visibleMaterialAssetIds = deriveVisibleMaterialAssetIdsForSceneInterest(
+		{
+			sceneInterest: options.sceneInterest,
+			preparedAssets: options.preparedAssets,
+			pendingAssetIds: options.pendingAssetIds,
 			materialTexturePreparationPolicy:
 				options.materialTexturePreparationPolicy,
-		});
+		},
+	);
 	if (visibleMaterialAssetIds.length === 0) {
 		return;
 	}
 
 	console.error("[holtburger-3d][asset-planner][material-mismatch]", {
 		priority: options.priority,
-			requestRevision: options.requestRevision,
-			visibleMaterialAssetIds: visibleMaterialAssetIds.slice(0, 64),
-			visibleMaterialCount: visibleMaterialAssetIds.length,
-			preparedAssetCounts: countPreparedAssetsByKind(
-				options.preparedAssets.values(),
-			),
+		requestRevision: options.requestRevision,
+		visibleMaterialAssetIds: visibleMaterialAssetIds.slice(0, 64),
+		visibleMaterialCount: visibleMaterialAssetIds.length,
+		preparedAssetCounts: countPreparedAssetsByKind(
+			options.preparedAssets.values(),
+		),
 		pendingMaterialAssetIds: options.pendingAssetIds
 			.filter((assetId) => assetId.startsWith("material/"))
 			.slice(0, 64),

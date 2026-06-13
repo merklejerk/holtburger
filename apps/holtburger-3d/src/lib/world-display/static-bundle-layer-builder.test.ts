@@ -125,9 +125,7 @@ describe("static bundle layer builder", () => {
 			},
 			{
 				key: "outdoor-static:da55ffff:direct-0",
-				visibilityKeys: [
-					"outdoor-static:landblock:da55ffff:instance:direct-0",
-				],
+				visibilityKeys: ["outdoor-static:landblock:da55ffff:instance:direct-0"],
 				bounds: {
 					min: { x: 1, y: 0, z: 0 },
 					max: { x: 2, y: 1, z: 1 },
@@ -1040,14 +1038,16 @@ function createOutdoorMember(
 		sourceScale?: { x: number; y: number; z: number };
 	} = {},
 ) {
-	const x = instanceId === "compactable-0" ? 0 : instanceId === "direct-0" ? 1 : 2;
+	const x =
+		instanceId === "compactable-0" ? 0 : instanceId === "direct-0" ? 1 : 2;
 	return {
 		kind: "explicit-object" as const,
 		instanceId,
 		sourceDid: Number.parseInt(sourceAssetId.slice(-8), 16),
 		sourceAssetId,
 		sourceIndex: 0,
-		localPlacement: options.localPlacement ?? createPlacement({ x, y: 0, z: 0 }),
+		localPlacement:
+			options.localPlacement ?? createPlacement({ x, y: 0, z: 0 }),
 		sourceScale: options.sourceScale ?? { x: 1, y: 1, z: 1 },
 		sourceBounds: null,
 		instanceBounds: {

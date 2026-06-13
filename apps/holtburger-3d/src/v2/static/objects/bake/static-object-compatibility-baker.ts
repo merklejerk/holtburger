@@ -318,17 +318,11 @@ function createStaticObjectMaterialTableEntry(parameters: {
 		renderState: createStaticObjectRenderState(parameters.entry.blend),
 		detailTextureTiling: parameters.entry.detailTextureTiling,
 		detailTextureUseId: detailTextureUse
-			? createStaticObjectTextureUseId(
-					options.work,
-					detailTextureUse,
-				)
+			? createStaticObjectTextureUseId(options.work, detailTextureUse)
 			: null,
 		indexedTextureFormat,
 		indexTextureUseId: indexTextureUse
-			? createStaticObjectTextureUseId(
-					options.work,
-					indexTextureUse,
-				)
+			? createStaticObjectTextureUseId(options.work, indexTextureUse)
 			: null,
 		materialColor: parameters.entry.materialColor,
 		materialEmissiveColor: parameters.entry.materialEmissiveColor,
@@ -338,16 +332,10 @@ function createStaticObjectMaterialTableEntry(parameters: {
 				? paletteTextureUse.firstIndex
 				: 0,
 		paletteTextureUseId: paletteTextureUse
-			? createStaticObjectTextureUseId(
-					options.work,
-					paletteTextureUse,
-				)
+			? createStaticObjectTextureUseId(options.work, paletteTextureUse)
 			: null,
 		primaryTextureUseId: primaryTextureUse
-			? createStaticObjectTextureUseId(
-					options.work,
-					primaryTextureUse,
-				)
+			? createStaticObjectTextureUseId(options.work, primaryTextureUse)
 			: null,
 		primaryTextureWrapMode: parameters.entry.textureWrapMode,
 		slot: parameters.slot,
@@ -449,7 +437,9 @@ function computePositionBounds(positions: Float32Array): StaticBounds | null {
 	};
 }
 
-function centerOfBounds(bounds: StaticBounds): readonly [number, number, number] {
+function centerOfBounds(
+	bounds: StaticBounds,
+): readonly [number, number, number] {
 	return [
 		(bounds.min.x + bounds.max.x) / 2,
 		(bounds.min.y + bounds.max.y) / 2,
@@ -544,7 +534,8 @@ function bakeStaticObjectPartitionGeometry(
 				candidate.polygonId === triangle.polygonId &&
 				candidate.firstVertex === triangle.firstVertex &&
 				candidate.geometrySurfaceId === triangle.geometrySurfaceId &&
-				candidate.materialVariantSignature === triangle.materialVariantSignature,
+				candidate.materialVariantSignature ===
+					triangle.materialVariantSignature,
 		);
 		if (!sourceTriangle) {
 			throw new Error(

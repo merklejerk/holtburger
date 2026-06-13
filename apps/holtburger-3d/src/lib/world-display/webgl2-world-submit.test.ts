@@ -199,7 +199,9 @@ function createTerrainDraw(terrainTileId: string): WorldRenderDraw {
 	};
 }
 
-function createStaticBundleLayerDraw(staticBundleLayerId: string): WorldRenderDraw {
+function createStaticBundleLayerDraw(
+	staticBundleLayerId: string,
+): WorldRenderDraw {
 	return {
 		kind: WORLD_RENDER_DRAW_KIND.staticBundleLayer,
 		staticBundleLayerId,

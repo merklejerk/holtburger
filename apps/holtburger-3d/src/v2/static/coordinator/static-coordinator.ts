@@ -71,7 +71,8 @@ export class StaticCoordinator {
 	#latestTerrainPayload: TerrainStaticScopePayloadSummary | null = null;
 	#latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null =
 		null;
-	#latestLandblockEnvCellsPayload: LandblockEnvCellsPayloadSummary | null = null;
+	#latestLandblockEnvCellsPayload: LandblockEnvCellsPayloadSummary | null =
+		null;
 	readonly #latestMaterialCoverageByDomain = new Map<
 		StaticDomain,
 		StaticMaterialCoverageReport
@@ -430,8 +431,7 @@ export class StaticCoordinator {
 					(count, envCell) => count + envCell.staticObjectSeeds.length,
 					0,
 				),
-				visibilityDiagnosticCount:
-					payload.scope.visibilityDiagnostics.length,
+				visibilityDiagnosticCount: payload.scope.visibilityDiagnostics.length,
 				visibleCellCount: countDistinctVisibleEnvCells(payload.scope.envCells),
 			};
 		}

@@ -135,16 +135,18 @@ interface RenderResourceInspectionMaterial {
 
 type RenderResourceInspectionMaterialBase = Omit<
 	RenderResourceInspectionMaterial,
-	| "geometryReferenceCount"
-	| "referencedIndexCount"
-	| "referencedTriangleCount"
+	"geometryReferenceCount" | "referencedIndexCount" | "referencedTriangleCount"
 >;
 
 interface RenderResourceInspectionGeometry {
 	readonly key: string;
 	readonly ownerKind: MaterialResourceInspectionOwnerKind;
 	readonly ownerKey: string;
-	readonly geometryKind: "compacted-batch" | "direct-entry" | "material-slice" | "fallback-shell";
+	readonly geometryKind:
+		| "compacted-batch"
+		| "direct-entry"
+		| "material-slice"
+		| "fallback-shell";
 	readonly materialRecordKey: string | null;
 	readonly vertexCount: number | null;
 	readonly indexCount: number;
@@ -378,7 +380,9 @@ export function inspectWebgl2WorldResources(
 	};
 }
 
-export function formatRenderResourceInspectionKeyForDisplay(key: string): string {
+export function formatRenderResourceInspectionKeyForDisplay(
+	key: string,
+): string {
 	return key
 		.replace(
 			/\benv-cell:(\d+):(\d+)(?=:)/g,
@@ -392,7 +396,10 @@ export function formatRenderResourceInspectionKeyForDisplay(key: string): string
 		);
 }
 
-function compareByKey<T extends { readonly key: string }>(left: T, right: T): number {
+function compareByKey<T extends { readonly key: string }>(
+	left: T,
+	right: T,
+): number {
 	return left.key.localeCompare(right.key);
 }
 
@@ -468,9 +475,11 @@ export function calculateTexturePageCoverage({
 		return { coveredPixelCount: 0, coverageRatio: 0 };
 	}
 
-	const xEdges = [...new Set(
-		normalizedRects.flatMap((rect) => [rect.x, rect.x + rect.width]),
-	)].sort(compareNumericAscending);
+	const xEdges = [
+		...new Set(
+			normalizedRects.flatMap((rect) => [rect.x, rect.x + rect.width]),
+		),
+	].sort(compareNumericAscending);
 	let coveredPixelCount = 0;
 	for (let index = 0; index < xEdges.length - 1; index += 1) {
 		const left = xEdges[index] ?? 0;
@@ -556,10 +565,8 @@ function buildStructuredInteriorMaterialOwnerKeyByCellKey(
 	store: Webgl2WorldResourceStore,
 ): ReadonlyMap<string, string> {
 	const materialOwnerKeyByCellKey = new Map<string, string>();
-	for (const [
-		productKey,
-		cellKeys,
-	] of store.structuredInteriorResources.cellKeysByProductKey) {
+	for (const [productKey, cellKeys] of store.structuredInteriorResources
+		.cellKeysByProductKey) {
 		const productResourceKey =
 			store.structuredInteriorResources.productResourceKeyByProductKey.get(
 				productKey,
@@ -614,11 +621,14 @@ function resolveGeometryMaterialOwnerKey(
 	resource: RenderResourceInspectionGeometry,
 	structuredMaterialOwnerKeyByCellKey: ReadonlyMap<string, string>,
 ): string | null {
-	if (resource.ownerKind === RENDER_RESOURCE_INSPECTION_OWNER_KIND.staticBundle) {
+	if (
+		resource.ownerKind === RENDER_RESOURCE_INSPECTION_OWNER_KIND.staticBundle
+	) {
 		return resource.ownerKey;
 	}
 	if (
-		resource.ownerKind === RENDER_RESOURCE_INSPECTION_OWNER_KIND.structuredInterior
+		resource.ownerKind ===
+		RENDER_RESOURCE_INSPECTION_OWNER_KIND.structuredInterior
 	) {
 		return structuredMaterialOwnerKeyByCellKey.get(resource.ownerKey) ?? null;
 	}

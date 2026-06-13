@@ -88,9 +88,9 @@ describe("planWebgl2TransitionPortalWork", () => {
 			"reachable",
 			"unreachable",
 		]);
-		expect(plan.batches.get("indoor-to-outdoor:1")?.map((work) => work.workItem.id)).toEqual([
-			"reachable",
-		]);
+		expect(
+			plan.batches.get("indoor-to-outdoor:1")?.map((work) => work.workItem.id),
+		).toEqual(["reachable"]);
 	});
 
 	it("clips portal composite bounds against clip space instead of dropping near-plane vertices", () => {
@@ -265,7 +265,8 @@ function createPortalMaskResource(
 		},
 		bvhItemKeys: [],
 		bvhFallbackReason: null,
-		portalCandidate: {} as Webgl2TransitionPortalMaskResource["portalCandidate"],
+		portalCandidate:
+			{} as Webgl2TransitionPortalMaskResource["portalCandidate"],
 	};
 }
 

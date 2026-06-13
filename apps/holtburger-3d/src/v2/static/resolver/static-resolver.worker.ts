@@ -54,17 +54,17 @@ const host = new StaticResolverWorkerRuntimeHost(workerPort);
 const assetService = new HostBackedAssetService({ host });
 const resolver = new StaticResolverRouter({
 	landblockEnvCellsResolver: new LandblockEnvCellsResolver({ assetService }),
-	outdoorStaticObjectsResolver: new OutdoorStaticObjectsResolver({ assetService }),
+	outdoorStaticObjectsResolver: new OutdoorStaticObjectsResolver({
+		assetService,
+	}),
 	terrainResolver: new TerrainStaticScopeResolver({ assetService }),
 });
 
 workerPort.addEventListener(
 	"message",
 	(event: MessageEvent<StaticResolverWorkerMainMessage>) => {
-		void handleStaticResolverWorkerRequest(
-			resolver,
-			event.data,
-			(response) => workerPort.postMessage(response),
+		void handleStaticResolverWorkerRequest(resolver, event.data, (response) =>
+			workerPort.postMessage(response),
 		);
 	},
 );

@@ -367,9 +367,7 @@ function createDetailedLandblockProductArtifact(): LandblockRenderProductWorkerR
 								isOutsideTransition: true,
 							},
 						],
-						portalApertureKeys: [
-							"portal-aperture:016c0155:cell-outside/01",
-						],
+						portalApertureKeys: ["portal-aperture:016c0155:cell-outside/01"],
 						staticObjectCount: 0,
 						cellBsp: createLeafBspNode(),
 						renderGeometry: createRenderGeometry(),

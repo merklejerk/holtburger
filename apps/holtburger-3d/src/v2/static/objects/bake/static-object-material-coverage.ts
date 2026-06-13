@@ -8,9 +8,7 @@ import type {
 	StaticMaterialRenderOutcome,
 	StaticMaterialUnrenderedBucket,
 } from "../../contracts";
-import type {
-	StaticObjectCompatibilityPartition,
-} from "./static-object-compatibility-partitioner";
+import type { StaticObjectCompatibilityPartition } from "./static-object-compatibility-partitioner";
 import type {
 	StaticObjectMaterialFallbackReason,
 	StaticObjectMaterialPipelinePlan,
@@ -37,11 +35,16 @@ export function createStaticObjectMaterialCoverageReport(options: {
 			outcome: resolveMaterialPlanOutcome(plan),
 			pass: plan.pass,
 		});
-		const materialIds = materialKeysByBucket.get(bucketKey) ?? new Set<number>();
+		const materialIds =
+			materialKeysByBucket.get(bucketKey) ?? new Set<number>();
 		materialIds.add(plan.material.materialId);
 		materialKeysByBucket.set(bucketKey, materialIds);
-		getOrCreateBucket(bucketBuilders, plan.family, plan.pass, resolveMaterialPlanOutcome(plan))
-			.textureRoleCount += plan.textureRoles.length;
+		getOrCreateBucket(
+			bucketBuilders,
+			plan.family,
+			plan.pass,
+			resolveMaterialPlanOutcome(plan),
+		).textureRoleCount += plan.textureRoles.length;
 	}
 
 	for (const partition of options.partitions) {
@@ -174,8 +177,9 @@ function createFallbackReasonCounts(
 	}
 
 	return [...counts.entries()]
-		.sort(([leftCode, leftCount], [rightCode, rightCount]) =>
-			rightCount - leftCount || leftCode.localeCompare(rightCode),
+		.sort(
+			([leftCode, leftCount], [rightCode, rightCount]) =>
+				rightCount - leftCount || leftCode.localeCompare(rightCode),
 		)
 		.map(([code, count]) => ({ code, count }));
 }
@@ -184,11 +188,15 @@ function createUnrenderedBuckets(
 	buckets: readonly StaticMaterialCoverageBucket[],
 	reasons: readonly StaticObjectMaterialFallbackReason[],
 ): readonly StaticMaterialUnrenderedBucket[] {
-	const reasonCodes = Array.from(new Set(reasons.map((reason) => reason.code))).sort();
+	const reasonCodes = Array.from(
+		new Set(reasons.map((reason) => reason.code)),
+	).sort();
 
 	return buckets
 		.filter(
-			(bucket): bucket is StaticMaterialCoverageBucket & {
+			(
+				bucket,
+			): bucket is StaticMaterialCoverageBucket & {
 				readonly outcome: "render-deferred" | "unsupported";
 			} => bucket.outcome !== "rendered",
 		)

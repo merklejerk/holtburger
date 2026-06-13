@@ -151,7 +151,8 @@ export function createWebgl2RenderMetrics(
 				assetHotPathDiagnostics.latestRendererAssetSync
 					?.recommittedProductCount ?? 0,
 			latestRendererAssetSyncScheduledFrame:
-				assetHotPathDiagnostics.latestRendererAssetSync?.scheduledFrame ?? false,
+				assetHotPathDiagnostics.latestRendererAssetSync?.scheduledFrame ??
+				false,
 			staticLandblockProductCount: input.worldStore
 				? new Set(collectStaticLandblockProductIdentityKeys(input.worldStore))
 						.size
@@ -305,8 +306,7 @@ export function createWebgl2RenderMetrics(
 				input.worldStore?.atlasCandidateMaterialSlotCount ?? 0,
 			atlasFailureReasonCount: input.worldStore?.atlasFailureReasonCount ?? 0,
 			atlasFailureSamples: [...(input.worldStore?.atlasFailureSamples ?? [])],
-			terrainTexturePageCount:
-				input.worldStore?.terrainTexturePageCount ?? 0,
+			terrainTexturePageCount: input.worldStore?.terrainTexturePageCount ?? 0,
 			terrainDetailTexturePageCount:
 				input.worldStore?.terrainDetailTexturePageCount ?? 0,
 			visibleStaticBundleLayerCount:
@@ -367,7 +367,8 @@ export function createWebgl2RenderMetrics(
 			materialSurfaceTriangleCountsByDomain: {
 				...input.submitMetrics.materialSurfaceTriangleCountsByDomain,
 			},
-			materialSurfaceSkippedCount: input.submitMetrics.materialSurfaceSkippedCount,
+			materialSurfaceSkippedCount:
+				input.submitMetrics.materialSurfaceSkippedCount,
 			materialSurfaceSkippedCountsByDomain: {
 				...input.submitMetrics.materialSurfaceSkippedCountsByDomain,
 			},
@@ -425,7 +426,8 @@ export function createWebgl2RenderMetrics(
 			preparedTextureGeneratedByteLength:
 				input.worldStore?.preparedTextureGeneratedByteLength ?? 0,
 			compressedSingleLevelFallbackUploadCount: 0,
-			renderCalls: input.submitMetrics.drawCallCount || input.lastFrameDrawCount,
+			renderCalls:
+				input.submitMetrics.drawCallCount || input.lastFrameDrawCount,
 			renderTriangles: input.submitMetrics.triangleCount,
 			renderLines: 0,
 			renderPoints: 0,
@@ -467,7 +469,9 @@ function collectStaticLandblockProductIdentityKeys(
 	];
 }
 
-function countProductDomains(productKeys: Iterable<string>): Record<string, number> {
+function countProductDomains(
+	productKeys: Iterable<string>,
+): Record<string, number> {
 	const counts: Record<string, number> = {};
 	for (const key of new Set(productKeys)) {
 		const product = key.split(":")[2] ?? "unknown";

@@ -11,9 +11,7 @@ import type {
 	AtlasTexturePlacement,
 } from "../../texture-pages/atlas-layout-planner";
 import type { IndexedTextureFormat } from "../../indexed-material-data";
-import type {
-	TexturePageAtlasPlan,
-} from "../../texture-pages/texture-page-atlas-planner";
+import type { TexturePageAtlasPlan } from "../../texture-pages/texture-page-atlas-planner";
 import type {
 	TexturePageBucket,
 	TexturePageKind,
@@ -62,7 +60,8 @@ export interface Webgl2ResidentTexturePageResource {
 	entryDiagnostics?: readonly TexturePageEntryDiagnostic[];
 }
 
-export type Webgl2TexturePageTextureResource = Webgl2ResidentTexturePageResource;
+export type Webgl2TexturePageTextureResource =
+	Webgl2ResidentTexturePageResource;
 
 export type Webgl2DetailTexturePageTextureResource =
 	Webgl2ResidentTexturePageResource;
@@ -245,12 +244,7 @@ function createTexturePageCpuTexture({
 			virtualRefKeys: [placement.atlasEntryKey],
 			sourceAssetId:
 				record.entry.preparedTextureAssetId ?? placement.atlasEntryKey,
-			rect: [
-				placement.x,
-				placement.y,
-				placement.width,
-				placement.height,
-			],
+			rect: [placement.x, placement.y, placement.width, placement.height],
 		});
 		entryDiagnostics.push({
 			atlasEntryKey: placement.atlasEntryKey,
@@ -312,12 +306,7 @@ function createDetailTexturePageCpuTexture({
 			virtualRefKey: placement.atlasEntryKey,
 			virtualRefKeys: [placement.atlasEntryKey],
 			sourceAssetId: placement.atlasEntryKey,
-			rect: [
-				placement.x,
-				placement.y,
-				placement.width,
-				placement.height,
-			],
+			rect: [placement.x, placement.y, placement.width, placement.height],
 		});
 		entryDiagnostics.push({
 			atlasEntryKey: placement.atlasEntryKey,
@@ -362,9 +351,7 @@ export function createWebgl2TexturePageTextureResourceFromCpu({
 	cpuTexture: TexturePageCpuTexture;
 	textureFilteringMode: TextureFilteringMode;
 	maxAnisotropy: number;
-}):
-	| Webgl2TexturePageTextureResource
-	| Webgl2DetailTexturePageTextureResource {
+}): Webgl2TexturePageTextureResource | Webgl2DetailTexturePageTextureResource {
 	const texture = createWebgl2Texture2D(gl, {
 		label: cpuTexture.key,
 		upload: {

@@ -111,8 +111,7 @@ export function resolveRenderMaterialSlotPlan(options: {
 				options.appearance ?? createBaseMaterialAppearanceContext("base"),
 		},
 		textureCapabilities:
-			options.textureCapabilities ??
-			defaultRenderMaterialTextureCapabilities(),
+			options.textureCapabilities ?? defaultRenderMaterialTextureCapabilities(),
 		textureFilteringMode: options.textureFilteringMode,
 		indexedMaterialDataCache: options.indexedMaterialDataCache,
 	});
@@ -220,9 +219,7 @@ function cacheRenderMaterialPlan<TPlan extends RenderMaterialPlan>(
 	return plan;
 }
 
-function isTransientRenderMaterialPlan(
-	material: RenderMaterialPlan,
-): boolean {
+function isTransientRenderMaterialPlan(material: RenderMaterialPlan): boolean {
 	if (material.kind !== "flat" || material.fallbackReasonCode === null) {
 		return false;
 	}
@@ -254,8 +251,7 @@ function describeRenderMaterialPlanCacheKey(options: {
 	const appearance =
 		options.appearance ?? createBaseMaterialAppearanceContext("base");
 	const capabilities =
-		options.textureCapabilities ??
-		defaultRenderMaterialTextureCapabilities();
+		options.textureCapabilities ?? defaultRenderMaterialTextureCapabilities();
 	return [
 		`renderable=${options.renderableKind ?? "unknown"}`,
 		`slot=${options.slot.slotIndex}`,
@@ -354,7 +350,9 @@ function collectStrategyPreparedAssetIds(
 			`render-surface/${formatHex32(strategy.textureUpload.upload.renderSurfaceId)}`,
 		);
 		if (strategy.texturePageReadiness) {
-			assetIds.add(strategy.texturePageReadiness.atlasEntry.preparedTextureAssetId);
+			assetIds.add(
+				strategy.texturePageReadiness.atlasEntry.preparedTextureAssetId,
+			);
 		}
 	}
 	if (strategy.kind === "indexed-paletted") {

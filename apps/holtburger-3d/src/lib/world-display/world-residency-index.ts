@@ -608,7 +608,9 @@ function collectArtifactResidencyCellSources(
 		if (!detailed) {
 			continue;
 		}
-		sources.push(...detailed.structuredInteriorCells.map(artifactCellToResidencySource));
+		sources.push(
+			...detailed.structuredInteriorCells.map(artifactCellToResidencySource),
+		);
 	}
 	return sources;
 }

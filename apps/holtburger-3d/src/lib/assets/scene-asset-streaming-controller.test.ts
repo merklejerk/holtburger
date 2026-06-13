@@ -82,9 +82,7 @@ describe("scene asset streaming controller", () => {
 		};
 
 		syncLatestInput();
-		await waitFor(() =>
-			preparedAssetStore.resolver.has("material/0800006c"),
-		);
+		await waitFor(() => preparedAssetStore.resolver.has("material/0800006c"));
 		controller.dispose();
 
 		expect(requestedAssetIds).toContain("landblock/016cffff/topology");
@@ -144,9 +142,7 @@ describe("scene asset streaming controller", () => {
 
 		expect(prunePlans).toEqual([]);
 		await vi.advanceTimersByTimeAsync(1_000);
-		expect(prunePlans).toEqual([
-			["gfx-obj/expired-a", "gfx-obj/expired-b"],
-		]);
+		expect(prunePlans).toEqual([["gfx-obj/expired-a", "gfx-obj/expired-b"]]);
 		expect(preparedAssetStore.resolver.has("gfx-obj/expired-c")).toBe(true);
 		expect(preparedAssetStore.resolver.getPreparedCount()).toBe(1);
 

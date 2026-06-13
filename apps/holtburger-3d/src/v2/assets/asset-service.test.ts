@@ -66,12 +66,18 @@ describe("V2 host-backed asset service lifecycle", () => {
 		});
 
 		await service.requestPreparedAsset(key);
-		expect(service.createSnapshot().committed[0]?.warmRetainedUntilMs).toBe(1050);
+		expect(service.createSnapshot().committed[0]?.warmRetainedUntilMs).toBe(
+			1050,
+		);
 
 		const lease = service.acquirePreparedAssetLease(key);
-		expect(service.createSnapshot().committed[0]?.warmRetainedUntilMs).toBeNull();
+		expect(
+			service.createSnapshot().committed[0]?.warmRetainedUntilMs,
+		).toBeNull();
 		lease.release();
-		expect(service.createSnapshot().committed[0]?.warmRetainedUntilMs).toBe(1050);
+		expect(service.createSnapshot().committed[0]?.warmRetainedUntilMs).toBe(
+			1050,
+		);
 
 		service.pruneExpiredWarmAssets(1049);
 		expect(service.createSnapshot().committed).toHaveLength(1);
@@ -143,6 +149,9 @@ function createPreparedAsset(
 		payload: { ok: true },
 		preparedAt: "2026-06-10T00:00:00.000Z",
 		revision,
-		sourceAssetId: key.kind === "landblock-outdoor" ? `landblock/${key.id}/outdoor` : `${key.kind}/${key.id}`,
+		sourceAssetId:
+			key.kind === "landblock-outdoor"
+				? `landblock/${key.id}/outdoor`
+				: `${key.kind}/${key.id}`,
 	};
 }

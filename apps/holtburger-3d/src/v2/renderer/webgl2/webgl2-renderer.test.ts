@@ -131,11 +131,7 @@ describe("V2 WebGL2 static object transparent pass helpers", () => {
 		expect(
 			resources
 				.toSorted((left, right) =>
-					compareStaticObjectTransparentDrawOrder(
-						left,
-						right,
-						cameraPosition,
-					),
+					compareStaticObjectTransparentDrawOrder(left, right, cameraPosition),
 				)
 				.map((resource) => resource.drawUnitId),
 		).toEqual(["far-a", "far-b", "middle", "near"]);

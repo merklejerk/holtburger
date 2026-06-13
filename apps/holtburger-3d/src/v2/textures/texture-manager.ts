@@ -256,13 +256,15 @@ export class TextureManager {
 		const placements: RuntimeTexturePlacement[] = [];
 		const drawUnitBindings: TextureDrawUnitBinding[] = [];
 		const textureUsePlacements: TextureUsePlacement[] = [];
-		const terrainRolePageSlots = new TerrainDrawUnitRolePageSlots((overflow) => {
-			this.#recentTerrainRolePageOverflows = appendBounded(
-				this.#recentTerrainRolePageOverflows,
-				overflow,
-				RECENT_TERRAIN_ROLE_PAGE_OVERFLOW_LIMIT,
-			);
-		});
+		const terrainRolePageSlots = new TerrainDrawUnitRolePageSlots(
+			(overflow) => {
+				this.#recentTerrainRolePageOverflows = appendBounded(
+					this.#recentTerrainRolePageOverflows,
+					overflow,
+					RECENT_TERRAIN_ROLE_PAGE_OVERFLOW_LIMIT,
+				);
+			},
+		);
 		const staticObjectRolePageSlots = new StaticObjectDrawUnitRolePageSlots(
 			(overflow) => {
 				this.#recentStaticObjectRolePageOverflows = appendBounded(
@@ -738,7 +740,6 @@ export class TextureManager {
 
 		return null;
 	}
-
 }
 
 type RuntimeTexturePlacement = TexturePlacementUpdate["placements"][number];
@@ -945,7 +946,10 @@ function isSameMaterialTextureDataUse(
 		return false;
 	}
 
-	if (left.kind === "palette-texture-use" && right.kind === "palette-texture-use") {
+	if (
+		left.kind === "palette-texture-use" &&
+		right.kind === "palette-texture-use"
+	) {
 		return (
 			left.palette.paletteId === right.palette.paletteId &&
 			left.firstIndex === right.firstIndex &&
@@ -959,8 +963,7 @@ function isSameMaterialTextureDataUse(
 		right.kind === "prepared-render-surface-texture-use"
 	) {
 		return (
-			left.renderSurface.renderSurfaceId ===
-			right.renderSurface.renderSurfaceId
+			left.renderSurface.renderSurfaceId === right.renderSurface.renderSurfaceId
 		);
 	}
 
@@ -1020,24 +1023,26 @@ function createMaterialTextureDataUseKey(
 		].join(":");
 	}
 
-	return (
-		[
-			source.kind,
-			source.renderSurface.renderSurfaceId.toString(16).padStart(8, "0"),
-			source.usage,
-		].join(":")
-	);
+	return [
+		source.kind,
+		source.renderSurface.renderSurfaceId.toString(16).padStart(8, "0"),
+		source.usage,
+	].join(":");
 }
 
 function isSamePaletteTextureSubPalettes(
-	left: Extract<
-		MaterialTextureDataUseIdentity,
-		{ readonly kind: "palette-texture-use" }
-	>["subPalettes"] | undefined,
-	right: Extract<
-		MaterialTextureDataUseIdentity,
-		{ readonly kind: "palette-texture-use" }
-	>["subPalettes"] | undefined,
+	left:
+		| Extract<
+				MaterialTextureDataUseIdentity,
+				{ readonly kind: "palette-texture-use" }
+		  >["subPalettes"]
+		| undefined,
+	right:
+		| Extract<
+				MaterialTextureDataUseIdentity,
+				{ readonly kind: "palette-texture-use" }
+		  >["subPalettes"]
+		| undefined,
 ): boolean {
 	const leftSubPalettes = left ?? [];
 	const rightSubPalettes = right ?? [];
@@ -1056,10 +1061,12 @@ function isSamePaletteTextureSubPalettes(
 }
 
 function createPaletteTextureSubPalettesKey(
-	subPalettes: Extract<
-		MaterialTextureDataUseIdentity,
-		{ readonly kind: "palette-texture-use" }
-	>["subPalettes"] | undefined,
+	subPalettes:
+		| Extract<
+				MaterialTextureDataUseIdentity,
+				{ readonly kind: "palette-texture-use" }
+		  >["subPalettes"]
+		| undefined,
 ): string {
 	if (!subPalettes || subPalettes.length === 0) {
 		return "sub:none";
@@ -1553,9 +1560,8 @@ function countSampleClasses(
 	return {
 		index8: pages.filter((page) => page.sampleClass === "index8").length,
 		index16: pages.filter((page) => page.sampleClass === "index16").length,
-		"palette-rgba": pages.filter(
-			(page) => page.sampleClass === "palette-rgba",
-		).length,
+		"palette-rgba": pages.filter((page) => page.sampleClass === "palette-rgba")
+			.length,
 		"rgba-color": pages.filter((page) => page.sampleClass === "rgba-color")
 			.length,
 		"rgba-detail": pages.filter((page) => page.sampleClass === "rgba-detail")

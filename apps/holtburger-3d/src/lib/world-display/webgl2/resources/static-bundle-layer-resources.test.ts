@@ -885,11 +885,11 @@ function createLayer(
 }
 
 function createProductKey() {
-		return {
-			landblockId: 0x1234,
-			product: "outdoor-buildings" as const,
-			buildPolicyRevision: "build:v1",
-			texturePagePolicyRevision: "texture-pages:v1",
+	return {
+		landblockId: 0x1234,
+		product: "outdoor-buildings" as const,
+		buildPolicyRevision: "build:v1",
+		texturePagePolicyRevision: "texture-pages:v1",
 	};
 }
 

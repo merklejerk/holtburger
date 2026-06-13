@@ -102,7 +102,6 @@ describe("asset cache policy", () => {
 		]);
 		expect(plan.nextCursorAssetId).toBe("gfx-obj/expired-c");
 	});
-
 });
 
 function indexPreparedAssets(

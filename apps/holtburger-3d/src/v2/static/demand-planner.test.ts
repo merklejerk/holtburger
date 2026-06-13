@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { normalizeOutdoorLandblockId } from "../../lib/landblocks";
-import { normalizeOutdoorLodRadii, planScheduledStaticWork } from "./demand-planner";
+import {
+	normalizeOutdoorLodRadii,
+	planScheduledStaticWork,
+} from "./demand-planner";
 import type { StaticDemand } from "./contracts";
 
 describe("V2 static demand planner", () => {
@@ -26,7 +29,9 @@ describe("V2 static demand planner", () => {
 		expect(terrainWork).toHaveLength(5);
 		expect(buildingWork).toHaveLength(5);
 		expect(work.every((item) => item.revision === 7)).toBe(true);
-		expect(work.every((item) => item.job.scope.kind === "landblock")).toBe(true);
+		expect(work.every((item) => item.job.scope.kind === "landblock")).toBe(
+			true,
+		);
 		expect(work[0]).toMatchObject({
 			job: {
 				domain: "outdoor-terrain",

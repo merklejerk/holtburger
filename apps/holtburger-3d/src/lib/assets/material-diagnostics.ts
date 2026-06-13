@@ -122,12 +122,16 @@ function summarizeMissingMaterialDependencies(
 
 	for (const recipe of recipes) {
 		for (const assetId of recipe.dependencies.surfaceTextureAssetIds) {
-			if (preparedAssetResolver.get(assetId)?.payload.kind !== "surface-texture") {
+			if (
+				preparedAssetResolver.get(assetId)?.payload.kind !== "surface-texture"
+			) {
 				surfaceTextureAssetIds.add(assetId);
 			}
 		}
 		for (const assetId of recipe.dependencies.renderSurfaceAssetIds) {
-			if (preparedAssetResolver.get(assetId)?.payload.kind !== "render-surface") {
+			if (
+				preparedAssetResolver.get(assetId)?.payload.kind !== "render-surface"
+			) {
 				renderSurfaceAssetIds.add(assetId);
 			}
 		}
@@ -178,12 +182,11 @@ function summarizeIndexedMaterialDiagnostics(
 		) {
 			continue;
 		}
-			for (const renderSurfaceAssetId of textureCandidateRenderSurfaceAssetIds(
-				recipe,
-			)) {
-				const renderSurfaceAsset = preparedAssetResolver.get(
-					renderSurfaceAssetId,
-				);
+		for (const renderSurfaceAssetId of textureCandidateRenderSurfaceAssetIds(
+			recipe,
+		)) {
+			const renderSurfaceAsset =
+				preparedAssetResolver.get(renderSurfaceAssetId);
 			if (renderSurfaceAsset?.payload.kind !== "render-surface") {
 				continue;
 			}
@@ -207,9 +210,9 @@ function summarizeIndexedMaterialDiagnostics(
 				paletteSelectionCounts.renderSurfaceDefault += 1;
 			}
 
-				const paletteAsset = preparedAssetResolver.get(
-					paletteSelection.paletteAssetId,
-				);
+			const paletteAsset = preparedAssetResolver.get(
+				paletteSelection.paletteAssetId,
+			);
 			if (paletteAsset?.payload.kind !== "palette") {
 				missingPaletteAssetIds.add(paletteSelection.paletteAssetId);
 				continue;

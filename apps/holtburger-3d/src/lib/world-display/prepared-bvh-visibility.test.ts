@@ -115,12 +115,8 @@ describe("prepared BVH visibility", () => {
 		const result = queryTerrainBvhVisibility({
 			terrainBvh: {
 				coordinateSpace: "landblock-outdoor-terrain-local",
-				nodes: [
-					node(bounds(0, 24, 24, 48, 2, 4), null, null, [0]),
-				],
-				items: [
-					{ row: 1, col: 0, quadIndex: 8, triangleIndices: [16, 17] },
-				],
+				nodes: [node(bounds(0, 24, 24, 48, 2, 4), null, null, [0])],
+				items: [{ row: 1, col: 0, quadIndex: 8, triangleIndices: [16, 17] }],
 			},
 			landblockId: 0x0203ffff,
 			frustum: renderFrustum({

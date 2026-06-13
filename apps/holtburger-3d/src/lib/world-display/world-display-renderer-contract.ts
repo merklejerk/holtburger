@@ -21,9 +21,7 @@ import type {
 	RenderResourceTexturePagePreview,
 } from "./render-resource-inspection";
 import type { WorldRenderSceneContext } from "./render-scene-context";
-import type {
-	StaticLandblockRenderProductSet,
-} from "./static-landblock-render-artifact-store";
+import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import type { StaticLandblockProductSourceEvent } from "./static-landblock-product-source";
 
 export interface WorldDisplayRendererOptions {

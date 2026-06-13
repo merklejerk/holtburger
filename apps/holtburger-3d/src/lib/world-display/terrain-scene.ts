@@ -1,10 +1,7 @@
 import type { BrowserLocationSelection } from "../../app/browser-mode";
 import { isIndoorBrowserDestination } from "../../app/browser-mode";
 import type { PreparedAssetResolver } from "../assets/prepared-asset-store";
-import type {
-	PreparedAssetRecord,
-	PreparedTerrainMesh,
-} from "../assets/types";
+import type { PreparedAssetRecord, PreparedTerrainMesh } from "../assets/types";
 import { deriveTerrainFocusLandblockId } from "../assets/scene-asset-request-planner";
 import {
 	buildOutdoorCoverageLandblockIds,

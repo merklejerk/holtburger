@@ -267,7 +267,9 @@ export function createLandblockRenderProductWorkerJob(
 	desired: DesiredLandblockRenderProduct,
 	artifactFilter: ReadonlySet<RenderArtifactDiagnosticFamily> | null = null,
 ): LandblockRenderProductWorkerJob {
-	const artifactFilterValues = artifactFilter ? [...artifactFilter].sort() : null;
+	const artifactFilterValues = artifactFilter
+		? [...artifactFilter].sort()
+		: null;
 	const artifactFilterLabel =
 		artifactFilterValues === null
 			? "all"

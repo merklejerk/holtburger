@@ -46,9 +46,7 @@ describe("structured interior scene", () => {
 	});
 });
 
-function createAssetStateWithRecords(
-	...records: PreparedAssetRecord[]
-) {
+function createAssetStateWithRecords(...records: PreparedAssetRecord[]) {
 	return createTestPreparedAssetResolver(records);
 }
 

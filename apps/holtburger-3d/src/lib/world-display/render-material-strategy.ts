@@ -75,13 +75,12 @@ export interface RenderMaterialStrategyPolicy {
 	maxMaterialSlotsPerDraw: number;
 }
 
-const DEFAULT_RENDER_MATERIAL_STRATEGY_POLICY: RenderMaterialStrategyPolicy =
-	{
-		maxAtlasTextureSize: 4096,
-		maxAtlasTextureCount: 8,
-		baseGutterPixels: 2,
-		maxMaterialSlotsPerDraw: 128,
-	};
+const DEFAULT_RENDER_MATERIAL_STRATEGY_POLICY: RenderMaterialStrategyPolicy = {
+	maxAtlasTextureSize: 4096,
+	maxAtlasTextureCount: 8,
+	baseGutterPixels: 2,
+	maxMaterialSlotsPerDraw: 128,
+};
 
 export interface RenderMaterialStrategyInput {
 	slot: ResolvedMaterialSlot;
@@ -499,8 +498,9 @@ export function resolveRenderMaterialStrategy(options: {
 		renderSurfaceId: surface.renderSurfaceId,
 		usage: "raw",
 	});
-	const preparedTextureAsset =
-		options.assetReadModel.get(preparedTextureAssetId);
+	const preparedTextureAsset = options.assetReadModel.get(
+		preparedTextureAssetId,
+	);
 	if (preparedTextureAsset?.payload.kind !== "prepared-texture") {
 		return createFallbackRequirement({
 			input: options.input,
@@ -544,8 +544,7 @@ export function resolveRenderMaterialStrategy(options: {
 	const samplingPolicy = selectVariantTextureSamplingPolicy(
 		surface,
 		createDefaultMaterialTextureSamplingPolicy(
-			options.textureCapabilities ??
-				defaultRenderMaterialTextureCapabilities(),
+			options.textureCapabilities ?? defaultRenderMaterialTextureCapabilities(),
 			options.textureFilteringMode,
 		),
 		options.input.slot.materialVariantSignature,
@@ -567,8 +566,7 @@ export function resolveRenderMaterialStrategy(options: {
 		materialAssetId,
 		recipe,
 		textureCapabilities:
-			options.textureCapabilities ??
-			defaultRenderMaterialTextureCapabilities(),
+			options.textureCapabilities ?? defaultRenderMaterialTextureCapabilities(),
 		textureFilteringMode: options.textureFilteringMode,
 		texturePageReadiness: {
 			materialSlotKey: describeMaterialSlotKey({
@@ -602,9 +600,7 @@ function resolveIndexedPalettedTextureStrategy(options: {
 	recipe: PreparedMaterialRecipePayload;
 	textureCapabilities: MaterialTextureCapabilities;
 	indexedMaterialDataCache?: IndexedMaterialDataCache;
-}):
-	| RenderIndexedPalettedMaterialStrategy
-	| RenderMaterialFallbackStrategy {
+}): RenderIndexedPalettedMaterialStrategy | RenderMaterialFallbackStrategy {
 	const resolvedSurface = resolveFirstMaterialRenderSurface({
 		recipe: options.recipe,
 		assetReadModel: options.assetReadModel,
@@ -738,9 +734,7 @@ function resolveDirectTextureStrategy(options: {
 	textureCapabilities: MaterialTextureCapabilities;
 	textureFilteringMode?: TextureFilteringMode;
 	texturePageReadiness?: RenderMaterialTexturePageReadiness | null;
-}):
-	| RenderDirectTextureMaterialStrategy
-	| RenderMaterialFallbackStrategy {
+}): RenderDirectTextureMaterialStrategy | RenderMaterialFallbackStrategy {
 	const resolvedSurface = resolveFirstMaterialRenderSurface({
 		recipe: options.recipe,
 		assetReadModel: options.assetReadModel,
@@ -807,7 +801,9 @@ function resolveDirectTextureStrategy(options: {
 		recipe: options.recipe,
 		hasSourceAlpha: textureUpload.upload.hasSourceAlpha,
 	});
-	const textureKey = describeRenderMaterialDirectTextureKey(textureUpload.upload);
+	const textureKey = describeRenderMaterialDirectTextureKey(
+		textureUpload.upload,
+	);
 	const renderStateKey = describeDirectRenderStateKey(behavior);
 	const samplingKey = describeDirectSamplingKey(textureUpload.upload);
 	return {
@@ -978,9 +974,7 @@ function describeAtlasEntryKey(options: {
 	].join("|");
 }
 
-function describeAtlasSamplingKey(
-	policy: RenderAtlasSamplingPolicy,
-): string {
+function describeAtlasSamplingKey(policy: RenderAtlasSamplingPolicy): string {
 	return [
 		`wrap=${policy.wrapS}/${policy.wrapT}`,
 		"filter=linear/linear/linear",
@@ -1113,9 +1107,8 @@ function sortMaterialStrategies(
 function countFallbackReasons(
 	requirements: readonly RenderMaterialStrategy[],
 ): Partial<Record<RenderMaterialStrategyFallbackReason, number>> {
-	const counts: Partial<
-		Record<RenderMaterialStrategyFallbackReason, number>
-	> = {};
+	const counts: Partial<Record<RenderMaterialStrategyFallbackReason, number>> =
+		{};
 	for (const requirement of requirements) {
 		if (
 			requirement.kind !== "flat-fallback" &&
@@ -1128,9 +1121,7 @@ function countFallbackReasons(
 	return counts;
 }
 
-function describeStrategySortKey(
-	requirement: RenderMaterialStrategy,
-): string {
+function describeStrategySortKey(requirement: RenderMaterialStrategy): string {
 	switch (requirement.kind) {
 		case "atlas":
 			return requirement.materialSlotKey;
@@ -1216,7 +1207,9 @@ function normalizePolicy(
 		throw new Error("Render material atlas texture count must be positive.");
 	}
 	if (normalized.maxMaterialSlotsPerDraw <= 0) {
-		throw new Error("Render material atlas material table size must be positive.");
+		throw new Error(
+			"Render material atlas material table size must be positive.",
+		);
 	}
 	return normalized;
 }

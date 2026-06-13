@@ -1,10 +1,7 @@
 import { HostBackedAssetService } from "../assets/asset-service";
 import type { AssetService, AssetServiceSnapshot } from "../assets/contracts";
 import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
-import type {
-	Renderer,
-	RendererSnapshot,
-} from "../renderer/types";
+import type { Renderer, RendererSnapshot } from "../renderer/types";
 import type { FrameState } from "../renderer/types";
 import { normalizeOutdoorLandblockId } from "../../lib/landblocks";
 import { TextureManager } from "../textures/texture-manager";
@@ -363,7 +360,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			.then(() => this.#materializeStaticCommit(delta))
 			.catch((error: unknown) => {
 				this.#recordStaticMaterializationFailure(delta.revision, error);
-		});
+			});
 	}
 
 	#warnAboutDeferredStaticMaterialCoverage(

@@ -558,13 +558,14 @@ describe("V2 static object compatibility partitioner", () => {
 			throw new Error("Expected static object geometry draw unit.");
 		}
 		expect(result.drawUnits).toHaveLength(1);
-		expect(drawUnit.materialEntries.map((entry) => entry.primaryTextureUseId)).toEqual([
+		expect(
+			drawUnit.materialEntries.map((entry) => entry.primaryTextureUseId),
+		).toEqual([
 			"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color",
 			"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000011:rgba-color",
 		]);
 		expect(Array.from(drawUnit.materialSlotIndices)).toEqual([
-			0, 0, 0,
-			1, 1, 1,
+			0, 0, 0, 1, 1, 1,
 		]);
 		expect(drawUnit.textureUseIds).toEqual([
 			"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color",
@@ -603,10 +604,9 @@ describe("V2 static object compatibility partitioner", () => {
 				},
 			},
 		]);
-		expect(plan.partitions.map((partition) => partition.triangleCount)).toEqual([
-			1,
-			1,
-		]);
+		expect(plan.partitions.map((partition) => partition.triangleCount)).toEqual(
+			[1, 1],
+		);
 
 		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
 		expect(result.drawUnits).toEqual([
@@ -649,10 +649,7 @@ describe("V2 static object compatibility partitioner", () => {
 				createTexturedMaterial(0x08000014, { surfaceType: 0x10 }),
 				createSolidMaterial(0x08000015, { surfaceType: 0x20000 }),
 			],
-			textureRefs: [
-				...createRgbaTextureRefs(),
-				...createIndexedTextureRefs(),
-			],
+			textureRefs: [...createRgbaTextureRefs(), ...createIndexedTextureRefs()],
 		});
 		const input = createBakeInput(payload);
 
@@ -794,12 +791,16 @@ describe("V2 static object compatibility partitioner", () => {
 			{
 				firstIndex: 0,
 				indexCount: 256,
-				subPalettes: [{ firstIndex: 16, indexCount: 32, paletteId: 0x04000010 }],
+				subPalettes: [
+					{ firstIndex: 16, indexCount: 32, paletteId: 0x04000010 },
+				],
 			},
 			{
 				firstIndex: 0,
 				indexCount: 256,
-				subPalettes: [{ firstIndex: 64, indexCount: 32, paletteId: 0x04000010 }],
+				subPalettes: [
+					{ firstIndex: 64, indexCount: 32, paletteId: 0x04000010 },
+				],
 			},
 		]);
 	});
@@ -873,11 +874,13 @@ describe("V2 static object compatibility partitioner", () => {
 					)
 				: [],
 		).toEqual(["clamp", "repeat"]);
-		expect(result.textureUses.map((textureUse) => ({
-			id: textureUse.textureUseId,
-			samplingPolicy: textureUse.samplingPolicy,
-			usage: textureUse.source.usage,
-		}))).toEqual([
+		expect(
+			result.textureUses.map((textureUse) => ({
+				id: textureUse.textureUseId,
+				samplingPolicy: textureUse.samplingPolicy,
+				usage: textureUse.source.usage,
+			})),
+		).toEqual([
 			{
 				id: "1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color",
 				samplingPolicy: {
@@ -956,8 +959,7 @@ describe("V2 static object compatibility partitioner", () => {
 			throw new Error("Expected static object geometry draw unit.");
 		}
 		expect(Array.from(drawUnit.positions.slice(0, 18))).toEqual([
-			1, 1, 1, 0, 1, 1, 1, 0, 1,
-			2, 1, 1, 0, 1, 1, 1, 0, 1,
+			1, 1, 1, 0, 1, 1, 1, 0, 1, 2, 1, 1, 0, 1, 1, 1, 0, 1,
 		]);
 		expect(result.staticSourceMappings).toEqual([
 			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:7:first-vertex:0:geometry-surface:0:variant:base",
@@ -1289,7 +1291,9 @@ function createTexturedMaterial(
 	};
 }
 
-function createIndexedMaterial(materialId: number): StaticObjectMaterialSourceFacts {
+function createIndexedMaterial(
+	materialId: number,
+): StaticObjectMaterialSourceFacts {
 	return {
 		diffuse: 1,
 		identity: createMaterialIdentity(materialId),
@@ -1471,9 +1475,7 @@ function createObjectIdentity(
 	};
 }
 
-function createSourceIdentity(
-	options: { readonly sourceDid?: number } = {},
-) {
+function createSourceIdentity(options: { readonly sourceDid?: number } = {}) {
 	return {
 		kind: "static-object-source" as const,
 		sourceAssetKind: "setup-model" as const,
@@ -1481,9 +1483,7 @@ function createSourceIdentity(
 	};
 }
 
-function createGfxObjIdentity(
-	options: { readonly sourceDid?: number } = {},
-) {
+function createGfxObjIdentity(options: { readonly sourceDid?: number } = {}) {
 	return {
 		kind: "static-object-source" as const,
 		sourceAssetKind: "gfx-obj" as const,

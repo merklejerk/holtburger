@@ -77,7 +77,9 @@ describe("buildTerrainBlendPlanSet", () => {
 			pcodes: [terrainPcode([0, 0, 0, 0], [1, 1, 1, 1])],
 		});
 
-		expect(planSet?.plans[0]?.base.renderSurface.renderSurfaceId).toBe(0x06000011);
+		expect(planSet?.plans[0]?.base.renderSurface.renderSurfaceId).toBe(
+			0x06000011,
+		);
 		expect(planSet?.diagnostics).toEqual([]);
 	});
 
@@ -231,8 +233,9 @@ function createTerrainMaterialPayload(
 
 function createSurfaceTexturePayload(
 	selectedRenderSurfaceId: number | null,
-	renderSurfaceIds: readonly number[] =
-		selectedRenderSurfaceId === null ? [] : [selectedRenderSurfaceId],
+	renderSurfaceIds: readonly number[] = selectedRenderSurfaceId === null
+		? []
+		: [selectedRenderSurfaceId],
 ): PreparedAssetPayload {
 	return {
 		kind: "surface-texture",
@@ -258,7 +261,9 @@ function createRenderSurfacePayload(
 	formatRaw = 0x14,
 ): PreparedAssetPayload {
 	const sourceBytes =
-		formatRaw === 0xf4 ? new Uint8Array([255]) : new Uint8Array([255, 255, 255]);
+		formatRaw === 0xf4
+			? new Uint8Array([255])
+			: new Uint8Array([255, 255, 255]);
 	return {
 		kind: "render-surface",
 		sourceAssetKind: "render-surface",

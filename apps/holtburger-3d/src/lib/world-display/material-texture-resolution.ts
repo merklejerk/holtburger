@@ -22,15 +22,15 @@ export function resolveFirstMaterialRenderSurface(options: {
 			: options.recipe.dependencies.renderSurfaceAssetIds;
 	const assetId = assetIds[0];
 	const asset =
-		assetId === undefined
-			? null
-			: options.assetReadModel.get(assetId);
+		assetId === undefined ? null : options.assetReadModel.get(assetId);
 	return asset?.payload.kind === "render-surface"
 		? { assetId, renderSurface: asset.payload }
 		: null;
 }
 
-function selectedRenderSurfaceAssetIds(renderSurfaceId: number | null): string[] {
+function selectedRenderSurfaceAssetIds(
+	renderSurfaceId: number | null,
+): string[] {
 	return renderSurfaceId === null
 		? []
 		: [`render-surface/${formatHex32(renderSurfaceId)}`];

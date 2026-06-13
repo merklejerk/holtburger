@@ -35,19 +35,16 @@ describe("asset state reducer", () => {
 	});
 
 	it("records prepared status without owning prepared payload indexes", () => {
-		const state = applyPreparedAssets(
-			createAssetState(),
-			[
-				createPreparedTerrainAsset(
-					"bootstrap-terrain-a",
-					"landblock/0102ffff/outdoor",
-				),
-				createPreparedTerrainAsset(
-					"bootstrap-terrain-b",
-					"landblock/0103ffff/outdoor",
-				),
-			],
-		);
+		const state = applyPreparedAssets(createAssetState(), [
+			createPreparedTerrainAsset(
+				"bootstrap-terrain-a",
+				"landblock/0102ffff/outdoor",
+			),
+			createPreparedTerrainAsset(
+				"bootstrap-terrain-b",
+				"landblock/0103ffff/outdoor",
+			),
+		]);
 
 		expect(state.status).toBe("ready");
 		expect(state.activeRequest?.assetId).toBe("landblock/0103ffff/outdoor");
@@ -62,5 +59,4 @@ describe("asset state reducer", () => {
 			"prepared",
 		]);
 	});
-
 });

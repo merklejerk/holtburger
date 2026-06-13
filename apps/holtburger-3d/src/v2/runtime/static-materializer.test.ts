@@ -65,7 +65,10 @@ describe("V2 static materializer", () => {
 		const drawUnit = createTerrainDrawUnit("terrain-flat");
 
 		const materialized = materializeStaticCommit({
-			commit: createCommitDelta({ addedDrawUnits: [drawUnit], textureUses: [] }),
+			commit: createCommitDelta({
+				addedDrawUnits: [drawUnit],
+				textureUses: [],
+			}),
 			renderAnchorLandblockId: 0xda55ffff,
 			textureUpdate: null,
 		});
@@ -124,16 +127,26 @@ describe("V2 static materializer", () => {
 		]);
 		expect(
 			addedDrawUnits.map((added) =>
-				added.kind === "static-object-geometry"
-					? added.renderState
-					: null,
+				added.kind === "static-object-geometry" ? added.renderState : null,
 			),
 		).toEqual([drawUnit.renderState, drawUnit.renderState]);
 		expect(materialized.textureUpdate?.drawUnitBindings).toMatchObject([
-			{ drawUnitId: "static-table", rolePage: { kind: "static-base-color", slot: 0 } },
-			{ drawUnitId: "static-table", rolePage: { kind: "static-base-color", slot: 1 } },
-			{ drawUnitId: "static-table", rolePage: { kind: "static-base-color", slot: 2 } },
-			{ drawUnitId: "static-table", rolePage: { kind: "static-base-color", slot: 3 } },
+			{
+				drawUnitId: "static-table",
+				rolePage: { kind: "static-base-color", slot: 0 },
+			},
+			{
+				drawUnitId: "static-table",
+				rolePage: { kind: "static-base-color", slot: 1 },
+			},
+			{
+				drawUnitId: "static-table",
+				rolePage: { kind: "static-base-color", slot: 2 },
+			},
+			{
+				drawUnitId: "static-table",
+				rolePage: { kind: "static-base-color", slot: 3 },
+			},
 			{
 				drawUnitId: "static-table#fine-1",
 				rolePage: { kind: "static-base-color", slot: 0 },
@@ -284,7 +297,7 @@ function createTexturePlacementUpdate(
 				textureUseId,
 				textureWidth: 1,
 			},
-			],
+		],
 		placements: [],
 		removedTextureRefIds: [],
 		revision: 3,
@@ -319,7 +332,9 @@ function createStaticObjectDrawUnit(
 		materialEntries.push(createStaticObjectMaterialEntry(slot, drawUnitId));
 	}
 
-	const textureUseIds = materialEntries.map((entry) => entry.primaryTextureUseId!);
+	const textureUseIds = materialEntries.map(
+		(entry) => entry.primaryTextureUseId!,
+	);
 
 	return {
 		alphaTest: 0,

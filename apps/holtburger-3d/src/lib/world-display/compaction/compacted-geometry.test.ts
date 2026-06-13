@@ -430,15 +430,12 @@ function createDirectTextureMaterial(
 	};
 }
 
-function createIndexedMaterial(
-	id: string,
-): RenderIndexedPalettedMaterialPlan {
+function createIndexedMaterial(id: string): RenderIndexedPalettedMaterialPlan {
 	return {
 		kind: "indexed-paletted",
 		key: `indexed/${id}`,
 		color: new Float32Array([1, 1, 1, 1]),
-		indexedMaterial:
-			{} as RenderIndexedPalettedMaterialPlan["indexedMaterial"],
+		indexedMaterial: {} as RenderIndexedPalettedMaterialPlan["indexedMaterial"],
 		behavior: createOpaqueBehavior(),
 		fallbackReason: null,
 		detailOverlay: null,

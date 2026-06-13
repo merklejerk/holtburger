@@ -68,8 +68,7 @@ export interface Webgl2StaticBundleLayerResource {
 	dispose(): void;
 }
 
-export interface Webgl2StaticBundleTexturePageResource
-	extends Webgl2ResidentTexturePageResource {
+export interface Webgl2StaticBundleTexturePageResource extends Webgl2ResidentTexturePageResource {
 	bucket: StaticBundleTexturePage["bucket"];
 	sampleClass: VirtualTexturePageSampleClass;
 	pageKind: StaticBundleTexturePage["pageKind"];
@@ -77,8 +76,7 @@ export interface Webgl2StaticBundleTexturePageResource
 	entries: readonly Webgl2StaticBundleTexturePageEntryResource[];
 }
 
-interface Webgl2StaticBundleTexturePageEntryResource
-	extends Webgl2ResidentTexturePageEntryResource {
+interface Webgl2StaticBundleTexturePageEntryResource extends Webgl2ResidentTexturePageEntryResource {
 	sourceAssetId: string;
 	role: VirtualTexturePageEntryRole;
 	sampleClass: VirtualTexturePageSampleClass;
@@ -392,11 +390,12 @@ export function updateWebgl2StaticBundleTexturePageResourceSamplerPolicy({
 	textureFilteringMode: TextureFilteringMode;
 	maxAnisotropy?: number;
 }): void {
-	const nextSamplerPolicyKey = describeStaticBundleTexturePageResourceSamplerPolicy({
-		page,
-		textureFilteringMode,
-		maxAnisotropy,
-	});
+	const nextSamplerPolicyKey =
+		describeStaticBundleTexturePageResourceSamplerPolicy({
+			page,
+			textureFilteringMode,
+			maxAnisotropy,
+		});
 	if (page.samplerPolicyKey === nextSamplerPolicyKey) {
 		return;
 	}
@@ -639,7 +638,9 @@ function shouldGenerateStaticBundleTexturePageMipmaps({
 	page: Pick<Webgl2StaticBundleTexturePageResource, "sampleClass">;
 	textureFilteringMode: TextureFilteringMode;
 }): boolean {
-	return !isExactSampleClass(page.sampleClass) && textureFilteringMode !== "nearest";
+	return (
+		!isExactSampleClass(page.sampleClass) && textureFilteringMode !== "nearest"
+	);
 }
 
 function selectArtifactTexturePageAnisotropy({
@@ -750,8 +751,8 @@ function resolveStaticBundleMaterialTextureBinding({
 			`Static bundle material ${materialRecordKey} references missing texture page ref ${virtualRefKey}.`,
 		);
 	}
-	const entry = page.entries.find(
-		(candidate) => candidate.virtualRefKeys.includes(virtualRefKey),
+	const entry = page.entries.find((candidate) =>
+		candidate.virtualRefKeys.includes(virtualRefKey),
 	);
 	if (!entry) {
 		throw new Error(

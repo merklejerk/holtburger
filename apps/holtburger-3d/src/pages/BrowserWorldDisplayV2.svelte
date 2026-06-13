@@ -859,11 +859,13 @@
 										.visibleCellCount} portals
 									{snapshot.static.latestLandblockEnvCellsPayload.portalCount}
 									links
-									{snapshot.static.latestLandblockEnvCellsPayload.portalLinkCount}
+									{snapshot.static.latestLandblockEnvCellsPayload
+										.portalLinkCount}
 									seeds
 									{snapshot.static.latestLandblockEnvCellsPayload
 										.staticObjectSeedCount} missing
-									{snapshot.static.latestLandblockEnvCellsPayload.missingRefCount}
+									{snapshot.static.latestLandblockEnvCellsPayload
+										.missingRefCount}
 								{:else}
 									none
 								{/if}

@@ -760,9 +760,7 @@ function createDeferredBlendedMaterialCoverage(): StaticMaterialCoverageReport {
 		detailRoleCount: 0,
 		domain: "outdoor-detail",
 		fallbackReasonCount: 1,
-		fallbackReasonCounts: [
-			{ code: "translucent-render-deferred", count: 1 },
-		],
+		fallbackReasonCounts: [{ code: "translucent-render-deferred", count: 1 }],
 		landblockId: 0xda55ffff,
 		materialCount: 1,
 		partitionCount: 99,

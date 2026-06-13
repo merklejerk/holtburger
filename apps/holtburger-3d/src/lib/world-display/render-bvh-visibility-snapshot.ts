@@ -110,10 +110,11 @@ export function deriveRenderBvhVisibilitySnapshot(options: {
 			transform,
 		]),
 	);
-	const artifactEnvCellBvhEntriesById = collectDetailedArtifactEnvCellBvhEntriesById(
-		options.staticLandblockRenderProducts,
-		fallbackReasons,
-	);
+	const artifactEnvCellBvhEntriesById =
+		collectDetailedArtifactEnvCellBvhEntriesById(
+			options.staticLandblockRenderProducts,
+			fallbackReasons,
+		);
 	const queriedTerrainLandblockIds = new Set<number>();
 	const queriedOutdoorStaticLandblockIds = new Set<number>();
 
@@ -338,9 +339,7 @@ export function deriveRenderBvhVisibilitySnapshot(options: {
 	};
 }
 
-function collectTerrainArtifacts(
-	artifacts: StaticLandblockRenderProductSet,
-) {
+function collectTerrainArtifacts(artifacts: StaticLandblockRenderProductSet) {
 	return artifacts.artifacts
 		.map((result) => getLandblockTerrainRenderArtifact(result))
 		.filter((artifact) => artifact !== null)

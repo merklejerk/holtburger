@@ -82,7 +82,9 @@ describe("landblock render product planner", () => {
 		expect(
 			products.filter((product) => product.product === "outdoor-detail"),
 		).toHaveLength(5);
-		expect(new Set(products.map((product) => product.landblockId)).size).toBe(5);
+		expect(new Set(products.map((product) => product.landblockId)).size).toBe(
+			5,
+		);
 	});
 
 	it("keeps default outdoor coverage split by terrain, static, and env-cell radii", () => {

@@ -154,7 +154,9 @@ export function planAtlasLayout(options: {
 	const overflows = [
 		...sourceTooLargeOverflows,
 		...(selectedAttempt?.atlasFullOverflows ?? []),
-	].sort((left, right) => left.atlasEntryKey.localeCompare(right.atlasEntryKey));
+	].sort((left, right) =>
+		left.atlasEntryKey.localeCompare(right.atlasEntryKey),
+	);
 	const overflowsByEntryKey = new Map(
 		overflows.map((overflow) => [overflow.atlasEntryKey, overflow] as const),
 	);
@@ -198,7 +200,10 @@ function selectAtlasPackAttempt(options: {
 		entries: options.entries,
 		cohorts: options.cohorts,
 	});
-	const candidates = createAtlasPageSizeCandidates(options.entries, options.policy);
+	const candidates = createAtlasPageSizeCandidates(
+		options.entries,
+		options.policy,
+	);
 	let selected: AtlasPackAttempt | null = null;
 	for (const candidate of candidates) {
 		const attempt = packEntriesInPageSize({
@@ -288,7 +293,10 @@ function createAtlasCohortComponents(
 	const parentByEntryKey = new Map<string, string>();
 	for (const cohort of cohorts) {
 		for (const entryKey of cohort.entryKeys) {
-			parentByEntryKey.set(entryKey, parentByEntryKey.get(entryKey) ?? entryKey);
+			parentByEntryKey.set(
+				entryKey,
+				parentByEntryKey.get(entryKey) ?? entryKey,
+			);
 		}
 		const [firstEntryKey] = cohort.entryKeys;
 		if (!firstEntryKey) {
@@ -350,7 +358,10 @@ function createAtlasPackingUnit(
 	key: string,
 	entries: readonly PaddedAtlasLayoutEntry[],
 ): AtlasPackingUnit {
-	const paddedArea = entries.reduce((total, entry) => total + entry.paddedArea, 0);
+	const paddedArea = entries.reduce(
+		(total, entry) => total + entry.paddedArea,
+		0,
+	);
 	const maxPaddedSide = Math.max(
 		...entries.map((entry) => Math.max(entry.paddedWidth, entry.paddedHeight)),
 	);
@@ -379,13 +390,17 @@ function packEntriesInPageSize(options: {
 			continue;
 		}
 		if (pageStates.length >= options.policy.maxTextureCount) {
-			atlasFullOverflows.push(...createAtlasFullOverflows(unit, options.policy));
+			atlasFullOverflows.push(
+				...createAtlasFullOverflows(unit, options.policy),
+			);
 			continue;
 		}
 		const page = createAtlasPagePackState(pageStates.length, options.pageSize);
 		const newPagePlacement = tryPlaceUnitOnPage(unit, page);
 		if (newPagePlacement === null) {
-			atlasFullOverflows.push(...createAtlasFullOverflows(unit, options.policy));
+			atlasFullOverflows.push(
+				...createAtlasFullOverflows(unit, options.policy),
+			);
 			continue;
 		}
 		pageStates.push(page);
@@ -506,7 +521,9 @@ function createAtlasFullOverflows(
 					? `atlas entry ${entry.entry.key} did not fit in ${policy.maxTextureCount} atlas textures`
 					: `atlas entry ${entry.entry.key} belongs to cohort ${unit.key}, which did not fit in ${policy.maxTextureCount} atlas textures`,
 		}))
-		.sort((left, right) => left.atlasEntryKey.localeCompare(right.atlasEntryKey));
+		.sort((left, right) =>
+			left.atlasEntryKey.localeCompare(right.atlasEntryKey),
+		);
 }
 
 function findBestPlacementCandidate(

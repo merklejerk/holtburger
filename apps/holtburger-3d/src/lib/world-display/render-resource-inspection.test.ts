@@ -9,9 +9,7 @@ import type { Webgl2WorldResourceStore } from "./webgl2-world-resources";
 
 describe("render resource inspection", () => {
 	it("projects resident WebGL2 resource stores into a plain inspection snapshot", () => {
-		const snapshot = inspectWebgl2WorldResources(
-			createInspectableWorldStore(),
-		);
+		const snapshot = inspectWebgl2WorldResources(createInspectableWorldStore());
 
 		expect(snapshot.summary).toEqual({
 			staticBundleLayerCount: 1,

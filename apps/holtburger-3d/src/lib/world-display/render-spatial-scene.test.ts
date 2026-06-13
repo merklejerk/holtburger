@@ -61,9 +61,7 @@ describe("render spatial scene", () => {
 
 	it("derives coarse static spatial items from static bundle artifact hints", () => {
 		const items = deriveStaticRenderableSpatialItemsFromLandblockArtifacts(
-			createStaticLandblockProductSet([
-				createStaticBundleProductArtifact(),
-			]),
+			createStaticLandblockProductSet([createStaticBundleProductArtifact()]),
 		);
 
 		expect(items).toHaveLength(1);

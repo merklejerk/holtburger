@@ -36,9 +36,7 @@ export interface StaticLandblockProductSourceSubscription {
 	unsubscribe(): void;
 }
 
-export class MutableStaticLandblockProductSource
-	implements StaticLandblockProductSource
-{
+export class MutableStaticLandblockProductSource implements StaticLandblockProductSource {
 	private readonly store: StaticLandblockRenderArtifactStore;
 	private readonly listeners = new Set<StaticLandblockProductSourceListener>();
 

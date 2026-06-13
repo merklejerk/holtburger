@@ -302,9 +302,15 @@ describe("atlas layout planner", () => {
 	});
 });
 
-function assertNoPaddedOverlaps(texturePages: readonly AtlasTexturePage[]): void {
+function assertNoPaddedOverlaps(
+	texturePages: readonly AtlasTexturePage[],
+): void {
 	for (const page of texturePages) {
-		for (let leftIndex = 0; leftIndex < page.placements.length; leftIndex += 1) {
+		for (
+			let leftIndex = 0;
+			leftIndex < page.placements.length;
+			leftIndex += 1
+		) {
 			const left = page.placements[leftIndex];
 			if (left === undefined) {
 				continue;

@@ -9,7 +9,11 @@ import type {
 	SetupModelPayloadDto,
 	SurfaceTexturePayloadDto,
 } from "../../../lib/host/contracts";
-import type { AssetService, HostAssetKey, PreparedAsset } from "../../assets/contracts";
+import type {
+	AssetService,
+	HostAssetKey,
+	PreparedAsset,
+} from "../../assets/contracts";
 import {
 	createHostAssetKey,
 	describeHostAssetKey,
@@ -61,7 +65,10 @@ interface LoadedPayload<
 		OutdoorStaticPreparedPayload["kind"],
 > {
 	readonly asset: PreparedAsset;
-	readonly payload: Extract<OutdoorStaticPreparedPayload, { readonly kind: TKind }>;
+	readonly payload: Extract<
+		OutdoorStaticPreparedPayload,
+		{ readonly kind: TKind }
+	>;
 }
 
 interface SourceResolution {
@@ -95,7 +102,10 @@ export class OutdoorStaticObjectsResolver {
 	}
 
 	async resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
-		if (!isOutdoorStaticObjectDomain(job.domain) || job.scope.kind !== "landblock") {
+		if (
+			!isOutdoorStaticObjectDomain(job.domain) ||
+			job.scope.kind !== "landblock"
+		) {
 			throw new Error(
 				`Outdoor static object resolver only supports outdoor static landblock jobs. Received ${job.scope.kind}/${job.domain}.`,
 			);
@@ -110,7 +120,10 @@ export class OutdoorStaticObjectsResolver {
 			shouldIncludeOutdoorStaticObject(domain, object.kind),
 		);
 		const regionRenderProfile = await this.#loadPayload(
-			createHostAssetKey("region-render-profile", landblock.payload.regionNumber),
+			createHostAssetKey(
+				"region-render-profile",
+				landblock.payload.regionNumber,
+			),
 			"region-render-profile",
 		);
 		const sourceResolution = await this.#resolveSourceAssets(
@@ -374,7 +387,10 @@ export class OutdoorStaticObjectsResolver {
 			);
 			let gfxObj: LoadedPayload<"gfx-obj">;
 			try {
-				gfxObj = await this.#loadPayload(parseHostAssetId(gfxObjAssetId), "gfx-obj");
+				gfxObj = await this.#loadPayload(
+					parseHostAssetId(gfxObjAssetId),
+					"gfx-obj",
+				);
 			} catch {
 				options.missingRefs.push(gfxObjIdentity);
 				continue;
@@ -482,15 +498,17 @@ export class OutdoorStaticObjectsResolver {
 			options.materialSlots ??
 			expandStaticObjectMaterialVariants({
 				gfxObj: options.gfxObj,
-				materialSlots: options.gfxObj.surfaceIds.map((surfaceId, slotIndex) => ({
-					geometrySurfaceId: slotIndex,
-					materialId: surfaceId,
-					materialSurfaceId: surfaceId,
-					materialVariantSignature: null,
-					paletteOverride: null,
-					paletteViews: [],
-					slotIndex,
-				})),
+				materialSlots: options.gfxObj.surfaceIds.map(
+					(surfaceId, slotIndex) => ({
+						geometrySurfaceId: slotIndex,
+						materialId: surfaceId,
+						materialSurfaceId: surfaceId,
+						materialVariantSignature: null,
+						paletteOverride: null,
+						paletteViews: [],
+						slotIndex,
+					}),
+				),
 			});
 		const slots = await Promise.all(
 			materialSlots.map(async (slot) => {
@@ -667,7 +685,9 @@ export class OutdoorStaticObjectsResolver {
 			surfaceTexture.payload.renderSurfaceIds[0] ??
 			null;
 		const renderSurface =
-			renderSurfaceId === null ? null : createRenderSurfaceIdentity(renderSurfaceId);
+			renderSurfaceId === null
+				? null
+				: createRenderSurfaceIdentity(renderSurfaceId);
 		let palette = options.palette;
 
 		options.textureRefs.set(
@@ -696,7 +716,9 @@ export class OutdoorStaticObjectsResolver {
 				palette ??
 				(loadedRenderSurface.payload.defaultPaletteId === null
 					? null
-					: createPaletteIdentity(loadedRenderSurface.payload.defaultPaletteId));
+					: createPaletteIdentity(
+							loadedRenderSurface.payload.defaultPaletteId,
+						));
 			options.textureRefs.set(
 				createTextureRefCacheKey({ role: "render-surface", renderSurface }),
 				{
@@ -908,7 +930,9 @@ function compareMaterialVariantSignatures(
 	return (left ?? "").localeCompare(right ?? "");
 }
 
-function createStaticObjectSourceIdentity(key: HostAssetKey): StaticObjectSourceIdentity {
+function createStaticObjectSourceIdentity(
+	key: HostAssetKey,
+): StaticObjectSourceIdentity {
 	if (
 		key.kind !== "gfx-obj" &&
 		key.kind !== "setup-model" &&
@@ -1021,7 +1045,9 @@ function deriveSetupPartDefaultPlacements(
 	return [...byPart, ...location];
 }
 
-function toFloat32Array(values: readonly number[] | Float32Array): Float32Array {
+function toFloat32Array(
+	values: readonly number[] | Float32Array,
+): Float32Array {
 	return values instanceof Float32Array ? values : new Float32Array(values);
 }
 
@@ -1069,7 +1095,9 @@ function createSourceCacheKey(identity: StaticObjectSourceIdentity): string {
 	return `${identity.sourceAssetKind}:${identity.sourceDid}`;
 }
 
-function createMaterialCacheKey(identity: StaticMaterialSourceIdentity): string {
+function createMaterialCacheKey(
+	identity: StaticMaterialSourceIdentity,
+): string {
 	return `${identity.materialId}`;
 }
 
@@ -1079,8 +1107,14 @@ function createPaletteCacheKey(identity: PaletteIdentity): string {
 
 function createTextureRefCacheKey(
 	ref:
-		| { readonly role: "surface-texture"; readonly texture: SurfaceTextureIdentity }
-		| { readonly role: "render-surface"; readonly renderSurface: RenderSurfaceIdentity },
+		| {
+				readonly role: "surface-texture";
+				readonly texture: SurfaceTextureIdentity;
+		  }
+		| {
+				readonly role: "render-surface";
+				readonly renderSurface: RenderSurfaceIdentity;
+		  },
 ): string {
 	return ref.role === "surface-texture"
 		? `${ref.role}:${ref.texture.surfaceTextureId}`
@@ -1100,7 +1134,10 @@ function requirePreparedPayloadKind<
 		);
 	}
 
-	return payload as Extract<OutdoorStaticPreparedPayload, { readonly kind: TKind }>;
+	return payload as Extract<
+		OutdoorStaticPreparedPayload,
+		{ readonly kind: TKind }
+	>;
 }
 
 const UNIT_SCALE = { x: 1, y: 1, z: 1 };
@@ -1108,7 +1145,10 @@ const UNIT_SCALE = { x: 1, y: 1, z: 1 };
 const PIXEL_FORMAT_P8 = 0x29;
 const PIXEL_FORMAT_INDEX16 = 0x65;
 
-function scanIndexedMaxIndex(bytes: Uint8Array, formatRaw: number): number | null {
+function scanIndexedMaxIndex(
+	bytes: Uint8Array,
+	formatRaw: number,
+): number | null {
 	if (formatRaw === PIXEL_FORMAT_P8) {
 		let maxIndex = 0;
 		for (const index of bytes) {

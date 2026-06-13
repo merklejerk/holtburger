@@ -9,9 +9,7 @@ import {
 	type PreparedLandblockOutdoorPayload,
 	type PreparedPolygonSetRenderGeometry,
 } from "../assets/types";
-import {
-	PreparedAssetStore,
-} from "../assets/prepared-asset-store";
+import { PreparedAssetStore } from "../assets/prepared-asset-store";
 import {
 	formatEnvCellAssetId,
 	formatLandblockOutdoorAssetId,
@@ -156,8 +154,7 @@ function createCoordinatorInput(
 ): BrowserRenderResourceCoordinatorInput {
 	const assetPresentationState = createInitialAssetChannelState();
 	const preparedAssetResolver =
-		overrides.preparedAssetResolver ??
-		createResolver(overrides.records ?? []);
+		overrides.preparedAssetResolver ?? createResolver(overrides.records ?? []);
 	return {
 		assetPresentationState,
 		preparedAssetResolver,
@@ -203,7 +200,9 @@ function createOutdoorDestination(
 	};
 }
 
-function createInteriorDestination(envCellId: number): BrowserLocationSelection {
+function createInteriorDestination(
+	envCellId: number,
+): BrowserLocationSelection {
 	return {
 		kind: "interior-cell",
 		label: `Env cell 0x${envCellId.toString(16).padStart(8, "0")}`,

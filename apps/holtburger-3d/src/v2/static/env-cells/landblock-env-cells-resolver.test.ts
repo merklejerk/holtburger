@@ -139,9 +139,12 @@ describe("V2 landblock env-cell resolver", () => {
 
 	it("rejects prepared assets with the wrong payload kind", async () => {
 		const assetService = new FixtureAssetService([
-			createPreparedAsset(createHostAssetKey("landblock-env-cells", 0xda55ffff), {
-				kind: "landblock-outdoor",
-			}),
+			createPreparedAsset(
+				createHostAssetKey("landblock-env-cells", 0xda55ffff),
+				{
+					kind: "landblock-outdoor",
+				},
+			),
 		]);
 
 		await expect(
@@ -343,9 +346,11 @@ function createRuntimeEnvCell(
 	};
 }
 
-function createLandblockEnvCellsPayload(options: {
-	readonly classification?: LandblockEnvCellsPayloadDto["classification"];
-} = {}): LandblockEnvCellsPayloadDto {
+function createLandblockEnvCellsPayload(
+	options: {
+		readonly classification?: LandblockEnvCellsPayloadDto["classification"];
+	} = {},
+): LandblockEnvCellsPayloadDto {
 	return {
 		classification: options.classification ?? "dungeon",
 		diagnostics: createDiagnostics(),

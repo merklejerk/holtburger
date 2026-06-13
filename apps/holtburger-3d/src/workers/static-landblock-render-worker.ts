@@ -161,11 +161,13 @@ export async function runStaticLandblockRenderWorkerJob(
 	});
 
 	throwIfWorkerJobCanceled(options);
-	const terrainArtifact =
-		shouldBuildTerrainArtifact(job)
-			? buildOutdoorTerrainArtifact(job, preparedByAssetId)
-			: null;
-	const staticObjectBundles = buildProductStaticBundleLayers(job, preparedByAssetId);
+	const terrainArtifact = shouldBuildTerrainArtifact(job)
+		? buildOutdoorTerrainArtifact(job, preparedByAssetId)
+		: null;
+	const staticObjectBundles = buildProductStaticBundleLayers(
+		job,
+		preparedByAssetId,
+	);
 	const artifacts: LandblockRenderArtifact[] = [
 		...(terrainArtifact ? [terrainArtifact] : []),
 		...staticObjectBundles,
@@ -333,8 +335,8 @@ async function loadPreparedCompanionClosure(options: {
 	let pass = 1;
 	while (true) {
 		const companionAssetIds = uniqueSortedStrings([
-			...collectTerrainCompanionAssetIds(options.preparedByAssetId).filter(
-				() => shouldBuildTerrainArtifact(options.job),
+			...collectTerrainCompanionAssetIds(options.preparedByAssetId).filter(() =>
+				shouldBuildTerrainArtifact(options.job),
 			),
 			...collectOutdoorStaticCompanionAssetIds(
 				options.job,
@@ -407,25 +409,27 @@ function shouldBuildOutdoorStaticObjects(
 function collectTerrainCompanionAssetIds(
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>,
 ): string[] {
-	const terrainMaterialAssetIds = [...preparedByAssetId.values()].flatMap((asset) =>
-		asset.payload.kind === "landblock-outdoor"
-			? [formatTerrainMaterialAssetId(asset.payload.regionNumber)]
-			: [],
-	);
-	const terrainPreparedTextureAssetIds = [...preparedByAssetId.values()].flatMap(
+	const terrainMaterialAssetIds = [...preparedByAssetId.values()].flatMap(
 		(asset) =>
-			asset.payload.kind === "terrain-material"
-				? asset.payload.dependencies.renderSurfaceAssetIds.map((assetId) => {
-						const renderSurface = preparedByAssetId.get(assetId);
-						if (renderSurface?.payload.kind !== "render-surface") {
-							return null;
-						}
-						return formatAtlasReadyPreparedTextureAssetId({
-							renderSurfaceId: renderSurface.payload.renderSurfaceId,
-							usage: "raw",
-						});
-					})
+			asset.payload.kind === "landblock-outdoor"
+				? [formatTerrainMaterialAssetId(asset.payload.regionNumber)]
 				: [],
+	);
+	const terrainPreparedTextureAssetIds = [
+		...preparedByAssetId.values(),
+	].flatMap((asset) =>
+		asset.payload.kind === "terrain-material"
+			? asset.payload.dependencies.renderSurfaceAssetIds.map((assetId) => {
+					const renderSurface = preparedByAssetId.get(assetId);
+					if (renderSurface?.payload.kind !== "render-surface") {
+						return null;
+					}
+					return formatAtlasReadyPreparedTextureAssetId({
+						renderSurfaceId: renderSurface.payload.renderSurfaceId,
+						usage: "raw",
+					});
+				})
+			: [],
 	);
 	return uniqueSortedStrings([
 		...terrainMaterialAssetIds,
@@ -531,7 +535,9 @@ function buildProductStaticBundleLayers(
 		return [];
 	}
 	if (job.product === "outdoor-buildings") {
-		return [buildStaticObjectBundle(job, preparedByAssetId, "outdoor-buildings")];
+		return [
+			buildStaticObjectBundle(job, preparedByAssetId, "outdoor-buildings"),
+		];
 	}
 	if (job.product === "outdoor-detail") {
 		return [buildStaticObjectBundle(job, preparedByAssetId, "outdoor-detail")];
@@ -804,7 +810,9 @@ function buildStructuredInteriorMaterialRecords(options: {
 	landblockId: number;
 }): StaticBundleMaterialRecord[] {
 	const recordsByKey = new Map<string, StaticBundleMaterialRecord>();
-	for (const slot of uniqueStructuredInteriorMaterialSlots(options.materialSlots)) {
+	for (const slot of uniqueStructuredInteriorMaterialSlots(
+		options.materialSlots,
+	)) {
 		const detail = resolveStructuredInteriorEnvironmentDetail({
 			regionNumber: slot.regionNumber,
 			texturePageRefs: options.texturePageRefs,
@@ -901,8 +909,7 @@ function buildStructuredInteriorMaterialSlices(options: {
 		if (!surface) {
 			continue;
 		}
-		const materialVariantSignature =
-			triangle.materialVariantSignature ?? null;
+		const materialVariantSignature = triangle.materialVariantSignature ?? null;
 		const key = [
 			surface.slotId,
 			surface.surfaceId,
@@ -1032,10 +1039,7 @@ function uniqueStructuredInteriorMaterialSlots(
 		);
 	}
 	return [...byKey.values()].sort((left, right) =>
-		[
-			left.regionNumber,
-			formatStructuredInteriorMaterialTextureRecordKey(left),
-		]
+		[left.regionNumber, formatStructuredInteriorMaterialTextureRecordKey(left)]
 			.join(":")
 			.localeCompare(
 				[
@@ -1171,7 +1175,9 @@ function resolveStructuredInteriorEnvironmentDetailRole({
 	regionNumber: number;
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
 }): PreparedRegionDetailRole | null {
-	const profile = preparedByAssetId.get(formatRegionRenderProfileAssetId(regionNumber));
+	const profile = preparedByAssetId.get(
+		formatRegionRenderProfileAssetId(regionNumber),
+	);
 	if (profile?.payload.kind !== "region-render-profile") {
 		return null;
 	}
@@ -1317,7 +1323,9 @@ function getPreparedPayload<
 ): Extract<PreparedAssetRecord["payload"], { kind: TKind }> {
 	const asset = preparedByAssetId.get(assetId);
 	if (!asset) {
-		throw new Error(`Static render worker is missing required asset ${assetId}.`);
+		throw new Error(
+			`Static render worker is missing required asset ${assetId}.`,
+		);
 	}
 	if (asset.payload.kind !== kind) {
 		throw new Error(
@@ -1455,9 +1463,9 @@ function uniqueSortedStrings(values: readonly string[]): string[] {
 function uniqueTexturePageRefs(
 	refs: readonly VirtualTexturePageRef[],
 ): VirtualTexturePageRef[] {
-	return [
-		...new Map(refs.map((ref) => [ref.key, ref] as const)).values(),
-	].sort((left, right) => left.key.localeCompare(right.key));
+	return [...new Map(refs.map((ref) => [ref.key, ref] as const)).values()].sort(
+		(left, right) => left.key.localeCompare(right.key),
+	);
 }
 
 function formatAssetIdSample(assetIds: readonly string[]): string {

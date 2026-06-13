@@ -306,7 +306,9 @@ function createSceneDomainTexture(
 ): WebGLTexture {
 	const texture = gl.createTexture();
 	if (!texture) {
-		throw new Error(`Failed to create WebGL2 scene-domain ${options.label} texture.`);
+		throw new Error(
+			`Failed to create WebGL2 scene-domain ${options.label} texture.`,
+		);
 	}
 	gl.bindTexture(gl.TEXTURE_2D, texture);
 	try {

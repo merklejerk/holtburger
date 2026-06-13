@@ -1338,11 +1338,7 @@ function createStaticObjectGeometryProgram(
 				program,
 				"uMaterialPaletteTextureRects[0]",
 			),
-			uMaterialWrapModes: requireUniform(
-				gl,
-				program,
-				"uMaterialWrapModes[0]",
-			),
+			uMaterialWrapModes: requireUniform(gl, program, "uMaterialWrapModes[0]"),
 			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
 			uStaticBaseColorSizes: requireUniform(
 				gl,
@@ -1355,11 +1351,7 @@ function createStaticObjectGeometryProgram(
 				"uStaticBaseColorTexture",
 				MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
 			),
-			uStaticDetailSizes: requireUniform(
-				gl,
-				program,
-				"uStaticDetailSizes[0]",
-			),
+			uStaticDetailSizes: requireUniform(gl, program, "uStaticDetailSizes[0]"),
 			uStaticDetailTextures: createRolePageTextureUniforms(
 				gl,
 				program,
@@ -1697,7 +1689,11 @@ function collectStaticObjectPageBinding(
 		return;
 	}
 	const texture = textures.get(binding.textureRefId);
-	if (!texture || binding.rolePage.slot < 0 || binding.rolePage.slot >= pages.length) {
+	if (
+		!texture ||
+		binding.rolePage.slot < 0 ||
+		binding.rolePage.slot >= pages.length
+	) {
 		return;
 	}
 	const existing = pages[binding.rolePage.slot] ?? null;
@@ -1745,7 +1741,9 @@ function uploadStaticObjectMaterialTableUniforms(
 		);
 	}
 
-	const alphaTests = new Float32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW);
+	const alphaTests = new Float32Array(
+		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	);
 	const baseColorPages = new Int32Array(
 		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
 	);
@@ -1844,9 +1842,8 @@ function uploadStaticObjectMaterialTableUniforms(
 			detailRects,
 			slot,
 		);
-		detailEnabled[slot] = detailBinding && textures.has(detailBinding.textureRefId)
-			? 1
-			: 0;
+		detailEnabled[slot] =
+			detailBinding && textures.has(detailBinding.textureRefId) ? 1 : 0;
 	}
 
 	gl.uniform1fv(program.uniforms.uMaterialAlphaTests, alphaTests);
@@ -1875,8 +1872,14 @@ function uploadStaticObjectMaterialTableUniforms(
 }
 
 function createDefaultRectTable(): Float32Array {
-	const rects = new Float32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4);
-	for (let slot = 0; slot < MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW; slot += 1) {
+	const rects = new Float32Array(
+		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
+	);
+	for (
+		let slot = 0;
+		slot < MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW;
+		slot += 1
+	) {
 		rects.set([0, 0, 1, 1], slot * 4);
 	}
 
@@ -2011,9 +2014,7 @@ function isTransparentStaticObjectResource(
 	);
 }
 
-function applyStaticObjectDepthWritingState(
-	gl: WebGL2RenderingContext,
-): void {
+function applyStaticObjectDepthWritingState(gl: WebGL2RenderingContext): void {
 	gl.enable(gl.DEPTH_TEST);
 	gl.depthMask(true);
 	gl.disable(gl.BLEND);

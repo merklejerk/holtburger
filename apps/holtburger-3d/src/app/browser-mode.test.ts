@@ -107,10 +107,7 @@ describe("browser-mode location policy", () => {
 		expect(nearState.cameraNearPlane).toBe(1);
 		expect(nearState.cameraFarPlane).toBe(3000);
 
-		const farState = updateBrowserCameraFarPlane(
-			createBrowserModeState(),
-			10,
-		);
+		const farState = updateBrowserCameraFarPlane(createBrowserModeState(), 10);
 		expect(farState.cameraFarPlane).toBe(250);
 
 		const invalidState = updateBrowserCameraFarPlane(

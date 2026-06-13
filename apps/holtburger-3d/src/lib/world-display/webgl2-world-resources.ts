@@ -61,9 +61,7 @@ import {
 	describeWebgl2TexturePageSetKey,
 	type TexturePageCpuSet,
 } from "./webgl2/resources/texture-page-upload";
-import {
-	type TerrainBlendTextureRef,
-} from "./terrain-blend-plan";
+import { type TerrainBlendTextureRef } from "./terrain-blend-plan";
 import type { RendererAssetReadModel } from "./renderer-asset-read-model";
 import type {
 	LandblockTerrainRenderArtifact,
@@ -378,8 +376,9 @@ export function evictWebgl2TerrainProductResources({
 	detailTexturesEnabled?: boolean;
 }): void {
 	const productIdentityKey = formatStaticLandblockProductKey(productKey);
-	for (const tileId of store.terrainTileIdsByProductKey.get(productIdentityKey) ??
-		[]) {
+	for (const tileId of store.terrainTileIdsByProductKey.get(
+		productIdentityKey,
+	) ?? []) {
 		destroyWebgl2TerrainTileResourceById({ store, tileId });
 	}
 	store.terrainTileIdsByProductKey.delete(productIdentityKey);
@@ -459,9 +458,9 @@ export function clearWebgl2TransitionPortalMaskResources({
 function refreshWebgl2TransitionPortalMaskResources(
 	store: Webgl2WorldResourceStore,
 ): void {
-	store.transitionPortalMasks = [...store.transitionPortalMasksById.values()].sort(
-		(left, right) => left.id.localeCompare(right.id),
-	);
+	store.transitionPortalMasks = [
+		...store.transitionPortalMasksById.values(),
+	].sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function refreshWebgl2TerrainProductDerivedState({
@@ -479,8 +478,8 @@ function refreshWebgl2TerrainProductDerivedState({
 	textureFilteringMode: TextureFilteringMode;
 	detailTexturesEnabled: boolean;
 }): void {
-	store.terrainTiles = [...store.terrainTilesById.values()].sort((left, right) =>
-		left.id.localeCompare(right.id),
+	store.terrainTiles = [...store.terrainTilesById.values()].sort(
+		(left, right) => left.id.localeCompare(right.id),
 	);
 	store.terrainRenderCandidates = store.terrainTiles.map(
 		deriveTerrainTileRenderCandidate,
@@ -1124,8 +1123,7 @@ function deriveWebgl2TerrainArtifactReadiness(
 	if (artifact.materialResources.status === "ready") {
 		return {
 			status: "ready",
-			terrainMaterialAssetId:
-				artifact.materialResources.terrainMaterialAssetId,
+			terrainMaterialAssetId: artifact.materialResources.terrainMaterialAssetId,
 		};
 	}
 	return {
@@ -1474,7 +1472,9 @@ function collectTerrainLayerPlanTextureRefsByRole(
 				],
 	);
 	const refsByKey = new Map(
-		refs.map((ref) => [describeTerrainBlendTextureAtlasEntryKey(ref), ref] as const),
+		refs.map(
+			(ref) => [describeTerrainBlendTextureAtlasEntryKey(ref), ref] as const,
+		),
 	);
 	return [...refsByKey.values()].sort((left, right) =>
 		describeTerrainBlendTextureAtlasEntryKey(left).localeCompare(
@@ -1670,9 +1670,7 @@ function resolveWebgl2TerrainTileTexturePageBindings({
 		Webgl2TerrainTexturePageResource
 	>;
 }): void {
-	const placementsByEntryKey = createTexturePageAtlasPlacementsByEntryKey(
-		plan,
-	);
+	const placementsByEntryKey = createTexturePageAtlasPlacementsByEntryKey(plan);
 	const detailPlacementsByEntryKey =
 		createTexturePageDetailAtlasPlacementsByEntryKey(plan);
 	for (const tile of terrainTiles) {
@@ -1766,10 +1764,14 @@ function resolveTerrainTexturePageResource({
 	bucket: Webgl2TerrainTexturePageResource["bucket"];
 	textureIndex: number;
 }): Webgl2TerrainTexturePageResource | null {
-	return texturePagesByBucketIndex.get(describeTerrainTexturePageBucketIndexKey({
-		bucket,
-		textureIndex,
-	})) ?? null;
+	return (
+		texturePagesByBucketIndex.get(
+			describeTerrainTexturePageBucketIndexKey({
+				bucket,
+				textureIndex,
+			}),
+		) ?? null
+	);
 }
 
 function rebuildTerrainTexturePageBucketIndex({

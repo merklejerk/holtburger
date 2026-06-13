@@ -617,7 +617,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 	options: WorldDisplayRendererOptions,
 ): WorldDisplayRenderer {
 	if (!options.preparedAssetResolver) {
-		throw new Error("WorldDisplay renderer requires a prepared asset resolver.");
+		throw new Error(
+			"WorldDisplay renderer requires a prepared asset resolver.",
+		);
 	}
 
 	const preparedAssetResolver = options.preparedAssetResolver;
@@ -2578,7 +2580,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			if (colorTexture) {
 				gl.deleteTexture(colorTexture);
 			}
-			throw new Error(`Failed to create texture preview target for ${page.key}.`);
+			throw new Error(
+				`Failed to create texture preview target for ${page.key}.`,
+			);
 		}
 
 		try {
@@ -2632,7 +2636,9 @@ export function createWebgl2WorldDisplayRendererImplementation(
 			);
 			gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-			const pixels = new Uint8Array(page.texture.width * page.texture.height * 4);
+			const pixels = new Uint8Array(
+				page.texture.width * page.texture.height * 4,
+			);
 			gl.readPixels(
 				0,
 				0,
@@ -3249,7 +3255,8 @@ function createStaticProductDependencyIndex(): StaticProductDependencyIndex {
 				createStaticLandblockProductKeyFromResult(result),
 			);
 			removeProduct(productKey);
-			const dependencies = collectLandblockRenderProductPreparedAssetIds(result);
+			const dependencies =
+				collectLandblockRenderProductPreparedAssetIds(result);
 			productDependenciesByKey.set(productKey, dependencies);
 			for (const assetId of dependencies) {
 				const productKeys = productKeysByAssetId.get(assetId) ?? new Set();
@@ -3267,7 +3274,8 @@ function createStaticProductDependencyIndex(): StaticProductDependencyIndex {
 		findDependentProductKeys(assets) {
 			const productKeys = new Set<string>();
 			for (const asset of assets) {
-				for (const productKey of productKeysByAssetId.get(asset.assetId) ?? []) {
+				for (const productKey of productKeysByAssetId.get(asset.assetId) ??
+					[]) {
 					productKeys.add(productKey);
 				}
 			}

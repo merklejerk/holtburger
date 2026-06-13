@@ -752,8 +752,8 @@ function reportPreparedOutdoorAssetsNotRendered({
 	const expectedOutdoorAssetIds = outdoorSceneInterest.terrainLandblockIds.map(
 		formatLandblockOutdoorAssetId,
 	);
-	const preparedOutdoorAssetIds = expectedOutdoorAssetIds.filter(
-		(assetId) => input.preparedAssetResolver.has(assetId),
+	const preparedOutdoorAssetIds = expectedOutdoorAssetIds.filter((assetId) =>
+		input.preparedAssetResolver.has(assetId),
 	);
 	if (preparedOutdoorAssetIds.length === 0) {
 		lastPreparedOutdoorAssetsNotRenderedSignature = null;

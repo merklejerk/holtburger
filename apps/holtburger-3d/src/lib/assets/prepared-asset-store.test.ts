@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { createPreparedTerrainAsset } from "../../app/test-fixtures";
-import { PreparedAssetStore, type PreparedAssetChangeEvent } from "./prepared-asset-store";
+import {
+	PreparedAssetStore,
+	type PreparedAssetChangeEvent,
+} from "./prepared-asset-store";
 
 describe("PreparedAssetStore", () => {
 	it("owns prepared assets behind a stable resolver", () => {
@@ -40,12 +43,7 @@ describe("PreparedAssetStore", () => {
 
 		unsubscribe();
 		store.applyPreparedAssets(
-			[
-				createPreparedTerrainAsset(
-					"terrain-b",
-					"landblock/0103ffff/outdoor",
-				),
-			],
+			[createPreparedTerrainAsset("terrain-b", "landblock/0103ffff/outdoor")],
 			2_000,
 		);
 
@@ -58,18 +56,9 @@ describe("PreparedAssetStore", () => {
 		store.resolver.subscribe((event) => events.push(event));
 		store.applyPreparedAssets(
 			[
-				createPreparedTerrainAsset(
-					"terrain-a",
-					"landblock/0102ffff/outdoor",
-				),
-				createPreparedTerrainAsset(
-					"terrain-b",
-					"landblock/0103ffff/outdoor",
-				),
-				createPreparedTerrainAsset(
-					"terrain-c",
-					"landblock/0104ffff/outdoor",
-				),
+				createPreparedTerrainAsset("terrain-a", "landblock/0102ffff/outdoor"),
+				createPreparedTerrainAsset("terrain-b", "landblock/0103ffff/outdoor"),
+				createPreparedTerrainAsset("terrain-c", "landblock/0104ffff/outdoor"),
 			],
 			1_000,
 		);
@@ -121,18 +110,9 @@ describe("PreparedAssetStore", () => {
 		const store = new PreparedAssetStore();
 		store.applyPreparedAssets(
 			[
-				createPreparedTerrainAsset(
-					"terrain-a",
-					"landblock/0102ffff/outdoor",
-				),
-				createPreparedTerrainAsset(
-					"terrain-b",
-					"landblock/0103ffff/outdoor",
-				),
-				createPreparedTerrainAsset(
-					"terrain-c",
-					"landblock/0104ffff/outdoor",
-				),
+				createPreparedTerrainAsset("terrain-a", "landblock/0102ffff/outdoor"),
+				createPreparedTerrainAsset("terrain-b", "landblock/0103ffff/outdoor"),
+				createPreparedTerrainAsset("terrain-c", "landblock/0104ffff/outdoor"),
 			],
 			1_000,
 		);
@@ -161,5 +141,4 @@ describe("PreparedAssetStore", () => {
 		]);
 		expect(secondPage.nextCursorAssetId).toBeNull();
 	});
-
 });

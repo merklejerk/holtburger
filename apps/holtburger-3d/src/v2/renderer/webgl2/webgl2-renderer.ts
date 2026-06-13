@@ -9,11 +9,17 @@ import type {
 	TexturePlacementUpdate,
 } from "../types";
 import {
+	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
+	MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW,
+	MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW,
+	MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
 	MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
 	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
 } from "../types";
 import type {
 	StaticObjectGeometryStaticDrawUnit,
+	StaticObjectMaterialTableEntry,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialTextureRoleBinding,
 } from "../../static/contracts";
@@ -31,10 +37,16 @@ const TERRAIN_MASK_TEXTURE_UNIT_BASE =
 	TERRAIN_COLOR_TEXTURE_UNIT_BASE + MAX_TERRAIN_COLOR_PAGES_PER_DRAW;
 const TERRAIN_DETAIL_TEXTURE_UNIT =
 	TERRAIN_MASK_TEXTURE_UNIT_BASE + MAX_TERRAIN_MASK_PAGES_PER_DRAW;
-const STATIC_OBJECT_TEXTURE_UNIT = 0;
-const STATIC_OBJECT_INDEX_TEXTURE_UNIT = 1;
-const STATIC_OBJECT_PALETTE_TEXTURE_UNIT = 2;
-const STATIC_OBJECT_DETAIL_TEXTURE_UNIT = 3;
+const STATIC_OBJECT_BASE_COLOR_TEXTURE_UNIT_BASE = 0;
+const STATIC_OBJECT_INDEX_TEXTURE_UNIT_BASE =
+	STATIC_OBJECT_BASE_COLOR_TEXTURE_UNIT_BASE +
+	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW;
+const STATIC_OBJECT_PALETTE_TEXTURE_UNIT_BASE =
+	STATIC_OBJECT_INDEX_TEXTURE_UNIT_BASE +
+	MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW;
+const STATIC_OBJECT_DETAIL_TEXTURE_UNIT_BASE =
+	STATIC_OBJECT_PALETTE_TEXTURE_UNIT_BASE +
+	MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW;
 
 const defaultFrameState: FrameState = {
 	camera: {
@@ -85,26 +97,42 @@ export const STATIC_OBJECT_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 precision highp int;
 
-uniform sampler2D uTexture;
-uniform sampler2D uIndexTexture;
-uniform sampler2D uPaletteTexture;
-uniform sampler2D uDetailTexture;
-uniform vec4 uTextureRect;
-uniform vec4 uIndexTextureRect;
-uniform vec4 uPaletteTextureRect;
-uniform vec4 uDetailTextureRect;
-uniform vec2 uTextureSize;
-uniform vec2 uPaletteTextureSize;
-uniform vec2 uDetailTextureSize;
-uniform float uMaterialPaletteFirstIndices[1];
-uniform float uMaterialDetailTilings[1];
-uniform int uMaterialDetailEnabled[1];
-uniform float uMaterialAlphaTests[1];
-uniform vec4 uMaterialColors[1];
-uniform vec3 uMaterialEmissiveColors[1];
-uniform int uMaterialIndexedTextureFormats[1];
-uniform int uMaterialModes[1];
-uniform int uMaterialWrapModes[1];
+uniform sampler2D uStaticBaseColorTexture0;
+uniform sampler2D uStaticBaseColorTexture1;
+uniform sampler2D uStaticBaseColorTexture2;
+uniform sampler2D uStaticBaseColorTexture3;
+uniform vec2 uStaticBaseColorSizes[${MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW}];
+uniform sampler2D uStaticIndexTexture0;
+uniform sampler2D uStaticIndexTexture1;
+uniform sampler2D uStaticIndexTexture2;
+uniform sampler2D uStaticIndexTexture3;
+uniform sampler2D uStaticPaletteTexture0;
+uniform sampler2D uStaticPaletteTexture1;
+uniform sampler2D uStaticPaletteTexture2;
+uniform sampler2D uStaticPaletteTexture3;
+uniform vec2 uStaticPaletteSizes[${MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW}];
+uniform sampler2D uStaticDetailTexture0;
+uniform sampler2D uStaticDetailTexture1;
+uniform sampler2D uStaticDetailTexture2;
+uniform sampler2D uStaticDetailTexture3;
+uniform vec2 uStaticDetailSizes[${MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW}];
+uniform vec4 uMaterialBaseColorRects[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform int uMaterialBaseColorPages[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform vec4 uMaterialIndexTextureRects[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform int uMaterialIndexTexturePages[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform vec4 uMaterialPaletteTextureRects[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform int uMaterialPaletteTexturePages[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform vec4 uMaterialDetailTextureRects[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform int uMaterialDetailTexturePages[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform float uMaterialPaletteFirstIndices[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform float uMaterialDetailTilings[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform int uMaterialDetailEnabled[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform float uMaterialAlphaTests[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform vec4 uMaterialColors[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform vec3 uMaterialEmissiveColors[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform int uMaterialIndexedTextureFormats[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform int uMaterialModes[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform int uMaterialWrapModes[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
 
 in vec2 vTexCoord;
 flat in int vMaterialSlot;
@@ -112,7 +140,7 @@ flat in int vMaterialSlot;
 out vec4 fragColor;
 
 int materialSlot() {
-	return clamp(vMaterialSlot, 0, 0);
+	return clamp(vMaterialSlot, 0, ${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW - 1});
 }
 
 vec2 resolveWrappedUv(vec2 uv) {
@@ -120,7 +148,8 @@ vec2 resolveWrappedUv(vec2 uv) {
 }
 
 ivec2 resolveIndexSampleCoord(ivec2 baseCoord, ivec2 offset) {
-	ivec2 size = ivec2(uIndexTextureRect.zw);
+	int slot = materialSlot();
+	ivec2 size = ivec2(uMaterialIndexTextureRects[slot].zw);
 	ivec2 coord = baseCoord + offset;
 	if (uMaterialWrapModes[materialSlot()] == 1) {
 		coord = ivec2(
@@ -133,24 +162,103 @@ ivec2 resolveIndexSampleCoord(ivec2 baseCoord, ivec2 offset) {
 	return coord;
 }
 
+vec4 sampleStaticBaseColorPage(int page, vec4 rect, vec2 localUv) {
+	vec2 atlasSize = uStaticBaseColorSizes[0];
+	if (page == 1) {
+		atlasSize = uStaticBaseColorSizes[1];
+		vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
+		return texture(uStaticBaseColorTexture1, atlasUv);
+	}
+	if (page == 2) {
+		atlasSize = uStaticBaseColorSizes[2];
+		vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
+		return texture(uStaticBaseColorTexture2, atlasUv);
+	}
+	if (page == 3) {
+		atlasSize = uStaticBaseColorSizes[3];
+		vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
+		return texture(uStaticBaseColorTexture3, atlasUv);
+	}
+	vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
+	return texture(uStaticBaseColorTexture0, atlasUv);
+}
+
+vec4 fetchStaticIndexPage(int page, ivec2 atlasCoord) {
+	if (page == 1) {
+		return texelFetch(uStaticIndexTexture1, atlasCoord, 0);
+	}
+	if (page == 2) {
+		return texelFetch(uStaticIndexTexture2, atlasCoord, 0);
+	}
+	if (page == 3) {
+		return texelFetch(uStaticIndexTexture3, atlasCoord, 0);
+	}
+	return texelFetch(uStaticIndexTexture0, atlasCoord, 0);
+}
+
+vec4 sampleStaticPalettePage(int page, vec4 rect, float paletteLocalX) {
+	vec2 atlasSize = uStaticPaletteSizes[0];
+	if (page == 1) {
+		atlasSize = uStaticPaletteSizes[1];
+		vec2 paletteUv = (rect.xy + vec2(paletteLocalX + 0.5, 0.5)) / atlasSize;
+		return texture(uStaticPaletteTexture1, paletteUv);
+	}
+	if (page == 2) {
+		atlasSize = uStaticPaletteSizes[2];
+		vec2 paletteUv = (rect.xy + vec2(paletteLocalX + 0.5, 0.5)) / atlasSize;
+		return texture(uStaticPaletteTexture2, paletteUv);
+	}
+	if (page == 3) {
+		atlasSize = uStaticPaletteSizes[3];
+		vec2 paletteUv = (rect.xy + vec2(paletteLocalX + 0.5, 0.5)) / atlasSize;
+		return texture(uStaticPaletteTexture3, paletteUv);
+	}
+	vec2 paletteUv = (rect.xy + vec2(paletteLocalX + 0.5, 0.5)) / atlasSize;
+	return texture(uStaticPaletteTexture0, paletteUv);
+}
+
+vec4 sampleStaticDetailPage(int page, vec4 rect, vec2 localUv) {
+	vec2 atlasSize = uStaticDetailSizes[0];
+	if (page == 1) {
+		atlasSize = uStaticDetailSizes[1];
+		vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
+		return texture(uStaticDetailTexture1, atlasUv);
+	}
+	if (page == 2) {
+		atlasSize = uStaticDetailSizes[2];
+		vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
+		return texture(uStaticDetailTexture2, atlasUv);
+	}
+	if (page == 3) {
+		atlasSize = uStaticDetailSizes[3];
+		vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
+		return texture(uStaticDetailTexture3, atlasUv);
+	}
+	vec2 atlasUv = (rect.xy + localUv * rect.zw) / atlasSize;
+	return texture(uStaticDetailTexture0, atlasUv);
+}
+
 float paletteIndexAt(ivec2 coord) {
-	ivec2 atlasCoord = ivec2(floor(uIndexTextureRect.xy + vec2(0.5))) + coord;
-	vec4 packed = texelFetch(uIndexTexture, atlasCoord, 0) * 255.0;
-	if (uMaterialIndexedTextureFormats[materialSlot()] == 1) {
+	int slot = materialSlot();
+	ivec2 atlasCoord = ivec2(floor(uMaterialIndexTextureRects[slot].xy + vec2(0.5))) + coord;
+	vec4 packed = fetchStaticIndexPage(uMaterialIndexTexturePages[slot], atlasCoord) * 255.0;
+	if (uMaterialIndexedTextureFormats[slot] == 1) {
 		return floor(packed.r + 0.5) + floor(packed.g + 0.5) * 256.0;
 	}
 	return floor(packed.r + 0.5);
 }
 
 vec4 paletteColor(float index) {
-	float paletteIndex = index - uMaterialPaletteFirstIndices[materialSlot()];
-	float paletteLocalX = clamp(paletteIndex, 0.0, max(uPaletteTextureRect.z - 1.0, 0.0));
-	vec2 paletteUv = (uPaletteTextureRect.xy + vec2(paletteLocalX + 0.5, 0.5)) / uPaletteTextureSize;
-	return texture(uPaletteTexture, paletteUv);
+	int slot = materialSlot();
+	vec4 rect = uMaterialPaletteTextureRects[slot];
+	float paletteIndex = index - uMaterialPaletteFirstIndices[slot];
+	float paletteLocalX = clamp(paletteIndex, 0.0, max(rect.z - 1.0, 0.0));
+	return sampleStaticPalettePage(uMaterialPaletteTexturePages[slot], rect, paletteLocalX);
 }
 
 vec4 sampleIndexedPaletteLinear(vec2 uv) {
-	vec2 texelPosition = resolveWrappedUv(uv) * uIndexTextureRect.zw;
+	int slot = materialSlot();
+	vec2 texelPosition = resolveWrappedUv(uv) * uMaterialIndexTextureRects[slot].zw;
 	ivec2 baseCoord = ivec2(floor(texelPosition));
 	vec2 blend = fract(texelPosition);
 	vec4 top = mix(
@@ -167,9 +275,13 @@ vec4 sampleIndexedPaletteLinear(vec2 uv) {
 }
 
 vec4 sampleDetailOverlay(vec2 uv) {
-	vec2 localUv = fract(uv * uMaterialDetailTilings[materialSlot()]);
-	vec2 atlasUv = (uDetailTextureRect.xy + localUv * uDetailTextureRect.zw) / uDetailTextureSize;
-	return texture(uDetailTexture, atlasUv);
+	int slot = materialSlot();
+	vec2 localUv = fract(uv * uMaterialDetailTilings[slot]);
+	return sampleStaticDetailPage(
+		uMaterialDetailTexturePages[slot],
+		uMaterialDetailTextureRects[slot],
+		localUv
+	);
 }
 
 void main() {
@@ -183,8 +295,11 @@ void main() {
 	vec4 baseColor = vec4(1.0);
 	if (materialMode == 1) {
 		vec2 localUv = resolveWrappedUv(vTexCoord);
-		vec2 atlasUv = (uTextureRect.xy + localUv * uTextureRect.zw) / uTextureSize;
-		baseColor = texture(uTexture, atlasUv);
+		baseColor = sampleStaticBaseColorPage(
+			uMaterialBaseColorPages[slot],
+			uMaterialBaseColorRects[slot],
+			localUv
+		);
 	} else if (materialMode == 3) {
 		baseColor = sampleIndexedPaletteLinear(vTexCoord);
 	}
@@ -734,145 +849,47 @@ class Webgl2Renderer implements Renderer {
 		for (const resource of this.#staticObjectResources.values()) {
 			const bindings =
 				this.#textureBindings.get(resource.drawUnitId) ?? new Map();
-			const binding = resource.primaryTextureUseId
-				? bindings.get(resource.primaryTextureUseId)
-				: null;
-			const indexBinding = resource.indexTextureUseId
-				? bindings.get(resource.indexTextureUseId)
-				: null;
-			const paletteBinding = resource.paletteTextureUseId
-				? bindings.get(resource.paletteTextureUseId)
-				: null;
-			const detailBinding = resource.detailTextureUseId
-				? bindings.get(resource.detailTextureUseId)
-				: null;
-			const texture = binding
-				? (this.#textures.get(binding.textureRefId) ?? null)
-				: null;
-			const indexTexture = indexBinding
-				? (this.#textures.get(indexBinding.textureRefId) ?? null)
-				: null;
-			const paletteTexture = paletteBinding
-				? (this.#textures.get(paletteBinding.textureRefId) ?? null)
-				: null;
-			const detailTexture = detailBinding
-				? (this.#textures.get(detailBinding.textureRefId) ?? null)
-				: null;
-			const materialMode = resolveStaticObjectMaterialMode(
+			const pageBindings = createStaticObjectPageBindings(
 				resource,
-				texture,
-				indexTexture,
-				paletteTexture,
+				bindings,
+				this.#textures,
 			);
 
-			gl.activeTexture(gl.TEXTURE0 + STATIC_OBJECT_TEXTURE_UNIT);
-			gl.bindTexture(gl.TEXTURE_2D, texture);
-			gl.uniform1i(
-				this.#staticObjectProgram.uniforms.uTexture,
-				STATIC_OBJECT_TEXTURE_UNIT,
+			uploadStaticObjectRolePageBindings(
+				gl,
+				this.#staticObjectProgram.uniforms.uStaticBaseColorTextures,
+				this.#staticObjectProgram.uniforms.uStaticBaseColorSizes,
+				pageBindings.baseColor,
+				STATIC_OBJECT_BASE_COLOR_TEXTURE_UNIT_BASE,
 			);
-			gl.activeTexture(gl.TEXTURE0 + STATIC_OBJECT_INDEX_TEXTURE_UNIT);
-			gl.bindTexture(gl.TEXTURE_2D, indexTexture);
-			gl.uniform1i(
-				this.#staticObjectProgram.uniforms.uIndexTexture,
-				STATIC_OBJECT_INDEX_TEXTURE_UNIT,
+			uploadStaticObjectRolePageBindings(
+				gl,
+				this.#staticObjectProgram.uniforms.uStaticIndexTextures,
+				null,
+				pageBindings.index,
+				STATIC_OBJECT_INDEX_TEXTURE_UNIT_BASE,
 			);
-			gl.activeTexture(gl.TEXTURE0 + STATIC_OBJECT_PALETTE_TEXTURE_UNIT);
-			gl.bindTexture(gl.TEXTURE_2D, paletteTexture);
-			gl.uniform1i(
-				this.#staticObjectProgram.uniforms.uPaletteTexture,
-				STATIC_OBJECT_PALETTE_TEXTURE_UNIT,
+			uploadStaticObjectRolePageBindings(
+				gl,
+				this.#staticObjectProgram.uniforms.uStaticPaletteTextures,
+				this.#staticObjectProgram.uniforms.uStaticPaletteSizes,
+				pageBindings.palette,
+				STATIC_OBJECT_PALETTE_TEXTURE_UNIT_BASE,
 			);
-			gl.activeTexture(gl.TEXTURE0 + STATIC_OBJECT_DETAIL_TEXTURE_UNIT);
-			gl.bindTexture(gl.TEXTURE_2D, detailTexture);
-			gl.uniform1i(
-				this.#staticObjectProgram.uniforms.uDetailTexture,
-				STATIC_OBJECT_DETAIL_TEXTURE_UNIT,
+			uploadStaticObjectRolePageBindings(
+				gl,
+				this.#staticObjectProgram.uniforms.uStaticDetailTextures,
+				this.#staticObjectProgram.uniforms.uStaticDetailSizes,
+				pageBindings.detail,
+				STATIC_OBJECT_DETAIL_TEXTURE_UNIT_BASE,
 			);
-			gl.uniform4f(
-				this.#staticObjectProgram.uniforms.uTextureRect,
-				binding?.rect[0] ?? 0,
-				binding?.rect[1] ?? 0,
-				binding?.rect[2] ?? 1,
-				binding?.rect[3] ?? 1,
-			);
-			gl.uniform2f(
-				this.#staticObjectProgram.uniforms.uTextureSize,
-				binding?.textureWidth ?? 1,
-				binding?.textureHeight ?? 1,
-			);
-			gl.uniform4f(
-				this.#staticObjectProgram.uniforms.uIndexTextureRect,
-				indexBinding?.rect[0] ?? 0,
-				indexBinding?.rect[1] ?? 0,
-				indexBinding?.rect[2] ?? 1,
-				indexBinding?.rect[3] ?? 1,
-			);
-			gl.uniform2f(
-				this.#staticObjectProgram.uniforms.uPaletteTextureSize,
-				paletteBinding?.textureWidth ?? 1,
-				paletteBinding?.textureHeight ?? 1,
-			);
-			gl.uniform4f(
-				this.#staticObjectProgram.uniforms.uPaletteTextureRect,
-				paletteBinding?.rect[0] ?? 0,
-				paletteBinding?.rect[1] ?? 0,
-				paletteBinding?.rect[2] ?? 1,
-				paletteBinding?.rect[3] ?? 1,
-			);
-			gl.uniform4f(
-				this.#staticObjectProgram.uniforms.uDetailTextureRect,
-				detailBinding?.rect[0] ?? 0,
-				detailBinding?.rect[1] ?? 0,
-				detailBinding?.rect[2] ?? 1,
-				detailBinding?.rect[3] ?? 1,
-			);
-			gl.uniform2f(
-				this.#staticObjectProgram.uniforms.uDetailTextureSize,
-				detailBinding?.textureWidth ?? 1,
-				detailBinding?.textureHeight ?? 1,
-			);
-			const materialEntry = resource.materialEntries[0];
-			if (!materialEntry) {
-				throw new Error(
-					`Static object resource ${resource.drawUnitId} has no material table entries.`,
-				);
-			}
-			gl.uniform1fv(
-				this.#staticObjectProgram.uniforms.uMaterialAlphaTests,
-				[materialEntry.alphaTest],
-			);
-			gl.uniform4fv(
-				this.#staticObjectProgram.uniforms.uMaterialColors,
-				materialEntry.materialColor,
-			);
-			gl.uniform1iv(
-				this.#staticObjectProgram.uniforms.uMaterialDetailEnabled,
-				[detailTexture ? 1 : 0],
-			);
-			gl.uniform1fv(
-				this.#staticObjectProgram.uniforms.uMaterialDetailTilings,
-				[materialEntry.detailTextureTiling],
-			);
-			gl.uniform3fv(
-				this.#staticObjectProgram.uniforms.uMaterialEmissiveColors,
-				materialEntry.materialEmissiveColor,
-			);
-			gl.uniform1iv(
-				this.#staticObjectProgram.uniforms.uMaterialIndexedTextureFormats,
-				[materialEntry.indexedTextureFormat === "index16" ? 1 : 0],
-			);
-			gl.uniform1iv(
-				this.#staticObjectProgram.uniforms.uMaterialModes,
-				[materialMode],
-			);
-			gl.uniform1fv(
-				this.#staticObjectProgram.uniforms.uMaterialPaletteFirstIndices,
-				[materialEntry.paletteFirstIndex],
-			);
-			gl.uniform1iv(
-				this.#staticObjectProgram.uniforms.uMaterialWrapModes,
-				[materialEntry.primaryTextureWrapMode === "repeat" ? 1 : 0],
+
+			uploadStaticObjectMaterialTableUniforms(
+				gl,
+				this.#staticObjectProgram,
+				resource,
+				bindings,
+				this.#textures,
 			);
 			gl.bindVertexArray(resource.vertexArray);
 			gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
@@ -988,27 +1005,31 @@ interface TerrainGeometryProgram {
 interface StaticObjectGeometryProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
-		readonly uDetailTexture: WebGLUniformLocation;
-		readonly uDetailTextureRect: WebGLUniformLocation;
-		readonly uDetailTextureSize: WebGLUniformLocation;
-		readonly uIndexTexture: WebGLUniformLocation;
-		readonly uIndexTextureRect: WebGLUniformLocation;
 		readonly uMaterialAlphaTests: WebGLUniformLocation;
+		readonly uMaterialBaseColorPages: WebGLUniformLocation;
+		readonly uMaterialBaseColorRects: WebGLUniformLocation;
 		readonly uMaterialColors: WebGLUniformLocation;
 		readonly uMaterialDetailEnabled: WebGLUniformLocation;
+		readonly uMaterialDetailTexturePages: WebGLUniformLocation;
+		readonly uMaterialDetailTextureRects: WebGLUniformLocation;
 		readonly uMaterialDetailTilings: WebGLUniformLocation;
 		readonly uMaterialEmissiveColors: WebGLUniformLocation;
 		readonly uMaterialIndexedTextureFormats: WebGLUniformLocation;
+		readonly uMaterialIndexTexturePages: WebGLUniformLocation;
+		readonly uMaterialIndexTextureRects: WebGLUniformLocation;
 		readonly uMaterialModes: WebGLUniformLocation;
 		readonly uMaterialPaletteFirstIndices: WebGLUniformLocation;
+		readonly uMaterialPaletteTexturePages: WebGLUniformLocation;
+		readonly uMaterialPaletteTextureRects: WebGLUniformLocation;
 		readonly uMaterialWrapModes: WebGLUniformLocation;
 		readonly uModelViewProjection: WebGLUniformLocation;
-		readonly uPaletteTexture: WebGLUniformLocation;
-		readonly uPaletteTextureRect: WebGLUniformLocation;
-		readonly uPaletteTextureSize: WebGLUniformLocation;
-		readonly uTexture: WebGLUniformLocation;
-		readonly uTextureRect: WebGLUniformLocation;
-		readonly uTextureSize: WebGLUniformLocation;
+		readonly uStaticBaseColorSizes: WebGLUniformLocation;
+		readonly uStaticBaseColorTextures: readonly WebGLUniformLocation[];
+		readonly uStaticDetailSizes: WebGLUniformLocation;
+		readonly uStaticDetailTextures: readonly WebGLUniformLocation[];
+		readonly uStaticIndexTextures: readonly WebGLUniformLocation[];
+		readonly uStaticPaletteSizes: WebGLUniformLocation;
+		readonly uStaticPaletteTextures: readonly WebGLUniformLocation[];
 	};
 	dispose(): void;
 }
@@ -1038,10 +1059,6 @@ interface StaticObjectGeometryResource {
 	readonly drawUnitId: string;
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly materialEntries: StaticObjectGeometryStaticDrawUnit["materialEntries"];
-	readonly detailTextureUseId: string | null;
-	readonly indexTextureUseId: string | null;
-	readonly paletteTextureUseId: string | null;
-	readonly primaryTextureUseId: string | null;
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
@@ -1058,6 +1075,18 @@ interface TerrainLayeredPageBindings {
 }
 
 interface TerrainLayeredPageBinding {
+	readonly binding: TextureDrawUnitBinding;
+	readonly texture: WebGLTexture;
+}
+
+interface StaticObjectPageBindings {
+	readonly baseColor: (StaticObjectPageBinding | null)[];
+	readonly detail: (StaticObjectPageBinding | null)[];
+	readonly index: (StaticObjectPageBinding | null)[];
+	readonly palette: (StaticObjectPageBinding | null)[];
+}
+
+interface StaticObjectPageBinding {
 	readonly binding: TextureDrawUnitBinding;
 	readonly texture: WebGLTexture;
 }
@@ -1098,7 +1127,7 @@ function createTerrainGeometryProgram(
 			uCameraPosition: requireUniform(gl, program, "uCameraPosition"),
 			uColor: requireUniform(gl, program, "uColor"),
 			uColorAtlasSizes: requireUniform(gl, program, "uColorAtlasSizes"),
-			uColorAtlasTextures: createTerrainRolePageTextureUniforms(
+			uColorAtlasTextures: createRolePageTextureUniforms(
 				gl,
 				program,
 				"uColorAtlasTexture",
@@ -1149,7 +1178,7 @@ function createTerrainGeometryProgram(
 			uLayerRoadRotations: requireUniform(gl, program, "uLayerRoadRotations"),
 			uLayerRoadTilings: requireUniform(gl, program, "uLayerRoadTilings"),
 			uMaskAtlasSizes: requireUniform(gl, program, "uMaskAtlasSizes"),
-			uMaskAtlasTextures: createTerrainRolePageTextureUniforms(
+			uMaskAtlasTextures: createRolePageTextureUniforms(
 				gl,
 				program,
 				"uMaskAtlasTexture",
@@ -1205,21 +1234,36 @@ function createStaticObjectGeometryProgram(
 	return {
 		program,
 		uniforms: {
-			uDetailTexture: requireUniform(gl, program, "uDetailTexture"),
-			uDetailTextureRect: requireUniform(gl, program, "uDetailTextureRect"),
-			uDetailTextureSize: requireUniform(gl, program, "uDetailTextureSize"),
-			uIndexTexture: requireUniform(gl, program, "uIndexTexture"),
-			uIndexTextureRect: requireUniform(gl, program, "uIndexTextureRect"),
 			uMaterialAlphaTests: requireUniform(
 				gl,
 				program,
 				"uMaterialAlphaTests[0]",
+			),
+			uMaterialBaseColorPages: requireUniform(
+				gl,
+				program,
+				"uMaterialBaseColorPages[0]",
+			),
+			uMaterialBaseColorRects: requireUniform(
+				gl,
+				program,
+				"uMaterialBaseColorRects[0]",
 			),
 			uMaterialColors: requireUniform(gl, program, "uMaterialColors[0]"),
 			uMaterialDetailEnabled: requireUniform(
 				gl,
 				program,
 				"uMaterialDetailEnabled[0]",
+			),
+			uMaterialDetailTexturePages: requireUniform(
+				gl,
+				program,
+				"uMaterialDetailTexturePages[0]",
+			),
+			uMaterialDetailTextureRects: requireUniform(
+				gl,
+				program,
+				"uMaterialDetailTextureRects[0]",
 			),
 			uMaterialDetailTilings: requireUniform(
 				gl,
@@ -1236,11 +1280,31 @@ function createStaticObjectGeometryProgram(
 				program,
 				"uMaterialIndexedTextureFormats[0]",
 			),
+			uMaterialIndexTexturePages: requireUniform(
+				gl,
+				program,
+				"uMaterialIndexTexturePages[0]",
+			),
+			uMaterialIndexTextureRects: requireUniform(
+				gl,
+				program,
+				"uMaterialIndexTextureRects[0]",
+			),
 			uMaterialModes: requireUniform(gl, program, "uMaterialModes[0]"),
 			uMaterialPaletteFirstIndices: requireUniform(
 				gl,
 				program,
 				"uMaterialPaletteFirstIndices[0]",
+			),
+			uMaterialPaletteTexturePages: requireUniform(
+				gl,
+				program,
+				"uMaterialPaletteTexturePages[0]",
+			),
+			uMaterialPaletteTextureRects: requireUniform(
+				gl,
+				program,
+				"uMaterialPaletteTextureRects[0]",
 			),
 			uMaterialWrapModes: requireUniform(
 				gl,
@@ -1248,20 +1312,45 @@ function createStaticObjectGeometryProgram(
 				"uMaterialWrapModes[0]",
 			),
 			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
-			uPaletteTexture: requireUniform(gl, program, "uPaletteTexture"),
-			uPaletteTextureRect: requireUniform(
+			uStaticBaseColorSizes: requireUniform(
 				gl,
 				program,
-				"uPaletteTextureRect",
+				"uStaticBaseColorSizes[0]",
 			),
-			uPaletteTextureSize: requireUniform(
+			uStaticBaseColorTextures: createRolePageTextureUniforms(
 				gl,
 				program,
-				"uPaletteTextureSize",
+				"uStaticBaseColorTexture",
+				MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
 			),
-			uTexture: requireUniform(gl, program, "uTexture"),
-			uTextureRect: requireUniform(gl, program, "uTextureRect"),
-			uTextureSize: requireUniform(gl, program, "uTextureSize"),
+			uStaticDetailSizes: requireUniform(
+				gl,
+				program,
+				"uStaticDetailSizes[0]",
+			),
+			uStaticDetailTextures: createRolePageTextureUniforms(
+				gl,
+				program,
+				"uStaticDetailTexture",
+				MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW,
+			),
+			uStaticIndexTextures: createRolePageTextureUniforms(
+				gl,
+				program,
+				"uStaticIndexTexture",
+				MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW,
+			),
+			uStaticPaletteSizes: requireUniform(
+				gl,
+				program,
+				"uStaticPaletteSizes[0]",
+			),
+			uStaticPaletteTextures: createRolePageTextureUniforms(
+				gl,
+				program,
+				"uStaticPaletteTexture",
+				MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
+			),
 		},
 		dispose() {
 			gl.deleteProgram(program);
@@ -1423,14 +1512,10 @@ function createStaticObjectGeometryResource(
 		indexCount: drawUnit.indices.length,
 		indexType:
 			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
-		detailTextureUseId: drawUnit.detailTextureUseId,
-		indexTextureUseId: drawUnit.indexTextureUseId,
 		materialEntries: drawUnit.materialEntries,
 		materialFamily: drawUnit.materialFamily,
-		paletteTextureUseId: drawUnit.paletteTextureUseId,
 		materialSlotBuffer,
 		positionBuffer,
-		primaryTextureUseId: drawUnit.primaryTextureUseId,
 		texCoordBuffer,
 		triangleCount: drawUnit.triangleCount,
 		vertexArray,
@@ -1444,20 +1529,351 @@ function createStaticObjectGeometryResource(
 	};
 }
 
-function resolveStaticObjectMaterialMode(
+function resolveStaticObjectMaterialEntryMode(
 	resource: StaticObjectGeometryResource,
-	texture: WebGLTexture | null,
-	indexTexture: WebGLTexture | null,
-	paletteTexture: WebGLTexture | null,
+	materialEntry: StaticObjectMaterialTableEntry,
+	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	textures: ReadonlyMap<string, WebGLTexture>,
 ): number {
 	if (resource.materialFamily === "flat-color") {
 		return 0;
 	}
 	if (resource.materialFamily === "indexed-paletted") {
-		return indexTexture && paletteTexture ? 3 : 2;
+		return hasResidentBinding(
+			materialEntry.indexTextureUseId,
+			"static-index",
+			MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW,
+			bindings,
+			textures,
+		) &&
+			hasResidentBinding(
+				materialEntry.paletteTextureUseId,
+				"static-palette",
+				MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
+				bindings,
+				textures,
+			)
+			? 3
+			: 2;
 	}
 
-	return texture ? 1 : 2;
+	return hasResidentBinding(
+		materialEntry.primaryTextureUseId,
+		"static-base-color",
+		MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
+		bindings,
+		textures,
+	)
+		? 1
+		: 2;
+}
+
+function hasResidentBinding(
+	textureUseId: string | null,
+	expectedKind: TextureDrawUnitBinding["rolePage"]["kind"],
+	maxSlots: number,
+	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	textures: ReadonlyMap<string, WebGLTexture>,
+): boolean {
+	if (!textureUseId) {
+		return false;
+	}
+	const binding = bindings.get(textureUseId);
+
+	return binding
+		? binding.rolePage.kind === expectedKind &&
+				binding.rolePage.slot >= 0 &&
+				binding.rolePage.slot < maxSlots &&
+				textures.has(binding.textureRefId)
+		: false;
+}
+
+function createStaticObjectPageBindings(
+	resource: StaticObjectGeometryResource,
+	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	textures: ReadonlyMap<string, WebGLTexture>,
+): StaticObjectPageBindings {
+	const pageBindings: StaticObjectPageBindings = {
+		baseColor: Array.from(
+			{ length: MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW },
+			() => null,
+		),
+		detail: Array.from(
+			{ length: MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW },
+			() => null,
+		),
+		index: Array.from(
+			{ length: MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW },
+			() => null,
+		),
+		palette: Array.from(
+			{ length: MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW },
+			() => null,
+		),
+	};
+
+	for (const entry of resource.materialEntries) {
+		collectStaticObjectPageBinding(
+			entry.primaryTextureUseId,
+			"static-base-color",
+			bindings,
+			textures,
+			pageBindings.baseColor,
+		);
+		collectStaticObjectPageBinding(
+			entry.indexTextureUseId,
+			"static-index",
+			bindings,
+			textures,
+			pageBindings.index,
+		);
+		collectStaticObjectPageBinding(
+			entry.paletteTextureUseId,
+			"static-palette",
+			bindings,
+			textures,
+			pageBindings.palette,
+		);
+		collectStaticObjectPageBinding(
+			entry.detailTextureUseId,
+			"static-detail",
+			bindings,
+			textures,
+			pageBindings.detail,
+		);
+	}
+
+	return pageBindings;
+}
+
+function collectStaticObjectPageBinding(
+	textureUseId: string | null,
+	expectedKind: TextureDrawUnitBinding["rolePage"]["kind"],
+	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	textures: ReadonlyMap<string, WebGLTexture>,
+	pages: (StaticObjectPageBinding | null)[],
+): void {
+	if (!textureUseId) {
+		return;
+	}
+	const binding = bindings.get(textureUseId);
+	if (!binding || binding.rolePage.kind !== expectedKind) {
+		return;
+	}
+	const texture = textures.get(binding.textureRefId);
+	if (!texture || binding.rolePage.slot < 0 || binding.rolePage.slot >= pages.length) {
+		return;
+	}
+	const existing = pages[binding.rolePage.slot] ?? null;
+	if (existing && existing.binding.textureRefId !== binding.textureRefId) {
+		return;
+	}
+	pages[binding.rolePage.slot] = {
+		binding,
+		texture,
+	};
+}
+
+function uploadStaticObjectRolePageBindings(
+	gl: WebGL2RenderingContext,
+	samplerUniforms: readonly WebGLUniformLocation[],
+	sizeUniform: WebGLUniformLocation | null,
+	pages: readonly (StaticObjectPageBinding | null)[],
+	textureUnitBase: number,
+): void {
+	const sizes = new Float32Array(pages.length * 2);
+	for (const [slot, uniform] of samplerUniforms.entries()) {
+		const page = pages[slot] ?? null;
+		const textureUnit = textureUnitBase + slot;
+		gl.activeTexture(gl.TEXTURE0 + textureUnit);
+		gl.bindTexture(gl.TEXTURE_2D, page?.texture ?? null);
+		gl.uniform1i(uniform, textureUnit);
+		sizes[slot * 2] = page?.binding.textureWidth ?? 1;
+		sizes[slot * 2 + 1] = page?.binding.textureHeight ?? 1;
+	}
+	if (sizeUniform) {
+		gl.uniform2fv(sizeUniform, sizes);
+	}
+}
+
+function uploadStaticObjectMaterialTableUniforms(
+	gl: WebGL2RenderingContext,
+	program: StaticObjectGeometryProgram,
+	resource: StaticObjectGeometryResource,
+	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	textures: ReadonlyMap<string, WebGLTexture>,
+): void {
+	if (resource.materialEntries.length === 0) {
+		throw new Error(
+			`Static object resource ${resource.drawUnitId} has no material table entries.`,
+		);
+	}
+
+	const alphaTests = new Float32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW);
+	const baseColorPages = new Int32Array(
+		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	);
+	const baseColorRects = createDefaultRectTable();
+	const colors = new Float32Array(
+		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
+	);
+	const detailEnabled = new Int32Array(
+		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	);
+	const detailPages = new Int32Array(
+		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	);
+	const detailRects = createDefaultRectTable();
+	const detailTilings = new Float32Array(
+		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	);
+	const emissiveColors = new Float32Array(
+		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 3,
+	);
+	const indexedTextureFormats = new Int32Array(
+		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	);
+	const indexPages = new Int32Array(
+		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	);
+	const indexRects = createDefaultRectTable();
+	const materialModes = new Int32Array(
+		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	);
+	const paletteFirstIndices = new Float32Array(
+		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	);
+	const palettePages = new Int32Array(
+		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	);
+	const paletteRects = createDefaultRectTable();
+	const wrapModes = new Int32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW);
+
+	for (const entry of resource.materialEntries.slice(
+		0,
+		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	)) {
+		const slot = entry.slot;
+		if (slot < 0 || slot >= MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW) {
+			continue;
+		}
+		alphaTests[slot] = entry.alphaTest;
+		colors.set(entry.materialColor, slot * 4);
+		detailTilings[slot] = entry.detailTextureTiling;
+		emissiveColors.set(entry.materialEmissiveColor, slot * 3);
+		indexedTextureFormats[slot] =
+			entry.indexedTextureFormat === "index16" ? 1 : 0;
+		materialModes[slot] = resolveStaticObjectMaterialEntryMode(
+			resource,
+			entry,
+			bindings,
+			textures,
+		);
+		paletteFirstIndices[slot] = entry.paletteFirstIndex;
+		wrapModes[slot] = entry.primaryTextureWrapMode === "repeat" ? 1 : 0;
+
+		writeStaticObjectTextureEntry(
+			entry.primaryTextureUseId,
+			"static-base-color",
+			MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
+			bindings,
+			baseColorPages,
+			baseColorRects,
+			slot,
+		);
+		writeStaticObjectTextureEntry(
+			entry.indexTextureUseId,
+			"static-index",
+			MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW,
+			bindings,
+			indexPages,
+			indexRects,
+			slot,
+		);
+		writeStaticObjectTextureEntry(
+			entry.paletteTextureUseId,
+			"static-palette",
+			MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
+			bindings,
+			palettePages,
+			paletteRects,
+			slot,
+		);
+		const detailBinding = writeStaticObjectTextureEntry(
+			entry.detailTextureUseId,
+			"static-detail",
+			MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW,
+			bindings,
+			detailPages,
+			detailRects,
+			slot,
+		);
+		detailEnabled[slot] = detailBinding && textures.has(detailBinding.textureRefId)
+			? 1
+			: 0;
+	}
+
+	gl.uniform1fv(program.uniforms.uMaterialAlphaTests, alphaTests);
+	gl.uniform1iv(program.uniforms.uMaterialBaseColorPages, baseColorPages);
+	gl.uniform4fv(program.uniforms.uMaterialBaseColorRects, baseColorRects);
+	gl.uniform4fv(program.uniforms.uMaterialColors, colors);
+	gl.uniform1iv(program.uniforms.uMaterialDetailEnabled, detailEnabled);
+	gl.uniform1iv(program.uniforms.uMaterialDetailTexturePages, detailPages);
+	gl.uniform4fv(program.uniforms.uMaterialDetailTextureRects, detailRects);
+	gl.uniform1fv(program.uniforms.uMaterialDetailTilings, detailTilings);
+	gl.uniform3fv(program.uniforms.uMaterialEmissiveColors, emissiveColors);
+	gl.uniform1iv(
+		program.uniforms.uMaterialIndexedTextureFormats,
+		indexedTextureFormats,
+	);
+	gl.uniform1iv(program.uniforms.uMaterialIndexTexturePages, indexPages);
+	gl.uniform4fv(program.uniforms.uMaterialIndexTextureRects, indexRects);
+	gl.uniform1iv(program.uniforms.uMaterialModes, materialModes);
+	gl.uniform1fv(
+		program.uniforms.uMaterialPaletteFirstIndices,
+		paletteFirstIndices,
+	);
+	gl.uniform1iv(program.uniforms.uMaterialPaletteTexturePages, palettePages);
+	gl.uniform4fv(program.uniforms.uMaterialPaletteTextureRects, paletteRects);
+	gl.uniform1iv(program.uniforms.uMaterialWrapModes, wrapModes);
+}
+
+function createDefaultRectTable(): Float32Array {
+	const rects = new Float32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4);
+	for (let slot = 0; slot < MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW; slot += 1) {
+		rects.set([0, 0, 1, 1], slot * 4);
+	}
+
+	return rects;
+}
+
+function writeStaticObjectTextureEntry(
+	textureUseId: string | null,
+	expectedKind: TextureDrawUnitBinding["rolePage"]["kind"],
+	maxSlots: number,
+	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	pages: Int32Array,
+	rects: Float32Array,
+	slot: number,
+): TextureDrawUnitBinding | null {
+	if (!textureUseId) {
+		return null;
+	}
+	const binding = bindings.get(textureUseId);
+	if (!binding) {
+		return null;
+	}
+	if (
+		binding.rolePage.kind !== expectedKind ||
+		binding.rolePage.slot < 0 ||
+		binding.rolePage.slot >= maxSlots
+	) {
+		return null;
+	}
+	pages[slot] = binding.rolePage.slot;
+	rects.set(binding.rect, slot * 4);
+
+	return binding;
 }
 
 function translateTerrainPositions(
@@ -2015,7 +2431,7 @@ function requireUniform(
 	return uniform;
 }
 
-function createTerrainRolePageTextureUniforms(
+function createRolePageTextureUniforms(
 	gl: WebGL2RenderingContext,
 	program: WebGLProgram,
 	prefix: string,

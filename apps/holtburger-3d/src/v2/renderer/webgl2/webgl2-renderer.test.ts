@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
+	MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
 	MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
 	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
 } from "../types";
@@ -40,14 +42,14 @@ describe("V2 WebGL2 terrain renderer shader contract", () => {
 describe("V2 WebGL2 static object indexed shader contract", () => {
 	it("keeps index textures exact and filters after palette lookup", () => {
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
-			"uniform sampler2D uIndexTexture;",
+			"uniform sampler2D uStaticIndexTexture0;",
 		);
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).not.toContain("usampler2D");
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
 			"vec4 sampleIndexedPaletteLinear(vec2 uv)",
 		);
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
-			"texelFetch(uIndexTexture, atlasCoord, 0) * 255.0",
+			"fetchStaticIndexPage(uMaterialIndexTexturePages[slot], atlasCoord) * 255.0",
 		);
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
 			"paletteColor(paletteIndexAt(resolveIndexSampleCoord(baseCoord, ivec2(1, 1))))",
@@ -59,10 +61,10 @@ describe("V2 WebGL2 static object indexed shader contract", () => {
 
 	it("reconstructs index16 pages from normalized RG8 low and high bytes", () => {
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
-			"uniform int uMaterialIndexedTextureFormats[1];",
+			`uniform int uMaterialIndexedTextureFormats[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];`,
 		);
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
-			"if (uMaterialIndexedTextureFormats[materialSlot()] == 1)",
+			"if (uMaterialIndexedTextureFormats[slot] == 1)",
 		);
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
 			"floor(packed.r + 0.5) + floor(packed.g + 0.5) * 256.0",
@@ -70,16 +72,43 @@ describe("V2 WebGL2 static object indexed shader contract", () => {
 	});
 });
 
+describe("V2 WebGL2 static object role-page shader contract", () => {
+	it("uses bounded explicit static base-color page samplers and material page selectors", () => {
+		for (
+			let slot = 0;
+			slot < MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW;
+			slot += 1
+		) {
+			expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
+				`uniform sampler2D uStaticBaseColorTexture${slot};`,
+			);
+		}
+
+		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
+			`uniform vec4 uMaterialBaseColorRects[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];`,
+		);
+		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
+			`uniform int uMaterialBaseColorPages[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];`,
+		);
+		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
+			"sampleStaticBaseColorPage(int page, vec4 rect, vec2 localUv)",
+		);
+		expect(STATIC_OBJECT_FRAGMENT_SHADER).not.toContain(
+			"uniform sampler2D uTexture;",
+		);
+	});
+});
+
 describe("V2 WebGL2 static object detail shader contract", () => {
 	it("composes detail overlays as a second repeat-sampled material role", () => {
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
-			"uniform sampler2D uDetailTexture;",
+			"uniform sampler2D uStaticDetailTexture0;",
 		);
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
 			"vec4 sampleDetailOverlay(vec2 uv)",
 		);
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
-			"vec2 localUv = fract(uv * uMaterialDetailTilings[materialSlot()]);",
+			"vec2 localUv = fract(uv * uMaterialDetailTilings[slot]);",
 		);
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
 			"rgb = clamp(rgb * (detailColor.rgb + (1.0 - detailAlpha)), vec3(0.0), vec3(1.0));",

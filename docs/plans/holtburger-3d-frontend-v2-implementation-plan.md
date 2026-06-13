@@ -3847,9 +3847,134 @@ Verification:
 - `cd apps/holtburger-3d && npm run lint:dead`
 - `cd apps/holtburger-3d && npm run test:ts`
 
+### Phase 12A4: Landblock Env-Cell Host Bundle Resteer
+
+Status: planned. Immediate corrective phase after 12A3 and before 11E5.
+
+Purpose: decouple the V2 `landblock-env-cells` host asset contract from V1 topology/standalone-env-cell route shapes before adding smarter env-cell BVHs and query behavior. The host can still reuse low-level DAT decode and preparation helpers, but the public V2 bundle should stop exposing topology-route artifacts.
+
+Current steering:
+
+- `coordinateSpace` strings are decoration in these DTOs. The owning DTO field implies the spatial contract: `landblockEnvCellBvh` is landblock/env-cell-root space, `envCells[].localBvh` is env-cell-local space, `outdoorBvh` is outdoor landblock-local space. Runtime transforms must be explicit fields or derived from explicit placement records, not inferred from string tags.
+- `classification` is a landblock-info heuristic, not an env-cell structural fact. Remove it from the V2 env-cell bundle and resolver/runtime summaries. Scene entry policy decides outdoor/interior/dungeon behavior.
+- The route must still load landblock info (`XXYYFFFE`) to discover env-cell membership. That is source data, not the same thing as exposing a public `landblock-topology` product to V2.
+- Prefer a dedicated host-side `LandblockEnvCells` assembly path that directly assembles the bundle from landblock info plus env-cell/environment/cell-structure/static source facts. It may share helper functions with the old topology/env-cell assemblers, but it should not build V1 route DTOs as intermediate public shapes.
+- Keep the old public `landblock/{XXYYffff}/topology` and standalone env-cell routes only as V1/old-display compatibility until those callers are removed. V2 code must not reference them.
+- The current host adapter serializes env-cell residency and local BVHs as single flat nodes. That is acceptable as historical route scaffolding, but not acceptable as the V2 query/culling shape.
+- This phase can preserve flat BVH contents temporarily if needed, but it should rename and normalize the bundle fields so Phase 12A5 can replace the internals without another route contract churn.
+- Dry run on 2026-06-13 found that current V2 env-cell query treats `localPlacement` as query/render-space placement, while the host serializes raw DAT/AC frames and the old residency BVH manually converts placement points to render axes. 12A4 must settle this DTO contract before 12A5 builds landblock-wide bounds. Either emit V2 bundle placements in the implied query/render axis convention or rename raw AC frames so runtime code cannot accidentally treat them as query transforms.
+
+Proposed DTO course correction:
+
+```ts
+interface LandblockEnvCellsPayloadDto {
+	kind: "landblock-env-cells";
+	landblockId: number;
+	landblockInfoId: number;
+	regionId: number;
+	regionNumber: number;
+	envCells: LandblockEnvCellDto[];
+	portalLinks: EnvCellPortalLinkDto[];
+	landblockEnvCellBvh: PreparedLandblockEnvCellBvhDto;
+	diagnostics: PreparedContentSourceDiagnosticsDto;
+	provenance: AssetProvenanceDto;
+}
+
+interface PreparedLandblockEnvCellBvhDto {
+	nodes: PreparedBvhNodeDto[];
+	items: PreparedLandblockEnvCellBvhItemDto[];
+}
+
+interface PreparedLandblockEnvCellBvhItemDto {
+	envCellId: number;
+	memberId: string;
+	bounds: PreparedAabbDto | null;
+	source: "env-cell-root" | "placement-fallback" | "derived";
+}
+
+interface LandblockEnvCellDto {
+	envCellId: number;
+	memberId: string;
+	localPlacement: PlacementTransformDto;
+	localBvh: PreparedEnvCellBvhDto;
+	// remaining environment, cell-structure, portal, static seed, render geometry,
+	// diagnostics, and source fields remain as in 12A0/12A1.
+}
+```
+
+Deliverables:
+
+- Remove `classification` from the V2 `LandblockEnvCellsPayloadDto`, resolver payload, coordinator summary, runtime diagnostics, browser diagnostics, and tests.
+- Rename V2 env-cell bundle `envCellResidencyBvh` to `landblockEnvCellBvh` in host contracts, route serialization, V2 resolver contracts, runtime static contracts, and tests.
+- Split shared host schemas where needed so old standalone `env-cell` / `landblock-topology` route payloads can retain legacy `coordinateSpace` fields while the V2 `landblock-env-cells` bundle removes them.
+- Remove `coordinateSpace` from V2 env-cell bundle/local BVH DTOs and runtime contracts. If old V1 topology/env-cell DTOs still require it, keep it isolated to those old route schemas.
+- Define the V2 bundle `localPlacement` axis/space contract explicitly and make host serialization, runtime transforms, and tests agree. Do not leave a raw-AC-frame field with a query-space name.
+- Add or refactor a direct host `LandblockEnvCellsAsset` assembly path that treats landblock info/env-cell source data as inputs and emits the V2 bundle shape directly, rather than returning `LandblockTopologyAsset` plus standalone `EnvCellAsset` route products as the public intermediate shape.
+- Keep old public topology/standalone-env-cell routes available only for V1/old-display callers, with a documented removal phase after the old display is cut over.
+- Update V2 resolver tests to prove it requests only `landblock-env-cells` and does not depend on `classification`, `coordinateSpace`, `landblock-topology`, or standalone env-cell route strings.
+- Update the plan/design docs to distinguish low-level source loading reuse from public V1 route-shape reuse.
+
+Acceptance criteria:
+
+- V2 `landblock-env-cells` payloads no longer expose `classification`, `coordinateSpace`, or `envCellResidencyBvh`.
+- V2 resolver/runtime/env-cell diagnostics no longer print or depend on classification.
+- Public V1 topology/env-cell routes can remain for old-display compatibility, but V2 source/query code has no references to them.
+- The host bundle still loads landblock info for membership and provenance, but that source dependency is represented as `landblockInfoId`/diagnostics rather than a topology product contract.
+- V2 bundle placement transforms have an explicit tested axis convention that matches runtime query transforms and later landblock-wide env-cell bounds.
+- `cargo check`, Tauri host route/schema tests, `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and focused V2 env-cell resolver/runtime tests pass before 12A5.
+
+### Phase 12A5: Landblock-Wide Env-Cell BVH And Residency Query Course Correct
+
+Status: planned. Follows 12A4 and remains before 11E5.
+
+Purpose: upgrade the normalized `landblock-env-cells` source bundle from flat env-cell spatial records into a true landblock-wide env-cell BVH plus per-cell local BVHs, then make runtime env-cell queries use that landblock BVH as the broad phase for initial residency, ray picking, and future visibility/frustum traversal.
+
+Current steering:
+
+- Portal walking decides semantic visibility once a current env-cell or portal entry is known. It does not replace initial residency discovery. V2 needs a landblock-wide env-cell BVH to answer which env cells contain or intersect a camera/ray/frustum before or alongside portal traversal.
+- The host/Rust preparation layer should build the landblock-wide env-cell BVH. The browser/runtime must preserve and traverse it; it should not rebuild static BVHs from frontend-computed bounds.
+- The existing Rust prepared BVH builder is private and tied to `PreparedSpatialItemKind` / outdoor-static semantics. 12A5 should extract a reusable prepared-BVH builder or add a dedicated env-cell builder in `holtburger-content`, not continue building BVH JSON ad hoc in the Tauri adapter.
+- Top-level landblock env-cell BVH items should be env-cell-grained. The item may reference an env cell whose leaf/detail structure is still carried by that cell's `localBvh`; object/render/portal detail remains per-cell.
+- Per-cell `localBvh` should also be a real prepared BVH over render geometry, static seeds, and portal apertures, not one aggregate flat node, unless the source cell genuinely has too few spatial items to split.
+- If a cell is not reachable through the landblock env-cell BVH, V2 should not silently query it through an out-of-band roots list. Missing or malformed BVH data should surface as a typed warning/error and an unqueryable source record.
+- Dry run on 2026-06-13 found that landblock-wide cell bounds require conservative transformation of local BVH root bounds through the 12A4 placement convention. This should be tested with translated and rotated cells before runtime query changes rely on it.
+
+Deliverables:
+
+- Reusable Rust prepared-BVH construction helper for arbitrary item bounds/kind masks, or a dedicated env-cell BVH builder in `holtburger-content`, with tests independent of JSON serialization.
+- Host/preparation update replacing the flat `landblockEnvCellBvh` payload with a true landblock-wide env-cell BVH built from env-cell root bounds.
+- Env-cell root bounds derived from real cell content where available: transformed local BVH root bounds, render geometry bounds, static seed bounds, portal aperture bounds, or a typed fallback/diagnostic when only placement-point bounds are possible.
+- Host/preparation update replacing flat `localBvh` serialization with the same real prepared BVH builder used for other prepared/source BVHs, preserving item-index order and kind masks.
+- Tests proving landblock-wide env-cell bounds are correct for non-identity placement transforms under the V2 bundle placement convention.
+- `StaticSceneQuery` refactor so landblock env-cell state is stored as one landblock-wide BVH root plus per-cell local BVH roots, not only a map of independent cell roots.
+- Env-cell ray picking broad phase:
+  - traverse `landblockEnvCellBvh` first to collect candidate env-cell ids,
+  - intersect that set with the current scene context's current/accepted/portal-visible cell set,
+  - then transform into each candidate cell's local placement and traverse its `localBvh`.
+- Initial residency query primitive for env-cell scenes, such as `queryEnvCellAtPoint` or an equivalent internal helper, backed by `landblockEnvCellBvh` and deterministic tie-breaking. This can remain runtime/internal until browser follow mode needs it.
+- Diagnostics that distinguish:
+  - missing landblock env-cell BVH,
+  - malformed top-level BVH item references,
+  - missing per-cell local BVH,
+  - cells omitted because they are outside the accepted/portal-visible set,
+  - cells omitted because they are not hit by the landblock broad phase.
+- Tests proving broad accepted-cell ray picks do not iterate every env-cell local BVH when the landblock BVH excludes most cells.
+- Tests proving current-cell picks still work when the current cell is selected through the landblock BVH and then refined through the local BVH.
+- Tests proving payloads without a usable landblock env-cell BVH do not become queryable through a flat fallback roots list.
+
+Acceptance criteria:
+
+- `landblock/{XXYYffff}/env-cells` exposes one landblock-wide env-cell BVH whose items are env-cell-grained and whose nodes are hierarchical for non-trivial cells.
+- Per-cell `localBvh` exposes a real local hierarchy over render geometry, static seeds, and portal apertures where item counts justify subdivision.
+- Runtime env-cell ray picking never linearly considers every env-cell root for a broad accepted set unless the landblock BVH itself returns every cell as spatially relevant.
+- Initial env-cell residency can be established from the landblock-wide env-cell BVH without relying on portal traversal or renderer draw state.
+- Portal walking remains a semantic visibility step layered on top of residency/broad-phase candidates; it is not conflated with Euclidean BVH inclusion.
+- No renderer draw-unit, frontend-computed bounds, or flat seed/root fallback path is introduced.
+- `cargo check`, Tauri host tests for the route/schema, `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and focused static-scene query/env-cell resolver tests pass before returning to 11E5.
+
 ### Phase 11E5: Static Material Family Resteer
 
-Status: planned. Deferred behind the Phase 12A0-12A3 sequence on 2026-06-13 so browser/game-client picking can identify suspect explicit-object cutout materials before the remaining material-family resteer.
+Status: planned. Deferred behind the Phase 12A0-12A5 sequence on 2026-06-13 so browser/game-client picking can identify suspect explicit-object cutout materials before the remaining material-family resteer.
 
 Purpose: reassess static material parity after explicit-object coverage and target-scoped blended material work, before broadening static-object source coverage in Phase 12.
 
@@ -4053,7 +4178,7 @@ Manual verification milestones should be explicit:
 - Phase 9C: atlas ownership is reassessed before terrain material work builds on it.
 - Phase 10C: terrain material behavior is credible enough to compare against v1 terrain blend/layer behavior on named targets.
 - Phase 10D: terrain parity findings steer static object, inspection, dungeon, and cutover scope before broader enrichment starts.
-- Phase 12A0-12A3: bundled env-cell source loading, cell-level visibility traversal, BVH-backed runtime/static-scene `pickRay`, root-transform/reanchor behavior, and browser-owned picker diagnostics can identify object-level static hits without renderer-owned semantic picking.
+- Phase 12A0-12A5: bundled env-cell source loading, cell-level visibility traversal, BVH-backed runtime/static-scene `pickRay`, root-transform/reanchor behavior, landblock-wide env-cell residency broad phase, and browser-owned picker diagnostics can identify object-level static hits without renderer-owned semantic picking.
 - Phase 12B: outdoor terrain/static object behavior is reassessed before dungeon/interior and dynamic breadth.
 - Phase 13C: dungeon/interior behavior is compared against v1 on named targets before dynamic and cutover work.
 - Phase 14A: final design-vs-implementation reassessment happens before replacing the old browser display.

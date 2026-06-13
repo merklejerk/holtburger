@@ -51,11 +51,11 @@ export class LandblockEnvCellsResolver {
 		const envCells = landblock.payload.envCells.map((cell) =>
 			createLandblockEnvCellStaticFacts(landblock.payload.landblockId, cell),
 		);
+		reportUnboundedEnvCells(landblock.payload);
 		const scope: LandblockEnvCellsStaticScopePayload = {
 			acceptedEnvCellIds: envCells
 				.map((cell) => cell.identity.envCellId)
 				.sort(compareNumeric),
-			classification: landblock.payload.classification,
 			envCells,
 			kind: "landblock-env-cells",
 			landblock: {
@@ -70,14 +70,13 @@ export class LandblockEnvCellsResolver {
 				regionNumber: landblock.payload.regionNumber,
 			},
 			residencySpatial: {
-				coordinateSpace: "landblock-env-cell-residency",
-				envCellResidencyBvhItemCount:
-					landblock.payload.envCellResidencyBvh.items.length,
-				envCellResidencyBvhNodeCount:
-					landblock.payload.envCellResidencyBvh.nodes.length,
-				residencyBvh: {
-					coordinateSpace: "landblock-env-cell-residency",
-					items: landblock.payload.envCellResidencyBvh.items.map((item) => ({
+				landblockEnvCellBvhItemCount:
+					landblock.payload.landblockEnvCellBvh.items.length,
+				landblockEnvCellBvhNodeCount:
+					landblock.payload.landblockEnvCellBvh.nodes.length,
+				landblockEnvCellBvh: {
+					items: landblock.payload.landblockEnvCellBvh.items.map((item) => ({
+						bounds: item.bounds,
 						identity: {
 							envCellId: item.envCellId,
 							kind: "env-cell-source",
@@ -85,7 +84,7 @@ export class LandblockEnvCellsResolver {
 						memberId: item.memberId,
 						source: item.source,
 					})),
-					nodes: landblock.payload.envCellResidencyBvh.nodes,
+					nodes: landblock.payload.landblockEnvCellBvh.nodes,
 				},
 			},
 			visibilityDiagnostics: [],
@@ -105,6 +104,25 @@ export class LandblockEnvCellsResolver {
 		const payload = requirePreparedPayloadKind(asset, "landblock-env-cells");
 		return { asset, payload };
 	}
+}
+
+function reportUnboundedEnvCells(payload: LandblockEnvCellsPayloadDto): void {
+	const boundedEnvCellIds = new Set(
+		payload.landblockEnvCellBvh.items.map((item) => item.envCellId),
+	);
+	const omittedEnvCellIds = payload.envCells
+		.map((cell) => cell.envCellId)
+		.filter((envCellId) => !boundedEnvCellIds.has(envCellId));
+	if (omittedEnvCellIds.length === 0) {
+		return;
+	}
+
+	console.warn("[holtburger-3d][v2][landblock-env-cells-bvh]", {
+		landblockId: payload.landblockId,
+		message:
+			"Resolved env cells without landblock BVH bounds were omitted from the landblockEnvCellBvh broad phase.",
+		omittedEnvCellIds,
+	});
 }
 
 function createLandblockEnvCellStaticFacts(
@@ -128,7 +146,6 @@ function createLandblockEnvCellStaticFacts(
 		landblockId,
 		localPlacement: cell.localPlacement,
 		localSpatial: {
-			coordinateSpace: "env-cell-local",
 			localBvh: cell.localBvh,
 			localBvhItemCount: cell.localBvh.items.length,
 			localBvhNodeCount: cell.localBvh.nodes.length,

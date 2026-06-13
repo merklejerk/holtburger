@@ -249,7 +249,6 @@ function createOutdoorStaticObjectsPayload(options: {
 function createLandblockEnvCellsPayload(): LandblockEnvCellsStaticScopePayload {
 	return {
 		acceptedEnvCellIds: [0xda550100],
-		classification: "dungeon",
 		envCells: [
 			{
 				cellBsp: {
@@ -273,9 +272,7 @@ function createLandblockEnvCellsPayload(): LandblockEnvCellsStaticScopePayload {
 				landblockId: 0xda55ffff,
 				localPlacement: createPlacement(),
 				localSpatial: {
-					coordinateSpace: "env-cell-local",
 					localBvh: {
-						coordinateSpace: "env-cell-local",
 						items: [{ instanceId: "env-static-0", kind: "static" }],
 						nodes: [
 							{
@@ -355,11 +352,9 @@ function createLandblockEnvCellsPayload(): LandblockEnvCellsStaticScopePayload {
 			regionNumber: 1,
 		},
 		residencySpatial: {
-			coordinateSpace: "landblock-env-cell-residency",
-			envCellResidencyBvhItemCount: 0,
-			envCellResidencyBvhNodeCount: 0,
-			residencyBvh: {
-				coordinateSpace: "landblock-env-cell-residency",
+			landblockEnvCellBvhItemCount: 0,
+			landblockEnvCellBvhNodeCount: 0,
+			landblockEnvCellBvh: {
 				items: [],
 				nodes: [],
 			},

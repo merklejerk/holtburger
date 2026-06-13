@@ -48,6 +48,23 @@ pub struct LandblockTopologyAsset {
 }
 
 #[derive(Debug, Clone)]
+pub struct LandblockEnvCellsAsset {
+    pub landblock_id: u32,
+    pub landblock_info_id: u32,
+    pub env_cells: Vec<LandblockEnvCellBundleCell>,
+    pub diagnostics: PreparedContentSourceDiagnostics,
+}
+
+#[derive(Debug, Clone)]
+pub struct LandblockEnvCellBundleCell {
+    pub env_cell: EnvCellFact,
+    pub prepared_cell: PreparedInteriorCell,
+    pub static_meshes: Vec<PreparedStaticMesh>,
+    pub landblock_bounds: Option<PreparedAabb>,
+    pub diagnostics: PreparedContentSourceDiagnostics,
+}
+
+#[derive(Debug, Clone)]
 pub struct LandblockOutdoorStaticMember {
     pub instance: PreparedStaticInstance,
     pub source_bounds: Option<PreparedAabb>,
@@ -408,6 +425,9 @@ pub struct LandblockOutdoorAssetAssembler;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LandblockTopologyAssetAssembler;
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct LandblockEnvCellsAssetAssembler;
+
 struct PreparedContentAssemblyContext<'a> {
     source: ContentSourceReader<'a>,
     diagnostics: PreparedContentSourceDiagnostics,
@@ -582,6 +602,23 @@ impl<'a> PreparedContentAssemblyContext<'a> {
             file_id,
             role,
             error_code,
+            detail,
+        });
+    }
+
+    fn report_source_omission(
+        &mut self,
+        namespace: &'static str,
+        file_id: u32,
+        role: &'static str,
+        reason: &'static str,
+        detail: String,
+    ) {
+        self.diagnostics.omissions.push(SourceOmissionDiagnostic {
+            namespace,
+            file_id,
+            role,
+            reason,
             detail,
         });
     }
@@ -867,6 +904,105 @@ impl LandblockTopologyAssetAssembler {
     }
 }
 
+impl LandblockEnvCellsAssetAssembler {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn assemble_landblock_with_cache(
+        &self,
+        content: &ContentRepository,
+        decode_cache: &ContentDecodeCache,
+        raw_landblock_id: u32,
+    ) -> anyhow::Result<LandblockEnvCellsAsset> {
+        self.assemble_landblock_with_context(
+            PreparedContentAssemblyContext::with_decode_cache(content, decode_cache),
+            raw_landblock_id,
+        )
+    }
+
+    fn assemble_landblock_with_context(
+        &self,
+        mut context: PreparedContentAssemblyContext<'_>,
+        raw_landblock_id: u32,
+    ) -> anyhow::Result<LandblockEnvCellsAsset> {
+        let landblock_id = normalize_landblock_id(raw_landblock_id);
+        let landblock_info_id = derive_landblock_info_id(landblock_id);
+        let landblock_info = context
+            .load_landblock_info(landblock_id)
+            .as_ref()
+            .map(|info| LandblockInfoFact::from_info(info, landblock_id))
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Could not assemble landblock env-cell bundle 0x{landblock_id:08X}; landblock info unavailable"
+                )
+            })?;
+        let env_cell_facts = load_env_cell_facts(&mut context, landblock_id, &landblock_info);
+        let environments = load_bundle_environment_facts(&mut context, &env_cell_facts);
+        let interiors = LandblockInteriorFacts {
+            env_cells: env_cell_facts,
+            environments,
+        };
+        let prepared_cells_by_id = build_prepared_interior_cells(&interiors)
+            .into_iter()
+            .map(|cell| (cell.env_cell_id, cell))
+            .collect::<HashMap<_, _>>();
+        let indoor_instances =
+            build_prepared_indoor_static_instances(landblock_id, &interiors).collect::<Vec<_>>();
+        let static_meshes = build_prepared_static_meshes(&mut context, indoor_instances.iter());
+        let mut static_meshes_by_env_cell = static_meshes.into_iter().fold(
+            HashMap::<u32, Vec<PreparedStaticMesh>>::new(),
+            |mut cells, mesh| {
+                if let Some(env_cell_id) = mesh.owning_env_cell_id {
+                    cells.entry(env_cell_id).or_default().push(mesh);
+                }
+                cells
+            },
+        );
+        let env_cells = interiors
+            .env_cells
+            .into_iter()
+            .filter_map(|env_cell| {
+                let prepared_cell = prepared_cells_by_id.get(&env_cell.env_cell_id)?.clone();
+                let static_meshes = static_meshes_by_env_cell
+                    .remove(&env_cell.env_cell_id)
+                    .unwrap_or_default();
+                let landblock_bounds = derive_env_cell_landblock_bounds(
+                    &prepared_cell,
+                    &static_meshes,
+                );
+                if landblock_bounds.is_none() {
+                    context.report_source_omission(
+                        EOR_CELL_NAMESPACE,
+                        env_cell.env_cell_id,
+                        "landblock-env-cell-bvh",
+                        "missing-bounds",
+                        format!(
+                            "EnvCell 0x{:08X} did not produce render, static, or portal bounds for landblock-wide BVH inclusion",
+                            env_cell.env_cell_id
+                        ),
+                    );
+                }
+                Some(LandblockEnvCellBundleCell {
+                    diagnostics: PreparedContentSourceDiagnostics::default(),
+                    static_meshes,
+                    landblock_bounds,
+                    env_cell,
+                    prepared_cell,
+                })
+            })
+            .collect::<Vec<_>>();
+        let diagnostics = context.into_diagnostics();
+
+        Ok(LandblockEnvCellsAsset {
+            landblock_id,
+            landblock_info_id,
+            env_cells,
+            diagnostics,
+        })
+    }
+}
+
 pub fn derive_landblock_info_id(raw_landblock_id: u32) -> u32 {
     normalize_landblock_id(raw_landblock_id) & 0xffff_fffe
 }
@@ -921,6 +1057,72 @@ fn load_environment_fact(
         selected_cell_structure_ids,
         &mut context.diagnostics,
     ))
+}
+
+fn load_bundle_environment_facts(
+    context: &mut PreparedContentAssemblyContext<'_>,
+    env_cells: &[EnvCellFact],
+) -> Vec<EnvironmentFact> {
+    let mut selected_cell_structure_ids_by_environment = HashMap::<u32, Vec<u32>>::new();
+    for env_cell in env_cells {
+        let (Some(environment_id), Some(cell_structure_id)) =
+            (env_cell.environment_id, env_cell.cell_structure_id)
+        else {
+            continue;
+        };
+        selected_cell_structure_ids_by_environment
+            .entry(environment_id)
+            .or_default()
+            .push(cell_structure_id);
+    }
+
+    let mut environments = Vec::new();
+    for (environment_id, mut cell_structure_ids) in selected_cell_structure_ids_by_environment {
+        cell_structure_ids.sort_unstable();
+        cell_structure_ids.dedup();
+        if let Some(environment) =
+            load_environment_fact(context, environment_id, &cell_structure_ids)
+        {
+            environments.push(environment);
+        }
+    }
+    environments
+}
+
+fn derive_env_cell_landblock_bounds(
+    prepared_cell: &PreparedInteriorCell,
+    static_meshes: &[PreparedStaticMesh],
+) -> Option<PreparedAabb> {
+    let local_bounds = derive_env_cell_local_bounds(prepared_cell, static_meshes)?;
+    Some(pad_bvh_bounds(
+        transform_render_local_bounds_by_ac_frame_conservative(
+            local_bounds,
+            &prepared_cell.local_placement,
+            unit_prepared_vec3(),
+        ),
+    ))
+}
+
+fn derive_env_cell_local_bounds(
+    prepared_cell: &PreparedInteriorCell,
+    static_meshes: &[PreparedStaticMesh],
+) -> Option<PreparedAabb> {
+    let mut bounds = prepared_cell.render_geometry.bounds;
+    for mesh in static_meshes {
+        bounds = union_optional_bounds(bounds, mesh.instance_bounds);
+    }
+    for aperture in &prepared_cell.portal_apertures {
+        bounds = union_optional_bounds(bounds, portal_aperture_bounds(aperture));
+    }
+    bounds
+}
+
+fn portal_aperture_bounds(aperture: &PreparedPortalAperture) -> Option<PreparedAabb> {
+    aperture
+        .points
+        .iter()
+        .copied()
+        .fold(None, |bounds, point| Some(expand_bounds(bounds, point)))
 }
 
 impl CellLandblockFact {

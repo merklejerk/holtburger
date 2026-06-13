@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { LandblockEnvCellsPayloadDto } from "../../../lib/host/contracts";
 import type {
 	AssetService,
@@ -42,7 +42,6 @@ describe("V2 landblock env-cell resolver", () => {
 
 		expect(payload.scope).toMatchObject({
 			acceptedEnvCellIds: [0xda550100, 0xda550101],
-			classification: "dungeon",
 			landblock: {
 				kind: "landblock-source",
 				landblockId: 0xda55ffff,
@@ -53,8 +52,8 @@ describe("V2 landblock env-cell resolver", () => {
 				regionNumber: 1,
 			},
 			residencySpatial: {
-				envCellResidencyBvhItemCount: 1,
-				envCellResidencyBvhNodeCount: 0,
+				landblockEnvCellBvhItemCount: 2,
+				landblockEnvCellBvhNodeCount: 0,
 			},
 		});
 		expect(payload.scope.envCells[0]).toMatchObject({
@@ -115,11 +114,11 @@ describe("V2 landblock env-cell resolver", () => {
 		).toEqual(["landblock-env-cells:da55ffff"]);
 	});
 
-	it("uses the same env-cell source path for outdoor-linked landblocks", async () => {
+	it("uses the same env-cell source path without topology classification", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-env-cells", 0xda55ffff),
-				createLandblockEnvCellsPayload({ classification: "outdoor" }),
+				createLandblockEnvCellsPayload(),
 			),
 		]);
 
@@ -131,10 +130,32 @@ describe("V2 landblock env-cell resolver", () => {
 		if (payload.scope.kind !== "landblock-env-cells") {
 			throw new Error("expected landblock env-cell payload");
 		}
-		expect(payload.scope.classification).toBe("outdoor");
 		expect(assetService.requestedKeys).toEqual([
 			createHostAssetKey("landblock-env-cells", 0xda55ffff),
 		]);
+	});
+
+	it("warns when env cells are omitted from the landblock BVH because they have no bounds", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const assetService = new FixtureAssetService([
+			createPreparedAsset(
+				createHostAssetKey("landblock-env-cells", 0xda55ffff),
+				createLandblockEnvCellsPayload({ omitSecondBvhItem: true }),
+			),
+		]);
+
+		await new LandblockEnvCellsResolver({ assetService }).resolve(
+			createEnvCellRequest(),
+		);
+
+		expect(warn).toHaveBeenCalledWith(
+			"[holtburger-3d][v2][landblock-env-cells-bvh]",
+			expect.objectContaining({
+				landblockId: 0xda55ffff,
+				omittedEnvCellIds: [0xda550101],
+			}),
+		);
+		warn.mockRestore();
 	});
 
 	it("rejects prepared assets with the wrong payload kind", async () => {
@@ -328,8 +349,7 @@ function createRuntimeEnvCell(
 		},
 		landblockId: 0xda55ffff,
 		localPlacement: createPlacement(),
-		localSpatial: {
-			coordinateSpace: "env-cell-local",
+	localSpatial: {
 			localBvh: createLocalBvh(),
 			localBvhItemCount: 0,
 			localBvhNodeCount: 0,
@@ -347,22 +367,28 @@ function createRuntimeEnvCell(
 }
 
 function createLandblockEnvCellsPayload(
-	options: {
-		readonly classification?: LandblockEnvCellsPayloadDto["classification"];
-	} = {},
+	options: { readonly omitSecondBvhItem?: boolean } = {},
 ): LandblockEnvCellsPayloadDto {
 	return {
-		classification: options.classification ?? "dungeon",
 		diagnostics: createDiagnostics(),
-		envCellResidencyBvh: {
-			coordinateSpace: "landblock-env-cell-residency",
+		landblockEnvCellBvh: {
 			items: [
 				{
-					assetId: "env-cell/da550100",
+					bounds: createBounds(),
 					envCellId: 0xda550100,
 					memberId: "cell-0",
-					source: "env-cell-placement",
+					source: "env-cell-root",
 				},
+				...(options.omitSecondBvhItem
+					? []
+					: [
+							{
+								bounds: createBounds(),
+								envCellId: 0xda550101,
+								memberId: "cell-1",
+								source: "env-cell-root" as const,
+							},
+						]),
 			],
 			nodes: [],
 		},
@@ -496,7 +522,6 @@ function createCellBsp() {
 
 function createLocalBvh() {
 	return {
-		coordinateSpace: "env-cell-local" as const,
 		items: [],
 		nodes: [],
 	};

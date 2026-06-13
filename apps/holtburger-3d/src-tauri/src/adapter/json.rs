@@ -756,33 +756,31 @@ pub fn serialize_landblock_topology_payload(
 }
 
 pub fn serialize_landblock_env_cells_payload_with_cells<F>(
-    topology: &LandblockTopologyAsset,
-    cells: &[EnvCellAsset],
+    bundle: &LandblockEnvCellsAsset,
     region_id: u32,
     region_number: u32,
     mut serialize_cell: F,
 ) -> serde_json::Value
 where
-    F: FnMut(usize, &EnvCellAsset, u32, u32) -> serde_json::Value,
+    F: FnMut(usize, &LandblockEnvCellBundleCell, u32, u32) -> serde_json::Value,
 {
     serde_json::json!({
         "kind": "landblock-env-cells",
         "residencyKind": "landblock",
         "sourceAssetKind": "landblock-env-cells",
-        "landblockId": topology.landblock_id,
-        "landblockInfoId": topology.landblock_info_id,
-        "classification": serialize_landblock_classification(topology.classification),
+        "landblockId": bundle.landblock_id,
+        "landblockInfoId": bundle.landblock_info_id,
         "regionId": region_id,
         "regionNumber": region_number,
-        "envCells": cells.iter().enumerate().map(|(index, cell)| serialize_cell(index, cell, region_id, region_number)).collect::<Vec<_>>(),
-        "portalLinks": serialize_landblock_topology_portal_links(topology),
-        "envCellResidencyBvh": serialize_landblock_topology_env_cell_residency_bvh(topology),
-        "diagnostics": serialize_prepared_content_diagnostics(&topology.diagnostics),
+        "envCells": bundle.env_cells.iter().enumerate().map(|(index, cell)| serialize_cell(index, cell, region_id, region_number)).collect::<Vec<_>>(),
+        "portalLinks": serialize_landblock_env_cell_bundle_portal_links(bundle),
+        "landblockEnvCellBvh": serialize_landblock_env_cell_bundle_bvh(bundle),
+        "diagnostics": serialize_prepared_content_diagnostics(&bundle.diagnostics),
         "provenance": {
             "source": "repo-local-hba",
             "sourceAssetKind": "landblock-env-cells",
-            "errorCode": topology.diagnostics.errors.first().map(|error| error.error_code),
-            "detail": topology.diagnostics.errors.first().map(|error| error.detail.clone())
+            "errorCode": bundle.diagnostics.errors.first().map(|error| error.error_code),
+            "detail": bundle.diagnostics.errors.first().map(|error| error.detail.clone())
         }
     })
 }
@@ -922,11 +920,57 @@ pub fn serialize_landblock_topology_env_cell_residency_bvh(
     })
 }
 
+pub fn serialize_landblock_env_cell_bundle_bvh(
+    bundle: &LandblockEnvCellsAsset,
+) -> serde_json::Value {
+    let bounded_cells = bundle
+        .env_cells
+        .iter()
+        .filter_map(|cell| cell.landblock_bounds.map(|bounds| (cell, bounds)))
+        .collect::<Vec<_>>();
+    let items = bounded_cells
+        .iter()
+        .map(|(cell, bounds)| {
+            serde_json::json!({
+                "envCellId": cell.env_cell.env_cell_id,
+                "memberId": format!("env-cell/{:08x}", cell.env_cell.env_cell_id),
+                "bounds": serialize_prepared_aabb(bounds),
+                "source": "env-cell-root",
+            })
+        })
+        .collect::<Vec<_>>();
+    let node_inputs = bounded_cells
+        .into_iter()
+        .map(|(_cell, bounds)| (bounds, 1_u32))
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "nodes": build_flat_bvh_nodes_from_bounds(node_inputs),
+        "items": items,
+    })
+}
+
 pub fn serialize_landblock_topology_portal_links(
     topology: &LandblockTopologyAsset,
 ) -> Vec<serde_json::Value> {
-    topology
+    serialize_landblock_portal_links(topology.landblock_id, &topology.env_cells)
+}
+
+pub fn serialize_landblock_env_cell_bundle_portal_links(
+    bundle: &LandblockEnvCellsAsset,
+) -> Vec<serde_json::Value> {
+    let env_cells = bundle
         .env_cells
+        .iter()
+        .map(|cell| cell.env_cell.clone())
+        .collect::<Vec<_>>();
+    serialize_landblock_portal_links(bundle.landblock_id, &env_cells)
+}
+
+fn serialize_landblock_portal_links(
+    landblock_id: u32,
+    env_cells: &[EnvCellFact],
+) -> Vec<serde_json::Value> {
+    env_cells
         .iter()
         .flat_map(|cell| {
             cell.portals.iter().map(|portal| {
@@ -946,7 +990,7 @@ pub fn serialize_landblock_topology_portal_links(
                     }).unwrap_or_else(|| {
                         serde_json::json!({
                             "kind": "outside",
-                            "landblockId": topology.landblock_id,
+                            "landblockId": landblock_id,
                         })
                     }),
                     "flags": portal.flags,
@@ -1042,7 +1086,7 @@ where
 }
 
 pub fn serialize_landblock_env_cell_bundle_cell<F>(
-    asset: &EnvCellAsset,
+    asset: &LandblockEnvCellBundleCell,
     render_geometry: serde_json::Value,
     mut serialize_aperture: F,
 ) -> serde_json::Value
@@ -1054,7 +1098,7 @@ where
     serde_json::json!({
         "envCellId": cell.env_cell_id,
         "memberId": format!("env-cell/{:08x}", cell.env_cell_id),
-        "localPlacement": serialize_frame(&cell.local_placement),
+        "localPlacement": serialize_v2_render_space_frame(&cell.local_placement),
         "environmentId": cell.environment_id,
         "cellStructureId": cell.cell_structure_id,
         "visibleEnvCellIds": asset.env_cell.visible_cell_ids,
@@ -1094,7 +1138,7 @@ where
         }).collect::<Vec<_>>(),
         "renderGeometry": render_geometry,
         "cellBsp": serialize_bsp_node(&cell.cell_bsp),
-        "localBvh": serialize_env_cell_local_bvh(cell, &static_meshes),
+        "localBvh": serialize_landblock_env_cell_bundle_local_bvh(cell, &static_meshes),
         "diagnostics": serialize_prepared_content_diagnostics(&asset.diagnostics),
     })
 }
@@ -1141,6 +1185,17 @@ pub fn serialize_env_cell_local_bvh(
         "coordinateSpace": "env-cell-local",
         "nodes": build_flat_bvh_nodes_from_bounds(node_inputs),
         "items": items,
+    })
+}
+
+pub fn serialize_landblock_env_cell_bundle_local_bvh(
+    cell: &PreparedInteriorCell,
+    static_meshes: &[&PreparedStaticMesh],
+) -> serde_json::Value {
+    let local_bvh = serialize_env_cell_local_bvh(cell, static_meshes);
+    serde_json::json!({
+        "nodes": local_bvh.get("nodes").cloned().unwrap_or_else(|| serde_json::json!([])),
+        "items": local_bvh.get("items").cloned().unwrap_or_else(|| serde_json::json!([])),
     })
 }
 
@@ -1456,6 +1511,49 @@ pub fn serialize_frame(frame: &holtburger_dat::graphics::Frame) -> serde_json::V
     })
 }
 
+pub fn serialize_v2_render_space_frame(
+    frame: &holtburger_dat::graphics::Frame,
+) -> serde_json::Value {
+    serde_json::json!({
+        "origin": serialize_prepared_vec3(&ac_vector_to_render_space(frame.origin)),
+        "orientation": serialize_quaternion(&ac_quaternion_to_render_space(frame.orientation)),
+    })
+}
+
+fn ac_vector_to_render_space(vector: Vector3) -> PreparedVec3 {
+    PreparedVec3 {
+        x: vector.x,
+        y: vector.z,
+        z: if vector.y == 0.0 { 0.0 } else { -vector.y },
+    }
+}
+
+fn ac_quaternion_to_render_space(quaternion: Quaternion) -> Quaternion {
+    const SQRT_ONE_HALF: f32 = std::f32::consts::FRAC_1_SQRT_2;
+    let ac_to_render = Quaternion {
+        w: SQRT_ONE_HALF,
+        x: -SQRT_ONE_HALF,
+        y: 0.0,
+        z: 0.0,
+    };
+    let render_to_ac = Quaternion {
+        w: SQRT_ONE_HALF,
+        x: SQRT_ONE_HALF,
+        y: 0.0,
+        z: 0.0,
+    };
+    multiply_quaternions(multiply_quaternions(ac_to_render, quaternion), render_to_ac)
+}
+
+fn multiply_quaternions(left: Quaternion, right: Quaternion) -> Quaternion {
+    Quaternion {
+        w: left.w * right.w - left.x * right.x - left.y * right.y - left.z * right.z,
+        x: left.w * right.x + left.x * right.w + left.y * right.z - left.z * right.y,
+        y: left.w * right.y - left.x * right.z + left.y * right.w + left.z * right.x,
+        z: left.w * right.z + left.x * right.y - left.y * right.x + left.z * right.w,
+    }
+}
+
 pub fn serialize_sphere(sphere: &holtburger_common::Sphere) -> serde_json::Value {
     serde_json::json!({
         "center": serialize_vector3(&sphere.center),
@@ -1745,6 +1843,76 @@ mod tests {
                 z: 1.,
             },
         }
+    }
+
+    #[test]
+    fn v2_env_cell_bundle_frame_uses_render_query_axes() {
+        let frame = holtburger_dat::graphics::Frame {
+            origin: holtburger_common::math::Vector3 {
+                x: 1.,
+                y: 2.,
+                z: 3.,
+            },
+            orientation: holtburger_common::math::Quaternion {
+                w: 1.,
+                x: 0.,
+                y: 0.,
+                z: 0.,
+            },
+        };
+
+        let payload = serialize_v2_render_space_frame(&frame);
+
+        assert_close(
+            payload
+                .pointer("/origin/x")
+                .and_then(serde_json::Value::as_f64),
+            1.,
+        );
+        assert_close(
+            payload
+                .pointer("/origin/y")
+                .and_then(serde_json::Value::as_f64),
+            3.,
+        );
+        assert_close(
+            payload
+                .pointer("/origin/z")
+                .and_then(serde_json::Value::as_f64),
+            -2.,
+        );
+        assert_close(
+            payload
+                .pointer("/orientation/w")
+                .and_then(serde_json::Value::as_f64),
+            1.,
+        );
+        assert_close(
+            payload
+                .pointer("/orientation/x")
+                .and_then(serde_json::Value::as_f64),
+            0.,
+        );
+        assert_close(
+            payload
+                .pointer("/orientation/y")
+                .and_then(serde_json::Value::as_f64),
+            0.,
+        );
+        assert_close(
+            payload
+                .pointer("/orientation/z")
+                .and_then(serde_json::Value::as_f64),
+            0.,
+        );
+    }
+
+    fn assert_close(actual: Option<f64>, expected: f64) {
+        let actual = actual.expect("expected numeric JSON field");
+        assert!(
+            (actual - expected).abs() < 1e-6,
+            "expected {actual} to be close to {expected}",
+        );
     }
 
     #[test]

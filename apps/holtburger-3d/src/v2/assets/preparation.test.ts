@@ -127,4 +127,154 @@ describe("V2 host asset preparation", () => {
 			}),
 		).toThrow("V2 asset preparation does not support host asset route");
 	});
+
+	it("accepts only the normalized V2 landblock env-cell bundle shape", () => {
+		const payload = createLandblockEnvCellsPayload();
+
+		expect(
+			prepareV2StaticAssetPayload({
+				assetId: "landblock/da55ffff/env-cells",
+				payload,
+				payloadKind: "json",
+				requestId: "request-1",
+			}),
+		).toMatchObject({
+			kind: "landblock-env-cells",
+			landblockEnvCellBvh: {
+				items: [{ source: "env-cell-root" }],
+			},
+		});
+
+		expect(() =>
+			prepareV2StaticAssetPayload({
+				assetId: "landblock/da55ffff/env-cells",
+				payload: {
+					...payload,
+					classification: "dungeon",
+					envCellResidencyBvh: payload.landblockEnvCellBvh,
+					envCells: payload.envCells.map((cell) => ({
+						...cell,
+						localBvh: {
+							...cell.localBvh,
+							coordinateSpace: "env-cell-local",
+						},
+					})),
+				},
+				payloadKind: "json",
+				requestId: "request-1",
+			}),
+		).toThrow(
+			"Asset landblock/da55ffff/env-cells matched the landblock-env-cells route but its payload failed the landblock-env-cells contract",
+		);
+
+		expect(() =>
+			prepareV2StaticAssetPayload({
+				assetId: "landblock/da55ffff/env-cells",
+				payload: {
+					...payload,
+					landblockEnvCellBvh: {
+						...payload.landblockEnvCellBvh,
+						items: payload.landblockEnvCellBvh.items.map((item) => ({
+							...item,
+							bounds: null,
+						})),
+					},
+				},
+				payloadKind: "json",
+				requestId: "request-2",
+			}),
+		).toThrow(
+			"Asset landblock/da55ffff/env-cells matched the landblock-env-cells route but its payload failed the landblock-env-cells contract",
+		);
+	});
 });
+
+function createLandblockEnvCellsPayload() {
+	return {
+		diagnostics: createDiagnostics(),
+		envCells: [
+			{
+				cellBsp: {
+					index: 0,
+					kind: "leaf",
+					polyIds: [],
+					solid: 0,
+					sphere: null,
+				},
+				cellStructureId: 0x0d000001,
+				diagnostics: createDiagnostics(),
+				environmentId: 0x0e000001,
+				envCellId: 0xda550100,
+				localBvh: {
+					items: [],
+					nodes: [],
+				},
+				localPlacement: createPlacement({ x: 1, y: 3, z: -2 }),
+				memberId: "env-cell/da550100",
+				portalApertures: [],
+				portals: [],
+				renderGeometry: {
+					bounds: null,
+					invalidPolygons: [],
+					normals: [],
+					positions: [],
+					skippedPolygonCount: 0,
+					sourceId: 0xda550100,
+					surfaceIds: [],
+					triangleCount: 0,
+					triangles: [],
+					uvs: [],
+					vertexCount: 0,
+				},
+				restrictionObjectId: null,
+				seenOutside: null,
+				statics: [],
+				surfaces: [],
+				visibleEnvCellIds: [],
+			},
+		],
+		kind: "landblock-env-cells",
+		landblockEnvCellBvh: {
+			items: [
+				{
+					bounds: {
+						max: { x: 1, y: 3, z: -2 },
+						min: { x: 1, y: 3, z: -2 },
+					},
+					envCellId: 0xda550100,
+					memberId: "env-cell/da550100",
+					source: "env-cell-root",
+				},
+			],
+			nodes: [],
+		},
+		landblockId: 0xda55ffff,
+		landblockInfoId: 0xda55fffe,
+		portalLinks: [],
+		provenance: {
+			detail: null,
+			errorCode: null,
+			source: "repo-local-hba",
+			sourceAssetKind: "landblock-env-cells",
+		},
+		regionId: 1,
+		regionNumber: 1,
+		residencyKind: "landblock",
+		sourceAssetKind: "landblock-env-cells",
+	};
+}
+
+function createPlacement(origin = { x: 0, y: 0, z: 0 }) {
+	return {
+		orientation: { w: 1, x: 0, y: 0, z: 0 },
+		origin,
+	};
+}
+
+function createDiagnostics() {
+	return {
+		errors: [],
+		omissions: [],
+		sourceRecords: [],
+	};
+}

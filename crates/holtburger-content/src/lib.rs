@@ -14,6 +14,7 @@ pub use decode_cache::ContentDecodeCache;
 pub use landblock_scene_assets::{
     CellLandblockFact, EnvCellAsset, EnvCellAssetAssembler, EnvCellFact, EnvCellPortalFact,
     EnvironmentFact, IndoorStaticObjectFact, LandblockBuildingPortal, LandblockClassification,
+    LandblockEnvCellBundleCell, LandblockEnvCellsAsset, LandblockEnvCellsAssetAssembler,
     LandblockGeneratedSceneryFacts, LandblockInfoFact, LandblockOutdoorAsset,
     LandblockOutdoorAssetAssembler, LandblockOutdoorBuildingFacts, LandblockOutdoorStaticMember,
     LandblockRestriction, LandblockTopologyAsset, LandblockTopologyAssetAssembler, PreparedAabb,

@@ -970,8 +970,7 @@
 									lb {snapshot.static.latestLandblockEnvCellsPayload.landblockId
 										.toString(16)
 										.padStart(8, "0")}
-									{snapshot.static.latestLandblockEnvCellsPayload
-										.classification} cells
+									cells
 									{snapshot.static.latestLandblockEnvCellsPayload.envCellCount}
 									accepted
 									{snapshot.static.latestLandblockEnvCellsPayload

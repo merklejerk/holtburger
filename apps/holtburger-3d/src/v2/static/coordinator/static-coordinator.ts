@@ -455,7 +455,6 @@ export class StaticCoordinator {
 		if (payload.scope.kind === "landblock-env-cells") {
 			this.#latestLandblockEnvCellsPayload = {
 				acceptedEnvCellCount: payload.scope.acceptedEnvCellIds.length,
-				classification: payload.scope.classification,
 				envCellCount: payload.scope.envCells.length,
 				landblockId: payload.scope.landblock.landblockId,
 				missingRefCount: payload.scope.missingRefs.length,

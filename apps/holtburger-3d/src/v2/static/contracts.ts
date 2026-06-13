@@ -101,8 +101,6 @@ interface LandblockSourceIdentity {
 	readonly landblockId: number;
 }
 
-type LandblockClassification = "outdoor" | "dungeon";
-
 interface EnvCellSourceIdentity {
 	readonly kind: "env-cell-source";
 	readonly envCellId: number;
@@ -548,7 +546,6 @@ interface StaticObjectDebugProvenance {
 export interface LandblockEnvCellsStaticScopePayload {
 	readonly kind: "landblock-env-cells";
 	readonly landblock: LandblockSourceIdentity;
-	readonly classification: LandblockClassification;
 	readonly regionRenderProfile: RegionRenderProfileIdentity;
 	readonly envCells: readonly LandblockEnvCellStaticFacts[];
 	readonly portalLinks: readonly LandblockPortalLinkFacts[];
@@ -642,26 +639,24 @@ type PortalEndpointIdentity =
 	  };
 
 interface LandblockEnvCellResidencySpatialFacts {
-	readonly coordinateSpace: "landblock-env-cell-residency";
-	readonly envCellResidencyBvhNodeCount: number;
-	readonly envCellResidencyBvhItemCount: number;
-	readonly residencyBvh: LandblockEnvCellResidencyBvhFacts;
+	readonly landblockEnvCellBvhNodeCount: number;
+	readonly landblockEnvCellBvhItemCount: number;
+	readonly landblockEnvCellBvh: LandblockEnvCellResidencyBvhFacts;
 }
 
 interface LandblockEnvCellResidencyBvhFacts {
-	readonly coordinateSpace: "landblock-env-cell-residency";
-	readonly nodes: LandblockEnvCellsPayloadDto["envCellResidencyBvh"]["nodes"];
+	readonly nodes: LandblockEnvCellsPayloadDto["landblockEnvCellBvh"]["nodes"];
 	readonly items: readonly LandblockEnvCellResidencyBvhItemFacts[];
 }
 
 interface LandblockEnvCellResidencyBvhItemFacts {
 	readonly identity: EnvCellSourceIdentity;
 	readonly memberId: string;
-	readonly source: "building-portal-link" | "env-cell-placement" | "derived";
+	readonly bounds: StaticBounds;
+	readonly source: "env-cell-root" | "derived";
 }
 
 interface EnvCellSpatialFacts {
-	readonly coordinateSpace: "env-cell-local";
 	readonly localBvh: LandblockEnvCellsPayloadDto["envCells"][number]["localBvh"];
 	readonly localBvhNodeCount: number;
 	readonly localBvhItemCount: number;
@@ -1076,7 +1071,6 @@ export interface ScheduledStaticWorkStatus {
 
 export interface LandblockEnvCellsPayloadSummary {
 	readonly landblockId: number;
-	readonly classification: LandblockClassification;
 	readonly envCellCount: number;
 	readonly acceptedEnvCellCount: number;
 	readonly visibleCellCount: number;

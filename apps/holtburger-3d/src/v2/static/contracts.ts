@@ -1038,6 +1038,12 @@ export interface StaticCoordinatorCommitDelta {
 	readonly revision: number;
 }
 
+export interface StaticCoordinatorSourcePayloadDelta {
+	readonly payload: StaticScopePayload;
+	readonly revision: number;
+	readonly work: ScheduledStaticWork;
+}
+
 export interface ScheduledStaticWorkStatus {
 	readonly workId: string;
 	readonly revision: number;
@@ -1046,6 +1052,7 @@ export interface ScheduledStaticWorkStatus {
 	readonly status:
 		| "requested"
 		| "resolving"
+		| "source-committed"
 		| "baking"
 		| "committed"
 		| "failed";

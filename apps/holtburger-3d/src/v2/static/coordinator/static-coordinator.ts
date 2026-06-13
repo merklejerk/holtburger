@@ -5,6 +5,7 @@ import type {
 	StaticBakeBatchItem,
 	StaticBaker,
 	StaticCoordinatorCommitDelta,
+	StaticCoordinatorSourcePayloadDelta,
 	StaticCoordinatorSnapshot,
 	StaticDemand,
 	StaticDomain,
@@ -32,6 +33,9 @@ export type StaticCoordinatorListener = (
 export type StaticCoordinatorCommitListener = (
 	delta: StaticCoordinatorCommitDelta,
 ) => void;
+export type StaticCoordinatorSourcePayloadListener = (
+	delta: StaticCoordinatorSourcePayloadDelta,
+) => void;
 
 export interface StaticCoordinatorOptions {
 	readonly resolver: StaticResolver;
@@ -58,6 +62,8 @@ export class StaticCoordinator {
 	) => StaticAtlasBatchSnapshot;
 	readonly #listeners = new Set<StaticCoordinatorListener>();
 	readonly #commitListeners = new Set<StaticCoordinatorCommitListener>();
+	readonly #sourcePayloadListeners =
+		new Set<StaticCoordinatorSourcePayloadListener>();
 	readonly #activeWork = new Map<string, MutableScheduledStaticWorkStatus>();
 	readonly #pendingBatches = new Map<string, PendingStaticBakeBatch>();
 	readonly #residentDrawUnitIds = new Set<string>();
@@ -148,6 +154,16 @@ export class StaticCoordinator {
 		};
 	}
 
+	subscribeSourcePayloads(
+		listener: StaticCoordinatorSourcePayloadListener,
+	): () => void {
+		this.#sourcePayloadListeners.add(listener);
+
+		return () => {
+			this.#sourcePayloadListeners.delete(listener);
+		};
+	}
+
 	createSnapshot(): StaticCoordinatorSnapshot {
 		const activeWork = Array.from(this.#activeWork.values());
 
@@ -192,6 +208,7 @@ export class StaticCoordinator {
 		this.#emit();
 		this.#listeners.clear();
 		this.#commitListeners.clear();
+		this.#sourcePayloadListeners.clear();
 	}
 
 	async #resolveThenBake(work: ScheduledStaticWork): Promise<void> {
@@ -215,7 +232,30 @@ export class StaticCoordinator {
 		}
 
 		this.#recordResolvedPayload(payload);
+		if (isSourceOnlyPayload(payload)) {
+			this.#commitSourcePayload(work, payload);
+			return;
+		}
 		this.#enqueueBakePayload(work, payload);
+	}
+
+	#commitSourcePayload(
+		work: ScheduledStaticWork,
+		payload: StaticScopePayload,
+	): void {
+		const status = this.#activeWork.get(work.workId);
+		if (!status) {
+			return;
+		}
+
+		status.status = "source-committed";
+		this.#committed += 1;
+		this.#emitSourcePayloadDelta({
+			payload,
+			revision: work.revision,
+			work,
+		});
+		this.#emit();
 	}
 
 	#enqueueBakePayload(
@@ -485,6 +525,12 @@ export class StaticCoordinator {
 			listener(delta);
 		}
 	}
+
+	#emitSourcePayloadDelta(delta: StaticCoordinatorSourcePayloadDelta): void {
+		for (const listener of this.#sourcePayloadListeners) {
+			listener(delta);
+		}
+	}
 }
 
 type MutableScheduledStaticWorkStatus = {
@@ -586,6 +632,10 @@ function countStatus(
 	status: ScheduledStaticWorkStatus["status"],
 ): number {
 	return requests.filter((request) => request.status === status).length;
+}
+
+function isSourceOnlyPayload(payload: StaticScopePayload): boolean {
+	return payload.scope.kind === "landblock-env-cells";
 }
 
 function disposeIfAvailable(value: unknown): void {

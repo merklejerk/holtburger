@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { DeferredStaticBaker, DeferredStaticResolver } from "../fake-workers";
 import type {
 	StaticCoordinatorCommitDelta,
+	StaticCoordinatorSourcePayloadDelta,
 	StaticDemand,
 	StaticDrawUnit,
+	StaticScopePayload,
 	StaticMaterialCoverageReport,
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
@@ -436,6 +438,71 @@ describe("V2 static coordinator", () => {
 
 		expect(coordinator.createSnapshot().materialCoverage).toEqual([]);
 	});
+
+	it("commits landblock env-cell bundles as source facts without baking", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+		const sourcePayloads: StaticCoordinatorSourcePayloadDelta[] = [];
+		coordinator.subscribeSourcePayloads((delta) => sourcePayloads.push(delta));
+
+		const [work] = coordinator.requestStaticDemand({
+			location: {
+				envCellId: 0xda550100,
+				kind: "interior-cell",
+				landblockId: 0xda55ffff,
+			},
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: 0,
+				terrain: -1,
+			},
+		});
+
+		resolver.complete(
+			resolver.pendingRequests[0]?.requestId ?? "",
+			createLandblockEnvCellsResolverPayload(),
+		);
+		await flushPromises();
+
+		expect(work?.job.domain).toBe("landblock-env-cells");
+		expect(baker.pendingInputs).toHaveLength(0);
+		expect(sourcePayloads).toMatchObject([
+			{
+				payload: {
+					scope: {
+						kind: "landblock-env-cells",
+						landblock: {
+							landblockId: 0xda55ffff,
+						},
+					},
+				},
+				revision: 1,
+				work: {
+					workId: "1:landblock:da55ffff:landblock-env-cells",
+				},
+			},
+		]);
+		expect(coordinator.createSnapshot()).toMatchObject({
+			baking: 0,
+			committed: 1,
+			committedDrawUnits: 0,
+			latestLandblockEnvCellsPayload: {
+				acceptedEnvCellCount: 1,
+				envCellCount: 1,
+				landblockId: 0xda55ffff,
+				staticObjectSeedCount: 0,
+			},
+		});
+		expect(coordinator.createSnapshot().activeWork[0]?.status).toBe(
+			"source-committed",
+		);
+	});
 });
 
 function createSingleTerrainDemand(landblockId: number): StaticDemand {
@@ -482,5 +549,97 @@ function createMaterialCoverage(
 		triangleCount: 0,
 		unrenderedBuckets: [],
 		unsupportedTriangleCount: 0,
+	};
+}
+
+function createLandblockEnvCellsResolverPayload(): {
+	readonly scope: StaticScopePayload["scope"];
+} {
+	return {
+		scope: {
+			acceptedEnvCellIds: [0xda550100],
+			classification: "dungeon",
+			envCells: [
+				{
+					cellBsp: {
+						kind: "leaf",
+						polyIds: [],
+						solid: 0,
+						sphere: null,
+					},
+					cellStructure: {
+						cellStructureId: 0x0d000001,
+						kind: "cell-structure",
+					},
+					environment: {
+						environmentId: 0x0e000001,
+						kind: "environment",
+					},
+					identity: {
+						envCellId: 0xda550100,
+						kind: "env-cell-source",
+					},
+					landblockId: 0xda55ffff,
+					localPlacement: {
+						orientation: { w: 1, x: 0, y: 0, z: 0 },
+						origin: { x: 0, y: 0, z: 0 },
+					},
+					localSpatial: {
+						coordinateSpace: "env-cell-local",
+						localBvh: {
+							coordinateSpace: "env-cell-local",
+							items: [],
+							nodes: [],
+						},
+						localBvhItemCount: 0,
+						localBvhNodeCount: 0,
+					},
+					memberId: "cell-0",
+					portalApertures: [],
+					portals: [],
+					renderGeometry: {
+						bounds: null,
+						invalidPolygons: [],
+						normals: [],
+						positions: [],
+						skippedPolygonCount: 0,
+						sourceId: 0xda550100,
+						surfaceIds: [],
+						triangleCount: 0,
+						triangles: [],
+						uvs: [],
+						vertexCount: 0,
+					},
+					restrictionObjectId: null,
+					seenOutside: null,
+					staticObjectSeeds: [],
+					surfaces: [],
+					visibleEnvCellIds: [],
+				},
+			],
+			kind: "landblock-env-cells",
+			landblock: {
+				kind: "landblock-source",
+				landblockId: 0xda55ffff,
+				source: "env-cells",
+			},
+			missingRefs: [],
+			portalLinks: [],
+			regionRenderProfile: {
+				kind: "region-render-profile",
+				regionNumber: 1,
+			},
+			residencySpatial: {
+				coordinateSpace: "landblock-env-cell-residency",
+				envCellResidencyBvhItemCount: 0,
+				envCellResidencyBvhNodeCount: 0,
+				residencyBvh: {
+					coordinateSpace: "landblock-env-cell-residency",
+					items: [],
+					nodes: [],
+				},
+			},
+			visibilityDiagnostics: [],
+		},
 	};
 }

@@ -2907,7 +2907,7 @@ Verification:
 
 ### Phase 11E4A3: Static Object Material Binding Tables
 
-Status: in progress; Phase 11E4A3a through Phase 11E4A3e0 complete. Phase 11E4A3e is the next implementation phase.
+Status: in progress; Phase 11E4A3a through Phase 11E4A3e complete. Phase 11E4A3f is the next implementation phase.
 
 Purpose: recover V1-style cross-material static-object compaction before `outdoor-detail` generated scenery and transparent object/part sorting broaden the static-object surface area.
 
@@ -2981,6 +2981,7 @@ Implementation split:
   - Split when material-entry count, static role-page slot capacity, or sort/visibility policy requires it; do not split solely by source/gfx object identity.
   - Preserve source mappings, spatial records, and texture-use ownership across any rewritten draw-unit ids.
   - Emit typed diagnostics for material-table or role-page overflow that cannot be made legal by deterministic splitting.
+  - Status: complete on 2026-06-12 for runtime fine splitting of renderer draw units, material table/selector remapping, texture binding remapping from committed placement facts, and eviction-id expansion. Source/spatial metadata remapping remains a follow-up because the runtime commit delta does not carry those records.
 - Phase 11E4A3f: Parity, Diagnostics, And Cleanup.
   - Port V1 parity expectations around RGBA and indexed material-table overflow partitioning rather than bypassing.
   - Add live/manual diagnostic expectations proving texture A/B/C merge into fewer draw units when role-slot/table capacity allows, and split deterministically when it does not.
@@ -3097,10 +3098,30 @@ Phase 11E4A3e0 spicy bits:
 - The old renderability check was the subtle blocker. Even after the partitioner merged texture A/B, `isRenderableStaticObjectPartition` still evaluated the union of all texture uses and turned multi-entry partitions into placeholders. The fix is entry-local layout validation.
 - Wrap mode is not a physical texture-use compatibility fact for static objects. The baker now keeps texture-use ids wrap-neutral and preserves authored wrap only in material entries for renderer virtual wrap.
 
-Phase 11E4A3e0 failed to close:
+Phase 11E4A3e0 failed to close before Phase 11E4A3e:
 
-- Fine partitioning by committed texture page/role-slot capacity is still not implemented. If a coarse multi-entry draw unit exceeds static role-page limits after packing, the current materializer still relies on texture-manager overflow behavior instead of rewriting the draw unit into legal subsets.
+- Fine partitioning by committed texture page/role-slot capacity was still not implemented after e0. If a coarse multi-entry draw unit exceeded static role-page limits after packing, the materializer still relied on texture-manager overflow behavior instead of rewriting the draw unit into legal subsets. Phase 11E4A3e added the runtime fine-split path for cases where committed placement/binding facts reach the materializer.
 - Runtime/manual diagnostics have not yet been re-run against a live landblock to confirm the expected `texture-rgba opaque` partition-count drop.
+
+Phase 11E4A3e execution notes:
+
+- Added placement-aware fine splitting to `runtime/static-materializer.ts`. Static-object draw units are now split after texture placement facts exist when adding another material entry would exceed `MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW` or the static base-color/index/palette/detail role-page limits.
+- Rebuilt split static-object geometry by copying only triangles whose material selector belongs to the slice, remapping material-entry slots to a compact `0..n` range, and rewriting `materialSlotIndices` for the sliced geometry.
+- Rebuilt split static-object `textureUseIds`, material-entry summaries, and renderer texture bindings from committed texture placement/binding facts. The first slice keeps the source draw-unit id; later slices use deterministic ids such as `source#fine-1`.
+- Added runtime bookkeeping for source draw-unit id to materialized draw-unit ids so later coordinator removals expand to every split renderer draw unit and do not leak suffix-id resources.
+- Added focused materializer tests proving five committed static base-color pages split into two draw units with role slots `0..3` and `0`, and proving removal expansion through a previous materialization mapping.
+
+Phase 11E4A3e spicy bits:
+
+- The materializer can recover omitted original draw-unit bindings only when the committed `TexturePlacementUpdate` still exposes the texture-use placement facts. That is true for newly packed placements and for non-overflow committed bindings; an already-resident texture use that overflowed before any binding was emitted still cannot be reconstructed without extending the texture-manager/materializer contract.
+- Static-object renderer draw units do not currently carry per-triangle source mapping ids. The baker has `staticSourceMappings`/`staticSpatialRecords`, but `StaticCoordinatorCommitDelta` only forwards draw units and texture uses to runtime materialization. Fine splitting therefore preserves renderer geometry/material ownership, but it does not rewrite source/spatial mapping records yet.
+- Static coordinator diagnostics still count pre-materialized resident draw units, while renderer diagnostics count post-materialization draw units. Fine splitting can increase renderer draw-unit counts in over-capacity cases even when coordinator committed counts stay at the coarse count.
+
+Phase 11E4A3e failed to close:
+
+- Source mappings and spatial records are not remapped across fine-split ids because those records are not present at the runtime materialization boundary. Phase 11E4A3f should either extend the commit delta to carry them through materialization or explicitly keep picking/inspection keyed to coarse draw units until a later source-record materialization pass.
+- No live browser/manual diagnostics were rerun after the fine splitter. The expected common-landblock numbers should not drop further unless a coarse draw unit exceeds role-page/material-entry capacity; this phase is mainly a correctness guard for legal renderer residency.
+- Texture-manager static role-page overflow diagnostics can still appear for cases where an over-capacity texture use is already resident and no placement/binding fact reaches the materializer. Closing that fully needs a tighter texture-manager handoff: committed texture-use placement facts independent of original draw-unit role-slot success.
 
 ### Phase 11E4B: Outdoor Detail Generated Scenery Cutout
 

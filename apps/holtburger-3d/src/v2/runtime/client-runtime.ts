@@ -141,6 +141,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#pendingStaticMaterializations = new Set<number>();
 	#committedStaticMaterializations: number[] = [];
 	#failedStaticMaterializations: StaticMaterializationFailureSnapshot[] = [];
+	#materializedDrawUnitIdsBySourceDrawUnitId = new Map<
+		string,
+		readonly string[]
+	>();
 	#recentTerrainTextureFallbacks: TerrainTextureFallbackDiagnostics[] = [];
 	#disposed = false;
 
@@ -359,9 +363,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 		const materialized = materializeStaticCommit({
 			commit: delta,
+			materializedDrawUnitIdsBySourceDrawUnitId:
+				this.#materializedDrawUnitIdsBySourceDrawUnitId,
 			renderAnchorLandblockId: this.#renderAnchorLandblockId,
 			textureUpdate,
 		});
+		this.#updateMaterializedDrawUnitIdMappings(delta, materialized);
 		this.#warnAboutStaticFallbacks(delta);
 		applyMaterializedStaticCommit(this.#renderer, materialized);
 		this.#pendingStaticMaterializations.delete(delta.revision);
@@ -386,6 +393,21 @@ class ClientRuntimeImpl implements ClientRuntime {
 			revision,
 		});
 		this.#emit();
+	}
+
+	#updateMaterializedDrawUnitIdMappings(
+		delta: StaticCoordinatorCommitDelta,
+		materialized: StaticMaterializationResult,
+	): void {
+		for (const removedDrawUnitId of delta.removedDrawUnitIds) {
+			this.#materializedDrawUnitIdsBySourceDrawUnitId.delete(removedDrawUnitId);
+		}
+		for (const mapping of materialized.drawUnitIdMappings) {
+			this.#materializedDrawUnitIdsBySourceDrawUnitId.set(
+				mapping.sourceDrawUnitId,
+				mapping.materializedDrawUnitIds,
+			);
+		}
 	}
 
 	#warnAboutStaticFallbacks(delta: StaticCoordinatorCommitDelta): void {

@@ -3960,7 +3960,7 @@ Phase 12A4 verification:
 
 ### Phase 12A5: Landblock-Wide Env-Cell BVH And Residency Query Course Correct
 
-Status: planned. Follows 12A4 and remains before 11E5.
+Status: complete on 2026-06-13. Phase 11E5 is the next planned phase.
 
 Purpose: upgrade the normalized `landblock-env-cells` source bundle from flat env-cell spatial records into a true landblock-wide env-cell BVH plus per-cell local BVHs, then make runtime env-cell queries use that landblock BVH as the broad phase for initial residency, ray picking, and future visibility/frustum traversal.
 
@@ -3978,7 +3978,7 @@ Deliverables:
 
 - Reusable Rust prepared-BVH construction helper for arbitrary item bounds/kind masks, or a dedicated env-cell BVH builder in `holtburger-content`, with tests independent of JSON serialization.
 - Host/preparation update replacing the flat `landblockEnvCellBvh` payload with a true landblock-wide env-cell BVH built from env-cell root bounds.
-- Env-cell root bounds derived from real cell content where available: transformed local BVH root bounds, render geometry bounds, static seed bounds, portal aperture bounds, or a typed fallback/diagnostic when only placement-point bounds are possible.
+- Env-cell root bounds derived from real cell content where available: transformed local BVH root bounds, render geometry bounds, static seed bounds, and portal aperture bounds. Cells without those bounds are omitted with diagnostics rather than receiving synthetic placement-point bounds.
 - Host/preparation update replacing flat `localBvh` serialization with the same real prepared BVH builder used for other prepared/source BVHs, preserving item-index order and kind masks.
 - Tests proving landblock-wide env-cell bounds are correct for non-identity placement transforms under the V2 bundle placement convention.
 - `StaticSceneQuery` refactor so landblock env-cell state is stored as one landblock-wide BVH root plus per-cell local BVH roots, not only a map of independent cell roots.
@@ -4006,6 +4006,40 @@ Acceptance criteria:
 - Portal walking remains a semantic visibility step layered on top of residency/broad-phase candidates; it is not conflated with Euclidean BVH inclusion.
 - No renderer draw-unit, frontend-computed bounds, or flat seed/root fallback path is introduced.
 - `cargo check`, Tauri host tests for the route/schema, `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and focused static-scene query/env-cell resolver tests pass before returning to 11E5.
+
+Phase 12A5 execution notes:
+
+- Moved V2 landblock env-cell BVH construction into `holtburger-content`. `LandblockEnvCellsAsset` now carries prepared landblock-level env-cell BVH nodes plus item metadata, and each bundled env cell carries prepared local BVH nodes plus item metadata.
+- Reused the existing Rust prepared BVH splitting algorithm through a scoped builder instead of continuing to construct V2 env-cell BVH nodes in the Tauri JSON adapter. The adapter now serializes prepared nodes/items for V2 and remains responsible for legacy flat topology/standalone env-cell route compatibility only.
+- Landblock env-cell bounds are now derived from each cell's local BVH root transformed through the 12A4 V2 placement convention. Cells with no local render/static/portal bounds still stay out of the landblock BVH and report source diagnostics.
+- Per-cell V2 `localBvh` now comes from the same prepared BVH builder over render geometry, indoor static seed instance bounds, and portal aperture bounds. Item arrays are sorted alongside spatial items so node `itemIndices` stay aligned with serialized item metadata.
+- `StaticSceneQuery` now stores `landblock-env-cells` as one landblock-wide env-cell BVH root plus a per-env-cell local root map. Env-cell ray picking traverses the landblock BVH first, intersects with the request's accepted/current env-cell set, then enters only matching local BVHs.
+- Added `queryEnvCellAtPoint` as the first internal residency primitive backed by the landblock env-cell BVH, with deterministic env-cell id tie-breaking.
+- Added Rust tests for prepared env-cell BVH hierarchy splitting and transformed local-root bounds, plus TS tests proving env-cell locals are not queryable when the landblock BVH is absent and that point residency uses the landblock BVH.
+
+Phase 12A5 spicy bits:
+
+- This phase changed the runtime contract from "accepted env-cell roots are enough" to "the landblock BVH is mandatory for env-cell queries." That is the correct shape, but it means malformed top-level BVH data now makes otherwise populated local cell records unqueryable.
+- The prepared BVH kind mask is still a compact bitmask shared by source domains. It is sufficient for traversal and diagnostics today, but it is not yet a strongly typed per-domain mask contract.
+- Legacy `landblock-topology` and standalone `env-cell` payloads still use the old adapter-side flat BVH scaffolding. V2 no longer depends on those paths, but they remain until the old display/V1 route surface is deleted.
+
+Phase 12A5 failed to close:
+
+- The diagnostic taxonomy is not fully implemented. Current behavior distinguishes missing/empty landblock BVH by making the env-cell source unqueryable, and still warns for cells omitted from the top-level BVH, but it does not yet emit separate typed runtime diagnostics for malformed item references, accepted-set pruning, or broad-phase misses.
+- No live browser/manual env-cell picking or dungeon residency run was performed.
+
+Phase 12A5 verification:
+
+- `cargo check -p holtburger-3d`
+- `cargo check`
+- `cargo test -p holtburger-content`
+- `cargo test -p holtburger-3d`
+- `cargo fmt --check`
+- `cd apps/holtburger-3d && npm run test:ts -- runtime/static-scene-query static/env-cells/landblock-env-cells-resolver assets/preparation`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 11E5: Static Material Family Resteer
 

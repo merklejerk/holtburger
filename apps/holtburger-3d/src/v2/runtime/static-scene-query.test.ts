@@ -128,6 +128,53 @@ describe("V2 static scene query", () => {
 		});
 	});
 
+	it("does not query env-cell locals through a flat fallback when the landblock BVH is absent", () => {
+		const query = new StaticSceneQuery();
+		query.ingestLandblockEnvCells(
+			createLandblockEnvCellsPayload({ includeLandblockBvh: false }),
+		);
+
+		const hit = query.pickRay({
+			context: {
+				acceptedEnvCellIds: [0xda550100],
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+			ray: {
+				direction: { x: 0, y: 0, z: -1 },
+				origin: { x: 0, y: 0, z: 0 },
+			},
+		});
+
+		expect(hit).toBeNull();
+		expect(query.createSnapshot()).toEqual({
+			envCellLandblockCount: 0,
+			envCellRecordCount: 0,
+			outdoorRecordCount: 0,
+		});
+	});
+
+	it("uses the landblock env-cell BVH for initial residency queries", () => {
+		const query = new StaticSceneQuery();
+		query.ingestLandblockEnvCells(createLandblockEnvCellsPayload());
+
+		expect(
+			query.queryEnvCellAtPoint({
+				acceptedEnvCellIds: [0xda550100],
+				landblockId: 0xda55ffff,
+				point: { x: 0, y: 0, z: -4.5 },
+			}),
+		).toBe(0xda550100);
+		expect(
+			query.queryEnvCellAtPoint({
+				acceptedEnvCellIds: [0xda550100],
+				landblockId: 0xda55ffff,
+				point: { x: 40, y: 0, z: -4.5 },
+			}),
+		).toBeNull();
+	});
+
 });
 
 function createOutdoorStaticObjectsPayload(options: {
@@ -246,7 +293,10 @@ function createOutdoorStaticObjectsPayload(options: {
 	};
 }
 
-function createLandblockEnvCellsPayload(): LandblockEnvCellsStaticScopePayload {
+function createLandblockEnvCellsPayload(options: {
+	readonly includeLandblockBvh?: boolean;
+} = {}): LandblockEnvCellsStaticScopePayload {
+	const includeLandblockBvh = options.includeLandblockBvh ?? true;
 	return {
 		acceptedEnvCellIds: [0xda550100],
 		envCells: [
@@ -352,11 +402,39 @@ function createLandblockEnvCellsPayload(): LandblockEnvCellsStaticScopePayload {
 			regionNumber: 1,
 		},
 		residencySpatial: {
-			landblockEnvCellBvhItemCount: 0,
-			landblockEnvCellBvhNodeCount: 0,
+			landblockEnvCellBvhItemCount: includeLandblockBvh ? 1 : 0,
+			landblockEnvCellBvhNodeCount: includeLandblockBvh ? 1 : 0,
 			landblockEnvCellBvh: {
-				items: [],
-				nodes: [],
+				items: includeLandblockBvh
+					? [
+							{
+								bounds: {
+									max: { x: 1, y: 1, z: -4 },
+									min: { x: -1, y: -1, z: -5 },
+								},
+								identity: {
+									envCellId: 0xda550100,
+									kind: "env-cell-source",
+								},
+								memberId: "cell-0",
+								source: "env-cell-root",
+							},
+						]
+					: [],
+				nodes: includeLandblockBvh
+					? [
+							{
+								bounds: {
+									max: { x: 1, y: 1, z: -4 },
+									min: { x: -1, y: -1, z: -5 },
+								},
+								itemIndices: [0],
+								kindMask: 1,
+								left: null,
+								right: null,
+							},
+						]
+					: [],
 			},
 		},
 		visibilityDiagnostics: [],

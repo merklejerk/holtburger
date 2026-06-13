@@ -411,6 +411,93 @@ describe("V2 outdoor static object resolver", () => {
 		expect(payload.scope.missingRefs).toEqual([]);
 	});
 
+	it("resolves outdoor-detail explicit objects through the static object pipeline", async () => {
+		const assetService = new FixtureAssetService([
+			createPreparedAsset(
+				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createLandblockOutdoorPayload({
+					includeExplicitObject: true,
+					includeGeneratedScenery: false,
+				}),
+			),
+			createPreparedAsset(
+				createHostAssetKey("region-render-profile", 1),
+				createRegionRenderProfilePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("gfx-obj", 0x01000031),
+				createGfxObjPayload({ gfxObjId: 0x01000031 }),
+			),
+			createPreparedAsset(
+				createHostAssetKey("material", 0x08000010),
+				createMaterialPayload({ materialId: 0x08000010 }),
+			),
+			createPreparedAsset(
+				createHostAssetKey("surface-texture", 0x05000010),
+				createSurfaceTexturePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("render-surface", 0x06000010),
+				createRenderSurfacePayload(),
+			),
+			createPreparedAsset(createHostAssetKey("palette", 0x04000010), {
+				kind: "palette",
+				paletteId: 0x04000010,
+				provenance: createProvenance("palette"),
+				residencyKind: "unknown",
+				sourceAssetKind: "palette",
+			} satisfies PalettePayloadDto),
+		]);
+
+		const payload = await new OutdoorStaticObjectsResolver({
+			assetService,
+		}).resolve(createDetailRequest());
+
+		expect(payload.scope.kind).toBe("outdoor-static-objects");
+		if (payload.scope.kind !== "outdoor-static-objects") {
+			throw new Error("expected outdoor static object payload");
+		}
+
+		expect(payload.scope.domain).toBe("outdoor-detail");
+		expect(payload.scope.regionRenderProfile.detailRoles).toEqual([]);
+		expect(payload.scope.objects).toEqual([
+			expect.objectContaining({
+				generated: null,
+				identity: expect.objectContaining({
+					instanceId: "explicit-0",
+					objectKind: "explicit-object",
+				}),
+				source: {
+					kind: "static-object-source",
+					sourceAssetKind: "gfx-obj",
+					sourceDid: 0x01000031,
+				},
+			}),
+		]);
+		expect(payload.scope.sourceAssets).toEqual([
+			expect.objectContaining({
+				identity: {
+					kind: "static-object-source",
+					sourceAssetKind: "gfx-obj",
+					sourceDid: 0x01000031,
+				},
+			}),
+		]);
+		expect(payload.scope.materialSlots).toHaveLength(1);
+		expect(payload.scope.textureRefs).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000010,
+					},
+					role: "surface-texture",
+				}),
+			]),
+		);
+		expect(payload.scope.missingRefs).toEqual([]);
+	});
+
 	it("reports missing generated-scenery source assets as typed missing refs", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
@@ -713,6 +800,7 @@ function createDetailRequest(): StaticResolverJob {
 function createLandblockOutdoorPayload(
 	options: {
 		readonly buildingSourceAssetId?: string;
+		readonly includeExplicitObject?: boolean;
 		readonly includeGeneratedScenery?: boolean;
 	} = {},
 ): LandblockOutdoorPayloadDto {
@@ -749,6 +837,21 @@ function createLandblockOutdoorPayload(
 			sourceScale: { x: 1, y: 1, z: 1 },
 		});
 	}
+	if (options.includeExplicitObject === true) {
+		statics.push({
+			building: null,
+			generated: null,
+			instanceBounds: createBounds(),
+			instanceId: "explicit-0",
+			kind: "explicit-object",
+			localPlacement: createPlacement(),
+			sourceAssetId: "gfx-obj/01000031",
+			sourceBounds: createBounds(),
+			sourceDid: 0x01000031,
+			sourceIndex: 2,
+			sourceScale: { x: 1, y: 1, z: 1 },
+		});
+	}
 
 	return {
 		classification: "outdoor",
@@ -757,7 +860,10 @@ function createLandblockOutdoorPayload(
 		landblockId: 0xda55ffff,
 		outdoorBvh: {
 			coordinateSpace: "landblock-render-local",
-			items: [{ instanceId: "building-0", kind: "building" }],
+			items: statics.map((object) => ({
+				instanceId: object.instanceId,
+				kind: object.kind,
+			})),
 			nodes: [],
 		},
 		provenance: createProvenance("landblock-outdoor"),

@@ -3307,7 +3307,7 @@ Phase 11E4C failed to close:
 
 ### Phase 11E4C1: Explicit Outdoor Object Coverage
 
-Status: planned.
+Status: complete on 2026-06-13.
 
 Purpose: integrate the outdoor `explicit-object` category into V2 static object resolution so the known blended outdoor static target is present in V2 before implementing blended rendering.
 
@@ -3351,6 +3351,27 @@ Phase 11E4C1 spicy bits:
 
 - `outdoor-detail` will become a mixed generated-scenery plus explicit-object domain. That is acceptable for now because both use the same static-object source/bake/material path, but the plan should record a future split if explicit objects turn out to need different residency radii, detail roles, or visibility policy.
 - Pulling explicit objects forward may increase `outdoor-detail` draw-unit and texture pressure before Phase 12 breadth cleanup. Watch diagnostics for draw-unit count jumps that are not explained by explicit-object coverage, role-page capacity, or deferred transparent object/part partitioning.
+
+Phase 11E4C1 execution notes:
+
+- Widened `OutdoorStaticObjectsResolver` selection so `outdoor-detail` includes both `generated-scenery` and `explicit-object`; `outdoor-buildings` remains building-only.
+- Kept explicit objects on the existing static object source/material/bake path. No bespoke explicit-object pipeline branch was added.
+- Added `objectKindCounts` to `OutdoorStaticObjectsPayloadSummary` and included compact building/generated/explicit counts in runtime diagnostics so live reports can confirm explicit-object coverage without adding noisy gfx/material warning samples.
+- Added resolver fixture coverage proving explicit-only outdoor detail payloads resolve through a `gfx-obj` source, preserve empty detail roles, emit material slots/texture refs, and do not require generated scenery.
+
+Phase 11E4C1 failed to close:
+
+- No live browser/manual pass was run against the user's known explicit-object target.
+- Blended explicit-object materials still remain `render-deferred`; Phase 11E4D owns renderer-ingestible transparent draw units and object/part sort metadata.
+
+Phase 11E4C1 verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- src/v2/static/objects/outdoor-static-objects-resolver.test.ts`
+- `cd apps/holtburger-3d && npm run test:ts -- src/v2/static/coordinator/static-coordinator.test.ts src/v2/runtime/client-runtime.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run test:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
 
 ### Phase 11E4D: Object/Part Transparent Static Draw Units
 

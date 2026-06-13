@@ -1001,12 +1001,17 @@ export interface OutdoorStaticObjectsPayloadSummary {
 	readonly landblockId: number;
 	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
 	readonly objectCount: number;
+	readonly objectKindCounts: StaticObjectKindCounts;
 	readonly sourceAssetCount: number;
 	readonly materialSlotCount: number;
 	readonly materialSourceCount: number;
 	readonly textureRefCount: number;
 	readonly missingRefCount: number;
 }
+
+type StaticObjectKindCounts = {
+	readonly [K in StaticObjectInstanceIdentity["objectKind"]]: number;
+};
 
 export interface StaticResolverFailureSnapshot {
 	readonly workId: string;

@@ -393,6 +393,11 @@ describe("V2 static coordinator", () => {
 				materialSourceCount: 1,
 				missingRefCount: 0,
 				objectCount: 1,
+				objectKindCounts: {
+					building: 1,
+					"explicit-object": 0,
+					"generated-scenery": 0,
+				},
 				sourceAssetCount: 1,
 				textureRefCount: 1,
 			},

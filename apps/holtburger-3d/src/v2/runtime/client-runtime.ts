@@ -587,7 +587,7 @@ function createStaticCoordinatorDiagnosticsReport(
 				: null,
 			latestOutdoorStaticObjectsPayload:
 				snapshot.latestOutdoorStaticObjectsPayload
-					? `lb ${formatHex(snapshot.latestOutdoorStaticObjectsPayload.landblockId)} ${snapshot.latestOutdoorStaticObjectsPayload.domain} objects ${snapshot.latestOutdoorStaticObjectsPayload.objectCount} sources ${snapshot.latestOutdoorStaticObjectsPayload.sourceAssetCount} slots ${snapshot.latestOutdoorStaticObjectsPayload.materialSlotCount} materials ${snapshot.latestOutdoorStaticObjectsPayload.materialSourceCount} tex ${snapshot.latestOutdoorStaticObjectsPayload.textureRefCount} missing ${snapshot.latestOutdoorStaticObjectsPayload.missingRefCount}`
+					? `lb ${formatHex(snapshot.latestOutdoorStaticObjectsPayload.landblockId)} ${snapshot.latestOutdoorStaticObjectsPayload.domain} objects ${snapshot.latestOutdoorStaticObjectsPayload.objectCount} kinds b:${snapshot.latestOutdoorStaticObjectsPayload.objectKindCounts.building}/g:${snapshot.latestOutdoorStaticObjectsPayload.objectKindCounts["generated-scenery"]}/e:${snapshot.latestOutdoorStaticObjectsPayload.objectKindCounts["explicit-object"]} sources ${snapshot.latestOutdoorStaticObjectsPayload.sourceAssetCount} slots ${snapshot.latestOutdoorStaticObjectsPayload.materialSlotCount} materials ${snapshot.latestOutdoorStaticObjectsPayload.materialSourceCount} tex ${snapshot.latestOutdoorStaticObjectsPayload.textureRefCount} missing ${snapshot.latestOutdoorStaticObjectsPayload.missingRefCount}`
 					: null,
 			latestResolverFailure: snapshot.latestResolverFailure
 				? `${snapshot.latestResolverFailure.workId}: ${snapshot.latestResolverFailure.message}`

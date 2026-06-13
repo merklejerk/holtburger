@@ -106,6 +106,26 @@ describe("V2 static scene query", () => {
 		});
 	});
 
+	it("prunes farther BVH subtrees after finding a nearer hit", () => {
+		const query = new StaticSceneQuery();
+		query.ingestOutdoorStaticObjects(
+			createOutdoorStaticObjectsPayload({ includeFarInvalidSubtree: true }),
+		);
+
+		const hit = query.pickRay({
+			context: { kind: "outdoor" },
+			ray: {
+				direction: { x: 0, y: 0, z: -1 },
+				origin: { x: 0, y: 0, z: 0 },
+			},
+		});
+
+		expect(hit).toMatchObject({
+			distance: 4,
+			instanceId: "outdoor-static-0",
+		});
+	});
+
 	it("does not flatten outdoor and env-cell scene contexts", () => {
 		const query = new StaticSceneQuery();
 		query.ingestOutdoorStaticObjects(createOutdoorStaticObjectsPayload());
@@ -211,6 +231,7 @@ describe("V2 static scene query", () => {
 
 function createOutdoorStaticObjectsPayload(options: {
 	readonly includeContainingObject?: boolean;
+	readonly includeFarInvalidSubtree?: boolean;
 	readonly includeBvh?: boolean;
 	readonly landblockId?: number;
 } = {}): OutdoorStaticObjectsScopePayload {
@@ -241,6 +262,9 @@ function createOutdoorStaticObjectsPayload(options: {
 				object,
 			]
 		: [object];
+	const outdoorBvh = options.includeFarInvalidSubtree
+		? createPruningRegressionOutdoorBvh(objects)
+		: createFlatOutdoorBvh(objects);
 	return {
 		domain: "outdoor-detail",
 		kind: "outdoor-static-objects",
@@ -265,57 +289,107 @@ function createOutdoorStaticObjectsPayload(options: {
 		sourceSpatial: {
 			bounds: null,
 			coordinateSpace: "landblock-render-local",
-			outdoorBvh: includeBvh
-				? {
-						coordinateSpace: "landblock-render-local",
-						items: objects.map((object, bvhItemIndex) => ({
-							bvhItemIndex,
-							instanceId: object.identity.instanceId,
-							kind: "static",
-							object,
-						})),
-						nodes: [
-							{
-								bounds: {
-									max: {
-										x: Math.max(
-											...objects.map((entry) => entry.instanceBounds?.max.x ?? 0),
-										),
-										y: Math.max(
-											...objects.map((entry) => entry.instanceBounds?.max.y ?? 0),
-										),
-										z: Math.max(
-											...objects.map((entry) => entry.instanceBounds?.max.z ?? 0),
-										),
-									},
-									min: {
-										x: Math.min(
-											...objects.map((entry) => entry.instanceBounds?.min.x ?? 0),
-										),
-										y: Math.min(
-											...objects.map((entry) => entry.instanceBounds?.min.y ?? 0),
-										),
-										z: Math.min(
-											...objects.map((entry) => entry.instanceBounds?.min.z ?? 0),
-										),
-									},
-								},
-								itemIndices: objects.map((_object, index) => index),
-								kindMask: {
-									building: false,
-									domain: "outdoor-static",
-									static: true,
-								},
-								left: null,
-								right: null,
-							},
-						],
-					}
-				: null,
-			outdoorBvhItemCount: includeBvh ? objects.length : 0,
-			outdoorBvhNodeCount: includeBvh ? 1 : 0,
+			outdoorBvh: includeBvh ? outdoorBvh : null,
+			outdoorBvhItemCount: includeBvh ? outdoorBvh.items.length : 0,
+			outdoorBvhNodeCount: includeBvh ? outdoorBvh.nodes.length : 0,
 		},
 		textureRefs: [],
+	};
+}
+
+function createFlatOutdoorBvh(
+	objects: readonly OutdoorStaticObjectsScopePayload["objects"][number][],
+): NonNullable<OutdoorStaticObjectsScopePayload["sourceSpatial"]["outdoorBvh"]> {
+	return {
+		coordinateSpace: "landblock-render-local",
+		items: objects.map((object, bvhItemIndex) => ({
+			bvhItemIndex,
+			instanceId: object.identity.instanceId,
+			kind: "static",
+			object,
+		})),
+		nodes: [
+			{
+				bounds: unionObjectBounds(objects),
+				itemIndices: objects.map((_object, index) => index),
+				kindMask: outdoorStaticKindMask(),
+				left: null,
+				right: null,
+			},
+		],
+	};
+}
+
+function createPruningRegressionOutdoorBvh(
+	objects: readonly OutdoorStaticObjectsScopePayload["objects"][number][],
+): NonNullable<OutdoorStaticObjectsScopePayload["sourceSpatial"]["outdoorBvh"]> {
+	return {
+		coordinateSpace: "landblock-render-local",
+		items: [
+			{
+				bvhItemIndex: 0,
+				instanceId: objects[0]?.identity.instanceId ?? "missing-near",
+				kind: "static",
+				object: objects[0] ?? null,
+			},
+		],
+		nodes: [
+			{
+				bounds: {
+					max: { x: 1, y: 1, z: -4 },
+					min: { x: -1, y: -1, z: -20 },
+				},
+				itemIndices: [],
+				kindMask: outdoorStaticKindMask(),
+				left: 1,
+				right: 2,
+			},
+			{
+				bounds: {
+					max: { x: 1, y: 1, z: -4 },
+					min: { x: -1, y: -1, z: -5 },
+				},
+				itemIndices: [0],
+				kindMask: outdoorStaticKindMask(),
+				left: null,
+				right: null,
+			},
+			{
+				bounds: {
+					max: { x: 1, y: 1, z: -10 },
+					min: { x: -1, y: -1, z: -20 },
+				},
+				itemIndices: [99],
+				kindMask: outdoorStaticKindMask(),
+				left: null,
+				right: null,
+			},
+		],
+	};
+}
+
+function outdoorStaticKindMask() {
+	return {
+		building: false,
+		domain: "outdoor-static" as const,
+		static: true,
+	};
+}
+
+function unionObjectBounds(
+	objects: readonly OutdoorStaticObjectsScopePayload["objects"][number][],
+) {
+	return {
+		max: {
+			x: Math.max(...objects.map((entry) => entry.instanceBounds?.max.x ?? 0)),
+			y: Math.max(...objects.map((entry) => entry.instanceBounds?.max.y ?? 0)),
+			z: Math.max(...objects.map((entry) => entry.instanceBounds?.max.z ?? 0)),
+		},
+		min: {
+			x: Math.min(...objects.map((entry) => entry.instanceBounds?.min.x ?? 0)),
+			y: Math.min(...objects.map((entry) => entry.instanceBounds?.min.y ?? 0)),
+			z: Math.min(...objects.map((entry) => entry.instanceBounds?.min.z ?? 0)),
+		},
 	};
 }
 

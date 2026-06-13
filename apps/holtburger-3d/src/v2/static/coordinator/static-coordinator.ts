@@ -423,6 +423,7 @@ export class StaticCoordinator {
 				materialSourceCount: payload.scope.materialSources.length,
 				missingRefCount: payload.scope.missingRefs.length,
 				objectCount: payload.scope.objects.length,
+				objectKindCounts: countStaticObjectKinds(payload.scope.objects),
 				sourceAssetCount: payload.scope.sourceAssets.length,
 				textureRefCount: payload.scope.textureRefs.length,
 			};
@@ -563,6 +564,28 @@ function countDistinctVisibleEnvCells(
 	}
 
 	return visible.size;
+}
+
+function countStaticObjectKinds(
+	objects: readonly {
+		readonly identity: {
+			readonly objectKind: "building" | "explicit-object" | "generated-scenery";
+		};
+	}[],
+): OutdoorStaticObjectsPayloadSummary["objectKindCounts"] {
+	const counts: {
+		-readonly [K in keyof OutdoorStaticObjectsPayloadSummary["objectKindCounts"]]: number;
+	} = {
+		building: 0,
+		"explicit-object": 0,
+		"generated-scenery": 0,
+	};
+
+	for (const object of objects) {
+		counts[object.identity.objectKind] += 1;
+	}
+
+	return counts;
 }
 
 function countStatus(

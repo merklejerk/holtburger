@@ -814,7 +814,7 @@ function shouldIncludeOutdoorStaticObject(
 ): boolean {
 	return domain === "outdoor-buildings"
 		? objectKind === "building"
-		: objectKind === "generated-scenery";
+		: objectKind === "generated-scenery" || objectKind === "explicit-object";
 }
 
 function createObjectMaterialSlotFacts(options: {

@@ -3194,18 +3194,21 @@ Current steering:
 - This phase is contract and classification work. Renderer sorting arrives later.
 - The material planner already derives private blend/depth facts and currently marks non-depth-writing static materials as `classified-render-deferred`. This phase should make that render-state contract explicit and reusable without prematurely turning blended partitions into rendered draw units.
 - Build blended render-state facts on top of the table-capable static-object binding contract from Phase 11E4A3. Do not treat blended ordering as triangle-level sorting or as a reason to bypass material-table capacity limits.
+- Render-state facts should live at the most precise level the source data and table contract can support. Material-entry-level alpha/blend/depth facts are preferred where one table draw unit can contain multiple material entries; draw-unit-level summaries should remain derived policy facts used for gating, diagnostics, and later renderer pass routing.
 
 Deliverables:
 
 - Typed static object render-state contract for blend mode, blend enablement, source/destination factors, depth write, alpha test, and pass/order class.
+- Material-table entry render-state fields for per-entry alpha-test, blend, depth-write, and pass/order facts, with draw-unit-level summary/pass facts derived from the contained entries.
 - Material planner changes that expose renderable alpha-test/cutout and currently deferred true blended materials using the V1 blend-factor parity matrix.
 - Partition metadata that marks true blended candidates as object/part sortable and render-deferred instead of order-independent batchable rendered output.
 - Coverage diagnostics that preserve deferred true blended triangle counts by family, pass, and blend mode, including indexed-paletted blended materials.
-- Tests proving alpha-test remains opaque/depth-writing and true blended/additive modes carry the expected typed render-state facts.
+- Tests proving alpha-test remains opaque/depth-writing and true blended/additive modes carry the expected typed render-state facts at material-entry granularity.
 
 Acceptance criteria:
 
 - Blend support is expressed through typed pass/render-state contracts, not shader-side ad hoc flags alone.
+- Table-capable static-object contracts do not collapse per-entry blend/depth policy into a lossy single draw-unit flag before object/part partitioning has run.
 - True blended materials remain diagnostic-backed until object/part sortable draw units and renderer ordering are implemented.
 - Coverage diagnostics distinguish alpha-test/cutout rendered triangles from true blended deferred triangles.
 - No renderer path consumes transparent/additive static-object draw units before 11E4D/11E4E owns their draw-unit and pass semantics.
@@ -3216,6 +3219,11 @@ Status: planned.
 
 Purpose: emit renderer-ingestible transparent/additive static object draw units at object/part granularity so the renderer can sort them by distance.
 
+Current steering:
+
+- Mixed source objects are expected. If one source/gfx object or part contains both order-independent opaque/cutout surfaces and true blended/additive surfaces, keep opaque/cutout surfaces on the normal batchable path and split only the order-dependent surfaces by object/part. Do not force the whole source object into transparent sorting because one part needs blending.
+- Object/part identity is a hard partition axis only for order-dependent transparent/additive output. It remains metadata for compatible opaque and alpha-test/cutout output.
+
 Deliverables:
 
 - Partition policy that splits true blended/additive static materials by object instance, source/gfx part, render state, table-compatible texture/material binding layout, and material-table capacity constraints.
@@ -3225,12 +3233,14 @@ Deliverables:
 - Geometry bake support that computes sort center/bounds in the same landblock-render-local coordinate space as the baked positions, using object/part bounds when available and baked vertex bounds as the hard fallback.
 - Texture-use ownership support for transparent/additive draw units without merging texture ownership across order-dependent object/part units.
 - Tests proving blended triangles from different objects or parts do not merge into one order-dependent draw unit, while compatible opaque/alpha-test geometry still batches normally.
+- Tests for mixed opaque/cutout plus blended source objects proving the blended subset splits by object/part while the opaque/cutout subset still compacts through the batchable material-table path.
 
 Acceptance criteria:
 
 - Transparent/additive draw units are never triangle-level sorted by default.
 - Transparent/additive draw units carry enough object/part identity and bounds/sort metadata for renderer ordering and future inspection.
 - Existing opaque/alpha-test compaction remains deterministic and unaffected.
+- Mixed source objects do not poison order-independent batching for their opaque/cutout surfaces.
 - Renderability gates are updated intentionally: true blended partitions become renderer-ingestible only when they have the required render state, texture layout, object/part sort metadata, and stageable texture uses.
 
 ### Phase 11E4E: Transparent Renderer Pass And Visual Review
@@ -3243,6 +3253,7 @@ Current steering:
 
 - Before claiming visual parity, identify or audit a landblock with actual translucent/additive static-object triangle coverage. The earlier `0xda55ffff` target showed transparent material counts but zero transparent triangles, so it is useful for classification sanity only.
 - Sorting is object/part-level, not triangle-level. Any artifacts from intersecting transparent surfaces must be documented rather than hidden.
+- Runtime diagnostics should compare source coarse draw-unit counts against materialized renderer draw-unit counts after transparent support lands. Transparent object/part sorting is allowed to increase counts, but the increase should be explainable by order-dependent partitioning, role-page capacity, or fine materialization rather than accidental key churn.
 
 Deliverables:
 
@@ -3253,6 +3264,7 @@ Deliverables:
 - Preserve the Phase 11E4A3 table-capable static-object material path while adding transparent pass ordering; do not regress opaque/alpha-test table batching while adding transparent resource buckets.
 - Tests proving pass order, depth-write/depth-test behavior, blend-factor mapping, stable tie-breaking, and fallback behavior.
 - GL-state hygiene checks or tests proving blend/depth-mask state is restored after the transparent pass.
+- Runtime/material-coverage diagnostics that report source vs materialized static-object draw-unit counts for transparent-capable scenes, including enough bucket detail to explain object/part splits and placement-aware fine splits.
 - Visual verification on audited landblocks with nonzero translucent/additive static triangles.
 
 Acceptance criteria:
@@ -3260,6 +3272,7 @@ Acceptance criteria:
 - Opaque/alpha-test draw ordering remains deterministic and unaffected.
 - Transparent/additive draw units render after depth-writing passes with depth test enabled and depth write disabled unless the typed render state explicitly says otherwise.
 - Material coverage diagnostics identify a nonzero blended/static triangle target before claiming visual parity.
+- Source-vs-materialized draw-unit diagnostics stay interpretable after transparent support; any draw-unit-count increase is attributable to transparent object/part splitting, binding-capacity fine splitting, or another named policy.
 - Object/part sorting limitations are explicitly documented before moving to Phase 12.
 - Transparent sorting is recalculated from the active camera each frame, but only for transparent/additive static resources.
 

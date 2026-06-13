@@ -3712,30 +3712,36 @@ Acceptance criteria:
 
 Status: planned. Follows Phase 12A1 and remains ahead of 11E5.
 
-Purpose: add the runtime-owned static scene query service that can answer context-aware static `pickRay` requests for outdoor and env-cell scenes, then use it from browser mode for object-level picker diagnostics without putting semantic picking policy into the renderer.
+Purpose: add the runtime-owned static scene query service that can ingest committed outdoor static records plus resolved `landblock-env-cells` source facts, answer context-aware static `pickRay` requests for outdoor and env-cell scenes, and feed browser-owned object-level picker diagnostics without putting semantic picking policy into the renderer.
 
 Current steering:
 
 - `pickRay` is a shared runtime/static-scene capability, not a browser-only debug hack. Browser mode and the future game client own filter/selection/presentation policy; the runtime-owned static scene query returns neutral hit records such as instance id, distance, hit point, scene context, and source references.
 - Do not put static picking support into the WebGL renderer. The renderer should keep drawing submitted resources; it should not own AC object identity, source provenance, material classification, or selection semantics.
-- Use host/prepared domain BVHs and object bounds where available. For outdoor static landblock elements, preserve and ingest the prepared `outdoorBvh`; for env cells, use the env-cell bundle's residency and per-cell local BVH records.
+- Treat `landblock-env-cells` as a source/query facts domain until Phase 13A turns env-cell geometry into bake-ready output. Loading the bundle should not imply texture atlas placement, static materialization, or renderer draw-unit submission.
+- Use host/prepared domain BVHs and object bounds where available. For outdoor static landblock elements, preserve and ingest the prepared `outdoorBvh`; for env cells, use the `landblock-env-cells` bundle's residency and per-cell local BVH records.
 - Improve on v1's flat render spatial index by making queries scene-context aware. A ray cast from an env cell must not collide with outdoor or neighboring-cell objects solely because renderer-local bounds overlap; it may only reach another env cell or outdoor scene through explicit context/portal traversal.
-- Treat outdoor scene indexes, topology/env-cell residency indexes, and per-env-cell local indexes as separate cooperating indexes under one query service rather than one global Euclidean AABB set.
+- Treat outdoor scene indexes, landblock env-cell residency indexes, and per-env-cell local indexes as separate cooperating indexes under one query service rather than one global Euclidean AABB set.
+- Start with two concrete scene contexts: `outdoor` and `env-cell`. Portal crossing between contexts is explicit and bounded; recursive portal rendering remains Phase 13B+ work.
 - Keep the first implementation object-level. For the current black-background/cutout investigation, identifying the clicked static object, source/gfx/setup ids, material ids, material pass, alpha-test threshold, and relevant surface/texture facts is more valuable than exact triangle identity.
 - Shape the spatial-query data so later frustum culling can reuse the same static-scene/index layer, but do not implement frustum culling in this phase.
 - If runtime state does not yet retain enough metadata after materialization, add narrow committed-scene records rather than consulting Svelte state or reloading prepared assets from the picker.
+- Current diagnostics show `landblock-env-cells` can appear as empty texture-atlas work because the coordinator currently routes every resolved static payload through placeholder baking. Treat that as implementation debt: 12A2 should introduce a source-facts/query ingestion path or an explicit source-only coordinator classification so query-only env-cell bundles do not produce misleading empty atlas batches.
 
 Deliverables:
 
-- Runtime-owned static scene query service with separate outdoor, topology/env-cell residency, and env-cell-local query inputs.
+- Runtime-owned static scene query service with separate outdoor, landblock env-cell residency, and env-cell-local query inputs.
+- Source-facts ingestion path for resolved `landblock-env-cells` payloads that updates static scene query state without requiring env-cell bake/materialization or texture-atlas work.
 - Static spatial record contract updates that preserve prepared outdoor BVH nodes/items, env-cell residency BVH nodes/items, env-cell local BVH nodes/items, object bounds, portal/interior facts, and source mapping facts needed for object-level hit identity.
-- `pickRay` API that accepts a scene context plus caller-owned filters and returns neutral hit records: distance, point/bounds hit fact, item kind, owning static scope/work identity, landblock/domain/env-cell context, object instance id when known, and stable source/draw-unit references.
+- `pickRay` API that accepts a scene context plus caller-owned filters and returns neutral hit records: distance, point/bounds hit fact, item kind, owning static scope/work identity, landblock/domain/env-cell context, object instance id when known, and stable source/draw-unit/query-record references.
 - Outdoor object-level picking over resident outdoor static BVH records.
-- Env-cell-aware query model that tests the current accepted env-cell set's local indexes. Recursive portal expansion beyond the current accepted set can be staged, but the API must not require a flat global scene.
+- Env-cell-aware query model that tests the current accepted env-cell set's local indexes from the resolved `landblock-env-cells` bundle. Recursive portal expansion beyond the current accepted set can be staged, but the API must not require a flat global scene.
 - Static object browser picker integration that builds the ray from the active V2 camera and applies browser-owned filters/policy.
 - Picker diagnostics for static object hits, including object kind, instance id, source/setup/gfx ids where known, material ids, material family/pass, alpha-test value, render state/blend mode, texture-use ids, and surface/opacity facts when those facts survive the bake/materialization boundary.
+- Runtime/coordinator diagnostics that distinguish source-only `landblock-env-cells` query ingestion from materialized static draw output, so the texture-atlas report does not show meaningless empty env-cell batches.
 - Tests for ray/bounds picking, deterministic nearest-hit ordering, scene-context gating, browser/client filter policy staying outside the query primitive, and diagnostic identity shape.
 - Tests proving an env-cell-context pick does not hit outdoor objects unless an explicit context/portal path is implemented and selected.
+- Tests proving resolved `landblock-env-cells` source facts can populate query state without scheduling a placeholder bake or creating empty texture-atlas batches.
 - Design/plan note if any host BVH payload is insufficient and a fallback to baked draw-unit bounds is required.
 
 Acceptance criteria:
@@ -3743,9 +3749,11 @@ Acceptance criteria:
 - Browser mode can click the suspected black-background explicit object and produce enough diagnostics to decide whether the issue is material classification, missing texture alpha/palette alpha, or another decode/render path.
 - The runtime/static query primitive has no browser UI, clipboard, panel, or debug-formatting dependencies, and returns neutral object/instance/source facts that browser mode can use for follow-up queries.
 - The WebGL renderer does not gain semantic picking or AC source/material ownership.
+- Env-cell source/query ingestion does not render env-cell geometry and does not imply texture placement, static materialization, or renderer draw-unit submission. Env-cell geometry baking remains Phase 13A.
 - Query results are object-level and intentionally not part/triangle-level unless the available host BVH already exposes a cleaner object subdivision for free.
 - Querying respects scene context: outdoor and env-cell spaces are not flattened into one Euclidean collision set.
 - Env-cell query inclusion is whole-cell based over the accepted env-cell set; overdraw is accepted until profiling proves otherwise.
+- `landblock-env-cells` no longer appears as misleading empty texture-atlas work when the runtime only ingests source/query facts.
 - The data flow is compatible with future frustum culling: committed static scene records feed a query/index layer, and renderer residency remains downstream of scene/culling decisions.
 
 ### Phase 11E5: Static Material Family Resteer

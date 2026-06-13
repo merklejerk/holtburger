@@ -1225,11 +1225,12 @@ pub fn serialize_landblock_env_cell_bundle_local_bvh(
 
 pub fn serialize_env_cell_local_bvh_item(item: &PreparedEnvCellLocalBvhItem) -> serde_json::Value {
     match item {
-        PreparedEnvCellLocalBvhItem::RenderGeometry { triangle_count } => serde_json::json!({
-            "kind": "render-geometry",
-            "polygonId": null,
-            "triangleRange": [0, triangle_count],
-        }),
+        PreparedEnvCellLocalBvhItem::CellStructureGeometry { triangle_count } => {
+            serde_json::json!({
+                "kind": "cell-structure-geometry",
+                "triangleRange": [0, triangle_count],
+            })
+        }
         PreparedEnvCellLocalBvhItem::Static { instance_id } => serde_json::json!({
             "kind": "static",
             "instanceId": instance_id,
@@ -1380,8 +1381,35 @@ pub fn serialize_prepared_bvh_node(node: &PreparedBvhNode) -> serde_json::Value 
         "left": node.left,
         "right": node.right,
         "itemIndices": node.item_indices,
-        "kindMask": node.kind_mask,
+        "kindMask": serialize_prepared_bvh_kind_mask(node.kind_mask),
     })
+}
+
+pub fn serialize_prepared_bvh_kind_mask(mask: PreparedBvhKindMask) -> serde_json::Value {
+    match mask {
+        PreparedBvhKindMask::OutdoorStatic {
+            static_object,
+            building,
+        } => serde_json::json!({
+            "domain": "outdoor-static",
+            "static": static_object,
+            "building": building,
+        }),
+        PreparedBvhKindMask::LandblockEnvCells { env_cell_root } => serde_json::json!({
+            "domain": "landblock-env-cells",
+            "envCellRoot": env_cell_root,
+        }),
+        PreparedBvhKindMask::EnvCellLocal {
+            cell_structure_geometry,
+            static_object,
+            portal,
+        } => serde_json::json!({
+            "domain": "env-cell-local",
+            "cellStructureGeometry": cell_structure_geometry,
+            "static": static_object,
+            "portal": portal,
+        }),
+    }
 }
 
 pub fn serialize_prepared_portal_aperture_plane(
@@ -2021,7 +2049,7 @@ mod tests {
             outdoor_bvh: Some(PreparedBvh {
                 coordinate_space: "test",
                 landblock_id: 1,
-                scope: "test",
+                scope: PreparedBvhScope::OutdoorStatic,
                 nodes: vec![],
             }),
             diagnostics: PreparedContentSourceDiagnostics::default(),
@@ -2077,13 +2105,16 @@ mod tests {
             outdoor_bvh: Some(PreparedBvh {
                 coordinate_space: "landblock-render-local",
                 landblock_id: source_landblock_id,
-                scope: "landblock-outdoor",
+                scope: PreparedBvhScope::OutdoorStatic,
                 nodes: vec![PreparedBvhNode {
                     bounds: instance_bounds,
                     left: None,
                     right: None,
                     item_indices: vec![0],
-                    kind_mask: 1 << 1,
+                    kind_mask: PreparedBvhKindMask::OutdoorStatic {
+                        static_object: true,
+                        building: false,
+                    },
                 }],
             }),
             diagnostics: PreparedContentSourceDiagnostics::default(),

@@ -127,12 +127,36 @@ const preparedAabbDtoSchema = z
 	.object({ min: vec3DtoSchema, max: vec3DtoSchema })
 	.nullable();
 
+const preparedBvhKindMaskDtoSchema = z.discriminatedUnion("domain", [
+	z.object({
+		domain: z.literal("outdoor-static"),
+		static: z.boolean(),
+		building: z.boolean(),
+	}).strict(),
+	z.object({
+		domain: z.literal("landblock-env-cells"),
+		envCellRoot: z.boolean(),
+	}).strict(),
+	z.object({
+		domain: z.literal("env-cell-local"),
+		cellStructureGeometry: z.boolean(),
+		static: z.boolean(),
+		portal: z.boolean(),
+	}).strict(),
+]);
+
+const preparedLegacyBvhKindMaskDtoSchema = z.number().int().nonnegative();
+
 const preparedLandblockBvhNodeDtoSchema = z.object({
 	bounds: z.object({ min: vec3DtoSchema, max: vec3DtoSchema }),
 	left: z.number().int().nonnegative().nullable(),
 	right: z.number().int().nonnegative().nullable(),
 	itemIndices: z.array(z.number().int().nonnegative()),
-	kindMask: z.number().int().nonnegative(),
+	kindMask: preparedBvhKindMaskDtoSchema,
+});
+
+const preparedLegacyLandblockBvhNodeDtoSchema = preparedLandblockBvhNodeDtoSchema.extend({
+	kindMask: preparedLegacyBvhKindMaskDtoSchema,
 });
 
 const sourceRecordDiagnosticDtoSchema = z.object({
@@ -176,7 +200,7 @@ const preparedTerrainBvhItemDtoSchema = z.object({
 
 const preparedTerrainBvhDtoSchema = z.object({
 	coordinateSpace: z.literal("landblock-outdoor-terrain-local"),
-	nodes: z.array(preparedLandblockBvhNodeDtoSchema),
+	nodes: z.array(preparedLegacyLandblockBvhNodeDtoSchema),
 	items: z.array(preparedTerrainBvhItemDtoSchema),
 });
 
@@ -267,7 +291,7 @@ const preparedEnvCellResidencyBvhItemDtoSchema = z.object({
 
 const preparedEnvCellResidencyBvhDtoSchema = z.object({
 	coordinateSpace: z.literal("landblock-topology-residency"),
-	nodes: z.array(preparedLandblockBvhNodeDtoSchema),
+	nodes: z.array(preparedLegacyLandblockBvhNodeDtoSchema),
 	items: z.array(preparedEnvCellResidencyBvhItemDtoSchema),
 });
 
@@ -411,9 +435,24 @@ const preparedEnvCellBvhItemDtoSchema = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("portal"), portalId: z.string().min(1) }),
 ]);
 
+const preparedLandblockEnvCellLocalBvhItemDtoSchema = z.discriminatedUnion(
+	"kind",
+	[
+		z.object({
+			kind: z.literal("cell-structure-geometry"),
+			triangleRange: z.tuple([
+				z.number().int().nonnegative(),
+				z.number().int().nonnegative(),
+			]),
+		}),
+		z.object({ kind: z.literal("static"), instanceId: z.string().min(1) }),
+		z.object({ kind: z.literal("portal"), portalId: z.string().min(1) }),
+	],
+);
+
 const preparedEnvCellBvhDtoSchema = z.object({
 	coordinateSpace: z.literal("env-cell-local"),
-	nodes: z.array(preparedLandblockBvhNodeDtoSchema),
+	nodes: z.array(preparedLegacyLandblockBvhNodeDtoSchema),
 	items: z.array(preparedEnvCellBvhItemDtoSchema),
 });
 
@@ -431,7 +470,7 @@ const preparedLandblockEnvCellBvhDtoSchema = z.object({
 
 const preparedLandblockEnvCellLocalBvhDtoSchema = z.object({
 	nodes: z.array(preparedLandblockBvhNodeDtoSchema),
-	items: z.array(preparedEnvCellBvhItemDtoSchema),
+	items: z.array(preparedLandblockEnvCellLocalBvhItemDtoSchema),
 }).strict();
 
 export const envCellPayloadDtoSchema = z.object({

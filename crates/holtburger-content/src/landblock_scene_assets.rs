@@ -84,7 +84,7 @@ pub enum LandblockEnvCellBvhItemSource {
 
 #[derive(Debug, Clone)]
 pub enum PreparedEnvCellLocalBvhItem {
-    RenderGeometry { triangle_count: usize },
+    CellStructureGeometry { triangle_count: usize },
     Static { instance_id: String },
     Portal { portal_id: String },
 }
@@ -319,7 +319,7 @@ struct PreparedSpatialItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PreparedSpatialItemKind {
     EnvCellRoot,
-    RenderGeometry,
+    CellStructureGeometry,
     OutdoorStatic,
     Building,
     IndoorStatic,
@@ -330,8 +330,15 @@ enum PreparedSpatialItemKind {
 pub struct PreparedBvh {
     pub coordinate_space: &'static str,
     pub landblock_id: u32,
-    pub scope: &'static str,
+    pub scope: PreparedBvhScope,
     pub nodes: Vec<PreparedBvhNode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedBvhScope {
+    OutdoorStatic,
+    LandblockEnvCells,
+    EnvCellLocal,
 }
 
 #[derive(Debug, Clone)]
@@ -340,7 +347,23 @@ pub struct PreparedBvhNode {
     pub left: Option<usize>,
     pub right: Option<usize>,
     pub item_indices: Vec<usize>,
-    pub kind_mask: u32,
+    pub kind_mask: PreparedBvhKindMask,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedBvhKindMask {
+    OutdoorStatic {
+        static_object: bool,
+        building: bool,
+    },
+    LandblockEnvCells {
+        env_cell_root: bool,
+    },
+    EnvCellLocal {
+        cell_structure_geometry: bool,
+        static_object: bool,
+        portal: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1000,7 +1023,7 @@ impl LandblockEnvCellsAssetAssembler {
                 let local_bvh = build_prepared_bvh_with_scope(
                     landblock_id,
                     "env-cell-local",
-                    "env-cell-local",
+                    PreparedBvhScope::EnvCellLocal,
                     &local_spatial_items,
                 );
                 let landblock_bounds =
@@ -1040,7 +1063,7 @@ impl LandblockEnvCellsAssetAssembler {
         let landblock_bvh = build_prepared_bvh_with_scope(
             landblock_id,
             "landblock-env-cell-root",
-            "landblock-env-cells",
+            PreparedBvhScope::LandblockEnvCells,
             &landblock_bvh_spatial_items,
         );
         let diagnostics = context.into_diagnostics();
@@ -1655,11 +1678,14 @@ fn build_env_cell_local_bvh_records(
     if let Some(bounds) = prepared_cell.render_geometry.bounds {
         items.push((
             PreparedSpatialItem {
-                id: format!("env-cell/{:08x}/render-geometry", prepared_cell.env_cell_id),
-                kind: PreparedSpatialItemKind::RenderGeometry,
+                id: format!(
+                    "env-cell/{:08x}/cell-structure-geometry",
+                    prepared_cell.env_cell_id
+                ),
+                kind: PreparedSpatialItemKind::CellStructureGeometry,
                 bounds: pad_bvh_bounds(bounds),
             },
-            PreparedEnvCellLocalBvhItem::RenderGeometry {
+            PreparedEnvCellLocalBvhItem::CellStructureGeometry {
                 triangle_count: prepared_cell.render_geometry.triangle_count,
             },
         ));
@@ -1796,7 +1822,7 @@ fn build_prepared_bvh(landblock_id: u32, items: &[PreparedSpatialItem]) -> Optio
     build_prepared_bvh_with_scope(
         landblock_id,
         "landblock-render-local",
-        "static-landblock",
+        PreparedBvhScope::OutdoorStatic,
         items,
     )
 }
@@ -1804,7 +1830,7 @@ fn build_prepared_bvh(landblock_id: u32, items: &[PreparedSpatialItem]) -> Optio
 fn build_prepared_bvh_with_scope(
     landblock_id: u32,
     coordinate_space: &'static str,
-    scope: &'static str,
+    scope: PreparedBvhScope,
     items: &[PreparedSpatialItem],
 ) -> Option<PreparedBvh> {
     if items.is_empty() {
@@ -1813,7 +1839,7 @@ fn build_prepared_bvh_with_scope(
 
     let mut nodes = Vec::new();
     let item_indices = (0..items.len()).collect::<Vec<_>>();
-    build_prepared_bvh_node(items, item_indices, &mut nodes);
+    build_prepared_bvh_node(scope, items, item_indices, &mut nodes);
     Some(PreparedBvh {
         coordinate_space,
         landblock_id,
@@ -1823,6 +1849,7 @@ fn build_prepared_bvh_with_scope(
 }
 
 fn build_prepared_bvh_node(
+    scope: PreparedBvhScope,
     items: &[PreparedSpatialItem],
     mut item_indices: Vec<usize>,
     nodes: &mut Vec<PreparedBvhNode>,
@@ -1832,9 +1859,7 @@ fn build_prepared_bvh_node(
         .map(|index| items[*index].bounds)
         .reduce(union_bounds)
         .expect("BVH nodes require at least one spatial item");
-    let kind_mask = item_indices.iter().fold(0, |mask, index| {
-        mask | spatial_item_kind_mask(items[*index].kind)
-    });
+    let kind_mask = prepared_bvh_kind_mask(scope, items, &item_indices);
     let node_index = nodes.len();
     nodes.push(PreparedBvhNode {
         bounds,
@@ -1859,8 +1884,8 @@ fn build_prepared_bvh_node(
             .then(left.cmp(right))
     });
     let right_indices = item_indices.split_off(item_indices.len() / 2);
-    let left = build_prepared_bvh_node(items, item_indices, nodes);
-    let right = build_prepared_bvh_node(items, right_indices, nodes);
+    let left = build_prepared_bvh_node(scope, items, item_indices, nodes);
+    let right = build_prepared_bvh_node(scope, items, right_indices, nodes);
     nodes[node_index].left = Some(left);
     nodes[node_index].right = Some(right);
     node_index
@@ -1909,14 +1934,60 @@ fn union_bounds(left: PreparedAabb, right: PreparedAabb) -> PreparedAabb {
     }
 }
 
-fn spatial_item_kind_mask(kind: PreparedSpatialItemKind) -> u32 {
-    match kind {
-        PreparedSpatialItemKind::EnvCellRoot => 1 << 0,
-        PreparedSpatialItemKind::RenderGeometry => 1 << 1,
-        PreparedSpatialItemKind::OutdoorStatic => 1 << 1,
-        PreparedSpatialItemKind::Building => 1 << 2,
-        PreparedSpatialItemKind::IndoorStatic => 1 << 4,
-        PreparedSpatialItemKind::Portal => 1 << 5,
+fn prepared_bvh_kind_mask(
+    scope: PreparedBvhScope,
+    items: &[PreparedSpatialItem],
+    item_indices: &[usize],
+) -> PreparedBvhKindMask {
+    match scope {
+        PreparedBvhScope::OutdoorStatic => {
+            let mut static_object = false;
+            let mut building = false;
+            for index in item_indices {
+                match items[*index].kind {
+                    PreparedSpatialItemKind::OutdoorStatic => static_object = true,
+                    PreparedSpatialItemKind::Building => building = true,
+                    kind => panic!("invalid outdoor static BVH item kind: {kind:?}"),
+                }
+            }
+            PreparedBvhKindMask::OutdoorStatic {
+                static_object,
+                building,
+            }
+        }
+        PreparedBvhScope::LandblockEnvCells => {
+            for index in item_indices {
+                if items[*index].kind != PreparedSpatialItemKind::EnvCellRoot {
+                    panic!(
+                        "invalid landblock env-cell BVH item kind: {:?}",
+                        items[*index].kind
+                    );
+                }
+            }
+            PreparedBvhKindMask::LandblockEnvCells {
+                env_cell_root: !item_indices.is_empty(),
+            }
+        }
+        PreparedBvhScope::EnvCellLocal => {
+            let mut cell_structure_geometry = false;
+            let mut static_object = false;
+            let mut portal = false;
+            for index in item_indices {
+                match items[*index].kind {
+                    PreparedSpatialItemKind::CellStructureGeometry => {
+                        cell_structure_geometry = true
+                    }
+                    PreparedSpatialItemKind::IndoorStatic => static_object = true,
+                    PreparedSpatialItemKind::Portal => portal = true,
+                    kind => panic!("invalid env-cell local BVH item kind: {kind:?}"),
+                }
+            }
+            PreparedBvhKindMask::EnvCellLocal {
+                cell_structure_geometry,
+                static_object,
+                portal,
+            }
+        }
     }
 }
 
@@ -2899,20 +2970,22 @@ mod tests {
         let bvh = build_prepared_bvh_with_scope(
             0xda55ffff,
             "landblock-env-cell-root",
-            "landblock-env-cells",
+            PreparedBvhScope::LandblockEnvCells,
             &items,
         )
         .expect("non-empty env-cell roots should build a BVH");
 
         assert_eq!(bvh.coordinate_space, "landblock-env-cell-root");
-        assert_eq!(bvh.scope, "landblock-env-cells");
+        assert_eq!(bvh.scope, PreparedBvhScope::LandblockEnvCells);
         assert!(bvh.nodes.len() > 1);
         assert!(bvh.nodes[0].left.is_some());
         assert!(bvh.nodes[0].right.is_some());
         assert!(bvh.nodes[0].item_indices.is_empty());
         assert_eq!(
-            bvh.nodes[0].kind_mask & spatial_item_kind_mask(PreparedSpatialItemKind::EnvCellRoot),
-            1
+            bvh.nodes[0].kind_mask,
+            PreparedBvhKindMask::LandblockEnvCells {
+                env_cell_root: true
+            }
         );
     }
 

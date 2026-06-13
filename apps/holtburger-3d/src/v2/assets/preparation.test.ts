@@ -186,6 +186,26 @@ describe("V2 host asset preparation", () => {
 		).toThrow(
 			"Asset landblock/da55ffff/env-cells matched the landblock-env-cells route but its payload failed the landblock-env-cells contract",
 		);
+
+		expect(() =>
+			prepareV2StaticAssetPayload({
+				assetId: "landblock/da55ffff/env-cells",
+				payload: {
+					...payload,
+					landblockEnvCellBvh: {
+						...payload.landblockEnvCellBvh,
+						nodes: payload.landblockEnvCellBvh.nodes.map((node) => ({
+							...node,
+							kindMask: 1,
+						})),
+					},
+				},
+				payloadKind: "json",
+				requestId: "request-3",
+			}),
+		).toThrow(
+			"Asset landblock/da55ffff/env-cells matched the landblock-env-cells route but its payload failed the landblock-env-cells contract",
+		);
 	});
 });
 
@@ -246,7 +266,21 @@ function createLandblockEnvCellsPayload() {
 					source: "env-cell-root",
 				},
 			],
-			nodes: [],
+			nodes: [
+				{
+					bounds: {
+						max: { x: 1, y: 3, z: -2 },
+						min: { x: 1, y: 3, z: -2 },
+					},
+					itemIndices: [0],
+					kindMask: {
+						domain: "landblock-env-cells",
+						envCellRoot: true,
+					},
+					left: null,
+					right: null,
+				},
+			],
 		},
 		landblockId: 0xda55ffff,
 		landblockInfoId: 0xda55fffe,

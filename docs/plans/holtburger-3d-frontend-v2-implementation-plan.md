@@ -3502,9 +3502,49 @@ Phase 11E4E verification:
 - `cd apps/holtburger-3d && npm run lint:dead`
 - `cd apps/holtburger-3d && npm run test:ts`
 
+### Phase 12A: Env-Cell-Aware Static Scene Query And Browser Picker Diagnostics
+
+Status: planned. Pulled forward on 2026-06-13 as the next immediate phase before 11E5 because the explicit-object cutout/black-background investigation needs object-level picking evidence, and the same env-cell-aware `pickRay` primitive is also required by the future game client for selection.
+
+Purpose: add the runtime-owned static scene query service that can answer context-aware static `pickRay` requests for outdoor and env-cell scenes, then use it from browser mode for object-level picker diagnostics without putting semantic picking policy into the renderer.
+
+Current steering:
+
+- `pickRay` is a shared runtime/static-scene capability, not a browser-only debug hack. Browser mode and the future game client own filter/selection/presentation policy; the runtime-owned static scene query returns neutral hit records such as instance id, distance, hit point, scene context, and source references.
+- Do not put static picking support into the WebGL renderer. The renderer should keep drawing submitted resources; it should not own AC object identity, source provenance, material classification, or selection semantics.
+- Use host/prepared domain BVHs and object bounds where available. For outdoor static landblock elements, preserve and ingest the prepared `outdoorBvh` instead of deriving a new index from baked draw-unit geometry. For env-cell support, preserve topology `envCellResidencyBvh` and env-cell `localBvh` facts as query inputs.
+- Improve on v1's flat render spatial index by making queries scene-context aware. A ray cast from an env cell must not collide with outdoor or neighboring-cell objects solely because renderer-local bounds overlap; it may only cross into another env cell or outdoor scene through explicit portal traversal.
+- Treat outdoor scene indexes, topology/env-cell residency indexes, and per-env-cell local indexes as separate cooperating indexes under one query service rather than one global Euclidean AABB set.
+- Keep the first implementation object-level. For the current black-background/cutout investigation, identifying the clicked static object, source/gfx/setup ids, material ids, material pass, alpha-test threshold, and relevant surface/texture facts is more valuable than exact triangle identity.
+- Shape the spatial-query data so later frustum culling can reuse the same static-scene/index layer, but do not implement frustum culling in this phase.
+- V2 currently preserves only BVH counts for several prepared BVHs. This phase should stop throwing away the actual nodes/items needed by the query service, using typed static spatial records instead of opaque strings where practical.
+- If runtime state does not yet retain enough metadata after materialization, add narrow committed-scene records rather than consulting Svelte state or reloading prepared assets from the picker.
+
+Deliverables:
+
+- Runtime-owned static scene query service with separate outdoor, topology/env-cell residency, and env-cell-local query inputs.
+- Static spatial record contract updates that preserve prepared outdoor BVH nodes/items, env-cell residency BVH nodes/items, env-cell local BVH nodes/items, object bounds, portal/interior facts, and source mapping facts needed for object-level hit identity.
+- `pickRay` API that accepts a scene context plus caller-owned filters and returns neutral hit records: distance, point/bounds hit fact, item kind, owning static scope/work identity, landblock/domain/env-cell context, object instance id when known, and stable source/draw-unit references.
+- Outdoor object-level picking over resident outdoor static BVH records.
+- Env-cell-aware query model that can test the current env-cell local index and leaves an explicit extension point for portal traversal. Full recursive portal picking can be staged if necessary, but the API must not require a flat global scene.
+- Static object browser picker integration that builds the ray from the active V2 camera and applies browser-owned filters/policy.
+- Picker diagnostics for static object hits, including object kind, instance id, source/setup/gfx ids where known, material ids, material family/pass, alpha-test value, render state/blend mode, texture-use ids, and surface/opacity facts when those facts survive the bake/materialization boundary.
+- Tests for ray/bounds picking, deterministic nearest-hit ordering, scene-context gating, browser/client filter policy staying outside the query primitive, and diagnostic identity shape.
+- Tests proving an env-cell-context pick does not hit outdoor objects unless an explicit portal traversal path is implemented and selected.
+- Design/plan note if any host BVH payload is insufficient and a fallback to baked draw-unit bounds is required.
+
+Acceptance criteria:
+
+- Browser mode can click the suspected black-background explicit object and produce enough diagnostics to decide whether the issue is material classification, missing texture alpha/palette alpha, or another decode/render path.
+- The runtime/static query primitive has no browser UI, clipboard, panel, or debug-formatting dependencies, and returns neutral object/instance/source facts that browser mode can use for follow-up queries.
+- The WebGL renderer does not gain semantic picking or AC source/material ownership.
+- Query results are object-level and intentionally not part/triangle-level unless the available host BVH already exposes a cleaner object subdivision for free.
+- Querying respects scene context: outdoor and env-cell spaces are not flattened into one Euclidean collision set.
+- The data flow is compatible with future frustum culling: committed static scene records feed a query/index layer, and renderer residency remains downstream of scene/culling decisions.
+
 ### Phase 11E5: Static Material Family Resteer
 
-Status: planned. Phase 11E4E made alpha/translucent static-object draw units visually renderable in WebGL2, but 11E5 still needs the known-target manual review before broadening static material/source coverage.
+Status: planned. Deferred behind Phase 12A on 2026-06-13 so browser/game-client picking can identify suspect explicit-object cutout materials before the remaining material-family resteer.
 
 Purpose: reassess static material parity after explicit-object coverage and target-scoped blended material work, before broadening static-object source coverage in Phase 12.
 
@@ -3540,24 +3580,6 @@ Acceptance criteria:
 - Compaction is a bake concern and does not require renderer-side asset dependency knowledge.
 - Removing a static scope releases geometry and texture placement leases.
 - Static object enrichment remains independent from Svelte state and browser UX policy.
-
-### Phase 12A: Picking, Inspection, Metrics, And Debug Snapshot Parity
-
-Purpose: make v1-style browser inspection and frame diagnostics explicit instead of burying them in the final cutover phase.
-
-Deliverables:
-
-- Renderer picking path for terrain and supported static object draw units.
-- Static source mapping display path that can map picked draw slices back to typed landblock/env-cell/object/material/resource identities without consulting Svelte-owned state.
-- Texture/material inspection snapshots backed by texture/atlas manager and renderer debug APIs.
-- Global FPS/frame-time overlay and runtime snapshot fields for renderer timing, static residency, texture placement, and latest texture/material failures.
-- Tests for source mapping records, pick result identity shape, and debug snapshot construction where deterministic.
-
-Acceptance criteria:
-
-- Picking/inspection consumes committed static records and renderer query APIs, not prepared assets or Svelte mirrors.
-- Frame timing and texture/material failures are visible outside the console.
-- Diagnostics remain consumers of snapshots/debug APIs and do not become required control-plane fields.
 
 ### Phase 12B: Plan Reassessment Before Dungeon And Dynamic Breadth
 
@@ -3713,7 +3735,7 @@ The V2 harness should always provide:
 - Basic camera controls.
 - A compact runtime status projection.
 - A way to request, supersede, and evict scopes.
-- A way to inspect the latest runtime snapshot and selected renderer object once picking exists.
+- A way to inspect the latest runtime snapshot and selected static scene item once picking exists.
 
 Manual verification milestones should be explicit:
 
@@ -3724,7 +3746,7 @@ Manual verification milestones should be explicit:
 - Phase 9C: atlas ownership is reassessed before terrain material work builds on it.
 - Phase 10C: terrain material behavior is credible enough to compare against v1 terrain blend/layer behavior on named targets.
 - Phase 10D: terrain parity findings steer static object, inspection, dungeon, and cutover scope before broader enrichment starts.
-- Phase 12A: picking, inspection, texture/material snapshots, and frame timing are visible through V2-owned runtime/renderer APIs.
+- Phase 12A: runtime/static-scene `pickRay` and browser-owned picker diagnostics can identify object-level static hits without renderer-owned semantic picking.
 - Phase 12B: outdoor terrain/static object behavior is reassessed before dungeon/interior and dynamic breadth.
 - Phase 13C: dungeon/interior behavior is compared against v1 on named targets before dynamic and cutover work.
 - Phase 14A: final design-vs-implementation reassessment happens before replacing the old browser display.

@@ -376,7 +376,7 @@ Svelte browser state
        2. landblock render-product baking with its own closure loading
   -> Svelte renderer adapter
   -> deferred imperative WebGL2 renderer
-  -> UI samples renderer state for picking, metrics, resources, and previews
+  -> UI samples renderer/runtime state for picking, metrics, resources, and previews
 ```
 
 The broad architecture is sound in the sense that there are separate concepts for app state, asset preparation, landblock baking, renderer resources, and UI. The implementation is hard to reason about because those concepts are not given clean ownership boundaries, and because Svelte, workers, planners, renderer stores, and diagnostics all participate in lifecycle decisions.
@@ -448,13 +448,13 @@ The core rule is simple: each layer receives facts from the layer below, adds ex
 ### Design Principles
 
 - Browser UI is a consumer. It does not own asset hydration, baking, renderer lifecycle, or renderer state diffing.
-- Runtime is orchestration. It translates user/client intent into service commands and publishes snapshots, but it does not decode assets, bake geometry, or upload WebGL resources. Runtime also owns scene anchoring/rebasing policy: it converts canonical static/dynamic records into renderer-local placements before renderer ingestion.
+- Runtime is orchestration. It translates user/client intent into service commands and publishes snapshots, but it does not decode assets, bake geometry, or upload WebGL resources. Runtime also owns scene anchoring/rebasing policy and semantic scene queries: it converts canonical static/dynamic records into renderer-local placements before renderer ingestion, and it answers picking/visibility queries from committed scene records rather than asking the renderer to own AC source semantics.
 - Asset service owns asset identity, cache, in-flight dedupe, shared preparation rules, committed prepared-asset leases, warm retention, and failure/retry semantics. It is a logical owner, not necessarily a dedicated worker boundary.
 - Static coordinator owns landblock-scoped static demand. It expands scene interest into concrete static work requests by landblock/domain and env-cell focus where needed, schedules resolver workers, groups resolved payloads into submitted static atlas batches, schedules baker workers, requests texture/atlas placement snapshots for those batches, and commits completed output.
 - Static scope resolver workers own IO-heavy static source resolution. They resolve concrete static work requests into bakeable payloads by reading/fetching needed source assets, walking static dependencies, identifying referenced textures/surfaces, and producing source spatial facts and static-authored dynamic seeds.
 - Static bake workers own CPU-heavy static baking. They consume resolved static scope payloads plus batch placement snapshots, then produce static draw-unit bake records, placement requirements/assumptions, and peer static records for spatial, visibility, portal/interior, source-mapping, and dynamic-seed output.
 - Dynamic service owns entity/object render readiness. It hydrates dynamic visual resources and publishes instance state without static landblock baking.
-- Renderer owns GPU residency and drawing. It consumes committed static/dynamic placements and frame state; it does not fetch host assets, walk dependency closures, classify AC materials, or choose scene anchors/rebase policy.
+- Renderer owns GPU residency and drawing. It consumes committed static/dynamic placements and frame state; it does not fetch host assets, walk dependency closures, classify AC materials, choose scene anchors/rebase policy, or own semantic picking/source inspection. Renderer-side acceleration structures may mirror committed query records later, but they are not the source of truth for AC object, env-cell, portal, or material identity.
 - Diagnostics observe. They do not define required fields in core protocols.
 
 ### Minimal Vocabulary
@@ -482,6 +482,7 @@ The earlier vocabulary table was intentionally expansive. After the research pas
 | Static visibility record      | Static-scope visibility fact for object/cell visibility and renderer visibility structures.                                                                                                                                                                                                                                                                                                                                                      | object visibility record, cell visibility record                  |
 | Static portal/interior record | Static-scope portal, env-cell, structured-interior, aperture, and cell-structure facts.                                                                                                                                                                                                                                                                                                                                                          | detailed landblock sidecars, portal links, cell metadata          |
 | Static source mapping         | Static-scope mapping from draw units/slices/records back to source landblock, env-cell, object, material, and typed runtime resource identities. Host route strings may appear only as explicit provenance/debug text.                                                                                                                                                                                                                           | object records, part hints, diagnostic source metadata            |
+| Static scene query            | Runtime-owned query service built from committed static spatial, visibility, portal/interior, and source-mapping records. It exposes neutral `pickRay`/visibility query primitives for browser mode and the future game client, with caller-owned filters and selection policy. Queries are context-aware: outdoor rays test outdoor scene indexes, env-cell rays test that cell's local index and only cross portals through explicit portal traversal. | flat renderer spatial index, renderer-owned semantic picking      |
 | Static-authored dynamic seed  | Static-scope authored dynamic instance seed whose resource hydration and animation state are owned by the dynamic service.                                                                                                                                                                                                                                                                                                                       | animated static object, rotating windmill seed                    |
 | Static bake result            | Worker output for one static work request: draw units, bake-local texture uses, placement requirements/assumptions, static spatial records, static visibility records, static portal/interior records, static source mappings, static-authored dynamic seeds, and source/build revisions. It does not contain atlas pixel buffers or final texture refs.                                                                                         | landblock render product worker result, render artifacts          |
 | Dynamic instance              | Renderer-visible entity/object instance with transform, appearance state, animation/motion state, and resource refs.                                                                                                                                                                                                                                                                                                                             | future dynamic renderable, dynamic material placeholder           |
@@ -514,11 +515,12 @@ flowchart TB
   Host["Host adapter<br/>typed asset lookup + world/session inputs"]
   Assets["Asset service<br/>identity, cache, dedupe, shared prepare rules"]
   StaticCoordinator["Static coordinator<br/>interest -> concrete static work requests"]
+  StaticSceneQuery["Static scene query<br/>env-cell-aware picking + visibility queries"]
   StaticResolver["Static scope resolver workers<br/>parallel IO/source resolution"]
   TextureManager["Texture/atlas manager<br/>batch atlas groups + texture refs"]
   StaticBaker["Static bake workers<br/>CPU bake by submitted atlas batch"]
   Dynamic["Dynamic service<br/>entity interest -> dynamic instances/resources"]
-  Renderer["Renderer<br/>GPU residency, frame loop, picking"]
+  Renderer["Renderer<br/>GPU residency, frame loop, drawing"]
   Diagnostics["Diagnostics observer<br/>events -> debug snapshots"]
 
   BrowserShell --> Runtime
@@ -526,10 +528,12 @@ flowchart TB
   Runtime --> Host
   Runtime --> Assets
   Runtime --> StaticCoordinator
+  Runtime --> StaticSceneQuery
   Runtime --> Dynamic
   Runtime --> Renderer
 
   StaticCoordinator --> Assets
+  StaticCoordinator --> StaticSceneQuery
   StaticCoordinator --> StaticResolver
   StaticCoordinator --> TextureManager
   TextureManager --> StaticBaker
@@ -548,6 +552,7 @@ flowchart TB
   Runtime -. events .-> Diagnostics
   Assets -. events .-> Diagnostics
   StaticCoordinator -. events .-> Diagnostics
+  StaticSceneQuery -. events .-> Diagnostics
   StaticResolver -. events .-> Diagnostics
   StaticBaker -. events .-> Diagnostics
   TextureManager -. events .-> Diagnostics
@@ -562,15 +567,16 @@ The browser and future client sit at the same level. Browser-specific UI can be 
 | Owner                         | Owns                                                                                                                                                                                                                                      | Does not own                                                                                                                      |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | Shell                         | UI state, browser/client input mapping, panels, route/location affordances.                                                                                                                                                               | Asset lifecycles, bake jobs, renderer diffing, GPU resources.                                                                     |
-| Runtime                       | Service composition, command routing, scene interest, snapshots, lifecycle.                                                                                                                                                               | Host decoding, static baking, dynamic asset interpretation, WebGL internals.                                                      |
+| Runtime                       | Service composition, command routing, scene interest, snapshots, lifecycle, and semantic scene-query command routing.                                                                                                                     | Host decoding, static baking, dynamic asset interpretation, WebGL internals.                                                      |
 | Host adapter                  | Typed boundary to Tauri/session/content providers.                                                                                                                                                                                        | Frontend cache policy, material families, renderer resource state.                                                                |
 | Asset service                 | Typed asset identity, host fetch policy, shared preparation library, in-flight dedupe, prepared cache, committed prepared-asset leases, warm retention, failure/retry semantics.                                                          | Static bake bucketing, dynamic instance state, GPU upload, mandatory dedicated prepare worker.                                    |
 | Static coordinator            | Expanding interest radii into concrete static work requests, scheduling resolver jobs, grouping resolved payloads into submitted static atlas batches, scheduling baker jobs, retaining committed static output, rejecting stale results. | Dependency walking on the render thread, texture handle allocation, WebGL upload.                                                 |
+| Static scene query            | Env-cell-aware static spatial query indexes, `pickRay`, visibility-query primitives, committed BVH/spatial/source-map ingestion, and neutral hit records for browser and future client selection.                                        | Browser/client selection policy, debug panel formatting, WebGL upload, material classification, asset dependency walking.         |
 | Static scope resolver workers | IO-heavy static source resolution, static dependency walking, missing typed dependency discovery, referenced texture/surface discovery, source spatial facts, static-authored dynamic seeds, static scope payloads.                       | Scene interest radii, atlas mutation, material-family packing, geometry compaction, renderer handle allocation, GPU objects.      |
 | Texture/atlas manager         | Logical texture refs, typed batch atlas groups, batch placement snapshots, placement table, leases from resident draw units, direct-placement fallback policy for non-packable resources, and texture-packing worker orchestration.      | Static source walking, material classification, geometry compaction, Svelte/UI state, WebGL upload.                               |
 | Static bake workers           | CPU-heavy material-family classification, placement requirement/assumption output, draw-unit compatibility bucketing, geometry compaction, draw-slice/source mapping, static record production, and static bake results.                  | HBA/source dependency walking, scene interest radii, cache pruning, renderer handle allocation, GPU objects, atlas pixel packing. |
 | Dynamic service               | Dynamic visual resource hydration and dynamic instance updates.                                                                                                                                                                           | Static landblock baking, static atlas policy, browser selection UX.                                                               |
-| Renderer                      | GPU resources, render updates, frame loop, picking, targeted inspection.                                                                                                                                                                  | Dependency walking, host lookup, Svelte state, scene interest policy.                                                             |
+| Renderer                      | GPU resources, render updates, frame loop, drawing, and optional mirrored acceleration needed strictly for rendering.                                                                                                                     | Dependency walking, host lookup, Svelte state, scene interest policy, semantic picking, source/material inspection ownership.      |
 | Diagnostics observer          | Bounded events, derived debug snapshots, reports.                                                                                                                                                                                         | Required pipeline fields or control flow.                                                                                         |
 
 ### Runtime-Owned Components
@@ -607,7 +613,7 @@ The runtime should expose a small imperative API. Svelte can wrap it in stores, 
 interface ClientRuntime {
   dispatch(command: RuntimeCommand): void;
   subscribe(listener: (snapshot: RuntimeSnapshot) => void): Unsubscribe;
-  pick(request: PickRequest): Promise<PickResult | null>;
+  pickRay(request: PickRayRequest): PickResult | null;
   captureDebugSnapshot(request: DebugSnapshotRequest): Promise<DebugSnapshot>;
   dispose(): void;
 }
@@ -620,6 +626,8 @@ Commands are intent:
 - Update camera/control mode.
 - Select, inspect, or pick.
 - Toggle debug overlays.
+
+Picking requests carry a scene-space context as well as a ray and caller-owned filters. An outdoor-context ray may test resident outdoor terrain/statics and outside transition portals for that outdoor scene. An env-cell-context ray may test the current env-cell local index and may only cross into another env cell or outdoor scene through an explicit portal traversal. It must not collide with outdoor or neighboring-cell objects merely because their renderer-local bounds overlap the ray. This preserves AC's portal-rendered, non-Euclidean scene model while still letting browser mode and the future game client share the same `pickRay` primitive.
 
 Snapshots are observation:
 
@@ -806,7 +814,7 @@ Static object partitioning should make those axes explicit instead of hiding the
 
 The resolver is parallel and IO-bound. It reads/fetches source assets through the shared asset service/host boundary, runs the shared preparation library locally when needed, walks dependencies for one concrete static resolver job, and emits a compact payload. The main thread does not inspect heavy geometry or walk closures; it groups ready payloads by static domain into submitted static atlas batches and asks the texture/atlas manager for a batch placement snapshot.
 
-The baker is CPU-bound. It consumes one or more static scope payloads plus the placement assumptions available for that batch, performs material-family classification, coarse compatibility bucketing, geometry/source mapping preparation, and emits materialization-ready bake records. Placement-aware materialization consumes the committed texture placement/binding records, assigns draw-local role slots, fine-splits over renderer binding limits, and emits final draw units. The normal sharing unit is the submitted batch, not the whole static domain. Batches may run independently because later batches intentionally receive distinct atlas groups and may duplicate source textures. Draw units produced inside the batch still carry source landblock/env-cell ownership so renderer culling, picking, inspection, sorting, and eviction can remain granular.
+The baker is CPU-bound. It consumes one or more static scope payloads plus the placement assumptions available for that batch, performs material-family classification, coarse compatibility bucketing, geometry/source mapping preparation, and emits materialization-ready bake records. Placement-aware materialization consumes the committed texture placement/binding records, assigns draw-local role slots, fine-splits over renderer binding limits, and emits final draw units. The normal sharing unit is the submitted batch, not the whole static domain. Batches may run independently because later batches intentionally receive distinct atlas groups and may duplicate source textures. Draw units produced inside the batch still carry source landblock/env-cell ownership so runtime query, renderer submission, inspection, sorting, and eviction stay granular.
 
 The baker does not assign texture refs, renderer IDs, GPU IDs, physical atlas pages, or atlas pixel buffers. It emits bake-local texture uses, placement requirements/assumptions, materialization-ready static bake records, and peer static records. Static records include spatial records, visibility records, portal/interior records, source mappings, and static-authored dynamic seeds when the source scope contains animated or otherwise dynamic-authored content. The texture/atlas manager resolves bake-local texture uses to texture refs and placement-table entries when committing the result. If new or repacked atlas pages are needed, the texture/atlas manager delegates pixel packing to a texture-packing worker. The final materialization step then uses the committed placement/binding records to produce legal renderer draw units and sends those plus placement updates to the renderer.
 
@@ -848,7 +856,7 @@ sequenceDiagram
   Dynamic->>Dynamic: resolve appearance + motion resource refs
   Dynamic->>Renderer: upsertDynamicResources(resource refs)
   Dynamic->>Renderer: upsertDynamicInstances(transforms, appearance, animation state)
-  Runtime->>Renderer: updateFrameState(camera, selection, policy)
+  Runtime->>Renderer: updateFrameState(camera, policy)
 ```
 
 Dynamic rendering shares prepared assets with static rendering where the source data overlaps. It does not share static draw units, packed static VAOs, or static landblock atlas assumptions.
@@ -866,16 +874,16 @@ flowchart TB
   Renderer["Renderer"]
   GpuCache["GPU cache/resource manager"]
   Frame["Frame loop"]
-  Queries["Picking + inspection queries"]
+  DebugViews["GPU debug views"]
 
   StaticBake -->|static residency deltas| Renderer
   Textures -->|texture placement revisions| Renderer
   Dynamic -->|dynamic resource + instance deltas| Renderer
-  Runtime -->|camera, frame policy, selection| Renderer
+  Runtime -->|camera + frame policy| Renderer
   Runtime -->|sampler/render policy revisions| Renderer
   Renderer --> GpuCache
   Renderer --> Frame
-  Renderer --> Queries
+  Renderer --> DebugViews
 ```
 
 Renderer input should be incremental, not setter confetti and not a giant deep scene object every frame.
@@ -887,8 +895,6 @@ interface Renderer {
   applyTexturePlacementUpdate(update: TexturePlacementUpdate): void;
   applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void;
   updateFrameState(state: FrameState): void;
-  pick(request: PickRequest): PickResult | null;
-  inspect(request: InspectionRequest): InspectionSnapshot;
   dispose(): void;
 }
 ```
@@ -926,7 +932,9 @@ Static coordinator:
 
 Renderer:
   StaticDrawUnitId -> GPU buffers/VAO/index state/uploaded revision
-  static records -> renderer culling/picking/visibility structures
+
+Static scene query:
+  static records -> env-cell-aware picking/visibility/query structures
 ```
 
 Dynamic resources follow the same pattern:
@@ -957,8 +965,12 @@ Spatial and picking metadata should also keep logical ownership separate from re
 Static/dynamic services:
   source ids, pickable ids, draw-slice mappings, BVH item bindings
 
+Static scene query:
+  outdoor indexes, env-cell residency indexes, env-cell-local indexes,
+  portal traversal gates, pickRay/query results
+
 Renderer:
-  culling/picking structures built from committed deltas
+  optional mirrored render acceleration built from committed deltas
 ```
 
 The general rule is: logical resource owners emit stable refs and revisions; the renderer mirrors committed refs into GPU resources. Workers do not mint renderer IDs.
@@ -1084,7 +1096,7 @@ sequenceDiagram
   Static->>Renderer: applyStaticDelta(add/replace draw units)
   Renderer->>Renderer: validate texture refs against placement table
   Renderer->>Renderer: upload or reuse geometry buffers
-  Renderer->>Renderer: install spatial/picking records
+  Static->>Static: update static scene query records
   Renderer-->>Static: residency snapshot/event
 ```
 
@@ -1301,9 +1313,10 @@ The current implementation has three separate BVH/spatial concepts that should s
 
 - Prepared source BVHs: terrain BVH, outdoor static BVH, landblock env-cell residency BVH, and env-cell local BVHs.
 - Worker-produced static records: object visibility records, cell visibility records, local BVH records, and draw/source mapping produced with static output.
-- Renderer visibility state: live culling, picking, and submission structures derived from committed static deltas.
+- Static scene query state: live semantic picking, visibility-query, portal traversal, and future culling inputs derived from committed static deltas.
+- Renderer visibility state: draw submission state derived from runtime/static-scene visibility decisions and committed renderer deltas.
 
-V2 static deltas should include renderer-ingestible spatial metadata rather than forcing the renderer to pull prepared assets for BVH queries. Resolver workers produce source spatial facts; baker workers produce draw/source mappings and BVH item bindings; the renderer builds and owns the live culling/picking structures from committed deltas.
+V2 static deltas should include runtime-ingestible spatial metadata rather than forcing the renderer or browser UI to pull prepared assets for BVH queries. Resolver workers produce source spatial facts; baker workers produce draw/source mappings and BVH item bindings; the runtime-owned static scene query builds and owns the live semantic picking/visibility structures from committed deltas. The renderer may later mirror a reduced acceleration structure for draw submission, but it is not the semantic owner of AC object, material, env-cell, or portal identity.
 
 ### Scene Anchoring And Renderer-Local Placement
 
@@ -1371,13 +1384,14 @@ The current renderer boundary is too setter-heavy. The replacement should separa
 
 - Residency updates: add/remove/replace static draw-unit placements, dynamic resource handles/placements, texture/atlas pages, debug overlays.
 - Resource policy updates: texture placement revisions, sampler policy revisions, and renderer capability changes that should not require rebaking geometry.
-- Frame/update input: camera, visible domains, frame render policy, selection, dynamic instance transforms/state.
-- Query APIs: picking and resource inspection.
+- Frame/update input: camera, visible domains, frame render policy, and dynamic instance transforms/state.
+- Runtime query APIs: picking and semantic resource/source inspection.
+- Renderer debug APIs: GPU resource inspection and texture/page preview.
 - Debug APIs: explicit opt-in report capture and texture/page preview.
 
 V2 should use explicit residency deltas plus frame state as the primary renderer contract. Static add deltas carry canonical draw units with runtime-produced renderer-local placements; static remove deltas carry draw-unit/resource ids. A `RenderScene`-like value may still be useful as an inspection snapshot, but not as the normal update mechanism.
 
-After static draw units are baked, the renderer only needs ownership ids for resource/debug association, renderer-local placement transforms for drawing, and spatial metadata for culling/picking. It should not resolve landblock dependencies, classify materials, choose a scene anchor, or derive landblock translations from source ids.
+After static draw units are baked, the renderer only needs ownership ids for resource/debug association, renderer-local placement transforms for drawing, and renderer-facing submission facts. Static spatial/query metadata belongs to the runtime-owned static scene query service. The renderer should not resolve landblock dependencies, classify materials, choose a scene anchor, derive landblock translations from source ids, or own semantic picking.
 
 ### Diagnostics And Debug Workflows
 
@@ -1478,7 +1492,7 @@ Mitigation: when semantics are uncertain, verify against ACE, ACViewer, checked-
 - Dynamic renderables can enter the render scene without static landblock baking, packed static VAOs, or static landblock atlases.
 - Static-authored animated objects can enter the dynamic path as scope-owned dynamic seeds.
 - Texture atlas policy shares compatible texture placements across scopes inside a submitted static atlas batch through leases from resident draw units. Cross-batch sharing is an explicit future optimization, not the default.
-- Static BVH/spatial metadata is included in static deltas; the renderer does not pull prepared assets to build normal culling/picking state.
+- Static BVH/spatial metadata is included in static deltas; the runtime/static scene query uses those records for semantic picking and visibility queries, and the renderer does not pull prepared assets to build normal culling/picking state.
 - Diagnostics are optional observers, not required fields in core data.
 - Independent services and workers have names and directories that reflect ownership rather than proximity to a UI component.
 
@@ -1504,7 +1518,7 @@ Mitigation: when semantics are uncertain, verify against ACE, ACViewer, checked-
 - 2026-06-10: Host asset route strings are boundary transport/provenance, not runtime resource identity. Typed identities or runtime-assigned handles are required for resolver payloads, bake outputs, texture manager state, renderer deltas, dynamic records, and source mappings; opaque string cache keys must be derived from typed identities.
 - 2026-06-10: Scene anchoring and landblock rebasing are runtime/domain policy, not renderer policy. Static resolver/baker outputs remain canonical landblock/env-cell-owned records; runtime converts committed draw units and dynamic instances into renderer-local placements before renderer ingestion.
 - 2026-06-11: Static bake workers should not output atlas pixel buffers. Texture/atlas manager owns atlas policy, refs, leases, batch commit/abort rules, and delegates atlas pixel assembly to texture-packing workers; the renderer only uploads committed texture pages on the GL-owning thread.
-- 2026-06-11: Static atlas sharing is batch-scoped by default. Submitted batches receive distinct atlas groups under the texture/atlas manager, and source textures may be duplicated across batches intentionally. Draw units remain landblock/env-cell scoped within each batch so renderer culling, picking, inspection, and eviction stay granular.
+- 2026-06-11: Static atlas sharing is batch-scoped by default. Submitted batches receive distinct atlas groups under the texture/atlas manager, and source textures may be duplicated across batches intentionally. Draw units remain landblock/env-cell scoped within each batch so runtime query, renderer submission, inspection, and eviction stay granular.
 - 2026-06-11: Terrain material compatibility is bounded by renderer role-page capacity, not by a requirement that every color or mask role for one draw unit share one physical atlas page. Terrain materialization maps committed texture placements to draw-local role-page slots, while atlas packing remains free to distribute compatible textures across batch atlas pages.
 - 2026-06-12: Static-object material tables should use the same separation of concerns as terrain role pages. Coarse static-object material plans are produced before packing from logical compatibility facts; final renderer draw units are materialized after committed texture placement/binding records exist, so fine partitioning can use actual texture refs/pages/rects without making the baker partition by atlas topology.
 - 2026-06-12: Static-object table cutover should extend `StaticObjectGeometryStaticDrawUnit` directly instead of introducing a second public table-backed draw-unit subtype. V1's compacted geometry parity shape is a single geometry layout with material-slot selectors, and V2 should treat one-entry static objects as degenerate table-backed draw units rather than keeping a parallel single-binding renderer contract.

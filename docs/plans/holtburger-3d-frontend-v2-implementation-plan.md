@@ -3482,17 +3482,18 @@ Phase 11E4E execution notes:
 - Added per-frame back-to-front transparent resource sorting from active camera position with a stable draw-unit-id tie-break. Sorting remains object/part level; triangle-level sorting is intentionally out of scope.
 - Mapped typed static blend factors (`one`, `src-alpha`, `one-minus-src-alpha`) to WebGL2 blend constants and applied the draw unit's depth-write flag for transparent resources. The pass restores depth mask and disables blending after transparent draws.
 - Added focused renderer tests for back-to-front ordering, tie-breaking, and blend-factor mapping. Existing shader/table tests continue to cover the material binding path.
+- Follow-up investigation of a concerning `outdoor-detail` transparent bucket shaped like one material producing 102 partitions found that the count was legitimate generated-scenery coverage, not accidental materialization churn. Temporary transparent-sort diagnostics and browser-console visibility filters were used during the investigation, then reset out of the codebase after the user visually confirmed the culprits were small ground-level blended plants.
 
 Phase 11E4E spicy bits:
 
 - The renderer pass can draw `additive` if a future draw unit reaches it, but the planner still keeps additive, alpha-additive, inverse-alpha, and inverse-alpha-additive static materials render-deferred. That is intentional evidence gating, not a renderer omission.
 - Transparent ordering uses the baked vertex-bound center translated into renderer-local space. That is the best current fact emitted by the baker, but it is still an approximation for large or intersecting blended parts.
 - There is no browser-side GL-state harness. GL-state hygiene is covered structurally by the renderer pass restoration path and focused helper tests, not by an end-to-end fake WebGL command trace.
+- The transparent partition count is explainable but still worth keeping in mind for performance policy. The confirmed case was generated scenery: roughly 29 objects / 107 object-part sort units / 1,637 transparent triangles, dominated by small plant sources around `setup-model:02001063` and `setup-model:02001064` using `gfx-obj:010031ae`.
 
 Phase 11E4E failed to close:
 
-- No live browser/manual visual pass was run against the known explicit-object blended target in this turn.
-- No new runtime diagnostic field was added in this phase. Existing diagnostics already expose source/materialized static draw-unit counts and material coverage buckets; Phase 11E5 should decide whether those are enough after the manual target review.
+- The temporary investigation helpers were intentionally not retained. If this question recurs, add a deliberate diagnostics phase rather than leaving ad hoc browser-console filters in the renderer surface.
 
 Phase 11E4E verification:
 

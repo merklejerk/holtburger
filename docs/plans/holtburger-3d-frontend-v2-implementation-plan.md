@@ -3375,7 +3375,7 @@ Phase 11E4C1 verification:
 
 ### Phase 11E4D: Object/Part Transparent Static Draw Units
 
-Status: planned after 11E4C1 surfaces explicit outdoor objects.
+Status: complete on 2026-06-13 for alpha/translucent static draw-unit emission; additive/inverse-alpha remain deferred.
 
 Purpose: implement blended static material draw units at object/part granularity against the known explicit-object target.
 
@@ -3407,6 +3407,39 @@ Acceptance criteria:
 - Mixed source objects do not poison order-independent batching for their opaque/cutout surfaces.
 - Renderability gates are updated intentionally: true blended partitions become renderer-ingestible only when they have the required render state, texture layout, object/part sort metadata, and stageable texture uses.
 - The phase records the known target and scopes blend behavior to observed material flags rather than every possible `SurfaceType` flag.
+
+Phase 11E4D execution notes:
+
+- Promoted alpha/translucent static object material plans from `classified-render-deferred` to `classified-render-candidate` when their texture/data-use layout is otherwise stageable. Additive, alpha-additive, inverse-alpha, and inverse-alpha-additive remain render-deferred.
+- Widened static-object renderability and draw-unit contracts so `materialPass` can carry `transparent`, not only `opaque`/`alpha-test`.
+- Added `renderState` to static object draw units and material-table entries, carrying blend mode/factors plus depth-test/depth-write facts from the material planner.
+- Added `sort` metadata to static object draw units, including object/part back-to-front policy, object-part key, local bounds, and local sort center.
+- Kept existing partition policy shape: transparent partitions use object/part ownership as a hard key, while opaque and alpha-test/cutout partitions stay batchable.
+- Updated materialization so fine-split static object draw units preserve render state across material-table page slicing.
+- WebGL resources now accept transparent/additive static object resources but skip them in the old opaque static-object draw loop. Phase 11E4E owns actually drawing them with ordered transparent pass state.
+- Added tests proving alpha/translucent transparent partitions produce static-object geometry draw units with blend/depth/sort metadata, material coverage counts them as rendered, additive remains deferred, and materialization preserves render state after fine splitting.
+
+Phase 11E4D spicy bits:
+
+- This phase deliberately does not draw transparent units yet. Sending them through the old static-object loop would render them without blend/depth-mask scheduling, which is worse than deferring the visual pass. The resources are renderer-ingestible/resident, but 11E4E must replace the skip with sorted transparent rendering.
+- Material coverage now reports alpha/translucent transparent static triangles as rendered once they become stageable draw units. That means diagnostics may show fewer deferred transparent triangles even though the browser still needs 11E4E before visual parity.
+- Sort bounds are computed from baked draw-unit vertex bounds in landblock-render-local space. That is the hard fallback requested by the phase, but not a source-authored part bound.
+
+Phase 11E4D failed to close:
+
+- No user-provided target facts were recorded because the specific landblock/object/material ids were not supplied in this turn.
+- No live browser/manual pass was run against the known explicit-object target.
+- Additive and inverse-alpha static materials remain intentionally render-deferred.
+- Transparent WebGL pass ordering, camera-distance sorting, blend-factor application, depth-mask toggling, and GL-state hygiene remain Phase 11E4E.
+
+Phase 11E4D verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- src/v2/static/objects/bake/static-object-compatibility-partitioner.test.ts`
+- `cd apps/holtburger-3d && npm run test:ts -- src/v2/static/objects/bake/static-object-compatibility-partitioner.test.ts src/v2/runtime/static-materializer.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 11E4E: Transparent Renderer Pass And Visual Review
 

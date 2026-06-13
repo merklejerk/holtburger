@@ -122,6 +122,20 @@ describe("V2 static object compatibility partitioner", () => {
 				materialSlotIndices: new Float32Array([0, 0, 0]),
 				primaryTextureUseId:
 					"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color",
+				renderState: {
+					blend: {
+						dstFactor: null,
+						enabled: false,
+						mode: "opaque",
+						srcFactor: null,
+					},
+					depthTest: true,
+					depthWrite: true,
+				},
+				sort: expect.objectContaining({
+					objectPartKey: null,
+					policy: "depth-writing",
+				}),
 			}),
 		]);
 		const drawUnit = result.drawUnits[0];
@@ -143,6 +157,16 @@ describe("V2 static object compatibility partitioner", () => {
 				primaryTextureUseId:
 					"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color",
 				primaryTextureWrapMode: "clamp",
+				renderState: {
+					blend: {
+						dstFactor: null,
+						enabled: false,
+						mode: "opaque",
+						srcFactor: null,
+					},
+					depthTest: true,
+					depthWrite: true,
+				},
 				slot: 0,
 			},
 		]);
@@ -583,6 +607,36 @@ describe("V2 static object compatibility partitioner", () => {
 			1,
 			1,
 		]);
+
+		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+		expect(result.drawUnits).toEqual([
+			expect.objectContaining({
+				kind: "static-object-geometry",
+				materialPass: "transparent",
+				renderState: {
+					blend: {
+						dstFactor: "one-minus-src-alpha",
+						enabled: true,
+						mode: "translucent",
+						srcFactor: "src-alpha",
+					},
+					depthTest: true,
+					depthWrite: false,
+				},
+				sort: expect.objectContaining({
+					objectPartKey: "da55ffff:building:building-0:part:0",
+					policy: "object-part-back-to-front",
+				}),
+			}),
+			expect.objectContaining({
+				kind: "static-object-geometry",
+				materialPass: "transparent",
+				sort: expect.objectContaining({
+					objectPartKey: "da55ffff:building:building-1:part:0",
+					policy: "object-part-back-to-front",
+				}),
+			}),
+		]);
 	});
 
 	it("reports compact material coverage by rendered, deferred, and unsupported buckets", () => {
@@ -606,14 +660,14 @@ describe("V2 static object compatibility partitioner", () => {
 
 		expect(result.materialCoverage).toEqual([
 			expect.objectContaining({
-				deferredTriangleCount: 1,
+				deferredTriangleCount: 0,
 				detailRoleCount: 0,
 				domain: "outdoor-buildings",
-				fallbackReasonCount: 2,
+				fallbackReasonCount: 1,
 				landblockId: 0xda55ffff,
 				materialCount: 6,
 				partitionCount: 6,
-				renderedTriangleCount: 4,
+				renderedTriangleCount: 5,
 				triangleCount: 6,
 				unsupportedTriangleCount: 1,
 			}),
@@ -643,7 +697,7 @@ describe("V2 static object compatibility partitioner", () => {
 				}),
 				expect.objectContaining({
 					family: "texture-rgba",
-					outcome: "render-deferred",
+					outcome: "rendered",
 					pass: "transparent",
 					triangleCount: 1,
 				}),
@@ -656,13 +710,12 @@ describe("V2 static object compatibility partitioner", () => {
 			]),
 		);
 		expect(result.materialCoverage[0]?.fallbackReasonCounts).toEqual([
-			{ code: "translucent-render-deferred", count: 1 },
 			{ code: "unsupported-surface-flag", count: 1 },
 		]);
 		expect(result.materialCoverage[0]?.unrenderedBuckets[0]).toMatchObject({
-			family: "texture-rgba",
-			outcome: "render-deferred",
-			pass: "transparent",
+			family: "unsupported",
+			outcome: "unsupported",
+			pass: "opaque",
 			triangleCount: 1,
 		});
 	});

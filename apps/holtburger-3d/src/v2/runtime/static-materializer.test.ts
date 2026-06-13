@@ -122,6 +122,13 @@ describe("V2 static materializer", () => {
 			[0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3],
 			[0, 0, 0],
 		]);
+		expect(
+			addedDrawUnits.map((added) =>
+				added.kind === "static-object-geometry"
+					? added.renderState
+					: null,
+			),
+		).toEqual([drawUnit.renderState, drawUnit.renderState]);
 		expect(materialized.textureUpdate?.drawUnitBindings).toMatchObject([
 			{ drawUnitId: "static-table", rolePage: { kind: "static-base-color", slot: 0 } },
 			{ drawUnitId: "static-table", rolePage: { kind: "static-base-color", slot: 1 } },
@@ -340,6 +347,22 @@ function createStaticObjectDrawUnit(
 		positions: new Float32Array(positions),
 		primaryTextureUseId: textureUseIds[0] ?? null,
 		primaryTextureWrapMode: "clamp",
+		renderState: {
+			blend: {
+				dstFactor: null,
+				enabled: false,
+				mode: "opaque",
+				srcFactor: null,
+			},
+			depthTest: true,
+			depthWrite: true,
+		},
+		sort: {
+			bounds: null,
+			center: [0, 0, 0],
+			objectPartKey: null,
+			policy: "depth-writing",
+		},
 		sourceMappingRecords: Array.from(
 			{ length: materialCount },
 			(_, index) => `${drawUnitId}:source:${index}`,
@@ -369,6 +392,16 @@ function createStaticObjectMaterialEntry(
 		paletteTextureUseId: null,
 		primaryTextureUseId: `${drawUnitId}:prepared-texture:${slot}`,
 		primaryTextureWrapMode: "clamp",
+		renderState: {
+			blend: {
+				dstFactor: null,
+				enabled: false,
+				mode: "opaque",
+				srcFactor: null,
+			},
+			depthTest: true,
+			depthWrite: true,
+		},
 		slot,
 	};
 }

@@ -67,6 +67,7 @@ interface StaticObjectCoarseMaterialEntry {
 	readonly materialEntryKey: string;
 	readonly materialUseKey: string;
 	readonly materialIds: readonly number[];
+	readonly blend: StaticObjectMaterialPlan["blend"];
 	readonly materialColor: StaticObjectMaterialPlan["color"];
 	readonly materialEmissiveColor: StaticObjectMaterialPlan["emissiveColor"];
 	readonly alphaMode: StaticObjectMaterialPlan["alphaPolicy"]["mode"];
@@ -527,6 +528,7 @@ function createCoarseTablePlan(options: {
 		entriesByKey.set(candidate.materialEntryKey, {
 			alphaMode: candidate.materialPlan.alphaPolicy.mode,
 			alphaTest: candidate.materialPlan.alphaPolicy.alphaTest,
+			blend: candidate.materialPlan.blend,
 			detailTextureTiling: resolveDetailTextureTiling(candidate.materialPlan),
 			materialColor: candidate.materialPlan.color,
 			materialEmissiveColor: candidate.materialPlan.emissiveColor,

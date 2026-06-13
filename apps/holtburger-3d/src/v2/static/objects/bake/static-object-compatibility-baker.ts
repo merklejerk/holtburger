@@ -2,6 +2,7 @@ import type {
 	MaterialTextureDataUseIdentity,
 	OutdoorStaticObjectsScopePayload,
 	ScheduledStaticWork,
+	StaticBounds,
 	StaticBakeBatchInput,
 	StaticBakeBatchItem,
 	StaticBakeBatchResult,
@@ -13,6 +14,8 @@ import type {
 	StaticObjectMaterialTableEntry,
 	StaticObjectInstanceIdentity,
 	StaticObjectPartSourceFacts,
+	StaticObjectRenderState,
+	StaticObjectSortMetadata,
 	StaticObjectSourceIdentity,
 } from "../../contracts";
 import {
@@ -242,6 +245,8 @@ function createStaticObjectGeometryDrawUnit(options: {
 		materialFamily: resolveRenderableStaticObjectFamily(options.partition),
 		materialIds: options.partition.materialIds,
 		materialPass: resolveRenderableStaticObjectPass(options.partition),
+		renderState: materialEntry.renderState,
+		sort: createStaticObjectSortMetadata(options.partition, geometry.positions),
 		detailTextureTiling: materialEntry.detailTextureTiling,
 		detailTextureUseId: materialEntry.detailTextureUseId,
 		positions: geometry.positions,
@@ -310,6 +315,7 @@ function createStaticObjectMaterialTableEntry(parameters: {
 
 	return {
 		alphaTest: parameters.entry.alphaTest,
+		renderState: createStaticObjectRenderState(parameters.entry.blend),
 		detailTextureTiling: parameters.entry.detailTextureTiling,
 		detailTextureUseId: detailTextureUse
 			? createStaticObjectTextureUseId(
@@ -367,13 +373,88 @@ function resolveRenderableStaticObjectFamily(
 function resolveRenderableStaticObjectPass(
 	partition: StaticObjectCompatibilityPartition,
 ): StaticObjectGeometryStaticDrawUnit["materialPass"] {
-	if (partition.pass === "opaque" || partition.pass === "alpha-test") {
+	if (
+		partition.pass === "opaque" ||
+		partition.pass === "alpha-test" ||
+		partition.pass === "transparent" ||
+		partition.pass === "additive"
+	) {
 		return partition.pass;
 	}
 
 	throw new Error(
 		`Static object partition ${partition.sliceId} has unrenderable pass ${partition.pass}.`,
 	);
+}
+
+function createStaticObjectRenderState(
+	blend: StaticObjectCompatibilityPartition["coarseTablePlan"]["entries"][number]["blend"],
+): StaticObjectRenderState {
+	return {
+		blend: {
+			dstFactor: blend.dstFactor,
+			enabled: blend.enabled,
+			mode: blend.mode,
+			srcFactor: blend.srcFactor,
+		},
+		depthTest: true,
+		depthWrite: blend.depthWrite,
+	};
+}
+
+function createStaticObjectSortMetadata(
+	partition: StaticObjectCompatibilityPartition,
+	positions: Float32Array,
+): StaticObjectSortMetadata {
+	const bounds = computePositionBounds(positions);
+
+	return {
+		bounds,
+		center: bounds ? centerOfBounds(bounds) : [0, 0, 0],
+		objectPartKey: partition.partitionAxes.ownership.objectPartKey,
+		policy:
+			partition.partitionAxes.sort.policy === "transparent-object-part-sortable"
+				? "object-part-back-to-front"
+				: "depth-writing",
+	};
+}
+
+function computePositionBounds(positions: Float32Array): StaticBounds | null {
+	if (positions.length < 3) {
+		return null;
+	}
+
+	let minX = Number.POSITIVE_INFINITY;
+	let minY = Number.POSITIVE_INFINITY;
+	let minZ = Number.POSITIVE_INFINITY;
+	let maxX = Number.NEGATIVE_INFINITY;
+	let maxY = Number.NEGATIVE_INFINITY;
+	let maxZ = Number.NEGATIVE_INFINITY;
+
+	for (let index = 0; index + 2 < positions.length; index += 3) {
+		const x = positions[index]!;
+		const y = positions[index + 1]!;
+		const z = positions[index + 2]!;
+		minX = Math.min(minX, x);
+		minY = Math.min(minY, y);
+		minZ = Math.min(minZ, z);
+		maxX = Math.max(maxX, x);
+		maxY = Math.max(maxY, y);
+		maxZ = Math.max(maxZ, z);
+	}
+
+	return {
+		max: { x: maxX, y: maxY, z: maxZ },
+		min: { x: minX, y: minY, z: minZ },
+	};
+}
+
+function centerOfBounds(bounds: StaticBounds): readonly [number, number, number] {
+	return [
+		(bounds.min.x + bounds.max.x) / 2,
+		(bounds.min.y + bounds.max.y) / 2,
+		(bounds.min.z + bounds.max.z) / 2,
+	];
 }
 
 class StaticObjectBakeSourceIndex {

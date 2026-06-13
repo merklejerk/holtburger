@@ -6,6 +6,8 @@ import {
 	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
 } from "../types";
 import {
+	compareStaticObjectTransparentDrawOrder,
+	resolveStaticObjectBlendFactor,
 	STATIC_OBJECT_FRAGMENT_SHADER,
 	TERRAIN_FRAGMENT_SHADER,
 } from "./webgl2-renderer";
@@ -112,6 +114,44 @@ describe("V2 WebGL2 static object detail shader contract", () => {
 		);
 		expect(STATIC_OBJECT_FRAGMENT_SHADER).toContain(
 			"rgb = clamp(rgb * (detailColor.rgb + (1.0 - detailAlpha)), vec3(0.0), vec3(1.0));",
+		);
+	});
+});
+
+describe("V2 WebGL2 static object transparent pass helpers", () => {
+	it("sorts transparent object/part resources back-to-front with a stable id tie-break", () => {
+		const cameraPosition = [0, 0, 0] as const;
+		const resources = [
+			{ drawUnitId: "near", sortCenter: [0, 0, 4] as const },
+			{ drawUnitId: "far-b", sortCenter: [0, 0, 12] as const },
+			{ drawUnitId: "far-a", sortCenter: [0, 0, -12] as const },
+			{ drawUnitId: "middle", sortCenter: [0, 0, 8] as const },
+		];
+
+		expect(
+			resources
+				.toSorted((left, right) =>
+					compareStaticObjectTransparentDrawOrder(
+						left,
+						right,
+						cameraPosition,
+					),
+				)
+				.map((resource) => resource.drawUnitId),
+		).toEqual(["far-a", "far-b", "middle", "near"]);
+	});
+
+	it("maps typed static blend factors to WebGL constants", () => {
+		const gl = {
+			ONE: 1,
+			ONE_MINUS_SRC_ALPHA: 771,
+			SRC_ALPHA: 770,
+		} as WebGL2RenderingContext;
+
+		expect(resolveStaticObjectBlendFactor(gl, "one")).toBe(gl.ONE);
+		expect(resolveStaticObjectBlendFactor(gl, "src-alpha")).toBe(gl.SRC_ALPHA);
+		expect(resolveStaticObjectBlendFactor(gl, "one-minus-src-alpha")).toBe(
+			gl.ONE_MINUS_SRC_ALPHA,
 		);
 	});
 });

@@ -124,6 +124,21 @@ interface EnvCellBvhRoot {
 	readonly items: readonly (EnvCellBvhRuntimeItem | null)[];
 }
 
+interface EnvCellLandblockBvhRoot {
+	readonly acceptedEnvCellIds: readonly number[];
+	readonly cellsByEnvCellId: ReadonlyMap<number, EnvCellBvhRoot>;
+	readonly items: readonly (EnvCellLandblockBvhRuntimeItem | null)[];
+	readonly landblockId: number;
+	readonly nodes: readonly BvhNode[];
+}
+
+interface EnvCellLandblockBvhRuntimeItem {
+	readonly bounds: StaticBounds;
+	readonly envCellId: number;
+	readonly memberId: string;
+	readonly source: "env-cell-root" | "derived";
+}
+
 type EnvCellBvhRuntimeItem =
 	| {
 			readonly kind: "static";
@@ -149,7 +164,7 @@ export class StaticSceneQuery {
 	>();
 	readonly #envCellRootsByLandblockId = new Map<
 		number,
-		readonly EnvCellBvhRoot[]
+		EnvCellLandblockBvhRoot
 	>();
 
 	ingestSourcePayload(
@@ -206,7 +221,7 @@ export class StaticSceneQuery {
 
 	ingestLandblockEnvCells(payload: LandblockEnvCellsStaticScopePayload): void {
 		const acceptedEnvCellIds = new Set(payload.acceptedEnvCellIds);
-		const roots: EnvCellBvhRoot[] = [];
+		const cellsByEnvCellId = new Map<number, EnvCellBvhRoot>();
 
 		for (const envCell of payload.envCells) {
 			const envCellId = envCell.identity.envCellId;
@@ -278,7 +293,7 @@ export class StaticSceneQuery {
 					sourceItem: item,
 				};
 			});
-			roots.push({
+			cellsByEnvCellId.set(envCellId, {
 				acceptedEnvCellIds: payload.acceptedEnvCellIds,
 				envCellId,
 				items,
@@ -288,7 +303,29 @@ export class StaticSceneQuery {
 			});
 		}
 
-		this.#envCellRootsByLandblockId.set(payload.landblock.landblockId, roots);
+		const landblockBvh = payload.residencySpatial.landblockEnvCellBvh;
+		if (landblockBvh.nodes.length === 0) {
+			this.#envCellRootsByLandblockId.delete(payload.landblock.landblockId);
+			return;
+		}
+		const items = landblockBvh.items.map((item) =>
+			cellsByEnvCellId.has(item.identity.envCellId)
+				? {
+						bounds: item.bounds,
+						envCellId: item.identity.envCellId,
+						memberId: item.memberId,
+						source: item.source,
+					}
+				: null,
+		);
+
+		this.#envCellRootsByLandblockId.set(payload.landblock.landblockId, {
+			acceptedEnvCellIds: payload.acceptedEnvCellIds,
+			cellsByEnvCellId,
+			items,
+			landblockId: payload.landblock.landblockId,
+			nodes: landblockBvh.nodes,
+		});
 	}
 
 	pickRay(request: StaticScenePickRequest): StaticScenePickHit | null {
@@ -301,15 +338,50 @@ export class StaticSceneQuery {
 		return hits.sort(comparePickHits)[0] ?? null;
 	}
 
+	queryEnvCellAtPoint(options: {
+		readonly acceptedEnvCellIds?: readonly number[];
+		readonly landblockId: number;
+		readonly point: StaticSceneVec3;
+	}): number | null {
+		const root = this.#envCellRootsByLandblockId.get(options.landblockId);
+		if (!root) {
+			return null;
+		}
+
+		const acceptedEnvCellIds = new Set(
+			options.acceptedEnvCellIds ?? root.acceptedEnvCellIds,
+		);
+		const candidates = traverseBvhPoint(root.nodes, options.point)
+			.flatMap((candidate) =>
+				candidate.itemIndices.map((itemIndex) => ({
+					item: root.items[itemIndex],
+					nodeIndex: candidate.nodeIndex,
+				})),
+			)
+			.filter(
+				(candidate): candidate is {
+					readonly item: EnvCellLandblockBvhRuntimeItem;
+					readonly nodeIndex: number;
+				} =>
+					candidate.item !== null &&
+					acceptedEnvCellIds.has(candidate.item.envCellId),
+			)
+			.sort(
+				(left, right) =>
+					left.item.envCellId - right.item.envCellId ||
+					left.nodeIndex - right.nodeIndex,
+			);
+
+		return candidates[0]?.item.envCellId ?? null;
+	}
+
 	createSnapshot(): StaticSceneQuerySnapshot {
 		let envCellRecordCount = 0;
-		for (const roots of this.#envCellRootsByLandblockId.values()) {
-			envCellRecordCount += roots.reduce(
-				(count, root) =>
-					count +
-					root.items.filter((item) => item?.kind === "static").length,
-				0,
-			);
+		for (const root of this.#envCellRootsByLandblockId.values()) {
+			for (const cellRoot of root.cellsByEnvCellId.values()) {
+				envCellRecordCount +=
+					cellRoot.items.filter((item) => item?.kind === "static").length;
+			}
 		}
 
 		const outdoorBvhRecordCount = [...this.#outdoorBvhRootsByDomainAndLandblock.values()].reduce(
@@ -388,41 +460,67 @@ export class StaticSceneQuery {
 			return [];
 		}
 
-		const roots =
-			this.#envCellRootsByLandblockId.get(request.context.landblockId) ?? [];
+		const landblockRoot = this.#envCellRootsByLandblockId.get(
+			request.context.landblockId,
+		);
+		if (!landblockRoot) {
+			return [];
+		}
 		const acceptedEnvCellIds = new Set(
 			request.context.acceptedEnvCellIds ?? [request.context.envCellId],
 		);
 		const hits: EnvCellStaticScenePickHit[] = [];
 
-		for (const root of roots) {
-			if (!acceptedEnvCellIds.has(root.envCellId)) {
-				continue;
+		for (const broadCandidate of traverseBvh(landblockRoot.nodes, ray)) {
+			for (const landblockItemIndex of broadCandidate.itemIndices) {
+				const landblockItem = landblockRoot.items[landblockItemIndex];
+				if (
+					!landblockItem ||
+					!acceptedEnvCellIds.has(landblockItem.envCellId)
+				) {
+					continue;
+				}
+				const root = landblockRoot.cellsByEnvCellId.get(
+					landblockItem.envCellId,
+				);
+				if (!root) {
+					continue;
+				}
+				hits.push(...this.#pickEnvCellLocalRoot(ray, request, root));
 			}
+		}
 
-			const localRay = transformRayToLocal(ray, root.placement);
-			for (const candidate of traverseBvh(root.nodes, localRay)) {
-				for (const itemIndex of candidate.itemIndices) {
-					const item = root.items[itemIndex];
-					if (item?.kind !== "static") {
-						continue;
-					}
+		return hits;
+	}
 
-					const distance = intersectRayBounds(localRay, item.seed.bounds);
-					if (distance === null) {
-						continue;
-					}
+	#pickEnvCellLocalRoot(
+		ray: StaticSceneRay,
+		request: StaticScenePickRequest,
+		root: EnvCellBvhRoot,
+	): EnvCellStaticScenePickHit[] {
+		const hits: EnvCellStaticScenePickHit[] = [];
+		const localRay = transformRayToLocal(ray, root.placement);
+		for (const candidate of traverseBvh(root.nodes, localRay)) {
+			for (const itemIndex of candidate.itemIndices) {
+				const item = root.items[itemIndex];
+				if (item?.kind !== "static") {
+					continue;
+				}
 
-					const hit: EnvCellStaticScenePickHit = {
-						...item.seed.hit,
-						bvhItemIndex: item.bvhItemIndex,
-						distance,
-						hitPoint: pointOnRay(ray, distance),
-						queryPath: "source-bvh",
-					};
-					if (matchesFilters(hit, request.filters)) {
-						hits.push(hit);
-					}
+				const distance = intersectRayBounds(localRay, item.seed.bounds);
+				if (distance === null) {
+					continue;
+				}
+
+				const hit: EnvCellStaticScenePickHit = {
+					...item.seed.hit,
+					bvhItemIndex: item.bvhItemIndex,
+					distance,
+					hitPoint: pointOnRay(ray, distance),
+					queryPath: "source-bvh",
+				};
+				if (matchesFilters(hit, request.filters)) {
+					hits.push(hit);
 				}
 			}
 		}
@@ -462,6 +560,44 @@ function traverseBvh(
 		if (node.itemIndices.length > 0) {
 			candidates.push({
 				distance,
+				itemIndices: node.itemIndices,
+				nodeIndex,
+			});
+		}
+		if (node.right !== null) {
+			stack.push(node.right);
+		}
+		if (node.left !== null) {
+			stack.push(node.left);
+		}
+	}
+
+	return candidates.sort(
+		(left, right) =>
+			left.distance - right.distance || left.nodeIndex - right.nodeIndex,
+	);
+}
+
+function traverseBvhPoint(
+	nodes: readonly BvhNode[],
+	point: StaticSceneVec3,
+): readonly BvhCandidate[] {
+	if (nodes.length === 0) {
+		return [];
+	}
+
+	const candidates: BvhCandidate[] = [];
+	const stack = [0];
+	while (stack.length > 0) {
+		const nodeIndex = stack.pop() ?? 0;
+		const node = nodes[nodeIndex];
+		if (!node || !containsPoint(node.bounds, point)) {
+			continue;
+		}
+
+		if (node.itemIndices.length > 0) {
+			candidates.push({
+				distance: boundsCenterDistanceSquared(node.bounds, point),
 				itemIndices: node.itemIndices,
 				nodeIndex,
 			});
@@ -559,6 +695,32 @@ function intersectRayBounds(
 	}
 
 	return Math.max(tMin, 0);
+}
+
+function containsPoint(bounds: StaticBounds, point: StaticSceneVec3): boolean {
+	return (
+		point.x >= bounds.min.x &&
+		point.x <= bounds.max.x &&
+		point.y >= bounds.min.y &&
+		point.y <= bounds.max.y &&
+		point.z >= bounds.min.z &&
+		point.z <= bounds.max.z
+	);
+}
+
+function boundsCenterDistanceSquared(
+	bounds: StaticBounds,
+	point: StaticSceneVec3,
+): number {
+	const center = {
+		x: (bounds.min.x + bounds.max.x) * 0.5,
+		y: (bounds.min.y + bounds.max.y) * 0.5,
+		z: (bounds.min.z + bounds.max.z) * 0.5,
+	};
+	const dx = center.x - point.x;
+	const dy = center.y - point.y;
+	const dz = center.z - point.z;
+	return dx * dx + dy * dy + dz * dz;
 }
 
 function pointOnRay(ray: StaticSceneRay, distance: number): StaticSceneVec3 {

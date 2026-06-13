@@ -52,6 +52,8 @@ pub struct LandblockEnvCellsAsset {
     pub landblock_id: u32,
     pub landblock_info_id: u32,
     pub env_cells: Vec<LandblockEnvCellBundleCell>,
+    pub landblock_bvh_items: Vec<LandblockEnvCellBvhItem>,
+    pub landblock_bvh: Option<PreparedBvh>,
     pub diagnostics: PreparedContentSourceDiagnostics,
 }
 
@@ -61,7 +63,30 @@ pub struct LandblockEnvCellBundleCell {
     pub prepared_cell: PreparedInteriorCell,
     pub static_meshes: Vec<PreparedStaticMesh>,
     pub landblock_bounds: Option<PreparedAabb>,
+    pub local_bvh_items: Vec<PreparedEnvCellLocalBvhItem>,
+    pub local_bvh: Option<PreparedBvh>,
     pub diagnostics: PreparedContentSourceDiagnostics,
+}
+
+#[derive(Debug, Clone)]
+pub struct LandblockEnvCellBvhItem {
+    pub env_cell_id: u32,
+    pub member_id: String,
+    pub bounds: PreparedAabb,
+    pub source: LandblockEnvCellBvhItemSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LandblockEnvCellBvhItemSource {
+    EnvCellRoot,
+    Derived,
+}
+
+#[derive(Debug, Clone)]
+pub enum PreparedEnvCellLocalBvhItem {
+    RenderGeometry { triangle_count: usize },
+    Static { instance_id: String },
+    Portal { portal_id: String },
 }
 
 #[derive(Debug, Clone)]
@@ -293,9 +318,12 @@ struct PreparedSpatialItem {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PreparedSpatialItemKind {
+    EnvCellRoot,
+    RenderGeometry,
     OutdoorStatic,
     Building,
     IndoorStatic,
+    Portal,
 }
 
 #[derive(Debug, Clone)]
@@ -967,10 +995,22 @@ impl LandblockEnvCellsAssetAssembler {
                 let static_meshes = static_meshes_by_env_cell
                     .remove(&env_cell.env_cell_id)
                     .unwrap_or_default();
-                let landblock_bounds = derive_env_cell_landblock_bounds(
-                    &prepared_cell,
-                    &static_meshes,
+                let (local_spatial_items, local_bvh_items) =
+                    build_env_cell_local_bvh_records(&prepared_cell, &static_meshes);
+                let local_bvh = build_prepared_bvh_with_scope(
+                    landblock_id,
+                    "env-cell-local",
+                    "env-cell-local",
+                    &local_spatial_items,
                 );
+                let landblock_bounds =
+                    local_bvh.as_ref().map(|bvh| {
+                        pad_bvh_bounds(transform_render_local_bounds_by_ac_frame_conservative(
+                            bvh.nodes[0].bounds,
+                            &prepared_cell.local_placement,
+                            unit_prepared_vec3(),
+                        ))
+                    });
                 if landblock_bounds.is_none() {
                     context.report_source_omission(
                         EOR_CELL_NAMESPACE,
@@ -987,17 +1027,30 @@ impl LandblockEnvCellsAssetAssembler {
                     diagnostics: PreparedContentSourceDiagnostics::default(),
                     static_meshes,
                     landblock_bounds,
+                    local_bvh_items,
+                    local_bvh,
                     env_cell,
                     prepared_cell,
                 })
             })
             .collect::<Vec<_>>();
+        let landblock_bvh_items = build_landblock_env_cell_bvh_items(&env_cells);
+        let landblock_bvh_spatial_items =
+            build_landblock_env_cell_bvh_spatial_items(&landblock_bvh_items);
+        let landblock_bvh = build_prepared_bvh_with_scope(
+            landblock_id,
+            "landblock-env-cell-root",
+            "landblock-env-cells",
+            &landblock_bvh_spatial_items,
+        );
         let diagnostics = context.into_diagnostics();
 
         Ok(LandblockEnvCellsAsset {
             landblock_id,
             landblock_info_id,
             env_cells,
+            landblock_bvh_items,
+            landblock_bvh,
             diagnostics,
         })
     }
@@ -1087,34 +1140,6 @@ fn load_bundle_environment_facts(
         }
     }
     environments
-}
-
-fn derive_env_cell_landblock_bounds(
-    prepared_cell: &PreparedInteriorCell,
-    static_meshes: &[PreparedStaticMesh],
-) -> Option<PreparedAabb> {
-    let local_bounds = derive_env_cell_local_bounds(prepared_cell, static_meshes)?;
-    Some(pad_bvh_bounds(
-        transform_render_local_bounds_by_ac_frame_conservative(
-            local_bounds,
-            &prepared_cell.local_placement,
-            unit_prepared_vec3(),
-        ),
-    ))
-}
-
-fn derive_env_cell_local_bounds(
-    prepared_cell: &PreparedInteriorCell,
-    static_meshes: &[PreparedStaticMesh],
-) -> Option<PreparedAabb> {
-    let mut bounds = prepared_cell.render_geometry.bounds;
-    for mesh in static_meshes {
-        bounds = union_optional_bounds(bounds, mesh.instance_bounds);
-    }
-    for aperture in &prepared_cell.portal_apertures {
-        bounds = union_optional_bounds(bounds, portal_aperture_bounds(aperture));
-    }
-    bounds
 }
 
 fn portal_aperture_bounds(aperture: &PreparedPortalAperture) -> Option<PreparedAabb> {
@@ -1590,6 +1615,100 @@ fn build_outdoor_member_spatial_items(
     items
 }
 
+fn build_landblock_env_cell_bvh_items(
+    env_cells: &[LandblockEnvCellBundleCell],
+) -> Vec<LandblockEnvCellBvhItem> {
+    let mut items = env_cells
+        .iter()
+        .filter_map(|cell| {
+            let bounds = cell.landblock_bounds?;
+            Some(LandblockEnvCellBvhItem {
+                env_cell_id: cell.env_cell.env_cell_id,
+                member_id: format!("env-cell/{:08x}", cell.env_cell.env_cell_id),
+                bounds,
+                source: LandblockEnvCellBvhItemSource::EnvCellRoot,
+            })
+        })
+        .collect::<Vec<_>>();
+    items.sort_by_key(|item| item.env_cell_id);
+    items
+}
+
+fn build_landblock_env_cell_bvh_spatial_items(
+    items: &[LandblockEnvCellBvhItem],
+) -> Vec<PreparedSpatialItem> {
+    items
+        .iter()
+        .map(|item| PreparedSpatialItem {
+            id: item.member_id.clone(),
+            kind: PreparedSpatialItemKind::EnvCellRoot,
+            bounds: item.bounds,
+        })
+        .collect()
+}
+
+fn build_env_cell_local_bvh_records(
+    prepared_cell: &PreparedInteriorCell,
+    static_meshes: &[PreparedStaticMesh],
+) -> (Vec<PreparedSpatialItem>, Vec<PreparedEnvCellLocalBvhItem>) {
+    let mut items = Vec::new();
+    if let Some(bounds) = prepared_cell.render_geometry.bounds {
+        items.push((
+            PreparedSpatialItem {
+                id: format!("env-cell/{:08x}/render-geometry", prepared_cell.env_cell_id),
+                kind: PreparedSpatialItemKind::RenderGeometry,
+                bounds: pad_bvh_bounds(bounds),
+            },
+            PreparedEnvCellLocalBvhItem::RenderGeometry {
+                triangle_count: prepared_cell.render_geometry.triangle_count,
+            },
+        ));
+    }
+    items.extend(static_meshes.iter().filter_map(|mesh| {
+        Some(PreparedSpatialItem {
+            id: format!(
+                "env-cell/{:08x}/static/{}",
+                prepared_cell.env_cell_id, mesh.instance_id
+            ),
+            kind: PreparedSpatialItemKind::IndoorStatic,
+            bounds: pad_bvh_bounds(mesh.instance_bounds?),
+        })
+        .map(|spatial_item| {
+            (
+                spatial_item,
+                PreparedEnvCellLocalBvhItem::Static {
+                    instance_id: mesh.instance_id.clone(),
+                },
+            )
+        })
+    }));
+    items.extend(
+        prepared_cell
+            .portal_apertures
+            .iter()
+            .filter_map(|aperture| {
+                Some(PreparedSpatialItem {
+                    id: format!(
+                        "env-cell/{:08x}/portal/{}",
+                        prepared_cell.env_cell_id, aperture.portal_id
+                    ),
+                    kind: PreparedSpatialItemKind::Portal,
+                    bounds: pad_bvh_bounds(portal_aperture_bounds(aperture)?),
+                })
+                .map(|spatial_item| {
+                    (
+                        spatial_item,
+                        PreparedEnvCellLocalBvhItem::Portal {
+                            portal_id: aperture.portal_id.clone(),
+                        },
+                    )
+                })
+            }),
+    );
+    items.sort_by(|left, right| left.0.id.cmp(&right.0.id));
+    items.into_iter().unzip()
+}
+
 fn transform_render_local_bounds_by_ac_frame_conservative(
     render_bounds: PreparedAabb,
     ac_frame: &Frame,
@@ -1674,6 +1793,20 @@ fn multiply_ac_quaternion(
 }
 
 fn build_prepared_bvh(landblock_id: u32, items: &[PreparedSpatialItem]) -> Option<PreparedBvh> {
+    build_prepared_bvh_with_scope(
+        landblock_id,
+        "landblock-render-local",
+        "static-landblock",
+        items,
+    )
+}
+
+fn build_prepared_bvh_with_scope(
+    landblock_id: u32,
+    coordinate_space: &'static str,
+    scope: &'static str,
+    items: &[PreparedSpatialItem],
+) -> Option<PreparedBvh> {
     if items.is_empty() {
         return None;
     }
@@ -1682,9 +1815,9 @@ fn build_prepared_bvh(landblock_id: u32, items: &[PreparedSpatialItem]) -> Optio
     let item_indices = (0..items.len()).collect::<Vec<_>>();
     build_prepared_bvh_node(items, item_indices, &mut nodes);
     Some(PreparedBvh {
-        coordinate_space: "landblock-render-local",
+        coordinate_space,
         landblock_id,
-        scope: "static-landblock",
+        scope,
         nodes,
     })
 }
@@ -1778,9 +1911,12 @@ fn union_bounds(left: PreparedAabb, right: PreparedAabb) -> PreparedAabb {
 
 fn spatial_item_kind_mask(kind: PreparedSpatialItemKind) -> u32 {
     match kind {
+        PreparedSpatialItemKind::EnvCellRoot => 1 << 0,
+        PreparedSpatialItemKind::RenderGeometry => 1 << 1,
         PreparedSpatialItemKind::OutdoorStatic => 1 << 1,
         PreparedSpatialItemKind::Building => 1 << 2,
         PreparedSpatialItemKind::IndoorStatic => 1 << 4,
+        PreparedSpatialItemKind::Portal => 1 << 5,
     }
 }
 
@@ -2751,6 +2887,70 @@ mod tests {
     }
 
     #[test]
+    fn prepared_bvh_builder_splits_non_trivial_env_cell_roots() {
+        let items = (0..6)
+            .map(|index| PreparedSpatialItem {
+                id: format!("env-cell/{:08x}", 0xda550100_u32 + index as u32),
+                kind: PreparedSpatialItemKind::EnvCellRoot,
+                bounds: test_aabb(index as f32 * 10.0, 0.0, 0.0, 1.0),
+            })
+            .collect::<Vec<_>>();
+
+        let bvh = build_prepared_bvh_with_scope(
+            0xda55ffff,
+            "landblock-env-cell-root",
+            "landblock-env-cells",
+            &items,
+        )
+        .expect("non-empty env-cell roots should build a BVH");
+
+        assert_eq!(bvh.coordinate_space, "landblock-env-cell-root");
+        assert_eq!(bvh.scope, "landblock-env-cells");
+        assert!(bvh.nodes.len() > 1);
+        assert!(bvh.nodes[0].left.is_some());
+        assert!(bvh.nodes[0].right.is_some());
+        assert!(bvh.nodes[0].item_indices.is_empty());
+        assert_eq!(
+            bvh.nodes[0].kind_mask & spatial_item_kind_mask(PreparedSpatialItemKind::EnvCellRoot),
+            1
+        );
+    }
+
+    #[test]
+    fn env_cell_landblock_bounds_transform_local_bvh_root_through_ac_frame() {
+        let local_bounds = test_aabb(-1.0, -2.0, -3.0, 2.0);
+        let frame = Frame {
+            origin: holtburger_common::Vector3 {
+                x: 10.0,
+                y: -20.0,
+                z: 5.0,
+            },
+            orientation: holtburger_common::Quaternion {
+                w: 1.0,
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        };
+
+        let bounds = transform_render_local_bounds_by_ac_frame_conservative(
+            local_bounds,
+            &frame,
+            unit_prepared_vec3(),
+        );
+
+        let center_x = (bounds.min.x + bounds.max.x) * 0.5;
+        let center_y = (bounds.min.y + bounds.max.y) * 0.5;
+        let center_z = (bounds.min.z + bounds.max.z) * 0.5;
+        assert!((center_x - 10.0).abs() < 0.0001);
+        assert!((center_y - 4.0).abs() < 0.0001);
+        assert!((center_z - 18.0).abs() < 0.0001);
+        assert!(bounds.max.x > bounds.min.x);
+        assert!(bounds.max.y > bounds.min.y);
+        assert!(bounds.max.z > bounds.min.z);
+    }
+
+    #[test]
     fn env_cell_asset_assembly_does_not_read_landblock_roots() {
         let source_path = repo_assets_hba_path();
         if !source_path.is_file() {
@@ -3168,6 +3368,17 @@ mod tests {
                 poly_ids: Vec::new(),
             }),
             drawing_bsp: None,
+        }
+    }
+
+    fn test_aabb(x: f32, y: f32, z: f32, size: f32) -> PreparedAabb {
+        PreparedAabb {
+            min: PreparedVec3 { x, y, z },
+            max: PreparedVec3 {
+                x: x + size,
+                y: y + size,
+                z: z + size,
+            },
         }
     }
 

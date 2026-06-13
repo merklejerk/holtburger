@@ -923,30 +923,41 @@ pub fn serialize_landblock_topology_env_cell_residency_bvh(
 pub fn serialize_landblock_env_cell_bundle_bvh(
     bundle: &LandblockEnvCellsAsset,
 ) -> serde_json::Value {
-    let bounded_cells = bundle
-        .env_cells
+    let nodes = bundle
+        .landblock_bvh
+        .as_ref()
+        .map(|bvh| {
+            bvh.nodes
+                .iter()
+                .map(serialize_prepared_bvh_node)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let items = bundle
+        .landblock_bvh_items
         .iter()
-        .filter_map(|cell| cell.landblock_bounds.map(|bounds| (cell, bounds)))
-        .collect::<Vec<_>>();
-    let items = bounded_cells
-        .iter()
-        .map(|(cell, bounds)| {
+        .map(|item| {
             serde_json::json!({
-                "envCellId": cell.env_cell.env_cell_id,
-                "memberId": format!("env-cell/{:08x}", cell.env_cell.env_cell_id),
-                "bounds": serialize_prepared_aabb(bounds),
-                "source": "env-cell-root",
+                "envCellId": item.env_cell_id,
+                "memberId": item.member_id,
+                "bounds": serialize_prepared_aabb(&item.bounds),
+                "source": serialize_landblock_env_cell_bvh_item_source(item.source),
             })
         })
         .collect::<Vec<_>>();
-    let node_inputs = bounded_cells
-        .into_iter()
-        .map(|(_cell, bounds)| (bounds, 1_u32))
-        .collect::<Vec<_>>();
     serde_json::json!({
-        "nodes": build_flat_bvh_nodes_from_bounds(node_inputs),
+        "nodes": nodes,
         "items": items,
     })
+}
+
+pub fn serialize_landblock_env_cell_bvh_item_source(
+    source: LandblockEnvCellBvhItemSource,
+) -> &'static str {
+    match source {
+        LandblockEnvCellBvhItemSource::EnvCellRoot => "env-cell-root",
+        LandblockEnvCellBvhItemSource::Derived => "derived",
+    }
 }
 
 pub fn serialize_landblock_topology_portal_links(
@@ -1138,7 +1149,7 @@ where
         }).collect::<Vec<_>>(),
         "renderGeometry": render_geometry,
         "cellBsp": serialize_bsp_node(&cell.cell_bsp),
-        "localBvh": serialize_landblock_env_cell_bundle_local_bvh(cell, &static_meshes),
+        "localBvh": serialize_landblock_env_cell_bundle_local_bvh(asset),
         "diagnostics": serialize_prepared_content_diagnostics(&asset.diagnostics),
     })
 }
@@ -1189,14 +1200,45 @@ pub fn serialize_env_cell_local_bvh(
 }
 
 pub fn serialize_landblock_env_cell_bundle_local_bvh(
-    cell: &PreparedInteriorCell,
-    static_meshes: &[&PreparedStaticMesh],
+    cell: &LandblockEnvCellBundleCell,
 ) -> serde_json::Value {
-    let local_bvh = serialize_env_cell_local_bvh(cell, static_meshes);
+    let nodes = cell
+        .local_bvh
+        .as_ref()
+        .map(|bvh| {
+            bvh.nodes
+                .iter()
+                .map(serialize_prepared_bvh_node)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let items = cell
+        .local_bvh_items
+        .iter()
+        .map(serialize_env_cell_local_bvh_item)
+        .collect::<Vec<_>>();
     serde_json::json!({
-        "nodes": local_bvh.get("nodes").cloned().unwrap_or_else(|| serde_json::json!([])),
-        "items": local_bvh.get("items").cloned().unwrap_or_else(|| serde_json::json!([])),
+        "nodes": nodes,
+        "items": items,
     })
+}
+
+pub fn serialize_env_cell_local_bvh_item(item: &PreparedEnvCellLocalBvhItem) -> serde_json::Value {
+    match item {
+        PreparedEnvCellLocalBvhItem::RenderGeometry { triangle_count } => serde_json::json!({
+            "kind": "render-geometry",
+            "polygonId": null,
+            "triangleRange": [0, triangle_count],
+        }),
+        PreparedEnvCellLocalBvhItem::Static { instance_id } => serde_json::json!({
+            "kind": "static",
+            "instanceId": instance_id,
+        }),
+        PreparedEnvCellLocalBvhItem::Portal { portal_id } => serde_json::json!({
+            "kind": "portal",
+            "portalId": portal_id,
+        }),
+    }
 }
 
 pub fn portal_aperture_bounds(aperture: &PreparedPortalAperture) -> Option<PreparedAabb> {

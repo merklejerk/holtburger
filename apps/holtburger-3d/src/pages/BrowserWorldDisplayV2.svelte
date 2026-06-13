@@ -531,6 +531,7 @@
 				clientX: event.clientX,
 				clientY: event.clientY,
 				context,
+				filters: { ignoreContainingOrigin: true },
 				viewport: canvasElement.getBoundingClientRect(),
 			}),
 		);

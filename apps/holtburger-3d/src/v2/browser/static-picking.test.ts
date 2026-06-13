@@ -48,4 +48,26 @@ describe("browser static picking", () => {
 		expect(request.ray.direction.y).toBeGreaterThan(0);
 		expect(request.ray.direction.z).toBeLessThan(0);
 	});
+
+	it("passes caller-owned filters through to the static scene query", () => {
+		const request = createBrowserStaticPickRay({
+			camera: {
+				pitchRadians: 0,
+				position: [0, 0, 0],
+				yawRadians: 0,
+			},
+			clientX: 50,
+			clientY: 50,
+			context: { kind: "outdoor" },
+			filters: { ignoreContainingOrigin: true },
+			viewport: {
+				height: 100,
+				left: 0,
+				top: 0,
+				width: 100,
+			},
+		});
+
+		expect(request.filters).toEqual({ ignoreContainingOrigin: true });
+	});
 });

@@ -13,7 +13,7 @@ import type {
 	StaticCoordinatorCommitDelta,
 	StaticScopePayload,
 } from "../static/contracts";
-import type { TexturePacker } from "./packing/packer";
+import { AtlasTexturePacker, type TexturePacker } from "./packing/packer";
 import type {
 	TexturePackingJob,
 	TexturePackingResult,
@@ -341,7 +341,7 @@ describe("V2 texture manager", () => {
 		).toEqual(["terrain-base-a", "terrain-road", "terrain-base-b"]);
 	});
 
-	it("scopes non-terrain texture packing cohorts to draw-unit ownership within a batch", async () => {
+	it("does not force static object texture refs into draw-unit same-page cohorts", async () => {
 		const assetService = new FixtureAssetService();
 		const texturePacker = new FixtureTexturePacker({
 			pageHeight: 512,
@@ -384,22 +384,7 @@ describe("V2 texture manager", () => {
 			],
 		});
 
-		expect(texturePacker.jobs[0]?.cohorts).toEqual([
-			{
-				key: expect.stringContaining("draw-unit:terrain-a"),
-				textureUseIds: [
-					"terrain-a:prepared-texture:06000010",
-					"terrain-a:prepared-texture:06000020",
-				],
-			},
-			{
-				key: expect.stringContaining("draw-unit:terrain-b"),
-				textureUseIds: [
-					"terrain-b:prepared-texture:06000030",
-					"terrain-b:prepared-texture:06000040",
-				],
-			},
-		]);
+		expect(texturePacker.jobs[0]?.cohorts).toBeUndefined();
 		expect(
 			texturePacker.jobs[0]?.sources.map((source) => source.textureUseId),
 		).toEqual([
@@ -408,6 +393,44 @@ describe("V2 texture manager", () => {
 			"terrain-b:prepared-texture:06000030",
 			"terrain-b:prepared-texture:06000040",
 		]);
+	});
+
+	it("packs outdoor-detail static object base-color refs across pages instead of one cohort page", async () => {
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService({
+				byteLength: 512 * 512 * 4,
+				height: 512,
+				outputFormat: "rgba8",
+				width: 512,
+			}),
+			texturePacker: new AtlasTexturePacker(),
+		});
+		const textureUses = Array.from({ length: 10 }, (_, index) =>
+			createTextureUseCommit({
+				domain: "outdoor-detail",
+				drawUnitId: "detail-static-a",
+				renderSurfaceId: 0x06003780 + index,
+				textureUseId: `detail-static-a:base:${index}`,
+				usage: "rgba-color",
+			}),
+		);
+
+		const update = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedDrawUnitIds: [],
+			revision: 1,
+			staticBatchId: "batch-detail",
+			textureUses,
+		});
+
+		expect(update?.placements.length).toBeGreaterThan(1);
+		expect(update?.textureUsePlacements).toHaveLength(textureUses.length);
+		expect(update?.drawUnitBindings).toHaveLength(textureUses.length);
+		expect(
+			new Set(
+				update?.drawUnitBindings.map((binding) => binding.rolePage?.slot),
+			).size,
+		).toBeGreaterThan(1);
 	});
 
 	it("dedupes shared prepared sources inside one static batch", async () => {
@@ -444,16 +467,7 @@ describe("V2 texture manager", () => {
 		expect(
 			texturePacker.jobs[0]?.sources.map((source) => source.textureUseId),
 		).toEqual(["terrain-a:prepared-texture:06000010"]);
-		expect(texturePacker.jobs[0]?.cohorts).toEqual([
-			{
-				key: expect.stringContaining("draw-unit:terrain-a"),
-				textureUseIds: ["terrain-a:prepared-texture:06000010"],
-			},
-			{
-				key: expect.stringContaining("draw-unit:terrain-b"),
-				textureUseIds: ["terrain-a:prepared-texture:06000010"],
-			},
-		]);
+		expect(texturePacker.jobs[0]?.cohorts).toBeUndefined();
 	});
 
 	it("carries atlas rect metadata on duplicate logical texture placements", async () => {
@@ -1427,8 +1441,12 @@ class FixtureAssetService implements AssetService {
 		return {
 			key,
 			payload: createPreparedTexturePayload(
-				this.#payloadOptions ??
-					createPreparedTexturePayloadOptionsFromKey(key, outputFormat),
+				this.#payloadOptions
+					? {
+							...this.#payloadOptions,
+							renderSurfaceId: getPreparedTextureRenderSurfaceId(key),
+						}
+					: createPreparedTexturePayloadOptionsFromKey(key, outputFormat),
 			),
 			preparedAt: "test",
 			revision: 1,
@@ -1792,6 +1810,7 @@ function createTerrainPayload(
 interface PreparedTexturePayloadOptions {
 	readonly byteLength?: number;
 	readonly colorSpace?: "data" | "linear";
+	readonly height?: number;
 	readonly levelFormat?: string;
 	readonly outputFormat: "dxt1" | "index16" | "r8" | "rgba8";
 	readonly renderSurfaceId?: number;
@@ -1814,7 +1833,7 @@ function createPreparedTexturePayload(options: PreparedTexturePayloadOptions) {
 				bytes,
 				format: options.levelFormat ?? "A8R8G8B8",
 				formatRaw: 0,
-				height: 1,
+				height: options.height ?? 1,
 				level: 0,
 				width: options.width ?? 1,
 			},

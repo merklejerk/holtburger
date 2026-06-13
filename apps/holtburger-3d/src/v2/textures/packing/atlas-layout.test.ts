@@ -120,6 +120,40 @@ describe("V2 atlas layout planner", () => {
 		expect(constrained.texturePages[0]?.width).toBeGreaterThan(1024);
 	});
 
+	it("reports failed cohort diagnostics against the largest attempted page", () => {
+		const plan = planAtlasLayout({
+			cohorts: [
+				{
+					entryKeys: ["detail-a", "detail-b", "detail-c", "detail-d", "detail-e"],
+					key: "detail-draw-unit",
+				},
+			],
+			entries: [
+				{ height: 1024, key: "detail-a", width: 1024 },
+				{ height: 1024, key: "detail-b", width: 1024 },
+				{ height: 1024, key: "detail-c", width: 1024 },
+				{ height: 1024, key: "detail-d", width: 1024 },
+				{ height: 1024, key: "detail-e", width: 1024 },
+			],
+			policy: {
+				...createPolicy(),
+				maxTextureSize: 2048,
+				pageSelection: "minimize-textures",
+			},
+		});
+
+		expect(plan.overflows).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					atlasEntryKey: "detail-a",
+					detail: expect.stringContaining("2048x2048"),
+					reason: "atlas-full",
+				}),
+			]),
+		);
+		expect(plan.overflows[0]?.detail).not.toContain("1024x1024");
+	});
+
 	it("reproduces shared terrain road cohorts re-merging sibling slices", () => {
 		const entries = [
 			{ height: 1024, key: "terrain-base-a", width: 1024 },

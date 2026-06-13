@@ -1233,7 +1233,7 @@ function assertPositiveInteger(value: number, label: string): void {
 function createTexturePackingCohorts(
 	group: PendingTexturePlacementGroup,
 ): TexturePackingJob["cohorts"] {
-	if (shouldUseIndependentTerrainPacking(group)) {
+	if (shouldUseIndependentRolePagePacking(group)) {
 		return undefined;
 	}
 
@@ -1254,13 +1254,15 @@ function createTexturePackingCohorts(
 		.sort((left, right) => left.key.localeCompare(right.key));
 }
 
-function shouldUseIndependentTerrainPacking(
+function shouldUseIndependentRolePagePacking(
 	group: PendingTexturePlacementGroup,
 ): boolean {
 	return (
-		group.domain === "outdoor-terrain" &&
-		(group.pagePolicy.sampleClass === "rgba-color" ||
-			group.pagePolicy.sampleClass === "rgba-mask")
+		(group.domain === "outdoor-terrain" &&
+			(group.pagePolicy.sampleClass === "rgba-color" ||
+				group.pagePolicy.sampleClass === "rgba-mask")) ||
+		group.domain === "outdoor-buildings" ||
+		group.domain === "outdoor-detail"
 	);
 }
 

@@ -1,6 +1,7 @@
 import {
 	formatEnvCellAssetId,
 	formatHex32,
+	formatLandblockEnvCellsAssetId,
 	formatLandblockOutdoorAssetId,
 	formatLandblockTopologyAssetId,
 	formatRegionRenderProfileAssetId,
@@ -55,6 +56,10 @@ export function formatHostAssetId(key: HostAssetKey): string {
 		return formatLandblockTopologyAssetId(parseHex32RouteId(key));
 	}
 
+	if (key.kind === "landblock-env-cells") {
+		return formatLandblockEnvCellsAssetId(parseHex32RouteId(key));
+	}
+
 	if (key.kind === "env-cell") {
 		return formatEnvCellAssetId(parseHex32RouteId(key));
 	}
@@ -71,14 +76,16 @@ export function formatHostAssetId(key: HostAssetKey): string {
 }
 
 export function parseHostAssetId(assetId: string): HostAssetKey {
-	const landblockMatch = /^landblock\/([0-9a-fA-F]{8})\/(outdoor|topology)$/.exec(
-		assetId,
-	);
+	const landblockMatch =
+		/^landblock\/([0-9a-fA-F]{8})\/(outdoor|topology|env-cells)$/.exec(assetId);
 	if (landblockMatch) {
+		const routeKind = landblockMatch[2];
 		return createHostAssetKey(
-			landblockMatch[2] === "outdoor"
+			routeKind === "outdoor"
 				? "landblock-outdoor"
-				: "landblock-topology",
+				: routeKind === "topology"
+					? "landblock-topology"
+					: "landblock-env-cells",
 			Number.parseInt(landblockMatch[1] as string, 16),
 		);
 	}
@@ -110,7 +117,10 @@ function normalizeAssetKeyId(
 	kind: HostAssetKeyKind,
 	id: string | number,
 ): string {
-	if (kind === "raw" || (kind === "prepared-texture" && typeof id === "string")) {
+	if (
+		kind === "raw" ||
+		(kind === "prepared-texture" && typeof id === "string")
+	) {
 		return `${id}`.trim();
 	}
 
@@ -118,7 +128,11 @@ function normalizeAssetKeyId(
 		throw new Error(`${kind} route id must be numeric: ${id}`);
 	}
 
-	if (kind === "landblock-outdoor" || kind === "landblock-topology") {
+	if (
+		kind === "landblock-outdoor" ||
+		kind === "landblock-topology" ||
+		kind === "landblock-env-cells"
+	) {
 		return formatHex32(normalizeOutdoorLandblockId(id));
 	}
 
@@ -131,7 +145,9 @@ function normalizeAssetKeyId(
 
 function parseHex32RouteId(key: HostAssetKey): number {
 	if (!/^[0-9a-fA-F]{8}$/.test(key.id)) {
-		throw new Error(`Host asset key ${describeHostAssetKey(key)} needs hex32 id.`);
+		throw new Error(
+			`Host asset key ${describeHostAssetKey(key)} needs hex32 id.`,
+		);
 	}
 
 	return Number.parseInt(key.id, 16) >>> 0;
@@ -154,6 +170,7 @@ function isKnownHostAssetKeyKind(kind: string): kind is HostAssetKeyKind {
 	return (
 		kind === "landblock-outdoor" ||
 		kind === "landblock-topology" ||
+		kind === "landblock-env-cells" ||
 		kind === "env-cell" ||
 		kind === "gfx-obj" ||
 		kind === "setup-model" ||

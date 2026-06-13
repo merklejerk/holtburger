@@ -21,6 +21,7 @@ const DEFAULT_CONTENT_ASSET_WORKERS: usize = 4;
 pub enum ContentAssetRequest {
     LandblockOutdoor(u32),
     LandblockTopology(u32),
+    LandblockEnvCells(u32),
     EnvCell(u32),
     TerrainMaterial(u32),
     RegionRenderProfile(u32),
@@ -56,6 +57,12 @@ pub enum ContentAsset {
         region_number: u32,
     },
     LandblockTopology(Box<LandblockTopologyAsset>),
+    LandblockEnvCells {
+        topology: Box<LandblockTopologyAsset>,
+        cells: Vec<EnvCellAsset>,
+        region_id: u32,
+        region_number: u32,
+    },
     EnvCell {
         cell: Box<EnvCellAsset>,
         region_id: u32,
@@ -111,6 +118,37 @@ impl ContentAssetService {
                         landblock_id,
                     ),
                 )))
+            }
+            ContentAssetRequest::LandblockEnvCells(landblock_id) => {
+                let landblock_id = normalize_landblock_id(landblock_id);
+                let topology = LandblockTopologyAssetAssembler::new().assemble_landblock_with_cache(
+                    &self.content,
+                    &self.decode_cache,
+                    landblock_id,
+                );
+                let mut cells = Vec::with_capacity(topology.env_cells.len());
+                for member in &topology.env_cells {
+                    let env_cell_id = member.env_cell_id;
+                    let cell = EnvCellAssetAssembler::new()
+                        .try_assemble_env_cell_with_cache(
+                            &self.content,
+                            &self.decode_cache,
+                            env_cell_id,
+                        )
+                        .with_context(|| {
+                            format!(
+                                "Could not assemble bundled EnvCell 0x{env_cell_id:08X} for landblock 0x{landblock_id:08X}"
+                            )
+                        })?;
+                    cells.push(cell);
+                }
+                let region = self.decode_cache.region_desc(&self.content)?;
+                Ok(ContentAsset::LandblockEnvCells {
+                    topology: Box::new(topology),
+                    cells,
+                    region_id: region.id,
+                    region_number: region.region_number,
+                })
             }
             ContentAssetRequest::EnvCell(env_cell_id) => {
                 let asset = EnvCellAssetAssembler::new()

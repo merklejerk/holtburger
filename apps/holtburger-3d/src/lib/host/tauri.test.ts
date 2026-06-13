@@ -26,6 +26,7 @@ describe("Tauri host commands", () => {
 			createRequest("e", "landblock/0103ffff/topology"),
 			createRequest("f", "env-cell/01030100"),
 			createRequest("g", "palette/04000001"),
+			createRequest("h", "landblock/0103ffff/env-cells"),
 		]);
 
 		expect(
@@ -39,6 +40,7 @@ describe("Tauri host commands", () => {
 				"landblock/0103ffff/topology",
 				"env-cell/01030100",
 				"palette/04000001",
+				"landblock/0103ffff/env-cells",
 			],
 		]);
 	});
@@ -50,6 +52,7 @@ describe("Tauri host commands", () => {
 			createRequest("c", "render-surface/06000001"),
 			createRequest("d", "surface-texture/05000001"),
 			createRequest("e", "palette/04000001"),
+			createRequest("f", "landblock/0103ffff/env-cells"),
 		]);
 
 		expect(
@@ -57,7 +60,12 @@ describe("Tauri host commands", () => {
 				batch.map((request) => request.assetId),
 			),
 		).toEqual([
-			["env-cell/01030100", "render-surface/06000001", "palette/04000001"],
+			[
+				"env-cell/01030100",
+				"render-surface/06000001",
+				"palette/04000001",
+				"landblock/0103ffff/env-cells",
+			],
 		]);
 		expect(plan.jsonRequests.map((request) => request.assetId)).toEqual([
 			"material/0800006c",

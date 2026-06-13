@@ -3504,7 +3504,7 @@ Phase 11E4E verification:
 
 ### Phase 12A0: Landblock Env-Cell Bundle Host Route
 
-Status: planned. Pulled forward on 2026-06-13 as the next immediate phase before 11E5 because the explicit-object cutout/black-background investigation needs object-level picking evidence, and V2 should not copy v1's topology-plus-N-env-cell request pattern.
+Status: completed on 2026-06-13. Pulled forward as the next immediate phase before 11E5 because the explicit-object cutout/black-background investigation needs object-level picking evidence, and V2 should not copy v1's topology-plus-N-env-cell request pattern.
 
 Purpose: add a host-backed, landblock-owned env-cell source bundle route so V2 can load and understand outdoor-linked interiors and pure dungeon interiors through one isomorphic source boundary.
 
@@ -3520,7 +3520,7 @@ Current steering:
 
 Deliverables:
 
-- New host asset route such as `landblock/{XXYYffff}/env-cells` with one payload for the owning landblock's env-cell source bundle.
+- New host asset route `landblock/{XXYYffff}/env-cells` with one payload for the owning landblock's env-cell source bundle.
 - Concrete host route/DTO proposal recorded before implementation:
 
 ```text
@@ -3581,6 +3581,27 @@ interface LandblockEnvCellDto {
 - Plan/code vocabulary update from `dungeon-static` toward `landblock-env-cells` or an equivalent env-cell-domain name. Temporary aliases are acceptable only if the phase records their removal path.
 - Tests for route parsing, payload schema validation, classification-agnostic env-cell bundle identity, and hard failures for route/payload mismatches.
 
+Implemented:
+
+- Added `ContentAssetRequest::LandblockEnvCells` / `ContentAsset::LandblockEnvCells` in `holtburger-core`, assembled from the existing landblock topology and cached env-cell assemblers so the frontend has one landblock-owned route while the source decoding remains shared.
+- Added Tauri host parsing, direct-JSON rejection, binary-envelope serialization, and route tests for `landblock/{XXYYffff}/env-cells`.
+- Added the V2 host key kind, formatter/parser support, binary lookup routing, route-payload parser entry, and `landblock-env-cells` Zod DTO schema.
+- Bundle cells carry env-cell source facts, render geometry, portal apertures, static seeds, cell BSP, local BVH, and per-cell diagnostics. Outdoor building transition portals remain only on the outdoor payload.
+
+Decision/caveat:
+
+- The initial route is strict: if topology discovers an env cell and that cell cannot assemble its environment/cell-structure/render geometry, the host returns a route failure instead of a partial bundle. This matches current standalone env-cell assembler behavior and keeps 12A0 small. If real HBA coverage exposes brittle cells, add a follow-up before 12A1 to return successful cells plus typed omitted-cell diagnostics rather than failing the whole bundle.
+
+Verification:
+
+- `cargo check`
+- `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+- `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
+
 Acceptance criteria:
 
 - A V2 resolver can request one landblock-scoped env-cell bundle without issuing topology plus one request per env cell.
@@ -3592,24 +3613,43 @@ Acceptance criteria:
 
 ### Phase 12A1: Env-Cell Bundle Resolver And Cell-Level Visibility Model
 
-Status: planned. Follows Phase 12A0.
+Status: planned. Follows Phase 12A0. Refined on 2026-06-13 after the concrete `landblock/{XXYYffff}/env-cells` route and `landblock-env-cells` DTO landed.
 
 Purpose: consume the landblock env-cell bundle in V2 resolver/runtime contracts, preserve the actual spatial and source facts needed by later scene queries, and model env-cell visibility as cell-level traversal rather than flat global bounds or premature grouping.
 
 Current steering:
 
 - Resolver jobs remain landblock-owned. The current/focus env cell is scene/navigation context, not top-level static resolver identity.
-- Replace the fake `dungeon-static` shell path with a real env-cell source payload path backed by the landblock env-cell bundle.
+- Replace the fake `dungeon-static` shell path with a real `landblock-env-cells` source payload path backed by the `landblock/{XXYYffff}/env-cells` host bundle.
+- Prefer a clean domain rename from `dungeon-static` to `landblock-env-cells` now. A temporary alias is only acceptable if implementation discovers a narrow migration blocker and records its removal path immediately.
+- The resolver must request `createHostAssetKey("landblock-env-cells", landblockId)` and consume a `LandblockEnvCellsPayloadDto`; it must not request `landblock-topology` plus individual `env-cell/*` assets.
+- Add an explicit conversion boundary from host DTO to V2 runtime static source payload. The resolver output should be a normalized runtime record, not direct host-route choreography and not a renderer/baker product.
 - Env-cell visibility should initially walk authored visible-cell and portal facts from a focus/current cell and include accepted env cells in their entirety. Overdraw is acceptable at this stage.
 - Do not build env-cell clusters/groups yet. Grouping can be reconsidered after profiling if cell-level inclusion is too expensive.
 - Preserve source facts and BVH nodes/items as typed runtime records where practical. Counts-only summaries are not enough for picking or future culling.
+- Keep env-cell render geometry in the resolver payload for 12A1. Phase 12A2 needs geometry/local BVH/source records for picking, and dropping render geometry here would immediately force another resolver change.
 - Portal traversal can start conservative and explicit. The API/data model should support outdoor transition and interior focus contexts, but full recursive portal rendering remains later dungeon work.
+- Preflight the 12A0 strict-bundle caveat before deeper resolver work. If real HBA coverage shows common cell assembly failures, add partial-cell omitted diagnostics before relying on the bundle in runtime flow.
 
 Deliverables:
 
-- Real V2 resolver path for the landblock env-cell bundle.
-- Static domain rename or alias from `dungeon-static` to `landblock-env-cells` or equivalent env-cell-domain vocabulary.
-- Resolver payload records for:
+- Static domain rename from `dungeon-static` to `landblock-env-cells` across resolver contracts, demand planning, coordinator branches, fake resolver fixtures, and tests.
+- Real V2 resolver path for the landblock env-cell bundle:
+  - schedule one landblock-owned `landblock-env-cells` job for interior/dungeon demand,
+  - request one `landblock-env-cells` host asset by typed key,
+  - validate that the prepared payload kind is `landblock-env-cells`,
+  - fail hard on route/payload mismatches.
+- Resolver output shape equivalent to a normalized `LandblockEnvCellsStaticScopePayload`:
+  - `kind: "landblock-env-cells"`,
+  - `landblock: { kind: "landblock-source"; landblockId; source: "env-cells" }`,
+  - `classification: "outdoor" | "dungeon"`,
+  - ordered `envCellIds`,
+  - `envCellsById`,
+  - `portalLinks`,
+  - `envCellResidencyBvh`,
+  - `diagnostics`,
+  - `missingRefs`.
+- Runtime env-cell records preserving:
   - env-cell membership,
   - cell placement,
   - environment/cell-structure ids,
@@ -3620,18 +3660,32 @@ Deliverables:
   - topology residency BVH records,
   - env-cell local BVH records,
   - missing typed refs and diagnostics.
-- Runtime-owned cell visibility helper that accepts scene context and returns accepted env-cell ids using visible-cell/portal graph facts.
+- Runtime-owned cell visibility helper with an API equivalent to:
+
+```ts
+selectVisibleEnvCells(bundle, {
+	focusEnvCellId,
+	maxDepth,
+	includeFocus,
+});
+```
+
+  It should return deterministic accepted env-cell ids plus diagnostics for missing focus cells, missing target cells, and traversal cutoffs. Default behavior should include the focus cell and authored visible-cell refs; portal-link expansion can be bounded and conservative.
 - Tests proving outdoor-linked and dungeon-classified landblocks use the same env-cell source path.
 - Tests proving cell visibility traversal is deterministic, bounded, and scene-context driven.
 - Tests proving env-cell records do not use host route strings as semantic identity.
+- Tests proving the resolver issues exactly one `landblock-env-cells` host request for an interior landblock and does not request `landblock-topology` or individual `env-cell/*` assets.
+- Tests proving the old `dungeon-static` vocabulary is removed or confined to an explicitly documented temporary alias.
 
 Acceptance criteria:
 
 - V2 can resolve a landblock env-cell bundle into typed runtime source facts without going through v1 topology/env-cell request choreography.
 - A pure dungeon landblock and an outdoor-linked interior use the same resolver/data model.
+- Interior/dungeon demand schedules and resolves `landblock-env-cells`, not `dungeon-static`, unless an explicit temporary alias is documented in this phase with a removal checklist.
 - Accepted env cells are selected by explicit cell visibility/portal facts, not by a flat global Euclidean AABB query.
 - No env-cell grouping/clustering policy exists in this phase beyond whole-cell inclusion.
 - The next scene-query phase has real env-cell local BVH and object/source records available without reloading host assets from the picker.
+- The resolver payload preserves enough source identity for later baking/picking without exposing host route strings as semantic env-cell identity.
 
 ### Phase 12A2: Env-Cell-Aware Static Scene Query And Browser Picker Diagnostics
 

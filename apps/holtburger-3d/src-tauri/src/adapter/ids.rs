@@ -74,6 +74,10 @@ pub fn parse_landblock_topology_asset_id(asset_id: &str) -> Option<u32> {
     parse_landblock_child_asset_id(asset_id, "/topology")
 }
 
+pub fn parse_landblock_env_cells_asset_id(asset_id: &str) -> Option<u32> {
+    parse_landblock_child_asset_id(asset_id, "/env-cells")
+}
+
 pub fn parse_env_cell_asset_id(asset_id: &str) -> Option<u32> {
     asset_id
         .strip_prefix("env-cell/")
@@ -102,6 +106,9 @@ pub fn content_asset_request_from_asset_id(asset_id: &str) -> Option<ContentAsse
         .or_else(|| {
             parse_landblock_topology_asset_id(asset_id).map(ContentAssetRequest::LandblockTopology)
         })
+        .or_else(|| {
+            parse_landblock_env_cells_asset_id(asset_id).map(ContentAssetRequest::LandblockEnvCells)
+        })
         .or_else(|| parse_env_cell_asset_id(asset_id).map(ContentAssetRequest::EnvCell))
         .or_else(|| {
             parse_terrain_material_asset_id(asset_id).map(ContentAssetRequest::TerrainMaterial)
@@ -123,4 +130,21 @@ pub fn content_asset_request_from_asset_id(asset_id: &str) -> Option<ContentAsse
         })
         .or_else(|| parse_render_surface_asset_id(asset_id).map(ContentAssetRequest::RenderSurface))
         .or_else(|| parse_palette_asset_id(asset_id).map(ContentAssetRequest::Palette))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_landblock_env_cells_route_as_landblock_owned_bundle() {
+        assert_eq!(
+            parse_landblock_env_cells_asset_id("landblock/da550123/env-cells"),
+            Some(0xda55ffff)
+        );
+        assert_eq!(
+            content_asset_request_from_asset_id("landblock/da550123/env-cells"),
+            Some(ContentAssetRequest::LandblockEnvCells(0xda55ffff))
+        );
+    }
 }

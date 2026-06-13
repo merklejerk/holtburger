@@ -28,6 +28,13 @@ describe("V2 host asset keys", () => {
 			id: "da55ffff",
 			kind: "landblock-topology",
 		});
+		expect(parseHostAssetId("landblock/da55ffff/env-cells")).toEqual({
+			id: "da55ffff",
+			kind: "landblock-env-cells",
+		});
+		expect(
+			formatHostAssetId(createHostAssetKey("landblock-env-cells", 0xda550123)),
+		).toBe("landblock/da55ffff/env-cells");
 		expect(formatHostAssetId(createHostAssetKey("terrain-material", 3))).toBe(
 			"terrain-material/3",
 		);

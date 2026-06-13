@@ -127,6 +127,7 @@ describe("V2 static coordinator", () => {
 		expect(deltas).toEqual([
 			{
 				addedDrawUnits: [createPlaceholderDrawUnit("terrain-a")],
+				materialCoverage: [],
 				removedDrawUnitIds: [],
 				revision: 1,
 				staticAuthoredDynamicSeeds: [],
@@ -152,6 +153,7 @@ describe("V2 static coordinator", () => {
 
 		expect(deltas.at(-1)).toEqual({
 			addedDrawUnits: [],
+			materialCoverage: [],
 			removedDrawUnitIds: ["terrain-a"],
 			revision: 2,
 			staticAuthoredDynamicSeeds: [],

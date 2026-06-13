@@ -8,6 +8,7 @@ import type {
 	StaticMaterialCoverageFilteringMode,
 	StaticMaterialCoverageFamily,
 	StaticMaterialCoveragePass,
+	StaticMaterialUnrenderedBucket,
 	StaticMaterialRenderOutcome,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialFallbackReason,
@@ -217,6 +218,7 @@ export interface StaticObjectRolePageOverflowDiagnostics {
 
 type RuntimeWarningEvent =
 	| StaticMaterializationFailedWarning
+	| StaticMaterialCoverageDeferredWarning
 	| TerrainRenderableFallbackWarning;
 
 interface StaticMaterializationFailedWarning {
@@ -224,6 +226,14 @@ interface StaticMaterializationFailedWarning {
 	readonly revision: number;
 	readonly message: string;
 	readonly error: unknown;
+}
+
+interface StaticMaterialCoverageDeferredWarning {
+	readonly kind: "static-material-coverage-deferred";
+	readonly revision: number;
+	readonly domain: StaticDomain;
+	readonly landblockId: number | null;
+	readonly buckets: readonly StaticMaterialUnrenderedBucket[];
 }
 
 interface TerrainRenderableFallbackWarning {
@@ -241,6 +251,7 @@ export function createConsoleRuntimeDiagnostics(): RuntimeDiagnostics {
 
 class ConsoleRuntimeDiagnostics implements RuntimeDiagnostics {
 	readonly #reportedFallbacks = new Set<string>();
+	readonly #reportedStaticMaterialCoverage = new Set<string>();
 
 	warn(event: RuntimeWarningEvent): void {
 		switch (event.kind) {
@@ -250,10 +261,41 @@ class ConsoleRuntimeDiagnostics implements RuntimeDiagnostics {
 					event.error,
 				);
 				return;
+			case "static-material-coverage-deferred":
+				this.#warnStaticMaterialCoverageDeferred(event);
+				return;
 			case "terrain-renderable-fallback":
 				this.#warnTerrainRenderableFallback(event);
 				return;
 		}
+	}
+
+	#warnStaticMaterialCoverageDeferred(
+		event: StaticMaterialCoverageDeferredWarning,
+	): void {
+		const warningKey = [
+			event.revision,
+			event.domain,
+			event.landblockId ?? "none",
+			...event.buckets.map(createStaticMaterialBucketSignature),
+		].join("|");
+		if (this.#reportedStaticMaterialCoverage.has(warningKey)) {
+			return;
+		}
+
+		this.#reportedStaticMaterialCoverage.add(warningKey);
+		console.warn(
+			"V2 static material coverage encountered deferred blended/order-dependent materials; renderer support is intentionally deferred until audited evidence justifies it.",
+			{
+				buckets: event.buckets,
+				domain: event.domain,
+				landblockId:
+					event.landblockId === null
+						? null
+						: `0x${event.landblockId.toString(16).padStart(8, "0")}`,
+				revision: event.revision,
+			},
+		);
 	}
 
 	#warnTerrainRenderableFallback(
@@ -279,6 +321,20 @@ class ConsoleRuntimeDiagnostics implements RuntimeDiagnostics {
 			},
 		);
 	}
+}
+
+function createStaticMaterialBucketSignature(
+	bucket: StaticMaterialUnrenderedBucket,
+): string {
+	return [
+		bucket.family,
+		bucket.pass,
+		bucket.outcome,
+		bucket.triangleCount,
+		bucket.materialCount,
+		bucket.partitionCount,
+		bucket.reasonCodes.join(","),
+	].join(":");
 }
 
 function createReasonSignature(

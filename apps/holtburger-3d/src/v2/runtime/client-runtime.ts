@@ -29,6 +29,7 @@ import type {
 	StaticDemand,
 	StaticLodRadii,
 	StaticMaterialCoverageReport,
+	StaticMaterialUnrenderedBucket,
 	ScheduledStaticWorkStatus,
 } from "../static/contracts";
 import {
@@ -38,6 +39,7 @@ import {
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
+const BLENDED_STATIC_AUDIT_WARNING_BUCKET_LIMIT = 8;
 
 export type ManualStaticDomain =
 	| "terrain"
@@ -352,13 +354,35 @@ class ClientRuntimeImpl implements ClientRuntime {
 	}
 
 	#enqueueStaticMaterialization(delta: StaticCoordinatorCommitDelta): void {
+		this.#warnAboutDeferredStaticMaterialCoverage(delta);
 		this.#pendingStaticMaterializations.add(delta.revision);
 		this.#emit();
 		this.#staticMaterializationQueue = this.#staticMaterializationQueue
 			.then(() => this.#materializeStaticCommit(delta))
 			.catch((error: unknown) => {
 				this.#recordStaticMaterializationFailure(delta.revision, error);
+		});
+	}
+
+	#warnAboutDeferredStaticMaterialCoverage(
+		delta: StaticCoordinatorCommitDelta,
+	): void {
+		for (const coverage of delta.materialCoverage) {
+			const buckets = coverage.unrenderedBuckets
+				.filter(isBlendedStaticAuditBucket)
+				.slice(0, BLENDED_STATIC_AUDIT_WARNING_BUCKET_LIMIT);
+			if (buckets.length === 0) {
+				continue;
+			}
+
+			this.#diagnostics.warn({
+				buckets,
+				domain: coverage.domain,
+				kind: "static-material-coverage-deferred",
+				landblockId: coverage.landblockId,
+				revision: delta.revision,
 			});
+		}
 	}
 
 	async #materializeStaticCommit(
@@ -450,6 +474,16 @@ class ClientRuntimeImpl implements ClientRuntime {
 			});
 		}
 	}
+}
+
+function isBlendedStaticAuditBucket(
+	bucket: StaticMaterialUnrenderedBucket,
+): boolean {
+	return (
+		bucket.triangleCount > 0 &&
+		bucket.outcome === "render-deferred" &&
+		(bucket.pass === "transparent" || bucket.pass === "additive")
+	);
 }
 
 function createTerrainTextureDiagnosticsReport(

@@ -1682,6 +1682,7 @@ function createCommitDelta(options: {
 
 	return {
 		addedDrawUnits: [],
+		materialCoverage: [],
 		removedDrawUnitIds: [],
 		revision: 1,
 		staticBatchId: options.staticBatchId ?? "batch-a",

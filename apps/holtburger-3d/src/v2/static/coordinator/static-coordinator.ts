@@ -332,6 +332,7 @@ export class StaticCoordinator {
 		this.#committedDrawUnits = this.#residentDrawUnitIds.size;
 		this.#emitCommitDelta({
 			addedDrawUnits: result.drawUnits,
+			materialCoverage: result.materialCoverage,
 			removedDrawUnitIds: [],
 			revision: result.revision,
 			staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds,
@@ -355,6 +356,7 @@ export class StaticCoordinator {
 		this.#committedDrawUnits = 0;
 		this.#emitCommitDelta({
 			addedDrawUnits: [],
+			materialCoverage: [],
 			removedDrawUnitIds,
 			revision: this.#revision,
 			staticAuthoredDynamicSeeds: [],

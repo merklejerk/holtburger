@@ -946,6 +946,7 @@ export interface StaticCoordinatorCommitDelta {
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
 	readonly removedDrawUnitIds: readonly string[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
+	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly staticSpatialRecords: readonly string[];
 	readonly staticVisibilityRecords: readonly string[];
 	readonly staticPortalInteriorRecords: readonly string[];

@@ -283,7 +283,7 @@ describe("V2 static object material planner", () => {
 		]);
 	});
 
-	it("marks translucent texture materials render-deferred without losing roles", () => {
+	it("marks translucent texture materials renderable without losing roles", () => {
 		const plan = classifyStaticObjectMaterial({
 			material: createTexturedMaterial({
 				surfaceType: 0x100,
@@ -295,6 +295,28 @@ describe("V2 static object material planner", () => {
 		expect(plan).toMatchObject({
 			family: "texture-rgba",
 			pass: "transparent",
+			renderCoverage: "classified-render-candidate",
+			textureRoles: [
+				expect.objectContaining({
+					role: "base-color",
+				}),
+			],
+		});
+		expect(plan.fallbackReasons).toEqual([]);
+	});
+
+	it("keeps additive texture materials render-deferred until the blend mode is implemented", () => {
+		const plan = classifyStaticObjectMaterial({
+			material: createTexturedMaterial({
+				surfaceType: 0x10000,
+			}),
+			paletteSources: [],
+			textureRefs: createTextureRefs({ formatRaw: 1, paletteId: null }),
+		});
+
+		expect(plan).toMatchObject({
+			family: "texture-rgba",
+			pass: "additive",
 			renderCoverage: "classified-render-deferred",
 			textureRoles: [
 				expect.objectContaining({

@@ -847,6 +847,12 @@ class Webgl2Renderer implements Renderer {
 		);
 
 		for (const resource of this.#staticObjectResources.values()) {
+			if (
+				resource.materialPass === "transparent" ||
+				resource.materialPass === "additive"
+			) {
+				continue;
+			}
 			const bindings =
 				this.#textureBindings.get(resource.drawUnitId) ?? new Map();
 			const pageBindings = createStaticObjectPageBindings(
@@ -1058,6 +1064,7 @@ interface StaticObjectGeometryResource {
 	readonly indexBuffer: WebGLBuffer;
 	readonly drawUnitId: string;
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
+	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
 	readonly materialEntries: StaticObjectGeometryStaticDrawUnit["materialEntries"];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
@@ -1514,6 +1521,7 @@ function createStaticObjectGeometryResource(
 			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
 		materialEntries: drawUnit.materialEntries,
 		materialFamily: drawUnit.materialFamily,
+		materialPass: drawUnit.materialPass,
 		materialSlotBuffer,
 		positionBuffer,
 		texCoordBuffer,

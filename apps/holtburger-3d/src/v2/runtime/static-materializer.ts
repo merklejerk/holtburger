@@ -362,6 +362,7 @@ function remapStaticObjectDrawUnit(
 		materialIds: uniqueNumbers(
 			materialEntries.flatMap((entry) => entry.materialIds),
 		),
+		renderState: summary?.renderState ?? drawUnit.renderState,
 		paletteFirstIndex: summary?.paletteFirstIndex ?? drawUnit.paletteFirstIndex,
 		paletteTextureUseId:
 			summary?.paletteTextureUseId ?? drawUnit.paletteTextureUseId,

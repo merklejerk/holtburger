@@ -361,7 +361,7 @@ export function classifyStaticObjectMaterial(
 			});
 			return createUnsupportedPlan(basePlan, [reason, ...unsupportedFlagReasons]);
 		}
-		const indexedDeferredReasons = behavior.blend.depthWrite
+		const indexedDeferredReasons = isSupportedTransparentStaticBlend(behavior)
 			? []
 			: [
 					createFallbackReason({
@@ -422,7 +422,7 @@ export function classifyStaticObjectMaterial(
 		});
 	}
 
-	const translucentReasons = behavior.blend.depthWrite
+	const translucentReasons = isSupportedTransparentStaticBlend(behavior)
 		? []
 		: [
 				createFallbackReason({
@@ -896,6 +896,16 @@ function resolveMaterialPass(
 		return "transparent";
 	}
 	return behavior.alphaPolicy.alphaTest > 0 ? "alpha-test" : "opaque";
+}
+
+function isSupportedTransparentStaticBlend(
+	behavior: ReturnType<typeof deriveMaterialBehavior>,
+): boolean {
+	return (
+		behavior.blend.depthWrite ||
+		behavior.blend.mode === "alpha" ||
+		behavior.blend.mode === "translucent"
+	);
 }
 
 function resolveMaterialColor(

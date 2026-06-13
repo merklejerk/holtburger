@@ -9,7 +9,7 @@ export function isRenderableStaticObjectMaterialPlan(
 ): boolean {
 	if (
 		plan.family === "flat-color" &&
-		(plan.pass === "opaque" || plan.pass === "alpha-test") &&
+		isRenderableStaticObjectPass(plan.pass, plan.alphaPolicy.mode) &&
 		plan.renderCoverage === "classified-render-candidate" &&
 		plan.textureRoles.length === 0
 	) {
@@ -18,7 +18,7 @@ export function isRenderableStaticObjectMaterialPlan(
 
 	return (
 		(plan.family === "texture-rgba" || plan.family === "indexed-paletted") &&
-		(plan.pass === "opaque" || plan.pass === "alpha-test") &&
+		isRenderableStaticObjectPass(plan.pass, plan.alphaPolicy.mode) &&
 		plan.renderCoverage === "classified-render-candidate" &&
 		isCurrentlyStageableStaticObjectDataUseLayout(
 			plan.textureRoles.map((role) => role.dataUse),
@@ -31,7 +31,7 @@ export function isRenderableStaticObjectPartition(
 ): boolean {
 	if (
 		partition.family === "flat-color" &&
-		(partition.pass === "opaque" || partition.pass === "alpha-test") &&
+		isRenderableStaticObjectPass(partition.pass, partition.alphaMode) &&
 		partition.renderCoverage === "classified-render-candidate" &&
 		partition.coarseTablePlan.entries.every(
 			(entry) => entry.textureDataUses.length === 0,
@@ -43,11 +43,23 @@ export function isRenderableStaticObjectPartition(
 	return (
 		(partition.family === "texture-rgba" ||
 			partition.family === "indexed-paletted") &&
-		(partition.pass === "opaque" || partition.pass === "alpha-test") &&
+		isRenderableStaticObjectPass(partition.pass, partition.alphaMode) &&
 		partition.renderCoverage === "classified-render-candidate" &&
 		partition.coarseTablePlan.entries.every((entry) =>
 			isCurrentlyStageableStaticObjectDataUseLayout(entry.textureDataUses),
 		)
+	);
+}
+
+function isRenderableStaticObjectPass(
+	pass: StaticObjectMaterialPlan["pass"],
+	alphaMode: StaticObjectMaterialPlan["alphaPolicy"]["mode"],
+): boolean {
+	return (
+		pass === "opaque" ||
+		pass === "alpha-test" ||
+		(pass === "transparent" &&
+			(alphaMode === "alpha" || alphaMode === "translucent"))
 	);
 }
 

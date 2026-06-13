@@ -284,7 +284,7 @@ export interface TerrainMeshQuadFacts {
 	readonly bounds: StaticBounds;
 }
 
-interface StaticBounds {
+export interface StaticBounds {
 	readonly min: StaticVec3;
 	readonly max: StaticVec3;
 }
@@ -750,8 +750,10 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly landblockId: number;
 	readonly domain: "outdoor-buildings" | "outdoor-detail";
 	readonly materialFamily: "flat-color" | "indexed-paletted" | "texture-rgba";
-	readonly materialPass: "opaque" | "alpha-test";
+	readonly materialPass: StaticObjectMaterialPass;
 	readonly materialBucketKey: string;
+	readonly renderState: StaticObjectRenderState;
+	readonly sort: StaticObjectSortMetadata;
 	readonly coordinateSpace: "landblock-render-local";
 	readonly positions: Float32Array;
 	readonly texCoords: Float32Array;
@@ -826,6 +828,7 @@ export interface StaticObjectMaterialTableEntry {
 	readonly slot: number;
 	readonly materialIds: readonly number[];
 	readonly alphaTest: number;
+	readonly renderState: StaticObjectRenderState;
 	readonly materialColor: readonly [number, number, number, number];
 	readonly materialEmissiveColor: readonly [number, number, number];
 	readonly primaryTextureUseId: string | null;
@@ -836,6 +839,48 @@ export interface StaticObjectMaterialTableEntry {
 	readonly detailTextureUseId: string | null;
 	readonly detailTextureTiling: number;
 	readonly primaryTextureWrapMode: "clamp" | "repeat";
+}
+
+type StaticObjectMaterialPass =
+	| "opaque"
+	| "alpha-test"
+	| "transparent"
+	| "additive";
+
+export interface StaticObjectRenderState {
+	readonly blend: StaticObjectBlendState;
+	readonly depthTest: true;
+	readonly depthWrite: boolean;
+}
+
+interface StaticObjectBlendState {
+	readonly enabled: boolean;
+	readonly mode:
+		| "opaque"
+		| "clipmap"
+		| "translucent"
+		| "alpha"
+		| "alpha-additive"
+		| "inverse-alpha"
+		| "inverse-alpha-additive"
+		| "additive";
+	readonly srcFactor:
+		| "one"
+		| "src-alpha"
+		| "one-minus-src-alpha"
+		| null;
+	readonly dstFactor:
+		| "one"
+		| "src-alpha"
+		| "one-minus-src-alpha"
+		| null;
+}
+
+export interface StaticObjectSortMetadata {
+	readonly policy: "depth-writing" | "object-part-back-to-front";
+	readonly objectPartKey: string | null;
+	readonly center: readonly [number, number, number];
+	readonly bounds: StaticBounds | null;
 }
 
 export interface TerrainMaterialLayerPlan {

@@ -146,7 +146,7 @@ type EnvCellBvhRuntimeItem =
 			readonly seed: EnvCellStaticSeedRuntimeRecord;
 	  }
 	| {
-			readonly kind: "portal" | "render-geometry";
+			readonly kind: "cell-structure-geometry" | "portal";
 			readonly bvhItemIndex: number;
 			readonly sourceItem: unknown;
 	  };

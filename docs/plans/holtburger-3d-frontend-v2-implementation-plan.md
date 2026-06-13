@@ -3571,7 +3571,7 @@ interface LandblockEnvCellDto {
   - env-cell portal links and portal apertures,
   - visible-cell refs,
   - environment and cell-structure ids,
-  - render geometry source facts,
+  - cell-structure geometry source facts,
   - static object seeds,
   - topology/env-cell residency BVH nodes/items,
   - per-env-cell local BVH nodes/items,
@@ -3586,11 +3586,11 @@ Implemented:
 - Added `ContentAssetRequest::LandblockEnvCells` / `ContentAsset::LandblockEnvCells` in `holtburger-core`, assembled from the existing landblock topology and cached env-cell assemblers so the frontend has one landblock-owned route while the source decoding remains shared.
 - Added Tauri host parsing, direct-JSON rejection, binary-envelope serialization, and route tests for `landblock/{XXYYffff}/env-cells`.
 - Added the V2 host key kind, formatter/parser support, binary lookup routing, route-payload parser entry, and `landblock-env-cells` Zod DTO schema.
-- Bundle cells carry env-cell source facts, render geometry, portal apertures, static seeds, cell BSP, local BVH, and per-cell diagnostics. Outdoor building transition portals remain only on the outdoor payload.
+- Bundle cells carry env-cell source facts, prepared cell-structure geometry, portal apertures, static seeds, cell BSP, local BVH, and per-cell diagnostics. Outdoor building transition portals remain only on the outdoor payload.
 
 Decision/caveat:
 
-- The initial route is strict: if topology discovers an env cell and that cell cannot assemble its environment/cell-structure/render geometry, the host returns a route failure instead of a partial bundle. This matches current standalone env-cell assembler behavior and keeps 12A0 small. If real HBA coverage exposes brittle cells, add a follow-up before 12A1 to return successful cells plus typed omitted-cell diagnostics rather than failing the whole bundle.
+- The initial route is strict: if topology discovers an env cell and that cell cannot assemble its environment/cell-structure geometry, the host returns a route failure instead of a partial bundle. This matches current standalone env-cell assembler behavior and keeps 12A0 small. If real HBA coverage exposes brittle cells, add a follow-up before 12A1 to return successful cells plus typed omitted-cell diagnostics rather than failing the whole bundle.
 
 Verification:
 
@@ -3627,7 +3627,7 @@ Current steering:
 - Env-cell visibility should initially walk authored visible-cell and portal facts from a focus/current cell and include accepted env cells in their entirety. Overdraw is acceptable at this stage.
 - Do not build env-cell clusters/groups yet. Grouping can be reconsidered after profiling if cell-level inclusion is too expensive.
 - Preserve source facts and BVH nodes/items as typed runtime records where practical. Counts-only summaries are not enough for picking or future culling.
-- Keep env-cell render geometry in the resolver payload for 12A1. Phase 12A2 needs geometry/local BVH/source records for picking, and dropping render geometry here would immediately force another resolver change.
+- Keep env-cell cell-structure geometry in the resolver payload for 12A1. Phase 12A2 needs geometry/local BVH/source records for picking, and dropping it here would immediately force another resolver change.
 - Portal traversal can start conservative and explicit. The API/data model should support outdoor transition and interior focus contexts, but full recursive portal rendering remains later dungeon work.
 - Preflight the 12A0 strict-bundle caveat before deeper resolver work. If real HBA coverage shows common cell assembly failures, add partial-cell omitted diagnostics before relying on the bundle in runtime flow.
 
@@ -3655,7 +3655,7 @@ Deliverables:
   - environment/cell-structure ids,
   - portal links/apertures,
   - visible-cell refs,
-  - local render geometry facts,
+  - local cell-structure geometry facts,
   - static object seed facts,
   - topology residency BVH records,
   - env-cell local BVH records,
@@ -3681,7 +3681,7 @@ Implementation notes:
 
 - Added `LandblockEnvCellsResolver` under the V2 static env-cell domain. It requests exactly one `createHostAssetKey("landblock-env-cells", landblockId)` host asset, validates `kind: "landblock-env-cells"`, and converts the host DTO into `LandblockEnvCellsStaticScopePayload`.
 - Replaced the `dungeon-static` static domain with `landblock-env-cells` across static contracts, demand planning, fake resolver fixtures, worker routing, coordinator snapshots, runtime diagnostics, and the browser V2 diagnostics panel. No compatibility alias was kept.
-- The resolver preserves env-cell placement, environment/cell-structure identities, surfaces/material identities, portals, portal apertures, static object seeds, render geometry, cell BSP, topology residency BVH records, and per-cell local BVHs for Phase 12A2 scene query work.
+- The resolver preserves env-cell placement, environment/cell-structure identities, surfaces/material identities, portals, portal apertures, static object seeds, cell-structure geometry, cell BSP, topology residency BVH records, and per-cell local BVHs for Phase 12A2 scene query work.
 - The runtime conversion strips host route strings out of semantic env-cell/spatial records. In particular, residency BVH `assetId` values become typed env-cell identities; object source route strings remain only in explicit debug provenance.
 - Added `selectVisibleEnvCells(...)` as a bounded whole-cell traversal helper over authored visible-cell refs plus env-cell portal links. It returns deterministic accepted cell ids and typed diagnostics for missing focus cells, missing visible cells, and traversal cutoffs.
 - Follow-up course correction on 2026-06-13: purged the topology-only V2 static domain and V2 asset-key/preparation support for `landblock/{XXYYffff}/topology`. The host route can remain for V1/diagnostics, but V2 now treats topology facts as part of `landblock-env-cells`.
@@ -3751,7 +3751,7 @@ Implementation notes:
 - Wired the client runtime to ingest source payload deltas into the static scene query and materialized static residency deltas into outdoor query records. The runtime exposes `pickStaticRay(...)`; Svelte/browser code only builds a ray and displays neutral hit facts.
 - Added browser pick-ray construction that mirrors the V2 renderer camera convention and FOV. The harness now updates a selected static diagnostic on non-drag primary clicks.
 - Outdoor picking currently indexes materialized static-object draw-unit bounds and source mapping strings because the committed static-object sidecar records are still string-shaped. This is sufficient for object/material-family diagnostics but not exact part/triangle identity.
-- Env-cell picking indexes static object seed `instanceBounds` from the resolved `landblock-env-cells` bundle. The host local BVH item records identify render geometry/static/portal items, but the current query slice does not walk BVH node bounds yet; broad env-cell visibility/frustum traversal remains future work.
+- Env-cell picking indexes static object seed `instanceBounds` from the resolved `landblock-env-cells` bundle. The host local BVH item records identify cell-structure geometry/static/portal items, but the current query slice does not walk BVH node bounds yet; broad env-cell visibility/frustum traversal remains future work.
 
 Phase 12A2 spicy bits:
 
@@ -3803,7 +3803,7 @@ Deliverables:
 
 - Preserve host `outdoorBvh.nodes/items` in V2 outdoor static source payloads instead of reducing them to counts. Keep counts as summaries only.
 - Add typed outdoor BVH item facts that map each BVH item to object-grained `StaticObjectInstanceFacts` identity, source, object kind, bounds, and debug provenance.
-- Preserve and expose env-cell `localBvh.nodes/items` as queryable records keyed to env-cell static object seeds, render-geometry items, and portals. The first object-picking slice can return static object items only, but the index shape must not discard render/portal item identity.
+- Preserve and expose env-cell `localBvh.nodes/items` as queryable records keyed to env-cell static object seeds, cell-structure geometry items, and portals. The first object-picking slice can return static object items only, but the index shape must not discard structure/portal item identity.
 - Generalize static coordinator source-payload publication so outdoor static-object payloads can feed the query service before/independently of bake/materialization. `landblock-env-cells` remains source-only, but outdoor object source payloads should also be available to the query layer without waiting for renderer draw-unit output.
 - Add a shared BVH traversal helper for ray-vs-node AABB traversal with deterministic candidate ordering and no frontend BVH rebuild.
 - Refactor `StaticSceneQuery` around BVH roots:
@@ -3897,7 +3897,7 @@ interface LandblockEnvCellDto {
 	memberId: string;
 	localPlacement: PlacementTransformDto;
 	localBvh: PreparedEnvCellBvhDto;
-	// remaining environment, cell-structure, portal, static seed, render geometry,
+	// remaining environment, cell-structure geometry, portal, static seed,
 	// diagnostics, and source fields remain as in 12A0/12A1.
 }
 ```
@@ -3940,12 +3940,12 @@ Phase 12A4 spicy bits:
 - The direct bundle assembler loads all env-cell facts before loading environments, then requests each environment with the full set of cell-structure ids needed by that environment. That avoids the subtle one-cell-at-a-time bug where shared environments with different selected structures could drop later cells.
 - `landblockEnvCellBvh` is still flat. The name/shape now matches the 12A5 destination, but the hierarchy is not yet a real env-cell broad-phase tree.
 - The V2 bundle now emits env-cell root placement in query/render axes. Per-cell local geometry/BVH coordinates remain env-cell-local source coordinates; 12A5 must be careful to transform local BVH root bounds through the new root placement convention when building landblock-wide bounds.
-- Env cells with no render geometry, static mesh bounds, or portal aperture bounds are invalid for the landblock-wide BVH. The corrected contract drops them from `landblockEnvCellBvh` instead of inventing fallback bounds, while keeping them in `envCells` with diagnostics so the bad source condition is visible.
+- Env cells with no cell-structure geometry, static mesh bounds, or portal aperture bounds are invalid for the landblock-wide BVH. The corrected contract drops them from `landblockEnvCellBvh` instead of inventing fallback bounds, while keeping them in `envCells` with diagnostics so the bad source condition is visible.
 
 Phase 12A4 failed to close:
 
 - No live browser/manual env-cell picking rerun was performed against the explicit-object/cutout investigation target.
-- `landblockEnvCellBvh` item bounds are derived from transformed local render/static/portal content bounds, but the BVH hierarchy itself remains flat. Phase 12A5 owns replacing the flat node scaffold with a true landblock-wide env-cell hierarchy and query primitive.
+- `landblockEnvCellBvh` item bounds are derived from transformed local cell-structure/static/portal content bounds, but the BVH hierarchy itself remains flat. Phase 12A5 owns replacing the flat node scaffold with a true landblock-wide env-cell hierarchy and query primitive.
 
 Phase 12A4 verification:
 
@@ -3969,8 +3969,8 @@ Current steering:
 - Portal walking decides semantic visibility once a current env-cell or portal entry is known. It does not replace initial residency discovery. V2 needs a landblock-wide env-cell BVH to answer which env cells contain or intersect a camera/ray/frustum before or alongside portal traversal.
 - The host/Rust preparation layer should build the landblock-wide env-cell BVH. The browser/runtime must preserve and traverse it; it should not rebuild static BVHs from frontend-computed bounds.
 - The existing Rust prepared BVH builder is private and tied to `PreparedSpatialItemKind` / outdoor-static semantics. 12A5 should extract a reusable prepared-BVH builder or add a dedicated env-cell builder in `holtburger-content`, not continue building BVH JSON ad hoc in the Tauri adapter.
-- Top-level landblock env-cell BVH items should be env-cell-grained. The item may reference an env cell whose leaf/detail structure is still carried by that cell's `localBvh`; object/render/portal detail remains per-cell.
-- Per-cell `localBvh` should also be a real prepared BVH over render geometry, static seeds, and portal apertures, not one aggregate flat node, unless the source cell genuinely has too few spatial items to split.
+- Top-level landblock env-cell BVH items should be env-cell-grained. The item may reference an env cell whose leaf/detail structure is still carried by that cell's `localBvh`; object/cell-structure/portal detail remains per-cell.
+- Per-cell `localBvh` should also be a real prepared BVH over cell-structure geometry, static seeds, and portal apertures, not one aggregate flat node, unless the source cell genuinely has too few spatial items to split.
 - If a cell is not reachable through the landblock env-cell BVH, V2 should not silently query it through an out-of-band roots list. Missing or malformed BVH data should surface as a typed warning/error and an unqueryable source record.
 - Dry run on 2026-06-13 found that landblock-wide cell bounds require conservative transformation of local BVH root bounds through the 12A4 placement convention. This should be tested with translated and rotated cells before runtime query changes rely on it.
 
@@ -3978,7 +3978,7 @@ Deliverables:
 
 - Reusable Rust prepared-BVH construction helper for arbitrary item bounds/kind masks, or a dedicated env-cell BVH builder in `holtburger-content`, with tests independent of JSON serialization.
 - Host/preparation update replacing the flat `landblockEnvCellBvh` payload with a true landblock-wide env-cell BVH built from env-cell root bounds.
-- Env-cell root bounds derived from real cell content where available: transformed local BVH root bounds, render geometry bounds, static seed bounds, and portal aperture bounds. Cells without those bounds are omitted with diagnostics rather than receiving synthetic placement-point bounds.
+- Env-cell root bounds derived from real cell content where available: transformed local BVH root bounds, cell-structure geometry bounds, static seed bounds, and portal aperture bounds. Cells without those bounds are omitted with diagnostics rather than receiving synthetic placement-point bounds.
 - Host/preparation update replacing flat `localBvh` serialization with the same real prepared BVH builder used for other prepared/source BVHs, preserving item-index order and kind masks.
 - Tests proving landblock-wide env-cell bounds are correct for non-identity placement transforms under the V2 bundle placement convention.
 - `StaticSceneQuery` refactor so landblock env-cell state is stored as one landblock-wide BVH root plus per-cell local BVH roots, not only a map of independent cell roots.
@@ -4000,7 +4000,7 @@ Deliverables:
 Acceptance criteria:
 
 - `landblock/{XXYYffff}/env-cells` exposes one landblock-wide env-cell BVH whose items are env-cell-grained and whose nodes are hierarchical for non-trivial cells.
-- Per-cell `localBvh` exposes a real local hierarchy over render geometry, static seeds, and portal apertures where item counts justify subdivision.
+- Per-cell `localBvh` exposes a real local hierarchy over cell-structure geometry, static seeds, and portal apertures where item counts justify subdivision.
 - Runtime env-cell ray picking never linearly considers every env-cell root for a broad accepted set unless the landblock BVH itself returns every cell as spatially relevant.
 - Initial env-cell residency can be established from the landblock-wide env-cell BVH without relying on portal traversal or renderer draw state.
 - Portal walking remains a semantic visibility step layered on top of residency/broad-phase candidates; it is not conflated with Euclidean BVH inclusion.
@@ -4011,8 +4011,9 @@ Phase 12A5 execution notes:
 
 - Moved V2 landblock env-cell BVH construction into `holtburger-content`. `LandblockEnvCellsAsset` now carries prepared landblock-level env-cell BVH nodes plus item metadata, and each bundled env cell carries prepared local BVH nodes plus item metadata.
 - Reused the existing Rust prepared BVH splitting algorithm through a scoped builder instead of continuing to construct V2 env-cell BVH nodes in the Tauri JSON adapter. The adapter now serializes prepared nodes/items for V2 and remains responsible for legacy flat topology/standalone env-cell route compatibility only.
-- Landblock env-cell bounds are now derived from each cell's local BVH root transformed through the 12A4 V2 placement convention. Cells with no local render/static/portal bounds still stay out of the landblock BVH and report source diagnostics.
-- Per-cell V2 `localBvh` now comes from the same prepared BVH builder over render geometry, indoor static seed instance bounds, and portal aperture bounds. Item arrays are sorted alongside spatial items so node `itemIndices` stay aligned with serialized item metadata.
+- Landblock env-cell bounds are now derived from each cell's local BVH root transformed through the 12A4 V2 placement convention. Cells with no local cell-structure/static/portal bounds still stay out of the landblock BVH and report source diagnostics.
+- Per-cell V2 `localBvh` now comes from the same prepared BVH builder over cell-structure geometry, indoor static seed instance bounds, and portal aperture bounds. Item arrays are sorted alongside spatial items so node `itemIndices` stay aligned with serialized item metadata.
+- Renamed the V2 env-cell local BVH item kind from `render-geometry` to `cell-structure-geometry` after review. The lower-level `renderGeometry` payload field and `PreparedPolygonSetRenderGeometry` helper names remain because they describe prepared polygon geometry output, while the BVH item kind now names the source semantic role.
 - `StaticSceneQuery` now stores `landblock-env-cells` as one landblock-wide env-cell BVH root plus a per-env-cell local root map. Env-cell ray picking traverses the landblock BVH first, intersects with the request's accepted/current env-cell set, then enters only matching local BVHs.
 - Added `queryEnvCellAtPoint` as the first internal residency primitive backed by the landblock env-cell BVH, with deterministic env-cell id tie-breaking.
 - Added Rust tests for prepared env-cell BVH hierarchy splitting and transformed local-root bounds, plus TS tests proving env-cell locals are not queryable when the landblock BVH is absent and that point residency uses the landblock BVH.
@@ -4020,7 +4021,7 @@ Phase 12A5 execution notes:
 Phase 12A5 spicy bits:
 
 - This phase changed the runtime contract from "accepted env-cell roots are enough" to "the landblock BVH is mandatory for env-cell queries." That is the correct shape, but it means malformed top-level BVH data now makes otherwise populated local cell records unqueryable.
-- The prepared BVH kind mask is still a compact bitmask shared by source domains. It is sufficient for traversal and diagnostics today, but it is not yet a strongly typed per-domain mask contract.
+- Prepared BVH kind masks are now domain-tagged records for content-built BVHs (`outdoor-static`, `landblock-env-cells`, and `env-cell-local`) instead of one shared numeric bitmask. Legacy flat terrain/topology/standalone-env-cell scaffolds still carry numeric masks until those route surfaces are modernized or deleted.
 - Legacy `landblock-topology` and standalone `env-cell` payloads still use the old adapter-side flat BVH scaffolding. V2 no longer depends on those paths, but they remain until the old display/V1 route surface is deleted.
 
 Phase 12A5 failed to close:
@@ -4128,7 +4129,7 @@ Purpose: build on the Phase 12A landblock env-cell bundle path by turning resolv
 Deliverables:
 
 - Env-cell geometry bake input records derived from the Phase 12A landblock env-cell bundle payload.
-- Bake support for env-cell render geometry, local placement, source surface/material slots, portal apertures, and static object seeds.
+- Bake support for env-cell cell-structure geometry, local placement, source surface/material slots, portal apertures, and static object seeds.
 - Interior static-object source enrichment through the same shared static material/object path used by outdoor static objects where the source facts are isomorphic.
 - Portal, visibility, and env-cell spatial records as peer bake outputs, not renderer-owned dependency walks.
 - Harness summary for known dungeon/interior focus: owning landblock, current env-cell, accepted env-cell count, visible-cell count, portal count, rendered geometry counts, and missing typed refs.

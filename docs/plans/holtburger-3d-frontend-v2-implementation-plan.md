@@ -3787,7 +3787,7 @@ Acceptance criteria:
 
 ### Phase 12A3: BVH-Backed Static Scene Query Course Correct
 
-Status: planned. Immediate corrective phase after 12A2 and before 11E5.
+Status: completed on 2026-06-13. Immediate corrective phase after 12A2 and before 11E5.
 
 Purpose: replace the temporary linear AABB query backing with a runtime-owned static scene query that preserves and traverses host/prepared BVHs, keeps object-grained hit identity, and handles request-anchor/root-transform behavior without rebuilding static BVHs in the frontend.
 
@@ -3797,7 +3797,7 @@ Current steering:
 - Object-level resolution is sufficient for this phase. Do not broaden into part/triangle picking unless a later inspection feature proves the need.
 - Prepared BVHs are source/static facts. The runtime query service owns live query state and root transforms; the renderer still does not own semantic picking or AC source identity.
 - V2 does not have live follow-mode rebasing yet. This phase should implement request-anchor/root-transform behavior that is compatible with future rebase/follow mode without pretending that camera-driven reanchoring exists today. For outdoor landblocks, the same canonical landblock BVH can be queried through a root translation derived from the active requested outdoor anchor. For env cells, query rays should be transformed into the env-cell/local root context or traversed with the cell root transform.
-- Draw-unit bounds may remain a fallback for payloads without BVHs or for renderer-output diagnostics, but tests must prove normal outdoor/env-cell picking uses BVH traversal.
+- Draw-unit bounds are not a semantic picking fallback. If an object is not reachable through the prepared/source BVH, V2 treats it as non-queryable for this phase.
 
 Deliverables:
 
@@ -3810,7 +3810,7 @@ Deliverables:
   - outdoor landblock roots with canonical source BVH plus current root translation,
   - env-cell roots with cell-local BVH plus env-cell/root transform,
   - scene-context gates for `outdoor` and `env-cell`,
-  - fallback linear records only when a payload lacks BVH data.
+  - no renderer draw-unit or frontend-computed bounds fallback.
 - Extract/shared runtime static placement helpers so renderer materialization and query-root placement use the same outdoor landblock-to-anchor translation math.
 - Add explicit request-anchor/root-transform handling so a new static request can replace root placements or query transforms without rebuilding BVH nodes/items. This should be testable independently from WebGL renderer upload and should leave full camera-driven follow/rebase policy to a later phase.
 - Keep browser picker integration unchanged except for richer hit diagnostics. Browser mode still builds the ray and formats the neutral hit record; it does not own BVH traversal.
@@ -3818,17 +3818,34 @@ Deliverables:
 - Tests proving env-cell picking traverses the env-cell local BVH and respects the accepted/current cell context.
 - Tests proving outdoor static-object source payloads populate query roots without relying on materialized static-object draw units.
 - Tests proving request-anchor/root translation behavior: the same BVH root can move relative to renderer-local space and the pick result remains correct after replacing the root transform.
-- Tests proving draw-unit-bound fallback is only used for records without BVH data.
+- Tests proving payloads without BVH data do not become pickable through renderer draw-unit bounds.
 
 Acceptance criteria:
 
 - Normal outdoor object picking uses preserved host `outdoorBvh` nodes/items, not materialized draw-unit bounds.
 - Normal env-cell object picking uses preserved env-cell `localBvh` nodes/items, not a flat scan over all seed bounds.
+- Objects absent from the prepared/source BVH are not queryable; V2 does not synthesize semantic picking records from renderer draw units.
 - BVH roots remain canonical/source-owned with runtime root transforms; request-anchor changes do not rebuild static BVHs, and the shape remains compatible with later follow-mode rebase work.
 - Hits remain object-grained and include stable object/source/material diagnostic hooks sufficient for the black-background/cutout investigation.
 - The WebGL renderer remains uninvolved in semantic picking and does not gain AC object/source/BVH ownership.
 - `landblock-env-cells` remains source/query-only until env-cell geometry baking in Phase 13A; the BVH course correction must not reintroduce placeholder bake or empty atlas batches.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and focused static-scene query/runtime tests pass before returning to 11E5.
+
+Implementation notes:
+
+- V2 outdoor static object payloads now preserve `sourceSpatial.outdoorBvh` nodes/items and bind each BVH item back to object-grained `StaticObjectInstanceFacts` when the object source resolved. Counts remain as summaries.
+- Static coordinator source-payload publication now fires for all current resolver payloads, not only source-only env-cell bundles. `landblock-env-cells` still commits as source-only and does not enter bake/materialization.
+- `StaticSceneQuery` now owns source BVH roots for outdoor static objects and env-cell local BVHs. Outdoor roots use canonical source BVH nodes plus a runtime root translation derived from the requested outdoor anchor. Env-cell roots transform rays through the cell placement into env-cell-local space.
+- Renderer draw-unit bounds were removed from semantic picking after review. Browser mode only formats the richer neutral BVH-backed hit; renderer semantics remain untouched.
+- Request-anchor/root-transform behavior is covered, but full camera-follow/live rebase remains deferred because V2 still has no follow-mode reanchor policy.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- static-scene-query static-coordinator client-runtime outdoor-static-objects-resolver`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 11E5: Static Material Family Resteer
 

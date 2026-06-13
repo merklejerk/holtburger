@@ -1,5 +1,6 @@
 import type {
 	LandblockEnvCellsPayloadDto,
+	LandblockOutdoorPayloadDto,
 	PlacementTransformDto,
 } from "../../lib/host/contracts";
 
@@ -292,7 +293,7 @@ export interface StaticBounds {
 	readonly max: StaticVec3;
 }
 
-interface StaticVec3 {
+export interface StaticVec3 {
 	readonly x: number;
 	readonly y: number;
 	readonly z: number;
@@ -512,9 +513,23 @@ interface OutdoorStaticSourceSpatialFacts {
 	readonly bounds: StaticBounds | null;
 	readonly outdoorBvhNodeCount: number;
 	readonly outdoorBvhItemCount: number;
+	readonly outdoorBvh: OutdoorStaticBvhFacts | null;
 }
 
-interface StaticPlacementTransform {
+export interface OutdoorStaticBvhFacts {
+	readonly coordinateSpace: "landblock-render-local";
+	readonly nodes: NonNullable<LandblockOutdoorPayloadDto["outdoorBvh"]>["nodes"];
+	readonly items: readonly OutdoorStaticBvhItemFacts[];
+}
+
+interface OutdoorStaticBvhItemFacts {
+	readonly bvhItemIndex: number;
+	readonly kind: "static" | "building";
+	readonly instanceId: string;
+	readonly object: StaticObjectInstanceFacts | null;
+}
+
+export interface StaticPlacementTransform {
 	readonly origin: StaticVec3;
 	readonly orientation: StaticQuaternion;
 }

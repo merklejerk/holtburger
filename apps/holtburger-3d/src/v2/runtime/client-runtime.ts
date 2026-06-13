@@ -212,7 +212,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		);
 		this.#unsubscribeStaticSourcePayloads =
 			staticCoordinator.subscribeSourcePayloads((delta) => {
-				this.#staticSceneQuery.ingestSourcePayload(delta.payload);
+				this.#staticSceneQuery.ingestSourcePayload(delta.payload, {
+					outdoorAnchorLandblockId: this.#renderAnchorLandblockId,
+				});
 				this.#emit();
 			});
 	}
@@ -453,7 +455,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 			textureUpdate,
 		});
 		this.#updateMaterializedDrawUnitIdMappings(delta, materialized);
-		this.#staticSceneQuery.ingestStaticResidencyDelta(materialized.staticDelta);
 		this.#warnAboutStaticFallbacks(delta);
 		applyMaterializedStaticCommit(this.#renderer, materialized);
 		this.#pendingStaticMaterializations.delete(delta.revision);

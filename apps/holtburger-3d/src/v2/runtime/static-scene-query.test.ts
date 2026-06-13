@@ -1,33 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type {
 	LandblockEnvCellsStaticScopePayload,
-	StaticObjectGeometryStaticDrawUnit,
+	OutdoorStaticObjectsScopePayload,
 } from "../static/contracts";
 import { StaticSceneQuery } from "./static-scene-query";
 
 describe("V2 static scene query", () => {
-	it("picks the nearest outdoor static draw unit by bounds", () => {
+	it("picks outdoor static objects through source BVH roots without draw units", () => {
 		const query = new StaticSceneQuery();
-		query.ingestStaticResidencyDelta({
-			addedDrawUnitPlacements: [
-				{
-					drawUnit: createStaticObjectDrawUnit("far", {
-						max: { x: 1, y: 1, z: -9 },
-						min: { x: -1, y: -1, z: -10 },
-					}),
-					translation: [0, 0, 0],
-				},
-				{
-					drawUnit: createStaticObjectDrawUnit("near", {
-						max: { x: 1, y: 1, z: -4 },
-						min: { x: -1, y: -1, z: -5 },
-					}),
-					translation: [0, 0, 0],
-				},
-			],
-			removedDrawUnitIds: [],
-			revision: 1,
-		});
+		query.ingestOutdoorStaticObjects(createOutdoorStaticObjectsPayload());
 
 		const hit = query.pickRay({
 			context: { kind: "outdoor" },
@@ -38,28 +19,64 @@ describe("V2 static scene query", () => {
 		});
 
 		expect(hit).toMatchObject({
-			drawUnitId: "near",
-			itemKind: "outdoor-static-draw-unit",
-			materialIds: [0x08000010],
+			instanceId: "outdoor-static-0",
+			itemKind: "outdoor-static-object",
+			queryPath: "source-bvh",
+			source: {
+				sourceAssetKind: "setup-model",
+				sourceDid: 0x02000010,
+			},
+		});
+		expect(hit?.distance).toBe(4);
+		expect(query.createSnapshot()).toMatchObject({
+			outdoorRecordCount: 1,
+		});
+	});
+
+	it("applies outdoor request-anchor root translation without rebuilding BVH nodes", () => {
+		const query = new StaticSceneQuery();
+		query.ingestOutdoorStaticObjects(
+			createOutdoorStaticObjectsPayload({ landblockId: 0xdb55ffff }),
+			0xda55ffff,
+		);
+
+		const hit = query.pickRay({
+			context: { kind: "outdoor" },
+			ray: {
+				direction: { x: 0, y: 0, z: -1 },
+				origin: { x: 192, y: 0, z: 0 },
+			},
+		});
+
+		expect(hit).toMatchObject({
+			instanceId: "outdoor-static-0",
+			itemKind: "outdoor-static-object",
+			queryPath: "source-bvh",
 		});
 		expect(hit?.distance).toBe(4);
 	});
 
+	it("does not pick outdoor source payloads without BVH roots", () => {
+		const query = new StaticSceneQuery();
+		query.ingestOutdoorStaticObjects(
+			createOutdoorStaticObjectsPayload({ includeBvh: false }),
+		);
+
+		const hit = query.pickRay({
+			context: { kind: "outdoor" },
+			ray: {
+				direction: { x: 0, y: 0, z: -1 },
+				origin: { x: 0, y: 0, z: 0 },
+			},
+		});
+
+		expect(hit).toBeNull();
+		expect(query.createSnapshot().outdoorRecordCount).toBe(0);
+	});
+
 	it("does not flatten outdoor and env-cell scene contexts", () => {
 		const query = new StaticSceneQuery();
-		query.ingestStaticResidencyDelta({
-			addedDrawUnitPlacements: [
-				{
-					drawUnit: createStaticObjectDrawUnit("outdoor", {
-						max: { x: 1, y: 1, z: -4 },
-						min: { x: -1, y: -1, z: -5 },
-					}),
-					translation: [0, 0, 0],
-				},
-			],
-			removedDrawUnitIds: [],
-			revision: 1,
-		});
+		query.ingestOutdoorStaticObjects(createOutdoorStaticObjectsPayload());
 
 		const hit = query.pickRay({
 			context: {
@@ -98,6 +115,7 @@ describe("V2 static scene query", () => {
 			envCellId: 0xda550100,
 			instanceId: "env-static-0",
 			itemKind: "env-cell-static-object",
+			queryPath: "source-bvh",
 			source: {
 				sourceAssetKind: "setup-model",
 				sourceDid: 0x02000010,
@@ -110,85 +128,121 @@ describe("V2 static scene query", () => {
 		});
 	});
 
-	it("removes outdoor query records when draw units are evicted", () => {
-		const query = new StaticSceneQuery();
-		query.ingestStaticResidencyDelta({
-			addedDrawUnitPlacements: [
-				{
-					drawUnit: createStaticObjectDrawUnit("outdoor", {
-						max: { x: 1, y: 1, z: -4 },
-						min: { x: -1, y: -1, z: -5 },
-					}),
-					translation: [0, 0, 0],
-				},
-			],
-			removedDrawUnitIds: [],
-			revision: 1,
-		});
-		query.ingestStaticResidencyDelta({
-			addedDrawUnitPlacements: [],
-			removedDrawUnitIds: ["outdoor"],
-			revision: 2,
-		});
-
-		expect(query.createSnapshot().outdoorRecordCount).toBe(0);
-	});
 });
 
-function createStaticObjectDrawUnit(
-	drawUnitId: string,
-	bounds: StaticObjectGeometryStaticDrawUnit["sort"]["bounds"],
-): StaticObjectGeometryStaticDrawUnit {
+function createOutdoorStaticObjectsPayload(options: {
+	readonly includeBvh?: boolean;
+	readonly landblockId?: number;
+} = {}): OutdoorStaticObjectsScopePayload {
+	const landblockId = options.landblockId ?? 0xda55ffff;
+	const includeBvh = options.includeBvh ?? true;
 	return {
-		alphaTest: 0.5,
-		coordinateSpace: "landblock-render-local",
-		detailTextureTiling: 1,
-		detailTextureUseId: null,
 		domain: "outdoor-detail",
-		drawUnitId,
-		indexTextureUseId: null,
-		indexType: "uint16",
-		indexedTextureFormat: null,
-		indices: new Uint16Array([0, 1, 2]),
-		kind: "static-object-geometry",
-		landblockId: 0xda55ffff,
-		materialBucketKey: "bucket",
-		materialColor: [1, 1, 1, 1],
-		materialEmissiveColor: [0, 0, 0],
-		materialEntries: [],
-		materialFamily: "texture-rgba",
-		materialIds: [0x08000010],
-		materialPass: "alpha-test",
-		materialSlotIndices: new Float32Array([0, 0, 0]),
-		paletteFirstIndex: 0,
-		paletteTextureUseId: null,
-		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-		primaryTextureUseId: "texture-use",
-		primaryTextureWrapMode: "clamp",
-		renderState: {
-			blend: {
-				dstFactor: null,
-				enabled: false,
-				mode: "clipmap",
-				srcFactor: null,
+		kind: "outdoor-static-objects",
+		landblock: {
+			kind: "landblock-source",
+			landblockId,
+			source: "outdoor",
+		},
+		materialSlots: [],
+		materialSources: [],
+		missingRefs: [],
+		objects: [
+			{
+				debug: { sourceAssetId: "setup-model/02000010" },
+				generated: null,
+				identity: {
+					instanceId: "outdoor-static-0",
+					kind: "static-object-instance",
+					landblockId,
+					objectKind: "explicit-object",
+				},
+				instanceBounds: {
+					max: { x: 1, y: 1, z: -4 },
+					min: { x: -1, y: -1, z: -5 },
+				},
+				localPlacement: createPlacement(),
+				portalCount: 0,
+				source: {
+					kind: "static-object-source",
+					sourceAssetKind: "setup-model",
+					sourceDid: 0x02000010,
+				},
+				sourceBounds: {
+					max: { x: 1, y: 1, z: 1 },
+					min: { x: -1, y: -1, z: -1 },
+				},
+				sourceIndex: 0,
+				sourceScale: { x: 1, y: 1, z: 1 },
 			},
-			depthTest: true,
-			depthWrite: true,
-		},
-		sort: {
-			bounds,
-			center: [0, 0, 0],
-			objectPartKey: "object/0",
-			policy: "depth-writing",
-		},
-		sourceMappingRecords: [
-			`${drawUnitId}:source:setup-model/02000010:gfx:gfx-obj/01000010:object:env-static-0`,
 		],
-		spatialRecord: `${drawUnitId}:bounds:1t`,
-		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		textureUseIds: ["texture-use"],
-		triangleCount: 1,
-		vertexCount: 3,
+		paletteSources: [],
+		regionRenderProfile: {
+			detailRoles: [],
+			identity: {
+				kind: "region-render-profile",
+				regionNumber: 1,
+			},
+		},
+		sourceAssets: [],
+		sourceSpatial: {
+			bounds: null,
+			coordinateSpace: "landblock-render-local",
+			outdoorBvh: includeBvh
+				? {
+						coordinateSpace: "landblock-render-local",
+						items: [
+							{
+								bvhItemIndex: 0,
+								instanceId: "outdoor-static-0",
+								kind: "static",
+								object: {
+									debug: { sourceAssetId: "setup-model/02000010" },
+									generated: null,
+									identity: {
+										instanceId: "outdoor-static-0",
+										kind: "static-object-instance",
+										landblockId,
+										objectKind: "explicit-object",
+									},
+									instanceBounds: {
+										max: { x: 1, y: 1, z: -4 },
+										min: { x: -1, y: -1, z: -5 },
+									},
+									localPlacement: createPlacement(),
+									portalCount: 0,
+									source: {
+										kind: "static-object-source",
+										sourceAssetKind: "setup-model",
+										sourceDid: 0x02000010,
+									},
+									sourceBounds: {
+										max: { x: 1, y: 1, z: 1 },
+										min: { x: -1, y: -1, z: -1 },
+									},
+									sourceIndex: 0,
+									sourceScale: { x: 1, y: 1, z: 1 },
+								},
+							},
+						],
+						nodes: [
+							{
+								bounds: {
+									max: { x: 1, y: 1, z: -4 },
+									min: { x: -1, y: -1, z: -5 },
+								},
+								itemIndices: [0],
+								kindMask: 1,
+								left: null,
+								right: null,
+							},
+						],
+					}
+				: null,
+			outdoorBvhItemCount: includeBvh ? 1 : 0,
+			outdoorBvhNodeCount: includeBvh ? 1 : 0,
+		},
+		textureRefs: [],
 	};
 }
 
@@ -223,10 +277,21 @@ function createLandblockEnvCellsPayload(): LandblockEnvCellsStaticScopePayload {
 					localBvh: {
 						coordinateSpace: "env-cell-local",
 						items: [{ instanceId: "env-static-0", kind: "static" }],
-						nodes: [],
+						nodes: [
+							{
+								bounds: {
+									max: { x: 1, y: 1, z: -4 },
+									min: { x: -1, y: -1, z: -5 },
+								},
+								itemIndices: [0],
+								kindMask: 1,
+								left: null,
+								right: null,
+							},
+						],
 					},
 					localBvhItemCount: 1,
-					localBvhNodeCount: 0,
+					localBvhNodeCount: 1,
 				},
 				memberId: "cell-0",
 				portalApertures: [],

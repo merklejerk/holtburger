@@ -29,6 +29,7 @@ import type {
 	StaticObjectInstanceIdentity,
 	StaticObjectMaterialSlotFacts,
 	StaticObjectMaterialSourceFacts,
+	OutdoorStaticBvhFacts,
 	StaticObjectPaletteViewFacts,
 	StaticObjectPartIdentity,
 	StaticObjectPartMaterialSlotFacts,
@@ -190,6 +191,9 @@ export class OutdoorStaticObjectsResolver {
 				};
 			})
 			.filter((object) => sourceByKey.has(createSourceCacheKey(object.source)));
+		const objectsByInstanceId = new Map(
+			objects.map((object) => [object.identity.instanceId, object]),
+		);
 		const materialSlots = createObjectMaterialSlotFacts({
 			objects,
 			sourceByKey,
@@ -218,6 +222,10 @@ export class OutdoorStaticObjectsResolver {
 			sourceSpatial: {
 				bounds: landblock.payload.terrain.bounds,
 				coordinateSpace: "landblock-render-local",
+				outdoorBvh: createOutdoorStaticBvhFacts(
+					landblock.payload.outdoorBvh,
+					objectsByInstanceId,
+				),
 				outdoorBvhItemCount: landblock.payload.outdoorBvh?.items.length ?? 0,
 				outdoorBvhNodeCount: landblock.payload.outdoorBvh?.nodes.length ?? 0,
 			},
@@ -837,6 +845,26 @@ function shouldIncludeOutdoorStaticObject(
 	return domain === "outdoor-buildings"
 		? objectKind === "building"
 		: objectKind === "generated-scenery" || objectKind === "explicit-object";
+}
+
+function createOutdoorStaticBvhFacts(
+	bvh: LandblockOutdoorPayloadDto["outdoorBvh"],
+	objectsByInstanceId: ReadonlyMap<string, StaticObjectInstanceFacts>,
+): OutdoorStaticBvhFacts | null {
+	if (!bvh) {
+		return null;
+	}
+
+	return {
+		coordinateSpace: "landblock-render-local",
+		items: bvh.items.map((item, bvhItemIndex) => ({
+			bvhItemIndex,
+			instanceId: item.instanceId,
+			kind: item.kind,
+			object: objectsByInstanceId.get(item.instanceId) ?? null,
+		})),
+		nodes: bvh.nodes,
+	};
 }
 
 function createObjectMaterialSlotFacts(options: {

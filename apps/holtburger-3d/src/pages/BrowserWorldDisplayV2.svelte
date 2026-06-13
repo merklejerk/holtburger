@@ -541,8 +541,8 @@
 			return "none";
 		}
 
-		if (hit.itemKind === "outdoor-static-draw-unit") {
-			return `${hit.domain} ${hit.drawUnitId} ${hit.materialFamily}/${hit.materialPass} d=${hit.distance.toFixed(2)} materials ${hit.materialIds.map(formatHexId).join(",")}`;
+		if (hit.itemKind === "outdoor-static-object") {
+			return `${hit.domain} ${hit.objectKind} ${hit.instanceId} ${hit.source.sourceAssetKind}:${formatHexId(hit.source.sourceDid)} d=${hit.distance.toFixed(2)} bvh ${hit.bvhItemIndex}`;
 		}
 
 		return `env-cell ${formatHexId(hit.envCellId)} ${hit.instanceId} ${hit.source.sourceAssetKind}:${formatHexId(hit.source.sourceDid)} d=${hit.distance.toFixed(2)}`;

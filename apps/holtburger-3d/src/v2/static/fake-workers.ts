@@ -209,6 +209,7 @@ export class ImmediateStaticResolver implements StaticResolver {
 					sourceSpatial: {
 						bounds: null,
 						coordinateSpace: "landblock-render-local",
+						outdoorBvh: null,
 						outdoorBvhItemCount: 0,
 						outdoorBvhNodeCount: 0,
 					},

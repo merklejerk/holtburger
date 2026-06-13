@@ -406,11 +406,13 @@ export class StaticSceneQuery {
 		ray: StaticSceneRay,
 		request: StaticScenePickRequest,
 	): OutdoorStaticObjectScenePickHit[] {
-		const hits: OutdoorStaticObjectScenePickHit[] = [];
+		let nearestHit: OutdoorStaticObjectScenePickHit | null = null;
 
 		for (const root of this.#outdoorBvhRootsByDomainAndLandblock.values()) {
 			const localRay = translateRay(ray, negateTranslation(root.translation));
-			for (const candidate of traverseBvh(root.nodes, localRay)) {
+			traverseBvhNearest(root.nodes, localRay, {
+				getMaxDistance: () => nearestHit?.distance ?? null,
+				visitCandidate: (candidate) => {
 				for (const itemIndex of candidate.itemIndices) {
 					const item = root.items[itemIndex];
 					if (!item?.object.instanceBounds) {
@@ -444,13 +446,17 @@ export class StaticSceneQuery {
 						sourceIndex: item.object.sourceIndex,
 					};
 					if (matchesFilters(hit, request.filters, ray.origin)) {
-						hits.push(hit);
+						nearestHit =
+							nearestHit === null || comparePickHits(hit, nearestHit) < 0
+								? hit
+								: nearestHit;
 					}
 				}
-			}
+				},
+			});
 		}
 
-		return hits;
+		return nearestHit ? [nearestHit] : [];
 	}
 
 	#pickEnvCell(
@@ -470,9 +476,11 @@ export class StaticSceneQuery {
 		const acceptedEnvCellIds = new Set(
 			request.context.acceptedEnvCellIds ?? [request.context.envCellId],
 		);
-		const hits: EnvCellStaticScenePickHit[] = [];
+		let nearestHit: EnvCellStaticScenePickHit | null = null;
 
-		for (const broadCandidate of traverseBvh(landblockRoot.nodes, ray)) {
+		traverseBvhNearest(landblockRoot.nodes, ray, {
+			getMaxDistance: () => nearestHit?.distance ?? null,
+			visitCandidate: (broadCandidate) => {
 			for (const landblockItemIndex of broadCandidate.itemIndices) {
 				const landblockItem = landblockRoot.items[landblockItemIndex];
 				if (
@@ -487,21 +495,35 @@ export class StaticSceneQuery {
 				if (!root) {
 					continue;
 				}
-				hits.push(...this.#pickEnvCellLocalRoot(ray, request, root));
+				const hit = this.#pickEnvCellLocalRoot(
+					ray,
+					request,
+					root,
+					nearestHit,
+				);
+				nearestHit =
+					hit !== null &&
+					(nearestHit === null || comparePickHits(hit, nearestHit) < 0)
+						? hit
+						: nearestHit;
 			}
-		}
+			},
+		});
 
-		return hits;
+		return nearestHit ? [nearestHit] : [];
 	}
 
 	#pickEnvCellLocalRoot(
 		ray: StaticSceneRay,
 		request: StaticScenePickRequest,
 		root: EnvCellBvhRoot,
-	): EnvCellStaticScenePickHit[] {
-		const hits: EnvCellStaticScenePickHit[] = [];
+		currentNearestHit: EnvCellStaticScenePickHit | null,
+	): EnvCellStaticScenePickHit | null {
+		let nearestHit = currentNearestHit;
 		const localRay = transformRayToLocal(ray, root.placement);
-		for (const candidate of traverseBvh(root.nodes, localRay)) {
+		traverseBvhNearest(root.nodes, localRay, {
+			getMaxDistance: () => nearestHit?.distance ?? null,
+			visitCandidate: (candidate) => {
 			for (const itemIndex of candidate.itemIndices) {
 				const item = root.items[itemIndex];
 				if (item?.kind !== "static") {
@@ -521,12 +543,16 @@ export class StaticSceneQuery {
 					queryPath: "source-bvh",
 				};
 				if (matchesFilters(hit, request.filters, ray.origin)) {
-					hits.push(hit);
+					nearestHit =
+						nearestHit === null || comparePickHits(hit, nearestHit) < 0
+							? hit
+							: nearestHit;
 				}
 			}
-		}
+			},
+		});
 
-		return hits;
+		return nearestHit === currentNearestHit ? null : nearestHit;
 	}
 }
 
@@ -536,47 +562,78 @@ interface BvhCandidate {
 	readonly nodeIndex: number;
 }
 
-function traverseBvh(
+function traverseBvhNearest(
 	nodes: readonly BvhNode[],
 	ray: StaticSceneRay,
-): readonly BvhCandidate[] {
+	options: {
+		readonly getMaxDistance: () => number | null;
+		readonly visitCandidate: (candidate: BvhCandidate) => void;
+	},
+): void {
 	if (nodes.length === 0) {
-		return [];
+		return;
 	}
 
-	const candidates: BvhCandidate[] = [];
-	const stack = [0];
-	while (stack.length > 0) {
-		const nodeIndex = stack.pop() ?? 0;
-		const node = nodes[nodeIndex];
+	const root = nodes[0];
+	if (!root) {
+		return;
+	}
+	const rootDistance = intersectRayBounds(ray, root.bounds);
+	if (rootDistance === null) {
+		return;
+	}
+
+	const pending: BvhCandidate[] = [
+		{ distance: rootDistance, itemIndices: [], nodeIndex: 0 },
+	];
+	while (pending.length > 0) {
+		pending.sort(
+			(left, right) =>
+				right.distance - left.distance || right.nodeIndex - left.nodeIndex,
+		);
+		const candidate = pending.pop();
+		if (!candidate) {
+			continue;
+		}
+		const maxDistance = options.getMaxDistance();
+		if (maxDistance !== null && candidate.distance > maxDistance) {
+			continue;
+		}
+
+		const node = nodes[candidate.nodeIndex];
 		if (!node) {
 			continue;
 		}
-
-		const distance = intersectRayBounds(ray, node.bounds);
-		if (distance === null) {
-			continue;
-		}
-
 		if (node.itemIndices.length > 0) {
-			candidates.push({
-				distance,
+			options.visitCandidate({
+				distance: candidate.distance,
 				itemIndices: node.itemIndices,
-				nodeIndex,
+				nodeIndex: candidate.nodeIndex,
 			});
 		}
-		if (node.right !== null) {
-			stack.push(node.right);
-		}
-		if (node.left !== null) {
-			stack.push(node.left);
+		for (const childIndex of [node.left, node.right]) {
+			if (childIndex === null) {
+				continue;
+			}
+			const child = nodes[childIndex];
+			if (!child) {
+				continue;
+			}
+			const childDistance = intersectRayBounds(ray, child.bounds);
+			const updatedMaxDistance = options.getMaxDistance();
+			if (
+				childDistance === null ||
+				(updatedMaxDistance !== null && childDistance > updatedMaxDistance)
+			) {
+				continue;
+			}
+			pending.push({
+				distance: childDistance,
+				itemIndices: [],
+				nodeIndex: childIndex,
+			});
 		}
 	}
-
-	return candidates.sort(
-		(left, right) =>
-			left.distance - right.distance || left.nodeIndex - right.nodeIndex,
-	);
 }
 
 function traverseBvhPoint(

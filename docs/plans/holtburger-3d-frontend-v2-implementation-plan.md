@@ -2907,7 +2907,7 @@ Verification:
 
 ### Phase 11E4A3: Static Object Material Binding Tables
 
-Status: in progress; Phase 11E4A3a through Phase 11E4A3d2 complete.
+Status: in progress; Phase 11E4A3a through Phase 11E4A3d2 complete. Phase 11E4A3e0 is the next implementation phase.
 
 Purpose: recover V1-style cross-material static-object compaction before `outdoor-detail` generated scenery and transparent object/part sorting broaden the static-object surface area.
 
@@ -2923,10 +2923,10 @@ Current steering:
 
 Dry-run findings:
 
-- The current `StaticObjectGeometryStaticDrawUnit` is single-binding: one base/index/palette/detail texture-use id, one material color/emissive set, one alpha threshold, one palette first index, and one wrap mode.
-- The current WebGL2 static-object shader is also single-binding: one sampler/rect per role and one `uMaterialMode`. It has no material selector attribute and no material-entry uniform arrays.
-- Static object GPU upload currently creates only position and texcoord buffers. Terrain already has the closest pattern for selectors through `layerSlots`; static objects need a parallel material-slot selector stream.
-- The texture manager already has draw-unit-local role-page slot vocabulary, but static object roles are hardcoded to slot `0`. Material tables need static-object role slots per draw unit, otherwise texture A/B/C can only work when they collapse to the same bound texture role by accident.
+- Early Phase 11E4A3 dry runs found the static-object draw-unit contract, WebGL2 shader, GPU upload, and texture-manager role-slot assignment were single-binding. Phases 11E4A3c through 11E4A3d2 closed those contract and renderer gaps: the remaining blockers are now partitioner/baker output and post-placement fine splitting.
+- `StaticObjectGeometryStaticDrawUnit` now has bounded `materialEntries` and a `materialSlotIndices` selector stream, but the baker still populates the degenerate one-entry case for every static-object partition.
+- The WebGL2 static-object renderer now consumes selector attributes, material-entry uniform tables, and bounded role-page samplers. The renderer can draw multi-entry static objects if the baker and materializer produce legal table entries and bindings.
+- The texture manager now assigns draw-unit-local static role-page slots, but it cannot recover batching after the coarse baker has already split every concrete material entry into a separate draw unit.
 - Full atlas-page awareness is only known after texture packing/commit. The earlier dry-run idea of splitting by bounded unique texture-use slots in the baker is safe but too conservative and still leaks placement concerns into the wrong stage.
 - The cleaner shape is `coarse partition -> texture pack/resolve placements -> fine materialization`. Coarse partition groups by logical compatibility and table-family/schema facts. Fine materialization consumes actual placement records, assigns draw-local role slots, and splits only when the final texture refs/pages exceed role-slot or table-entry capacity.
 - A texture that cannot fit in a shared atlas page does not inherently invalidate the draw unit; direct placement or a separate page is still just a texture ref/page slot to the renderer. The invalidation/split case is when one coarse partition needs more committed pages for a role than the renderer role-slot limit can bind.
@@ -2936,6 +2936,8 @@ Dry-run findings:
 - The one-entry case should use the same table shader path as multi-entry draw units. Do not keep a second single-binding static-object renderer path; otherwise later transparent/static inspection work will have to support both.
 - Detail overlays are part of the table entry. A shared building detail role should consume one detail role slot across many entries where possible; distinct detail texture uses or tiling/fade facts are table-entry compatibility facts.
 - Indexed-paletted entries need both index and palette role slots, indexed format, palette first index/range, and exact lookup semantics. They should remain a separate table family from RGBA entries in this phase.
+- 2026-06-12 live diagnostics after Phase 11E4A3d2 showed `outdoor-buildings` still producing `texture-rgba` opaque output shaped like `46 materials -> 40 partitions`, while the texture atlas already had multi-source pages. That confirms the renderer/table-page plumbing can exist without reducing static-object draw units because the partitioner and baker still emit one concrete material entry per draw unit.
+- The current code still has three explicit blockers for multi-entry batching: the opaque/alpha-test compatibility key includes concrete `materialEntryKey`, `StaticObjectCompatibilityTriangle` does not retain material-entry identity for selector baking, and `createStaticObjectGeometryDrawUnit` emits `materialEntries: [materialEntry]` with an all-zero `materialSlotIndices` stream.
 
 Implementation split:
 
@@ -2948,7 +2950,7 @@ Implementation split:
   - Add a materialization step after texture placement/commit data exists, or refactor the static coordinator/texture manager boundary so final static-object draw units are produced from coarse plans plus committed texture bindings.
   - Fine-partition coarse table candidates by actual texture refs/pages, draw-local role-slot limits, and material-entry limits.
   - Preserve static source/spatial records across materialization so inspection and picking do not depend on pre-materialized temporary ids.
-  - Status: complete on 2026-06-12 for the explicit runtime materialization boundary and binding validation. Actual static-object fine partitioning by committed pages/role slots remains in 11E4A3d-11E4A3e after the table draw-unit contract exists.
+  - Status: complete on 2026-06-12 for the explicit runtime materialization boundary and binding validation. Actual static-object fine partitioning by committed pages/role slots remains in 11E4A3e after the table draw-unit contract exists.
 - Phase 11E4A3b1: Table Contract Cutover Resteer.
   - Re-check whether 11E4A3c should add table fields directly to `StaticObjectGeometryStaticDrawUnit` or introduce a materialized static-object draw-unit subtype/adapter first. The new runtime materializer validates committed bindings for existing draw units, but cannot fine-split static-object table candidates until the draw-unit contract can represent table entries and selector streams.
   - Status: complete on 2026-06-12.
@@ -2966,16 +2968,34 @@ Implementation split:
   - Teach the renderer to bind static object role slot textures and upload material-entry rect/page arrays from committed `TextureDrawUnitBinding` records.
   - Keep this as a separate shader/material-entry contract step from slot assignment because WebGL2 sampler/page-array expansion needs focused shader tests and a browser/GPU smoke pass.
   - Status: complete on 2026-06-12 for explicit WebGL2 static role-page samplers, material-entry rect/page tables, and browser shader-link smoke coverage.
-- Phase 11E4A3e: Multi-Entry Partitioning And Selector Baking.
+- Phase 11E4A3e0: Coarse Multi-Entry Draw Unit Cutover.
   - Batch table-compatible opaque/alpha-test entries across concrete texture/data-use identities at the coarse stage.
-  - Emit selector values in baked/materialized geometry and material-entry tables in stable order.
-  - Split fine materialized draw units only when committed page slots or table-entry capacity require it.
+  - Remove concrete `materialEntryKey` from the opaque/alpha-test coarse compatibility key while preserving concrete material-entry identity per source triangle.
+  - Build static-object `materialEntries` from `coarseTablePlan.entries` in stable slot order instead of deriving a one-entry table from partition-wide texture-use unions.
+  - Emit selector values in baked geometry by writing each triangle's material-entry slot to all three duplicated vertices.
   - Preserve object/part sortable transparent policy as a hard split for later 11E4C-11E4E work.
+  - Keep physical atlas placement and page-slot splitting out of this phase; it should still be possible for a coarse multi-entry draw unit to be split later by the placement-aware materializer.
+- Phase 11E4A3e: Placement-Aware Fine Partitioning.
+  - Fine-split table-capable static-object draw units only after committed texture refs/pages/rects and draw-local role-page slots exist.
+  - Split when material-entry count, static role-page slot capacity, or sort/visibility policy requires it; do not split solely by source/gfx object identity.
+  - Preserve source mappings, spatial records, and texture-use ownership across any rewritten draw-unit ids.
+  - Emit typed diagnostics for material-table or role-page overflow that cannot be made legal by deterministic splitting.
 - Phase 11E4A3f: Parity, Diagnostics, And Cleanup.
   - Port V1 parity expectations around RGBA and indexed material-table overflow partitioning rather than bypassing.
-  - Add tests proving texture A/B/C merge into one draw unit when role-slot/table capacity allows, and split deterministically when it does not.
+  - Add live/manual diagnostic expectations proving texture A/B/C merge into fewer draw units when role-slot/table capacity allows, and split deterministically when it does not.
   - Remove or downgrade legacy singular draw-unit fields once no renderer/test path consumes them, or clearly mark any retained singular fields as derived debug summaries.
   - Run full V2 app verification plus a browser/GPU smoke test if the WebGL2 shader contract changes are nontrivial.
+
+Outstanding Phase 11E4A3 dry run, 2026-06-12:
+
+- Phase 11E4A3e0 should be implemented in the partitioner and baker first. The safe cut is to make `createMaterialCompatibilityAxis` omit concrete `entry:${materialEntryKey}` only for `opaque-batchable` and `alpha-test-batchable` policies, retain it for transparent/additive sortable policies, and add tests that currently fail because texture A/B remain separate partitions.
+- `StaticObjectCompatibilityTriangle` needs a material-entry identity field, likely `materialEntryKey`, so `bakeStaticObjectPartitionGeometry` can write material selectors without re-resolving material slots from source payloads. This keeps selector generation deterministic and avoids dragging material planning back into geometry baking.
+- `createStaticObjectMaterialTableEntry` should be refactored to consume one `coarseTablePlan.entries` item at a time. Each entry should own its own base/index/palette/detail texture-use ids, alpha threshold, color/emissive constants, palette first index, detail tiling, wrap policy, and slot number. The draw unit's singular summary fields should be derived from entry slot `0` only until cleanup.
+- `textureUseIds` and `createStaticObjectBakeTextureUses` already operate over partition-level `textureDataUses`, so they should mostly survive the e0 cutover. The key test is owner propagation: one merged draw unit must own every texture use referenced by its entries, not only the first entry's texture use.
+- `materialSlotIndices` should remain a `Float32Array` because the existing WebGL2 attribute path consumes a float selector. The renderer clamps the selector to the bounded table size, but e0 should still assert that the baker never emits slots outside the emitted `materialEntries` range.
+- Phase 11E4A3e, after e0, belongs at the runtime materializer/texture-manager boundary. Today `materializeStaticCommit` validates bindings and forwards already-baked draw units. It will need a fine-split helper that can rewrite static-object draw units after texture placement commit, rebuild selector/entry subsets, remap `textureUseIds`, and preserve placement/source/spatial records.
+- The texture manager's static role-page slots make e fine partitioning possible, but current overflow behavior can omit excess bindings. Fine splitting should happen before renderer residency depends on those omitted bindings; otherwise the renderer may receive a draw unit whose entries reference missing role pages and fall back visually.
+- Phase 11E4A3f should not be used to finish core behavior. It should be reserved for parity proof, diagnostics, browser smoke, and deleting temporary singular-field dependencies after e0/e prove the material table path is complete.
 
 Deliverables:
 
@@ -3007,19 +3027,19 @@ Phase 11E4A3a execution notes:
 
 Spicy bits:
 
-- Phase 11E4A3a intentionally keeps the final compatibility key conservative by including the concrete `materialEntryKey`. Texture A/B still become separate final partitions today even when their coarse table schema matches. The important course correction is that the partitioner now exposes the distinction between table schema and concrete material entry, so 11E4A3b/11E4A3e can move that split to placement-aware materialization instead of doing it prematurely in the coarse baker.
+- Phase 11E4A3a intentionally keeps the final compatibility key conservative by including the concrete `materialEntryKey`. Texture A/B still become separate final partitions today even when their coarse table schema matches. The important course correction is that the partitioner now exposes the distinction between table schema and concrete material entry, so 11E4A3e0/11E4A3e can move that split to table selector baking and placement-aware materialization instead of doing it prematurely in the coarse baker.
 - The one-entry compatibility path is still a bridge, not a destination. Keeping it too long would recreate parallel renderer contracts; Phase 11E4A3 should cut it over decisively once the table contract exists.
 - Phase 11E4A3b exposed that the existing runtime already had an async "static materialization" queue, but it was only sequencing texture placement before forwarding original baked draw units. The new `materializeStaticCommit` boundary now consumes committed texture bindings and rejects textured draw units with missing bindings before renderer residency. That is the right insertion point for later fine partitioning, but it deliberately does not pretend to split table candidates before the table draw-unit contract exists.
 - Phase 11E4A3b1 chooses direct contract extension over a new public materialized static-object subtype. V1's parity shape is one compacted geometry layout carrying material-slot selectors, and the V2 design already expects static-object draw units to grow bounded material entries/selectors. A separate public subtype would preserve the old single-binding path as a parallel contract and make renderer/static inspection support both shapes. Internal helper/adapters during implementation are fine; the renderer-facing contract should become table-capable in place.
-- Phase 11E4A3c uses one-entry uniform arrays in the WebGL2 static-object shader. That is intentionally not the final role-slot/table capacity design; it proves the renderer consumes material-slot selectors and material entries before 11E4A3d expands texture role pages and 11E4A3e allows multi-entry coarse partitions.
+- Phase 11E4A3c used one-entry uniform arrays in the WebGL2 static-object shader as an intermediate step. Phase 11E4A3d2 expanded the renderer to bounded role-page and material-entry tables; Phase 11E4A3e0 now needs to let the baker produce multi-entry coarse partitions.
 - Phase 11E4A3d1 split static role-slot assignment from renderer multi-slot sampling. The texture manager can now produce draw-unit-local static slots and overflow diagnostics, but the WebGL2 static-object shader still samples one texture/page per role until 11E4A3d2 uploads role-page arrays and material-entry page selectors.
 - Phase 11E4A3d2 intentionally mirrors terrain's explicit sampler-uniform pattern instead of using GLSL sampler arrays. This keeps the first static table shader on the renderer's known WebGL2-safe path while still allowing material entries to select role pages by integer page uniforms.
 - Headless Chrome caught a stale `uIndexTextureRect` reference during shader compile after the table cutover. That was fixed in the same phase by making indexed sampling use `uMaterialIndexTextureRects[slot]`.
 
 Failed to close:
 
-- Multi-entry coarse partitioning and selector baking are not implemented yet. Phase 11E4A3d2 made the renderer table/page-array capable, but final static-object partitions still remain one concrete material entry each until 11E4A3e loosens coarse partitioning and writes non-zero material-slot selectors.
-- Fine partitioning by actual committed texture refs/pages is not implemented yet because the current materializer still receives already-materialized one-entry static-object draw units.
+- Multi-entry coarse partitioning and selector baking are not implemented yet. Phase 11E4A3d2 made the renderer table/page-array capable, but final static-object partitions still remain one concrete material entry each until 11E4A3e0 loosens coarse partitioning and writes non-zero material-slot selectors.
+- Fine partitioning by actual committed texture refs/pages is not implemented yet because the current materializer still validates bindings and forwards already-baked static-object draw units without rewriting them into legal post-placement subsets.
 - The derived singular static-object fields remain in `StaticObjectGeometryStaticDrawUnit` as temporary compatibility/debug summaries. They are explicitly cleanup targets for 11E4A3f once tests and renderer code stop consuming them.
 - `outdoor-detail` generated scenery remains blocked behind this phase to avoid multiplying draw-unit churn for foliage.
 - True blended/additive support remains blocked behind 11E4C-11E4E.

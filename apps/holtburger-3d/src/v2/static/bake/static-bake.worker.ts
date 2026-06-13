@@ -24,7 +24,10 @@ class StaticBakeWorkerRouter implements StaticBaker {
 		if (input.domain === "outdoor-terrain") {
 			return this.#terrainBaker.bake(input);
 		}
-		if (input.domain === "outdoor-buildings" || input.domain === "outdoor-detail") {
+		if (
+			input.domain === "outdoor-buildings" ||
+			input.domain === "outdoor-detail"
+		) {
 			return this.#staticObjectBaker.bake(input);
 		}
 
@@ -41,9 +44,7 @@ const baker = new StaticBakeWorkerRouter({
 });
 
 workerPort.addEventListener("message", (event) => {
-	void handleStaticBakeWorkerRequest(
-		baker,
-		event.data,
-		(response) => workerPort.postMessage(response),
+	void handleStaticBakeWorkerRequest(baker, event.data, (response) =>
+		workerPort.postMessage(response),
 	);
 });

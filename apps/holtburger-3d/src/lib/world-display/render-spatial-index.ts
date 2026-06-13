@@ -18,10 +18,7 @@ import {
 
 const MIN_PICK_DISTANCE = 1e-4;
 
-export type {
-	RenderBounds,
-	RenderVec3,
-} from "./render-spatial-math";
+export type { RenderBounds, RenderVec3 } from "./render-spatial-math";
 
 export type RenderSpatialItemKind =
 	| "terrain"

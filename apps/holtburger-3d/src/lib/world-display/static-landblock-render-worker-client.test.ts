@@ -88,9 +88,7 @@ describe("static landblock render worker client", () => {
 		const staleQueued = client.requestProduct(
 			createDesiredProduct("request:old"),
 		);
-		const staleExpectation = expect(staleQueued).rejects.toThrow(
-			"superseded",
-		);
+		const staleExpectation = expect(staleQueued).rejects.toThrow("superseded");
 		const latestQueued = client.requestProduct(
 			createDesiredProduct("request:new"),
 		);
@@ -181,7 +179,9 @@ describe("static landblock render worker client", () => {
 			lookupAssetsFn: async () => [],
 			workerFactory: () => worker,
 		});
-		const stale = client.requestProduct(createDesiredProduct("request:current"));
+		const stale = client.requestProduct(
+			createDesiredProduct("request:current"),
+		);
 
 		worker.emit({
 			type: "landblock-render-product-job-complete",
@@ -189,9 +189,7 @@ describe("static landblock render worker client", () => {
 			result: createResult("request:old"),
 		});
 
-		await expect(stale).rejects.toThrow(
-			"Ignored stale landblock",
-		);
+		await expect(stale).rejects.toThrow("Ignored stale landblock");
 		client.dispose();
 	});
 

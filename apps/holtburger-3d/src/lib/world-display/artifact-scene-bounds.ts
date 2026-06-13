@@ -63,9 +63,7 @@ function collectStaticLandblockArtifactSceneBounds({
 			const transform = chunkTransformsByKey.get(renderChunk.chunkKey);
 			const root = terrain.bvh.nodes[0];
 			if (transform && root) {
-				bounds.push(
-					transformTerrainLocalBounds(root.bounds, transform.offset),
-				);
+				bounds.push(transformTerrainLocalBounds(root.bounds, transform.offset));
 			}
 		}
 

@@ -163,7 +163,9 @@ describe("V2 terrain geometry baker", () => {
 			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-0",
 			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-1",
 		]);
-		expect(drawUnits.map((drawUnit) => drawUnit.triangleCount)).toEqual([16, 2]);
+		expect(drawUnits.map((drawUnit) => drawUnit.triangleCount)).toEqual([
+			16, 2,
+		]);
 		expect(drawUnits[0]?.terrainMaterialPlan?.layerEntries).toHaveLength(8);
 		expect(drawUnits[1]?.terrainMaterialPlan?.layerEntries).toHaveLength(1);
 		expect(Array.from(drawUnits[0]?.layerSlots ?? [])).toEqual(

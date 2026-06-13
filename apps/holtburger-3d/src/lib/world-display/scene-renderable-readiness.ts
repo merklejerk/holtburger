@@ -264,7 +264,8 @@ function deriveStructuredInteriorMissingRecords(
 				dependencyClass: "source",
 				item: null,
 				assetId,
-				reason: "cell structure is not prepared; prepared env-cell geometry remains renderable",
+				reason:
+					"cell structure is not prepared; prepared env-cell geometry remains renderable",
 			}),
 		),
 	];
@@ -306,8 +307,7 @@ function derivePortalReadinessRecords(
 		createRecord<TransitionPortalCandidate>({
 			key: `portal/${candidate.id}`,
 			family: "portal",
-			status:
-				candidate.aperture.points.length >= 3 ? "resolved" : "failed",
+			status: candidate.aperture.points.length >= 3 ? "resolved" : "failed",
 			dependencyClass: "portal-aperture",
 			item: candidate,
 			assetId: null,

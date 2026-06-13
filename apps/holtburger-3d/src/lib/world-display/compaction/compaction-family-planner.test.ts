@@ -15,10 +15,7 @@ type CandidateOptions = Partial<CompactionFamilyCandidate> & {
 	entryKey?: string;
 	width?: number;
 	height?: number;
-	materialKind?:
-		| "flat"
-		| "direct-texture"
-		| "indexed-paletted";
+	materialKind?: "flat" | "direct-texture" | "indexed-paletted";
 	materialBehavior?: LegacyMaterialBehaviorDto | null;
 	hasUvBuffer?: boolean;
 	hasDetailOverlay?: boolean;
@@ -50,10 +47,9 @@ describe("compaction family planner", () => {
 		});
 
 		expect(plan.compactableCandidateIds).toEqual(["static-b", "structured-a"]);
-		expect(plan.renderFamilies.rgbaTexturePage.compactableCandidateIds).toEqual([
-			"static-b",
-			"structured-a",
-		]);
+		expect(plan.renderFamilies.rgbaTexturePage.compactableCandidateIds).toEqual(
+			["static-b", "structured-a"],
+		);
 		expect(plan.renderFamilies.rgbaTexturePage.materialSlots).toEqual(
 			plan.materialSlots,
 		);
@@ -392,7 +388,9 @@ describe("compaction family planner", () => {
 			],
 		});
 
-		expect(withDetailOverlay.compactionEligibility.material.blockers).toEqual([]);
+		expect(withDetailOverlay.compactionEligibility.material.blockers).toEqual(
+			[],
+		);
 
 		const missingDetailAtlas = createCandidate({
 			materialKind: "indexed-paletted",
@@ -712,9 +710,9 @@ describe("compaction family planner", () => {
 
 		expect(plan.compactableCandidateIds).toEqual(["slot-a", "slot-b"]);
 		expect(plan.bypasses).toEqual([]);
-		expect(plan.texturePageAtlasPlan.failures.map((failure) => failure.reason)).toEqual([
-			"source-texture-too-large",
-		]);
+		expect(
+			plan.texturePageAtlasPlan.failures.map((failure) => failure.reason),
+		).toEqual(["source-texture-too-large"]);
 	});
 
 	it("partitions RGBA material tables instead of bypassing overflow candidates", () => {
@@ -780,12 +778,16 @@ describe("compaction family planner", () => {
 			{
 				compactableCandidateIds: ["indexed-a"],
 				materialTableRecords: [{ key: "indexed-table-a" }],
-				drawSlices: [{ candidateIds: ["indexed-a"], materialTableSlotCount: 1 }],
+				drawSlices: [
+					{ candidateIds: ["indexed-a"], materialTableSlotCount: 1 },
+				],
 			},
 			{
 				compactableCandidateIds: ["indexed-b"],
 				materialTableRecords: [{ key: "indexed-table-b" }],
-				drawSlices: [{ candidateIds: ["indexed-b"], materialTableSlotCount: 1 }],
+				drawSlices: [
+					{ candidateIds: ["indexed-b"], materialTableSlotCount: 1 },
+				],
 			},
 		]);
 		expect(
@@ -821,9 +823,9 @@ describe("compaction family planner", () => {
 
 		expect(plan.compactableCandidateIds).toEqual(["slot-a"]);
 		expect(plan.bypasses).toEqual([]);
-		expect(plan.texturePageAtlasPlan.failures.map((failure) => failure.reason)).toEqual([
-			"atlas-full",
-		]);
+		expect(
+			plan.texturePageAtlasPlan.failures.map((failure) => failure.reason),
+		).toEqual(["atlas-full"]);
 	});
 
 	it("retains extra terrain RGBA atlas candidates without generic compaction candidates", () => {
@@ -852,9 +854,7 @@ describe("compaction family planner", () => {
 		expect(plan.texturePageAtlasPlan.buckets).toMatchObject([
 			{
 				bucket: "terrain-color",
-				atlasEntryRecords: [
-					{ key: "terrain-page/color/06006d06/21/512/512" },
-				],
+				atlasEntryRecords: [{ key: "terrain-page/color/06006d06/21/512/512" }],
 				atlasTextures: [
 					{
 						placements: [

@@ -76,9 +76,7 @@ export function parseHostAssetId(assetId: string): HostAssetKey {
 	if (landblockMatch) {
 		const routeKind = landblockMatch[2];
 		return createHostAssetKey(
-			routeKind === "outdoor"
-				? "landblock-outdoor"
-				: "landblock-env-cells",
+			routeKind === "outdoor" ? "landblock-outdoor" : "landblock-env-cells",
 			Number.parseInt(landblockMatch[1] as string, 16),
 		);
 	}
@@ -121,10 +119,7 @@ function normalizeAssetKeyId(
 		throw new Error(`${kind} route id must be numeric: ${id}`);
 	}
 
-	if (
-		kind === "landblock-outdoor" ||
-		kind === "landblock-env-cells"
-	) {
+	if (kind === "landblock-outdoor" || kind === "landblock-env-cells") {
 		return formatHex32(normalizeOutdoorLandblockId(id));
 	}
 

@@ -35,9 +35,10 @@ export function deriveStaticRenderableBatchBvhBinding(
 	return {
 		batchId: staticRenderableBatchId(groupKey),
 		itemKeys: [...itemKeys],
-		fallbackReason: itemKeys.size === 0
-			? `static render batch ${groupKey} contains no parts`
-			: null,
+		fallbackReason:
+			itemKeys.size === 0
+				? `static render batch ${groupKey} contains no parts`
+				: null,
 	};
 }
 

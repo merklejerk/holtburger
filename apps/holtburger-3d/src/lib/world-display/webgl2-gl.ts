@@ -238,10 +238,18 @@ function applyWebgl2SamplerParameters(
 		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, parameters.wrapT);
 	}
 	if (parameters.minFilter !== undefined) {
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, parameters.minFilter);
+		gl.texParameteri(
+			gl.TEXTURE_2D,
+			gl.TEXTURE_MIN_FILTER,
+			parameters.minFilter,
+		);
 	}
 	if (parameters.magFilter !== undefined) {
-		gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, parameters.magFilter);
+		gl.texParameteri(
+			gl.TEXTURE_2D,
+			gl.TEXTURE_MAG_FILTER,
+			parameters.magFilter,
+		);
 	}
 	if (parameters.maxAnisotropy !== undefined) {
 		const extension =
@@ -296,7 +304,11 @@ function createWebgl2Buffer(
 		throw new Error(`Failed to create WebGL2 buffer ${input.label}.`);
 	}
 	gl.bindBuffer(input.target, buffer);
-	gl.bufferData(input.target, normalizeWebgl2BufferUploadData(input.data), input.usage);
+	gl.bufferData(
+		input.target,
+		normalizeWebgl2BufferUploadData(input.data),
+		input.usage,
+	);
 	gl.bindBuffer(input.target, null);
 	return {
 		buffer,
@@ -391,7 +403,9 @@ function lookupUniformLocations<TName extends string>(
 	for (const name of names) {
 		const location = gl.getUniformLocation(program, name);
 		if (!location) {
-			throw new Error(`WebGL2 program ${programLabel} is missing uniform ${name}.`);
+			throw new Error(
+				`WebGL2 program ${programLabel} is missing uniform ${name}.`,
+			);
 		}
 		locations[name] = location;
 	}
@@ -400,20 +414,14 @@ function lookupUniformLocations<TName extends string>(
 
 function isTexImageSource(value: unknown): value is TexImageSource {
 	return (
-		typeof ImageBitmap !== "undefined" && value instanceof ImageBitmap
-	) || (
-		typeof ImageData !== "undefined" && value instanceof ImageData
-	) || (
-		typeof HTMLImageElement !== "undefined" &&
-		value instanceof HTMLImageElement
-	) || (
-		typeof HTMLCanvasElement !== "undefined" &&
-		value instanceof HTMLCanvasElement
-	) || (
-		typeof HTMLVideoElement !== "undefined" &&
-		value instanceof HTMLVideoElement
-	) || (
-		typeof OffscreenCanvas !== "undefined" &&
-		value instanceof OffscreenCanvas
+		(typeof ImageBitmap !== "undefined" && value instanceof ImageBitmap) ||
+		(typeof ImageData !== "undefined" && value instanceof ImageData) ||
+		(typeof HTMLImageElement !== "undefined" &&
+			value instanceof HTMLImageElement) ||
+		(typeof HTMLCanvasElement !== "undefined" &&
+			value instanceof HTMLCanvasElement) ||
+		(typeof HTMLVideoElement !== "undefined" &&
+			value instanceof HTMLVideoElement) ||
+		(typeof OffscreenCanvas !== "undefined" && value instanceof OffscreenCanvas)
 	);
 }

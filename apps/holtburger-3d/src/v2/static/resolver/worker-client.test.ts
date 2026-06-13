@@ -89,7 +89,9 @@ class FixtureWorkerPort implements StaticResolverWorkerPort {
 	}
 
 	emit(response: StaticResolverWorkerResponse): void {
-		const event = { data: response } as MessageEvent<StaticResolverWorkerResponse>;
+		const event = {
+			data: response,
+		} as MessageEvent<StaticResolverWorkerResponse>;
 		for (const listener of this.#listeners) {
 			listener(event);
 		}

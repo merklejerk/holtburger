@@ -40,7 +40,9 @@ export class StaticBakeWorkerClient implements StaticBaker {
 
 	bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
 		if (this.#disposed) {
-			return Promise.reject(new Error("Static bake worker client was disposed."));
+			return Promise.reject(
+				new Error("Static bake worker client was disposed."),
+			);
 		}
 
 		const requestId = `bake-job:${this.#nextRequestIndex}`;

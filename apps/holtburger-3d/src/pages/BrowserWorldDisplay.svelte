@@ -991,7 +991,10 @@
 	}
 
 	function handleTexturePreviewPointerMove(event: PointerEvent): void {
-		if (!texturePreviewStage || texturePreviewDrag?.pointerId !== event.pointerId) {
+		if (
+			!texturePreviewStage ||
+			texturePreviewDrag?.pointerId !== event.pointerId
+		) {
 			return;
 		}
 
@@ -1010,7 +1013,10 @@
 	}
 
 	function handleTexturePreviewPointerUp(event: PointerEvent): void {
-		if (!texturePreviewStage || texturePreviewDrag?.pointerId !== event.pointerId) {
+		if (
+			!texturePreviewStage ||
+			texturePreviewDrag?.pointerId !== event.pointerId
+		) {
 			return;
 		}
 		const drag = texturePreviewDrag;
@@ -2373,8 +2379,9 @@
 			return `error preparing ${assetState.activeRequest?.assetId ?? "asset"}`;
 		}
 
-		const preparedCounts =
-			countPreparedAssetsByKindFromResolver(preparedAssetResolver);
+		const preparedCounts = countPreparedAssetsByKindFromResolver(
+			preparedAssetResolver,
+		);
 		return `${assetState.status}; ${preparedCounts.total} prepared asset${preparedCounts.total === 1 ? "" : "s"}.`;
 	}
 
@@ -2383,8 +2390,9 @@
 			return `Error while preparing ${assetState.activeRequest?.assetId ?? "asset"}: ${assetState.errorMessage}`;
 		}
 
-		const preparedCounts =
-			countPreparedAssetsByKindFromResolver(preparedAssetResolver);
+		const preparedCounts = countPreparedAssetsByKindFromResolver(
+			preparedAssetResolver,
+		);
 		const activeAssetId = assetState.activeRequest?.assetId ?? "none";
 		const recentActivity = assetState.history.at(-1);
 		const recentText = recentActivity
@@ -2420,8 +2428,9 @@
 		const resolverRevisionText = `resolver revisions prepared ${preparedAssetResolver.getPreparedRevision()}, cache metadata ${preparedAssetResolver.getCacheMetadataRevision()}, prepared ${preparedAssetResolver.getPreparedCount()}`;
 		const cacheDiagnostics = preparedAssetResolver.getCacheDiagnostics();
 		if (!cacheDiagnostics) {
-			const preparedCounts =
-				countPreparedAssetsByKindFromResolver(preparedAssetResolver);
+			const preparedCounts = countPreparedAssetsByKindFromResolver(
+				preparedAssetResolver,
+			);
 			return `Prepared ${preparedCounts.total} (${formatPreparedAssetKindCounts(preparedCounts)}); waiting for first prune sample; ${pruneText}; ${resolverRevisionText}.`;
 		}
 
@@ -2481,10 +2490,10 @@
 	oncontextmenucapture={handleBrowserContextMenuCapture}
 	onclickcapture={handleBrowserClickCapture}
 >
-		<WorldDisplay
-			bind:this={worldDisplaySurface}
-			{preparedAssetResolver}
-			{staticLandblockProductSource}
+	<WorldDisplay
+		bind:this={worldDisplaySurface}
+		{preparedAssetResolver}
+		{staticLandblockProductSource}
 		onCameraFrameChange={handleRendererCameraFrameChange}
 		onRenderMetricsChange={handleRenderMetricsChange}
 		onCameraResidencyChange={handleRendererCameraResidencyChange}
@@ -2548,7 +2557,9 @@
 						<p>Texture page preview</p>
 						<h2 id="texture-preview-title">
 							{texturePreview
-								? formatRenderResourceInspectionKeyForDisplay(texturePreview.key)
+								? formatRenderResourceInspectionKeyForDisplay(
+										texturePreview.key,
+									)
 								: "Preview unavailable"}
 						</h2>
 					</div>
@@ -2558,10 +2569,14 @@
 					<p class="browser-panel__status">{texturePreviewError}</p>
 				{:else if texturePreview}
 					<div class="browser-world-display__texture-preview-toolbar">
-						<button type="button" onclick={() => void fitTexturePreviewToStage()}>
+						<button
+							type="button"
+							onclick={() => void fitTexturePreviewToStage()}
+						>
 							Fit
 						</button>
-						<button type="button" onclick={resetTexturePreviewZoom}>100%</button>
+						<button type="button" onclick={resetTexturePreviewZoom}>100%</button
+						>
 						<button
 							type="button"
 							aria-label="Zoom out"
@@ -2694,7 +2709,9 @@
 						</dl>
 						<details class="browser-panel__details">
 							<summary>Atlas Entries</summary>
-							<dl class="data-list compact-data-list browser-panel__resource-list">
+							<dl
+								class="data-list compact-data-list browser-panel__resource-list"
+							>
 								{#each texturePreview.entries as entry}
 									<div
 										class:selected={entry.sourcePlacementKey ===
@@ -2714,8 +2731,8 @@
 											</button>
 										</dt>
 										<dd>
-											{entry.sourceAssetId}; aliases {entry.virtualRefKeys.length};
-											rect [{entry.rect.join(", ")}]
+											{entry.sourceAssetId}; aliases {entry.virtualRefKeys
+												.length}; rect [{entry.rect.join(", ")}]
 										</dd>
 									</div>
 								{/each}

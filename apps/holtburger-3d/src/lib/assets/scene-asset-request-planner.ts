@@ -39,9 +39,7 @@ import {
 	type OutdoorSceneInterest,
 } from "../world-display/outdoor-scene-interest";
 
-type PreparedAssetDependencyKey =
-	| "gfxObjAssetIds"
-	| "materialAssetIds";
+type PreparedAssetDependencyKey = "gfxObjAssetIds" | "materialAssetIds";
 
 type PreparedAssetDependencyMap = Partial<
 	Record<PreparedAssetDependencyKey, readonly string[]>
@@ -112,8 +110,7 @@ export function createSceneCoverageRequests(
 		sceneInterest,
 		preparedAssets,
 		pendingAssetIds = [],
-		materialTexturePreparationPolicy =
-			DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS.materialTexturePreparationPolicy,
+		materialTexturePreparationPolicy = DEFAULT_OUTDOOR_SCENE_REQUEST_OPTIONS.materialTexturePreparationPolicy,
 	} = input;
 	const sceneLocation = sceneInterest.location;
 	const options = createOutdoorSceneRequestOptionsFromInterest(
@@ -153,7 +150,10 @@ export function createSceneCoverageRequests(
 		];
 	}
 
-	const interest = deriveOutdoorInterestForSceneLocation(sceneLocation, options);
+	const interest = deriveOutdoorInterestForSceneLocation(
+		sceneLocation,
+		options,
+	);
 
 	return [
 		...createOutdoorCoverageRequestsForInterest(
@@ -228,7 +228,10 @@ export function deriveSceneCoverageAssetIds(
 		].sort();
 	}
 
-	const interest = deriveOutdoorInterestForSceneLocation(sceneLocation, options);
+	const interest = deriveOutdoorInterestForSceneLocation(
+		sceneLocation,
+		options,
+	);
 	return [
 		...new Set([
 			...deriveFocusedOutdoorCoverageLandblockIds(interest).map(
@@ -255,10 +258,12 @@ export function deriveVisibleMaterialAssetIdsForSceneInterest(input: {
 	materialTexturePreparationPolicy?: MaterialTexturePreparationPolicy;
 }): string[] {
 	const { preparedAssets, pendingAssetIds = [] } = input;
-	const materialAssetIds = deriveAllVisibleMaterialAssetIdsForSceneInterest(input);
+	const materialAssetIds =
+		deriveAllVisibleMaterialAssetIdsForSceneInterest(input);
 	const pendingAssetIdSet = new Set(pendingAssetIds);
 	return materialAssetIds.filter(
-		(assetId) => !preparedAssets.has(assetId) && !pendingAssetIdSet.has(assetId),
+		(assetId) =>
+			!preparedAssets.has(assetId) && !pendingAssetIdSet.has(assetId),
 	);
 }
 
@@ -285,10 +290,7 @@ function deriveAllVisibleMaterialAssetIdsForSceneInterest(input: {
 	preparedAssets: PreparedAssetResolver;
 	materialTexturePreparationPolicy?: MaterialTexturePreparationPolicy;
 }): string[] {
-	const {
-		sceneInterest,
-		preparedAssets,
-	} = input;
+	const { sceneInterest, preparedAssets } = input;
 	const sceneLocation = sceneInterest.location;
 	const options = createOutdoorSceneRequestOptionsFromInterest(
 		sceneInterest,
@@ -523,8 +525,7 @@ function createStaticRenderableAssetRequests(
 	}
 
 	const outdoorInterest =
-		interest ??
-		deriveOutdoorInterestForSceneLocation(sceneLocation, options);
+		interest ?? deriveOutdoorInterestForSceneLocation(sceneLocation, options);
 	const buildingLandblockIds = new Set(outdoorInterest.buildingLandblockIds);
 	const detailLandblockIds = new Set(outdoorInterest.detailLandblockIds);
 	const envCellLandblockIds = new Set(outdoorInterest.envCellLandblockIds);
@@ -856,27 +857,29 @@ function collectVisibleRenderSurfaceAssetIds(options: {
 	options: OutdoorSceneRequestOptions;
 	interest: NormalizedOutdoorSceneInterest | null;
 }): string[] {
-	const materialAssetIds = options.sceneLocation.kind === "interior-cell"
-		? collectIndoorVisibleMaterialAssetIds(
-				options.sceneLocation,
-				options.preparedAssets,
-			)
-		: collectOutdoorVisibleMaterialAssetIds(
-				options.sceneLocation,
-				options.preparedAssets,
-				options.options,
-			);
-	const tableAssetIds = options.sceneLocation.kind === "interior-cell"
-		? collectIndoorVisibleRegionRenderProfileAssetIds(
-				options.sceneLocation,
-				options.preparedAssets,
-			)
-		: collectOutdoorVisibleRenderResourceTableAssetIds(
-				options.sceneLocation,
-				options.preparedAssets,
-				options.options,
-				options.interest,
-			);
+	const materialAssetIds =
+		options.sceneLocation.kind === "interior-cell"
+			? collectIndoorVisibleMaterialAssetIds(
+					options.sceneLocation,
+					options.preparedAssets,
+				)
+			: collectOutdoorVisibleMaterialAssetIds(
+					options.sceneLocation,
+					options.preparedAssets,
+					options.options,
+				);
+	const tableAssetIds =
+		options.sceneLocation.kind === "interior-cell"
+			? collectIndoorVisibleRegionRenderProfileAssetIds(
+					options.sceneLocation,
+					options.preparedAssets,
+				)
+			: collectOutdoorVisibleRenderResourceTableAssetIds(
+					options.sceneLocation,
+					options.preparedAssets,
+					options.options,
+					options.interest,
+				);
 	return uniqueSortedAssetIds(
 		collectRenderSurfaceAssetIdsFromAssets(options.preparedAssets, [
 			...materialAssetIds,
@@ -911,8 +914,7 @@ function collectOutdoorVisibleRenderResourceTableAssetIds(
 	interest: NormalizedOutdoorSceneInterest | null,
 ): string[] {
 	const outdoorInterest =
-		interest ??
-		deriveOutdoorInterestForSceneLocation(sceneLocation, options);
+		interest ?? deriveOutdoorInterestForSceneLocation(sceneLocation, options);
 	const outdoorLandblockIds = unionOutdoorSceneLandblockIds(
 		deriveFocusedOutdoorCoverageLandblockIds(outdoorInterest),
 		deriveFarOutdoorCoverageLandblockIds(outdoorInterest),
@@ -938,16 +940,16 @@ function collectRenderSurfaceAssetIdsFromAssets(
 	assetIds: readonly string[],
 ): string[] {
 	const directRenderSurfaceAssetIds = assetIds.flatMap((assetId) => {
-			const payload = preparedAssets.get(assetId)?.payload;
-			if (
-				payload?.kind !== "material-recipe" &&
-				payload?.kind !== "terrain-material" &&
-				payload?.kind !== "region-render-profile"
-			) {
-				return [];
-			}
-			return payload.dependencies.renderSurfaceAssetIds;
-		});
+		const payload = preparedAssets.get(assetId)?.payload;
+		if (
+			payload?.kind !== "material-recipe" &&
+			payload?.kind !== "terrain-material" &&
+			payload?.kind !== "region-render-profile"
+		) {
+			return [];
+		}
+		return payload.dependencies.renderSurfaceAssetIds;
+	});
 	const surfaceTextureAssetIds = assetIds.flatMap((assetId) => {
 		const payload = preparedAssets.get(assetId)?.payload;
 		if (
@@ -1306,7 +1308,9 @@ function deriveOutdoorInterestForSceneLocation(
 	return deriveOutdoorSceneInterest(requestedInterest);
 }
 
-function deriveSceneFocusLandblockId(sceneLocation: SceneResourceLocation): number {
+function deriveSceneFocusLandblockId(
+	sceneLocation: SceneResourceLocation,
+): number {
 	return normalizeOutdoorLandblockId(sceneLocation.landblockId);
 }
 
@@ -1345,7 +1349,9 @@ function describeRequiredSceneLocationIdentity(
 	return describeSceneLocationIdentity(sceneLocation);
 }
 
-function describeSceneLocationIdentity(sceneLocation: SceneResourceLocation): string {
+function describeSceneLocationIdentity(
+	sceneLocation: SceneResourceLocation,
+): string {
 	if (sceneLocation.kind === "interior-cell") {
 		return `interior-cell-${formatHex32(
 			sceneLocation.envCellId,

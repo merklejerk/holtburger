@@ -202,5 +202,7 @@ function compareSnapshotKeys(
 	left: { readonly key: HostAssetKey },
 	right: { readonly key: HostAssetKey },
 ): number {
-	return describeHostAssetKey(left.key).localeCompare(describeHostAssetKey(right.key));
+	return describeHostAssetKey(left.key).localeCompare(
+		describeHostAssetKey(right.key),
+	);
 }

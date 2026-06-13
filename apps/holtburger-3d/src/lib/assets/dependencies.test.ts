@@ -147,7 +147,9 @@ describe("asset response dependencies", () => {
 			sourceAssetKind: "terrain-material",
 			regionNumber: 1,
 			materialKind: "tex-merge-table",
-			terrainTypes: [createTerrainMaterialTypeEntry("surface-texture/05000010")],
+			terrainTypes: [
+				createTerrainMaterialTypeEntry("surface-texture/05000010"),
+			],
 			terrainAlphaMaps: [
 				{
 					alphaIndex: 0,

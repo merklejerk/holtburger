@@ -49,7 +49,10 @@ export function selectVisibleEnvCells(
 		}
 		visited.add(queued.cell.identity.envCellId);
 
-		for (const targetEnvCellId of collectVisibleTargetIds(bundle, queued.cell)) {
+		for (const targetEnvCellId of collectVisibleTargetIds(
+			bundle,
+			queued.cell,
+		)) {
 			const target = cellById.get(targetEnvCellId);
 			if (!target) {
 				diagnostics.push({

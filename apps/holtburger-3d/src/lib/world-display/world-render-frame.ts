@@ -1,5 +1,8 @@
 import type { SceneCameraFrame } from "./camera";
-import { buildSceneCameraViewProjectionMatrix, type RenderMat4 } from "./render-math";
+import {
+	buildSceneCameraViewProjectionMatrix,
+	type RenderMat4,
+} from "./render-math";
 import { deriveRenderBvhVisibilitySnapshot } from "./render-bvh-visibility-snapshot";
 import type { RenderBvhItemKey } from "./prepared-bvh-visibility";
 import type { RenderChunkTransform } from "./render-anchor";
@@ -91,9 +94,7 @@ export interface WorldRenderFrameMetrics {
 	fallbackReasonCount: number;
 	fallbackReasonSamples: readonly string[];
 	candidateCountsByCategory: Readonly<Record<WorldRenderCategory, number>>;
-	visibleDrawCountsByCategory: Readonly<
-		Record<WorldRenderCategory, number>
-	>;
+	visibleDrawCountsByCategory: Readonly<Record<WorldRenderCategory, number>>;
 	fallbackCountsByCategory: Readonly<Record<WorldRenderCategory, number>>;
 	representedItemKeyCountsByCategory: Readonly<
 		Record<WorldRenderCategory, number>
@@ -141,7 +142,8 @@ export function buildWorldRenderFrame({
 	structuredInteriorScene: StructuredInteriorSceneModel;
 	terrainScene: TerrainSceneModel;
 }): WorldRenderFrame {
-	const viewProjectionMatrix = buildSceneCameraViewProjectionMatrix(cameraFrame);
+	const viewProjectionMatrix =
+		buildSceneCameraViewProjectionMatrix(cameraFrame);
 	const visibilitySnapshot = deriveRenderBvhVisibilitySnapshot({
 		assetReadModel,
 		terrainScene,
@@ -151,13 +153,10 @@ export function buildWorldRenderFrame({
 		renderChunkTransforms,
 		frustum: buildRenderFrustumFromProjectionMatrix(viewProjectionMatrix),
 	});
-	const selection = selectWorldRenderCandidates(
-		candidates,
-		{
-			visibleItemKeys: visibilitySnapshot.visibleItemKeys,
-			queryFallbackReasons: visibilitySnapshot.fallbackReasons,
-		},
-	);
+	const selection = selectWorldRenderCandidates(candidates, {
+		visibleItemKeys: visibilitySnapshot.visibleItemKeys,
+		queryFallbackReasons: visibilitySnapshot.fallbackReasons,
+	});
 	return {
 		cameraFrame,
 		viewProjectionMatrix,
@@ -374,7 +373,8 @@ function resolveBatchFallbackReason({
 }): string | null {
 	if (!hasItemKeys) {
 		return (
-			fallbackReason ?? `world render candidate ${candidateId} has no BVH item keys`
+			fallbackReason ??
+			`world render candidate ${candidateId} has no BVH item keys`
 		);
 	}
 	if (fallbackReason) {
@@ -386,7 +386,9 @@ function resolveBatchFallbackReason({
 	return null;
 }
 
-function createWorldRenderDraw(candidate: WorldRenderCandidate): WorldRenderDraw {
+function createWorldRenderDraw(
+	candidate: WorldRenderCandidate,
+): WorldRenderDraw {
 	if (candidate.kind === WORLD_RENDER_CANDIDATE_KIND.terrainTile) {
 		return {
 			kind: WORLD_RENDER_DRAW_KIND.terrainTile,

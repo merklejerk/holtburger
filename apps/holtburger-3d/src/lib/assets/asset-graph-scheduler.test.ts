@@ -55,11 +55,9 @@ describe("asset graph scheduler", () => {
 			["synthetic/root"],
 			["synthetic/leaf-a", "synthetic/leaf-b"],
 		]);
-		expect(result.preparedAssets.map((asset) => asset.request.assetId).sort()).toEqual([
-			"synthetic/leaf-a",
-			"synthetic/leaf-b",
-			"synthetic/root",
-		]);
+		expect(
+			result.preparedAssets.map((asset) => asset.request.assetId).sort(),
+		).toEqual(["synthetic/leaf-a", "synthetic/leaf-b", "synthetic/root"]);
 		expect(result.dependencyStatus).toMatchObject({
 			status: "ready",
 			dependencyAssetIds: ["synthetic/leaf-a", "synthetic/leaf-b"],

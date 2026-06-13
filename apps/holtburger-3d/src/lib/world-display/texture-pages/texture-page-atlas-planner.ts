@@ -155,7 +155,9 @@ export function planTexturePageAtlas(options: {
 			policy: options.policy,
 			bucketPlans,
 		}),
-		rgbaAtlasReadyCandidateIds: rgbaReady.map((candidate) => candidate.candidateId),
+		rgbaAtlasReadyCandidateIds: rgbaReady.map(
+			(candidate) => candidate.candidateId,
+		),
 		detailAtlasReadyCandidateIds: detailReady.map(
 			(candidate) => candidate.candidateId,
 		),
@@ -223,7 +225,9 @@ function planTexturePageAtlasBucket({
 		cohorts: atlasLayoutCohorts,
 	});
 	const basePlaced = rgbaCandidates.filter((candidate) =>
-		layout.placementsByEntryKey.has(candidate.texturePageReadiness.atlasEntryKey),
+		layout.placementsByEntryKey.has(
+			candidate.texturePageReadiness.atlasEntryKey,
+		),
 	);
 	for (const candidate of rgbaCandidates) {
 		const overflow = layout.overflowsByEntryKey.get(
@@ -381,7 +385,10 @@ function groupRgbaCandidatesByBucket(
 function groupDetailCandidatesByBucket(
 	candidates: readonly TexturePageAtlasDetailCandidate[],
 ): Map<TexturePageBucket, TexturePageAtlasDetailCandidate[]> {
-	const groups = new Map<TexturePageBucket, TexturePageAtlasDetailCandidate[]>();
+	const groups = new Map<
+		TexturePageBucket,
+		TexturePageAtlasDetailCandidate[]
+	>();
 	for (const candidate of candidates) {
 		const bucket = candidate.bucket ?? "static-detail";
 		const group = groups.get(bucket) ?? [];

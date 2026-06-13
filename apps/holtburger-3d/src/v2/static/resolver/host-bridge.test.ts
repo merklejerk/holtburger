@@ -47,7 +47,9 @@ describe("V2 static resolver host bridge", () => {
 		);
 		const workerHost = new StaticResolverWorkerRuntimeHost(channel.workerPort);
 
-		await expect(workerHost.lookupAsset(key, 1)).rejects.toThrow("host said no");
+		await expect(workerHost.lookupAsset(key, 1)).rejects.toThrow(
+			"host said no",
+		);
 		expect(workerHost.createSnapshot().failure).toBe("host said no");
 
 		workerHost.dispose();
@@ -90,14 +92,18 @@ class FixtureWorkerChannel {
 	};
 
 	#emitThreadMessage(message: StaticResolverWorkerThreadMessage): void {
-		const event = { data: message } as MessageEvent<StaticResolverWorkerThreadMessage>;
+		const event = {
+			data: message,
+		} as MessageEvent<StaticResolverWorkerThreadMessage>;
 		for (const listener of this.#mainListeners) {
 			listener(event);
 		}
 	}
 
 	#emitWorkerMessage(message: StaticResolverWorkerMainMessage): void {
-		const event = { data: message } as MessageEvent<StaticResolverWorkerMainMessage>;
+		const event = {
+			data: message,
+		} as MessageEvent<StaticResolverWorkerMainMessage>;
 		for (const listener of this.#workerListeners) {
 			listener(event);
 		}

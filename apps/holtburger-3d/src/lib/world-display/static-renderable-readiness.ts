@@ -80,9 +80,8 @@ export function deriveStaticRenderableReadinessModel({
 			.map((record) => record.part?.renderKey)
 			.filter((renderKey): renderKey is string => renderKey !== undefined),
 	);
-	const committedScene = filterStaticRenderableSceneParts(
-		scene,
-		(part) => committedPartKeys.has(part.renderKey),
+	const committedScene = filterStaticRenderableSceneParts(scene, (part) =>
+		committedPartKeys.has(part.renderKey),
 	);
 
 	return {
@@ -197,7 +196,10 @@ function derivePartReadinessRecord(
 		});
 	}
 
-	const materialFallbackReason = findMaterialFallbackReason(assetReadModel, part);
+	const materialFallbackReason = findMaterialFallbackReason(
+		assetReadModel,
+		part,
+	);
 	if (materialFallbackReason) {
 		return createPartRecord({
 			status: "fallback-resolved",
@@ -222,20 +224,19 @@ function derivePartReadinessRecord(
 function findMaterialFallbackReason(
 	assetReadModel: RendererAssetReadModel,
 	part: StaticRenderablePart,
-):
-	| {
-			dependencyClass: "material-plan" | "surface-texture";
-			assetId: string;
-			reason: string;
-	  }
-	| null {
+): {
+	dependencyClass: "material-plan" | "surface-texture";
+	assetId: string;
+	reason: string;
+} | null {
 	for (const slot of part.materialSlots) {
 		const materialAsset = assetReadModel.get(slot.materialAssetId);
 		if (!isPreparedMaterialRecipeAsset(materialAsset)) {
 			return {
 				dependencyClass: "material-plan",
 				assetId: slot.materialAssetId,
-				reason: "material recipe is not prepared; debug fallback material is valid",
+				reason:
+					"material recipe is not prepared; debug fallback material is valid",
 			};
 		}
 
@@ -364,7 +365,10 @@ function deriveReadinessMetrics(
 function isPreparedGfxGeometryAsset(
 	asset: PreparedAssetRecord | null | undefined,
 ): asset is PreparedAssetRecord & {
-	payload: { kind: "gfx-obj"; renderGeometry: { vertexCount: number; triangleCount: number } };
+	payload: {
+		kind: "gfx-obj";
+		renderGeometry: { vertexCount: number; triangleCount: number };
+	};
 } {
 	return asset?.payload.kind === "gfx-obj";
 }

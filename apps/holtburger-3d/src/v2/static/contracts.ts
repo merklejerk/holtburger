@@ -911,16 +911,8 @@ interface StaticObjectBlendState {
 		| "inverse-alpha"
 		| "inverse-alpha-additive"
 		| "additive";
-	readonly srcFactor:
-		| "one"
-		| "src-alpha"
-		| "one-minus-src-alpha"
-		| null;
-	readonly dstFactor:
-		| "one"
-		| "src-alpha"
-		| "one-minus-src-alpha"
-		| null;
+	readonly srcFactor: "one" | "src-alpha" | "one-minus-src-alpha" | null;
+	readonly dstFactor: "one" | "src-alpha" | "one-minus-src-alpha" | null;
 }
 
 export interface StaticObjectSortMetadata {

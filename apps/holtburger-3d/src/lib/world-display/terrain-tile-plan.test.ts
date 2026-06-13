@@ -23,7 +23,9 @@ describe("terrain tile plan", () => {
 		});
 
 		expect(plan?.blockers).toEqual([]);
-		expect(plan?.layerEntries.map((entry) => [entry.slot, entry.pcode])).toEqual([
+		expect(
+			plan?.layerEntries.map((entry) => [entry.slot, entry.pcode]),
+		).toEqual([
 			[0, 1],
 			[1, 2],
 		]);
@@ -148,7 +150,9 @@ function createTextureRef(
 	};
 }
 
-function createRenderSurface(renderSurfaceId: number): PreparedRenderSurfacePayload {
+function createRenderSurface(
+	renderSurfaceId: number,
+): PreparedRenderSurfacePayload {
 	return {
 		kind: "render-surface",
 		sourceAssetKind: "render-surface",

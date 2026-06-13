@@ -114,12 +114,12 @@ class GraphTraversalState {
 
 	enqueueDependencies(dependencyAssetIds: string[]): void {
 		for (const dependencyAssetId of dependencyAssetIds) {
-				if (
-					this.scheduledAssetIds.has(dependencyAssetId) ||
-					this.hasPreparedAsset(dependencyAssetId)
-				) {
-					continue;
-				}
+			if (
+				this.scheduledAssetIds.has(dependencyAssetId) ||
+				this.hasPreparedAsset(dependencyAssetId)
+			) {
+				continue;
+			}
 
 			this.scheduledAssetIds.add(dependencyAssetId);
 			this.returnOrderByAssetId.set(
@@ -206,7 +206,8 @@ class GraphTraversalState {
 			};
 		}
 		return {
-			status: readyAssetIds.length > 0 ? "partial-ready" : "awaiting-dependency",
+			status:
+				readyAssetIds.length > 0 ? "partial-ready" : "awaiting-dependency",
 			dependencyAssetIds,
 			readyAssetIds,
 			missingAssetIds,

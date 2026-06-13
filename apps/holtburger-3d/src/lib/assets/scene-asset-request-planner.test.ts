@@ -25,9 +25,9 @@ describe("scene asset request planner", () => {
 
 		const requests = createSceneCoverageRequests(
 			{
-					requestRevision: 7,
-					browserDestination: destination,
-					preparedAssets: createTestPreparedAssetResolver(),
+				requestRevision: 7,
+				browserDestination: destination,
+				preparedAssets: createTestPreparedAssetResolver(),
 				options: {
 					terrainRadius: 1,
 					buildingRadius: 0,
@@ -74,9 +74,9 @@ describe("scene asset request planner", () => {
 
 		const requests = createSceneCoverageRequests(
 			{
-					requestRevision: 3,
-					browserDestination: destination,
-					preparedAssets: createTestPreparedAssetResolver(),
+				requestRevision: 3,
+				browserDestination: destination,
+				preparedAssets: createTestPreparedAssetResolver(),
 				options: {
 					terrainRadius: 2,
 					buildingRadius: 1,
@@ -101,14 +101,12 @@ describe("scene asset request planner", () => {
 				priority: "bootstrap",
 			},
 		]);
-			expect(
-				deriveSceneCoverageAssetIds(
-					destination,
-					createTestPreparedAssetResolver(),
-				),
-			).toEqual([
-				"landblock/016cffff/topology",
-			]);
+		expect(
+			deriveSceneCoverageAssetIds(
+				destination,
+				createTestPreparedAssetResolver(),
+			),
+		).toEqual(["landblock/016cffff/topology"]);
 	});
 
 	it("requests dungeon static dependencies from prepared pack cells", () => {
@@ -125,10 +123,10 @@ describe("scene asset request planner", () => {
 			{
 				requestRevision: 4,
 				browserDestination: destination,
-					preparedAssets: createTestPreparedAssetResolver([
-						preparedTopology,
-						preparedEnvCell,
-					]),
+				preparedAssets: createTestPreparedAssetResolver([
+					preparedTopology,
+					preparedEnvCell,
+				]),
 				pendingAssetIds: [],
 			},
 			"streaming",
@@ -168,11 +166,11 @@ describe("scene asset request planner", () => {
 			{
 				requestRevision: 5,
 				browserDestination: destination,
-					preparedAssets: createTestPreparedAssetResolver([
-						preparedTopology,
-						preparedEnvCell,
-						setupModel,
-					]),
+				preparedAssets: createTestPreparedAssetResolver([
+					preparedTopology,
+					preparedEnvCell,
+					setupModel,
+				]),
 				pendingAssetIds: [],
 			},
 			"streaming",
@@ -208,12 +206,12 @@ describe("scene asset request planner", () => {
 			{
 				requestRevision: 6,
 				browserDestination: destination,
-					preparedAssets: createTestPreparedAssetResolver([
-						preparedTopology,
-						preparedEnvCell,
-						setupModel,
-						setupAppearance,
-					]),
+				preparedAssets: createTestPreparedAssetResolver([
+					preparedTopology,
+					preparedEnvCell,
+					setupModel,
+					setupAppearance,
+				]),
 				pendingAssetIds: [],
 			},
 			"streaming",
@@ -244,11 +242,11 @@ describe("scene asset request planner", () => {
 			{
 				requestRevision: 8,
 				browserDestination: destination,
-					preparedAssets: createTestPreparedAssetResolver([
-						preparedTopology,
-						preparedEnvCell,
-						setupModel,
-					]),
+				preparedAssets: createTestPreparedAssetResolver([
+					preparedTopology,
+					preparedEnvCell,
+					setupModel,
+				]),
 				pendingAssetIds: [],
 				options: {
 					terrainRadius: 0,
@@ -274,7 +272,7 @@ describe("scene asset request planner", () => {
 			{
 				requestRevision: 9,
 				browserDestination: destination,
-					preparedAssets: createTestPreparedAssetResolver([preparedOutdoor]),
+				preparedAssets: createTestPreparedAssetResolver([preparedOutdoor]),
 				pendingAssetIds: [],
 				options: {
 					terrainRadius: 0,
@@ -312,11 +310,11 @@ describe("scene asset request planner", () => {
 			{
 				requestRevision: 6,
 				browserDestination: destination,
-					preparedAssets: createTestPreparedAssetResolver([
-						preparedTopology,
-						preparedEnvCell,
-						gfxObj,
-					]),
+				preparedAssets: createTestPreparedAssetResolver([
+					preparedTopology,
+					preparedEnvCell,
+					gfxObj,
+				]),
 				pendingAssetIds: [],
 			},
 			"streaming",
@@ -344,13 +342,13 @@ describe("scene asset request planner", () => {
 		]);
 		expect(
 			deriveAllVisibleMaterialAssetIdsForBrowserDestination({
-					browserDestination: destination,
-					preparedAssets: createTestPreparedAssetResolver([
-						preparedTopology,
-						preparedEnvCell,
-						gfxObj,
-					]),
-				}),
+				browserDestination: destination,
+				preparedAssets: createTestPreparedAssetResolver([
+					preparedTopology,
+					preparedEnvCell,
+					gfxObj,
+				]),
+			}),
 		).toEqual(["material/0800006c", "material/0800007e"]);
 	});
 
@@ -368,10 +366,10 @@ describe("scene asset request planner", () => {
 			{
 				requestRevision: 7,
 				browserDestination: destination,
-					preparedAssets: createTestPreparedAssetResolver([
-						preparedTopology,
-						preparedEnvCell,
-					]),
+				preparedAssets: createTestPreparedAssetResolver([
+					preparedTopology,
+					preparedEnvCell,
+				]),
 				pendingAssetIds: [],
 			},
 			"streaming",
@@ -415,13 +413,13 @@ describe("scene asset request planner", () => {
 			{
 				requestRevision: 10,
 				browserDestination: destination,
-					preparedAssets: createTestPreparedAssetResolver([
-						preparedTopology,
-						preparedEnvCell,
-						material,
-						visibleRenderSurface,
-						unrelatedRenderSurface,
-					]),
+				preparedAssets: createTestPreparedAssetResolver([
+					preparedTopology,
+					preparedEnvCell,
+					material,
+					visibleRenderSurface,
+					unrelatedRenderSurface,
+				]),
 				pendingAssetIds: [],
 			},
 			"streaming",
@@ -459,12 +457,12 @@ describe("scene asset request planner", () => {
 			{
 				requestRevision: 10,
 				browserDestination: destination,
-					preparedAssets: createTestPreparedAssetResolver([
-						preparedTopology,
-						preparedEnvCell,
-						material,
-						visibleRenderSurface,
-					]),
+				preparedAssets: createTestPreparedAssetResolver([
+					preparedTopology,
+					preparedEnvCell,
+					material,
+					visibleRenderSurface,
+				]),
 				pendingAssetIds: [],
 				options: {
 					terrainRadius: 2,
@@ -510,12 +508,12 @@ describe("scene asset request planner", () => {
 			{
 				requestRevision: 11,
 				browserDestination: destination,
-					preparedAssets: createTestPreparedAssetResolver([
-						preparedTopology,
-						preparedEnvCell,
-						material,
-						visibleRenderSurface,
-					]),
+				preparedAssets: createTestPreparedAssetResolver([
+					preparedTopology,
+					preparedEnvCell,
+					material,
+					visibleRenderSurface,
+				]),
 				pendingAssetIds: [],
 				options: {
 					terrainRadius: 2,
@@ -558,12 +556,12 @@ describe("scene asset request planner", () => {
 			{
 				requestRevision: 12,
 				browserDestination: destination,
-					preparedAssets: createTestPreparedAssetResolver([
-						preparedOutdoor,
-						terrainMaterial,
-						terrainSurfaceTexture,
-						terrainRenderSurface,
-					]),
+				preparedAssets: createTestPreparedAssetResolver([
+					preparedOutdoor,
+					terrainMaterial,
+					terrainSurfaceTexture,
+					terrainRenderSurface,
+				]),
 				pendingAssetIds: [],
 				options: {
 					terrainRadius: 0,
@@ -603,15 +601,15 @@ describe("scene asset request planner", () => {
 		);
 
 		expect(
-				deriveSceneCoverageAssetIds(
-					destination,
-					createTestPreparedAssetResolver([
-						preparedTopology,
-						preparedEnvCell,
-						material,
-						renderSurface,
-					]),
-				),
+			deriveSceneCoverageAssetIds(
+				destination,
+				createTestPreparedAssetResolver([
+					preparedTopology,
+					preparedEnvCell,
+					material,
+					renderSurface,
+				]),
+			),
 		).toContain(
 			"prepared-texture/0600006c?usage=raw&out=dxt5&mips=retail4&cs=source",
 		);
@@ -637,15 +635,15 @@ describe("scene asset request planner", () => {
 			"Dxt5",
 		);
 
-			const assetIds = deriveSceneCoverageAssetIds(
-				destination,
-				createTestPreparedAssetResolver([
-					preparedTopology,
-					preparedEnvCell,
-					material,
-					renderSurface,
-				]),
-				{
+		const assetIds = deriveSceneCoverageAssetIds(
+			destination,
+			createTestPreparedAssetResolver([
+				preparedTopology,
+				preparedEnvCell,
+				material,
+				renderSurface,
+			]),
+			{
 				terrainRadius: 2,
 				buildingRadius: 1,
 				detailRadius: 1,

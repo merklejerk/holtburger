@@ -102,7 +102,9 @@ export class WorkerPoolStaticResolver implements StaticResolver {
 
 	constructor(resolvers: readonly StaticResolver[]) {
 		if (resolvers.length === 0) {
-			throw new Error("WorkerPoolStaticResolver requires at least one resolver.");
+			throw new Error(
+				"WorkerPoolStaticResolver requires at least one resolver.",
+			);
 		}
 
 		this.#resolvers = resolvers;

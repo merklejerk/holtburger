@@ -52,9 +52,7 @@ interface StaticLandblockRenderArtifactCoordinatorOptions {
 	buildPolicy?: LandblockRenderProductBuildPolicy;
 	buildPolicyRevision?: string;
 	texturePagePolicyRevision?: string;
-	onStoreChanged?: (
-		productSet: StaticLandblockRenderProductSet,
-	) => void;
+	onStoreChanged?: (productSet: StaticLandblockRenderProductSet) => void;
 	onProductCommitted?: (result: LandblockRenderProductWorkerResult) => void;
 	onProductEvicted?: (key: StaticLandblockProductKey) => void;
 	onProductsCleared?: () => void;
@@ -62,9 +60,7 @@ interface StaticLandblockRenderArtifactCoordinatorOptions {
 	renderRegressionDiagnostics?: TemporaryRenderRegressionDiagnostics;
 }
 
-export class StaticLandblockRenderArtifactCoordinator
-	implements LandblockProductRuntime
-{
+export class StaticLandblockRenderArtifactCoordinator implements LandblockProductRuntime {
 	private readonly client: StaticLandblockRenderProductClient;
 	readonly productSource: MutableStaticLandblockProductSource;
 	private readonly buildPolicy: LandblockRenderProductBuildPolicy;
@@ -200,9 +196,7 @@ export class StaticLandblockRenderArtifactCoordinator
 		this.client.dispose();
 	}
 
-	private resolveRequestId(
-		sceneInterest: SceneResourceInterest,
-	): string {
+	private resolveRequestId(sceneInterest: SceneResourceInterest): string {
 		const signature = describeSceneResourceInterestKey(sceneInterest);
 		if (this.lastInputSignature === signature && this.lastRequestId !== null) {
 			return this.lastRequestId;

@@ -37,7 +37,9 @@ describe("buildWorldRenderFrame", () => {
 			terrainScene: createTerrainScene(),
 		});
 
-		expect(frame.passes).toEqual([{ id: WORLD_RENDER_PASS_ID.world, draws: [] }]);
+		expect(frame.passes).toEqual([
+			{ id: WORLD_RENDER_PASS_ID.world, draws: [] },
+		]);
 		expect(frame.metrics.registeredBatchCount).toBe(1);
 		expect(frame.metrics.keyedBatchCount).toBe(1);
 		expect(frame.metrics.candidateBatchCount).toBe(0);
@@ -114,9 +116,9 @@ describe("buildRenderFrustumFromProjectionMatrix", () => {
 		);
 
 		for (const plane of frustum.planes) {
-			expect(Math.hypot(plane.normal.x, plane.normal.y, plane.normal.z)).toBeCloseTo(
-				1,
-			);
+			expect(
+				Math.hypot(plane.normal.x, plane.normal.y, plane.normal.z),
+			).toBeCloseTo(1);
 		}
 	});
 });
@@ -146,15 +148,16 @@ function buildFrameWithFallbackCandidates(
 	return buildTestWorldRenderFrame(candidates);
 }
 
-function buildTestWorldRenderFrame(candidates: readonly WorldRenderCandidate[]) {
+function buildTestWorldRenderFrame(
+	candidates: readonly WorldRenderCandidate[],
+) {
 	return buildWorldRenderFrameImpl({
 		assetReadModel: emptyAssetReadModel(),
 		candidates,
 		cameraFrame: createCameraFrame(),
 		renderChunkTransforms: [],
 		staticRenderableScene: createEmptyStaticRenderableSceneModel(),
-		staticLandblockRenderProducts:
-			createEmptyStaticLandblockRenderProductSet(),
+		staticLandblockRenderProducts: createEmptyStaticLandblockRenderProductSet(),
 		structuredInteriorScene: createEmptyStructuredInteriorSceneModel(),
 		terrainScene: createTerrainScene(),
 	});

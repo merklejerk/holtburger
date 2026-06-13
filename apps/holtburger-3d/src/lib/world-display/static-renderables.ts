@@ -359,7 +359,9 @@ function collectOutdoorStaticRenderableSourceInstances(
 		...selection.detailLandblockIds,
 	]);
 	return [...landblockIds].flatMap((landblockId) => {
-		const asset = assetReadModel.get(formatLandblockOutdoorAssetId(landblockId));
+		const asset = assetReadModel.get(
+			formatLandblockOutdoorAssetId(landblockId),
+		);
 		if (!isPreparedLandblockOutdoorAsset(asset)) {
 			return [];
 		}
@@ -657,9 +659,7 @@ function expandStaticRenderableSourceInstanceParts(
 			formatSetupAppearanceAssetId(sourceAsset.payload.setupModelId),
 		);
 		return sourceAsset.payload.parts.flatMap((part) => {
-			if (
-				!isPreparedGfxObjAsset(assetReadModel.get(part.gfxObjAssetId))
-			) {
+			if (!isPreparedGfxObjAsset(assetReadModel.get(part.gfxObjAssetId))) {
 				missingGfxAssetIds.add(part.gfxObjAssetId);
 				return [];
 			}

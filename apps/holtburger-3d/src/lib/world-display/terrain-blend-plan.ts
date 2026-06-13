@@ -216,7 +216,8 @@ function resolveTerrainBlendPlanTextures(options: {
 			? [{ terrain, alpha, rotation: overlay.alpha.rotation }]
 			: [];
 	});
-	const roadTextureAssetId = options.plan.roads[0]?.road.roadTextureAssetId ?? null;
+	const roadTextureAssetId =
+		options.plan.roads[0]?.road.roadTextureAssetId ?? null;
 	const road = roadTextureAssetId
 		? resolveTerrainTexture({
 				assetReadModel: options.assetReadModel,
@@ -456,7 +457,11 @@ function selectRoadAlpha(options: {
 	pcode: number;
 	rcode: number;
 	table: PreparedTerrainMaterialTablePayload;
-}): { road: PreparedTerrainRoadAlphaMapEntry; rotation: number; tiling: number } | null {
+}): {
+	road: PreparedTerrainRoadAlphaMapEntry;
+	rotation: number;
+	tiling: number;
+} | null {
 	const roadMaps = options.table.roadAlphaMaps;
 	if (roadMaps.length === 0) {
 		return null;

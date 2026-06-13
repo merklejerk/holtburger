@@ -48,10 +48,7 @@ import {
 	type DetailedLandblockRenderArtifacts,
 	type LandblockRenderProductWorkerResult,
 } from "./landblock-render-product";
-import {
-	formatRenderDomainKey,
-	WORLD_RENDER_DOMAIN,
-} from "./render-domains";
+import { formatRenderDomainKey, WORLD_RENDER_DOMAIN } from "./render-domains";
 import type { StaticLandblockRenderProductSet } from "./static-landblock-render-artifact-store";
 import type {
 	StaticBundleSpatialHint,
@@ -90,8 +87,8 @@ export function deriveLandblockProductSpatialItems(
 				...deriveDetailedPortalSpatialItems(detailed),
 			]
 		: [];
-	return [...terrainItems, ...staticItems, ...detailedItems].sort((left, right) =>
-		left.id.localeCompare(right.id),
+	return [...terrainItems, ...staticItems, ...detailedItems].sort(
+		(left, right) => left.id.localeCompare(right.id),
 	);
 }
 
@@ -189,9 +186,7 @@ function deriveTerrainSpatialItem(tile: TerrainSceneTile): RenderSpatialItem {
 }
 
 function deriveTerrainArtifactSpatialItem(
-	artifact: NonNullable<
-		ReturnType<typeof getLandblockTerrainRenderArtifact>
-	>,
+	artifact: NonNullable<ReturnType<typeof getLandblockTerrainRenderArtifact>>,
 ): RenderSpatialItem {
 	const bounds = deriveTerrainMeshBounds(artifact.mesh);
 	const placement = deriveLandblockRenderChunkPlacement(artifact.landblockId);
@@ -298,7 +293,10 @@ function deriveStructuredInteriorCellCoverage(
 	artifact: DetailedLandblockRenderArtifacts,
 	cell: DetailedLandblockRenderArtifacts["structuredInteriorCells"][number],
 ): NonNullable<
-	Extract<RenderSpatialItem["metadata"], { kind: "structured-cell" }>["artifactCoverage"]
+	Extract<
+		RenderSpatialItem["metadata"],
+		{ kind: "structured-cell" }
+	>["artifactCoverage"]
 > {
 	const materialRecordsByKey = new Map(
 		artifact.structuredInteriorMaterialRecords.map((record) => [
@@ -361,10 +359,13 @@ function deriveDetailedPortalSpatialItems(
 	);
 	const portalByKey = new Map(
 		artifact.structuredInteriorCells.flatMap((cell) =>
-			cell.portals.map((portal) => [
-				`${portal.envCellId}:${portal.portalId}:${portal.sourceIndex}`,
-				portal,
-			] as const),
+			cell.portals.map(
+				(portal) =>
+					[
+						`${portal.envCellId}:${portal.portalId}:${portal.sourceIndex}`,
+						portal,
+					] as const,
+			),
 		),
 	);
 	return artifact.portalApertures.flatMap((aperture) => {
@@ -383,7 +384,9 @@ function deriveDetailedPortalSpatialItems(
 			{ x: 0, y: 0, z: 0 },
 			{ x: 1, y: 1, z: 1 },
 		);
-		const points = aperture.points.map((point) => transformPoint(point, transform));
+		const points = aperture.points.map((point) =>
+			transformPoint(point, transform),
+		);
 		const bounds = expandBounds(pointsToBounds(points), PORTAL_PICK_THICKNESS);
 		return [
 			{
@@ -396,13 +399,18 @@ function deriveDetailedPortalSpatialItems(
 				ownerKey: DEBUG_OVERLAY_SPATIAL_OWNER_KEY,
 				chunkKey: cell.renderChunk.chunkKey,
 				broadphaseBounds: bounds,
-				pickShape: { kind: "polygon", points, thickness: PORTAL_PICK_THICKNESS },
+				pickShape: {
+					kind: "polygon",
+					points,
+					thickness: PORTAL_PICK_THICKNESS,
+				},
 				metadata: {
 					kind: "portal",
 					portalId: aperture.portalId,
 					sourceEnvCellId: aperture.envCellId,
 					targetEnvCellId: portal?.targetEnvCellId ?? null,
-					targetStatus: portal?.targetEnvCellId === null ? "outside" : "known-unloaded",
+					targetStatus:
+						portal?.targetEnvCellId === null ? "outside" : "known-unloaded",
 					polygonId: aperture.polygonId,
 					otherPortalId: portal?.otherPortalId ?? 0,
 					flags: portal?.flags ?? 0,
@@ -460,7 +468,9 @@ function deriveStaticBundleSpatialItems(
 ): RenderSpatialItem[] {
 	const objectRecordByVisibilityKey = new Map(
 		bundle.objectRecords.flatMap((record) =>
-			record.visibilityKeys.map((visibilityKey) => [visibilityKey, record] as const),
+			record.visibilityKeys.map(
+				(visibilityKey) => [visibilityKey, record] as const,
+			),
 		),
 	);
 	const renderChunk = deriveLandblockRenderChunkPlacement(bundle.landblockId);
@@ -471,7 +481,14 @@ function deriveStaticBundleSpatialItems(
 		if (!objectRecord) {
 			return [];
 		}
-		return [deriveStaticBundleSpatialItem(bundle, hint, objectRecord, renderChunk.chunkKey)];
+		return [
+			deriveStaticBundleSpatialItem(
+				bundle,
+				hint,
+				objectRecord,
+				renderChunk.chunkKey,
+			),
+		];
 	});
 }
 
@@ -518,7 +535,10 @@ function deriveStaticBundleObjectCoverage(
 	bundle: StaticObjectBundleArtifact,
 	objectRecord: StaticObjectBundleArtifact["objectRecords"][number],
 ): NonNullable<
-	Extract<RenderSpatialItem["metadata"], { kind: "static-renderable" }>["artifactCoverage"]
+	Extract<
+		RenderSpatialItem["metadata"],
+		{ kind: "static-renderable" }
+	>["artifactCoverage"]
 > {
 	const materialRecordsByKey = new Map(
 		bundle.materialRecords.map((record) => [record.key, record]),
@@ -534,7 +554,9 @@ function deriveStaticBundleObjectCoverage(
 		...compactedBatches.map((batch) => batch.materialRecordKey),
 	]);
 	const sourcePartHints = objectRecord.partHints ?? [];
-	const directTriangleCounts = directEntries.map((entry) => entry.indices.length / 3);
+	const directTriangleCounts = directEntries.map(
+		(entry) => entry.indices.length / 3,
+	);
 	const compactedBatchTriangleCounts = compactedBatches.map(
 		(batch) =>
 			batch.objectTriangleCounts?.[objectRecord.objectKey] ??
@@ -624,7 +646,10 @@ function summarizeStaticBundleMaterialTriangleCounts({
 	directEntries: readonly StaticObjectBundleArtifact["directEntries"][number][];
 	compactedBatches: readonly StaticObjectBundleArtifact["compactedBatches"][number][];
 }): NonNullable<
-	Extract<RenderSpatialItem["metadata"], { kind: "static-renderable" }>["artifactCoverage"]
+	Extract<
+		RenderSpatialItem["metadata"],
+		{ kind: "static-renderable" }
+	>["artifactCoverage"]
 >["materialTriangleCounts"] {
 	const countsByMaterialKey = new Map<string, number>();
 	for (const entry of directEntries) {

@@ -96,7 +96,10 @@ describe("static landblock render worker", () => {
 						}),
 					]),
 				),
-				createResponse(formatRegionRenderProfileAssetId(1), createRegionRenderProfile()),
+				createResponse(
+					formatRegionRenderProfileAssetId(1),
+					createRegionRenderProfile(),
+				),
 				createResponse(buildingSourceAssetId, createGfxObjPayload(0x01000010)),
 			].map((response) => [response.assetId, response] as const),
 		);
@@ -150,7 +153,10 @@ describe("static landblock render worker", () => {
 						}),
 					]),
 				),
-				createResponse(formatRegionRenderProfileAssetId(1), createRegionRenderProfile()),
+				createResponse(
+					formatRegionRenderProfileAssetId(1),
+					createRegionRenderProfile(),
+				),
 				createResponse(detailSourceAssetId, createGfxObjPayload(0x01000020)),
 			].map((response) => [response.assetId, response] as const),
 		);
@@ -342,7 +348,9 @@ describe("static landblock render worker", () => {
 
 		const detailedArtifacts = getDetailedLandblockRenderArtifacts(result);
 		expect(detailedArtifacts).not.toBeNull();
-		expect(detailedArtifacts!.structuredInteriorMaterialRecords).toHaveLength(1);
+		expect(detailedArtifacts!.structuredInteriorMaterialRecords).toHaveLength(
+			1,
+		);
 		expect(
 			detailedArtifacts!.structuredInteriorMaterialRecords[0],
 		).toMatchObject({
@@ -766,12 +774,18 @@ function createEnvCellPayload(
 	},
 ): Record<string, unknown> {
 	const materialSlotId = material?.slotId ?? 0;
-	const materialVariantSignatures = material?.materialVariantSignatures ?? [null];
+	const materialVariantSignatures = material?.materialVariantSignatures ?? [
+		null,
+	];
 	const triangleCount = material ? materialVariantSignatures.length : 1;
 	const positions = new Float32Array(triangleCount * 9);
 	const normals = new Float32Array(triangleCount * 9);
 	const uvs = new Float32Array(triangleCount * 6);
-	for (let triangleIndex = 0; triangleIndex < triangleCount; triangleIndex += 1) {
+	for (
+		let triangleIndex = 0;
+		triangleIndex < triangleCount;
+		triangleIndex += 1
+	) {
 		const xOffset = triangleIndex * 2;
 		positions.set(
 			[xOffset, 0, 0, xOffset + 1, 0, 0, xOffset, 1, 0],
@@ -839,13 +853,13 @@ function createEnvCellPayload(
 			normals,
 			uvs,
 			triangles: Array.from({ length: triangleCount }, (_, triangleIndex) => ({
-					polygonId: 7,
-					surfaceId: material ? materialSlotId : null,
-					firstVertex: triangleIndex * 3,
-					materialVariantSignature: material
-						? (materialVariantSignatures[triangleIndex] ?? null)
-						: null,
-				})),
+				polygonId: 7,
+				surfaceId: material ? materialSlotId : null,
+				firstVertex: triangleIndex * 3,
+				materialVariantSignature: material
+					? (materialVariantSignatures[triangleIndex] ?? null)
+					: null,
+			})),
 			surfaceIds: material ? [materialSlotId] : [],
 			invalidPolygons: [],
 			skippedPolygonCount: 0,
@@ -1090,7 +1104,10 @@ function createRegionRenderProfile(): Record<string, unknown> {
 	};
 }
 
-function createRegionRenderProfileWithEnvironmentDetail(): Record<string, unknown> {
+function createRegionRenderProfileWithEnvironmentDetail(): Record<
+	string,
+	unknown
+> {
 	return {
 		kind: "region-render-profile",
 		sourceAssetKind: "region-render-profile",

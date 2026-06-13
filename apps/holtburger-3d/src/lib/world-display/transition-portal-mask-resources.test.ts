@@ -32,8 +32,7 @@ describe("transition portal mask resources", () => {
 		expect(masks[0]?.geometry).toMatchObject({
 			vertexCount: 3,
 			triangleCount: 1,
-			signature:
-				"portal-mask:outdoor-topology/00:cell-outside/01:points=3",
+			signature: "portal-mask:outdoor-topology/00:cell-outside/01:points=3",
 		});
 		expect(masks[0]?.bvhBinding.itemKeys).toEqual([
 			envPortalBvhItemKey(0x016c0155, "cell-outside/01"),

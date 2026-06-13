@@ -182,9 +182,7 @@ describe("webgl2 texture page upload", () => {
 			maxAnisotropy: 8,
 		});
 
-		expect(pageSet?.key).toBe(
-			"texture-page-atlas/test;filter=nearest;aniso=1",
-		);
+		expect(pageSet?.key).toBe("texture-page-atlas/test;filter=nearest;aniso=1");
 		expect(gl.generatedMipmapCount).toBe(0);
 		expect(gl.textureParameters.slice(0, 4)).toEqual([
 			{ pname: gl.TEXTURE_WRAP_S, param: gl.CLAMP_TO_EDGE },

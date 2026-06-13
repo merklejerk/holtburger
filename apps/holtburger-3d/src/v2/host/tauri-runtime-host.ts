@@ -33,7 +33,8 @@ class TauriRuntimeHost implements RuntimeHost {
 				revision,
 			});
 		} catch (error) {
-			this.#lastFailure = error instanceof Error ? error.message : String(error);
+			this.#lastFailure =
+				error instanceof Error ? error.message : String(error);
 			throw error;
 		}
 	}

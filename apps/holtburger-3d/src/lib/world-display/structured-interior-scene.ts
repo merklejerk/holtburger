@@ -120,7 +120,10 @@ function deriveBrowserFocusedStructuredInteriorSceneModel(
 ): StructuredInteriorSceneModel {
 	const activeEnvCellIds =
 		structuredInteriorCoverage?.envCellIds ??
-		deriveBrowserFocusedEnvCellIdsFromTopology(focusEnvCellId, assetReadModel) ??
+		deriveBrowserFocusedEnvCellIdsFromTopology(
+			focusEnvCellId,
+			assetReadModel,
+		) ??
 		deriveStructuredInteriorCoverageFromLookup(
 			deriveBrowserFocusedStructuredInteriorMembershipPolicy(focusEnvCellId),
 			assetReadModel,

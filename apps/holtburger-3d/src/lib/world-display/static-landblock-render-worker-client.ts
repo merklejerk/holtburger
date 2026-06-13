@@ -88,7 +88,10 @@ export class StaticLandblockRenderWorkerClient {
 		this.renderRegressionDiagnostics =
 			options.renderRegressionDiagnostics ??
 			readTemporaryRenderRegressionDiagnostics();
-		if (!Number.isInteger(this.maxConcurrentJobs) || this.maxConcurrentJobs < 1) {
+		if (
+			!Number.isInteger(this.maxConcurrentJobs) ||
+			this.maxConcurrentJobs < 1
+		) {
 			throw new Error(
 				"Static landblock render worker client requires maxConcurrentJobs >= 1.",
 			);
@@ -335,9 +338,7 @@ export class StaticLandblockRenderWorkerClient {
 				jobId: pending.job.jobId,
 				landblockId: pending.job.landblockId,
 				product: pending.job.product,
-				artifactFilter: formatArtifactFilterForLog(
-					pending.job.artifactFilter,
-				),
+				artifactFilter: formatArtifactFilterForLog(pending.job.artifactFilter),
 				totalMs: roundMs(completedAtMs - pending.queuedAtMs),
 				workerMs:
 					pending.postedAtMs === null

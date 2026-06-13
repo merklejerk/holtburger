@@ -123,7 +123,9 @@ function createLandblockModeLocation(
 	return createOutdoorLandblockLocation(landblockId);
 }
 
-function createOutdoorLandblockLocation(landblockId: number): V2ParsedLocationInput {
+function createOutdoorLandblockLocation(
+	landblockId: number,
+): V2ParsedLocationInput {
 	const normalizedLandblockId = normalizeOutdoorLandblockId(landblockId);
 	return {
 		kind: "outdoor-landblock",
@@ -156,7 +158,9 @@ function browserLocationInputToLandblockId(location: {
 			? location.northSouth
 			: -location.northSouth;
 	const signedLongitude =
-		location.eastWestHemisphere === "E" ? location.eastWest : -location.eastWest;
+		location.eastWestHemisphere === "E"
+			? location.eastWest
+			: -location.eastWest;
 	const landblockX = clampLandblockAxis(
 		Math.floor(((signedLongitude + 102) * 240) / 192),
 	);

@@ -82,7 +82,8 @@
 
 	onMount(() => {
 		let disposed = false;
-		staticLandblockRenderProducts = staticLandblockProductSource.getProductSet();
+		staticLandblockRenderProducts =
+			staticLandblockProductSource.getProductSet();
 		const productSubscription = staticLandblockProductSource.subscribe(
 			(event) => {
 				staticLandblockRenderProducts = applyProductSourceEventToSet(

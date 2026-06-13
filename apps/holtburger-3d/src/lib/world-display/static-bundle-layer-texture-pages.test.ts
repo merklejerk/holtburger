@@ -39,12 +39,10 @@ describe("static bundle layer texture pages", () => {
 			[1, 0, 1, 1],
 		]);
 		expect(
-			pages.find((page) => page.pageKind === "single-entry")?.entries[0]
-				?.role,
+			pages.find((page) => page.pageKind === "single-entry")?.entries[0]?.role,
 		).toBe("detail");
 		expect(
-			pages.find((page) => page.pageKind === "single-entry")?.entries[0]
-				?.rect,
+			pages.find((page) => page.pageKind === "single-entry")?.entries[0]?.rect,
 		).toEqual([0, 0, 8, 8]);
 	});
 
@@ -100,7 +98,7 @@ describe("static bundle layer texture pages", () => {
 					"control-filtered",
 				),
 			).sampling,
-			).toMatchObject({
+		).toMatchObject({
 			samplingDomain: "control",
 			lookup: "control-filtered",
 		});
@@ -111,14 +109,32 @@ describe("static bundle layer texture pages", () => {
 		const pages = buildStaticBundleLayerTexturePages({
 			scopeKey: "landblock:da55ffff:outdoor-buildings",
 			texturePageRefs: [
-				createRef("texture:material:a:prepared-texture/060003a1", "base-color", "rgba-color", 2, 2, "color", "color-filtered", {
-					sourceAssetId,
-					bytes: new Uint8Array(16).fill(7),
-				}),
-				createRef("texture:material:b:prepared-texture/060003a1", "base-color", "rgba-color", 2, 2, "color", "color-filtered", {
-					sourceAssetId,
-					bytes: new Uint8Array(16).fill(7),
-				}),
+				createRef(
+					"texture:material:a:prepared-texture/060003a1",
+					"base-color",
+					"rgba-color",
+					2,
+					2,
+					"color",
+					"color-filtered",
+					{
+						sourceAssetId,
+						bytes: new Uint8Array(16).fill(7),
+					},
+				),
+				createRef(
+					"texture:material:b:prepared-texture/060003a1",
+					"base-color",
+					"rgba-color",
+					2,
+					2,
+					"color",
+					"color-filtered",
+					{
+						sourceAssetId,
+						bytes: new Uint8Array(16).fill(7),
+					},
+				),
 			],
 			policy: {
 				maxTextureSize: 8,
@@ -135,10 +151,19 @@ describe("static bundle layer texture pages", () => {
 		]);
 		expect(pages[0]?.entries[0]?.sourcePlacementKey).toBe(
 			describeStaticBundleSourceTexturePagePlacementKey(
-				createRef("canonical", "base-color", "rgba-color", 2, 2, "color", "color-filtered", {
-					sourceAssetId,
-					bytes: new Uint8Array(16).fill(7),
-				}),
+				createRef(
+					"canonical",
+					"base-color",
+					"rgba-color",
+					2,
+					2,
+					"color",
+					"color-filtered",
+					{
+						sourceAssetId,
+						bytes: new Uint8Array(16).fill(7),
+					},
+				),
 			),
 		);
 	});
@@ -148,16 +173,34 @@ describe("static bundle layer texture pages", () => {
 		const pages = buildStaticBundleLayerTexturePages({
 			scopeKey: "landblock:da55ffff:outdoor-buildings",
 			texturePageRefs: [
-				createRef("texture:material:a:variant:sampler=clamp", "base-color", "rgba-color", 2, 2, "color", "color-filtered", {
-					sourceAssetId,
-					wrapS: "clamp",
-					wrapT: "clamp",
-				}),
-				createRef("texture:material:a:variant:sampler=repeat", "base-color", "rgba-color", 2, 2, "color", "color-filtered", {
-					sourceAssetId,
-					wrapS: "repeat",
-					wrapT: "repeat",
-				}),
+				createRef(
+					"texture:material:a:variant:sampler=clamp",
+					"base-color",
+					"rgba-color",
+					2,
+					2,
+					"color",
+					"color-filtered",
+					{
+						sourceAssetId,
+						wrapS: "clamp",
+						wrapT: "clamp",
+					},
+				),
+				createRef(
+					"texture:material:a:variant:sampler=repeat",
+					"base-color",
+					"rgba-color",
+					2,
+					2,
+					"color",
+					"color-filtered",
+					{
+						sourceAssetId,
+						wrapS: "repeat",
+						wrapT: "repeat",
+					},
+				),
 			],
 			policy: {
 				maxTextureSize: 8,
@@ -179,9 +222,18 @@ describe("static bundle layer texture pages", () => {
 		const pages = buildStaticBundleLayerTexturePages({
 			scopeKey: "landblock:da55ffff:outdoor-buildings",
 			texturePageRefs: [
-				createRef("color", "base-color", "rgba-color", 1, 1, "color", "color-filtered", {
-					sourceAssetId,
-				}),
+				createRef(
+					"color",
+					"base-color",
+					"rgba-color",
+					1,
+					1,
+					"color",
+					"color-filtered",
+					{
+						sourceAssetId,
+					},
+				),
 				createRef("data", "base-color", "rgba-color", 1, 1, "data", "exact", {
 					sourceAssetId,
 				}),
@@ -206,26 +258,62 @@ describe("static bundle layer texture pages", () => {
 		const pages = buildStaticBundleLayerTexturePages({
 			scopeKey: "landblock:da55ffff:outdoor-detail",
 			texturePageRefs: [
-				createRef("p8-a", "indexed-texels", "indexed-data", 2, 1, "data", "exact", {
-					sourceAssetId,
-					indexedFormat: "p8",
-					bytes: new Uint8Array([1, 2]),
-				}),
-				createRef("p8-b", "indexed-texels", "indexed-data", 2, 1, "data", "exact", {
-					sourceAssetId,
-					indexedFormat: "p8",
-					bytes: new Uint8Array([1, 2]),
-				}),
-				createRef("p8-c", "indexed-texels", "indexed-data", 2, 1, "data", "exact", {
-					sourceAssetId,
-					indexedFormat: "p8",
-					bytes: new Uint8Array([2, 1]),
-				}),
-				createRef("index16", "indexed-texels", "indexed-data", 2, 1, "data", "exact", {
-					sourceAssetId,
-					indexedFormat: "index16",
-					bytes: new Uint8Array([1, 0, 2, 0]),
-				}),
+				createRef(
+					"p8-a",
+					"indexed-texels",
+					"indexed-data",
+					2,
+					1,
+					"data",
+					"exact",
+					{
+						sourceAssetId,
+						indexedFormat: "p8",
+						bytes: new Uint8Array([1, 2]),
+					},
+				),
+				createRef(
+					"p8-b",
+					"indexed-texels",
+					"indexed-data",
+					2,
+					1,
+					"data",
+					"exact",
+					{
+						sourceAssetId,
+						indexedFormat: "p8",
+						bytes: new Uint8Array([1, 2]),
+					},
+				),
+				createRef(
+					"p8-c",
+					"indexed-texels",
+					"indexed-data",
+					2,
+					1,
+					"data",
+					"exact",
+					{
+						sourceAssetId,
+						indexedFormat: "p8",
+						bytes: new Uint8Array([2, 1]),
+					},
+				),
+				createRef(
+					"index16",
+					"indexed-texels",
+					"indexed-data",
+					2,
+					1,
+					"data",
+					"exact",
+					{
+						sourceAssetId,
+						indexedFormat: "index16",
+						bytes: new Uint8Array([1, 0, 2, 0]),
+					},
+				),
 			],
 			policy: {
 				maxTextureSize: 8,

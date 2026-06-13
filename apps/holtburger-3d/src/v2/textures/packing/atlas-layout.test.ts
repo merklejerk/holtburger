@@ -124,7 +124,13 @@ describe("V2 atlas layout planner", () => {
 		const plan = planAtlasLayout({
 			cohorts: [
 				{
-					entryKeys: ["detail-a", "detail-b", "detail-c", "detail-d", "detail-e"],
+					entryKeys: [
+						"detail-a",
+						"detail-b",
+						"detail-c",
+						"detail-d",
+						"detail-e",
+					],
 					key: "detail-draw-unit",
 				},
 			],

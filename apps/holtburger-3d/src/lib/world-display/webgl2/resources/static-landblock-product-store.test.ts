@@ -35,9 +35,7 @@ describe("webgl2 static landblock product store", () => {
 		store.commitProduct(
 			createProductResult("request:second", {
 				product: "outdoor-env-cells",
-				artifacts: [
-					createDetailedArtifact("detailed:changed"),
-				],
+				artifacts: [createDetailedArtifact("detailed:changed")],
 			}),
 			{ ownedResources: [secondResource] },
 		);

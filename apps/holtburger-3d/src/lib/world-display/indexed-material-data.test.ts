@@ -335,9 +335,7 @@ describe("indexed material data", () => {
 function createAssetState(
 	preparedByAssetId: Record<string, PreparedAssetRecord>,
 ) {
-	return createTestPreparedAssetResolver(
-		Object.values(preparedByAssetId),
-	);
+	return createTestPreparedAssetResolver(Object.values(preparedByAssetId));
 }
 
 function createAppearance(options: {

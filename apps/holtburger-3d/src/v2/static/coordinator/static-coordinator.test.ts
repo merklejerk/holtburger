@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-	DeferredStaticBaker,
-	DeferredStaticResolver,
-} from "../fake-workers";
+import { DeferredStaticBaker, DeferredStaticResolver } from "../fake-workers";
 import type {
 	StaticCoordinatorCommitDelta,
 	StaticDemand,

@@ -547,7 +547,11 @@ function createRequirement(
 ) {
 	return {
 		renderableKind,
-		slot: createMaterialSlot({ slotIndex, surfaceId, materialVariantSignature }),
+		slot: createMaterialSlot({
+			slotIndex,
+			surfaceId,
+			materialVariantSignature,
+		}),
 	};
 }
 

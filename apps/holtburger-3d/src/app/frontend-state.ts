@@ -116,10 +116,7 @@ function createFrontendStateStore() {
 		updateBrowserCameraNearPlane(nearPlane: number): void {
 			update((state) => ({
 				...state,
-				browserMode: updateBrowserCameraNearPlane(
-					state.browserMode,
-					nearPlane,
-				),
+				browserMode: updateBrowserCameraNearPlane(state.browserMode, nearPlane),
 			}));
 		},
 		updateBrowserCameraFarPlane(farPlane: number): void {

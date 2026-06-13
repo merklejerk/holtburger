@@ -388,8 +388,10 @@
 			const displayKey = formatRenderResourceInspectionKeyForDisplay(
 				resource.key,
 			).toLowerCase();
-			return resource.key.toLowerCase().includes(needle) ||
-				displayKey.includes(needle);
+			return (
+				resource.key.toLowerCase().includes(needle) ||
+				displayKey.includes(needle)
+			);
 		});
 	}
 
@@ -421,7 +423,10 @@
 						left.referencedTriangleCount,
 						right.referencedTriangleCount,
 					) ||
-					compareNumbers(left.referencedIndexCount, right.referencedIndexCount) ||
+					compareNumbers(
+						left.referencedIndexCount,
+						right.referencedIndexCount,
+					) ||
 					left.key.localeCompare(right.key),
 				direction,
 			),
@@ -513,8 +518,12 @@
 							{:else if tab.icon === "resources"}
 								<svg viewBox="0 0 24 24">
 									<ellipse cx="12" cy="6" rx="7" ry="3" />
-									<path d="M5 6V12C5 13.7 8.1 15 12 15C15.9 15 19 13.7 19 12V6" />
-									<path d="M5 12V18C5 19.7 8.1 21 12 21C15.9 21 19 19.7 19 18V12" />
+									<path
+										d="M5 6V12C5 13.7 8.1 15 12 15C15.9 15 19 13.7 19 12V6"
+									/>
+									<path
+										d="M5 12V18C5 19.7 8.1 21 12 21C15.9 21 19 19.7 19 18V12"
+									/>
 								</svg>
 							{:else}
 								<svg viewBox="0 0 24 24">
@@ -944,7 +953,9 @@
 			<dl class="data-list compact-data-list browser-panel__summary-list">
 				<div>
 					<dt>Snapshot</dt>
-					<dd>{formatResourceSnapshotTime(resourceInspection.generatedAtMs)}</dd>
+					<dd>
+						{formatResourceSnapshotTime(resourceInspection.generatedAtMs)}
+					</dd>
 				</div>
 				<div>
 					<dt>Layers</dt>
@@ -1040,8 +1051,8 @@
 				</div>
 				{#if filteredTexturePages.length > visibleTexturePages.length}
 					<p class="browser-panel__resource-limit">
-						Showing first {MAX_VISIBLE_RESOURCE_ROWS} matches. Narrow the filter
-						to inspect more specific rows.
+						Showing first {MAX_VISIBLE_RESOURCE_ROWS} matches. Narrow the filter to
+						inspect more specific rows.
 					</p>
 				{/if}
 				<div class="browser-panel__resource-scroll">
@@ -1120,15 +1131,17 @@
 				</div>
 				{#if filteredMaterials.length > visibleMaterials.length}
 					<p class="browser-panel__resource-limit">
-						Showing first {MAX_VISIBLE_RESOURCE_ROWS} matches. Narrow the filter
-						to inspect more specific rows.
+						Showing first {MAX_VISIBLE_RESOURCE_ROWS} matches. Narrow the filter to
+						inspect more specific rows.
 					</p>
 				{/if}
 				<div class="browser-panel__resource-scroll">
 					<dl class="data-list compact-data-list browser-panel__resource-list">
 						{#each visibleMaterials as material}
 							<div>
-								<dt title={material.key}>{truncateResourceKey(material.key)}</dt>
+								<dt title={material.key}>
+									{truncateResourceKey(material.key)}
+								</dt>
 								<dd>
 									{material.ownerKind}; owner {truncateResourceKey(
 										material.ownerKey,
@@ -1136,8 +1149,7 @@
 									{material.alphaPolicy ?? "alpha n/a"}; bindings {material.textureBindingCount};
 									refs {material.geometryReferenceCount}; indices {material.referencedIndexCount};
 									tris {material.referencedTriangleCount};
-									{material.indexed ? "indexed" : "direct"};
-									detail {material.detailTextureRefKey
+									{material.indexed ? "indexed" : "direct"}; detail {material.detailTextureRefKey
 										? material.detailTiling
 										: "none"}
 								</dd>
@@ -1171,15 +1183,17 @@
 				</label>
 				{#if filteredGeometry.length > visibleGeometry.length}
 					<p class="browser-panel__resource-limit">
-						Showing first {MAX_VISIBLE_RESOURCE_ROWS} matches. Narrow the filter
-						to inspect more specific rows.
+						Showing first {MAX_VISIBLE_RESOURCE_ROWS} matches. Narrow the filter to
+						inspect more specific rows.
 					</p>
 				{/if}
 				<div class="browser-panel__resource-scroll">
 					<dl class="data-list compact-data-list browser-panel__resource-list">
 						{#each visibleGeometry as geometry}
 							<div>
-								<dt title={geometry.key}>{truncateResourceKey(geometry.key)}</dt>
+								<dt title={geometry.key}>
+									{truncateResourceKey(geometry.key)}
+								</dt>
 								<dd>
 									{geometry.ownerKind}; owner {truncateResourceKey(
 										geometry.ownerKey,
@@ -1219,8 +1233,8 @@
 				</label>
 				{#if filteredStaticBundleLayers.length > visibleStaticBundleLayers.length}
 					<p class="browser-panel__resource-limit">
-						Showing first {MAX_VISIBLE_RESOURCE_ROWS} matches. Narrow the filter
-						to inspect more specific rows.
+						Showing first {MAX_VISIBLE_RESOURCE_ROWS} matches. Narrow the filter to
+						inspect more specific rows.
 					</p>
 				{/if}
 				<div class="browser-panel__resource-scroll">
@@ -1229,12 +1243,11 @@
 							<div>
 								<dt title={layer.key}>{truncateResourceKey(layer.key)}</dt>
 								<dd>
-									0x{formatHex32(layer.landblockId)} {layer.bundleKind};
-									objects {formatResourceRatio(
+									0x{formatHex32(layer.landblockId)}
+									{layer.bundleKind}; objects {formatResourceRatio(
 										layer.objectRecordCount,
 										layer.sourceObjectCount,
-									)};
-									materials {layer.materialCount}; pages {layer.texturePageCount};
+									)}; materials {layer.materialCount}; pages {layer.texturePageCount};
 									{layer.triangleCount} tris
 								</dd>
 							</div>
@@ -1267,8 +1280,8 @@
 				</label>
 				{#if filteredStructuredInteriorCells.length > visibleStructuredInteriorCells.length}
 					<p class="browser-panel__resource-limit">
-						Showing first {MAX_VISIBLE_RESOURCE_ROWS} matches. Narrow the filter
-						to inspect more specific rows.
+						Showing first {MAX_VISIBLE_RESOURCE_ROWS} matches. Narrow the filter to
+						inspect more specific rows.
 					</p>
 				{/if}
 				<div class="browser-panel__resource-scroll">
@@ -1278,7 +1291,8 @@
 								<dt title={cell.key}>{truncateResourceKey(cell.key)}</dt>
 								<dd>
 									cell 0x{formatHex32(cell.envCellId)}; slices
-									{cell.materialSliceCount}; materials {cell.materialCount}; pages
+									{cell.materialSliceCount}; materials {cell.materialCount};
+									pages
 									{cell.texturePageCount}; {cell.triangleCount} tris;
 									{cell.hasFallbackShell ? "fallback shell" : "material slices"}
 								</dd>

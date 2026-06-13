@@ -34,10 +34,7 @@ export function deriveStructuredInteriorCoverageFromLookup(
 		};
 	}
 
-	return deriveLandblockClosureCoverage(
-		policy.seedEnvCellIds,
-		assets,
-	);
+	return deriveLandblockClosureCoverage(policy.seedEnvCellIds, assets);
 }
 
 export function deriveBrowserFocusedStructuredInteriorMembershipPolicy(

@@ -425,7 +425,9 @@ function buildSpatialHints(
 ): StaticBundleSpatialHint[] {
 	return sourceObjects
 		.filter(
-			(object): object is StaticBundleSourceObject & {
+			(
+				object,
+			): object is StaticBundleSourceObject & {
 				bounds: NonNullable<StaticBundleSourceObject["bounds"]>;
 			} => object.bounds !== null,
 		)
@@ -519,8 +521,7 @@ function collectSetupAppearanceBundleSourceParts({
 					gfxObj.payload.renderGeometry.skippedPolygonCount ?? 0,
 				sourceInvalidPolygonCount:
 					gfxObj.payload.renderGeometry.invalidPolygons?.length ?? 0,
-				sourcePhysicsPolygonCount:
-					gfxObj.payload.physicsWitness.polygonCount,
+				sourcePhysicsPolygonCount: gfxObj.payload.physicsWitness.polygonCount,
 				partPlacements: deriveSetupPartDefaultPlacements(
 					setupModel,
 					part.partIndex,
@@ -854,7 +855,8 @@ function buildObjectGeometrySurface({
 	gfxObj: PreparedGfxObjPayload;
 	slot: ResolvedMaterialSlot;
 }): StaticBundleGeometrySurface {
-	const materialTextureRecordKey = formatStaticBundleMaterialTextureRecordKey(slot);
+	const materialTextureRecordKey =
+		formatStaticBundleMaterialTextureRecordKey(slot);
 	const geometry = buildPolygonSetRenderGeometry(gfxObj.renderGeometry, {
 		surfaceId: slot.slotIndex,
 		materialVariantSignature: slot.materialVariantSignature ?? null,
@@ -1286,14 +1288,12 @@ function buildDiagnostics(options: {
 		).length,
 		skippedSurfaceCount,
 		missingAssetIds: [],
-		skippedReasons: uniqueSortedStrings(
-			[
-				...(skippedSurfaceCount > 0 ? ["geometry:empty-or-incomplete"] : []),
-				...options.surfaces.flatMap((surface) =>
-					surface.reason ? [surface.reason] : [],
-				),
-			],
-		),
+		skippedReasons: uniqueSortedStrings([
+			...(skippedSurfaceCount > 0 ? ["geometry:empty-or-incomplete"] : []),
+			...options.surfaces.flatMap((surface) =>
+				surface.reason ? [surface.reason] : [],
+			),
+		]),
 	};
 }
 
@@ -1398,7 +1398,7 @@ function uniqueSortedStrings(values: readonly string[]): string[] {
 function uniqueTexturePageRefs(
 	refs: readonly VirtualTexturePageRef[],
 ): VirtualTexturePageRef[] {
-	return [
-		...new Map(refs.map((ref) => [ref.key, ref] as const)).values(),
-	].sort((left, right) => left.key.localeCompare(right.key));
+	return [...new Map(refs.map((ref) => [ref.key, ref] as const)).values()].sort(
+		(left, right) => left.key.localeCompare(right.key),
+	);
 }

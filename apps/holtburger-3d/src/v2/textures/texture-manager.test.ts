@@ -186,14 +186,15 @@ describe("V2 texture manager", () => {
 	it("records terrain role-page overflow in the on-demand diagnostics report", async () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const assetService = new FixtureAssetService();
-		const textureUses = [0x06000010, 0x06000020, 0x06000030, 0x06000040, 0x06000050]
-			.map((renderSurfaceId) =>
-				createTextureUseCommit({
-					drawUnitId: "terrain-overflow",
-					renderSurfaceId,
-					textureUseId: `terrain-overflow:prepared-texture:${renderSurfaceId.toString(16).padStart(8, "0")}`,
-				}),
-			);
+		const textureUses = [
+			0x06000010, 0x06000020, 0x06000030, 0x06000040, 0x06000050,
+		].map((renderSurfaceId) =>
+			createTextureUseCommit({
+				drawUnitId: "terrain-overflow",
+				renderSurfaceId,
+				textureUseId: `terrain-overflow:prepared-texture:${renderSurfaceId.toString(16).padStart(8, "0")}`,
+			}),
+		);
 		const texturePacker = new FixtureTexturePacker({
 			rectsByTextureUseId: new Map(
 				textureUses.map((textureUse, index) => [
@@ -427,9 +428,8 @@ describe("V2 texture manager", () => {
 		expect(update?.textureUsePlacements).toHaveLength(textureUses.length);
 		expect(update?.drawUnitBindings).toHaveLength(textureUses.length);
 		expect(
-			new Set(
-				update?.drawUnitBindings.map((binding) => binding.rolePage?.slot),
-			).size,
+			new Set(update?.drawUnitBindings.map((binding) => binding.rolePage?.slot))
+				.size,
 		).toBeGreaterThan(1);
 	});
 
@@ -605,7 +605,10 @@ describe("V2 texture manager", () => {
 				rect: [96, 96, 1, 1],
 			});
 			const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
-			const textureManager = new TextureManager({ assetService, texturePacker });
+			const textureManager = new TextureManager({
+				assetService,
+				texturePacker,
+			});
 
 			const update = await textureManager.applyStaticCommitDelta({
 				addedDrawUnits: [],
@@ -742,7 +745,10 @@ describe("V2 texture manager", () => {
 				]),
 			);
 			const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
-			const textureManager = new TextureManager({ assetService, texturePacker });
+			const textureManager = new TextureManager({
+				assetService,
+				texturePacker,
+			});
 
 			const update = await textureManager.applyStaticCommitDelta({
 				addedDrawUnits: [],
@@ -755,9 +761,9 @@ describe("V2 texture manager", () => {
 			expect(update?.drawUnitBindings).toHaveLength(
 				MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
 			);
-			expect(update?.textureUsePlacements.map((placement) => placement.textureUseId)).toEqual(
-				textureUses.map((textureUse) => textureUse.textureUseId),
-			);
+			expect(
+				update?.textureUsePlacements.map((placement) => placement.textureUseId),
+			).toEqual(textureUses.map((textureUse) => textureUse.textureUseId));
 			expect(
 				update?.drawUnitBindings.map((binding) => binding.rolePage),
 			).toEqual([
@@ -1321,8 +1327,7 @@ describe("V2 texture manager", () => {
 				mipmapsGenerated: false,
 				rect: [0, 0, 2, 1],
 				sampleClass: "palette-rgba",
-				samplerPolicyKey:
-					"sample=palette-rgba;filter=nearest;mips=off;aniso=1",
+				samplerPolicyKey: "sample=palette-rgba;filter=nearest;mips=off;aniso=1",
 				textureUseId: "static-a:palette",
 				width: 2,
 				wrapS: "clamp-to-edge",
@@ -1408,10 +1413,10 @@ describe("V2 texture manager", () => {
 			{ id: "04000010", kind: "palette" },
 			{ id: "04000020", kind: "palette" },
 		]);
-		expect(Array.from(update?.placements[0]?.pixels.slice(0, 12) ?? [])).toEqual([
-			0x11, 0x22, 0x33, 0xff,
-			0x77, 0x88, 0x99, 0xff,
-			0xaa, 0xbb, 0xcc, 0xff,
+		expect(
+			Array.from(update?.placements[0]?.pixels.slice(0, 12) ?? []),
+		).toEqual([
+			0x11, 0x22, 0x33, 0xff, 0x77, 0x88, 0x99, 0xff, 0xaa, 0xbb, 0xcc, 0xff,
 		]);
 	});
 });
@@ -1519,7 +1524,10 @@ class FixtureTexturePacker implements TexturePacker {
 	async pack(job: TexturePackingJob): Promise<TexturePackingResult> {
 		this.jobs.push(job);
 		if (this.#options.rectsByTextureUseId) {
-			const pagesById = new Map<string, TexturePackingResult["pages"][number]>();
+			const pagesById = new Map<
+				string,
+				TexturePackingResult["pages"][number]
+			>();
 			const rects: TexturePackingResult["rects"] = [];
 			for (const source of job.sources) {
 				const placement = this.#options.rectsByTextureUseId.get(

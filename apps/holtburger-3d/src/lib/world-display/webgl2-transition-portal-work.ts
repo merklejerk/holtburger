@@ -48,15 +48,16 @@ interface Webgl2PortalScreenRect {
 	height: number;
 }
 
-export interface Webgl2TransitionPortalWorkPlan
-	extends TransitionPortalDepthBatchModel<Webgl2VisibleTransitionPortalWork> {
+export interface Webgl2TransitionPortalWorkPlan extends TransitionPortalDepthBatchModel<Webgl2VisibleTransitionPortalWork> {
 	visibleWorkItems: readonly Webgl2VisibleTransitionPortalWork[];
 }
 
 export function deriveWebgl2BaseSceneDomain(options: {
 	renderSceneContext: WorldRenderSceneContext;
 }): TransitionPortalScene {
-	return options.renderSceneContext.kind === "dungeon" ? "interior" : "exterior";
+	return options.renderSceneContext.kind === "dungeon"
+		? "interior"
+		: "exterior";
 }
 
 export function deriveWebgl2BaseSceneDomainFromResidency(
@@ -143,7 +144,10 @@ export function planWebgl2TransitionPortalWork(options: {
 		}
 	}
 
-	for (const pool of [visiblePools.outdoorToIndoor, visiblePools.indoorToOutdoor]) {
+	for (const pool of [
+		visiblePools.outdoorToIndoor,
+		visiblePools.indoorToOutdoor,
+	]) {
 		pool.sort(compareWebgl2VisibleTransitionPortalWork);
 	}
 
@@ -163,7 +167,9 @@ export function planWebgl2TransitionPortalWork(options: {
 	};
 }
 
-function parsePortalMaskResourceCandidateId(maskResourceId: string): string | null {
+function parsePortalMaskResourceCandidateId(
+	maskResourceId: string,
+): string | null {
 	const prefix = "portal-mask/";
 	return maskResourceId.startsWith(prefix)
 		? maskResourceId.slice(prefix.length)
@@ -195,12 +201,18 @@ function projectPortalMaskScreenRect(options: {
 			y: ((1 - clip.y * inverseW) / 2) * options.viewport.height,
 		};
 	});
-	const minX = Math.max(0, Math.floor(Math.min(...projected.map((point) => point.x))));
+	const minX = Math.max(
+		0,
+		Math.floor(Math.min(...projected.map((point) => point.x))),
+	);
 	const maxX = Math.min(
 		options.viewport.width,
 		Math.ceil(Math.max(...projected.map((point) => point.x))),
 	);
-	const minY = Math.max(0, Math.floor(Math.min(...projected.map((point) => point.y))));
+	const minY = Math.max(
+		0,
+		Math.floor(Math.min(...projected.map((point) => point.y))),
+	);
 	const maxY = Math.min(
 		options.viewport.height,
 		Math.ceil(Math.max(...projected.map((point) => point.y))),
@@ -316,31 +328,71 @@ function transformPortalAperturePlane(
 
 function transformPoint(matrix: RenderMat4, point: Vec3Dto): Vec3Dto {
 	return {
-		x: matrix[0] * point.x + matrix[4] * point.y + matrix[8] * point.z + matrix[12],
-		y: matrix[1] * point.x + matrix[5] * point.y + matrix[9] * point.z + matrix[13],
-		z: matrix[2] * point.x + matrix[6] * point.y + matrix[10] * point.z + matrix[14],
+		x:
+			matrix[0] * point.x +
+			matrix[4] * point.y +
+			matrix[8] * point.z +
+			matrix[12],
+		y:
+			matrix[1] * point.x +
+			matrix[5] * point.y +
+			matrix[9] * point.z +
+			matrix[13],
+		z:
+			matrix[2] * point.x +
+			matrix[6] * point.y +
+			matrix[10] * point.z +
+			matrix[14],
 	};
 }
 
 function transformDirection(matrix: RenderMat4, direction: Vec3Dto): Vec3Dto {
 	return {
-		x: matrix[0] * direction.x + matrix[4] * direction.y + matrix[8] * direction.z,
-		y: matrix[1] * direction.x + matrix[5] * direction.y + matrix[9] * direction.z,
-		z: matrix[2] * direction.x + matrix[6] * direction.y + matrix[10] * direction.z,
+		x:
+			matrix[0] * direction.x +
+			matrix[4] * direction.y +
+			matrix[8] * direction.z,
+		y:
+			matrix[1] * direction.x +
+			matrix[5] * direction.y +
+			matrix[9] * direction.z,
+		z:
+			matrix[2] * direction.x +
+			matrix[6] * direction.y +
+			matrix[10] * direction.z,
 	};
 }
 
-function transformPoint4(matrix: RenderMat4, point: Vec3Dto): {
+function transformPoint4(
+	matrix: RenderMat4,
+	point: Vec3Dto,
+): {
 	x: number;
 	y: number;
 	z: number;
 	w: number;
 } {
 	return {
-		x: matrix[0] * point.x + matrix[4] * point.y + matrix[8] * point.z + matrix[12],
-		y: matrix[1] * point.x + matrix[5] * point.y + matrix[9] * point.z + matrix[13],
-		z: matrix[2] * point.x + matrix[6] * point.y + matrix[10] * point.z + matrix[14],
-		w: matrix[3] * point.x + matrix[7] * point.y + matrix[11] * point.z + matrix[15],
+		x:
+			matrix[0] * point.x +
+			matrix[4] * point.y +
+			matrix[8] * point.z +
+			matrix[12],
+		y:
+			matrix[1] * point.x +
+			matrix[5] * point.y +
+			matrix[9] * point.z +
+			matrix[13],
+		z:
+			matrix[2] * point.x +
+			matrix[6] * point.y +
+			matrix[10] * point.z +
+			matrix[14],
+		w:
+			matrix[3] * point.x +
+			matrix[7] * point.y +
+			matrix[11] * point.z +
+			matrix[15],
 	};
 }
 

@@ -62,7 +62,9 @@ export class StaticResolverWorkerRuntimeHost implements RuntimeHost {
 	}
 
 	#handleResponse(
-		response: StaticResolverHostLookupResponse | StaticResolverWorkerMainMessage,
+		response:
+			| StaticResolverHostLookupResponse
+			| StaticResolverWorkerMainMessage,
 	): void {
 		if (
 			response.kind !== "host-asset-lookup-resolved" &&

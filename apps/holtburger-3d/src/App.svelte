@@ -68,14 +68,15 @@
 		});
 		sceneResourceRuntime = runtime;
 
-		const browserSceneResourceController =
-			createBrowserSceneResourceController({
+		const browserSceneResourceController = createBrowserSceneResourceController(
+			{
 				frontendState,
 				runtime,
 				onFrontendState: (state) => {
 					latestFrontendState = state;
 				},
-			});
+			},
+		);
 
 		void (async () => {
 			try {
@@ -144,7 +145,8 @@
 	{:else}
 		<BrowserWorldDisplay
 			preparedAssetResolver={preparedAssetStore.resolver}
-			staticLandblockProductSource={sceneResourceRuntime.landblockProducts.productSource}
+			staticLandblockProductSource={sceneResourceRuntime.landblockProducts
+				.productSource}
 		/>
 	{/if}
 </main>

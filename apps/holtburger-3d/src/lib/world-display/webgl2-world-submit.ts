@@ -143,11 +143,23 @@ export interface Webgl2WorldSubmitMetrics {
 	staticBundleMaterialBaseColorBindingCount: number;
 	staticBundleMaterialIndexedBindingCount: number;
 	materialSurfaceSubmittedCount: number;
-	materialSurfaceSubmittedCountsByDomain: Record<Webgl2MaterialDrawDomain, number>;
-	materialSurfaceDrawCallCountsByDomain: Record<Webgl2MaterialDrawDomain, number>;
-	materialSurfaceTriangleCountsByDomain: Record<Webgl2MaterialDrawDomain, number>;
+	materialSurfaceSubmittedCountsByDomain: Record<
+		Webgl2MaterialDrawDomain,
+		number
+	>;
+	materialSurfaceDrawCallCountsByDomain: Record<
+		Webgl2MaterialDrawDomain,
+		number
+	>;
+	materialSurfaceTriangleCountsByDomain: Record<
+		Webgl2MaterialDrawDomain,
+		number
+	>;
 	materialSurfaceSkippedCount: number;
-	materialSurfaceSkippedCountsByDomain: Record<Webgl2MaterialDrawDomain, number>;
+	materialSurfaceSkippedCountsByDomain: Record<
+		Webgl2MaterialDrawDomain,
+		number
+	>;
 	materialSurfaceSubmittedAlphaPolicyCounts: Record<string, number>;
 	materialSurfaceSkippedReasonCounts: Record<string, number>;
 	materialSurfaceSkippedFamilyCounts: Record<string, number>;
@@ -572,7 +584,8 @@ function submitWebgl2StaticBundleLayers({
 			missingMaterialGeometryCount,
 		});
 		metrics.staticBundleGeometryCandidateCount += geometries.length;
-		metrics.staticBundleGeometryCandidateTriangleCount += candidateTriangleCount;
+		metrics.staticBundleGeometryCandidateTriangleCount +=
+			candidateTriangleCount;
 		metrics.staticBundleSelectedMissingMaterialGeometryCount +=
 			missingMaterialGeometryCount;
 		let submittedLayer = false;
@@ -618,7 +631,8 @@ function submitWebgl2StaticBundleLayers({
 			recordStaticBundleLayerCoverageSample({
 				metrics,
 				layer,
-				reason: geometries.length === 0 ? "no-geometry" : "no-submitted-geometry",
+				reason:
+					geometries.length === 0 ? "no-geometry" : "no-submitted-geometry",
 				geometryCount: geometries.length,
 				candidateTriangleCount,
 				missingMaterialGeometryCount,
@@ -643,7 +657,8 @@ function recordStaticBundleLayerCoverageDiagnostics({
 	metrics.staticBundleSelectedObjectRecordCount += layer.objectRecordCount;
 	metrics.staticBundleSelectedSpatialHintCount += layer.spatialHintCount;
 	metrics.staticBundleSelectedSourceObjectCount += layer.sourceObjectCount;
-	metrics.staticBundleSelectedCompactedBatchCount += layer.compactedBatches.length;
+	metrics.staticBundleSelectedCompactedBatchCount +=
+		layer.compactedBatches.length;
 	metrics.staticBundleSelectedDirectEntryCount += layer.directEntries.length;
 	metrics.staticBundleBuilderSkippedSurfaceCount +=
 		layer.diagnosticSkippedSurfaceCount;
@@ -896,11 +911,7 @@ function submitWebgl2StructuredInteriorShell({
 	gl.uniformMatrix4fv(
 		program.uniforms.uModelViewProjection,
 		false,
-		multiplyMat4Into(
-			new Float32Array(16),
-			viewProjectionMatrix,
-			modelMatrix,
-		),
+		multiplyMat4Into(new Float32Array(16), viewProjectionMatrix, modelMatrix),
 	);
 	gl.uniform4fv(program.uniforms.uColor, shell.color);
 	metrics.uniformUploadCount += 2;
@@ -1350,12 +1361,15 @@ function submitWebgl2IndexedMaterialDrawSurface({
 		palette.width,
 		palette.height,
 	);
+	gl.uniform1i(program.uniforms.uClipThreshold, descriptor.clipThreshold);
 	gl.uniform1i(
-		program.uniforms.uClipThreshold,
-		descriptor.clipThreshold,
+		program.uniforms.uRepeatS,
+		descriptor.wrapS === "repeat" ? 1 : 0,
 	);
-	gl.uniform1i(program.uniforms.uRepeatS, descriptor.wrapS === "repeat" ? 1 : 0);
-	gl.uniform1i(program.uniforms.uRepeatT, descriptor.wrapT === "repeat" ? 1 : 0);
+	gl.uniform1i(
+		program.uniforms.uRepeatT,
+		descriptor.wrapT === "repeat" ? 1 : 0,
+	);
 	gl.uniform1f(
 		program.uniforms.uDetailTiling,
 		material.detailOverlay?.tiling ?? 1,
@@ -1557,9 +1571,7 @@ function resolveMaterialTextureBinding(
 	role: Webgl2StaticBundleMaterialTextureBinding["role"],
 ): Webgl2StaticBundleMaterialTextureBinding | null {
 	return (
-		material.textureBindings.find(
-			(binding) => binding.role === role,
-		) ?? null
+		material.textureBindings.find((binding) => binding.role === role) ?? null
 	);
 }
 
@@ -1571,7 +1583,8 @@ function resolveMaterialDetailTextureBinding(
 	}
 	return (
 		material.textureBindings.find(
-			(binding) => binding.virtualRefKey === material.detailOverlay?.textureRefKey,
+			(binding) =>
+				binding.virtualRefKey === material.detailOverlay?.textureRefKey,
 		) ?? null
 	);
 }

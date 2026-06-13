@@ -170,8 +170,7 @@ export function describeDerivedPaletteDataKey(options: {
 				subPalette.numColors,
 				describePaletteAssetPreparedState(
 					formatPaletteAssetId(subPalette.subId),
-					assetLookup.get(formatPaletteAssetId(subPalette.subId)) ??
-						undefined,
+					assetLookup.get(formatPaletteAssetId(subPalette.subId)) ?? undefined,
 				),
 			].join(":"),
 		),

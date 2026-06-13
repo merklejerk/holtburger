@@ -97,9 +97,7 @@ interface StaticMaterialPaletteRoute {
 	colorCount: number;
 }
 
-const STATIC_MATERIAL_TEXTURE_USAGES: readonly MaterialTextureUsage[] = [
-	"raw",
-];
+const STATIC_MATERIAL_TEXTURE_USAGES: readonly MaterialTextureUsage[] = ["raw"];
 const STATIC_MATERIAL_FAMILY_KEY_PREFIX = "static:";
 const STATIC_MATERIAL_ALPHA_POLICY_KEY = "alpha";
 
@@ -123,7 +121,10 @@ const STATIC_MATERIAL_ALPHA_POLICIES = new Set<string>([
 function normalizeStaticMaterialTextureRouteRequests(
 	requests: readonly StaticMaterialTextureRouteRequest[],
 ): NormalizedStaticMaterialTextureRouteRequest[] {
-	const requestsByKey = new Map<string, NormalizedStaticMaterialTextureRouteRequest>();
+	const requestsByKey = new Map<
+		string,
+		NormalizedStaticMaterialTextureRouteRequest
+	>();
 	for (const request of requests) {
 		const normalized =
 			typeof request === "string"
@@ -136,8 +137,7 @@ function normalizeStaticMaterialTextureRouteRequests(
 						materialAssetId: request.materialAssetId,
 						materialRecordKey:
 							request.materialRecordKey ?? request.materialAssetId,
-						materialVariantSignature:
-							request.materialVariantSignature ?? null,
+						materialVariantSignature: request.materialVariantSignature ?? null,
 					};
 		requestsByKey.set(
 			[
@@ -183,8 +183,7 @@ function resolveStaticMaterialRouteWrapMode({
 	};
 }
 
-type StaticMaterialFamilyKind =
-	CompactionMaterialFamily;
+type StaticMaterialFamilyKind = CompactionMaterialFamily;
 
 export type StaticMaterialFamilyDescriptor =
 	| {
@@ -212,14 +211,11 @@ export type StaticMaterialFamilyDescriptor =
 			readonly kind: "unsupported";
 			readonly sourceFamily: Exclude<
 				StaticMaterialFamilyKind,
-				| "textured-opaque"
-				| "transparent-blended"
-				| "opacity-translucent"
+				"textured-opaque" | "transparent-blended" | "opacity-translucent"
 			>;
 			readonly alphaPolicy: CompactionAlphaPolicy | null;
 			readonly reason: string;
 	  };
-
 
 export function collectStaticMaterialTextureRoutes(
 	requests: readonly StaticMaterialTextureRouteRequest[],
@@ -394,14 +390,16 @@ export function resolveStaticMaterialReadiness(options: {
 					? hasSourceAlpha(directRenderSurface.renderSurface.formatRaw)
 					: false,
 			});
-	const materialRecordKey = options.materialRecordKey ?? options.materialAssetId;
+	const materialRecordKey =
+		options.materialRecordKey ?? options.materialAssetId;
 	const materialRoutes = options.materialTextureRoutes.filter(
 		(route) => route.materialRecordKey === materialRecordKey,
 	);
 	const texturePageBindings = materialRoutes
 		.map((route) => {
 			const ref = options.texturePageRefs.find(
-				(candidate) => candidate.key === formatStaticMaterialTextureRefKey(route),
+				(candidate) =>
+					candidate.key === formatStaticMaterialTextureRefKey(route),
 			);
 			return ref ? createStaticBundleTexturePageDescriptor(ref) : null;
 		})
@@ -489,7 +487,8 @@ export function resolveStaticIndexedMaterialRecord(options: {
 	materialTextureRoutes: readonly StaticMaterialTextureRoute[];
 	preparedByAssetId: ReadonlyMap<string, PreparedAssetRecord>;
 }): StaticBundleIndexedMaterialRecord | undefined {
-	const materialRecordKey = options.materialRecordKey ?? options.materialAssetId;
+	const materialRecordKey =
+		options.materialRecordKey ?? options.materialAssetId;
 	const indexRoute = options.materialTextureRoutes.find(
 		(route): route is StaticMaterialIndexedTexelRoute =>
 			route.kind === "indexed-texels" &&
@@ -542,12 +541,12 @@ export function collectStaticPreparedTextureRouteAssetIds(
 					surfaceTexture.payload,
 					preparedByAssetId,
 				);
-					return renderSurface
-						? resolveNormalizedPreparedTextureAssetIds({
-								renderSurface,
-								usage: "detail",
-							})
-						: [];
+				return renderSurface
+					? resolveNormalizedPreparedTextureAssetIds({
+							renderSurface,
+							usage: "detail",
+						})
+					: [];
 			}),
 		);
 	}
@@ -823,9 +822,10 @@ function findDirectRenderSurface(
 	if (material.source.kind !== "texture") {
 		return null;
 	}
-	const selectedAssetId = material.source.selectedRenderSurfaceId !== null
-		? `render-surface/${formatHex32(material.source.selectedRenderSurfaceId)}`
-		: null;
+	const selectedAssetId =
+		material.source.selectedRenderSurfaceId !== null
+			? `render-surface/${formatHex32(material.source.selectedRenderSurfaceId)}`
+			: null;
 	const candidateAssetIds = selectedAssetId
 		? [
 				selectedAssetId,

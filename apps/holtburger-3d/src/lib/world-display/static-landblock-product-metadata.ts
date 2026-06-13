@@ -17,7 +17,9 @@ export interface StaticLandblockProductMetadataStore {
 	commitProduct(result: LandblockRenderProductWorkerResult): void;
 	evictProduct(key: StaticLandblockProductKey): void;
 	clearProducts(): void;
-	updateRenderChunkTransforms(transforms: readonly RenderChunkTransform[]): void;
+	updateRenderChunkTransforms(
+		transforms: readonly RenderChunkTransform[],
+	): void;
 	productCount(): number;
 	spatialItemCount(): number;
 }

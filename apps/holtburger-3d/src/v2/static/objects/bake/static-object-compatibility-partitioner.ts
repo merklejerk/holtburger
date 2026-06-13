@@ -221,10 +221,14 @@ function createTriangleCandidates(
 			for (const triangle of [...part.triangles].sort(
 				(left, right) => left.polygonId - right.polygonId,
 			)) {
-				const materialSlot = materialSlots.resolveMaterialSlot(object.identity, part, {
-					geometrySurfaceId: triangle.geometrySurfaceId,
-					materialVariantSignature: triangle.materialVariantSignature,
-				});
+				const materialSlot = materialSlots.resolveMaterialSlot(
+					object.identity,
+					part,
+					{
+						geometrySurfaceId: triangle.geometrySurfaceId,
+						materialVariantSignature: triangle.materialVariantSignature,
+					},
+				);
 				if (!materialSlot) {
 					throw new Error(
 						`Static object triangle ${createObjectKey(object.identity)}:part:${part.partIndex}:polygon:${triangle.polygonId} has no resolved material slot.`,
@@ -249,8 +253,12 @@ function createTriangleCandidates(
 					);
 				}
 
-				const textureRoleSchemaKey = createTextureRoleSchemaKey(plan.textureRoles);
-				const textureRoleLayoutKey = createTextureRoleLayoutKey(plan.textureRoles);
+				const textureRoleSchemaKey = createTextureRoleSchemaKey(
+					plan.textureRoles,
+				);
+				const textureRoleLayoutKey = createTextureRoleLayoutKey(
+					plan.textureRoles,
+				);
 				const materialColorKey = createMaterialColorKey(plan);
 				const sourceKey = createSourceKey(object.source);
 				const gfxKey = createSourceKey(part.gfxObj);
@@ -353,7 +361,10 @@ class MaterialSlotIndex {
 			readonly geometrySurfaceId: number | null;
 			readonly materialVariantSignature: string | null;
 		},
-	): StaticObjectMaterialSlotFacts | StaticObjectPartSourceFacts["materialSlots"][number] | null {
+	):
+		| StaticObjectMaterialSlotFacts
+		| StaticObjectPartSourceFacts["materialSlots"][number]
+		| null {
 		if (triangle.geometrySurfaceId === null) {
 			return null;
 		}

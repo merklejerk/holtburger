@@ -37,9 +37,7 @@ export function getAssetResponseDependencies(
 		return uniqueSortedAssetIds([
 			formatTerrainMaterialAssetId(landblockOutdoor.data.regionNumber),
 			formatRegionRenderProfileAssetId(landblockOutdoor.data.regionNumber),
-			...collectLandblockOutdoorRenderableSourceAssetIds(
-				landblockOutdoor.data,
-			),
+			...collectLandblockOutdoorRenderableSourceAssetIds(landblockOutdoor.data),
 		]);
 	}
 

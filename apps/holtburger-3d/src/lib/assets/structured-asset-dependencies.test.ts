@@ -65,6 +65,9 @@ describe("structured asset dependency derivation", () => {
 function createOutdoorMember(
 	kind: "explicit-object" | "building" | "generated-scenery",
 	sourceAssetId: string,
-): { kind: "explicit-object" | "building" | "generated-scenery"; sourceAssetId: string } {
+): {
+	kind: "explicit-object" | "building" | "generated-scenery";
+	sourceAssetId: string;
+} {
 	return { kind, sourceAssetId };
 }

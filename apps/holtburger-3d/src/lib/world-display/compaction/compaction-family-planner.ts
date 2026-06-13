@@ -35,10 +35,7 @@ type CompactionFamilyBypassReason =
 	| "missing-detail-atlas-entry"
 	| "material-table-overflow";
 
-type CompactionMaterialKind =
-	| "flat"
-	| "direct-texture"
-	| "indexed-paletted";
+type CompactionMaterialKind = "flat" | "direct-texture" | "indexed-paletted";
 
 export type CompactionMaterialFamily =
 	| "flat-constant-color"
@@ -350,7 +347,9 @@ export function planCompactionFamilies(options: {
 			bypasses.push(bypass);
 			continue;
 		}
-		if (candidate.compactionEligibility.material.family === "indexed-paletted") {
+		if (
+			candidate.compactionEligibility.material.family === "indexed-paletted"
+		) {
 			continue;
 		}
 		const texturePageReadiness =
@@ -482,9 +481,7 @@ export function planCompactionFamilies(options: {
 		candidateMaterialSlots,
 		drawSlices,
 		staticObjectKeys: uniqueSortedStrings([
-			...compactable.flatMap(
-				(candidate) => candidate.source.staticObjectKeys,
-			),
+			...compactable.flatMap((candidate) => candidate.source.staticObjectKeys),
 			...indexedCompactable.flatMap((candidate) => candidate.staticObjectKeys),
 		]),
 		staticPartCount:
@@ -948,7 +945,9 @@ export function createCompactionEligibility(options: {
 			if (!hasIndexedTexelTexturePage(options.material.texturePages.bindings)) {
 				materialBlockers.push("missing-indexed-texel-page");
 			}
-			if (!hasIndexedPaletteTexturePage(options.material.texturePages.bindings)) {
+			if (
+				!hasIndexedPaletteTexturePage(options.material.texturePages.bindings)
+			) {
 				materialBlockers.push("missing-indexed-palette-page");
 			}
 			materialBlockers.push(
@@ -1038,7 +1037,8 @@ function createGeometryCompactionBypass(
 				reason: "missing-landblock-origin",
 				blockerKind: "geometry",
 				blocker,
-				detail: "compacted geometry compaction candidate has no owning landblock",
+				detail:
+					"compacted geometry compaction candidate has no owning landblock",
 			};
 		case "missing-uv-buffer":
 			return {
@@ -1283,7 +1283,9 @@ function hasIndexedPaletteTexturePage(
 	);
 }
 
-function hasExactDataTexturePageSampling(binding: TexturePageDescriptor): boolean {
+function hasExactDataTexturePageSampling(
+	binding: TexturePageDescriptor,
+): boolean {
 	return (
 		binding.sampling.samplingDomain === "data" &&
 		binding.sampling.lookup === "exact" &&
@@ -1316,9 +1318,7 @@ function classifyUnsupportedIndexedTexturePageBlockers(
 						? null
 						: "unsupported-texture-page-sampling";
 				default:
-					return formatUnsupportedTexturePageUsageBlocker(
-						binding.role,
-					);
+					return formatUnsupportedTexturePageUsageBlocker(binding.role);
 			}
 		});
 	return collectUniqueMaterialBlockers([
@@ -1344,9 +1344,7 @@ function classifyUnsupportedCompactedTexturePageBlockers(
 						? null
 						: "unsupported-texture-page-sampling";
 				default:
-					return formatUnsupportedTexturePageUsageBlocker(
-						binding.role,
-					);
+					return formatUnsupportedTexturePageUsageBlocker(binding.role);
 			}
 		}),
 	);
@@ -1364,7 +1362,9 @@ function isUnsupportedTexturePageUsageBlocker(
 	return blocker.startsWith("unsupported-texture-page-role:");
 }
 
-function hasColorFilteredTexturePageSampling(binding: TexturePageDescriptor): boolean {
+function hasColorFilteredTexturePageSampling(
+	binding: TexturePageDescriptor,
+): boolean {
 	return (
 		binding.sampling.samplingDomain === "color" &&
 		binding.sampling.lookup === "color-filtered"
@@ -1481,7 +1481,10 @@ function describeRgbaTexturePageAlphaSlot(
 					(candidate) =>
 						describeCompactionMaterialSlotKey(candidate) === materialSlotKey,
 				)
-				.map((candidate) => candidate.source.compactionEligibility.material.alphaPolicy),
+				.map(
+					(candidate) =>
+						candidate.source.compactionEligibility.material.alphaPolicy,
+				),
 		),
 	];
 	if (alphaPolicies.length > 1) {
@@ -1502,7 +1505,10 @@ function describeRgbaTexturePageAlphaSlot(
 					(candidate) =>
 						describeCompactionMaterialSlotKey(candidate) === materialSlotKey,
 				)
-				.map((candidate) => candidate.source.compactionEligibility.material.alphaTest),
+				.map(
+					(candidate) =>
+						candidate.source.compactionEligibility.material.alphaTest,
+				),
 		),
 	];
 	if (alphaTests.length > 1) {
@@ -1563,10 +1569,7 @@ function describeCompactionMaterialSlotKey(
 function dedupeRgbaTexturePageCandidates(
 	candidates: readonly EligibleCompactionFamilyCandidate[],
 ): EligibleCompactionFamilyCandidate[] {
-	const candidateById = new Map<
-		string,
-		EligibleCompactionFamilyCandidate
-	>();
+	const candidateById = new Map<string, EligibleCompactionFamilyCandidate>();
 	for (const candidate of candidates) {
 		const previous = candidateById.get(candidate.source.id);
 		if (!previous) {

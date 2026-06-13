@@ -230,7 +230,9 @@ export function deriveTransitionPortalCandidatesFromLandblockArtifacts({
 	};
 	const candidates: TransitionPortalCandidate[] = [];
 	let nextStencilRef = 1;
-	for (const portal of collectDetailedOutdoorBuildingPortals(detailedArtifacts)) {
+	for (const portal of collectDetailedOutdoorBuildingPortals(
+		detailedArtifacts,
+	)) {
 		diagnostics.topologyPortalCount += 1;
 		if (portal.linkedEnvCellIds.length === 0) {
 			continue;
@@ -658,7 +660,10 @@ function resolveDetailedTargetStatus(
 	return "known-unloaded";
 }
 
-function describeDetailedPortalKey(envCellId: number, portalId: string): string {
+function describeDetailedPortalKey(
+	envCellId: number,
+	portalId: string,
+): string {
 	return `${envCellId}:${portalId}`;
 }
 

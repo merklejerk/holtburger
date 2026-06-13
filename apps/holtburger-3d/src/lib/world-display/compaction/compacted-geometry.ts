@@ -92,9 +92,7 @@ export function buildCompactedGeometryBatch<
 	if (plan.compactableEntryIds.length === 0) {
 		return null;
 	}
-	const entryById = new Map(
-		entries.map((entry) => [entry.id, entry]),
-	);
+	const entryById = new Map(entries.map((entry) => [entry.id, entry]));
 	const materialSlotByKey = new Map(
 		plan.materialSlots.map((slot) => [slot.key, slot] as const),
 	);
@@ -260,7 +258,9 @@ function assertCompactedGeometryEntry(
 		);
 	}
 	if (!entry.geometry.uvs) {
-		throw new Error(`Compacted geometry compaction entry ${entry.id} has no UVs.`);
+		throw new Error(
+			`Compacted geometry compaction entry ${entry.id} has no UVs.`,
+		);
 	}
 }
 
@@ -411,9 +411,7 @@ export function describeCompactedGeometryJobKey({
 	entries: readonly CompactedGeometryBuildEntry[];
 	batchOrigin: { x: number; y: number; z: number };
 }): string {
-	const entryById = new Map(
-		entries.map((entry) => [entry.id, entry]),
-	);
+	const entryById = new Map(entries.map((entry) => [entry.id, entry]));
 	const compactableEntrys = orderCompactedEntrysBySlice({
 		plan,
 		entryById,

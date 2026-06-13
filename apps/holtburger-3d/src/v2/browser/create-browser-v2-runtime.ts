@@ -221,7 +221,9 @@ class BrowserStaticBaker implements StaticBaker {
 	}
 }
 
-export function shouldUseBrowserSourceResolver(job: StaticResolverJob): boolean {
+export function shouldUseBrowserSourceResolver(
+	job: StaticResolverJob,
+): boolean {
 	return (
 		(job.domain === "outdoor-terrain" ||
 			job.domain === "outdoor-buildings" ||

@@ -30,5 +30,4 @@ describe("scene resource interest", () => {
 			"interior:0xda550155:terrain-2:buildings-1:detail-0:env-cells--1",
 		);
 	});
-
 });

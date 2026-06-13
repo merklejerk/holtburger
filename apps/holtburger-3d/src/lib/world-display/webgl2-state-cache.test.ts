@@ -132,7 +132,9 @@ class CapturingStateGl implements Webgl2StateCacheGl {
 	}
 
 	bindVertexArray(vertexArray: WebGLVertexArrayObject | null): void {
-		this.calls.push(`bindVertexArray:${formatHandle(vertexArray, "vertex-array")}`);
+		this.calls.push(
+			`bindVertexArray:${formatHandle(vertexArray, "vertex-array")}`,
+		);
 	}
 
 	activeTexture(textureUnit: GLenum): void {
@@ -140,7 +142,9 @@ class CapturingStateGl implements Webgl2StateCacheGl {
 	}
 
 	bindTexture(target: GLenum, texture: WebGLTexture | null): void {
-		this.calls.push(`bindTexture:${target}:${formatHandle(texture, "texture")}`);
+		this.calls.push(
+			`bindTexture:${target}:${formatHandle(texture, "texture")}`,
+		);
 	}
 
 	enable(capability: GLenum): void {

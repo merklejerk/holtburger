@@ -298,10 +298,7 @@ export function updateBrowserCameraNearPlane(
 	return {
 		...browserMode,
 		cameraNearPlane: nextNearPlane,
-		cameraFarPlane: Math.max(
-			browserMode.cameraFarPlane,
-			nextNearPlane + 1,
-		),
+		cameraFarPlane: Math.max(browserMode.cameraFarPlane, nextNearPlane + 1),
 	};
 }
 

@@ -184,7 +184,9 @@ export function planStaticObjectMaterials(
 	const plannedMaterialKeys = new Set<string>();
 	const rawMaterialPlans: StaticObjectMaterialPlan[] = [];
 	for (const slot of payload.materialSlots) {
-		const material = materialById.get(createStaticMaterialSourceKey(slot.material));
+		const material = materialById.get(
+			createStaticMaterialSourceKey(slot.material),
+		);
 		if (!material) {
 			continue;
 		}
@@ -208,7 +210,11 @@ export function planStaticObjectMaterials(
 		);
 	}
 	for (const material of payload.materialSources) {
-		const planKey = createStaticObjectMaterialUseKey(material.identity, null, []);
+		const planKey = createStaticObjectMaterialUseKey(
+			material.identity,
+			null,
+			[],
+		);
 		if (plannedMaterialKeys.has(planKey)) {
 			continue;
 		}
@@ -311,7 +317,8 @@ export function classifyStaticObjectMaterial(
 		const reason = createFallbackReason({
 			code: "missing-render-surface",
 			material: context.material.identity,
-			message: "Static textured material references a render surface that was not resolved.",
+			message:
+				"Static textured material references a render surface that was not resolved.",
 			renderSurface: textureRef.renderSurface,
 			texture: context.material.source.texture,
 		});
@@ -328,11 +335,15 @@ export function classifyStaticObjectMaterial(
 			const reason = createFallbackReason({
 				code: "missing-palette",
 				material: context.material.identity,
-				message: "Indexed static material requires a material or render-surface palette.",
+				message:
+					"Indexed static material requires a material or render-surface palette.",
 				renderSurface: renderSurfaceRef.renderSurface,
 				texture: context.material.source.texture,
 			});
-			return createUnsupportedPlan(basePlan, [reason, ...unsupportedFlagReasons]);
+			return createUnsupportedPlan(basePlan, [
+				reason,
+				...unsupportedFlagReasons,
+			]);
 		}
 		const paletteSource = findPaletteSource(context.paletteSources, palette);
 		if (!paletteSource) {
@@ -345,7 +356,10 @@ export function classifyStaticObjectMaterial(
 				renderSurface: renderSurfaceRef.renderSurface,
 				texture: context.material.source.texture,
 			});
-			return createUnsupportedPlan(basePlan, [reason, ...unsupportedFlagReasons]);
+			return createUnsupportedPlan(basePlan, [
+				reason,
+				...unsupportedFlagReasons,
+			]);
 		}
 		if (
 			renderSurfaceRef.indexedMaxIndex !== null &&
@@ -359,7 +373,10 @@ export function classifyStaticObjectMaterial(
 				renderSurface: renderSurfaceRef.renderSurface,
 				texture: context.material.source.texture,
 			});
-			return createUnsupportedPlan(basePlan, [reason, ...unsupportedFlagReasons]);
+			return createUnsupportedPlan(basePlan, [
+				reason,
+				...unsupportedFlagReasons,
+			]);
 		}
 		const indexedDeferredReasons = isSupportedTransparentStaticBlend(behavior)
 			? []
@@ -579,8 +596,9 @@ function findPaletteSource(
 	palette: PaletteIdentity,
 ): StaticObjectPaletteSourceFacts | null {
 	return (
-		paletteSources.find((source) => source.palette.paletteId === palette.paletteId) ??
-		null
+		paletteSources.find(
+			(source) => source.palette.paletteId === palette.paletteId,
+		) ?? null
 	);
 }
 
@@ -727,9 +745,7 @@ function createDetailRolePlan(
 	};
 }
 
-function deriveMaterialBehavior(
-	material: StaticObjectMaterialSourceFacts,
-): {
+function deriveMaterialBehavior(material: StaticObjectMaterialSourceFacts): {
 	readonly alphaPolicy: StaticObjectMaterialAlphaPolicy;
 	readonly blend: StaticObjectMaterialBlendFacts;
 	readonly diffuseScale: number;
@@ -737,10 +753,16 @@ function deriveMaterialBehavior(
 	readonly unsupportedSurfaceFlags: readonly string[];
 } {
 	const opacity = normalizeLegacyOpacity(material.translucency);
-	const diffuseScale = hasSurfaceFlag(material.surfaceType, SURFACE_TYPE_DIFFUSE)
+	const diffuseScale = hasSurfaceFlag(
+		material.surfaceType,
+		SURFACE_TYPE_DIFFUSE,
+	)
 		? clampUnit(material.diffuse)
 		: 1;
-	const emissiveScale = hasSurfaceFlag(material.surfaceType, SURFACE_TYPE_LUMINOUS)
+	const emissiveScale = hasSurfaceFlag(
+		material.surfaceType,
+		SURFACE_TYPE_LUMINOUS,
+	)
 		? Math.max(0, material.luminosity)
 		: 0;
 	const isClipMap = hasSurfaceFlag(
@@ -889,7 +911,10 @@ function resolveAlphaMode(
 function resolveMaterialPass(
 	behavior: ReturnType<typeof deriveMaterialBehavior>,
 ): StaticObjectMaterialPass {
-	if (behavior.blend.mode === "additive" || behavior.blend.mode.endsWith("additive")) {
+	if (
+		behavior.blend.mode === "additive" ||
+		behavior.blend.mode.endsWith("additive")
+	) {
 		return "additive";
 	}
 	if (!behavior.blend.depthWrite) {
@@ -942,10 +967,15 @@ function resolveMaterialEmissiveColor(
 function findSurfaceTextureRef(
 	textureRefs: readonly StaticObjectTextureRefFacts[],
 	texture: SurfaceTextureIdentity,
-): Extract<StaticObjectTextureRefFacts, { readonly role: "surface-texture" }> | null {
+): Extract<
+	StaticObjectTextureRefFacts,
+	{ readonly role: "surface-texture" }
+> | null {
 	return (
 		textureRefs.find(
-			(ref): ref is Extract<
+			(
+				ref,
+			): ref is Extract<
 				StaticObjectTextureRefFacts,
 				{ readonly role: "surface-texture" }
 			> =>
@@ -958,10 +988,15 @@ function findSurfaceTextureRef(
 function findRenderSurfaceRef(
 	textureRefs: readonly StaticObjectTextureRefFacts[],
 	renderSurface: RenderSurfaceIdentity,
-): Extract<StaticObjectTextureRefFacts, { readonly role: "render-surface" }> | null {
+): Extract<
+	StaticObjectTextureRefFacts,
+	{ readonly role: "render-surface" }
+> | null {
 	return (
 		textureRefs.find(
-			(ref): ref is Extract<
+			(
+				ref,
+			): ref is Extract<
 				StaticObjectTextureRefFacts,
 				{ readonly role: "render-surface" }
 			> =>
@@ -1017,17 +1052,21 @@ function createTextureRoleDataUseSignature(
 	const detailSuffix =
 		role.role === "detail-overlay" ? `:tiling=${role.tiling}` : "";
 	if (role.dataUse.kind === "palette-texture-use") {
-		return [
-			formatHex32(role.dataUse.palette.paletteId),
-			`${role.dataUse.firstIndex}-${role.dataUse.indexCount}`,
-			role.dataUse.usage,
-		].join(":") + detailSuffix;
+		return (
+			[
+				formatHex32(role.dataUse.palette.paletteId),
+				`${role.dataUse.firstIndex}-${role.dataUse.indexCount}`,
+				role.dataUse.usage,
+			].join(":") + detailSuffix
+		);
 	}
 
-	return [
-		formatHex32(role.dataUse.renderSurface.renderSurfaceId),
-		role.dataUse.usage,
-	].join(":") + detailSuffix;
+	return (
+		[
+			formatHex32(role.dataUse.renderSurface.renderSurfaceId),
+			role.dataUse.usage,
+		].join(":") + detailSuffix
+	);
 }
 
 function createFallbackReason(options: {

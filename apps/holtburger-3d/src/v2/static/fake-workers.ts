@@ -144,7 +144,10 @@ export class DeferredStaticBaker implements StaticBaker {
 
 export class ImmediateStaticResolver implements StaticResolver {
 	async resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
-		if (job.domain === "landblock-env-cells" && job.scope.kind === "landblock") {
+		if (
+			job.domain === "landblock-env-cells" &&
+			job.scope.kind === "landblock"
+		) {
 			return {
 				job,
 				scope: {

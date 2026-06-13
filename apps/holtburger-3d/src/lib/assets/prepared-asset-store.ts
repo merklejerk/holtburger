@@ -46,9 +46,7 @@ export interface PreparedAssetResolver {
 	getPreparedRevision(): number;
 	getCacheMetadataRevision(): number;
 	getPreparedCount(): number;
-	scanPreparedAssets(
-		options: PreparedAssetScanOptions,
-	): PreparedAssetScanPage;
+	scanPreparedAssets(options: PreparedAssetScanOptions): PreparedAssetScanPage;
 	subscribe(listener: PreparedAssetChangeListener): () => void;
 }
 

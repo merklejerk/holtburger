@@ -49,9 +49,7 @@ export type StaticResolverWorkerResponse = Extract<
 export type StaticResolverHostLookupResponse = Extract<
 	StaticResolverWorkerMainMessage,
 	{
-		readonly kind:
-			| "host-asset-lookup-resolved"
-			| "host-asset-lookup-failed";
+		readonly kind: "host-asset-lookup-resolved" | "host-asset-lookup-failed";
 	}
 >;
 

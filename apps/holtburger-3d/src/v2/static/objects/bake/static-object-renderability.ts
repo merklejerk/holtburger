@@ -1,7 +1,5 @@
 import type { MaterialTextureDataUseIdentity } from "../../contracts";
-import type {
-	StaticObjectCompatibilityPartition,
-} from "./static-object-compatibility-partitioner";
+import type { StaticObjectCompatibilityPartition } from "./static-object-compatibility-partitioner";
 import type { StaticObjectMaterialPlan } from "./static-object-material-planner";
 
 export function isRenderableStaticObjectMaterialPlan(
@@ -67,12 +65,13 @@ export function isCurrentlyStageableStaticObjectDataUse(
 	dataUse: MaterialTextureDataUseIdentity | undefined,
 ): boolean {
 	return (
-		dataUse?.kind === "prepared-render-surface-texture-use" &&
-		(dataUse.usage === "rgba-color" ||
-			dataUse.usage === "rgba-detail" ||
-			dataUse.usage === "index8" ||
-			dataUse.usage === "index16")
-	) || dataUse?.kind === "palette-texture-use";
+		(dataUse?.kind === "prepared-render-surface-texture-use" &&
+			(dataUse.usage === "rgba-color" ||
+				dataUse.usage === "rgba-detail" ||
+				dataUse.usage === "index8" ||
+				dataUse.usage === "index16")) ||
+		dataUse?.kind === "palette-texture-use"
+	);
 }
 
 function isCurrentlyStageableStaticObjectDataUseLayout(

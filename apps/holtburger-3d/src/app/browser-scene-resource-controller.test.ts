@@ -33,7 +33,10 @@ describe("createBrowserSceneResourceController", () => {
 		expect(observedStates).toHaveLength(1);
 
 		store.updateBrowserMode((browserMode) =>
-			updateBrowserCameraNearPlane(browserMode, browserMode.cameraNearPlane + 0.1),
+			updateBrowserCameraNearPlane(
+				browserMode,
+				browserMode.cameraNearPlane + 0.1,
+			),
 		);
 		store.updateBrowserMode((browserMode) =>
 			updatePortalPolygonVisibility(

@@ -29,10 +29,7 @@ describe("planTexturePageAtlas", () => {
 			policy: createPolicy(),
 		});
 
-		expect(plan.rgbaAtlasReadyCandidateIds).toEqual([
-			"static-a",
-			"terrain-a",
-		]);
+		expect(plan.rgbaAtlasReadyCandidateIds).toEqual(["static-a", "terrain-a"]);
 		expect(plan.buckets.map((bucket) => bucket.bucket)).toEqual([
 			"static-base-color",
 			"terrain-color",
@@ -221,7 +218,9 @@ describe("planTexturePageAtlas", () => {
 		});
 
 		const pagesByBucket = new Map(
-			plan.buckets.map((bucket) => [bucket.bucket, bucket.atlasTextures] as const),
+			plan.buckets.map(
+				(bucket) => [bucket.bucket, bucket.atlasTextures] as const,
+			),
 		);
 
 		expect(pagesByBucket.get("terrain-color")?.[0]).toMatchObject({

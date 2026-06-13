@@ -192,7 +192,9 @@ describe("V2 outdoor static object resolver", () => {
 				},
 			],
 		});
-		expect(payload.scope.sourceAssets[0]?.parts[0]?.materialSlots[0]).toMatchObject({
+		expect(
+			payload.scope.sourceAssets[0]?.parts[0]?.materialSlots[0],
+		).toMatchObject({
 			paletteOverride: {
 				kind: "palette",
 				paletteId: 0x04000030,
@@ -607,12 +609,12 @@ describe("V2 outdoor static object resolver", () => {
 				materialVariantSignature: "sampler=repeat",
 			}),
 		]);
-		expect(
-			payload.scope.sourceAssets[0]?.parts[0]?.triangles[0],
-		).toMatchObject({
-			geometrySurfaceId: 0,
-			materialVariantSignature: "sampler=repeat",
-		});
+		expect(payload.scope.sourceAssets[0]?.parts[0]?.triangles[0]).toMatchObject(
+			{
+				geometrySurfaceId: 0,
+				materialVariantSignature: "sampler=repeat",
+			},
+		);
 	});
 
 	it("keeps host routes confined to debug provenance", async () => {
@@ -677,7 +679,9 @@ describe("V2 outdoor static object resolver", () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-outdoor", 0xda55ffff),
-				createLandblockOutdoorPayload({ buildingSourceAssetId: "gfx-obj/01000020" }),
+				createLandblockOutdoorPayload({
+					buildingSourceAssetId: "gfx-obj/01000020",
+				}),
 			),
 			createPreparedAsset(
 				createHostAssetKey("region-render-profile", 1),
@@ -1059,13 +1063,15 @@ function createMaterialPayload(
 	};
 }
 
-function createSurfaceTexturePayload(options: {
-	readonly surfaceTextureId: number;
-	readonly renderSurfaceId: number;
-} = {
-	renderSurfaceId: 0x06000010,
-	surfaceTextureId: 0x05000010,
-}): SurfaceTexturePayloadDto {
+function createSurfaceTexturePayload(
+	options: {
+		readonly surfaceTextureId: number;
+		readonly renderSurfaceId: number;
+	} = {
+		renderSurfaceId: 0x06000010,
+		surfaceTextureId: 0x05000010,
+	},
+): SurfaceTexturePayloadDto {
 	return {
 		dependencies: {
 			renderSurfaceAssetIds: [
@@ -1084,11 +1090,13 @@ function createSurfaceTexturePayload(options: {
 	};
 }
 
-function createRenderSurfacePayload(options: {
-	readonly renderSurfaceId: number;
-} = {
-	renderSurfaceId: 0x06000010,
-}): RenderSurfacePayloadDto {
+function createRenderSurfacePayload(
+	options: {
+		readonly renderSurfaceId: number;
+	} = {
+		renderSurfaceId: 0x06000010,
+	},
+): RenderSurfacePayloadDto {
 	return {
 		defaultPaletteId: 0x04000010,
 		dependencies: { paletteAssetIds: ["palette/04000010"] },

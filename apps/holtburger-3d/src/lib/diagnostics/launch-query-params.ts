@@ -22,7 +22,10 @@ function readLaunchQueryParams(): URLSearchParams {
 		cachedLaunchQueryParams,
 		parseQueryParamsEnv(readViteEnv(QUERY_PARAMS_ENV)),
 	);
-	mergeParams(cachedLaunchQueryParams, parseLaunchUrlEnv(readViteEnv(LAUNCH_URL_ENV)));
+	mergeParams(
+		cachedLaunchQueryParams,
+		parseLaunchUrlEnv(readViteEnv(LAUNCH_URL_ENV)),
+	);
 	return cachedLaunchQueryParams;
 }
 

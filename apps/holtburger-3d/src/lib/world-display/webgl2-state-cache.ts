@@ -77,7 +77,10 @@ export class Webgl2StateCache {
 	private currentProgram: WebGLProgram | null | undefined;
 	private currentVertexArray: WebGLVertexArrayObject | null | undefined;
 	private currentActiveTextureUnit: number | undefined;
-	private readonly textureBindingsByUnit = new Map<number, WebGLTexture | null>();
+	private readonly textureBindingsByUnit = new Map<
+		number,
+		WebGLTexture | null
+	>();
 	private depthState: Webgl2DepthState | undefined;
 	private blendState: Webgl2BlendState | undefined;
 	private cullState: Webgl2CullState | undefined;

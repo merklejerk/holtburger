@@ -861,6 +861,9 @@ function comparePackAttempts(
 	if (overflowDelta !== 0) {
 		return overflowDelta;
 	}
+	if (leftOverflowCount !== 0) {
+		return comparePageSizeCandidates(right.pageSize, left.pageSize);
+	}
 	if (pageSelection === "minimize-textures") {
 		return (
 			left.texturePages.length - right.texturePages.length ||

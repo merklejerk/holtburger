@@ -3201,7 +3201,7 @@ Phase 11E4B failed to close:
 
 ### Phase 11E4B1: Outdoor Detail Atlas Cohort Pagination
 
-Status: planned.
+Status: complete on 2026-06-13. Phase 11E4C is the next implementation phase.
 
 Purpose: course-correct the live `outdoor-detail` foliage failure where a large generated-scenery `rgba-color` packing cohort can fail static materialization before any detail draw units reach renderer residency.
 
@@ -3230,6 +3230,24 @@ Acceptance criteria:
 - The warning/error text no longer implies the runtime only supports `1024x1024` when `2048x2048` candidates were considered.
 - `outdoor-detail` draw units can enter renderer residency for foliage-heavy batches when their final materialized role-page count is legal.
 - Terrain road/mask cohort behavior and existing outdoor-building texture packing behavior remain covered by tests and unchanged unless the test evidence requires a shared fix.
+
+Phase 11E4B1 execution notes:
+
+- Changed `TextureManager` static-object packing policy so `outdoor-buildings` and `outdoor-detail` groups no longer emit draw-unit same-page cohorts. Static-object material tables and placement-aware materialization already consume multiple role pages and fine-split over renderer role-page limits, so same-page cohorts were a stale single-page invariant.
+- Preserved the earlier terrain correction: `outdoor-terrain` color/mask groups also remain independent of draw-unit same-page cohorts, while other domains can still use cohort constraints if a future path needs them.
+- Updated atlas-layout failed-attempt selection so if every page-size candidate overflows, diagnostics report the largest attempted page candidate instead of a smaller failed candidate that happened to minimize memory. This keeps real failures from implying a `1024x1024` runtime cap when `2048x2048` was considered.
+- Added a texture-manager regression with real `AtlasTexturePacker` packing ten `512x512` `outdoor-detail` base-color textures for one draw unit across multiple pages, proving the old one-page cohort failure no longer blocks a legal role-page materialization.
+- Updated static-object packing tests to expect cohort-free static-object texture jobs and kept source dedupe through logical texture placement identity instead of same-page cohort identity.
+
+Phase 11E4B1 spicy bits:
+
+- Existing `outdoor-buildings` static-object jobs are also cohort-free now. That is intentional: the table-capable static-object path makes outdoor buildings and outdoor detail the same role-page-capable family, so keeping same-page cohorts for buildings would preserve a stale invariant in one domain and not the other.
+- This phase fixes the packing/materialization boundary. It does not lower texture memory pressure; independent packing can still allocate additional pages when many large foliage textures are resident.
+
+Phase 11E4B1 failed to close:
+
+- No live browser/manual rerun was performed against the reported `0xda55ffff`/neighbor `outdoor-detail` foliage case.
+- Diagnostics now report the largest failed atlas candidate, but they still report one overflow string rather than a structured "candidate history" for every attempted page size.
 
 ### Phase 11E4C: Static Blended Material Contract
 

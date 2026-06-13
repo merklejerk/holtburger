@@ -3149,7 +3149,7 @@ Phase 11E4A3f failed to close:
 
 ### Phase 11E4B: Outdoor Detail Generated Scenery Cutout
 
-Status: planned.
+Status: complete on 2026-06-13. Phase 11E4C is the next implementation phase.
 
 Purpose: fast-track the `outdoor-detail` domain so generated scenery, especially tree foliage, exercises the existing alpha-test/cutout static path before true blended transparency work.
 
@@ -3180,6 +3180,24 @@ Acceptance criteria:
 - `outdoor-buildings` behavior remains unchanged.
 - `outdoor-detail` breadth remains limited to generated scenery unless explicit-object evidence requires a narrow inclusion.
 - Landblocks without generated scenery produce no-op `outdoor-detail` results instead of resolver/baker errors.
+
+Phase 11E4B execution notes:
+
+- Updated `OutdoorStaticObjectsResolver` so `outdoor-buildings` selects only `building` statics while `outdoor-detail` selects only `generated-scenery` statics from the same landblock outdoor payload.
+- Preserved the existing static object source/material/texture fact model for generated scenery, including direct `gfx-obj` source support, generated-scene provenance, material slots, texture refs, and typed missing refs.
+- Kept `outdoor-detail` detail-overlay roles disabled at the resolver payload boundary. The resolver still loads the region render profile for identity/revision, but it does not resolve or attach the `building` detail role for generated scenery.
+- Routed `outdoor-detail` through the browser source resolver, static resolver worker, and worker static baker instead of the placeholder resolver/baker path.
+- Added tests for generated-scenery resolution, empty generated-scenery landblocks, typed missing generated dependencies, outdoor-detail alpha-test baking, and browser routing predicates.
+
+Phase 11E4B spicy bits:
+
+- The implementation relies on the host-prepared `kind: "generated-scenery"` classification instead of re-deriving scenery from terrain scene tables in TypeScript. That matches the current V2 resolver boundary and ACViewer/ACE shape, but it means source classification bugs must be fixed in the host adapter/preparation layer, not papered over in this resolver.
+- `outdoor-detail` now intentionally emits no region detail roles. If v1 evidence later proves object/detail overlay policy applies to generated scenery, that should be added as a separate parity phase with a real target, not smuggled through the building role.
+
+Phase 11E4B failed to close:
+
+- No live browser/manual diagnostics were rerun on a known tree/foliage-heavy landblock. Unit coverage proves the source and bake path; visual foliage parity still needs a target landblock diagnostic pass.
+- The phase did not audit generated-scenery density across DATs or choose a canonical foliage verification landblock.
 
 ### Phase 11E4C: Static Blended Material Contract
 

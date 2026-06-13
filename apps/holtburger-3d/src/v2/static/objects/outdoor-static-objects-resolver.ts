@@ -95,18 +95,19 @@ export class OutdoorStaticObjectsResolver {
 	}
 
 	async resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
-		if (job.domain !== "outdoor-buildings" || job.scope.kind !== "landblock") {
+		if (!isOutdoorStaticObjectDomain(job.domain) || job.scope.kind !== "landblock") {
 			throw new Error(
-				`Outdoor static object resolver only supports outdoor building landblock jobs. Received ${job.scope.kind}/${job.domain}.`,
+				`Outdoor static object resolver only supports outdoor static landblock jobs. Received ${job.scope.kind}/${job.domain}.`,
 			);
 		}
+		const domain = job.domain;
 
 		const landblock = await this.#loadPayload(
 			createHostAssetKey("landblock-outdoor", job.scope.landblockId),
 			"landblock-outdoor",
 		);
-		const selectedObjects = landblock.payload.statics.filter(
-			(object) => object.kind === "building",
+		const selectedObjects = landblock.payload.statics.filter((object) =>
+			shouldIncludeOutdoorStaticObject(domain, object.kind),
 		);
 		const regionRenderProfile = await this.#loadPayload(
 			createHostAssetKey("region-render-profile", landblock.payload.regionNumber),
@@ -128,12 +129,19 @@ export class OutdoorStaticObjectsResolver {
 			]),
 		);
 		const missingRefs = [...sourceResolution.missingRefs];
-		const detailTextureRevision = await this.#resolveRegionDetailTextureRefs({
-			missingRefs,
-			paletteSources,
-			profile: regionRenderProfile.payload,
-			textureRefs,
-		});
+		const detailRoles = createRegionDetailRolesForDomain(
+			domain,
+			regionRenderProfile.payload,
+		);
+		const detailTextureRevision =
+			detailRoles.length === 0
+				? 0
+				: await this.#resolveRegionDetailTextureRefs({
+						missingRefs,
+						paletteSources,
+						profile: regionRenderProfile.payload,
+						textureRefs,
+					});
 		const sourceByKey = new Map(
 			sourceResolution.sourceAssets.map((source) => [
 				createSourceCacheKey(source.identity),
@@ -174,7 +182,7 @@ export class OutdoorStaticObjectsResolver {
 			sourceByKey,
 		});
 		const scope: OutdoorStaticObjectsScopePayload = {
-			domain: "outdoor-buildings",
+			domain,
 			kind: "outdoor-static-objects",
 			landblock: {
 				kind: "landblock-source",
@@ -187,7 +195,7 @@ export class OutdoorStaticObjectsResolver {
 			objects,
 			paletteSources: [...paletteSources.values()],
 			regionRenderProfile: {
-				detailRoles: createRegionDetailRoles(regionRenderProfile.payload),
+				detailRoles,
 				identity: {
 					kind: "region-render-profile",
 					regionNumber: landblock.payload.regionNumber,
@@ -794,6 +802,21 @@ export class OutdoorStaticObjectsResolver {
 	}
 }
 
+function isOutdoorStaticObjectDomain(
+	domain: StaticResolverJob["domain"],
+): domain is OutdoorStaticObjectsScopePayload["domain"] {
+	return domain === "outdoor-buildings" || domain === "outdoor-detail";
+}
+
+function shouldIncludeOutdoorStaticObject(
+	domain: OutdoorStaticObjectsScopePayload["domain"],
+	objectKind: LandblockOutdoorPayloadDto["statics"][number]["kind"],
+): boolean {
+	return domain === "outdoor-buildings"
+		? objectKind === "building"
+		: objectKind === "generated-scenery";
+}
+
 function createObjectMaterialSlotFacts(options: {
 	readonly objects: readonly StaticObjectInstanceFacts[];
 	readonly sourceByKey: ReadonlyMap<string, StaticObjectSourceAssetFacts>;
@@ -945,6 +968,17 @@ function createRegionDetailRoles(
 			},
 		];
 	});
+}
+
+function createRegionDetailRolesForDomain(
+	domain: OutdoorStaticObjectsScopePayload["domain"],
+	profile: RegionRenderProfilePayloadDto,
+): readonly RegionDetailRoleFacts[] {
+	if (domain === "outdoor-detail") {
+		return [];
+	}
+
+	return createRegionDetailRoles(profile);
 }
 
 function createStaticObjectPaletteViews(

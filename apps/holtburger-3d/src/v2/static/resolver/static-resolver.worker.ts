@@ -33,7 +33,7 @@ class StaticResolverRouter implements StaticResolver {
 		if (job.domain === "outdoor-terrain") {
 			return this.#terrainResolver.resolve(job);
 		}
-		if (job.domain === "outdoor-buildings") {
+		if (job.domain === "outdoor-buildings" || job.domain === "outdoor-detail") {
 			return this.#outdoorStaticObjectsResolver.resolve(job);
 		}
 

@@ -274,6 +274,175 @@ describe("V2 outdoor static object resolver", () => {
 		expect(payload.scope.missingRefs).toEqual([]);
 	});
 
+	it("resolves outdoor-detail generated scenery without building detail roles", async () => {
+		const assetService = new FixtureAssetService([
+			createPreparedAsset(
+				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createLandblockOutdoorPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("region-render-profile", 1),
+				createRegionRenderProfilePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("gfx-obj", 0x01000030),
+				createGfxObjPayload({ gfxObjId: 0x01000030 }),
+			),
+			createPreparedAsset(
+				createHostAssetKey("material", 0x08000010),
+				createMaterialPayload({ materialId: 0x08000010 }),
+			),
+			createPreparedAsset(
+				createHostAssetKey("surface-texture", 0x05000010),
+				createSurfaceTexturePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("render-surface", 0x06000010),
+				createRenderSurfacePayload(),
+			),
+			createPreparedAsset(createHostAssetKey("palette", 0x04000010), {
+				kind: "palette",
+				paletteId: 0x04000010,
+				provenance: createProvenance("palette"),
+				residencyKind: "unknown",
+				sourceAssetKind: "palette",
+			} satisfies PalettePayloadDto),
+		]);
+
+		const payload = await new OutdoorStaticObjectsResolver({
+			assetService,
+		}).resolve(createDetailRequest());
+
+		expect(payload.scope.kind).toBe("outdoor-static-objects");
+		if (payload.scope.kind !== "outdoor-static-objects") {
+			throw new Error("expected outdoor static object payload");
+		}
+
+		expect(payload.scope.domain).toBe("outdoor-detail");
+		expect(payload.scope.regionRenderProfile.detailRoles).toEqual([]);
+		expect(payload.scope.objects).toEqual([
+			expect.objectContaining({
+				generated: {
+					sceneId: 1,
+					sceneTemplateIndex: 0,
+					terrainIndex: 0,
+				},
+				identity: expect.objectContaining({
+					instanceId: "detail-0",
+					objectKind: "generated-scenery",
+				}),
+				source: {
+					kind: "static-object-source",
+					sourceAssetKind: "gfx-obj",
+					sourceDid: 0x01000030,
+				},
+			}),
+		]);
+		expect(payload.scope.sourceAssets).toEqual([
+			expect.objectContaining({
+				identity: {
+					kind: "static-object-source",
+					sourceAssetKind: "gfx-obj",
+					sourceDid: 0x01000030,
+				},
+				materialSlotCount: 1,
+				partCount: 1,
+				renderTriangleCount: 1,
+			}),
+		]);
+		expect(payload.scope.materialSlots).toEqual([
+			expect.objectContaining({
+				material: {
+					kind: "static-material-source",
+					materialId: 0x08000010,
+				},
+			}),
+		]);
+		expect(payload.scope.textureRefs).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000010,
+					},
+					role: "surface-texture",
+				}),
+			]),
+		);
+		expect(payload.scope.textureRefs).not.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000020,
+					},
+				}),
+			]),
+		);
+		expect(payload.scope.missingRefs).toEqual([]);
+	});
+
+	it("returns an empty outdoor-detail payload when a landblock has no generated scenery", async () => {
+		const assetService = new FixtureAssetService([
+			createPreparedAsset(
+				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createLandblockOutdoorPayload({ includeGeneratedScenery: false }),
+			),
+			createPreparedAsset(
+				createHostAssetKey("region-render-profile", 1),
+				createRegionRenderProfilePayload(),
+			),
+		]);
+
+		const payload = await new OutdoorStaticObjectsResolver({
+			assetService,
+		}).resolve(createDetailRequest());
+
+		expect(payload.scope.kind).toBe("outdoor-static-objects");
+		if (payload.scope.kind !== "outdoor-static-objects") {
+			throw new Error("expected outdoor static object payload");
+		}
+
+		expect(payload.scope.domain).toBe("outdoor-detail");
+		expect(payload.scope.objects).toEqual([]);
+		expect(payload.scope.sourceAssets).toEqual([]);
+		expect(payload.scope.materialSlots).toEqual([]);
+		expect(payload.scope.textureRefs).toEqual([]);
+		expect(payload.scope.missingRefs).toEqual([]);
+	});
+
+	it("reports missing generated-scenery source assets as typed missing refs", async () => {
+		const assetService = new FixtureAssetService([
+			createPreparedAsset(
+				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createLandblockOutdoorPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("region-render-profile", 1),
+				createRegionRenderProfilePayload(),
+			),
+		]);
+
+		const payload = await new OutdoorStaticObjectsResolver({
+			assetService,
+		}).resolve(createDetailRequest());
+
+		expect(payload.scope.kind).toBe("outdoor-static-objects");
+		if (payload.scope.kind !== "outdoor-static-objects") {
+			throw new Error("expected outdoor static object payload");
+		}
+
+		expect(payload.scope.objects).toEqual([]);
+		expect(payload.scope.sourceAssets).toEqual([]);
+		expect(payload.scope.missingRefs).toEqual([
+			{
+				kind: "static-object-source",
+				sourceAssetKind: "gfx-obj",
+				sourceDid: 0x01000030,
+			},
+		]);
+	});
+
 	it("expands setup appearance material slots across geometry material variants", async () => {
 		const gfxObj = createGfxObjPayload();
 		const assetService = new FixtureAssetService([
@@ -531,12 +700,56 @@ function createBuildingRequest(): StaticResolverJob {
 	};
 }
 
+function createDetailRequest(): StaticResolverJob {
+	return {
+		domain: "outdoor-detail",
+		scope: {
+			kind: "landblock",
+			landblockId: 0xda55ffff,
+		},
+	};
+}
+
 function createLandblockOutdoorPayload(
-	options: { readonly buildingSourceAssetId?: string } = {},
+	options: {
+		readonly buildingSourceAssetId?: string;
+		readonly includeGeneratedScenery?: boolean;
+	} = {},
 ): LandblockOutdoorPayloadDto {
 	const buildingSourceAssetId =
 		options.buildingSourceAssetId ?? "setup-model/02000010";
 	const buildingSourceKey = parseHostAssetId(buildingSourceAssetId);
+	const statics: LandblockOutdoorPayloadDto["statics"] = [
+		{
+			building: { numLeaves: 1, portals: [] },
+			generated: null,
+			instanceBounds: createBounds(),
+			instanceId: "building-0",
+			kind: "building",
+			localPlacement: createPlacement(),
+			sourceAssetId: buildingSourceAssetId,
+			sourceBounds: createBounds(),
+			sourceDid: Number.parseInt(buildingSourceKey.id, 16) >>> 0,
+			sourceIndex: 0,
+			sourceScale: { x: 1, y: 1, z: 1 },
+		},
+	];
+	if (options.includeGeneratedScenery !== false) {
+		statics.push({
+			building: null,
+			generated: { sceneId: 1, sceneTemplateIndex: 0, terrainIndex: 0 },
+			instanceBounds: createBounds(),
+			instanceId: "detail-0",
+			kind: "generated-scenery",
+			localPlacement: createPlacement(),
+			sourceAssetId: "gfx-obj/01000030",
+			sourceBounds: createBounds(),
+			sourceDid: 0x01000030,
+			sourceIndex: 1,
+			sourceScale: { x: 1, y: 1, z: 1 },
+		});
+	}
+
 	return {
 		classification: "outdoor",
 		diagnostics: { errors: [], omissions: [], sourceRecords: [] },
@@ -552,34 +765,7 @@ function createLandblockOutdoorPayload(
 		regionNumber: 1,
 		residencyKind: "outdoor-landblock",
 		sourceAssetKind: "landblock-outdoor",
-		statics: [
-			{
-				building: { numLeaves: 1, portals: [] },
-				generated: null,
-				instanceBounds: createBounds(),
-				instanceId: "building-0",
-				kind: "building",
-				localPlacement: createPlacement(),
-				sourceAssetId: buildingSourceAssetId,
-				sourceBounds: createBounds(),
-				sourceDid: Number.parseInt(buildingSourceKey.id, 16) >>> 0,
-				sourceIndex: 0,
-				sourceScale: { x: 1, y: 1, z: 1 },
-			},
-			{
-				building: null,
-				generated: { sceneId: 1, sceneTemplateIndex: 0, terrainIndex: 0 },
-				instanceBounds: createBounds(),
-				instanceId: "detail-0",
-				kind: "generated-scenery",
-				localPlacement: createPlacement(),
-				sourceAssetId: "gfx-obj/01000030",
-				sourceBounds: createBounds(),
-				sourceDid: 0x01000030,
-				sourceIndex: 1,
-				sourceScale: { x: 1, y: 1, z: 1 },
-			},
-		],
+		statics,
 		terrain: createTerrainStub(),
 	};
 }
@@ -691,14 +877,18 @@ function createSetupAppearancePayload(
 	};
 }
 
-function createGfxObjPayload(): GfxObjPayloadDto {
+function createGfxObjPayload(
+	options: { readonly gfxObjId?: number } = {},
+): GfxObjPayloadDto {
+	const gfxObjId = options.gfxObjId ?? 0x01000020;
+
 	return {
 		dependencies: { materialAssetIds: ["material/08000010"] },
 		didDegrade: null,
 		drawingBsp: null,
 		drawingPolygons: [],
 		flags: null,
-		gfxObjId: 0x01000020,
+		gfxObjId,
 		kind: "gfx-obj",
 		physicsWitness: { hasBsp: false, polygonCount: 1, rootKind: null },
 		provenance: createProvenance("gfx-obj"),
@@ -708,7 +898,7 @@ function createGfxObjPayload(): GfxObjPayloadDto {
 			normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
 			positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
 			skippedPolygonCount: 0,
-			sourceId: 0x01000020,
+			sourceId: gfxObjId,
 			surfaceIds: [0x08000010],
 			triangleCount: 1,
 			triangles: [
@@ -730,7 +920,14 @@ function createGfxObjPayload(): GfxObjPayloadDto {
 	};
 }
 
-function createMaterialPayload(): MaterialRecipePayloadDto {
+function createMaterialPayload(
+	options: {
+		readonly materialId?: number;
+		readonly surfaceType?: number;
+	} = {},
+): MaterialRecipePayloadDto {
+	const materialId = options.materialId ?? 0x08000011;
+
 	return {
 		dependencies: {
 			paletteAssetIds: ["palette/04000010"],
@@ -750,8 +947,8 @@ function createMaterialPayload(): MaterialRecipePayloadDto {
 			surfaceTextureId: 0x05000010,
 		},
 		sourceAssetKind: "material-recipe",
-		surfaceId: 0x08000011,
-		surfaceType: 0,
+		surfaceId: materialId,
+		surfaceType: options.surfaceType ?? 0,
 		translucency: 0,
 	};
 }

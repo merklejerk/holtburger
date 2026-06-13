@@ -3502,9 +3502,140 @@ Phase 11E4E verification:
 - `cd apps/holtburger-3d && npm run lint:dead`
 - `cd apps/holtburger-3d && npm run test:ts`
 
-### Phase 12A: Env-Cell-Aware Static Scene Query And Browser Picker Diagnostics
+### Phase 12A0: Landblock Env-Cell Bundle Host Route
 
-Status: planned. Pulled forward on 2026-06-13 as the next immediate phase before 11E5 because the explicit-object cutout/black-background investigation needs object-level picking evidence, and the same env-cell-aware `pickRay` primitive is also required by the future game client for selection.
+Status: planned. Pulled forward on 2026-06-13 as the next immediate phase before 11E5 because the explicit-object cutout/black-background investigation needs object-level picking evidence, and V2 should not copy v1's topology-plus-N-env-cell request pattern.
+
+Purpose: add a host-backed, landblock-owned env-cell source bundle route so V2 can load and understand outdoor-linked interiors and pure dungeon interiors through one isomorphic source boundary.
+
+Current steering:
+
+- V1 first loads a landblock topology route, then individually fetches every `env-cell/*` route discovered from topology. That was useful while discovering the format, but it is too chatty for V2 and encourages frontend request choreography.
+- V2 should not usually need "topology only" for env-cell work. The host should provide a complete landblock env-cell bundle that includes topology membership and the env-cell source facts needed for traversal, picking, baking, and later rendering.
+- Outdoor-linked env cells and dungeon env cells are the same source family. The route and V2 domain vocabulary should be landblock/env-cell oriented, not dungeon-only.
+- The host bundle should expose decoded source facts and spatial/query facts, not V2 renderer draw units, atlas placements, WebGL resources, or browser diagnostics.
+- Keep static object/gfx/material/prepared-texture companion closure separate unless a later phase proves a heavier "with closure" bundle is needed. The env-cell bundle should not become a render-product blob.
+- Keep outdoor building transition portal facts in `landblock/{XXYYffff}/outdoor`, where they already originate from LandblockInfo building portal records. Pure dungeon/interior loading should not need the outdoor route, and outdoor-linked traversal can explicitly compose outdoor transition facts with the env-cell bundle when needed.
+- Do not introduce env-cell clustering/grouping in this phase. Env cells are already authored visibility/spatial units; V2 can include accepted cells whole and tolerate overdraw until profiling proves a need for another partitioning layer.
+
+Deliverables:
+
+- New host asset route such as `landblock/{XXYYffff}/env-cells` with one payload for the owning landblock's env-cell source bundle.
+- Concrete host route/DTO proposal recorded before implementation:
+
+```text
+landblock/{XXYYffff}/env-cells
+```
+
+```ts
+interface LandblockEnvCellsPayloadDto {
+	kind: "landblock-env-cells";
+	residencyKind: "landblock";
+	sourceAssetKind: "landblock-env-cells";
+	landblockId: number;
+	landblockInfoId: number;
+	classification: "outdoor" | "dungeon";
+	regionId: number;
+	regionNumber: number;
+	envCells: LandblockEnvCellDto[];
+	portalLinks: EnvCellPortalLinkDto[];
+	envCellResidencyBvh: PreparedEnvCellResidencyBvhDto;
+	diagnostics: PreparedContentSourceDiagnosticsDto;
+	provenance: AssetProvenanceDto;
+}
+
+interface LandblockEnvCellDto {
+	envCellId: number;
+	memberId: string;
+	localPlacement: PlacementTransformDto;
+	environmentId: number;
+	cellStructureId: number;
+	visibleEnvCellIds: number[];
+	restrictionObjectId: number | null;
+	seenOutside: boolean | null;
+	surfaces: EnvCellSurfaceSlotDto[];
+	portals: EnvCellPortalDto[];
+	portalApertures: PreparedPortalApertureDto[];
+	statics: EnvCellStaticMemberDto[];
+	renderGeometry: PreparedPolygonSetRenderGeometryDto;
+	cellBsp: PreparedPolygonSetBspNodeDto;
+	localBvh: PreparedEnvCellBvhDto;
+	diagnostics: PreparedContentSourceDiagnosticsDto;
+}
+```
+
+- Host DTO/schema for the env-cell bundle, including:
+  - landblock id and classification metadata,
+  - env-cell membership and local placement,
+  - env-cell graph facts,
+  - env-cell portal links and portal apertures,
+  - visible-cell refs,
+  - environment and cell-structure ids,
+  - render geometry source facts,
+  - static object seeds,
+  - topology/env-cell residency BVH nodes/items,
+  - per-env-cell local BVH nodes/items,
+  - diagnostics, omissions, and provenance.
+- V2 asset-key and preparation parser support for the new route.
+- Route naming and payload shape that can represent outdoor-linked interiors and pure dungeon landblocks without changing source family.
+- Plan/code vocabulary update from `dungeon-static` toward `landblock-env-cells` or an equivalent env-cell-domain name. Temporary aliases are acceptable only if the phase records their removal path.
+- Tests for route parsing, payload schema validation, classification-agnostic env-cell bundle identity, and hard failures for route/payload mismatches.
+
+Acceptance criteria:
+
+- A V2 resolver can request one landblock-scoped env-cell bundle without issuing topology plus one request per env cell.
+- The initial implementation either matches the proposed `landblock-env-cells` route/DTO shape above or records an explicit course correction in this phase before dependent V2 resolver code lands.
+- The bundle contains enough topology/env-cell/portal/BVH/source facts to support cell-level visibility traversal and object-level picking in later 12A phases.
+- The host route does not pre-bake V2 renderer products, atlas placements, or browser-specific diagnostics.
+- The route and V2 domain vocabulary do not encode a false architectural split between outdoor-linked env cells and dungeon env cells.
+- Outdoor building transition portals remain sourced from the outdoor landblock payload; the env-cell bundle does not duplicate that route's outdoor-static navigation facts.
+
+### Phase 12A1: Env-Cell Bundle Resolver And Cell-Level Visibility Model
+
+Status: planned. Follows Phase 12A0.
+
+Purpose: consume the landblock env-cell bundle in V2 resolver/runtime contracts, preserve the actual spatial and source facts needed by later scene queries, and model env-cell visibility as cell-level traversal rather than flat global bounds or premature grouping.
+
+Current steering:
+
+- Resolver jobs remain landblock-owned. The current/focus env cell is scene/navigation context, not top-level static resolver identity.
+- Replace the fake `dungeon-static` shell path with a real env-cell source payload path backed by the landblock env-cell bundle.
+- Env-cell visibility should initially walk authored visible-cell and portal facts from a focus/current cell and include accepted env cells in their entirety. Overdraw is acceptable at this stage.
+- Do not build env-cell clusters/groups yet. Grouping can be reconsidered after profiling if cell-level inclusion is too expensive.
+- Preserve source facts and BVH nodes/items as typed runtime records where practical. Counts-only summaries are not enough for picking or future culling.
+- Portal traversal can start conservative and explicit. The API/data model should support outdoor transition and interior focus contexts, but full recursive portal rendering remains later dungeon work.
+
+Deliverables:
+
+- Real V2 resolver path for the landblock env-cell bundle.
+- Static domain rename or alias from `dungeon-static` to `landblock-env-cells` or equivalent env-cell-domain vocabulary.
+- Resolver payload records for:
+  - env-cell membership,
+  - cell placement,
+  - environment/cell-structure ids,
+  - portal links/apertures,
+  - visible-cell refs,
+  - local render geometry facts,
+  - static object seed facts,
+  - topology residency BVH records,
+  - env-cell local BVH records,
+  - missing typed refs and diagnostics.
+- Runtime-owned cell visibility helper that accepts scene context and returns accepted env-cell ids using visible-cell/portal graph facts.
+- Tests proving outdoor-linked and dungeon-classified landblocks use the same env-cell source path.
+- Tests proving cell visibility traversal is deterministic, bounded, and scene-context driven.
+- Tests proving env-cell records do not use host route strings as semantic identity.
+
+Acceptance criteria:
+
+- V2 can resolve a landblock env-cell bundle into typed runtime source facts without going through v1 topology/env-cell request choreography.
+- A pure dungeon landblock and an outdoor-linked interior use the same resolver/data model.
+- Accepted env cells are selected by explicit cell visibility/portal facts, not by a flat global Euclidean AABB query.
+- No env-cell grouping/clustering policy exists in this phase beyond whole-cell inclusion.
+- The next scene-query phase has real env-cell local BVH and object/source records available without reloading host assets from the picker.
+
+### Phase 12A2: Env-Cell-Aware Static Scene Query And Browser Picker Diagnostics
+
+Status: planned. Follows Phase 12A1 and remains ahead of 11E5.
 
 Purpose: add the runtime-owned static scene query service that can answer context-aware static `pickRay` requests for outdoor and env-cell scenes, then use it from browser mode for object-level picker diagnostics without putting semantic picking policy into the renderer.
 
@@ -3512,12 +3643,11 @@ Current steering:
 
 - `pickRay` is a shared runtime/static-scene capability, not a browser-only debug hack. Browser mode and the future game client own filter/selection/presentation policy; the runtime-owned static scene query returns neutral hit records such as instance id, distance, hit point, scene context, and source references.
 - Do not put static picking support into the WebGL renderer. The renderer should keep drawing submitted resources; it should not own AC object identity, source provenance, material classification, or selection semantics.
-- Use host/prepared domain BVHs and object bounds where available. For outdoor static landblock elements, preserve and ingest the prepared `outdoorBvh` instead of deriving a new index from baked draw-unit geometry. For env-cell support, preserve topology `envCellResidencyBvh` and env-cell `localBvh` facts as query inputs.
-- Improve on v1's flat render spatial index by making queries scene-context aware. A ray cast from an env cell must not collide with outdoor or neighboring-cell objects solely because renderer-local bounds overlap; it may only cross into another env cell or outdoor scene through explicit portal traversal.
+- Use host/prepared domain BVHs and object bounds where available. For outdoor static landblock elements, preserve and ingest the prepared `outdoorBvh`; for env cells, use the env-cell bundle's residency and per-cell local BVH records.
+- Improve on v1's flat render spatial index by making queries scene-context aware. A ray cast from an env cell must not collide with outdoor or neighboring-cell objects solely because renderer-local bounds overlap; it may only reach another env cell or outdoor scene through explicit context/portal traversal.
 - Treat outdoor scene indexes, topology/env-cell residency indexes, and per-env-cell local indexes as separate cooperating indexes under one query service rather than one global Euclidean AABB set.
 - Keep the first implementation object-level. For the current black-background/cutout investigation, identifying the clicked static object, source/gfx/setup ids, material ids, material pass, alpha-test threshold, and relevant surface/texture facts is more valuable than exact triangle identity.
 - Shape the spatial-query data so later frustum culling can reuse the same static-scene/index layer, but do not implement frustum culling in this phase.
-- V2 currently preserves only BVH counts for several prepared BVHs. This phase should stop throwing away the actual nodes/items needed by the query service, using typed static spatial records instead of opaque strings where practical.
 - If runtime state does not yet retain enough metadata after materialization, add narrow committed-scene records rather than consulting Svelte state or reloading prepared assets from the picker.
 
 Deliverables:
@@ -3526,11 +3656,11 @@ Deliverables:
 - Static spatial record contract updates that preserve prepared outdoor BVH nodes/items, env-cell residency BVH nodes/items, env-cell local BVH nodes/items, object bounds, portal/interior facts, and source mapping facts needed for object-level hit identity.
 - `pickRay` API that accepts a scene context plus caller-owned filters and returns neutral hit records: distance, point/bounds hit fact, item kind, owning static scope/work identity, landblock/domain/env-cell context, object instance id when known, and stable source/draw-unit references.
 - Outdoor object-level picking over resident outdoor static BVH records.
-- Env-cell-aware query model that can test the current env-cell local index and leaves an explicit extension point for portal traversal. Full recursive portal picking can be staged if necessary, but the API must not require a flat global scene.
+- Env-cell-aware query model that tests the current accepted env-cell set's local indexes. Recursive portal expansion beyond the current accepted set can be staged, but the API must not require a flat global scene.
 - Static object browser picker integration that builds the ray from the active V2 camera and applies browser-owned filters/policy.
 - Picker diagnostics for static object hits, including object kind, instance id, source/setup/gfx ids where known, material ids, material family/pass, alpha-test value, render state/blend mode, texture-use ids, and surface/opacity facts when those facts survive the bake/materialization boundary.
 - Tests for ray/bounds picking, deterministic nearest-hit ordering, scene-context gating, browser/client filter policy staying outside the query primitive, and diagnostic identity shape.
-- Tests proving an env-cell-context pick does not hit outdoor objects unless an explicit portal traversal path is implemented and selected.
+- Tests proving an env-cell-context pick does not hit outdoor objects unless an explicit context/portal path is implemented and selected.
 - Design/plan note if any host BVH payload is insufficient and a fallback to baked draw-unit bounds is required.
 
 Acceptance criteria:
@@ -3540,11 +3670,12 @@ Acceptance criteria:
 - The WebGL renderer does not gain semantic picking or AC source/material ownership.
 - Query results are object-level and intentionally not part/triangle-level unless the available host BVH already exposes a cleaner object subdivision for free.
 - Querying respects scene context: outdoor and env-cell spaces are not flattened into one Euclidean collision set.
+- Env-cell query inclusion is whole-cell based over the accepted env-cell set; overdraw is accepted until profiling proves otherwise.
 - The data flow is compatible with future frustum culling: committed static scene records feed a query/index layer, and renderer residency remains downstream of scene/culling decisions.
 
 ### Phase 11E5: Static Material Family Resteer
 
-Status: planned. Deferred behind Phase 12A on 2026-06-13 so browser/game-client picking can identify suspect explicit-object cutout materials before the remaining material-family resteer.
+Status: planned. Deferred behind the Phase 12A0-12A2 sequence on 2026-06-13 so browser/game-client picking can identify suspect explicit-object cutout materials before the remaining material-family resteer.
 
 Purpose: reassess static material parity after explicit-object coverage and target-scoped blended material work, before broadening static-object source coverage in Phase 12.
 
@@ -3622,23 +3753,25 @@ Acceptance criteria:
 - Existing single-binding draw units remain valid as the one-entry table case.
 - Material-table capacity failures are typed diagnostics or capacity splits, not silent fallbacks.
 
-### Phase 13A: Host-Backed Topology And Env-Cell Resolution
+### Phase 13A: Env-Cell Geometry Bake And Interior Source Enrichment
 
-Purpose: turn the Phase 5A dungeon/topology contracts into real host-backed resolver output before rendering dungeon geometry.
+Purpose: build on the Phase 12A landblock env-cell bundle path by turning resolved env-cell source facts into bake-ready interior geometry, portal, visibility, and static-object enrichment records before rendering dungeon/interior geometry.
 
 Deliverables:
 
-- V2 preparation parser support for `env-cell` host routes.
-- Host-backed topology/dungeon resolver that loads landblock topology, derives env-cell membership, and resolves selected/all env-cell payloads for one dungeon landblock.
-- Resolver payload records for environment, cell-structure, portal links, visible-cell refs, env-cell spatial facts, and typed missing refs.
-- Harness summary for known dungeon/interior focus: owning landblock, current env-cell, env-cell count, visible-cell count, portal count, missing typed refs.
-- Tests proving dungeon requests remain landblock-owned and env-cell IDs do not become top-level resolver jobs.
+- Env-cell geometry bake input records derived from the Phase 12A landblock env-cell bundle payload.
+- Bake support for env-cell render geometry, local placement, source surface/material slots, portal apertures, and static object seeds.
+- Interior static-object source enrichment through the same shared static material/object path used by outdoor static objects where the source facts are isomorphic.
+- Portal, visibility, and env-cell spatial records as peer bake outputs, not renderer-owned dependency walks.
+- Harness summary for known dungeon/interior focus: owning landblock, current env-cell, accepted env-cell count, visible-cell count, portal count, rendered geometry counts, and missing typed refs.
+- Tests proving env-cell geometry/static enrichment remains landblock-owned and env-cell IDs do not become top-level resolver jobs.
 
 Acceptance criteria:
 
-- A pure dungeon landblock can resolve topology/env-cell source facts without requesting outdoor terrain.
-- Resolver payloads use typed runtime identities and no host route strings as semantic identity.
-- Missing env-cell dependencies are surfaced as typed refs and do not trigger renderer-owned dependency walks.
+- A pure dungeon landblock can produce bake-ready env-cell geometry/source facts without requesting outdoor terrain.
+- Outdoor-linked and dungeon-classified env cells continue to use the same landblock env-cell bundle source path.
+- Env-cell bake outputs use typed runtime identities and no host route strings as semantic identity.
+- Missing env-cell/material/static dependencies are surfaced as typed refs and do not trigger renderer-owned dependency walks.
 
 ### Phase 13B: Interior Geometry, Portal, And Visibility Rendering
 
@@ -3655,7 +3788,7 @@ Deliverables:
 Acceptance criteria:
 
 - Interior and portal data enters the renderer as committed static records, not renderer-owned dependency walks.
-- Dungeon landblocks continue to use landblock-owned topology/env-cell domains rather than a separate renderer architecture.
+- Dungeon landblocks continue to use the landblock env-cell source path rather than a separate renderer architecture.
 - Visibility records can update culling/visibility structures independently of texture placement updates.
 - Static BVH/spatial records are committed alongside other peer static result fields.
 
@@ -3671,7 +3804,7 @@ Deliverables:
 
 Acceptance criteria:
 
-- V2 can visually inspect at least one real dungeon/interior target through the new topology/env-cell pipeline.
+- V2 can visually inspect at least one real dungeon/interior target through the landblock env-cell bundle pipeline.
 - Remaining dungeon parity gaps are typed and scheduled rather than hidden under cutover.
 
 ### Phase 14: Static-Authored Dynamic Seeds
@@ -3746,7 +3879,7 @@ Manual verification milestones should be explicit:
 - Phase 9C: atlas ownership is reassessed before terrain material work builds on it.
 - Phase 10C: terrain material behavior is credible enough to compare against v1 terrain blend/layer behavior on named targets.
 - Phase 10D: terrain parity findings steer static object, inspection, dungeon, and cutover scope before broader enrichment starts.
-- Phase 12A: runtime/static-scene `pickRay` and browser-owned picker diagnostics can identify object-level static hits without renderer-owned semantic picking.
+- Phase 12A0-12A2: bundled env-cell source loading, cell-level visibility traversal, runtime/static-scene `pickRay`, and browser-owned picker diagnostics can identify object-level static hits without renderer-owned semantic picking.
 - Phase 12B: outdoor terrain/static object behavior is reassessed before dungeon/interior and dynamic breadth.
 - Phase 13C: dungeon/interior behavior is compared against v1 on named targets before dynamic and cutover work.
 - Phase 14A: final design-vs-implementation reassessment happens before replacing the old browser display.

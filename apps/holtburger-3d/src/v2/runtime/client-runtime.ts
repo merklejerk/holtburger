@@ -45,7 +45,7 @@ export type ManualStaticDomain =
 	| "terrain"
 	| "buildings"
 	| "detail"
-	| "topology";
+	| "env-cells";
 
 export interface StaticWorkCommand {
 	readonly landblockId: string;
@@ -150,6 +150,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		readonly string[]
 	>();
 	#recentTerrainTextureFallbacks: TerrainTextureFallbackDiagnostics[] = [];
+	readonly #reportedStaticResolverFailures = new Set<string>();
 	#disposed = false;
 
 	constructor(
@@ -193,6 +194,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#unsubscribeStaticCoordinator = staticCoordinator.subscribe(
 			(snapshot) => {
 				this.#lastStaticSnapshot = snapshot;
+				this.#warnAboutStaticResolverFailure(snapshot);
 				this.#emit();
 			},
 		);
@@ -227,8 +229,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 			lod: {
 				buildings: -1,
 				detail: -1,
+				envCells: -1,
 				terrain: -1,
-				topology: -1,
 			},
 		});
 		this.#emit();
@@ -383,6 +385,34 @@ class ClientRuntimeImpl implements ClientRuntime {
 				revision: delta.revision,
 			});
 		}
+	}
+
+	#warnAboutStaticResolverFailure(snapshot: StaticCoordinatorSnapshot): void {
+		const failure = snapshot.latestResolverFailure;
+		if (!failure) {
+			return;
+		}
+
+		const warningKey = [
+			failure.revision,
+			failure.workId,
+			failure.domain,
+			failure.scopeKey,
+			failure.message,
+		].join("|");
+		if (this.#reportedStaticResolverFailures.has(warningKey)) {
+			return;
+		}
+
+		this.#reportedStaticResolverFailures.add(warningKey);
+		this.#diagnostics.warn({
+			domain: failure.domain,
+			kind: "static-resolver-failed",
+			message: failure.message,
+			revision: failure.revision,
+			scopeKey: failure.scopeKey,
+			workId: failure.workId,
+		});
 	}
 
 	async #materializeStaticCommit(
@@ -579,11 +609,8 @@ function createStaticCoordinatorDiagnosticsReport(
 			committed: snapshot.committed,
 			committedDrawUnits: snapshot.committedDrawUnits,
 			failed: snapshot.failed,
-			latestDungeonPayload: snapshot.latestDungeonPayload
-				? `lb ${formatHex(snapshot.latestDungeonPayload.landblockId)} cells ${snapshot.latestDungeonPayload.envCellCount} visible ${snapshot.latestDungeonPayload.visibleCellCount} portals ${snapshot.latestDungeonPayload.portalCount} missing ${snapshot.latestDungeonPayload.missingRefCount}`
-				: null,
-			latestLandblockTopologyPayload: snapshot.latestLandblockTopologyPayload
-				? `lb ${formatHex(snapshot.latestLandblockTopologyPayload.landblockId)} ${snapshot.latestLandblockTopologyPayload.classification} cells ${snapshot.latestLandblockTopologyPayload.envCellCount} visible ${snapshot.latestLandblockTopologyPayload.visibleCellCount} links ${snapshot.latestLandblockTopologyPayload.portalLinkCount} missing ${snapshot.latestLandblockTopologyPayload.missingRefCount}`
+			latestLandblockEnvCellsPayload: snapshot.latestLandblockEnvCellsPayload
+				? `lb ${formatHex(snapshot.latestLandblockEnvCellsPayload.landblockId)} ${snapshot.latestLandblockEnvCellsPayload.classification} cells ${snapshot.latestLandblockEnvCellsPayload.envCellCount} accepted ${snapshot.latestLandblockEnvCellsPayload.acceptedEnvCellCount} visible ${snapshot.latestLandblockEnvCellsPayload.visibleCellCount} portals ${snapshot.latestLandblockEnvCellsPayload.portalCount} links ${snapshot.latestLandblockEnvCellsPayload.portalLinkCount} seeds ${snapshot.latestLandblockEnvCellsPayload.staticObjectSeedCount} missing ${snapshot.latestLandblockEnvCellsPayload.missingRefCount}`
 				: null,
 			latestOutdoorStaticObjectsPayload:
 				snapshot.latestOutdoorStaticObjectsPayload
@@ -702,8 +729,8 @@ function createManualStaticDemand(command: StaticWorkCommand): StaticDemand {
 		terrain: command.domains.includes("terrain")
 			? (command.lod?.terrain ?? 0)
 			: -1,
-		topology: command.domains.includes("topology")
-			? (command.lod?.topology ?? 0)
+		envCells: command.domains.includes("env-cells")
+			? (command.lod?.envCells ?? 0)
 			: -1,
 	};
 

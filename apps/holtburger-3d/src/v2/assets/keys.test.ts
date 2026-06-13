@@ -24,10 +24,6 @@ describe("V2 host asset keys", () => {
 			id: "da550100",
 			kind: "env-cell",
 		});
-		expect(parseHostAssetId("landblock/da55ffff/topology")).toEqual({
-			id: "da55ffff",
-			kind: "landblock-topology",
-		});
 		expect(parseHostAssetId("landblock/da55ffff/env-cells")).toEqual({
 			id: "da55ffff",
 			kind: "landblock-env-cells",

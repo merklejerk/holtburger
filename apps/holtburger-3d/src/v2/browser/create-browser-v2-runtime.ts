@@ -225,7 +225,8 @@ export function shouldUseBrowserSourceResolver(job: StaticResolverJob): boolean 
 	return (
 		(job.domain === "outdoor-terrain" ||
 			job.domain === "outdoor-buildings" ||
-			job.domain === "outdoor-detail") &&
+			job.domain === "outdoor-detail" ||
+			job.domain === "landblock-env-cells") &&
 		job.scope.kind === "landblock"
 	);
 }

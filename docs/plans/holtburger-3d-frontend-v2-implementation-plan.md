@@ -3613,7 +3613,7 @@ Acceptance criteria:
 
 ### Phase 12A1: Env-Cell Bundle Resolver And Cell-Level Visibility Model
 
-Status: planned. Follows Phase 12A0. Refined on 2026-06-13 after the concrete `landblock/{XXYYffff}/env-cells` route and `landblock-env-cells` DTO landed.
+Status: completed on 2026-06-13. Follows Phase 12A0. Refined on 2026-06-13 after the concrete `landblock/{XXYYffff}/env-cells` route and `landblock-env-cells` DTO landed.
 
 Purpose: consume the landblock env-cell bundle in V2 resolver/runtime contracts, preserve the actual spatial and source facts needed by later scene queries, and model env-cell visibility as cell-level traversal rather than flat global bounds or premature grouping.
 
@@ -3643,11 +3643,11 @@ Deliverables:
   - `kind: "landblock-env-cells"`,
   - `landblock: { kind: "landblock-source"; landblockId; source: "env-cells" }`,
   - `classification: "outdoor" | "dungeon"`,
-  - ordered `envCellIds`,
-  - `envCellsById`,
+  - ordered `acceptedEnvCellIds`,
+  - rich `envCells` records preserving source/spatial facts,
   - `portalLinks`,
-  - `envCellResidencyBvh`,
-  - `diagnostics`,
+  - `residencySpatial.residencyBvh`,
+  - `visibilityDiagnostics`,
   - `missingRefs`.
 - Runtime env-cell records preserving:
   - env-cell membership,
@@ -3676,6 +3676,27 @@ selectVisibleEnvCells(bundle, {
 - Tests proving env-cell records do not use host route strings as semantic identity.
 - Tests proving the resolver issues exactly one `landblock-env-cells` host request for an interior landblock and does not request `landblock-topology` or individual `env-cell/*` assets.
 - Tests proving the old `dungeon-static` vocabulary is removed or confined to an explicitly documented temporary alias.
+
+Implementation notes:
+
+- Added `LandblockEnvCellsResolver` under the V2 static env-cell domain. It requests exactly one `createHostAssetKey("landblock-env-cells", landblockId)` host asset, validates `kind: "landblock-env-cells"`, and converts the host DTO into `LandblockEnvCellsStaticScopePayload`.
+- Replaced the `dungeon-static` static domain with `landblock-env-cells` across static contracts, demand planning, fake resolver fixtures, worker routing, coordinator snapshots, runtime diagnostics, and the browser V2 diagnostics panel. No compatibility alias was kept.
+- The resolver preserves env-cell placement, environment/cell-structure identities, surfaces/material identities, portals, portal apertures, static object seeds, render geometry, cell BSP, topology residency BVH records, and per-cell local BVHs for Phase 12A2 scene query work.
+- The runtime conversion strips host route strings out of semantic env-cell/spatial records. In particular, residency BVH `assetId` values become typed env-cell identities; object source route strings remain only in explicit debug provenance.
+- Added `selectVisibleEnvCells(...)` as a bounded whole-cell traversal helper over authored visible-cell refs plus env-cell portal links. It returns deterministic accepted cell ids and typed diagnostics for missing focus cells, missing visible cells, and traversal cutoffs.
+- Follow-up course correction on 2026-06-13: purged the topology-only V2 static domain and V2 asset-key/preparation support for `landblock/{XXYYffff}/topology`. The host route can remain for V1/diagnostics, but V2 now treats topology facts as part of `landblock-env-cells`.
+- Outdoor demand now has an `envCells` coverage radius and schedules `landblock-env-cells` directly for that coverage. Browser V2 controls expose env-cell coverage rather than topology coverage, and interior location input requests `env-cells`.
+- Browser worker routing sends `landblock-env-cells` jobs through the real source resolver worker while keeping env-cell baking on the placeholder path until env-cell geometry baking lands.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- landblock-env-cells-resolver demand-planner`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
+- `git diff --check`
+- `cd apps/holtburger-3d && npm run test:ts -- demand-planner client-runtime create-browser-v2-runtime location-input keys preparation landblock-env-cells-resolver`
 
 Acceptance criteria:
 

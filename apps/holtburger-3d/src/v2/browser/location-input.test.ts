@@ -68,7 +68,7 @@ describe("V2 browser location input", () => {
 			locationKind: "outdoor-landblock",
 		});
 		expect(createStaticWorkCommandFromLocation(interior, ["terrain"])).toEqual({
-			domains: ["topology"],
+			domains: ["env-cells"],
 			envCellId: "0xda550123",
 			landblockId: "0xda55ffff",
 			locationKind: "interior-cell",

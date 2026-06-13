@@ -90,7 +90,6 @@ describe("V2 host asset preparation", () => {
 	it("recognizes every V2 static asset route and reports route-specific schema failures", () => {
 		const routes = [
 			["landblock/da55ffff/outdoor", "landblock-outdoor"],
-			["landblock/da55ffff/topology", "landblock-topology"],
 			["landblock/da55ffff/env-cells", "landblock-env-cells"],
 			["gfx-obj/01000001", "gfx-obj"],
 			["setup-model/02000001", "setup-model"],

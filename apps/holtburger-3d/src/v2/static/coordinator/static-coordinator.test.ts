@@ -147,7 +147,7 @@ describe("V2 static coordinator", () => {
 				buildings: -1,
 				detail: -1,
 				terrain: -1,
-				topology: -1,
+				envCells: -1,
 			},
 		});
 
@@ -188,7 +188,7 @@ describe("V2 static coordinator", () => {
 				buildings: -1,
 				detail: -1,
 				terrain: 1,
-				topology: -1,
+				envCells: -1,
 			},
 		});
 		const terrainWork = work.filter(
@@ -236,7 +236,7 @@ describe("V2 static coordinator", () => {
 				buildings: 0,
 				detail: -1,
 				terrain: 0,
-				topology: -1,
+				envCells: -1,
 			},
 		});
 		const buildingWork = work.find(
@@ -433,7 +433,7 @@ describe("V2 static coordinator", () => {
 				buildings: -1,
 				detail: -1,
 				terrain: -1,
-				topology: -1,
+				envCells: -1,
 			},
 		});
 
@@ -451,7 +451,7 @@ function createSingleTerrainDemand(landblockId: number): StaticDemand {
 			buildings: -1,
 			detail: -1,
 			terrain: 0,
-			topology: -1,
+			envCells: -1,
 		},
 	};
 }

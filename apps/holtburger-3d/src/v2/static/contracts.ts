@@ -1,9 +1,13 @@
+import type {
+	LandblockEnvCellsPayloadDto,
+	PlacementTransformDto,
+} from "../../lib/host/contracts";
+
 export type StaticDomain =
 	| "outdoor-terrain"
 	| "outdoor-buildings"
 	| "outdoor-detail"
-	| "landblock-topology"
-	| "dungeon-static";
+	| "landblock-env-cells";
 
 export interface StaticResolverScope {
 	readonly kind: "landblock";
@@ -14,7 +18,7 @@ export interface StaticLodRadii {
 	readonly terrain: number;
 	readonly buildings: number;
 	readonly detail: number;
-	readonly topology: number;
+	readonly envCells: number;
 }
 
 type StaticDemandLocation =
@@ -52,8 +56,7 @@ export interface StaticScopePayload {
 }
 
 type StaticScopePayloadBody =
-	| DungeonStaticScopePayload
-	| LandblockTopologyStaticScopePayload
+	| LandblockEnvCellsStaticScopePayload
 	| OutdoorStaticObjectsScopePayload
 	| TerrainStaticScopePayload
 	| PlaceholderStaticScopePayload;
@@ -93,7 +96,7 @@ export type StaticResourceIdentity =
 
 interface LandblockSourceIdentity {
 	readonly kind: "landblock-source";
-	readonly source: "outdoor" | "topology";
+	readonly source: "outdoor" | "env-cells";
 	readonly landblockId: number;
 }
 
@@ -527,46 +530,76 @@ interface StaticObjectDebugProvenance {
 	readonly sourceAssetId: string;
 }
 
-interface LandblockTopologyStaticScopePayload {
-	readonly kind: "landblock-topology";
+export interface LandblockEnvCellsStaticScopePayload {
+	readonly kind: "landblock-env-cells";
 	readonly landblock: LandblockSourceIdentity;
 	readonly classification: LandblockClassification;
-	readonly envCells: readonly LandblockTopologyEnvCellFacts[];
+	readonly regionRenderProfile: RegionRenderProfileIdentity;
+	readonly envCells: readonly LandblockEnvCellStaticFacts[];
 	readonly portalLinks: readonly LandblockPortalLinkFacts[];
-	readonly residencySpatial: LandblockTopologySpatialFacts;
+	readonly acceptedEnvCellIds: readonly number[];
+	readonly visibilityDiagnostics: readonly EnvCellVisibilityDiagnostic[];
+	readonly residencySpatial: LandblockEnvCellResidencySpatialFacts;
 	readonly missingRefs: readonly StaticResourceIdentity[];
 }
 
-interface DungeonStaticScopePayload {
-	readonly kind: "dungeon-static";
-	readonly landblock: LandblockSourceIdentity;
-	readonly classification: "dungeon";
-	readonly envCells: readonly EnvCellStaticFacts[];
-	readonly portalLinks: readonly LandblockPortalLinkFacts[];
-	readonly missingRefs: readonly StaticResourceIdentity[];
-}
-
-interface LandblockTopologyEnvCellFacts {
+export interface LandblockEnvCellStaticFacts {
 	readonly identity: EnvCellSourceIdentity;
 	readonly landblockId: number;
 	readonly memberId: string;
-	readonly visibleEnvCellIds: readonly number[];
-	readonly restrictionObjectId: number | null;
-	readonly seenOutside: boolean | null;
-}
-
-interface EnvCellStaticFacts {
-	readonly identity: EnvCellSourceIdentity;
-	readonly landblockId: number;
+	readonly localPlacement: PlacementTransformDto;
 	readonly environment: EnvironmentIdentity;
 	readonly cellStructure: CellStructureIdentity;
 	readonly visibleEnvCellIds: readonly number[];
-	readonly portalCount: number;
-	readonly portalApertureCount: number;
-	readonly staticObjectSeedCount: number;
-	readonly renderGeometryPolygonCount: number;
+	readonly restrictionObjectId: number | null;
+	readonly seenOutside: boolean | null;
+	readonly surfaces: readonly LandblockEnvCellSurfaceFacts[];
+	readonly portals: LandblockEnvCellsPayloadDto["envCells"][number]["portals"];
+	readonly portalApertures: LandblockEnvCellsPayloadDto["envCells"][number]["portalApertures"];
+	readonly staticObjectSeeds: readonly LandblockEnvCellStaticObjectSeedFacts[];
+	readonly renderGeometry: LandblockEnvCellsPayloadDto["envCells"][number]["renderGeometry"];
+	readonly cellBsp: LandblockEnvCellsPayloadDto["envCells"][number]["cellBsp"];
 	readonly localSpatial: EnvCellSpatialFacts;
 }
+
+interface LandblockEnvCellSurfaceFacts {
+	readonly slotId: number;
+	readonly surfaceId: number;
+	readonly material: StaticMaterialSourceIdentity;
+}
+
+interface LandblockEnvCellStaticObjectSeedFacts {
+	readonly identity: StaticObjectInstanceIdentity;
+	readonly source: StaticObjectSourceIdentity;
+	readonly sourceIndex: number;
+	readonly localPlacement: PlacementTransformDto;
+	readonly sourceScale: LandblockEnvCellsPayloadDto["envCells"][number]["statics"][number]["sourceScale"];
+	readonly sourceBounds: LandblockEnvCellsPayloadDto["envCells"][number]["statics"][number]["sourceBounds"];
+	readonly instanceBounds: LandblockEnvCellsPayloadDto["envCells"][number]["statics"][number]["instanceBounds"];
+	readonly debug: StaticObjectDebugProvenance;
+}
+
+export interface EnvCellVisibilitySelection {
+	readonly acceptedEnvCellIds: readonly number[];
+	readonly diagnostics: readonly EnvCellVisibilityDiagnostic[];
+}
+
+export type EnvCellVisibilityDiagnostic =
+	| {
+			readonly kind: "missing-focus-cell";
+			readonly envCellId: number;
+	  }
+	| {
+			readonly kind: "missing-visible-cell";
+			readonly sourceEnvCellId: number;
+			readonly targetEnvCellId: number;
+	  }
+	| {
+			readonly kind: "traversal-cutoff";
+			readonly sourceEnvCellId: number;
+			readonly targetEnvCellId: number;
+			readonly maxDepth: number;
+	  };
 
 interface LandblockPortalLinkFacts {
 	readonly linkId: string;
@@ -593,14 +626,28 @@ type PortalEndpointIdentity =
 			readonly landblockId: number;
 	  };
 
-interface LandblockTopologySpatialFacts {
-	readonly coordinateSpace: "landblock-topology-residency";
+interface LandblockEnvCellResidencySpatialFacts {
+	readonly coordinateSpace: "landblock-env-cell-residency";
 	readonly envCellResidencyBvhNodeCount: number;
 	readonly envCellResidencyBvhItemCount: number;
+	readonly residencyBvh: LandblockEnvCellResidencyBvhFacts;
+}
+
+interface LandblockEnvCellResidencyBvhFacts {
+	readonly coordinateSpace: "landblock-env-cell-residency";
+	readonly nodes: LandblockEnvCellsPayloadDto["envCellResidencyBvh"]["nodes"];
+	readonly items: readonly LandblockEnvCellResidencyBvhItemFacts[];
+}
+
+interface LandblockEnvCellResidencyBvhItemFacts {
+	readonly identity: EnvCellSourceIdentity;
+	readonly memberId: string;
+	readonly source: "building-portal-link" | "env-cell-placement" | "derived";
 }
 
 interface EnvCellSpatialFacts {
 	readonly coordinateSpace: "env-cell-local";
+	readonly localBvh: LandblockEnvCellsPayloadDto["envCells"][number]["localBvh"];
 	readonly localBvhNodeCount: number;
 	readonly localBvhItemCount: number;
 }
@@ -980,8 +1027,7 @@ export interface StaticCoordinatorSnapshot {
 	readonly activeWork: readonly ScheduledStaticWorkStatus[];
 	readonly latestTerrainPayload: TerrainStaticScopePayloadSummary | null;
 	readonly latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null;
-	readonly latestLandblockTopologyPayload: LandblockTopologyPayloadSummary | null;
-	readonly latestDungeonPayload: DungeonStaticPayloadSummary | null;
+	readonly latestLandblockEnvCellsPayload: LandblockEnvCellsPayloadSummary | null;
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly latestResolverFailure: StaticResolverFailureSnapshot | null;
 }
@@ -1014,21 +1060,16 @@ export interface ScheduledStaticWorkStatus {
 	readonly failureMessage: string | null;
 }
 
-export interface LandblockTopologyPayloadSummary {
+export interface LandblockEnvCellsPayloadSummary {
 	readonly landblockId: number;
 	readonly classification: LandblockClassification;
 	readonly envCellCount: number;
-	readonly visibleCellCount: number;
-	readonly portalLinkCount: number;
-	readonly missingRefCount: number;
-}
-
-export interface DungeonStaticPayloadSummary {
-	readonly landblockId: number;
-	readonly selectedEnvCellId: number | null;
-	readonly envCellCount: number;
+	readonly acceptedEnvCellCount: number;
 	readonly visibleCellCount: number;
 	readonly portalCount: number;
+	readonly portalLinkCount: number;
+	readonly staticObjectSeedCount: number;
+	readonly visibilityDiagnosticCount: number;
 	readonly missingRefCount: number;
 }
 

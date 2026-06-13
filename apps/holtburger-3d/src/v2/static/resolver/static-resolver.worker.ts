@@ -6,6 +6,7 @@ import type {
 	StaticResolverJob,
 	StaticScopePayload,
 } from "../contracts";
+import { LandblockEnvCellsResolver } from "../env-cells/landblock-env-cells-resolver";
 import { OutdoorStaticObjectsResolver } from "../objects/outdoor-static-objects-resolver";
 import { TerrainStaticScopeResolver } from "../terrain/terrain-resolver";
 import { StaticResolverWorkerRuntimeHost } from "./host-bridge";
@@ -20,13 +21,16 @@ const workerPort = self as unknown as StaticResolverWorkerGlobalPort;
 class StaticResolverRouter implements StaticResolver {
 	readonly #terrainResolver: StaticResolver;
 	readonly #outdoorStaticObjectsResolver: StaticResolver;
+	readonly #landblockEnvCellsResolver: StaticResolver;
 
 	constructor(options: {
 		readonly terrainResolver: StaticResolver;
 		readonly outdoorStaticObjectsResolver: StaticResolver;
+		readonly landblockEnvCellsResolver: StaticResolver;
 	}) {
 		this.#terrainResolver = options.terrainResolver;
 		this.#outdoorStaticObjectsResolver = options.outdoorStaticObjectsResolver;
+		this.#landblockEnvCellsResolver = options.landblockEnvCellsResolver;
 	}
 
 	resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
@@ -35,6 +39,9 @@ class StaticResolverRouter implements StaticResolver {
 		}
 		if (job.domain === "outdoor-buildings" || job.domain === "outdoor-detail") {
 			return this.#outdoorStaticObjectsResolver.resolve(job);
+		}
+		if (job.domain === "landblock-env-cells") {
+			return this.#landblockEnvCellsResolver.resolve(job);
 		}
 
 		return Promise.reject(
@@ -46,6 +53,7 @@ class StaticResolverRouter implements StaticResolver {
 const host = new StaticResolverWorkerRuntimeHost(workerPort);
 const assetService = new HostBackedAssetService({ host });
 const resolver = new StaticResolverRouter({
+	landblockEnvCellsResolver: new LandblockEnvCellsResolver({ assetService }),
 	outdoorStaticObjectsResolver: new OutdoorStaticObjectsResolver({ assetService }),
 	terrainResolver: new TerrainStaticScopeResolver({ assetService }),
 });

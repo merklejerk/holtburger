@@ -3,7 +3,6 @@ import {
 	formatHex32,
 	formatLandblockEnvCellsAssetId,
 	formatLandblockOutdoorAssetId,
-	formatLandblockTopologyAssetId,
 	formatRegionRenderProfileAssetId,
 	formatTerrainMaterialAssetId,
 	normalizeOutdoorLandblockId,
@@ -52,10 +51,6 @@ export function formatHostAssetId(key: HostAssetKey): string {
 		return formatLandblockOutdoorAssetId(parseHex32RouteId(key));
 	}
 
-	if (key.kind === "landblock-topology") {
-		return formatLandblockTopologyAssetId(parseHex32RouteId(key));
-	}
-
 	if (key.kind === "landblock-env-cells") {
 		return formatLandblockEnvCellsAssetId(parseHex32RouteId(key));
 	}
@@ -77,15 +72,13 @@ export function formatHostAssetId(key: HostAssetKey): string {
 
 export function parseHostAssetId(assetId: string): HostAssetKey {
 	const landblockMatch =
-		/^landblock\/([0-9a-fA-F]{8})\/(outdoor|topology|env-cells)$/.exec(assetId);
+		/^landblock\/([0-9a-fA-F]{8})\/(outdoor|env-cells)$/.exec(assetId);
 	if (landblockMatch) {
 		const routeKind = landblockMatch[2];
 		return createHostAssetKey(
 			routeKind === "outdoor"
 				? "landblock-outdoor"
-				: routeKind === "topology"
-					? "landblock-topology"
-					: "landblock-env-cells",
+				: "landblock-env-cells",
 			Number.parseInt(landblockMatch[1] as string, 16),
 		);
 	}
@@ -130,7 +123,6 @@ function normalizeAssetKeyId(
 
 	if (
 		kind === "landblock-outdoor" ||
-		kind === "landblock-topology" ||
 		kind === "landblock-env-cells"
 	) {
 		return formatHex32(normalizeOutdoorLandblockId(id));
@@ -169,7 +161,6 @@ function assertNonnegativeInteger(value: number, kind: string): number {
 function isKnownHostAssetKeyKind(kind: string): kind is HostAssetKeyKind {
 	return (
 		kind === "landblock-outdoor" ||
-		kind === "landblock-topology" ||
 		kind === "landblock-env-cells" ||
 		kind === "env-cell" ||
 		kind === "gfx-obj" ||

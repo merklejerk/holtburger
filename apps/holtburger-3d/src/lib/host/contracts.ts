@@ -439,6 +439,44 @@ export const envCellPayloadDtoSchema = z.object({
 });
 export type EnvCellPayloadDto = z.infer<typeof envCellPayloadDtoSchema>;
 
+const landblockEnvCellDtoSchema = z.object({
+	envCellId: z.number().int().nonnegative(),
+	memberId: z.string().min(1),
+	localPlacement: placementTransformDtoSchema,
+	environmentId: z.number().int().nonnegative(),
+	cellStructureId: z.number().int().nonnegative(),
+	visibleEnvCellIds: z.array(z.number().int().nonnegative()),
+	restrictionObjectId: z.number().int().nonnegative().nullable(),
+	seenOutside: z.boolean().nullable(),
+	surfaces: z.array(envCellSurfaceSlotDtoSchema),
+	portals: z.array(envCellPortalDtoSchema),
+	portalApertures: z.array(preparedPortalApertureDtoSchema),
+	statics: z.array(envCellStaticMemberDtoSchema),
+	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
+	cellBsp: z.lazy(() => polygonSetBspNodeDtoSchema),
+	localBvh: preparedEnvCellBvhDtoSchema,
+	diagnostics: landblockPackDiagnosticsDtoSchema,
+});
+
+export const landblockEnvCellsPayloadDtoSchema = z.object({
+	kind: z.literal("landblock-env-cells"),
+	residencyKind: z.literal("landblock"),
+	sourceAssetKind: z.literal("landblock-env-cells"),
+	landblockId: z.number().int().nonnegative(),
+	landblockInfoId: z.number().int().nonnegative(),
+	classification: landblockClassificationValueSchema,
+	regionId: z.number().int().nonnegative(),
+	regionNumber: z.number().int().nonnegative(),
+	envCells: z.array(landblockEnvCellDtoSchema),
+	portalLinks: z.array(landblockScenePortalLinkDtoSchema),
+	envCellResidencyBvh: preparedEnvCellResidencyBvhDtoSchema,
+	diagnostics: landblockPackDiagnosticsDtoSchema,
+	provenance: assetProvenanceDtoSchema,
+});
+export type LandblockEnvCellsPayloadDto = z.infer<
+	typeof landblockEnvCellsPayloadDtoSchema
+>;
+
 const regionRenderProfileDetailRoleDtoSchema = z.object({
 	role: z.enum(["landscape", "building", "environment", "object"]),
 	sourceTerrainDescIndex: z.number().int().nonnegative(),

@@ -87,6 +87,10 @@ export function formatLandblockTopologyAssetId(landblockId: number): string {
 	return `landblock/${formatHex32(normalizeOutdoorLandblockId(landblockId))}/topology`;
 }
 
+export function formatLandblockEnvCellsAssetId(landblockId: number): string {
+	return `landblock/${formatHex32(normalizeOutdoorLandblockId(landblockId))}/env-cells`;
+}
+
 export function formatEnvCellAssetId(envCellId: number): string {
 	return `env-cell/${formatHex32(envCellId)}`;
 }

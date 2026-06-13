@@ -207,7 +207,9 @@ export function planAssetLookupEnvelopeRequests(
 
 function usesBinaryAssetLookup(assetId: string): boolean {
 	return (
-		/^landblock\/[0-9a-fA-F]{8}\/(?:outdoor|topology)$/.test(assetId) ||
+		/^landblock\/[0-9a-fA-F]{8}\/(?:outdoor|topology|env-cells)$/.test(
+			assetId,
+		) ||
 		/^env-cell\/[0-9a-fA-F]{8}$/.test(assetId) ||
 		assetId.startsWith("gfx-obj/") ||
 		assetId.startsWith("prepared-texture/") ||

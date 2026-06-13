@@ -755,6 +755,38 @@ pub fn serialize_landblock_topology_payload(
     })
 }
 
+pub fn serialize_landblock_env_cells_payload_with_cells<F>(
+    topology: &LandblockTopologyAsset,
+    cells: &[EnvCellAsset],
+    region_id: u32,
+    region_number: u32,
+    mut serialize_cell: F,
+) -> serde_json::Value
+where
+    F: FnMut(usize, &EnvCellAsset, u32, u32) -> serde_json::Value,
+{
+    serde_json::json!({
+        "kind": "landblock-env-cells",
+        "residencyKind": "landblock",
+        "sourceAssetKind": "landblock-env-cells",
+        "landblockId": topology.landblock_id,
+        "landblockInfoId": topology.landblock_info_id,
+        "classification": serialize_landblock_classification(topology.classification),
+        "regionId": region_id,
+        "regionNumber": region_number,
+        "envCells": cells.iter().enumerate().map(|(index, cell)| serialize_cell(index, cell, region_id, region_number)).collect::<Vec<_>>(),
+        "portalLinks": serialize_landblock_topology_portal_links(topology),
+        "envCellResidencyBvh": serialize_landblock_topology_env_cell_residency_bvh(topology),
+        "diagnostics": serialize_prepared_content_diagnostics(&topology.diagnostics),
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "landblock-env-cells",
+            "errorCode": topology.diagnostics.errors.first().map(|error| error.error_code),
+            "detail": topology.diagnostics.errors.first().map(|error| error.detail.clone())
+        }
+    })
+}
+
 pub fn landblock_outdoor_terrain_asset(
     outdoor: &LandblockOutdoorAsset,
 ) -> SerializedOutdoorTerrainSource {
@@ -1006,6 +1038,64 @@ where
             "errorCode": asset.diagnostics.errors.first().map(|error| error.error_code),
             "detail": asset.diagnostics.errors.first().map(|error| error.detail.clone())
         }
+    })
+}
+
+pub fn serialize_landblock_env_cell_bundle_cell<F>(
+    asset: &EnvCellAsset,
+    render_geometry: serde_json::Value,
+    mut serialize_aperture: F,
+) -> serde_json::Value
+where
+    F: FnMut(usize, &PreparedPortalAperture) -> serde_json::Value,
+{
+    let cell = &asset.prepared_cell;
+    let static_meshes = asset.static_meshes.iter().collect::<Vec<_>>();
+    serde_json::json!({
+        "envCellId": cell.env_cell_id,
+        "memberId": format!("env-cell/{:08x}", cell.env_cell_id),
+        "localPlacement": serialize_frame(&cell.local_placement),
+        "environmentId": cell.environment_id,
+        "cellStructureId": cell.cell_structure_id,
+        "visibleEnvCellIds": asset.env_cell.visible_cell_ids,
+        "restrictionObjectId": asset.env_cell.restriction_object_id,
+        "seenOutside": asset.env_cell.seen_outside,
+        "surfaces": cell.surface_ids.iter().enumerate().map(|(index, surface_id)| {
+            serde_json::json!({
+                "slotId": index,
+                "surfaceId": surface_id,
+                "materialAssetId": format_material_asset_id(*surface_id),
+            })
+        }).collect::<Vec<_>>(),
+        "portals": cell.portals.iter().map(|portal| {
+            serde_json::json!({
+                "portalId": portal.portal_id,
+                "sourceIndex": portal.source_index,
+                "flags": portal.flags,
+                "polygonId": portal.polygon_id,
+                "otherCellId": portal.other_cell_id,
+                "otherPortalId": portal.other_portal_id,
+                "targetEnvCellId": portal.target_env_cell_id,
+                "isOutsideTransition": portal.is_outside_transition,
+            })
+        }).collect::<Vec<_>>(),
+        "portalApertures": cell.portal_apertures.iter().enumerate().map(|(index, aperture)| serialize_aperture(index, aperture)).collect::<Vec<_>>(),
+        "statics": static_meshes.iter().map(|mesh| {
+            serde_json::json!({
+                "instanceId": mesh.instance_id,
+                "sourceDid": mesh.source_did,
+                "sourceAssetId": mesh.source_asset_id,
+                "sourceIndex": mesh.source_index,
+                "localPlacement": serialize_frame(&mesh.local_placement),
+                "sourceScale": serialize_prepared_vec3(&mesh.source_scale),
+                "sourceBounds": mesh.source_bounds.as_ref().map(serialize_prepared_aabb),
+                "instanceBounds": mesh.instance_bounds.as_ref().map(serialize_prepared_aabb),
+            })
+        }).collect::<Vec<_>>(),
+        "renderGeometry": render_geometry,
+        "cellBsp": serialize_bsp_node(&cell.cell_bsp),
+        "localBvh": serialize_env_cell_local_bvh(cell, &static_meshes),
+        "diagnostics": serialize_prepared_content_diagnostics(&asset.diagnostics),
     })
 }
 

@@ -152,7 +152,6 @@ export class ImmediateStaticResolver implements StaticResolver {
 				job,
 				scope: {
 					acceptedEnvCellIds: [],
-					classification: "dungeon",
 					envCells: [],
 					kind: "landblock-env-cells",
 					landblock: {
@@ -167,11 +166,9 @@ export class ImmediateStaticResolver implements StaticResolver {
 						regionNumber: 0,
 					},
 					residencySpatial: {
-						coordinateSpace: "landblock-env-cell-residency",
-						envCellResidencyBvhItemCount: 0,
-						envCellResidencyBvhNodeCount: 0,
-						residencyBvh: {
-							coordinateSpace: "landblock-env-cell-residency",
+						landblockEnvCellBvhItemCount: 0,
+						landblockEnvCellBvhNodeCount: 0,
+						landblockEnvCellBvh: {
 							items: [],
 							nodes: [],
 						},

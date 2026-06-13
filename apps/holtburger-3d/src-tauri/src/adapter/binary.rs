@@ -181,8 +181,7 @@ pub fn serialize_content_asset_binary_response(
         },
         ContentAssetRequest::LandblockEnvCells(landblock_id) => match asset {
             Ok(ContentAsset::LandblockEnvCells {
-                topology,
-                cells,
+                bundle,
                 region_id,
                 region_number,
             }) => AssetLookupResponseDto {
@@ -190,8 +189,7 @@ pub fn serialize_content_asset_binary_response(
                 asset_id: request.asset_id,
                 payload_kind: AssetPayloadKindDto::Json,
                 payload: serialize_landblock_env_cells_binary_payload(
-                    &topology,
-                    &cells,
+                    &bundle,
                     region_id,
                     region_number,
                     path_prefix,
@@ -529,16 +527,14 @@ pub fn serialize_env_cell_binary_payload(
 }
 
 pub fn serialize_landblock_env_cells_binary_payload(
-    topology: &LandblockTopologyAsset,
-    cells: &[EnvCellAsset],
+    bundle: &LandblockEnvCellsAsset,
     region_id: u32,
     region_number: u32,
     path_prefix: &str,
     writer: &mut BinaryAssetSectionWriter,
 ) -> serde_json::Value {
     serialize_landblock_env_cells_payload_with_cells(
-        topology,
-        cells,
+        bundle,
         region_id,
         region_number,
         |cell_index, asset, _region_id, _region_number| {

@@ -3849,7 +3849,7 @@ Verification:
 
 ### Phase 12A4: Landblock Env-Cell Host Bundle Resteer
 
-Status: planned. Immediate corrective phase after 12A3 and before 11E5.
+Status: complete on 2026-06-13. Phase 12A5 remains the next implementation phase before returning to 11E5.
 
 Purpose: decouple the V2 `landblock-env-cells` host asset contract from V1 topology/standalone-env-cell route shapes before adding smarter env-cell BVHs and query behavior. The host can still reuse low-level DAT decode and preparation helpers, but the public V2 bundle should stop exposing topology-route artifacts.
 
@@ -3888,8 +3888,8 @@ interface PreparedLandblockEnvCellBvhDto {
 interface PreparedLandblockEnvCellBvhItemDto {
 	envCellId: number;
 	memberId: string;
-	bounds: PreparedAabbDto | null;
-	source: "env-cell-root" | "placement-fallback" | "derived";
+	bounds: PreparedAabbDto;
+	source: "env-cell-root" | "derived";
 }
 
 interface LandblockEnvCellDto {
@@ -3922,6 +3922,41 @@ Acceptance criteria:
 - The host bundle still loads landblock info for membership and provenance, but that source dependency is represented as `landblockInfoId`/diagnostics rather than a topology product contract.
 - V2 bundle placement transforms have an explicit tested axis convention that matches runtime query transforms and later landblock-wide env-cell bounds.
 - `cargo check`, Tauri host route/schema tests, `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and focused V2 env-cell resolver/runtime tests pass before 12A5.
+
+Phase 12A4 execution notes:
+
+- Split the V2 `landblock-env-cells` host DTO from the legacy topology/standalone env-cell DTOs. The old `landblock-topology` and standalone `env-cell` schemas still retain their compatibility `classification`, `envCellResidencyBvh`, and `coordinateSpace` fields for old-display callers.
+- Updated the V2 landblock env-cell host payload to emit `landblockEnvCellBvh` with env-cell-grained items carrying non-null typed `bounds` and `source: "env-cell-root"`, and removed V2 bundle `classification`.
+- Removed `coordinateSpace` from the V2 bundle's top-level env-cell BVH and per-cell `localBvh` schemas. The V2 bundle/local schemas are now strict so old decorations fail at the preparation boundary instead of being silently stripped.
+- Tightened the V2 `landblockEnvCellBvh` contract on both sides: host DTO schemas reject null item bounds, runtime static contracts model bounds as required, and cells that cannot derive real content bounds are omitted from the landblock BVH with host diagnostics plus a resolver console warning.
+- Added `serialize_v2_render_space_frame` for V2 env-cell bundle `localPlacement`. Its contract maps raw AC placement origin `(x, y, z)` into V2 query/render axes `(x, z, -y)` and conjugates the AC quaternion through the same AC-to-render basis. Standalone env-cell/topology serializers still use the legacy raw-frame shape.
+- Added a dedicated `LandblockEnvCellsAsset` / `LandblockEnvCellsAssetAssembler` content path. `ContentAsset::LandblockEnvCells` now carries this V2 bundle asset directly instead of composing `LandblockTopologyAsset` plus standalone `EnvCellAsset` products. The assembler still reuses low-level source loading and preparation helpers, but it does not call the V1 topology or env-cell asset assemblers.
+- Updated `LandblockEnvCellsResolver`, V2 static contracts, fake resolver payloads, static coordinator summaries, runtime diagnostics, and the browser harness projection to stop carrying env-cell classification and to use `landblockEnvCellBvh` naming.
+- Added schema/preparation coverage proving normalized `landblock-env-cells` payloads parse, null BVH item bounds fail, and old top-level/nested decorations fail, plus a Tauri serializer test pinning the V2 placement axis convention.
+
+Phase 12A4 spicy bits:
+
+- The first 12A4 implementation only decoupled the public DTO and still reused V1 topology/env-cell asset products internally. That was wrong for the phase goal because those assemblers are deletion candidates when V1 is removed. The corrected implementation gives `landblock-env-cells` a direct content asset/assembler path and leaves old topology/standalone-env-cell assemblers only for their legacy routes.
+- The direct bundle assembler loads all env-cell facts before loading environments, then requests each environment with the full set of cell-structure ids needed by that environment. That avoids the subtle one-cell-at-a-time bug where shared environments with different selected structures could drop later cells.
+- `landblockEnvCellBvh` is still flat. The name/shape now matches the 12A5 destination, but the hierarchy is not yet a real env-cell broad-phase tree.
+- The V2 bundle now emits env-cell root placement in query/render axes. Per-cell local geometry/BVH coordinates remain env-cell-local source coordinates; 12A5 must be careful to transform local BVH root bounds through the new root placement convention when building landblock-wide bounds.
+- Env cells with no render geometry, static mesh bounds, or portal aperture bounds are invalid for the landblock-wide BVH. The corrected contract drops them from `landblockEnvCellBvh` instead of inventing fallback bounds, while keeping them in `envCells` with diagnostics so the bad source condition is visible.
+
+Phase 12A4 failed to close:
+
+- No live browser/manual env-cell picking rerun was performed against the explicit-object/cutout investigation target.
+- `landblockEnvCellBvh` item bounds are derived from transformed local render/static/portal content bounds, but the BVH hierarchy itself remains flat. Phase 12A5 owns replacing the flat node scaffold with a true landblock-wide env-cell hierarchy and query primitive.
+
+Phase 12A4 verification:
+
+- `cargo check`
+- `cargo check -p holtburger-3d`
+- `cargo test -p holtburger-3d`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts -- static/env-cells/landblock-env-cells-resolver static/coordinator/static-coordinator runtime/static-scene-query assets/preparation`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 ### Phase 12A5: Landblock-Wide Env-Cell BVH And Residency Query Course Correct
 

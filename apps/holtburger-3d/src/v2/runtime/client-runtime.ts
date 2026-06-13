@@ -633,7 +633,7 @@ function createStaticCoordinatorDiagnosticsReport(
 			committedDrawUnits: snapshot.committedDrawUnits,
 			failed: snapshot.failed,
 			latestLandblockEnvCellsPayload: snapshot.latestLandblockEnvCellsPayload
-				? `lb ${formatHex(snapshot.latestLandblockEnvCellsPayload.landblockId)} ${snapshot.latestLandblockEnvCellsPayload.classification} cells ${snapshot.latestLandblockEnvCellsPayload.envCellCount} accepted ${snapshot.latestLandblockEnvCellsPayload.acceptedEnvCellCount} visible ${snapshot.latestLandblockEnvCellsPayload.visibleCellCount} portals ${snapshot.latestLandblockEnvCellsPayload.portalCount} links ${snapshot.latestLandblockEnvCellsPayload.portalLinkCount} seeds ${snapshot.latestLandblockEnvCellsPayload.staticObjectSeedCount} missing ${snapshot.latestLandblockEnvCellsPayload.missingRefCount}`
+				? `lb ${formatHex(snapshot.latestLandblockEnvCellsPayload.landblockId)} cells ${snapshot.latestLandblockEnvCellsPayload.envCellCount} accepted ${snapshot.latestLandblockEnvCellsPayload.acceptedEnvCellCount} visible ${snapshot.latestLandblockEnvCellsPayload.visibleCellCount} portals ${snapshot.latestLandblockEnvCellsPayload.portalCount} links ${snapshot.latestLandblockEnvCellsPayload.portalLinkCount} seeds ${snapshot.latestLandblockEnvCellsPayload.staticObjectSeedCount} missing ${snapshot.latestLandblockEnvCellsPayload.missingRefCount}`
 				: null,
 			latestOutdoorStaticObjectsPayload:
 				snapshot.latestOutdoorStaticObjectsPayload

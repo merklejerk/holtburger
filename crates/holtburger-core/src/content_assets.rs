@@ -6,10 +6,11 @@ use anyhow::{Context, Result, anyhow};
 use futures::future::{BoxFuture, FutureExt, Shared};
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, EnvCellAsset, EnvCellAssetAssembler,
-    LandblockOutdoorAsset, LandblockOutdoorAssetAssembler, LandblockTopologyAsset,
-    LandblockTopologyAssetAssembler, MaterialAppearanceInput, ResolvedMaterialRecipe,
-    ResolvedRegionRenderProfile, ResolvedSetupAppearance, ResolvedSurfaceTexture,
-    ResolvedTerrainMaterialTable, normalize_landblock_id,
+    LandblockEnvCellsAsset, LandblockEnvCellsAssetAssembler, LandblockOutdoorAsset,
+    LandblockOutdoorAssetAssembler, LandblockTopologyAsset, LandblockTopologyAssetAssembler,
+    MaterialAppearanceInput, ResolvedMaterialRecipe, ResolvedRegionRenderProfile,
+    ResolvedSetupAppearance, ResolvedSurfaceTexture, ResolvedTerrainMaterialTable,
+    normalize_landblock_id,
 };
 use holtburger_dat::file_type::{GfxObj, Palette, RenderSurface, SetupModel};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
@@ -58,8 +59,7 @@ pub enum ContentAsset {
     },
     LandblockTopology(Box<LandblockTopologyAsset>),
     LandblockEnvCells {
-        topology: Box<LandblockTopologyAsset>,
-        cells: Vec<EnvCellAsset>,
+        bundle: Box<LandblockEnvCellsAsset>,
         region_id: u32,
         region_number: u32,
     },
@@ -121,31 +121,16 @@ impl ContentAssetService {
             }
             ContentAssetRequest::LandblockEnvCells(landblock_id) => {
                 let landblock_id = normalize_landblock_id(landblock_id);
-                let topology = LandblockTopologyAssetAssembler::new().assemble_landblock_with_cache(
-                    &self.content,
-                    &self.decode_cache,
-                    landblock_id,
-                );
-                let mut cells = Vec::with_capacity(topology.env_cells.len());
-                for member in &topology.env_cells {
-                    let env_cell_id = member.env_cell_id;
-                    let cell = EnvCellAssetAssembler::new()
-                        .try_assemble_env_cell_with_cache(
-                            &self.content,
-                            &self.decode_cache,
-                            env_cell_id,
+                let bundle = LandblockEnvCellsAssetAssembler::new()
+                    .assemble_landblock_with_cache(&self.content, &self.decode_cache, landblock_id)
+                    .with_context(|| {
+                        format!(
+                            "Could not assemble landblock env-cell bundle 0x{landblock_id:08X}"
                         )
-                        .with_context(|| {
-                            format!(
-                                "Could not assemble bundled EnvCell 0x{env_cell_id:08X} for landblock 0x{landblock_id:08X}"
-                            )
-                        })?;
-                    cells.push(cell);
-                }
+                    })?;
                 let region = self.decode_cache.region_desc(&self.content)?;
                 Ok(ContentAsset::LandblockEnvCells {
-                    topology: Box::new(topology),
-                    cells,
+                    bundle: Box::new(bundle),
                     region_id: region.id,
                     region_number: region.region_number,
                 })

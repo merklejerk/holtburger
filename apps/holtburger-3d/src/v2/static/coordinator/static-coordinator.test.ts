@@ -573,10 +573,9 @@ function createLandblockEnvCellsResolverPayload(): {
 	readonly scope: StaticScopePayload["scope"];
 } {
 	return {
-		scope: {
-			acceptedEnvCellIds: [0xda550100],
-			classification: "dungeon",
-			envCells: [
+			scope: {
+				acceptedEnvCellIds: [0xda550100],
+				envCells: [
 				{
 					cellBsp: {
 						kind: "leaf",
@@ -602,9 +601,7 @@ function createLandblockEnvCellsResolverPayload(): {
 						origin: { x: 0, y: 0, z: 0 },
 					},
 					localSpatial: {
-						coordinateSpace: "env-cell-local",
 						localBvh: {
-							coordinateSpace: "env-cell-local",
 							items: [],
 							nodes: [],
 						},
@@ -647,11 +644,9 @@ function createLandblockEnvCellsResolverPayload(): {
 				regionNumber: 1,
 			},
 			residencySpatial: {
-				coordinateSpace: "landblock-env-cell-residency",
-				envCellResidencyBvhItemCount: 0,
-				envCellResidencyBvhNodeCount: 0,
-				residencyBvh: {
-					coordinateSpace: "landblock-env-cell-residency",
+				landblockEnvCellBvhItemCount: 0,
+				landblockEnvCellBvhNodeCount: 0,
+				landblockEnvCellBvh: {
 					items: [],
 					nodes: [],
 				},

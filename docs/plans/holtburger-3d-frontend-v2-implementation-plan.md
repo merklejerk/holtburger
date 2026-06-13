@@ -2709,7 +2709,7 @@ Phase 11E4 dry-run course correction:
 - The current static resolver worker only dispatches `outdoor-buildings` to `OutdoorStaticObjectsResolver`, and the resolver itself rejects every non-`outdoor-buildings` job. Phase 11E4B must update both gates.
 - The static-object baker already accepts `outdoor-detail`, and `StaticObjectGeometryStaticDrawUnit.domain` already includes `outdoor-detail`, so 11E4B should reuse the existing bake product shape instead of inventing a second object pipeline.
 - The current partitioner includes source/gfx identity in a single flat compatibility key, but not object identity. That is correct for compacting opaque/alpha-test repeated objects and should not be accidentally undone. Phase 11E4A should make source ownership explicit as metadata and policy input, while only forcing object/part partitioning when the sort policy requires it.
-- The current draw-unit contract only permits `materialPass: "opaque" | "alpha-test"`, and `isRenderableStaticObjectPartition` explicitly filters to those passes. Phase 11E4C was course-corrected into audit/deferred diagnostics; Phase 11E4C1/11E4C2 surface explicit-object blended targets first, and Phase 11E4D owns widening baked static-object draw units to carry transparent/additive pass state and sort metadata once the target is concrete.
+- The current draw-unit contract only permits `materialPass: "opaque" | "alpha-test"`, and `isRenderableStaticObjectPartition` explicitly filters to those passes. Phase 11E4C was course-corrected into audit/deferred diagnostics; Phase 11E4C1 surfaces explicit-object coverage, and Phase 11E4D owns widening baked static-object draw units to carry transparent/additive pass state and sort metadata for the known target.
 - The WebGL2 renderer currently draws all static-object resources in insertion order with depth testing enabled and no explicit blend/depth-mask scheduling. Phase 11E4E must introduce a separate depth-writing static pass and a transparent/additive pass, sort only transparent object/part resources each frame, and restore GL state after the pass.
 
 ### Phase 11E4A: Static Object Partition Axes
@@ -3305,11 +3305,11 @@ Phase 11E4C failed to close:
 - No DAT-wide audit was added to prove whether inverse-alpha or additive static triangles occur in meaningful outdoor/static-world content.
 - Console warnings currently identify aggregate buckets and reason codes, not representative surface IDs. The existing material coverage path remains the structured durable record; add representative surfaces only if warnings prove too vague during manual review.
 
-### Phase 11E4C1: Explicit Outdoor Object Coverage And Provenance
+### Phase 11E4C1: Explicit Outdoor Object Coverage
 
 Status: planned.
 
-Purpose: integrate the outdoor `explicit-object` category into V2 static object resolution and diagnostics so the known blended outdoor static target can be surfaced before implementing blended rendering.
+Purpose: integrate the outdoor `explicit-object` category into V2 static object resolution so the known blended outdoor static target is present in V2 before implementing blended rendering.
 
 Current steering:
 
@@ -3317,60 +3317,53 @@ Current steering:
 - The expected blended static target is believed to come from `explicit-object`, not building or generated scenery. This is now enough evidence to pull explicit-object coverage forward instead of waiting for broad Phase 12 static breadth.
 - Keep this as an evidence/surface phase first. Do not implement blended rendering here.
 - Prefer routing explicit outdoor objects through `outdoor-detail` initially unless source inspection proves they need a separate domain. That keeps the source/bake/render path small and uses the existing static-object table/material machinery.
-- The warning object must become useful for manual inspection. Add bounded representative provenance for deferred unrendered buckets: at minimum source/gfx object identity, object kind/id, part index, polygon id, geometry surface id, material id, material surface id/source surface id if available, and source triangle id.
+- Do not add extra gfx/source provenance logging in this phase. The target location is already known, so this phase should focus on resolving and baking the missing explicit-object category.
 - Preserve the existing `outdoor-detail` generated-scenery alpha-test path. Explicit-object inclusion must not regress foliage residency, atlas pagination, or cutout rendering.
 
 Deliverables:
 
 - Resolver selection update so `outdoor-detail` includes both `generated-scenery` and `explicit-object`, or a documented split if code inspection proves a separate explicit-object domain is cleaner.
 - Runtime/source diagnostics that report explicit-object counts distinctly from generated-scenery counts where useful.
-- Material coverage representative samples for unrendered buckets, sourced from partitioner triangle provenance and capped to a small fixed count per bucket.
-- Console warning payloads for deferred blended/static material coverage include those representative samples so manual browser review can identify likely `gfx-obj`/material/polygon sources.
-- Tests proving explicit objects are selected/resolved, generated-scenery remains selected, buildings do not leak into `outdoor-detail`, and representative deferred-coverage provenance is present.
+- Tests proving explicit objects are selected/resolved, generated-scenery remains selected, and buildings do not leak into `outdoor-detail`.
 
 Acceptance criteria:
 
 - A landblock containing explicit outdoor objects produces an `outdoor-detail` payload with `objectKind: "explicit-object"` records.
 - Existing generated-scenery `outdoor-detail` tests still pass and foliage alpha-test rendering remains unchanged.
-- Deferred blended/static warnings are actionable: they identify representative source/gfx/material/polygon facts rather than only aggregate bucket counts.
+- Deferred blended/static warnings remain aggregate bucket warnings; target-specific investigation uses the known object/location rather than new warning samples.
 - No transparent renderer support is added in this phase.
 - Any decision to keep explicit objects in `outdoor-detail` or split them later is recorded in this plan.
 
-### Phase 11E4C2: Explicit Outdoor Blended Material Target Audit
+Phase 11E4C1 dry-run findings:
 
-Status: planned.
+- The resolver inclusion change is mechanically small: `shouldIncludeOutdoorStaticObject` can include `explicit-object` for `outdoor-detail` while keeping `outdoor-buildings` restricted to `building`.
+- Existing source loading already accepts both `gfx-obj` and `setup-model`, so explicit outdoor objects should reuse the current source closure path unless a real fixture proves a new prepared asset kind is involved.
+- Existing `outdoor-detail` suppresses region detail roles through `createRegionDetailRolesForDomain`; keep that behavior for explicit objects during this phase so object detail overlays do not get mixed into the blended-material investigation.
+- Add object-kind counts to `OutdoorStaticObjectsPayloadSummary` and runtime diagnostics, or an equivalent structured summary, so `outdoor-detail` can distinguish generated scenery from explicit objects without requiring a material warning.
+- Do not expand material-coverage representative samples or console warning payloads here. That was an audit/debug convenience, and the user already knows where the blended target lives.
+- Tests to add/update:
+  - outdoor resolver includes explicit objects in `outdoor-detail`;
+  - outdoor resolver still excludes buildings from `outdoor-detail`;
+  - no-generated-scenery landblocks with explicit objects no longer produce empty `outdoor-detail`;
+  - object-kind counts or equivalent diagnostics distinguish generated scenery from explicit objects.
 
-Purpose: validate the remembered explicit-object blended static target and decide the smallest renderer implementation needed for parity.
+Phase 11E4C1 spicy bits:
 
-Current steering:
-
-- This phase is the bridge between “we saw deferred blended coverage” and “we know exactly what to render.” It should run after explicit-object coverage/provenance is available.
-- The target should be a named landblock/object if possible, with console warning representatives or diagnostics proving nonzero static transparent/additive triangle coverage.
-- Do not implement broad inverse-alpha/additive behavior from enum theory. Use the observed target’s flags, ACViewer/static evidence, and v1 behavior as the parity scope.
-
-Deliverables:
-
-- Identify a concrete explicit-object blended static target from runtime diagnostics, source samples, or a targeted DAT audit.
-- Record the target landblock, object/source/gfx/material ids, material surface flags, pass classification, triangle count, and expected visual behavior.
-- Refine Phase 11E4D/11E4E deliverables to the observed blend mode(s), likely alpha/translucent first.
-- Decide whether additive/inverse-alpha remain audit-only or enter the renderer scope based on actual target evidence.
-
-Acceptance criteria:
-
-- The plan names at least one explicit-object blended/static target with enough ids for repeatable manual testing.
-- The subsequent blended implementation phase is scoped to observed material behavior, not all possible `SurfaceType` flags.
-- If no concrete target is found, 11E4D/11E4E remain deferred and the plan records why.
+- `outdoor-detail` will become a mixed generated-scenery plus explicit-object domain. That is acceptable for now because both use the same static-object source/bake/material path, but the plan should record a future split if explicit objects turn out to need different residency radii, detail roles, or visibility policy.
+- Pulling explicit objects forward may increase `outdoor-detail` draw-unit and texture pressure before Phase 12 breadth cleanup. Watch diagnostics for draw-unit count jumps that are not explained by explicit-object coverage, role-page capacity, or deferred transparent object/part partitioning.
 
 ### Phase 11E4D: Object/Part Transparent Static Draw Units
 
-Status: planned after 11E4C2 identifies a concrete explicit-object blended target.
+Status: planned after 11E4C1 surfaces explicit outdoor objects.
 
-Purpose: emit renderer-ingestible transparent/additive static object draw units at object/part granularity so the renderer can sort them by distance.
+Purpose: implement blended static material draw units at object/part granularity against the known explicit-object target.
 
 Current steering:
 
-- Do not start this phase until 11E4C2 identifies concrete nonzero static blended/additive coverage and a ground-truth visual target.
-- Scope initial implementation to the observed explicit-object blended target. Alpha/translucent should land before additive/inverse-alpha unless the target proves otherwise.
+- The user already knows the explicit-object target location. Do not insert a separate audit phase or extra gfx logging phase; use the target as implementation input once 11E4C1 makes explicit-object coverage visible in V2.
+- At the start of implementation, record the user-provided target facts in this phase's execution notes: landblock id, object identity/source/gfx/material ids when known, material surface flags, pass classification, triangle count, and expected visual behavior.
+- Scope initial implementation to the known explicit-object blended target. Alpha/translucent should land before additive/inverse-alpha unless the target proves otherwise.
+- Do not implement broad inverse-alpha/additive behavior from enum theory. Use the target's flags, ACViewer/static evidence, and v1 behavior as the parity scope.
 - Mixed source objects are expected. If one source/gfx object or part contains both order-independent opaque/cutout surfaces and true blended/additive surfaces, keep opaque/cutout surfaces on the normal batchable path and split only the order-dependent surfaces by object/part. Do not force the whole source object into transparent sorting because one part needs blending.
 - Object/part identity is a hard partition axis only for order-dependent transparent/additive output. It remains metadata for compatible opaque and alpha-test/cutout output.
 
@@ -3392,6 +3385,7 @@ Acceptance criteria:
 - Existing opaque/alpha-test compaction remains deterministic and unaffected.
 - Mixed source objects do not poison order-independent batching for their opaque/cutout surfaces.
 - Renderability gates are updated intentionally: true blended partitions become renderer-ingestible only when they have the required render state, texture layout, object/part sort metadata, and stageable texture uses.
+- The phase records the known target and scopes blend behavior to observed material flags rather than every possible `SurfaceType` flag.
 
 ### Phase 11E4E: Transparent Renderer Pass And Visual Review
 
@@ -3401,8 +3395,8 @@ Purpose: render object/part-level transparent/additive static draw units after o
 
 Current steering:
 
-- Do not start this phase until 11E4D emits renderer-ingestible transparent draw units for the audited explicit-object target.
-- Before claiming visual parity, identify or audit a landblock with actual translucent/additive static-object triangle coverage. The earlier `0xda55ffff` target showed transparent material counts but zero transparent triangles, so it is useful for classification sanity only.
+- Do not start this phase until 11E4D emits renderer-ingestible transparent draw units for the known explicit-object target.
+- Before claiming visual parity, use the known explicit-object target with actual blended static-object triangle coverage. The earlier `0xda55ffff` target showed transparent material counts but zero transparent triangles, so it is useful for classification sanity only.
 - Sorting is object/part-level, not triangle-level. Any artifacts from intersecting transparent surfaces must be documented rather than hidden.
 - Runtime diagnostics should compare source coarse draw-unit counts against materialized renderer draw-unit counts after transparent support lands. Transparent object/part sorting is allowed to increase counts, but the increase should be explainable by order-dependent partitioning, role-page capacity, or fine materialization rather than accidental key churn.
 

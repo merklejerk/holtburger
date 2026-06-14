@@ -59,6 +59,7 @@ function createRendererSnapshot(
 		backend: "webgl2",
 		canvasHeight: 1,
 		canvasWidth: 1,
+		debugOverlayPrimitives: 0,
 		error: null,
 		frameCount: 0,
 		frameHandlerMs: 1,

@@ -1,4 +1,5 @@
 import type {
+	DebugOverlayPrimitive,
 	FrameState,
 	Renderer,
 	RendererSnapshot,
@@ -50,6 +51,7 @@ const STATIC_OBJECT_PALETTE_TEXTURE_UNIT_BASE =
 const STATIC_OBJECT_DETAIL_TEXTURE_UNIT_BASE =
 	STATIC_OBJECT_PALETTE_TEXTURE_UNIT_BASE +
 	MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW;
+const DEBUG_OVERLAY_FLOATS_PER_VERTEX = 7;
 
 const defaultFrameState: FrameState = {
 	camera: {
@@ -96,6 +98,31 @@ void main() {
 	vTexCoord = texCoord;
 	vMaterialSlot = int(materialSlot);
 	gl_Position = uModelViewProjection * vec4(position + uPlacementTranslation, 1.0);
+}
+`;
+
+export const DEBUG_OVERLAY_VERTEX_SHADER = `#version 300 es
+layout(location = 0) in vec3 position;
+layout(location = 1) in vec4 color;
+
+uniform mat4 uModelViewProjection;
+
+out vec4 vColor;
+
+void main() {
+	vColor = color;
+	gl_Position = uModelViewProjection * vec4(position, 1.0);
+}
+`;
+
+export const DEBUG_OVERLAY_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+in vec4 vColor;
+out vec4 fragColor;
+
+void main() {
+	fragColor = vec4(vec3(1.0), vColor.a);
 }
 `;
 
@@ -572,12 +599,17 @@ class Webgl2Renderer implements Renderer {
 	readonly #warnedLayeredFallbackDrawUnitIds = new Set<string>();
 	readonly #terrainProgram: TerrainGeometryProgram;
 	readonly #staticObjectProgram: StaticObjectGeometryProgram;
+	readonly #debugOverlayProgram: DebugOverlayProgram;
+	readonly #debugOverlayVertexArray: WebGLVertexArrayObject;
+	readonly #debugOverlayVertexBuffer: WebGLBuffer;
 	#animationFrameId: number | null = null;
 	#disposed = false;
 	#frameCount = 0;
 	#frameHandlerMs = 0;
 	#frameState = defaultFrameState;
 	#staticRenderAnchorLandblockId: number | null = null;
+	#debugOverlayPrimitiveCount = 0;
+	#debugOverlayVertexCount = 0;
 	#error: string | null = null;
 
 	constructor(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext) {
@@ -585,6 +617,15 @@ class Webgl2Renderer implements Renderer {
 		this.#gl = gl;
 		this.#terrainProgram = createTerrainGeometryProgram(gl);
 		this.#staticObjectProgram = createStaticObjectGeometryProgram(gl);
+		this.#debugOverlayProgram = createDebugOverlayProgram(gl);
+		const vertexArray = gl.createVertexArray();
+		const vertexBuffer = gl.createBuffer();
+		if (!vertexArray || !vertexBuffer) {
+			throw new Error("Failed to create V2 debug overlay resources.");
+		}
+		this.#debugOverlayVertexArray = vertexArray;
+		this.#debugOverlayVertexBuffer = vertexBuffer;
+		this.#configureDebugOverlayVertexArray();
 		this.#startFrameLoop();
 	}
 
@@ -632,6 +673,22 @@ class Webgl2Renderer implements Renderer {
 
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void {
 		this.#staticRenderAnchorLandblockId = anchorLandblockId;
+		this.#emit();
+	}
+
+	setDebugOverlayPrimitives(
+		primitives: readonly DebugOverlayPrimitive[],
+	): void {
+		const vertices = createDebugOverlayVertices(primitives);
+		const gl = this.#gl;
+		gl.bindVertexArray(this.#debugOverlayVertexArray);
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.#debugOverlayVertexBuffer);
+		gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
+		gl.bindVertexArray(null);
+		gl.bindBuffer(gl.ARRAY_BUFFER, null);
+		this.#debugOverlayPrimitiveCount = primitives.length;
+		this.#debugOverlayVertexCount =
+			vertices.length / DEBUG_OVERLAY_FLOATS_PER_VERTEX;
 		this.#emit();
 	}
 
@@ -711,6 +768,9 @@ class Webgl2Renderer implements Renderer {
 		this.#warnedLayeredFallbackDrawUnitIds.clear();
 		this.#terrainProgram.dispose();
 		this.#staticObjectProgram.dispose();
+		this.#debugOverlayProgram.dispose();
+		this.#gl.deleteBuffer(this.#debugOverlayVertexBuffer);
+		this.#gl.deleteVertexArray(this.#debugOverlayVertexArray);
 		this.#listeners.clear();
 	}
 
@@ -752,6 +812,7 @@ class Webgl2Renderer implements Renderer {
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 		this.#drawTerrain();
 		this.#drawStaticObjects();
+		this.#drawDebugOverlay();
 
 		this.#frameCount += 1;
 	}
@@ -888,6 +949,33 @@ class Webgl2Renderer implements Renderer {
 		restoreStaticObjectRenderState(gl);
 	}
 
+	#drawDebugOverlay(): void {
+		if (this.#debugOverlayVertexCount === 0) {
+			return;
+		}
+
+		const gl = this.#gl;
+		const mvp = createModelViewProjectionMatrix(
+			this.#frameState,
+			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight),
+		);
+
+		gl.useProgram(this.#debugOverlayProgram.program);
+		gl.uniformMatrix4fv(
+			this.#debugOverlayProgram.uniforms.uModelViewProjection,
+			false,
+			mvp,
+		);
+		gl.disable(gl.DEPTH_TEST);
+		gl.depthMask(false);
+		applyDebugOverlayInvertBlendState(gl);
+		gl.lineWidth(1);
+		gl.bindVertexArray(this.#debugOverlayVertexArray);
+		gl.drawArrays(gl.LINES, 0, this.#debugOverlayVertexCount);
+		gl.bindVertexArray(null);
+		restoreDebugOverlayRenderState(gl);
+	}
+
 	#drawStaticObjectResource(resource: StaticObjectGeometryResource): void {
 		const gl = this.#gl;
 		const bindings =
@@ -964,6 +1052,7 @@ class Webgl2Renderer implements Renderer {
 			backend: "webgl2",
 			canvasWidth: this.#canvas.width,
 			canvasHeight: this.#canvas.height,
+			debugOverlayPrimitives: this.#debugOverlayPrimitiveCount,
 			error: this.#error,
 			frameCount: this.#frameCount,
 			frameHandlerMs: this.#frameHandlerMs,
@@ -1017,6 +1106,26 @@ class Webgl2Renderer implements Renderer {
 			resource.localSortCenter,
 			this.#createResourceTranslation(resource),
 		);
+	}
+
+	#configureDebugOverlayVertexArray(): void {
+		const gl = this.#gl;
+		gl.bindVertexArray(this.#debugOverlayVertexArray);
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.#debugOverlayVertexBuffer);
+		const stride = DEBUG_OVERLAY_FLOATS_PER_VERTEX * Float32Array.BYTES_PER_ELEMENT;
+		gl.enableVertexAttribArray(0);
+		gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
+		gl.enableVertexAttribArray(1);
+		gl.vertexAttribPointer(
+			1,
+			4,
+			gl.FLOAT,
+			false,
+			stride,
+			3 * Float32Array.BYTES_PER_ELEMENT,
+		);
+		gl.bindVertexArray(null);
+		gl.bindBuffer(gl.ARRAY_BUFFER, null);
 	}
 }
 
@@ -1093,6 +1202,14 @@ interface StaticObjectGeometryProgram {
 		readonly uStaticIndexTextures: readonly WebGLUniformLocation[];
 		readonly uStaticPaletteSizes: WebGLUniformLocation;
 		readonly uStaticPaletteTextures: readonly WebGLUniformLocation[];
+	};
+	dispose(): void;
+}
+
+interface DebugOverlayProgram {
+	readonly program: WebGLProgram;
+	readonly uniforms: {
+		readonly uModelViewProjection: WebGLUniformLocation;
 	};
 	dispose(): void;
 }
@@ -1422,6 +1539,47 @@ function createStaticObjectGeometryProgram(
 				"uStaticPaletteTexture",
 				MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
 			),
+		},
+		dispose() {
+			gl.deleteProgram(program);
+		},
+	};
+}
+
+function createDebugOverlayProgram(
+	gl: WebGL2RenderingContext,
+): DebugOverlayProgram {
+	const vertexShader = compileShader(
+		gl,
+		gl.VERTEX_SHADER,
+		DEBUG_OVERLAY_VERTEX_SHADER,
+	);
+	const fragmentShader = compileShader(
+		gl,
+		gl.FRAGMENT_SHADER,
+		DEBUG_OVERLAY_FRAGMENT_SHADER,
+	);
+	const program = gl.createProgram();
+	if (!program) {
+		throw new Error("Failed to create V2 debug overlay shader program.");
+	}
+
+	gl.attachShader(program, vertexShader);
+	gl.attachShader(program, fragmentShader);
+	gl.linkProgram(program);
+	gl.deleteShader(vertexShader);
+	gl.deleteShader(fragmentShader);
+
+	if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+		const message = gl.getProgramInfoLog(program) ?? "unknown link error";
+		gl.deleteProgram(program);
+		throw new Error(`Failed to link V2 debug overlay shader: ${message}`);
+	}
+
+	return {
+		program,
+		uniforms: {
+			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
 		},
 		dispose() {
 			gl.deleteProgram(program);
@@ -2059,7 +2217,88 @@ function applyStaticObjectRenderState(
 function restoreStaticObjectRenderState(gl: WebGL2RenderingContext): void {
 	gl.depthMask(true);
 	gl.disable(gl.BLEND);
+	gl.blendEquation(gl.FUNC_ADD);
 	gl.blendFunc(gl.ONE, gl.ZERO);
+}
+
+function applyDebugOverlayInvertBlendState(gl: WebGL2RenderingContext): void {
+	gl.enable(gl.BLEND);
+	gl.blendEquationSeparate(gl.FUNC_SUBTRACT, gl.FUNC_ADD);
+	gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ZERO, gl.ONE);
+}
+
+function restoreDebugOverlayRenderState(gl: WebGL2RenderingContext): void {
+	gl.enable(gl.DEPTH_TEST);
+	gl.depthMask(true);
+	gl.disable(gl.BLEND);
+	gl.blendEquation(gl.FUNC_ADD);
+	gl.blendFunc(gl.ONE, gl.ZERO);
+}
+
+function createDebugOverlayVertices(
+	primitives: readonly DebugOverlayPrimitive[],
+): Float32Array {
+	const vertices: number[] = [];
+	for (const primitive of primitives) {
+		if (primitive.kind === "aabb") {
+			appendDebugOverlayAabb(vertices, primitive);
+		}
+	}
+
+	return new Float32Array(vertices);
+}
+
+function appendDebugOverlayAabb(
+	vertices: number[],
+	primitive: Extract<DebugOverlayPrimitive, { readonly kind: "aabb" }>,
+): void {
+	const [minX, minY, minZ] = primitive.min;
+	const [maxX, maxY, maxZ] = primitive.max;
+	const corners = [
+		[minX, minY, minZ],
+		[maxX, minY, minZ],
+		[maxX, maxY, minZ],
+		[minX, maxY, minZ],
+		[minX, minY, maxZ],
+		[maxX, minY, maxZ],
+		[maxX, maxY, maxZ],
+		[minX, maxY, maxZ],
+	] as const;
+	const edges = [
+		[0, 1],
+		[1, 2],
+		[2, 3],
+		[3, 0],
+		[4, 5],
+		[5, 6],
+		[6, 7],
+		[7, 4],
+		[0, 4],
+		[1, 5],
+		[2, 6],
+		[3, 7],
+	] as const;
+
+	for (const [left, right] of edges) {
+		appendDebugOverlayVertex(vertices, corners[left], primitive.color);
+		appendDebugOverlayVertex(vertices, corners[right], primitive.color);
+	}
+}
+
+function appendDebugOverlayVertex(
+	vertices: number[],
+	position: readonly [number, number, number],
+	color: readonly [number, number, number, number],
+): void {
+	vertices.push(
+		position[0],
+		position[1],
+		position[2],
+		color[0],
+		color[1],
+		color[2],
+		color[3],
+	);
 }
 
 function uploadTerrainLayeredUniforms(

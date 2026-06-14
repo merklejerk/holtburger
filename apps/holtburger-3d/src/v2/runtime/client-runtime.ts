@@ -2,7 +2,7 @@ import { HostBackedAssetService } from "../assets/asset-service";
 import type { AssetService, AssetServiceSnapshot } from "../assets/contracts";
 import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
 import type { Renderer, RendererSnapshot } from "../renderer/types";
-import type { FrameState } from "../renderer/types";
+import type { DebugOverlayPrimitive, FrameState } from "../renderer/types";
 import { formatHex32, normalizeOutdoorLandblockId } from "../../lib/landblocks";
 import { TextureManager } from "../textures/texture-manager";
 import type { TexturePacker } from "../textures/packing/packer";
@@ -24,6 +24,7 @@ import type {
 	StaticCoordinatorSnapshot,
 	StaticCoordinatorCommitDelta,
 	StaticDemand,
+	StaticBounds,
 	StaticDrawUnit,
 	StaticLodRadii,
 	StaticMaterialCoverageReport,
@@ -36,10 +37,12 @@ import {
 } from "./static-materializer";
 import {
 	StaticSceneQuery,
+	describeStaticSceneSelectionKey,
 	type StaticScenePickRequest,
 	type StaticScenePickHit,
 	type StaticSceneQuerySnapshot,
 	type StaticSceneQueryRetainedScope,
+	type StaticSceneSelectionKey,
 } from "./static-scene-query";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
@@ -104,6 +107,7 @@ interface StaticMaterializationFailureSnapshot {
 export interface ClientRuntime {
 	updateSceneInterest(interest: RuntimeSceneInterest): void;
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null;
+	setStaticDebugSelection(selectionKey: StaticSceneSelectionKey | null): void;
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void;
 	updateFrameState(state: FrameState): void;
 	createDiagnosticsReport(): RuntimeDiagnosticsReport;
@@ -170,6 +174,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #materializedDrawUnitsById = new Map<string, StaticDrawUnit>();
 	#recentTerrainTextureFallbacks: TerrainTextureFallbackDiagnostics[] = [];
 	readonly #reportedStaticResolverFailures = new Set<string>();
+	#staticDebugSelectionKey: StaticSceneSelectionKey | null = null;
 	#disposed = false;
 
 	constructor(
@@ -197,6 +202,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			backend: "webgl2",
 			canvasWidth: 0,
 			canvasHeight: 0,
+			debugOverlayPrimitives: 0,
 			error: null,
 			frameCount: 0,
 			frameHandlerMs: 0,
@@ -227,6 +233,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				this.#staticSceneQuery.ingestSourcePayload(delta.payload, {
 					outdoorAnchorLandblockId: this.#renderAnchorLandblockId,
 				});
+				this.#refreshStaticDebugOverlay();
 				this.#emit();
 			});
 	}
@@ -250,12 +257,22 @@ class ClientRuntimeImpl implements ClientRuntime {
 				}),
 			),
 		);
+		this.#refreshStaticDebugOverlay();
 		this.#emit();
 	}
 
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null {
 		this.#assertActive();
 		return this.#staticSceneQuery.pickRay(request);
+	}
+
+	setStaticDebugSelection(
+		selectionKey: StaticSceneSelectionKey | null,
+	): void {
+		this.#assertActive();
+		this.#staticDebugSelectionKey = selectionKey;
+		this.#refreshStaticDebugOverlay();
+		this.#emit();
 	}
 
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void {
@@ -326,6 +343,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#unsubscribeStaticCoordinator();
 		this.#unsubscribeStaticCommits();
 		this.#unsubscribeStaticSourcePayloads();
+		this.#renderer.setDebugOverlayPrimitives([]);
 		this.#staticCoordinator.dispose();
 		this.#textureManager.dispose();
 		this.#renderer.dispose();
@@ -347,6 +365,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#renderAnchorLandblockId = nextAnchorLandblockId;
 		this.#staticSceneQuery.setOutdoorAnchorLandblockId(nextAnchorLandblockId);
 		this.#renderer.setStaticRenderAnchorLandblockId(nextAnchorLandblockId);
+		this.#refreshStaticDebugOverlay();
 	}
 
 	#createSnapshot(): RuntimeSnapshot {
@@ -548,6 +567,48 @@ class ClientRuntimeImpl implements ClientRuntime {
 			});
 		}
 	}
+
+	#refreshStaticDebugOverlay(): void {
+		if (!this.#staticDebugSelectionKey) {
+			this.#renderer.setDebugOverlayPrimitives([]);
+			return;
+		}
+
+		const debugBounds = this.#staticSceneQuery.querySelectionDebugBounds(
+			this.#staticDebugSelectionKey,
+		);
+		if (!debugBounds) {
+			const selectionKey = describeStaticSceneSelectionKey(
+				this.#staticDebugSelectionKey,
+			);
+			this.#diagnostics.warn({
+				kind: "static-debug-selection-unresolved",
+				reason: "missing-query-bounds",
+				selectionKey,
+			});
+			this.#renderer.setDebugOverlayPrimitives([]);
+			return;
+		}
+
+		this.#renderer.setDebugOverlayPrimitives([
+			createStaticDebugBoundsOverlayPrimitive(debugBounds.bounds, {
+				id: describeStaticSceneSelectionKey(debugBounds.selectionKey),
+			}),
+		]);
+	}
+}
+
+function createStaticDebugBoundsOverlayPrimitive(
+	bounds: StaticBounds,
+	options: { readonly id: string },
+): DebugOverlayPrimitive {
+	return {
+		color: [1, 0.85, 0.1, 1],
+		id: options.id,
+		kind: "aabb",
+		max: [bounds.max.x, bounds.max.y, bounds.max.z],
+		min: [bounds.min.x, bounds.min.y, bounds.min.z],
+	};
 }
 
 function isBlendedStaticAuditBucket(

@@ -32,7 +32,10 @@
 		ManualStaticDomain,
 		RuntimeSnapshot,
 	} from "../v2/runtime/client-runtime";
-	import type { StaticScenePickHit } from "../v2/runtime/static-scene-query";
+	import {
+		describeStaticSceneSelectionKey,
+		type StaticSceneSelectionKey,
+	} from "../v2/runtime/static-scene-query";
 	import type { TextureFilteringMode } from "../v2/textures/sampling-policy";
 	import PerformanceOverlay from "../v2/ui/PerformanceOverlay.svelte";
 	import {
@@ -75,7 +78,8 @@
 	let snapshot = $state<RuntimeSnapshot | null>(null);
 	let cameraState = $state<V2FreeCameraState>(createV2FreeCameraState());
 	let diagnosticsReportText = $state<string | null>(null);
-	let selectedStaticPick = $state<StaticScenePickHit | null>(null);
+	let selectedStaticSelectionKey = $state<StaticSceneSelectionKey | null>(null);
+	let selectedStaticPickDistance = $state<number | null>(null);
 	let pickPointerCandidate: {
 		readonly pointerId: number;
 		readonly startX: number;
@@ -159,7 +163,7 @@
 		}
 
 		submittedStaticLocation = parsedLocation;
-		selectedStaticPick = null;
+		clearStaticDebugSelection();
 		updateSceneInterestForLocation(parsedLocation);
 	}
 
@@ -188,7 +192,7 @@
 	function clearSceneInterest(): void {
 		clearStaticInterestRefresh();
 		submittedStaticLocation = null;
-		selectedStaticPick = null;
+		clearStaticDebugSelection();
 		followModeEnabled = false;
 		runtime?.updateSceneInterest({ kind: "none" });
 	}
@@ -590,7 +594,7 @@
 		contextLocation: V2ParsedLocationInput | null,
 	): void {
 		if (!runtime || !canvasElement || !contextLocation) {
-			selectedStaticPick = null;
+			clearStaticDebugSelection();
 			return;
 		}
 
@@ -602,7 +606,7 @@
 						landblockId: contextLocation.landblockId,
 					}
 				: { kind: "outdoor" as const };
-		selectedStaticPick = runtime.pickStaticRay(
+		const hit = runtime.pickStaticRay(
 			createBrowserStaticPickRay({
 				camera:
 					cameraController?.createFrameStateCamera() ??
@@ -614,22 +618,27 @@
 				viewport: canvasElement.getBoundingClientRect(),
 			}),
 		);
+		selectedStaticSelectionKey = hit?.selectionKey ?? null;
+		selectedStaticPickDistance = hit?.distance ?? null;
+		runtime.setStaticDebugSelection(selectedStaticSelectionKey);
 	}
 
-	function formatStaticPickSummary(hit: StaticScenePickHit | null): string {
-		if (!hit) {
+	function clearStaticDebugSelection(): void {
+		selectedStaticSelectionKey = null;
+		selectedStaticPickDistance = null;
+		runtime?.setStaticDebugSelection(null);
+	}
+
+	function formatStaticPickSummary(
+		selectionKey: StaticSceneSelectionKey | null,
+		distance: number | null,
+	): string {
+		if (!selectionKey) {
 			return "none";
 		}
 
-		if (hit.itemKind === "outdoor-static-object") {
-			return `${hit.domain} ${hit.instanceId} d=${hit.distance.toFixed(2)}`;
-		}
-
-		if (hit.itemKind === "terrain-quad") {
-			return `terrain ${formatHexId(hit.landblockId)} q${hit.quadIndex} d=${hit.distance.toFixed(2)}`;
-		}
-
-		return `env-cell ${formatHexId(hit.envCellId)} ${hit.instanceId} d=${hit.distance.toFixed(2)}`;
+		const distanceText = distance === null ? "" : ` d=${distance.toFixed(2)}`;
+		return `${describeStaticSceneSelectionKey(selectionKey)}${distanceText}`;
 	}
 
 	function formatHexId(value: number): string {
@@ -1028,7 +1037,12 @@
 						</div>
 						<div>
 							<dt>Selected static</dt>
-							<dd>{formatStaticPickSummary(selectedStaticPick)}</dd>
+							<dd>
+								{formatStaticPickSummary(
+									selectedStaticSelectionKey,
+									selectedStaticPickDistance,
+								)}
+							</dd>
 						</div>
 						<div>
 							<dt>Host</dt>

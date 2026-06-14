@@ -4059,6 +4059,7 @@ Current steering:
 - Camera landblock residency is simple outdoor grid math derived from the current outdoor anchor and the camera's renderer-local position. Put this helper in V2 runtime/static placement code, not in Svelte.
 - Current WebGL2 static placement is baked into vertex buffers during upload. That blocks cheap anchor rebasing. Renderer resources should keep source/local vertex buffers and apply placement/root translation at draw time, preferably through explicit shader uniforms or an equivalent per-resource transform path.
 - The `StaticSceneQuery` outdoor landblock-grid broadphase is already shaped around root translations, but it needs an explicit reanchor/update path for resident roots instead of relying on clear/re-ingest behavior.
+- Browser follow mode must be visible and opt-in. It should be off by default and surfaced as a toggle button/control in the existing V2 navigation tab near the landblock focus controls, not hidden in settings or enabled implicitly by camera movement.
 - Env-cell/dungeon follow behavior can use the same scene-interest/update machinery, but this phase should focus on outdoor anchor movement and leave richer portal/current-cell follow policy to Phase 13 unless required for correctness.
 
 Deliverables:
@@ -4079,7 +4080,7 @@ Deliverables:
 - WebGL2 renderer update so terrain and static object vertex buffers remain in source/local draw-unit coordinates and placement translation is applied at draw time. Terrain shader world-position calculations must use the translated position when placement affects rendering or material effects.
 - Runtime materialization update so draw-unit placement is retained as mutable residency state, not only a one-time upload translation.
 - `StaticSceneQuery` reanchor/update API that recomputes outdoor root translations and landblock-grid buckets for resident terrain/static roots without rebuilding the source BVHs.
-- Browser V2 follow-mode control that observes camera movement, asks the runtime helper for anchor residency changes, and submits scene-interest updates through the same runtime API used by manual navigation.
+- Browser V2 navigation-tab follow-mode toggle that is off by default. When enabled, it observes camera movement, asks the runtime helper for anchor residency changes, and submits scene-interest updates through the same runtime API used by manual navigation; when disabled, manual/fixed-anchor navigation remains unchanged.
 - Removal of the legacy non-incremental browser refresh path once the scene-interest API covers manual load, follow updates, and evict.
 - Tests covering:
   - camera-position-to-landblock residency across positive and negative local X/Z offsets,
@@ -4092,6 +4093,7 @@ Deliverables:
 Acceptance criteria:
 
 - Manual V2 browser loading and follow-mode anchor updates use one runtime scene-interest API; there is no separate legacy `requestStaticWork()` rebuild path left behind.
+- Follow mode is not enabled by default and is controlled by an explicit toggle in the V2 browser navigation tab.
 - Moving the outdoor anchor by one landblock retains overlapping coverage work and only requests/evicts the set difference.
 - Resident terrain/static renderer resources can be repositioned for a new anchor without rebaking and without re-uploading position buffers solely to change the anchor translation.
 - Static scene picking and terrain picking remain aligned with the renderer after anchor changes.
@@ -4115,7 +4117,7 @@ Phase 12A6 verification:
 - `cd apps/holtburger-3d && npm run lint:dead`
 - `cd apps/holtburger-3d && npm run test:ts -- runtime/client-runtime runtime/static-materializer runtime/static-scene-query static/coordinator/static-coordinator`
 - `cd apps/holtburger-3d && npm run test:ts`
-- Browser visual verification of `/browser-v2` manual load, follow-mode anchor movement, and click picking after at least one outdoor reanchor.
+- Browser visual verification of `/browser-v2` manual load, follow-mode opt-in toggle behavior, follow-mode anchor movement, follow-mode disabled/fixed-anchor behavior, and click picking after at least one outdoor reanchor.
 
 ### Phase 12: Static Object Breadth And Compaction
 

@@ -8,6 +8,7 @@ import type {
 } from "../assets/contracts";
 import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
 import type {
+	DebugOverlayPrimitive,
 	Renderer,
 	RendererSnapshot,
 	RendererSnapshotListener,
@@ -20,6 +21,7 @@ import type {
 	PreparedRgbaRenderSurfaceTextureUseIdentity,
 	StaticBakeTextureUse,
 	StaticMaterialCoverageReport,
+	TerrainStaticScopePayload,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialFallbackReason,
 } from "../static/contracts";
@@ -28,6 +30,7 @@ import {
 	DeferredStaticResolver,
 } from "../static/fake-workers";
 import { createClientRuntime, type RuntimeSnapshot } from "./client-runtime";
+import { createTerrainQuadSelectionKey } from "./static-scene-query";
 import type { RuntimeDiagnostics } from "./diagnostics";
 
 const silentDiagnostics: RuntimeDiagnostics = {
@@ -178,6 +181,47 @@ describe("V2 client runtime", () => {
 				},
 			}),
 		).toBeNull();
+		runtime.dispose();
+	});
+
+	it("refreshes static debug overlays when selected source bounds arrive", async () => {
+		const renderer = new FakeRenderer();
+		const resolver = new DeferredStaticResolver();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker: new DeferredStaticBaker(),
+				resolver,
+			}),
+		});
+		const selectionKey = createTerrainQuadSelectionKey({
+			landblockId: 0xda55ffff,
+			quadIndex: 0,
+		});
+
+		runtime.setStaticDebugSelection(selectionKey);
+		expect(renderer.debugOverlayUpdates.at(-1)).toEqual([]);
+
+		updateOutdoorSceneInterest(runtime);
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "", {
+			scope: createTerrainSourceScopePayload(),
+		});
+		await flushPromises();
+
+		expect(renderer.debugOverlayUpdates.at(-1)).toEqual([
+			{
+				color: [1, 0.85, 0.1, 1],
+				id: "terrain-quad:outdoor-terrain:da55ffff:0",
+				kind: "aabb",
+				max: [24, 24, 3],
+				min: [0, 0, 0],
+			},
+		]);
+
+		runtime.setStaticDebugSelection(null);
+		expect(renderer.debugOverlayUpdates.at(-1)).toEqual([]);
 		runtime.dispose();
 	});
 
@@ -625,6 +669,7 @@ function updateInteriorSceneInterest(
 class FakeRenderer implements Renderer {
 	readonly staticDeltas: StaticResidencyDelta[] = [];
 	readonly staticAnchorLandblockIds: (number | null)[] = [];
+	readonly debugOverlayUpdates: readonly DebugOverlayPrimitive[][] = [];
 	readonly textureUpdates: TexturePlacementUpdate[] = [];
 	readonly samplerPolicyUpdates: SamplerPolicyUpdate[] = [];
 	readonly events: string[] = [];
@@ -632,6 +677,7 @@ class FakeRenderer implements Renderer {
 		backend: "webgl2",
 		canvasHeight: 1,
 		canvasWidth: 1,
+		debugOverlayPrimitives: 0,
 		error: null,
 		frameCount: 0,
 		frameHandlerMs: 0,
@@ -671,6 +717,15 @@ class FakeRenderer implements Renderer {
 	}
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void {
 		this.staticAnchorLandblockIds.push(anchorLandblockId);
+	}
+	setDebugOverlayPrimitives(
+		primitives: readonly DebugOverlayPrimitive[],
+	): void {
+		this.debugOverlayUpdates.push([...primitives]);
+		this.#snapshot = {
+			...this.#snapshot,
+			debugOverlayPrimitives: primitives.length,
+		};
 	}
 	updateFrameState(): void {}
 
@@ -752,6 +807,117 @@ class DeferredAssetService implements AssetService {
 interface DeferredAssetRequest {
 	readonly resolve: (asset: PreparedAsset) => void;
 	readonly reject: (error: Error) => void;
+}
+
+function createTerrainSourceScopePayload(): TerrainStaticScopePayload {
+	const quadBounds = {
+		max: { x: 24, y: 24, z: 3 },
+		min: { x: 0, y: 0, z: 0 },
+	};
+
+	return {
+		kind: "terrain",
+		landblock: {
+			kind: "landblock-source",
+			landblockId: 0xda55ffff,
+			source: "outdoor",
+		},
+		mesh: {
+			bounds: quadBounds,
+			gridSize: 2,
+			maxHeight: 3,
+			minHeight: 0,
+			quadCount: 1,
+			quads: [
+				{
+					averageHeight: 1,
+					bounds: quadBounds,
+					col: 0,
+					cornerTerrainCodes: [1, 1, 1, 1],
+					diagonal: "southwest-northeast",
+					pcode: 1,
+					quadIndex: 0,
+					row: 0,
+					sourceTerrainIndices: [0, 1, 2, 3],
+					terrainQuadId: "q0",
+					triangleIndices: [0, 1],
+					vertexIndices: [0, 1, 2, 3],
+				},
+			],
+			tileSize: 24,
+			triangleCount: 2,
+			triangles: [
+				{
+					averageHeight: 1,
+					bounds: quadBounds,
+					quadIndex: 0,
+					terrainTriangleId: "t0",
+					triangleInQuad: 0,
+					vertexIndices: [0, 1, 2],
+				},
+				{
+					averageHeight: 1,
+					bounds: quadBounds,
+					quadIndex: 0,
+					terrainTriangleId: "t1",
+					triangleInQuad: 1,
+					vertexIndices: [1, 3, 2],
+				},
+			],
+			vertexCount: 4,
+			vertices: [
+				{ x: 0, y: 0, z: 0 },
+				{ x: 24, y: 0, z: 1 },
+				{ x: 0, y: 24, z: 2 },
+				{ x: 24, y: 24, z: 3 },
+			],
+		},
+		missingRefs: [],
+		regionRenderProfile: {
+			detailRoles: [],
+			identity: {
+				kind: "region-render-profile",
+				regionNumber: 1,
+			},
+		},
+		sourceSpatial: {
+			bounds: quadBounds,
+			coordinateSpace: "landblock-render-local",
+			terrainBvh: {
+				coordinateSpace: "landblock-outdoor-terrain-local",
+				items: [{ quadIndex: 0 }],
+				nodes: [
+					{
+						bounds: quadBounds,
+						itemIndices: [0],
+						left: null,
+						right: null,
+					},
+				],
+			},
+			terrainBvhItemCount: 1,
+			terrainBvhNodeCount: 1,
+		},
+		terrainMaterial: {
+			alphaMapCount: 0,
+			identity: {
+				kind: "terrain-material",
+				regionNumber: 1,
+			},
+			materialKind: "tex-merge-table",
+			pcodeEncoding: {
+				roadCodeBits: 2,
+				sizeBitMask: 0,
+				terrainCodeBits: 5,
+			},
+			roadAlphaMapCount: 0,
+			roadAlphaMaps: [],
+			terrainAlphaMaps: [],
+			terrainTypeCount: 0,
+			terrainTypes: [],
+		},
+		textureUses: [],
+	};
 }
 
 function createTerrainDrawUnit(

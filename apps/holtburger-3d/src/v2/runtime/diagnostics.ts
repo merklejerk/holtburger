@@ -219,7 +219,8 @@ type RuntimeWarningEvent =
 	| StaticResolverFailedWarning
 	| StaticMaterializationFailedWarning
 	| StaticMaterialCoverageDeferredWarning
-	| TerrainRenderableFallbackWarning;
+	| TerrainRenderableFallbackWarning
+	| StaticDebugSelectionUnresolvedWarning;
 
 interface StaticResolverFailedWarning {
 	readonly kind: "static-resolver-failed";
@@ -245,6 +246,12 @@ interface StaticMaterialCoverageDeferredWarning {
 	readonly buckets: readonly StaticMaterialUnrenderedBucket[];
 }
 
+interface StaticDebugSelectionUnresolvedWarning {
+	readonly kind: "static-debug-selection-unresolved";
+	readonly selectionKey: string;
+	readonly reason: "missing-query-bounds";
+}
+
 interface TerrainRenderableFallbackWarning {
 	readonly kind: "terrain-renderable-fallback";
 	readonly revision: number;
@@ -261,6 +268,7 @@ export function createConsoleRuntimeDiagnostics(): RuntimeDiagnostics {
 class ConsoleRuntimeDiagnostics implements RuntimeDiagnostics {
 	readonly #reportedFallbacks = new Set<string>();
 	readonly #reportedStaticMaterialCoverage = new Set<string>();
+	readonly #reportedStaticDebugSelectionFailures = new Set<string>();
 
 	warn(event: RuntimeWarningEvent): void {
 		switch (event.kind) {
@@ -285,7 +293,24 @@ class ConsoleRuntimeDiagnostics implements RuntimeDiagnostics {
 			case "terrain-renderable-fallback":
 				this.#warnTerrainRenderableFallback(event);
 				return;
+			case "static-debug-selection-unresolved":
+				this.#warnStaticDebugSelectionUnresolved(event);
+				return;
 		}
+	}
+
+	#warnStaticDebugSelectionUnresolved(
+		event: StaticDebugSelectionUnresolvedWarning,
+	): void {
+		const warningKey = [event.selectionKey, event.reason].join("|");
+		if (this.#reportedStaticDebugSelectionFailures.has(warningKey)) {
+			return;
+		}
+		this.#reportedStaticDebugSelectionFailures.add(warningKey);
+		console.warn(
+			`V2 static debug selection ${event.selectionKey} could not be resolved to query bounds.`,
+			{ reason: event.reason },
+		);
 	}
 
 	#warnStaticMaterialCoverageDeferred(

@@ -6,6 +6,11 @@ import type {
 } from "../static/contracts";
 import {
 	StaticSceneQuery,
+	compareStaticSceneSelectionKeys,
+	createEnvCellStaticObjectSelectionKey,
+	createOutdoorStaticObjectSelectionKey,
+	createTerrainQuadSelectionKey,
+	describeStaticSceneSelectionKey,
 	traceLandblockGridRayCells,
 } from "./static-scene-query";
 
@@ -70,8 +75,10 @@ describe("V2 static scene query", () => {
 		});
 
 		expect(hit).toMatchObject({
-			instanceId: "outdoor-static-0",
-			itemKind: "outdoor-static-object",
+			selectionKey: {
+				instanceId: "outdoor-static-0",
+				itemKind: "outdoor-static-object",
+			},
 		});
 		expect(hit?.distance).toBe(4);
 		expect(
@@ -94,6 +101,53 @@ describe("V2 static scene query", () => {
 		});
 	});
 
+	it("returns normalized selection keys and resolves selected debug bounds", () => {
+		const query = new StaticSceneQuery();
+		query.ingestOutdoorStaticObjects(createOutdoorStaticObjectsPayload());
+		query.ingestTerrain(createTerrainPayload());
+		query.ingestLandblockEnvCells(createLandblockEnvCellsPayload());
+
+		const outdoorKey = createOutdoorStaticObjectSelectionKey({
+			domain: "outdoor-detail",
+			instanceId: "outdoor-static-0",
+			landblockId: 0xda55ffff,
+		});
+		const terrainKey = createTerrainQuadSelectionKey({
+			landblockId: 0xda55ffff,
+			quadIndex: 0,
+		});
+		const envCellKey = createEnvCellStaticObjectSelectionKey({
+			envCellId: 0xda550100,
+			instanceId: "env-static-0",
+			landblockId: 0xda55ffff,
+		});
+
+		expect(
+			describeStaticSceneSelectionKey(outdoorKey),
+		).toBe("outdoor-static-object:outdoor-detail:da55ffff:outdoor-static-0");
+		expect(compareStaticSceneSelectionKeys(outdoorKey, terrainKey)).toBeLessThan(
+			0,
+		);
+		expect(
+			query.querySelectionDebugBounds(outdoorKey)?.bounds,
+		).toMatchObject({
+			max: { x: 1, y: 1, z: -4 },
+			min: { x: -1, y: -1, z: -5 },
+		});
+		expect(
+			query.querySelectionDebugBounds(terrainKey)?.bounds,
+		).toMatchObject({
+			max: { x: 4, y: 4, z: 1 },
+			min: { x: 0, y: 0, z: 0 },
+		});
+		expect(
+			query.querySelectionDebugBounds(envCellKey)?.bounds,
+		).toMatchObject({
+			max: { x: 1, y: 1, z: -4 },
+			min: { x: -1, y: -1, z: -5 },
+		});
+	});
+
 	it("applies outdoor request-anchor root translation without rebuilding BVH nodes", () => {
 		const query = new StaticSceneQuery();
 		query.ingestOutdoorStaticObjects(
@@ -110,8 +164,10 @@ describe("V2 static scene query", () => {
 		});
 
 		expect(hit).toMatchObject({
-			instanceId: "outdoor-static-0",
-			itemKind: "outdoor-static-object",
+			selectionKey: {
+				instanceId: "outdoor-static-0",
+				itemKind: "outdoor-static-object",
+			},
 		});
 		expect(hit?.distance).toBe(4);
 
@@ -124,8 +180,10 @@ describe("V2 static scene query", () => {
 			},
 		});
 		expect(rebasedHit).toMatchObject({
-			instanceId: "outdoor-static-0",
-			itemKind: "outdoor-static-object",
+			selectionKey: {
+				instanceId: "outdoor-static-0",
+				itemKind: "outdoor-static-object",
+			},
 		});
 		expect(rebasedHit?.distance).toBe(4);
 	});
@@ -153,9 +211,11 @@ describe("V2 static scene query", () => {
 		});
 
 		expect(hit).toMatchObject({
-			instanceId: "outdoor-static-0",
-			itemKind: "outdoor-static-object",
-			landblockId: 0xdb55ffff,
+			selectionKey: {
+				instanceId: "outdoor-static-0",
+				itemKind: "outdoor-static-object",
+				landblockId: 0xdb55ffff,
+			},
 		});
 		expect(hit?.distance).toBe(191);
 		expect(query.createSnapshot()).toMatchObject({
@@ -191,8 +251,10 @@ describe("V2 static scene query", () => {
 		});
 
 		expect(hit).toMatchObject({
-			instanceId: "outdoor-static-0",
-			landblockId: 0xdb55ffff,
+			selectionKey: {
+				instanceId: "outdoor-static-0",
+				landblockId: 0xdb55ffff,
+			},
 		});
 		expect(hit?.distance).toBe(191);
 	});
@@ -239,11 +301,11 @@ describe("V2 static scene query", () => {
 
 		expect(containingHit).toMatchObject({
 			distance: 0,
-			instanceId: "outdoor-containing-0",
+			selectionKey: { instanceId: "outdoor-containing-0" },
 		});
 		expect(filteredHit).toMatchObject({
 			distance: 4,
-			instanceId: "outdoor-static-0",
+			selectionKey: { instanceId: "outdoor-static-0" },
 		});
 	});
 
@@ -263,7 +325,7 @@ describe("V2 static scene query", () => {
 
 		expect(hit).toMatchObject({
 			distance: 4,
-			instanceId: "outdoor-static-0",
+			selectionKey: { instanceId: "outdoor-static-0" },
 		});
 	});
 
@@ -300,10 +362,12 @@ describe("V2 static scene query", () => {
 
 		expect(hit).toMatchObject({
 			distance: 3,
-			domain: "outdoor-terrain",
-			itemKind: "terrain-quad",
-			landblockId: 0xda55ffff,
-			quadIndex: 0,
+			selectionKey: {
+				domain: "outdoor-terrain",
+				itemKind: "terrain-quad",
+				landblockId: 0xda55ffff,
+				quadIndex: 0,
+			},
 		});
 		expect(
 			query.queryTerrainQuadDetails({
@@ -340,9 +404,11 @@ describe("V2 static scene query", () => {
 		});
 
 		expect(hit).toMatchObject({
-			envCellId: 0xda550100,
-			instanceId: "env-static-0",
-			itemKind: "env-cell-static-object",
+			selectionKey: {
+				envCellId: 0xda550100,
+				instanceId: "env-static-0",
+				itemKind: "env-cell-static-object",
+			},
 		});
 		expect(
 			query.queryEnvCellStaticObjectDetails({

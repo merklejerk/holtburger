@@ -39,8 +39,8 @@ export interface StaticScenePickRequest {
 }
 
 interface StaticScenePickFilters {
-	readonly itemKinds?: readonly StaticScenePickHit["itemKind"][];
-	readonly domains?: readonly StaticScenePickHit["domain"][];
+	readonly itemKinds?: readonly StaticSceneSelectionKey["itemKind"][];
+	readonly domains?: readonly StaticSceneSelectionKey["domain"][];
 	readonly ignoreContainingOrigin?: boolean;
 }
 
@@ -49,38 +49,55 @@ export type StaticScenePickHit =
 	| EnvCellStaticScenePickHit
 	| TerrainQuadScenePickHit;
 
-export interface OutdoorStaticObjectScenePickHit {
-	readonly kind: "static-scene-pick-hit";
+export type StaticSceneSelectionKey =
+	| OutdoorStaticObjectSceneSelectionKey
+	| EnvCellStaticSceneSelectionKey
+	| TerrainQuadSceneSelectionKey;
+
+export interface OutdoorStaticObjectSceneSelectionKey {
 	readonly itemKind: "outdoor-static-object";
 	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
-	readonly distance: number;
-	readonly hitPoint: StaticSceneVec3;
-	readonly bounds: StaticBounds;
 	readonly landblockId: number;
 	readonly instanceId: string;
 }
 
-export interface EnvCellStaticScenePickHit {
-	readonly kind: "static-scene-pick-hit";
+export interface EnvCellStaticSceneSelectionKey {
 	readonly itemKind: "env-cell-static-object";
 	readonly domain: "landblock-env-cells";
-	readonly distance: number;
-	readonly hitPoint: StaticSceneVec3;
-	readonly bounds: StaticBounds;
 	readonly landblockId: number;
 	readonly envCellId: number;
 	readonly instanceId: string;
 }
 
-export interface TerrainQuadScenePickHit {
-	readonly kind: "static-scene-pick-hit";
+export interface TerrainQuadSceneSelectionKey {
 	readonly itemKind: "terrain-quad";
 	readonly domain: "outdoor-terrain";
+	readonly landblockId: number;
+	readonly quadIndex: number;
+}
+
+export interface OutdoorStaticObjectScenePickHit {
+	readonly kind: "static-scene-pick-hit";
 	readonly distance: number;
 	readonly hitPoint: StaticSceneVec3;
 	readonly bounds: StaticBounds;
-	readonly landblockId: number;
-	readonly quadIndex: number;
+	readonly selectionKey: OutdoorStaticObjectSceneSelectionKey;
+}
+
+export interface EnvCellStaticScenePickHit {
+	readonly kind: "static-scene-pick-hit";
+	readonly distance: number;
+	readonly hitPoint: StaticSceneVec3;
+	readonly bounds: StaticBounds;
+	readonly selectionKey: EnvCellStaticSceneSelectionKey;
+}
+
+export interface TerrainQuadScenePickHit {
+	readonly kind: "static-scene-pick-hit";
+	readonly distance: number;
+	readonly hitPoint: StaticSceneVec3;
+	readonly bounds: StaticBounds;
+	readonly selectionKey: TerrainQuadSceneSelectionKey;
 }
 
 export interface OutdoorStaticObjectScenePickDetails {
@@ -104,6 +121,11 @@ export interface TerrainQuadScenePickDetails {
 	readonly landblockId: number;
 	readonly quad: TerrainMeshQuadFacts;
 	readonly bvhItemIndex: number;
+}
+
+export interface StaticSceneSelectionDebugBounds {
+	readonly bounds: StaticBounds;
+	readonly selectionKey: StaticSceneSelectionKey;
 }
 
 export interface StaticSceneQuerySnapshot {
@@ -816,6 +838,75 @@ export class StaticSceneQuery {
 		return null;
 	}
 
+	querySelectionDebugBounds(
+		selectionKey: StaticSceneSelectionKey,
+	): StaticSceneSelectionDebugBounds | null {
+		if (selectionKey.itemKind === "outdoor-static-object") {
+			const root = this.#outdoorBvhRootsByDomainAndLandblock.get(
+				createOutdoorRootKey(selectionKey.domain, selectionKey.landblockId),
+			);
+			if (!root) {
+				return null;
+			}
+
+			for (const item of root.items) {
+				if (
+					item?.object.identity.instanceId === selectionKey.instanceId &&
+					item.object.instanceBounds
+				) {
+					return {
+						bounds: translateBounds(item.object.instanceBounds, root.translation),
+						selectionKey,
+					};
+				}
+			}
+
+			return null;
+		}
+
+		if (selectionKey.itemKind === "terrain-quad") {
+			const root = this.#terrainBvhRootsByLandblockId.get(
+				selectionKey.landblockId,
+			);
+			if (!root) {
+				return null;
+			}
+
+			for (const item of root.items) {
+				if (item?.quad.quadIndex === selectionKey.quadIndex) {
+					return {
+						bounds: translateBounds(item.quad.bounds, root.translation),
+						selectionKey,
+					};
+				}
+			}
+
+			return null;
+		}
+
+		const landblockRoot = this.#envCellRootsByLandblockId.get(
+			selectionKey.landblockId,
+		);
+		const root = landblockRoot?.cellsByEnvCellId.get(selectionKey.envCellId);
+		if (!root) {
+			return null;
+		}
+
+		for (const item of root.items) {
+			if (
+				item?.kind === "static" &&
+				item.seed.seed.identity.instanceId === selectionKey.instanceId
+			) {
+				return {
+					bounds: transformBounds(item.seed.bounds, root.placement),
+					selectionKey,
+				};
+			}
+		}
+
+		return null;
+	}
+
 	queryEnvCellAtPoint(options: {
 		readonly acceptedEnvCellIds?: readonly number[];
 		readonly landblockId: number;
@@ -929,7 +1020,7 @@ export class StaticSceneQuery {
 		currentNearestHit: StaticScenePickHit | null,
 	): OutdoorStaticObjectScenePickHit | null {
 		let nearestHit: OutdoorStaticObjectScenePickHit | null =
-			currentNearestHit?.itemKind === "outdoor-static-object"
+			isOutdoorStaticObjectScenePickHit(currentNearestHit)
 				? currentNearestHit
 				: null;
 		const localRay = translateRay(ray, negateTranslation(root.translation));
@@ -962,12 +1053,13 @@ export class StaticSceneQuery {
 							root.translation,
 						),
 						distance,
-						domain: root.domain,
 						hitPoint: pointOnRay(ray, distance),
-						instanceId: item.object.identity.instanceId,
-						itemKind: "outdoor-static-object",
 						kind: "static-scene-pick-hit",
-						landblockId: root.landblockId,
+						selectionKey: createOutdoorStaticObjectSelectionKey({
+							domain: root.domain,
+							instanceId: item.object.identity.instanceId,
+							landblockId: root.landblockId,
+						}),
 					};
 					if (matchesFilters(hit, request.filters, ray.origin)) {
 						nearestHit =
@@ -989,7 +1081,7 @@ export class StaticSceneQuery {
 		currentNearestHit: StaticScenePickHit | null,
 	): TerrainQuadScenePickHit | null {
 		let nearestHit: TerrainQuadScenePickHit | null =
-			currentNearestHit?.itemKind === "terrain-quad" ? currentNearestHit : null;
+			isTerrainQuadScenePickHit(currentNearestHit) ? currentNearestHit : null;
 		const localRay = translateRay(ray, negateTranslation(root.translation));
 		traverseBvhNearest(root.nodes, localRay, {
 			getMaxDistance: () =>
@@ -1014,12 +1106,12 @@ export class StaticSceneQuery {
 					const hit: TerrainQuadScenePickHit = {
 						bounds: translateBounds(item.quad.bounds, root.translation),
 						distance,
-						domain: "outdoor-terrain",
 						hitPoint: pointOnRay(ray, distance),
-						itemKind: "terrain-quad",
 						kind: "static-scene-pick-hit",
-						landblockId: root.landblockId,
-						quadIndex: item.quad.quadIndex,
+						selectionKey: createTerrainQuadSelectionKey({
+							landblockId: root.landblockId,
+							quadIndex: item.quad.quadIndex,
+						}),
 					};
 					if (matchesFilters(hit, request.filters, ray.origin)) {
 						nearestHit =
@@ -1113,13 +1205,13 @@ export class StaticSceneQuery {
 					const hit: EnvCellStaticScenePickHit = {
 						bounds: transformBounds(item.seed.bounds, root.placement),
 						distance,
-						domain: "landblock-env-cells",
-						envCellId: item.seed.envCellId,
 						hitPoint: pointOnRay(ray, distance),
-						instanceId: item.seed.seed.identity.instanceId,
-						itemKind: "env-cell-static-object",
 						kind: "static-scene-pick-hit",
-						landblockId: root.landblockId,
+						selectionKey: createEnvCellStaticObjectSelectionKey({
+							envCellId: item.seed.envCellId,
+							instanceId: item.seed.seed.identity.instanceId,
+							landblockId: root.landblockId,
+						}),
 					};
 					if (matchesFilters(hit, request.filters, ray.origin)) {
 						nearestHit =
@@ -1488,6 +1580,18 @@ function selectNearestHit(
 	return comparePickHits(right, left) < 0 ? right : left;
 }
 
+function isOutdoorStaticObjectScenePickHit(
+	hit: StaticScenePickHit | null,
+): hit is OutdoorStaticObjectScenePickHit {
+	return hit?.selectionKey.itemKind === "outdoor-static-object";
+}
+
+function isTerrainQuadScenePickHit(
+	hit: StaticScenePickHit | null,
+): hit is TerrainQuadScenePickHit {
+	return hit?.selectionKey.itemKind === "terrain-quad";
+}
+
 const GRID_EPSILON = 1e-8;
 
 interface BvhCandidate {
@@ -1614,8 +1718,10 @@ function matchesFilters(
 	rayOrigin: StaticSceneVec3,
 ): boolean {
 	return (
-		(!filters?.itemKinds || filters.itemKinds.includes(hit.itemKind)) &&
-		(!filters?.domains || filters.domains.includes(hit.domain)) &&
+		(!filters?.itemKinds ||
+			filters.itemKinds.includes(hit.selectionKey.itemKind)) &&
+		(!filters?.domains ||
+			filters.domains.includes(hit.selectionKey.domain)) &&
 		(!filters?.ignoreContainingOrigin || !containsPoint(hit.bounds, rayOrigin))
 	);
 }
@@ -1626,20 +1732,86 @@ function comparePickHits(
 ): number {
 	return (
 		left.distance - right.distance ||
-		left.itemKind.localeCompare(right.itemKind) ||
-		describeHitStableId(left).localeCompare(describeHitStableId(right))
+		left.selectionKey.itemKind.localeCompare(right.selectionKey.itemKind) ||
+		compareStaticSceneSelectionKeys(left.selectionKey, right.selectionKey)
 	);
 }
 
-function describeHitStableId(hit: StaticScenePickHit): string {
-	if (hit.itemKind === "outdoor-static-object") {
-		return `${hit.landblockId}:${hit.domain}:${hit.instanceId}`;
+export function createOutdoorStaticObjectSelectionKey(options: {
+	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
+	readonly landblockId: number;
+	readonly instanceId: string;
+}): OutdoorStaticObjectSceneSelectionKey {
+	return {
+		domain: options.domain,
+		instanceId: options.instanceId,
+		itemKind: "outdoor-static-object",
+		landblockId: options.landblockId,
+	};
+}
+
+export function createEnvCellStaticObjectSelectionKey(options: {
+	readonly landblockId: number;
+	readonly envCellId: number;
+	readonly instanceId: string;
+}): EnvCellStaticSceneSelectionKey {
+	return {
+		domain: "landblock-env-cells",
+		envCellId: options.envCellId,
+		instanceId: options.instanceId,
+		itemKind: "env-cell-static-object",
+		landblockId: options.landblockId,
+	};
+}
+
+export function createTerrainQuadSelectionKey(options: {
+	readonly landblockId: number;
+	readonly quadIndex: number;
+}): TerrainQuadSceneSelectionKey {
+	return {
+		domain: "outdoor-terrain",
+		itemKind: "terrain-quad",
+		landblockId: options.landblockId,
+		quadIndex: options.quadIndex,
+	};
+}
+
+export function compareStaticSceneSelectionKeys(
+	left: StaticSceneSelectionKey,
+	right: StaticSceneSelectionKey,
+): number {
+	return describeStaticSceneSelectionKey(left).localeCompare(
+		describeStaticSceneSelectionKey(right),
+	);
+}
+
+export function describeStaticSceneSelectionKey(
+	selectionKey: StaticSceneSelectionKey,
+): string {
+	if (selectionKey.itemKind === "outdoor-static-object") {
+		return [
+			selectionKey.itemKind,
+			selectionKey.domain,
+			selectionKey.landblockId.toString(16),
+			selectionKey.instanceId,
+		].join(":");
 	}
-	if (hit.itemKind === "terrain-quad") {
-		return `${hit.landblockId}:${hit.domain}:${hit.quadIndex}`;
+	if (selectionKey.itemKind === "terrain-quad") {
+		return [
+			selectionKey.itemKind,
+			selectionKey.domain,
+			selectionKey.landblockId.toString(16),
+			selectionKey.quadIndex,
+		].join(":");
 	}
 
-	return `${hit.landblockId}:${hit.envCellId}:${hit.instanceId}`;
+	return [
+		selectionKey.itemKind,
+		selectionKey.domain,
+		selectionKey.landblockId.toString(16),
+		selectionKey.envCellId.toString(16),
+		selectionKey.instanceId,
+	].join(":");
 }
 
 function createOutdoorRootKey(

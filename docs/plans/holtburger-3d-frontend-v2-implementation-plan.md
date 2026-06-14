@@ -4231,7 +4231,7 @@ Phase 12A7 verification:
 
 ### Phase 12A8: Normalized Static Selection Keys And Debug Overlay Pass
 
-Status: planned as the next immediate phase before Phase 12 breadth.
+Status: complete on 2026-06-14. Phase 12 is the next planned breadth phase.
 
 Purpose: normalize runtime static pick identity into a durable selection-key contract, then add a renderer-owned debug overlay pass that can draw selected object/terrain bounds in-scene without adding diagnostics to static residency or the scene graph.
 
@@ -4245,7 +4245,7 @@ Current steering:
 - Debug overlays are transient diagnostics. They must not become `StaticDrawUnit`s, static residency deltas, texture leases, source mappings, BVH records, or materialized scene graph entries.
 - Selected bounds should be drawn in the actual 3D scene using the same camera matrices and anchor-local coordinates as normal rendering. They should not be a DOM/canvas-2D overlay.
 - The first overlay primitive should be an AABB line box drawn last with depth testing disabled. Broader debug primitives can wait until a concrete diagnostic need appears.
-- `StaticScenePickHit.bounds` may remain during the first pass because request filters such as `ignoreContainingOrigin` currently use it internally. The browser should move to `selectionKey` state first; deeper hit minimization can follow once filtering and inspection APIs are clean.
+- `StaticScenePickHit.bounds` remains because request filters such as `ignoreContainingOrigin` use it as the immediate intersection/filter fact. Durable identity lives only on `selectionKey`; duplicated top-level identity fields should not be reintroduced.
 
 Deliverables:
 
@@ -4288,7 +4288,7 @@ Acceptance criteria:
 
 Spicy expectations:
 
-- `StaticScenePickHit` currently carries more than a strict minimal result. This phase should trim what is safe now, but it does not need to complete a full inspection API if browser diagnostics still need temporary summary fields.
+- `StaticScenePickHit` intentionally still carries `bounds` as a query/filter fact. Do not grow it back into a source/detail payload; richer inspection should be queried by `selectionKey`.
 - Env-cell static object `instanceId` is synthesized by the resolver and must remain opaque. Do not parse the `envCellId:seedInstanceId` string; the selection key already carries `envCellId` separately.
 - Terrain selection has no object instance id. Any API that only accepts `instanceId` is too narrow and should be rejected.
 - Overlay coordinate correctness depends on the Phase 12A7 owner-landblock plus current-anchor placement contract. If selected bounds drift during follow-mode reanchor, treat that as a correctness bug rather than a visual-only artifact.
@@ -4304,6 +4304,40 @@ Verification:
 - Focused tests for static-scene query selection-key shape/sorting, static-scene query selection-bounds resolution, client runtime static debug selection refresh after anchor/source/retention changes, browser static picking state, renderer snapshot overlay count, and WebGL2 overlay primitive submission.
 - `cd apps/holtburger-3d && npm run test:ts`
 - Browser visual verification in `/browser-v2`: select an outdoor static object and terrain quad; verify an in-scene AABB box appears around the selected target, remains stable after a follow-mode reanchor, and disappears when selection is cleared.
+
+Phase 12A8 execution notes:
+
+- Added a typed `StaticSceneSelectionKey` union for outdoor static objects, env-cell static objects, and terrain quads. Static ray pick hits now carry `selectionKey` as their only durable identity; duplicate top-level identity fields were removed. Hits still carry `bounds` for immediate filter/debug use.
+- Replaced private string-only hit identity sorting with exported selection-key helpers: key creation, comparison, and stable description now share one contract.
+- Added `StaticSceneQuery.querySelectionDebugBounds(...)` so selected bounds resolve inside the query service from current outdoor root translations, env-cell placement, and terrain/static source records.
+- Added `ClientRuntime.setStaticDebugSelection(...)`. Runtime stores the selection key as durable intent and regenerates renderer debug primitives after selection changes, source-payload ingestion, scene-interest retention/eviction, outdoor anchor changes, and disposal.
+- Added a typed runtime warning for unresolved static debug selections. Missing/no-bounds selections clear renderer overlay primitives and emit a deduped diagnostic warning instead of fabricating geometry.
+- Added renderer debug overlay primitives and `Renderer.setDebugOverlayPrimitives(...)`. WebGL2 uploads AABB line vertices to a dedicated dynamic buffer and draws them last through a tiny color-only line shader with depth testing/writes disabled.
+- Added `RendererSnapshot.debugOverlayPrimitives` so diagnostics can tell whether overlay geometry is currently submitted even when it is out of camera view.
+- Updated `/browser-v2` so browser selection state stores `StaticSceneSelectionKey | null` plus the last pick distance. The browser forwards selection intent to runtime instead of holding full source/query detail records.
+
+Phase 12A8 spicy bits:
+
+- Pick hits still carry `bounds` in addition to `selectionKey`. That is intentional because `ignoreContainingOrigin` uses hit-local bounds without doing a second query. The legacy duplicate identity fields were removed in the same cleanup pass.
+- Runtime now calls `renderer.setDebugOverlayPrimitives([])` whenever selection is absent or unresolved. That is a small extra renderer update on some scene-interest transitions, but it keeps debug overlay state unambiguous and out of static residency.
+- WebGL line width is deliberately conservative. The first overlay is a one-pixel AABB line box; thicker outlines, labels, depth-aware styling, and face tinting remain out of scope until a concrete diagnostic need appears.
+- The overlay shader/program is created at renderer startup. Plain Vite smoke proves shader/program creation does not break the harness, but it does not prove real selected-object overlay placement against live Tauri assets.
+
+Phase 12A8 failed to close:
+
+- No Tauri-backed live asset walkthrough was performed, so real outdoor static/terrain click-selection overlay placement after a follow-mode reanchor remains visually unverified.
+- Pick result minimization is now complete for durable identity fields. `bounds` remains as a non-identity hit/filter fact; a deeper future cleanup could make bounds internal to the query filter path if needed.
+- Runtime unresolved-selection diagnostics are console-backed via `RuntimeDiagnostics`; there is no browser panel list for recent debug-selection failures yet.
+
+Phase 12A8 verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- runtime/static-scene-query runtime/client-runtime renderer/webgl2/webgl2-renderer browser/static-picking`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
+- `git diff --check`
+- Plain Vite `/browser-v2` smoke with headless Chrome + SwiftShader verified the harness mounts after the overlay shader/program addition. Screenshot: `/tmp/holtburger-browser-v2-12a8-smoke.png`.
 
 ### Phase 12: Static Object Breadth And Compaction
 

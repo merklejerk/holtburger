@@ -7,6 +7,8 @@ import {
 } from "../types";
 import {
 	compareStaticObjectTransparentDrawOrder,
+	DEBUG_OVERLAY_FRAGMENT_SHADER,
+	DEBUG_OVERLAY_VERTEX_SHADER,
 	resolveStaticObjectBlendFactor,
 	STATIC_OBJECT_FRAGMENT_SHADER,
 	TERRAIN_FRAGMENT_SHADER,
@@ -148,6 +150,19 @@ describe("V2 WebGL2 static object transparent pass helpers", () => {
 		expect(resolveStaticObjectBlendFactor(gl, "src-alpha")).toBe(gl.SRC_ALPHA);
 		expect(resolveStaticObjectBlendFactor(gl, "one-minus-src-alpha")).toBe(
 			gl.ONE_MINUS_SRC_ALPHA,
+		);
+	});
+});
+
+describe("V2 WebGL2 debug overlay shader contract", () => {
+	it("draws in-scene line primitives through the scene camera matrix", () => {
+		expect(DEBUG_OVERLAY_VERTEX_SHADER).toContain(
+			"uniform mat4 uModelViewProjection;",
+		);
+		expect(DEBUG_OVERLAY_VERTEX_SHADER).toContain("layout(location = 0) in vec3 position;");
+		expect(DEBUG_OVERLAY_VERTEX_SHADER).toContain("layout(location = 1) in vec4 color;");
+		expect(DEBUG_OVERLAY_FRAGMENT_SHADER).toContain(
+			"fragColor = vec4(vec3(1.0), vColor.a);",
 		);
 	});
 });

@@ -28,6 +28,16 @@ export interface StaticResidencyDelta {
 	readonly revision: number;
 }
 
+export type DebugOverlayPrimitive = DebugOverlayAabbPrimitive;
+
+interface DebugOverlayAabbPrimitive {
+	readonly kind: "aabb";
+	readonly id: string;
+	readonly min: readonly [number, number, number];
+	readonly max: readonly [number, number, number];
+	readonly color: readonly [number, number, number, number];
+}
+
 interface DynamicResidencyDelta {
 	readonly addedInstanceIds: readonly string[];
 	readonly removedInstanceIds: readonly string[];
@@ -126,6 +136,7 @@ export interface RendererSnapshot {
 	readonly staticDrawUnits: number;
 	readonly terrainDrawUnits: number;
 	readonly renderedTriangles: number;
+	readonly debugOverlayPrimitives: number;
 }
 
 export type RendererSnapshotListener = (snapshot: RendererSnapshot) => void;
@@ -136,6 +147,7 @@ export interface Renderer {
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void;
 	applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void;
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void;
+	setDebugOverlayPrimitives(primitives: readonly DebugOverlayPrimitive[]): void;
 	updateFrameState(state: FrameState): void;
 	subscribe(listener: RendererSnapshotListener): () => void;
 	dispose(): void;

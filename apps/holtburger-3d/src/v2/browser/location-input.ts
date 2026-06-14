@@ -3,10 +3,17 @@ import {
 	makeOutdoorLandblockId,
 	normalizeOutdoorLandblockId,
 } from "../../lib/landblocks";
-import type { StaticWorkCommand } from "../runtime/client-runtime";
+import type {
+	ManualStaticDomain,
+	RuntimeSceneInterest,
+} from "../runtime/client-runtime";
 import type { StaticLodRadii } from "../static/contracts";
 
 export type V2LandblockInputMode = "outdoor" | "dungeon";
+type RuntimeSceneInterestSource = Extract<
+	RuntimeSceneInterest,
+	{ readonly source: string }
+>["source"];
 
 export type V2ParsedLocationInput =
 	| {
@@ -83,25 +90,27 @@ export function inferV2LandblockInputMode(
 	return currentMode;
 }
 
-export function createStaticWorkCommandFromLocation(
+export function createSceneInterestFromLocation(
 	location: V2ParsedLocationInput,
-	domains: readonly StaticWorkCommand["domains"][number][],
+	domains: readonly ManualStaticDomain[],
 	lod?: Partial<StaticLodRadii>,
-): StaticWorkCommand {
+	source: RuntimeSceneInterestSource = "manual",
+): RuntimeSceneInterest {
 	if (location.kind === "interior-cell") {
 		return {
-			domains: ["env-cells"],
-			envCellId: `0x${formatHex32(location.envCellId)}`,
-			landblockId: `0x${formatHex32(location.landblockId)}`,
-			locationKind: "interior-cell",
+			envCellId: location.envCellId,
+			kind: "interior-cell",
+			landblockId: location.landblockId,
+			source,
 		};
 	}
 
 	return {
+		anchorLandblockId: location.landblockId,
 		domains,
-		landblockId: `0x${formatHex32(location.landblockId)}`,
+		kind: "outdoor-anchor",
 		...(lod ? { lod } : {}),
-		locationKind: "outdoor-landblock",
+		source,
 	};
 }
 

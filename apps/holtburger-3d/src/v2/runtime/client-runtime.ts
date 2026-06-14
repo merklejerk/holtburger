@@ -3,7 +3,7 @@ import type { AssetService, AssetServiceSnapshot } from "../assets/contracts";
 import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
 import type { Renderer, RendererSnapshot } from "../renderer/types";
 import type { FrameState } from "../renderer/types";
-import { normalizeOutdoorLandblockId } from "../../lib/landblocks";
+import { formatHex32, normalizeOutdoorLandblockId } from "../../lib/landblocks";
 import { TextureManager } from "../textures/texture-manager";
 import type { TexturePacker } from "../textures/packing/packer";
 import type { TextureFilteringMode } from "../textures/sampling-policy";
@@ -24,6 +24,7 @@ import type {
 	StaticCoordinatorSnapshot,
 	StaticCoordinatorCommitDelta,
 	StaticDemand,
+	StaticDrawUnit,
 	StaticLodRadii,
 	StaticMaterialCoverageReport,
 	StaticMaterialUnrenderedBucket,
@@ -31,6 +32,7 @@ import type {
 } from "../static/contracts";
 import {
 	materializeStaticCommit,
+	createStaticDrawUnitTranslation,
 	type StaticMaterializationResult,
 } from "./static-materializer";
 import {
@@ -38,6 +40,7 @@ import {
 	type StaticScenePickRequest,
 	type StaticScenePickHit,
 	type StaticSceneQuerySnapshot,
+	type StaticSceneQueryRetainedScope,
 } from "./static-scene-query";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
@@ -50,18 +53,28 @@ export type ManualStaticDomain =
 	| "detail"
 	| "env-cells";
 
-export interface StaticWorkCommand {
-	readonly landblockId: string;
-	readonly domains: readonly ManualStaticDomain[];
-	readonly lod?: Partial<StaticLodRadii>;
-	readonly locationKind?: "outdoor-landblock" | "interior-cell";
-	readonly envCellId?: string;
-}
+export type RuntimeSceneInterest =
+	| {
+			readonly kind: "none";
+	  }
+	| {
+			readonly kind: "outdoor-anchor";
+			readonly anchorLandblockId: number;
+			readonly domains: readonly ManualStaticDomain[];
+			readonly lod?: Partial<StaticLodRadii>;
+			readonly source: "manual" | "follow";
+	  }
+	| {
+			readonly kind: "interior-cell";
+			readonly landblockId: number;
+			readonly envCellId: number;
+			readonly source: "manual" | "follow";
+	  };
 
 export interface RuntimeSnapshot {
 	readonly status: "idle" | "static-active" | "disposed";
 	readonly renderPolicy: RuntimeRenderPolicySnapshot;
-	readonly lastStaticRequest: StaticWorkCommand | null;
+	readonly sceneInterest: RuntimeSceneInterest;
 	readonly assets: AssetServiceSnapshot;
 	readonly host: RuntimeHostSnapshot;
 	readonly renderer: RendererSnapshot;
@@ -90,8 +103,7 @@ interface StaticMaterializationFailureSnapshot {
 }
 
 export interface ClientRuntime {
-	requestStaticWork(command: StaticWorkCommand): void;
-	evictStaticWork(): void;
+	updateSceneInterest(interest: RuntimeSceneInterest): void;
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null;
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void;
 	updateFrameState(state: FrameState): void;
@@ -146,7 +158,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #unsubscribeStaticSourcePayloads: () => void;
 	#lastRendererSnapshot: RendererSnapshot;
 	#lastStaticSnapshot: StaticCoordinatorSnapshot;
-	#lastStaticRequest: StaticWorkCommand | null = null;
+	#sceneInterest: RuntimeSceneInterest = { kind: "none" };
 	#renderAnchorLandblockId: number | null = null;
 	#staticMaterializationQueue: Promise<void> = Promise.resolve();
 	#pendingStaticMaterializations = new Set<number>();
@@ -156,6 +168,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		string,
 		readonly string[]
 	>();
+	readonly #materializedDrawUnitsById = new Map<string, StaticDrawUnit>();
 	#recentTerrainTextureFallbacks: TerrainTextureFallbackDiagnostics[] = [];
 	readonly #reportedStaticResolverFailures = new Set<string>();
 	#disposed = false;
@@ -219,36 +232,25 @@ class ClientRuntimeImpl implements ClientRuntime {
 			});
 	}
 
-	requestStaticWork(command: StaticWorkCommand): void {
+	updateSceneInterest(interest: RuntimeSceneInterest): void {
 		this.#assertActive();
-		this.#lastStaticRequest = normalizeStaticWorkCommand(command);
-		this.#renderAnchorLandblockId =
-			this.#lastStaticRequest.locationKind === "outdoor-landblock"
-				? normalizeOutdoorLandblockId(
-						parseLandblockInput(this.#lastStaticRequest.landblockId),
-					)
+		this.#sceneInterest = normalizeSceneInterest(interest);
+		const nextAnchor =
+			this.#sceneInterest.kind === "outdoor-anchor"
+				? normalizeOutdoorLandblockId(this.#sceneInterest.anchorLandblockId)
 				: null;
-		this.#staticSceneQuery.clear();
-		this.#staticCoordinator.requestStaticDemand(
-			createManualStaticDemand(this.#lastStaticRequest),
+		this.#setRenderAnchorLandblockId(nextAnchor);
+		const activeWork = this.#staticCoordinator.requestStaticDemand(
+			createStaticDemandFromSceneInterest(this.#sceneInterest),
 		);
-		this.#emit();
-	}
-
-	evictStaticWork(): void {
-		this.#assertActive();
-		this.#lastStaticRequest = null;
-		this.#renderAnchorLandblockId = null;
-		this.#staticSceneQuery.clear();
-		this.#staticCoordinator.requestStaticDemand({
-			location: null,
-			lod: {
-				buildings: -1,
-				detail: -1,
-				envCells: -1,
-				terrain: -1,
-			},
-		});
+		this.#staticSceneQuery.retainScopes(
+			activeWork.map(
+				(work): StaticSceneQueryRetainedScope => ({
+					domain: work.job.domain,
+					landblockId: work.job.scope.landblockId,
+				}),
+			),
+		);
 		this.#emit();
 	}
 
@@ -294,9 +296,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				committedStaticMaterializationRevisions:
 					snapshot.staticMaterialization.committedRevisions,
 				failedStaticMaterializations: snapshot.staticMaterialization.failed,
-				lastStaticRequest: snapshot.lastStaticRequest
-					? createStaticRequestSummary(snapshot.lastStaticRequest)
-					: null,
+				sceneInterest: createSceneInterestSummary(snapshot.sceneInterest),
 				materializedStaticDrawUnits:
 					snapshot.staticMaterialization.materializedDrawUnits,
 				pendingStaticMaterializationRevisions:
@@ -340,15 +340,44 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 	}
 
+	#setRenderAnchorLandblockId(nextAnchorLandblockId: number | null): void {
+		if (this.#renderAnchorLandblockId === nextAnchorLandblockId) {
+			return;
+		}
+
+		this.#renderAnchorLandblockId = nextAnchorLandblockId;
+		this.#staticSceneQuery.setOutdoorAnchorLandblockId(nextAnchorLandblockId);
+		const updatedDrawUnitPlacements = Array.from(
+			this.#materializedDrawUnitsById.values(),
+		).map((drawUnit) => ({
+			drawUnitId: drawUnit.drawUnitId,
+			translation: createStaticDrawUnitTranslation(
+				drawUnit,
+				nextAnchorLandblockId,
+			),
+		}));
+
+		if (updatedDrawUnitPlacements.length === 0) {
+			return;
+		}
+
+		this.#renderer.applyStaticDelta({
+			addedDrawUnitPlacements: [],
+			removedDrawUnitIds: [],
+			revision: this.#lastStaticSnapshot.revision + 1,
+			updatedDrawUnitPlacements,
+		});
+	}
+
 	#createSnapshot(): RuntimeSnapshot {
 		return {
 			assets: this.#assetService.createSnapshot(),
 			host: this.#host.createSnapshot(),
-			lastStaticRequest: this.#lastStaticRequest,
 			renderPolicy: {
 				textureFilteringMode: this.#textureManager.filteringMode,
 			},
 			renderer: this.#lastRendererSnapshot,
+			sceneInterest: this.#sceneInterest,
 			static: this.#lastStaticSnapshot,
 			staticSceneQuery: this.#staticSceneQuery.createSnapshot(),
 			staticMaterialization: {
@@ -486,12 +515,25 @@ class ClientRuntimeImpl implements ClientRuntime {
 		materialized: StaticMaterializationResult,
 	): void {
 		for (const removedDrawUnitId of delta.removedDrawUnitIds) {
+			const materializedDrawUnitIds =
+				this.#materializedDrawUnitIdsBySourceDrawUnitId.get(
+					removedDrawUnitId,
+				) ?? [removedDrawUnitId];
 			this.#materializedDrawUnitIdsBySourceDrawUnitId.delete(removedDrawUnitId);
+			for (const materializedDrawUnitId of materializedDrawUnitIds) {
+				this.#materializedDrawUnitsById.delete(materializedDrawUnitId);
+			}
 		}
 		for (const mapping of materialized.drawUnitIdMappings) {
 			this.#materializedDrawUnitIdsBySourceDrawUnitId.set(
 				mapping.sourceDrawUnitId,
 				mapping.materializedDrawUnitIds,
+			);
+		}
+		for (const placement of materialized.staticDelta.addedDrawUnitPlacements) {
+			this.#materializedDrawUnitsById.set(
+				placement.drawUnit.drawUnitId,
+				placement.drawUnit,
 			);
 		}
 	}
@@ -588,25 +630,52 @@ function appendBounded<T>(entries: readonly T[], entry: T, limit: number): T[] {
 	return [...entries, entry].slice(-limit);
 }
 
-function normalizeStaticWorkCommand(
-	command: StaticWorkCommand,
-): StaticWorkCommand {
-	const domains = Array.from(new Set(command.domains)).sort();
+function normalizeSceneInterest(
+	interest: RuntimeSceneInterest,
+): RuntimeSceneInterest {
+	if (interest.kind === "none") {
+		return interest;
+	}
+
+	if (interest.kind === "interior-cell") {
+		return {
+			envCellId: interest.envCellId >>> 0,
+			kind: "interior-cell",
+			landblockId: normalizeOutdoorLandblockId(interest.landblockId),
+			source: interest.source,
+		};
+	}
 
 	return {
-		domains,
-		envCellId: command.envCellId?.trim(),
-		landblockId: command.landblockId.trim(),
-		...(command.lod ? { lod: command.lod } : {}),
-		locationKind: command.locationKind,
+		anchorLandblockId: normalizeOutdoorLandblockId(interest.anchorLandblockId),
+		domains: Array.from(new Set(interest.domains)).sort(),
+		...(interest.lod ? { lod: interest.lod } : {}),
+		kind: "outdoor-anchor",
+		source: interest.source,
 	};
 }
 
-function createStaticRequestSummary(command: StaticWorkCommand): string {
+function createSceneInterestSummary(
+	interest: RuntimeSceneInterest,
+): string | null {
+	if (interest.kind === "none") {
+		return null;
+	}
+
+	if (interest.kind === "interior-cell") {
+		return [
+			interest.source,
+			"interior-cell",
+			`0x${formatHex32(interest.landblockId)}`,
+			`0x${formatHex32(interest.envCellId)}`,
+		].join("|");
+	}
+
 	return [
-		command.locationKind ?? "outdoor-landblock",
-		command.landblockId,
-		command.domains.join(","),
+		interest.source,
+		"outdoor-anchor",
+		`0x${formatHex32(interest.anchorLandblockId)}`,
+		interest.domains.join(","),
 	].join("|");
 }
 
@@ -741,52 +810,57 @@ function formatHex(value: number): string {
 	return `0x${value.toString(16).padStart(8, "0")}`;
 }
 
-function createManualStaticDemand(command: StaticWorkCommand): StaticDemand {
-	const lod: StaticLodRadii = {
-		buildings: command.domains.includes("buildings")
-			? (command.lod?.buildings ?? 0)
-			: -1,
-		detail: command.domains.includes("detail")
-			? (command.lod?.detail ?? 0)
-			: -1,
-		terrain: command.domains.includes("terrain")
-			? (command.lod?.terrain ?? 0)
-			: -1,
-		envCells: command.domains.includes("env-cells")
-			? (command.lod?.envCells ?? 0)
-			: -1,
-	};
-
-	if (command.locationKind === "interior-cell") {
+function createStaticDemandFromSceneInterest(
+	interest: RuntimeSceneInterest,
+): StaticDemand {
+	if (interest.kind === "none") {
 		return {
-			location: {
-				envCellId: parseLandblockInput(
-					command.envCellId ?? command.landblockId,
-				),
-				kind: "interior-cell",
-				landblockId: parseLandblockInput(command.landblockId),
+			location: null,
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: -1,
+				terrain: -1,
 			},
-			lod,
 		};
 	}
+
+	if (interest.kind === "interior-cell") {
+		return {
+			location: {
+				envCellId: interest.envCellId,
+				kind: "interior-cell",
+				landblockId: interest.landblockId,
+			},
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: 0,
+				terrain: -1,
+			},
+		};
+	}
+
+	const lod: StaticLodRadii = {
+		buildings: interest.domains.includes("buildings")
+			? (interest.lod?.buildings ?? 0)
+			: -1,
+		detail: interest.domains.includes("detail")
+			? (interest.lod?.detail ?? 0)
+			: -1,
+		terrain: interest.domains.includes("terrain")
+			? (interest.lod?.terrain ?? 0)
+			: -1,
+		envCells: interest.domains.includes("env-cells")
+			? (interest.lod?.envCells ?? 0)
+			: -1,
+	};
 
 	return {
 		location: {
 			kind: "outdoor-landblock",
-			landblockId: parseLandblockInput(command.landblockId),
+			landblockId: interest.anchorLandblockId,
 		},
 		lod,
 	};
-}
-
-function parseLandblockInput(value: string): number {
-	const trimmed = value.trim();
-	const normalized = trimmed.startsWith("0x") ? trimmed.slice(2) : trimmed;
-	const parsed = Number.parseInt(normalized, 16);
-
-	if (!Number.isFinite(parsed)) {
-		throw new Error(`Invalid landblock id: ${value}`);
-	}
-
-	return parsed >>> 0;
 }

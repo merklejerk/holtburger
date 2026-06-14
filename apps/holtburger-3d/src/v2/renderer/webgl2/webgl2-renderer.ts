@@ -65,16 +65,18 @@ layout(location = 1) in vec2 texCoord;
 layout(location = 2) in float layerSlot;
 
 uniform mat4 uModelViewProjection;
+uniform vec3 uPlacementTranslation;
 
 out vec2 vTexCoord;
 out vec3 vWorldPosition;
 flat out int vLayerSlot;
 
 void main() {
+	vec3 worldPosition = position + uPlacementTranslation;
 	vTexCoord = texCoord;
-	vWorldPosition = position;
+	vWorldPosition = worldPosition;
 	vLayerSlot = int(layerSlot);
-	gl_Position = uModelViewProjection * vec4(position, 1.0);
+	gl_Position = uModelViewProjection * vec4(worldPosition, 1.0);
 }
 `;
 
@@ -84,6 +86,7 @@ layout(location = 1) in vec2 texCoord;
 layout(location = 2) in float materialSlot;
 
 uniform mat4 uModelViewProjection;
+uniform vec3 uPlacementTranslation;
 
 out vec2 vTexCoord;
 flat out int vMaterialSlot;
@@ -91,7 +94,7 @@ flat out int vMaterialSlot;
 void main() {
 	vTexCoord = texCoord;
 	vMaterialSlot = int(materialSlot);
-	gl_Position = uModelViewProjection * vec4(position, 1.0);
+	gl_Position = uModelViewProjection * vec4(position + uPlacementTranslation, 1.0);
 }
 `;
 
@@ -599,6 +602,31 @@ class Webgl2Renderer implements Renderer {
 			this.#textureBindings.delete(drawUnitId);
 		}
 
+		for (const placement of delta.updatedDrawUnitPlacements) {
+			const terrainResource = this.#terrainResources.get(placement.drawUnitId);
+			if (terrainResource) {
+				this.#terrainResources.set(placement.drawUnitId, {
+					...terrainResource,
+					translation: placement.translation,
+				});
+				continue;
+			}
+
+			const staticObjectResource = this.#staticObjectResources.get(
+				placement.drawUnitId,
+			);
+			if (staticObjectResource) {
+				this.#staticObjectResources.set(placement.drawUnitId, {
+					...staticObjectResource,
+					sortCenter: translatePoint(
+						staticObjectResource.localSortCenter,
+						placement.translation,
+					),
+					translation: placement.translation,
+				});
+			}
+		}
+
 		for (const placement of delta.addedDrawUnitPlacements) {
 			const { drawUnit } = placement;
 			this.#terrainResources.get(drawUnit.drawUnitId)?.dispose();
@@ -822,6 +850,12 @@ class Webgl2Renderer implements Renderer {
 				this.#terrainProgram.uniforms.uMaterialMode,
 				useLayered ? 2 : useTexture ? 1 : 0,
 			);
+			gl.uniform3f(
+				this.#terrainProgram.uniforms.uPlacementTranslation,
+				resource.translation[0],
+				resource.translation[1],
+				resource.translation[2],
+			);
 			gl.bindVertexArray(resource.vertexArray);
 			gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
 		}
@@ -923,6 +957,12 @@ class Webgl2Renderer implements Renderer {
 			bindings,
 			this.#textures,
 		);
+		gl.uniform3f(
+			this.#staticObjectProgram.uniforms.uPlacementTranslation,
+			resource.translation[0],
+			resource.translation[1],
+			resource.translation[2],
+		);
 		gl.bindVertexArray(resource.vertexArray);
 		gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
 	}
@@ -1022,6 +1062,7 @@ interface TerrainGeometryProgram {
 		readonly uMaskAtlasTextures: readonly WebGLUniformLocation[];
 		readonly uMaterialMode: WebGLUniformLocation;
 		readonly uModelViewProjection: WebGLUniformLocation;
+		readonly uPlacementTranslation: WebGLUniformLocation;
 		readonly uTexture: WebGLUniformLocation;
 		readonly uTextureRect: WebGLUniformLocation;
 		readonly uTextureSize: WebGLUniformLocation;
@@ -1051,6 +1092,7 @@ interface StaticObjectGeometryProgram {
 		readonly uMaterialPaletteTextureRects: WebGLUniformLocation;
 		readonly uMaterialWrapModes: WebGLUniformLocation;
 		readonly uModelViewProjection: WebGLUniformLocation;
+		readonly uPlacementTranslation: WebGLUniformLocation;
 		readonly uStaticBaseColorSizes: WebGLUniformLocation;
 		readonly uStaticBaseColorTextures: readonly WebGLUniformLocation[];
 		readonly uStaticDetailSizes: WebGLUniformLocation;
@@ -1072,6 +1114,7 @@ interface TerrainGeometryResource {
 	readonly materialFamily: TerrainGeometryStaticDrawUnit["materialFamily"];
 	readonly primaryTextureUseId: string | null;
 	readonly terrainMaterialPlan: TerrainGeometryStaticDrawUnit["terrainMaterialPlan"];
+	readonly translation: readonly [number, number, number];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
@@ -1089,8 +1132,10 @@ interface StaticObjectGeometryResource {
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
 	readonly materialEntries: StaticObjectGeometryStaticDrawUnit["materialEntries"];
 	readonly renderState: StaticObjectRenderState;
+	readonly localSortCenter: StaticObjectSortMetadata["center"];
 	readonly sortCenter: StaticObjectSortMetadata["center"];
 	readonly sortPolicy: StaticObjectSortMetadata["policy"];
+	readonly translation: readonly [number, number, number];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
@@ -1218,6 +1263,11 @@ function createTerrainGeometryProgram(
 			),
 			uMaterialMode: requireUniform(gl, program, "uMaterialMode"),
 			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
+			uPlacementTranslation: requireUniform(
+				gl,
+				program,
+				"uPlacementTranslation",
+			),
 			uTexture: requireUniform(gl, program, "uTexture"),
 			uTextureRect: requireUniform(gl, program, "uTextureRect"),
 			uTextureSize: requireUniform(gl, program, "uTextureSize"),
@@ -1340,6 +1390,11 @@ function createStaticObjectGeometryProgram(
 			),
 			uMaterialWrapModes: requireUniform(gl, program, "uMaterialWrapModes[0]"),
 			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
+			uPlacementTranslation: requireUniform(
+				gl,
+				program,
+				"uPlacementTranslation",
+			),
 			uStaticBaseColorSizes: requireUniform(
 				gl,
 				program,
@@ -1419,11 +1474,7 @@ function createTerrainGeometryResource(
 
 	gl.bindVertexArray(vertexArray);
 	gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-	gl.bufferData(
-		gl.ARRAY_BUFFER,
-		translateTerrainPositions(drawUnit.positions, translation),
-		gl.STATIC_DRAW,
-	);
+	gl.bufferData(gl.ARRAY_BUFFER, drawUnit.positions, gl.STATIC_DRAW);
 	gl.enableVertexAttribArray(0);
 	gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
 
@@ -1456,6 +1507,7 @@ function createTerrainGeometryResource(
 		positionBuffer,
 		texCoordBuffer,
 		triangleCount: drawUnit.triangleCount,
+		translation,
 		vertexArray,
 		dispose() {
 			gl.deleteBuffer(positionBuffer);
@@ -1506,11 +1558,7 @@ function createStaticObjectGeometryResource(
 
 	gl.bindVertexArray(vertexArray);
 	gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-	gl.bufferData(
-		gl.ARRAY_BUFFER,
-		translatePositions(drawUnit.positions, translation),
-		gl.STATIC_DRAW,
-	);
+	gl.bufferData(gl.ARRAY_BUFFER, drawUnit.positions, gl.STATIC_DRAW);
 	gl.enableVertexAttribArray(0);
 	gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
 
@@ -1536,6 +1584,7 @@ function createStaticObjectGeometryResource(
 		indexCount: drawUnit.indices.length,
 		indexType:
 			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
+		localSortCenter: drawUnit.sort.center,
 		materialEntries: drawUnit.materialEntries,
 		materialFamily: drawUnit.materialFamily,
 		materialPass: drawUnit.materialPass,
@@ -1546,6 +1595,7 @@ function createStaticObjectGeometryResource(
 		sortPolicy: drawUnit.sort.policy,
 		texCoordBuffer,
 		triangleCount: drawUnit.triangleCount,
+		translation,
 		vertexArray,
 		dispose() {
 			gl.deleteBuffer(positionBuffer);
@@ -1915,13 +1965,6 @@ function writeStaticObjectTextureEntry(
 	return binding;
 }
 
-function translateTerrainPositions(
-	positions: Float32Array,
-	translation: readonly [number, number, number],
-): Float32Array {
-	return translatePositions(positions, translation);
-}
-
 function translatePoint(
 	point: readonly [number, number, number],
 	translation: readonly [number, number, number],
@@ -1931,24 +1974,6 @@ function translatePoint(
 		point[1] + translation[1],
 		point[2] + translation[2],
 	];
-}
-
-function translatePositions(
-	positions: Float32Array,
-	translation: readonly [number, number, number],
-): Float32Array {
-	if (translation[0] === 0 && translation[1] === 0 && translation[2] === 0) {
-		return positions;
-	}
-
-	const translated = new Float32Array(positions);
-	for (let index = 0; index < translated.length; index += 3) {
-		translated[index] += translation[0];
-		translated[index + 1] += translation[1];
-		translated[index + 2] += translation[2];
-	}
-
-	return translated;
 }
 
 function sumRenderedTriangles(

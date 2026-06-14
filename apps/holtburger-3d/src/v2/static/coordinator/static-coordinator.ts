@@ -9,6 +9,7 @@ import type {
 	StaticCoordinatorSnapshot,
 	StaticDemand,
 	StaticDomain,
+	StaticDrawUnit,
 	StaticMaterialCoverageReport,
 	LandblockEnvCellsPayloadSummary,
 	OutdoorStaticObjectsPayloadSummary,
@@ -67,6 +68,7 @@ export class StaticCoordinator {
 	readonly #activeWork = new Map<string, MutableScheduledStaticWorkStatus>();
 	readonly #pendingBatches = new Map<string, PendingStaticBakeBatch>();
 	readonly #residentDrawUnitIds = new Set<string>();
+	readonly #residentDrawUnitIdsByDesiredKey = new Map<string, Set<string>>();
 	#revision = 0;
 	#disposed = false;
 	#committed = 0;
@@ -111,30 +113,54 @@ export class StaticCoordinator {
 	requestStaticDemand(demand: StaticDemand): readonly ScheduledStaticWork[] {
 		this.#assertActive();
 		this.#revision += 1;
-		this.#activeWork.clear();
-		this.#latestMaterialCoverageByDomain.clear();
-		this.#evictResidentDrawUnits();
-
 		const workItems = planScheduledStaticWork(demand, this.#revision);
+		const desiredKeys = new Set(workItems.map(createDesiredWorkKey));
+		const newWorkItems: ScheduledStaticWork[] = [];
+
+		for (const status of Array.from(this.#activeWork.values())) {
+			if (!desiredKeys.has(status.desiredKey)) {
+				this.#activeWork.delete(status.workId);
+			}
+		}
+		this.#evictResidentDrawUnitsExcept(desiredKeys);
+		this.#pruneMaterialCoverageByDesiredKeys(desiredKeys);
 
 		for (const work of workItems) {
+			const desiredKey = createDesiredWorkKey(work);
+			const existing = this.#findActiveWorkByDesiredKey(desiredKey);
+			if (existing && existing.status !== "failed") {
+				continue;
+			}
+			if (existing) {
+				this.#activeWork.delete(existing.workId);
+			}
 			this.#activeWork.set(work.workId, {
+				desiredKey,
 				domain: work.job.domain,
 				failureMessage: null,
 				workId: work.workId,
 				revision: work.revision,
 				scopeKey: describeStaticScopeKey(work.job.scope),
 				status: "requested",
+				work,
 			});
+			newWorkItems.push(work);
 		}
 
 		this.#emit();
 
-		for (const work of workItems) {
+		for (const work of newWorkItems) {
 			void this.#resolveThenBake(work);
 		}
 
-		return workItems;
+		return workItems
+			.map((work) =>
+				this.#findActiveWorkByDesiredKey(createDesiredWorkKey(work)),
+			)
+			.filter((status): status is MutableScheduledStaticWorkStatus =>
+				Boolean(status),
+			)
+			.map((status) => status.work);
 	}
 
 	subscribe(listener: StaticCoordinatorListener): () => void {
@@ -165,7 +191,9 @@ export class StaticCoordinator {
 	}
 
 	createSnapshot(): StaticCoordinatorSnapshot {
-		const activeWork = Array.from(this.#activeWork.values());
+		const activeWork = Array.from(this.#activeWork.values()).map(
+			toScheduledStaticWorkStatus,
+		);
 
 		return {
 			activeWork,
@@ -204,7 +232,7 @@ export class StaticCoordinator {
 			}
 		}
 		this.#pendingBatches.clear();
-		this.#evictResidentDrawUnits();
+		this.#evictResidentDrawUnitsExcept(new Set());
 		this.#emit();
 		this.#listeners.clear();
 		this.#commitListeners.clear();
@@ -341,8 +369,11 @@ export class StaticCoordinator {
 		const currentWorks = result.works.filter((work) => this.#isCurrent(work));
 		if (currentWorks.length !== result.works.length) {
 			this.#staleBakeResults += result.works.length - currentWorks.length;
-			this.#emit();
-			return;
+			result = filterStaticBakeResultForWorks(result, currentWorks);
+			if (currentWorks.length === 0) {
+				this.#emit();
+				return;
+			}
 		}
 
 		this.#commit(result);
@@ -359,6 +390,13 @@ export class StaticCoordinator {
 		}
 		for (const drawUnit of result.drawUnits) {
 			this.#residentDrawUnitIds.add(drawUnit.drawUnitId);
+			const desiredKey = getDrawUnitDesiredKey(drawUnit, result.works);
+			let drawUnitIds = this.#residentDrawUnitIdsByDesiredKey.get(desiredKey);
+			if (!drawUnitIds) {
+				drawUnitIds = new Set<string>();
+				this.#residentDrawUnitIdsByDesiredKey.set(desiredKey, drawUnitIds);
+			}
+			drawUnitIds.add(drawUnit.drawUnitId);
 		}
 		for (const coverage of result.materialCoverage) {
 			this.#latestMaterialCoverageByDomain.set(coverage.domain, coverage);
@@ -380,14 +418,26 @@ export class StaticCoordinator {
 		this.#emit();
 	}
 
-	#evictResidentDrawUnits(): void {
-		if (this.#residentDrawUnitIds.size === 0) {
+	#evictResidentDrawUnitsExcept(desiredKeys: ReadonlySet<string>): void {
+		const removedDrawUnitIds: string[] = [];
+		for (const [desiredKey, drawUnitIds] of Array.from(
+			this.#residentDrawUnitIdsByDesiredKey,
+		)) {
+			if (desiredKeys.has(desiredKey)) {
+				continue;
+			}
+			removedDrawUnitIds.push(...drawUnitIds);
+			this.#residentDrawUnitIdsByDesiredKey.delete(desiredKey);
+		}
+
+		for (const drawUnitId of removedDrawUnitIds) {
+			this.#residentDrawUnitIds.delete(drawUnitId);
+		}
+		if (removedDrawUnitIds.length === 0) {
 			return;
 		}
 
-		const removedDrawUnitIds = Array.from(this.#residentDrawUnitIds);
-		this.#residentDrawUnitIds.clear();
-		this.#committedDrawUnits = 0;
+		this.#committedDrawUnits = this.#residentDrawUnitIds.size;
 		this.#emitCommitDelta({
 			addedDrawUnits: [],
 			materialCoverage: [],
@@ -401,6 +451,31 @@ export class StaticCoordinator {
 			staticVisibilityRecords: [],
 			textureUses: [],
 		});
+	}
+
+	#findActiveWorkByDesiredKey(
+		desiredKey: string,
+	): MutableScheduledStaticWorkStatus | null {
+		for (const status of this.#activeWork.values()) {
+			if (status.desiredKey === desiredKey) {
+				return status;
+			}
+		}
+
+		return null;
+	}
+
+	#pruneMaterialCoverageByDesiredKeys(desiredKeys: ReadonlySet<string>): void {
+		for (const domain of Array.from(
+			this.#latestMaterialCoverageByDomain.keys(),
+		)) {
+			const hasDesiredDomain = Array.from(desiredKeys).some((desiredKey) =>
+				desiredKey.endsWith(`:${domain}`),
+			);
+			if (!hasDesiredDomain) {
+				this.#latestMaterialCoverageByDomain.delete(domain);
+			}
+		}
 	}
 
 	#markFailedIfCurrent(work: ScheduledStaticWork, message: string): void {
@@ -495,11 +570,7 @@ export class StaticCoordinator {
 	}
 
 	#isCurrent(work: ScheduledStaticWork): boolean {
-		return (
-			!this.#disposed &&
-			work.revision === this.#revision &&
-			this.#activeWork.has(work.workId)
-		);
+		return !this.#disposed && this.#activeWork.has(work.workId);
 	}
 
 	#assertActive(): void {
@@ -531,6 +602,9 @@ export class StaticCoordinator {
 
 type MutableScheduledStaticWorkStatus = {
 	-readonly [Key in keyof ScheduledStaticWorkStatus]: ScheduledStaticWorkStatus[Key];
+} & {
+	readonly desiredKey: string;
+	readonly work: ScheduledStaticWork;
 };
 
 interface PendingStaticBakeBatch {
@@ -579,6 +653,114 @@ function createStaticBatchId(input: {
 
 function createPendingBatchKey(work: ScheduledStaticWork): string {
 	return [work.revision.toString(), work.job.domain].join(":");
+}
+
+function createDesiredWorkKey(work: ScheduledStaticWork): string {
+	return `${describeStaticScopeKey(work.job.scope)}:${work.job.domain}`;
+}
+
+function createDesiredKeyForDrawUnit(input: {
+	readonly domain: StaticDomain;
+	readonly landblockId: number;
+}): string {
+	return `landblock:${(input.landblockId >>> 0).toString(16).padStart(8, "0")}:${input.domain}`;
+}
+
+function getDrawUnitDesiredKey(
+	drawUnit: StaticDrawUnit,
+	works: readonly ScheduledStaticWork[],
+): string {
+	if (
+		drawUnit.kind === "terrain-geometry" ||
+		drawUnit.kind === "static-object-geometry"
+	) {
+		return createDesiredKeyForDrawUnit({
+			domain: drawUnit.domain,
+			landblockId: drawUnit.landblockId,
+		});
+	}
+
+	const [onlyWork] = works;
+	if (works.length === 1 && onlyWork) {
+		return createDesiredWorkKey(onlyWork);
+	}
+
+	return createDesiredWorkKey(
+		works[0] ?? {
+			job: {
+				domain: "outdoor-terrain",
+				scope: { kind: "landblock", landblockId: 0 },
+			},
+			priority: 0,
+			revision: 0,
+			workId: "unknown",
+		},
+	);
+}
+
+function filterStaticBakeResultForWorks(
+	result: StaticBakeBatchResult,
+	works: readonly ScheduledStaticWork[],
+): StaticBakeBatchResult {
+	const desiredKeys = new Set(works.map(createDesiredWorkKey));
+	const drawUnitIds = new Set(
+		result.drawUnits
+			.filter((drawUnit) =>
+				desiredKeys.has(getDrawUnitDesiredKey(drawUnit, works)),
+			)
+			.map((drawUnit) => drawUnit.drawUnitId),
+	);
+
+	return {
+		...result,
+		drawUnits: result.drawUnits.filter((drawUnit) =>
+			drawUnitIds.has(drawUnit.drawUnitId),
+		),
+		materialCoverage: result.materialCoverage.filter((coverage) =>
+			works.some((work) => work.job.domain === coverage.domain),
+		),
+		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds,
+		staticPortalInteriorRecords: result.staticPortalInteriorRecords,
+		staticSourceMappings: result.staticSourceMappings.filter((record) =>
+			hasAnyDrawUnitRecordPrefix(record, drawUnitIds),
+		),
+		staticSpatialRecords: result.staticSpatialRecords.filter((record) =>
+			hasAnyDrawUnitRecordPrefix(record, drawUnitIds),
+		),
+		staticVisibilityRecords: result.staticVisibilityRecords,
+		textureUses: result.textureUses.filter((textureUse) =>
+			textureUse.ownerDrawUnitIds.some((drawUnitId) =>
+				drawUnitIds.has(drawUnitId),
+			),
+		),
+		works,
+	};
+}
+
+function hasAnyDrawUnitRecordPrefix(
+	record: string,
+	drawUnitIds: ReadonlySet<string>,
+): boolean {
+	for (const drawUnitId of drawUnitIds) {
+		if (record.startsWith(`${drawUnitId}:`)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+function toScheduledStaticWorkStatus(
+	status: MutableScheduledStaticWorkStatus,
+): ScheduledStaticWorkStatus {
+	return {
+		domain: status.domain,
+		failureMessage: status.failureMessage,
+		revision: status.revision,
+		scopeKey: status.scopeKey,
+		status: status.status,
+		workId: status.workId,
+	};
 }
 
 function createEvictionStaticBatchId(revision: number): string {

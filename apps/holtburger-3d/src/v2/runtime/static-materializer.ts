@@ -77,6 +77,7 @@ export function materializeStaticCommit(
 				input.materializedDrawUnitIdsBySourceDrawUnitId,
 			),
 			revision: input.commit.revision,
+			updatedDrawUnitPlacements: [],
 		},
 		textureUpdate,
 	};
@@ -764,7 +765,7 @@ function getStaticDrawUnitTextureUseIds(
 	return [];
 }
 
-function createStaticDrawUnitTranslation(
+export function createStaticDrawUnitTranslation(
 	drawUnit: StaticDrawUnit,
 	focusLandblockId: number | null,
 ): readonly [number, number, number] {

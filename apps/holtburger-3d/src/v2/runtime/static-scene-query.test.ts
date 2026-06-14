@@ -114,6 +114,20 @@ describe("V2 static scene query", () => {
 			itemKind: "outdoor-static-object",
 		});
 		expect(hit?.distance).toBe(4);
+
+		query.setOutdoorAnchorLandblockId(0xdb55ffff);
+		const rebasedHit = query.pickRay({
+			context: { kind: "outdoor" },
+			ray: {
+				direction: { x: 0, y: 0, z: -1 },
+				origin: { x: 0, y: 0, z: 0 },
+			},
+		});
+		expect(rebasedHit).toMatchObject({
+			instanceId: "outdoor-static-0",
+			itemKind: "outdoor-static-object",
+		});
+		expect(rebasedHit?.distance).toBe(4);
 	});
 
 	it("uses the outdoor landblock grid to pick anchored neighbor landblocks", () => {
@@ -405,19 +419,20 @@ describe("V2 static scene query", () => {
 			}),
 		).toBeNull();
 	});
-
 });
 
-function createOutdoorStaticObjectsPayload(options: {
-	readonly includeContainingObject?: boolean;
-	readonly includeFarInvalidSubtree?: boolean;
-	readonly includeBvh?: boolean;
-	readonly instanceBounds?: NonNullable<
-		OutdoorStaticObjectsScopePayload["objects"][number]["instanceBounds"]
-	>;
-	readonly instanceId?: string;
-	readonly landblockId?: number;
-} = {}): OutdoorStaticObjectsScopePayload {
+function createOutdoorStaticObjectsPayload(
+	options: {
+		readonly includeContainingObject?: boolean;
+		readonly includeFarInvalidSubtree?: boolean;
+		readonly includeBvh?: boolean;
+		readonly instanceBounds?: NonNullable<
+			OutdoorStaticObjectsScopePayload["objects"][number]["instanceBounds"]
+		>;
+		readonly instanceId?: string;
+		readonly landblockId?: number;
+	} = {},
+): OutdoorStaticObjectsScopePayload {
 	const landblockId = options.landblockId ?? 0xda55ffff;
 	const includeBvh = options.includeBvh ?? true;
 	const object = createOutdoorStaticObject({
@@ -601,7 +616,9 @@ function createTerrainPayload(): TerrainStaticScopePayload {
 
 function createFlatOutdoorBvh(
 	objects: readonly OutdoorStaticObjectsScopePayload["objects"][number][],
-): NonNullable<OutdoorStaticObjectsScopePayload["sourceSpatial"]["outdoorBvh"]> {
+): NonNullable<
+	OutdoorStaticObjectsScopePayload["sourceSpatial"]["outdoorBvh"]
+> {
 	return {
 		coordinateSpace: "landblock-render-local",
 		items: objects.map((object, bvhItemIndex) => ({
@@ -624,7 +641,9 @@ function createFlatOutdoorBvh(
 
 function createPruningRegressionOutdoorBvh(
 	objects: readonly OutdoorStaticObjectsScopePayload["objects"][number][],
-): NonNullable<OutdoorStaticObjectsScopePayload["sourceSpatial"]["outdoorBvh"]> {
+): NonNullable<
+	OutdoorStaticObjectsScopePayload["sourceSpatial"]["outdoorBvh"]
+> {
 	return {
 		coordinateSpace: "landblock-render-local",
 		items: [
@@ -731,9 +750,11 @@ function createOutdoorStaticObject(input: {
 	};
 }
 
-function createLandblockEnvCellsPayload(options: {
-	readonly includeLandblockBvh?: boolean;
-} = {}): LandblockEnvCellsStaticScopePayload {
+function createLandblockEnvCellsPayload(
+	options: {
+		readonly includeLandblockBvh?: boolean;
+	} = {},
+): LandblockEnvCellsStaticScopePayload {
 	const includeLandblockBvh = options.includeLandblockBvh ?? true;
 	return {
 		acceptedEnvCellIds: [0xda550100],

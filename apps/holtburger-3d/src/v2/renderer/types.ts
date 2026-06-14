@@ -24,12 +24,18 @@ export interface FrameState {
 
 export interface StaticResidencyDelta {
 	readonly addedDrawUnitPlacements: readonly StaticDrawUnitPlacement[];
+	readonly updatedDrawUnitPlacements: readonly StaticDrawUnitPlacementUpdate[];
 	readonly removedDrawUnitIds: readonly string[];
 	readonly revision: number;
 }
 
 interface StaticDrawUnitPlacement {
 	readonly drawUnit: StaticDrawUnit;
+	readonly translation: readonly [number, number, number];
+}
+
+interface StaticDrawUnitPlacementUpdate {
+	readonly drawUnitId: string;
 	readonly translation: readonly [number, number, number];
 }
 

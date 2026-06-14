@@ -19,7 +19,7 @@
 	import { createBrowserV2Runtime } from "../v2/browser/create-browser-v2-runtime";
 	import { createBrowserStaticPickRay } from "../v2/browser/static-picking";
 	import {
-		createStaticWorkCommandFromLocation,
+		createSceneInterestFromLocation,
 		inferV2LandblockInputMode,
 		isV2LandblockPrefixInput,
 		parseV2LocationInput,
@@ -31,6 +31,7 @@
 		ManualStaticDomain,
 		RuntimeSnapshot,
 	} from "../v2/runtime/client-runtime";
+	import { deriveOutdoorCameraLandblockResidency } from "../v2/runtime/static-placement";
 	import type { StaticScenePickHit } from "../v2/runtime/static-scene-query";
 	import type { TextureFilteringMode } from "../v2/textures/sampling-policy";
 	import PerformanceOverlay from "../v2/ui/PerformanceOverlay.svelte";
@@ -62,6 +63,7 @@
 	let locationInput = $state("0000");
 	let landblockInputMode = $state<V2LandblockInputMode>("outdoor");
 	let submittedStaticLocation = $state<V2ParsedLocationInput | null>(null);
+	let followModeEnabled = $state(false);
 	let terrainEnabled = $state(true);
 	let buildingsEnabled = $state(true);
 	let detailEnabled = $state(true);
@@ -126,12 +128,14 @@
 				);
 			});
 			const frameInterval = window.setInterval(() => {
+				const camera =
+					cameraController?.createFrameStateCamera() ??
+					createV2FreeCameraFrameStateCamera(cameraState);
 				runtime?.updateFrameState({
-					camera:
-						cameraController?.createFrameStateCamera() ??
-						createV2FreeCameraFrameStateCamera(cameraState),
+					camera,
 					timeSeconds: performance.now() / 1000,
 				});
+				updateFollowModeSceneInterest(camera.position);
 			}, 1000 / 30);
 
 			return () => {
@@ -148,7 +152,7 @@
 		}
 	});
 
-	function requestStaticWork(): void {
+	function requestSceneInterest(): void {
 		clearStaticInterestRefresh();
 		if (!runtime || !parsedLocation) {
 			return;
@@ -156,16 +160,18 @@
 
 		submittedStaticLocation = parsedLocation;
 		selectedStaticPick = null;
-		requestStaticWorkForLocation(parsedLocation);
+		updateSceneInterestForLocation(parsedLocation);
 	}
 
-	function requestStaticWorkForLocation(location: V2ParsedLocationInput): void {
+	function updateSceneInterestForLocation(
+		location: V2ParsedLocationInput,
+	): void {
 		if (!runtime) {
 			return;
 		}
 
-		runtime.requestStaticWork(
-			createStaticWorkCommandFromLocation(location, selectedDomains(), {
+		runtime.updateSceneInterest(
+			createSceneInterestFromLocation(location, selectedDomains(), {
 				buildings: buildingRadius,
 				detail: detailRadius,
 				terrain: terrainRadius,
@@ -176,14 +182,15 @@
 
 	function handleStaticWorkSubmit(event: SubmitEvent): void {
 		event.preventDefault();
-		requestStaticWork();
+		requestSceneInterest();
 	}
 
-	function evictStaticWork(): void {
+	function clearSceneInterest(): void {
 		clearStaticInterestRefresh();
 		submittedStaticLocation = null;
 		selectedStaticPick = null;
-		runtime?.evictStaticWork();
+		followModeEnabled = false;
+		runtime?.updateSceneInterest({ kind: "none" });
 	}
 
 	function resetCamera(): void {
@@ -248,6 +255,26 @@
 
 	function handleStaticDomainChange(): void {
 		scheduleStaticInterestRefresh();
+	}
+
+	function handleFollowModeChange(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		followModeEnabled = input.checked;
+		if (!followModeEnabled) {
+			return;
+		}
+
+		if (!submittedStaticLocation && parsedLocation) {
+			requestSceneInterest();
+			return;
+		}
+
+		updateFollowModeSceneInterest(
+			(
+				cameraController?.createFrameStateCamera() ??
+				createV2FreeCameraFrameStateCamera(cameraState)
+			).position,
+		);
 	}
 
 	function canRequestStaticWork(): boolean {
@@ -356,7 +383,7 @@
 		staticInterestRefreshTimer = window.setTimeout(() => {
 			staticInterestRefreshTimer = null;
 			if (submittedStaticLocation) {
-				requestStaticWorkForLocation(submittedStaticLocation);
+				updateSceneInterestForLocation(submittedStaticLocation);
 			}
 		}, STATIC_INTEREST_REFRESH_DEBOUNCE_MS);
 	}
@@ -368,6 +395,54 @@
 
 		window.clearTimeout(staticInterestRefreshTimer);
 		staticInterestRefreshTimer = null;
+	}
+
+	function updateFollowModeSceneInterest(
+		cameraPosition: readonly [number, number, number],
+	): void {
+		if (
+			!followModeEnabled ||
+			!runtime ||
+			!submittedStaticLocation ||
+			submittedStaticLocation.kind !== "outdoor-landblock"
+		) {
+			return;
+		}
+
+		const residency = deriveOutdoorCameraLandblockResidency({
+			anchorLandblockId: submittedStaticLocation.landblockId,
+			cameraPosition,
+		});
+		if (
+			!residency ||
+			residency.landblockId === submittedStaticLocation.landblockId
+		) {
+			return;
+		}
+
+		submittedStaticLocation = {
+			kind: "outdoor-landblock",
+			label: `Outdoor landblock ${formatHexId(residency.landblockId)}`,
+			landblockId: residency.landblockId,
+		};
+		cameraController?.setPosition(residency.localCameraPosition);
+		cameraState = {
+			...cameraState,
+			position: residency.localCameraPosition,
+		};
+		runtime.updateSceneInterest(
+			createSceneInterestFromLocation(
+				submittedStaticLocation,
+				selectedDomains(),
+				{
+					buildings: buildingRadius,
+					detail: detailRadius,
+					terrain: terrainRadius,
+					envCells: envCellRadius,
+				},
+				"follow",
+			),
+		);
 	}
 
 	function formatCameraPosition(
@@ -697,6 +772,19 @@
 							</label>
 						</div>
 
+						<div class="browser-v2__toggles" aria-label="Follow mode">
+							<label>
+								<input
+									checked={followModeEnabled}
+									disabled={!runtime ||
+										parsedLocation?.kind === "interior-cell"}
+									type="checkbox"
+									onchange={handleFollowModeChange}
+								/>
+								<span>Follow camera</span>
+							</label>
+						</div>
+
 						<dl class="browser-v2__status">
 							<div>
 								<dt>Parsed</dt>
@@ -713,14 +801,16 @@
 								</dd>
 							</div>
 							<div>
-								<dt>Last request</dt>
+								<dt>Scene interest</dt>
 								<dd>
-									{#if snapshot?.lastStaticRequest}
-										{snapshot.lastStaticRequest.landblockId}
-										{#if snapshot.lastStaticRequest.envCellId}
-											/ {snapshot.lastStaticRequest.envCellId}
-										{/if}
-										({snapshot.lastStaticRequest.domains.join(", ")})
+									{#if snapshot?.sceneInterest.kind === "outdoor-anchor"}
+										{formatHexId(snapshot.sceneInterest.anchorLandblockId)}
+										({snapshot.sceneInterest.domains.join(", ") || "none"}) [{snapshot
+											.sceneInterest.source}]
+									{:else if snapshot?.sceneInterest.kind === "interior-cell"}
+										{formatHexId(snapshot.sceneInterest.landblockId)}
+										/ {formatHexId(snapshot.sceneInterest.envCellId)}
+										[{snapshot.sceneInterest.source}]
 									{:else}
 										none
 									{/if}
@@ -867,7 +957,11 @@
 					</dl>
 
 					<div class="browser-v2__actions browser-v2__actions--single">
-						<button disabled={!runtime} type="button" onclick={evictStaticWork}>
+						<button
+							disabled={!runtime}
+							type="button"
+							onclick={clearSceneInterest}
+						>
 							Evict
 						</button>
 						<button disabled={!runtime} type="button" onclick={resetCamera}>

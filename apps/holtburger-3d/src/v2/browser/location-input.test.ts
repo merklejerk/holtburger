@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-	createStaticWorkCommandFromLocation,
+	createSceneInterestFromLocation,
 	inferV2LandblockInputMode,
 	isV2LandblockPrefixInput,
 	parseV2LocationInput,
@@ -55,23 +55,24 @@ describe("V2 browser location input", () => {
 		});
 	});
 
-	it("converts parsed locations into static work commands", () => {
+	it("converts parsed locations into scene interest commands", () => {
 		const outdoor = parseV2LocationInput("0xda55ffff", "outdoor");
 		const interior = parseV2LocationInput("0xda550123", "outdoor");
 		if (!outdoor || !interior) {
 			throw new Error("expected parsed locations");
 		}
 
-		expect(createStaticWorkCommandFromLocation(outdoor, ["terrain"])).toEqual({
+		expect(createSceneInterestFromLocation(outdoor, ["terrain"])).toEqual({
+			anchorLandblockId: 0xda55ffff,
 			domains: ["terrain"],
-			landblockId: "0xda55ffff",
-			locationKind: "outdoor-landblock",
+			kind: "outdoor-anchor",
+			source: "manual",
 		});
-		expect(createStaticWorkCommandFromLocation(interior, ["terrain"])).toEqual({
-			domains: ["env-cells"],
-			envCellId: "0xda550123",
-			landblockId: "0xda55ffff",
-			locationKind: "interior-cell",
+		expect(createSceneInterestFromLocation(interior, ["terrain"])).toEqual({
+			envCellId: 0xda550123,
+			kind: "interior-cell",
+			landblockId: 0xda55ffff,
+			source: "manual",
 		});
 	});
 

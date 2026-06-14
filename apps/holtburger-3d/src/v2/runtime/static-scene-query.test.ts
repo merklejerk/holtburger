@@ -4,9 +4,59 @@ import type {
 	OutdoorStaticObjectsScopePayload,
 	TerrainStaticScopePayload,
 } from "../static/contracts";
-import { StaticSceneQuery } from "./static-scene-query";
+import {
+	StaticSceneQuery,
+	traceLandblockGridRayCells,
+} from "./static-scene-query";
 
 describe("V2 static scene query", () => {
+	it("traces outdoor landblock grid cells in ray order", () => {
+		const cells = [
+			...traceLandblockGridRayCells(
+				{
+					direction: { x: 1, y: 0, z: 0 },
+					origin: { x: 1, y: 0, z: -4 },
+				},
+				{
+					maxCellX: 2,
+					maxCellZ: -1,
+					minCellX: 0,
+					minCellZ: -1,
+				},
+			),
+		];
+
+		expect(cells).toEqual([
+			{ cellX: 0, cellZ: -1, distance: 0 },
+			{ cellX: 1, cellZ: -1, distance: 191 },
+			{ cellX: 2, cellZ: -1, distance: 383 },
+		]);
+	});
+
+	it("stops outdoor landblock grid tracing once the next cell is farther than the nearest hit", () => {
+		let nearestDistance: number | null = null;
+		const cells = [];
+
+		for (const cell of traceLandblockGridRayCells(
+			{
+				direction: { x: 1, y: 0, z: 0 },
+				origin: { x: 1, y: 0, z: -4 },
+			},
+			{
+				maxCellX: 2,
+				maxCellZ: -1,
+				minCellX: 0,
+				minCellZ: -1,
+			},
+			{ getMaxDistance: () => nearestDistance },
+		)) {
+			cells.push(cell);
+			nearestDistance = 100;
+		}
+
+		expect(cells).toEqual([{ cellX: 0, cellZ: -1, distance: 0 }]);
+	});
+
 	it("picks outdoor static objects through source BVH roots without draw units", () => {
 		const query = new StaticSceneQuery();
 		query.ingestOutdoorStaticObjects(createOutdoorStaticObjectsPayload());
@@ -64,6 +114,73 @@ describe("V2 static scene query", () => {
 			itemKind: "outdoor-static-object",
 		});
 		expect(hit?.distance).toBe(4);
+	});
+
+	it("uses the outdoor landblock grid to pick anchored neighbor landblocks", () => {
+		const query = new StaticSceneQuery();
+		query.ingestOutdoorStaticObjects(
+			createOutdoorStaticObjectsPayload({ landblockId: 0xdb55ffff }),
+			0xda55ffff,
+		);
+		query.ingestOutdoorStaticObjects(
+			createOutdoorStaticObjectsPayload({
+				instanceId: "far-outdoor-static-0",
+				landblockId: 0xdc55ffff,
+			}),
+			0xda55ffff,
+		);
+
+		const hit = query.pickRay({
+			context: { kind: "outdoor" },
+			ray: {
+				direction: { x: 1, y: 0, z: 0 },
+				origin: { x: 0, y: 0, z: -4.5 },
+			},
+		});
+
+		expect(hit).toMatchObject({
+			instanceId: "outdoor-static-0",
+			itemKind: "outdoor-static-object",
+			landblockId: 0xdb55ffff,
+		});
+		expect(hit?.distance).toBe(191);
+		expect(query.createSnapshot()).toMatchObject({
+			landblockBucketCount: 2,
+			outdoorRecordCount: 2,
+		});
+	});
+
+	it("does not prune neighbor roots whose bounds protrude into an earlier landblock grid cell", () => {
+		const query = new StaticSceneQuery();
+		query.ingestOutdoorStaticObjects(
+			createOutdoorStaticObjectsPayload({
+				instanceBounds: {
+					max: { x: 191.6, y: 1, z: -4 },
+					min: { x: 191.5, y: -1, z: -5 },
+				},
+				instanceId: "local-boundary-static-0",
+				landblockId: 0xda55ffff,
+			}),
+			0xda55ffff,
+		);
+		query.ingestOutdoorStaticObjects(
+			createOutdoorStaticObjectsPayload({ landblockId: 0xdb55ffff }),
+			0xda55ffff,
+		);
+
+		const hit = query.pickRay({
+			context: { kind: "outdoor" },
+			ray: {
+				direction: { x: 1, y: 0, z: 0 },
+				origin: { x: 0, y: 0, z: -4.5 },
+			},
+		});
+
+		expect(hit).toMatchObject({
+			instanceId: "outdoor-static-0",
+			landblockId: 0xdb55ffff,
+		});
+		expect(hit?.distance).toBe(191);
 	});
 
 	it("does not pick outdoor source payloads without BVH roots", () => {
@@ -232,6 +349,7 @@ describe("V2 static scene query", () => {
 		expect(query.createSnapshot()).toEqual({
 			envCellLandblockCount: 1,
 			envCellRecordCount: 1,
+			landblockBucketCount: 1,
 			outdoorRecordCount: 0,
 			terrainLandblockCount: 0,
 			terrainRecordCount: 0,
@@ -261,6 +379,7 @@ describe("V2 static scene query", () => {
 		expect(query.createSnapshot()).toEqual({
 			envCellLandblockCount: 0,
 			envCellRecordCount: 0,
+			landblockBucketCount: 0,
 			outdoorRecordCount: 0,
 			terrainLandblockCount: 0,
 			terrainRecordCount: 0,
@@ -293,16 +412,20 @@ function createOutdoorStaticObjectsPayload(options: {
 	readonly includeContainingObject?: boolean;
 	readonly includeFarInvalidSubtree?: boolean;
 	readonly includeBvh?: boolean;
+	readonly instanceBounds?: NonNullable<
+		OutdoorStaticObjectsScopePayload["objects"][number]["instanceBounds"]
+	>;
+	readonly instanceId?: string;
 	readonly landblockId?: number;
 } = {}): OutdoorStaticObjectsScopePayload {
 	const landblockId = options.landblockId ?? 0xda55ffff;
 	const includeBvh = options.includeBvh ?? true;
 	const object = createOutdoorStaticObject({
-		instanceBounds: {
+		instanceBounds: options.instanceBounds ?? {
 			max: { x: 1, y: 1, z: -4 },
 			min: { x: -1, y: -1, z: -5 },
 		},
-		instanceId: "outdoor-static-0",
+		instanceId: options.instanceId ?? "outdoor-static-0",
 		landblockId,
 		sourceDid: 0x02000010,
 		sourceIndex: 0,

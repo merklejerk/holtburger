@@ -78,11 +78,44 @@ describe("V2 terrain static resolver", () => {
 			source: "outdoor",
 		});
 		expect(payload.scope.mesh).toMatchObject({
+			bounds: {
+				max: { x: 24, y: 3, z: 0 },
+				min: { x: 0, y: 0, z: -24 },
+			},
 			gridSize: 2,
 			quadCount: 1,
 			tileSize: 24,
 			triangleCount: 2,
+			vertices: [
+				{ x: 0, y: 0, z: 0 },
+				{ x: 24, y: 1, z: 0 },
+				{ x: 0, y: 2, z: -24 },
+				{ x: 24, y: 3, z: -24 },
+			],
 			vertexCount: 4,
+		});
+		expect(payload.scope.mesh.quads[0]?.bounds).toEqual({
+			max: { x: 24, y: 3, z: 0 },
+			min: { x: 0, y: 0, z: -24 },
+		});
+		expect(payload.scope.sourceSpatial).toMatchObject({
+			bounds: {
+				max: { x: 24, y: 3, z: 0 },
+				min: { x: 0, y: 0, z: -24 },
+			},
+			coordinateSpace: "landblock-render-local",
+			terrainBvh: {
+				coordinateSpace: "landblock-render-local",
+				items: [{ quadIndex: 0 }],
+				nodes: [
+					{
+						bounds: {
+							max: { x: 24, y: 3, z: 0 },
+							min: { x: 0, y: 0, z: -24 },
+						},
+					},
+				],
+			},
 		});
 		expect(payload.scope.terrainMaterial.identity).toEqual({
 			kind: "terrain-material",
@@ -326,8 +359,29 @@ function createLandblockOutdoorPayload(): LandblockOutdoorPayloadDto {
 			],
 			terrainBvh: {
 				coordinateSpace: "landblock-outdoor-terrain-local",
-				items: [],
-				nodes: [],
+				items: [
+					{
+						col: 0,
+						quadIndex: 0,
+						row: 0,
+						triangleIndices: [0, 1],
+					},
+				],
+				nodes: [
+					{
+						bounds: {
+							max: { x: 24, y: 24, z: 3 },
+							min: { x: 0, y: 0, z: 0 },
+						},
+						itemIndices: [0],
+						kindMask: {
+							domain: "outdoor-terrain",
+							terrainQuad: true,
+						},
+						left: null,
+						right: null,
+					},
+				],
 			},
 			tileSize: 24,
 			triangles: [

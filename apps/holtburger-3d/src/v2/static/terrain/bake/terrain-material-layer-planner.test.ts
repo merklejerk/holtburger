@@ -265,7 +265,7 @@ function createTerrainPayload({
 			bounds: null,
 			coordinateSpace: "landblock-render-local",
 			terrainBvh: {
-				coordinateSpace: "landblock-outdoor-terrain-local",
+				coordinateSpace: "landblock-render-local",
 				items: [],
 				nodes: [],
 			},

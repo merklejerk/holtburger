@@ -4049,7 +4049,7 @@ Phase 12A5 verification:
 
 ### Phase 12A6: Runtime Follow Mode, Incremental Static Interest, And Anchor Rebase
 
-Status: complete on 2026-06-14. Phase 12 is the next planned breadth phase.
+Status: complete on 2026-06-14. Phase 12A7 is the next immediate corrective phase before Phase 12 breadth.
 
 Purpose: replace the manual non-incremental V2 static request path with a runtime-owned scene-interest model that supports browser-driven camera follow mode, moving outdoor anchors, in-place static streaming, and renderer/query rebasing without rebuilding source BVHs or rebaking resident draw units.
 
@@ -4120,6 +4120,7 @@ Phase 12A6 spicy bits:
 - Renderer placement is now a draw-time uniform path, not a CPU-upload translation. This is the right streaming shape, but it changes shader assumptions: terrain world-position consumers now rely on the placement uniform being set for every draw.
 - Desired-set diffing changes the static coordinator from a global revision model to per-scope active-work membership. That is the correct streaming shape, but it means fake/placeholder draw units need careful ownership handling in tests.
 - Runtime rebase updates currently use a static-delta revision derived from the latest coordinator snapshot rather than a dedicated renderer-placement revision counter. It is deterministic for renderer consumption, but the revision vocabulary is still coordinator-shaped.
+- Follow-mode anchor rebasing currently emits one placement update per materialized draw unit. This avoids buffer rebuilds, but it is too granular for resident outdoor content where all draw units in the same landblock share the same anchor-relative base translation.
 
 Phase 12A6 failed to close:
 
@@ -4134,6 +4135,65 @@ Phase 12A6 verification:
 - `cd apps/holtburger-3d && npm run test:ts`
 - Plain Vite `/browser-v2` smoke with headless Chrome + SwiftShader verified the harness mounts, the canvas initializes, and the `Follow camera` navigation-tab toggle is visible/off by default.
 - Tauri-backed browser visual verification of real-asset manual load, follow-mode anchor movement, follow-mode disabled/fixed-anchor behavior, and click picking after at least one outdoor reanchor remains outstanding.
+
+### Phase 12A7: Static Draw-Unit Ownership And Anchor Placement Contract Cleanup
+
+Status: planned as the next immediate phase before Phase 12 breadth.
+
+Purpose: remove fake placeholder static draw units, make static draw-unit ownership non-optional across the bake/coordinator/materializer/renderer boundary, and replace per-draw-unit anchor-rebase placement updates with an anchor-aware placement contract that can resolve outdoor landblock translations cheaply.
+
+Current steering:
+
+- Static renderables without scope ownership are invalid. Every real static draw unit must either carry enough typed ownership to derive its desired scope (`domain`, `landblockId`, and interior/env-cell identity where applicable) or be rejected before it reaches renderer residency.
+- Placeholder draw units should not be kept for compatibility. If a partition cannot produce real renderable geometry, the baker should skip renderer output for that partition and emit typed diagnostics/console warnings at the boundary that made the non-rendering decision.
+- Anchor movement should not require an O(draw units) placement update for outdoor terrain/static content. Outdoor draw units are landblock-local, so their base render translation can be derived from owning landblock plus current render anchor. Multiple draw units in one landblock should share that base translation.
+- One global anchor translation is not sufficient by itself because resident coverage contains multiple landblocks. The durable contract is anchor plus owner landblock, with per-landblock translation derived just-in-time or cached by the renderer/query runtime.
+- Follow-mode anchor changes must be camera/anchor coherent within the same browser tick. Debouncing camera residency checks is not the correctness fix; the browser/runtime should derive a rebase, update scene interest/anchor state, rebase the camera, and only then publish the frame state used for rendering/picking.
+- Visibility culling is not a scene-residency delta producer. It should select draw candidates from resident draw units/BVH roots and must not be mixed into this phase's static residency revision cleanup.
+- Dynamic/live entities and animation remain out of scope. They belong to a future dynamic scene graph/update path and should not complicate the static draw-unit placement contract.
+
+Deliverables:
+
+- Delete `PlaceholderStaticDrawUnit` from the `StaticDrawUnit` union and remove any renderer/materializer/coordinator special cases that infer ownership from fake placeholder outputs.
+- Change static object compatibility baking so non-renderable partitions do not emit draw units. Instead, they preserve material coverage/fallback diagnostics and emit a clear console warning or runtime diagnostic that includes domain, landblock id, partition id, material family/pass/outcome, and fallback reason when available.
+- Tighten coordinator ownership mapping so every committed draw unit maps to a desired work key from typed draw-unit fields. If a draw unit cannot be mapped, fail the commit loudly instead of assigning it to the first work in the batch.
+- Add tests proving multi-work bake batches cannot commit ownerless draw units and that non-renderable static partitions produce diagnostics without renderer draw-unit output.
+- Replace `updatedDrawUnitPlacements` rebase behavior with an anchor-aware renderer/runtime placement contract:
+  - outdoor terrain/static draw units expose owning `landblockId`;
+  - renderer resources keep source/local buffers plus owner landblock;
+  - runtime or renderer stores the current render anchor landblock id;
+  - draw-time placement derives or looks up per-landblock translation from owner landblock and current anchor;
+  - anchor changes update one anchor/per-landblock placement state, not every draw-unit placement record.
+- Keep static scene query rebasing aligned with the same owner-landblock plus current-anchor translation model so picking and renderer placement cannot drift.
+- Reorder browser follow-mode frame handling so residency/rebase is resolved before `runtime.updateFrameState()` receives the camera for that tick. The renderer must not observe a new anchor with the old pre-rebase camera position, or the old anchor with the new post-rebase camera position.
+- Add tests around follow-mode rebase sequencing: crossing a landblock boundary should submit one anchor update, rebase the camera into the new anchor-local range, and publish only the rebased camera frame state for that tick.
+- Clarify `StaticResidencyDelta.revision` semantics or split anchor placement updates out of static residency deltas if the resulting API is cleaner. The goal is that residency revisions describe add/remove content, while anchor movement is an explicit placement/anchor state update.
+
+Acceptance criteria:
+
+- `StaticDrawUnit` has no placeholder variant and no code path emits fake draw units for unsupported/non-renderable static partitions.
+- Unsupported or deferred static partitions are visible through diagnostics/warnings but do not enter renderer residency, texture ownership, source mapping, spatial records, or eviction bookkeeping as fake draw units.
+- The coordinator rejects ownerless committed draw units in tests and never falls back to "first work in batch" ownership.
+- Follow-mode outdoor anchor changes no longer allocate/send one placement update per materialized draw unit.
+- Follow-mode outdoor anchor changes do not produce a one-frame split where renderer frame state uses the pre-rebase camera while runtime/static placement has already moved to the new anchor.
+- Existing resident terrain/static GPU buffers are still retained across anchor changes.
+- Renderer drawing, static scene query picking, and sort-center/world-position logic resolve positions through the same anchor plus owner-landblock placement model.
+- Existing Phase 12A6 follow-mode, materialization, static coordinator, renderer, and static-scene query tests still pass.
+
+Spicy expectations:
+
+- Deleting placeholder draw units may expose tests or fake/local bakers that were relying on fake draw-unit counts instead of real diagnostics. Prefer updating those tests to assert warnings/coverage records rather than preserving compatibility.
+- Non-renderable partitions still need useful source/material diagnostics after draw-unit deletion. Do not delete the diagnostic trail just because renderer output disappears.
+- Per-landblock translation should be enough for outdoor terrain and outdoor static objects. Interior/env-cell geometry may need a second local transform layer later, but this phase should keep that future shape explicit instead of inventing per-object placement for outdoor content.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- Focused tests for static coordinator ownership, static object compatibility baking diagnostics, static materialization, renderer placement/rebase behavior, static scene query reanchor behavior, and browser follow-mode scene interest.
+- `cd apps/holtburger-3d && npm run test:ts`
+- If feasible, plain Vite `/browser-v2` smoke verifying the follow toggle still mounts and manual/follow navigation still requests scene interest through the runtime.
 
 ### Phase 12: Static Object Breadth And Compaction
 

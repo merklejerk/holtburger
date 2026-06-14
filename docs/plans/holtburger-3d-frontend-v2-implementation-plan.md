@@ -1888,7 +1888,7 @@ Dry-run conclusion:
   - migrate terrain constructors/tests and texture-manager source-key/page-policy call sites,
   - replace `PreparedTextureUseIdentity` in bake/texture-manager contracts once tests prove parity,
   - delete the old type or demote it to an implementation detail before moving to 11B2B.
-  This should be a decisive cutover inside V2; avoid carrying old and new texture-use identities past the end of 11B2A.
+    This should be a decisive cutover inside V2; avoid carrying old and new texture-use identities past the end of 11B2A.
 
 Implementation notes:
 
@@ -3529,38 +3529,38 @@ landblock/{XXYYffff}/env-cells
 
 ```ts
 interface LandblockEnvCellsPayloadDto {
-	kind: "landblock-env-cells";
-	residencyKind: "landblock";
-	sourceAssetKind: "landblock-env-cells";
-	landblockId: number;
-	landblockInfoId: number;
-	classification: "outdoor" | "dungeon";
-	regionId: number;
-	regionNumber: number;
-	envCells: LandblockEnvCellDto[];
-	portalLinks: EnvCellPortalLinkDto[];
-	envCellResidencyBvh: PreparedEnvCellResidencyBvhDto;
-	diagnostics: PreparedContentSourceDiagnosticsDto;
-	provenance: AssetProvenanceDto;
+  kind: "landblock-env-cells";
+  residencyKind: "landblock";
+  sourceAssetKind: "landblock-env-cells";
+  landblockId: number;
+  landblockInfoId: number;
+  classification: "outdoor" | "dungeon";
+  regionId: number;
+  regionNumber: number;
+  envCells: LandblockEnvCellDto[];
+  portalLinks: EnvCellPortalLinkDto[];
+  envCellResidencyBvh: PreparedEnvCellResidencyBvhDto;
+  diagnostics: PreparedContentSourceDiagnosticsDto;
+  provenance: AssetProvenanceDto;
 }
 
 interface LandblockEnvCellDto {
-	envCellId: number;
-	memberId: string;
-	localPlacement: PlacementTransformDto;
-	environmentId: number;
-	cellStructureId: number;
-	visibleEnvCellIds: number[];
-	restrictionObjectId: number | null;
-	seenOutside: boolean | null;
-	surfaces: EnvCellSurfaceSlotDto[];
-	portals: EnvCellPortalDto[];
-	portalApertures: PreparedPortalApertureDto[];
-	statics: EnvCellStaticMemberDto[];
-	renderGeometry: PreparedPolygonSetRenderGeometryDto;
-	cellBsp: PreparedPolygonSetBspNodeDto;
-	localBvh: PreparedEnvCellBvhDto;
-	diagnostics: PreparedContentSourceDiagnosticsDto;
+  envCellId: number;
+  memberId: string;
+  localPlacement: PlacementTransformDto;
+  environmentId: number;
+  cellStructureId: number;
+  visibleEnvCellIds: number[];
+  restrictionObjectId: number | null;
+  seenOutside: boolean | null;
+  surfaces: EnvCellSurfaceSlotDto[];
+  portals: EnvCellPortalDto[];
+  portalApertures: PreparedPortalApertureDto[];
+  statics: EnvCellStaticMemberDto[];
+  renderGeometry: PreparedPolygonSetRenderGeometryDto;
+  cellBsp: PreparedPolygonSetBspNodeDto;
+  localBvh: PreparedEnvCellBvhDto;
+  diagnostics: PreparedContentSourceDiagnosticsDto;
 }
 ```
 
@@ -3664,13 +3664,14 @@ Deliverables:
 
 ```ts
 selectVisibleEnvCells(bundle, {
-	focusEnvCellId,
-	maxDepth,
-	includeFocus,
+  focusEnvCellId,
+  maxDepth,
+  includeFocus,
 });
 ```
 
-  It should return deterministic accepted env-cell ids plus diagnostics for missing focus cells, missing target cells, and traversal cutoffs. Default behavior should include the focus cell and authored visible-cell refs; portal-link expansion can be bounded and conservative.
+It should return deterministic accepted env-cell ids plus diagnostics for missing focus cells, missing target cells, and traversal cutoffs. Default behavior should include the focus cell and authored visible-cell refs; portal-link expansion can be bounded and conservative.
+
 - Tests proving outdoor-linked and dungeon-classified landblocks use the same env-cell source path.
 - Tests proving cell visibility traversal is deterministic, bounded, and scene-context driven.
 - Tests proving env-cell records do not use host route strings as semantic identity.
@@ -3868,37 +3869,37 @@ Proposed DTO course correction:
 
 ```ts
 interface LandblockEnvCellsPayloadDto {
-	kind: "landblock-env-cells";
-	landblockId: number;
-	landblockInfoId: number;
-	regionId: number;
-	regionNumber: number;
-	envCells: LandblockEnvCellDto[];
-	portalLinks: EnvCellPortalLinkDto[];
-	landblockEnvCellBvh: PreparedLandblockEnvCellBvhDto;
-	diagnostics: PreparedContentSourceDiagnosticsDto;
-	provenance: AssetProvenanceDto;
+  kind: "landblock-env-cells";
+  landblockId: number;
+  landblockInfoId: number;
+  regionId: number;
+  regionNumber: number;
+  envCells: LandblockEnvCellDto[];
+  portalLinks: EnvCellPortalLinkDto[];
+  landblockEnvCellBvh: PreparedLandblockEnvCellBvhDto;
+  diagnostics: PreparedContentSourceDiagnosticsDto;
+  provenance: AssetProvenanceDto;
 }
 
 interface PreparedLandblockEnvCellBvhDto {
-	nodes: PreparedBvhNodeDto[];
-	items: PreparedLandblockEnvCellBvhItemDto[];
+  nodes: PreparedBvhNodeDto[];
+  items: PreparedLandblockEnvCellBvhItemDto[];
 }
 
 interface PreparedLandblockEnvCellBvhItemDto {
-	envCellId: number;
-	memberId: string;
-	bounds: PreparedAabbDto;
-	source: "env-cell-root" | "derived";
+  envCellId: number;
+  memberId: string;
+  bounds: PreparedAabbDto;
+  source: "env-cell-root" | "derived";
 }
 
 interface LandblockEnvCellDto {
-	envCellId: number;
-	memberId: string;
-	localPlacement: PlacementTransformDto;
-	localBvh: PreparedEnvCellBvhDto;
-	// remaining environment, cell-structure geometry, portal, static seed,
-	// diagnostics, and source fields remain as in 12A0/12A1.
+  envCellId: number;
+  memberId: string;
+  localPlacement: PlacementTransformDto;
+  localBvh: PreparedEnvCellBvhDto;
+  // remaining environment, cell-structure geometry, portal, static seed,
+  // diagnostics, and source fields remain as in 12A0/12A1.
 }
 ```
 
@@ -4048,7 +4049,7 @@ Phase 12A5 verification:
 
 ### Phase 12A6: Runtime Follow Mode, Incremental Static Interest, And Anchor Rebase
 
-Status: planned; next immediate implementation phase before Phase 12 breadth.
+Status: complete on 2026-06-14. Phase 12 is the next planned breadth phase.
 
 Purpose: replace the manual non-incremental V2 static request path with a runtime-owned scene-interest model that supports browser-driven camera follow mode, moving outdoor anchors, in-place static streaming, and renderer/query rebasing without rebuilding source BVHs or rebaking resident draw units.
 
@@ -4100,15 +4101,29 @@ Acceptance criteria:
 - The runtime snapshot exposes enough anchor/residency facts for browser status/debug UI without making Svelte own residency policy.
 - Existing terrain/static object rendering, materialization, picking, and texture-manager tests still pass.
 
+Phase 12A6 execution notes:
+
+- Replaced the V2 `ClientRuntime.requestStaticWork()` / `evictStaticWork()` command surface with `updateSceneInterest()`. Manual browser navigation, follow-driven outdoor anchor updates, interior/env-cell focus, and no-interest eviction now share the same runtime API.
+- Added runtime scene-interest snapshot state and diagnostics summary. Browser presentation now reads `sceneInterest` instead of `lastStaticRequest`, keeping Svelte as a consumer rather than the owner of residency policy.
+- Added `deriveOutdoorCameraLandblockResidency()` in the runtime placement module. It derives the camera's outdoor landblock from current anchor-local position using the 192m landblock grid and returns the camera-local rebase translation for browser follow mode.
+- Changed `StaticCoordinator.requestStaticDemand()` from full global teardown to desired-set reconciliation. It retains still-desired work, enqueues only new landblock/domain work, evicts resident draw units only for scopes that leave demand, and stale-rejects async resolver/baker results based on active work membership instead of a global revision equality check.
+- Added renderer placement update deltas. Runtime now retains materialized draw units and emits `updatedDrawUnitPlacements` when the outdoor anchor changes, allowing resident geometry to move without remove/add churn.
+- Updated WebGL2 terrain/static-object rendering so placement is applied at draw time through shader placement uniforms. Position buffers now stay in source/local draw-unit coordinates instead of being CPU-translated during upload. Terrain `vWorldPosition` uses translated position so material/detail calculations stay in renderer-local scene space.
+- Added public `StaticSceneQuery.setOutdoorAnchorLandblockId()` and `retainScopes()` so query roots can be rebased/pruned without clearing and re-ingesting source BVHs.
+- Added an opt-in `Follow camera` control in the V2 browser navigation tab. It is off by default; when enabled, camera landblock residency changes update scene interest through the same runtime API as manual load. When disabled, manual/fixed-anchor behavior remains unchanged.
+- Removed stale CPU vertex translation helpers from the WebGL2 renderer and updated tests away from the old manual request API.
+
 Phase 12A6 spicy bits:
 
-- This phase intentionally deletes the old manual non-incremental runtime API instead of keeping compatibility wrappers. Browser controls should migrate to the scene-interest API in the same cutover.
-- Renderer placement currently mutates CPU vertex data before upload. Changing that to draw-time transforms touches shader inputs, sort-center handling, terrain material/world-position calculations, and tests. This is the risky center of the phase.
-- Desired-set diffing changes the static coordinator from a global revision model to per-scope generations. That is the correct streaming shape, but stale-result tests need to get stricter so old async work cannot resurrect evicted scopes.
+- This phase intentionally deletes the old manual non-incremental runtime API instead of keeping compatibility wrappers. Browser controls migrated to the scene-interest API in the same cutover.
+- The static coordinator still emits batch-level bake results, so scope-level eviction maps draw units back to desired scopes from draw-unit ownership (`domain`/`landblockId`) when possible. Placeholder draw units only map precisely when a batch has a single work item; real terrain/static draw units are now covered by typed ownership. This is acceptable for current real V2 domains, but placeholders remain a test/fake-worker limitation.
+- Renderer placement is now a draw-time uniform path, not a CPU-upload translation. This is the right streaming shape, but it changes shader assumptions: terrain world-position consumers now rely on the placement uniform being set for every draw.
+- Desired-set diffing changes the static coordinator from a global revision model to per-scope active-work membership. That is the correct streaming shape, but it means fake/placeholder draw units need careful ownership handling in tests.
+- Runtime rebase updates currently use a static-delta revision derived from the latest coordinator snapshot rather than a dedicated renderer-placement revision counter. It is deterministic for renderer consumption, but the revision vocabulary is still coordinator-shaped.
 
-Phase 12A6 failed-to-close log:
+Phase 12A6 failed to close:
 
-- None yet; fill during implementation.
+- No Tauri-backed live asset streaming/browser walkthrough was performed in this implementation pass. Automated tests cover the runtime/coordinator/query behavior and a plain Vite browser smoke confirms the V2 harness/follow toggle mounts, but live follow mode over real terrain/static assets still needs manual verification.
 
 Phase 12A6 verification:
 
@@ -4117,7 +4132,8 @@ Phase 12A6 verification:
 - `cd apps/holtburger-3d && npm run lint:dead`
 - `cd apps/holtburger-3d && npm run test:ts -- runtime/client-runtime runtime/static-materializer runtime/static-scene-query static/coordinator/static-coordinator`
 - `cd apps/holtburger-3d && npm run test:ts`
-- Browser visual verification of `/browser-v2` manual load, follow-mode opt-in toggle behavior, follow-mode anchor movement, follow-mode disabled/fixed-anchor behavior, and click picking after at least one outdoor reanchor.
+- Plain Vite `/browser-v2` smoke with headless Chrome + SwiftShader verified the harness mounts, the canvas initializes, and the `Follow camera` navigation-tab toggle is visible/off by default.
+- Tauri-backed browser visual verification of real-asset manual load, follow-mode anchor movement, follow-mode disabled/fixed-anchor behavior, and click picking after at least one outdoor reanchor remains outstanding.
 
 ### Phase 12: Static Object Breadth And Compaction
 

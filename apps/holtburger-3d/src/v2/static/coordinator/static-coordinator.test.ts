@@ -77,6 +77,69 @@ describe("V2 static coordinator", () => {
 		});
 	});
 
+	it("diffs desired outdoor work across neighboring anchors", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+
+		coordinator.requestStaticDemand({
+			location: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: -1,
+				terrain: 1,
+			},
+		});
+		expect(resolver.pendingRequests).toHaveLength(5);
+
+		coordinator.requestStaticDemand({
+			location: {
+				kind: "outdoor-landblock",
+				landblockId: 0xdb55ffff,
+			},
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: -1,
+				terrain: 1,
+			},
+		});
+
+		expect(resolver.pendingRequests).toHaveLength(8);
+		expect(coordinator.createSnapshot().activeWork).toHaveLength(5);
+		expect(
+			new Set(
+				coordinator.createSnapshot().activeWork.map((work) => work.scopeKey),
+			),
+		).toEqual(
+			new Set([
+				"landblock:da55ffff",
+				"landblock:db55ffff",
+				"landblock:db54ffff",
+				"landblock:db56ffff",
+				"landblock:dc55ffff",
+			]),
+		);
+
+		const evictedRequest = resolver.pendingRequests.find(
+			(request) =>
+				request.job.scope.landblockId === 0xd955ffff &&
+				request.job.domain === "outdoor-terrain",
+		);
+		resolver.complete(evictedRequest?.requestId ?? "");
+		await flushPromises();
+
+		expect(coordinator.createSnapshot().staleResolverResults).toBe(1);
+	});
+
 	it("tracks revisions on pending work without asset lease concepts", () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -573,9 +636,9 @@ function createLandblockEnvCellsResolverPayload(): {
 	readonly scope: StaticScopePayload["scope"];
 } {
 	return {
-			scope: {
-				acceptedEnvCellIds: [0xda550100],
-				envCells: [
+		scope: {
+			acceptedEnvCellIds: [0xda550100],
+			envCells: [
 				{
 					cellBsp: {
 						kind: "leaf",

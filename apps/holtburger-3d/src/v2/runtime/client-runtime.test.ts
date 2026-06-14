@@ -47,10 +47,8 @@ describe("V2 client runtime", () => {
 			}),
 		});
 
-		runtime.requestStaticWork({
+		updateOutdoorSceneInterest(runtime, {
 			domains: ["buildings", "terrain", "env-cells"],
-			landblockId: "0xda55ffff",
-			locationKind: "outdoor-landblock",
 			lod: {
 				buildings: 0,
 				terrain: 1,
@@ -87,11 +85,7 @@ describe("V2 client runtime", () => {
 			}),
 		});
 
-		runtime.requestStaticWork({
-			domains: ["terrain"],
-			landblockId: "0xda55ffff",
-			locationKind: "outdoor-landblock",
-		});
+		updateOutdoorSceneInterest(runtime);
 
 		expect(runtime.createDiagnosticsReport()).toMatchObject({
 			domains: expect.arrayContaining([
@@ -125,7 +119,7 @@ describe("V2 client runtime", () => {
 			]),
 			kind: "runtime-diagnostics-report",
 			runtime: {
-				lastStaticRequest: "outdoor-landblock|0xda55ffff|terrain",
+				sceneInterest: "manual|outdoor-anchor|0xda55ffff|terrain",
 				materializedStaticDrawUnits: 0,
 				pendingStaticMaterializationRevisions: [],
 				sourceStaticDrawUnits: 0,
@@ -145,12 +139,7 @@ describe("V2 client runtime", () => {
 			renderer: new FakeRenderer(),
 		});
 
-		runtime.requestStaticWork({
-			domains: ["env-cells"],
-			envCellId: "0xda550100",
-			landblockId: "0xda55ffff",
-			locationKind: "interior-cell",
-		});
+		updateInteriorSceneInterest(runtime);
 		await flushPromises();
 
 		expect(runtime.createDiagnosticsReport()).toMatchObject({
@@ -207,11 +196,7 @@ describe("V2 client runtime", () => {
 			staticCoordinator,
 		});
 
-		runtime.requestStaticWork({
-			domains: ["terrain"],
-			landblockId: "0xda55ffff",
-			locationKind: "outdoor-landblock",
-		});
+		updateOutdoorSceneInterest(runtime);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
 		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
@@ -229,16 +214,59 @@ describe("V2 client runtime", () => {
 				],
 				removedDrawUnitIds: [],
 				revision: 1,
+				updatedDrawUnitPlacements: [],
 			},
 		]);
 
-		runtime.evictStaticWork();
+		runtime.updateSceneInterest({ kind: "none" });
 		await flushPromises();
 
 		expect(renderer.staticDeltas.at(-1)).toEqual({
 			addedDrawUnitPlacements: [],
 			removedDrawUnitIds: ["terrain-a"],
 			revision: 2,
+			updatedDrawUnitPlacements: [],
+		});
+		runtime.dispose();
+	});
+
+	it("rebases resident static draw units without remove/add churn", async () => {
+		const renderer = new FakeRenderer();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker,
+				resolver,
+			}),
+		});
+
+		updateOutdoorSceneInterest(runtime);
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
+		await flushPromises();
+		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
+			drawUnits: [createTerrainDrawUnit("terrain-a", 0xdb55ffff)],
+		});
+		await flushPromises();
+
+		updateOutdoorSceneInterest(runtime, {
+			anchorLandblockId: 0xdb55ffff,
+			source: "follow",
+		});
+
+		expect(renderer.staticDeltas.at(-1)).toEqual({
+			addedDrawUnitPlacements: [],
+			removedDrawUnitIds: [],
+			revision: 2,
+			updatedDrawUnitPlacements: [
+				{
+					drawUnitId: "terrain-a",
+					translation: [0, 0, 0],
+				},
+			],
 		});
 		runtime.dispose();
 	});
@@ -269,11 +297,7 @@ describe("V2 client runtime", () => {
 			textureUseIds: ["terrain-textured:prepared-texture:06000010"],
 		});
 
-		runtime.requestStaticWork({
-			domains: ["terrain"],
-			landblockId: "0xda55ffff",
-			locationKind: "outdoor-landblock",
-		});
+		updateOutdoorSceneInterest(runtime);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
 		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
@@ -330,11 +354,7 @@ describe("V2 client runtime", () => {
 			textureUseIds: ["terrain-textured:prepared-texture:06000010"],
 		});
 
-		runtime.requestStaticWork({
-			domains: ["terrain"],
-			landblockId: "0xda55ffff",
-			locationKind: "outdoor-landblock",
-		});
+		updateOutdoorSceneInterest(runtime);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
 		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
@@ -398,11 +418,7 @@ describe("V2 client runtime", () => {
 			textureUseIds: ["terrain-textured:prepared-texture:06000010"],
 		});
 
-		runtime.requestStaticWork({
-			domains: ["terrain"],
-			landblockId: "0xda55ffff",
-			locationKind: "outdoor-landblock",
-		});
+		updateOutdoorSceneInterest(runtime);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
 		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
@@ -456,11 +472,7 @@ describe("V2 client runtime", () => {
 			pcode: 33825,
 		};
 
-		runtime.requestStaticWork({
-			domains: ["terrain"],
-			landblockId: "0xda55ffff",
-			locationKind: "outdoor-landblock",
-		});
+		updateOutdoorSceneInterest(runtime);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
 		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
@@ -511,11 +523,7 @@ describe("V2 client runtime", () => {
 			}),
 		});
 
-		runtime.requestStaticWork({
-			domains: ["terrain"],
-			landblockId: "0xda55ffff",
-			locationKind: "outdoor-landblock",
-		});
+		updateOutdoorSceneInterest(runtime);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
 		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
@@ -565,11 +573,7 @@ describe("V2 client runtime", () => {
 			latestSnapshot = snapshot;
 		});
 
-		runtime.requestStaticWork({
-			domains: ["terrain"],
-			landblockId: "0xda55ffff",
-			locationKind: "outdoor-landblock",
-		});
+		updateOutdoorSceneInterest(runtime);
 		resolver.fail(
 			resolver.pendingRequests[0]?.requestId ?? "",
 			new Error("landblock env-cell bundle unavailable"),
@@ -592,6 +596,45 @@ describe("V2 client runtime", () => {
 		runtime.dispose();
 	});
 });
+
+function updateOutdoorSceneInterest(
+	runtime: ReturnType<typeof createClientRuntime>,
+	options: {
+		readonly anchorLandblockId?: number;
+		readonly domains?: readonly (
+			| "buildings"
+			| "detail"
+			| "env-cells"
+			| "terrain"
+		)[];
+		readonly lod?: {
+			readonly buildings?: number;
+			readonly detail?: number;
+			readonly envCells?: number;
+			readonly terrain?: number;
+		};
+		readonly source?: "manual" | "follow";
+	} = {},
+): void {
+	runtime.updateSceneInterest({
+		anchorLandblockId: options.anchorLandblockId ?? 0xda55ffff,
+		domains: options.domains ?? ["terrain"],
+		...(options.lod ? { lod: options.lod } : {}),
+		kind: "outdoor-anchor",
+		source: options.source ?? "manual",
+	});
+}
+
+function updateInteriorSceneInterest(
+	runtime: ReturnType<typeof createClientRuntime>,
+): void {
+	runtime.updateSceneInterest({
+		envCellId: 0xda550100,
+		kind: "interior-cell",
+		landblockId: 0xda55ffff,
+		source: "manual",
+	});
+}
 
 class FakeRenderer implements Renderer {
 	readonly staticDeltas: StaticResidencyDelta[] = [];

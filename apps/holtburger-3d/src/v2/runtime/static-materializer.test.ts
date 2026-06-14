@@ -39,6 +39,7 @@ describe("V2 static materializer", () => {
 			],
 			removedDrawUnitIds: [],
 			revision: 7,
+			updatedDrawUnitPlacements: [],
 		});
 	});
 

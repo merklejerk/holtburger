@@ -128,25 +128,33 @@ const preparedAabbDtoSchema = z
 	.nullable();
 
 const preparedBvhKindMaskDtoSchema = z.discriminatedUnion("domain", [
-	z.object({
-		domain: z.literal("outdoor-terrain"),
-		terrainQuad: z.boolean(),
-	}).strict(),
-	z.object({
-		domain: z.literal("outdoor-static"),
-		static: z.boolean(),
-		building: z.boolean(),
-	}).strict(),
-	z.object({
-		domain: z.literal("landblock-env-cells"),
-		envCellRoot: z.boolean(),
-	}).strict(),
-	z.object({
-		domain: z.literal("env-cell-local"),
-		cellStructureGeometry: z.boolean(),
-		static: z.boolean(),
-		portal: z.boolean(),
-	}).strict(),
+	z
+		.object({
+			domain: z.literal("outdoor-terrain"),
+			terrainQuad: z.boolean(),
+		})
+		.strict(),
+	z
+		.object({
+			domain: z.literal("outdoor-static"),
+			static: z.boolean(),
+			building: z.boolean(),
+		})
+		.strict(),
+	z
+		.object({
+			domain: z.literal("landblock-env-cells"),
+			envCellRoot: z.boolean(),
+		})
+		.strict(),
+	z
+		.object({
+			domain: z.literal("env-cell-local"),
+			cellStructureGeometry: z.boolean(),
+			static: z.boolean(),
+			portal: z.boolean(),
+		})
+		.strict(),
 ]);
 
 const preparedLegacyBvhKindMaskDtoSchema = z.number().int().nonnegative();
@@ -159,9 +167,10 @@ const preparedLandblockBvhNodeDtoSchema = z.object({
 	kindMask: preparedBvhKindMaskDtoSchema,
 });
 
-const preparedLegacyLandblockBvhNodeDtoSchema = preparedLandblockBvhNodeDtoSchema.extend({
-	kindMask: preparedLegacyBvhKindMaskDtoSchema,
-});
+const preparedLegacyLandblockBvhNodeDtoSchema =
+	preparedLandblockBvhNodeDtoSchema.extend({
+		kindMask: preparedLegacyBvhKindMaskDtoSchema,
+	});
 
 const sourceRecordDiagnosticDtoSchema = z.object({
 	namespace: z.string().min(1),
@@ -460,22 +469,28 @@ const preparedEnvCellBvhDtoSchema = z.object({
 	items: z.array(preparedEnvCellBvhItemDtoSchema),
 });
 
-const preparedLandblockEnvCellBvhItemDtoSchema = z.object({
-	envCellId: z.number().int().nonnegative(),
-	memberId: z.string().min(1),
-	bounds: z.object({ min: vec3DtoSchema, max: vec3DtoSchema }),
-	source: z.enum(["env-cell-root", "derived"]),
-}).strict();
+const preparedLandblockEnvCellBvhItemDtoSchema = z
+	.object({
+		envCellId: z.number().int().nonnegative(),
+		memberId: z.string().min(1),
+		bounds: z.object({ min: vec3DtoSchema, max: vec3DtoSchema }),
+		source: z.enum(["env-cell-root", "derived"]),
+	})
+	.strict();
 
-const preparedLandblockEnvCellBvhDtoSchema = z.object({
-	nodes: z.array(preparedLandblockBvhNodeDtoSchema),
-	items: z.array(preparedLandblockEnvCellBvhItemDtoSchema),
-}).strict();
+const preparedLandblockEnvCellBvhDtoSchema = z
+	.object({
+		nodes: z.array(preparedLandblockBvhNodeDtoSchema),
+		items: z.array(preparedLandblockEnvCellBvhItemDtoSchema),
+	})
+	.strict();
 
-const preparedLandblockEnvCellLocalBvhDtoSchema = z.object({
-	nodes: z.array(preparedLandblockBvhNodeDtoSchema),
-	items: z.array(preparedLandblockEnvCellLocalBvhItemDtoSchema),
-}).strict();
+const preparedLandblockEnvCellLocalBvhDtoSchema = z
+	.object({
+		nodes: z.array(preparedLandblockBvhNodeDtoSchema),
+		items: z.array(preparedLandblockEnvCellLocalBvhItemDtoSchema),
+	})
+	.strict();
 
 export const envCellPayloadDtoSchema = z.object({
 	kind: z.literal("env-cell"),
@@ -499,39 +514,43 @@ export const envCellPayloadDtoSchema = z.object({
 });
 export type EnvCellPayloadDto = z.infer<typeof envCellPayloadDtoSchema>;
 
-const landblockEnvCellDtoSchema = z.object({
-	envCellId: z.number().int().nonnegative(),
-	memberId: z.string().min(1),
-	localPlacement: placementTransformDtoSchema,
-	environmentId: z.number().int().nonnegative(),
-	cellStructureId: z.number().int().nonnegative(),
-	visibleEnvCellIds: z.array(z.number().int().nonnegative()),
-	restrictionObjectId: z.number().int().nonnegative().nullable(),
-	seenOutside: z.boolean().nullable(),
-	surfaces: z.array(envCellSurfaceSlotDtoSchema),
-	portals: z.array(envCellPortalDtoSchema),
-	portalApertures: z.array(preparedPortalApertureDtoSchema),
-	statics: z.array(envCellStaticMemberDtoSchema),
-	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
-	cellBsp: z.lazy(() => polygonSetBspNodeDtoSchema),
-	localBvh: preparedLandblockEnvCellLocalBvhDtoSchema,
-	diagnostics: landblockPackDiagnosticsDtoSchema,
-}).strict();
+const landblockEnvCellDtoSchema = z
+	.object({
+		envCellId: z.number().int().nonnegative(),
+		memberId: z.string().min(1),
+		localPlacement: placementTransformDtoSchema,
+		environmentId: z.number().int().nonnegative(),
+		cellStructureId: z.number().int().nonnegative(),
+		visibleEnvCellIds: z.array(z.number().int().nonnegative()),
+		restrictionObjectId: z.number().int().nonnegative().nullable(),
+		seenOutside: z.boolean().nullable(),
+		surfaces: z.array(envCellSurfaceSlotDtoSchema),
+		portals: z.array(envCellPortalDtoSchema),
+		portalApertures: z.array(preparedPortalApertureDtoSchema),
+		statics: z.array(envCellStaticMemberDtoSchema),
+		renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
+		cellBsp: z.lazy(() => polygonSetBspNodeDtoSchema),
+		localBvh: preparedLandblockEnvCellLocalBvhDtoSchema,
+		diagnostics: landblockPackDiagnosticsDtoSchema,
+	})
+	.strict();
 
-export const landblockEnvCellsPayloadDtoSchema = z.object({
-	kind: z.literal("landblock-env-cells"),
-	residencyKind: z.literal("landblock"),
-	sourceAssetKind: z.literal("landblock-env-cells"),
-	landblockId: z.number().int().nonnegative(),
-	landblockInfoId: z.number().int().nonnegative(),
-	regionId: z.number().int().nonnegative(),
-	regionNumber: z.number().int().nonnegative(),
-	envCells: z.array(landblockEnvCellDtoSchema),
-	portalLinks: z.array(landblockScenePortalLinkDtoSchema),
-	landblockEnvCellBvh: preparedLandblockEnvCellBvhDtoSchema,
-	diagnostics: landblockPackDiagnosticsDtoSchema,
-	provenance: assetProvenanceDtoSchema,
-}).strict();
+export const landblockEnvCellsPayloadDtoSchema = z
+	.object({
+		kind: z.literal("landblock-env-cells"),
+		residencyKind: z.literal("landblock"),
+		sourceAssetKind: z.literal("landblock-env-cells"),
+		landblockId: z.number().int().nonnegative(),
+		landblockInfoId: z.number().int().nonnegative(),
+		regionId: z.number().int().nonnegative(),
+		regionNumber: z.number().int().nonnegative(),
+		envCells: z.array(landblockEnvCellDtoSchema),
+		portalLinks: z.array(landblockScenePortalLinkDtoSchema),
+		landblockEnvCellBvh: preparedLandblockEnvCellBvhDtoSchema,
+		diagnostics: landblockPackDiagnosticsDtoSchema,
+		provenance: assetProvenanceDtoSchema,
+	})
+	.strict();
 export type LandblockEnvCellsPayloadDto = z.infer<
 	typeof landblockEnvCellsPayloadDtoSchema
 >;

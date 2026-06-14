@@ -517,7 +517,9 @@ interface OutdoorStaticSourceSpatialFacts {
 
 export interface OutdoorStaticBvhFacts {
 	readonly coordinateSpace: "landblock-render-local";
-	readonly nodes: NonNullable<LandblockOutdoorPayloadDto["outdoorBvh"]>["nodes"];
+	readonly nodes: NonNullable<
+		LandblockOutdoorPayloadDto["outdoorBvh"]
+	>["nodes"];
 	readonly items: readonly OutdoorStaticBvhItemFacts[];
 }
 

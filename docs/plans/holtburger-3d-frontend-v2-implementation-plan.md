@@ -3960,7 +3960,7 @@ Phase 12A4 verification:
 
 ### Phase 12A5: Landblock-Wide Env-Cell BVH And Residency Query Course Correct
 
-Status: complete on 2026-06-13. Phase 12 is the next planned phase.
+Status: complete on 2026-06-13. Phase 12A6 is the next immediate phase before returning to Phase 12 breadth.
 
 Purpose: upgrade the normalized `landblock-env-cells` source bundle from flat env-cell spatial records into a true landblock-wide env-cell BVH plus per-cell local BVHs, then make runtime env-cell queries use that landblock BVH as the broad phase for initial residency, ray picking, and future visibility/frustum traversal.
 
@@ -4045,6 +4045,77 @@ Phase 12A5 verification:
 - `cd apps/holtburger-3d && npm run lint:ts`
 - `cd apps/holtburger-3d && npm run lint:dead`
 - `cd apps/holtburger-3d && npm run test:ts`
+
+### Phase 12A6: Runtime Follow Mode, Incremental Static Interest, And Anchor Rebase
+
+Status: planned; next immediate implementation phase before Phase 12 breadth.
+
+Purpose: replace the manual non-incremental V2 static request path with a runtime-owned scene-interest model that supports browser-driven camera follow mode, moving outdoor anchors, in-place static streaming, and renderer/query rebasing without rebuilding source BVHs or rebaking resident draw units.
+
+Current steering:
+
+- The future playable client and the browser follow mode need the same runtime mechanism. The browser may decide when to follow the camera, but runtime owns scene anchor state, coverage expansion, residency diffs, stale async work rejection, renderer placement updates, and static scene query rebasing.
+- The existing `requestStaticWork()` path is a manual harness API that rebuilds too much state. Do not preserve it as a legacy non-incremental path if the new scene-interest API can cover manual browser navigation, follow mode, and evict/none behavior.
+- Camera landblock residency is simple outdoor grid math derived from the current outdoor anchor and the camera's renderer-local position. Put this helper in V2 runtime/static placement code, not in Svelte.
+- Current WebGL2 static placement is baked into vertex buffers during upload. That blocks cheap anchor rebasing. Renderer resources should keep source/local vertex buffers and apply placement/root translation at draw time, preferably through explicit shader uniforms or an equivalent per-resource transform path.
+- The `StaticSceneQuery` outdoor landblock-grid broadphase is already shaped around root translations, but it needs an explicit reanchor/update path for resident roots instead of relying on clear/re-ingest behavior.
+- Env-cell/dungeon follow behavior can use the same scene-interest/update machinery, but this phase should focus on outdoor anchor movement and leave richer portal/current-cell follow policy to Phase 13 unless required for correctness.
+
+Deliverables:
+
+- Replace `ClientRuntime.requestStaticWork()` / `evictStaticWork()` with a typed scene-interest update API that can express:
+  - no scene interest,
+  - a fixed outdoor anchor/manual browser request,
+  - browser follow mode outdoor anchor updates,
+  - an interior/env-cell focus request for existing browser behavior.
+- Runtime helper for deriving the camera's outdoor landblock residency from the current outdoor anchor plus renderer-local camera position using the 192m landblock grid and the established V2 render-axis convention.
+- Runtime-maintained scene-anchor snapshot state, including current outdoor anchor landblock id, desired domains, LoD radii, and whether the current interest was manually set or follow-driven.
+- Static coordinator support for desired-set diffing:
+  - retain resident work still inside coverage,
+  - enqueue newly covered landblock/domain jobs,
+  - evict only scopes that leave retention,
+  - reject stale resolver/baker results at the work/scope generation level instead of globally invalidating every in-flight result on each anchor update.
+- Renderer contract/update path for rebasing already resident static draw units without recreating geometry buffers.
+- WebGL2 renderer update so terrain and static object vertex buffers remain in source/local draw-unit coordinates and placement translation is applied at draw time. Terrain shader world-position calculations must use the translated position when placement affects rendering or material effects.
+- Runtime materialization update so draw-unit placement is retained as mutable residency state, not only a one-time upload translation.
+- `StaticSceneQuery` reanchor/update API that recomputes outdoor root translations and landblock-grid buckets for resident terrain/static roots without rebuilding the source BVHs.
+- Browser V2 follow-mode control that observes camera movement, asks the runtime helper for anchor residency changes, and submits scene-interest updates through the same runtime API used by manual navigation.
+- Removal of the legacy non-incremental browser refresh path once the scene-interest API covers manual load, follow updates, and evict.
+- Tests covering:
+  - camera-position-to-landblock residency across positive and negative local X/Z offsets,
+  - static coordinator desired-set diffing across neighboring outdoor anchors,
+  - retained draw units receiving rebase placement updates without remove/add churn,
+  - stale async results from evicted scopes being rejected while retained scopes can still commit,
+  - static scene query picks remaining correct after an outdoor reanchor without clear/re-ingest,
+  - browser/manual scene-interest commands using the same runtime path as follow mode.
+
+Acceptance criteria:
+
+- Manual V2 browser loading and follow-mode anchor updates use one runtime scene-interest API; there is no separate legacy `requestStaticWork()` rebuild path left behind.
+- Moving the outdoor anchor by one landblock retains overlapping coverage work and only requests/evicts the set difference.
+- Resident terrain/static renderer resources can be repositioned for a new anchor without rebaking and without re-uploading position buffers solely to change the anchor translation.
+- Static scene picking and terrain picking remain aligned with the renderer after anchor changes.
+- The runtime snapshot exposes enough anchor/residency facts for browser status/debug UI without making Svelte own residency policy.
+- Existing terrain/static object rendering, materialization, picking, and texture-manager tests still pass.
+
+Phase 12A6 spicy bits:
+
+- This phase intentionally deletes the old manual non-incremental runtime API instead of keeping compatibility wrappers. Browser controls should migrate to the scene-interest API in the same cutover.
+- Renderer placement currently mutates CPU vertex data before upload. Changing that to draw-time transforms touches shader inputs, sort-center handling, terrain material/world-position calculations, and tests. This is the risky center of the phase.
+- Desired-set diffing changes the static coordinator from a global revision model to per-scope generations. That is the correct streaming shape, but stale-result tests need to get stricter so old async work cannot resurrect evicted scopes.
+
+Phase 12A6 failed-to-close log:
+
+- None yet; fill during implementation.
+
+Phase 12A6 verification:
+
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts -- runtime/client-runtime runtime/static-materializer runtime/static-scene-query static/coordinator/static-coordinator`
+- `cd apps/holtburger-3d && npm run test:ts`
+- Browser visual verification of `/browser-v2` manual load, follow-mode anchor movement, and click picking after at least one outdoor reanchor.
 
 ### Phase 12: Static Object Breadth And Compaction
 

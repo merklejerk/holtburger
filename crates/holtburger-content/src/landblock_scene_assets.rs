@@ -208,6 +208,9 @@ pub struct PreparedTerrainMesh {
     pub tile_size: f32,
     pub vertices: Vec<PreparedVec3>,
     pub triangles: Vec<PreparedTerrainTriangle>,
+    pub quads: Vec<PreparedTerrainQuad>,
+    pub terrain_bvh_items: Vec<PreparedTerrainBvhItem>,
+    pub terrain_bvh: Option<PreparedBvh>,
     pub min_height: f32,
     pub max_height: f32,
 }
@@ -219,6 +222,36 @@ pub struct PreparedTerrainTriangle {
     pub c: usize,
     pub terrain_type: u16,
     pub average_height: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedTerrainQuad {
+    pub terrain_quad_id: String,
+    pub row: usize,
+    pub col: usize,
+    pub quad_index: usize,
+    pub source_terrain_indices: [usize; 4],
+    pub vertex_indices: [usize; 4],
+    pub triangle_indices: [usize; 2],
+    pub diagonal: PreparedTerrainQuadDiagonal,
+    pub corner_terrain_codes: [u32; 4],
+    pub pcode: u32,
+    pub average_height: f32,
+    pub bounds: PreparedAabb,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedTerrainQuadDiagonal {
+    SouthwestNortheast,
+    SoutheastNorthwest,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedTerrainBvhItem {
+    pub row: usize,
+    pub col: usize,
+    pub quad_index: usize,
+    pub triangle_indices: [usize; 2],
 }
 
 #[derive(Debug, Clone)]
@@ -318,6 +351,7 @@ struct PreparedSpatialItem {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PreparedSpatialItemKind {
+    TerrainQuad,
     EnvCellRoot,
     CellStructureGeometry,
     OutdoorStatic,
@@ -336,6 +370,7 @@ pub struct PreparedBvh {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreparedBvhScope {
+    OutdoorTerrain,
     OutdoorStatic,
     LandblockEnvCells,
     EnvCellLocal,
@@ -352,6 +387,9 @@ pub struct PreparedBvhNode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreparedBvhKindMask {
+    OutdoorTerrain {
+        terrain_quad: bool,
+    },
     OutdoorStatic {
         static_object: bool,
         building: bool,
@@ -1940,6 +1978,19 @@ fn prepared_bvh_kind_mask(
     item_indices: &[usize],
 ) -> PreparedBvhKindMask {
     match scope {
+        PreparedBvhScope::OutdoorTerrain => {
+            for index in item_indices {
+                if items[*index].kind != PreparedSpatialItemKind::TerrainQuad {
+                    panic!(
+                        "invalid outdoor terrain BVH item kind: {:?}",
+                        items[*index].kind
+                    );
+                }
+            }
+            PreparedBvhKindMask::OutdoorTerrain {
+                terrain_quad: !item_indices.is_empty(),
+            }
+        }
         PreparedBvhScope::OutdoorStatic => {
             let mut static_object = false;
             let mut building = false;
@@ -2219,12 +2270,15 @@ fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> PreparedTerrainMesh
         .collect::<Vec<_>>();
 
     let mut triangles = Vec::new();
+    let mut quads = Vec::new();
     for row in 0..(grid_size - 1) {
         for col in 0..(grid_size - 1) {
             let southwest = row * grid_size + col;
             let southeast = southwest + 1;
             let northwest = southwest + grid_size;
             let northeast = northwest + 1;
+            let quad_index = row * (grid_size - 1) + col;
+            let triangle_indices = [quad_index * 2, quad_index * 2 + 1];
             let terrain_type = normalized_terrain_types
                 .get(southwest)
                 .copied()
@@ -2235,7 +2289,9 @@ fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> PreparedTerrainMesh
                 + normalized_heights[northeast])
                 / 4.0;
 
-            if uses_southwest_to_northeast_cut(cell_landblock.id, col as u32, row as u32) {
+            let uses_southwest_to_northeast =
+                uses_southwest_to_northeast_cut(cell_landblock.id, col as u32, row as u32);
+            if uses_southwest_to_northeast {
                 triangles.push(PreparedTerrainTriangle {
                     a: southwest,
                     b: southeast,
@@ -2266,8 +2322,66 @@ fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> PreparedTerrainMesh
                     average_height,
                 });
             }
+
+            if let Some(bounds) =
+                terrain_vertex_bounds(&vertices, [southwest, southeast, northwest, northeast])
+            {
+                let raw_corners = [
+                    normalized_terrain_types[southwest],
+                    normalized_terrain_types[southeast],
+                    normalized_terrain_types[northeast],
+                    normalized_terrain_types[northwest],
+                ];
+                let corner_terrain_codes = raw_corners.map(terrain_code_from_cell_terrain);
+                let corner_road_codes = raw_corners.map(road_code_from_cell_terrain);
+                quads.push(PreparedTerrainQuad {
+                    terrain_quad_id: format!(
+                        "landblock/{:08x}/outdoor/terrain/quad/{row:02x}/{col:02x}",
+                        cell_landblock.id
+                    ),
+                    row,
+                    col,
+                    quad_index,
+                    source_terrain_indices: [southwest, southeast, northeast, northwest],
+                    vertex_indices: [southwest, southeast, northeast, northwest],
+                    triangle_indices,
+                    diagonal: if uses_southwest_to_northeast {
+                        PreparedTerrainQuadDiagonal::SouthwestNortheast
+                    } else {
+                        PreparedTerrainQuadDiagonal::SoutheastNorthwest
+                    },
+                    corner_terrain_codes,
+                    pcode: terrain_pcode(corner_road_codes, corner_terrain_codes),
+                    average_height,
+                    bounds,
+                });
+            }
         }
     }
+
+    let terrain_bvh_items = quads
+        .iter()
+        .map(|quad| PreparedTerrainBvhItem {
+            row: quad.row,
+            col: quad.col,
+            quad_index: quad.quad_index,
+            triangle_indices: quad.triangle_indices,
+        })
+        .collect::<Vec<_>>();
+    let terrain_spatial_items = quads
+        .iter()
+        .map(|quad| PreparedSpatialItem {
+            id: quad.terrain_quad_id.clone(),
+            kind: PreparedSpatialItemKind::TerrainQuad,
+            bounds: pad_bvh_bounds(quad.bounds),
+        })
+        .collect::<Vec<_>>();
+    let terrain_bvh = build_prepared_bvh_with_scope(
+        cell_landblock.id,
+        "landblock-outdoor-terrain-local",
+        PreparedBvhScope::OutdoorTerrain,
+        &terrain_spatial_items,
+    );
 
     PreparedTerrainMesh {
         landblock_id: cell_landblock.id,
@@ -2275,6 +2389,9 @@ fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> PreparedTerrainMesh
         tile_size,
         vertices,
         triangles,
+        quads,
+        terrain_bvh_items,
+        terrain_bvh,
         min_height: normalized_heights
             .iter()
             .copied()
@@ -2286,6 +2403,37 @@ fn build_terrain_mesh(cell_landblock: &CellLandblockFact) -> PreparedTerrainMesh
             .reduce(f32::max)
             .unwrap_or(0.0),
     }
+}
+
+pub fn terrain_code_from_cell_terrain(value: u16) -> u32 {
+    u32::from((value >> 2) & 0x1f)
+}
+
+pub fn road_code_from_cell_terrain(value: u16) -> u32 {
+    u32::from(value & 0x03)
+}
+
+pub fn terrain_pcode(road_codes: [u32; 4], terrain_codes: [u32; 4]) -> u32 {
+    (1 << 28)
+        | (road_codes[0] << 26)
+        | (road_codes[1] << 24)
+        | (road_codes[2] << 22)
+        | (road_codes[3] << 20)
+        | (terrain_codes[0] << 15)
+        | (terrain_codes[1] << 10)
+        | (terrain_codes[2] << 5)
+        | terrain_codes[3]
+}
+
+fn terrain_vertex_bounds<const N: usize>(
+    vertices: &[PreparedVec3],
+    vertex_indices: [usize; N],
+) -> Option<PreparedAabb> {
+    vertex_indices
+        .iter()
+        .filter_map(|index| vertices.get(*index))
+        .copied()
+        .fold(None, |bounds, point| Some(expand_bounds(bounds, point)))
 }
 
 fn uses_southwest_to_northeast_cut(landblock_id: u32, cell_x: u32, cell_y: u32) -> bool {
@@ -3404,6 +3552,47 @@ mod tests {
                 vertex_ids: vec![0, 1, 2],
                 missing_vertex_ids: Vec::new(),
             }]
+        );
+    }
+
+    #[test]
+    fn terrain_mesh_prepares_quads_and_hierarchical_bvh() {
+        let cell = CellLandblockFact {
+            id: 0xda55ffff,
+            has_objects: false,
+            grid_size: 9,
+            tile_size: 24.0,
+            terrain_types: (0..81)
+                .map(|index| {
+                    let terrain_code = ((index % 5) + 1) as u16;
+                    let road_code = (index % 4) as u16;
+                    (terrain_code << 2) | road_code
+                })
+                .collect(),
+            heights: (0..81).map(|index| index as f32 * 0.25).collect(),
+            min_height: 0.0,
+            max_height: 20.0,
+            all_heights_zero: false,
+        };
+
+        let mesh = build_terrain_mesh(&cell);
+
+        assert_eq!(mesh.quads.len(), 64);
+        assert_eq!(mesh.terrain_bvh_items.len(), 64);
+        assert_eq!(mesh.quads[0].corner_terrain_codes, [1, 5, 1, 2]);
+        assert_eq!(
+            mesh.quads[0].pcode,
+            terrain_pcode([0, 1, 2, 1], [1, 5, 1, 2])
+        );
+        let terrain_bvh = mesh.terrain_bvh.as_ref().expect("terrain bvh");
+        assert_eq!(terrain_bvh.scope, PreparedBvhScope::OutdoorTerrain);
+        assert!(terrain_bvh.nodes.len() > 1);
+        assert!(terrain_bvh.nodes[0].left.is_some());
+        assert!(terrain_bvh.nodes[0].right.is_some());
+        assert!(terrain_bvh.nodes[0].item_indices.is_empty());
+        assert_eq!(
+            terrain_bvh.nodes[0].kind_mask,
+            PreparedBvhKindMask::OutdoorTerrain { terrain_quad: true }
         );
     }
 

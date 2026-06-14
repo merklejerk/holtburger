@@ -543,10 +543,14 @@
 		}
 
 		if (hit.itemKind === "outdoor-static-object") {
-			return `${hit.domain} ${hit.objectKind} ${hit.instanceId} ${hit.source.sourceAssetKind}:${formatHexId(hit.source.sourceDid)} d=${hit.distance.toFixed(2)} bvh ${hit.bvhItemIndex}`;
+			return `${hit.domain} ${hit.instanceId} d=${hit.distance.toFixed(2)}`;
 		}
 
-		return `env-cell ${formatHexId(hit.envCellId)} ${hit.instanceId} ${hit.source.sourceAssetKind}:${formatHexId(hit.source.sourceDid)} d=${hit.distance.toFixed(2)}`;
+		if (hit.itemKind === "terrain-quad") {
+			return `terrain ${formatHexId(hit.landblockId)} q${hit.quadIndex} d=${hit.distance.toFixed(2)}`;
+		}
+
+		return `env-cell ${formatHexId(hit.envCellId)} ${hit.instanceId} d=${hit.distance.toFixed(2)}`;
 	}
 
 	function formatHexId(value: number): string {

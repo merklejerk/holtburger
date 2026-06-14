@@ -129,6 +129,10 @@ const preparedAabbDtoSchema = z
 
 const preparedBvhKindMaskDtoSchema = z.discriminatedUnion("domain", [
 	z.object({
+		domain: z.literal("outdoor-terrain"),
+		terrainQuad: z.boolean(),
+	}).strict(),
+	z.object({
 		domain: z.literal("outdoor-static"),
 		static: z.boolean(),
 		building: z.boolean(),
@@ -200,7 +204,7 @@ const preparedTerrainBvhItemDtoSchema = z.object({
 
 const preparedTerrainBvhDtoSchema = z.object({
 	coordinateSpace: z.literal("landblock-outdoor-terrain-local"),
-	nodes: z.array(preparedLegacyLandblockBvhNodeDtoSchema),
+	nodes: z.array(preparedLandblockBvhNodeDtoSchema),
 	items: z.array(preparedTerrainBvhItemDtoSchema),
 });
 

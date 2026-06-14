@@ -23,10 +23,11 @@ pub use landblock_scene_assets::{
     PreparedEnvCellLocalBvhItem, PreparedInteriorCell, PreparedPolygonSetInvalidPolygon,
     PreparedPolygonSetRenderGeometry, PreparedPolygonSetRenderTriangle, PreparedPortalAperture,
     PreparedPortalAperturePlane, PreparedPortalAperturePlaneSource, PreparedStaticInstance,
-    PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainMesh, PreparedTerrainTriangle,
-    PreparedVec3, SourceLoadError, SourceOmissionDiagnostic, SourceRecordDiagnostic,
-    SourceRecordStatus, build_gfx_obj_render_geometry, format_static_object_source_asset_id,
-    pad_bvh_bounds,
+    PreparedStaticInstanceKind, PreparedStaticMesh, PreparedTerrainBvhItem, PreparedTerrainMesh,
+    PreparedTerrainQuad, PreparedTerrainQuadDiagonal, PreparedTerrainTriangle, PreparedVec3,
+    SourceLoadError, SourceOmissionDiagnostic, SourceRecordDiagnostic, SourceRecordStatus,
+    build_gfx_obj_render_geometry, format_static_object_source_asset_id, pad_bvh_bounds,
+    road_code_from_cell_terrain, terrain_code_from_cell_terrain, terrain_pcode,
 };
 pub use material_capabilities::{
     MaterialArchiveCapabilityReport, MaterialRecordAvailability, MaterialRecordCounts,

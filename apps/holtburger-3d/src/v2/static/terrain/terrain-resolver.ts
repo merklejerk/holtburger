@@ -359,6 +359,7 @@ function createTerrainSourceSpatialFacts(
 	return {
 		bounds: landblock.terrain.bounds,
 		coordinateSpace: "landblock-render-local",
+		terrainBvh: landblock.terrain.terrainBvh,
 		terrainBvhItemCount: landblock.terrain.terrainBvh.items.length,
 		terrainBvhNodeCount: landblock.terrain.terrainBvh.nodes.length,
 	};

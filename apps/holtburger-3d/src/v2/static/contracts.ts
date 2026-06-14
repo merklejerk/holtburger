@@ -361,6 +361,7 @@ export interface TerrainTextureUseFacts {
 export interface TerrainSourceSpatialFacts {
 	readonly coordinateSpace: "landblock-render-local";
 	readonly bounds: StaticBounds | null;
+	readonly terrainBvh: LandblockOutdoorPayloadDto["terrain"]["terrainBvh"];
 	readonly terrainBvhNodeCount: number;
 	readonly terrainBvhItemCount: number;
 }

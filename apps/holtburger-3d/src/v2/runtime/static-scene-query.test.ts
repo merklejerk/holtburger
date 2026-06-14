@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
 	LandblockEnvCellsStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
+	TerrainStaticScopePayload,
 } from "../static/contracts";
 import { StaticSceneQuery } from "./static-scene-query";
 
@@ -21,13 +22,23 @@ describe("V2 static scene query", () => {
 		expect(hit).toMatchObject({
 			instanceId: "outdoor-static-0",
 			itemKind: "outdoor-static-object",
-			queryPath: "source-bvh",
-			source: {
-				sourceAssetKind: "setup-model",
-				sourceDid: 0x02000010,
-			},
 		});
 		expect(hit?.distance).toBe(4);
+		expect(
+			query.queryOutdoorStaticObjectDetails({
+				domain: "outdoor-detail",
+				instanceId: "outdoor-static-0",
+				landblockId: 0xda55ffff,
+			}),
+		).toMatchObject({
+			bvhItemIndex: 0,
+			object: {
+				source: {
+					sourceAssetKind: "setup-model",
+					sourceDid: 0x02000010,
+				},
+			},
+		});
 		expect(query.createSnapshot()).toMatchObject({
 			outdoorRecordCount: 1,
 		});
@@ -51,7 +62,6 @@ describe("V2 static scene query", () => {
 		expect(hit).toMatchObject({
 			instanceId: "outdoor-static-0",
 			itemKind: "outdoor-static-object",
-			queryPath: "source-bvh",
 		});
 		expect(hit?.distance).toBe(4);
 	});
@@ -145,6 +155,42 @@ describe("V2 static scene query", () => {
 		expect(hit).toBeNull();
 	});
 
+	it("picks terrain quads through terrain source BVH roots", () => {
+		const query = new StaticSceneQuery();
+		query.ingestTerrain(createTerrainPayload());
+
+		const hit = query.pickRay({
+			context: { kind: "outdoor" },
+			ray: {
+				direction: { x: 0, y: 0, z: -1 },
+				origin: { x: 2, y: 2, z: 4 },
+			},
+		});
+
+		expect(hit).toMatchObject({
+			distance: 3,
+			domain: "outdoor-terrain",
+			itemKind: "terrain-quad",
+			landblockId: 0xda55ffff,
+			quadIndex: 0,
+		});
+		expect(
+			query.queryTerrainQuadDetails({
+				landblockId: 0xda55ffff,
+				quadIndex: 0,
+			}),
+		).toMatchObject({
+			bvhItemIndex: 0,
+			quad: {
+				terrainQuadId: "terrain-quad-0",
+			},
+		});
+		expect(query.createSnapshot()).toMatchObject({
+			terrainLandblockCount: 1,
+			terrainRecordCount: 1,
+		});
+	});
+
 	it("ingests landblock env-cell source facts for env-cell-local picking", () => {
 		const query = new StaticSceneQuery();
 		query.ingestLandblockEnvCells(createLandblockEnvCellsPayload());
@@ -163,20 +209,32 @@ describe("V2 static scene query", () => {
 		});
 
 		expect(hit).toMatchObject({
-			debugSourceAssetId: "setup-model/02000010",
 			envCellId: 0xda550100,
 			instanceId: "env-static-0",
 			itemKind: "env-cell-static-object",
-			queryPath: "source-bvh",
-			source: {
-				sourceAssetKind: "setup-model",
-				sourceDid: 0x02000010,
+		});
+		expect(
+			query.queryEnvCellStaticObjectDetails({
+				envCellId: 0xda550100,
+				instanceId: "env-static-0",
+				landblockId: 0xda55ffff,
+			}),
+		).toMatchObject({
+			bvhItemIndex: 0,
+			seed: {
+				debug: { sourceAssetId: "setup-model/02000010" },
+				source: {
+					sourceAssetKind: "setup-model",
+					sourceDid: 0x02000010,
+				},
 			},
 		});
 		expect(query.createSnapshot()).toEqual({
 			envCellLandblockCount: 1,
 			envCellRecordCount: 1,
 			outdoorRecordCount: 0,
+			terrainLandblockCount: 0,
+			terrainRecordCount: 0,
 		});
 	});
 
@@ -204,6 +262,8 @@ describe("V2 static scene query", () => {
 			envCellLandblockCount: 0,
 			envCellRecordCount: 0,
 			outdoorRecordCount: 0,
+			terrainLandblockCount: 0,
+			terrainRecordCount: 0,
 		});
 	});
 
@@ -294,6 +354,125 @@ function createOutdoorStaticObjectsPayload(options: {
 			outdoorBvhNodeCount: includeBvh ? outdoorBvh.nodes.length : 0,
 		},
 		textureRefs: [],
+	};
+}
+
+function createTerrainPayload(): TerrainStaticScopePayload {
+	const quad = {
+		averageHeight: 0,
+		bounds: {
+			max: { x: 4, y: 4, z: 1 },
+			min: { x: 0, y: 0, z: 0 },
+		},
+		col: 0,
+		cornerTerrainCodes: [1, 1, 1, 1] as const,
+		diagonal: "southwest-northeast" as const,
+		pcode: 1,
+		quadIndex: 0,
+		row: 0,
+		sourceTerrainIndices: [0, 1, 2, 3] as const,
+		terrainQuadId: "terrain-quad-0",
+		triangleIndices: [0, 1] as const,
+		vertexIndices: [0, 1, 2, 3] as const,
+	};
+	return {
+		kind: "terrain",
+		landblock: {
+			kind: "landblock-source",
+			landblockId: 0xda55ffff,
+			source: "outdoor",
+		},
+		mesh: {
+			bounds: quad.bounds,
+			gridSize: 2,
+			maxHeight: 1,
+			minHeight: 0,
+			quadCount: 1,
+			quads: [quad],
+			tileSize: 4,
+			triangleCount: 2,
+			triangles: [
+				{
+					averageHeight: 0,
+					bounds: quad.bounds,
+					quadIndex: 0,
+					terrainTriangleId: "terrain-triangle-0",
+					triangleInQuad: 0,
+					vertexIndices: [0, 1, 2],
+				},
+				{
+					averageHeight: 0,
+					bounds: quad.bounds,
+					quadIndex: 0,
+					terrainTriangleId: "terrain-triangle-1",
+					triangleInQuad: 1,
+					vertexIndices: [1, 3, 2],
+				},
+			],
+			vertexCount: 4,
+			vertices: [
+				{ x: 0, y: 0, z: 0 },
+				{ x: 4, y: 0, z: 0 },
+				{ x: 0, y: 4, z: 0 },
+				{ x: 4, y: 4, z: 1 },
+			],
+		},
+		missingRefs: [],
+		regionRenderProfile: {
+			detailRoles: [],
+			identity: {
+				kind: "region-render-profile",
+				regionNumber: 1,
+			},
+		},
+		sourceSpatial: {
+			bounds: quad.bounds,
+			coordinateSpace: "landblock-render-local",
+			terrainBvh: {
+				coordinateSpace: "landblock-outdoor-terrain-local",
+				items: [
+					{
+						col: 0,
+						quadIndex: 0,
+						row: 0,
+						triangleIndices: [0, 1],
+					},
+				],
+				nodes: [
+					{
+						bounds: quad.bounds,
+						itemIndices: [0],
+						kindMask: {
+							domain: "outdoor-terrain",
+							terrainQuad: true,
+						},
+						left: null,
+						right: null,
+					},
+				],
+			},
+			terrainBvhItemCount: 1,
+			terrainBvhNodeCount: 1,
+		},
+		terrainMaterial: {
+			alphaMapCount: 0,
+			identity: {
+				kind: "terrain-material",
+				regionNumber: 1,
+			},
+			materialKind: "tex-merge-table",
+			pcodeEncoding: {
+				roadCodeBits: 2,
+				sizeBitMask: 1 << 28,
+				terrainCodeBits: 5,
+			},
+			roadAlphaMapCount: 0,
+			roadAlphaMaps: [],
+			terrainAlphaMaps: [],
+			terrainTypeCount: 0,
+			terrainTypes: [],
+		},
+		textureUses: [],
 	};
 }
 

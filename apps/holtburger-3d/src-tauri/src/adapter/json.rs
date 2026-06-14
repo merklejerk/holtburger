@@ -377,34 +377,16 @@ pub fn serialize_landblock_terrain(
     let Some(mesh) = terrain_asset.terrain_mesh.as_ref() else {
         return empty_landblock_terrain();
     };
-    let quads = terrain_asset
-        .cell_landblock
-        .as_ref()
-        .map(|cell| build_landblock_terrain_quads(mesh, cell))
-        .unwrap_or_default();
-    let terrain_bvh_items = quads
-        .iter()
-        .map(|quad| {
-            serde_json::json!({
-                "row": quad.row,
-                "col": quad.col,
-                "quadIndex": quad.quad_index,
-                "triangleIndices": quad.triangle_indices,
-            })
-        })
-        .collect::<Vec<_>>();
-    let terrain_bvh_nodes =
-        build_flat_bvh_nodes_from_bounds(quads.iter().map(|quad| (quad.bounds, 1_u32)).collect());
     serde_json::json!({
         "gridSize": mesh.grid_size,
         "tileSize": mesh.tile_size,
         "vertices": mesh.vertices.iter().map(serialize_prepared_vec3).collect::<Vec<_>>(),
         "triangles": build_landblock_terrain_triangles(mesh).iter().map(serialize_landblock_terrain_triangle).collect::<Vec<_>>(),
-        "quads": quads.iter().map(serialize_landblock_terrain_quad).collect::<Vec<_>>(),
+        "quads": mesh.quads.iter().map(serialize_landblock_terrain_quad).collect::<Vec<_>>(),
         "terrainBvh": {
             "coordinateSpace": "landblock-outdoor-terrain-local",
-            "nodes": terrain_bvh_nodes,
-            "items": terrain_bvh_items,
+            "nodes": mesh.terrain_bvh.as_ref().map(|bvh| bvh.nodes.iter().map(serialize_prepared_bvh_node).collect::<Vec<_>>()).unwrap_or_default(),
+            "items": mesh.terrain_bvh_items.iter().map(serialize_landblock_terrain_bvh_item).collect::<Vec<_>>(),
         },
         "minHeight": mesh.min_height,
         "maxHeight": mesh.max_height,
@@ -431,22 +413,6 @@ pub fn empty_landblock_terrain() -> serde_json::Value {
 }
 
 #[derive(Clone, Debug)]
-pub struct SerializedTerrainQuad {
-    pub terrain_quad_id: String,
-    pub row: usize,
-    pub col: usize,
-    pub quad_index: usize,
-    pub source_terrain_indices: [usize; 4],
-    pub vertex_indices: [usize; 4],
-    pub triangle_indices: [usize; 2],
-    pub diagonal: &'static str,
-    pub corner_terrain_codes: [u32; 4],
-    pub pcode: u32,
-    pub average_height: f32,
-    pub bounds: PreparedAabb,
-}
-
-#[derive(Clone, Debug)]
 pub struct SerializedTerrainTriangle {
     pub terrain_triangle_id: String,
     pub quad_index: usize,
@@ -454,75 +420,6 @@ pub struct SerializedTerrainTriangle {
     pub vertex_indices: [usize; 3],
     pub average_height: f32,
     pub bounds: PreparedAabb,
-}
-
-pub fn build_landblock_terrain_quads(
-    mesh: &PreparedTerrainMesh,
-    cell: &holtburger_content::CellLandblockFact,
-) -> Vec<SerializedTerrainQuad> {
-    if mesh.grid_size < 2 {
-        return Vec::new();
-    }
-    let quad_width = mesh.grid_size - 1;
-    let mut normalized_terrain = Vec::with_capacity(cell.terrain_types.len());
-    for row in 0..mesh.grid_size {
-        for col in 0..mesh.grid_size {
-            let source_index = col * mesh.grid_size + row;
-            normalized_terrain.push(*cell.terrain_types.get(source_index).unwrap_or(&0));
-        }
-    }
-    let mut quads = Vec::with_capacity(quad_width * quad_width);
-    for row in 0..quad_width {
-        for col in 0..quad_width {
-            let southwest = row * mesh.grid_size + col;
-            let southeast = southwest + 1;
-            let northwest = southwest + mesh.grid_size;
-            let northeast = northwest + 1;
-            let Some(bounds) =
-                terrain_vertex_bounds_json(mesh, [southwest, southeast, northwest, northeast])
-            else {
-                continue;
-            };
-            let quad_index = row * quad_width + col;
-            let triangle_indices = [quad_index * 2, quad_index * 2 + 1];
-            let raw_corners = [
-                normalized_terrain[southwest],
-                normalized_terrain[southeast],
-                normalized_terrain[northeast],
-                normalized_terrain[northwest],
-            ];
-            let corner_terrain_codes = raw_corners.map(terrain_code_from_cell_terrain);
-            let corner_road_codes = raw_corners.map(road_code_from_cell_terrain);
-            let diagonal = if terrain_triangle_cut_is_southwest_to_northeast(mesh, triangle_indices)
-            {
-                "southwest-northeast"
-            } else {
-                "southeast-northwest"
-            };
-            quads.push(SerializedTerrainQuad {
-                terrain_quad_id: format!(
-                    "landblock/{:08x}/outdoor/terrain/quad/{row:02x}/{col:02x}",
-                    mesh.landblock_id
-                ),
-                row,
-                col,
-                quad_index,
-                source_terrain_indices: [southwest, southeast, northeast, northwest],
-                vertex_indices: [southwest, southeast, northeast, northwest],
-                triangle_indices,
-                diagonal,
-                corner_terrain_codes,
-                pcode: terrain_pcode(corner_road_codes, corner_terrain_codes),
-                average_height: (mesh.vertices[southwest].z
-                    + mesh.vertices[southeast].z
-                    + mesh.vertices[northeast].z
-                    + mesh.vertices[northwest].z)
-                    / 4.0,
-                bounds,
-            });
-        }
-    }
-    quads
 }
 
 pub fn build_landblock_terrain_triangles(
@@ -561,7 +458,7 @@ pub fn serialize_landblock_terrain_triangle(
     })
 }
 
-pub fn serialize_landblock_terrain_quad(quad: &SerializedTerrainQuad) -> serde_json::Value {
+pub fn serialize_landblock_terrain_quad(quad: &PreparedTerrainQuad) -> serde_json::Value {
     serde_json::json!({
         "terrainQuadId": quad.terrain_quad_id,
         "row": quad.row,
@@ -570,7 +467,7 @@ pub fn serialize_landblock_terrain_quad(quad: &SerializedTerrainQuad) -> serde_j
         "sourceTerrainIndices": quad.source_terrain_indices,
         "vertexIndices": quad.vertex_indices,
         "triangleIndices": quad.triangle_indices,
-        "diagonal": quad.diagonal,
+        "diagonal": serialize_prepared_terrain_quad_diagonal(quad.diagonal),
         "cornerTerrainCodes": quad.corner_terrain_codes,
         "pcode": quad.pcode,
         "averageHeight": quad.average_height,
@@ -578,37 +475,22 @@ pub fn serialize_landblock_terrain_quad(quad: &SerializedTerrainQuad) -> serde_j
     })
 }
 
-pub fn terrain_code_from_cell_terrain(value: u16) -> u32 {
-    u32::from((value >> 2) & 0x1f)
+pub fn serialize_prepared_terrain_quad_diagonal(
+    diagonal: PreparedTerrainQuadDiagonal,
+) -> &'static str {
+    match diagonal {
+        PreparedTerrainQuadDiagonal::SouthwestNortheast => "southwest-northeast",
+        PreparedTerrainQuadDiagonal::SoutheastNorthwest => "southeast-northwest",
+    }
 }
 
-pub fn road_code_from_cell_terrain(value: u16) -> u32 {
-    u32::from(value & 0x03)
-}
-
-pub fn terrain_pcode(road_codes: [u32; 4], terrain_codes: [u32; 4]) -> u32 {
-    (1 << 28)
-        | (road_codes[0] << 26)
-        | (road_codes[1] << 24)
-        | (road_codes[2] << 22)
-        | (road_codes[3] << 20)
-        | (terrain_codes[0] << 15)
-        | (terrain_codes[1] << 10)
-        | (terrain_codes[2] << 5)
-        | terrain_codes[3]
-}
-
-pub fn terrain_triangle_cut_is_southwest_to_northeast(
-    mesh: &PreparedTerrainMesh,
-    triangle_indices: [usize; 2],
-) -> bool {
-    let Some(first) = mesh.triangles.get(triangle_indices[0]) else {
-        return true;
-    };
-    let Some(second) = mesh.triangles.get(triangle_indices[1]) else {
-        return true;
-    };
-    first.c == second.b
+pub fn serialize_landblock_terrain_bvh_item(item: &PreparedTerrainBvhItem) -> serde_json::Value {
+    serde_json::json!({
+        "row": item.row,
+        "col": item.col,
+        "quadIndex": item.quad_index,
+        "triangleIndices": item.triangle_indices,
+    })
 }
 
 pub fn terrain_mesh_bounds(mesh: &PreparedTerrainMesh) -> Option<PreparedAabb> {
@@ -789,13 +671,11 @@ pub fn landblock_outdoor_terrain_asset(
     outdoor: &LandblockOutdoorAsset,
 ) -> SerializedOutdoorTerrainSource {
     SerializedOutdoorTerrainSource {
-        cell_landblock: outdoor.cell_landblock.clone(),
         terrain_mesh: outdoor.terrain_mesh.clone(),
     }
 }
 
 pub struct SerializedOutdoorTerrainSource {
-    pub cell_landblock: Option<holtburger_content::CellLandblockFact>,
     pub terrain_mesh: Option<PreparedTerrainMesh>,
 }
 
@@ -1387,6 +1267,10 @@ pub fn serialize_prepared_bvh_node(node: &PreparedBvhNode) -> serde_json::Value 
 
 pub fn serialize_prepared_bvh_kind_mask(mask: PreparedBvhKindMask) -> serde_json::Value {
     match mask {
+        PreparedBvhKindMask::OutdoorTerrain { terrain_quad } => serde_json::json!({
+            "domain": "outdoor-terrain",
+            "terrainQuad": terrain_quad,
+        }),
         PreparedBvhKindMask::OutdoorStatic {
             static_object,
             building,
@@ -1793,7 +1677,7 @@ mod tests {
     use holtburger_content::{
         CellLandblockFact, LandblockOutdoorAsset, LandblockOutdoorStaticMember, PreparedAabb,
         PreparedBvh, PreparedBvhNode, PreparedContentSourceDiagnostics, PreparedStaticInstance,
-        PreparedStaticInstanceKind, PreparedTerrainMesh, PreparedTerrainTriangle, PreparedVec3,
+        PreparedStaticInstanceKind, PreparedTerrainMesh, PreparedVec3,
     };
 
     #[test]
@@ -1808,81 +1692,6 @@ mod tests {
         assert_eq!((pcode >> 10) & 0x1f, 5);
         assert_eq!((pcode >> 5) & 0x1f, 6);
         assert_eq!(pcode & 0x1f, 7);
-    }
-
-    #[test]
-    fn landblock_quad_pcode_preserves_geometry_corner_order_for_texmerge() {
-        let mesh = PreparedTerrainMesh {
-            landblock_id: 0xda55ffff,
-            grid_size: 2,
-            tile_size: 24.0,
-            vertices: vec![
-                PreparedVec3 {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                PreparedVec3 {
-                    x: 24.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                PreparedVec3 {
-                    x: 0.0,
-                    y: 24.0,
-                    z: 0.0,
-                },
-                PreparedVec3 {
-                    x: 24.0,
-                    y: 24.0,
-                    z: 0.0,
-                },
-            ],
-            triangles: vec![
-                PreparedTerrainTriangle {
-                    a: 0,
-                    b: 1,
-                    c: 3,
-                    terrain_type: 0,
-                    average_height: 0.0,
-                },
-                PreparedTerrainTriangle {
-                    a: 0,
-                    b: 3,
-                    c: 2,
-                    terrain_type: 0,
-                    average_height: 0.0,
-                },
-            ],
-            min_height: 0.0,
-            max_height: 0.0,
-        };
-        let cell = CellLandblockFact {
-            id: 0xda55ffff,
-            has_objects: false,
-            grid_size: 2,
-            tile_size: 24.0,
-            terrain_types: vec![
-                cell_terrain(1, 1),
-                cell_terrain(4, 0),
-                cell_terrain(2, 2),
-                cell_terrain(3, 3),
-            ],
-            heights: vec![0.0; 4],
-            min_height: 0.0,
-            max_height: 0.0,
-            all_heights_zero: true,
-        };
-
-        let quads = build_landblock_terrain_quads(&mesh, &cell);
-
-        assert_eq!(quads.len(), 1);
-        assert_eq!(quads[0].corner_terrain_codes, [1, 2, 3, 4]);
-        assert_eq!(quads[0].pcode, terrain_pcode([1, 2, 3, 0], [1, 2, 3, 4]));
-    }
-
-    fn cell_terrain(terrain_code: u16, road_code: u16) -> u16 {
-        (terrain_code << 2) | road_code
     }
 
     fn dummy_static_instance(id: &str, kind: PreparedStaticInstanceKind) -> PreparedStaticInstance {
@@ -2042,6 +1851,9 @@ mod tests {
                 tile_size: 1.,
                 vertices: vec![],
                 triangles: vec![],
+                quads: vec![],
+                terrain_bvh_items: vec![],
+                terrain_bvh: None,
                 min_height: 0.,
                 max_height: 0.,
             }),

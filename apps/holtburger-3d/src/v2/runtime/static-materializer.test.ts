@@ -23,7 +23,6 @@ describe("V2 static materializer", () => {
 				addedDrawUnits: [drawUnit],
 				textureUses: [createBakeTextureUse(drawUnit.drawUnitId)],
 			}),
-			renderAnchorLandblockId: 0xda55ffff,
 			textureUpdate,
 		});
 
@@ -31,15 +30,9 @@ describe("V2 static materializer", () => {
 		expect(materialized.staticSourceMappings).toEqual([]);
 		expect(materialized.staticSpatialRecords).toEqual([]);
 		expect(materialized.staticDelta).toEqual({
-			addedDrawUnitPlacements: [
-				{
-					drawUnit,
-					translation: [0, 0, 0],
-				},
-			],
+			addedDrawUnits: [drawUnit],
 			removedDrawUnitIds: [],
 			revision: 7,
-			updatedDrawUnitPlacements: [],
 		});
 	});
 
@@ -54,7 +47,6 @@ describe("V2 static materializer", () => {
 					addedDrawUnits: [drawUnit],
 					textureUses: [createBakeTextureUse(drawUnit.drawUnitId)],
 				}),
-				renderAnchorLandblockId: 0xda55ffff,
 				textureUpdate: null,
 			}),
 		).toThrow(
@@ -70,16 +62,10 @@ describe("V2 static materializer", () => {
 				addedDrawUnits: [drawUnit],
 				textureUses: [],
 			}),
-			renderAnchorLandblockId: 0xda55ffff,
 			textureUpdate: null,
 		});
 
-		expect(materialized.staticDelta.addedDrawUnitPlacements).toEqual([
-			{
-				drawUnit,
-				translation: [0, 0, 0],
-			},
-		]);
+		expect(materialized.staticDelta.addedDrawUnits).toEqual([drawUnit]);
 		expect(materialized.textureUpdate).toBeNull();
 	});
 
@@ -98,13 +84,10 @@ describe("V2 static materializer", () => {
 					),
 				),
 			}),
-			renderAnchorLandblockId: 0xda55ffff,
 			textureUpdate,
 		});
 
-		const addedDrawUnits = materialized.staticDelta.addedDrawUnitPlacements.map(
-			(placement) => placement.drawUnit,
-		);
+		const addedDrawUnits = materialized.staticDelta.addedDrawUnits;
 		expect(addedDrawUnits.map((added) => added.drawUnitId)).toEqual([
 			"static-table",
 			"static-table#fine-1",
@@ -183,7 +166,6 @@ describe("V2 static materializer", () => {
 			materializedDrawUnitIdsBySourceDrawUnitId: new Map([
 				["static-table", ["static-table", "static-table#fine-1"]],
 			]),
-			renderAnchorLandblockId: 0xda55ffff,
 			textureUpdate: null,
 		});
 

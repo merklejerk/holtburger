@@ -7,6 +7,7 @@ import type {
 	StaticDrawUnit,
 	StaticScopePayload,
 	StaticMaterialCoverageReport,
+	TerrainGeometryStaticDrawUnit,
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
 
@@ -40,7 +41,9 @@ describe("V2 static coordinator", () => {
 
 		resolver.complete(secondResolverRequest?.requestId ?? "");
 		await flushPromises();
-		baker.complete(secondWork.workId);
+		baker.complete(secondWork.workId, {
+			drawUnits: [createTerrainDrawUnit("terrain-a", 0xda56ffff)],
+		});
 		await flushPromises();
 
 		expect(coordinator.createSnapshot()).toMatchObject({
@@ -181,13 +184,13 @@ describe("V2 static coordinator", () => {
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
 		baker.complete(work.workId, {
-			drawUnits: [createPlaceholderDrawUnit("terrain-a")],
+			drawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
 		});
 		await flushPromises();
 
 		expect(deltas).toEqual([
 			{
-				addedDrawUnits: [createPlaceholderDrawUnit("terrain-a")],
+				addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
 				materialCoverage: [],
 				removedDrawUnitIds: [],
 				revision: 1,
@@ -226,6 +229,39 @@ describe("V2 static coordinator", () => {
 			textureUses: [],
 		});
 		expect(coordinator.createSnapshot().committedDrawUnits).toBe(0);
+	});
+
+	it("rejects ownerless committed draw units instead of inferring batch ownership", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+		const deltas: StaticCoordinatorCommitDelta[] = [];
+		coordinator.subscribeCommits((delta) => deltas.push(delta));
+
+		const [work] = coordinator.requestStaticDemand(
+			createSingleTerrainDemand(0xda55ffff),
+		);
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
+		await flushPromises();
+		baker.complete(work.workId, {
+			drawUnits: [createInvalidOwnerlessDrawUnit("bad-draw-unit")],
+		});
+		await flushPromises();
+
+		expect(deltas).toEqual([]);
+		expect(coordinator.createSnapshot()).toMatchObject({
+			committed: 0,
+			committedDrawUnits: 0,
+			failed: 1,
+			latestResolverFailure: {
+				message:
+					"Static coordinator cannot commit ownerless draw unit bad-draw-unit.",
+			},
+		});
 	});
 
 	it("groups same-domain resolved payloads into one static bake batch", async () => {
@@ -275,7 +311,7 @@ describe("V2 static coordinator", () => {
 
 		expect(coordinator.createSnapshot()).toMatchObject({
 			committed: 2,
-			committedDrawUnits: 2,
+			committedDrawUnits: 0,
 		});
 	});
 
@@ -605,10 +641,37 @@ async function flushPromises(): Promise<void> {
 	await Promise.resolve();
 }
 
-function createPlaceholderDrawUnit(drawUnitId: string): StaticDrawUnit {
+function createInvalidOwnerlessDrawUnit(drawUnitId: string): StaticDrawUnit {
 	return {
 		drawUnitId,
-		kind: "placeholder",
+		kind: "ownerless-test-draw-unit",
+	} as unknown as StaticDrawUnit;
+}
+
+function createTerrainDrawUnit(
+	drawUnitId: string,
+	landblockId: number,
+): TerrainGeometryStaticDrawUnit {
+	return {
+		coordinateSpace: "landblock-render-local",
+		domain: "outdoor-terrain",
+		drawUnitId,
+		indexType: "uint16",
+		indices: new Uint16Array([0, 1, 2]),
+		kind: "terrain-geometry",
+		landblockId,
+		layerSlots: new Float32Array([0, 0, 0]),
+		materialBucketKey: "shader:terrain-debug-flat",
+		materialFamily: "terrain-debug-flat",
+		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
+		primaryTextureUseId: null,
+		sourceTriangleIds: ["triangle-a"],
+		terrainFallbackReasons: [],
+		terrainMaterialPlan: null,
+		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+		textureUseIds: [],
+		triangleCount: 1,
+		vertexCount: 3,
 	};
 }
 

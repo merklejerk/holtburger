@@ -30,7 +30,7 @@ describe("V2 static bake worker protocol", () => {
 		});
 
 		await expect(pending).resolves.toMatchObject({
-			drawUnits: [{ kind: "placeholder" }],
+			drawUnits: [],
 			works: [input.items[0]?.work],
 		});
 		client.dispose();
@@ -141,12 +141,7 @@ function createResult(input: StaticBakeBatchInput): StaticBakeBatchResult {
 		atlasRegistryUpdates: [],
 		buildRevision: 1,
 		domain: input.domain,
-		drawUnits: [
-			{
-				drawUnitId: "placeholder",
-				kind: "placeholder",
-			},
-		],
+		drawUnits: [],
 		materialCoverage: [],
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: [],

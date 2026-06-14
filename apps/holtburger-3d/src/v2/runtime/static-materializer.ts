@@ -16,7 +16,6 @@ import type {
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectMaterialTableEntry,
 } from "../static/contracts";
-import { createOutdoorLandblockRootTranslation } from "./static-placement";
 
 export interface StaticMaterializationInput {
 	readonly commit: StaticCoordinatorCommitDelta;
@@ -24,7 +23,6 @@ export interface StaticMaterializationInput {
 		string,
 		readonly string[]
 	>;
-	readonly renderAnchorLandblockId: number | null;
 	readonly textureUpdate: TexturePlacementUpdate | null;
 }
 
@@ -65,19 +63,12 @@ export function materializeStaticCommit(
 		drawUnitIdMappings: finePartitioned.drawUnitIdMappings,
 		...materializeStaticSidecars(input.commit, finePartitioned),
 		staticDelta: {
-			addedDrawUnitPlacements: finePartitioned.drawUnits.map((drawUnit) => ({
-				drawUnit,
-				translation: createStaticDrawUnitTranslation(
-					drawUnit,
-					input.renderAnchorLandblockId,
-				),
-			})),
+			addedDrawUnits: finePartitioned.drawUnits,
 			removedDrawUnitIds: expandRemovedDrawUnitIds(
 				input.commit.removedDrawUnitIds,
 				input.materializedDrawUnitIdsBySourceDrawUnitId,
 			),
 			revision: input.commit.revision,
-			updatedDrawUnitPlacements: [],
 		},
 		textureUpdate,
 	};
@@ -755,30 +746,5 @@ function assertTexturedDrawUnitsHaveCommittedBindings(
 function getStaticDrawUnitTextureUseIds(
 	drawUnit: StaticDrawUnit,
 ): readonly string[] {
-	if (
-		drawUnit.kind === "terrain-geometry" ||
-		drawUnit.kind === "static-object-geometry"
-	) {
-		return drawUnit.textureUseIds;
-	}
-
-	return [];
-}
-
-export function createStaticDrawUnitTranslation(
-	drawUnit: StaticDrawUnit,
-	focusLandblockId: number | null,
-): readonly [number, number, number] {
-	if (
-		(drawUnit.kind !== "terrain-geometry" &&
-			drawUnit.kind !== "static-object-geometry") ||
-		focusLandblockId === null
-	) {
-		return [0, 0, 0];
-	}
-
-	return createOutdoorLandblockRootTranslation(
-		drawUnit.landblockId,
-		focusLandblockId,
-	);
+	return drawUnit.textureUseIds;
 }

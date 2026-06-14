@@ -4138,7 +4138,7 @@ Phase 12A6 verification:
 
 ### Phase 12A7: Static Draw-Unit Ownership And Anchor Placement Contract Cleanup
 
-Status: planned as the next immediate phase before Phase 12 breadth.
+Status: complete on 2026-06-14. Phase 12 is the next planned breadth phase.
 
 Purpose: remove fake placeholder static draw units, make static draw-unit ownership non-optional across the bake/coordinator/materializer/renderer boundary, and replace per-draw-unit anchor-rebase placement updates with an anchor-aware placement contract that can resolve outdoor landblock translations cheaply.
 
@@ -4194,6 +4194,40 @@ Verification:
 - Focused tests for static coordinator ownership, static object compatibility baking diagnostics, static materialization, renderer placement/rebase behavior, static scene query reanchor behavior, and browser follow-mode scene interest.
 - `cd apps/holtburger-3d && npm run test:ts`
 - If feasible, plain Vite `/browser-v2` smoke verifying the follow toggle still mounts and manual/follow navigation still requests scene interest through the runtime.
+
+Phase 12A7 execution notes:
+
+- Deleted the `PlaceholderStaticDrawUnit` variant from `StaticDrawUnit`. Static renderer residency now only accepts typed terrain and static-object geometry draw units with owner `domain` and `landblockId`.
+- Changed fake/static fallback bake paths so they no longer fabricate renderer draw units. Fake resolver payload placeholders may still exist as source/protocol scaffolding, but they do not become renderer residency.
+- Changed static-object compatibility baking so non-renderable partitions are skipped instead of emitted as placeholder draw units. The baker emits a console warning with domain, landblock id, partition id, material family/pass, render coverage, reason, and work id while preserving material coverage diagnostics.
+- Tightened static coordinator ownership mapping so committed draw units map to desired work keys only from typed draw-unit ownership. Invalid ownerless draw units are rejected before commit counts or residency deltas are updated.
+- Simplified `StaticResidencyDelta` to static add/remove residency only: `addedDrawUnits`, `removedDrawUnitIds`, and `revision`. Anchor movement no longer masquerades as a static residency delta.
+- Added `Renderer.setStaticRenderAnchorLandblockId()`. Runtime calls it alongside `StaticSceneQuery.setOutdoorAnchorLandblockId()` when outdoor anchor state changes.
+- Changed the WebGL2 renderer to store owner `landblockId` on terrain/static resources and derive placement translation at draw/sort time from owner landblock plus current static render anchor. Existing GPU buffers are retained across anchor changes.
+- Moved outdoor landblock placement math into a neutral static placement helper so renderer does not import runtime policy code.
+- Reordered browser follow-mode frame handling so a boundary-crossing rebase is resolved before `runtime.updateFrameState()` receives the camera for that tick. The browser now applies the new submitted anchor, rebases the camera controller state, updates scene interest, and then publishes the rebased camera frame state.
+- Added a testable browser follow-mode helper proving an outdoor boundary crossing returns one coherent new anchor, scene-interest update, and rebased camera position.
+
+Phase 12A7 spicy bits:
+
+- Static resolver payload placeholders still exist for fake/protocol scaffolding. They are no longer renderer draw units, but the naming remains unfortunate and should be revisited when the fake resolver paths are deleted or renamed.
+- Static-object non-renderable partition warnings use `console.warn` because the baker boundary does not yet have a typed diagnostics channel. Material coverage remains the structured diagnostic source; a future worker/runtime diagnostics path would be cleaner.
+- Renderer draw/sort placement is now derived just-in-time from `landblockId` plus current anchor. That is the right outdoor shape, but future env-cell/interior geometry still needs an explicit second local transform layer rather than overloading outdoor landblock placement.
+
+Phase 12A7 failed to close:
+
+- No Tauri-backed live asset follow-mode walkthrough was performed. Plain Vite browser smoke verified mount/follow toggle visibility, and automated tests cover the contract and sequencing changes.
+- The browser runtime still names the fake resolver/baker variables `placeholderResolver` / `placeholderBaker`. They no longer emit placeholder draw units, but the variable names are stale.
+
+Phase 12A7 verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- runtime/static-materializer runtime/client-runtime static/coordinator/static-coordinator browser/follow-mode`
+- `cd apps/holtburger-3d && npm run test:ts -- static/objects/bake/static-object-compatibility-partitioner`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run lint:dead`
+- `cd apps/holtburger-3d && npm run test:ts`
+- Plain Vite `/browser-v2` smoke with headless Chrome + SwiftShader verified the harness mounts and the `Follow camera` navigation-tab toggle remains visible/off by default.
 
 ### Phase 12: Static Object Breadth And Compaction
 

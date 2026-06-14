@@ -23,20 +23,9 @@ export interface FrameState {
 }
 
 export interface StaticResidencyDelta {
-	readonly addedDrawUnitPlacements: readonly StaticDrawUnitPlacement[];
-	readonly updatedDrawUnitPlacements: readonly StaticDrawUnitPlacementUpdate[];
+	readonly addedDrawUnits: readonly StaticDrawUnit[];
 	readonly removedDrawUnitIds: readonly string[];
 	readonly revision: number;
-}
-
-interface StaticDrawUnitPlacement {
-	readonly drawUnit: StaticDrawUnit;
-	readonly translation: readonly [number, number, number];
-}
-
-interface StaticDrawUnitPlacementUpdate {
-	readonly drawUnitId: string;
-	readonly translation: readonly [number, number, number];
 }
 
 interface DynamicResidencyDelta {
@@ -146,6 +135,7 @@ export interface Renderer {
 	applyDynamicDelta(delta: DynamicResidencyDelta): void;
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void;
 	applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void;
+	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void;
 	updateFrameState(state: FrameState): void;
 	subscribe(listener: RendererSnapshotListener): () => void;
 	dispose(): void;

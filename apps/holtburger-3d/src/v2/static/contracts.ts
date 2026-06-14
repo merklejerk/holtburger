@@ -361,9 +361,17 @@ export interface TerrainTextureUseFacts {
 export interface TerrainSourceSpatialFacts {
 	readonly coordinateSpace: "landblock-render-local";
 	readonly bounds: StaticBounds | null;
-	readonly terrainBvh: LandblockOutdoorPayloadDto["terrain"]["terrainBvh"];
+	readonly terrainBvh: TerrainRenderLocalBvh;
 	readonly terrainBvhNodeCount: number;
 	readonly terrainBvhItemCount: number;
+}
+
+type TerrainHostBvh = LandblockOutdoorPayloadDto["terrain"]["terrainBvh"];
+
+interface TerrainRenderLocalBvh {
+	readonly coordinateSpace: "landblock-render-local";
+	readonly nodes: readonly (TerrainHostBvh["nodes"][number])[];
+	readonly items: TerrainHostBvh["items"];
 }
 
 export interface OutdoorStaticObjectsScopePayload {

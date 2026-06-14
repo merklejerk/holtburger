@@ -602,12 +602,50 @@ function createStaticDebugBoundsOverlayPrimitive(
 	bounds: StaticBounds,
 	options: { readonly id: string },
 ): DebugOverlayPrimitive {
+	const visibleBounds = createMinimumDebugOverlayBounds(bounds);
 	return {
 		color: [1, 0.85, 0.1, 1],
 		id: options.id,
 		kind: "aabb",
-		max: [bounds.max.x, bounds.max.y, bounds.max.z],
-		min: [bounds.min.x, bounds.min.y, bounds.min.z],
+		max: [visibleBounds.max.x, visibleBounds.max.y, visibleBounds.max.z],
+		min: [visibleBounds.min.x, visibleBounds.min.y, visibleBounds.min.z],
+	};
+}
+
+function createMinimumDebugOverlayBounds(bounds: StaticBounds): StaticBounds {
+	const minExtent = 0.1;
+	const x = expandDebugBoundsAxis(bounds.min.x, bounds.max.x, minExtent);
+	const y = expandDebugBoundsAxis(bounds.min.y, bounds.max.y, minExtent);
+	const z = expandDebugBoundsAxis(bounds.min.z, bounds.max.z, minExtent);
+	return {
+		max: {
+			x: x.max,
+			y: y.max,
+			z: z.max,
+		},
+		min: {
+			x: x.min,
+			y: y.min,
+			z: z.min,
+		},
+	};
+}
+
+function expandDebugBoundsAxis(
+	min: number,
+	max: number,
+	minExtent: number,
+): { readonly min: number; readonly max: number } {
+	const extent = max - min;
+	if (extent >= minExtent) {
+		return { max, min };
+	}
+
+	const center = (min + max) * 0.5;
+	const halfExtent = minExtent * 0.5;
+	return {
+		max: center + halfExtent,
+		min: center - halfExtent,
 	};
 }
 

@@ -137,8 +137,8 @@ describe("V2 static scene query", () => {
 		expect(
 			query.querySelectionDebugBounds(terrainKey)?.bounds,
 		).toMatchObject({
-			max: { x: 4, y: 4, z: 1 },
-			min: { x: 0, y: 0, z: 0 },
+			max: { x: 4, y: 1, z: 0 },
+			min: { x: 0, y: 0, z: -4 },
 		});
 		expect(
 			query.querySelectionDebugBounds(envCellKey)?.bounds,
@@ -355,8 +355,8 @@ describe("V2 static scene query", () => {
 		const hit = query.pickRay({
 			context: { kind: "outdoor" },
 			ray: {
-				direction: { x: 0, y: 0, z: -1 },
-				origin: { x: 2, y: 2, z: 4 },
+				direction: { x: 0, y: -1, z: 0 },
+				origin: { x: 2, y: 4, z: -2 },
 			},
 		});
 
@@ -369,6 +369,16 @@ describe("V2 static scene query", () => {
 				quadIndex: 0,
 			},
 		});
+		expect(hit?.distance).toBe(3);
+		expect(
+			query.pickRay({
+				context: { kind: "outdoor" },
+				ray: {
+					direction: { x: 1, y: 0, z: 0 },
+					origin: { x: -2, y: 3, z: -2 },
+				},
+			}),
+		).toBeNull();
 		expect(
 			query.queryTerrainQuadDetails({
 				landblockId: 0xda55ffff,
@@ -565,8 +575,8 @@ function createTerrainPayload(): TerrainStaticScopePayload {
 	const quad = {
 		averageHeight: 0,
 		bounds: {
-			max: { x: 4, y: 4, z: 1 },
-			min: { x: 0, y: 0, z: 0 },
+			max: { x: 4, y: 1, z: 0 },
+			min: { x: 0, y: 0, z: -4 },
 		},
 		col: 0,
 		cornerTerrainCodes: [1, 1, 1, 1] as const,
@@ -617,8 +627,8 @@ function createTerrainPayload(): TerrainStaticScopePayload {
 			vertices: [
 				{ x: 0, y: 0, z: 0 },
 				{ x: 4, y: 0, z: 0 },
-				{ x: 0, y: 4, z: 0 },
-				{ x: 4, y: 4, z: 1 },
+				{ x: 0, y: 0, z: -4 },
+				{ x: 4, y: 1, z: -4 },
 			],
 		},
 		missingRefs: [],
@@ -633,7 +643,7 @@ function createTerrainPayload(): TerrainStaticScopePayload {
 			bounds: quad.bounds,
 			coordinateSpace: "landblock-render-local",
 			terrainBvh: {
-				coordinateSpace: "landblock-outdoor-terrain-local",
+				coordinateSpace: "landblock-render-local",
 				items: [
 					{
 						col: 0,

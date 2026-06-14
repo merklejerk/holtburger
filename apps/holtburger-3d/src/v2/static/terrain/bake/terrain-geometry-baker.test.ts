@@ -28,7 +28,7 @@ describe("V2 terrain geometry baker", () => {
 			vertexCount: 6,
 		});
 		expect(Array.from(drawUnit.positions)).toEqual([
-			0, 0, -0, 24, 1, -0, 0, 2, -24, 24, 1, -0, 24, 3, -24, 0, 2, -24,
+			0, 0, 0, 24, 1, 0, 0, 2, -24, 24, 1, 0, 24, 3, -24, 0, 2, -24,
 		]);
 		expect(drawUnit.indices).toBeInstanceOf(Uint16Array);
 		expect(Array.from(drawUnit.indices)).toEqual([0, 1, 2, 3, 4, 5]);
@@ -360,7 +360,7 @@ function createTerrainPayload(
 			bounds: null,
 			coordinateSpace: "landblock-render-local",
 			terrainBvh: {
-				coordinateSpace: "landblock-outdoor-terrain-local",
+				coordinateSpace: "landblock-render-local",
 				items: [],
 				nodes: [],
 			},
@@ -405,15 +405,15 @@ function createTerrainMesh({
 
 	const vertices = [
 		{ x: 0, y: 0, z: 0 },
-		{ x: 24, y: 0, z: 1 },
-		{ x: 0, y: 24, z: 2 },
-		{ x: 24, y: 24, z: 3 },
+		{ x: 24, y: 1, z: 0 },
+		{ x: 0, y: 2, z: -24 },
+		{ x: 24, y: 3, z: -24 },
 	];
 	const quads = pcodes.map((pcode, quadIndex) => ({
 		averageHeight: 1,
 		bounds: {
-			max: { x: 24, y: 24, z: 3 },
-			min: { x: 0, y: 0, z: 0 },
+			max: { x: 24, y: 3, z: 0 },
+			min: { x: 0, y: 0, z: -24 },
 		},
 		col: quadIndex,
 		cornerTerrainCodes: [
@@ -452,8 +452,8 @@ function createTerrainMesh({
 
 	return {
 		bounds: {
-			max: { x: 24, y: 24, z: 3 },
-			min: { x: 0, y: 0, z: 0 },
+			max: { x: 24, y: 3, z: 0 },
+			min: { x: 0, y: 0, z: -24 },
 		},
 		gridSize: 2,
 		maxHeight: 3,
@@ -475,8 +475,8 @@ function createRepeatedTerrainMesh(
 	const triangles = Array.from({ length: triangleCount }, (_value, index) => ({
 		averageHeight: 1,
 		bounds: {
-			max: { x: 24, y: 24, z: 3 },
-			min: { x: 0, y: 0, z: 0 },
+			max: { x: 24, y: 3, z: 0 },
+			min: { x: 0, y: 0, z: -24 },
 		},
 		quadIndex: 0,
 		terrainTriangleId: `t${index}`,
@@ -487,8 +487,8 @@ function createRepeatedTerrainMesh(
 
 	return {
 		bounds: {
-			max: { x: 24, y: 24, z: 3 },
-			min: { x: 0, y: 0, z: 0 },
+			max: { x: 24, y: 3, z: 0 },
+			min: { x: 0, y: 0, z: -24 },
 		},
 		gridSize: 2,
 		maxHeight: 3,
@@ -498,8 +498,8 @@ function createRepeatedTerrainMesh(
 			{
 				averageHeight: 1,
 				bounds: {
-					max: { x: 24, y: 24, z: 3 },
-					min: { x: 0, y: 0, z: 0 },
+					max: { x: 24, y: 3, z: 0 },
+					min: { x: 0, y: 0, z: -24 },
 				},
 				col: 0,
 				cornerTerrainCodes: [
@@ -524,9 +524,9 @@ function createRepeatedTerrainMesh(
 		vertexCount: 4,
 		vertices: [
 			{ x: 0, y: 0, z: 0 },
-			{ x: 24, y: 0, z: 1 },
-			{ x: 0, y: 24, z: 2 },
-			{ x: 24, y: 24, z: 3 },
+			{ x: 24, y: 1, z: 0 },
+			{ x: 0, y: 2, z: -24 },
+			{ x: 24, y: 3, z: -24 },
 		],
 	};
 }

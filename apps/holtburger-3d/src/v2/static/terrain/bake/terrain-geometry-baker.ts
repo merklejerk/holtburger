@@ -322,8 +322,8 @@ function writeTrianglePositions(
 
 		const targetOffset = triangleIndex * 9 + corner * 3;
 		positions[targetOffset] = vertex.x;
-		positions[targetOffset + 1] = vertex.z;
-		positions[targetOffset + 2] = -vertex.y;
+		positions[targetOffset + 1] = vertex.y;
+		positions[targetOffset + 2] = vertex.z;
 
 		const texCoordOffset = triangleIndex * 6 + corner * 2;
 		const uv = terrainQuadUv(quad, sourceVertexIndex);

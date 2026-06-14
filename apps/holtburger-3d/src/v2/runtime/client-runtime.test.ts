@@ -215,13 +215,52 @@ describe("V2 client runtime", () => {
 				color: [1, 0.85, 0.1, 1],
 				id: "terrain-quad:outdoor-terrain:da55ffff:0",
 				kind: "aabb",
-				max: [24, 24, 3],
-				min: [0, 0, 0],
+				max: [24, 3, 0],
+				min: [0, 0, -24],
 			},
 		]);
 
 		runtime.setStaticDebugSelection(null);
 		expect(renderer.debugOverlayUpdates.at(-1)).toEqual([]);
+		runtime.dispose();
+	});
+
+	it("keeps flat static debug overlay bounds visible", async () => {
+		const renderer = new FakeRenderer();
+		const resolver = new DeferredStaticResolver();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker: new DeferredStaticBaker(),
+				resolver,
+			}),
+		});
+
+		runtime.setStaticDebugSelection(
+			createTerrainQuadSelectionKey({
+				landblockId: 0xda55ffff,
+				quadIndex: 0,
+			}),
+		);
+		updateOutdoorSceneInterest(runtime);
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "", {
+			scope: createTerrainSourceScopePayload({
+				quadBounds: {
+					max: { x: 24, y: 0, z: 0 },
+					min: { x: 0, y: 0, z: -24 },
+				},
+			}),
+		});
+		await flushPromises();
+
+		expect(renderer.debugOverlayUpdates.at(-1)).toEqual([
+			expect.objectContaining({
+				max: [24, 0.05, 0],
+				min: [0, -0.05, -24],
+			}),
+		]);
 		runtime.dispose();
 	});
 
@@ -809,10 +848,14 @@ interface DeferredAssetRequest {
 	readonly reject: (error: Error) => void;
 }
 
-function createTerrainSourceScopePayload(): TerrainStaticScopePayload {
-	const quadBounds = {
-		max: { x: 24, y: 24, z: 3 },
-		min: { x: 0, y: 0, z: 0 },
+function createTerrainSourceScopePayload(
+	options: {
+		readonly quadBounds?: TerrainStaticScopePayload["mesh"]["quads"][number]["bounds"];
+	} = {},
+): TerrainStaticScopePayload {
+	const quadBounds = options.quadBounds ?? {
+		max: { x: 24, y: 3, z: 0 },
+		min: { x: 0, y: 0, z: -24 },
 	};
 
 	return {
@@ -867,9 +910,9 @@ function createTerrainSourceScopePayload(): TerrainStaticScopePayload {
 			vertexCount: 4,
 			vertices: [
 				{ x: 0, y: 0, z: 0 },
-				{ x: 24, y: 0, z: 1 },
-				{ x: 0, y: 24, z: 2 },
-				{ x: 24, y: 24, z: 3 },
+				{ x: 24, y: 1, z: 0 },
+				{ x: 0, y: 2, z: -24 },
+				{ x: 24, y: 3, z: -24 },
 			],
 		},
 		missingRefs: [],
@@ -884,7 +927,7 @@ function createTerrainSourceScopePayload(): TerrainStaticScopePayload {
 			bounds: quadBounds,
 			coordinateSpace: "landblock-render-local",
 			terrainBvh: {
-				coordinateSpace: "landblock-outdoor-terrain-local",
+				coordinateSpace: "landblock-render-local",
 				items: [{ quadIndex: 0 }],
 				nodes: [
 					{

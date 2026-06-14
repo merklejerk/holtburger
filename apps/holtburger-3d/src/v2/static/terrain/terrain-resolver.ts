@@ -11,12 +11,14 @@ import { createHostAssetKey } from "../../assets/keys";
 import type {
 	PaletteIdentity,
 	RegionDetailRoleFacts,
+	StaticBounds,
 	StaticResolverJob,
 	StaticResourceIdentity,
 	StaticScopePayload,
 	TerrainAlphaMapFacts,
 	TerrainMaterialTypeFacts,
 	TerrainRoadAlphaMapFacts,
+	TerrainStaticScopePayload,
 	TerrainSourceSpatialFacts,
 	TerrainTextureUseFacts,
 } from "../contracts";
@@ -82,19 +84,7 @@ export class TerrainStaticScopeResolver {
 					landblockId: landblock.landblockId,
 					source: "outdoor",
 				},
-				mesh: {
-					bounds: landblock.terrain.bounds,
-					gridSize: landblock.terrain.gridSize,
-					maxHeight: landblock.terrain.maxHeight,
-					minHeight: landblock.terrain.minHeight,
-					quadCount: landblock.terrain.quads.length,
-					quads: landblock.terrain.quads,
-					tileSize: landblock.terrain.tileSize,
-					triangleCount: landblock.terrain.triangles.length,
-					triangles: landblock.terrain.triangles,
-					vertexCount: landblock.terrain.vertices.length,
-					vertices: landblock.terrain.vertices,
-				},
+				mesh: createTerrainMeshFacts(landblock),
 				missingRefs: textureUses.missingRefs,
 				regionRenderProfile: {
 					detailRoles: createRegionDetailRoles(regionRenderProfile),
@@ -357,12 +347,76 @@ function createTerrainSourceSpatialFacts(
 	landblock: LandblockOutdoorPayloadDto,
 ): TerrainSourceSpatialFacts {
 	return {
-		bounds: landblock.terrain.bounds,
+		bounds: landblock.terrain.bounds
+			? terrainSourceBoundsToRenderLocalBounds(landblock.terrain.bounds)
+			: null,
 		coordinateSpace: "landblock-render-local",
-		terrainBvh: landblock.terrain.terrainBvh,
+		terrainBvh: {
+			coordinateSpace: "landblock-render-local",
+			items: landblock.terrain.terrainBvh.items,
+			nodes: landblock.terrain.terrainBvh.nodes.map((node) => ({
+				...node,
+				bounds: terrainSourceBoundsToRenderLocalBounds(node.bounds),
+			})),
+		},
 		terrainBvhItemCount: landblock.terrain.terrainBvh.items.length,
 		terrainBvhNodeCount: landblock.terrain.terrainBvh.nodes.length,
 	};
+}
+
+function createTerrainMeshFacts(
+	landblock: LandblockOutdoorPayloadDto,
+): TerrainStaticScopePayload["mesh"] {
+	return {
+		bounds: landblock.terrain.bounds
+			? terrainSourceBoundsToRenderLocalBounds(landblock.terrain.bounds)
+			: null,
+		gridSize: landblock.terrain.gridSize,
+		maxHeight: landblock.terrain.maxHeight,
+		minHeight: landblock.terrain.minHeight,
+		quadCount: landblock.terrain.quads.length,
+		quads: landblock.terrain.quads.map((quad) => ({
+			...quad,
+			bounds: terrainSourceBoundsToRenderLocalBounds(quad.bounds),
+		})),
+		tileSize: landblock.terrain.tileSize,
+		triangleCount: landblock.terrain.triangles.length,
+		triangles: landblock.terrain.triangles.map((triangle) => ({
+			...triangle,
+			bounds: terrainSourceBoundsToRenderLocalBounds(triangle.bounds),
+		})),
+		vertexCount: landblock.terrain.vertices.length,
+		vertices: landblock.terrain.vertices.map(terrainSourceVec3ToRenderLocalVec3),
+	};
+}
+
+function terrainSourceVec3ToRenderLocalVec3(
+	vec: LandblockOutdoorPayloadDto["terrain"]["vertices"][number],
+): LandblockOutdoorPayloadDto["terrain"]["vertices"][number] {
+	return {
+		x: vec.x,
+		y: vec.z,
+		z: negateWithoutNegativeZero(vec.y),
+	};
+}
+
+function terrainSourceBoundsToRenderLocalBounds(bounds: StaticBounds): StaticBounds {
+	return {
+		max: {
+			x: bounds.max.x,
+			y: bounds.max.z,
+			z: negateWithoutNegativeZero(bounds.min.y),
+		},
+		min: {
+			x: bounds.min.x,
+			y: bounds.min.z,
+			z: negateWithoutNegativeZero(bounds.max.y),
+		},
+	};
+}
+
+function negateWithoutNegativeZero(value: number): number {
+	return value === 0 ? 0 : -value;
 }
 
 function parseFirstPaletteDependency(

@@ -101,17 +101,29 @@ function bakeStaticObjectCompatibilityItem(
 
 	const scope = item.payload.scope;
 	const partitionPlan = partitionStaticObjectCompatibility(scope);
-	const drawUnits = partitionPlan.partitions.map((partition) =>
-		createPartitionDrawUnit(item.work, scope, partition),
+	const renderablePartitions = partitionPlan.partitions.filter((partition) => {
+		if (isRenderableStaticObjectPartition(partition)) {
+			return true;
+		}
+
+		warnAboutSkippedStaticObjectPartition(item.work, scope, partition);
+		return false;
+	});
+	const drawUnits = renderablePartitions.map((partition) =>
+		createStaticObjectGeometryDrawUnit({
+			partition,
+			payload: scope,
+			work: item.work,
+		}),
 	);
 	const drawUnitIdBySliceId = new Map(
-		partitionPlan.partitions.map((partition, index) => [
+		renderablePartitions.map((partition, index) => [
 			partition.sliceId,
 			drawUnits[index]?.drawUnitId ?? "",
 		]),
 	);
 	const sourceMappingsBySliceId = new Map(
-		partitionPlan.partitions.map((partition) => {
+		renderablePartitions.map((partition) => {
 			const drawUnitId = drawUnitIdBySliceId.get(partition.sliceId);
 			return [
 				partition.sliceId,
@@ -124,7 +136,7 @@ function bakeStaticObjectCompatibilityItem(
 		}),
 	);
 	const spatialRecordBySliceId = new Map(
-		partitionPlan.partitions.map((partition) => {
+		renderablePartitions.map((partition) => {
 			const drawUnitId = drawUnitIdBySliceId.get(partition.sliceId);
 			return [
 				partition.sliceId,
@@ -134,19 +146,15 @@ function bakeStaticObjectCompatibilityItem(
 	);
 
 	return {
-		drawUnits: drawUnits.map((drawUnit, index) => {
-			const partition = partitionPlan.partitions[index];
-			if (drawUnit.kind !== "static-object-geometry" || !partition) {
-				return drawUnit;
-			}
-
-			return {
-				...drawUnit,
-				sourceMappingRecords:
-					sourceMappingsBySliceId.get(partition.sliceId) ?? [],
-				spatialRecord: spatialRecordBySliceId.get(partition.sliceId) ?? null,
-			};
-		}),
+		drawUnits: drawUnits.map((drawUnit, index) => ({
+			...drawUnit,
+			sourceMappingRecords:
+				sourceMappingsBySliceId.get(renderablePartitions[index]?.sliceId ?? "") ??
+				[],
+			spatialRecord:
+				spatialRecordBySliceId.get(renderablePartitions[index]?.sliceId ?? "") ??
+				null,
+		})),
 		materialCoverage: partitionPlan.materialCoverage,
 		sourceMappings: [...sourceMappingsBySliceId.values()].flat(),
 		spatialRecords: [...spatialRecordBySliceId.values()],
@@ -175,23 +183,25 @@ function createStaticObjectSourceMapping(
 	].join(":");
 }
 
-function createPartitionDrawUnit(
+function warnAboutSkippedStaticObjectPartition(
 	work: ScheduledStaticWork,
 	payload: OutdoorStaticObjectsScopePayload,
 	partition: StaticObjectCompatibilityPartition,
-): StaticDrawUnit {
-	if (isRenderableStaticObjectPartition(partition)) {
-		return createStaticObjectGeometryDrawUnit({
-			partition,
-			payload,
-			work,
-		});
-	}
-
-	return {
-		drawUnitId: `${work.workId}:static-object-partition:${partition.sliceId.replaceAll("/", "-")}`,
-		kind: "placeholder",
-	};
+): void {
+	console.warn(
+		`V2 skipped non-renderable static object partition ${partition.sliceId}.`,
+		{
+			domain: work.job.domain,
+			landblockId: payload.landblock.landblockId,
+			materialFamily: partition.family,
+			materialPass: partition.pass,
+			partitionId: partition.sliceId,
+			reason: partition.reason,
+			renderCoverage: partition.renderCoverage,
+			triangleCount: partition.triangleCount,
+			workId: work.workId,
+		},
+	);
 }
 
 function createStaticObjectGeometryDrawUnit(options: {

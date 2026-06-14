@@ -206,31 +206,26 @@ describe("V2 client runtime", () => {
 
 		expect(renderer.staticDeltas).toEqual([
 			{
-				addedDrawUnitPlacements: [
-					{
-						drawUnit: createTerrainDrawUnit("terrain-a", 0xdb55ffff),
-						translation: [192, 0, 0],
-					},
-				],
+				addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xdb55ffff)],
 				removedDrawUnitIds: [],
 				revision: 1,
-				updatedDrawUnitPlacements: [],
 			},
 		]);
+		expect(renderer.staticAnchorLandblockIds).toEqual([0xda55ffff]);
 
 		runtime.updateSceneInterest({ kind: "none" });
 		await flushPromises();
 
 		expect(renderer.staticDeltas.at(-1)).toEqual({
-			addedDrawUnitPlacements: [],
+			addedDrawUnits: [],
 			removedDrawUnitIds: ["terrain-a"],
 			revision: 2,
-			updatedDrawUnitPlacements: [],
 		});
+		expect(renderer.staticAnchorLandblockIds.at(-1)).toBeNull();
 		runtime.dispose();
 	});
 
-	it("rebases resident static draw units without remove/add churn", async () => {
+	it("rebases resident static draw units through renderer anchor state", async () => {
 		const renderer = new FakeRenderer();
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -257,17 +252,8 @@ describe("V2 client runtime", () => {
 			source: "follow",
 		});
 
-		expect(renderer.staticDeltas.at(-1)).toEqual({
-			addedDrawUnitPlacements: [],
-			removedDrawUnitIds: [],
-			revision: 2,
-			updatedDrawUnitPlacements: [
-				{
-					drawUnitId: "terrain-a",
-					translation: [0, 0, 0],
-				},
-			],
-		});
+		expect(renderer.staticDeltas).toHaveLength(1);
+		expect(renderer.staticAnchorLandblockIds).toEqual([0xda55ffff, 0xdb55ffff]);
 		runtime.dispose();
 	});
 
@@ -638,6 +624,7 @@ function updateInteriorSceneInterest(
 
 class FakeRenderer implements Renderer {
 	readonly staticDeltas: StaticResidencyDelta[] = [];
+	readonly staticAnchorLandblockIds: (number | null)[] = [];
 	readonly textureUpdates: TexturePlacementUpdate[] = [];
 	readonly samplerPolicyUpdates: SamplerPolicyUpdate[] = [];
 	readonly events: string[] = [];
@@ -657,15 +644,15 @@ class FakeRenderer implements Renderer {
 	applyStaticDelta(delta: StaticResidencyDelta): void {
 		this.staticDeltas.push(delta);
 		this.events.push(
-			`static:${delta.revision}:${delta.addedDrawUnitPlacements
-				.map((placement) => placement.drawUnit.drawUnitId)
+			`static:${delta.revision}:${delta.addedDrawUnits
+				.map((drawUnit) => drawUnit.drawUnitId)
 				.join(",")}`,
 		);
 		this.#snapshot = {
 			...this.#snapshot,
-			renderedTriangles: delta.addedDrawUnitPlacements.length,
-			staticDrawUnits: delta.addedDrawUnitPlacements.length,
-			terrainDrawUnits: delta.addedDrawUnitPlacements.length,
+			renderedTriangles: delta.addedDrawUnits.length,
+			staticDrawUnits: delta.addedDrawUnits.length,
+			terrainDrawUnits: delta.addedDrawUnits.length,
 		};
 	}
 
@@ -681,6 +668,9 @@ class FakeRenderer implements Renderer {
 	applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void {
 		this.samplerPolicyUpdates.push(update);
 		this.events.push(`sampler:${update.revision}:${update.policies.length}`);
+	}
+	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void {
+		this.staticAnchorLandblockIds.push(anchorLandblockId);
 	}
 	updateFrameState(): void {}
 

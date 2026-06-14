@@ -2,7 +2,6 @@ import type {
 	StaticBakeBatchInput,
 	StaticBakeBatchResult,
 	StaticBaker,
-	StaticDrawUnit,
 	StaticResolver,
 	StaticResolverJob,
 	StaticScopePayload,
@@ -257,9 +256,7 @@ function createFakeStaticBakeResult(
 			result.buildRevision ??
 			Math.max(...input.items.map((item) => item.payload.sourceRevision), 0),
 		domain: input.domain,
-		drawUnits: result.drawUnits ?? [
-			...input.items.map((item) => createPlaceholderDrawUnit(item.work.workId)),
-		],
+		drawUnits: result.drawUnits ?? [],
 		materialCoverage: result.materialCoverage ?? [],
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds ?? [],
@@ -270,13 +267,6 @@ function createFakeStaticBakeResult(
 		staticBatchId: input.staticBatchId,
 		textureUses: result.textureUses ?? [],
 		works: input.items.map((item) => item.work),
-	};
-}
-
-function createPlaceholderDrawUnit(workId: string): StaticDrawUnit {
-	return {
-		drawUnitId: `${workId}:fake-draw-unit`,
-		kind: "placeholder",
 	};
 }
 

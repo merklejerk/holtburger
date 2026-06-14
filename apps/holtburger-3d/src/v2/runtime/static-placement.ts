@@ -3,33 +3,13 @@ import {
 	getOutdoorLandblockCoords,
 	makeOutdoorLandblockId,
 } from "../../lib/landblocks";
+export { createOutdoorLandblockRootTranslation } from "../static/placement";
+import { createOutdoorLandblockRootTranslation } from "../static/placement";
 
 export interface OutdoorCameraLandblockResidency {
 	readonly landblockId: number;
 	readonly localCameraPosition: readonly [number, number, number];
 	readonly rebaseTranslation: readonly [number, number, number];
-}
-
-export function createOutdoorLandblockRootTranslation(
-	landblockId: number,
-	focusLandblockId: number | null,
-): readonly [number, number, number] {
-	if (focusLandblockId === null) {
-		return [0, 0, 0];
-	}
-
-	const landblockCoords = getOutdoorLandblockCoords(landblockId);
-	const focusCoords = getOutdoorLandblockCoords(focusLandblockId);
-
-	return [
-		normalizeZero(
-			(landblockCoords.x - focusCoords.x) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-		),
-		0,
-		normalizeZero(
-			-(landblockCoords.y - focusCoords.y) * OUTDOOR_LANDBLOCK_WORLD_SIZE,
-		),
-	];
 }
 
 export function deriveOutdoorCameraLandblockResidency(options: {

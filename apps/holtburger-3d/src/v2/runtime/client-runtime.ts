@@ -32,7 +32,6 @@ import type {
 } from "../static/contracts";
 import {
 	materializeStaticCommit,
-	createStaticDrawUnitTranslation,
 	type StaticMaterializationResult,
 } from "./static-materializer";
 import {
@@ -347,26 +346,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 		this.#renderAnchorLandblockId = nextAnchorLandblockId;
 		this.#staticSceneQuery.setOutdoorAnchorLandblockId(nextAnchorLandblockId);
-		const updatedDrawUnitPlacements = Array.from(
-			this.#materializedDrawUnitsById.values(),
-		).map((drawUnit) => ({
-			drawUnitId: drawUnit.drawUnitId,
-			translation: createStaticDrawUnitTranslation(
-				drawUnit,
-				nextAnchorLandblockId,
-			),
-		}));
-
-		if (updatedDrawUnitPlacements.length === 0) {
-			return;
-		}
-
-		this.#renderer.applyStaticDelta({
-			addedDrawUnitPlacements: [],
-			removedDrawUnitIds: [],
-			revision: this.#lastStaticSnapshot.revision + 1,
-			updatedDrawUnitPlacements,
-		});
+		this.#renderer.setStaticRenderAnchorLandblockId(nextAnchorLandblockId);
 	}
 
 	#createSnapshot(): RuntimeSnapshot {
@@ -480,7 +460,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 			commit: delta,
 			materializedDrawUnitIdsBySourceDrawUnitId:
 				this.#materializedDrawUnitIdsBySourceDrawUnitId,
-			renderAnchorLandblockId: this.#renderAnchorLandblockId,
 			textureUpdate,
 		});
 		this.#updateMaterializedDrawUnitIdMappings(delta, materialized);
@@ -530,10 +509,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 				mapping.materializedDrawUnitIds,
 			);
 		}
-		for (const placement of materialized.staticDelta.addedDrawUnitPlacements) {
+		for (const drawUnit of materialized.staticDelta.addedDrawUnits) {
 			this.#materializedDrawUnitsById.set(
-				placement.drawUnit.drawUnitId,
-				placement.drawUnit,
+				drawUnit.drawUnitId,
+				drawUnit,
 			);
 		}
 	}

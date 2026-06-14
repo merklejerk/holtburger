@@ -376,10 +376,24 @@ export class StaticCoordinator {
 			}
 		}
 
-		this.#commit(result);
+		try {
+			this.#commit(result);
+		} catch (error: unknown) {
+			for (const work of currentWorks) {
+				this.#markFailedIfCurrent(
+					work,
+					error instanceof Error ? error.message : String(error),
+				);
+			}
+		}
 	}
 
 	#commit(result: StaticBakeBatchResult): void {
+		const drawUnitDesiredKeys = result.drawUnits.map((drawUnit) => ({
+			desiredKey: getDrawUnitDesiredKey(drawUnit),
+			drawUnit,
+		}));
+
 		for (const work of result.works) {
 			const status = this.#activeWork.get(work.workId);
 			if (!status) {
@@ -388,9 +402,8 @@ export class StaticCoordinator {
 			status.status = "committed";
 			this.#committed += 1;
 		}
-		for (const drawUnit of result.drawUnits) {
+		for (const { desiredKey, drawUnit } of drawUnitDesiredKeys) {
 			this.#residentDrawUnitIds.add(drawUnit.drawUnitId);
-			const desiredKey = getDrawUnitDesiredKey(drawUnit, result.works);
 			let drawUnitIds = this.#residentDrawUnitIdsByDesiredKey.get(desiredKey);
 			if (!drawUnitIds) {
 				drawUnitIds = new Set<string>();
@@ -666,10 +679,7 @@ function createDesiredKeyForDrawUnit(input: {
 	return `landblock:${(input.landblockId >>> 0).toString(16).padStart(8, "0")}:${input.domain}`;
 }
 
-function getDrawUnitDesiredKey(
-	drawUnit: StaticDrawUnit,
-	works: readonly ScheduledStaticWork[],
-): string {
+function getDrawUnitDesiredKey(drawUnit: StaticDrawUnit): string {
 	if (
 		drawUnit.kind === "terrain-geometry" ||
 		drawUnit.kind === "static-object-geometry"
@@ -680,21 +690,8 @@ function getDrawUnitDesiredKey(
 		});
 	}
 
-	const [onlyWork] = works;
-	if (works.length === 1 && onlyWork) {
-		return createDesiredWorkKey(onlyWork);
-	}
-
-	return createDesiredWorkKey(
-		works[0] ?? {
-			job: {
-				domain: "outdoor-terrain",
-				scope: { kind: "landblock", landblockId: 0 },
-			},
-			priority: 0,
-			revision: 0,
-			workId: "unknown",
-		},
+	throw new Error(
+		`Static coordinator cannot commit ownerless draw unit ${String((drawUnit as { drawUnitId?: unknown }).drawUnitId ?? "unknown")}.`,
 	);
 }
 
@@ -706,7 +703,7 @@ function filterStaticBakeResultForWorks(
 	const drawUnitIds = new Set(
 		result.drawUnits
 			.filter((drawUnit) =>
-				desiredKeys.has(getDrawUnitDesiredKey(drawUnit, works)),
+				desiredKeys.has(getDrawUnitDesiredKey(drawUnit)),
 			)
 			.map((drawUnit) => drawUnit.drawUnitId),
 	);

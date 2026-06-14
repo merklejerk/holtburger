@@ -26,12 +26,12 @@
 		type V2LandblockInputMode,
 		type V2ParsedLocationInput,
 	} from "../v2/browser/location-input";
+	import { resolveBrowserFollowModeRebase } from "../v2/browser/follow-mode";
 	import type {
 		ClientRuntime,
 		ManualStaticDomain,
 		RuntimeSnapshot,
 	} from "../v2/runtime/client-runtime";
-	import { deriveOutdoorCameraLandblockResidency } from "../v2/runtime/static-placement";
 	import type { StaticScenePickHit } from "../v2/runtime/static-scene-query";
 	import type { TextureFilteringMode } from "../v2/textures/sampling-policy";
 	import PerformanceOverlay from "../v2/ui/PerformanceOverlay.svelte";
@@ -128,14 +128,14 @@
 				);
 			});
 			const frameInterval = window.setInterval(() => {
-				const camera =
+				let camera =
 					cameraController?.createFrameStateCamera() ??
 					createV2FreeCameraFrameStateCamera(cameraState);
+				camera = applyFollowModeRebaseForFrame(camera);
 				runtime?.updateFrameState({
 					camera,
 					timeSeconds: performance.now() / 1000,
 				});
-				updateFollowModeSceneInterest(camera.position);
 			}, 1000 / 30);
 
 			return () => {
@@ -400,49 +400,53 @@
 	function updateFollowModeSceneInterest(
 		cameraPosition: readonly [number, number, number],
 	): void {
+		applyFollowModeRebaseForFrame({
+			pitchRadians: cameraState.pitchRadians,
+			position: cameraPosition,
+			yawRadians: cameraState.yawRadians,
+		});
+	}
+
+	function applyFollowModeRebaseForFrame(
+		camera: ReturnType<typeof createV2FreeCameraFrameStateCamera>,
+	): ReturnType<typeof createV2FreeCameraFrameStateCamera> {
 		if (
 			!followModeEnabled ||
 			!runtime ||
 			!submittedStaticLocation ||
 			submittedStaticLocation.kind !== "outdoor-landblock"
 		) {
-			return;
+			return camera;
 		}
 
-		const residency = deriveOutdoorCameraLandblockResidency({
-			anchorLandblockId: submittedStaticLocation.landblockId,
-			cameraPosition,
+		const rebase = resolveBrowserFollowModeRebase({
+			cameraPosition: camera.position,
+			domains: selectedDomains(),
+			enabled: followModeEnabled,
+			lod: {
+				buildings: buildingRadius,
+				detail: detailRadius,
+				terrain: terrainRadius,
+				envCells: envCellRadius,
+			},
+			submittedLocation: submittedStaticLocation,
 		});
-		if (
-			!residency ||
-			residency.landblockId === submittedStaticLocation.landblockId
-		) {
-			return;
+		if (!rebase) {
+			return camera;
 		}
 
-		submittedStaticLocation = {
-			kind: "outdoor-landblock",
-			label: `Outdoor landblock ${formatHexId(residency.landblockId)}`,
-			landblockId: residency.landblockId,
-		};
-		cameraController?.setPosition(residency.localCameraPosition);
+		submittedStaticLocation = rebase.submittedLocation;
+		cameraController?.setPosition(rebase.cameraPosition);
 		cameraState = {
 			...cameraState,
-			position: residency.localCameraPosition,
+			position: rebase.cameraPosition,
 		};
-		runtime.updateSceneInterest(
-			createSceneInterestFromLocation(
-				submittedStaticLocation,
-				selectedDomains(),
-				{
-					buildings: buildingRadius,
-					detail: detailRadius,
-					terrain: terrainRadius,
-					envCells: envCellRadius,
-				},
-				"follow",
-			),
-		);
+		runtime.updateSceneInterest(rebase.sceneInterest);
+
+		return {
+			...camera,
+			position: rebase.cameraPosition,
+		};
 	}
 
 	function formatCameraPosition(

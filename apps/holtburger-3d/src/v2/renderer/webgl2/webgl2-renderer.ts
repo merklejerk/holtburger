@@ -29,6 +29,7 @@ import {
 	type TextureFilteringMode,
 	type TextureWrapMode,
 } from "../../textures/sampling-policy";
+import { createOutdoorLandblockRootTranslation } from "../../static/placement";
 
 const TERRAIN_LAYERED_MAX_LAYER_ENTRIES = 8;
 const TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER = 3;
@@ -576,6 +577,7 @@ class Webgl2Renderer implements Renderer {
 	#frameCount = 0;
 	#frameHandlerMs = 0;
 	#frameState = defaultFrameState;
+	#staticRenderAnchorLandblockId: number | null = null;
 	#error: string | null = null;
 
 	constructor(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext) {
@@ -602,33 +604,7 @@ class Webgl2Renderer implements Renderer {
 			this.#textureBindings.delete(drawUnitId);
 		}
 
-		for (const placement of delta.updatedDrawUnitPlacements) {
-			const terrainResource = this.#terrainResources.get(placement.drawUnitId);
-			if (terrainResource) {
-				this.#terrainResources.set(placement.drawUnitId, {
-					...terrainResource,
-					translation: placement.translation,
-				});
-				continue;
-			}
-
-			const staticObjectResource = this.#staticObjectResources.get(
-				placement.drawUnitId,
-			);
-			if (staticObjectResource) {
-				this.#staticObjectResources.set(placement.drawUnitId, {
-					...staticObjectResource,
-					sortCenter: translatePoint(
-						staticObjectResource.localSortCenter,
-						placement.translation,
-					),
-					translation: placement.translation,
-				});
-			}
-		}
-
-		for (const placement of delta.addedDrawUnitPlacements) {
-			const { drawUnit } = placement;
+		for (const drawUnit of delta.addedDrawUnits) {
 			this.#terrainResources.get(drawUnit.drawUnitId)?.dispose();
 			this.#staticObjectResources.get(drawUnit.drawUnitId)?.dispose();
 			this.#terrainResources.delete(drawUnit.drawUnitId);
@@ -637,20 +613,12 @@ class Webgl2Renderer implements Renderer {
 			if (drawUnit.kind === "terrain-geometry") {
 				this.#terrainResources.set(
 					drawUnit.drawUnitId,
-					createTerrainGeometryResource(
-						this.#gl,
-						drawUnit,
-						placement.translation,
-					),
+					createTerrainGeometryResource(this.#gl, drawUnit),
 				);
 			} else if (drawUnit.kind === "static-object-geometry") {
 				this.#staticObjectResources.set(
 					drawUnit.drawUnitId,
-					createStaticObjectGeometryResource(
-						this.#gl,
-						drawUnit,
-						placement.translation,
-					),
+					createStaticObjectGeometryResource(this.#gl, drawUnit),
 				);
 			}
 		}
@@ -660,6 +628,11 @@ class Webgl2Renderer implements Renderer {
 
 	applyDynamicDelta(): void {
 		// Dynamic renderer residency starts after static pipeline contracts are proven.
+	}
+
+	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void {
+		this.#staticRenderAnchorLandblockId = anchorLandblockId;
+		this.#emit();
 	}
 
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void {
@@ -852,9 +825,7 @@ class Webgl2Renderer implements Renderer {
 			);
 			gl.uniform3f(
 				this.#terrainProgram.uniforms.uPlacementTranslation,
-				resource.translation[0],
-				resource.translation[1],
-				resource.translation[2],
+				...this.#createResourceTranslation(resource),
 			);
 			gl.bindVertexArray(resource.vertexArray);
 			gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
@@ -896,8 +867,14 @@ class Webgl2Renderer implements Renderer {
 			.filter(isTransparentStaticObjectResource)
 			.sort((left, right) =>
 				compareStaticObjectTransparentDrawOrder(
-					left,
-					right,
+					{
+						drawUnitId: left.drawUnitId,
+						sortCenter: this.#createStaticObjectSortCenter(left),
+					},
+					{
+						drawUnitId: right.drawUnitId,
+						sortCenter: this.#createStaticObjectSortCenter(right),
+					},
 					this.#frameState.camera.position,
 				),
 			);
@@ -959,9 +936,7 @@ class Webgl2Renderer implements Renderer {
 		);
 		gl.uniform3f(
 			this.#staticObjectProgram.uniforms.uPlacementTranslation,
-			resource.translation[0],
-			resource.translation[1],
-			resource.translation[2],
+			...this.#createResourceTranslation(resource),
 		);
 		gl.bindVertexArray(resource.vertexArray);
 		gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
@@ -1023,6 +998,24 @@ class Webgl2Renderer implements Renderer {
 				reason:
 					"Missing texture binding/residency, terrain role-page overflow, or a multi-page terrain role binding that the current WebGL2 shader cannot sample yet.",
 			},
+		);
+	}
+
+	#createResourceTranslation(
+		resource: TerrainGeometryResource | StaticObjectGeometryResource,
+	): readonly [number, number, number] {
+		return createOutdoorLandblockRootTranslation(
+			resource.landblockId,
+			this.#staticRenderAnchorLandblockId,
+		);
+	}
+
+	#createStaticObjectSortCenter(
+		resource: StaticObjectGeometryResource,
+	): readonly [number, number, number] {
+		return translatePoint(
+			resource.localSortCenter,
+			this.#createResourceTranslation(resource),
 		);
 	}
 }
@@ -1111,10 +1104,10 @@ interface TerrainGeometryResource {
 	readonly layerSlotBuffer: WebGLBuffer;
 	readonly indexBuffer: WebGLBuffer;
 	readonly drawUnitId: string;
+	readonly landblockId: TerrainGeometryStaticDrawUnit["landblockId"];
 	readonly materialFamily: TerrainGeometryStaticDrawUnit["materialFamily"];
 	readonly primaryTextureUseId: string | null;
 	readonly terrainMaterialPlan: TerrainGeometryStaticDrawUnit["terrainMaterialPlan"];
-	readonly translation: readonly [number, number, number];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
@@ -1128,14 +1121,13 @@ interface StaticObjectGeometryResource {
 	readonly materialSlotBuffer: WebGLBuffer;
 	readonly indexBuffer: WebGLBuffer;
 	readonly drawUnitId: string;
+	readonly landblockId: StaticObjectGeometryStaticDrawUnit["landblockId"];
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
 	readonly materialEntries: StaticObjectGeometryStaticDrawUnit["materialEntries"];
 	readonly renderState: StaticObjectRenderState;
 	readonly localSortCenter: StaticObjectSortMetadata["center"];
-	readonly sortCenter: StaticObjectSortMetadata["center"];
 	readonly sortPolicy: StaticObjectSortMetadata["policy"];
-	readonly translation: readonly [number, number, number];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
@@ -1440,7 +1432,6 @@ function createStaticObjectGeometryProgram(
 function createTerrainGeometryResource(
 	gl: WebGL2RenderingContext,
 	drawUnit: TerrainGeometryStaticDrawUnit,
-	translation: readonly [number, number, number],
 ): TerrainGeometryResource {
 	const vertexArray = gl.createVertexArray();
 	const positionBuffer = gl.createBuffer();
@@ -1500,6 +1491,7 @@ function createTerrainGeometryResource(
 		indexCount: drawUnit.indices.length,
 		indexType:
 			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
+		landblockId: drawUnit.landblockId,
 		materialFamily: drawUnit.materialFamily,
 		primaryTextureUseId: drawUnit.primaryTextureUseId,
 		terrainMaterialPlan: drawUnit.terrainMaterialPlan,
@@ -1507,7 +1499,6 @@ function createTerrainGeometryResource(
 		positionBuffer,
 		texCoordBuffer,
 		triangleCount: drawUnit.triangleCount,
-		translation,
 		vertexArray,
 		dispose() {
 			gl.deleteBuffer(positionBuffer);
@@ -1522,7 +1513,6 @@ function createTerrainGeometryResource(
 function createStaticObjectGeometryResource(
 	gl: WebGL2RenderingContext,
 	drawUnit: StaticObjectGeometryStaticDrawUnit,
-	translation: readonly [number, number, number],
 ): StaticObjectGeometryResource {
 	const vertexArray = gl.createVertexArray();
 	const positionBuffer = gl.createBuffer();
@@ -1584,6 +1574,7 @@ function createStaticObjectGeometryResource(
 		indexCount: drawUnit.indices.length,
 		indexType:
 			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
+		landblockId: drawUnit.landblockId,
 		localSortCenter: drawUnit.sort.center,
 		materialEntries: drawUnit.materialEntries,
 		materialFamily: drawUnit.materialFamily,
@@ -1591,11 +1582,9 @@ function createStaticObjectGeometryResource(
 		materialSlotBuffer,
 		positionBuffer,
 		renderState: drawUnit.renderState,
-		sortCenter: translatePoint(drawUnit.sort.center, translation),
 		sortPolicy: drawUnit.sort.policy,
 		texCoordBuffer,
 		triangleCount: drawUnit.triangleCount,
-		translation,
 		vertexArray,
 		dispose() {
 			gl.deleteBuffer(positionBuffer);

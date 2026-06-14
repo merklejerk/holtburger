@@ -771,13 +771,7 @@ export interface StaticMaterialUnrenderedBucket {
 
 export type StaticDrawUnit =
 	| TerrainGeometryStaticDrawUnit
-	| StaticObjectGeometryStaticDrawUnit
-	| PlaceholderStaticDrawUnit;
-
-interface PlaceholderStaticDrawUnit {
-	readonly kind: "placeholder";
-	readonly drawUnitId: string;
-}
+	| StaticObjectGeometryStaticDrawUnit;
 
 export interface TerrainGeometryStaticDrawUnit {
 	readonly kind: "terrain-geometry";

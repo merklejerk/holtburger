@@ -9,6 +9,10 @@ import type {
 	TerrainMeshQuadFacts,
 	TerrainStaticScopePayload,
 } from "../static/contracts";
+import {
+	OUTDOOR_LANDBLOCK_WORLD_SIZE,
+	getOutdoorLandblockCoords,
+} from "../../lib/landblocks";
 import { createOutdoorLandblockRootTranslation } from "./static-placement";
 
 export interface StaticSceneRay {
@@ -102,6 +106,7 @@ export interface TerrainQuadScenePickDetails {
 }
 
 export interface StaticSceneQuerySnapshot {
+	readonly landblockBucketCount: number;
 	readonly terrainLandblockCount: number;
 	readonly terrainRecordCount: number;
 	readonly outdoorRecordCount: number;
@@ -178,6 +183,42 @@ interface EnvCellLandblockBvhRuntimeItem {
 	readonly source: "env-cell-root" | "derived";
 }
 
+interface LandblockSpatialBucket {
+	readonly envCellRoot: EnvCellLandblockBvhRoot | null;
+	readonly landblockId: number;
+	readonly outdoorRootsByDomain: ReadonlyMap<
+		OutdoorStaticObjectsScopePayload["domain"],
+		OutdoorStaticBvhRoot
+	>;
+	readonly terrainRoot: TerrainBvhRoot | null;
+}
+
+interface LandblockSpatialCandidate {
+	readonly distance: number;
+	readonly envCellRoot: EnvCellLandblockBvhRoot | null;
+	readonly landblockId: number;
+	readonly outdoorRoots: readonly OutdoorStaticBvhRoot[];
+	readonly terrainRoot: TerrainBvhRoot | null;
+}
+
+export interface LandblockGridRayBounds {
+	readonly maxCellX: number;
+	readonly maxCellZ: number;
+	readonly minCellX: number;
+	readonly minCellZ: number;
+}
+
+export interface LandblockGridRayCell {
+	readonly cellX: number;
+	readonly cellZ: number;
+	readonly distance: number;
+}
+
+export interface LandblockGridRayTraceOptions {
+	readonly cellSize?: number;
+	readonly getMaxDistance?: () => number | null;
+}
+
 type EnvCellBvhRuntimeItem =
 	| {
 			readonly kind: "static";
@@ -196,7 +237,231 @@ interface EnvCellStaticSeedRuntimeRecord {
 	readonly seed: LandblockEnvCellsStaticScopePayload["envCells"][number]["staticObjectSeeds"][number];
 }
 
+class LandblockGridSpatialIndex {
+	#outdoorAnchorLandblockId: number | null = null;
+	readonly #bucketsByLandblockId = new Map<number, LandblockSpatialBucket>();
+	readonly #bucketsByRenderCell = new Map<string, LandblockSpatialBucket[]>();
+
+	get bucketCount(): number {
+		return this.#bucketsByLandblockId.size;
+	}
+
+	setOutdoorAnchorLandblockId(outdoorAnchorLandblockId: number | null): void {
+		if (this.#outdoorAnchorLandblockId === outdoorAnchorLandblockId) {
+			return;
+		}
+
+		this.#outdoorAnchorLandblockId = outdoorAnchorLandblockId;
+		this.#rebuildRenderCellIndex();
+	}
+
+	upsertTerrainRoot(root: TerrainBvhRoot): void {
+		const bucket = this.#getOrCreateBucket(root.landblockId);
+		this.#setBucket(root.landblockId, {
+			...bucket,
+			terrainRoot: root,
+		});
+	}
+
+	deleteTerrainRoot(landblockId: number): void {
+		const bucket = this.#bucketsByLandblockId.get(landblockId);
+		if (!bucket) {
+			return;
+		}
+
+		this.#setOrDeleteBucket({
+			...bucket,
+			terrainRoot: null,
+		});
+	}
+
+	upsertOutdoorRoot(root: OutdoorStaticBvhRoot): void {
+		const bucket = this.#getOrCreateBucket(root.landblockId);
+		const outdoorRootsByDomain = new Map(bucket.outdoorRootsByDomain);
+		outdoorRootsByDomain.set(root.domain, root);
+		this.#setBucket(root.landblockId, {
+			...bucket,
+			outdoorRootsByDomain,
+		});
+	}
+
+	deleteOutdoorRoot(
+		domain: OutdoorStaticObjectsScopePayload["domain"],
+		landblockId: number,
+	): void {
+		const bucket = this.#bucketsByLandblockId.get(landblockId);
+		if (!bucket) {
+			return;
+		}
+
+		const outdoorRootsByDomain = new Map(bucket.outdoorRootsByDomain);
+		outdoorRootsByDomain.delete(domain);
+		this.#setOrDeleteBucket({
+			...bucket,
+			outdoorRootsByDomain,
+		});
+	}
+
+	upsertEnvCellRoot(root: EnvCellLandblockBvhRoot): void {
+		const bucket = this.#getOrCreateBucket(root.landblockId);
+		this.#setBucket(root.landblockId, {
+			...bucket,
+			envCellRoot: root,
+		});
+	}
+
+	deleteEnvCellRoot(landblockId: number): void {
+		const bucket = this.#bucketsByLandblockId.get(landblockId);
+		if (!bucket) {
+			return;
+		}
+
+		this.#setOrDeleteBucket({
+			...bucket,
+			envCellRoot: null,
+		});
+	}
+
+	*traceOutdoorRay(
+		ray: StaticSceneRay,
+		options: {
+			readonly getMaxDistance: () => number | null;
+		},
+	): Iterable<LandblockSpatialCandidate> {
+		if (this.#outdoorAnchorLandblockId === null) {
+			for (const bucket of [...this.#bucketsByLandblockId.values()].sort(
+				compareLandblockSpatialBuckets,
+			)) {
+				const candidate = createLandblockSpatialCandidate(bucket, 0);
+				if (candidate) {
+					yield candidate;
+				}
+			}
+			return;
+		}
+
+		const bounds = this.#createRenderCellBounds();
+		if (!bounds) {
+			return;
+		}
+
+		const visitedLandblockIds = new Set<number>();
+		for (const cell of traceLandblockGridRayCells(ray, bounds, {
+			cellSize: OUTDOOR_LANDBLOCK_WORLD_SIZE,
+			getMaxDistance: options.getMaxDistance,
+		})) {
+			const buckets = this.#bucketsByRenderCell.get(
+				createRenderCellKey(cell.cellX, cell.cellZ),
+			);
+			if (!buckets) {
+				continue;
+			}
+			for (const bucket of buckets) {
+				if (visitedLandblockIds.has(bucket.landblockId)) {
+					continue;
+				}
+				visitedLandblockIds.add(bucket.landblockId);
+				const candidateDistance = estimateLandblockSpatialCandidateDistance(
+					ray,
+					bucket,
+				);
+				const maxDistance = options.getMaxDistance();
+				if (
+					candidateDistance === null ||
+					(maxDistance !== null && candidateDistance > maxDistance)
+				) {
+					continue;
+				}
+				const candidate = createLandblockSpatialCandidate(
+					bucket,
+					candidateDistance,
+				);
+				if (candidate) {
+					yield candidate;
+				}
+			}
+		}
+	}
+
+	clear(): void {
+		this.#outdoorAnchorLandblockId = null;
+		this.#bucketsByLandblockId.clear();
+		this.#bucketsByRenderCell.clear();
+	}
+
+	#createRenderCellBounds(): LandblockGridRayBounds | null {
+		if (this.#bucketsByRenderCell.size === 0) {
+			return null;
+		}
+
+		let minCellX = Number.POSITIVE_INFINITY;
+		let minCellZ = Number.POSITIVE_INFINITY;
+		let maxCellX = Number.NEGATIVE_INFINITY;
+		let maxCellZ = Number.NEGATIVE_INFINITY;
+
+		for (const key of this.#bucketsByRenderCell.keys()) {
+			const cell = parseRenderCellKey(key);
+			minCellX = Math.min(minCellX, cell.cellX);
+			minCellZ = Math.min(minCellZ, cell.cellZ);
+			maxCellX = Math.max(maxCellX, cell.cellX);
+			maxCellZ = Math.max(maxCellZ, cell.cellZ);
+		}
+
+		return { maxCellX, maxCellZ, minCellX, minCellZ };
+	}
+
+	#getOrCreateBucket(landblockId: number): LandblockSpatialBucket {
+		return (
+			this.#bucketsByLandblockId.get(landblockId) ?? {
+				envCellRoot: null,
+				landblockId,
+				outdoorRootsByDomain: new Map(),
+				terrainRoot: null,
+			}
+		);
+	}
+
+	#setOrDeleteBucket(bucket: LandblockSpatialBucket): void {
+		if (
+			bucket.envCellRoot === null &&
+			bucket.outdoorRootsByDomain.size === 0 &&
+			bucket.terrainRoot === null
+		) {
+			this.#bucketsByLandblockId.delete(bucket.landblockId);
+			this.#rebuildRenderCellIndex();
+			return;
+		}
+
+		this.#setBucket(bucket.landblockId, bucket);
+	}
+
+	#setBucket(landblockId: number, bucket: LandblockSpatialBucket): void {
+		this.#bucketsByLandblockId.set(landblockId, bucket);
+		this.#rebuildRenderCellIndex();
+	}
+
+	#rebuildRenderCellIndex(): void {
+		this.#bucketsByRenderCell.clear();
+		if (this.#outdoorAnchorLandblockId === null) {
+			return;
+		}
+
+		for (const bucket of this.#bucketsByLandblockId.values()) {
+			for (const cellKey of createBucketRenderCellKeys(
+				bucket,
+				this.#outdoorAnchorLandblockId,
+			)) {
+				const buckets = this.#bucketsByRenderCell.get(cellKey) ?? [];
+				buckets.push(bucket);
+				this.#bucketsByRenderCell.set(cellKey, buckets);
+			}
+		}
+	}
+}
+
 export class StaticSceneQuery {
+	#outdoorAnchorLandblockId: number | null = null;
+	readonly #landblockGridIndex = new LandblockGridSpatialIndex();
 	readonly #terrainBvhRootsByLandblockId = new Map<number, TerrainBvhRoot>();
 	readonly #outdoorBvhRootsByDomainAndLandblock = new Map<
 		string,
@@ -233,10 +498,12 @@ export class StaticSceneQuery {
 		payload: TerrainStaticScopePayload,
 		outdoorAnchorLandblockId: number | null = null,
 	): void {
+		this.#setOutdoorAnchorLandblockId(outdoorAnchorLandblockId);
 		const landblockId = payload.landblock.landblockId;
 		const bvh = payload.sourceSpatial.terrainBvh;
 		if (bvh.nodes.length === 0) {
 			this.#terrainBvhRootsByLandblockId.delete(landblockId);
+			this.#landblockGridIndex.deleteTerrainRoot(landblockId);
 			return;
 		}
 
@@ -255,21 +522,24 @@ export class StaticSceneQuery {
 			};
 		});
 
-		this.#terrainBvhRootsByLandblockId.set(landblockId, {
+		const root = {
 			items,
 			landblockId,
 			nodes: bvh.nodes,
 			translation: createOutdoorLandblockRootTranslation(
 				landblockId,
-				outdoorAnchorLandblockId,
+				this.#outdoorAnchorLandblockId,
 			),
-		});
+		};
+		this.#terrainBvhRootsByLandblockId.set(landblockId, root);
+		this.#landblockGridIndex.upsertTerrainRoot(root);
 	}
 
 	ingestOutdoorStaticObjects(
 		payload: OutdoorStaticObjectsScopePayload,
 		outdoorAnchorLandblockId: number | null = null,
 	): void {
+		this.#setOutdoorAnchorLandblockId(outdoorAnchorLandblockId);
 		const rootKey = createOutdoorRootKey(
 			payload.domain,
 			payload.landblock.landblockId,
@@ -277,6 +547,10 @@ export class StaticSceneQuery {
 		const bvh = payload.sourceSpatial.outdoorBvh;
 		if (!bvh || bvh.nodes.length === 0) {
 			this.#outdoorBvhRootsByDomainAndLandblock.delete(rootKey);
+			this.#landblockGridIndex.deleteOutdoorRoot(
+				payload.domain,
+				payload.landblock.landblockId,
+			);
 			return;
 		}
 
@@ -289,16 +563,18 @@ export class StaticSceneQuery {
 					}
 				: null,
 		);
-		this.#outdoorBvhRootsByDomainAndLandblock.set(rootKey, {
+		const root = {
 			domain: payload.domain,
 			items,
 			landblockId: payload.landblock.landblockId,
 			nodes: bvh.nodes,
 			translation: createOutdoorLandblockRootTranslation(
 				payload.landblock.landblockId,
-				outdoorAnchorLandblockId,
+				this.#outdoorAnchorLandblockId,
 			),
-		});
+		};
+		this.#outdoorBvhRootsByDomainAndLandblock.set(rootKey, root);
+		this.#landblockGridIndex.upsertOutdoorRoot(root);
 	}
 
 	ingestLandblockEnvCells(payload: LandblockEnvCellsStaticScopePayload): void {
@@ -368,6 +644,7 @@ export class StaticSceneQuery {
 		const landblockBvh = payload.residencySpatial.landblockEnvCellBvh;
 		if (landblockBvh.nodes.length === 0) {
 			this.#envCellRootsByLandblockId.delete(payload.landblock.landblockId);
+			this.#landblockGridIndex.deleteEnvCellRoot(payload.landblock.landblockId);
 			return;
 		}
 		const items = landblockBvh.items.map((item) =>
@@ -381,20 +658,22 @@ export class StaticSceneQuery {
 				: null,
 		);
 
-		this.#envCellRootsByLandblockId.set(payload.landblock.landblockId, {
+		const root = {
 			acceptedEnvCellIds: payload.acceptedEnvCellIds,
 			cellsByEnvCellId,
 			items,
 			landblockId: payload.landblock.landblockId,
 			nodes: landblockBvh.nodes,
-		});
+		};
+		this.#envCellRootsByLandblockId.set(payload.landblock.landblockId, root);
+		this.#landblockGridIndex.upsertEnvCellRoot(root);
 	}
 
 	pickRay(request: StaticScenePickRequest): StaticScenePickHit | null {
 		const ray = normalizeRay(request.ray);
 		const hits =
 			request.context.kind === "outdoor"
-				? [...this.#pickTerrain(ray, request), ...this.#pickOutdoor(ray, request)]
+				? this.#pickOutdoorScene(ray, request)
 				: this.#pickEnvCell(ray, request);
 
 		return hits.sort(comparePickHits)[0] ?? null;
@@ -535,6 +814,7 @@ export class StaticSceneQuery {
 		);
 
 		return {
+			landblockBucketCount: this.#landblockGridIndex.bucketCount,
 			envCellLandblockCount: this.#envCellRootsByLandblockId.size,
 			envCellRecordCount,
 			outdoorRecordCount: outdoorBvhRecordCount,
@@ -544,22 +824,65 @@ export class StaticSceneQuery {
 	}
 
 	clear(): void {
+		this.#outdoorAnchorLandblockId = null;
+		this.#landblockGridIndex.clear();
 		this.#terrainBvhRootsByLandblockId.clear();
 		this.#outdoorBvhRootsByDomainAndLandblock.clear();
 		this.#envCellRootsByLandblockId.clear();
 	}
 
-	#pickOutdoor(
+	#pickOutdoorScene(
 		ray: StaticSceneRay,
 		request: StaticScenePickRequest,
-	): OutdoorStaticObjectScenePickHit[] {
-		let nearestHit: OutdoorStaticObjectScenePickHit | null = null;
+	): StaticScenePickHit[] {
+		let nearestHit: StaticScenePickHit | null = null;
 
-		for (const root of this.#outdoorBvhRootsByDomainAndLandblock.values()) {
-			const localRay = translateRay(ray, negateTranslation(root.translation));
-			traverseBvhNearest(root.nodes, localRay, {
-				getMaxDistance: () => nearestHit?.distance ?? null,
-				visitCandidate: (candidate) => {
+		for (const candidate of this.#landblockGridIndex.traceOutdoorRay(ray, {
+			getMaxDistance: () => nearestHit?.distance ?? null,
+		})) {
+			if (candidate.terrainRoot) {
+				nearestHit = selectNearestHit(
+					nearestHit,
+					this.#pickTerrainRoot(
+						ray,
+						request,
+						candidate.terrainRoot,
+						nearestHit,
+					),
+				);
+			}
+
+			for (const root of candidate.outdoorRoots) {
+				nearestHit = selectNearestHit(
+					nearestHit,
+					this.#pickOutdoorRoot(ray, request, root, nearestHit),
+				);
+			}
+		}
+
+		return nearestHit ? [nearestHit] : [];
+	}
+
+	#pickOutdoorRoot(
+		ray: StaticSceneRay,
+		request: StaticScenePickRequest,
+		root: OutdoorStaticBvhRoot,
+		currentNearestHit: StaticScenePickHit | null,
+	): OutdoorStaticObjectScenePickHit | null {
+		let nearestHit: OutdoorStaticObjectScenePickHit | null =
+			currentNearestHit?.itemKind === "outdoor-static-object"
+				? currentNearestHit
+				: null;
+		const localRay = translateRay(ray, negateTranslation(root.translation));
+		traverseBvhNearest(root.nodes, localRay, {
+			getMaxDistance: () =>
+				currentNearestHit === null
+					? (nearestHit?.distance ?? null)
+					: Math.min(
+							currentNearestHit.distance,
+							nearestHit?.distance ?? Number.POSITIVE_INFINITY,
+						),
+			visitCandidate: (candidate) => {
 				for (const itemIndex of candidate.itemIndices) {
 					const item = root.items[itemIndex];
 					if (!item?.object.instanceBounds) {
@@ -591,57 +914,62 @@ export class StaticSceneQuery {
 								: nearestHit;
 					}
 				}
-				},
-			});
-		}
+			},
+		});
 
-		return nearestHit ? [nearestHit] : [];
+		return nearestHit === currentNearestHit ? null : nearestHit;
 	}
 
-	#pickTerrain(
+	#pickTerrainRoot(
 		ray: StaticSceneRay,
 		request: StaticScenePickRequest,
-	): TerrainQuadScenePickHit[] {
-		let nearestHit: TerrainQuadScenePickHit | null = null;
-
-		for (const root of this.#terrainBvhRootsByLandblockId.values()) {
-			const localRay = translateRay(ray, negateTranslation(root.translation));
-			traverseBvhNearest(root.nodes, localRay, {
-				getMaxDistance: () => nearestHit?.distance ?? null,
-				visitCandidate: (candidate) => {
-					for (const itemIndex of candidate.itemIndices) {
-						const item = root.items[itemIndex];
-						if (!item) {
-							continue;
-						}
-
-						const distance = intersectRayBounds(localRay, item.quad.bounds);
-						if (distance === null) {
-							continue;
-						}
-
-						const hit: TerrainQuadScenePickHit = {
-							bounds: translateBounds(item.quad.bounds, root.translation),
-							distance,
-							domain: "outdoor-terrain",
-							hitPoint: pointOnRay(ray, distance),
-							itemKind: "terrain-quad",
-							kind: "static-scene-pick-hit",
-							landblockId: root.landblockId,
-							quadIndex: item.quad.quadIndex,
-						};
-						if (matchesFilters(hit, request.filters, ray.origin)) {
-							nearestHit =
-								nearestHit === null || comparePickHits(hit, nearestHit) < 0
-									? hit
-									: nearestHit;
-						}
+		root: TerrainBvhRoot,
+		currentNearestHit: StaticScenePickHit | null,
+	): TerrainQuadScenePickHit | null {
+		let nearestHit: TerrainQuadScenePickHit | null =
+			currentNearestHit?.itemKind === "terrain-quad" ? currentNearestHit : null;
+		const localRay = translateRay(ray, negateTranslation(root.translation));
+		traverseBvhNearest(root.nodes, localRay, {
+			getMaxDistance: () =>
+				currentNearestHit === null
+					? (nearestHit?.distance ?? null)
+					: Math.min(
+							currentNearestHit.distance,
+							nearestHit?.distance ?? Number.POSITIVE_INFINITY,
+						),
+			visitCandidate: (candidate) => {
+				for (const itemIndex of candidate.itemIndices) {
+					const item = root.items[itemIndex];
+					if (!item) {
+						continue;
 					}
-				},
-			});
-		}
 
-		return nearestHit ? [nearestHit] : [];
+					const distance = intersectRayBounds(localRay, item.quad.bounds);
+					if (distance === null) {
+						continue;
+					}
+
+					const hit: TerrainQuadScenePickHit = {
+						bounds: translateBounds(item.quad.bounds, root.translation),
+						distance,
+						domain: "outdoor-terrain",
+						hitPoint: pointOnRay(ray, distance),
+						itemKind: "terrain-quad",
+						kind: "static-scene-pick-hit",
+						landblockId: root.landblockId,
+						quadIndex: item.quad.quadIndex,
+					};
+					if (matchesFilters(hit, request.filters, ray.origin)) {
+						nearestHit =
+							nearestHit === null || comparePickHits(hit, nearestHit) < 0
+								? hit
+								: nearestHit;
+					}
+				}
+			},
+		});
+
+		return nearestHit === currentNearestHit ? null : nearestHit;
 	}
 
 	#pickEnvCell(
@@ -743,7 +1071,369 @@ export class StaticSceneQuery {
 
 		return nearestHit === currentNearestHit ? null : nearestHit;
 	}
+
+	#setOutdoorAnchorLandblockId(outdoorAnchorLandblockId: number | null): void {
+		if (this.#outdoorAnchorLandblockId === outdoorAnchorLandblockId) {
+			return;
+		}
+
+		this.#outdoorAnchorLandblockId = outdoorAnchorLandblockId;
+		for (const [landblockId, root] of this.#terrainBvhRootsByLandblockId) {
+			this.#terrainBvhRootsByLandblockId.set(landblockId, {
+				...root,
+				translation: createOutdoorLandblockRootTranslation(
+					landblockId,
+					outdoorAnchorLandblockId,
+				),
+			});
+		}
+		for (const [key, root] of this.#outdoorBvhRootsByDomainAndLandblock) {
+			this.#outdoorBvhRootsByDomainAndLandblock.set(key, {
+				...root,
+				translation: createOutdoorLandblockRootTranslation(
+					root.landblockId,
+					outdoorAnchorLandblockId,
+				),
+			});
+		}
+		this.#rebuildLandblockGridIndex();
+	}
+
+	#rebuildLandblockGridIndex(): void {
+		this.#landblockGridIndex.clear();
+		this.#landblockGridIndex.setOutdoorAnchorLandblockId(
+			this.#outdoorAnchorLandblockId,
+		);
+		for (const root of this.#terrainBvhRootsByLandblockId.values()) {
+			this.#landblockGridIndex.upsertTerrainRoot(root);
+		}
+		for (const root of this.#outdoorBvhRootsByDomainAndLandblock.values()) {
+			this.#landblockGridIndex.upsertOutdoorRoot(root);
+		}
+		for (const root of this.#envCellRootsByLandblockId.values()) {
+			this.#landblockGridIndex.upsertEnvCellRoot(root);
+		}
+	}
 }
+
+function createLandblockSpatialCandidate(
+	bucket: LandblockSpatialBucket,
+	distance: number,
+): LandblockSpatialCandidate | null {
+	const outdoorRoots = [...bucket.outdoorRootsByDomain.values()].sort(
+		(left, right) => left.domain.localeCompare(right.domain),
+	);
+	if (!bucket.terrainRoot && outdoorRoots.length === 0) {
+		return null;
+	}
+
+	return {
+		distance,
+		envCellRoot: bucket.envCellRoot,
+		landblockId: bucket.landblockId,
+		outdoorRoots,
+		terrainRoot: bucket.terrainRoot,
+	};
+}
+
+function compareLandblockSpatialBuckets(
+	left: LandblockSpatialBucket,
+	right: LandblockSpatialBucket,
+): number {
+	return left.landblockId - right.landblockId;
+}
+
+function createBucketRenderCellKeys(
+	bucket: LandblockSpatialBucket,
+	outdoorAnchorLandblockId: number,
+): readonly string[] {
+	const cellKeys = new Set<string>();
+	const baseCell = projectLandblockIdToRenderCell(
+		bucket.landblockId,
+		outdoorAnchorLandblockId,
+	);
+	cellKeys.add(createRenderCellKey(baseCell.cellX, baseCell.cellZ));
+
+	for (const bounds of getBucketOutdoorRenderBounds(bucket)) {
+		for (const cellKey of createRenderCellKeysForBounds(bounds)) {
+			cellKeys.add(cellKey);
+		}
+	}
+
+	return [...cellKeys].sort();
+}
+
+function getBucketOutdoorRenderBounds(
+	bucket: LandblockSpatialBucket,
+): readonly StaticBounds[] {
+	const bounds: StaticBounds[] = [];
+	if (bucket.terrainRoot?.nodes[0]) {
+		bounds.push(
+			translateBounds(
+				bucket.terrainRoot.nodes[0].bounds,
+				bucket.terrainRoot.translation,
+			),
+		);
+	}
+
+	for (const root of bucket.outdoorRootsByDomain.values()) {
+		if (!root.nodes[0]) {
+			continue;
+		}
+		bounds.push(translateBounds(root.nodes[0].bounds, root.translation));
+	}
+
+	return bounds;
+}
+
+function createRenderCellKeysForBounds(bounds: StaticBounds): readonly string[] {
+	const minCellX = gridCellAt(
+		bounds.min.x,
+		1,
+		OUTDOOR_LANDBLOCK_WORLD_SIZE,
+	);
+	const maxCellX = gridCellAt(
+		bounds.max.x,
+		-1,
+		OUTDOOR_LANDBLOCK_WORLD_SIZE,
+	);
+	const minCellZ = gridCellAt(
+		bounds.min.z,
+		1,
+		OUTDOOR_LANDBLOCK_WORLD_SIZE,
+	);
+	const maxCellZ = gridCellAt(
+		bounds.max.z,
+		-1,
+		OUTDOOR_LANDBLOCK_WORLD_SIZE,
+	);
+	const cellKeys: string[] = [];
+
+	for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+		for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
+			cellKeys.push(createRenderCellKey(cellX, cellZ));
+		}
+	}
+
+	return cellKeys;
+}
+
+function estimateLandblockSpatialCandidateDistance(
+	ray: StaticSceneRay,
+	bucket: LandblockSpatialBucket,
+): number | null {
+	let nearestDistance: number | null = null;
+	for (const bounds of getBucketOutdoorRenderBounds(bucket)) {
+		const distance = intersectRayBounds(ray, bounds);
+		if (distance === null) {
+			continue;
+		}
+		nearestDistance =
+			nearestDistance === null ? distance : Math.min(nearestDistance, distance);
+	}
+
+	return nearestDistance;
+}
+
+export function* traceLandblockGridRayCells(
+	ray: StaticSceneRay,
+	bounds: LandblockGridRayBounds,
+	options: LandblockGridRayTraceOptions = {},
+): Iterable<LandblockGridRayCell> {
+	const cellSize = options.cellSize ?? OUTDOOR_LANDBLOCK_WORLD_SIZE;
+	const startDistance = intersectRayGridBounds(ray, bounds, cellSize);
+	if (startDistance === null) {
+		return;
+	}
+
+	let currentDistance = startDistance;
+	const startPoint = pointOnRay(ray, currentDistance);
+	let cellX = gridCellAt(startPoint.x, ray.direction.x, cellSize);
+	let cellZ = gridCellAt(startPoint.z, ray.direction.z, cellSize);
+
+	const stepX = Math.sign(ray.direction.x);
+	const stepZ = Math.sign(ray.direction.z);
+	let nextDistanceX = nextGridBoundaryDistance(
+		ray.origin.x,
+		ray.direction.x,
+		cellX,
+		stepX,
+		cellSize,
+	);
+	let nextDistanceZ = nextGridBoundaryDistance(
+		ray.origin.z,
+		ray.direction.z,
+		cellZ,
+		stepZ,
+		cellSize,
+	);
+	const deltaDistanceX =
+		stepX === 0 ? Number.POSITIVE_INFINITY : cellSize / Math.abs(ray.direction.x);
+	const deltaDistanceZ =
+		stepZ === 0 ? Number.POSITIVE_INFINITY : cellSize / Math.abs(ray.direction.z);
+
+	while (containsGridCell(bounds, cellX, cellZ)) {
+		const maxDistance = options.getMaxDistance?.() ?? null;
+		if (maxDistance !== null && currentDistance > maxDistance) {
+			return;
+		}
+
+		yield {
+			cellX,
+			cellZ,
+			distance: normalizeDistanceZero(currentDistance),
+		};
+
+		const nextDistance = Math.min(nextDistanceX, nextDistanceZ);
+		if (!Number.isFinite(nextDistance)) {
+			return;
+		}
+
+		const advanceX = nextDistanceX <= nextDistance + GRID_EPSILON;
+		const advanceZ = nextDistanceZ <= nextDistance + GRID_EPSILON;
+		currentDistance = nextDistance;
+		if (advanceX) {
+			cellX += stepX;
+			nextDistanceX += deltaDistanceX;
+		}
+		if (advanceZ) {
+			cellZ += stepZ;
+			nextDistanceZ += deltaDistanceZ;
+		}
+	}
+}
+
+function projectLandblockIdToRenderCell(
+	landblockId: number,
+	outdoorAnchorLandblockId: number,
+): { readonly cellX: number; readonly cellZ: number } {
+	const landblockCoords = getOutdoorLandblockCoords(landblockId);
+	const anchorCoords = getOutdoorLandblockCoords(outdoorAnchorLandblockId);
+
+	return {
+		cellX: landblockCoords.x - anchorCoords.x,
+		// Local outdoor render Z runs from -landblockSize to 0, so the anchor
+		// landblock lives in render cell Z -1 rather than 0.
+		cellZ: anchorCoords.y - landblockCoords.y - 1,
+	};
+}
+
+function createRenderCellKey(cellX: number, cellZ: number): string {
+	return `${cellX}:${cellZ}`;
+}
+
+function parseRenderCellKey(key: string): {
+	readonly cellX: number;
+	readonly cellZ: number;
+} {
+	const [cellX, cellZ] = key.split(":").map((entry) => Number.parseInt(entry, 10));
+	if (!Number.isFinite(cellX) || !Number.isFinite(cellZ)) {
+		throw new Error(`Invalid landblock render cell key: ${key}`);
+	}
+
+	return { cellX, cellZ };
+}
+
+function intersectRayGridBounds(
+	ray: StaticSceneRay,
+	bounds: LandblockGridRayBounds,
+	cellSize: number,
+): number | null {
+	let tMin = Number.NEGATIVE_INFINITY;
+	let tMax = Number.POSITIVE_INFINITY;
+	const minX = bounds.minCellX * cellSize;
+	const maxX = (bounds.maxCellX + 1) * cellSize;
+	const minZ = bounds.minCellZ * cellSize;
+	const maxZ = (bounds.maxCellZ + 1) * cellSize;
+
+	for (const slab of [
+		{ direction: ray.direction.x, max: maxX, min: minX, origin: ray.origin.x },
+		{ direction: ray.direction.z, max: maxZ, min: minZ, origin: ray.origin.z },
+	]) {
+		if (Math.abs(slab.direction) < GRID_EPSILON) {
+			if (slab.origin < slab.min || slab.origin > slab.max) {
+				return null;
+			}
+			continue;
+		}
+
+		const inverse = 1 / slab.direction;
+		const t1 = (slab.min - slab.origin) * inverse;
+		const t2 = (slab.max - slab.origin) * inverse;
+		tMin = Math.max(tMin, Math.min(t1, t2));
+		tMax = Math.min(tMax, Math.max(t1, t2));
+		if (tMin > tMax) {
+			return null;
+		}
+	}
+
+	if (tMax < 0) {
+		return null;
+	}
+
+	return Math.max(tMin, 0);
+}
+
+function gridCellAt(value: number, direction: number, cellSize: number): number {
+	const scaled = value / cellSize;
+	const rounded = Math.round(scaled);
+	if (
+		direction < 0 &&
+		Math.abs(scaled - rounded) < GRID_EPSILON
+	) {
+		return rounded - 1;
+	}
+
+	return Math.floor(scaled);
+}
+
+function nextGridBoundaryDistance(
+	origin: number,
+	direction: number,
+	cell: number,
+	step: number,
+	cellSize: number,
+): number {
+	if (step === 0) {
+		return Number.POSITIVE_INFINITY;
+	}
+
+	const boundary = (step > 0 ? cell + 1 : cell) * cellSize;
+	return (boundary - origin) / direction;
+}
+
+function containsGridCell(
+	bounds: LandblockGridRayBounds,
+	cellX: number,
+	cellZ: number,
+): boolean {
+	return (
+		cellX >= bounds.minCellX &&
+		cellX <= bounds.maxCellX &&
+		cellZ >= bounds.minCellZ &&
+		cellZ <= bounds.maxCellZ
+	);
+}
+
+function normalizeDistanceZero(value: number): number {
+	return Object.is(value, -0) ? 0 : value;
+}
+
+function selectNearestHit(
+	left: StaticScenePickHit | null,
+	right: StaticScenePickHit | null,
+): StaticScenePickHit | null {
+	if (!right) {
+		return left;
+	}
+	if (!left) {
+		return right;
+	}
+
+	return comparePickHits(right, left) < 0 ? right : left;
+}
+
+const GRID_EPSILON = 1e-8;
 
 interface BvhCandidate {
 	readonly distance: number;

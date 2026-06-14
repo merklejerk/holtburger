@@ -4017,17 +4017,21 @@ Phase 12A5 execution notes:
 - `StaticSceneQuery` now stores `landblock-env-cells` as one landblock-wide env-cell BVH root plus a per-env-cell local root map. Env-cell ray picking traverses the landblock BVH first, intersects with the request's accepted/current env-cell set, then enters only matching local BVHs.
 - Added `queryEnvCellAtPoint` as the first internal residency primitive backed by the landblock env-cell BVH, with deterministic env-cell id tie-breaking.
 - Added Rust tests for prepared env-cell BVH hierarchy splitting and transformed local-root bounds, plus TS tests proving env-cell locals are not queryable when the landblock BVH is absent and that point residency uses the landblock BVH.
+- Follow-up runtime query work added a coarse `StaticSceneQuery` landblock-grid broadphase for outdoor picks. Resident terrain/static roots stay in source/local BVHs, while the runtime projects landblock buckets into the current render-anchor grid and ray-walks X/Z cells before entering per-landblock BVHs.
+- The landblock-grid index registers buckets into every render-grid cell overlapped by translated terrain/static root bounds, not only the nominal landblock square, so roots that protrude across a landblock boundary remain queryable before pruning stops at the next cell.
 
 Phase 12A5 spicy bits:
 
 - This phase changed the runtime contract from "accepted env-cell roots are enough" to "the landblock BVH is mandatory for env-cell queries." That is the correct shape, but it means malformed top-level BVH data now makes otherwise populated local cell records unqueryable.
 - Prepared BVH kind masks are now domain-tagged records for content-built BVHs (`outdoor-static`, `landblock-env-cells`, and `env-cell-local`) instead of one shared numeric bitmask. Legacy flat terrain/topology/standalone-env-cell scaffolds still carry numeric masks until those route surfaces are modernized or deleted.
 - Legacy `landblock-topology` and standalone `env-cell` payloads still use the old adapter-side flat BVH scaffolding. V2 no longer depends on those paths, but they remain until the old display/V1 route surface is deleted.
+- The outdoor landblock-grid broadphase is reanchor-aware through runtime root translation rebuilds, but it is still runtime-residency state, not a serialized asset contract. If future code rebases the render anchor without clearing/re-ingesting or calling the same query-anchor update path, stale query translations would be a bug.
 
 Phase 12A5 failed to close:
 
 - The diagnostic taxonomy is not fully implemented. Current behavior distinguishes missing/empty landblock BVH by making the env-cell source unqueryable, and still warns for cells omitted from the top-level BVH, but it does not yet emit separate typed runtime diagnostics for malformed item references, accepted-set pruning, or broad-phase misses.
 - No live browser/manual env-cell picking or dungeon residency run was performed.
+- No live browser/manual outdoor terrain/static picking rerun was performed after the landblock-grid broadphase follow-up; coverage is automated TS query tests only.
 
 Phase 12A5 verification:
 

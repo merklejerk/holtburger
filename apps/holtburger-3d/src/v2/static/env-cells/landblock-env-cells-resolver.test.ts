@@ -349,7 +349,7 @@ function createRuntimeEnvCell(
 		},
 		landblockId: 0xda55ffff,
 		localPlacement: createPlacement(),
-	localSpatial: {
+		localSpatial: {
 			localBvh: createLocalBvh(),
 			localBvhItemCount: 0,
 			localBvhNodeCount: 0,

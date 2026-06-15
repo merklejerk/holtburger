@@ -132,7 +132,7 @@ Status: Completed on 2026-06-15.
 - [x] Update `#drawTerrain` and `#drawStaticObjectResource` to use the shared empty bindings map.
 - [x] Update terrain rect resolution to avoid fresh default rect arrays.
 - [x] Replace the static material table `.slice(...)` loop with a counted loop.
-- [ ] Replace terrain overlay/road `.slice(...).entries()` loops during Phase 3 terrain builder extraction.
+- [x] Replace terrain overlay/road `.slice(...).entries()` loops during Phase 3 terrain builder extraction.
 - [x] Update this plan's Open Questions if the test seam decision changes during implementation.
 
 #### Acceptance Criteria
@@ -148,6 +148,7 @@ Status: Completed on 2026-06-15.
 - Replaced the draw-path `?? new Map()` fallbacks with the shared empty map. `applyTexturePlacementUpdate` still creates a real mutable map when a draw unit receives its first binding; that is outside the render loop and should remain explicit.
 - Replaced static material-table `slice(0, max)` with a counted loop. Terrain overlay/road `slice(...).entries()` loops were intentionally left for Phase 3 because they sit inside the terrain payload builder work and are easier to verify there.
 - Phase 1 resolved the test seam by moving static payload builders into a sibling module instead of exporting renderer internals.
+- Phase 3 closed the deferred terrain overlay/road loop work with counted loops in `webgl2-terrain-payloads.ts`.
 
 ### Phase 1: Isolate Static Material Payload Construction
 
@@ -248,6 +249,8 @@ Status: Completed on 2026-06-15.
 
 ### Phase 3: Isolate Terrain Layered Payload Construction
 
+Status: Completed on 2026-06-15.
+
 #### Deliverables
 
 - Add a renderer-owned scratch object for terrain layered payload construction, for example:
@@ -268,13 +271,13 @@ Status: Completed on 2026-06-15.
 
 #### Task Checklist
 
-- Build color/mask page binding arrays and size arrays in a prepared payload.
-- Build base/overlay/road rect/page/count/tiling/rotation arrays in a prepared payload.
-- Build detail rect/tiling/fade uniforms in a prepared payload.
-- Reuse renderer-owned scratch buffers for terrain payload construction until Phase 4 makes stable payloads resource-owned.
-- Replace bounded `layer.overlays.slice(...).entries()` and `layer.roads.slice(...).entries()` loops with counted loops that do not allocate.
-- Keep `uploadTerrainLayeredUniforms` as an upload-only path plus camera upload.
-- Preserve fallback behavior when layered material dependencies are unsatisfied.
+- [x] Build color/mask page binding arrays and size arrays in a prepared payload.
+- [x] Build base/overlay/road rect/page/count/tiling/rotation arrays in a prepared payload.
+- [x] Build detail rect/tiling/fade uniforms in a prepared payload.
+- [x] Reuse renderer-owned scratch buffers for terrain payload construction until Phase 4 makes stable payloads resource-owned.
+- [x] Replace bounded `layer.overlays.slice(...).entries()` and `layer.roads.slice(...).entries()` loops with counted loops that do not allocate.
+- [x] Keep `uploadTerrainLayeredUniforms` as an upload-only path plus camera upload.
+- [x] Preserve fallback behavior when layered material dependencies are unsatisfied.
 
 #### Acceptance Criteria
 
@@ -286,6 +289,13 @@ Status: Completed on 2026-06-15.
 #### Decisions and Course Corrections
 
 - Dry run clarified that terrain fallback paths must still return `false` before any partial upload when bindings are unsatisfied.
+- Chose a sibling module, `webgl2-terrain-payloads.ts`, matching the static payload seam from Phase 1. This keeps the terrain builder testable without exporting renderer internals.
+- Added one renderer-owned `#terrainLayeredDrawScratch` payload. Phase 3 rebuilds this scratch payload per layered terrain draw; Phase 4 is still responsible for moving terrain payload lifetime onto `TerrainGeometryResource`.
+- `prepareTerrainLayeredPayload` returns `false` before upload when bindings/textures/detail roles cannot be fully satisfied, preserving the existing fallback behavior and warning path.
+- Terrain role page bindings now use parallel `textures` and `sizes` scratch arrays, matching the static payload representation.
+- Moved terrain layer rect/detail construction out of `webgl2-renderer.ts`; renderer helpers now upload prepared arrays and camera position only.
+- Replaced terrain overlay/road `.slice(...).entries()` loops with counted loops in the builder.
+- Added `webgl2-terrain-payloads.test.ts` coverage for populated layer/overlay/road/detail arrays, missing binding fallback, conflicting page-slot fallback, and inconsistent detail texture fallback.
 
 ### Phase 4: Resource-Owned Terrain Prepared Payloads
 

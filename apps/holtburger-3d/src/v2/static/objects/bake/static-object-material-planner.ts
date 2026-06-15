@@ -381,7 +381,10 @@ export function classifyStaticObjectMaterial(
 				...unsupportedFlagReasons,
 			]);
 		}
-		const indexedDeferredReasons = isSupportedTransparentStaticBlend(behavior)
+		const indexedBehavior = deriveIndexedRenderSurfaceBehavior(behavior);
+		const indexedDeferredReasons = isSupportedTransparentStaticBlend(
+			indexedBehavior,
+		)
 			? []
 			: [
 					createFallbackReason({
@@ -401,6 +404,8 @@ export function classifyStaticObjectMaterial(
 		);
 		return createTexturePlan({
 			...basePlan,
+			alphaPolicy: indexedBehavior.alphaPolicy,
+			blend: indexedBehavior.blend,
 			family:
 				unsupportedFlagReasons.length === 0
 					? "indexed-paletted"
@@ -412,6 +417,7 @@ export function classifyStaticObjectMaterial(
 					: indexedDeferredReasons.length > 0
 						? "classified-render-deferred"
 						: "classified-render-candidate",
+			pass: resolveMaterialPass(indexedBehavior),
 			textureRoles: [
 				{
 					dataUse: {
@@ -605,6 +611,23 @@ function findPaletteSource(
 	);
 }
 
+function deriveIndexedRenderSurfaceBehavior(
+	behavior: ReturnType<typeof deriveMaterialBehavior>,
+): ReturnType<typeof deriveMaterialBehavior> {
+	if (behavior.alphaPolicy.mode !== "clip") {
+		return behavior;
+	}
+
+	return {
+		...behavior,
+		alphaPolicy: {
+			...behavior.alphaPolicy,
+			alphaTest: INDEXED_CLIP_MAP_ALPHA_TEST,
+			indexedClipThreshold: INDEXED_CLIP_MAP_INDEX_THRESHOLD,
+		},
+	};
+}
+
 export function createStaticObjectMaterialUseKey(
 	material: StaticMaterialSourceIdentity,
 	paletteOverride: PaletteIdentity | null,
@@ -772,18 +795,10 @@ function deriveMaterialBehavior(material: StaticObjectMaterialSourceFacts): {
 		material.surfaceType,
 		SURFACE_TYPE_BASE1_CLIP_MAP,
 	);
-	const usesIndexedClipDiscard =
-		material.source.kind === "texture" && material.source.palette !== null;
 	const alphaTest =
 		isClipMap && !hasSurfaceFlag(material.surfaceType, SURFACE_TYPE_TRANSLUCENT)
-			? usesIndexedClipDiscard
-				? INDEXED_CLIP_MAP_ALPHA_TEST
-				: DIRECT_CLIP_MAP_ALPHA_TEST
+			? DIRECT_CLIP_MAP_ALPHA_TEST
 			: 0;
-	const indexedClipThreshold =
-		isClipMap && usesIndexedClipDiscard
-			? INDEXED_CLIP_MAP_INDEX_THRESHOLD
-			: INDEXED_CLIP_MAP_INDEX_THRESHOLD_DISABLED;
 	const blend = deriveBlendBehavior({
 		isClipMap,
 		opacity,
@@ -793,7 +808,7 @@ function deriveMaterialBehavior(material: StaticObjectMaterialSourceFacts): {
 	return {
 		alphaPolicy: {
 			alphaTest,
-			indexedClipThreshold,
+			indexedClipThreshold: INDEXED_CLIP_MAP_INDEX_THRESHOLD_DISABLED,
 			mode: resolveAlphaMode(material.surfaceType, blend, opacity),
 			opacity,
 		},

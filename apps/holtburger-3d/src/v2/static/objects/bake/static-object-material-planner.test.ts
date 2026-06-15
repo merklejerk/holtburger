@@ -170,6 +170,30 @@ describe("V2 static object material planner", () => {
 		});
 	});
 
+	it("uses render-surface palette facts for indexed Base1ClipMap materials without authored palettes", () => {
+		const plan = classifyStaticObjectMaterial({
+			material: createTexturedMaterial({
+				paletteId: null,
+				surfaceType: 0x4,
+			}),
+			paletteSources: createPaletteSources({ paletteId: 0x04000010 }),
+			textureRefs: createTextureRefs({
+				formatRaw: 0x65,
+				paletteId: 0x04000010,
+			}),
+		});
+
+		expect(plan).toMatchObject({
+			alphaPolicy: {
+				alphaTest: 100 / 255,
+				indexedClipThreshold: 8,
+				mode: "clip",
+			},
+			family: "indexed-paletted",
+			pass: "alpha-test",
+		});
+	});
+
 	it("uses authored palette views as derived palette replacement ranges", () => {
 		const plan = classifyStaticObjectMaterial({
 			material: createTexturedMaterial({

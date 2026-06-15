@@ -2,7 +2,6 @@ import type {
 	PreparedAsset,
 	PreparedAssetReader,
 } from "../../assets/contracts";
-import type { RuntimeHost, RuntimeHostSnapshot } from "../../host/contracts";
 import type {
 	StaticResolverPreparedAssetResponse,
 	StaticResolverWorkerGlobalPort,
@@ -11,31 +10,30 @@ import type {
 	StaticResolverWorkerThreadMessage,
 } from "./protocol";
 
-interface PendingWorkerHostLookup {
+interface PendingWorkerPreparedAssetRequest {
 	readonly resolve: (asset: PreparedAsset) => void;
 	readonly reject: (error: Error) => void;
 }
 
-export class StaticResolverWorkerRuntimeHost implements RuntimeHost {
+export class StaticResolverWorkerPreparedAssetReader implements PreparedAssetReader {
 	readonly #port: StaticResolverWorkerGlobalPort;
-	readonly #pending = new Map<string, PendingWorkerHostLookup>();
+	readonly #pending = new Map<string, PendingWorkerPreparedAssetRequest>();
 	readonly #onMessage = (
 		event: MessageEvent<StaticResolverWorkerMainMessage>,
 	): void => {
 		this.#handleResponse(event.data);
 	};
 	#nextRequestIndex = 1;
-	#lastFailure: string | null = null;
 
 	constructor(port: StaticResolverWorkerGlobalPort) {
 		this.#port = port;
 		this.#port.addEventListener("message", this.#onMessage);
 	}
 
-	lookupAsset(
-		key: Parameters<RuntimeHost["lookupAsset"]>[0],
+	requestPreparedAsset(
+		key: Parameters<PreparedAssetReader["requestPreparedAsset"]>[0],
 	): Promise<PreparedAsset> {
-		const requestId = `resolver-host-${this.#nextRequestIndex++}`;
+		const requestId = `resolver-asset-${this.#nextRequestIndex++}`;
 
 		return new Promise((resolve, reject) => {
 			this.#pending.set(requestId, { reject, resolve });
@@ -47,17 +45,12 @@ export class StaticResolverWorkerRuntimeHost implements RuntimeHost {
 		});
 	}
 
-	createSnapshot(): RuntimeHostSnapshot {
-		return {
-			failure: this.#lastFailure,
-			isAvailable: true,
-		};
-	}
-
 	dispose(): void {
 		this.#port.removeEventListener("message", this.#onMessage);
 		for (const pending of this.#pending.values()) {
-			pending.reject(new Error("Static resolver worker host was disposed."));
+			pending.reject(
+				new Error("Static resolver worker asset reader was disposed."),
+			);
 		}
 		this.#pending.clear();
 	}
@@ -81,12 +74,10 @@ export class StaticResolverWorkerRuntimeHost implements RuntimeHost {
 
 		this.#pending.delete(response.requestId);
 		if (response.kind === "prepared-asset-request-failed") {
-			this.#lastFailure = response.message;
 			pending.reject(new Error(response.message));
 			return;
 		}
 
-		this.#lastFailure = null;
 		pending.resolve(response.asset);
 	}
 }

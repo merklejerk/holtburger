@@ -39,11 +39,13 @@ import {
 	type StaticObjectPreparedRolePageBindings,
 } from "./webgl2-static-object-payloads";
 import {
-	createTerrainLayeredDrawScratch,
-	prepareTerrainLayeredPayload,
+	createTerrainPreparedLayeredPayloadState,
+	markTerrainPreparedLayeredPayloadDirty,
+	prepareTerrainLayeredPayloadState,
 	type TerrainPreparedDetailUniforms,
 	type TerrainPreparedLayerRects,
 	type TerrainPreparedLayeredPayload,
+	type TerrainPreparedLayeredPayloadState,
 	type TerrainPreparedRolePageBindings,
 } from "./webgl2-terrain-payloads";
 
@@ -628,7 +630,6 @@ class Webgl2Renderer implements Renderer {
 	readonly #debugOverlayProgram: DebugOverlayProgram;
 	readonly #debugOverlayVertexArray: WebGLVertexArrayObject;
 	readonly #debugOverlayVertexBuffer: WebGLBuffer;
-	readonly #terrainLayeredDrawScratch = createTerrainLayeredDrawScratch();
 	#animationFrameId: number | null = null;
 	#disposed = false;
 	#frameCount = 0;
@@ -722,6 +723,7 @@ class Webgl2Renderer implements Renderer {
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void {
 		const gl = this.#gl;
 		let shouldMarkAllStaticPayloadsDirty = update.removedTextureRefIds.length > 0;
+		let shouldMarkAllTerrainPayloadsDirty = update.removedTextureRefIds.length > 0;
 		for (const textureRefId of update.removedTextureRefIds) {
 			const texture = this.#textures.get(textureRefId);
 			if (!texture) {
@@ -739,6 +741,7 @@ class Webgl2Renderer implements Renderer {
 			}
 			this.#textures.set(placement.textureRefId, texture);
 			shouldMarkAllStaticPayloadsDirty = true;
+			shouldMarkAllTerrainPayloadsDirty = true;
 		}
 
 		for (const binding of update.drawUnitBindings) {
@@ -747,13 +750,17 @@ class Webgl2Renderer implements Renderer {
 			bindings.set(binding.textureUseId, binding);
 			this.#textureBindings.set(binding.drawUnitId, bindings);
 			this.#markStaticObjectPreparedPayloadDirty(binding.drawUnitId);
+			this.#markTerrainPreparedPayloadDirty(binding.drawUnitId);
 		}
 
 		if (shouldMarkAllStaticPayloadsDirty) {
-			// Prepared static payloads hold WebGLTexture handles. Without a reverse
+			// Prepared payloads hold WebGLTexture handles. Without a reverse
 			// texture-ref owner map, texture page adds/replacements/removals must
-			// conservatively dirty all live static payloads.
+			// conservatively dirty all live payloads.
 			this.#markAllStaticObjectPreparedPayloadsDirty();
+		}
+		if (shouldMarkAllTerrainPayloadsDirty) {
+			this.#markAllTerrainPreparedPayloadsDirty();
 		}
 	}
 
@@ -886,17 +893,19 @@ class Webgl2Renderer implements Renderer {
 			const useTexture =
 				resource.materialFamily === "terrain-single-base-color" &&
 				texture !== null;
-			const useLayered =
-				resource.materialFamily === "terrain-layered" &&
+			const layeredPayload =
+				resource.materialFamily === "terrain-layered"
+					? this.#getTerrainPreparedLayeredPayload(resource, bindings)
+					: null;
+			const useLayered = layeredPayload !== null;
+			if (layeredPayload) {
 				uploadTerrainLayeredUniforms(
 					gl,
 					this.#terrainProgram,
-					resource,
-					bindings,
-					this.#textures,
+					layeredPayload,
 					this.#frameState,
-					this.#terrainLayeredDrawScratch,
 				);
+			}
 			if (resource.materialFamily === "terrain-layered" && !useLayered) {
 				this.#warnTerrainLayeredFallback(resource);
 			}
@@ -1060,6 +1069,41 @@ class Webgl2Renderer implements Renderer {
 		);
 		gl.bindVertexArray(resource.vertexArray);
 		gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
+	}
+
+	#getTerrainPreparedLayeredPayload(
+		resource: TerrainGeometryResource,
+		bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	): TerrainPreparedLayeredPayload | null {
+		const plan = resource.terrainMaterialPlan;
+		if (!plan) {
+			return null;
+		}
+
+		return prepareTerrainLayeredPayloadState(
+			resource.preparedLayeredPayloadState,
+			plan,
+			bindings,
+			this.#textures,
+		);
+	}
+
+	#markTerrainPreparedPayloadDirty(drawUnitId: string): void {
+		const resource = this.#terrainResources.get(drawUnitId);
+		if (!resource) {
+			return;
+		}
+		markTerrainPreparedLayeredPayloadDirty(
+			resource.preparedLayeredPayloadState,
+		);
+	}
+
+	#markAllTerrainPreparedPayloadsDirty(): void {
+		for (const resource of this.#terrainResources.values()) {
+			markTerrainPreparedLayeredPayloadDirty(
+				resource.preparedLayeredPayloadState,
+			);
+		}
 	}
 
 	#getStaticObjectPreparedPayload(
@@ -1289,6 +1333,7 @@ interface TerrainGeometryResource {
 	readonly landblockId: TerrainGeometryStaticDrawUnit["landblockId"];
 	readonly materialFamily: TerrainGeometryStaticDrawUnit["materialFamily"];
 	readonly primaryTextureUseId: string | null;
+	readonly preparedLayeredPayloadState: TerrainPreparedLayeredPayloadState;
 	readonly terrainMaterialPlan: TerrainGeometryStaticDrawUnit["terrainMaterialPlan"];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
@@ -1701,6 +1746,7 @@ function createTerrainGeometryResource(
 		landblockId: drawUnit.landblockId,
 		materialFamily: drawUnit.materialFamily,
 		primaryTextureUseId: drawUnit.primaryTextureUseId,
+		preparedLayeredPayloadState: createTerrainPreparedLayeredPayloadState(),
 		terrainMaterialPlan: drawUnit.terrainMaterialPlan,
 		layerSlotBuffer,
 		positionBuffer,
@@ -2081,20 +2127,9 @@ function appendDebugOverlayVertex(
 function uploadTerrainLayeredUniforms(
 	gl: WebGL2RenderingContext,
 	program: TerrainGeometryProgram,
-	resource: TerrainGeometryResource,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
-	textures: ReadonlyMap<string, WebGLTexture>,
-	frameState: FrameState,
 	payload: TerrainPreparedLayeredPayload,
-): boolean {
-	const plan = resource.terrainMaterialPlan;
-	if (!plan) {
-		return false;
-	}
-	if (!prepareTerrainLayeredPayload(payload, plan, bindings, textures)) {
-		return false;
-	}
-
+	frameState: FrameState,
+): void {
 	uploadTerrainRolePageBindings(
 		gl,
 		program.uniforms.uColorAtlasTextures,
@@ -2125,8 +2160,6 @@ function uploadTerrainLayeredUniforms(
 		frameState.camera.position[1],
 		frameState.camera.position[2],
 	);
-
-	return true;
 }
 
 function uploadTerrainRolePageBindings(

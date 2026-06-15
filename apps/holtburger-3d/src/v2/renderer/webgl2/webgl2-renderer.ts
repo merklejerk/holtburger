@@ -20,7 +20,6 @@ import {
 } from "../types";
 import type {
 	StaticObjectGeometryStaticDrawUnit,
-	StaticObjectMaterialTableEntry,
 	StaticObjectRenderState,
 	StaticObjectSortMetadata,
 	TerrainGeometryStaticDrawUnit,
@@ -31,6 +30,12 @@ import {
 	type TextureWrapMode,
 } from "../../textures/sampling-policy";
 import { createOutdoorLandblockRootTranslation } from "../../static/placement";
+import {
+	createStaticObjectDrawScratch,
+	prepareStaticObjectDrawPayload,
+	type StaticObjectPreparedMaterialUniforms,
+	type StaticObjectPreparedRolePageBindings,
+} from "./webgl2-static-object-payloads";
 
 const TERRAIN_LAYERED_MAX_LAYER_ENTRIES = 8;
 const TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER = 3;
@@ -614,6 +619,7 @@ class Webgl2Renderer implements Renderer {
 	readonly #debugOverlayProgram: DebugOverlayProgram;
 	readonly #debugOverlayVertexArray: WebGLVertexArrayObject;
 	readonly #debugOverlayVertexBuffer: WebGLBuffer;
+	readonly #staticObjectDrawScratch = createStaticObjectDrawScratch();
 	#animationFrameId: number | null = null;
 	#disposed = false;
 	#frameCount = 0;
@@ -994,47 +1000,47 @@ class Webgl2Renderer implements Renderer {
 		const bindings =
 			this.#textureBindings.get(resource.drawUnitId) ??
 			EMPTY_TEXTURE_DRAW_UNIT_BINDINGS;
-		const pageBindings = createStaticObjectPageBindings(
+		prepareStaticObjectDrawPayload(
+			this.#staticObjectDrawScratch,
 			resource,
 			bindings,
 			this.#textures,
 		);
+		const { materialUniforms, rolePages } = this.#staticObjectDrawScratch;
 
 		uploadStaticObjectRolePageBindings(
 			gl,
 			this.#staticObjectProgram.uniforms.uStaticBaseColorTextures,
 			this.#staticObjectProgram.uniforms.uStaticBaseColorSizes,
-			pageBindings.baseColor,
+			rolePages.baseColor,
 			STATIC_OBJECT_BASE_COLOR_TEXTURE_UNIT_BASE,
 		);
 		uploadStaticObjectRolePageBindings(
 			gl,
 			this.#staticObjectProgram.uniforms.uStaticIndexTextures,
 			null,
-			pageBindings.index,
+			rolePages.index,
 			STATIC_OBJECT_INDEX_TEXTURE_UNIT_BASE,
 		);
 		uploadStaticObjectRolePageBindings(
 			gl,
 			this.#staticObjectProgram.uniforms.uStaticPaletteTextures,
 			this.#staticObjectProgram.uniforms.uStaticPaletteSizes,
-			pageBindings.palette,
+			rolePages.palette,
 			STATIC_OBJECT_PALETTE_TEXTURE_UNIT_BASE,
 		);
 		uploadStaticObjectRolePageBindings(
 			gl,
 			this.#staticObjectProgram.uniforms.uStaticDetailTextures,
 			this.#staticObjectProgram.uniforms.uStaticDetailSizes,
-			pageBindings.detail,
+			rolePages.detail,
 			STATIC_OBJECT_DETAIL_TEXTURE_UNIT_BASE,
 		);
 
 		uploadStaticObjectMaterialTableUniforms(
 			gl,
 			this.#staticObjectProgram,
-			resource,
-			bindings,
-			this.#textures,
+			materialUniforms,
 		);
 		gl.uniform3f(
 			this.#staticObjectProgram.uniforms.uPlacementTranslation,
@@ -1277,18 +1283,6 @@ interface TerrainLayeredPageBindings {
 }
 
 interface TerrainLayeredPageBinding {
-	readonly binding: TextureDrawUnitBinding;
-	readonly texture: WebGLTexture;
-}
-
-interface StaticObjectPageBindings {
-	readonly baseColor: (StaticObjectPageBinding | null)[];
-	readonly detail: (StaticObjectPageBinding | null)[];
-	readonly index: (StaticObjectPageBinding | null)[];
-	readonly palette: (StaticObjectPageBinding | null)[];
-}
-
-interface StaticObjectPageBinding {
 	readonly binding: TextureDrawUnitBinding;
 	readonly texture: WebGLTexture;
 }
@@ -1775,380 +1769,89 @@ function createStaticObjectGeometryResource(
 	};
 }
 
-function resolveStaticObjectMaterialEntryMode(
-	resource: StaticObjectGeometryResource,
-	materialEntry: StaticObjectMaterialTableEntry,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
-	textures: ReadonlyMap<string, WebGLTexture>,
-): number {
-	if (resource.materialFamily === "flat-color") {
-		return 0;
-	}
-	if (resource.materialFamily === "indexed-paletted") {
-		return hasResidentBinding(
-			materialEntry.indexTextureUseId,
-			"static-index",
-			MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW,
-			bindings,
-			textures,
-		) &&
-			hasResidentBinding(
-				materialEntry.paletteTextureUseId,
-				"static-palette",
-				MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
-				bindings,
-				textures,
-			)
-			? 3
-			: 2;
-	}
-
-	return hasResidentBinding(
-		materialEntry.primaryTextureUseId,
-		"static-base-color",
-		MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
-		bindings,
-		textures,
-	)
-		? 1
-		: 2;
-}
-
-function hasResidentBinding(
-	textureUseId: string | null,
-	expectedKind: TextureDrawUnitBinding["rolePage"]["kind"],
-	maxSlots: number,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
-	textures: ReadonlyMap<string, WebGLTexture>,
-): boolean {
-	if (!textureUseId) {
-		return false;
-	}
-	const binding = bindings.get(textureUseId);
-
-	return binding
-		? binding.rolePage.kind === expectedKind &&
-				binding.rolePage.slot >= 0 &&
-				binding.rolePage.slot < maxSlots &&
-				textures.has(binding.textureRefId)
-		: false;
-}
-
-function createStaticObjectPageBindings(
-	resource: StaticObjectGeometryResource,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
-	textures: ReadonlyMap<string, WebGLTexture>,
-): StaticObjectPageBindings {
-	const pageBindings: StaticObjectPageBindings = {
-		baseColor: Array.from(
-			{ length: MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW },
-			() => null,
-		),
-		detail: Array.from(
-			{ length: MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW },
-			() => null,
-		),
-		index: Array.from(
-			{ length: MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW },
-			() => null,
-		),
-		palette: Array.from(
-			{ length: MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW },
-			() => null,
-		),
-	};
-
-	for (const entry of resource.materialEntries) {
-		collectStaticObjectPageBinding(
-			entry.primaryTextureUseId,
-			"static-base-color",
-			bindings,
-			textures,
-			pageBindings.baseColor,
-		);
-		collectStaticObjectPageBinding(
-			entry.indexTextureUseId,
-			"static-index",
-			bindings,
-			textures,
-			pageBindings.index,
-		);
-		collectStaticObjectPageBinding(
-			entry.paletteTextureUseId,
-			"static-palette",
-			bindings,
-			textures,
-			pageBindings.palette,
-		);
-		collectStaticObjectPageBinding(
-			entry.detailTextureUseId,
-			"static-detail",
-			bindings,
-			textures,
-			pageBindings.detail,
-		);
-	}
-
-	return pageBindings;
-}
-
-function collectStaticObjectPageBinding(
-	textureUseId: string | null,
-	expectedKind: TextureDrawUnitBinding["rolePage"]["kind"],
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
-	textures: ReadonlyMap<string, WebGLTexture>,
-	pages: (StaticObjectPageBinding | null)[],
-): void {
-	if (!textureUseId) {
-		return;
-	}
-	const binding = bindings.get(textureUseId);
-	if (!binding || binding.rolePage.kind !== expectedKind) {
-		return;
-	}
-	const texture = textures.get(binding.textureRefId);
-	if (
-		!texture ||
-		binding.rolePage.slot < 0 ||
-		binding.rolePage.slot >= pages.length
-	) {
-		return;
-	}
-	const existing = pages[binding.rolePage.slot] ?? null;
-	if (existing && existing.binding.textureRefId !== binding.textureRefId) {
-		return;
-	}
-	pages[binding.rolePage.slot] = {
-		binding,
-		texture,
-	};
-}
-
 function uploadStaticObjectRolePageBindings(
 	gl: WebGL2RenderingContext,
 	samplerUniforms: readonly WebGLUniformLocation[],
 	sizeUniform: WebGLUniformLocation | null,
-	pages: readonly (StaticObjectPageBinding | null)[],
+	pages: StaticObjectPreparedRolePageBindings,
 	textureUnitBase: number,
 ): void {
-	const sizes = new Float32Array(pages.length * 2);
 	for (const [slot, uniform] of samplerUniforms.entries()) {
-		const page = pages[slot] ?? null;
 		const textureUnit = textureUnitBase + slot;
 		gl.activeTexture(gl.TEXTURE0 + textureUnit);
-		gl.bindTexture(gl.TEXTURE_2D, page?.texture ?? null);
+		gl.bindTexture(gl.TEXTURE_2D, pages.textures[slot] ?? null);
 		gl.uniform1i(uniform, textureUnit);
-		sizes[slot * 2] = page?.binding.textureWidth ?? 1;
-		sizes[slot * 2 + 1] = page?.binding.textureHeight ?? 1;
 	}
 	if (sizeUniform) {
-		gl.uniform2fv(sizeUniform, sizes);
+		gl.uniform2fv(sizeUniform, pages.sizes);
 	}
 }
 
 function uploadStaticObjectMaterialTableUniforms(
 	gl: WebGL2RenderingContext,
 	program: StaticObjectGeometryProgram,
-	resource: StaticObjectGeometryResource,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
-	textures: ReadonlyMap<string, WebGLTexture>,
+	uniforms: StaticObjectPreparedMaterialUniforms,
 ): void {
-	if (resource.materialEntries.length === 0) {
-		throw new Error(
-			`Static object resource ${resource.drawUnitId} has no material table entries.`,
-		);
-	}
-
-	const alphaTests = new Float32Array(
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	gl.uniform1fv(program.uniforms.uMaterialAlphaTests, uniforms.alphaTests);
+	gl.uniform1iv(
+		program.uniforms.uMaterialBaseColorPages,
+		uniforms.baseColorPages,
 	);
-	const baseColorPages = new Int32Array(
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	gl.uniform4fv(
+		program.uniforms.uMaterialBaseColorRects,
+		uniforms.baseColorRects,
 	);
-	const baseColorRects = createDefaultRectTable();
-	const colors = new Float32Array(
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
+	gl.uniform4fv(program.uniforms.uMaterialColors, uniforms.colors);
+	gl.uniform1iv(
+		program.uniforms.uMaterialDetailEnabled,
+		uniforms.detailEnabled,
 	);
-	const detailEnabled = new Int32Array(
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	gl.uniform1iv(
+		program.uniforms.uMaterialDetailTexturePages,
+		uniforms.detailPages,
 	);
-	const detailPages = new Int32Array(
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	gl.uniform4fv(
+		program.uniforms.uMaterialDetailTextureRects,
+		uniforms.detailRects,
 	);
-	const detailRects = createDefaultRectTable();
-	const detailTilings = new Float32Array(
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	gl.uniform1fv(
+		program.uniforms.uMaterialDetailTilings,
+		uniforms.detailTilings,
 	);
-	const emissiveColors = new Float32Array(
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 3,
+	gl.uniform3fv(
+		program.uniforms.uMaterialEmissiveColors,
+		uniforms.emissiveColors,
 	);
-	const indexedTextureFormats = new Int32Array(
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
-	);
-	const indexedClipThresholds = new Float32Array(
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
-	);
-	indexedClipThresholds.fill(-1);
-	const indexPages = new Int32Array(
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
-	);
-	const indexRects = createDefaultRectTable();
-	const materialModes = new Int32Array(
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
-	);
-	const paletteFirstIndices = new Float32Array(
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
-	);
-	const palettePages = new Int32Array(
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
-	);
-	const paletteRects = createDefaultRectTable();
-	const wrapModes = new Int32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW);
-
-	const materialEntryCount = Math.min(
-		resource.materialEntries.length,
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
-	);
-	for (let entryIndex = 0; entryIndex < materialEntryCount; entryIndex += 1) {
-		const entry = resource.materialEntries[entryIndex];
-		if (!entry) {
-			continue;
-		}
-		const slot = entry.slot;
-		if (slot < 0 || slot >= MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW) {
-			continue;
-		}
-		alphaTests[slot] = entry.alphaTest;
-		colors.set(entry.materialColor, slot * 4);
-		detailTilings[slot] = entry.detailTextureTiling;
-		emissiveColors.set(entry.materialEmissiveColor, slot * 3);
-		indexedTextureFormats[slot] =
-			entry.indexedTextureFormat === "index16" ? 1 : 0;
-		indexedClipThresholds[slot] = entry.indexedClipThreshold;
-		materialModes[slot] = resolveStaticObjectMaterialEntryMode(
-			resource,
-			entry,
-			bindings,
-			textures,
-		);
-		paletteFirstIndices[slot] = entry.paletteFirstIndex;
-		wrapModes[slot] = entry.primaryTextureWrapMode === "repeat" ? 1 : 0;
-
-		writeStaticObjectTextureEntry(
-			entry.primaryTextureUseId,
-			"static-base-color",
-			MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
-			bindings,
-			baseColorPages,
-			baseColorRects,
-			slot,
-		);
-		writeStaticObjectTextureEntry(
-			entry.indexTextureUseId,
-			"static-index",
-			MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW,
-			bindings,
-			indexPages,
-			indexRects,
-			slot,
-		);
-		writeStaticObjectTextureEntry(
-			entry.paletteTextureUseId,
-			"static-palette",
-			MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
-			bindings,
-			palettePages,
-			paletteRects,
-			slot,
-		);
-		const detailBinding = writeStaticObjectTextureEntry(
-			entry.detailTextureUseId,
-			"static-detail",
-			MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW,
-			bindings,
-			detailPages,
-			detailRects,
-			slot,
-		);
-		detailEnabled[slot] =
-			detailBinding && textures.has(detailBinding.textureRefId) ? 1 : 0;
-	}
-
-	gl.uniform1fv(program.uniforms.uMaterialAlphaTests, alphaTests);
-	gl.uniform1iv(program.uniforms.uMaterialBaseColorPages, baseColorPages);
-	gl.uniform4fv(program.uniforms.uMaterialBaseColorRects, baseColorRects);
-	gl.uniform4fv(program.uniforms.uMaterialColors, colors);
-	gl.uniform1iv(program.uniforms.uMaterialDetailEnabled, detailEnabled);
-	gl.uniform1iv(program.uniforms.uMaterialDetailTexturePages, detailPages);
-	gl.uniform4fv(program.uniforms.uMaterialDetailTextureRects, detailRects);
-	gl.uniform1fv(program.uniforms.uMaterialDetailTilings, detailTilings);
-	gl.uniform3fv(program.uniforms.uMaterialEmissiveColors, emissiveColors);
 	gl.uniform1fv(
 		program.uniforms.uMaterialIndexedClipThresholds,
-		indexedClipThresholds,
+		uniforms.indexedClipThresholds,
 	);
 	gl.uniform1iv(
 		program.uniforms.uMaterialIndexedTextureFormats,
-		indexedTextureFormats,
+		uniforms.indexedTextureFormats,
 	);
-	gl.uniform1iv(program.uniforms.uMaterialIndexTexturePages, indexPages);
-	gl.uniform4fv(program.uniforms.uMaterialIndexTextureRects, indexRects);
-	gl.uniform1iv(program.uniforms.uMaterialModes, materialModes);
+	gl.uniform1iv(
+		program.uniforms.uMaterialIndexTexturePages,
+		uniforms.indexPages,
+	);
+	gl.uniform4fv(
+		program.uniforms.uMaterialIndexTextureRects,
+		uniforms.indexRects,
+	);
+	gl.uniform1iv(program.uniforms.uMaterialModes, uniforms.materialModes);
 	gl.uniform1fv(
 		program.uniforms.uMaterialPaletteFirstIndices,
-		paletteFirstIndices,
+		uniforms.paletteFirstIndices,
 	);
-	gl.uniform1iv(program.uniforms.uMaterialPaletteTexturePages, palettePages);
-	gl.uniform4fv(program.uniforms.uMaterialPaletteTextureRects, paletteRects);
-	gl.uniform1iv(program.uniforms.uMaterialWrapModes, wrapModes);
-}
-
-function createDefaultRectTable(): Float32Array {
-	const rects = new Float32Array(
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
+	gl.uniform1iv(
+		program.uniforms.uMaterialPaletteTexturePages,
+		uniforms.palettePages,
 	);
-	fillDefaultMaterialRectTable(rects);
-
-	return rects;
-}
-
-function fillDefaultMaterialRectTable(rects: Float32Array): void {
-	for (
-		let slot = 0;
-		slot < MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW;
-		slot += 1
-	) {
-		rects.set(DEFAULT_TEXTURE_RECT, slot * 4);
-	}
-}
-
-function writeStaticObjectTextureEntry(
-	textureUseId: string | null,
-	expectedKind: TextureDrawUnitBinding["rolePage"]["kind"],
-	maxSlots: number,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
-	pages: Int32Array,
-	rects: Float32Array,
-	slot: number,
-): TextureDrawUnitBinding | null {
-	if (!textureUseId) {
-		return null;
-	}
-	const binding = bindings.get(textureUseId);
-	if (!binding) {
-		return null;
-	}
-	if (
-		binding.rolePage.kind !== expectedKind ||
-		binding.rolePage.slot < 0 ||
-		binding.rolePage.slot >= maxSlots
-	) {
-		return null;
-	}
-	pages[slot] = binding.rolePage.slot;
-	rects.set(binding.rect, slot * 4);
-
-	return binding;
+	gl.uniform4fv(
+		program.uniforms.uMaterialPaletteTextureRects,
+		uniforms.paletteRects,
+	);
+	gl.uniform1iv(program.uniforms.uMaterialWrapModes, uniforms.wrapModes);
 }
 
 function translatePoint(

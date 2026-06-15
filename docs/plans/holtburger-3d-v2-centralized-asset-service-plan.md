@@ -247,6 +247,10 @@ Deliverables:
 
 - Re-read the updated implementation against the V2 design doc.
 - Delete obsolete bridge classes, test fixtures, and misleading names.
+- Rename or split stale resolver bridge files once ownership is settled:
+  - `static/resolver/host-bridge.ts` should become `static/resolver/asset-bridge.ts`, or split into a worker-side reader file plus a main-thread asset bridge file.
+  - `createStaticResolverMainHostBridge` should become `createStaticResolverMainAssetBridge` if it remains as one bridge factory.
+- Re-evaluate new Phase 4 files so asset views, bake attachment interfaces, and static-object attachment implementations live under their natural owners rather than whichever file first needed them.
 - Record any deferred work in this plan rather than leaving TODOs scattered in code.
 
 Acceptance criteria:
@@ -260,11 +264,13 @@ Task checklist:
 - [ ] Run `rg "HostBackedAssetService|pruneExpiredWarmAssets|host-asset-lookup|StaticResolverWorkerRuntimeHost" apps/holtburger-3d/src/v2 docs/plans`.
 - [ ] Run `rg "positions:|normals:|texCoords:" apps/holtburger-3d/src/v2/static/contracts.ts apps/holtburger-3d/src/v2/static/objects`.
 - [ ] Remove dead protocol types and fixtures.
+- [ ] Rename `static/resolver/host-bridge.*` or split it into worker asset reader and main asset bridge modules after Phase 3 confirms final bridge ownership.
+- [ ] Place Phase 4 asset view helpers, bake attachment interfaces, and static-object attachment implementations under the narrowest proven owner.
 - [ ] Run final verification commands.
 
 Decisions and course corrections:
 
-- None yet.
+- 2026-06-15: Deferred resolver bridge file renaming until cleanup to avoid churn while Phase 3/4 may still reshape the bridge and attachment boundaries.
 
 ## Risks And Mitigations
 

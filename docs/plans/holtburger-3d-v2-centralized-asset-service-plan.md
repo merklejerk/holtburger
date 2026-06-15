@@ -146,11 +146,12 @@ Task checklist:
 - [x] Pass that same `assetService` into `createClientRuntime`.
 - [x] Thread the runtime asset service into `createTauriStaticCoordinator`.
 - [x] Update `createWorkerStaticResolver` to bridge workers to that service.
-- [ ] Add a browser-runtime composition test that proves the resolver bridge is asset-service backed.
+- [x] Add a browser-runtime composition test that proves the resolver bridge is asset-service backed.
 
 Decisions and course corrections:
 
 - 2026-06-15: Shared-service browser runtime wiring was implemented early as part of Phase 1 so `createStaticResolverMainHostBridge()` could stop accepting `RuntimeHost`.
+- 2026-06-15: Added a narrow `createWorkerStaticResolver()` factory seam so browser runtime tests can assert resolver worker bridges receive the supplied `PreparedAssetReader` without constructing real Workers or WebGL state.
 
 ### Phase 4: Split Static Source Metadata From Bake Geometry
 

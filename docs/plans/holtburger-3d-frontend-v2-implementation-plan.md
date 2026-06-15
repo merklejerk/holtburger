@@ -509,7 +509,7 @@ Execution steering:
 
 ##### Phase 13A3a: Static Object Source Closure Extraction
 
-Status: planned.
+Status: complete on 2026-06-15.
 
 Purpose: extract reusable static-object source enrichment without changing env-cell behavior yet.
 
@@ -522,13 +522,25 @@ Deliverables:
 
 Acceptance criteria:
 
-- The extracted source-closure helper has no dependency on `OutdoorStaticObjectsScopePayload`.
-- The outdoor resolver remains the only owner of outdoor object selection and outdoor spatial/source records.
-- Resolver-facing source facts remain metadata-only; full source geometry still arrives through bake attachments.
+- The extracted source-closure helper has no dependency on `OutdoorStaticObjectsScopePayload`. Met by `static-object-source-closure.ts`, which imports only shared static contracts, host prepared DTOs, asset readers/keys, terrain identities, and static-object source geometry identity helpers.
+- The outdoor resolver remains the only owner of outdoor object selection and outdoor spatial/source records. Met: `OutdoorStaticObjectsResolver` still selects `outdoor-buildings`/`outdoor-detail`, creates outdoor object instances, material-slot instance facts, outdoor BVH facts, and source-spatial facts.
+- Resolver-facing source facts remain metadata-only; full source geometry still arrives through bake attachments. Met: the extracted closure still emits source/part/material/texture metadata and source geometry identities only; it does not carry vertex buffers.
+
+Implementation notes:
+
+- Added `static-object-source-closure.ts` with `resolveStaticObjectSourceClosure`, `resolveStaticObjectSurfaceTextureRef`, source/palette/texture cache-key helpers, and `createStaticObjectSourceIdentity`.
+- Updated `OutdoorStaticObjectsResolver` to call the extracted source closure and keep only outdoor domain selection, outdoor instance/source-spatial facts, region detail role selection, and outdoor material-slot instance flattening.
+- Existing outdoor resolver tests continue to cover building source resolution, missing source refs, setup-model/setup-appearance material slots, material variant expansion, debug provenance route confinement, and object filtering when source closure is missing.
+- The neutral closure carries source-local material slots through `StaticObjectSourceAssetFacts.parts[*].materialSlots`. Instance-level `StaticObjectMaterialSlotFacts` remain ownership-specific and are still flattened by the outdoor resolver; env-cell seed ownership should flatten its own slots in 13A3b/13A3c.
+
+Decisions and course corrections:
+
+- Region detail texture-ref resolution now uses the shared static-object surface texture ref helper because it is the same render-surface/palette/texture closure shape. Region profile ownership remains in the outdoor resolver.
+- The extracted closure keeps the existing `sourceRevision = max(asset revision, partCount)` behavior from the old resolver. That `partCount` contribution is suspicious because it is not an asset revision, but this phase was intentionally behavior-preserving; clean it up only after deciding the intended revision semantics.
 
 ##### Phase 13A3b: Env-Cell Seed Source Closure And Attachments
 
-Status: planned.
+Status: planned; ready to start after 13A3a extraction.
 
 Purpose: adapt env-cell static object seeds into the neutral source closure while preserving env-cell ownership.
 

@@ -29,6 +29,8 @@ const PIXEL_FORMAT_INDEX16 = 0x65;
 const DEFAULT_PALETTE_FIRST_INDEX = 0;
 const DIRECT_CLIP_MAP_ALPHA_TEST = 200 / BYTE_MAX;
 const INDEXED_CLIP_MAP_ALPHA_TEST = 100 / BYTE_MAX;
+const INDEXED_CLIP_MAP_INDEX_THRESHOLD = 8;
+const INDEXED_CLIP_MAP_INDEX_THRESHOLD_DISABLED = -1;
 
 type StaticObjectMaterialFamily =
 	| "flat-color"
@@ -145,6 +147,7 @@ interface StaticObjectMaterialAlphaPolicy {
 		| "inverse-alpha"
 		| "additive";
 	readonly alphaTest: number;
+	readonly indexedClipThreshold: number;
 	readonly opacity: number;
 }
 
@@ -777,6 +780,10 @@ function deriveMaterialBehavior(material: StaticObjectMaterialSourceFacts): {
 				? INDEXED_CLIP_MAP_ALPHA_TEST
 				: DIRECT_CLIP_MAP_ALPHA_TEST
 			: 0;
+	const indexedClipThreshold =
+		isClipMap && usesIndexedClipDiscard
+			? INDEXED_CLIP_MAP_INDEX_THRESHOLD
+			: INDEXED_CLIP_MAP_INDEX_THRESHOLD_DISABLED;
 	const blend = deriveBlendBehavior({
 		isClipMap,
 		opacity,
@@ -786,6 +793,7 @@ function deriveMaterialBehavior(material: StaticObjectMaterialSourceFacts): {
 	return {
 		alphaPolicy: {
 			alphaTest,
+			indexedClipThreshold,
 			mode: resolveAlphaMode(material.surfaceType, blend, opacity),
 			opacity,
 		},

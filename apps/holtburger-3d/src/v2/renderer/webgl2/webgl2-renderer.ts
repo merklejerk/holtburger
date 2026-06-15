@@ -161,6 +161,7 @@ uniform float uMaterialPaletteFirstIndices[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_
 uniform float uMaterialDetailTilings[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
 uniform int uMaterialDetailEnabled[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
 uniform float uMaterialAlphaTests[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
+uniform float uMaterialIndexedClipThresholds[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
 uniform vec4 uMaterialColors[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
 uniform vec3 uMaterialEmissiveColors[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
 uniform int uMaterialIndexedTextureFormats[${MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW}];
@@ -283,6 +284,12 @@ float paletteIndexAt(ivec2 coord) {
 
 vec4 paletteColor(float index) {
 	int slot = materialSlot();
+	if (
+		uMaterialIndexedClipThresholds[slot] >= 0.0 &&
+		index < uMaterialIndexedClipThresholds[slot]
+	) {
+		return vec4(0.0);
+	}
 	vec4 rect = uMaterialPaletteTextureRects[slot];
 	float paletteIndex = index - uMaterialPaletteFirstIndices[slot];
 	float paletteLocalX = clamp(paletteIndex, 0.0, max(rect.z - 1.0, 0.0));
@@ -1112,7 +1119,8 @@ class Webgl2Renderer implements Renderer {
 		const gl = this.#gl;
 		gl.bindVertexArray(this.#debugOverlayVertexArray);
 		gl.bindBuffer(gl.ARRAY_BUFFER, this.#debugOverlayVertexBuffer);
-		const stride = DEBUG_OVERLAY_FLOATS_PER_VERTEX * Float32Array.BYTES_PER_ELEMENT;
+		const stride =
+			DEBUG_OVERLAY_FLOATS_PER_VERTEX * Float32Array.BYTES_PER_ELEMENT;
 		gl.enableVertexAttribArray(0);
 		gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
 		gl.enableVertexAttribArray(1);
@@ -1185,6 +1193,7 @@ interface StaticObjectGeometryProgram {
 		readonly uMaterialDetailTextureRects: WebGLUniformLocation;
 		readonly uMaterialDetailTilings: WebGLUniformLocation;
 		readonly uMaterialEmissiveColors: WebGLUniformLocation;
+		readonly uMaterialIndexedClipThresholds: WebGLUniformLocation;
 		readonly uMaterialIndexedTextureFormats: WebGLUniformLocation;
 		readonly uMaterialIndexTexturePages: WebGLUniformLocation;
 		readonly uMaterialIndexTextureRects: WebGLUniformLocation;
@@ -1465,6 +1474,11 @@ function createStaticObjectGeometryProgram(
 				gl,
 				program,
 				"uMaterialEmissiveColors[0]",
+			),
+			uMaterialIndexedClipThresholds: requireUniform(
+				gl,
+				program,
+				"uMaterialIndexedClipThresholds[0]",
 			),
 			uMaterialIndexedTextureFormats: requireUniform(
 				gl,
@@ -1964,6 +1978,10 @@ function uploadStaticObjectMaterialTableUniforms(
 	const indexedTextureFormats = new Int32Array(
 		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
 	);
+	const indexedClipThresholds = new Float32Array(
+		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	);
+	indexedClipThresholds.fill(-1);
 	const indexPages = new Int32Array(
 		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
 	);
@@ -1994,6 +2012,7 @@ function uploadStaticObjectMaterialTableUniforms(
 		emissiveColors.set(entry.materialEmissiveColor, slot * 3);
 		indexedTextureFormats[slot] =
 			entry.indexedTextureFormat === "index16" ? 1 : 0;
+		indexedClipThresholds[slot] = entry.indexedClipThreshold;
 		materialModes[slot] = resolveStaticObjectMaterialEntryMode(
 			resource,
 			entry,
@@ -2052,6 +2071,10 @@ function uploadStaticObjectMaterialTableUniforms(
 	gl.uniform4fv(program.uniforms.uMaterialDetailTextureRects, detailRects);
 	gl.uniform1fv(program.uniforms.uMaterialDetailTilings, detailTilings);
 	gl.uniform3fv(program.uniforms.uMaterialEmissiveColors, emissiveColors);
+	gl.uniform1fv(
+		program.uniforms.uMaterialIndexedClipThresholds,
+		indexedClipThresholds,
+	);
 	gl.uniform1iv(
 		program.uniforms.uMaterialIndexedTextureFormats,
 		indexedTextureFormats,

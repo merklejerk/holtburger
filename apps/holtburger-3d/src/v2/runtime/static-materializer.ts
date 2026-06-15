@@ -352,6 +352,8 @@ function remapStaticObjectDrawUnit(
 			summary?.detailTextureUseId ?? drawUnit.detailTextureUseId,
 		drawUnitId,
 		indexTextureUseId: summary?.indexTextureUseId ?? drawUnit.indexTextureUseId,
+		indexedClipThreshold:
+			summary?.indexedClipThreshold ?? drawUnit.indexedClipThreshold,
 		indexedTextureFormat:
 			summary?.indexedTextureFormat ?? drawUnit.indexedTextureFormat,
 		materialColor: summary?.materialColor ?? drawUnit.materialColor,

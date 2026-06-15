@@ -228,8 +228,8 @@ Phase 13A should add a landblock-env-cell bake route rather than a separate dung
 
 When choosing draw-unit shape in Phase 13A:
 
-- widen the existing static-object draw-unit path to `landblock-env-cells` only if it can carry env-cell ownership, placement, sort, and source facts losslessly;
-- prefer a dedicated structured-interior geometry variant for cell-structure surfaces if that keeps cell, portal, and visibility facts cleaner;
+- use a dedicated structured-interior geometry variant for cell-structure surfaces; do not force cell walls/floors through static object/part/source identity;
+- widen the existing static-object draw-unit path to `landblock-env-cells` only for env-cell static object seeds, and only if it can carry env-cell ownership, placement, sort, and source facts losslessly;
 - do not add more stringly portal/interior or visibility records.
 
 ### Phase 13A: Env-Cell Geometry Bake And Interior Source Enrichment
@@ -245,7 +245,7 @@ Dry-run findings:
 - Cell-structure geometry and env-cell static object seeds should not land in one oversized phase. Cell walls/floors can bake from the existing env-cell bundle; static seeds need source/material closure enrichment first.
 - Existing static-object material helpers are valuable, but several are private and tied to `OutdoorStaticObjectsScopePayload`. Extract neutral helpers only when the env-cell path proves the shared shape. Do not copy a second transform/matrix/material-table stack.
 - The current `StaticObjectGeometryStaticDrawUnit.domain` is outdoor-only. Widening it to `landblock-env-cells` is acceptable only for env-cell static object draw units if env-cell ownership, placement, sort, and source mapping remain lossless.
-- Cell-structure geometry should get a dedicated structured-interior draw-unit variant unless implementation proves it is truly isomorphic with static object geometry. Forcing cell surfaces through object/part/source concepts would obscure ownership and source identity.
+- Cell-structure geometry should get a dedicated structured-interior draw-unit variant. Forcing cell surfaces through object/part/source concepts would obscure ownership and source identity.
 - The host/content `landblock-env-cells` asset may include full cell-structure render geometry just as host `gfx-obj` assets include vertex data. Resolver-facing env-cell assets should still follow the `gfx-obj` metadata-view pattern: strip heavy vertex buffers before resolver facts, then fetch/attach full geometry explicitly in bake/enrichment work.
 - `StaticBakeBatchResult.staticVisibilityRecords`, `staticPortalInteriorRecords`, `staticSpatialRecords`, and `staticSourceMappings` are string arrays today. Phase 13A should introduce typed peer records before renderer visibility or runtime query consumers depend on them.
 - Texture-manager policy is mostly domain-generic, but it has explicit terrain/outdoor-static-object branches. `landblock-env-cells` must be audited so interior color/detail/index/palette pages use static-object-style policy rather than accidentally falling into terrain-only or exact/raw behavior.
@@ -255,7 +255,9 @@ Implementation split:
 
 - Phase 13A0: resolver-light env-cell asset view.
 - Phase 13A1: typed env-cell bake contracts and peer records.
-- Phase 13A2: structured cell-structure geometry bake.
+- Phase 13A2a: explicit cell-structure geometry attachments.
+- Phase 13A2b: structured-interior draw-unit contract and debug/flat geometry bake.
+- Phase 13A2c: structured-interior material and texture planning.
 - Phase 13A3: env-cell static object seed enrichment through the static object material pipeline.
 
 Acceptance criteria for the whole Phase 13A sequence:
@@ -279,7 +281,7 @@ Deliverables:
 - A resolver-facing `landblock-env-cells` prepared-asset view, applied at the asset-service/worker bridge or resolver boundary, that strips cell-structure `renderGeometry.positions`, `renderGeometry.normals`, and `renderGeometry.uvs` from every env cell.
 - The view preserves metadata needed for planning and diagnostics: ids, local placement, surfaces/material ids, portal facts, visibility ids, cell BSP, BVHs, bounds, counts, triangle metadata, invalid/skipped polygon diagnostics, and static object seeds.
 - `LandblockEnvCellsResolver` consumes the resolver-light view and no longer exposes cell-structure vertex buffers in `LandblockEnvCellStaticFacts`.
-- Future Phase 13A2 bake work fetches or receives full cell-structure geometry through an explicit geometry attachment/enrichment path, not by assuming resolver payloads contain vertex buffers.
+- Future Phase 13A2a bake work fetches or receives full cell-structure geometry through an explicit geometry attachment/enrichment path, not by assuming resolver payloads contain vertex buffers.
 - Tests proving a heavy host `landblock-env-cells` payload becomes resolver-light while the host/full prepared asset remains capable of supplying bake-time geometry.
 
 Acceptance criteria:
@@ -342,31 +344,78 @@ Verification:
 
 Spicy follow-up for 13A2:
 
-- Env-cell peer records are now committed, but runtime query/visibility consumers still do not actively use the new typed records. Phase 13A2/13B should decide whether those records become runtime query inputs immediately or remain committed peer records until renderer visibility has a concrete consumer.
+- Env-cell peer records are now committed, but runtime query/visibility consumers still do not actively use the new typed records. Phase 13A2b/13B should decide whether those records become runtime query inputs immediately or remain committed peer records until renderer visibility has a concrete consumer.
 
-#### Phase 13A2: Structured Cell-Structure Geometry Bake
+#### Phase 13A2a: Explicit Cell-Structure Geometry Attachments
 
 Status: planned.
 
-Purpose: turn env-cell cell-structure render geometry into the first renderable interior/static draw units.
+Purpose: make full env-cell cell-structure geometry available to bake work without re-heavying resolver payloads.
 
 Deliverables:
 
-- A `StructuredInteriorGeometryStaticDrawUnit` or equivalent dedicated draw-unit variant for cell-structure geometry, with landblock id, env-cell id, cell-structure/environment ids, local placement ownership, material-family facts, geometry buffers, source triangle ids, texture-use ids, and sort/visibility metadata.
-- An explicit cell-structure geometry attachment/enrichment path that obtains full positions, normals, UVs, and triangle metadata for env-cell shells at bake time. It must not depend on resolver payloads carrying vertex buffers.
-- Geometry bake from env-cell shell attachments plus resolver metadata: positions, UVs, triangles, surface ids, material variant signatures, bounds, local placement, and env-cell/cell-structure ownership.
-- The new typed work-owned env-cell peer records from 13A1 should be preserved when 13A2 starts emitting draw units; adding geometry must not regress no-draw-unit peer-record commit/filter behavior.
-- Material planning for env-cell cell-structure surfaces through the existing static material planner where material facts are isomorphic.
-- Texture/data-use emission for cell-structure surfaces through the existing texture manager and batch atlas ownership model.
-- Coordinate/placement tests proving env-cell local placement maps cell-local geometry into the same renderer-local space used by `StaticSceneQuery` picking and debug overlays.
-- Portal/interior/spatial/source records that link draw units back to landblock id, env-cell id, cell-structure id, surface/material ids, portal ids, and local BVH item refs.
+- Extend `StaticBakeBatchAttachments` with an env-cell/cell-structure geometry attachment collection parallel to `staticObjectSourceGeometry`.
+- The attachment provider obtains full positions, normals, UVs, triangles, surface ids, bounds, invalid/skipped polygon diagnostics, and source ids from the full prepared `landblock-env-cells` asset or equivalent host-backed prepared asset path.
+- The env-cell baker consumes geometry attachments only through `StaticBakeBatchInput.attachments`; it must not fetch prepared assets directly.
+- Attachment identities must include at least landblock id, env-cell id, and cell-structure id so stale filtering and bake errors can be reported without host route strings.
+- Tests proving resolver-facing env-cell facts remain light while bake attachments contain full vertex buffers for the same env cell.
 
 Acceptance criteria:
 
-- A `landblock-env-cells` bake can emit renderable cell-structure draw units without loading outdoor terrain or outdoor static object payloads.
-- The renderer-facing geometry is bounded by material/table capacity before residency.
-- Cell-structure geometry does not pretend to be an outdoor static object or require object/part identity that the source data does not have.
+- Resolver-facing `landblock-env-cells` payloads still have empty/absent `positions`, `normals`, and `uvs`.
+- `landblock-env-cells` bake inputs can receive full cell-structure geometry attachments without requesting outdoor terrain or outdoor static object payloads.
+- Missing or stale cell-structure attachments fail clearly or produce typed missing refs; they do not silently produce empty geometry.
+- The existing 13A1 no-draw-unit peer-record commit/filter behavior remains covered by tests.
+
+#### Phase 13A2b: Structured-Interior Draw Unit And Debug Geometry Bake
+
+Status: planned.
+
+Purpose: turn cell-structure geometry attachments plus env-cell resolver metadata into the first renderable interior draw units, using a dedicated source-accurate draw-unit shape.
+
+Decision:
+
+- Use a dedicated `structured-interior-geometry` draw-unit variant for cell-structure geometry. Do not widen `StaticObjectGeometryStaticDrawUnit` for cell walls/floors.
+- The dedicated draw unit may later share renderer/material internals with static objects, but its public contract must keep cell-structure ownership explicit: landblock id, env-cell id, cell-structure id, environment id, local placement, surface ids, and source triangle ids.
+- Object/part/source identities are not required for cell structures and must not be invented to satisfy outdoor static-object contracts.
+
+Deliverables:
+
+- `StructuredInteriorGeometryStaticDrawUnit` or equivalent dedicated draw-unit type with landblock id, env-cell id, cell-structure/environment ids, local placement ownership, coordinate space, positions, UVs, indices, source triangle ids, material/debug bucket facts, and visibility/sort metadata.
+- Env-cell baker path that emits structured-interior draw units from geometry attachments plus resolver metadata, initially using a debug/flat material if full material planning is not ready.
+- Draw-unit desired-key and coordinator commit/eviction support for structured-interior geometry owned by `landblock-env-cells`.
+- Static materializer and renderer-facing delta support sufficient to carry the new draw-unit variant without texture binding.
+- Coordinate/placement tests proving env-cell local placement maps cell-local geometry into the same renderer-local space used by `StaticSceneQuery` picking and debug overlays.
+- Peer records from 13A1 are preserved when draw units are emitted; adding geometry must not regress no-draw-unit peer-record commit/filter behavior.
+
+Acceptance criteria:
+
+- A `landblock-env-cells` bake can emit renderable/debuggable cell-structure draw units without loading outdoor terrain or outdoor static object payloads.
+- Cell-structure geometry does not pretend to be an outdoor static object or require object/part identity.
+- Evicting the owning `landblock-env-cells` work evicts the structured-interior draw units and work-owned peer records correctly.
+- Runtime query/debug selection and draw-unit placement agree for at least one env-cell fixture.
+
+#### Phase 13A2c: Structured-Interior Material And Texture Planning
+
+Status: planned.
+
+Purpose: upgrade structured-interior cell-structure draw units from debug/flat rendering to real material and texture behavior.
+
+Deliverables:
+
+- Material planning for env-cell cell-structure surfaces through existing static material helpers only where the material facts are isomorphic.
+- Texture/data-use emission for cell-structure surfaces through the existing texture manager and batch atlas ownership model.
+- `TextureManager.resolveTextureRolePageSlot` tests for `landblock-env-cells`, proving non-terrain static/interior materials intentionally use static-object-style role pages.
+- Renderer-facing material/table capacity handling for structured-interior draw units before residency.
+- Material coverage reports and fallback/deferred reasons for env-cell cell-structure materials.
+- Portal/interior/spatial/source peer records that link draw units back to landblock id, env-cell id, cell-structure id, surface/material ids, portal ids, and local BVH item refs.
+
+Acceptance criteria:
+
 - Texture uses, material coverage, and fallback/deferred reasons are visible for env-cell cell-structure materials.
+- Renderer-facing geometry is bounded by material/table capacity before residency.
+- Structured-interior material planning does not copy the outdoor static-object transform/matrix/material-table stack; shared helpers are extracted only where source facts are genuinely isomorphic.
+- A named env-cell target with varied surface materials can produce textured structured-interior draw units or explicit typed fallback records.
 
 #### Phase 13A3: Env-Cell Static Object Seed Enrichment
 
@@ -377,7 +426,8 @@ Purpose: render static object seeds inside env cells through the proven static o
 Deliverables:
 
 - Env-cell static object seed source enrichment that loads `gfx-obj`, `setup-model`, `setup-appearance`, material, render-surface, palette, and texture refs as needed through V2 asset service ownership.
-- An adapter or neutralized source-fact shape that lets the static object compatibility partitioner/baker operate on env-cell static seeds without depending on `OutdoorStaticObjectsScopePayload`.
+- A neutral `StaticObjectBakeSourceSet`-style source-fact shape, or equivalent, extracted from the outdoor static-object baker only if it can represent outdoor static objects and env-cell static seeds without losing ownership facts.
+- An adapter from env-cell static object seeds into that neutral source-fact shape; do not add env-cell branches to `OutdoorStaticObjectsScopePayload`.
 - Static object geometry attachments collected for env-cell seed source assets.
 - Widened `StaticObjectGeometryStaticDrawUnit.domain` or a sibling env-cell-static-object draw-unit shape, only if ownership/source facts remain lossless.
 - Tests proving env-cell static seeds can render through existing material families and that missing seed source assets become typed missing refs without failing unrelated cell-structure geometry.
@@ -397,7 +447,8 @@ Purpose: render structured interiors and portal/visibility records through the s
 Dry-run findings:
 
 - WebGL2 already has a generic static-object geometry resource path for positions, UVs, material-slot selectors, material tables, texture bindings, render state, and transparent pass ordering.
-- If Phase 13A2 introduces a dedicated structured-interior draw-unit variant, Phase 13B needs either a renderer resource path for that variant or a materialized translation into the existing static-object shader payload shape.
+- Because Phase 13A2b introduces a dedicated structured-interior draw-unit variant, Phase 13B needs either a renderer resource path for that variant or a materialized translation into the existing static-object shader payload shape.
+- Re-dry-run Phase 13B immediately after Phase 13A2b lands. The renderer plan should be based on the actual `structured-interior-geometry` draw-unit contract, not the older generic Phase 13A wording.
 - Renderer ingestion is not the semantic owner of env-cell visibility. Runtime/static-scene query already owns env-cell BVHs, accepted cell sets, ray picking, and debug selection. Renderer visibility should consume runtime/coordinator decisions, not derive portal traversal from WebGL resources.
 - Existing runtime anchor/rebase policy is outdoor-landblock oriented. Phase 13B must define how dungeon/interior renderer-local placement composes owning landblock, env-cell local placement, and current focus/anchor before visual verification.
 - `TextureManager.resolveTextureRolePageSlot` treats all non-terrain domains as static-object-style role pages, which is likely correct for env-cell static/object materials. Add tests for `landblock-env-cells` so this remains intentional.
@@ -507,7 +558,9 @@ The V2 harness should always provide:
 
 Remaining manual verification milestones:
 
-- Phase 13A: a named pure dungeon or outdoor-linked interior landblock produces env-cell bake output summaries, typed portal/visibility/source records, and material coverage without requesting outdoor terrain.
+- Phase 13A2a: a named pure dungeon or outdoor-linked interior landblock produces full cell-structure geometry attachments while resolver-facing env-cell facts remain light.
+- Phase 13A2b: a named pure dungeon or outdoor-linked interior landblock produces structured-interior debug/flat draw units, typed portal/visibility/source peer records, and correct placement without requesting outdoor terrain.
+- Phase 13A2c: the same target produces structured-interior material/texture coverage or explicit typed fallback records.
 - Phase 13B: at least one real env-cell/interior target renders structured geometry through committed static deltas, with picking/debug overlay still using runtime-owned query records.
 - Phase 13C: dungeon/interior behavior is compared against v1 on named targets before dynamic and cutover work.
 - Phase 14: a static-authored dynamic seed can hydrate, render, animate, and evict without static geometry/atlas rebake.
@@ -589,7 +642,7 @@ Mitigation: picking, inspection, frame metrics, terrain visual parity, static ma
 
 - Which known pure dungeon or outdoor-linked interior landblock/env-cell should be the standard Phase 13 verification target?
 - Which env-cell target has enough surface/material variety to validate both cell-structure geometry and static object seed enrichment?
-- Should Phase 13A introduce a dedicated structured-interior draw-unit variant immediately, or first prove how far the static-object geometry/material table path can extend without losing env-cell ownership facts?
+- After Phase 13A2b, should Phase 13B add a dedicated renderer resource path for `structured-interior-geometry`, or materialize it into an existing static-object shader payload internally while preserving the public draw-unit contract?
 - How soon should Playwright/screenshot regression coverage be introduced for the V2 harness?
 
 ## Decisions And Course Corrections
@@ -609,3 +662,4 @@ Mitigation: picking, inspection, frame metrics, terrain visual parity, static ma
 - 2026-06-14: Static picking durable identity is `StaticSceneSelectionKey`. Browser state and renderer diagnostics should not reconstruct identity from ad hoc hit fields.
 - 2026-06-15: Phase 12B steering chooses static interior/env-cell ingestion and rendering as the next implementation target. More outdoor static breadth is target-driven cleanup, not a blocker for Phase 13A.
 - 2026-06-15: Host `landblock-env-cells` assets may include heavy cell-structure render geometry, but resolver-facing env-cell views should strip vertex buffers like resolver-facing `gfx-obj` views. Bake-time geometry must arrive through explicit attachment/enrichment paths.
+- 2026-06-15: Phase 13A2 is split into geometry attachments, structured-interior debug draw units, and material/texture planning. Cell-structure geometry will use a dedicated `structured-interior-geometry` draw-unit contract; object/part identities must not be invented for cell walls/floors.

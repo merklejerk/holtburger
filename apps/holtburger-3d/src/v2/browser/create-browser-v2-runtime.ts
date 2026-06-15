@@ -25,9 +25,9 @@ import {
 	WorkerPoolStaticBaker,
 } from "../static/bake/worker-client";
 import {
-	createStaticResolverMainHostBridge,
-	type StaticResolverMainHostBridge,
-} from "../static/resolver/host-bridge";
+	createStaticResolverMainAssetBridge,
+	type StaticResolverMainAssetBridge,
+} from "../static/resolver/asset-bridge";
 import {
 	StaticResolverWorkerClient,
 	WorkerPoolStaticResolver,
@@ -104,7 +104,7 @@ export interface WorkerStaticResolverFactories {
 	readonly createBridge?: (
 		port: StaticResolverWorkerPort,
 		assetReader: PreparedAssetReader,
-	) => StaticResolverMainHostBridge;
+	) => StaticResolverMainAssetBridge;
 	readonly createWorker?: () => StaticResolverBrowserWorker;
 }
 
@@ -117,7 +117,7 @@ export function createWorkerStaticResolver(
 	const createWorker =
 		factories.createWorker ?? createStaticResolverBrowserWorker;
 	const createBridge =
-		factories.createBridge ?? createStaticResolverMainHostBridge;
+		factories.createBridge ?? createStaticResolverMainAssetBridge;
 
 	const resolvers = Array.from({ length: workerCount }, () => {
 		const worker = createWorker();

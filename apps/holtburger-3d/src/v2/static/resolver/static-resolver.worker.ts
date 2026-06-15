@@ -8,12 +8,12 @@ import type {
 import { LandblockEnvCellsResolver } from "../env-cells/landblock-env-cells-resolver";
 import { OutdoorStaticObjectsResolver } from "../objects/outdoor-static-objects-resolver";
 import { TerrainStaticScopeResolver } from "../terrain/terrain-resolver";
-import { StaticResolverWorkerPreparedAssetReader } from "./host-bridge";
 import { handleStaticResolverWorkerRequest } from "./worker-handler";
 import type {
 	StaticResolverWorkerGlobalPort,
 	StaticResolverWorkerMainMessage,
 } from "./protocol";
+import { StaticResolverWorkerPreparedAssetReader } from "./worker-asset-reader";
 
 const workerPort = self as unknown as StaticResolverWorkerGlobalPort;
 

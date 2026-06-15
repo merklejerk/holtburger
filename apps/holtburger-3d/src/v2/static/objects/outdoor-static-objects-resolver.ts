@@ -49,6 +49,7 @@ import {
 	createRenderSurfaceIdentity,
 	createSurfaceTextureIdentity,
 } from "../terrain/terrain-identities";
+import { createStaticObjectSourceGeometryIdentity } from "./static-object-source-assets";
 
 type OutdoorStaticPreparedPayload =
 	| GfxObjPayloadDto
@@ -472,19 +473,21 @@ export class OutdoorStaticObjectsResolver {
 		return {
 			bounds: options.gfxObj.renderGeometry.bounds,
 			defaultPlacements: options.defaultPlacements,
+			geometry: createStaticObjectSourceGeometryIdentity({
+				gfxObj,
+				partIndex: options.partIndex,
+				source: options.source,
+			}),
 			gfxObj,
 			invalidPolygonCount: options.gfxObj.renderGeometry.invalidPolygons.length,
 			materialSlotCount: materialSlots.length,
 			materialSlots,
-			normals: toFloat32Array(options.gfxObj.renderGeometry.normals),
 			partIndex: options.partIndex,
 			physicsPolygonCount: options.gfxObj.physicsWitness.polygonCount,
-			positions: toFloat32Array(options.gfxObj.renderGeometry.positions),
 			renderTriangleCount: options.gfxObj.renderGeometry.triangleCount,
 			scale: options.scale,
 			skippedPolygonCount: options.gfxObj.renderGeometry.skippedPolygonCount,
 			source: options.source,
-			texCoords: toFloat32Array(options.gfxObj.renderGeometry.uvs),
 			triangles: options.gfxObj.renderGeometry.triangles.map((triangle) => ({
 				firstVertex: triangle.firstVertex,
 				geometrySurfaceId: triangle.surfaceId,
@@ -1071,12 +1074,6 @@ function deriveSetupPartDefaultPlacements(
 		.filter((entry) => entry.partId === partIndex)
 		.map((entry) => entry.localPlacement);
 	return [...byPart, ...location];
-}
-
-function toFloat32Array(
-	values: readonly number[] | Float32Array,
-): Float32Array {
-	return values instanceof Float32Array ? values : new Float32Array(values);
 }
 
 function mergePartBounds(

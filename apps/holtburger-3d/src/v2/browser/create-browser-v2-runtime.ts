@@ -19,6 +19,7 @@ import {
 	ImmediateStaticBaker,
 	ImmediateStaticResolver,
 } from "../static/fake-workers";
+import { StaticObjectBakeAttachmentProvider } from "../static/objects/bake/static-object-bake-attachments";
 import {
 	StaticBakeWorkerClient,
 	WorkerPoolStaticBaker,
@@ -87,6 +88,9 @@ function createTauriStaticCoordinator(
 	});
 
 	return new StaticCoordinator({
+		attachmentProvider: new StaticObjectBakeAttachmentProvider({
+			assetReader,
+		}),
 		baker,
 		resolver,
 	});

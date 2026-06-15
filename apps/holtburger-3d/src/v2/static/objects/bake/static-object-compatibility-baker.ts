@@ -13,12 +13,14 @@ import type {
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectMaterialTableEntry,
 	StaticObjectInstanceIdentity,
+	StaticObjectSourceGeometryAttachment,
 	StaticObjectPartSourceFacts,
 	StaticObjectRenderState,
 	StaticObjectSourceMappingCoverage,
 	StaticObjectSortMetadata,
 	StaticObjectSourceIdentity,
 } from "../../contracts";
+import { describeStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
 import {
 	createMaterialTextureDataUseKey,
 	partitionStaticObjectCompatibility,
@@ -217,6 +219,7 @@ function bakeStaticObjectCompatibilityItem(
 	});
 	const drawUnits = renderablePartitions.map((partition) =>
 		createStaticObjectGeometryDrawUnit({
+			attachments: input.attachments,
 			partition,
 			payload: scope,
 			work: item.work,
@@ -292,11 +295,15 @@ function warnAboutSkippedStaticObjectPartition(
 }
 
 function createStaticObjectGeometryDrawUnit(options: {
+	readonly attachments: StaticBakeBatchInput["attachments"];
 	readonly work: ScheduledStaticWork;
 	readonly payload: OutdoorStaticObjectsScopePayload;
 	readonly partition: StaticObjectCompatibilityPartition;
 }): StaticObjectGeometryStaticDrawUnit {
-	const sourceIndex = new StaticObjectBakeSourceIndex(options.payload);
+	const sourceIndex = new StaticObjectBakeSourceIndex(
+		options.payload,
+		options.attachments,
+	);
 	const materialEntries = createStaticObjectMaterialTableEntries(options);
 	const materialSlotByEntryKey = new Map<string, number>(
 		options.partition.coarseTablePlan.entries.map((entry, index) => [
@@ -555,13 +562,26 @@ class StaticObjectBakeSourceIndex {
 		string,
 		OutdoorStaticObjectsScopePayload["sourceAssets"][number]
 	>();
+	readonly #geometryByKey = new Map<
+		string,
+		StaticObjectSourceGeometryAttachment
+	>();
 
-	constructor(payload: OutdoorStaticObjectsScopePayload) {
+	constructor(
+		payload: OutdoorStaticObjectsScopePayload,
+		attachments: StaticBakeBatchInput["attachments"],
+	) {
 		for (const object of payload.objects) {
 			this.#objectsByKey.set(createObjectKey(object.identity), object);
 		}
 		for (const source of payload.sourceAssets) {
 			this.#sourcesByKey.set(createSourceKey(source.identity), source);
+		}
+		for (const geometry of attachments.staticObjectSourceGeometry) {
+			this.#geometryByKey.set(
+				describeStaticObjectSourceGeometryIdentity(geometry.identity),
+				geometry,
+			);
 		}
 	}
 
@@ -603,6 +623,23 @@ class StaticObjectBakeSourceIndex {
 
 		return part;
 	}
+
+	getGeometry(
+		part: StaticObjectPartSourceFacts,
+	): StaticObjectSourceGeometryAttachment {
+		const geometry = this.#geometryByKey.get(
+			describeStaticObjectSourceGeometryIdentity(part.geometry),
+		);
+		if (!geometry) {
+			throw new Error(
+				`Static object geometry partition references missing geometry attachment ${describeStaticObjectSourceGeometryIdentity(
+					part.geometry,
+				)}.`,
+			);
+		}
+
+		return geometry;
+	}
 }
 
 function bakeStaticObjectPartitionGeometry(
@@ -628,6 +665,7 @@ function bakeStaticObjectPartitionGeometry(
 			triangle.gfxObj,
 			triangle.partIndex,
 		);
+		const sourceGeometry = sourceIndex.getGeometry(part);
 		const sourceTriangle = part.triangles.find(
 			(candidate) =>
 				candidate.polygonId === triangle.polygonId &&
@@ -655,12 +693,12 @@ function bakeStaticObjectPartitionGeometry(
 			writeTransformedPosition({
 				matrix,
 				positions,
-				source: part.positions,
+				source: sourceGeometry.positions,
 				sourceVertexIndex,
 				targetVertexIndex,
 			});
 			writeTexCoord({
-				source: part.texCoords,
+				source: sourceGeometry.texCoords,
 				sourceVertexIndex,
 				target: texCoords,
 				targetVertexIndex,

@@ -1,5 +1,6 @@
 import type {
 	StaticAtlasBatchSnapshot,
+	StaticBakeAttachmentProvider,
 	StaticBakeBatchInput,
 	StaticBakeBatchResult,
 	StaticBakeBatchItem,
@@ -24,9 +25,13 @@ import {
 	describeStaticScopeKey,
 	planScheduledStaticWork,
 } from "../demand-planner";
+import { createEmptyStaticBakeAttachments } from "../bake/attachments";
 
 const DEFAULT_STATIC_BATCH_MAX_PAYLOADS = 10;
 const DEFAULT_STATIC_BATCH_COALESCE_DELAY_MS = 500;
+const DEFAULT_STATIC_BAKE_ATTACHMENT_PROVIDER: StaticBakeAttachmentProvider = {
+	createAttachments: () => Promise.resolve(createEmptyStaticBakeAttachments()),
+};
 
 export type StaticCoordinatorListener = (
 	snapshot: StaticCoordinatorSnapshot,
@@ -41,6 +46,7 @@ export type StaticCoordinatorSourcePayloadListener = (
 export interface StaticCoordinatorOptions {
 	readonly resolver: StaticResolver;
 	readonly baker: StaticBaker;
+	readonly attachmentProvider?: StaticBakeAttachmentProvider;
 	readonly batching?: Partial<StaticCoordinatorBatchingOptions>;
 	readonly createAtlasSnapshot?: (
 		payloads: readonly StaticScopePayload[],
@@ -56,6 +62,7 @@ export interface StaticCoordinatorBatchingOptions {
 export class StaticCoordinator {
 	readonly #resolver: StaticResolver;
 	readonly #baker: StaticBaker;
+	readonly #attachmentProvider: StaticBakeAttachmentProvider;
 	readonly #batching: StaticCoordinatorBatchingOptions;
 	#createAtlasSnapshot: (
 		payloads: readonly StaticScopePayload[],
@@ -90,6 +97,8 @@ export class StaticCoordinator {
 	constructor(options: StaticCoordinatorOptions) {
 		this.#resolver = options.resolver;
 		this.#baker = options.baker;
+		this.#attachmentProvider =
+			options.attachmentProvider ?? DEFAULT_STATIC_BAKE_ATTACHMENT_PROVIDER;
 		this.#batching = {
 			maxPayloadsPerBatch:
 				options.batching?.maxPayloadsPerBatch ??
@@ -342,11 +351,29 @@ export class StaticCoordinator {
 			items,
 			revision: pendingBatch.revision,
 		});
+		let attachments: StaticBakeBatchInput["attachments"];
+		try {
+			attachments = await this.#attachmentProvider.createAttachments({
+				domain: pendingBatch.domain,
+				items,
+				revision: pendingBatch.revision,
+				staticBatchId,
+			});
+		} catch (error: unknown) {
+			for (const item of items) {
+				this.#markFailedIfCurrent(
+					item.work,
+					error instanceof Error ? error.message : String(error),
+				);
+			}
+			return;
+		}
 		const bakeInput: StaticBakeBatchInput = {
 			atlasSnapshot: this.#createAtlasSnapshot(
 				items.map((item) => item.payload),
 				staticBatchId,
 			),
+			attachments,
 			domain: pendingBatch.domain,
 			items,
 			revision: pendingBatch.revision,

@@ -7,6 +7,7 @@ import type {
 	StaticDrawUnit,
 	StaticScopePayload,
 	StaticMaterialCoverageReport,
+	StaticBakeAttachmentProvider,
 	TerrainGeometryStaticDrawUnit,
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
@@ -77,6 +78,30 @@ describe("V2 static coordinator", () => {
 		expect(coordinator.createSnapshot()).toMatchObject({
 			committed: 0,
 			staleBakeResults: 1,
+		});
+	});
+
+	it("marks work failed when bake attachment creation fails", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			attachmentProvider: new RejectingAttachmentProvider("geometry offline"),
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+
+		coordinator.requestStaticDemand(createSingleTerrainDemand(0xda55ffff));
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
+		await flushPromises();
+
+		expect(baker.pendingInputs).toHaveLength(0);
+		expect(coordinator.createSnapshot()).toMatchObject({
+			failed: 1,
+		});
+		expect(coordinator.createSnapshot().activeWork[0]).toMatchObject({
+			failureMessage: "geometry offline",
+			status: "failed",
 		});
 	});
 
@@ -634,6 +659,14 @@ function createSingleTerrainDemand(landblockId: number): StaticDemand {
 			envCells: -1,
 		},
 	};
+}
+
+class RejectingAttachmentProvider implements StaticBakeAttachmentProvider {
+	constructor(private readonly message: string) {}
+
+	createAttachments(): Promise<never> {
+		return Promise.reject(new Error(this.message));
+	}
 }
 
 async function flushPromises(): Promise<void> {

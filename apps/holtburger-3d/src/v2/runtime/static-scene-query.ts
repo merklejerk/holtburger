@@ -1974,6 +1974,7 @@ function stripPartGeometryBuffers(
 	return {
 		bounds: part.bounds,
 		defaultPlacements: part.defaultPlacements,
+		geometry: part.geometry,
 		gfxObj: part.gfxObj,
 		invalidPolygonCount: part.invalidPolygonCount,
 		materialSlotCount: part.materialSlotCount,

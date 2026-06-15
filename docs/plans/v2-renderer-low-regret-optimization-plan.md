@@ -336,6 +336,8 @@ Status: Completed on 2026-06-15.
 
 ### Phase 5: Adopt Narrow GL State Caching in V2 Renderer
 
+Status: Completed on 2026-06-15.
+
 #### Deliverables
 
 - Move `Webgl2StateCache` from `src/lib/world-display/webgl2-state-cache.ts` to a neutral app-local WebGL utility path before v2 imports it, unless implementation discovers a cleaner existing neutral location.
@@ -354,14 +356,14 @@ Status: Completed on 2026-06-15.
 
 #### Task Checklist
 
-- Move `webgl2-state-cache.ts` and `webgl2-state-cache.test.ts` to the chosen neutral app-local WebGL utility path.
-- Update imports in legacy world-display files and tests.
-- Import `Webgl2StateCache` from the neutral path and instantiate it in the v2 renderer constructor.
-- Convert viewport, program, VAO, texture binds, and fixed render-state helpers incrementally.
-- Explicitly convert or invalidate around raw GL binding paths in resource creation, texture creation, sampler policy application, debug overlay upload, and debug overlay VAO configuration.
-- Keep raw GL calls where state-cache coverage would make the code less clear.
-- Extend existing `webgl2-state-cache.test.ts` only if cache behavior needs new coverage for v2 use.
-- Add v2 renderer tests with a capturing GL only if direct behavior can be tested without brittle browser/WebGL setup.
+- [x] Move `webgl2-state-cache.ts` and `webgl2-state-cache.test.ts` to the chosen neutral app-local WebGL utility path.
+- [x] Update imports in legacy world-display files and tests.
+- [x] Import `Webgl2StateCache` from the neutral path and instantiate it in the v2 renderer constructor.
+- [x] Convert viewport, program, VAO, texture binds, and fixed render-state helpers incrementally.
+- [x] Explicitly convert or invalidate around raw GL binding paths in resource creation, texture creation, sampler policy application, debug overlay upload, and debug overlay VAO configuration.
+- [x] Keep raw GL calls where state-cache coverage would make the code less clear.
+- [x] Extend existing `webgl2-state-cache.test.ts` only if cache behavior needs new coverage for v2 use.
+- [x] Add v2 renderer tests with a capturing GL only if direct behavior can be tested without brittle browser/WebGL setup.
 
 #### Acceptance Criteria
 
@@ -373,6 +375,13 @@ Status: Completed on 2026-06-15.
 #### Decisions and Course Corrections
 
 - Dry run rejected importing the helper from `src/lib/world-display` directly into v2 because the path would encode misleading ownership.
+- Moved the shared helper to `src/lib/webgl2/webgl2-state-cache.ts` with its existing tests under the same neutral path. No second state cache was created.
+- Updated legacy world-display imports plus v2 renderer imports to use the neutral helper path.
+- Added `#stateCache` to `Webgl2Renderer` and converted v2 viewport, program, VAO, texture unit/texture binds, depth state, and blend state to route through it.
+- Converted v2 `blendFunc`/`blendEquation` usage to equivalent `setBlendState` calls using separate RGB/alpha state. Static object blend uses equal RGB/alpha factors to match `gl.blendFunc(src, dst)`.
+- Left uniform uploads, buffer uploads, shader/program creation, texture image upload, sampler parameter updates, and `lineWidth` as raw GL calls. These are not covered by the narrow cache or would make the code less clear.
+- Invalidated the state cache after raw tracked-state mutations: terrain/static resource creation, debug overlay VAO configuration, debug overlay buffer upload, texture page creation, and sampler policy application.
+- Did not add v2 renderer GL call-capture tests. The existing cache tests cover suppression behavior, and v2 integration would require brittle fake WebGL plumbing with low signal.
 
 ### Phase 6: Cleanup and Resteering
 
@@ -435,5 +444,4 @@ Status: Completed on 2026-06-15.
 
 ## Open Questions
 
-- Which exact neutral path should own the moved state cache: `src/lib/webgl2/`, `src/lib/webgl/`, or another existing utility convention discovered during implementation?
 - Do we want a short before/after profiler note checked into this plan after implementation, or should profiler captures stay local/manual?

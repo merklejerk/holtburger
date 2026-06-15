@@ -13,7 +13,7 @@ import {
 } from "./camera";
 import type { PreparedBounds } from "../assets/types";
 import { createWebgl2RenderMetrics } from "./webgl2-render-metrics";
-import { Webgl2StateCache } from "./webgl2-state-cache";
+import { Webgl2StateCache } from "../webgl2/webgl2-state-cache";
 import {
 	buildWorldRenderFrame,
 	WORLD_RENDER_CANDIDATE_KIND,

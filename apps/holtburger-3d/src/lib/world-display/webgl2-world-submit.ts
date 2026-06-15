@@ -16,7 +16,7 @@ import {
 	type WorldRenderFrame,
 } from "./world-render-frame";
 import type { Webgl2ProgramResource } from "./webgl2-gl";
-import type { Webgl2StateCache } from "./webgl2-state-cache";
+import type { Webgl2StateCache } from "../webgl2/webgl2-state-cache";
 import type { Webgl2TransitionPortalMaskResource } from "./webgl2-world-resources";
 import type { Webgl2TerrainTileResource } from "./webgl2/resources/terrain-tile-resources";
 import {

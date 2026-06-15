@@ -9,7 +9,7 @@ import {
 	createWebgl2Program,
 	type Webgl2ProgramResource,
 } from "../../webgl2-gl";
-import type { Webgl2StateCache } from "../../webgl2-state-cache";
+import type { Webgl2StateCache } from "../../../webgl2/webgl2-state-cache";
 import {
 	describeTerrainBlendTextureAtlasEntryKey,
 	type Webgl2TerrainTileDrawSliceResource,

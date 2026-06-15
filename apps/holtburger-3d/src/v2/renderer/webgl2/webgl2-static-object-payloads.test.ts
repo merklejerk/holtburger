@@ -5,8 +5,11 @@ import type {
 } from "../../static/contracts";
 import type { TextureDrawUnitBinding } from "../types";
 import {
-	createStaticObjectDrawScratch,
+	createStaticObjectPreparedDrawPayload,
+	createStaticObjectPreparedDrawPayloadState,
+	markStaticObjectPreparedDrawPayloadDirty,
 	prepareStaticObjectDrawPayload,
+	prepareStaticObjectDrawPayloadState,
 	type StaticObjectMaterialPayloadResource,
 } from "./webgl2-static-object-payloads";
 
@@ -23,7 +26,7 @@ const opaqueRenderState: StaticObjectRenderState = {
 
 describe("V2 WebGL2 static object payload builder", () => {
 	it("fills material defaults and fallback modes without resident textures", () => {
-		const scratch = createStaticObjectDrawScratch();
+		const scratch = createStaticObjectPreparedDrawPayload();
 		const resource = createStaticResource({
 			materialEntries: [
 				createMaterialEntry({
@@ -69,7 +72,7 @@ describe("V2 WebGL2 static object payload builder", () => {
 	});
 
 	it("prepares resident role pages and indexed material uniforms", () => {
-		const scratch = createStaticObjectDrawScratch();
+		const scratch = createStaticObjectPreparedDrawPayload();
 		const indexTexture = createTexture();
 		const paletteTexture = createTexture();
 		const detailTexture = createTexture();
@@ -164,7 +167,7 @@ describe("V2 WebGL2 static object payload builder", () => {
 	});
 
 	it("resets stale scratch values between preparations", () => {
-		const scratch = createStaticObjectDrawScratch();
+		const scratch = createStaticObjectPreparedDrawPayload();
 		const texture = createTexture();
 		const residentResource = createStaticResource({
 			materialEntries: [
@@ -217,7 +220,7 @@ describe("V2 WebGL2 static object payload builder", () => {
 	});
 
 	it("throws when a static resource has no material table entries", () => {
-		const scratch = createStaticObjectDrawScratch();
+		const scratch = createStaticObjectPreparedDrawPayload();
 		const resource = createStaticResource({
 			materialEntries: [],
 			materialFamily: "flat-color",
@@ -231,6 +234,66 @@ describe("V2 WebGL2 static object payload builder", () => {
 				new Map(),
 			),
 		).toThrow("Static object resource test-draw-unit has no material table entries.");
+	});
+
+	it("rebuilds resource-owned payload state only when marked dirty", () => {
+		const state = createStaticObjectPreparedDrawPayloadState();
+		const texture = createTexture();
+		const resource = createStaticResource({
+			materialEntries: [
+				createMaterialEntry({
+					primaryTextureUseId: "base-use",
+					slot: 0,
+				}),
+			],
+			materialFamily: "texture-rgba",
+		});
+		const bindings = new Map<string, TextureDrawUnitBinding>([
+			[
+				"base-use",
+				createBinding({
+					height: 8,
+					kind: "static-base-color",
+					rect: [1, 2, 3, 4],
+					slot: 0,
+					textureRefId: "base-ref",
+					textureUseId: "base-use",
+					width: 8,
+				}),
+			],
+		]);
+		const textures = new Map<string, WebGLTexture>([["base-ref", texture]]);
+
+		const firstPayload = prepareStaticObjectDrawPayloadState(
+			state,
+			resource,
+			bindings,
+			textures,
+		);
+		expect(state.isDirty).toBe(false);
+		expect(firstPayload.materialUniforms.materialModes[0]).toBe(1);
+
+		textures.delete("base-ref");
+		const unchangedPayload = prepareStaticObjectDrawPayloadState(
+			state,
+			resource,
+			bindings,
+			textures,
+		);
+		expect(unchangedPayload).toBe(firstPayload);
+		expect(unchangedPayload.materialUniforms.materialModes[0]).toBe(1);
+
+		markStaticObjectPreparedDrawPayloadDirty(state);
+		const rebuiltPayload = prepareStaticObjectDrawPayloadState(
+			state,
+			resource,
+			bindings,
+			textures,
+		);
+		expect(rebuiltPayload).toBe(firstPayload);
+		expect(state.isDirty).toBe(false);
+		expect(rebuiltPayload.materialUniforms.materialModes[0]).toBe(2);
+		expect(rebuiltPayload.rolePages.baseColor.textures[0]).toBeNull();
 	});
 });
 

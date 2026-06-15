@@ -54,7 +54,39 @@ export interface StaticObjectPreparedMaterialUniforms {
 	readonly wrapModes: Int32Array;
 }
 
-export function createStaticObjectDrawScratch(): StaticObjectPreparedDrawPayload {
+export interface StaticObjectPreparedDrawPayloadState {
+	readonly payload: StaticObjectPreparedDrawPayload;
+	isDirty: boolean;
+}
+
+export function createStaticObjectPreparedDrawPayloadState(): StaticObjectPreparedDrawPayloadState {
+	return {
+		isDirty: true,
+		payload: createStaticObjectPreparedDrawPayload(),
+	};
+}
+
+export function markStaticObjectPreparedDrawPayloadDirty(
+	state: StaticObjectPreparedDrawPayloadState,
+): void {
+	state.isDirty = true;
+}
+
+export function prepareStaticObjectDrawPayloadState(
+	state: StaticObjectPreparedDrawPayloadState,
+	resource: StaticObjectMaterialPayloadResource,
+	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	textures: ReadonlyMap<string, WebGLTexture>,
+): StaticObjectPreparedDrawPayload {
+	if (state.isDirty) {
+		prepareStaticObjectDrawPayload(state.payload, resource, bindings, textures);
+		state.isDirty = false;
+	}
+
+	return state.payload;
+}
+
+export function createStaticObjectPreparedDrawPayload(): StaticObjectPreparedDrawPayload {
 	return {
 		materialUniforms: createStaticObjectMaterialUniformScratch(),
 		rolePages: {

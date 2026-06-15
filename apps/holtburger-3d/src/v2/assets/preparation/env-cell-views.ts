@@ -3,6 +3,33 @@ import type {
 	LandblockEnvCellsPayloadDto,
 } from "../../../lib/host/contracts";
 import type { PreparedAsset } from "../contracts";
+import { omitRenderGeometryVertexBuffers } from "./render-geometry-views";
+
+export type ResolverEnvCellRenderGeometryDto = Omit<
+	LandblockEnvCellsPayloadDto["envCells"][number]["renderGeometry"],
+	"normals" | "positions" | "uvs"
+>;
+
+export type ResolverLandblockEnvCellDto = Omit<
+	LandblockEnvCellsPayloadDto["envCells"][number],
+	"renderGeometry"
+> & {
+	readonly renderGeometry: ResolverEnvCellRenderGeometryDto;
+};
+
+export type ResolverLandblockEnvCellsPayloadDto = Omit<
+	LandblockEnvCellsPayloadDto,
+	"envCells"
+> & {
+	readonly envCells: readonly ResolverLandblockEnvCellDto[];
+};
+
+export type ResolverEnvCellPayloadDto = Omit<
+	EnvCellPayloadDto,
+	"renderGeometry"
+> & {
+	readonly renderGeometry: ResolverEnvCellRenderGeometryDto;
+};
 
 export function createResolverEnvCellPreparedAssetView(
 	asset: PreparedAsset,
@@ -25,7 +52,7 @@ export function createResolverEnvCellPreparedAssetView(
 
 function createResolverLandblockEnvCellsPayloadView(
 	payload: LandblockEnvCellsPayloadDto,
-): LandblockEnvCellsPayloadDto {
+): ResolverLandblockEnvCellsPayloadDto {
 	return {
 		...payload,
 		envCells: payload.envCells.map(createResolverEnvCellPayloadView),
@@ -34,21 +61,16 @@ function createResolverLandblockEnvCellsPayloadView(
 
 function createResolverEnvCellPayloadView(
 	cell: EnvCellPayloadDto,
-): EnvCellPayloadDto;
+): ResolverEnvCellPayloadDto;
 function createResolverEnvCellPayloadView(
 	cell: LandblockEnvCellsPayloadDto["envCells"][number],
-): LandblockEnvCellsPayloadDto["envCells"][number];
+): ResolverLandblockEnvCellDto;
 function createResolverEnvCellPayloadView(
 	cell: EnvCellPayloadDto | LandblockEnvCellsPayloadDto["envCells"][number],
-): EnvCellPayloadDto | LandblockEnvCellsPayloadDto["envCells"][number] {
+): ResolverEnvCellPayloadDto | ResolverLandblockEnvCellDto {
 	return {
 		...cell,
-		renderGeometry: {
-			...cell.renderGeometry,
-			normals: [],
-			positions: [],
-			uvs: [],
-		},
+		renderGeometry: omitRenderGeometryVertexBuffers(cell.renderGeometry),
 	};
 }
 

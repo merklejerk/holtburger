@@ -77,15 +77,22 @@ describe("V2 static resolver asset bridge", () => {
 			envCells: [
 				{
 					renderGeometry: {
-						normals: [],
-						positions: [],
 						triangles: [{ firstVertex: 0 }],
-						uvs: [],
 					},
 				},
 			],
 			kind: "landblock-env-cells",
 		});
+		const renderGeometry = (
+			resolved.payload as {
+				readonly envCells: readonly {
+					readonly renderGeometry: Record<string, unknown>;
+				}[];
+			}
+		).envCells[0]?.renderGeometry;
+		expect(renderGeometry).not.toHaveProperty("normals");
+		expect(renderGeometry).not.toHaveProperty("positions");
+		expect(renderGeometry).not.toHaveProperty("uvs");
 		expect(
 			(
 				asset.payload as {
@@ -95,6 +102,48 @@ describe("V2 static resolver asset bridge", () => {
 				}
 			).envCells[0]?.renderGeometry.positions,
 		).toEqual([1, 2, 3]);
+
+		workerAssetReader.dispose();
+		bridge.dispose();
+	});
+
+	it("sends resolver-light gfx-obj payloads across the worker boundary without vertex buffers", async () => {
+		const channel = new FixtureWorkerChannel();
+		const key = createHostAssetKey("gfx-obj", 0x01000020);
+		const asset = createPreparedAssetWithPayload(key, {
+			kind: "gfx-obj",
+			renderGeometry: {
+				normals: [0, 0, 1],
+				positions: [1, 2, 3],
+				triangles: [{ firstVertex: 0 }],
+				uvs: [0, 0],
+			},
+		});
+		const assetReader = new FixturePreparedAssetReader(asset);
+		const bridge = createStaticResolverMainAssetBridge(
+			channel.mainPort,
+			assetReader,
+		);
+		const workerAssetReader = new StaticResolverWorkerPreparedAssetReader(
+			channel.workerPort,
+		);
+
+		const resolved = await workerAssetReader.requestPreparedAsset(key);
+
+		expect(resolved.payload).toMatchObject({
+			kind: "gfx-obj",
+			renderGeometry: {
+				triangles: [{ firstVertex: 0 }],
+			},
+		});
+		const renderGeometry = (
+			resolved.payload as {
+				readonly renderGeometry: Record<string, unknown>;
+			}
+		).renderGeometry;
+		expect(renderGeometry).not.toHaveProperty("normals");
+		expect(renderGeometry).not.toHaveProperty("positions");
+		expect(renderGeometry).not.toHaveProperty("uvs");
 
 		workerAssetReader.dispose();
 		bridge.dispose();

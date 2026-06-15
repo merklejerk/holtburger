@@ -1,5 +1,4 @@
 import type {
-	GfxObjPayloadDto,
 	LandblockOutdoorPayloadDto,
 	MaterialRecipePayloadDto,
 	PalettePayloadDto,
@@ -9,6 +8,7 @@ import type {
 	SetupModelPayloadDto,
 	SurfaceTexturePayloadDto,
 } from "../../../lib/host/contracts";
+import type { ResolverGfxObjPayloadDto } from "../../assets/preparation/gfx-obj-views";
 import type {
 	HostAssetKey,
 	PreparedAsset,
@@ -52,7 +52,7 @@ import {
 import { createStaticObjectSourceGeometryIdentity } from "./static-object-source-assets";
 
 type OutdoorStaticPreparedPayload =
-	| GfxObjPayloadDto
+	| ResolverGfxObjPayloadDto
 	| LandblockOutdoorPayloadDto
 	| MaterialRecipePayloadDto
 	| PalettePayloadDto
@@ -350,7 +350,7 @@ export class OutdoorStaticObjectsResolver {
 		readonly context: OutdoorStaticResolveContext;
 		readonly source: StaticObjectSourceIdentity;
 		readonly gfxObjAssetId: string;
-		readonly gfxObj: GfxObjPayloadDto;
+		readonly gfxObj: ResolverGfxObjPayloadDto;
 		readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
 		readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
 		readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
@@ -473,7 +473,7 @@ export class OutdoorStaticObjectsResolver {
 		readonly context: OutdoorStaticResolveContext;
 		readonly source: StaticObjectSourceIdentity;
 		readonly gfxObjAssetId: string;
-		readonly gfxObj: GfxObjPayloadDto;
+		readonly gfxObj: ResolverGfxObjPayloadDto;
 		readonly partIndex: number;
 		readonly defaultPlacements: readonly StaticObjectPartSourceFacts["defaultPlacements"][number][];
 		readonly scale: StaticObjectPartSourceFacts["scale"];
@@ -525,7 +525,7 @@ export class OutdoorStaticObjectsResolver {
 
 	async #createMaterialSlotFacts(options: {
 		readonly context: OutdoorStaticResolveContext;
-		readonly gfxObj: GfxObjPayloadDto;
+		readonly gfxObj: ResolverGfxObjPayloadDto;
 		readonly materialSlots?: readonly StaticObjectMaterialSlotInput[];
 		readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
 		readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
@@ -983,7 +983,7 @@ function createObjectMaterialSlotFacts(options: {
 }
 
 function expandStaticObjectMaterialVariants(options: {
-	readonly gfxObj: GfxObjPayloadDto;
+	readonly gfxObj: ResolverGfxObjPayloadDto;
 	readonly materialSlots: readonly Omit<
 		StaticObjectMaterialSlotInput,
 		"materialVariantSignature"
@@ -1009,7 +1009,7 @@ function expandStaticObjectMaterialVariants(options: {
 }
 
 function collectGeometryMaterialVariants(
-	gfxObj: GfxObjPayloadDto,
+	gfxObj: ResolverGfxObjPayloadDto,
 ): ReadonlyMap<number, ReadonlySet<string | null>> {
 	const variantsByGeometrySurface = new Map<number, Set<string | null>>();
 

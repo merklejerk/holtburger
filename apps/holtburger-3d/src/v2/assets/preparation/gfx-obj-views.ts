@@ -1,5 +1,18 @@
 import type { GfxObjPayloadDto } from "../../../lib/host/contracts";
 import type { PreparedAsset } from "../contracts";
+import { omitRenderGeometryVertexBuffers } from "./render-geometry-views";
+
+export type ResolverGfxObjRenderGeometryDto = Omit<
+	GfxObjPayloadDto["renderGeometry"],
+	"normals" | "positions" | "uvs"
+>;
+
+export type ResolverGfxObjPayloadDto = Omit<
+	GfxObjPayloadDto,
+	"renderGeometry"
+> & {
+	readonly renderGeometry: ResolverGfxObjRenderGeometryDto;
+};
 
 export function createResolverGfxObjPreparedAssetView(
 	asset: PreparedAsset,
@@ -16,15 +29,10 @@ export function createResolverGfxObjPreparedAssetView(
 
 function createResolverGfxObjPayloadView(
 	payload: GfxObjPayloadDto,
-): GfxObjPayloadDto {
+): ResolverGfxObjPayloadDto {
 	return {
 		...payload,
-		renderGeometry: {
-			...payload.renderGeometry,
-			normals: [],
-			positions: [],
-			uvs: [],
-		},
+		renderGeometry: omitRenderGeometryVertexBuffers(payload.renderGeometry),
 	};
 }
 

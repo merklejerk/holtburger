@@ -1,6 +1,9 @@
 import type { V2ParsedLocationInput } from "./location-input";
 import { createSceneInterestFromLocation } from "./location-input";
-import type { ManualStaticDomain, RuntimeSceneInterest } from "../runtime/client-runtime";
+import type {
+	ManualStaticDomain,
+	RuntimeSceneInterest,
+} from "../runtime/client-runtime";
 import { deriveOutdoorCameraLandblockResidency } from "../runtime/static-placement";
 import type { StaticLodRadii } from "../static/contracts";
 

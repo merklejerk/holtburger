@@ -702,9 +702,7 @@ function filterStaticBakeResultForWorks(
 	const desiredKeys = new Set(works.map(createDesiredWorkKey));
 	const drawUnitIds = new Set(
 		result.drawUnits
-			.filter((drawUnit) =>
-				desiredKeys.has(getDrawUnitDesiredKey(drawUnit)),
-			)
+			.filter((drawUnit) => desiredKeys.has(getDrawUnitDesiredKey(drawUnit)))
 			.map((drawUnit) => drawUnit.drawUnitId),
 	);
 

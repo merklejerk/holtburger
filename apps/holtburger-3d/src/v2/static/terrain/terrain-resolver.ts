@@ -386,7 +386,9 @@ function createTerrainMeshFacts(
 			bounds: terrainSourceBoundsToRenderLocalBounds(triangle.bounds),
 		})),
 		vertexCount: landblock.terrain.vertices.length,
-		vertices: landblock.terrain.vertices.map(terrainSourceVec3ToRenderLocalVec3),
+		vertices: landblock.terrain.vertices.map(
+			terrainSourceVec3ToRenderLocalVec3,
+		),
 	};
 }
 
@@ -400,7 +402,9 @@ function terrainSourceVec3ToRenderLocalVec3(
 	};
 }
 
-function terrainSourceBoundsToRenderLocalBounds(bounds: StaticBounds): StaticBounds {
+function terrainSourceBoundsToRenderLocalBounds(
+	bounds: StaticBounds,
+): StaticBounds {
 	return {
 		max: {
 			x: bounds.max.x,

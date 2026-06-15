@@ -159,8 +159,12 @@ describe("V2 WebGL2 debug overlay shader contract", () => {
 		expect(DEBUG_OVERLAY_VERTEX_SHADER).toContain(
 			"uniform mat4 uModelViewProjection;",
 		);
-		expect(DEBUG_OVERLAY_VERTEX_SHADER).toContain("layout(location = 0) in vec3 position;");
-		expect(DEBUG_OVERLAY_VERTEX_SHADER).toContain("layout(location = 1) in vec4 color;");
+		expect(DEBUG_OVERLAY_VERTEX_SHADER).toContain(
+			"layout(location = 0) in vec3 position;",
+		);
+		expect(DEBUG_OVERLAY_VERTEX_SHADER).toContain(
+			"layout(location = 1) in vec4 color;",
+		);
 		expect(DEBUG_OVERLAY_FRAGMENT_SHADER).toContain(
 			"fragColor = vec4(vec3(1.0), vColor.a);",
 		);

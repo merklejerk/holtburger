@@ -74,6 +74,12 @@ const STATIC_OBJECT_DETAIL_TEXTURE_UNIT_BASE =
 	STATIC_OBJECT_PALETTE_TEXTURE_UNIT_BASE +
 	MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW;
 const DEBUG_OVERLAY_FLOATS_PER_VERTEX = 7;
+// Visual-quality/perf tradeoff: sort only transparent statics close enough for
+// object-order artifacts to be obvious.
+const NEAR_TRANSPARENT_STATIC_SORT_DISTANCE = 16;
+const NEAR_TRANSPARENT_STATIC_SORT_DISTANCE_SQUARED =
+	NEAR_TRANSPARENT_STATIC_SORT_DISTANCE *
+	NEAR_TRANSPARENT_STATIC_SORT_DISTANCE;
 const EMPTY_TEXTURE_DRAW_UNIT_BINDINGS: ReadonlyMap<
 	string,
 	TextureDrawUnitBinding
@@ -636,6 +642,13 @@ class Webgl2Renderer implements Renderer {
 	readonly #debugOverlayVertexArray: WebGLVertexArrayObject;
 	readonly #debugOverlayVertexBuffer: WebGLBuffer;
 	readonly #stateCache: Webgl2StateCache;
+	readonly #farTransparentStaticObjectDrawList: StaticObjectGeometryResource[] =
+		[];
+	readonly #nearTransparentStaticObjectDrawEntries: StaticObjectTransparentDrawEntry[] =
+		[];
+	readonly #transparentStaticObjectDrawEntryPool: StaticObjectTransparentDrawEntry[] =
+		[];
+	#transparentStaticObjectDrawEntryPoolActiveCount = 0;
 	#animationFrameId: number | null = null;
 	#disposed = false;
 	#frameCount = 0;
@@ -970,6 +983,7 @@ class Webgl2Renderer implements Renderer {
 
 	#drawStaticObjects(): void {
 		if (this.#staticObjectResources.size === 0) {
+			this.#resetTransparentStaticObjectDrawLists();
 			return;
 		}
 
@@ -987,31 +1001,27 @@ class Webgl2Renderer implements Renderer {
 		);
 
 		applyStaticObjectDepthWritingState(gl, this.#stateCache);
+		this.#resetTransparentStaticObjectDrawLists();
 		for (const resource of this.#staticObjectResources.values()) {
 			if (isTransparentStaticObjectResource(resource)) {
+				this.#appendTransparentStaticObjectResource(resource);
 				continue;
 			}
 			this.#drawStaticObjectResource(resource);
 		}
 
-		const transparentResources = Array.from(
-			this.#staticObjectResources.values(),
-		)
-			.filter(isTransparentStaticObjectResource)
-			.sort((left, right) =>
-				compareStaticObjectTransparentDrawOrder(
-					{
-						drawUnitId: left.drawUnitId,
-						sortCenter: this.#createStaticObjectSortCenter(left),
-					},
-					{
-						drawUnitId: right.drawUnitId,
-						sortCenter: this.#createStaticObjectSortCenter(right),
-					},
-					this.#frameState.camera.position,
-				),
-			);
-		for (const resource of transparentResources) {
+		for (const resource of this.#farTransparentStaticObjectDrawList) {
+			applyStaticObjectRenderState(gl, this.#stateCache, resource.renderState);
+			this.#drawStaticObjectResource(resource);
+		}
+		this.#nearTransparentStaticObjectDrawEntries.sort(
+			compareStaticObjectTransparentDrawEntries,
+		);
+		for (const entry of this.#nearTransparentStaticObjectDrawEntries) {
+			const resource = entry.resource;
+			if (!resource) {
+				throw new Error("Missing transparent static object draw resource.");
+			}
 			applyStaticObjectRenderState(gl, this.#stateCache, resource.renderState);
 			this.#drawStaticObjectResource(resource);
 		}
@@ -1147,6 +1157,44 @@ class Webgl2Renderer implements Renderer {
 		);
 	}
 
+	#resetTransparentStaticObjectDrawLists(): void {
+		this.#farTransparentStaticObjectDrawList.length = 0;
+		this.#nearTransparentStaticObjectDrawEntries.length = 0;
+		for (
+			let index = 0;
+			index < this.#transparentStaticObjectDrawEntryPoolActiveCount;
+			index += 1
+		) {
+			const entry = this.#transparentStaticObjectDrawEntryPool[index];
+			if (entry) {
+				entry.resource = null;
+			}
+		}
+		this.#transparentStaticObjectDrawEntryPoolActiveCount = 0;
+	}
+
+	#appendTransparentStaticObjectResource(
+		resource: StaticObjectGeometryResource,
+	): void {
+		const distanceSquared =
+			this.#computeStaticObjectSortDistanceSquared(resource);
+		if (distanceSquared > NEAR_TRANSPARENT_STATIC_SORT_DISTANCE_SQUARED) {
+			this.#farTransparentStaticObjectDrawList.push(resource);
+			return;
+		}
+
+		const poolIndex = this.#transparentStaticObjectDrawEntryPoolActiveCount;
+		const entry =
+			this.#transparentStaticObjectDrawEntryPool[poolIndex] ??
+			createStaticObjectTransparentDrawEntry();
+		entry.resource = resource;
+		entry.drawUnitId = resource.drawUnitId;
+		entry.distanceSquared = distanceSquared;
+		this.#transparentStaticObjectDrawEntryPool[poolIndex] = entry;
+		this.#transparentStaticObjectDrawEntryPoolActiveCount += 1;
+		this.#nearTransparentStaticObjectDrawEntries.push(entry);
+	}
+
 	#markStaticObjectPreparedPayloadDirty(drawUnitId: string): void {
 		const resource = this.#staticObjectResources.get(drawUnitId);
 		if (!resource) {
@@ -1232,13 +1280,17 @@ class Webgl2Renderer implements Renderer {
 		);
 	}
 
-	#createStaticObjectSortCenter(
+	#computeStaticObjectSortDistanceSquared(
 		resource: StaticObjectGeometryResource,
-	): readonly [number, number, number] {
-		return translatePoint(
-			resource.localSortCenter,
-			this.#createResourceTranslation(resource),
-		);
+	): number {
+		const translation = this.#createResourceTranslation(resource);
+		const sortCenter = resource.localSortCenter;
+		const cameraPosition = this.#frameState.camera.position;
+		const deltaX = sortCenter[0] + translation[0] - cameraPosition[0];
+		const deltaY = sortCenter[1] + translation[1] - cameraPosition[1];
+		const deltaZ = sortCenter[2] + translation[2] - cameraPosition[2];
+
+		return deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
 	}
 
 	#configureDebugOverlayVertexArray(): void {
@@ -1962,17 +2014,6 @@ function uploadStaticObjectMaterialTableUniforms(
 	gl.uniform1iv(program.uniforms.uMaterialWrapModes, uniforms.wrapModes);
 }
 
-function translatePoint(
-	point: readonly [number, number, number],
-	translation: readonly [number, number, number],
-): readonly [number, number, number] {
-	return [
-		point[0] + translation[0],
-		point[1] + translation[1],
-		point[2] + translation[2],
-	];
-}
-
 function sumRenderedTriangles(
 	resources: readonly RenderedTriangleResource[],
 ): number {
@@ -1982,19 +2023,30 @@ function sumRenderedTriangles(
 	);
 }
 
-interface StaticObjectDrawOrderResource {
+export interface StaticObjectTransparentDrawSortEntry {
 	readonly drawUnitId: string;
-	readonly sortCenter: readonly [number, number, number];
+	readonly distanceSquared: number;
 }
 
-export function compareStaticObjectTransparentDrawOrder(
-	left: StaticObjectDrawOrderResource,
-	right: StaticObjectDrawOrderResource,
-	cameraPosition: readonly [number, number, number],
+interface StaticObjectTransparentDrawEntry {
+	resource: StaticObjectGeometryResource | null;
+	distanceSquared: number;
+	drawUnitId: string;
+}
+
+function createStaticObjectTransparentDrawEntry(): StaticObjectTransparentDrawEntry {
+	return {
+		distanceSquared: 0,
+		drawUnitId: "",
+		resource: null,
+	};
+}
+
+export function compareStaticObjectTransparentDrawEntries(
+	left: StaticObjectTransparentDrawSortEntry,
+	right: StaticObjectTransparentDrawSortEntry,
 ): number {
-	const leftDistance = distanceSquared(left.sortCenter, cameraPosition);
-	const rightDistance = distanceSquared(right.sortCenter, cameraPosition);
-	const distanceOrder = rightDistance - leftDistance;
+	const distanceOrder = right.distanceSquared - left.distanceSquared;
 
 	return distanceOrder === 0
 		? left.drawUnitId.localeCompare(right.drawUnitId)
@@ -2013,17 +2065,6 @@ export function resolveStaticObjectBlendFactor(
 		case "one-minus-src-alpha":
 			return gl.ONE_MINUS_SRC_ALPHA;
 	}
-}
-
-function distanceSquared(
-	left: readonly [number, number, number],
-	right: readonly [number, number, number],
-): number {
-	const deltaX = left[0] - right[0];
-	const deltaY = left[1] - right[1];
-	const deltaZ = left[2] - right[2];
-
-	return deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
 }
 
 function isTransparentStaticObjectResource(

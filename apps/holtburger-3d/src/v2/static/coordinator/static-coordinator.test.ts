@@ -10,6 +10,7 @@ import type {
 	StaticBakeAttachmentProvider,
 	ScheduledStaticWork,
 	StaticSpatialRecord,
+	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
 	StaticVisibilityRecord,
 } from "../contracts";
@@ -764,6 +765,80 @@ describe("V2 static coordinator", () => {
 				),
 		).toBe(false);
 	});
+
+	it("commits and evicts structured interior draw units with env-cell work", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+		const deltas: StaticCoordinatorCommitDelta[] = [];
+		coordinator.subscribeCommits((delta) => deltas.push(delta));
+
+		const [work] = coordinator.requestStaticDemand({
+			location: {
+				envCellId: 0xda550100,
+				kind: "interior-cell",
+				landblockId: 0xda55ffff,
+			},
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: 0,
+				terrain: -1,
+			},
+		});
+		resolver.complete(
+			resolver.pendingRequests[0]?.requestId ?? "",
+			createLandblockEnvCellsResolverPayload(),
+		);
+		await flushPromises();
+
+		baker.complete(work?.workId ?? "", {
+			drawUnits: [
+				createStructuredInteriorDrawUnit(
+					"structured-interior-a",
+					0xda55ffff,
+				),
+			],
+		});
+		await flushPromises();
+
+		expect(coordinator.createSnapshot()).toMatchObject({
+			committed: 1,
+			committedDrawUnits: 1,
+		});
+		expect(deltas.at(-1)).toMatchObject({
+			addedDrawUnits: [
+				{
+					domain: "landblock-env-cells",
+					drawUnitId: "structured-interior-a",
+					kind: "structured-interior-geometry",
+				},
+			],
+			removedDrawUnitIds: [],
+		});
+
+		coordinator.requestStaticDemand({
+			location: null,
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: -1,
+				terrain: -1,
+			},
+		});
+
+		expect(coordinator.createSnapshot()).toMatchObject({
+			committedDrawUnits: 0,
+		});
+		expect(deltas.at(-1)).toMatchObject({
+			addedDrawUnits: [],
+			removedDrawUnitIds: ["structured-interior-a"],
+		});
+	});
 });
 
 function createSingleTerrainDemand(landblockId: number): StaticDemand {
@@ -821,6 +896,46 @@ function createTerrainDrawUnit(
 		sourceTriangleIds: ["triangle-a"],
 		terrainFallbackReasons: [],
 		terrainMaterialPlan: null,
+		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+		textureUseIds: [],
+		triangleCount: 1,
+		vertexCount: 3,
+	};
+}
+
+function createStructuredInteriorDrawUnit(
+	drawUnitId: string,
+	landblockId: number,
+): StructuredInteriorGeometryStaticDrawUnit {
+	return {
+		cellStructure: {
+			cellStructureId: 0x0d000001,
+			kind: "cell-structure",
+		},
+		coordinateSpace: "landblock-render-local",
+		debugColor: [0.42, 0.72, 1, 1],
+		domain: "landblock-env-cells",
+		drawUnitId,
+		envCellId: landblockId & 0xffff_ff00,
+		environment: {
+			environmentId: 0x0e000001,
+			kind: "environment",
+		},
+		indexType: "uint16",
+		indices: new Uint16Array([0, 1, 2]),
+		kind: "structured-interior-geometry",
+		landblockId,
+		localPlacement: {
+			orientation: { w: 1, x: 0, y: 0, z: 0 },
+			origin: { x: 0, y: 0, z: 0 },
+		},
+		materialBucketKey: "structured-interior-debug-flat",
+		materialFamily: "structured-interior-debug-flat",
+		materialIds: [],
+		memberId: "cell-0",
+		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
+		sourceTriangleIds: ["triangle-a"],
+		surfaceIds: [],
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
 		textureUseIds: [],
 		triangleCount: 1,

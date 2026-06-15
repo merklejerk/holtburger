@@ -695,7 +695,8 @@ function createDesiredKeyForDrawUnit(input: {
 function getDrawUnitDesiredKey(drawUnit: StaticDrawUnit): string {
 	if (
 		drawUnit.kind === "terrain-geometry" ||
-		drawUnit.kind === "static-object-geometry"
+		drawUnit.kind === "static-object-geometry" ||
+		drawUnit.kind === "structured-interior-geometry"
 	) {
 		return createDesiredKeyForDrawUnit({
 			domain: drawUnit.domain,

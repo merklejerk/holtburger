@@ -269,7 +269,7 @@ Decisions and course corrections:
 Debt and follow-up:
 
 - Immediate debt: remove the V2 import from `src/workers/shared/asset-prepare.ts` and replace it with V2-owned preparation modules before any new resolver/baker phase proceeds.
-- The host adapter supports single-asset lookup. Resolver workers will likely need batched host lookups or a worker-local bridge in Phase 4 to avoid request-per-dependency overhead.
+- The host adapter supports single-asset lookup. Resolver workers should request prepared assets through the runtime-owned asset service bridge so cache ownership, pending dedupe, and retention remain centralized.
 - Asset snapshot counters are coarse. Do not add detailed diagnostics until real resolver usage shows which facts matter.
 - Warm retention has a manual prune method but no runtime timer or pressure policy yet. Add pruning when real residency/eviction policy exists.
 
@@ -365,18 +365,18 @@ Implementation notes:
 - Added a V2-owned terrain resolver core that accepts concrete terrain landblock work requests, asks `AssetService` for the needed prepared host DTOs, immediately translates host route dependencies into typed runtime identities, and emits terrain mesh/source/material/texture/spatial facts.
 - Added typed missing dependency reporting for surface/render/palette dependencies. Root landblock/material/profile lookup failure still fails the resolver job because there is no meaningful terrain payload without those roots.
 - Added a static resolver worker protocol, postMessage client, and handler. The protocol carries concrete `StaticResolverJob` records plus transport-only request ids, not scheduled work envelopes, camera interest, or browser radius state.
-- Kept the runtime default on the fake resolver/baker until the V2 worker host-lookup bridge exists. The Phase 4 resolver is worker-protocol-ready, but the actual browser worker instance still needs a V2 host bridge before it can replace the fake runtime path.
+- Kept the runtime default on the fake resolver/baker until the V2 worker prepared-asset bridge exists. The Phase 4 resolver is worker-protocol-ready, but the actual browser worker instance still needs the prepared-asset bridge before it can replace the fake runtime path.
 
 Decisions and course corrections:
 
 - Terrain resolver payloads intentionally do not carry raw host DTOs. Host DTO dependency route strings are consumed at the resolver boundary and converted into typed identities before entering `StaticScopePayload`.
 - The resolver identifies intended prepared texture uses but does not prepare texture bytes yet. Phases 6, 8, and 10 own the bake, texture-manager, and terrain-material paths that turn prepared texture uses into draw units, texture refs, placement, and renderer updates.
 - Local resolver maps may use opaque derived keys internally, but public resolver payload identity remains structured typed data.
-- The worker protocol was introduced before runtime worker construction because the missing piece is not resolver behavior; it is a clean V2 host lookup bridge for worker contexts. Pulling in the old worker bridge remains prohibited.
+- The worker protocol was introduced before runtime worker construction because the missing piece is not resolver behavior; it is a clean V2 prepared-asset bridge for worker contexts. Pulling in the old worker bridge remains prohibited.
 
 Debt and follow-up:
 
-- Phase 5 must add the V2 worker host-lookup bridge or equivalent worker-local host adapter before the runtime default can use the terrain resolver for real Tauri-backed data.
+- Phase 5 must add the V2 worker prepared-asset bridge before the runtime default can use the terrain resolver for real Tauri-backed data.
 - `StaticCoordinator` still creates placement snapshots directly from payload texture-use facts. Phases 8 and 9 must move this to the texture/atlas manager boundary.
 - The terrain resolver currently summarizes mesh geometry facts instead of carrying the full bake-ready terrain mesh. Phase 6 should replace or extend this with exactly the terrain bake input fields needed by the terrain baker.
 - Prepared texture use policy is intentionally conservative and must stay host-valid. Phase 8 uses normalized `rgba8` / `none` / `linear` for the probe path; Phases 10A-10C should validate terrain-specific color/mask/detail policy against texture upload and material requirements before treating textured terrain as credible.
@@ -395,7 +395,7 @@ Purpose: replace the fake resolver path with the real terrain resolver for one c
 
 Deliverables:
 
-- V2 worker host-lookup bridge or worker-local host adapter for static resolver workers, without importing legacy worker bridge modules.
+- V2 worker prepared-asset bridge for static resolver workers, without importing legacy worker bridge modules.
 - Browser worker construction for the static scope resolver protocol introduced in Phase 4.
 - Runtime composition that uses the real terrain resolver for terrain landblock requests when a Tauri host is available, and keeps the fake resolver only as a plain-browser fallback.
 - Harness-visible resolver output summary for the latest terrain payload: landblock, region, mesh counts, texture-use counts, and typed missing refs.
@@ -411,22 +411,22 @@ Acceptance criteria:
 
 Implementation notes:
 
-- Added a V2-only static resolver host bridge so resolver workers can request typed `HostAssetKey` lookups from the main-thread `RuntimeHost` without importing the legacy worker bridge or asset worker.
-- Added a static resolver worker entry that composes a worker-local `HostBackedAssetService` with the Phase 4 `TerrainStaticScopeResolver`. This keeps fetch/prepare dedupe/cache behavior inside the asset service shape while source resolution runs off the render thread.
+- Added a V2-only static resolver prepared-asset bridge so resolver workers can request typed `HostAssetKey` prepared assets through the runtime-owned asset service without importing the legacy worker bridge or asset worker.
+- Added a static resolver worker entry that composes a remote prepared-asset reader with the Phase 4 `TerrainStaticScopeResolver`. Fetch/prepare dedupe/cache behavior is centralized in the runtime-owned asset service while source resolution runs off the render thread.
 - Updated browser V2 runtime composition so Tauri mode routes terrain landblock requests through the real resolver worker. Plain Vite keeps the fake resolver path because Tauri host lookup is unavailable there.
 - Kept the immediate fake baker in place. Phase 5 proves real resolver output only; Phase 6 owns real terrain bake input/output.
 - Added runtime snapshot projection for the latest terrain payload summary and latest resolver failure so the harness can show real mesh/material/texture-use facts without Svelte owning resolver state.
 
 Decisions and course corrections:
 
-- Worker-local asset service cache state is not currently mirrored into the main runtime `assets` snapshot. The harness still shows resolver payload facts and failures, but detailed worker asset cache diagnostics should wait until real resolver pressure proves which facts matter.
+- Resolver-worker asset requests are reflected in the main runtime `assets` snapshot because prepared-asset cache ownership is centralized in the runtime-owned asset service.
 - Non-terrain static domains still route to the fake resolver in Tauri mode. Phase 5 is terrain-only; buildings, detail, and env-cell real resolution remain later-phase work.
 
 Debt and follow-up:
 
 - Phase 5A must correct the remaining terrain-first bias by adding first-class landblock topology and dungeon/env-cell foundation before the geometry bake path hardens around outdoor-only assumptions.
 - Phase 6 must replace the fake baker path with a geometry-only terrain bake worker and expand the terrain resolver payload from summary mesh facts into the full bake-ready mesh records the baker needs.
-- If worker asset diagnostics become necessary, add an explicit worker snapshot/event path instead of reaching into the worker-local asset service from Svelte or the renderer.
+- If worker asset diagnostics become necessary, add explicit worker timing/request events; do not add worker-local durable asset cache snapshots.
 
 Verification:
 

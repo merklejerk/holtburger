@@ -40,7 +40,8 @@ Current implementation references:
 - `apps/holtburger-3d/src/v2/runtime/client-runtime.ts`
 - `apps/holtburger-3d/src/v2/browser/create-browser-v2-runtime.ts`
 - `apps/holtburger-3d/src/v2/static/resolver/static-resolver.worker.ts`
-- `apps/holtburger-3d/src/v2/static/resolver/host-bridge.ts`
+- `apps/holtburger-3d/src/v2/static/resolver/asset-bridge.ts`
+- `apps/holtburger-3d/src/v2/static/resolver/worker-asset-reader.ts`
 - `apps/holtburger-3d/src/v2/static/resolver/protocol.ts`
 - `apps/holtburger-3d/src/v2/static/resolver/worker-client.ts`
 - `apps/holtburger-3d/src/v2/static/coordinator/static-coordinator.ts`
@@ -54,7 +55,7 @@ Current implementation references:
 Existing tests to extend:
 
 - `apps/holtburger-3d/src/v2/assets/asset-service.test.ts`
-- `apps/holtburger-3d/src/v2/static/resolver/host-bridge.test.ts`
+- `apps/holtburger-3d/src/v2/static/resolver/asset-bridge.test.ts`
 - `apps/holtburger-3d/src/v2/static/resolver/worker-client.test.ts`
 - `apps/holtburger-3d/src/v2/static/coordinator/static-coordinator.test.ts`
 - `apps/holtburger-3d/src/v2/browser/create-browser-v2-runtime.test.ts`
@@ -83,7 +84,7 @@ Task checklist:
 
 - [x] Add a request-only prepared asset interface colocated with asset contracts.
 - [x] Add or rename resolver asset request/response protocol messages.
-- [x] Update `createStaticResolverMainHostBridge` to accept request-only prepared asset access from the runtime asset service.
+- [x] Update the static resolver main asset bridge to accept request-only prepared asset access from the runtime asset service.
 - [x] Keep bridge error semantics typed and testable.
 - [x] Update bridge tests for successful lookup, failure propagation, dedupe, and disposal.
 
@@ -122,7 +123,7 @@ Decisions and course corrections:
 
 - 2026-06-15: Replaced `StaticResolverWorkerRuntimeHost` with `StaticResolverWorkerPreparedAssetReader`. The worker-side facade now implements only `PreparedAssetReader`, uses `prepared-asset-request-*` messages, and exposes no lease, prune, or snapshot surface.
 - 2026-06-15: Removed the worker-local `HostBackedAssetService` from `static-resolver.worker.ts`. Production resolver workers now pass the remote reader directly into terrain, outdoor static object, and landblock env-cell resolvers.
-- 2026-06-15: Kept the resolver bridge file/test names for now to avoid a noisy file rename. Phase 6/7 cleanup should decide whether `host-bridge` should become `asset-bridge`.
+- 2026-06-15: Kept the resolver bridge file/test names temporarily to avoid a noisy file rename while bridge ownership was still changing.
 
 ### Phase 3: Share The Runtime Asset Service With Resolver Workers And Textures
 
@@ -150,7 +151,7 @@ Task checklist:
 
 Decisions and course corrections:
 
-- 2026-06-15: Shared-service browser runtime wiring was implemented early as part of Phase 1 so `createStaticResolverMainHostBridge()` could stop accepting `RuntimeHost`.
+- 2026-06-15: Shared-service browser runtime wiring was implemented early as part of Phase 1 so the static resolver main asset bridge could stop accepting `RuntimeHost`.
 - 2026-06-15: Added a narrow `createWorkerStaticResolver()` factory seam so browser runtime tests can assert resolver worker bridges receive the supplied `PreparedAssetReader` without constructing real Workers or WebGL state.
 
 ### Phase 4: Split Static Source Metadata From Bake Geometry
@@ -252,7 +253,7 @@ Decisions and course corrections:
 - 2026-06-15: Added an `asset-service` diagnostics domain report summarizing pending, pending waiters, committed, leased, warm-retained, and failed prepared assets while also carrying the centralized asset snapshot.
 - 2026-06-15: No obsolete worker-local cache tests remained. Existing resolver bridge tests already prove worker requests route through a shared main-thread `HostBackedAssetService`.
 - 2026-06-15: Updated the V2 design doc to move prepared-cache pruning ownership from the old scene asset streamer wording to runtime-owned asset-service maintenance.
-- 2026-06-15: Kept `static/resolver/host-bridge.*` naming as Phase 7 cleanup. The protocol no longer has `host-asset-lookup` messages, but the file/function names are still stale.
+- 2026-06-15: Kept stale static resolver bridge naming as Phase 7 cleanup. The protocol no longer has `host-asset-lookup` messages, but the file/function names were still stale.
 
 ### Phase 7: Resteer And Cleanup
 
@@ -260,9 +261,10 @@ Deliverables:
 
 - Re-read the updated implementation against the V2 design doc.
 - Delete obsolete bridge classes, test fixtures, and misleading names.
-- Rename or split stale resolver bridge files once ownership is settled:
-  - `static/resolver/host-bridge.ts` should become `static/resolver/asset-bridge.ts`, or split into a worker-side reader file plus a main-thread asset bridge file.
-  - `createStaticResolverMainHostBridge` should become `createStaticResolverMainAssetBridge` if it remains as one bridge factory.
+- Split stale resolver bridge files once ownership is settled:
+  - `static/resolver/asset-bridge.ts` owns the main-thread asset-service bridge.
+  - `static/resolver/worker-asset-reader.ts` owns the worker-side remote prepared-asset reader.
+  - `createStaticResolverMainAssetBridge` is the main bridge factory.
 - Re-evaluate new Phase 4 files so asset views, bake attachment interfaces, and static-object attachment implementations live under their natural owners rather than whichever file first needed them.
 - Record any deferred work in this plan rather than leaving TODOs scattered in code.
 
@@ -274,16 +276,21 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Run `rg "HostBackedAssetService|pruneExpiredWarmAssets|host-asset-lookup|StaticResolverWorkerRuntimeHost" apps/holtburger-3d/src/v2 docs/plans`.
-- [ ] Run `rg "positions:|normals:|texCoords:" apps/holtburger-3d/src/v2/static/contracts.ts apps/holtburger-3d/src/v2/static/objects`.
-- [ ] Remove dead protocol types and fixtures.
-- [ ] Rename `static/resolver/host-bridge.*` or split it into worker asset reader and main asset bridge modules after Phase 3 confirms final bridge ownership.
-- [ ] Place Phase 4 asset view helpers, bake attachment interfaces, and static-object attachment implementations under the narrowest proven owner.
-- [ ] Run final verification commands.
+- [x] Run `rg "HostBackedAssetService|pruneExpiredWarmAssets|host-asset-lookup|StaticResolverWorkerRuntimeHost" apps/holtburger-3d/src/v2 docs/plans`.
+- [x] Run `rg "positions:|normals:|texCoords:" apps/holtburger-3d/src/v2/static/contracts.ts apps/holtburger-3d/src/v2/static/objects`.
+- [x] Remove dead protocol types and fixtures.
+- [x] Rename `static/resolver/host-bridge.*` or split it into worker asset reader and main asset bridge modules after Phase 3 confirms final bridge ownership.
+- [x] Place Phase 4 asset view helpers, bake attachment interfaces, and static-object attachment implementations under the narrowest proven owner.
+- [x] Run final verification commands.
 
 Decisions and course corrections:
 
 - 2026-06-15: Deferred resolver bridge file renaming until cleanup to avoid churn while Phase 3/4 may still reshape the bridge and attachment boundaries.
+- 2026-06-15: Split `static/resolver/host-bridge.ts` into `asset-bridge.ts` for the main-thread asset-service bridge and `worker-asset-reader.ts` for the worker-side prepared-asset facade. Renamed `createStaticResolverMainHostBridge`/`StaticResolverMainHostBridge` to asset-bridge terms.
+- 2026-06-15: Renamed `host-bridge.test.ts` to `asset-bridge.test.ts` and kept the cross-boundary tests because they still prove the important behavior: worker requests route through a shared main-thread asset service.
+- 2026-06-15: Re-evaluated Phase 4 helper placement and left the files in place: asset views under `assets/preparation`, generic empty bake attachments under `static/bake`, static-object source geometry helpers under `static/objects`, and static-object attachment provider under `static/objects/bake`. No relocation had a cleaner ownership payoff than the existing layout.
+- 2026-06-15: The exact `positions`/`normals`/`texCoords` search still reports expected geometry-bearing contracts, bake-time attachments, baker/materializer internals, and test fixtures. It no longer indicates resolver payloads returning full static-object geometry.
+- 2026-06-15: Updated the older V2 implementation plan so its Phase 5 notes no longer describe a future worker-local host adapter or worker-local asset service.
 
 ## Risks And Mitigations
 
@@ -333,5 +340,4 @@ Decisions and course corrections:
 
 - Should worker asset request messages carry priority now, or should priority wait until static coordinator scheduling grows teeth?
 - Should prepared asset leases be held for committed static payloads, or only for texture/render resources after bake commit?
-- Should warm retention pruning run on a timer, on scene-interest changes, or on explicit runtime maintenance ticks?
 - Should terrain get the same metadata/geometry split later, or is terrain's first-visible fast path better served by keeping terrain mesh directly in the terrain payload for now?

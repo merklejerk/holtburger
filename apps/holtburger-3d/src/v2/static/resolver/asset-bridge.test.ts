@@ -7,24 +7,22 @@ import type {
 } from "../../assets/contracts";
 import { createHostAssetKey } from "../../assets/keys";
 import type { RuntimeHost, RuntimeHostSnapshot } from "../../host/contracts";
-import {
-	createStaticResolverMainHostBridge,
-	StaticResolverWorkerPreparedAssetReader,
-} from "./host-bridge";
+import { createStaticResolverMainAssetBridge } from "./asset-bridge";
 import type {
 	StaticResolverWorkerGlobalPort,
 	StaticResolverWorkerMainMessage,
 	StaticResolverWorkerPort,
 	StaticResolverWorkerThreadMessage,
 } from "./protocol";
+import { StaticResolverWorkerPreparedAssetReader } from "./worker-asset-reader";
 
-describe("V2 static resolver host bridge", () => {
+describe("V2 static resolver asset bridge", () => {
 	it("round-trips typed prepared asset requests through the worker boundary", async () => {
 		const channel = new FixtureWorkerChannel();
 		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
 		const asset = createPreparedAsset(key);
 		const assetReader = new FixturePreparedAssetReader(asset);
-		const bridge = createStaticResolverMainHostBridge(
+		const bridge = createStaticResolverMainAssetBridge(
 			channel.mainPort,
 			assetReader,
 		);
@@ -51,7 +49,7 @@ describe("V2 static resolver host bridge", () => {
 	it("surfaces prepared asset request failures inside the worker", async () => {
 		const channel = new FixtureWorkerChannel();
 		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
-		const bridge = createStaticResolverMainHostBridge(
+		const bridge = createStaticResolverMainAssetBridge(
 			channel.mainPort,
 			new FixturePreparedAssetReader(new Error("asset service said no")),
 		);
@@ -72,7 +70,7 @@ describe("V2 static resolver host bridge", () => {
 		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
 		const host = new DeferredRuntimeHost(createPreparedAsset(key));
 		const assetService = new HostBackedAssetService({ host });
-		const bridge = createStaticResolverMainHostBridge(
+		const bridge = createStaticResolverMainAssetBridge(
 			channel.mainPort,
 			assetService,
 		);
@@ -98,7 +96,7 @@ describe("V2 static resolver host bridge", () => {
 	it("rejects pending worker requests on disposal", async () => {
 		const channel = new FixtureWorkerChannel();
 		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
-		const bridge = createStaticResolverMainHostBridge(
+		const bridge = createStaticResolverMainAssetBridge(
 			channel.mainPort,
 			new DeferredPreparedAssetReader(),
 		);

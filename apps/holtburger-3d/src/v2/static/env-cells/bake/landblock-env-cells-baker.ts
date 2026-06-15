@@ -9,10 +9,12 @@ import type {
 	StaticBaker,
 	StaticDrawUnit,
 	EnvCellCellStructureGeometryAttachment,
+	StaticMaterialCoverageReport,
 	StaticPortalInteriorRecord,
 	StaticSourceMappingRecord,
 	StaticSpatialRecord,
 	StructuredInteriorGeometryStaticDrawUnit,
+	StructuredInteriorMaterialPlanEntry,
 	StaticVisibilityRecord,
 	StaticWorkPeerRecordOwner,
 } from "../../contracts";
@@ -26,6 +28,10 @@ import {
 	createEnvCellCellStructureGeometryIdentity,
 	describeEnvCellCellStructureGeometryIdentity,
 } from "./landblock-env-cell-geometry-attachments";
+import {
+	createStructuredInteriorMaterialCoverageReport,
+	planStructuredInteriorCellMaterials,
+} from "./structured-interior-material-planner";
 
 export class LandblockEnvCellsBaker implements StaticBaker {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
@@ -57,7 +63,7 @@ export function bakeLandblockEnvCells(
 		),
 		domain: input.domain,
 		drawUnits,
-		materialCoverage: [],
+		materialCoverage: itemResults.map((result) => result.materialCoverage),
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: itemResults.flatMap(
 			(result) => result.staticAuthoredDynamicSeeds,
@@ -123,6 +129,7 @@ function bakeLandblockEnvCellItem(
 	item: StaticBakeBatchItem,
 ): {
 	readonly drawUnits: readonly StaticDrawUnit[];
+	readonly materialCoverage: StaticMaterialCoverageReport;
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
@@ -140,9 +147,19 @@ function bakeLandblockEnvCellItem(
 
 	const owner = createWorkPeerRecordOwner(item.work);
 	const payload = item.payload.scope;
+	const materialPlansByEnvCellId = createStructuredInteriorMaterialPlans(payload);
 
 	return {
-		drawUnits: createStructuredInteriorDrawUnits(input, item.work, payload),
+		drawUnits: createStructuredInteriorDrawUnits(
+			input,
+			item.work,
+			payload,
+			materialPlansByEnvCellId,
+		),
+		materialCoverage: createStructuredInteriorMaterialCoverageReport({
+			materialPlansByEnvCellId,
+			payload,
+		}),
 		staticAuthoredDynamicSeeds: createAuthoredDynamicSeedRecords(owner, payload),
 		staticPortalInteriorRecords: [createPortalInteriorRecord(owner, payload)],
 		staticSourceMappings: createSourceMappingRecords(owner, payload),
@@ -155,6 +172,10 @@ function createStructuredInteriorDrawUnits(
 	input: StaticBakeBatchInput,
 	work: ScheduledStaticWork,
 	payload: LandblockEnvCellsStaticScopePayload,
+	materialPlansByEnvCellId: ReadonlyMap<
+		number,
+		readonly StructuredInteriorMaterialPlanEntry[]
+	>,
 ): readonly StructuredInteriorGeometryStaticDrawUnit[] {
 	return payload.envCells.flatMap((envCell) => {
 		if (envCell.renderGeometry.triangleCount === 0) {
@@ -167,6 +188,8 @@ function createStructuredInteriorDrawUnits(
 				attachment,
 				envCell,
 				landblockId: payload.landblock.landblockId,
+				materialPlan:
+					materialPlansByEnvCellId.get(envCell.identity.envCellId) ?? [],
 				work,
 			}),
 		];
@@ -177,6 +200,7 @@ function createStructuredInteriorDrawUnit(options: {
 	readonly attachment: EnvCellCellStructureGeometryAttachment;
 	readonly envCell: LandblockEnvCellStaticFacts;
 	readonly landblockId: number;
+	readonly materialPlan: StructuredInteriorGeometryStaticDrawUnit["materialPlan"];
 	readonly work: ScheduledStaticWork;
 }): StructuredInteriorGeometryStaticDrawUnit {
 	const geometry = bakeCellStructureGeometry(
@@ -203,6 +227,7 @@ function createStructuredInteriorDrawUnit(options: {
 		materialBucketKey: "structured-interior-debug-flat",
 		materialFamily: "structured-interior-debug-flat",
 		materialIds,
+		materialPlan: options.materialPlan,
 		memberId: options.envCell.memberId,
 		positions: geometry.positions,
 		sourceTriangleIds: geometry.sourceTriangleIds,
@@ -212,6 +237,20 @@ function createStructuredInteriorDrawUnit(options: {
 		triangleCount: options.attachment.triangleCount,
 		vertexCount: options.attachment.vertexCount,
 	};
+}
+
+function createStructuredInteriorMaterialPlans(
+	payload: LandblockEnvCellsStaticScopePayload,
+): ReadonlyMap<
+	number,
+	readonly StructuredInteriorMaterialPlanEntry[]
+> {
+	return new Map(
+		payload.envCells.map((envCell) => [
+			envCell.identity.envCellId,
+			planStructuredInteriorCellMaterials(envCell),
+		]),
+	);
 }
 
 function bakeCellStructureGeometry(

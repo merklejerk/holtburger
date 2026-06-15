@@ -1269,7 +1269,8 @@ function shouldUseIndependentRolePagePacking(
 			(group.pagePolicy.sampleClass === "rgba-color" ||
 				group.pagePolicy.sampleClass === "rgba-mask")) ||
 		group.domain === "outdoor-buildings" ||
-		group.domain === "outdoor-detail"
+		group.domain === "outdoor-detail" ||
+		group.domain === "landblock-env-cells"
 	);
 }
 

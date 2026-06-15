@@ -932,6 +932,7 @@ function createStructuredInteriorDrawUnit(
 		materialBucketKey: "structured-interior-debug-flat",
 		materialFamily: "structured-interior-debug-flat",
 		materialIds: [],
+		materialPlan: [],
 		memberId: "cell-0",
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
 		sourceTriangleIds: ["triangle-a"],

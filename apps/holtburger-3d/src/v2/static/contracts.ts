@@ -1071,6 +1071,7 @@ export interface StructuredInteriorGeometryStaticDrawUnit {
 	readonly materialFamily: "structured-interior-debug-flat";
 	readonly materialBucketKey: string;
 	readonly debugColor: readonly [number, number, number, number];
+	readonly materialPlan: readonly StructuredInteriorMaterialPlanEntry[];
 	readonly positions: Float32Array;
 	readonly texCoords: Float32Array;
 	readonly indices: Uint16Array | Uint32Array;
@@ -1081,6 +1082,24 @@ export interface StructuredInteriorGeometryStaticDrawUnit {
 	readonly surfaceIds: readonly number[];
 	readonly materialIds: readonly number[];
 	readonly textureUseIds: readonly string[];
+}
+
+export interface StructuredInteriorMaterialPlanEntry {
+	readonly slotId: number;
+	readonly surfaceId: number;
+	readonly material: StaticMaterialSourceIdentity;
+	readonly family: "structured-interior-debug-flat";
+	readonly pass: "opaque";
+	readonly outcome: "render-deferred";
+	readonly textureUseIds: readonly string[];
+	readonly fallbackReasons: readonly StructuredInteriorMaterialFallbackReason[];
+}
+
+export interface StructuredInteriorMaterialFallbackReason {
+	readonly code: "missing-cell-structure-material-source";
+	readonly message: string;
+	readonly material: StaticMaterialSourceIdentity;
+	readonly surfaceId: number;
 }
 
 export interface StaticObjectSourceMappingCoverage {

@@ -16,7 +16,13 @@ describe("V2 landblock env-cell baker", () => {
 			buildRevision: 42,
 			domain: "landblock-env-cells",
 			drawUnits: [],
-			materialCoverage: [],
+			materialCoverage: [
+				expect.objectContaining({
+					domain: "landblock-env-cells",
+					materialCount: 1,
+					triangleCount: 0,
+				}),
+			],
 			staticBatchId: "env-batch-a",
 			textureUses: [],
 			works: [input.items[0]?.work],
@@ -138,6 +144,26 @@ describe("V2 landblock env-cell baker", () => {
 			envCellId: 0xda550100,
 			kind: "structured-interior-geometry",
 			landblockId: 0xda55ffff,
+			materialPlan: [
+				{
+					fallbackReasons: [
+						{
+							code: "missing-cell-structure-material-source",
+							material: {
+								kind: "static-material-source",
+								materialId: 0x08000010,
+							},
+							surfaceId: 0x08000010,
+						},
+					],
+					family: "structured-interior-debug-flat",
+					outcome: "render-deferred",
+					pass: "opaque",
+					slotId: 0,
+					surfaceId: 0x08000010,
+					textureUseIds: [],
+				},
+			],
 			materialFamily: "structured-interior-debug-flat",
 			materialIds: [0x08000010],
 			sourceTriangleIds: [
@@ -154,6 +180,44 @@ describe("V2 landblock env-cell baker", () => {
 		}
 		expect(Array.from(drawUnit.indices)).toEqual([0, 1, 2]);
 		expect(Array.from(drawUnit.texCoords)).toEqual([0, 0, 1, 0, 0, 1]);
+		expect(result.textureUses).toEqual([]);
+		expect(result.materialCoverage).toEqual([
+			expect.objectContaining({
+				buckets: [
+					{
+						family: "unsupported",
+						filteringMode: "none",
+						materialCount: 1,
+						outcome: "render-deferred",
+						partitionCount: 1,
+						pass: "opaque",
+						textureRoleCount: 0,
+						triangleCount: 1,
+					},
+				],
+				deferredTriangleCount: 1,
+				domain: "landblock-env-cells",
+				fallbackReasonCounts: [
+					{ code: "missing-cell-structure-material-source", count: 1 },
+				],
+				fallbackReasonCount: 1,
+				landblockId: 0xda55ffff,
+				materialCount: 1,
+				renderedTriangleCount: 0,
+				triangleCount: 1,
+				unrenderedBuckets: [
+					{
+						family: "unsupported",
+						materialCount: 1,
+						outcome: "render-deferred",
+						partitionCount: 1,
+						pass: "opaque",
+						reasonCodes: ["missing-cell-structure-material-source"],
+						triangleCount: 1,
+					},
+				],
+			}),
+		]);
 	});
 
 	it("bakes env-cell local placement into render-local positions", () => {

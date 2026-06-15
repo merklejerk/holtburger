@@ -715,6 +715,106 @@ describe("V2 texture manager", () => {
 		]);
 	});
 
+	it("assigns landblock env-cell texture uses to static role pages", async () => {
+		const rectsByTextureUseId = new Map<
+			string,
+			FixtureTexturePackerRectPlacement
+		>([
+			[
+				"structured-interior-a:base:0",
+				{
+					pageHeight: 16,
+					pageId: "env-cell-base-page:0",
+					pageWidth: 16,
+					rect: [4, 4, 1, 1],
+				},
+			],
+			[
+				"structured-interior-a:base:1",
+				{
+					pageHeight: 16,
+					pageId: "env-cell-base-page:1",
+					pageWidth: 16,
+					rect: [4, 4, 1, 1],
+				},
+			],
+		]);
+		const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+			texturePacker,
+		});
+
+		const update = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			materialCoverage: [],
+			removedDrawUnitIds: [],
+			revision: 1,
+			staticAuthoredDynamicSeeds: [],
+			staticBatchId: "batch-env",
+			staticPortalInteriorRecords: [],
+			staticSourceMappings: [],
+			staticSpatialRecords: [],
+			staticVisibilityRecords: [],
+			textureUses: [
+				createTextureUseCommit({
+					domain: "landblock-env-cells",
+					drawUnitId: "structured-interior-a",
+					renderSurfaceId: 0x06000010,
+					staticBatchId: "batch-env",
+					textureUseId: "structured-interior-a:base:0",
+					usage: "rgba-color",
+				}),
+				createTextureUseCommit({
+					domain: "landblock-env-cells",
+					drawUnitId: "structured-interior-a",
+					renderSurfaceId: 0x06000020,
+					staticBatchId: "batch-env",
+					textureUseId: "structured-interior-a:base:1",
+					usage: "rgba-color",
+				}),
+			],
+		});
+
+		expect(update?.drawUnitBindings).toEqual([
+			expect.objectContaining({
+				drawUnitId: "structured-interior-a",
+				rolePage: { kind: "static-base-color", slot: 0 },
+				textureUseId: "structured-interior-a:base:0",
+			}),
+			expect.objectContaining({
+				drawUnitId: "structured-interior-a",
+				rolePage: { kind: "static-base-color", slot: 1 },
+				textureUseId: "structured-interior-a:base:1",
+			}),
+		]);
+		expect(texturePacker.jobs).toMatchObject([
+			{
+				domain: "landblock-env-cells",
+				page: {
+					gutterPixels: 4,
+				},
+				sources: [
+					expect.objectContaining({
+						gutterEdgeMode: "repeat",
+						textureUseId: "structured-interior-a:base:0",
+					}),
+					expect.objectContaining({
+						gutterEdgeMode: "repeat",
+						textureUseId: "structured-interior-a:base:1",
+					}),
+				],
+			},
+		]);
+		expect(textureManager.createDiagnosticsReport()).toMatchObject({
+			byDomain: [
+				expect.objectContaining({
+					domain: "landblock-env-cells",
+				}),
+			],
+		});
+	});
+
 	it("records static object role-page overflow without collapsing to slot zero", async () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {

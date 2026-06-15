@@ -12,6 +12,7 @@ import {
 	partitionStaticObjectCompatibility,
 	STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE,
 } from "./static-object-compatibility-partitioner";
+import { createStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
 
 describe("V2 static object compatibility partitioner", () => {
 	it("partitions compatible solid materials by bounded material table capacity", () => {
@@ -210,6 +211,21 @@ describe("V2 static object compatibility partitioner", () => {
 		expect(result.staticSpatialRecords).toEqual([
 			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:bounds:1t",
 		]);
+	});
+
+	it("fails hard when a bake input omits a referenced geometry attachment", () => {
+		const payload = createPayload({
+			materials: [createTexturedMaterial(0x08000010)],
+			textureRefs: createRgbaTextureRefs(),
+		});
+		const input = {
+			...createBakeInput(payload),
+			attachments: { staticObjectSourceGeometry: [] },
+		};
+
+		expect(() => bakeStaticObjectCompatibility(input)).toThrow(
+			/missing geometry attachment/,
+		);
 	});
 
 	it("composes resolved building detail overlays into rendered draw units", () => {
@@ -1219,6 +1235,11 @@ function createPayload(options: {
 					{
 						bounds: null,
 						defaultPlacements: [createPlacement()],
+						geometry: createStaticObjectSourceGeometryIdentity({
+							gfxObj: createGfxObjIdentity(),
+							partIndex: 0,
+							source: createSourceIdentity(),
+						}),
 						gfxObj: createGfxObjIdentity(),
 						invalidPolygonCount: 0,
 						materialSlotCount: options.materials.length,
@@ -1289,6 +1310,21 @@ function createBakeInput(
 			placements: [],
 			staticBatchId: "static-batch:objects",
 			textureUses: [],
+		},
+		attachments: {
+			staticObjectSourceGeometry: payload.sourceAssets.flatMap((source) =>
+				source.parts.map((part) => {
+					const fixturePart = part as typeof part & {
+						readonly positions: Float32Array;
+						readonly texCoords: Float32Array;
+					};
+					return {
+						identity: part.geometry,
+						positions: fixturePart.positions,
+						texCoords: fixturePart.texCoords,
+					};
+				}),
+			),
 		},
 		domain,
 		items: [

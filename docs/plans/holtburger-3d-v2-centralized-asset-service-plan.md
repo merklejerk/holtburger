@@ -177,19 +177,23 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add view/key types for `gfx-obj` metadata and render geometry.
-- [ ] Update asset-service contracts or helpers to request a prepared asset view by typed key.
-- [ ] Add a `StaticBakeAttachmentProvider` interface and no-op/default implementation for domains that do not need extra attachments.
-- [ ] Split `StaticObjectPartSourceFacts` into lightweight source facts plus geometry identity.
-- [ ] Update static-object resolver tests to assert payloads omit heavy arrays.
-- [ ] Add `StaticBakeBatchInput` geometry attachments for static object domains.
-- [ ] Update `StaticCoordinator` to ask the attachment provider for bake attachments while constructing `StaticBakeBatchInput`.
-- [ ] Update static-object baker/partitioner to read geometry from attachments.
-- [ ] Add coordinator attachment-failure, baker missing-attachment, and duplicate-attachment tests.
+- [x] Add view/key types for `gfx-obj` metadata and render geometry.
+- [x] Update asset-service contracts or helpers to request a prepared asset view by typed key.
+- [x] Add a `StaticBakeAttachmentProvider` interface and no-op/default implementation for domains that do not need extra attachments.
+- [x] Split `StaticObjectPartSourceFacts` into lightweight source facts plus geometry identity.
+- [x] Update static-object resolver tests to assert payloads omit heavy arrays.
+- [x] Add `StaticBakeBatchInput` geometry attachments for static object domains.
+- [x] Update `StaticCoordinator` to ask the attachment provider for bake attachments while constructing `StaticBakeBatchInput`.
+- [x] Update static-object baker/partitioner to read geometry from attachments.
+- [x] Add coordinator attachment-failure, baker missing-attachment, and duplicate-attachment tests.
 
 Decisions and course corrections:
 
-- None yet.
+- 2026-06-15: Added `StaticObjectSourceGeometryIdentity` and `StaticObjectSourceGeometryAttachment`. Static object resolver payloads now carry geometry identities instead of `positions`, `normals`, or `texCoords`.
+- 2026-06-15: Added `createResolverGfxObjPreparedAssetView()` and applied it in the resolver worker bridge so workers receive metadata-only `gfx-obj` render geometry arrays while the runtime asset service keeps the full cached asset.
+- 2026-06-15: Added a generic `StaticBakeAttachmentProvider` hook to `StaticCoordinator`, with empty attachments as the default for domains that do not need extra source geometry.
+- 2026-06-15: Added `StaticObjectBakeAttachmentProvider`, backed by `PreparedAssetReader`, to attach full static-object positions/UVs once per bake batch from the centralized runtime asset service.
+- 2026-06-15: Static-object baker now resolves source positions/UVs through bake attachments and fails hard if a partition references a missing attachment.
 
 ### Phase 5: Add Resolver Per-Job Memoization Where It Pays
 

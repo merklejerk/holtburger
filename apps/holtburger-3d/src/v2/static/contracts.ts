@@ -425,19 +425,24 @@ export interface StaticObjectPartSourceFacts {
 	readonly partIndex: number;
 	readonly source: StaticObjectSourceIdentity;
 	readonly gfxObj: StaticObjectSourceIdentity;
+	readonly geometry: StaticObjectSourceGeometryIdentity;
 	readonly materialSlotCount: number;
 	readonly renderTriangleCount: number;
 	readonly skippedPolygonCount: number;
 	readonly invalidPolygonCount: number;
 	readonly physicsPolygonCount: number;
 	readonly bounds: StaticBounds | null;
-	readonly positions: Float32Array;
-	readonly normals: Float32Array;
-	readonly texCoords: Float32Array;
 	readonly triangles: readonly StaticObjectPartTriangleFacts[];
 	readonly defaultPlacements: readonly StaticPlacementTransform[];
 	readonly scale: StaticVec3;
 	readonly materialSlots: readonly StaticObjectPartMaterialSlotFacts[];
+}
+
+export interface StaticObjectSourceGeometryIdentity {
+	readonly kind: "static-object-source-geometry";
+	readonly source: StaticObjectSourceIdentity;
+	readonly gfxObj: StaticObjectSourceIdentity;
+	readonly partIndex: number;
 }
 
 interface StaticObjectPartTriangleFacts {
@@ -691,10 +696,34 @@ export interface StaticBakeBatchItem {
 
 export interface StaticBakeBatchInput {
 	readonly atlasSnapshot: StaticAtlasBatchSnapshot;
+	readonly attachments: StaticBakeBatchAttachments;
 	readonly domain: StaticDomain;
 	readonly items: readonly StaticBakeBatchItem[];
 	readonly revision: number;
 	readonly staticBatchId: string;
+}
+
+export interface StaticBakeBatchAttachments {
+	readonly staticObjectSourceGeometry: readonly StaticObjectSourceGeometryAttachment[];
+}
+
+export interface StaticObjectSourceGeometryAttachment {
+	readonly identity: StaticObjectSourceGeometryIdentity;
+	readonly positions: Float32Array;
+	readonly texCoords: Float32Array;
+}
+
+export interface StaticBakeAttachmentRequest {
+	readonly domain: StaticDomain;
+	readonly items: readonly StaticBakeBatchItem[];
+	readonly revision: number;
+	readonly staticBatchId: string;
+}
+
+export interface StaticBakeAttachmentProvider {
+	createAttachments(
+		request: StaticBakeAttachmentRequest,
+	): Promise<StaticBakeBatchAttachments>;
 }
 
 export interface StaticBakeBatchResult {

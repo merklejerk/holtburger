@@ -2,6 +2,7 @@ import type {
 	PreparedAsset,
 	PreparedAssetReader,
 } from "../../assets/contracts";
+import { createResolverGfxObjPreparedAssetView } from "../../assets/preparation/gfx-obj-views";
 import type {
 	StaticResolverPreparedAssetResponse,
 	StaticResolverWorkerGlobalPort,
@@ -102,7 +103,7 @@ export function createStaticResolverMainHostBridge(
 			.requestPreparedAsset(message.key)
 			.then((asset) => {
 				port.postMessage({
-					asset,
+					asset: createResolverGfxObjPreparedAssetView(asset),
 					kind: "prepared-asset-request-resolved",
 					requestId: message.requestId,
 				});

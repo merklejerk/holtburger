@@ -147,6 +147,10 @@ describe("V2 outdoor static object resolver", () => {
 			renderTriangleCount: 1,
 		});
 		expect(payload.scope.sourceAssets[0]?.parts[0]).toMatchObject({
+			geometry: {
+				kind: "static-object-source-geometry",
+				partIndex: 0,
+			},
 			gfxObj: {
 				kind: "static-object-source",
 				sourceAssetKind: "gfx-obj",
@@ -155,6 +159,15 @@ describe("V2 outdoor static object resolver", () => {
 			materialSlotCount: 1,
 			renderTriangleCount: 1,
 		});
+		expect(payload.scope.sourceAssets[0]?.parts[0]).not.toHaveProperty(
+			"positions",
+		);
+		expect(payload.scope.sourceAssets[0]?.parts[0]).not.toHaveProperty(
+			"normals",
+		);
+		expect(payload.scope.sourceAssets[0]?.parts[0]).not.toHaveProperty(
+			"texCoords",
+		);
 		expect(payload.scope.materialSlots).toHaveLength(1);
 		expect(payload.scope.regionRenderProfile.detailRoles).toEqual([
 			{
@@ -1005,8 +1018,8 @@ function createGfxObjPayload(
 		renderGeometry: {
 			bounds: createBounds(),
 			invalidPolygons: [],
-			normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
-			positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+			normals: [],
+			positions: [],
 			skippedPolygonCount: 0,
 			sourceId: gfxObjId,
 			surfaceIds: [0x08000010],
@@ -1019,7 +1032,7 @@ function createGfxObjPayload(
 					surfaceId: 0x08000010,
 				},
 			],
-			uvs: [0, 0, 1, 0, 0, 1],
+			uvs: [],
 			vertexCount: 3,
 		},
 		residencyKind: "unknown",

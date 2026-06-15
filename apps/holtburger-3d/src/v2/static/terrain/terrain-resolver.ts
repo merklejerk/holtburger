@@ -6,7 +6,10 @@ import type {
 	SurfaceTexturePayloadDto,
 	TerrainMaterialPayloadDto,
 } from "../../../lib/host/contracts";
-import type { AssetService, PreparedAsset } from "../../assets/contracts";
+import type {
+	PreparedAsset,
+	PreparedAssetReader,
+} from "../../assets/contracts";
 import { createHostAssetKey } from "../../assets/keys";
 import type {
 	PaletteIdentity,
@@ -37,11 +40,11 @@ type TerrainResolverCacheKey = string & {
 };
 
 export interface TerrainResolverOptions {
-	readonly assetService: AssetService;
+	readonly assetService: PreparedAssetReader;
 }
 
 export class TerrainStaticScopeResolver {
-	readonly #assetService: AssetService;
+	readonly #assetService: PreparedAssetReader;
 
 	constructor(options: TerrainResolverOptions) {
 		this.#assetService = options.assetService;

@@ -32,8 +32,11 @@ export interface PreparedAssetLease {
 	release(): void;
 }
 
-export interface AssetService {
+export interface PreparedAssetReader {
 	requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset>;
+}
+
+export interface AssetService extends PreparedAssetReader {
 	acquirePreparedAssetLease(key: HostAssetKey): PreparedAssetLease;
 	pruneExpiredWarmAssets(nowMs?: number): void;
 	createSnapshot(): AssetServiceSnapshot;

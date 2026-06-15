@@ -1,8 +1,8 @@
 import type { LandblockEnvCellsPayloadDto } from "../../../lib/host/contracts";
 import type {
-	AssetService,
 	HostAssetKey,
 	PreparedAsset,
+	PreparedAssetReader,
 } from "../../assets/contracts";
 import {
 	createHostAssetKey,
@@ -25,11 +25,11 @@ interface LoadedLandblockEnvCellsPayload {
 }
 
 export interface LandblockEnvCellsResolverOptions {
-	readonly assetService: AssetService;
+	readonly assetService: PreparedAssetReader;
 }
 
 export class LandblockEnvCellsResolver {
-	readonly #assetService: AssetService;
+	readonly #assetService: PreparedAssetReader;
 
 	constructor(options: LandblockEnvCellsResolverOptions) {
 		this.#assetService = options.assetService;

@@ -74,22 +74,25 @@ Deliverables:
 
 Acceptance criteria:
 
-- Resolver workers cannot directly instantiate a durable `HostBackedAssetService` as part of normal production wiring.
+- The resolver worker main bridge no longer depends on `RuntimeHost`; it depends on request-only prepared asset access supplied by the runtime asset service.
 - Main-thread bridge tests prove two identical worker requests can be deduped by the same asset service.
 - Protocol names make it clear that resolver workers depend on the asset service boundary, not the host boundary.
 - Resolver constructors depend on request-only asset access unless a specific resolver genuinely needs leases or diagnostics.
 
 Task checklist:
 
-- [ ] Add a request-only prepared asset interface colocated with asset contracts.
-- [ ] Add or rename resolver asset request/response protocol messages.
-- [ ] Update `createStaticResolverMainHostBridge` to accept an `AssetService`.
-- [ ] Keep bridge error semantics typed and testable.
-- [ ] Update bridge tests for successful lookup, failure propagation, dedupe, and disposal.
+- [x] Add a request-only prepared asset interface colocated with asset contracts.
+- [x] Add or rename resolver asset request/response protocol messages.
+- [x] Update `createStaticResolverMainHostBridge` to accept request-only prepared asset access from the runtime asset service.
+- [x] Keep bridge error semantics typed and testable.
+- [x] Update bridge tests for successful lookup, failure propagation, dedupe, and disposal.
 
 Decisions and course corrections:
 
-- None yet.
+- 2026-06-15: Named the request-only interface `PreparedAssetReader` and made `AssetService` extend it. Terrain, outdoor static object, and landblock env-cell resolvers now depend on `PreparedAssetReader`.
+- 2026-06-15: Renamed resolver worker asset RPC messages from `host-asset-lookup-*` to `prepared-asset-request-*`. `RuntimeHost.lookupAsset()` remains the host adapter boundary inside `HostBackedAssetService`.
+- 2026-06-15: Moved the "resolver workers no longer instantiate `HostBackedAssetService`" acceptance into Phase 2 ownership cutover. Phase 1 keeps the compatibility wrapper while removing raw-host semantics from the main bridge contract.
+- 2026-06-15: Pulled browser runtime shared-service construction from Phase 3 into this phase because the bridge no longer accepts `RuntimeHost`.
 
 ### Phase 2: Move Resolver Workers To A Remote Asset Facade
 
@@ -137,15 +140,15 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Construct one `assetService` in `createBrowserV2Runtime`.
-- [ ] Pass that same `assetService` into `createClientRuntime`.
-- [ ] Thread the runtime asset service into `createTauriStaticCoordinator`.
-- [ ] Update `createWorkerStaticResolver` to bridge workers to that service.
+- [x] Construct one `assetService` in `createBrowserV2Runtime`.
+- [x] Pass that same `assetService` into `createClientRuntime`.
+- [x] Thread the runtime asset service into `createTauriStaticCoordinator`.
+- [x] Update `createWorkerStaticResolver` to bridge workers to that service.
 - [ ] Add a browser-runtime composition test that proves the resolver bridge is asset-service backed.
 
 Decisions and course corrections:
 
-- None yet.
+- 2026-06-15: Shared-service browser runtime wiring was implemented early as part of Phase 1 so `createStaticResolverMainHostBridge()` could stop accepting `RuntimeHost`.
 
 ### Phase 4: Split Static Source Metadata From Bake Geometry
 
@@ -307,7 +310,6 @@ Decisions and course corrections:
 
 ## Open Questions
 
-- Should the request-only resolver interface be named `PreparedAssetReader`, `PreparedAssetRequester`, or something more domain-specific?
 - Should worker asset request messages carry priority now, or should priority wait until static coordinator scheduling grows teeth?
 - Should prepared asset leases be held for committed static payloads, or only for texture/render resources after bake commit?
 - Should warm retention pruning run on a timer, on scene-interest changes, or on explicit runtime maintenance ticks?

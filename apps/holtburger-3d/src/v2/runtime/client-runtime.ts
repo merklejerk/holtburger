@@ -38,11 +38,14 @@ import {
 import {
 	StaticSceneQuery,
 	describeStaticSceneSelectionKey,
+	type EnvCellStaticScenePickDetails,
+	type OutdoorStaticObjectScenePickDetails,
 	type StaticScenePickRequest,
 	type StaticScenePickHit,
 	type StaticSceneQuerySnapshot,
 	type StaticSceneQueryRetainedScope,
 	type StaticSceneSelectionKey,
+	type TerrainQuadScenePickDetails,
 } from "./static-scene-query";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
@@ -85,6 +88,36 @@ export interface RuntimeSnapshot {
 	readonly staticMaterialization: StaticMaterializationSnapshot;
 }
 
+export interface StaticSelectionDiagnosticsReport {
+	readonly kind: "static-selection-diagnostics-report";
+	readonly selection: {
+		readonly key: StaticSceneSelectionKey;
+		readonly label: string;
+		readonly pickDistance: number | null;
+	};
+	readonly debugBounds: StaticBounds | null;
+	readonly details: StaticSelectionDiagnosticsDetails | null;
+	readonly runtime: {
+		readonly renderAnchorLandblockId: number | null;
+		readonly sceneInterest: string | null;
+		readonly staticSceneQuery: StaticSceneQuerySnapshot;
+	};
+}
+
+export type StaticSelectionDiagnosticsDetails =
+	| {
+			readonly kind: "outdoor-static-object";
+			readonly detail: OutdoorStaticObjectScenePickDetails;
+	  }
+	| {
+			readonly kind: "env-cell-static-object";
+			readonly detail: EnvCellStaticScenePickDetails;
+	  }
+	| {
+			readonly kind: "terrain-quad";
+			readonly detail: TerrainQuadScenePickDetails;
+	  };
+
 type RuntimeSnapshotListener = (snapshot: RuntimeSnapshot) => void;
 
 interface RuntimeRenderPolicySnapshot {
@@ -107,6 +140,10 @@ interface StaticMaterializationFailureSnapshot {
 export interface ClientRuntime {
 	updateSceneInterest(interest: RuntimeSceneInterest): void;
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null;
+	createStaticSelectionDiagnosticsReport(
+		selectionKey: StaticSceneSelectionKey,
+		options?: { readonly pickDistance?: number | null },
+	): StaticSelectionDiagnosticsReport;
 	setStaticDebugSelection(selectionKey: StaticSceneSelectionKey | null): void;
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void;
 	updateFrameState(state: FrameState): void;
@@ -266,9 +303,34 @@ class ClientRuntimeImpl implements ClientRuntime {
 		return this.#staticSceneQuery.pickRay(request);
 	}
 
-	setStaticDebugSelection(
-		selectionKey: StaticSceneSelectionKey | null,
-	): void {
+	createStaticSelectionDiagnosticsReport(
+		selectionKey: StaticSceneSelectionKey,
+		options: { readonly pickDistance?: number | null } = {},
+	): StaticSelectionDiagnosticsReport {
+		this.#assertActive();
+		const label = describeStaticSceneSelectionKey(selectionKey);
+		const debugBounds =
+			this.#staticSceneQuery.querySelectionDebugBounds(selectionKey)?.bounds ??
+			null;
+
+		return {
+			debugBounds,
+			details: this.#queryStaticSelectionDiagnosticsDetails(selectionKey),
+			kind: "static-selection-diagnostics-report",
+			runtime: {
+				renderAnchorLandblockId: this.#renderAnchorLandblockId,
+				sceneInterest: createSceneInterestSummary(this.#sceneInterest),
+				staticSceneQuery: this.#staticSceneQuery.createSnapshot(),
+			},
+			selection: {
+				key: selectionKey,
+				label,
+				pickDistance: options.pickDistance ?? null,
+			},
+		};
+	}
+
+	setStaticDebugSelection(selectionKey: StaticSceneSelectionKey | null): void {
 		this.#assertActive();
 		this.#staticDebugSelectionKey = selectionKey;
 		this.#refreshStaticDebugOverlay();
@@ -529,10 +591,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			);
 		}
 		for (const drawUnit of materialized.staticDelta.addedDrawUnits) {
-			this.#materializedDrawUnitsById.set(
-				drawUnit.drawUnitId,
-				drawUnit,
-			);
+			this.#materializedDrawUnitsById.set(drawUnit.drawUnitId, drawUnit);
 		}
 	}
 
@@ -595,6 +654,49 @@ class ClientRuntimeImpl implements ClientRuntime {
 				id: describeStaticSceneSelectionKey(debugBounds.selectionKey),
 			}),
 		]);
+	}
+
+	#queryStaticSelectionDiagnosticsDetails(
+		selectionKey: StaticSceneSelectionKey,
+	): StaticSelectionDiagnosticsDetails | null {
+		if (selectionKey.itemKind === "outdoor-static-object") {
+			const detail = this.#staticSceneQuery.queryOutdoorStaticObjectDetails({
+				domain: selectionKey.domain,
+				instanceId: selectionKey.instanceId,
+				landblockId: selectionKey.landblockId,
+			});
+			return detail === null
+				? null
+				: {
+						detail,
+						kind: "outdoor-static-object",
+					};
+		}
+
+		if (selectionKey.itemKind === "terrain-quad") {
+			const detail = this.#staticSceneQuery.queryTerrainQuadDetails({
+				landblockId: selectionKey.landblockId,
+				quadIndex: selectionKey.quadIndex,
+			});
+			return detail === null
+				? null
+				: {
+						detail,
+						kind: "terrain-quad",
+					};
+		}
+
+		const detail = this.#staticSceneQuery.queryEnvCellStaticObjectDetails({
+			envCellId: selectionKey.envCellId,
+			instanceId: selectionKey.instanceId,
+			landblockId: selectionKey.landblockId,
+		});
+		return detail === null
+			? null
+			: {
+					detail,
+					kind: "env-cell-static-object",
+				};
 	}
 }
 

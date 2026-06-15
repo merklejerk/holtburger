@@ -5,13 +5,16 @@ import type {
 } from "../../static/contracts";
 import type { TextureDrawUnitBinding } from "../types";
 import {
-	createTerrainLayeredDrawScratch,
+	createTerrainPreparedLayeredPayload,
+	createTerrainPreparedLayeredPayloadState,
+	markTerrainPreparedLayeredPayloadDirty,
 	prepareTerrainLayeredPayload,
+	prepareTerrainLayeredPayloadState,
 } from "./webgl2-terrain-payloads";
 
 describe("V2 WebGL2 terrain layered payload builder", () => {
 	it("prepares layered page, rect, road, and detail payload arrays", () => {
-		const scratch = createTerrainLayeredDrawScratch();
+		const scratch = createTerrainPreparedLayeredPayload();
 		const base = createRole("terrain-base", "base-use", 2);
 		const overlayTerrain = createRole("terrain-base", "overlay-use", 4);
 		const overlayAlpha = createRole("terrain-alpha", "overlay-alpha-use", 1);
@@ -148,7 +151,7 @@ describe("V2 WebGL2 terrain layered payload builder", () => {
 	});
 
 	it("returns false when a required terrain binding is missing", () => {
-		const scratch = createTerrainLayeredDrawScratch();
+		const scratch = createTerrainPreparedLayeredPayload();
 		const plan = createPlan({
 			layer: {
 				base: createRole("terrain-base", "missing-use", 1),
@@ -163,7 +166,7 @@ describe("V2 WebGL2 terrain layered payload builder", () => {
 	});
 
 	it("returns false when different terrain textures collide in one page slot", () => {
-		const scratch = createTerrainLayeredDrawScratch();
+		const scratch = createTerrainPreparedLayeredPayload();
 		const base = createRole("terrain-base", "base-use", 1);
 		const overlayTerrain = createRole("terrain-base", "overlay-use", 1);
 		const overlayAlpha = createRole("terrain-alpha", "overlay-alpha-use", 1);
@@ -218,7 +221,7 @@ describe("V2 WebGL2 terrain layered payload builder", () => {
 	});
 
 	it("returns false when detail roles disagree on texture residency", () => {
-		const scratch = createTerrainLayeredDrawScratch();
+		const scratch = createTerrainPreparedLayeredPayload();
 		const base = createRole("terrain-base", "base-use", 1);
 		const plan = createPlan({
 			detail: createRole("detail", "detail-a-use", 1),
@@ -264,6 +267,57 @@ describe("V2 WebGL2 terrain layered payload builder", () => {
 		expect(prepareTerrainLayeredPayload(scratch, plan, bindings, textures)).toBe(
 			false,
 		);
+	});
+
+	it("keeps resource-owned payload state dirty when rebuild fails", () => {
+		const state = createTerrainPreparedLayeredPayloadState();
+		const base = createRole("terrain-base", "base-use", 1);
+		const plan = createPlan({
+			layer: {
+				base,
+				overlays: [],
+				roads: [],
+			},
+		});
+		const bindings = new Map<string, TextureDrawUnitBinding>([
+			[
+				"base-use",
+				createBinding("base-use", "base-ref", "color", 0, [1, 2, 3, 4]),
+			],
+		]);
+		const textures = new Map<string, WebGLTexture>([
+			["base-ref", createTexture()],
+		]);
+
+		const firstPayload = prepareTerrainLayeredPayloadState(
+			state,
+			plan,
+			bindings,
+			textures,
+		);
+		expect(firstPayload).not.toBeNull();
+		expect(state.isDirty).toBe(false);
+		expect(firstPayload?.layerRects.baseColorPages[1]).toBe(0);
+
+		textures.delete("base-ref");
+		const unchangedPayload = prepareTerrainLayeredPayloadState(
+			state,
+			plan,
+			bindings,
+			textures,
+		);
+		expect(unchangedPayload).toBe(firstPayload);
+		expect(state.isDirty).toBe(false);
+
+		markTerrainPreparedLayeredPayloadDirty(state);
+		const failedPayload = prepareTerrainLayeredPayloadState(
+			state,
+			plan,
+			bindings,
+			textures,
+		);
+		expect(failedPayload).toBeNull();
+		expect(state.isDirty).toBe(true);
 	});
 });
 

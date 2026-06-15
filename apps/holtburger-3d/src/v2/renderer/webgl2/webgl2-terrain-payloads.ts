@@ -21,6 +21,11 @@ export interface TerrainPreparedLayeredPayload {
 	readonly maskPages: TerrainPreparedRolePageBindings;
 }
 
+export interface TerrainPreparedLayeredPayloadState {
+	readonly payload: TerrainPreparedLayeredPayload;
+	isDirty: boolean;
+}
+
 export interface TerrainPreparedRolePageBindings {
 	readonly sizes: Float32Array;
 	readonly textures: (WebGLTexture | null)[];
@@ -56,7 +61,38 @@ export interface TerrainPreparedLayerRects {
 	readonly roadTilings: Float32Array;
 }
 
-export function createTerrainLayeredDrawScratch(): TerrainPreparedLayeredPayload {
+export function createTerrainPreparedLayeredPayloadState(): TerrainPreparedLayeredPayloadState {
+	return {
+		isDirty: true,
+		payload: createTerrainPreparedLayeredPayload(),
+	};
+}
+
+export function markTerrainPreparedLayeredPayloadDirty(
+	state: TerrainPreparedLayeredPayloadState,
+): void {
+	state.isDirty = true;
+}
+
+export function prepareTerrainLayeredPayloadState(
+	state: TerrainPreparedLayeredPayloadState,
+	plan: TerrainMaterialLayerPlan,
+	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	textures: ReadonlyMap<string, WebGLTexture>,
+): TerrainPreparedLayeredPayload | null {
+	if (!state.isDirty) {
+		return state.payload;
+	}
+
+	if (!prepareTerrainLayeredPayload(state.payload, plan, bindings, textures)) {
+		return null;
+	}
+	state.isDirty = false;
+
+	return state.payload;
+}
+
+export function createTerrainPreparedLayeredPayload(): TerrainPreparedLayeredPayload {
 	return {
 		colorPages: createTerrainRolePageScratch(
 			MAX_TERRAIN_COLOR_PAGES_PER_DRAW,

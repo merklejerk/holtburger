@@ -299,6 +299,8 @@ Status: Completed on 2026-06-15.
 
 ### Phase 4: Resource-Owned Terrain Prepared Payloads
 
+Status: Completed on 2026-06-15.
+
 #### Deliverables
 
 - Extend `TerrainGeometryResource` with a nullable prepared layered payload.
@@ -308,11 +310,11 @@ Status: Completed on 2026-06-15.
 
 #### Task Checklist
 
-- Initialize terrain prepared payload as dirty/null in `createTerrainGeometryResource`.
-- Mark dirty in `applyTexturePlacementUpdate` for matching terrain draw units.
-- Update `#drawTerrain` to use prepared layered payload for material mode `2`.
-- Ensure resource-owned typed arrays are not aliases of renderer-owned scratch arrays.
-- Keep existing terrain fallback warning semantics.
+- [x] Initialize terrain prepared payload as dirty/null in `createTerrainGeometryResource`.
+- [x] Mark dirty in `applyTexturePlacementUpdate` for matching terrain draw units.
+- [x] Update `#drawTerrain` to use prepared layered payload for material mode `2`.
+- [x] Ensure resource-owned typed arrays are not aliases of renderer-owned scratch arrays.
+- [x] Keep existing terrain fallback warning semantics.
 
 #### Acceptance Criteria
 
@@ -324,6 +326,13 @@ Status: Completed on 2026-06-15.
 #### Decisions and Course Corrections
 
 - Dry run chose resource-local mutable payload state over a renderer-global cache. Conservative invalidation remains acceptable for texture removal/replacement.
+- Implemented `TerrainPreparedLayeredPayloadState` in `webgl2-terrain-payloads.ts`, mirroring the static payload state shape. The state owns the prepared typed arrays and tracks a mutable dirty flag.
+- `TerrainGeometryResource` now owns `preparedLayeredPayloadState`, initialized dirty at resource creation. Removing a draw unit drops the payload through the existing terrain resource map deletion path.
+- Replaced the renderer-owned `#terrainLayeredDrawScratch` with `#getTerrainPreparedLayeredPayload(resource, bindings)`, which rebuilds only when the terrain resource state is dirty.
+- `applyTexturePlacementUpdate` marks live terrain resources dirty for every changed `drawUnitBindings` entry.
+- Texture page additions/replacements/removals conservatively mark all live terrain prepared payloads dirty, matching the static payload policy, because prepared payloads hold `WebGLTexture` handles and there is no reverse texture-ref owner map.
+- A failed dirty rebuild returns `null` and leaves the terrain payload state dirty, so `#drawTerrain` falls back without uploading stale cached layered uniforms.
+- Added payload-state tests covering cached reuse, explicit dirty marking, and failed rebuild behavior.
 
 ### Phase 5: Adopt Narrow GL State Caching in V2 Renderer
 

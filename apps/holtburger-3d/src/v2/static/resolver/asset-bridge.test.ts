@@ -46,6 +46,60 @@ describe("V2 static resolver asset bridge", () => {
 		bridge.dispose();
 	});
 
+	it("sends resolver-light landblock env-cell payloads across the worker boundary without mutating the asset service copy", async () => {
+		const channel = new FixtureWorkerChannel();
+		const key = createHostAssetKey("landblock-env-cells", 0xda55ffff);
+		const asset = createPreparedAssetWithPayload(key, {
+			envCells: [
+				{
+					renderGeometry: {
+						normals: [0, 0, 1],
+						positions: [1, 2, 3],
+						triangles: [{ firstVertex: 0 }],
+						uvs: [0, 0],
+					},
+				},
+			],
+			kind: "landblock-env-cells",
+		});
+		const assetReader = new FixturePreparedAssetReader(asset);
+		const bridge = createStaticResolverMainAssetBridge(
+			channel.mainPort,
+			assetReader,
+		);
+		const workerAssetReader = new StaticResolverWorkerPreparedAssetReader(
+			channel.workerPort,
+		);
+
+		const resolved = await workerAssetReader.requestPreparedAsset(key);
+
+		expect(resolved.payload).toMatchObject({
+			envCells: [
+				{
+					renderGeometry: {
+						normals: [],
+						positions: [],
+						triangles: [{ firstVertex: 0 }],
+						uvs: [],
+					},
+				},
+			],
+			kind: "landblock-env-cells",
+		});
+		expect(
+			(
+				asset.payload as {
+					readonly envCells: readonly {
+						readonly renderGeometry: { readonly positions: readonly number[] };
+					}[];
+				}
+			).envCells[0]?.renderGeometry.positions,
+		).toEqual([1, 2, 3]);
+
+		workerAssetReader.dispose();
+		bridge.dispose();
+	});
+
 	it("surfaces prepared asset request failures inside the worker", async () => {
 		const channel = new FixtureWorkerChannel();
 		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
@@ -219,11 +273,18 @@ class DeferredRuntimeHost implements RuntimeHost {
 }
 
 function createPreparedAsset(key: HostAssetKey): PreparedAsset {
+	return createPreparedAssetWithPayload(key, {
+		kind: "landblock-outdoor",
+	});
+}
+
+function createPreparedAssetWithPayload(
+	key: HostAssetKey,
+	payload: PreparedAsset["payload"],
+): PreparedAsset {
 	return {
 		key,
-		payload: {
-			kind: "landblock-outdoor",
-		},
+		payload,
 		preparedAt: "2026-06-10T00:00:00.000Z",
 		revision: 7,
 		sourceAssetId: "landblock/da55ffff/outdoor",

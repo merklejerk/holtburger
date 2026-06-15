@@ -114,6 +114,51 @@ describe("V2 landblock env-cell resolver", () => {
 		).toEqual(["landblock-env-cells:da55ffff"]);
 	});
 
+	it("preserves resolver-light cell-structure geometry metadata supplied by the resolver asset bridge", async () => {
+		const payload = createLandblockEnvCellsPayload({
+			heavyRenderGeometry: true,
+		});
+		payload.envCells = payload.envCells.map((cell) => ({
+			...cell,
+			renderGeometry: {
+				...cell.renderGeometry,
+				normals: [],
+				positions: [],
+				uvs: [],
+			},
+		}));
+		const assetService = new FixtureAssetService([
+			createPreparedAsset(
+				createHostAssetKey("landblock-env-cells", 0xda55ffff),
+				payload,
+			),
+		]);
+
+		const result = await new LandblockEnvCellsResolver({
+			assetService,
+		}).resolve(createEnvCellRequest());
+
+		expect(result.scope.kind).toBe("landblock-env-cells");
+		if (result.scope.kind !== "landblock-env-cells") {
+			throw new Error("expected landblock env-cell payload");
+		}
+		expect(result.scope.envCells[0]?.renderGeometry).toMatchObject({
+			normals: [],
+			positions: [],
+			triangleCount: 1,
+			uvs: [],
+			vertexCount: 3,
+		});
+		expect(result.scope.envCells[0]?.renderGeometry.triangles).toEqual([
+			{
+				firstVertex: 0,
+				materialVariantSignature: "variant-a",
+				polygonId: 17,
+				surfaceId: 10,
+			},
+		]);
+	});
+
 	it("uses the same env-cell source path without topology classification", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
@@ -369,7 +414,10 @@ function createRuntimeEnvCell(
 }
 
 function createLandblockEnvCellsPayload(
-	options: { readonly omitSecondBvhItem?: boolean } = {},
+	options: {
+		readonly heavyRenderGeometry?: boolean;
+		readonly omitSecondBvhItem?: boolean;
+	} = {},
 ): LandblockEnvCellsPayloadDto {
 	return {
 		diagnostics: createDiagnostics(),
@@ -397,12 +445,14 @@ function createLandblockEnvCellsPayload(
 		envCells: [
 			createEnvCellPayload({
 				envCellId: 0xda550100,
+				heavyRenderGeometry: options.heavyRenderGeometry,
 				memberId: "cell-0",
 				staticSourceAssetId: "gfx-obj/01000010",
 				visibleEnvCellIds: [0xda550101],
 			}),
 			createEnvCellPayload({
 				envCellId: 0xda550101,
+				heavyRenderGeometry: options.heavyRenderGeometry,
 				memberId: "cell-1",
 				staticSourceAssetId: "setup-model/02000010",
 				visibleEnvCellIds: [],
@@ -441,6 +491,7 @@ function createLandblockEnvCellsPayload(
 
 function createEnvCellPayload(input: {
 	readonly envCellId: number;
+	readonly heavyRenderGeometry?: boolean;
 	readonly memberId: string;
 	readonly visibleEnvCellIds: readonly number[];
 	readonly staticSourceAssetId: string;
@@ -456,7 +507,9 @@ function createEnvCellPayload(input: {
 		memberId: input.memberId,
 		portalApertures: [],
 		portals: [],
-		renderGeometry: createRenderGeometry(input.envCellId),
+		renderGeometry: createRenderGeometry(input.envCellId, {
+			heavy: input.heavyRenderGeometry ?? false,
+		}),
 		restrictionObjectId: null,
 		seenOutside: null,
 		statics: [
@@ -496,7 +549,33 @@ function createBounds() {
 	};
 }
 
-function createRenderGeometry(sourceId: number) {
+function createRenderGeometry(
+	sourceId: number,
+	options: { readonly heavy?: boolean } = {},
+) {
+	if (options.heavy) {
+		return {
+			bounds: createBounds(),
+			invalidPolygons: [],
+			normals: [0, 0, 1, 0, 0, 1, 0, 0, 1],
+			positions: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+			skippedPolygonCount: 0,
+			sourceId,
+			surfaceIds: [10],
+			triangleCount: 1,
+			triangles: [
+				{
+					firstVertex: 0,
+					materialVariantSignature: "variant-a",
+					polygonId: 17,
+					surfaceId: 10,
+				},
+			],
+			uvs: [0, 0, 1, 0, 0, 1],
+			vertexCount: 3,
+		};
+	}
+
 	return {
 		bounds: null,
 		invalidPolygons: [],

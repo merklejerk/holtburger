@@ -270,7 +270,7 @@ Acceptance criteria for the whole Phase 13A sequence:
 
 #### Phase 13A0: Resolver-Light Env-Cell Asset View
 
-Status: planned; immediate correction before 13A1.
+Status: complete on 2026-06-15.
 
 Purpose: keep the env-cell resolver metadata-oriented by applying the same light-view pattern already used for resolver-facing `gfx-obj` assets.
 
@@ -287,6 +287,19 @@ Acceptance criteria:
 - Resolver facts for `landblock-env-cells` have empty or absent cell-structure vertex buffer arrays, matching the intent of `createResolverGfxObjPreparedAssetView`.
 - Indoor explicit static object seeds remain metadata-only in the env-cell resolver; their source geometry continues to use static object source/bake attachment patterns.
 - Runtime query, visibility diagnostics, and spatial/BVH selection still have the metadata they need after vertex buffers are stripped.
+
+Implementation notes:
+
+- Added `createResolverEnvCellPreparedAssetView`, mirroring the existing resolver-facing `gfx-obj` light view. It strips `renderGeometry.positions`, `renderGeometry.normals`, and `renderGeometry.uvs` for `landblock-env-cells` bundles and single `env-cell` payloads while preserving counts, triangle metadata, bounds, surfaces, portals, BSP, BVHs, and static seeds.
+- Applied the view at the static resolver worker asset bridge, matching the existing `gfx-obj` resolver-light ownership boundary. `LandblockEnvCellsResolver` consumes resolver-facing prepared assets and does not own light-view transformation.
+- Added tests proving resolver facts can consume light geometry metadata, the full prepared asset is not mutated by the bridge, and worker-bridge responses strip env-cell buffers while preserving triangle metadata.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run test:ts -- --run src/v2/static/env-cells/landblock-env-cells-resolver.test.ts src/v2/static/resolver/asset-bridge.test.ts`
+- `cd apps/holtburger-3d && npm run test:ts`
 
 #### Phase 13A1: Env-Cell Bake Contracts And Typed Peer Records
 
@@ -322,7 +335,8 @@ Purpose: turn env-cell cell-structure render geometry into the first renderable 
 Deliverables:
 
 - A `StructuredInteriorGeometryStaticDrawUnit` or equivalent dedicated draw-unit variant for cell-structure geometry, with landblock id, env-cell id, cell-structure/environment ids, local placement ownership, material-family facts, geometry buffers, source triangle ids, texture-use ids, and sort/visibility metadata.
-- Geometry bake from explicit cell-structure geometry attachments plus resolver metadata: positions, UVs, triangles, surface ids, material variant signatures, and bounds.
+- An explicit cell-structure geometry attachment/enrichment path that obtains full positions, normals, UVs, and triangle metadata for env-cell shells at bake time. It must not depend on resolver payloads carrying vertex buffers.
+- Geometry bake from env-cell shell attachments plus resolver metadata: positions, UVs, triangles, surface ids, material variant signatures, bounds, local placement, and env-cell/cell-structure ownership.
 - Material planning for env-cell cell-structure surfaces through the existing static material planner where material facts are isomorphic.
 - Texture/data-use emission for cell-structure surfaces through the existing texture manager and batch atlas ownership model.
 - Coordinate/placement tests proving env-cell local placement maps cell-local geometry into the same renderer-local space used by `StaticSceneQuery` picking and debug overlays.

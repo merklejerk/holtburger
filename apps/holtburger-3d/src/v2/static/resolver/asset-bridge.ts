@@ -1,4 +1,5 @@
-import type { PreparedAssetReader } from "../../assets/contracts";
+import type { PreparedAsset, PreparedAssetReader } from "../../assets/contracts";
+import { createResolverEnvCellPreparedAssetView } from "../../assets/preparation/env-cell-views";
 import { createResolverGfxObjPreparedAssetView } from "../../assets/preparation/gfx-obj-views";
 import type {
 	StaticResolverWorkerPort,
@@ -25,7 +26,7 @@ export function createStaticResolverMainAssetBridge(
 			.requestPreparedAsset(message.key)
 			.then((asset) => {
 				port.postMessage({
-					asset: createResolverGfxObjPreparedAssetView(asset),
+					asset: createResolverPreparedAssetView(asset),
 					kind: "prepared-asset-request-resolved",
 					requestId: message.requestId,
 				});
@@ -46,4 +47,10 @@ export function createStaticResolverMainAssetBridge(
 			port.removeEventListener("message", onMessage);
 		},
 	};
+}
+
+function createResolverPreparedAssetView(asset: PreparedAsset): PreparedAsset {
+	return createResolverEnvCellPreparedAssetView(
+		createResolverGfxObjPreparedAssetView(asset),
+	);
 }

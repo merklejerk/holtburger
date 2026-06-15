@@ -47,6 +47,9 @@ import {
 	createTerrainPreparedLayeredPayloadState,
 	markTerrainPreparedLayeredPayloadDirty,
 	prepareTerrainLayeredPayloadState,
+	TERRAIN_LAYERED_MAX_LAYER_ENTRIES,
+	TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER,
+	TERRAIN_LAYERED_MAX_ROADS_PER_LAYER,
 	type TerrainPreparedDetailUniforms,
 	type TerrainPreparedLayerRects,
 	type TerrainPreparedLayeredPayload,
@@ -54,9 +57,6 @@ import {
 	type TerrainPreparedRolePageBindings,
 } from "./webgl2-terrain-payloads";
 
-const TERRAIN_LAYERED_MAX_LAYER_ENTRIES = 8;
-const TERRAIN_LAYERED_MAX_OVERLAYS_PER_LAYER = 3;
-const TERRAIN_LAYERED_MAX_ROADS_PER_LAYER = 2;
 const TERRAIN_ATLAS_MIP_GRADIENT_SCALE = 0.5;
 const TERRAIN_COLOR_TEXTURE_UNIT_BASE = 1;
 const TERRAIN_MASK_TEXTURE_UNIT_BASE =
@@ -767,10 +767,10 @@ class Webgl2Renderer implements Renderer {
 			this.#markTerrainPreparedPayloadDirty(binding.drawUnitId);
 		}
 
+		// Prepared payloads hold WebGLTexture handles. Without a reverse
+		// texture-ref owner map, texture page adds/replacements/removals must
+		// conservatively dirty all live payloads.
 		if (shouldMarkAllStaticPayloadsDirty) {
-			// Prepared payloads hold WebGLTexture handles. Without a reverse
-			// texture-ref owner map, texture page adds/replacements/removals must
-			// conservatively dirty all live payloads.
 			this.#markAllStaticObjectPreparedPayloadsDirty();
 		}
 		if (shouldMarkAllTerrainPayloadsDirty) {

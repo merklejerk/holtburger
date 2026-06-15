@@ -1066,7 +1066,7 @@ impl LandblockEnvCellsAssetAssembler {
                 );
                 let landblock_bounds =
                     local_bvh.as_ref().map(|bvh| {
-                        pad_bvh_bounds(transform_render_local_bounds_by_ac_frame_conservative(
+                        pad_bvh_bounds(transform_render_local_bounds_by_ac_frame(
                             bvh.nodes[0].bounds,
                             &prepared_cell.local_placement,
                             unit_prepared_vec3(),
@@ -1773,54 +1773,43 @@ fn build_env_cell_local_bvh_records(
     items.into_iter().unzip()
 }
 
-fn transform_render_local_bounds_by_ac_frame_conservative(
+fn transform_render_local_bounds_by_ac_frame(
     render_bounds: PreparedAabb,
     ac_frame: &Frame,
     ac_scale: PreparedVec3,
 ) -> PreparedAabb {
     // Source render geometry is already in renderer axes ({x, z, -y}); DAT
     // placement frames and source scale are still in AC axes.
-    let render_center = PreparedVec3 {
-        x: (render_bounds.min.x + render_bounds.max.x) * 0.5,
-        y: (render_bounds.min.y + render_bounds.max.y) * 0.5,
-        z: (render_bounds.min.z + render_bounds.max.z) * 0.5,
-    };
-    let render_half_extent = PreparedVec3 {
-        x: (render_bounds.max.x - render_bounds.min.x).abs() * 0.5,
-        y: (render_bounds.max.y - render_bounds.min.y).abs() * 0.5,
-        z: (render_bounds.max.z - render_bounds.min.z).abs() * 0.5,
-    };
-    let ac_center = render_vector_to_ac_space(render_center);
-    let ac_half_extent = render_extents_to_ac_extents(render_half_extent);
-    let scaled_half_extent = PreparedVec3 {
-        x: ac_half_extent.x * ac_scale.x.abs(),
-        y: ac_half_extent.y * ac_scale.y.abs(),
-        z: ac_half_extent.z * ac_scale.z.abs(),
-    };
-    let radius = (scaled_half_extent.x * scaled_half_extent.x
-        + scaled_half_extent.y * scaled_half_extent.y
-        + scaled_half_extent.z * scaled_half_extent.z)
-        .sqrt();
-    let scaled_center = holtburger_common::Vector3 {
-        x: ac_center.x * ac_scale.x,
-        y: ac_center.y * ac_scale.y,
-        z: ac_center.z * ac_scale.z,
-    };
-    let center = ac_vector_to_render_space(
-        ac_frame.origin + rotate_ac_vector(scaled_center, ac_frame.orientation),
-    );
-    PreparedAabb {
-        min: PreparedVec3 {
-            x: center.x - radius,
-            y: center.y - radius,
-            z: center.z - radius,
-        },
-        max: PreparedVec3 {
-            x: center.x + radius,
-            y: center.y + radius,
-            z: center.z + radius,
-        },
+    let mut bounds = None;
+    for x in [render_bounds.min.x, render_bounds.max.x] {
+        for y in [render_bounds.min.y, render_bounds.max.y] {
+            for z in [render_bounds.min.z, render_bounds.max.z] {
+                let point = transform_render_local_point_by_ac_frame(
+                    PreparedVec3 { x, y, z },
+                    ac_frame,
+                    ac_scale,
+                );
+                bounds = Some(expand_bounds(bounds, point));
+            }
+        }
     }
+    bounds.expect("AABB corners should always produce transformed bounds")
+}
+
+fn transform_render_local_point_by_ac_frame(
+    point: PreparedVec3,
+    ac_frame: &Frame,
+    ac_scale: PreparedVec3,
+) -> PreparedVec3 {
+    let ac_point = render_vector_to_ac_space(point);
+    let scaled_point = holtburger_common::Vector3 {
+        x: ac_point.x * ac_scale.x,
+        y: ac_point.y * ac_scale.y,
+        z: ac_point.z * ac_scale.z,
+    };
+    ac_vector_to_render_space(
+        ac_frame.origin + rotate_ac_vector(scaled_point, ac_frame.orientation),
+    )
 }
 
 fn combine_ac_frames(parent: &Frame, child: &Frame) -> Frame {
@@ -2209,17 +2198,13 @@ fn conservative_instance_bounds(
     scale: PreparedVec3,
 ) -> PreparedAabb {
     if part_placements.is_empty() {
-        return transform_render_local_bounds_by_ac_frame_conservative(
-            source_bounds,
-            placement,
-            scale,
-        );
+        return transform_render_local_bounds_by_ac_frame(source_bounds, placement, scale);
     }
 
     part_placements
         .iter()
         .map(|part_placement| {
-            transform_render_local_bounds_by_ac_frame_conservative(
+            transform_render_local_bounds_by_ac_frame(
                 source_bounds,
                 &combine_ac_frames(placement, part_placement),
                 scale,
@@ -2970,14 +2955,6 @@ fn render_vector_to_ac_space(vector: PreparedVec3) -> holtburger_common::Vector3
     }
 }
 
-fn render_extents_to_ac_extents(extents: PreparedVec3) -> PreparedVec3 {
-    PreparedVec3 {
-        x: extents.x,
-        y: extents.z,
-        z: extents.y,
-    }
-}
-
 fn scale_normal_component(value: f32, scale: f32) -> f32 {
     let scaled = value * scale;
     if scaled == 0.0 { 0.0 } else { scaled }
@@ -3154,11 +3131,8 @@ mod tests {
             },
         };
 
-        let bounds = transform_render_local_bounds_by_ac_frame_conservative(
-            local_bounds,
-            &frame,
-            unit_prepared_vec3(),
-        );
+        let bounds =
+            transform_render_local_bounds_by_ac_frame(local_bounds, &frame, unit_prepared_vec3());
 
         let center_x = (bounds.min.x + bounds.max.x) * 0.5;
         let center_y = (bounds.min.y + bounds.max.y) * 0.5;
@@ -3935,6 +3909,55 @@ mod tests {
             }
         );
         assert_eq!(bounds.max, bounds.min);
+    }
+
+    #[test]
+    fn static_instance_bounds_transform_scaled_corners_without_radius_cube_inflation() {
+        let placement = Frame {
+            origin: holtburger_common::Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            orientation: holtburger_common::Quaternion::identity(),
+        };
+        let bounds = conservative_instance_bounds(
+            &placement,
+            &[],
+            PreparedAabb {
+                min: PreparedVec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                max: PreparedVec3 {
+                    x: 2.0,
+                    y: 4.0,
+                    z: 6.0,
+                },
+            },
+            PreparedVec3 {
+                x: 2.0,
+                y: 3.0,
+                z: 5.0,
+            },
+        );
+
+        assert_eq!(
+            bounds,
+            PreparedAabb {
+                min: PreparedVec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                max: PreparedVec3 {
+                    x: 4.0,
+                    y: 20.0,
+                    z: 18.0,
+                },
+            }
+        );
     }
 
     #[test]

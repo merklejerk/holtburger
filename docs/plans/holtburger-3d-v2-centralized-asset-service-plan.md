@@ -211,14 +211,17 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit terrain, outdoor object, and env-cell resolvers for repeated key paths.
-- [ ] Add a small typed request memo helper if at least two resolvers need it.
-- [ ] Prefer resolver-local helper injection over global module state.
-- [ ] Extend resolver tests with duplicate dependency fixtures.
+- [x] Audit terrain, outdoor object, and env-cell resolvers for repeated key paths.
+- [x] Add a small typed request memo helper if at least two resolvers need it; otherwise keep the helper local to the proven duplicate path.
+- [x] Prefer resolver-local helper injection over global module state.
+- [x] Extend resolver tests with duplicate dependency fixtures.
 
 Decisions and course corrections:
 
-- None yet.
+- 2026-06-15: Terrain already dedupes terrain texture roles before requesting surface textures, and the env-cell resolver currently requests one landblock env-cell asset per job, so neither received memoization in this phase.
+- 2026-06-15: Added a local `PerJobPreparedAssetReader` inside the outdoor static-object resolver. It memoizes in-flight and completed prepared-asset requests by `HostAssetKey` only for one `resolve(job)` call.
+- 2026-06-15: Did not add a shared memo helper because only outdoor static objects had a proven duplicate request path. The cleanup phase can revisit if Phase 6 exposes another resolver-local duplicate path.
+- 2026-06-15: Added an outdoor static-object resolver fixture where duplicate material slots fan out to the same material, surface texture, render surface, and palette; each key is now requested once within the job.
 
 ### Phase 6: Retention, Pruning, And Diagnostics Cleanup
 

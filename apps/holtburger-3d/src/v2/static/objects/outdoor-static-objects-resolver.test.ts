@@ -397,6 +397,88 @@ describe("V2 outdoor static object resolver", () => {
 		expect(payload.scope.missingRefs).toEqual([]);
 	});
 
+	it("memoizes duplicate prepared asset requests inside one resolve job", async () => {
+		const duplicatedMaterialKey = createHostAssetKey("material", 0x08000011);
+		const duplicatedTextureKey = createHostAssetKey(
+			"surface-texture",
+			0x05000010,
+		);
+		const duplicatedRenderSurfaceKey = createHostAssetKey(
+			"render-surface",
+			0x06000010,
+		);
+		const duplicatedPaletteKey = createHostAssetKey("palette", 0x04000010);
+		const assetService = new FixtureAssetService([
+			createPreparedAsset(
+				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createLandblockOutdoorPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("region-render-profile", 1),
+				createRegionRenderProfilePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("setup-model", 0x02000010),
+				createSetupModelPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("setup-appearance", 0x02000010),
+				createSetupAppearancePayload({
+					materialSlots: [
+						{
+							materialAssetId: "material/08000011",
+							slotIndex: 0,
+							surfaceId: 0x08000010,
+						},
+						{
+							materialAssetId: "material/08000011",
+							slotIndex: 1,
+							surfaceId: 0x08000010,
+						},
+					],
+				}),
+			),
+			createPreparedAsset(
+				createHostAssetKey("gfx-obj", 0x01000020),
+				createGfxObjPayload(),
+			),
+			createPreparedAsset(duplicatedMaterialKey, createMaterialPayload()),
+			createPreparedAsset(
+				duplicatedTextureKey,
+				createSurfaceTexturePayload({
+					renderSurfaceId: 0x06000010,
+					surfaceTextureId: 0x05000010,
+				}),
+			),
+			createPreparedAsset(
+				duplicatedRenderSurfaceKey,
+				createRenderSurfacePayload({ renderSurfaceId: 0x06000010 }),
+			),
+			createPreparedAsset(duplicatedPaletteKey, {
+				kind: "palette",
+				paletteId: 0x04000010,
+				provenance: createProvenance("palette"),
+				residencyKind: "unknown",
+				sourceAssetKind: "palette",
+			} satisfies PalettePayloadDto),
+		]);
+
+		const payload = await new OutdoorStaticObjectsResolver({
+			assetService,
+		}).resolve(createBuildingRequest());
+
+		expect(payload.scope.kind).toBe("outdoor-static-objects");
+		if (payload.scope.kind !== "outdoor-static-objects") {
+			throw new Error("expected outdoor static object payload");
+		}
+
+		expect(payload.scope.materialSlots).toHaveLength(2);
+		expect(assetService.countRequests(duplicatedMaterialKey)).toBe(1);
+		expect(assetService.countRequests(duplicatedTextureKey)).toBe(1);
+		expect(assetService.countRequests(duplicatedRenderSurfaceKey)).toBe(1);
+		expect(assetService.countRequests(duplicatedPaletteKey)).toBe(1);
+	});
+
 	it("returns an empty outdoor-detail payload when a landblock has no generated scenery", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
@@ -746,6 +828,7 @@ describe("V2 outdoor static object resolver", () => {
 
 class FixtureAssetService implements AssetService {
 	readonly #assets = new Map<string, PreparedAsset>();
+	readonly #requestCounts = new Map<string, number>();
 
 	constructor(assets: readonly PreparedAsset[]) {
 		for (const asset of assets) {
@@ -754,12 +837,21 @@ class FixtureAssetService implements AssetService {
 	}
 
 	async requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
+		const requestKey = describeHostAssetKey(key);
+		this.#requestCounts.set(
+			requestKey,
+			(this.#requestCounts.get(requestKey) ?? 0) + 1,
+		);
 		const asset = this.#assets.get(describeHostAssetKey(key));
 		if (!asset) {
 			throw new Error(`Missing fixture asset ${describeHostAssetKey(key)}.`);
 		}
 
 		return asset;
+	}
+
+	countRequests(key: HostAssetKey): number {
+		return this.#requestCounts.get(describeHostAssetKey(key)) ?? 0;
 	}
 
 	acquirePreparedAssetLease(key: HostAssetKey): PreparedAssetLease {
@@ -964,6 +1056,7 @@ function createRegionRenderProfilePayload(): RegionRenderProfilePayloadDto {
 
 function createSetupAppearancePayload(
 	options: {
+		readonly materialSlots?: SetupAppearancePayloadDto["parts"][number]["materialSlots"];
 		readonly paletteId?: number | null;
 		readonly subPalettes?: SetupAppearancePayloadDto["subPalettes"];
 	} = {},
@@ -981,7 +1074,7 @@ function createSetupAppearancePayload(
 			{
 				gfxObjAssetId: "gfx-obj/01000020",
 				gfxObjId: 0x01000020,
-				materialSlots: [
+				materialSlots: options.materialSlots ?? [
 					{
 						materialAssetId: "material/08000011",
 						slotIndex: 0,

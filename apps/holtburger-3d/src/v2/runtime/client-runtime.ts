@@ -26,8 +26,12 @@ import type {
 	StaticDemand,
 	StaticBounds,
 	StaticDrawUnit,
+	StaticObjectGeometryStaticDrawUnit,
 	StaticLodRadii,
 	StaticMaterialCoverageReport,
+	StaticObjectMaterialTableEntry,
+	StaticObjectSourceMappingCoverage,
+	StaticObjectSourceIdentity,
 	StaticMaterialUnrenderedBucket,
 	ScheduledStaticWorkStatus,
 } from "../static/contracts";
@@ -39,6 +43,7 @@ import {
 	StaticSceneQuery,
 	describeStaticSceneSelectionKey,
 	type EnvCellStaticScenePickDetails,
+	type OutdoorStaticObjectSourceDiagnostics,
 	type OutdoorStaticObjectScenePickDetails,
 	type StaticScenePickRequest,
 	type StaticScenePickHit,
@@ -97,6 +102,7 @@ export interface StaticSelectionDiagnosticsReport {
 	};
 	readonly debugBounds: StaticBounds | null;
 	readonly details: StaticSelectionDiagnosticsDetails | null;
+	readonly rendering: StaticSelectionRenderingDiagnostics | null;
 	readonly runtime: {
 		readonly renderAnchorLandblockId: number | null;
 		readonly sceneInterest: string | null;
@@ -107,7 +113,7 @@ export interface StaticSelectionDiagnosticsReport {
 export type StaticSelectionDiagnosticsDetails =
 	| {
 			readonly kind: "outdoor-static-object";
-			readonly detail: OutdoorStaticObjectScenePickDetails;
+			readonly detail: OutdoorStaticObjectSelectionDetails;
 	  }
 	| {
 			readonly kind: "env-cell-static-object";
@@ -117,6 +123,152 @@ export type StaticSelectionDiagnosticsDetails =
 			readonly kind: "terrain-quad";
 			readonly detail: TerrainQuadScenePickDetails;
 	  };
+
+export interface OutdoorStaticObjectSelectionDetails {
+	readonly bvhItemIndex: number;
+	readonly bvhItemKind: "static" | "building";
+	readonly domain: OutdoorStaticObjectScenePickDetails["domain"];
+	readonly instanceId: string;
+	readonly landblockId: number;
+	readonly object: StaticSelectionObjectSummary;
+}
+
+export interface StaticSelectionObjectSummary {
+	readonly instanceId: string;
+	readonly objectKind: "explicit-object" | "building" | "generated-scenery";
+	readonly portalCount: number;
+	readonly source: StaticObjectSourceSummary;
+	readonly sourceAssetId: string | null;
+	readonly sourceIndex: number;
+}
+
+export interface StaticObjectSourceSummary {
+	readonly sourceAssetKind: StaticObjectSourceIdentity["sourceAssetKind"];
+	readonly sourceDid: number;
+}
+
+export type StaticSelectionRenderingDiagnostics =
+	| OutdoorStaticSelectionRenderingDiagnostics
+	| UnsupportedStaticSelectionRenderingDiagnostics;
+
+export interface OutdoorStaticSelectionRenderingDiagnostics {
+	readonly kind: "outdoor-static-object-rendering";
+	readonly drawUnits: readonly StaticSelectionDrawUnitDiagnostics[];
+	readonly partCoverage: readonly StaticSelectionPartCoverageDiagnostics[];
+	readonly source: OutdoorStaticObjectSourceDiagnosticsSummary | null;
+	readonly unmatchedReason: string | null;
+}
+
+export interface UnsupportedStaticSelectionRenderingDiagnostics {
+	readonly kind: "unsupported-static-selection-rendering";
+	readonly reason: string;
+}
+
+export interface StaticSelectionDrawUnitDiagnostics {
+	readonly drawUnitId: string;
+	readonly sourceDrawUnitId: string | null;
+	readonly domain: StaticObjectGeometryStaticDrawUnit["domain"];
+	readonly materialEntryCount: number;
+	readonly materialEntries: readonly StaticSelectionDrawUnitMaterialEntryDiagnostics[];
+	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
+	readonly materialIds: readonly number[];
+	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
+	readonly sourceMapping: StaticSelectionSourceMappingSummaryDiagnostics;
+	readonly textureUseCount: number;
+	readonly triangleCount: number;
+	readonly vertexCount: number;
+}
+
+export interface StaticSelectionDrawUnitMaterialEntryDiagnostics {
+	readonly alphaTest: number;
+	readonly blendMode: string;
+	readonly indexTextureDid: string | null;
+	readonly materialIds: readonly number[];
+	readonly paletteDid: string | null;
+	readonly primaryTextureDid: string | null;
+	readonly slot: number;
+	readonly wrapMode: "clamp" | "repeat";
+}
+
+export interface StaticSelectionSourceMappingSummaryDiagnostics {
+	readonly geometrySurfaceIds: readonly number[];
+	readonly materialVariantSignatures: readonly (string | null)[];
+	readonly partIndices: readonly number[];
+	readonly polygonCount: number;
+	readonly polygonRange: StaticSelectionNumericRange | null;
+	readonly sourceTriangleCount: number;
+}
+
+export interface StaticSelectionNumericRange {
+	readonly max: number;
+	readonly min: number;
+}
+
+export interface StaticSelectionPartCoverageDiagnostics {
+	readonly drawUnitIds: readonly string[];
+	readonly materialIds: readonly number[];
+	readonly partIndex: number;
+	readonly polygonCount: number;
+	readonly polygonRange: StaticSelectionNumericRange | null;
+	readonly sourceTriangleCount: number;
+}
+
+export interface OutdoorStaticObjectSourceDiagnosticsSummary {
+	readonly domain: OutdoorStaticObjectSourceDiagnostics["domain"];
+	readonly instanceId: string;
+	readonly landblockId: number;
+	readonly materialIds: readonly number[];
+	readonly materialSlots: readonly StaticSelectionMaterialSlotDiagnostics[];
+	readonly object: StaticSelectionObjectSummary;
+	readonly sourceAsset: StaticSelectionSourceAssetDiagnostics | null;
+	readonly textureRefs: StaticSelectionTextureRefSummary;
+}
+
+export interface StaticSelectionMaterialSlotDiagnostics {
+	readonly diffuse: number | null;
+	readonly geometrySurfaceId: number;
+	readonly luminosity: number | null;
+	readonly materialId: number;
+	readonly materialSurfaceId: number;
+	readonly materialVariantSignature: string | null;
+	readonly partIndex: number;
+	readonly slotIndex: number;
+	readonly surfaceType: number | null;
+	readonly translucency: number | null;
+}
+
+export interface StaticSelectionSourceAssetDiagnostics {
+	readonly identity: StaticObjectSourceSummary;
+	readonly invalidPolygonCount: number;
+	readonly materialSlotCount: number;
+	readonly partCount: number;
+	readonly parts: readonly StaticSelectionSourcePartDiagnostics[];
+	readonly physicsPolygonCount: number;
+	readonly renderTriangleCount: number;
+	readonly skippedPolygonCount: number;
+}
+
+export interface StaticSelectionSourcePartDiagnostics {
+	readonly geometrySurfaceIds: readonly number[];
+	readonly materialIds: readonly number[];
+	readonly materialSlotCount: number;
+	readonly partIndex: number;
+	readonly physicsPolygonCount: number;
+	readonly renderTriangleCount: number;
+	readonly skippedPolygonCount: number;
+}
+
+export interface StaticSelectionTextureRefSummary {
+	readonly count: number;
+	readonly paletteIds: readonly number[];
+	readonly renderSurfaceIds: readonly number[];
+	readonly surfaceTextureIds: readonly number[];
+}
+
+interface MatchedStaticSelectionDrawUnitDiagnostics {
+	readonly diagnostics: StaticSelectionDrawUnitDiagnostics;
+	readonly sourceMappingCoverage: readonly StaticObjectSourceMappingCoverage[];
+}
 
 type RuntimeSnapshotListener = (snapshot: RuntimeSnapshot) => void;
 
@@ -317,6 +469,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			debugBounds,
 			details: this.#queryStaticSelectionDiagnosticsDetails(selectionKey),
 			kind: "static-selection-diagnostics-report",
+			rendering: this.#queryStaticSelectionRenderingDiagnostics(selectionKey),
 			runtime: {
 				renderAnchorLandblockId: this.#renderAnchorLandblockId,
 				sceneInterest: createSceneInterestSummary(this.#sceneInterest),
@@ -668,7 +821,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			return detail === null
 				? null
 				: {
-						detail,
+						detail: summarizeOutdoorStaticObjectDetails(detail),
 						kind: "outdoor-static-object",
 					};
 		}
@@ -698,6 +851,394 @@ class ClientRuntimeImpl implements ClientRuntime {
 					kind: "env-cell-static-object",
 				};
 	}
+
+	#queryStaticSelectionRenderingDiagnostics(
+		selectionKey: StaticSceneSelectionKey,
+	): StaticSelectionRenderingDiagnostics | null {
+		if (selectionKey.itemKind === "terrain-quad") {
+			return null;
+		}
+
+		if (selectionKey.itemKind === "env-cell-static-object") {
+			return {
+				kind: "unsupported-static-selection-rendering",
+				reason:
+					"Env-cell static selection source material retention is not implemented yet.",
+			};
+		}
+
+		const source =
+			this.#staticSceneQuery.queryOutdoorStaticObjectSourceDiagnostics({
+				domain: selectionKey.domain,
+				instanceId: selectionKey.instanceId,
+				landblockId: selectionKey.landblockId,
+			});
+		const matchedDrawUnits = this.#queryOutdoorStaticSelectionDrawUnits(
+			selectionKey,
+			source?.object.identity.objectKind ?? null,
+		);
+		const drawUnits = matchedDrawUnits.map((drawUnit) => drawUnit.diagnostics);
+
+		return {
+			drawUnits,
+			kind: "outdoor-static-object-rendering",
+			partCoverage: createStaticSelectionPartCoverage(matchedDrawUnits),
+			source:
+				source === null ? null : summarizeOutdoorStaticObjectSource(source),
+			unmatchedReason:
+				source === null
+					? "selected outdoor static source diagnostics were not retained"
+					: drawUnits.length === 0
+						? "no committed materialized static object draw units referenced this selection"
+						: null,
+		};
+	}
+
+	#queryOutdoorStaticSelectionDrawUnits(
+		selectionKey: StaticSceneSelectionKey & {
+			readonly itemKind: "outdoor-static-object";
+		},
+		objectKind: "building" | "explicit-object" | "generated-scenery" | null,
+	): readonly MatchedStaticSelectionDrawUnitDiagnostics[] {
+		const drawUnits: MatchedStaticSelectionDrawUnitDiagnostics[] = [];
+
+		for (const drawUnit of this.#materializedDrawUnitsById.values()) {
+			if (drawUnit.kind !== "static-object-geometry") {
+				continue;
+			}
+			const sourceMappingCoverage = drawUnit.sourceMappingCoverage.filter(
+				(coverage) =>
+					matchesStaticObjectSourceMappingCoverage(
+						coverage,
+						selectionKey,
+						objectKind,
+					),
+			);
+			if (sourceMappingCoverage.length === 0) {
+				continue;
+			}
+
+			drawUnits.push({
+				diagnostics: {
+					domain: drawUnit.domain,
+					drawUnitId: drawUnit.drawUnitId,
+					materialEntryCount: drawUnit.materialEntries.length,
+					materialEntries: drawUnit.materialEntries.map(
+						summarizeDrawUnitMaterialEntry,
+					),
+					materialFamily: drawUnit.materialFamily,
+					materialIds: drawUnit.materialIds,
+					materialPass: drawUnit.materialPass,
+					sourceDrawUnitId: this.#findSourceDrawUnitId(drawUnit.drawUnitId),
+					sourceMapping: createStaticSelectionSourceMappingSummary(
+						sourceMappingCoverage,
+					),
+					textureUseCount: drawUnit.textureUseIds.length,
+					triangleCount: drawUnit.triangleCount,
+					vertexCount: drawUnit.vertexCount,
+				},
+				sourceMappingCoverage,
+			});
+		}
+
+		return drawUnits.sort((left, right) =>
+			left.diagnostics.drawUnitId.localeCompare(right.diagnostics.drawUnitId),
+		);
+	}
+
+	#findSourceDrawUnitId(materializedDrawUnitId: string): string | null {
+		for (const [sourceDrawUnitId, materializedDrawUnitIds] of this
+			.#materializedDrawUnitIdsBySourceDrawUnitId) {
+			if (materializedDrawUnitIds.includes(materializedDrawUnitId)) {
+				return sourceDrawUnitId;
+			}
+		}
+
+		return null;
+	}
+}
+
+function summarizeOutdoorStaticObjectDetails(
+	detail: OutdoorStaticObjectScenePickDetails,
+): OutdoorStaticObjectSelectionDetails {
+	return {
+		bvhItemIndex: detail.bvhItemIndex,
+		bvhItemKind: detail.bvhItemKind,
+		domain: detail.domain,
+		instanceId: detail.instanceId,
+		landblockId: detail.landblockId,
+		object: summarizeStaticSelectionObject(detail.object),
+	};
+}
+
+function summarizeOutdoorStaticObjectSource(
+	source: OutdoorStaticObjectSourceDiagnostics,
+): OutdoorStaticObjectSourceDiagnosticsSummary {
+	return {
+		domain: source.domain,
+		instanceId: source.instanceId,
+		landblockId: source.landblockId,
+		materialIds: uniqueNumbers(
+			source.materialSources.map((material) => material.identity.materialId),
+		),
+		materialSlots: source.materialSlots.map((entry) => ({
+			diffuse: entry.material?.diffuse ?? null,
+			geometrySurfaceId: entry.slot.identity.geometrySurfaceId,
+			luminosity: entry.material?.luminosity ?? null,
+			materialId: entry.slot.material.materialId,
+			materialSurfaceId: entry.slot.identity.materialSurfaceId,
+			materialVariantSignature: entry.slot.materialVariantSignature,
+			partIndex: entry.slot.identity.part.partIndex,
+			slotIndex: entry.slot.identity.slotIndex,
+			surfaceType: entry.material?.surfaceType ?? null,
+			translucency: entry.material?.translucency ?? null,
+		})),
+		object: summarizeStaticSelectionObject(source.object),
+		sourceAsset:
+			source.sourceAsset === null
+				? null
+				: {
+						identity: summarizeStaticObjectSource(source.sourceAsset.identity),
+						invalidPolygonCount: source.sourceAsset.invalidPolygonCount,
+						materialSlotCount: source.sourceAsset.materialSlotCount,
+						partCount: source.sourceAsset.partCount,
+						parts: source.sourceAsset.parts.map((part) => ({
+							geometrySurfaceIds: uniqueNumbers(
+								part.materialSlots.map((slot) => slot.geometrySurfaceId),
+							),
+							materialIds: uniqueNumbers(
+								part.materialSlots.map((slot) => slot.material.materialId),
+							),
+							materialSlotCount: part.materialSlotCount,
+							partIndex: part.partIndex,
+							physicsPolygonCount: part.physicsPolygonCount,
+							renderTriangleCount: part.renderTriangleCount,
+							skippedPolygonCount: part.skippedPolygonCount,
+						})),
+						physicsPolygonCount: source.sourceAsset.physicsPolygonCount,
+						renderTriangleCount: source.sourceAsset.renderTriangleCount,
+						skippedPolygonCount: source.sourceAsset.skippedPolygonCount,
+					},
+		textureRefs: summarizeTextureRefs(source.textureRefs),
+	};
+}
+
+function summarizeStaticSelectionObject(
+	object: OutdoorStaticObjectScenePickDetails["object"],
+): StaticSelectionObjectSummary {
+	return {
+		instanceId: object.identity.instanceId,
+		objectKind: object.identity.objectKind,
+		portalCount: object.portalCount,
+		source: summarizeStaticObjectSource(object.source),
+		sourceAssetId: object.debug.sourceAssetId,
+		sourceIndex: object.sourceIndex,
+	};
+}
+
+function summarizeStaticObjectSource(
+	source: StaticObjectSourceIdentity,
+): StaticObjectSourceSummary {
+	return {
+		sourceAssetKind: source.sourceAssetKind,
+		sourceDid: source.sourceDid,
+	};
+}
+
+function summarizeDrawUnitMaterialEntry(
+	entry: StaticObjectMaterialTableEntry,
+): StaticSelectionDrawUnitMaterialEntryDiagnostics {
+	return {
+		alphaTest: entry.alphaTest,
+		blendMode: entry.renderState.blend.mode,
+		indexTextureDid: extractTextureUseDid(entry.indexTextureUseId),
+		materialIds: entry.materialIds,
+		paletteDid: extractTextureUseDid(entry.paletteTextureUseId),
+		primaryTextureDid: extractTextureUseDid(entry.primaryTextureUseId),
+		slot: entry.slot,
+		wrapMode: entry.primaryTextureWrapMode,
+	};
+}
+
+function extractTextureUseDid(textureUseId: string | null): string | null {
+	if (textureUseId === null) {
+		return null;
+	}
+	const match = textureUseId.match(/:([0-9a-f]{8})(?::|$)/i);
+	return match?.[1] ?? textureUseId;
+}
+
+function summarizeTextureRefs(
+	textureRefs: OutdoorStaticObjectSourceDiagnostics["textureRefs"],
+): StaticSelectionTextureRefSummary {
+	const paletteIds: number[] = [];
+	const renderSurfaceIds: number[] = [];
+	const surfaceTextureIds: number[] = [];
+
+	for (const textureRef of textureRefs) {
+		if (textureRef.palette !== null) {
+			paletteIds.push(textureRef.palette.paletteId);
+		}
+		if (textureRef.renderSurface !== null) {
+			renderSurfaceIds.push(textureRef.renderSurface.renderSurfaceId);
+		}
+		if (textureRef.role === "surface-texture") {
+			surfaceTextureIds.push(textureRef.texture.surfaceTextureId);
+		}
+	}
+
+	return {
+		count: textureRefs.length,
+		paletteIds: uniqueNumbers(paletteIds),
+		renderSurfaceIds: uniqueNumbers(renderSurfaceIds),
+		surfaceTextureIds: uniqueNumbers(surfaceTextureIds),
+	};
+}
+
+function uniqueNumbers(values: readonly number[]): readonly number[] {
+	return [...new Set(values)].sort((left, right) => left - right);
+}
+
+function createStaticSelectionPartCoverage(
+	drawUnits: readonly MatchedStaticSelectionDrawUnitDiagnostics[],
+): readonly StaticSelectionPartCoverageDiagnostics[] {
+	const coverageByPart = new Map<
+		number,
+		{
+			readonly drawUnitIds: Set<string>;
+			readonly materialIds: Set<number>;
+			maxPolygonId: number | null;
+			minPolygonId: number | null;
+			polygonCount: number;
+			sourceTriangleCount: number;
+		}
+	>();
+
+	for (const drawUnit of drawUnits) {
+		for (const sourceCoverage of drawUnit.sourceMappingCoverage) {
+			const coverage = coverageByPart.get(sourceCoverage.partIndex) ?? {
+				drawUnitIds: new Set<string>(),
+				materialIds: new Set<number>(),
+				maxPolygonId: null,
+				minPolygonId: null,
+				polygonCount: 0,
+				sourceTriangleCount: 0,
+			};
+			coverage.drawUnitIds.add(drawUnit.diagnostics.drawUnitId);
+			for (const materialId of sourceCoverage.materialIds) {
+				coverage.materialIds.add(materialId);
+			}
+			coverage.polygonCount += sourceCoverage.polygonCount;
+			coverage.sourceTriangleCount += sourceCoverage.sourceTriangleCount;
+			if (sourceCoverage.polygonRange !== null) {
+				coverage.minPolygonId =
+					coverage.minPolygonId === null
+						? sourceCoverage.polygonRange.min
+						: Math.min(coverage.minPolygonId, sourceCoverage.polygonRange.min);
+				coverage.maxPolygonId =
+					coverage.maxPolygonId === null
+						? sourceCoverage.polygonRange.max
+						: Math.max(coverage.maxPolygonId, sourceCoverage.polygonRange.max);
+			}
+			coverageByPart.set(sourceCoverage.partIndex, coverage);
+		}
+	}
+
+	return [...coverageByPart.entries()]
+		.sort(([left], [right]) => left - right)
+		.map(([partIndex, coverage]) => ({
+			drawUnitIds: [...coverage.drawUnitIds].sort(),
+			materialIds: [...coverage.materialIds].sort(
+				(left, right) => left - right,
+			),
+			partIndex,
+			polygonCount: coverage.polygonCount,
+			polygonRange:
+				coverage.minPolygonId === null || coverage.maxPolygonId === null
+					? null
+					: { max: coverage.maxPolygonId, min: coverage.minPolygonId },
+			sourceTriangleCount: coverage.sourceTriangleCount,
+		}));
+}
+
+function createStaticSelectionSourceMappingSummary(
+	coverages: readonly StaticObjectSourceMappingCoverage[],
+): StaticSelectionSourceMappingSummaryDiagnostics {
+	const geometrySurfaceIds = new Set<number>();
+	const materialVariantSignatures = new Set<string | null>();
+	const partIndices = new Set<number>();
+	let polygonCount = 0;
+	let minPolygonId: number | null = null;
+	let maxPolygonId: number | null = null;
+	let sourceTriangleCount = 0;
+
+	for (const coverage of coverages) {
+		for (const geometrySurfaceId of coverage.geometrySurfaceIds) {
+			geometrySurfaceIds.add(geometrySurfaceId);
+		}
+		for (const materialVariantSignature of coverage.materialVariantSignatures) {
+			materialVariantSignatures.add(materialVariantSignature);
+		}
+		partIndices.add(coverage.partIndex);
+		polygonCount += coverage.polygonCount;
+		sourceTriangleCount += coverage.sourceTriangleCount;
+		if (coverage.polygonRange !== null) {
+			minPolygonId =
+				minPolygonId === null
+					? coverage.polygonRange.min
+					: Math.min(minPolygonId, coverage.polygonRange.min);
+			maxPolygonId =
+				maxPolygonId === null
+					? coverage.polygonRange.max
+					: Math.max(maxPolygonId, coverage.polygonRange.max);
+		}
+	}
+
+	return {
+		geometrySurfaceIds: [...geometrySurfaceIds].sort(
+			(left, right) => left - right,
+		),
+		materialVariantSignatures: [...materialVariantSignatures].sort(
+			compareNullableStrings,
+		),
+		partIndices: [...partIndices].sort((left, right) => left - right),
+		polygonCount,
+		polygonRange:
+			minPolygonId === null || maxPolygonId === null
+				? null
+				: { max: maxPolygonId, min: minPolygonId },
+		sourceTriangleCount,
+	};
+}
+
+function compareNullableStrings(
+	left: string | null,
+	right: string | null,
+): number {
+	if (left === right) {
+		return 0;
+	}
+	if (left === null) {
+		return -1;
+	}
+	if (right === null) {
+		return 1;
+	}
+	return left.localeCompare(right);
+}
+
+function matchesStaticObjectSourceMappingCoverage(
+	coverage: StaticObjectSourceMappingCoverage,
+	selectionKey: StaticSceneSelectionKey & {
+		readonly itemKind: "outdoor-static-object";
+	},
+	objectKind: "building" | "explicit-object" | "generated-scenery" | null,
+): boolean {
+	return (
+		coverage.object.landblockId === selectionKey.landblockId &&
+		coverage.object.instanceId === selectionKey.instanceId &&
+		(objectKind === null || coverage.object.objectKind === objectKind)
+	);
 }
 
 function createStaticDebugBoundsOverlayPrimitive(

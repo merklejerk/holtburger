@@ -3,9 +3,12 @@ import type {
 	OutdoorStaticObjectsScopePayload,
 	StaticBounds,
 	StaticObjectInstanceFacts,
+	StaticObjectMaterialSourceFacts,
+	StaticObjectPartSourceFacts,
 	StaticPlacementTransform,
 	StaticDomain,
 	StaticScopePayload,
+	StaticObjectTextureRefFacts,
 	StaticVec3,
 	TerrainMeshQuadFacts,
 	TerrainStaticScopePayload,
@@ -109,6 +112,34 @@ export interface OutdoorStaticObjectScenePickDetails {
 	readonly bvhItemKind: "static" | "building";
 }
 
+export interface OutdoorStaticObjectSourceDiagnostics {
+	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
+	readonly instanceId: string;
+	readonly landblockId: number;
+	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
+	readonly materialSlots: readonly OutdoorStaticObjectMaterialSlotDiagnostics[];
+	readonly object: StaticObjectInstanceFacts;
+	readonly sourceAsset: OutdoorStaticObjectSourceAssetDiagnostics | null;
+	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
+}
+
+export type OutdoorStaticObjectPartDiagnostics = Omit<
+	StaticObjectPartSourceFacts,
+	"normals" | "positions" | "texCoords" | "triangles"
+>;
+
+export type OutdoorStaticObjectSourceAssetDiagnostics = Omit<
+	OutdoorStaticObjectsScopePayload["sourceAssets"][number],
+	"parts"
+> & {
+	readonly parts: readonly OutdoorStaticObjectPartDiagnostics[];
+};
+
+export interface OutdoorStaticObjectMaterialSlotDiagnostics {
+	readonly material: StaticObjectMaterialSourceFacts | null;
+	readonly slot: OutdoorStaticObjectsScopePayload["materialSlots"][number];
+}
+
 export interface EnvCellStaticScenePickDetails {
 	readonly landblockId: number;
 	readonly envCellId: number;
@@ -194,6 +225,13 @@ interface TerrainBvhRoot {
 interface TerrainBvhRuntimeItem {
 	readonly bvhItemIndex: number;
 	readonly quad: TerrainMeshQuadFacts;
+}
+
+interface OutdoorSourceDiagnosticsRoot {
+	readonly objectsByInstanceId: ReadonlyMap<
+		string,
+		OutdoorStaticObjectSourceDiagnostics
+	>;
 }
 
 interface EnvCellLandblockBvhRoot {
@@ -495,6 +533,10 @@ export class StaticSceneQuery {
 		string,
 		OutdoorStaticBvhRoot
 	>();
+	readonly #outdoorSourceDiagnosticsByDomainAndLandblock = new Map<
+		string,
+		OutdoorSourceDiagnosticsRoot
+	>();
 	readonly #envCellRootsByLandblockId = new Map<
 		number,
 		EnvCellLandblockBvhRoot
@@ -564,6 +606,11 @@ export class StaticSceneQuery {
 				this.#outdoorBvhRootsByDomainAndLandblock.delete(key);
 			}
 		}
+		for (const key of this.#outdoorSourceDiagnosticsByDomainAndLandblock.keys()) {
+			if (!outdoorRootKeys.has(key)) {
+				this.#outdoorSourceDiagnosticsByDomainAndLandblock.delete(key);
+			}
+		}
 		for (const landblockId of this.#envCellRootsByLandblockId.keys()) {
 			if (!envCellLandblockIds.has(landblockId)) {
 				this.#envCellRootsByLandblockId.delete(landblockId);
@@ -623,6 +670,10 @@ export class StaticSceneQuery {
 		const rootKey = createOutdoorRootKey(
 			payload.domain,
 			payload.landblock.landblockId,
+		);
+		this.#outdoorSourceDiagnosticsByDomainAndLandblock.set(
+			rootKey,
+			createOutdoorSourceDiagnosticsRoot(payload),
 		);
 		const bvh = payload.sourceSpatial.outdoorBvh;
 		if (!bvh || bvh.nodes.length === 0) {
@@ -785,6 +836,21 @@ export class StaticSceneQuery {
 		return null;
 	}
 
+	queryOutdoorStaticObjectSourceDiagnostics(options: {
+		readonly domain: OutdoorStaticObjectsScopePayload["domain"];
+		readonly landblockId: number;
+		readonly instanceId: string;
+	}): OutdoorStaticObjectSourceDiagnostics | null {
+		const root = this.#outdoorSourceDiagnosticsByDomainAndLandblock.get(
+			createOutdoorRootKey(options.domain, options.landblockId),
+		);
+		if (!root) {
+			return null;
+		}
+
+		return root.objectsByInstanceId.get(options.instanceId) ?? null;
+	}
+
 	queryEnvCellStaticObjectDetails(options: {
 		readonly landblockId: number;
 		readonly envCellId: number;
@@ -855,7 +921,10 @@ export class StaticSceneQuery {
 					item.object.instanceBounds
 				) {
 					return {
-						bounds: translateBounds(item.object.instanceBounds, root.translation),
+						bounds: translateBounds(
+							item.object.instanceBounds,
+							root.translation,
+						),
 						selectionKey,
 					};
 				}
@@ -978,6 +1047,7 @@ export class StaticSceneQuery {
 		this.#landblockGridIndex.clear();
 		this.#terrainBvhRootsByLandblockId.clear();
 		this.#outdoorBvhRootsByDomainAndLandblock.clear();
+		this.#outdoorSourceDiagnosticsByDomainAndLandblock.clear();
 		this.#envCellRootsByLandblockId.clear();
 	}
 
@@ -1080,8 +1150,11 @@ export class StaticSceneQuery {
 		root: TerrainBvhRoot,
 		currentNearestHit: StaticScenePickHit | null,
 	): TerrainQuadScenePickHit | null {
-		let nearestHit: TerrainQuadScenePickHit | null =
-			isTerrainQuadScenePickHit(currentNearestHit) ? currentNearestHit : null;
+		let nearestHit: TerrainQuadScenePickHit | null = isTerrainQuadScenePickHit(
+			currentNearestHit,
+		)
+			? currentNearestHit
+			: null;
 		const localRay = translateRay(ray, negateTranslation(root.translation));
 		traverseBvhNearest(root.nodes, localRay, {
 			getMaxDistance: () =>
@@ -1720,8 +1793,7 @@ function matchesFilters(
 	return (
 		(!filters?.itemKinds ||
 			filters.itemKinds.includes(hit.selectionKey.itemKind)) &&
-		(!filters?.domains ||
-			filters.domains.includes(hit.selectionKey.domain)) &&
+		(!filters?.domains || filters.domains.includes(hit.selectionKey.domain)) &&
 		(!filters?.ignoreContainingOrigin || !containsPoint(hit.bounds, rayOrigin))
 	);
 }
@@ -1819,6 +1891,175 @@ function createOutdoorRootKey(
 	landblockId: number,
 ): string {
 	return `${domain}:${landblockId.toString(16)}`;
+}
+
+function createOutdoorSourceDiagnosticsRoot(
+	payload: OutdoorStaticObjectsScopePayload,
+): OutdoorSourceDiagnosticsRoot {
+	const sourceAssetsByKey = new Map(
+		payload.sourceAssets.map((sourceAsset) => [
+			createStaticObjectSourceKey(sourceAsset.identity),
+			sourceAsset,
+		]),
+	);
+	const materialSourcesById = new Map(
+		payload.materialSources.map((material) => [
+			material.identity.materialId,
+			material,
+		]),
+	);
+	const objectsByInstanceId = new Map<
+		string,
+		OutdoorStaticObjectSourceDiagnostics
+	>();
+
+	for (const object of payload.objects) {
+		const sourceAsset =
+			sourceAssetsByKey.get(createStaticObjectSourceKey(object.source)) ?? null;
+		const sourceAssetDiagnostics =
+			sourceAsset === null ? null : createSourceAssetDiagnostics(sourceAsset);
+		const materialSlots = [
+			...payload.materialSlots
+				.filter(
+					(slot) =>
+						slot.object.landblockId === object.identity.landblockId &&
+						slot.object.instanceId === object.identity.instanceId,
+				)
+				.map(
+					(slot): OutdoorStaticObjectMaterialSlotDiagnostics => ({
+						material: materialSourcesById.get(slot.material.materialId) ?? null,
+						slot,
+					}),
+				),
+		].sort(compareMaterialSlotDiagnostics);
+		const materialIds = new Set([
+			...materialSlots.map((entry) => entry.slot.material.materialId),
+			...(sourceAssetDiagnostics?.parts.flatMap((part) =>
+				part.materialSlots.map((slot) => slot.material.materialId),
+			) ?? []),
+		]);
+		const materialSources = payload.materialSources
+			.filter((material) => materialIds.has(material.identity.materialId))
+			.sort(compareMaterialSources);
+		objectsByInstanceId.set(object.identity.instanceId, {
+			domain: payload.domain,
+			instanceId: object.identity.instanceId,
+			landblockId: payload.landblock.landblockId,
+			materialSlots,
+			materialSources,
+			object,
+			sourceAsset: sourceAssetDiagnostics,
+			textureRefs: filterTextureRefsForMaterials(
+				payload.textureRefs,
+				materialSources,
+			),
+		});
+	}
+
+	return { objectsByInstanceId };
+}
+
+function createSourceAssetDiagnostics(
+	sourceAsset: OutdoorStaticObjectsScopePayload["sourceAssets"][number],
+): OutdoorStaticObjectSourceAssetDiagnostics {
+	return {
+		...sourceAsset,
+		parts: sourceAsset.parts.map(stripPartGeometryBuffers),
+	};
+}
+
+function stripPartGeometryBuffers(
+	part: StaticObjectPartSourceFacts,
+): OutdoorStaticObjectPartDiagnostics {
+	return {
+		bounds: part.bounds,
+		defaultPlacements: part.defaultPlacements,
+		gfxObj: part.gfxObj,
+		invalidPolygonCount: part.invalidPolygonCount,
+		materialSlotCount: part.materialSlotCount,
+		materialSlots: part.materialSlots,
+		partIndex: part.partIndex,
+		physicsPolygonCount: part.physicsPolygonCount,
+		renderTriangleCount: part.renderTriangleCount,
+		scale: part.scale,
+		skippedPolygonCount: part.skippedPolygonCount,
+		source: part.source,
+	};
+}
+
+function filterTextureRefsForMaterials(
+	textureRefs: readonly StaticObjectTextureRefFacts[],
+	materials: readonly StaticObjectMaterialSourceFacts[],
+): readonly StaticObjectTextureRefFacts[] {
+	const surfaceTextureIds = new Set<number>();
+	const renderSurfaceIds = new Set<number>();
+	const paletteIds = new Set<number>();
+
+	for (const material of materials) {
+		if (material.source.kind !== "texture") {
+			continue;
+		}
+		surfaceTextureIds.add(material.source.texture.surfaceTextureId);
+		if (material.source.selectedRenderSurface) {
+			renderSurfaceIds.add(
+				material.source.selectedRenderSurface.renderSurfaceId,
+			);
+		}
+		if (material.source.palette) {
+			paletteIds.add(material.source.palette.paletteId);
+		}
+		for (const palette of material.source.renderSurfaceDefaultPalettes) {
+			paletteIds.add(palette.paletteId);
+		}
+	}
+
+	return textureRefs.filter((textureRef) => {
+		if (textureRef.role === "surface-texture") {
+			return (
+				surfaceTextureIds.has(textureRef.texture.surfaceTextureId) ||
+				(textureRef.renderSurface !== null &&
+					renderSurfaceIds.has(textureRef.renderSurface.renderSurfaceId)) ||
+				(textureRef.palette !== null &&
+					paletteIds.has(textureRef.palette.paletteId))
+			);
+		}
+
+		return (
+			renderSurfaceIds.has(textureRef.renderSurface.renderSurfaceId) ||
+			(textureRef.palette !== null &&
+				paletteIds.has(textureRef.palette.paletteId))
+		);
+	});
+}
+
+function compareMaterialSlotDiagnostics(
+	left: OutdoorStaticObjectMaterialSlotDiagnostics,
+	right: OutdoorStaticObjectMaterialSlotDiagnostics,
+): number {
+	return (
+		left.slot.identity.part.partIndex - right.slot.identity.part.partIndex ||
+		left.slot.identity.slotIndex - right.slot.identity.slotIndex ||
+		left.slot.identity.geometrySurfaceId -
+			right.slot.identity.geometrySurfaceId ||
+		left.slot.identity.materialSurfaceId - right.slot.identity.materialSurfaceId
+	);
+}
+
+function compareMaterialSources(
+	left: StaticObjectMaterialSourceFacts,
+	right: StaticObjectMaterialSourceFacts,
+): number {
+	return left.identity.materialId - right.identity.materialId;
+}
+
+function createStaticObjectSourceKey(
+	source: OutdoorStaticObjectsScopePayload["sourceAssets"][number]["identity"],
+): string {
+	return [
+		source.kind,
+		source.sourceAssetKind,
+		(source.sourceDid >>> 0).toString(16).padStart(8, "0"),
+	].join(":");
 }
 
 function normalizeRay(ray: StaticSceneRay): StaticSceneRay {

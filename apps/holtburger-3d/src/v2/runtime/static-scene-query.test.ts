@@ -101,6 +101,52 @@ describe("V2 static scene query", () => {
 		});
 	});
 
+	it("retains compact outdoor static source diagnostics without geometry buffers", () => {
+		const query = new StaticSceneQuery();
+		query.ingestOutdoorStaticObjects(
+			createOutdoorStaticObjectsPayload({ includeSourceDiagnostics: true }),
+		);
+
+		const diagnostics = query.queryOutdoorStaticObjectSourceDiagnostics({
+			domain: "outdoor-detail",
+			instanceId: "outdoor-static-0",
+			landblockId: 0xda55ffff,
+		});
+
+		expect(diagnostics).toMatchObject({
+			instanceId: "outdoor-static-0",
+			materialSlots: [
+				{
+					material: {
+						identity: {
+							materialId: 0x08000010,
+						},
+					},
+				},
+			],
+			sourceAsset: {
+				identity: {
+					sourceDid: 0x02000010,
+				},
+				parts: [
+					{
+						materialSlotCount: 1,
+						partIndex: 0,
+					},
+				],
+			},
+			textureRefs: [
+				{
+					role: "surface-texture",
+				},
+			],
+		});
+		expect(diagnostics?.sourceAsset?.parts[0]).not.toHaveProperty("positions");
+		expect(diagnostics?.sourceAsset?.parts[0]).not.toHaveProperty("normals");
+		expect(diagnostics?.sourceAsset?.parts[0]).not.toHaveProperty("texCoords");
+		expect(diagnostics?.sourceAsset?.parts[0]).not.toHaveProperty("triangles");
+	});
+
 	it("returns normalized selection keys and resolves selected debug bounds", () => {
 		const query = new StaticSceneQuery();
 		query.ingestOutdoorStaticObjects(createOutdoorStaticObjectsPayload());
@@ -122,27 +168,21 @@ describe("V2 static scene query", () => {
 			landblockId: 0xda55ffff,
 		});
 
-		expect(
-			describeStaticSceneSelectionKey(outdoorKey),
-		).toBe("outdoor-static-object:outdoor-detail:da55ffff:outdoor-static-0");
-		expect(compareStaticSceneSelectionKeys(outdoorKey, terrainKey)).toBeLessThan(
-			0,
+		expect(describeStaticSceneSelectionKey(outdoorKey)).toBe(
+			"outdoor-static-object:outdoor-detail:da55ffff:outdoor-static-0",
 		);
 		expect(
-			query.querySelectionDebugBounds(outdoorKey)?.bounds,
-		).toMatchObject({
+			compareStaticSceneSelectionKeys(outdoorKey, terrainKey),
+		).toBeLessThan(0);
+		expect(query.querySelectionDebugBounds(outdoorKey)?.bounds).toMatchObject({
 			max: { x: 1, y: 1, z: -4 },
 			min: { x: -1, y: -1, z: -5 },
 		});
-		expect(
-			query.querySelectionDebugBounds(terrainKey)?.bounds,
-		).toMatchObject({
+		expect(query.querySelectionDebugBounds(terrainKey)?.bounds).toMatchObject({
 			max: { x: 4, y: 1, z: 0 },
 			min: { x: 0, y: 0, z: -4 },
 		});
-		expect(
-			query.querySelectionDebugBounds(envCellKey)?.bounds,
-		).toMatchObject({
+		expect(query.querySelectionDebugBounds(envCellKey)?.bounds).toMatchObject({
 			max: { x: 1, y: 1, z: -4 },
 			min: { x: -1, y: -1, z: -5 },
 		});
@@ -502,6 +542,7 @@ function createOutdoorStaticObjectsPayload(
 		readonly includeContainingObject?: boolean;
 		readonly includeFarInvalidSubtree?: boolean;
 		readonly includeBvh?: boolean;
+		readonly includeSourceDiagnostics?: boolean;
 		readonly instanceBounds?: NonNullable<
 			OutdoorStaticObjectsScopePayload["objects"][number]["instanceBounds"]
 		>;
@@ -539,6 +580,14 @@ function createOutdoorStaticObjectsPayload(
 	const outdoorBvh = options.includeFarInvalidSubtree
 		? createPruningRegressionOutdoorBvh(objects)
 		: createFlatOutdoorBvh(objects);
+	const sourceDiagnostics = options.includeSourceDiagnostics
+		? createOutdoorSourceDiagnostics(object)
+		: {
+				materialSlots: [],
+				materialSources: [],
+				sourceAssets: [],
+				textureRefs: [],
+			};
 	return {
 		domain: "outdoor-detail",
 		kind: "outdoor-static-objects",
@@ -547,8 +596,8 @@ function createOutdoorStaticObjectsPayload(
 			landblockId,
 			source: "outdoor",
 		},
-		materialSlots: [],
-		materialSources: [],
+		materialSlots: sourceDiagnostics.materialSlots,
+		materialSources: sourceDiagnostics.materialSources,
 		missingRefs: [],
 		objects,
 		paletteSources: [],
@@ -559,7 +608,7 @@ function createOutdoorStaticObjectsPayload(
 				regionNumber: 1,
 			},
 		},
-		sourceAssets: [],
+		sourceAssets: sourceDiagnostics.sourceAssets,
 		sourceSpatial: {
 			bounds: null,
 			coordinateSpace: "landblock-render-local",
@@ -567,7 +616,123 @@ function createOutdoorStaticObjectsPayload(
 			outdoorBvhItemCount: includeBvh ? outdoorBvh.items.length : 0,
 			outdoorBvhNodeCount: includeBvh ? outdoorBvh.nodes.length : 0,
 		},
-		textureRefs: [],
+		textureRefs: sourceDiagnostics.textureRefs,
+	};
+}
+
+function createOutdoorSourceDiagnostics(
+	object: OutdoorStaticObjectsScopePayload["objects"][number],
+): Pick<
+	OutdoorStaticObjectsScopePayload,
+	"materialSlots" | "materialSources" | "sourceAssets" | "textureRefs"
+> {
+	const material = {
+		diffuse: 0xffffffff,
+		identity: {
+			kind: "static-material-source" as const,
+			materialId: 0x08000010,
+		},
+		luminosity: 0,
+		source: {
+			kind: "texture" as const,
+			palette: null,
+			renderSurfaceDefaultPalettes: [],
+			selectedRenderSurface: {
+				kind: "render-surface" as const,
+				renderSurfaceId: 0x06000010,
+			},
+			texture: {
+				kind: "surface-texture" as const,
+				surfaceTextureId: 0x05000010,
+			},
+		},
+		surfaceId: 0,
+		surfaceType: 0,
+		translucency: 0,
+	};
+	const partMaterialSlot = {
+		geometrySurfaceId: 0,
+		material: material.identity,
+		materialSurfaceId: 0,
+		materialVariantSignature: null,
+		paletteOverride: null,
+		paletteViews: [],
+		slotIndex: 0,
+	};
+	const materialSlot = {
+		...partMaterialSlot,
+		gfxObj: {
+			kind: "static-object-source" as const,
+			sourceAssetKind: "gfx-obj" as const,
+			sourceDid: 0x01000020,
+		},
+		identity: {
+			geometrySurfaceId: 0,
+			kind: "static-material-slot" as const,
+			materialSurfaceId: 0,
+			part: {
+				kind: "static-object-part" as const,
+				object: object.identity,
+				partIndex: 0,
+			},
+			slotIndex: 0,
+		},
+		object: object.identity,
+		source: object.source,
+	};
+
+	return {
+		materialSlots: [materialSlot],
+		materialSources: [material],
+		sourceAssets: [
+			{
+				bounds: object.sourceBounds,
+				debug: object.debug,
+				identity: object.source,
+				invalidPolygonCount: 0,
+				materialSlotCount: 1,
+				partCount: 1,
+				parts: [
+					{
+						bounds: object.sourceBounds,
+						defaultPlacements: [createPlacement()],
+						gfxObj: materialSlot.gfxObj,
+						invalidPolygonCount: 0,
+						materialSlotCount: 1,
+						materialSlots: [partMaterialSlot],
+						normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]),
+						partIndex: 0,
+						physicsPolygonCount: 0,
+						positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+						renderTriangleCount: 1,
+						scale: { x: 1, y: 1, z: 1 },
+						skippedPolygonCount: 0,
+						source: object.source,
+						texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+						triangles: [
+							{
+								firstVertex: 0,
+								geometrySurfaceId: 0,
+								materialVariantSignature: null,
+								polygonId: 0,
+							},
+						],
+					},
+				],
+				physicsPolygonCount: 0,
+				renderTriangleCount: 1,
+				skippedPolygonCount: 0,
+				sourceAssetKind: "setup-model",
+			},
+		],
+		textureRefs: [
+			{
+				palette: null,
+				renderSurface: material.source.selectedRenderSurface,
+				role: "surface-texture",
+				texture: material.source.texture,
+			},
+		],
 	};
 }
 

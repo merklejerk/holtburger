@@ -21,6 +21,8 @@ import type {
 	PreparedRgbaRenderSurfaceTextureUseIdentity,
 	StaticBakeTextureUse,
 	StaticMaterialCoverageReport,
+	OutdoorStaticObjectsScopePayload,
+	StaticObjectGeometryStaticDrawUnit,
 	TerrainStaticScopePayload,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialFallbackReason,
@@ -30,7 +32,10 @@ import {
 	DeferredStaticResolver,
 } from "../static/fake-workers";
 import { createClientRuntime, type RuntimeSnapshot } from "./client-runtime";
-import { createTerrainQuadSelectionKey } from "./static-scene-query";
+import {
+	createOutdoorStaticObjectSelectionKey,
+	createTerrainQuadSelectionKey,
+} from "./static-scene-query";
 import type { RuntimeDiagnostics } from "./diagnostics";
 
 const silentDiagnostics: RuntimeDiagnostics = {
@@ -305,6 +310,100 @@ describe("V2 client runtime", () => {
 			revision: 2,
 		});
 		expect(renderer.staticAnchorLandblockIds.at(-1)).toBeNull();
+		runtime.dispose();
+	});
+
+	it("joins selected outdoor static diagnostics to source parts and materialized draw units", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer: new FakeRenderer(),
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker,
+				resolver,
+			}),
+		});
+
+		updateOutdoorSceneInterest(runtime, {
+			domains: ["terrain", "buildings", "detail"],
+			lod: { buildings: 0, detail: 0, terrain: 0 },
+		});
+		const detailRequest = resolver.pendingRequests.find(
+			(request) => request.job.domain === "outdoor-detail",
+		);
+		resolver.complete(detailRequest?.requestId ?? "", {
+			scope: createOutdoorStaticObjectsPayload(),
+		});
+		await flushPromises();
+		baker.complete("1:landblock:da55ffff:outdoor-detail", {
+			drawUnits: [createStaticObjectDrawUnit("static-draw-a")],
+		});
+		await flushPromises();
+
+		const report = runtime.createStaticSelectionDiagnosticsReport(
+			createOutdoorStaticObjectSelectionKey({
+				domain: "outdoor-detail",
+				instanceId: "outdoor-static-0",
+				landblockId: 0xda55ffff,
+			}),
+			{ pickDistance: 4 },
+		);
+
+		expect(report.rendering).toMatchObject({
+			drawUnits: [
+				{
+					drawUnitId: "static-draw-a",
+					materialEntryCount: 1,
+					materialEntries: [
+						{
+							blendMode: "opaque",
+							materialIds: [0x08000010],
+							slot: 0,
+						},
+					],
+					sourceMapping: {
+						geometrySurfaceIds: [0],
+						partIndices: [0],
+						polygonCount: 1,
+						polygonRange: { max: 0, min: 0 },
+						sourceTriangleCount: 1,
+					},
+					textureUseCount: 0,
+				},
+			],
+			kind: "outdoor-static-object-rendering",
+			partCoverage: [
+				{
+					drawUnitIds: ["static-draw-a"],
+					materialIds: [0x08000010],
+					partIndex: 0,
+					polygonRange: { max: 0, min: 0 },
+				},
+			],
+			source: {
+				materialIds: [0x08000010],
+				materialSlots: [
+					{
+						geometrySurfaceId: 0,
+						materialId: 0x08000010,
+						partIndex: 0,
+					},
+				],
+				sourceAsset: {
+					parts: [
+						{
+							partIndex: 0,
+						},
+					],
+				},
+				textureRefs: {
+					count: 0,
+				},
+			},
+			unmatchedReason: null,
+		});
 		runtime.dispose();
 	});
 
@@ -846,6 +945,290 @@ class DeferredAssetService implements AssetService {
 interface DeferredAssetRequest {
 	readonly resolve: (asset: PreparedAsset) => void;
 	readonly reject: (error: Error) => void;
+}
+
+function createOutdoorStaticObjectsPayload(): OutdoorStaticObjectsScopePayload {
+	const object = {
+		debug: { sourceAssetId: "setup-model/02000010" },
+		generated: null,
+		identity: {
+			instanceId: "outdoor-static-0",
+			kind: "static-object-instance" as const,
+			landblockId: 0xda55ffff,
+			objectKind: "explicit-object" as const,
+		},
+		instanceBounds: {
+			max: { x: 1, y: 1, z: -4 },
+			min: { x: -1, y: -1, z: -5 },
+		},
+		localPlacement: createStaticPlacement(),
+		portalCount: 0,
+		source: {
+			kind: "static-object-source" as const,
+			sourceAssetKind: "setup-model" as const,
+			sourceDid: 0x02000010,
+		},
+		sourceBounds: {
+			max: { x: 1, y: 1, z: 1 },
+			min: { x: -1, y: -1, z: -1 },
+		},
+		sourceIndex: 0,
+		sourceScale: { x: 1, y: 1, z: 1 },
+	};
+	const material = {
+		diffuse: 0xffffffff,
+		identity: {
+			kind: "static-material-source" as const,
+			materialId: 0x08000010,
+		},
+		luminosity: 0,
+		source: {
+			argb: 0xffffffff,
+			kind: "solid-color" as const,
+		},
+		surfaceId: 0,
+		surfaceType: 0,
+		translucency: 0,
+	};
+	const gfxObj = {
+		kind: "static-object-source" as const,
+		sourceAssetKind: "gfx-obj" as const,
+		sourceDid: 0x01000020,
+	};
+	const partMaterialSlot = {
+		geometrySurfaceId: 0,
+		material: material.identity,
+		materialSurfaceId: 0,
+		materialVariantSignature: null,
+		paletteOverride: null,
+		paletteViews: [],
+		slotIndex: 0,
+	};
+
+	return {
+		domain: "outdoor-detail",
+		kind: "outdoor-static-objects",
+		landblock: {
+			kind: "landblock-source",
+			landblockId: 0xda55ffff,
+			source: "outdoor",
+		},
+		materialSlots: [
+			{
+				...partMaterialSlot,
+				gfxObj,
+				identity: {
+					geometrySurfaceId: 0,
+					kind: "static-material-slot",
+					materialSurfaceId: 0,
+					part: {
+						kind: "static-object-part",
+						object: object.identity,
+						partIndex: 0,
+					},
+					slotIndex: 0,
+				},
+				object: object.identity,
+				source: object.source,
+			},
+		],
+		materialSources: [material],
+		missingRefs: [],
+		objects: [object],
+		paletteSources: [],
+		regionRenderProfile: {
+			detailRoles: [],
+			identity: {
+				kind: "region-render-profile",
+				regionNumber: 1,
+			},
+		},
+		sourceAssets: [
+			{
+				bounds: object.sourceBounds,
+				debug: object.debug,
+				identity: object.source,
+				invalidPolygonCount: 0,
+				materialSlotCount: 1,
+				partCount: 1,
+				parts: [
+					{
+						bounds: object.sourceBounds,
+						defaultPlacements: [createStaticPlacement()],
+						gfxObj,
+						invalidPolygonCount: 0,
+						materialSlotCount: 1,
+						materialSlots: [partMaterialSlot],
+						normals: new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]),
+						partIndex: 0,
+						physicsPolygonCount: 0,
+						positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+						renderTriangleCount: 1,
+						scale: { x: 1, y: 1, z: 1 },
+						skippedPolygonCount: 0,
+						source: object.source,
+						texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+						triangles: [
+							{
+								firstVertex: 0,
+								geometrySurfaceId: 0,
+								materialVariantSignature: null,
+								polygonId: 0,
+							},
+						],
+					},
+				],
+				physicsPolygonCount: 0,
+				renderTriangleCount: 1,
+				skippedPolygonCount: 0,
+				sourceAssetKind: "setup-model",
+			},
+		],
+		sourceSpatial: {
+			bounds: object.instanceBounds,
+			coordinateSpace: "landblock-render-local",
+			outdoorBvh: {
+				coordinateSpace: "landblock-render-local",
+				items: [
+					{
+						bvhItemIndex: 0,
+						instanceId: object.identity.instanceId,
+						kind: "static",
+						object,
+					},
+				],
+				nodes: [
+					{
+						bounds: object.instanceBounds,
+						itemIndices: [0],
+						left: null,
+						right: null,
+					},
+				],
+			},
+			outdoorBvhItemCount: 1,
+			outdoorBvhNodeCount: 1,
+		},
+		textureRefs: [],
+	};
+}
+
+function createStaticObjectDrawUnit(
+	drawUnitId: string,
+): StaticObjectGeometryStaticDrawUnit {
+	const renderState = {
+		blend: {
+			dstFactor: null,
+			enabled: false,
+			mode: "opaque" as const,
+			srcFactor: null,
+		},
+		depthTest: true as const,
+		depthWrite: true,
+	};
+
+	return {
+		alphaTest: 0,
+		coordinateSpace: "landblock-render-local",
+		detailTextureTiling: 1,
+		detailTextureUseId: null,
+		domain: "outdoor-detail",
+		drawUnitId,
+		indexTextureUseId: null,
+		indexType: "uint16",
+		indexedClipThreshold: 0,
+		indexedTextureFormat: null,
+		indices: new Uint16Array([0, 1, 2]),
+		kind: "static-object-geometry",
+		landblockId: 0xda55ffff,
+		materialBucketKey: "flat-color:test",
+		materialColor: [1, 1, 1, 1],
+		materialEmissiveColor: [0, 0, 0],
+		materialEntries: [
+			{
+				alphaTest: 0,
+				detailTextureTiling: 1,
+				detailTextureUseId: null,
+				indexTextureUseId: null,
+				indexedClipThreshold: 0,
+				indexedTextureFormat: null,
+				materialColor: [1, 1, 1, 1],
+				materialEmissiveColor: [0, 0, 0],
+				materialIds: [0x08000010],
+				paletteFirstIndex: 0,
+				paletteTextureUseId: null,
+				primaryTextureUseId: null,
+				primaryTextureWrapMode: "clamp",
+				renderState,
+				slot: 0,
+			},
+		],
+		materialFamily: "flat-color",
+		materialIds: [0x08000010],
+		materialPass: "opaque",
+		materialSlotIndices: new Float32Array([0, 0, 0]),
+		paletteFirstIndex: 0,
+		paletteTextureUseId: null,
+		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+		primaryTextureUseId: null,
+		primaryTextureWrapMode: "clamp",
+		renderState,
+		sort: {
+			bounds: null,
+			center: [0, 0, 0],
+			objectPartKey: null,
+			policy: "depth-writing",
+		},
+		sourceMappingCoverage: [
+			{
+				geometrySurfaceIds: [0],
+				gfxObj: {
+					kind: "static-object-source",
+					sourceAssetKind: "gfx-obj",
+					sourceDid: 0x01000020,
+				},
+				materialIds: [0x08000010],
+				materialSlot: 0,
+				materialVariantSignatures: [null],
+				object: {
+					instanceId: "outdoor-static-0",
+					kind: "static-object-instance",
+					landblockId: 0xda55ffff,
+					objectKind: "explicit-object",
+				},
+				partIndex: 0,
+				polygonCount: 1,
+				polygonRange: { max: 0, min: 0 },
+				source: {
+					kind: "static-object-source",
+					sourceAssetKind: "setup-model",
+					sourceDid: 0x02000010,
+				},
+				sourceTriangleCount: 1,
+			},
+		],
+		spatialRecord: `${drawUnitId}:bounds:1t`,
+		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+		textureUseIds: [],
+		triangleCount: 1,
+		vertexCount: 3,
+	};
+}
+
+function createStaticPlacement() {
+	return {
+		orientation: {
+			w: 1,
+			x: 0,
+			y: 0,
+			z: 0,
+		},
+		origin: {
+			x: 0,
+			y: 0,
+			z: 0,
+		},
+	};
 }
 
 function createTerrainSourceScopePayload(

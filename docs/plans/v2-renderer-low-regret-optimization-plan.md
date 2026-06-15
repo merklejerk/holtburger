@@ -385,6 +385,8 @@ Status: Completed on 2026-06-15.
 
 ### Phase 6: Cleanup and Resteering
 
+Status: Completed on 2026-06-15 for code cleanup and resteering. Manual Safari profiler comparison remains external/user-run.
+
 #### Deliverables
 
 - Remove obsolete helper functions whose responsibilities moved into builders or upload-only functions.
@@ -393,10 +395,11 @@ Status: Completed on 2026-06-15.
 
 #### Task Checklist
 
-- Delete unused allocation helpers.
-- Remove any temporary exports added only for early tests if a cleaner test surface is available.
-- Ensure comments explain only non-obvious invalidation and state-cache boundaries.
-- Document any follow-up findings in this plan's Decisions and Course Corrections sections.
+- [x] Delete unused allocation helpers.
+- [x] Remove any temporary exports added only for early tests if a cleaner test surface is available.
+- [x] Ensure comments explain only non-obvious invalidation and state-cache boundaries.
+- [x] Document any follow-up findings in this plan's Decisions and Course Corrections sections.
+- [ ] Re-run Safari profiler on the same scene and compare qualitative hot spots against the original capture.
 
 #### Acceptance Criteria
 
@@ -406,7 +409,11 @@ Status: Completed on 2026-06-15.
 
 #### Decisions and Course Corrections
 
-- Pending during implementation.
+- `rg` found no remaining renderer-local `createDefaultRectTable`, `createStaticObjectPageBindings`, `createTerrainLayeredPageBindings`, `StaticObjectDrawScratch`, or `TerrainLayeredDrawScratch` helpers. The old allocation-heavy helper responsibilities have moved into the static and terrain payload modules or upload-only functions.
+- Kept `webgl2-static-object-payloads.ts` and `webgl2-terrain-payloads.ts` as sibling modules instead of merging them back into `webgl2-renderer.ts`. They are the current clean test seam, and their exports are consumed by both the renderer and colocated payload tests rather than being renderer-internal temporary exports.
+- Removed duplicated terrain layered capacity constants from `webgl2-renderer.ts`; shader string sizing now imports the same constants used by terrain payload array construction.
+- Tightened the conservative prepared-payload invalidation comment so it documents the shared static/terrain boundary: prepared payloads hold `WebGLTexture` handles, and without a reverse texture-ref owner map, texture page adds/replacements/removals dirty all live prepared payloads.
+- Manual Safari profiler comparison was not run from this environment. The next profiler pass should check whether the hot spots moved away from per-draw payload construction and whether the deferred transparent-resource `Array.from(...).filter(...).sort(...)` allocation has become visible enough to justify a separate phase.
 
 ## Risks & Mitigations
 
@@ -444,4 +451,4 @@ Status: Completed on 2026-06-15.
 
 ## Open Questions
 
-- Do we want a short before/after profiler note checked into this plan after implementation, or should profiler captures stay local/manual?
+- Resolved for now: profiler captures can stay local/manual. Add a short qualitative note to this plan only if a new capture changes the optimization direction or exposes a surprising remaining hot spot.

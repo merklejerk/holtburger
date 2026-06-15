@@ -52,6 +52,11 @@ const STATIC_OBJECT_DETAIL_TEXTURE_UNIT_BASE =
 	STATIC_OBJECT_PALETTE_TEXTURE_UNIT_BASE +
 	MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW;
 const DEBUG_OVERLAY_FLOATS_PER_VERTEX = 7;
+const EMPTY_TEXTURE_DRAW_UNIT_BINDINGS: ReadonlyMap<
+	string,
+	TextureDrawUnitBinding
+> = new Map();
+const DEFAULT_TEXTURE_RECT = [0, 0, 1, 1] as const;
 
 const defaultFrameState: FrameState = {
 	camera: {
@@ -845,7 +850,8 @@ class Webgl2Renderer implements Renderer {
 
 		for (const resource of this.#terrainResources.values()) {
 			const bindings =
-				this.#textureBindings.get(resource.drawUnitId) ?? new Map();
+				this.#textureBindings.get(resource.drawUnitId) ??
+				EMPTY_TEXTURE_DRAW_UNIT_BINDINGS;
 			const binding = resource.primaryTextureUseId
 				? bindings.get(resource.primaryTextureUseId)
 				: undefined;
@@ -986,7 +992,8 @@ class Webgl2Renderer implements Renderer {
 	#drawStaticObjectResource(resource: StaticObjectGeometryResource): void {
 		const gl = this.#gl;
 		const bindings =
-			this.#textureBindings.get(resource.drawUnitId) ?? new Map();
+			this.#textureBindings.get(resource.drawUnitId) ??
+			EMPTY_TEXTURE_DRAW_UNIT_BINDINGS;
 		const pageBindings = createStaticObjectPageBindings(
 			resource,
 			bindings,
@@ -1998,10 +2005,15 @@ function uploadStaticObjectMaterialTableUniforms(
 	const paletteRects = createDefaultRectTable();
 	const wrapModes = new Int32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW);
 
-	for (const entry of resource.materialEntries.slice(
-		0,
+	const materialEntryCount = Math.min(
+		resource.materialEntries.length,
 		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
-	)) {
+	);
+	for (let entryIndex = 0; entryIndex < materialEntryCount; entryIndex += 1) {
+		const entry = resource.materialEntries[entryIndex];
+		if (!entry) {
+			continue;
+		}
 		const slot = entry.slot;
 		if (slot < 0 || slot >= MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW) {
 			continue;
@@ -2095,15 +2107,19 @@ function createDefaultRectTable(): Float32Array {
 	const rects = new Float32Array(
 		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
 	);
+	fillDefaultMaterialRectTable(rects);
+
+	return rects;
+}
+
+function fillDefaultMaterialRectTable(rects: Float32Array): void {
 	for (
 		let slot = 0;
 		slot < MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW;
 		slot += 1
 	) {
-		rects.set([0, 0, 1, 1], slot * 4);
+		rects.set(DEFAULT_TEXTURE_RECT, slot * 4);
 	}
-
-	return rects;
 }
 
 function writeStaticObjectTextureEntry(
@@ -2621,7 +2637,7 @@ function uploadTerrainDetailUniforms(
 	const detailRole = plan.detailRoles[0] ?? null;
 	const detailRect = detailRole
 		? resolveBindingRect(bindings, detailRole.texture)
-		: ([0, 0, 1, 1] as const);
+		: DEFAULT_TEXTURE_RECT;
 	gl.uniform1i(
 		program.uniforms.uDetailEnabled,
 		detailRole && detailBinding ? 1 : 0,
@@ -2637,10 +2653,10 @@ function resolveBindingRect(
 	role: TerrainMaterialTextureRoleBinding,
 ): readonly [number, number, number, number] {
 	if (!role.textureUseId) {
-		return [0, 0, 1, 1];
+		return DEFAULT_TEXTURE_RECT;
 	}
 
-	return bindings.get(role.textureUseId)?.rect ?? [0, 0, 1, 1];
+	return bindings.get(role.textureUseId)?.rect ?? DEFAULT_TEXTURE_RECT;
 }
 
 function resolveBindingPage(

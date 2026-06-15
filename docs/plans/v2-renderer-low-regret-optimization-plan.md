@@ -111,6 +111,8 @@ Dry-run date: 2026-06-15
 
 ### Phase 0: Hot Loop Constants and Scratch Foundations
 
+Status: Completed on 2026-06-15.
+
 #### Deliverables
 
 - Add file-local constants/helpers in `webgl2-renderer.ts`:
@@ -126,11 +128,12 @@ Dry-run date: 2026-06-15
 
 #### Task Checklist
 
-- Add shared empty/default constants.
-- Update `#drawTerrain` and `#drawStaticObjectResource` to use the shared empty bindings map.
-- Update terrain rect resolution to avoid fresh default rect arrays.
-- Replace hot `.slice(...).entries()` loops with counted loops during the relevant builder extraction phases.
-- Update this plan's Open Questions if the test seam decision changes during implementation.
+- [x] Add shared empty/default constants.
+- [x] Update `#drawTerrain` and `#drawStaticObjectResource` to use the shared empty bindings map.
+- [x] Update terrain rect resolution to avoid fresh default rect arrays.
+- [x] Replace the static material table `.slice(...)` loop with a counted loop.
+- [ ] Replace terrain overlay/road `.slice(...).entries()` loops during Phase 3 terrain builder extraction.
+- [x] Update this plan's Open Questions if the test seam decision changes during implementation.
 
 #### Acceptance Criteria
 
@@ -141,6 +144,10 @@ Dry-run date: 2026-06-15
 #### Decisions and Course Corrections
 
 - Dry run resolved that a test seam is required. Prefer a sibling payload-builder module if Phase 1 materially increases `webgl2-renderer.ts` size; otherwise use named internal exports from the existing module.
+- Implemented `EMPTY_TEXTURE_DRAW_UNIT_BINDINGS`, `DEFAULT_TEXTURE_RECT`, and `fillDefaultMaterialRectTable` in `webgl2-renderer.ts`.
+- Replaced the draw-path `?? new Map()` fallbacks with the shared empty map. `applyTexturePlacementUpdate` still creates a real mutable map when a draw unit receives its first binding; that is outside the render loop and should remain explicit.
+- Replaced static material-table `slice(0, max)` with a counted loop. Terrain overlay/road `slice(...).entries()` loops were intentionally left for Phase 3 because they sit inside the terrain payload builder work and are easier to verify there.
+- The test seam is still unresolved because Phase 0 did not extract payload builders. Phase 1 should choose between a sibling module and explicit internal exports before adding payload-builder tests.
 
 ### Phase 1: Isolate Static Material Payload Construction
 
@@ -393,6 +400,6 @@ Dry-run date: 2026-06-15
 ## Open Questions
 
 - Which exact neutral path should own the moved state cache: `src/lib/webgl2/`, `src/lib/webgl/`, or another existing utility convention discovered during implementation?
-- Which exact test seam should Phase 0 choose for payload builders: sibling module exports or explicit internal exports from `webgl2-renderer.ts`?
+- Which exact test seam should Phase 1 choose for payload builders: sibling module exports or explicit internal exports from `webgl2-renderer.ts`?
 - Should conservative invalidation on texture removal/replacement clear all prepared payloads, or should implementation add a reverse map from `textureRefId` to owning draw-unit ids?
 - Do we want a short before/after profiler note checked into this plan after implementation, or should profiler captures stay local/manual?

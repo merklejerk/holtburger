@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { HostAssetKey, PreparedAsset } from "../../assets/contracts";
+import { HostBackedAssetService } from "../../assets/asset-service";
+import type {
+	HostAssetKey,
+	PreparedAsset,
+	PreparedAssetReader,
+} from "../../assets/contracts";
 import { createHostAssetKey } from "../../assets/keys";
 import type { RuntimeHost, RuntimeHostSnapshot } from "../../host/contracts";
 import {
@@ -14,23 +19,24 @@ import type {
 } from "./protocol";
 
 describe("V2 static resolver host bridge", () => {
-	it("round-trips typed host asset lookup requests through the worker boundary", async () => {
+	it("round-trips typed prepared asset requests through the worker boundary", async () => {
 		const channel = new FixtureWorkerChannel();
 		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
 		const asset = createPreparedAsset(key);
+		const assetReader = new FixturePreparedAssetReader(asset);
 		const bridge = createStaticResolverMainHostBridge(
 			channel.mainPort,
-			new FixtureRuntimeHost(asset),
+			assetReader,
 		);
 		const workerHost = new StaticResolverWorkerRuntimeHost(channel.workerPort);
 
 		await expect(workerHost.lookupAsset(key, 7)).resolves.toEqual(asset);
+		expect(assetReader.requests).toEqual([key]);
 		expect(channel.threadMessages).toEqual([
 			{
 				key,
-				kind: "host-asset-lookup-requested",
+				kind: "prepared-asset-requested",
 				requestId: "resolver-host-1",
-				revision: 7,
 			},
 		]);
 
@@ -38,21 +44,65 @@ describe("V2 static resolver host bridge", () => {
 		bridge.dispose();
 	});
 
-	it("surfaces host lookup failures inside the worker", async () => {
+	it("surfaces prepared asset request failures inside the worker", async () => {
 		const channel = new FixtureWorkerChannel();
 		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
 		const bridge = createStaticResolverMainHostBridge(
 			channel.mainPort,
-			new FixtureRuntimeHost(new Error("host said no")),
+			new FixturePreparedAssetReader(new Error("asset service said no")),
 		);
 		const workerHost = new StaticResolverWorkerRuntimeHost(channel.workerPort);
 
 		await expect(workerHost.lookupAsset(key, 1)).rejects.toThrow(
-			"host said no",
+			"asset service said no",
 		);
-		expect(workerHost.createSnapshot().failure).toBe("host said no");
+		expect(workerHost.createSnapshot().failure).toBe("asset service said no");
 
 		workerHost.dispose();
+		bridge.dispose();
+	});
+
+	it("lets a shared main-thread asset service dedupe identical worker requests", async () => {
+		const channel = new FixtureWorkerChannel();
+		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
+		const host = new DeferredRuntimeHost(createPreparedAsset(key));
+		const assetService = new HostBackedAssetService({ host });
+		const bridge = createStaticResolverMainHostBridge(
+			channel.mainPort,
+			assetService,
+		);
+		const workerHost = new StaticResolverWorkerRuntimeHost(channel.workerPort);
+
+		const first = workerHost.lookupAsset(key, 1);
+		const second = workerHost.lookupAsset(key, 2);
+
+		expect(host.lookupCount).toBe(1);
+		host.resolveNext();
+
+		await expect(Promise.all([first, second])).resolves.toEqual([
+			expect.objectContaining({ key }),
+			expect.objectContaining({ key }),
+		]);
+
+		workerHost.dispose();
+		bridge.dispose();
+	});
+
+	it("rejects pending worker requests on disposal", async () => {
+		const channel = new FixtureWorkerChannel();
+		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
+		const bridge = createStaticResolverMainHostBridge(
+			channel.mainPort,
+			new DeferredPreparedAssetReader(),
+		);
+		const workerHost = new StaticResolverWorkerRuntimeHost(channel.workerPort);
+		const pending = workerHost.lookupAsset(key, 1);
+
+		workerHost.dispose();
+
+		await expect(pending).rejects.toThrow(
+			"Static resolver worker host was disposed.",
+		);
 		bridge.dispose();
 	});
 });
@@ -110,21 +160,53 @@ class FixtureWorkerChannel {
 	}
 }
 
-class FixtureRuntimeHost implements RuntimeHost {
+class FixturePreparedAssetReader implements PreparedAssetReader {
+	readonly requests: HostAssetKey[] = [];
+
 	constructor(private readonly result: PreparedAsset | Error) {}
 
-	lookupAsset(): Promise<PreparedAsset> {
+	requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
+		this.requests.push(key);
 		if (this.result instanceof Error) {
 			return Promise.reject(this.result);
 		}
 
 		return Promise.resolve(this.result);
 	}
+}
+
+class DeferredPreparedAssetReader implements PreparedAssetReader {
+	requestPreparedAsset(): Promise<PreparedAsset> {
+		return new Promise(() => undefined);
+	}
+}
+
+class DeferredRuntimeHost implements RuntimeHost {
+	#pendingResolve: ((asset: PreparedAsset) => void) | null = null;
+	lookupCount = 0;
+
+	constructor(private readonly asset: PreparedAsset) {}
+
+	lookupAsset(): Promise<PreparedAsset> {
+		this.lookupCount += 1;
+		return new Promise((resolve) => {
+			this.#pendingResolve = resolve;
+		});
+	}
+
+	resolveNext(): void {
+		if (!this.#pendingResolve) {
+			throw new Error("No pending runtime host lookup to resolve.");
+		}
+
+		this.#pendingResolve(this.asset);
+		this.#pendingResolve = null;
+	}
 
 	createSnapshot(): RuntimeHostSnapshot {
 		return {
-			failure: this.result instanceof Error ? this.result.message : null,
-			isAvailable: !(this.result instanceof Error),
+			failure: null,
+			isAvailable: true,
 		};
 	}
 }

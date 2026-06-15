@@ -1,5 +1,6 @@
+import { HostBackedAssetService } from "../assets/asset-service";
+import type { PreparedAssetReader } from "../assets/contracts";
 import { createBrowserRuntimeHost } from "../host/tauri-runtime-host";
-import type { RuntimeHost } from "../host/contracts";
 import { createWebgl2Renderer } from "../renderer/webgl2/webgl2-renderer";
 import {
 	createClientRuntime,
@@ -42,9 +43,10 @@ export function createBrowserV2Runtime(
 ): ClientRuntime {
 	const renderer = createWebgl2Renderer(canvas);
 	const host = createBrowserRuntimeHost();
+	const assetService = new HostBackedAssetService({ host });
 	const hostSnapshot = host.createSnapshot();
 	const staticCoordinator = hostSnapshot.isAvailable
-		? createTauriStaticCoordinator(host)
+		? createTauriStaticCoordinator(assetService)
 		: undefined;
 	const texturePacker = hostSnapshot.isAvailable
 		? createWorkerTexturePacker(DEFAULT_TEXTURE_PACKING_WORKER_COUNT)
@@ -52,15 +54,18 @@ export function createBrowserV2Runtime(
 
 	return createClientRuntime({
 		host,
+		assetService,
 		renderer,
 		staticCoordinator,
 		texturePacker,
 	});
 }
 
-function createTauriStaticCoordinator(host: RuntimeHost): StaticCoordinator {
+function createTauriStaticCoordinator(
+	assetReader: PreparedAssetReader,
+): StaticCoordinator {
 	const terrainResolver = createWorkerStaticResolver(
-		host,
+		assetReader,
 		DEFAULT_STATIC_RESOLVER_WORKER_COUNT,
 	);
 	const workerBaker = createWorkerStaticBaker(
@@ -84,7 +89,7 @@ function createTauriStaticCoordinator(host: RuntimeHost): StaticCoordinator {
 }
 
 function createWorkerStaticResolver(
-	host: RuntimeHost,
+	assetReader: PreparedAssetReader,
 	workerCount: number,
 ): StaticResolver {
 	assertPositiveInteger(workerCount, "static resolver worker count");
@@ -94,7 +99,7 @@ function createWorkerStaticResolver(
 			new URL("../static/resolver/static-resolver.worker.ts", import.meta.url),
 			{ type: "module" },
 		);
-		const bridge = createStaticResolverMainHostBridge(worker, host);
+		const bridge = createStaticResolverMainHostBridge(worker, assetReader);
 
 		return new StaticResolverWorkerClient(worker, {
 			disposePort: () => {

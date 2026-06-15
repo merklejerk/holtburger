@@ -1,7 +1,10 @@
-import type { PreparedAsset } from "../../assets/contracts";
+import type {
+	PreparedAsset,
+	PreparedAssetReader,
+} from "../../assets/contracts";
 import type { RuntimeHost, RuntimeHostSnapshot } from "../../host/contracts";
 import type {
-	StaticResolverHostLookupResponse,
+	StaticResolverPreparedAssetResponse,
 	StaticResolverWorkerGlobalPort,
 	StaticResolverWorkerMainMessage,
 	StaticResolverWorkerPort,
@@ -31,7 +34,6 @@ export class StaticResolverWorkerRuntimeHost implements RuntimeHost {
 
 	lookupAsset(
 		key: Parameters<RuntimeHost["lookupAsset"]>[0],
-		revision: number,
 	): Promise<PreparedAsset> {
 		const requestId = `resolver-host-${this.#nextRequestIndex++}`;
 
@@ -39,9 +41,8 @@ export class StaticResolverWorkerRuntimeHost implements RuntimeHost {
 			this.#pending.set(requestId, { reject, resolve });
 			this.#port.postMessage({
 				key,
-				kind: "host-asset-lookup-requested",
+				kind: "prepared-asset-requested",
 				requestId,
-				revision,
 			});
 		});
 	}
@@ -63,12 +64,12 @@ export class StaticResolverWorkerRuntimeHost implements RuntimeHost {
 
 	#handleResponse(
 		response:
-			| StaticResolverHostLookupResponse
+			| StaticResolverPreparedAssetResponse
 			| StaticResolverWorkerMainMessage,
 	): void {
 		if (
-			response.kind !== "host-asset-lookup-resolved" &&
-			response.kind !== "host-asset-lookup-failed"
+			response.kind !== "prepared-asset-request-resolved" &&
+			response.kind !== "prepared-asset-request-failed"
 		) {
 			return;
 		}
@@ -79,7 +80,7 @@ export class StaticResolverWorkerRuntimeHost implements RuntimeHost {
 		}
 
 		this.#pending.delete(response.requestId);
-		if (response.kind === "host-asset-lookup-failed") {
+		if (response.kind === "prepared-asset-request-failed") {
 			this.#lastFailure = response.message;
 			pending.reject(new Error(response.message));
 			return;
@@ -96,28 +97,28 @@ export interface StaticResolverMainHostBridge {
 
 export function createStaticResolverMainHostBridge(
 	port: StaticResolverWorkerPort,
-	host: RuntimeHost,
+	assetReader: PreparedAssetReader,
 ): StaticResolverMainHostBridge {
 	const onMessage = (
 		event: MessageEvent<StaticResolverWorkerThreadMessage>,
 	): void => {
 		const message = event.data;
-		if (message.kind !== "host-asset-lookup-requested") {
+		if (message.kind !== "prepared-asset-requested") {
 			return;
 		}
 
-		void host
-			.lookupAsset(message.key, message.revision)
+		void assetReader
+			.requestPreparedAsset(message.key)
 			.then((asset) => {
 				port.postMessage({
 					asset,
-					kind: "host-asset-lookup-resolved",
+					kind: "prepared-asset-request-resolved",
 					requestId: message.requestId,
 				});
 			})
 			.catch((error: unknown) => {
 				port.postMessage({
-					kind: "host-asset-lookup-failed",
+					kind: "prepared-asset-request-failed",
 					message: error instanceof Error ? error.message : String(error),
 					requestId: message.requestId,
 				});

@@ -10,9 +10,9 @@ import type {
 	SurfaceTexturePayloadDto,
 } from "../../../lib/host/contracts";
 import type {
-	AssetService,
 	HostAssetKey,
 	PreparedAsset,
+	PreparedAssetReader,
 } from "../../assets/contracts";
 import {
 	createHostAssetKey,
@@ -92,11 +92,11 @@ interface StaticObjectMaterialSlotInput {
 }
 
 export interface OutdoorStaticObjectsResolverOptions {
-	readonly assetService: AssetService;
+	readonly assetService: PreparedAssetReader;
 }
 
 export class OutdoorStaticObjectsResolver {
-	readonly #assetService: AssetService;
+	readonly #assetService: PreparedAssetReader;
 
 	constructor(options: OutdoorStaticObjectsResolverOptions) {
 		this.#assetService = options.assetService;

@@ -8,12 +8,12 @@ export type StaticResolverWorkerMainMessage =
 			readonly job: StaticResolverJob;
 	  }
 	| {
-			readonly kind: "host-asset-lookup-resolved";
+			readonly kind: "prepared-asset-request-resolved";
 			readonly requestId: string;
 			readonly asset: PreparedAsset;
 	  }
 	| {
-			readonly kind: "host-asset-lookup-failed";
+			readonly kind: "prepared-asset-request-failed";
 			readonly requestId: string;
 			readonly message: string;
 	  };
@@ -30,10 +30,9 @@ export type StaticResolverWorkerThreadMessage =
 			readonly message: string;
 	  }
 	| {
-			readonly kind: "host-asset-lookup-requested";
+			readonly kind: "prepared-asset-requested";
 			readonly requestId: string;
 			readonly key: HostAssetKey;
-			readonly revision: number;
 	  };
 
 export type StaticResolverWorkerRequest = Extract<
@@ -46,10 +45,12 @@ export type StaticResolverWorkerResponse = Extract<
 	{ readonly kind: "static-scope-resolved" | "static-scope-resolve-failed" }
 >;
 
-export type StaticResolverHostLookupResponse = Extract<
+export type StaticResolverPreparedAssetResponse = Extract<
 	StaticResolverWorkerMainMessage,
 	{
-		readonly kind: "host-asset-lookup-resolved" | "host-asset-lookup-failed";
+		readonly kind:
+			| "prepared-asset-request-resolved"
+			| "prepared-asset-request-failed";
 	}
 >;
 

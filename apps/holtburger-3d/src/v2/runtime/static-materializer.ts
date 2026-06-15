@@ -16,6 +16,11 @@ import type {
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectMaterialTableEntry,
 	StaticObjectSourceMappingCoverage,
+	StaticAuthoredDynamicSeedRecord,
+	StaticPortalInteriorRecord,
+	StaticSourceMappingRecord,
+	StaticSpatialRecord,
+	StaticVisibilityRecord,
 } from "../static/contracts";
 
 export interface StaticMaterializationInput {
@@ -29,12 +34,12 @@ export interface StaticMaterializationInput {
 
 export interface StaticMaterializationResult {
 	readonly drawUnitIdMappings: readonly StaticMaterializedDrawUnitIdMapping[];
-	readonly staticAuthoredDynamicSeeds: readonly string[];
+	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly staticDelta: StaticResidencyDelta;
-	readonly staticPortalInteriorRecords: readonly string[];
-	readonly staticSourceMappings: readonly string[];
-	readonly staticSpatialRecords: readonly string[];
-	readonly staticVisibilityRecords: readonly string[];
+	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
+	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
+	readonly staticSpatialRecords: readonly StaticSpatialRecord[];
+	readonly staticVisibilityRecords: readonly StaticVisibilityRecord[];
 	readonly textureUpdate: TexturePlacementUpdate | null;
 }
 
@@ -62,7 +67,7 @@ export function materializeStaticCommit(
 
 	return {
 		drawUnitIdMappings: finePartitioned.drawUnitIdMappings,
-		...materializeStaticSidecars(input.commit, finePartitioned),
+		...materializeStaticPeerRecords(input.commit, finePartitioned),
 		staticDelta: {
 			addedDrawUnits: finePartitioned.drawUnits,
 			removedDrawUnitIds: expandRemovedDrawUnitIds(
@@ -122,7 +127,7 @@ interface RemappedStaticObjectDrawUnit {
 	readonly sourceDrawUnitId: string;
 }
 
-function materializeStaticSidecars(
+function materializeStaticPeerRecords(
 	commit: StaticCoordinatorCommitDelta,
 	finePartitioned: {
 		readonly remappedStaticObjectDrawUnits: readonly RemappedStaticObjectDrawUnit[];
@@ -150,12 +155,12 @@ function materializeStaticSidecars(
 		staticPortalInteriorRecords: commit.staticPortalInteriorRecords,
 		staticSourceMappings: [
 			...commit.staticSourceMappings.filter(
-				(record) => !hasAnyRecordDrawUnitId(record, remappedSourceDrawUnitIds),
+				(record) => !isOwnedByAnyDrawUnit(record, remappedSourceDrawUnitIds),
 			),
 		],
 		staticSpatialRecords: [
 			...commit.staticSpatialRecords.filter(
-				(record) => !hasAnyRecordDrawUnitId(record, remappedSourceDrawUnitIds),
+				(record) => !isOwnedByAnyDrawUnit(record, remappedSourceDrawUnitIds),
 			),
 			...staticObjectDrawUnits.flatMap((drawUnit) =>
 				drawUnit.spatialRecord ? [drawUnit.spatialRecord] : [],
@@ -165,17 +170,15 @@ function materializeStaticSidecars(
 	};
 }
 
-function hasAnyRecordDrawUnitId(
-	record: string,
+function isOwnedByAnyDrawUnit(
+	record: { readonly owner: { readonly kind: string; readonly drawUnitId?: string } },
 	drawUnitIds: ReadonlySet<string>,
 ): boolean {
-	for (const drawUnitId of drawUnitIds) {
-		if (record.startsWith(`${drawUnitId}:`)) {
-			return true;
-		}
-	}
-
-	return false;
+	return (
+		record.owner.kind === "draw-unit" &&
+		typeof record.owner.drawUnitId === "string" &&
+		drawUnitIds.has(record.owner.drawUnitId)
+	);
 }
 
 function splitStaticObjectDrawUnit(
@@ -370,8 +373,26 @@ function remapStaticObjectDrawUnit(
 		primaryTextureWrapMode:
 			summary?.primaryTextureWrapMode ?? drawUnit.primaryTextureWrapMode,
 		sourceMappingCoverage: geometry.sourceMappingCoverage,
-		spatialRecord: `${drawUnitId}:bounds:${geometry.triangleCount}t`,
+		spatialRecord: createDrawUnitSpatialRecord(
+			drawUnitId,
+			geometry.triangleCount,
+		),
 		textureUseIds,
+	};
+}
+
+function createDrawUnitSpatialRecord(
+	drawUnitId: string,
+	triangleCount: number,
+): StaticSpatialRecord {
+	return {
+		drawUnitId,
+		kind: "draw-unit-bounds",
+		owner: {
+			drawUnitId,
+			kind: "draw-unit",
+		},
+		triangleCount,
 	};
 }
 

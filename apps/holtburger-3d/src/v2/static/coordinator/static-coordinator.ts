@@ -16,6 +16,7 @@ import type {
 	OutdoorStaticObjectsPayloadSummary,
 	StaticResolverFailureSnapshot,
 	StaticResolver,
+	StaticPeerRecordOwner,
 	StaticScopePayload,
 	TerrainStaticScopePayloadSummary,
 	ScheduledStaticWork,
@@ -274,22 +275,7 @@ export class StaticCoordinator {
 			revision: work.revision,
 			work,
 		});
-		if (isSourceOnlyPayload(payload)) {
-			this.#commitSourcePayload(work);
-			return;
-		}
 		this.#enqueueBakePayload(work, payload);
-	}
-
-	#commitSourcePayload(work: ScheduledStaticWork): void {
-		const status = this.#activeWork.get(work.workId);
-		if (!status) {
-			return;
-		}
-
-		status.status = "source-committed";
-		this.#committed += 1;
-		this.#emit();
 	}
 
 	#enqueueBakePayload(
@@ -727,6 +713,7 @@ function filterStaticBakeResultForWorks(
 	works: readonly ScheduledStaticWork[],
 ): StaticBakeBatchResult {
 	const desiredKeys = new Set(works.map(createDesiredWorkKey));
+	const workIds = new Set(works.map((work) => work.workId));
 	const drawUnitIds = new Set(
 		result.drawUnits
 			.filter((drawUnit) => desiredKeys.has(getDrawUnitDesiredKey(drawUnit)))
@@ -741,15 +728,21 @@ function filterStaticBakeResultForWorks(
 		materialCoverage: result.materialCoverage.filter((coverage) =>
 			works.some((work) => work.job.domain === coverage.domain),
 		),
-		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds,
-		staticPortalInteriorRecords: result.staticPortalInteriorRecords,
+		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds.filter(
+			(record) => isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
+		),
+		staticPortalInteriorRecords: result.staticPortalInteriorRecords.filter(
+			(record) => isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
+		),
 		staticSourceMappings: result.staticSourceMappings.filter((record) =>
-			hasAnyDrawUnitRecordPrefix(record, drawUnitIds),
+			isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
 		),
 		staticSpatialRecords: result.staticSpatialRecords.filter((record) =>
-			hasAnyDrawUnitRecordPrefix(record, drawUnitIds),
+			isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
 		),
-		staticVisibilityRecords: result.staticVisibilityRecords,
+		staticVisibilityRecords: result.staticVisibilityRecords.filter((record) =>
+			isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
+		),
 		textureUses: result.textureUses.filter((textureUse) =>
 			textureUse.ownerDrawUnitIds.some((drawUnitId) =>
 				drawUnitIds.has(drawUnitId),
@@ -759,17 +752,16 @@ function filterStaticBakeResultForWorks(
 	};
 }
 
-function hasAnyDrawUnitRecordPrefix(
-	record: string,
+function isPeerRecordOwnedByCurrentWork(
+	owner: StaticPeerRecordOwner,
+	workIds: ReadonlySet<string>,
 	drawUnitIds: ReadonlySet<string>,
 ): boolean {
-	for (const drawUnitId of drawUnitIds) {
-		if (record.startsWith(`${drawUnitId}:`)) {
-			return true;
-		}
+	if (owner.kind === "draw-unit") {
+		return drawUnitIds.has(owner.drawUnitId);
 	}
 
-	return false;
+	return workIds.has(owner.workId);
 }
 
 function toScheduledStaticWorkStatus(
@@ -832,10 +824,6 @@ function countStatus(
 	status: ScheduledStaticWorkStatus["status"],
 ): number {
 	return requests.filter((request) => request.status === status).length;
-}
-
-function isSourceOnlyPayload(payload: StaticScopePayload): boolean {
-	return payload.scope.kind === "landblock-env-cells";
 }
 
 function disposeIfAvailable(value: unknown): void {

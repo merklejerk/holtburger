@@ -21,7 +21,7 @@ describe("browser V2 runtime routing", () => {
 		expect(shouldUseBrowserWorkerBaker("outdoor-detail")).toBe(true);
 	});
 
-	it("routes env-cell bundles through source resolver without worker baking", () => {
+	it("routes env-cell bundles through source resolver and worker baking", () => {
 		expect(
 			shouldUseBrowserSourceResolver({
 				domain: "landblock-env-cells",
@@ -31,7 +31,7 @@ describe("browser V2 runtime routing", () => {
 				},
 			}),
 		).toBe(true);
-		expect(shouldUseBrowserWorkerBaker("landblock-env-cells")).toBe(false);
+		expect(shouldUseBrowserWorkerBaker("landblock-env-cells")).toBe(true);
 	});
 
 	it("backs static resolver worker bridges with the supplied asset reader", () => {

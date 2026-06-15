@@ -303,7 +303,7 @@ Verification:
 
 #### Phase 13A1: Env-Cell Bake Contracts And Typed Peer Records
 
-Status: planned; first implementation step after 13A0.
+Status: complete as of 2026-06-15.
 
 Purpose: prepare the static bake/coordinator/materializer contracts for env-cell output before adding geometry.
 
@@ -318,13 +318,31 @@ Deliverables:
   - static-authored dynamic seeds, if source facts already expose them.
 - Coordinator, materializer, and runtime deltas updated to carry the typed peer records without requiring renderer behavior.
 - Retention/stale-result filtering rules for typed peer records. Filtering must not depend on parsing draw-unit-id prefixes out of strings.
-- Tests proving `landblock-env-cells` batches can commit typed sidecar records and stale batch filtering does not retain records for evicted/superseded work.
+- Tests proving `landblock-env-cells` batches can commit typed peer records and stale batch filtering does not retain records for evicted/superseded work.
 
 Acceptance criteria:
 
 - No new `string[]` peer-record fields are added for env-cell facts.
 - Existing terrain and outdoor static-object commits still work while typed env-cell peer records are introduced.
 - Runtime query ownership remains unchanged: typed records are consumed by runtime/static-scene query or stored for later visibility work, not by renderer dependency walks.
+
+Implementation notes:
+
+- Added typed peer-record ownership contracts: draw-unit-owned records for existing terrain/static-object products and work-owned records for env-cell products that may intentionally have no draw units in early phases.
+- Replaced the previous `string[]` peer-record fields on `StaticBakeBatchResult`, `StaticCoordinatorCommitDelta`, and static materialization output with typed spatial, visibility, portal/interior, source-mapping, and authored-dynamic-seed records.
+- Added `LandblockEnvCellsBaker` and routed `landblock-env-cells` through the static bake worker/browser worker baker path. The 13A1 baker emits no draw units, no texture uses, and no material coverage; it emits typed env-cell peer records from resolver facts.
+- Removed the coordinator source-only shortcut for `landblock-env-cells`; env-cell bundles now resolve source facts and then commit through bake output like other static domains.
+- Stale-result filtering now uses structural peer-record ownership (`draw-unit` or `work`) instead of parsing draw-unit id prefixes from string records. This is required because env-cell peer records can be work-owned while draw-unit output is still empty.
+- Existing terrain source mappings and terrain/static-object spatial records were converted to typed draw-unit-owned records so the peer-record contract is uniform.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run test:ts -- --run src/v2/static/env-cells/bake/landblock-env-cells-baker.test.ts src/v2/static/coordinator/static-coordinator.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts src/v2/static/objects/bake/static-object-compatibility-partitioner.test.ts src/v2/runtime/static-materializer.test.ts src/v2/runtime/client-runtime.test.ts src/v2/browser/create-browser-v2-runtime.test.ts`
+
+Spicy follow-up for 13A2:
+
+- Env-cell peer records are now committed, but runtime query/visibility consumers still do not actively use the new typed records. Phase 13A2/13B should decide whether those records become runtime query inputs immediately or remain committed peer records until renderer visibility has a concrete consumer.
 
 #### Phase 13A2: Structured Cell-Structure Geometry Bake
 
@@ -337,6 +355,7 @@ Deliverables:
 - A `StructuredInteriorGeometryStaticDrawUnit` or equivalent dedicated draw-unit variant for cell-structure geometry, with landblock id, env-cell id, cell-structure/environment ids, local placement ownership, material-family facts, geometry buffers, source triangle ids, texture-use ids, and sort/visibility metadata.
 - An explicit cell-structure geometry attachment/enrichment path that obtains full positions, normals, UVs, and triangle metadata for env-cell shells at bake time. It must not depend on resolver payloads carrying vertex buffers.
 - Geometry bake from env-cell shell attachments plus resolver metadata: positions, UVs, triangles, surface ids, material variant signatures, bounds, local placement, and env-cell/cell-structure ownership.
+- The new typed work-owned env-cell peer records from 13A1 should be preserved when 13A2 starts emitting draw units; adding geometry must not regress no-draw-unit peer-record commit/filter behavior.
 - Material planning for env-cell cell-structure surfaces through the existing static material planner where material facts are isomorphic.
 - Texture/data-use emission for cell-structure surfaces through the existing texture manager and batch atlas ownership model.
 - Coordinate/placement tests proving env-cell local placement maps cell-local geometry into the same renderer-local space used by `StaticSceneQuery` picking and debug overlays.

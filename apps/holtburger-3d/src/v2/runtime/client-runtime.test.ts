@@ -1263,7 +1263,15 @@ function createStaticObjectDrawUnit(
 				sourceTriangleCount: 1,
 			},
 		],
-		spatialRecord: `${drawUnitId}:bounds:1t`,
+		spatialRecord: {
+			drawUnitId,
+			kind: "draw-unit-bounds",
+			owner: {
+				drawUnitId,
+				kind: "draw-unit",
+			},
+			triangleCount: 1,
+		},
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
 		textureUseIds: [],
 		triangleCount: 1,

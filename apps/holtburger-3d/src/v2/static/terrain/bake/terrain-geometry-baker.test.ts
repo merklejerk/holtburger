@@ -55,15 +55,40 @@ describe("V2 terrain geometry baker", () => {
 			staticAuthoredDynamicSeeds: [],
 			staticPortalInteriorRecords: [],
 			staticSpatialRecords: [
-				"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:bounds",
+				{
+					drawUnitId: "7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
+					kind: "draw-unit-bounds",
+					owner: {
+						drawUnitId:
+							"7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
+						kind: "draw-unit",
+					},
+					triangleCount: 2,
+				},
 			],
 			staticVisibilityRecords: [],
 			textureUses: [],
 			works: [input.items[0]?.work],
 		});
 		expect(result.staticSourceMappings).toEqual([
-			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:source:t0",
-			"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:source:t1",
+			{
+				drawUnitId: "7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
+				kind: "terrain-source-triangle",
+				owner: {
+					drawUnitId: "7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
+					kind: "draw-unit",
+				},
+				sourceTriangleId: "t0",
+			},
+			{
+				drawUnitId: "7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
+				kind: "terrain-source-triangle",
+				owner: {
+					drawUnitId: "7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
+					kind: "draw-unit",
+				},
+				sourceTriangleId: "t1",
+			},
 		]);
 	});
 

@@ -92,6 +92,10 @@ interface StaticObjectMaterialSlotInput {
 	readonly paletteViews: readonly StaticObjectPaletteViewFacts[];
 }
 
+interface OutdoorStaticResolveContext {
+	readonly assetService: PreparedAssetReader;
+}
+
 export interface OutdoorStaticObjectsResolverOptions {
 	readonly assetService: PreparedAssetReader;
 }
@@ -113,8 +117,12 @@ export class OutdoorStaticObjectsResolver {
 			);
 		}
 		const domain = job.domain;
+		const context: OutdoorStaticResolveContext = {
+			assetService: new PerJobPreparedAssetReader(this.#assetService),
+		};
 
 		const landblock = await this.#loadPayload(
+			context,
 			createHostAssetKey("landblock-outdoor", job.scope.landblockId),
 			"landblock-outdoor",
 		);
@@ -122,6 +130,7 @@ export class OutdoorStaticObjectsResolver {
 			shouldIncludeOutdoorStaticObject(domain, object.kind),
 		);
 		const regionRenderProfile = await this.#loadPayload(
+			context,
 			createHostAssetKey(
 				"region-render-profile",
 				landblock.payload.regionNumber,
@@ -129,6 +138,7 @@ export class OutdoorStaticObjectsResolver {
 			"region-render-profile",
 		);
 		const sourceResolution = await this.#resolveSourceAssets(
+			context,
 			selectedObjects.map((object) => object.sourceAssetId),
 		);
 		const paletteSources = new Map(
@@ -152,6 +162,7 @@ export class OutdoorStaticObjectsResolver {
 			detailRoles.length === 0
 				? 0
 				: await this.#resolveRegionDetailTextureRefs({
+						context,
 						missingRefs,
 						paletteSources,
 						profile: regionRenderProfile.payload,
@@ -246,6 +257,7 @@ export class OutdoorStaticObjectsResolver {
 	}
 
 	async #resolveSourceAssets(
+		context: OutdoorStaticResolveContext,
 		sourceAssetIds: readonly string[],
 	): Promise<SourceResolution> {
 		const sourceAssets = new Map<string, StaticObjectSourceAssetFacts>();
@@ -260,9 +272,10 @@ export class OutdoorStaticObjectsResolver {
 			const identity = createStaticObjectSourceIdentity(sourceKey);
 
 			try {
-				const source = await this.#loadRenderableSource(sourceKey);
+				const source = await this.#loadRenderableSource(context, sourceKey);
 				sourceRevision = Math.max(sourceRevision, source.asset.revision);
 				const facts = await this.#createSourceAssetFacts({
+					context,
 					identity,
 					materialSources,
 					missingRefs,
@@ -288,6 +301,7 @@ export class OutdoorStaticObjectsResolver {
 	}
 
 	async #createSourceAssetFacts(options: {
+		readonly context: OutdoorStaticResolveContext;
 		readonly identity: StaticObjectSourceIdentity;
 		readonly source: LoadedPayload<"gfx-obj" | "setup-model">;
 		readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
@@ -298,6 +312,7 @@ export class OutdoorStaticObjectsResolver {
 		const parts =
 			options.source.payload.kind === "gfx-obj"
 				? await this.#createDirectGfxParts({
+						context: options.context,
 						gfxObjAssetId: options.source.asset.sourceAssetId,
 						gfxObj: options.source.payload,
 						materialSources: options.materialSources,
@@ -307,6 +322,7 @@ export class OutdoorStaticObjectsResolver {
 						textureRefs: options.textureRefs,
 					})
 				: await this.#createSetupModelParts({
+						context: options.context,
 						materialSources: options.materialSources,
 						missingRefs: options.missingRefs,
 						paletteSources: options.paletteSources,
@@ -331,6 +347,7 @@ export class OutdoorStaticObjectsResolver {
 	}
 
 	async #createDirectGfxParts(options: {
+		readonly context: OutdoorStaticResolveContext;
 		readonly source: StaticObjectSourceIdentity;
 		readonly gfxObjAssetId: string;
 		readonly gfxObj: GfxObjPayloadDto;
@@ -341,6 +358,7 @@ export class OutdoorStaticObjectsResolver {
 	}): Promise<readonly StaticObjectPartSourceFacts[]> {
 		return [
 			await this.#createGfxPartFacts({
+				context: options.context,
 				defaultPlacements: [],
 				gfxObj: options.gfxObj,
 				gfxObjAssetId: options.gfxObjAssetId,
@@ -356,6 +374,7 @@ export class OutdoorStaticObjectsResolver {
 	}
 
 	async #createSetupModelParts(options: {
+		readonly context: OutdoorStaticResolveContext;
 		readonly source: StaticObjectSourceIdentity;
 		readonly setupModel: SetupModelPayloadDto;
 		readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
@@ -364,6 +383,7 @@ export class OutdoorStaticObjectsResolver {
 		readonly missingRefs: StaticResourceIdentity[];
 	}): Promise<readonly StaticObjectPartSourceFacts[]> {
 		const setupAppearance = await this.#tryLoadSetupAppearance(
+			options.context,
 			options.setupModel.setupModelId,
 			options.missingRefs,
 		);
@@ -377,12 +397,14 @@ export class OutdoorStaticObjectsResolver {
 		);
 		if (paletteOverride) {
 			await this.#loadPalette(
+				options.context,
 				paletteOverride,
 				options.paletteSources,
 				options.missingRefs,
 			);
 		}
 		await this.#loadPaletteViews(
+			options.context,
 			paletteViews,
 			options.paletteSources,
 			options.missingRefs,
@@ -397,6 +419,7 @@ export class OutdoorStaticObjectsResolver {
 			let gfxObj: LoadedPayload<"gfx-obj">;
 			try {
 				gfxObj = await this.#loadPayload(
+					options.context,
 					parseHostAssetId(gfxObjAssetId),
 					"gfx-obj",
 				);
@@ -410,6 +433,7 @@ export class OutdoorStaticObjectsResolver {
 			);
 			facts.push(
 				await this.#createGfxPartFacts({
+					context: options.context,
 					defaultPlacements: deriveSetupPartDefaultPlacements(
 						options.setupModel,
 						part.partIndex,
@@ -446,6 +470,7 @@ export class OutdoorStaticObjectsResolver {
 	}
 
 	async #createGfxPartFacts(options: {
+		readonly context: OutdoorStaticResolveContext;
 		readonly source: StaticObjectSourceIdentity;
 		readonly gfxObjAssetId: string;
 		readonly gfxObj: GfxObjPayloadDto;
@@ -462,6 +487,7 @@ export class OutdoorStaticObjectsResolver {
 			parseHostAssetId(options.gfxObjAssetId),
 		);
 		const materialSlots = await this.#createMaterialSlotFacts({
+			context: options.context,
 			gfxObj: options.gfxObj,
 			materialSlots: options.materialSlots,
 			materialSources: options.materialSources,
@@ -498,6 +524,7 @@ export class OutdoorStaticObjectsResolver {
 	}
 
 	async #createMaterialSlotFacts(options: {
+		readonly context: OutdoorStaticResolveContext;
 		readonly gfxObj: GfxObjPayloadDto;
 		readonly materialSlots?: readonly StaticObjectMaterialSlotInput[];
 		readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
@@ -525,6 +552,7 @@ export class OutdoorStaticObjectsResolver {
 			materialSlots.map(async (slot) => {
 				const material = createStaticMaterialSourceIdentity(slot.materialId);
 				await this.#loadMaterialSource({
+					context: options.context,
 					material,
 					materialSources: options.materialSources,
 					missingRefs: options.missingRefs,
@@ -547,6 +575,7 @@ export class OutdoorStaticObjectsResolver {
 	}
 
 	async #loadMaterialSource(options: {
+		readonly context: OutdoorStaticResolveContext;
 		readonly material: StaticMaterialSourceIdentity;
 		readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
 		readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
@@ -561,6 +590,7 @@ export class OutdoorStaticObjectsResolver {
 		let material: LoadedPayload<"material-recipe">;
 		try {
 			material = await this.#loadPayload(
+				options.context,
 				createHostAssetKey("material", options.material.materialId),
 				"material-recipe",
 			);
@@ -608,6 +638,7 @@ export class OutdoorStaticObjectsResolver {
 
 		if (source.kind === "texture" && source.palette) {
 			await this.#loadPalette(
+				options.context,
 				source.palette,
 				options.paletteSources,
 				options.missingRefs,
@@ -615,6 +646,7 @@ export class OutdoorStaticObjectsResolver {
 		}
 
 		await this.#resolveMaterialTextureRefs(
+			options.context,
 			material.payload,
 			options.paletteSources,
 			options.textureRefs,
@@ -623,6 +655,7 @@ export class OutdoorStaticObjectsResolver {
 	}
 
 	async #resolveMaterialTextureRefs(
+		context: OutdoorStaticResolveContext,
 		material: MaterialRecipePayloadDto,
 		paletteSources: Map<string, StaticObjectPaletteSourceFacts>,
 		textureRefs: Map<string, StaticObjectTextureRefFacts>,
@@ -633,6 +666,7 @@ export class OutdoorStaticObjectsResolver {
 		}
 
 		await this.#resolveSurfaceTextureRef({
+			context,
 			missingRefs,
 			palette:
 				material.source.paletteId === null
@@ -646,6 +680,7 @@ export class OutdoorStaticObjectsResolver {
 	}
 
 	async #resolveRegionDetailTextureRefs(options: {
+		readonly context: OutdoorStaticResolveContext;
 		readonly profile: RegionRenderProfilePayloadDto;
 		readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
 		readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
@@ -659,6 +694,7 @@ export class OutdoorStaticObjectsResolver {
 			sourceRevision = Math.max(
 				sourceRevision,
 				await this.#resolveSurfaceTextureRef({
+					context: options.context,
 					missingRefs: options.missingRefs,
 					palette: null,
 					paletteSources: options.paletteSources,
@@ -672,6 +708,7 @@ export class OutdoorStaticObjectsResolver {
 	}
 
 	async #resolveSurfaceTextureRef(options: {
+		readonly context: OutdoorStaticResolveContext;
 		readonly texture: SurfaceTextureIdentity;
 		readonly selectedRenderSurfaceId: number | null;
 		readonly palette: PaletteIdentity | null;
@@ -682,6 +719,7 @@ export class OutdoorStaticObjectsResolver {
 		let surfaceTexture: LoadedPayload<"surface-texture">;
 		try {
 			surfaceTexture = await this.#loadPayload(
+				options.context,
 				createHostAssetKey("surface-texture", options.texture.surfaceTextureId),
 				"surface-texture",
 			);
@@ -720,6 +758,7 @@ export class OutdoorStaticObjectsResolver {
 
 		try {
 			const loadedRenderSurface = await this.#loadPayload(
+				options.context,
 				createHostAssetKey("render-surface", renderSurface.renderSurfaceId),
 				"render-surface",
 			);
@@ -748,6 +787,7 @@ export class OutdoorStaticObjectsResolver {
 			);
 			if (palette) {
 				await this.#loadPalette(
+					options.context,
 					palette,
 					options.paletteSources,
 					options.missingRefs,
@@ -761,6 +801,7 @@ export class OutdoorStaticObjectsResolver {
 	}
 
 	async #loadPalette(
+		context: OutdoorStaticResolveContext,
 		palette: PaletteIdentity,
 		paletteSources: Map<string, StaticObjectPaletteSourceFacts>,
 		missingRefs: StaticResourceIdentity[],
@@ -771,6 +812,7 @@ export class OutdoorStaticObjectsResolver {
 		}
 		try {
 			const loaded = await this.#loadPayload(
+				context,
 				createHostAssetKey("palette", palette.paletteId),
 				"palette",
 			);
@@ -784,16 +826,23 @@ export class OutdoorStaticObjectsResolver {
 	}
 
 	async #loadPaletteViews(
+		context: OutdoorStaticResolveContext,
 		paletteViews: readonly StaticObjectPaletteViewFacts[],
 		paletteSources: Map<string, StaticObjectPaletteSourceFacts>,
 		missingRefs: StaticResourceIdentity[],
 	): Promise<void> {
 		for (const paletteView of paletteViews) {
-			await this.#loadPalette(paletteView.palette, paletteSources, missingRefs);
+			await this.#loadPalette(
+				context,
+				paletteView.palette,
+				paletteSources,
+				missingRefs,
+			);
 		}
 	}
 
 	async #tryLoadSetupAppearance(
+		context: OutdoorStaticResolveContext,
 		setupModelId: number,
 		missingRefs: StaticResourceIdentity[],
 	): Promise<LoadedPayload<"setup-appearance"> | null> {
@@ -804,6 +853,7 @@ export class OutdoorStaticObjectsResolver {
 		};
 		try {
 			return await this.#loadPayload(
+				context,
 				createHostAssetKey("setup-appearance", setupModelId),
 				"setup-appearance",
 			);
@@ -814,6 +864,7 @@ export class OutdoorStaticObjectsResolver {
 	}
 
 	async #loadRenderableSource(
+		context: OutdoorStaticResolveContext,
 		key: HostAssetKey,
 	): Promise<LoadedPayload<"gfx-obj" | "setup-model">> {
 		if (key.kind !== "gfx-obj" && key.kind !== "setup-model") {
@@ -822,16 +873,38 @@ export class OutdoorStaticObjectsResolver {
 			);
 		}
 
-		return this.#loadPayload(key, key.kind);
+		return this.#loadPayload(context, key, key.kind);
 	}
 
 	async #loadPayload<TKind extends OutdoorStaticPreparedPayload["kind"]>(
+		context: OutdoorStaticResolveContext,
 		key: HostAssetKey,
 		expectedKind: TKind,
 	): Promise<LoadedPayload<TKind>> {
-		const asset = await this.#assetService.requestPreparedAsset(key);
+		const asset = await context.assetService.requestPreparedAsset(key);
 		const payload = requirePreparedPayloadKind(asset, expectedKind);
 		return { asset, payload };
+	}
+}
+
+class PerJobPreparedAssetReader implements PreparedAssetReader {
+	readonly #reader: PreparedAssetReader;
+	readonly #requests = new Map<string, Promise<PreparedAsset>>();
+
+	constructor(reader: PreparedAssetReader) {
+		this.#reader = reader;
+	}
+
+	requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
+		const cacheKey = describeHostAssetKey(key);
+		const request = this.#requests.get(cacheKey);
+		if (request) {
+			return request;
+		}
+
+		const nextRequest = this.#reader.requestPreparedAsset(key);
+		this.#requests.set(cacheKey, nextRequest);
+		return nextRequest;
 	}
 }
 

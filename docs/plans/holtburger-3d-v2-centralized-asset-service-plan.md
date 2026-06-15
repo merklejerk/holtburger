@@ -113,14 +113,16 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Implement `RemotePreparedAssetReader` or equivalent worker-side facade.
-- [ ] Wire `static-resolver.worker.ts` to the remote facade.
-- [ ] Remove `StaticResolverWorkerRuntimeHost` if it becomes obsolete, or rename it so it no longer claims to be a `RuntimeHost`.
-- [ ] Update imports and tests.
+- [x] Implement `RemotePreparedAssetReader` or equivalent worker-side facade.
+- [x] Wire `static-resolver.worker.ts` to the remote facade.
+- [x] Remove `StaticResolverWorkerRuntimeHost` if it becomes obsolete, or rename it so it no longer claims to be a `RuntimeHost`.
+- [x] Update imports and tests.
 
 Decisions and course corrections:
 
-- None yet.
+- 2026-06-15: Replaced `StaticResolverWorkerRuntimeHost` with `StaticResolverWorkerPreparedAssetReader`. The worker-side facade now implements only `PreparedAssetReader`, uses `prepared-asset-request-*` messages, and exposes no lease, prune, or snapshot surface.
+- 2026-06-15: Removed the worker-local `HostBackedAssetService` from `static-resolver.worker.ts`. Production resolver workers now pass the remote reader directly into terrain, outdoor static object, and landblock env-cell resolvers.
+- 2026-06-15: Kept the resolver bridge file/test names for now to avoid a noisy file rename. Phase 6/7 cleanup should decide whether `host-bridge` should become `asset-bridge`.
 
 ### Phase 3: Share The Runtime Asset Service With Resolver Workers And Textures
 

@@ -1,6 +1,5 @@
 /// <reference lib="webworker" />
 
-import { HostBackedAssetService } from "../../assets/asset-service";
 import type {
 	StaticResolver,
 	StaticResolverJob,
@@ -9,7 +8,7 @@ import type {
 import { LandblockEnvCellsResolver } from "../env-cells/landblock-env-cells-resolver";
 import { OutdoorStaticObjectsResolver } from "../objects/outdoor-static-objects-resolver";
 import { TerrainStaticScopeResolver } from "../terrain/terrain-resolver";
-import { StaticResolverWorkerRuntimeHost } from "./host-bridge";
+import { StaticResolverWorkerPreparedAssetReader } from "./host-bridge";
 import { handleStaticResolverWorkerRequest } from "./worker-handler";
 import type {
 	StaticResolverWorkerGlobalPort,
@@ -50,14 +49,17 @@ class StaticResolverRouter implements StaticResolver {
 	}
 }
 
-const host = new StaticResolverWorkerRuntimeHost(workerPort);
-const assetService = new HostBackedAssetService({ host });
+const assetReader = new StaticResolverWorkerPreparedAssetReader(workerPort);
 const resolver = new StaticResolverRouter({
-	landblockEnvCellsResolver: new LandblockEnvCellsResolver({ assetService }),
-	outdoorStaticObjectsResolver: new OutdoorStaticObjectsResolver({
-		assetService,
+	landblockEnvCellsResolver: new LandblockEnvCellsResolver({
+		assetService: assetReader,
 	}),
-	terrainResolver: new TerrainStaticScopeResolver({ assetService }),
+	outdoorStaticObjectsResolver: new OutdoorStaticObjectsResolver({
+		assetService: assetReader,
+	}),
+	terrainResolver: new TerrainStaticScopeResolver({
+		assetService: assetReader,
+	}),
 });
 
 workerPort.addEventListener(

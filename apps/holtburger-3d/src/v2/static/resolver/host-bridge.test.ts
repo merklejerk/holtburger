@@ -9,7 +9,7 @@ import { createHostAssetKey } from "../../assets/keys";
 import type { RuntimeHost, RuntimeHostSnapshot } from "../../host/contracts";
 import {
 	createStaticResolverMainHostBridge,
-	StaticResolverWorkerRuntimeHost,
+	StaticResolverWorkerPreparedAssetReader,
 } from "./host-bridge";
 import type {
 	StaticResolverWorkerGlobalPort,
@@ -28,19 +28,23 @@ describe("V2 static resolver host bridge", () => {
 			channel.mainPort,
 			assetReader,
 		);
-		const workerHost = new StaticResolverWorkerRuntimeHost(channel.workerPort);
+		const workerAssetReader = new StaticResolverWorkerPreparedAssetReader(
+			channel.workerPort,
+		);
 
-		await expect(workerHost.lookupAsset(key, 7)).resolves.toEqual(asset);
+		await expect(workerAssetReader.requestPreparedAsset(key)).resolves.toEqual(
+			asset,
+		);
 		expect(assetReader.requests).toEqual([key]);
 		expect(channel.threadMessages).toEqual([
 			{
 				key,
 				kind: "prepared-asset-requested",
-				requestId: "resolver-host-1",
+				requestId: "resolver-asset-1",
 			},
 		]);
 
-		workerHost.dispose();
+		workerAssetReader.dispose();
 		bridge.dispose();
 	});
 
@@ -51,14 +55,15 @@ describe("V2 static resolver host bridge", () => {
 			channel.mainPort,
 			new FixturePreparedAssetReader(new Error("asset service said no")),
 		);
-		const workerHost = new StaticResolverWorkerRuntimeHost(channel.workerPort);
+		const workerAssetReader = new StaticResolverWorkerPreparedAssetReader(
+			channel.workerPort,
+		);
 
-		await expect(workerHost.lookupAsset(key, 1)).rejects.toThrow(
+		await expect(workerAssetReader.requestPreparedAsset(key)).rejects.toThrow(
 			"asset service said no",
 		);
-		expect(workerHost.createSnapshot().failure).toBe("asset service said no");
 
-		workerHost.dispose();
+		workerAssetReader.dispose();
 		bridge.dispose();
 	});
 
@@ -71,10 +76,12 @@ describe("V2 static resolver host bridge", () => {
 			channel.mainPort,
 			assetService,
 		);
-		const workerHost = new StaticResolverWorkerRuntimeHost(channel.workerPort);
+		const workerAssetReader = new StaticResolverWorkerPreparedAssetReader(
+			channel.workerPort,
+		);
 
-		const first = workerHost.lookupAsset(key, 1);
-		const second = workerHost.lookupAsset(key, 2);
+		const first = workerAssetReader.requestPreparedAsset(key);
+		const second = workerAssetReader.requestPreparedAsset(key);
 
 		expect(host.lookupCount).toBe(1);
 		host.resolveNext();
@@ -84,7 +91,7 @@ describe("V2 static resolver host bridge", () => {
 			expect.objectContaining({ key }),
 		]);
 
-		workerHost.dispose();
+		workerAssetReader.dispose();
 		bridge.dispose();
 	});
 
@@ -95,13 +102,15 @@ describe("V2 static resolver host bridge", () => {
 			channel.mainPort,
 			new DeferredPreparedAssetReader(),
 		);
-		const workerHost = new StaticResolverWorkerRuntimeHost(channel.workerPort);
-		const pending = workerHost.lookupAsset(key, 1);
+		const workerAssetReader = new StaticResolverWorkerPreparedAssetReader(
+			channel.workerPort,
+		);
+		const pending = workerAssetReader.requestPreparedAsset(key);
 
-		workerHost.dispose();
+		workerAssetReader.dispose();
 
 		await expect(pending).rejects.toThrow(
-			"Static resolver worker host was disposed.",
+			"Static resolver worker asset reader was disposed.",
 		);
 		bridge.dispose();
 	});

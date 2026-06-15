@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
 	AssetService,
 	AssetServiceSnapshot,
@@ -138,6 +138,36 @@ describe("V2 client runtime", () => {
 			"activeWork",
 		);
 		runtime.dispose();
+	});
+
+	it("prunes runtime-owned warm asset cache entries on the maintenance cadence", () => {
+		vi.useFakeTimers();
+		try {
+			const assetService = new DeferredAssetService();
+			const runtime = createClientRuntime({
+				assetMaintenanceIntervalMs: 25,
+				assetService,
+				diagnostics: silentDiagnostics,
+				host: new FakeRuntimeHost(),
+				renderer: new FakeRenderer(),
+				staticCoordinator: createImmediateStaticCoordinator({
+					baker: new DeferredStaticBaker(),
+					resolver: new DeferredStaticResolver(),
+				}),
+			});
+
+			vi.advanceTimersByTime(24);
+			expect(assetService.pruneCalls).toBe(0);
+
+			vi.advanceTimersByTime(1);
+			expect(assetService.pruneCalls).toBe(1);
+
+			runtime.dispose();
+			vi.advanceTimersByTime(25);
+			expect(assetService.pruneCalls).toBe(1);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("ingests env-cell source facts without static materialization or atlas batches", async () => {
@@ -479,6 +509,28 @@ describe("V2 client runtime", () => {
 		expect(snapshots.at(-1)?.staticMaterialization.pendingRevisions).toEqual([
 			1,
 		]);
+		expect(runtime.createDiagnosticsReport().domains).toContainEqual({
+			kind: "asset-service",
+			snapshot: {
+				committed: [],
+				failures: [],
+				pending: [
+					{
+						key: assetService.pendingKeys[0],
+						revision: 1,
+						waiterCount: 1,
+					},
+				],
+			},
+			summary: {
+				committed: 0,
+				failures: 0,
+				leased: 0,
+				pending: 1,
+				pendingWaiters: 1,
+				warmRetained: 0,
+			},
+		});
 
 		assetService.resolveNext(
 			createPreparedTextureAsset(assetService.pendingKeys[0] ?? failKey()),
@@ -895,6 +947,7 @@ class FakeRuntimeHost implements RuntimeHost {
 
 class DeferredAssetService implements AssetService {
 	readonly pendingKeys: HostAssetKey[] = [];
+	pruneCalls = 0;
 	readonly #pending: DeferredAssetRequest[] = [];
 
 	requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
@@ -927,7 +980,10 @@ class DeferredAssetService implements AssetService {
 		};
 	}
 
-	pruneExpiredWarmAssets(): void {}
+	pruneExpiredWarmAssets(): number {
+		this.pruneCalls += 1;
+		return 0;
+	}
 
 	createSnapshot(): AssetServiceSnapshot {
 		return {

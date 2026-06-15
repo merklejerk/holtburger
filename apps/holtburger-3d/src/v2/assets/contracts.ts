@@ -38,7 +38,7 @@ export interface PreparedAssetReader {
 
 export interface AssetService extends PreparedAssetReader {
 	acquirePreparedAssetLease(key: HostAssetKey): PreparedAssetLease;
-	pruneExpiredWarmAssets(nowMs?: number): void;
+	pruneExpiredWarmAssets(nowMs?: number): number;
 	createSnapshot(): AssetServiceSnapshot;
 }
 

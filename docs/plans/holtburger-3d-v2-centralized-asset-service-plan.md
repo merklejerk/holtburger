@@ -240,14 +240,19 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add runtime asset maintenance cadence or explicit prune hook.
-- [ ] Update runtime diagnostics/snapshot projections.
-- [ ] Delete obsolete worker-local cache tests or rewrite them against the main service bridge.
-- [ ] Search for stale wording such as `host-asset-lookup` where it now means asset service request.
+- [x] Add runtime asset maintenance cadence or explicit prune hook.
+- [x] Update runtime diagnostics/snapshot projections.
+- [x] Delete obsolete worker-local cache tests or rewrite them against the main service bridge.
+- [x] Search for stale wording such as `host-asset-lookup` where it now means asset service request.
 
 Decisions and course corrections:
 
-- None yet.
+- 2026-06-15: Added a runtime-owned asset maintenance interval in `ClientRuntime`. The cadence calls `AssetService.pruneExpiredWarmAssets()` and emits a new runtime snapshot only when the asset service reports pruned entries.
+- 2026-06-15: Changed `AssetService.pruneExpiredWarmAssets()` to return the number of pruned warm entries so runtime maintenance can report useful effects without weakening the production contract for test doubles.
+- 2026-06-15: Added an `asset-service` diagnostics domain report summarizing pending, pending waiters, committed, leased, warm-retained, and failed prepared assets while also carrying the centralized asset snapshot.
+- 2026-06-15: No obsolete worker-local cache tests remained. Existing resolver bridge tests already prove worker requests route through a shared main-thread `HostBackedAssetService`.
+- 2026-06-15: Updated the V2 design doc to move prepared-cache pruning ownership from the old scene asset streamer wording to runtime-owned asset-service maintenance.
+- 2026-06-15: Kept `static/resolver/host-bridge.*` naming as Phase 7 cleanup. The protocol no longer has `host-asset-lookup` messages, but the file/function names are still stale.
 
 ### Phase 7: Resteer And Cleanup
 

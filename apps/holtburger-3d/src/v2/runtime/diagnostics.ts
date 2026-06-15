@@ -3,6 +3,7 @@ import type {
 	StaticObjectTextureRolePageKind,
 	TerrainTextureRolePageKind,
 } from "../renderer/types";
+import type { AssetServiceSnapshot } from "../assets/contracts";
 import type {
 	StaticDomain,
 	StaticMaterialCoverageFilteringMode,
@@ -46,10 +47,26 @@ interface RuntimeDiagnosticsFailure {
 }
 
 type RuntimeDiagnosticsDomainReport =
+	| AssetServiceDiagnosticsReport
 	| RendererDiagnosticsReport
 	| StaticCoordinatorDiagnosticsReport
 	| TerrainTextureDiagnosticsReport
 	| TextureAtlasDiagnosticsReport;
+
+export interface AssetServiceDiagnosticsReport {
+	readonly kind: "asset-service";
+	readonly summary: AssetServiceDiagnosticsSummary;
+	readonly snapshot: AssetServiceSnapshot;
+}
+
+interface AssetServiceDiagnosticsSummary {
+	readonly pending: number;
+	readonly pendingWaiters: number;
+	readonly committed: number;
+	readonly leased: number;
+	readonly warmRetained: number;
+	readonly failures: number;
+}
 
 interface RendererDiagnosticsReport {
 	readonly kind: "renderer";
@@ -263,6 +280,28 @@ interface TerrainRenderableFallbackWarning {
 
 export function createConsoleRuntimeDiagnostics(): RuntimeDiagnostics {
 	return new ConsoleRuntimeDiagnostics();
+}
+
+export function createAssetServiceDiagnosticsReport(
+	snapshot: AssetServiceSnapshot,
+): AssetServiceDiagnosticsReport {
+	return {
+		kind: "asset-service",
+		snapshot,
+		summary: {
+			committed: snapshot.committed.length,
+			failures: snapshot.failures.length,
+			leased: snapshot.committed.filter((entry) => entry.leaseCount > 0).length,
+			pending: snapshot.pending.length,
+			pendingWaiters: snapshot.pending.reduce(
+				(total, entry) => total + entry.waiterCount,
+				0,
+			),
+			warmRetained: snapshot.committed.filter(
+				(entry) => entry.warmRetainedUntilMs !== null,
+			).length,
+		},
+	};
 }
 
 class ConsoleRuntimeDiagnostics implements RuntimeDiagnostics {

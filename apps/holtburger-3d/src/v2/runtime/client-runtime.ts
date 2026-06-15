@@ -8,6 +8,7 @@ import { TextureManager } from "../textures/texture-manager";
 import type { TexturePacker } from "../textures/packing/packer";
 import type { TextureFilteringMode } from "../textures/sampling-policy";
 import {
+	createAssetServiceDiagnosticsReport,
 	createConsoleRuntimeDiagnostics,
 	type RuntimeDiagnostics,
 	type RuntimeDiagnosticsReport,
@@ -56,6 +57,7 @@ import {
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
 const BLENDED_STATIC_AUDIT_WARNING_BUCKET_LIMIT = 8;
+const DEFAULT_ASSET_MAINTENANCE_INTERVAL_MS = 5_000;
 
 export type ManualStaticDomain =
 	| "terrain"
@@ -308,6 +310,7 @@ export interface ClientRuntimeOptions {
 	readonly renderer: Renderer;
 	readonly host: RuntimeHost;
 	readonly assetService?: AssetService;
+	readonly assetMaintenanceIntervalMs?: number;
 	readonly diagnostics?: RuntimeDiagnostics;
 	readonly staticCoordinator?: StaticCoordinator;
 	readonly texturePacker?: TexturePacker;
@@ -331,6 +334,7 @@ export function createClientRuntime(
 		assetService,
 		staticCoordinator,
 		options.texturePacker,
+		options.assetMaintenanceIntervalMs ?? DEFAULT_ASSET_MAINTENANCE_INTERVAL_MS,
 		options.diagnostics ?? createConsoleRuntimeDiagnostics(),
 	);
 }
@@ -348,6 +352,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #unsubscribeStaticCoordinator: () => void;
 	readonly #unsubscribeStaticCommits: () => void;
 	readonly #unsubscribeStaticSourcePayloads: () => void;
+	readonly #assetMaintenanceIntervalId: ReturnType<
+		typeof globalThis.setInterval
+	>;
 	#lastRendererSnapshot: RendererSnapshot;
 	#lastStaticSnapshot: StaticCoordinatorSnapshot;
 	#sceneInterest: RuntimeSceneInterest = { kind: "none" };
@@ -372,8 +379,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 		assetService: AssetService,
 		staticCoordinator: StaticCoordinator,
 		texturePacker: TexturePacker | undefined,
+		assetMaintenanceIntervalMs: number,
 		diagnostics: RuntimeDiagnostics,
 	) {
+		assertPositiveFiniteIntervalMs(
+			assetMaintenanceIntervalMs,
+			"asset maintenance interval",
+		);
 		this.#renderer = renderer;
 		this.#host = host;
 		this.#assetService = assetService;
@@ -425,6 +437,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 				this.#refreshStaticDebugOverlay();
 				this.#emit();
 			});
+		this.#assetMaintenanceIntervalId = globalThis.setInterval(() => {
+			this.#pruneExpiredWarmAssets();
+		}, assetMaintenanceIntervalMs);
+		unrefTimerIfAvailable(this.#assetMaintenanceIntervalId);
 	}
 
 	updateSceneInterest(interest: RuntimeSceneInterest): void {
@@ -509,6 +525,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 		return {
 			domains: [
+				createAssetServiceDiagnosticsReport(snapshot.assets),
 				{
 					kind: "renderer",
 					summary: this.#lastRendererSnapshot,
@@ -558,6 +575,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#unsubscribeStaticCoordinator();
 		this.#unsubscribeStaticCommits();
 		this.#unsubscribeStaticSourcePayloads();
+		globalThis.clearInterval(this.#assetMaintenanceIntervalId);
 		this.#renderer.setDebugOverlayPrimitives([]);
 		this.#staticCoordinator.dispose();
 		this.#textureManager.dispose();
@@ -618,6 +636,17 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 		for (const listener of this.#listeners) {
 			listener(snapshot);
+		}
+	}
+
+	#pruneExpiredWarmAssets(): void {
+		if (this.#disposed) {
+			return;
+		}
+
+		const pruned = this.#assetService.pruneExpiredWarmAssets();
+		if (typeof pruned === "number" && pruned > 0) {
+			this.#emit();
 		}
 	}
 
@@ -1398,6 +1427,33 @@ function createSceneInterestSummary(
 		`0x${formatHex32(interest.anchorLandblockId)}`,
 		interest.domains.join(","),
 	].join("|");
+}
+
+function assertPositiveFiniteIntervalMs(value: number, label: string): void {
+	if (!Number.isFinite(value) || value <= 0) {
+		throw new Error(`${label} must be a positive finite number.`);
+	}
+}
+
+interface UnrefableTimer {
+	unref(): void;
+}
+
+function unrefTimerIfAvailable(timer: unknown): void {
+	if (!isUnrefableTimer(timer)) {
+		return;
+	}
+
+	timer.unref();
+}
+
+function isUnrefableTimer(timer: unknown): timer is UnrefableTimer {
+	return (
+		typeof timer === "object" &&
+		timer !== null &&
+		"unref" in timer &&
+		typeof (timer as { readonly unref?: unknown }).unref === "function"
+	);
 }
 
 function createStaticCoordinatorDiagnosticsReport(

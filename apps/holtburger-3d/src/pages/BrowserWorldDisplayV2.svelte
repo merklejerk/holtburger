@@ -37,6 +37,7 @@
 		type StaticSceneSelectionKey,
 	} from "../v2/runtime/static-scene-query";
 	import type { TextureFilteringMode } from "../v2/textures/sampling-policy";
+	import DiagnosticsModal from "../v2/ui/DiagnosticsModal.svelte";
 	import PerformanceOverlay from "../v2/ui/PerformanceOverlay.svelte";
 	import {
 		PerformanceMetricsTracker,
@@ -78,6 +79,7 @@
 	let snapshot = $state<RuntimeSnapshot | null>(null);
 	let cameraState = $state<V2FreeCameraState>(createV2FreeCameraState());
 	let diagnosticsReportText = $state<string | null>(null);
+	let selectedStaticDiagnosticsReportText = $state<string | null>(null);
 	let selectedStaticSelectionKey = $state<StaticSceneSelectionKey | null>(null);
 	let selectedStaticPickDistance = $state<number | null>(null);
 	let pickPointerCandidate: {
@@ -87,9 +89,6 @@
 		readonly context: V2ParsedLocationInput | null;
 		moved: boolean;
 	} | null = null;
-	let diagnosticsReportCopyStatus = $state<"copied" | "failed" | "ready">(
-		"ready",
-	);
 	let selectedTextureFilteringMode =
 		$state<TextureFilteringMode>("anisotropic-4x");
 	let performanceMetrics = $state<PerformanceMetricsSnapshot>({
@@ -324,12 +323,31 @@
 			null,
 			2,
 		);
-		diagnosticsReportCopyStatus = "ready";
 	}
 
 	function closeDiagnosticsReport(): void {
 		diagnosticsReportText = null;
-		diagnosticsReportCopyStatus = "ready";
+	}
+
+	function closeSelectedStaticDiagnosticsReport(): void {
+		selectedStaticDiagnosticsReportText = null;
+	}
+
+	function openSelectedStaticDiagnosticsReport(): void {
+		if (!runtime || !selectedStaticSelectionKey) {
+			return;
+		}
+
+		selectedStaticDiagnosticsReportText = JSON.stringify(
+			runtime.createStaticSelectionDiagnosticsReport(
+				selectedStaticSelectionKey,
+				{
+					pickDistance: selectedStaticPickDistance,
+				},
+			),
+			null,
+			2,
+		);
 	}
 
 	function setTextureFilteringMode(event: Event): void {
@@ -337,38 +355,6 @@
 			.value as TextureFilteringMode;
 		selectedTextureFilteringMode = nextMode;
 		runtime?.setTextureFilteringMode(nextMode);
-	}
-
-	async function copyDiagnosticsReport(): Promise<void> {
-		if (diagnosticsReportText === null) {
-			return;
-		}
-
-		try {
-			if (navigator.clipboard) {
-				await navigator.clipboard.writeText(diagnosticsReportText);
-			} else {
-				copyTextWithSelectionFallback(diagnosticsReportText);
-			}
-			diagnosticsReportCopyStatus = "copied";
-		} catch {
-			diagnosticsReportCopyStatus = "failed";
-		}
-	}
-
-	function copyTextWithSelectionFallback(text: string): void {
-		const textarea = document.createElement("textarea");
-		textarea.value = text;
-		textarea.style.position = "fixed";
-		textarea.style.left = "-9999px";
-		textarea.setAttribute("readonly", "");
-		document.body.appendChild(textarea);
-		textarea.select();
-		const copied = document.execCommand("copy");
-		textarea.remove();
-		if (!copied) {
-			throw new Error("Clipboard fallback copy failed.");
-		}
 	}
 
 	function scheduleStaticInterestRefresh(): void {
@@ -463,7 +449,7 @@
 		return (
 			event.target instanceof Element &&
 			(event.target.closest(".browser-v2__panel") !== null ||
-				event.target.closest(".browser-v2__modal-backdrop") !== null)
+				event.target.closest("[data-browser-v2-modal]") !== null)
 		);
 	}
 
@@ -620,12 +606,14 @@
 		);
 		selectedStaticSelectionKey = hit?.selectionKey ?? null;
 		selectedStaticPickDistance = hit?.distance ?? null;
+		selectedStaticDiagnosticsReportText = null;
 		runtime.setStaticDebugSelection(selectedStaticSelectionKey);
 	}
 
 	function clearStaticDebugSelection(): void {
 		selectedStaticSelectionKey = null;
 		selectedStaticPickDistance = null;
+		selectedStaticDiagnosticsReportText = null;
 		runtime?.setStaticDebugSelection(null);
 	}
 
@@ -1035,13 +1023,22 @@
 								{/if}
 							</dd>
 						</div>
-						<div>
+						<div class="browser-v2__status-row--action">
 							<dt>Selected static</dt>
 							<dd>
-								{formatStaticPickSummary(
-									selectedStaticSelectionKey,
-									selectedStaticPickDistance,
-								)}
+								<span>
+									{formatStaticPickSummary(
+										selectedStaticSelectionKey,
+										selectedStaticPickDistance,
+									)}
+								</span>
+								<button
+									disabled={!selectedStaticSelectionKey}
+									type="button"
+									onclick={openSelectedStaticDiagnosticsReport}
+								>
+									Inspect
+								</button>
 							</dd>
 						</div>
 						<div>
@@ -1151,36 +1148,23 @@
 	</aside>
 
 	{#if diagnosticsReportText !== null}
-		<div class="browser-v2__modal-backdrop">
-			<div
-				class="browser-v2__diagnostics-modal"
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby="browser-v2-diagnostics-title"
-			>
-				<div class="browser-v2__diagnostics-header">
-					<div>
-						<p>On-demand diagnostics</p>
-						<h2 id="browser-v2-diagnostics-title">Runtime Report</h2>
-					</div>
-					<button type="button" onclick={closeDiagnosticsReport}>Close</button>
-				</div>
-				<textarea readonly spellcheck="false" value={diagnosticsReportText}
-				></textarea>
-				<div class="browser-v2__diagnostics-actions">
-					<span>
-						{diagnosticsReportCopyStatus === "copied"
-							? "Copied."
-							: diagnosticsReportCopyStatus === "failed"
-								? "Copy failed."
-								: "Ready to copy."}
-					</span>
-					<button type="button" onclick={() => void copyDiagnosticsReport()}>
-						Copy
-					</button>
-				</div>
-			</div>
-		</div>
+		<DiagnosticsModal
+			eyebrow="On-demand diagnostics"
+			text={diagnosticsReportText}
+			title="Runtime Report"
+			titleId="browser-v2-diagnostics-title"
+			onClose={closeDiagnosticsReport}
+		/>
+	{/if}
+
+	{#if selectedStaticDiagnosticsReportText !== null}
+		<DiagnosticsModal
+			eyebrow="Selected item diagnostics"
+			text={selectedStaticDiagnosticsReportText}
+			title="Static Selection"
+			titleId="browser-v2-selection-diagnostics-title"
+			onClose={closeSelectedStaticDiagnosticsReport}
+		/>
 	{/if}
 </section>
 
@@ -1476,6 +1460,19 @@
 		overflow-wrap: anywhere;
 	}
 
+	.browser-v2__status-row--action dd {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.browser-v2__status-row--action button {
+		min-height: 24px;
+		padding: 0 7px;
+		font-size: 11px;
+	}
+
 	.browser-v2__error {
 		margin: 0 0 12px;
 		padding: 7px;
@@ -1483,90 +1480,6 @@
 		border-radius: 4px;
 		background: rgba(61, 10, 10, 0.62);
 		color: #ffd2d2;
-		font-size: 12px;
-	}
-
-	.browser-v2__modal-backdrop {
-		position: absolute;
-		inset: 0;
-		z-index: 4;
-		display: grid;
-		place-items: center;
-		padding: 16px;
-		background: rgba(0, 0, 0, 0.46);
-		pointer-events: auto;
-	}
-
-	.browser-v2__diagnostics-modal {
-		display: grid;
-		grid-template-rows: auto minmax(240px, 1fr) auto;
-		gap: 10px;
-		width: min(920px, calc(100vw - 32px));
-		height: min(680px, calc(100vh - 32px));
-		box-sizing: border-box;
-		padding: 12px;
-		border: 1px solid rgba(91, 255, 187, 0.52);
-		border-radius: 6px;
-		background:
-			linear-gradient(180deg, rgba(9, 27, 23, 0.98), rgba(4, 12, 11, 0.97)),
-			rgba(4, 12, 11, 0.97);
-		box-shadow:
-			0 0 0 1px rgba(0, 0, 0, 0.8),
-			0 24px 70px rgba(0, 0, 0, 0.58),
-			0 0 42px rgba(57, 255, 170, 0.13);
-		color: #d9ffe8;
-	}
-
-	.browser-v2__diagnostics-header,
-	.browser-v2__diagnostics-actions {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 10px;
-		min-width: 0;
-	}
-
-	.browser-v2__diagnostics-header p {
-		margin: 0 0 2px;
-		color: #75ffd1;
-		font-size: 10px;
-		line-height: 1.2;
-		text-transform: uppercase;
-		letter-spacing: 0;
-	}
-
-	.browser-v2__diagnostics-header h2 {
-		margin: 0;
-		color: #f1fff6;
-		font-size: 16px;
-		line-height: 1.2;
-		letter-spacing: 0;
-	}
-
-	.browser-v2__diagnostics-modal textarea {
-		width: 100%;
-		min-width: 0;
-		min-height: 0;
-		box-sizing: border-box;
-		resize: none;
-		padding: 10px;
-		border: 1px solid rgba(91, 255, 187, 0.25);
-		border-radius: 4px;
-		background: rgba(1, 9, 8, 0.88);
-		color: #f1fff6;
-		font:
-			11px/1.45 "IBM Plex Mono",
-			"SFMono-Regular",
-			Consolas,
-			"Liberation Mono",
-			monospace;
-		outline: none;
-		white-space: pre;
-	}
-
-	.browser-v2__diagnostics-actions span {
-		min-width: 0;
-		color: #fff7cf;
 		font-size: 12px;
 	}
 
@@ -1595,13 +1508,8 @@
 			grid-template-columns: 1fr;
 		}
 
-		.browser-v2__modal-backdrop {
-			padding: 10px;
-		}
-
-		.browser-v2__diagnostics-modal {
-			width: calc(100vw - 20px);
-			height: calc(100vh - 20px);
+		.browser-v2__status-row--action dd {
+			grid-template-columns: 1fr;
 		}
 	}
 </style>

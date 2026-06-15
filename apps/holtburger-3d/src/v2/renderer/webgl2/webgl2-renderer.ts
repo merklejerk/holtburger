@@ -30,6 +30,11 @@ import {
 } from "../../textures/sampling-policy";
 import { createOutdoorLandblockRootTranslation } from "../../static/placement";
 import {
+	Webgl2StateCache,
+	type Webgl2BlendState,
+	type Webgl2DepthState,
+} from "../../../lib/webgl2/webgl2-state-cache";
+import {
 	createStaticObjectPreparedDrawPayloadState,
 	markStaticObjectPreparedDrawPayloadDirty,
 	prepareStaticObjectDrawPayloadState,
@@ -630,6 +635,7 @@ class Webgl2Renderer implements Renderer {
 	readonly #debugOverlayProgram: DebugOverlayProgram;
 	readonly #debugOverlayVertexArray: WebGLVertexArrayObject;
 	readonly #debugOverlayVertexBuffer: WebGLBuffer;
+	readonly #stateCache: Webgl2StateCache;
 	#animationFrameId: number | null = null;
 	#disposed = false;
 	#frameCount = 0;
@@ -646,6 +652,7 @@ class Webgl2Renderer implements Renderer {
 		this.#terrainProgram = createTerrainGeometryProgram(gl);
 		this.#staticObjectProgram = createStaticObjectGeometryProgram(gl);
 		this.#debugOverlayProgram = createDebugOverlayProgram(gl);
+		this.#stateCache = new Webgl2StateCache(gl);
 		const vertexArray = gl.createVertexArray();
 		const vertexBuffer = gl.createBuffer();
 		if (!vertexArray || !vertexBuffer) {
@@ -691,6 +698,9 @@ class Webgl2Renderer implements Renderer {
 				);
 			}
 		}
+		if (delta.addedDrawUnits.length > 0) {
+			this.#stateCache.invalidate();
+		}
 
 		this.#emit();
 	}
@@ -714,6 +724,7 @@ class Webgl2Renderer implements Renderer {
 		gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
 		gl.bindVertexArray(null);
 		gl.bindBuffer(gl.ARRAY_BUFFER, null);
+		this.#stateCache.invalidate();
 		this.#debugOverlayPrimitiveCount = primitives.length;
 		this.#debugOverlayVertexCount =
 			vertices.length / DEBUG_OVERLAY_FLOATS_PER_VERTEX;
@@ -743,6 +754,9 @@ class Webgl2Renderer implements Renderer {
 			shouldMarkAllStaticPayloadsDirty = true;
 			shouldMarkAllTerrainPayloadsDirty = true;
 		}
+		if (update.placements.length > 0) {
+			this.#stateCache.invalidate();
+		}
 
 		for (const binding of update.drawUnitBindings) {
 			const bindings =
@@ -766,12 +780,17 @@ class Webgl2Renderer implements Renderer {
 
 	applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void {
 		const gl = this.#gl;
+		let didApplyPolicy = false;
 		for (const policy of update.policies) {
 			const texture = this.#textures.get(policy.textureRefId);
 			if (!texture) {
 				continue;
 			}
 			applyTextureSamplerPolicy(gl, texture, policy);
+			didApplyPolicy = true;
+		}
+		if (didApplyPolicy) {
+			this.#stateCache.invalidate();
 		}
 	}
 
@@ -849,8 +868,13 @@ class Webgl2Renderer implements Renderer {
 		const frameTime = this.#frameState.timeSeconds || timeSeconds;
 		const pulse = 0.5 + Math.sin(frameTime * 0.7) * 0.5;
 
-		gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
-		gl.enable(gl.DEPTH_TEST);
+		this.#stateCache.setViewport({
+			height: gl.drawingBufferHeight,
+			width: gl.drawingBufferWidth,
+			x: 0,
+			y: 0,
+		});
+		this.#stateCache.setDepthState(createDepthState(gl, true, true));
 		gl.clearColor(0.025 + pulse * 0.015, 0.045, 0.065 + pulse * 0.025, 1);
 		gl.clearDepth(1);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -872,7 +896,7 @@ class Webgl2Renderer implements Renderer {
 			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight),
 		);
 
-		gl.useProgram(this.#terrainProgram.program);
+		this.#stateCache.useProgram(this.#terrainProgram.program);
 		gl.uniformMatrix4fv(
 			this.#terrainProgram.uniforms.uModelViewProjection,
 			false,
@@ -901,6 +925,7 @@ class Webgl2Renderer implements Renderer {
 			if (layeredPayload) {
 				uploadTerrainLayeredUniforms(
 					gl,
+					this.#stateCache,
 					this.#terrainProgram,
 					layeredPayload,
 					this.#frameState,
@@ -909,8 +934,7 @@ class Webgl2Renderer implements Renderer {
 			if (resource.materialFamily === "terrain-layered" && !useLayered) {
 				this.#warnTerrainLayeredFallback(resource);
 			}
-			gl.activeTexture(gl.TEXTURE0);
-			gl.bindTexture(gl.TEXTURE_2D, useTexture ? texture : null);
+			this.#stateCache.bindTexture2D(0, useTexture ? texture : null);
 			gl.uniform1i(this.#terrainProgram.uniforms.uTexture, 0);
 			gl.uniform4f(
 				this.#terrainProgram.uniforms.uTextureRect,
@@ -936,12 +960,12 @@ class Webgl2Renderer implements Renderer {
 				this.#terrainProgram.uniforms.uPlacementTranslation,
 				...this.#createResourceTranslation(resource),
 			);
-			gl.bindVertexArray(resource.vertexArray);
+			this.#stateCache.bindVertexArray(resource.vertexArray);
 			gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
 		}
 
-		gl.bindVertexArray(null);
-		gl.bindTexture(gl.TEXTURE_2D, null);
+		this.#stateCache.bindVertexArray(null);
+		this.#stateCache.bindTexture2D(0, null);
 	}
 
 	#drawStaticObjects(): void {
@@ -955,14 +979,14 @@ class Webgl2Renderer implements Renderer {
 			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight),
 		);
 
-		gl.useProgram(this.#staticObjectProgram.program);
+		this.#stateCache.useProgram(this.#staticObjectProgram.program);
 		gl.uniformMatrix4fv(
 			this.#staticObjectProgram.uniforms.uModelViewProjection,
 			false,
 			mvp,
 		);
 
-		applyStaticObjectDepthWritingState(gl);
+		applyStaticObjectDepthWritingState(gl, this.#stateCache);
 		for (const resource of this.#staticObjectResources.values()) {
 			if (isTransparentStaticObjectResource(resource)) {
 				continue;
@@ -988,13 +1012,12 @@ class Webgl2Renderer implements Renderer {
 				),
 			);
 		for (const resource of transparentResources) {
-			applyStaticObjectRenderState(gl, resource.renderState);
+			applyStaticObjectRenderState(gl, this.#stateCache, resource.renderState);
 			this.#drawStaticObjectResource(resource);
 		}
 
-		gl.bindVertexArray(null);
-		gl.bindTexture(gl.TEXTURE_2D, null);
-		restoreStaticObjectRenderState(gl);
+		this.#stateCache.bindVertexArray(null);
+		restoreStaticObjectRenderState(gl, this.#stateCache);
 	}
 
 	#drawDebugOverlay(): void {
@@ -1008,20 +1031,19 @@ class Webgl2Renderer implements Renderer {
 			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight),
 		);
 
-		gl.useProgram(this.#debugOverlayProgram.program);
+		this.#stateCache.useProgram(this.#debugOverlayProgram.program);
 		gl.uniformMatrix4fv(
 			this.#debugOverlayProgram.uniforms.uModelViewProjection,
 			false,
 			mvp,
 		);
-		gl.disable(gl.DEPTH_TEST);
-		gl.depthMask(false);
-		applyDebugOverlayInvertBlendState(gl);
+		this.#stateCache.setDepthState(createDepthState(gl, false, false));
+		applyDebugOverlayInvertBlendState(gl, this.#stateCache);
 		gl.lineWidth(1);
-		gl.bindVertexArray(this.#debugOverlayVertexArray);
+		this.#stateCache.bindVertexArray(this.#debugOverlayVertexArray);
 		gl.drawArrays(gl.LINES, 0, this.#debugOverlayVertexCount);
-		gl.bindVertexArray(null);
-		restoreDebugOverlayRenderState(gl);
+		this.#stateCache.bindVertexArray(null);
+		restoreDebugOverlayRenderState(gl, this.#stateCache);
 	}
 
 	#drawStaticObjectResource(resource: StaticObjectGeometryResource): void {
@@ -1031,6 +1053,7 @@ class Webgl2Renderer implements Renderer {
 
 		uploadStaticObjectRolePageBindings(
 			gl,
+			this.#stateCache,
 			this.#staticObjectProgram.uniforms.uStaticBaseColorTextures,
 			this.#staticObjectProgram.uniforms.uStaticBaseColorSizes,
 			rolePages.baseColor,
@@ -1038,6 +1061,7 @@ class Webgl2Renderer implements Renderer {
 		);
 		uploadStaticObjectRolePageBindings(
 			gl,
+			this.#stateCache,
 			this.#staticObjectProgram.uniforms.uStaticIndexTextures,
 			null,
 			rolePages.index,
@@ -1045,6 +1069,7 @@ class Webgl2Renderer implements Renderer {
 		);
 		uploadStaticObjectRolePageBindings(
 			gl,
+			this.#stateCache,
 			this.#staticObjectProgram.uniforms.uStaticPaletteTextures,
 			this.#staticObjectProgram.uniforms.uStaticPaletteSizes,
 			rolePages.palette,
@@ -1052,6 +1077,7 @@ class Webgl2Renderer implements Renderer {
 		);
 		uploadStaticObjectRolePageBindings(
 			gl,
+			this.#stateCache,
 			this.#staticObjectProgram.uniforms.uStaticDetailTextures,
 			this.#staticObjectProgram.uniforms.uStaticDetailSizes,
 			rolePages.detail,
@@ -1067,7 +1093,7 @@ class Webgl2Renderer implements Renderer {
 			this.#staticObjectProgram.uniforms.uPlacementTranslation,
 			...this.#createResourceTranslation(resource),
 		);
-		gl.bindVertexArray(resource.vertexArray);
+		this.#stateCache.bindVertexArray(resource.vertexArray);
 		gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
 	}
 
@@ -1234,6 +1260,7 @@ class Webgl2Renderer implements Renderer {
 		);
 		gl.bindVertexArray(null);
 		gl.bindBuffer(gl.ARRAY_BUFFER, null);
+		this.#stateCache.invalidate();
 	}
 }
 
@@ -1852,6 +1879,7 @@ function createStaticObjectGeometryResource(
 
 function uploadStaticObjectRolePageBindings(
 	gl: WebGL2RenderingContext,
+	stateCache: Webgl2StateCache,
 	samplerUniforms: readonly WebGLUniformLocation[],
 	sizeUniform: WebGLUniformLocation | null,
 	pages: StaticObjectPreparedRolePageBindings,
@@ -1859,8 +1887,7 @@ function uploadStaticObjectRolePageBindings(
 ): void {
 	for (const [slot, uniform] of samplerUniforms.entries()) {
 		const textureUnit = textureUnitBase + slot;
-		gl.activeTexture(gl.TEXTURE0 + textureUnit);
-		gl.bindTexture(gl.TEXTURE_2D, pages.textures[slot] ?? null);
+		stateCache.bindTexture2D(textureUnit, pages.textures[slot] ?? null);
 		gl.uniform1i(uniform, textureUnit);
 	}
 	if (sizeUniform) {
@@ -2009,20 +2036,22 @@ function isTransparentStaticObjectResource(
 	);
 }
 
-function applyStaticObjectDepthWritingState(gl: WebGL2RenderingContext): void {
-	gl.enable(gl.DEPTH_TEST);
-	gl.depthMask(true);
-	gl.disable(gl.BLEND);
+function applyStaticObjectDepthWritingState(
+	gl: WebGL2RenderingContext,
+	stateCache: Webgl2StateCache,
+): void {
+	stateCache.setDepthState(createDepthState(gl, true, true));
+	stateCache.setBlendState(createBlendState(gl, false, gl.ONE, gl.ZERO));
 }
 
 function applyStaticObjectRenderState(
 	gl: WebGL2RenderingContext,
+	stateCache: Webgl2StateCache,
 	renderState: StaticObjectRenderState,
 ): void {
-	gl.enable(gl.DEPTH_TEST);
-	gl.depthMask(renderState.depthWrite);
+	stateCache.setDepthState(createDepthState(gl, true, renderState.depthWrite));
 	if (!renderState.blend.enabled) {
-		gl.disable(gl.BLEND);
+		stateCache.setBlendState(createBlendState(gl, false, gl.ONE, gl.ZERO));
 		return;
 	}
 	if (!renderState.blend.srcFactor || !renderState.blend.dstFactor) {
@@ -2030,32 +2059,74 @@ function applyStaticObjectRenderState(
 			`Static object blend mode ${renderState.blend.mode} is enabled without concrete blend factors.`,
 		);
 	}
-	gl.enable(gl.BLEND);
-	gl.blendFunc(
-		resolveStaticObjectBlendFactor(gl, renderState.blend.srcFactor),
-		resolveStaticObjectBlendFactor(gl, renderState.blend.dstFactor),
+	stateCache.setBlendState(
+		createBlendState(
+			gl,
+			true,
+			resolveStaticObjectBlendFactor(gl, renderState.blend.srcFactor),
+			resolveStaticObjectBlendFactor(gl, renderState.blend.dstFactor),
+		),
 	);
 }
 
-function restoreStaticObjectRenderState(gl: WebGL2RenderingContext): void {
-	gl.depthMask(true);
-	gl.disable(gl.BLEND);
-	gl.blendEquation(gl.FUNC_ADD);
-	gl.blendFunc(gl.ONE, gl.ZERO);
+function restoreStaticObjectRenderState(
+	gl: WebGL2RenderingContext,
+	stateCache: Webgl2StateCache,
+): void {
+	stateCache.setDepthState(createDepthState(gl, true, true));
+	stateCache.setBlendState(createBlendState(gl, false, gl.ONE, gl.ZERO));
 }
 
-function applyDebugOverlayInvertBlendState(gl: WebGL2RenderingContext): void {
-	gl.enable(gl.BLEND);
-	gl.blendEquationSeparate(gl.FUNC_SUBTRACT, gl.FUNC_ADD);
-	gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ZERO, gl.ONE);
+function applyDebugOverlayInvertBlendState(
+	gl: WebGL2RenderingContext,
+	stateCache: Webgl2StateCache,
+): void {
+	stateCache.setBlendState({
+		dstAlpha: gl.ONE,
+		dstRgb: gl.ONE,
+		enabled: true,
+		equationAlpha: gl.FUNC_ADD,
+		equationRgb: gl.FUNC_SUBTRACT,
+		srcAlpha: gl.ZERO,
+		srcRgb: gl.ONE,
+	});
 }
 
-function restoreDebugOverlayRenderState(gl: WebGL2RenderingContext): void {
-	gl.enable(gl.DEPTH_TEST);
-	gl.depthMask(true);
-	gl.disable(gl.BLEND);
-	gl.blendEquation(gl.FUNC_ADD);
-	gl.blendFunc(gl.ONE, gl.ZERO);
+function restoreDebugOverlayRenderState(
+	gl: WebGL2RenderingContext,
+	stateCache: Webgl2StateCache,
+): void {
+	stateCache.setDepthState(createDepthState(gl, true, true));
+	stateCache.setBlendState(createBlendState(gl, false, gl.ONE, gl.ZERO));
+}
+
+function createDepthState(
+	gl: WebGL2RenderingContext,
+	enabled: boolean,
+	write: boolean,
+): Webgl2DepthState {
+	return {
+		enabled,
+		func: gl.LESS,
+		write,
+	};
+}
+
+function createBlendState(
+	gl: WebGL2RenderingContext,
+	enabled: boolean,
+	src: GLenum,
+	dst: GLenum,
+): Webgl2BlendState {
+	return {
+		dstAlpha: dst,
+		dstRgb: dst,
+		enabled,
+		equationAlpha: gl.FUNC_ADD,
+		equationRgb: gl.FUNC_ADD,
+		srcAlpha: src,
+		srcRgb: src,
+	};
 }
 
 function createDebugOverlayVertices(
@@ -2126,12 +2197,14 @@ function appendDebugOverlayVertex(
 
 function uploadTerrainLayeredUniforms(
 	gl: WebGL2RenderingContext,
+	stateCache: Webgl2StateCache,
 	program: TerrainGeometryProgram,
 	payload: TerrainPreparedLayeredPayload,
 	frameState: FrameState,
 ): void {
 	uploadTerrainRolePageBindings(
 		gl,
+		stateCache,
 		program.uniforms.uColorAtlasTextures,
 		program.uniforms.uColorAtlasSizes,
 		payload.colorPages,
@@ -2139,13 +2212,13 @@ function uploadTerrainLayeredUniforms(
 	);
 	uploadTerrainRolePageBindings(
 		gl,
+		stateCache,
 		program.uniforms.uMaskAtlasTextures,
 		program.uniforms.uMaskAtlasSizes,
 		payload.maskPages,
 		TERRAIN_MASK_TEXTURE_UNIT_BASE,
 	);
-	gl.activeTexture(gl.TEXTURE0 + TERRAIN_DETAIL_TEXTURE_UNIT);
-	gl.bindTexture(gl.TEXTURE_2D, payload.detail.texture);
+	stateCache.bindTexture2D(TERRAIN_DETAIL_TEXTURE_UNIT, payload.detail.texture);
 	gl.uniform1i(
 		program.uniforms.uDetailAtlasTexture,
 		TERRAIN_DETAIL_TEXTURE_UNIT,
@@ -2164,6 +2237,7 @@ function uploadTerrainLayeredUniforms(
 
 function uploadTerrainRolePageBindings(
 	gl: WebGL2RenderingContext,
+	stateCache: Webgl2StateCache,
 	samplerUniforms: readonly WebGLUniformLocation[],
 	sizeUniform: WebGLUniformLocation,
 	pages: TerrainPreparedRolePageBindings,
@@ -2171,8 +2245,7 @@ function uploadTerrainRolePageBindings(
 ): void {
 	for (const [slot, uniform] of samplerUniforms.entries()) {
 		const textureUnit = textureUnitBase + slot;
-		gl.activeTexture(gl.TEXTURE0 + textureUnit);
-		gl.bindTexture(gl.TEXTURE_2D, pages.textures[slot] ?? null);
+		stateCache.bindTexture2D(textureUnit, pages.textures[slot] ?? null);
 		gl.uniform1i(uniform, textureUnit);
 	}
 	gl.uniform2fv(sizeUniform, pages.sizes);

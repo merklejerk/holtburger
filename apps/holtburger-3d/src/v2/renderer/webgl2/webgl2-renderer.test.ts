@@ -6,7 +6,7 @@ import {
 	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
 } from "../types";
 import {
-	compareStaticObjectTransparentDrawOrder,
+	compareStaticObjectTransparentDrawEntries,
 	DEBUG_OVERLAY_FRAGMENT_SHADER,
 	DEBUG_OVERLAY_VERTEX_SHADER,
 	resolveStaticObjectBlendFactor,
@@ -121,19 +121,18 @@ describe("V2 WebGL2 static object detail shader contract", () => {
 });
 
 describe("V2 WebGL2 static object transparent pass helpers", () => {
-	it("sorts transparent object/part resources back-to-front with a stable id tie-break", () => {
-		const cameraPosition = [0, 0, 0] as const;
+	it("sorts precomputed transparent entries back-to-front with a stable id tie-break", () => {
 		const resources = [
-			{ drawUnitId: "near", sortCenter: [0, 0, 4] as const },
-			{ drawUnitId: "far-b", sortCenter: [0, 0, 12] as const },
-			{ drawUnitId: "far-a", sortCenter: [0, 0, -12] as const },
-			{ drawUnitId: "middle", sortCenter: [0, 0, 8] as const },
+			{ drawUnitId: "near", distanceSquared: 16 },
+			{ drawUnitId: "far-b", distanceSquared: 144 },
+			{ drawUnitId: "far-a", distanceSquared: 144 },
+			{ drawUnitId: "middle", distanceSquared: 64 },
 		];
 
 		expect(
 			resources
 				.toSorted((left, right) =>
-					compareStaticObjectTransparentDrawOrder(left, right, cameraPosition),
+					compareStaticObjectTransparentDrawEntries(left, right),
 				)
 				.map((resource) => resource.drawUnitId),
 		).toEqual(["far-a", "far-b", "middle", "near"]);

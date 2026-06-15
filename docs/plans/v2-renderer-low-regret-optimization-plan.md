@@ -417,7 +417,7 @@ Status: Completed on 2026-06-15 for code cleanup and resteering. Manual Safari p
 
 ### Phase 7: Bounded Transparent Static Sorting
 
-Status: Planned as the next immediate phase after the 2026-06-15 Safari profiler follow-up.
+Status: Completed on 2026-06-15 for code and automated checks. Manual visual/profiler validation remains external/user-run.
 
 #### Context
 
@@ -439,13 +439,13 @@ The follow-up Safari profiler capture showed transparent static sorting as a vis
 
 #### Task Checklist
 
-- [ ] Add a file-local near transparent sort distance constant with a conservative initial value and document that it is a visual-quality/perf tradeoff.
-- [ ] Add renderer-owned reusable arrays for transparent draw partitioning.
-- [ ] Replace `Array.from(...).filter(...).sort(...)` with list clearing, partitioning, bounded sorting, and drawing.
-- [ ] Avoid per-comparator `{ drawUnitId, sortCenter }` object allocation and avoid recomputing translated sort centers inside the comparator.
-- [ ] Preserve opaque-first rendering and current transparent render-state application.
-- [ ] Add or update pure tests for transparent draw-order comparison/partitioning if the partition logic can be extracted without brittle WebGL test plumbing.
-- [ ] Re-run `npm run test:ts`, `npm run check`, and `npm run lint:ts`.
+- [x] Add a file-local near transparent sort distance constant with a conservative initial value and document that it is a visual-quality/perf tradeoff.
+- [x] Add renderer-owned reusable arrays for transparent draw partitioning.
+- [x] Replace `Array.from(...).filter(...).sort(...)` with list clearing, partitioning, bounded sorting, and drawing.
+- [x] Avoid per-comparator `{ drawUnitId, sortCenter }` object allocation and avoid recomputing translated sort centers inside the comparator.
+- [x] Preserve opaque-first rendering and current transparent render-state application.
+- [x] Add or update pure tests for transparent draw-order comparison/partitioning if the partition logic can be extracted without brittle WebGL test plumbing.
+- [x] Re-run `npm run test:ts`, `npm run check`, and `npm run lint:ts`.
 
 #### Acceptance Criteria
 
@@ -468,7 +468,15 @@ Dry-run date: 2026-06-15
 
 #### Decisions and Course Corrections
 
-- Pending during implementation.
+- Implemented the near sort radius as `NEAR_TRANSPARENT_STATIC_SORT_DISTANCE = 16`, matching the post-dry-run correction that transparent sorting should be much tighter than a landblock-scale radius.
+- Kept opaque static drawing as a streaming pass through `#staticObjectResources.values()`; no opaque scratch list was added.
+- Replaced the full-frame `Array.from(...).filter(...).sort(...)` transparent path with reusable renderer-owned lists:
+  - `#farTransparentStaticObjectDrawList` stores far transparent resources directly and draws them first in stable resource-map insertion order.
+  - `#nearTransparentStaticObjectDrawEntries` stores pooled near entries and sorts only those entries back-to-front.
+- Added a small reusable entry pool for near transparent sorting. Entries cache `resource`, `drawUnitId`, and precomputed `distanceSquared`; reset nulls active entry `resource` references so removed draw units are not retained by the pool, including the zero-static-resource early-return path.
+- Replaced the old public `compareStaticObjectTransparentDrawOrder` helper with `compareStaticObjectTransparentDrawEntries`, which sorts by precomputed distance and keeps the same stable draw-unit-id tie-break. Existing renderer tests were updated to cover the optimized comparator seam without WebGL fakes.
+- Did not eliminate all translation allocation in static rendering. `#drawStaticObjectResource` still calls `#createResourceTranslation(resource)` per draw, and transparent partitioning still computes one translated distance per transparent resource. Removing those would be a separate broader placement-uniform cleanup, not necessary for this transparent sorting phase.
+- Manual runtime visual smoke and Safari profiler comparison were not run from this environment. The user should verify nearby transparent objects still look acceptable with the 16-unit near-sort radius and check whether `sort`/proxy trap time falls out of the Safari profile.
 
 ## Risks & Mitigations
 

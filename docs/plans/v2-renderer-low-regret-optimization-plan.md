@@ -147,9 +147,11 @@ Status: Completed on 2026-06-15.
 - Implemented `EMPTY_TEXTURE_DRAW_UNIT_BINDINGS`, `DEFAULT_TEXTURE_RECT`, and `fillDefaultMaterialRectTable` in `webgl2-renderer.ts`.
 - Replaced the draw-path `?? new Map()` fallbacks with the shared empty map. `applyTexturePlacementUpdate` still creates a real mutable map when a draw unit receives its first binding; that is outside the render loop and should remain explicit.
 - Replaced static material-table `slice(0, max)` with a counted loop. Terrain overlay/road `slice(...).entries()` loops were intentionally left for Phase 3 because they sit inside the terrain payload builder work and are easier to verify there.
-- The test seam is still unresolved because Phase 0 did not extract payload builders. Phase 1 should choose between a sibling module and explicit internal exports before adding payload-builder tests.
+- Phase 1 resolved the test seam by moving static payload builders into a sibling module instead of exporting renderer internals.
 
 ### Phase 1: Isolate Static Material Payload Construction
+
+Status: Completed on 2026-06-15.
 
 #### Deliverables
 
@@ -171,14 +173,14 @@ Status: Completed on 2026-06-15.
 
 #### Task Checklist
 
-- Add private prepared static payload types near `StaticObjectGeometryResource`.
-- Add static scratch buffer construction in `Webgl2Renderer` or a file-local factory.
-- Extract static material array population from `uploadStaticObjectMaterialTableUniforms`.
-- Extract static role page collection from `createStaticObjectPageBindings`.
-- Replace `resource.materialEntries.slice(0, MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW)` with a counted loop that does not allocate.
-- Change `uploadStaticObjectMaterialTableUniforms` to accept prepared arrays and perform only `gl.uniform*` calls.
-- Change `uploadStaticObjectRolePageBindings` to accept prebuilt sizes arrays.
-- Add tests for static payload construction using pure helper exports or file-local testable exports, whichever matches current v2 test style best.
+- [x] Add private prepared static payload types near `StaticObjectGeometryResource`.
+- [x] Add static scratch buffer construction in `Webgl2Renderer` or a file-local factory.
+- [x] Extract static material array population from `uploadStaticObjectMaterialTableUniforms`.
+- [x] Extract static role page collection from `createStaticObjectPageBindings`.
+- [x] Replace `resource.materialEntries.slice(0, MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW)` with a counted loop that does not allocate.
+- [x] Change `uploadStaticObjectMaterialTableUniforms` to accept prepared arrays and perform only `gl.uniform*` calls.
+- [x] Change `uploadStaticObjectRolePageBindings` to accept prebuilt sizes arrays.
+- [x] Add tests for static payload construction using pure helper exports or file-local testable exports, whichever matches current v2 test style best.
 
 #### Acceptance Criteria
 
@@ -191,6 +193,12 @@ Status: Completed on 2026-06-15.
 #### Decisions and Course Corrections
 
 - Dry run clarified that Phase 1 should use scratch arrays only for immediate upload. Phase 2 is responsible for copying/rebuilding into resource-owned arrays.
+- Chose a sibling module, `webgl2-static-object-payloads.ts`, for the pure static payload builder seam. This avoided exporting a pile of renderer internals from `webgl2-renderer.ts` and gives Phase 2 a clean payload shape to promote into resource-owned state.
+- The renderer now owns one `#staticObjectDrawScratch` payload and calls `prepareStaticObjectDrawPayload` per static draw. This reuses typed arrays and role-page arrays within the frame, but intentionally does not cache across frames yet.
+- Role page bindings now use parallel `textures` and `sizes` scratch arrays instead of per-draw arrays of `{ binding, texture }` objects. That slightly changes the internal representation, but keeps upload behavior equivalent.
+- Static upload helpers in `webgl2-renderer.ts` are upload-only: they bind textures/upload uniforms from prepared arrays and do not build material/page data.
+- Added `webgl2-static-object-payloads.test.ts` coverage for default rects, fallback material modes, resident indexed/palette/detail page slots, detail enablement, indexed settings, scratch reset behavior, and the empty-material-entry failure path.
+- Phase 0's test-seam open question is resolved: static payload builders use a sibling module. Terrain payload builders should probably follow the same pattern if Phase 3 grows similarly.
 
 ### Phase 2: Resource-Owned Static Prepared Payloads
 
@@ -400,6 +408,5 @@ Status: Completed on 2026-06-15.
 ## Open Questions
 
 - Which exact neutral path should own the moved state cache: `src/lib/webgl2/`, `src/lib/webgl/`, or another existing utility convention discovered during implementation?
-- Which exact test seam should Phase 1 choose for payload builders: sibling module exports or explicit internal exports from `webgl2-renderer.ts`?
 - Should conservative invalidation on texture removal/replacement clear all prepared payloads, or should implementation add a reverse map from `textureRefId` to owning draw-unit ids?
 - Do we want a short before/after profiler note checked into this plan after implementation, or should profiler captures stay local/manual?

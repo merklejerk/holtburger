@@ -415,6 +415,61 @@ Status: Completed on 2026-06-15 for code cleanup and resteering. Manual Safari p
 - Tightened the conservative prepared-payload invalidation comment so it documents the shared static/terrain boundary: prepared payloads hold `WebGLTexture` handles, and without a reverse texture-ref owner map, texture page adds/replacements/removals dirty all live prepared payloads.
 - Manual Safari profiler comparison was not run from this environment. The next profiler pass should check whether the hot spots moved away from per-draw payload construction and whether the deferred transparent-resource `Array.from(...).filter(...).sort(...)` allocation has become visible enough to justify a separate phase.
 
+### Phase 7: Bounded Transparent Static Sorting
+
+Status: Planned as the next immediate phase after the 2026-06-15 Safari profiler follow-up.
+
+#### Context
+
+The follow-up Safari profiler capture showed transparent static sorting as a visible secondary cost under `#drawStaticObjects`, including `Array.from(...).filter(...).sort(...)`, `compareStaticObjectTransparentDrawOrder`, `distanceSquared`, and proxy/get trap overhead. Full transparent sorting is only for visual correctness, and ordering errors are most noticeable near the camera. Distant transparent objects can usually draw in stable resource order without an obvious visual penalty.
+
+#### Deliverables
+
+- Replace the per-frame `Array.from(this.#staticObjectResources.values()).filter(...).sort(...)` allocation path in `#drawStaticObjects`.
+- Add renderer-owned reusable transparent static object draw lists, for example:
+  - `#nearTransparentStaticObjectDrawList`
+  - `#farTransparentStaticObjectDrawList`
+- Split static resources in a counted loop over `#staticObjectResources.values()`:
+  - opaque resources draw immediately, preserving the current no-allocation streaming path;
+  - transparent resources within a fixed near-sort radius go into the near transparent list;
+  - farther transparent resources go into the far transparent list.
+- Sort only the near transparent list by precomputed camera-distance squared.
+- Draw far transparent resources first in stable resource-map insertion order, then draw near transparent resources back-to-front.
+- Avoid allocating sort wrapper objects inside the comparator path. Store reusable entries that include `resource` and precomputed `distanceSquared`, or add a small comparator that works directly on such entries.
+
+#### Task Checklist
+
+- [ ] Add a file-local near transparent sort distance constant with a conservative initial value and document that it is a visual-quality/perf tradeoff.
+- [ ] Add renderer-owned reusable arrays for transparent draw partitioning.
+- [ ] Replace `Array.from(...).filter(...).sort(...)` with list clearing, partitioning, bounded sorting, and drawing.
+- [ ] Avoid per-comparator `{ drawUnitId, sortCenter }` object allocation and avoid recomputing translated sort centers inside the comparator.
+- [ ] Preserve opaque-first rendering and current transparent render-state application.
+- [ ] Add or update pure tests for transparent draw-order comparison/partitioning if the partition logic can be extracted without brittle WebGL test plumbing.
+- [ ] Re-run `npm run test:ts`, `npm run check`, and `npm run lint:ts`.
+
+#### Acceptance Criteria
+
+- Static transparent sorting no longer allocates a new full resource array every frame.
+- Only near transparent static resources are distance-sorted each frame.
+- Far transparent static resources render first in stable insertion order; near transparent static resources render afterward in back-to-front order.
+- Visual behavior remains acceptable in the runtime harness scene, especially around nearby trees/buildings/fences.
+- The plan explicitly records the chosen near-sort distance and any visual artifacts observed.
+
+#### Dry Run Findings
+
+Dry-run date: 2026-06-15
+
+- Do not add an opaque draw list. The current opaque pass already streams `#staticObjectResources.values()` without allocating a frame-local array; replacing it with a reusable array would add unnecessary push/clear work.
+- The original phase text had far/near transparent order backwards in one acceptance criterion. Transparent rendering should keep broad back-to-front order, so far stable transparent resources should draw before the near sorted transparent resources.
+- Reusing only the transparent resource array is not enough. The current sort comparator allocates `{ drawUnitId, sortCenter }` wrappers and calls `#createStaticObjectSortCenter` during comparator execution, which can repeat many times per sort. Phase 7 should precompute `distanceSquared` once per transparent resource during partitioning and sort entries by that scalar.
+- A small reusable entry shape is justified here despite being more machinery than a bare resource array: `{ resource, distanceSquared }` avoids translated-center allocation/recomputation inside the comparator and gives tests a pure comparator seam.
+- Use a tight initial near-sort radius of 16 scene units/meters unless implementation profiling/visual smoke suggests otherwise. This keeps sorting focused on objects close enough for transparent ordering errors to be noticeable instead of covering most of the landblock interest range.
+- Keep `compareStaticObjectTransparentDrawOrder` only if tests still need the existing public seam. Prefer replacing or supplementing it with an entry comparator such as `compareStaticObjectTransparentDrawEntries` so tests cover the actual optimized path.
+
+#### Decisions and Course Corrections
+
+- Pending during implementation.
+
 ## Risks & Mitigations
 
 - **Risk: Prepared payloads become stale after texture updates.**
@@ -435,6 +490,9 @@ Status: Completed on 2026-06-15 for code cleanup and resteering. Manual Safari p
 - **Risk: Moving helpers out of `webgl2-renderer.ts` creates premature module boundaries.**
   - Mitigation: Start file-local. Split only if the renderer becomes materially harder to review.
 
+- **Risk: Bounded transparent sorting creates visible order artifacts.**
+  - Mitigation: Sort nearby transparent static resources where artifacts are most noticeable, keep far transparent order stable instead of random, and tune the threshold from profiler/runtime harness feedback.
+
 ## Definition of Done
 
 - Static draw loop no longer allocates material uniform arrays, role page arrays, role size arrays, or default rect tables per draw.
@@ -443,7 +501,7 @@ Status: Completed on 2026-06-15 for code cleanup and resteering. Manual Safari p
 - Prepared payloads are resource-owned and invalidated on texture-binding changes.
 - Draw-unit removal naturally drops prepared payloads through existing resource disposal.
 - V2 renderer uses the existing `Webgl2StateCache` from a neutral app-local WebGL utility path for practical high-frequency state changes, or the plan records why reuse was deferred.
-- No global renderer material cache, draw sorting, instancing, or visibility policy change is introduced.
+- No global renderer material cache, opaque/material draw sorting, instancing, or visibility policy change is introduced. The only draw-order change allowed by this plan is the bounded transparent static sorting phase.
 - `npm run test:ts` passes in `apps/holtburger-3d`.
 - `npm run check` passes in `apps/holtburger-3d`.
 - Manual runtime harness smoke test shows no obvious visual regression.

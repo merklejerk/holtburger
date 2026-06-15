@@ -191,8 +191,21 @@ describe("V2 static object compatibility partitioner", () => {
 				},
 			}),
 		]);
-		expect(result.staticSourceMappings).toEqual([
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
+		expect(result.staticSourceMappings).toEqual([]);
+		expect(drawUnit.sourceMappingCoverage).toMatchObject([
+			{
+				geometrySurfaceIds: [0],
+				gfxObj: createGfxObjIdentity(),
+				materialIds: [0x08000010],
+				materialSlot: 0,
+				materialVariantSignatures: [null],
+				object: createObjectIdentity(),
+				partIndex: 0,
+				polygonCount: 1,
+				polygonRange: { max: 0, min: 0 },
+				source: createSourceIdentity(),
+				sourceTriangleCount: 1,
+			},
 		]);
 		expect(result.staticSpatialRecords).toEqual([
 			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:bounds:1t",
@@ -486,9 +499,22 @@ describe("V2 static object compatibility partitioner", () => {
 		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
 
 		expect(result.drawUnits).toHaveLength(1);
-		expect(result.staticSourceMappings).toEqual([
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000011:gfx:static-object-source:gfx-obj:01000021:object:da55ffff:building:building-1:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
+		expect(result.staticSourceMappings).toEqual([]);
+		expect(
+			result.drawUnits[0]?.kind === "static-object-geometry"
+				? result.drawUnits[0].sourceMappingCoverage
+				: [],
+		).toMatchObject([
+			{
+				gfxObj: createGfxObjIdentity({ sourceDid: 0x01000020 }),
+				object: createObjectIdentity({ instanceId: "building-0" }),
+				source: createSourceIdentity({ sourceDid: 0x02000010 }),
+			},
+			{
+				gfxObj: createGfxObjIdentity({ sourceDid: 0x01000021 }),
+				object: createObjectIdentity({ instanceId: "building-1" }),
+				source: createSourceIdentity({ sourceDid: 0x02000011 }),
+			},
 		]);
 	});
 
@@ -925,9 +951,26 @@ describe("V2 static object compatibility partitioner", () => {
 				? Array.from(drawUnits[0].positions.slice(0, 18))
 				: [],
 		).toEqual([1, 1, 1, 0, 1, 1, 1, 0, 1, 2, 1, 1, 0, 1, 1, 1, 0, 1]);
-		expect(result.staticSourceMappings).toEqual([
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:0:first-vertex:0:geometry-surface:0:variant:base",
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:0:first-vertex:3:geometry-surface:1:variant:sampler=repeat",
+		expect(result.staticSourceMappings).toEqual([]);
+		expect(
+			drawUnits[0]?.kind === "static-object-geometry"
+				? drawUnits[0].sourceMappingCoverage
+				: [],
+		).toMatchObject([
+			{
+				geometrySurfaceIds: [0],
+				materialVariantSignatures: [null],
+				polygonCount: 1,
+				polygonRange: { max: 0, min: 0 },
+				sourceTriangleCount: 1,
+			},
+			{
+				geometrySurfaceIds: [1],
+				materialVariantSignatures: ["sampler=repeat"],
+				polygonCount: 1,
+				polygonRange: { max: 0, min: 0 },
+				sourceTriangleCount: 1,
+			},
 		]);
 	});
 
@@ -986,9 +1029,15 @@ describe("V2 static object compatibility partitioner", () => {
 		expect(Array.from(drawUnit.positions.slice(0, 18))).toEqual([
 			1, 1, 1, 0, 1, 1, 1, 0, 1, 2, 1, 1, 0, 1, 1, 1, 0, 1,
 		]);
-		expect(result.staticSourceMappings).toEqual([
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:7:first-vertex:0:geometry-surface:0:variant:base",
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:source:static-object-source:setup-model:02000010:gfx:static-object-source:gfx-obj:01000020:object:da55ffff:building:building-0:part:0:polygon:7:first-vertex:3:geometry-surface:0:variant:base",
+		expect(result.staticSourceMappings).toEqual([]);
+		expect(drawUnit.sourceMappingCoverage).toMatchObject([
+			{
+				geometrySurfaceIds: [0],
+				materialVariantSignatures: [null],
+				polygonCount: 1,
+				polygonRange: { max: 7, min: 7 },
+				sourceTriangleCount: 2,
+			},
 		]);
 	});
 });

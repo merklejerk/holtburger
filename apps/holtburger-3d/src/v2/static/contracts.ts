@@ -824,7 +824,7 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly indexType: "uint16" | "uint32";
 	readonly vertexCount: number;
 	readonly triangleCount: number;
-	readonly sourceMappingRecords: readonly string[];
+	readonly sourceMappingCoverage: readonly StaticObjectSourceMappingCoverage[];
 	readonly spatialRecord: string | null;
 	readonly materialEntries: readonly StaticObjectMaterialTableEntry[];
 	/**
@@ -889,6 +889,25 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly primaryTextureWrapMode: "clamp" | "repeat";
 	readonly textureUseIds: readonly string[];
 	readonly materialIds: readonly number[];
+}
+
+export interface StaticObjectSourceMappingCoverage {
+	readonly object: StaticObjectInstanceIdentity;
+	readonly source: StaticObjectSourceIdentity;
+	readonly gfxObj: StaticObjectSourceIdentity;
+	readonly partIndex: number;
+	readonly materialSlot: number;
+	readonly materialIds: readonly number[];
+	readonly geometrySurfaceIds: readonly number[];
+	readonly materialVariantSignatures: readonly (string | null)[];
+	readonly polygonCount: number;
+	readonly polygonRange: StaticNumericRange | null;
+	readonly sourceTriangleCount: number;
+}
+
+export interface StaticNumericRange {
+	readonly max: number;
+	readonly min: number;
 }
 
 export interface StaticObjectMaterialTableEntry {

@@ -136,12 +136,24 @@ describe("V2 static materializer", () => {
 				rolePage: { kind: "static-base-color", slot: 0 },
 			},
 		]);
-		expect(materialized.staticSourceMappings).toEqual([
-			"static-table:source:0",
-			"static-table:source:1",
-			"static-table:source:2",
-			"static-table:source:3",
-			"static-table#fine-1:source:4",
+		expect(materialized.staticSourceMappings).toEqual([]);
+		expect(
+			addedDrawUnits.map((drawUnit) =>
+				drawUnit.kind === "static-object-geometry"
+					? drawUnit.sourceMappingCoverage.map((coverage) => ({
+							materialSlot: coverage.materialSlot,
+							polygonRange: coverage.polygonRange,
+						}))
+					: [],
+			),
+		).toEqual([
+			[
+				{ materialSlot: 0, polygonRange: { max: 0, min: 0 } },
+				{ materialSlot: 1, polygonRange: { max: 1, min: 1 } },
+				{ materialSlot: 2, polygonRange: { max: 2, min: 2 } },
+				{ materialSlot: 3, polygonRange: { max: 3, min: 3 } },
+			],
+			[{ materialSlot: 0, polygonRange: { max: 4, min: 4 } }],
 		]);
 		expect(materialized.staticSpatialRecords).toEqual([
 			"static-table:bounds:4t",
@@ -362,9 +374,34 @@ function createStaticObjectDrawUnit(
 			objectPartKey: null,
 			policy: "depth-writing",
 		},
-		sourceMappingRecords: Array.from(
+		sourceMappingCoverage: Array.from(
 			{ length: materialCount },
-			(_, index) => `${drawUnitId}:source:${index}`,
+			(_, index) => ({
+				geometrySurfaceIds: [index],
+				gfxObj: {
+					kind: "static-object-source" as const,
+					sourceAssetKind: "gfx-obj" as const,
+					sourceDid: 0x01000020,
+				},
+				materialIds: [index + 1],
+				materialSlot: index,
+				materialVariantSignatures: [null],
+				object: {
+					instanceId: "outdoor-static-0",
+					kind: "static-object-instance" as const,
+					landblockId: 0xda55ffff,
+					objectKind: "explicit-object" as const,
+				},
+				partIndex: 0,
+				polygonCount: 1,
+				polygonRange: { max: index, min: index },
+				source: {
+					kind: "static-object-source" as const,
+					sourceAssetKind: "setup-model" as const,
+					sourceDid: 0x02000010,
+				},
+				sourceTriangleCount: 1,
+			}),
 		),
 		spatialRecord: `${drawUnitId}:bounds:${materialCount}t`,
 		texCoords: new Float32Array(texCoords),

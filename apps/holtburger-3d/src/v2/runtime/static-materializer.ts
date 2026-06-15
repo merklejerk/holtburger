@@ -15,6 +15,7 @@ import type {
 	StaticDrawUnit,
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectMaterialTableEntry,
+	StaticObjectSourceMappingCoverage,
 } from "../static/contracts";
 
 export interface StaticMaterializationInput {
@@ -150,9 +151,6 @@ function materializeStaticSidecars(
 		staticSourceMappings: [
 			...commit.staticSourceMappings.filter(
 				(record) => !hasAnyRecordDrawUnitId(record, remappedSourceDrawUnitIds),
-			),
-			...staticObjectDrawUnits.flatMap(
-				(drawUnit) => drawUnit.sourceMappingRecords,
 			),
 		],
 		staticSpatialRecords: [
@@ -371,9 +369,7 @@ function remapStaticObjectDrawUnit(
 			summary?.primaryTextureUseId ?? drawUnit.primaryTextureUseId,
 		primaryTextureWrapMode:
 			summary?.primaryTextureWrapMode ?? drawUnit.primaryTextureWrapMode,
-		sourceMappingRecords: geometry.sourceMappingRecords.map((record) =>
-			replaceRecordDrawUnitId(record, drawUnit.drawUnitId, drawUnitId),
-		),
+		sourceMappingCoverage: geometry.sourceMappingCoverage,
 		spatialRecord: `${drawUnitId}:bounds:${geometry.triangleCount}t`,
 		textureUseIds,
 	};
@@ -388,7 +384,7 @@ function copyStaticObjectGeometryForMaterialSlots(
 	| "indexType"
 	| "materialSlotIndices"
 	| "positions"
-	| "sourceMappingRecords"
+	| "sourceMappingCoverage"
 	| "texCoords"
 	| "triangleCount"
 	| "vertexCount"
@@ -397,7 +393,7 @@ function copyStaticObjectGeometryForMaterialSlots(
 	const texCoords: number[] = [];
 	const materialSlotIndices: number[] = [];
 	const indices: number[] = [];
-	const sourceMappingRecords: string[] = [];
+	const retainedSourceSlots = new Set<number>();
 	let triangleCount = 0;
 
 	for (
@@ -415,12 +411,7 @@ function copyStaticObjectGeometryForMaterialSlots(
 			continue;
 		}
 
-		const sourceTriangleIndex = indexOffset / 3;
-		const sourceMappingRecord =
-			drawUnit.sourceMappingRecords[sourceTriangleIndex];
-		if (sourceMappingRecord) {
-			sourceMappingRecords.push(sourceMappingRecord);
-		}
+		retainedSourceSlots.add(sourceSlot);
 		triangleCount += 1;
 
 		for (let corner = 0; corner < 3; corner += 1) {
@@ -451,21 +442,32 @@ function copyStaticObjectGeometryForMaterialSlots(
 		indexType,
 		materialSlotIndices: new Float32Array(materialSlotIndices),
 		positions: new Float32Array(positions),
-		sourceMappingRecords,
+		sourceMappingCoverage: drawUnit.sourceMappingCoverage
+			.filter((coverage) => retainedSourceSlots.has(coverage.materialSlot))
+			.map((coverage) =>
+				remapSourceMappingCoverage(coverage, slotBySourceSlot),
+			),
 		texCoords: new Float32Array(texCoords),
 		triangleCount,
 		vertexCount,
 	};
 }
 
-function replaceRecordDrawUnitId(
-	record: string,
-	sourceDrawUnitId: string,
-	targetDrawUnitId: string,
-): string {
-	return record.startsWith(`${sourceDrawUnitId}:`)
-		? `${targetDrawUnitId}:${record.slice(sourceDrawUnitId.length + 1)}`
-		: record;
+function remapSourceMappingCoverage(
+	coverage: StaticObjectSourceMappingCoverage,
+	slotBySourceSlot: ReadonlyMap<number, number>,
+): StaticObjectSourceMappingCoverage {
+	const materialSlot = slotBySourceSlot.get(coverage.materialSlot);
+	if (materialSlot === undefined) {
+		throw new Error(
+			`Static object source mapping coverage references missing material slot ${coverage.materialSlot}.`,
+		);
+	}
+
+	return {
+		...coverage,
+		materialSlot,
+	};
 }
 
 function createFineStaticDrawUnitId(

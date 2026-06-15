@@ -15,6 +15,7 @@ import type {
 	StaticObjectInstanceIdentity,
 	StaticObjectPartSourceFacts,
 	StaticObjectRenderState,
+	StaticObjectSourceMappingCoverage,
 	StaticObjectSortMetadata,
 	StaticObjectSourceIdentity,
 } from "../../contracts";
@@ -79,6 +80,111 @@ export function bakeStaticObjectCompatibility(
 	};
 }
 
+function createStaticObjectSourceMappingCoverage(
+	partition: StaticObjectCompatibilityPartition,
+): readonly StaticObjectSourceMappingCoverage[] {
+	const materialSlotByEntryKey = new Map(
+		partition.coarseTablePlan.entries.map((entry, slot) => [
+			entry.materialEntryKey,
+			slot,
+		]),
+	);
+	const materialIdsBySlot = new Map(
+		partition.coarseTablePlan.entries.map((entry, slot) => [
+			slot,
+			entry.materialIds,
+		]),
+	);
+	const buckets = new Map<
+		string,
+		{
+			readonly object: StaticObjectInstanceIdentity;
+			readonly source: StaticObjectSourceIdentity;
+			readonly gfxObj: StaticObjectSourceIdentity;
+			readonly partIndex: number;
+			readonly materialSlot: number;
+			readonly materialIds: readonly number[];
+			readonly geometrySurfaceIds: Set<number>;
+			readonly materialVariantSignatures: Set<string | null>;
+			readonly polygonIds: Set<number>;
+			sourceTriangleCount: number;
+			minPolygonId: number | null;
+			maxPolygonId: number | null;
+		}
+	>();
+
+	for (const triangle of partition.triangles) {
+		const materialSlot = materialSlotByEntryKey.get(triangle.materialEntryKey);
+		if (materialSlot === undefined) {
+			throw new Error(
+				`Renderable static object partition ${partition.sliceId} references missing material entry ${triangle.materialEntryKey}.`,
+			);
+		}
+		const bucketKey = [
+			createObjectKey(triangle.object),
+			createSourceKey(triangle.source),
+			createSourceKey(triangle.gfxObj),
+			triangle.partIndex,
+			materialSlot,
+		].join("|");
+		const bucket = buckets.get(bucketKey) ?? {
+			geometrySurfaceIds: new Set<number>(),
+			gfxObj: triangle.gfxObj,
+			materialIds: materialIdsBySlot.get(materialSlot) ?? [],
+			materialSlot,
+			materialVariantSignatures: new Set<string | null>(),
+			maxPolygonId: null,
+			minPolygonId: null,
+			object: triangle.object,
+			partIndex: triangle.partIndex,
+			polygonIds: new Set<number>(),
+			source: triangle.source,
+			sourceTriangleCount: 0,
+		};
+
+		bucket.geometrySurfaceIds.add(triangle.geometrySurfaceId);
+		bucket.materialVariantSignatures.add(triangle.materialVariantSignature);
+		bucket.polygonIds.add(triangle.polygonId);
+		bucket.sourceTriangleCount += 1;
+		bucket.minPolygonId =
+			bucket.minPolygonId === null
+				? triangle.polygonId
+				: Math.min(bucket.minPolygonId, triangle.polygonId);
+		bucket.maxPolygonId =
+			bucket.maxPolygonId === null
+				? triangle.polygonId
+				: Math.max(bucket.maxPolygonId, triangle.polygonId);
+		buckets.set(bucketKey, bucket);
+	}
+
+	return [...buckets.values()]
+		.map(
+			(bucket): StaticObjectSourceMappingCoverage => ({
+				geometrySurfaceIds: [...bucket.geometrySurfaceIds].sort(
+					(left, right) => left - right,
+				),
+				gfxObj: bucket.gfxObj,
+				materialIds: [...bucket.materialIds].sort(
+					(left, right) => left - right,
+				),
+				materialSlot: bucket.materialSlot,
+				materialVariantSignatures: [...bucket.materialVariantSignatures].sort(
+					compareNullableStrings,
+				),
+				object: bucket.object,
+				partIndex: bucket.partIndex,
+				polygonCount: bucket.polygonIds.size,
+				polygonRange:
+					bucket.minPolygonId === null || bucket.maxPolygonId === null
+						? null
+						: { max: bucket.maxPolygonId, min: bucket.minPolygonId },
+				source: bucket.source,
+				sourceTriangleCount: bucket.sourceTriangleCount,
+			}),
+		)
+		.sort(compareSourceMappingCoverage);
+}
+
 function bakeStaticObjectCompatibilityItem(
 	input: StaticBakeBatchInput,
 	item: StaticBakeBatchItem,
@@ -122,18 +228,14 @@ function bakeStaticObjectCompatibilityItem(
 			drawUnits[index]?.drawUnitId ?? "",
 		]),
 	);
-	const sourceMappingsBySliceId = new Map(
-		renderablePartitions.map((partition) => {
-			const drawUnitId = drawUnitIdBySliceId.get(partition.sliceId);
-			return [
-				partition.sliceId,
-				drawUnitId
-					? partition.triangles.map((triangle) =>
-							createStaticObjectSourceMapping(drawUnitId, triangle),
-						)
-					: [],
-			] as const;
-		}),
+	const sourceMappingCoverageBySliceId = new Map(
+		renderablePartitions.map(
+			(partition) =>
+				[
+					partition.sliceId,
+					createStaticObjectSourceMappingCoverage(partition),
+				] as const,
+		),
 	);
 	const spatialRecordBySliceId = new Map(
 		renderablePartitions.map((partition) => {
@@ -148,8 +250,8 @@ function bakeStaticObjectCompatibilityItem(
 	return {
 		drawUnits: drawUnits.map((drawUnit, index) => ({
 			...drawUnit,
-			sourceMappingRecords:
-				sourceMappingsBySliceId.get(
+			sourceMappingCoverage:
+				sourceMappingCoverageBySliceId.get(
 					renderablePartitions[index]?.sliceId ?? "",
 				) ?? [],
 			spatialRecord:
@@ -158,7 +260,7 @@ function bakeStaticObjectCompatibilityItem(
 				) ?? null,
 		})),
 		materialCoverage: partitionPlan.materialCoverage,
-		sourceMappings: [...sourceMappingsBySliceId.values()].flat(),
+		sourceMappings: [],
 		spatialRecords: [...spatialRecordBySliceId.values()],
 		textureUses: createStaticObjectBakeTextureUses({
 			partitions: partitionPlan.partitions,
@@ -166,23 +268,6 @@ function bakeStaticObjectCompatibilityItem(
 			work: item.work,
 		}),
 	};
-}
-
-function createStaticObjectSourceMapping(
-	drawUnitId: string,
-	triangle: StaticObjectCompatibilityTriangle,
-): string {
-	return [
-		drawUnitId,
-		`source:${createSourceKey(triangle.source)}`,
-		`gfx:${createSourceKey(triangle.gfxObj)}`,
-		`object:${createObjectKey(triangle.object)}`,
-		`part:${triangle.partIndex}`,
-		`polygon:${triangle.polygonId}`,
-		`first-vertex:${triangle.firstVertex}`,
-		`geometry-surface:${triangle.geometrySurfaceId}`,
-		`variant:${triangle.materialVariantSignature ?? "base"}`,
-	].join(":");
 }
 
 function warnAboutSkippedStaticObjectPartition(
@@ -269,7 +354,7 @@ function createStaticObjectGeometryDrawUnit(options: {
 		paletteTextureUseId: materialEntry.paletteTextureUseId,
 		primaryTextureUseId: materialEntry.primaryTextureUseId,
 		primaryTextureWrapMode: materialEntry.primaryTextureWrapMode,
-		sourceMappingRecords: [],
+		sourceMappingCoverage: [],
 		spatialRecord: null,
 		texCoords: geometry.texCoords,
 		materialSlotIndices: geometry.materialSlotIndices,
@@ -910,6 +995,36 @@ function createSourceKey(source: StaticObjectSourceIdentity): string {
 		source.sourceAssetKind,
 		formatHex32(source.sourceDid),
 	].join(":");
+}
+
+function compareSourceMappingCoverage(
+	left: StaticObjectSourceMappingCoverage,
+	right: StaticObjectSourceMappingCoverage,
+): number {
+	return (
+		createObjectKey(left.object).localeCompare(createObjectKey(right.object)) ||
+		createSourceKey(left.source).localeCompare(createSourceKey(right.source)) ||
+		createSourceKey(left.gfxObj).localeCompare(createSourceKey(right.gfxObj)) ||
+		left.partIndex - right.partIndex ||
+		left.materialSlot - right.materialSlot
+	);
+}
+
+function compareNullableStrings(
+	left: string | null,
+	right: string | null,
+): number {
+	if (left === right) {
+		return 0;
+	}
+	if (left === null) {
+		return -1;
+	}
+	if (right === null) {
+		return 1;
+	}
+
+	return left.localeCompare(right);
 }
 
 function formatHex32(value: number): string {

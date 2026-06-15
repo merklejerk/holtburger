@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { LandblockEnvCellsPayloadDto } from "../../../lib/host/contracts";
+import type { ResolverLandblockEnvCellsPayloadDto } from "../../assets/preparation/env-cell-views";
+import { omitRenderGeometryVertexBuffers } from "../../assets/preparation/render-geometry-views";
 import type {
 	AssetService,
 	AssetServiceSnapshot,
@@ -118,19 +120,17 @@ describe("V2 landblock env-cell resolver", () => {
 		const payload = createLandblockEnvCellsPayload({
 			heavyRenderGeometry: true,
 		});
-		payload.envCells = payload.envCells.map((cell) => ({
-			...cell,
-			renderGeometry: {
-				...cell.renderGeometry,
-				normals: [],
-				positions: [],
-				uvs: [],
-			},
-		}));
+		const resolverPayload = {
+			...payload,
+			envCells: payload.envCells.map((cell) => ({
+				...cell,
+				renderGeometry: omitRenderGeometryVertexBuffers(cell.renderGeometry),
+			})),
+		} satisfies ResolverLandblockEnvCellsPayloadDto;
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-env-cells", 0xda55ffff),
-				payload,
+				resolverPayload,
 			),
 		]);
 
@@ -142,14 +142,15 @@ describe("V2 landblock env-cell resolver", () => {
 		if (result.scope.kind !== "landblock-env-cells") {
 			throw new Error("expected landblock env-cell payload");
 		}
-		expect(result.scope.envCells[0]?.renderGeometry).toMatchObject({
-			normals: [],
-			positions: [],
+		const renderGeometry = result.scope.envCells[0]?.renderGeometry;
+		expect(renderGeometry).toMatchObject({
 			triangleCount: 1,
-			uvs: [],
 			vertexCount: 3,
 		});
-		expect(result.scope.envCells[0]?.renderGeometry.triangles).toEqual([
+		expect(renderGeometry).not.toHaveProperty("normals");
+		expect(renderGeometry).not.toHaveProperty("positions");
+		expect(renderGeometry).not.toHaveProperty("uvs");
+		expect(renderGeometry?.triangles).toEqual([
 			{
 				firstVertex: 0,
 				materialVariantSignature: "variant-a",

@@ -1,4 +1,4 @@
-import type { LandblockEnvCellsPayloadDto } from "../../../lib/host/contracts";
+import type { ResolverLandblockEnvCellsPayloadDto } from "../../assets/preparation/env-cell-views";
 import type {
 	HostAssetKey,
 	PreparedAsset,
@@ -21,7 +21,7 @@ import type {
 
 interface LoadedLandblockEnvCellsPayload {
 	readonly asset: PreparedAsset;
-	readonly payload: LandblockEnvCellsPayloadDto;
+	readonly payload: ResolverLandblockEnvCellsPayloadDto;
 }
 
 export interface LandblockEnvCellsResolverOptions {
@@ -106,7 +106,9 @@ export class LandblockEnvCellsResolver {
 	}
 }
 
-function reportUnboundedEnvCells(payload: LandblockEnvCellsPayloadDto): void {
+function reportUnboundedEnvCells(
+	payload: ResolverLandblockEnvCellsPayloadDto,
+): void {
 	const boundedEnvCellIds = new Set(
 		payload.landblockEnvCellBvh.items.map((item) => item.envCellId),
 	);
@@ -127,7 +129,7 @@ function reportUnboundedEnvCells(payload: LandblockEnvCellsPayloadDto): void {
 
 function createLandblockEnvCellStaticFacts(
 	landblockId: number,
-	cell: LandblockEnvCellsPayloadDto["envCells"][number],
+	cell: ResolverLandblockEnvCellsPayloadDto["envCells"][number],
 ): LandblockEnvCellStaticFacts {
 	return {
 		cellBsp: cell.cellBsp,
@@ -248,8 +250,9 @@ function parseHex32KeyId(key: HostAssetKey, sourceAssetId: string): number {
 function requirePreparedPayloadKind(
 	asset: PreparedAsset,
 	expectedKind: "landblock-env-cells",
-): LandblockEnvCellsPayloadDto {
-	const payload = asset.payload as Partial<LandblockEnvCellsPayloadDto> | null;
+): ResolverLandblockEnvCellsPayloadDto {
+	const payload =
+		asset.payload as Partial<ResolverLandblockEnvCellsPayloadDto> | null;
 	if (!payload || payload.kind !== expectedKind) {
 		throw new Error(
 			`Prepared asset ${asset.sourceAssetId} was ${String(
@@ -258,7 +261,7 @@ function requirePreparedPayloadKind(
 		);
 	}
 
-	return payload as LandblockEnvCellsPayloadDto;
+	return payload as ResolverLandblockEnvCellsPayloadDto;
 }
 
 function compareNumeric(left: number, right: number): number {

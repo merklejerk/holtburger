@@ -585,10 +585,15 @@ export interface LandblockEnvCellStaticFacts {
 	readonly portals: LandblockEnvCellsPayloadDto["envCells"][number]["portals"];
 	readonly portalApertures: LandblockEnvCellsPayloadDto["envCells"][number]["portalApertures"];
 	readonly staticObjectSeeds: readonly LandblockEnvCellStaticObjectSeedFacts[];
-	readonly renderGeometry: LandblockEnvCellsPayloadDto["envCells"][number]["renderGeometry"];
+	readonly renderGeometry: LandblockEnvCellRenderGeometryFacts;
 	readonly cellBsp: LandblockEnvCellsPayloadDto["envCells"][number]["cellBsp"];
 	readonly localSpatial: EnvCellSpatialFacts;
 }
+
+export type LandblockEnvCellRenderGeometryFacts = Omit<
+	LandblockEnvCellsPayloadDto["envCells"][number]["renderGeometry"],
+	"normals" | "positions" | "uvs"
+>;
 
 export interface LandblockEnvCellSurfaceFacts {
 	readonly slotId: number;

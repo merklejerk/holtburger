@@ -23,11 +23,15 @@ import {
 	StaticBakeWorkerClient,
 	WorkerPoolStaticBaker,
 } from "../static/bake/worker-client";
-import { createStaticResolverMainHostBridge } from "../static/resolver/host-bridge";
+import {
+	createStaticResolverMainHostBridge,
+	type StaticResolverMainHostBridge,
+} from "../static/resolver/host-bridge";
 import {
 	StaticResolverWorkerClient,
 	WorkerPoolStaticResolver,
 } from "../static/resolver/worker-client";
+import type { StaticResolverWorkerPort } from "../static/resolver/protocol";
 import type { TexturePacker } from "../textures/packing/packer";
 import {
 	WorkerPoolTexturePacker,
@@ -88,18 +92,32 @@ function createTauriStaticCoordinator(
 	});
 }
 
-function createWorkerStaticResolver(
+interface StaticResolverBrowserWorker extends StaticResolverWorkerPort {
+	terminate(): void;
+}
+
+export interface WorkerStaticResolverFactories {
+	readonly createBridge?: (
+		port: StaticResolverWorkerPort,
+		assetReader: PreparedAssetReader,
+	) => StaticResolverMainHostBridge;
+	readonly createWorker?: () => StaticResolverBrowserWorker;
+}
+
+export function createWorkerStaticResolver(
 	assetReader: PreparedAssetReader,
 	workerCount: number,
+	factories: WorkerStaticResolverFactories = {},
 ): StaticResolver {
 	assertPositiveInteger(workerCount, "static resolver worker count");
+	const createWorker =
+		factories.createWorker ?? createStaticResolverBrowserWorker;
+	const createBridge =
+		factories.createBridge ?? createStaticResolverMainHostBridge;
 
 	const resolvers = Array.from({ length: workerCount }, () => {
-		const worker = new Worker(
-			new URL("../static/resolver/static-resolver.worker.ts", import.meta.url),
-			{ type: "module" },
-		);
-		const bridge = createStaticResolverMainHostBridge(worker, assetReader);
+		const worker = createWorker();
+		const bridge = createBridge(worker, assetReader);
 
 		return new StaticResolverWorkerClient(worker, {
 			disposePort: () => {
@@ -110,6 +128,13 @@ function createWorkerStaticResolver(
 	});
 
 	return new WorkerPoolStaticResolver(resolvers);
+}
+
+function createStaticResolverBrowserWorker(): StaticResolverBrowserWorker {
+	return new Worker(
+		new URL("../static/resolver/static-resolver.worker.ts", import.meta.url),
+		{ type: "module" },
+	) as StaticResolverBrowserWorker;
 }
 
 function createWorkerStaticBaker(workerCount: number): StaticBaker {

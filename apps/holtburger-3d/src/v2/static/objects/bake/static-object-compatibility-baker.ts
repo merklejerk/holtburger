@@ -19,6 +19,7 @@ import type {
 	StaticObjectSourceMappingCoverage,
 	StaticObjectSortMetadata,
 	StaticObjectSourceIdentity,
+	StaticSpatialRecord,
 } from "../../contracts";
 import { describeStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
 import {
@@ -193,8 +194,8 @@ function bakeStaticObjectCompatibilityItem(
 ): {
 	readonly drawUnits: readonly StaticDrawUnit[];
 	readonly materialCoverage: StaticBakeBatchResult["materialCoverage"][number];
-	readonly sourceMappings: readonly string[];
-	readonly spatialRecords: readonly string[];
+	readonly sourceMappings: StaticBakeBatchResult["staticSourceMappings"];
+	readonly spatialRecords: readonly StaticSpatialRecord[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 } {
 	if (
@@ -245,7 +246,10 @@ function bakeStaticObjectCompatibilityItem(
 			const drawUnitId = drawUnitIdBySliceId.get(partition.sliceId);
 			return [
 				partition.sliceId,
-				`${drawUnitId ?? partition.sliceId}:bounds:${partition.triangleCount}t`,
+				createDrawUnitSpatialRecord(
+					drawUnitId ?? partition.sliceId,
+					partition.triangleCount,
+				),
 			] as const;
 		}),
 	);
@@ -270,6 +274,21 @@ function bakeStaticObjectCompatibilityItem(
 			staticBatchId: input.staticBatchId,
 			work: item.work,
 		}),
+	};
+}
+
+function createDrawUnitSpatialRecord(
+	drawUnitId: string,
+	triangleCount: number,
+): StaticSpatialRecord {
+	return {
+		drawUnitId,
+		kind: "draw-unit-bounds",
+		owner: {
+			drawUnitId,
+			kind: "draw-unit",
+		},
+		triangleCount,
 	};
 }
 

@@ -590,13 +590,13 @@ export interface LandblockEnvCellStaticFacts {
 	readonly localSpatial: EnvCellSpatialFacts;
 }
 
-interface LandblockEnvCellSurfaceFacts {
+export interface LandblockEnvCellSurfaceFacts {
 	readonly slotId: number;
 	readonly surfaceId: number;
 	readonly material: StaticMaterialSourceIdentity;
 }
 
-interface LandblockEnvCellStaticObjectSeedFacts {
+export interface LandblockEnvCellStaticObjectSeedFacts {
 	readonly identity: StaticObjectInstanceIdentity;
 	readonly source: StaticObjectSourceIdentity;
 	readonly sourceIndex: number;
@@ -629,7 +629,7 @@ export type EnvCellVisibilityDiagnostic =
 			readonly maxDepth: number;
 	  };
 
-interface LandblockPortalLinkFacts {
+export interface LandblockPortalLinkFacts {
 	readonly linkId: string;
 	readonly source: PortalEndpointIdentity;
 	readonly target: PortalEndpointIdentity;
@@ -638,7 +638,7 @@ interface LandblockPortalLinkFacts {
 	readonly polygonId: number | null;
 }
 
-type PortalEndpointIdentity =
+export type PortalEndpointIdentity =
 	| {
 			readonly kind: "landblock-building";
 			readonly instanceId: string;
@@ -713,6 +713,113 @@ export interface StaticObjectSourceGeometryAttachment {
 	readonly texCoords: Float32Array;
 }
 
+export type StaticPeerRecordOwner =
+	| StaticDrawUnitPeerRecordOwner
+	| StaticWorkPeerRecordOwner;
+
+export interface StaticDrawUnitPeerRecordOwner {
+	readonly kind: "draw-unit";
+	readonly drawUnitId: string;
+}
+
+export interface StaticWorkPeerRecordOwner {
+	readonly kind: "work";
+	readonly workId: string;
+	readonly domain: StaticDomain;
+	readonly scope: StaticResolverScope;
+	readonly scopeKey: string;
+}
+
+export type StaticSpatialRecord =
+	| StaticDrawUnitSpatialRecord
+	| StaticEnvCellSpatialRecord;
+
+export interface StaticDrawUnitSpatialRecord {
+	readonly kind: "draw-unit-bounds";
+	readonly owner: StaticDrawUnitPeerRecordOwner;
+	readonly drawUnitId: string;
+	readonly triangleCount: number | null;
+}
+
+export interface StaticEnvCellSpatialRecord {
+	readonly kind: "env-cell-spatial";
+	readonly owner: StaticWorkPeerRecordOwner;
+	readonly landblockId: number;
+	readonly envCellId: number;
+	readonly memberId: string;
+	readonly environment: EnvironmentIdentity;
+	readonly cellStructure: CellStructureIdentity;
+	readonly renderBounds: StaticBounds | null;
+	readonly localBvhNodeCount: number;
+	readonly localBvhItemCount: number;
+	readonly residencyBvhNodeCount: number;
+	readonly residencyBvhItemCount: number;
+}
+
+export type StaticVisibilityRecord = StaticEnvCellVisibilityRecord;
+
+export interface StaticEnvCellVisibilityRecord {
+	readonly kind: "env-cell-visibility";
+	readonly owner: StaticWorkPeerRecordOwner;
+	readonly landblockId: number;
+	readonly acceptedEnvCellIds: readonly number[];
+	readonly visibleLinks: readonly StaticEnvCellVisibleLink[];
+	readonly diagnostics: readonly EnvCellVisibilityDiagnostic[];
+}
+
+export interface StaticEnvCellVisibleLink {
+	readonly sourceEnvCellId: number;
+	readonly targetEnvCellId: number;
+}
+
+export type StaticPortalInteriorRecord = StaticEnvCellPortalInteriorRecord;
+
+export interface StaticEnvCellPortalInteriorRecord {
+	readonly kind: "env-cell-portal-interior";
+	readonly owner: StaticWorkPeerRecordOwner;
+	readonly landblockId: number;
+	readonly portalLinks: readonly LandblockPortalLinkFacts[];
+	readonly envCells: readonly StaticEnvCellPortalSummary[];
+}
+
+export interface StaticEnvCellPortalSummary {
+	readonly envCellId: number;
+	readonly portals: LandblockEnvCellStaticFacts["portals"];
+	readonly portalApertures: LandblockEnvCellStaticFacts["portalApertures"];
+}
+
+export type StaticSourceMappingRecord =
+	| StaticTerrainSourceTriangleMappingRecord
+	| StaticEnvCellSourceMappingRecord;
+
+export interface StaticTerrainSourceTriangleMappingRecord {
+	readonly kind: "terrain-source-triangle";
+	readonly owner: StaticDrawUnitPeerRecordOwner;
+	readonly drawUnitId: string;
+	readonly sourceTriangleId: string;
+}
+
+export interface StaticEnvCellSourceMappingRecord {
+	readonly kind: "env-cell-source";
+	readonly owner: StaticWorkPeerRecordOwner;
+	readonly landblockId: number;
+	readonly envCellId: number;
+	readonly memberId: string;
+	readonly environment: EnvironmentIdentity;
+	readonly cellStructure: CellStructureIdentity;
+	readonly surfaces: readonly LandblockEnvCellSurfaceFacts[];
+}
+
+export type StaticAuthoredDynamicSeedRecord = StaticEnvCellStaticObjectSeedRecord;
+
+export interface StaticEnvCellStaticObjectSeedRecord {
+	readonly kind: "env-cell-static-object-seed";
+	readonly owner: StaticWorkPeerRecordOwner;
+	readonly landblockId: number;
+	readonly envCellId: number;
+	readonly seed: LandblockEnvCellStaticObjectSeedFacts;
+}
+
 export interface StaticBakeAttachmentRequest {
 	readonly domain: StaticDomain;
 	readonly items: readonly StaticBakeBatchItem[];
@@ -735,11 +842,11 @@ export interface StaticBakeBatchResult {
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly atlasRegistryUpdates: readonly string[];
-	readonly staticSpatialRecords: readonly string[];
-	readonly staticVisibilityRecords: readonly string[];
-	readonly staticPortalInteriorRecords: readonly string[];
-	readonly staticSourceMappings: readonly string[];
-	readonly staticAuthoredDynamicSeeds: readonly string[];
+	readonly staticSpatialRecords: readonly StaticSpatialRecord[];
+	readonly staticVisibilityRecords: readonly StaticVisibilityRecord[];
+	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
+	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
+	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly buildRevision: number;
 }
 
@@ -854,7 +961,7 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly vertexCount: number;
 	readonly triangleCount: number;
 	readonly sourceMappingCoverage: readonly StaticObjectSourceMappingCoverage[];
-	readonly spatialRecord: string | null;
+	readonly spatialRecord: StaticSpatialRecord | null;
 	readonly materialEntries: readonly StaticObjectMaterialTableEntry[];
 	/**
 	 * Derived one-entry summary retained while the renderer/test surface cuts over
@@ -1099,11 +1206,11 @@ export interface StaticCoordinatorCommitDelta {
 	readonly removedDrawUnitIds: readonly string[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
-	readonly staticSpatialRecords: readonly string[];
-	readonly staticVisibilityRecords: readonly string[];
-	readonly staticPortalInteriorRecords: readonly string[];
-	readonly staticSourceMappings: readonly string[];
-	readonly staticAuthoredDynamicSeeds: readonly string[];
+	readonly staticSpatialRecords: readonly StaticSpatialRecord[];
+	readonly staticVisibilityRecords: readonly StaticVisibilityRecord[];
+	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
+	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
+	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly revision: number;
 }
 

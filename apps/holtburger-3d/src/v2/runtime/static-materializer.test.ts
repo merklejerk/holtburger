@@ -156,8 +156,24 @@ describe("V2 static materializer", () => {
 			[{ materialSlot: 0, polygonRange: { max: 4, min: 4 } }],
 		]);
 		expect(materialized.staticSpatialRecords).toEqual([
-			"static-table:bounds:4t",
-			"static-table#fine-1:bounds:1t",
+			{
+				drawUnitId: "static-table",
+				kind: "draw-unit-bounds",
+				owner: {
+					drawUnitId: "static-table",
+					kind: "draw-unit",
+				},
+				triangleCount: 4,
+			},
+			{
+				drawUnitId: "static-table#fine-1",
+				kind: "draw-unit-bounds",
+				owner: {
+					drawUnitId: "static-table#fine-1",
+					kind: "draw-unit",
+				},
+				triangleCount: 1,
+			},
 		]);
 	});
 
@@ -403,7 +419,15 @@ function createStaticObjectDrawUnit(
 				sourceTriangleCount: 1,
 			}),
 		),
-		spatialRecord: `${drawUnitId}:bounds:${materialCount}t`,
+		spatialRecord: {
+			drawUnitId,
+			kind: "draw-unit-bounds",
+			owner: {
+				drawUnitId,
+				kind: "draw-unit",
+			},
+			triangleCount: materialCount,
+		},
 		texCoords: new Float32Array(texCoords),
 		textureUseIds,
 		triangleCount: materialCount,

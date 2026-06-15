@@ -209,7 +209,17 @@ describe("V2 static object compatibility partitioner", () => {
 			},
 		]);
 		expect(result.staticSpatialRecords).toEqual([
-			"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0:bounds:1t",
+			{
+				drawUnitId:
+					"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0",
+				kind: "draw-unit-bounds",
+				owner: {
+					drawUnitId:
+						"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0",
+					kind: "draw-unit",
+				},
+				triangleCount: 1,
+			},
 		]);
 	});
 

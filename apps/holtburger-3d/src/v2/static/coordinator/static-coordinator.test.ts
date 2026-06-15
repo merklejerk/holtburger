@@ -8,7 +8,10 @@ import type {
 	StaticScopePayload,
 	StaticMaterialCoverageReport,
 	StaticBakeAttachmentProvider,
+	ScheduledStaticWork,
+	StaticSpatialRecord,
 	TerrainGeometryStaticDrawUnit,
+	StaticVisibilityRecord,
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
 
@@ -580,7 +583,7 @@ describe("V2 static coordinator", () => {
 		expect(coordinator.createSnapshot().materialCoverage).toEqual([]);
 	});
 
-	it("commits landblock env-cell bundles as source facts without baking", async () => {
+	it("bakes landblock env-cell bundles after resolving source facts", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
@@ -612,7 +615,12 @@ describe("V2 static coordinator", () => {
 		await flushPromises();
 
 		expect(work?.job.domain).toBe("landblock-env-cells");
-		expect(baker.pendingInputs).toHaveLength(0);
+		expect(baker.pendingInputs).toHaveLength(1);
+		expect(baker.pendingInputs[0]).toMatchObject({
+			domain: "landblock-env-cells",
+			staticBatchId:
+				"static-batch:1:landblock-env-cells:landblock:da55ffff:1",
+		});
 		expect(sourcePayloads).toMatchObject([
 			{
 				payload: {
@@ -630,8 +638,8 @@ describe("V2 static coordinator", () => {
 			},
 		]);
 		expect(coordinator.createSnapshot()).toMatchObject({
-			baking: 0,
-			committed: 1,
+			baking: 1,
+			committed: 0,
 			committedDrawUnits: 0,
 			latestLandblockEnvCellsPayload: {
 				acceptedEnvCellCount: 1,
@@ -640,9 +648,121 @@ describe("V2 static coordinator", () => {
 				staticObjectSeedCount: 0,
 			},
 		});
-		expect(coordinator.createSnapshot().activeWork[0]?.status).toBe(
-			"source-committed",
+
+		baker.complete(work?.workId ?? "");
+		await flushPromises();
+
+		expect(coordinator.createSnapshot()).toMatchObject({
+			baking: 0,
+			committed: 1,
+			committedDrawUnits: 0,
+		});
+		expect(coordinator.createSnapshot().activeWork[0]?.status).toBe("committed");
+	});
+
+	it("filters typed work-owned env-cell peer records for superseded batch members", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+		const deltas: StaticCoordinatorCommitDelta[] = [];
+		coordinator.subscribeCommits((delta) => deltas.push(delta));
+
+		coordinator.requestStaticDemand({
+			location: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: 1,
+				terrain: 1,
+			},
+		});
+
+		const envCellRequests = resolver.pendingRequests.filter(
+			(request) => request.job.domain === "landblock-env-cells",
 		);
+		for (const request of envCellRequests) {
+			resolver.complete(
+				request.requestId,
+				createLandblockEnvCellsResolverPayload(request.job.scope.landblockId),
+			);
+		}
+		await flushPromises();
+
+		const envCellBatch = baker.pendingInputs.find(
+			(input) => input.domain === "landblock-env-cells",
+		);
+		expect(envCellBatch?.items.length).toBeGreaterThan(1);
+
+		coordinator.requestStaticDemand({
+			location: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: 0,
+				terrain: 1,
+			},
+		});
+
+		const focusItem = envCellBatch?.items.find(
+			(item) => item.work.job.scope.landblockId === 0xda55ffff,
+		);
+		const staleItem = envCellBatch?.items.find(
+			(item) => item.work.job.scope.landblockId !== 0xda55ffff,
+		);
+		if (!envCellBatch || !focusItem || !staleItem) {
+			throw new Error("Expected focus and stale env-cell batch items.");
+		}
+
+		baker.complete(envCellBatch.staticBatchId, {
+			staticSpatialRecords: [
+				createEnvCellSpatialRecord(focusItem.work),
+				createEnvCellSpatialRecord(staleItem.work),
+			],
+			staticVisibilityRecords: [
+				createEnvCellVisibilityRecord(focusItem.work),
+				createEnvCellVisibilityRecord(staleItem.work),
+			],
+		});
+		await flushPromises();
+
+		expect(coordinator.createSnapshot().staleBakeResults).toBe(
+			envCellBatch.items.length - 1,
+		);
+		expect(deltas.at(-1)).toMatchObject({
+			staticSpatialRecords: [
+				{
+					landblockId: 0xda55ffff,
+					owner: {
+						workId: focusItem.work.workId,
+					},
+				},
+			],
+			staticVisibilityRecords: [
+				{
+					landblockId: 0xda55ffff,
+					owner: {
+						workId: focusItem.work.workId,
+					},
+				},
+			],
+		});
+		expect(
+			deltas
+				.at(-1)
+				?.staticSpatialRecords.some(
+					(record) => record.owner.workId === staleItem.work.workId,
+				),
+		).toBe(false);
 	});
 });
 
@@ -728,12 +848,60 @@ function createMaterialCoverage(
 	};
 }
 
-function createLandblockEnvCellsResolverPayload(): {
+function createEnvCellSpatialRecord(work: ScheduledStaticWork): StaticSpatialRecord {
+	return {
+		cellStructure: {
+			cellStructureId: 0x0d000001,
+			kind: "cell-structure",
+		},
+		envCellId: work.job.scope.landblockId & 0xffff_ffff,
+		environment: {
+			environmentId: 0x0e000001,
+			kind: "environment",
+		},
+		kind: "env-cell-spatial",
+		landblockId: work.job.scope.landblockId,
+		localBvhItemCount: 0,
+		localBvhNodeCount: 0,
+		memberId: `cell-${work.job.scope.landblockId.toString(16)}`,
+		owner: createWorkPeerRecordOwner(work),
+		renderBounds: null,
+		residencyBvhItemCount: 0,
+		residencyBvhNodeCount: 0,
+	};
+}
+
+function createEnvCellVisibilityRecord(
+	work: ScheduledStaticWork,
+): StaticVisibilityRecord {
+	return {
+		acceptedEnvCellIds: [work.job.scope.landblockId & 0xffff_ffff],
+		diagnostics: [],
+		kind: "env-cell-visibility",
+		landblockId: work.job.scope.landblockId,
+		owner: createWorkPeerRecordOwner(work),
+		visibleLinks: [],
+	};
+}
+
+function createWorkPeerRecordOwner(work: ScheduledStaticWork) {
+	return {
+		domain: work.job.domain,
+		kind: "work" as const,
+		scope: work.job.scope,
+		scopeKey: `landblock:${work.job.scope.landblockId.toString(16).padStart(8, "0")}`,
+		workId: work.workId,
+	};
+}
+
+function createLandblockEnvCellsResolverPayload(landblockId = 0xda55ffff): {
 	readonly scope: StaticScopePayload["scope"];
 } {
+	const envCellId = landblockId & 0xffff_ff00;
+
 	return {
 		scope: {
-			acceptedEnvCellIds: [0xda550100],
+			acceptedEnvCellIds: [envCellId],
 			envCells: [
 				{
 					cellBsp: {
@@ -751,10 +919,10 @@ function createLandblockEnvCellsResolverPayload(): {
 						kind: "environment",
 					},
 					identity: {
-						envCellId: 0xda550100,
+						envCellId,
 						kind: "env-cell-source",
 					},
-					landblockId: 0xda55ffff,
+					landblockId,
 					localPlacement: {
 						orientation: { w: 1, x: 0, y: 0, z: 0 },
 						origin: { x: 0, y: 0, z: 0 },
@@ -793,7 +961,7 @@ function createLandblockEnvCellsResolverPayload(): {
 			kind: "landblock-env-cells",
 			landblock: {
 				kind: "landblock-source",
-				landblockId: 0xda55ffff,
+				landblockId,
 				source: "env-cells",
 			},
 			missingRefs: [],

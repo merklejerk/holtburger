@@ -4,6 +4,8 @@ import type {
 	StaticBakeBatchResult,
 	StaticBakeTextureUse,
 	StaticBaker,
+	StaticSourceMappingRecord,
+	StaticSpatialRecord,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialDrawSlice,
 	TerrainMaterialFallbackReason,
@@ -51,19 +53,43 @@ export function bakeTerrainGeometry(
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: [],
 		staticPortalInteriorRecords: [],
-		staticSourceMappings: drawUnits.flatMap((drawUnit) =>
-			drawUnit.sourceTriangleIds.map(
-				(triangleId) => `${drawUnit.drawUnitId}:source:${triangleId}`,
-			),
-		),
-		staticSpatialRecords: drawUnits.map(
-			(drawUnit) => `${drawUnit.drawUnitId}:bounds`,
-		),
+		staticSourceMappings: createTerrainSourceMappingRecords(drawUnits),
+		staticSpatialRecords: createTerrainSpatialRecords(drawUnits),
 		staticVisibilityRecords: [],
 		staticBatchId: input.staticBatchId,
 		textureUses: itemResults.flatMap((result) => result.textureUses),
 		works: input.items.map((item) => item.work),
 	};
+}
+
+function createTerrainSourceMappingRecords(
+	drawUnits: readonly TerrainGeometryStaticDrawUnit[],
+): readonly StaticSourceMappingRecord[] {
+	return drawUnits.flatMap((drawUnit) =>
+		drawUnit.sourceTriangleIds.map((sourceTriangleId) => ({
+			drawUnitId: drawUnit.drawUnitId,
+			kind: "terrain-source-triangle" as const,
+			owner: {
+				drawUnitId: drawUnit.drawUnitId,
+				kind: "draw-unit" as const,
+			},
+			sourceTriangleId,
+		})),
+	);
+}
+
+function createTerrainSpatialRecords(
+	drawUnits: readonly TerrainGeometryStaticDrawUnit[],
+): readonly StaticSpatialRecord[] {
+	return drawUnits.map((drawUnit) => ({
+		drawUnitId: drawUnit.drawUnitId,
+		kind: "draw-unit-bounds",
+		owner: {
+			drawUnitId: drawUnit.drawUnitId,
+			kind: "draw-unit",
+		},
+		triangleCount: drawUnit.triangleCount,
+	}));
 }
 
 function bakeTerrainGeometryItem(

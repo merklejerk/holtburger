@@ -230,7 +230,10 @@ describe("V2 static object compatibility partitioner", () => {
 		});
 		const input = {
 			...createBakeInput(payload),
-			attachments: { staticObjectSourceGeometry: [] },
+			attachments: {
+				envCellCellStructureGeometry: [],
+				staticObjectSourceGeometry: [],
+			},
 		};
 
 		expect(() => bakeStaticObjectCompatibility(input)).toThrow(
@@ -1322,6 +1325,7 @@ function createBakeInput(
 			textureUses: [],
 		},
 		attachments: {
+			envCellCellStructureGeometry: [],
 			staticObjectSourceGeometry: payload.sourceAssets.flatMap((source) =>
 				source.parts.map((part) => {
 					const fixturePart = part as typeof part & {

@@ -349,7 +349,7 @@ Spicy follow-up for 13A2:
 
 #### Phase 13A2a: Explicit Cell-Structure Geometry Attachments
 
-Status: planned.
+Status: complete on 2026-06-15.
 
 Purpose: make full env-cell cell-structure geometry available to bake work without re-heavying resolver payloads.
 
@@ -367,6 +367,30 @@ Acceptance criteria:
 - `landblock-env-cells` bake inputs can receive full cell-structure geometry attachments without requesting outdoor terrain or outdoor static object payloads.
 - Missing or stale cell-structure attachments fail clearly or produce typed missing refs; they do not silently produce empty geometry.
 - The existing 13A1 no-draw-unit peer-record commit/filter behavior remains covered by tests.
+
+Implementation notes:
+
+- Added first-class `EnvCellCellStructureGeometryAttachment` and `EnvCellCellStructureGeometryIdentity` contracts under `StaticBakeBatchAttachments`. The identity is domain-native: landblock id, env-cell id, environment id, and cell-structure id. It does not invent object/part/source identity for cell walls/floors.
+- Added `LandblockEnvCellGeometryAttachmentProvider`, which requests the full host-backed `landblock-env-cells` prepared asset by landblock and extracts only the env-cell cell-structure geometry requested by the bake batch.
+- Added a composite static bake attachment provider and wired browser V2 runtime composition to install both the existing static-object geometry provider and the new env-cell geometry provider.
+- Kept resolver-facing env-cell DTOs metadata-only. Tests now prove the resolver-light payload has absent `positions`, `normals`, and `uvs` while the bake attachment for the same env cell carries full typed arrays and triangle metadata.
+- Updated `LandblockEnvCellsBaker` to validate full geometry attachments for non-empty cell-structure metadata. Missing attachments fail hard; source id, vertex count, and triangle count mismatches fail as stale attachment evidence. Empty cell-structure metadata still preserves the 13A1 no-draw-unit peer-record path.
+- Fixed the resolver-light render-geometry helper to omit readonly fields without using `delete` on readonly DTO properties.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- --run src/v2/static/env-cells/bake/landblock-env-cell-geometry-attachments.test.ts src/v2/static/env-cells/bake/landblock-env-cells-baker.test.ts src/v2/static/objects/bake/static-object-bake-attachments.test.ts src/v2/static/bake/worker-client.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run test:ts`
+
+Known remaining gap:
+
+- `cd apps/holtburger-3d && npm run lint:dead` still fails on the existing exported-type baseline. This phase initially introduced one unused exported helper and three unnecessary exported identity interfaces; those were removed. The remaining Knip report is not from the new attachment provider path, but the baseline still needs cleanup or explicit configuration before the plan's dead-code gate can be fully green.
+
+Spicy follow-up for 13A2b:
+
+- The env-cell baker now validates attachments but still emits no draw units. Phase 13A2b should build directly on `EnvCellCellStructureGeometryAttachment`; it should not read vertex buffers from resolver facts and should preserve the hard missing/stale attachment checks when creating `structured-interior-geometry` draw units.
 
 #### Phase 13A2b: Structured-Interior Draw Unit And Debug Geometry Bake
 
@@ -559,7 +583,7 @@ The V2 harness should always provide:
 
 Remaining manual verification milestones:
 
-- Phase 13A2a: a named pure dungeon or outdoor-linked interior landblock produces full cell-structure geometry attachments while resolver-facing env-cell facts remain light.
+- Phase 13A2a: automated fixtures prove full cell-structure geometry attachments while resolver-facing env-cell facts remain light. A named pure dungeon or outdoor-linked interior landblock should still be exercised during 13A2b/13B once geometry produces visible draw units.
 - Phase 13A2b: a named pure dungeon or outdoor-linked interior landblock produces structured-interior debug/flat draw units, typed portal/visibility/source peer records, and correct placement without requesting outdoor terrain.
 - Phase 13A2c: the same target produces structured-interior material/texture coverage or explicit typed fallback records.
 - Phase 13B: at least one real env-cell/interior target renders structured geometry through committed static deltas, with picking/debug overlay still using runtime-owned query records.

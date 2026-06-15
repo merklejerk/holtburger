@@ -51,7 +51,10 @@ export class StaticObjectBakeAttachmentProvider implements StaticBakeAttachmentP
 			}),
 		);
 
-		return { staticObjectSourceGeometry };
+		return {
+			...createEmptyStaticBakeAttachments(),
+			staticObjectSourceGeometry,
+		};
 	}
 }
 

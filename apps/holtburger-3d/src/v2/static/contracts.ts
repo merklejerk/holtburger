@@ -709,7 +709,31 @@ export interface StaticBakeBatchInput {
 }
 
 export interface StaticBakeBatchAttachments {
+	readonly envCellCellStructureGeometry: readonly EnvCellCellStructureGeometryAttachment[];
 	readonly staticObjectSourceGeometry: readonly StaticObjectSourceGeometryAttachment[];
+}
+
+export interface EnvCellCellStructureGeometryAttachment {
+	readonly identity: EnvCellCellStructureGeometryIdentity;
+	readonly sourceId: number;
+	readonly vertexCount: number;
+	readonly triangleCount: number;
+	readonly positions: Float32Array;
+	readonly normals: Float32Array;
+	readonly uvs: Float32Array;
+	readonly triangles: LandblockEnvCellsPayloadDto["envCells"][number]["renderGeometry"]["triangles"];
+	readonly surfaceIds: readonly number[];
+	readonly bounds: StaticBounds | null;
+	readonly invalidPolygons: LandblockEnvCellsPayloadDto["envCells"][number]["renderGeometry"]["invalidPolygons"];
+	readonly skippedPolygonCount: number;
+}
+
+export interface EnvCellCellStructureGeometryIdentity {
+	readonly kind: "env-cell-cell-structure-geometry";
+	readonly landblockId: number;
+	readonly envCell: EnvCellSourceIdentity;
+	readonly environment: EnvironmentIdentity;
+	readonly cellStructure: CellStructureIdentity;
 }
 
 export interface StaticObjectSourceGeometryAttachment {

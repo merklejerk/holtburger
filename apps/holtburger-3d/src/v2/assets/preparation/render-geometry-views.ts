@@ -5,10 +5,10 @@ export function omitRenderGeometryVertexBuffers<
 		readonly uvs?: unknown;
 	},
 >(geometry: TGeometry): Omit<TGeometry, "normals" | "positions" | "uvs"> {
-	const metadata: Partial<TGeometry> = { ...geometry };
-	delete metadata.normals;
-	delete metadata.positions;
-	delete metadata.uvs;
+	const metadata = { ...geometry } as Record<string, unknown>;
+	delete metadata["normals"];
+	delete metadata["positions"];
+	delete metadata["uvs"];
 
 	return metadata as Omit<TGeometry, "normals" | "positions" | "uvs">;
 }

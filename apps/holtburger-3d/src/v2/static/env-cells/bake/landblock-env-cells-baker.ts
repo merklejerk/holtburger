@@ -13,6 +13,10 @@ import type {
 	StaticVisibilityRecord,
 	StaticWorkPeerRecordOwner,
 } from "../../contracts";
+import {
+	createEnvCellCellStructureGeometryIdentity,
+	describeEnvCellCellStructureGeometryIdentity,
+} from "./landblock-env-cell-geometry-attachments";
 
 export class LandblockEnvCellsBaker implements StaticBaker {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
@@ -28,6 +32,8 @@ export function bakeLandblockEnvCells(
 			`Landblock env-cell baker only supports landblock env-cell batches. Received ${input.domain}.`,
 		);
 	}
+
+	validateGeometryAttachments(input);
 
 	const itemResults = input.items.map(bakeLandblockEnvCellItem);
 
@@ -60,6 +66,44 @@ export function bakeLandblockEnvCells(
 		textureUses: [],
 		works: input.items.map((item) => item.work),
 	};
+}
+
+function validateGeometryAttachments(input: StaticBakeBatchInput): void {
+	for (const item of input.items) {
+		if (item.payload.scope.kind !== "landblock-env-cells") {
+			continue;
+		}
+
+		for (const envCell of item.payload.scope.envCells) {
+			if (envCell.renderGeometry.triangleCount === 0) {
+				continue;
+			}
+
+			const identity = createEnvCellCellStructureGeometryIdentity({ envCell });
+			const identityKey =
+				describeEnvCellCellStructureGeometryIdentity(identity);
+			const attachment = input.attachments.envCellCellStructureGeometry.find(
+				(candidate) =>
+					describeEnvCellCellStructureGeometryIdentity(candidate.identity) ===
+					identityKey,
+			);
+			if (!attachment) {
+				throw new Error(
+					`Missing env-cell cell-structure geometry attachment ${identityKey}.`,
+				);
+			}
+
+			if (
+				attachment.sourceId !== envCell.renderGeometry.sourceId ||
+				attachment.vertexCount !== envCell.renderGeometry.vertexCount ||
+				attachment.triangleCount !== envCell.renderGeometry.triangleCount
+			) {
+				throw new Error(
+					`Stale env-cell cell-structure geometry attachment ${identityKey}; source/count metadata does not match resolver facts.`,
+				);
+			}
+		}
+	}
 }
 
 function bakeLandblockEnvCellItem(item: StaticBakeBatchItem): {

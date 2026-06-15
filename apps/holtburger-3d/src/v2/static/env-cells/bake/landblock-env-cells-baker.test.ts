@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { StaticBakeBatchInput } from "../../contracts";
+import type {
+	EnvCellCellStructureGeometryAttachment,
+	LandblockEnvCellStaticFacts,
+	StaticBakeBatchInput,
+} from "../../contracts";
 import { bakeLandblockEnvCells } from "./landblock-env-cells-baker";
 import { createEnvCellCellStructureGeometryIdentity } from "./landblock-env-cell-geometry-attachments";
 
@@ -110,50 +114,84 @@ describe("V2 landblock env-cell baker", () => {
 
 	it("accepts full geometry attachments for resolver-light cell structures", () => {
 		const input = createInputWithRenderableCellStructure();
-		const item = input.items[0];
-		if (!item || item.payload.scope.kind !== "landblock-env-cells") {
-			throw new Error("Missing fixture env-cell scope.");
-		}
-		const envCell = item.payload.scope.envCells[0];
-		if (!envCell) {
-			throw new Error("Missing fixture env cell.");
-		}
+		const envCell = requireFirstEnvCell(input);
 
 		const result = bakeLandblockEnvCells({
 			...input,
 			attachments: {
-				envCellCellStructureGeometry: [
-					{
-						bounds: envCell.renderGeometry.bounds,
-						identity: createEnvCellCellStructureGeometryIdentity({ envCell }),
-						invalidPolygons: [],
-						normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
-						positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-						skippedPolygonCount: 0,
-						sourceId: envCell.renderGeometry.sourceId,
-						surfaceIds: [0x08000010],
-						triangleCount: envCell.renderGeometry.triangleCount,
-						triangles: [
-							{
-								firstVertex: 0,
-								materialVariantSignature: null,
-								polygonId: 1,
-								surfaceId: 0x08000010,
-							},
-						],
-						uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
-						vertexCount: envCell.renderGeometry.vertexCount,
-					},
-				],
+				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
 				staticObjectSourceGeometry: [],
 			},
 		});
 
 		expect(result.staticSpatialRecords).toHaveLength(1);
+		expect(result.drawUnits).toHaveLength(1);
+		expect(result.drawUnits[0]).toMatchObject({
+			cellStructure: {
+				cellStructureId: 0x0d000001,
+				kind: "cell-structure",
+			},
+			coordinateSpace: "landblock-render-local",
+			domain: "landblock-env-cells",
+			drawUnitId:
+				"7:landblock:da55ffff:landblock-env-cells:structured-interior:da550100:0d000001",
+			envCellId: 0xda550100,
+			kind: "structured-interior-geometry",
+			landblockId: 0xda55ffff,
+			materialFamily: "structured-interior-debug-flat",
+			materialIds: [0x08000010],
+			sourceTriangleIds: [
+				"polygon:1|surface:134217744|first:0|variant:none",
+			],
+			surfaceIds: [0x08000010],
+			textureUseIds: [],
+			triangleCount: 1,
+			vertexCount: 3,
+		});
+		const drawUnit = result.drawUnits[0];
+		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
+			throw new Error("Expected structured interior geometry draw unit.");
+		}
+		expect(Array.from(drawUnit.indices)).toEqual([0, 1, 2]);
+		expect(Array.from(drawUnit.texCoords)).toEqual([0, 0, 1, 0, 0, 1]);
+	});
+
+	it("bakes env-cell local placement into render-local positions", () => {
+		const input = createInputWithRenderableCellStructure({
+			localPlacement: {
+				orientation: { w: 1, x: 0, y: 0, z: 0 },
+				origin: { x: 10, y: 20, z: 30 },
+			},
+		});
+		const envCell = requireFirstEnvCell(input);
+
+		const result = bakeLandblockEnvCells({
+			...input,
+			attachments: {
+				envCellCellStructureGeometry: [
+					createGeometryAttachment(envCell, {
+						positions: new Float32Array([0, 1, 0, 0, 0, 1, 1, 0, 0]),
+					}),
+				],
+				staticObjectSourceGeometry: [],
+			},
+		});
+		const drawUnit = result.drawUnits[0];
+		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
+			throw new Error("Expected structured interior geometry draw unit.");
+		}
+
+		expect(Array.from(drawUnit.positions)).toEqual([
+			10, 31, -20, 10, 30, -19, 11, 30, -20,
+		]);
 	});
 });
 
-function createInputWithRenderableCellStructure(): StaticBakeBatchInput {
+function createInputWithRenderableCellStructure(
+	options: {
+		readonly localPlacement?: LandblockEnvCellStaticFacts["localPlacement"];
+	} = {},
+): StaticBakeBatchInput {
 	const input = createInput();
 	const item = input.items[0];
 	if (!item) {
@@ -199,12 +237,59 @@ function createInputWithRenderableCellStructure(): StaticBakeBatchInput {
 									],
 									vertexCount: 3,
 								},
+								localPlacement:
+									options.localPlacement ?? envCell.localPlacement,
 							},
 						],
 					},
 				},
 			},
 		],
+	};
+}
+
+function requireFirstEnvCell(
+	input: StaticBakeBatchInput,
+): LandblockEnvCellStaticFacts {
+	const item = input.items[0];
+	if (!item || item.payload.scope.kind !== "landblock-env-cells") {
+		throw new Error("Missing fixture env-cell scope.");
+	}
+	const envCell = item.payload.scope.envCells[0];
+	if (!envCell) {
+		throw new Error("Missing fixture env cell.");
+	}
+
+	return envCell;
+}
+
+function createGeometryAttachment(
+	envCell: LandblockEnvCellStaticFacts,
+	options: {
+		readonly positions?: Float32Array;
+	} = {},
+): EnvCellCellStructureGeometryAttachment {
+	return {
+		bounds: envCell.renderGeometry.bounds,
+		identity: createEnvCellCellStructureGeometryIdentity({ envCell }),
+		invalidPolygons: [],
+		normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+		positions:
+			options.positions ?? new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+		skippedPolygonCount: 0,
+		sourceId: envCell.renderGeometry.sourceId,
+		surfaceIds: [0x08000010],
+		triangleCount: envCell.renderGeometry.triangleCount,
+		triangles: [
+			{
+				firstVertex: 0,
+				materialVariantSignature: null,
+				polygonId: 1,
+				surfaceId: 0x08000010,
+			},
+		],
+		uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
+		vertexCount: envCell.renderGeometry.vertexCount,
 	};
 }
 

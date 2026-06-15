@@ -22,6 +22,7 @@ import type {
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectRenderState,
 	StaticObjectSortMetadata,
+	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
 } from "../../static/contracts";
 import {
@@ -630,6 +631,10 @@ class Webgl2Renderer implements Renderer {
 		string,
 		StaticObjectGeometryResource
 	>();
+	readonly #structuredInteriorResources = new Map<
+		string,
+		StructuredInteriorGeometryResource
+	>();
 	readonly #textures = new Map<string, WebGLTexture>();
 	readonly #textureBindings = new Map<
 		string,
@@ -690,14 +695,22 @@ class Webgl2Renderer implements Renderer {
 				staticObjectResource.dispose();
 				this.#staticObjectResources.delete(drawUnitId);
 			}
+			const structuredInteriorResource =
+				this.#structuredInteriorResources.get(drawUnitId);
+			if (structuredInteriorResource) {
+				structuredInteriorResource.dispose();
+				this.#structuredInteriorResources.delete(drawUnitId);
+			}
 			this.#textureBindings.delete(drawUnitId);
 		}
 
 		for (const drawUnit of delta.addedDrawUnits) {
 			this.#terrainResources.get(drawUnit.drawUnitId)?.dispose();
 			this.#staticObjectResources.get(drawUnit.drawUnitId)?.dispose();
+			this.#structuredInteriorResources.get(drawUnit.drawUnitId)?.dispose();
 			this.#terrainResources.delete(drawUnit.drawUnitId);
 			this.#staticObjectResources.delete(drawUnit.drawUnitId);
+			this.#structuredInteriorResources.delete(drawUnit.drawUnitId);
 
 			if (drawUnit.kind === "terrain-geometry") {
 				this.#terrainResources.set(
@@ -708,6 +721,11 @@ class Webgl2Renderer implements Renderer {
 				this.#staticObjectResources.set(
 					drawUnit.drawUnitId,
 					createStaticObjectGeometryResource(this.#gl, drawUnit),
+				);
+			} else if (drawUnit.kind === "structured-interior-geometry") {
+				this.#structuredInteriorResources.set(
+					drawUnit.drawUnitId,
+					createStructuredInteriorGeometryResource(this.#gl, drawUnit),
 				);
 			}
 		}
@@ -834,11 +852,15 @@ class Webgl2Renderer implements Renderer {
 		for (const resource of this.#staticObjectResources.values()) {
 			resource.dispose();
 		}
+		for (const resource of this.#structuredInteriorResources.values()) {
+			resource.dispose();
+		}
 		for (const texture of this.#textures.values()) {
 			this.#gl.deleteTexture(texture);
 		}
 		this.#terrainResources.clear();
 		this.#staticObjectResources.clear();
+		this.#structuredInteriorResources.clear();
 		this.#textures.clear();
 		this.#textureBindings.clear();
 		this.#warnedLayeredFallbackDrawUnitIds.clear();
@@ -1243,7 +1265,9 @@ class Webgl2Renderer implements Renderer {
 				...this.#staticObjectResources.values(),
 			]),
 			staticDrawUnits:
-				this.#terrainResources.size + this.#staticObjectResources.size,
+				this.#terrainResources.size +
+				this.#staticObjectResources.size +
+				this.#structuredInteriorResources.size,
 			terrainDrawUnits: this.#terrainResources.size,
 		};
 	}
@@ -1435,6 +1459,22 @@ interface StaticObjectGeometryResource {
 	readonly renderState: StaticObjectRenderState;
 	readonly localSortCenter: StaticObjectSortMetadata["center"];
 	readonly sortPolicy: StaticObjectSortMetadata["policy"];
+	readonly indexCount: number;
+	readonly indexType: GLenum;
+	readonly triangleCount: number;
+	dispose(): void;
+}
+
+interface StructuredInteriorGeometryResource {
+	readonly vertexArray: WebGLVertexArrayObject;
+	readonly positionBuffer: WebGLBuffer;
+	readonly texCoordBuffer: WebGLBuffer;
+	readonly indexBuffer: WebGLBuffer;
+	readonly drawUnitId: string;
+	readonly landblockId: StructuredInteriorGeometryStaticDrawUnit["landblockId"];
+	readonly envCellId: StructuredInteriorGeometryStaticDrawUnit["envCellId"];
+	readonly materialFamily: StructuredInteriorGeometryStaticDrawUnit["materialFamily"];
+	readonly debugColor: StructuredInteriorGeometryStaticDrawUnit["debugColor"];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
@@ -1923,6 +1963,72 @@ function createStaticObjectGeometryResource(
 			gl.deleteBuffer(positionBuffer);
 			gl.deleteBuffer(texCoordBuffer);
 			gl.deleteBuffer(materialSlotBuffer);
+			gl.deleteBuffer(indexBuffer);
+			gl.deleteVertexArray(vertexArray);
+		},
+	};
+}
+
+function createStructuredInteriorGeometryResource(
+	gl: WebGL2RenderingContext,
+	drawUnit: StructuredInteriorGeometryStaticDrawUnit,
+): StructuredInteriorGeometryResource {
+	const vertexArray = gl.createVertexArray();
+	const positionBuffer = gl.createBuffer();
+	const texCoordBuffer = gl.createBuffer();
+	const indexBuffer = gl.createBuffer();
+	if (!vertexArray || !positionBuffer || !texCoordBuffer || !indexBuffer) {
+		if (vertexArray) {
+			gl.deleteVertexArray(vertexArray);
+		}
+		if (positionBuffer) {
+			gl.deleteBuffer(positionBuffer);
+		}
+		if (texCoordBuffer) {
+			gl.deleteBuffer(texCoordBuffer);
+		}
+		if (indexBuffer) {
+			gl.deleteBuffer(indexBuffer);
+		}
+		throw new Error(
+			`Failed to create GPU buffers for structured interior ${drawUnit.drawUnitId}.`,
+		);
+	}
+
+	gl.bindVertexArray(vertexArray);
+	gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+	gl.bufferData(gl.ARRAY_BUFFER, drawUnit.positions, gl.STATIC_DRAW);
+	gl.enableVertexAttribArray(0);
+	gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+
+	gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+	gl.bufferData(gl.ARRAY_BUFFER, drawUnit.texCoords, gl.STATIC_DRAW);
+	gl.enableVertexAttribArray(1);
+	gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+
+	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, drawUnit.indices, gl.STATIC_DRAW);
+	gl.bindVertexArray(null);
+	gl.bindBuffer(gl.ARRAY_BUFFER, null);
+	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+
+	return {
+		debugColor: drawUnit.debugColor,
+		drawUnitId: drawUnit.drawUnitId,
+		envCellId: drawUnit.envCellId,
+		indexBuffer,
+		indexCount: drawUnit.indices.length,
+		indexType:
+			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
+		landblockId: drawUnit.landblockId,
+		materialFamily: drawUnit.materialFamily,
+		positionBuffer,
+		texCoordBuffer,
+		triangleCount: drawUnit.triangleCount,
+		vertexArray,
+		dispose() {
+			gl.deleteBuffer(positionBuffer);
+			gl.deleteBuffer(texCoordBuffer);
 			gl.deleteBuffer(indexBuffer);
 			gl.deleteVertexArray(vertexArray);
 		},

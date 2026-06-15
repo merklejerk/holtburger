@@ -394,7 +394,7 @@ Spicy follow-up for 13A2b:
 
 #### Phase 13A2b: Structured-Interior Draw Unit And Debug Geometry Bake
 
-Status: planned.
+Status: complete on 2026-06-15.
 
 Purpose: turn cell-structure geometry attachments plus env-cell resolver metadata into the first renderable interior draw units, using a dedicated source-accurate draw-unit shape.
 
@@ -419,6 +419,28 @@ Acceptance criteria:
 - Cell-structure geometry does not pretend to be an outdoor static object or require object/part identity.
 - Evicting the owning `landblock-env-cells` work evicts the structured-interior draw units and work-owned peer records correctly.
 - Runtime query/debug selection and draw-unit placement agree for at least one env-cell fixture.
+
+Implementation notes:
+
+- Added `StructuredInteriorGeometryStaticDrawUnit` as a dedicated `StaticDrawUnit` variant. The public contract carries `landblockId`, `envCellId`, `memberId`, `environment`, `cellStructure`, `localPlacement`, transformed render-local positions, UVs, indices, source triangle ids, surface ids, material ids, debug color, and empty `textureUseIds`.
+- `LandblockEnvCellsBaker` now emits one structured-interior debug/flat draw unit per non-empty env-cell cell-structure geometry attachment. It still emits the 13A1 typed peer records, authored seed records, visibility records, portal/interior records, and source mappings.
+- The baker consumes vertex buffers only from `StaticBakeBatchInput.attachments.envCellCellStructureGeometry`; resolver facts remain metadata-only. Missing/stale attachment checks from 13A2a remain in force.
+- Extracted the AC placement transform math from the outdoor static-object baker into a neutral bake helper so env-cell local placement and static-object placement share the same coordinate conversion without forcing cell structures through object/part contracts.
+- Coordinator desired-key logic now recognizes `structured-interior-geometry` as `landblock-env-cells` owned work. Tests prove the draw units commit and evict with the owning env-cell work.
+- Static materialization carries the new draw-unit variant without texture binding because its `textureUseIds` are empty.
+- WebGL2 renderer static delta ingestion now recognizes structured-interior draw units and creates/disposes structured-interior geometry resources. The frame loop does not draw them yet; visible rendering remains Phase 13B.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- --run src/v2/static/env-cells/bake/landblock-env-cells-baker.test.ts src/v2/static/coordinator/static-coordinator.test.ts src/v2/static/objects/bake/static-object-compatibility-partitioner.test.ts src/v2/runtime/static-materializer.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run test:ts`
+
+Known remaining gap:
+
+- Structured-interior resources are resident in the WebGL2 renderer but are not drawn in the frame loop yet. This is intentionally left to Phase 13B, where renderer visibility, portal/interior records, and anchor/focus policy can be handled together instead of sneaking in a one-off debug draw path.
+- `cd apps/holtburger-3d && npm run lint:dead` still fails on the existing exported-type baseline. This phase did not add new Knip-reported unused exports.
 
 #### Phase 13A2c: Structured-Interior Material And Texture Planning
 
@@ -465,7 +487,7 @@ Acceptance criteria:
 
 ### Phase 13B: Interior Geometry, Portal, And Visibility Rendering
 
-Status: planned; dry-run completed on 2026-06-15.
+Status: planned; dry-run completed on 2026-06-15 and re-steered after 13A2b.
 
 Purpose: render structured interiors and portal/visibility records through the same static coordinator/baker/renderer seams as outdoor static work.
 
@@ -473,9 +495,9 @@ Dry-run findings:
 
 - WebGL2 already has a generic static-object geometry resource path for positions, UVs, material-slot selectors, material tables, texture bindings, render state, and transparent pass ordering.
 - Because Phase 13A2b introduces a dedicated structured-interior draw-unit variant, Phase 13B needs either a renderer resource path for that variant or a materialized translation into the existing static-object shader payload shape.
-- Re-dry-run Phase 13B immediately after Phase 13A2b lands. The renderer plan should be based on the actual `structured-interior-geometry` draw-unit contract, not the older generic Phase 13A wording.
+- Re-dry-run after Phase 13A2b: the actual `structured-interior-geometry` contract is dedicated and already has WebGL2 resource residency. Phase 13B should add a visible debug/flat draw path for this resource first, then fold in material/texture behavior from 13A2c. Do not translate structured interiors into `StaticObjectGeometryStaticDrawUnit` at the public contract boundary.
 - Renderer ingestion is not the semantic owner of env-cell visibility. Runtime/static-scene query already owns env-cell BVHs, accepted cell sets, ray picking, and debug selection. Renderer visibility should consume runtime/coordinator decisions, not derive portal traversal from WebGL resources.
-- Existing runtime anchor/rebase policy is outdoor-landblock oriented. Phase 13B must define how dungeon/interior renderer-local placement composes owning landblock, env-cell local placement, and current focus/anchor before visual verification.
+- Existing runtime anchor/rebase policy is outdoor-landblock oriented. Phase 13A2b bakes env-cell local placement into landblock-render-local positions; Phase 13B must define how the renderer anchor composes owning landblock placement, dungeon/interior focus, and portal visibility before visual verification.
 - `TextureManager.resolveTextureRolePageSlot` treats all non-terrain domains as static-object-style role pages, which is likely correct for env-cell static/object materials. Add tests for `landblock-env-cells` so this remains intentional.
 
 Deliverables:
@@ -584,7 +606,7 @@ The V2 harness should always provide:
 Remaining manual verification milestones:
 
 - Phase 13A2a: automated fixtures prove full cell-structure geometry attachments while resolver-facing env-cell facts remain light. A named pure dungeon or outdoor-linked interior landblock should still be exercised during 13A2b/13B once geometry produces visible draw units.
-- Phase 13A2b: a named pure dungeon or outdoor-linked interior landblock produces structured-interior debug/flat draw units, typed portal/visibility/source peer records, and correct placement without requesting outdoor terrain.
+- Phase 13A2b: automated fixtures prove structured-interior debug/flat draw units, typed portal/visibility/source peer records, and correct placement without requesting outdoor terrain. Named-landblock visual verification moves to Phase 13B because 13A2b resource residency is not drawn yet.
 - Phase 13A2c: the same target produces structured-interior material/texture coverage or explicit typed fallback records.
 - Phase 13B: at least one real env-cell/interior target renders structured geometry through committed static deltas, with picking/debug overlay still using runtime-owned query records.
 - Phase 13C: dungeon/interior behavior is compared against v1 on named targets before dynamic and cutover work.

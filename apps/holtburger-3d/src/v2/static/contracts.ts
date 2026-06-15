@@ -944,7 +944,8 @@ export interface StaticMaterialUnrenderedBucket {
 
 export type StaticDrawUnit =
 	| TerrainGeometryStaticDrawUnit
-	| StaticObjectGeometryStaticDrawUnit;
+	| StaticObjectGeometryStaticDrawUnit
+	| StructuredInteriorGeometryStaticDrawUnit;
 
 export interface TerrainGeometryStaticDrawUnit {
 	readonly kind: "terrain-geometry";
@@ -1054,6 +1055,32 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly primaryTextureWrapMode: "clamp" | "repeat";
 	readonly textureUseIds: readonly string[];
 	readonly materialIds: readonly number[];
+}
+
+export interface StructuredInteriorGeometryStaticDrawUnit {
+	readonly kind: "structured-interior-geometry";
+	readonly drawUnitId: string;
+	readonly landblockId: number;
+	readonly domain: "landblock-env-cells";
+	readonly envCellId: number;
+	readonly memberId: string;
+	readonly environment: EnvironmentIdentity;
+	readonly cellStructure: CellStructureIdentity;
+	readonly localPlacement: PlacementTransformDto;
+	readonly coordinateSpace: "landblock-render-local";
+	readonly materialFamily: "structured-interior-debug-flat";
+	readonly materialBucketKey: string;
+	readonly debugColor: readonly [number, number, number, number];
+	readonly positions: Float32Array;
+	readonly texCoords: Float32Array;
+	readonly indices: Uint16Array | Uint32Array;
+	readonly indexType: "uint16" | "uint32";
+	readonly vertexCount: number;
+	readonly triangleCount: number;
+	readonly sourceTriangleIds: readonly string[];
+	readonly surfaceIds: readonly number[];
+	readonly materialIds: readonly number[];
+	readonly textureUseIds: readonly string[];
 }
 
 export interface StaticObjectSourceMappingCoverage {

@@ -444,7 +444,7 @@ Known remaining gap:
 
 #### Phase 13A2c: Structured-Interior Material And Texture Planning
 
-Status: planned.
+Status: complete on 2026-06-15.
 
 Purpose: upgrade structured-interior cell-structure draw units from debug/flat rendering to real material and texture behavior.
 
@@ -463,6 +463,32 @@ Acceptance criteria:
 - Renderer-facing geometry is bounded by material/table capacity before residency.
 - Structured-interior material planning does not copy the outdoor static-object transform/matrix/material-table stack; shared helpers are extracted only where source facts are genuinely isomorphic.
 - A named env-cell target with varied surface materials can produce textured structured-interior draw units or explicit typed fallback records.
+
+Implementation notes:
+
+- Added structured-interior material plan entries to `StructuredInteriorGeometryStaticDrawUnit`. The entries carry surface slot id, surface id, material id, debug-flat family, opaque pass, deferred outcome, empty texture-use ids, and typed fallback reasons.
+- Added a dedicated structured-interior material planner/coverage helper for env-cell cell-structure surfaces. It does not reuse `StaticObjectMaterialTableEntry`, because current env-cell facts only contain material ids, not the material/render-surface/palette source facts required by the static-object material pipeline.
+- `LandblockEnvCellsBaker` now attaches material plans to structured-interior draw units and emits `StaticMaterialCoverageReport` entries for `landblock-env-cells`. Current coverage reports deferred material rendering with `missing-cell-structure-material-source` fallback reasons and zero texture roles.
+- `textureUses` remain empty for structured-interior cell structures until material-source enrichment lands. This is intentional: emitting fake render-surface uses from only material ids would violate resolver/baker ownership and hide missing source closure work.
+- Made `landblock-env-cells` explicit in texture-manager static-style packing policy, rather than relying on a broad non-terrain fallthrough.
+- Added texture-manager tests proving `landblock-env-cells` texture uses receive static role pages such as `static-base-color` and static-style atlas gutter behavior, not terrain `color`/mask role pages.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- --run src/v2/static/env-cells/bake/landblock-env-cells-baker.test.ts src/v2/textures/texture-manager.test.ts src/v2/static/coordinator/static-coordinator.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run test:ts`
+
+Known remaining gap:
+
+- Real structured-interior texture-use emission is still blocked on material-source enrichment for cell-structure surfaces. The current phase closes the material planning/coverage surface and texture-manager policy, but render-surface/palette source closure must be added before textured interior draw units can be produced.
+- `cd apps/holtburger-3d && npm run lint:dead` still fails on the existing exported-type baseline. This phase did not add new Knip-reported unused exports.
+
+Steering for remaining phases:
+
+- Phase 13A3 is still about env-cell static object seed enrichment. It should not be overloaded with cell-structure material enrichment unless the source closure can be shared cleanly.
+- A future structured-interior material-enrichment phase should load material/render-surface/palette facts for cell-structure surface material ids and then convert deferred material-plan entries into texture roles and renderer-capacity-bounded material tables.
 
 #### Phase 13A3: Env-Cell Static Object Seed Enrichment
 

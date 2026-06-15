@@ -202,6 +202,8 @@ Status: Completed on 2026-06-15.
 
 ### Phase 2: Resource-Owned Static Prepared Payloads
 
+Status: Completed on 2026-06-15.
+
 #### Deliverables
 
 - Extend `StaticObjectGeometryResource` with a nullable prepared payload:
@@ -217,13 +219,13 @@ Status: Completed on 2026-06-15.
 
 #### Task Checklist
 
-- Decide whether static resources should expose a `markMaterialPayloadDirty()` closure or hold a mutable field updated by renderer methods. Do not hide mutable state behind `readonly` interface fields.
-- On static resource creation in `createStaticObjectGeometryResource`, initialize prepared payload as dirty/null.
-- In `applyTexturePlacementUpdate`, after `#textureBindings` updates, mark matching live static object resources dirty.
-- For `removedTextureRefIds` and replaced `placements`, conservatively clear all prepared payloads if reverse texture ownership is not already tracked.
-- Update `#drawStaticObjectResource` to retrieve prepared payload and upload it.
-- Ensure resource-owned typed arrays are not aliases of renderer-owned scratch arrays.
-- Preserve current failure behavior for missing material entries.
+- [x] Decide whether static resources should expose a `markMaterialPayloadDirty()` closure or hold a mutable field updated by renderer methods. Do not hide mutable state behind `readonly` interface fields.
+- [x] On static resource creation in `createStaticObjectGeometryResource`, initialize prepared payload as dirty/null.
+- [x] In `applyTexturePlacementUpdate`, after `#textureBindings` updates, mark matching live static object resources dirty.
+- [x] For `removedTextureRefIds` and replaced `placements`, conservatively clear all prepared payloads if reverse texture ownership is not already tracked.
+- [x] Update `#drawStaticObjectResource` to retrieve prepared payload and upload it.
+- [x] Ensure resource-owned typed arrays are not aliases of renderer-owned scratch arrays.
+- [x] Preserve current failure behavior for missing material entries.
 
 #### Acceptance Criteria
 
@@ -236,6 +238,13 @@ Status: Completed on 2026-06-15.
 #### Decisions and Course Corrections
 
 - Dry run chose resource-local mutable payload state over a renderer-global cache. The implementation may use a nested mutable holder to keep the rest of the resource shape mostly readonly.
+- Implemented a resource-local `StaticObjectPreparedDrawPayloadState` holder in `webgl2-static-object-payloads.ts`. The holder owns the prepared typed arrays and a mutable `isDirty` flag.
+- `StaticObjectGeometryResource` now owns `preparedDrawPayloadState`, initialized dirty at resource creation. Removing a draw unit drops the payload through the existing resource map deletion path; there is no renderer-global cache to evict.
+- Replaced the renderer-owned `#staticObjectDrawScratch` with `#getStaticObjectPreparedPayload(resource)`, which rebuilds only when the resource-local state is dirty.
+- `applyTexturePlacementUpdate` marks live static resources dirty for every changed `drawUnitBindings` entry.
+- Texture page additions/replacements/removals conservatively mark all live static prepared payloads dirty because prepared payloads contain `WebGLTexture` handles and the renderer does not yet track a reverse `textureRefId -> drawUnitId` owner map.
+- Added payload-state tests that verify dirty rebuild behavior, payload object reuse, and stale values remaining unchanged until the state is explicitly dirtied.
+- Did not add brittle renderer-private WebGL tests for map deletion/disposal behavior. The disposal/drop behavior remains covered structurally by `applyStaticDelta` deleting `StaticObjectGeometryResource` entries, which now own their prepared payloads.
 
 ### Phase 3: Isolate Terrain Layered Payload Construction
 
@@ -408,5 +417,4 @@ Status: Completed on 2026-06-15.
 ## Open Questions
 
 - Which exact neutral path should own the moved state cache: `src/lib/webgl2/`, `src/lib/webgl/`, or another existing utility convention discovered during implementation?
-- Should conservative invalidation on texture removal/replacement clear all prepared payloads, or should implementation add a reverse map from `textureRefId` to owning draw-unit ids?
 - Do we want a short before/after profiler note checked into this plan after implementation, or should profiler captures stay local/manual?

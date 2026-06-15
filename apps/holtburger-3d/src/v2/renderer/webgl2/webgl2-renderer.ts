@@ -31,9 +31,12 @@ import {
 } from "../../textures/sampling-policy";
 import { createOutdoorLandblockRootTranslation } from "../../static/placement";
 import {
-	createStaticObjectDrawScratch,
-	prepareStaticObjectDrawPayload,
+	createStaticObjectPreparedDrawPayloadState,
+	markStaticObjectPreparedDrawPayloadDirty,
+	prepareStaticObjectDrawPayloadState,
 	type StaticObjectPreparedMaterialUniforms,
+	type StaticObjectPreparedDrawPayload,
+	type StaticObjectPreparedDrawPayloadState,
 	type StaticObjectPreparedRolePageBindings,
 } from "./webgl2-static-object-payloads";
 
@@ -619,7 +622,6 @@ class Webgl2Renderer implements Renderer {
 	readonly #debugOverlayProgram: DebugOverlayProgram;
 	readonly #debugOverlayVertexArray: WebGLVertexArrayObject;
 	readonly #debugOverlayVertexBuffer: WebGLBuffer;
-	readonly #staticObjectDrawScratch = createStaticObjectDrawScratch();
 	#animationFrameId: number | null = null;
 	#disposed = false;
 	#frameCount = 0;
@@ -712,6 +714,7 @@ class Webgl2Renderer implements Renderer {
 
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void {
 		const gl = this.#gl;
+		let shouldMarkAllStaticPayloadsDirty = update.removedTextureRefIds.length > 0;
 		for (const textureRefId of update.removedTextureRefIds) {
 			const texture = this.#textures.get(textureRefId);
 			if (!texture) {
@@ -728,6 +731,7 @@ class Webgl2Renderer implements Renderer {
 				gl.deleteTexture(previousTexture);
 			}
 			this.#textures.set(placement.textureRefId, texture);
+			shouldMarkAllStaticPayloadsDirty = true;
 		}
 
 		for (const binding of update.drawUnitBindings) {
@@ -735,6 +739,14 @@ class Webgl2Renderer implements Renderer {
 				this.#textureBindings.get(binding.drawUnitId) ?? new Map();
 			bindings.set(binding.textureUseId, binding);
 			this.#textureBindings.set(binding.drawUnitId, bindings);
+			this.#markStaticObjectPreparedPayloadDirty(binding.drawUnitId);
+		}
+
+		if (shouldMarkAllStaticPayloadsDirty) {
+			// Prepared static payloads hold WebGLTexture handles. Without a reverse
+			// texture-ref owner map, texture page adds/replacements/removals must
+			// conservatively dirty all live static payloads.
+			this.#markAllStaticObjectPreparedPayloadsDirty();
 		}
 	}
 
@@ -997,16 +1009,8 @@ class Webgl2Renderer implements Renderer {
 
 	#drawStaticObjectResource(resource: StaticObjectGeometryResource): void {
 		const gl = this.#gl;
-		const bindings =
-			this.#textureBindings.get(resource.drawUnitId) ??
-			EMPTY_TEXTURE_DRAW_UNIT_BINDINGS;
-		prepareStaticObjectDrawPayload(
-			this.#staticObjectDrawScratch,
-			resource,
-			bindings,
-			this.#textures,
-		);
-		const { materialUniforms, rolePages } = this.#staticObjectDrawScratch;
+		const { materialUniforms, rolePages } =
+			this.#getStaticObjectPreparedPayload(resource);
 
 		uploadStaticObjectRolePageBindings(
 			gl,
@@ -1048,6 +1052,37 @@ class Webgl2Renderer implements Renderer {
 		);
 		gl.bindVertexArray(resource.vertexArray);
 		gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
+	}
+
+	#getStaticObjectPreparedPayload(
+		resource: StaticObjectGeometryResource,
+	): StaticObjectPreparedDrawPayload {
+		const bindings =
+			this.#textureBindings.get(resource.drawUnitId) ??
+			EMPTY_TEXTURE_DRAW_UNIT_BINDINGS;
+
+		return prepareStaticObjectDrawPayloadState(
+			resource.preparedDrawPayloadState,
+			resource,
+			bindings,
+			this.#textures,
+		);
+	}
+
+	#markStaticObjectPreparedPayloadDirty(drawUnitId: string): void {
+		const resource = this.#staticObjectResources.get(drawUnitId);
+		if (!resource) {
+			return;
+		}
+		markStaticObjectPreparedDrawPayloadDirty(resource.preparedDrawPayloadState);
+	}
+
+	#markAllStaticObjectPreparedPayloadsDirty(): void {
+		for (const resource of this.#staticObjectResources.values()) {
+			markStaticObjectPreparedDrawPayloadDirty(
+				resource.preparedDrawPayloadState,
+			);
+		}
 	}
 
 	#resizeToDisplaySize(): void {
@@ -1264,6 +1299,7 @@ interface StaticObjectGeometryResource {
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
 	readonly materialEntries: StaticObjectGeometryStaticDrawUnit["materialEntries"];
+	readonly preparedDrawPayloadState: StaticObjectPreparedDrawPayloadState;
 	readonly renderState: StaticObjectRenderState;
 	readonly localSortCenter: StaticObjectSortMetadata["center"];
 	readonly sortPolicy: StaticObjectSortMetadata["policy"];
@@ -1752,6 +1788,7 @@ function createStaticObjectGeometryResource(
 		materialEntries: drawUnit.materialEntries,
 		materialFamily: drawUnit.materialFamily,
 		materialPass: drawUnit.materialPass,
+		preparedDrawPayloadState: createStaticObjectPreparedDrawPayloadState(),
 		materialSlotBuffer,
 		positionBuffer,
 		renderState: drawUnit.renderState,

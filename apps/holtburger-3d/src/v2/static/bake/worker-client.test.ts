@@ -117,6 +117,10 @@ function createInput(): StaticBakeBatchInput {
 			staticBatchId: "batch-a",
 			textureUses: [],
 		},
+		attachments: {
+			envCellCellStructureGeometry: [],
+			staticObjectSourceGeometry: [],
+		},
 		domain: "outdoor-terrain",
 		items: [
 			{

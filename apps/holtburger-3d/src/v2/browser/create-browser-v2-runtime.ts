@@ -6,6 +6,7 @@ import {
 	createClientRuntime,
 	type ClientRuntime,
 } from "../runtime/client-runtime";
+import { CompositeStaticBakeAttachmentProvider } from "../static/bake/attachments";
 import { StaticCoordinator } from "../static/coordinator/static-coordinator";
 import type {
 	StaticBakeBatchInput,
@@ -19,6 +20,7 @@ import {
 	ImmediateStaticBaker,
 	ImmediateStaticResolver,
 } from "../static/fake-workers";
+import { LandblockEnvCellGeometryAttachmentProvider } from "../static/env-cells/bake/landblock-env-cell-geometry-attachments";
 import { StaticObjectBakeAttachmentProvider } from "../static/objects/bake/static-object-bake-attachments";
 import {
 	StaticBakeWorkerClient,
@@ -88,9 +90,14 @@ function createTauriStaticCoordinator(
 	});
 
 	return new StaticCoordinator({
-		attachmentProvider: new StaticObjectBakeAttachmentProvider({
-			assetReader,
-		}),
+		attachmentProvider: new CompositeStaticBakeAttachmentProvider([
+			new StaticObjectBakeAttachmentProvider({
+				assetReader,
+			}),
+			new LandblockEnvCellGeometryAttachmentProvider({
+				assetReader,
+			}),
+		]),
 		baker,
 		resolver,
 	});

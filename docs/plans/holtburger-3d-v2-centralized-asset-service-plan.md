@@ -1,0 +1,314 @@
+# Holtburger 3D V2 Centralized Asset Service Plan
+
+## Context And Boundaries
+
+Goal: move V2 prepared-asset cache ownership out of resolver workers and into one runtime-owned asset service that sits in front of the host bridge.
+
+The current V2 implementation has the right logical pieces, but the resolver worker currently constructs its own `HostBackedAssetService`. That makes each resolver worker a durable prepared-asset cache owner. The design direction is tighter: runtime/main owns durable asset identity, pending dedupe, committed prepared assets, leases, warm retention, failures, and diagnostics; resolver workers use a remote asset facade plus optional per-job memoization.
+
+In scope:
+
+- V2 TypeScript/frontend code under `apps/holtburger-3d/src/v2`.
+- Resolver worker host/asset protocol changes.
+- Runtime-owned `HostBackedAssetService` use for resolver worker lookups.
+- Asset-service-owned prepared asset views that separate lightweight resolver metadata from heavy bake geometry.
+- Bake-time geometry attachment tables for large static source buffers.
+- A narrow coordinator-facing attachment provider so static coordination can request bake attachments without inspecting `gfx-obj` internals.
+- Resolver-local per-job memoization where it removes duplicate work inside one resolve call.
+- Tests proving cross-worker dedupe and worker-local non-retention.
+- Design doc alignment.
+
+Out of scope:
+
+- Rewriting Tauri/Rust host contracts.
+- Moving texture packing, WebGL upload, or renderer residency.
+- Reworking dynamic service architecture before dynamic rendering exists.
+- Preserving worker-local durable cache behavior for compatibility.
+- Adding a universal cache eviction policy beyond making current warm retention actually owned by the runtime service.
+
+## Ground Truth
+
+Design references:
+
+- [holtburger-3d-frontend-v2-design.md](holtburger-3d-frontend-v2-design.md)
+- [holtburger-3d-frontend-v2-implementation-plan.md](holtburger-3d-frontend-v2-implementation-plan.md)
+
+Current implementation references:
+
+- `apps/holtburger-3d/src/v2/assets/asset-service.ts`
+- `apps/holtburger-3d/src/v2/assets/contracts.ts`
+- `apps/holtburger-3d/src/v2/runtime/client-runtime.ts`
+- `apps/holtburger-3d/src/v2/browser/create-browser-v2-runtime.ts`
+- `apps/holtburger-3d/src/v2/static/resolver/static-resolver.worker.ts`
+- `apps/holtburger-3d/src/v2/static/resolver/host-bridge.ts`
+- `apps/holtburger-3d/src/v2/static/resolver/protocol.ts`
+- `apps/holtburger-3d/src/v2/static/resolver/worker-client.ts`
+- `apps/holtburger-3d/src/v2/static/coordinator/static-coordinator.ts`
+- `apps/holtburger-3d/src/v2/static/terrain/terrain-resolver.ts`
+- `apps/holtburger-3d/src/v2/static/objects/outdoor-static-objects-resolver.ts`
+- `apps/holtburger-3d/src/v2/static/env-cells/landblock-env-cells-resolver.ts`
+- `apps/holtburger-3d/src/v2/static/objects/bake/static-object-compatibility-baker.ts`
+- `apps/holtburger-3d/src/v2/static/objects/bake/static-object-compatibility-partitioner.ts`
+- `apps/holtburger-3d/src/v2/textures/texture-manager.ts`
+
+Existing tests to extend:
+
+- `apps/holtburger-3d/src/v2/assets/asset-service.test.ts`
+- `apps/holtburger-3d/src/v2/static/resolver/host-bridge.test.ts`
+- `apps/holtburger-3d/src/v2/static/resolver/worker-client.test.ts`
+- `apps/holtburger-3d/src/v2/static/coordinator/static-coordinator.test.ts`
+- `apps/holtburger-3d/src/v2/browser/create-browser-v2-runtime.test.ts`
+- Resolver unit tests under `apps/holtburger-3d/src/v2/static/*/*.test.ts`
+
+## Phased Implementation
+
+### Phase 1: Make Ownership Explicit In Contracts
+
+Deliverables:
+
+- Introduce a resolver-worker asset RPC contract whose operation name reflects prepared-asset service lookup, not raw host lookup.
+- Keep `RuntimeHost.lookupAsset` as the host adapter boundary.
+- Introduce a narrow `PreparedAssetReader` or `PreparedAssetRequester` interface for resolver dependencies so workers do not need an `AssetService` object with lease, prune, or snapshot methods.
+- Add or rename worker bridge types so the main side can route worker asset requests through `AssetService.requestPreparedAsset()` rather than directly through `RuntimeHost.lookupAsset()`.
+- Update tests to assert the main bridge receives typed prepared-asset requests and delegates to an injected `AssetService`.
+
+Acceptance criteria:
+
+- Resolver workers cannot directly instantiate a durable `HostBackedAssetService` as part of normal production wiring.
+- Main-thread bridge tests prove two identical worker requests can be deduped by the same asset service.
+- Protocol names make it clear that resolver workers depend on the asset service boundary, not the host boundary.
+- Resolver constructors depend on request-only asset access unless a specific resolver genuinely needs leases or diagnostics.
+
+Task checklist:
+
+- [ ] Add a request-only prepared asset interface colocated with asset contracts.
+- [ ] Add or rename resolver asset request/response protocol messages.
+- [ ] Update `createStaticResolverMainHostBridge` to accept an `AssetService`.
+- [ ] Keep bridge error semantics typed and testable.
+- [ ] Update bridge tests for successful lookup, failure propagation, dedupe, and disposal.
+
+Decisions and course corrections:
+
+- None yet.
+
+### Phase 2: Move Resolver Workers To A Remote Asset Facade
+
+Deliverables:
+
+- Replace worker-local `HostBackedAssetService({ host: StaticResolverWorkerRuntimeHost })` with a lightweight worker-side remote asset facade.
+- The remote facade implements `requestPreparedAsset()` by posting to the main-thread asset service bridge.
+- The worker facade implements only the request-only prepared asset interface; it does not fake leases, pruning, or snapshots.
+- Resolver constructors keep dependency injection while depending on request-only prepared asset access.
+
+Acceptance criteria:
+
+- `static-resolver.worker.ts` no longer imports `HostBackedAssetService`.
+- Resolver worker memory no longer has committed/pending/failure durable maps from `HostBackedAssetService`.
+- Resolver unit tests still use fake asset services directly.
+- Production resolver workers still resolve terrain, outdoor static objects, and landblock env-cell bundles through the same resolver classes.
+- No worker-side production class implements `AssetService` solely to satisfy resolver type signatures.
+
+Task checklist:
+
+- [ ] Implement `RemotePreparedAssetReader` or equivalent worker-side facade.
+- [ ] Wire `static-resolver.worker.ts` to the remote facade.
+- [ ] Remove `StaticResolverWorkerRuntimeHost` if it becomes obsolete, or rename it so it no longer claims to be a `RuntimeHost`.
+- [ ] Update imports and tests.
+
+Decisions and course corrections:
+
+- None yet.
+
+### Phase 3: Share The Runtime Asset Service With Resolver Workers And Textures
+
+Deliverables:
+
+- Ensure browser runtime creates one runtime-owned `HostBackedAssetService`.
+- Pass that asset service into both `ClientRuntime` and the resolver worker main bridge.
+- Keep `TextureManager` using the same runtime asset service for prepared textures.
+- Prefer constructing the shared `HostBackedAssetService` in `createBrowserV2Runtime()` and passing it explicitly into `createClientRuntime()` and `createTauriStaticCoordinator()` so duplicate services are structurally hard to create.
+- Add tests proving resolver worker requests and texture-manager requests share the same in-flight/committed cache owner when they ask for the same key.
+
+Acceptance criteria:
+
+- In the browser/Tauri V2 path, there is one durable `HostBackedAssetService` per runtime, not one per resolver worker.
+- Cross-worker duplicate requests for the same host asset coalesce at the runtime service.
+- Runtime snapshots expose one asset service snapshot for V2 diagnostics.
+
+Task checklist:
+
+- [ ] Construct one `assetService` in `createBrowserV2Runtime`.
+- [ ] Pass that same `assetService` into `createClientRuntime`.
+- [ ] Thread the runtime asset service into `createTauriStaticCoordinator`.
+- [ ] Update `createWorkerStaticResolver` to bridge workers to that service.
+- [ ] Add a browser-runtime composition test that proves the resolver bridge is asset-service backed.
+
+Decisions and course corrections:
+
+- None yet.
+
+### Phase 4: Split Static Source Metadata From Bake Geometry
+
+Deliverables:
+
+- Introduce typed prepared asset views for static object source data:
+  - lightweight `gfx-obj` metadata for resolver work: bounds, counts, surface ids, triangle descriptors, material variant signatures, and material/source dependency facts;
+  - heavy `gfx-obj` render geometry for bake work: positions and UVs now, with the attachment shape able to grow normals/tangents only when a renderer path actually needs them.
+- Change outdoor static-object resolver payloads so `StaticObjectPartSourceFacts` carries geometry refs and lightweight triangle/material facts rather than large position/UV/normal buffers.
+- Add a static bake geometry attachment table to the static bake input, keyed by typed geometry identity instead of host route strings.
+- Introduce a narrow `StaticBakeAttachmentProvider` or equivalent coordinator dependency. The coordinator asks it to build attachments for a pending bake batch, but the coordinator does not parse prepared `gfx-obj` payloads.
+- Back the attachment provider with asset-service view helpers that derive metadata and geometry views from the cached prepared `gfx-obj`. Do not add new Tauri/Rust routes for virtual metadata unless profiling proves the frontend view split is insufficient.
+- Build the attachment table through that provider before submitting static-object batches to the baker.
+
+Acceptance criteria:
+
+- Outdoor static-object resolver results do not clone large `positions`, `normals`, or `texCoords` arrays back from resolver workers.
+- Static-object bake workers still receive the geometry buffers required to build draw units.
+- Tests prove the resolver can classify material/source facts from metadata-only views.
+- Static coordinator tests prove attachment-provider failures mark current work failed rather than submitting partial bake inputs.
+- Tests prove the bake path fails hard when a draw partition references a missing geometry attachment.
+- Tests prove duplicate source geometry referenced by multiple objects or parts is attached once per bake batch.
+
+Task checklist:
+
+- [ ] Add view/key types for `gfx-obj` metadata and render geometry.
+- [ ] Update asset-service contracts or helpers to request a prepared asset view by typed key.
+- [ ] Add a `StaticBakeAttachmentProvider` interface and no-op/default implementation for domains that do not need extra attachments.
+- [ ] Split `StaticObjectPartSourceFacts` into lightweight source facts plus geometry identity.
+- [ ] Update static-object resolver tests to assert payloads omit heavy arrays.
+- [ ] Add `StaticBakeBatchInput` geometry attachments for static object domains.
+- [ ] Update `StaticCoordinator` to ask the attachment provider for bake attachments while constructing `StaticBakeBatchInput`.
+- [ ] Update static-object baker/partitioner to read geometry from attachments.
+- [ ] Add coordinator attachment-failure, baker missing-attachment, and duplicate-attachment tests.
+
+Decisions and course corrections:
+
+- None yet.
+
+### Phase 5: Add Resolver Per-Job Memoization Where It Pays
+
+Deliverables:
+
+- Identify resolver-local repeated lookups that happen inside a single `resolve(job)` call.
+- Add small per-call memo helpers only where they remove real duplication.
+- Keep memo state scoped to the resolve call, not the resolver instance, unless profiling proves a stronger need.
+
+Acceptance criteria:
+
+- No resolver-local memo survives beyond the current job.
+- Tests prove repeated dependencies inside one job call only issue one asset-service request through the injected dependency.
+- Missing refs and failure behavior remain explicit; memoization does not swallow errors.
+
+Task checklist:
+
+- [ ] Audit terrain, outdoor object, and env-cell resolvers for repeated key paths.
+- [ ] Add a small typed request memo helper if at least two resolvers need it.
+- [ ] Prefer resolver-local helper injection over global module state.
+- [ ] Extend resolver tests with duplicate dependency fixtures.
+
+Decisions and course corrections:
+
+- None yet.
+
+### Phase 6: Retention, Pruning, And Diagnostics Cleanup
+
+Deliverables:
+
+- Decide where runtime calls `pruneExpiredWarmAssets()`.
+- Make cache diagnostics describe one runtime asset cache rather than worker-local caches.
+- Remove stale worker-host cache terminology from comments, tests, and docs.
+- Ensure lease semantics remain main-thread/runtime-owned.
+
+Acceptance criteria:
+
+- Warm-retention deadlines are meaningful because pruning is called by a runtime-owned cadence or explicit maintenance command.
+- Asset service snapshot includes all resolver-worker-driven prepared asset requests.
+- No production resolver worker path exposes `HostBackedAssetService.createSnapshot()` because workers no longer own durable cache state.
+
+Task checklist:
+
+- [ ] Add runtime asset maintenance cadence or explicit prune hook.
+- [ ] Update runtime diagnostics/snapshot projections.
+- [ ] Delete obsolete worker-local cache tests or rewrite them against the main service bridge.
+- [ ] Search for stale wording such as `host-asset-lookup` where it now means asset service request.
+
+Decisions and course corrections:
+
+- None yet.
+
+### Phase 7: Resteer And Cleanup
+
+Deliverables:
+
+- Re-read the updated implementation against the V2 design doc.
+- Delete obsolete bridge classes, test fixtures, and misleading names.
+- Record any deferred work in this plan rather than leaving TODOs scattered in code.
+
+Acceptance criteria:
+
+- The V2 design doc, this plan, and code agree on asset service ownership.
+- No duplicated durable prepared-asset cache remains in resolver workers.
+- All affected V2 tests pass.
+
+Task checklist:
+
+- [ ] Run `rg "HostBackedAssetService|pruneExpiredWarmAssets|host-asset-lookup|StaticResolverWorkerRuntimeHost" apps/holtburger-3d/src/v2 docs/plans`.
+- [ ] Run `rg "positions:|normals:|texCoords:" apps/holtburger-3d/src/v2/static/contracts.ts apps/holtburger-3d/src/v2/static/objects`.
+- [ ] Remove dead protocol types and fixtures.
+- [ ] Run final verification commands.
+
+Decisions and course corrections:
+
+- None yet.
+
+## Risks And Mitigations
+
+- Risk: centralizing the cache increases repeated structured-clone transfers from main to workers.
+  Mitigation: measure after the ownership fix; if transfers are hot, add transferables or immutable payload handles without moving durable cache ownership back into workers.
+
+- Risk: lightweight metadata views become a second divergent `gfx-obj` interpretation path.
+  Mitigation: derive metadata and geometry views from the same prepared source contract or shared asset-service view builder, and test parity against the current full `gfx-obj` payload behavior.
+
+- Risk: moving geometry out of resolver payloads makes the coordinator responsible for source internals.
+  Mitigation: keep geometry attachment construction behind typed asset-service helpers; the coordinator gathers refs and asks for attachments, but it does not inspect `gfx-obj` fields directly.
+
+- Risk: the coordinator grows a hidden dependency on static-object source format while adding attachments.
+  Mitigation: add a narrow `StaticBakeAttachmentProvider` boundary. Static coordinator owns batch timing and failure propagation; asset-service-backed helpers own source payload interpretation.
+
+- Risk: `AssetService` currently includes lease/prune methods resolvers do not use.
+  Mitigation: introduce a narrower request-only interface before implementing the remote facade, and make resolvers depend on it instead of full `AssetService`.
+
+- Risk: new virtual `gfx-obj` metadata routes could expand the Tauri boundary before there is evidence they are needed.
+  Mitigation: derive frontend metadata and geometry views from cached prepared `gfx-obj` payloads first. The existing binary envelope already keeps heavy `renderGeometry` arrays out of the JSON manifest transport.
+
+- Risk: browser runtime composition may accidentally create two main-thread asset services.
+  Mitigation: add tests around composition and expose a single runtime asset snapshot.
+
+- Risk: naming churn obscures host-vs-asset boundaries.
+  Mitigation: rename bridge messages deliberately: host adapter messages cross `AssetService -> RuntimeHost`; resolver worker messages cross `ResolverWorker -> AssetService`.
+
+- Risk: warm retention remains theoretical if no runtime prune cadence is added.
+  Mitigation: include pruning as a dedicated phase and do not call the migration complete until retention can actually evict.
+
+## Definition Of Done
+
+- Resolver workers no longer create or own `HostBackedAssetService`.
+- Runtime/main owns the only durable prepared-asset cache for V2 static resolution and texture preparation.
+- Resolver worker asset requests are deduped across the resolver worker pool.
+- Static-object resolver payloads carry lightweight geometry refs/metadata, not full render geometry buffers.
+- Static-object bake inputs attach required source geometry once per batch through the runtime asset service.
+- Resolver-local cache, if present, is per-job and tested.
+- Texture manager and resolver workers share the same runtime asset service.
+- Warm retention has an owner and pruning path.
+- Diagnostics report the centralized asset service snapshot.
+- `cd apps/holtburger-3d && npm run check` passes.
+- `cd apps/holtburger-3d && npm run lint:ts` passes.
+- `cd apps/holtburger-3d && npm run test:ts` passes.
+
+## Open Questions
+
+- Should the request-only resolver interface be named `PreparedAssetReader`, `PreparedAssetRequester`, or something more domain-specific?
+- Should worker asset request messages carry priority now, or should priority wait until static coordinator scheduling grows teeth?
+- Should prepared asset leases be held for committed static payloads, or only for texture/render resources after bake commit?
+- Should warm retention pruning run on a timer, on scene-interest changes, or on explicit runtime maintenance ticks?
+- Should terrain get the same metadata/geometry split later, or is terrain's first-visible fast path better served by keeping terrain mesh directly in the terrain payload for now?

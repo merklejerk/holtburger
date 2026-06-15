@@ -147,6 +147,7 @@ describe("V2 static object compatibility partitioner", () => {
 				alphaTest: 0,
 				detailTextureTiling: 1,
 				detailTextureUseId: null,
+				indexedClipThreshold: -1,
 				indexedTextureFormat: null,
 				indexTextureUseId: null,
 				materialColor: [1, 1, 1, 1],
@@ -341,6 +342,30 @@ describe("V2 static object compatibility partitioner", () => {
 			materialPass: "alpha-test",
 		});
 		expect(result.textureUses).toHaveLength(1);
+	});
+
+	it("bakes Base1ClipMap indexed partitions with retail index cutoff", () => {
+		const payload = createPayload({
+			materials: [createIndexedMaterial(0x08000010, { surfaceType: 0x4 })],
+			textureRefs: createIndexedTextureRefs(),
+		});
+		const input = createBakeInput(payload);
+
+		const result = bakeStaticObjectCompatibility(input);
+		const drawUnit = result.drawUnits[0];
+
+		expect(drawUnit).toMatchObject({
+			alphaTest: 100 / 255,
+			indexedClipThreshold: 8,
+			kind: "static-object-geometry",
+			materialFamily: "indexed-paletted",
+			materialPass: "alpha-test",
+		});
+		expect(
+			drawUnit?.kind === "static-object-geometry"
+				? drawUnit.materialEntries[0]?.indexedClipThreshold
+				: null,
+		).toBe(8);
 	});
 
 	it("bakes outdoor-detail alpha-test generated scenery into rendered draw units", () => {
@@ -544,8 +569,8 @@ describe("V2 static object compatibility partitioner", () => {
 			{
 				entryCount: 2,
 				entryKeys: [
-					"color:1.000000,1.000000,1.000000,1.000000,0.000000,0.000000,0.000000|wrap:clamp|roles:base-color:prepared-render-surface-texture-use:06000010:rgba-color|alpha-test:0.000000|detail-tiling:1.000000",
-					"color:1.000000,1.000000,1.000000,1.000000,0.000000,0.000000,0.000000|wrap:clamp|roles:base-color:prepared-render-surface-texture-use:06000011:rgba-color|alpha-test:0.000000|detail-tiling:1.000000",
+					"color:1.000000,1.000000,1.000000,1.000000,0.000000,0.000000,0.000000|wrap:clamp|roles:base-color:prepared-render-surface-texture-use:06000010:rgba-color|alpha-test:0.000000|indexed-clip:-1.000000|detail-tiling:1.000000",
+					"color:1.000000,1.000000,1.000000,1.000000,0.000000,0.000000,0.000000|wrap:clamp|roles:base-color:prepared-render-surface-texture-use:06000011:rgba-color|alpha-test:0.000000|indexed-clip:-1.000000|detail-tiling:1.000000",
 				],
 				tableSchemaKey:
 					"base-color:prepared-render-surface-texture-use:rgba-color",
@@ -1293,6 +1318,7 @@ function createTexturedMaterial(
 
 function createIndexedMaterial(
 	materialId: number,
+	overrides: Partial<StaticObjectMaterialSourceFacts> = {},
 ): StaticObjectMaterialSourceFacts {
 	return {
 		diffuse: 1,
@@ -1317,6 +1343,7 @@ function createIndexedMaterial(
 		surfaceId: materialId,
 		surfaceType: 0,
 		translucency: 0,
+		...overrides,
 	};
 }
 

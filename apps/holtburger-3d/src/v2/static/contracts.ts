@@ -370,7 +370,7 @@ type TerrainHostBvh = LandblockOutdoorPayloadDto["terrain"]["terrainBvh"];
 
 interface TerrainRenderLocalBvh {
 	readonly coordinateSpace: "landblock-render-local";
-	readonly nodes: readonly (TerrainHostBvh["nodes"][number])[];
+	readonly nodes: readonly TerrainHostBvh["nodes"][number][];
 	readonly items: TerrainHostBvh["items"];
 }
 
@@ -836,6 +836,11 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	 * Derived one-entry summary retained while the renderer/test surface cuts over
 	 * to materialEntries and materialSlotIndices.
 	 */
+	readonly indexedClipThreshold: number;
+	/**
+	 * Derived one-entry summary retained while the renderer/test surface cuts over
+	 * to materialEntries and materialSlotIndices.
+	 */
 	readonly materialColor: readonly [number, number, number, number];
 	/**
 	 * Derived one-entry summary retained while the renderer/test surface cuts over
@@ -890,6 +895,7 @@ export interface StaticObjectMaterialTableEntry {
 	readonly slot: number;
 	readonly materialIds: readonly number[];
 	readonly alphaTest: number;
+	readonly indexedClipThreshold: number;
 	readonly renderState: StaticObjectRenderState;
 	readonly materialColor: readonly [number, number, number, number];
 	readonly materialEmissiveColor: readonly [number, number, number];

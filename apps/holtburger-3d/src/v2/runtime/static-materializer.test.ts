@@ -328,6 +328,7 @@ function createStaticObjectDrawUnit(
 		drawUnitId,
 		indexTextureUseId: null,
 		indexType: "uint16",
+		indexedClipThreshold: -1,
 		indexedTextureFormat: null,
 		indices: new Uint16Array(indices),
 		kind: "static-object-geometry",
@@ -379,6 +380,7 @@ function createStaticObjectMaterialEntry(
 ): StaticObjectMaterialTableEntry {
 	return {
 		alphaTest: 0,
+		indexedClipThreshold: -1,
 		detailTextureTiling: 1,
 		detailTextureUseId: null,
 		indexTextureUseId: null,

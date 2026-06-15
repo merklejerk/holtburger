@@ -149,11 +149,13 @@ function bakeStaticObjectCompatibilityItem(
 		drawUnits: drawUnits.map((drawUnit, index) => ({
 			...drawUnit,
 			sourceMappingRecords:
-				sourceMappingsBySliceId.get(renderablePartitions[index]?.sliceId ?? "") ??
-				[],
+				sourceMappingsBySliceId.get(
+					renderablePartitions[index]?.sliceId ?? "",
+				) ?? [],
 			spatialRecord:
-				spatialRecordBySliceId.get(renderablePartitions[index]?.sliceId ?? "") ??
-				null,
+				spatialRecordBySliceId.get(
+					renderablePartitions[index]?.sliceId ?? "",
+				) ?? null,
 		})),
 		materialCoverage: partitionPlan.materialCoverage,
 		sourceMappings: [...sourceMappingsBySliceId.values()].flat(),
@@ -262,6 +264,7 @@ function createStaticObjectGeometryDrawUnit(options: {
 		positions: geometry.positions,
 		indexTextureUseId: materialEntry.indexTextureUseId,
 		indexedTextureFormat: materialEntry.indexedTextureFormat,
+		indexedClipThreshold: materialEntry.indexedClipThreshold,
 		paletteFirstIndex: materialEntry.paletteFirstIndex,
 		paletteTextureUseId: materialEntry.paletteTextureUseId,
 		primaryTextureUseId: materialEntry.primaryTextureUseId,
@@ -325,6 +328,7 @@ function createStaticObjectMaterialTableEntry(parameters: {
 
 	return {
 		alphaTest: parameters.entry.alphaTest,
+		indexedClipThreshold: parameters.entry.indexedClipThreshold,
 		renderState: createStaticObjectRenderState(parameters.entry.blend),
 		detailTextureTiling: parameters.entry.detailTextureTiling,
 		detailTextureUseId: detailTextureUse

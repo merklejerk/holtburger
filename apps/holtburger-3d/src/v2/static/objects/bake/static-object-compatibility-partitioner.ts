@@ -36,6 +36,7 @@ export interface StaticObjectCompatibilityPartition {
 	readonly pass: StaticObjectMaterialPlan["pass"];
 	readonly alphaMode: StaticObjectMaterialPlan["alphaPolicy"]["mode"];
 	readonly alphaTest: StaticObjectMaterialPlan["alphaPolicy"]["alphaTest"];
+	readonly indexedClipThreshold: StaticObjectMaterialPlan["alphaPolicy"]["indexedClipThreshold"];
 	readonly materialColor: StaticObjectMaterialPlan["color"];
 	readonly materialEmissiveColor: StaticObjectMaterialPlan["emissiveColor"];
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
@@ -72,6 +73,7 @@ interface StaticObjectCoarseMaterialEntry {
 	readonly materialEmissiveColor: StaticObjectMaterialPlan["emissiveColor"];
 	readonly alphaMode: StaticObjectMaterialPlan["alphaPolicy"]["mode"];
 	readonly alphaTest: StaticObjectMaterialPlan["alphaPolicy"]["alphaTest"];
+	readonly indexedClipThreshold: StaticObjectMaterialPlan["alphaPolicy"]["indexedClipThreshold"];
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly detailTextureTiling: number;
 	readonly textureRoles: readonly StaticObjectMaterialTextureUseRole[];
@@ -475,6 +477,7 @@ function createCompatibilityPartition(options: {
 	return {
 		alphaMode: first.materialPlan.alphaPolicy.mode,
 		alphaTest: first.materialPlan.alphaPolicy.alphaTest,
+		indexedClipThreshold: first.materialPlan.alphaPolicy.indexedClipThreshold,
 		compatibilityKey: options.compatibilityKey,
 		coarseTablePlan: createCoarseTablePlan({
 			candidates: options.candidates,
@@ -539,6 +542,8 @@ function createCoarseTablePlan(options: {
 		entriesByKey.set(candidate.materialEntryKey, {
 			alphaMode: candidate.materialPlan.alphaPolicy.mode,
 			alphaTest: candidate.materialPlan.alphaPolicy.alphaTest,
+			indexedClipThreshold:
+				candidate.materialPlan.alphaPolicy.indexedClipThreshold,
 			blend: candidate.materialPlan.blend,
 			detailTextureTiling: resolveDetailTextureTiling(candidate.materialPlan),
 			materialColor: candidate.materialPlan.color,
@@ -757,6 +762,9 @@ function createMaterialEntryKey(options: {
 		`wrap:${options.textureWrapMode}`,
 		`roles:${options.textureRoleLayoutKey}`,
 		`alpha-test:${formatMaterialScalar(options.plan.alphaPolicy.alphaTest)}`,
+		`indexed-clip:${formatMaterialScalar(
+			options.plan.alphaPolicy.indexedClipThreshold,
+		)}`,
 		`detail-tiling:${formatMaterialScalar(
 			resolveDetailTextureTiling(options.plan),
 		)}`,

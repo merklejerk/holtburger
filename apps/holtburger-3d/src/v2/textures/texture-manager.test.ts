@@ -1466,7 +1466,9 @@ class FixtureAssetService implements AssetService {
 		};
 	}
 
-	pruneExpiredWarmAssets(): void {}
+	pruneExpiredWarmAssets(): number {
+		return 0;
+	}
 
 	createSnapshot(): AssetServiceSnapshot {
 		return {

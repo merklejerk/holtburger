@@ -79,10 +79,10 @@ describe("V2 host-backed asset service lifecycle", () => {
 			1050,
 		);
 
-		service.pruneExpiredWarmAssets(1049);
+		expect(service.pruneExpiredWarmAssets(1049)).toBe(0);
 		expect(service.createSnapshot().committed).toHaveLength(1);
 
-		service.pruneExpiredWarmAssets(1050);
+		expect(service.pruneExpiredWarmAssets(1050)).toBe(1);
 		expect(service.createSnapshot().committed).toEqual([]);
 	});
 

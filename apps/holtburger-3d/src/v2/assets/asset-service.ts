@@ -123,7 +123,8 @@ export class HostBackedAssetService implements AssetService {
 		};
 	}
 
-	pruneExpiredWarmAssets(nowMs = this.#nowMs()): void {
+	pruneExpiredWarmAssets(nowMs = this.#nowMs()): number {
+		let pruned = 0;
 		for (const [keyString, entry] of this.#committed) {
 			if (
 				entry.leaseCount === 0 &&
@@ -131,8 +132,10 @@ export class HostBackedAssetService implements AssetService {
 				entry.warmRetainedUntilMs <= nowMs
 			) {
 				this.#committed.delete(keyString);
+				pruned += 1;
 			}
 		}
+		return pruned;
 	}
 
 	createSnapshot(): AssetServiceSnapshot {

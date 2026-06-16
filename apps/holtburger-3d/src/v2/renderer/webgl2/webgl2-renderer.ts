@@ -1004,7 +1004,10 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	#drawStaticObjects(): void {
-		if (this.#staticObjectResources.size === 0) {
+		if (
+			this.#staticObjectResources.size === 0 &&
+			this.#structuredInteriorResources.size === 0
+		) {
 			this.#resetTransparentStaticObjectDrawLists();
 			return;
 		}
@@ -1029,12 +1032,16 @@ class Webgl2Renderer implements Renderer {
 				this.#appendTransparentStaticObjectResource(resource);
 				continue;
 			}
-			this.#drawStaticObjectResource(resource);
+			this.#drawStaticMaterialResource(resource);
+		}
+		for (const resource of this.#structuredInteriorResources.values()) {
+			applyStaticObjectRenderState(gl, this.#stateCache, resource.renderState);
+			this.#drawStaticMaterialResource(resource);
 		}
 
 		for (const resource of this.#farTransparentStaticObjectDrawList) {
 			applyStaticObjectRenderState(gl, this.#stateCache, resource.renderState);
-			this.#drawStaticObjectResource(resource);
+			this.#drawStaticMaterialResource(resource);
 		}
 		this.#nearTransparentStaticObjectDrawEntries.sort(
 			compareStaticObjectTransparentDrawEntries,
@@ -1045,7 +1052,7 @@ class Webgl2Renderer implements Renderer {
 				throw new Error("Missing transparent static object draw resource.");
 			}
 			applyStaticObjectRenderState(gl, this.#stateCache, resource.renderState);
-			this.#drawStaticObjectResource(resource);
+			this.#drawStaticMaterialResource(resource);
 		}
 
 		this.#stateCache.bindVertexArray(null);
@@ -1078,7 +1085,7 @@ class Webgl2Renderer implements Renderer {
 		restoreDebugOverlayRenderState(gl, this.#stateCache);
 	}
 
-	#drawStaticObjectResource(resource: StaticObjectGeometryResource): void {
+	#drawStaticMaterialResource(resource: StaticMaterialGeometryResource): void {
 		const gl = this.#gl;
 		const { materialUniforms, rolePages } =
 			this.#getStaticObjectPreparedPayload(resource);
@@ -1165,7 +1172,7 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	#getStaticObjectPreparedPayload(
-		resource: StaticObjectGeometryResource,
+		resource: StaticMaterialGeometryResource,
 	): StaticObjectPreparedDrawPayload {
 		const bindings =
 			this.#textureBindings.get(resource.drawUnitId) ??
@@ -1219,14 +1226,27 @@ class Webgl2Renderer implements Renderer {
 
 	#markStaticObjectPreparedPayloadDirty(drawUnitId: string): void {
 		const resource = this.#staticObjectResources.get(drawUnitId);
-		if (!resource) {
-			return;
+		if (resource) {
+			markStaticObjectPreparedDrawPayloadDirty(
+				resource.preparedDrawPayloadState,
+			);
 		}
-		markStaticObjectPreparedDrawPayloadDirty(resource.preparedDrawPayloadState);
+		const structuredInteriorResource =
+			this.#structuredInteriorResources.get(drawUnitId);
+		if (structuredInteriorResource) {
+			markStaticObjectPreparedDrawPayloadDirty(
+				structuredInteriorResource.preparedDrawPayloadState,
+			);
+		}
 	}
 
 	#markAllStaticObjectPreparedPayloadsDirty(): void {
 		for (const resource of this.#staticObjectResources.values()) {
+			markStaticObjectPreparedDrawPayloadDirty(
+				resource.preparedDrawPayloadState,
+			);
+		}
+		for (const resource of this.#structuredInteriorResources.values()) {
 			markStaticObjectPreparedDrawPayloadDirty(
 				resource.preparedDrawPayloadState,
 			);
@@ -1263,6 +1283,7 @@ class Webgl2Renderer implements Renderer {
 			renderedTriangles: sumRenderedTriangles([
 				...this.#terrainResources.values(),
 				...this.#staticObjectResources.values(),
+				...this.#structuredInteriorResources.values(),
 			]),
 			staticDrawUnits:
 				this.#terrainResources.size +
@@ -1296,7 +1317,10 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	#createResourceTranslation(
-		resource: TerrainGeometryResource | StaticObjectGeometryResource,
+		resource:
+			| TerrainGeometryResource
+			| StaticObjectGeometryResource
+			| StructuredInteriorGeometryResource,
 	): readonly [number, number, number] {
 		return createOutdoorLandblockRootTranslation(
 			resource.landblockId,
@@ -1465,15 +1489,23 @@ interface StaticObjectGeometryResource {
 	dispose(): void;
 }
 
+type StaticMaterialGeometryResource =
+	| StaticObjectGeometryResource
+	| StructuredInteriorGeometryResource;
+
 interface StructuredInteriorGeometryResource {
 	readonly vertexArray: WebGLVertexArrayObject;
 	readonly positionBuffer: WebGLBuffer;
 	readonly texCoordBuffer: WebGLBuffer;
+	readonly materialSlotBuffer: WebGLBuffer;
 	readonly indexBuffer: WebGLBuffer;
 	readonly drawUnitId: string;
 	readonly landblockId: StructuredInteriorGeometryStaticDrawUnit["landblockId"];
 	readonly envCellId: StructuredInteriorGeometryStaticDrawUnit["envCellId"];
 	readonly materialFamily: StructuredInteriorGeometryStaticDrawUnit["materialFamily"];
+	readonly materialEntries: StructuredInteriorGeometryStaticDrawUnit["materialEntries"];
+	readonly preparedDrawPayloadState: StaticObjectPreparedDrawPayloadState;
+	readonly renderState: StaticObjectRenderState;
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
@@ -1975,8 +2007,15 @@ function createStructuredInteriorGeometryResource(
 	const vertexArray = gl.createVertexArray();
 	const positionBuffer = gl.createBuffer();
 	const texCoordBuffer = gl.createBuffer();
+	const materialSlotBuffer = gl.createBuffer();
 	const indexBuffer = gl.createBuffer();
-	if (!vertexArray || !positionBuffer || !texCoordBuffer || !indexBuffer) {
+	if (
+		!vertexArray ||
+		!positionBuffer ||
+		!texCoordBuffer ||
+		!materialSlotBuffer ||
+		!indexBuffer
+	) {
 		if (vertexArray) {
 			gl.deleteVertexArray(vertexArray);
 		}
@@ -1986,11 +2025,24 @@ function createStructuredInteriorGeometryResource(
 		if (texCoordBuffer) {
 			gl.deleteBuffer(texCoordBuffer);
 		}
+		if (materialSlotBuffer) {
+			gl.deleteBuffer(materialSlotBuffer);
+		}
 		if (indexBuffer) {
 			gl.deleteBuffer(indexBuffer);
 		}
 		throw new Error(
 			`Failed to create GPU buffers for structured interior ${drawUnit.drawUnitId}.`,
+		);
+	}
+	if (drawUnit.materialEntries.length === 0) {
+		gl.deleteVertexArray(vertexArray);
+		gl.deleteBuffer(positionBuffer);
+		gl.deleteBuffer(texCoordBuffer);
+		gl.deleteBuffer(materialSlotBuffer);
+		gl.deleteBuffer(indexBuffer);
+		throw new Error(
+			`Structured interior resource ${drawUnit.drawUnitId} has no material table entries.`,
 		);
 	}
 
@@ -2004,6 +2056,11 @@ function createStructuredInteriorGeometryResource(
 	gl.bufferData(gl.ARRAY_BUFFER, drawUnit.texCoords, gl.STATIC_DRAW);
 	gl.enableVertexAttribArray(1);
 	gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+
+	gl.bindBuffer(gl.ARRAY_BUFFER, materialSlotBuffer);
+	gl.bufferData(gl.ARRAY_BUFFER, drawUnit.materialSlotIndices, gl.STATIC_DRAW);
+	gl.enableVertexAttribArray(2);
+	gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
 
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, drawUnit.indices, gl.STATIC_DRAW);
@@ -2019,14 +2076,19 @@ function createStructuredInteriorGeometryResource(
 		indexType:
 			drawUnit.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
 		landblockId: drawUnit.landblockId,
+		materialEntries: drawUnit.materialEntries,
 		materialFamily: drawUnit.materialFamily,
+		materialSlotBuffer,
 		positionBuffer,
+		preparedDrawPayloadState: createStaticObjectPreparedDrawPayloadState(),
+		renderState: drawUnit.renderState,
 		texCoordBuffer,
 		triangleCount: drawUnit.triangleCount,
 		vertexArray,
 		dispose() {
 			gl.deleteBuffer(positionBuffer);
 			gl.deleteBuffer(texCoordBuffer);
+			gl.deleteBuffer(materialSlotBuffer);
 			gl.deleteBuffer(indexBuffer);
 			gl.deleteVertexArray(vertexArray);
 		},

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { StructuredInteriorGeometryStaticDrawUnit } from "../../static/contracts";
 import {
 	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
 	MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
@@ -10,9 +11,17 @@ import {
 	DEBUG_OVERLAY_FRAGMENT_SHADER,
 	DEBUG_OVERLAY_VERTEX_SHADER,
 	resolveStaticObjectBlendFactor,
+	createWebgl2Renderer,
 	STATIC_OBJECT_FRAGMENT_SHADER,
 	TERRAIN_FRAGMENT_SHADER,
 } from "./webgl2-renderer";
+
+let pendingFrame: FrameRequestCallback | null = null;
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+	pendingFrame = null;
+});
 
 describe("V2 WebGL2 terrain renderer shader contract", () => {
 	it("uses bounded explicit terrain color and mask page samplers", () => {
@@ -153,6 +162,57 @@ describe("V2 WebGL2 static object transparent pass helpers", () => {
 	});
 });
 
+describe("V2 WebGL2 structured interior rendering", () => {
+	it("draws and removes structured-interior geometry through the static material path", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+		let latestSnapshot = rendererSnapshotPlaceholder();
+		renderer.subscribe((snapshot) => {
+			latestSnapshot = snapshot;
+		});
+
+		renderer.applyStaticDelta({
+			addedDrawUnits: [createStructuredInteriorDrawUnit()],
+			removedDrawUnitIds: [],
+			revision: 1,
+		});
+		expect(latestSnapshot.staticDrawUnits).toBe(1);
+		expect(latestSnapshot.renderedTriangles).toBe(1);
+
+		pendingFrame?.(16);
+		expect(gl.drawElementsCalls).toEqual([
+			{ count: 3, mode: gl.TRIANGLES, type: gl.UNSIGNED_SHORT },
+		]);
+		expect(gl.bufferDataTargets).toEqual(
+			expect.arrayContaining([
+				gl.ARRAY_BUFFER,
+				gl.ELEMENT_ARRAY_BUFFER,
+			]),
+		);
+		expect(gl.enabledVertexAttributes).toEqual(expect.arrayContaining([0, 1, 2]));
+
+		renderer.applyStaticDelta({
+			addedDrawUnits: [],
+			removedDrawUnitIds: ["structured-interior-a"],
+			revision: 2,
+		});
+		expect(latestSnapshot.staticDrawUnits).toBe(0);
+		expect(latestSnapshot.renderedTriangles).toBe(0);
+		gl.drawElementsCalls.length = 0;
+		pendingFrame?.(32);
+		expect(gl.drawElementsCalls).toEqual([]);
+
+		renderer.dispose();
+	});
+});
+
 describe("V2 WebGL2 debug overlay shader contract", () => {
 	it("draws in-scene line primitives through the scene camera matrix", () => {
 		expect(DEBUG_OVERLAY_VERTEX_SHADER).toContain(
@@ -169,3 +229,262 @@ describe("V2 WebGL2 debug overlay shader contract", () => {
 		);
 	});
 });
+
+function createStructuredInteriorDrawUnit(): StructuredInteriorGeometryStaticDrawUnit {
+	return {
+		cellStructure: {
+			cellStructureId: 0x0d000001,
+			kind: "cell-structure",
+		},
+		coordinateSpace: "landblock-render-local",
+		domain: "landblock-env-cells",
+		drawUnitId: "structured-interior-a",
+		envCellId: 0xda550100,
+		environment: {
+			environmentId: 0x0e000001,
+			kind: "environment",
+		},
+		indexType: "uint16",
+		indices: new Uint16Array([0, 1, 2]),
+		kind: "structured-interior-geometry",
+		landblockId: 0xda55ffff,
+		localPlacement: {
+			orientation: { w: 1, x: 0, y: 0, z: 0 },
+			origin: { x: 0, y: 0, z: 0 },
+		},
+		materialBucketKey: "family:flat-color|pass:opaque|material:08000010",
+		materialEntries: [
+			{
+				alphaTest: 0,
+				detailTextureTiling: 1,
+				detailTextureUseId: null,
+				indexedClipThreshold: -1,
+				indexedTextureFormat: null,
+				indexTextureUseId: null,
+				materialColor: [1, 0, 0, 1],
+				materialEmissiveColor: [0, 0, 0],
+				materialIds: [0x08000010],
+				paletteFirstIndex: 0,
+				paletteTextureUseId: null,
+				primaryTextureUseId: null,
+				primaryTextureWrapMode: "clamp",
+				renderState: {
+					blend: {
+						dstFactor: null,
+						enabled: false,
+						mode: "opaque",
+						srcFactor: null,
+					},
+					depthTest: true,
+					depthWrite: true,
+				},
+				slot: 0,
+			},
+		],
+		materialFamily: "flat-color",
+		materialIds: [0x08000010],
+		materialPass: "opaque",
+		materialPlan: [
+			{
+				diagnostics: [],
+				family: "flat-color",
+				material: {
+					kind: "static-material-source",
+					materialId: 0x08000010,
+				},
+				outcome: "rendered",
+				pass: "opaque",
+				slotId: 0,
+				surfaceId: 0x08000010,
+				textureUseIds: [],
+			},
+		],
+		materialSlotIndices: new Float32Array([0, 0, 0]),
+		memberId: "cell-0",
+		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+		renderState: {
+			blend: {
+				dstFactor: null,
+				enabled: false,
+				mode: "opaque",
+				srcFactor: null,
+			},
+			depthTest: true,
+			depthWrite: true,
+		},
+		sourceTriangleIds: ["triangle-a"],
+		surfaceIds: [0x08000010],
+		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+		textureUseIds: [],
+		triangleCount: 1,
+		vertexCount: 3,
+	};
+}
+
+function createFakeCanvas(gl: WebGL2RenderingContext): HTMLCanvasElement {
+	return {
+		clientHeight: 64,
+		clientWidth: 64,
+		getContext: (kind: string) => (kind === "webgl2" ? gl : null),
+		height: 64,
+		width: 64,
+	} as HTMLCanvasElement;
+}
+
+function rendererSnapshotPlaceholder() {
+	return {
+		backend: "webgl2" as const,
+		canvasHeight: 0,
+		canvasWidth: 0,
+		debugOverlayPrimitives: 0,
+		error: null,
+		frameCount: 0,
+		frameHandlerMs: 0,
+		isRunning: false,
+		renderedTriangles: 0,
+		staticDrawUnits: 0,
+		terrainDrawUnits: 0,
+	};
+}
+
+function createFakeWebgl2Context(): WebGL2RenderingContext & {
+	readonly bufferDataTargets: GLenum[];
+	readonly drawElementsCalls: { readonly count: number; readonly mode: GLenum; readonly type: GLenum }[];
+	readonly enabledVertexAttributes: number[];
+} {
+	let nextObjectId = 1;
+	const bufferDataTargets: GLenum[] = [];
+	const drawElementsCalls: { count: number; mode: GLenum; type: GLenum }[] = [];
+	const enabledVertexAttributes: number[] = [];
+	const createObject = () => ({ id: nextObjectId++ });
+	const gl = {
+		ALWAYS: 519,
+		ARRAY_BUFFER: 34962,
+		BACK: 1029,
+		BLEND: 3042,
+		CLAMP_TO_EDGE: 33071,
+		COLOR_BUFFER_BIT: 16384,
+		COMPILE_STATUS: 35713,
+		CULL_FACE: 2884,
+		DEPTH_BUFFER_BIT: 256,
+		DEPTH_TEST: 2929,
+		DYNAMIC_DRAW: 35048,
+		ELEMENT_ARRAY_BUFFER: 34963,
+		FLOAT: 5126,
+		FRAGMENT_SHADER: 35632,
+		FRAMEBUFFER: 36160,
+		FRONT: 1028,
+		FRONT_AND_BACK: 1032,
+		FUNC_ADD: 32774,
+		FUNC_SUBTRACT: 32778,
+		KEEP: 7680,
+		LESS: 513,
+		LINEAR: 9729,
+		LINES: 1,
+		LINK_STATUS: 35714,
+		NEAREST: 9728,
+		ONE: 1,
+		ONE_MINUS_SRC_ALPHA: 771,
+		R8: 33321,
+		RED: 6403,
+		RG: 33319,
+		RG8: 33323,
+		RGBA: 6408,
+		SRC_ALPHA: 770,
+		STATIC_DRAW: 35044,
+		STENCIL_TEST: 2960,
+		TEXTURE0: 33984,
+		TEXTURE_2D: 3553,
+		TEXTURE_MAG_FILTER: 10240,
+		TEXTURE_MIN_FILTER: 10241,
+		TEXTURE_WRAP_S: 10242,
+		TEXTURE_WRAP_T: 10243,
+		TRIANGLES: 4,
+		UNPACK_ALIGNMENT: 3317,
+		UNSIGNED_BYTE: 5121,
+		UNSIGNED_INT: 5125,
+		UNSIGNED_SHORT: 5123,
+		VERTEX_SHADER: 35633,
+		ZERO: 0,
+		activeTexture: vi.fn(),
+		attachShader: vi.fn(),
+		bindBuffer: vi.fn(),
+		bindFramebuffer: vi.fn(),
+		bindTexture: vi.fn(),
+		bindVertexArray: vi.fn(),
+		blendEquationSeparate: vi.fn(),
+		blendFuncSeparate: vi.fn(),
+		bufferData: vi.fn((target: GLenum) => {
+			bufferDataTargets.push(target);
+		}),
+		clear: vi.fn(),
+		clearColor: vi.fn(),
+		clearDepth: vi.fn(),
+		compileShader: vi.fn(),
+		createBuffer: vi.fn(createObject),
+		createProgram: vi.fn(createObject),
+		createShader: vi.fn(createObject),
+		createTexture: vi.fn(createObject),
+		createVertexArray: vi.fn(createObject),
+		cullFace: vi.fn(),
+		deleteBuffer: vi.fn(),
+		deleteProgram: vi.fn(),
+		deleteShader: vi.fn(),
+		deleteTexture: vi.fn(),
+		deleteVertexArray: vi.fn(),
+		depthFunc: vi.fn(),
+		depthMask: vi.fn(),
+		disable: vi.fn(),
+		drawArrays: vi.fn(),
+		drawElements: vi.fn((mode: GLenum, count: number, type: GLenum) => {
+			drawElementsCalls.push({ count, mode, type });
+		}),
+		enable: vi.fn(),
+		enableVertexAttribArray: vi.fn((slot: number) => {
+			enabledVertexAttributes.push(slot);
+		}),
+		generateMipmap: vi.fn(),
+		getExtension: vi.fn(() => null),
+		getParameter: vi.fn(() => 1),
+		getProgramInfoLog: vi.fn(() => null),
+		getProgramParameter: vi.fn(() => true),
+		getShaderInfoLog: vi.fn(() => null),
+		getShaderParameter: vi.fn(() => true),
+		getUniformLocation: vi.fn((_program: WebGLProgram, name: string) => ({
+			name,
+		})),
+		lineWidth: vi.fn(),
+		linkProgram: vi.fn(),
+		pixelStorei: vi.fn(),
+		shaderSource: vi.fn(),
+		stencilFunc: vi.fn(),
+		stencilMask: vi.fn(),
+		stencilOp: vi.fn(),
+		texImage2D: vi.fn(),
+		texParameterf: vi.fn(),
+		texParameteri: vi.fn(),
+		uniform1f: vi.fn(),
+		uniform1fv: vi.fn(),
+		uniform1i: vi.fn(),
+		uniform1iv: vi.fn(),
+		uniform2f: vi.fn(),
+		uniform2fv: vi.fn(),
+		uniform3f: vi.fn(),
+		uniform3fv: vi.fn(),
+		uniform4f: vi.fn(),
+		uniform4fv: vi.fn(),
+		uniformMatrix4fv: vi.fn(),
+		useProgram: vi.fn(),
+		vertexAttribPointer: vi.fn(),
+		viewport: vi.fn(),
+		bufferDataTargets,
+		drawElementsCalls,
+		enabledVertexAttributes,
+	};
+
+	return gl as unknown as WebGL2RenderingContext & {
+		readonly bufferDataTargets: GLenum[];
+		readonly drawElementsCalls: { readonly count: number; readonly mode: GLenum; readonly type: GLenum }[];
+		readonly enabledVertexAttributes: number[];
+	};
+}

@@ -895,7 +895,7 @@ Failed to close:
 
 ### Phase 13B0: Structured Interior First Pixels
 
-Status: planned; split out of the older broad 13B on 2026-06-16.
+Status: implementation complete on 2026-06-16; manual harness visual verification still pending.
 
 Purpose: visibly draw already-baked, already-resident `structured-interior-geometry` resources without taking on portal traversal, env-cell visibility policy, or dungeon focus semantics.
 
@@ -923,6 +923,25 @@ Acceptance criteria:
 - Textured, flat-color, and alpha-test structured slices render through the intended material/pass path.
 - Missing/deferred/unsupported surfaces remain omitted and do not block unrelated structured-interior slices or env-cell static objects.
 - Existing outdoor terrain and static-object rendering behavior remains unchanged.
+
+Completed work:
+
+- WebGL2 now uploads `structured-interior-geometry` resources with the same material-slot attribute used by static-object geometry, including material table entries, prepared material payload state, and render state.
+- Structured-interior resources are drawn through the existing static-object shader/material path instead of being converted into public static-object draw units.
+- Texture placement updates now dirty structured-interior prepared material payloads through the same draw-unit binding path used by static objects.
+- Renderer snapshots now count structured-interior triangles in `renderedTriangles`; static draw-unit counts already included structured interiors.
+- Added a public renderer API test with a fake WebGL2 context proving structured-interior apply/draw/remove behavior and material-slot attribute upload. Existing texture-manager tests already cover `landblock-env-cells` static role-page bindings/sampler packing.
+
+Spicy bits:
+
+- Structured interiors currently draw in the static material pass after opaque/non-transparent static objects and before transparent static-object sorting. That is acceptable for 13B0 first pixels and alpha-test/opaque structured slices, but any future transparent structured-interior support should get explicit render-pass steering in Phase 13B3 rather than quietly inheriting object sorting.
+- The implementation reuses renderer internals, not public static-object DTOs. `StructuredInteriorGeometryStaticDrawUnit` remains a first-class public draw-unit contract.
+- The renderer now fails loudly if a structured-interior resource reaches WebGL2 with an empty material table. That should be unreachable after 13A4, and it is better than a fallback material.
+
+Failed to close:
+
+- I did not perform the manual harness visual check against a real outdoor env-cell target in this phase. Automated tests prove renderer plumbing, but the acceptance item "known outdoor landblock env-cell target can visibly render" still needs an eyeball pass in the V2 harness.
+- Portal traversal, env-cell visibility consumption, dungeon anchoring/focus, and render-target/pass steering remain deferred to 13B1-13B3.
 
 ### Phase 13B1: Portal And Visibility Record Consumption
 

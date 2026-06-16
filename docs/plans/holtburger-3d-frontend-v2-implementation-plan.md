@@ -675,36 +675,76 @@ Spicy bits and follow-up steering:
 
 #### Phase 13A4: Structured Interior Material Source Enrichment
 
-Status: planned; added on 2026-06-15 after 13A3 refinement exposed the missing textured-interior phase.
+Status: planned; refined on 2026-06-16 after the env-cell static-object transform/picking fixes exposed that the original phase was too hand-wavey around closure ownership and fallback removal.
 
 Purpose: turn structured interior cell-structure geometry from debug/deferred material plans into real textured/materialized draw units where source facts are available.
 
 Execution steering:
 
 - This phase is for cell structures/surfaces, not env-cell static object seeds. Static seeds remain Phase 13A3.
-- Reuse the static-object material/source closure helpers only where material, render-surface, palette, and texture-ref facts are genuinely isomorphic. Do not force cell structures through outdoor static-object instance/source ownership.
+- Add a dedicated material-source closure for cell-structure surface material ids. It may share low-level material/render-surface/palette/texture-ref loaders with static objects, but it must not route cell structures through static-object source assets, static-object material slots, setup-model ownership, or outdoor resolver assumptions.
+- Treat `LandblockEnvCellsStaticScopePayload.materialSources`, `paletteSources`, `textureRefs`, and `missingRefs` as merged env-cell source closure facts. Env-cell static seeds and cell structures can contribute to the same arrays, but typed coverage/source/omission records must preserve which producer needed each fact.
 - Keep cell-structure geometry as `structured-interior-geometry`; do not translate it into public `static-object-geometry` draw units.
 - Preserve the current coarse interior draw-unit batching. Env-cell ids may be retained as ownership/visibility metadata, but this phase should not split draw units per env cell.
 - Cell structures and env-cell static object seeds should share the same `landblock-env-cells` bake result/static batch and texture-manager packing policy when both emit compatible texture uses.
-- Do not keep fallback materials for structured interiors. If required material source closure is missing, log a console-visible diagnostic and omit the affected structured-interior draw unit rather than rendering debug/flat geometry.
+- Do not keep fallback materials for structured interiors. Materialized structured-interior draw units should include only fully resolved/renderable surface slots. Missing material/render-surface/palette/texture facts must produce typed omissions plus runtime-visible diagnostics, and the affected renderable surface/slot geometry should be dropped instead of rendered with debug/flat color.
+- Phase 13A4 proves materialized structured-interior bake/materialization output. Actual visible drawing remains Phase 13B, which should draw only materialized structured-interior resources.
+
+##### Phase 13A4a: Cell-Structure Material Source Closure
+
+Status: planned.
 
 Deliverables:
 
-- Resolver/source enrichment for cell-structure surface material ids that loads required material, render-surface, palette, and texture refs through V2 asset service ownership.
-- Structured-interior material planner update that converts `render-deferred` entries into textured/materialized entries when source closure is present.
-- Texture-use emission for structured-interior draw units using `landblock-env-cells` static-style role pages and the same static batch id as other env-cell bake outputs.
-- Renderer-facing material/table capacity checks for structured-interior draw units with textured materials.
-- Typed omission reasons for missing material/render-surface/palette/texture refs, with console-visible diagnostics, that drop affected structured-interior draw units without hiding source-closure gaps.
-- Tests proving textured cell-structure surfaces emit texture uses, missing refs remain typed, and env-cell static object seed texture uses can share the same `landblock-env-cells` atlas batch.
+- Extract or expose a neutral helper for loading material recipe, render-surface, palette, and texture-ref facts by material id, independent of static-object source asset traversal.
+- Add a resolver path for `LandblockEnvCellsResolver` that collects unique `envCell.surfaces[*].material` ids and resolves their material source closure through V2 asset service ownership.
+- Merge cell-structure material closure with env-cell static seed closure into the existing `LandblockEnvCellsStaticScopePayload` source arrays, with deterministic dedupe by identity and no empty placeholder fields.
+- Keep resolver-facing env-cell cell-structure geometry light: the resolver may request material/source metadata and texture-preparation facts, but it must not request or receive cell-structure vertex buffers.
+- Add tests proving material ids from cell surfaces request `material`, `surface-texture`, `render-surface`, and `palette` assets, dedupe through one resolver funnel, and report missing refs as typed source identities.
 
 Acceptance criteria:
 
-- A structured-interior cell structure with available material source closure produces textured/materialized draw units rather than only debug-flat/deferred material plans.
+- A landblock env-cell payload with only cell-structure surfaces, and no static seeds, can still resolve material sources, palette sources, texture refs, and missing refs.
+- Static seed source closure and cell-structure material closure coexist without duplicated output facts.
+- Resolver DTOs remain metadata-only for cell structures; full render geometry still arrives through explicit bake attachments.
+
+##### Phase 13A4b: Materialized Structured-Interior Draw-Unit Contract
+
+Status: planned.
+
+Deliverables:
+
+- Replace the renderable `structured-interior-debug-flat` path with an explicit materialized structured-interior material contract. Existing debug/deferred plan fields may remain only as non-renderable diagnostics until cleaned up.
+- Update the structured-interior material planner to classify resolved cell-structure materials using the same material behavior rules as static objects where those rules are genuinely material-level: solid color, RGBA texture, indexed/paletted texture, alpha-test, transparent, additive, and unsupported surface flags.
+- Emit structured-interior texture uses with `landblock-env-cells` static-style role pages and the same static batch boundary as env-cell static-object draw units.
+- Add renderer-facing material/table capacity checks before structured-interior draw units become resident. Over-capacity output should be a typed omission/deferred result, not a debug fallback.
+- Preserve public draw-unit boundaries: structured cell geometry remains `structured-interior-geometry`, while env-cell static seeds remain `static-object-geometry` when their render payload is isomorphic.
+
+Acceptance criteria:
+
+- A structured-interior cell structure with available material source closure produces materialized/textured structured-interior draw units rather than only debug-flat/deferred material plans.
 - Structured-interior cell structures and env-cell static object seeds can coexist in one `landblock-env-cells` bake result and submit texture uses against the same static batch boundary.
-- Missing material source facts produce explicit omission/deferred records and console-visible diagnostics without failing unrelated cell structures or static seed geometry.
-- Public draw-unit boundaries remain honest: cell structures stay `structured-interior-geometry`; static-object-sourced env-cell seeds stay static-object geometry if their render payload is isomorphic.
 - Texture-manager behavior for `landblock-env-cells` remains intentionally static-style, not terrain-style.
-- No structured-interior debug/flat fallback material remains in the renderable path after this phase.
+- No structured-interior debug/flat material is accepted as a renderable fallback after this subphase.
+
+##### Phase 13A4c: Missing-Source Omission Diagnostics And Cleanup
+
+Status: planned.
+
+Deliverables:
+
+- Add typed omission records for unresolved or unsupported structured-interior surface material dependencies, including material id, surface id, env-cell id, landblock id, and missing dependency identity.
+- Make the runtime/client diagnostic path emit grouped console-visible warnings for committed structured-interior omissions. Avoid one warning per triangle/surface spam, and do not write tests against incidental console text.
+- Drop affected surface/slot geometry from materialized structured-interior draw units when its required source closure is incomplete. Do not fail unrelated env cells or env-cell static seed geometry in the same `landblock-env-cells` batch.
+- Remove or quarantine legacy `structured-interior-debug-flat` renderable fields after the materialized path owns all renderable structured-interior output.
+- Add tests proving missing material/render-surface/palette/texture refs remain typed, produce omission records, and keep unrelated structured-interior/static-seed draw units materializable.
+
+Acceptance criteria:
+
+- Missing material source facts produce explicit omission/deferred records and runtime-visible diagnostics without hiding source-closure gaps.
+- Missing or unsupported structured-interior materials drop only affected renderable surface/slot geometry unless the remaining draw unit would be empty, in which case the draw unit is omitted.
+- Public diagnostics and material coverage make it clear whether triangles rendered, were omitted due to missing source closure, or were deferred due to capacity/unsupported material behavior.
+- No structured-interior debug/flat fallback material remains in the renderable path after Phase 13A4.
 
 ### Phase 13B: Interior Geometry, Portal, And Visibility Rendering
 
@@ -715,7 +755,7 @@ Purpose: render structured interiors and portal/visibility records through the s
 Dry-run findings:
 
 - WebGL2 already has a generic static-object geometry resource path for positions, UVs, material-slot selectors, material tables, texture bindings, render state, and transparent pass ordering.
-- Because Phase 13A2b introduces a dedicated structured-interior draw-unit variant, Phase 13B needs either a renderer resource path for that variant or a materialized translation into the existing static-object shader payload shape.
+- Earlier Phase 13B dry-run considered translating structured interiors into the existing static-object shader payload shape. That is no longer the steering: structured interiors keep the public `structured-interior-geometry` contract, and Phase 13B draws only materialized structured-interior resources produced by Phase 13A4.
 - Re-dry-run after Phase 13A2b/13A4 steering: the actual `structured-interior-geometry` contract is dedicated and already has WebGL2 resource residency. Phase 13B should add a visible draw path for materialized structured-interior resources only. Do not render `structured-interior-debug-flat` as a fallback, and do not translate structured interiors into `StaticObjectGeometryStaticDrawUnit` at the public contract boundary.
 - Renderer ingestion is not the semantic owner of env-cell visibility. Runtime/static-scene query already owns env-cell BVHs, accepted cell sets, ray picking, and debug selection. Renderer visibility should consume runtime/coordinator decisions, not derive portal traversal from WebGL resources.
 - Existing runtime anchor/rebase policy is outdoor-landblock oriented. Phase 13A2b bakes env-cell local placement into landblock-render-local positions; Phase 13B must define how the renderer anchor composes owning landblock placement, dungeon/interior focus, and portal visibility before visual verification.

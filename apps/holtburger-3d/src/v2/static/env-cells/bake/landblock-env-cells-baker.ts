@@ -1,7 +1,6 @@
 import type {
 	LandblockEnvCellStaticFacts,
 	LandblockEnvCellsStaticScopePayload,
-	MaterialTextureDataUseIdentity,
 	ScheduledStaticWork,
 	StaticAuthoredDynamicSeedRecord,
 	StaticBakeBatchInput,
@@ -27,15 +26,17 @@ import {
 	writeTransformedPosition,
 } from "../../bake/ac-placement-transform";
 import {
-	createMaterialTextureDataUseKey,
-	createStaticMaterialTextureSamplingPolicy,
-} from "../../bake/static-material-texture-policy";
+	createStaticMaterialEntryKey,
+	createStaticMaterialTableEntry,
+	createStaticMaterialTextureRoleSchemaKey,
+	createStaticMaterialTextureUses,
+} from "../../bake/static-material-adapter";
+import { sliceStaticMaterialCompatibilityCandidates } from "../../bake/static-material-compatibility-slicer";
 import {
 	createEnvCellCellStructureGeometryIdentity,
 	describeEnvCellCellStructureGeometryIdentity,
 } from "./landblock-env-cell-geometry-attachments";
 import { bakeStaticObjectCompatibility } from "../../objects/bake/static-object-compatibility-baker";
-import { sliceStaticMaterialCompatibilityCandidates } from "../../objects/bake/static-material-compatibility-slicer";
 import {
 	createStructuredInteriorTextureUseId,
 	createStructuredInteriorMaterialCoverageReport,
@@ -47,7 +48,6 @@ import {
 } from "./structured-interior-material-planner";
 import type {
 	StaticObjectMaterialPlan,
-	StaticObjectMaterialTextureUseRole,
 } from "../../objects/bake/static-object-material-planner";
 import {
 	isCurrentlyStageableStaticObjectDataUse,
@@ -610,11 +610,19 @@ function createStructuredInteriorMaterialTableEntries(options: {
 		.sort(([left], [right]) => left.localeCompare(right))
 		.map(
 			([, entry], slot): StaticObjectMaterialTableEntry =>
-				createStructuredInteriorMaterialTableEntry({
+				createStaticMaterialTableEntry({
+					createTextureUseId: (dataUse, wrapMode) =>
+						createStructuredInteriorTextureUseId({
+							dataUse,
+							work: options.work,
+							wrapMode,
+						}),
 					materialIds: uniqueSortedNumbers([...entry.materialIds]),
 					plan: entry.plan,
 					slot,
-					work: options.work,
+					textureWrapMode: resolveStructuredInteriorPlanTextureWrapMode(
+						entry.plan,
+					),
 				}),
 		);
 }
@@ -652,7 +660,10 @@ function createStructuredInteriorTriangleCandidates(options: {
 			if (!plan || !isRenderableStaticObjectMaterialPlan(plan)) {
 				return null;
 			}
-			const materialEntryKey = createStructuredInteriorMaterialEntryKey(plan);
+			const materialEntryKey = createStaticMaterialEntryKey({
+				plan,
+				textureWrapMode: resolveStructuredInteriorPlanTextureWrapMode(plan),
+			});
 			return {
 				compatibilityKey: createStructuredInteriorCompatibilityKey({
 					materialEntryKey,
@@ -686,105 +697,6 @@ function resolveRenderableStructuredInteriorFamily(
 
 	throw new Error(
 		`Structured interior material ${plan.material.materialId.toString(16)} has unrenderable family ${plan.family}.`,
-	);
-}
-
-function createStructuredInteriorMaterialTableEntry(options: {
-	readonly materialIds: readonly number[];
-	readonly plan: StaticObjectMaterialPlan;
-	readonly slot: number;
-	readonly work: ScheduledStaticWork;
-}): StaticObjectMaterialTableEntry {
-	const primaryTextureUse = findTextureDataUse(options.plan, "rgba-color");
-	const indexTextureUse =
-		findTextureDataUse(options.plan, "index8") ??
-		findTextureDataUse(options.plan, "index16");
-	const paletteTextureUse = options.plan.textureRoles
-		.map((role) => role.dataUse)
-		.find((dataUse) => dataUse.kind === "palette-texture-use");
-	const detailTextureUse = findTextureDataUse(options.plan, "rgba-detail");
-	const textureWrapMode = resolveStructuredInteriorPlanTextureWrapMode(
-		options.plan,
-	);
-	const indexedTextureFormat =
-		indexTextureUse?.kind === "prepared-render-surface-texture-use"
-			? indexTextureUse.usage === "index16"
-				? "index16"
-				: "p8"
-			: null;
-
-	return {
-		alphaTest: options.plan.alphaPolicy.alphaTest,
-		indexedClipThreshold: options.plan.alphaPolicy.indexedClipThreshold,
-		renderState: {
-			blend: {
-				dstFactor: options.plan.blend.dstFactor,
-				enabled: options.plan.blend.enabled,
-				mode: options.plan.blend.mode,
-				srcFactor: options.plan.blend.srcFactor,
-			},
-			depthTest: true,
-			depthWrite: options.plan.blend.depthWrite,
-		},
-		detailTextureTiling:
-			options.plan.textureRoles.find((role) => role.role === "detail-overlay")
-				?.tiling ?? 1,
-		detailTextureUseId: detailTextureUse
-			? createStructuredInteriorTextureUseId({
-					dataUse: detailTextureUse,
-					work: options.work,
-					wrapMode: textureWrapMode,
-				})
-			: null,
-		indexedTextureFormat,
-		indexTextureUseId: indexTextureUse
-			? createStructuredInteriorTextureUseId({
-					dataUse: indexTextureUse,
-					work: options.work,
-					wrapMode: textureWrapMode,
-				})
-			: null,
-		materialColor: options.plan.color,
-		materialEmissiveColor: options.plan.emissiveColor,
-		materialIds: options.materialIds,
-		paletteFirstIndex:
-			paletteTextureUse?.kind === "palette-texture-use"
-				? paletteTextureUse.firstIndex
-				: 0,
-		paletteTextureUseId: paletteTextureUse
-			? createStructuredInteriorTextureUseId({
-					dataUse: paletteTextureUse,
-					work: options.work,
-					wrapMode: textureWrapMode,
-				})
-			: null,
-		primaryTextureUseId: primaryTextureUse
-			? createStructuredInteriorTextureUseId({
-					dataUse: primaryTextureUse,
-					work: options.work,
-					wrapMode: textureWrapMode,
-				})
-			: null,
-		primaryTextureWrapMode: textureWrapMode,
-		slot: options.slot,
-	};
-}
-
-function findTextureDataUse(
-	plan: StaticObjectMaterialPlan,
-	usage: Extract<
-		MaterialTextureDataUseIdentity,
-		{ readonly kind: "prepared-render-surface-texture-use" }
-	>["usage"],
-): MaterialTextureDataUseIdentity | null {
-	return (
-		plan.textureRoles
-			.map((role) => role.dataUse)
-			.find(
-				(dataUse) =>
-					dataUse.kind === "prepared-render-surface-texture-use" &&
-					dataUse.usage === usage,
-			) ?? null
 	);
 }
 
@@ -828,88 +740,10 @@ function createStructuredInteriorCompatibilityKey(options: {
 		`pass:${options.plan.pass}`,
 		`alpha:${options.plan.alphaPolicy.mode}`,
 		`blend:${options.plan.blend.mode}`,
-		`schema:${createStructuredInteriorTextureRoleSchemaKey(
+		`schema:${createStaticMaterialTextureRoleSchemaKey(
 			options.plan.textureRoles,
 		)}`,
 	].join("|");
-}
-
-function createStructuredInteriorMaterialEntryKey(
-	plan: StaticObjectMaterialPlan,
-): string {
-	return [
-		`material:${formatHex32(plan.material.materialId)}`,
-		`color:${[
-			...plan.color.map(formatMaterialScalar),
-			...plan.emissiveColor.map(formatMaterialScalar),
-		].join(",")}`,
-		`wrap:${resolveStructuredInteriorPlanTextureWrapMode(plan)}`,
-		`roles:${createStructuredInteriorTextureRoleLayoutKey(plan.textureRoles)}`,
-		`alpha-test:${formatMaterialScalar(plan.alphaPolicy.alphaTest)}`,
-		`indexed-clip:${formatMaterialScalar(
-			plan.alphaPolicy.indexedClipThreshold,
-		)}`,
-		`detail-tiling:${formatMaterialScalar(resolveDetailTextureTiling(plan))}`,
-	].join("|");
-}
-
-function createStructuredInteriorTextureRoleLayoutKey(
-	roles: readonly StaticObjectMaterialTextureUseRole[],
-): string {
-	if (roles.length === 0) {
-		return "none";
-	}
-
-	return roles.map(createStructuredInteriorTextureRoleLayoutPart).join(",");
-}
-
-function createStructuredInteriorTextureRoleSchemaKey(
-	roles: readonly StaticObjectMaterialTextureUseRole[],
-): string {
-	if (roles.length === 0) {
-		return "none";
-	}
-
-	return roles
-		.map((role) => {
-			const detailSuffix =
-				role.role === "detail-overlay" ? `:tiling=${role.tiling}` : "";
-			return `${role.role}:${createStructuredInteriorTextureDataUseSchemaKey(role.dataUse)}${detailSuffix}`;
-		})
-		.join(",");
-}
-
-function createStructuredInteriorTextureRoleLayoutPart(
-	role: StaticObjectMaterialTextureUseRole,
-): string {
-	const detailSuffix =
-		role.role === "detail-overlay" ? `:tiling=${role.tiling}` : "";
-	return `${role.role}:${createMaterialTextureDataUseKey(role.dataUse)}${detailSuffix}`;
-}
-
-function createStructuredInteriorTextureDataUseSchemaKey(
-	dataUse: MaterialTextureDataUseIdentity,
-): string {
-	if (dataUse.kind === "palette-texture-use") {
-		return [
-			dataUse.kind,
-			`range:${dataUse.firstIndex}-${dataUse.indexCount}`,
-			dataUse.usage,
-		].join(":");
-	}
-
-	return [dataUse.kind, dataUse.usage].join(":");
-}
-
-function resolveDetailTextureTiling(plan: StaticObjectMaterialPlan): number {
-	const detailRole = plan.textureRoles.find(
-		(role) => role.role === "detail-overlay",
-	);
-	return detailRole?.role === "detail-overlay" ? detailRole.tiling : 1;
-}
-
-function formatMaterialScalar(value: number): string {
-	return value.toFixed(6);
 }
 
 function compareStructuredInteriorTriangleCandidates(
@@ -934,56 +768,53 @@ function createStructuredInteriorTextureUses(options: {
 	readonly staticBatchId: string;
 	readonly work: ScheduledStaticWork;
 }): readonly StaticBakeTextureUse[] {
-	const textureUsesById = new Map<string, StaticBakeTextureUse>();
-	for (const drawUnit of options.drawUnits) {
-		const materialPlan = options.materialPlansByEnvCellId.get(drawUnit.envCellId);
-		if (!materialPlan) {
-			continue;
-		}
-		for (const plan of materialPlan.materialPlansBySurfaceId.values()) {
-			for (const role of plan.textureRoles) {
-				if (!isCurrentlyStageableStaticObjectDataUse(role.dataUse)) {
-					continue;
-				}
-				const textureWrapMode = resolveStructuredInteriorPlanTextureWrapMode(
-					plan,
-				);
-				const textureUseId = createStructuredInteriorTextureUseId({
-					dataUse: role.dataUse,
-					work: options.work,
-					wrapMode: textureWrapMode,
-				});
-				if (!drawUnit.textureUseIds.includes(textureUseId)) {
-					continue;
-				}
-				const existing = textureUsesById.get(textureUseId);
-				if (existing) {
-					textureUsesById.set(textureUseId, {
-						...existing,
-						ownerDrawUnitIds: [
-							...existing.ownerDrawUnitIds,
-							drawUnit.drawUnitId,
-						],
-					});
-					continue;
-				}
-				textureUsesById.set(textureUseId, {
-					domain: "landblock-env-cells",
-					ownerDrawUnitIds: [drawUnit.drawUnitId],
-					samplingPolicy: createStaticMaterialTextureSamplingPolicy({
-						dataUse: role.dataUse,
-						wrapMode: textureWrapMode,
-					}),
-					source: role.dataUse,
-					staticBatchId: options.staticBatchId,
-					textureUseId,
-				});
+	return createStaticMaterialTextureUses({
+		createTextureUseId: (dataUse, wrapMode) =>
+			createStructuredInteriorTextureUseId({
+				dataUse,
+				work: options.work,
+				wrapMode,
+			}),
+		domain: "landblock-env-cells",
+		isStageableDataUse: isCurrentlyStageableStaticObjectDataUse,
+		staticBatchId: options.staticBatchId,
+		textureUseSpecs: options.drawUnits.flatMap((drawUnit) => {
+			const materialPlan = options.materialPlansByEnvCellId.get(
+				drawUnit.envCellId,
+			);
+			if (!materialPlan) {
+				return [];
 			}
-		}
-	}
-	return [...textureUsesById.values()].sort((left, right) =>
-		left.textureUseId.localeCompare(right.textureUseId),
-	);
+			const drawUnitTextureUseIds = new Set(drawUnit.textureUseIds);
+			return [...materialPlan.materialPlansBySurfaceId.values()].flatMap(
+				(plan) => {
+					const textureWrapMode =
+						resolveStructuredInteriorPlanTextureWrapMode(plan);
+					const textureDataUses = plan.textureRoles
+						.map((role) => role.dataUse)
+						.filter((dataUse) =>
+							drawUnitTextureUseIds.has(
+								createStructuredInteriorTextureUseId({
+									dataUse,
+									work: options.work,
+									wrapMode: textureWrapMode,
+								}),
+							),
+						);
+					if (textureDataUses.length === 0) {
+						return [];
+					}
+					return [
+						{
+							ownerDrawUnitId: drawUnit.drawUnitId,
+							textureDataUses,
+							textureWrapMode,
+						},
+					];
+				},
+			);
+		}),
+	});
 }
 
 function bakeCellStructureGeometry(

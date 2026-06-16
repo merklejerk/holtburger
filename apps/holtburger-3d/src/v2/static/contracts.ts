@@ -903,7 +903,15 @@ export type StaticMaterialCoverageFilteringMode =
 	| "none"
 	| "shader-palette-linear";
 
+export type StaticMaterialCoverageKind =
+	| "env-cell-static-object-seeds"
+	| "outdoor-static-objects"
+	| "structured-interior"
+	| "terrain";
+
 export interface StaticMaterialCoverageReport {
+	readonly coverageKey: string;
+	readonly coverageKind: StaticMaterialCoverageKind;
 	readonly domain: StaticDomain;
 	readonly landblockId: number | null;
 	readonly materialCount: number;

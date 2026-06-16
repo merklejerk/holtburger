@@ -668,7 +668,7 @@ Implementation notes:
 
 Spicy bits and follow-up steering:
 
-- Material coverage for `landblock-env-cells` can now come from both structured-interior and static-object paths. The coordinator still stores latest coverage by domain, so the snapshot view is not a complete multi-report aggregate for mixed env-cell batches. Commit deltas carry the reports; richer dashboard aggregation should be handled in a later coverage/reporting cleanup rather than blocking draw-unit emission.
+- Material coverage for `landblock-env-cells` can now come from both structured-interior and static-object paths. Immediate cleanup after this phase replaced domain-only latest coverage storage with stable coverage keys/kinds, so mixed env-cell batches can retain both `landblock-env-cells:structured-interior` and `landblock-env-cells:static-objects` reports in coordinator snapshots.
 - `StaticObjectInstanceIdentity.instanceId` remains the seed identity carrier. Env-cell resolver-created identities include the env-cell prefix, and the env-cell draw-unit ownership records the parsed env-cell ids explicitly. If future authored seed ids become available from source data, revisit identity naming then.
 
 #### Phase 13A4: Structured Interior Material Source Enrichment

@@ -548,7 +548,7 @@ describe("V2 static coordinator", () => {
 		});
 	});
 
-	it("publishes latest material coverage by current static domain", async () => {
+	it("publishes latest material coverage by coverage key", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
@@ -563,12 +563,20 @@ describe("V2 static coordinator", () => {
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
 		baker.complete(work?.workId ?? "", {
-			materialCoverage: [createMaterialCoverage("outdoor-terrain")],
+			materialCoverage: [
+				createMaterialCoverage("outdoor-terrain", {
+					coverageKey: "outdoor-terrain:terrain",
+					coverageKind: "terrain",
+				}),
+			],
 		});
 		await flushPromises();
 
 		expect(coordinator.createSnapshot().materialCoverage).toEqual([
-			createMaterialCoverage("outdoor-terrain"),
+			createMaterialCoverage("outdoor-terrain", {
+				coverageKey: "outdoor-terrain:terrain",
+				coverageKind: "terrain",
+			}),
 		]);
 
 		coordinator.requestStaticDemand({
@@ -582,6 +590,57 @@ describe("V2 static coordinator", () => {
 		});
 
 		expect(coordinator.createSnapshot().materialCoverage).toEqual([]);
+	});
+
+	it("retains multiple latest material coverage reports for one static domain", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+
+		const [work] = coordinator.requestStaticDemand({
+			location: {
+				envCellId: 0xda550100,
+				kind: "interior-cell",
+				landblockId: 0xda55ffff,
+			},
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: 0,
+				terrain: -1,
+			},
+		});
+		resolver.complete(
+			resolver.pendingRequests[0]?.requestId ?? "",
+			createLandblockEnvCellsResolverPayload(),
+		);
+		await flushPromises();
+		baker.complete(work?.workId ?? "", {
+			materialCoverage: [
+				createMaterialCoverage("landblock-env-cells", {
+					coverageKey: "landblock-env-cells:structured-interior",
+					coverageKind: "structured-interior",
+				}),
+				createMaterialCoverage("landblock-env-cells", {
+					coverageKey: "landblock-env-cells:static-objects",
+					coverageKind: "env-cell-static-object-seeds",
+				}),
+			],
+		});
+		await flushPromises();
+
+		expect(
+			coordinator
+				.createSnapshot()
+				.materialCoverage.map((coverage) => coverage.coverageKey),
+		).toEqual([
+			"landblock-env-cells:static-objects",
+			"landblock-env-cells:structured-interior",
+		]);
 	});
 
 	it("bakes landblock env-cell bundles after resolving source facts", async () => {
@@ -946,9 +1005,15 @@ function createStructuredInteriorDrawUnit(
 
 function createMaterialCoverage(
 	domain: StaticMaterialCoverageReport["domain"],
+	options: {
+		readonly coverageKey?: string;
+		readonly coverageKind?: StaticMaterialCoverageReport["coverageKind"];
+	} = {},
 ): StaticMaterialCoverageReport {
 	return {
 		buckets: [],
+		coverageKey: options.coverageKey ?? `${domain}:test-coverage`,
+		coverageKind: options.coverageKind ?? "outdoor-static-objects",
 		deferredTriangleCount: 0,
 		detailRoleCount: 0,
 		domain,

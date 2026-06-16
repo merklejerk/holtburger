@@ -1514,6 +1514,8 @@ function createStaticMaterialCoverageDiagnostics(
 			textureRoles: bucket.textureRoleCount,
 			triangles: bucket.triangleCount,
 		})),
+		coverageKey: coverage.coverageKey,
+		coverageKind: coverage.coverageKind,
 		deferredTriangles: coverage.deferredTriangleCount,
 		detailRoleCount: coverage.detailRoleCount,
 		domain: coverage.domain,

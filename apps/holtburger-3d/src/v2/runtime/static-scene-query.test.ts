@@ -715,6 +715,61 @@ describe("V2 static scene query", () => {
 		).toBeNull();
 	});
 
+	it("derives camera residency from committed env-cell query data", () => {
+		const query = new StaticSceneQuery();
+		query.ingestLandblockEnvCells(createLandblockEnvCellsPayload());
+		applyCommittedEnvCellRecords(query, 0xda55ffff);
+
+		expect(
+			query.queryCameraResidencyAtPoint({
+				outdoorAnchorLandblockId: 0xda55ffff,
+				point: { x: 0, y: 0, z: -4.5 },
+			}),
+		).toEqual({
+			envCellId: 0xda550100,
+			kind: "env-cell",
+			landblockId: 0xda55ffff,
+		});
+	});
+
+	it("does not infer env-cell camera residency from source BVHs after committed records are gone", () => {
+		const query = new StaticSceneQuery();
+		query.ingestLandblockEnvCells(createLandblockEnvCellsPayload());
+
+		expect(
+			query.queryCameraResidencyAtPoint({
+				outdoorAnchorLandblockId: 0xda55ffff,
+				point: { x: 0, y: 0, z: -4.5 },
+			}),
+		).toEqual({
+			kind: "outdoor-landblock",
+			landblockId: 0xda55ffff,
+		});
+	});
+
+	it("derives outdoor and unknown camera residency candidates", () => {
+		const query = new StaticSceneQuery();
+
+		expect(
+			query.queryCameraResidencyAtPoint({
+				outdoorAnchorLandblockId: 0xda55ffff,
+				point: { x: 192, y: 10, z: 0 },
+			}),
+		).toEqual({
+			kind: "outdoor-landblock",
+			landblockId: 0xdb55ffff,
+		});
+		expect(
+			query.queryCameraResidencyAtPoint({
+				outdoorAnchorLandblockId: 0x0055ffff,
+				point: { x: -1, y: 10, z: 0 },
+			}),
+		).toEqual({
+			kind: "unknown",
+			landblockId: null,
+		});
+	});
+
 	it("stores committed env-cell peer records independently from source BVH payloads", () => {
 		const query = new StaticSceneQuery();
 		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
@@ -1462,6 +1517,47 @@ function createEnvCellWorkOwner(
 		scopeKey: `landblock:${landblockId.toString(16).padStart(8, "0")}`,
 		workId,
 	};
+}
+
+function applyCommittedEnvCellRecords(
+	query: StaticSceneQuery,
+	landblockId: number,
+): void {
+	const owner = createEnvCellWorkOwner("work-env-residency", landblockId);
+	query.applyStaticPeerRecords({
+		spatialRecords: [
+			{
+				cellStructure: {
+					cellStructureId: 0x0d000001,
+					kind: "cell-structure",
+				},
+				envCellId: 0xda550100,
+				environment: {
+					environmentId: 0x0e000001,
+					kind: "environment",
+				},
+				kind: "env-cell-spatial",
+				landblockId,
+				localBvhItemCount: 1,
+				localBvhNodeCount: 1,
+				memberId: "cell-0",
+				owner,
+				renderBounds: null,
+				residencyBvhItemCount: 1,
+				residencyBvhNodeCount: 1,
+			},
+		],
+		visibilityRecords: [
+			{
+				acceptedEnvCellIds: [0xda550100],
+				diagnostics: [],
+				kind: "env-cell-visibility",
+				landblockId,
+				owner,
+				visibleLinks: [],
+			},
+		],
+	});
 }
 
 function createPlacement(

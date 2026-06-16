@@ -1337,7 +1337,7 @@ Cleanup notes:
 
 ### Phase 13B1b: Position-To-Residency Query API
 
-Status: planned.
+Status: complete on 2026-06-16.
 
 Purpose: expose a pure runtime/static-scene lookup that maps a render-space position to a residency candidate using committed env-cell spatial/BSP records.
 
@@ -1352,6 +1352,179 @@ Acceptance criteria:
 - Browser/free-camera mode can derive a residency candidate from position through runtime/static-scene query support.
 - Query behavior uses committed static-scene records and does not inspect resident WebGL resources.
 - The authoritative residency contract has no `source` field.
+
+Implementation notes:
+
+- Added `StaticSceneCameraResidency` and `StaticSceneQuery.queryCameraResidencyAtPoint`.
+- The query derives the outdoor landblock from the anchor-local render position, converts the point into the candidate landblock's local frame, and then tests the env-cell residency BVH for that landblock.
+- Env-cell results are gated by committed env-cell peer records. If the source BVH is still present but committed env-cell records have been evicted, the query returns the outdoor landblock candidate instead of inventing interior residency from stale source-only data.
+- The residency result shape is exactly the planned union: `outdoor-landblock`, `env-cell`, or `unknown`; it does not include a `source`/provenance field.
+
+Spicy / failed to close:
+
+- The committed `env-cell-spatial` peer record currently carries residency/local BVH counts and cell identity, not raw BVH nodes/items. The point containment test therefore reuses the existing runtime env-cell BVH root built by source-payload ingestion, while committed records act as the lifecycle/validity gate. This is still renderer-independent, but it is not yet a fully standalone committed-BVH record store. If 13B1c/13B1d need lookup after source-payload roots are intentionally dropped, add raw residency BVH payload to the committed spatial record instead of adding a second bespoke lookup path.
+
+Verification:
+
+- `npm run test:ts -- static-scene-query.test.ts`
+
+### Phase 13B1b-1: Runtime-Level Static Scope Retention Reconciler Course Correction
+
+Status: planned; inserted on 2026-06-16 before 13B1c.
+
+Purpose: replace the current parallel static eviction paths with one runtime-level scope-retention reconciliation flow that fans out to semantic query state and concrete renderer/texture resources.
+
+Problem statement:
+
+- Static scene interest already expresses a retained set of landblock/domain scopes, but runtime currently coordinates eviction through two partially overlapping paths:
+  - `ClientRuntimeImpl.updateSceneInterest` calls `StaticCoordinator.requestStaticDemand(...)`, then synchronously calls `StaticSceneQuery.retainScopes(...)` with the returned active work.
+  - Later, an async `StaticCoordinatorCommitDelta` carries `removedScopes` and `removedResources`; materialization applies renderer/texture removals and then calls `StaticSceneQuery.applyStaticPeerRecords({ removedScopes, removedResources, ... })`.
+- This means semantic/query eviction depends on both `retainScopes(...)` and `applyStaticPeerRecords({ removedScopes })` staying in sync. That is fragile, and it directly caused the current dual env-cell spatial lifecycle where source-ingested BVHs and committed peer records can disagree.
+- The top-level retention decision should happen once. Everything else should be a derived cleanup effect.
+
+Target model:
+
+```text
+Runtime.updateSceneInterest(...)
+  |
+  v
+reconcile retained static scopes
+  |
+  +--> StaticCoordinator: schedule missing work and report evicted resources
+  |
+  +--> StaticSceneQuery: retain semantic/query state for those scopes
+  |
+  +--> Materializer/TextureManager/Renderer: remove concrete resources derived from evicted resource keys
+```
+
+Explicit boundary rule:
+
+- Scope retention is the top-level **semantic scene lifecycle** API.
+- Renderer/texture cleanup remains **resource-keyed** below that boundary because source draw units can split into multiple materialized renderer resources.
+- Do not make WebGL infer removals directly from landblock scopes. Instead, derive/emit concrete `StaticResourceKey` removals from the same top-level retention reconciliation.
+
+Deliverables:
+
+- Add a runtime-owned retained static scope type that represents the top-level scene retention decision. It should include `domain`, `scopeKey`, `scope`, and `landblockId` where applicable, so call sites do not keep rebuilding partial `{ domain, landblockId }` shapes.
+- Replace demand expansion that only returns scheduled work with a demand plan shape, e.g. `StaticDemandPlan`, where retained scopes are derived directly from `StaticDemand`/`RuntimeSceneInterest` before work scheduling:
+  ```ts
+  interface StaticDemandPlan {
+    readonly retainedScopes: readonly StaticScopeOwnerKey[];
+    readonly work: readonly ScheduledStaticWork[];
+  }
+  ```
+- Replace or wrap `StaticCoordinator.requestStaticDemand(...)` with a clearer reconciliation API, e.g. `reconcileStaticDemand(...)` or `retainStaticScopes(...)`, that returns:
+  - `activeWork`: scheduled/active work for retained scopes.
+  - `removedScopes`: scopes that left retention.
+  - `removedResources`: concrete source resource keys evicted because their owning scope left retention.
+- Ensure coordinator commit emission uses the same reconciliation result. Avoid recomputing removed scopes/resources in a second path.
+- Add a runtime helper, e.g. `#reconcileStaticRetention(interest)`, that is the only place in `ClientRuntimeImpl` that:
+  - derives retained scopes from `RuntimeSceneInterest`,
+  - calls the coordinator reconciliation API,
+  - calls `StaticSceneQuery.retainScopes(retainedScopes)`,
+  - enqueues any required materialized resource removals,
+  - refreshes static debug overlays and emits snapshots.
+- Narrow `StaticSceneQuery.applyStaticPeerRecords(...)` so `removedScopes` is no longer part of its normal public upsert path. Semantic/work-owned committed record eviction should happen from `StaticSceneQuery.retainScopes(...)`.
+- Keep draw-unit-owned query-record cleanup resource-keyed. If a draw-unit resource is removed without its whole scope being evicted, `StaticSceneQuery` still needs a resource removal path for draw-unit-owned bounds/source records.
+- Update `StaticSceneQuery.retainScopes(...)` to remove all query-owned state for scopes that left retention:
+  - source-ingested env-cell roots and landblock grid entries,
+  - committed env-cell spatial/visibility/portal/source records,
+  - source diagnostics,
+  - bounds overrides whose owner scope is no longer retained,
+  - any future query-owned portal aperture metadata.
+- Update `ClientRuntimeImpl.#materializeStaticCommit(...)` so it applies peer-record upserts and resource removals, but does not perform semantic scope eviction through `applyStaticPeerRecords({ removedScopes })`.
+- Update tests to prove one top-level retention change evicts semantic query state and renderer/texture resources through the same reconciliation result.
+
+Acceptance criteria:
+
+- `ClientRuntimeImpl.updateSceneInterest(...)` has one explicit retained-scope reconciliation flow; it no longer manually coordinates separate semantic eviction paths that can drift.
+- `StaticSceneQuery` semantic records and source spatial indexes are evicted by retained scopes in one method.
+- `StaticSceneQuery.applyStaticPeerRecords(...)` no longer accepts or depends on `removedScopes` for work-owned committed record cleanup.
+- Renderer and texture cleanup remain concrete-resource-keyed and continue to handle materialized draw-unit splitting.
+- Tests cover:
+  - Evicting an env-cell landblock removes source-ingested BVH roots and committed env-cell records together.
+  - Evicting a scope with no resident draw units still removes semantic query records.
+  - Evicting a source draw unit that split into multiple materialized draw units still removes all renderer-local draw units.
+  - Resource-only removal still removes draw-unit-owned query records without requiring whole-scope eviction.
+
+Implementation steps:
+
+1. Introduce a shared retained-scope helper/type near the static coordinator/runtime boundary. Derive retained scopes from static demand expansion, not from `ScheduledStaticWork`.
+2. Refactor the demand planner so it returns a demand plan containing both retained scope keys and scheduled work. Keep one source of truth for domain/scope expansion.
+3. Refactor `StaticCoordinator.requestStaticDemand(...)` internals so stale active work removal produces a single reconciliation result object. The existing subscription/commit behavior may remain, but it should use that object rather than deriving removals independently.
+4. Add `ClientRuntimeImpl.#reconcileStaticRetention(...)` and route `updateSceneInterest(...)` through it. Keep renderer/texture removal asynchronous if it still depends on materialization.
+5. Move work-owned committed record pruning from `StaticSceneQuery.applyStaticPeerRecords(...)` into `StaticSceneQuery.retainScopes(...)`.
+6. Keep `removedResources` in `applyStaticPeerRecords(...)` or split it into a narrower `removeStaticResources(...)` method for draw-unit-owned query records. Pick the cleaner option after checking call sites; do not leave both APIs doing the same cleanup.
+7. Update coordinator, runtime, static-scene-query, materializer, texture-manager, and renderer tests around the new flow.
+8. Update this plan with any remaining debt, especially whether the env-cell committed BVH promotion should happen immediately after this phase or inside 13B1c.
+
+Spicy / watchouts:
+
+- Do not regress the resource-keyed renderer boundary. A retained scope is too broad for WebGL resource deletion after materialization splitting.
+- Watch async ordering: a scope can be evicted while a prior materialization is pending. Removed resource keys need to win over stale late-arriving adds, or stale-bake handling must remain explicit.
+- Be careful with failed-before-draw scopes. They may have committed peer records but no resident draw units; retained-scope eviction must still remove them.
+- Avoid renaming only. The win is eliminating the dual eviction responsibility, not making `requestStaticDemand` sound fancier.
+- This phase does not need to promote raw env-cell BVH nodes/items into committed peer records, but it should leave one clear lifecycle owner so that promotion is straightforward.
+
+Dry-run notes:
+
+- Existing top-level seam:
+  - `ClientRuntimeImpl.updateSceneInterest(...)` already performs the top-level retention decision by calling `StaticCoordinator.requestStaticDemand(createStaticDemandFromSceneInterest(...))`.
+  - Despite the method name, `requestStaticDemand(...)` returns the retained active work list, not only newly scheduled work. The current runtime then maps that list to `StaticSceneQuery.retainScopes(...)`.
+  - That current return path is a useful seam, but it is not the desired authority. Retained scopes should come from demand expansion, not from scheduled/active work. Scheduled work should fulfill retained scopes; it should not define them.
+  - Therefore this phase does not need to redesign scheduling execution, but it should correct the direction of authority: `StaticDemand` -> retained scopes + work -> coordinator reconciliation.
+- Demand planner refactor target:
+  - Replace or wrap `planScheduledStaticWork(...)` with a planner that returns both retained scopes and work:
+    ```ts
+    interface StaticDemandPlan {
+      readonly retainedScopes: readonly StaticScopeOwnerKey[];
+      readonly work: readonly ScheduledStaticWork[];
+    }
+    ```
+  - `retainedScopes` should be derived directly from the demand location/LOD domain expansion. They must remain stable even if no new work needs scheduling, existing work has failed, or retained work is already active.
+  - `work` remains the execution plan for resolver/baker scheduling and can keep its current `ScheduledStaticWork` shape.
+- Coordinator refactor target:
+  - Introduce a result shape such as `StaticScopeRetentionReconciliation`:
+    ```ts
+    interface StaticScopeRetentionReconciliation {
+      readonly retainedScopes: readonly StaticScopeOwnerKey[];
+      readonly activeWork: readonly ScheduledStaticWork[];
+      readonly removedScopes: readonly StaticScopeOwnerKey[];
+      readonly removedResources: readonly StaticResourceKey[];
+    }
+    ```
+  - Rename or wrap `requestStaticDemand(...)` as `reconcileStaticDemand(...)`. It may keep emitting commit deltas for async materialization, but the returned reconciliation object should be the source of truth for immediate semantic retention.
+  - Use the demand planner's `retainedScopes` directly. Do not build retained scopes from `ScheduledStaticWork`; that would keep lifecycle authority coupled to job scheduling.
+  - Continue emitting eviction commit deltas from the same `removedScopes`/`removedResources` arrays. Do not recompute them for the commit path.
+- Runtime refactor target:
+  - Add `ClientRuntimeImpl.#reconcileStaticRetention(interest)` and move the current `requestStaticDemand` + `StaticSceneQuery.retainScopes` + debug refresh/emit workflow into it.
+  - Runtime should pass `reconciliation.retainedScopes` directly to `StaticSceneQuery.retainScopes(...)`.
+  - Materialized resource removals should still flow through the async commit/materialization path because texture placement and materialized draw-unit splitting already live there.
+  - `#materializeStaticCommit(...)` should call a narrowed query API for:
+    - record upserts from `materialized.static*Records`,
+    - draw-unit resource removals from `materialized.removedResources`.
+    It should not pass `removedScopes` to query cleanup.
+- Static scene query refactor target:
+  - Replace `StaticSceneQueryRetainedScope` with `StaticScopeOwnerKey` or an alias that carries the full typed scope. This removes the current lossy `{ domain, landblockId }` reconstruction.
+  - `retainScopes(...)` should derive retained keys with `createStaticScopeOwnerKey` and prune both:
+    - source-ingested roots/source diagnostics by scope/domain/landblock,
+    - work-owned committed peer records by exact retained scope key.
+  - Split `applyStaticPeerRecords(...)` if needed:
+    - `applyStaticPeerRecords({ records... })` for upserts/replacements,
+    - `removeStaticResources(resources)` for draw-unit-owned query cleanup.
+    Prefer the split if it removes optional `removedResources`/`removedScopes` ambiguity.
+- Call-site impact:
+  - `TextureManager.applyStaticCommitDelta(...)` can keep consuming coordinator commit deltas and `removedResources`.
+  - `materializeStaticCommit(...)` can keep returning materialized `removedResources` and renderer-local `StaticResidencyDelta.removedDrawUnitIds`.
+  - `applyMaterializedStaticCommit(...)` and `WebGL2Renderer.applyStaticDelta(...)` should not change unless a narrow naming cleanup falls out naturally.
+- Test plan from actual seams:
+  - Coordinator: `reconcileStaticDemand` returns retained scopes, removed scopes, and removed resources from the same reconciliation; scope-only eviction still returns/commits `removedScopes` when there are no draw units.
+  - Runtime: `updateSceneInterest` calls one retention helper and query semantic retention happens immediately from `retainedScopes`, while renderer removals still arrive through materialized resource deltas.
+  - Query: `retainScopes([env-cell scope])` keeps both source roots and committed env-cell records; `retainScopes([])` removes both. `applyStaticPeerRecords` no longer accepts `removedScopes`.
+  - Query resource cleanup: draw-unit-owned env-cell static bounds still disappear when the materialized draw-unit resource is removed without evicting the whole landblock scope.
+  - Materializer/runtime split: source draw-unit removal still expands to all materialized draw units, proving the renderer boundary remains resource-keyed.
+- Blind spot to watch while implementing:
+  - `retainScopes(...)` currently rebuilds the landblock grid index after deleting roots. If committed env-cell BVH promotion happens later, make sure that index rebuild remains tied to semantic retention, not resource commit timing.
 
 ### Phase 13B1c: Browser/Client-Owned Camera Residency Input
 

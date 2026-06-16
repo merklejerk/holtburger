@@ -21,6 +21,16 @@ export interface StructuredInteriorCellMaterialPlan {
 	readonly materialPlansBySurfaceId: ReadonlyMap<number, StaticObjectMaterialPlan>;
 }
 
+export function resolveStructuredInteriorMaterialSurfaceId(
+	envCell: LandblockEnvCellStaticFacts,
+	geometrySurfaceId: number,
+): number | null {
+	const slotSurface = envCell.surfaces.find(
+		(surface) => surface.slotId === geometrySurfaceId,
+	);
+	return slotSurface?.surfaceId ?? null;
+}
+
 export function planStructuredInteriorCellMaterials(options: {
 	readonly envCell: LandblockEnvCellStaticFacts;
 	readonly payload: LandblockEnvCellsStaticScopePayload;
@@ -311,7 +321,10 @@ function countSurfaceTriangles(
 	surfaceId: number,
 ): number {
 	return envCell.renderGeometry.triangles.filter(
-		(triangle) => triangle.surfaceId === surfaceId,
+		(triangle) =>
+			triangle.surfaceId !== null &&
+			resolveStructuredInteriorMaterialSurfaceId(envCell, triangle.surfaceId) ===
+				surfaceId,
 	).length;
 }
 

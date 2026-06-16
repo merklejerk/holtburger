@@ -171,9 +171,7 @@ describe("V2 landblock env-cell baker", () => {
 			materialFamily: "flat-color",
 			materialIds: [0x08000010],
 			materialPass: "opaque",
-			sourceTriangleIds: [
-				"polygon:1|surface:134217744|first:0|variant:none",
-			],
+			sourceTriangleIds: ["polygon:1|surface:0|first:0|variant:none"],
 			surfaceIds: [0x08000010],
 			textureUseIds: [],
 			triangleCount: 1,
@@ -275,19 +273,19 @@ describe("V2 landblock env-cell baker", () => {
 							0, 0, 0, 1, 0, 0, 0, 1, 0,
 							2, 0, 0, 3, 0, 0, 2, 1, 0,
 						]),
-						surfaceIds: [0x08000010, 0x08000020],
+						surfaceIds: [0, 1],
 						triangles: [
 							{
 								firstVertex: 0,
 								materialVariantSignature: null,
 								polygonId: 1,
-								surfaceId: 0x08000010,
+								surfaceId: 0,
 							},
 							{
 								firstVertex: 3,
 								materialVariantSignature: null,
 								polygonId: 2,
-								surfaceId: 0x08000020,
+								surfaceId: 1,
 							},
 						],
 						uvs: new Float32Array([
@@ -314,14 +312,14 @@ describe("V2 landblock env-cell baker", () => {
 			})),
 		).toEqual([
 			{
-				ids: ["polygon:2|surface:134217760|first:3|variant:none"],
+				ids: ["polygon:2|surface:1|first:3|variant:none"],
 				pass: "alpha-test",
 				surfaceIds: [0x08000020],
 				triangleCount: 1,
 				vertexCount: 3,
 			},
 			{
-				ids: ["polygon:1|surface:134217744|first:0|variant:none"],
+				ids: ["polygon:1|surface:0|first:0|variant:none"],
 				pass: "opaque",
 				surfaceIds: [0x08000010],
 				triangleCount: 1,
@@ -353,19 +351,19 @@ describe("V2 landblock env-cell baker", () => {
 							0, 0, 0, 1, 0, 0, 0, 1, 0,
 							2, 0, 0, 3, 0, 0, 2, 1, 0,
 						]),
-						surfaceIds: [0x08000010, 0x08000020],
+						surfaceIds: [0, 1],
 						triangles: [
 							{
 								firstVertex: 0,
 								materialVariantSignature: null,
 								polygonId: 1,
-								surfaceId: 0x08000010,
+								surfaceId: 0,
 							},
 							{
 								firstVertex: 3,
 								materialVariantSignature: null,
 								polygonId: 2,
-								surfaceId: 0x08000020,
+								surfaceId: 1,
 							},
 						],
 						uvs: new Float32Array([
@@ -383,7 +381,7 @@ describe("V2 landblock env-cell baker", () => {
 
 		expect(structuredDrawUnits).toHaveLength(1);
 		expect(structuredDrawUnits[0]).toMatchObject({
-			sourceTriangleIds: ["polygon:1|surface:134217744|first:0|variant:none"],
+			sourceTriangleIds: ["polygon:1|surface:0|first:0|variant:none"],
 			surfaceIds: [0x08000010],
 			triangleCount: 1,
 			vertexCount: 3,
@@ -429,19 +427,19 @@ describe("V2 landblock env-cell baker", () => {
 							0, 0, 0, 1, 0, 0, 0, 1, 0,
 							2, 0, 0, 3, 0, 0, 2, 1, 0,
 						]),
-						surfaceIds: [0x08000010, 0x08000020],
+						surfaceIds: [0, 1],
 						triangles: [
 							{
 								firstVertex: 0,
 								materialVariantSignature: null,
 								polygonId: 1,
-								surfaceId: 0x08000010,
+								surfaceId: 0,
 							},
 							{
 								firstVertex: 3,
 								materialVariantSignature: null,
 								polygonId: 2,
-								surfaceId: 0x08000020,
+								surfaceId: 1,
 							},
 						],
 						uvs: new Float32Array([
@@ -506,19 +504,19 @@ describe("V2 landblock env-cell baker", () => {
 							0, 0, 0, 1, 0, 0, 0, 1, 0,
 							2, 0, 0, 3, 0, 0, 2, 1, 0,
 						]),
-						surfaceIds: [0x08000010, 0x08000020],
+						surfaceIds: [0, 1],
 						triangles: [
 							{
 								firstVertex: 0,
 								materialVariantSignature: null,
 								polygonId: 1,
-								surfaceId: 0x08000010,
+								surfaceId: 0,
 							},
 							{
 								firstVertex: 3,
 								materialVariantSignature: null,
 								polygonId: 2,
-								surfaceId: 0x08000020,
+								surfaceId: 1,
 							},
 						],
 						uvs: new Float32Array([
@@ -792,16 +790,14 @@ function createInputWithRenderableCellStructure(
 								renderGeometry: {
 									...envCell.renderGeometry,
 									sourceId: 0xda550100,
-									surfaceIds: renderSurfaces.map(
-										(surface) => surface.materialId,
-									),
+									surfaceIds: renderSurfaces.map((_surface, slotId) => slotId),
 									triangleCount: renderSurfaces.length,
 									triangles: renderSurfaces.map(
 										(surface, index) => ({
 											firstVertex: index * 3,
 											materialVariantSignature: null,
 											polygonId: surface.polygonId,
-											surfaceId: surface.materialId,
+											surfaceId: index,
 										}),
 									),
 									vertexCount: renderSurfaces.length * 3,
@@ -948,7 +944,7 @@ function createGeometryAttachment(
 			options.positions ?? new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 		skippedPolygonCount: 0,
 		sourceId: envCell.renderGeometry.sourceId,
-		surfaceIds: options.surfaceIds ?? [0x08000010],
+		surfaceIds: options.surfaceIds ?? [0],
 		triangleCount: envCell.renderGeometry.triangleCount,
 		triangles:
 			options.triangles ?? [
@@ -956,7 +952,7 @@ function createGeometryAttachment(
 					firstVertex: 0,
 					materialVariantSignature: null,
 					polygonId: 1,
-					surfaceId: 0x08000010,
+					surfaceId: 0,
 				},
 			],
 		uvs: options.uvs ?? new Float32Array([0, 0, 1, 0, 0, 1]),

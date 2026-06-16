@@ -39,6 +39,7 @@ import {
 	createStructuredInteriorMaterialCoverageReport,
 	getStructuredInteriorMaterialEntries,
 	planStructuredInteriorCellMaterials,
+	resolveStructuredInteriorMaterialSurfaceId,
 	type StructuredInteriorCellMaterialPlan,
 } from "./structured-interior-material-planner";
 import type {
@@ -232,7 +233,8 @@ function createStructuredInteriorDrawUnits(
 	payload: LandblockEnvCellsStaticScopePayload,
 	materialPlansByEnvCellId: ReadonlyMap<number, StructuredInteriorCellMaterialPlan>,
 ): readonly StructuredInteriorGeometryStaticDrawUnit[] {
-	return payload.envCells.flatMap((envCell) => {
+	const geometrySurfaceOmissions: StructuredInteriorGeometrySurfaceOmission[] = [];
+	const drawUnits = payload.envCells.flatMap((envCell) => {
 		if (envCell.renderGeometry.triangleCount === 0) {
 			return [];
 		}
@@ -246,6 +248,8 @@ function createStructuredInteriorDrawUnits(
 		const attachment = requireGeometryAttachment(input, envCell);
 		const candidates = createStructuredInteriorTriangleCandidates({
 			attachment,
+			envCell,
+			geometrySurfaceOmissions,
 			materialPlan,
 		});
 		const slices = sliceStaticMaterialCompatibilityCandidates({
@@ -265,6 +269,12 @@ function createStructuredInteriorDrawUnits(
 			}),
 		);
 	});
+	warnAboutStructuredInteriorGeometrySurfaceOmissions({
+		omissions: geometrySurfaceOmissions,
+		payload,
+		work,
+	});
+	return drawUnits;
 }
 
 function createStructuredInteriorDrawUnit(options: {
@@ -380,6 +390,14 @@ interface StructuredInteriorMaterialOmissionWarningGroup {
 	readonly triangleCount: number;
 }
 
+interface StructuredInteriorGeometrySurfaceOmission {
+	readonly cellStructureId: string;
+	readonly envCellId: string;
+	readonly geometrySurfaceId: number;
+	readonly memberId: string;
+	readonly triangleCount: number;
+}
+
 function warnAboutStructuredInteriorMaterialOmissions(options: {
 	readonly materialPlansByEnvCellId: ReadonlyMap<
 		number,
@@ -401,6 +419,56 @@ function warnAboutStructuredInteriorMaterialOmissions(options: {
 			landblockId: formatHex32(options.payload.landblock.landblockId),
 			workId: options.work.workId,
 		},
+	);
+}
+
+function warnAboutStructuredInteriorGeometrySurfaceOmissions(options: {
+	readonly omissions: readonly StructuredInteriorGeometrySurfaceOmission[];
+	readonly payload: LandblockEnvCellsStaticScopePayload;
+	readonly work: ScheduledStaticWork;
+}): void {
+	if (options.omissions.length === 0) {
+		return;
+	}
+
+	console.warn(
+		"V2 omitted structured-interior triangles whose geometry surface slot could not be resolved through the env-cell surface table.",
+		{
+			domain: options.work.job.domain,
+			groups: createStructuredInteriorGeometrySurfaceOmissionWarningGroups(
+				options.omissions,
+			),
+			landblockId: formatHex32(options.payload.landblock.landblockId),
+			workId: options.work.workId,
+		},
+	);
+}
+
+function createStructuredInteriorGeometrySurfaceOmissionWarningGroups(
+	omissions: readonly StructuredInteriorGeometrySurfaceOmission[],
+): readonly StructuredInteriorGeometrySurfaceOmission[] {
+	const groups = new Map<string, StructuredInteriorGeometrySurfaceOmission>();
+	for (const omission of omissions) {
+		const key = [
+			omission.envCellId,
+			omission.cellStructureId,
+			omission.geometrySurfaceId,
+		].join("|");
+		const existing = groups.get(key);
+		if (existing) {
+			groups.set(key, {
+				...existing,
+				triangleCount: existing.triangleCount + omission.triangleCount,
+			});
+			continue;
+		}
+		groups.set(key, omission);
+	}
+	return [...groups.values()].sort(
+		(left, right) =>
+			left.envCellId.localeCompare(right.envCellId) ||
+			left.cellStructureId.localeCompare(right.cellStructureId) ||
+			left.geometrySurfaceId - right.geometrySurfaceId,
 	);
 }
 
@@ -509,7 +577,10 @@ function countStructuredInteriorSurfaceTriangles(
 	surfaceId: number,
 ): number {
 	return envCell.renderGeometry.triangles.filter(
-		(triangle) => triangle.surfaceId === surfaceId,
+		(triangle) =>
+			triangle.surfaceId !== null &&
+			resolveStructuredInteriorMaterialSurfaceId(envCell, triangle.surfaceId) ===
+				surfaceId,
 	).length;
 }
 
@@ -547,6 +618,8 @@ function createStructuredInteriorMaterialTableEntries(options: {
 
 function createStructuredInteriorTriangleCandidates(options: {
 	readonly attachment: EnvCellCellStructureGeometryAttachment;
+	readonly envCell: LandblockEnvCellStaticFacts;
+	readonly geometrySurfaceOmissions: StructuredInteriorGeometrySurfaceOmission[];
 	readonly materialPlan: StructuredInteriorCellMaterialPlan;
 }): readonly StructuredInteriorTriangleCandidate[] {
 	return options.attachment.triangles
@@ -554,8 +627,24 @@ function createStructuredInteriorTriangleCandidates(options: {
 			if (triangle.surfaceId === null) {
 				return null;
 			}
-			const plan = options.materialPlan.materialPlansBySurfaceId.get(
+			const materialSurfaceId = resolveStructuredInteriorMaterialSurfaceId(
+				options.envCell,
 				triangle.surfaceId,
+			);
+			if (materialSurfaceId === null) {
+				options.geometrySurfaceOmissions.push({
+					cellStructureId: formatHex32(
+						options.envCell.cellStructure.cellStructureId,
+					),
+					envCellId: formatHex32(options.envCell.identity.envCellId),
+					geometrySurfaceId: triangle.surfaceId,
+					memberId: options.envCell.memberId,
+					triangleCount: 1,
+				});
+				return null;
+			}
+			const plan = options.materialPlan.materialPlansBySurfaceId.get(
+				materialSurfaceId,
 			);
 			if (!plan || !isRenderableStaticObjectMaterialPlan(plan)) {
 				return null;
@@ -569,7 +658,7 @@ function createStructuredInteriorTriangleCandidates(options: {
 				materialEntryKey,
 				materialPlan: plan,
 				sourceTriangleId: createSourceTriangleId(triangle),
-				surfaceId: triangle.surfaceId,
+				surfaceId: materialSurfaceId,
 				triangle,
 				triangleIndex,
 			};

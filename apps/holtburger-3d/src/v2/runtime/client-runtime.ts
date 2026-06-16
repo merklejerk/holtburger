@@ -36,6 +36,7 @@ import type {
 	StaticMaterialUnrenderedBucket,
 	ScheduledStaticWorkStatus,
 } from "../static/contracts";
+import { collectStaticDrawUnitResourceIds } from "../static/contracts";
 import {
 	materializeStaticCommit,
 	type StaticMaterializationResult,
@@ -730,7 +731,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 		applyMaterializedStaticCommit(this.#renderer, materialized);
 		this.#staticSceneQuery.applyStaticPeerRecords({
 			portalInteriorRecords: materialized.staticPortalInteriorRecords,
-			removedDrawUnitIds: materialized.staticDelta.removedDrawUnitIds,
+			removedResources: materialized.removedResources,
+			removedScopes: materialized.removedScopes,
 			sourceMappings: materialized.staticSourceMappings,
 			spatialRecords: materialized.staticSpatialRecords,
 			visibilityRecords: materialized.staticVisibilityRecords,
@@ -764,7 +766,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		delta: StaticCoordinatorCommitDelta,
 		materialized: StaticMaterializationResult,
 	): void {
-		for (const removedDrawUnitId of delta.removedDrawUnitIds) {
+		for (const removedDrawUnitId of collectStaticDrawUnitResourceIds(
+			delta.removedResources,
+		)) {
 			const materializedDrawUnitIds =
 				this.#materializedDrawUnitIdsBySourceDrawUnitId.get(
 					removedDrawUnitId,

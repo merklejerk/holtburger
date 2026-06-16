@@ -37,6 +37,7 @@ import type {
 	StaticCoordinatorCommitDelta,
 	StaticDomain,
 } from "../static/contracts";
+import { collectStaticDrawUnitResourceIds } from "../static/contracts";
 import { AtlasTexturePacker, type TexturePacker } from "./packing/packer";
 import type {
 	TexturePackingJob,
@@ -251,7 +252,7 @@ export class TextureManager {
 		delta: StaticCoordinatorCommitDelta,
 	): Promise<TexturePlacementUpdate | null> {
 		const removedTextureRefIds = this.#removeDrawUnitTextureRefs(
-			delta.removedDrawUnitIds,
+			collectStaticDrawUnitResourceIds(delta.removedResources),
 		);
 		const placements: RuntimeTexturePlacement[] = [];
 		const drawUnitBindings: TextureDrawUnitBinding[] = [];
@@ -375,11 +376,11 @@ export class TextureManager {
 	}
 
 	#removeDrawUnitTextureRefs(
-		removedDrawUnitIds: readonly string[],
+		removedDrawUnitResourceIds: readonly string[],
 	): readonly string[] {
 		const removedTextureRefIds: string[] = [];
 
-		for (const drawUnitId of removedDrawUnitIds) {
+		for (const drawUnitId of removedDrawUnitResourceIds) {
 			const textureKeys = this.#textureKeysByDrawUnitId.get(drawUnitId);
 			if (!textureKeys) {
 				continue;

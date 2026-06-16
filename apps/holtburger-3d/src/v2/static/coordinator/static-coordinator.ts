@@ -17,7 +17,9 @@ import type {
 	StaticResolverFailureSnapshot,
 	StaticResolver,
 	StaticPeerRecordOwner,
+	StaticResourceKey,
 	StaticScopePayload,
+	StaticScopeOwnerKey,
 	TerrainStaticScopePayloadSummary,
 	ScheduledStaticWork,
 	ScheduledStaticWorkStatus,
@@ -126,13 +128,18 @@ export class StaticCoordinator {
 		const workItems = planScheduledStaticWork(demand, this.#revision);
 		const desiredKeys = new Set(workItems.map(createDesiredWorkKey));
 		const newWorkItems: ScheduledStaticWork[] = [];
+		const removedScopes: StaticScopeOwnerKey[] = [];
 
 		for (const status of Array.from(this.#activeWork.values())) {
 			if (!desiredKeys.has(status.desiredKey)) {
+				removedScopes.push(createStaticScopeOwnerKey(status));
 				this.#activeWork.delete(status.workId);
 			}
 		}
-		this.#evictResidentDrawUnitsExcept(desiredKeys);
+		const removedResources = this.#evictResidentDrawUnitsExcept(desiredKeys);
+		if (removedScopes.length > 0 || removedResources.length > 0) {
+			this.#emitEvictionCommitDelta({ removedResources, removedScopes });
+		}
 		this.#pruneMaterialCoverageByDesiredKeys(desiredKeys);
 
 		for (const work of workItems) {
@@ -431,7 +438,8 @@ export class StaticCoordinator {
 		this.#emitCommitDelta({
 			addedDrawUnits: result.drawUnits,
 			materialCoverage: result.materialCoverage,
-			removedDrawUnitIds: [],
+			removedResources: [],
+			removedScopes: [],
 			revision: result.revision,
 			staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds,
 			staticBatchId: result.staticBatchId,
@@ -444,30 +452,39 @@ export class StaticCoordinator {
 		this.#emit();
 	}
 
-	#evictResidentDrawUnitsExcept(desiredKeys: ReadonlySet<string>): void {
-		const removedDrawUnitIds: string[] = [];
+	#evictResidentDrawUnitsExcept(
+		desiredKeys: ReadonlySet<string>,
+	): readonly StaticResourceKey[] {
+		const removedDrawUnitResourceIds: string[] = [];
 		for (const [desiredKey, drawUnitIds] of Array.from(
 			this.#residentDrawUnitIdsByDesiredKey,
 		)) {
 			if (desiredKeys.has(desiredKey)) {
 				continue;
 			}
-			removedDrawUnitIds.push(...drawUnitIds);
+			removedDrawUnitResourceIds.push(...drawUnitIds);
 			this.#residentDrawUnitIdsByDesiredKey.delete(desiredKey);
 		}
 
-		for (const drawUnitId of removedDrawUnitIds) {
+		for (const drawUnitId of removedDrawUnitResourceIds) {
 			this.#residentDrawUnitIds.delete(drawUnitId);
 		}
-		if (removedDrawUnitIds.length === 0) {
-			return;
-		}
-
 		this.#committedDrawUnits = this.#residentDrawUnitIds.size;
+		return removedDrawUnitResourceIds.map((drawUnitId) => ({
+			drawUnitId,
+			kind: "draw-unit",
+		}));
+	}
+
+	#emitEvictionCommitDelta(options: {
+		readonly removedResources: readonly StaticResourceKey[];
+		readonly removedScopes: readonly StaticScopeOwnerKey[];
+	}): void {
 		this.#emitCommitDelta({
 			addedDrawUnits: [],
 			materialCoverage: [],
-			removedDrawUnitIds,
+			removedResources: options.removedResources,
+			removedScopes: options.removedScopes,
 			revision: this.#revision,
 			staticAuthoredDynamicSeeds: [],
 			staticBatchId: createEvictionStaticBatchId(this.#revision),
@@ -685,6 +702,19 @@ function createDesiredWorkKey(work: ScheduledStaticWork): string {
 	return `${describeStaticScopeKey(work.job.scope)}:${work.job.domain}`;
 }
 
+function createStaticScopeOwnerKey(
+	status: Pick<
+		MutableScheduledStaticWorkStatus,
+		"domain" | "scopeKey" | "work"
+	>,
+): StaticScopeOwnerKey {
+	return {
+		domain: status.domain,
+		scope: status.work.job.scope,
+		scopeKey: status.scopeKey,
+	};
+}
+
 function createDesiredKeyForDrawUnit(input: {
 	readonly domain: StaticDomain;
 	readonly landblockId: number;
@@ -740,10 +770,12 @@ function filterStaticBakeResultForWorks(
 			works.some((work) => work.job.domain === coverage.domain),
 		),
 		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds.filter(
-			(record) => isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
+			(record) =>
+				isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
 		),
 		staticPortalInteriorRecords: result.staticPortalInteriorRecords.filter(
-			(record) => isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
+			(record) =>
+				isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
 		),
 		staticSourceMappings: result.staticSourceMappings.filter((record) =>
 			isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),

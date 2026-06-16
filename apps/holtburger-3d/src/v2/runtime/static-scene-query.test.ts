@@ -581,6 +581,64 @@ describe("V2 static scene query", () => {
 		});
 	});
 
+	it("removes draw-unit-owned committed records by materialized resource key", () => {
+		const query = new StaticSceneQuery();
+		query.ingestLandblockEnvCells(
+			createLandblockEnvCellsPayload({
+				staticInstanceBounds: {
+					max: { x: 101, y: 101, z: 101 },
+					min: { x: 100, y: 100, z: 100 },
+				},
+			}),
+		);
+		query.applyStaticSpatialRecords({
+			records: [
+				{
+					bounds: {
+						max: { x: 1, y: 1, z: -4 },
+						min: { x: -1, y: -1, z: -5 },
+					},
+					envCellId: 0xda550100,
+					instanceId: "env-static-0",
+					kind: "env-cell-static-object-bounds",
+					landblockId: 0xda55ffff,
+					owner: {
+						drawUnitId: "env-cell-static-draw-unit#fine-1",
+						kind: "draw-unit",
+					},
+				},
+			],
+		});
+
+		expect(query.createSnapshot()).toMatchObject({
+			committedEnvCellSpatialRecordCount: 1,
+		});
+
+		query.applyStaticPeerRecords({
+			removedResources: [
+				{ drawUnitId: "env-cell-static-draw-unit#fine-1", kind: "draw-unit" },
+			],
+		});
+
+		expect(query.createSnapshot()).toMatchObject({
+			committedEnvCellSpatialRecordCount: 0,
+		});
+		expect(
+			query.pickRay({
+				context: {
+					acceptedEnvCellIds: [0xda550100],
+					envCellId: 0xda550100,
+					kind: "env-cell",
+					landblockId: 0xda55ffff,
+				},
+				ray: {
+					direction: { x: 0, y: 0, z: -1 },
+					origin: { x: 0, y: 0, z: 0 },
+				},
+			}),
+		).toBeNull();
+	});
+
 	it("picks env-cell static objects from outdoor context for visible interior debugging", () => {
 		const query = new StaticSceneQuery();
 		query.ingestLandblockEnvCells(createLandblockEnvCellsPayload());
@@ -734,14 +792,15 @@ describe("V2 static scene query", () => {
 			],
 		});
 
-		expect(query.queryCommittedEnvCellRecords({ landblockId: 0xda55ffff }))
-			.toMatchObject({
-				landblockId: 0xda55ffff,
-				portalInteriorRecords: [{ kind: "env-cell-portal-interior" }],
-				sourceMappings: [{ kind: "env-cell-source" }],
-				spatialRecords: [{ kind: "env-cell-spatial" }],
-				visibilityRecords: [{ kind: "env-cell-visibility" }],
-			});
+		expect(
+			query.queryCommittedEnvCellRecords({ landblockId: 0xda55ffff }),
+		).toMatchObject({
+			landblockId: 0xda55ffff,
+			portalInteriorRecords: [{ kind: "env-cell-portal-interior" }],
+			sourceMappings: [{ kind: "env-cell-source" }],
+			spatialRecords: [{ kind: "env-cell-spatial" }],
+			visibilityRecords: [{ kind: "env-cell-visibility" }],
+		});
 		expect(query.createSnapshot()).toMatchObject({
 			committedEnvCellLandblockCount: 1,
 			committedEnvCellPortalInteriorRecordCount: 1,
@@ -752,7 +811,15 @@ describe("V2 static scene query", () => {
 			envCellRecordCount: 0,
 		});
 
-		query.retainScopes([]);
+		query.applyStaticPeerRecords({
+			removedScopes: [
+				{
+					domain: "landblock-env-cells",
+					scope: { kind: "landblock", landblockId: 0xda55ffff },
+					scopeKey: "landblock:da55ffff",
+				},
+			],
+		});
 
 		expect(
 			query.queryCommittedEnvCellRecords({ landblockId: 0xda55ffff }),
@@ -1399,7 +1466,11 @@ function createEnvCellWorkOwner(
 
 function createPlacement(
 	options: {
-		readonly origin?: { readonly x: number; readonly y: number; readonly z: number };
+		readonly origin?: {
+			readonly x: number;
+			readonly y: number;
+			readonly z: number;
+		};
 	} = {},
 ) {
 	return {

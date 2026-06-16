@@ -181,7 +181,8 @@ describe("V2 static materializer", () => {
 		const materialized = materializeStaticCommit({
 			commit: {
 				addedDrawUnits: [],
-				removedDrawUnitIds: ["static-table"],
+				removedResources: [{ drawUnitId: "static-table", kind: "draw-unit" }],
+				removedScopes: [],
 				revision: 8,
 				staticAuthoredDynamicSeeds: [],
 				staticBatchId: "batch-a",
@@ -201,6 +202,10 @@ describe("V2 static materializer", () => {
 			"static-table",
 			"static-table#fine-1",
 		]);
+		expect(materialized.removedResources).toEqual([
+			{ drawUnitId: "static-table", kind: "draw-unit" },
+			{ drawUnitId: "static-table#fine-1", kind: "draw-unit" },
+		]);
 	});
 });
 
@@ -211,7 +216,8 @@ function createCommitDelta(options: {
 	return {
 		addedDrawUnits: options.addedDrawUnits,
 		materialCoverage: [],
-		removedDrawUnitIds: [],
+		removedResources: [],
+		removedScopes: [],
 		revision: 7,
 		staticAuthoredDynamicSeeds: [],
 		staticBatchId: "batch-a",

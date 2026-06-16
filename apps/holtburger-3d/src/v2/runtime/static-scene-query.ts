@@ -11,6 +11,8 @@ import type {
 	StaticSourceMappingRecord,
 	StaticSpatialRecord,
 	StaticObjectTextureRefFacts,
+	StaticResourceKey,
+	StaticScopeOwnerKey,
 	TerrainMeshQuadFacts,
 	TerrainStaticScopePayload,
 	StaticVisibilityRecord,
@@ -288,12 +290,11 @@ export interface LandblockGridRayTraceOptions {
 	readonly getMaxDistance?: () => number | null;
 }
 
-type EnvCellBvhRuntimeItem =
-	{
-		readonly kind: "static";
-		readonly bvhItemIndex: number | null;
-		readonly seed: EnvCellStaticSeedRuntimeRecord;
-	};
+type EnvCellBvhRuntimeItem = {
+	readonly kind: "static";
+	readonly bvhItemIndex: number | null;
+	readonly seed: EnvCellStaticSeedRuntimeRecord;
+};
 
 interface EnvCellStaticSeedRuntimeRecord {
 	readonly envCellId: number;
@@ -662,32 +663,42 @@ export class StaticSceneQuery {
 
 	applyStaticSpatialRecords(options: {
 		readonly records: readonly StaticSpatialRecord[];
-		readonly removedDrawUnitIds?: readonly string[];
+		readonly removedResources?: readonly StaticResourceKey[];
+		readonly removedScopes?: readonly StaticScopeOwnerKey[];
 	}): void {
 		this.applyStaticPeerRecords({
-			removedDrawUnitIds: options.removedDrawUnitIds,
+			removedResources: options.removedResources,
+			removedScopes: options.removedScopes,
 			spatialRecords: options.records,
 		});
 	}
 
 	applyStaticPeerRecords(options: {
 		readonly portalInteriorRecords?: readonly StaticPortalInteriorRecord[];
-		readonly removedDrawUnitIds?: readonly string[];
+		readonly removedResources?: readonly StaticResourceKey[];
+		readonly removedScopes?: readonly StaticScopeOwnerKey[];
 		readonly sourceMappings?: readonly StaticSourceMappingRecord[];
 		readonly spatialRecords?: readonly StaticSpatialRecord[];
 		readonly visibilityRecords?: readonly StaticVisibilityRecord[];
 	}): void {
-		const removedDrawUnitIds = new Set(options.removedDrawUnitIds ?? []);
-		if (removedDrawUnitIds.size > 0) {
-			for (const [
-				key,
-				record,
-			] of this.#envCellStaticBoundsOverridesByKey) {
-				if (removedDrawUnitIds.has(record.ownerDrawUnitId)) {
+		const removedDrawUnitResourceIds = new Set([
+			...(options.removedResources ?? []).flatMap((resource) =>
+				resource.kind === "draw-unit" ? [resource.drawUnitId] : [],
+			),
+		]);
+		if (removedDrawUnitResourceIds.size > 0) {
+			for (const [key, record] of this.#envCellStaticBoundsOverridesByKey) {
+				if (removedDrawUnitResourceIds.has(record.ownerDrawUnitId)) {
 					this.#envCellStaticBoundsOverridesByKey.delete(key);
 				}
 			}
-			this.#deleteDrawUnitOwnedCommittedRecords(removedDrawUnitIds);
+			this.#deleteDrawUnitOwnedCommittedRecords(removedDrawUnitResourceIds);
+		}
+		const removedScopeKeys = new Set(
+			(options.removedScopes ?? []).map(createStaticScopeOwnerKey),
+		);
+		if (removedScopeKeys.size > 0) {
+			this.#deleteWorkOwnedCommittedRecords(removedScopeKeys);
 		}
 
 		this.#upsertCommittedSpatialRecords(options.spatialRecords ?? []);
@@ -1165,7 +1176,9 @@ export class StaticSceneQuery {
 		this.#committedSourceMappingsByKey.clear();
 	}
 
-	#upsertCommittedSpatialRecords(records: readonly StaticSpatialRecord[]): void {
+	#upsertCommittedSpatialRecords(
+		records: readonly StaticSpatialRecord[],
+	): void {
 		this.#deleteCommittedRecordsForOwners(
 			this.#committedSpatialRecordsByKey,
 			records,
@@ -1255,6 +1268,8 @@ export class StaticSceneQuery {
 			readonly owner: {
 				readonly kind: string;
 				readonly drawUnitId?: string;
+				readonly domain?: StaticDomain;
+				readonly scopeKey?: string;
 				readonly workId?: string;
 			};
 		},
@@ -1288,11 +1303,32 @@ export class StaticSceneQuery {
 		}
 	}
 
+	#deleteWorkOwnedCommittedRecords(scopeKeys: ReadonlySet<string>): void {
+		for (const recordsByKey of [
+			this.#committedSpatialRecordsByKey,
+			this.#committedVisibilityRecordsByKey,
+			this.#committedPortalInteriorRecordsByKey,
+			this.#committedSourceMappingsByKey,
+		]) {
+			for (const [key, entry] of recordsByKey) {
+				const owner = entry.record.owner;
+				if (
+					owner.kind === "work" &&
+					scopeKeys.has(createStaticScopeOwnerKey(owner))
+				) {
+					recordsByKey.delete(key);
+				}
+			}
+		}
+	}
+
 	#pruneCommittedRecordsByRetainedScopes(
 		scopes: readonly StaticSceneQueryRetainedScope[],
 	): void {
 		const retainedScopeKeys = new Set(
-			scopes.map((scope) => createRetainedScopeKey(scope.domain, scope.landblockId)),
+			scopes.map((scope) =>
+				createRetainedScopeKey(scope.domain, scope.landblockId),
+			),
 		);
 		for (const recordsByKey of [
 			this.#committedSpatialRecordsByKey,
@@ -1350,9 +1386,7 @@ export class StaticSceneQuery {
 						ray,
 						request,
 						candidate.envCellRoot,
-						createAcceptedEnvCellSet(
-							candidate.envCellRoot.acceptedEnvCellIds,
-						),
+						createAcceptedEnvCellSet(candidate.envCellRoot.acceptedEnvCellIds),
 						nearestHit,
 					),
 				);
@@ -1657,11 +1691,7 @@ function createLandblockSpatialCandidate(
 	const outdoorRoots = [...bucket.outdoorRootsByDomain.values()].sort(
 		(left, right) => left.domain.localeCompare(right.domain),
 	);
-	if (
-		!bucket.terrainRoot &&
-		outdoorRoots.length === 0 &&
-		!bucket.envCellRoot
-	) {
+	if (!bucket.terrainRoot && outdoorRoots.length === 0 && !bucket.envCellRoot) {
 		return null;
 	}
 
@@ -2140,7 +2170,9 @@ function createEnvCellStaticObjectBoundsKey(input: {
 	return `${input.landblockId >>> 0}:${input.envCellId >>> 0}:${input.instanceId}`;
 }
 
-function parseEnvCellStaticObjectBoundsKeyLandblockId(key: string): number | null {
+function parseEnvCellStaticObjectBoundsKeyLandblockId(
+	key: string,
+): number | null {
 	const landblockId = Number.parseInt(key.split(":", 1)[0] ?? "", 10);
 	return Number.isFinite(landblockId) ? landblockId : null;
 }
@@ -2182,17 +2214,33 @@ function createCommittedSourceMappingRecordKey(
 function createStaticPeerOwnerKey(owner: {
 	readonly kind: string;
 	readonly drawUnitId?: string;
+	readonly domain?: StaticDomain;
+	readonly scopeKey?: string;
 	readonly workId?: string;
 }): string {
 	if (owner.kind === "draw-unit" && typeof owner.drawUnitId === "string") {
 		return `draw-unit:${owner.drawUnitId}`;
 	}
-	if (owner.kind === "work" && typeof owner.workId === "string") {
-		return `work:${owner.workId}`;
+	if (
+		owner.kind === "work" &&
+		typeof owner.domain === "string" &&
+		typeof owner.scopeKey === "string"
+	) {
+		return createStaticScopeOwnerKey({
+			domain: owner.domain,
+			scopeKey: owner.scopeKey,
+		});
 	}
 	throw new Error(
 		`Static scene query cannot commit peer record with unknown owner ${owner.kind}.`,
 	);
+}
+
+function createStaticScopeOwnerKey(owner: {
+	readonly domain: string;
+	readonly scopeKey: string;
+}): string {
+	return `${owner.domain}:${owner.scopeKey}`;
 }
 
 function collectCommittedRecordsByLandblock<TRecord>(
@@ -2231,9 +2279,14 @@ function countCommittedEnvCellLandblocks(
 	return landblockIds.size;
 }
 
-function compareCommittedRecords<TRecord>(left: TRecord, right: TRecord): number {
+function compareCommittedRecords<TRecord>(
+	left: TRecord,
+	right: TRecord,
+): number {
 	return (
-		getCommittedRecordDomain(left).localeCompare(getCommittedRecordDomain(right)) ||
+		getCommittedRecordDomain(left).localeCompare(
+			getCommittedRecordDomain(right),
+		) ||
 		(getCommittedRecordLandblockId(left) ?? -1) -
 			(getCommittedRecordLandblockId(right) ?? -1) ||
 		JSON.stringify(left).localeCompare(JSON.stringify(right))
@@ -2281,9 +2334,7 @@ function createRetainedScopeKey(
 	return `${domain}:${landblockId ?? "none"}`;
 }
 
-function isRecordWithWorkOwner(
-	record: unknown,
-): record is {
+function isRecordWithWorkOwner(record: unknown): record is {
 	readonly owner: { readonly kind: "work"; readonly domain: StaticDomain };
 } {
 	return (

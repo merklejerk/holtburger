@@ -28,6 +28,7 @@ import {
 	createEnvCellCellStructureGeometryIdentity,
 	describeEnvCellCellStructureGeometryIdentity,
 } from "./landblock-env-cell-geometry-attachments";
+import { bakeStaticObjectCompatibility } from "../../objects/bake/static-object-compatibility-baker";
 import {
 	createStructuredInteriorMaterialCoverageReport,
 	planStructuredInteriorCellMaterials,
@@ -53,7 +54,11 @@ export function bakeLandblockEnvCells(
 	const itemResults = input.items.map((item) =>
 		bakeLandblockEnvCellItem(input, item),
 	);
-	const drawUnits = itemResults.flatMap((result) => result.drawUnits);
+	const staticObjectResult = bakeStaticObjectCompatibility(input);
+	const drawUnits = [
+		...itemResults.flatMap((result) => result.drawUnits),
+		...staticObjectResult.drawUnits,
+	];
 
 	return {
 		atlasRegistryUpdates: [],
@@ -63,7 +68,13 @@ export function bakeLandblockEnvCells(
 		),
 		domain: input.domain,
 		drawUnits,
-		materialCoverage: itemResults.map((result) => result.materialCoverage),
+		materialCoverage: [
+			...itemResults.map((result) => result.materialCoverage),
+			...staticObjectResult.materialCoverage.filter(
+				(coverage) =>
+					coverage.materialCount > 0 || coverage.partitionCount > 0,
+			),
+		],
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: itemResults.flatMap(
 			(result) => result.staticAuthoredDynamicSeeds,
@@ -81,7 +92,7 @@ export function bakeLandblockEnvCells(
 		staticVisibilityRecords: itemResults.flatMap(
 			(result) => result.staticVisibilityRecords,
 		),
-		textureUses: [],
+		textureUses: staticObjectResult.textureUses,
 		works: input.items.map((item) => item.work),
 	};
 }

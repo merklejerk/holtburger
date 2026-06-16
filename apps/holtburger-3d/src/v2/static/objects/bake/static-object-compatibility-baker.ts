@@ -1,6 +1,6 @@
 import type {
 	MaterialTextureDataUseIdentity,
-	OutdoorStaticObjectsScopePayload,
+	LandblockEnvCellsStaticScopePayload,
 	ScheduledStaticWork,
 	StaticBounds,
 	StaticBakeBatchInput,
@@ -11,6 +11,7 @@ import type {
 	StaticBaker,
 	StaticDrawUnit,
 	StaticObjectGeometryStaticDrawUnit,
+	StaticObjectDrawUnitOwnership,
 	StaticObjectMaterialTableEntry,
 	StaticObjectInstanceIdentity,
 	StaticObjectSourceGeometryAttachment,
@@ -33,6 +34,7 @@ import { describeStaticObjectSourceGeometryIdentity } from "../static-object-sou
 import {
 	createMaterialTextureDataUseKey,
 	partitionStaticObjectCompatibility,
+	type StaticObjectCompatibilityPayload,
 	type StaticObjectCompatibilityPartition,
 	type StaticObjectCompatibilityTriangle,
 } from "./static-object-compatibility-partitioner";
@@ -52,10 +54,11 @@ export function bakeStaticObjectCompatibility(
 ): StaticBakeBatchResult {
 	if (
 		input.domain !== "outdoor-buildings" &&
-		input.domain !== "outdoor-detail"
+		input.domain !== "outdoor-detail" &&
+		input.domain !== "landblock-env-cells"
 	) {
 		throw new Error(
-			`Static object compatibility baker only supports outdoor static object batches. Received ${input.domain}.`,
+			`Static object compatibility baker only supports static object batches. Received ${input.domain}.`,
 		);
 	}
 
@@ -206,17 +209,7 @@ function bakeStaticObjectCompatibilityItem(
 	readonly spatialRecords: readonly StaticSpatialRecord[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 } {
-	if (
-		(item.work.job.domain !== "outdoor-buildings" &&
-			item.work.job.domain !== "outdoor-detail") ||
-		item.payload.scope.kind !== "outdoor-static-objects"
-	) {
-		throw new Error(
-			`Static object compatibility baker only supports outdoor static object payloads. Received ${item.work.job.domain}/${item.payload.scope.kind}.`,
-		);
-	}
-
-	const scope = item.payload.scope;
+	const scope = createStaticObjectCompatibilityPayload(item);
 	const partitionPlan = partitionStaticObjectCompatibility(scope);
 	const renderablePartitions = partitionPlan.partitions.filter((partition) => {
 		if (isRenderableStaticObjectPartition(partition)) {
@@ -285,6 +278,28 @@ function bakeStaticObjectCompatibilityItem(
 	};
 }
 
+function createStaticObjectCompatibilityPayload(
+	item: StaticBakeBatchItem,
+): StaticObjectCompatibilityPayload {
+	if (
+		(item.work.job.domain === "outdoor-buildings" ||
+			item.work.job.domain === "outdoor-detail") &&
+		item.payload.scope.kind === "outdoor-static-objects"
+	) {
+		return item.payload.scope;
+	}
+	if (
+		item.work.job.domain === "landblock-env-cells" &&
+		item.payload.scope.kind === "landblock-env-cells"
+	) {
+		return createEnvCellStaticObjectCompatibilityPayload(item.payload.scope);
+	}
+
+	throw new Error(
+		`Static object compatibility baker only supports static object payloads. Received ${item.work.job.domain}/${item.payload.scope.kind}.`,
+	);
+}
+
 function createDrawUnitSpatialRecord(
 	drawUnitId: string,
 	triangleCount: number,
@@ -302,7 +317,7 @@ function createDrawUnitSpatialRecord(
 
 function warnAboutSkippedStaticObjectPartition(
 	work: ScheduledStaticWork,
-	payload: OutdoorStaticObjectsScopePayload,
+	payload: StaticObjectCompatibilityPayload,
 	partition: StaticObjectCompatibilityPartition,
 ): void {
 	console.warn(
@@ -324,7 +339,7 @@ function warnAboutSkippedStaticObjectPartition(
 function createStaticObjectGeometryDrawUnit(options: {
 	readonly attachments: StaticBakeBatchInput["attachments"];
 	readonly work: ScheduledStaticWork;
-	readonly payload: OutdoorStaticObjectsScopePayload;
+	readonly payload: StaticObjectCompatibilityPayload;
 	readonly partition: StaticObjectCompatibilityPartition;
 }): StaticObjectGeometryStaticDrawUnit {
 	const sourceIndex = new StaticObjectBakeSourceIndex(
@@ -363,12 +378,16 @@ function createStaticObjectGeometryDrawUnit(options: {
 	return {
 		alphaTest: materialEntry.alphaTest,
 		coordinateSpace: "landblock-render-local",
-		domain: options.work.job.domain as "outdoor-buildings" | "outdoor-detail",
+		domain: options.payload.domain,
 		drawUnitId: `${options.work.workId}:static-object-partition:${options.partition.sliceId.replaceAll("/", "-")}`,
 		indexType: geometry.indices instanceof Uint16Array ? "uint16" : "uint32",
 		indices: geometry.indices,
 		kind: "static-object-geometry",
 		landblockId: options.payload.landblock.landblockId,
+		ownership: createStaticObjectDrawUnitOwnership(
+			options.payload,
+			options.partition,
+		),
 		materialBucketKey: options.partition.compatibilityKey,
 		materialColor: materialEntry.materialColor,
 		materialEmissiveColor: materialEntry.materialEmissiveColor,
@@ -583,11 +602,11 @@ function centerOfBounds(
 class StaticObjectBakeSourceIndex {
 	readonly #objectsByKey = new Map<
 		string,
-		OutdoorStaticObjectsScopePayload["objects"][number]
+		StaticObjectCompatibilityPayload["objects"][number]
 	>();
 	readonly #sourcesByKey = new Map<
 		string,
-		OutdoorStaticObjectsScopePayload["sourceAssets"][number]
+		StaticObjectCompatibilityPayload["sourceAssets"][number]
 	>();
 	readonly #geometryByKey = new Map<
 		string,
@@ -595,7 +614,7 @@ class StaticObjectBakeSourceIndex {
 	>();
 
 	constructor(
-		payload: OutdoorStaticObjectsScopePayload,
+		payload: StaticObjectCompatibilityPayload,
 		attachments: StaticBakeBatchInput["attachments"],
 	) {
 		for (const object of payload.objects) {
@@ -614,7 +633,7 @@ class StaticObjectBakeSourceIndex {
 
 	getObject(
 		identity: StaticObjectInstanceIdentity,
-	): OutdoorStaticObjectsScopePayload["objects"][number] {
+	): StaticObjectCompatibilityPayload["objects"][number] {
 		const object = this.#objectsByKey.get(createObjectKey(identity));
 		if (!object) {
 			throw new Error(
@@ -846,7 +865,7 @@ function createIndexArray(vertexCount: number): Uint16Array | Uint32Array {
 }
 
 function createStaticObjectSourcePartMatrix(
-	object: OutdoorStaticObjectsScopePayload["objects"][number],
+	object: StaticObjectCompatibilityPayload["objects"][number],
 	part: StaticObjectPartSourceFacts,
 ): Float32Array {
 	let matrix = buildAcPlacementMatrix(object.localPlacement, AC_UNIT_SCALE);
@@ -865,6 +884,104 @@ function createStaticObjectSourcePartMatrix(
 			z: object.sourceScale.z * part.scale.z,
 		}),
 	);
+}
+
+export function createEnvCellStaticObjectCompatibilityPayload(
+	payload: LandblockEnvCellsStaticScopePayload,
+): StaticObjectCompatibilityPayload {
+	const sourceByKey = new Set(
+		(payload.sourceAssets ?? []).map((source) =>
+			createSourceKey(source.identity),
+		),
+	);
+	const objects = payload.envCells.flatMap((envCell) =>
+		envCell.staticObjectSeeds.flatMap((seed) => {
+			if (!sourceByKey.has(createSourceKey(seed.source))) {
+				return [];
+			}
+			return {
+				debug: seed.debug,
+				generated: null,
+				identity: seed.identity,
+				instanceBounds: seed.instanceBounds,
+				localPlacement: seed.localPlacement,
+				portalCount: 0,
+				source: seed.source,
+				sourceBounds: seed.sourceBounds,
+				sourceIndex: seed.sourceIndex,
+				sourceScale: seed.sourceScale ?? { x: 1, y: 1, z: 1 },
+			};
+		}),
+	);
+
+	return {
+		domain: "landblock-env-cells",
+		landblock: payload.landblock,
+		materialSlots: [],
+		materialSources: payload.materialSources ?? [],
+		objects,
+		paletteSources: payload.paletteSources ?? [],
+		regionRenderProfile: { detailRoles: [] },
+		sourceAssets: payload.sourceAssets ?? [],
+		textureRefs: payload.textureRefs ?? [],
+	};
+}
+
+function createStaticObjectDrawUnitOwnership(
+	payload: StaticObjectCompatibilityPayload,
+	partition: StaticObjectCompatibilityPartition,
+): StaticObjectDrawUnitOwnership {
+	if (payload.domain !== "landblock-env-cells") {
+		return {
+			domain: payload.domain,
+			kind: "outdoor-static-objects",
+			landblockId: payload.landblock.landblockId,
+		};
+	}
+
+	const identities = uniqueObjectIdentities(
+		partition.triangles.map((triangle) => triangle.object),
+	);
+	const envCellIds = uniqueSortedNumbers(
+		identities.map((identity) =>
+			parseEnvCellIdFromStaticObjectInstance(identity),
+		),
+	);
+	return {
+		envCellIds,
+		kind: "env-cell-static-object-seeds",
+		landblockId: payload.landblock.landblockId,
+		seedIdentities: identities,
+	};
+}
+
+function parseEnvCellIdFromStaticObjectInstance(
+	identity: StaticObjectInstanceIdentity,
+): number {
+	const [envCellId] = identity.instanceId.split(":");
+	if (!envCellId || !/^[0-9a-fA-F]{8}$/.test(envCellId)) {
+		throw new Error(
+			`Env-cell static object instance ${identity.instanceId} does not include an env-cell id prefix.`,
+		);
+	}
+
+	return Number.parseInt(envCellId, 16) >>> 0;
+}
+
+function uniqueObjectIdentities(
+	identities: readonly StaticObjectInstanceIdentity[],
+): readonly StaticObjectInstanceIdentity[] {
+	const byKey = new Map<string, StaticObjectInstanceIdentity>();
+	for (const identity of identities) {
+		byKey.set(createObjectKey(identity), identity);
+	}
+	return [...byKey.entries()]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([, identity]) => identity);
+}
+
+function uniqueSortedNumbers(values: readonly number[]): readonly number[] {
+	return [...new Set(values)].sort((left, right) => left - right);
 }
 
 function createObjectKey(object: StaticObjectInstanceIdentity): string {

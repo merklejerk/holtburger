@@ -1,6 +1,9 @@
 import type {
 	MaterialTextureDataUseIdentity,
+	LandblockSourceIdentity,
 	OutdoorStaticObjectsScopePayload,
+	RegionDetailRoleFacts,
+	StaticDomain,
 	StaticMaterialCoverageReport,
 	StaticMaterialSourceIdentity,
 	StaticObjectInstanceIdentity,
@@ -20,10 +23,27 @@ import {
 export const STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE = 8;
 
 export interface StaticObjectCompatibilityPartitionPlan {
-	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
+	readonly domain: StaticObjectCompatibilityPayload["domain"];
 	readonly partitions: readonly StaticObjectCompatibilityPartition[];
 	readonly fallbackReasons: readonly StaticObjectMaterialFallbackReason[];
 	readonly materialCoverage: StaticMaterialCoverageReport;
+}
+
+export interface StaticObjectCompatibilityPayload {
+	readonly domain: Extract<
+		StaticDomain,
+		"outdoor-buildings" | "outdoor-detail" | "landblock-env-cells"
+	>;
+	readonly landblock: LandblockSourceIdentity;
+	readonly regionRenderProfile: {
+		readonly detailRoles: readonly RegionDetailRoleFacts[];
+	};
+	readonly objects: OutdoorStaticObjectsScopePayload["objects"];
+	readonly sourceAssets: OutdoorStaticObjectsScopePayload["sourceAssets"];
+	readonly paletteSources: OutdoorStaticObjectsScopePayload["paletteSources"];
+	readonly materialSlots: OutdoorStaticObjectsScopePayload["materialSlots"];
+	readonly materialSources: OutdoorStaticObjectsScopePayload["materialSources"];
+	readonly textureRefs: OutdoorStaticObjectsScopePayload["textureRefs"];
 }
 
 export interface StaticObjectCompatibilityPartition {
@@ -103,7 +123,7 @@ interface StaticObjectMaterialCompatibilityAxis {
 
 interface StaticObjectOwnershipAxis {
 	readonly key: string;
-	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
+	readonly domain: StaticObjectCompatibilityPayload["domain"];
 	readonly landblockId: number;
 	readonly sourceKey: string;
 	readonly sourceKeys: readonly string[];
@@ -168,7 +188,7 @@ interface StaticObjectTriangleCandidate {
 }
 
 export function partitionStaticObjectCompatibility(
-	payload: OutdoorStaticObjectsScopePayload,
+	payload: StaticObjectCompatibilityPayload,
 ): StaticObjectCompatibilityPartitionPlan {
 	const materialPlan = planStaticObjectMaterials(payload);
 	const materialById = new Map(
@@ -197,7 +217,7 @@ export function partitionStaticObjectCompatibility(
 }
 
 function createTriangleCandidates(
-	payload: OutdoorStaticObjectsScopePayload,
+	payload: StaticObjectCompatibilityPayload,
 	materialById: ReadonlyMap<string, StaticObjectMaterialPlan>,
 ): readonly StaticObjectTriangleCandidate[] {
 	const sourceByKey = new Map(
@@ -342,7 +362,7 @@ class MaterialSlotIndex {
 		StaticObjectMaterialSlotFacts
 	>();
 
-	constructor(payload: OutdoorStaticObjectsScopePayload) {
+	constructor(payload: StaticObjectCompatibilityPayload) {
 		for (const slot of payload.materialSlots) {
 			this.#slotsByObjectPartSurface.set(
 				createMaterialSlotKey({
@@ -600,7 +620,7 @@ function createPartitionSliceAxes(
 }
 
 function createPartitionAxes(options: {
-	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
+	readonly domain: StaticObjectCompatibilityPayload["domain"];
 	readonly plan: StaticObjectMaterialPlan;
 	readonly landblockId: number;
 	readonly sourceKey: string;
@@ -669,7 +689,7 @@ function createMaterialCompatibilityAxis(options: {
 }
 
 function createOwnershipAxis(options: {
-	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
+	readonly domain: StaticObjectCompatibilityPayload["domain"];
 	readonly landblockId: number;
 	readonly sourceKey: string;
 	readonly gfxKey: string;

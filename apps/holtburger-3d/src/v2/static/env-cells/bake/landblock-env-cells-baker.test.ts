@@ -3,7 +3,10 @@ import type {
 	EnvCellCellStructureGeometryAttachment,
 	LandblockEnvCellStaticFacts,
 	StaticBakeBatchInput,
+	StaticObjectMaterialSourceFacts,
+	StaticObjectSourceAssetFacts,
 } from "../../contracts";
+import { createStaticObjectSourceGeometryIdentity } from "../../objects/static-object-source-assets";
 import { bakeLandblockEnvCells } from "./landblock-env-cells-baker";
 import { createEnvCellCellStructureGeometryIdentity } from "./landblock-env-cell-geometry-attachments";
 
@@ -249,6 +252,60 @@ describe("V2 landblock env-cell baker", () => {
 			10, 31, -20, 10, 30, -19, 11, 30, -20,
 		]);
 	});
+
+	it("bakes env-cell static seeds through static object draw units with env-cell ownership", () => {
+		const input = createInputWithRenderableStaticSeed();
+
+		const result = bakeLandblockEnvCells(input);
+		const drawUnit = result.drawUnits.find(
+			(candidate) => candidate.kind === "static-object-geometry",
+		);
+		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
+			throw new Error("Expected env-cell static object geometry draw unit.");
+		}
+
+		expect(result.drawUnits).toHaveLength(1);
+		expect(drawUnit).toMatchObject({
+			domain: "landblock-env-cells",
+			kind: "static-object-geometry",
+			landblockId: 0xda55ffff,
+			materialFamily: "flat-color",
+			ownership: {
+				envCellIds: [0xda550100],
+				kind: "env-cell-static-object-seeds",
+				landblockId: 0xda55ffff,
+				seedIdentities: [
+					{
+						instanceId: "da550100:env-cell-static-0",
+						kind: "static-object-instance",
+						landblockId: 0xda55ffff,
+						objectKind: "explicit-object",
+					},
+				],
+			},
+			sourceMappingCoverage: [
+				expect.objectContaining({
+					object: expect.objectContaining({
+						instanceId: "da550100:env-cell-static-0",
+					}),
+					partIndex: 0,
+					sourceTriangleCount: 1,
+				}),
+			],
+			triangleCount: 1,
+			vertexCount: 3,
+		});
+		expect(drawUnit.drawUnitId).toContain(
+			"7:landblock:da55ffff:landblock-env-cells:static-object-partition:",
+		);
+		expect(result.textureUses).toEqual([]);
+		expect(result.staticAuthoredDynamicSeeds).toEqual([
+			expect.objectContaining({
+				envCellId: 0xda550100,
+				kind: "env-cell-static-object-seed",
+			}),
+		]);
+	});
 });
 
 function createInputWithRenderableCellStructure(
@@ -327,6 +384,65 @@ function requireFirstEnvCell(
 	return envCell;
 }
 
+function createInputWithRenderableStaticSeed(): StaticBakeBatchInput {
+	const input = createInput();
+	const item = input.items[0];
+	if (!item || item.payload.scope.kind !== "landblock-env-cells") {
+		throw new Error("Missing fixture env-cell scope.");
+	}
+	const scope = item.payload.scope;
+	const envCell = scope.envCells[0];
+	if (!envCell) {
+		throw new Error("Missing fixture env cell.");
+	}
+	const material = createStaticObjectMaterialSource();
+	const source = createStaticObjectSourceAsset(material);
+	const seedIdentity = {
+		instanceId: "da550100:env-cell-static-0",
+		kind: "static-object-instance" as const,
+		landblockId: 0xda55ffff,
+		objectKind: "explicit-object" as const,
+	};
+
+	return {
+		...input,
+		attachments: {
+			envCellCellStructureGeometry: [],
+			staticObjectSourceGeometry: [
+				{
+					identity: source.parts[0]?.geometry ?? createStaticObjectGeometry(),
+					positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+					texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+				},
+			],
+		},
+		items: [
+			{
+				...item,
+				payload: {
+					...item.payload,
+					scope: {
+						...scope,
+						envCells: [
+							{
+								...envCell,
+								staticObjectSeeds: envCell.staticObjectSeeds.map((seed) => ({
+									...seed,
+									identity: seedIdentity,
+								})),
+							},
+						],
+						materialSources: [material],
+						paletteSources: [],
+						sourceAssets: [source],
+						textureRefs: [],
+					},
+				},
+			},
+		],
+	};
+}
+
 function createGeometryAttachment(
 	envCell: LandblockEnvCellStaticFacts,
 	options: {
@@ -355,6 +471,100 @@ function createGeometryAttachment(
 		uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
 		vertexCount: envCell.renderGeometry.vertexCount,
 	};
+}
+
+function createStaticObjectMaterialSource(): StaticObjectMaterialSourceFacts {
+	return {
+		diffuse: 0,
+		identity: {
+			kind: "static-material-source",
+			materialId: 0x08000020,
+		},
+		luminosity: 0,
+		source: {
+			argb: 0xff336699,
+			kind: "solid-color",
+		},
+		surfaceId: 0x08000020,
+		surfaceType: 0,
+		translucency: 0,
+	};
+}
+
+function createStaticObjectSourceAsset(
+	material: StaticObjectMaterialSourceFacts,
+): StaticObjectSourceAssetFacts {
+	const source = {
+		kind: "static-object-source" as const,
+		sourceAssetKind: "gfx-obj" as const,
+		sourceDid: 0x01000020,
+	};
+	const geometry = createStaticObjectGeometry();
+	return {
+		bounds: null,
+		debug: { sourceAssetId: "gfxobj/01000020" },
+		identity: source,
+		invalidPolygonCount: 0,
+		materialSlotCount: 1,
+		partCount: 1,
+		parts: [
+			{
+				bounds: null,
+				defaultPlacements: [
+					{
+						orientation: { w: 1, x: 0, y: 0, z: 0 },
+						origin: { x: 0, y: 0, z: 0 },
+					},
+				],
+				geometry,
+				gfxObj: source,
+				invalidPolygonCount: 0,
+				materialSlotCount: 1,
+				materialSlots: [
+					{
+						geometrySurfaceId: 0,
+						material: material.identity,
+						materialSurfaceId: material.surfaceId,
+						materialVariantSignature: null,
+						paletteOverride: null,
+						paletteViews: [],
+						slotIndex: 0,
+					},
+				],
+				partIndex: 0,
+				physicsPolygonCount: 0,
+				renderTriangleCount: 1,
+				scale: { x: 1, y: 1, z: 1 },
+				skippedPolygonCount: 0,
+				source,
+				triangles: [
+					{
+						firstVertex: 0,
+						geometrySurfaceId: 0,
+						materialVariantSignature: null,
+						polygonId: 1,
+					},
+				],
+			},
+		],
+		physicsPolygonCount: 0,
+		renderTriangleCount: 1,
+		skippedPolygonCount: 0,
+		sourceAssetKind: "gfx-obj",
+	};
+}
+
+function createStaticObjectGeometry() {
+	const source = {
+		kind: "static-object-source" as const,
+		sourceAssetKind: "gfx-obj" as const,
+		sourceDid: 0x01000020,
+	};
+	return createStaticObjectSourceGeometryIdentity({
+		gfxObj: source,
+		partIndex: 0,
+		source,
+	});
 }
 
 function createInput(): StaticBakeBatchInput {
@@ -489,6 +699,8 @@ function createInput(): StaticBakeBatchInput {
 							source: "env-cells",
 						},
 						missingRefs: [],
+						materialSources: [],
+						paletteSources: [],
 						portalLinks: [],
 						regionRenderProfile: {
 							kind: "region-render-profile",
@@ -502,6 +714,8 @@ function createInput(): StaticBakeBatchInput {
 							landblockEnvCellBvhItemCount: 1,
 							landblockEnvCellBvhNodeCount: 1,
 						},
+						sourceAssets: [],
+						textureRefs: [],
 						visibilityDiagnostics: [],
 					},
 					sourceRevision: 42,

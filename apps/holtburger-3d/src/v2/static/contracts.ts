@@ -95,7 +95,7 @@ export type StaticResourceIdentity =
 	| PaletteIdentity
 	| MaterialTextureDataUseIdentity;
 
-interface LandblockSourceIdentity {
+export interface LandblockSourceIdentity {
 	readonly kind: "landblock-source";
 	readonly source: "outdoor" | "env-cells";
 	readonly landblockId: number;
@@ -979,7 +979,11 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly kind: "static-object-geometry";
 	readonly drawUnitId: string;
 	readonly landblockId: number;
-	readonly domain: "outdoor-buildings" | "outdoor-detail";
+	readonly domain:
+		| "outdoor-buildings"
+		| "outdoor-detail"
+		| "landblock-env-cells";
+	readonly ownership: StaticObjectDrawUnitOwnership;
 	readonly materialFamily: "flat-color" | "indexed-paletted" | "texture-rgba";
 	readonly materialPass: StaticObjectMaterialPass;
 	readonly materialBucketKey: string;
@@ -1059,6 +1063,19 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly textureUseIds: readonly string[];
 	readonly materialIds: readonly number[];
 }
+
+export type StaticObjectDrawUnitOwnership =
+	| {
+			readonly kind: "outdoor-static-objects";
+			readonly landblockId: number;
+			readonly domain: "outdoor-buildings" | "outdoor-detail";
+	  }
+	| {
+			readonly kind: "env-cell-static-object-seeds";
+			readonly landblockId: number;
+			readonly envCellIds: readonly number[];
+			readonly seedIdentities: readonly StaticObjectInstanceIdentity[];
+	  };
 
 export interface StructuredInteriorGeometryStaticDrawUnit {
 	readonly kind: "structured-interior-geometry";

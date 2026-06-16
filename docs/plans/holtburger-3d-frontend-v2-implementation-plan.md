@@ -1169,29 +1169,300 @@ Failed to close / follow-up:
 
 - I did not run the live harness visual pass against the smeared structured-interior target or a detail-overlay target. Automated coverage passed, including a focused structured-interior detail-overlay bake test, but visual confirmation is still on deck.
 
-### Phase 13B1: Portal And Visibility Record Consumption
+### Phase 13B1: Camera Residency And Portal Orchestration
 
-Status: planned.
+Status: planned group.
 
-Purpose: consume committed env-cell visibility, portal/interior, spatial, and source records as runtime/coordinator-owned scene data without making the renderer invent portal traversal.
+Purpose: split portal/visibility readiness into runtime-owned record storage, optional position lookup support, browser/client-owned camera residency, and explicit renderer pass planning.
 
 Steering:
 
-- Renderer ingestion is not the semantic owner of env-cell visibility. Runtime/static-scene query already owns env-cell BVHs, accepted cell sets, ray picking, and debug selection. Renderer visibility should consume runtime/coordinator decisions, not derive portal traversal from WebGL resources.
+- Camera residency authority belongs above the renderer. In browser/free-camera mode, the browser app may poll the camera position and set residency on its own schedule. In future client mode, the Rust physics/runtime should be able to pass authoritative residency directly.
+- Runtime/static-scene may provide a convenient position-to-residency query over committed env-cell BVHs/BSPs, but that query is lookup support, not global authority. Do not add decorative provenance fields such as `source` to the authoritative residency contract.
+- Renderer ingestion is not the semantic owner of env-cell visibility. Runtime/static-scene query already owns env-cell BVHs, accepted cell sets, ray picking, and debug selection. Renderer visibility should consume explicit pass-planning inputs, not derive portal traversal from WebGL resources.
 - Visibility records should update culling/visibility structures independently from texture placement updates.
-- Portal/interior records should be represented explicitly enough for later portal rendering/render-target work, but this phase does not need to implement indoor/outdoor multi-pass composition.
+- Portal/interior records should be represented explicitly enough for portal rendering/render-target work. This phase should define the orchestration contract that turns camera residency into base-scene and initial-env-cell inputs, but it does not need to complete full indoor/outdoor multi-pass composition.
+
+Illustrations:
+
+```text
+Browser free-camera mode
+
+camera position
+   |
+   v
+static-scene position query  ---->  residency candidate
+   |                                      |
+   |                                      v
+committed env-cell records        browser-owned current residency
+                                          |
+                                          v
+                                  runtime/browser pass plan
+                                          |
+                                          v
+                                      renderer executes
+```
+
+```text
+Future client mode
+
+Rust physics/runtime
+   |
+   v
+authoritative current residency
+   |
+   v
+runtime/client pass plan
+   |
+   v
+renderer executes
+
+The TS position query remains optional lookup support, not the authority.
+```
+
+```ts
+type CameraResidency =
+	| { kind: "outdoor-landblock"; landblockId: number }
+	| { kind: "env-cell"; landblockId: number; envCellId: number }
+	| { kind: "unknown"; landblockId: number | null };
+
+type PortalPassPlan = {
+	baseScene: "exterior" | "interior";
+	initialEnvCellId: number | null;
+};
+```
+
+### Phase 13B1a: Committed Env-Cell Scene Record Store
+
+Status: planned.
+
+Purpose: consume committed env-cell visibility, portal/interior, spatial, and source records as runtime/static-scene data independent from renderer resource residency.
 
 Deliverables:
 
-- Renderer/runtime consumption path for committed static visibility records, portal/interior records, spatial records, and source mappings emitted by the env-cell bake.
+- Runtime/static-scene consumption path for committed static visibility records, portal/interior records, spatial records, and source mappings emitted by the env-cell bake.
 - Apply/remove behavior for those peer records independent of geometry and texture resource lifetime.
 - Debug visibility/source inspection hooks that agree with committed static records.
 
 Acceptance criteria:
 
-- Interior and portal metadata enters the runtime/renderer as committed static records, not renderer-owned dependency walks.
+- Interior and portal metadata enters runtime/static-scene as committed static records, not renderer-owned dependency walks.
 - Static BVH/spatial records are committed alongside other peer static result fields.
 - Visibility/source record updates and removals do not require geometry or atlas rebakes.
+
+### Phase 13B1b: Position-To-Residency Query API
+
+Status: planned.
+
+Purpose: expose a pure runtime/static-scene lookup that maps a render-space position to a residency candidate using committed env-cell spatial/BSP records.
+
+Deliverables:
+
+- Position-to-residency query API over committed env-cell spatial/BSP records, suitable for browser free-camera polling.
+- Query result shape matching the residency union from the 13B1 overview, with no `source`/provenance field.
+- Tests or deterministic diagnostics for outdoor, env-cell, and unknown results.
+
+Acceptance criteria:
+
+- Browser/free-camera mode can derive a residency candidate from position through runtime/static-scene query support.
+- Query behavior uses committed static-scene records and does not inspect resident WebGL resources.
+- The authoritative residency contract has no `source` field.
+
+### Phase 13B1c: Browser/Client-Owned Camera Residency Input
+
+Status: planned.
+
+Purpose: add an explicit current-camera-residency input owned by the browser/client layer so the renderer no longer infers residency from uploaded resources.
+
+Deliverables:
+
+- Explicit current-camera-residency input owned by the browser/client layer, with no `source`/provenance field in the authoritative contract.
+- Browser free-camera polling path that may use the 13B1b query and then sets current residency on its own schedule.
+- Pass-through path shape for future client mode, where Rust physics/runtime can set residency directly.
+
+Acceptance criteria:
+
+- Browser/free-camera mode sets current residency explicitly rather than letting the renderer compute authoritative residency.
+- The residency input accepts direct authoritative values, so a future client mode can bypass TS position lookup.
+- Renderer-facing contracts no longer require a residency `source` field.
+
+### Phase 13B1d: Residency-Derived Portal Pass Plan
+
+Status: planned.
+
+Purpose: map explicit current camera residency to render-policy inputs for base scene, initial portal env-cell, and transition-depth policy. This is a contract phase only; it does not implement transition portal candidate selection, mask resources, render targets, or compositing.
+
+Deliverables:
+
+- Runtime/browser pass-planning contract that maps current residency to `baseScene`, `initialEnvCellId`, and transition max-depth policy for future portal compositing.
+- Renderer-facing input shape that consumes the pass plan instead of recomputing camera residency or walking portal topology from resident WebGL resources.
+- Tests proving `outdoor-landblock` maps to exterior base/null initial env-cell, `env-cell` maps to interior base/that env-cell id, and `unknown` maps to the conservative exterior base/null initial env-cell.
+
+Acceptance criteria:
+
+- Renderer pass planning receives explicit residency-derived `baseScene`, `initialEnvCellId`, and transition-depth-policy inputs.
+- Renderer code does not derive authoritative camera residency from resident WebGL resources for portal pass planning.
+- Full indoor/outdoor transition portal candidate derivation, mask resources, scene-domain targets, and compositing remain deferred to 13B1e-13B1h.
+
+### Phase 13B1e: Transition Portal Candidate Derivation From V2 Records
+
+Status: planned.
+
+Purpose: derive transition portal candidates from committed V2 portal/interior records without treating ordinary env-cell-to-env-cell portals as render-composition portals.
+
+Steering:
+
+- Only outdoor-to-indoor and indoor-to-outdoor transition portals participate in portal compositing.
+- Env-cell-to-env-cell portals remain visibility/connectivity records. They may drive interior visibility traversal later, but they must not produce transition portal mask resources.
+- Do not make the static baker emit portal-mask draw units. The baker emits semantic portal facts and may emit prepared/pre-triangulated transition aperture geometry; runtime/static-scene derives transition candidates from those facts.
+
+Deliverables:
+
+- Runtime/static-scene adapter that converts committed V2 `env-cell-portal-interior` records plus outdoor building portal links into a `TransitionPortalCandidateModel`-equivalent structure.
+- Filtering that requires an outdoor building endpoint, a linked env-cell endpoint, and an outside-transition aperture before creating a transition candidate.
+- Prepared/pre-triangulated aperture geometry attached to transition-eligible aperture records or their derived candidates, so renderer sync does not triangulate portal polygons on the render thread.
+- Tests proving ordinary env-cell-to-env-cell portal records do not produce transition candidates.
+
+Acceptance criteria:
+
+- Transition candidates can be derived from V2 committed records without consulting old detailed landblock render artifacts.
+- Candidate ids, linked env-cell ids, requested interior env-cell ids, prepared aperture geometry, aperture plane, visible-side facts, and target status are deterministic.
+- Env-cell-to-env-cell portals are retained as scene records but excluded from portal compositing candidates.
+
+### Phase 13B1f: Transition Aperture Geometry Resource Sync
+
+Status: planned.
+
+Purpose: feed transition portal candidates into renderer aperture geometry resources without adding a static bake draw-unit family or requiring one draw call per portal.
+
+Steering:
+
+- Transition aperture geometry is render-control geometry derived from transition candidates. It is not materialized world geometry and should not become a `StaticDrawUnit` variant.
+- The renderer may own VAO/VBO/IBO resources for apertures, but runtime/static-scene owns the candidate model that decides which transition apertures exist.
+- Prefer packed VAO-backed aperture geometry batches per active landblock/scope so the composite path can target one/few aperture draws per transition depth rather than one draw call per portal.
+
+Deliverables:
+
+- V2 resource sync path that builds packed transition aperture geometry resources from the 13B1e candidate model and prepared aperture geometry.
+- Stable per-candidate range metadata (`firstIndex`, `indexCount`, vertex/base offset or equivalent) for per-frame filtering and diagnostics.
+- Apply/remove behavior for aperture resources when committed portal records, active landblocks, or transition candidates change.
+- Diagnostics for candidate count, aperture resource count, skipped malformed apertures, and stale aperture cleanup.
+
+Acceptance criteria:
+
+- Renderer transition aperture geometry resources are populated from V2 runtime/static-scene transition candidates and prepared aperture geometry.
+- No portal mask or aperture `StaticDrawUnit` is added to the bake result contract.
+- Clearing or replacing V2 portal records removes stale aperture resources.
+- The intended render path can draw packed transition apertures one/few times per transition depth, even if the first implementation falls back to smaller batches for correctness.
+
+### Phase 13B1g: Scene-Domain Render Targets
+
+Status: planned.
+
+Purpose: render exterior and interior scene domains into separate targets under explicit runtime/browser pass orchestration.
+
+Steering:
+
+- Scene-domain routing should use explicit pass-plan metadata, not static-object material domain inference.
+- Interior resources do not need to be partitioned by env-cell before this phase unless visibility/render-target correctness proves it is required.
+
+Deliverables:
+
+- Renderer pass inputs for exterior and interior domains, derived from the 13B1d pass plan and available V2 resources.
+- Exterior target render path for terrain/outdoor static resources and interior target render path for structured interiors/env-cell static resources.
+- Metrics for exterior/interior target draw calls and target allocation failures.
+
+Acceptance criteria:
+
+- Exterior and interior scene domains can be rendered to separate targets for a frame.
+- Base-scene selection chooses the target implied by explicit current residency.
+- Scene-domain rendering does not require rebaking static geometry or texture atlases.
+
+### Phase 13B1h: Depth-Carrying Direct Transition Portal Composite Passes
+
+Status: planned.
+
+Purpose: implement the actual outdoor/indoor transition portal compositing loop using scene-domain color/depth targets, packed transition aperture geometry, and residency-derived pass planning, with direct aperture compositing as the primary path.
+
+Steering:
+
+- Follow the proven v1 sequencing shape while replacing stencil masks with direct aperture compositing where viable: derive transition levels from base scene, batch visible transition portals, copy the base target color/depth, draw packed transition apertures for each depth, sample the opposite scene color/depth at screen-space UVs, write sampled color plus sampled depth into the current composite target, ping-pong composite targets, then copy the final target to the default framebuffer.
+- The primary path should preserve and propagate depth through the composite target. The direct composite shader should manually compare rasterized aperture depth against the previous composite depth to decide whether the portal aperture is visible, then write the sampled opposite-scene depth to propagate newly visible scene depth for later recursion passes.
+- Do not assume arbitrary recursion can be solved in fewer than `maxDepth` passes. Each transition depth depends on the previous composite result, so the primary design remains one/few packed aperture draws per transition depth.
+- Prefer cheap per-depth direction rejection through aperture winding/backface culling plus a direction uniform before adding heavier per-depth frontier filtering. If propagated depth and direction rejection leak unrelated transition portals, add compact per-depth candidate filtering as a fallback.
+- Compositing applies only to transition portal candidates. Env-cell-to-env-cell portals stay out of this render path.
+- Keep stencil or mask-texture compositing as a fallback only if propagated-depth direct aperture compositing leaks, cannot express required parent containment, or hits WebGL2 depth-texture/framebuffer constraints.
+
+Target frame algorithm:
+
+```text
+1. Render exterior scene domain into E.color + E.depth.
+2. Render interior scene domain into I.color + I.depth.
+3. Resolve current camera residency into:
+   - baseScene: exterior | interior
+   - initialEnvCellId: env-cell id | null
+   - maxDepth
+4. Copy base scene color+depth into compositeRead.
+5. For transitionDepth = 0 .. maxDepth - 1:
+   a. currentScene = transitionDepth even ? baseScene : opposite(baseScene)
+   b. sourceScene = opposite(currentScene)
+   c. desiredDirection =
+      sourceScene == interior ? outdoor-to-indoor : indoor-to-outdoor
+   d. Copy compositeRead color+depth into compositeWrite.
+   e. Bind compositeWrite framebuffer with color+depth writes enabled.
+   f. Bind compositeRead.depth as previousCompositeDepth.
+   g. Bind sourceScene.color and sourceScene.depth as samplers.
+   h. Draw packed transition aperture geometry once/few times for this depth.
+   i. Swap compositeRead and compositeWrite.
+6. Copy compositeRead.color to the default framebuffer.
+```
+
+Direct aperture composite shader contract:
+
+```text
+Inputs:
+  - packed aperture vertex/index stream with stable candidate metadata
+  - desiredDirection uniform for this transition depth
+  - previousCompositeDepth sampler
+  - sourceSceneColor/sourceSceneDepth samplers
+  - viewport size for screen-space UV
+
+Per fragment:
+  1. Reject non-transition candidates before this draw path entirely.
+  2. Reject wrong-direction candidates using aperture winding/backface culling
+     plus desiredDirection/candidate metadata as needed.
+  3. previousDepth = sample(previousCompositeDepth, screenUv)
+  4. apertureDepth = rasterized aperture fragment depth
+  5. If apertureDepth is behind previousDepth, discard.
+  6. sourceColor = sample(sourceSceneColor, screenUv)
+  7. sourceDepth = sample(sourceSceneDepth, screenUv)
+  8. Output sourceColor.
+  9. Write gl_FragDepth = sourceDepth.
+```
+
+Notes:
+
+- `compositeRead` and `compositeWrite` must be distinct targets. Do not sample from the target being rendered.
+- The aperture visibility test uses rasterized aperture depth against the previous composite depth; the final written depth is the sampled opposite-scene depth. Do not rely on fixed-function depth testing alone for both decisions, because those two depths are intentionally different.
+- Backface culling/direction rejection is an optimization and correctness guard for transition direction. It does not turn env-cell-to-env-cell portals into compositing candidates.
+- Start without explicit per-depth frontier filtering. Add compact per-depth candidate filtering only if tests or visual targets prove propagated-depth containment leaks unrelated transition portals.
+
+Deliverables:
+
+- Visible transition portal work planning from aperture resources, camera position, portal aperture planes, screen rects, `baseScene`, and `initialEnvCellId`.
+- Depth-batched outdoor-to-indoor / indoor-to-outdoor transition work.
+- Color/depth scene-domain targets, color/depth composite targets, direct aperture composite shader, propagated-depth writes, ping-pong target swap, and final framebuffer copy.
+- One/few packed aperture draws per transition depth, with backface-culling/direction-uniform rejection for wrong-direction candidates and manual aperture-depth-vs-composite-depth rejection for occluded portal pixels.
+- Tests around transition level order, direction alternation from the current base scene, propagated depth behavior, overlapping transition portals, and exclusion of env-cell-to-env-cell portals from composition.
+
+Acceptance criteria:
+
+- Outdoor residency composites visible interiors through outdoor-to-indoor transition portals.
+- Interior residency composites visible exterior through indoor-to-outdoor transition portals starting from `initialEnvCellId`.
+- Recursive depth > 1 uses propagated composite depth to constrain child transition aperture pixels to regions visible through previous depths, or documents/activates the fallback path if direct depth propagation leaks.
+- The primary path does not require per-depth frontier filtering unless tests or visual targets prove propagated-depth containment is insufficient.
+- Ordinary env-cell-to-env-cell portals never produce transition composite passes.
+- Metrics expose aperture draw pass count, interior/exterior composite pass count, portal rect count, estimated pixel area, max composite depth, and whether direct-depth or fallback compositing was used.
 
 ### Phase 13B2: Dungeon Anchoring And Interior Focus
 
@@ -1203,6 +1474,7 @@ Steering:
 
 - Existing runtime anchor/rebase policy is outdoor-landblock oriented. Phase 13A bakes env-cell local placement into landblock-render-local positions; dungeon focus must decide how owning landblock placement, interior focus, and portal visibility compose before deeper visual verification.
 - Dungeon landblocks should continue to use the landblock env-cell source path rather than a separate renderer architecture.
+- Build on Phase 13B1c's explicit camera residency input. Dungeon focus may set residency directly; it should not require the renderer to infer residency from uploaded resources.
 
 Deliverables:
 
@@ -1215,25 +1487,27 @@ Acceptance criteria:
 - Runtime, renderer, and debug overlay agree on env-cell placement after selection, anchor/focus changes, and eviction.
 - A named dungeon/interior target can be loaded through the env-cell bundle pipeline without a separate renderer architecture.
 
-### Phase 13B3: Interior Visual Parity And Render-Pass Steering
+### Phase 13B3: Interior Visual Parity And Portal Verification
 
 Status: planned.
 
-Purpose: compare V2 interior behavior against v1 and steer portal rendering, visibility traversal, and future indoor/outdoor pass separation before dynamic/cutover work.
+Purpose: compare V2 interior behavior against v1 and steer remaining portal rendering, visibility traversal, and indoor/outdoor pass separation gaps before dynamic/cutover work.
 
 Steering:
 
-- Future portal rendering will likely group outdoor and indoor scene resources into different passes or render targets. Use explicit scene/pass metadata for that routing; do not infer it from static-object material domain, and do not require per-env-cell draw-unit partitioning before the visibility/render-target design needs it.
+- Phase 13B1g/13B1h should establish the first transition portal render-target and compositing path. Use this phase to verify against v1 and schedule remaining visibility/render-target gaps rather than inventing new routing policy.
 
 Deliverables:
 
 - Named dungeon/interior verification targets covering ordinary env-cell geometry, portal visibility, visible-cell traversal, and omission/deferred cases.
+- Named outdoor-to-indoor transition portal verification targets proving portal compositing only applies to transition portals.
 - Manual visual comparison checklist against v1 harness behavior for those targets.
 - Plan update with remaining dungeon parity gaps and any required portal/render-target design changes.
 
 Acceptance criteria:
 
 - V2 can visually inspect at least one real dungeon/interior target through the landblock env-cell bundle pipeline.
+- V2 can visually inspect at least one real outdoor-to-indoor transition portal with compositing behavior comparable to v1.
 - Remaining dungeon parity gaps are typed and scheduled rather than hidden under cutover.
 
 ### Phase 13C: Interior Plan Reassessment Before Dynamic Seeds

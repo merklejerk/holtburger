@@ -21,7 +21,10 @@ import {
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 	getOutdoorLandblockCoords,
 } from "../../lib/landblocks";
-import { createOutdoorLandblockRootTranslation } from "./static-placement";
+import {
+	createOutdoorLandblockRootTranslation,
+	deriveOutdoorCameraLandblockResidency,
+} from "./static-placement";
 
 export interface StaticSceneRay {
 	readonly origin: StaticSceneVec3;
@@ -186,11 +189,26 @@ export interface StaticSceneQueryRetainedScope {
 	readonly landblockId: number;
 }
 
-interface StaticSceneVec3 {
+export interface StaticSceneVec3 {
 	readonly x: number;
 	readonly y: number;
 	readonly z: number;
 }
+
+export type StaticSceneCameraResidency =
+	| {
+			readonly kind: "outdoor-landblock";
+			readonly landblockId: number;
+	  }
+	| {
+			readonly kind: "env-cell";
+			readonly landblockId: number;
+			readonly envCellId: number;
+	  }
+	| {
+			readonly kind: "unknown";
+			readonly landblockId: number | null;
+	  };
 
 type TerrainBvh = TerrainStaticScopePayload["sourceSpatial"]["terrainBvh"];
 type BvhNode =
@@ -1085,6 +1103,48 @@ export class StaticSceneQuery {
 		return candidates[0]?.item.envCellId ?? null;
 	}
 
+	queryCameraResidencyAtPoint(options: {
+		readonly outdoorAnchorLandblockId: number;
+		readonly point: StaticSceneVec3;
+	}): StaticSceneCameraResidency {
+		const outdoorResidency = deriveOutdoorCameraLandblockResidency({
+			anchorLandblockId: options.outdoorAnchorLandblockId,
+			cameraPosition: [options.point.x, options.point.y, options.point.z],
+		});
+		if (!outdoorResidency) {
+			return {
+				kind: "unknown",
+				landblockId: null,
+			};
+		}
+
+		const landblockId = outdoorResidency.landblockId;
+		if (this.#hasCommittedEnvCellRecords(landblockId)) {
+			const envCellId = this.queryEnvCellAtPoint({
+				acceptedEnvCellIds:
+					this.#getCommittedAcceptedEnvCellIds(landblockId) ?? undefined,
+				landblockId,
+				point: {
+					x: outdoorResidency.localCameraPosition[0],
+					y: outdoorResidency.localCameraPosition[1],
+					z: outdoorResidency.localCameraPosition[2],
+				},
+			});
+			if (envCellId !== null) {
+				return {
+					envCellId,
+					kind: "env-cell",
+					landblockId,
+				};
+			}
+		}
+
+		return {
+			kind: "outdoor-landblock",
+			landblockId,
+		};
+	}
+
 	queryCommittedEnvCellRecords(options: {
 		readonly landblockId: number;
 	}): StaticSceneCommittedEnvCellRecords | null {
@@ -1320,6 +1380,43 @@ export class StaticSceneQuery {
 				}
 			}
 		}
+	}
+
+	#hasCommittedEnvCellRecords(landblockId: number): boolean {
+		for (const recordsByKey of [
+			this.#committedSpatialRecordsByKey,
+			this.#committedVisibilityRecordsByKey,
+			this.#committedPortalInteriorRecordsByKey,
+			this.#committedSourceMappingsByKey,
+		]) {
+			for (const entry of recordsByKey.values()) {
+				if (
+					getCommittedRecordDomain(entry.record) === "landblock-env-cells" &&
+					getCommittedRecordLandblockId(entry.record) === landblockId
+				) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	#getCommittedAcceptedEnvCellIds(landblockId: number): readonly number[] | null {
+		const acceptedEnvCellIds = new Set<number>();
+		for (const entry of this.#committedVisibilityRecordsByKey.values()) {
+			const record = entry.record;
+			if (
+				record.kind === "env-cell-visibility" &&
+				record.landblockId === landblockId
+			) {
+				for (const envCellId of record.acceptedEnvCellIds) {
+					acceptedEnvCellIds.add(envCellId);
+				}
+			}
+		}
+		return acceptedEnvCellIds.size > 0
+			? [...acceptedEnvCellIds].sort((left, right) => left - right)
+			: null;
 	}
 
 	#pruneCommittedRecordsByRetainedScopes(

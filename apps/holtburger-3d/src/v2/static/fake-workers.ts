@@ -158,7 +158,9 @@ export class ImmediateStaticResolver implements StaticResolver {
 						landblockId: job.scope.landblockId,
 						source: "env-cells",
 					},
+					materialSources: [],
 					missingRefs: [],
+					paletteSources: [],
 					portalLinks: [],
 					regionRenderProfile: {
 						kind: "region-render-profile",
@@ -172,6 +174,8 @@ export class ImmediateStaticResolver implements StaticResolver {
 							nodes: [],
 						},
 					},
+					sourceAssets: [],
+					textureRefs: [],
 					visibilityDiagnostics: [],
 				},
 				sourceRevision: createStableFakeRenderSurfaceId(job),

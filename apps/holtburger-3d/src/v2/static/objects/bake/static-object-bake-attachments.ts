@@ -25,7 +25,8 @@ export class StaticObjectBakeAttachmentProvider implements StaticBakeAttachmentP
 	): Promise<StaticBakeBatchAttachments> {
 		if (
 			request.domain !== "outdoor-buildings" &&
-			request.domain !== "outdoor-detail"
+			request.domain !== "outdoor-detail" &&
+			request.domain !== "landblock-env-cells"
 		) {
 			return createEmptyStaticBakeAttachments();
 		}
@@ -64,7 +65,10 @@ function collectStaticObjectGeometryIdentities(
 	const byKey = new Map<string, StaticObjectSourceGeometryIdentity>();
 
 	for (const item of request.items) {
-		if (item.payload.scope.kind !== "outdoor-static-objects") {
+		if (
+			item.payload.scope.kind !== "outdoor-static-objects" &&
+			item.payload.scope.kind !== "landblock-env-cells"
+		) {
 			continue;
 		}
 

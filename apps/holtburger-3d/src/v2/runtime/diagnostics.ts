@@ -20,6 +20,7 @@ import type {
 	TexturePageSampleClass,
 	TextureWrapMode,
 } from "../textures/sampling-policy";
+import type { StaticSceneCameraResidency } from "./static-scene-query";
 
 export interface RuntimeDiagnostics {
 	warn(event: RuntimeWarningEvent): void;
@@ -35,6 +36,7 @@ interface RuntimeDiagnosticsRuntimeSummary {
 	readonly status: "idle" | "static-active" | "disposed";
 	readonly textureFilteringMode: TextureFilteringMode;
 	readonly sceneInterest: string | null;
+	readonly currentCameraResidency: StaticSceneCameraResidency;
 	readonly pendingStaticMaterializationRevisions: readonly number[];
 	readonly committedStaticMaterializationRevisions: readonly number[];
 	readonly failedStaticMaterializations: readonly RuntimeDiagnosticsFailure[];

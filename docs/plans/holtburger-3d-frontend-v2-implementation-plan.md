@@ -1553,7 +1553,7 @@ Verification:
 
 ### Phase 13B1c: Browser/Client-Owned Camera Residency Input
 
-Status: planned.
+Status: complete on 2026-06-16.
 
 Purpose: add an explicit current-camera-residency input owned by the browser/client layer so the renderer no longer infers residency from uploaded resources.
 
@@ -1568,6 +1568,71 @@ Acceptance criteria:
 - Browser/free-camera mode sets current residency explicitly rather than letting the renderer compute authoritative residency.
 - The residency input accepts direct authoritative values, so a future client mode can bypass TS position lookup.
 - Renderer-facing contracts no longer require a residency `source` field.
+
+Implementation notes:
+
+- Added `RuntimeCameraResidency` as the runtime-facing authoritative residency union, reusing the `StaticSceneCameraResidency` shape from the 13B1b query without adding a `source`/provenance field.
+- Added `ClientRuntime.queryCameraResidencyAtPoint(...)` as the browser-friendly position lookup wrapper over `StaticSceneQuery.queryCameraResidencyAtPoint(...)`.
+- Added `ClientRuntime.setCurrentCameraResidency(...)` as the explicit direct input path. This is the future client-mode seam: a physics/runtime owner can set `outdoor-landblock`, `env-cell`, or `unknown` directly without using the TS position lookup.
+- Runtime snapshots and runtime diagnostics now include `currentCameraResidency`, so later pass-planning phases can consume one explicit value and debug reports show the active authority.
+- Browser V2 debug UI now surfaces the current camera residency directly in the debug panel.
+- Browser V2 now polls residency during its frame update:
+  - outdoor mode queries by camera position plus submitted outdoor anchor landblock;
+  - interior/dungeon mode sets the submitted env-cell residency directly;
+  - no submitted static location reports `unknown`.
+
+Spicy / failed to close:
+
+- The renderer still does not consume `currentCameraResidency`; 13B1d owns turning this value into a pass plan. This phase intentionally stopped at authority/input wiring.
+- Browser polling currently runs on the existing 30 Hz frame-state interval. That is acceptable for browser free-camera scaffolding, but future client mode should push authoritative residency directly from the Rust physics/runtime cadence instead of adopting this polling loop.
+- No structured diagnostics were added around residency transitions beyond snapshot/report visibility. That keeps with the current preference to be loud at failure points and avoid decorative accounting.
+
+Verification:
+
+- `npm run test:ts -- client-runtime.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run test:ts`
+
+### Phase 13B1c-1: Browser Camera Cadence Split
+
+Status: complete on 2026-06-16.
+
+Purpose: remove the accidental 30 Hz cap from browser V2 camera frame-state updates while keeping slower policy work out of the renderer loop.
+
+Problem statement:
+
+- Browser V2 already used a `setInterval(..., 1000 / 30)` loop to push camera frame state into the runtime/renderer.
+- The camera controller itself moves on RAF, so forwarding camera state only at 30 Hz can make visual camera motion stale even when the renderer draws at display cadence.
+- Follow-mode rebasing, residency polling, and static-interest policy do not need to run at renderer cadence yet; mixing them with camera frame-state forwarding made the cadence ambiguous.
+
+Deliverables:
+
+- Push renderer frame state immediately when the browser camera controller reports a camera change.
+- Keep a slower browser policy sync loop for follow-mode rebase and current camera residency updates.
+- Ensure follow-mode rebase still updates renderer camera state immediately when it mutates the camera position.
+
+Acceptance criteria:
+
+- Browser camera movement is no longer forwarded to the runtime/renderer only by the 30 Hz interval.
+- The 30 Hz loop remains a policy loop, not the visual camera movement cadence.
+- Camera residency remains browser/client-owned and explicit, but is not promoted into the renderer loop before 13B1d.
+
+Implementation notes:
+
+- `BrowserWorldDisplayV2` now calls `pushCameraFrameState()` from `V2BrowserCameraController.onChange`, so pointer, wheel, keyboard RAF movement, and reset-driven camera changes are forwarded immediately.
+- Replaced the old `frameInterval` with a named `CAMERA_POLICY_SYNC_INTERVAL_MS` loop that calls `syncCameraPolicy()`.
+- `syncCameraPolicy()` applies follow-mode rebase and updates current camera residency. Rebase pushes camera frame state immediately through the controller `onChange` path; the null-controller fallback pushes explicitly.
+
+Spicy / failed to close:
+
+- The policy loop is still 30 Hz. That is fine for current browser-mode residency/follow scaffolding, but future client mode should set residency directly from authoritative simulation rather than adopt this browser polling cadence.
+- Renderer still renders from the latest pushed frame state; it does not pull camera state itself. That is acceptable for this app-local browser controller model, but 13B1d should keep pass planning explicit instead of making the renderer infer residency from frame state.
+
+Verification:
+
+- `npm run test:ts -- client-runtime.test.ts browser-camera-controller.test.ts`
+- `npm run check`
 
 ### Phase 13B1d: Residency-Derived Portal Pass Plan
 

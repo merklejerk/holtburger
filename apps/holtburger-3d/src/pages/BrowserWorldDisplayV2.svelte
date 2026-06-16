@@ -30,6 +30,7 @@
 	import type {
 		ClientRuntime,
 		ManualStaticDomain,
+		RuntimeCameraResidency,
 		RuntimeSnapshot,
 	} from "../v2/runtime/client-runtime";
 	import {
@@ -47,6 +48,7 @@
 	type BrowserV2PanelTab = "navigate" | "settings" | "debug";
 
 	const STATIC_INTEREST_REFRESH_DEBOUNCE_MS = 250;
+	const CAMERA_POLICY_SYNC_INTERVAL_MS = 1000 / 30;
 	const PERF_OVERLAY_SAMPLE_MS = 500;
 	const PERF_OVERLAY_EMA_ALPHA = 0.18;
 	const STATIC_PICK_CLICK_DRAG_THRESHOLD_PX = 3;
@@ -120,6 +122,7 @@
 				initialState: cameraState,
 				onChange(nextCameraState) {
 					cameraState = nextCameraState;
+					pushCameraFrameState();
 				},
 			});
 			const unsubscribe = runtime.subscribe((nextSnapshot) => {
@@ -130,19 +133,13 @@
 					nextSnapshot.renderer,
 				);
 			});
-			const frameInterval = window.setInterval(() => {
-				let camera =
-					cameraController?.createFrameStateCamera() ??
-					createV2FreeCameraFrameStateCamera(cameraState);
-				camera = applyFollowModeRebaseForFrame(camera);
-				runtime?.updateFrameState({
-					camera,
-					timeSeconds: performance.now() / 1000,
-				});
-			}, 1000 / 30);
+			pushCameraFrameState();
+			const policySyncInterval = window.setInterval(() => {
+				syncCameraPolicy();
+			}, CAMERA_POLICY_SYNC_INTERVAL_MS);
 
 			return () => {
-				window.clearInterval(frameInterval);
+				window.clearInterval(policySyncInterval);
 				clearStaticInterestRefresh();
 				unsubscribe();
 				cameraController?.dispose();
@@ -198,6 +195,20 @@
 
 	function resetCamera(): void {
 		cameraController?.reset();
+	}
+
+	function pushCameraFrameState(): void {
+		if (!runtime) {
+			return;
+		}
+
+		const camera =
+			cameraController?.createFrameStateCamera() ??
+			createV2FreeCameraFrameStateCamera(cameraState);
+		runtime.updateFrameState({
+			camera,
+			timeSeconds: performance.now() / 1000,
+		});
 	}
 
 	function handleLocationInput(event: Event): void {
@@ -397,6 +408,59 @@
 		});
 	}
 
+	function syncCameraPolicy(): void {
+		const camera =
+			cameraController?.createFrameStateCamera() ??
+			createV2FreeCameraFrameStateCamera(cameraState);
+		const rebasedCamera = applyFollowModeRebaseForFrame(camera);
+		syncCurrentCameraResidency(rebasedCamera.position);
+	}
+
+	function syncCurrentCameraResidency(
+		cameraPosition: readonly [number, number, number],
+	): void {
+		if (!runtime) {
+			return;
+		}
+
+		runtime.setCurrentCameraResidency(
+			resolveCurrentCameraResidency(cameraPosition),
+		);
+	}
+
+	function resolveCurrentCameraResidency(
+		cameraPosition: readonly [number, number, number],
+	): RuntimeCameraResidency {
+		if (!submittedStaticLocation) {
+			return {
+				kind: "unknown",
+				landblockId: null,
+			};
+		}
+
+		if (submittedStaticLocation.kind === "interior-cell") {
+			return {
+				envCellId: submittedStaticLocation.envCellId,
+				kind: "env-cell",
+				landblockId: submittedStaticLocation.landblockId,
+			};
+		}
+
+		return (
+			runtime?.queryCameraResidencyAtPoint({
+				outdoorAnchorLandblockId: submittedStaticLocation.landblockId,
+				point: {
+					x: cameraPosition[0],
+					y: cameraPosition[1],
+					z: cameraPosition[2],
+				},
+			}) ?? {
+				kind: "unknown",
+				landblockId: null,
+			}
+		);
+	}
+
 	function applyFollowModeRebaseForFrame(
 		camera: ReturnType<typeof createV2FreeCameraFrameStateCamera>,
 	): ReturnType<typeof createV2FreeCameraFrameStateCamera> {
@@ -432,6 +496,9 @@
 			position: rebase.cameraPosition,
 		};
 		runtime.updateSceneInterest(rebase.sceneInterest);
+		if (!cameraController) {
+			pushCameraFrameState();
+		}
 
 		return {
 			...camera,
@@ -631,6 +698,20 @@
 
 	function formatHexId(value: number): string {
 		return `0x${value.toString(16).padStart(8, "0")}`;
+	}
+
+	function formatCameraResidency(residency: RuntimeCameraResidency): string {
+		if (residency.kind === "unknown") {
+			return residency.landblockId === null
+				? "unknown"
+				: `unknown ${formatHexId(residency.landblockId)}`;
+		}
+
+		if (residency.kind === "outdoor-landblock") {
+			return `outdoor ${formatHexId(residency.landblockId)}`;
+		}
+
+		return `env ${formatHexId(residency.landblockId)} / ${formatHexId(residency.envCellId)}`;
 	}
 </script>
 
@@ -1111,6 +1192,14 @@
 								{formatCameraPosition(cameraState.position)} yaw
 								{cameraState.yawRadians.toFixed(2)} pitch
 								{cameraState.pitchRadians.toFixed(2)}
+							</dd>
+						</div>
+						<div>
+							<dt>Camera residency</dt>
+							<dd>
+								{snapshot
+									? formatCameraResidency(snapshot.currentCameraResidency)
+									: "pending"}
 							</dd>
 						</div>
 						<div>

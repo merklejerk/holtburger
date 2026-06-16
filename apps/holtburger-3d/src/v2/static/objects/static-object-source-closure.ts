@@ -68,6 +68,20 @@ export interface StaticObjectSourceClosure {
 	readonly sourceRevision: number;
 }
 
+export type StaticMaterialSourceClosure = Omit<
+	StaticObjectSourceClosure,
+	"sourceAssets"
+>;
+
+interface StaticSourceClosureAccumulator {
+	readonly sourceAssets: Map<string, StaticObjectSourceAssetFacts>;
+	readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
+	readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
+	readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
+	readonly missingRefs: StaticResourceIdentity[];
+	sourceRevision: number;
+}
+
 interface StaticObjectMaterialSlotInput {
 	readonly slotIndex: number;
 	readonly geometrySurfaceId: number;
@@ -82,12 +96,33 @@ export async function resolveStaticObjectSourceClosure(options: {
 	readonly assetService: PreparedAssetReader;
 	readonly sourceAssetIds: readonly string[];
 }): Promise<StaticObjectSourceClosure> {
-	const sourceAssets = new Map<string, StaticObjectSourceAssetFacts>();
-	const materialSources = new Map<string, StaticObjectMaterialSourceFacts>();
-	const paletteSources = new Map<string, StaticObjectPaletteSourceFacts>();
-	const textureRefs = new Map<string, StaticObjectTextureRefFacts>();
-	const missingRefs: StaticResourceIdentity[] = [];
-	let sourceRevision = 0;
+	const closure = await resolveStaticObjectAndMaterialSourceClosure({
+		assetService: options.assetService,
+		materialIds: [],
+		sourceAssetIds: options.sourceAssetIds,
+	});
+
+	return closure;
+}
+
+export async function resolveStaticMaterialSourceClosure(options: {
+	readonly assetService: PreparedAssetReader;
+	readonly materialIds: readonly number[];
+}): Promise<StaticMaterialSourceClosure> {
+	const accumulator = createStaticSourceClosureAccumulator();
+	await resolveMaterialSourcesIntoAccumulator(accumulator, {
+		assetService: options.assetService,
+		materialIds: options.materialIds,
+	});
+	return finalizeStaticMaterialSourceClosure(accumulator);
+}
+
+export async function resolveStaticObjectAndMaterialSourceClosure(options: {
+	readonly assetService: PreparedAssetReader;
+	readonly sourceAssetIds: readonly string[];
+	readonly materialIds: readonly number[];
+}): Promise<StaticObjectSourceClosure> {
+	const accumulator = createStaticSourceClosureAccumulator();
 
 	for (const sourceAssetId of uniqueSorted(options.sourceAssetIds)) {
 		const sourceKey = parseHostAssetId(sourceAssetId);
@@ -95,30 +130,89 @@ export async function resolveStaticObjectSourceClosure(options: {
 
 		try {
 			const source = await loadRenderableSource(options.assetService, sourceKey);
-			sourceRevision = Math.max(sourceRevision, source.asset.revision);
+			accumulator.sourceRevision = Math.max(
+				accumulator.sourceRevision,
+				source.asset.revision,
+			);
 			const facts = await createSourceAssetFacts({
 				assetService: options.assetService,
 				identity,
-				materialSources,
-				missingRefs,
-				paletteSources,
+				materialSources: accumulator.materialSources,
+				missingRefs: accumulator.missingRefs,
+				paletteSources: accumulator.paletteSources,
 				source,
-				textureRefs,
+				textureRefs: accumulator.textureRefs,
 			});
-			sourceAssets.set(createSourceCacheKey(identity), facts);
-			sourceRevision = Math.max(sourceRevision, facts.partCount);
+			accumulator.sourceAssets.set(createSourceCacheKey(identity), facts);
 		} catch {
-			missingRefs.push(identity);
+			addMissingRef(accumulator.missingRefs, identity);
 		}
 	}
 
+	await resolveMaterialSourcesIntoAccumulator(accumulator, {
+		assetService: options.assetService,
+		materialIds: options.materialIds,
+	});
+
+	return finalizeStaticObjectSourceClosure(accumulator);
+}
+
+function createStaticSourceClosureAccumulator(): StaticSourceClosureAccumulator {
 	return {
-		materialSources: [...materialSources.values()],
-		missingRefs,
-		paletteSources: [...paletteSources.values()],
-		sourceAssets: [...sourceAssets.values()],
-		sourceRevision,
-		textureRefs: [...textureRefs.values()],
+		materialSources: new Map(),
+		missingRefs: [],
+		paletteSources: new Map(),
+		sourceAssets: new Map(),
+		sourceRevision: 0,
+		textureRefs: new Map(),
+	};
+}
+
+async function resolveMaterialSourcesIntoAccumulator(
+	accumulator: StaticSourceClosureAccumulator,
+	options: {
+		readonly assetService: PreparedAssetReader;
+		readonly materialIds: readonly number[];
+	},
+): Promise<void> {
+	for (const materialId of uniqueSortedNumbers(options.materialIds)) {
+		const sourceRevision = await loadMaterialSource({
+			assetService: options.assetService,
+			material: createStaticMaterialSourceIdentity(materialId),
+			materialSources: accumulator.materialSources,
+			missingRefs: accumulator.missingRefs,
+			paletteSources: accumulator.paletteSources,
+			textureRefs: accumulator.textureRefs,
+		});
+		accumulator.sourceRevision = Math.max(
+			accumulator.sourceRevision,
+			sourceRevision,
+		);
+	}
+}
+
+function finalizeStaticObjectSourceClosure(
+	accumulator: StaticSourceClosureAccumulator,
+): StaticObjectSourceClosure {
+	return {
+		materialSources: [...accumulator.materialSources.values()],
+		missingRefs: accumulator.missingRefs,
+		paletteSources: [...accumulator.paletteSources.values()],
+		sourceAssets: [...accumulator.sourceAssets.values()],
+		sourceRevision: accumulator.sourceRevision,
+		textureRefs: [...accumulator.textureRefs.values()],
+	};
+}
+
+function finalizeStaticMaterialSourceClosure(
+	accumulator: StaticSourceClosureAccumulator,
+): StaticMaterialSourceClosure {
+	return {
+		materialSources: [...accumulator.materialSources.values()],
+		missingRefs: accumulator.missingRefs,
+		paletteSources: [...accumulator.paletteSources.values()],
+		sourceRevision: accumulator.sourceRevision,
+		textureRefs: [...accumulator.textureRefs.values()],
 	};
 }
 
@@ -139,7 +233,7 @@ export async function resolveStaticObjectSurfaceTextureRef(options: {
 			"surface-texture",
 		);
 	} catch {
-		options.missingRefs.push(options.texture);
+		addMissingRef(options.missingRefs, options.texture);
 		return 0;
 	}
 
@@ -202,7 +296,7 @@ export async function resolveStaticObjectSurfaceTextureRef(options: {
 		}
 		return loadedRenderSurface.payload.sourceByteLength;
 	} catch {
-		options.missingRefs.push(renderSurface);
+		addMissingRef(options.missingRefs, renderSurface);
 		return 0;
 	}
 }
@@ -331,7 +425,7 @@ async function createSetupModelParts(options: {
 				"gfx-obj",
 			);
 		} catch {
-			options.missingRefs.push(gfxObjIdentity);
+			addMissingRef(options.missingRefs, gfxObjIdentity);
 			continue;
 		}
 
@@ -486,10 +580,10 @@ async function loadMaterialSource(options: {
 	readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
 	readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
 	readonly missingRefs: StaticResourceIdentity[];
-}): Promise<void> {
+}): Promise<number> {
 	const key = createMaterialCacheKey(options.material);
 	if (options.materialSources.has(key)) {
-		return;
+		return 0;
 	}
 
 	let material: LoadedPayload<"material-recipe">;
@@ -500,8 +594,8 @@ async function loadMaterialSource(options: {
 			"material-recipe",
 		);
 	} catch {
-		options.missingRefs.push(options.material);
-		return;
+		addMissingRef(options.missingRefs, options.material);
+		return 0;
 	}
 
 	const source =
@@ -541,22 +635,30 @@ async function loadMaterialSource(options: {
 		translucency: material.payload.translucency,
 	});
 
+	let sourceRevision = material.asset.revision;
 	if (source.kind === "texture" && source.palette) {
-		await loadPalette(
-			options.assetService,
-			source.palette,
-			options.paletteSources,
-			options.missingRefs,
+		sourceRevision = Math.max(
+			sourceRevision,
+			await loadPalette(
+				options.assetService,
+				source.palette,
+				options.paletteSources,
+				options.missingRefs,
+			),
 		);
 	}
 
-	await resolveMaterialTextureRefs(
-		options.assetService,
-		material.payload,
-		options.paletteSources,
-		options.textureRefs,
-		options.missingRefs,
+	sourceRevision = Math.max(
+		sourceRevision,
+		await resolveMaterialTextureRefs(
+			options.assetService,
+			material.payload,
+			options.paletteSources,
+			options.textureRefs,
+			options.missingRefs,
+		),
 	);
+	return sourceRevision;
 }
 
 async function resolveMaterialTextureRefs(
@@ -565,9 +667,9 @@ async function resolveMaterialTextureRefs(
 	paletteSources: Map<string, StaticObjectPaletteSourceFacts>,
 	textureRefs: Map<string, StaticObjectTextureRefFacts>,
 	missingRefs: StaticResourceIdentity[],
-): Promise<void> {
+): Promise<number> {
 	if (material.source.kind !== "texture") {
-		return;
+		return 0;
 	}
 
 	await resolveStaticObjectSurfaceTextureRef({
@@ -582,6 +684,7 @@ async function resolveMaterialTextureRefs(
 		texture: createSurfaceTextureIdentity(material.source.surfaceTextureId),
 		textureRefs,
 	});
+	return 0;
 }
 
 async function loadPalette(
@@ -589,10 +692,10 @@ async function loadPalette(
 	palette: PaletteIdentity,
 	paletteSources: Map<string, StaticObjectPaletteSourceFacts>,
 	missingRefs: StaticResourceIdentity[],
-): Promise<void> {
+): Promise<number> {
 	const key = createPaletteCacheKey(palette);
 	if (paletteSources.has(key)) {
-		return;
+		return 0;
 	}
 	try {
 		const loaded = await loadPayload(
@@ -604,8 +707,10 @@ async function loadPalette(
 			colorCount: loaded.payload.colorCount,
 			palette,
 		});
+		return loaded.asset.revision;
 	} catch {
-		missingRefs.push(palette);
+		addMissingRef(missingRefs, palette);
+		return 0;
 	}
 }
 
@@ -637,7 +742,7 @@ async function tryLoadSetupAppearance(
 			"setup-appearance",
 		);
 	} catch {
-		missingRefs.push(identity);
+		addMissingRef(missingRefs, identity);
 		return null;
 	}
 }
@@ -850,6 +955,31 @@ function sum<T>(values: readonly T[], getValue: (value: T) => number): number {
 
 function uniqueSorted(values: readonly string[]): readonly string[] {
 	return Array.from(new Set(values)).sort();
+}
+
+function uniqueSortedNumbers(values: readonly number[]): readonly number[] {
+	return Array.from(new Set(values)).sort((left, right) => left - right);
+}
+
+function addMissingRef(
+	missingRefs: StaticResourceIdentity[],
+	identity: StaticResourceIdentity,
+): void {
+	const key = createStaticResourceCacheKey(identity);
+	if (
+		missingRefs.some(
+			(existingIdentity) =>
+				createStaticResourceCacheKey(existingIdentity) === key,
+		)
+	) {
+		return;
+	}
+
+	missingRefs.push(identity);
+}
+
+function createStaticResourceCacheKey(identity: StaticResourceIdentity): string {
+	return `${identity.kind}:${JSON.stringify(identity)}`;
 }
 
 export function createSourceCacheKey(

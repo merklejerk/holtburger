@@ -1474,7 +1474,6 @@ interface StructuredInteriorGeometryResource {
 	readonly landblockId: StructuredInteriorGeometryStaticDrawUnit["landblockId"];
 	readonly envCellId: StructuredInteriorGeometryStaticDrawUnit["envCellId"];
 	readonly materialFamily: StructuredInteriorGeometryStaticDrawUnit["materialFamily"];
-	readonly debugColor: StructuredInteriorGeometryStaticDrawUnit["debugColor"];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
@@ -2013,7 +2012,6 @@ function createStructuredInteriorGeometryResource(
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
 
 	return {
-		debugColor: drawUnit.debugColor,
 		drawUnitId: drawUnit.drawUnitId,
 		envCellId: drawUnit.envCellId,
 		indexBuffer,

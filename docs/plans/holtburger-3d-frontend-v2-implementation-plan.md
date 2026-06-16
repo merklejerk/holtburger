@@ -730,7 +730,7 @@ Spicy follow-up for 13A4b:
 
 ##### Phase 13A4b: Materialized Structured-Interior Draw-Unit Contract
 
-Status: planned.
+Status: complete on 2026-06-16.
 
 Deliverables:
 
@@ -747,15 +747,88 @@ Acceptance criteria:
 - Texture-manager behavior for `landblock-env-cells` remains intentionally static-style, not terrain-style.
 - No structured-interior debug/flat material is accepted as a renderable fallback after this subphase.
 
-##### Phase 13A4c: Missing-Source Omission Diagnostics And Cleanup
+Implementation notes:
 
-Status: planned.
+- `StructuredInteriorGeometryStaticDrawUnit` now carries a materialized material contract: renderable material family/pass, render state, material table entries, material slot indices, and texture use ids. The old renderable `structured-interior-debug-flat`/`debugColor` path was removed from the draw-unit contract and WebGL2 structured-interior residency metadata.
+- `planStructuredInteriorCellMaterials` now consumes the merged `LandblockEnvCellsStaticScopePayload` material source closure from 13A4a and classifies cell-structure materials through the existing static material behavior rules where those rules are material-level. It currently emits rendered/deferred/unsupported structured-interior plan entries plus translated material failure reasons; those failure reasons are diagnostics only and must not become fallback render materials.
+- `LandblockEnvCellsBaker` now materializes structured-interior draw units only when all surface material plans for the cell are renderable and compatible at the current coarse draw-unit level. Missing/deferred/unsupported materials no longer produce debug fallback draw units.
+- Structured-interior bake output now emits `landblock-env-cells` texture uses for materialized textured surfaces using the same static batch boundary as env-cell static-object draw units. Texture manager role-page behavior remains the existing non-terrain static-style policy.
+- Material coverage now records rendered/deferred/unsupported structured-interior buckets from material plan outcomes instead of treating every cell structure as deferred debug scaffolding.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- --run src/v2/static/env-cells/bake/landblock-env-cells-baker.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run test:ts`
+
+Spicy follow-up and course correction:
+
+- Coarse structured-interior draw units are materialized only when all surface materials in the env cell are compatible by family/pass and fit the current material table limit. Mixed or unsupported cells are deferred/omitted wholesale for now. That is acceptable as a no-fallback guardrail, but it is not the desired architecture.
+- The next phase should course-correct toward a shared material compatibility partitioning core reused by both static objects and structured interiors. Cell structures should not be forced through static-object source/object ownership, but they should reuse material classification, renderability, texture-role layout, material-table capacity, and compatibility grouping logic.
+- Stop describing non-renderable structured-interior material results as "fallbacks" except when referring to legacy code being removed. Missing/deferred/unsupported material facts should become typed omissions/deferred diagnostics, logged loudly at runtime, and dropped from renderable output.
+- The structured-interior draw unit now has material table data, but WebGL2 still only creates resident buffers for it; visible drawing remains Phase 13B.
+
+##### Phase 13A4b-1: Shared Material Compatibility Partitioning Course Correction
+
+Status: planned; inserted and dry-run refined on 2026-06-16 before 13A4c.
+
+Purpose: replace the coarse all-or-nothing structured-interior materialization gate with a shared compatibility partitioning core that static objects and structured interiors can both use through honest ownership adapters.
 
 Deliverables:
 
-- Add typed omission records for unresolved or unsupported structured-interior surface material dependencies, including material id, surface id, env-cell id, landblock id, and missing dependency identity.
+- Extract a reusable material compatibility partitioning helper from the static-object partitioner. The shared core should group triangle-like candidates by material family, pass, renderability, texture role layout, material table capacity, and stageable texture data uses.
+- Keep domain adapters separate:
+  - Static-object adapter remains object/part/source-triangle owned.
+  - Structured-interior adapter is env-cell/cell-structure/surface-triangle owned.
+- Structured interiors must continue to emit public `structured-interior-geometry` draw units, not `static-object-geometry`, and must not invent static-object identities for walls/floors.
+- Allow mixed cell-structure geometry to produce multiple compatible structured-interior draw units from one env-cell cell structure when materials require different render contracts. This is draw-unit partitioning by material compatibility, not a policy to partition interior static-object seeds by env cell.
+- Replace "fallback reason" terminology in structured-interior planner/baker code and tests with omission/deferred diagnostic terminology. Missing/deferred/unsupported surfaces should be dropped from renderable structured-interior draw units and represented by typed records/loggable diagnostics.
+- Preserve shared texture batch behavior: structured interiors and env-cell static objects continue to submit texture uses to the same `landblock-env-cells` static batch boundary.
+
+Acceptance criteria:
+
+- A cell structure with both opaque textured surfaces and alpha-test/indexed surfaces can produce separate compatible `structured-interior-geometry` draw units instead of omitting the whole cell.
+- A missing/unsupported surface does not block unrelated compatible surfaces in the same cell structure from materializing.
+- Static object draw-unit output remains behaviorally unchanged after extracting the shared compatibility core.
+- Structured-interior code contains no renderable fallback material path and no misleading fallback-material naming for new omission/deferred diagnostics.
+- Tests prove mixed structured-interior surfaces, missing-surface omission, static-object partitioner parity, and shared `landblock-env-cells` texture-use staging.
+
+Steering:
+
+- Do not over-generalize geometry ownership. The shared core should operate on narrow material compatibility candidate data, not static-object-specific source assets or cell-structure-specific attachments.
+- Prefer deleting the current whole-cell compatibility gate once the partitioning core can produce structured-interior slices. Keeping both paths around will make future renderer behavior ambiguous.
+- If extraction becomes too large, split this phase into "shared candidate/partition model" and "structured-interior adapter" subphases before proceeding to 13A4c.
+
+Dry-run findings:
+
+- The extraction boundary should be below `partitionStaticObjectCompatibility`, not around it. The existing static-object partitioner mixes reusable material axes with static-object-only ownership axes, source/gfx/part identity, transparent sorting policy, and coverage coupling. Extract only a generic material compatibility slicer that accepts preclassified material candidates plus an opaque owner reference, then keep static-object and structured-interior adapters responsible for their own geometry/source identities.
+- The reusable slicer should group only by renderable material contract: family, pass, render coverage, blend/alpha policy, texture role schema/layout, wrap mode, material entry key, stageable texture data uses, and material table capacity. Ownership keys, object part keys, env-cell ids, surface ids, and source triangle ids stay outside the shared grouping core except as opaque refs returned to the adapter.
+- Static-object behavior needs a parity step first: adapt the current static-object candidate list into the shared slicer and recreate the existing `StaticObjectCompatibilityPartition` shape from the slice output. Existing partitioner tests should remain behaviorally unchanged before structured interiors are moved over.
+- Structured interiors should then build one candidate per renderable surface triangle, using the surface's classified material plan and preserving env-cell id, cell-structure id, surface id, source triangle id, and attachment triangle index as structured-interior-owned metadata. Missing/deferred/unsupported surfaces are omitted before slicing and recorded as diagnostics, not allowed to block unrelated renderable candidates in the same cell structure.
+- The current `isRenderableStructuredInteriorCell` whole-cell gate should be deleted when this lands. Keeping it would preserve the all-or-nothing behavior and make mixed cells impossible even if the shared slicer works.
+- Multiple structured-interior slices from one env cell need stable distinct draw-unit ids, for example by appending the compatibility/slice id to the current `structured-interior:<envCellId>:<cellStructureId>` id. Texture-use owner ids must reference those slice draw-unit ids, not only the env-cell-level id.
+- Structured-interior geometry should be compact-baked per slice from selected attachment triangles. Do not reuse the full cell attachment vertex/index buffers with filtered material slots; compact buffers avoid unreferenced vertices, stale `triangleCount`/`vertexCount`, and ambiguous `materialSlotIndices`.
+- Material table slots for structured interiors should be assigned from the slice's material entry keys, not by searching material ids across the whole cell. Repeated material ids with different texture-role/layout behavior must not collapse into the wrong slot.
+- Coverage currently counts fallback reason codes globally and applies them to every unrendered bucket. This phase should track omission/deferred reason codes per affected surface/bucket so diagnostics stay honest once good and bad surfaces coexist in one cell.
+- The term "fallback" remains in static-object material planner types today, but structured-interior-facing code should stop exposing that name. If a global rename is too invasive for this phase, map static-object planner failures into structured-interior omission/deferred diagnostic records at the adapter boundary and leave the broader terminology cleanup for a focused follow-up.
+
+Suggested implementation order:
+
+1. Extract a generic material compatibility candidate/slice helper and port the static-object partitioner onto it, preserving current static-object output and tests.
+2. Add the structured-interior candidate adapter, compact per-slice geometry bake, stable slice draw-unit ids, and slice-owned texture uses; delete the whole-cell compatibility gate.
+3. Rename structured-interior fallback-facing types/tests to omission/deferred diagnostics and make coverage reason codes bucket/surface-specific.
+4. Validate with focused mixed-cell, missing-surface, static-object parity, and shared texture-use staging tests before proceeding to 13A4c.
+
+##### Phase 13A4c: Missing-Source Omission Diagnostics And Cleanup
+
+Status: planned; re-steered to follow 13A4b-1.
+
+Deliverables:
+
+- Add typed omission/deferred records for unresolved or unsupported structured-interior surface material dependencies, including material id, surface id, env-cell id, landblock id, and missing dependency identity.
 - Make the runtime/client diagnostic path emit grouped console-visible warnings for committed structured-interior omissions. Avoid one warning per triangle/surface spam, and do not write tests against incidental console text.
-- Drop affected surface/slot geometry from materialized structured-interior draw units when its required source closure is incomplete. Do not fail unrelated env cells or env-cell static seed geometry in the same `landblock-env-cells` batch.
+- Drop affected surface/slot geometry from materialized structured-interior draw units when its required source closure is incomplete. Do not fail unrelated compatible surfaces, unrelated env cells, or env-cell static seed geometry in the same `landblock-env-cells` batch.
 - Remove or quarantine legacy `structured-interior-debug-flat` renderable fields after the materialized path owns all renderable structured-interior output.
 - Add tests proving missing material/render-surface/palette/texture refs remain typed, produce omission records, and keep unrelated structured-interior/static-seed draw units materializable.
 

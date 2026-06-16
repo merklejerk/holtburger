@@ -1,3 +1,4 @@
+import type { RegionRenderProfilePayloadDto } from "../../../lib/host/contracts";
 import type { ResolverLandblockEnvCellsPayloadDto } from "../../assets/preparation/env-cell-views";
 import type {
 	HostAssetKey,
@@ -14,18 +15,33 @@ import type {
 	LandblockEnvCellsStaticScopePayload,
 	StaticMaterialSourceIdentity,
 	StaticObjectInstanceIdentity,
+	StaticObjectPaletteSourceFacts,
+	StaticObjectTextureRefFacts,
 	StaticResolverJob,
 	StaticScopePayload,
+	StaticResourceIdentity,
+	RegionDetailRoleFacts,
 } from "../contracts";
 import {
+	createPaletteCacheKey,
 	createSourceCacheKey,
 	createStaticObjectSourceIdentity,
+	createTextureRefCacheKey,
 	resolveStaticObjectAndMaterialSourceClosure,
+	resolveStaticObjectSurfaceTextureRef,
 } from "../objects/static-object-source-closure";
+import { createSurfaceTextureIdentity } from "../terrain/terrain-identities";
 
-interface LoadedLandblockEnvCellsPayload {
+type LandblockEnvCellsPreparedPayload =
+	| ResolverLandblockEnvCellsPayloadDto
+	| RegionRenderProfilePayloadDto;
+
+interface LoadedPayload<
+	TKind extends LandblockEnvCellsPreparedPayload["kind"] =
+		LandblockEnvCellsPreparedPayload["kind"],
+> {
 	readonly asset: PreparedAsset;
-	readonly payload: ResolverLandblockEnvCellsPayloadDto;
+	readonly payload: Extract<LandblockEnvCellsPreparedPayload, { readonly kind: TKind }>;
 }
 
 export interface LandblockEnvCellsResolverOptions {
@@ -51,6 +67,11 @@ export class LandblockEnvCellsResolver {
 
 		const landblock = await this.#loadPayload(
 			createHostAssetKey("landblock-env-cells", job.scope.landblockId),
+			"landblock-env-cells",
+		);
+		const regionRenderProfile = await this.#loadPayload(
+			createHostAssetKey("region-render-profile", landblock.payload.regionNumber),
+			"region-render-profile",
 		);
 		const sourceClosure = await resolveStaticObjectAndMaterialSourceClosure({
 			assetService: this.#assetService,
@@ -58,6 +79,26 @@ export class LandblockEnvCellsResolver {
 			sourceAssetIds: landblock.payload.envCells.flatMap((cell) =>
 				cell.statics.map((staticSeed) => staticSeed.sourceAssetId),
 			),
+		});
+		const paletteSources = new Map(
+			sourceClosure.paletteSources.map((source) => [
+				createPaletteCacheKey(source.palette),
+				source,
+			]),
+		);
+		const textureRefs = new Map(
+			sourceClosure.textureRefs.map((ref) => [
+				createTextureRefCacheKey(ref),
+				ref,
+			]),
+		);
+		const missingRefs = [...sourceClosure.missingRefs];
+		const detailRoles = createRegionDetailRoles(regionRenderProfile.payload);
+		const detailTextureRevision = await this.#resolveRegionDetailTextureRefs({
+			detailRoles: detailRoles.filter((role) => role.role === "environment"),
+			missingRefs,
+			paletteSources,
+			textureRefs,
 		});
 		const sourceByKey = new Set(
 			sourceClosure.sourceAssets.map((source) =>
@@ -89,12 +130,15 @@ export class LandblockEnvCellsResolver {
 				source: "env-cells",
 			},
 			materialSources: sourceClosure.materialSources,
-			missingRefs: sourceClosure.missingRefs,
-			paletteSources: sourceClosure.paletteSources,
+			missingRefs,
+			paletteSources: [...paletteSources.values()],
 			portalLinks: landblock.payload.portalLinks,
 			regionRenderProfile: {
-				kind: "region-render-profile",
-				regionNumber: landblock.payload.regionNumber,
+				detailRoles,
+				identity: {
+					kind: "region-render-profile",
+					regionNumber: landblock.payload.regionNumber,
+				},
 			},
 			residencySpatial: {
 				landblockEnvCellBvhItemCount:
@@ -115,7 +159,7 @@ export class LandblockEnvCellsResolver {
 				},
 			},
 			sourceAssets: sourceClosure.sourceAssets,
-			textureRefs: sourceClosure.textureRefs,
+			textureRefs: [...textureRefs.values()],
 			visibilityDiagnostics: [],
 		};
 
@@ -124,18 +168,65 @@ export class LandblockEnvCellsResolver {
 			scope,
 			sourceRevision: Math.max(
 				landblock.asset.revision,
+				regionRenderProfile.asset.revision,
 				sourceClosure.sourceRevision,
+				detailTextureRevision,
 			),
 		};
 	}
 
-	async #loadPayload(
+	async #resolveRegionDetailTextureRefs(options: {
+		readonly detailRoles: readonly RegionDetailRoleFacts[];
+		readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
+		readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
+		readonly missingRefs: StaticResourceIdentity[];
+	}): Promise<number> {
+		let sourceRevision = 0;
+		for (const role of options.detailRoles) {
+			sourceRevision = Math.max(
+				sourceRevision,
+				await resolveStaticObjectSurfaceTextureRef({
+					assetService: this.#assetService,
+					missingRefs: options.missingRefs,
+					palette: null,
+					paletteSources: options.paletteSources,
+					selectedRenderSurfaceId: null,
+					texture: role.texture,
+					textureRefs: options.textureRefs,
+				}),
+			);
+		}
+		return sourceRevision;
+	}
+
+	async #loadPayload<TKind extends LandblockEnvCellsPreparedPayload["kind"]>(
 		key: HostAssetKey,
-	): Promise<LoadedLandblockEnvCellsPayload> {
+		expectedKind: TKind,
+	): Promise<LoadedPayload<TKind>> {
 		const asset = await this.#assetService.requestPreparedAsset(key);
-		const payload = requirePreparedPayloadKind(asset, "landblock-env-cells");
+		const payload = requirePreparedPayloadKind(asset, expectedKind);
 		return { asset, payload };
 	}
+}
+
+function createRegionDetailRoles(
+	profile: RegionRenderProfilePayloadDto,
+): readonly RegionDetailRoleFacts[] {
+	return Object.entries(profile.detailRoles).flatMap(([role, entry]) => {
+		if (!entry) {
+			return [];
+		}
+
+		return [
+			{
+				fadeFar: entry.fadeFar,
+				fadeNear: entry.fadeNear,
+				role: role as RegionDetailRoleFacts["role"],
+				texture: createSurfaceTextureIdentity(entry.textureDid),
+				tiling: entry.tiling,
+			},
+		];
+	});
 }
 
 function collectCellStructureMaterialIds(
@@ -342,12 +433,13 @@ function parseHex32KeyId(key: HostAssetKey, sourceAssetId: string): number {
 	return Number.parseInt(key.id, 16) >>> 0;
 }
 
-function requirePreparedPayloadKind(
+function requirePreparedPayloadKind<
+	TKind extends LandblockEnvCellsPreparedPayload["kind"],
+>(
 	asset: PreparedAsset,
-	expectedKind: "landblock-env-cells",
-): ResolverLandblockEnvCellsPayloadDto {
-	const payload =
-		asset.payload as Partial<ResolverLandblockEnvCellsPayloadDto> | null;
+	expectedKind: TKind,
+): Extract<LandblockEnvCellsPreparedPayload, { readonly kind: TKind }> {
+	const payload = asset.payload as Partial<LandblockEnvCellsPreparedPayload> | null;
 	if (!payload || payload.kind !== expectedKind) {
 		throw new Error(
 			`Prepared asset ${asset.sourceAssetId} was ${String(
@@ -356,7 +448,7 @@ function requirePreparedPayloadKind(
 		);
 	}
 
-	return payload as ResolverLandblockEnvCellsPayloadDto;
+	return payload as Extract<LandblockEnvCellsPreparedPayload, { readonly kind: TKind }>;
 }
 
 function compareNumeric(left: number, right: number): number {

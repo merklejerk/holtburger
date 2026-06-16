@@ -1191,8 +1191,11 @@ function createLandblockEnvCellsResolverPayload(landblockId = 0xda55ffff): {
 			missingRefs: [],
 			portalLinks: [],
 			regionRenderProfile: {
-				kind: "region-render-profile",
-				regionNumber: 1,
+				detailRoles: [],
+				identity: {
+					kind: "region-render-profile",
+					regionNumber: 1,
+				},
 			},
 			residencySpatial: {
 				landblockEnvCellBvhItemCount: 0,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
 	EnvCellCellStructureGeometryAttachment,
 	LandblockEnvCellStaticFacts,
+	RegionDetailRoleFacts,
 	StaticBakeBatchInput,
 	StaticObjectMaterialSourceFacts,
 	StaticObjectPaletteSourceFacts,
@@ -618,6 +619,68 @@ describe("V2 landblock env-cell baker", () => {
 		]);
 	});
 
+	it("composes environment detail roles onto structured-interior textured materials", () => {
+		const input = createInputWithRenderableCellStructure({
+			detailRoles: [
+				{
+					fadeFar: 256,
+					fadeNear: 128,
+					role: "environment",
+					texture: {
+						kind: "surface-texture",
+						surfaceTextureId: 0x05000020,
+					},
+					tiling: 8,
+				},
+			],
+			materialSources: [createTexturedMaterialSource(0x08000010)],
+			textureRefs: [...createRgbaTextureRefs(), ...createDetailTextureRefs()],
+		});
+		const envCell = requireFirstEnvCell(input);
+
+		const result = bakeLandblockEnvCells({
+			...input,
+			attachments: {
+				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
+				staticObjectSourceGeometry: [],
+			},
+		});
+		const drawUnit = result.drawUnits[0];
+		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
+			throw new Error("Expected structured interior geometry draw unit.");
+		}
+
+		expect(drawUnit.materialEntries[0]).toMatchObject({
+			detailTextureTiling: 8,
+			detailTextureUseId:
+				"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
+		});
+		expect(drawUnit.textureUseIds).toEqual([
+			"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
+			"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
+		]);
+		expect(result.textureUses).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					samplingPolicy: {
+						wrapS: "repeat",
+						wrapT: "repeat",
+					},
+					source: {
+						kind: "prepared-render-surface-texture-use",
+						renderSurface: {
+							kind: "render-surface",
+							renderSurfaceId: 0x06000020,
+						},
+						usage: "rgba-detail",
+					},
+					textureUseId:
+						"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000020:rgba-detail:sampling:wrap=repeat,repeat",
+				}),
+			]),
+		);
+	});
+
 	it("bakes env-cell local placement into render-local positions", () => {
 		const input = createInputWithRenderableCellStructure({
 			localPlacement: {
@@ -756,6 +819,7 @@ function createInputWithRenderableCellStructure(
 		readonly localPlacement?: LandblockEnvCellStaticFacts["localPlacement"];
 		readonly materialSources?: readonly StaticObjectMaterialSourceFacts[];
 		readonly paletteSources?: readonly StaticObjectPaletteSourceFacts[];
+		readonly detailRoles?: readonly RegionDetailRoleFacts[];
 		readonly renderSurfaces?: readonly {
 			readonly materialId: number;
 			readonly polygonId: number;
@@ -832,6 +896,11 @@ function createInputWithRenderableCellStructure(
 										}),
 									]),
 						paletteSources: options.paletteSources ?? scope.paletteSources,
+						regionRenderProfile: {
+							...scope.regionRenderProfile,
+							detailRoles:
+								options.detailRoles ?? scope.regionRenderProfile.detailRoles,
+						},
 						textureRefs: options.textureRefs ?? scope.textureRefs,
 					},
 				},
@@ -1041,6 +1110,35 @@ function createRgbaTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 			renderSurface: {
 				kind: "render-surface",
 				renderSurfaceId: 0x06000010,
+			},
+			role: "render-surface",
+			width: 1,
+		},
+	];
+}
+
+function createDetailTextureRefs(): readonly StaticObjectTextureRefFacts[] {
+	return [
+		{
+			palette: null,
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000020,
+			},
+			role: "surface-texture",
+			texture: {
+				kind: "surface-texture",
+				surfaceTextureId: 0x05000020,
+			},
+		},
+		{
+			format: "rgba",
+			formatRaw: 1,
+			height: 1,
+			palette: null,
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000020,
 			},
 			role: "render-surface",
 			width: 1,
@@ -1289,8 +1387,11 @@ function createInput(): StaticBakeBatchInput {
 						paletteSources: [],
 						portalLinks: [],
 						regionRenderProfile: {
-							kind: "region-render-profile",
-							regionNumber: 1,
+							detailRoles: [],
+							identity: {
+								kind: "region-render-profile",
+								regionNumber: 1,
+							},
 						},
 						residencySpatial: {
 							landblockEnvCellBvh: {

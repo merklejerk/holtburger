@@ -200,12 +200,15 @@ function createScopePayload(
 			landblockId: payload.landblockId,
 			source: "env-cells",
 		},
-		missingRefs: [],
-		portalLinks: [],
-		regionRenderProfile: {
-			kind: "region-render-profile",
-			regionNumber: payload.regionNumber,
-		},
+			missingRefs: [],
+			portalLinks: [],
+			regionRenderProfile: {
+				detailRoles: [],
+				identity: {
+					kind: "region-render-profile",
+					regionNumber: payload.regionNumber,
+				},
+			},
 		residencySpatial: {
 			landblockEnvCellBvh: {
 				items: payload.landblockEnvCellBvh.items.map((item) => ({

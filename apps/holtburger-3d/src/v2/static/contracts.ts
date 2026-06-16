@@ -561,7 +561,7 @@ interface StaticObjectDebugProvenance {
 export interface LandblockEnvCellsStaticScopePayload {
 	readonly kind: "landblock-env-cells";
 	readonly landblock: LandblockSourceIdentity;
-	readonly regionRenderProfile: RegionRenderProfileIdentity;
+	readonly regionRenderProfile: RegionRenderProfileSourceFacts;
 	readonly envCells: readonly LandblockEnvCellStaticFacts[];
 	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
 	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];

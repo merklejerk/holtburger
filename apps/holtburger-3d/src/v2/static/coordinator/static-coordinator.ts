@@ -89,8 +89,8 @@ export class StaticCoordinator {
 		null;
 	#latestLandblockEnvCellsPayload: LandblockEnvCellsPayloadSummary | null =
 		null;
-	readonly #latestMaterialCoverageByDomain = new Map<
-		StaticDomain,
+	readonly #latestMaterialCoverageByKey = new Map<
+		string,
 		StaticMaterialCoverageReport
 	>();
 	#latestResolverFailure: StaticResolverFailureSnapshot | null = null;
@@ -213,8 +213,8 @@ export class StaticCoordinator {
 			failed: this.#failed,
 			latestLandblockEnvCellsPayload: this.#latestLandblockEnvCellsPayload,
 			materialCoverage: Array.from(
-				this.#latestMaterialCoverageByDomain.values(),
-			).sort((left, right) => left.domain.localeCompare(right.domain)),
+				this.#latestMaterialCoverageByKey.values(),
+			).sort(compareMaterialCoverageReports),
 			latestOutdoorStaticObjectsPayload:
 				this.#latestOutdoorStaticObjectsPayload,
 			latestResolverFailure: this.#latestResolverFailure,
@@ -425,7 +425,7 @@ export class StaticCoordinator {
 			drawUnitIds.add(drawUnit.drawUnitId);
 		}
 		for (const coverage of result.materialCoverage) {
-			this.#latestMaterialCoverageByDomain.set(coverage.domain, coverage);
+			this.#latestMaterialCoverageByKey.set(coverage.coverageKey, coverage);
 		}
 		this.#committedDrawUnits = this.#residentDrawUnitIds.size;
 		this.#emitCommitDelta({
@@ -492,14 +492,14 @@ export class StaticCoordinator {
 	}
 
 	#pruneMaterialCoverageByDesiredKeys(desiredKeys: ReadonlySet<string>): void {
-		for (const domain of Array.from(
-			this.#latestMaterialCoverageByDomain.keys(),
+		for (const coverage of Array.from(
+			this.#latestMaterialCoverageByKey.values(),
 		)) {
 			const hasDesiredDomain = Array.from(desiredKeys).some((desiredKey) =>
-				desiredKey.endsWith(`:${domain}`),
+				desiredKey.endsWith(`:${coverage.domain}`),
 			);
 			if (!hasDesiredDomain) {
-				this.#latestMaterialCoverageByDomain.delete(domain);
+				this.#latestMaterialCoverageByKey.delete(coverage.coverageKey);
 			}
 		}
 	}
@@ -706,6 +706,16 @@ function getDrawUnitDesiredKey(drawUnit: StaticDrawUnit): string {
 
 	throw new Error(
 		`Static coordinator cannot commit ownerless draw unit ${String((drawUnit as { drawUnitId?: unknown }).drawUnitId ?? "unknown")}.`,
+	);
+}
+
+function compareMaterialCoverageReports(
+	left: StaticMaterialCoverageReport,
+	right: StaticMaterialCoverageReport,
+): number {
+	return (
+		left.domain.localeCompare(right.domain) ||
+		left.coverageKey.localeCompare(right.coverageKey)
 	);
 }
 

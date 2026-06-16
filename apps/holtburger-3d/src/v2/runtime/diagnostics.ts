@@ -8,6 +8,7 @@ import type {
 	StaticDomain,
 	StaticMaterialCoverageFilteringMode,
 	StaticMaterialCoverageFamily,
+	StaticMaterialCoverageKind,
 	StaticMaterialCoveragePass,
 	StaticMaterialUnrenderedBucket,
 	StaticMaterialRenderOutcome,
@@ -107,6 +108,8 @@ interface StaticCoordinatorWorkDiagnostics {
 }
 
 interface StaticMaterialCoverageDiagnostics {
+	readonly coverageKey: string;
+	readonly coverageKind: StaticMaterialCoverageKind;
 	readonly domain: StaticDomain;
 	readonly landblockId: string | null;
 	readonly materialCount: number;

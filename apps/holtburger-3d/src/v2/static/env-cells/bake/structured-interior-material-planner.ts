@@ -87,6 +87,8 @@ export function createStructuredInteriorMaterialCoverageReport(options: {
 				triangleCount,
 			},
 		],
+		coverageKey: "landblock-env-cells:structured-interior",
+		coverageKind: "structured-interior",
 		deferredTriangleCount: triangleCount,
 		detailRoleCount: 0,
 		domain: "landblock-env-cells",
@@ -122,6 +124,8 @@ function createEmptyCoverageReport(
 ): StaticMaterialCoverageReport {
 	return {
 		buckets: [],
+		coverageKey: "landblock-env-cells:structured-interior",
+		coverageKind: "structured-interior",
 		deferredTriangleCount: 0,
 		detailRoleCount: 0,
 		domain: "landblock-env-cells",

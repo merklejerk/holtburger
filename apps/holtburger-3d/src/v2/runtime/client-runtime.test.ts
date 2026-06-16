@@ -1499,6 +1499,8 @@ function createDeferredBlendedMaterialCoverage(): StaticMaterialCoverageReport {
 				triangleCount: 1584,
 			},
 		],
+		coverageKey: "outdoor-detail:static-objects",
+		coverageKind: "outdoor-static-objects",
 		deferredTriangleCount: 1584,
 		detailRoleCount: 0,
 		domain: "outdoor-detail",

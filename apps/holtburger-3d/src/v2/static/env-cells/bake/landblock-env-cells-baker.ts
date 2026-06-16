@@ -11,7 +11,7 @@ import type {
 	StaticDrawUnit,
 	EnvCellCellStructureGeometryAttachment,
 	StaticMaterialCoverageReport,
-	StaticObjectMaterialTableEntry,
+	StaticMaterialTableEntry,
 	StaticPortalInteriorRecord,
 	StaticSourceMappingRecord,
 	StaticSpatialRecord,
@@ -47,11 +47,11 @@ import {
 	type StructuredInteriorCellMaterialPlan,
 } from "./structured-interior-material-planner";
 import type {
-	StaticObjectMaterialPlan,
+	StaticMaterialPlan,
 } from "../../objects/bake/static-object-material-planner";
 import {
 	isCurrentlyStageableStaticObjectDataUse,
-	isRenderableStaticObjectMaterialPlan,
+	isRenderableStaticMaterialPlan,
 } from "../../objects/bake/static-object-renderability";
 
 const MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW = 8;
@@ -59,7 +59,7 @@ const MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW = 8;
 interface StructuredInteriorTriangleCandidate {
 	readonly compatibilityKey: string;
 	readonly materialEntryKey: string;
-	readonly materialPlan: StaticObjectMaterialPlan;
+	readonly materialPlan: StaticMaterialPlan;
 	readonly sourceTriangleId: string;
 	readonly surfaceId: number;
 	readonly triangle: EnvCellCellStructureGeometryAttachment["triangles"][number];
@@ -590,7 +590,7 @@ function countStructuredInteriorSurfaceTriangles(
 function createStructuredInteriorMaterialTableEntries(options: {
 	readonly candidates: readonly StructuredInteriorTriangleCandidate[];
 	readonly work: ScheduledStaticWork;
-}): readonly StaticObjectMaterialTableEntry[] {
+}): readonly StaticMaterialTableEntry[] {
 	return [
 		...options.candidates
 			.reduce((entries, candidate) => {
@@ -604,12 +604,12 @@ function createStructuredInteriorMaterialTableEntries(options: {
 					plan: candidate.materialPlan,
 				});
 				return entries;
-			}, new Map<string, { readonly plan: StaticObjectMaterialPlan; readonly materialIds: Set<number> }>())
+			}, new Map<string, { readonly plan: StaticMaterialPlan; readonly materialIds: Set<number> }>())
 			.entries(),
 	]
 		.sort(([left], [right]) => left.localeCompare(right))
 		.map(
-			([, entry], slot): StaticObjectMaterialTableEntry =>
+			([, entry], slot): StaticMaterialTableEntry =>
 				createStaticMaterialTableEntry({
 					createTextureUseId: (dataUse, wrapMode) =>
 						createStructuredInteriorTextureUseId({
@@ -657,7 +657,7 @@ function createStructuredInteriorTriangleCandidates(options: {
 			const plan = options.materialPlan.materialPlansBySurfaceId.get(
 				materialSurfaceId,
 			);
-			if (!plan || !isRenderableStaticObjectMaterialPlan(plan)) {
+			if (!plan || !isRenderableStaticMaterialPlan(plan)) {
 				return null;
 			}
 			const materialEntryKey = createStaticMaterialEntryKey({
@@ -685,7 +685,7 @@ function createStructuredInteriorTriangleCandidates(options: {
 }
 
 function resolveRenderableStructuredInteriorFamily(
-	plan: StaticObjectMaterialPlan,
+	plan: StaticMaterialPlan,
 ): StructuredInteriorGeometryStaticDrawUnit["materialFamily"] {
 	if (
 		plan.family === "flat-color" ||
@@ -732,7 +732,7 @@ function createStructuredInteriorSliceMaterialEntries(
 
 function createStructuredInteriorCompatibilityKey(options: {
 	readonly materialEntryKey: string;
-	readonly plan: StaticObjectMaterialPlan;
+	readonly plan: StaticMaterialPlan;
 }): string {
 	return [
 		`family:${options.plan.family}`,

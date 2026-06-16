@@ -1,9 +1,9 @@
 import type { MaterialTextureDataUseIdentity } from "../../contracts";
 import type { StaticObjectCompatibilityPartition } from "./static-object-compatibility-partitioner";
-import type { StaticObjectMaterialPlan } from "./static-object-material-planner";
+import type { StaticMaterialPlan } from "./static-object-material-planner";
 
-export function isRenderableStaticObjectMaterialPlan(
-	plan: StaticObjectMaterialPlan,
+export function isRenderableStaticMaterialPlan(
+	plan: StaticMaterialPlan,
 ): boolean {
 	if (
 		plan.family === "flat-color" &&
@@ -50,8 +50,8 @@ export function isRenderableStaticObjectPartition(
 }
 
 function isRenderableStaticObjectPass(
-	pass: StaticObjectMaterialPlan["pass"],
-	alphaMode: StaticObjectMaterialPlan["alphaPolicy"]["mode"],
+	pass: StaticMaterialPlan["pass"],
+	alphaMode: StaticMaterialPlan["alphaPolicy"]["mode"],
 ): boolean {
 	return (
 		pass === "opaque" ||

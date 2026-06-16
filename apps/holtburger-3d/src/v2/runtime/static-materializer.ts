@@ -14,7 +14,7 @@ import type {
 	StaticCoordinatorCommitDelta,
 	StaticDrawUnit,
 	StaticObjectGeometryStaticDrawUnit,
-	StaticObjectMaterialTableEntry,
+	StaticMaterialTableEntry,
 	StaticObjectSourceMappingCoverage,
 	StaticAuthoredDynamicSeedRecord,
 	StaticPortalInteriorRecord,
@@ -199,15 +199,15 @@ function splitStaticObjectDrawUnit(
 }
 
 function createStaticObjectMaterialSlices(
-	entries: readonly StaticObjectMaterialTableEntry[],
+	entries: readonly StaticMaterialTableEntry[],
 	bindings: ReadonlyMap<string, StaticTextureBindingFacts>,
-): readonly StaticObjectMaterialTableEntry[][] {
+): readonly StaticMaterialTableEntry[][] {
 	if (entries.length === 0) {
 		return [[]];
 	}
 
-	const slices: StaticObjectMaterialTableEntry[][] = [];
-	let currentEntries: StaticObjectMaterialTableEntry[] = [];
+	const slices: StaticMaterialTableEntry[][] = [];
+	let currentEntries: StaticMaterialTableEntry[] = [];
 	let currentPages = createEmptyStaticRolePageSets();
 
 	for (const entry of entries) {
@@ -237,9 +237,9 @@ function createStaticObjectMaterialSlices(
 }
 
 function canAddStaticObjectMaterialEntry(
-	entries: readonly StaticObjectMaterialTableEntry[],
+	entries: readonly StaticMaterialTableEntry[],
 	pages: StaticRolePageSets,
-	entry: StaticObjectMaterialTableEntry,
+	entry: StaticMaterialTableEntry,
 	bindings: ReadonlyMap<string, StaticTextureBindingFacts>,
 ): boolean {
 	if (entries.length >= MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW) {
@@ -259,7 +259,7 @@ function canAddStaticObjectMaterialEntry(
 
 function addStaticObjectMaterialEntryPages(
 	pages: StaticRolePageSets,
-	entry: StaticObjectMaterialTableEntry,
+	entry: StaticMaterialTableEntry,
 	bindings: ReadonlyMap<string, StaticTextureBindingFacts>,
 ): void {
 	addStaticRolePage(pages.baseColor, entry.primaryTextureUseId, bindings);
@@ -315,7 +315,7 @@ function cloneStaticRolePageSets(
 
 function remapStaticObjectDrawUnit(
 	drawUnit: StaticObjectGeometryStaticDrawUnit,
-	entries: readonly StaticObjectMaterialTableEntry[],
+	entries: readonly StaticMaterialTableEntry[],
 	sliceIndex: number,
 ): StaticObjectGeometryStaticDrawUnit {
 	const slotBySourceSlot = new Map<number, number>();
@@ -641,7 +641,7 @@ interface StaticRoleTextureUse {
 }
 
 function createStaticRoleTextureUses(
-	entry: StaticObjectMaterialTableEntry,
+	entry: StaticMaterialTableEntry,
 ): readonly StaticRoleTextureUse[] {
 	const uses: StaticRoleTextureUse[] = [];
 	if (entry.primaryTextureUseId) {

@@ -11,7 +11,7 @@ import type {
 	StaticDrawUnit,
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectDrawUnitOwnership,
-	StaticObjectMaterialTableEntry,
+	StaticMaterialTableEntry,
 	StaticObjectInstanceIdentity,
 	StaticEnvCellStaticObjectSpatialRecord,
 	StaticObjectSourceGeometryAttachment,
@@ -482,7 +482,7 @@ function createEnvCellStaticObjectSpatialRecords(options: {
 function createStaticObjectMaterialTableEntries(options: {
 	readonly work: ScheduledStaticWork;
 	readonly partition: StaticObjectCompatibilityPartition;
-}): readonly StaticObjectMaterialTableEntry[] {
+}): readonly StaticMaterialTableEntry[] {
 	return options.partition.coarseTablePlan.entries.map((entry, slot) =>
 		createStaticMaterialTableEntry({
 			createTextureUseId: (dataUse, wrapMode) =>

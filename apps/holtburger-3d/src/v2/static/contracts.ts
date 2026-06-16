@@ -1017,7 +1017,7 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly triangleCount: number;
 	readonly sourceMappingCoverage: readonly StaticObjectSourceMappingCoverage[];
 	readonly spatialRecord: StaticSpatialRecord | null;
-	readonly materialEntries: readonly StaticObjectMaterialTableEntry[];
+	readonly materialEntries: readonly StaticMaterialTableEntry[];
 	/**
 	 * Derived one-entry summary retained while the renderer/test surface cuts over
 	 * to materialEntries and materialSlotIndices.
@@ -1110,7 +1110,7 @@ export interface StructuredInteriorGeometryStaticDrawUnit {
 	readonly materialPass: StaticObjectMaterialPass;
 	readonly materialBucketKey: string;
 	readonly renderState: StaticObjectRenderState;
-	readonly materialEntries: readonly StaticObjectMaterialTableEntry[];
+	readonly materialEntries: readonly StaticMaterialTableEntry[];
 	readonly materialPlan: readonly StructuredInteriorMaterialPlanEntry[];
 	readonly positions: Float32Array;
 	readonly texCoords: Float32Array;
@@ -1169,7 +1169,7 @@ export interface StaticNumericRange {
 	readonly min: number;
 }
 
-export interface StaticObjectMaterialTableEntry {
+export interface StaticMaterialTableEntry {
 	readonly slot: number;
 	readonly materialIds: readonly number[];
 	readonly alphaTest: number;

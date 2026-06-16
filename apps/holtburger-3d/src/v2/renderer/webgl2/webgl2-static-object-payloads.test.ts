@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
-	StaticObjectMaterialTableEntry,
+	StaticMaterialTableEntry,
 	StaticObjectRenderState,
 } from "../../static/contracts";
 import type { TextureDrawUnitBinding } from "../types";
@@ -311,8 +311,8 @@ function createStaticResource(
 }
 
 function createMaterialEntry(
-	options: Partial<StaticObjectMaterialTableEntry> & { readonly slot: number },
-): StaticObjectMaterialTableEntry {
+	options: Partial<StaticMaterialTableEntry> & { readonly slot: number },
+): StaticMaterialTableEntry {
 	return {
 		alphaTest: options.alphaTest ?? 0,
 		detailTextureTiling: options.detailTextureTiling ?? 1,

@@ -1106,12 +1106,15 @@ export interface StructuredInteriorGeometryStaticDrawUnit {
 	readonly cellStructure: CellStructureIdentity;
 	readonly localPlacement: PlacementTransformDto;
 	readonly coordinateSpace: "landblock-render-local";
-	readonly materialFamily: "structured-interior-debug-flat";
+	readonly materialFamily: "flat-color" | "indexed-paletted" | "texture-rgba";
+	readonly materialPass: StaticObjectMaterialPass;
 	readonly materialBucketKey: string;
-	readonly debugColor: readonly [number, number, number, number];
+	readonly renderState: StaticObjectRenderState;
+	readonly materialEntries: readonly StaticObjectMaterialTableEntry[];
 	readonly materialPlan: readonly StructuredInteriorMaterialPlanEntry[];
 	readonly positions: Float32Array;
 	readonly texCoords: Float32Array;
+	readonly materialSlotIndices: Float32Array;
 	readonly indices: Uint16Array | Uint32Array;
 	readonly indexType: "uint16" | "uint32";
 	readonly vertexCount: number;
@@ -1126,15 +1129,23 @@ export interface StructuredInteriorMaterialPlanEntry {
 	readonly slotId: number;
 	readonly surfaceId: number;
 	readonly material: StaticMaterialSourceIdentity;
-	readonly family: "structured-interior-debug-flat";
-	readonly pass: "opaque";
-	readonly outcome: "render-deferred";
+	readonly family: "flat-color" | "indexed-paletted" | "texture-rgba" | "unsupported";
+	readonly pass: StaticObjectMaterialPass;
+	readonly outcome: StaticMaterialRenderOutcome;
 	readonly textureUseIds: readonly string[];
 	readonly fallbackReasons: readonly StructuredInteriorMaterialFallbackReason[];
 }
 
 export interface StructuredInteriorMaterialFallbackReason {
-	readonly code: "missing-cell-structure-material-source";
+	readonly code:
+		| "missing-cell-structure-material-source"
+		| "missing-material-texture"
+		| "missing-render-surface"
+		| "missing-palette"
+		| "unsupported-surface-flag"
+		| "translucent-render-deferred"
+		| "detail-overlay-render-deferred"
+		| "missing-detail-render-surface";
 	readonly message: string;
 	readonly material: StaticMaterialSourceIdentity;
 	readonly surfaceId: number;

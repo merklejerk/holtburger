@@ -4,6 +4,7 @@ import type {
 	LandblockEnvCellStaticFacts,
 	StaticBakeBatchInput,
 	StaticObjectMaterialSourceFacts,
+	StaticObjectTextureRefFacts,
 	StaticObjectSourceAssetFacts,
 } from "../../contracts";
 import { createStaticObjectSourceGeometryIdentity } from "../../objects/static-object-source-assets";
@@ -149,26 +150,26 @@ describe("V2 landblock env-cell baker", () => {
 			landblockId: 0xda55ffff,
 			materialPlan: [
 				{
-					fallbackReasons: [
-						{
-							code: "missing-cell-structure-material-source",
-							material: {
-								kind: "static-material-source",
-								materialId: 0x08000010,
-							},
-							surfaceId: 0x08000010,
-						},
-					],
-					family: "structured-interior-debug-flat",
-					outcome: "render-deferred",
+					fallbackReasons: [],
+					family: "flat-color",
+					outcome: "rendered",
 					pass: "opaque",
 					slotId: 0,
 					surfaceId: 0x08000010,
 					textureUseIds: [],
 				},
 			],
-			materialFamily: "structured-interior-debug-flat",
+			materialEntries: [
+				expect.objectContaining({
+					materialColor: expect.any(Array),
+					materialIds: [0x08000010],
+					primaryTextureUseId: null,
+					slot: 0,
+				}),
+			],
+			materialFamily: "flat-color",
 			materialIds: [0x08000010],
+			materialPass: "opaque",
 			sourceTriangleIds: [
 				"polygon:1|surface:134217744|first:0|variant:none",
 			],
@@ -182,43 +183,121 @@ describe("V2 landblock env-cell baker", () => {
 			throw new Error("Expected structured interior geometry draw unit.");
 		}
 		expect(Array.from(drawUnit.indices)).toEqual([0, 1, 2]);
+		expect(Array.from(drawUnit.materialSlotIndices)).toEqual([0, 0, 0]);
 		expect(Array.from(drawUnit.texCoords)).toEqual([0, 0, 1, 0, 0, 1]);
 		expect(result.textureUses).toEqual([]);
-		expect(result.materialCoverage).toEqual([
-			expect.objectContaining({
+		expect(result.materialCoverage).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
 				buckets: [
 					{
-						family: "unsupported",
+						family: "flat-color",
 						filteringMode: "none",
 						materialCount: 1,
-						outcome: "render-deferred",
+						outcome: "rendered",
 						partitionCount: 1,
 						pass: "opaque",
 						textureRoleCount: 0,
 						triangleCount: 1,
 					},
 				],
-				deferredTriangleCount: 1,
+				deferredTriangleCount: 0,
 				domain: "landblock-env-cells",
+				fallbackReasonCounts: [],
+				fallbackReasonCount: 0,
+				landblockId: 0xda55ffff,
+				materialCount: 1,
+				renderedTriangleCount: 1,
+				triangleCount: 1,
+				unrenderedBuckets: [],
+				}),
+			]),
+		);
+	});
+
+	it("does not emit structured-interior fallback draw units when material sources are missing", () => {
+		const input = createInputWithRenderableCellStructure({
+			includeMaterialSources: false,
+		});
+		const envCell = requireFirstEnvCell(input);
+
+		const result = bakeLandblockEnvCells({
+			...input,
+			attachments: {
+				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
+				staticObjectSourceGeometry: [],
+			},
+		});
+
+		expect(result.drawUnits).toEqual([]);
+		expect(result.textureUses).toEqual([]);
+		expect(result.materialCoverage).toEqual([
+			expect.objectContaining({
+				deferredTriangleCount: 1,
 				fallbackReasonCounts: [
 					{ code: "missing-cell-structure-material-source", count: 1 },
 				],
-				fallbackReasonCount: 1,
-				landblockId: 0xda55ffff,
-				materialCount: 1,
 				renderedTriangleCount: 0,
-				triangleCount: 1,
 				unrenderedBuckets: [
-					{
-						family: "unsupported",
-						materialCount: 1,
+					expect.objectContaining({
 						outcome: "render-deferred",
-						partitionCount: 1,
-						pass: "opaque",
 						reasonCodes: ["missing-cell-structure-material-source"],
 						triangleCount: 1,
-					},
+					}),
 				],
+			}),
+		]);
+	});
+
+	it("emits structured-interior texture uses for textured cell materials", () => {
+		const input = createInputWithRenderableCellStructure({
+			materialSources: [createTexturedMaterialSource(0x08000010)],
+			textureRefs: createRgbaTextureRefs(),
+		});
+		const envCell = requireFirstEnvCell(input);
+
+		const result = bakeLandblockEnvCells({
+			...input,
+			attachments: {
+				envCellCellStructureGeometry: [createGeometryAttachment(envCell)],
+				staticObjectSourceGeometry: [],
+			},
+		});
+		const drawUnit = result.drawUnits[0];
+		if (!drawUnit || drawUnit.kind !== "structured-interior-geometry") {
+			throw new Error("Expected structured interior geometry draw unit.");
+		}
+
+		expect(drawUnit).toMatchObject({
+			materialFamily: "texture-rgba",
+			materialPlan: [
+				expect.objectContaining({
+					family: "texture-rgba",
+					outcome: "rendered",
+					textureUseIds: [
+						"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color",
+					],
+				}),
+			],
+			textureUseIds: [
+				"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color",
+			],
+		});
+		expect(result.textureUses).toEqual([
+			expect.objectContaining({
+				domain: "landblock-env-cells",
+				ownerDrawUnitIds: [drawUnit.drawUnitId],
+				source: {
+					kind: "prepared-render-surface-texture-use",
+					renderSurface: {
+						kind: "render-surface",
+						renderSurfaceId: 0x06000010,
+					},
+					usage: "rgba-color",
+				},
+				staticBatchId: "env-batch-a",
+				textureUseId:
+					"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color",
 			}),
 		]);
 	});
@@ -357,7 +436,10 @@ describe("V2 landblock env-cell baker", () => {
 
 function createInputWithRenderableCellStructure(
 	options: {
+		readonly includeMaterialSources?: boolean;
 		readonly localPlacement?: LandblockEnvCellStaticFacts["localPlacement"];
+		readonly materialSources?: readonly StaticObjectMaterialSourceFacts[];
+		readonly textureRefs?: readonly StaticObjectTextureRefFacts[];
 	} = {},
 ): StaticBakeBatchInput {
 	const input = createInput();
@@ -409,6 +491,15 @@ function createInputWithRenderableCellStructure(
 									options.localPlacement ?? envCell.localPlacement,
 							},
 						],
+						materialSources:
+							options.includeMaterialSources === false
+								? []
+								: (options.materialSources ?? [
+										createStaticObjectMaterialSource({
+											materialId: 0x08000010,
+										}),
+									]),
+						textureRefs: options.textureRefs ?? scope.textureRefs,
 					},
 				},
 			},
@@ -447,7 +538,9 @@ function createInputWithRenderableStaticSeed(
 	if (!envCell) {
 		throw new Error("Missing fixture env cell.");
 	}
-	const material = createStaticObjectMaterialSource();
+	const material = createStaticObjectMaterialSource({
+		materialId: 0x08000020,
+	});
 	const source = createStaticObjectSourceAsset(material);
 	const seedIdentity = {
 		instanceId: "da550100:env-cell-static-0",
@@ -539,22 +632,82 @@ function createGeometryAttachment(
 	};
 }
 
-function createStaticObjectMaterialSource(): StaticObjectMaterialSourceFacts {
+function createStaticObjectMaterialSource(options: {
+	readonly materialId: number;
+}): StaticObjectMaterialSourceFacts {
 	return {
 		diffuse: 0,
 		identity: {
 			kind: "static-material-source",
-			materialId: 0x08000020,
+			materialId: options.materialId,
 		},
 		luminosity: 0,
 		source: {
 			argb: 0xff336699,
 			kind: "solid-color",
 		},
-		surfaceId: 0x08000020,
+		surfaceId: options.materialId,
 		surfaceType: 0,
 		translucency: 0,
 	};
+}
+
+function createTexturedMaterialSource(
+	materialId: number,
+): StaticObjectMaterialSourceFacts {
+	return {
+		diffuse: 1,
+		identity: {
+			kind: "static-material-source",
+			materialId,
+		},
+		luminosity: 0,
+		source: {
+			kind: "texture",
+			palette: null,
+			renderSurfaceDefaultPalettes: [],
+			selectedRenderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000010,
+			},
+			texture: {
+				kind: "surface-texture",
+				surfaceTextureId: 0x05000010,
+			},
+		},
+		surfaceId: materialId,
+		surfaceType: 0,
+		translucency: 0,
+	};
+}
+
+function createRgbaTextureRefs(): readonly StaticObjectTextureRefFacts[] {
+	return [
+		{
+			palette: null,
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000010,
+			},
+			role: "surface-texture",
+			texture: {
+				kind: "surface-texture",
+				surfaceTextureId: 0x05000010,
+			},
+		},
+		{
+			format: "rgba",
+			formatRaw: 1,
+			height: 1,
+			palette: null,
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000010,
+			},
+			role: "render-surface",
+			width: 1,
+		},
+	];
 }
 
 function createStaticObjectSourceAsset(

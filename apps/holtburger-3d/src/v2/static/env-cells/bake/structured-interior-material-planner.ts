@@ -1,33 +1,88 @@
 import type {
 	LandblockEnvCellStaticFacts,
 	LandblockEnvCellsStaticScopePayload,
+	ScheduledStaticWork,
 	StaticMaterialCoverageReport,
+	StaticMaterialUnrenderedBucket,
+	StaticObjectMaterialSourceFacts,
 	StructuredInteriorMaterialFallbackReason,
 	StructuredInteriorMaterialPlanEntry,
 } from "../../contracts";
+import {
+	classifyStaticObjectMaterial,
+	type StaticObjectMaterialFallbackReason,
+	type StaticObjectMaterialPlan,
+} from "../../objects/bake/static-object-material-planner";
+import { createMaterialTextureDataUseKey } from "../../objects/bake/static-object-compatibility-partitioner";
+import { isRenderableStaticObjectMaterialPlan } from "../../objects/bake/static-object-renderability";
 
-export function planStructuredInteriorCellMaterials(
-	envCell: LandblockEnvCellStaticFacts,
-): readonly StructuredInteriorMaterialPlanEntry[] {
-	return envCell.surfaces
+export interface StructuredInteriorCellMaterialPlan {
+	readonly entries: readonly StructuredInteriorMaterialPlanEntry[];
+	readonly materialPlansBySurfaceId: ReadonlyMap<number, StaticObjectMaterialPlan>;
+}
+
+export function planStructuredInteriorCellMaterials(options: {
+	readonly envCell: LandblockEnvCellStaticFacts;
+	readonly payload: LandblockEnvCellsStaticScopePayload;
+	readonly work: ScheduledStaticWork;
+}): StructuredInteriorCellMaterialPlan {
+	const materialSourcesById = new Map(
+		options.payload.materialSources.map((source) => [
+			source.identity.materialId,
+			source,
+		]),
+	);
+	const materialPlansBySurfaceId = new Map<number, StaticObjectMaterialPlan>();
+	const entries = options.envCell.surfaces
 		.map((surface): StructuredInteriorMaterialPlanEntry => {
-			const fallbackReason: StructuredInteriorMaterialFallbackReason = {
-				code: "missing-cell-structure-material-source",
-				material: surface.material,
-				message:
-					"Env-cell cell-structure material sources are not enriched yet; rendering uses structured-interior debug flat material.",
-				surfaceId: surface.surfaceId,
-			};
+			const material = materialSourcesById.get(surface.material.materialId);
+			if (!material) {
+				const fallbackReason: StructuredInteriorMaterialFallbackReason = {
+					code: "missing-cell-structure-material-source",
+					material: surface.material,
+					message:
+						"Env-cell cell-structure material source was not resolved; structured-interior surface is not renderable.",
+					surfaceId: surface.surfaceId,
+				};
 
+				return {
+					fallbackReasons: [fallbackReason],
+					family: "unsupported",
+					material: surface.material,
+					outcome: "render-deferred",
+					pass: "opaque",
+					slotId: surface.slotId,
+					surfaceId: surface.surfaceId,
+					textureUseIds: [],
+				};
+			}
+
+			const plan = classifyStructuredInteriorMaterial({
+				material,
+				payload: options.payload,
+			});
+			materialPlansBySurfaceId.set(surface.surfaceId, plan);
 			return {
-				fallbackReasons: [fallbackReason],
-				family: "structured-interior-debug-flat",
+				fallbackReasons: plan.fallbackReasons.map((reason) =>
+					createStructuredInteriorFallbackReason({
+						material: surface.material,
+						reason,
+						surfaceId: surface.surfaceId,
+					}),
+				),
+				family: plan.family,
 				material: surface.material,
-				outcome: "render-deferred",
-				pass: "opaque",
+				outcome: isRenderableStaticObjectMaterialPlan(plan)
+					? "rendered"
+					: plan.renderCoverage === "unsupported"
+						? "unsupported"
+						: "render-deferred",
+				pass: plan.pass,
 				slotId: surface.slotId,
 				surfaceId: surface.surfaceId,
-				textureUseIds: [],
+				textureUseIds: plan.textureRoles.map((role) =>
+					createStructuredInteriorTextureUseId(options.work, role.dataUse),
+				),
 			};
 		})
 		.sort(
@@ -36,34 +91,126 @@ export function planStructuredInteriorCellMaterials(
 				left.surfaceId - right.surfaceId ||
 				left.material.materialId - right.material.materialId,
 		);
+
+	return { entries, materialPlansBySurfaceId };
+}
+
+export function createStructuredInteriorTextureUseId(
+	work: ScheduledStaticWork,
+	dataUse: Parameters<typeof createMaterialTextureDataUseKey>[0],
+): string {
+	return [
+		work.workId,
+		"structured-interior-texture",
+		createMaterialTextureDataUseKey(dataUse),
+	].join(":");
+}
+
+function classifyStructuredInteriorMaterial(options: {
+	readonly material: StaticObjectMaterialSourceFacts;
+	readonly payload: LandblockEnvCellsStaticScopePayload;
+}): StaticObjectMaterialPlan {
+	return classifyStaticObjectMaterial({
+		material: options.material,
+		paletteOverride: null,
+		paletteSources: options.payload.paletteSources,
+		paletteViews: [],
+		textureRefs: options.payload.textureRefs,
+	});
+}
+
+function createStructuredInteriorFallbackReason(options: {
+	readonly material: StructuredInteriorMaterialFallbackReason["material"];
+	readonly reason: StaticObjectMaterialFallbackReason;
+	readonly surfaceId: number;
+}): StructuredInteriorMaterialFallbackReason {
+	return {
+		code: options.reason.code,
+		material: options.material,
+		message: options.reason.message,
+		surfaceId: options.surfaceId,
+	};
+}
+
+export function getStructuredInteriorMaterialEntries(
+	plan: StructuredInteriorCellMaterialPlan,
+): readonly StructuredInteriorMaterialPlanEntry[] {
+	return plan.entries;
 }
 
 export function createStructuredInteriorMaterialCoverageReport(options: {
 	readonly payload: LandblockEnvCellsStaticScopePayload;
 	readonly materialPlansByEnvCellId: ReadonlyMap<
 		number,
-		readonly StructuredInteriorMaterialPlanEntry[]
+		StructuredInteriorCellMaterialPlan
 	>;
 }): StaticMaterialCoverageReport {
 	const materialIds = new Set<number>();
 	let materialCount = 0;
 	let triangleCount = 0;
+	let renderedTriangleCount = 0;
+	let deferredTriangleCount = 0;
+	let unsupportedTriangleCount = 0;
 	let fallbackReasonCount = 0;
 	const fallbackReasonCodes = new Map<string, number>();
+	const bucketCounts = new Map<
+		string,
+		{
+			readonly family: StructuredInteriorMaterialPlanEntry["family"];
+			readonly outcome: StructuredInteriorMaterialPlanEntry["outcome"];
+			readonly pass: StructuredInteriorMaterialPlanEntry["pass"];
+			textureRoleCount: number;
+			materialIds: Set<number>;
+			triangleCount: number;
+		}
+	>();
 
 	for (const envCell of options.payload.envCells) {
-		const materialPlans =
-			options.materialPlansByEnvCellId.get(envCell.identity.envCellId) ?? [];
-		for (const plan of materialPlans) {
+		const plan =
+			options.materialPlansByEnvCellId.get(envCell.identity.envCellId) ?? null;
+		const materialEntries = plan?.entries ?? [];
+		for (const planEntry of materialEntries) {
 			materialCount += 1;
-			materialIds.add(plan.material.materialId);
-			fallbackReasonCount += plan.fallbackReasons.length;
-			for (const reason of plan.fallbackReasons) {
+			materialIds.add(planEntry.material.materialId);
+			fallbackReasonCount += planEntry.fallbackReasons.length;
+			for (const reason of planEntry.fallbackReasons) {
 				fallbackReasonCodes.set(
 					reason.code,
 					(fallbackReasonCodes.get(reason.code) ?? 0) + 1,
 				);
 			}
+
+			const surfaceTriangleCount = countSurfaceTriangles(
+				envCell,
+				planEntry.surfaceId,
+			);
+			if (planEntry.outcome === "rendered") {
+				renderedTriangleCount += surfaceTriangleCount;
+			} else if (planEntry.outcome === "unsupported") {
+				unsupportedTriangleCount += surfaceTriangleCount;
+			} else {
+				deferredTriangleCount += surfaceTriangleCount;
+			}
+			const bucketKey = [
+				planEntry.family,
+				planEntry.pass,
+				planEntry.outcome,
+			].join("|");
+			const bucket = bucketCounts.get(bucketKey) ?? {
+				family: planEntry.family,
+				materialIds: new Set<number>(),
+				outcome: planEntry.outcome,
+				pass: planEntry.pass,
+				textureRoleCount: 0,
+				triangleCount: 0,
+			};
+			bucket.materialIds.add(planEntry.material.materialId);
+			bucket.textureRoleCount = Math.max(
+				bucket.textureRoleCount,
+				planEntry.textureUseIds.length,
+			);
+			bucket.triangleCount += surfaceTriangleCount;
+			bucketCounts.set(bucketKey, bucket);
 		}
 		if (envCell.renderGeometry.triangleCount > 0) {
 			triangleCount += envCell.renderGeometry.triangleCount;
@@ -75,21 +222,22 @@ export function createStructuredInteriorMaterialCoverageReport(options: {
 	}
 
 	return {
-		buckets: [
-			{
-				family: "unsupported",
+		buckets: [...bucketCounts.values()]
+			.sort(compareCoverageBuckets)
+			.map((bucket) => ({
+				family:
+					bucket.family === "unsupported" ? "unsupported" : bucket.family,
 				filteringMode: "none",
-				materialCount: materialIds.size,
-				outcome: "render-deferred",
-				pass: "opaque",
+				materialCount: bucket.materialIds.size,
+				outcome: bucket.outcome,
+				pass: bucket.pass,
 				partitionCount: countRenderableEnvCells(options.payload),
-				textureRoleCount: 0,
-				triangleCount,
-			},
-		],
+				textureRoleCount: bucket.textureRoleCount,
+				triangleCount: bucket.triangleCount,
+			})),
 		coverageKey: "landblock-env-cells:structured-interior",
 		coverageKind: "structured-interior",
-		deferredTriangleCount: triangleCount,
+		deferredTriangleCount,
 		detailRoleCount: 0,
 		domain: "landblock-env-cells",
 		fallbackReasonCount,
@@ -102,20 +250,19 @@ export function createStructuredInteriorMaterialCoverageReport(options: {
 		landblockId: options.payload.landblock.landblockId,
 		materialCount,
 		partitionCount: countRenderableEnvCells(options.payload),
-		renderedTriangleCount: 0,
+		renderedTriangleCount,
 		triangleCount,
-		unrenderedBuckets: [
-			{
-				family: "unsupported",
-				materialCount: materialIds.size,
-				outcome: "render-deferred",
-				partitionCount: countRenderableEnvCells(options.payload),
-				pass: "opaque",
-				reasonCodes: [...fallbackReasonCodes.keys()].sort(),
-				triangleCount,
-			},
-		],
-		unsupportedTriangleCount: 0,
+		unrenderedBuckets: [...bucketCounts.values()]
+			.sort(compareCoverageBuckets)
+			.flatMap((bucket) => {
+				const unrenderedBucket = createUnrenderedBucket({
+					bucket,
+					partitionCount: countRenderableEnvCells(options.payload),
+					reasonCodes: [...fallbackReasonCodes.keys()].sort(),
+				});
+				return unrenderedBucket ? [unrenderedBucket] : [];
+			}),
+		unsupportedTriangleCount,
 	};
 }
 
@@ -146,4 +293,61 @@ function countRenderableEnvCells(
 ): number {
 	return payload.envCells.filter((envCell) => envCell.renderGeometry.triangleCount > 0)
 		.length;
+}
+
+function countSurfaceTriangles(
+	envCell: LandblockEnvCellStaticFacts,
+	surfaceId: number,
+): number {
+	return envCell.renderGeometry.triangles.filter(
+		(triangle) => triangle.surfaceId === surfaceId,
+	).length;
+}
+
+function compareCoverageBuckets(
+	left: {
+		readonly family: string;
+		readonly outcome: string;
+		readonly pass: string;
+	},
+	right: {
+		readonly family: string;
+		readonly outcome: string;
+		readonly pass: string;
+	},
+): number {
+	return (
+		left.outcome.localeCompare(right.outcome) ||
+		left.pass.localeCompare(right.pass) ||
+		left.family.localeCompare(right.family)
+	);
+}
+
+function createUnrenderedBucket(options: {
+	readonly bucket: {
+		readonly family: StructuredInteriorMaterialPlanEntry["family"];
+		readonly outcome: StructuredInteriorMaterialPlanEntry["outcome"];
+		readonly pass: StructuredInteriorMaterialPlanEntry["pass"];
+		readonly materialIds: ReadonlySet<number>;
+		readonly triangleCount: number;
+	};
+	readonly partitionCount: number;
+	readonly reasonCodes: readonly string[];
+}): StaticMaterialUnrenderedBucket | null {
+	if (options.bucket.outcome === "rendered") {
+		return null;
+	}
+
+	return {
+		family:
+			options.bucket.family === "unsupported"
+				? "unsupported"
+				: options.bucket.family,
+		materialCount: options.bucket.materialIds.size,
+		outcome: options.bucket.outcome,
+		partitionCount: options.partitionCount,
+		pass: options.bucket.pass,
+		reasonCodes: options.reasonCodes,
+		triangleCount: options.bucket.triangleCount,
+	};
 }

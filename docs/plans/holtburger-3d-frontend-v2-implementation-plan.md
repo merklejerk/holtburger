@@ -856,55 +856,120 @@ Acceptance criteria:
 - Public diagnostics and material coverage make it clear whether triangles rendered, were omitted due to missing source closure, or were deferred due to capacity/unsupported material behavior.
 - No structured-interior debug/flat fallback material remains in the renderable path after Phase 13A4.
 
-### Phase 13B: Interior Geometry, Portal, And Visibility Rendering
+### Phase 13B0: Structured Interior First Pixels
 
-Status: planned; dry-run completed on 2026-06-15 and re-steered after 13A2b/13A4 refinement.
+Status: planned; split out of the older broad 13B on 2026-06-16.
 
-Purpose: render structured interiors and portal/visibility records through the same static coordinator/baker/renderer seams as outdoor static work.
+Purpose: visibly draw already-baked, already-resident `structured-interior-geometry` resources without taking on portal traversal, env-cell visibility policy, or dungeon focus semantics.
 
-Dry-run findings:
+Steering:
 
-- WebGL2 already has a generic static-object geometry resource path for positions, UVs, material-slot selectors, material tables, texture bindings, render state, and transparent pass ordering.
-- Earlier Phase 13B dry-run considered translating structured interiors into the existing static-object shader payload shape. That is no longer the steering: structured interiors keep the public `structured-interior-geometry` contract, and Phase 13B draws only materialized structured-interior resources produced by Phase 13A4.
-- Re-dry-run after Phase 13A2b/13A4 steering: the actual `structured-interior-geometry` contract is dedicated and already has WebGL2 resource residency. Phase 13B should add a visible draw path for materialized structured-interior resources only. Do not render `structured-interior-debug-flat` as a fallback, and do not translate structured interiors into `StaticObjectGeometryStaticDrawUnit` at the public contract boundary.
+- This phase is only about first visible pixels for materialized cell-structure geometry. It should not become the portal/visibility integration phase.
+- Keep the public draw-unit contract dedicated: do not translate structured interiors into public `StaticObjectGeometryStaticDrawUnit` records.
+- Reuse the existing static-object material table, texture binding, sampler, render-state, and pass behavior where the renderer internals are genuinely isomorphic.
+- Do not add debug/fallback material rendering. If a structured-interior resource lacks a materialized contract, the renderer should fail loudly or skip it according to the 13A4 omission diagnostics, not paint a placeholder.
+- Do not partition interior static-object draw units by env cell in this phase. Structured-interior slices from 13A4b-1 are material-compatibility slices, not a visibility policy.
+- Do not require portal traversal, env-cell residency, or dungeon anchor/focus work for outdoor-landblock env-cell inspection unless implementation proves the current landblock-render-local anchor cannot draw committed resources correctly.
+
+Deliverables:
+
+- WebGL2 visible draw path for committed `structured-interior-geometry` resources produced by Phase 13A4.
+- Texture/material binding support for structured-interior material entries, including flat-color, RGBA texture, indexed/paletted, and alpha-test slices that already pass the 13A4 materialization gates.
+- Static delta apply/remove coverage for structured-interior renderer resources and draw membership.
+- Tests for structured-interior texture role page binding under `landblock-env-cells`, sampler behavior, render-state handling, and eviction/removal.
+- Minimal harness/manual verification target for an outdoor landblock with env-cell cell structures, proving the geometry can be seen before portal/visibility work begins.
+
+Acceptance criteria:
+
+- A known outdoor landblock env-cell target can visibly render materialized cell-structure geometry in V2.
+- Structured-interior resources draw only from materialized `structured-interior-geometry` data; no debug/flat fallback path is reintroduced.
+- Textured, flat-color, and alpha-test structured slices render through the intended material/pass path.
+- Missing/deferred/unsupported surfaces remain omitted and do not block unrelated structured-interior slices or env-cell static objects.
+- Existing outdoor terrain and static-object rendering behavior remains unchanged.
+
+### Phase 13B1: Portal And Visibility Record Consumption
+
+Status: planned.
+
+Purpose: consume committed env-cell visibility, portal/interior, spatial, and source records as runtime/coordinator-owned scene data without making the renderer invent portal traversal.
+
+Steering:
+
 - Renderer ingestion is not the semantic owner of env-cell visibility. Runtime/static-scene query already owns env-cell BVHs, accepted cell sets, ray picking, and debug selection. Renderer visibility should consume runtime/coordinator decisions, not derive portal traversal from WebGL resources.
-- Existing runtime anchor/rebase policy is outdoor-landblock oriented. Phase 13A2b bakes env-cell local placement into landblock-render-local positions; Phase 13B must define how the renderer anchor composes owning landblock placement, dungeon/interior focus, and portal visibility before visual verification.
-- `TextureManager.resolveTextureRolePageSlot` treats all non-terrain domains as static-object-style role pages, which is likely correct for env-cell static/object materials. Add tests for `landblock-env-cells` so this remains intentional.
+- Visibility records should update culling/visibility structures independently from texture placement updates.
+- Portal/interior records should be represented explicitly enough for later portal rendering/render-target work, but this phase does not need to implement indoor/outdoor multi-pass composition.
+
+Deliverables:
+
+- Renderer/runtime consumption path for committed static visibility records, portal/interior records, spatial records, and source mappings emitted by the env-cell bake.
+- Apply/remove behavior for those peer records independent of geometry and texture resource lifetime.
+- Debug visibility/source inspection hooks that agree with committed static records.
+
+Acceptance criteria:
+
+- Interior and portal metadata enters the runtime/renderer as committed static records, not renderer-owned dependency walks.
+- Static BVH/spatial records are committed alongside other peer static result fields.
+- Visibility/source record updates and removals do not require geometry or atlas rebakes.
+
+### Phase 13B2: Dungeon Anchoring And Interior Focus
+
+Status: planned.
+
+Purpose: define renderer-local placement, camera focus, and scene anchoring for true dungeon/interior inspection after first structured-interior pixels work.
+
+Steering:
+
+- Existing runtime anchor/rebase policy is outdoor-landblock oriented. Phase 13A bakes env-cell local placement into landblock-render-local positions; dungeon focus must decide how owning landblock placement, interior focus, and portal visibility compose before deeper visual verification.
+- Dungeon landblocks should continue to use the landblock env-cell source path rather than a separate renderer architecture.
+
+Deliverables:
+
+- Dungeon/interior anchoring and renderer-local placement policy consistent with the runtime-owned scene anchor model.
+- Targeted harness controls for dungeon/env-cell loading and focus changes.
+- Tests or deterministic diagnostics proving runtime, renderer, and debug overlay agree on env-cell placement after selection, anchor/focus changes, and eviction.
+
+Acceptance criteria:
+
+- Runtime, renderer, and debug overlay agree on env-cell placement after selection, anchor/focus changes, and eviction.
+- A named dungeon/interior target can be loaded through the env-cell bundle pipeline without a separate renderer architecture.
+
+### Phase 13B3: Interior Visual Parity And Render-Pass Steering
+
+Status: planned.
+
+Purpose: compare V2 interior behavior against v1 and steer portal rendering, visibility traversal, and future indoor/outdoor pass separation before dynamic/cutover work.
+
+Steering:
+
 - Future portal rendering will likely group outdoor and indoor scene resources into different passes or render targets. Use explicit scene/pass metadata for that routing; do not infer it from static-object material domain, and do not require per-env-cell draw-unit partitioning before the visibility/render-target design needs it.
 
 Deliverables:
 
-- Renderer ingestion for the env-cell/interior draw-unit records emitted by Phase 13A.
-- Static visibility records and portal/interior records consumed as peer static bake result fields.
-- Renderer support for applying/removing visibility and portal/interior records independently from terrain/object geometry.
-- Dungeon/interior anchoring and renderer-local placement policy consistent with the runtime-owned scene anchor model.
-- Targeted visual harness controls for dungeon/env-cell loading and visibility inspection.
-- Tests for static delta ingestion/removal, texture binding, sampler updates, and transparent pass behavior for env-cell/interior draw units.
-
-Acceptance criteria:
-
-- Interior and portal data enters the renderer as committed static records, not renderer-owned dependency walks.
-- Dungeon landblocks continue to use the landblock env-cell source path rather than a separate renderer architecture.
-- Visibility records can update culling/visibility structures independently of texture placement updates.
-- Static BVH/spatial records are committed alongside other peer static result fields.
-- Runtime, renderer, and debug overlay agree on env-cell placement after selection, anchor/focus changes, and eviction.
-
-### Phase 13C: Dungeon Visual Parity And Steering
-
-Status: planned.
-
-Purpose: compare dungeon/interior behavior against v1 and steer the remaining dynamic/cutover plan before final browser replacement work.
-
-Deliverables:
-
-- Named dungeon/interior verification targets covering ordinary env-cell geometry, portal visibility, visible-cell traversal, and fallback cases.
+- Named dungeon/interior verification targets covering ordinary env-cell geometry, portal visibility, visible-cell traversal, and omission/deferred cases.
 - Manual visual comparison checklist against v1 harness behavior for those targets.
-- Update this plan with any remaining dungeon parity gaps before dynamic seeds or cutover.
+- Plan update with remaining dungeon parity gaps and any required portal/render-target design changes.
 
 Acceptance criteria:
 
 - V2 can visually inspect at least one real dungeon/interior target through the landblock env-cell bundle pipeline.
 - Remaining dungeon parity gaps are typed and scheduled rather than hidden under cutover.
+
+### Phase 13C: Interior Plan Reassessment Before Dynamic Seeds
+
+Status: planned.
+
+Purpose: reassess the interior/static-rendering work completed through 13B3 before starting static-authored dynamic seeds.
+
+Deliverables:
+
+- Review completed structured-interior rendering, portal/visibility consumption, anchoring, and visual parity outcomes.
+- Confirm any remaining interior parity gaps are either scheduled before Phase 14 or explicitly deferred because they do not block static-authored dynamic seeds.
+- Update Phase 14/14A if interior rendering reveals dynamic-seed requirements that were previously hidden.
+
+Acceptance criteria:
+
+- Phase 14 starts with a current list of interior/static-rendering gaps and no duplicate parity work hidden in the plan.
+- Any blocker for static-authored dynamic seeds is explicitly scheduled before Phase 14.
 
 ### Phase 14: Static-Authored Dynamic Seeds
 

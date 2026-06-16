@@ -16,7 +16,6 @@ import type {
 	StaticEnvCellStaticObjectSpatialRecord,
 	StaticObjectSourceGeometryAttachment,
 	StaticObjectPartSourceFacts,
-	StaticObjectRenderState,
 	StaticObjectSourceMappingCoverage,
 	StaticObjectSortMetadata,
 	StaticObjectSourceIdentity,
@@ -31,9 +30,10 @@ import {
 	writeTransformedPosition,
 } from "../../bake/ac-placement-transform";
 import {
-	createStaticMaterialTextureSamplingPolicy,
-	createStaticMaterialTextureUseId,
-} from "../../bake/static-material-texture-policy";
+	createStaticMaterialTableEntry,
+	createStaticMaterialTextureUses,
+} from "../../bake/static-material-adapter";
+import { createStaticMaterialTextureUseId } from "../../bake/static-material-texture-policy";
 import { describeStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
 import {
 	partitionStaticObjectCompatibility,
@@ -484,92 +484,19 @@ function createStaticObjectMaterialTableEntries(options: {
 	readonly partition: StaticObjectCompatibilityPartition;
 }): readonly StaticObjectMaterialTableEntry[] {
 	return options.partition.coarseTablePlan.entries.map((entry, slot) =>
-		createStaticObjectMaterialTableEntry({
-			entry,
-			options,
+		createStaticMaterialTableEntry({
+			createTextureUseId: (dataUse, wrapMode) =>
+				createStaticObjectTextureUseId({
+					dataUse,
+					work: options.work,
+					wrapMode,
+				}),
+			materialIds: entry.materialIds,
+			plan: entry.materialPlan,
 			slot,
+			textureWrapMode: entry.textureWrapMode,
 		}),
 	);
-}
-
-function createStaticObjectMaterialTableEntry(parameters: {
-	readonly options: {
-		readonly work: ScheduledStaticWork;
-		readonly partition: StaticObjectCompatibilityPartition;
-	};
-	readonly entry: StaticObjectCompatibilityPartition["coarseTablePlan"]["entries"][number];
-	readonly slot: number;
-}): StaticObjectMaterialTableEntry {
-	const { options } = parameters;
-	const primaryTextureUse = parameters.entry.textureDataUses.find(
-		(textureUse) =>
-			textureUse.kind === "prepared-render-surface-texture-use" &&
-			textureUse.usage === "rgba-color",
-	);
-	const indexTextureUse = parameters.entry.textureDataUses.find(
-		(textureUse) =>
-			textureUse.kind === "prepared-render-surface-texture-use" &&
-			(textureUse.usage === "index8" || textureUse.usage === "index16"),
-	);
-	const paletteTextureUse = parameters.entry.textureDataUses.find(
-		(textureUse) => textureUse.kind === "palette-texture-use",
-	);
-	const detailTextureUse = parameters.entry.textureDataUses.find(
-		(textureUse) =>
-			textureUse.kind === "prepared-render-surface-texture-use" &&
-			textureUse.usage === "rgba-detail",
-	);
-	const indexedTextureFormat =
-		indexTextureUse?.kind === "prepared-render-surface-texture-use"
-			? indexTextureUse.usage === "index16"
-				? "index16"
-				: "p8"
-			: null;
-
-	return {
-		alphaTest: parameters.entry.alphaTest,
-		indexedClipThreshold: parameters.entry.indexedClipThreshold,
-		renderState: createStaticObjectRenderState(parameters.entry.blend),
-		detailTextureTiling: parameters.entry.detailTextureTiling,
-		detailTextureUseId: detailTextureUse
-			? createStaticObjectTextureUseId({
-					dataUse: detailTextureUse,
-					work: options.work,
-					wrapMode: parameters.entry.textureWrapMode,
-				})
-			: null,
-		indexedTextureFormat,
-		indexTextureUseId: indexTextureUse
-			? createStaticObjectTextureUseId({
-					dataUse: indexTextureUse,
-					work: options.work,
-					wrapMode: parameters.entry.textureWrapMode,
-				})
-			: null,
-		materialColor: parameters.entry.materialColor,
-		materialEmissiveColor: parameters.entry.materialEmissiveColor,
-		materialIds: parameters.entry.materialIds,
-		paletteFirstIndex:
-			paletteTextureUse?.kind === "palette-texture-use"
-				? paletteTextureUse.firstIndex
-				: 0,
-		paletteTextureUseId: paletteTextureUse
-			? createStaticObjectTextureUseId({
-					dataUse: paletteTextureUse,
-					work: options.work,
-					wrapMode: parameters.entry.textureWrapMode,
-				})
-			: null,
-		primaryTextureUseId: primaryTextureUse
-			? createStaticObjectTextureUseId({
-					dataUse: primaryTextureUse,
-					work: options.work,
-					wrapMode: parameters.entry.textureWrapMode,
-				})
-			: null,
-		primaryTextureWrapMode: parameters.entry.textureWrapMode,
-		slot: parameters.slot,
-	};
 }
 
 function resolveRenderableStaticObjectFamily(
@@ -603,21 +530,6 @@ function resolveRenderableStaticObjectPass(
 	throw new Error(
 		`Static object partition ${partition.sliceId} has unrenderable pass ${partition.pass}.`,
 	);
-}
-
-function createStaticObjectRenderState(
-	blend: StaticObjectCompatibilityPartition["coarseTablePlan"]["entries"][number]["blend"],
-): StaticObjectRenderState {
-	return {
-		blend: {
-			dstFactor: blend.dstFactor,
-			enabled: blend.enabled,
-			mode: blend.mode,
-			srcFactor: blend.srcFactor,
-		},
-		depthTest: true,
-		depthWrite: blend.depthWrite,
-	};
 }
 
 function createStaticObjectSortMetadata(
@@ -888,52 +800,28 @@ function createStaticObjectBakeTextureUses(options: {
 	readonly staticBatchId: string;
 	readonly partitions: readonly StaticObjectCompatibilityPartition[];
 }): readonly StaticBakeTextureUse[] {
-	const textureUsesById = new Map<string, StaticBakeTextureUse>();
-
-	for (const partition of options.partitions) {
-		if (partition.renderCoverage !== "classified-render-candidate") {
-			continue;
-		}
-
-		const drawUnitId = `${options.work.workId}:static-object-partition:${partition.sliceId.replaceAll("/", "-")}`;
-		for (const entry of partition.coarseTablePlan.entries) {
-			for (const dataUse of entry.textureDataUses) {
-				if (!isCurrentlyStageableStaticObjectDataUse(dataUse)) {
-					continue;
-				}
-
-				const textureUseId = createStaticObjectTextureUseId({
-					dataUse,
-					work: options.work,
-					wrapMode: entry.textureWrapMode,
-				});
-				const existing = textureUsesById.get(textureUseId);
-				if (existing) {
-					textureUsesById.set(textureUseId, {
-						...existing,
-						ownerDrawUnitIds: [...existing.ownerDrawUnitIds, drawUnitId],
-					});
-					continue;
-				}
-
-				textureUsesById.set(textureUseId, {
-					domain: options.work.job.domain,
-					ownerDrawUnitIds: [drawUnitId],
-					samplingPolicy: createStaticMaterialTextureSamplingPolicy({
-						dataUse,
-						wrapMode: entry.textureWrapMode,
-					}),
-					source: dataUse,
-					staticBatchId: options.staticBatchId,
-					textureUseId,
-				});
+	return createStaticMaterialTextureUses({
+		createTextureUseId: (dataUse, wrapMode) =>
+			createStaticObjectTextureUseId({
+				dataUse,
+				work: options.work,
+				wrapMode,
+			}),
+		domain: options.work.job.domain,
+		isStageableDataUse: isCurrentlyStageableStaticObjectDataUse,
+		staticBatchId: options.staticBatchId,
+		textureUseSpecs: options.partitions.flatMap((partition) => {
+			if (partition.renderCoverage !== "classified-render-candidate") {
+				return [];
 			}
-		}
-	}
-
-	return [...textureUsesById.values()].sort((left, right) =>
-		left.textureUseId.localeCompare(right.textureUseId),
-	);
+			const ownerDrawUnitId = `${options.work.workId}:static-object-partition:${partition.sliceId.replaceAll("/", "-")}`;
+			return partition.coarseTablePlan.entries.map((entry) => ({
+				ownerDrawUnitId,
+				textureDataUses: entry.textureDataUses,
+				textureWrapMode: entry.textureWrapMode,
+			}));
+		}),
+	});
 }
 
 function createStaticObjectTextureUseId(

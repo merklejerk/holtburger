@@ -11,6 +11,14 @@ import type {
 	StaticObjectPartSourceFacts,
 	StaticObjectSourceIdentity,
 } from "../../contracts";
+import {
+	createStaticMaterialColorKey,
+	createStaticMaterialEntryKey,
+	createStaticMaterialTextureRoleLayoutKey,
+	createStaticMaterialTextureRoleSchemaKey,
+	resolveStaticMaterialDetailTextureTiling,
+} from "../../bake/static-material-adapter";
+import { sliceStaticMaterialCompatibilityCandidates } from "../../bake/static-material-compatibility-slicer";
 import { createMaterialTextureDataUseKey } from "../../bake/static-material-texture-policy";
 import { createStaticObjectMaterialCoverageReport } from "./static-object-material-coverage";
 import {
@@ -20,7 +28,6 @@ import {
 	type StaticObjectMaterialPlan,
 	type StaticObjectMaterialTextureUseRole,
 } from "./static-object-material-planner";
-import { sliceStaticMaterialCompatibilityCandidates } from "./static-material-compatibility-slicer";
 
 export const STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE = 8;
 
@@ -94,6 +101,7 @@ interface StaticObjectCoarseTablePlan {
 interface StaticObjectCoarseMaterialEntry {
 	readonly materialEntryKey: string;
 	readonly materialUseKey: string;
+	readonly materialPlan: StaticObjectMaterialPlan;
 	readonly materialIds: readonly number[];
 	readonly blend: StaticObjectMaterialPlan["blend"];
 	readonly materialColor: StaticObjectMaterialPlan["color"];
@@ -287,13 +295,13 @@ function createTriangleCandidates(
 					);
 				}
 
-				const textureRoleSchemaKey = createTextureRoleSchemaKey(
+				const textureRoleSchemaKey = createStaticMaterialTextureRoleSchemaKey(
 					plan.textureRoles,
 				);
-				const textureRoleLayoutKey = createTextureRoleLayoutKey(
+				const textureRoleLayoutKey = createStaticMaterialTextureRoleLayoutKey(
 					plan.textureRoles,
 				);
-				const materialColorKey = createMaterialColorKey(plan);
+				const materialColorKey = createStaticMaterialColorKey(plan);
 				const sourceKey = createSourceKey(object.source);
 				const gfxKey = createSourceKey(part.gfxObj);
 				const materialKey = createStaticObjectMaterialUseKey(
@@ -307,10 +315,8 @@ function createTriangleCandidates(
 				const textureWrapMode = resolveTextureWrapMode(
 					materialVariantSignature,
 				);
-				const materialEntryKey = createMaterialEntryKey({
-					materialColorKey,
+				const materialEntryKey = createStaticMaterialEntryKey({
 					plan,
-					textureRoleLayoutKey,
 					textureWrapMode,
 				});
 				const partitionAxes = createPartitionAxes({
@@ -475,7 +481,9 @@ function createCompatibilityPartition(options: {
 				? "material table overflow partition"
 				: "compatible static object material partition",
 		renderCoverage: first.materialPlan.renderCoverage,
-		detailTextureTiling: resolveDetailTextureTiling(first.materialPlan),
+		detailTextureTiling: resolveStaticMaterialDetailTextureTiling(
+			first.materialPlan,
+		),
 		sliceId: `slice/${options.compatibilityIndex}/${options.sliceIndex}`,
 		sourceTriangleIds,
 		textureWrapMode: first.textureWrapMode,
@@ -523,12 +531,15 @@ function createCoarseTablePlan(options: {
 			indexedClipThreshold:
 				candidate.materialPlan.alphaPolicy.indexedClipThreshold,
 			blend: candidate.materialPlan.blend,
-			detailTextureTiling: resolveDetailTextureTiling(candidate.materialPlan),
+			detailTextureTiling: resolveStaticMaterialDetailTextureTiling(
+				candidate.materialPlan,
+			),
 			materialColor: candidate.materialPlan.color,
 			materialEmissiveColor: candidate.materialPlan.emissiveColor,
 			materialEntryKey: candidate.materialEntryKey,
 			materialIds: [candidate.materialId],
 			materialIdSet: new Set([candidate.materialId]),
+			materialPlan: candidate.materialPlan,
 			materialUseKey: candidate.materialKey,
 			textureDataUses: uniqueTextureDataUses(
 				candidate.materialPlan.textureRoles.map((role) => role.dataUse),
@@ -720,91 +731,6 @@ function createPartitionCompatibilityKey(
 	}
 
 	return compatibilityKeyParts.join("|");
-}
-
-function createMaterialColorKey(plan: StaticObjectMaterialPlan): string {
-	return [
-		...plan.color.map(formatMaterialScalar),
-		...plan.emissiveColor.map(formatMaterialScalar),
-	].join(",");
-}
-
-function createMaterialEntryKey(options: {
-	readonly plan: StaticObjectMaterialPlan;
-	readonly materialColorKey: string;
-	readonly textureWrapMode: StaticObjectTextureWrapMode;
-	readonly textureRoleLayoutKey: string;
-}): string {
-	return [
-		`color:${options.materialColorKey}`,
-		`wrap:${options.textureWrapMode}`,
-		`roles:${options.textureRoleLayoutKey}`,
-		`alpha-test:${formatMaterialScalar(options.plan.alphaPolicy.alphaTest)}`,
-		`indexed-clip:${formatMaterialScalar(
-			options.plan.alphaPolicy.indexedClipThreshold,
-		)}`,
-		`detail-tiling:${formatMaterialScalar(
-			resolveDetailTextureTiling(options.plan),
-		)}`,
-	].join("|");
-}
-
-function formatMaterialScalar(value: number): string {
-	return value.toFixed(6);
-}
-
-function createTextureRoleLayoutKey(
-	roles: readonly StaticObjectMaterialTextureUseRole[],
-): string {
-	if (roles.length === 0) {
-		return "none";
-	}
-
-	return roles
-		.map((role) => {
-			const dataUseKey = createMaterialTextureDataUseKey(role.dataUse);
-			const detailSuffix =
-				role.role === "detail-overlay" ? `:tiling=${role.tiling}` : "";
-			return `${role.role}:${dataUseKey}${detailSuffix}`;
-		})
-		.join(",");
-}
-
-function createTextureRoleSchemaKey(
-	roles: readonly StaticObjectMaterialTextureUseRole[],
-): string {
-	if (roles.length === 0) {
-		return "none";
-	}
-
-	return roles
-		.map((role) => {
-			const detailSuffix =
-				role.role === "detail-overlay" ? `:tiling=${role.tiling}` : "";
-			return `${role.role}:${createTextureDataUseSchemaKey(role.dataUse)}${detailSuffix}`;
-		})
-		.join(",");
-}
-
-function createTextureDataUseSchemaKey(
-	dataUse: MaterialTextureDataUseIdentity,
-): string {
-	if (dataUse.kind === "palette-texture-use") {
-		return [
-			dataUse.kind,
-			`range:${dataUse.firstIndex}-${dataUse.indexCount}`,
-			dataUse.usage,
-		].join(":");
-	}
-
-	return [dataUse.kind, dataUse.usage].join(":");
-}
-
-function resolveDetailTextureTiling(plan: StaticObjectMaterialPlan): number {
-	const detailRole = plan.textureRoles.find(
-		(role) => role.role === "detail-overlay",
-	);
-	return detailRole?.role === "detail-overlay" ? detailRole.tiling : 1;
 }
 
 function uniqueTextureDataUses(

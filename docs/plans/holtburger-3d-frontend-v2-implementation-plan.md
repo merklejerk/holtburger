@@ -1037,7 +1037,7 @@ Failed to close / follow-up:
 
 ### Phase 13B0b: Shared Static Material Adapter Course Correction
 
-Status: planned; immediate next phase after 13B0a and before 13B1.
+Status: complete on 2026-06-16.
 
 Purpose: remove the remaining structured-interior-specific material/table/texture-use drift by sharing one static material adapter between static-object geometry and cell-structure geometry, while keeping their source/ownership/geometry adapters separate. This phase assumes 13B0a has already centralized role-aware static texture sampling policy and policy-qualified texture-use identity.
 
@@ -1146,6 +1146,28 @@ Blind spots to account for during implementation:
 - Transparent static-object behavior has object/part sort constraints. The shared adapter must not pull transparent sorting into generic material helpers.
 - Moving the shared slicer path will touch imports in both static-object and env-cell bakers. Do this as a single mechanical move inside the phase, not as lingering object-owned shared code.
 - If the extraction reveals that the 13B0a policy model missed a role, update 13B0a notes and tests as part of this phase rather than adding a one-off adapter exception.
+
+Implementation notes:
+
+- Added `static/bake/static-material-adapter.ts` as the shared material adapter for:
+  - render-equivalent material entry keys;
+  - material color keys;
+  - texture-role layout/schema keys;
+  - renderer material-table entries;
+  - render-state construction;
+  - static material texture-use emission and owner merging.
+- Moved `static-material-compatibility-slicer.ts` from `static/objects/bake/` to neutral `static/bake/`, then updated static-object and env-cell imports.
+- Static-object partitioning now uses the neutral material key/schema/detail helpers while keeping object/source/ownership/sort axes local.
+- Static-object bake output now builds material-table entries and texture uses through the shared adapter. The partition table entries carry their classified material plan through to bake output so the adapter can consume one material-plan shape instead of a decomposed object-only shape.
+- Structured-interior bake output now uses the same shared adapter for material entry keys, texture-role schemas, material-table entries, and texture-use emission. The local structured-interior material table/key/role/texture-use helper stack was deleted.
+- The shared adapter keeps caller-specific texture-use namespaces separate through caller-provided texture-use id factories (`static-object-texture` vs `structured-interior-texture`) and does not know object ids, env-cell ids, geometry, picking, portal visibility, or source assets.
+- Focused static-object/env-cell/policy tests, `npm run check`, `npm run lint:ts`, full `npm run test:ts`, and `git diff --check` passed.
+
+Failed to close / follow-up:
+
+- The global contract rename from `StaticObjectMaterialTableEntry` to a neutral `StaticMaterialTableEntry` was intentionally deferred. The behavior is now shared, but the name is still referenced across runtime materialization and WebGL payload code; doing that rename here would have been broad mechanical churn with little extra architectural value.
+- The shared adapter still consumes the existing `StaticObjectMaterialPlan` type from the object material planner. A future cleanup should rename/extract that plan type to neutral static material naming if we continue sharing it beyond object-originated materials.
+- I did not run the live harness visual pass against the smeared structured-interior target or a detail-overlay target. Automated coverage passed, but visual confirmation is still on deck.
 
 ### Phase 13B1: Portal And Visibility Record Consumption
 

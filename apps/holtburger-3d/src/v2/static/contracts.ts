@@ -564,6 +564,10 @@ export interface LandblockEnvCellsStaticScopePayload {
 	readonly landblock: LandblockSourceIdentity;
 	readonly regionRenderProfile: RegionRenderProfileIdentity;
 	readonly envCells: readonly LandblockEnvCellStaticFacts[];
+	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
+	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
+	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
+	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
 	readonly portalLinks: readonly LandblockPortalLinkFacts[];
 	readonly acceptedEnvCellIds: readonly number[];
 	readonly visibilityDiagnostics: readonly EnvCellVisibilityDiagnostic[];

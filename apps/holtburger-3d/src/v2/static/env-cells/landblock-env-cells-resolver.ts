@@ -14,10 +14,14 @@ import type {
 	LandblockEnvCellsStaticScopePayload,
 	StaticMaterialSourceIdentity,
 	StaticObjectInstanceIdentity,
-	StaticObjectSourceIdentity,
 	StaticResolverJob,
 	StaticScopePayload,
 } from "../contracts";
+import {
+	createSourceCacheKey,
+	createStaticObjectSourceIdentity,
+	resolveStaticObjectSourceClosure,
+} from "../objects/static-object-source-closure";
 
 interface LoadedLandblockEnvCellsPayload {
 	readonly asset: PreparedAsset;
@@ -48,8 +52,23 @@ export class LandblockEnvCellsResolver {
 		const landblock = await this.#loadPayload(
 			createHostAssetKey("landblock-env-cells", job.scope.landblockId),
 		);
+		const sourceClosure = await resolveStaticObjectSourceClosure({
+			assetService: this.#assetService,
+			sourceAssetIds: landblock.payload.envCells.flatMap((cell) =>
+				cell.statics.map((staticSeed) => staticSeed.sourceAssetId),
+			),
+		});
+		const sourceByKey = new Set(
+			sourceClosure.sourceAssets.map((source) =>
+				createSourceCacheKey(source.identity),
+			),
+		);
 		const envCells = landblock.payload.envCells.map((cell) =>
-			createLandblockEnvCellStaticFacts(landblock.payload.landblockId, cell),
+			createLandblockEnvCellStaticFacts({
+				cell,
+				landblockId: landblock.payload.landblockId,
+				sourceByKey,
+			}),
 		);
 		reportUnboundedEnvCells(landblock.payload);
 		const scope: LandblockEnvCellsStaticScopePayload = {
@@ -63,7 +82,9 @@ export class LandblockEnvCellsResolver {
 				landblockId: landblock.payload.landblockId,
 				source: "env-cells",
 			},
-			missingRefs: [],
+			materialSources: sourceClosure.materialSources,
+			missingRefs: sourceClosure.missingRefs,
+			paletteSources: sourceClosure.paletteSources,
 			portalLinks: landblock.payload.portalLinks,
 			regionRenderProfile: {
 				kind: "region-render-profile",
@@ -87,13 +108,18 @@ export class LandblockEnvCellsResolver {
 					nodes: landblock.payload.landblockEnvCellBvh.nodes,
 				},
 			},
+			sourceAssets: sourceClosure.sourceAssets,
+			textureRefs: sourceClosure.textureRefs,
 			visibilityDiagnostics: [],
 		};
 
 		return {
 			job,
 			scope,
-			sourceRevision: landblock.asset.revision,
+			sourceRevision: Math.max(
+				landblock.asset.revision,
+				sourceClosure.sourceRevision,
+			),
 		};
 	}
 
@@ -127,10 +153,12 @@ function reportUnboundedEnvCells(
 	});
 }
 
-function createLandblockEnvCellStaticFacts(
-	landblockId: number,
-	cell: ResolverLandblockEnvCellsPayloadDto["envCells"][number],
-): LandblockEnvCellStaticFacts {
+function createLandblockEnvCellStaticFacts(options: {
+	readonly landblockId: number;
+	readonly cell: ResolverLandblockEnvCellsPayloadDto["envCells"][number];
+	readonly sourceByKey: ReadonlySet<string>;
+}): LandblockEnvCellStaticFacts {
+	const { cell, landblockId, sourceByKey } = options;
 	return {
 		cellBsp: cell.cellBsp,
 		cellStructure: {
@@ -158,20 +186,31 @@ function createLandblockEnvCellStaticFacts(
 		renderGeometry: cell.renderGeometry,
 		restrictionObjectId: cell.restrictionObjectId,
 		seenOutside: cell.seenOutside,
-		staticObjectSeeds: cell.statics.map((staticSeed) => ({
-			debug: { sourceAssetId: staticSeed.sourceAssetId },
-			identity: createEnvCellStaticObjectInstanceIdentity({
-				envCellId: cell.envCellId,
-				instanceId: staticSeed.instanceId,
-				landblockId,
-			}),
-			instanceBounds: staticSeed.instanceBounds,
-			localPlacement: staticSeed.localPlacement,
-			source: createStaticObjectSourceIdentity(staticSeed.sourceAssetId),
-			sourceBounds: staticSeed.sourceBounds,
-			sourceIndex: staticSeed.sourceIndex,
-			sourceScale: staticSeed.sourceScale,
-		})),
+		staticObjectSeeds: cell.statics.flatMap((staticSeed) => {
+			const source = createStaticObjectSourceIdentity(
+				parseHostAssetId(staticSeed.sourceAssetId),
+			);
+			if (!sourceByKey.has(createSourceCacheKey(source))) {
+				return [];
+			}
+
+			return [
+				{
+					debug: { sourceAssetId: staticSeed.sourceAssetId },
+					identity: createEnvCellStaticObjectInstanceIdentity({
+						envCellId: cell.envCellId,
+						instanceId: staticSeed.instanceId,
+						landblockId,
+					}),
+					instanceBounds: staticSeed.instanceBounds,
+					localPlacement: staticSeed.localPlacement,
+					source,
+					sourceBounds: staticSeed.sourceBounds,
+					sourceIndex: staticSeed.sourceIndex,
+					sourceScale: staticSeed.sourceScale,
+				},
+			];
+		}),
 		surfaces: cell.surfaces.map((surface) => ({
 			material: createStaticMaterialSourceIdentity(surface.materialAssetId),
 			slotId: surface.slotId,
@@ -191,29 +230,6 @@ function createEnvCellStaticObjectInstanceIdentity(input: {
 		kind: "static-object-instance",
 		landblockId: input.landblockId,
 		objectKind: "explicit-object",
-	};
-}
-
-function createStaticObjectSourceIdentity(
-	assetId: string,
-): StaticObjectSourceIdentity {
-	const key = parseHostAssetId(assetId);
-	if (
-		key.kind !== "gfx-obj" &&
-		key.kind !== "setup-model" &&
-		key.kind !== "setup-appearance"
-	) {
-		throw new Error(
-			`Env-cell static object source must be gfx-obj, setup-model, or setup-appearance, got ${describeHostAssetKey(
-				key,
-			)} from ${assetId}.`,
-		);
-	}
-
-	return {
-		kind: "static-object-source",
-		sourceAssetKind: key.kind,
-		sourceDid: parseHex32KeyId(key, assetId),
 	};
 }
 

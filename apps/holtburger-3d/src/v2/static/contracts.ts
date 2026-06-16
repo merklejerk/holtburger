@@ -1133,10 +1133,10 @@ export interface StructuredInteriorMaterialPlanEntry {
 	readonly pass: StaticObjectMaterialPass;
 	readonly outcome: StaticMaterialRenderOutcome;
 	readonly textureUseIds: readonly string[];
-	readonly fallbackReasons: readonly StructuredInteriorMaterialFallbackReason[];
+	readonly diagnostics: readonly StructuredInteriorMaterialDiagnostic[];
 }
 
-export interface StructuredInteriorMaterialFallbackReason {
+export interface StructuredInteriorMaterialDiagnostic {
 	readonly code:
 		| "missing-cell-structure-material-source"
 		| "missing-material-texture"

@@ -771,7 +771,7 @@ Spicy follow-up and course correction:
 
 ##### Phase 13A4b-1: Shared Material Compatibility Partitioning Course Correction
 
-Status: planned; inserted and dry-run refined on 2026-06-16 before 13A4c.
+Status: completed on 2026-06-16.
 
 Purpose: replace the coarse all-or-nothing structured-interior materialization gate with a shared compatibility partitioning core that static objects and structured interiors can both use through honest ownership adapters.
 
@@ -820,22 +820,39 @@ Suggested implementation order:
 3. Rename structured-interior fallback-facing types/tests to omission/deferred diagnostics and make coverage reason codes bucket/surface-specific.
 4. Validate with focused mixed-cell, missing-surface, static-object parity, and shared texture-use staging tests before proceeding to 13A4c.
 
+Completed implementation notes:
+
+- Added a narrow shared material compatibility slicer for preclassified candidates. It owns deterministic compatibility grouping and material-table-capacity slicing only; static-object ownership/source axes and structured-interior env-cell/surface ownership stay in their adapters.
+- Ported the static-object compatibility partitioner through the shared slicer while preserving the public `StaticObjectCompatibilityPartition` output shape.
+- Replaced the structured-interior whole-cell materialization gate with per-triangle renderable candidates. Mixed structured cell geometry now produces multiple compatible `structured-interior-geometry` draw units when material pass/schema requires it.
+- Structured-interior draw units compact-bake only the selected slice triangles. Slice draw-unit ids append `slice:<compatibilityIndex>:<sliceIndex>`, and texture-use owner ids point at those slice ids.
+- Structured-interior material slots are assigned by slice material entry key rather than by searching material ids across the whole cell.
+- Structured-interior-facing material plan entries now expose `diagnostics` instead of `fallbackReasons`. The adapter still translates static-object planner failure reasons internally because static-object material planner terminology was not renamed globally in this phase.
+- Structured-interior material coverage now tracks diagnostic reason codes by the affected unrendered bucket instead of applying all diagnostic codes to every unrendered bucket.
+- Focused tests cover static-object partitioner parity, mixed structured-interior slices, missing-surface omission without blocking renderable triangles, compact geometry counts, and shared `landblock-env-cells` texture-use ownership.
+
+Spicy bits:
+
+- Structured-interior texture-use ids are still keyed by the work/static batch and texture data use, not by slice. That is intentional because the texture itself is shared; owner draw-unit ids now capture which slices reference it.
+- Static-object material planner types still use `fallbackReasons`. This phase stopped exposing that name through structured-interior DTOs, but a repo-wide terminology rename would be larger and should be done as its own cleanup if desired.
+- The shared slicer is intentionally small. It does not know about static-object sorting, env-cell residency, portal visibility, source mappings, or geometry ownership.
+
 ##### Phase 13A4c: Missing-Source Omission Diagnostics And Cleanup
 
-Status: planned; re-steered to follow 13A4b-1.
+Status: planned; re-steered after 13A4b-1.
 
 Deliverables:
 
 - Add typed omission/deferred records for unresolved or unsupported structured-interior surface material dependencies, including material id, surface id, env-cell id, landblock id, and missing dependency identity.
 - Make the runtime/client diagnostic path emit grouped console-visible warnings for committed structured-interior omissions. Avoid one warning per triangle/surface spam, and do not write tests against incidental console text.
-- Drop affected surface/slot geometry from materialized structured-interior draw units when its required source closure is incomplete. Do not fail unrelated compatible surfaces, unrelated env cells, or env-cell static seed geometry in the same `landblock-env-cells` batch.
-- Remove or quarantine legacy `structured-interior-debug-flat` renderable fields after the materialized path owns all renderable structured-interior output.
+- Verify the typed structured-interior diagnostics added in 13A4b-1 are sufficient for unresolved material/render-surface/palette/texture dependencies; extend them only if runtime diagnostics need missing dependency identity that is not currently carried.
+- Remove or quarantine any remaining legacy `structured-interior-debug-flat` references in historical tests/docs/comments after confirming no renderable path consumes them.
 - Add tests proving missing material/render-surface/palette/texture refs remain typed, produce omission records, and keep unrelated structured-interior/static-seed draw units materializable.
 
 Acceptance criteria:
 
 - Missing material source facts produce explicit omission/deferred records and runtime-visible diagnostics without hiding source-closure gaps.
-- Missing or unsupported structured-interior materials drop only affected renderable surface/slot geometry unless the remaining draw unit would be empty, in which case the draw unit is omitted.
+- Missing or unsupported structured-interior materials keep dropping only affected renderable surface/slot geometry unless the remaining draw unit would be empty, in which case the draw unit is omitted.
 - Public diagnostics and material coverage make it clear whether triangles rendered, were omitted due to missing source closure, or were deferred due to capacity/unsupported material behavior.
 - No structured-interior debug/flat fallback material remains in the renderable path after Phase 13A4.
 

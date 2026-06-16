@@ -5,7 +5,7 @@ import type {
 	StaticMaterialCoverageReport,
 	StaticMaterialUnrenderedBucket,
 	StaticObjectMaterialSourceFacts,
-	StructuredInteriorMaterialFallbackReason,
+	StructuredInteriorMaterialDiagnostic,
 	StructuredInteriorMaterialPlanEntry,
 } from "../../contracts";
 import {
@@ -37,7 +37,7 @@ export function planStructuredInteriorCellMaterials(options: {
 		.map((surface): StructuredInteriorMaterialPlanEntry => {
 			const material = materialSourcesById.get(surface.material.materialId);
 			if (!material) {
-				const fallbackReason: StructuredInteriorMaterialFallbackReason = {
+				const diagnostic: StructuredInteriorMaterialDiagnostic = {
 					code: "missing-cell-structure-material-source",
 					material: surface.material,
 					message:
@@ -46,7 +46,7 @@ export function planStructuredInteriorCellMaterials(options: {
 				};
 
 				return {
-					fallbackReasons: [fallbackReason],
+					diagnostics: [diagnostic],
 					family: "unsupported",
 					material: surface.material,
 					outcome: "render-deferred",
@@ -63,8 +63,8 @@ export function planStructuredInteriorCellMaterials(options: {
 			});
 			materialPlansBySurfaceId.set(surface.surfaceId, plan);
 			return {
-				fallbackReasons: plan.fallbackReasons.map((reason) =>
-					createStructuredInteriorFallbackReason({
+				diagnostics: plan.fallbackReasons.map((reason) =>
+					createStructuredInteriorDiagnostic({
 						material: surface.material,
 						reason,
 						surfaceId: surface.surfaceId,
@@ -119,11 +119,11 @@ function classifyStructuredInteriorMaterial(options: {
 	});
 }
 
-function createStructuredInteriorFallbackReason(options: {
-	readonly material: StructuredInteriorMaterialFallbackReason["material"];
+function createStructuredInteriorDiagnostic(options: {
+	readonly material: StructuredInteriorMaterialDiagnostic["material"];
 	readonly reason: StaticObjectMaterialFallbackReason;
 	readonly surfaceId: number;
-}): StructuredInteriorMaterialFallbackReason {
+}): StructuredInteriorMaterialDiagnostic {
 	return {
 		code: options.reason.code,
 		material: options.material,
@@ -151,8 +151,9 @@ export function createStructuredInteriorMaterialCoverageReport(options: {
 	let renderedTriangleCount = 0;
 	let deferredTriangleCount = 0;
 	let unsupportedTriangleCount = 0;
-	let fallbackReasonCount = 0;
-	const fallbackReasonCodes = new Map<string, number>();
+	let diagnosticCount = 0;
+	const diagnosticCodes = new Map<string, number>();
+	const diagnosticCodesByBucket = new Map<string, Set<string>>();
 	const bucketCounts = new Map<
 		string,
 		{
@@ -172,11 +173,11 @@ export function createStructuredInteriorMaterialCoverageReport(options: {
 		for (const planEntry of materialEntries) {
 			materialCount += 1;
 			materialIds.add(planEntry.material.materialId);
-			fallbackReasonCount += planEntry.fallbackReasons.length;
-			for (const reason of planEntry.fallbackReasons) {
-				fallbackReasonCodes.set(
+			diagnosticCount += planEntry.diagnostics.length;
+			for (const reason of planEntry.diagnostics) {
+				diagnosticCodes.set(
 					reason.code,
-					(fallbackReasonCodes.get(reason.code) ?? 0) + 1,
+					(diagnosticCodes.get(reason.code) ?? 0) + 1,
 				);
 			}
 
@@ -196,6 +197,12 @@ export function createStructuredInteriorMaterialCoverageReport(options: {
 				planEntry.pass,
 				planEntry.outcome,
 			].join("|");
+			const bucketDiagnosticCodes =
+				diagnosticCodesByBucket.get(bucketKey) ?? new Set<string>();
+			for (const diagnostic of planEntry.diagnostics) {
+				bucketDiagnosticCodes.add(diagnostic.code);
+			}
+			diagnosticCodesByBucket.set(bucketKey, bucketDiagnosticCodes);
 			const bucket = bucketCounts.get(bucketKey) ?? {
 				family: planEntry.family,
 				materialIds: new Set<number>(),
@@ -240,8 +247,8 @@ export function createStructuredInteriorMaterialCoverageReport(options: {
 		deferredTriangleCount,
 		detailRoleCount: 0,
 		domain: "landblock-env-cells",
-		fallbackReasonCount,
-		fallbackReasonCounts: [...fallbackReasonCodes.entries()]
+		fallbackReasonCount: diagnosticCount,
+		fallbackReasonCounts: [...diagnosticCodes.entries()]
 			.sort(
 				([leftCode, leftCount], [rightCode, rightCount]) =>
 					rightCount - leftCount || leftCode.localeCompare(rightCode),
@@ -258,7 +265,11 @@ export function createStructuredInteriorMaterialCoverageReport(options: {
 				const unrenderedBucket = createUnrenderedBucket({
 					bucket,
 					partitionCount: countRenderableEnvCells(options.payload),
-					reasonCodes: [...fallbackReasonCodes.keys()].sort(),
+					reasonCodes: [
+						...(diagnosticCodesByBucket.get(
+							[bucket.family, bucket.pass, bucket.outcome].join("|"),
+						) ?? []),
+					].sort(),
 				});
 				return unrenderedBucket ? [unrenderedBucket] : [];
 			}),

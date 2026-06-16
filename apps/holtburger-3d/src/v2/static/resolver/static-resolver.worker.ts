@@ -1,6 +1,9 @@
 /// <reference lib="webworker" />
 
 import type {
+	PreparedAssetReader,
+} from "../../assets/contracts";
+import type {
 	StaticResolver,
 	StaticResolverJob,
 	StaticScopePayload,
@@ -13,7 +16,10 @@ import type {
 	StaticResolverWorkerGlobalPort,
 	StaticResolverWorkerMainMessage,
 } from "./protocol";
-import { StaticResolverWorkerPreparedAssetReader } from "./worker-asset-reader";
+import {
+	RequestScopedPreparedAssetReader,
+	StaticResolverWorkerPreparedAssetReader,
+} from "./worker-asset-reader";
 
 const workerPort = self as unknown as StaticResolverWorkerGlobalPort;
 
@@ -49,24 +55,32 @@ class StaticResolverRouter implements StaticResolver {
 	}
 }
 
-const assetReader = new StaticResolverWorkerPreparedAssetReader(workerPort);
-const resolver = new StaticResolverRouter({
-	landblockEnvCellsResolver: new LandblockEnvCellsResolver({
-		assetService: assetReader,
-	}),
-	outdoorStaticObjectsResolver: new OutdoorStaticObjectsResolver({
-		assetService: assetReader,
-	}),
-	terrainResolver: new TerrainStaticScopeResolver({
-		assetService: assetReader,
-	}),
-});
+const workerAssetReader = new StaticResolverWorkerPreparedAssetReader(workerPort);
+
+function createStaticResolver(assetReader: PreparedAssetReader): StaticResolver {
+	return new StaticResolverRouter({
+		landblockEnvCellsResolver: new LandblockEnvCellsResolver({
+			assetService: assetReader,
+		}),
+		outdoorStaticObjectsResolver: new OutdoorStaticObjectsResolver({
+			assetService: assetReader,
+		}),
+		terrainResolver: new TerrainStaticScopeResolver({
+			assetService: assetReader,
+		}),
+	});
+}
 
 workerPort.addEventListener(
 	"message",
 	(event: MessageEvent<StaticResolverWorkerMainMessage>) => {
-		void handleStaticResolverWorkerRequest(resolver, event.data, (response) =>
-			workerPort.postMessage(response),
+		void handleStaticResolverWorkerRequest(
+			() =>
+				createStaticResolver(
+					new RequestScopedPreparedAssetReader(workerAssetReader),
+				),
+			event.data,
+			(response) => workerPort.postMessage(response),
 		);
 	},
 );

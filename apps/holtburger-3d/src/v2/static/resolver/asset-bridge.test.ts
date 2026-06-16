@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { HostBackedAssetService } from "../../assets/asset-service";
 import type {
 	HostAssetKey,
 	PreparedAsset,
 	PreparedAssetReader,
 } from "../../assets/contracts";
 import { createHostAssetKey } from "../../assets/keys";
-import type { RuntimeHost, RuntimeHostSnapshot } from "../../host/contracts";
 import { createStaticResolverMainAssetBridge } from "./asset-bridge";
 import type {
 	StaticResolverWorkerGlobalPort,
@@ -14,7 +12,10 @@ import type {
 	StaticResolverWorkerPort,
 	StaticResolverWorkerThreadMessage,
 } from "./protocol";
-import { StaticResolverWorkerPreparedAssetReader } from "./worker-asset-reader";
+import {
+	RequestScopedPreparedAssetReader,
+	StaticResolverWorkerPreparedAssetReader,
+} from "./worker-asset-reader";
 
 describe("V2 static resolver asset bridge", () => {
 	it("round-trips typed prepared asset requests through the worker boundary", async () => {
@@ -149,6 +150,50 @@ describe("V2 static resolver asset bridge", () => {
 		bridge.dispose();
 	});
 
+	it("sends resolver-light render-surface payloads across the worker boundary without source bytes", async () => {
+		const channel = new FixtureWorkerChannel();
+		const key = createHostAssetKey("render-surface", 0x06000010);
+		const asset = createPreparedAssetWithPayload(key, {
+			defaultPaletteId: 0x04000010,
+			dependencies: { paletteAssetIds: ["palette/04000010"] },
+			format: "p8",
+			formatRaw: 0x29,
+			height: 4,
+			kind: "render-surface",
+			provenance: { sourceDatFile: "client_portal.dat", sourceDid: 0x06000010 },
+			renderSurfaceId: 0x06000010,
+			residencyKind: "unknown",
+			sourceAssetKind: "render-surface",
+			sourceByteLength: 16,
+			sourceBytes: new Uint8Array([1, 2, 3, 4]),
+			unknown: 0,
+			width: 4,
+		});
+		const assetReader = new FixturePreparedAssetReader(asset);
+		const bridge = createStaticResolverMainAssetBridge(
+			channel.mainPort,
+			assetReader,
+		);
+		const workerAssetReader = new StaticResolverWorkerPreparedAssetReader(
+			channel.workerPort,
+		);
+
+		const resolved = await workerAssetReader.requestPreparedAsset(key);
+
+		expect(resolved.payload).toMatchObject({
+			defaultPaletteId: 0x04000010,
+			format: "p8",
+			formatRaw: 0x29,
+			kind: "render-surface",
+			sourceByteLength: 16,
+		});
+		expect(resolved.payload).not.toHaveProperty("sourceBytes");
+		expect(asset.payload).toHaveProperty("sourceBytes");
+
+		workerAssetReader.dispose();
+		bridge.dispose();
+	});
+
 	it("surfaces prepared asset request failures inside the worker", async () => {
 		const channel = new FixtureWorkerChannel();
 		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
@@ -168,24 +213,32 @@ describe("V2 static resolver asset bridge", () => {
 		bridge.dispose();
 	});
 
-	it("lets a shared main-thread asset service dedupe identical worker requests", async () => {
+	it("dedupes identical prepared asset requests before crossing the worker bridge", async () => {
 		const channel = new FixtureWorkerChannel();
 		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
-		const host = new DeferredRuntimeHost(createPreparedAsset(key));
-		const assetService = new HostBackedAssetService({ host });
+		const assetReader = new DeferredPreparedAssetReader(createPreparedAsset(key));
 		const bridge = createStaticResolverMainAssetBridge(
 			channel.mainPort,
-			assetService,
+			assetReader,
 		);
 		const workerAssetReader = new StaticResolverWorkerPreparedAssetReader(
 			channel.workerPort,
 		);
+		const requestScopedReader = new RequestScopedPreparedAssetReader(
+			workerAssetReader,
+		);
 
-		const first = workerAssetReader.requestPreparedAsset(key);
-		const second = workerAssetReader.requestPreparedAsset(key);
+		const first = requestScopedReader.requestPreparedAsset(key);
+		const second = requestScopedReader.requestPreparedAsset(key);
 
-		expect(host.lookupCount).toBe(1);
-		host.resolveNext();
+		expect(channel.threadMessages).toEqual([
+			{
+				key,
+				kind: "prepared-asset-requested",
+				requestId: "resolver-asset-1",
+			},
+		]);
+		assetReader.resolveNext();
 
 		await expect(Promise.all([first, second])).resolves.toEqual([
 			expect.objectContaining({ key }),
@@ -286,38 +339,26 @@ class FixturePreparedAssetReader implements PreparedAssetReader {
 }
 
 class DeferredPreparedAssetReader implements PreparedAssetReader {
-	requestPreparedAsset(): Promise<PreparedAsset> {
-		return new Promise(() => undefined);
-	}
-}
-
-class DeferredRuntimeHost implements RuntimeHost {
 	#pendingResolve: ((asset: PreparedAsset) => void) | null = null;
-	lookupCount = 0;
 
-	constructor(private readonly asset: PreparedAsset) {}
+	constructor(private readonly asset?: PreparedAsset) {}
 
-	lookupAsset(): Promise<PreparedAsset> {
-		this.lookupCount += 1;
+	requestPreparedAsset(): Promise<PreparedAsset> {
 		return new Promise((resolve) => {
 			this.#pendingResolve = resolve;
 		});
 	}
 
 	resolveNext(): void {
+		if (!this.asset) {
+			throw new Error("Deferred reader has no asset to resolve.");
+		}
 		if (!this.#pendingResolve) {
-			throw new Error("No pending runtime host lookup to resolve.");
+			throw new Error("No pending prepared asset request to resolve.");
 		}
 
 		this.#pendingResolve(this.asset);
 		this.#pendingResolve = null;
-	}
-
-	createSnapshot(): RuntimeHostSnapshot {
-		return {
-			failure: null,
-			isAvailable: true,
-		};
 	}
 }
 

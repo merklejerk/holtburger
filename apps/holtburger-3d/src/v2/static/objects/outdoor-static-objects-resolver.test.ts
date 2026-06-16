@@ -24,6 +24,7 @@ import {
 	parseHostAssetId,
 } from "../../assets/keys";
 import type { StaticResolverJob } from "../contracts";
+import { RequestScopedPreparedAssetReader } from "../resolver/worker-asset-reader";
 import { OutdoorStaticObjectsResolver } from "./outdoor-static-objects-resolver";
 
 describe("V2 outdoor static object resolver", () => {
@@ -397,7 +398,7 @@ describe("V2 outdoor static object resolver", () => {
 		expect(payload.scope.missingRefs).toEqual([]);
 	});
 
-	it("memoizes duplicate prepared asset requests inside one resolve job", async () => {
+	it("resolves duplicate prepared asset refs through the shared request reader", async () => {
 		const duplicatedMaterialKey = createHostAssetKey("material", 0x08000011);
 		const duplicatedTextureKey = createHostAssetKey(
 			"surface-texture",
@@ -464,7 +465,7 @@ describe("V2 outdoor static object resolver", () => {
 		]);
 
 		const payload = await new OutdoorStaticObjectsResolver({
-			assetService,
+			assetService: new RequestScopedPreparedAssetReader(assetService),
 		}).resolve(createBuildingRequest());
 
 		expect(payload.scope.kind).toBe("outdoor-static-objects");

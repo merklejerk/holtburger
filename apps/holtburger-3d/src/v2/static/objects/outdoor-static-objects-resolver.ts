@@ -9,7 +9,6 @@ import type {
 } from "../../assets/contracts";
 import {
 	createHostAssetKey,
-	describeHostAssetKey,
 	parseHostAssetId,
 } from "../../assets/keys";
 import type {
@@ -79,7 +78,7 @@ export class OutdoorStaticObjectsResolver {
 		}
 		const domain = job.domain;
 		const context: OutdoorStaticResolveContext = {
-			assetService: new PerJobPreparedAssetReader(this.#assetService),
+			assetService: this.#assetService,
 		};
 
 		const landblock = await this.#loadPayload(
@@ -253,27 +252,6 @@ export class OutdoorStaticObjectsResolver {
 		const asset = await context.assetService.requestPreparedAsset(key);
 		const payload = requirePreparedPayloadKind(asset, expectedKind);
 		return { asset, payload };
-	}
-}
-
-class PerJobPreparedAssetReader implements PreparedAssetReader {
-	readonly #reader: PreparedAssetReader;
-	readonly #requests = new Map<string, Promise<PreparedAsset>>();
-
-	constructor(reader: PreparedAssetReader) {
-		this.#reader = reader;
-	}
-
-	requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
-		const cacheKey = describeHostAssetKey(key);
-		const request = this.#requests.get(cacheKey);
-		if (request) {
-			return request;
-		}
-
-		const nextRequest = this.#reader.requestPreparedAsset(key);
-		this.#requests.set(cacheKey, nextRequest);
-		return nextRequest;
 	}
 }
 

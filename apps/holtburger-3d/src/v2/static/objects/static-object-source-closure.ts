@@ -1,11 +1,11 @@
 import type {
 	MaterialRecipePayloadDto,
 	PalettePayloadDto,
-	RenderSurfacePayloadDto,
 	SetupAppearancePayloadDto,
 	SetupModelPayloadDto,
 	SurfaceTexturePayloadDto,
 } from "../../../lib/host/contracts";
+import type { ResolverRenderSurfacePayloadDto } from "../../assets/preparation/render-surface-views";
 import type { ResolverGfxObjPayloadDto } from "../../assets/preparation/gfx-obj-views";
 import type {
 	HostAssetKey,
@@ -42,7 +42,7 @@ import { createStaticObjectSourceGeometryIdentity } from "./static-object-source
 type StaticObjectSourceClosurePreparedPayload =
 	| MaterialRecipePayloadDto
 	| PalettePayloadDto
-	| RenderSurfacePayloadDto
+	| ResolverRenderSurfacePayloadDto
 	| ResolverGfxObjPayloadDto
 	| SetupAppearancePayloadDto
 	| SetupModelPayloadDto
@@ -186,10 +186,6 @@ export async function resolveStaticObjectSurfaceTextureRef(options: {
 				format: loadedRenderSurface.payload.format,
 				formatRaw: loadedRenderSurface.payload.formatRaw,
 				height: loadedRenderSurface.payload.height,
-				indexedMaxIndex: scanIndexedMaxIndex(
-					loadedRenderSurface.payload.sourceBytes,
-					loadedRenderSurface.payload.formatRaw,
-				),
 				palette,
 				renderSurface,
 				role: "render-surface",
@@ -888,33 +884,3 @@ function requirePreparedPayloadKind<
 }
 
 const UNIT_SCALE = { x: 1, y: 1, z: 1 };
-
-const PIXEL_FORMAT_P8 = 0x29;
-const PIXEL_FORMAT_INDEX16 = 0x65;
-
-function scanIndexedMaxIndex(
-	bytes: Uint8Array,
-	formatRaw: number,
-): number | null {
-	if (formatRaw === PIXEL_FORMAT_P8) {
-		let maxIndex = 0;
-		for (const index of bytes) {
-			maxIndex = Math.max(maxIndex, index);
-		}
-		return maxIndex;
-	}
-	if (formatRaw !== PIXEL_FORMAT_INDEX16) {
-		return null;
-	}
-	if (bytes.byteLength % Uint16Array.BYTES_PER_ELEMENT !== 0) {
-		throw new Error(
-			`Index16 render surface byte length ${bytes.byteLength} is not 16-bit aligned.`,
-		);
-	}
-	let maxIndex = 0;
-	for (let offset = 0; offset < bytes.byteLength; offset += 2) {
-		const index = bytes[offset] | ((bytes[offset + 1] ?? 0) << 8);
-		maxIndex = Math.max(maxIndex, index);
-	}
-	return maxIndex;
-}

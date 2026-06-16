@@ -1,7 +1,9 @@
 import type {
+	HostAssetKey,
 	PreparedAsset,
 	PreparedAssetReader,
 } from "../../assets/contracts";
+import { describeHostAssetKey } from "../../assets/keys";
 import type {
 	StaticResolverPreparedAssetResponse,
 	StaticResolverWorkerGlobalPort,
@@ -77,5 +79,28 @@ export class StaticResolverWorkerPreparedAssetReader implements PreparedAssetRea
 		}
 
 		pending.resolve(response.asset);
+	}
+}
+
+export class RequestScopedPreparedAssetReader implements PreparedAssetReader {
+	readonly #reader: PreparedAssetReader;
+	readonly #pending = new Map<string, Promise<PreparedAsset>>();
+
+	constructor(reader: PreparedAssetReader) {
+		this.#reader = reader;
+	}
+
+	requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
+		const cacheKey = describeHostAssetKey(key);
+		const pending = this.#pending.get(cacheKey);
+		if (pending) {
+			return pending;
+		}
+
+		const next = this.#reader.requestPreparedAsset(key).finally(() => {
+			this.#pending.delete(cacheKey);
+		});
+		this.#pending.set(cacheKey, next);
+		return next;
 	}
 }

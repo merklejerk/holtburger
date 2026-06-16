@@ -63,6 +63,11 @@ export class LandblockEnvCellsResolver {
 				createSourceCacheKey(source.identity),
 			),
 		);
+		reportOmittedStaticSeeds({
+			landblockId: landblock.payload.landblockId,
+			payload: landblock.payload,
+			sourceByKey,
+		});
 		const envCells = landblock.payload.envCells.map((cell) =>
 			createLandblockEnvCellStaticFacts({
 				cell,
@@ -150,6 +155,41 @@ function reportUnboundedEnvCells(
 		message:
 			"Resolved env cells without landblock BVH bounds were omitted from the landblockEnvCellBvh broad phase.",
 		omittedEnvCellIds,
+	});
+}
+
+function reportOmittedStaticSeeds(options: {
+	readonly landblockId: number;
+	readonly payload: ResolverLandblockEnvCellsPayloadDto;
+	readonly sourceByKey: ReadonlySet<string>;
+}): void {
+	const omittedSeeds = options.payload.envCells.flatMap((cell) =>
+		cell.statics.flatMap((staticSeed) => {
+			const source = createStaticObjectSourceIdentity(
+				parseHostAssetId(staticSeed.sourceAssetId),
+			);
+			if (options.sourceByKey.has(createSourceCacheKey(source))) {
+				return [];
+			}
+
+			return [
+				{
+					envCellId: cell.envCellId,
+					instanceId: staticSeed.instanceId,
+					sourceAssetId: staticSeed.sourceAssetId,
+				},
+			];
+		}),
+	);
+	if (omittedSeeds.length === 0) {
+		return;
+	}
+
+	console.warn("[holtburger-3d][v2][landblock-env-cell-static-seeds]", {
+		landblockId: options.landblockId,
+		message:
+			"Omitted env-cell static seeds because their top-level source assets could not be resolved.",
+		omittedSeeds,
 	});
 }
 

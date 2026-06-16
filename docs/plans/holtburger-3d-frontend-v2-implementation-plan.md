@@ -572,7 +572,7 @@ Decisions and course corrections:
 
 ##### Phase 13A3b-1: Resolver Source Closure Hygiene
 
-Status: planned; inserted after 13A3b on 2026-06-15 before env-cell static draw-unit work.
+Status: complete on 2026-06-15; inserted after 13A3b before env-cell static draw-unit work.
 
 Purpose: close resolver-boundary issues exposed by env-cell static seed source closure before renderable draw units depend on them.
 
@@ -618,9 +618,18 @@ Decisions and course corrections:
 - Prefer request-scoped resolver construction over a worker-lifetime deduper, even though it touches more files. The maintainability payoff is that resolver asset request lifetime becomes explicit, and the worker never owns committed asset freshness.
 - Do not add host-side `maxIndexNumber` for this phase. The validation it would preserve is not worth expanding the host/TS render-surface contract right now. If indexed palette-range diagnostics become useful later, add them in a byte-aware diagnostics pipeline rather than resolver source closure.
 
+Implementation notes:
+
+- `StaticResolverWorkerPreparedAssetReader` remains the long-lived worker-to-main transport reader, but each `resolve-static-scope` request now constructs a fresh resolver router with a `RequestScopedPreparedAssetReader` wrapper. That wrapper dedupes concurrent in-flight prepared asset requests by `describeHostAssetKey(key)` and deletes entries on settle; committed freshness/caching remains only in the main-thread asset service.
+- `OutdoorStaticObjectsResolver` no longer owns a private `PerJobPreparedAssetReader`. Direct resolver tests that need dedupe now wrap the fixture reader with the same shared request-scoped reader the worker uses.
+- `createResolverPreparedAssetView` now strips render-surface `sourceBytes` in addition to env-cell/gfx geometry buffers. The render-surface resolver view preserves metadata needed by source closure and material planning: ids, dimensions, format, default palette id, provenance/dependencies, and `sourceByteLength`.
+- `StaticObjectTextureRefFacts` no longer carries `indexedMaxIndex`; `static-object-source-closure.ts` no longer scans render-surface bytes; static material planning no longer performs indexed max-index-vs-palette-color-count validation. Indexed materials still fail when no palette can be selected or when selected palette source metadata is absent.
+- `LandblockEnvCellsResolver` now warns once per resolve when top-level env-cell static seed source assets cannot be resolved and are omitted. Nested material/texture/render-surface/palette misses remain typed `missingRefs` without noisy logging.
+- Tests cover request-scoped worker-side dedupe before crossing the worker bridge, request-scoped resolver construction, resolver-light render-surface payloads without `sourceBytes`, retained indexed palette metadata requirements, and env-cell static source omission behavior. Console logging itself is not asserted because project guidance says not to write tests for debug-oriented logging.
+
 ##### Phase 13A3c: Env-Cell Static Object Draw Units
 
-Status: planned; blocked on Phase 13A3b-1 resolver source closure hygiene.
+Status: planned; unblocked by Phase 13A3b-1 resolver source closure hygiene.
 
 Purpose: bake env-cell static object seeds through static-object material/render-state behavior while keeping ownership and eviction correct.
 

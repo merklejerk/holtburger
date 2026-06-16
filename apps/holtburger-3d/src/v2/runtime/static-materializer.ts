@@ -22,7 +22,6 @@ import type {
 	StaticResourceKey,
 	StaticSourceMappingRecord,
 	StaticSpatialRecord,
-	StaticScopeOwnerKey,
 	StaticVisibilityRecord,
 } from "../static/contracts";
 
@@ -38,7 +37,6 @@ export interface StaticMaterializationInput {
 export interface StaticMaterializationResult {
 	readonly drawUnitIdMappings: readonly StaticMaterializedDrawUnitIdMapping[];
 	readonly removedResources: readonly StaticResourceKey[];
-	readonly removedScopes: readonly StaticScopeOwnerKey[];
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly staticDelta: StaticResidencyDelta;
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
@@ -77,7 +75,6 @@ export function materializeStaticCommit(
 	return {
 		drawUnitIdMappings: finePartitioned.drawUnitIdMappings,
 		removedResources,
-		removedScopes: input.commit.removedScopes,
 		...materializeStaticPeerRecords(input.commit, finePartitioned),
 		staticDelta: {
 			addedDrawUnits: finePartitioned.drawUnits,

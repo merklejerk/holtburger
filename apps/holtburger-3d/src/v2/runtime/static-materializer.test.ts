@@ -182,7 +182,6 @@ describe("V2 static materializer", () => {
 			commit: {
 				addedDrawUnits: [],
 				removedResources: [{ drawUnitId: "static-table", kind: "draw-unit" }],
-				removedScopes: [],
 				revision: 8,
 				staticAuthoredDynamicSeeds: [],
 				staticBatchId: "batch-a",
@@ -217,7 +216,6 @@ function createCommitDelta(options: {
 		addedDrawUnits: options.addedDrawUnits,
 		materialCoverage: [],
 		removedResources: [],
-		removedScopes: [],
 		revision: 7,
 		staticAuthoredDynamicSeeds: [],
 		staticBatchId: "batch-a",

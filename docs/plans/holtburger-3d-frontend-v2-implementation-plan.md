@@ -1273,6 +1273,8 @@ Verification:
 
 Status: complete as of 2026-06-16.
 
+Superseded cleanup on 2026-06-16: the `removedScopes` part of this phase was removed after Phase 13B1b-1 made retained scopes the top-level semantic lifecycle authority. `StaticCoordinatorCommitDelta` now carries concrete `removedResources` only; semantic scope eviction is immediate through runtime/query retention.
+
 Purpose: make static eviction deltas carry semantic scope ownership and typed renderer-resource removals explicitly, so runtime records prune by scope while renderer resources prune by resource key instead of calcifying the model around draw units only.
 
 Problem statement:
@@ -1370,7 +1372,7 @@ Verification:
 
 ### Phase 13B1b-1: Runtime-Level Static Scope Retention Reconciler Course Correction
 
-Status: planned; inserted on 2026-06-16 before 13B1c.
+Status: complete on 2026-06-16; inserted before 13B1c and implemented before browser/client-owned residency input.
 
 Purpose: replace the current parallel static eviction paths with one runtime-level scope-retention reconciliation flow that fans out to semantic query state and concrete renderer/texture resources.
 
@@ -1525,6 +1527,29 @@ Dry-run notes:
   - Materializer/runtime split: source draw-unit removal still expands to all materialized draw units, proving the renderer boundary remains resource-keyed.
 - Blind spot to watch while implementing:
   - `retainScopes(...)` currently rebuilds the landblock grid index after deleting roots. If committed env-cell BVH promotion happens later, make sure that index rebuild remains tied to semantic retention, not resource commit timing.
+
+Implementation notes:
+
+- Added `StaticDemandPlan` and `StaticRetentionReconciliation` to make retained scopes explicit runtime/coordinator data instead of deriving retained scope semantics from returned scheduled work.
+- Replaced `planScheduledStaticWork(...)` with `planStaticDemand(...)`. The planner now emits both `retainedScopes` and `work` from one demand expansion, so retained scopes are derived from static demand/scene interest rather than active or scheduled work status.
+- Replaced the production `StaticCoordinator.requestStaticDemand(...)` API with `StaticCoordinator.reconcileStaticDemand(...)`. The reconciliation result contains `activeWork`, `retainedScopes`, and concrete `removedResources`; eviction commit deltas carry concrete resources only.
+- Routed `ClientRuntimeImpl.updateSceneInterest(...)` through `#reconcileStaticRetention(...)`, which calls coordinator reconciliation and immediately applies `StaticSceneQuery.retainScopes(reconciliation.retainedScopes)`.
+- Narrowed `StaticSceneQuery.applyStaticPeerRecords(...)` to peer-record upserts only. Scope-owned semantic record pruning now happens through `retainScopes(...)`; draw-unit-owned record pruning happens through `removeStaticResources(...)`.
+- Removed `removedScopes` from `StaticMaterializationResult`; materialization now carries only concrete removed resources into renderer/query cleanup.
+- Updated tests around demand planning, coordinator reconciliation, scope-owned query eviction, and resource-only draw-unit query cleanup.
+
+Spicy / failed to close:
+
+- Closed after implementation: `StaticCoordinatorCommitDelta` no longer includes `removedScopes`; diagnostics/tests were updated to consume the retained-scope/resource-key model instead of preserving decorative accounting.
+- Closed after implementation: committed env-cell spatial records now carry the raw local and residency BVH payloads, and committed authored seed records are applied to `StaticSceneQuery`. Env-cell residency/picking roots are rebuilt from committed peer records rather than source-ingested BVH roots.
+- Remaining watchout: source-payload env-cell ingest is now intentionally not the query BVH owner. Any future pre-bake diagnostics should use an explicit source diagnostic path rather than reintroducing a second env-cell root store.
+
+Verification:
+
+- `npm run test:ts -- demand-planner.test.ts static-coordinator.test.ts static-scene-query.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run test:ts`
 
 ### Phase 13B1c: Browser/Client-Owned Camera Residency Input
 

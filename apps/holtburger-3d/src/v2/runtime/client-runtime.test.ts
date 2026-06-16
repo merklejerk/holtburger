@@ -140,6 +140,77 @@ describe("V2 client runtime", () => {
 		runtime.dispose();
 	});
 
+	it("accepts explicit current camera residency without provenance accounting", () => {
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer: new FakeRenderer(),
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker: new DeferredStaticBaker(),
+				resolver: new DeferredStaticResolver(),
+			}),
+		});
+		const snapshots: RuntimeSnapshot[] = [];
+		const unsubscribe = runtime.subscribe((nextSnapshot) => {
+			snapshots.push(nextSnapshot);
+		});
+
+		runtime.setCurrentCameraResidency({
+			envCellId: 0xda550100,
+			kind: "env-cell",
+			landblockId: 0xda55ffff,
+		});
+		runtime.setCurrentCameraResidency({
+			envCellId: 0xda550100,
+			kind: "env-cell",
+			landblockId: 0xda55ffff,
+		});
+
+		expect(snapshots).toHaveLength(2);
+		expect(snapshots.at(-1)?.currentCameraResidency).toEqual({
+			envCellId: 0xda550100,
+			kind: "env-cell",
+			landblockId: 0xda55ffff,
+		});
+		expect(runtime.createDiagnosticsReport().runtime).toMatchObject({
+			currentCameraResidency: {
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+		});
+		expect(JSON.stringify(runtime.createDiagnosticsReport())).not.toContain(
+			'"source"',
+		);
+
+		unsubscribe();
+		runtime.dispose();
+	});
+
+	it("exposes a browser-pollable camera residency candidate query", () => {
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer: new FakeRenderer(),
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker: new DeferredStaticBaker(),
+				resolver: new DeferredStaticResolver(),
+			}),
+		});
+
+		expect(
+			runtime.queryCameraResidencyAtPoint({
+				outdoorAnchorLandblockId: 0xda55ffff,
+				point: { x: 0, y: 10, z: 0 },
+			}),
+		).toEqual({
+			kind: "outdoor-landblock",
+			landblockId: 0xda55ffff,
+		});
+
+		runtime.dispose();
+	});
+
 	it("prunes runtime-owned warm asset cache entries on the maintenance cadence", () => {
 		vi.useFakeTimers();
 		try {

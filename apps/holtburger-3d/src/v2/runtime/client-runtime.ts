@@ -50,8 +50,10 @@ import {
 	type OutdoorStaticObjectScenePickDetails,
 	type StaticScenePickRequest,
 	type StaticScenePickHit,
+	type StaticSceneCameraResidency,
 	type StaticSceneQuerySnapshot,
 	type StaticSceneSelectionKey,
+	type StaticSceneVec3,
 	type TerrainQuadScenePickDetails,
 } from "./static-scene-query";
 
@@ -84,10 +86,13 @@ export type RuntimeSceneInterest =
 			readonly source: "manual" | "follow";
 	  };
 
+export type RuntimeCameraResidency = StaticSceneCameraResidency;
+
 export interface RuntimeSnapshot {
 	readonly status: "idle" | "static-active" | "disposed";
 	readonly renderPolicy: RuntimeRenderPolicySnapshot;
 	readonly sceneInterest: RuntimeSceneInterest;
+	readonly currentCameraResidency: RuntimeCameraResidency;
 	readonly assets: AssetServiceSnapshot;
 	readonly host: RuntimeHostSnapshot;
 	readonly renderer: RendererSnapshot;
@@ -294,6 +299,11 @@ interface StaticMaterializationFailureSnapshot {
 
 export interface ClientRuntime {
 	updateSceneInterest(interest: RuntimeSceneInterest): void;
+	queryCameraResidencyAtPoint(options: {
+		readonly outdoorAnchorLandblockId: number;
+		readonly point: StaticSceneVec3;
+	}): RuntimeCameraResidency;
+	setCurrentCameraResidency(residency: RuntimeCameraResidency): void;
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null;
 	createStaticSelectionDiagnosticsReport(
 		selectionKey: StaticSceneSelectionKey,
@@ -359,6 +369,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#lastRendererSnapshot: RendererSnapshot;
 	#lastStaticSnapshot: StaticCoordinatorSnapshot;
 	#sceneInterest: RuntimeSceneInterest = { kind: "none" };
+	#currentCameraResidency: RuntimeCameraResidency = {
+		kind: "unknown",
+		landblockId: null,
+	};
 	#renderAnchorLandblockId: number | null = null;
 	#staticMaterializationQueue: Promise<void> = Promise.resolve();
 	#pendingStaticMaterializations = new Set<number>();
@@ -457,6 +471,25 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#emit();
 	}
 
+	queryCameraResidencyAtPoint(options: {
+		readonly outdoorAnchorLandblockId: number;
+		readonly point: StaticSceneVec3;
+	}): RuntimeCameraResidency {
+		this.#assertActive();
+		return this.#staticSceneQuery.queryCameraResidencyAtPoint(options);
+	}
+
+	setCurrentCameraResidency(residency: RuntimeCameraResidency): void {
+		this.#assertActive();
+		const normalized = normalizeCameraResidency(residency);
+		if (cameraResidencyEquals(this.#currentCameraResidency, normalized)) {
+			return;
+		}
+
+		this.#currentCameraResidency = normalized;
+		this.#emit();
+	}
+
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null {
 		this.#assertActive();
 		return this.#staticSceneQuery.pickRay(request);
@@ -534,6 +567,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			runtime: {
 				committedStaticMaterializationRevisions:
 					snapshot.staticMaterialization.committedRevisions,
+				currentCameraResidency: snapshot.currentCameraResidency,
 				failedStaticMaterializations: snapshot.staticMaterialization.failed,
 				sceneInterest: createSceneInterestSummary(snapshot.sceneInterest),
 				materializedStaticDrawUnits:
@@ -605,6 +639,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#createSnapshot(): RuntimeSnapshot {
 		return {
 			assets: this.#assetService.createSnapshot(),
+			currentCameraResidency: this.#currentCameraResidency,
 			host: this.#host.createSnapshot(),
 			renderPolicy: {
 				textureFilteringMode: this.#textureManager.filteringMode,
@@ -1415,6 +1450,48 @@ function normalizeSceneInterest(
 		kind: "outdoor-anchor",
 		source: interest.source,
 	};
+}
+
+function normalizeCameraResidency(
+	residency: RuntimeCameraResidency,
+): RuntimeCameraResidency {
+	if (residency.kind === "unknown") {
+		return {
+			kind: "unknown",
+			landblockId:
+				residency.landblockId === null
+					? null
+					: normalizeOutdoorLandblockId(residency.landblockId),
+		};
+	}
+
+	if (residency.kind === "outdoor-landblock") {
+		return {
+			kind: "outdoor-landblock",
+			landblockId: normalizeOutdoorLandblockId(residency.landblockId),
+		};
+	}
+
+	return {
+		envCellId: residency.envCellId >>> 0,
+		kind: "env-cell",
+		landblockId: normalizeOutdoorLandblockId(residency.landblockId),
+	};
+}
+
+function cameraResidencyEquals(
+	left: RuntimeCameraResidency,
+	right: RuntimeCameraResidency,
+): boolean {
+	if (left.kind !== right.kind || left.landblockId !== right.landblockId) {
+		return false;
+	}
+
+	if (left.kind !== "env-cell" || right.kind !== "env-cell") {
+		return true;
+	}
+
+	return left.envCellId === right.envCellId;
 }
 
 function createSceneInterestSummary(

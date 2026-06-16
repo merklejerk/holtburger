@@ -144,13 +144,13 @@ describe("V2 landblock env-cell baker", () => {
 			coordinateSpace: "landblock-render-local",
 			domain: "landblock-env-cells",
 			drawUnitId:
-				"7:landblock:da55ffff:landblock-env-cells:structured-interior:da550100:0d000001",
+				"7:landblock:da55ffff:landblock-env-cells:structured-interior:da550100:0d000001:slice:0:0",
 			envCellId: 0xda550100,
 			kind: "structured-interior-geometry",
 			landblockId: 0xda55ffff,
 			materialPlan: [
 				{
-					fallbackReasons: [],
+					diagnostics: [],
 					family: "flat-color",
 					outcome: "rendered",
 					pass: "opaque",
@@ -189,33 +189,33 @@ describe("V2 landblock env-cell baker", () => {
 		expect(result.materialCoverage).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
-				buckets: [
-					{
-						family: "flat-color",
-						filteringMode: "none",
-						materialCount: 1,
-						outcome: "rendered",
-						partitionCount: 1,
-						pass: "opaque",
-						textureRoleCount: 0,
-						triangleCount: 1,
-					},
-				],
-				deferredTriangleCount: 0,
-				domain: "landblock-env-cells",
-				fallbackReasonCounts: [],
-				fallbackReasonCount: 0,
-				landblockId: 0xda55ffff,
-				materialCount: 1,
-				renderedTriangleCount: 1,
-				triangleCount: 1,
-				unrenderedBuckets: [],
+					buckets: [
+						{
+							family: "flat-color",
+							filteringMode: "none",
+							materialCount: 1,
+							outcome: "rendered",
+							partitionCount: 1,
+							pass: "opaque",
+							textureRoleCount: 0,
+							triangleCount: 1,
+						},
+					],
+					deferredTriangleCount: 0,
+					domain: "landblock-env-cells",
+					fallbackReasonCounts: [],
+					fallbackReasonCount: 0,
+					landblockId: 0xda55ffff,
+					materialCount: 1,
+					renderedTriangleCount: 1,
+					triangleCount: 1,
+					unrenderedBuckets: [],
 				}),
 			]),
 		);
 	});
 
-	it("does not emit structured-interior fallback draw units when material sources are missing", () => {
+	it("omits structured-interior draw units when all material sources are missing", () => {
 		const input = createInputWithRenderableCellStructure({
 			includeMaterialSources: false,
 		});
@@ -247,6 +247,163 @@ describe("V2 landblock env-cell baker", () => {
 				],
 			}),
 		]);
+	});
+
+	it("partitions mixed structured-interior material passes into separate draw units", () => {
+		const input = createInputWithRenderableCellStructure({
+			materialSources: [
+				createStaticObjectMaterialSource({ materialId: 0x08000010 }),
+				createStaticObjectMaterialSource({
+					materialId: 0x08000020,
+					surfaceType: 0x4,
+				}),
+			],
+			renderSurfaces: [
+				{ materialId: 0x08000010, polygonId: 1 },
+				{ materialId: 0x08000020, polygonId: 2 },
+			],
+		});
+		const envCell = requireFirstEnvCell(input);
+
+		const result = bakeLandblockEnvCells({
+			...input,
+			attachments: {
+				envCellCellStructureGeometry: [
+					createGeometryAttachment(envCell, {
+						positions: new Float32Array([
+							0, 0, 0, 1, 0, 0, 0, 1, 0,
+							2, 0, 0, 3, 0, 0, 2, 1, 0,
+						]),
+						surfaceIds: [0x08000010, 0x08000020],
+						triangles: [
+							{
+								firstVertex: 0,
+								materialVariantSignature: null,
+								polygonId: 1,
+								surfaceId: 0x08000010,
+							},
+							{
+								firstVertex: 3,
+								materialVariantSignature: null,
+								polygonId: 2,
+								surfaceId: 0x08000020,
+							},
+						],
+						uvs: new Float32Array([
+							0, 0, 1, 0, 0, 1,
+							0, 0, 1, 0, 0, 1,
+						]),
+					}),
+				],
+				staticObjectSourceGeometry: [],
+			},
+		});
+		const structuredDrawUnits = result.drawUnits.filter(
+			(drawUnit) => drawUnit.kind === "structured-interior-geometry",
+		);
+
+		expect(structuredDrawUnits).toHaveLength(2);
+		expect(
+			structuredDrawUnits.map((drawUnit) => ({
+				ids: drawUnit.sourceTriangleIds,
+				pass: drawUnit.materialPass,
+				surfaceIds: drawUnit.surfaceIds,
+				triangleCount: drawUnit.triangleCount,
+				vertexCount: drawUnit.vertexCount,
+			})),
+		).toEqual([
+			{
+				ids: ["polygon:2|surface:134217760|first:3|variant:none"],
+				pass: "alpha-test",
+				surfaceIds: [0x08000020],
+				triangleCount: 1,
+				vertexCount: 3,
+			},
+			{
+				ids: ["polygon:1|surface:134217744|first:0|variant:none"],
+				pass: "opaque",
+				surfaceIds: [0x08000010],
+				triangleCount: 1,
+				vertexCount: 3,
+			},
+		]);
+		expect(new Set(structuredDrawUnits.map((drawUnit) => drawUnit.drawUnitId)).size)
+			.toBe(2);
+	});
+
+	it("omits missing structured-interior surfaces without blocking renderable slices", () => {
+		const input = createInputWithRenderableCellStructure({
+			materialSources: [
+				createStaticObjectMaterialSource({ materialId: 0x08000010 }),
+			],
+			renderSurfaces: [
+				{ materialId: 0x08000010, polygonId: 1 },
+				{ materialId: 0x08000020, polygonId: 2 },
+			],
+		});
+		const envCell = requireFirstEnvCell(input);
+
+		const result = bakeLandblockEnvCells({
+			...input,
+			attachments: {
+				envCellCellStructureGeometry: [
+					createGeometryAttachment(envCell, {
+						positions: new Float32Array([
+							0, 0, 0, 1, 0, 0, 0, 1, 0,
+							2, 0, 0, 3, 0, 0, 2, 1, 0,
+						]),
+						surfaceIds: [0x08000010, 0x08000020],
+						triangles: [
+							{
+								firstVertex: 0,
+								materialVariantSignature: null,
+								polygonId: 1,
+								surfaceId: 0x08000010,
+							},
+							{
+								firstVertex: 3,
+								materialVariantSignature: null,
+								polygonId: 2,
+								surfaceId: 0x08000020,
+							},
+						],
+						uvs: new Float32Array([
+							0, 0, 1, 0, 0, 1,
+							0, 0, 1, 0, 0, 1,
+						]),
+					}),
+				],
+				staticObjectSourceGeometry: [],
+			},
+		});
+		const structuredDrawUnits = result.drawUnits.filter(
+			(drawUnit) => drawUnit.kind === "structured-interior-geometry",
+		);
+
+		expect(structuredDrawUnits).toHaveLength(1);
+		expect(structuredDrawUnits[0]).toMatchObject({
+			sourceTriangleIds: ["polygon:1|surface:134217744|first:0|variant:none"],
+			surfaceIds: [0x08000010],
+			triangleCount: 1,
+			vertexCount: 3,
+		});
+		expect(result.materialCoverage).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					coverageKind: "structured-interior",
+					deferredTriangleCount: 1,
+					renderedTriangleCount: 1,
+					triangleCount: 2,
+					unrenderedBuckets: [
+						expect.objectContaining({
+							outcome: "render-deferred",
+							reasonCodes: ["missing-cell-structure-material-source"],
+							triangleCount: 1,
+						}),
+					],
+				}),
+			]),
+		);
 	});
 
 	it("emits structured-interior texture uses for textured cell materials", () => {
@@ -439,6 +596,10 @@ function createInputWithRenderableCellStructure(
 		readonly includeMaterialSources?: boolean;
 		readonly localPlacement?: LandblockEnvCellStaticFacts["localPlacement"];
 		readonly materialSources?: readonly StaticObjectMaterialSourceFacts[];
+		readonly renderSurfaces?: readonly {
+			readonly materialId: number;
+			readonly polygonId: number;
+		}[];
 		readonly textureRefs?: readonly StaticObjectTextureRefFacts[];
 	} = {},
 ): StaticBakeBatchInput {
@@ -455,6 +616,9 @@ function createInputWithRenderableCellStructure(
 	if (!envCell) {
 		throw new Error("Missing fixture env cell.");
 	}
+	const renderSurfaces = options.renderSurfaces ?? [
+		{ materialId: 0x08000010, polygonId: 1 },
+	];
 
 	return {
 		...input,
@@ -475,20 +639,30 @@ function createInputWithRenderableCellStructure(
 								renderGeometry: {
 									...envCell.renderGeometry,
 									sourceId: 0xda550100,
-									surfaceIds: [0x08000010],
-									triangleCount: 1,
-									triangles: [
-										{
-											firstVertex: 0,
+									surfaceIds: renderSurfaces.map(
+										(surface) => surface.materialId,
+									),
+									triangleCount: renderSurfaces.length,
+									triangles: renderSurfaces.map(
+										(surface, index) => ({
+											firstVertex: index * 3,
 											materialVariantSignature: null,
-											polygonId: 1,
-											surfaceId: 0x08000010,
-										},
-									],
-									vertexCount: 3,
+											polygonId: surface.polygonId,
+											surfaceId: surface.materialId,
+										}),
+									),
+									vertexCount: renderSurfaces.length * 3,
 								},
 								localPlacement:
 									options.localPlacement ?? envCell.localPlacement,
+								surfaces: renderSurfaces.map((surface, slotId) => ({
+									material: {
+										kind: "static-material-source" as const,
+										materialId: surface.materialId,
+									},
+									slotId,
+									surfaceId: surface.materialId,
+								})),
 							},
 						],
 						materialSources:
@@ -606,6 +780,9 @@ function createGeometryAttachment(
 	envCell: LandblockEnvCellStaticFacts,
 	options: {
 		readonly positions?: Float32Array;
+		readonly surfaceIds?: readonly number[];
+		readonly triangles?: readonly EnvCellCellStructureGeometryAttachment["triangles"][number][];
+		readonly uvs?: Float32Array;
 	} = {},
 ): EnvCellCellStructureGeometryAttachment {
 	return {
@@ -617,23 +794,25 @@ function createGeometryAttachment(
 			options.positions ?? new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 		skippedPolygonCount: 0,
 		sourceId: envCell.renderGeometry.sourceId,
-		surfaceIds: [0x08000010],
+		surfaceIds: options.surfaceIds ?? [0x08000010],
 		triangleCount: envCell.renderGeometry.triangleCount,
-		triangles: [
-			{
-				firstVertex: 0,
-				materialVariantSignature: null,
-				polygonId: 1,
-				surfaceId: 0x08000010,
-			},
-		],
-		uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
+		triangles:
+			options.triangles ?? [
+				{
+					firstVertex: 0,
+					materialVariantSignature: null,
+					polygonId: 1,
+					surfaceId: 0x08000010,
+				},
+			],
+		uvs: options.uvs ?? new Float32Array([0, 0, 1, 0, 0, 1]),
 		vertexCount: envCell.renderGeometry.vertexCount,
 	};
 }
 
 function createStaticObjectMaterialSource(options: {
 	readonly materialId: number;
+	readonly surfaceType?: number;
 }): StaticObjectMaterialSourceFacts {
 	return {
 		diffuse: 0,
@@ -647,7 +826,7 @@ function createStaticObjectMaterialSource(options: {
 			kind: "solid-color",
 		},
 		surfaceId: options.materialId,
-		surfaceType: 0,
+		surfaceType: options.surfaceType ?? 0,
 		translucency: 0,
 	};
 }

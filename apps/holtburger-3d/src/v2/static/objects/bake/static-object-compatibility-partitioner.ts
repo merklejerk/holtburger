@@ -19,6 +19,7 @@ import {
 	type StaticObjectMaterialPlan,
 	type StaticObjectMaterialTextureUseRole,
 } from "./static-object-material-planner";
+import { sliceStaticMaterialCompatibilityCandidates } from "./static-material-compatibility-slicer";
 
 export const STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE = 8;
 
@@ -202,12 +203,17 @@ export function partitionStaticObjectCompatibility(
 	const candidates = [...createTriangleCandidates(payload, materialById)].sort(
 		compareTriangleCandidates,
 	);
-	const candidatesByCompatibility = groupByCompatibility(candidates);
-	const partitions = [...candidatesByCompatibility.entries()]
-		.sort(([left], [right]) => left.localeCompare(right))
-		.flatMap(([compatibilityKey, group], compatibilityIndex) =>
-			createCompatibilitySlices(compatibilityKey, compatibilityIndex, group),
-		);
+	const partitions = sliceStaticMaterialCompatibilityCandidates({
+		candidates,
+		maxMaterialEntriesPerSlice: STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE,
+	}).map((slice) =>
+		createCompatibilityPartition({
+			candidates: slice.candidates,
+			compatibilityIndex: slice.compatibilityIndex,
+			compatibilityKey: slice.compatibilityKey,
+			sliceIndex: slice.sliceIndex,
+		}),
+	);
 
 	return {
 		domain: payload.domain,
@@ -413,60 +419,6 @@ class MaterialSlotIndex {
 			null
 		);
 	}
-}
-
-function groupByCompatibility(
-	candidates: readonly StaticObjectTriangleCandidate[],
-): Map<string, readonly StaticObjectTriangleCandidate[]> {
-	const groups = new Map<string, StaticObjectTriangleCandidate[]>();
-
-	for (const candidate of candidates) {
-		const group = groups.get(candidate.compatibilityKey);
-		if (group) {
-			group.push(candidate);
-		} else {
-			groups.set(candidate.compatibilityKey, [candidate]);
-		}
-	}
-
-	return groups;
-}
-
-function createCompatibilitySlices(
-	compatibilityKey: string,
-	compatibilityIndex: number,
-	candidates: readonly StaticObjectTriangleCandidate[],
-): readonly StaticObjectCompatibilityPartition[] {
-	const slices: StaticObjectTriangleCandidate[][] = [];
-	let currentSlice: StaticObjectTriangleCandidate[] = [];
-	let currentMaterialKeys = new Set<string>();
-
-	for (const candidate of candidates) {
-		if (
-			!currentMaterialKeys.has(candidate.materialEntryKey) &&
-			currentMaterialKeys.size >= STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE
-		) {
-			slices.push(currentSlice);
-			currentSlice = [];
-			currentMaterialKeys = new Set<string>();
-		}
-
-		currentSlice.push(candidate);
-		currentMaterialKeys.add(candidate.materialEntryKey);
-	}
-
-	if (currentSlice.length > 0) {
-		slices.push(currentSlice);
-	}
-
-	return slices.map((slice, sliceIndex) =>
-		createCompatibilityPartition({
-			candidates: slice,
-			compatibilityIndex,
-			compatibilityKey,
-			sliceIndex,
-		}),
-	);
 }
 
 function createCompatibilityPartition(options: {

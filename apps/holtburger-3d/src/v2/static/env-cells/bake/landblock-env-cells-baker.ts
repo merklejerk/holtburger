@@ -32,6 +32,8 @@ import {
 	describeEnvCellCellStructureGeometryIdentity,
 } from "./landblock-env-cell-geometry-attachments";
 import { bakeStaticObjectCompatibility } from "../../objects/bake/static-object-compatibility-baker";
+import { createMaterialTextureDataUseKey } from "../../objects/bake/static-object-compatibility-partitioner";
+import { sliceStaticMaterialCompatibilityCandidates } from "../../objects/bake/static-material-compatibility-slicer";
 import {
 	createStructuredInteriorTextureUseId,
 	createStructuredInteriorMaterialCoverageReport,
@@ -39,10 +41,26 @@ import {
 	planStructuredInteriorCellMaterials,
 	type StructuredInteriorCellMaterialPlan,
 } from "./structured-interior-material-planner";
-import type { StaticObjectMaterialPlan } from "../../objects/bake/static-object-material-planner";
-import { isCurrentlyStageableStaticObjectDataUse } from "../../objects/bake/static-object-renderability";
+import type {
+	StaticObjectMaterialPlan,
+	StaticObjectMaterialTextureUseRole,
+} from "../../objects/bake/static-object-material-planner";
+import {
+	isCurrentlyStageableStaticObjectDataUse,
+	isRenderableStaticObjectMaterialPlan,
+} from "../../objects/bake/static-object-renderability";
 
 const MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW = 8;
+
+interface StructuredInteriorTriangleCandidate {
+	readonly compatibilityKey: string;
+	readonly materialEntryKey: string;
+	readonly materialPlan: StaticObjectMaterialPlan;
+	readonly sourceTriangleId: string;
+	readonly surfaceId: number;
+	readonly triangle: EnvCellCellStructureGeometryAttachment["triangles"][number];
+	readonly triangleIndex: number;
+}
 
 export class LandblockEnvCellsBaker implements StaticBaker {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
@@ -214,21 +232,33 @@ function createStructuredInteriorDrawUnits(
 			return [];
 		}
 
-		const materialPlan = materialPlansByEnvCellId.get(envCell.identity.envCellId);
-		if (!materialPlan || !isRenderableStructuredInteriorCell(materialPlan)) {
+		const materialPlan =
+			materialPlansByEnvCellId.get(envCell.identity.envCellId) ?? null;
+		if (!materialPlan) {
 			return [];
 		}
 
 		const attachment = requireGeometryAttachment(input, envCell);
-		return [
+		const candidates = createStructuredInteriorTriangleCandidates({
+			attachment,
+			materialPlan,
+		});
+		const slices = sliceStaticMaterialCompatibilityCandidates({
+			candidates,
+			maxMaterialEntriesPerSlice:
+				MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW,
+		});
+
+		return slices.map((slice) =>
 			createStructuredInteriorDrawUnit({
 				attachment,
 				envCell,
 				landblockId: payload.landblock.landblockId,
 				materialPlan,
+				slice,
 				work,
 			}),
-		];
+		);
 	});
 }
 
@@ -237,26 +267,32 @@ function createStructuredInteriorDrawUnit(options: {
 	readonly envCell: LandblockEnvCellStaticFacts;
 	readonly landblockId: number;
 	readonly materialPlan: StructuredInteriorCellMaterialPlan;
+	readonly slice: {
+		readonly sliceId: string;
+		readonly candidates: readonly StructuredInteriorTriangleCandidate[];
+	};
 	readonly work: ScheduledStaticWork;
 }): StructuredInteriorGeometryStaticDrawUnit {
 	const materialEntries = createStructuredInteriorMaterialTableEntries({
-		materialPlan: options.materialPlan,
+		candidates: options.slice.candidates,
 		work: options.work,
 	});
-	const materialSlotBySurfaceId = createMaterialSlotBySurfaceId(
-		options.materialPlan,
-		materialEntries,
+	const materialSlotByEntryKey = createMaterialSlotByEntryKey(
+		options.slice.candidates,
 	);
 	const geometry = bakeCellStructureGeometry(
 		options.envCell,
 		options.attachment,
-		materialSlotBySurfaceId,
+		options.slice.candidates,
+		materialSlotByEntryKey,
 	);
 	const materialIds = uniqueSortedNumbers(
-		options.envCell.surfaces.map((surface) => surface.material.materialId),
+		options.slice.candidates.map(
+			(candidate) => candidate.materialPlan.material.materialId,
+		),
 	);
 	const firstMaterialEntry = materialEntries[0];
-	const firstMaterialPlan = getFirstMaterializedPlan(options.materialPlan);
+	const firstMaterialPlan = options.slice.candidates[0]?.materialPlan ?? null;
 	if (!firstMaterialEntry || !firstMaterialPlan) {
 		throw new Error(
 			`Structured interior ${formatHex32(options.envCell.identity.envCellId)} has no materialized material entries.`,
@@ -267,7 +303,11 @@ function createStructuredInteriorDrawUnit(options: {
 		cellStructure: options.envCell.cellStructure,
 		coordinateSpace: "landblock-render-local",
 		domain: "landblock-env-cells",
-		drawUnitId: createStructuredInteriorDrawUnitId(options.work, options.envCell),
+		drawUnitId: createStructuredInteriorDrawUnitId(
+			options.work,
+			options.envCell,
+			options.slice.sliceId,
+		),
 		envCellId: options.envCell.identity.envCellId,
 		environment: options.envCell.environment,
 		indexType: geometry.indices instanceof Uint16Array ? "uint16" : "uint32",
@@ -276,19 +316,24 @@ function createStructuredInteriorDrawUnit(options: {
 		landblockId: options.landblockId,
 		localPlacement: options.envCell.localPlacement,
 		materialBucketKey: createStructuredInteriorMaterialBucketKey(
-			options.materialPlan,
+			options.slice.candidates,
 		),
 		materialEntries,
 		materialFamily: resolveRenderableStructuredInteriorFamily(firstMaterialPlan),
 		materialIds,
 		materialPass: firstMaterialPlan.pass,
-		materialPlan: getStructuredInteriorMaterialEntries(options.materialPlan),
+		materialPlan: createStructuredInteriorSliceMaterialEntries(
+			options.materialPlan,
+			options.slice.candidates,
+		),
 		materialSlotIndices: geometry.materialSlotIndices,
 		memberId: options.envCell.memberId,
 		positions: geometry.positions,
 		renderState: firstMaterialEntry.renderState,
 		sourceTriangleIds: geometry.sourceTriangleIds,
-		surfaceIds: uniqueSortedNumbers(options.attachment.surfaceIds),
+		surfaceIds: uniqueSortedNumbers(
+			options.slice.candidates.map((candidate) => candidate.surfaceId),
+		),
 		texCoords: geometry.texCoords,
 		textureUseIds: uniqueSortedStrings(
 			materialEntries.flatMap((entry) =>
@@ -300,8 +345,8 @@ function createStructuredInteriorDrawUnit(options: {
 				].filter((textureUseId): textureUseId is string => textureUseId !== null),
 			),
 		),
-		triangleCount: options.attachment.triangleCount,
-		vertexCount: options.attachment.vertexCount,
+		triangleCount: geometry.triangleCount,
+		vertexCount: geometry.vertexCount,
 	};
 }
 
@@ -317,54 +362,72 @@ function createStructuredInteriorMaterialPlans(
 	);
 }
 
-function isRenderableStructuredInteriorCell(
-	plan: StructuredInteriorCellMaterialPlan,
-): boolean {
-	const materialPlans = [...plan.materialPlansBySurfaceId.values()];
-	if (
-		materialPlans.length === 0 ||
-		materialPlans.length > MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW
-	) {
-		return false;
-	}
-	const firstPlan = materialPlans[0];
-	if (!firstPlan) {
-		return false;
-	}
-	return materialPlans.every(
-		(candidate) =>
-			candidate.renderCoverage === "classified-render-candidate" &&
-			candidate.family !== "unsupported" &&
-			candidate.family === firstPlan.family &&
-			candidate.pass === firstPlan.pass &&
-			candidate.textureRoles.every((role) =>
-				isCurrentlyStageableStaticObjectDataUse(role.dataUse),
-			),
-	);
-}
-
 function createStructuredInteriorMaterialTableEntries(options: {
-	readonly materialPlan: StructuredInteriorCellMaterialPlan;
+	readonly candidates: readonly StructuredInteriorTriangleCandidate[];
 	readonly work: ScheduledStaticWork;
 }): readonly StaticObjectMaterialTableEntry[] {
-	return getStructuredInteriorMaterialEntries(options.materialPlan).map(
-		(entry, slot): StaticObjectMaterialTableEntry => {
-			const plan = options.materialPlan.materialPlansBySurfaceId.get(
-				entry.surfaceId,
-			);
-			if (!plan) {
-				throw new Error(
-					`Structured interior material entry ${entry.surfaceId} had no materialized material plan.`,
-				);
-			}
+	return [
+		...options.candidates
+			.reduce((entries, candidate) => {
+				const existing = entries.get(candidate.materialEntryKey);
+				if (existing) {
+					existing.materialIds.add(candidate.materialPlan.material.materialId);
+					return entries;
+				}
+				entries.set(candidate.materialEntryKey, {
+					materialIds: new Set([candidate.materialPlan.material.materialId]),
+					plan: candidate.materialPlan,
+				});
+				return entries;
+			}, new Map<string, { readonly plan: StaticObjectMaterialPlan; readonly materialIds: Set<number> }>())
+			.entries(),
+	]
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(
+			([, entry], slot): StaticObjectMaterialTableEntry =>
+				createStructuredInteriorMaterialTableEntry({
+					materialIds: uniqueSortedNumbers([...entry.materialIds]),
+					plan: entry.plan,
+					slot,
+					work: options.work,
+				}),
+		);
+}
 
-			return createStructuredInteriorMaterialTableEntry({
-				plan,
-				slot,
-				work: options.work,
-			});
-		},
-	);
+function createStructuredInteriorTriangleCandidates(options: {
+	readonly attachment: EnvCellCellStructureGeometryAttachment;
+	readonly materialPlan: StructuredInteriorCellMaterialPlan;
+}): readonly StructuredInteriorTriangleCandidate[] {
+	return options.attachment.triangles
+		.map((triangle, triangleIndex): StructuredInteriorTriangleCandidate | null => {
+			if (triangle.surfaceId === null) {
+				return null;
+			}
+			const plan = options.materialPlan.materialPlansBySurfaceId.get(
+				triangle.surfaceId,
+			);
+			if (!plan || !isRenderableStaticObjectMaterialPlan(plan)) {
+				return null;
+			}
+			const materialEntryKey = createStructuredInteriorMaterialEntryKey(plan);
+			return {
+				compatibilityKey: createStructuredInteriorCompatibilityKey({
+					materialEntryKey,
+					plan,
+				}),
+				materialEntryKey,
+				materialPlan: plan,
+				sourceTriangleId: createSourceTriangleId(triangle),
+				surfaceId: triangle.surfaceId,
+				triangle,
+				triangleIndex,
+			};
+		})
+		.filter(
+			(candidate): candidate is StructuredInteriorTriangleCandidate =>
+				candidate !== null,
+		)
+		.sort(compareStructuredInteriorTriangleCandidates);
 }
 
 function resolveRenderableStructuredInteriorFamily(
@@ -384,6 +447,7 @@ function resolveRenderableStructuredInteriorFamily(
 }
 
 function createStructuredInteriorMaterialTableEntry(options: {
+	readonly materialIds: readonly number[];
 	readonly plan: StaticObjectMaterialPlan;
 	readonly slot: number;
 	readonly work: ScheduledStaticWork;
@@ -428,7 +492,7 @@ function createStructuredInteriorMaterialTableEntry(options: {
 			: null,
 		materialColor: options.plan.color,
 		materialEmissiveColor: options.plan.emissiveColor,
-		materialIds: [options.plan.material.materialId],
+		materialIds: options.materialIds,
 		paletteFirstIndex:
 			paletteTextureUse?.kind === "palette-texture-use"
 				? paletteTextureUse.firstIndex
@@ -462,34 +526,141 @@ function findTextureDataUse(
 	);
 }
 
-function createMaterialSlotBySurfaceId(
-	plan: StructuredInteriorCellMaterialPlan,
-	materialEntries: readonly StaticObjectMaterialTableEntry[],
-): ReadonlyMap<number, number> {
-	const slots = new Map<number, number>();
-	for (const entry of getStructuredInteriorMaterialEntries(plan)) {
-		const materialEntry = materialEntries.find((candidate) =>
-			candidate.materialIds.includes(entry.material.materialId),
-		);
-		slots.set(entry.surfaceId, materialEntry?.slot ?? 0);
-	}
-	return slots;
-}
-
-function getFirstMaterializedPlan(
-	plan: StructuredInteriorCellMaterialPlan,
-): StaticObjectMaterialPlan | null {
-	return plan.materialPlansBySurfaceId.values().next().value ?? null;
-}
-
 function createStructuredInteriorMaterialBucketKey(
-	plan: StructuredInteriorCellMaterialPlan,
+	candidates: readonly StructuredInteriorTriangleCandidate[],
 ): string {
 	return uniqueSortedStrings(
-		[...plan.materialPlansBySurfaceId.values()].map(
-			(materialPlan) => materialPlan.materialBucketKey,
-		),
+		candidates.map((candidate) => candidate.materialPlan.materialBucketKey),
 	).join("|");
+}
+
+function createMaterialSlotByEntryKey(
+	candidates: readonly StructuredInteriorTriangleCandidate[],
+): ReadonlyMap<string, number> {
+	return new Map(
+		uniqueSortedStrings(
+			candidates.map((candidate) => candidate.materialEntryKey),
+		).map((materialEntryKey, slot) => [materialEntryKey, slot]),
+	);
+}
+
+function createStructuredInteriorSliceMaterialEntries(
+	materialPlan: StructuredInteriorCellMaterialPlan,
+	candidates: readonly StructuredInteriorTriangleCandidate[],
+): ReturnType<typeof getStructuredInteriorMaterialEntries> {
+	const surfaceIds = new Set(
+		candidates.map((candidate) => candidate.surfaceId),
+	);
+	return getStructuredInteriorMaterialEntries(materialPlan).filter((entry) =>
+		surfaceIds.has(entry.surfaceId),
+	);
+}
+
+function createStructuredInteriorCompatibilityKey(options: {
+	readonly materialEntryKey: string;
+	readonly plan: StaticObjectMaterialPlan;
+}): string {
+	return [
+		`family:${options.plan.family}`,
+		`coverage:${options.plan.renderCoverage}`,
+		`pass:${options.plan.pass}`,
+		`alpha:${options.plan.alphaPolicy.mode}`,
+		`blend:${options.plan.blend.mode}`,
+		`schema:${createStructuredInteriorTextureRoleSchemaKey(
+			options.plan.textureRoles,
+		)}`,
+	].join("|");
+}
+
+function createStructuredInteriorMaterialEntryKey(
+	plan: StaticObjectMaterialPlan,
+): string {
+	return [
+		`material:${formatHex32(plan.material.materialId)}`,
+		`color:${[
+			...plan.color.map(formatMaterialScalar),
+			...plan.emissiveColor.map(formatMaterialScalar),
+		].join(",")}`,
+		"wrap:clamp",
+		`roles:${createStructuredInteriorTextureRoleLayoutKey(plan.textureRoles)}`,
+		`alpha-test:${formatMaterialScalar(plan.alphaPolicy.alphaTest)}`,
+		`indexed-clip:${formatMaterialScalar(
+			plan.alphaPolicy.indexedClipThreshold,
+		)}`,
+		`detail-tiling:${formatMaterialScalar(resolveDetailTextureTiling(plan))}`,
+	].join("|");
+}
+
+function createStructuredInteriorTextureRoleLayoutKey(
+	roles: readonly StaticObjectMaterialTextureUseRole[],
+): string {
+	if (roles.length === 0) {
+		return "none";
+	}
+
+	return roles.map(createStructuredInteriorTextureRoleLayoutPart).join(",");
+}
+
+function createStructuredInteriorTextureRoleSchemaKey(
+	roles: readonly StaticObjectMaterialTextureUseRole[],
+): string {
+	if (roles.length === 0) {
+		return "none";
+	}
+
+	return roles
+		.map((role) => {
+			const detailSuffix =
+				role.role === "detail-overlay" ? `:tiling=${role.tiling}` : "";
+			return `${role.role}:${createStructuredInteriorTextureDataUseSchemaKey(role.dataUse)}${detailSuffix}`;
+		})
+		.join(",");
+}
+
+function createStructuredInteriorTextureRoleLayoutPart(
+	role: StaticObjectMaterialTextureUseRole,
+): string {
+	const detailSuffix =
+		role.role === "detail-overlay" ? `:tiling=${role.tiling}` : "";
+	return `${role.role}:${createMaterialTextureDataUseKey(role.dataUse)}${detailSuffix}`;
+}
+
+function createStructuredInteriorTextureDataUseSchemaKey(
+	dataUse: MaterialTextureDataUseIdentity,
+): string {
+	if (dataUse.kind === "palette-texture-use") {
+		return [
+			dataUse.kind,
+			`range:${dataUse.firstIndex}-${dataUse.indexCount}`,
+			dataUse.usage,
+		].join(":");
+	}
+
+	return [dataUse.kind, dataUse.usage].join(":");
+}
+
+function resolveDetailTextureTiling(plan: StaticObjectMaterialPlan): number {
+	const detailRole = plan.textureRoles.find(
+		(role) => role.role === "detail-overlay",
+	);
+	return detailRole?.role === "detail-overlay" ? detailRole.tiling : 1;
+}
+
+function formatMaterialScalar(value: number): string {
+	return value.toFixed(6);
+}
+
+function compareStructuredInteriorTriangleCandidates(
+	left: StructuredInteriorTriangleCandidate,
+	right: StructuredInteriorTriangleCandidate,
+): number {
+	return (
+		left.compatibilityKey.localeCompare(right.compatibilityKey) ||
+		left.surfaceId - right.surfaceId ||
+		left.triangle.polygonId - right.triangle.polygonId ||
+		left.triangle.firstVertex - right.triangle.firstVertex ||
+		left.materialEntryKey.localeCompare(right.materialEntryKey)
+	);
 }
 
 function createStructuredInteriorTextureUses(options: {
@@ -556,13 +727,16 @@ function createStructuredInteriorSamplingPolicy(): StaticBakeTextureSamplingPoli
 function bakeCellStructureGeometry(
 	envCell: LandblockEnvCellStaticFacts,
 	attachment: EnvCellCellStructureGeometryAttachment,
-	materialSlotBySurfaceId: ReadonlyMap<number, number>,
+	candidates: readonly StructuredInteriorTriangleCandidate[],
+	materialSlotByEntryKey: ReadonlyMap<string, number>,
 ): {
 	readonly positions: Float32Array;
 	readonly texCoords: Float32Array;
 	readonly materialSlotIndices: Float32Array;
 	readonly indices: Uint16Array | Uint32Array;
 	readonly sourceTriangleIds: readonly string[];
+	readonly triangleCount: number;
+	readonly vertexCount: number;
 } {
 	if (
 		attachment.triangleCount > 0 &&
@@ -576,67 +750,61 @@ function bakeCellStructureGeometry(
 	}
 
 	const matrix = buildAcPlacementMatrix(envCell.localPlacement, AC_UNIT_SCALE);
-	const positions = new Float32Array(attachment.vertexCount * 3);
-	const texCoords = new Float32Array(attachment.vertexCount * 2);
-	const materialSlotIndices = new Float32Array(attachment.vertexCount);
-	for (
-		let vertexIndex = 0;
-		vertexIndex < attachment.vertexCount;
-		vertexIndex += 1
-	) {
-		writeTransformedPosition({
-			matrix,
-			positions,
-			source: attachment.positions,
-			sourceVertexIndex: vertexIndex,
-			targetVertexIndex: vertexIndex,
-		});
-		writeTexCoord({
-			source: attachment.uvs,
-			sourceVertexIndex: vertexIndex,
-			target: texCoords,
-			targetVertexIndex: vertexIndex,
-		});
-	}
-	for (const triangle of attachment.triangles) {
-		const materialSlot =
-			triangle.surfaceId === null
-				? 0
-				: (materialSlotBySurfaceId.get(triangle.surfaceId) ?? 0);
-		materialSlotIndices[triangle.firstVertex] = materialSlot;
-		materialSlotIndices[triangle.firstVertex + 1] = materialSlot;
-		materialSlotIndices[triangle.firstVertex + 2] = materialSlot;
-	}
+	const vertexCount = candidates.length * 3;
+	const positions = new Float32Array(vertexCount * 3);
+	const texCoords = new Float32Array(vertexCount * 2);
+	const materialSlotIndices = new Float32Array(vertexCount);
+	const indices = createIndexArray(vertexCount, candidates.length * 3);
+	const sourceTriangleIds: string[] = [];
 
-	return {
-		indices: createTriangleIndices(attachment),
-		materialSlotIndices,
-		positions,
-		sourceTriangleIds: attachment.triangles.map(createSourceTriangleId),
-		texCoords,
-	};
-}
-
-function createTriangleIndices(
-	attachment: EnvCellCellStructureGeometryAttachment,
-): Uint16Array | Uint32Array {
-	const indices = createIndexArray(attachment.vertexCount, attachment.triangleCount * 3);
-	for (const [triangleIndex, triangle] of attachment.triangles.entries()) {
-		const firstVertex = triangle.firstVertex;
-		if (firstVertex + 2 >= attachment.vertexCount) {
+	for (const [candidateIndex, candidate] of candidates.entries()) {
+		const firstSourceVertex = candidate.triangle.firstVertex;
+		if (firstSourceVertex + 2 >= attachment.vertexCount) {
 			throw new Error(
 				`Env-cell cell-structure geometry ${describeEnvCellCellStructureGeometryIdentity(
 					attachment.identity,
-				)} triangle ${triangleIndex} references vertex ${firstVertex + 2}, but attachment has ${attachment.vertexCount} vertices.`,
+				)} triangle ${candidate.triangleIndex} references vertex ${firstSourceVertex + 2}, but attachment has ${attachment.vertexCount} vertices.`,
 			);
 		}
-		const offset = triangleIndex * 3;
-		indices[offset] = firstVertex;
-		indices[offset + 1] = firstVertex + 1;
-		indices[offset + 2] = firstVertex + 2;
+		const firstTargetVertex = candidateIndex * 3;
+		const materialSlot = materialSlotByEntryKey.get(candidate.materialEntryKey);
+		if (materialSlot === undefined) {
+			throw new Error(
+				`Structured interior material entry ${candidate.materialEntryKey} was not assigned a material slot.`,
+			);
+		}
+
+		for (let triangleVertex = 0; triangleVertex < 3; triangleVertex += 1) {
+			const sourceVertexIndex = firstSourceVertex + triangleVertex;
+			const targetVertexIndex = firstTargetVertex + triangleVertex;
+			writeTransformedPosition({
+				matrix,
+				positions,
+				source: attachment.positions,
+				sourceVertexIndex,
+				targetVertexIndex,
+			});
+			writeTexCoord({
+				source: attachment.uvs,
+				sourceVertexIndex,
+				target: texCoords,
+				targetVertexIndex,
+			});
+			materialSlotIndices[targetVertexIndex] = materialSlot;
+			indices[targetVertexIndex] = targetVertexIndex;
+		}
+		sourceTriangleIds.push(candidate.sourceTriangleId);
 	}
 
-	return indices;
+	return {
+		indices,
+		materialSlotIndices,
+		positions,
+		sourceTriangleIds,
+		texCoords,
+		triangleCount: candidates.length,
+		vertexCount,
+	};
 }
 
 function createIndexArray(
@@ -682,12 +850,14 @@ function requireGeometryAttachment(
 function createStructuredInteriorDrawUnitId(
 	work: ScheduledStaticWork,
 	envCell: LandblockEnvCellStaticFacts,
+	sliceId: string,
 ): string {
 	return [
 		work.workId,
 		"structured-interior",
 		formatHex32(envCell.identity.envCellId),
 		formatHex32(envCell.cellStructure.cellStructureId),
+		sliceId.replaceAll("/", ":"),
 	].join(":");
 }
 

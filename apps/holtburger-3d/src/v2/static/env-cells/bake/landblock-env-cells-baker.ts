@@ -7,7 +7,6 @@ import type {
 	StaticBakeBatchInput,
 	StaticBakeBatchItem,
 	StaticBakeBatchResult,
-	StaticBakeTextureSamplingPolicy,
 	StaticBakeTextureUse,
 	StaticBaker,
 	StaticDrawUnit,
@@ -28,17 +27,21 @@ import {
 	writeTransformedPosition,
 } from "../../bake/ac-placement-transform";
 import {
+	createMaterialTextureDataUseKey,
+	createStaticMaterialTextureSamplingPolicy,
+} from "../../bake/static-material-texture-policy";
+import {
 	createEnvCellCellStructureGeometryIdentity,
 	describeEnvCellCellStructureGeometryIdentity,
 } from "./landblock-env-cell-geometry-attachments";
 import { bakeStaticObjectCompatibility } from "../../objects/bake/static-object-compatibility-baker";
-import { createMaterialTextureDataUseKey } from "../../objects/bake/static-object-compatibility-partitioner";
 import { sliceStaticMaterialCompatibilityCandidates } from "../../objects/bake/static-material-compatibility-slicer";
 import {
 	createStructuredInteriorTextureUseId,
 	createStructuredInteriorMaterialCoverageReport,
 	getStructuredInteriorMaterialEntries,
 	planStructuredInteriorCellMaterials,
+	resolveStructuredInteriorPlanTextureWrapMode,
 	resolveStructuredInteriorMaterialSurfaceId,
 	type StructuredInteriorCellMaterialPlan,
 } from "./structured-interior-material-planner";
@@ -52,8 +55,6 @@ import {
 } from "../../objects/bake/static-object-renderability";
 
 const MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW = 8;
-
-type StructuredInteriorTextureWrapMode = "clamp" | "repeat";
 
 interface StructuredInteriorTriangleCandidate {
 	readonly compatibilityKey: string;
@@ -702,6 +703,9 @@ function createStructuredInteriorMaterialTableEntry(options: {
 		.map((role) => role.dataUse)
 		.find((dataUse) => dataUse.kind === "palette-texture-use");
 	const detailTextureUse = findTextureDataUse(options.plan, "rgba-detail");
+	const textureWrapMode = resolveStructuredInteriorPlanTextureWrapMode(
+		options.plan,
+	);
 	const indexedTextureFormat =
 		indexTextureUse?.kind === "prepared-render-surface-texture-use"
 			? indexTextureUse.usage === "index16"
@@ -726,11 +730,19 @@ function createStructuredInteriorMaterialTableEntry(options: {
 			options.plan.textureRoles.find((role) => role.role === "detail-overlay")
 				?.tiling ?? 1,
 		detailTextureUseId: detailTextureUse
-			? createStructuredInteriorTextureUseId(options.work, detailTextureUse)
+			? createStructuredInteriorTextureUseId({
+					dataUse: detailTextureUse,
+					work: options.work,
+					wrapMode: textureWrapMode,
+				})
 			: null,
 		indexedTextureFormat,
 		indexTextureUseId: indexTextureUse
-			? createStructuredInteriorTextureUseId(options.work, indexTextureUse)
+			? createStructuredInteriorTextureUseId({
+					dataUse: indexTextureUse,
+					work: options.work,
+					wrapMode: textureWrapMode,
+				})
 			: null,
 		materialColor: options.plan.color,
 		materialEmissiveColor: options.plan.emissiveColor,
@@ -740,14 +752,20 @@ function createStructuredInteriorMaterialTableEntry(options: {
 				? paletteTextureUse.firstIndex
 				: 0,
 		paletteTextureUseId: paletteTextureUse
-			? createStructuredInteriorTextureUseId(options.work, paletteTextureUse)
+			? createStructuredInteriorTextureUseId({
+					dataUse: paletteTextureUse,
+					work: options.work,
+					wrapMode: textureWrapMode,
+				})
 			: null,
 		primaryTextureUseId: primaryTextureUse
-			? createStructuredInteriorTextureUseId(options.work, primaryTextureUse)
+			? createStructuredInteriorTextureUseId({
+					dataUse: primaryTextureUse,
+					work: options.work,
+					wrapMode: textureWrapMode,
+				})
 			: null,
-		primaryTextureWrapMode: resolveStructuredInteriorTextureWrapMode(
-			options.plan,
-		),
+		primaryTextureWrapMode: textureWrapMode,
 		slot: options.slot,
 	};
 }
@@ -825,7 +843,7 @@ function createStructuredInteriorMaterialEntryKey(
 			...plan.color.map(formatMaterialScalar),
 			...plan.emissiveColor.map(formatMaterialScalar),
 		].join(",")}`,
-		`wrap:${resolveStructuredInteriorTextureWrapMode(plan)}`,
+		`wrap:${resolveStructuredInteriorPlanTextureWrapMode(plan)}`,
 		`roles:${createStructuredInteriorTextureRoleLayoutKey(plan.textureRoles)}`,
 		`alpha-test:${formatMaterialScalar(plan.alphaPolicy.alphaTest)}`,
 		`indexed-clip:${formatMaterialScalar(
@@ -927,10 +945,14 @@ function createStructuredInteriorTextureUses(options: {
 				if (!isCurrentlyStageableStaticObjectDataUse(role.dataUse)) {
 					continue;
 				}
-				const textureUseId = createStructuredInteriorTextureUseId(
-					options.work,
-					role.dataUse,
+				const textureWrapMode = resolveStructuredInteriorPlanTextureWrapMode(
+					plan,
 				);
+				const textureUseId = createStructuredInteriorTextureUseId({
+					dataUse: role.dataUse,
+					work: options.work,
+					wrapMode: textureWrapMode,
+				});
 				if (!drawUnit.textureUseIds.includes(textureUseId)) {
 					continue;
 				}
@@ -948,9 +970,10 @@ function createStructuredInteriorTextureUses(options: {
 				textureUsesById.set(textureUseId, {
 					domain: "landblock-env-cells",
 					ownerDrawUnitIds: [drawUnit.drawUnitId],
-					samplingPolicy: createStructuredInteriorSamplingPolicy(
-						role.dataUse,
-					),
+					samplingPolicy: createStaticMaterialTextureSamplingPolicy({
+						dataUse: role.dataUse,
+						wrapMode: textureWrapMode,
+					}),
 					source: role.dataUse,
 					staticBatchId: options.staticBatchId,
 					textureUseId,
@@ -960,43 +983,6 @@ function createStructuredInteriorTextureUses(options: {
 	}
 	return [...textureUsesById.values()].sort((left, right) =>
 		left.textureUseId.localeCompare(right.textureUseId),
-	);
-}
-
-function createStructuredInteriorSamplingPolicy(
-	dataUse: MaterialTextureDataUseIdentity,
-): StaticBakeTextureSamplingPolicy {
-	if (shouldRepeatStructuredInteriorTextureUse(dataUse)) {
-		return {
-			wrapS: "repeat",
-			wrapT: "repeat",
-		};
-	}
-
-	return {
-		wrapS: "clamp-to-edge",
-		wrapT: "clamp-to-edge",
-	};
-}
-
-function resolveStructuredInteriorTextureWrapMode(
-	plan: StaticObjectMaterialPlan,
-): StructuredInteriorTextureWrapMode {
-	return plan.textureRoles.some((role) =>
-		shouldRepeatStructuredInteriorTextureUse(role.dataUse),
-	)
-		? "repeat"
-		: "clamp";
-}
-
-function shouldRepeatStructuredInteriorTextureUse(
-	dataUse: MaterialTextureDataUseIdentity,
-): boolean {
-	return (
-		dataUse.kind === "prepared-render-surface-texture-use" &&
-		(dataUse.usage === "rgba-color" ||
-			dataUse.usage === "index8" ||
-			dataUse.usage === "index16")
 	);
 }
 

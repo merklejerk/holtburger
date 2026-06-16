@@ -9,11 +9,16 @@ import type {
 	StructuredInteriorMaterialPlanEntry,
 } from "../../contracts";
 import {
+	createMaterialTextureDataUseKey,
+	createStaticMaterialTextureUseId,
+	resolveRepeatedStaticMaterialPrimaryWrapMode,
+	type StaticMaterialTextureWrapMode,
+} from "../../bake/static-material-texture-policy";
+import {
 	classifyStaticObjectMaterial,
 	type StaticObjectMaterialFallbackReason,
 	type StaticObjectMaterialPlan,
 } from "../../objects/bake/static-object-material-planner";
-import { createMaterialTextureDataUseKey } from "../../objects/bake/static-object-compatibility-partitioner";
 import { isRenderableStaticObjectMaterialPlan } from "../../objects/bake/static-object-renderability";
 
 export interface StructuredInteriorCellMaterialPlan {
@@ -71,6 +76,8 @@ export function planStructuredInteriorCellMaterials(options: {
 				material,
 				payload: options.payload,
 			});
+			const textureWrapMode =
+				resolveStructuredInteriorPlanTextureWrapMode(plan);
 			materialPlansBySurfaceId.set(surface.surfaceId, plan);
 			return {
 				diagnostics: plan.fallbackReasons.map((reason) =>
@@ -91,7 +98,11 @@ export function planStructuredInteriorCellMaterials(options: {
 				slotId: surface.slotId,
 				surfaceId: surface.surfaceId,
 				textureUseIds: plan.textureRoles.map((role) =>
-					createStructuredInteriorTextureUseId(options.work, role.dataUse),
+					createStructuredInteriorTextureUseId({
+						dataUse: role.dataUse,
+						work: options.work,
+						wrapMode: textureWrapMode,
+					}),
 				),
 			};
 		})
@@ -106,14 +117,26 @@ export function planStructuredInteriorCellMaterials(options: {
 }
 
 export function createStructuredInteriorTextureUseId(
-	work: ScheduledStaticWork,
-	dataUse: Parameters<typeof createMaterialTextureDataUseKey>[0],
+	options: {
+		readonly dataUse: Parameters<typeof createMaterialTextureDataUseKey>[0];
+		readonly work: ScheduledStaticWork;
+		readonly wrapMode: StaticMaterialTextureWrapMode;
+	},
 ): string {
-	return [
-		work.workId,
-		"structured-interior-texture",
-		createMaterialTextureDataUseKey(dataUse),
-	].join(":");
+	return createStaticMaterialTextureUseId({
+		dataUse: options.dataUse,
+		textureUseNamespace: "structured-interior-texture",
+		workId: options.work.workId,
+		wrapMode: options.wrapMode,
+	});
+}
+
+export function resolveStructuredInteriorPlanTextureWrapMode(
+	plan: StaticObjectMaterialPlan,
+): StaticMaterialTextureWrapMode {
+	return resolveRepeatedStaticMaterialPrimaryWrapMode(
+		plan.textureRoles.map((role) => role.dataUse),
+	);
 }
 
 function classifyStructuredInteriorMaterial(options: {

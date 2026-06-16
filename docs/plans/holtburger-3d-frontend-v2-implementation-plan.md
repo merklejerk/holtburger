@@ -945,7 +945,7 @@ Failed to close:
 
 ### Phase 13B0a: Static Texture Sampling Policy Course Correction
 
-Status: planned; immediate next phase before 13B0b and 13B1.
+Status: complete on 2026-06-16.
 
 Purpose: replace static-domain blanket clamp sampling with an explicit role-aware static texture sampling policy before broader material-adapter sharing.
 
@@ -1017,6 +1017,23 @@ Blind spots:
 - Detail overlay repeat policy may expose existing static-object visual differences. That should be treated as a real correction and visually checked, not papered over.
 - Palette texture clamp is non-negotiable unless the palette atlas model changes; repeating palette rows would be nonsense.
 - `rgba-mask` may be sampled by alpha/material logic in future phases. Keep it clamp until there is evidence for repeat.
+
+Implementation notes:
+
+- Added a neutral static material texture policy helper in `static/bake/static-material-texture-policy.ts`.
+- Static material texture-use identity is now policy-qualified as `source data + semantic namespace + sampling policy`. This intentionally changes static material texture-use ids so clamp/repeat consumers of the same source cannot collapse in `textureUsesById`.
+- Static objects now derive texture-use sampling policy from material wrap and data-use role instead of blanket clamp:
+  - base `rgba-color` and `index8`/`index16` follow the material entry wrap mode;
+  - detail overlays repeat;
+  - palette, mask, and raw data clamp.
+- Structured interiors now use the same helper for texture-use ids and sampling policy, and the temporary local structured-interior repeat/clamp helpers were removed.
+- The structured-interior material planner no longer imports the static-object partitioner just to create texture-use ids; texture-use identity now lives in neutral static bake code.
+- Focused policy/static-object/env-cell tests, `npm run check`, `npm run lint:ts`, and full `npm run test:ts` passed.
+
+Failed to close / follow-up:
+
+- I did not run a live harness visual pass for static detail overlays or structured-interior wrap after this code pass. The automated coverage verifies the policy and IDs, but visual parity still needs a manual look in the harness.
+- Phase 13B0b should still extract the broader shared static material adapter. This phase only centralized sampling/id policy; material-table construction is still duplicated between static objects and structured interiors.
 
 ### Phase 13B0b: Shared Static Material Adapter Course Correction
 

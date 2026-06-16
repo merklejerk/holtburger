@@ -2,7 +2,6 @@ import type {
 	PreparedRgbaRenderSurfaceTextureUseIdentity,
 	RegionDetailRoleFacts,
 	RenderSurfaceIdentity,
-	StaticMaterialSourceIdentity,
 	StaticObjectTextureRefFacts,
 	SurfaceTextureIdentity,
 } from "../contracts";
@@ -11,7 +10,12 @@ import type {
 	StaticMaterialPlan,
 	StaticMaterialTextureUseRole,
 } from "../objects/bake/static-object-material-planner";
-import { createMaterialTextureDataUseKey } from "./static-material-texture-policy";
+import {
+	createStaticMaterialBucketKey,
+	createStaticMaterialFallbackReason,
+	findStaticRenderSurfaceRef,
+	findStaticSurfaceTextureRef,
+} from "./static-material-plan-primitives";
 
 export type StaticMaterialDetailRoleDomain =
 	| "outdoor-buildings"
@@ -59,7 +63,7 @@ export function composeStaticMaterialDetailRole(options: {
 			...options.plan,
 			fallbackReasons: [
 				...options.plan.fallbackReasons,
-				createFallbackReason({
+				createStaticMaterialFallbackReason({
 					code: "detail-overlay-render-deferred",
 					material: options.plan.material,
 					message:
@@ -89,7 +93,7 @@ export function composeStaticMaterialDetailRole(options: {
 
 	return {
 		...options.plan,
-		materialBucketKey: createMaterialBucketKey({
+		materialBucketKey: createStaticMaterialBucketKey({
 			alphaPolicy: options.plan.alphaPolicy.mode,
 			family: options.plan.family,
 			material: options.plan.material,
@@ -131,7 +135,7 @@ function createStaticMaterialDetailRolePlan(
 			fadeFar: role.fadeFar,
 			fadeNear: role.fadeNear,
 			fallbackReasons: [
-				createFallbackReason({
+				createStaticMaterialFallbackReason({
 					code: "detail-overlay-render-deferred",
 					message:
 						"Static material detail overlay role is not renderable for this static family yet.",
@@ -146,15 +150,15 @@ function createStaticMaterialDetailRolePlan(
 		};
 	}
 
-	const textureRef = findSurfaceTextureRef(textureRefs, role.texture);
+	const textureRef = findStaticSurfaceTextureRef(textureRefs, role.texture);
 	const renderSurface = textureRef?.renderSurface ?? null;
-	if (!renderSurface || !findRenderSurfaceRef(textureRefs, renderSurface)) {
+	if (!renderSurface || !findStaticRenderSurfaceRef(textureRefs, renderSurface)) {
 		return {
 			dataUse: null,
 			fadeFar: role.fadeFar,
 			fadeNear: role.fadeNear,
 			fallbackReasons: [
-				createFallbackReason({
+				createStaticMaterialFallbackReason({
 					code: "missing-detail-render-surface",
 					message:
 						"Static material detail overlay texture has no resolved render surface.",
@@ -183,70 +187,5 @@ function createStaticMaterialDetailRolePlan(
 		role: role.role,
 		texture: role.texture,
 		tiling: role.tiling,
-	};
-}
-
-function findSurfaceTextureRef(
-	textureRefs: readonly StaticObjectTextureRefFacts[],
-	texture: SurfaceTextureIdentity,
-): StaticObjectTextureRefFacts | null {
-	return (
-		textureRefs.find(
-			(ref) =>
-				ref.role === "surface-texture" &&
-				ref.texture.surfaceTextureId === texture.surfaceTextureId,
-		) ?? null
-	);
-}
-
-function findRenderSurfaceRef(
-	textureRefs: readonly StaticObjectTextureRefFacts[],
-	renderSurface: RenderSurfaceIdentity,
-): StaticObjectTextureRefFacts | null {
-	return (
-		textureRefs.find(
-			(ref) =>
-				ref.role === "render-surface" &&
-				ref.renderSurface?.renderSurfaceId === renderSurface.renderSurfaceId,
-		) ?? null
-	);
-}
-
-function createMaterialBucketKey(options: {
-	readonly family: StaticMaterialPlan["family"];
-	readonly material: StaticMaterialSourceIdentity;
-	readonly textureRoles: readonly StaticMaterialTextureUseRole[];
-	readonly alphaPolicy: StaticMaterialPlan["alphaPolicy"]["mode"];
-	readonly pass: StaticMaterialPlan["pass"];
-}): string {
-	return [
-		options.family,
-		options.pass,
-		options.alphaPolicy,
-		createMaterialSourceKey(options.material),
-		options.textureRoles
-			.map((role) => createMaterialTextureDataUseKey(role.dataUse))
-			.join(","),
-	].join("|");
-}
-
-function createMaterialSourceKey(material: StaticMaterialSourceIdentity): string {
-	return `${material.materialId}`;
-}
-
-function createFallbackReason(options: {
-	readonly code: StaticMaterialFallbackReason["code"];
-	readonly message: string;
-	readonly material?: StaticMaterialSourceIdentity | null;
-	readonly texture?: SurfaceTextureIdentity | null;
-	readonly renderSurface?: RenderSurfaceIdentity | null;
-}): StaticMaterialFallbackReason {
-	return {
-		code: options.code,
-		material: options.material ?? null,
-		message: options.message,
-		palette: null,
-		renderSurface: options.renderSurface ?? null,
-		texture: options.texture ?? null,
 	};
 }

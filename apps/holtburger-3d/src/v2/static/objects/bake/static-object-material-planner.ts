@@ -19,6 +19,13 @@ import {
 	planStaticMaterialDetailRoles,
 	type StaticMaterialDetailRolePlan,
 } from "../../bake/static-material-detail-roles";
+import {
+	createStaticMaterialBucketKey,
+	createStaticMaterialFallbackReason,
+	createStaticMaterialSourceKey,
+	findStaticRenderSurfaceRef,
+	findStaticSurfaceTextureRef,
+} from "../../bake/static-material-plan-primitives";
 
 const BYTE_MAX = 255;
 const LEGACY_OPACITY_BYTE_SCALE = 255;
@@ -278,7 +285,7 @@ export function classifyStaticObjectMaterial(
 		pass: resolveMaterialPass(behavior),
 	};
 	const unsupportedFlagReasons = behavior.unsupportedSurfaceFlags.map((flag) =>
-		createFallbackReason({
+		createStaticMaterialFallbackReason({
 			code: "unsupported-surface-flag",
 			material: context.material.identity,
 			message: `Static material uses unsupported surface flag ${flag}.`,
@@ -291,7 +298,7 @@ export function classifyStaticObjectMaterial(
 			fallbackReasons: unsupportedFlagReasons,
 			family:
 				unsupportedFlagReasons.length === 0 ? "flat-color" : "unsupported",
-			materialBucketKey: createMaterialBucketKey({
+			materialBucketKey: createStaticMaterialBucketKey({
 				alphaPolicy: behavior.alphaPolicy.mode,
 				family:
 					unsupportedFlagReasons.length === 0 ? "flat-color" : "unsupported",
@@ -307,12 +314,12 @@ export function classifyStaticObjectMaterial(
 		};
 	}
 
-	const textureRef = findSurfaceTextureRef(
+	const textureRef = findStaticSurfaceTextureRef(
 		context.textureRefs,
 		context.material.source.texture,
 	);
 	if (!textureRef?.renderSurface) {
-		const reason = createFallbackReason({
+		const reason = createStaticMaterialFallbackReason({
 			code: "missing-render-surface",
 			material: context.material.identity,
 			message: "Static textured material has no selected render surface.",
@@ -321,12 +328,12 @@ export function classifyStaticObjectMaterial(
 		return createUnsupportedPlan(basePlan, [reason, ...unsupportedFlagReasons]);
 	}
 
-	const renderSurfaceRef = findRenderSurfaceRef(
+	const renderSurfaceRef = findStaticRenderSurfaceRef(
 		context.textureRefs,
 		textureRef.renderSurface,
 	);
 	if (!renderSurfaceRef) {
-		const reason = createFallbackReason({
+		const reason = createStaticMaterialFallbackReason({
 			code: "missing-render-surface",
 			material: context.material.identity,
 			message:
@@ -344,7 +351,7 @@ export function classifyStaticObjectMaterial(
 			context.material.source.palette ??
 			renderSurfaceRef.palette;
 		if (!palette) {
-			const reason = createFallbackReason({
+			const reason = createStaticMaterialFallbackReason({
 				code: "missing-palette",
 				material: context.material.identity,
 				message:
@@ -359,7 +366,7 @@ export function classifyStaticObjectMaterial(
 		}
 		const paletteSource = findPaletteSource(context.paletteSources, palette);
 		if (!paletteSource) {
-			const reason = createFallbackReason({
+			const reason = createStaticMaterialFallbackReason({
 				code: "missing-palette",
 				material: context.material.identity,
 				message:
@@ -379,7 +386,7 @@ export function classifyStaticObjectMaterial(
 		)
 			? []
 			: [
-					createFallbackReason({
+					createStaticMaterialFallbackReason({
 						code: "translucent-render-deferred",
 						material: context.material.identity,
 						message:
@@ -443,7 +450,7 @@ export function classifyStaticObjectMaterial(
 	const translucentReasons = isSupportedTransparentStaticBlend(behavior)
 		? []
 		: [
-				createFallbackReason({
+				createStaticMaterialFallbackReason({
 					code: "translucent-render-deferred",
 					material: context.material.identity,
 					message:
@@ -496,7 +503,7 @@ function createTexturePlan(
 ): StaticMaterialPlan {
 	return {
 		...options,
-		materialBucketKey: createMaterialBucketKey({
+		materialBucketKey: createStaticMaterialBucketKey({
 			alphaPolicy: options.alphaPolicy.mode,
 			family: options.family,
 			material: options.material,
@@ -588,12 +595,6 @@ function sortPaletteViews(
 	);
 }
 
-function createStaticMaterialSourceKey(
-	material: StaticMaterialSourceIdentity,
-): string {
-	return formatHex32(material.materialId);
-}
-
 function formatHex32(value: number): string {
 	return value.toString(16).padStart(8, "0");
 }
@@ -615,7 +616,7 @@ function createUnsupportedPlan(
 		...basePlan,
 		fallbackReasons,
 		family: "unsupported",
-		materialBucketKey: createMaterialBucketKey({
+		materialBucketKey: createStaticMaterialBucketKey({
 			alphaPolicy: basePlan.alphaPolicy.mode,
 			family: "unsupported",
 			material: basePlan.material,
@@ -843,48 +844,6 @@ function resolveMaterialEmissiveColor(
 	];
 }
 
-function findSurfaceTextureRef(
-	textureRefs: readonly StaticObjectTextureRefFacts[],
-	texture: SurfaceTextureIdentity,
-): Extract<
-	StaticObjectTextureRefFacts,
-	{ readonly role: "surface-texture" }
-> | null {
-	return (
-		textureRefs.find(
-			(
-				ref,
-			): ref is Extract<
-				StaticObjectTextureRefFacts,
-				{ readonly role: "surface-texture" }
-			> =>
-				ref.role === "surface-texture" &&
-				ref.texture.surfaceTextureId === texture.surfaceTextureId,
-		) ?? null
-	);
-}
-
-function findRenderSurfaceRef(
-	textureRefs: readonly StaticObjectTextureRefFacts[],
-	renderSurface: RenderSurfaceIdentity,
-): Extract<
-	StaticObjectTextureRefFacts,
-	{ readonly role: "render-surface" }
-> | null {
-	return (
-		textureRefs.find(
-			(
-				ref,
-			): ref is Extract<
-				StaticObjectTextureRefFacts,
-				{ readonly role: "render-surface" }
-			> =>
-				ref.role === "render-surface" &&
-				ref.renderSurface.renderSurfaceId === renderSurface.renderSurfaceId,
-		) ?? null
-	);
-}
-
 function indexedTextureFormat(formatRaw: number): "p8" | "index16" | null {
 	switch (formatRaw) {
 		case PIXEL_FORMAT_P8:
@@ -894,76 +853,6 @@ function indexedTextureFormat(formatRaw: number): "p8" | "index16" | null {
 		default:
 			return null;
 	}
-}
-
-function createMaterialBucketKey(options: {
-	readonly family: StaticObjectMaterialFamily;
-	readonly material: StaticMaterialSourceIdentity;
-	readonly pass: StaticObjectMaterialPass;
-	readonly alphaPolicy: StaticObjectMaterialAlphaPolicy["mode"];
-	readonly textureRoles: readonly StaticMaterialTextureUseRole[];
-}): string {
-	return [
-		`family:${options.family}`,
-		"domain:static-objects",
-		`pass:${options.pass}`,
-		`alpha:${options.alphaPolicy}`,
-		`material:${options.material.materialId.toString(16).padStart(8, "0")}`,
-		`roles:${createTextureRoleSignature(options.textureRoles)}`,
-	].join("|");
-}
-
-function createTextureRoleSignature(
-	roles: readonly StaticMaterialTextureUseRole[],
-): string {
-	if (roles.length === 0) {
-		return "none";
-	}
-
-	return roles
-		.map((role) => `${role.role}:${createTextureRoleDataUseSignature(role)}`)
-		.join(",");
-}
-
-function createTextureRoleDataUseSignature(
-	role: StaticMaterialTextureUseRole,
-): string {
-	const detailSuffix =
-		role.role === "detail-overlay" ? `:tiling=${role.tiling}` : "";
-	if (role.dataUse.kind === "palette-texture-use") {
-		return (
-			[
-				formatHex32(role.dataUse.palette.paletteId),
-				`${role.dataUse.firstIndex}-${role.dataUse.indexCount}`,
-				role.dataUse.usage,
-			].join(":") + detailSuffix
-		);
-	}
-
-	return (
-		[
-			formatHex32(role.dataUse.renderSurface.renderSurfaceId),
-			role.dataUse.usage,
-		].join(":") + detailSuffix
-	);
-}
-
-function createFallbackReason(options: {
-	readonly code: StaticMaterialFallbackReason["code"];
-	readonly message: string;
-	readonly material?: StaticMaterialSourceIdentity | null;
-	readonly texture?: SurfaceTextureIdentity | null;
-	readonly renderSurface?: RenderSurfaceIdentity | null;
-	readonly palette?: PaletteIdentity | null;
-}): StaticMaterialFallbackReason {
-	return {
-		code: options.code,
-		material: options.material ?? null,
-		message: options.message,
-		palette: options.palette ?? null,
-		renderSurface: options.renderSurface ?? null,
-		texture: options.texture ?? null,
-	};
 }
 
 function normalizeLegacyOpacity(translucency: number): number {

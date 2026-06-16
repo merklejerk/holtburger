@@ -1271,7 +1271,7 @@ Verification:
 
 ### Phase 13B1a-1: Scope-Owned And Resource-Keyed Static Eviction Course Correction
 
-Status: planned.
+Status: complete as of 2026-06-16.
 
 Purpose: make static eviction deltas carry semantic scope ownership and typed renderer-resource removals explicitly, so runtime records prune by scope while renderer resources prune by resource key instead of calcifying the model around draw units only.
 
@@ -1287,7 +1287,7 @@ Deliverables:
 - Add a typed static scope eviction key to the static coordinator/runtime contract. Prefer a scope-owner shape such as `{ domain: StaticDomain; scopeKey: string; scope: StaticResolverScope }` so work-owned peer records can match their owner without parsing desired-key strings.
 - Add a typed static resource key to the static coordinator/runtime contract. Initial shape can be only `{ kind: "draw-unit"; drawUnitId: string }`, but the union should be named broadly enough to grow into portal apertures, light fields, and effect batches.
 - Extend `StaticCoordinatorCommitDelta` with `removedScopes`/`removedStaticScopes` and `removedResources`/`removedStaticResources`.
-- Treat top-level `removedDrawUnitIds` as compatibility debt. Prefer replacing it with resource-keyed removal in the coordinator/runtime contract if the churn is contained; otherwise keep it as a derived compatibility helper for renderer/texture paths during this phase and schedule its deletion.
+- Replace top-level `removedDrawUnitIds` in the coordinator/runtime commit contract with resource-keyed removal. Renderer-local `StaticResidencyDelta` may still expose draw-unit ids because it is currently the concrete WebGL resource boundary.
 - Emit removed scope keys from coordinator demand eviction when active work scopes fall out of demand, even when the scope currently has zero resident draw units. Metadata-only and failed-before-draw scopes still need an explicit semantic cleanup signal.
 - Emit removed draw-unit resource keys from coordinator demand eviction for today's resident draw-unit resources.
 - Update materialization to translate draw-unit resource keys through source-to-materialized draw-unit mappings while passing non-draw-unit resource keys and removed scope keys through unchanged.
@@ -1320,6 +1320,20 @@ Dry-run notes:
 - `StaticSceneQuery` should remove work-owned committed records by matching `record.owner.domain + record.owner.scopeKey` against removed scope keys. Draw-unit-owned records should match `{ kind: "draw-unit"; drawUnitId }` resource keys.
 - Existing renderer and texture-manager consumers can ignore `removedScopes`; they should consume only draw-unit resource keys. If their public input still says `removedDrawUnitIds`, derive it from `removedResources` at the runtime boundary as temporary compatibility.
 - Tests to update: coordinator eviction delta assertions need `removedScopes` and `removedResources`; static materializer helper deltas need empty defaults; static-scene query needs scope-removal and draw-unit-resource-removal tests; client-runtime can assert renderer deltas remain unchanged while query cleanup happens through the commit stream.
+
+Implementation notes:
+
+- Added `StaticScopeOwnerKey`, `StaticResourceKey`, and `collectStaticDrawUnitResourceIds` to the static coordinator/runtime contract. The only current resource kind is `draw-unit`; portal aperture/light/effect resource kinds remain future work.
+- `StaticCoordinator` now emits scope removals when active work falls out of demand, even if no resident draw units exist. Resident draw-unit eviction emits draw-unit resource keys only; the coordinator commit contract no longer carries `removedDrawUnitIds`.
+- Static materialization now remaps removed draw-unit resource keys through source-to-materialized draw-unit mappings, so fine-split static object draw units still remove the correct renderer/query resources.
+- `TextureManager` consumes draw-unit resource keys from coordinator deltas. `ClientRuntimeImpl` uses source resource keys for materialized draw-unit mapping cleanup, then passes materialized resource keys and removed scopes into `StaticSceneQuery`.
+- `StaticSceneQuery` now keys work-owned committed peer records by `domain + scopeKey` rather than `workId`, removes work-owned committed records by explicit scope removals, and removes draw-unit-owned committed records by materialized resource keys.
+- Added tests for scope-only eviction, draw-unit resource remapping after materialization splitting, work-owned committed env-cell record cleanup by removed scope, and draw-unit-owned committed record cleanup by removed materialized resource key.
+
+Cleanup notes:
+
+- `removedDrawUnitIds` was removed from `StaticCoordinatorCommitDelta` and from `StaticSceneQuery` peer-record cleanup inputs. Static coordinator/runtime lifecycle is now resource-keyed.
+- `removedDrawUnitIds` still exists on renderer-local `StaticResidencyDelta`, where materialization derives concrete WebGL draw-unit removals from materialized `removedResources`. That is no longer coordinator compatibility debt; it is the current renderer resource API.
 
 ### Phase 13B1b: Position-To-Residency Query API
 

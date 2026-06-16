@@ -221,7 +221,8 @@ describe("V2 static coordinator", () => {
 			{
 				addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
 				materialCoverage: [],
-				removedDrawUnitIds: [],
+				removedResources: [],
+				removedScopes: [],
 				revision: 1,
 				staticAuthoredDynamicSeeds: [],
 				staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
@@ -247,7 +248,14 @@ describe("V2 static coordinator", () => {
 		expect(deltas.at(-1)).toEqual({
 			addedDrawUnits: [],
 			materialCoverage: [],
-			removedDrawUnitIds: ["terrain-a"],
+			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
+			removedScopes: [
+				{
+					domain: "outdoor-terrain",
+					scope: { kind: "landblock", landblockId: 0xda55ffff },
+					scopeKey: "landblock:da55ffff",
+				},
+			],
 			revision: 2,
 			staticAuthoredDynamicSeeds: [],
 			staticBatchId: "static-batch:2:evict",
@@ -258,6 +266,52 @@ describe("V2 static coordinator", () => {
 			textureUses: [],
 		});
 		expect(coordinator.createSnapshot().committedDrawUnits).toBe(0);
+	});
+
+	it("emits scope eviction deltas for active work without resident draw units", () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+		const deltas: StaticCoordinatorCommitDelta[] = [];
+		coordinator.subscribeCommits((delta) => deltas.push(delta));
+
+		coordinator.requestStaticDemand(createSingleTerrainDemand(0xda55ffff));
+		coordinator.requestStaticDemand({
+			location: null,
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: -1,
+				terrain: -1,
+			},
+		});
+
+		expect(deltas).toEqual([
+			{
+				addedDrawUnits: [],
+				materialCoverage: [],
+				removedResources: [],
+				removedScopes: [
+					{
+						domain: "outdoor-terrain",
+						scope: { kind: "landblock", landblockId: 0xda55ffff },
+						scopeKey: "landblock:da55ffff",
+					},
+				],
+				revision: 2,
+				staticAuthoredDynamicSeeds: [],
+				staticBatchId: "static-batch:2:evict",
+				staticPortalInteriorRecords: [],
+				staticSourceMappings: [],
+				staticSpatialRecords: [],
+				staticVisibilityRecords: [],
+				textureUses: [],
+			},
+		]);
 	});
 
 	it("rejects ownerless committed draw units instead of inferring batch ownership", async () => {
@@ -678,8 +732,7 @@ describe("V2 static coordinator", () => {
 		expect(baker.pendingInputs).toHaveLength(1);
 		expect(baker.pendingInputs[0]).toMatchObject({
 			domain: "landblock-env-cells",
-			staticBatchId:
-				"static-batch:1:landblock-env-cells:landblock:da55ffff:1",
+			staticBatchId: "static-batch:1:landblock-env-cells:landblock:da55ffff:1",
 		});
 		expect(sourcePayloads).toMatchObject([
 			{
@@ -717,7 +770,9 @@ describe("V2 static coordinator", () => {
 			committed: 1,
 			committedDrawUnits: 0,
 		});
-		expect(coordinator.createSnapshot().activeWork[0]?.status).toBe("committed");
+		expect(coordinator.createSnapshot().activeWork[0]?.status).toBe(
+			"committed",
+		);
 	});
 
 	it("filters typed work-owned env-cell peer records for superseded batch members", async () => {
@@ -857,10 +912,7 @@ describe("V2 static coordinator", () => {
 
 		baker.complete(work?.workId ?? "", {
 			drawUnits: [
-				createStructuredInteriorDrawUnit(
-					"structured-interior-a",
-					0xda55ffff,
-				),
+				createStructuredInteriorDrawUnit("structured-interior-a", 0xda55ffff),
 			],
 		});
 		await flushPromises();
@@ -877,7 +929,8 @@ describe("V2 static coordinator", () => {
 					kind: "structured-interior-geometry",
 				},
 			],
-			removedDrawUnitIds: [],
+			removedResources: [],
+			removedScopes: [],
 		});
 
 		coordinator.requestStaticDemand({
@@ -895,7 +948,16 @@ describe("V2 static coordinator", () => {
 		});
 		expect(deltas.at(-1)).toMatchObject({
 			addedDrawUnits: [],
-			removedDrawUnitIds: ["structured-interior-a"],
+			removedResources: [
+				{ drawUnitId: "structured-interior-a", kind: "draw-unit" },
+			],
+			removedScopes: [
+				{
+					domain: "landblock-env-cells",
+					scope: { kind: "landblock", landblockId: 0xda55ffff },
+					scopeKey: "landblock:da55ffff",
+				},
+			],
 		});
 	});
 });
@@ -1072,7 +1134,9 @@ function createMaterialCoverage(
 	};
 }
 
-function createEnvCellSpatialRecord(work: ScheduledStaticWork): StaticSpatialRecord {
+function createEnvCellSpatialRecord(
+	work: ScheduledStaticWork,
+): StaticSpatialRecord {
 	return {
 		cellStructure: {
 			cellStructureId: 0x0d000001,

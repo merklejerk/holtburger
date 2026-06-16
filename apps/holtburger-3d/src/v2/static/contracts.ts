@@ -43,6 +43,27 @@ export interface StaticResolverJob {
 	readonly domain: StaticDomain;
 }
 
+export interface StaticScopeOwnerKey {
+	readonly domain: StaticDomain;
+	readonly scope: StaticResolverScope;
+	readonly scopeKey: string;
+}
+
+export type StaticResourceKey = StaticDrawUnitResourceKey;
+
+export interface StaticDrawUnitResourceKey {
+	readonly kind: "draw-unit";
+	readonly drawUnitId: string;
+}
+
+export function collectStaticDrawUnitResourceIds(
+	resources: readonly StaticResourceKey[],
+): readonly string[] {
+	return resources.flatMap((resource) =>
+		resource.kind === "draw-unit" ? [resource.drawUnitId] : [],
+	);
+}
+
 export interface ScheduledStaticWork {
 	readonly workId: string;
 	readonly revision: number;
@@ -852,7 +873,8 @@ export interface StaticEnvCellSourceMappingRecord {
 	readonly surfaces: readonly LandblockEnvCellSurfaceFacts[];
 }
 
-export type StaticAuthoredDynamicSeedRecord = StaticEnvCellStaticObjectSeedRecord;
+export type StaticAuthoredDynamicSeedRecord =
+	StaticEnvCellStaticObjectSeedRecord;
 
 export interface StaticEnvCellStaticObjectSeedRecord {
 	readonly kind: "env-cell-static-object-seed";
@@ -1129,7 +1151,11 @@ export interface StructuredInteriorMaterialPlanEntry {
 	readonly slotId: number;
 	readonly surfaceId: number;
 	readonly material: StaticMaterialSourceIdentity;
-	readonly family: "flat-color" | "indexed-paletted" | "texture-rgba" | "unsupported";
+	readonly family:
+		| "flat-color"
+		| "indexed-paletted"
+		| "texture-rgba"
+		| "unsupported";
 	readonly pass: StaticObjectMaterialPass;
 	readonly outcome: StaticMaterialRenderOutcome;
 	readonly textureUseIds: readonly string[];
@@ -1326,7 +1352,8 @@ export interface StaticCoordinatorSnapshot {
 export interface StaticCoordinatorCommitDelta {
 	readonly staticBatchId: string;
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
-	readonly removedDrawUnitIds: readonly string[];
+	readonly removedResources: readonly StaticResourceKey[];
+	readonly removedScopes: readonly StaticScopeOwnerKey[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly staticSpatialRecords: readonly StaticSpatialRecord[];

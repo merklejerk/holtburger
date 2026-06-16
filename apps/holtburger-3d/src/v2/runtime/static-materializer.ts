@@ -5,6 +5,7 @@ import {
 	MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
 	MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
 } from "../renderer/types";
+import { collectStaticDrawUnitResourceIds } from "../static/contracts";
 import type {
 	StaticResidencyDelta,
 	TextureDrawUnitBinding,
@@ -18,8 +19,10 @@ import type {
 	StaticObjectSourceMappingCoverage,
 	StaticAuthoredDynamicSeedRecord,
 	StaticPortalInteriorRecord,
+	StaticResourceKey,
 	StaticSourceMappingRecord,
 	StaticSpatialRecord,
+	StaticScopeOwnerKey,
 	StaticVisibilityRecord,
 } from "../static/contracts";
 
@@ -34,6 +37,8 @@ export interface StaticMaterializationInput {
 
 export interface StaticMaterializationResult {
 	readonly drawUnitIdMappings: readonly StaticMaterializedDrawUnitIdMapping[];
+	readonly removedResources: readonly StaticResourceKey[];
+	readonly removedScopes: readonly StaticScopeOwnerKey[];
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly staticDelta: StaticResidencyDelta;
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
@@ -64,16 +69,19 @@ export function materializeStaticCommit(
 		finePartitioned.drawUnits,
 		textureUpdate?.drawUnitBindings ?? [],
 	);
+	const removedResources = materializeRemovedStaticResources(
+		input.commit.removedResources,
+		input.materializedDrawUnitIdsBySourceDrawUnitId,
+	);
 
 	return {
 		drawUnitIdMappings: finePartitioned.drawUnitIdMappings,
+		removedResources,
+		removedScopes: input.commit.removedScopes,
 		...materializeStaticPeerRecords(input.commit, finePartitioned),
 		staticDelta: {
 			addedDrawUnits: finePartitioned.drawUnits,
-			removedDrawUnitIds: expandRemovedDrawUnitIds(
-				input.commit.removedDrawUnitIds,
-				input.materializedDrawUnitIdsBySourceDrawUnitId,
-			),
+			removedDrawUnitIds: collectStaticDrawUnitResourceIds(removedResources),
 			revision: input.commit.revision,
 		},
 		textureUpdate,
@@ -171,7 +179,9 @@ function materializeStaticPeerRecords(
 }
 
 function isOwnedByAnyDrawUnit(
-	record: { readonly owner: { readonly kind: string; readonly drawUnitId?: string } },
+	record: {
+		readonly owner: { readonly kind: string; readonly drawUnitId?: string };
+	},
 	drawUnitIds: ReadonlySet<string>,
 ): boolean {
 	return (
@@ -721,19 +731,24 @@ function getMaxStaticRolePageSlots(kind: StaticRolePageKind): number {
 	}
 }
 
-function expandRemovedDrawUnitIds(
-	removedDrawUnitIds: readonly string[],
+function materializeRemovedStaticResources(
+	removedResources: readonly StaticResourceKey[],
 	materializedDrawUnitIdsBySourceDrawUnitId:
 		| ReadonlyMap<string, readonly string[]>
 		| undefined,
-): readonly string[] {
+): readonly StaticResourceKey[] {
 	if (!materializedDrawUnitIdsBySourceDrawUnitId) {
-		return removedDrawUnitIds;
+		return removedResources;
 	}
 
-	return removedDrawUnitIds.flatMap(
-		(drawUnitId) =>
-			materializedDrawUnitIdsBySourceDrawUnitId.get(drawUnitId) ?? [drawUnitId],
+	return removedResources.flatMap((resource) =>
+		resource.kind === "draw-unit"
+			? (
+					materializedDrawUnitIdsBySourceDrawUnitId.get(
+						resource.drawUnitId,
+					) ?? [resource.drawUnitId]
+				).map((drawUnitId) => ({ drawUnitId, kind: "draw-unit" as const }))
+			: [resource],
 	);
 }
 

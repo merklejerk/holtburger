@@ -4,6 +4,7 @@ import type {
 	LandblockEnvCellStaticFacts,
 	StaticBakeBatchInput,
 	StaticObjectMaterialSourceFacts,
+	StaticObjectPaletteSourceFacts,
 	StaticObjectTextureRefFacts,
 	StaticObjectSourceAssetFacts,
 } from "../../contracts";
@@ -406,6 +407,157 @@ describe("V2 landblock env-cell baker", () => {
 		);
 	});
 
+	it("omits structured-interior surfaces with missing render surfaces without blocking renderable slices", () => {
+		const input = createInputWithRenderableCellStructure({
+			materialSources: [
+				createStaticObjectMaterialSource({ materialId: 0x08000010 }),
+				createTexturedMaterialSource(0x08000020),
+			],
+			renderSurfaces: [
+				{ materialId: 0x08000010, polygonId: 1 },
+				{ materialId: 0x08000020, polygonId: 2 },
+			],
+		});
+		const envCell = requireFirstEnvCell(input);
+
+		const result = bakeLandblockEnvCells({
+			...input,
+			attachments: {
+				envCellCellStructureGeometry: [
+					createGeometryAttachment(envCell, {
+						positions: new Float32Array([
+							0, 0, 0, 1, 0, 0, 0, 1, 0,
+							2, 0, 0, 3, 0, 0, 2, 1, 0,
+						]),
+						surfaceIds: [0x08000010, 0x08000020],
+						triangles: [
+							{
+								firstVertex: 0,
+								materialVariantSignature: null,
+								polygonId: 1,
+								surfaceId: 0x08000010,
+							},
+							{
+								firstVertex: 3,
+								materialVariantSignature: null,
+								polygonId: 2,
+								surfaceId: 0x08000020,
+							},
+						],
+						uvs: new Float32Array([
+							0, 0, 1, 0, 0, 1,
+							0, 0, 1, 0, 0, 1,
+						]),
+					}),
+				],
+				staticObjectSourceGeometry: [],
+			},
+		});
+		const structuredDrawUnits = result.drawUnits.filter(
+			(drawUnit) => drawUnit.kind === "structured-interior-geometry",
+		);
+
+		expect(structuredDrawUnits).toHaveLength(1);
+		expect(structuredDrawUnits[0]).toMatchObject({
+			surfaceIds: [0x08000010],
+			triangleCount: 1,
+		});
+		expect(result.materialCoverage).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					deferredTriangleCount: 0,
+					fallbackReasonCounts: [
+						{ code: "missing-render-surface", count: 1 },
+					],
+					renderedTriangleCount: 1,
+					unsupportedTriangleCount: 1,
+					unrenderedBuckets: [
+						expect.objectContaining({
+							outcome: "unsupported",
+							reasonCodes: ["missing-render-surface"],
+							triangleCount: 1,
+						}),
+					],
+				}),
+			]),
+		);
+	});
+
+	it("omits indexed structured-interior surfaces with missing palettes without blocking renderable slices", () => {
+		const input = createInputWithRenderableCellStructure({
+			materialSources: [
+				createStaticObjectMaterialSource({ materialId: 0x08000010 }),
+				createTexturedMaterialSource(0x08000020),
+			],
+			renderSurfaces: [
+				{ materialId: 0x08000010, polygonId: 1 },
+				{ materialId: 0x08000020, polygonId: 2 },
+			],
+			textureRefs: createIndexedTextureRefsWithoutPalette(),
+		});
+		const envCell = requireFirstEnvCell(input);
+
+		const result = bakeLandblockEnvCells({
+			...input,
+			attachments: {
+				envCellCellStructureGeometry: [
+					createGeometryAttachment(envCell, {
+						positions: new Float32Array([
+							0, 0, 0, 1, 0, 0, 0, 1, 0,
+							2, 0, 0, 3, 0, 0, 2, 1, 0,
+						]),
+						surfaceIds: [0x08000010, 0x08000020],
+						triangles: [
+							{
+								firstVertex: 0,
+								materialVariantSignature: null,
+								polygonId: 1,
+								surfaceId: 0x08000010,
+							},
+							{
+								firstVertex: 3,
+								materialVariantSignature: null,
+								polygonId: 2,
+								surfaceId: 0x08000020,
+							},
+						],
+						uvs: new Float32Array([
+							0, 0, 1, 0, 0, 1,
+							0, 0, 1, 0, 0, 1,
+						]),
+					}),
+				],
+				staticObjectSourceGeometry: [],
+			},
+		});
+		const structuredDrawUnits = result.drawUnits.filter(
+			(drawUnit) => drawUnit.kind === "structured-interior-geometry",
+		);
+
+		expect(structuredDrawUnits).toHaveLength(1);
+		expect(structuredDrawUnits[0]).toMatchObject({
+			surfaceIds: [0x08000010],
+			triangleCount: 1,
+		});
+		expect(result.materialCoverage).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					deferredTriangleCount: 0,
+					fallbackReasonCounts: [{ code: "missing-palette", count: 1 }],
+					renderedTriangleCount: 1,
+					unsupportedTriangleCount: 1,
+					unrenderedBuckets: [
+						expect.objectContaining({
+							outcome: "unsupported",
+							reasonCodes: ["missing-palette"],
+							triangleCount: 1,
+						}),
+					],
+				}),
+			]),
+		);
+	});
+
 	it("emits structured-interior texture uses for textured cell materials", () => {
 		const input = createInputWithRenderableCellStructure({
 			materialSources: [createTexturedMaterialSource(0x08000010)],
@@ -596,6 +748,7 @@ function createInputWithRenderableCellStructure(
 		readonly includeMaterialSources?: boolean;
 		readonly localPlacement?: LandblockEnvCellStaticFacts["localPlacement"];
 		readonly materialSources?: readonly StaticObjectMaterialSourceFacts[];
+		readonly paletteSources?: readonly StaticObjectPaletteSourceFacts[];
 		readonly renderSurfaces?: readonly {
 			readonly materialId: number;
 			readonly polygonId: number;
@@ -673,6 +826,7 @@ function createInputWithRenderableCellStructure(
 											materialId: 0x08000010,
 										}),
 									]),
+						paletteSources: options.paletteSources ?? scope.paletteSources,
 						textureRefs: options.textureRefs ?? scope.textureRefs,
 					},
 				},
@@ -877,6 +1031,35 @@ function createRgbaTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 		{
 			format: "rgba",
 			formatRaw: 1,
+			height: 1,
+			palette: null,
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000010,
+			},
+			role: "render-surface",
+			width: 1,
+		},
+	];
+}
+
+function createIndexedTextureRefsWithoutPalette(): readonly StaticObjectTextureRefFacts[] {
+	return [
+		{
+			palette: null,
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: 0x06000010,
+			},
+			role: "surface-texture",
+			texture: {
+				kind: "surface-texture",
+				surfaceTextureId: 0x05000010,
+			},
+		},
+		{
+			format: "indexed",
+			formatRaw: 0x29,
 			height: 1,
 			palette: null,
 			renderSurface: {

@@ -839,22 +839,59 @@ Spicy bits:
 
 ##### Phase 13A4c: Missing-Source Omission Diagnostics And Cleanup
 
-Status: planned; re-steered after 13A4b-1.
+Status: complete on 2026-06-16.
 
 Deliverables:
 
-- Add typed omission/deferred records for unresolved or unsupported structured-interior surface material dependencies, including material id, surface id, env-cell id, landblock id, and missing dependency identity.
-- Make the runtime/client diagnostic path emit grouped console-visible warnings for committed structured-interior omissions. Avoid one warning per triangle/surface spam, and do not write tests against incidental console text.
-- Verify the typed structured-interior diagnostics added in 13A4b-1 are sufficient for unresolved material/render-surface/palette/texture dependencies; extend them only if runtime diagnostics need missing dependency identity that is not currently carried.
+- Make structured-interior material omission/deferred failures loud at the point they occur: material planning/classification and bake output should emit grouped console-visible diagnostics when surfaces are omitted or deferred.
+- Keep `StaticMaterialCoverageReport` as the aggregate after-the-fact evidence for omitted/deferred/unsupported structured-interior material buckets. Do not add a durable peer-record pipeline solely for post-hoc structured diagnostics in this phase.
+- Improve existing `StructuredInteriorMaterialDiagnostic` messages only where the point-of-failure warning needs clearer material/surface/dependency context. Weak or nonexistent durable after-the-fact structured diagnostics are acceptable if the local warning is clear when the omission happens.
 - Remove or quarantine any remaining legacy `structured-interior-debug-flat` references in historical tests/docs/comments after confirming no renderable path consumes them.
-- Add tests proving missing material/render-surface/palette/texture refs remain typed, produce omission records, and keep unrelated structured-interior/static-seed draw units materializable.
+- Add tests proving missing material/render-surface/palette/texture refs remain typed in material coverage/plan diagnostics, trigger the local warning path, and keep unrelated structured-interior/static-seed draw units materializable.
 
 Acceptance criteria:
 
-- Missing material source facts produce explicit omission/deferred records and runtime-visible diagnostics without hiding source-closure gaps.
+- Missing material source facts produce loud point-of-failure diagnostics without hiding source-closure gaps.
 - Missing or unsupported structured-interior materials keep dropping only affected renderable surface/slot geometry unless the remaining draw unit would be empty, in which case the draw unit is omitted.
 - Public diagnostics and material coverage make it clear whether triangles rendered, were omitted due to missing source closure, or were deferred due to capacity/unsupported material behavior.
 - No structured-interior debug/flat fallback material remains in the renderable path after Phase 13A4.
+
+Dry-run findings:
+
+- 13A4b-1 already closed the renderability behavior: missing/deferred/unsupported structured-interior surfaces are omitted before slice baking, and unrelated compatible surfaces still materialize. 13A4c should not reopen that baker partitioning logic except to emit grouped point-of-failure warnings.
+- Current `StructuredInteriorMaterialDiagnostic` entries carry material id and surface id, but not landblock/env-cell/cell-structure identity or missing dependency identity. That is acceptable for durable after-the-fact diagnostics in this phase; warnings emitted during planning/baking can include the missing context from the env-cell/work being processed.
+- `StaticMaterialCoverageReport` is aggregate-only. It is useful for bucket counts and warning summaries, but it cannot preserve per-surface omission details after bake. Do not try to reconstruct surface-level omissions from coverage in runtime.
+- Do not add a peer-style omission record just to preserve after-the-fact detail. That would add coordinator/runtime plumbing and lifetime policy for data the user does not currently need.
+- Runtime already has `#warnAboutDeferredStaticMaterialCoverage`, but it only warns blended/deferred audit buckets. Either keep structured-interior warnings local to planning/baking, or add a narrow grouped warning path for structured-interior coverage buckets; avoid broadening the blended-material warning semantics.
+- `StaticMaterialCoverageReport` still uses `fallbackReasonCount`/`fallbackReasonCounts` as generic cross-domain field names. Renaming that global contract is larger than this phase and risks terrain/static-object churn. Keep structured-interior-specific DTOs and warnings on omission/diagnostic terminology, and leave global coverage field naming as known debt unless we schedule a dedicated rename.
+- `structured-interior-debug-flat` still appears in historical plan text and static coordinator tests. Code should confirm there is no renderable contract path before replacing current-test fixtures; old historical plan notes can remain when they describe past behavior.
+
+Suggested implementation order:
+
+1. Add a grouped warning helper near structured-interior material planning/baking that reports omitted/deferred surfaces by landblock/env-cell/cell-structure/reason without one-warning-per-triangle spam.
+2. Ensure missing material, missing render surface/texture/palette, unsupported surface flags, and deferred material behavior trigger that warning path while preserving aggregate material coverage.
+3. Keep the existing structured-interior `diagnostics` DTO lightweight unless a warning message needs clearer dependency identity at the point of failure.
+4. Update tests around material planning/bake behavior and coverage; do not write brittle tests for exact console text.
+5. Audit remaining `structured-interior-debug-flat` references and clean only active fixtures/comments that imply a current renderable path.
+
+Completed work:
+
+- Added a baker-local grouped warning path for structured-interior material omissions/deferred output. It reports work id, landblock id, env-cell id, cell-structure id, member id, outcome, reason code, material ids, surface ids, messages, and affected triangle counts while avoiding one warning per triangle.
+- Kept durable output lightweight: `StaticMaterialCoverageReport` remains the aggregate after-the-fact record, and no peer-record omission pipeline was added.
+- Added bake tests for missing render-surface and missing indexed palette cases. Both prove the bad structured-interior surface is omitted, coverage records the typed reason, and an unrelated compatible structured-interior surface still materializes.
+- Replaced the active static-coordinator structured-interior fixture that still used `structured-interior-debug-flat`/`debugColor` with a materialized flat-color draw-unit shape.
+
+Spicy bits:
+
+- The warning path lives inside the landblock env-cell baker and uses `console.warn`, matching the existing static-object partition skip warning. This is intentionally point-of-failure logging, not runtime/coordinator-owned durable diagnostics.
+- Missing render-surface and missing palette classify as `unsupported`, not `render-deferred`; missing material source remains `render-deferred`. Coverage assertions now reflect that split.
+- Follow-up cleanup removed the unused `missing-material-texture` diagnostic code from the static-object and structured-interior unions. Missing texture-source closure currently reaches structured interiors as `missing-render-surface`.
+
+Failed to close:
+
+- No renderer-visible structured-interior pixels yet; that is Phase 13B0.
+- No durable per-surface omission peer records by design. After-the-fact diagnostics remain aggregate coverage plus local point-of-failure warnings.
+- Historical plan notes still mention `structured-interior-debug-flat` where they describe old behavior.
 
 ### Phase 13B0: Structured Interior First Pixels
 

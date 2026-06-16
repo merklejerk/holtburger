@@ -764,6 +764,7 @@ export interface StaticWorkPeerRecordOwner {
 
 export type StaticSpatialRecord =
 	| StaticDrawUnitSpatialRecord
+	| StaticEnvCellStaticObjectSpatialRecord
 	| StaticEnvCellSpatialRecord;
 
 export interface StaticDrawUnitSpatialRecord {
@@ -771,6 +772,15 @@ export interface StaticDrawUnitSpatialRecord {
 	readonly owner: StaticDrawUnitPeerRecordOwner;
 	readonly drawUnitId: string;
 	readonly triangleCount: number | null;
+}
+
+export interface StaticEnvCellStaticObjectSpatialRecord {
+	readonly kind: "env-cell-static-object-bounds";
+	readonly owner: StaticDrawUnitPeerRecordOwner;
+	readonly landblockId: number;
+	readonly envCellId: number;
+	readonly instanceId: string;
+	readonly bounds: StaticBounds;
 }
 
 export interface StaticEnvCellSpatialRecord {

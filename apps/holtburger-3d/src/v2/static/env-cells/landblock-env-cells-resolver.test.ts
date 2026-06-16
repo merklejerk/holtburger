@@ -95,6 +95,12 @@ describe("V2 landblock env-cell resolver", () => {
 		expect(payload.scope.sourceAssets[0]?.parts[0]).not.toHaveProperty(
 			"positions",
 		);
+		const setupSource = payload.scope.sourceAssets.find(
+			(source) => source.identity.sourceAssetKind === "setup-model",
+		);
+		expect(setupSource?.parts[0]?.defaultPlacements).toEqual([
+			createPlacement({ x: 3, y: 4, z: 5 }),
+		]);
 		expect(payload.scope.materialSources.map((source) => source.identity)).toEqual([
 			{ kind: "static-material-source", materialId: 0x08000010 },
 			{ kind: "static-material-source", materialId: 0x08000011 },
@@ -149,6 +155,9 @@ describe("V2 landblock env-cell resolver", () => {
 				},
 			],
 		});
+		expect(payload.scope.envCells[0]?.localSpatial.localBvh.items).toEqual([
+			{ instanceId: "da550100:static-0", kind: "static" },
+		]);
 	});
 
 	it("requests resolver metadata for static seeds but not standalone env-cell assets", async () => {
@@ -701,7 +710,7 @@ function createEnvCellPayload(input: {
 		diagnostics: createDiagnostics(),
 		environmentId: 0x0d000010,
 		envCellId: input.envCellId,
-		localBvh: createLocalBvh(),
+		localBvh: createLocalBvh({ staticInstanceId: "static-0" }),
 		localPlacement: createPlacement(),
 		memberId: input.memberId,
 		portalApertures: [],
@@ -734,10 +743,10 @@ function createEnvCellPayload(input: {
 	};
 }
 
-function createPlacement() {
+function createPlacement(origin = { x: 0, y: 0, z: 0 }) {
 	return {
 		orientation: { w: 1, x: 0, y: 0, z: 0 },
-		origin: { x: 0, y: 0, z: 0 },
+		origin,
 	};
 }
 
@@ -860,7 +869,20 @@ function createSetupModelPayload(): SetupModelPayloadDto {
 				scale: null,
 			},
 		],
-		placementSets: [],
+		placementSets: [
+			{
+				hookCount: 0,
+				key: 0,
+				localPlacements: [createPlacement({ x: 30, y: 40, z: 50 })],
+				textureVelocities: [],
+			},
+			{
+				hookCount: 0,
+				key: 0x65,
+				localPlacements: [createPlacement({ x: 3, y: 4, z: 5 })],
+				textureVelocities: [],
+			},
+		],
 		provenance: createProvenance(),
 		radius: null,
 		residencyKind: "unknown",
@@ -989,9 +1011,14 @@ function createCellBsp() {
 	};
 }
 
-function createLocalBvh() {
+function createLocalBvh(
+	options: { readonly staticInstanceId?: string } = {},
+) {
 	return {
-		items: [],
+		items:
+			options.staticInstanceId === undefined
+				? []
+				: [{ instanceId: options.staticInstanceId, kind: "static" as const }],
 		nodes: [],
 	};
 }

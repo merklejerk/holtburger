@@ -254,7 +254,16 @@ describe("V2 landblock env-cell baker", () => {
 	});
 
 	it("bakes env-cell static seeds through static object draw units with env-cell ownership", () => {
-		const input = createInputWithRenderableStaticSeed();
+		const input = createInputWithRenderableStaticSeed({
+			envCellLocalPlacement: {
+				orientation: { w: 1, x: 0, y: 0, z: 0 },
+				origin: { x: 10, y: 30, z: -20 },
+			},
+			seedLocalPlacement: {
+				orientation: { w: 1, x: 0, y: 0, z: 0 },
+				origin: { x: 1, y: 2, z: 3 },
+			},
+		});
 
 		const result = bakeLandblockEnvCells(input);
 		const drawUnit = result.drawUnits.find(
@@ -298,12 +307,50 @@ describe("V2 landblock env-cell baker", () => {
 		expect(drawUnit.drawUnitId).toContain(
 			"7:landblock:da55ffff:landblock-env-cells:static-object-partition:",
 		);
+		expect(Array.from(drawUnit.positions.slice(0, 9))).toEqual([
+			1, 3, -2, 2, 3, -2, 1, 4, -2,
+		]);
 		expect(result.textureUses).toEqual([]);
 		expect(result.staticAuthoredDynamicSeeds).toEqual([
 			expect.objectContaining({
 				envCellId: 0xda550100,
 				kind: "env-cell-static-object-seed",
 			}),
+		]);
+	});
+
+	it("bakes env-cell static seed rotation without applying the containing cell frame", () => {
+		const input = createInputWithRenderableStaticSeed({
+			envCellLocalPlacement: {
+				orientation: {
+					w: Math.SQRT1_2,
+					x: 0,
+					y: Math.SQRT1_2,
+					z: 0,
+				},
+				origin: { x: 0, y: 0, z: 0 },
+			},
+			seedLocalPlacement: {
+				orientation: {
+					w: Math.SQRT1_2,
+					x: 0,
+					y: 0,
+					z: Math.SQRT1_2,
+				},
+				origin: { x: 1, y: 0, z: 0 },
+			},
+		});
+
+		const result = bakeLandblockEnvCells(input);
+		const drawUnit = result.drawUnits.find(
+			(candidate) => candidate.kind === "static-object-geometry",
+		);
+		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
+			throw new Error("Expected env-cell static object geometry draw unit.");
+		}
+
+		expectNumbersClose(Array.from(drawUnit.positions.slice(0, 9)), [
+			1, 0, 0, 1, 0, -1, 1, 1, 0,
 		]);
 	});
 });
@@ -384,7 +431,12 @@ function requireFirstEnvCell(
 	return envCell;
 }
 
-function createInputWithRenderableStaticSeed(): StaticBakeBatchInput {
+function createInputWithRenderableStaticSeed(
+	options: {
+		readonly envCellLocalPlacement?: LandblockEnvCellStaticFacts["localPlacement"];
+		readonly seedLocalPlacement?: LandblockEnvCellStaticFacts["staticObjectSeeds"][number]["localPlacement"];
+	} = {},
+): StaticBakeBatchInput {
 	const input = createInput();
 	const item = input.items[0];
 	if (!item || item.payload.scope.kind !== "landblock-env-cells") {
@@ -426,9 +478,13 @@ function createInputWithRenderableStaticSeed(): StaticBakeBatchInput {
 						envCells: [
 							{
 								...envCell,
+								localPlacement:
+									options.envCellLocalPlacement ?? envCell.localPlacement,
 								staticObjectSeeds: envCell.staticObjectSeeds.map((seed) => ({
 									...seed,
 									identity: seedIdentity,
+									localPlacement:
+										options.seedLocalPlacement ?? seed.localPlacement,
 								})),
 							},
 						],
@@ -441,6 +497,16 @@ function createInputWithRenderableStaticSeed(): StaticBakeBatchInput {
 			},
 		],
 	};
+}
+
+function expectNumbersClose(
+	actual: readonly number[],
+	expected: readonly number[],
+): void {
+	expect(actual).toHaveLength(expected.length);
+	for (const [index, expectedValue] of expected.entries()) {
+		expect(actual[index]).toBeCloseTo(expectedValue, 5);
+	}
 }
 
 function createGeometryAttachment(

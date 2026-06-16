@@ -728,6 +728,11 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#updateMaterializedDrawUnitIdMappings(delta, materialized);
 		this.#warnAboutStaticFallbacks(delta);
 		applyMaterializedStaticCommit(this.#renderer, materialized);
+		this.#staticSceneQuery.applyStaticSpatialRecords({
+			records: delta.staticSpatialRecords,
+			removedDrawUnitIds: delta.removedDrawUnitIds,
+		});
+		this.#refreshStaticDebugOverlay();
 		this.#pendingStaticMaterializations.delete(delta.revision);
 		this.#committedStaticMaterializations = appendBoundedRevision(
 			this.#committedStaticMaterializations,

@@ -1,4 +1,5 @@
 import type {
+	LandblockSourceIdentity,
 	OutdoorStaticObjectsScopePayload,
 	PaletteIdentity,
 	MaterialTextureDataUseIdentity,
@@ -55,10 +56,24 @@ type PaletteDataUseIdentity = Extract<
 >;
 
 export interface StaticObjectMaterialPipelinePlan {
-	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
+	readonly domain: StaticObjectMaterialPlanningPayload["domain"];
 	readonly materialPlans: readonly StaticObjectMaterialPlan[];
 	readonly detailRoles: readonly StaticObjectDetailRolePlan[];
 	readonly fallbackReasons: readonly StaticObjectMaterialFallbackReason[];
+}
+
+export interface StaticObjectMaterialPlanningPayload {
+	readonly domain:
+		| OutdoorStaticObjectsScopePayload["domain"]
+		| "landblock-env-cells";
+	readonly landblock: LandblockSourceIdentity;
+	readonly materialSources: OutdoorStaticObjectsScopePayload["materialSources"];
+	readonly materialSlots: OutdoorStaticObjectsScopePayload["materialSlots"];
+	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
+	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
+	readonly regionRenderProfile: {
+		readonly detailRoles: readonly RegionDetailRoleFacts[];
+	};
 }
 
 export interface StaticObjectMaterialPlan {
@@ -175,7 +190,7 @@ interface StaticObjectMaterialContext {
 }
 
 export function planStaticObjectMaterials(
-	payload: OutdoorStaticObjectsScopePayload,
+	payload: StaticObjectMaterialPlanningPayload,
 ): StaticObjectMaterialPipelinePlan {
 	const materialById = new Map(
 		payload.materialSources.map((material) => [
@@ -470,7 +485,7 @@ export function classifyStaticObjectMaterial(
 
 function composeStaticDetailRoles(
 	plan: StaticObjectMaterialPlan,
-	domain: OutdoorStaticObjectsScopePayload["domain"],
+	domain: StaticObjectMaterialPlanningPayload["domain"],
 	detailRoles: readonly StaticObjectDetailRolePlan[],
 ): StaticObjectMaterialPlan {
 	const detailRole = resolveComposableDetailRole(domain, detailRoles);
@@ -525,7 +540,7 @@ function composeStaticDetailRoles(
 }
 
 function resolveComposableDetailRole(
-	domain: OutdoorStaticObjectsScopePayload["domain"],
+	domain: StaticObjectMaterialPlanningPayload["domain"],
 	detailRoles: readonly StaticObjectDetailRolePlan[],
 ): StaticObjectDetailRolePlan | null {
 	if (domain !== "outdoor-buildings") {

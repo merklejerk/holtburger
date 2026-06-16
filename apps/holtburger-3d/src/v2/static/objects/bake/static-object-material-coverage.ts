@@ -1,5 +1,6 @@
 import type {
-	OutdoorStaticObjectsScopePayload,
+	LandblockSourceIdentity,
+	StaticDomain,
 	StaticMaterialCoverageBucket,
 	StaticMaterialCoverageFamily,
 	StaticMaterialCoverageFilteringMode,
@@ -22,7 +23,13 @@ import {
 const MAX_UNRENDERED_BUCKETS = 8;
 
 export function createStaticObjectMaterialCoverageReport(options: {
-	readonly payload: OutdoorStaticObjectsScopePayload;
+	readonly payload: {
+		readonly domain: Extract<
+			StaticDomain,
+			"outdoor-buildings" | "outdoor-detail" | "landblock-env-cells"
+		>;
+		readonly landblock: LandblockSourceIdentity;
+	};
 	readonly materialPlan: StaticObjectMaterialPipelinePlan;
 	readonly partitions: readonly StaticObjectCompatibilityPartition[];
 }): StaticMaterialCoverageReport {

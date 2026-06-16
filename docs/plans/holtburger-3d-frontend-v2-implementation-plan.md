@@ -629,7 +629,7 @@ Implementation notes:
 
 ##### Phase 13A3c: Env-Cell Static Object Draw Units
 
-Status: planned; unblocked by Phase 13A3b-1 resolver source closure hygiene.
+Status: complete on 2026-06-15; unblocked by Phase 13A3b-1 resolver source closure hygiene.
 
 Purpose: bake env-cell static object seeds through static-object material/render-state behavior while keeping ownership and eviction correct.
 
@@ -655,6 +655,21 @@ Acceptance criteria:
 - Transparent object/part sorting remains object/part-level where seed source facts support it.
 - Static coordinator desired-key/eviction behavior treats these draw units as `landblock-env-cells` owned.
 - Current batching remains coarse enough to avoid per-env-cell draw-unit fragmentation; env-cell ids are retained as ownership/visibility metadata for future portal/render-target routing.
+
+Implementation notes:
+
+- `StaticObjectGeometryStaticDrawUnit.domain` now includes `landblock-env-cells`, and each static-object draw unit carries explicit `ownership`. Outdoor draw units use `kind: "outdoor-static-objects"`; env-cell seed draw units use `kind: "env-cell-static-object-seeds"` with `landblockId`, owning `envCellIds`, and the existing static-object seed identities.
+- The static-object material planner, material coverage, partitioner, and compatibility baker now accept a shared static-object compatibility payload rather than only `OutdoorStaticObjectsScopePayload`. Outdoor payloads pass through directly; env-cell payloads are adapted by `createEnvCellStaticObjectCompatibilityPayload`.
+- `LandblockEnvCellsBaker` composes the shared static-object compatibility baker into the same `landblock-env-cells` bake result. Structured interior cell geometry and env-cell static seed draw units therefore share the same static batch, texture-use staging policy, and coordinator ownership/eviction boundary.
+- Env-cell static seeds are not partitioned into per-env-cell draw-unit batches. The partitioner can still batch compatible opaque/alpha-test seeds together; env-cell ids are retained on draw-unit ownership for future visibility/pass routing.
+- Env-cell seed adapter filters to seeds with resolved source assets, normalizes nullable seed `sourceScale` to unit scale, and uses the existing static-object instance identity rather than inventing a seed id.
+- Empty static-object material coverage reports are filtered from env-cell bake results so env-cell batches without renderable static seed source closure keep the prior structured-interior coverage shape.
+- Tests prove env-cell static seeds bake as `static-object-geometry` with `landblock-env-cells` domain and env-cell ownership, while existing static-object material families/source mapping behavior and structured-interior env-cell bake behavior remain intact.
+
+Spicy bits and follow-up steering:
+
+- Material coverage for `landblock-env-cells` can now come from both structured-interior and static-object paths. The coordinator still stores latest coverage by domain, so the snapshot view is not a complete multi-report aggregate for mixed env-cell batches. Commit deltas carry the reports; richer dashboard aggregation should be handled in a later coverage/reporting cleanup rather than blocking draw-unit emission.
+- `StaticObjectInstanceIdentity.instanceId` remains the seed identity carrier. Env-cell resolver-created identities include the env-cell prefix, and the env-cell draw-unit ownership records the parsed env-cell ids explicitly. If future authored seed ids become available from source data, revisit identity naming then.
 
 #### Phase 13A4: Structured Interior Material Source Enrichment
 

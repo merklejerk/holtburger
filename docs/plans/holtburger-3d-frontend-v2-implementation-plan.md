@@ -692,7 +692,7 @@ Execution steering:
 
 ##### Phase 13A4a: Cell-Structure Material Source Closure
 
-Status: planned.
+Status: complete on 2026-06-16.
 
 Deliverables:
 
@@ -707,6 +707,26 @@ Acceptance criteria:
 - A landblock env-cell payload with only cell-structure surfaces, and no static seeds, can still resolve material sources, palette sources, texture refs, and missing refs.
 - Static seed source closure and cell-structure material closure coexist without duplicated output facts.
 - Resolver DTOs remain metadata-only for cell structures; full render geometry still arrives through explicit bake attachments.
+
+Implementation notes:
+
+- Extracted a neutral `resolveStaticMaterialSourceClosure` path plus a combined `resolveStaticObjectAndMaterialSourceClosure` path from the existing static-object source closure. Both use the same accumulator for material sources, palette sources, texture refs, missing refs, and source revision.
+- `LandblockEnvCellsResolver` now collects unique cell-structure surface material ids and resolves them through the combined closure alongside env-cell static seed source assets. This keeps cell-structure materials first-class without routing them through static-object source assets or setup-model ownership.
+- The combined closure dedupes material source requests before they hit the asset service. If a material is needed by both a static seed source asset and a cell-structure surface, it is requested once and emitted once.
+- Missing refs are deduped as typed resource identities. Env-cell payloads with missing static seed sources can still report missing cell-structure material source facts without dropping env-cell/cell-structure metadata.
+- Resolver-facing env-cell geometry remains metadata-only; Phase 13A4a did not add any cell-structure vertex-buffer access to the resolver path.
+
+Verification:
+
+- `cd apps/holtburger-3d && npm run test:ts -- --run src/v2/static/env-cells/landblock-env-cells-resolver.test.ts`
+- `cd apps/holtburger-3d && npm run check`
+- `cd apps/holtburger-3d && npm run lint:ts`
+- `cd apps/holtburger-3d && npm run test:ts`
+
+Spicy follow-up for 13A4b:
+
+- The source closure is now present, but structured-interior material planning still emits `structured-interior-debug-flat`/`render-deferred` entries. Phase 13A4b must consume the resolved material facts and replace the renderable debug path with a materialized structured-interior contract.
+- Source revision accounting now includes direct material source closure loads. The existing public `resolveStaticObjectSurfaceTextureRef` helper still returns only source byte length for outdoor static compatibility; if future cache invalidation needs texture-asset revision precision, extract an internal texture-ref closure result rather than changing the public helper casually.
 
 ##### Phase 13A4b: Materialized Structured-Interior Draw-Unit Contract
 

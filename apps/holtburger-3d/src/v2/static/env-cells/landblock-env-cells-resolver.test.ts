@@ -53,6 +53,11 @@ describe("V2 landblock env-cell resolver", () => {
 				"setup-model:02000010",
 			]),
 		);
+		expect(
+			assetService.requestedKeys
+				.map((key) => describeHostAssetKey(key))
+				.filter((key) => key === "material:08000010"),
+		).toEqual(["material:08000010"]);
 		expect(payload.scope.kind).toBe("landblock-env-cells");
 		if (payload.scope.kind !== "landblock-env-cells") {
 			throw new Error("expected landblock env-cell payload");
@@ -212,7 +217,72 @@ describe("V2 landblock env-cell resolver", () => {
 				sourceAssetKind: "setup-model",
 				sourceDid: 0x02000010,
 			},
+			{
+				kind: "static-material-source",
+				materialId: 0x08000010,
+			},
 		]);
+	});
+
+	it("resolves cell-structure material closure without static seed sources", async () => {
+		const assetService = new FixtureAssetService([
+			createPreparedAsset(
+				createHostAssetKey("landblock-env-cells", 0xda55ffff),
+				createLandblockEnvCellsPayload({ omitStatics: true }),
+			),
+			createPreparedAsset(
+				createHostAssetKey("material", 0x08000010),
+				createMaterialPayload({ materialId: 0x08000010 }),
+			),
+			createPreparedAsset(
+				createHostAssetKey("surface-texture", 0x05000010),
+				createSurfaceTexturePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("render-surface", 0x06000010),
+				createRenderSurfacePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("palette", 0x04000010),
+				createPalettePayload(),
+			),
+		]);
+
+		const payload = await new LandblockEnvCellsResolver({
+			assetService,
+		}).resolve(createEnvCellRequest());
+
+		expect(payload.scope.kind).toBe("landblock-env-cells");
+		if (payload.scope.kind !== "landblock-env-cells") {
+			throw new Error("expected landblock env-cell payload");
+		}
+		expect(
+			assetService.requestedKeys.map((key) => describeHostAssetKey(key)),
+		).toEqual([
+			"landblock-env-cells:da55ffff",
+			"material:08000010",
+			"surface-texture:05000010",
+			"render-surface:06000010",
+			"palette:04000010",
+		]);
+		expect(payload.scope.sourceAssets).toEqual([]);
+		expect(payload.scope.envCells.flatMap((cell) => cell.staticObjectSeeds)).toEqual(
+			[],
+		);
+		expect(payload.scope.materialSources.map((source) => source.identity)).toEqual([
+			{ kind: "static-material-source", materialId: 0x08000010 },
+		]);
+		expect(payload.scope.textureRefs.map((ref) => ref.role)).toEqual([
+			"surface-texture",
+			"render-surface",
+		]);
+		expect(payload.scope.paletteSources).toEqual([
+			{
+				colorCount: 256,
+				palette: { kind: "palette", paletteId: 0x04000010 },
+			},
+		]);
+		expect(payload.scope.missingRefs).toEqual([]);
 	});
 
 	it("deduplicates repeated env-cell static seed source closure", async () => {
@@ -262,6 +332,11 @@ describe("V2 landblock env-cell resolver", () => {
 				.map((key) => describeHostAssetKey(key))
 				.filter((key) => key === "gfx-obj:01000010"),
 		).toEqual(["gfx-obj:01000010"]);
+		expect(
+			assetService.requestedKeys
+				.map((key) => describeHostAssetKey(key))
+				.filter((key) => key === "material:08000010"),
+		).toEqual(["material:08000010"]);
 		expect(payload.scope.sourceAssets).toHaveLength(1);
 		expect(payload.scope.envCells.flatMap((cell) => cell.staticObjectSeeds)).toHaveLength(
 			2,
@@ -623,6 +698,7 @@ function createLandblockEnvCellsPayload(
 	options: {
 		readonly heavyRenderGeometry?: boolean;
 		readonly omitSecondBvhItem?: boolean;
+		readonly omitStatics?: boolean;
 		readonly secondStaticSourceAssetId?: string;
 	} = {},
 ): LandblockEnvCellsPayloadDto {
@@ -654,7 +730,7 @@ function createLandblockEnvCellsPayload(
 				envCellId: 0xda550100,
 				heavyRenderGeometry: options.heavyRenderGeometry,
 				memberId: "cell-0",
-				staticSourceAssetId: "gfx-obj/01000010",
+				staticSourceAssetId: options.omitStatics ? null : "gfx-obj/01000010",
 				visibleEnvCellIds: [0xda550101],
 			}),
 			createEnvCellPayload({
@@ -662,7 +738,9 @@ function createLandblockEnvCellsPayload(
 				heavyRenderGeometry: options.heavyRenderGeometry,
 				memberId: "cell-1",
 				staticSourceAssetId:
-					options.secondStaticSourceAssetId ?? "setup-model/02000010",
+					options.omitStatics
+						? null
+						: (options.secondStaticSourceAssetId ?? "setup-model/02000010"),
 				visibleEnvCellIds: [],
 			}),
 		],
@@ -702,7 +780,7 @@ function createEnvCellPayload(input: {
 	readonly heavyRenderGeometry?: boolean;
 	readonly memberId: string;
 	readonly visibleEnvCellIds: readonly number[];
-	readonly staticSourceAssetId: string;
+	readonly staticSourceAssetId: string | null;
 }): LandblockEnvCellsPayloadDto["envCells"][number] {
 	return {
 		cellBsp: createCellBsp(),
@@ -720,18 +798,24 @@ function createEnvCellPayload(input: {
 		}),
 		restrictionObjectId: null,
 		seenOutside: null,
-		statics: [
-			{
-				instanceBounds: createBounds(),
-				instanceId: "static-0",
-				localPlacement: createPlacement(),
-				sourceAssetId: input.staticSourceAssetId,
-				sourceBounds: createBounds(),
-				sourceDid: Number.parseInt(input.staticSourceAssetId.slice(-8), 16),
-				sourceIndex: 0,
-				sourceScale: { x: 1, y: 1, z: 1 },
-			},
-		],
+		statics:
+			input.staticSourceAssetId === null
+				? []
+				: [
+						{
+							instanceBounds: createBounds(),
+							instanceId: "static-0",
+							localPlacement: createPlacement(),
+							sourceAssetId: input.staticSourceAssetId,
+							sourceBounds: createBounds(),
+							sourceDid: Number.parseInt(
+								input.staticSourceAssetId.slice(-8),
+								16,
+							),
+							sourceIndex: 0,
+							sourceScale: { x: 1, y: 1, z: 1 },
+						},
+					],
 		surfaces: [
 			{
 				materialAssetId: "material/08000010",

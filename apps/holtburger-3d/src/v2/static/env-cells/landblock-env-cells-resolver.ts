@@ -20,7 +20,7 @@ import type {
 import {
 	createSourceCacheKey,
 	createStaticObjectSourceIdentity,
-	resolveStaticObjectSourceClosure,
+	resolveStaticObjectAndMaterialSourceClosure,
 } from "../objects/static-object-source-closure";
 
 interface LoadedLandblockEnvCellsPayload {
@@ -52,8 +52,9 @@ export class LandblockEnvCellsResolver {
 		const landblock = await this.#loadPayload(
 			createHostAssetKey("landblock-env-cells", job.scope.landblockId),
 		);
-		const sourceClosure = await resolveStaticObjectSourceClosure({
+		const sourceClosure = await resolveStaticObjectAndMaterialSourceClosure({
 			assetService: this.#assetService,
+			materialIds: collectCellStructureMaterialIds(landblock.payload),
 			sourceAssetIds: landblock.payload.envCells.flatMap((cell) =>
 				cell.statics.map((staticSeed) => staticSeed.sourceAssetId),
 			),
@@ -135,6 +136,17 @@ export class LandblockEnvCellsResolver {
 		const payload = requirePreparedPayloadKind(asset, "landblock-env-cells");
 		return { asset, payload };
 	}
+}
+
+function collectCellStructureMaterialIds(
+	payload: ResolverLandblockEnvCellsPayloadDto,
+): readonly number[] {
+	return payload.envCells.flatMap((cell) =>
+		cell.surfaces.map(
+			(surface) =>
+				createStaticMaterialSourceIdentity(surface.materialAssetId).materialId,
+		),
+	);
 }
 
 function reportUnboundedEnvCells(

@@ -214,7 +214,6 @@ describe("V2 texture manager", () => {
 			const update = await textureManager.applyStaticCommitDelta({
 				addedDrawUnits: [],
 				removedResources: [],
-				removedScopes: [],
 				revision: 1,
 				staticBatchId: "batch-a",
 				textureUses,
@@ -247,7 +246,6 @@ describe("V2 texture manager", () => {
 		const update = await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [],
-			removedScopes: [],
 			revision: 1,
 			staticBatchId: "batch-a",
 			textureUses: [
@@ -312,7 +310,6 @@ describe("V2 texture manager", () => {
 		await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [],
-			removedScopes: [],
 			revision: 1,
 			staticBatchId: "batch-a",
 			textureUses: [
@@ -358,7 +355,6 @@ describe("V2 texture manager", () => {
 		await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [],
-			removedScopes: [],
 			revision: 1,
 			staticBatchId: "batch-a",
 			textureUses: [
@@ -423,7 +419,6 @@ describe("V2 texture manager", () => {
 		const update = await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [],
-			removedScopes: [],
 			revision: 1,
 			staticBatchId: "batch-detail",
 			textureUses,
@@ -451,7 +446,6 @@ describe("V2 texture manager", () => {
 		await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [],
-			removedScopes: [],
 			revision: 1,
 			staticBatchId: "batch-a",
 			textureUses: [
@@ -560,7 +554,6 @@ describe("V2 texture manager", () => {
 		const update = await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [],
-			removedScopes: [],
 			revision: 1,
 			staticBatchId: "batch-a",
 			textureUses: [
@@ -620,7 +613,6 @@ describe("V2 texture manager", () => {
 			const update = await textureManager.applyStaticCommitDelta({
 				addedDrawUnits: [],
 				removedResources: [],
-				removedScopes: [],
 				revision: 1,
 				staticBatchId: "batch-a",
 				textureUses: [
@@ -689,7 +681,6 @@ describe("V2 texture manager", () => {
 		const update = await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [],
-			removedScopes: [],
 			revision: 1,
 			staticBatchId: "batch-a",
 			textureUses: [
@@ -758,7 +749,6 @@ describe("V2 texture manager", () => {
 			addedDrawUnits: [],
 			materialCoverage: [],
 			removedResources: [],
-			removedScopes: [],
 			revision: 1,
 			staticAuthoredDynamicSeeds: [],
 			staticBatchId: "batch-env",
@@ -863,7 +853,6 @@ describe("V2 texture manager", () => {
 			const update = await textureManager.applyStaticCommitDelta({
 				addedDrawUnits: [],
 				removedResources: [],
-				removedScopes: [],
 				revision: 1,
 				staticBatchId: "batch-a",
 				textureUses,
@@ -907,7 +896,6 @@ describe("V2 texture manager", () => {
 		const update = await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
-			removedScopes: [],
 			revision: 2,
 			staticBatchId: "batch-a",
 			textureUses: [],
@@ -958,7 +946,6 @@ describe("V2 texture manager", () => {
 		const removeFirstUpdate = await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
-			removedScopes: [],
 			revision: 3,
 			staticBatchId: "batch-a",
 			textureUses: [],
@@ -968,7 +955,6 @@ describe("V2 texture manager", () => {
 		const removeSecondUpdate = await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [{ drawUnitId: "terrain-b", kind: "draw-unit" }],
-			removedScopes: [],
 			revision: 4,
 			staticBatchId: "batch-a",
 			textureUses: [],
@@ -1157,7 +1143,6 @@ describe("V2 texture manager", () => {
 		const update = await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [],
-			removedScopes: [],
 			revision: 1,
 			staticBatchId: "batch-a",
 			textureUses: [
@@ -1235,7 +1220,6 @@ describe("V2 texture manager", () => {
 		const firstUpdate = await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [],
-			removedScopes: [],
 			revision: 1,
 			staticBatchId: "batch-a",
 			textureUses: [
@@ -1255,7 +1239,6 @@ describe("V2 texture manager", () => {
 		const secondUpdate = await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [],
-			removedScopes: [],
 			revision: 2,
 			staticBatchId: "batch-a",
 			textureUses: [
@@ -1335,7 +1318,6 @@ describe("V2 texture manager", () => {
 		const update = await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [],
-			removedScopes: [],
 			revision: 1,
 			staticBatchId: "batch-a",
 			textureUses: [
@@ -1495,7 +1477,6 @@ describe("V2 texture manager", () => {
 		const update = await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [],
-			removedScopes: [],
 			revision: 1,
 			staticBatchId: "batch-a",
 			textureUses: [
@@ -1813,7 +1794,6 @@ function createCommitDelta(options: {
 		addedDrawUnits: [],
 		materialCoverage: [],
 		removedResources: [],
-		removedScopes: [],
 		revision: 1,
 		staticBatchId: options.staticBatchId ?? "batch-a",
 		textureUses: [

@@ -46,9 +46,7 @@ import {
 	resolveStructuredInteriorMaterialSurfaceId,
 	type StructuredInteriorCellMaterialPlan,
 } from "./structured-interior-material-planner";
-import type {
-	StaticMaterialPlan,
-} from "../../objects/bake/static-object-material-planner";
+import type { StaticMaterialPlan } from "../../objects/bake/static-object-material-planner";
 import {
 	isCurrentlyStageableStaticObjectDataUse,
 	isRenderableStaticMaterialPlan,
@@ -103,8 +101,7 @@ export function bakeLandblockEnvCells(
 		materialCoverage: [
 			...itemResults.map((result) => result.materialCoverage),
 			...staticObjectResult.materialCoverage.filter(
-				(coverage) =>
-					coverage.materialCount > 0 || coverage.partitionCount > 0,
+				(coverage) => coverage.materialCount > 0 || coverage.partitionCount > 0,
 			),
 		],
 		revision: input.revision,
@@ -216,7 +213,10 @@ function bakeLandblockEnvCellItem(
 			materialPlansByEnvCellId,
 			payload,
 		}),
-		staticAuthoredDynamicSeeds: createAuthoredDynamicSeedRecords(owner, payload),
+		staticAuthoredDynamicSeeds: createAuthoredDynamicSeedRecords(
+			owner,
+			payload,
+		),
 		staticPortalInteriorRecords: [createPortalInteriorRecord(owner, payload)],
 		staticSourceMappings: createSourceMappingRecords(owner, payload),
 		staticSpatialRecords: createSpatialRecords(owner, payload),
@@ -234,9 +234,13 @@ function createStructuredInteriorDrawUnits(
 	input: StaticBakeBatchInput,
 	work: ScheduledStaticWork,
 	payload: LandblockEnvCellsStaticScopePayload,
-	materialPlansByEnvCellId: ReadonlyMap<number, StructuredInteriorCellMaterialPlan>,
+	materialPlansByEnvCellId: ReadonlyMap<
+		number,
+		StructuredInteriorCellMaterialPlan
+	>,
 ): readonly StructuredInteriorGeometryStaticDrawUnit[] {
-	const geometrySurfaceOmissions: StructuredInteriorGeometrySurfaceOmission[] = [];
+	const geometrySurfaceOmissions: StructuredInteriorGeometrySurfaceOmission[] =
+		[];
 	const drawUnits = payload.envCells.flatMap((envCell) => {
 		if (envCell.renderGeometry.triangleCount === 0) {
 			return [];
@@ -337,7 +341,8 @@ function createStructuredInteriorDrawUnit(options: {
 			options.slice.candidates,
 		),
 		materialEntries,
-		materialFamily: resolveRenderableStructuredInteriorFamily(firstMaterialPlan),
+		materialFamily:
+			resolveRenderableStructuredInteriorFamily(firstMaterialPlan),
 		materialIds,
 		materialPass: firstMaterialPlan.pass,
 		materialPlan: createStructuredInteriorSliceMaterialEntries(
@@ -360,7 +365,9 @@ function createStructuredInteriorDrawUnit(options: {
 					entry.indexTextureUseId,
 					entry.paletteTextureUseId,
 					entry.detailTextureUseId,
-				].filter((textureUseId): textureUseId is string => textureUseId !== null),
+				].filter(
+					(textureUseId): textureUseId is string => textureUseId !== null,
+				),
 			),
 		),
 		triangleCount: geometry.triangleCount,
@@ -582,8 +589,10 @@ function countStructuredInteriorSurfaceTriangles(
 	return envCell.renderGeometry.triangles.filter(
 		(triangle) =>
 			triangle.surfaceId !== null &&
-			resolveStructuredInteriorMaterialSurfaceId(envCell, triangle.surfaceId) ===
-				surfaceId,
+			resolveStructuredInteriorMaterialSurfaceId(
+				envCell,
+				triangle.surfaceId,
+			) === surfaceId,
 	).length;
 }
 
@@ -634,49 +643,50 @@ function createStructuredInteriorTriangleCandidates(options: {
 	readonly materialPlan: StructuredInteriorCellMaterialPlan;
 }): readonly StructuredInteriorTriangleCandidate[] {
 	return options.attachment.triangles
-		.map((triangle, triangleIndex): StructuredInteriorTriangleCandidate | null => {
-			if (triangle.surfaceId === null) {
-				return null;
-			}
-			const materialSurfaceId = resolveStructuredInteriorMaterialSurfaceId(
-				options.envCell,
-				triangle.surfaceId,
-			);
-			if (materialSurfaceId === null) {
-				options.geometrySurfaceOmissions.push({
-					cellStructureId: formatHex32(
-						options.envCell.cellStructure.cellStructureId,
-					),
-					envCellId: formatHex32(options.envCell.identity.envCellId),
-					geometrySurfaceId: triangle.surfaceId,
-					memberId: options.envCell.memberId,
-					triangleCount: 1,
-				});
-				return null;
-			}
-			const plan = options.materialPlan.materialPlansBySurfaceId.get(
-				materialSurfaceId,
-			);
-			if (!plan || !isRenderableStaticMaterialPlan(plan)) {
-				return null;
-			}
-			const materialEntryKey = createStaticMaterialEntryKey({
-				plan,
-				textureWrapMode: resolveStructuredInteriorPlanTextureWrapMode(plan),
-			});
-			return {
-				compatibilityKey: createStructuredInteriorCompatibilityKey({
-					materialEntryKey,
+		.map(
+			(triangle, triangleIndex): StructuredInteriorTriangleCandidate | null => {
+				if (triangle.surfaceId === null) {
+					return null;
+				}
+				const materialSurfaceId = resolveStructuredInteriorMaterialSurfaceId(
+					options.envCell,
+					triangle.surfaceId,
+				);
+				if (materialSurfaceId === null) {
+					options.geometrySurfaceOmissions.push({
+						cellStructureId: formatHex32(
+							options.envCell.cellStructure.cellStructureId,
+						),
+						envCellId: formatHex32(options.envCell.identity.envCellId),
+						geometrySurfaceId: triangle.surfaceId,
+						memberId: options.envCell.memberId,
+						triangleCount: 1,
+					});
+					return null;
+				}
+				const plan =
+					options.materialPlan.materialPlansBySurfaceId.get(materialSurfaceId);
+				if (!plan || !isRenderableStaticMaterialPlan(plan)) {
+					return null;
+				}
+				const materialEntryKey = createStaticMaterialEntryKey({
 					plan,
-				}),
-				materialEntryKey,
-				materialPlan: plan,
-				sourceTriangleId: createSourceTriangleId(triangle),
-				surfaceId: materialSurfaceId,
-				triangle,
-				triangleIndex,
-			};
-		})
+					textureWrapMode: resolveStructuredInteriorPlanTextureWrapMode(plan),
+				});
+				return {
+					compatibilityKey: createStructuredInteriorCompatibilityKey({
+						materialEntryKey,
+						plan,
+					}),
+					materialEntryKey,
+					materialPlan: plan,
+					sourceTriangleId: createSourceTriangleId(triangle),
+					surfaceId: materialSurfaceId,
+					triangle,
+					triangleIndex,
+				};
+			},
+		)
 		.filter(
 			(candidate): candidate is StructuredInteriorTriangleCandidate =>
 				candidate !== null,
@@ -995,11 +1005,13 @@ function createSpatialRecords(
 		environment: envCell.environment,
 		kind: "env-cell-spatial",
 		landblockId: payload.landblock.landblockId,
+		localBvh: envCell.localSpatial.localBvh,
 		localBvhItemCount: envCell.localSpatial.localBvhItemCount,
 		localBvhNodeCount: envCell.localSpatial.localBvhNodeCount,
 		memberId: envCell.memberId,
 		owner,
 		renderBounds: envCell.renderGeometry.bounds,
+		residencyBvh: payload.residencySpatial.landblockEnvCellBvh,
 		residencyBvhItemCount:
 			payload.residencySpatial.landblockEnvCellBvhItemCount,
 		residencyBvhNodeCount:
@@ -1097,7 +1109,9 @@ function createWorkPeerRecordOwner(
 	};
 }
 
-function describeStaticScopeKey(scope: ScheduledStaticWork["job"]["scope"]): string {
+function describeStaticScopeKey(
+	scope: ScheduledStaticWork["job"]["scope"],
+): string {
 	return `landblock:${formatHex32(scope.landblockId)}`;
 }
 

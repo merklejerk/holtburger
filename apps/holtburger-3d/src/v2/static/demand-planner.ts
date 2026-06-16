@@ -4,10 +4,12 @@ import {
 } from "../../lib/landblocks";
 import type {
 	StaticDemand,
+	StaticDemandPlan,
 	StaticDomain,
 	StaticLodRadii,
 	StaticResolverJob,
 	StaticResolverScope,
+	StaticScopeOwnerKey,
 	ScheduledStaticWork,
 } from "./contracts";
 
@@ -18,32 +20,37 @@ const domainPriorities: Record<StaticDomain, number> = {
 	"outdoor-detail": 20,
 };
 
-export function planScheduledStaticWork(
+export function planStaticDemand(
 	demand: StaticDemand,
 	revision: number,
-): ScheduledStaticWork[] {
+): StaticDemandPlan {
 	if (!demand.location) {
-		return [];
+		return { retainedScopes: [], work: [] };
 	}
 
 	if (demand.location.kind === "interior-cell") {
 		const landblockId = normalizeOutdoorLandblockId(
 			demand.location.landblockId,
 		);
-
-		return [
+		const job: StaticResolverJob = {
+			domain: "landblock-env-cells",
+			scope: {
+				kind: "landblock",
+				landblockId,
+			},
+		};
+		const work = [
 			createScheduledStaticWork({
-				job: {
-					domain: "landblock-env-cells",
-					scope: {
-						kind: "landblock",
-						landblockId,
-					},
-				},
+				job,
 				priority: domainPriorities["landblock-env-cells"],
 				revision,
 			}),
 		];
+
+		return {
+			retainedScopes: work.map(createRetainedScopeFromWork),
+			work,
+		};
 	}
 
 	const lod = normalizeOutdoorLodRadii(demand.lod);
@@ -75,7 +82,12 @@ export function planScheduledStaticWork(
 		revision,
 	});
 
-	return work.sort(compareScheduledStaticWork);
+	const sortedWork = work.sort(compareScheduledStaticWork);
+
+	return {
+		retainedScopes: sortedWork.map(createRetainedScopeFromWork),
+		work: sortedWork,
+	};
 }
 
 export function normalizeOutdoorLodRadii(lod: StaticLodRadii): StaticLodRadii {
@@ -139,6 +151,16 @@ function createScheduledStaticWork(input: {
 
 export function describeStaticScopeKey(scope: StaticResolverScope): string {
 	return `landblock:${formatHex32(scope.landblockId)}`;
+}
+
+function createRetainedScopeFromWork(
+	work: ScheduledStaticWork,
+): StaticScopeOwnerKey {
+	return {
+		domain: work.job.domain,
+		scope: work.job.scope,
+		scopeKey: describeStaticScopeKey(work.job.scope),
+	};
 }
 
 function compareScheduledStaticWork(

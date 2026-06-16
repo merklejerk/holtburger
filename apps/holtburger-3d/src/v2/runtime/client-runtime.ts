@@ -35,6 +35,7 @@ import type {
 	StaticObjectSourceIdentity,
 	StaticMaterialUnrenderedBucket,
 	ScheduledStaticWorkStatus,
+	StaticRetentionReconciliation,
 } from "../static/contracts";
 import { collectStaticDrawUnitResourceIds } from "../static/contracts";
 import {
@@ -50,7 +51,6 @@ import {
 	type StaticScenePickRequest,
 	type StaticScenePickHit,
 	type StaticSceneQuerySnapshot,
-	type StaticSceneQueryRetainedScope,
 	type StaticSceneSelectionKey,
 	type TerrainQuadScenePickDetails,
 } from "./static-scene-query";
@@ -452,17 +452,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				? normalizeOutdoorLandblockId(this.#sceneInterest.anchorLandblockId)
 				: null;
 		this.#setRenderAnchorLandblockId(nextAnchor);
-		const activeWork = this.#staticCoordinator.requestStaticDemand(
-			createStaticDemandFromSceneInterest(this.#sceneInterest),
-		);
-		this.#staticSceneQuery.retainScopes(
-			activeWork.map(
-				(work): StaticSceneQueryRetainedScope => ({
-					domain: work.job.domain,
-					landblockId: work.job.scope.landblockId,
-				}),
-			),
-		);
+		this.#reconcileStaticRetention(this.#sceneInterest);
 		this.#refreshStaticDebugOverlay();
 		this.#emit();
 	}
@@ -602,6 +592,16 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#refreshStaticDebugOverlay();
 	}
 
+	#reconcileStaticRetention(
+		interest: RuntimeSceneInterest,
+	): StaticRetentionReconciliation {
+		const reconciliation = this.#staticCoordinator.reconcileStaticDemand(
+			createStaticDemandFromSceneInterest(interest),
+		);
+		this.#staticSceneQuery.retainScopes(reconciliation.retainedScopes);
+		return reconciliation;
+	}
+
 	#createSnapshot(): RuntimeSnapshot {
 		return {
 			assets: this.#assetService.createSnapshot(),
@@ -729,10 +729,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#updateMaterializedDrawUnitIdMappings(delta, materialized);
 		this.#warnAboutStaticFallbacks(delta);
 		applyMaterializedStaticCommit(this.#renderer, materialized);
+		this.#staticSceneQuery.removeStaticResources(materialized.removedResources);
 		this.#staticSceneQuery.applyStaticPeerRecords({
+			authoredDynamicSeeds: materialized.staticAuthoredDynamicSeeds,
 			portalInteriorRecords: materialized.staticPortalInteriorRecords,
-			removedResources: materialized.removedResources,
-			removedScopes: materialized.removedScopes,
 			sourceMappings: materialized.staticSourceMappings,
 			spatialRecords: materialized.staticSpatialRecords,
 			visibilityRecords: materialized.staticVisibilityRecords,

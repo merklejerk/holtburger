@@ -152,7 +152,7 @@ describe("V2 static scene query", () => {
 		const query = new StaticSceneQuery();
 		query.ingestOutdoorStaticObjects(createOutdoorStaticObjectsPayload());
 		query.ingestTerrain(createTerrainPayload());
-		query.ingestLandblockEnvCells(createLandblockEnvCellsPayload());
+		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
 
 		const outdoorKey = createOutdoorStaticObjectSelectionKey({
 			domain: "outdoor-detail",
@@ -439,7 +439,7 @@ describe("V2 static scene query", () => {
 
 	it("ingests landblock env-cell static seed facts for object picking", () => {
 		const query = new StaticSceneQuery();
-		query.ingestLandblockEnvCells(createLandblockEnvCellsPayload());
+		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
 
 		const hit = query.pickRay({
 			context: {
@@ -478,11 +478,11 @@ describe("V2 static scene query", () => {
 			},
 		});
 		expect(query.createSnapshot()).toEqual({
-			committedEnvCellLandblockCount: 0,
+			committedEnvCellLandblockCount: 1,
 			committedEnvCellPortalInteriorRecordCount: 0,
 			committedEnvCellSourceMappingRecordCount: 0,
-			committedEnvCellSpatialRecordCount: 0,
-			committedEnvCellVisibilityRecordCount: 0,
+			committedEnvCellSpatialRecordCount: 1,
+			committedEnvCellVisibilityRecordCount: 1,
 			envCellLandblockCount: 1,
 			envCellRecordCount: 1,
 			landblockBucketCount: 1,
@@ -494,7 +494,8 @@ describe("V2 static scene query", () => {
 
 	it("picks env-cell static objects from STAB placement without reapplying the env-cell frame", () => {
 		const query = new StaticSceneQuery();
-		query.ingestLandblockEnvCells(
+		commitLandblockEnvCells(
+			query,
 			createLandblockEnvCellsPayload({
 				envCellPlacement: createPlacement({
 					origin: { x: 10, y: 20, z: 30 },
@@ -531,7 +532,8 @@ describe("V2 static scene query", () => {
 
 	it("prefers baked env-cell static object bounds over resolver instance bounds", () => {
 		const query = new StaticSceneQuery();
-		query.ingestLandblockEnvCells(
+		commitLandblockEnvCells(
+			query,
 			createLandblockEnvCellsPayload({
 				staticInstanceBounds: {
 					max: { x: 101, y: 101, z: 101 },
@@ -583,7 +585,8 @@ describe("V2 static scene query", () => {
 
 	it("removes draw-unit-owned committed records by materialized resource key", () => {
 		const query = new StaticSceneQuery();
-		query.ingestLandblockEnvCells(
+		commitLandblockEnvCells(
+			query,
 			createLandblockEnvCellsPayload({
 				staticInstanceBounds: {
 					max: { x: 101, y: 101, z: 101 },
@@ -611,17 +614,15 @@ describe("V2 static scene query", () => {
 		});
 
 		expect(query.createSnapshot()).toMatchObject({
-			committedEnvCellSpatialRecordCount: 1,
+			committedEnvCellSpatialRecordCount: 2,
 		});
 
-		query.applyStaticPeerRecords({
-			removedResources: [
-				{ drawUnitId: "env-cell-static-draw-unit#fine-1", kind: "draw-unit" },
-			],
-		});
+		query.removeStaticResources([
+			{ drawUnitId: "env-cell-static-draw-unit#fine-1", kind: "draw-unit" },
+		]);
 
 		expect(query.createSnapshot()).toMatchObject({
-			committedEnvCellSpatialRecordCount: 0,
+			committedEnvCellSpatialRecordCount: 1,
 		});
 		expect(
 			query.pickRay({
@@ -641,7 +642,7 @@ describe("V2 static scene query", () => {
 
 	it("picks env-cell static objects from outdoor context for visible interior debugging", () => {
 		const query = new StaticSceneQuery();
-		query.ingestLandblockEnvCells(createLandblockEnvCellsPayload());
+		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
 
 		const hit = query.pickRay({
 			context: { kind: "outdoor" },
@@ -662,7 +663,8 @@ describe("V2 static scene query", () => {
 
 	it("does not query env-cell locals through a flat fallback when the landblock BVH is absent", () => {
 		const query = new StaticSceneQuery();
-		query.ingestLandblockEnvCells(
+		commitLandblockEnvCells(
+			query,
 			createLandblockEnvCellsPayload({ includeLandblockBvh: false }),
 		);
 
@@ -681,11 +683,11 @@ describe("V2 static scene query", () => {
 
 		expect(hit).toBeNull();
 		expect(query.createSnapshot()).toEqual({
-			committedEnvCellLandblockCount: 0,
+			committedEnvCellLandblockCount: 1,
 			committedEnvCellPortalInteriorRecordCount: 0,
 			committedEnvCellSourceMappingRecordCount: 0,
-			committedEnvCellSpatialRecordCount: 0,
-			committedEnvCellVisibilityRecordCount: 0,
+			committedEnvCellSpatialRecordCount: 1,
+			committedEnvCellVisibilityRecordCount: 1,
 			envCellLandblockCount: 0,
 			envCellRecordCount: 0,
 			landblockBucketCount: 0,
@@ -697,7 +699,7 @@ describe("V2 static scene query", () => {
 
 	it("uses the landblock env-cell BVH for initial residency queries", () => {
 		const query = new StaticSceneQuery();
-		query.ingestLandblockEnvCells(createLandblockEnvCellsPayload());
+		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
 
 		expect(
 			query.queryEnvCellAtPoint({
@@ -717,8 +719,7 @@ describe("V2 static scene query", () => {
 
 	it("derives camera residency from committed env-cell query data", () => {
 		const query = new StaticSceneQuery();
-		query.ingestLandblockEnvCells(createLandblockEnvCellsPayload());
-		applyCommittedEnvCellRecords(query, 0xda55ffff);
+		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
 
 		expect(
 			query.queryCameraResidencyAtPoint({
@@ -734,7 +735,8 @@ describe("V2 static scene query", () => {
 
 	it("does not infer env-cell camera residency from source BVHs after committed records are gone", () => {
 		const query = new StaticSceneQuery();
-		query.ingestLandblockEnvCells(createLandblockEnvCellsPayload());
+		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		query.retainScopes([]);
 
 		expect(
 			query.queryCameraResidencyAtPoint({
@@ -866,15 +868,7 @@ describe("V2 static scene query", () => {
 			envCellRecordCount: 0,
 		});
 
-		query.applyStaticPeerRecords({
-			removedScopes: [
-				{
-					domain: "landblock-env-cells",
-					scope: { kind: "landblock", landblockId: 0xda55ffff },
-					scopeKey: "landblock:da55ffff",
-				},
-			],
-		});
+		query.retainScopes([]);
 
 		expect(
 			query.queryCommittedEnvCellRecords({ landblockId: 0xda55ffff }),
@@ -1519,42 +1513,57 @@ function createEnvCellWorkOwner(
 	};
 }
 
-function applyCommittedEnvCellRecords(
+function commitLandblockEnvCells(
 	query: StaticSceneQuery,
-	landblockId: number,
+	payload: LandblockEnvCellsStaticScopePayload,
 ): void {
+	const landblockId = payload.landblock.landblockId;
 	const owner = createEnvCellWorkOwner("work-env-residency", landblockId);
 	query.applyStaticPeerRecords({
-		spatialRecords: [
-			{
-				cellStructure: {
-					cellStructureId: 0x0d000001,
-					kind: "cell-structure",
-				},
-				envCellId: 0xda550100,
-				environment: {
-					environmentId: 0x0e000001,
-					kind: "environment",
-				},
-				kind: "env-cell-spatial",
+		authoredDynamicSeeds: payload.envCells.flatMap((envCell) =>
+			envCell.staticObjectSeeds.map((seed) => ({
+				envCellId: envCell.identity.envCellId,
+				kind: "env-cell-static-object-seed" as const,
 				landblockId,
-				localBvhItemCount: 1,
-				localBvhNodeCount: 1,
-				memberId: "cell-0",
 				owner,
-				renderBounds: null,
-				residencyBvhItemCount: 1,
-				residencyBvhNodeCount: 1,
-			},
-		],
+				seed,
+			})),
+		),
+		spatialRecords: payload.envCells.map((envCell) => ({
+			cellStructure: envCell.cellStructure,
+			envCellId: envCell.identity.envCellId,
+			environment: envCell.environment,
+			kind: "env-cell-spatial" as const,
+			landblockId,
+			localBvh: envCell.localSpatial.localBvh,
+			localBvhItemCount: envCell.localSpatial.localBvhItemCount,
+			localBvhNodeCount: envCell.localSpatial.localBvhNodeCount,
+			memberId: envCell.memberId,
+			owner,
+			renderBounds: envCell.renderGeometry.bounds,
+			residencyBvh: payload.residencySpatial.landblockEnvCellBvh,
+			residencyBvhItemCount:
+				payload.residencySpatial.landblockEnvCellBvhItemCount,
+			residencyBvhNodeCount:
+				payload.residencySpatial.landblockEnvCellBvhNodeCount,
+		})),
 		visibilityRecords: [
 			{
-				acceptedEnvCellIds: [0xda550100],
-				diagnostics: [],
+				acceptedEnvCellIds: payload.acceptedEnvCellIds,
+				diagnostics: payload.visibilityDiagnostics,
 				kind: "env-cell-visibility",
 				landblockId,
 				owner,
-				visibleLinks: [],
+				visibleLinks: payload.portalLinks.flatMap((link) =>
+					link.source.kind === "env-cell" && link.target.kind === "env-cell"
+						? [
+								{
+									sourceEnvCellId: link.source.envCellId,
+									targetEnvCellId: link.target.envCellId,
+								},
+							]
+						: [],
+				),
 			},
 		],
 	});

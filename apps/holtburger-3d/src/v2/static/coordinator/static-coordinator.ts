@@ -18,16 +18,13 @@ import type {
 	StaticResolver,
 	StaticPeerRecordOwner,
 	StaticResourceKey,
+	StaticRetentionReconciliation,
 	StaticScopePayload,
-	StaticScopeOwnerKey,
 	TerrainStaticScopePayloadSummary,
 	ScheduledStaticWork,
 	ScheduledStaticWorkStatus,
 } from "../contracts";
-import {
-	describeStaticScopeKey,
-	planScheduledStaticWork,
-} from "../demand-planner";
+import { describeStaticScopeKey, planStaticDemand } from "../demand-planner";
 import { createEmptyStaticBakeAttachments } from "../bake/attachments";
 
 const DEFAULT_STATIC_BATCH_MAX_PAYLOADS = 10;
@@ -122,27 +119,25 @@ export class StaticCoordinator {
 		this.#createAtlasSnapshot = createAtlasSnapshot;
 	}
 
-	requestStaticDemand(demand: StaticDemand): readonly ScheduledStaticWork[] {
+	reconcileStaticDemand(demand: StaticDemand): StaticRetentionReconciliation {
 		this.#assertActive();
 		this.#revision += 1;
-		const workItems = planScheduledStaticWork(demand, this.#revision);
-		const desiredKeys = new Set(workItems.map(createDesiredWorkKey));
+		const demandPlan = planStaticDemand(demand, this.#revision);
+		const desiredKeys = new Set(demandPlan.work.map(createDesiredWorkKey));
 		const newWorkItems: ScheduledStaticWork[] = [];
-		const removedScopes: StaticScopeOwnerKey[] = [];
 
 		for (const status of Array.from(this.#activeWork.values())) {
 			if (!desiredKeys.has(status.desiredKey)) {
-				removedScopes.push(createStaticScopeOwnerKey(status));
 				this.#activeWork.delete(status.workId);
 			}
 		}
 		const removedResources = this.#evictResidentDrawUnitsExcept(desiredKeys);
-		if (removedScopes.length > 0 || removedResources.length > 0) {
-			this.#emitEvictionCommitDelta({ removedResources, removedScopes });
+		if (removedResources.length > 0) {
+			this.#emitEvictionCommitDelta({ removedResources });
 		}
 		this.#pruneMaterialCoverageByDesiredKeys(desiredKeys);
 
-		for (const work of workItems) {
+		for (const work of demandPlan.work) {
 			const desiredKey = createDesiredWorkKey(work);
 			const existing = this.#findActiveWorkByDesiredKey(desiredKey);
 			if (existing && existing.status !== "failed") {
@@ -170,7 +165,7 @@ export class StaticCoordinator {
 			void this.#resolveThenBake(work);
 		}
 
-		return workItems
+		const activeWork = demandPlan.work
 			.map((work) =>
 				this.#findActiveWorkByDesiredKey(createDesiredWorkKey(work)),
 			)
@@ -178,6 +173,12 @@ export class StaticCoordinator {
 				Boolean(status),
 			)
 			.map((status) => status.work);
+
+		return {
+			activeWork,
+			removedResources,
+			retainedScopes: demandPlan.retainedScopes,
+		};
 	}
 
 	subscribe(listener: StaticCoordinatorListener): () => void {
@@ -439,7 +440,6 @@ export class StaticCoordinator {
 			addedDrawUnits: result.drawUnits,
 			materialCoverage: result.materialCoverage,
 			removedResources: [],
-			removedScopes: [],
 			revision: result.revision,
 			staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds,
 			staticBatchId: result.staticBatchId,
@@ -478,13 +478,11 @@ export class StaticCoordinator {
 
 	#emitEvictionCommitDelta(options: {
 		readonly removedResources: readonly StaticResourceKey[];
-		readonly removedScopes: readonly StaticScopeOwnerKey[];
 	}): void {
 		this.#emitCommitDelta({
 			addedDrawUnits: [],
 			materialCoverage: [],
 			removedResources: options.removedResources,
-			removedScopes: options.removedScopes,
 			revision: this.#revision,
 			staticAuthoredDynamicSeeds: [],
 			staticBatchId: createEvictionStaticBatchId(this.#revision),
@@ -700,19 +698,6 @@ function createPendingBatchKey(work: ScheduledStaticWork): string {
 
 function createDesiredWorkKey(work: ScheduledStaticWork): string {
 	return `${describeStaticScopeKey(work.job.scope)}:${work.job.domain}`;
-}
-
-function createStaticScopeOwnerKey(
-	status: Pick<
-		MutableScheduledStaticWorkStatus,
-		"domain" | "scopeKey" | "work"
-	>,
-): StaticScopeOwnerKey {
-	return {
-		domain: status.domain,
-		scope: status.work.job.scope,
-		scopeKey: status.scopeKey,
-	};
 }
 
 function createDesiredKeyForDrawUnit(input: {

@@ -1,15 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { normalizeOutdoorLandblockId } from "../../lib/landblocks";
-import {
-	normalizeOutdoorLodRadii,
-	planScheduledStaticWork,
-} from "./demand-planner";
+import { normalizeOutdoorLodRadii, planStaticDemand } from "./demand-planner";
 import type { StaticDemand } from "./contracts";
 
 describe("V2 static demand planner", () => {
 	it("clamps outdoor domain radii before producing scheduled work", () => {
 		const focusLandblockId = 0xda55ffff;
-		const work = planScheduledStaticWork(
+		const { work } = planStaticDemand(
 			createOutdoorDemand(focusLandblockId, {
 				buildings: 9,
 				detail: 1,
@@ -45,7 +42,7 @@ describe("V2 static demand planner", () => {
 	});
 
 	it("does not put lifecycle policy, interest radii, or camera state on resolver jobs", () => {
-		const [work] = planScheduledStaticWork(
+		const [work] = planStaticDemand(
 			createOutdoorDemand(0xda55ffff, {
 				buildings: -1,
 				detail: -1,
@@ -53,7 +50,7 @@ describe("V2 static demand planner", () => {
 				terrain: 0,
 			}),
 			3,
-		);
+		).work;
 
 		expect(work?.job).toEqual({
 			domain: "outdoor-terrain",
@@ -84,7 +81,7 @@ describe("V2 static demand planner", () => {
 	});
 
 	it("plans outdoor env-cell demand from env-cell coverage radius", () => {
-		const work = planScheduledStaticWork(
+		const { retainedScopes, work } = planStaticDemand(
 			createOutdoorDemand(0xda55ffff, {
 				buildings: -1,
 				detail: -1,
@@ -110,10 +107,18 @@ describe("V2 static demand planner", () => {
 			priority: 5,
 			workId: "4:landblock:da55ffff:landblock-env-cells",
 		});
+		expect(retainedScopes).toContainEqual({
+			domain: "landblock-env-cells",
+			scope: {
+				kind: "landblock",
+				landblockId: 0xda55ffff,
+			},
+			scopeKey: "landblock:da55ffff",
+		});
 	});
 
 	it("plans dungeon/interior demand as one landblock-owned env-cell resolver job", () => {
-		const work = planScheduledStaticWork(
+		const { retainedScopes, work } = planStaticDemand(
 			{
 				location: {
 					envCellId: 0xda550123,
@@ -142,6 +147,16 @@ describe("V2 static demand planner", () => {
 				priority: 5,
 				revision: 12,
 				workId: "12:landblock:da55ffff:landblock-env-cells",
+			},
+		]);
+		expect(retainedScopes).toEqual([
+			{
+				domain: "landblock-env-cells",
+				scope: {
+					kind: "landblock",
+					landblockId: 0xda55ffff,
+				},
+				scopeKey: "landblock:da55ffff",
 			},
 		]);
 	});

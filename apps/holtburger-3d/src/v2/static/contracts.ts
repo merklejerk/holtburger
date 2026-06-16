@@ -49,6 +49,17 @@ export interface StaticScopeOwnerKey {
 	readonly scopeKey: string;
 }
 
+export interface StaticDemandPlan {
+	readonly retainedScopes: readonly StaticScopeOwnerKey[];
+	readonly work: readonly ScheduledStaticWork[];
+}
+
+export interface StaticRetentionReconciliation {
+	readonly activeWork: readonly ScheduledStaticWork[];
+	readonly retainedScopes: readonly StaticScopeOwnerKey[];
+	readonly removedResources: readonly StaticResourceKey[];
+}
+
 export type StaticResourceKey = StaticDrawUnitResourceKey;
 
 export interface StaticDrawUnitResourceKey {
@@ -813,8 +824,10 @@ export interface StaticEnvCellSpatialRecord {
 	readonly environment: EnvironmentIdentity;
 	readonly cellStructure: CellStructureIdentity;
 	readonly renderBounds: StaticBounds | null;
+	readonly localBvh: LandblockEnvCellsPayloadDto["envCells"][number]["localBvh"];
 	readonly localBvhNodeCount: number;
 	readonly localBvhItemCount: number;
+	readonly residencyBvh: LandblockEnvCellResidencyBvhFacts;
 	readonly residencyBvhNodeCount: number;
 	readonly residencyBvhItemCount: number;
 }
@@ -1353,7 +1366,6 @@ export interface StaticCoordinatorCommitDelta {
 	readonly staticBatchId: string;
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
 	readonly removedResources: readonly StaticResourceKey[];
-	readonly removedScopes: readonly StaticScopeOwnerKey[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly staticSpatialRecords: readonly StaticSpatialRecord[];

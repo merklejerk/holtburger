@@ -25,10 +25,12 @@ describe("V2 static coordinator", () => {
 			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
 			resolver,
 		});
-		const [firstWork] = coordinator.requestStaticDemand(
+		const [firstWork] = activeWorkForDemand(
+			coordinator,
 			createSingleTerrainDemand(0xda55ffff),
 		);
-		const [secondWork] = coordinator.requestStaticDemand(
+		const [secondWork] = activeWorkForDemand(
+			coordinator,
 			createSingleTerrainDemand(0xda56ffff),
 		);
 		const firstResolverRequest = resolver.pendingRequests[0];
@@ -67,7 +69,8 @@ describe("V2 static coordinator", () => {
 			resolver,
 		});
 
-		const [firstWork] = coordinator.requestStaticDemand(
+		const [firstWork] = activeWorkForDemand(
+			coordinator,
 			createSingleTerrainDemand(0xda55ffff),
 		);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
@@ -75,7 +78,7 @@ describe("V2 static coordinator", () => {
 
 		expect(baker.pendingInputs).toHaveLength(1);
 
-		coordinator.requestStaticDemand(createSingleTerrainDemand(0xda56ffff));
+		activeWorkForDemand(coordinator, createSingleTerrainDemand(0xda56ffff));
 		baker.complete(firstWork.workId);
 		await flushPromises();
 
@@ -95,7 +98,7 @@ describe("V2 static coordinator", () => {
 			resolver,
 		});
 
-		coordinator.requestStaticDemand(createSingleTerrainDemand(0xda55ffff));
+		activeWorkForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
 
@@ -118,7 +121,7 @@ describe("V2 static coordinator", () => {
 			resolver,
 		});
 
-		coordinator.requestStaticDemand({
+		activeWorkForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
 				landblockId: 0xda55ffff,
@@ -132,7 +135,7 @@ describe("V2 static coordinator", () => {
 		});
 		expect(resolver.pendingRequests).toHaveLength(5);
 
-		coordinator.requestStaticDemand({
+		activeWorkForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
 				landblockId: 0xdb55ffff,
@@ -181,7 +184,7 @@ describe("V2 static coordinator", () => {
 			resolver,
 		});
 
-		coordinator.requestStaticDemand(createSingleTerrainDemand(0xda55ffff));
+		activeWorkForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
 
 		expect(coordinator.createSnapshot().activeWork).toEqual([
 			{
@@ -196,6 +199,30 @@ describe("V2 static coordinator", () => {
 		expect(JSON.stringify(coordinator.createSnapshot())).not.toContain("lease");
 	});
 
+	it("returns retained scopes separately from active work", () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+
+		const reconciliation = coordinator.reconcileStaticDemand(
+			createSingleTerrainDemand(0xda55ffff),
+		);
+
+		expect(reconciliation.retainedScopes).toEqual([
+			{
+				domain: "outdoor-terrain",
+				scope: { kind: "landblock", landblockId: 0xda55ffff },
+				scopeKey: "landblock:da55ffff",
+			},
+		]);
+		expect(reconciliation.activeWork).toHaveLength(1);
+		expect(reconciliation.removedResources).toEqual([]);
+	});
+
 	it("emits committed draw-unit deltas and eviction deltas", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -207,7 +234,8 @@ describe("V2 static coordinator", () => {
 		const deltas: StaticCoordinatorCommitDelta[] = [];
 		coordinator.subscribeCommits((delta) => deltas.push(delta));
 
-		const [work] = coordinator.requestStaticDemand(
+		const [work] = activeWorkForDemand(
+			coordinator,
 			createSingleTerrainDemand(0xda55ffff),
 		);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
@@ -222,7 +250,6 @@ describe("V2 static coordinator", () => {
 				addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
 				materialCoverage: [],
 				removedResources: [],
-				removedScopes: [],
 				revision: 1,
 				staticAuthoredDynamicSeeds: [],
 				staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:1",
@@ -235,7 +262,7 @@ describe("V2 static coordinator", () => {
 		]);
 		expect(coordinator.createSnapshot().committedDrawUnits).toBe(1);
 
-		coordinator.requestStaticDemand({
+		activeWorkForDemand(coordinator, {
 			location: null,
 			lod: {
 				buildings: -1,
@@ -249,13 +276,6 @@ describe("V2 static coordinator", () => {
 			addedDrawUnits: [],
 			materialCoverage: [],
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
-			removedScopes: [
-				{
-					domain: "outdoor-terrain",
-					scope: { kind: "landblock", landblockId: 0xda55ffff },
-					scopeKey: "landblock:da55ffff",
-				},
-			],
 			revision: 2,
 			staticAuthoredDynamicSeeds: [],
 			staticBatchId: "static-batch:2:evict",
@@ -268,7 +288,7 @@ describe("V2 static coordinator", () => {
 		expect(coordinator.createSnapshot().committedDrawUnits).toBe(0);
 	});
 
-	it("emits scope eviction deltas for active work without resident draw units", () => {
+	it("does not emit eviction commit deltas without concrete resources", () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
@@ -279,8 +299,8 @@ describe("V2 static coordinator", () => {
 		const deltas: StaticCoordinatorCommitDelta[] = [];
 		coordinator.subscribeCommits((delta) => deltas.push(delta));
 
-		coordinator.requestStaticDemand(createSingleTerrainDemand(0xda55ffff));
-		coordinator.requestStaticDemand({
+		activeWorkForDemand(coordinator, createSingleTerrainDemand(0xda55ffff));
+		const reconciliation = coordinator.reconcileStaticDemand({
 			location: null,
 			lod: {
 				buildings: -1,
@@ -290,28 +310,9 @@ describe("V2 static coordinator", () => {
 			},
 		});
 
-		expect(deltas).toEqual([
-			{
-				addedDrawUnits: [],
-				materialCoverage: [],
-				removedResources: [],
-				removedScopes: [
-					{
-						domain: "outdoor-terrain",
-						scope: { kind: "landblock", landblockId: 0xda55ffff },
-						scopeKey: "landblock:da55ffff",
-					},
-				],
-				revision: 2,
-				staticAuthoredDynamicSeeds: [],
-				staticBatchId: "static-batch:2:evict",
-				staticPortalInteriorRecords: [],
-				staticSourceMappings: [],
-				staticSpatialRecords: [],
-				staticVisibilityRecords: [],
-				textureUses: [],
-			},
-		]);
+		expect(reconciliation.retainedScopes).toEqual([]);
+		expect(reconciliation.removedResources).toEqual([]);
+		expect(deltas).toEqual([]);
 	});
 
 	it("rejects ownerless committed draw units instead of inferring batch ownership", async () => {
@@ -325,7 +326,8 @@ describe("V2 static coordinator", () => {
 		const deltas: StaticCoordinatorCommitDelta[] = [];
 		coordinator.subscribeCommits((delta) => deltas.push(delta));
 
-		const [work] = coordinator.requestStaticDemand(
+		const [work] = activeWorkForDemand(
+			coordinator,
 			createSingleTerrainDemand(0xda55ffff),
 		);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
@@ -359,7 +361,7 @@ describe("V2 static coordinator", () => {
 			resolver,
 		});
 
-		const work = coordinator.requestStaticDemand({
+		const work = activeWorkForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
 				landblockId: 0xda55ffff,
@@ -409,7 +411,7 @@ describe("V2 static coordinator", () => {
 		const sourcePayloads: StaticCoordinatorSourcePayloadDelta[] = [];
 		coordinator.subscribeSourcePayloads((delta) => sourcePayloads.push(delta));
 
-		const work = coordinator.requestStaticDemand({
+		const work = activeWorkForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
 				landblockId: 0xda55ffff,
@@ -611,7 +613,8 @@ describe("V2 static coordinator", () => {
 			resolver,
 		});
 
-		const [work] = coordinator.requestStaticDemand(
+		const [work] = activeWorkForDemand(
+			coordinator,
 			createSingleTerrainDemand(0xda55ffff),
 		);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
@@ -633,7 +636,7 @@ describe("V2 static coordinator", () => {
 			}),
 		]);
 
-		coordinator.requestStaticDemand({
+		activeWorkForDemand(coordinator, {
 			location: null,
 			lod: {
 				buildings: -1,
@@ -655,7 +658,7 @@ describe("V2 static coordinator", () => {
 			resolver,
 		});
 
-		const [work] = coordinator.requestStaticDemand({
+		const [work] = activeWorkForDemand(coordinator, {
 			location: {
 				envCellId: 0xda550100,
 				kind: "interior-cell",
@@ -708,7 +711,7 @@ describe("V2 static coordinator", () => {
 		const sourcePayloads: StaticCoordinatorSourcePayloadDelta[] = [];
 		coordinator.subscribeSourcePayloads((delta) => sourcePayloads.push(delta));
 
-		const [work] = coordinator.requestStaticDemand({
+		const [work] = activeWorkForDemand(coordinator, {
 			location: {
 				envCellId: 0xda550100,
 				kind: "interior-cell",
@@ -786,7 +789,7 @@ describe("V2 static coordinator", () => {
 		const deltas: StaticCoordinatorCommitDelta[] = [];
 		coordinator.subscribeCommits((delta) => deltas.push(delta));
 
-		coordinator.requestStaticDemand({
+		activeWorkForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
 				landblockId: 0xda55ffff,
@@ -815,7 +818,7 @@ describe("V2 static coordinator", () => {
 		);
 		expect(envCellBatch?.items.length).toBeGreaterThan(1);
 
-		coordinator.requestStaticDemand({
+		activeWorkForDemand(coordinator, {
 			location: {
 				kind: "outdoor-landblock",
 				landblockId: 0xda55ffff,
@@ -891,7 +894,7 @@ describe("V2 static coordinator", () => {
 		const deltas: StaticCoordinatorCommitDelta[] = [];
 		coordinator.subscribeCommits((delta) => deltas.push(delta));
 
-		const [work] = coordinator.requestStaticDemand({
+		const [work] = activeWorkForDemand(coordinator, {
 			location: {
 				envCellId: 0xda550100,
 				kind: "interior-cell",
@@ -930,10 +933,9 @@ describe("V2 static coordinator", () => {
 				},
 			],
 			removedResources: [],
-			removedScopes: [],
 		});
 
-		coordinator.requestStaticDemand({
+		activeWorkForDemand(coordinator, {
 			location: null,
 			lod: {
 				buildings: -1,
@@ -950,13 +952,6 @@ describe("V2 static coordinator", () => {
 			addedDrawUnits: [],
 			removedResources: [
 				{ drawUnitId: "structured-interior-a", kind: "draw-unit" },
-			],
-			removedScopes: [
-				{
-					domain: "landblock-env-cells",
-					scope: { kind: "landblock", landblockId: 0xda55ffff },
-					scopeKey: "landblock:da55ffff",
-				},
 			],
 		});
 	});
@@ -975,6 +970,13 @@ function createSingleTerrainDemand(landblockId: number): StaticDemand {
 			envCells: -1,
 		},
 	};
+}
+
+function activeWorkForDemand(
+	coordinator: StaticCoordinator,
+	demand: StaticDemand,
+): readonly ScheduledStaticWork[] {
+	return coordinator.reconcileStaticDemand(demand).activeWork;
 }
 
 class RejectingAttachmentProvider implements StaticBakeAttachmentProvider {

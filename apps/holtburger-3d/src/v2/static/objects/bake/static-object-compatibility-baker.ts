@@ -6,7 +6,6 @@ import type {
 	StaticBakeBatchInput,
 	StaticBakeBatchItem,
 	StaticBakeBatchResult,
-	StaticBakeTextureSamplingPolicy,
 	StaticBakeTextureUse,
 	StaticBaker,
 	StaticDrawUnit,
@@ -31,9 +30,12 @@ import {
 	writeTexCoord,
 	writeTransformedPosition,
 } from "../../bake/ac-placement-transform";
+import {
+	createStaticMaterialTextureSamplingPolicy,
+	createStaticMaterialTextureUseId,
+} from "../../bake/static-material-texture-policy";
 import { describeStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
 import {
-	createMaterialTextureDataUseKey,
 	partitionStaticObjectCompatibility,
 	type StaticObjectCompatibilityPayload,
 	type StaticObjectCompatibilityPartition,
@@ -530,11 +532,19 @@ function createStaticObjectMaterialTableEntry(parameters: {
 		renderState: createStaticObjectRenderState(parameters.entry.blend),
 		detailTextureTiling: parameters.entry.detailTextureTiling,
 		detailTextureUseId: detailTextureUse
-			? createStaticObjectTextureUseId(options.work, detailTextureUse)
+			? createStaticObjectTextureUseId({
+					dataUse: detailTextureUse,
+					work: options.work,
+					wrapMode: parameters.entry.textureWrapMode,
+				})
 			: null,
 		indexedTextureFormat,
 		indexTextureUseId: indexTextureUse
-			? createStaticObjectTextureUseId(options.work, indexTextureUse)
+			? createStaticObjectTextureUseId({
+					dataUse: indexTextureUse,
+					work: options.work,
+					wrapMode: parameters.entry.textureWrapMode,
+				})
 			: null,
 		materialColor: parameters.entry.materialColor,
 		materialEmissiveColor: parameters.entry.materialEmissiveColor,
@@ -544,10 +554,18 @@ function createStaticObjectMaterialTableEntry(parameters: {
 				? paletteTextureUse.firstIndex
 				: 0,
 		paletteTextureUseId: paletteTextureUse
-			? createStaticObjectTextureUseId(options.work, paletteTextureUse)
+			? createStaticObjectTextureUseId({
+					dataUse: paletteTextureUse,
+					work: options.work,
+					wrapMode: parameters.entry.textureWrapMode,
+				})
 			: null,
 		primaryTextureUseId: primaryTextureUse
-			? createStaticObjectTextureUseId(options.work, primaryTextureUse)
+			? createStaticObjectTextureUseId({
+					dataUse: primaryTextureUse,
+					work: options.work,
+					wrapMode: parameters.entry.textureWrapMode,
+				})
 			: null,
 		primaryTextureWrapMode: parameters.entry.textureWrapMode,
 		slot: parameters.slot,
@@ -884,10 +902,11 @@ function createStaticObjectBakeTextureUses(options: {
 					continue;
 				}
 
-				const textureUseId = createStaticObjectTextureUseId(
-					options.work,
+				const textureUseId = createStaticObjectTextureUseId({
 					dataUse,
-				);
+					work: options.work,
+					wrapMode: entry.textureWrapMode,
+				});
 				const existing = textureUsesById.get(textureUseId);
 				if (existing) {
 					textureUsesById.set(textureUseId, {
@@ -900,7 +919,10 @@ function createStaticObjectBakeTextureUses(options: {
 				textureUsesById.set(textureUseId, {
 					domain: options.work.job.domain,
 					ownerDrawUnitIds: [drawUnitId],
-					samplingPolicy: createStaticObjectSamplingPolicy(),
+					samplingPolicy: createStaticMaterialTextureSamplingPolicy({
+						dataUse,
+						wrapMode: entry.textureWrapMode,
+					}),
 					source: dataUse,
 					staticBatchId: options.staticBatchId,
 					textureUseId,
@@ -915,21 +937,18 @@ function createStaticObjectBakeTextureUses(options: {
 }
 
 function createStaticObjectTextureUseId(
-	work: ScheduledStaticWork,
-	dataUse: MaterialTextureDataUseIdentity,
+	options: {
+		readonly dataUse: MaterialTextureDataUseIdentity;
+		readonly work: ScheduledStaticWork;
+		readonly wrapMode: StaticObjectCompatibilityPartition["textureWrapMode"];
+	},
 ): string {
-	return [
-		work.workId,
-		"static-object-texture",
-		createMaterialTextureDataUseKey(dataUse),
-	].join(":");
-}
-
-function createStaticObjectSamplingPolicy(): StaticBakeTextureSamplingPolicy {
-	return {
-		wrapS: "clamp-to-edge",
-		wrapT: "clamp-to-edge",
-	};
+	return createStaticMaterialTextureUseId({
+		dataUse: options.dataUse,
+		textureUseNamespace: "static-object-texture",
+		workId: options.work.workId,
+		wrapMode: options.wrapMode,
+	});
 }
 
 function mergeTextureUses(

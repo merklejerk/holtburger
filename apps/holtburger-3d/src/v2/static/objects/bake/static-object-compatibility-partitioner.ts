@@ -11,6 +11,7 @@ import type {
 	StaticObjectPartSourceFacts,
 	StaticObjectSourceIdentity,
 } from "../../contracts";
+import { createMaterialTextureDataUseKey } from "../../bake/static-material-texture-policy";
 import { createStaticObjectMaterialCoverageReport } from "./static-object-material-coverage";
 import {
 	createStaticObjectMaterialUseKey,
@@ -804,44 +805,6 @@ function resolveDetailTextureTiling(plan: StaticObjectMaterialPlan): number {
 		(role) => role.role === "detail-overlay",
 	);
 	return detailRole?.role === "detail-overlay" ? detailRole.tiling : 1;
-}
-
-export function createMaterialTextureDataUseKey(
-	dataUse: MaterialTextureDataUseIdentity,
-): string {
-	if (dataUse.kind === "palette-texture-use") {
-		return [
-			dataUse.kind,
-			formatHex32(dataUse.palette.paletteId),
-			`range:${dataUse.firstIndex}-${dataUse.indexCount}`,
-			createPaletteTextureSubPalettesKey(dataUse.subPalettes ?? []),
-			dataUse.usage,
-		].join(":");
-	}
-
-	return [
-		dataUse.kind,
-		formatHex32(dataUse.renderSurface.renderSurfaceId),
-		dataUse.usage,
-	].join(":");
-}
-
-function createPaletteTextureSubPalettesKey(
-	subPalettes: Extract<
-		MaterialTextureDataUseIdentity,
-		{ readonly kind: "palette-texture-use" }
-	>["subPalettes"],
-): string {
-	if (subPalettes.length === 0) {
-		return "sub:none";
-	}
-	return [
-		"sub",
-		...subPalettes.map(
-			(subPalette) =>
-				`${formatHex32(subPalette.palette.paletteId)}@${subPalette.firstIndex}+${subPalette.indexCount}`,
-		),
-	].join(":");
 }
 
 function uniqueTextureDataUses(

@@ -587,12 +587,12 @@ describe("V2 landblock env-cell baker", () => {
 					family: "texture-rgba",
 					outcome: "rendered",
 					textureUseIds: [
-						"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color",
+						"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 					],
 				}),
 			],
 			textureUseIds: [
-				"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color",
+				"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 			],
 		});
 		expect(result.textureUses).toEqual([
@@ -613,7 +613,7 @@ describe("V2 landblock env-cell baker", () => {
 				},
 				staticBatchId: "env-batch-a",
 				textureUseId:
-					"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color",
+					"7:landblock:da55ffff:landblock-env-cells:structured-interior-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=repeat,repeat",
 			}),
 		]);
 	});

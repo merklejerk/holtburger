@@ -215,11 +215,7 @@ function createLandblockEnvCellStaticFacts(options: {
 		},
 		landblockId,
 		localPlacement: cell.localPlacement,
-		localSpatial: {
-			localBvh: cell.localBvh,
-			localBvhItemCount: cell.localBvh.items.length,
-			localBvhNodeCount: cell.localBvh.nodes.length,
-		},
+		localSpatial: createEnvCellLocalSpatialFacts(cell),
 		memberId: cell.memberId,
 		portalApertures: cell.portalApertures,
 		portals: cell.portals,
@@ -266,10 +262,41 @@ function createEnvCellStaticObjectInstanceIdentity(input: {
 	readonly instanceId: string;
 }): StaticObjectInstanceIdentity {
 	return {
-		instanceId: `${formatHex32(input.envCellId)}:${input.instanceId}`,
+		instanceId: createEnvCellStaticObjectInstanceId(input),
 		kind: "static-object-instance",
 		landblockId: input.landblockId,
 		objectKind: "explicit-object",
+	};
+}
+
+function createEnvCellStaticObjectInstanceId(input: {
+	readonly envCellId: number;
+	readonly instanceId: string;
+}): string {
+	return `${formatHex32(input.envCellId)}:${input.instanceId}`;
+}
+
+function createEnvCellLocalSpatialFacts(
+	cell: ResolverLandblockEnvCellsPayloadDto["envCells"][number],
+): LandblockEnvCellStaticFacts["localSpatial"] {
+	const localBvh = {
+		items: cell.localBvh.items.map((item) =>
+			item.kind === "static"
+				? {
+						...item,
+						instanceId: createEnvCellStaticObjectInstanceId({
+							envCellId: cell.envCellId,
+							instanceId: item.instanceId,
+						}),
+					}
+				: item,
+		),
+		nodes: cell.localBvh.nodes,
+	};
+	return {
+		localBvh,
+		localBvhItemCount: localBvh.items.length,
+		localBvhNodeCount: localBvh.nodes.length,
 	};
 }
 

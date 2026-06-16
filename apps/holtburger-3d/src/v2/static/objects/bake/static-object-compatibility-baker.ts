@@ -14,6 +14,7 @@ import type {
 	StaticObjectDrawUnitOwnership,
 	StaticObjectMaterialTableEntry,
 	StaticObjectInstanceIdentity,
+	StaticEnvCellStaticObjectSpatialRecord,
 	StaticObjectSourceGeometryAttachment,
 	StaticObjectPartSourceFacts,
 	StaticObjectRenderState,
@@ -220,7 +221,7 @@ function bakeStaticObjectCompatibilityItem(
 		return false;
 	});
 	const drawUnits = renderablePartitions.map((partition) =>
-		createStaticObjectGeometryDrawUnit({
+		createStaticObjectGeometryBakeOutput({
 			attachments: input.attachments,
 			partition,
 			payload: scope,
@@ -230,7 +231,7 @@ function bakeStaticObjectCompatibilityItem(
 	const drawUnitIdBySliceId = new Map(
 		renderablePartitions.map((partition, index) => [
 			partition.sliceId,
-			drawUnits[index]?.drawUnitId ?? "",
+			drawUnits[index]?.drawUnit.drawUnitId ?? "",
 		]),
 	);
 	const sourceMappingCoverageBySliceId = new Map(
@@ -256,8 +257,8 @@ function bakeStaticObjectCompatibilityItem(
 	);
 
 	return {
-		drawUnits: drawUnits.map((drawUnit, index) => ({
-			...drawUnit,
+		drawUnits: drawUnits.map((output, index) => ({
+			...output.drawUnit,
 			sourceMappingCoverage:
 				sourceMappingCoverageBySliceId.get(
 					renderablePartitions[index]?.sliceId ?? "",
@@ -269,7 +270,10 @@ function bakeStaticObjectCompatibilityItem(
 		})),
 		materialCoverage: partitionPlan.materialCoverage,
 		sourceMappings: [],
-		spatialRecords: [...spatialRecordBySliceId.values()],
+		spatialRecords: [
+			...spatialRecordBySliceId.values(),
+			...drawUnits.flatMap((output) => output.objectSpatialRecords),
+		],
 		textureUses: createStaticObjectBakeTextureUses({
 			partitions: partitionPlan.partitions,
 			staticBatchId: input.staticBatchId,
@@ -336,12 +340,17 @@ function warnAboutSkippedStaticObjectPartition(
 	);
 }
 
-function createStaticObjectGeometryDrawUnit(options: {
+interface StaticObjectGeometryBakeOutput {
+	readonly drawUnit: StaticObjectGeometryStaticDrawUnit;
+	readonly objectSpatialRecords: readonly StaticEnvCellStaticObjectSpatialRecord[];
+}
+
+function createStaticObjectGeometryBakeOutput(options: {
 	readonly attachments: StaticBakeBatchInput["attachments"];
 	readonly work: ScheduledStaticWork;
 	readonly payload: StaticObjectCompatibilityPayload;
 	readonly partition: StaticObjectCompatibilityPartition;
-}): StaticObjectGeometryStaticDrawUnit {
+}): StaticObjectGeometryBakeOutput {
 	const sourceIndex = new StaticObjectBakeSourceIndex(
 		options.payload,
 		options.attachments,
@@ -374,12 +383,13 @@ function createStaticObjectGeometryDrawUnit(options: {
 			`Renderable static object partition ${options.partition.sliceId} has no material table entries.`,
 		);
 	}
+	const drawUnitId = `${options.work.workId}:static-object-partition:${options.partition.sliceId.replaceAll("/", "-")}`;
 
-	return {
+	const drawUnit: StaticObjectGeometryStaticDrawUnit = {
 		alphaTest: materialEntry.alphaTest,
 		coordinateSpace: "landblock-render-local",
 		domain: options.payload.domain,
-		drawUnitId: `${options.work.workId}:static-object-partition:${options.partition.sliceId.replaceAll("/", "-")}`,
+		drawUnitId,
 		indexType: geometry.indices instanceof Uint16Array ? "uint16" : "uint32",
 		indices: geometry.indices,
 		kind: "static-object-geometry",
@@ -415,6 +425,56 @@ function createStaticObjectGeometryDrawUnit(options: {
 		triangleCount: options.partition.triangleCount,
 		vertexCount: options.partition.triangleCount * 3,
 	};
+	return {
+		drawUnit,
+		objectSpatialRecords: createEnvCellStaticObjectSpatialRecords({
+			drawUnitId,
+			geometry,
+			payload: options.payload,
+		}),
+	};
+}
+
+function createEnvCellStaticObjectSpatialRecords(options: {
+	readonly drawUnitId: string;
+	readonly geometry: ReturnType<typeof bakeStaticObjectPartitionGeometry>;
+	readonly payload: StaticObjectCompatibilityPayload;
+}): readonly StaticEnvCellStaticObjectSpatialRecord[] {
+	if (options.payload.domain !== "landblock-env-cells") {
+		return [];
+	}
+
+	const objectsByKey = new Map(
+		options.payload.objects.map((object) => [
+			createObjectKey(object.identity),
+			object,
+		]),
+	);
+	return [...options.geometry.objectBoundsByObjectKey].flatMap(
+		([objectKey, bounds]): readonly StaticEnvCellStaticObjectSpatialRecord[] => {
+			const object = objectsByKey.get(objectKey);
+			if (
+				!object ||
+				object.owningEnvCellId === null ||
+				object.owningEnvCellId === undefined
+			) {
+				return [];
+			}
+			return [
+				{
+					bounds,
+					envCellId: object.owningEnvCellId,
+					instanceId: object.identity.instanceId,
+					kind: "env-cell-static-object-bounds",
+					landblockId: object.identity.landblockId,
+					owner: {
+						drawUnitId: options.drawUnitId,
+						kind: "draw-unit",
+					},
+				},
+			];
+		},
+	);
 }
 
 function createStaticObjectMaterialTableEntries(options: {
@@ -589,6 +649,39 @@ function computePositionBounds(positions: Float32Array): StaticBounds | null {
 	};
 }
 
+function expandObjectBounds(
+	boundsByObjectKey: Map<string, StaticBounds>,
+	objectKey: string,
+	positions: Float32Array,
+	vertexIndex: number,
+): void {
+	const offset = vertexIndex * 3;
+	const x = positions[offset]!;
+	const y = positions[offset + 1]!;
+	const z = positions[offset + 2]!;
+	const existing = boundsByObjectKey.get(objectKey);
+	if (!existing) {
+		boundsByObjectKey.set(objectKey, {
+			max: { x, y, z },
+			min: { x, y, z },
+		});
+		return;
+	}
+
+	boundsByObjectKey.set(objectKey, {
+		max: {
+			x: Math.max(existing.max.x, x),
+			y: Math.max(existing.max.y, y),
+			z: Math.max(existing.max.z, z),
+		},
+		min: {
+			x: Math.min(existing.min.x, x),
+			y: Math.min(existing.min.y, y),
+			z: Math.min(existing.min.z, z),
+		},
+	});
+}
+
 function centerOfBounds(
 	bounds: StaticBounds,
 ): readonly [number, number, number] {
@@ -697,15 +790,18 @@ function bakeStaticObjectPartitionGeometry(
 	readonly texCoords: Float32Array;
 	readonly materialSlotIndices: Float32Array;
 	readonly indices: Uint16Array | Uint32Array;
+	readonly objectBoundsByObjectKey: ReadonlyMap<string, StaticBounds>;
 } {
 	const vertexCount = triangles.length * 3;
 	const positions = new Float32Array(vertexCount * 3);
 	const texCoords = new Float32Array(vertexCount * 2);
 	const materialSlotIndices = new Float32Array(vertexCount);
 	const indices = createIndexArray(vertexCount);
+	const objectBoundsByObjectKey = new Map<string, StaticBounds>();
 
 	for (const [triangleIndex, triangle] of triangles.entries()) {
 		const object = sourceIndex.getObject(triangle.object);
+		const objectKey = createObjectKey(object.identity);
 		const part = sourceIndex.getPart(
 			triangle.source,
 			triangle.gfxObj,
@@ -743,6 +839,12 @@ function bakeStaticObjectPartitionGeometry(
 				sourceVertexIndex,
 				targetVertexIndex,
 			});
+			expandObjectBounds(
+				objectBoundsByObjectKey,
+				objectKey,
+				positions,
+				targetVertexIndex,
+			);
 			writeTexCoord({
 				source: sourceGeometry.texCoords,
 				sourceVertexIndex,
@@ -757,6 +859,7 @@ function bakeStaticObjectPartitionGeometry(
 	return {
 		indices,
 		materialSlotIndices,
+		objectBoundsByObjectKey,
 		positions,
 		texCoords,
 	};
@@ -905,6 +1008,7 @@ export function createEnvCellStaticObjectCompatibilityPayload(
 				identity: seed.identity,
 				instanceBounds: seed.instanceBounds,
 				localPlacement: seed.localPlacement,
+				owningEnvCellId: envCell.identity.envCellId,
 				portalCount: 0,
 				source: seed.source,
 				sourceBounds: seed.sourceBounds,

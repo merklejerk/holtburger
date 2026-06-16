@@ -730,14 +730,34 @@ function deriveSetupPartDefaultPlacements(
 	setupModel: SetupModelPayloadDto,
 	partIndex: number,
 ): readonly StaticObjectPartSourceFacts["defaultPlacements"][number][] {
-	const byPart = setupModel.placementSets
-		.flatMap((set) => set.localPlacements)
-		.filter((_, index) => index === partIndex);
+	const placementSet = selectDefaultSetupPlacementSet(setupModel);
+	const placement = placementSet?.localPlacements[partIndex];
 	const location = setupModel.connectionPoints
 		.concat(setupModel.holdingLocations)
 		.filter((entry) => entry.partId === partIndex)
 		.map((entry) => entry.localPlacement);
-	return [...byPart, ...location];
+	return [...(placement ? [placement] : []), ...location];
+}
+
+function selectDefaultSetupPlacementSet(
+	setupModel: SetupModelPayloadDto,
+): SetupModelPayloadDto["placementSets"][number] | null {
+	return (
+		setupModel.placementSets.find(
+			(placementSet) => placementSet.key === 0x65,
+		) ??
+		setupModel.placementSets.find((placementSet) => placementSet.key === 0) ??
+		setupModel.placementSets.reduce<
+			SetupModelPayloadDto["placementSets"][number] | null
+		>(
+			(selectedPlacementSet, placementSet) =>
+				selectedPlacementSet === null ||
+				placementSet.key < selectedPlacementSet.key
+					? placementSet
+					: selectedPlacementSet,
+			null,
+		)
+	);
 }
 
 function expandStaticObjectMaterialVariants(options: {

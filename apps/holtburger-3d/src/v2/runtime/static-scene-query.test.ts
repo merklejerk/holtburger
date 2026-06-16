@@ -436,7 +436,7 @@ describe("V2 static scene query", () => {
 		});
 	});
 
-	it("ingests landblock env-cell source facts for env-cell-local picking", () => {
+	it("ingests landblock env-cell static seed facts for object picking", () => {
 		const query = new StaticSceneQuery();
 		query.ingestLandblockEnvCells(createLandblockEnvCellsPayload());
 
@@ -483,6 +483,116 @@ describe("V2 static scene query", () => {
 			outdoorRecordCount: 0,
 			terrainLandblockCount: 0,
 			terrainRecordCount: 0,
+		});
+	});
+
+	it("picks env-cell static objects from STAB placement without reapplying the env-cell frame", () => {
+		const query = new StaticSceneQuery();
+		query.ingestLandblockEnvCells(
+			createLandblockEnvCellsPayload({
+				envCellPlacement: createPlacement({
+					origin: { x: 10, y: 20, z: 30 },
+				}),
+				landblockBounds: {
+					max: { x: 11, y: 31, z: -24 },
+					min: { x: -1, y: -1, z: -25 },
+				},
+			}),
+		);
+
+		const hit = query.pickRay({
+			context: {
+				acceptedEnvCellIds: [0xda550100],
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+			ray: {
+				direction: { x: 0, y: 0, z: -1 },
+				origin: { x: 0, y: 0, z: -3 },
+			},
+		});
+
+		expect(hit).toMatchObject({
+			distance: 1,
+			selectionKey: {
+				envCellId: 0xda550100,
+				instanceId: "env-static-0",
+				itemKind: "env-cell-static-object",
+			},
+		});
+	});
+
+	it("prefers baked env-cell static object bounds over resolver instance bounds", () => {
+		const query = new StaticSceneQuery();
+		query.ingestLandblockEnvCells(
+			createLandblockEnvCellsPayload({
+				staticInstanceBounds: {
+					max: { x: 101, y: 101, z: 101 },
+					min: { x: 100, y: 100, z: 100 },
+				},
+			}),
+		);
+		query.applyStaticSpatialRecords({
+			records: [
+				{
+					bounds: {
+						max: { x: 1, y: 1, z: -4 },
+						min: { x: -1, y: -1, z: -5 },
+					},
+					envCellId: 0xda550100,
+					instanceId: "env-static-0",
+					kind: "env-cell-static-object-bounds",
+					landblockId: 0xda55ffff,
+					owner: {
+						drawUnitId: "env-cell-static-draw-unit",
+						kind: "draw-unit",
+					},
+				},
+			],
+		});
+
+		const hit = query.pickRay({
+			context: {
+				acceptedEnvCellIds: [0xda550100],
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+			ray: {
+				direction: { x: 0, y: 0, z: -1 },
+				origin: { x: 0, y: 0, z: 0 },
+			},
+		});
+
+		expect(hit).toMatchObject({
+			distance: 4,
+			selectionKey: {
+				envCellId: 0xda550100,
+				instanceId: "env-static-0",
+				itemKind: "env-cell-static-object",
+			},
+		});
+	});
+
+	it("picks env-cell static objects from outdoor context for visible interior debugging", () => {
+		const query = new StaticSceneQuery();
+		query.ingestLandblockEnvCells(createLandblockEnvCellsPayload());
+
+		const hit = query.pickRay({
+			context: { kind: "outdoor" },
+			ray: {
+				direction: { x: 0, y: 0, z: -1 },
+				origin: { x: 0, y: 0, z: 0 },
+			},
+		});
+
+		expect(hit).toMatchObject({
+			selectionKey: {
+				envCellId: 0xda550100,
+				instanceId: "env-static-0",
+				itemKind: "env-cell-static-object",
+			},
 		});
 	});
 
@@ -993,10 +1103,18 @@ function createOutdoorStaticObject(input: {
 
 function createLandblockEnvCellsPayload(
 	options: {
+		readonly envCellPlacement?: ReturnType<typeof createPlacement>;
 		readonly includeLandblockBvh?: boolean;
+		readonly landblockBounds?: LandblockEnvCellsStaticScopePayload["residencySpatial"]["landblockEnvCellBvh"]["items"][number]["bounds"];
+		readonly staticInstanceBounds?: LandblockEnvCellsStaticScopePayload["envCells"][number]["staticObjectSeeds"][number]["instanceBounds"];
 	} = {},
 ): LandblockEnvCellsStaticScopePayload {
 	const includeLandblockBvh = options.includeLandblockBvh ?? true;
+	const envCellPlacement = options.envCellPlacement ?? createPlacement();
+	const landblockBounds = options.landblockBounds ?? {
+		max: { x: 1, y: 1, z: -4 },
+		min: { x: -1, y: -1, z: -5 },
+	};
 	return {
 		acceptedEnvCellIds: [0xda550100],
 		envCells: [
@@ -1020,7 +1138,7 @@ function createLandblockEnvCellsPayload(
 					kind: "env-cell-source",
 				},
 				landblockId: 0xda55ffff,
-				localPlacement: createPlacement(),
+				localPlacement: envCellPlacement,
 				localSpatial: {
 					localBvh: {
 						items: [{ instanceId: "env-static-0", kind: "static" }],
@@ -1072,7 +1190,7 @@ function createLandblockEnvCellsPayload(
 							landblockId: 0xda55ffff,
 							objectKind: "explicit-object",
 						},
-						instanceBounds: {
+						instanceBounds: options.staticInstanceBounds ?? {
 							max: { x: 1, y: 1, z: -4 },
 							min: { x: -1, y: -1, z: -5 },
 						},
@@ -1113,10 +1231,7 @@ function createLandblockEnvCellsPayload(
 				items: includeLandblockBvh
 					? [
 							{
-								bounds: {
-									max: { x: 1, y: 1, z: -4 },
-									min: { x: -1, y: -1, z: -5 },
-								},
+								bounds: landblockBounds,
 								identity: {
 									envCellId: 0xda550100,
 									kind: "env-cell-source",
@@ -1129,10 +1244,7 @@ function createLandblockEnvCellsPayload(
 				nodes: includeLandblockBvh
 					? [
 							{
-								bounds: {
-									max: { x: 1, y: 1, z: -4 },
-									min: { x: -1, y: -1, z: -5 },
-								},
+								bounds: landblockBounds,
 								itemIndices: [0],
 								kindMask: {
 									domain: "landblock-env-cells",
@@ -1149,9 +1261,13 @@ function createLandblockEnvCellsPayload(
 	};
 }
 
-function createPlacement() {
+function createPlacement(
+	options: {
+		readonly origin?: { readonly x: number; readonly y: number; readonly z: number };
+	} = {},
+) {
 	return {
 		orientation: { w: 1, x: 0, y: 0, z: 0 },
-		origin: { x: 0, y: 0, z: 0 },
+		origin: options.origin ?? { x: 0, y: 0, z: 0 },
 	};
 }

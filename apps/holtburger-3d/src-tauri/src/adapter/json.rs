@@ -989,7 +989,7 @@ where
     serde_json::json!({
         "envCellId": cell.env_cell_id,
         "memberId": format!("env-cell/{:08x}", cell.env_cell_id),
-        "localPlacement": serialize_v2_render_space_frame(&cell.local_placement),
+        "localPlacement": serialize_frame(&cell.local_placement),
         "environmentId": cell.environment_id,
         "cellStructureId": cell.cell_structure_id,
         "visibleEnvCellIds": asset.env_cell.visible_cell_ids,
@@ -1465,49 +1465,6 @@ pub fn serialize_frame(frame: &holtburger_dat::graphics::Frame) -> serde_json::V
     })
 }
 
-pub fn serialize_v2_render_space_frame(
-    frame: &holtburger_dat::graphics::Frame,
-) -> serde_json::Value {
-    serde_json::json!({
-        "origin": serialize_prepared_vec3(&ac_vector_to_render_space(frame.origin)),
-        "orientation": serialize_quaternion(&ac_quaternion_to_render_space(frame.orientation)),
-    })
-}
-
-fn ac_vector_to_render_space(vector: Vector3) -> PreparedVec3 {
-    PreparedVec3 {
-        x: vector.x,
-        y: vector.z,
-        z: if vector.y == 0.0 { 0.0 } else { -vector.y },
-    }
-}
-
-fn ac_quaternion_to_render_space(quaternion: Quaternion) -> Quaternion {
-    const SQRT_ONE_HALF: f32 = std::f32::consts::FRAC_1_SQRT_2;
-    let ac_to_render = Quaternion {
-        w: SQRT_ONE_HALF,
-        x: -SQRT_ONE_HALF,
-        y: 0.0,
-        z: 0.0,
-    };
-    let render_to_ac = Quaternion {
-        w: SQRT_ONE_HALF,
-        x: SQRT_ONE_HALF,
-        y: 0.0,
-        z: 0.0,
-    };
-    multiply_quaternions(multiply_quaternions(ac_to_render, quaternion), render_to_ac)
-}
-
-fn multiply_quaternions(left: Quaternion, right: Quaternion) -> Quaternion {
-    Quaternion {
-        w: left.w * right.w - left.x * right.x - left.y * right.y - left.z * right.z,
-        x: left.w * right.x + left.x * right.w + left.y * right.z - left.z * right.y,
-        y: left.w * right.y - left.x * right.z + left.y * right.w + left.z * right.x,
-        z: left.w * right.z + left.x * right.y - left.y * right.x + left.z * right.w,
-    }
-}
-
 pub fn serialize_sphere(sphere: &holtburger_common::Sphere) -> serde_json::Value {
     serde_json::json!({
         "center": serialize_vector3(&sphere.center),
@@ -1725,7 +1682,7 @@ mod tests {
     }
 
     #[test]
-    fn v2_env_cell_bundle_frame_uses_render_query_axes() {
+    fn landblock_env_cell_bundle_frame_remains_ac_frame() {
         let frame = holtburger_dat::graphics::Frame {
             origin: holtburger_common::math::Vector3 {
                 x: 1.,
@@ -1740,50 +1697,105 @@ mod tests {
             },
         };
 
-        let payload = serialize_v2_render_space_frame(&frame);
+        let payload = serialize_landblock_env_cell_bundle_cell(
+            &LandblockEnvCellBundleCell {
+                diagnostics: PreparedContentSourceDiagnostics::default(),
+                env_cell: EnvCellFact {
+                    cell_structure_id: Some(0x0d000001),
+                    env_cell_id: 0xda550100,
+                    environment_id: Some(0x0d000001),
+                    local_placement: frame.clone(),
+                    portals: Vec::new(),
+                    restriction_object_id: None,
+                    seen_outside: Some(false),
+                    static_objects: Vec::new(),
+                    surface_ids: Vec::new(),
+                    visible_cell_ids: Vec::new(),
+                },
+                landblock_bounds: None,
+                local_bvh: None,
+                local_bvh_items: Vec::new(),
+                prepared_cell: PreparedInteriorCell {
+                    cell_bsp: empty_bsp_leaf(),
+                    cell_structure_id: 0x0d000001,
+                    env_cell_id: 0xda550100,
+                    environment_id: 0x0d000001,
+                    local_placement: frame,
+                    portal_apertures: Vec::new(),
+                    render_geometry: PreparedPolygonSetRenderGeometry {
+                        bounds: None,
+                        invalid_polygons: Vec::new(),
+                        normals: Vec::new(),
+                        positions: Vec::new(),
+                        skipped_polygon_count: 0,
+                        source_id: 0x0d000001,
+                        surface_ids: Vec::new(),
+                        triangle_count: 0,
+                        triangles: Vec::new(),
+                        uvs: Vec::new(),
+                        vertex_count: 0,
+                    },
+                    surface_ids: Vec::new(),
+                    portals: Vec::new(),
+                    static_object_count: 0,
+                },
+                static_meshes: Vec::new(),
+            },
+            serde_json::json!({ "positions": [], "normals": [], "uvs": [] }),
+            |_index, _aperture| serde_json::json!({}),
+        );
 
         assert_close(
             payload
-                .pointer("/origin/x")
+                .pointer("/localPlacement/origin/x")
                 .and_then(serde_json::Value::as_f64),
             1.,
         );
         assert_close(
             payload
-                .pointer("/origin/y")
+                .pointer("/localPlacement/origin/y")
+                .and_then(serde_json::Value::as_f64),
+            2.,
+        );
+        assert_close(
+            payload
+                .pointer("/localPlacement/origin/z")
                 .and_then(serde_json::Value::as_f64),
             3.,
         );
         assert_close(
             payload
-                .pointer("/origin/z")
-                .and_then(serde_json::Value::as_f64),
-            -2.,
-        );
-        assert_close(
-            payload
-                .pointer("/orientation/w")
+                .pointer("/localPlacement/orientation/w")
                 .and_then(serde_json::Value::as_f64),
             1.,
         );
         assert_close(
             payload
-                .pointer("/orientation/x")
+                .pointer("/localPlacement/orientation/x")
                 .and_then(serde_json::Value::as_f64),
             0.,
         );
         assert_close(
             payload
-                .pointer("/orientation/y")
+                .pointer("/localPlacement/orientation/y")
                 .and_then(serde_json::Value::as_f64),
             0.,
         );
         assert_close(
             payload
-                .pointer("/orientation/z")
+                .pointer("/localPlacement/orientation/z")
                 .and_then(serde_json::Value::as_f64),
             0.,
         );
+    }
+
+    fn empty_bsp_leaf() -> BspNode {
+        BspNode::Leaf(holtburger_dat::physics::BspLeaf {
+            index: 0,
+            poly_ids: Vec::new(),
+            solid: 0,
+            sphere: None,
+        })
     }
 
     fn assert_close(actual: Option<f64>, expected: f64) {

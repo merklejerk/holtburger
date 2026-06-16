@@ -38,13 +38,18 @@ export interface StaticObjectCompatibilityPayload {
 	readonly regionRenderProfile: {
 		readonly detailRoles: readonly RegionDetailRoleFacts[];
 	};
-	readonly objects: OutdoorStaticObjectsScopePayload["objects"];
+	readonly objects: readonly StaticObjectCompatibilityObject[];
 	readonly sourceAssets: OutdoorStaticObjectsScopePayload["sourceAssets"];
 	readonly paletteSources: OutdoorStaticObjectsScopePayload["paletteSources"];
 	readonly materialSlots: OutdoorStaticObjectsScopePayload["materialSlots"];
 	readonly materialSources: OutdoorStaticObjectsScopePayload["materialSources"];
 	readonly textureRefs: OutdoorStaticObjectsScopePayload["textureRefs"];
 }
+
+export type StaticObjectCompatibilityObject =
+	OutdoorStaticObjectsScopePayload["objects"][number] & {
+		readonly owningEnvCellId?: number | null;
+	};
 
 export interface StaticObjectCompatibilityPartition {
 	readonly sliceId: string;

@@ -16,14 +16,14 @@ import {
 } from "../../bake/static-material-texture-policy";
 import {
 	classifyStaticObjectMaterial,
-	type StaticObjectMaterialFallbackReason,
-	type StaticObjectMaterialPlan,
+	type StaticMaterialFallbackReason,
+	type StaticMaterialPlan,
 } from "../../objects/bake/static-object-material-planner";
-import { isRenderableStaticObjectMaterialPlan } from "../../objects/bake/static-object-renderability";
+import { isRenderableStaticMaterialPlan } from "../../objects/bake/static-object-renderability";
 
 export interface StructuredInteriorCellMaterialPlan {
 	readonly entries: readonly StructuredInteriorMaterialPlanEntry[];
-	readonly materialPlansBySurfaceId: ReadonlyMap<number, StaticObjectMaterialPlan>;
+	readonly materialPlansBySurfaceId: ReadonlyMap<number, StaticMaterialPlan>;
 }
 
 export function resolveStructuredInteriorMaterialSurfaceId(
@@ -47,7 +47,7 @@ export function planStructuredInteriorCellMaterials(options: {
 			source,
 		]),
 	);
-	const materialPlansBySurfaceId = new Map<number, StaticObjectMaterialPlan>();
+	const materialPlansBySurfaceId = new Map<number, StaticMaterialPlan>();
 	const entries = options.envCell.surfaces
 		.map((surface): StructuredInteriorMaterialPlanEntry => {
 			const material = materialSourcesById.get(surface.material.materialId);
@@ -89,7 +89,7 @@ export function planStructuredInteriorCellMaterials(options: {
 				),
 				family: plan.family,
 				material: surface.material,
-				outcome: isRenderableStaticObjectMaterialPlan(plan)
+				outcome: isRenderableStaticMaterialPlan(plan)
 					? "rendered"
 					: plan.renderCoverage === "unsupported"
 						? "unsupported"
@@ -132,7 +132,7 @@ export function createStructuredInteriorTextureUseId(
 }
 
 export function resolveStructuredInteriorPlanTextureWrapMode(
-	plan: StaticObjectMaterialPlan,
+	plan: StaticMaterialPlan,
 ): StaticMaterialTextureWrapMode {
 	return resolveRepeatedStaticMaterialPrimaryWrapMode(
 		plan.textureRoles.map((role) => role.dataUse),
@@ -142,7 +142,7 @@ export function resolveStructuredInteriorPlanTextureWrapMode(
 function classifyStructuredInteriorMaterial(options: {
 	readonly material: StaticObjectMaterialSourceFacts;
 	readonly payload: LandblockEnvCellsStaticScopePayload;
-}): StaticObjectMaterialPlan {
+}): StaticMaterialPlan {
 	return classifyStaticObjectMaterial({
 		material: options.material,
 		paletteOverride: null,
@@ -154,7 +154,7 @@ function classifyStructuredInteriorMaterial(options: {
 
 function createStructuredInteriorDiagnostic(options: {
 	readonly material: StructuredInteriorMaterialDiagnostic["material"];
-	readonly reason: StaticObjectMaterialFallbackReason;
+	readonly reason: StaticMaterialFallbackReason;
 	readonly surfaceId: number;
 }): StructuredInteriorMaterialDiagnostic {
 	return {

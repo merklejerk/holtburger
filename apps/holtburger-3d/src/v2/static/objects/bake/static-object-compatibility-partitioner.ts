@@ -24,9 +24,9 @@ import { createStaticObjectMaterialCoverageReport } from "./static-object-materi
 import {
 	createStaticObjectMaterialUseKey,
 	planStaticObjectMaterials,
-	type StaticObjectMaterialFallbackReason,
-	type StaticObjectMaterialPlan,
-	type StaticObjectMaterialTextureUseRole,
+	type StaticMaterialFallbackReason,
+	type StaticMaterialPlan,
+	type StaticMaterialTextureUseRole,
 } from "./static-object-material-planner";
 
 export const STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE = 8;
@@ -34,7 +34,7 @@ export const STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE = 8;
 export interface StaticObjectCompatibilityPartitionPlan {
 	readonly domain: StaticObjectCompatibilityPayload["domain"];
 	readonly partitions: readonly StaticObjectCompatibilityPartition[];
-	readonly fallbackReasons: readonly StaticObjectMaterialFallbackReason[];
+	readonly fallbackReasons: readonly StaticMaterialFallbackReason[];
 	readonly materialCoverage: StaticMaterialCoverageReport;
 }
 
@@ -65,14 +65,14 @@ export interface StaticObjectCompatibilityPartition {
 	readonly compatibilityKey: string;
 	readonly partitionAxes: StaticObjectCompatibilityPartitionAxes;
 	readonly coarseTablePlan: StaticObjectCoarseTablePlan;
-	readonly family: StaticObjectMaterialPlan["family"];
-	readonly renderCoverage: StaticObjectMaterialPlan["renderCoverage"];
-	readonly pass: StaticObjectMaterialPlan["pass"];
-	readonly alphaMode: StaticObjectMaterialPlan["alphaPolicy"]["mode"];
-	readonly alphaTest: StaticObjectMaterialPlan["alphaPolicy"]["alphaTest"];
-	readonly indexedClipThreshold: StaticObjectMaterialPlan["alphaPolicy"]["indexedClipThreshold"];
-	readonly materialColor: StaticObjectMaterialPlan["color"];
-	readonly materialEmissiveColor: StaticObjectMaterialPlan["emissiveColor"];
+	readonly family: StaticMaterialPlan["family"];
+	readonly renderCoverage: StaticMaterialPlan["renderCoverage"];
+	readonly pass: StaticMaterialPlan["pass"];
+	readonly alphaMode: StaticMaterialPlan["alphaPolicy"]["mode"];
+	readonly alphaTest: StaticMaterialPlan["alphaPolicy"]["alphaTest"];
+	readonly indexedClipThreshold: StaticMaterialPlan["alphaPolicy"]["indexedClipThreshold"];
+	readonly materialColor: StaticMaterialPlan["color"];
+	readonly materialEmissiveColor: StaticMaterialPlan["emissiveColor"];
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly detailTextureTiling: number;
 	readonly textureRoleSchemaKey: string;
@@ -87,10 +87,10 @@ export interface StaticObjectCompatibilityPartition {
 }
 
 interface StaticObjectCoarseTablePlan {
-	readonly tableFamily: StaticObjectMaterialPlan["family"];
+	readonly tableFamily: StaticMaterialPlan["family"];
 	readonly tableSchemaKey: string;
-	readonly renderCoverage: StaticObjectMaterialPlan["renderCoverage"];
-	readonly pass: StaticObjectMaterialPlan["pass"];
+	readonly renderCoverage: StaticMaterialPlan["renderCoverage"];
+	readonly pass: StaticMaterialPlan["pass"];
 	readonly sortPolicy: StaticObjectSortAxis["policy"];
 	readonly visibilityPolicy: StaticObjectVisibilityAxis["policy"];
 	readonly entries: readonly StaticObjectCoarseMaterialEntry[];
@@ -101,17 +101,17 @@ interface StaticObjectCoarseTablePlan {
 interface StaticObjectCoarseMaterialEntry {
 	readonly materialEntryKey: string;
 	readonly materialUseKey: string;
-	readonly materialPlan: StaticObjectMaterialPlan;
+	readonly materialPlan: StaticMaterialPlan;
 	readonly materialIds: readonly number[];
-	readonly blend: StaticObjectMaterialPlan["blend"];
-	readonly materialColor: StaticObjectMaterialPlan["color"];
-	readonly materialEmissiveColor: StaticObjectMaterialPlan["emissiveColor"];
-	readonly alphaMode: StaticObjectMaterialPlan["alphaPolicy"]["mode"];
-	readonly alphaTest: StaticObjectMaterialPlan["alphaPolicy"]["alphaTest"];
-	readonly indexedClipThreshold: StaticObjectMaterialPlan["alphaPolicy"]["indexedClipThreshold"];
+	readonly blend: StaticMaterialPlan["blend"];
+	readonly materialColor: StaticMaterialPlan["color"];
+	readonly materialEmissiveColor: StaticMaterialPlan["emissiveColor"];
+	readonly alphaMode: StaticMaterialPlan["alphaPolicy"]["mode"];
+	readonly alphaTest: StaticMaterialPlan["alphaPolicy"]["alphaTest"];
+	readonly indexedClipThreshold: StaticMaterialPlan["alphaPolicy"]["indexedClipThreshold"];
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly detailTextureTiling: number;
-	readonly textureRoles: readonly StaticObjectMaterialTextureUseRole[];
+	readonly textureRoles: readonly StaticMaterialTextureUseRole[];
 	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
 }
 
@@ -124,11 +124,11 @@ interface StaticObjectCompatibilityPartitionAxes {
 
 interface StaticObjectMaterialCompatibilityAxis {
 	readonly key: string;
-	readonly family: StaticObjectMaterialPlan["family"];
-	readonly renderCoverage: StaticObjectMaterialPlan["renderCoverage"];
-	readonly pass: StaticObjectMaterialPlan["pass"];
-	readonly alphaMode: StaticObjectMaterialPlan["alphaPolicy"]["mode"];
-	readonly blendMode: StaticObjectMaterialPlan["blend"]["mode"];
+	readonly family: StaticMaterialPlan["family"];
+	readonly renderCoverage: StaticMaterialPlan["renderCoverage"];
+	readonly pass: StaticMaterialPlan["pass"];
+	readonly alphaMode: StaticMaterialPlan["alphaPolicy"]["mode"];
+	readonly blendMode: StaticMaterialPlan["blend"]["mode"];
 	readonly materialEntryKey: string;
 	readonly materialColorKey: string;
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
@@ -186,7 +186,7 @@ interface StaticObjectTriangleCandidate {
 	readonly material: StaticMaterialSourceIdentity;
 	readonly materialKey: string;
 	readonly materialId: number;
-	readonly materialPlan: StaticObjectMaterialPlan;
+	readonly materialPlan: StaticMaterialPlan;
 	readonly materialColorKey: string;
 	readonly materialEntryKey: string;
 	readonly textureRoleSchemaKey: string;
@@ -238,7 +238,7 @@ export function partitionStaticObjectCompatibility(
 
 function createTriangleCandidates(
 	payload: StaticObjectCompatibilityPayload,
-	materialById: ReadonlyMap<string, StaticObjectMaterialPlan>,
+	materialById: ReadonlyMap<string, StaticMaterialPlan>,
 ): readonly StaticObjectTriangleCandidate[] {
 	const sourceByKey = new Map(
 		payload.sourceAssets.map((source) => [
@@ -590,7 +590,7 @@ function createPartitionSliceAxes(
 
 function createPartitionAxes(options: {
 	readonly domain: StaticObjectCompatibilityPayload["domain"];
-	readonly plan: StaticObjectMaterialPlan;
+	readonly plan: StaticMaterialPlan;
 	readonly landblockId: number;
 	readonly sourceKey: string;
 	readonly gfxKey: string;
@@ -623,7 +623,7 @@ function createPartitionAxes(options: {
 }
 
 function createMaterialCompatibilityAxis(options: {
-	readonly plan: StaticObjectMaterialPlan;
+	readonly plan: StaticMaterialPlan;
 	readonly materialEntryKey: string;
 	readonly materialColorKey: string;
 	readonly includeConcreteEntryInKey: boolean;
@@ -690,7 +690,7 @@ function createOwnershipAxis(options: {
 	};
 }
 
-function createSortAxis(plan: StaticObjectMaterialPlan): StaticObjectSortAxis {
+function createSortAxis(plan: StaticMaterialPlan): StaticObjectSortAxis {
 	const policy =
 		plan.pass === "transparent" || plan.pass === "additive"
 			? "transparent-object-part-sortable"

@@ -56,13 +56,13 @@ type PaletteDataUseIdentity = Extract<
 >;
 
 export interface StaticObjectMaterialPipelinePlan {
-	readonly domain: StaticObjectMaterialPlanningPayload["domain"];
-	readonly materialPlans: readonly StaticObjectMaterialPlan[];
+	readonly domain: StaticMaterialPlanningPayload["domain"];
+	readonly materialPlans: readonly StaticMaterialPlan[];
 	readonly detailRoles: readonly StaticObjectDetailRolePlan[];
-	readonly fallbackReasons: readonly StaticObjectMaterialFallbackReason[];
+	readonly fallbackReasons: readonly StaticMaterialFallbackReason[];
 }
 
-export interface StaticObjectMaterialPlanningPayload {
+export interface StaticMaterialPlanningPayload {
 	readonly domain:
 		| OutdoorStaticObjectsScopePayload["domain"]
 		| "landblock-env-cells";
@@ -76,7 +76,7 @@ export interface StaticObjectMaterialPlanningPayload {
 	};
 }
 
-export interface StaticObjectMaterialPlan {
+export interface StaticMaterialPlan {
 	readonly material: StaticMaterialSourceIdentity;
 	readonly materialUseKey: string;
 	readonly family: StaticObjectMaterialFamily;
@@ -86,12 +86,12 @@ export interface StaticObjectMaterialPlan {
 	readonly blend: StaticObjectMaterialBlendFacts;
 	readonly color: readonly [number, number, number, number];
 	readonly emissiveColor: readonly [number, number, number];
-	readonly textureRoles: readonly StaticObjectMaterialTextureUseRole[];
+	readonly textureRoles: readonly StaticMaterialTextureUseRole[];
 	readonly materialBucketKey: string;
-	readonly fallbackReasons: readonly StaticObjectMaterialFallbackReason[];
+	readonly fallbackReasons: readonly StaticMaterialFallbackReason[];
 }
 
-export type StaticObjectMaterialTextureUseRole =
+export type StaticMaterialTextureUseRole =
 	| {
 			readonly role: "base-color";
 			readonly texture: SurfaceTextureIdentity;
@@ -133,10 +133,10 @@ interface StaticObjectDetailRolePlan {
 	readonly renderCoverage:
 		| "classified-render-candidate"
 		| "classified-render-deferred";
-	readonly fallbackReasons: readonly StaticObjectMaterialFallbackReason[];
+	readonly fallbackReasons: readonly StaticMaterialFallbackReason[];
 }
 
-export interface StaticObjectMaterialFallbackReason {
+export interface StaticMaterialFallbackReason {
 	readonly code:
 		| "missing-detail-render-surface"
 		| "missing-render-surface"
@@ -189,7 +189,7 @@ interface StaticObjectMaterialContext {
 }
 
 export function planStaticObjectMaterials(
-	payload: StaticObjectMaterialPlanningPayload,
+	payload: StaticMaterialPlanningPayload,
 ): StaticObjectMaterialPipelinePlan {
 	const materialById = new Map(
 		payload.materialSources.map((material) => [
@@ -198,7 +198,7 @@ export function planStaticObjectMaterials(
 		]),
 	);
 	const plannedMaterialKeys = new Set<string>();
-	const rawMaterialPlans: StaticObjectMaterialPlan[] = [];
+	const rawMaterialPlans: StaticMaterialPlan[] = [];
 	for (const slot of payload.materialSlots) {
 		const material = materialById.get(
 			createStaticMaterialSourceKey(slot.material),
@@ -266,7 +266,7 @@ export function planStaticObjectMaterials(
 
 export function classifyStaticObjectMaterial(
 	context: StaticObjectMaterialContext,
-): StaticObjectMaterialPlan {
+): StaticMaterialPlan {
 	const behavior = deriveMaterialBehavior(context.material);
 	const basePlan = {
 		alphaPolicy: behavior.alphaPolicy,
@@ -483,10 +483,10 @@ export function classifyStaticObjectMaterial(
 }
 
 function composeStaticDetailRoles(
-	plan: StaticObjectMaterialPlan,
-	domain: StaticObjectMaterialPlanningPayload["domain"],
+	plan: StaticMaterialPlan,
+	domain: StaticMaterialPlanningPayload["domain"],
 	detailRoles: readonly StaticObjectDetailRolePlan[],
-): StaticObjectMaterialPlan {
+): StaticMaterialPlan {
 	const detailRole = resolveComposableDetailRole(domain, detailRoles);
 	if (!detailRole) {
 		return plan;
@@ -512,7 +512,7 @@ function composeStaticDetailRoles(
 		return plan;
 	}
 
-	const textureRoles: readonly StaticObjectMaterialTextureUseRole[] = [
+	const textureRoles: readonly StaticMaterialTextureUseRole[] = [
 		...plan.textureRoles,
 		{
 			dataUse: detailRole.dataUse,
@@ -539,7 +539,7 @@ function composeStaticDetailRoles(
 }
 
 function resolveComposableDetailRole(
-	domain: StaticObjectMaterialPlanningPayload["domain"],
+	domain: StaticMaterialPlanningPayload["domain"],
 	detailRoles: readonly StaticObjectDetailRolePlan[],
 ): StaticObjectDetailRolePlan | null {
 	if (domain !== "outdoor-buildings") {
@@ -555,7 +555,7 @@ function resolveComposableDetailRole(
 
 function createTexturePlan(
 	options: Pick<
-		StaticObjectMaterialPlan,
+		StaticMaterialPlan,
 		| "alphaPolicy"
 		| "blend"
 		| "color"
@@ -568,7 +568,7 @@ function createTexturePlan(
 		| "renderCoverage"
 		| "textureRoles"
 	>,
-): StaticObjectMaterialPlan {
+): StaticMaterialPlan {
 	return {
 		...options,
 		materialBucketKey: createMaterialBucketKey({
@@ -675,7 +675,7 @@ function formatHex32(value: number): string {
 
 function createUnsupportedPlan(
 	basePlan: Pick<
-		StaticObjectMaterialPlan,
+		StaticMaterialPlan,
 		| "alphaPolicy"
 		| "blend"
 		| "color"
@@ -684,8 +684,8 @@ function createUnsupportedPlan(
 		| "materialUseKey"
 		| "pass"
 	>,
-	fallbackReasons: readonly StaticObjectMaterialFallbackReason[],
-): StaticObjectMaterialPlan {
+	fallbackReasons: readonly StaticMaterialFallbackReason[],
+): StaticMaterialPlan {
 	return {
 		...basePlan,
 		fallbackReasons,
@@ -1041,7 +1041,7 @@ function createMaterialBucketKey(options: {
 	readonly material: StaticMaterialSourceIdentity;
 	readonly pass: StaticObjectMaterialPass;
 	readonly alphaPolicy: StaticObjectMaterialAlphaPolicy["mode"];
-	readonly textureRoles: readonly StaticObjectMaterialTextureUseRole[];
+	readonly textureRoles: readonly StaticMaterialTextureUseRole[];
 }): string {
 	return [
 		`family:${options.family}`,
@@ -1054,7 +1054,7 @@ function createMaterialBucketKey(options: {
 }
 
 function createTextureRoleSignature(
-	roles: readonly StaticObjectMaterialTextureUseRole[],
+	roles: readonly StaticMaterialTextureUseRole[],
 ): string {
 	if (roles.length === 0) {
 		return "none";
@@ -1066,7 +1066,7 @@ function createTextureRoleSignature(
 }
 
 function createTextureRoleDataUseSignature(
-	role: StaticObjectMaterialTextureUseRole,
+	role: StaticMaterialTextureUseRole,
 ): string {
 	const detailSuffix =
 		role.role === "detail-overlay" ? `:tiling=${role.tiling}` : "";
@@ -1089,13 +1089,13 @@ function createTextureRoleDataUseSignature(
 }
 
 function createFallbackReason(options: {
-	readonly code: StaticObjectMaterialFallbackReason["code"];
+	readonly code: StaticMaterialFallbackReason["code"];
 	readonly message: string;
 	readonly material?: StaticMaterialSourceIdentity | null;
 	readonly texture?: SurfaceTextureIdentity | null;
 	readonly renderSurface?: RenderSurfaceIdentity | null;
 	readonly palette?: PaletteIdentity | null;
-}): StaticObjectMaterialFallbackReason {
+}): StaticMaterialFallbackReason {
 	return {
 		code: options.code,
 		material: options.material ?? null,

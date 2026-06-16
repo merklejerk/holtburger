@@ -11,12 +11,12 @@ import type {
 } from "../../contracts";
 import type { StaticObjectCompatibilityPartition } from "./static-object-compatibility-partitioner";
 import type {
-	StaticObjectMaterialFallbackReason,
+	StaticMaterialFallbackReason,
 	StaticObjectMaterialPipelinePlan,
-	StaticObjectMaterialPlan,
+	StaticMaterialPlan,
 } from "./static-object-material-planner";
 import {
-	isRenderableStaticObjectMaterialPlan,
+	isRenderableStaticMaterialPlan,
 	isRenderableStaticObjectPartition,
 } from "./static-object-renderability";
 
@@ -106,12 +106,12 @@ export function createStaticObjectMaterialCoverageReport(options: {
 }
 
 function resolveMaterialPlanOutcome(
-	plan: StaticObjectMaterialPlan,
+	plan: StaticMaterialPlan,
 ): StaticMaterialRenderOutcome {
 	if (plan.renderCoverage === "unsupported") {
 		return "unsupported";
 	}
-	return isRenderableStaticObjectMaterialPlan(plan)
+	return isRenderableStaticMaterialPlan(plan)
 		? "rendered"
 		: "render-deferred";
 }
@@ -181,7 +181,7 @@ function countOutcomeTriangles(
 }
 
 function createFallbackReasonCounts(
-	reasons: readonly StaticObjectMaterialFallbackReason[],
+	reasons: readonly StaticMaterialFallbackReason[],
 ): readonly StaticMaterialCoverageReport["fallbackReasonCounts"][number][] {
 	const counts = new Map<string, number>();
 	for (const reason of reasons) {
@@ -198,7 +198,7 @@ function createFallbackReasonCounts(
 
 function createUnrenderedBuckets(
 	buckets: readonly StaticMaterialCoverageBucket[],
-	reasons: readonly StaticObjectMaterialFallbackReason[],
+	reasons: readonly StaticMaterialFallbackReason[],
 ): readonly StaticMaterialUnrenderedBucket[] {
 	const reasonCodes = Array.from(
 		new Set(reasons.map((reason) => reason.code)),

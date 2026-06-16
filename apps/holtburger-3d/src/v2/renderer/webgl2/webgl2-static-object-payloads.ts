@@ -1,4 +1,4 @@
-import type { StaticObjectMaterialTableEntry } from "../../static/contracts";
+import type { StaticMaterialTableEntry } from "../../static/contracts";
 import type { TextureDrawUnitBinding } from "../types";
 import {
 	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
@@ -13,7 +13,7 @@ const DEFAULT_TEXTURE_RECT = [0, 0, 1, 1] as const;
 export interface StaticObjectMaterialPayloadResource {
 	readonly drawUnitId: string;
 	readonly materialFamily: "flat-color" | "indexed-paletted" | "texture-rgba";
-	readonly materialEntries: readonly StaticObjectMaterialTableEntry[];
+	readonly materialEntries: readonly StaticMaterialTableEntry[];
 }
 
 export interface StaticObjectPreparedDrawPayload {
@@ -386,7 +386,7 @@ function fillStaticObjectMaterialUniforms(
 
 function resolveStaticObjectMaterialEntryMode(
 	resource: StaticObjectMaterialPayloadResource,
-	materialEntry: StaticObjectMaterialTableEntry,
+	materialEntry: StaticMaterialTableEntry,
 	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): number {

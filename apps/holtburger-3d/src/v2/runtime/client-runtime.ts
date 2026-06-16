@@ -30,7 +30,7 @@ import type {
 	StaticObjectGeometryStaticDrawUnit,
 	StaticLodRadii,
 	StaticMaterialCoverageReport,
-	StaticObjectMaterialTableEntry,
+	StaticMaterialTableEntry,
 	StaticObjectSourceMappingCoverage,
 	StaticObjectSourceIdentity,
 	StaticMaterialUnrenderedBucket,
@@ -1080,7 +1080,7 @@ function summarizeStaticObjectSource(
 }
 
 function summarizeDrawUnitMaterialEntry(
-	entry: StaticObjectMaterialTableEntry,
+	entry: StaticMaterialTableEntry,
 ): StaticSelectionDrawUnitMaterialEntryDiagnostics {
 	return {
 		alphaTest: entry.alphaTest,

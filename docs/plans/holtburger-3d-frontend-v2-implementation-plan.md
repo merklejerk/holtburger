@@ -468,7 +468,7 @@ Acceptance criteria:
 Implementation notes:
 
 - Added structured-interior material plan entries to `StructuredInteriorGeometryStaticDrawUnit`. The entries carry surface slot id, surface id, material id, debug-flat family, opaque pass, deferred outcome, empty texture-use ids, and typed fallback reasons.
-- Added a dedicated structured-interior material planner/coverage helper for env-cell cell-structure surfaces. It does not reuse `StaticObjectMaterialTableEntry`, because current env-cell facts only contain material ids, not the material/render-surface/palette source facts required by the static-object material pipeline.
+- Added a dedicated structured-interior material planner/coverage helper for env-cell cell-structure surfaces. It does not reuse `StaticMaterialTableEntry`, because current env-cell facts only contain material ids, not the material/render-surface/palette source facts required by the static-object material pipeline.
 - `LandblockEnvCellsBaker` now attaches material plans to structured-interior draw units and emits `StaticMaterialCoverageReport` entries for `landblock-env-cells`. Current coverage reports deferred material rendering with `missing-cell-structure-material-source` fallback reasons and zero texture roles.
 - `textureUses` remain empty for structured-interior cell structures until material-source enrichment lands. This is intentional: emitting fake render-surface uses from only material ids would violate resolver/baker ownership and hide missing source closure work.
 - Made `landblock-env-cells` explicit in texture-manager static-style packing policy, rather than relying on a broad non-terrain fallthrough.
@@ -1043,10 +1043,10 @@ Purpose: remove the remaining structured-interior-specific material/table/textur
 
 Problem statement:
 
-- 13B0 proved structured interiors render through the same WebGL2 static material shader/payload path as static objects, but the structured-interior baker still hand-builds `StaticObjectMaterialTableEntry`, material entry keys, texture-role keys, and texture-use emission shape.
+- 13B0 proved structured interiors render through the same WebGL2 static material shader/payload path as static objects, but the structured-interior baker still hand-builds `StaticMaterialTableEntry`, material entry keys, texture-role keys, and texture-use emission shape.
 - The structured-interior wrap bug found after 13B0 was caused by that parallel adapter hard-coding clamp where the static material shader expected an authored repeat decision. Phase 13B0a corrects the immediate policy model; this phase removes the duplicate adapter shape that let the bug exist.
 - Detail overlays, indexed/paletted sampling, alpha policy, render state, material-table capacity, texture-role layout keys, and texture-use staging should not be reimplemented separately for cell structures. Geometry ownership differs; static material semantics do not.
-- `StaticObjectMaterialTableEntry` is currently a shared renderer material-table shape wearing an object-specific name. Since maintainability is preferred over minimizing churn, this phase may rename that contract to a neutral `StaticMaterialTableEntry` or equivalent if the rename keeps ownership boundaries clearer.
+- `StaticMaterialTableEntry` is currently a shared renderer material-table shape wearing an object-specific name. Since maintainability is preferred over minimizing churn, this phase may rename that contract to a neutral `StaticMaterialTableEntry` or equivalent if the rename keeps ownership boundaries clearer.
 
 Steering:
 
@@ -1057,10 +1057,10 @@ Steering:
   - static objects adapt gfxobj parts, material slots, object/source ownership, and transparent object-part sorting facts;
   - structured interiors adapt env-cell cell-structure triangles, surface-slot material resolution, env-cell/cell-structure ownership, and compact slice geometry.
 - Extract only the renderer-facing static material adapter: material entry key creation, material-table entry construction, texture-role schema/layout facts, detail role handling, and texture-use emission. Wrap/sampling decisions should delegate to the 13B0a policy helper.
-- Do not make the shared adapter know about env-cell ids, object ids, source assets, attachments, BVHs, portal visibility, or picking. It should accept classified `StaticObjectMaterialPlan`-style inputs plus caller-provided texture-use id construction.
+- Do not make the shared adapter know about env-cell ids, object ids, source assets, attachments, BVHs, portal visibility, or picking. It should accept classified `StaticMaterialPlan`-style inputs plus caller-provided texture-use id construction.
 - Prefer deleting structured-interior-local copies once the shared adapter exists. Keeping duplicate code around with "same but slightly different" behavior is the bug factory.
 - Preserve fail-loud/drop-output behavior: missing/deferred/unsupported material facts are still omitted before renderable draw units. This phase is not allowed to reintroduce fallback material rendering.
-- Prefer honest neutral naming over compatibility-preserving aliases. If `StaticObjectMaterialTableEntry` becomes shared, rename it decisively instead of leaving long-lived object-specific names in structured-interior code.
+- Prefer honest neutral naming over compatibility-preserving aliases. If `StaticMaterialTableEntry` becomes shared, rename it decisively instead of leaving long-lived object-specific names in structured-interior code.
 
 Deliverables:
 
@@ -1094,7 +1094,7 @@ Dry-run findings:
   - a material signature/spec helper used during candidate creation and partitioning;
   - a material table/texture-use helper used during bake output.
 - Existing duplicated symbols to collapse:
-  - static object side: `createMaterialEntryKey`, `createTextureRoleLayoutKey`, `createTextureRoleSchemaKey`, `createTextureDataUseSchemaKey`, `createMaterialTextureDataUseKey`, `resolveDetailTextureTiling`, `resolveTextureWrapMode`, `createStaticObjectMaterialTableEntry`, and texture-use emission;
+  - static object side: `createMaterialEntryKey`, `createTextureRoleLayoutKey`, `createTextureRoleSchemaKey`, `createTextureDataUseSchemaKey`, `createMaterialTextureDataUseKey`, `resolveDetailTextureTiling`, `resolveTextureWrapMode`, `createStaticMaterialTableEntry`, and texture-use emission;
   - structured-interior side: `createStructuredInteriorMaterialEntryKey`, `createStructuredInteriorTextureRoleLayoutKey`, `createStructuredInteriorTextureRoleSchemaKey`, `createStructuredInteriorTextureDataUseSchemaKey`, `resolveDetailTextureTiling`, `createStructuredInteriorMaterialTableEntry`, and texture-use emission.
 - The existing shared slicer `static-material-compatibility-slicer.ts` already proves the right narrow shape, but it lives under `static/objects/bake/` while structured interiors import it. This phase should move shared material helpers to a neutral location such as `src/v2/static/bake/static-material-*` or `src/v2/static/materials/*`, then update both adapters. Do not add the new adapter under object-specific ownership.
 - Static-object partitioning currently derives primary repeat wrap from `materialVariantSignature` (`sampler=repeat`). Structured interiors do not have that variant string; after 13B0a both adapters should pass explicit policy facts into shared helpers rather than parsing static-object-only strings inside the shared adapter.
@@ -1138,7 +1138,7 @@ Suggested implementation order:
 Blind spots to account for during implementation:
 
 - Static objects and structured interiors may not have identical wrap-policy inputs. Do not fake static-object `materialVariantSignature` for cell structures; pass explicit policy facts into the 13B0a helper.
-- Avoid compatibility aliases that leave both `StaticObjectMaterialTableEntry` and `StaticMaterialTableEntry` alive indefinitely. If a temporary alias is needed for the mechanical rename, remove it before marking this phase complete.
+- Avoid compatibility aliases that leave both `StaticMaterialTableEntry` and `StaticMaterialTableEntry` alive indefinitely. If a temporary alias is needed for the mechanical rename, remove it before marking this phase complete.
 - Detail overlays are second-role textures, not primary textures. The shared adapter should carry detail texture ids/tiling, but detail sampling policy belongs to 13B0a.
 - Palette textures should stay clamp-to-edge even when indexed source textures use repeat/modular sampling.
 - `rgba-mask` and `rgba-raw` should remain clamp/exact unless a concrete material case proves otherwise.
@@ -1161,12 +1161,11 @@ Implementation notes:
 - Static-object bake output now builds material-table entries and texture uses through the shared adapter. The partition table entries carry their classified material plan through to bake output so the adapter can consume one material-plan shape instead of a decomposed object-only shape.
 - Structured-interior bake output now uses the same shared adapter for material entry keys, texture-role schemas, material-table entries, and texture-use emission. The local structured-interior material table/key/role/texture-use helper stack was deleted.
 - The shared adapter keeps caller-specific texture-use namespaces separate through caller-provided texture-use id factories (`static-object-texture` vs `structured-interior-texture`) and does not know object ids, env-cell ids, geometry, picking, portal visibility, or source assets.
-- Focused static-object/env-cell/policy tests, `npm run check`, `npm run lint:ts`, full `npm run test:ts`, and `git diff --check` passed.
+- Follow-up naming cleanup completed immediately after this phase: the shared renderer material table contract was renamed to `StaticMaterialTableEntry`, the shared material plan/role/fallback types were neutralized to `StaticMaterialPlan`, `StaticMaterialTextureUseRole`, and `StaticMaterialFallbackReason`, and the renderability predicate became `isRenderableStaticMaterialPlan`.
+- Focused static-object/env-cell/policy tests, `npm run check`, `npm run lint:ts`, full `npm run test:ts`, and `git diff --check` passed. The follow-up naming cleanup also passed `npm run check`, `npm run lint:ts`, full `npm run test:ts`, and `git diff --check`.
 
 Failed to close / follow-up:
 
-- The global contract rename from `StaticObjectMaterialTableEntry` to a neutral `StaticMaterialTableEntry` was intentionally deferred. The behavior is now shared, but the name is still referenced across runtime materialization and WebGL payload code; doing that rename here would have been broad mechanical churn with little extra architectural value.
-- The shared adapter still consumes the existing `StaticObjectMaterialPlan` type from the object material planner. A future cleanup should rename/extract that plan type to neutral static material naming if we continue sharing it beyond object-originated materials.
 - I did not run the live harness visual pass against the smeared structured-interior target or a detail-overlay target. Automated coverage passed, but visual confirmation is still on deck.
 
 ### Phase 13B1: Portal And Visibility Record Consumption

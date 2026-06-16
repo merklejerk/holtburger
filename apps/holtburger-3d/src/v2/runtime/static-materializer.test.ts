@@ -6,7 +6,7 @@ import type {
 	StaticCoordinatorCommitDelta,
 	StaticDrawUnit,
 	StaticObjectGeometryStaticDrawUnit,
-	StaticObjectMaterialTableEntry,
+	StaticMaterialTableEntry,
 	TerrainGeometryStaticDrawUnit,
 } from "../static/contracts";
 import { materializeStaticCommit } from "./static-materializer";
@@ -332,7 +332,7 @@ function createStaticObjectDrawUnit(
 	const texCoords: number[] = [];
 	const materialSlotIndices: number[] = [];
 	const indices: number[] = [];
-	const materialEntries: StaticObjectMaterialTableEntry[] = [];
+	const materialEntries: StaticMaterialTableEntry[] = [];
 
 	for (let slot = 0; slot < materialCount; slot += 1) {
 		const vertexOffset = slot * 3;
@@ -438,7 +438,7 @@ function createStaticObjectDrawUnit(
 function createStaticObjectMaterialEntry(
 	slot: number,
 	drawUnitId: string,
-): StaticObjectMaterialTableEntry {
+): StaticMaterialTableEntry {
 	return {
 		alphaTest: 0,
 		indexedClipThreshold: -1,

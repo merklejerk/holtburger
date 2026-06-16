@@ -4,8 +4,10 @@ import type {
 	StaticResolverWorkerResponse,
 } from "./protocol";
 
+export type StaticResolverFactory = () => StaticResolver;
+
 export async function handleStaticResolverWorkerRequest(
-	resolver: StaticResolver,
+	createResolver: StaticResolverFactory,
 	message: StaticResolverWorkerMainMessage,
 	postMessage: (response: StaticResolverWorkerResponse) => void,
 ): Promise<void> {
@@ -14,6 +16,7 @@ export async function handleStaticResolverWorkerRequest(
 	}
 
 	try {
+		const resolver = createResolver();
 		const payload = await resolver.resolve(message.job);
 		postMessage({
 			kind: "static-scope-resolved",

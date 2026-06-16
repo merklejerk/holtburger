@@ -510,7 +510,6 @@ export type StaticObjectTextureRefFacts =
 			readonly height: number;
 			readonly format: string;
 			readonly formatRaw: number;
-			readonly indexedMaxIndex: number | null;
 			readonly palette: PaletteIdentity | null;
 	  };
 

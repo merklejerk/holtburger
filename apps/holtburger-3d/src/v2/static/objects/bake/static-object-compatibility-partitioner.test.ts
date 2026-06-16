@@ -1472,7 +1472,6 @@ function createRgbaTextureRefs(
 			format: "rgba",
 			formatRaw: 1,
 			height: 32,
-			indexedMaxIndex: null,
 			palette: null,
 			renderSurface: {
 				kind: "render-surface",
@@ -1502,7 +1501,6 @@ function createDetailTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 			format: "rgba",
 			formatRaw: 1,
 			height: 16,
-			indexedMaxIndex: null,
 			palette: null,
 			renderSurface: {
 				kind: "render-surface",
@@ -1535,7 +1533,6 @@ function createIndexedTextureRefs(): readonly StaticObjectTextureRefFacts[] {
 			format: "p8",
 			formatRaw: 0x29,
 			height: 32,
-			indexedMaxIndex: 42,
 			palette: {
 				kind: "palette",
 				paletteId: 0x04000010,

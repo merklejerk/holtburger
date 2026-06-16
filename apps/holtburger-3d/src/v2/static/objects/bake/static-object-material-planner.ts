@@ -127,7 +127,6 @@ export interface StaticObjectMaterialFallbackReason {
 		| "missing-detail-render-surface"
 		| "missing-render-surface"
 		| "missing-palette"
-		| "palette-index-out-of-range"
 		| "detail-overlay-render-deferred"
 		| "translucent-render-deferred"
 		| "unsupported-surface-flag";
@@ -355,23 +354,6 @@ export function classifyStaticObjectMaterial(
 				material: context.material.identity,
 				message:
 					"Indexed static material palette was selected but no palette source metadata was resolved.",
-				palette,
-				renderSurface: renderSurfaceRef.renderSurface,
-				texture: context.material.source.texture,
-			});
-			return createUnsupportedPlan(basePlan, [
-				reason,
-				...unsupportedFlagReasons,
-			]);
-		}
-		if (
-			renderSurfaceRef.indexedMaxIndex !== null &&
-			renderSurfaceRef.indexedMaxIndex >= paletteSource.colorCount
-		) {
-			const reason = createFallbackReason({
-				code: "palette-index-out-of-range",
-				material: context.material.identity,
-				message: `Indexed static material references palette index ${renderSurfaceRef.indexedMaxIndex}, but palette ${formatHex32(palette.paletteId)} has ${paletteSource.colorCount} colors.`,
 				palette,
 				renderSurface: renderSurfaceRef.renderSurface,
 				texture: context.material.source.texture,

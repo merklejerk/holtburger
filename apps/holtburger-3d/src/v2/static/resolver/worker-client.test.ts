@@ -41,11 +41,11 @@ describe("V2 static resolver worker protocol", () => {
 		const responses: StaticResolverWorkerResponse[] = [];
 
 		await handleStaticResolverWorkerRequest(
-			{
+			() => ({
 				async resolve(): Promise<StaticScopePayload> {
 					throw new Error("missing terrain root");
 				},
-			},
+			}),
 			{
 				job,
 				kind: "resolve-static-scope",
@@ -61,6 +61,48 @@ describe("V2 static resolver worker protocol", () => {
 				requestId: "transport:1",
 			},
 		]);
+	});
+
+	it("constructs a fresh resolver for each static scope request", async () => {
+		const job = createJob();
+		const responses: StaticResolverWorkerResponse[] = [];
+		let resolverCount = 0;
+
+		await handleStaticResolverWorkerRequest(
+			() => {
+				resolverCount += 1;
+				return {
+					async resolve(): Promise<StaticScopePayload> {
+						return createPayload(job);
+					},
+				};
+			},
+			{
+				job,
+				kind: "resolve-static-scope",
+				requestId: "transport:1",
+			},
+			(response) => responses.push(response),
+		);
+		await handleStaticResolverWorkerRequest(
+			() => {
+				resolverCount += 1;
+				return {
+					async resolve(): Promise<StaticScopePayload> {
+						return createPayload(job);
+					},
+				};
+			},
+			{
+				job,
+				kind: "resolve-static-scope",
+				requestId: "transport:2",
+			},
+			(response) => responses.push(response),
+		);
+
+		expect(resolverCount).toBe(2);
+		expect(responses).toHaveLength(2);
 	});
 });
 

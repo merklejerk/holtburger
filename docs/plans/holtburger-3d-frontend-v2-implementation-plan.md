@@ -1234,7 +1234,7 @@ type PortalPassPlan = {
 
 ### Phase 13B1a: Committed Env-Cell Scene Record Store
 
-Status: planned.
+Status: complete on 2026-06-16.
 
 Purpose: consume committed env-cell visibility, portal/interior, spatial, and source records as runtime/static-scene data independent from renderer resource residency.
 
@@ -1249,6 +1249,77 @@ Acceptance criteria:
 - Interior and portal metadata enters runtime/static-scene as committed static records, not renderer-owned dependency walks.
 - Static BVH/spatial records are committed alongside other peer static result fields.
 - Visibility/source record updates and removals do not require geometry or atlas rebakes.
+
+Completed implementation notes:
+
+- `StaticSceneQuery` now has a committed peer-record store for spatial, visibility, portal/interior, and source-mapping records. It is separate from source-payload BVH ingestion, so committed env-cell metadata can be inspected even before or independently from renderer/WebGL resource residency.
+- Runtime static materialization now applies the materialized peer records to `StaticSceneQuery`, including expanded materialized draw-unit removals. This avoids feeding raw pre-split spatial records into the query after materialization has changed draw-unit ids.
+- Added `queryCommittedEnvCellRecords({ landblockId })` and snapshot counts for committed env-cell peer records, giving future 13B1b-13B1h phases a runtime-owned inspection/query surface instead of walking renderer resources.
+- Existing `applyStaticSpatialRecords` remains as a narrow compatibility wrapper over the new peer-record application path.
+
+Spicy / failed to close:
+
+- Work-owned env-cell records cannot be removed from coordinator eviction deltas because those deltas currently carry only draw-unit ids. Phase 13B1a temporarily splits lifecycle cleanup: draw-unit-owned records are removed by materialized draw-unit removal, while work-owned env-cell peer records are pruned by `retainScopes`, matching the existing source-payload retention model. Phase 13B1a-1 course-corrects this before 13B1b depends on the committed record store.
+- 13B1a intentionally did not implement the position-to-residency lookup. The committed record store is now present; 13B1b still owns turning committed spatial/BSP data into the browser-pollable residency candidate API.
+
+Verification:
+
+- `npm run test:ts -- static-scene-query.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run test:ts`
+
+### Phase 13B1a-1: Scope-Owned And Resource-Keyed Static Eviction Course Correction
+
+Status: planned.
+
+Purpose: make static eviction deltas carry semantic scope ownership and typed renderer-resource removals explicitly, so runtime records prune by scope while renderer resources prune by resource key instead of calcifying the model around draw units only.
+
+Problem statement:
+
+- Today static demand eviction is already conceptually landblock/domain based: desired work keys are `scopeKey + domain`, and draw-unit desired keys are `landblock:<id>:<domain>`.
+- The commit delta only exposes `removedDrawUnitIds`, which is a useful low-level signal for today's geometry draw resources but the wrong sole signal for both work-owned semantic records and future renderer-owned resource families such as transition portal aperture buffers, static light fields, or effect batches.
+- Env-cell visibility, portal/interior, spatial, and source records are usually work-owned. They describe committed scene scope state, not one materialized draw unit. Making their cleanup depend only on draw-unit removal is structurally wrong; making them depend only on `retainScopes` is serviceable but too implicit for later residency and portal work.
+- Renderer cleanup should not be inferred solely from semantic scope eviction either. A scope may own multiple resource families with different materialization and cache lifetimes. The renderer needs explicit resource keys, not broad scope strings.
+
+Deliverables:
+
+- Add a typed static scope eviction key to the static coordinator/runtime contract. Prefer a scope-owner shape such as `{ domain: StaticDomain; scopeKey: string; scope: StaticResolverScope }` so work-owned peer records can match their owner without parsing desired-key strings.
+- Add a typed static resource key to the static coordinator/runtime contract. Initial shape can be only `{ kind: "draw-unit"; drawUnitId: string }`, but the union should be named broadly enough to grow into portal apertures, light fields, and effect batches.
+- Extend `StaticCoordinatorCommitDelta` with `removedScopes`/`removedStaticScopes` and `removedResources`/`removedStaticResources`.
+- Treat top-level `removedDrawUnitIds` as compatibility debt. Prefer replacing it with resource-keyed removal in the coordinator/runtime contract if the churn is contained; otherwise keep it as a derived compatibility helper for renderer/texture paths during this phase and schedule its deletion.
+- Emit removed scope keys from coordinator demand eviction when active work scopes fall out of demand, even when the scope currently has zero resident draw units. Metadata-only and failed-before-draw scopes still need an explicit semantic cleanup signal.
+- Emit removed draw-unit resource keys from coordinator demand eviction for today's resident draw-unit resources.
+- Update materialization to translate draw-unit resource keys through source-to-materialized draw-unit mappings while passing non-draw-unit resource keys and removed scope keys through unchanged.
+- Update renderer and texture-manager paths to consume draw-unit resource keys. If compatibility requires `removedDrawUnitIds` for one phase, derive it from `removedResources` in one place rather than letting every consumer keep a parallel model.
+- Update `StaticSceneQuery.applyStaticPeerRecords` to prune work-owned committed peer records by removed scope keys, while continuing to prune draw-unit-owned records by materialized draw-unit resource keys.
+- Keep `retainScopes` as broad source/query retention, not the primary semantic-record eviction signal.
+- Add tests proving a landblock/domain eviction removes work-owned env-cell peer records without requiring any draw-unit-owned record to exist, and that draw-unit resource eviction still removes renderer/texture/query draw-unit-owned resources after materialization splitting.
+
+Acceptance criteria:
+
+- Semantic env-cell peer-record cleanup is driven by explicit scope eviction metadata from the coordinator/runtime commit path.
+- Renderer and texture cleanup receive materialized draw-unit resource keys; no WebGL resource path is forced to infer removal from landblock/domain scopes.
+- The eviction contract is resource-keyed, not draw-unit-only, so Phase 13B1f/13B1h can add transition portal aperture resources without inventing another parallel removal channel.
+- Work-owned record lifecycle no longer depends on `retainScopes` as the only cleanup path.
+- 13B1b can consume the committed record store knowing stale landblock/domain records are removed by the same static commit stream that removed renderer resources.
+
+Spicy / watchouts:
+
+- Materialization can split one source draw unit into multiple renderer draw units. Draw-unit resource keys must be materialized for renderer cleanup; do not replace resource-keyed cleanup with scope eviction.
+- Current work and draw-unit desired keys both encode landblock/domain, but they do so as strings. Prefer introducing a typed helper/key rather than adding more ad hoc string parsing.
+- If future static scopes stop being landblock-only, this phase should name the type as a scope owner key rather than hard-code `removedLandblocks`.
+- Do not add portal/light/effect resource kinds in this phase unless a current consumer exists. The goal is to fix the contract shape, not prebuild unowned resource systems.
+
+Dry-run notes:
+
+- Contract touch points are `StaticCoordinatorCommitDelta`, `materializeStaticCommit`, `ClientRuntimeImpl.#materializeStaticCommit`, and `StaticSceneQuery.applyStaticPeerRecords`.
+- Coordinator should collect removed active work scopes before deleting stale `#activeWork` entries in `requestStaticDemand`. Those scope keys should flow into the eviction commit delta alongside removed draw-unit resource keys.
+- `#evictResidentDrawUnitsExcept` should return typed removed resource keys rather than owning the whole eviction delta emission. If removed scopes exist but removed resources are empty, the coordinator should still emit an eviction delta carrying `removedScopes`.
+- `materializeStaticCommit` should pass scope removals through unchanged while expanding draw-unit resource keys through source-to-materialized draw-unit mappings. Non-draw-unit resource keys pass through unchanged until a future materializer owns their remapping.
+- `StaticSceneQuery` should remove work-owned committed records by matching `record.owner.domain + record.owner.scopeKey` against removed scope keys. Draw-unit-owned records should match `{ kind: "draw-unit"; drawUnitId }` resource keys.
+- Existing renderer and texture-manager consumers can ignore `removedScopes`; they should consume only draw-unit resource keys. If their public input still says `removedDrawUnitIds`, derive it from `removedResources` at the runtime boundary as temporary compatibility.
+- Tests to update: coordinator eviction delta assertions need `removedScopes` and `removedResources`; static materializer helper deltas need empty defaults; static-scene query needs scope-removal and draw-unit-resource-removal tests; client-runtime can assert renderer deltas remain unchanged while query cleanup happens through the commit stream.
 
 ### Phase 13B1b: Position-To-Residency Query API
 

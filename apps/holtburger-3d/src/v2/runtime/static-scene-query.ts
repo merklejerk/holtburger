@@ -6,11 +6,14 @@ import type {
 	StaticObjectMaterialSourceFacts,
 	StaticObjectPartSourceFacts,
 	StaticDomain,
+	StaticPortalInteriorRecord,
 	StaticScopePayload,
+	StaticSourceMappingRecord,
 	StaticSpatialRecord,
 	StaticObjectTextureRefFacts,
 	TerrainMeshQuadFacts,
 	TerrainStaticScopePayload,
+	StaticVisibilityRecord,
 } from "../static/contracts";
 import {
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
@@ -165,6 +168,11 @@ export interface StaticSceneQuerySnapshot {
 	readonly outdoorRecordCount: number;
 	readonly envCellRecordCount: number;
 	readonly envCellLandblockCount: number;
+	readonly committedEnvCellLandblockCount: number;
+	readonly committedEnvCellPortalInteriorRecordCount: number;
+	readonly committedEnvCellSourceMappingRecordCount: number;
+	readonly committedEnvCellSpatialRecordCount: number;
+	readonly committedEnvCellVisibilityRecordCount: number;
 }
 
 export interface StaticSceneQuerySourcePayloadOptions {
@@ -291,6 +299,19 @@ interface EnvCellStaticSeedRuntimeRecord {
 	readonly envCellId: number;
 	readonly resolverBounds: StaticBounds | null;
 	readonly seed: LandblockEnvCellsStaticScopePayload["envCells"][number]["staticObjectSeeds"][number];
+}
+
+export interface StaticSceneCommittedEnvCellRecords {
+	readonly landblockId: number;
+	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
+	readonly sourceMappings: readonly StaticSourceMappingRecord[];
+	readonly spatialRecords: readonly StaticSpatialRecord[];
+	readonly visibilityRecords: readonly StaticVisibilityRecord[];
+}
+
+interface CommittedRecordEntry<TRecord> {
+	readonly ownerKey: string;
+	readonly record: TRecord;
 }
 
 class LandblockGridSpatialIndex {
@@ -538,6 +559,22 @@ export class StaticSceneQuery {
 			readonly ownerDrawUnitId: string;
 		}
 	>();
+	readonly #committedSpatialRecordsByKey = new Map<
+		string,
+		CommittedRecordEntry<StaticSpatialRecord>
+	>();
+	readonly #committedVisibilityRecordsByKey = new Map<
+		string,
+		CommittedRecordEntry<StaticVisibilityRecord>
+	>();
+	readonly #committedPortalInteriorRecordsByKey = new Map<
+		string,
+		CommittedRecordEntry<StaticPortalInteriorRecord>
+	>();
+	readonly #committedSourceMappingsByKey = new Map<
+		string,
+		CommittedRecordEntry<StaticSourceMappingRecord>
+	>();
 
 	ingestSourcePayload(
 		payload: StaticScopePayload,
@@ -619,12 +656,26 @@ export class StaticSceneQuery {
 				this.#envCellStaticBoundsOverridesByKey.delete(key);
 			}
 		}
+		this.#pruneCommittedRecordsByRetainedScopes(scopes);
 		this.#rebuildLandblockGridIndex();
 	}
 
 	applyStaticSpatialRecords(options: {
 		readonly records: readonly StaticSpatialRecord[];
 		readonly removedDrawUnitIds?: readonly string[];
+	}): void {
+		this.applyStaticPeerRecords({
+			removedDrawUnitIds: options.removedDrawUnitIds,
+			spatialRecords: options.records,
+		});
+	}
+
+	applyStaticPeerRecords(options: {
+		readonly portalInteriorRecords?: readonly StaticPortalInteriorRecord[];
+		readonly removedDrawUnitIds?: readonly string[];
+		readonly sourceMappings?: readonly StaticSourceMappingRecord[];
+		readonly spatialRecords?: readonly StaticSpatialRecord[];
+		readonly visibilityRecords?: readonly StaticVisibilityRecord[];
 	}): void {
 		const removedDrawUnitIds = new Set(options.removedDrawUnitIds ?? []);
 		if (removedDrawUnitIds.size > 0) {
@@ -636,24 +687,15 @@ export class StaticSceneQuery {
 					this.#envCellStaticBoundsOverridesByKey.delete(key);
 				}
 			}
+			this.#deleteDrawUnitOwnedCommittedRecords(removedDrawUnitIds);
 		}
 
-		for (const record of options.records) {
-			if (record.kind !== "env-cell-static-object-bounds") {
-				continue;
-			}
-			this.#envCellStaticBoundsOverridesByKey.set(
-				createEnvCellStaticObjectBoundsKey({
-					envCellId: record.envCellId,
-					instanceId: record.instanceId,
-					landblockId: record.landblockId,
-				}),
-				{
-					bounds: record.bounds,
-					ownerDrawUnitId: record.owner.drawUnitId,
-				},
-			);
-		}
+		this.#upsertCommittedSpatialRecords(options.spatialRecords ?? []);
+		this.#upsertCommittedVisibilityRecords(options.visibilityRecords ?? []);
+		this.#upsertCommittedPortalInteriorRecords(
+			options.portalInteriorRecords ?? [],
+		);
+		this.#upsertCommittedSourceMappings(options.sourceMappings ?? []);
 	}
 
 	ingestTerrain(
@@ -1032,6 +1074,44 @@ export class StaticSceneQuery {
 		return candidates[0]?.item.envCellId ?? null;
 	}
 
+	queryCommittedEnvCellRecords(options: {
+		readonly landblockId: number;
+	}): StaticSceneCommittedEnvCellRecords | null {
+		const portalInteriorRecords = collectCommittedRecordsByLandblock(
+			this.#committedPortalInteriorRecordsByKey,
+			options.landblockId,
+		);
+		const sourceMappings = collectCommittedRecordsByLandblock(
+			this.#committedSourceMappingsByKey,
+			options.landblockId,
+		);
+		const spatialRecords = collectCommittedRecordsByLandblock(
+			this.#committedSpatialRecordsByKey,
+			options.landblockId,
+		);
+		const visibilityRecords = collectCommittedRecordsByLandblock(
+			this.#committedVisibilityRecordsByKey,
+			options.landblockId,
+		);
+
+		if (
+			portalInteriorRecords.length === 0 &&
+			sourceMappings.length === 0 &&
+			spatialRecords.length === 0 &&
+			visibilityRecords.length === 0
+		) {
+			return null;
+		}
+
+		return {
+			landblockId: options.landblockId,
+			portalInteriorRecords,
+			sourceMappings,
+			spatialRecords,
+			visibilityRecords,
+		};
+	}
+
 	createSnapshot(): StaticSceneQuerySnapshot {
 		let envCellRecordCount = 0;
 		for (const root of this.#envCellRootsByLandblockId.values()) {
@@ -1049,6 +1129,20 @@ export class StaticSceneQuery {
 
 		return {
 			landblockBucketCount: this.#landblockGridIndex.bucketCount,
+			committedEnvCellLandblockCount: countCommittedEnvCellLandblocks([
+				this.#committedSpatialRecordsByKey,
+				this.#committedVisibilityRecordsByKey,
+				this.#committedPortalInteriorRecordsByKey,
+				this.#committedSourceMappingsByKey,
+			]),
+			committedEnvCellPortalInteriorRecordCount:
+				this.#committedPortalInteriorRecordsByKey.size,
+			committedEnvCellSourceMappingRecordCount:
+				this.#committedSourceMappingsByKey.size,
+			committedEnvCellSpatialRecordCount:
+				this.#committedSpatialRecordsByKey.size,
+			committedEnvCellVisibilityRecordCount:
+				this.#committedVisibilityRecordsByKey.size,
 			envCellLandblockCount: this.#envCellRootsByLandblockId.size,
 			envCellRecordCount,
 			outdoorRecordCount: outdoorBvhRecordCount,
@@ -1064,6 +1158,161 @@ export class StaticSceneQuery {
 		this.#outdoorBvhRootsByDomainAndLandblock.clear();
 		this.#outdoorSourceDiagnosticsByDomainAndLandblock.clear();
 		this.#envCellRootsByLandblockId.clear();
+		this.#envCellStaticBoundsOverridesByKey.clear();
+		this.#committedSpatialRecordsByKey.clear();
+		this.#committedVisibilityRecordsByKey.clear();
+		this.#committedPortalInteriorRecordsByKey.clear();
+		this.#committedSourceMappingsByKey.clear();
+	}
+
+	#upsertCommittedSpatialRecords(records: readonly StaticSpatialRecord[]): void {
+		this.#deleteCommittedRecordsForOwners(
+			this.#committedSpatialRecordsByKey,
+			records,
+		);
+
+		for (const record of records) {
+			this.#committedSpatialRecordsByKey.set(
+				createCommittedSpatialRecordKey(record),
+				{
+					ownerKey: createStaticPeerOwnerKey(record.owner),
+					record,
+				},
+			);
+			if (record.kind !== "env-cell-static-object-bounds") {
+				continue;
+			}
+			this.#envCellStaticBoundsOverridesByKey.set(
+				createEnvCellStaticObjectBoundsKey({
+					envCellId: record.envCellId,
+					instanceId: record.instanceId,
+					landblockId: record.landblockId,
+				}),
+				{
+					bounds: record.bounds,
+					ownerDrawUnitId: record.owner.drawUnitId,
+				},
+			);
+		}
+	}
+
+	#upsertCommittedVisibilityRecords(
+		records: readonly StaticVisibilityRecord[],
+	): void {
+		this.#deleteCommittedRecordsForOwners(
+			this.#committedVisibilityRecordsByKey,
+			records,
+		);
+		for (const record of records) {
+			this.#committedVisibilityRecordsByKey.set(
+				createCommittedVisibilityRecordKey(record),
+				{
+					ownerKey: createStaticPeerOwnerKey(record.owner),
+					record,
+				},
+			);
+		}
+	}
+
+	#upsertCommittedPortalInteriorRecords(
+		records: readonly StaticPortalInteriorRecord[],
+	): void {
+		this.#deleteCommittedRecordsForOwners(
+			this.#committedPortalInteriorRecordsByKey,
+			records,
+		);
+		for (const record of records) {
+			this.#committedPortalInteriorRecordsByKey.set(
+				createCommittedPortalInteriorRecordKey(record),
+				{
+					ownerKey: createStaticPeerOwnerKey(record.owner),
+					record,
+				},
+			);
+		}
+	}
+
+	#upsertCommittedSourceMappings(
+		records: readonly StaticSourceMappingRecord[],
+	): void {
+		this.#deleteCommittedRecordsForOwners(
+			this.#committedSourceMappingsByKey,
+			records,
+		);
+		for (const record of records) {
+			this.#committedSourceMappingsByKey.set(
+				createCommittedSourceMappingRecordKey(record),
+				{
+					ownerKey: createStaticPeerOwnerKey(record.owner),
+					record,
+				},
+			);
+		}
+	}
+
+	#deleteCommittedRecordsForOwners<
+		TRecord extends {
+			readonly owner: {
+				readonly kind: string;
+				readonly drawUnitId?: string;
+				readonly workId?: string;
+			};
+		},
+	>(
+		recordsByKey: Map<string, CommittedRecordEntry<TRecord>>,
+		records: readonly TRecord[],
+	): void {
+		const ownerKeys = new Set(
+			records.map((record) => createStaticPeerOwnerKey(record.owner)),
+		);
+		for (const [key, entry] of recordsByKey) {
+			if (ownerKeys.has(entry.ownerKey)) {
+				recordsByKey.delete(key);
+			}
+		}
+	}
+
+	#deleteDrawUnitOwnedCommittedRecords(drawUnitIds: ReadonlySet<string>): void {
+		for (const recordsByKey of [
+			this.#committedSpatialRecordsByKey,
+			this.#committedVisibilityRecordsByKey,
+			this.#committedPortalInteriorRecordsByKey,
+			this.#committedSourceMappingsByKey,
+		]) {
+			for (const [key, entry] of recordsByKey) {
+				const owner = entry.record.owner;
+				if (owner.kind === "draw-unit" && drawUnitIds.has(owner.drawUnitId)) {
+					recordsByKey.delete(key);
+				}
+			}
+		}
+	}
+
+	#pruneCommittedRecordsByRetainedScopes(
+		scopes: readonly StaticSceneQueryRetainedScope[],
+	): void {
+		const retainedScopeKeys = new Set(
+			scopes.map((scope) => createRetainedScopeKey(scope.domain, scope.landblockId)),
+		);
+		for (const recordsByKey of [
+			this.#committedSpatialRecordsByKey,
+			this.#committedVisibilityRecordsByKey,
+			this.#committedPortalInteriorRecordsByKey,
+			this.#committedSourceMappingsByKey,
+		]) {
+			for (const [key, entry] of recordsByKey) {
+				if (
+					!retainedScopeKeys.has(
+						createRetainedScopeKey(
+							getCommittedRecordDomain(entry.record),
+							getCommittedRecordLandblockId(entry.record),
+						),
+					)
+				) {
+					recordsByKey.delete(key);
+				}
+			}
+		}
 	}
 
 	#pickOutdoorScene(
@@ -1894,6 +2143,188 @@ function createEnvCellStaticObjectBoundsKey(input: {
 function parseEnvCellStaticObjectBoundsKeyLandblockId(key: string): number | null {
 	const landblockId = Number.parseInt(key.split(":", 1)[0] ?? "", 10);
 	return Number.isFinite(landblockId) ? landblockId : null;
+}
+
+function createCommittedSpatialRecordKey(record: StaticSpatialRecord): string {
+	switch (record.kind) {
+		case "draw-unit-bounds":
+			return `draw-unit-bounds:${record.drawUnitId}`;
+		case "env-cell-static-object-bounds":
+			return `env-cell-static-object-bounds:${record.landblockId >>> 0}:${record.envCellId >>> 0}:${record.instanceId}`;
+		case "env-cell-spatial":
+			return `env-cell-spatial:${record.landblockId >>> 0}:${record.envCellId >>> 0}:${record.memberId}`;
+	}
+}
+
+function createCommittedVisibilityRecordKey(
+	record: StaticVisibilityRecord,
+): string {
+	return `env-cell-visibility:${record.landblockId >>> 0}`;
+}
+
+function createCommittedPortalInteriorRecordKey(
+	record: StaticPortalInteriorRecord,
+): string {
+	return `env-cell-portal-interior:${record.landblockId >>> 0}`;
+}
+
+function createCommittedSourceMappingRecordKey(
+	record: StaticSourceMappingRecord,
+): string {
+	switch (record.kind) {
+		case "terrain-source-triangle":
+			return `terrain-source-triangle:${record.drawUnitId}:${record.sourceTriangleId}`;
+		case "env-cell-source":
+			return `env-cell-source:${record.landblockId >>> 0}:${record.envCellId >>> 0}:${record.memberId}`;
+	}
+}
+
+function createStaticPeerOwnerKey(owner: {
+	readonly kind: string;
+	readonly drawUnitId?: string;
+	readonly workId?: string;
+}): string {
+	if (owner.kind === "draw-unit" && typeof owner.drawUnitId === "string") {
+		return `draw-unit:${owner.drawUnitId}`;
+	}
+	if (owner.kind === "work" && typeof owner.workId === "string") {
+		return `work:${owner.workId}`;
+	}
+	throw new Error(
+		`Static scene query cannot commit peer record with unknown owner ${owner.kind}.`,
+	);
+}
+
+function collectCommittedRecordsByLandblock<TRecord>(
+	recordsByKey: ReadonlyMap<string, CommittedRecordEntry<TRecord>>,
+	landblockId: number,
+): readonly TRecord[] {
+	return [...recordsByKey.values()]
+		.map((entry) => entry.record)
+		.filter((record) => getCommittedRecordLandblockId(record) === landblockId)
+		.sort(compareCommittedRecords);
+}
+
+function countCommittedEnvCellLandblocks(
+	recordMaps: readonly ReadonlyMap<
+		string,
+		CommittedRecordEntry<
+			| StaticPortalInteriorRecord
+			| StaticSourceMappingRecord
+			| StaticSpatialRecord
+			| StaticVisibilityRecord
+		>
+	>[],
+): number {
+	const landblockIds = new Set<number>();
+	for (const recordsByKey of recordMaps) {
+		for (const entry of recordsByKey.values()) {
+			const landblockId = getCommittedRecordLandblockId(entry.record);
+			if (
+				landblockId !== null &&
+				getCommittedRecordDomain(entry.record) === "landblock-env-cells"
+			) {
+				landblockIds.add(landblockId);
+			}
+		}
+	}
+	return landblockIds.size;
+}
+
+function compareCommittedRecords<TRecord>(left: TRecord, right: TRecord): number {
+	return (
+		getCommittedRecordDomain(left).localeCompare(getCommittedRecordDomain(right)) ||
+		(getCommittedRecordLandblockId(left) ?? -1) -
+			(getCommittedRecordLandblockId(right) ?? -1) ||
+		JSON.stringify(left).localeCompare(JSON.stringify(right))
+	);
+}
+
+function getCommittedRecordDomain(
+	record:
+		| StaticPortalInteriorRecord
+		| StaticSourceMappingRecord
+		| StaticSpatialRecord
+		| StaticVisibilityRecord
+		| unknown,
+): StaticDomain {
+	if (isRecordWithWorkOwner(record)) {
+		return record.owner.domain;
+	}
+	if (isEnvCellRecord(record)) {
+		return "landblock-env-cells";
+	}
+	if (isTerrainSourceMappingRecord(record)) {
+		return "outdoor-terrain";
+	}
+	return "outdoor-detail";
+}
+
+function getCommittedRecordLandblockId(
+	record:
+		| StaticPortalInteriorRecord
+		| StaticSourceMappingRecord
+		| StaticSpatialRecord
+		| StaticVisibilityRecord
+		| unknown,
+): number | null {
+	if (isRecordWithLandblock(record)) {
+		return record.landblockId;
+	}
+	return null;
+}
+
+function createRetainedScopeKey(
+	domain: StaticDomain,
+	landblockId: number | null,
+): string {
+	return `${domain}:${landblockId ?? "none"}`;
+}
+
+function isRecordWithWorkOwner(
+	record: unknown,
+): record is {
+	readonly owner: { readonly kind: "work"; readonly domain: StaticDomain };
+} {
+	return (
+		typeof record === "object" &&
+		record !== null &&
+		"owner" in record &&
+		(record as { owner?: { kind?: unknown } }).owner?.kind === "work" &&
+		typeof (record as { owner?: { domain?: unknown } }).owner?.domain ===
+			"string"
+	);
+}
+
+function isRecordWithLandblock(
+	record: unknown,
+): record is { readonly landblockId: number } {
+	return (
+		typeof record === "object" &&
+		record !== null &&
+		"landblockId" in record &&
+		typeof (record as { landblockId?: unknown }).landblockId === "number"
+	);
+}
+
+function isEnvCellRecord(record: unknown): boolean {
+	return (
+		typeof record === "object" &&
+		record !== null &&
+		"kind" in record &&
+		typeof (record as { kind?: unknown }).kind === "string" &&
+		(record as { kind: string }).kind.startsWith("env-cell")
+	);
+}
+
+function isTerrainSourceMappingRecord(
+	record: unknown,
+): record is { readonly kind: "terrain-source-triangle" } {
+	return (
+		typeof record === "object" &&
+		record !== null &&
+		(record as { kind?: unknown }).kind === "terrain-source-triangle"
+	);
 }
 
 function comparePickHits(

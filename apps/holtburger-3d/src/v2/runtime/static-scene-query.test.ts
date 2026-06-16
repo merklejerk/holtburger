@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
 	LandblockEnvCellsStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
+	StaticPeerRecordOwner,
 	TerrainStaticScopePayload,
 } from "../static/contracts";
 import {
@@ -477,6 +478,11 @@ describe("V2 static scene query", () => {
 			},
 		});
 		expect(query.createSnapshot()).toEqual({
+			committedEnvCellLandblockCount: 0,
+			committedEnvCellPortalInteriorRecordCount: 0,
+			committedEnvCellSourceMappingRecordCount: 0,
+			committedEnvCellSpatialRecordCount: 0,
+			committedEnvCellVisibilityRecordCount: 0,
 			envCellLandblockCount: 1,
 			envCellRecordCount: 1,
 			landblockBucketCount: 1,
@@ -617,6 +623,11 @@ describe("V2 static scene query", () => {
 
 		expect(hit).toBeNull();
 		expect(query.createSnapshot()).toEqual({
+			committedEnvCellLandblockCount: 0,
+			committedEnvCellPortalInteriorRecordCount: 0,
+			committedEnvCellSourceMappingRecordCount: 0,
+			committedEnvCellSpatialRecordCount: 0,
+			committedEnvCellVisibilityRecordCount: 0,
 			envCellLandblockCount: 0,
 			envCellRecordCount: 0,
 			landblockBucketCount: 0,
@@ -644,6 +655,115 @@ describe("V2 static scene query", () => {
 				point: { x: 40, y: 0, z: -4.5 },
 			}),
 		).toBeNull();
+	});
+
+	it("stores committed env-cell peer records independently from source BVH payloads", () => {
+		const query = new StaticSceneQuery();
+		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+
+		query.applyStaticPeerRecords({
+			portalInteriorRecords: [
+				{
+					envCells: [
+						{
+							envCellId: 0xda550100,
+							portalApertures: [],
+							portals: [],
+						},
+					],
+					kind: "env-cell-portal-interior",
+					landblockId: 0xda55ffff,
+					owner,
+					portalLinks: [],
+				},
+			],
+			sourceMappings: [
+				{
+					cellStructure: {
+						cellStructureId: 0x0d000001,
+						kind: "cell-structure",
+					},
+					envCellId: 0xda550100,
+					environment: {
+						environmentId: 0x0e000001,
+						kind: "environment",
+					},
+					kind: "env-cell-source",
+					landblockId: 0xda55ffff,
+					memberId: "cell-0",
+					owner,
+					surfaces: [],
+				},
+			],
+			spatialRecords: [
+				{
+					cellStructure: {
+						cellStructureId: 0x0d000001,
+						kind: "cell-structure",
+					},
+					envCellId: 0xda550100,
+					environment: {
+						environmentId: 0x0e000001,
+						kind: "environment",
+					},
+					kind: "env-cell-spatial",
+					landblockId: 0xda55ffff,
+					localBvhItemCount: 1,
+					localBvhNodeCount: 1,
+					memberId: "cell-0",
+					owner,
+					renderBounds: null,
+					residencyBvhItemCount: 1,
+					residencyBvhNodeCount: 1,
+				},
+			],
+			visibilityRecords: [
+				{
+					acceptedEnvCellIds: [0xda550100],
+					diagnostics: [],
+					kind: "env-cell-visibility",
+					landblockId: 0xda55ffff,
+					owner,
+					visibleLinks: [
+						{
+							sourceEnvCellId: 0xda550100,
+							targetEnvCellId: 0xda550101,
+						},
+					],
+				},
+			],
+		});
+
+		expect(query.queryCommittedEnvCellRecords({ landblockId: 0xda55ffff }))
+			.toMatchObject({
+				landblockId: 0xda55ffff,
+				portalInteriorRecords: [{ kind: "env-cell-portal-interior" }],
+				sourceMappings: [{ kind: "env-cell-source" }],
+				spatialRecords: [{ kind: "env-cell-spatial" }],
+				visibilityRecords: [{ kind: "env-cell-visibility" }],
+			});
+		expect(query.createSnapshot()).toMatchObject({
+			committedEnvCellLandblockCount: 1,
+			committedEnvCellPortalInteriorRecordCount: 1,
+			committedEnvCellSourceMappingRecordCount: 1,
+			committedEnvCellSpatialRecordCount: 1,
+			committedEnvCellVisibilityRecordCount: 1,
+			envCellLandblockCount: 0,
+			envCellRecordCount: 0,
+		});
+
+		query.retainScopes([]);
+
+		expect(
+			query.queryCommittedEnvCellRecords({ landblockId: 0xda55ffff }),
+		).toBeNull();
+		expect(query.createSnapshot()).toMatchObject({
+			committedEnvCellLandblockCount: 0,
+			committedEnvCellPortalInteriorRecordCount: 0,
+			committedEnvCellSourceMappingRecordCount: 0,
+			committedEnvCellSpatialRecordCount: 0,
+			committedEnvCellVisibilityRecordCount: 0,
+		});
 	});
 });
 
@@ -1258,6 +1378,22 @@ function createLandblockEnvCellsPayload(
 			},
 		},
 		visibilityDiagnostics: [],
+	};
+}
+
+function createEnvCellWorkOwner(
+	workId: string,
+	landblockId: number,
+): StaticPeerRecordOwner {
+	return {
+		domain: "landblock-env-cells",
+		kind: "work",
+		scope: {
+			kind: "landblock",
+			landblockId,
+		},
+		scopeKey: `landblock:${landblockId.toString(16).padStart(8, "0")}`,
+		workId,
 	};
 }
 

@@ -577,6 +577,11 @@ describe("V2 landblock env-cell baker", () => {
 
 		expect(drawUnit).toMatchObject({
 			materialFamily: "texture-rgba",
+			materialEntries: [
+				expect.objectContaining({
+					primaryTextureWrapMode: "repeat",
+				}),
+			],
 			materialPlan: [
 				expect.objectContaining({
 					family: "texture-rgba",
@@ -594,6 +599,10 @@ describe("V2 landblock env-cell baker", () => {
 			expect.objectContaining({
 				domain: "landblock-env-cells",
 				ownerDrawUnitIds: [drawUnit.drawUnitId],
+				samplingPolicy: {
+					wrapS: "repeat",
+					wrapT: "repeat",
+				},
 				source: {
 					kind: "prepared-render-surface-texture-use",
 					renderSurface: {

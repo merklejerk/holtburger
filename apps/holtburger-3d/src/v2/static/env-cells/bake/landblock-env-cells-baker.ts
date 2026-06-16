@@ -53,6 +53,8 @@ import {
 
 const MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW = 8;
 
+type StructuredInteriorTextureWrapMode = "clamp" | "repeat";
+
 interface StructuredInteriorTriangleCandidate {
 	readonly compatibilityKey: string;
 	readonly materialEntryKey: string;
@@ -743,7 +745,9 @@ function createStructuredInteriorMaterialTableEntry(options: {
 		primaryTextureUseId: primaryTextureUse
 			? createStructuredInteriorTextureUseId(options.work, primaryTextureUse)
 			: null,
-		primaryTextureWrapMode: "clamp",
+		primaryTextureWrapMode: resolveStructuredInteriorTextureWrapMode(
+			options.plan,
+		),
 		slot: options.slot,
 	};
 }
@@ -821,7 +825,7 @@ function createStructuredInteriorMaterialEntryKey(
 			...plan.color.map(formatMaterialScalar),
 			...plan.emissiveColor.map(formatMaterialScalar),
 		].join(",")}`,
-		"wrap:clamp",
+		`wrap:${resolveStructuredInteriorTextureWrapMode(plan)}`,
 		`roles:${createStructuredInteriorTextureRoleLayoutKey(plan.textureRoles)}`,
 		`alpha-test:${formatMaterialScalar(plan.alphaPolicy.alphaTest)}`,
 		`indexed-clip:${formatMaterialScalar(
@@ -944,7 +948,9 @@ function createStructuredInteriorTextureUses(options: {
 				textureUsesById.set(textureUseId, {
 					domain: "landblock-env-cells",
 					ownerDrawUnitIds: [drawUnit.drawUnitId],
-					samplingPolicy: createStructuredInteriorSamplingPolicy(),
+					samplingPolicy: createStructuredInteriorSamplingPolicy(
+						role.dataUse,
+					),
 					source: role.dataUse,
 					staticBatchId: options.staticBatchId,
 					textureUseId,
@@ -957,11 +963,41 @@ function createStructuredInteriorTextureUses(options: {
 	);
 }
 
-function createStructuredInteriorSamplingPolicy(): StaticBakeTextureSamplingPolicy {
+function createStructuredInteriorSamplingPolicy(
+	dataUse: MaterialTextureDataUseIdentity,
+): StaticBakeTextureSamplingPolicy {
+	if (shouldRepeatStructuredInteriorTextureUse(dataUse)) {
+		return {
+			wrapS: "repeat",
+			wrapT: "repeat",
+		};
+	}
+
 	return {
 		wrapS: "clamp-to-edge",
 		wrapT: "clamp-to-edge",
 	};
+}
+
+function resolveStructuredInteriorTextureWrapMode(
+	plan: StaticObjectMaterialPlan,
+): StructuredInteriorTextureWrapMode {
+	return plan.textureRoles.some((role) =>
+		shouldRepeatStructuredInteriorTextureUse(role.dataUse),
+	)
+		? "repeat"
+		: "clamp";
+}
+
+function shouldRepeatStructuredInteriorTextureUse(
+	dataUse: MaterialTextureDataUseIdentity,
+): boolean {
+	return (
+		dataUse.kind === "prepared-render-surface-texture-use" &&
+		(dataUse.usage === "rgba-color" ||
+			dataUse.usage === "index8" ||
+			dataUse.usage === "index16")
+	);
 }
 
 function bakeCellStructureGeometry(

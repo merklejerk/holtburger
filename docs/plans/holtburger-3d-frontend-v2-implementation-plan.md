@@ -943,6 +943,193 @@ Failed to close:
 - I did not perform the manual harness visual check against a real outdoor env-cell target in this phase. Automated tests prove renderer plumbing, but the acceptance item "known outdoor landblock env-cell target can visibly render" still needs an eyeball pass in the V2 harness.
 - Portal traversal, env-cell visibility consumption, dungeon anchoring/focus, and render-target/pass steering remain deferred to 13B1-13B3.
 
+### Phase 13B0a: Static Texture Sampling Policy Course Correction
+
+Status: planned; immediate next phase before 13B0b and 13B1.
+
+Purpose: replace static-domain blanket clamp sampling with an explicit role-aware static texture sampling policy before broader material-adapter sharing.
+
+Problem statement:
+
+- Static-object bake output currently emits a clamp-to-edge `StaticBakeTextureSamplingPolicy` for every static texture use, regardless of texture role or material wrap mode.
+- Structured interiors recently exposed the same class of issue from the opposite direction: their material table originally hard-coded clamp and smeared tiled cell-structure surfaces until repeat virtual wrap was restored.
+- The static material shader and texture manager have separate responsibilities:
+  - material table `primaryTextureWrapMode` tells the shader whether to clamp or repeat base/index UVs;
+  - texture-use `samplingPolicy` tells the atlas packer and texture manager how to pack/source-gutter texture pages.
+- Blanket clamp is too blunt for tiled base/index textures and detail overlays, but blanket repeat would be equally wrong for palettes, masks, and raw/exact data.
+
+Steering:
+
+- Fix the policy model first, before extracting the shared material adapter. Otherwise the extraction will either preserve bad clamp behavior or combine policy correction with refactor churn.
+- Treat texture-use sampling policy as role/data-use policy, not domain folklore:
+  - base `rgba-color`: clamp or repeat according to authored/material wrap facts;
+  - index `index8`/`index16`: same repeat/clamp behavior as the indexed material's UV sampling mode;
+  - `rgba-detail`: repeat unless ground-truth evidence proves a specific static detail case should clamp;
+  - palette textures: clamp-to-edge;
+  - `rgba-mask` and `rgba-raw`: clamp-to-edge unless a concrete material case proves otherwise.
+- Preserve shader virtual-wrap semantics for non-terrain atlas pages. This phase should not make packed atlas pages rely on physical GL `REPEAT`; it should feed correct material wrap uniforms and correct per-source gutter behavior.
+- Keep public draw-unit contracts unchanged. This is a behavior/policy correction, not a geometry or ownership refactor.
+- If static-object detail clamp was masking a visual issue, fix the policy and update tests intentionally. Do not preserve a wrong test just for compatibility.
+
+Deliverables:
+
+- A neutral static texture sampling policy helper that derives:
+  - material primary wrap mode where the caller has authored/material wrap facts;
+  - texture-use `StaticBakeTextureSamplingPolicy` from `MaterialTextureDataUseIdentity` plus the material/role wrap mode when needed.
+- Policy-qualified texture-use identity for static material texture uses. If the same source bytes can be sampled with different clamp/repeat policy inside one static batch, those must become distinct logical texture uses rather than sharing one first-wins `textureUseId`.
+- Static-object bake path updated so texture-use sampling policy is no longer blanket clamp.
+- Structured-interior bake path updated to use the same policy helper for texture-use sampling and material primary wrap mode, replacing the temporary local repeat/clamp helper added after 13B0.
+- Tests for static-object base-color clamp and repeat cases, static-object detail overlay repeat policy, structured-interior base-color repeat, structured-interior indexed repeat, palette clamp, and mask/raw clamp if fixtures are cheap.
+- Texture-manager tests or existing diagnostics assertions updated so repeat source gutters are expected for repeat static texture uses while physical atlas page wrap remains shader-virtualized where appropriate.
+
+Acceptance criteria:
+
+- Static objects no longer emit clamp sampling policy for every texture use by default.
+- Structured interiors and static objects use the same policy helper for isomorphic material/data-use facts.
+- Repeat base/index/detail texture uses produce repeat source-gutter policy while palette/mask/raw uses remain clamp.
+- Clamp and repeat consumers of the same source texture cannot silently collapse onto the same logical texture use. The texture-use id, texture manager grouping, or an explicit fail-loud guard must enforce policy separation.
+- Material `primaryTextureWrapMode` and texture-use `samplingPolicy` agree for base/index materials that repeat.
+- Existing visible static-object behavior remains valid or any intentional detail/wrap correction is explicitly tested and called out.
+- `npm run check`, `npm run lint:ts`, focused texture-manager/static-object/structured-interior tests, and full `npm run test:ts` pass.
+
+Dry-run findings:
+
+- The current static-object policy lives in `createStaticObjectSamplingPolicy()` and unconditionally returns clamp. That function is small enough to replace directly once the shared helper exists.
+- Structured interiors currently have local `resolveStructuredInteriorTextureWrapMode()` and `createStructuredInteriorSamplingPolicy()` helpers. They should be replaced here, not left for the larger adapter extraction.
+- The texture manager already supports repeat per-source gutters through `createTexturePackingSourceGutterEdgeMode(pagePolicy)`, and non-terrain domains already use shader virtual wrap for physical atlas pages. The missing piece is correct `samplingPolicy` at bake output.
+- Existing tests currently assert static-object detail overlay clamp sampling. This phase must decide from shader/runtime evidence whether to update that to repeat; the shader samples detail overlays with `fract(uv * tiling)`, so repeat is the likely correct default.
+- The material table `primaryTextureWrapMode` is still only meaningful for base/index UV sampling. Detail overlays are always `fract`-sampled in the shader and need their own texture-use repeat policy; do not conflate these two channels.
+- Current texture-use ids are mostly data-use based. That is not enough if policy differs for the same source data. The durable identity model should be `source data + semantic usage + sampling policy`, not source data alone.
+
+Suggested implementation order:
+
+1. Add a neutral helper, for example `static/bake/static-texture-sampling-policy.ts`, with explicit functions for primary material wrap and per-data-use sampling policy.
+2. Add or update texture-use id construction so sampling policy participates when needed. Prefer a typed/keyed helper over ad hoc string suffixes at call sites.
+3. Port static-object texture-use emission to the helper while keeping static-object material table wrap behavior driven by material variant facts.
+4. Port structured-interior material wrap and texture-use emission to the helper; remove the local structured-interior wrap/sampling helpers.
+5. Add/update tests for static-object repeat/clamp, detail overlay, structured-interior repeat, indexed repeat, palette clamp, policy-qualified texture-use ids, and texture-manager repeat source gutters.
+6. Run the harness target that showed smeared structured-interior surfaces.
+
+Blind spots:
+
+- Static object repeat currently comes from `materialVariantSignature`; structured interiors should not fake that string. The helper should accept an explicit wrap decision from the caller.
+- If a single source texture can be referenced by both clamp and repeat consumers in the same static batch, policy-qualified texture-use identity is required. Silent "first use wins" is forbidden.
+- Detail overlay repeat policy may expose existing static-object visual differences. That should be treated as a real correction and visually checked, not papered over.
+- Palette texture clamp is non-negotiable unless the palette atlas model changes; repeating palette rows would be nonsense.
+- `rgba-mask` may be sampled by alpha/material logic in future phases. Keep it clamp until there is evidence for repeat.
+
+### Phase 13B0b: Shared Static Material Adapter Course Correction
+
+Status: planned; immediate next phase after 13B0a and before 13B1.
+
+Purpose: remove the remaining structured-interior-specific material/table/texture-use drift by sharing one static material adapter between static-object geometry and cell-structure geometry, while keeping their source/ownership/geometry adapters separate. This phase assumes 13B0a has already centralized role-aware static texture sampling policy and policy-qualified texture-use identity.
+
+Problem statement:
+
+- 13B0 proved structured interiors render through the same WebGL2 static material shader/payload path as static objects, but the structured-interior baker still hand-builds `StaticObjectMaterialTableEntry`, material entry keys, texture-role keys, and texture-use emission shape.
+- The structured-interior wrap bug found after 13B0 was caused by that parallel adapter hard-coding clamp where the static material shader expected an authored repeat decision. Phase 13B0a corrects the immediate policy model; this phase removes the duplicate adapter shape that let the bug exist.
+- Detail overlays, indexed/paletted sampling, alpha policy, render state, material-table capacity, texture-role layout keys, and texture-use staging should not be reimplemented separately for cell structures. Geometry ownership differs; static material semantics do not.
+- `StaticObjectMaterialTableEntry` is currently a shared renderer material-table shape wearing an object-specific name. Since maintainability is preferred over minimizing churn, this phase may rename that contract to a neutral `StaticMaterialTableEntry` or equivalent if the rename keeps ownership boundaries clearer.
+
+Steering:
+
+- Keep public draw-unit contracts separate:
+  - static object geometry remains `static-object-geometry`;
+  - cell structures remain `structured-interior-geometry`.
+- Keep candidate/geometry adapters separate:
+  - static objects adapt gfxobj parts, material slots, object/source ownership, and transparent object-part sorting facts;
+  - structured interiors adapt env-cell cell-structure triangles, surface-slot material resolution, env-cell/cell-structure ownership, and compact slice geometry.
+- Extract only the renderer-facing static material adapter: material entry key creation, material-table entry construction, texture-role schema/layout facts, detail role handling, and texture-use emission. Wrap/sampling decisions should delegate to the 13B0a policy helper.
+- Do not make the shared adapter know about env-cell ids, object ids, source assets, attachments, BVHs, portal visibility, or picking. It should accept classified `StaticObjectMaterialPlan`-style inputs plus caller-provided texture-use id construction.
+- Prefer deleting structured-interior-local copies once the shared adapter exists. Keeping duplicate code around with "same but slightly different" behavior is the bug factory.
+- Preserve fail-loud/drop-output behavior: missing/deferred/unsupported material facts are still omitted before renderable draw units. This phase is not allowed to reintroduce fallback material rendering.
+- Prefer honest neutral naming over compatibility-preserving aliases. If `StaticObjectMaterialTableEntry` becomes shared, rename it decisively instead of leaving long-lived object-specific names in structured-interior code.
+
+Deliverables:
+
+- A shared static material adapter module used by both static-object and structured-interior bake paths for:
+  - material entry key/layout construction;
+  - material table entry construction;
+  - primary texture wrap mode resolution through the 13B0a policy helper;
+  - detail overlay use id and tiling propagation;
+  - index/palette use id and indexed format propagation;
+  - render state, alpha-test, indexed clip, color, and emissive fields;
+  - consumption of the 13B0a texture sampling policy helper for color, detail, index, palette, mask/raw roles.
+- Optional but preferred contract rename from object-specific renderer material-table names to neutral static material names, including tests and renderer/runtime call sites touched by the shared shape.
+- Static-object compatibility/bake output ported onto the shared adapter with behavior-preserving tests.
+- Structured-interior bake output ported onto the same adapter; remove local structured-interior equivalents such as material-entry-key construction, texture-role layout construction, table-entry construction, and texture-use emission where they duplicate the shared adapter.
+- Tests proving detail-overlay material entries and texture uses are identical in capability between static objects and structured interiors where the material facts are isomorphic.
+- Tests proving the recent structured-interior repeat-wrap case stays wired through the 13B0a policy helper and shared adapter rather than a structured-interior-only special case.
+
+Acceptance criteria:
+
+- Static objects and structured interiors derive material table entries from the same adapter for isomorphic material facts.
+- Shared renderer material-table contracts use neutral naming, or the phase documents why a rename was intentionally deferred.
+- A structured-interior material with detail overlay emits the same renderer-facing detail fields and texture-use staging behavior expected by static objects.
+- A structured-interior tiled RGBA or indexed surface still emits `primaryTextureWrapMode: "repeat"` and repeat sampling/gutter policy through the 13B0a helper after the adapter extraction.
+- Static-object output remains behaviorally unchanged.
+- Structured-interior code no longer contains a parallel hand-rolled material table/texture-use policy stack except for source/ownership/geometry-specific adaptation.
+- `npm run check`, `npm run lint:ts`, focused static-object/structured-interior/texture-manager tests, and full `npm run test:ts` pass.
+
+Dry-run findings:
+
+- The clean extraction boundary is two small shared helpers, not one giant "material pipeline":
+  - a material signature/spec helper used during candidate creation and partitioning;
+  - a material table/texture-use helper used during bake output.
+- Existing duplicated symbols to collapse:
+  - static object side: `createMaterialEntryKey`, `createTextureRoleLayoutKey`, `createTextureRoleSchemaKey`, `createTextureDataUseSchemaKey`, `createMaterialTextureDataUseKey`, `resolveDetailTextureTiling`, `resolveTextureWrapMode`, `createStaticObjectMaterialTableEntry`, and texture-use emission;
+  - structured-interior side: `createStructuredInteriorMaterialEntryKey`, `createStructuredInteriorTextureRoleLayoutKey`, `createStructuredInteriorTextureRoleSchemaKey`, `createStructuredInteriorTextureDataUseSchemaKey`, `resolveDetailTextureTiling`, `createStructuredInteriorMaterialTableEntry`, and texture-use emission.
+- The existing shared slicer `static-material-compatibility-slicer.ts` already proves the right narrow shape, but it lives under `static/objects/bake/` while structured interiors import it. This phase should move shared material helpers to a neutral location such as `src/v2/static/bake/static-material-*` or `src/v2/static/materials/*`, then update both adapters. Do not add the new adapter under object-specific ownership.
+- Static-object partitioning currently derives primary repeat wrap from `materialVariantSignature` (`sampler=repeat`). Structured interiors do not have that variant string; after 13B0a both adapters should pass explicit policy facts into shared helpers rather than parsing static-object-only strings inside the shared adapter.
+- Texture-use sampling policy should already be centralized by 13B0a. This phase should consume that helper and remove duplicate call-site policy code; it should not reopen role policy unless implementation proves the 13B0a model is incomplete.
+- Material entry identity should be shared, but caller-specific material identity must stay outside it:
+  - static objects may include material use keys/variant signatures/ownership axes in their surrounding partition data;
+  - structured interiors may include material ids/surface ids/env-cell ids in their surrounding records;
+  - the shared entry key should represent render-equivalent material table behavior: color, emissive, alpha thresholds, wrap mode, texture role layout, and detail tiling.
+- The shared table-entry builder should take a caller-provided `createTextureUseId(dataUse)` function. That keeps static-object texture ids (`static-object-texture`) and structured-interior texture ids (`structured-interior-texture`) separate without duplicating table-entry logic.
+- After 13B0a, `createTextureUseId` must already be policy-qualified where policy can vary. The shared adapter should use that helper rather than rebuilding texture-use identity.
+- The shared texture-use emitter should take owner draw-unit ids from the caller. Static-object partitions already have draw-unit ids derived from static-object slices; structured interiors already have slice draw-unit ids. The helper should merge owners by texture-use id, but it should not compute ownership.
+- The static-object parity step must run before structured-interior migration. This keeps any static behavior changes intentional rather than accidental fallout from the extraction.
+- The structured-interior migration should delete the local copies in the same phase. Leaving them as wrappers around shared helpers is acceptable only if the wrapper carries domain-specific naming or texture-use id construction; duplicated material semantics should be gone.
+
+Suggested implementation order:
+
+1. Add a neutral shared module for static material role/signature utilities:
+   - `createStaticMaterialTextureDataUseKey`;
+   - `createStaticMaterialTextureRoleLayoutKey`;
+   - `createStaticMaterialTextureRoleSchemaKey`;
+   - `createStaticMaterialEntryKey`;
+   - `resolveStaticMaterialDetailTextureTiling`;
+   - integration points for the 13B0a wrap/sampling policy helper.
+2. Move or re-export the existing shared material compatibility slicer from an object-specific path to the same neutral area.
+3. Port `static-object-compatibility-partitioner.ts` to the neutral signature helpers. Keep static-object ownership axes, transparent sort axes, object/source keys, and material-slot resolution local.
+4. Add a neutral material table/texture-use output helper:
+   - builds the renderer material-table entry from a material table entry spec plus `createTextureUseId`;
+   - resolves primary/index/palette/detail texture use ids;
+   - resolves render state, alpha fields, indexed format, palette first index, material color/emissive, detail tiling, and primary wrap mode via the 13B0a helper;
+   - emits/merges `StaticBakeTextureUse` from table specs plus owner draw-unit ids, caller domain/static batch id, caller texture-use id factory, and 13B0a sampling policy.
+5. Port `static-object-compatibility-baker.ts` to the neutral table/texture-use helper. Keep static-object geometry/source behavior unchanged.
+6. Rename shared material-table contracts from object-specific names to neutral static material names if doing so does not balloon the phase beyond the touched call sites. Prefer doing this in the same phase while the adapter boundary is being clarified.
+7. Port `landblock-env-cells-baker.ts` structured-interior table entries, entry keys, role keys, and texture uses to the same helpers. Delete the structured-interior-local duplicates listed above.
+8. Add focused tests:
+   - static-object partitioner/baker parity for existing flat, RGBA, indexed, repeat, and detail-overlay cases;
+   - structured-interior RGBA repeat case from the smeared-wall bug;
+   - structured-interior indexed/paletted repeat case, because the shader has separate modular index sampling;
+   - structured-interior detail-overlay case, proving detail texture id, detail tiling, material table fields, and texture-use emission are produced through shared logic.
+9. Run the real harness after implementation against the env-cell target that showed smeared structured-interior textures.
+
+Blind spots to account for during implementation:
+
+- Static objects and structured interiors may not have identical wrap-policy inputs. Do not fake static-object `materialVariantSignature` for cell structures; pass explicit policy facts into the 13B0a helper.
+- Avoid compatibility aliases that leave both `StaticObjectMaterialTableEntry` and `StaticMaterialTableEntry` alive indefinitely. If a temporary alias is needed for the mechanical rename, remove it before marking this phase complete.
+- Detail overlays are second-role textures, not primary textures. The shared adapter should carry detail texture ids/tiling, but detail sampling policy belongs to 13B0a.
+- Palette textures should stay clamp-to-edge even when indexed source textures use repeat/modular sampling.
+- `rgba-mask` and `rgba-raw` should remain clamp/exact unless a concrete material case proves otherwise.
+- The texture manager uses shader virtual wrap for non-terrain domains, so repeat role policy mostly controls virtual shader wrapping and per-source gutter fill, not physical GL `REPEAT` on atlas pages. Tests should assert both material `primaryTextureWrapMode` and emitted `samplingPolicy`.
+- Transparent static-object behavior has object/part sort constraints. The shared adapter must not pull transparent sorting into generic material helpers.
+- Moving the shared slicer path will touch imports in both static-object and env-cell bakers. Do this as a single mechanical move inside the phase, not as lingering object-owned shared code.
+- If the extraction reveals that the 13B0a policy model missed a role, update 13B0a notes and tests as part of this phase rather than adding a one-off adapter exception.
+
 ### Phase 13B1: Portal And Visibility Record Consumption
 
 Status: planned.

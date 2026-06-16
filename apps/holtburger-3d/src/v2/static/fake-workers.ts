@@ -163,8 +163,11 @@ export class ImmediateStaticResolver implements StaticResolver {
 					paletteSources: [],
 					portalLinks: [],
 					regionRenderProfile: {
-						kind: "region-render-profile",
-						regionNumber: 0,
+						detailRoles: [],
+						identity: {
+							kind: "region-render-profile",
+							regionNumber: 0,
+						},
 					},
 					residencySpatial: {
 						landblockEnvCellBvhItemCount: 0,

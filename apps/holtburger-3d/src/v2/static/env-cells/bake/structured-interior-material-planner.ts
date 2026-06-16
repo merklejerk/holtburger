@@ -15,6 +15,10 @@ import {
 	type StaticMaterialTextureWrapMode,
 } from "../../bake/static-material-texture-policy";
 import {
+	composeStaticMaterialDetailRole,
+	planStaticMaterialDetailRoles,
+} from "../../bake/static-material-detail-roles";
+import {
 	classifyStaticObjectMaterial,
 	type StaticMaterialFallbackReason,
 	type StaticMaterialPlan,
@@ -143,12 +147,20 @@ function classifyStructuredInteriorMaterial(options: {
 	readonly material: StaticObjectMaterialSourceFacts;
 	readonly payload: LandblockEnvCellsStaticScopePayload;
 }): StaticMaterialPlan {
-	return classifyStaticObjectMaterial({
+	const basePlan = classifyStaticObjectMaterial({
 		material: options.material,
 		paletteOverride: null,
 		paletteSources: options.payload.paletteSources,
 		paletteViews: [],
 		textureRefs: options.payload.textureRefs,
+	});
+	return composeStaticMaterialDetailRole({
+		detailRoles: planStaticMaterialDetailRoles({
+			detailRoles: options.payload.regionRenderProfile.detailRoles,
+			textureRefs: options.payload.textureRefs,
+		}),
+		domain: "landblock-env-cells",
+		plan: basePlan,
 	});
 }
 

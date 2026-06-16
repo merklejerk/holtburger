@@ -4,6 +4,7 @@ import type {
 	LandblockEnvCellsPayloadDto,
 	MaterialRecipePayloadDto,
 	PalettePayloadDto,
+	RegionRenderProfilePayloadDto,
 	RenderSurfacePayloadDto,
 	SetupAppearancePayloadDto,
 	SetupModelPayloadDto,
@@ -71,8 +72,11 @@ describe("V2 landblock env-cell resolver", () => {
 				source: "env-cells",
 			},
 			regionRenderProfile: {
-				kind: "region-render-profile",
-				regionNumber: 1,
+				detailRoles: [],
+				identity: {
+					kind: "region-render-profile",
+					regionNumber: 1,
+				},
 			},
 			residencySpatial: {
 				landblockEnvCellBvhItemCount: 2,
@@ -186,6 +190,7 @@ describe("V2 landblock env-cell resolver", () => {
 				createHostAssetKey("landblock-env-cells", 0xda55ffff),
 				createLandblockEnvCellsPayload(),
 			),
+			createRegionRenderProfileAsset(),
 		]);
 
 		const payload = await new LandblockEnvCellsResolver({
@@ -230,6 +235,7 @@ describe("V2 landblock env-cell resolver", () => {
 				createHostAssetKey("landblock-env-cells", 0xda55ffff),
 				createLandblockEnvCellsPayload({ omitStatics: true }),
 			),
+			createRegionRenderProfileAsset(),
 			createPreparedAsset(
 				createHostAssetKey("material", 0x08000010),
 				createMaterialPayload({ materialId: 0x08000010 }),
@@ -258,11 +264,12 @@ describe("V2 landblock env-cell resolver", () => {
 		}
 		expect(
 			assetService.requestedKeys.map((key) => describeHostAssetKey(key)),
-		).toEqual([
-			"landblock-env-cells:da55ffff",
-			"material:08000010",
-			"surface-texture:05000010",
-			"render-surface:06000010",
+	).toEqual([
+		"landblock-env-cells:da55ffff",
+		"region-render-profile:1",
+		"material:08000010",
+		"surface-texture:05000010",
+		"render-surface:06000010",
 			"palette:04000010",
 		]);
 		expect(payload.scope.sourceAssets).toEqual([]);
@@ -293,6 +300,7 @@ describe("V2 landblock env-cell resolver", () => {
 					secondStaticSourceAssetId: "gfx-obj/01000010",
 				}),
 			),
+			createRegionRenderProfileAsset(),
 			createPreparedAsset(
 				createHostAssetKey("gfx-obj", 0x01000010),
 				createGfxObjPayload({
@@ -359,6 +367,7 @@ describe("V2 landblock env-cell resolver", () => {
 				createHostAssetKey("landblock-env-cells", 0xda55ffff),
 				resolverPayload,
 			),
+			createRegionRenderProfileAsset(),
 		]);
 
 		const result = await new LandblockEnvCellsResolver({
@@ -410,6 +419,7 @@ describe("V2 landblock env-cell resolver", () => {
 				createHostAssetKey("landblock-env-cells", 0xda55ffff),
 				createLandblockEnvCellsPayload({ omitSecondBvhItem: true }),
 			),
+			createRegionRenderProfileAsset(),
 		]);
 
 		await new LandblockEnvCellsResolver({ assetService }).resolve(
@@ -451,6 +461,7 @@ describe("V2 landblock env-cell resolver", () => {
 				createHostAssetKey("landblock-env-cells", 0xda55ffff),
 				createLandblockEnvCellsPayload(),
 			),
+			createRegionRenderProfileAsset(),
 		]);
 
 		const payload = await new LandblockEnvCellsResolver({
@@ -564,12 +575,22 @@ function createPreparedAsset(
 	};
 }
 
+function createRegionRenderProfileAsset(
+	options: Parameters<typeof createRegionRenderProfilePayload>[0] = {},
+): PreparedAsset {
+	return createPreparedAsset(
+		createHostAssetKey("region-render-profile", 1),
+		createRegionRenderProfilePayload(options),
+	);
+}
+
 function createResolverAssets(): readonly PreparedAsset[] {
 	return [
 		createPreparedAsset(
 			createHostAssetKey("landblock-env-cells", 0xda55ffff),
 			createLandblockEnvCellsPayload(),
 		),
+		createRegionRenderProfileAsset(),
 		createPreparedAsset(
 			createHostAssetKey("gfx-obj", 0x01000010),
 			createGfxObjPayload({
@@ -622,6 +643,46 @@ function createEnvCellRequest(): StaticResolverJob {
 			kind: "landblock",
 			landblockId: 0xda55ffff,
 		},
+	};
+}
+
+function createRegionRenderProfilePayload(
+	options: {
+		readonly environmentDetail?: boolean;
+	} = {},
+): RegionRenderProfilePayloadDto {
+	const environmentDetailRole = {
+		fadeFar: 256,
+		fadeNear: 128,
+		role: "environment" as const,
+		sourceTerrainDescIndex: 0,
+		textureAssetId: "surface-texture/05000020",
+		textureDid: 0x05000020,
+		tiling: 8,
+	};
+
+	return {
+		dependencies: {
+			paletteAssetIds: [],
+			renderSurfaceAssetIds: options.environmentDetail
+				? ["render-surface/06000020"]
+				: [],
+			surfaceTextureAssetIds: options.environmentDetail
+				? ["surface-texture/05000020"]
+				: [],
+		},
+		detailRoles: {
+			building: null,
+			environment: options.environmentDetail ? environmentDetailRole : null,
+			landscape: null,
+			object: null,
+		},
+		kind: "region-render-profile",
+		provenance: createProvenance(),
+		regionId: 1,
+		regionNumber: 1,
+		residencyKind: "unknown",
+		sourceAssetKind: "region-render-profile",
 	};
 }
 

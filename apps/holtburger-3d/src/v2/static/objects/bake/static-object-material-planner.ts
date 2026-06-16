@@ -14,6 +14,11 @@ import type {
 	StaticObjectTextureRefFacts,
 	SurfaceTextureIdentity,
 } from "../../contracts";
+import {
+	composeStaticMaterialDetailRole,
+	planStaticMaterialDetailRoles,
+	type StaticMaterialDetailRolePlan,
+} from "../../bake/static-material-detail-roles";
 
 const BYTE_MAX = 255;
 const LEGACY_OPACITY_BYTE_SCALE = 255;
@@ -58,7 +63,7 @@ type PaletteDataUseIdentity = Extract<
 export interface StaticObjectMaterialPipelinePlan {
 	readonly domain: StaticMaterialPlanningPayload["domain"];
 	readonly materialPlans: readonly StaticMaterialPlan[];
-	readonly detailRoles: readonly StaticObjectDetailRolePlan[];
+	readonly detailRoles: readonly StaticMaterialDetailRolePlan[];
 	readonly fallbackReasons: readonly StaticMaterialFallbackReason[];
 }
 
@@ -121,20 +126,6 @@ export type StaticMaterialTextureUseRole =
 			readonly fadeNear: number;
 			readonly fadeFar: number;
 	  };
-
-interface StaticObjectDetailRolePlan {
-	readonly role: RegionDetailRoleFacts["role"];
-	readonly texture: SurfaceTextureIdentity;
-	readonly renderSurface: RenderSurfaceIdentity | null;
-	readonly dataUse: PreparedRgbaRenderSurfaceTextureUseIdentity | null;
-	readonly tiling: number;
-	readonly fadeNear: number;
-	readonly fadeFar: number;
-	readonly renderCoverage:
-		| "classified-render-candidate"
-		| "classified-render-deferred";
-	readonly fallbackReasons: readonly StaticMaterialFallbackReason[];
-}
 
 export interface StaticMaterialFallbackReason {
 	readonly code:
@@ -245,11 +236,16 @@ export function planStaticObjectMaterials(
 			}),
 		);
 	}
-	const detailRoles = payload.regionRenderProfile.detailRoles
-		.filter((role) => role.role !== "landscape")
-		.map((role) => createDetailRolePlan(role, payload.textureRefs));
+	const detailRoles = planStaticMaterialDetailRoles({
+		detailRoles: payload.regionRenderProfile.detailRoles,
+		textureRefs: payload.textureRefs,
+	});
 	const materialPlans = rawMaterialPlans.map((plan) =>
-		composeStaticDetailRoles(plan, payload.domain, detailRoles),
+		composeStaticMaterialDetailRole({
+			detailRoles,
+			domain: payload.domain,
+			plan,
+		}),
 	);
 	const fallbackReasons = [
 		...materialPlans.flatMap((plan) => plan.fallbackReasons),
@@ -482,77 +478,6 @@ export function classifyStaticObjectMaterial(
 	});
 }
 
-function composeStaticDetailRoles(
-	plan: StaticMaterialPlan,
-	domain: StaticMaterialPlanningPayload["domain"],
-	detailRoles: readonly StaticObjectDetailRolePlan[],
-): StaticMaterialPlan {
-	const detailRole = resolveComposableDetailRole(domain, detailRoles);
-	if (!detailRole) {
-		return plan;
-	}
-
-	if (plan.renderCoverage !== "classified-render-candidate") {
-		return {
-			...plan,
-			fallbackReasons: [
-				...plan.fallbackReasons,
-				createFallbackReason({
-					code: "detail-overlay-render-deferred",
-					material: plan.material,
-					message:
-						"Static object detail overlay is deferred until this material pass is renderable.",
-					texture: detailRole.texture,
-				}),
-			],
-		};
-	}
-
-	if (!detailRole.dataUse || !detailRole.renderSurface) {
-		return plan;
-	}
-
-	const textureRoles: readonly StaticMaterialTextureUseRole[] = [
-		...plan.textureRoles,
-		{
-			dataUse: detailRole.dataUse,
-			fadeFar: detailRole.fadeFar,
-			fadeNear: detailRole.fadeNear,
-			renderSurface: detailRole.renderSurface,
-			role: "detail-overlay",
-			texture: detailRole.texture,
-			tiling: detailRole.tiling,
-		},
-	];
-
-	return {
-		...plan,
-		materialBucketKey: createMaterialBucketKey({
-			alphaPolicy: plan.alphaPolicy.mode,
-			family: plan.family,
-			material: plan.material,
-			pass: plan.pass,
-			textureRoles,
-		}),
-		textureRoles,
-	};
-}
-
-function resolveComposableDetailRole(
-	domain: StaticMaterialPlanningPayload["domain"],
-	detailRoles: readonly StaticObjectDetailRolePlan[],
-): StaticObjectDetailRolePlan | null {
-	if (domain !== "outdoor-buildings") {
-		return null;
-	}
-
-	const detailRole =
-		detailRoles.find((role) => role.role === "building") ?? null;
-	return detailRole?.renderCoverage === "classified-render-candidate"
-		? detailRole
-		: null;
-}
-
 function createTexturePlan(
 	options: Pick<
 		StaticMaterialPlan,
@@ -699,71 +624,6 @@ function createUnsupportedPlan(
 		}),
 		renderCoverage: "unsupported",
 		textureRoles: [],
-	};
-}
-
-function createDetailRolePlan(
-	role: RegionDetailRoleFacts,
-	textureRefs: readonly StaticObjectTextureRefFacts[],
-): StaticObjectDetailRolePlan {
-	if (role.role !== "building" && role.role !== "environment") {
-		return {
-			dataUse: null,
-			fadeFar: role.fadeFar,
-			fadeNear: role.fadeNear,
-			fallbackReasons: [
-				createFallbackReason({
-					code: "detail-overlay-render-deferred",
-					message:
-						"Static object detail overlay role is not renderable for this static object family yet.",
-					texture: role.texture,
-				}),
-			],
-			renderCoverage: "classified-render-deferred",
-			renderSurface: null,
-			role: role.role,
-			texture: role.texture,
-			tiling: role.tiling,
-		};
-	}
-
-	const textureRef = findSurfaceTextureRef(textureRefs, role.texture);
-	const renderSurface = textureRef?.renderSurface ?? null;
-	if (!renderSurface || !findRenderSurfaceRef(textureRefs, renderSurface)) {
-		return {
-			dataUse: null,
-			fadeFar: role.fadeFar,
-			fadeNear: role.fadeNear,
-			fallbackReasons: [
-				createFallbackReason({
-					code: "missing-detail-render-surface",
-					message:
-						"Static object detail overlay texture has no resolved render surface.",
-					texture: role.texture,
-				}),
-			],
-			renderCoverage: "classified-render-deferred",
-			renderSurface: null,
-			role: role.role,
-			texture: role.texture,
-			tiling: role.tiling,
-		};
-	}
-
-	return {
-		dataUse: {
-			kind: "prepared-render-surface-texture-use",
-			renderSurface,
-			usage: "rgba-detail",
-		},
-		fadeFar: role.fadeFar,
-		fadeNear: role.fadeNear,
-		fallbackReasons: [],
-		renderCoverage: "classified-render-candidate",
-		renderSurface,
-		role: role.role,
-		texture: role.texture,
-		tiling: role.tiling,
 	};
 }
 

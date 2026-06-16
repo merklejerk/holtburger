@@ -1139,7 +1139,6 @@ export interface StructuredInteriorMaterialPlanEntry {
 export interface StructuredInteriorMaterialDiagnostic {
 	readonly code:
 		| "missing-cell-structure-material-source"
-		| "missing-material-texture"
 		| "missing-render-surface"
 		| "missing-palette"
 		| "unsupported-surface-flag"

@@ -138,7 +138,6 @@ interface StaticObjectDetailRolePlan {
 
 export interface StaticObjectMaterialFallbackReason {
 	readonly code:
-		| "missing-material-texture"
 		| "missing-detail-render-surface"
 		| "missing-render-surface"
 		| "missing-palette"

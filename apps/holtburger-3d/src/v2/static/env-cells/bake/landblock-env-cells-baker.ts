@@ -194,6 +194,11 @@ function bakeLandblockEnvCellItem(
 		payload,
 		item.work,
 	);
+	warnAboutStructuredInteriorMaterialOmissions({
+		materialPlansByEnvCellId,
+		payload,
+		work: item.work,
+	});
 	const drawUnits = createStructuredInteriorDrawUnits(
 		input,
 		item.work,
@@ -360,6 +365,152 @@ function createStructuredInteriorMaterialPlans(
 			planStructuredInteriorCellMaterials({ envCell, payload, work }),
 		]),
 	);
+}
+
+interface StructuredInteriorMaterialOmissionWarningGroup {
+	readonly cellStructureId: string;
+	readonly envCellId: string;
+	readonly materialIds: readonly string[];
+	readonly memberId: string;
+	readonly messages: readonly string[];
+	readonly outcome: string;
+	readonly reasonCode: string;
+	readonly surfaceIds: readonly string[];
+	readonly surfaceCount: number;
+	readonly triangleCount: number;
+}
+
+function warnAboutStructuredInteriorMaterialOmissions(options: {
+	readonly materialPlansByEnvCellId: ReadonlyMap<
+		number,
+		StructuredInteriorCellMaterialPlan
+	>;
+	readonly payload: LandblockEnvCellsStaticScopePayload;
+	readonly work: ScheduledStaticWork;
+}): void {
+	const groups = createStructuredInteriorMaterialOmissionWarningGroups(options);
+	if (groups.length === 0) {
+		return;
+	}
+
+	console.warn(
+		"V2 omitted/deferred structured-interior material surfaces; affected cell-structure triangles were not baked.",
+		{
+			domain: options.work.job.domain,
+			groups,
+			landblockId: formatHex32(options.payload.landblock.landblockId),
+			workId: options.work.workId,
+		},
+	);
+}
+
+function createStructuredInteriorMaterialOmissionWarningGroups(options: {
+	readonly materialPlansByEnvCellId: ReadonlyMap<
+		number,
+		StructuredInteriorCellMaterialPlan
+	>;
+	readonly payload: LandblockEnvCellsStaticScopePayload;
+}): readonly StructuredInteriorMaterialOmissionWarningGroup[] {
+	const groups = new Map<
+		string,
+		{
+			readonly cellStructureId: number;
+			readonly envCellId: number;
+			readonly materialIds: Set<number>;
+			readonly memberId: string;
+			readonly messages: Set<string>;
+			readonly outcome: string;
+			readonly reasonCode: string;
+			readonly surfaceIds: Set<number>;
+			triangleCount: number;
+		}
+	>();
+
+	for (const envCell of options.payload.envCells) {
+		const plan =
+			options.materialPlansByEnvCellId.get(envCell.identity.envCellId) ?? null;
+		if (!plan) {
+			continue;
+		}
+
+		for (const entry of plan.entries) {
+			if (entry.outcome === "rendered") {
+				continue;
+			}
+
+			const diagnostics =
+				entry.diagnostics.length > 0
+					? entry.diagnostics
+					: [
+							{
+								code: "unrendered-without-diagnostic",
+								message:
+									"Structured-interior surface was not renderable, but no material diagnostic was recorded.",
+							},
+						];
+			const triangleCount = countStructuredInteriorSurfaceTriangles(
+				envCell,
+				entry.surfaceId,
+			);
+			if (triangleCount === 0) {
+				continue;
+			}
+			for (const diagnostic of diagnostics) {
+				const key = [
+					envCell.identity.envCellId,
+					envCell.cellStructure.cellStructureId,
+					entry.outcome,
+					diagnostic.code,
+				].join("|");
+				const group = groups.get(key) ?? {
+					cellStructureId: envCell.cellStructure.cellStructureId,
+					envCellId: envCell.identity.envCellId,
+					materialIds: new Set<number>(),
+					memberId: envCell.memberId,
+					messages: new Set<string>(),
+					outcome: entry.outcome,
+					reasonCode: diagnostic.code,
+					surfaceIds: new Set<number>(),
+					triangleCount: 0,
+				};
+				group.materialIds.add(entry.material.materialId);
+				group.messages.add(diagnostic.message);
+				group.surfaceIds.add(entry.surfaceId);
+				group.triangleCount += triangleCount;
+				groups.set(key, group);
+			}
+		}
+	}
+
+	return [...groups.values()]
+		.sort(
+			(left, right) =>
+				left.envCellId - right.envCellId ||
+				left.cellStructureId - right.cellStructureId ||
+				left.outcome.localeCompare(right.outcome) ||
+				left.reasonCode.localeCompare(right.reasonCode),
+		)
+		.map((group) => ({
+			cellStructureId: formatHex32(group.cellStructureId),
+			envCellId: formatHex32(group.envCellId),
+			materialIds: uniqueSortedNumbers([...group.materialIds]).map(formatHex32),
+			memberId: group.memberId,
+			messages: uniqueSortedStrings([...group.messages]),
+			outcome: group.outcome,
+			reasonCode: group.reasonCode,
+			surfaceCount: group.surfaceIds.size,
+			surfaceIds: uniqueSortedNumbers([...group.surfaceIds]).map(formatHex32),
+			triangleCount: group.triangleCount,
+		}));
+}
+
+function countStructuredInteriorSurfaceTriangles(
+	envCell: LandblockEnvCellStaticFacts,
+	surfaceId: number,
+): number {
+	return envCell.renderGeometry.triangles.filter(
+		(triangle) => triangle.surfaceId === surfaceId,
+	).length;
 }
 
 function createStructuredInteriorMaterialTableEntries(options: {

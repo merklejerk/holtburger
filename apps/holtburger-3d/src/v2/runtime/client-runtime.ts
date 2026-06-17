@@ -61,6 +61,7 @@ import {
 	type Vec3,
 	type TerrainQuadScenePickDetails,
 } from "./static-scene-query";
+import { createOutdoorLandblockRootTranslation } from "./static-placement";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
@@ -943,7 +944,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 		if (this.#transitionApertureDebugOverlayVisible) {
 			for (const batch of this.#staticSceneQuery.queryTransitionApertureBatches()) {
-				primitives.push(...createTransitionApertureDebugOverlayPrimitives(batch));
+				primitives.push(
+					...createTransitionApertureDebugOverlayPrimitives(
+						batch,
+						this.#renderAnchorLandblockId,
+					),
+				);
 			}
 		}
 
@@ -1442,13 +1448,19 @@ function createEnvCellAabbDebugOverlayPrimitive(
 
 function createTransitionApertureDebugOverlayPrimitives(
 	batch: TransitionApertureBatch,
+	renderAnchorLandblockId: number | null,
 ): DebugOverlayPrimitive[] {
 	const primitives: DebugOverlayPrimitive[] = [];
+	const translation = createOutdoorLandblockRootTranslation(
+		batch.landblockId,
+		renderAnchorLandblockId,
+	);
 	for (const range of batch.ranges) {
 		const storedWindingVertices = readTransitionApertureRangeVertices(
 			batch,
 			range.firstIndex,
 			range.indexCount,
+			translation,
 		);
 		const baseId = `transition-aperture:${formatHex32(batch.landblockId)}:${range.portalId}`;
 		primitives.push(
@@ -1474,6 +1486,7 @@ function readTransitionApertureRangeVertices(
 	batch: TransitionApertureBatch,
 	firstIndex: number,
 	indexCount: number,
+	translation: readonly [number, number, number],
 ): readonly (readonly [number, number, number])[] {
 	const vertices: Array<readonly [number, number, number]> = [];
 	for (let indexOffset = 0; indexOffset < indexCount; indexOffset += 1) {
@@ -1484,7 +1497,11 @@ function readTransitionApertureRangeVertices(
 				`Transition aperture batch ${batch.apertureBatchId} has invalid index at ${firstIndex + indexOffset}.`,
 			);
 		}
-		vertices.push([vertex.x, vertex.y, vertex.z]);
+		vertices.push([
+			vertex.x + translation[0],
+			vertex.y + translation[1],
+			vertex.z + translation[2],
+		]);
 	}
 	return vertices;
 }

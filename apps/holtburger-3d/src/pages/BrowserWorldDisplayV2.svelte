@@ -74,6 +74,7 @@
 	let buildingsEnabled = $state(true);
 	let detailEnabled = $state(true);
 	let envCellsEnabled = $state(true);
+	let envCellAabbDebugVisible = $state(false);
 	let terrainRadius = $state(DEFAULT_TERRAIN_LOD_RADIUS);
 	let buildingRadius = $state(DEFAULT_BUILDING_LOD_RADIUS);
 	let detailRadius = $state(DEFAULT_DETAIL_LOD_RADIUS);
@@ -118,6 +119,7 @@
 
 		try {
 			runtime = createBrowserV2Runtime(canvasElement);
+			runtime.setEnvCellAabbDebugOverlayVisible(envCellAabbDebugVisible);
 			cameraController = new V2BrowserCameraController({
 				initialState: cameraState,
 				onChange(nextCameraState) {
@@ -366,6 +368,11 @@
 			.value as TextureFilteringMode;
 		selectedTextureFilteringMode = nextMode;
 		runtime?.setTextureFilteringMode(nextMode);
+	}
+
+	function handleEnvCellAabbDebugToggle(event: Event): void {
+		envCellAabbDebugVisible = (event.currentTarget as HTMLInputElement).checked;
+		runtime?.setEnvCellAabbDebugOverlayVisible(envCellAabbDebugVisible);
 	}
 
 	function scheduleStaticInterestRefresh(): void {
@@ -1063,6 +1070,17 @@
 						</button>
 					</div>
 
+					<label class="browser-v2__checkbox-row">
+						<input
+							checked={envCellAabbDebugVisible}
+							disabled={!runtime}
+							type="checkbox"
+							onchange={handleEnvCellAabbDebugToggle}
+						/>
+						<span>Env-cell AABBs</span>
+						<small>{snapshot?.debugOverlays.envCellAabbCount ?? 0}</small>
+					</label>
+
 					<dl class="browser-v2__status">
 						<div>
 							<dt>Filtering</dt>
@@ -1496,6 +1514,26 @@
 		border-radius: 4px;
 		background: rgba(9, 38, 31, 0.48);
 		font-size: 12px;
+	}
+
+	.browser-v2__checkbox-row {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 7px;
+		min-height: 30px;
+		padding: 0 8px;
+		border: 1px solid rgba(91, 255, 187, 0.22);
+		border-radius: 4px;
+		background: rgba(1, 9, 8, 0.38);
+		color: #f1fff6;
+		font-size: 12px;
+	}
+
+	.browser-v2__checkbox-row small {
+		color: #75ffd1;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+		font-size: 11px;
 	}
 
 	.browser-v2__range {

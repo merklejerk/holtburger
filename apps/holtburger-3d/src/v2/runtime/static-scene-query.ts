@@ -168,6 +168,14 @@ export interface StaticSceneSelectionDebugBounds {
 	readonly selectionKey: StaticSceneSelectionKey;
 }
 
+export interface StaticSceneEnvCellAabbDebugBounds {
+	readonly bounds: StaticBounds;
+	readonly envCellId: number;
+	readonly landblockId: number;
+	readonly memberId: string;
+	readonly source: "env-cell-root" | "derived";
+}
+
 export interface StaticSceneQuerySnapshot {
 	readonly landblockBucketCount: number;
 	readonly terrainLandblockCount: number;
@@ -260,6 +268,7 @@ interface EnvCellLandblockBvhRoot {
 	readonly items: readonly (EnvCellLandblockBvhRuntimeItem | null)[];
 	readonly landblockId: number;
 	readonly nodes: readonly BvhNode[];
+	readonly translation: readonly [number, number, number];
 }
 
 interface EnvCellLandblockBvhRuntimeItem {
@@ -1043,6 +1052,48 @@ export class StaticSceneQuery {
 		return candidates[0]?.item.envCellId ?? null;
 	}
 
+	queryEnvCellAabbDebugBounds(options?: {
+		readonly landblockId?: number | null;
+	}): readonly StaticSceneEnvCellAabbDebugBounds[] {
+		const requestedRoot =
+			options?.landblockId === undefined || options.landblockId === null
+				? null
+				: this.#envCellRootsByLandblockId.get(options.landblockId);
+		const roots =
+			options?.landblockId === undefined || options.landblockId === null
+				? [...this.#envCellRootsByLandblockId.values()]
+				: requestedRoot
+					? [requestedRoot]
+					: [];
+		const seenKeys = new Set<string>();
+		const bounds: StaticSceneEnvCellAabbDebugBounds[] = [];
+		for (const root of roots) {
+			for (const item of root.items) {
+				if (item === null) {
+					continue;
+				}
+				const key = `${root.landblockId}:${item.envCellId}:${item.memberId}`;
+				if (seenKeys.has(key)) {
+					continue;
+				}
+				seenKeys.add(key);
+				bounds.push({
+					bounds: translateBounds(item.bounds, root.translation),
+					envCellId: item.envCellId,
+					landblockId: root.landblockId,
+					memberId: item.memberId,
+					source: item.source,
+				});
+			}
+		}
+		return bounds.sort(
+			(left, right) =>
+				left.landblockId - right.landblockId ||
+				left.envCellId - right.envCellId ||
+				left.memberId.localeCompare(right.memberId),
+		);
+	}
+
 	queryCameraResidencyAtPoint(options: {
 		readonly outdoorAnchorLandblockId: number;
 		readonly point: StaticSceneVec3;
@@ -1356,6 +1407,10 @@ export class StaticSceneQuery {
 				items,
 				landblockId,
 				nodes: residencyBvh.nodes,
+				translation: createOutdoorLandblockRootTranslation(
+					landblockId,
+					this.#outdoorAnchorLandblockId,
+				),
 			});
 		}
 
@@ -1788,6 +1843,15 @@ export class StaticSceneQuery {
 				),
 			});
 		}
+		for (const [landblockId, root] of this.#envCellRootsByLandblockId) {
+			this.#envCellRootsByLandblockId.set(landblockId, {
+				...root,
+				translation: createOutdoorLandblockRootTranslation(
+					landblockId,
+					outdoorAnchorLandblockId,
+				),
+			});
+		}
 		this.#rebuildLandblockGridIndex();
 	}
 
@@ -1876,7 +1940,12 @@ function getBucketOutdoorRenderBounds(
 	}
 
 	if (bucket.envCellRoot?.nodes[0]) {
-		bounds.push(bucket.envCellRoot.nodes[0].bounds);
+		bounds.push(
+			translateBounds(
+				bucket.envCellRoot.nodes[0].bounds,
+				bucket.envCellRoot.translation,
+			),
+		);
 	}
 
 	return bounds;

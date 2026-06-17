@@ -1057,7 +1057,7 @@ impl LandblockEnvCellsAssetAssembler {
                     .remove(&env_cell.env_cell_id)
                     .unwrap_or_default();
                 let (local_spatial_items, local_bvh_items) =
-                    build_env_cell_local_bvh_records(&prepared_cell, &static_meshes);
+                    build_env_cell_local_bvh_records(&prepared_cell);
                 let local_bvh = build_prepared_bvh_with_scope(
                     landblock_id,
                     "env-cell-local",
@@ -1710,7 +1710,6 @@ fn build_landblock_env_cell_bvh_spatial_items(
 
 fn build_env_cell_local_bvh_records(
     prepared_cell: &PreparedInteriorCell,
-    static_meshes: &[PreparedStaticMesh],
 ) -> (Vec<PreparedSpatialItem>, Vec<PreparedEnvCellLocalBvhItem>) {
     let mut items = Vec::new();
     if let Some(bounds) = prepared_cell.render_geometry.bounds {
@@ -1728,24 +1727,6 @@ fn build_env_cell_local_bvh_records(
             },
         ));
     }
-    items.extend(static_meshes.iter().filter_map(|mesh| {
-        Some(PreparedSpatialItem {
-            id: format!(
-                "env-cell/{:08x}/static/{}",
-                prepared_cell.env_cell_id, mesh.instance_id
-            ),
-            kind: PreparedSpatialItemKind::IndoorStatic,
-            bounds: pad_bvh_bounds(mesh.instance_bounds?),
-        })
-        .map(|spatial_item| {
-            (
-                spatial_item,
-                PreparedEnvCellLocalBvhItem::Static {
-                    instance_id: mesh.instance_id.clone(),
-                },
-            )
-        })
-    }));
     items.extend(
         prepared_cell
             .portal_apertures
@@ -3143,6 +3124,51 @@ mod tests {
         assert!(bounds.max.x > bounds.min.x);
         assert!(bounds.max.y > bounds.min.y);
         assert!(bounds.max.z > bounds.min.z);
+    }
+
+    #[test]
+    fn env_cell_landblock_bvh_uses_cell_local_bounds_without_static_double_transform() {
+        let source_path = repo_assets_hba_path();
+        if !source_path.is_file() {
+            eprintln!(
+                "skipping env-cell BVH double-transform regression; missing repo-local {}",
+                source_path.display()
+            );
+            return;
+        }
+
+        let content =
+            ContentRepository::from_hba_path(source_path).expect("repo assets.hba should open");
+        let cache = ContentDecodeCache::new();
+        let asset = LandblockEnvCellsAssetAssembler::new()
+            .assemble_landblock_with_cache(&content, &cache, 0xda55ffff)
+            .expect("da55ffff env-cell bundle should assemble");
+        let cell = asset
+            .env_cells
+            .iter()
+            .find(|cell| cell.env_cell.env_cell_id == 0xda550102)
+            .expect("fixture landblock should include env cell 0xda550102");
+        let bounds = cell
+            .landblock_bounds
+            .expect("fixture env cell should have landblock bounds");
+
+        assert!(
+            bounds.max.x - bounds.min.x < 20.0,
+            "env-cell x extent should not include double-transformed indoor statics: {:?}",
+            bounds
+        );
+        assert!(
+            bounds.max.z - bounds.min.z < 20.0,
+            "env-cell z extent should not include double-transformed indoor statics: {:?}",
+            bounds
+        );
+        assert!(
+            !cell
+                .local_bvh_items
+                .iter()
+                .any(|item| matches!(item, PreparedEnvCellLocalBvhItem::Static { .. })),
+            "env-cell-local BVH items must stay in cell-local coordinate space"
+        );
     }
 
     #[test]

@@ -2275,6 +2275,7 @@ dependencies = [
  "clap",
  "env_logger",
  "hex",
+ "holtburger-common",
  "holtburger-content",
  "holtburger-core",
  "holtburger-dat",

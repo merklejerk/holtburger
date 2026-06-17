@@ -2040,7 +2040,7 @@ Spicy/residual to close in this phase:
 
 ### Phase 13B1g: Scene-Domain Render Targets
 
-Status: planned.
+Status: complete on 2026-06-17.
 
 Purpose: render exterior and interior scene domains into separate targets under explicit runtime/browser pass orchestration.
 
@@ -2086,6 +2086,37 @@ Acceptance criteria:
 - Scene-domain depth textures are sampleable by later composite passes, or a named fallback path is explicitly recorded before proceeding to 13B1h.
 - Base-scene selection chooses the target implied by explicit current residency when `RenderPassPlan.kind === "portal-scene-domains"`.
 - Scene-domain rendering does not require rebaking static geometry or texture atlases.
+
+Completed implementation notes:
+
+- Replaced renderer/runtime `PortalPassPlan | null` with first-class `RenderPassPlan`:
+  - `{ kind: "single-surface-resident" }` preserves the current direct-to-display resident draw path;
+  - `{ kind: "portal-scene-domains", baseScene, transitionDepthPolicy }` drives scene-domain target rendering.
+- Renamed renderer/runtime snapshot diagnostics from `portalPassPlan` to `renderPassPlan`; the no-base/fallback state is no longer nullable.
+- Disabled V2 default-framebuffer antialiasing by requesting `antialias: false` during WebGL2 context creation.
+- Added WebGL2 scene-domain target allocation for exterior, interior, composite ping, and composite pong targets:
+  - color textures use `RGB8`;
+  - depth textures use sampleable `DEPTH_COMPONENT24`;
+  - textures use nearest filtering, clamp-to-edge wrapping, and no mipmaps;
+  - framebuffer completeness failures throw and increment renderer allocation-failure metrics.
+- Added renderer pass routing:
+  - `single-surface-resident` renders the existing resident terrain/static/interior path directly to the display surface;
+  - `portal-scene-domains` renders terrain plus outdoor static resources to the exterior target, env-cell static resources plus structured interiors to the interior target, then blits the selected base scene target to the display surface.
+- Added renderer snapshot metrics for scene-domain target size, formats, allocation failures, and exterior/interior draw calls.
+- Added focused renderer test coverage proving `antialias: false` and `RGB8`/`DEPTH_COMPONENT24` scene-domain allocation.
+
+Spicy / failed to close:
+
+- Interior rendering is domain-separated but not yet per-cell/portal-visible clipped. The interior target currently draws all resident env-cell static resources and structured interiors. That is acceptable for 13B1g because visibility planning/compositing belongs to 13B1h0/13B1h, but it should not be mistaken for final portal correctness.
+- 13B1g allocates composite ping/pong targets with the final RGB8/depth24 policy, but does not execute composite passes yet. 13B1h0/13B1h must consume them rather than introducing a parallel target model.
+- Scene-domain target allocation failures are exposed in renderer diagnostics, but a failure during frame rendering still puts the renderer into its existing fatal error/dispose path. That is intentional for now: failing hard is better than silently falling back to unsampleable depth.
+
+Verification:
+
+- `npm run check`
+- `npm run lint:ts`
+- `npm run test:ts`
+- `git diff --check`
 
 ### Phase 13B1h0: Transition Composite Work Planner
 

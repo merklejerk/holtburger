@@ -2062,7 +2062,9 @@ type RenderPassPlan =
 - The `single-surface-resident` branch renders currently resident terrain/static/interior draw units directly to the display surface with no exterior/interior target split, no transition aperture mask/composite work, and no attempt to hide indoor resources from outdoor resources beyond ordinary draw-unit residency. This is the current behavior and should remain available as a future browser-mode debug override.
 - The `portal-scene-domains` branch is the only branch that may allocate/use exterior/interior scene-domain targets and later transition compositing. Do not add nullable companion fields or a fake scene-domain variant to represent fallback/default rendering.
 - Interior resources do not need to be partitioned by env-cell before this phase unless visibility/render-target correctness proves it is required.
-- Allocate scene-domain targets with sampleable color and sampleable depth attachments. The direct composite path in 13B1h samples previous composite depth and opposite-scene depth; depth renderbuffers are not sufficient for the primary path.
+- Allocate scene-domain and composite color targets as `RGB8` textures (`internalFormat: gl.RGB8`, `format: gl.RGB`, `type: gl.UNSIGNED_BYTE`) with nearest filtering, clamp-to-edge wrapping, and no mipmaps. Do not allocate `RGBA8` unless a later phase identifies a real alpha payload.
+- Allocate scene-domain and composite depth targets as sampleable depth textures, with `DEPTH_COMPONENT24` (`format: gl.DEPTH_COMPONENT`, `type: gl.UNSIGNED_INT`) as the default policy. The direct composite path in 13B1h samples previous composite depth and opposite-scene depth; depth renderbuffers are not sufficient for the primary path.
+- Disable antialiasing for the V2 WebGL2 display context and do not introduce offscreen MSAA in 13B1g. If aliasing becomes unacceptable, add a separate render-target policy phase for multisampled renderbuffers plus explicit resolves into sampleable scene-domain textures.
 - Fail loudly or activate an explicitly documented fallback if WebGL2 depth texture/framebuffer support is unavailable.
 - Keep scene-domain drawing separate from transition compositing. This phase proves that exterior and interior targets can be rendered and selected as the base scene; it should not start drawing aperture composite passes.
 
@@ -2072,12 +2074,15 @@ Deliverables:
 - Renderer/runtime contract cleanup that replaces `PortalPassPlan | null` with `RenderPassPlan`.
 - Exterior target render path for terrain/outdoor static resources and interior target render path for structured interiors/env-cell static resources.
 - Color/depth target allocation helpers for exterior, interior, and later composite targets, with resize/dispose handling and framebuffer completeness checks.
+- WebGL2 context creation policy update that requests `antialias: false` for V2 rendering.
 - Metrics for exterior/interior target draw calls and target allocation failures.
 
 Acceptance criteria:
 
 - Exterior and interior scene domains can be rendered to separate targets for a frame.
 - The render contract has no nullable pass-plan state for fallback rendering; current fallback behavior and any future explicit browser debug override route through `RenderPassPlan.kind === "single-surface-resident"`.
+- Scene-domain and composite color targets use `RGB8`, not `RGBA8`.
+- V2 rendering does not request default-framebuffer AA and does not allocate offscreen MSAA resources in this phase.
 - Scene-domain depth textures are sampleable by later composite passes, or a named fallback path is explicitly recorded before proceeding to 13B1h.
 - Base-scene selection chooses the target implied by explicit current residency when `RenderPassPlan.kind === "portal-scene-domains"`.
 - Scene-domain rendering does not require rebaking static geometry or texture atlases.

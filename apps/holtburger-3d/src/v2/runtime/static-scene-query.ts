@@ -208,10 +208,7 @@ export interface Plane {
 export type TransitionPortalVisibleSide = "positive" | "negative";
 
 interface TransitionPortalEndpointPair {
-	readonly outdoor: {
-		readonly buildingInstanceId: string;
-		readonly buildingPortalId: string;
-	};
+	readonly exterior: TransitionApertureExteriorEndpoint;
 	readonly indoor: {
 		readonly envCellId: number;
 		readonly envCellPortalId: string;
@@ -228,13 +225,23 @@ type TransitionApertureOmissionReason =
 export type TransitionApertureFrontFace = "indoor-visible";
 
 export interface TransitionApertureRange {
-	readonly buildingInstanceId: string;
-	readonly buildingPortalId: string;
 	readonly envCellId: number;
+	readonly exterior: TransitionApertureExteriorEndpoint;
 	readonly firstIndex: number;
 	readonly indexCount: number;
 	readonly portalId: string;
 }
+
+export type TransitionApertureExteriorEndpoint =
+	| {
+			readonly kind: "landblock-building";
+			readonly buildingInstanceId: string;
+			readonly buildingPortalId: string;
+	  }
+	| {
+			readonly kind: "outside";
+			readonly landblockId: number;
+	  };
 
 export interface TransitionApertureBatch {
 	readonly apertureBatchId: string;
@@ -2418,32 +2425,45 @@ function isAcceptedEnvCellId(
 function createTransitionEndpointPair(
 	link: LandblockPortalLinkFacts,
 ): TransitionPortalEndpointPair | null {
-	const outdoorEndpoint =
-		link.source.kind === "landblock-building"
-			? link.source
-			: link.target.kind === "landblock-building"
-				? link.target
-				: null;
+	const exteriorEndpoint =
+		createTransitionExteriorEndpoint(link.source) ??
+		createTransitionExteriorEndpoint(link.target);
 	const indoorEndpoint =
 		link.source.kind === "env-cell"
 			? link.source
 			: link.target.kind === "env-cell"
 				? link.target
 				: null;
-	if (!outdoorEndpoint || !indoorEndpoint) {
+	if (!exteriorEndpoint || !indoorEndpoint) {
 		return null;
 	}
 
 	return {
+		exterior: exteriorEndpoint,
 		indoor: {
 			envCellId: indoorEndpoint.envCellId,
 			envCellPortalId: indoorEndpoint.portalId,
 		},
-		outdoor: {
-			buildingInstanceId: outdoorEndpoint.instanceId,
-			buildingPortalId: outdoorEndpoint.portalId,
-		},
 	};
+}
+
+function createTransitionExteriorEndpoint(
+	endpoint: LandblockPortalLinkFacts["source"],
+): TransitionApertureExteriorEndpoint | null {
+	if (endpoint.kind === "landblock-building") {
+		return {
+			buildingInstanceId: endpoint.instanceId,
+			buildingPortalId: endpoint.portalId,
+			kind: "landblock-building",
+		};
+	}
+	if (endpoint.kind === "outside") {
+		return {
+			kind: "outside",
+			landblockId: endpoint.landblockId,
+		};
+	}
+	return null;
 }
 
 function deriveTransitionApertureBatch(
@@ -2563,9 +2583,8 @@ function appendTransitionAperture(options: {
 	options.vertices.push(...apertureVertices);
 	options.indices.push(...apertureIndices.map((index) => firstVertex + index));
 	options.ranges.push({
-		buildingInstanceId: options.endpoints.outdoor.buildingInstanceId,
-		buildingPortalId: options.endpoints.outdoor.buildingPortalId,
 		envCellId: options.endpoints.indoor.envCellId,
+		exterior: options.endpoints.exterior,
 		firstIndex,
 		indexCount: apertureIndices.length,
 		portalId: createTransitionAperturePortalId({
@@ -2587,11 +2606,18 @@ function createTransitionAperturePortalId(options: {
 	return [
 		"transition-portal",
 		options.landblockId >>> 0,
-		options.endpoints.outdoor.buildingInstanceId,
-		options.endpoints.outdoor.buildingPortalId,
+		describeTransitionExteriorEndpointId(options.endpoints.exterior),
 		options.endpoints.indoor.envCellId >>> 0,
 		options.endpoints.indoor.envCellPortalId,
 	].join(":");
+}
+
+function describeTransitionExteriorEndpointId(
+	endpoint: TransitionApertureExteriorEndpoint,
+): string {
+	return endpoint.kind === "landblock-building"
+		? `building:${endpoint.buildingInstanceId}:${endpoint.buildingPortalId}`
+		: `outside:${endpoint.landblockId >>> 0}`;
 }
 
 function triangulatePortalApertureFan(
@@ -2628,10 +2654,9 @@ function logTransitionApertureOmission(
 	reason: TransitionApertureOmissionReason,
 ): void {
 	console.error("Failed to derive transition aperture batch geometry.", {
-		buildingInstanceId: options.endpoints.outdoor.buildingInstanceId,
-		buildingPortalId: options.endpoints.outdoor.buildingPortalId,
 		envCellId: options.endpoints.indoor.envCellId,
 		envCellPortalId: options.endpoints.indoor.envCellPortalId,
+		exterior: options.endpoints.exterior,
 		landblockId: options.landblockId,
 		linkId: options.link.linkId,
 		reason,

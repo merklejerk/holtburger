@@ -1043,15 +1043,14 @@ describe("V2 static scene query", () => {
 						linkId: "transition-link-1",
 						polygonId: 8,
 						source: {
-							instanceId: "building-0",
-							kind: "landblock-building",
-							portalId: "building-portal-1",
-						},
-						sourceIndex: 1,
-						target: {
 							envCellId: 0xda550100,
 							kind: "env-cell",
 							portalId: "env-portal-1",
+						},
+						sourceIndex: 1,
+						target: {
+							kind: "outside",
+							landblockId: 0xda55ffff,
 						},
 					},
 				],
@@ -1097,22 +1096,27 @@ describe("V2 static scene query", () => {
 				],
 				ranges: [
 					{
-						buildingInstanceId: "building-0",
-						buildingPortalId: "building-portal-0",
 						envCellId: 0xda550100,
+						exterior: {
+							buildingInstanceId: "building-0",
+							buildingPortalId: "building-portal-0",
+							kind: "landblock-building",
+						},
 						firstIndex: 0,
 						indexCount: 6,
 						portalId:
-							"transition-portal:3663069183:building-0:building-portal-0:3663003904:env-portal-0",
+							"transition-portal:3663069183:building:building-0:building-portal-0:3663003904:env-portal-0",
 					},
 					{
-						buildingInstanceId: "building-0",
-						buildingPortalId: "building-portal-1",
 						envCellId: 0xda550100,
+						exterior: {
+							kind: "outside",
+							landblockId: 0xda55ffff,
+						},
 						firstIndex: 6,
 						indexCount: 6,
 						portalId:
-							"transition-portal:3663069183:building-0:building-portal-1:3663003904:env-portal-1",
+							"transition-portal:3663069183:outside:3663069183:3663003904:env-portal-1",
 					},
 				],
 				vertices: [

@@ -1838,11 +1838,21 @@ type Plane = {
 
 type TransitionApertureFrontFace = "indoor-visible";
 
+type TransitionApertureExteriorEndpoint =
+	| {
+			readonly kind: "landblock-building";
+			readonly buildingInstanceId: string;
+			readonly buildingPortalId: string;
+	  }
+	| {
+			readonly kind: "outside";
+			readonly landblockId: number;
+	  };
+
 type TransitionApertureRange = {
 	readonly portalId: string;
 	readonly envCellId: number;
-	readonly buildingInstanceId: string;
-	readonly buildingPortalId: string;
+	readonly exterior: TransitionApertureExteriorEndpoint;
 	readonly firstIndex: number;
 	readonly indexCount: number;
 };
@@ -1887,9 +1897,10 @@ Implementation notes:
 
 - Replaced the V2 public `StaticSceneQuery.queryTransitionPortalCandidates(...)` surface with `StaticSceneQuery.queryTransitionApertureBatches(...)`.
 - Added `TransitionApertureBatch`, `TransitionApertureRange`, and `TransitionApertureFrontFace` as the durable pre-renderer contract.
-- The batch builder groups committed portal-interior records by landblock, filters to building-to-env-cell links whose env-cell portal is an outside transition, transforms aperture vertices into `landblock-render-local`, and appends them into one contiguous vertex/index/range set per landblock.
+- The batch builder groups committed portal-interior records by landblock, filters to exterior-to-env-cell links whose env-cell portal is an outside transition, transforms aperture vertices into `landblock-render-local`, and appends them into one contiguous vertex/index/range set per landblock.
+- Course correction: host landblock env-cell topology emits ordinary outdoor transitions as `outside <-> env-cell`, not necessarily `landblock-building <-> env-cell`. The batch range contract carries an explicit exterior endpoint so renderer/resource phases do not recalc or guess this distinction.
 - Winding is normalized to `frontFace: "indoor-visible"` during batch derivation. Current implementation maps the env-cell portal visible-side flag to fan index order; later renderer passes should flip cull mode/pass state rather than rewriting portal geometry.
-- Malformed linked transition apertures now emit `console.error(...)` with landblock/link/building/env-cell context and are omitted from the packed batch. No durable `skipped` record remains.
+- Malformed linked transition apertures now emit `console.error(...)` with landblock/link/exterior/env-cell context and are omitted from the packed batch. No durable `skipped` record remains.
 - Renamed V2 generic geometry primitives from `StaticSceneVec3`/`StaticScenePlane` to `Vec3`/`Plane`; downstream V2 runtime imports were updated.
 
 Spicy/residual:

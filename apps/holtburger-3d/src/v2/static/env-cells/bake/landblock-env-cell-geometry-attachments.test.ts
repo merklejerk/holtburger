@@ -172,11 +172,6 @@ function createScopePayload(
 			},
 			landblockId: payload.landblockId,
 			localPlacement: cell.localPlacement,
-			localSpatial: {
-				localBvh: cell.localBvh,
-				localBvhItemCount: cell.localBvh.items.length,
-				localBvhNodeCount: cell.localBvh.nodes.length,
-			},
 			memberId: cell.memberId,
 			portalApertures: cell.portalApertures,
 			portals: cell.portals,
@@ -281,15 +276,6 @@ function createEnvCellPayload(): LandblockEnvCellsPayloadDto["envCells"][number]
 		diagnostics: createDiagnostics(),
 		environmentId: 0x0e000010,
 		envCellId: 0xda550100,
-		localBvh: {
-			items: [
-				{
-					kind: "cell-structure-geometry",
-					triangleRange: [0, 1],
-				},
-			],
-			nodes: [],
-		},
 		localPlacement: createPlacement(),
 		memberId: "cell-0",
 		portalApertures: [],

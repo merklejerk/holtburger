@@ -318,7 +318,6 @@ function createLandblockEnvCellStaticFacts(options: {
 		},
 		landblockId,
 		localPlacement: cell.localPlacement,
-		localSpatial: createEnvCellLocalSpatialFacts(cell),
 		memberId: cell.memberId,
 		portalApertures: cell.portalApertures,
 		portals: cell.portals,
@@ -377,30 +376,6 @@ function createEnvCellStaticObjectInstanceId(input: {
 	readonly instanceId: string;
 }): string {
 	return `${formatHex32(input.envCellId)}:${input.instanceId}`;
-}
-
-function createEnvCellLocalSpatialFacts(
-	cell: ResolverLandblockEnvCellsPayloadDto["envCells"][number],
-): LandblockEnvCellStaticFacts["localSpatial"] {
-	const localBvh = {
-		items: cell.localBvh.items.map((item) =>
-			item.kind === "static"
-				? {
-						...item,
-						instanceId: createEnvCellStaticObjectInstanceId({
-							envCellId: cell.envCellId,
-							instanceId: item.instanceId,
-						}),
-					}
-				: item,
-		),
-		nodes: cell.localBvh.nodes,
-	};
-	return {
-		localBvh,
-		localBvhItemCount: localBvh.items.length,
-		localBvhNodeCount: localBvh.nodes.length,
-	};
 }
 
 function createStaticMaterialSourceIdentity(

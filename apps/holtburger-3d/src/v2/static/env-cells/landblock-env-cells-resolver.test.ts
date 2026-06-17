@@ -164,9 +164,6 @@ describe("V2 landblock env-cell resolver", () => {
 				},
 			],
 		});
-		expect(payload.scope.envCells[0]?.localSpatial.localBvh.items).toEqual([
-			{ instanceId: "da550100:static-0", kind: "static" },
-		]);
 	});
 
 	it("requests resolver metadata for static seeds but not standalone env-cell assets", async () => {
@@ -738,11 +735,6 @@ function createRuntimeEnvCell(
 		},
 		landblockId: 0xda55ffff,
 		localPlacement: createPlacement(),
-		localSpatial: {
-			localBvh: createLocalBvh(),
-			localBvhItemCount: 0,
-			localBvhNodeCount: 0,
-		},
 		memberId: `member-${envCellId.toString(16)}`,
 		portalApertures: [],
 		portals: [],
@@ -849,7 +841,6 @@ function createEnvCellPayload(input: {
 		diagnostics: createDiagnostics(),
 		environmentId: 0x0d000010,
 		envCellId: input.envCellId,
-		localBvh: createLocalBvh({ staticInstanceId: "static-0" }),
 		localPlacement: createPlacement(),
 		memberId: input.memberId,
 		portalApertures: [],
@@ -1153,18 +1144,6 @@ function createCellBsp() {
 		polyIds: [],
 		solid: 0,
 		sphere: null,
-	};
-}
-
-function createLocalBvh(
-	options: { readonly staticInstanceId?: string } = {},
-) {
-	return {
-		items:
-			options.staticInstanceId === undefined
-				? []
-				: [{ instanceId: options.staticInstanceId, kind: "static" as const }],
-		nodes: [],
 	};
 }
 

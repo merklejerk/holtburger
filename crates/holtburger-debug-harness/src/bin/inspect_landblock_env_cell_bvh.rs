@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler, PreparedAabb,
-    PreparedBvhKindMask, PreparedEnvCellLocalBvhItem, PreparedVec3, normalize_landblock_id,
+    PreparedVec3, normalize_landblock_id,
 };
 use holtburger_dat::physics::BspNode;
 
@@ -92,12 +92,11 @@ fn main() -> Result<()> {
             .map(format_bounds)
             .unwrap_or_else(|| "none".to_string());
         println!(
-            "cell=0x{:08x} placementOrigin=({:.3},{:.3},{:.3}) localBvhItems={} landblockBounds={}",
+            "cell=0x{:08x} placementOrigin=({:.3},{:.3},{:.3}) landblockBounds={}",
             cell.env_cell.env_cell_id,
             cell.env_cell.local_placement.origin.x,
             cell.env_cell.local_placement.origin.y,
             cell.env_cell.local_placement.origin.z,
-            cell.local_bvh_items.len(),
             bounds_text
         );
     }
@@ -115,9 +114,8 @@ fn main() -> Result<()> {
         }
         for cell in &asset.env_cells {
             let plane_count = count_bsp_planes(&cell.prepared_cell.cell_bsp);
-            let bsp_bounds = derive_cell_bsp_render_bounds_by_plane_triples(
-                &cell.prepared_cell.cell_bsp,
-            );
+            let bsp_bounds =
+                derive_cell_bsp_render_bounds_by_plane_triples(&cell.prepared_cell.cell_bsp);
             match bsp_bounds {
                 Some(bounds) => {
                     cells_with_bounds += 1;
@@ -200,31 +198,10 @@ fn main() -> Result<()> {
         } else {
             println!("  renderGeometryBounds=none");
         }
-        if let Some(root) = cell.local_bvh.as_ref().and_then(|bvh| bvh.nodes.first()) {
-            println!("  localBvhRoot={}", format_bounds(&root.bounds));
-        } else {
-            println!("  localBvhRoot=none");
-        }
         if let Some(bounds) = &cell.landblock_bounds {
             println!("  landblockBounds={}", format_bounds(bounds));
         } else {
             println!("  landblockBounds=none");
-        }
-        if let Some(local_bvh) = &cell.local_bvh {
-            for (index, node) in local_bvh.nodes.iter().enumerate() {
-                if node.item_indices.is_empty() {
-                    continue;
-                }
-                println!(
-                    "  localLeafNode[{index}] items={:?} kindMask={} bounds={}",
-                    node.item_indices,
-                    format_kind_mask(node.kind_mask),
-                    format_bounds(&node.bounds)
-                );
-            }
-        }
-        for (index, item) in cell.local_bvh_items.iter().enumerate() {
-            println!("  localItem[{index}] kind={}", format_local_bvh_item(item));
         }
         for mesh in &cell.static_meshes {
             let bounds_text = mesh
@@ -248,40 +225,8 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn format_kind_mask(kind_mask: PreparedBvhKindMask) -> &'static str {
-    match kind_mask {
-        PreparedBvhKindMask::OutdoorTerrain { .. } => "outdoor-terrain",
-        PreparedBvhKindMask::OutdoorStatic { .. } => "outdoor-static",
-        PreparedBvhKindMask::LandblockEnvCells { .. } => "landblock-env-cells",
-        PreparedBvhKindMask::EnvCellLocal {
-            cell_structure_geometry,
-            static_object,
-            portal,
-        } => match (cell_structure_geometry, static_object, portal) {
-            (true, false, false) => "cell-structure",
-            (false, true, false) => "static",
-            (false, false, true) => "portal",
-            _ => "mixed",
-        },
-    }
-}
-
 fn parse_hex_u32(input: &str) -> Result<u32> {
     Ok(u32::from_str_radix(input.trim_start_matches("0x"), 16)?)
-}
-
-fn format_local_bvh_item(item: &PreparedEnvCellLocalBvhItem) -> String {
-    match item {
-        PreparedEnvCellLocalBvhItem::CellStructureGeometry { triangle_count } => {
-            format!("cell-structure triangles={triangle_count}")
-        }
-        PreparedEnvCellLocalBvhItem::Static { instance_id } => {
-            format!("static instance={instance_id}")
-        }
-        PreparedEnvCellLocalBvhItem::Portal { portal_id } => {
-            format!("portal id={portal_id}")
-        }
-    }
 }
 
 fn derive_cell_bsp_render_bounds_by_plane_triples(node: &BspNode) -> Option<PreparedAabb> {

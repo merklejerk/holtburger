@@ -154,7 +154,6 @@ export interface EnvCellStaticScenePickDetails {
 	readonly envCellId: number;
 	readonly instanceId: string;
 	readonly seed: LandblockEnvCellsStaticScopePayload["envCells"][number]["staticObjectSeeds"][number];
-	readonly bvhItemIndex: number | null;
 }
 
 export interface TerrainQuadScenePickDetails {
@@ -316,7 +315,6 @@ export interface LandblockGridRayTraceOptions {
 
 type EnvCellBvhRuntimeItem = {
 	readonly kind: "static";
-	readonly bvhItemIndex: number | null;
 	readonly seed: EnvCellStaticSeedRuntimeRecord;
 };
 
@@ -902,7 +900,6 @@ export class StaticSceneQuery {
 				item.seed.seed.identity.instanceId === options.instanceId
 			) {
 				return {
-					bvhItemIndex: item.bvhItemIndex,
 					envCellId: options.envCellId,
 					instanceId: options.instanceId,
 					landblockId: options.landblockId,
@@ -1360,12 +1357,6 @@ export class StaticSceneQuery {
 			);
 			const cellsByEnvCellId = new Map<number, EnvCellBvhRoot>();
 			for (const record of spatialRecords) {
-				const bvhItemIndexByStaticInstanceId = new Map(
-					record.localBvh.items.flatMap(
-						(item, bvhItemIndex): readonly [string, number][] =>
-							item.kind === "static" ? [[item.instanceId, bvhItemIndex]] : [],
-					),
-				);
 				const seeds =
 					seedsByLandblockAndEnvCell.get(landblockId)?.get(record.envCellId) ??
 					[];
@@ -1374,9 +1365,6 @@ export class StaticSceneQuery {
 					items: seeds.map((seedRecord): EnvCellBvhRuntimeItem => {
 						const seed = seedRecord.seed;
 						return {
-							bvhItemIndex:
-								bvhItemIndexByStaticInstanceId.get(seed.identity.instanceId) ??
-								null,
 							kind: "static",
 							seed: {
 								envCellId: record.envCellId,

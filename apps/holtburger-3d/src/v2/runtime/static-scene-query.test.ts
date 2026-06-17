@@ -468,7 +468,6 @@ describe("V2 static scene query", () => {
 				landblockId: 0xda55ffff,
 			}),
 		).toMatchObject({
-			bvhItemIndex: 0,
 			seed: {
 				debug: { sourceAssetId: "setup-model/02000010" },
 				source: {
@@ -954,8 +953,6 @@ describe("V2 static scene query", () => {
 					},
 					kind: "env-cell-spatial",
 					landblockId: 0xda55ffff,
-					localBvhItemCount: 1,
-					localBvhNodeCount: 1,
 					memberId: "cell-0",
 					owner,
 					renderBounds: null,
@@ -1513,30 +1510,6 @@ function createLandblockEnvCellsPayload(
 				},
 				landblockId,
 				localPlacement: envCellPlacement,
-				localSpatial: {
-					localBvh: {
-						items: [{ instanceId: "env-static-0", kind: "static" }],
-						nodes: [
-							{
-								bounds: {
-									max: { x: 1, y: 1, z: -4 },
-									min: { x: -1, y: -1, z: -5 },
-								},
-								itemIndices: [0],
-								kindMask: {
-									cellStructureGeometry: false,
-									domain: "env-cell-local",
-									portal: false,
-									static: true,
-								},
-								left: null,
-								right: null,
-							},
-						],
-					},
-					localBvhItemCount: 1,
-					localBvhNodeCount: 1,
-				},
 				memberId: "cell-0",
 				portalApertures: [],
 				portals: [],
@@ -1673,9 +1646,6 @@ function commitLandblockEnvCells(
 			environment: envCell.environment,
 			kind: "env-cell-spatial" as const,
 			landblockId,
-			localBvh: envCell.localSpatial.localBvh,
-			localBvhItemCount: envCell.localSpatial.localBvhItemCount,
-			localBvhNodeCount: envCell.localSpatial.localBvhNodeCount,
 			memberId: envCell.memberId,
 			owner,
 			renderBounds: envCell.renderGeometry.bounds,

@@ -152,13 +152,7 @@ describe("V2 host asset preparation", () => {
 					...payload,
 					classification: "dungeon",
 					envCellResidencyBvh: payload.landblockEnvCellBvh,
-					envCells: payload.envCells.map((cell) => ({
-						...cell,
-						localBvh: {
-							...cell.localBvh,
-							coordinateSpace: "env-cell-local",
-						},
-					})),
+					envCells: payload.envCells,
 				},
 				payloadKind: "json",
 				requestId: "request-1",
@@ -225,10 +219,6 @@ function createLandblockEnvCellsPayload() {
 				diagnostics: createDiagnostics(),
 				environmentId: 0x0e000001,
 				envCellId: 0xda550100,
-				localBvh: {
-					items: [],
-					nodes: [],
-				},
 				localPlacement: createPlacement({ x: 1, y: 3, z: -2 }),
 				memberId: "env-cell/da550100",
 				portalApertures: [],

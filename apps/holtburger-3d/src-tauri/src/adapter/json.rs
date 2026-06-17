@@ -1029,7 +1029,6 @@ where
         }).collect::<Vec<_>>(),
         "renderGeometry": render_geometry,
         "cellBsp": serialize_bsp_node(&cell.cell_bsp),
-        "localBvh": serialize_landblock_env_cell_bundle_local_bvh(asset),
         "diagnostics": serialize_prepared_content_diagnostics(&asset.diagnostics),
     })
 }
@@ -1077,49 +1076,6 @@ pub fn serialize_env_cell_local_bvh(
         "nodes": build_flat_bvh_nodes_from_bounds(node_inputs),
         "items": items,
     })
-}
-
-pub fn serialize_landblock_env_cell_bundle_local_bvh(
-    cell: &LandblockEnvCellBundleCell,
-) -> serde_json::Value {
-    let nodes = cell
-        .local_bvh
-        .as_ref()
-        .map(|bvh| {
-            bvh.nodes
-                .iter()
-                .map(serialize_prepared_bvh_node)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let items = cell
-        .local_bvh_items
-        .iter()
-        .map(serialize_env_cell_local_bvh_item)
-        .collect::<Vec<_>>();
-    serde_json::json!({
-        "nodes": nodes,
-        "items": items,
-    })
-}
-
-pub fn serialize_env_cell_local_bvh_item(item: &PreparedEnvCellLocalBvhItem) -> serde_json::Value {
-    match item {
-        PreparedEnvCellLocalBvhItem::CellStructureGeometry { triangle_count } => {
-            serde_json::json!({
-                "kind": "cell-structure-geometry",
-                "triangleRange": [0, triangle_count],
-            })
-        }
-        PreparedEnvCellLocalBvhItem::Static { instance_id } => serde_json::json!({
-            "kind": "static",
-            "instanceId": instance_id,
-        }),
-        PreparedEnvCellLocalBvhItem::Portal { portal_id } => serde_json::json!({
-            "kind": "portal",
-            "portalId": portal_id,
-        }),
-    }
 }
 
 pub fn portal_aperture_bounds(aperture: &PreparedPortalAperture) -> Option<PreparedAabb> {
@@ -1713,8 +1669,6 @@ mod tests {
                     visible_cell_ids: Vec::new(),
                 },
                 landblock_bounds: None,
-                local_bvh: None,
-                local_bvh_items: Vec::new(),
                 prepared_cell: PreparedInteriorCell {
                     cell_bsp: empty_bsp_leaf(),
                     cell_structure_id: 0x0d000001,

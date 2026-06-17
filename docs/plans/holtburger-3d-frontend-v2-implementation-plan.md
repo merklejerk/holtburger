@@ -2290,6 +2290,7 @@ Completed implementation notes:
   - swaps composite targets and finally blits composite color to the display surface.
 - Course correction on 2026-06-17: transition compositing now draws all renderable resident transition aperture batches instead of filtering to the base landblock. Base-landblock filtering caused visible cutoffs when a portal's aperture batch belonged to a neighboring retained landblock.
 - Composite depth writes use depth testing with `ALWAYS` plus shader-side aperture-depth rejection. This is intentional: fixed-function `LESS` would test the shader-written source depth rather than the rasterized aperture depth.
+- Diagnostic course correction on 2026-06-17: a depth24 bucket plus local `fwidth(apertureDepth)` shader tolerance was tested and removed after visual validation showed the distant portal banding still occurred. The active diagnostic is now an explicit `aperture-depth-probe` renderer mode that copies the base target into a composite target and draws transition apertures as flat ordinary geometry with fixed-function `LEQUAL` against the blitted depth buffer. This mirrors the decisive v1 `portal-geometry-depth` probe without adding a production mask/stencil path yet.
 - Added lean current-frame renderer diagnostics for compositing mode, executed composite depth, composite pass count, and aperture batch draw calls.
 - Added tests for:
   - the direct-depth shader contract;
@@ -2307,6 +2308,257 @@ Verification:
 - `npm run check`
 - `npm run lint:ts`
 - `npm run test:ts`
+
+### Immediate Phase 13B1h1: Portal Composite Depth Banding Hunt
+
+Status: complete on 2026-06-17.
+
+Purpose: explain and isolate the distant transition-portal banding visible in the no-stencil direct-depth compositor before choosing a production fix. This phase is diagnostic course correction, not a new production render architecture.
+
+Context:
+
+- Visual testing of 13B1h showed nested portal compositing generally works, but distant outdoor-to-indoor transition portals can show horizontal/diagonal bands where the base scene remains visible through what should be composited interior pixels.
+- Changing camera near/far planes changed artifact intensity, strongly implicating depth-buffer representation or depth comparison behavior.
+- The symptom closely resembles the v1 WebGL2 portal compositor issue captured in `docs/plans/holtburger-3d-portal-depth-copy-postmortem.md`.
+
+Ground truth from v1:
+
+- V1 proved shader-copying depth with `gl_FragDepth = texture(depthTexture, uv).r` was not equivalent to framebuffer depth transfer for portal compositor coverage.
+- V1 also proved shader-side manual aperture-depth comparisons against sampled depth remained holey after depth blits were fixed.
+- The stable v1 model separated the jobs:
+  - copy color with shader/fullscreen when needed;
+  - copy depth with `gl.blitFramebuffer(... DEPTH_BUFFER_BIT ...)`;
+  - draw portal aperture masks as real geometry with fixed-function `LEQUAL` against copied depth;
+  - composite source color/depth through that mask afterward.
+
+Observed v2 model:
+
+- V2 already uses framebuffer blits for whole-target color+depth copies between matching `DEPTH_COMPONENT24` scene/composite targets.
+- V2 still performs aperture coverage inside the direct composite shader:
+
+```glsl
+previousDepth = texture(uPreviousCompositeDepth, screenUv).r;
+apertureDepth = gl_FragCoord.z;
+if (apertureDepth > previousDepth) {
+    discard;
+}
+sourceDepth = texture(uSourceSceneDepth, screenUv).r;
+gl_FragDepth = sourceDepth;
+```
+
+- The shader is trying to do two incompatible jobs in one draw:
+  - coverage wants rasterized aperture depth tested against current composite depth;
+  - recursion wants the final fragment to write sampled source-scene depth.
+- Fixed-function depth cannot express both in one pass because WebGL depth testing observes the shader-written `gl_FragDepth` when it is assigned. Using fixed-function `LEQUAL` in the current one-pass shader would test sampled source depth, not aperture depth.
+
+What we tried:
+
+- Tried a shader-side tolerance on aperture rejection:
+
+```glsl
+depthTolerance = max(DEPTH24_UNIT * 4.0, fwidth(apertureDepth) * 1.5);
+if (apertureDepth > previousDepth + depthTolerance) {
+    discard;
+}
+```
+
+- Result: visual validation showed distant banding still occurred.
+- Decision: removed the tolerance patch. Keeping it would add over-permissive coverage risk without solving the root symptom.
+
+Active diagnostic:
+
+- Added renderer debug mode `aperture-depth-probe`.
+- Added renderer debug mode `shader-coverage-probe`.
+- Added renderer debug mode `combined-depth-rgb`.
+- Added renderer debug mode `combined-depth-linear`.
+- Browser UI exposes all four under `Portal composite debug`.
+- `aperture-depth-probe` algorithm:
+  - render exterior/interior scene-domain targets as usual;
+  - build the normal transition composite work plan;
+  - copy base target color+depth into `compositePing`;
+  - draw the first planned transition aperture batch set as flat semi-transparent magenta geometry into `compositePing`;
+  - use fixed-function `LEQUAL` against copied composite depth;
+  - blit probed composite color to the display.
+- `aperture-depth-probe` intentionally does not sample previous composite depth, sample source depth, write source depth, or composite source scene color. It answers one question only: does fixed-function aperture geometry render solid against the blitted composite depth buffer?
+- `shader-coverage-probe` algorithm:
+  - copy base target color+depth into `compositePing`;
+  - copy `compositePing` color+depth into `compositePong`;
+  - draw the first planned transition aperture batch set as flat semi-transparent magenta geometry into `compositePong`;
+  - sample only `compositePing.depth` and use the same shader-side `apertureDepth > previousDepth` discard as the production direct-depth composite shader;
+  - do not sample source scene color/depth and do not write `gl_FragDepth`;
+  - blit probed `compositePong` color to the display.
+- `shader-coverage-probe` answers whether sampled previous-composite-depth coverage alone produces the bands. If this probe bands, the read/compare side is sufficient to explain the production artifact. If it is solid, the remaining suspect is sampled source-depth propagation via `gl_FragDepth`, which needs a mask/stencil probe.
+- `combined-depth-rgb` renders the final combined scene-domain target's sampled depth texture directly to the display as RGB. It intentionally outputs `texture(depthTexture, uv).rgb` rather than forcing `.r` into all channels, so it can visually answer whether the browser/GPU exposes any meaningful non-red components for depth textures. If no transition work is active, it visualizes the base scene target depth.
+- `combined-depth-linear` samples the same target depth `.r`, linearizes it with the renderer camera near/far planes, and displays inverted grayscale so near pixels are brighter and far pixels are darker.
+
+Evidence collected:
+
+- The aperture probe renders semi-transparent magenta apertures solidly.
+- No banding is visible in the probe at any tested distance.
+- Therefore:
+  - transition aperture geometry is not the likely cause;
+  - landblock rebasing/placement of aperture geometry is not the likely cause;
+  - framebuffer depth blit into the copied composite target is not the likely cause;
+  - fixed-function `LEQUAL` coverage against copied composite depth is stable.
+- The `shader-coverage-probe` bands.
+- Because `shader-coverage-probe` does not sample source scene color/depth and does not write `gl_FragDepth`, source-depth propagation is not required to produce the artifact.
+- The failing mechanism is now isolated to the shader-side sampled previous-depth coverage test:
+
+```glsl
+previousDepth = texture(uPreviousCompositeDepth, screenUv).r;
+apertureDepth = gl_FragCoord.z;
+if (apertureDepth > previousDepth) {
+    discard;
+}
+```
+
+- Current conclusion: framebuffer depth attachment plus fixed-function `LEQUAL` is stable; sampled depth texture plus shader compare is not stable enough for aperture coverage.
+
+Closed experiment:
+
+- Replaced normalized screen-UV sampling in both the production transition compositor and `shader-coverage-probe` with exact integer texel fetches:
+
+```glsl
+ivec2 textureExtent = textureSize(uPreviousCompositeDepth, 0);
+ivec2 texelCoord = clamp(ivec2(gl_FragCoord.xy), ivec2(0), textureExtent - ivec2(1));
+previousDepth = texelFetch(uPreviousCompositeDepth, texelCoord, 0).r;
+```
+
+- Added a deliberately tiny post-projection depth tolerance equal to two 24-bit depth buckets:
+
+```glsl
+const float depth24Epsilon = 2.0 / 16777215.0;
+if (apertureDepth > previousDepth + depth24Epsilon) {
+    discard;
+}
+```
+
+- The production compositor also now fetches source color/depth through the same integer texel coordinate, so the screen-space copy path no longer depends on normalized UVs.
+- Result: visual validation showed `shader-coverage-probe` still bands.
+- Conclusion: normalized UV sampling and pixel-alignment error were not the root cause.
+- Decision: do not grow the epsilon into a broad tolerance such as `1e-6` or `1e-5`. Those values represent many depth24 buckets, can hide this scene's bands by over-accepting aperture pixels, and risk visible portal leaks at silhouettes, doorway trim, roofs, fences, and near-coplanar intersections. Larger epsilon is a scene-tuned workaround, not a stable compositor model.
+- Last pre-stencil experiment: keep exact `texelFetch` sampling, but quantize `gl_FragCoord.z` onto the depth24 grid before comparing it to the sampled previous composite depth:
+
+```glsl
+float quantizeDepth24(float depth) {
+    const float depth24Max = 16777215.0;
+    return floor(clamp(depth, 0.0, 1.0) * depth24Max + 0.5) / depth24Max;
+}
+
+previousDepth = texelFetch(uPreviousCompositeDepth, texelCoord, 0).r;
+apertureDepth = quantizeDepth24(gl_FragCoord.z);
+if (apertureDepth > previousDepth) {
+    discard;
+}
+```
+
+- This tests whether the remaining mismatch is caused by comparing an unquantized incoming aperture depth against an already quantized stored depth value. Round-to-nearest is the first attempt because it is the least biased representation match; floor would intentionally bias apertures closer and should only be considered if we deliberately choose a conservative over-acceptance model.
+- Result: visual validation showed `shader-coverage-probe` still bands.
+- Conclusion: comparing in quantized depth24 space does not make shader-side sampled-depth coverage match fixed-function aperture coverage.
+- Decision: shader-side sampled-depth coverage is closed. The next implementation step is the stencil aperture mask compositor in Immediate Phase 13B1h2.
+
+Working theory:
+
+- The one-pass no-stencil compositor asks shader-sampled depth to make an equality-sensitive aperture coverage decision that fixed-function depth handles correctly.
+- Sampling a `DEPTH_COMPONENT24` texture returns normalized window-depth values; comparing those values in shader code is not guaranteed to match the hardware depth pipeline's fixed-function coverage behavior near quantized/depth-slope boundaries.
+- Pulling aperture depth toward the camera is not expected to help. V1 already explored that path, and in this scene the leaking/banding geometry is behind the aperture. Biasing aperture depth acts on the wrong side of the visual failure.
+- The structural issue is that aperture coverage and source-depth propagation need separate operations. Trying to keep them in one draw forces shader-side coverage.
+
+Likely production direction:
+
+- Reintroduce a mask split for transition aperture coverage. Stencil is the preferred first production route because it is the native framebuffer mask path, avoids adding a color mask surface, and lets aperture coverage use fixed-function depth.
+- Candidate production sequence per transition depth:
+  1. Seed the first composite target from the base scene with shader color copy plus framebuffer depth blit. Clear stencil only for this initial seed.
+  2. For each transition depth, copy the current composite target into the write target with shader color copy plus framebuffer depth blit, then blit stencil history into the write target.
+  3. Draw the batched transition aperture VAOs into stencil with color writes off, depth writes off, fixed-function `LEQUAL`, and cull mode from the transition work plan. Use transition-depth stencil refs rather than per-frame generation refs.
+  4. Draw a fullscreen source-copy pass with stencil test enabled only where the aperture pass wrote the mask. This pass samples source scene color/depth at the destination pixel, writes color, and writes sampled source depth with `gl_FragDepth`.
+  5. Swap composite read/write targets and continue to the next transition depth.
+- This restores the v1 invariant: aperture coverage is decided by fixed-function depth against copied framebuffer depth; source color/depth propagation happens only after coverage is known.
+- V1 still used shader `gl_FragDepth` for the stencil-gated incoming scene copy. The critical fix was not "never write `gl_FragDepth`"; it was "never use shader-copied or shader-compared depth for aperture coverage." Whole-target composite depth transfer must use framebuffer depth blits.
+
+Open questions:
+
+- Resolved: use packed `DEPTH24_STENCIL8` targets for exterior, interior, and ping-pong composite targets so depth/stencil blits stay format-compatible.
+- Resolved for the immediate stencil pivot: keep current all-resident transition aperture batching by transition depth and direction. If later scenes show unrelated portal leakage, add explicit frontier filtering as a separate phase rather than folding it into the depth-banding fix.
+- Resolved: the temporary `aperture-depth-probe`, `shader-coverage-probe`, and depth visualization modes were investigation-only and were reverted before the stencil compositor implementation. The evidence remains documented here; production code does not retain the probes.
+
+### Immediate Phase 13B1h2: Stencil Aperture Mask Compositor
+
+Status: implementation complete on 2026-06-17; manual harness visual validation still pending.
+
+Purpose: replace the unstable shader-side aperture-depth coverage test with a two-step stencil mask compositor while keeping the existing scene-domain targets, transition aperture VAOs, and transition-depth work planning model.
+
+Rationale:
+
+- `aperture-depth-probe` proved fixed-function `LEQUAL` against framebuffer-copied composite depth draws solid apertures.
+- `shader-coverage-probe` still bands after exact `texelFetch` sampling and a small depth24 epsilon.
+- Therefore the next course correction should preserve fixed-function aperture coverage and stop relying on shader-sampled previous depth for mask decisions.
+
+Deliverables:
+
+- Allocate scene-domain/composite targets with stencil-capable depth storage, preferably packed `DEPTH24_STENCIL8` unless WebGL2 constraints force a different shape.
+- Match scene-domain and composite target depth/stencil formats so framebuffer depth blits are compatible. V1 field testing found `DEPTH_COMPONENT24` scene targets blitted into `DEPTH24_STENCIL8` composite targets was noisy/unsupported enough to invalidate diagnostics.
+- Replace whole-target recursive composite copies with the v1 shape:
+  - shader copy color;
+  - framebuffer-blit depth;
+  - framebuffer-blit stencil history.
+- Add a stencil aperture mask pass that:
+  - disables color writes;
+  - disables depth writes;
+  - uses fixed-function depth test `LEQUAL`;
+  - writes transition-depth stencil refs for aperture-covered pixels;
+  - draws the existing batched transition aperture VAOs using the current cull direction from the transition work plan.
+- Add a fullscreen compositing pass that:
+  - enables stencil test for the active transition-depth aperture mask;
+  - samples source scene color/depth by exact integer texel coordinate;
+  - writes source color;
+  - writes sampled source depth with `gl_FragDepth`.
+- Keep ping-pong composite target recursion as the outer control flow.
+- Keep the temporary debug probe modes retired. They were useful to isolate the issue, but keeping them in the browser panel after the architecture pivot would turn diagnostics into a junk drawer.
+
+Implementation notes:
+
+- V2 scene-domain targets now allocate `RGB8` color plus packed `DEPTH24_STENCIL8` depth/stencil textures and attach them with `DEPTH_STENCIL_ATTACHMENT`.
+- Whole-target recursive composite copies now:
+  - draw a fullscreen color copy into the destination target;
+  - copy depth with `gl.blitFramebuffer(... DEPTH_BUFFER_BIT ...)`;
+  - clear stencil for the initial base-scene seed;
+  - copy stencil history between ping-pong composite targets with `gl.blitFramebuffer(... STENCIL_BUFFER_BIT ...)`.
+- Transition aperture batches now draw a stencil mask with color writes disabled, depth writes disabled, fixed-function `LEQUAL`, and `REPLACE` into sequential stencil refs.
+- Source scene compositing now uses a fullscreen stencil-gated copy pass. It samples source color/depth by integer `texelFetch`, writes color, and writes sampled source depth through `gl_FragDepth`.
+- The production path no longer samples `uPreviousCompositeDepth` or performs shader-side `apertureDepth > previousDepth` rejection.
+
+Acceptance criteria:
+
+- Portal compositing no longer uses `uPreviousCompositeDepth` shader-side aperture rejection in the production path.
+- Whole-target composite depth transfer uses framebuffer depth blits, not shader `gl_FragDepth`.
+- Automated: the production shader contract no longer contains the sampled previous-depth coverage test.
+- Automated: whole-target composite depth transfer uses depth blits and stencil history uses stencil blits.
+- Automated: renderer tests cover packed depth/stencil target allocation, stencil aperture state, fullscreen stencil-gated source copy state, cull direction, and sequential stencil refs.
+- Pending manual: prove the distant portal banding visible in 13B1h/13B1h1 is gone in normal portal compositing mode.
+- Pending manual: prove nested portals still composite cleanly through the configured transition depth policy.
+- Base-landblock portal cutoff remains fixed by the existing all-resident aperture batch input model: all resident renderable transition aperture batches are eligible, not only the base landblock's batch.
+
+Spicy implementation notes:
+
+- This is intentionally more draw-pass work than the no-stencil shader, but it matches the v1 lesson: aperture coverage and source-depth propagation are separate operations.
+- The fullscreen stencil-gated incoming scene copy still writes sampled source depth through `gl_FragDepth`, matching v1. That path is acceptable only because it is no longer used to decide aperture coverage. If nested-depth artifacts remain after the stencil pivot, this is the next specific suspect to isolate.
+- WebGL2 does not give us a simple stencil-tested polygon-shaped framebuffer depth blit. A depth blit can copy a rectangle of depth values, but it cannot copy only pixels selected by the aperture stencil mask, so the incoming scene copy still needs a shader for masked color/depth propagation.
+- Do not use incrementing per-frame stencil generations to avoid clears. Use explicit clears/sequential refs where needed and blit stencil history between ping-pong targets. Per-frame generation refs add wrap/state hazards without addressing the proven artifact.
+- Avoid adding durable diagnostic records for mask failures. Shader/framebuffer setup errors should fail loudly; visual/debug modes can remain interactive tools, not report-journal entries.
+- Do not reintroduce per-portal draw calls. The baker-emitted transition aperture batches remain the batching unit; the stencil pass should draw those VAOs in batch form per transition-depth direction.
+
+Validation:
+
+- `npm run test:ts -- src/v2/renderer/webgl2/webgl2-renderer.test.ts src/v2/renderer/transition-composite-work-plan.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run test:ts`
+
+Unclosed:
+
+- Manual browser/Tauri visual validation is still needed for the original distance banding scene and nested transition portals.
+- The stencil-gated source scene copy still writes sampled source depth with `gl_FragDepth`, matching v1. It is no longer part of aperture coverage, but if any nested-depth artifacts remain, this is the next suspect to isolate.
 
 ### Phase 13B2: Dungeon Anchoring And Interior Focus
 

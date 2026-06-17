@@ -1805,7 +1805,7 @@ Verification:
 
 ### Phase 13B1e-1: Packed Transition Aperture Batch Course Correction
 
-Status: planned; inserted immediately after 13B1e before aperture resource sync.
+Status: complete on 2026-06-17; inserted immediately after 13B1e before aperture resource sync.
 
 Purpose: replace the candidate-shaped transition portal API with a baker/static-scene packed transition aperture batch, and clean up overly narrow `StaticSceneVec3`/`StaticScenePlane` naming before the renderer resource contract hardens.
 
@@ -1882,6 +1882,20 @@ Acceptance criteria:
 - No public/durable `skipped` candidate records remain in the transition portal model.
 - No transition aperture geometry is built at frame/submit time.
 - The plan and code make it clear that per-depth direction switching is controlled by cull mode/pass state, not per-portal draw calls.
+
+Implementation notes:
+
+- Replaced the V2 public `StaticSceneQuery.queryTransitionPortalCandidates(...)` surface with `StaticSceneQuery.queryTransitionApertureBatches(...)`.
+- Added `TransitionApertureBatch`, `TransitionApertureRange`, and `TransitionApertureFrontFace` as the durable pre-renderer contract.
+- The batch builder groups committed portal-interior records by landblock, filters to building-to-env-cell links whose env-cell portal is an outside transition, transforms aperture vertices into `landblock-render-local`, and appends them into one contiguous vertex/index/range set per landblock.
+- Winding is normalized to `frontFace: "indoor-visible"` during batch derivation. Current implementation maps the env-cell portal visible-side flag to fan index order; later renderer passes should flip cull mode/pass state rather than rewriting portal geometry.
+- Malformed linked transition apertures now emit `console.error(...)` with landblock/link/building/env-cell context and are omitted from the packed batch. No durable `skipped` record remains.
+- Renamed V2 generic geometry primitives from `StaticSceneVec3`/`StaticScenePlane` to `Vec3`/`Plane`; downstream V2 runtime imports were updated.
+
+Spicy/residual:
+
+- The winding normalization is intentionally based on the existing transition portal visible-side flag semantics. If visual testing shows the indoor-facing side is inverted for some content, the fix should be in the batch winding rule, not in renderer-side per-portal branching.
+- The packed CPU batch exists in the static-scene query layer only. Phase 13B1f still needs to upload it to renderer-owned VAO/VBO/IBO resources and attach it to resource retention.
 
 ### Phase 13B1f: Transition Aperture Geometry Resource Sync
 

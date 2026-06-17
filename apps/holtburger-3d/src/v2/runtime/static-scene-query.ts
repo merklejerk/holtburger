@@ -30,8 +30,8 @@ import {
 } from "./static-placement";
 
 export interface StaticSceneRay {
-	readonly origin: StaticSceneVec3;
-	readonly direction: StaticSceneVec3;
+	readonly origin: Vec3;
+	readonly direction: Vec3;
 }
 
 export type StaticScenePickContext =
@@ -92,7 +92,7 @@ export interface TerrainQuadSceneSelectionKey {
 export interface OutdoorStaticObjectScenePickHit {
 	readonly kind: "static-scene-pick-hit";
 	readonly distance: number;
-	readonly hitPoint: StaticSceneVec3;
+	readonly hitPoint: Vec3;
 	readonly bounds: StaticBounds;
 	readonly selectionKey: OutdoorStaticObjectSceneSelectionKey;
 }
@@ -100,7 +100,7 @@ export interface OutdoorStaticObjectScenePickHit {
 export interface EnvCellStaticScenePickHit {
 	readonly kind: "static-scene-pick-hit";
 	readonly distance: number;
-	readonly hitPoint: StaticSceneVec3;
+	readonly hitPoint: Vec3;
 	readonly bounds: StaticBounds;
 	readonly selectionKey: EnvCellStaticSceneSelectionKey;
 }
@@ -108,7 +108,7 @@ export interface EnvCellStaticScenePickHit {
 export interface TerrainQuadScenePickHit {
 	readonly kind: "static-scene-pick-hit";
 	readonly distance: number;
-	readonly hitPoint: StaticSceneVec3;
+	readonly hitPoint: Vec3;
 	readonly bounds: StaticBounds;
 	readonly selectionKey: TerrainQuadSceneSelectionKey;
 }
@@ -194,20 +194,20 @@ export interface StaticSceneQuerySourcePayloadOptions {
 	readonly outdoorAnchorLandblockId?: number | null;
 }
 
-export interface StaticSceneVec3 {
+export interface Vec3 {
 	readonly x: number;
 	readonly y: number;
 	readonly z: number;
 }
 
-export interface StaticScenePlane {
-	readonly normal: StaticSceneVec3;
+export interface Plane {
+	readonly normal: Vec3;
 	readonly constant: number;
 }
 
 export type TransitionPortalVisibleSide = "positive" | "negative";
 
-export interface TransitionPortalEndpointPair {
+interface TransitionPortalEndpointPair {
 	readonly outdoor: {
 		readonly buildingInstanceId: string;
 		readonly buildingPortalId: string;
@@ -218,37 +218,34 @@ export interface TransitionPortalEndpointPair {
 	};
 }
 
-export type TransitionPortalSkipReason =
+type TransitionApertureOmissionReason =
 	| "missing-env-cell-summary"
 	| "missing-env-cell-portal"
 	| "not-outside-transition-portal"
 	| "missing-portal-aperture"
 	| "malformed-portal-aperture";
 
-export type TransitionPortalCandidate =
-	| RenderableTransitionPortalCandidate
-	| SkippedTransitionPortalCandidate;
+export type TransitionApertureFrontFace = "indoor-visible";
 
-export interface RenderableTransitionPortalCandidate {
-	readonly apertureIndices: readonly number[];
-	readonly aperturePlane: StaticScenePlane | null;
-	readonly apertureVertices: readonly StaticSceneVec3[];
-	readonly endpoints: TransitionPortalEndpointPair;
-	readonly id: string;
-	readonly insideVisibleSide: TransitionPortalVisibleSide;
-	readonly kind: "renderable";
-	readonly landblockId: number;
-	readonly outsideVisibleSide: TransitionPortalVisibleSide;
-	readonly sourceLinkId: string;
+export interface TransitionApertureRange {
+	readonly buildingInstanceId: string;
+	readonly buildingPortalId: string;
+	readonly envCellId: number;
+	readonly firstIndex: number;
+	readonly indexCount: number;
+	readonly portalId: string;
 }
 
-export interface SkippedTransitionPortalCandidate {
-	readonly endpoints: TransitionPortalEndpointPair;
-	readonly id: string;
-	readonly kind: "skipped";
+export interface TransitionApertureBatch {
+	readonly apertureBatchId: string;
+	readonly coordinateSpace: "landblock-render-local";
+	readonly frontFace: TransitionApertureFrontFace;
+	readonly indices: readonly number[];
+	readonly kind: "transition-aperture-batch";
 	readonly landblockId: number;
-	readonly skipReason: TransitionPortalSkipReason;
-	readonly sourceLinkId: string;
+	readonly planes: readonly (Plane | null)[];
+	readonly ranges: readonly TransitionApertureRange[];
+	readonly vertices: readonly Vec3[];
 }
 
 export type StaticSceneCameraResidency =
@@ -962,17 +959,31 @@ export class StaticSceneQuery {
 		return null;
 	}
 
-	queryTransitionPortalCandidates(options: {
+	queryTransitionApertureBatches(options: {
 		readonly landblockId?: number;
-	} = {}): readonly TransitionPortalCandidate[] {
-		return [...this.#committedPortalInteriorRecordsByKey.values()]
-			.filter(
-				(entry) =>
-					options.landblockId === undefined ||
-					entry.record.landblockId === options.landblockId,
-			)
-			.flatMap((entry) => deriveTransitionPortalCandidates(entry.record))
-			.sort(compareTransitionPortalCandidates);
+	} = {}): readonly TransitionApertureBatch[] {
+		const recordsByLandblockId = new Map<
+			number,
+			CommittedRecordEntry<StaticPortalInteriorRecord>[]
+		>();
+		for (const entry of this.#committedPortalInteriorRecordsByKey.values()) {
+			if (
+				options.landblockId !== undefined &&
+				entry.record.landblockId !== options.landblockId
+			) {
+				continue;
+			}
+			const entries = recordsByLandblockId.get(entry.record.landblockId) ?? [];
+			entries.push(entry);
+			recordsByLandblockId.set(entry.record.landblockId, entries);
+		}
+
+		return [...recordsByLandblockId]
+			.sort(([leftLandblockId], [rightLandblockId]) => leftLandblockId - rightLandblockId)
+			.flatMap(([landblockId, entries]) => {
+				const batch = deriveTransitionApertureBatch(landblockId, entries);
+				return batch ? [batch] : [];
+			});
 	}
 
 	queryTerrainQuadDetails(options: {
@@ -1076,7 +1087,7 @@ export class StaticSceneQuery {
 	queryEnvCellAtPoint(options: {
 		readonly acceptedEnvCellIds?: readonly number[];
 		readonly landblockId: number;
-		readonly point: StaticSceneVec3;
+		readonly point: Vec3;
 	}): number | null {
 		const root = this.#envCellRootsByLandblockId.get(options.landblockId);
 		if (!root) {
@@ -1157,7 +1168,7 @@ export class StaticSceneQuery {
 
 	queryCameraResidencyAtPoint(options: {
 		readonly outdoorAnchorLandblockId: number;
-		readonly point: StaticSceneVec3;
+		readonly point: Vec3;
 	}): StaticSceneCameraResidency {
 		const outdoorResidency = deriveOutdoorCameraLandblockResidency({
 			anchorLandblockId: options.outdoorAnchorLandblockId,
@@ -2342,7 +2353,7 @@ function traverseBvhNearest(
 
 function traverseBvhPoint(
 	nodes: readonly BvhNode[],
-	point: StaticSceneVec3,
+	point: Vec3,
 ): readonly BvhCandidate[] {
 	if (nodes.length === 0) {
 		return [];
@@ -2381,7 +2392,7 @@ function traverseBvhPoint(
 function matchesFilters(
 	hit: StaticScenePickHit,
 	filters: StaticScenePickFilters | undefined,
-	rayOrigin: StaticSceneVec3,
+	rayOrigin: Vec3,
 ): boolean {
 	return (
 		(!filters?.itemKinds ||
@@ -2402,30 +2413,6 @@ function isAcceptedEnvCellId(
 	envCellId: number,
 ): boolean {
 	return acceptedEnvCellIds.size === 0 || acceptedEnvCellIds.has(envCellId);
-}
-
-function deriveTransitionPortalCandidates(
-	record: StaticPortalInteriorRecord,
-): readonly TransitionPortalCandidate[] {
-	const envCellsById = new Map(
-		record.envCells.map((envCell) => [envCell.envCellId, envCell] as const),
-	);
-
-	return record.portalLinks.flatMap((link) => {
-		const endpoints = createTransitionEndpointPair(link);
-		if (!endpoints) {
-			return [];
-		}
-
-		return [
-			createTransitionPortalCandidate({
-				endpoints,
-				envCellsById,
-				landblockId: record.landblockId,
-				link,
-			}),
-		];
-	});
 }
 
 function createTransitionEndpointPair(
@@ -2459,32 +2446,80 @@ function createTransitionEndpointPair(
 	};
 }
 
-function createTransitionPortalCandidate(options: {
+function deriveTransitionApertureBatch(
+	landblockId: number,
+	entries: readonly CommittedRecordEntry<StaticPortalInteriorRecord>[],
+): TransitionApertureBatch | null {
+	const vertices: Vec3[] = [];
+	const indices: number[] = [];
+	const ranges: TransitionApertureRange[] = [];
+	const planes: (Plane | null)[] = [];
+	const sortedEntries = [...entries].sort((left, right) =>
+		left.ownerKey.localeCompare(right.ownerKey),
+	);
+
+	for (const entry of sortedEntries) {
+		const envCellsById = new Map(
+			entry.record.envCells.map(
+				(envCell) => [envCell.envCellId, envCell] as const,
+			),
+		);
+		const sortedLinks = [...entry.record.portalLinks].sort((left, right) =>
+			left.linkId.localeCompare(right.linkId),
+		);
+		for (const link of sortedLinks) {
+			const endpoints = createTransitionEndpointPair(link);
+			if (!endpoints) {
+				continue;
+			}
+
+			appendTransitionAperture({
+				endpoints,
+				envCellsById,
+				indices,
+				landblockId,
+				link,
+				planes,
+				ranges,
+				vertices,
+			});
+		}
+	}
+
+	if (indices.length === 0) {
+		return null;
+	}
+
+	return {
+		apertureBatchId: createTransitionApertureBatchId(landblockId),
+		coordinateSpace: "landblock-render-local",
+		frontFace: "indoor-visible",
+		indices,
+		kind: "transition-aperture-batch",
+		landblockId,
+		planes,
+		ranges,
+		vertices,
+	};
+}
+
+function appendTransitionAperture(options: {
 	readonly endpoints: TransitionPortalEndpointPair;
 	readonly envCellsById: ReadonlyMap<
 		number,
 		StaticPortalInteriorRecord["envCells"][number]
 	>;
+	readonly indices: number[];
 	readonly landblockId: number;
 	readonly link: LandblockPortalLinkFacts;
-}): TransitionPortalCandidate {
-	const id = createTransitionPortalCandidateId({
-		endpoints: options.endpoints,
-		landblockId: options.landblockId,
-	});
-	const skipped = (
-		skipReason: TransitionPortalSkipReason,
-	): SkippedTransitionPortalCandidate => ({
-		endpoints: options.endpoints,
-		id,
-		kind: "skipped",
-		landblockId: options.landblockId,
-		skipReason,
-		sourceLinkId: options.link.linkId,
-	});
+	readonly planes: (Plane | null)[];
+	readonly ranges: TransitionApertureRange[];
+	readonly vertices: Vec3[];
+}): void {
 	const envCell = options.envCellsById.get(options.endpoints.indoor.envCellId);
 	if (!envCell) {
-		return skipped("missing-env-cell-summary");
+		logTransitionApertureOmission(options, "missing-env-cell-summary");
+		return;
 	}
 
 	const portal = envCell.portals.find(
@@ -2492,17 +2527,20 @@ function createTransitionPortalCandidate(options: {
 			candidate.portalId === options.endpoints.indoor.envCellPortalId,
 	);
 	if (!portal) {
-		return skipped("missing-env-cell-portal");
+		logTransitionApertureOmission(options, "missing-env-cell-portal");
+		return;
 	}
 	if (!portal.isOutsideTransition) {
-		return skipped("not-outside-transition-portal");
+		logTransitionApertureOmission(options, "not-outside-transition-portal");
+		return;
 	}
 
 	const aperture = envCell.portalApertures.find(
 		(candidate) => candidate.portalId === portal.portalId,
 	);
 	if (!aperture) {
-		return skipped("missing-portal-aperture");
+		logTransitionApertureOmission(options, "missing-portal-aperture");
+		return;
 	}
 
 	const placementMatrix = buildLandblockRenderLocalPlacementMatrix(
@@ -2511,30 +2549,38 @@ function createTransitionPortalCandidate(options: {
 	const apertureVertices = aperture.points.map((point) =>
 		transformRenderLocalPoint(point, placementMatrix),
 	);
-	const apertureIndices = triangulatePortalApertureFan(apertureVertices);
+	const apertureIndices = triangulatePortalApertureFan(
+		apertureVertices,
+		decodeTransitionPortalVisibleSide(portal.flags),
+	);
 	if (apertureIndices.length === 0) {
-		return skipped("malformed-portal-aperture");
+		logTransitionApertureOmission(options, "malformed-portal-aperture");
+		return;
 	}
 
-	const insideVisibleSide = decodeTransitionPortalVisibleSide(portal.flags);
-	return {
-		apertureIndices,
-		aperturePlane: transformPortalAperturePlane(
-			aperture.plane,
-			placementMatrix,
-		),
-		apertureVertices,
-		endpoints: options.endpoints,
-		id,
-		insideVisibleSide,
-		kind: "renderable",
-		landblockId: options.landblockId,
-		outsideVisibleSide: oppositeTransitionPortalVisibleSide(insideVisibleSide),
-		sourceLinkId: options.link.linkId,
-	};
+	const firstIndex = options.indices.length;
+	const firstVertex = options.vertices.length;
+	options.vertices.push(...apertureVertices);
+	options.indices.push(...apertureIndices.map((index) => firstVertex + index));
+	options.ranges.push({
+		buildingInstanceId: options.endpoints.outdoor.buildingInstanceId,
+		buildingPortalId: options.endpoints.outdoor.buildingPortalId,
+		envCellId: options.endpoints.indoor.envCellId,
+		firstIndex,
+		indexCount: apertureIndices.length,
+		portalId: createTransitionAperturePortalId({
+			endpoints: options.endpoints,
+			landblockId: options.landblockId,
+		}),
+	});
+	options.planes.push(transformPortalAperturePlane(aperture.plane, placementMatrix));
 }
 
-function createTransitionPortalCandidateId(options: {
+function createTransitionApertureBatchId(landblockId: number): string {
+	return `transition-apertures:${landblockId >>> 0}`;
+}
+
+function createTransitionAperturePortalId(options: {
 	readonly endpoints: TransitionPortalEndpointPair;
 	readonly landblockId: number;
 }): string {
@@ -2549,7 +2595,8 @@ function createTransitionPortalCandidateId(options: {
 }
 
 function triangulatePortalApertureFan(
-	vertices: readonly StaticSceneVec3[],
+	vertices: readonly Vec3[],
+	insideVisibleSide: TransitionPortalVisibleSide,
 ): readonly number[] {
 	if (vertices.length < 3) {
 		return [];
@@ -2557,7 +2604,11 @@ function triangulatePortalApertureFan(
 
 	const indices: number[] = [];
 	for (let index = 1; index < vertices.length - 1; index += 1) {
-		indices.push(0, index, index + 1);
+		if (insideVisibleSide === "positive") {
+			indices.push(0, index, index + 1);
+		} else {
+			indices.push(0, index + 1, index);
+		}
 	}
 	return indices;
 }
@@ -2568,19 +2619,32 @@ function decodeTransitionPortalVisibleSide(
 	return (flags & 0x2) === 0 ? "negative" : "positive";
 }
 
-function oppositeTransitionPortalVisibleSide(
-	side: TransitionPortalVisibleSide,
-): TransitionPortalVisibleSide {
-	return side === "positive" ? "negative" : "positive";
+function logTransitionApertureOmission(
+	options: {
+		readonly endpoints: TransitionPortalEndpointPair;
+		readonly landblockId: number;
+		readonly link: LandblockPortalLinkFacts;
+	},
+	reason: TransitionApertureOmissionReason,
+): void {
+	console.error("Failed to derive transition aperture batch geometry.", {
+		buildingInstanceId: options.endpoints.outdoor.buildingInstanceId,
+		buildingPortalId: options.endpoints.outdoor.buildingPortalId,
+		envCellId: options.endpoints.indoor.envCellId,
+		envCellPortalId: options.endpoints.indoor.envCellPortalId,
+		landblockId: options.landblockId,
+		linkId: options.link.linkId,
+		reason,
+	});
 }
 
 function transformPortalAperturePlane(
 	plane: {
 		readonly constant: number;
-		readonly normal: StaticSceneVec3;
+		readonly normal: Vec3;
 	} | null,
 	matrix: Float32Array,
-): StaticScenePlane | null {
+): Plane | null {
 	if (!plane) {
 		return null;
 	}
@@ -2621,7 +2685,7 @@ function transformPortalAperturePlane(
 		z: transformedNormal.z / transformedNormalLength,
 	};
 	return {
-		constant: dotStaticSceneVec3(normalizedNormal, pointOnPlane),
+		constant: dotVec3(normalizedNormal, pointOnPlane),
 		normal: normalizedNormal,
 	};
 }
@@ -2644,9 +2708,9 @@ function buildLandblockRenderLocalPlacementMatrix(
 }
 
 function transformRenderLocalPoint(
-	point: StaticSceneVec3,
+	point: Vec3,
 	matrix: Float32Array,
-): StaticSceneVec3 {
+): Vec3 {
 	return {
 		x:
 			matrix[0] * point.x +
@@ -2776,18 +2840,11 @@ function buildQuaternionRotationMatrix(quaternion: {
 	]);
 }
 
-function dotStaticSceneVec3(
-	left: StaticSceneVec3,
-	right: StaticSceneVec3,
+function dotVec3(
+	left: Vec3,
+	right: Vec3,
 ): number {
 	return left.x * right.x + left.y * right.y + left.z * right.z;
-}
-
-function compareTransitionPortalCandidates(
-	left: TransitionPortalCandidate,
-	right: TransitionPortalCandidate,
-): number {
-	return left.id.localeCompare(right.id);
 }
 
 function createEnvCellStaticObjectBoundsKey(input: {
@@ -3376,7 +3433,7 @@ function intersectRayBounds(
 	return Math.max(tMin, 0);
 }
 
-function containsPoint(bounds: StaticBounds, point: StaticSceneVec3): boolean {
+function containsPoint(bounds: StaticBounds, point: Vec3): boolean {
 	return (
 		point.x >= bounds.min.x &&
 		point.x <= bounds.max.x &&
@@ -3389,7 +3446,7 @@ function containsPoint(bounds: StaticBounds, point: StaticSceneVec3): boolean {
 
 function boundsCenterDistanceSquared(
 	bounds: StaticBounds,
-	point: StaticSceneVec3,
+	point: Vec3,
 ): number {
 	const center = {
 		x: (bounds.min.x + bounds.max.x) * 0.5,
@@ -3402,7 +3459,7 @@ function boundsCenterDistanceSquared(
 	return dx * dx + dy * dy + dz * dz;
 }
 
-function pointOnRay(ray: StaticSceneRay, distance: number): StaticSceneVec3 {
+function pointOnRay(ray: StaticSceneRay, distance: number): Vec3 {
 	return {
 		x: ray.origin.x + ray.direction.x * distance,
 		y: ray.origin.y + ray.direction.y * distance,
@@ -3448,7 +3505,7 @@ function translateBounds(
 	};
 }
 
-function normalizeVec3(vector: StaticSceneVec3): StaticSceneVec3 {
+function normalizeVec3(vector: Vec3): Vec3 {
 	const length = Math.hypot(vector.x, vector.y, vector.z);
 	if (length === 0) {
 		return { x: 0, y: 0, z: -1 };

@@ -57,7 +57,7 @@ import {
 	type StaticSceneCameraResidency,
 	type StaticSceneQuerySnapshot,
 	type StaticSceneSelectionKey,
-	type StaticSceneVec3,
+	type Vec3,
 	type TerrainQuadScenePickDetails,
 } from "./static-scene-query";
 
@@ -312,7 +312,7 @@ export interface ClientRuntime {
 	updateSceneInterest(interest: RuntimeSceneInterest): void;
 	queryCameraResidencyAtPoint(options: {
 		readonly outdoorAnchorLandblockId: number;
-		readonly point: StaticSceneVec3;
+		readonly point: Vec3;
 	}): RuntimeCameraResidency;
 	setCurrentCameraResidency(residency: RuntimeCameraResidency): void;
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null;
@@ -487,7 +487,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 	queryCameraResidencyAtPoint(options: {
 		readonly outdoorAnchorLandblockId: number;
-		readonly point: StaticSceneVec3;
+		readonly point: Vec3;
 	}): RuntimeCameraResidency {
 		this.#assertActive();
 		return this.#staticSceneQuery.queryCameraResidencyAtPoint(options);

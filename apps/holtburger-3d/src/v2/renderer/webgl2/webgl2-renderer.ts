@@ -669,7 +669,6 @@ class Webgl2Renderer implements Renderer {
 	#frameState = defaultFrameState;
 	#staticRenderAnchorLandblockId: number | null = null;
 	#renderPassPlan: RenderPassPlan = { kind: "single-surface-resident" };
-	#sceneDomainTargetAllocationFailures = 0;
 	#lastExteriorSceneDomainDrawCalls = 0;
 	#lastInteriorSceneDomainDrawCalls = 0;
 	#debugOverlayPrimitiveCount = 0;
@@ -1530,7 +1529,7 @@ class Webgl2Renderer implements Renderer {
 			return targets;
 		} catch (error) {
 			this.#sceneDomainTargets = null;
-			this.#sceneDomainTargetAllocationFailures += 1;
+			console.error("Failed to allocate WebGL2 scene-domain targets.", error);
 			throw error;
 		}
 	}
@@ -1538,7 +1537,6 @@ class Webgl2Renderer implements Renderer {
 	#createSceneDomainTargetSnapshot(): SceneDomainTargetSnapshot {
 		return {
 			active: this.#renderPassPlan.kind === "portal-scene-domains",
-			allocationFailures: this.#sceneDomainTargetAllocationFailures,
 			colorFormat: "rgb8",
 			depthFormat: "depth-component24",
 			exteriorDrawCalls: this.#lastExteriorSceneDomainDrawCalls,

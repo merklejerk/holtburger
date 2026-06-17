@@ -494,7 +494,6 @@ function rendererSnapshotPlaceholder() {
 		renderedTriangles: 0,
 		sceneDomainTargets: {
 			active: false,
-			allocationFailures: 0,
 			colorFormat: "rgb8" as const,
 			depthFormat: "depth-component24" as const,
 			exteriorDrawCalls: 0,

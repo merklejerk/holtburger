@@ -1048,7 +1048,6 @@ class FakeRenderer implements Renderer {
 		renderedTriangles: 0,
 		sceneDomainTargets: {
 			active: false,
-			allocationFailures: 0,
 			colorFormat: "rgb8",
 			depthFormat: "depth-component24",
 			exteriorDrawCalls: 0,

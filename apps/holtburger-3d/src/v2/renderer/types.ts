@@ -189,7 +189,6 @@ export interface SceneDomainTargetSnapshot {
 	readonly depthFormat: "depth-component24";
 	readonly exteriorDrawCalls: number;
 	readonly interiorDrawCalls: number;
-	readonly allocationFailures: number;
 }
 
 export interface Renderer {

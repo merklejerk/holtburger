@@ -1756,7 +1756,6 @@ function renderPassPlanEquals(
 function createEmptySceneDomainTargetSnapshot(): SceneDomainTargetSnapshot {
 	return {
 		active: false,
-		allocationFailures: 0,
 		colorFormat: "rgb8",
 		depthFormat: "depth-component24",
 		exteriorDrawCalls: 0,

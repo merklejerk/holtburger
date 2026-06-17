@@ -717,6 +717,116 @@ describe("V2 static scene query", () => {
 		).toBeNull();
 	});
 
+	it("exposes committed env-cell landblock BVH bounds for debug overlays", () => {
+		const query = new StaticSceneQuery();
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				landblockBounds: {
+					max: { x: 8, y: 4, z: 2 },
+					min: { x: 2, y: -1, z: -6 },
+				},
+			}),
+		);
+
+		expect(query.queryEnvCellAabbDebugBounds()).toEqual([
+			{
+				bounds: {
+					max: { x: 8, y: 4, z: 2 },
+					min: { x: 2, y: -1, z: -6 },
+				},
+				envCellId: 0xda550100,
+				landblockId: 0xda55ffff,
+				memberId: "cell-0",
+				source: "env-cell-root",
+			},
+		]);
+		expect(
+			query.queryEnvCellAabbDebugBounds({ landblockId: 0xdb55ffff }),
+		).toEqual([]);
+	});
+
+	it("translates env-cell debug bounds into the outdoor anchor frame", () => {
+		const query = new StaticSceneQuery();
+		query.setOutdoorAnchorLandblockId(0xda55ffff);
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				envCellId: 0xdb550100,
+				landblockBounds: {
+					max: { x: 8, y: 4, z: 2 },
+					min: { x: 2, y: -1, z: -6 },
+				},
+				landblockId: 0xdb55ffff,
+			}),
+		);
+
+		expect(
+			query.queryEnvCellAabbDebugBounds({ landblockId: 0xdb55ffff }),
+		).toEqual([
+			expect.objectContaining({
+				bounds: {
+					max: { x: 200, y: 4, z: 2 },
+					min: { x: 194, y: -1, z: -6 },
+				},
+				envCellId: 0xdb550100,
+				landblockId: 0xdb55ffff,
+			}),
+		]);
+	});
+
+	it("exposes all committed env-cell debug bounds by default", () => {
+		const query = new StaticSceneQuery();
+		query.setOutdoorAnchorLandblockId(0xda55ffff);
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				envCellId: 0xda550100,
+				landblockBounds: {
+					max: { x: 8, y: 4, z: 2 },
+					min: { x: 2, y: -1, z: -6 },
+				},
+				landblockId: 0xda55ffff,
+			}),
+		);
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				envCellId: 0xdb550100,
+				landblockBounds: {
+					max: { x: 18, y: 6, z: 12 },
+					min: { x: 12, y: 1, z: 4 },
+				},
+				landblockId: 0xdb55ffff,
+			}),
+		);
+
+		expect(
+			query.queryEnvCellAabbDebugBounds().map((debugBounds) => ({
+				bounds: debugBounds.bounds,
+				envCellId: debugBounds.envCellId,
+				landblockId: debugBounds.landblockId,
+			})),
+		).toEqual([
+			{
+				bounds: {
+					max: { x: 8, y: 4, z: 2 },
+					min: { x: 2, y: -1, z: -6 },
+				},
+				envCellId: 0xda550100,
+				landblockId: 0xda55ffff,
+			},
+			{
+				bounds: {
+					max: { x: 210, y: 6, z: 12 },
+					min: { x: 204, y: 1, z: 4 },
+				},
+				envCellId: 0xdb550100,
+				landblockId: 0xdb55ffff,
+			},
+		]);
+	});
+
 	it("does not count broad env-cell BVH node hits as residency without item containment", () => {
 		const query = new StaticSceneQuery();
 		commitLandblockEnvCells(
@@ -1361,13 +1471,18 @@ function createOutdoorStaticObject(input: {
 function createLandblockEnvCellsPayload(
 	options: {
 		readonly envCellPlacement?: ReturnType<typeof createPlacement>;
+		readonly envCellId?: number;
 		readonly includeLandblockBvh?: boolean;
 		readonly landblockBounds?: LandblockEnvCellsStaticScopePayload["residencySpatial"]["landblockEnvCellBvh"]["items"][number]["bounds"];
+		readonly landblockId?: number;
 		readonly landblockNodeBounds?: LandblockEnvCellsStaticScopePayload["residencySpatial"]["landblockEnvCellBvh"]["nodes"][number]["bounds"];
 		readonly staticInstanceBounds?: LandblockEnvCellsStaticScopePayload["envCells"][number]["staticObjectSeeds"][number]["instanceBounds"];
 	} = {},
 ): LandblockEnvCellsStaticScopePayload {
 	const includeLandblockBvh = options.includeLandblockBvh ?? true;
+	const landblockId = options.landblockId ?? 0xda55ffff;
+	const envCellId =
+		options.envCellId ?? (((landblockId & 0xffff0000) | 0x0100) >>> 0);
 	const envCellPlacement = options.envCellPlacement ?? createPlacement();
 	const landblockBounds = options.landblockBounds ?? {
 		max: { x: 1, y: 1, z: -4 },
@@ -1393,10 +1508,10 @@ function createLandblockEnvCellsPayload(
 					kind: "environment",
 				},
 				identity: {
-					envCellId: 0xda550100,
+					envCellId,
 					kind: "env-cell-source",
 				},
-				landblockId: 0xda55ffff,
+				landblockId,
 				localPlacement: envCellPlacement,
 				localSpatial: {
 					localBvh: {
@@ -1446,7 +1561,7 @@ function createLandblockEnvCellsPayload(
 						identity: {
 							instanceId: "env-static-0",
 							kind: "static-object-instance",
-							landblockId: 0xda55ffff,
+							landblockId,
 							objectKind: "explicit-object",
 						},
 						instanceBounds: options.staticInstanceBounds ?? {
@@ -1474,7 +1589,7 @@ function createLandblockEnvCellsPayload(
 		kind: "landblock-env-cells",
 		landblock: {
 			kind: "landblock-source",
-			landblockId: 0xda55ffff,
+			landblockId,
 			source: "env-cells",
 		},
 		missingRefs: [],
@@ -1492,7 +1607,7 @@ function createLandblockEnvCellsPayload(
 							{
 								bounds: landblockBounds,
 								identity: {
-									envCellId: 0xda550100,
+									envCellId,
 									kind: "env-cell-source",
 								},
 								memberId: "cell-0",

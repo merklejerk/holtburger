@@ -93,12 +93,18 @@ export interface RuntimeSnapshot {
 	readonly renderPolicy: RuntimeRenderPolicySnapshot;
 	readonly sceneInterest: RuntimeSceneInterest;
 	readonly currentCameraResidency: RuntimeCameraResidency;
+	readonly debugOverlays: RuntimeDebugOverlaySnapshot;
 	readonly assets: AssetServiceSnapshot;
 	readonly host: RuntimeHostSnapshot;
 	readonly renderer: RendererSnapshot;
 	readonly static: StaticCoordinatorSnapshot;
 	readonly staticSceneQuery: StaticSceneQuerySnapshot;
 	readonly staticMaterialization: StaticMaterializationSnapshot;
+}
+
+interface RuntimeDebugOverlaySnapshot {
+	readonly envCellAabbsVisible: boolean;
+	readonly envCellAabbCount: number;
 }
 
 export interface StaticSelectionDiagnosticsReport {
@@ -310,6 +316,7 @@ export interface ClientRuntime {
 		options?: { readonly pickDistance?: number | null },
 	): StaticSelectionDiagnosticsReport;
 	setStaticDebugSelection(selectionKey: StaticSceneSelectionKey | null): void;
+	setEnvCellAabbDebugOverlayVisible(visible: boolean): void;
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void;
 	updateFrameState(state: FrameState): void;
 	createDiagnosticsReport(): RuntimeDiagnosticsReport;
@@ -386,6 +393,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#recentTerrainTextureFallbacks: TerrainTextureFallbackDiagnostics[] = [];
 	readonly #reportedStaticResolverFailures = new Set<string>();
 	#staticDebugSelectionKey: StaticSceneSelectionKey | null = null;
+	#envCellAabbDebugOverlayVisible = false;
 	#disposed = false;
 
 	constructor(
@@ -487,6 +495,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 
 		this.#currentCameraResidency = normalized;
+		this.#refreshStaticDebugOverlay();
 		this.#emit();
 	}
 
@@ -526,6 +535,16 @@ class ClientRuntimeImpl implements ClientRuntime {
 	setStaticDebugSelection(selectionKey: StaticSceneSelectionKey | null): void {
 		this.#assertActive();
 		this.#staticDebugSelectionKey = selectionKey;
+		this.#refreshStaticDebugOverlay();
+		this.#emit();
+	}
+
+	setEnvCellAabbDebugOverlayVisible(visible: boolean): void {
+		this.#assertActive();
+		if (this.#envCellAabbDebugOverlayVisible === visible) {
+			return;
+		}
+		this.#envCellAabbDebugOverlayVisible = visible;
 		this.#refreshStaticDebugOverlay();
 		this.#emit();
 	}
@@ -640,6 +659,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 		return {
 			assets: this.#assetService.createSnapshot(),
 			currentCameraResidency: this.#currentCameraResidency,
+			debugOverlays: {
+				envCellAabbCount: this.#envCellAabbDebugOverlayVisible
+					? this.#staticSceneQuery.queryEnvCellAabbDebugBounds().length
+					: 0,
+				envCellAabbsVisible: this.#envCellAabbDebugOverlayVisible,
+			},
 			host: this.#host.createSnapshot(),
 			renderPolicy: {
 				textureFilteringMode: this.#textureManager.filteringMode,
@@ -857,8 +882,21 @@ class ClientRuntimeImpl implements ClientRuntime {
 	}
 
 	#refreshStaticDebugOverlay(): void {
+		const primitives: DebugOverlayPrimitive[] = [];
+		if (this.#envCellAabbDebugOverlayVisible) {
+			for (const debugBounds of this.#staticSceneQuery.queryEnvCellAabbDebugBounds()) {
+				primitives.push(
+					createEnvCellAabbDebugOverlayPrimitive(debugBounds.bounds, {
+						envCellId: debugBounds.envCellId,
+						landblockId: debugBounds.landblockId,
+						memberId: debugBounds.memberId,
+					}),
+				);
+			}
+		}
+
 		if (!this.#staticDebugSelectionKey) {
-			this.#renderer.setDebugOverlayPrimitives([]);
+			this.#renderer.setDebugOverlayPrimitives(primitives);
 			return;
 		}
 
@@ -874,15 +912,16 @@ class ClientRuntimeImpl implements ClientRuntime {
 				reason: "missing-query-bounds",
 				selectionKey,
 			});
-			this.#renderer.setDebugOverlayPrimitives([]);
+			this.#renderer.setDebugOverlayPrimitives(primitives);
 			return;
 		}
 
-		this.#renderer.setDebugOverlayPrimitives([
+		primitives.push(
 			createStaticDebugBoundsOverlayPrimitive(debugBounds.bounds, {
 				id: describeStaticSceneSelectionKey(debugBounds.selectionKey),
 			}),
-		]);
+		);
+		this.#renderer.setDebugOverlayPrimitives(primitives);
 	}
 
 	#queryStaticSelectionDiagnosticsDetails(
@@ -1325,6 +1364,24 @@ function createStaticDebugBoundsOverlayPrimitive(
 	return {
 		color: [1, 0.85, 0.1, 1],
 		id: options.id,
+		kind: "aabb",
+		max: [visibleBounds.max.x, visibleBounds.max.y, visibleBounds.max.z],
+		min: [visibleBounds.min.x, visibleBounds.min.y, visibleBounds.min.z],
+	};
+}
+
+function createEnvCellAabbDebugOverlayPrimitive(
+	bounds: StaticBounds,
+	options: {
+		readonly envCellId: number;
+		readonly landblockId: number;
+		readonly memberId: string;
+	},
+): DebugOverlayPrimitive {
+	const visibleBounds = createMinimumDebugOverlayBounds(bounds);
+	return {
+		color: [0.15, 0.85, 1, 0.55],
+		id: `env-cell-aabb:${formatHex32(options.landblockId)}:${formatHex32(options.envCellId)}:${options.memberId}`,
 		kind: "aabb",
 		max: [visibleBounds.max.x, visibleBounds.max.y, visibleBounds.max.z],
 		min: [visibleBounds.min.x, visibleBounds.min.y, visibleBounds.min.z],

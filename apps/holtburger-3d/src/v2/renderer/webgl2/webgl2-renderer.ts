@@ -1,6 +1,7 @@
 import type {
 	DebugOverlayPrimitive,
 	FrameState,
+	PortalPassPlan,
 	Renderer,
 	RendererSnapshot,
 	RendererSnapshotListener,
@@ -660,6 +661,7 @@ class Webgl2Renderer implements Renderer {
 	#frameHandlerMs = 0;
 	#frameState = defaultFrameState;
 	#staticRenderAnchorLandblockId: number | null = null;
+	#portalPassPlan: PortalPassPlan | null = null;
 	#debugOverlayPrimitiveCount = 0;
 	#debugOverlayVertexCount = 0;
 	#error: string | null = null;
@@ -742,6 +744,11 @@ class Webgl2Renderer implements Renderer {
 
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void {
 		this.#staticRenderAnchorLandblockId = anchorLandblockId;
+		this.#emit();
+	}
+
+	setPortalPassPlan(plan: PortalPassPlan | null): void {
+		this.#portalPassPlan = plan;
 		this.#emit();
 	}
 
@@ -1280,6 +1287,7 @@ class Webgl2Renderer implements Renderer {
 			frameCount: this.#frameCount,
 			frameHandlerMs: this.#frameHandlerMs,
 			isRunning: !this.#disposed,
+			portalPassPlan: this.#portalPassPlan,
 			renderedTriangles: sumRenderedTriangles([
 				...this.#terrainResources.values(),
 				...this.#staticObjectResources.values(),

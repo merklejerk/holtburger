@@ -64,6 +64,7 @@ function createRendererSnapshot(
 		frameCount: 0,
 		frameHandlerMs: 1,
 		isRunning: true,
+		portalPassPlan: null,
 		renderedTriangles: 0,
 		staticDrawUnits: 0,
 		terrainDrawUnits: 0,

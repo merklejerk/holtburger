@@ -1,7 +1,11 @@
 import { HostBackedAssetService } from "../assets/asset-service";
 import type { AssetService, AssetServiceSnapshot } from "../assets/contracts";
 import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
-import type { Renderer, RendererSnapshot } from "../renderer/types";
+import type {
+	PortalPassPlan,
+	Renderer,
+	RendererSnapshot,
+} from "../renderer/types";
 import type { DebugOverlayPrimitive, FrameState } from "../renderer/types";
 import { formatHex32, normalizeOutdoorLandblockId } from "../../lib/landblocks";
 import { TextureManager } from "../textures/texture-manager";
@@ -93,6 +97,7 @@ export interface RuntimeSnapshot {
 	readonly renderPolicy: RuntimeRenderPolicySnapshot;
 	readonly sceneInterest: RuntimeSceneInterest;
 	readonly currentCameraResidency: RuntimeCameraResidency;
+	readonly portalPassPlan: PortalPassPlan | null;
 	readonly debugOverlays: RuntimeDebugOverlaySnapshot;
 	readonly assets: AssetServiceSnapshot;
 	readonly host: RuntimeHostSnapshot;
@@ -431,6 +436,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			frameCount: 0,
 			frameHandlerMs: 0,
 			isRunning: true,
+			portalPassPlan: null,
 			renderedTriangles: 0,
 			staticDrawUnits: 0,
 			terrainDrawUnits: 0,
@@ -495,8 +501,11 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 
 		this.#currentCameraResidency = normalized;
+		const portalPassPlanChanged = this.#updatePortalPassPlan();
 		this.#refreshStaticDebugOverlay();
-		this.#emit();
+		if (!portalPassPlanChanged) {
+			this.#emit();
+		}
 	}
 
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null {
@@ -588,6 +597,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					snapshot.staticMaterialization.committedRevisions,
 				currentCameraResidency: snapshot.currentCameraResidency,
 				failedStaticMaterializations: snapshot.staticMaterialization.failed,
+				portalPassPlan: snapshot.portalPassPlan,
 				sceneInterest: createSceneInterestSummary(snapshot.sceneInterest),
 				materializedStaticDrawUnits:
 					snapshot.staticMaterialization.materializedDrawUnits,
@@ -642,6 +652,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#renderAnchorLandblockId = nextAnchorLandblockId;
 		this.#staticSceneQuery.setOutdoorAnchorLandblockId(nextAnchorLandblockId);
 		this.#renderer.setStaticRenderAnchorLandblockId(nextAnchorLandblockId);
+		this.#updatePortalPassPlan();
 		this.#refreshStaticDebugOverlay();
 	}
 
@@ -655,6 +666,19 @@ class ClientRuntimeImpl implements ClientRuntime {
 		return reconciliation;
 	}
 
+	#updatePortalPassPlan(): boolean {
+		const plan = derivePortalPassPlan(
+			this.#currentCameraResidency,
+			this.#renderAnchorLandblockId,
+		);
+		if (portalPassPlanEquals(this.#lastRendererSnapshot.portalPassPlan, plan)) {
+			return false;
+		}
+
+		this.#renderer.setPortalPassPlan(plan);
+		return true;
+	}
+
 	#createSnapshot(): RuntimeSnapshot {
 		return {
 			assets: this.#assetService.createSnapshot(),
@@ -666,6 +690,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				envCellAabbsVisible: this.#envCellAabbDebugOverlayVisible,
 			},
 			host: this.#host.createSnapshot(),
+			portalPassPlan: this.#lastRendererSnapshot.portalPassPlan,
 			renderPolicy: {
 				textureFilteringMode: this.#textureManager.filteringMode,
 			},
@@ -1534,6 +1559,69 @@ function normalizeCameraResidency(
 		kind: "env-cell",
 		landblockId: normalizeOutdoorLandblockId(residency.landblockId),
 	};
+}
+
+function derivePortalPassPlan(
+	residency: RuntimeCameraResidency,
+	fallbackExteriorLandblockId: number | null,
+): PortalPassPlan | null {
+	if (residency.kind === "env-cell") {
+		return {
+			baseScene: {
+				envCellId: residency.envCellId,
+				kind: "interior",
+				landblockId: residency.landblockId,
+			},
+			transitionDepthPolicy: { maxDepth: 0 },
+		};
+	}
+
+	const exteriorLandblockId =
+		residency.kind === "outdoor-landblock"
+			? residency.landblockId
+			: (residency.landblockId ?? fallbackExteriorLandblockId);
+	if (exteriorLandblockId === null) {
+		return null;
+	}
+
+	return {
+		baseScene: {
+			kind: "exterior",
+			landblockId: exteriorLandblockId,
+		},
+		transitionDepthPolicy: { maxDepth: 0 },
+	};
+}
+
+function portalPassPlanEquals(
+	left: PortalPassPlan | null,
+	right: PortalPassPlan | null,
+): boolean {
+	if (left === null || right === null) {
+		return left === right;
+	}
+
+	if (
+		left.transitionDepthPolicy.maxDepth !==
+		right.transitionDepthPolicy.maxDepth
+	) {
+		return false;
+	}
+
+	const leftBase = left.baseScene;
+	const rightBase = right.baseScene;
+	if (
+		leftBase.kind !== rightBase.kind ||
+		leftBase.landblockId !== rightBase.landblockId
+	) {
+		return false;
+	}
+
+	if (leftBase.kind !== "interior" || rightBase.kind !== "interior") {
+		return true;
+	}
+
+	return leftBase.envCellId === rightBase.envCellId;
 }
 
 function cameraResidencyEquals(

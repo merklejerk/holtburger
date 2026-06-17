@@ -133,6 +133,7 @@ export interface RendererSnapshot {
 	readonly isRunning: boolean;
 	readonly backend: "webgl2";
 	readonly error: string | null;
+	readonly portalPassPlan: PortalPassPlan | null;
 	readonly staticDrawUnits: number;
 	readonly terrainDrawUnits: number;
 	readonly renderedTriangles: number;
@@ -141,12 +142,33 @@ export interface RendererSnapshot {
 
 export type RendererSnapshotListener = (snapshot: RendererSnapshot) => void;
 
+export type PortalBaseScene =
+	| {
+			readonly kind: "exterior";
+			readonly landblockId: number;
+	  }
+	| {
+			readonly kind: "interior";
+			readonly landblockId: number;
+			readonly envCellId: number;
+	  };
+
+export interface PortalTransitionDepthPolicy {
+	readonly maxDepth: number;
+}
+
+export interface PortalPassPlan {
+	readonly baseScene: PortalBaseScene;
+	readonly transitionDepthPolicy: PortalTransitionDepthPolicy;
+}
+
 export interface Renderer {
 	applyStaticDelta(delta: StaticResidencyDelta): void;
 	applyDynamicDelta(delta: DynamicResidencyDelta): void;
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void;
 	applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void;
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void;
+	setPortalPassPlan(plan: PortalPassPlan | null): void;
 	setDebugOverlayPrimitives(primitives: readonly DebugOverlayPrimitive[]): void;
 	updateFrameState(state: FrameState): void;
 	subscribe(listener: RendererSnapshotListener): () => void;

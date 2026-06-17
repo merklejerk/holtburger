@@ -1232,7 +1232,8 @@ type PortalBaseScene =
 
 type PortalPassPlan = {
 	baseScene: PortalBaseScene;
-};
+	transitionDepthPolicy: { maxDepth: number };
+} | null;
 ```
 
 ### Phase 13B1a: Committed Env-Cell Scene Record Store
@@ -1642,7 +1643,7 @@ Verification:
 
 ### Phase 13B1d: Residency-Derived Portal Pass Plan
 
-Status: planned.
+Status: complete on 2026-06-17.
 
 Purpose: map explicit current camera residency to render-policy inputs for the base scene target and transition-depth policy. This is a contract phase only; it does not implement transition portal candidate selection, mask resources, render targets, or compositing.
 
@@ -1672,6 +1673,8 @@ type PortalPassPlan = {
 };
 ```
 
+- Runtime/renderer state may carry `PortalPassPlan | null` before any meaningful exterior/interior base scene is known. Do not encode that idle/no-base state inside `PortalBaseScene`; once a plan exists, the base scene remains a strict discriminated exterior/interior target.
+
 Deliverables:
 
 - Runtime/browser pass-planning contract that maps current residency to a discriminated `baseScene` target and transition max-depth policy for future portal compositing.
@@ -1683,6 +1686,31 @@ Acceptance criteria:
 - Renderer pass planning receives explicit residency-derived discriminated `baseScene` and transition-depth-policy inputs.
 - Renderer code does not derive authoritative camera residency from resident WebGL resources for portal pass planning.
 - Full indoor/outdoor transition portal candidate derivation, mask resources, scene-domain targets, work planning, and compositing remain deferred to 13B1e-13B1h.
+
+Implementation notes:
+
+- Added `PortalBaseScene`, `PortalTransitionDepthPolicy`, and `PortalPassPlan` to the renderer contract.
+- Added `Renderer.setPortalPassPlan(...)` and `RendererSnapshot.portalPassPlan`; the WebGL2 renderer stores and reports the plan but does not branch rendering or attempt portal compositing yet.
+- `ClientRuntimeImpl` derives the pass plan from `currentCameraResidency` plus the current render anchor:
+  - `env-cell` maps to an `interior` base scene with the env-cell id;
+  - `outdoor-landblock` maps to an `exterior` base scene;
+  - `unknown` with a landblock id, or with a current render anchor, maps to a conservative `exterior` base scene;
+  - `unknown` with no landblock and no render anchor maps to `portalPassPlan: null`.
+- Transition depth policy is currently `{ maxDepth: 0 }` to keep this phase honest: no recursive transition portal compositing is implemented until 13B1g/13B1h.
+- Runtime snapshots and diagnostics now expose `portalPassPlan` alongside `currentCameraResidency`.
+
+Spicy / failed to close:
+
+- The idle `unknown/null` residency edge cannot produce a concrete exterior `PortalBaseScene` without inventing a sentinel landblock. The code now exposes `portalPassPlan: null` for that no-base-scene state. Future portal work should treat null as "render normal resident scene only / no portal orchestration" instead of widening `PortalBaseScene`.
+- WebGL2 stores the pass plan but does not consume it in the render loop yet. Candidate derivation, aperture resources, scene-domain targets, work planning, and compositing remain intentionally deferred.
+- `maxDepth: 0` is a placeholder policy value for the contract phase. 13B1h0/13B1h should replace it with the actual configured transition recursion budget when compositing lands.
+
+Verification:
+
+- `npm run test:ts -- client-runtime.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run test:ts`
 
 ### Phase 13B1e: Transition Portal Candidate Derivation From V2 Records
 
@@ -1803,6 +1831,7 @@ Purpose: render exterior and interior scene domains into separate targets under 
 Steering:
 
 - Scene-domain routing should use explicit pass-plan metadata, not static-object material domain inference.
+- A null 13B1d `PortalPassPlan` means no concrete base scene is known for that frame; render the normal resident/default path and do not attempt scene-domain portal orchestration.
 - Interior resources do not need to be partitioned by env-cell before this phase unless visibility/render-target correctness proves it is required.
 - Allocate scene-domain targets with sampleable color and sampleable depth attachments. The direct composite path in 13B1h samples previous composite depth and opposite-scene depth; depth renderbuffers are not sufficient for the primary path.
 - Fail loudly or activate an explicitly documented fallback if WebGL2 depth texture/framebuffer support is unavailable.
@@ -1831,6 +1860,7 @@ Purpose: turn the pass plan, current camera state, and transition aperture resou
 Steering:
 
 - Keep this phase pure or mostly pure. It should be testable without a WebGL context.
+- Treat null `PortalPassPlan` as empty composite work. Do not add a third `PortalBaseScene` variant to represent idle/no-base state.
 - Start without explicit per-depth frontier filtering. The planner should alternate directions from the base scene, reject non-transition candidates, reject obviously wrong-side candidates where candidate metadata allows it, and produce packed-batch draw ranges for each transition depth.
 - Do not let ordinary env-cell-to-env-cell portals enter the planner.
 - Do not try to prove arbitrary recursion visually here. This phase prepares a deterministic work list for 13B1h.

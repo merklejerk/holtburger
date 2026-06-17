@@ -9,6 +9,7 @@ import type {
 	StaticResidencyDelta,
 	TextureDrawUnitBinding,
 	TexturePlacementUpdate,
+	TransitionApertureGeometryBatch,
 } from "../types";
 import {
 	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
@@ -636,6 +637,10 @@ class Webgl2Renderer implements Renderer {
 		string,
 		StructuredInteriorGeometryResource
 	>();
+	readonly #transitionApertureResources = new Map<
+		string,
+		TransitionApertureGeometryResource
+	>();
 	readonly #textures = new Map<string, WebGLTexture>();
 	readonly #textureBindings = new Map<
 		string,
@@ -686,6 +691,15 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	applyStaticDelta(delta: StaticResidencyDelta): void {
+		for (const apertureBatchId of delta.removedTransitionApertureBatchIds) {
+			const resource = this.#transitionApertureResources.get(apertureBatchId);
+			if (!resource) {
+				continue;
+			}
+			resource.dispose();
+			this.#transitionApertureResources.delete(apertureBatchId);
+		}
+
 		for (const drawUnitId of delta.removedDrawUnitIds) {
 			const terrainResource = this.#terrainResources.get(drawUnitId);
 			if (terrainResource) {
@@ -732,7 +746,21 @@ class Webgl2Renderer implements Renderer {
 				);
 			}
 		}
-		if (delta.addedDrawUnits.length > 0) {
+
+		for (const batch of delta.addedTransitionApertureBatches) {
+			this.#transitionApertureResources
+				.get(batch.apertureBatchId)
+				?.dispose();
+			this.#transitionApertureResources.set(
+				batch.apertureBatchId,
+				createTransitionApertureGeometryResource(this.#gl, batch),
+			);
+		}
+		if (
+			delta.addedDrawUnits.length > 0 ||
+			delta.addedTransitionApertureBatches.length > 0 ||
+			delta.removedTransitionApertureBatchIds.length > 0
+		) {
 			this.#stateCache.invalidate();
 		}
 
@@ -863,12 +891,16 @@ class Webgl2Renderer implements Renderer {
 		for (const resource of this.#structuredInteriorResources.values()) {
 			resource.dispose();
 		}
+		for (const resource of this.#transitionApertureResources.values()) {
+			resource.dispose();
+		}
 		for (const texture of this.#textures.values()) {
 			this.#gl.deleteTexture(texture);
 		}
 		this.#terrainResources.clear();
 		this.#staticObjectResources.clear();
 		this.#structuredInteriorResources.clear();
+		this.#transitionApertureResources.clear();
 		this.#textures.clear();
 		this.#textureBindings.clear();
 		this.#warnedLayeredFallbackDrawUnitIds.clear();
@@ -1314,6 +1346,10 @@ class Webgl2Renderer implements Renderer {
 				this.#staticObjectResources.size +
 				this.#structuredInteriorResources.size,
 			terrainDrawUnits: this.#terrainResources.size,
+			transitionApertureBatches: this.#transitionApertureResources.size,
+			transitionApertures: sumTransitionApertureRanges(
+				this.#transitionApertureResources,
+			),
 		};
 	}
 
@@ -1533,6 +1569,19 @@ interface StructuredInteriorGeometryResource {
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
+	dispose(): void;
+}
+
+interface TransitionApertureGeometryResource {
+	readonly vertexArray: WebGLVertexArrayObject;
+	readonly positionBuffer: WebGLBuffer;
+	readonly indexBuffer: WebGLBuffer;
+	readonly apertureBatchId: string;
+	readonly landblockId: number;
+	readonly frontFace: TransitionApertureGeometryBatch["frontFace"];
+	readonly ranges: TransitionApertureGeometryBatch["ranges"];
+	readonly indexCount: number;
+	readonly indexType: GLenum;
 	dispose(): void;
 }
 
@@ -2119,6 +2168,93 @@ function createStructuredInteriorGeometryResource(
 	};
 }
 
+function createTransitionApertureGeometryResource(
+	gl: WebGL2RenderingContext,
+	batch: TransitionApertureGeometryBatch,
+): TransitionApertureGeometryResource {
+	const vertexArray = gl.createVertexArray();
+	const positionBuffer = gl.createBuffer();
+	const indexBuffer = gl.createBuffer();
+	if (!vertexArray || !positionBuffer || !indexBuffer) {
+		if (vertexArray) {
+			gl.deleteVertexArray(vertexArray);
+		}
+		if (positionBuffer) {
+			gl.deleteBuffer(positionBuffer);
+		}
+		if (indexBuffer) {
+			gl.deleteBuffer(indexBuffer);
+		}
+		throw new Error(
+			`Failed to create GPU buffers for transition aperture batch ${batch.apertureBatchId}.`,
+		);
+	}
+
+	gl.bindVertexArray(vertexArray);
+	gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+	gl.bufferData(
+		gl.ARRAY_BUFFER,
+		createTransitionAperturePositionBuffer(batch),
+		gl.STATIC_DRAW,
+	);
+	gl.enableVertexAttribArray(0);
+	gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+
+	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+	gl.bufferData(
+		gl.ELEMENT_ARRAY_BUFFER,
+		createTransitionApertureIndexBuffer(batch),
+		gl.STATIC_DRAW,
+	);
+	gl.bindVertexArray(null);
+	gl.bindBuffer(gl.ARRAY_BUFFER, null);
+	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+
+	return {
+		apertureBatchId: batch.apertureBatchId,
+		frontFace: batch.frontFace,
+		indexBuffer,
+		indexCount: batch.indices.length,
+		indexType:
+			batch.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
+		landblockId: batch.landblockId,
+		positionBuffer,
+		ranges: batch.ranges,
+		vertexArray,
+		dispose() {
+			gl.deleteBuffer(positionBuffer);
+			gl.deleteBuffer(indexBuffer);
+			gl.deleteVertexArray(vertexArray);
+		},
+	};
+}
+
+function createTransitionApertureIndexBuffer(
+	batch: TransitionApertureGeometryBatch,
+): Uint16Array | Uint32Array {
+	return batch.indexType === "uint16"
+		? new Uint16Array(batch.indices)
+		: new Uint32Array(batch.indices);
+}
+
+function createTransitionAperturePositionBuffer(
+	batch: TransitionApertureGeometryBatch,
+): Float32Array {
+	const positions = new Float32Array(batch.vertices.length * 3);
+	for (
+		let vertexIndex = 0;
+		vertexIndex < batch.vertices.length;
+		vertexIndex += 1
+	) {
+		const vertex = batch.vertices[vertexIndex];
+		const offset = vertexIndex * 3;
+		positions[offset] = vertex.x;
+		positions[offset + 1] = vertex.y;
+		positions[offset + 2] = vertex.z;
+	}
+	return positions;
+}
+
 function uploadStaticObjectRolePageBindings(
 	gl: WebGL2RenderingContext,
 	stateCache: Webgl2StateCache,
@@ -2211,6 +2347,16 @@ function sumRenderedTriangles(
 		(total, resource) => total + resource.triangleCount,
 		0,
 	);
+}
+
+function sumTransitionApertureRanges(
+	resources: ReadonlyMap<string, TransitionApertureGeometryResource>,
+): number {
+	let total = 0;
+	for (const resource of resources.values()) {
+		total += resource.ranges.length;
+	}
+	return total;
 }
 
 export interface StaticObjectTransparentDrawSortEntry {

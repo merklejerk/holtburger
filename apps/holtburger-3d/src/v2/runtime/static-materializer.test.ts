@@ -31,7 +31,9 @@ describe("V2 static materializer", () => {
 		expect(materialized.staticSpatialRecords).toEqual([]);
 		expect(materialized.staticDelta).toEqual({
 			addedDrawUnits: [drawUnit],
+			addedTransitionApertureBatches: [],
 			removedDrawUnitIds: [],
+			removedTransitionApertureBatchIds: [],
 			revision: 7,
 		});
 	});
@@ -205,6 +207,39 @@ describe("V2 static materializer", () => {
 			{ drawUnitId: "static-table", kind: "draw-unit" },
 			{ drawUnitId: "static-table#fine-1", kind: "draw-unit" },
 		]);
+	});
+
+	it("preserves removed transition aperture batch resources", () => {
+		const materialized = materializeStaticCommit({
+			commit: {
+				addedDrawUnits: [],
+				removedResources: [
+					{
+						apertureBatchId: "transition-aperture-batch:da55ffff",
+						kind: "transition-aperture-batch",
+					},
+				],
+				revision: 9,
+				staticAuthoredDynamicSeeds: [],
+				staticBatchId: "batch-a",
+				staticPortalInteriorRecords: [],
+				staticSourceMappings: [],
+				staticSpatialRecords: [],
+				staticVisibilityRecords: [],
+				textureUses: [],
+			},
+			textureUpdate: null,
+		});
+
+		expect(materialized.staticDelta).toEqual({
+			addedDrawUnits: [],
+			addedTransitionApertureBatches: [],
+			removedDrawUnitIds: [],
+			removedTransitionApertureBatchIds: [
+				"transition-aperture-batch:da55ffff",
+			],
+			revision: 9,
+		});
 	});
 });
 

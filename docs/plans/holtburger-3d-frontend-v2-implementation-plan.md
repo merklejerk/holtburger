@@ -2157,19 +2157,20 @@ Completed implementation notes:
   - `portal-scene-domains` produces max-depth-bounded per-depth work;
   - each depth alternates current/source targets from the base scene;
   - each depth carries desired transition direction and the cull face implied by `frontFace: "indoor-visible"`;
-  - aperture batches are filtered to the base landblock and preserved in input order.
+  - all renderable resident aperture batches are preserved in input order.
 - Added a small batch-input adapter from baked `TransitionApertureBatch` metadata so 13B1h can plan from resource metadata without reading WebGL buffers/VAOs.
 - Added tests for:
   - empty work under `single-surface-resident`;
   - exterior-base direction alternation;
   - interior-base direction alternation while retaining the full interior `PortalSceneDomain`;
-  - stable aperture batch ordering and base-landblock filtering;
+  - stable aperture batch ordering across landblocks;
   - empty/malformed packed-batch metadata not entering draw work;
   - deriving planner input from baked transition aperture batches.
 
 Spicy / failed to close:
 
-- The planner deliberately does not add per-depth frontier filtering. It filters by base landblock and relies on cull direction plus the future propagated-depth shader path for pixel correctness. If 13B1h leaks unrelated apertures through overlapping screen projections, add a compact range-filter fallback there with evidence from the composite path.
+- Course correction on 2026-06-17: the initial planner filtered aperture batches to `baseScene.landblockId`, which caused visible compositing cutoffs when the camera/base landblock changed while neighboring transition aperture batches were still resident. The planner now includes all renderable resident aperture batches and relies on resource retention/materialization to define the available set.
+- The planner deliberately does not add per-depth frontier filtering. It relies on cull direction plus the propagated-depth shader path for pixel correctness. If 13B1h leaks unrelated apertures through overlapping screen projections, add a compact range-filter fallback there with evidence from the composite path.
 - Per-depth current/source scene-domain inputs are target-level, not `PortalSceneDomain`, because `PortalSceneDomain` is an authoritative residency/base-scene type and cannot represent "the whole interior target" without inventing a fake env-cell. Keep that separation unless the render target model becomes per-cell.
 - This phase still does not draw portal composites. 13B1h must consume the work plan, bind the packed aperture VAOs, and execute the RGB8/depth24 ping-pong composite loop.
 
@@ -2287,6 +2288,7 @@ Completed implementation notes:
   - configures cull face from `depthWork.cullFace`;
   - draws each planned packed aperture batch VAO;
   - swaps composite targets and finally blits composite color to the display surface.
+- Course correction on 2026-06-17: transition compositing now draws all renderable resident transition aperture batches instead of filtering to the base landblock. Base-landblock filtering caused visible cutoffs when a portal's aperture batch belonged to a neighboring retained landblock.
 - Composite depth writes use depth testing with `ALWAYS` plus shader-side aperture-depth rejection. This is intentional: fixed-function `LESS` would test the shader-written source depth rather than the rasterized aperture depth.
 - Added lean current-frame renderer diagnostics for compositing mode, executed composite depth, composite pass count, and aperture batch draw calls.
 - Added tests for:

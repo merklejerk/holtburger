@@ -63,10 +63,9 @@ export function planTransitionCompositeWork(options: {
 	}
 
 	const maxDepth = Math.max(0, Math.trunc(renderPassPlan.transitionDepthPolicy.maxDepth));
-	const apertureBatchIds = selectRenderableApertureBatchIds({
-		apertureBatches: options.apertureBatches,
-		baseScene: renderPassPlan.baseScene,
-	});
+	const apertureBatchIds = selectRenderableApertureBatchIds(
+		options.apertureBatches,
+	);
 	const depthWork: TransitionCompositeDepthWork[] = [];
 	for (let transitionDepth = 0; transitionDepth < maxDepth; transitionDepth += 1) {
 		const currentTarget = getTransitionDepthCurrentTarget(
@@ -95,12 +94,10 @@ export function planTransitionCompositeWork(options: {
 	};
 }
 
-function selectRenderableApertureBatchIds(options: {
-	readonly apertureBatches: readonly TransitionCompositeApertureBatchInput[];
-	readonly baseScene: PortalSceneDomain;
-}): readonly string[] {
-	return options.apertureBatches
-		.filter((batch) => batch.landblockId === options.baseScene.landblockId)
+function selectRenderableApertureBatchIds(
+	apertureBatches: readonly TransitionCompositeApertureBatchInput[],
+): readonly string[] {
+	return apertureBatches
 		.filter(isRenderableTransitionApertureBatch)
 		.map((batch) => batch.apertureBatchId);
 }

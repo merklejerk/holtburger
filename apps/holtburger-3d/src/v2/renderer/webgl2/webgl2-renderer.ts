@@ -69,6 +69,8 @@ import {
 } from "../transition-composite-work-plan";
 
 const TERRAIN_ATLAS_MIP_GRADIENT_SCALE = 0.5;
+const CAMERA_NEAR_PLANE = 0.1;
+const CAMERA_FAR_PLANE = 2500;
 const TERRAIN_COLOR_TEXTURE_UNIT_BASE = 1;
 const TERRAIN_MASK_TEXTURE_UNIT_BASE =
 	TERRAIN_COLOR_TEXTURE_UNIT_BASE + MAX_TERRAIN_COLOR_PAGES_PER_DRAW;
@@ -3584,7 +3586,12 @@ function createModelViewProjectionMatrix(
 	frameState: FrameState,
 	aspectRatio: number,
 ): Float32Array {
-	const projection = createPerspectiveMatrix(Math.PI / 3, aspectRatio, 1, 5000);
+	const projection = createPerspectiveMatrix(
+		Math.PI / 3,
+		aspectRatio,
+		CAMERA_NEAR_PLANE,
+		CAMERA_FAR_PLANE,
+	);
 	const view = createViewMatrix(frameState);
 	return multiplyMat4(projection, view);
 }

@@ -1,4 +1,4 @@
-import type { StaticDrawUnit } from "../static/contracts";
+import type { StaticDrawUnit, TransitionApertureBatch } from "../static/contracts";
 import type {
 	TextureFilteringMode,
 	TexturePageSampleClass,
@@ -24,33 +24,10 @@ export interface FrameState {
 
 export interface StaticResidencyDelta {
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
-	readonly addedTransitionApertureBatches: readonly TransitionApertureGeometryBatch[];
+	readonly addedTransitionApertureBatches: readonly TransitionApertureBatch[];
 	readonly removedDrawUnitIds: readonly string[];
 	readonly removedTransitionApertureBatchIds: readonly string[];
 	readonly revision: number;
-}
-
-export interface TransitionApertureGeometryBatch {
-	readonly apertureBatchId: string;
-	readonly landblockId: number;
-	readonly frontFace: "indoor-visible";
-	readonly vertices: readonly TransitionApertureGeometryVertex[];
-	readonly indices: readonly number[];
-	readonly indexType: "uint16" | "uint32";
-	readonly ranges: readonly TransitionApertureGeometryRange[];
-}
-
-export interface TransitionApertureGeometryVertex {
-	readonly x: number;
-	readonly y: number;
-	readonly z: number;
-}
-
-export interface TransitionApertureGeometryRange {
-	readonly portalId: string;
-	readonly envCellId: number;
-	readonly firstIndex: number;
-	readonly indexCount: number;
 }
 
 export type DebugOverlayPrimitive =

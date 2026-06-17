@@ -273,6 +273,7 @@ function createFakeStaticBakeResult(
 		staticVisibilityRecords: result.staticVisibilityRecords ?? [],
 		staticBatchId: input.staticBatchId,
 		textureUses: result.textureUses ?? [],
+		transitionApertureBatches: result.transitionApertureBatches ?? [],
 		works: input.items.map((item) => item.work),
 	};
 }

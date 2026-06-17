@@ -93,6 +93,7 @@ export function bakeStaticObjectCompatibility(
 		textureUses: mergeTextureUses(
 			itemResults.flatMap((result) => result.textureUses),
 		),
+		transitionApertureBatches: [],
 		works: input.items.map((item) => item.work),
 	};
 }

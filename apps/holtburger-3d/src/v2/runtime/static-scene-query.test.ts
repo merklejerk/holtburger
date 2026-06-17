@@ -3,6 +3,7 @@ import type {
 	LandblockEnvCellsStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
 	StaticPeerRecordOwner,
+	StaticBounds,
 	TerrainStaticScopePayload,
 } from "../static/contracts";
 import {
@@ -153,6 +154,7 @@ describe("V2 static scene query", () => {
 		query.ingestOutdoorStaticObjects(createOutdoorStaticObjectsPayload());
 		query.ingestTerrain(createTerrainPayload());
 		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellStaticObjectBounds(query);
 
 		const outdoorKey = createOutdoorStaticObjectSelectionKey({
 			domain: "outdoor-detail",
@@ -440,6 +442,7 @@ describe("V2 static scene query", () => {
 	it("ingests landblock env-cell static seed facts for object picking", () => {
 		const query = new StaticSceneQuery();
 		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellStaticObjectBounds(query);
 
 		const hit = query.pickRay({
 			context: {
@@ -480,7 +483,7 @@ describe("V2 static scene query", () => {
 			committedEnvCellLandblockCount: 1,
 			committedEnvCellPortalInteriorRecordCount: 0,
 			committedEnvCellSourceMappingRecordCount: 0,
-			committedEnvCellSpatialRecordCount: 1,
+			committedEnvCellSpatialRecordCount: 2,
 			committedEnvCellVisibilityRecordCount: 1,
 			envCellLandblockCount: 1,
 			envCellRecordCount: 1,
@@ -505,6 +508,7 @@ describe("V2 static scene query", () => {
 				},
 			}),
 		);
+		commitEnvCellStaticObjectBounds(query);
 
 		const hit = query.pickRay({
 			context: {
@@ -529,35 +533,10 @@ describe("V2 static scene query", () => {
 		});
 	});
 
-	it("prefers baked env-cell static object bounds over resolver instance bounds", () => {
+	it("uses baked env-cell static object bounds for picking", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(
-			query,
-			createLandblockEnvCellsPayload({
-				staticInstanceBounds: {
-					max: { x: 101, y: 101, z: 101 },
-					min: { x: 100, y: 100, z: 100 },
-				},
-			}),
-		);
-		query.applyStaticSpatialRecords({
-			records: [
-				{
-					bounds: {
-						max: { x: 1, y: 1, z: -4 },
-						min: { x: -1, y: -1, z: -5 },
-					},
-					envCellId: 0xda550100,
-					instanceId: "env-static-0",
-					kind: "env-cell-static-object-bounds",
-					landblockId: 0xda55ffff,
-					owner: {
-						drawUnitId: "env-cell-static-draw-unit",
-						kind: "draw-unit",
-					},
-				},
-			],
-		});
+		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellStaticObjectBounds(query);
 
 		const hit = query.pickRay({
 			context: {
@@ -584,15 +563,7 @@ describe("V2 static scene query", () => {
 
 	it("removes draw-unit-owned committed records by materialized resource key", () => {
 		const query = new StaticSceneQuery();
-		commitLandblockEnvCells(
-			query,
-			createLandblockEnvCellsPayload({
-				staticInstanceBounds: {
-					max: { x: 101, y: 101, z: 101 },
-					min: { x: 100, y: 100, z: 100 },
-				},
-			}),
-		);
+		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
 		query.applyStaticSpatialRecords({
 			records: [
 				{
@@ -642,6 +613,7 @@ describe("V2 static scene query", () => {
 	it("picks env-cell static objects from outdoor context for visible interior debugging", () => {
 		const query = new StaticSceneQuery();
 		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellStaticObjectBounds(query);
 
 		const hit = query.pickRay({
 			context: { kind: "outdoor" },
@@ -1473,7 +1445,6 @@ function createLandblockEnvCellsPayload(
 		readonly landblockBounds?: LandblockEnvCellsStaticScopePayload["residencySpatial"]["landblockEnvCellBvh"]["items"][number]["bounds"];
 		readonly landblockId?: number;
 		readonly landblockNodeBounds?: LandblockEnvCellsStaticScopePayload["residencySpatial"]["landblockEnvCellBvh"]["nodes"][number]["bounds"];
-		readonly staticInstanceBounds?: LandblockEnvCellsStaticScopePayload["envCells"][number]["staticObjectSeeds"][number]["instanceBounds"];
 	} = {},
 ): LandblockEnvCellsStaticScopePayload {
 	const includeLandblockBvh = options.includeLandblockBvh ?? true;
@@ -1537,19 +1508,11 @@ function createLandblockEnvCellsPayload(
 							landblockId,
 							objectKind: "explicit-object",
 						},
-						instanceBounds: options.staticInstanceBounds ?? {
-							max: { x: 1, y: 1, z: -4 },
-							min: { x: -1, y: -1, z: -5 },
-						},
 						localPlacement: createPlacement(),
 						source: {
 							kind: "static-object-source",
 							sourceAssetKind: "setup-model",
 							sourceDid: 0x02000010,
-						},
-						sourceBounds: {
-							max: { x: 1, y: 1, z: 1 },
-							min: { x: -1, y: -1, z: -1 },
 						},
 						sourceIndex: 0,
 						sourceScale: { x: 1, y: 1, z: 1 },
@@ -1672,6 +1635,36 @@ function commitLandblockEnvCells(
 							]
 						: [],
 				),
+			},
+		],
+	});
+}
+
+function commitEnvCellStaticObjectBounds(
+	query: StaticSceneQuery,
+	options: {
+		readonly bounds?: StaticBounds;
+		readonly drawUnitId?: string;
+		readonly envCellId?: number;
+		readonly instanceId?: string;
+		readonly landblockId?: number;
+	} = {},
+): void {
+	query.applyStaticSpatialRecords({
+		records: [
+			{
+				bounds: options.bounds ?? {
+					max: { x: 1, y: 1, z: -4 },
+					min: { x: -1, y: -1, z: -5 },
+				},
+				envCellId: options.envCellId ?? 0xda550100,
+				instanceId: options.instanceId ?? "env-static-0",
+				kind: "env-cell-static-object-bounds",
+				landblockId: options.landblockId ?? 0xda55ffff,
+				owner: {
+					drawUnitId: options.drawUnitId ?? "env-cell-static-draw-unit",
+					kind: "draw-unit",
+				},
 			},
 		],
 	});

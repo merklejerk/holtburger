@@ -435,6 +435,11 @@ const envCellStaticMemberDtoSchema = z.object({
 	instanceBounds: preparedAabbDtoSchema,
 });
 
+const landblockEnvCellStaticMemberDtoSchema = envCellStaticMemberDtoSchema.omit({
+	instanceBounds: true,
+	sourceBounds: true,
+});
+
 const preparedEnvCellBvhItemDtoSchema = z.discriminatedUnion("kind", [
 	z.object({
 		kind: z.literal("render-geometry"),
@@ -505,7 +510,7 @@ const landblockEnvCellDtoSchema = z
 		surfaces: z.array(envCellSurfaceSlotDtoSchema),
 		portals: z.array(envCellPortalDtoSchema),
 		portalApertures: z.array(preparedPortalApertureDtoSchema),
-		statics: z.array(envCellStaticMemberDtoSchema),
+		statics: z.array(landblockEnvCellStaticMemberDtoSchema),
 		renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
 		cellBsp: z.lazy(() => polygonSetBspNodeDtoSchema),
 		diagnostics: landblockPackDiagnosticsDtoSchema,

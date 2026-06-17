@@ -320,7 +320,6 @@ type EnvCellBvhRuntimeItem = {
 
 interface EnvCellStaticSeedRuntimeRecord {
 	readonly envCellId: number;
-	readonly resolverBounds: StaticBounds | null;
 	readonly seed: LandblockEnvCellsStaticScopePayload["envCells"][number]["staticObjectSeeds"][number];
 }
 
@@ -1368,7 +1367,6 @@ export class StaticSceneQuery {
 							kind: "static",
 							seed: {
 								envCellId: record.envCellId,
-								resolverBounds: seed.instanceBounds,
 								seed,
 							},
 						};
@@ -1801,9 +1799,7 @@ export class StaticSceneQuery {
 					instanceId: record.seed.identity.instanceId,
 					landblockId: root.landblockId,
 				}),
-			)?.bounds ??
-			record.resolverBounds ??
-			null
+			)?.bounds ?? null
 		);
 	}
 

@@ -788,7 +788,8 @@ impl EnvCellAssetAssembler {
         let landblock_id = normalize_landblock_id(env_cell_id & 0xffff_0000);
         let indoor_instances =
             build_prepared_indoor_static_instances(landblock_id, &interiors).collect::<Vec<_>>();
-        let static_meshes = build_prepared_static_meshes(&mut context, indoor_instances.iter());
+        let static_meshes =
+            build_prepared_static_meshes(&mut context, indoor_instances.iter(), true);
         let diagnostics = context.into_diagnostics();
 
         Ok(EnvCellAsset {
@@ -905,7 +906,7 @@ impl LandblockOutdoorAssetAssembler {
         };
         let instances =
             build_prepared_outdoor_static_instances(outdoor_scene.as_ref()).collect::<Vec<_>>();
-        let static_meshes = build_prepared_static_meshes(&mut context, instances.iter());
+        let static_meshes = build_prepared_static_meshes(&mut context, instances.iter(), true);
         let statics = build_landblock_outdoor_static_members(
             outdoor_scene.as_ref(),
             instances,
@@ -1027,7 +1028,8 @@ impl LandblockEnvCellsAssetAssembler {
             .collect::<HashMap<_, _>>();
         let indoor_instances =
             build_prepared_indoor_static_instances(landblock_id, &interiors).collect::<Vec<_>>();
-        let static_meshes = build_prepared_static_meshes(&mut context, indoor_instances.iter());
+        let static_meshes =
+            build_prepared_static_meshes(&mut context, indoor_instances.iter(), false);
         let mut static_meshes_by_env_cell = static_meshes.into_iter().fold(
             HashMap::<u32, Vec<PreparedStaticMesh>>::new(),
             |mut cells, mesh| {
@@ -1494,14 +1496,18 @@ fn build_prepared_static_instance(
 fn build_prepared_static_meshes<'a>(
     context: &mut PreparedContentAssemblyContext<'_>,
     instances: impl Iterator<Item = &'a PreparedStaticInstance>,
+    load_render_bounds: bool,
 ) -> Vec<PreparedStaticMesh> {
     let mut meshes = Vec::new();
     let mut reported_missing = HashSet::new();
     for instance in instances {
         match instance.source_did >> 24 {
             0x01 => {
-                let source_bounds =
-                    load_gfx_obj_render_bounds(context, instance.source_did, &mut reported_missing);
+                let source_bounds = if load_render_bounds {
+                    load_gfx_obj_render_bounds(context, instance.source_did, &mut reported_missing)
+                } else {
+                    None
+                };
                 meshes.push(build_prepared_static_mesh(
                     instance,
                     0,
@@ -1520,8 +1526,11 @@ fn build_prepared_static_meshes<'a>(
                     continue;
                 };
                 for (part_index, gfx_obj_id) in setup_model.parts.iter().copied().enumerate() {
-                    let source_bounds =
-                        load_gfx_obj_render_bounds(context, gfx_obj_id, &mut reported_missing);
+                    let source_bounds = if load_render_bounds {
+                        load_gfx_obj_render_bounds(context, gfx_obj_id, &mut reported_missing)
+                    } else {
+                        None
+                    };
                     meshes.push(build_prepared_static_mesh(
                         instance,
                         part_index,

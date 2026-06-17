@@ -66,11 +66,15 @@ describe("V2 landblock env-cell baker", () => {
 		expect(result.staticPortalInteriorRecords).toEqual([
 			expect.objectContaining({
 				envCells: [
-					{
+					expect.objectContaining({
 						envCellId: 0xda550100,
+						localPlacement: {
+							orientation: { w: 1, x: 0, y: 0, z: 0 },
+							origin: { x: 0, y: 0, z: 0 },
+						},
 						portalApertures: [],
 						portals: [],
-					},
+					}),
 				],
 				kind: "env-cell-portal-interior",
 				portalLinks: [],

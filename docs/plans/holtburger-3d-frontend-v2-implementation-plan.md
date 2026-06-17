@@ -1714,7 +1714,7 @@ Verification:
 
 ### Phase 13B1e: Transition Portal Candidate Derivation From V2 Records
 
-Status: planned.
+Status: complete on 2026-06-17.
 
 Purpose: derive transition portal candidates from committed V2 portal/interior records without treating ordinary env-cell-to-env-cell portals as render-composition portals.
 
@@ -1730,8 +1730,6 @@ Steering:
 Candidate contract target:
 
 ```ts
-type TransitionPortalDirection = "outdoor-to-indoor" | "indoor-to-outdoor";
-
 type TransitionPortalEndpointPair = {
 	readonly outdoor: {
 		readonly buildingInstanceId: string;
@@ -1751,14 +1749,15 @@ type RenderableTransitionPortalCandidate = {
 	readonly aperturePlane: Plane | null;
 	readonly apertureVertices: readonly Vec3[];
 	readonly apertureIndices: readonly number[];
-	readonly outwardDirection: TransitionPortalDirection;
+	readonly insideVisibleSide: "positive" | "negative";
+	readonly outsideVisibleSide: "positive" | "negative";
 };
 
 type SkippedTransitionPortalCandidate = {
 	readonly id: string;
 	readonly kind: "skipped";
 	readonly landblockId: number;
-	readonly endpoints: Partial<TransitionPortalEndpointPair>;
+	readonly endpoints: TransitionPortalEndpointPair;
 	readonly skipReason: string;
 };
 
@@ -1783,19 +1782,121 @@ Acceptance criteria:
 - Candidate ids, transition endpoint pairs, prepared aperture geometry, aperture plane, visible-side facts, and renderable/skipped status are deterministic and encoded without nullable companion fields.
 - Env-cell-to-env-cell portals are retained as scene records but excluded from portal compositing candidates.
 
+Implementation notes:
+
+- Added `TransitionPortalCandidate`, `TransitionPortalEndpointPair`, renderable/skipped candidate variants, skip reasons, visible-side facts, and `StaticSceneQuery.queryTransitionPortalCandidates(...)`.
+- Derivation consumes committed `StaticEnvCellPortalInteriorRecord` values only. It filters for links with one `landblock-building` endpoint and one `env-cell` endpoint, then validates the env-cell portal is marked `isOutsideTransition`.
+- Ordinary env-cell-to-env-cell links are ignored for this model; they remain visibility/connectivity data and do not become skipped render-composition candidates.
+- `StaticEnvCellPortalSummary` now carries `localPlacement` because committed portal records need enough information to transform prepared portal apertures without reaching back into source payloads.
+- Renderable candidates carry fan-triangulated aperture indices and aperture vertices transformed into landblock-render-local coordinates. Malformed aperture geometry is reported as a skipped candidate instead of being repaired by renderer sync.
+- The candidate does not encode a fixed transition direction. Direction is camera/pass dependent, so this phase stores `insideVisibleSide` and `outsideVisibleSide`; 13B1h0/13B1h should classify direction from the current pass/camera state.
+
+Spicy / failed to close:
+
+- The phase had to widen the committed portal summary with `localPlacement`; without that, the "committed V2 records only" rule was impossible for aperture transforms. This is a contract change, but it removes a hidden dependency on source payload lifetime.
+- The candidate model derives aperture planes from prepared planes only. If a prepared aperture has vertices but no plane, the renderable candidate currently carries `aperturePlane: null`; 13B1h0/13B1h must either tolerate that or schedule a focused derivation pass from transformed vertices before compositing.
+- No renderer aperture resources were added. Packed VAO/resource-key sync remains 13B1f.
+- Course correction on 2026-06-17: the public `TransitionPortalCandidate`/`skipped` shape is too durable for what the renderer needs. The structurally correct render contract is a landblock-scoped packed transition aperture batch. Phase 13B1e-1 immediately replaces the candidate-shaped query/model with the simpler batch model before 13B1f uploads WebGL resources.
+
+Verification:
+
+- `npm run test:ts -- static-scene-query.test.ts`
+- `npm run check`
+
+### Phase 13B1e-1: Packed Transition Aperture Batch Course Correction
+
+Status: planned; inserted immediately after 13B1e before aperture resource sync.
+
+Purpose: replace the candidate-shaped transition portal API with a baker/static-scene packed transition aperture batch, and clean up overly narrow `StaticSceneVec3`/`StaticScenePlane` naming before the renderer resource contract hardens.
+
+Steering:
+
+- The renderer does not need durable per-portal candidate records to draw transition apertures. It needs one packed geometry resource per active landblock/scope that can be drawn in one/few calls per transition depth.
+- Treat malformed transition aperture data as an authoring/prep failure: log loudly with actionable details when deriving the batch and omit the malformed portal from the batch. Do not store durable `skipped` records as part of the render contract.
+- Keep ordinary env-cell-to-env-cell portals out of the transition aperture batch entirely. They are connectivity/visibility facts, not render-composition aperture geometry.
+- Winding must be normalized at batch derivation time. Define one explicit winding contract, such as `frontFace: "indoor-visible"`, so portal depth/composite passes can flip cull mode instead of branching per portal.
+- Do not add a portal `StaticDrawUnit`. The batch is render-control geometry, not materialized world geometry.
+- Rename local generic math shapes away from static-scene-specific names before downstream phases spread them:
+  - `StaticSceneVec3` -> `Vec3`
+  - `StaticScenePlane` -> `Plane`
+  - keep names domain-specific only where the value is genuinely a static-scene query concept, such as selection keys or pick hits.
+- Avoid importing legacy `src/lib/world-display` implementation helpers into V2. If V2 needs placement/vector helpers, keep them V2-local or move them into a small V2/shared app-local module with no legacy dependency.
+
+Target contract:
+
+```ts
+type Vec3 = {
+	readonly x: number;
+	readonly y: number;
+	readonly z: number;
+};
+
+type Plane = {
+	readonly normal: Vec3;
+	readonly constant: number;
+};
+
+type TransitionApertureFrontFace = "indoor-visible";
+
+type TransitionApertureRange = {
+	readonly portalId: string;
+	readonly envCellId: number;
+	readonly buildingInstanceId: string;
+	readonly buildingPortalId: string;
+	readonly firstIndex: number;
+	readonly indexCount: number;
+};
+
+type TransitionApertureBatch = {
+	readonly kind: "transition-aperture-batch";
+	readonly apertureBatchId: string;
+	readonly landblockId: number;
+	readonly coordinateSpace: "landblock-render-local";
+	readonly frontFace: TransitionApertureFrontFace;
+	readonly vertices: readonly Vec3[];
+	readonly indices: readonly number[];
+	readonly ranges: readonly TransitionApertureRange[];
+	readonly planes: readonly (Plane | null)[];
+};
+```
+
+Exact type names can change, but the durable output must be a packed batch, not `TransitionPortalCandidate[]`.
+
+Deliverables:
+
+- Replace or downgrade `StaticSceneQuery.queryTransitionPortalCandidates(...)` so the public next-phase API is a packed `TransitionApertureBatch` query/record.
+- Delete the durable `SkippedTransitionPortalCandidate` path. Batch derivation should report malformed transition portals through console diagnostics and omit them from packed geometry.
+- Normalize triangle winding for every included transition aperture so the batch has a single front-face contract.
+- Rename `StaticSceneVec3`, `StaticScenePlane`, and helper names to generic `Vec3`/`Plane` where they are plain geometry values.
+- Update Phase 13B1f to upload packed transition aperture batches rather than consuming candidate arrays.
+- Tests proving:
+  - all valid transition apertures for a landblock are packed into one batch with deterministic vertices/indices/ranges;
+  - env-cell-to-env-cell portals are absent from the batch;
+  - malformed transition aperture geometry is logged/omitted, not represented as a durable skipped record;
+  - winding is normalized for the declared `frontFace`;
+  - renamed vector/plane types keep existing static scene query tests passing.
+
+Acceptance criteria:
+
+- The renderer-facing pre-resource contract is one packed aperture batch per landblock/scope, suitable for one VAO/VBO/IBO upload in 13B1f.
+- No public/durable `skipped` candidate records remain in the transition portal model.
+- No transition aperture geometry is built at frame/submit time.
+- The plan and code make it clear that per-depth direction switching is controlled by cull mode/pass state, not per-portal draw calls.
+
 ### Phase 13B1f: Transition Aperture Geometry Resource Sync
 
 Status: planned.
 
-Purpose: feed transition portal candidates into renderer aperture geometry resources without adding a static bake draw-unit family or requiring one draw call per portal.
+Purpose: feed packed transition aperture batches into renderer aperture geometry resources without adding a static bake draw-unit family or requiring one draw call per portal.
 
 Steering:
 
-- Transition aperture geometry is render-control geometry derived from transition candidates. It is not materialized world geometry and should not become a `StaticDrawUnit` variant.
-- The renderer may own VAO/VBO/IBO resources for apertures, but runtime/static-scene owns the candidate model that decides which transition apertures exist.
-- Prefer packed VAO-backed aperture geometry batches per active landblock/scope so the composite path can target one/few aperture draws per transition depth rather than one draw call per portal.
+- Transition aperture geometry is render-control geometry derived from packed transition aperture batches. It is not materialized world geometry and should not become a `StaticDrawUnit` variant.
+- The renderer owns VAO/VBO/IBO resources for apertures, but runtime/static-scene owns the packed CPU batch that decides which transition apertures exist.
+- Use packed VAO-backed aperture geometry batches per active landblock/scope so the composite path can target one/few aperture draws per transition depth rather than one draw call per portal.
 - Add a concrete static resource-key kind for aperture batches if the resource lifetime flows through the static/runtime materialization stream. Do not bolt on a second removal channel for portals.
-- Scope eviction should remove candidate-model state through runtime/static-scene retained scopes, while concrete WebGL aperture buffers should be removed by resource keys.
+- Scope eviction should remove packed aperture batch state through runtime/static-scene retained scopes, while concrete WebGL aperture buffers should be removed by resource keys.
+- Preserve the 13B1e-1 winding contract in WebGL resource metadata. Direction/depth passes may flip cull mode, but must not reorder/index-rewrite aperture geometry at frame time.
 
 Resource lifecycle target:
 
@@ -1809,18 +1910,18 @@ Only add the new union member when this phase has a concrete renderer sync consu
 
 Deliverables:
 
-- V2 resource sync path that builds packed transition aperture geometry resources from the 13B1e candidate model and prepared aperture geometry.
+- V2 resource sync path that uploads packed transition aperture geometry resources from the 13B1e-1 transition aperture batch model.
 - A stable `transition-aperture-batch` resource key and removal path, or a documented reason the initial resource is renderer-local and does not cross the static resource contract yet.
-- Stable per-candidate range metadata (`firstIndex`, `indexCount`, vertex/base offset or equivalent) for per-frame filtering and diagnostics.
-- Apply/remove behavior for aperture resources when committed portal records, active landblocks, or transition candidates change.
-- Diagnostics for candidate count, aperture resource count, skipped malformed apertures, and stale aperture cleanup.
+- Stable per-aperture range metadata (`firstIndex`, `indexCount`, vertex/base offset or equivalent) for optional filtering and diagnostics.
+- Apply/remove behavior for aperture resources when committed portal records, active landblocks, or packed aperture batches change.
+- Diagnostics for batch count, aperture resource count, omitted malformed aperture count, and stale aperture cleanup.
 
 Acceptance criteria:
 
-- Renderer transition aperture geometry resources are populated from V2 runtime/static-scene transition candidates and prepared aperture geometry.
+- Renderer transition aperture geometry resources are populated from V2 runtime/static-scene packed transition aperture batches.
 - No portal mask or aperture `StaticDrawUnit` is added to the bake result contract.
 - Clearing or replacing V2 portal records removes stale aperture resources.
-- The intended render path can draw packed transition apertures one/few times per transition depth, even if the first implementation falls back to smaller batches for correctness.
+- The intended render path can draw packed transition apertures one/few times per transition depth without per-portal geometry construction or per-portal draw calls.
 
 ### Phase 13B1g: Scene-Domain Render Targets
 
@@ -1861,17 +1962,19 @@ Steering:
 
 - Keep this phase pure or mostly pure. It should be testable without a WebGL context.
 - Treat null `PortalPassPlan` as empty composite work. Do not add a third `PortalBaseScene` variant to represent idle/no-base state.
-- Start without explicit per-depth frontier filtering. The planner should alternate directions from the base scene, reject non-transition candidates, reject obviously wrong-side candidates where candidate metadata allows it, and produce packed-batch draw ranges for each transition depth.
+- Start without explicit per-depth frontier filtering. The planner should alternate directions from the base scene and select packed transition aperture batches for each transition depth. Do not invent per-portal candidate filtering unless propagated-depth compositing proves it is required.
 - Do not let ordinary env-cell-to-env-cell portals enter the planner.
 - Do not try to prove arbitrary recursion visually here. This phase prepares a deterministic work list for 13B1h.
 - Carry the discriminated `PortalBaseScene` through the work plan instead of flattening it back into `baseScene + initialEnvCellId`.
+- Direction is represented as pass state/cull mode over the batch winding contract, not by rewriting geometry or selecting one draw per portal.
 
 Deliverables:
 
-- `TransitionCompositeWorkPlan`-style contract containing max depth, base scene, per-depth desired direction, aperture batch ids/ranges, and any skipped-candidate diagnostics.
+- `TransitionCompositeWorkPlan`-style contract containing max depth, base scene, per-depth desired direction/cull mode, aperture batch ids, and target scene-domain inputs.
 - Tests for direction alternation from exterior and interior base scenes.
-- Tests proving env-cell-to-env-cell portal records and malformed/skipped transition candidates never appear in composite work.
-- Tests for overlapping transition portal ordering inputs where the planner preserves stable candidate/range order and leaves pixel-depth correctness to the composite shader.
+- Tests proving env-cell-to-env-cell portal records never appear in composite work.
+- Tests proving malformed transition aperture data omitted from packed batches never reaches composite work.
+- Tests for overlapping transition portal ordering inputs where the planner preserves stable batch order and leaves pixel-depth correctness to the composite shader.
 
 Acceptance criteria:
 
@@ -1887,11 +1990,11 @@ Purpose: implement the actual outdoor/indoor transition portal compositing loop 
 
 Steering:
 
-- Follow the proven v1 sequencing shape while replacing stencil masks with direct aperture compositing where viable: derive transition levels from base scene, batch visible transition portals, copy the base target color/depth, draw packed transition apertures for each depth, sample the opposite scene color/depth at screen-space UVs, write sampled color plus sampled depth into the current composite target, ping-pong composite targets, then copy the final target to the default framebuffer.
+- Follow the proven v1 sequencing shape while replacing stencil masks with direct aperture compositing where viable: derive transition levels from base scene, select packed transition aperture batches, copy the base target color/depth, draw packed transition apertures for each depth, sample the opposite scene color/depth at screen-space UVs, write sampled color plus sampled depth into the current composite target, ping-pong composite targets, then copy the final target to the default framebuffer.
 - The primary path should preserve and propagate depth through the composite target. The direct composite shader should manually compare rasterized aperture depth against the previous composite depth to decide whether the portal aperture is visible, then write the sampled opposite-scene depth to propagate newly visible scene depth for later recursion passes.
 - Do not assume arbitrary recursion can be solved in fewer than `maxDepth` passes. Each transition depth depends on the previous composite result, so the primary design remains one/few packed aperture draws per transition depth.
-- Prefer cheap per-depth direction rejection through aperture winding/backface culling plus a direction uniform before adding heavier per-depth frontier filtering. If propagated depth and direction rejection leak unrelated transition portals, add compact per-depth candidate filtering as a fallback.
-- Compositing applies only to transition portal candidates. Env-cell-to-env-cell portals stay out of this render path.
+- Prefer cheap per-depth direction rejection through aperture winding/backface culling before adding heavier per-depth frontier filtering. If propagated depth and cull-mode direction rejection leak unrelated transition portals, add compact per-depth aperture-range filtering as a fallback.
+- Compositing applies only to packed transition aperture batches. Env-cell-to-env-cell portals stay out of this render path.
 - Keep stencil or mask-texture compositing as a fallback only if propagated-depth direct aperture compositing leaks, cannot express required parent containment, or hits WebGL2 depth-texture/framebuffer constraints.
 - Consume the 13B1h0 work plan. Do not derive candidate sets, directions, or transition depth order inside the WebGL render loop.
 
@@ -1922,16 +2025,17 @@ Direct aperture composite shader contract:
 
 ```text
 Inputs:
-  - packed aperture vertex/index stream with stable candidate metadata
-  - desiredDirection uniform for this transition depth
+  - packed aperture vertex/index stream with stable batch/range metadata
+  - cull mode selected from desiredDirection and the batch front-face contract
   - previousCompositeDepth sampler
   - sourceSceneColor/sourceSceneDepth samplers
   - viewport size for screen-space UV
 
 Per fragment:
-  1. Reject non-transition candidates before this draw path entirely.
-  2. Reject wrong-direction candidates using aperture winding/backface culling
-     plus desiredDirection/candidate metadata as needed.
+  1. Reject non-transition portals before this draw path entirely by only
+     uploading/drawing transition aperture batches.
+  2. Reject wrong-direction aperture faces using cull mode derived from
+     desiredDirection and the batch front-face contract.
   3. previousDepth = sample(previousCompositeDepth, screenUv)
   4. apertureDepth = rasterized aperture fragment depth
   5. If apertureDepth is behind previousDepth, discard.
@@ -1945,14 +2049,14 @@ Notes:
 
 - `compositeRead` and `compositeWrite` must be distinct targets. Do not sample from the target being rendered.
 - The aperture visibility test uses rasterized aperture depth against the previous composite depth; the final written depth is the sampled opposite-scene depth. Do not rely on fixed-function depth testing alone for both decisions, because those two depths are intentionally different.
-- Backface culling/direction rejection is an optimization and correctness guard for transition direction. It does not turn env-cell-to-env-cell portals into compositing candidates.
-- Start without explicit per-depth frontier filtering. Add compact per-depth candidate filtering only if tests or visual targets prove propagated-depth containment leaks unrelated transition portals.
+- Backface culling/direction rejection is an optimization and correctness guard for transition direction. It does not turn env-cell-to-env-cell portals into compositing inputs.
+- Start without explicit per-depth frontier filtering. Add compact per-depth aperture-range filtering only if tests or visual targets prove propagated-depth containment leaks unrelated transition portals.
 
 Deliverables:
 
 - Execution of the 13B1h0 transition composite work plan.
 - Color/depth scene-domain targets, color/depth composite targets, direct aperture composite shader, propagated-depth writes, ping-pong target swap, and final framebuffer copy.
-- One/few packed aperture draws per transition depth, with backface-culling/direction-uniform rejection for wrong-direction candidates and manual aperture-depth-vs-composite-depth rejection for occluded portal pixels.
+- One/few packed aperture draws per transition depth, with backface-culling/cull-mode rejection for wrong-direction aperture faces and manual aperture-depth-vs-composite-depth rejection for occluded portal pixels.
 - Tests around propagated depth behavior and overlapping transition portals at the work-plan/shader boundary. Direction alternation and env-cell-to-env-cell exclusion belong in 13B1h0 tests unless implementation reveals a renderer-specific edge.
 
 Acceptance criteria:

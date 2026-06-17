@@ -1042,6 +1042,7 @@ function createPortalInteriorRecord(
 	return {
 		envCells: payload.envCells.map((envCell) => ({
 			envCellId: envCell.identity.envCellId,
+			localPlacement: envCell.localPlacement,
 			portalApertures: envCell.portalApertures,
 			portals: envCell.portals,
 		})),

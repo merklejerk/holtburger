@@ -481,7 +481,7 @@ describe("V2 static scene query", () => {
 		});
 		expect(query.createSnapshot()).toEqual({
 			committedEnvCellLandblockCount: 1,
-			committedEnvCellPortalInteriorRecordCount: 0,
+			committedEnvCellPortalInteriorRecordCount: 1,
 			committedEnvCellSourceMappingRecordCount: 0,
 			committedEnvCellSpatialRecordCount: 2,
 			committedEnvCellVisibilityRecordCount: 1,
@@ -655,7 +655,7 @@ describe("V2 static scene query", () => {
 		expect(hit).toBeNull();
 		expect(query.createSnapshot()).toEqual({
 			committedEnvCellLandblockCount: 1,
-			committedEnvCellPortalInteriorRecordCount: 0,
+			committedEnvCellPortalInteriorRecordCount: 1,
 			committedEnvCellSourceMappingRecordCount: 0,
 			committedEnvCellSpatialRecordCount: 1,
 			committedEnvCellVisibilityRecordCount: 1,
@@ -884,6 +884,7 @@ describe("V2 static scene query", () => {
 					envCells: [
 						{
 							envCellId: 0xda550100,
+							localPlacement: createPlacement(),
 							portalApertures: [],
 							portals: [],
 						},
@@ -980,6 +981,189 @@ describe("V2 static scene query", () => {
 			committedEnvCellSpatialRecordCount: 0,
 			committedEnvCellVisibilityRecordCount: 0,
 		});
+	});
+
+	it("derives renderable transition portal candidates from committed V2 portal records", () => {
+		const query = new StaticSceneQuery();
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				envCellPlacement: createPlacement({
+					origin: { x: 10, y: 20, z: 30 },
+				}),
+				portalApertures: [
+					{
+						plane: {
+							constant: 2,
+							normal: { x: 0, y: 0, z: 1 },
+							source: "derived-from-render-points",
+						},
+						points: [
+							{ x: 0, y: 0, z: 0 },
+							{ x: 2, y: 0, z: 0 },
+							{ x: 2, y: 2, z: 0 },
+							{ x: 0, y: 2, z: 0 },
+						],
+						polygonId: 7,
+						portalId: "env-portal-0",
+						sourceIndex: 0,
+					},
+				],
+				portalLinks: [
+					{
+						flags: 0,
+						linkId: "transition-link-0",
+						polygonId: 7,
+						source: {
+							instanceId: "building-0",
+							kind: "landblock-building",
+							portalId: "building-portal-0",
+						},
+						sourceIndex: 0,
+						target: {
+							envCellId: 0xda550100,
+							kind: "env-cell",
+							portalId: "env-portal-0",
+						},
+					},
+				],
+				portals: [
+					{
+						flags: 0,
+						isOutsideTransition: true,
+						otherCellId: 0xffff,
+						otherPortalId: 0,
+						polygonId: 7,
+						portalId: "env-portal-0",
+						sourceIndex: 0,
+						targetEnvCellId: 0xda55ffff,
+					},
+				],
+			}),
+		);
+
+		expect(query.queryTransitionPortalCandidates()).toEqual([
+			{
+				apertureIndices: [0, 1, 2, 0, 2, 3],
+				aperturePlane: {
+					constant: -18,
+					normal: { x: 0, y: 0, z: 1 },
+				},
+				apertureVertices: [
+					{ x: 10, y: 30, z: -20 },
+					{ x: 12, y: 30, z: -20 },
+					{ x: 12, y: 32, z: -20 },
+					{ x: 10, y: 32, z: -20 },
+				],
+				endpoints: {
+					indoor: {
+						envCellId: 0xda550100,
+						envCellPortalId: "env-portal-0",
+					},
+					outdoor: {
+						buildingInstanceId: "building-0",
+						buildingPortalId: "building-portal-0",
+					},
+				},
+				id: "transition-portal:3663069183:building-0:building-portal-0:3663003904:env-portal-0",
+				insideVisibleSide: "negative",
+				kind: "renderable",
+				landblockId: 0xda55ffff,
+				outsideVisibleSide: "positive",
+				sourceLinkId: "transition-link-0",
+			},
+		]);
+		expect(
+			query.queryTransitionPortalCandidates({ landblockId: 0xdb55ffff }),
+		).toEqual([]);
+	});
+
+	it("excludes ordinary env-cell links from transition portal candidates", () => {
+		const query = new StaticSceneQuery();
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				portalLinks: [
+					{
+						flags: 0,
+						linkId: "env-env-link-0",
+						polygonId: 7,
+						source: {
+							envCellId: 0xda550100,
+							kind: "env-cell",
+							portalId: "env-portal-0",
+						},
+						sourceIndex: 0,
+						target: {
+							envCellId: 0xda550101,
+							kind: "env-cell",
+							portalId: "env-portal-1",
+						},
+					},
+				],
+			}),
+		);
+
+		expect(query.queryTransitionPortalCandidates()).toEqual([]);
+	});
+
+	it("reports skipped transition candidates without repairing malformed apertures", () => {
+		const query = new StaticSceneQuery();
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				portalApertures: [
+					{
+						plane: null,
+						points: [{ x: 0, y: 0, z: 0 }],
+						polygonId: 7,
+						portalId: "env-portal-0",
+						sourceIndex: 0,
+					},
+				],
+				portalLinks: [
+					{
+						flags: 0,
+						linkId: "transition-link-0",
+						polygonId: 7,
+						source: {
+							instanceId: "building-0",
+							kind: "landblock-building",
+							portalId: "building-portal-0",
+						},
+						sourceIndex: 0,
+						target: {
+							envCellId: 0xda550100,
+							kind: "env-cell",
+							portalId: "env-portal-0",
+						},
+					},
+				],
+				portals: [
+					{
+						flags: 0,
+						isOutsideTransition: true,
+						otherCellId: 0xffff,
+						otherPortalId: 0,
+						polygonId: 7,
+						portalId: "env-portal-0",
+						sourceIndex: 0,
+						targetEnvCellId: 0xda55ffff,
+					},
+				],
+			}),
+		);
+
+		expect(query.queryTransitionPortalCandidates()).toEqual([
+			expect.objectContaining({
+				kind: "skipped",
+				skipReason: "malformed-portal-aperture",
+			}),
+		]);
+
+		query.retainScopes([]);
+
+		expect(query.queryTransitionPortalCandidates()).toEqual([]);
 	});
 });
 
@@ -1445,6 +1629,9 @@ function createLandblockEnvCellsPayload(
 		readonly landblockBounds?: LandblockEnvCellsStaticScopePayload["residencySpatial"]["landblockEnvCellBvh"]["items"][number]["bounds"];
 		readonly landblockId?: number;
 		readonly landblockNodeBounds?: LandblockEnvCellsStaticScopePayload["residencySpatial"]["landblockEnvCellBvh"]["nodes"][number]["bounds"];
+		readonly portalApertures?: LandblockEnvCellsStaticScopePayload["envCells"][number]["portalApertures"];
+		readonly portalLinks?: LandblockEnvCellsStaticScopePayload["portalLinks"];
+		readonly portals?: LandblockEnvCellsStaticScopePayload["envCells"][number]["portals"];
 	} = {},
 ): LandblockEnvCellsStaticScopePayload {
 	const includeLandblockBvh = options.includeLandblockBvh ?? true;
@@ -1458,7 +1645,7 @@ function createLandblockEnvCellsPayload(
 	};
 	const landblockNodeBounds = options.landblockNodeBounds ?? landblockBounds;
 	return {
-		acceptedEnvCellIds: [0xda550100],
+		acceptedEnvCellIds: [envCellId],
 		envCells: [
 			{
 				cellBsp: {
@@ -1482,8 +1669,8 @@ function createLandblockEnvCellsPayload(
 				landblockId,
 				localPlacement: envCellPlacement,
 				memberId: "cell-0",
-				portalApertures: [],
-				portals: [],
+				portalApertures: options.portalApertures ?? [],
+				portals: options.portals ?? [],
 				renderGeometry: {
 					bounds: null,
 					invalidPolygons: [],
@@ -1529,7 +1716,7 @@ function createLandblockEnvCellsPayload(
 			source: "env-cells",
 		},
 		missingRefs: [],
-		portalLinks: [],
+		portalLinks: options.portalLinks ?? [],
 		regionRenderProfile: {
 			kind: "region-render-profile",
 			regionNumber: 1,
@@ -1603,6 +1790,20 @@ function commitLandblockEnvCells(
 				seed,
 			})),
 		),
+		portalInteriorRecords: [
+			{
+				envCells: payload.envCells.map((envCell) => ({
+					envCellId: envCell.identity.envCellId,
+					localPlacement: envCell.localPlacement,
+					portalApertures: envCell.portalApertures,
+					portals: envCell.portals,
+				})),
+				kind: "env-cell-portal-interior" as const,
+				landblockId,
+				owner,
+				portalLinks: payload.portalLinks,
+			},
+		],
 		spatialRecords: payload.envCells.map((envCell) => ({
 			cellStructure: envCell.cellStructure,
 			envCellId: envCell.identity.envCellId,

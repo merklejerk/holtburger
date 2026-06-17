@@ -1359,6 +1359,7 @@ Implementation notes:
 
 - Added `StaticSceneCameraResidency` and `StaticSceneQuery.queryCameraResidencyAtPoint`.
 - The query derives the outdoor landblock from the anchor-local render position, converts the point into the candidate landblock's local frame, and then tests the env-cell residency BVH for that landblock.
+- Corrected env-cell point queries to require both BVH node containment and env-cell item-bounds containment. Broad/root BVH node hits alone are not residency hits.
 - Env-cell results are gated by committed env-cell peer records. If the source BVH is still present but committed env-cell records have been evicted, the query returns the outdoor landblock candidate instead of inventing interior residency from stale source-only data.
 - The residency result shape is exactly the planned union: `outdoor-landblock`, `env-cell`, or `unknown`; it does not include a `source`/provenance field.
 
@@ -1369,6 +1370,8 @@ Spicy / failed to close:
 Verification:
 
 - `npm run test:ts -- static-scene-query.test.ts`
+- `npm run check`
+- `npm run lint:ts`
 
 ### Phase 13B1b-1: Runtime-Level Static Scope Retention Reconciler Course Correction
 

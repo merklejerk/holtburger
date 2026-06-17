@@ -1031,6 +1031,7 @@ export class StaticSceneQuery {
 					readonly nodeIndex: number;
 				} =>
 					candidate.item !== null &&
+					containsPoint(candidate.item.bounds, options.point) &&
 					isAcceptedEnvCellId(acceptedEnvCellIds, candidate.item.envCellId),
 			)
 			.sort(

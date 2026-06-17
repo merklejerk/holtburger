@@ -121,7 +121,7 @@ describe("V2 transition composite work planner", () => {
 		]);
 	});
 
-	it("preserves stable aperture batch order for the base landblock", () => {
+	it("preserves stable aperture batch order across landblocks", () => {
 		const workPlan = planTransitionCompositeWork({
 			apertureBatches: [
 				createApertureBatchInput("near-overlap", { landblockId: 0xda55ffff }),
@@ -135,14 +135,14 @@ describe("V2 transition composite work planner", () => {
 		});
 
 		expect(workPlan).toMatchObject({
-			apertureBatchIds: ["near-overlap", "far-overlap"],
+			apertureBatchIds: ["near-overlap", "other-landblock", "far-overlap"],
 			kind: "transition-composite",
 		});
 		expect(
 			workPlan.depthWork.map((step) => step.apertureBatchIds),
 		).toEqual([
-			["near-overlap", "far-overlap"],
-			["near-overlap", "far-overlap"],
+			["near-overlap", "other-landblock", "far-overlap"],
+			["near-overlap", "other-landblock", "far-overlap"],
 		]);
 	});
 

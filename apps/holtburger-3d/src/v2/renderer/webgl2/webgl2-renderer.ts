@@ -156,7 +156,7 @@ in vec4 vColor;
 out vec4 fragColor;
 
 void main() {
-	fragColor = vec4(vec3(1.0), vColor.a);
+	fragColor = vColor;
 }
 `;
 
@@ -663,7 +663,8 @@ class Webgl2Renderer implements Renderer {
 	#staticRenderAnchorLandblockId: number | null = null;
 	#portalPassPlan: PortalPassPlan | null = null;
 	#debugOverlayPrimitiveCount = 0;
-	#debugOverlayVertexCount = 0;
+	#debugOverlayLineVertexCount = 0;
+	#debugOverlayTriangleVertexCount = 0;
 	#error: string | null = null;
 
 	constructor(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext) {
@@ -755,17 +756,17 @@ class Webgl2Renderer implements Renderer {
 	setDebugOverlayPrimitives(
 		primitives: readonly DebugOverlayPrimitive[],
 	): void {
-		const vertices = createDebugOverlayVertices(primitives);
+		const overlay = createDebugOverlayVertices(primitives);
 		const gl = this.#gl;
 		gl.bindVertexArray(this.#debugOverlayVertexArray);
 		gl.bindBuffer(gl.ARRAY_BUFFER, this.#debugOverlayVertexBuffer);
-		gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
+		gl.bufferData(gl.ARRAY_BUFFER, overlay.vertices, gl.DYNAMIC_DRAW);
 		gl.bindVertexArray(null);
 		gl.bindBuffer(gl.ARRAY_BUFFER, null);
 		this.#stateCache.invalidate();
 		this.#debugOverlayPrimitiveCount = primitives.length;
-		this.#debugOverlayVertexCount =
-			vertices.length / DEBUG_OVERLAY_FLOATS_PER_VERTEX;
+		this.#debugOverlayTriangleVertexCount = overlay.triangleVertexCount;
+		this.#debugOverlayLineVertexCount = overlay.lineVertexCount;
 		this.#emit();
 	}
 
@@ -1067,7 +1068,10 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	#drawDebugOverlay(): void {
-		if (this.#debugOverlayVertexCount === 0) {
+		if (
+			this.#debugOverlayTriangleVertexCount === 0 &&
+			this.#debugOverlayLineVertexCount === 0
+		) {
 			return;
 		}
 
@@ -1084,10 +1088,22 @@ class Webgl2Renderer implements Renderer {
 			mvp,
 		);
 		this.#stateCache.setDepthState(createDepthState(gl, false, false));
-		applyDebugOverlayInvertBlendState(gl, this.#stateCache);
-		gl.lineWidth(1);
 		this.#stateCache.bindVertexArray(this.#debugOverlayVertexArray);
-		gl.drawArrays(gl.LINES, 0, this.#debugOverlayVertexCount);
+		if (this.#debugOverlayTriangleVertexCount > 0) {
+			applyDebugOverlayAlphaBlendState(gl, this.#stateCache);
+			this.#stateCache.setCullState({ enabled: true, mode: gl.BACK });
+			gl.drawArrays(gl.TRIANGLES, 0, this.#debugOverlayTriangleVertexCount);
+		}
+		if (this.#debugOverlayLineVertexCount > 0) {
+			applyDebugOverlayInvertBlendState(gl, this.#stateCache);
+			this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
+			gl.lineWidth(1);
+			gl.drawArrays(
+				gl.LINES,
+				this.#debugOverlayTriangleVertexCount,
+				this.#debugOverlayLineVertexCount,
+			);
+		}
 		this.#stateCache.bindVertexArray(null);
 		restoreDebugOverlayRenderState(gl, this.#stateCache);
 	}
@@ -2307,12 +2323,22 @@ function applyDebugOverlayInvertBlendState(
 	});
 }
 
+function applyDebugOverlayAlphaBlendState(
+	gl: WebGL2RenderingContext,
+	stateCache: Webgl2StateCache,
+): void {
+	stateCache.setBlendState(
+		createBlendState(gl, true, gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA),
+	);
+}
+
 function restoreDebugOverlayRenderState(
 	gl: WebGL2RenderingContext,
 	stateCache: Webgl2StateCache,
 ): void {
 	stateCache.setDepthState(createDepthState(gl, true, true));
 	stateCache.setBlendState(createBlendState(gl, false, gl.ONE, gl.ZERO));
+	stateCache.setCullState({ enabled: false, mode: gl.BACK });
 }
 
 function createDepthState(
@@ -2344,17 +2370,28 @@ function createBlendState(
 	};
 }
 
-function createDebugOverlayVertices(
-	primitives: readonly DebugOverlayPrimitive[],
-): Float32Array {
-	const vertices: number[] = [];
+function createDebugOverlayVertices(primitives: readonly DebugOverlayPrimitive[]): {
+	readonly lineVertexCount: number;
+	readonly triangleVertexCount: number;
+	readonly vertices: Float32Array;
+} {
+	const triangleVertices: number[] = [];
+	const lineVertices: number[] = [];
 	for (const primitive of primitives) {
 		if (primitive.kind === "aabb") {
-			appendDebugOverlayAabb(vertices, primitive);
+			appendDebugOverlayAabb(lineVertices, primitive);
+		} else {
+			appendDebugOverlayTriangles(triangleVertices, primitive);
 		}
 	}
 
-	return new Float32Array(vertices);
+	const vertices = [...triangleVertices, ...lineVertices];
+	return {
+		lineVertexCount: lineVertices.length / DEBUG_OVERLAY_FLOATS_PER_VERTEX,
+		triangleVertexCount:
+			triangleVertices.length / DEBUG_OVERLAY_FLOATS_PER_VERTEX,
+		vertices: new Float32Array(vertices),
+	};
 }
 
 function appendDebugOverlayAabb(
@@ -2391,6 +2428,15 @@ function appendDebugOverlayAabb(
 	for (const [left, right] of edges) {
 		appendDebugOverlayVertex(vertices, corners[left], primitive.color);
 		appendDebugOverlayVertex(vertices, corners[right], primitive.color);
+	}
+}
+
+function appendDebugOverlayTriangles(
+	vertices: number[],
+	primitive: Extract<DebugOverlayPrimitive, { readonly kind: "triangles" }>,
+): void {
+	for (const position of primitive.vertices) {
+		appendDebugOverlayVertex(vertices, position, primitive.color);
 	}
 }
 

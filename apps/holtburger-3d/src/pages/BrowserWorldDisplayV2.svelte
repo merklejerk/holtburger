@@ -75,6 +75,7 @@
 	let detailEnabled = $state(true);
 	let envCellsEnabled = $state(true);
 	let envCellAabbDebugVisible = $state(false);
+	let transitionApertureDebugVisible = $state(false);
 	let terrainRadius = $state(DEFAULT_TERRAIN_LOD_RADIUS);
 	let buildingRadius = $state(DEFAULT_BUILDING_LOD_RADIUS);
 	let detailRadius = $state(DEFAULT_DETAIL_LOD_RADIUS);
@@ -120,6 +121,9 @@
 		try {
 			runtime = createBrowserV2Runtime(canvasElement);
 			runtime.setEnvCellAabbDebugOverlayVisible(envCellAabbDebugVisible);
+			runtime.setTransitionApertureDebugOverlayVisible(
+				transitionApertureDebugVisible,
+			);
 			cameraController = new V2BrowserCameraController({
 				initialState: cameraState,
 				onChange(nextCameraState) {
@@ -373,6 +377,15 @@
 	function handleEnvCellAabbDebugToggle(event: Event): void {
 		envCellAabbDebugVisible = (event.currentTarget as HTMLInputElement).checked;
 		runtime?.setEnvCellAabbDebugOverlayVisible(envCellAabbDebugVisible);
+	}
+
+	function handleTransitionApertureDebugToggle(event: Event): void {
+		transitionApertureDebugVisible = (
+			event.currentTarget as HTMLInputElement
+		).checked;
+		runtime?.setTransitionApertureDebugOverlayVisible(
+			transitionApertureDebugVisible,
+		);
 	}
 
 	function scheduleStaticInterestRefresh(): void {
@@ -1079,6 +1092,18 @@
 						/>
 						<span>Env-cell AABBs</span>
 						<small>{snapshot?.debugOverlays.envCellAabbCount ?? 0}</small>
+					</label>
+					<label class="browser-v2__checkbox-row">
+						<input
+							checked={transitionApertureDebugVisible}
+							disabled={!runtime}
+							type="checkbox"
+							onchange={handleTransitionApertureDebugToggle}
+						/>
+						<span>Transition portals</span>
+						<small>
+							{snapshot?.debugOverlays.transitionApertureCount ?? 0}
+						</small>
 					</label>
 
 					<dl class="browser-v2__status">

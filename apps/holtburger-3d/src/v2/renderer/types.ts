@@ -28,13 +28,22 @@ export interface StaticResidencyDelta {
 	readonly revision: number;
 }
 
-export type DebugOverlayPrimitive = DebugOverlayAabbPrimitive;
+export type DebugOverlayPrimitive =
+	| DebugOverlayAabbPrimitive
+	| DebugOverlayTrianglePrimitive;
 
 interface DebugOverlayAabbPrimitive {
 	readonly kind: "aabb";
 	readonly id: string;
 	readonly min: readonly [number, number, number];
 	readonly max: readonly [number, number, number];
+	readonly color: readonly [number, number, number, number];
+}
+
+interface DebugOverlayTrianglePrimitive {
+	readonly kind: "triangles";
+	readonly id: string;
+	readonly vertices: readonly (readonly [number, number, number])[];
 	readonly color: readonly [number, number, number, number];
 }
 

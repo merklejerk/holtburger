@@ -57,6 +57,7 @@ import {
 	type StaticSceneCameraResidency,
 	type StaticSceneQuerySnapshot,
 	type StaticSceneSelectionKey,
+	type TransitionApertureBatch,
 	type Vec3,
 	type TerrainQuadScenePickDetails,
 } from "./static-scene-query";
@@ -110,6 +111,8 @@ export interface RuntimeSnapshot {
 interface RuntimeDebugOverlaySnapshot {
 	readonly envCellAabbsVisible: boolean;
 	readonly envCellAabbCount: number;
+	readonly transitionApertureCount: number;
+	readonly transitionAperturesVisible: boolean;
 }
 
 export interface StaticSelectionDiagnosticsReport {
@@ -322,6 +325,7 @@ export interface ClientRuntime {
 	): StaticSelectionDiagnosticsReport;
 	setStaticDebugSelection(selectionKey: StaticSceneSelectionKey | null): void;
 	setEnvCellAabbDebugOverlayVisible(visible: boolean): void;
+	setTransitionApertureDebugOverlayVisible(visible: boolean): void;
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void;
 	updateFrameState(state: FrameState): void;
 	createDiagnosticsReport(): RuntimeDiagnosticsReport;
@@ -399,6 +403,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #reportedStaticResolverFailures = new Set<string>();
 	#staticDebugSelectionKey: StaticSceneSelectionKey | null = null;
 	#envCellAabbDebugOverlayVisible = false;
+	#transitionApertureDebugOverlayVisible = false;
 	#disposed = false;
 
 	constructor(
@@ -558,6 +563,16 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#emit();
 	}
 
+	setTransitionApertureDebugOverlayVisible(visible: boolean): void {
+		this.#assertActive();
+		if (this.#transitionApertureDebugOverlayVisible === visible) {
+			return;
+		}
+		this.#transitionApertureDebugOverlayVisible = visible;
+		this.#refreshStaticDebugOverlay();
+		this.#emit();
+	}
+
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void {
 		this.#assertActive();
 		const samplerUpdate = this.#textureManager.setFilteringMode(filteringMode);
@@ -688,6 +703,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 					? this.#staticSceneQuery.queryEnvCellAabbDebugBounds().length
 					: 0,
 				envCellAabbsVisible: this.#envCellAabbDebugOverlayVisible,
+				transitionApertureCount: this.#transitionApertureDebugOverlayVisible
+					? countTransitionApertures(
+							this.#staticSceneQuery.queryTransitionApertureBatches(),
+						)
+					: 0,
+				transitionAperturesVisible:
+					this.#transitionApertureDebugOverlayVisible,
 			},
 			host: this.#host.createSnapshot(),
 			portalPassPlan: this.#lastRendererSnapshot.portalPassPlan,
@@ -917,6 +939,11 @@ class ClientRuntimeImpl implements ClientRuntime {
 						memberId: debugBounds.memberId,
 					}),
 				);
+			}
+		}
+		if (this.#transitionApertureDebugOverlayVisible) {
+			for (const batch of this.#staticSceneQuery.queryTransitionApertureBatches()) {
+				primitives.push(...createTransitionApertureDebugOverlayPrimitives(batch));
 			}
 		}
 
@@ -1411,6 +1438,77 @@ function createEnvCellAabbDebugOverlayPrimitive(
 		max: [visibleBounds.max.x, visibleBounds.max.y, visibleBounds.max.z],
 		min: [visibleBounds.min.x, visibleBounds.min.y, visibleBounds.min.z],
 	};
+}
+
+function createTransitionApertureDebugOverlayPrimitives(
+	batch: TransitionApertureBatch,
+): DebugOverlayPrimitive[] {
+	const primitives: DebugOverlayPrimitive[] = [];
+	for (const range of batch.ranges) {
+		const storedWindingVertices = readTransitionApertureRangeVertices(
+			batch,
+			range.firstIndex,
+			range.indexCount,
+		);
+		const baseId = `transition-aperture:${formatHex32(batch.landblockId)}:${range.portalId}`;
+		primitives.push(
+			{
+				color: [0.95, 0.12, 0.08, 0.35],
+				id: `${baseId}:indoor-to-outdoor`,
+				kind: "triangles",
+				vertices: storedWindingVertices,
+			},
+			{
+				color: [0.05, 0.95, 0.25, 0.35],
+				id: `${baseId}:outdoor-to-indoor`,
+				kind: "triangles",
+				vertices: reverseTriangleWinding(storedWindingVertices),
+			},
+		);
+	}
+
+	return primitives;
+}
+
+function readTransitionApertureRangeVertices(
+	batch: TransitionApertureBatch,
+	firstIndex: number,
+	indexCount: number,
+): readonly (readonly [number, number, number])[] {
+	const vertices: Array<readonly [number, number, number]> = [];
+	for (let indexOffset = 0; indexOffset < indexCount; indexOffset += 1) {
+		const vertexIndex = batch.indices[firstIndex + indexOffset];
+		const vertex = vertexIndex === undefined ? undefined : batch.vertices[vertexIndex];
+		if (!vertex) {
+			throw new Error(
+				`Transition aperture batch ${batch.apertureBatchId} has invalid index at ${firstIndex + indexOffset}.`,
+			);
+		}
+		vertices.push([vertex.x, vertex.y, vertex.z]);
+	}
+	return vertices;
+}
+
+function reverseTriangleWinding(
+	vertices: readonly (readonly [number, number, number])[],
+): readonly (readonly [number, number, number])[] {
+	const reversed: Array<readonly [number, number, number]> = [];
+	for (let index = 0; index < vertices.length; index += 3) {
+		const first = vertices[index];
+		const second = vertices[index + 1];
+		const third = vertices[index + 2];
+		if (!first || !second || !third) {
+			throw new Error("Transition aperture debug geometry is not triangulated.");
+		}
+		reversed.push(first, third, second);
+	}
+	return reversed;
+}
+
+function countTransitionApertures(
+	batches: readonly TransitionApertureBatch[],
+): number {
+	return batches.reduce((count, batch) => count + batch.ranges.length, 0);
 }
 
 function createMinimumDebugOverlayBounds(bounds: StaticBounds): StaticBounds {

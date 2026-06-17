@@ -855,11 +855,9 @@ function createEnvCellPayload(input: {
 				? []
 				: [
 						{
-							instanceBounds: createBounds(),
 							instanceId: "static-0",
 							localPlacement: createPlacement(),
 							sourceAssetId: input.staticSourceAssetId,
-							sourceBounds: createBounds(),
 							sourceDid: Number.parseInt(
 								input.staticSourceAssetId.slice(-8),
 								16,

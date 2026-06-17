@@ -1338,7 +1338,6 @@ function createInput(): StaticBakeBatchInput {
 											landblockId: 0xda55ffff,
 											objectKind: "explicit-object",
 										},
-										instanceBounds: null,
 										localPlacement: {
 											orientation: { w: 1, x: 0, y: 0, z: 0 },
 											origin: { x: 1, y: 2, z: 3 },
@@ -1348,7 +1347,6 @@ function createInput(): StaticBakeBatchInput {
 											sourceAssetKind: "gfx-obj",
 											sourceDid: 0x01000020,
 										},
-										sourceBounds: null,
 										sourceIndex: 0,
 										sourceScale: null,
 									},

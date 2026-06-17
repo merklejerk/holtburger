@@ -641,8 +641,6 @@ export interface LandblockEnvCellStaticObjectSeedFacts {
 	readonly sourceIndex: number;
 	readonly localPlacement: PlacementTransformDto;
 	readonly sourceScale: LandblockEnvCellsPayloadDto["envCells"][number]["statics"][number]["sourceScale"];
-	readonly sourceBounds: LandblockEnvCellsPayloadDto["envCells"][number]["statics"][number]["sourceBounds"];
-	readonly instanceBounds: LandblockEnvCellsPayloadDto["envCells"][number]["statics"][number]["instanceBounds"];
 	readonly debug: StaticObjectDebugProvenance;
 }
 

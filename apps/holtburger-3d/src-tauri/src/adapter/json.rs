@@ -1023,8 +1023,6 @@ where
                 "sourceIndex": mesh.source_index,
                 "localPlacement": serialize_frame(&mesh.local_placement),
                 "sourceScale": serialize_prepared_vec3(&mesh.source_scale),
-                "sourceBounds": mesh.source_bounds.as_ref().map(serialize_prepared_aabb),
-                "instanceBounds": mesh.instance_bounds.as_ref().map(serialize_prepared_aabb),
             })
         }).collect::<Vec<_>>(),
         "renderGeometry": render_geometry,

@@ -180,7 +180,7 @@ describe("V2 client runtime", () => {
 				kind: "interior",
 				landblockId: 0xda55ffff,
 			},
-			transitionDepthPolicy: { maxDepth: 0 },
+			transitionDepthPolicy: { maxDepth: 4 },
 		});
 		expect(runtime.createDiagnosticsReport().runtime).toMatchObject({
 			currentCameraResidency: {
@@ -194,7 +194,7 @@ describe("V2 client runtime", () => {
 					kind: "interior",
 					landblockId: 0xda55ffff,
 				},
-				transitionDepthPolicy: { maxDepth: 0 },
+				transitionDepthPolicy: { maxDepth: 4 },
 			},
 		});
 		expect(JSON.stringify(runtime.createDiagnosticsReport())).not.toContain(
@@ -229,7 +229,7 @@ describe("V2 client runtime", () => {
 				kind: "exterior",
 				landblockId: 0xda55ffff,
 			},
-			transitionDepthPolicy: { maxDepth: 0 },
+			transitionDepthPolicy: { maxDepth: 4 },
 		});
 
 		runtime.setCurrentCameraResidency({
@@ -242,7 +242,7 @@ describe("V2 client runtime", () => {
 				kind: "exterior",
 				landblockId: 0xdb55ffff,
 			},
-			transitionDepthPolicy: { maxDepth: 0 },
+			transitionDepthPolicy: { maxDepth: 4 },
 		});
 
 		runtime.dispose();
@@ -267,7 +267,7 @@ describe("V2 client runtime", () => {
 				kind: "exterior",
 				landblockId: 0xda55ffff,
 			},
-			transitionDepthPolicy: { maxDepth: 0 },
+			transitionDepthPolicy: { maxDepth: 4 },
 		});
 
 		runtime.dispose();
@@ -669,7 +669,6 @@ describe("V2 client runtime", () => {
 		expect(runtime.createDiagnosticsReport().domains).toContainEqual({
 			kind: "asset-service",
 			snapshot: {
-				committed: [],
 				failures: [],
 				pending: [
 					{
@@ -688,6 +687,9 @@ describe("V2 client runtime", () => {
 				warmRetained: 0,
 			},
 		});
+		expect(JSON.stringify(runtime.createDiagnosticsReport())).not.toContain(
+			'"committed":[',
+		);
 
 		assetService.resolveNext(
 			createPreparedTextureAsset(assetService.pendingKeys[0] ?? failKey()),

@@ -67,6 +67,7 @@ const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
 const BLENDED_STATIC_AUDIT_WARNING_BUCKET_LIMIT = 8;
 const DEFAULT_ASSET_MAINTENANCE_INTERVAL_MS = 5_000;
+const DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 4;
 
 export type ManualStaticDomain =
 	| "terrain"
@@ -1687,7 +1688,7 @@ function derivePortalPassPlan(
 				kind: "interior",
 				landblockId: residency.landblockId,
 			},
-			transitionDepthPolicy: { maxDepth: 0 },
+			transitionDepthPolicy: { maxDepth: DEFAULT_TRANSITION_PORTAL_MAX_DEPTH },
 		};
 	}
 
@@ -1704,7 +1705,7 @@ function derivePortalPassPlan(
 			kind: "exterior",
 			landblockId: exteriorLandblockId,
 		},
-		transitionDepthPolicy: { maxDepth: 0 },
+		transitionDepthPolicy: { maxDepth: DEFAULT_TRANSITION_PORTAL_MAX_DEPTH },
 	};
 }
 

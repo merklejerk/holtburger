@@ -1696,14 +1696,14 @@ Implementation notes:
   - `outdoor-landblock` maps to an `exterior` base scene;
   - `unknown` with a landblock id, or with a current render anchor, maps to a conservative `exterior` base scene;
   - `unknown` with no landblock and no render anchor maps to `portalPassPlan: null`.
-- Transition depth policy is currently `{ maxDepth: 0 }` to keep this phase honest: no recursive transition portal compositing is implemented until 13B1g/13B1h.
+- Transition depth policy was initially `{ maxDepth: 0 }` to keep this phase honest while no recursive transition portal compositing existed. Course correction on 2026-06-17: the runtime now uses a named `DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 4` so the contract carries the intended recursion budget before compositing consumes it.
 - Runtime snapshots and diagnostics now expose `portalPassPlan` alongside `currentCameraResidency`.
 
 Spicy / failed to close:
 
 - The idle `unknown/null` residency edge cannot produce a concrete exterior `PortalBaseScene` without inventing a sentinel landblock. The code now exposes `portalPassPlan: null` for that no-base-scene state. Future portal work should treat null as "render normal resident scene only / no portal orchestration" instead of widening `PortalBaseScene`.
 - WebGL2 stores the pass plan but does not consume it in the render loop yet. Candidate derivation, aperture resources, scene-domain targets, work planning, and compositing remain intentionally deferred.
-- `maxDepth: 0` is a placeholder policy value for the contract phase. 13B1h0/13B1h should replace it with the actual configured transition recursion budget when compositing lands.
+- The transition depth default is still compile-time runtime configuration rather than user-facing configuration. If 13B1h0/13B1h needs scene/profile-specific depth control, add an explicit config path instead of scattering numeric literals.
 
 Verification:
 

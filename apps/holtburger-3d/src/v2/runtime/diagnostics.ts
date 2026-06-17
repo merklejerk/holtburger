@@ -61,7 +61,12 @@ type RuntimeDiagnosticsDomainReport =
 export interface AssetServiceDiagnosticsReport {
 	readonly kind: "asset-service";
 	readonly summary: AssetServiceDiagnosticsSummary;
-	readonly snapshot: AssetServiceSnapshot;
+	readonly snapshot: AssetServiceDiagnosticsSnapshot;
+}
+
+interface AssetServiceDiagnosticsSnapshot {
+	readonly pending: AssetServiceSnapshot["pending"];
+	readonly failures: AssetServiceSnapshot["failures"];
 }
 
 interface AssetServiceDiagnosticsSummary {
@@ -294,7 +299,10 @@ export function createAssetServiceDiagnosticsReport(
 ): AssetServiceDiagnosticsReport {
 	return {
 		kind: "asset-service",
-		snapshot,
+		snapshot: {
+			failures: snapshot.failures,
+			pending: snapshot.pending,
+		},
 		summary: {
 			committed: snapshot.committed.length,
 			failures: snapshot.failures.length,

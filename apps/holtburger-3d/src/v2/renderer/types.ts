@@ -144,7 +144,8 @@ export interface RendererSnapshot {
 	readonly isRunning: boolean;
 	readonly backend: "webgl2";
 	readonly error: string | null;
-	readonly portalPassPlan: PortalPassPlan | null;
+	readonly renderPassPlan: RenderPassPlan;
+	readonly sceneDomainTargets: SceneDomainTargetSnapshot;
 	readonly staticDrawUnits: number;
 	readonly terrainDrawUnits: number;
 	readonly transitionApertureBatches: number;
@@ -155,7 +156,7 @@ export interface RendererSnapshot {
 
 export type RendererSnapshotListener = (snapshot: RendererSnapshot) => void;
 
-export type PortalBaseScene =
+export type PortalSceneDomain =
 	| {
 			readonly kind: "exterior";
 			readonly landblockId: number;
@@ -170,9 +171,25 @@ export interface PortalTransitionDepthPolicy {
 	readonly maxDepth: number;
 }
 
-export interface PortalPassPlan {
-	readonly baseScene: PortalBaseScene;
-	readonly transitionDepthPolicy: PortalTransitionDepthPolicy;
+export type RenderPassPlan =
+	| {
+			readonly kind: "single-surface-resident";
+	  }
+	| {
+			readonly kind: "portal-scene-domains";
+			readonly baseScene: PortalSceneDomain;
+			readonly transitionDepthPolicy: PortalTransitionDepthPolicy;
+	  };
+
+export interface SceneDomainTargetSnapshot {
+	readonly active: boolean;
+	readonly width: number;
+	readonly height: number;
+	readonly colorFormat: "rgb8";
+	readonly depthFormat: "depth-component24";
+	readonly exteriorDrawCalls: number;
+	readonly interiorDrawCalls: number;
+	readonly allocationFailures: number;
 }
 
 export interface Renderer {
@@ -181,7 +198,7 @@ export interface Renderer {
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void;
 	applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void;
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void;
-	setPortalPassPlan(plan: PortalPassPlan | null): void;
+	setRenderPassPlan(plan: RenderPassPlan): void;
 	setDebugOverlayPrimitives(primitives: readonly DebugOverlayPrimitive[]): void;
 	updateFrameState(state: FrameState): void;
 	subscribe(listener: RendererSnapshotListener): () => void;

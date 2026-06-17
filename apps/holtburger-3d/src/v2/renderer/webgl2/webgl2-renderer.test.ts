@@ -163,6 +163,76 @@ describe("V2 WebGL2 static object transparent pass helpers", () => {
 });
 
 describe("V2 WebGL2 structured interior rendering", () => {
+	it("uses non-antialiased RGB8/depth24 scene-domain targets", () => {
+		const gl = createFakeWebgl2Context();
+		const getContext = vi.fn((kind: string) => (kind === "webgl2" ? gl : null));
+		const canvas = {
+			clientHeight: 64,
+			clientWidth: 64,
+			getContext,
+			height: 64,
+			width: 64,
+		} as unknown as HTMLCanvasElement;
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+		let latestSnapshot = rendererSnapshotPlaceholder();
+		renderer.subscribe((snapshot) => {
+			latestSnapshot = snapshot;
+		});
+
+		expect(getContext).toHaveBeenCalledWith(
+			"webgl2",
+			expect.objectContaining({ antialias: false }),
+		);
+
+		renderer.setRenderPassPlan({
+			baseScene: {
+				kind: "exterior",
+				landblockId: 0xda55ffff,
+			},
+			kind: "portal-scene-domains",
+			transitionDepthPolicy: { maxDepth: 4 },
+		});
+		pendingFrame?.(16);
+
+		expect(gl.texImage2D).toHaveBeenCalledWith(
+			gl.TEXTURE_2D,
+			0,
+			gl.RGB8,
+			64,
+			64,
+			0,
+			gl.RGB,
+			gl.UNSIGNED_BYTE,
+			null,
+		);
+		expect(gl.texImage2D).toHaveBeenCalledWith(
+			gl.TEXTURE_2D,
+			0,
+			gl.DEPTH_COMPONENT24,
+			64,
+			64,
+			0,
+			gl.DEPTH_COMPONENT,
+			gl.UNSIGNED_INT,
+			null,
+		);
+		expect(latestSnapshot.sceneDomainTargets).toMatchObject({
+			active: true,
+			colorFormat: "rgb8",
+			depthFormat: "depth-component24",
+			height: 64,
+			width: 64,
+		});
+
+		renderer.dispose();
+	});
+
 	it("draws and removes structured-interior geometry through the static material path", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
@@ -420,8 +490,18 @@ function rendererSnapshotPlaceholder() {
 		frameCount: 0,
 		frameHandlerMs: 0,
 		isRunning: false,
-		portalPassPlan: null,
+		renderPassPlan: { kind: "single-surface-resident" as const },
 		renderedTriangles: 0,
+		sceneDomainTargets: {
+			active: false,
+			allocationFailures: 0,
+			colorFormat: "rgb8" as const,
+			depthFormat: "depth-component24" as const,
+			exteriorDrawCalls: 0,
+			height: 0,
+			interiorDrawCalls: 0,
+			width: 0,
+		},
 		staticDrawUnits: 0,
 		terrainDrawUnits: 0,
 		transitionApertureBatches: 0,
@@ -448,13 +528,20 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		COLOR_BUFFER_BIT: 16384,
 		COMPILE_STATUS: 35713,
 		CULL_FACE: 2884,
+		DEPTH_ATTACHMENT: 36096,
 		DEPTH_BUFFER_BIT: 256,
+		DEPTH_COMPONENT: 6402,
+		DEPTH_COMPONENT24: 33190,
 		DEPTH_TEST: 2929,
+		drawingBufferHeight: 64,
+		drawingBufferWidth: 64,
+		DRAW_FRAMEBUFFER: 36009,
 		DYNAMIC_DRAW: 35048,
 		ELEMENT_ARRAY_BUFFER: 34963,
 		FLOAT: 5126,
 		FRAGMENT_SHADER: 35632,
 		FRAMEBUFFER: 36160,
+		FRAMEBUFFER_COMPLETE: 36053,
 		FRONT: 1028,
 		FRONT_AND_BACK: 1032,
 		FUNC_ADD: 32774,
@@ -468,7 +555,10 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		ONE: 1,
 		ONE_MINUS_SRC_ALPHA: 771,
 		R8: 33321,
+		READ_FRAMEBUFFER: 36008,
 		RED: 6403,
+		RGB: 6407,
+		RGB8: 32849,
 		RG: 33319,
 		RG8: 33323,
 		RGBA: 6408,
@@ -496,20 +586,24 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		bindVertexArray: vi.fn(),
 		blendEquationSeparate: vi.fn(),
 		blendFuncSeparate: vi.fn(),
+		blitFramebuffer: vi.fn(),
 		bufferData: vi.fn((target: GLenum) => {
 			bufferDataTargets.push(target);
 		}),
 		clear: vi.fn(),
 		clearColor: vi.fn(),
 		clearDepth: vi.fn(),
+		checkFramebufferStatus: vi.fn(() => 36053),
 		compileShader: vi.fn(),
 		createBuffer: vi.fn(createObject),
+		createFramebuffer: vi.fn(createObject),
 		createProgram: vi.fn(createObject),
 		createShader: vi.fn(createObject),
 		createTexture: vi.fn(createObject),
 		createVertexArray: vi.fn(createObject),
 		cullFace: vi.fn(),
 		deleteBuffer: vi.fn(),
+		deleteFramebuffer: vi.fn(),
 		deleteProgram: vi.fn(),
 		deleteShader: vi.fn(),
 		deleteTexture: vi.fn(),
@@ -525,6 +619,7 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		enableVertexAttribArray: vi.fn((slot: number) => {
 			enabledVertexAttributes.push(slot);
 		}),
+		framebufferTexture2D: vi.fn(),
 		generateMipmap: vi.fn(),
 		getExtension: vi.fn(() => null),
 		getParameter: vi.fn(() => 1),

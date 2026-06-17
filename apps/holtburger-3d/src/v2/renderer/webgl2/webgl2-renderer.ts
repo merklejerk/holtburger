@@ -1,10 +1,11 @@
 import type {
 	DebugOverlayPrimitive,
 	FrameState,
-	PortalPassPlan,
 	Renderer,
 	RendererSnapshot,
 	RendererSnapshotListener,
+	RenderPassPlan,
+	SceneDomainTargetSnapshot,
 	SamplerPolicyUpdate,
 	StaticResidencyDelta,
 	TextureDrawUnitBinding,
@@ -612,7 +613,7 @@ void main() {
 export function createWebgl2Renderer(canvas: HTMLCanvasElement): Renderer {
 	const gl = canvas.getContext("webgl2", {
 		alpha: false,
-		antialias: true,
+		antialias: false,
 		depth: true,
 		stencil: false,
 	});
@@ -653,6 +654,7 @@ class Webgl2Renderer implements Renderer {
 	readonly #debugOverlayVertexArray: WebGLVertexArrayObject;
 	readonly #debugOverlayVertexBuffer: WebGLBuffer;
 	readonly #stateCache: Webgl2StateCache;
+	#sceneDomainTargets: SceneDomainTargets | null = null;
 	readonly #farTransparentStaticObjectDrawList: StaticObjectGeometryResource[] =
 		[];
 	readonly #nearTransparentStaticObjectDrawEntries: StaticObjectTransparentDrawEntry[] =
@@ -666,7 +668,10 @@ class Webgl2Renderer implements Renderer {
 	#frameHandlerMs = 0;
 	#frameState = defaultFrameState;
 	#staticRenderAnchorLandblockId: number | null = null;
-	#portalPassPlan: PortalPassPlan | null = null;
+	#renderPassPlan: RenderPassPlan = { kind: "single-surface-resident" };
+	#sceneDomainTargetAllocationFailures = 0;
+	#lastExteriorSceneDomainDrawCalls = 0;
+	#lastInteriorSceneDomainDrawCalls = 0;
 	#debugOverlayPrimitiveCount = 0;
 	#debugOverlayLineVertexCount = 0;
 	#debugOverlayTriangleVertexCount = 0;
@@ -776,8 +781,8 @@ class Webgl2Renderer implements Renderer {
 		this.#emit();
 	}
 
-	setPortalPassPlan(plan: PortalPassPlan | null): void {
-		this.#portalPassPlan = plan;
+	setRenderPassPlan(plan: RenderPassPlan): void {
+		this.#renderPassPlan = plan;
 		this.#emit();
 	}
 
@@ -907,6 +912,8 @@ class Webgl2Renderer implements Renderer {
 		this.#terrainProgram.dispose();
 		this.#staticObjectProgram.dispose();
 		this.#debugOverlayProgram.dispose();
+		this.#sceneDomainTargets?.dispose();
+		this.#sceneDomainTargets = null;
 		this.#gl.deleteBuffer(this.#debugOverlayVertexBuffer);
 		this.#gl.deleteVertexArray(this.#debugOverlayVertexArray);
 		this.#listeners.clear();
@@ -939,10 +946,24 @@ class Webgl2Renderer implements Renderer {
 	#render(timeSeconds: number): void {
 		this.#resizeToDisplaySize();
 
-		const gl = this.#gl;
 		const frameTime = this.#frameState.timeSeconds || timeSeconds;
 		const pulse = 0.5 + Math.sin(frameTime * 0.7) * 0.5;
+		this.#lastExteriorSceneDomainDrawCalls = 0;
+		this.#lastInteriorSceneDomainDrawCalls = 0;
 
+		if (this.#renderPassPlan.kind === "single-surface-resident") {
+			this.#renderSingleSurfaceResident(pulse);
+		} else {
+			this.#renderSceneDomainTargets(pulse, this.#renderPassPlan);
+		}
+		this.#drawDebugOverlay();
+
+		this.#frameCount += 1;
+	}
+
+	#renderSingleSurfaceResident(pulse: number): void {
+		const gl = this.#gl;
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 		this.#stateCache.setViewport({
 			height: gl.drawingBufferHeight,
 			width: gl.drawingBufferWidth,
@@ -953,22 +974,100 @@ class Webgl2Renderer implements Renderer {
 		gl.clearColor(0.025 + pulse * 0.015, 0.045, 0.065 + pulse * 0.025, 1);
 		gl.clearDepth(1);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-		this.#drawTerrain();
-		this.#drawStaticObjects();
-		this.#drawDebugOverlay();
-
-		this.#frameCount += 1;
+		const aspectRatio = gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight);
+		this.#drawTerrain(aspectRatio);
+		this.#drawStaticObjects("single-surface-resident", aspectRatio);
 	}
 
-	#drawTerrain(): void {
+	#renderSceneDomainTargets(
+		pulse: number,
+		plan: Extract<RenderPassPlan, { readonly kind: "portal-scene-domains" }>,
+	): void {
+		const gl = this.#gl;
+		const targets = this.#ensureSceneDomainTargets(
+			gl.drawingBufferWidth,
+			gl.drawingBufferHeight,
+		);
+		const aspectRatio = targets.width / Math.max(1, targets.height);
+		this.#lastExteriorSceneDomainDrawCalls = this.#renderSceneDomainTarget(
+			targets.exterior,
+			"exterior",
+			pulse,
+			aspectRatio,
+		);
+		this.#lastInteriorSceneDomainDrawCalls = this.#renderSceneDomainTarget(
+			targets.interior,
+			"interior",
+			pulse,
+			aspectRatio,
+		);
+		const baseTarget =
+			plan.baseScene.kind === "exterior" ? targets.exterior : targets.interior;
+		this.#blitSceneDomainColorToDisplay(baseTarget);
+	}
+
+	#renderSceneDomainTarget(
+		target: SceneDomainTarget,
+		domain: SceneDomain,
+		pulse: number,
+		aspectRatio: number,
+	): number {
+		const gl = this.#gl;
+		gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+		this.#stateCache.invalidate();
+		this.#stateCache.setViewport({
+			height: target.height,
+			width: target.width,
+			x: 0,
+			y: 0,
+		});
+		this.#stateCache.setDepthState(createDepthState(gl, true, true));
+		gl.clearColor(0.025 + pulse * 0.015, 0.045, 0.065 + pulse * 0.025, 1);
+		gl.clearDepth(1);
+		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+		let drawCalls = 0;
+		if (domain === "exterior") {
+			drawCalls += this.#drawTerrain(aspectRatio);
+		}
+		drawCalls += this.#drawStaticObjects(domain, aspectRatio);
+		return drawCalls;
+	}
+
+	#blitSceneDomainColorToDisplay(target: SceneDomainTarget): void {
+		const gl = this.#gl;
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.framebuffer);
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+		gl.blitFramebuffer(
+			0,
+			0,
+			target.width,
+			target.height,
+			0,
+			0,
+			gl.drawingBufferWidth,
+			gl.drawingBufferHeight,
+			gl.COLOR_BUFFER_BIT,
+			gl.NEAREST,
+		);
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+		this.#stateCache.invalidate();
+		this.#stateCache.setViewport({
+			height: gl.drawingBufferHeight,
+			width: gl.drawingBufferWidth,
+			x: 0,
+			y: 0,
+		});
+	}
+
+	#drawTerrain(aspectRatio: number): number {
 		if (this.#terrainResources.size === 0) {
-			return;
+			return 0;
 		}
 
 		const gl = this.#gl;
 		const mvp = createModelViewProjectionMatrix(
 			this.#frameState,
-			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight),
+			aspectRatio,
 		);
 
 		this.#stateCache.useProgram(this.#terrainProgram.program);
@@ -1041,21 +1140,22 @@ class Webgl2Renderer implements Renderer {
 
 		this.#stateCache.bindVertexArray(null);
 		this.#stateCache.bindTexture2D(0, null);
+		return this.#terrainResources.size;
 	}
 
-	#drawStaticObjects(): void {
+	#drawStaticObjects(domain: RenderStaticDomain, aspectRatio: number): number {
 		if (
 			this.#staticObjectResources.size === 0 &&
 			this.#structuredInteriorResources.size === 0
 		) {
 			this.#resetTransparentStaticObjectDrawLists();
-			return;
+			return 0;
 		}
 
 		const gl = this.#gl;
 		const mvp = createModelViewProjectionMatrix(
 			this.#frameState,
-			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight),
+			aspectRatio,
 		);
 
 		this.#stateCache.useProgram(this.#staticObjectProgram.program);
@@ -1067,21 +1167,34 @@ class Webgl2Renderer implements Renderer {
 
 		applyStaticObjectDepthWritingState(gl, this.#stateCache);
 		this.#resetTransparentStaticObjectDrawLists();
+		let drawCalls = 0;
 		for (const resource of this.#staticObjectResources.values()) {
+			if (!shouldDrawStaticObjectResourceInDomain(resource, domain)) {
+				continue;
+			}
 			if (isTransparentStaticObjectResource(resource)) {
 				this.#appendTransparentStaticObjectResource(resource);
 				continue;
 			}
 			this.#drawStaticMaterialResource(resource);
+			drawCalls += 1;
 		}
-		for (const resource of this.#structuredInteriorResources.values()) {
-			applyStaticObjectRenderState(gl, this.#stateCache, resource.renderState);
-			this.#drawStaticMaterialResource(resource);
+		if (domain !== "exterior") {
+			for (const resource of this.#structuredInteriorResources.values()) {
+				applyStaticObjectRenderState(
+					gl,
+					this.#stateCache,
+					resource.renderState,
+				);
+				this.#drawStaticMaterialResource(resource);
+				drawCalls += 1;
+			}
 		}
 
 		for (const resource of this.#farTransparentStaticObjectDrawList) {
 			applyStaticObjectRenderState(gl, this.#stateCache, resource.renderState);
 			this.#drawStaticMaterialResource(resource);
+			drawCalls += 1;
 		}
 		this.#nearTransparentStaticObjectDrawEntries.sort(
 			compareStaticObjectTransparentDrawEntries,
@@ -1093,10 +1206,12 @@ class Webgl2Renderer implements Renderer {
 			}
 			applyStaticObjectRenderState(gl, this.#stateCache, resource.renderState);
 			this.#drawStaticMaterialResource(resource);
+			drawCalls += 1;
 		}
 
 		this.#stateCache.bindVertexArray(null);
 		restoreStaticObjectRenderState(gl, this.#stateCache);
+		return drawCalls;
 	}
 
 	#drawDebugOverlay(): void {
@@ -1335,12 +1450,13 @@ class Webgl2Renderer implements Renderer {
 			frameCount: this.#frameCount,
 			frameHandlerMs: this.#frameHandlerMs,
 			isRunning: !this.#disposed,
-			portalPassPlan: this.#portalPassPlan,
+			renderPassPlan: this.#renderPassPlan,
 			renderedTriangles: sumRenderedTriangles([
 				...this.#terrainResources.values(),
 				...this.#staticObjectResources.values(),
 				...this.#structuredInteriorResources.values(),
 			]),
+			sceneDomainTargets: this.#createSceneDomainTargetSnapshot(),
 			staticDrawUnits:
 				this.#terrainResources.size +
 				this.#staticObjectResources.size +
@@ -1399,6 +1515,37 @@ class Webgl2Renderer implements Renderer {
 		const deltaZ = sortCenter[2] + translation[2] - cameraPosition[2];
 
 		return deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+	}
+
+	#ensureSceneDomainTargets(width: number, height: number): SceneDomainTargets {
+		const current = this.#sceneDomainTargets;
+		if (current && current.width === width && current.height === height) {
+			return current;
+		}
+
+		current?.dispose();
+		try {
+			const targets = createSceneDomainTargets(this.#gl, width, height);
+			this.#sceneDomainTargets = targets;
+			return targets;
+		} catch (error) {
+			this.#sceneDomainTargets = null;
+			this.#sceneDomainTargetAllocationFailures += 1;
+			throw error;
+		}
+	}
+
+	#createSceneDomainTargetSnapshot(): SceneDomainTargetSnapshot {
+		return {
+			active: this.#renderPassPlan.kind === "portal-scene-domains",
+			allocationFailures: this.#sceneDomainTargetAllocationFailures,
+			colorFormat: "rgb8",
+			depthFormat: "depth-component24",
+			exteriorDrawCalls: this.#lastExteriorSceneDomainDrawCalls,
+			height: this.#sceneDomainTargets?.height ?? 0,
+			interiorDrawCalls: this.#lastInteriorSceneDomainDrawCalls,
+			width: this.#sceneDomainTargets?.width ?? 0,
+		};
 	}
 
 	#configureDebugOverlayVertexArray(): void {
@@ -1536,6 +1683,7 @@ interface StaticObjectGeometryResource {
 	readonly indexBuffer: WebGLBuffer;
 	readonly drawUnitId: string;
 	readonly landblockId: StaticObjectGeometryStaticDrawUnit["landblockId"];
+	readonly domain: StaticObjectGeometryStaticDrawUnit["domain"];
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
 	readonly materialEntries: StaticObjectGeometryStaticDrawUnit["materialEntries"];
@@ -1548,6 +1696,9 @@ interface StaticObjectGeometryResource {
 	readonly triangleCount: number;
 	dispose(): void;
 }
+
+type SceneDomain = "exterior" | "interior";
+type RenderStaticDomain = SceneDomain | "single-surface-resident";
 
 type StaticMaterialGeometryResource =
 	| StaticObjectGeometryResource
@@ -1585,8 +1736,205 @@ interface TransitionApertureGeometryResource {
 	dispose(): void;
 }
 
+interface SceneDomainTargets {
+	readonly width: number;
+	readonly height: number;
+	readonly exterior: SceneDomainTarget;
+	readonly interior: SceneDomainTarget;
+	readonly compositePing: SceneDomainTarget;
+	readonly compositePong: SceneDomainTarget;
+	dispose(): void;
+}
+
+interface SceneDomainTarget {
+	readonly label: string;
+	readonly width: number;
+	readonly height: number;
+	readonly framebuffer: WebGLFramebuffer;
+	readonly colorTexture: WebGLTexture;
+	readonly depthTexture: WebGLTexture;
+	dispose(): void;
+}
+
 interface RenderedTriangleResource {
 	readonly triangleCount: number;
+}
+
+function createSceneDomainTargets(
+	gl: WebGL2RenderingContext,
+	width: number,
+	height: number,
+): SceneDomainTargets {
+	const exterior = createSceneDomainTarget(gl, "exterior scene", width, height);
+	try {
+		const interior = createSceneDomainTarget(gl, "interior scene", width, height);
+		try {
+			const compositePing = createSceneDomainTarget(
+				gl,
+				"composite ping",
+				width,
+				height,
+			);
+			try {
+				const compositePong = createSceneDomainTarget(
+					gl,
+					"composite pong",
+					width,
+					height,
+				);
+				return {
+					compositePing,
+					compositePong,
+					exterior,
+					height,
+					interior,
+					width,
+					dispose() {
+						exterior.dispose();
+						interior.dispose();
+						compositePing.dispose();
+						compositePong.dispose();
+					},
+				};
+			} catch (error) {
+				compositePing.dispose();
+				throw error;
+			}
+		} catch (error) {
+			interior.dispose();
+			throw error;
+		}
+	} catch (error) {
+		exterior.dispose();
+		throw error;
+	}
+}
+
+function createSceneDomainTarget(
+	gl: WebGL2RenderingContext,
+	label: string,
+	width: number,
+	height: number,
+): SceneDomainTarget {
+	const colorTexture = createSceneDomainColorTexture(gl, width, height);
+	try {
+		const depthTexture = createSceneDomainDepthTexture(gl, width, height);
+		try {
+			const framebuffer = gl.createFramebuffer();
+			if (!framebuffer) {
+				throw new Error(`Failed to create WebGL2 ${label} framebuffer.`);
+			}
+			gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+			gl.framebufferTexture2D(
+				gl.FRAMEBUFFER,
+				gl.COLOR_ATTACHMENT0,
+				gl.TEXTURE_2D,
+				colorTexture,
+				0,
+			);
+			gl.framebufferTexture2D(
+				gl.FRAMEBUFFER,
+				gl.DEPTH_ATTACHMENT,
+				gl.TEXTURE_2D,
+				depthTexture,
+				0,
+			);
+			const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+			gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+			if (status !== gl.FRAMEBUFFER_COMPLETE) {
+				gl.deleteFramebuffer(framebuffer);
+				throw new Error(
+					`WebGL2 ${label} framebuffer is incomplete: 0x${status.toString(16)}.`,
+				);
+			}
+
+			return {
+				colorTexture,
+				depthTexture,
+				framebuffer,
+				height,
+				label,
+				width,
+				dispose() {
+					gl.deleteFramebuffer(framebuffer);
+					gl.deleteTexture(colorTexture);
+					gl.deleteTexture(depthTexture);
+				},
+			};
+		} catch (error) {
+			gl.deleteTexture(depthTexture);
+			throw error;
+		}
+	} catch (error) {
+		gl.deleteTexture(colorTexture);
+		throw error;
+	}
+}
+
+function createSceneDomainColorTexture(
+	gl: WebGL2RenderingContext,
+	width: number,
+	height: number,
+): WebGLTexture {
+	const texture = createSceneDomainTexture(gl);
+	gl.texImage2D(
+		gl.TEXTURE_2D,
+		0,
+		gl.RGB8,
+		width,
+		height,
+		0,
+		gl.RGB,
+		gl.UNSIGNED_BYTE,
+		null,
+	);
+	gl.bindTexture(gl.TEXTURE_2D, null);
+	return texture;
+}
+
+function createSceneDomainDepthTexture(
+	gl: WebGL2RenderingContext,
+	width: number,
+	height: number,
+): WebGLTexture {
+	const texture = createSceneDomainTexture(gl);
+	gl.texImage2D(
+		gl.TEXTURE_2D,
+		0,
+		gl.DEPTH_COMPONENT24,
+		width,
+		height,
+		0,
+		gl.DEPTH_COMPONENT,
+		gl.UNSIGNED_INT,
+		null,
+	);
+	gl.bindTexture(gl.TEXTURE_2D, null);
+	return texture;
+}
+
+function createSceneDomainTexture(gl: WebGL2RenderingContext): WebGLTexture {
+	const texture = gl.createTexture();
+	if (!texture) {
+		throw new Error("Failed to create WebGL2 scene-domain texture.");
+	}
+	gl.bindTexture(gl.TEXTURE_2D, texture);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+	gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+	return texture;
+}
+
+function shouldDrawStaticObjectResourceInDomain(
+	resource: StaticObjectGeometryResource,
+	domain: RenderStaticDomain,
+): boolean {
+	if (domain === "single-surface-resident") {
+		return true;
+	}
+	const isInteriorStaticObject = resource.domain === "landblock-env-cells";
+	return domain === "interior" ? isInteriorStaticObject : !isInteriorStaticObject;
 }
 
 function createTerrainGeometryProgram(
@@ -2045,6 +2393,7 @@ function createStaticObjectGeometryResource(
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
 
 	return {
+		domain: drawUnit.domain,
 		drawUnitId: drawUnit.drawUnitId,
 		indexBuffer,
 		indexCount: drawUnit.indices.length,

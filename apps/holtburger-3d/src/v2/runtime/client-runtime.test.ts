@@ -9,10 +9,10 @@ import type {
 import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
 import type {
 	DebugOverlayPrimitive,
-	PortalPassPlan,
 	Renderer,
 	RendererSnapshot,
 	RendererSnapshotListener,
+	RenderPassPlan,
 	SamplerPolicyUpdate,
 	StaticResidencyDelta,
 	TexturePlacementUpdate,
@@ -174,7 +174,8 @@ describe("V2 client runtime", () => {
 			kind: "env-cell",
 			landblockId: 0xda55ffff,
 		});
-		expect(renderer.portalPassPlans.at(-1)).toEqual({
+		expect(renderer.renderPassPlans.at(-1)).toEqual({
+			kind: "portal-scene-domains",
 			baseScene: {
 				envCellId: 0xda550100,
 				kind: "interior",
@@ -188,7 +189,8 @@ describe("V2 client runtime", () => {
 				kind: "env-cell",
 				landblockId: 0xda55ffff,
 			},
-			portalPassPlan: {
+			renderPassPlan: {
+				kind: "portal-scene-domains",
 				baseScene: {
 					envCellId: 0xda550100,
 					kind: "interior",
@@ -217,14 +219,17 @@ describe("V2 client runtime", () => {
 			}),
 		});
 
-		expect(runtime.createDiagnosticsReport().runtime.portalPassPlan).toBeNull();
+		expect(runtime.createDiagnosticsReport().runtime.renderPassPlan).toEqual({
+			kind: "single-surface-resident",
+		});
 
 		runtime.setCurrentCameraResidency({
 			kind: "outdoor-landblock",
 			landblockId: 0xda55ffff,
 		});
 
-		expect(renderer.portalPassPlans.at(-1)).toEqual({
+		expect(renderer.renderPassPlans.at(-1)).toEqual({
+			kind: "portal-scene-domains",
 			baseScene: {
 				kind: "exterior",
 				landblockId: 0xda55ffff,
@@ -237,7 +242,8 @@ describe("V2 client runtime", () => {
 			landblockId: 0xdb55ffff,
 		});
 
-		expect(renderer.portalPassPlans.at(-1)).toEqual({
+		expect(renderer.renderPassPlans.at(-1)).toEqual({
+			kind: "portal-scene-domains",
 			baseScene: {
 				kind: "exterior",
 				landblockId: 0xdb55ffff,
@@ -262,7 +268,8 @@ describe("V2 client runtime", () => {
 
 		updateOutdoorSceneInterest(runtime);
 
-		expect(renderer.portalPassPlans.at(-1)).toEqual({
+		expect(renderer.renderPassPlans.at(-1)).toEqual({
+			kind: "portal-scene-domains",
 			baseScene: {
 				kind: "exterior",
 				landblockId: 0xda55ffff,
@@ -1025,7 +1032,7 @@ class FakeRenderer implements Renderer {
 	readonly debugOverlayUpdates: readonly DebugOverlayPrimitive[][] = [];
 	readonly textureUpdates: TexturePlacementUpdate[] = [];
 	readonly samplerPolicyUpdates: SamplerPolicyUpdate[] = [];
-	readonly portalPassPlans: (PortalPassPlan | null)[] = [];
+	readonly renderPassPlans: RenderPassPlan[] = [];
 	readonly events: string[] = [];
 	readonly #listeners = new Set<RendererSnapshotListener>();
 	#snapshot: RendererSnapshot = {
@@ -1037,10 +1044,22 @@ class FakeRenderer implements Renderer {
 		frameCount: 0,
 		frameHandlerMs: 0,
 		isRunning: true,
-		portalPassPlan: null,
+		renderPassPlan: { kind: "single-surface-resident" },
 		renderedTriangles: 0,
+		sceneDomainTargets: {
+			active: false,
+			allocationFailures: 0,
+			colorFormat: "rgb8",
+			depthFormat: "depth-component24",
+			exteriorDrawCalls: 0,
+			height: 0,
+			interiorDrawCalls: 0,
+			width: 0,
+		},
 		staticDrawUnits: 0,
 		terrainDrawUnits: 0,
+		transitionApertureBatches: 0,
+		transitionApertures: 0,
 	};
 
 	applyStaticDelta(delta: StaticResidencyDelta): void {
@@ -1074,11 +1093,11 @@ class FakeRenderer implements Renderer {
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void {
 		this.staticAnchorLandblockIds.push(anchorLandblockId);
 	}
-	setPortalPassPlan(plan: PortalPassPlan | null): void {
-		this.portalPassPlans.push(plan);
+	setRenderPassPlan(plan: RenderPassPlan): void {
+		this.renderPassPlans.push(plan);
 		this.#snapshot = {
 			...this.#snapshot,
-			portalPassPlan: plan,
+			renderPassPlan: plan,
 		};
 		this.#emit();
 	}

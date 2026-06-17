@@ -2,9 +2,10 @@ import { HostBackedAssetService } from "../assets/asset-service";
 import type { AssetService, AssetServiceSnapshot } from "../assets/contracts";
 import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
 import type {
-	PortalPassPlan,
 	Renderer,
 	RendererSnapshot,
+	RenderPassPlan,
+	SceneDomainTargetSnapshot,
 } from "../renderer/types";
 import type { DebugOverlayPrimitive, FrameState } from "../renderer/types";
 import { formatHex32, normalizeOutdoorLandblockId } from "../../lib/landblocks";
@@ -100,7 +101,7 @@ export interface RuntimeSnapshot {
 	readonly renderPolicy: RuntimeRenderPolicySnapshot;
 	readonly sceneInterest: RuntimeSceneInterest;
 	readonly currentCameraResidency: RuntimeCameraResidency;
-	readonly portalPassPlan: PortalPassPlan | null;
+	readonly renderPassPlan: RenderPassPlan;
 	readonly debugOverlays: RuntimeDebugOverlaySnapshot;
 	readonly assets: AssetServiceSnapshot;
 	readonly host: RuntimeHostSnapshot;
@@ -443,8 +444,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 			frameCount: 0,
 			frameHandlerMs: 0,
 			isRunning: true,
-			portalPassPlan: null,
+			renderPassPlan: { kind: "single-surface-resident" },
 			renderedTriangles: 0,
+			sceneDomainTargets: createEmptySceneDomainTargetSnapshot(),
 			staticDrawUnits: 0,
 			terrainDrawUnits: 0,
 			transitionApertureBatches: 0,
@@ -510,9 +512,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 
 		this.#currentCameraResidency = normalized;
-		const portalPassPlanChanged = this.#updatePortalPassPlan();
+		const renderPassPlanChanged = this.#updateRenderPassPlan();
 		this.#refreshStaticDebugOverlay();
-		if (!portalPassPlanChanged) {
+		if (!renderPassPlanChanged) {
 			this.#emit();
 		}
 	}
@@ -616,7 +618,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					snapshot.staticMaterialization.committedRevisions,
 				currentCameraResidency: snapshot.currentCameraResidency,
 				failedStaticMaterializations: snapshot.staticMaterialization.failed,
-				portalPassPlan: snapshot.portalPassPlan,
+				renderPassPlan: snapshot.renderPassPlan,
 				sceneInterest: createSceneInterestSummary(snapshot.sceneInterest),
 				materializedStaticDrawUnits:
 					snapshot.staticMaterialization.materializedDrawUnits,
@@ -671,7 +673,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#renderAnchorLandblockId = nextAnchorLandblockId;
 		this.#staticSceneQuery.setOutdoorAnchorLandblockId(nextAnchorLandblockId);
 		this.#renderer.setStaticRenderAnchorLandblockId(nextAnchorLandblockId);
-		this.#updatePortalPassPlan();
+		this.#updateRenderPassPlan();
 		this.#refreshStaticDebugOverlay();
 	}
 
@@ -685,16 +687,16 @@ class ClientRuntimeImpl implements ClientRuntime {
 		return reconciliation;
 	}
 
-	#updatePortalPassPlan(): boolean {
-		const plan = derivePortalPassPlan(
+	#updateRenderPassPlan(): boolean {
+		const plan = deriveRenderPassPlan(
 			this.#currentCameraResidency,
 			this.#renderAnchorLandblockId,
 		);
-		if (portalPassPlanEquals(this.#lastRendererSnapshot.portalPassPlan, plan)) {
+		if (renderPassPlanEquals(this.#lastRendererSnapshot.renderPassPlan, plan)) {
 			return false;
 		}
 
-		this.#renderer.setPortalPassPlan(plan);
+		this.#renderer.setRenderPassPlan(plan);
 		return true;
 	}
 
@@ -716,7 +718,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					this.#transitionApertureDebugOverlayVisible,
 			},
 			host: this.#host.createSnapshot(),
-			portalPassPlan: this.#lastRendererSnapshot.portalPassPlan,
+			renderPassPlan: this.#lastRendererSnapshot.renderPassPlan,
 			renderPolicy: {
 				textureFilteringMode: this.#textureManager.filteringMode,
 			},
@@ -1679,12 +1681,13 @@ function normalizeCameraResidency(
 	};
 }
 
-function derivePortalPassPlan(
+function deriveRenderPassPlan(
 	residency: RuntimeCameraResidency,
 	fallbackExteriorLandblockId: number | null,
-): PortalPassPlan | null {
+): RenderPassPlan {
 	if (residency.kind === "env-cell") {
 		return {
+			kind: "portal-scene-domains",
 			baseScene: {
 				envCellId: residency.envCellId,
 				kind: "interior",
@@ -1699,10 +1702,11 @@ function derivePortalPassPlan(
 			? residency.landblockId
 			: (residency.landblockId ?? fallbackExteriorLandblockId);
 	if (exteriorLandblockId === null) {
-		return null;
+		return { kind: "single-surface-resident" };
 	}
 
 	return {
+		kind: "portal-scene-domains",
 		baseScene: {
 			kind: "exterior",
 			landblockId: exteriorLandblockId,
@@ -1711,12 +1715,19 @@ function derivePortalPassPlan(
 	};
 }
 
-function portalPassPlanEquals(
-	left: PortalPassPlan | null,
-	right: PortalPassPlan | null,
+function renderPassPlanEquals(
+	left: RenderPassPlan,
+	right: RenderPassPlan,
 ): boolean {
-	if (left === null || right === null) {
-		return left === right;
+	if (left.kind !== right.kind) {
+		return false;
+	}
+
+	if (left.kind === "single-surface-resident") {
+		return true;
+	}
+	if (right.kind === "single-surface-resident") {
+		return false;
 	}
 
 	if (
@@ -1740,6 +1751,19 @@ function portalPassPlanEquals(
 	}
 
 	return leftBase.envCellId === rightBase.envCellId;
+}
+
+function createEmptySceneDomainTargetSnapshot(): SceneDomainTargetSnapshot {
+	return {
+		active: false,
+		allocationFailures: 0,
+		colorFormat: "rgb8",
+		depthFormat: "depth-component24",
+		exteriorDrawCalls: 0,
+		height: 0,
+		interiorDrawCalls: 0,
+		width: 0,
+	};
 }
 
 function cameraResidencyEquals(

@@ -2120,7 +2120,7 @@ Verification:
 
 ### Phase 13B1h0: Transition Composite Work Planner
 
-Status: planned.
+Status: complete on 2026-06-17.
 
 Purpose: turn the pass plan, current camera state, and transition aperture resources into deterministic per-depth composite work before adding the WebGL composite shader/framebuffer loop.
 
@@ -2147,6 +2147,37 @@ Acceptance criteria:
 - Composite work can be planned from explicit `RenderPassPlan` plus transition aperture resources without walking renderer WebGL objects.
 - The output is deterministic enough for 13B1h to execute one/few packed aperture draws per transition depth.
 - Any need for per-depth frontier filtering is documented as a later fallback, not silently half-implemented here.
+
+Completed implementation notes:
+
+- Added a pure transition composite planner in `renderer/transition-composite-work-plan.ts`.
+- Added `SceneDomainTargetKind = "exterior" | "interior"` as the per-target input discriminator. The work plan retains the full `baseScene: PortalSceneDomain`, but per-depth current/source scene-domain inputs intentionally stay target-level because an exterior base scene does not identify a single opposite env cell.
+- Added `TransitionCompositeWorkPlan`:
+  - `single-surface-resident` produces `{ kind: "none" }`;
+  - `portal-scene-domains` produces max-depth-bounded per-depth work;
+  - each depth alternates current/source targets from the base scene;
+  - each depth carries desired transition direction and the cull face implied by `frontFace: "indoor-visible"`;
+  - aperture batches are filtered to the base landblock and preserved in input order.
+- Added a small batch-input adapter from baked `TransitionApertureBatch` metadata so 13B1h can plan from resource metadata without reading WebGL buffers/VAOs.
+- Added tests for:
+  - empty work under `single-surface-resident`;
+  - exterior-base direction alternation;
+  - interior-base direction alternation while retaining the full interior `PortalSceneDomain`;
+  - stable aperture batch ordering and base-landblock filtering;
+  - empty/malformed packed-batch metadata not entering draw work;
+  - deriving planner input from baked transition aperture batches.
+
+Spicy / failed to close:
+
+- The planner deliberately does not add per-depth frontier filtering. It filters by base landblock and relies on cull direction plus the future propagated-depth shader path for pixel correctness. If 13B1h leaks unrelated apertures through overlapping screen projections, add a compact range-filter fallback there with evidence from the composite path.
+- Per-depth current/source scene-domain inputs are target-level, not `PortalSceneDomain`, because `PortalSceneDomain` is an authoritative residency/base-scene type and cannot represent "the whole interior target" without inventing a fake env-cell. Keep that separation unless the render target model becomes per-cell.
+- This phase still does not draw portal composites. 13B1h must consume the work plan, bind the packed aperture VAOs, and execute the RGB8/depth24 ping-pong composite loop.
+
+Verification:
+
+- `npm run check`
+- `npm run lint:ts`
+- `npm run test:ts`
 
 ### Phase 13B1h: Depth-Carrying Direct Transition Portal Composite Passes
 

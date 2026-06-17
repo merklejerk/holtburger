@@ -2075,7 +2075,7 @@ Deliverables:
 - Exterior target render path for terrain/outdoor static resources and interior target render path for structured interiors/env-cell static resources.
 - Color/depth target allocation helpers for exterior, interior, and later composite targets, with resize/dispose handling and framebuffer completeness checks.
 - WebGL2 context creation policy update that requests `antialias: false` for V2 rendering.
-- Metrics for exterior/interior target draw calls and target allocation failures.
+- Metrics for exterior/interior target draw calls. Allocation failures should log loudly and fail through the renderer error path rather than accumulating diagnostic counters.
 
 Acceptance criteria:
 
@@ -2098,18 +2098,18 @@ Completed implementation notes:
   - color textures use `RGB8`;
   - depth textures use sampleable `DEPTH_COMPONENT24`;
   - textures use nearest filtering, clamp-to-edge wrapping, and no mipmaps;
-  - framebuffer completeness failures throw and increment renderer allocation-failure metrics.
+  - framebuffer completeness failures log loudly and throw through the renderer error path.
 - Added renderer pass routing:
   - `single-surface-resident` renders the existing resident terrain/static/interior path directly to the display surface;
   - `portal-scene-domains` renders terrain plus outdoor static resources to the exterior target, env-cell static resources plus structured interiors to the interior target, then blits the selected base scene target to the display surface.
-- Added renderer snapshot metrics for scene-domain target size, formats, allocation failures, and exterior/interior draw calls.
+- Added renderer snapshot metrics for scene-domain target size, formats, and exterior/interior draw calls.
 - Added focused renderer test coverage proving `antialias: false` and `RGB8`/`DEPTH_COMPONENT24` scene-domain allocation.
 
 Spicy / failed to close:
 
 - Interior rendering is domain-separated but not yet per-cell/portal-visible clipped. The interior target currently draws all resident env-cell static resources and structured interiors. That is acceptable for 13B1g because visibility planning/compositing belongs to 13B1h0/13B1h, but it should not be mistaken for final portal correctness.
 - 13B1g allocates composite ping/pong targets with the final RGB8/depth24 policy, but does not execute composite passes yet. 13B1h0/13B1h must consume them rather than introducing a parallel target model.
-- Scene-domain target allocation failures are exposed in renderer diagnostics, but a failure during frame rendering still puts the renderer into its existing fatal error/dispose path. That is intentional for now: failing hard is better than silently falling back to unsampleable depth.
+- Scene-domain target allocation failure uses `console.error` and the existing fatal renderer error/dispose path rather than durable diagnostic counters. This is intentional: diagnostics should expose current operational facts, not become a journal of failed attempts.
 
 Verification:
 

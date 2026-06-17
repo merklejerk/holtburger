@@ -482,7 +482,9 @@ describe("V2 client runtime", () => {
 		expect(renderer.staticDeltas).toEqual([
 			{
 				addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xdb55ffff)],
+				addedTransitionApertureBatches: [],
 				removedDrawUnitIds: [],
+				removedTransitionApertureBatchIds: [],
 				revision: 1,
 			},
 		]);
@@ -493,7 +495,9 @@ describe("V2 client runtime", () => {
 
 		expect(renderer.staticDeltas.at(-1)).toEqual({
 			addedDrawUnits: [],
+			addedTransitionApertureBatches: [],
 			removedDrawUnitIds: ["terrain-a"],
+			removedTransitionApertureBatchIds: [],
 			revision: 2,
 		});
 		expect(renderer.staticAnchorLandblockIds.at(-1)).toBeNull();

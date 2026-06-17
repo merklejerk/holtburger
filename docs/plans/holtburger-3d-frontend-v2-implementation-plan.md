@@ -1910,7 +1910,7 @@ Spicy/residual:
 
 ### Phase 13B1f: Transition Aperture Geometry Resource Sync
 
-Status: planned.
+Status: complete on 2026-06-17.
 
 Purpose: feed packed transition aperture batches into renderer aperture geometry resources without adding a static bake draw-unit family or requiring one draw call per portal.
 
@@ -1947,6 +1947,85 @@ Acceptance criteria:
 - No portal mask or aperture `StaticDrawUnit` is added to the bake result contract.
 - Clearing or replacing V2 portal records removes stale aperture resources.
 - The intended render path can draw packed transition apertures one/few times per transition depth without per-portal geometry construction or per-portal draw calls.
+
+Implementation notes:
+
+- Added `StaticResourceKey.kind === "transition-aperture-batch"` alongside draw-unit resources. Draw-unit collection helpers still return only draw-unit ids; transition aperture ids have their own helper so future resource kinds do not get squeezed through draw-unit-shaped APIs.
+- Extended `StaticResidencyDelta` with `addedTransitionApertureBatches` and `removedTransitionApertureBatchIds`. The fields are explicit/required so tests and mocks cannot silently ignore aperture resource residency.
+- Runtime now derives packed aperture geometry resources from `StaticSceneQuery.queryTransitionApertureBatches()` after retained-scope reconciliation and after static peer records commit. It diffs current batch ids and deterministic batch signatures against uploaded resources, then sends renderer add/remove or same-id replacement aperture resources without involving `StaticDrawUnit`.
+- WebGL2 now uploads each aperture batch into VAO/VBO/IBO resources and tracks `transitionApertureBatches`/`transitionApertures` in renderer snapshots. These resources intentionally do not affect `staticDrawUnits` or `renderedTriangles` until 13B1h draws them in portal/composite passes.
+- The renderer payload preserves `frontFace: "indoor-visible"` and per-aperture `portalId`/`envCellId`/`firstIndex`/`indexCount` ranges. It does not rewrite winding, partition per portal, or build geometry at frame/submit time.
+
+Spicy/residual:
+
+- The initial sync is runtime-owned rather than emitted directly by the static materializer/coordinator because aperture batches are derived from committed peer records in `StaticSceneQuery`, not baked draw-unit output. This proved the renderer upload/resource shape, but it is not the final lifecycle model. Phase 13B1f-1 must move aperture resource ownership into the static bake/coordinator pipeline before 13B1g/13B1h build on it.
+- Diagnostics expose renderer resource counts; malformed aperture omissions still scream via `console.error(...)` at batch derivation time and are not durable records. If we need omission counts later, prefer an operational aggregate from the batch builder, not another verbose diagnostics inventory.
+- No portal mask/composite draw path exists yet. This phase only proves packed geometry upload/lifecycle for 13B1g/13B1h.
+
+### Phase 13B1f-1: Bake-Owned Transition Aperture Resource Lifecycle Course Correction
+
+Status: planned; immediate next phase before 13B1g.
+
+Purpose: move transition aperture GPU-resource residency out of runtime-owned `StaticSceneQuery` diffing and into the same static bake/coordinator resource lifecycle that controls draw units, while keeping aperture geometry as render-control resources rather than `StaticDrawUnit`s.
+
+Why this phase exists:
+
+- Phase 13B1f intentionally proved that WebGL2 can upload one packed VAO/VBO/IBO aperture resource per landblock batch, but the first implementation drives those resources by diffing `StaticSceneQuery.queryTransitionApertureBatches()` in `ClientRuntimeImpl`.
+- That diff loop is too close to the V1 bottleneck pattern: observe mutable query/runtime state, compute desired renderer resources, then push imperative renderer mutations outside the static commit stream.
+- The V2 design direction says `StaticSceneQuery` owns semantic query indexes, picking, and visibility-query primitives. It should not control GPU resource residency.
+- Transition aperture batches are scope-owned static render-control resources. Their creation belongs in the `landblock-env-cells` bake path; their residency/eviction belongs to `StaticCoordinator`; their GPU objects belong to the renderer.
+
+Required lifecycle after this phase:
+
+```text
+scene interest / retained scopes
+  -> StaticCoordinator schedules landblock-env-cells work
+  -> resolver emits source payload
+  -> baker emits:
+       drawUnits[]
+       peerRecords[]
+       transitionApertureBatches[]
+  -> StaticCoordinator registers emitted resources under the work's desired key/scope
+  -> StaticCoordinatorCommitDelta carries added transition aperture batches
+  -> materializer forwards aperture batches into StaticResidencyDelta
+  -> renderer uploads VAO/VBO/IBO
+
+scope eviction
+  -> StaticCoordinator removes all resource keys owned by evicted scopes
+  -> StaticResidencyDelta removes draw-unit and transition-aperture-batch resources
+  -> StaticSceneQuery.retainScopes(...) prunes semantic/query records separately
+```
+
+Deliverables:
+
+- Add `transitionApertureBatches` to the static bake result/commit contract as renderer-ready render-control resources, not `StaticDrawUnit`s.
+- Move packed transition aperture derivation into the `landblock-env-cells` bake path or a bake-owned helper invoked from that path. The helper may share pure geometry/topology functions with query/debug code, but the baker must be the producer of renderer-resource batches.
+- Register emitted transition aperture batch resource keys in `StaticCoordinator` under the same desired-key/scope ownership model used for draw units.
+- Extend `StaticCoordinatorCommitDelta` and `StaticMaterializationResult.staticDelta` so added aperture batches flow through the normal commit/materialization/apply path.
+- Remove `ClientRuntimeImpl.#syncTransitionApertureResources`, `#uploadedTransitionApertureBatchSignatures`, and any renderer-resource diffing driven from `StaticSceneQuery`.
+- Keep `StaticSceneQuery.queryTransitionApertureBatches()` only if it remains useful as a semantic/debug query. It must not be the source of renderer GPU residency.
+- Preserve the existing WebGL2 aperture resource upload shape from 13B1f: one packed indexed batch per landblock, preserved `frontFace: "indoor-visible"`, and per-aperture range metadata.
+
+Acceptance criteria:
+
+- Committing a `landblock-env-cells` bake that contains transition portals produces `StaticResidencyDelta.addedTransitionApertureBatches` without runtime querying/diffing `StaticSceneQuery`.
+- Evicting the owning landblock/env-cell scope produces `removedResources` with `kind: "transition-aperture-batch"` and the renderer removes the corresponding aperture resource through the standard static delta path.
+- Replacing/rebaking the same scope replaces the aperture batch through the static commit stream, not through a runtime signature diff.
+- `StaticSceneQuery` can be deleted from the renderer-resource upload path without changing renderer aperture resource behavior.
+- No portal aperture `StaticDrawUnit` is introduced.
+- Tests prove added, removed, and same-scope replacement aperture resource behavior at the coordinator/materializer/runtime boundary.
+
+Implementation constraints:
+
+- Do not add a second portal cleanup API on runtime or renderer.
+- Do not add durable `skipped` records for malformed apertures. Invalid bake inputs should fail hard when they indicate our logic is inconsistent, or emit bounded console-visible diagnostics only when source data is malformed/non-renderable.
+- Do not rebuild or triangulate transition apertures in the render loop, frame submission path, or portal compositing pass.
+- Do not make `StaticSceneQuery` a generic resource store. It remains a semantic query/index service.
+
+Spicy/residual to close in this phase:
+
+- The current runtime diff loop exists in code after 13B1f. This phase is not complete until that loop is gone.
+- The existing 13B1f renderer upload tests should remain useful, but runtime tests should be rewritten around commit-driven aperture deltas instead of query-driven sync.
 
 ### Phase 13B1g: Scene-Domain Render Targets
 

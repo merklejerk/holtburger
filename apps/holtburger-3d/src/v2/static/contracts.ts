@@ -60,11 +60,18 @@ export interface StaticRetentionReconciliation {
 	readonly removedResources: readonly StaticResourceKey[];
 }
 
-export type StaticResourceKey = StaticDrawUnitResourceKey;
+export type StaticResourceKey =
+	| StaticDrawUnitResourceKey
+	| StaticTransitionApertureBatchResourceKey;
 
 export interface StaticDrawUnitResourceKey {
 	readonly kind: "draw-unit";
 	readonly drawUnitId: string;
+}
+
+export interface StaticTransitionApertureBatchResourceKey {
+	readonly kind: "transition-aperture-batch";
+	readonly apertureBatchId: string;
 }
 
 export function collectStaticDrawUnitResourceIds(
@@ -72,6 +79,16 @@ export function collectStaticDrawUnitResourceIds(
 ): readonly string[] {
 	return resources.flatMap((resource) =>
 		resource.kind === "draw-unit" ? [resource.drawUnitId] : [],
+	);
+}
+
+export function collectStaticTransitionApertureBatchResourceIds(
+	resources: readonly StaticResourceKey[],
+): readonly string[] {
+	return resources.flatMap((resource) =>
+		resource.kind === "transition-aperture-batch"
+			? [resource.apertureBatchId]
+			: [],
 	);
 }
 

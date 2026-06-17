@@ -180,7 +180,9 @@ describe("V2 WebGL2 structured interior rendering", () => {
 
 		renderer.applyStaticDelta({
 			addedDrawUnits: [createStructuredInteriorDrawUnit()],
+			addedTransitionApertureBatches: [],
 			removedDrawUnitIds: [],
+			removedTransitionApertureBatchIds: [],
 			revision: 1,
 		});
 		expect(latestSnapshot.staticDrawUnits).toBe(1);
@@ -200,7 +202,9 @@ describe("V2 WebGL2 structured interior rendering", () => {
 
 		renderer.applyStaticDelta({
 			addedDrawUnits: [],
+			addedTransitionApertureBatches: [],
 			removedDrawUnitIds: ["structured-interior-a"],
+			removedTransitionApertureBatchIds: [],
 			revision: 2,
 		});
 		expect(latestSnapshot.staticDrawUnits).toBe(0);
@@ -208,6 +212,77 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		gl.drawElementsCalls.length = 0;
 		pendingFrame?.(32);
 		expect(gl.drawElementsCalls).toEqual([]);
+
+		renderer.dispose();
+	});
+
+	it("uploads and removes transition aperture batches as non-draw-unit resources", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+		let latestSnapshot = rendererSnapshotPlaceholder();
+		renderer.subscribe((snapshot) => {
+			latestSnapshot = snapshot;
+		});
+
+		renderer.applyStaticDelta({
+			addedDrawUnits: [],
+			addedTransitionApertureBatches: [
+				{
+					apertureBatchId: "transition-aperture-batch:da55ffff",
+					frontFace: "indoor-visible",
+					indices: [0, 1, 2],
+					indexType: "uint16",
+					landblockId: 0xda55ffff,
+					ranges: [
+						{
+							envCellId: 0xda550100,
+							firstIndex: 0,
+							indexCount: 3,
+							portalId: "transition-portal:0",
+						},
+					],
+					vertices: [
+						{ x: 0, y: 0, z: 0 },
+						{ x: 1, y: 0, z: 0 },
+						{ x: 0, y: 1, z: 0 },
+					],
+				},
+			],
+			removedDrawUnitIds: [],
+			removedTransitionApertureBatchIds: [],
+			revision: 1,
+		});
+
+		expect(latestSnapshot.staticDrawUnits).toBe(0);
+		expect(latestSnapshot.renderedTriangles).toBe(0);
+		expect(latestSnapshot.transitionApertureBatches).toBe(1);
+		expect(latestSnapshot.transitionApertures).toBe(1);
+		expect(gl.bufferDataTargets).toEqual(
+			expect.arrayContaining([
+				gl.ARRAY_BUFFER,
+				gl.ELEMENT_ARRAY_BUFFER,
+			]),
+		);
+
+		renderer.applyStaticDelta({
+			addedDrawUnits: [],
+			addedTransitionApertureBatches: [],
+			removedDrawUnitIds: [],
+			removedTransitionApertureBatchIds: [
+				"transition-aperture-batch:da55ffff",
+			],
+			revision: 2,
+		});
+
+		expect(latestSnapshot.transitionApertureBatches).toBe(0);
+		expect(latestSnapshot.transitionApertures).toBe(0);
 
 		renderer.dispose();
 	});
@@ -343,6 +418,8 @@ function rendererSnapshotPlaceholder() {
 		renderedTriangles: 0,
 		staticDrawUnits: 0,
 		terrainDrawUnits: 0,
+		transitionApertureBatches: 0,
+		transitionApertures: 0,
 	};
 }
 

@@ -5,7 +5,10 @@ import {
 	MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
 	MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
 } from "../renderer/types";
-import { collectStaticDrawUnitResourceIds } from "../static/contracts";
+import {
+	collectStaticDrawUnitResourceIds,
+	collectStaticTransitionApertureBatchResourceIds,
+} from "../static/contracts";
 import type {
 	StaticResidencyDelta,
 	TextureDrawUnitBinding,
@@ -78,7 +81,10 @@ export function materializeStaticCommit(
 		...materializeStaticPeerRecords(input.commit, finePartitioned),
 		staticDelta: {
 			addedDrawUnits: finePartitioned.drawUnits,
+			addedTransitionApertureBatches: [],
 			removedDrawUnitIds: collectStaticDrawUnitResourceIds(removedResources),
+			removedTransitionApertureBatchIds:
+				collectStaticTransitionApertureBatchResourceIds(removedResources),
 			revision: input.commit.revision,
 		},
 		textureUpdate,
@@ -738,15 +744,20 @@ function materializeRemovedStaticResources(
 		return removedResources;
 	}
 
-	return removedResources.flatMap((resource) =>
-		resource.kind === "draw-unit"
-			? (
-					materializedDrawUnitIdsBySourceDrawUnitId.get(
-						resource.drawUnitId,
-					) ?? [resource.drawUnitId]
-				).map((drawUnitId) => ({ drawUnitId, kind: "draw-unit" as const }))
-			: [resource],
-	);
+	const materializedResources: StaticResourceKey[] = [];
+	for (const resource of removedResources) {
+		if (resource.kind !== "draw-unit") {
+			materializedResources.push(resource);
+			continue;
+		}
+
+		for (const drawUnitId of materializedDrawUnitIdsBySourceDrawUnitId.get(
+			resource.drawUnitId,
+		) ?? [resource.drawUnitId]) {
+			materializedResources.push({ drawUnitId, kind: "draw-unit" });
+		}
+	}
+	return materializedResources;
 }
 
 function assertTexturedDrawUnitsHaveCommittedBindings(

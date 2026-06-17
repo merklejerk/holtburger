@@ -1964,7 +1964,7 @@ Spicy/residual:
 
 ### Phase 13B1f-1: Bake-Owned Transition Aperture Resource Lifecycle Course Correction
 
-Status: planned; immediate next phase before 13B1g.
+Status: complete on 2026-06-17.
 
 Purpose: move transition aperture GPU-resource residency out of runtime-owned `StaticSceneQuery` diffing and into the same static bake/coordinator resource lifecycle that controls draw units, while keeping aperture geometry as render-control resources rather than `StaticDrawUnit`s.
 
@@ -2024,8 +2024,12 @@ Implementation constraints:
 
 Spicy/residual to close in this phase:
 
-- The current runtime diff loop exists in code after 13B1f. This phase is not complete until that loop is gone.
-- The existing 13B1f renderer upload tests should remain useful, but runtime tests should be rewritten around commit-driven aperture deltas instead of query-driven sync.
+- Closed: `StaticBakeBatchResult`, `StaticCoordinatorCommitDelta`, and renderer `StaticResidencyDelta` now share the static-contract `TransitionApertureBatch` shape. The renderer-local `TransitionApertureGeometryBatch`/`indexType` duplicate was removed; WebGL upload computes the index buffer type at upload time.
+- Closed: `landblock-env-cells` baking emits transition aperture batches through a bake-owned helper, while `StaticSceneQuery.queryTransitionApertureBatches()` now calls that helper only for semantic/debug visualization. It no longer drives renderer resource residency.
+- Closed: `StaticCoordinator` tracks scope-owned `StaticResourceKey`s instead of only draw-unit ids. Eviction removes draw units and transition aperture batches through the same resource-keyed commit path; `committedDrawUnits` remains derived from the draw-unit subset.
+- Closed: `ClientRuntimeImpl.#syncTransitionApertureResources`, `#uploadedTransitionApertureBatchSignatures`, and the runtime geometry/signature adapters were removed. Runtime now applies aperture GPU changes only through materialized static commit deltas.
+- Verified: `npm run check`, `npm run lint:ts`, and `npm run test:ts` pass for `apps/holtburger-3d`.
+- Spicy but acceptable: same-scope replacement is structurally commit-stream driven and renderer upload overwrites an existing aperture batch id, but this phase added focused coordinator eviction and materializer passthrough tests rather than a bespoke rebake/replacement coordinator test. Add that only if replacement churn becomes a real failure mode.
 
 ### Phase 13B1g: Scene-Domain Render Targets
 

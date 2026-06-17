@@ -236,13 +236,19 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			addedTransitionApertureBatches: [
 				{
 					apertureBatchId: "transition-aperture-batch:da55ffff",
+					coordinateSpace: "landblock-render-local",
 					frontFace: "indoor-visible",
 					indices: [0, 1, 2],
-					indexType: "uint16",
+					kind: "transition-aperture-batch",
 					landblockId: 0xda55ffff,
+					planes: [null],
 					ranges: [
 						{
 							envCellId: 0xda550100,
+							exterior: {
+								kind: "outside",
+								landblockId: 0xda55ffff,
+							},
 							firstIndex: 0,
 							indexCount: 3,
 							portalId: "transition-portal:0",

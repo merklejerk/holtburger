@@ -8,6 +8,7 @@ import type {
 	StaticObjectGeometryStaticDrawUnit,
 	StaticMaterialTableEntry,
 	TerrainGeometryStaticDrawUnit,
+	TransitionApertureBatch,
 } from "../static/contracts";
 import { materializeStaticCommit } from "./static-materializer";
 
@@ -32,6 +33,27 @@ describe("V2 static materializer", () => {
 		expect(materialized.staticDelta).toEqual({
 			addedDrawUnits: [drawUnit],
 			addedTransitionApertureBatches: [],
+			removedDrawUnitIds: [],
+			removedTransitionApertureBatchIds: [],
+			revision: 7,
+		});
+	});
+
+	it("forwards committed transition aperture batches into static residency", () => {
+		const batch = createTransitionApertureBatch();
+
+		const materialized = materializeStaticCommit({
+			commit: createCommitDelta({
+				addedDrawUnits: [],
+				addedTransitionApertureBatches: [batch],
+				textureUses: [],
+			}),
+			textureUpdate: null,
+		});
+
+		expect(materialized.staticDelta).toEqual({
+			addedDrawUnits: [],
+			addedTransitionApertureBatches: [batch],
 			removedDrawUnitIds: [],
 			removedTransitionApertureBatchIds: [],
 			revision: 7,
@@ -183,6 +205,7 @@ describe("V2 static materializer", () => {
 		const materialized = materializeStaticCommit({
 			commit: {
 				addedDrawUnits: [],
+				addedTransitionApertureBatches: [],
 				removedResources: [{ drawUnitId: "static-table", kind: "draw-unit" }],
 				revision: 8,
 				staticAuthoredDynamicSeeds: [],
@@ -213,6 +236,7 @@ describe("V2 static materializer", () => {
 		const materialized = materializeStaticCommit({
 			commit: {
 				addedDrawUnits: [],
+				addedTransitionApertureBatches: [],
 				removedResources: [
 					{
 						apertureBatchId: "transition-aperture-batch:da55ffff",
@@ -245,10 +269,13 @@ describe("V2 static materializer", () => {
 
 function createCommitDelta(options: {
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
+	readonly addedTransitionApertureBatches?: readonly TransitionApertureBatch[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 }): StaticCoordinatorCommitDelta {
 	return {
 		addedDrawUnits: options.addedDrawUnits,
+		addedTransitionApertureBatches:
+			options.addedTransitionApertureBatches ?? [],
 		materialCoverage: [],
 		removedResources: [],
 		revision: 7,
@@ -259,6 +286,35 @@ function createCommitDelta(options: {
 		staticSpatialRecords: [],
 		staticVisibilityRecords: [],
 		textureUses: options.textureUses,
+	};
+}
+
+function createTransitionApertureBatch(): TransitionApertureBatch {
+	return {
+		apertureBatchId: "transition-apertures:3663069183",
+		coordinateSpace: "landblock-render-local",
+		frontFace: "indoor-visible",
+		indices: [0, 1, 2],
+		kind: "transition-aperture-batch",
+		landblockId: 0xda55ffff,
+		planes: [null],
+		ranges: [
+			{
+				envCellId: 0xda550100,
+				exterior: {
+					kind: "outside",
+					landblockId: 0xda55ffff,
+				},
+				firstIndex: 0,
+				indexCount: 3,
+				portalId: "transition-portal:3663069183:outside:3663069183:3663003904:p0",
+			},
+		],
+		vertices: [
+			{ x: 0, y: 0, z: 0 },
+			{ x: 1, y: 0, z: 0 },
+			{ x: 0, y: 1, z: 0 },
+		],
 	};
 }
 

@@ -9,7 +9,6 @@ import type {
 	StaticResidencyDelta,
 	TextureDrawUnitBinding,
 	TexturePlacementUpdate,
-	TransitionApertureGeometryBatch,
 } from "../types";
 import {
 	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
@@ -26,6 +25,7 @@ import type {
 	StaticObjectSortMetadata,
 	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
+	TransitionApertureBatch,
 } from "../../static/contracts";
 import {
 	type TextureFilteringMode,
@@ -1578,8 +1578,8 @@ interface TransitionApertureGeometryResource {
 	readonly indexBuffer: WebGLBuffer;
 	readonly apertureBatchId: string;
 	readonly landblockId: number;
-	readonly frontFace: TransitionApertureGeometryBatch["frontFace"];
-	readonly ranges: TransitionApertureGeometryBatch["ranges"];
+	readonly frontFace: TransitionApertureBatch["frontFace"];
+	readonly ranges: TransitionApertureBatch["ranges"];
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	dispose(): void;
@@ -2170,7 +2170,7 @@ function createStructuredInteriorGeometryResource(
 
 function createTransitionApertureGeometryResource(
 	gl: WebGL2RenderingContext,
-	batch: TransitionApertureGeometryBatch,
+	batch: TransitionApertureBatch,
 ): TransitionApertureGeometryResource {
 	const vertexArray = gl.createVertexArray();
 	const positionBuffer = gl.createBuffer();
@@ -2216,7 +2216,9 @@ function createTransitionApertureGeometryResource(
 		indexBuffer,
 		indexCount: batch.indices.length,
 		indexType:
-			batch.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
+			getTransitionApertureIndexType(batch) === "uint16"
+				? gl.UNSIGNED_SHORT
+				: gl.UNSIGNED_INT,
 		landblockId: batch.landblockId,
 		positionBuffer,
 		ranges: batch.ranges,
@@ -2230,15 +2232,21 @@ function createTransitionApertureGeometryResource(
 }
 
 function createTransitionApertureIndexBuffer(
-	batch: TransitionApertureGeometryBatch,
+	batch: TransitionApertureBatch,
 ): Uint16Array | Uint32Array {
-	return batch.indexType === "uint16"
+	return getTransitionApertureIndexType(batch) === "uint16"
 		? new Uint16Array(batch.indices)
 		: new Uint32Array(batch.indices);
 }
 
+function getTransitionApertureIndexType(
+	batch: TransitionApertureBatch,
+): "uint16" | "uint32" {
+	return batch.vertices.length > 0xffff ? "uint32" : "uint16";
+}
+
 function createTransitionAperturePositionBuffer(
-	batch: TransitionApertureGeometryBatch,
+	batch: TransitionApertureBatch,
 ): Float32Array {
 	const positions = new Float32Array(batch.vertices.length * 3);
 	for (

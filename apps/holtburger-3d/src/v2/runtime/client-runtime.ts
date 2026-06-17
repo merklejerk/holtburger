@@ -5,7 +5,6 @@ import type {
 	PortalPassPlan,
 	Renderer,
 	RendererSnapshot,
-	TransitionApertureGeometryBatch,
 } from "../renderer/types";
 import type { DebugOverlayPrimitive, FrameState } from "../renderer/types";
 import { formatHex32, normalizeOutdoorLandblockId } from "../../lib/landblocks";
@@ -41,6 +40,7 @@ import type {
 	StaticMaterialUnrenderedBucket,
 	ScheduledStaticWorkStatus,
 	StaticRetentionReconciliation,
+	TransitionApertureBatch,
 } from "../static/contracts";
 import { collectStaticDrawUnitResourceIds } from "../static/contracts";
 import {
@@ -58,7 +58,6 @@ import {
 	type StaticSceneCameraResidency,
 	type StaticSceneQuerySnapshot,
 	type StaticSceneSelectionKey,
-	type TransitionApertureBatch,
 	type Vec3,
 	type TerrainQuadScenePickDetails,
 } from "./static-scene-query";
@@ -402,7 +401,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		readonly string[]
 	>();
 	readonly #materializedDrawUnitsById = new Map<string, StaticDrawUnit>();
-	readonly #uploadedTransitionApertureBatchSignatures = new Map<string, string>();
 	#recentTerrainTextureFallbacks: TerrainTextureFallbackDiagnostics[] = [];
 	readonly #reportedStaticResolverFailures = new Set<string>();
 	#staticDebugSelectionKey: StaticSceneSelectionKey | null = null;
@@ -654,7 +652,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#renderer.setDebugOverlayPrimitives([]);
 		this.#staticCoordinator.dispose();
 		this.#textureManager.dispose();
-		this.#uploadedTransitionApertureBatchSignatures.clear();
 		this.#renderer.dispose();
 		this.#emit();
 		this.#listeners.clear();
@@ -685,7 +682,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 			createStaticDemandFromSceneInterest(interest),
 		);
 		this.#staticSceneQuery.retainScopes(reconciliation.retainedScopes);
-		this.#syncTransitionApertureResources();
 		return reconciliation;
 	}
 
@@ -852,7 +848,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 			spatialRecords: materialized.staticSpatialRecords,
 			visibilityRecords: materialized.staticVisibilityRecords,
 		});
-		this.#syncTransitionApertureResources();
 		this.#refreshStaticDebugOverlay();
 		this.#pendingStaticMaterializations.delete(delta.revision);
 		this.#committedStaticMaterializations = appendBoundedRevision(
@@ -860,47 +855,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 			delta.revision,
 		);
 		this.#emit();
-	}
-
-	#syncTransitionApertureResources(): void {
-		const batches = this.#staticSceneQuery.queryTransitionApertureBatches();
-		const nextBatchIds = new Set(
-			batches.map((batch) => batch.apertureBatchId),
-		);
-		const removedBatchIds = Array.from(
-			this.#uploadedTransitionApertureBatchSignatures.keys(),
-		).filter((apertureBatchId) => !nextBatchIds.has(apertureBatchId));
-		const addedBatches = batches
-			.filter((batch) => {
-				const signature = createTransitionApertureBatchSignature(batch);
-				return (
-					this.#uploadedTransitionApertureBatchSignatures.get(
-						batch.apertureBatchId,
-					) !== signature
-				);
-			})
-			.map(createTransitionApertureGeometryBatch);
-
-		if (removedBatchIds.length === 0 && addedBatches.length === 0) {
-			return;
-		}
-
-		this.#renderer.applyStaticDelta({
-			addedDrawUnits: [],
-			addedTransitionApertureBatches: addedBatches,
-			removedDrawUnitIds: [],
-			removedTransitionApertureBatchIds: removedBatchIds,
-			revision: this.#lastStaticSnapshot.revision,
-		});
-		for (const apertureBatchId of removedBatchIds) {
-			this.#uploadedTransitionApertureBatchSignatures.delete(apertureBatchId);
-		}
-		for (const batch of addedBatches) {
-			this.#uploadedTransitionApertureBatchSignatures.set(
-				batch.apertureBatchId,
-				createTransitionApertureBatchSignature(batch),
-			);
-		}
 	}
 
 	#recordStaticMaterializationFailure(revision: number, error: unknown): void {
@@ -1575,46 +1529,6 @@ function countTransitionApertures(
 	batches: readonly TransitionApertureBatch[],
 ): number {
 	return batches.reduce((count, batch) => count + batch.ranges.length, 0);
-}
-
-function createTransitionApertureGeometryBatch(
-	batch: TransitionApertureBatch,
-): TransitionApertureGeometryBatch {
-	return {
-		apertureBatchId: batch.apertureBatchId,
-		frontFace: batch.frontFace,
-		indices: batch.indices,
-		indexType: batch.vertices.length > 0xffff ? "uint32" : "uint16",
-		landblockId: batch.landblockId,
-		ranges: batch.ranges.map((range) => ({
-			envCellId: range.envCellId,
-			firstIndex: range.firstIndex,
-			indexCount: range.indexCount,
-			portalId: range.portalId,
-		})),
-		vertices: batch.vertices,
-	};
-}
-
-function createTransitionApertureBatchSignature(
-	batch: TransitionApertureBatch | TransitionApertureGeometryBatch,
-): string {
-	const vertices = batch.vertices
-		.map((vertex) => `${vertex.x},${vertex.y},${vertex.z}`)
-		.join(";");
-	const ranges = batch.ranges
-		.map(
-			(range) =>
-				`${range.portalId},${range.envCellId},${range.firstIndex},${range.indexCount}`,
-		)
-		.join(";");
-	return [
-		batch.landblockId,
-		batch.frontFace,
-		batch.indices.join(","),
-		vertices,
-		ranges,
-	].join("|");
 }
 
 function createMinimumDebugOverlayBounds(bounds: StaticBounds): StaticBounds {

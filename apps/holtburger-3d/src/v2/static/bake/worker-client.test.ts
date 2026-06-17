@@ -155,6 +155,7 @@ function createResult(input: StaticBakeBatchInput): StaticBakeBatchResult {
 		staticVisibilityRecords: [],
 		staticBatchId: input.staticBatchId,
 		textureUses: [],
+		transitionApertureBatches: [],
 		works: input.items.map((item) => item.work),
 	};
 }

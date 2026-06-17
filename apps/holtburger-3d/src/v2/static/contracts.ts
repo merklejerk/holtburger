@@ -346,6 +346,11 @@ export interface StaticVec3 {
 	readonly z: number;
 }
 
+export interface StaticPlane {
+	readonly normal: StaticVec3;
+	readonly constant: number;
+}
+
 export interface TerrainMaterialSourceFacts {
 	readonly identity: TerrainMaterialIdentity;
 	readonly materialKind: "tex-merge-table";
@@ -922,6 +927,7 @@ export interface StaticBakeBatchResult {
 	readonly revision: number;
 	readonly works: readonly ScheduledStaticWork[];
 	readonly drawUnits: readonly StaticDrawUnit[];
+	readonly transitionApertureBatches: readonly TransitionApertureBatch[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly atlasRegistryUpdates: readonly string[];
@@ -1371,6 +1377,7 @@ export interface StaticCoordinatorSnapshot {
 export interface StaticCoordinatorCommitDelta {
 	readonly staticBatchId: string;
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
+	readonly addedTransitionApertureBatches: readonly TransitionApertureBatch[];
 	readonly removedResources: readonly StaticResourceKey[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
@@ -1380,6 +1387,39 @@ export interface StaticCoordinatorCommitDelta {
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly revision: number;
+}
+
+export type TransitionApertureFrontFace = "indoor-visible";
+
+export type TransitionApertureExteriorEndpoint =
+	| {
+			readonly kind: "landblock-building";
+			readonly buildingInstanceId: string;
+			readonly buildingPortalId: string;
+	  }
+	| {
+			readonly kind: "outside";
+			readonly landblockId: number;
+	  };
+
+export interface TransitionApertureRange {
+	readonly envCellId: number;
+	readonly exterior: TransitionApertureExteriorEndpoint;
+	readonly firstIndex: number;
+	readonly indexCount: number;
+	readonly portalId: string;
+}
+
+export interface TransitionApertureBatch {
+	readonly apertureBatchId: string;
+	readonly coordinateSpace: "landblock-render-local";
+	readonly frontFace: TransitionApertureFrontFace;
+	readonly indices: readonly number[];
+	readonly kind: "transition-aperture-batch";
+	readonly landblockId: number;
+	readonly planes: readonly (StaticPlane | null)[];
+	readonly ranges: readonly TransitionApertureRange[];
+	readonly vertices: readonly StaticVec3[];
 }
 
 export interface StaticCoordinatorSourcePayloadDelta {

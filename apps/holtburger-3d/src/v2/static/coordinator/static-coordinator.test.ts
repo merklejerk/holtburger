@@ -12,6 +12,7 @@ import type {
 	StaticSpatialRecord,
 	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
+	TransitionApertureBatch,
 	StaticVisibilityRecord,
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
@@ -248,6 +249,7 @@ describe("V2 static coordinator", () => {
 		expect(deltas).toEqual([
 			{
 				addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
+				addedTransitionApertureBatches: [],
 				materialCoverage: [],
 				removedResources: [],
 				revision: 1,
@@ -274,6 +276,7 @@ describe("V2 static coordinator", () => {
 
 		expect(deltas.at(-1)).toEqual({
 			addedDrawUnits: [],
+			addedTransitionApertureBatches: [],
 			materialCoverage: [],
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
 			revision: 2,
@@ -917,6 +920,12 @@ describe("V2 static coordinator", () => {
 			drawUnits: [
 				createStructuredInteriorDrawUnit("structured-interior-a", 0xda55ffff),
 			],
+			transitionApertureBatches: [
+				createTransitionApertureBatch(
+					"transition-apertures:3663069183",
+					0xda55ffff,
+				),
+			],
 		});
 		await flushPromises();
 
@@ -930,6 +939,13 @@ describe("V2 static coordinator", () => {
 					domain: "landblock-env-cells",
 					drawUnitId: "structured-interior-a",
 					kind: "structured-interior-geometry",
+				},
+			],
+			addedTransitionApertureBatches: [
+				{
+					apertureBatchId: "transition-apertures:3663069183",
+					kind: "transition-aperture-batch",
+					landblockId: 0xda55ffff,
 				},
 			],
 			removedResources: [],
@@ -950,8 +966,13 @@ describe("V2 static coordinator", () => {
 		});
 		expect(deltas.at(-1)).toMatchObject({
 			addedDrawUnits: [],
+			addedTransitionApertureBatches: [],
 			removedResources: [
 				{ drawUnitId: "structured-interior-a", kind: "draw-unit" },
+				{
+					apertureBatchId: "transition-apertures:3663069183",
+					kind: "transition-aperture-batch",
+				},
 			],
 		});
 	});
@@ -1023,6 +1044,38 @@ function createTerrainDrawUnit(
 		textureUseIds: [],
 		triangleCount: 1,
 		vertexCount: 3,
+	};
+}
+
+function createTransitionApertureBatch(
+	apertureBatchId: string,
+	landblockId: number,
+): TransitionApertureBatch {
+	return {
+		apertureBatchId,
+		coordinateSpace: "landblock-render-local",
+		frontFace: "indoor-visible",
+		indices: [0, 1, 2],
+		kind: "transition-aperture-batch",
+		landblockId,
+		planes: [null],
+		ranges: [
+			{
+				envCellId: landblockId & 0xffff_ff00,
+				exterior: {
+					kind: "outside",
+					landblockId,
+				},
+				firstIndex: 0,
+				indexCount: 3,
+				portalId: `${apertureBatchId}:portal-a`,
+			},
+		],
+		vertices: [
+			{ x: 0, y: 0, z: 0 },
+			{ x: 1, y: 0, z: 0 },
+			{ x: 0, y: 1, z: 0 },
+		],
 	};
 }
 

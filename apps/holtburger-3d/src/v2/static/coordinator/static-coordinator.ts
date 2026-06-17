@@ -75,7 +75,10 @@ export class StaticCoordinator {
 	readonly #activeWork = new Map<string, MutableScheduledStaticWorkStatus>();
 	readonly #pendingBatches = new Map<string, PendingStaticBakeBatch>();
 	readonly #residentDrawUnitIds = new Set<string>();
-	readonly #residentDrawUnitIdsByDesiredKey = new Map<string, Set<string>>();
+	readonly #residentResourcesByDesiredKey = new Map<
+		string,
+		StaticResourceKey[]
+	>();
 	#revision = 0;
 	#disposed = false;
 	#committed = 0;
@@ -131,7 +134,7 @@ export class StaticCoordinator {
 				this.#activeWork.delete(status.workId);
 			}
 		}
-		const removedResources = this.#evictResidentDrawUnitsExcept(desiredKeys);
+		const removedResources = this.#evictResidentResourcesExcept(desiredKeys);
 		if (removedResources.length > 0) {
 			this.#emitEvictionCommitDelta({ removedResources });
 		}
@@ -250,7 +253,7 @@ export class StaticCoordinator {
 			}
 		}
 		this.#pendingBatches.clear();
-		this.#evictResidentDrawUnitsExcept(new Set());
+		this.#evictResidentResourcesExcept(new Set());
 		this.#emit();
 		this.#listeners.clear();
 		this.#commitListeners.clear();
@@ -410,10 +413,7 @@ export class StaticCoordinator {
 	}
 
 	#commit(result: StaticBakeBatchResult): void {
-		const drawUnitDesiredKeys = result.drawUnits.map((drawUnit) => ({
-			desiredKey: getDrawUnitDesiredKey(drawUnit),
-			drawUnit,
-		}));
+		const resourcesByDesiredKey = collectCommittedResourceKeysByDesiredKey(result);
 
 		for (const work of result.works) {
 			const status = this.#activeWork.get(work.workId);
@@ -423,14 +423,18 @@ export class StaticCoordinator {
 			status.status = "committed";
 			this.#committed += 1;
 		}
-		for (const { desiredKey, drawUnit } of drawUnitDesiredKeys) {
-			this.#residentDrawUnitIds.add(drawUnit.drawUnitId);
-			let drawUnitIds = this.#residentDrawUnitIdsByDesiredKey.get(desiredKey);
-			if (!drawUnitIds) {
-				drawUnitIds = new Set<string>();
-				this.#residentDrawUnitIdsByDesiredKey.set(desiredKey, drawUnitIds);
+		for (const [desiredKey, resources] of resourcesByDesiredKey) {
+			const residentResources =
+				this.#residentResourcesByDesiredKey.get(desiredKey) ?? [];
+			this.#residentResourcesByDesiredKey.set(desiredKey, [
+				...residentResources,
+				...resources,
+			]);
+			for (const resource of resources) {
+				if (resource.kind === "draw-unit") {
+					this.#residentDrawUnitIds.add(resource.drawUnitId);
+				}
 			}
-			drawUnitIds.add(drawUnit.drawUnitId);
 		}
 		for (const coverage of result.materialCoverage) {
 			this.#latestMaterialCoverageByKey.set(coverage.coverageKey, coverage);
@@ -438,6 +442,7 @@ export class StaticCoordinator {
 		this.#committedDrawUnits = this.#residentDrawUnitIds.size;
 		this.#emitCommitDelta({
 			addedDrawUnits: result.drawUnits,
+			addedTransitionApertureBatches: result.transitionApertureBatches,
 			materialCoverage: result.materialCoverage,
 			removedResources: [],
 			revision: result.revision,
@@ -452,28 +457,27 @@ export class StaticCoordinator {
 		this.#emit();
 	}
 
-	#evictResidentDrawUnitsExcept(
+	#evictResidentResourcesExcept(
 		desiredKeys: ReadonlySet<string>,
 	): readonly StaticResourceKey[] {
-		const removedDrawUnitResourceIds: string[] = [];
-		for (const [desiredKey, drawUnitIds] of Array.from(
-			this.#residentDrawUnitIdsByDesiredKey,
+		const removedResources: StaticResourceKey[] = [];
+		for (const [desiredKey, resources] of Array.from(
+			this.#residentResourcesByDesiredKey,
 		)) {
 			if (desiredKeys.has(desiredKey)) {
 				continue;
 			}
-			removedDrawUnitResourceIds.push(...drawUnitIds);
-			this.#residentDrawUnitIdsByDesiredKey.delete(desiredKey);
+			removedResources.push(...resources);
+			this.#residentResourcesByDesiredKey.delete(desiredKey);
 		}
 
-		for (const drawUnitId of removedDrawUnitResourceIds) {
-			this.#residentDrawUnitIds.delete(drawUnitId);
+		for (const resource of removedResources) {
+			if (resource.kind === "draw-unit") {
+				this.#residentDrawUnitIds.delete(resource.drawUnitId);
+			}
 		}
 		this.#committedDrawUnits = this.#residentDrawUnitIds.size;
-		return removedDrawUnitResourceIds.map((drawUnitId) => ({
-			drawUnitId,
-			kind: "draw-unit",
-		}));
+		return removedResources;
 	}
 
 	#emitEvictionCommitDelta(options: {
@@ -481,6 +485,7 @@ export class StaticCoordinator {
 	}): void {
 		this.#emitCommitDelta({
 			addedDrawUnits: [],
+			addedTransitionApertureBatches: [],
 			materialCoverage: [],
 			removedResources: options.removedResources,
 			revision: this.#revision,
@@ -724,6 +729,42 @@ function getDrawUnitDesiredKey(drawUnit: StaticDrawUnit): string {
 	);
 }
 
+function collectCommittedResourceKeysByDesiredKey(
+	result: StaticBakeBatchResult,
+): Map<string, StaticResourceKey[]> {
+	const resourcesByDesiredKey = new Map<string, StaticResourceKey[]>();
+	for (const drawUnit of result.drawUnits) {
+		addResourceKey(resourcesByDesiredKey, getDrawUnitDesiredKey(drawUnit), {
+			drawUnitId: drawUnit.drawUnitId,
+			kind: "draw-unit",
+		});
+	}
+	for (const batch of result.transitionApertureBatches) {
+		addResourceKey(
+			resourcesByDesiredKey,
+			createDesiredKeyForDrawUnit({
+				domain: "landblock-env-cells",
+				landblockId: batch.landblockId,
+			}),
+			{
+				apertureBatchId: batch.apertureBatchId,
+				kind: "transition-aperture-batch",
+			},
+		);
+	}
+	return resourcesByDesiredKey;
+}
+
+function addResourceKey(
+	resourcesByDesiredKey: Map<string, StaticResourceKey[]>,
+	desiredKey: string,
+	resource: StaticResourceKey,
+): void {
+	const resources = resourcesByDesiredKey.get(desiredKey) ?? [];
+	resources.push(resource);
+	resourcesByDesiredKey.set(desiredKey, resources);
+}
+
 function compareMaterialCoverageReports(
 	left: StaticMaterialCoverageReport,
 	right: StaticMaterialCoverageReport,
@@ -744,6 +785,18 @@ function filterStaticBakeResultForWorks(
 		result.drawUnits
 			.filter((drawUnit) => desiredKeys.has(getDrawUnitDesiredKey(drawUnit)))
 			.map((drawUnit) => drawUnit.drawUnitId),
+	);
+	const retainedTransitionApertureBatchIds = new Set(
+		result.transitionApertureBatches
+			.filter((batch) =>
+				desiredKeys.has(
+					createDesiredKeyForDrawUnit({
+						domain: "landblock-env-cells",
+						landblockId: batch.landblockId,
+					}),
+				),
+			)
+			.map((batch) => batch.apertureBatchId),
 	);
 
 	return {
@@ -775,6 +828,9 @@ function filterStaticBakeResultForWorks(
 			textureUse.ownerDrawUnitIds.some((drawUnitId) =>
 				drawUnitIds.has(drawUnitId),
 			),
+		),
+		transitionApertureBatches: result.transitionApertureBatches.filter(
+			(batch) => retainedTransitionApertureBatchIds.has(batch.apertureBatchId),
 		),
 		works,
 	};

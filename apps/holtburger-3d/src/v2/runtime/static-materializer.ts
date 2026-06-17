@@ -81,7 +81,8 @@ export function materializeStaticCommit(
 		...materializeStaticPeerRecords(input.commit, finePartitioned),
 		staticDelta: {
 			addedDrawUnits: finePartitioned.drawUnits,
-			addedTransitionApertureBatches: [],
+			addedTransitionApertureBatches:
+				input.commit.addedTransitionApertureBatches,
 			removedDrawUnitIds: collectStaticDrawUnitResourceIds(removedResources),
 			removedTransitionApertureBatchIds:
 				collectStaticTransitionApertureBatchResourceIds(removedResources),

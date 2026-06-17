@@ -189,6 +189,10 @@ export interface SceneDomainTargetSnapshot {
 	readonly height: number;
 	readonly colorFormat: "rgb8";
 	readonly depthFormat: "depth-component24";
+	readonly compositingMode: "none" | "direct-depth";
+	readonly executedCompositeDepth: number;
+	readonly compositePasses: number;
+	readonly apertureBatchDrawCalls: number;
 	readonly exteriorDrawCalls: number;
 	readonly interiorDrawCalls: number;
 }

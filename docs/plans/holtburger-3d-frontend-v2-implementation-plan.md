@@ -2181,7 +2181,7 @@ Verification:
 
 ### Phase 13B1h: Depth-Carrying Direct Transition Portal Composite Passes
 
-Status: planned.
+Status: complete on 2026-06-17.
 
 Purpose: implement the actual outdoor/indoor transition portal compositing loop using scene-domain color/depth targets, packed transition aperture geometry, and residency-derived pass planning, with direct aperture compositing as the primary path.
 
@@ -2266,6 +2266,45 @@ Acceptance criteria:
 - The primary path does not require per-depth frontier filtering unless tests or visual targets prove propagated-depth containment is insufficient.
 - Ordinary env-cell-to-env-cell portals never produce transition composite passes.
 - Renderer diagnostics expose only lean current-frame facts from the executed path: active compositing mode, executed composite depth, aperture batch draw count, and composite pass count. Do not add durable failure journals or estimated pixel-area accounting.
+
+Completed implementation notes:
+
+- Added the WebGL2 direct-depth transition aperture composite shader:
+  - samples previous composite depth;
+  - compares rasterized aperture depth from `gl_FragCoord.z`;
+  - samples source scene color/depth at screen-space UV;
+  - writes sampled source color and propagates sampled source depth through `gl_FragDepth`.
+- Added a transition composite shader program/resource next to the existing terrain/static/debug programs. Required uniforms fail loudly during program setup if the shader contract drifts.
+- Replaced the portal-scene-domain base-target blit with execution of the `13B1h0` work plan:
+  - scene-domain targets still render exterior/interior first;
+  - renderer-held transition aperture resource metadata is adapted into planner inputs;
+  - no candidate derivation, target alternation, or direction selection happens inside the draw loop;
+  - if no renderable aperture batches are planned, the renderer preserves base-target blit behavior.
+- Added the RGB8/depth24 composite ping-pong loop:
+  - copies base color/depth into `compositeRead`;
+  - copies read to write before each planned depth;
+  - binds previous composite depth and planned source target color/depth;
+  - configures cull face from `depthWork.cullFace`;
+  - draws each planned packed aperture batch VAO;
+  - swaps composite targets and finally blits composite color to the display surface.
+- Composite depth writes use depth testing with `ALWAYS` plus shader-side aperture-depth rejection. This is intentional: fixed-function `LESS` would test the shader-written source depth rather than the rasterized aperture depth.
+- Added lean current-frame renderer diagnostics for compositing mode, executed composite depth, composite pass count, and aperture batch draw calls.
+- Added tests for:
+  - the direct-depth shader contract;
+  - WebGL sequencing for depth/color blits, `ALWAYS` depth state, cull-face flipping, aperture batch draws, and current-frame composite counters.
+
+Spicy / failed to close:
+
+- This phase implements the direct-depth compositing mechanism, but it has not been visually verified against real overlapping transition portal scenes yet. The next verification pass should inspect outdoor-to-indoor and indoor-to-outdoor views with transition portal debug overlays enabled.
+- The renderer skips a planned aperture batch id if its GPU resource is missing by the time the frame executes. That should be rare lifecycle timing, not normal behavior. If it shows up visually, fix resource retention/materialization rather than adding diagnostic journals.
+- The primary path still has no per-depth frontier filtering. That is deliberate. Add range filtering only if propagated depth plus cull direction leaks unrelated transition apertures in real scenes.
+- Interior scene-domain rendering remains whole-domain, not per-cell clipped. Portal compositing now clips through transition apertures, but the source interior target can still contain all resident env-cell static resources.
+
+Verification:
+
+- `npm run check`
+- `npm run lint:ts`
+- `npm run test:ts`
 
 ### Phase 13B2: Dungeon Anchoring And Interior Focus
 

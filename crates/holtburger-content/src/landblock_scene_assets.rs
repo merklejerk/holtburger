@@ -63,8 +63,6 @@ pub struct LandblockEnvCellBundleCell {
     pub prepared_cell: PreparedInteriorCell,
     pub static_meshes: Vec<PreparedStaticMesh>,
     pub landblock_bounds: Option<PreparedAabb>,
-    pub local_bvh_items: Vec<PreparedEnvCellLocalBvhItem>,
-    pub local_bvh: Option<PreparedBvh>,
     pub diagnostics: PreparedContentSourceDiagnostics,
 }
 
@@ -80,13 +78,6 @@ pub struct LandblockEnvCellBvhItem {
 pub enum LandblockEnvCellBvhItemSource {
     EnvCellRoot,
     Derived,
-}
-
-#[derive(Debug, Clone)]
-pub enum PreparedEnvCellLocalBvhItem {
-    CellStructureGeometry { triangle_count: usize },
-    Static { instance_id: String },
-    Portal { portal_id: String },
 }
 
 #[derive(Debug, Clone)]
@@ -353,11 +344,9 @@ struct PreparedSpatialItem {
 enum PreparedSpatialItemKind {
     TerrainQuad,
     EnvCellRoot,
-    CellStructureGeometry,
     OutdoorStatic,
     Building,
     IndoorStatic,
-    Portal,
 }
 
 #[derive(Debug, Clone)]
@@ -1056,22 +1045,16 @@ impl LandblockEnvCellsAssetAssembler {
                 let static_meshes = static_meshes_by_env_cell
                     .remove(&env_cell.env_cell_id)
                     .unwrap_or_default();
-                let (local_spatial_items, local_bvh_items) =
-                    build_env_cell_local_bvh_records(&prepared_cell);
-                let local_bvh = build_prepared_bvh_with_scope(
-                    landblock_id,
-                    "env-cell-local",
-                    PreparedBvhScope::EnvCellLocal,
-                    &local_spatial_items,
-                );
-                let landblock_bounds =
-                    local_bvh.as_ref().map(|bvh| {
-                        pad_bvh_bounds(transform_render_local_bounds_by_ac_frame(
-                            bvh.nodes[0].bounds,
-                            &prepared_cell.local_placement,
-                            unit_prepared_vec3(),
-                        ))
-                    });
+                let landblock_bounds = derive_cell_bsp_render_bounds_by_plane_triples(
+                    &prepared_cell.cell_bsp,
+                )
+                .map(|bounds| {
+                    pad_bvh_bounds(transform_render_local_bounds_by_ac_frame(
+                        bounds,
+                        &prepared_cell.local_placement,
+                        unit_prepared_vec3(),
+                    ))
+                });
                 if landblock_bounds.is_none() {
                     context.report_source_omission(
                         EOR_CELL_NAMESPACE,
@@ -1079,7 +1062,7 @@ impl LandblockEnvCellsAssetAssembler {
                         "landblock-env-cell-bvh",
                         "missing-bounds",
                         format!(
-                            "EnvCell 0x{:08X} did not produce render, static, or portal bounds for landblock-wide BVH inclusion",
+                            "EnvCell 0x{:08X} CellBSP did not produce finite bounds for landblock-wide BVH inclusion",
                             env_cell.env_cell_id
                         ),
                     );
@@ -1088,8 +1071,6 @@ impl LandblockEnvCellsAssetAssembler {
                     diagnostics: PreparedContentSourceDiagnostics::default(),
                     static_meshes,
                     landblock_bounds,
-                    local_bvh_items,
-                    local_bvh,
                     env_cell,
                     prepared_cell,
                 })
@@ -1201,14 +1182,6 @@ fn load_bundle_environment_facts(
         }
     }
     environments
-}
-
-fn portal_aperture_bounds(aperture: &PreparedPortalAperture) -> Option<PreparedAabb> {
-    aperture
-        .points
-        .iter()
-        .copied()
-        .fold(None, |bounds, point| Some(expand_bounds(bounds, point)))
 }
 
 impl CellLandblockFact {
@@ -1708,50 +1681,94 @@ fn build_landblock_env_cell_bvh_spatial_items(
         .collect()
 }
 
-fn build_env_cell_local_bvh_records(
-    prepared_cell: &PreparedInteriorCell,
-) -> (Vec<PreparedSpatialItem>, Vec<PreparedEnvCellLocalBvhItem>) {
-    let mut items = Vec::new();
-    if let Some(bounds) = prepared_cell.render_geometry.bounds {
-        items.push((
-            PreparedSpatialItem {
-                id: format!(
-                    "env-cell/{:08x}/cell-structure-geometry",
-                    prepared_cell.env_cell_id
-                ),
-                kind: PreparedSpatialItemKind::CellStructureGeometry,
-                bounds: pad_bvh_bounds(bounds),
-            },
-            PreparedEnvCellLocalBvhItem::CellStructureGeometry {
-                triangle_count: prepared_cell.render_geometry.triangle_count,
-            },
-        ));
+fn derive_cell_bsp_render_bounds_by_plane_triples(node: &BspNode) -> Option<PreparedAabb> {
+    let mut planes = Vec::new();
+    collect_bsp_planes(node, &mut planes);
+    let mut bounds = None;
+    for first_index in 0..planes.len() {
+        for second_index in (first_index + 1)..planes.len() {
+            for third_index in (second_index + 1)..planes.len() {
+                let Some(point) = intersect_planes(
+                    planes[first_index],
+                    planes[second_index],
+                    planes[third_index],
+                ) else {
+                    continue;
+                };
+                if point_inside_cell_bsp(node, point) {
+                    bounds = Some(expand_bounds(bounds, ac_vector_to_render_space(point)));
+                }
+            }
+        }
     }
-    items.extend(
-        prepared_cell
-            .portal_apertures
-            .iter()
-            .filter_map(|aperture| {
-                Some(PreparedSpatialItem {
-                    id: format!(
-                        "env-cell/{:08x}/portal/{}",
-                        prepared_cell.env_cell_id, aperture.portal_id
-                    ),
-                    kind: PreparedSpatialItemKind::Portal,
-                    bounds: pad_bvh_bounds(portal_aperture_bounds(aperture)?),
-                })
-                .map(|spatial_item| {
-                    (
-                        spatial_item,
-                        PreparedEnvCellLocalBvhItem::Portal {
-                            portal_id: aperture.portal_id.clone(),
-                        },
-                    )
-                })
-            }),
-    );
-    items.sort_by(|left, right| left.0.id.cmp(&right.0.id));
-    items.into_iter().unzip()
+    bounds
+}
+
+fn collect_bsp_planes(node: &BspNode, planes: &mut Vec<holtburger_common::Plane>) {
+    match node {
+        BspNode::Port(portal) => {
+            planes.push(portal.plane);
+            collect_bsp_planes(&portal.pos, planes);
+            collect_bsp_planes(&portal.neg, planes);
+        }
+        BspNode::Leaf(_) => {}
+        BspNode::Internal(internal) => {
+            planes.push(internal.plane);
+            if let Some(pos) = &internal.pos {
+                collect_bsp_planes(pos, planes);
+            }
+            if let Some(neg) = &internal.neg {
+                collect_bsp_planes(neg, planes);
+            }
+        }
+    }
+}
+
+fn intersect_planes(
+    first: holtburger_common::Plane,
+    second: holtburger_common::Plane,
+    third: holtburger_common::Plane,
+) -> Option<holtburger_common::Vector3> {
+    let second_cross_third = second.normal.cross(&third.normal);
+    let third_cross_first = third.normal.cross(&first.normal);
+    let first_cross_second = first.normal.cross(&second.normal);
+    let denominator = first.normal.dot(&second_cross_third);
+    if denominator.abs() < 0.00001 {
+        return None;
+    }
+
+    Some(
+        (second_cross_third * -first.d
+            + third_cross_first * -second.d
+            + first_cross_second * -third.d)
+            * (1.0 / denominator),
+    )
+}
+
+fn point_inside_cell_bsp(node: &BspNode, point: holtburger_common::Vector3) -> bool {
+    const EPSILON: f32 = 0.0002;
+    let mut current = Some(node);
+    while let Some(node) = current {
+        match node {
+            BspNode::Port(portal) => {
+                if portal.plane.distance_to_point(&point) < -EPSILON {
+                    return false;
+                }
+                current = Some(&portal.pos);
+            }
+            BspNode::Leaf(_) => return true,
+            BspNode::Internal(internal) => {
+                if internal.plane.distance_to_point(&point) < -EPSILON {
+                    return false;
+                }
+                current = internal.pos.as_deref();
+                if current.is_none() {
+                    return true;
+                }
+            }
+        }
+    }
+    true
 }
 
 fn transform_render_local_bounds_by_ac_frame(
@@ -1990,23 +2007,17 @@ fn prepared_bvh_kind_mask(
             }
         }
         PreparedBvhScope::EnvCellLocal => {
-            let mut cell_structure_geometry = false;
             let mut static_object = false;
-            let mut portal = false;
             for index in item_indices {
                 match items[*index].kind {
-                    PreparedSpatialItemKind::CellStructureGeometry => {
-                        cell_structure_geometry = true
-                    }
                     PreparedSpatialItemKind::IndoorStatic => static_object = true,
-                    PreparedSpatialItemKind::Portal => portal = true,
                     kind => panic!("invalid env-cell local BVH item kind: {kind:?}"),
                 }
             }
             PreparedBvhKindMask::EnvCellLocal {
-                cell_structure_geometry,
+                cell_structure_geometry: false,
                 static_object,
-                portal,
+                portal: false,
             }
         }
     }
@@ -3096,7 +3107,7 @@ mod tests {
     }
 
     #[test]
-    fn env_cell_landblock_bounds_transform_local_bvh_root_through_ac_frame() {
+    fn env_cell_landblock_bounds_transform_render_local_bounds_through_ac_frame() {
         let local_bounds = test_aabb(-1.0, -2.0, -3.0, 2.0);
         let frame = Frame {
             origin: holtburger_common::Vector3 {
@@ -3124,6 +3135,46 @@ mod tests {
         assert!(bounds.max.x > bounds.min.x);
         assert!(bounds.max.y > bounds.min.y);
         assert!(bounds.max.z > bounds.min.z);
+    }
+
+    #[test]
+    fn cell_bsp_plane_triples_derive_closed_cell_render_bounds() {
+        let bsp = test_cell_bsp_box(
+            holtburger_common::Vector3::new(-1.0, -2.0, -3.0),
+            holtburger_common::Vector3::new(4.0, 5.0, 6.0),
+        );
+
+        let bounds = derive_cell_bsp_render_bounds_by_plane_triples(&bsp)
+            .expect("closed CellBSP box should produce finite bounds");
+
+        assert!((bounds.min.x - -1.0).abs() < 0.0001);
+        assert!((bounds.max.x - 4.0).abs() < 0.0001);
+        assert!((bounds.min.y - -3.0).abs() < 0.0001);
+        assert!((bounds.max.y - 6.0).abs() < 0.0001);
+        assert!((bounds.min.z - -5.0).abs() < 0.0001);
+        assert!((bounds.max.z - 2.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn cell_bsp_plane_triples_do_not_invent_bounds_for_unclosed_cells() {
+        let bsp = BspNode::Internal(holtburger_dat::physics::InternalNode {
+            tag: *b"BPnn",
+            plane: holtburger_common::Plane {
+                d: 0.0,
+                normal: holtburger_common::Vector3::new(1.0, 0.0, 0.0),
+            },
+            pos: Some(Box::new(BspNode::Leaf(holtburger_dat::physics::BspLeaf {
+                index: 0,
+                poly_ids: Vec::new(),
+                solid: 0,
+                sphere: None,
+            }))),
+            neg: None,
+            sphere: None,
+            poly_ids: Vec::new(),
+        });
+
+        assert!(derive_cell_bsp_render_bounds_by_plane_triples(&bsp).is_none());
     }
 
     #[test]
@@ -3161,13 +3212,6 @@ mod tests {
             bounds.max.z - bounds.min.z < 20.0,
             "env-cell z extent should not include double-transformed indoor statics: {:?}",
             bounds
-        );
-        assert!(
-            !cell
-                .local_bvh_items
-                .iter()
-                .any(|item| matches!(item, PreparedEnvCellLocalBvhItem::Static { .. })),
-            "env-cell-local BVH items must stay in cell-local coordinate space"
         );
     }
 
@@ -3642,6 +3686,58 @@ mod tests {
                 z: z + size,
             },
         }
+    }
+
+    fn test_cell_bsp_box(
+        min: holtburger_common::Vector3,
+        max: holtburger_common::Vector3,
+    ) -> BspNode {
+        let planes = [
+            holtburger_common::Plane {
+                d: -min.x,
+                normal: holtburger_common::Vector3::new(1.0, 0.0, 0.0),
+            },
+            holtburger_common::Plane {
+                d: max.x,
+                normal: holtburger_common::Vector3::new(-1.0, 0.0, 0.0),
+            },
+            holtburger_common::Plane {
+                d: -min.y,
+                normal: holtburger_common::Vector3::new(0.0, 1.0, 0.0),
+            },
+            holtburger_common::Plane {
+                d: max.y,
+                normal: holtburger_common::Vector3::new(0.0, -1.0, 0.0),
+            },
+            holtburger_common::Plane {
+                d: -min.z,
+                normal: holtburger_common::Vector3::new(0.0, 0.0, 1.0),
+            },
+            holtburger_common::Plane {
+                d: max.z,
+                normal: holtburger_common::Vector3::new(0.0, 0.0, -1.0),
+            },
+        ];
+        test_cell_bsp_half_space_chain(&planes)
+    }
+
+    fn test_cell_bsp_half_space_chain(planes: &[holtburger_common::Plane]) -> BspNode {
+        let Some((plane, rest)) = planes.split_first() else {
+            return BspNode::Leaf(holtburger_dat::physics::BspLeaf {
+                index: 0,
+                poly_ids: Vec::new(),
+                solid: 0,
+                sphere: None,
+            });
+        };
+        BspNode::Internal(holtburger_dat::physics::InternalNode {
+            tag: *b"BPnn",
+            plane: *plane,
+            pos: Some(Box::new(test_cell_bsp_half_space_chain(rest))),
+            neg: None,
+            sphere: None,
+            poly_ids: Vec::new(),
+        })
     }
 
     fn test_vertex(x: f32, y: f32, z: f32, u: f32, v: f32) -> holtburger_dat::graphics::SWVertex {

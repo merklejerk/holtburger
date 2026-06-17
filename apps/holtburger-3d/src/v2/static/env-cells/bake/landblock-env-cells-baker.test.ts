@@ -38,8 +38,6 @@ describe("V2 landblock env-cell baker", () => {
 				envCellId: 0xda550100,
 				kind: "env-cell-spatial",
 				landblockId: 0xda55ffff,
-				localBvhItemCount: 1,
-				localBvhNodeCount: 1,
 				owner: expect.objectContaining({
 					kind: "work",
 					scopeKey: "landblock:da55ffff",
@@ -1307,14 +1305,6 @@ function createInput(): StaticBakeBatchInput {
 								localPlacement: {
 									orientation: { w: 1, x: 0, y: 0, z: 0 },
 									origin: { x: 0, y: 0, z: 0 },
-								},
-								localSpatial: {
-									localBvh: {
-										items: [],
-										nodes: [],
-									},
-									localBvhItemCount: 1,
-									localBvhNodeCount: 1,
 								},
 								memberId: "cell-0",
 								portalApertures: [],

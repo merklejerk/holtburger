@@ -448,21 +448,6 @@ const preparedEnvCellBvhItemDtoSchema = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("portal"), portalId: z.string().min(1) }),
 ]);
 
-const preparedLandblockEnvCellLocalBvhItemDtoSchema = z.discriminatedUnion(
-	"kind",
-	[
-		z.object({
-			kind: z.literal("cell-structure-geometry"),
-			triangleRange: z.tuple([
-				z.number().int().nonnegative(),
-				z.number().int().nonnegative(),
-			]),
-		}),
-		z.object({ kind: z.literal("static"), instanceId: z.string().min(1) }),
-		z.object({ kind: z.literal("portal"), portalId: z.string().min(1) }),
-	],
-);
-
 const preparedEnvCellBvhDtoSchema = z.object({
 	coordinateSpace: z.literal("env-cell-local"),
 	nodes: z.array(preparedLegacyLandblockBvhNodeDtoSchema),
@@ -482,13 +467,6 @@ const preparedLandblockEnvCellBvhDtoSchema = z
 	.object({
 		nodes: z.array(preparedLandblockBvhNodeDtoSchema),
 		items: z.array(preparedLandblockEnvCellBvhItemDtoSchema),
-	})
-	.strict();
-
-const preparedLandblockEnvCellLocalBvhDtoSchema = z
-	.object({
-		nodes: z.array(preparedLandblockBvhNodeDtoSchema),
-		items: z.array(preparedLandblockEnvCellLocalBvhItemDtoSchema),
 	})
 	.strict();
 
@@ -530,7 +508,6 @@ const landblockEnvCellDtoSchema = z
 		statics: z.array(envCellStaticMemberDtoSchema),
 		renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
 		cellBsp: z.lazy(() => polygonSetBspNodeDtoSchema),
-		localBvh: preparedLandblockEnvCellLocalBvhDtoSchema,
 		diagnostics: landblockPackDiagnosticsDtoSchema,
 	})
 	.strict();

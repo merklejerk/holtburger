@@ -622,7 +622,6 @@ export interface LandblockEnvCellStaticFacts {
 	readonly staticObjectSeeds: readonly LandblockEnvCellStaticObjectSeedFacts[];
 	readonly renderGeometry: LandblockEnvCellRenderGeometryFacts;
 	readonly cellBsp: LandblockEnvCellsPayloadDto["envCells"][number]["cellBsp"];
-	readonly localSpatial: EnvCellSpatialFacts;
 }
 
 export type LandblockEnvCellRenderGeometryFacts = Omit<
@@ -710,12 +709,6 @@ interface LandblockEnvCellResidencyBvhItemFacts {
 	readonly memberId: string;
 	readonly bounds: StaticBounds;
 	readonly source: "env-cell-root" | "derived";
-}
-
-interface EnvCellSpatialFacts {
-	readonly localBvh: LandblockEnvCellsPayloadDto["envCells"][number]["localBvh"];
-	readonly localBvhNodeCount: number;
-	readonly localBvhItemCount: number;
 }
 
 export interface StaticAtlasBatchSnapshot {
@@ -824,9 +817,6 @@ export interface StaticEnvCellSpatialRecord {
 	readonly environment: EnvironmentIdentity;
 	readonly cellStructure: CellStructureIdentity;
 	readonly renderBounds: StaticBounds | null;
-	readonly localBvh: LandblockEnvCellsPayloadDto["envCells"][number]["localBvh"];
-	readonly localBvhNodeCount: number;
-	readonly localBvhItemCount: number;
 	readonly residencyBvh: LandblockEnvCellResidencyBvhFacts;
 	readonly residencyBvhNodeCount: number;
 	readonly residencyBvhItemCount: number;

@@ -1151,8 +1151,6 @@ function createEnvCellSpatialRecord(
 		},
 		kind: "env-cell-spatial",
 		landblockId: work.job.scope.landblockId,
-		localBvhItemCount: 0,
-		localBvhNodeCount: 0,
 		memberId: `cell-${work.job.scope.landblockId.toString(16)}`,
 		owner: createWorkPeerRecordOwner(work),
 		renderBounds: null,
@@ -1216,14 +1214,6 @@ function createLandblockEnvCellsResolverPayload(landblockId = 0xda55ffff): {
 					localPlacement: {
 						orientation: { w: 1, x: 0, y: 0, z: 0 },
 						origin: { x: 0, y: 0, z: 0 },
-					},
-					localSpatial: {
-						localBvh: {
-							items: [],
-							nodes: [],
-						},
-						localBvhItemCount: 0,
-						localBvhNodeCount: 0,
 					},
 					memberId: "cell-0",
 					portalApertures: [],

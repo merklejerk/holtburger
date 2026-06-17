@@ -2187,35 +2187,33 @@ Purpose: implement the actual outdoor/indoor transition portal compositing loop 
 
 Steering:
 
-- Follow the proven v1 sequencing shape while replacing stencil masks with direct aperture compositing where viable: derive transition levels from base scene, select packed transition aperture batches, copy the base target color/depth, draw packed transition apertures for each depth, sample the opposite scene color/depth at screen-space UVs, write sampled color plus sampled depth into the current composite target, ping-pong composite targets, then copy the final target to the default framebuffer.
+- Follow the proven v1 sequencing shape while replacing stencil masks with direct aperture compositing where viable: consume the `TransitionCompositeWorkPlan`, copy the base target color/depth, draw packed transition apertures for each planned depth, sample the planned source target color/depth at screen-space UVs, write sampled color plus sampled depth into the current composite target, ping-pong composite targets, then copy the final target to the default framebuffer.
 - The primary path should preserve and propagate depth through the composite target. The direct composite shader should manually compare rasterized aperture depth against the previous composite depth to decide whether the portal aperture is visible, then write the sampled opposite-scene depth to propagate newly visible scene depth for later recursion passes.
 - Do not assume arbitrary recursion can be solved in fewer than `maxDepth` passes. Each transition depth depends on the previous composite result, so the primary design remains one/few packed aperture draws per transition depth.
 - Prefer cheap per-depth direction rejection through aperture winding/backface culling before adding heavier per-depth frontier filtering. If propagated depth and cull-mode direction rejection leak unrelated transition portals, add compact per-depth aperture-range filtering as a fallback.
 - Compositing applies only to packed transition aperture batches. Env-cell-to-env-cell portals stay out of this render path.
-- Keep stencil or mask-texture compositing as a fallback only if propagated-depth direct aperture compositing leaks, cannot express required parent containment, or hits WebGL2 depth-texture/framebuffer constraints.
-- Consume the 13B1h0 work plan. Do not derive candidate sets, directions, or transition depth order inside the WebGL render loop.
+- Keep stencil or mask-texture compositing as a documented future fallback only if propagated-depth direct aperture compositing leaks, cannot express required parent containment, or hits WebGL2 depth-texture/framebuffer constraints. Do not implement two compositing paths in this phase unless the direct path empirically fails.
+- Consume the 13B1h0 work plan. Do not derive candidate sets, directions, transition depth order, or target alternation inside the WebGL render loop.
 
 Target frame algorithm:
 
 ```text
 1. Render exterior scene domain into E.color + E.depth.
 2. Render interior scene domain into I.color + I.depth.
-3. Resolve current camera residency into:
-   - baseScene: { exterior landblock } | { interior landblock + env-cell }
-   - maxDepth
-4. Copy base scene color+depth into compositeRead.
-5. For transitionDepth = 0 .. maxDepth - 1:
-   a. currentScene = transitionDepth even ? baseScene : opposite(baseScene)
-   b. sourceScene = opposite(currentScene)
-   c. desiredDirection =
-      sourceScene == interior ? outdoor-to-indoor : indoor-to-outdoor
-   d. Copy compositeRead color+depth into compositeWrite.
-   e. Bind compositeWrite framebuffer with color+depth writes enabled.
-   f. Bind compositeRead.depth as previousCompositeDepth.
-   g. Bind sourceScene.color and sourceScene.depth as samplers.
-   h. Draw packed transition aperture geometry once/few times for this depth.
-   i. Swap compositeRead and compositeWrite.
-6. Copy compositeRead.color to the default framebuffer.
+3. Build/consume TransitionCompositeWorkPlan from:
+   - the explicit RenderPassPlan
+   - renderer-held transition aperture resource metadata
+4. If the work plan is `none`, render the single-surface path and stop.
+5. Copy workPlan.baseScene target color+depth into compositeRead.
+6. For each depthWork item:
+   a. Copy compositeRead color+depth into compositeWrite.
+   b. Bind compositeWrite framebuffer with color+depth writes enabled.
+   c. Bind compositeRead.depth as previousCompositeDepth.
+   d. Bind depthWork.sourceTarget color/depth as samplers.
+   e. Configure cull mode from depthWork.cullFace.
+   f. Draw the packed aperture batches named by depthWork.apertureBatchIds.
+   g. Swap compositeRead and compositeWrite.
+7. Copy compositeRead.color to the default framebuffer.
 ```
 
 Direct aperture composite shader contract:
@@ -2248,22 +2246,26 @@ Notes:
 - The aperture visibility test uses rasterized aperture depth against the previous composite depth; the final written depth is the sampled opposite-scene depth. Do not rely on fixed-function depth testing alone for both decisions, because those two depths are intentionally different.
 - Backface culling/direction rejection is an optimization and correctness guard for transition direction. It does not turn env-cell-to-env-cell portals into compositing inputs.
 - Start without explicit per-depth frontier filtering. Add compact per-depth aperture-range filtering only if tests or visual targets prove propagated-depth containment leaks unrelated transition portals.
+- `PortalSceneDomain` remains the authoritative base-residency type. Per-depth source/current routing should use `SceneDomainTargetKind` from the work plan, not a fake opposite `PortalSceneDomain`.
 
 Deliverables:
 
 - Execution of the 13B1h0 transition composite work plan.
 - Color/depth scene-domain targets, color/depth composite targets, direct aperture composite shader, propagated-depth writes, ping-pong target swap, and final framebuffer copy.
 - One/few packed aperture draws per transition depth, with backface-culling/cull-mode rejection for wrong-direction aperture faces and manual aperture-depth-vs-composite-depth rejection for occluded portal pixels.
-- Tests around propagated depth behavior and overlapping transition portals at the work-plan/shader boundary. Direction alternation and env-cell-to-env-cell exclusion belong in 13B1h0 tests unless implementation reveals a renderer-specific edge.
+- Tests around propagated depth behavior at the shader/sequence boundary:
+  - shader contract coverage for previous-composite-depth comparison and `gl_FragDepth` propagation from the source scene depth;
+  - WebGL sequencing coverage for base copy, per-depth copy, source target binding, cull mode, aperture batch drawing, ping-pong swap, and final framebuffer copy.
+  - Direction alternation, stable batch ordering, and env-cell-to-env-cell exclusion stay in 13B1h0 tests unless implementation reveals a renderer-specific edge.
 
 Acceptance criteria:
 
 - Outdoor residency composites visible interiors through outdoor-to-indoor transition portals.
-- Interior residency composites visible exterior through indoor-to-outdoor transition portals starting from the env-cell carried by the discriminated interior base scene.
+- Interior residency composites visible exterior through indoor-to-outdoor transition portals while retaining the env-cell carried by the discriminated interior base scene as base-residency identity. This does not imply per-cell interior render-target clipping yet.
 - Recursive depth > 1 uses propagated composite depth to constrain child transition aperture pixels to regions visible through previous depths, or documents/activates the fallback path if direct depth propagation leaks.
 - The primary path does not require per-depth frontier filtering unless tests or visual targets prove propagated-depth containment is insufficient.
 - Ordinary env-cell-to-env-cell portals never produce transition composite passes.
-- Metrics expose aperture draw pass count, interior/exterior composite pass count, portal rect count, estimated pixel area, max composite depth, and whether direct-depth or fallback compositing was used.
+- Renderer diagnostics expose only lean current-frame facts from the executed path: active compositing mode, executed composite depth, aperture batch draw count, and composite pass count. Do not add durable failure journals or estimated pixel-area accounting.
 
 ### Phase 13B2: Dungeon Anchoring And Interior Focus
 

@@ -171,6 +171,8 @@ export interface PortalTransitionDepthPolicy {
 	readonly maxDepth: number;
 }
 
+export type SceneDomainTargetKind = "exterior" | "interior";
+
 export type RenderPassPlan =
 	| {
 			readonly kind: "single-surface-resident";

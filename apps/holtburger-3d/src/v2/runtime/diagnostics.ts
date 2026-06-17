@@ -1,4 +1,5 @@
 import type {
+	PortalPassPlan,
 	RendererSnapshot,
 	StaticObjectTextureRolePageKind,
 	TerrainTextureRolePageKind,
@@ -37,6 +38,7 @@ interface RuntimeDiagnosticsRuntimeSummary {
 	readonly textureFilteringMode: TextureFilteringMode;
 	readonly sceneInterest: string | null;
 	readonly currentCameraResidency: StaticSceneCameraResidency;
+	readonly portalPassPlan: PortalPassPlan | null;
 	readonly pendingStaticMaterializationRevisions: readonly number[];
 	readonly committedStaticMaterializationRevisions: readonly number[];
 	readonly failedStaticMaterializations: readonly RuntimeDiagnosticsFailure[];

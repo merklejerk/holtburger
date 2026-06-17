@@ -9,6 +9,7 @@ import type {
 import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
 import type {
 	DebugOverlayPrimitive,
+	PortalPassPlan,
 	Renderer,
 	RendererSnapshot,
 	RendererSnapshotListener,
@@ -141,10 +142,11 @@ describe("V2 client runtime", () => {
 	});
 
 	it("accepts explicit current camera residency without provenance accounting", () => {
+		const renderer = new FakeRenderer();
 		const runtime = createClientRuntime({
 			diagnostics: silentDiagnostics,
 			host: new FakeRuntimeHost(),
-			renderer: new FakeRenderer(),
+			renderer,
 			staticCoordinator: createImmediateStaticCoordinator({
 				baker: new DeferredStaticBaker(),
 				resolver: new DeferredStaticResolver(),
@@ -172,11 +174,27 @@ describe("V2 client runtime", () => {
 			kind: "env-cell",
 			landblockId: 0xda55ffff,
 		});
+		expect(renderer.portalPassPlans.at(-1)).toEqual({
+			baseScene: {
+				envCellId: 0xda550100,
+				kind: "interior",
+				landblockId: 0xda55ffff,
+			},
+			transitionDepthPolicy: { maxDepth: 0 },
+		});
 		expect(runtime.createDiagnosticsReport().runtime).toMatchObject({
 			currentCameraResidency: {
 				envCellId: 0xda550100,
 				kind: "env-cell",
 				landblockId: 0xda55ffff,
+			},
+			portalPassPlan: {
+				baseScene: {
+					envCellId: 0xda550100,
+					kind: "interior",
+					landblockId: 0xda55ffff,
+				},
+				transitionDepthPolicy: { maxDepth: 0 },
 			},
 		});
 		expect(JSON.stringify(runtime.createDiagnosticsReport())).not.toContain(
@@ -184,6 +202,74 @@ describe("V2 client runtime", () => {
 		);
 
 		unsubscribe();
+		runtime.dispose();
+	});
+
+	it("derives portal pass plans from outdoor and unknown camera residency", () => {
+		const renderer = new FakeRenderer();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker: new DeferredStaticBaker(),
+				resolver: new DeferredStaticResolver(),
+			}),
+		});
+
+		expect(runtime.createDiagnosticsReport().runtime.portalPassPlan).toBeNull();
+
+		runtime.setCurrentCameraResidency({
+			kind: "outdoor-landblock",
+			landblockId: 0xda55ffff,
+		});
+
+		expect(renderer.portalPassPlans.at(-1)).toEqual({
+			baseScene: {
+				kind: "exterior",
+				landblockId: 0xda55ffff,
+			},
+			transitionDepthPolicy: { maxDepth: 0 },
+		});
+
+		runtime.setCurrentCameraResidency({
+			kind: "unknown",
+			landblockId: 0xdb55ffff,
+		});
+
+		expect(renderer.portalPassPlans.at(-1)).toEqual({
+			baseScene: {
+				kind: "exterior",
+				landblockId: 0xdb55ffff,
+			},
+			transitionDepthPolicy: { maxDepth: 0 },
+		});
+
+		runtime.dispose();
+	});
+
+	it("uses the render anchor as the conservative exterior portal pass plan for unknown residency", () => {
+		const renderer = new FakeRenderer();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker: new DeferredStaticBaker(),
+				resolver: new DeferredStaticResolver(),
+			}),
+		});
+
+		updateOutdoorSceneInterest(runtime);
+
+		expect(renderer.portalPassPlans.at(-1)).toEqual({
+			baseScene: {
+				kind: "exterior",
+				landblockId: 0xda55ffff,
+			},
+			transitionDepthPolicy: { maxDepth: 0 },
+		});
+
 		runtime.dispose();
 	});
 
@@ -933,7 +1019,9 @@ class FakeRenderer implements Renderer {
 	readonly debugOverlayUpdates: readonly DebugOverlayPrimitive[][] = [];
 	readonly textureUpdates: TexturePlacementUpdate[] = [];
 	readonly samplerPolicyUpdates: SamplerPolicyUpdate[] = [];
+	readonly portalPassPlans: (PortalPassPlan | null)[] = [];
 	readonly events: string[] = [];
+	readonly #listeners = new Set<RendererSnapshotListener>();
 	#snapshot: RendererSnapshot = {
 		backend: "webgl2",
 		canvasHeight: 1,
@@ -943,6 +1031,7 @@ class FakeRenderer implements Renderer {
 		frameCount: 0,
 		frameHandlerMs: 0,
 		isRunning: true,
+		portalPassPlan: null,
 		renderedTriangles: 0,
 		staticDrawUnits: 0,
 		terrainDrawUnits: 0,
@@ -979,6 +1068,14 @@ class FakeRenderer implements Renderer {
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void {
 		this.staticAnchorLandblockIds.push(anchorLandblockId);
 	}
+	setPortalPassPlan(plan: PortalPassPlan | null): void {
+		this.portalPassPlans.push(plan);
+		this.#snapshot = {
+			...this.#snapshot,
+			portalPassPlan: plan,
+		};
+		this.#emit();
+	}
 	setDebugOverlayPrimitives(
 		primitives: readonly DebugOverlayPrimitive[],
 	): void {
@@ -991,8 +1088,11 @@ class FakeRenderer implements Renderer {
 	updateFrameState(): void {}
 
 	subscribe(listener: RendererSnapshotListener): () => void {
+		this.#listeners.add(listener);
 		listener(this.#snapshot);
-		return () => {};
+		return () => {
+			this.#listeners.delete(listener);
+		};
 	}
 
 	dispose(): void {
@@ -1000,6 +1100,13 @@ class FakeRenderer implements Renderer {
 			...this.#snapshot,
 			isRunning: false,
 		};
+	}
+
+	#emit(): void {
+		const snapshot = this.#snapshot;
+		for (const listener of this.#listeners) {
+			listener(snapshot);
+		}
 	}
 }
 

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { StructuredInteriorGeometryStaticDrawUnit } from "../../static/contracts";
+import type {
+	StructuredInteriorGeometryStaticDrawUnit,
+	TransitionApertureBatch,
+} from "../../static/contracts";
 import {
 	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
 	MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
@@ -14,6 +17,7 @@ import {
 	createWebgl2Renderer,
 	STATIC_OBJECT_FRAGMENT_SHADER,
 	TERRAIN_FRAGMENT_SHADER,
+	TRANSITION_APERTURE_COMPOSITE_FRAGMENT_SHADER,
 } from "./webgl2-renderer";
 
 let pendingFrame: FrameRequestCallback | null = null;
@@ -163,6 +167,21 @@ describe("V2 WebGL2 static object transparent pass helpers", () => {
 });
 
 describe("V2 WebGL2 structured interior rendering", () => {
+	it("defines direct-depth transition aperture compositing in the shader contract", () => {
+		expect(TRANSITION_APERTURE_COMPOSITE_FRAGMENT_SHADER).toContain(
+			"uniform sampler2D uPreviousCompositeDepth;",
+		);
+		expect(TRANSITION_APERTURE_COMPOSITE_FRAGMENT_SHADER).toContain(
+			"float apertureDepth = gl_FragCoord.z;",
+		);
+		expect(TRANSITION_APERTURE_COMPOSITE_FRAGMENT_SHADER).toContain(
+			"if (apertureDepth > previousDepth)",
+		);
+		expect(TRANSITION_APERTURE_COMPOSITE_FRAGMENT_SHADER).toContain(
+			"gl_FragDepth = sourceDepth;",
+		);
+	});
+
 	it("uses non-antialiased RGB8/depth24 scene-domain targets", () => {
 		const gl = createFakeWebgl2Context();
 		const getContext = vi.fn((kind: string) => (kind === "webgl2" ? gl : null));
@@ -229,6 +248,66 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			height: 64,
 			width: 64,
 		});
+
+		renderer.dispose();
+	});
+
+	it("executes planned transition composite passes with depth propagation targets", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+		let latestSnapshot = rendererSnapshotPlaceholder();
+		renderer.subscribe((snapshot) => {
+			latestSnapshot = snapshot;
+		});
+
+		renderer.applyStaticDelta({
+			addedDrawUnits: [],
+			addedTransitionApertureBatches: [createTransitionApertureBatch()],
+			removedDrawUnitIds: [],
+			removedTransitionApertureBatchIds: [],
+			revision: 1,
+		});
+		renderer.setRenderPassPlan({
+			baseScene: {
+				kind: "exterior",
+				landblockId: 0xda55ffff,
+			},
+			kind: "portal-scene-domains",
+			transitionDepthPolicy: { maxDepth: 2 },
+		});
+		pendingFrame?.(16);
+
+		expect(latestSnapshot.sceneDomainTargets).toMatchObject({
+			apertureBatchDrawCalls: 2,
+			compositePasses: 2,
+			compositingMode: "direct-depth",
+			executedCompositeDepth: 2,
+		});
+		expect(gl.drawElementsCalls).toEqual([
+			{ count: 3, mode: gl.TRIANGLES, type: gl.UNSIGNED_SHORT },
+			{ count: 3, mode: gl.TRIANGLES, type: gl.UNSIGNED_SHORT },
+		]);
+		expect(gl.depthFuncModes).toContain(gl.ALWAYS);
+		expect(gl.cullFaceModes).toEqual(
+			expect.arrayContaining([gl.FRONT, gl.BACK]),
+		);
+		expect(gl.blitFramebufferCalls).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					mask: gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT,
+				}),
+				expect.objectContaining({
+					mask: gl.COLOR_BUFFER_BIT,
+				}),
+			]),
+		);
 
 		renderer.dispose();
 	});
@@ -470,6 +549,35 @@ function createStructuredInteriorDrawUnit(): StructuredInteriorGeometryStaticDra
 	};
 }
 
+function createTransitionApertureBatch(): TransitionApertureBatch {
+	return {
+		apertureBatchId: "transition-aperture-batch:da55ffff",
+		coordinateSpace: "landblock-render-local",
+		frontFace: "indoor-visible",
+		indices: [0, 1, 2],
+		kind: "transition-aperture-batch",
+		landblockId: 0xda55ffff,
+		planes: [null],
+		ranges: [
+			{
+				envCellId: 0xda550100,
+				exterior: {
+					kind: "outside",
+					landblockId: 0xda55ffff,
+				},
+				firstIndex: 0,
+				indexCount: 3,
+				portalId: "transition-portal:0",
+			},
+		],
+		vertices: [
+			{ x: 0, y: 0, z: 0 },
+			{ x: 1, y: 0, z: 0 },
+			{ x: 0, y: 1, z: 0 },
+		],
+	};
+}
+
 function createFakeCanvas(gl: WebGL2RenderingContext): HTMLCanvasElement {
 	return {
 		clientHeight: 64,
@@ -494,8 +602,12 @@ function rendererSnapshotPlaceholder() {
 		renderedTriangles: 0,
 		sceneDomainTargets: {
 			active: false,
+			apertureBatchDrawCalls: 0,
 			colorFormat: "rgb8" as const,
+			compositePasses: 0,
+			compositingMode: "none" as const,
 			depthFormat: "depth-component24" as const,
+			executedCompositeDepth: 0,
 			exteriorDrawCalls: 0,
 			height: 0,
 			interiorDrawCalls: 0,
@@ -509,12 +621,18 @@ function rendererSnapshotPlaceholder() {
 }
 
 function createFakeWebgl2Context(): WebGL2RenderingContext & {
+	readonly blitFramebufferCalls: { readonly mask: GLenum }[];
 	readonly bufferDataTargets: GLenum[];
+	readonly cullFaceModes: GLenum[];
+	readonly depthFuncModes: GLenum[];
 	readonly drawElementsCalls: { readonly count: number; readonly mode: GLenum; readonly type: GLenum }[];
 	readonly enabledVertexAttributes: number[];
 } {
 	let nextObjectId = 1;
+	const blitFramebufferCalls: { mask: GLenum }[] = [];
 	const bufferDataTargets: GLenum[] = [];
+	const cullFaceModes: GLenum[] = [];
+	const depthFuncModes: GLenum[] = [];
 	const drawElementsCalls: { count: number; mode: GLenum; type: GLenum }[] = [];
 	const enabledVertexAttributes: number[] = [];
 	const createObject = () => ({ id: nextObjectId++ });
@@ -585,7 +703,21 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		bindVertexArray: vi.fn(),
 		blendEquationSeparate: vi.fn(),
 		blendFuncSeparate: vi.fn(),
-		blitFramebuffer: vi.fn(),
+		blitFramebuffer: vi.fn(
+			(
+				_x0: number,
+				_y0: number,
+				_x1: number,
+				_y1: number,
+				_x2: number,
+				_y2: number,
+				_x3: number,
+				_y3: number,
+				mask: GLenum,
+			) => {
+				blitFramebufferCalls.push({ mask });
+			},
+		),
 		bufferData: vi.fn((target: GLenum) => {
 			bufferDataTargets.push(target);
 		}),
@@ -600,14 +732,18 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		createShader: vi.fn(createObject),
 		createTexture: vi.fn(createObject),
 		createVertexArray: vi.fn(createObject),
-		cullFace: vi.fn(),
+		cullFace: vi.fn((mode: GLenum) => {
+			cullFaceModes.push(mode);
+		}),
 		deleteBuffer: vi.fn(),
 		deleteFramebuffer: vi.fn(),
 		deleteProgram: vi.fn(),
 		deleteShader: vi.fn(),
 		deleteTexture: vi.fn(),
 		deleteVertexArray: vi.fn(),
-		depthFunc: vi.fn(),
+		depthFunc: vi.fn((mode: GLenum) => {
+			depthFuncModes.push(mode);
+		}),
 		depthMask: vi.fn(),
 		disable: vi.fn(),
 		drawArrays: vi.fn(),
@@ -653,13 +789,19 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		useProgram: vi.fn(),
 		vertexAttribPointer: vi.fn(),
 		viewport: vi.fn(),
+		blitFramebufferCalls,
 		bufferDataTargets,
+		cullFaceModes,
+		depthFuncModes,
 		drawElementsCalls,
 		enabledVertexAttributes,
 	};
 
 	return gl as unknown as WebGL2RenderingContext & {
+		readonly blitFramebufferCalls: { readonly mask: GLenum }[];
 		readonly bufferDataTargets: GLenum[];
+		readonly cullFaceModes: GLenum[];
+		readonly depthFuncModes: GLenum[];
 		readonly drawElementsCalls: { readonly count: number; readonly mode: GLenum; readonly type: GLenum }[];
 		readonly enabledVertexAttributes: number[];
 	};

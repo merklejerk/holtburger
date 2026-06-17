@@ -5,6 +5,7 @@ import type {
 	RendererSnapshot,
 	RendererSnapshotListener,
 	RenderPassPlan,
+	SceneDomainTargetKind,
 	SceneDomainTargetSnapshot,
 	SamplerPolicyUpdate,
 	StaticResidencyDelta,
@@ -60,6 +61,12 @@ import {
 	type TerrainPreparedLayeredPayloadState,
 	type TerrainPreparedRolePageBindings,
 } from "./webgl2-terrain-payloads";
+import {
+	planTransitionCompositeWork,
+	type TransitionCompositeApertureBatchInput,
+	type TransitionCompositeCullFace,
+	type TransitionCompositeDepthWork,
+} from "../transition-composite-work-plan";
 
 const TERRAIN_ATLAS_MIP_GRADIENT_SCALE = 0.5;
 const TERRAIN_COLOR_TEXTURE_UNIT_BASE = 1;
@@ -77,6 +84,9 @@ const STATIC_OBJECT_PALETTE_TEXTURE_UNIT_BASE =
 const STATIC_OBJECT_DETAIL_TEXTURE_UNIT_BASE =
 	STATIC_OBJECT_PALETTE_TEXTURE_UNIT_BASE +
 	MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW;
+const TRANSITION_COMPOSITE_PREVIOUS_DEPTH_TEXTURE_UNIT = 0;
+const TRANSITION_COMPOSITE_SOURCE_COLOR_TEXTURE_UNIT = 1;
+const TRANSITION_COMPOSITE_SOURCE_DEPTH_TEXTURE_UNIT = 2;
 const DEBUG_OVERLAY_FLOATS_PER_VERTEX = 7;
 // Visual-quality/perf tradeoff: sort only transparent statics close enough for
 // object-order artifacts to be obvious.
@@ -159,6 +169,41 @@ out vec4 fragColor;
 
 void main() {
 	fragColor = vColor;
+}
+`;
+
+const TRANSITION_APERTURE_COMPOSITE_VERTEX_SHADER = `#version 300 es
+layout(location = 0) in vec3 position;
+
+uniform mat4 uModelViewProjection;
+uniform vec3 uPlacementTranslation;
+
+void main() {
+	gl_Position = uModelViewProjection * vec4(position + uPlacementTranslation, 1.0);
+}
+`;
+
+export const TRANSITION_APERTURE_COMPOSITE_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+uniform sampler2D uPreviousCompositeDepth;
+uniform sampler2D uSourceSceneColor;
+uniform sampler2D uSourceSceneDepth;
+uniform vec2 uViewportSize;
+
+out vec4 fragColor;
+
+void main() {
+	vec2 screenUv = gl_FragCoord.xy / uViewportSize;
+	float previousDepth = texture(uPreviousCompositeDepth, screenUv).r;
+	float apertureDepth = gl_FragCoord.z;
+	if (apertureDepth > previousDepth) {
+		discard;
+	}
+	vec4 sourceColor = texture(uSourceSceneColor, screenUv);
+	float sourceDepth = texture(uSourceSceneDepth, screenUv).r;
+	fragColor = sourceColor;
+	gl_FragDepth = sourceDepth;
 }
 `;
 
@@ -651,6 +696,7 @@ class Webgl2Renderer implements Renderer {
 	readonly #terrainProgram: TerrainGeometryProgram;
 	readonly #staticObjectProgram: StaticObjectGeometryProgram;
 	readonly #debugOverlayProgram: DebugOverlayProgram;
+	readonly #transitionCompositeProgram: TransitionApertureCompositeProgram;
 	readonly #debugOverlayVertexArray: WebGLVertexArrayObject;
 	readonly #debugOverlayVertexBuffer: WebGLBuffer;
 	readonly #stateCache: Webgl2StateCache;
@@ -671,6 +717,10 @@ class Webgl2Renderer implements Renderer {
 	#renderPassPlan: RenderPassPlan = { kind: "single-surface-resident" };
 	#lastExteriorSceneDomainDrawCalls = 0;
 	#lastInteriorSceneDomainDrawCalls = 0;
+	#lastCompositePasses = 0;
+	#lastCompositeApertureBatchDrawCalls = 0;
+	#lastExecutedCompositeDepth = 0;
+	#lastCompositingMode: SceneDomainTargetSnapshot["compositingMode"] = "none";
 	#debugOverlayPrimitiveCount = 0;
 	#debugOverlayLineVertexCount = 0;
 	#debugOverlayTriangleVertexCount = 0;
@@ -682,6 +732,8 @@ class Webgl2Renderer implements Renderer {
 		this.#terrainProgram = createTerrainGeometryProgram(gl);
 		this.#staticObjectProgram = createStaticObjectGeometryProgram(gl);
 		this.#debugOverlayProgram = createDebugOverlayProgram(gl);
+		this.#transitionCompositeProgram =
+			createTransitionApertureCompositeProgram(gl);
 		this.#stateCache = new Webgl2StateCache(gl);
 		const vertexArray = gl.createVertexArray();
 		const vertexBuffer = gl.createBuffer();
@@ -911,6 +963,7 @@ class Webgl2Renderer implements Renderer {
 		this.#terrainProgram.dispose();
 		this.#staticObjectProgram.dispose();
 		this.#debugOverlayProgram.dispose();
+		this.#transitionCompositeProgram.dispose();
 		this.#sceneDomainTargets?.dispose();
 		this.#sceneDomainTargets = null;
 		this.#gl.deleteBuffer(this.#debugOverlayVertexBuffer);
@@ -949,6 +1002,10 @@ class Webgl2Renderer implements Renderer {
 		const pulse = 0.5 + Math.sin(frameTime * 0.7) * 0.5;
 		this.#lastExteriorSceneDomainDrawCalls = 0;
 		this.#lastInteriorSceneDomainDrawCalls = 0;
+		this.#lastCompositePasses = 0;
+		this.#lastCompositeApertureBatchDrawCalls = 0;
+		this.#lastExecutedCompositeDepth = 0;
+		this.#lastCompositingMode = "none";
 
 		if (this.#renderPassPlan.kind === "single-surface-resident") {
 			this.#renderSingleSurfaceResident(pulse);
@@ -1000,9 +1057,141 @@ class Webgl2Renderer implements Renderer {
 			pulse,
 			aspectRatio,
 		);
-		const baseTarget =
-			plan.baseScene.kind === "exterior" ? targets.exterior : targets.interior;
-		this.#blitSceneDomainColorToDisplay(baseTarget);
+		const workPlan = planTransitionCompositeWork({
+			apertureBatches: this.#createTransitionCompositeApertureBatchInputs(),
+			renderPassPlan: plan,
+		});
+		const baseTarget = this.#getSceneDomainTarget(targets, plan.baseScene.kind);
+		if (workPlan.kind === "none" || workPlan.apertureBatchIds.length === 0) {
+			this.#blitSceneDomainColorToDisplay(baseTarget);
+			return;
+		}
+		this.#executeTransitionCompositeWork(targets, workPlan.depthWork, baseTarget);
+	}
+
+	#createTransitionCompositeApertureBatchInputs(): readonly TransitionCompositeApertureBatchInput[] {
+		return [...this.#transitionApertureResources.values()].map((resource) => ({
+			apertureBatchId: resource.apertureBatchId,
+			frontFace: resource.frontFace,
+			indexCount: resource.indexCount,
+			landblockId: resource.landblockId,
+			rangeCount: resource.ranges.length,
+		}));
+	}
+
+	#executeTransitionCompositeWork(
+		targets: SceneDomainTargets,
+		depthWork: readonly TransitionCompositeDepthWork[],
+		baseTarget: SceneDomainTarget,
+	): void {
+		if (depthWork.length === 0) {
+			this.#blitSceneDomainColorToDisplay(baseTarget);
+			return;
+		}
+
+		let compositeRead = targets.compositePing;
+		let compositeWrite = targets.compositePong;
+		this.#blitSceneDomainColorAndDepth(baseTarget, compositeRead);
+
+		for (const work of depthWork) {
+			this.#blitSceneDomainColorAndDepth(compositeRead, compositeWrite);
+			this.#drawTransitionCompositeDepthWork(targets, compositeRead, compositeWrite, work);
+			this.#lastCompositePasses += 1;
+			this.#lastExecutedCompositeDepth = work.transitionDepth + 1;
+			this.#lastCompositingMode = "direct-depth";
+			const nextRead = compositeWrite;
+			compositeWrite = compositeRead;
+			compositeRead = nextRead;
+		}
+
+		this.#blitSceneDomainColorToDisplay(compositeRead);
+	}
+
+	#drawTransitionCompositeDepthWork(
+		targets: SceneDomainTargets,
+		compositeRead: SceneDomainTarget,
+		compositeWrite: SceneDomainTarget,
+		work: TransitionCompositeDepthWork,
+	): void {
+		const sourceTarget = this.#getSceneDomainTarget(targets, work.sourceTarget);
+		const gl = this.#gl;
+		const aspectRatio = compositeWrite.width / Math.max(1, compositeWrite.height);
+		this.#stateCache.bindFramebuffer(compositeWrite.framebuffer);
+		this.#stateCache.setViewport({
+			height: compositeWrite.height,
+			width: compositeWrite.width,
+			x: 0,
+			y: 0,
+		});
+		this.#stateCache.useProgram(this.#transitionCompositeProgram.program);
+		this.#stateCache.setDepthState({
+			enabled: true,
+			func: gl.ALWAYS,
+			write: true,
+		});
+		this.#stateCache.setBlendState(createBlendState(gl, false, gl.ONE, gl.ZERO));
+		this.#stateCache.setCullState({
+			enabled: true,
+			mode: resolveTransitionCompositeCullFace(gl, work.cullFace),
+		});
+		this.#stateCache.bindTexture2D(
+			TRANSITION_COMPOSITE_PREVIOUS_DEPTH_TEXTURE_UNIT,
+			compositeRead.depthTexture,
+		);
+		this.#stateCache.bindTexture2D(
+			TRANSITION_COMPOSITE_SOURCE_COLOR_TEXTURE_UNIT,
+			sourceTarget.colorTexture,
+		);
+		this.#stateCache.bindTexture2D(
+			TRANSITION_COMPOSITE_SOURCE_DEPTH_TEXTURE_UNIT,
+			sourceTarget.depthTexture,
+		);
+		gl.uniform1i(
+			this.#transitionCompositeProgram.uniforms.uPreviousCompositeDepth,
+			TRANSITION_COMPOSITE_PREVIOUS_DEPTH_TEXTURE_UNIT,
+		);
+		gl.uniform1i(
+			this.#transitionCompositeProgram.uniforms.uSourceSceneColor,
+			TRANSITION_COMPOSITE_SOURCE_COLOR_TEXTURE_UNIT,
+		);
+		gl.uniform1i(
+			this.#transitionCompositeProgram.uniforms.uSourceSceneDepth,
+			TRANSITION_COMPOSITE_SOURCE_DEPTH_TEXTURE_UNIT,
+		);
+		gl.uniform2f(
+			this.#transitionCompositeProgram.uniforms.uViewportSize,
+			compositeWrite.width,
+			compositeWrite.height,
+		);
+		gl.uniformMatrix4fv(
+			this.#transitionCompositeProgram.uniforms.uModelViewProjection,
+			false,
+			createModelViewProjectionMatrix(this.#frameState, aspectRatio),
+		);
+
+		for (const apertureBatchId of work.apertureBatchIds) {
+			const resource = this.#transitionApertureResources.get(apertureBatchId);
+			if (!resource) {
+				continue;
+			}
+			const translation = this.#createLandblockTranslation(resource.landblockId);
+			gl.uniform3f(
+				this.#transitionCompositeProgram.uniforms.uPlacementTranslation,
+				translation[0],
+				translation[1],
+				translation[2],
+			);
+			this.#stateCache.bindVertexArray(resource.vertexArray);
+			gl.drawElements(
+				gl.TRIANGLES,
+				resource.indexCount,
+				resource.indexType,
+				0,
+			);
+			this.#lastCompositeApertureBatchDrawCalls += 1;
+		}
+		this.#stateCache.bindVertexArray(null);
+		this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
 	}
 
 	#renderSceneDomainTarget(
@@ -1056,6 +1245,37 @@ class Webgl2Renderer implements Renderer {
 			x: 0,
 			y: 0,
 		});
+	}
+
+	#blitSceneDomainColorAndDepth(
+		source: SceneDomainTarget,
+		destination: SceneDomainTarget,
+	): void {
+		const gl = this.#gl;
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, source.framebuffer);
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, destination.framebuffer);
+		gl.blitFramebuffer(
+			0,
+			0,
+			source.width,
+			source.height,
+			0,
+			0,
+			destination.width,
+			destination.height,
+			gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT,
+			gl.NEAREST,
+		);
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+		this.#stateCache.invalidate();
+	}
+
+	#getSceneDomainTarget(
+		targets: SceneDomainTargets,
+		target: SceneDomainTargetKind,
+	): SceneDomainTarget {
+		return target === "exterior" ? targets.exterior : targets.interior;
 	}
 
 	#drawTerrain(aspectRatio: number): number {
@@ -1497,8 +1717,14 @@ class Webgl2Renderer implements Renderer {
 			| StaticObjectGeometryResource
 			| StructuredInteriorGeometryResource,
 	): readonly [number, number, number] {
+		return this.#createLandblockTranslation(resource.landblockId);
+	}
+
+	#createLandblockTranslation(
+		landblockId: number,
+	): readonly [number, number, number] {
 		return createOutdoorLandblockRootTranslation(
-			resource.landblockId,
+			landblockId,
 			this.#staticRenderAnchorLandblockId,
 		);
 	}
@@ -1537,8 +1763,12 @@ class Webgl2Renderer implements Renderer {
 	#createSceneDomainTargetSnapshot(): SceneDomainTargetSnapshot {
 		return {
 			active: this.#renderPassPlan.kind === "portal-scene-domains",
+			apertureBatchDrawCalls: this.#lastCompositeApertureBatchDrawCalls,
 			colorFormat: "rgb8",
+			compositePasses: this.#lastCompositePasses,
+			compositingMode: this.#lastCompositingMode,
 			depthFormat: "depth-component24",
+			executedCompositeDepth: this.#lastExecutedCompositeDepth,
 			exteriorDrawCalls: this.#lastExteriorSceneDomainDrawCalls,
 			height: this.#sceneDomainTargets?.height ?? 0,
 			interiorDrawCalls: this.#lastInteriorSceneDomainDrawCalls,
@@ -1651,6 +1881,19 @@ interface DebugOverlayProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
 		readonly uModelViewProjection: WebGLUniformLocation;
+	};
+	dispose(): void;
+}
+
+interface TransitionApertureCompositeProgram {
+	readonly program: WebGLProgram;
+	readonly uniforms: {
+		readonly uModelViewProjection: WebGLUniformLocation;
+		readonly uPlacementTranslation: WebGLUniformLocation;
+		readonly uPreviousCompositeDepth: WebGLUniformLocation;
+		readonly uSourceSceneColor: WebGLUniformLocation;
+		readonly uSourceSceneDepth: WebGLUniformLocation;
+		readonly uViewportSize: WebGLUniformLocation;
 	};
 	dispose(): void;
 }
@@ -2250,6 +2493,64 @@ function createDebugOverlayProgram(
 	};
 }
 
+function createTransitionApertureCompositeProgram(
+	gl: WebGL2RenderingContext,
+): TransitionApertureCompositeProgram {
+	const vertexShader = compileShader(
+		gl,
+		gl.VERTEX_SHADER,
+		TRANSITION_APERTURE_COMPOSITE_VERTEX_SHADER,
+	);
+	const fragmentShader = compileShader(
+		gl,
+		gl.FRAGMENT_SHADER,
+		TRANSITION_APERTURE_COMPOSITE_FRAGMENT_SHADER,
+	);
+	const program = gl.createProgram();
+	if (!program) {
+		throw new Error(
+			"Failed to create V2 transition aperture composite shader program.",
+		);
+	}
+
+	gl.attachShader(program, vertexShader);
+	gl.attachShader(program, fragmentShader);
+	gl.linkProgram(program);
+	gl.deleteShader(vertexShader);
+	gl.deleteShader(fragmentShader);
+
+	if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+		const message = gl.getProgramInfoLog(program) ?? "unknown link error";
+		gl.deleteProgram(program);
+		throw new Error(
+			`Failed to link V2 transition aperture composite shader: ${message}`,
+		);
+	}
+
+	return {
+		program,
+		uniforms: {
+			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
+			uPlacementTranslation: requireUniform(
+				gl,
+				program,
+				"uPlacementTranslation",
+			),
+			uPreviousCompositeDepth: requireUniform(
+				gl,
+				program,
+				"uPreviousCompositeDepth",
+			),
+			uSourceSceneColor: requireUniform(gl, program, "uSourceSceneColor"),
+			uSourceSceneDepth: requireUniform(gl, program, "uSourceSceneDepth"),
+			uViewportSize: requireUniform(gl, program, "uViewportSize"),
+		},
+		dispose() {
+			gl.deleteProgram(program);
+		},
+	};
+}
+
 function createTerrainGeometryResource(
 	gl: WebGL2RenderingContext,
 	drawUnit: TerrainGeometryStaticDrawUnit,
@@ -2840,6 +3141,13 @@ function restoreDebugOverlayRenderState(
 	stateCache.setDepthState(createDepthState(gl, true, true));
 	stateCache.setBlendState(createBlendState(gl, false, gl.ONE, gl.ZERO));
 	stateCache.setCullState({ enabled: false, mode: gl.BACK });
+}
+
+function resolveTransitionCompositeCullFace(
+	gl: WebGL2RenderingContext,
+	cullFace: TransitionCompositeCullFace,
+): GLenum {
+	return cullFace === "front" ? gl.FRONT : gl.BACK;
 }
 
 function createDepthState(

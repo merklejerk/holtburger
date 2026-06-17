@@ -1756,8 +1756,12 @@ function renderPassPlanEquals(
 function createEmptySceneDomainTargetSnapshot(): SceneDomainTargetSnapshot {
 	return {
 		active: false,
+		apertureBatchDrawCalls: 0,
 		colorFormat: "rgb8",
+		compositePasses: 0,
+		compositingMode: "none",
 		depthFormat: "depth-component24",
+		executedCompositeDepth: 0,
 		exteriorDrawCalls: 0,
 		height: 0,
 		interiorDrawCalls: 0,

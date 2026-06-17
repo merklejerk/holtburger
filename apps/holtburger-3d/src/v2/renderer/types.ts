@@ -1,4 +1,7 @@
-import type { StaticDrawUnit, TransitionApertureBatch } from "../static/contracts";
+import type {
+	StaticDrawUnit,
+	TransitionApertureBatch,
+} from "../static/contracts";
 import type {
 	TextureFilteringMode,
 	TexturePageSampleClass,
@@ -188,8 +191,8 @@ export interface SceneDomainTargetSnapshot {
 	readonly width: number;
 	readonly height: number;
 	readonly colorFormat: "rgb8";
-	readonly depthFormat: "depth-component24";
-	readonly compositingMode: "none" | "direct-depth";
+	readonly depthFormat: "depth24-stencil8";
+	readonly compositingMode: "none" | "stencil-mask";
 	readonly executedCompositeDepth: number;
 	readonly compositePasses: number;
 	readonly apertureBatchDrawCalls: number;

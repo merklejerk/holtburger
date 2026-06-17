@@ -15,9 +15,9 @@ import {
 	DEBUG_OVERLAY_VERTEX_SHADER,
 	resolveStaticObjectBlendFactor,
 	createWebgl2Renderer,
+	SOURCE_SCENE_COPY_FRAGMENT_SHADER,
 	STATIC_OBJECT_FRAGMENT_SHADER,
 	TERRAIN_FRAGMENT_SHADER,
-	TRANSITION_APERTURE_COMPOSITE_FRAGMENT_SHADER,
 } from "./webgl2-renderer";
 
 let pendingFrame: FrameRequestCallback | null = null;
@@ -167,22 +167,26 @@ describe("V2 WebGL2 static object transparent pass helpers", () => {
 });
 
 describe("V2 WebGL2 structured interior rendering", () => {
-	it("defines direct-depth transition aperture compositing in the shader contract", () => {
-		expect(TRANSITION_APERTURE_COMPOSITE_FRAGMENT_SHADER).toContain(
-			"uniform sampler2D uPreviousCompositeDepth;",
+	it("copies source scene color and depth without sampled aperture-depth coverage", () => {
+		expect(SOURCE_SCENE_COPY_FRAGMENT_SHADER).toContain(
+			"uniform sampler2D uSourceSceneColor;",
 		);
-		expect(TRANSITION_APERTURE_COMPOSITE_FRAGMENT_SHADER).toContain(
-			"float apertureDepth = gl_FragCoord.z;",
+		expect(SOURCE_SCENE_COPY_FRAGMENT_SHADER).toContain(
+			"uniform sampler2D uSourceSceneDepth;",
 		);
-		expect(TRANSITION_APERTURE_COMPOSITE_FRAGMENT_SHADER).toContain(
-			"if (apertureDepth > previousDepth)",
-		);
-		expect(TRANSITION_APERTURE_COMPOSITE_FRAGMENT_SHADER).toContain(
+		expect(SOURCE_SCENE_COPY_FRAGMENT_SHADER).toContain("texelFetch");
+		expect(SOURCE_SCENE_COPY_FRAGMENT_SHADER).toContain(
 			"gl_FragDepth = sourceDepth;",
+		);
+		expect(SOURCE_SCENE_COPY_FRAGMENT_SHADER).not.toContain(
+			"uPreviousCompositeDepth",
+		);
+		expect(SOURCE_SCENE_COPY_FRAGMENT_SHADER).not.toContain(
+			"apertureDepth > previousDepth",
 		);
 	});
 
-	it("uses non-antialiased RGB8/depth24 scene-domain targets", () => {
+	it("uses non-antialiased RGB8/depth24-stencil8 scene-domain targets", () => {
 		const gl = createFakeWebgl2Context();
 		const getContext = vi.fn((kind: string) => (kind === "webgl2" ? gl : null));
 		const canvas = {
@@ -233,18 +237,18 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		expect(gl.texImage2D).toHaveBeenCalledWith(
 			gl.TEXTURE_2D,
 			0,
-			gl.DEPTH_COMPONENT24,
+			gl.DEPTH24_STENCIL8,
 			64,
 			64,
 			0,
-			gl.DEPTH_COMPONENT,
-			gl.UNSIGNED_INT,
+			gl.DEPTH_STENCIL,
+			gl.UNSIGNED_INT_24_8,
 			null,
 		);
 		expect(latestSnapshot.sceneDomainTargets).toMatchObject({
 			active: true,
 			colorFormat: "rgb8",
-			depthFormat: "depth-component24",
+			depthFormat: "depth24-stencil8",
 			height: 64,
 			width: 64,
 		});
@@ -287,7 +291,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		expect(latestSnapshot.sceneDomainTargets).toMatchObject({
 			apertureBatchDrawCalls: 2,
 			compositePasses: 2,
-			compositingMode: "direct-depth",
+			compositingMode: "stencil-mask",
 			executedCompositeDepth: 2,
 		});
 		expect(gl.drawElementsCalls).toEqual([
@@ -295,17 +299,34 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			{ count: 3, mode: gl.TRIANGLES, type: gl.UNSIGNED_SHORT },
 		]);
 		expect(gl.depthFuncModes).toContain(gl.ALWAYS);
+		expect(gl.depthFuncModes).toContain(gl.LEQUAL);
 		expect(gl.cullFaceModes).toEqual(
 			expect.arrayContaining([gl.FRONT, gl.BACK]),
 		);
 		expect(gl.blitFramebufferCalls).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
-					mask: gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT,
+					mask: gl.DEPTH_BUFFER_BIT,
+				}),
+				expect.objectContaining({
+					mask: gl.STENCIL_BUFFER_BIT,
 				}),
 				expect.objectContaining({
 					mask: gl.COLOR_BUFFER_BIT,
 				}),
+			]),
+		);
+		expect(gl.stencilFuncCalls).toEqual(
+			expect.arrayContaining([
+				{ func: gl.ALWAYS, mask: 0xff, ref: 1 },
+				{ func: gl.EQUAL, mask: 0xff, ref: 1 },
+				{ func: gl.ALWAYS, mask: 0xff, ref: 2 },
+				{ func: gl.EQUAL, mask: 0xff, ref: 2 },
+			]),
+		);
+		expect(gl.stencilOpCalls).toEqual(
+			expect.arrayContaining([
+				{ fail: gl.KEEP, zfail: gl.KEEP, zpass: gl.REPLACE },
 			]),
 		);
 
@@ -342,12 +363,11 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			{ count: 3, mode: gl.TRIANGLES, type: gl.UNSIGNED_SHORT },
 		]);
 		expect(gl.bufferDataTargets).toEqual(
-			expect.arrayContaining([
-				gl.ARRAY_BUFFER,
-				gl.ELEMENT_ARRAY_BUFFER,
-			]),
+			expect.arrayContaining([gl.ARRAY_BUFFER, gl.ELEMENT_ARRAY_BUFFER]),
 		);
-		expect(gl.enabledVertexAttributes).toEqual(expect.arrayContaining([0, 1, 2]));
+		expect(gl.enabledVertexAttributes).toEqual(
+			expect.arrayContaining([0, 1, 2]),
+		);
 
 		renderer.applyStaticDelta({
 			addedDrawUnits: [],
@@ -420,19 +440,14 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		expect(latestSnapshot.transitionApertureBatches).toBe(1);
 		expect(latestSnapshot.transitionApertures).toBe(1);
 		expect(gl.bufferDataTargets).toEqual(
-			expect.arrayContaining([
-				gl.ARRAY_BUFFER,
-				gl.ELEMENT_ARRAY_BUFFER,
-			]),
+			expect.arrayContaining([gl.ARRAY_BUFFER, gl.ELEMENT_ARRAY_BUFFER]),
 		);
 
 		renderer.applyStaticDelta({
 			addedDrawUnits: [],
 			addedTransitionApertureBatches: [],
 			removedDrawUnitIds: [],
-			removedTransitionApertureBatchIds: [
-				"transition-aperture-batch:da55ffff",
-			],
+			removedTransitionApertureBatchIds: ["transition-aperture-batch:da55ffff"],
 			revision: 2,
 		});
 
@@ -606,7 +621,7 @@ function rendererSnapshotPlaceholder() {
 			colorFormat: "rgb8" as const,
 			compositePasses: 0,
 			compositingMode: "none" as const,
-			depthFormat: "depth-component24" as const,
+			depthFormat: "depth24-stencil8" as const,
 			executedCompositeDepth: 0,
 			exteriorDrawCalls: 0,
 			height: 0,
@@ -625,8 +640,22 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 	readonly bufferDataTargets: GLenum[];
 	readonly cullFaceModes: GLenum[];
 	readonly depthFuncModes: GLenum[];
-	readonly drawElementsCalls: { readonly count: number; readonly mode: GLenum; readonly type: GLenum }[];
+	readonly drawElementsCalls: {
+		readonly count: number;
+		readonly mode: GLenum;
+		readonly type: GLenum;
+	}[];
 	readonly enabledVertexAttributes: number[];
+	readonly stencilFuncCalls: {
+		readonly func: GLenum;
+		readonly mask: number;
+		readonly ref: number;
+	}[];
+	readonly stencilOpCalls: {
+		readonly fail: GLenum;
+		readonly zfail: GLenum;
+		readonly zpass: GLenum;
+	}[];
 } {
 	let nextObjectId = 1;
 	const blitFramebufferCalls: { mask: GLenum }[] = [];
@@ -635,6 +664,8 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 	const depthFuncModes: GLenum[] = [];
 	const drawElementsCalls: { count: number; mode: GLenum; type: GLenum }[] = [];
 	const enabledVertexAttributes: number[] = [];
+	const stencilFuncCalls: { func: GLenum; mask: number; ref: number }[] = [];
+	const stencilOpCalls: { fail: GLenum; zfail: GLenum; zpass: GLenum }[] = [];
 	const createObject = () => ({ id: nextObjectId++ });
 	const gl = {
 		ALWAYS: 519,
@@ -646,15 +677,19 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		COMPILE_STATUS: 35713,
 		CULL_FACE: 2884,
 		DEPTH_ATTACHMENT: 36096,
+		DEPTH_STENCIL_ATTACHMENT: 33306,
 		DEPTH_BUFFER_BIT: 256,
 		DEPTH_COMPONENT: 6402,
 		DEPTH_COMPONENT24: 33190,
+		DEPTH24_STENCIL8: 35056,
+		DEPTH_STENCIL: 34041,
 		DEPTH_TEST: 2929,
 		drawingBufferHeight: 64,
 		drawingBufferWidth: 64,
 		DRAW_FRAMEBUFFER: 36009,
 		DYNAMIC_DRAW: 35048,
 		ELEMENT_ARRAY_BUFFER: 34963,
+		EQUAL: 514,
 		FLOAT: 5126,
 		FRAGMENT_SHADER: 35632,
 		FRAMEBUFFER: 36160,
@@ -664,6 +699,7 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		FUNC_ADD: 32774,
 		FUNC_SUBTRACT: 32778,
 		KEEP: 7680,
+		LEQUAL: 515,
 		LESS: 513,
 		LINEAR: 9729,
 		LINES: 1,
@@ -681,6 +717,7 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		RGBA: 6408,
 		SRC_ALPHA: 770,
 		STATIC_DRAW: 35044,
+		STENCIL_BUFFER_BIT: 1024,
 		STENCIL_TEST: 2960,
 		TEXTURE0: 33984,
 		TEXTURE_2D: 3553,
@@ -692,6 +729,7 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		UNPACK_ALIGNMENT: 3317,
 		UNSIGNED_BYTE: 5121,
 		UNSIGNED_INT: 5125,
+		UNSIGNED_INT_24_8: 34042,
 		UNSIGNED_SHORT: 5123,
 		VERTEX_SHADER: 35633,
 		ZERO: 0,
@@ -725,7 +763,9 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		clearColor: vi.fn(),
 		clearDepth: vi.fn(),
 		checkFramebufferStatus: vi.fn(() => 36053),
+		clearStencil: vi.fn(),
 		compileShader: vi.fn(),
+		colorMask: vi.fn(),
 		createBuffer: vi.fn(createObject),
 		createFramebuffer: vi.fn(createObject),
 		createProgram: vi.fn(createObject),
@@ -769,9 +809,14 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		linkProgram: vi.fn(),
 		pixelStorei: vi.fn(),
 		shaderSource: vi.fn(),
-		stencilFunc: vi.fn(),
+		REPLACE: 7681,
+		stencilFunc: vi.fn((func: GLenum, ref: number, mask: number) => {
+			stencilFuncCalls.push({ func, mask, ref });
+		}),
 		stencilMask: vi.fn(),
-		stencilOp: vi.fn(),
+		stencilOp: vi.fn((fail: GLenum, zfail: GLenum, zpass: GLenum) => {
+			stencilOpCalls.push({ fail, zfail, zpass });
+		}),
 		texImage2D: vi.fn(),
 		texParameterf: vi.fn(),
 		texParameteri: vi.fn(),
@@ -795,6 +840,8 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		depthFuncModes,
 		drawElementsCalls,
 		enabledVertexAttributes,
+		stencilFuncCalls,
+		stencilOpCalls,
 	};
 
 	return gl as unknown as WebGL2RenderingContext & {
@@ -802,7 +849,21 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		readonly bufferDataTargets: GLenum[];
 		readonly cullFaceModes: GLenum[];
 		readonly depthFuncModes: GLenum[];
-		readonly drawElementsCalls: { readonly count: number; readonly mode: GLenum; readonly type: GLenum }[];
+		readonly drawElementsCalls: {
+			readonly count: number;
+			readonly mode: GLenum;
+			readonly type: GLenum;
+		}[];
 		readonly enabledVertexAttributes: number[];
+		readonly stencilFuncCalls: {
+			readonly func: GLenum;
+			readonly mask: number;
+			readonly ref: number;
+		}[];
+		readonly stencilOpCalls: {
+			readonly fail: GLenum;
+			readonly zfail: GLenum;
+			readonly zpass: GLenum;
+		}[];
 	};
 }

@@ -714,8 +714,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 							this.#staticSceneQuery.queryTransitionApertureBatches(),
 						)
 					: 0,
-				transitionAperturesVisible:
-					this.#transitionApertureDebugOverlayVisible,
+				transitionAperturesVisible: this.#transitionApertureDebugOverlayVisible,
 			},
 			host: this.#host.createSnapshot(),
 			renderPassPlan: this.#lastRendererSnapshot.renderPassPlan,
@@ -1496,7 +1495,8 @@ function readTransitionApertureRangeVertices(
 	const vertices: Array<readonly [number, number, number]> = [];
 	for (let indexOffset = 0; indexOffset < indexCount; indexOffset += 1) {
 		const vertexIndex = batch.indices[firstIndex + indexOffset];
-		const vertex = vertexIndex === undefined ? undefined : batch.vertices[vertexIndex];
+		const vertex =
+			vertexIndex === undefined ? undefined : batch.vertices[vertexIndex];
 		if (!vertex) {
 			throw new Error(
 				`Transition aperture batch ${batch.apertureBatchId} has invalid index at ${firstIndex + indexOffset}.`,
@@ -1520,7 +1520,9 @@ function reverseTriangleWinding(
 		const second = vertices[index + 1];
 		const third = vertices[index + 2];
 		if (!first || !second || !third) {
-			throw new Error("Transition aperture debug geometry is not triangulated.");
+			throw new Error(
+				"Transition aperture debug geometry is not triangulated.",
+			);
 		}
 		reversed.push(first, third, second);
 	}
@@ -1731,8 +1733,7 @@ function renderPassPlanEquals(
 	}
 
 	if (
-		left.transitionDepthPolicy.maxDepth !==
-		right.transitionDepthPolicy.maxDepth
+		left.transitionDepthPolicy.maxDepth !== right.transitionDepthPolicy.maxDepth
 	) {
 		return false;
 	}
@@ -1760,7 +1761,7 @@ function createEmptySceneDomainTargetSnapshot(): SceneDomainTargetSnapshot {
 		colorFormat: "rgb8",
 		compositePasses: 0,
 		compositingMode: "none",
-		depthFormat: "depth-component24",
+		depthFormat: "depth24-stencil8",
 		executedCompositeDepth: 0,
 		exteriorDrawCalls: 0,
 		height: 0,

@@ -717,6 +717,27 @@ describe("V2 static scene query", () => {
 		).toBeNull();
 	});
 
+	it("does not count broad env-cell BVH node hits as residency without item containment", () => {
+		const query = new StaticSceneQuery();
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				landblockNodeBounds: {
+					max: { x: 64, y: 8, z: 64 },
+					min: { x: -64, y: -8, z: -64 },
+				},
+			}),
+		);
+
+		expect(
+			query.queryEnvCellAtPoint({
+				acceptedEnvCellIds: [0xda550100],
+				landblockId: 0xda55ffff,
+				point: { x: 40, y: 0, z: 40 },
+			}),
+		).toBeNull();
+	});
+
 	it("derives camera residency from committed env-cell query data", () => {
 		const query = new StaticSceneQuery();
 		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
@@ -1342,6 +1363,7 @@ function createLandblockEnvCellsPayload(
 		readonly envCellPlacement?: ReturnType<typeof createPlacement>;
 		readonly includeLandblockBvh?: boolean;
 		readonly landblockBounds?: LandblockEnvCellsStaticScopePayload["residencySpatial"]["landblockEnvCellBvh"]["items"][number]["bounds"];
+		readonly landblockNodeBounds?: LandblockEnvCellsStaticScopePayload["residencySpatial"]["landblockEnvCellBvh"]["nodes"][number]["bounds"];
 		readonly staticInstanceBounds?: LandblockEnvCellsStaticScopePayload["envCells"][number]["staticObjectSeeds"][number]["instanceBounds"];
 	} = {},
 ): LandblockEnvCellsStaticScopePayload {
@@ -1351,6 +1373,7 @@ function createLandblockEnvCellsPayload(
 		max: { x: 1, y: 1, z: -4 },
 		min: { x: -1, y: -1, z: -5 },
 	};
+	const landblockNodeBounds = options.landblockNodeBounds ?? landblockBounds;
 	return {
 		acceptedEnvCellIds: [0xda550100],
 		envCells: [
@@ -1480,7 +1503,7 @@ function createLandblockEnvCellsPayload(
 				nodes: includeLandblockBvh
 					? [
 							{
-								bounds: landblockBounds,
+								bounds: landblockNodeBounds,
 								itemIndices: [0],
 								kindMask: {
 									domain: "landblock-env-cells",

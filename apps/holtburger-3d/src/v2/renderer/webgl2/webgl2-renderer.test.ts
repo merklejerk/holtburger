@@ -214,7 +214,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 });
 
 describe("V2 WebGL2 debug overlay shader contract", () => {
-	it("draws in-scene line primitives through the scene camera matrix", () => {
+	it("draws in-scene debug primitives through the scene camera matrix", () => {
 		expect(DEBUG_OVERLAY_VERTEX_SHADER).toContain(
 			"uniform mat4 uModelViewProjection;",
 		);
@@ -224,9 +224,7 @@ describe("V2 WebGL2 debug overlay shader contract", () => {
 		expect(DEBUG_OVERLAY_VERTEX_SHADER).toContain(
 			"layout(location = 1) in vec4 color;",
 		);
-		expect(DEBUG_OVERLAY_FRAGMENT_SHADER).toContain(
-			"fragColor = vec4(vec3(1.0), vColor.a);",
-		);
+		expect(DEBUG_OVERLAY_FRAGMENT_SHADER).toContain("fragColor = vColor;");
 	});
 });
 

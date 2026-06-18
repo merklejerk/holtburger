@@ -351,8 +351,9 @@ Phased execution:
      env-cell records are committed.
    - Spicy implementation note: `StaticSceneQuery` still retains the legacy
      env-cell-derived query fallback when no committed transition aperture
-     batches exist. Phase 4 should remove or further fence that fallback when
-     renderer/debug behavior fully cuts over to building-owned masks.
+     batches exist. Phase 4 must remove or hard-disable that fallback for
+     landblock-building transitions. It must not remain as an alternate
+     mask-producing path for building apertures.
 
 4. Renderer and debug behavior - next
 
@@ -363,6 +364,11 @@ Phased execution:
      landblock-building apertures.
    - Stop treating env-cell outside-transition apertures as mask-producing
      ranges for landblock-building transitions.
+   - Remove or hard-disable the legacy `StaticSceneQuery` env-cell-derived
+     transition aperture fallback for landblock-building transitions. Env-cell
+     outside-transition `CCellPortal` aperture polygons may remain metadata,
+     but they must not synthesize `TransitionApertureBatch` resources for
+     building apertures when no outdoor-building batch is present.
 
 Concrete scope:
 
@@ -410,6 +416,9 @@ Concrete scope:
   composited through it.
 - Stop using env-cell outside-transition `CCellPortal` aperture polygons as
   transition aperture mask geometry for landblock-building transitions.
+- Remove the legacy env-cell-derived transition aperture query path for
+  landblock-building masks. Do not keep it as a silent fallback when
+  outdoor-building transition aperture batches are missing.
 - Keep env-cell portal records available as metadata/debug data, but do not let
   them create additional V2 transition aperture ranges for the same
   landblock-building aperture.
@@ -430,6 +439,9 @@ Acceptance criteria:
   `PortalPoly.poly_id`, and matched `CBldPortal` metadata.
 - Building-sourced transition aperture resources commit when the outdoor
   landblock asset commits, even if no landblock env-cell asset has committed.
+- If no outdoor-building transition aperture batch is committed for a
+  landblock, V2 must not synthesize landblock-building transition mask ranges
+  from env-cell outside-transition `CCellPortal` aperture polygons.
 - If the destination interior/env-cell scene is not resident, the renderer keeps
   the aperture resource resident but skips compositing through it.
 - If a building `PortalPoly.portal_index` cannot be matched to a `CBldPortal`,
@@ -444,6 +456,8 @@ Non-goals for this step:
 - Do not solve bare `outside` transitions that have no landblock-building
   endpoint.
 - Do not implement env-cell aperture dedupe as a fallback in this same change.
+- Do not retain env-cell outside-transition aperture synthesis as a compatibility
+  fallback for landblock-building masks.
 - Do not expose raw building `GfxObj.drawing_bsp` traversal as V2 frontend
   transition aperture policy.
 - Do not use V1 behavior as an authority for this implementation. Use retail

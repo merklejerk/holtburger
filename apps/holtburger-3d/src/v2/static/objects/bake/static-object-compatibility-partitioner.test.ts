@@ -257,7 +257,7 @@ describe("V2 static object compatibility partitioner", () => {
 				apertureBatchId: "transition-apertures:outdoor-buildings:3663069183",
 				coordinateSpace: "landblock-render-local",
 				frontFace: "indoor-visible",
-				indices: [0, 2, 1, 0, 3, 2],
+				indices: [0, 1, 2, 0, 2, 3],
 				kind: "transition-aperture-batch",
 				landblockId: 0xda55ffff,
 				planes: [null],

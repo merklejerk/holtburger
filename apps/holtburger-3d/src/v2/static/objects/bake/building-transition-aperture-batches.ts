@@ -36,7 +36,7 @@ export function deriveBuildingTransitionApertureBatch(
 
 		const apertureIndices = triangulatePortalApertureFan(
 			aperture.points,
-			decodeTransitionPortalVisibleSide(aperture.flags),
+			decodeBuildingTransitionPortalInteriorVisibleSide(aperture.flags),
 		);
 		if (apertureIndices.length === 0) {
 			continue;
@@ -136,4 +136,21 @@ function decodeTransitionPortalVisibleSide(
 	flags: number,
 ): TransitionPortalVisibleSide {
 	return (flags & 0x2) === 0 ? "negative" : "positive";
+}
+
+function decodeBuildingTransitionPortalInteriorVisibleSide(
+	flags: number,
+): TransitionPortalVisibleSide {
+	// CBldPortal flags describe the building/outdoor side of the aperture. V2
+	// stores transition aperture front faces as indoor-visible, so building
+	// portal winding must use the opposite side.
+	return oppositeTransitionPortalVisibleSide(
+		decodeTransitionPortalVisibleSide(flags),
+	);
+}
+
+function oppositeTransitionPortalVisibleSide(
+	side: TransitionPortalVisibleSide,
+): TransitionPortalVisibleSide {
+	return side === "positive" ? "negative" : "positive";
 }

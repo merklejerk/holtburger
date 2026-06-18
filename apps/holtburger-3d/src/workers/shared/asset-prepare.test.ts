@@ -4,9 +4,77 @@ import type {
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
 } from "../../lib/host/contracts";
+import { landblockOutdoorPayloadDtoSchema } from "../../lib/host/contracts";
 import { prepareAssetPayload } from "./asset-prepare";
 
 describe("worker asset preparation", () => {
+	it("accepts prepared building transition apertures on landblock outdoor payloads", () => {
+		const result = landblockOutdoorPayloadDtoSchema.safeParse({
+			kind: "landblock-outdoor",
+			residencyKind: "outdoor-landblock",
+			sourceAssetKind: "landblock-outdoor",
+			landblockId: 0xda55ffff,
+			regionId: 1,
+			regionNumber: 1,
+			classification: "outdoor",
+			terrain: {
+				gridSize: 1,
+				tileSize: 24,
+				vertices: [],
+				triangles: [],
+				quads: [],
+				terrainBvh: {
+					coordinateSpace: "landblock-outdoor-terrain-local",
+					nodes: [],
+					items: [],
+				},
+				minHeight: 0,
+				maxHeight: 0,
+				bounds: null,
+			},
+			statics: [],
+			buildingTransitionApertures: [
+				{
+					apertureId: "building-transition-aperture:building-0:0",
+					buildingInstanceId: "building-0",
+					sourceDid: 0x02001234,
+					sourceAssetId: "gfx-obj/02001234",
+					portalIndex: 0,
+					polyId: 7,
+					buildingPortalId: "building-portal-0",
+					buildingPortalSourceIndex: 0,
+					flags: 1,
+					otherCellId: 0x0100,
+					otherPortalId: 0xffff,
+					linkedEnvCellIds: [0xda550100],
+					points: [
+						{ x: 0, y: 0, z: 0 },
+						{ x: 1, y: 0, z: 0 },
+						{ x: 0, y: 1, z: 0 },
+					],
+				},
+			],
+			outdoorBvh: null,
+			diagnostics: {
+				sourceRecords: [],
+				omissions: [],
+				errors: [],
+			},
+			provenance: {
+				source: "repo-local-hba",
+				sourceAssetKind: "landblock-outdoor",
+				errorCode: null,
+				detail: null,
+			},
+		});
+
+		expect(result.success).toBe(true);
+		if (!result.success) {
+			throw new Error(result.error.message);
+		}
+		expect(result.data.buildingTransitionApertures[0]?.polyId).toBe(7);
+	});
+
 	it("fails hard when a landblock outdoor route returns a non-outdoor payload", () => {
 		const request = createRequest(
 			"request-outdoor",

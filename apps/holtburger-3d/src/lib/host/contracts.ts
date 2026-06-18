@@ -285,6 +285,22 @@ const landblockSceneBuildingPortalDtoSchema = z.object({
 	linkedEnvCellIds: z.array(z.number().int().nonnegative()),
 });
 
+const landblockBuildingTransitionApertureDtoSchema = z.object({
+	apertureId: z.string().min(1),
+	buildingInstanceId: z.string().min(1),
+	sourceDid: z.number().int().nonnegative(),
+	sourceAssetId: z.string().min(1),
+	portalIndex: z.number().int(),
+	polyId: z.number().int().nonnegative(),
+	buildingPortalId: z.string().min(1),
+	buildingPortalSourceIndex: z.number().int().nonnegative(),
+	flags: z.number().int().nonnegative(),
+	otherCellId: z.number().int().nonnegative(),
+	otherPortalId: z.number().int().nonnegative(),
+	linkedEnvCellIds: z.array(z.number().int().nonnegative()),
+	points: z.array(vec3DtoSchema).min(3),
+});
+
 const landblockSceneEnvCellMemberDtoSchema = z.object({
 	memberId: z.string().min(1),
 	envCellId: z.number().int().nonnegative(),
@@ -382,6 +398,9 @@ export const landblockOutdoorPayloadDtoSchema = z.object({
 	classification: z.literal("outdoor"),
 	terrain: landblockTerrainDtoSchema,
 	statics: z.array(landblockOutdoorStaticMemberDtoSchema),
+	buildingTransitionApertures: z.array(
+		landblockBuildingTransitionApertureDtoSchema,
+	),
 	outdoorBvh: preparedOutdoorBvhDtoSchema.nullable(),
 	diagnostics: landblockPackDiagnosticsDtoSchema,
 	provenance: assetProvenanceDtoSchema,

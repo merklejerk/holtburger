@@ -188,6 +188,7 @@ export interface PreparedLandblockOutdoorPayload extends PreparedAssetPayloadBas
 	classification: "outdoor";
 	terrain: PreparedOutdoorTerrain;
 	statics: PreparedLandblockOutdoorStaticMember[];
+	buildingTransitionApertures: PreparedBuildingTransitionAperture[];
 	outdoorBvh: PreparedOutdoorBvh | null;
 	diagnostics: PreparedContentSourceDiagnostics;
 }
@@ -223,6 +224,22 @@ interface PreparedLandblockBuildingPortal {
 	otherPortalId: number;
 	stabLocalCellIds: number[];
 	linkedEnvCellIds: number[];
+}
+
+export interface PreparedBuildingTransitionAperture {
+	apertureId: string;
+	buildingInstanceId: string;
+	sourceDid: number;
+	sourceAssetId: string;
+	portalIndex: number;
+	polyId: number;
+	buildingPortalId: string;
+	buildingPortalSourceIndex: number;
+	flags: number;
+	otherCellId: number;
+	otherPortalId: number;
+	linkedEnvCellIds: number[];
+	points: Vec3Dto[];
 }
 
 interface PreparedLandblockTopologyEnvCellMember {

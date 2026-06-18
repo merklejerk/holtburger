@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 use holtburger_content::{
-    normalize_landblock_id, ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler,
-    LandblockOutdoorAssetAssembler, PreparedVec3,
+    ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler,
+    LandblockOutdoorAssetAssembler, PreparedVec3, normalize_landblock_id,
 };
 use holtburger_dat::graphics::Frame;
 use std::collections::{BTreeMap, BTreeSet};
@@ -65,10 +65,11 @@ fn main() -> Result<()> {
 
     println!("landblock=0x{landblock_id:08x}");
     println!(
-        "outdoorStatics={} buildings={} buildingPortals={}",
+        "outdoorStatics={} buildings={} buildingPortals={} buildingTransitionApertures={}",
         outdoor.statics.len(),
         building_members.len(),
-        building_portal_count
+        building_portal_count,
+        outdoor.building_transition_apertures.len()
     );
 
     let mut linked_env_cell_ids = BTreeSet::new();

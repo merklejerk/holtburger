@@ -181,7 +181,7 @@ describe("V2 client runtime", () => {
 				kind: "interior",
 				landblockId: 0xda55ffff,
 			},
-			transitionDepthPolicy: { maxDepth: 4 },
+			transitionDepthPolicy: { maxDepth: 5 },
 		});
 		expect(runtime.createDiagnosticsReport().runtime).toMatchObject({
 			currentCameraResidency: {
@@ -196,7 +196,7 @@ describe("V2 client runtime", () => {
 					kind: "interior",
 					landblockId: 0xda55ffff,
 				},
-				transitionDepthPolicy: { maxDepth: 4 },
+				transitionDepthPolicy: { maxDepth: 5 },
 			},
 		});
 		expect(JSON.stringify(runtime.createDiagnosticsReport())).not.toContain(
@@ -234,7 +234,7 @@ describe("V2 client runtime", () => {
 				kind: "exterior",
 				landblockId: 0xda55ffff,
 			},
-			transitionDepthPolicy: { maxDepth: 4 },
+			transitionDepthPolicy: { maxDepth: 5 },
 		});
 
 		runtime.setCurrentCameraResidency({
@@ -248,7 +248,7 @@ describe("V2 client runtime", () => {
 				kind: "exterior",
 				landblockId: 0xdb55ffff,
 			},
-			transitionDepthPolicy: { maxDepth: 4 },
+			transitionDepthPolicy: { maxDepth: 5 },
 		});
 
 		runtime.dispose();
@@ -274,7 +274,7 @@ describe("V2 client runtime", () => {
 				kind: "exterior",
 				landblockId: 0xda55ffff,
 			},
-			transitionDepthPolicy: { maxDepth: 4 },
+			transitionDepthPolicy: { maxDepth: 5 },
 		});
 
 		runtime.dispose();

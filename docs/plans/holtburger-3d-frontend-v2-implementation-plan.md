@@ -1222,21 +1222,21 @@ The TS position query remains optional lookup support, not the authority.
 
 ```ts
 type CameraResidency =
-	| { kind: "outdoor-landblock"; landblockId: number }
-	| { kind: "env-cell"; landblockId: number; envCellId: number }
-	| { kind: "unknown"; landblockId: number | null };
+  | { kind: "outdoor-landblock"; landblockId: number }
+  | { kind: "env-cell"; landblockId: number; envCellId: number }
+  | { kind: "unknown"; landblockId: number | null };
 
 type PortalSceneDomain =
-	| { kind: "exterior"; landblockId: number }
-	| { kind: "interior"; landblockId: number; envCellId: number };
+  | { kind: "exterior"; landblockId: number }
+  | { kind: "interior"; landblockId: number; envCellId: number };
 
 type RenderPassPlan =
-	| { kind: "single-surface-resident" }
-	| {
-			kind: "portal-scene-domains";
-			baseScene: PortalSceneDomain;
-			transitionDepthPolicy: { maxDepth: number };
-	  };
+  | { kind: "single-surface-resident" }
+  | {
+      kind: "portal-scene-domains";
+      baseScene: PortalSceneDomain;
+      transitionDepthPolicy: { maxDepth: number };
+    };
 ```
 
 ### Phase 13B1a: Committed Env-Cell Scene Record Store
@@ -1515,7 +1515,7 @@ Dry-run notes:
   - `#materializeStaticCommit(...)` should call a narrowed query API for:
     - record upserts from `materialized.static*Records`,
     - draw-unit resource removals from `materialized.removedResources`.
-    It should not pass `removedScopes` to query cleanup.
+      It should not pass `removedScopes` to query cleanup.
 - Static scene query refactor target:
   - Replace `StaticSceneQueryRetainedScope` with `StaticScopeOwnerKey` or an alias that carries the full typed scope. This removes the current lossy `{ domain, landblockId }` reconstruction.
   - `retainScopes(...)` should derive retained keys with `createStaticScopeOwnerKey` and prune both:
@@ -1524,7 +1524,7 @@ Dry-run notes:
   - Split `applyStaticPeerRecords(...)` if needed:
     - `applyStaticPeerRecords({ records... })` for upserts/replacements,
     - `removeStaticResources(resources)` for draw-unit-owned query cleanup.
-    Prefer the split if it removes optional `removedResources`/`removedScopes` ambiguity.
+      Prefer the split if it removes optional `removedResources`/`removedScopes` ambiguity.
 - Call-site impact:
   - `TextureManager.applyStaticCommitDelta(...)` can keep consuming coordinator commit deltas and `removedResources`.
   - `materializeStaticCommit(...)` can keep returning materialized `removedResources` and renderer-local `StaticResidencyDelta.removedDrawUnitIds`.
@@ -1659,24 +1659,24 @@ Refinement on 2026-06-17:
 
 ```ts
 type PortalSceneDomain =
-	| { readonly kind: "exterior"; readonly landblockId: number }
-	| {
-			readonly kind: "interior";
-			readonly landblockId: number;
-			readonly envCellId: number;
-	  };
+  | { readonly kind: "exterior"; readonly landblockId: number }
+  | {
+      readonly kind: "interior";
+      readonly landblockId: number;
+      readonly envCellId: number;
+    };
 
 type PortalTransitionDepthPolicy = {
-	readonly maxDepth: number;
+  readonly maxDepth: number;
 };
 
 type RenderPassPlan =
-	| { readonly kind: "single-surface-resident" }
-	| {
-			readonly kind: "portal-scene-domains";
-			readonly baseScene: PortalSceneDomain;
-			readonly transitionDepthPolicy: PortalTransitionDepthPolicy;
-	  };
+  | { readonly kind: "single-surface-resident" }
+  | {
+      readonly kind: "portal-scene-domains";
+      readonly baseScene: PortalSceneDomain;
+      readonly transitionDepthPolicy: PortalTransitionDepthPolicy;
+    };
 ```
 
 - Earlier 13B1d implementation used `PortalPassPlan | null`; 13B1g should course-correct this to a first-class `RenderPassPlan` union. The single-surface resident fallback is a render plan, not a scene-domain variant. Do not encode idle/default rendering inside `PortalSceneDomain`; once the portal-scene-domains branch exists, its base scene remains a strict discriminated exterior/interior target.
@@ -1702,7 +1702,7 @@ Implementation notes:
   - `outdoor-landblock` maps to an `exterior` base scene;
   - `unknown` with a landblock id, or with a current render anchor, maps to a conservative `exterior` base scene;
   - `unknown` with no landblock and no render anchor maps to `portalPassPlan: null`.
-- Transition depth policy was initially `{ maxDepth: 0 }` to keep this phase honest while no recursive transition portal compositing existed. Course correction on 2026-06-17: the runtime now uses a named `DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 4` so the contract carries the intended recursion budget before compositing consumes it.
+- Transition depth policy was initially `{ maxDepth: 0 }` to keep this phase honest while no recursive transition portal compositing existed. Course correction on 2026-06-17: the runtime now uses a named `DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 5` so the contract carries the intended recursion budget before compositing consumes it.
 - Runtime snapshots and diagnostics now expose `portalPassPlan` alongside `currentCameraResidency`.
 - Follow-up course correction for 13B1g: replace `PortalPassPlan | null` with first-class `RenderPassPlan`, where `{ kind: "single-surface-resident" }` carries the current no-compositing/default behavior without decorative reason metadata.
 
@@ -1738,39 +1738,39 @@ Candidate contract target:
 
 ```ts
 type TransitionPortalEndpointPair = {
-	readonly outdoor: {
-		readonly buildingInstanceId: string;
-		readonly buildingPortalId: string;
-	};
-	readonly indoor: {
-		readonly envCellId: number;
-		readonly envCellPortalId: string;
-	};
+  readonly outdoor: {
+    readonly buildingInstanceId: string;
+    readonly buildingPortalId: string;
+  };
+  readonly indoor: {
+    readonly envCellId: number;
+    readonly envCellPortalId: string;
+  };
 };
 
 type RenderableTransitionPortalCandidate = {
-	readonly id: string;
-	readonly kind: "renderable";
-	readonly landblockId: number;
-	readonly endpoints: TransitionPortalEndpointPair;
-	readonly aperturePlane: Plane | null;
-	readonly apertureVertices: readonly Vec3[];
-	readonly apertureIndices: readonly number[];
-	readonly insideVisibleSide: "positive" | "negative";
-	readonly outsideVisibleSide: "positive" | "negative";
+  readonly id: string;
+  readonly kind: "renderable";
+  readonly landblockId: number;
+  readonly endpoints: TransitionPortalEndpointPair;
+  readonly aperturePlane: Plane | null;
+  readonly apertureVertices: readonly Vec3[];
+  readonly apertureIndices: readonly number[];
+  readonly insideVisibleSide: "positive" | "negative";
+  readonly outsideVisibleSide: "positive" | "negative";
 };
 
 type SkippedTransitionPortalCandidate = {
-	readonly id: string;
-	readonly kind: "skipped";
-	readonly landblockId: number;
-	readonly endpoints: TransitionPortalEndpointPair;
-	readonly skipReason: string;
+  readonly id: string;
+  readonly kind: "skipped";
+  readonly landblockId: number;
+  readonly endpoints: TransitionPortalEndpointPair;
+  readonly skipReason: string;
 };
 
 type TransitionPortalCandidate =
-	| RenderableTransitionPortalCandidate
-	| SkippedTransitionPortalCandidate;
+  | RenderableTransitionPortalCandidate
+  | SkippedTransitionPortalCandidate;
 ```
 
 The exact type names can change during implementation, but the shape must remain deterministic and explicitly transition-only.
@@ -1833,47 +1833,47 @@ Target contract:
 
 ```ts
 type Vec3 = {
-	readonly x: number;
-	readonly y: number;
-	readonly z: number;
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
 };
 
 type Plane = {
-	readonly normal: Vec3;
-	readonly constant: number;
+  readonly normal: Vec3;
+  readonly constant: number;
 };
 
 type TransitionApertureFrontFace = "indoor-visible";
 
 type TransitionApertureExteriorEndpoint =
-	| {
-			readonly kind: "landblock-building";
-			readonly buildingInstanceId: string;
-			readonly buildingPortalId: string;
-	  }
-	| {
-			readonly kind: "outside";
-			readonly landblockId: number;
-	  };
+  | {
+      readonly kind: "landblock-building";
+      readonly buildingInstanceId: string;
+      readonly buildingPortalId: string;
+    }
+  | {
+      readonly kind: "outside";
+      readonly landblockId: number;
+    };
 
 type TransitionApertureRange = {
-	readonly portalId: string;
-	readonly envCellId: number;
-	readonly exterior: TransitionApertureExteriorEndpoint;
-	readonly firstIndex: number;
-	readonly indexCount: number;
+  readonly portalId: string;
+  readonly envCellId: number;
+  readonly exterior: TransitionApertureExteriorEndpoint;
+  readonly firstIndex: number;
+  readonly indexCount: number;
 };
 
 type TransitionApertureBatch = {
-	readonly kind: "transition-aperture-batch";
-	readonly apertureBatchId: string;
-	readonly landblockId: number;
-	readonly coordinateSpace: "landblock-render-local";
-	readonly frontFace: TransitionApertureFrontFace;
-	readonly vertices: readonly Vec3[];
-	readonly indices: readonly number[];
-	readonly ranges: readonly TransitionApertureRange[];
-	readonly planes: readonly (Plane | null)[];
+  readonly kind: "transition-aperture-batch";
+  readonly apertureBatchId: string;
+  readonly landblockId: number;
+  readonly coordinateSpace: "landblock-render-local";
+  readonly frontFace: TransitionApertureFrontFace;
+  readonly vertices: readonly Vec3[];
+  readonly indices: readonly number[];
+  readonly ranges: readonly TransitionApertureRange[];
+  readonly planes: readonly (Plane | null)[];
 };
 ```
 
@@ -1934,8 +1934,11 @@ Resource lifecycle target:
 
 ```ts
 type StaticResourceKey =
-	| { readonly kind: "draw-unit"; readonly drawUnitId: string }
-	| { readonly kind: "transition-aperture-batch"; readonly apertureBatchId: string };
+  | { readonly kind: "draw-unit"; readonly drawUnitId: string }
+  | {
+      readonly kind: "transition-aperture-batch";
+      readonly apertureBatchId: string;
+    };
 ```
 
 Only add the new union member when this phase has a concrete renderer sync consumer.
@@ -2051,12 +2054,12 @@ Steering:
 
 ```ts
 type RenderPassPlan =
-	| { readonly kind: "single-surface-resident" }
-	| {
-			readonly kind: "portal-scene-domains";
-			readonly baseScene: PortalSceneDomain;
-			readonly transitionDepthPolicy: PortalTransitionDepthPolicy;
-	  };
+  | { readonly kind: "single-surface-resident" }
+  | {
+      readonly kind: "portal-scene-domains";
+      readonly baseScene: PortalSceneDomain;
+      readonly transitionDepthPolicy: PortalTransitionDepthPolicy;
+    };
 ```
 
 - The `single-surface-resident` branch renders currently resident terrain/static/interior draw units directly to the display surface with no exterior/interior target split, no transition aperture mask/composite work, and no attempt to hide indoor resources from outdoor resources beyond ordinary draw-unit residency. This is the current behavior and should remain available as a future browser-mode debug override.
@@ -2466,25 +2469,21 @@ Working theory:
 
 Likely production direction:
 
-- Reintroduce a mask split for transition aperture coverage. Stencil is the preferred first production route because it is the native framebuffer mask path, avoids adding a color mask surface, and lets aperture coverage use fixed-function depth.
-- Candidate production sequence per transition depth:
-  1. Seed the first composite target from the base scene with shader color copy plus framebuffer depth blit. Clear stencil only for this initial seed.
-  2. For each transition depth, copy the current composite target into the write target with shader color copy plus framebuffer depth blit, then blit stencil history into the write target.
-  3. Draw the batched transition aperture VAOs into stencil with color writes off, depth writes off, fixed-function `LEQUAL`, and cull mode from the transition work plan. Use transition-depth stencil refs rather than per-frame generation refs.
-  4. Draw a fullscreen source-copy pass with stencil test enabled only where the aperture pass wrote the mask. This pass samples source scene color/depth at the destination pixel, writes color, and writes sampled source depth with `gl_FragDepth`.
-  5. Swap composite read/write targets and continue to the next transition depth.
-- This restores the v1 invariant: aperture coverage is decided by fixed-function depth against copied framebuffer depth; source color/depth propagation happens only after coverage is known.
-- V1 still used shader `gl_FragDepth` for the stencil-gated incoming scene copy. The critical fix was not "never write `gl_FragDepth`"; it was "never use shader-copied or shader-compared depth for aperture coverage." Whole-target composite depth transfer must use framebuffer depth blits.
+- Keep aperture coverage split from source-scene color/depth propagation. Both failed experiments reinforced the same rule: do not use shader-side depth comparisons or shader-written whole-target depth as the authority for later aperture coverage.
+- Stencil remains viable only if all scene/composite targets share a blit-compatible depth-stencil format. Carrying unused stencil bits on source scene targets is wasteful but likely stable.
+- If we want to avoid stencil bits on source scene targets, the next experiment should be a separate mask texture that records aperture coverage with fixed-function depth, then uses that mask to gate a source-scene copy. The mask path must not require shader-written whole-target composite depth.
 
-Open questions:
+Resolved questions:
 
-- Resolved: use packed `DEPTH24_STENCIL8` targets for exterior, interior, and ping-pong composite targets so depth/stencil blits stay format-compatible.
+- Failed experiment: `RGB8 + DEPTH_COMPONENT24` source targets depth-blitted into `RGB8 + DEPTH24_STENCIL8` composite targets produced visual artifacts and GL errors. That confirms the mixed-format depth-blit path is not acceptable.
+- Failed experiment: source scene targets and ping-pong composite targets all using sampleable `DEPTH_COMPONENT24` depth textures while ping-pong composite targets attached separate `STENCIL_INDEX8` renderbuffers failed hard in browser testing. The renderer hit `INVALID_OPERATION` from deleted debug overlay objects after the target allocation path went bad, and the scene rendered black. That path has been reverted.
+- Failed experiment: source scene targets as `RGB8 + DEPTH_COMPONENT24`, ping-pong composite targets as `RGB8 + DEPTH24_STENCIL8`, and whole-target color/depth copies rendered by fullscreen shader with `gl_FragDepth` still produced banding. That confirms shader-written whole-target depth is not a reliable substitute for framebuffer depth transfer.
 - Resolved for the immediate stencil pivot: keep current all-resident transition aperture batching by transition depth and direction. If later scenes show unrelated portal leakage, add explicit frontier filtering as a separate phase rather than folding it into the depth-banding fix.
 - Resolved: the temporary `aperture-depth-probe`, `shader-coverage-probe`, and depth visualization modes were investigation-only and were reverted before the stencil compositor implementation. The evidence remains documented here; production code does not retain the probes.
 
 ### Immediate Phase 13B1h2: Stencil Aperture Mask Compositor
 
-Status: implementation complete on 2026-06-17; manual harness visual validation still pending.
+Status: closed failed on 2026-06-17; code reverted.
 
 Purpose: replace the unstable shader-side aperture-depth coverage test with a two-step stencil mask compositor while keeping the existing scene-domain targets, transition aperture VAOs, and transition-depth work planning model.
 
@@ -2494,14 +2493,15 @@ Rationale:
 - `shader-coverage-probe` still bands after exact `texelFetch` sampling and a small depth24 epsilon.
 - Therefore the next course correction should preserve fixed-function aperture coverage and stop relying on shader-sampled previous depth for mask decisions.
 
-Deliverables:
+Attempted deliverables:
 
-- Allocate scene-domain/composite targets with stencil-capable depth storage, preferably packed `DEPTH24_STENCIL8` unless WebGL2 constraints force a different shape.
-- Match scene-domain and composite target depth/stencil formats so framebuffer depth blits are compatible. V1 field testing found `DEPTH_COMPONENT24` scene targets blitted into `DEPTH24_STENCIL8` composite targets was noisy/unsupported enough to invalidate diagnostics.
-- Replace whole-target recursive composite copies with the v1 shape:
+- Allocate source scene-domain targets as `RGB8 + DEPTH_COMPONENT24`.
+- Allocate ping-pong composite targets as `RGB8 + DEPTH24_STENCIL8`.
+- Keep an explicit manual validation checkpoint for framebuffer completeness and visual behavior with packed composite depth-stencil targets.
+- Replace whole-target recursive composite copies with the current mixed-format-safe experiment:
   - shader copy color;
-  - framebuffer-blit depth;
-  - framebuffer-blit stencil history.
+  - shader write sampled depth with `gl_FragDepth`;
+  - framebuffer-blit stencil history only between packed composite targets.
 - Add a stencil aperture mask pass that:
   - disables color writes;
   - disables depth writes;
@@ -2516,37 +2516,71 @@ Deliverables:
 - Keep ping-pong composite target recursion as the outer control flow.
 - Keep the temporary debug probe modes retired. They were useful to isolate the issue, but keeping them in the browser panel after the architecture pivot would turn diagnostics into a junk drawer.
 
-Implementation notes:
+Failure notes:
 
-- V2 scene-domain targets now allocate `RGB8` color plus packed `DEPTH24_STENCIL8` depth/stencil textures and attach them with `DEPTH_STENCIL_ATTACHMENT`.
-- Whole-target recursive composite copies now:
-  - draw a fullscreen color copy into the destination target;
-  - copy depth with `gl.blitFramebuffer(... DEPTH_BUFFER_BIT ...)`;
+- V2 source scene-domain targets allocated `RGB8` color plus `DEPTH_COMPONENT24` depth textures and attached them with `DEPTH_ATTACHMENT`.
+- V2 ping-pong composite targets allocated `RGB8` color plus packed `DEPTH24_STENCIL8` depth-stencil textures and attached them with `DEPTH_STENCIL_ATTACHMENT`.
+- Whole-target recursive composite copies:
+  - draw a fullscreen color/depth copy into the destination target;
+  - write sampled source depth through `gl_FragDepth`;
   - clear stencil for the initial base-scene seed;
   - copy stencil history between ping-pong composite targets with `gl.blitFramebuffer(... STENCIL_BUFFER_BIT ...)`.
-- Transition aperture batches now draw a stencil mask with color writes disabled, depth writes disabled, fixed-function `LEQUAL`, and `REPLACE` into sequential stencil refs.
-- Source scene compositing now uses a fullscreen stencil-gated copy pass. It samples source color/depth by integer `texelFetch`, writes color, and writes sampled source depth through `gl_FragDepth`.
-- The production path no longer samples `uPreviousCompositeDepth` or performs shader-side `apertureDepth > previousDepth` rejection.
+- Manual validation still showed banding, so shader-written whole-target depth cannot be used as the stable recursive composite depth source.
+- The code changes for this attempt were reverted before the next mask-texture investigation.
 
-Acceptance criteria:
+Acceptance result:
 
 - Portal compositing no longer uses `uPreviousCompositeDepth` shader-side aperture rejection in the production path.
-- Whole-target composite depth transfer uses framebuffer depth blits, not shader `gl_FragDepth`.
-- Automated: the production shader contract no longer contains the sampled previous-depth coverage test.
-- Automated: whole-target composite depth transfer uses depth blits and stencil history uses stencil blits.
-- Automated: renderer tests cover packed depth/stencil target allocation, stencil aperture state, fullscreen stencil-gated source copy state, cull direction, and sequential stencil refs.
-- Pending manual: prove the distant portal banding visible in 13B1h/13B1h1 is gone in normal portal compositing mode.
-- Pending manual: prove nested portals still composite cleanly through the configured transition depth policy.
+- Failed: the distant portal banding visible in 13B1h/13B1h1 remained.
 - Base-landblock portal cutoff remains fixed by the existing all-resident aperture batch input model: all resident renderable transition aperture batches are eligible, not only the base landblock's batch.
 
 Spicy implementation notes:
 
 - This is intentionally more draw-pass work than the no-stencil shader, but it matches the v1 lesson: aperture coverage and source-depth propagation are separate operations.
-- The fullscreen stencil-gated incoming scene copy still writes sampled source depth through `gl_FragDepth`, matching v1. That path is acceptable only because it is no longer used to decide aperture coverage. If nested-depth artifacts remain after the stencil pivot, this is the next specific suspect to isolate.
+- The fullscreen stencil-gated incoming scene copy still writes sampled source depth through `gl_FragDepth`, matching v1. That path is acceptable only because it is no longer used to decide aperture coverage. The failed experiment proved whole-target recursive depth copies cannot use the same shader-write trick.
 - WebGL2 does not give us a simple stencil-tested polygon-shaped framebuffer depth blit. A depth blit can copy a rectangle of depth values, but it cannot copy only pixels selected by the aperture stencil mask, so the incoming scene copy still needs a shader for masked color/depth propagation.
 - Do not use incrementing per-frame stencil generations to avoid clears. Use explicit clears/sequential refs where needed and blit stencil history between ping-pong targets. Per-frame generation refs add wrap/state hazards without addressing the proven artifact.
 - Avoid adding durable diagnostic records for mask failures. Shader/framebuffer setup errors should fail loudly; visual/debug modes can remain interactive tools, not report-journal entries.
 - Do not reintroduce per-portal draw calls. The baker-emitted transition aperture batches remain the batching unit; the stencil pass should draw those VAOs in batch form per transition-depth direction.
+
+### Immediate Phase 13B1h3: Evaluate Separate Mask Texture Compositor
+
+Status: implementation complete on 2026-06-17; manual visual validation pending.
+
+Purpose: determine whether a dedicated mask texture can replace stencil aperture masking without reintroducing shader-side depth authority. This first cut intentionally keeps all scene/composite depth targets packed as `DEPTH24_STENCIL8` so framebuffer depth blits remain stable; dropping unused source-scene stencil bits remains a later target-format question.
+
+Candidate shape:
+
+- Keep scene-domain and composite color/depth targets format-matched enough for framebuffer depth blits. The reliable baseline is all four offscreen targets using `RGB8 + DEPTH24_STENCIL8`; the mask-texture experiment should only deviate if it preserves framebuffer depth transfer.
+- Allocate a per-composite-pass mask color target, likely `R8`, with no depth attachment.
+- For each transition depth:
+  1. Copy current composite color/depth to the write composite target using framebuffer-compatible transfer. Do not use shader-written whole-target depth.
+  2. Clear the mask texture to 0.
+  3. Bind the mask target for color output, but attach or otherwise share the current composite depth for fixed-function aperture testing if WebGL2 allows a framebuffer layout that is complete and does not mutate the composite depth.
+  4. Draw batched transition aperture VAOs with fixed-function `LEQUAL`, depth writes off, and color writes outputting mask value 1.
+  5. Draw a fullscreen source-copy pass into the write composite target that samples the mask texture; pixels with mask 0 discard, pixels with mask 1 copy source color and source depth.
+- If step 3 cannot be expressed cleanly in WebGL2, the mask texture approach is not reliable. Drawing the mask with shader-side depth comparisons would recreate the failure we just isolated.
+
+Key unknown:
+
+- Can WebGL2 create a framebuffer with an `R8` mask color attachment and the current composite depth texture attached read-only enough for fixed-function depth testing while preserving the composite depth buffer? The implementation now tries this directly: the mask framebuffer owns the `R8` color texture and dynamically attaches the current composite `DEPTH24_STENCIL8` texture during mask rendering, with depth writes disabled.
+- If that framebuffer is incomplete or visually unstable in browser testing, the mask texture path collapses back into shader-side sampled-depth comparison and should be rejected.
+
+Implementation notes:
+
+- Added a reusable transition mask target per scene-domain target set:
+  - `R8` color texture;
+  - mask framebuffer with static color attachment;
+  - current composite depth-stencil texture attached dynamically for aperture mask rendering.
+- Transition aperture mask rendering now:
+  - clears the mask color texture to 0;
+  - uses fixed-function `LEQUAL` against the attached composite depth texture;
+  - keeps depth writes off;
+  - writes color value 1 into the mask texture;
+  - does not use stencil refs, stencil writes, or stencil tests.
+- Source scene compositing now samples the mask texture in the existing fullscreen source-copy shader and discards pixels where the mask is 0.
+- Whole-target recursive copies still use framebuffer depth blits. The failed fullscreen `gl_FragDepth` whole-target-copy experiment remains reverted.
+- Scene-domain targets still use `DEPTH24_STENCIL8` to keep depth blits format-compatible. This phase replaces stencil behavior, not the underlying packed target format.
 
 Validation:
 

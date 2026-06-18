@@ -393,6 +393,12 @@ Phased execution:
      scene level. V2 portal compositing treats the world as two renderable scene
      domains, so committed interior scene availability is the readiness signal;
      there is no per-aperture linked-env-cell readiness requirement.
+   - Spicy implementation note: building `CBldPortal` flags describe the
+     building/outdoor side of a landblock-building aperture. V2 transition
+     aperture batches store `frontFace: indoor-visible`, so the building-side
+     portal side must be inverted while triangulating building aperture masks.
+     The `0xf418ffff` harness output validates this: matched building portal
+     flags are opposite their target env-cell outside-transition portal flags.
    - Spicy implementation note: bare `outside` transition aperture mask
      synthesis from env-cell outside-transition portals is intentionally gone
      with this change. That matches this plan's non-goal, but it means any

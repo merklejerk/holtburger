@@ -4,7 +4,9 @@ use holtburger_content::{
     ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler, PreparedAabb,
     PreparedVec3, normalize_landblock_id,
 };
+use holtburger_dat::graphics::Frame;
 use holtburger_dat::physics::BspNode;
+use std::collections::BTreeMap;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -22,6 +24,8 @@ struct Args {
     bsp_bounds: bool,
     #[arg(long)]
     bsp_bounds_summary_only: bool,
+    #[arg(long)]
+    portal_duplicates: bool,
 }
 
 fn main() -> Result<()> {
@@ -183,6 +187,10 @@ fn main() -> Result<()> {
         );
     }
 
+    if args.portal_duplicates {
+        report_duplicate_transition_portals(&asset.env_cells);
+    }
+
     if let Some(detail_cell) = args.detail_cell.as_deref() {
         let env_cell_id = parse_hex_u32(detail_cell)?;
         let Some(cell) = asset
@@ -223,6 +231,124 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct TransitionPortalApertureDump {
+    env_cell_id: u32,
+    portal_id: String,
+    flags: u16,
+    polygon_id: u16,
+    point_count: usize,
+    world_points: Vec<PreparedVec3>,
+}
+
+fn report_duplicate_transition_portals(
+    cells: &[holtburger_content::LandblockEnvCellBundleCell],
+) {
+    let mut groups = BTreeMap::<String, Vec<TransitionPortalApertureDump>>::new();
+    let mut total_transition_apertures = 0usize;
+    for cell in cells {
+        let apertures_by_portal = cell
+            .prepared_cell
+            .portal_apertures
+            .iter()
+            .map(|aperture| (aperture.portal_id.as_str(), aperture))
+            .collect::<BTreeMap<_, _>>();
+        for portal in &cell.prepared_cell.portals {
+            if !portal.is_outside_transition {
+                continue;
+            }
+            let Some(aperture) = apertures_by_portal.get(portal.portal_id.as_str()) else {
+                continue;
+            };
+            total_transition_apertures += 1;
+            let world_points = aperture
+                .points
+                .iter()
+                .map(|point| transform_render_local_point(*point, &cell.prepared_cell.local_placement))
+                .collect::<Vec<_>>();
+            let key = canonical_point_set_key(&world_points);
+            groups
+                .entry(key)
+                .or_default()
+                .push(TransitionPortalApertureDump {
+                    env_cell_id: cell.env_cell.env_cell_id,
+                    flags: portal.flags,
+                    point_count: aperture.points.len(),
+                    polygon_id: portal.polygon_id,
+                    portal_id: portal.portal_id.clone(),
+                    world_points,
+                });
+        }
+    }
+
+    let duplicate_groups = groups.values().filter(|group| group.len() > 1).count();
+    println!(
+        "transitionPortalDuplicateSummary transitionApertures={} duplicateGroups={}",
+        total_transition_apertures, duplicate_groups
+    );
+    for group in groups.values().filter(|group| group.len() > 1) {
+        println!("duplicateTransitionPortalGroup members={}", group.len());
+        for member in group {
+            println!(
+                "  envCell=0x{:08x} portal={} flags=0x{:04x} polygon={} points={}",
+                member.env_cell_id,
+                member.portal_id,
+                member.flags,
+                member.polygon_id,
+                member.point_count
+            );
+        }
+        for (index, point) in group[0].world_points.iter().enumerate() {
+            println!("    p{}={}", index, format_point(*point));
+        }
+    }
+}
+
+fn canonical_point_set_key(points: &[PreparedVec3]) -> String {
+    let mut point_keys = points.iter().map(canonical_point_key).collect::<Vec<_>>();
+    point_keys.sort();
+    point_keys.join("|")
+}
+
+fn canonical_point_key(point: &PreparedVec3) -> String {
+    format!(
+        "{},{},{}",
+        quantize_coord(point.x),
+        quantize_coord(point.y),
+        quantize_coord(point.z)
+    )
+}
+
+fn quantize_coord(value: f32) -> i32 {
+    (value * 1000.0).round() as i32
+}
+
+fn transform_render_local_point(point: PreparedVec3, ac_frame: &Frame) -> PreparedVec3 {
+    ac_to_render_point(ac_frame.origin + rotate_ac_vector(render_to_ac_point(point), ac_frame.orientation))
+}
+
+fn render_to_ac_point(point: PreparedVec3) -> holtburger_common::Vector3 {
+    holtburger_common::Vector3 {
+        x: point.x,
+        y: if point.z == 0.0 { 0.0 } else { -point.z },
+        z: point.y,
+    }
+}
+
+fn rotate_ac_vector(
+    vector: holtburger_common::Vector3,
+    rotation: holtburger_common::Quaternion,
+) -> holtburger_common::Vector3 {
+    let q_vector = holtburger_common::Vector3 {
+        x: rotation.x,
+        y: rotation.y,
+        z: rotation.z,
+    };
+    let uv = q_vector.cross(&vector);
+    let uuv = q_vector.cross(&uv);
+    vector + uv * (2.0 * rotation.w) + uuv * 2.0
 }
 
 fn parse_hex_u32(input: &str) -> Result<u32> {

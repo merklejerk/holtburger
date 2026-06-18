@@ -68,7 +68,7 @@ const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
 const BLENDED_STATIC_AUDIT_WARNING_BUCKET_LIMIT = 8;
 const DEFAULT_ASSET_MAINTENANCE_INTERVAL_MS = 5_000;
-const DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 8;
+const DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 4;
 
 export type ManualStaticDomain =
 	| "terrain"
@@ -111,10 +111,16 @@ export interface RuntimeSnapshot {
 	readonly staticMaterialization: StaticMaterializationSnapshot;
 }
 
+export type TransitionApertureDebugOverlayMode =
+	| "both"
+	| "outdoor-to-indoor"
+	| "indoor-to-outdoor";
+
 interface RuntimeDebugOverlaySnapshot {
 	readonly envCellAabbsVisible: boolean;
 	readonly envCellAabbCount: number;
 	readonly transitionApertureCount: number;
+	readonly transitionApertureMode: TransitionApertureDebugOverlayMode;
 	readonly transitionAperturesVisible: boolean;
 }
 
@@ -328,6 +334,9 @@ export interface ClientRuntime {
 	): StaticSelectionDiagnosticsReport;
 	setStaticDebugSelection(selectionKey: StaticSceneSelectionKey | null): void;
 	setEnvCellAabbDebugOverlayVisible(visible: boolean): void;
+	setTransitionApertureDebugOverlayMode(
+		mode: TransitionApertureDebugOverlayMode,
+	): void;
 	setTransitionApertureDebugOverlayVisible(visible: boolean): void;
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void;
 	updateFrameState(state: FrameState): void;
@@ -407,6 +416,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#staticDebugSelectionKey: StaticSceneSelectionKey | null = null;
 	#envCellAabbDebugOverlayVisible = false;
 	#transitionApertureDebugOverlayVisible = false;
+	#transitionApertureDebugOverlayMode: TransitionApertureDebugOverlayMode =
+		"both";
 	#disposed = false;
 
 	constructor(
@@ -579,6 +590,18 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#emit();
 	}
 
+	setTransitionApertureDebugOverlayMode(
+		mode: TransitionApertureDebugOverlayMode,
+	): void {
+		this.#assertActive();
+		if (this.#transitionApertureDebugOverlayMode === mode) {
+			return;
+		}
+		this.#transitionApertureDebugOverlayMode = mode;
+		this.#refreshStaticDebugOverlay();
+		this.#emit();
+	}
+
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void {
 		this.#assertActive();
 		const samplerUpdate = this.#textureManager.setFilteringMode(filteringMode);
@@ -714,6 +737,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 							this.#staticSceneQuery.queryTransitionApertureBatches(),
 						)
 					: 0,
+				transitionApertureMode: this.#transitionApertureDebugOverlayMode,
 				transitionAperturesVisible: this.#transitionApertureDebugOverlayVisible,
 			},
 			host: this.#host.createSnapshot(),
@@ -952,6 +976,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					...createTransitionApertureDebugOverlayPrimitives(
 						batch,
 						this.#renderAnchorLandblockId,
+						this.#transitionApertureDebugOverlayMode,
 					),
 				);
 			}
@@ -1453,6 +1478,7 @@ function createEnvCellAabbDebugOverlayPrimitive(
 function createTransitionApertureDebugOverlayPrimitives(
 	batch: TransitionApertureBatch,
 	renderAnchorLandblockId: number | null,
+	mode: TransitionApertureDebugOverlayMode,
 ): DebugOverlayPrimitive[] {
 	const primitives: DebugOverlayPrimitive[] = [];
 	const translation = createOutdoorLandblockRootTranslation(
@@ -1467,20 +1493,22 @@ function createTransitionApertureDebugOverlayPrimitives(
 			translation,
 		);
 		const baseId = `transition-aperture:${formatHex32(batch.landblockId)}:${range.portalId}`;
-		primitives.push(
-			{
+		if (mode === "both" || mode === "indoor-to-outdoor") {
+			primitives.push({
 				color: [0.95, 0.12, 0.08, 0.35],
 				id: `${baseId}:indoor-to-outdoor`,
 				kind: "triangles",
 				vertices: storedWindingVertices,
-			},
-			{
+			});
+		}
+		if (mode === "both" || mode === "outdoor-to-indoor") {
+			primitives.push({
 				color: [0.05, 0.95, 0.25, 0.35],
 				id: `${baseId}:outdoor-to-indoor`,
 				kind: "triangles",
 				vertices: reverseTriangleWinding(storedWindingVertices),
-			},
-		);
+			});
+		}
 	}
 
 	return primitives;

@@ -63,6 +63,48 @@ fn main() -> Result<()> {
             mesh.local_placement.origin.z,
         );
     }
+    println!("portals:");
+    for portal in &asset.prepared_cell.portals {
+        println!(
+            "  id={} index={} flags=0x{:04x} polygon={} otherCell=0x{:04x} otherPortal=0x{:04x} target={} outsideTransition={}",
+            portal.portal_id,
+            portal.source_index,
+            portal.flags,
+            portal.polygon_id,
+            portal.other_cell_id,
+            portal.other_portal_id,
+            portal
+                .target_env_cell_id
+                .map(|id| format!("0x{id:08x}"))
+                .unwrap_or_else(|| "none".to_string()),
+            portal.is_outside_transition,
+        );
+    }
+    println!("portal apertures:");
+    for aperture in &asset.prepared_cell.portal_apertures {
+        println!(
+            "  portal={} index={} polygon={} points={} plane={}",
+            aperture.portal_id,
+            aperture.source_index,
+            aperture.polygon_id,
+            aperture.points.len(),
+            aperture
+                .plane
+                .map(|plane| {
+                    format!(
+                        "n=({:.6},{:.6},{:.6}) c={:.6} source={:?}",
+                        plane.normal.x, plane.normal.y, plane.normal.z, plane.constant, plane.source
+                    )
+                })
+                .unwrap_or_else(|| "none".to_string()),
+        );
+        for (point_index, point) in aperture.points.iter().enumerate() {
+            println!(
+                "    p{}=({:.6},{:.6},{:.6})",
+                point_index, point.x, point.y, point.z
+            );
+        }
+    }
     if !asset.diagnostics.errors.is_empty() {
         println!("errors:");
         for error in &asset.diagnostics.errors {

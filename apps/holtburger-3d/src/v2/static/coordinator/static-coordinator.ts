@@ -413,7 +413,8 @@ export class StaticCoordinator {
 	}
 
 	#commit(result: StaticBakeBatchResult): void {
-		const resourcesByDesiredKey = collectCommittedResourceKeysByDesiredKey(result);
+		const resourcesByDesiredKey =
+			collectCommittedResourceKeysByDesiredKey(result);
 
 		for (const work of result.works) {
 			const status = this.#activeWork.get(work.workId);
@@ -743,7 +744,7 @@ function collectCommittedResourceKeysByDesiredKey(
 		addResourceKey(
 			resourcesByDesiredKey,
 			createDesiredKeyForDrawUnit({
-				domain: "landblock-env-cells",
+				domain: batch.sourceDomain,
 				landblockId: batch.landblockId,
 			}),
 			{
@@ -791,7 +792,7 @@ function filterStaticBakeResultForWorks(
 			.filter((batch) =>
 				desiredKeys.has(
 					createDesiredKeyForDrawUnit({
-						domain: "landblock-env-cells",
+						domain: batch.sourceDomain,
 						landblockId: batch.landblockId,
 					}),
 				),

@@ -5,6 +5,7 @@ import type {
 	StaticPeerRecordOwner,
 	StaticBounds,
 	TerrainStaticScopePayload,
+	TransitionApertureBatch,
 } from "../static/contracts";
 import {
 	StaticSceneQuery,
@@ -1096,7 +1097,6 @@ describe("V2 static scene query", () => {
 				],
 				ranges: [
 					{
-						envCellId: 0xda550100,
 						exterior: {
 							buildingInstanceId: "building-0",
 							buildingPortalId: "building-portal-0",
@@ -1106,9 +1106,13 @@ describe("V2 static scene query", () => {
 						indexCount: 6,
 						portalId:
 							"transition-portal:3663069183:building:building-0:building-portal-0:3663003904:env-portal-0",
+						source: {
+							envCellId: 0xda550100,
+							envCellPortalId: "env-portal-0",
+							kind: "env-cell-portal",
+						},
 					},
 					{
-						envCellId: 0xda550100,
 						exterior: {
 							kind: "outside",
 							landblockId: 0xda55ffff,
@@ -1117,8 +1121,14 @@ describe("V2 static scene query", () => {
 						indexCount: 6,
 						portalId:
 							"transition-portal:3663069183:outside:3663069183:3663003904:env-portal-1",
+						source: {
+							envCellId: 0xda550100,
+							envCellPortalId: "env-portal-1",
+							kind: "env-cell-portal",
+						},
 					},
 				],
+				sourceDomain: "landblock-env-cells",
 				vertices: [
 					{ x: 10, y: 30, z: -20 },
 					{ x: 12, y: 30, z: -20 },
@@ -1131,6 +1141,58 @@ describe("V2 static scene query", () => {
 				],
 			},
 		]);
+		expect(
+			query.queryTransitionApertureBatches({ landblockId: 0xdb55ffff }),
+		).toEqual([]);
+	});
+
+	it("queries committed outdoor building transition aperture batches without env-cell records", () => {
+		const query = new StaticSceneQuery();
+		const batch: TransitionApertureBatch = {
+			apertureBatchId: "transition-apertures:outdoor-buildings:3663069183",
+			coordinateSpace: "landblock-render-local",
+			frontFace: "indoor-visible",
+			indices: [0, 2, 1],
+			kind: "transition-aperture-batch",
+			landblockId: 0xda55ffff,
+			planes: [null],
+			ranges: [
+				{
+					exterior: {
+						buildingInstanceId: "building-0",
+						buildingPortalId: "building-portal-0",
+						kind: "landblock-building",
+					},
+					firstIndex: 0,
+					indexCount: 3,
+					portalId:
+						"transition-portal:outdoor-buildings:3663069183:building-transition-aperture:building-0:0",
+					source: {
+						buildingInstanceId: "building-0",
+						buildingPortalId: "building-portal-0",
+						buildingPortalSourceIndex: 0,
+						kind: "building-portal",
+						linkedEnvCellIds: [0xda550100],
+						otherCellId: 0x0100,
+						otherPortalId: 0xffff,
+						polyId: 7,
+						portalIndex: 0,
+						sourceAssetId: "gfx-obj/01001234",
+						sourceDid: 0x01001234,
+					},
+				},
+			],
+			sourceDomain: "outdoor-buildings",
+			vertices: [
+				{ x: 0, y: 0, z: 0 },
+				{ x: 1, y: 0, z: 0 },
+				{ x: 0, y: 1, z: 0 },
+			],
+		};
+
+		query.applyTransitionApertureBatches([batch]);
+
+		expect(query.queryTransitionApertureBatches()).toEqual([batch]);
 		expect(
 			query.queryTransitionApertureBatches({ landblockId: 0xdb55ffff }),
 		).toEqual([]);
@@ -1694,7 +1756,7 @@ function createLandblockEnvCellsPayload(
 	const includeLandblockBvh = options.includeLandblockBvh ?? true;
 	const landblockId = options.landblockId ?? 0xda55ffff;
 	const envCellId =
-		options.envCellId ?? (((landblockId & 0xffff0000) | 0x0100) >>> 0);
+		options.envCellId ?? ((landblockId & 0xffff0000) | 0x0100) >>> 0;
 	const envCellPlacement = options.envCellPlacement ?? createPlacement();
 	const landblockBounds = options.landblockBounds ?? {
 		max: { x: 1, y: 1, z: -4 },

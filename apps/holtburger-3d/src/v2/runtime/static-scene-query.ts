@@ -605,6 +605,10 @@ export class StaticSceneQuery {
 		string,
 		CommittedRecordEntry<StaticSourceMappingRecord>
 	>();
+	readonly #committedTransitionApertureBatchesById = new Map<
+		string,
+		TransitionApertureBatch
+	>();
 	readonly #committedAuthoredDynamicSeedRecordsByKey = new Map<
 		string,
 		CommittedRecordEntry<StaticAuthoredDynamicSeedRecord>
@@ -710,16 +714,32 @@ export class StaticSceneQuery {
 				resource.kind === "draw-unit" ? [resource.drawUnitId] : [],
 			),
 		);
-		if (removedDrawUnitResourceIds.size === 0) {
-			return;
-		}
-
-		for (const [key, record] of this.#envCellStaticBoundsOverridesByKey) {
-			if (removedDrawUnitResourceIds.has(record.ownerDrawUnitId)) {
-				this.#envCellStaticBoundsOverridesByKey.delete(key);
+		for (const resource of resources) {
+			if (resource.kind === "transition-aperture-batch") {
+				this.#committedTransitionApertureBatchesById.delete(
+					resource.apertureBatchId,
+				);
 			}
 		}
-		this.#deleteDrawUnitOwnedCommittedRecords(removedDrawUnitResourceIds);
+		if (removedDrawUnitResourceIds.size > 0) {
+			for (const [key, record] of this.#envCellStaticBoundsOverridesByKey) {
+				if (removedDrawUnitResourceIds.has(record.ownerDrawUnitId)) {
+					this.#envCellStaticBoundsOverridesByKey.delete(key);
+				}
+			}
+			this.#deleteDrawUnitOwnedCommittedRecords(removedDrawUnitResourceIds);
+		}
+	}
+
+	applyTransitionApertureBatches(
+		batches: readonly TransitionApertureBatch[],
+	): void {
+		for (const batch of batches) {
+			this.#committedTransitionApertureBatchesById.set(
+				batch.apertureBatchId,
+				batch,
+			);
+		}
 	}
 
 	applyStaticPeerRecords(options: {
@@ -917,9 +937,24 @@ export class StaticSceneQuery {
 		return null;
 	}
 
-	queryTransitionApertureBatches(options: {
-		readonly landblockId?: number;
-	} = {}): readonly TransitionApertureBatch[] {
+	queryTransitionApertureBatches(
+		options: {
+			readonly landblockId?: number;
+		} = {},
+	): readonly TransitionApertureBatch[] {
+		const committedBatches = [
+			...this.#committedTransitionApertureBatchesById.values(),
+		].filter(
+			(batch) =>
+				options.landblockId === undefined ||
+				batch.landblockId === options.landblockId,
+		);
+		if (committedBatches.length > 0) {
+			return committedBatches.sort((left, right) =>
+				left.apertureBatchId.localeCompare(right.apertureBatchId),
+			);
+		}
+
 		const recordsByLandblockId = new Map<
 			number,
 			CommittedRecordEntry<StaticPortalInteriorRecord>[]
@@ -937,7 +972,10 @@ export class StaticSceneQuery {
 		}
 
 		return [...recordsByLandblockId]
-			.sort(([leftLandblockId], [rightLandblockId]) => leftLandblockId - rightLandblockId)
+			.sort(
+				([leftLandblockId], [rightLandblockId]) =>
+					leftLandblockId - rightLandblockId,
+			)
 			.flatMap(([landblockId, entries]) => {
 				const batch = deriveTransitionApertureBatch(
 					landblockId,
@@ -1265,6 +1303,7 @@ export class StaticSceneQuery {
 		this.#committedVisibilityRecordsByKey.clear();
 		this.#committedPortalInteriorRecordsByKey.clear();
 		this.#committedSourceMappingsByKey.clear();
+		this.#committedTransitionApertureBatchesById.clear();
 		this.#committedAuthoredDynamicSeedRecordsByKey.clear();
 	}
 

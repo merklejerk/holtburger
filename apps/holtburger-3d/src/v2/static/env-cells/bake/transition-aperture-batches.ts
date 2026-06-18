@@ -76,6 +76,7 @@ export function deriveTransitionApertureBatch(
 		landblockId,
 		planes,
 		ranges,
+		sourceDomain: "landblock-env-cells",
 		vertices,
 	};
 }
@@ -140,7 +141,6 @@ function appendTransitionAperture(options: {
 	options.vertices.push(...apertureVertices);
 	options.indices.push(...apertureIndices.map((index) => firstVertex + index));
 	options.ranges.push({
-		envCellId: options.endpoints.indoor.envCellId,
 		exterior: options.endpoints.exterior,
 		firstIndex,
 		indexCount: apertureIndices.length,
@@ -148,6 +148,11 @@ function appendTransitionAperture(options: {
 			endpoints: options.endpoints,
 			landblockId: options.landblockId,
 		}),
+		source: {
+			envCellId: options.endpoints.indoor.envCellId,
+			envCellPortalId: options.endpoints.indoor.envCellPortalId,
+			kind: "env-cell-portal",
+		},
 	});
 	options.planes.push(
 		transformPortalAperturePlane(aperture.plane, placementMatrix),

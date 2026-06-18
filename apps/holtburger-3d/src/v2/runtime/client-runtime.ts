@@ -873,6 +873,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 			spatialRecords: materialized.staticSpatialRecords,
 			visibilityRecords: materialized.staticVisibilityRecords,
 		});
+		this.#staticSceneQuery.applyTransitionApertureBatches(
+			materialized.staticDelta.addedTransitionApertureBatches,
+		);
 		this.#refreshStaticDebugOverlay();
 		this.#pendingStaticMaterializations.delete(delta.revision);
 		this.#committedStaticMaterializations = appendBoundedRevision(

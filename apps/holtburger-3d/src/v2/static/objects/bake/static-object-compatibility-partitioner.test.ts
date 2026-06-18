@@ -223,6 +223,81 @@ describe("V2 static object compatibility partitioner", () => {
 		]);
 	});
 
+	it("bakes building transition apertures from outdoor building payloads", () => {
+		const payload = createPayload({
+			buildingTransitionApertures: [
+				{
+					apertureId: "building-transition-aperture:building-0:0",
+					buildingInstanceId: "building-0",
+					buildingPortalId: "building-portal-0",
+					buildingPortalSourceIndex: 0,
+					flags: 0,
+					linkedEnvCellIds: [0xda550100],
+					otherCellId: 0x0100,
+					otherPortalId: 0xffff,
+					points: [
+						{ x: 0, y: 0, z: 0 },
+						{ x: 2, y: 0, z: 0 },
+						{ x: 2, y: 2, z: 0 },
+						{ x: 0, y: 2, z: 0 },
+					],
+					polyId: 7,
+					portalIndex: 0,
+					sourceAssetId: "gfx-obj/01001234",
+					sourceDid: 0x01001234,
+				},
+			],
+			materials: [],
+		});
+
+		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+
+		expect(result.transitionApertureBatches).toEqual([
+			{
+				apertureBatchId: "transition-apertures:outdoor-buildings:3663069183",
+				coordinateSpace: "landblock-render-local",
+				frontFace: "indoor-visible",
+				indices: [0, 2, 1, 0, 3, 2],
+				kind: "transition-aperture-batch",
+				landblockId: 0xda55ffff,
+				planes: [null],
+				ranges: [
+					{
+						exterior: {
+							buildingInstanceId: "building-0",
+							buildingPortalId: "building-portal-0",
+							kind: "landblock-building",
+						},
+						firstIndex: 0,
+						indexCount: 6,
+						portalId:
+							"transition-portal:outdoor-buildings:3663069183:building-transition-aperture:building-0:0",
+						source: {
+							buildingInstanceId: "building-0",
+							buildingPortalId: "building-portal-0",
+							buildingPortalSourceIndex: 0,
+							kind: "building-portal",
+							linkedEnvCellIds: [0xda550100],
+							otherCellId: 0x0100,
+							otherPortalId: 0xffff,
+							polyId: 7,
+							portalIndex: 0,
+							sourceAssetId: "gfx-obj/01001234",
+							sourceDid: 0x01001234,
+						},
+					},
+				],
+				sourceDomain: "outdoor-buildings",
+				vertices: [
+					{ x: 0, y: 0, z: 0 },
+					{ x: 2, y: 0, z: 0 },
+					{ x: 2, y: 2, z: 0 },
+					{ x: 0, y: 2, z: 0 },
+				],
+			},
+		]);
+	});
+
 	it("fails hard when a bake input omits a referenced geometry attachment", () => {
 		const payload = createPayload({
 			materials: [createTexturedMaterial(0x08000010)],
@@ -1181,6 +1256,7 @@ function createPayload(options: {
 	};
 	readonly paletteViews?: readonly (readonly StaticObjectPaletteViewFacts[])[];
 	readonly detailRoles?: OutdoorStaticObjectsScopePayload["regionRenderProfile"]["detailRoles"];
+	readonly buildingTransitionApertures?: OutdoorStaticObjectsScopePayload["buildingTransitionApertures"];
 	readonly textureRefs?: readonly StaticObjectTextureRefFacts[];
 }): OutdoorStaticObjectsScopePayload {
 	const domain = options.domain ?? "outdoor-buildings";
@@ -1190,6 +1266,7 @@ function createPayload(options: {
 	});
 
 	return {
+		buildingTransitionApertures: options.buildingTransitionApertures ?? [],
 		domain,
 		kind: "outdoor-static-objects",
 		landblock: {

@@ -7,10 +7,7 @@ import type {
 	PreparedAsset,
 	PreparedAssetReader,
 } from "../../assets/contracts";
-import {
-	createHostAssetKey,
-	parseHostAssetId,
-} from "../../assets/keys";
+import { createHostAssetKey, parseHostAssetId } from "../../assets/keys";
 import type {
 	OutdoorStaticObjectsScopePayload,
 	StaticMaterialSlotIdentity,
@@ -171,6 +168,10 @@ export class OutdoorStaticObjectsResolver {
 			sourceByKey,
 		});
 		const scope: OutdoorStaticObjectsScopePayload = {
+			buildingTransitionApertures:
+				domain === "outdoor-buildings"
+					? landblock.payload.buildingTransitionApertures
+					: [],
 			domain,
 			kind: "outdoor-static-objects",
 			landblock: {

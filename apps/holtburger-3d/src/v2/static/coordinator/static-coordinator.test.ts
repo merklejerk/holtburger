@@ -976,6 +976,79 @@ describe("V2 static coordinator", () => {
 			],
 		});
 	});
+
+	it("commits and evicts transition aperture batches with outdoor building work", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+		const deltas: StaticCoordinatorCommitDelta[] = [];
+		coordinator.subscribeCommits((delta) => deltas.push(delta));
+
+		const work = activeWorkForDemand(coordinator, {
+			location: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+			lod: {
+				buildings: 0,
+				detail: -1,
+				envCells: -1,
+				terrain: 0,
+			},
+		}).find((item) => item.job.domain === "outdoor-buildings");
+		const buildingRequest = resolver.pendingRequests.find(
+			(request) => request.job.domain === "outdoor-buildings",
+		);
+		resolver.complete(buildingRequest?.requestId ?? "");
+		await flushPromises();
+
+		baker.complete(work?.workId ?? "", {
+			transitionApertureBatches: [
+				createTransitionApertureBatch(
+					"transition-apertures:outdoor-buildings:3663069183",
+					0xda55ffff,
+					"outdoor-buildings",
+				),
+			],
+		});
+		await flushPromises();
+
+		expect(deltas.at(-1)).toMatchObject({
+			addedTransitionApertureBatches: [
+				{
+					apertureBatchId: "transition-apertures:outdoor-buildings:3663069183",
+					kind: "transition-aperture-batch",
+					landblockId: 0xda55ffff,
+					sourceDomain: "outdoor-buildings",
+				},
+			],
+			removedResources: [],
+		});
+
+		activeWorkForDemand(coordinator, {
+			location: null,
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: -1,
+				terrain: -1,
+			},
+		});
+
+		expect(deltas.at(-1)).toMatchObject({
+			addedTransitionApertureBatches: [],
+			removedResources: [
+				{
+					apertureBatchId: "transition-apertures:outdoor-buildings:3663069183",
+					kind: "transition-aperture-batch",
+				},
+			],
+		});
+	});
 });
 
 function createSingleTerrainDemand(landblockId: number): StaticDemand {
@@ -1050,6 +1123,7 @@ function createTerrainDrawUnit(
 function createTransitionApertureBatch(
 	apertureBatchId: string,
 	landblockId: number,
+	sourceDomain: TransitionApertureBatch["sourceDomain"] = "landblock-env-cells",
 ): TransitionApertureBatch {
 	return {
 		apertureBatchId,
@@ -1061,7 +1135,6 @@ function createTransitionApertureBatch(
 		planes: [null],
 		ranges: [
 			{
-				envCellId: landblockId & 0xffff_ff00,
 				exterior: {
 					kind: "outside",
 					landblockId,
@@ -1069,8 +1142,14 @@ function createTransitionApertureBatch(
 				firstIndex: 0,
 				indexCount: 3,
 				portalId: `${apertureBatchId}:portal-a`,
+				source: {
+					envCellId: landblockId & 0xffff_ff00,
+					envCellPortalId: "portal-a",
+					kind: "env-cell-portal",
+				},
 			},
 		],
+		sourceDomain,
 		vertices: [
 			{ x: 0, y: 0, z: 0 },
 			{ x: 1, y: 0, z: 0 },

@@ -684,6 +684,7 @@ function createOutdoorPayload(
 			bounds,
 		},
 		statics,
+		buildingTransitionApertures: [],
 		outdoorBvh: null,
 		diagnostics: { sourceRecords: [], errors: [], omissions: [] },
 	};

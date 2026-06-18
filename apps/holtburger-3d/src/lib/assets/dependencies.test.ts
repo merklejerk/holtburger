@@ -442,6 +442,7 @@ function createLandblockOutdoorPayload(
 		classification: "outdoor" as const,
 		terrain: terrainPayload.terrain,
 		statics,
+		buildingTransitionApertures: [],
 		outdoorBvh: null,
 		diagnostics: emptyLandblockDiagnostics(),
 		provenance,

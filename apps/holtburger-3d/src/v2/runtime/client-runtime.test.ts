@@ -174,15 +174,7 @@ describe("V2 client runtime", () => {
 			kind: "env-cell",
 			landblockId: 0xda55ffff,
 		});
-		expect(renderer.renderPassPlans.at(-1)).toEqual({
-			kind: "portal-scene-domains",
-			baseScene: {
-				envCellId: 0xda550100,
-				kind: "interior",
-				landblockId: 0xda55ffff,
-			},
-			transitionDepthPolicy: { maxDepth: 4 },
-		});
+		expect(renderer.renderPassPlans).toEqual([]);
 		expect(runtime.createDiagnosticsReport().runtime).toMatchObject({
 			currentCameraResidency: {
 				envCellId: 0xda550100,
@@ -190,13 +182,7 @@ describe("V2 client runtime", () => {
 				landblockId: 0xda55ffff,
 			},
 			renderPassPlan: {
-				kind: "portal-scene-domains",
-				baseScene: {
-					envCellId: 0xda550100,
-					kind: "interior",
-					landblockId: 0xda55ffff,
-				},
-				transitionDepthPolicy: { maxDepth: 4 },
+				kind: "single-surface-resident",
 			},
 		});
 		expect(JSON.stringify(runtime.createDiagnosticsReport())).not.toContain(
@@ -234,7 +220,7 @@ describe("V2 client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("derives portal pass plans from outdoor and unknown camera residency", () => {
+	it("does not derive portal pass plans without a committed interior scene", () => {
 		const renderer = new FakeRenderer();
 		const runtime = createClientRuntime({
 			diagnostics: silentDiagnostics,
@@ -255,33 +241,25 @@ describe("V2 client runtime", () => {
 			landblockId: 0xda55ffff,
 		});
 
-		expect(renderer.renderPassPlans.at(-1)).toEqual({
-			kind: "portal-scene-domains",
-			baseScene: {
-				kind: "exterior",
-				landblockId: 0xda55ffff,
-			},
-			transitionDepthPolicy: { maxDepth: 4 },
+		expect(runtime.createDiagnosticsReport().runtime.renderPassPlan).toEqual({
+			kind: "single-surface-resident",
 		});
+		expect(renderer.renderPassPlans).toEqual([]);
 
 		runtime.setCurrentCameraResidency({
 			kind: "unknown",
 			landblockId: 0xdb55ffff,
 		});
 
-		expect(renderer.renderPassPlans.at(-1)).toEqual({
-			kind: "portal-scene-domains",
-			baseScene: {
-				kind: "exterior",
-				landblockId: 0xdb55ffff,
-			},
-			transitionDepthPolicy: { maxDepth: 4 },
+		expect(runtime.createDiagnosticsReport().runtime.renderPassPlan).toEqual({
+			kind: "single-surface-resident",
 		});
+		expect(renderer.renderPassPlans).toEqual([]);
 
 		runtime.dispose();
 	});
 
-	it("uses the render anchor as the conservative exterior portal pass plan for unknown residency", () => {
+	it("keeps unknown residency single-surface without a committed interior scene", () => {
 		const renderer = new FakeRenderer();
 		const runtime = createClientRuntime({
 			diagnostics: silentDiagnostics,
@@ -295,14 +273,10 @@ describe("V2 client runtime", () => {
 
 		updateOutdoorSceneInterest(runtime);
 
-		expect(renderer.renderPassPlans.at(-1)).toEqual({
-			kind: "portal-scene-domains",
-			baseScene: {
-				kind: "exterior",
-				landblockId: 0xda55ffff,
-			},
-			transitionDepthPolicy: { maxDepth: 4 },
+		expect(runtime.createDiagnosticsReport().runtime.renderPassPlan).toEqual({
+			kind: "single-surface-resident",
 		});
+		expect(renderer.renderPassPlans).toEqual([]);
 
 		runtime.dispose();
 	});

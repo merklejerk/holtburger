@@ -36,7 +36,6 @@ import {
 	createEnvCellCellStructureGeometryIdentity,
 	describeEnvCellCellStructureGeometryIdentity,
 } from "./landblock-env-cell-geometry-attachments";
-import { deriveTransitionApertureBatch } from "./transition-aperture-batches";
 import { bakeStaticObjectCompatibility } from "../../objects/bake/static-object-compatibility-baker";
 import {
 	createStructuredInteriorTextureUseId,
@@ -90,10 +89,6 @@ export function bakeLandblockEnvCells(
 		...itemResults.flatMap((result) => result.drawUnits),
 		...staticObjectResult.drawUnits,
 	];
-	const transitionApertureBatches = itemResults.flatMap((result) =>
-		result.transitionApertureBatch ? [result.transitionApertureBatch] : [],
-	);
-
 	return {
 		atlasRegistryUpdates: [],
 		buildRevision: Math.max(
@@ -129,7 +124,7 @@ export function bakeLandblockEnvCells(
 			...itemResults.flatMap((result) => result.textureUses),
 			...staticObjectResult.textureUses,
 		]),
-		transitionApertureBatches,
+		transitionApertureBatches: [],
 		works: input.items.map((item) => item.work),
 	};
 }
@@ -184,7 +179,6 @@ function bakeLandblockEnvCellItem(
 	readonly staticSpatialRecords: readonly StaticSpatialRecord[];
 	readonly staticVisibilityRecords: readonly StaticVisibilityRecord[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
-	readonly transitionApertureBatch: StaticBakeBatchResult["transitionApertureBatches"][number] | null;
 } {
 	if (
 		item.work.job.domain !== "landblock-env-cells" ||
@@ -234,10 +228,6 @@ function bakeLandblockEnvCellItem(
 			staticBatchId: input.staticBatchId,
 			work: item.work,
 		}),
-		transitionApertureBatch: deriveTransitionApertureBatch(
-			payload.landblock.landblockId,
-			[portalInteriorRecord],
-		),
 	};
 }
 

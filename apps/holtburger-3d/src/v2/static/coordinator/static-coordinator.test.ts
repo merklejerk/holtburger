@@ -886,97 +886,6 @@ describe("V2 static coordinator", () => {
 		).toBe(false);
 	});
 
-	it("commits and evicts structured interior draw units with env-cell work", async () => {
-		const resolver = new DeferredStaticResolver();
-		const baker = new DeferredStaticBaker();
-		const coordinator = new StaticCoordinator({
-			baker,
-			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
-			resolver,
-		});
-		const deltas: StaticCoordinatorCommitDelta[] = [];
-		coordinator.subscribeCommits((delta) => deltas.push(delta));
-
-		const [work] = activeWorkForDemand(coordinator, {
-			location: {
-				envCellId: 0xda550100,
-				kind: "interior-cell",
-				landblockId: 0xda55ffff,
-			},
-			lod: {
-				buildings: -1,
-				detail: -1,
-				envCells: 0,
-				terrain: -1,
-			},
-		});
-		resolver.complete(
-			resolver.pendingRequests[0]?.requestId ?? "",
-			createLandblockEnvCellsResolverPayload(),
-		);
-		await flushPromises();
-
-		baker.complete(work?.workId ?? "", {
-			drawUnits: [
-				createStructuredInteriorDrawUnit("structured-interior-a", 0xda55ffff),
-			],
-			transitionApertureBatches: [
-				createTransitionApertureBatch(
-					"transition-apertures:3663069183",
-					0xda55ffff,
-				),
-			],
-		});
-		await flushPromises();
-
-		expect(coordinator.createSnapshot()).toMatchObject({
-			committed: 1,
-			committedDrawUnits: 1,
-		});
-		expect(deltas.at(-1)).toMatchObject({
-			addedDrawUnits: [
-				{
-					domain: "landblock-env-cells",
-					drawUnitId: "structured-interior-a",
-					kind: "structured-interior-geometry",
-				},
-			],
-			addedTransitionApertureBatches: [
-				{
-					apertureBatchId: "transition-apertures:3663069183",
-					kind: "transition-aperture-batch",
-					landblockId: 0xda55ffff,
-				},
-			],
-			removedResources: [],
-		});
-
-		activeWorkForDemand(coordinator, {
-			location: null,
-			lod: {
-				buildings: -1,
-				detail: -1,
-				envCells: -1,
-				terrain: -1,
-			},
-		});
-
-		expect(coordinator.createSnapshot()).toMatchObject({
-			committedDrawUnits: 0,
-		});
-		expect(deltas.at(-1)).toMatchObject({
-			addedDrawUnits: [],
-			addedTransitionApertureBatches: [],
-			removedResources: [
-				{ drawUnitId: "structured-interior-a", kind: "draw-unit" },
-				{
-					apertureBatchId: "transition-apertures:3663069183",
-					kind: "transition-aperture-batch",
-				},
-			],
-		});
-	});
-
 	it("commits and evicts transition aperture batches with outdoor building work", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -1011,7 +920,6 @@ describe("V2 static coordinator", () => {
 				createTransitionApertureBatch(
 					"transition-apertures:outdoor-buildings:3663069183",
 					0xda55ffff,
-					"outdoor-buildings",
 				),
 			],
 		});
@@ -1123,7 +1031,6 @@ function createTerrainDrawUnit(
 function createTransitionApertureBatch(
 	apertureBatchId: string,
 	landblockId: number,
-	sourceDomain: TransitionApertureBatch["sourceDomain"] = "landblock-env-cells",
 ): TransitionApertureBatch {
 	return {
 		apertureBatchId,
@@ -1136,20 +1043,29 @@ function createTransitionApertureBatch(
 		ranges: [
 			{
 				exterior: {
-					kind: "outside",
-					landblockId,
+					buildingInstanceId: "building-a",
+					buildingPortalId: "portal-a",
+					kind: "landblock-building",
 				},
 				firstIndex: 0,
 				indexCount: 3,
 				portalId: `${apertureBatchId}:portal-a`,
 				source: {
-					envCellId: landblockId & 0xffff_ff00,
-					envCellPortalId: "portal-a",
-					kind: "env-cell-portal",
+					buildingInstanceId: "building-a",
+					buildingPortalId: "portal-a",
+					buildingPortalSourceIndex: 0,
+					kind: "building-portal",
+					linkedEnvCellIds: [landblockId & 0xffff_ff00],
+					otherCellId: 0x0100,
+					otherPortalId: 0xffff,
+					polyId: 7,
+					portalIndex: 0,
+					sourceAssetId: "gfx-obj/01001234",
+					sourceDid: 0x01001234,
 				},
 			},
 		],
-		sourceDomain,
+		sourceDomain: "outdoor-buildings",
 		vertices: [
 			{ x: 0, y: 0, z: 0 },
 			{ x: 1, y: 0, z: 0 },

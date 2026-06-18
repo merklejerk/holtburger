@@ -20,7 +20,6 @@ import type {
 	TransitionApertureBatch,
 	StaticVisibilityRecord,
 } from "../static/contracts";
-import { deriveTransitionApertureBatch } from "../static/env-cells/bake/transition-aperture-batches";
 import {
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
 	getOutdoorLandblockCoords,
@@ -742,6 +741,17 @@ export class StaticSceneQuery {
 		}
 	}
 
+	hasCommittedPortalInteriorScene(options: {
+		readonly landblockId: number;
+	}): boolean {
+		for (const entry of this.#committedPortalInteriorRecordsByKey.values()) {
+			if (entry.record.landblockId === options.landblockId) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	applyStaticPeerRecords(options: {
 		readonly authoredDynamicSeeds?: readonly StaticAuthoredDynamicSeedRecord[];
 		readonly portalInteriorRecords?: readonly StaticPortalInteriorRecord[];
@@ -942,47 +952,15 @@ export class StaticSceneQuery {
 			readonly landblockId?: number;
 		} = {},
 	): readonly TransitionApertureBatch[] {
-		const committedBatches = [
-			...this.#committedTransitionApertureBatchesById.values(),
-		].filter(
-			(batch) =>
-				options.landblockId === undefined ||
-				batch.landblockId === options.landblockId,
-		);
-		if (committedBatches.length > 0) {
-			return committedBatches.sort((left, right) =>
+		return [...this.#committedTransitionApertureBatchesById.values()]
+			.filter(
+				(batch) =>
+					options.landblockId === undefined ||
+					batch.landblockId === options.landblockId,
+			)
+			.sort((left, right) =>
 				left.apertureBatchId.localeCompare(right.apertureBatchId),
 			);
-		}
-
-		const recordsByLandblockId = new Map<
-			number,
-			CommittedRecordEntry<StaticPortalInteriorRecord>[]
-		>();
-		for (const entry of this.#committedPortalInteriorRecordsByKey.values()) {
-			if (
-				options.landblockId !== undefined &&
-				entry.record.landblockId !== options.landblockId
-			) {
-				continue;
-			}
-			const entries = recordsByLandblockId.get(entry.record.landblockId) ?? [];
-			entries.push(entry);
-			recordsByLandblockId.set(entry.record.landblockId, entries);
-		}
-
-		return [...recordsByLandblockId]
-			.sort(
-				([leftLandblockId], [rightLandblockId]) =>
-					leftLandblockId - rightLandblockId,
-			)
-			.flatMap(([landblockId, entries]) => {
-				const batch = deriveTransitionApertureBatch(
-					landblockId,
-					entries.map((entry) => entry.record),
-				);
-				return batch ? [batch] : [];
-			});
 	}
 
 	queryTerrainQuadDetails(options: {

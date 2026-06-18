@@ -161,6 +161,10 @@ function materializeStaticPeerRecords(
 		finePartitioned.remappedStaticObjectDrawUnits.flatMap(
 			(mapping) => mapping.drawUnits,
 		);
+	const remappedEnvCellObjectBounds = remapEnvCellStaticObjectBoundsRecords(
+		commit.staticSpatialRecords,
+		finePartitioned.remappedStaticObjectDrawUnits,
+	);
 
 	return {
 		staticAuthoredDynamicSeeds: commit.staticAuthoredDynamicSeeds,
@@ -174,12 +178,47 @@ function materializeStaticPeerRecords(
 			...commit.staticSpatialRecords.filter(
 				(record) => !isOwnedByAnyDrawUnit(record, remappedSourceDrawUnitIds),
 			),
+			...remappedEnvCellObjectBounds,
 			...staticObjectDrawUnits.flatMap((drawUnit) =>
 				drawUnit.spatialRecord ? [drawUnit.spatialRecord] : [],
 			),
 		],
 		staticVisibilityRecords: commit.staticVisibilityRecords,
 	};
+}
+
+function remapEnvCellStaticObjectBoundsRecords(
+	records: readonly StaticSpatialRecord[],
+	remappedStaticObjectDrawUnits: readonly RemappedStaticObjectDrawUnit[],
+): readonly StaticSpatialRecord[] {
+	const materializedOwnerBySourceDrawUnitId = new Map(
+		remappedStaticObjectDrawUnits.flatMap((mapping) => {
+			const ownerDrawUnitId = mapping.drawUnits[0]?.drawUnitId;
+			return ownerDrawUnitId
+				? [[mapping.sourceDrawUnitId, ownerDrawUnitId] as const]
+				: [];
+		}),
+	);
+
+	return records.flatMap((record): readonly StaticSpatialRecord[] => {
+		if (record.kind !== "env-cell-static-object-bounds") {
+			return [];
+		}
+		const ownerDrawUnitId = materializedOwnerBySourceDrawUnitId.get(
+			record.owner.drawUnitId,
+		);
+		return ownerDrawUnitId
+			? [
+					{
+						...record,
+						owner: {
+							drawUnitId: ownerDrawUnitId,
+							kind: "draw-unit",
+						},
+					},
+				]
+			: [];
+	});
 }
 
 function isOwnedByAnyDrawUnit(

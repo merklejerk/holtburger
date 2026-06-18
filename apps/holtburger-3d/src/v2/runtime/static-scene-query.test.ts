@@ -633,6 +633,45 @@ describe("V2 static scene query", () => {
 		});
 	});
 
+	it("picks env-cell static objects in a neighboring landblock render frame", () => {
+		const query = new StaticSceneQuery();
+		query.setOutdoorAnchorLandblockId(0xda55ffff);
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				envCellId: 0xdb550100,
+				landblockId: 0xdb55ffff,
+			}),
+		);
+		commitEnvCellStaticObjectBounds(query, {
+			envCellId: 0xdb550100,
+			landblockId: 0xdb55ffff,
+		});
+
+		const hit = query.pickRay({
+			context: { kind: "outdoor" },
+			ray: {
+				direction: { x: 0, y: 0, z: -1 },
+				origin: { x: 192, y: 0, z: 0 },
+			},
+		});
+
+		expect(hit).toMatchObject({
+			distance: 4,
+			hitPoint: { x: 192, y: 0, z: -4 },
+			selectionKey: {
+				envCellId: 0xdb550100,
+				instanceId: "env-static-0",
+				itemKind: "env-cell-static-object",
+				landblockId: 0xdb55ffff,
+			},
+		});
+		expect(hit?.bounds).toEqual({
+			max: { x: 193, y: 1, z: -4 },
+			min: { x: 191, y: -1, z: -5 },
+		});
+	});
+
 	it("does not query env-cell locals through a flat fallback when the landblock BVH is absent", () => {
 		const query = new StaticSceneQuery();
 		commitLandblockEnvCells(
@@ -833,6 +872,54 @@ describe("V2 static scene query", () => {
 			envCellId: 0xda550100,
 			kind: "env-cell",
 			landblockId: 0xda55ffff,
+		});
+	});
+
+	it("derives camera residency from a dungeon landblock-local point", () => {
+		const query = new StaticSceneQuery();
+		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+
+		expect(
+			query.queryCameraResidencyAtLandblockPoint({
+				landblockId: 0xda55ffff,
+				point: { x: 0, y: 0, z: -4.5 },
+			}),
+		).toEqual({
+			envCellId: 0xda550100,
+			kind: "env-cell",
+			landblockId: 0xda55ffff,
+		});
+		expect(
+			query.queryCameraResidencyAtLandblockPoint({
+				landblockId: 0xda55ffff,
+				point: { x: 40, y: 0, z: 40 },
+			}),
+		).toEqual({
+			kind: "unknown",
+			landblockId: 0xda55ffff,
+		});
+	});
+
+	it("derives camera residency in a neighboring landblock render frame", () => {
+		const query = new StaticSceneQuery();
+		query.setOutdoorAnchorLandblockId(0xda55ffff);
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				envCellId: 0xdb550100,
+				landblockId: 0xdb55ffff,
+			}),
+		);
+
+		expect(
+			query.queryCameraResidencyAtPoint({
+				outdoorAnchorLandblockId: 0xda55ffff,
+				point: { x: 192, y: 0, z: -4.5 },
+			}),
+		).toEqual({
+			envCellId: 0xdb550100,
+			kind: "env-cell",
+			landblockId: 0xdb55ffff,
 		});
 	});
 

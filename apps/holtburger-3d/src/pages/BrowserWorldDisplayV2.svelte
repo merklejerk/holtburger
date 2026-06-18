@@ -473,11 +473,21 @@
 		}
 
 		if (submittedStaticLocation.kind === "interior-cell") {
-			return {
-				envCellId: submittedStaticLocation.envCellId,
-				kind: "env-cell",
+			const queriedResidency = runtime?.queryCameraResidencyAtLandblockPoint({
 				landblockId: submittedStaticLocation.landblockId,
-			};
+				point: {
+					x: cameraPosition[0],
+					y: cameraPosition[1],
+					z: cameraPosition[2],
+				},
+			});
+			return queriedResidency?.kind === "env-cell"
+				? queriedResidency
+				: {
+						envCellId: submittedStaticLocation.envCellId,
+						kind: "env-cell",
+						landblockId: submittedStaticLocation.landblockId,
+					};
 		}
 
 		return (
@@ -688,23 +698,44 @@
 		const context =
 			contextLocation.kind === "interior-cell"
 				? {
-						envCellId: contextLocation.envCellId,
+						envCellId:
+							snapshot?.currentCameraResidency.kind === "env-cell" &&
+							snapshot.currentCameraResidency.landblockId ===
+								contextLocation.landblockId
+								? snapshot.currentCameraResidency.envCellId
+								: contextLocation.envCellId,
 						kind: "env-cell" as const,
 						landblockId: contextLocation.landblockId,
 					}
 				: { kind: "outdoor" as const };
-		const hit = runtime.pickStaticRay(
-			createBrowserStaticPickRay({
-				camera:
-					cameraController?.createFrameStateCamera() ??
-					createV2FreeCameraFrameStateCamera(cameraState),
-				clientX: event.clientX,
-				clientY: event.clientY,
-				context,
-				filters: { ignoreContainingOrigin: true },
-				viewport: canvasElement.getBoundingClientRect(),
-			}),
-		);
+		const camera =
+			cameraController?.createFrameStateCamera() ??
+			createV2FreeCameraFrameStateCamera(cameraState);
+		const viewport = canvasElement.getBoundingClientRect();
+		const pickRequest = createBrowserStaticPickRay({
+			camera,
+			clientX: event.clientX,
+			clientY: event.clientY,
+			context,
+			filters: { ignoreContainingOrigin: true },
+			viewport,
+		});
+		const hit = runtime.pickStaticRay(pickRequest);
+		console.info("[holtburger-3d][v2][browser-static-pick]", {
+			camera,
+			contextLocation,
+			currentCameraResidency: snapshot?.currentCameraResidency ?? null,
+			hit,
+			pickRequest,
+			sceneInterest: snapshot?.sceneInterest ?? null,
+			staticSceneQuery: snapshot?.staticSceneQuery ?? null,
+			viewport: {
+				height: viewport.height,
+				left: viewport.left,
+				top: viewport.top,
+				width: viewport.width,
+			},
+		});
 		selectedStaticSelectionKey = hit?.selectionKey ?? null;
 		selectedStaticPickDistance = hit?.distance ?? null;
 		selectedStaticDiagnosticsReportText = null;

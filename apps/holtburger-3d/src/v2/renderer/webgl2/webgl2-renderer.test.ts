@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
 	StructuredInteriorGeometryStaticDrawUnit,
+	TerrainGeometryStaticDrawUnit,
 	TransitionApertureBatch,
 } from "../../static/contracts";
 import {
@@ -272,7 +273,10 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		});
 
 		renderer.applyStaticDelta({
-			addedDrawUnits: [],
+			addedDrawUnits: [
+				createTerrainDrawUnit(),
+				createStructuredInteriorDrawUnit(),
+			],
 			addedTransitionApertureBatches: [createTransitionApertureBatch()],
 			removedDrawUnitIds: [],
 			removedTransitionApertureBatchIds: [],
@@ -294,10 +298,12 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			compositingMode: "stencil-mask",
 			executedCompositeDepth: 2,
 		});
-		expect(gl.drawElementsCalls).toEqual([
-			{ count: 3, mode: gl.TRIANGLES, type: gl.UNSIGNED_SHORT },
-			{ count: 3, mode: gl.TRIANGLES, type: gl.UNSIGNED_SHORT },
-		]);
+		expect(gl.drawElementsCalls).toHaveLength(4);
+		expect(gl.drawElementsCalls).toEqual(
+			expect.arrayContaining([
+				{ count: 3, mode: gl.TRIANGLES, type: gl.UNSIGNED_SHORT },
+			]),
+		);
 		expect(gl.depthFuncModes).toContain(gl.ALWAYS);
 		expect(gl.depthFuncModes).toContain(gl.LEQUAL);
 		expect(gl.cullFaceModes).toEqual(
@@ -568,6 +574,30 @@ function createStructuredInteriorDrawUnit(): StructuredInteriorGeometryStaticDra
 	};
 }
 
+function createTerrainDrawUnit(): TerrainGeometryStaticDrawUnit {
+	return {
+		coordinateSpace: "landblock-render-local",
+		domain: "outdoor-terrain",
+		drawUnitId: "terrain-a",
+		indexType: "uint16",
+		indices: new Uint16Array([0, 1, 2]),
+		kind: "terrain-geometry",
+		landblockId: 0xda55ffff,
+		layerSlots: new Float32Array([0, 0, 0, 0, 0, 0]),
+		materialBucketKey: "family:terrain-debug-flat|material:debug",
+		materialFamily: "terrain-debug-flat",
+		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+		primaryTextureUseId: null,
+		sourceTriangleIds: ["terrain-triangle-a"],
+		terrainFallbackReasons: [],
+		terrainMaterialPlan: null,
+		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+		textureUseIds: [],
+		triangleCount: 1,
+		vertexCount: 3,
+	};
+}
+
 function createTransitionApertureBatch(): TransitionApertureBatch {
 	return {
 		apertureBatchId: "transition-aperture-batch:da55ffff",
@@ -579,16 +609,30 @@ function createTransitionApertureBatch(): TransitionApertureBatch {
 		planes: [null],
 		ranges: [
 			{
-				envCellId: 0xda550100,
 				exterior: {
-					kind: "outside",
-					landblockId: 0xda55ffff,
+					buildingInstanceId: "building-0",
+					buildingPortalId: "building-portal-0",
+					kind: "landblock-building",
 				},
 				firstIndex: 0,
 				indexCount: 3,
 				portalId: "transition-portal:0",
+				source: {
+					buildingInstanceId: "building-0",
+					buildingPortalId: "building-portal-0",
+					buildingPortalSourceIndex: 0,
+					kind: "building-portal",
+					linkedEnvCellIds: [0xda550100],
+					otherCellId: 0x0100,
+					otherPortalId: 0xffff,
+					polyId: 7,
+					portalIndex: 0,
+					sourceAssetId: "gfx-obj/01001234",
+					sourceDid: 0x01001234,
+				},
 			},
 		],
+		sourceDomain: "outdoor-buildings",
 		vertices: [
 			{ x: 0, y: 0, z: 0 },
 			{ x: 1, y: 0, z: 0 },

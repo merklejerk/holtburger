@@ -62,12 +62,19 @@ export function planTransitionCompositeWork(options: {
 		return { kind: "none", depthWork: [] };
 	}
 
-	const maxDepth = Math.max(0, Math.trunc(renderPassPlan.transitionDepthPolicy.maxDepth));
+	const maxDepth = Math.max(
+		0,
+		Math.trunc(renderPassPlan.transitionDepthPolicy.maxDepth),
+	);
 	const apertureBatchIds = selectRenderableApertureBatchIds(
 		options.apertureBatches,
 	);
 	const depthWork: TransitionCompositeDepthWork[] = [];
-	for (let transitionDepth = 0; transitionDepth < maxDepth; transitionDepth += 1) {
+	for (
+		let transitionDepth = 0;
+		transitionDepth < maxDepth;
+		transitionDepth += 1
+	) {
 		const currentTarget = getTransitionDepthCurrentTarget(
 			renderPassPlan.baseScene,
 			transitionDepth,

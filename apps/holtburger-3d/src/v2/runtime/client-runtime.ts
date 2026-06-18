@@ -707,6 +707,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			createStaticDemandFromSceneInterest(interest),
 		);
 		this.#staticSceneQuery.retainScopes(reconciliation.retainedScopes);
+		this.#updateRenderPassPlan();
 		return reconciliation;
 	}
 
@@ -714,6 +715,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 		const plan = deriveRenderPassPlan(
 			this.#currentCameraResidency,
 			this.#renderAnchorLandblockId,
+			(landblockId) =>
+				this.#staticSceneQuery.hasCommittedPortalInteriorScene({
+					landblockId,
+				}),
 		);
 		if (renderPassPlanEquals(this.#lastRendererSnapshot.renderPassPlan, plan)) {
 			return false;
@@ -876,6 +881,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#staticSceneQuery.applyTransitionApertureBatches(
 			materialized.staticDelta.addedTransitionApertureBatches,
 		);
+		this.#updateRenderPassPlan();
 		this.#refreshStaticDebugOverlay();
 		this.#pendingStaticMaterializations.delete(delta.revision);
 		this.#committedStaticMaterializations = appendBoundedRevision(
@@ -1495,7 +1501,7 @@ function createTransitionApertureDebugOverlayPrimitives(
 			range.indexCount,
 			translation,
 		);
-		const baseId = `transition-aperture:${formatHex32(batch.landblockId)}:${range.portalId}`;
+		const baseId = `transition-aperture:${formatHex32(batch.landblockId)}:${describeTransitionApertureRangeSource(range.source)}:${range.portalId}`;
 		if (mode === "both" || mode === "indoor-to-outdoor") {
 			primitives.push({
 				color: [0.95, 0.12, 0.08, 0.35],
@@ -1515,6 +1521,19 @@ function createTransitionApertureDebugOverlayPrimitives(
 	}
 
 	return primitives;
+}
+
+function describeTransitionApertureRangeSource(
+	source: TransitionApertureBatch["ranges"][number]["source"],
+): string {
+	return [
+		"building",
+		source.buildingInstanceId,
+		source.buildingPortalId,
+		`portal-index-${source.portalIndex}`,
+		`poly-${source.polyId}`,
+		`gfx-${formatHex32(source.sourceDid)}`,
+	].join(":");
 }
 
 function readTransitionApertureRangeVertices(
@@ -1717,8 +1736,12 @@ function normalizeCameraResidency(
 function deriveRenderPassPlan(
 	residency: RuntimeCameraResidency,
 	fallbackExteriorLandblockId: number | null,
+	hasPortalInteriorScene: (landblockId: number) => boolean,
 ): RenderPassPlan {
 	if (residency.kind === "env-cell") {
+		if (!hasPortalInteriorScene(residency.landblockId)) {
+			return { kind: "single-surface-resident" };
+		}
 		return {
 			kind: "portal-scene-domains",
 			baseScene: {
@@ -1735,6 +1758,9 @@ function deriveRenderPassPlan(
 			? residency.landblockId
 			: (residency.landblockId ?? fallbackExteriorLandblockId);
 	if (exteriorLandblockId === null) {
+		return { kind: "single-surface-resident" };
+	}
+	if (!hasPortalInteriorScene(exteriorLandblockId)) {
 		return { kind: "single-surface-resident" };
 	}
 

@@ -259,9 +259,7 @@ describe("V2 static materializer", () => {
 			addedDrawUnits: [],
 			addedTransitionApertureBatches: [],
 			removedDrawUnitIds: [],
-			removedTransitionApertureBatchIds: [
-				"transition-aperture-batch:da55ffff",
-			],
+			removedTransitionApertureBatchIds: ["transition-aperture-batch:da55ffff"],
 			revision: 9,
 		});
 	});
@@ -300,16 +298,31 @@ function createTransitionApertureBatch(): TransitionApertureBatch {
 		planes: [null],
 		ranges: [
 			{
-				envCellId: 0xda550100,
 				exterior: {
-					kind: "outside",
-					landblockId: 0xda55ffff,
+					buildingInstanceId: "building-0",
+					buildingPortalId: "building-portal-0",
+					kind: "landblock-building",
 				},
 				firstIndex: 0,
 				indexCount: 3,
-				portalId: "transition-portal:3663069183:outside:3663069183:3663003904:p0",
+				portalId:
+					"transition-portal:3663069183:outside:3663069183:3663003904:p0",
+				source: {
+					buildingInstanceId: "building-0",
+					buildingPortalId: "building-portal-0",
+					buildingPortalSourceIndex: 0,
+					kind: "building-portal",
+					linkedEnvCellIds: [0xda550100],
+					otherCellId: 0x0100,
+					otherPortalId: 0xffff,
+					polyId: 7,
+					portalIndex: 0,
+					sourceAssetId: "gfx-obj/01001234",
+					sourceDid: 0x01001234,
+				},
 			},
 		],
+		sourceDomain: "outdoor-buildings",
 		vertices: [
 			{ x: 0, y: 0, z: 0 },
 			{ x: 1, y: 0, z: 0 },

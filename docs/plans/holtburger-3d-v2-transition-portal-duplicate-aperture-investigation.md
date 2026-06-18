@@ -343,19 +343,14 @@ Phased execution:
    - Completed: `TransitionApertureBatch.sourceDomain` drives coordinator
      retention/eviction, so building aperture masks are keyed to
      `outdoor-buildings` instead of `landblock-env-cells`.
-   - Completed: `TransitionApertureRange` now stores a source variant. Building
-     aperture ranges carry building portal/source GfxObj metadata; env-cell
-     fallback ranges carry env-cell portal metadata.
+   - Completed: `TransitionApertureRange` now stores source metadata. Building
+     aperture ranges carry building portal/source GfxObj metadata. Phase 4
+     removed the env-cell fallback source variant.
    - Completed: `StaticSceneQuery` tracks committed transition aperture batches
      directly, including outdoor-building batches that exist before any
      env-cell records are committed.
-   - Spicy implementation note: `StaticSceneQuery` still retains the legacy
-     env-cell-derived query fallback when no committed transition aperture
-     batches exist. Phase 4 must remove or hard-disable that fallback for
-     landblock-building transitions. It must not remain as an alternate
-     mask-producing path for building apertures.
 
-4. Renderer and debug behavior - next
+4. Renderer and debug behavior - complete
 
    - Keep the WebGL aperture resource upload path batch-oriented.
    - Gate compositing through a resident building aperture on destination
@@ -369,6 +364,40 @@ Phased execution:
      outside-transition `CCellPortal` aperture polygons may remain metadata,
      but they must not synthesize `TransitionApertureBatch` resources for
      building apertures when no outdoor-building batch is present.
+   - Completed: removed the legacy `StaticSceneQuery` fallback that derived
+     transition aperture batches from committed env-cell portal interior
+     records. `queryTransitionApertureBatches` now returns only committed
+     batches.
+   - Completed: stopped the landblock env-cell baker from emitting
+     `TransitionApertureBatch` resources. Env-cell `CCellPortal` data still
+     participates in interior/static portal records and debug metadata, but no
+     longer creates V2 transition mask geometry.
+   - Completed: tightened the V2 `TransitionApertureBatch` contract so batches
+     are `outdoor-buildings` sourced and range sources are building portal
+     sources. This removes the env-cell transition mask compatibility shape
+     instead of leaving it as a dead alternate path.
+   - Completed: kept WebGL transition aperture resource upload batch-oriented;
+     the renderer still uploads committed batches as one aperture resource per
+     batch.
+   - Completed: portal render-pass activation is now gated above the renderer.
+     `ClientRuntime` derives `portal-scene-domains` only when `StaticSceneQuery`
+     has committed portal interior scene records for the relevant landblock;
+     otherwise it keeps the renderer on `single-surface-resident`.
+   - Completed: transition aperture debug overlay primitive ids now include
+     building-source metadata: building instance id, building portal id,
+     `PortalPoly.portal_index`, `PortalPoly.poly_id`, and source `GfxObj` DID.
+   - Spicy implementation note: the renderer-level draw-call readiness guard
+     was removed. The renderer now executes the render pass plan it is given;
+     semantic portal readiness belongs to runtime/static scene state.
+   - Spicy implementation note: the runtime gate is intentionally indoor/outdoor
+     scene level. V2 portal compositing treats the world as two renderable scene
+     domains, so committed interior scene availability is the readiness signal;
+     there is no per-aperture linked-env-cell readiness requirement.
+   - Spicy implementation note: bare `outside` transition aperture mask
+     synthesis from env-cell outside-transition portals is intentionally gone
+     with this change. That matches this plan's non-goal, but it means any
+     future non-building outside transition support needs a new explicit source
+     model rather than reviving env-cell fallback synthesis.
 
 Concrete scope:
 
@@ -464,6 +493,12 @@ Non-goals for this step:
   `GfxObj` drawing BSP / `CBldPortal` semantics and the decoded asset data.
 - Do not add asset-backed fixture tests for `0xf418ffff`; keep that landblock
   as a manual/debug-harness validation case.
+
+Remaining work after Phase 4:
+
+- Decide whether the debug UI needs a richer transition aperture details panel.
+  Phase 4 updates overlay primitive ids with building-source metadata, but does
+  not add a new visible inspector surface.
 
 ## Appendix: Reproduction Commands
 

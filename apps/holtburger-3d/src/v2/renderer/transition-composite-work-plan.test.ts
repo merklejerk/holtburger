@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type {
-	RenderPassPlan,
-	SceneDomainTargetKind,
-} from "./types";
+import type { RenderPassPlan, SceneDomainTargetKind } from "./types";
 import {
 	createTransitionCompositeApertureBatchInput,
 	planTransitionCompositeWork,
@@ -125,7 +122,9 @@ describe("V2 transition composite work planner", () => {
 		const workPlan = planTransitionCompositeWork({
 			apertureBatches: [
 				createApertureBatchInput("near-overlap", { landblockId: 0xda55ffff }),
-				createApertureBatchInput("other-landblock", { landblockId: 0xdb55ffff }),
+				createApertureBatchInput("other-landblock", {
+					landblockId: 0xdb55ffff,
+				}),
 				createApertureBatchInput("far-overlap", { landblockId: 0xda55ffff }),
 			],
 			renderPassPlan: createPortalRenderPassPlan({
@@ -138,9 +137,7 @@ describe("V2 transition composite work planner", () => {
 			apertureBatchIds: ["near-overlap", "other-landblock", "far-overlap"],
 			kind: "transition-composite",
 		});
-		expect(
-			workPlan.depthWork.map((step) => step.apertureBatchIds),
-		).toEqual([
+		expect(workPlan.depthWork.map((step) => step.apertureBatchIds)).toEqual([
 			["near-overlap", "other-landblock", "far-overlap"],
 			["near-overlap", "other-landblock", "far-overlap"],
 		]);
@@ -178,13 +175,30 @@ describe("V2 transition composite work planner", () => {
 				planes: [null],
 				ranges: [
 					{
-						envCellId: 0xda550100,
-						exterior: { kind: "outside", landblockId: 0xda55ffff },
+						exterior: {
+							buildingInstanceId: "building-0",
+							buildingPortalId: "building-portal-0",
+							kind: "landblock-building",
+						},
 						firstIndex: 0,
 						indexCount: 3,
 						portalId: "transition-portal-a",
+						source: {
+							buildingInstanceId: "building-0",
+							buildingPortalId: "building-portal-0",
+							buildingPortalSourceIndex: 0,
+							kind: "building-portal",
+							linkedEnvCellIds: [0xda550100],
+							otherCellId: 0x0100,
+							otherPortalId: 0xffff,
+							polyId: 7,
+							portalIndex: 0,
+							sourceAssetId: "gfx-obj/01001234",
+							sourceDid: 0x01001234,
+						},
 					},
 				],
+				sourceDomain: "outdoor-buildings",
 				vertices: [
 					{ x: 0, y: 0, z: 0 },
 					{ x: 1, y: 0, z: 0 },

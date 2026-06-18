@@ -1403,25 +1403,19 @@ export type TransitionApertureExteriorEndpoint =
 			readonly landblockId: number;
 	  };
 
-export type TransitionApertureRangeSource =
-	| {
-			readonly kind: "building-portal";
-			readonly buildingInstanceId: string;
-			readonly buildingPortalId: string;
-			readonly buildingPortalSourceIndex: number;
-			readonly linkedEnvCellIds: readonly number[];
-			readonly otherCellId: number;
-			readonly otherPortalId: number;
-			readonly polyId: number;
-			readonly portalIndex: number;
-			readonly sourceAssetId: string;
-			readonly sourceDid: number;
-	  }
-	| {
-			readonly kind: "env-cell-portal";
-			readonly envCellId: number;
-			readonly envCellPortalId: string;
-	  };
+export interface TransitionApertureRangeSource {
+	readonly kind: "building-portal";
+	readonly buildingInstanceId: string;
+	readonly buildingPortalId: string;
+	readonly buildingPortalSourceIndex: number;
+	readonly linkedEnvCellIds: readonly number[];
+	readonly otherCellId: number;
+	readonly otherPortalId: number;
+	readonly polyId: number;
+	readonly portalIndex: number;
+	readonly sourceAssetId: string;
+	readonly sourceDid: number;
+}
 
 export interface TransitionApertureRange {
 	readonly exterior: TransitionApertureExteriorEndpoint;
@@ -1440,7 +1434,7 @@ export interface TransitionApertureBatch {
 	readonly landblockId: number;
 	readonly planes: readonly (StaticPlane | null)[];
 	readonly ranges: readonly TransitionApertureRange[];
-	readonly sourceDomain: "outdoor-buildings" | "landblock-env-cells";
+	readonly sourceDomain: "outdoor-buildings";
 	readonly vertices: readonly StaticVec3[];
 }
 

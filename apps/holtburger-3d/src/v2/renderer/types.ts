@@ -192,7 +192,7 @@ export interface SceneDomainTargetSnapshot {
 	readonly height: number;
 	readonly colorFormat: "rgb8";
 	readonly depthFormat: "depth24-stencil8";
-	readonly compositingMode: "none" | "texture-mask";
+	readonly compositingMode: "none" | "stencil-mask";
 	readonly executedCompositeDepth: number;
 	readonly compositePasses: number;
 	readonly apertureBatchDrawCalls: number;

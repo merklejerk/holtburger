@@ -32,6 +32,7 @@
 		ManualStaticDomain,
 		RuntimeCameraResidency,
 		RuntimeSnapshot,
+		TransitionApertureDebugOverlayMode,
 	} from "../v2/runtime/client-runtime";
 	import {
 		describeStaticSceneSelectionKey,
@@ -76,6 +77,8 @@
 	let envCellsEnabled = $state(true);
 	let envCellAabbDebugVisible = $state(false);
 	let transitionApertureDebugVisible = $state(false);
+	let transitionApertureDebugMode =
+		$state<TransitionApertureDebugOverlayMode>("both");
 	let terrainRadius = $state(DEFAULT_TERRAIN_LOD_RADIUS);
 	let buildingRadius = $state(DEFAULT_BUILDING_LOD_RADIUS);
 	let detailRadius = $state(DEFAULT_DETAIL_LOD_RADIUS);
@@ -123,6 +126,9 @@
 			runtime.setEnvCellAabbDebugOverlayVisible(envCellAabbDebugVisible);
 			runtime.setTransitionApertureDebugOverlayVisible(
 				transitionApertureDebugVisible,
+			);
+			runtime.setTransitionApertureDebugOverlayMode(
+				transitionApertureDebugMode,
 			);
 			cameraController = new V2BrowserCameraController({
 				initialState: cameraState,
@@ -385,6 +391,14 @@
 		).checked;
 		runtime?.setTransitionApertureDebugOverlayVisible(
 			transitionApertureDebugVisible,
+		);
+	}
+
+	function handleTransitionApertureDebugModeChange(event: Event): void {
+		transitionApertureDebugMode = (event.currentTarget as HTMLSelectElement)
+			.value as TransitionApertureDebugOverlayMode;
+		runtime?.setTransitionApertureDebugOverlayMode(
+			transitionApertureDebugMode,
 		);
 	}
 
@@ -1104,6 +1118,18 @@
 						<small>
 							{snapshot?.debugOverlays.transitionApertureCount ?? 0}
 						</small>
+					</label>
+					<label class="browser-v2__field">
+						<span>Portal overlay</span>
+						<select
+							bind:value={transitionApertureDebugMode}
+							disabled={!runtime}
+							onchange={handleTransitionApertureDebugModeChange}
+						>
+							<option value="both">Both directions</option>
+							<option value="outdoor-to-indoor">Outdoor to indoor</option>
+							<option value="indoor-to-outdoor">Indoor to outdoor</option>
+						</select>
 					</label>
 
 					<dl class="browser-v2__status">

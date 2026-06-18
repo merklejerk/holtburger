@@ -89,7 +89,6 @@ const STATIC_OBJECT_DETAIL_TEXTURE_UNIT_BASE =
 	MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW;
 const SOURCE_SCENE_COPY_COLOR_TEXTURE_UNIT = 0;
 const SOURCE_SCENE_COPY_DEPTH_TEXTURE_UNIT = 1;
-const SOURCE_SCENE_COPY_MASK_TEXTURE_UNIT = 2;
 const DEBUG_OVERLAY_FLOATS_PER_VERTEX = 7;
 // Visual-quality/perf tradeoff: sort only transparent statics close enough for
 // object-order artifacts to be obvious.
@@ -188,10 +187,7 @@ void main() {
 const TRANSITION_APERTURE_MASK_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 
-out vec4 fragColor;
-
 void main() {
-	fragColor = vec4(1.0, 0.0, 0.0, 1.0);
 }
 `;
 
@@ -215,17 +211,12 @@ precision highp float;
 
 uniform sampler2D uSourceSceneColor;
 uniform sampler2D uSourceSceneDepth;
-uniform sampler2D uCompositeMask;
-uniform int uUseCompositeMask;
 
 out vec4 fragColor;
 
 void main() {
 	ivec2 textureExtent = textureSize(uSourceSceneColor, 0);
 	ivec2 texelCoord = clamp(ivec2(gl_FragCoord.xy), ivec2(0), textureExtent - ivec2(1));
-	if (uUseCompositeMask == 1 && texelFetch(uCompositeMask, texelCoord, 0).r < 0.5) {
-		discard;
-	}
 	vec4 sourceColor = texelFetch(uSourceSceneColor, texelCoord, 0);
 	float sourceDepth = texelFetch(uSourceSceneDepth, texelCoord, 0).r;
 	fragColor = sourceColor;
@@ -1122,6 +1113,7 @@ class Webgl2Renderer implements Renderer {
 		depthWork: readonly TransitionCompositeDepthWork[],
 		baseTarget: SceneDomainTarget,
 	): void {
+		const gl = this.#gl;
 		if (depthWork.length === 0) {
 			this.#blitSceneDomainColorToDisplay(baseTarget);
 			return;
@@ -1129,57 +1121,63 @@ class Webgl2Renderer implements Renderer {
 
 		let compositeRead = targets.compositePing;
 		let compositeWrite = targets.compositePong;
-		this.#copySceneDomainColorAndDepth(baseTarget, compositeRead);
+		this.#copySceneDomainColorAndDepth(baseTarget, compositeRead, {
+			clearStencil: true,
+			copyStencil: false,
+		});
 
 		for (const work of depthWork) {
-			this.#copySceneDomainColorAndDepth(compositeRead, compositeWrite);
-			this.#drawTransitionCompositeMask(
+			this.#copySceneDomainColorAndDepth(compositeRead, compositeWrite, {
+				clearStencil: false,
+				copyStencil: true,
+			});
+			const stencilRef = transitionCompositeStencilRef(work.transitionDepth);
+			const parentStencilRef =
+				work.transitionDepth === 0
+					? null
+					: transitionCompositeStencilRef(work.transitionDepth - 1);
+			this.#drawTransitionCompositeStencilMask(
 				compositeWrite,
-				targets.transitionMask,
 				work,
+				stencilRef,
+				parentStencilRef,
 			);
-			this.#drawTransitionCompositeSourceCopy(targets, compositeWrite, work);
+			this.#drawTransitionCompositeSourceCopy(
+				targets,
+				compositeWrite,
+				work,
+				stencilRef,
+			);
 			this.#lastCompositePasses += 1;
 			this.#lastExecutedCompositeDepth = work.transitionDepth + 1;
-			this.#lastCompositingMode = "texture-mask";
+			this.#lastCompositingMode = "stencil-mask";
 			const nextRead = compositeWrite;
 			compositeWrite = compositeRead;
 			compositeRead = nextRead;
 		}
+		this.#stateCache.setStencilState(
+			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+		);
 
 		this.#blitSceneDomainColorToDisplay(compositeRead);
 	}
 
-	#drawTransitionCompositeMask(
-		compositeTarget: SceneDomainTarget,
-		maskTarget: TransitionCompositeMaskTarget,
+	#drawTransitionCompositeStencilMask(
+		destination: SceneDomainTarget,
 		work: TransitionCompositeDepthWork,
+		stencilRef: number,
+		parentStencilRef: number | null,
 	): void {
 		const gl = this.#gl;
-		const aspectRatio =
-			compositeTarget.width / Math.max(1, compositeTarget.height);
-		this.#stateCache.bindFramebuffer(maskTarget.framebuffer);
-		gl.framebufferTexture2D(
-			gl.FRAMEBUFFER,
-			gl.DEPTH_STENCIL_ATTACHMENT,
-			gl.TEXTURE_2D,
-			compositeTarget.depthTexture,
-			0,
-		);
-		const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-		if (status !== gl.FRAMEBUFFER_COMPLETE) {
-			throw new Error(
-				`WebGL2 transition mask framebuffer is incomplete: 0x${status.toString(16)}.`,
-			);
-		}
+		const aspectRatio = destination.width / Math.max(1, destination.height);
+		this.#stateCache.bindFramebuffer(destination.framebuffer);
 		this.#stateCache.setViewport({
-			height: maskTarget.height,
-			width: maskTarget.width,
+			height: destination.height,
+			width: destination.width,
 			x: 0,
 			y: 0,
 		});
-		gl.clearColor(0, 0, 0, 0);
-		gl.clear(gl.COLOR_BUFFER_BIT);
+		gl.colorMask(false, false, false, false);
 		try {
 			this.#stateCache.useProgram(this.#transitionCompositeProgram.program);
 			this.#stateCache.setDepthState({
@@ -1195,7 +1193,14 @@ class Webgl2Renderer implements Renderer {
 				mode: resolveTransitionCompositeCullFace(gl, work.cullFace),
 			});
 			this.#stateCache.setStencilState(
-				createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+				createStencilState(
+					gl,
+					true,
+					0xff,
+					parentStencilRef === null ? gl.ALWAYS : gl.EQUAL,
+					parentStencilRef ?? stencilRef,
+					parentStencilRef === null ? gl.REPLACE : gl.INCR,
+				),
 			);
 			gl.uniformMatrix4fv(
 				this.#transitionCompositeProgram.uniforms.uModelViewProjection,
@@ -1227,13 +1232,7 @@ class Webgl2Renderer implements Renderer {
 				this.#lastCompositeApertureBatchDrawCalls += 1;
 			}
 		} finally {
-			gl.framebufferTexture2D(
-				gl.FRAMEBUFFER,
-				gl.DEPTH_STENCIL_ATTACHMENT,
-				gl.TEXTURE_2D,
-				null,
-				0,
-			);
+			gl.colorMask(true, true, true, true);
 		}
 		this.#stateCache.bindVertexArray(null);
 		this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
@@ -1243,6 +1242,7 @@ class Webgl2Renderer implements Renderer {
 		targets: SceneDomainTargets,
 		destination: SceneDomainTarget,
 		work: TransitionCompositeDepthWork,
+		stencilRef: number,
 	): void {
 		const gl = this.#gl;
 		const sourceTarget = this.#getSceneDomainTarget(targets, work.sourceTarget);
@@ -1263,12 +1263,9 @@ class Webgl2Renderer implements Renderer {
 		);
 		this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
 		this.#stateCache.setStencilState(
-			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+			createStencilState(gl, true, 0x00, gl.EQUAL, stencilRef, gl.KEEP),
 		);
-		this.#drawSourceSceneCopy(
-			sourceTarget,
-			targets.transitionMask.colorTexture,
-		);
+		this.#drawSourceSceneCopy(sourceTarget);
 	}
 
 	#renderSceneDomainTarget(
@@ -1331,6 +1328,10 @@ class Webgl2Renderer implements Renderer {
 	#copySceneDomainColorAndDepth(
 		source: SceneDomainTarget,
 		destination: SceneDomainTarget,
+		options: {
+			readonly clearStencil: boolean;
+			readonly copyStencil: boolean;
+		},
 	): void {
 		const gl = this.#gl;
 		this.#stateCache.bindFramebuffer(destination.framebuffer);
@@ -1340,6 +1341,13 @@ class Webgl2Renderer implements Renderer {
 			x: 0,
 			y: 0,
 		});
+		if (options.clearStencil) {
+			this.#stateCache.setStencilState(
+				createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+			);
+			gl.clearStencil(0);
+			gl.clear(gl.STENCIL_BUFFER_BIT);
+		}
 		this.#stateCache.setDepthState({
 			enabled: false,
 			func: gl.ALWAYS,
@@ -1352,8 +1360,11 @@ class Webgl2Renderer implements Renderer {
 		this.#stateCache.setStencilState(
 			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
 		);
-		this.#drawSourceSceneCopy(source, null);
+		this.#drawSourceSceneCopy(source);
 		this.#blitSceneDomainDepth(source, destination);
+		if (options.copyStencil) {
+			this.#blitSceneDomainStencil(source, destination);
+		}
 	}
 
 	#blitSceneDomainDepth(
@@ -1380,10 +1391,31 @@ class Webgl2Renderer implements Renderer {
 		this.#stateCache.invalidate();
 	}
 
-	#drawSourceSceneCopy(
+	#blitSceneDomainStencil(
 		source: SceneDomainTarget,
-		maskTexture: WebGLTexture | null,
+		destination: SceneDomainTarget,
 	): void {
+		const gl = this.#gl;
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, source.framebuffer);
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, destination.framebuffer);
+		gl.blitFramebuffer(
+			0,
+			0,
+			source.width,
+			source.height,
+			0,
+			0,
+			destination.width,
+			destination.height,
+			gl.STENCIL_BUFFER_BIT,
+			gl.NEAREST,
+		);
+		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+		this.#stateCache.invalidate();
+	}
+
+	#drawSourceSceneCopy(source: SceneDomainTarget): void {
 		const gl = this.#gl;
 		this.#stateCache.useProgram(this.#sourceSceneCopyProgram.program);
 		this.#stateCache.bindVertexArray(this.#sourceSceneCopyVertexArray);
@@ -1395,10 +1427,6 @@ class Webgl2Renderer implements Renderer {
 			SOURCE_SCENE_COPY_DEPTH_TEXTURE_UNIT,
 			source.depthTexture,
 		);
-		this.#stateCache.bindTexture2D(
-			SOURCE_SCENE_COPY_MASK_TEXTURE_UNIT,
-			maskTexture,
-		);
 		gl.uniform1i(
 			this.#sourceSceneCopyProgram.uniforms.uSourceSceneColor,
 			SOURCE_SCENE_COPY_COLOR_TEXTURE_UNIT,
@@ -1406,14 +1434,6 @@ class Webgl2Renderer implements Renderer {
 		gl.uniform1i(
 			this.#sourceSceneCopyProgram.uniforms.uSourceSceneDepth,
 			SOURCE_SCENE_COPY_DEPTH_TEXTURE_UNIT,
-		);
-		gl.uniform1i(
-			this.#sourceSceneCopyProgram.uniforms.uCompositeMask,
-			SOURCE_SCENE_COPY_MASK_TEXTURE_UNIT,
-		);
-		gl.uniform1i(
-			this.#sourceSceneCopyProgram.uniforms.uUseCompositeMask,
-			maskTexture ? 1 : 0,
 		);
 		gl.drawArrays(gl.TRIANGLES, 0, 3);
 	}
@@ -2038,10 +2058,8 @@ interface TransitionApertureCompositeProgram {
 interface SourceSceneCopyProgram {
 	readonly program: WebGLProgram;
 	readonly uniforms: {
-		readonly uCompositeMask: WebGLUniformLocation;
 		readonly uSourceSceneColor: WebGLUniformLocation;
 		readonly uSourceSceneDepth: WebGLUniformLocation;
-		readonly uUseCompositeMask: WebGLUniformLocation;
 	};
 	dispose(): void;
 }
@@ -2132,7 +2150,6 @@ interface SceneDomainTargets {
 	readonly interior: SceneDomainTarget;
 	readonly compositePing: SceneDomainTarget;
 	readonly compositePong: SceneDomainTarget;
-	readonly transitionMask: TransitionCompositeMaskTarget;
 	dispose(): void;
 }
 
@@ -2143,15 +2160,6 @@ interface SceneDomainTarget {
 	readonly framebuffer: WebGLFramebuffer;
 	readonly colorTexture: WebGLTexture;
 	readonly depthTexture: WebGLTexture;
-	dispose(): void;
-}
-
-interface TransitionCompositeMaskTarget {
-	readonly label: string;
-	readonly width: number;
-	readonly height: number;
-	readonly framebuffer: WebGLFramebuffer;
-	readonly colorTexture: WebGLTexture;
 	dispose(): void;
 }
 
@@ -2186,33 +2194,20 @@ function createSceneDomainTargets(
 					width,
 					height,
 				);
-				try {
-					const transitionMask = createTransitionCompositeMaskTarget(
-						gl,
-						"transition aperture mask",
-						width,
-						height,
-					);
-					return {
-						compositePing,
-						compositePong,
-						exterior,
-						height,
-						interior,
-						transitionMask,
-						width,
-						dispose() {
-							exterior.dispose();
-							interior.dispose();
-							compositePing.dispose();
-							compositePong.dispose();
-							transitionMask.dispose();
-						},
-					};
-				} catch (error) {
-					compositePong.dispose();
-					throw error;
-				}
+				return {
+					compositePing,
+					compositePong,
+					exterior,
+					height,
+					interior,
+					width,
+					dispose() {
+						exterior.dispose();
+						interior.dispose();
+						compositePing.dispose();
+						compositePong.dispose();
+					},
+				};
 			} catch (error) {
 				compositePing.dispose();
 				throw error;
@@ -2307,69 +2302,6 @@ function createSceneDomainColorTexture(
 	);
 	gl.bindTexture(gl.TEXTURE_2D, null);
 	return texture;
-}
-
-function createTransitionCompositeMaskTarget(
-	gl: WebGL2RenderingContext,
-	label: string,
-	width: number,
-	height: number,
-): TransitionCompositeMaskTarget {
-	const colorTexture = createSceneDomainTexture(gl);
-	try {
-		gl.texImage2D(
-			gl.TEXTURE_2D,
-			0,
-			gl.R8,
-			width,
-			height,
-			0,
-			gl.RED,
-			gl.UNSIGNED_BYTE,
-			null,
-		);
-		gl.bindTexture(gl.TEXTURE_2D, null);
-		const framebuffer = gl.createFramebuffer();
-		if (!framebuffer) {
-			throw new Error(`Failed to create WebGL2 ${label} framebuffer.`);
-		}
-		gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-		try {
-			gl.framebufferTexture2D(
-				gl.FRAMEBUFFER,
-				gl.COLOR_ATTACHMENT0,
-				gl.TEXTURE_2D,
-				colorTexture,
-				0,
-			);
-			const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
-			if (status !== gl.FRAMEBUFFER_COMPLETE) {
-				throw new Error(
-					`WebGL2 ${label} framebuffer is incomplete: 0x${status.toString(16)}.`,
-				);
-			}
-		} catch (error) {
-			gl.deleteFramebuffer(framebuffer);
-			throw error;
-		} finally {
-			gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-		}
-
-		return {
-			colorTexture,
-			framebuffer,
-			height,
-			label,
-			width,
-			dispose() {
-				gl.deleteFramebuffer(framebuffer);
-				gl.deleteTexture(colorTexture);
-			},
-		};
-	} catch (error) {
-		gl.deleteTexture(colorTexture);
-		throw error;
-	}
 }
 
 function createSceneDomainDepthTexture(
@@ -2817,10 +2749,8 @@ function createSourceSceneCopyProgram(
 	return {
 		program,
 		uniforms: {
-			uCompositeMask: requireUniform(gl, program, "uCompositeMask"),
 			uSourceSceneColor: requireUniform(gl, program, "uSourceSceneColor"),
 			uSourceSceneDepth: requireUniform(gl, program, "uSourceSceneDepth"),
-			uUseCompositeMask: requireUniform(gl, program, "uUseCompositeMask"),
 		},
 		dispose() {
 			gl.deleteProgram(program);
@@ -3290,6 +3220,10 @@ function sumTransitionApertureRanges(
 		total += resource.ranges.length;
 	}
 	return total;
+}
+
+function transitionCompositeStencilRef(transitionDepth: number): number {
+	return transitionDepth + 1;
 }
 
 function createStencilState(

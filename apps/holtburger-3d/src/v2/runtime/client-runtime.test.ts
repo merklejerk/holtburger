@@ -181,7 +181,7 @@ describe("V2 client runtime", () => {
 				kind: "interior",
 				landblockId: 0xda55ffff,
 			},
-			transitionDepthPolicy: { maxDepth: 5 },
+			transitionDepthPolicy: { maxDepth: 4 },
 		});
 		expect(runtime.createDiagnosticsReport().runtime).toMatchObject({
 			currentCameraResidency: {
@@ -196,12 +196,39 @@ describe("V2 client runtime", () => {
 					kind: "interior",
 					landblockId: 0xda55ffff,
 				},
-				transitionDepthPolicy: { maxDepth: 5 },
+				transitionDepthPolicy: { maxDepth: 4 },
 			},
 		});
 		expect(JSON.stringify(runtime.createDiagnosticsReport())).not.toContain(
 			'"source"',
 		);
+
+		unsubscribe();
+		runtime.dispose();
+	});
+
+	it("tracks transition aperture debug overlay direction mode", () => {
+		const renderer = new FakeRenderer();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker: new DeferredStaticBaker(),
+				resolver: new DeferredStaticResolver(),
+			}),
+		});
+		const snapshots: RuntimeSnapshot[] = [];
+		const unsubscribe = runtime.subscribe((nextSnapshot) => {
+			snapshots.push(nextSnapshot);
+		});
+
+		runtime.setTransitionApertureDebugOverlayMode("outdoor-to-indoor");
+
+		expect(snapshots.at(-1)?.debugOverlays.transitionApertureMode).toBe(
+			"outdoor-to-indoor",
+		);
+		expect(renderer.debugOverlayUpdates.at(-1)).toEqual([]);
 
 		unsubscribe();
 		runtime.dispose();
@@ -234,7 +261,7 @@ describe("V2 client runtime", () => {
 				kind: "exterior",
 				landblockId: 0xda55ffff,
 			},
-			transitionDepthPolicy: { maxDepth: 5 },
+			transitionDepthPolicy: { maxDepth: 4 },
 		});
 
 		runtime.setCurrentCameraResidency({
@@ -248,7 +275,7 @@ describe("V2 client runtime", () => {
 				kind: "exterior",
 				landblockId: 0xdb55ffff,
 			},
-			transitionDepthPolicy: { maxDepth: 5 },
+			transitionDepthPolicy: { maxDepth: 4 },
 		});
 
 		runtime.dispose();
@@ -274,7 +301,7 @@ describe("V2 client runtime", () => {
 				kind: "exterior",
 				landblockId: 0xda55ffff,
 			},
-			transitionDepthPolicy: { maxDepth: 5 },
+			transitionDepthPolicy: { maxDepth: 4 },
 		});
 
 		runtime.dispose();

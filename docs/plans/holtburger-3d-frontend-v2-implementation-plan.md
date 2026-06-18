@@ -2545,7 +2545,7 @@ Spicy implementation notes:
 
 ### Immediate Phase 13B1h3: Evaluate Separate Mask Texture Compositor
 
-Status: implementation complete on 2026-06-17; manual visual validation pending.
+Status: closed/reverted on 2026-06-18.
 
 Purpose: determine whether a dedicated mask texture can replace stencil aperture masking without reintroducing shader-side depth authority. This first cut intentionally keeps all scene/composite depth targets packed as `DEPTH24_STENCIL8` so framebuffer depth blits remain stable; dropping unused source-scene stencil bits remains a later target-format question.
 
@@ -2582,17 +2582,101 @@ Implementation notes:
 - Whole-target recursive copies still use framebuffer depth blits. The failed fullscreen `gl_FragDepth` whole-target-copy experiment remains reverted.
 - Scene-domain targets still use `DEPTH24_STENCIL8` to keep depth blits format-compatible. This phase replaces stencil behavior, not the underlying packed target format.
 
-Validation:
+Validation during experiment:
 
 - `npm run test:ts -- src/v2/renderer/webgl2/webgl2-renderer.test.ts src/v2/renderer/transition-composite-work-plan.test.ts`
 - `npm run check`
 - `npm run lint:ts`
 - `npm run test:ts`
 
-Unclosed:
+Outcome:
 
-- Manual browser/Tauri visual validation is still needed for the original distance banding scene and nested transition portals.
-- The stencil-gated source scene copy still writes sampled source depth with `gl_FragDepth`, matching v1. It is no longer part of aperture coverage, but if any nested-depth artifacts remain, this is the next suspect to isolate.
+- The mask-texture experiment was rejected and reverted after visual validation.
+- Current V2 renderer direction is the stencil aperture mask compositor, not the
+  separate `R8` mask texture path.
+- The mask experiment remains documented because it proved the important
+  negative result: avoiding stencil by moving the aperture mask into a color
+  texture did not simplify the compositor enough to justify carrying a second
+  mask model.
+
+### Immediate Phase 13B1h4: Stencil Rollback And Transition Aperture Source Correction
+
+Status: complete on 2026-06-18.
+
+Purpose: return portal compositing to the stencil aperture mask approach after
+the mask-texture experiment, then fix the yellow duplicate transition portal
+artifacts discovered during visual validation.
+
+What landed:
+
+- Rolled V2 portal compositing back to the stencil-mask approach.
+- Kept scene-domain/composite targets on `DEPTH24_STENCIL8` so color/depth
+  transfer and stencil history stay format-compatible.
+- Retired the mask-texture compositor path as a failed experiment rather than
+  keeping two mask implementations alive.
+- Kept portal render-pass activation gated above the renderer. Runtime/static
+  scene state decides whether an indoor scene exists for a landblock; the
+  renderer executes the plan it is given and does not carry a last-resort
+  per-aperture readiness guard.
+- Moved landblock-building transition aperture geometry sourcing to the
+  outdoor landblock asset route. V2 now uses building-side
+  `GfxObj.drawing_bsp` `PortalPoly` records matched to `CBldPortal` metadata
+  for transition aperture masks.
+- Stopped using env-cell outside-transition `CCellPortal` aperture polygons as
+  mask-producing geometry for landblock-building transitions. Env-cell portal
+  data remains interior/source/debug metadata.
+- Corrected building portal winding: building `CBldPortal` flags describe the
+  building/outdoor side, while V2 transition aperture batches store
+  `frontFace: indoor-visible`, so building-side winding is inverted during
+  triangulation.
+- Added building-source metadata to transition aperture debug overlay ids:
+  building instance id, source `GfxObj` DID, `PortalPoly.portal_index`,
+  `PortalPoly.poly_id`, and matched building portal metadata.
+- Suppressed snapped-building module seams in the Rust outdoor asset assembler.
+  Prepared building transition aperture polygons are canonicalized by
+  quantized landblock-render-local points, cyclic rotation, and reversed order;
+  duplicate physical aperture groups are dropped before serialization.
+- The frontend payload remains focused on mask-eligible
+  `buildingTransitionApertures`. Suppressed seam groups are not serialized as
+  extra DTO/debug metadata.
+
+Evidence and validation:
+
+- The dedicated investigation is recorded in
+  [docs/plans/holtburger-3d-v2-transition-portal-duplicate-aperture-investigation.md](holtburger-3d-v2-transition-portal-duplicate-aperture-investigation.md).
+- Manual harness validation on landblock `0xf418ffff` showed the root cause was
+  not only env-cell fallback duplication. Building-sourced duplicate apertures
+  existed across different placed building `GfxObj` instances, likely snapped
+  modular-building seams.
+- Before seam suppression, `inspect_landblock_building_portals --landblock
+  f418ffff --portal-duplicates` reported `buildingTransitionApertures=35` and
+  `duplicateGroups=11`.
+- After seam suppression, the same harness reported
+  `buildingTransitionApertures=13` and `duplicateGroups=0`.
+- Synthetic Rust coverage verifies exact, rotated, reversed, and
+  reversed-rotated duplicate aperture keys, plus singleton and malformed
+  behavior, without asset-backed fixtures.
+- The relevant verification commands passed during this detour:
+  `cargo test -p holtburger-content`,
+  `cargo clippy -p holtburger-content -- -D warnings`,
+  `npm run --prefix apps/holtburger-3d test:ts`, and
+  `npm run --prefix apps/holtburger-3d check`.
+
+Course corrections:
+
+- Do not revive the separate mask-texture compositor unless a new WebGL2
+  constraint invalidates the stencil path. One production mask model is enough.
+- Do not reintroduce env-cell outside-transition aperture synthesis as a
+  fallback for landblock-building masks.
+- Do not rank duplicate building seam apertures by flags, linked env cells,
+  source order, or portal metadata. If multiple building sources emit the same
+  physical aperture key, the whole group is treated as an interior module seam
+  and removed from mask generation.
+- Do not add per-aperture linked-env-cell readiness gating. V2 currently renders
+  two scene domains, indoor and outdoor; portal pass activation is scene-level.
+- Bare non-building `outside` transitions still need a new explicit source
+  model later. They should not be smuggled back through the removed env-cell
+  mask fallback.
 
 ### Phase 13B2: Dungeon Anchoring And Interior Focus
 

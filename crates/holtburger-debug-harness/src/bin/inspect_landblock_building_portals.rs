@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler,
-    LandblockOutdoorAssetAssembler, PreparedVec3, normalize_landblock_id,
+    normalize_landblock_id, ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler,
+    LandblockOutdoorAssetAssembler, PreparedVec3,
 };
 use holtburger_dat::graphics::Frame;
 use std::collections::{BTreeMap, BTreeSet};
@@ -109,6 +109,10 @@ fn main() -> Result<()> {
     );
 
     if args.portal_duplicates {
+        report_duplicate_building_transition_apertures(
+            landblock_id,
+            &outdoor.building_transition_apertures,
+        );
         report_duplicate_transition_portal_linkage(
             landblock_id,
             &env_asset.env_cells,
@@ -117,6 +121,63 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn report_duplicate_building_transition_apertures(
+    landblock_id: u32,
+    apertures: &[holtburger_content::PreparedBuildingTransitionAperture],
+) {
+    let mut groups = BTreeMap::<String, Vec<BuildingTransitionApertureDump>>::new();
+    for aperture in apertures {
+        groups
+            .entry(canonical_point_set_key(&aperture.points))
+            .or_default()
+            .push(BuildingTransitionApertureDump {
+                aperture_id: aperture.aperture_id.clone(),
+                building_instance_id: aperture.building_instance_id.clone(),
+                building_portal_id: aperture.building_portal_id.clone(),
+                flags: aperture.flags,
+                linked_env_cell_ids: aperture.linked_env_cell_ids.clone(),
+                other_cell_id: aperture.other_cell_id,
+                other_portal_id: aperture.other_portal_id,
+                points: aperture.points.clone(),
+                poly_id: aperture.poly_id,
+                portal_index: aperture.portal_index,
+                source_did: aperture.source_did,
+            });
+    }
+
+    let duplicate_groups = groups
+        .values()
+        .filter(|group| group.len() > 1)
+        .collect::<Vec<_>>();
+    println!(
+        "duplicateBuildingTransitionApertureSummary landblock=0x{landblock_id:08x} buildingTransitionApertures={} duplicateGroups={}",
+        apertures.len(),
+        duplicate_groups.len()
+    );
+    for group in duplicate_groups {
+        println!(
+            "duplicateBuildingTransitionApertureGroup members={}",
+            group.len()
+        );
+        for member in group {
+            println!(
+                "  aperture={} building={} portal={} portalIndex={} polyId={} sourceDid=0x{:08x} flags=0x{:04x} otherCell=0x{:04x} otherPortal=0x{:04x} linkedEnvCells={} orderedKey={}",
+                member.aperture_id,
+                member.building_instance_id,
+                member.building_portal_id,
+                member.portal_index,
+                member.poly_id,
+                member.source_did,
+                member.flags,
+                member.other_cell_id,
+                member.other_portal_id,
+                format_env_cell_ids(member.linked_env_cell_ids.iter().copied()),
+                ordered_point_set_key(&member.points),
+            );
+        }
+    }
 }
 
 fn report_duplicate_transition_portal_linkage(
@@ -189,6 +250,21 @@ struct TransitionPortalApertureDump {
 }
 
 #[derive(Debug)]
+struct BuildingTransitionApertureDump {
+    aperture_id: String,
+    building_instance_id: String,
+    building_portal_id: String,
+    flags: u16,
+    linked_env_cell_ids: Vec<u32>,
+    other_cell_id: u16,
+    other_portal_id: u16,
+    points: Vec<PreparedVec3>,
+    poly_id: u16,
+    portal_index: i16,
+    source_did: u32,
+}
+
+#[derive(Debug)]
 struct EnvPortalSummary {
     flags: u16,
     is_outside_transition: bool,
@@ -199,6 +275,14 @@ fn canonical_point_set_key(points: &[PreparedVec3]) -> String {
     let mut point_keys = points.iter().map(canonical_point_key).collect::<Vec<_>>();
     point_keys.sort();
     point_keys.join("|")
+}
+
+fn ordered_point_set_key(points: &[PreparedVec3]) -> String {
+    points
+        .iter()
+        .map(canonical_point_key)
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 fn canonical_point_key(point: &PreparedVec3) -> String {

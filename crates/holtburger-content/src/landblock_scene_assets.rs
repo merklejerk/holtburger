@@ -9,10 +9,11 @@ use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE};
 use crate::material_variants::legacy_sampler_material_variant_signature;
 use crate::source_reader::ContentSourceReader;
 use crate::static_outdoor_scene::{StaticOutdoorScene, StaticOutdoorSceneAssembler};
-use crate::{ContentDecodeCache, ContentRepository, normalize_landblock_id};
+use crate::{normalize_landblock_id, ContentDecodeCache, ContentRepository};
 
 pub const LANDBLOCK_GRID_SIZE: usize = 9;
 pub const LANDBLOCK_TILE_SIZE: f32 = 24.0;
+const BUILDING_TRANSITION_APERTURE_KEY_SCALE: f32 = 1000.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LandblockClassification {
@@ -1466,7 +1467,7 @@ fn build_prepared_building_transition_apertures(
             ),
         }
     }
-    apertures
+    suppress_building_module_seam_transition_apertures(apertures)
 }
 
 fn build_building_transition_apertures_from_gfx_obj(
@@ -1600,6 +1601,99 @@ fn build_building_transition_apertures_from_gfx_obj(
         });
     }
     apertures
+}
+
+type QuantizedTransitionAperturePoint = (i64, i64, i64);
+
+fn suppress_building_module_seam_transition_apertures(
+    apertures: Vec<PreparedBuildingTransitionAperture>,
+) -> Vec<PreparedBuildingTransitionAperture> {
+    let mut key_counts = HashMap::<Vec<QuantizedTransitionAperturePoint>, usize>::new();
+    let aperture_keys = apertures
+        .iter()
+        .map(|aperture| {
+            quantized_building_transition_aperture_key(aperture).inspect(|key| {
+                *key_counts.entry(key.clone()).or_default() += 1;
+            })
+        })
+        .collect::<Vec<_>>();
+
+    apertures
+        .into_iter()
+        .zip(aperture_keys)
+        .filter_map(|(aperture, key)| match key {
+            Some(key) if key_counts.get(&key).copied().unwrap_or_default() > 1 => None,
+            _ => Some(aperture),
+        })
+        .collect()
+}
+
+fn quantized_building_transition_aperture_key(
+    aperture: &PreparedBuildingTransitionAperture,
+) -> Option<Vec<QuantizedTransitionAperturePoint>> {
+    canonical_cyclic_point_sequence_key(
+        &aperture
+            .points
+            .iter()
+            .map(quantize_transition_aperture_point)
+            .collect::<Vec<_>>(),
+    )
+}
+
+fn canonical_cyclic_point_sequence_key(
+    points: &[QuantizedTransitionAperturePoint],
+) -> Option<Vec<QuantizedTransitionAperturePoint>> {
+    if points.len() < 3 {
+        return None;
+    }
+
+    let forward = lexicographically_smallest_rotation(points);
+    let reversed_points = points.iter().copied().rev().collect::<Vec<_>>();
+    let reversed = lexicographically_smallest_rotation(&reversed_points);
+    if lexicographic_point_sequence_less(&reversed, &forward) {
+        Some(reversed)
+    } else {
+        Some(forward)
+    }
+}
+
+fn lexicographically_smallest_rotation(
+    points: &[QuantizedTransitionAperturePoint],
+) -> Vec<QuantizedTransitionAperturePoint> {
+    let mut best = rotated_point_sequence(points, 0);
+    for start in 1..points.len() {
+        let candidate = rotated_point_sequence(points, start);
+        if lexicographic_point_sequence_less(&candidate, &best) {
+            best = candidate;
+        }
+    }
+    best
+}
+
+fn rotated_point_sequence(
+    points: &[QuantizedTransitionAperturePoint],
+    start: usize,
+) -> Vec<QuantizedTransitionAperturePoint> {
+    points[start..]
+        .iter()
+        .chain(points[..start].iter())
+        .copied()
+        .collect()
+}
+
+fn lexicographic_point_sequence_less(
+    left: &[QuantizedTransitionAperturePoint],
+    right: &[QuantizedTransitionAperturePoint],
+) -> bool {
+    left < right
+}
+
+fn quantize_transition_aperture_point(point: &PreparedVec3) -> QuantizedTransitionAperturePoint {
+    (
+        (point.x * BUILDING_TRANSITION_APERTURE_KEY_SCALE).round() as i64,
+        (point.y * BUILDING_TRANSITION_APERTURE_KEY_SCALE).round() as i64,
+        (point.z * BUILDING_TRANSITION_APERTURE_KEY_SCALE).round() as i64,
+    )
 }
 
 fn collect_bsp_portal_polys<'a>(
@@ -3181,7 +3275,11 @@ fn render_vector_to_ac_space(vector: PreparedVec3) -> holtburger_common::Vector3
 
 fn scale_normal_component(value: f32, scale: f32) -> f32 {
     let scaled = value * scale;
-    if scaled == 0.0 { 0.0 } else { scaled }
+    if scaled == 0.0 {
+        0.0
+    } else {
+        scaled
+    }
 }
 
 fn normalize_surface_id(surface_id: i16) -> Option<i16> {
@@ -3319,6 +3417,136 @@ mod tests {
         assert_eq!(diagnostics.omissions[0].reason, "missing-building-portal");
     }
 
+    #[test]
+    fn building_transition_aperture_seam_suppression_drops_exact_duplicate_sources() {
+        let apertures = suppress_building_module_seam_transition_apertures(vec![
+            synthetic_transition_aperture("left", 0, test_aperture_points()),
+            synthetic_transition_aperture("right", 1, test_aperture_points()),
+        ]);
+
+        assert!(apertures.is_empty());
+    }
+
+    #[test]
+    fn building_transition_aperture_seam_suppression_drops_rotated_duplicate_sources() {
+        let mut rotated_points = test_aperture_points();
+        rotated_points.rotate_left(2);
+
+        let apertures = suppress_building_module_seam_transition_apertures(vec![
+            synthetic_transition_aperture("left", 0, test_aperture_points()),
+            synthetic_transition_aperture("right", 1, rotated_points),
+        ]);
+
+        assert!(apertures.is_empty());
+    }
+
+    #[test]
+    fn building_transition_aperture_seam_suppression_drops_reversed_duplicate_sources() {
+        let mut reversed_points = test_aperture_points();
+        reversed_points.reverse();
+
+        let apertures = suppress_building_module_seam_transition_apertures(vec![
+            synthetic_transition_aperture("left", 0, test_aperture_points()),
+            synthetic_transition_aperture("right", 1, reversed_points),
+        ]);
+
+        assert!(apertures.is_empty());
+    }
+
+    #[test]
+    fn building_transition_aperture_seam_suppression_drops_reversed_rotated_duplicate_sources() {
+        let mut reversed_rotated_points = test_aperture_points();
+        reversed_rotated_points.reverse();
+        reversed_rotated_points.rotate_left(1);
+
+        let apertures = suppress_building_module_seam_transition_apertures(vec![
+            synthetic_transition_aperture("left", 0, test_aperture_points()),
+            synthetic_transition_aperture("right", 1, reversed_rotated_points),
+        ]);
+
+        assert!(apertures.is_empty());
+    }
+
+    #[test]
+    fn building_transition_aperture_seam_suppression_keeps_singletons_in_order() {
+        let first_points = test_aperture_points();
+        let second_points = vec![
+            PreparedVec3 {
+                x: 10.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            PreparedVec3 {
+                x: 11.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            PreparedVec3 {
+                x: 11.0,
+                y: 1.0,
+                z: 0.0,
+            },
+            PreparedVec3 {
+                x: 10.0,
+                y: 1.0,
+                z: 0.0,
+            },
+        ];
+
+        let apertures = suppress_building_module_seam_transition_apertures(vec![
+            synthetic_transition_aperture("first", 0, first_points),
+            synthetic_transition_aperture("second", 1, second_points),
+        ]);
+
+        assert_eq!(
+            apertures
+                .iter()
+                .map(|aperture| aperture.aperture_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["first", "second"]
+        );
+    }
+
+    #[test]
+    fn building_transition_aperture_seam_suppression_keeps_malformed_apertures() {
+        let apertures = suppress_building_module_seam_transition_apertures(vec![
+            synthetic_transition_aperture(
+                "malformed-a",
+                0,
+                vec![
+                    PreparedVec3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    PreparedVec3 {
+                        x: 1.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                ],
+            ),
+            synthetic_transition_aperture(
+                "malformed-b",
+                1,
+                vec![
+                    PreparedVec3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    PreparedVec3 {
+                        x: 1.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                ],
+            ),
+        ]);
+
+        assert_eq!(apertures.len(), 2);
+    }
+
     #[derive(Debug)]
     struct CountingSource {
         files: HashMap<(String, u32), Vec<u8>>,
@@ -3426,6 +3654,53 @@ mod tests {
             })),
             did_degrade: None,
         }
+    }
+
+    fn synthetic_transition_aperture(
+        aperture_id: &str,
+        source_index: usize,
+        points: Vec<PreparedVec3>,
+    ) -> PreparedBuildingTransitionAperture {
+        PreparedBuildingTransitionAperture {
+            aperture_id: aperture_id.to_string(),
+            building_instance_id: format!("building-{source_index}"),
+            source_did: 0x0100_1234 + source_index as u32,
+            source_asset_id: format!("gfx-obj/{:08x}", 0x0100_1234 + source_index as u32),
+            portal_index: source_index as i16,
+            poly_id: 7,
+            building_portal_id: format!("building-{source_index}/portal/0000"),
+            building_portal_source_index: source_index,
+            flags: 0x0001,
+            other_cell_id: 0xffff,
+            other_portal_id: 0xffff,
+            linked_env_cell_ids: Vec::new(),
+            points,
+        }
+    }
+
+    fn test_aperture_points() -> Vec<PreparedVec3> {
+        vec![
+            PreparedVec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            PreparedVec3 {
+                x: 2.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            PreparedVec3 {
+                x: 2.0,
+                y: 3.0,
+                z: 0.0,
+            },
+            PreparedVec3 {
+                x: 0.0,
+                y: 3.0,
+                z: 0.0,
+            },
+        ]
     }
 
     fn synthetic_vertex(origin: Vector3) -> SWVertex {

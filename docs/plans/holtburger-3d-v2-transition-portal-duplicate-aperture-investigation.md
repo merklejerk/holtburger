@@ -405,6 +405,89 @@ Phased execution:
      future non-building outside transition support needs a new explicit source
      model rather than reviving env-cell fallback synthesis.
 
+5. Building module seam suppression - complete
+
+   - Detect duplicate building-sourced transition aperture polygons after all
+     outdoor building aperture records for a landblock have been prepared in
+     the Rust outdoor asset assembler.
+   - Implementation insertion point: in
+     `build_prepared_building_transition_apertures`, collect all apertures from
+     `build_building_transition_apertures_from_gfx_obj` exactly as Phase 2 does
+     today, then pass the completed vector through a seam-suppression helper
+     before returning it to `LandblockOutdoorAsset.building_transition_apertures`.
+   - Use a fast canonical cyclic polygon key, not pairwise overlap testing:
+     quantize each landblock-render-local point, compute the smallest
+     lexicographic rotation of the ordered vertex sequence, compute the same for
+     the reversed sequence, and use the smaller sequence as the physical
+     aperture key.
+   - Implement the key as pure Rust helpers near the existing building aperture
+     extraction code:
+     `quantized_building_transition_aperture_key`,
+     `canonical_cyclic_point_sequence_key`, and a small lexicographic sequence
+     comparator over quantized `(x, y, z)` integer tuples.
+   - Treat canonical groups with more than one building aperture source as
+     snapped-building module seams rather than outdoor transition masks.
+   - Emit only singleton canonical groups in the outdoor asset
+     `building_transition_apertures` / frontend `buildingTransitionApertures`
+     payload.
+   - Drop multi-source seam groups inside the assembler. Do not serialize
+     suppressed seam groups or duplicate source metadata to the frontend.
+   - Do not add new DTO fields, TypeScript contract fields, renderer resource
+     fields, or frontend dedupe code. The existing frontend contract should keep
+     seeing only `buildingTransitionApertures`.
+   - Keep downstream V2 static bake, renderer, and debug overlay code unchanged;
+     they should only ever receive mask-eligible outdoor transition apertures.
+   - Synthetic Rust coverage:
+     - exact same ordered points collapse to zero emitted apertures for a
+       two-source seam group;
+     - rotated point order collapses to zero emitted apertures;
+     - reversed point order collapses to zero emitted apertures;
+     - two singleton physical apertures both survive;
+     - malformed apertures with fewer than three points are not considered seam
+       candidates beyond existing omission behavior.
+   - Manual validation command:
+     `cargo run -p holtburger-debug-harness --bin
+     inspect_landblock_building_portals -- --landblock f418ffff
+     --portal-duplicates`. Before the Phase 5 filter, the harness reports
+     `buildingTransitionApertures=35 duplicateGroups=11`; after the filter, the
+     outdoor payload should contain only singleton mask candidates, and the
+     duplicate yellow overlay groups should disappear from V2.
+   - Completed diagnostic: `inspect_landblock_building_portals
+     --portal-duplicates` now reports building-only duplicate aperture groups.
+     For `0xf418ffff`, it reports `buildingTransitionApertures=35` and
+     `duplicateGroups=11`.
+   - Spicy implementation note: these duplicate building apertures are likely
+     intentional modular-building seams. Several pairs come from different
+     building instances/source `GfxObj` ids, with opposite portal-side flags and
+     disjoint linked env-cell groups, and only become identical after landblock
+     placement snaps the modules together.
+   - Spicy implementation note: raw ordered points are not sufficient as the
+     duplicate key. Some duplicate groups have identical ordered point
+     sequences, but others are rotated or reversed. The key must be cyclic and
+     reversal invariant.
+   - Completed: `LandblockOutdoorAssetAssembler` now filters prepared building
+     transition apertures through a canonical cyclic polygon key before
+     serializing `building_transition_apertures`.
+   - Completed: duplicate canonical groups are dropped inside the Rust
+     assembler. No suppressed seam metadata, duplicate-source records, DTO
+     fields, renderer fields, or frontend dedupe paths were added.
+   - Completed: the key quantizes transformed landblock-render-local points to
+     `0.001`, computes the lexicographically smallest rotation for the forward
+     point order and reversed point order, and uses the smaller sequence.
+   - Completed: synthetic Rust coverage verifies exact duplicate, rotated,
+     reversed, singleton-preserving, and malformed-aperture behavior without
+     runtime DAT/HBA fixtures.
+   - Manual validation: after the Phase 5 filter,
+     `inspect_landblock_building_portals --landblock f418ffff
+     --portal-duplicates` reports `buildingTransitionApertures=13` and
+     `duplicateGroups=0`. Before filtering, the same landblock reported
+     `buildingTransitionApertures=35` and `duplicateGroups=11`.
+   - Spicy implementation note: the filter intentionally has no "winner." If
+     multiple building sources emit the same physical aperture key, the whole
+     group is treated as a snapped-module seam and removed from mask
+     generation. Ranking by flags, linked env cells, or source order would
+     reintroduce an accidental outdoor aperture at an interior module join.
+
 Concrete scope:
 
 - Extend the Rust outdoor landblock asset assembly path
@@ -446,9 +529,9 @@ Concrete scope:
 - Keep renderer resource lifetime tied to outdoor landblock residency for
   building-sourced aperture masks. The aperture mask may be resident before the
   target env-cell/interior scene is resident.
-- Gate actual transition compositing on destination scene readiness. A resident
-  outdoor aperture mask must not cause an empty or stale interior scene to be
-  composited through it.
+- Gate portal render-pass activation in runtime/static scene state. A resident
+  outdoor aperture mask must not enable portal compositing unless an indoor
+  scene exists for the relevant landblock.
 - Stop using env-cell outside-transition `CCellPortal` aperture polygons as
   transition aperture mask geometry for landblock-building transitions.
 - Remove the legacy env-cell-derived transition aperture query path for
@@ -457,6 +540,9 @@ Concrete scope:
 - Keep env-cell portal records available as metadata/debug data, but do not let
   them create additional V2 transition aperture ranges for the same
   landblock-building aperture.
+- Suppress duplicate building-sourced physical aperture groups in the Rust
+  outdoor asset assembler before serialization, because those groups are
+  building-module seams rather than outdoor transition openings.
 - Update transition aperture debug overlay/details to report building-source
   metadata for landblock-building apertures. Do not label these masks as owned
   by an env-cell portal, though matched env-cell ids/portals may be shown as
@@ -477,8 +563,14 @@ Acceptance criteria:
 - If no outdoor-building transition aperture batch is committed for a
   landblock, V2 must not synthesize landblock-building transition mask ranges
   from env-cell outside-transition `CCellPortal` aperture polygons.
-- If the destination interior/env-cell scene is not resident, the renderer keeps
-  the aperture resource resident but skips compositing through it.
+- If no indoor scene is committed for the relevant landblock, `ClientRuntime`
+  keeps the renderer on `single-surface-resident` instead of asking the renderer
+  to perform portal compositing.
+- For landblock `0xf418ffff`, duplicate building-sourced physical aperture
+  groups detected by the canonical cyclic polygon key are absent from
+  `buildingTransitionApertures` and therefore never emit compositor mask ranges.
+- The canonical duplicate key catches identical, rotated, reversed, and
+  reversed-rotated point orderings after quantization.
 - If a building `PortalPoly.portal_index` cannot be matched to a `CBldPortal`,
   omit that aperture with a debug-only omission reason rather than falling back
   silently to env-cell aperture geometry.
@@ -493,6 +585,14 @@ Non-goals for this step:
 - Do not implement env-cell aperture dedupe as a fallback in this same change.
 - Do not retain env-cell outside-transition aperture synthesis as a compatibility
   fallback for landblock-building masks.
+- Do not use pairwise polygon overlap/intersection tests for building seam
+  suppression. Use exact canonicalized transformed aperture identity.
+- Do not rank duplicate seam members with flags, `other_cell_id`,
+  `other_portal_id`, or linked env-cell lists. Those metadata fields describe
+  the building module source and are not reliable winner signals.
+- Do not serialize suppressed seam groups or duplicate source metadata to the
+  frontend. The frontend payload should stay focused on mask-eligible outdoor
+  transition apertures.
 - Do not expose raw building `GfxObj.drawing_bsp` traversal as V2 frontend
   transition aperture policy.
 - Do not use V1 behavior as an authority for this implementation. Use retail
@@ -500,7 +600,7 @@ Non-goals for this step:
 - Do not add asset-backed fixture tests for `0xf418ffff`; keep that landblock
   as a manual/debug-harness validation case.
 
-Remaining work after Phase 4:
+Remaining work after Phase 5:
 
 - Decide whether the debug UI needs a richer transition aperture details panel.
   Phase 4 updates overlay primitive ids with building-source metadata, but does

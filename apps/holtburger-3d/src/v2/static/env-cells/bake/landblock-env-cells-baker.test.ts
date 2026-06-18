@@ -777,6 +777,25 @@ describe("V2 landblock env-cell baker", () => {
 				kind: "env-cell-static-object-seed",
 			}),
 		]);
+		expect(result.staticSpatialRecords).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					envCellId: 0xda550100,
+					kind: "env-cell-spatial",
+					landblockId: 0xda55ffff,
+				}),
+				expect.objectContaining({
+					bounds: {
+						max: { x: 2, y: 4, z: -2 },
+						min: { x: 1, y: 3, z: -2 },
+					},
+					envCellId: 0xda550100,
+					instanceId: "da550100:env-cell-static-0",
+					kind: "env-cell-static-object-bounds",
+					landblockId: 0xda55ffff,
+				}),
+			]),
+		);
 	});
 
 	it("bakes env-cell static seed rotation without applying the containing cell frame", () => {

@@ -100,6 +100,22 @@ describe("V2 static materializer", () => {
 		const materialized = materializeStaticCommit({
 			commit: createCommitDelta({
 				addedDrawUnits: [drawUnit],
+				staticSpatialRecords: [
+					{
+						bounds: {
+							max: { x: 2, y: 3, z: 4 },
+							min: { x: 1, y: 2, z: 3 },
+						},
+						envCellId: 0xda550100,
+						instanceId: "da550100:env-cell-static-0",
+						kind: "env-cell-static-object-bounds",
+						landblockId: 0xda55ffff,
+						owner: {
+							drawUnitId: "static-table",
+							kind: "draw-unit",
+						},
+					},
+				],
 				textureUses: drawUnit.textureUseIds.map((textureUseId) =>
 					createBakeTextureUse(
 						drawUnit.drawUnitId,
@@ -180,6 +196,20 @@ describe("V2 static materializer", () => {
 			[{ materialSlot: 0, polygonRange: { max: 4, min: 4 } }],
 		]);
 		expect(materialized.staticSpatialRecords).toEqual([
+			{
+				bounds: {
+					max: { x: 2, y: 3, z: 4 },
+					min: { x: 1, y: 2, z: 3 },
+				},
+				envCellId: 0xda550100,
+				instanceId: "da550100:env-cell-static-0",
+				kind: "env-cell-static-object-bounds",
+				landblockId: 0xda55ffff,
+				owner: {
+					drawUnitId: "static-table",
+					kind: "draw-unit",
+				},
+			},
 			{
 				drawUnitId: "static-table",
 				kind: "draw-unit-bounds",
@@ -268,6 +298,7 @@ describe("V2 static materializer", () => {
 function createCommitDelta(options: {
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
 	readonly addedTransitionApertureBatches?: readonly TransitionApertureBatch[];
+	readonly staticSpatialRecords?: StaticCoordinatorCommitDelta["staticSpatialRecords"];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 }): StaticCoordinatorCommitDelta {
 	return {
@@ -281,7 +312,7 @@ function createCommitDelta(options: {
 		staticBatchId: "batch-a",
 		staticPortalInteriorRecords: [],
 		staticSourceMappings: [],
-		staticSpatialRecords: [],
+		staticSpatialRecords: options.staticSpatialRecords ?? [],
 		staticVisibilityRecords: [],
 		textureUses: options.textureUses,
 	};

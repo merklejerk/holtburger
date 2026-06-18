@@ -326,6 +326,10 @@ export interface ClientRuntime {
 		readonly outdoorAnchorLandblockId: number;
 		readonly point: Vec3;
 	}): RuntimeCameraResidency;
+	queryCameraResidencyAtLandblockPoint(options: {
+		readonly landblockId: number;
+		readonly point: Vec3;
+	}): RuntimeCameraResidency;
 	setCurrentCameraResidency(residency: RuntimeCameraResidency): void;
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null;
 	createStaticSelectionDiagnosticsReport(
@@ -513,6 +517,14 @@ class ClientRuntimeImpl implements ClientRuntime {
 	}): RuntimeCameraResidency {
 		this.#assertActive();
 		return this.#staticSceneQuery.queryCameraResidencyAtPoint(options);
+	}
+
+	queryCameraResidencyAtLandblockPoint(options: {
+		readonly landblockId: number;
+		readonly point: Vec3;
+	}): RuntimeCameraResidency {
+		this.#assertActive();
+		return this.#staticSceneQuery.queryCameraResidencyAtLandblockPoint(options);
 	}
 
 	setCurrentCameraResidency(residency: RuntimeCameraResidency): void {

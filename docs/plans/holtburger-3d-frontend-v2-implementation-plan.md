@@ -2680,26 +2680,144 @@ Course corrections:
 
 ### Phase 13B2: Dungeon Anchoring And Interior Focus
 
-Status: planned.
+Status: planned group; tightened and split on 2026-06-18 after code/design audit and user dungeon bug reports.
 
-Purpose: define renderer-local placement, camera focus, and scene anchoring for true dungeon/interior inspection after first structured-interior pixels work.
+Purpose: make pure dungeon/interior inspection debuggable and reliable without inventing a second anchoring architecture.
+
+Audit result:
+
+- A new dungeon anchor model is probably not necessary. The existing V2 contract already supports pure interior focus by setting `sceneInterest.kind = "interior-cell"`, retaining exactly one `landblock-env-cells` scope, setting the render anchor to `null`, and using the selected env cell as explicit camera residency.
+- `createOutdoorLandblockRootTranslation(landblockId, null)` intentionally returns zero translation, so pure dungeon mode is currently landblock-local. That matches how Phase 13A bakes env-cell cell-structure and seed geometry into landblock-render-local positions.
+- Browser V2 already parses dungeon landblock/cell inputs, disables follow mode for interiors, submits `interior-cell` scene interest, and forces `RuntimeCameraResidency.kind = "env-cell"` for the selected cell.
+- Runtime already derives an interior base `portal-scene-domains` plan from explicit env-cell residency once the landblock has committed portal/interior scene records.
+- Static scene query and debug overlays already translate committed env-cell bounds through the current anchor policy. With a null anchor, env-cell debug bounds remain in the same landblock-local frame as structured-interior renderer resources.
+- The missing piece is not "how should dungeon anchoring work." The missing piece is proving and exposing this null-anchor interior-focus path clearly enough that visual verification is not done from a random outdoor camera pose.
+
+User-observed dungeon issues that must drive this phase:
+
+- Dungeon picking does not work or works inconsistently.
+- Camera env-cell residency does not appear to update reliably. This may share a root cause with picking if env-cell BVH records are queried in the wrong coordinate frame or if accepted-cell filtering is too narrow.
+- Dungeon/browser mode renders static-object-looking markers near normal retail player spawn locations. Retail does not visibly render these markers. Because picking is unreliable, the exact source ids are not yet identified.
+
+Initial code audit findings for those issues:
+
+- `StaticSceneQuery.queryCameraResidencyAtPoint` converts an outdoor-anchor render-local camera point into the candidate landblock's local frame before testing the landblock env-cell BVH. Pure dungeon mode bypasses that query today by setting explicit env-cell residency from the submitted location.
+- Env-cell picking currently only selects env-cell static object seed bounds. It does not pick structured-interior cell-structure geometry, so clicking dungeon walls/floors can return no hit even when rendering is correct.
+- Env-cell picking traverses `EnvCellLandblockBvhRoot` with the raw render-local ray. Outdoor/terrain roots translate the ray into root-local space before BVH traversal. Env-cell picking must be audited/fixed to use the same root-translation model, especially for outdoor-anchored interior views and neighboring retained landblocks.
+- Env-cell static object seeds come from `EnvCell.static_objects` / `Stab` records. ACE/ACViewer instantiate these as env-cell static physics objects, so they cannot be blanket-deleted without evidence. The suspicious marker case needs source-id diagnostics and retail/ACE/ACViewer comparison before filtering or reclassifying.
+
+Split rationale:
+
+- Query/picking/residency correctness can be proven with deterministic TypeScript tests and should land first.
+- Camera focus ergonomics are useful once query records are trustworthy, but they should not be mixed into semantic picking fixes.
+- Suspicious spawn-marker-looking static objects need manual probing and retail/browser comparison. They should be a diagnostics-and-validation phase, not a hidden filter slipped into the query/focus work.
 
 Steering:
 
-- Existing runtime anchor/rebase policy is outdoor-landblock oriented. Phase 13A bakes env-cell local placement into landblock-render-local positions; dungeon focus must decide how owning landblock placement, interior focus, and portal visibility compose before deeper visual verification.
-- Dungeon landblocks should continue to use the landblock env-cell source path rather than a separate renderer architecture.
-- Build on Phase 13B1c's explicit camera residency input. Dungeon focus may set residency directly; it should not require the renderer to infer residency from uploaded resources.
+- Keep dungeon/interior focus as a runtime/browser policy over existing contracts:
+  - interior scene interest retains a landblock-owned `landblock-env-cells` scope;
+  - render anchor is `null`;
+  - selected/current env cell is explicit camera residency;
+  - renderer receives the same static resources and draw-domain plan it already understands.
+- Do not add a `dungeon-anchor`, env-cell-root renderer API, or renderer-side policy for choosing dungeon focus. Renderer still consumes frame state, static resources, static render anchor, and render pass plan.
+- Do not make the renderer infer camera residency from uploaded env-cell resources. Browser/client input or runtime query APIs own residency.
+- Do not require portal traversal to complete before pure dungeon inspection works. It is enough for the selected/focused env cell to draw in the interior/single-surface path with correct placement.
+- Treat camera placement as the real UX gap. The current default free-camera pose is outdoor-oriented and may miss or look away from small/offset env cells. Add a deterministic focus target derived from committed env-cell query/debug records instead of hardcoding a dungeon camera pose.
+- Treat picking/residency correctness as prerequisite work before relying on picker-driven diagnostics for the marker issue.
+- Do not hide suspicious env-cell STAB/static seeds as a quick visual workaround. First expose their source DIDs, setup/gfx identity, env-cell id, placement, and source mapping through diagnostics/picking/debug labels. Then decide whether they are renderable statics, gameplay markers, collision-only objects, or dynamic/server-owned seeds.
+
+Group acceptance:
+
+- A named dungeon/interior target can be loaded through the `landblock-env-cells` pipeline, focused in the V2 harness, and inspected without outdoor terrain/building/detail work.
+- Runtime diagnostics show `sceneInterest = interior-cell`, `renderAnchorLandblockId = null`, and `currentCameraResidency.kind = env-cell` for the focused target.
+- Env-cell AABB/debug selection overlays line up with rendered structured-interior/static-seed geometry under null anchor.
+- Picking works for the visible dungeon geometry needed to inspect these issues: structured-interior cell geometry if rendered, env-cell static seed objects if present, and source diagnostics for whichever was hit.
+- Camera residency can be proven from committed env-cell records in both pure dungeon/null-anchor mode and outdoor-anchored transition views, or the remaining limitation is explicit and does not block pure dungeon inspection.
+- Suspicious spawn-marker-looking statics are either identified and correctly filtered/reclassified, or retained with documented evidence that they are legitimate DAT/ACE-visible static objects.
+- Clearing or changing focus evicts/replaces the old landblock env-cell scope without leaving stale focus status, debug overlays, or camera residency claims.
+- No new renderer anchoring API or dungeon-specific renderer architecture is introduced.
+
+#### Phase 13B2a: Env-Cell Query, Picking, And Residency Correctness
+
+Status: partially implemented on 2026-06-18.
+
+Purpose: fix and prove the semantic query layer before using it for manual dungeon diagnostics.
 
 Deliverables:
 
-- Dungeon/interior anchoring and renderer-local placement policy consistent with the runtime-owned scene anchor model.
-- Targeted harness controls for dungeon/env-cell loading and focus changes.
-- Tests or deterministic diagnostics proving runtime, renderer, and debug overlay agree on env-cell placement after selection, anchor/focus changes, and eviction.
+- Done on 2026-06-18: env-cell BVH point/ray query tests for dungeon landblock-local focus, outdoor-anchor focus, and neighboring retained landblocks.
+- Done on 2026-06-18: env-cell picking fixed to use the same root-local translation model as terrain/outdoor static roots, with render-frame hit points/bounds returned to callers.
+- Still pending: structured-interior cell-structure picking support, or an explicit temporary diagnostic/report path proving static seed picking is the only implemented env-cell pick target.
+- Runtime tests proving:
+  - `interior-cell` scene interest sets render anchor to `null` and requests only `landblock-env-cells`;
+  - explicit env-cell camera residency produces the expected interior render-pass base once portal/interior records are committed;
+  - clearing/evicting the interior scope removes committed env-cell records and does not leave stale camera residency claims.
+- Done on 2026-06-18: `StaticSceneQuery.queryCameraResidencyAtPoint` and `pickStaticRay` agree on env-cell identity for the same neighboring committed env-cell bounds in outdoor-anchor context.
+- Done on 2026-06-18: added `queryCameraResidencyAtLandblockPoint` for pure dungeon/null-anchor landblock-local camera residency and wired Browser V2 interior mode to query it before falling back to the submitted env cell.
 
 Acceptance criteria:
 
-- Runtime, renderer, and debug overlay agree on env-cell placement after selection, anchor/focus changes, and eviction.
-- A named dungeon/interior target can be loaded through the env-cell bundle pipeline without a separate renderer architecture.
+- Done for committed env-cell static seed bounds; still pending for structured-interior geometry pick targets.
+- Done for committed env-cell static seed ray queries and env-cell point queries under dungeon landblock-local and outdoor-anchor frames.
+- Runtime, `StaticSceneQuery`, and debug overlay bounds agree on env-cell placement after selection, anchor changes, and eviction.
+- No renderer-owned picking or AC source-identity logic is added.
+
+Implementation notes from 2026-06-18:
+
+- The dungeon debug UX was misleading because Browser V2 reported the submitted env cell directly in interior mode instead of exercising the query layer. Browser V2 now asks the runtime for landblock-local camera residency and only falls back to the submitted env cell if that query misses.
+- The concrete picking bug was coordinate-frame drift: env-cell broad BVH traversal used the raw render-local ray, while terrain/outdoor roots translate rays into root-local space before traversal. Env-cell picking now follows the same model and translates returned bounds back into render-local space.
+- A second explicit-object picking bug was isolated through browser/runtime diagnostics: env-cell static seed draw units rendered, but `bakeLandblockEnvCells` dropped the nested static-object baker's `env-cell-static-object-bounds` spatial records. The baker now forwards those records, and a regression test proves renderable env-cell static seeds emit pick bounds.
+- A third record-lifecycle bug was then exposed: the runtime materializer fine-splits static object draw units, drops source draw-unit-owned peer records, and previously only re-added split draw-unit bounds. It now remaps draw-unit-owned `env-cell-static-object-bounds` records to a materialized draw-unit owner so they survive texture/material fine-splitting and still evict with the materialized draw unit.
+- This intentionally does not make walls/floors pickable. Current env-cell picking targets committed env-cell static seed bounds only.
+
+#### Phase 13B2b: Dungeon Camera Focus Controls
+
+Status: planned; depends on 13B2a.
+
+Purpose: make pure dungeon inspection ergonomic once committed env-cell query records can be trusted.
+
+Deliverables:
+
+- Runtime/query API or browser-local helper to derive an interior camera focus target from committed env-cell bounds for a requested `{ landblockId, envCellId }`. Prefer reusing `StaticSceneQuery` committed records; do not read prepared assets or renderer resources.
+- Browser V2 harness behavior for dungeon focus:
+  - when a dungeon/interior location is submitted and committed bounds are available, provide a deterministic "focus selected env cell" action or automatic first-focus behavior that moves the free camera to a useful inspectable pose;
+  - keep manual camera control authoritative once the user has moved the camera;
+  - expose enough status to tell whether the selected env cell has committed bounds, is missing, or was evicted.
+- Documentation or code comments, near the implementation if code changes are needed, recording the null-anchor pure-interior policy:
+  - `interior-cell` scene interest means one landblock-local env-cell scope;
+  - anchor `null` means no outdoor landblock offset;
+  - camera residency carries the focused env cell;
+  - outdoor transition compositing remains render-pass-plan driven and scene-level.
+
+Acceptance criteria:
+
+- A named dungeon/interior target can be loaded, focused, and inspected from a useful camera pose without outdoor terrain/building/detail work.
+- Manual camera movement is not overridden after the user takes control.
+- Focus status distinguishes committed bounds, missing bounds, and evicted/cleared focus.
+- No follow-mode landblock rebase behavior is introduced for pure dungeon focus.
+
+#### Phase 13B2c: Env-Cell Static Seed Marker Diagnostics And Validation
+
+Status: planned; depends on 13B2a and requires manual browser/retail validation.
+
+Purpose: identify the suspicious spawn-marker-looking dungeon statics before deciding whether to render, filter, or reclassify them.
+
+Deliverables:
+
+- Browser/runtime diagnostics sufficient to identify visible env-cell STAB/static-seed source DIDs, setup/gfx identity, owning env cell, placement, and source mapping from picker hits or explicit debug labels.
+- A named manual validation target where the browser-visible marker can be compared against retail and, where useful, ACE/ACViewer behavior.
+- A plan update after manual validation that records the decision:
+  - keep as legitimate renderable DAT static;
+  - filter as non-renderable gameplay/collision marker;
+  - move/reclassify as static-authored dynamic/server-owned seed work;
+  - or defer because evidence is inconclusive.
+- If suppression/reclassification is correct, implement it as a typed source classification/filter with tests, not as a renderer-only visual skip.
+
+Acceptance criteria:
+
+- The suspicious marker object can be identified by source DID and owning env cell from browser diagnostics.
+- The render/filter/reclassify decision is backed by manual retail/browser evidence and at least one source-code/reference check.
+- Any code change from the decision has focused tests and does not hide unrelated env-cell static seeds.
 
 ### Phase 13B3: Interior Visual Parity And Portal Verification
 

@@ -116,7 +116,7 @@ export function bakeLandblockEnvCells(
 		),
 		staticSpatialRecords: itemResults.flatMap(
 			(result) => result.staticSpatialRecords,
-		),
+		).concat(staticObjectResult.staticSpatialRecords),
 		staticVisibilityRecords: itemResults.flatMap(
 			(result) => result.staticVisibilityRecords,
 		),

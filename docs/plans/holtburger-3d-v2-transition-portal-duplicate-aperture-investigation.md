@@ -274,24 +274,142 @@ This does not necessarily require many draw calls. It does require the composito
 
 7. Can duplicate physical apertures occur across landblocks, or only between env cells within the same landblock env-cell asset?
 
-## Recommended Next Investigation
+## Implementation Step
 
-Before changing production compositor behavior, inspect V1's portal rendering path for this exact case.
+Replace V2 transition aperture geometry sourcing with building-side portal
+geometry for landblock-building transitions, surfaced through the outdoor
+landblock asset route.
 
-Targets:
+Phased execution:
 
-- V1 transition portal candidate/work-item generation.
-- How V1 maps env-cell portals to portal masks.
-- Whether V1 dedupes physical apertures.
-- Whether V1 selects portal masks by current camera residency/frontier rather than by all transition records.
-- Whether V1 treats the `0x0005` / `0x0007` pair as one physical opening with two logical sides.
+1. Rust outdoor payload shape
 
-Recommended V2 follow-up:
+   - Extend `LandblockOutdoorAsset` with prepared building transition aperture
+     records.
+   - Extend host JSON/binary contracts and TypeScript DTOs to carry the
+     prepared records.
+   - Use synthetic unit tests only. Do not add tests that require repo-local or
+     user-local runtime DAT/HBA assets.
 
-- Add a non-durable debug inspection path for selected transition aperture range id, env cell id, portal id, flags, and canonical physical aperture key.
-- Consider adding baker-level duplicate grouping for transformed outside-transition apertures.
-- Keep duplicate grouping as structural data if the compositor needs source env-cell metadata for frontier decisions.
-- Avoid storing this as durable diagnostics. This is runtime/debug inspection data, not operational health history.
+2. Building `PortalPoly` extraction
+
+   - In `LandblockOutdoorAssetAssembler`, load each outdoor building instance's
+     source `GfxObj` and walk `drawing_bsp` `PortalPoly` records.
+   - Resolve `PortalPoly.portal_index` to the building instance's `CBldPortal`
+     metadata and `PortalPoly.poly_id` to the source drawing polygon.
+   - Transform polygon points into landblock render-local space.
+   - Omit mismatches with debug diagnostics instead of falling back to env-cell
+     aperture geometry.
+   - Validate manually with the debug harness against `0xf418ffff`; do not
+     check in an asset-backed fixture test.
+
+3. V2 static commit route
+
+   - Emit building-sourced `TransitionApertureBatch` resources from the outdoor
+     static/building bake path.
+   - Move transition aperture retention keys for these resources to the
+     `outdoor-buildings` domain instead of `landblock-env-cells`.
+   - Update filtering/eviction so outdoor-sourced aperture batches survive and
+     expire with outdoor building residency.
+   - Replace mandatory env-cell ownership in `TransitionApertureRange` with a
+     source variant that can represent building-owned apertures.
+
+4. Renderer and debug behavior
+
+   - Keep the WebGL aperture resource upload path batch-oriented.
+   - Gate compositing through a resident building aperture on destination
+     interior/env-cell scene readiness.
+   - Update debug overlay/details to describe building-source metadata for
+     landblock-building apertures.
+   - Stop treating env-cell outside-transition apertures as mask-producing
+     ranges for landblock-building transitions.
+
+Concrete scope:
+
+- Extend the Rust outdoor landblock asset assembly path
+  (`LandblockOutdoorAssetAssembler` / host serialization) to emit prepared
+  building transition aperture records for each outdoor building instance.
+- In Rust, extract transition aperture polygons from each outdoor building
+  instance's source `GfxObj.drawing_bsp` `PortalPoly` records. Do not make the
+  V2 frontend reconstruct transition apertures from raw `GfxObj` BSP data.
+- Treat `PortalPoly.portal_index` as the index into the landblock `BuildInfo`
+  / `CBldPortal` list for that building instance. Validate this mapping against
+  `0xf418ffff` before relying on it globally.
+- Transform the referenced `PortalPoly.poly_id` polygon points from building
+  model space through the building instance placement into landblock
+  render-local space.
+- Use the matched `CBldPortal` record only for transition metadata:
+  building portal id, flags, `other_cell_id`, `other_portal_id`, and `stab_list`
+  / linked env-cell ids.
+- Serialize the prepared building transition aperture records to the frontend
+  with landblock-render-local vertices or polygon points plus source metadata:
+  building instance id, source `GfxObj` id, `PortalPoly.portal_index`,
+  `PortalPoly.poly_id`, matched `CBldPortal` id/index, flags,
+  `other_cell_id`, `other_portal_id`, and linked env-cell ids.
+- Update V2 transition aperture batch derivation to consume these outdoor
+  building transition aperture records for `landblock-building` transitions.
+- Bake and commit landblock-building transition aperture data independently of
+  landblock env-cell records. The outdoor landblock asset owns physical
+  building aperture geometry; env-cell assets own interior geometry, visibility,
+  and env-cell portal metadata.
+- Add a V2 committed static record/resource path for outdoor-sourced transition
+  apertures, or emit `TransitionApertureBatch` resources directly from the
+  outdoor landblock asset path. Do not require `StaticPortalInteriorRecord` /
+  landblock env-cell commitment before building transition aperture masks can
+  exist.
+- Update `TransitionApertureRange` metadata for landblock-building apertures so
+  it does not require `envCellId` as the primary owner. Store building/source
+  identity (`buildingInstanceId`, `buildingPortalId`, source `GfxObj` id,
+  `PortalPoly.portal_index`, `PortalPoly.poly_id`) plus matched `CBldPortal`
+  metadata (`other_cell_id`, `other_portal_id`, linked env-cell ids).
+- Keep renderer resource lifetime tied to outdoor landblock residency for
+  building-sourced aperture masks. The aperture mask may be resident before the
+  target env-cell/interior scene is resident.
+- Gate actual transition compositing on destination scene readiness. A resident
+  outdoor aperture mask must not cause an empty or stale interior scene to be
+  composited through it.
+- Stop using env-cell outside-transition `CCellPortal` aperture polygons as
+  transition aperture mask geometry for landblock-building transitions.
+- Keep env-cell portal records available as metadata/debug data, but do not let
+  them create additional V2 transition aperture ranges for the same
+  landblock-building aperture.
+- Update transition aperture debug overlay/details to report building-source
+  metadata for landblock-building apertures. Do not label these masks as owned
+  by an env-cell portal, though matched env-cell ids/portals may be shown as
+  metadata.
+
+Acceptance criteria:
+
+- For landblock `0xf418ffff`, V2 transition aperture range count is derived
+  from prepared outdoor building transition aperture records, not from the 35
+  env-cell outside-transition `CCellPortal` records.
+- The `0xf4180103 portal/01` and `0xf418010b portal/00` duplicate env-cell
+  aperture pair no longer produces two transition mask ranges.
+- Every emitted building-side transition aperture records its source building
+  instance id, source `GfxObj` id, `PortalPoly.portal_index`,
+  `PortalPoly.poly_id`, and matched `CBldPortal` metadata.
+- Building-sourced transition aperture resources commit when the outdoor
+  landblock asset commits, even if no landblock env-cell asset has committed.
+- If the destination interior/env-cell scene is not resident, the renderer keeps
+  the aperture resource resident but skips compositing through it.
+- If a building `PortalPoly.portal_index` cannot be matched to a `CBldPortal`,
+  omit that aperture with a debug-only omission reason rather than falling back
+  silently to env-cell aperture geometry.
+- Automated tests use synthetic `GfxObj`/BSP/building data or pure TypeScript
+  payloads. No new automated test may depend on runtime DAT/HBA assets that are
+  not checked into the repo.
+
+Non-goals for this step:
+
+- Do not solve bare `outside` transitions that have no landblock-building
+  endpoint.
+- Do not implement env-cell aperture dedupe as a fallback in this same change.
+- Do not expose raw building `GfxObj.drawing_bsp` traversal as V2 frontend
+  transition aperture policy.
+- Do not use V1 behavior as an authority for this implementation. Use retail
+  `GfxObj` drawing BSP / `CBldPortal` semantics and the decoded asset data.
+- Do not add asset-backed fixture tests for `0xf418ffff`; keep that landblock
+  as a manual/debug-harness validation case.
 
 ## Appendix: Reproduction Commands
 

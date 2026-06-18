@@ -930,6 +930,8 @@ impl LandblockOutdoorAssetAssembler {
             instances,
             &static_meshes,
         );
+        let building_transition_apertures =
+            build_prepared_building_transition_apertures(&mut context, outdoor_scene.as_ref());
         let spatial_items = build_outdoor_member_spatial_items(landblock_id, &statics);
         let outdoor_bvh = build_prepared_bvh(landblock_id, &spatial_items);
         let diagnostics = context.into_diagnostics();
@@ -939,7 +941,7 @@ impl LandblockOutdoorAssetAssembler {
             cell_landblock,
             terrain_mesh,
             statics,
-            building_transition_apertures: Vec::new(),
+            building_transition_apertures,
             outdoor_bvh,
             diagnostics,
         }
@@ -1418,6 +1420,208 @@ fn build_landblock_outdoor_static_members(
             }
         })
         .collect()
+}
+
+fn build_prepared_building_transition_apertures(
+    context: &mut PreparedContentAssemblyContext<'_>,
+    outdoor_scene: Option<&StaticOutdoorScene>,
+) -> Vec<PreparedBuildingTransitionAperture> {
+    let Some(outdoor_scene) = outdoor_scene else {
+        return Vec::new();
+    };
+
+    let mut apertures = Vec::new();
+    let mut reported_missing = HashSet::new();
+    for building in &outdoor_scene.buildings {
+        let gfx_obj_id = building.instance.source.did;
+        if gfx_obj_id >> 24 != 0x01 {
+            context.report_source_omission(
+                EOR_PORTAL_NAMESPACE,
+                gfx_obj_id,
+                "building-transition-aperture",
+                "unsupported-building-source",
+                format!(
+                    "Building {} uses non-GfxObj source 0x{gfx_obj_id:08X}; transition aperture geometry was omitted",
+                    building.instance.identity.stable_id()
+                ),
+            );
+            continue;
+        }
+
+        match context.source.gfx_obj(gfx_obj_id) {
+            Ok(gfx_obj) => apertures.extend(build_building_transition_apertures_from_gfx_obj(
+                building,
+                &gfx_obj,
+                &mut context.diagnostics,
+            )),
+            Err(error) => report_renderable_load_error(
+                &mut context.diagnostics,
+                &mut reported_missing,
+                gfx_obj_id,
+                "building-transition-aperture",
+                source_error_code_from_error(&error),
+                format!(
+                    "Could not load building GfxObj 0x{gfx_obj_id:08X} for transition apertures: {error:#}"
+                ),
+            ),
+        }
+    }
+    apertures
+}
+
+fn build_building_transition_apertures_from_gfx_obj(
+    building: &crate::static_outdoor_scene::StaticOutdoorBuilding,
+    gfx_obj: &GfxObj,
+    diagnostics: &mut PreparedContentSourceDiagnostics,
+) -> Vec<PreparedBuildingTransitionAperture> {
+    let building_instance_id = building.instance.identity.stable_id();
+    let Some(drawing_bsp) = gfx_obj.drawing_bsp.as_ref() else {
+        diagnostics.omissions.push(SourceOmissionDiagnostic {
+            namespace: EOR_PORTAL_NAMESPACE,
+            file_id: gfx_obj.id,
+            role: "building-transition-aperture",
+            reason: "missing-drawing-bsp",
+            detail: format!(
+                "Building {building_instance_id} GfxObj 0x{:08X} has no drawing BSP; transition aperture geometry was omitted",
+                gfx_obj.id
+            ),
+        });
+        return Vec::new();
+    };
+
+    let mut portal_polys = Vec::new();
+    collect_bsp_portal_polys(drawing_bsp, &mut portal_polys);
+
+    let source_asset_id = renderable_source_asset_id(gfx_obj.id)
+        .unwrap_or_else(|| format!("gfx-obj/{:08x}", gfx_obj.id));
+    let building_frame = convert_static_outdoor_frame(&building.instance.frame);
+    let mut apertures = Vec::new();
+    for portal_poly in portal_polys {
+        let portal_index = portal_poly.portal_index;
+        if portal_index < 0 {
+            diagnostics.omissions.push(SourceOmissionDiagnostic {
+                namespace: EOR_PORTAL_NAMESPACE,
+                file_id: gfx_obj.id,
+                role: "building-transition-aperture",
+                reason: "negative-portal-index",
+                detail: format!(
+                    "Building {building_instance_id} GfxObj 0x{:08X} PortalPoly had negative portal_index {portal_index}; aperture was omitted",
+                    gfx_obj.id
+                ),
+            });
+            continue;
+        }
+
+        let Some(building_portal) = building.portals.get(portal_index as usize) else {
+            diagnostics.omissions.push(SourceOmissionDiagnostic {
+                namespace: EOR_PORTAL_NAMESPACE,
+                file_id: gfx_obj.id,
+                role: "building-transition-aperture",
+                reason: "missing-building-portal",
+                detail: format!(
+                    "Building {building_instance_id} GfxObj 0x{:08X} PortalPoly portal_index {portal_index} did not match any CBldPortal metadata; aperture was omitted",
+                    gfx_obj.id
+                ),
+            });
+            continue;
+        };
+
+        if portal_poly.poly_id < 0 {
+            diagnostics.omissions.push(SourceOmissionDiagnostic {
+                namespace: EOR_PORTAL_NAMESPACE,
+                file_id: gfx_obj.id,
+                role: "building-transition-aperture",
+                reason: "negative-polygon-id",
+                detail: format!(
+                    "Building {building_instance_id} GfxObj 0x{:08X} PortalPoly portal_index {portal_index} had negative poly_id {}; aperture was omitted",
+                    gfx_obj.id, portal_poly.poly_id
+                ),
+            });
+            continue;
+        }
+
+        let poly_id = portal_poly.poly_id as u16;
+        let Some(polygon) = gfx_obj.polygons.get(&poly_id) else {
+            diagnostics.omissions.push(SourceOmissionDiagnostic {
+                namespace: EOR_PORTAL_NAMESPACE,
+                file_id: gfx_obj.id,
+                role: "building-transition-aperture",
+                reason: "missing-drawing-polygon",
+                detail: format!(
+                    "Building {building_instance_id} GfxObj 0x{:08X} PortalPoly portal_index {portal_index} referenced missing drawing polygon {poly_id}; aperture was omitted",
+                    gfx_obj.id
+                ),
+            });
+            continue;
+        };
+
+        let model_points = build_portal_polygon_points(&gfx_obj.vertex_array, polygon);
+        if model_points.len() < 3 {
+            diagnostics.omissions.push(SourceOmissionDiagnostic {
+                namespace: EOR_PORTAL_NAMESPACE,
+                file_id: gfx_obj.id,
+                role: "building-transition-aperture",
+                reason: "malformed-drawing-polygon",
+                detail: format!(
+                    "Building {building_instance_id} GfxObj 0x{:08X} PortalPoly portal_index {portal_index} polygon {poly_id} produced {} points; aperture was omitted",
+                    gfx_obj.id,
+                    model_points.len()
+                ),
+            });
+            continue;
+        }
+
+        let points = model_points
+            .into_iter()
+            .map(|point| {
+                transform_render_local_point_by_ac_frame(
+                    point,
+                    &building_frame,
+                    unit_prepared_vec3(),
+                )
+            })
+            .collect::<Vec<_>>();
+        apertures.push(PreparedBuildingTransitionAperture {
+            aperture_id: format!(
+                "building-transition-aperture:{building_instance_id}:{portal_index:04x}:{poly_id:04x}"
+            ),
+            building_instance_id: building_instance_id.clone(),
+            source_did: gfx_obj.id,
+            source_asset_id: source_asset_id.clone(),
+            portal_index,
+            poly_id,
+            building_portal_id: format!("{building_instance_id}/portal/{portal_index:04x}"),
+            building_portal_source_index: building_portal.source_index,
+            flags: building_portal.flags,
+            other_cell_id: building_portal.other_cell_id,
+            other_portal_id: building_portal.other_portal_id,
+            linked_env_cell_ids: building_portal.linked_env_cell_ids.clone(),
+            points,
+        });
+    }
+    apertures
+}
+
+fn collect_bsp_portal_polys<'a>(
+    node: &'a BspNode,
+    portal_polys: &mut Vec<&'a holtburger_dat::physics::PortalPoly>,
+) {
+    match node {
+        BspNode::Port(portal) => {
+            portal_polys.extend(portal.portal_polys.iter());
+            collect_bsp_portal_polys(&portal.pos, portal_polys);
+            collect_bsp_portal_polys(&portal.neg, portal_polys);
+        }
+        BspNode::Internal(internal) => {
+            if let Some(pos) = internal.pos.as_deref() {
+                collect_bsp_portal_polys(pos, portal_polys);
+            }
+            if let Some(neg) = internal.neg.as_deref() {
+                collect_bsp_portal_polys(neg, portal_polys);
+            }
+        }
+        BspNode::Leaf(_) => {}
+    }
 }
 
 fn build_prepared_outdoor_static_instances(
@@ -3027,6 +3231,14 @@ fn classify_scene_landblock(landblock_info: Option<&LandblockInfoFact>) -> Landb
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::static_outdoor_scene::{
+        StaticOutdoorBuilding, StaticOutdoorBuildingPortal, StaticOutdoorFrame,
+        StaticOutdoorInstance, StaticOutdoorInstanceIdentity, StaticRenderableSourceRef,
+    };
+    use holtburger_common::properties::GfxObjFlags;
+    use holtburger_common::{Plane, Quaternion, Vector3};
+    use holtburger_dat::graphics::{CVertexArray, SWVertex};
+    use holtburger_dat::physics::{BspLeaf, BspPortal, PortalPoly};
     use holtburger_dat::{
         DatError, DatFileType, FileMetadata, HbaReader, ResourceKey, ResourceSource,
     };
@@ -3034,10 +3246,195 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
+    #[test]
+    fn building_transition_apertures_resolve_portal_poly_geometry() {
+        let building = synthetic_static_building(vec![StaticOutdoorBuildingPortal {
+            source_index: 0,
+            flags: 0x0001,
+            other_cell_id: 0x0100,
+            other_portal_id: 0xffff,
+            stab_list: vec![0x0100],
+            linked_env_cell_ids: vec![0xda55_0100],
+        }]);
+        let gfx_obj = synthetic_building_gfx_obj(PortalPoly {
+            portal_index: 0,
+            poly_id: 7,
+        });
+        let mut diagnostics = PreparedContentSourceDiagnostics::default();
+
+        let apertures =
+            build_building_transition_apertures_from_gfx_obj(&building, &gfx_obj, &mut diagnostics);
+
+        assert_eq!(diagnostics.omissions, Vec::new());
+        assert_eq!(apertures.len(), 1);
+        let aperture = &apertures[0];
+        assert_eq!(
+            aperture.building_instance_id,
+            "landblock-static/da55ffff/building/0000/01001234"
+        );
+        assert_eq!(aperture.source_did, 0x0100_1234);
+        assert_eq!(aperture.source_asset_id, "gfx-obj/01001234");
+        assert_eq!(aperture.portal_index, 0);
+        assert_eq!(aperture.poly_id, 7);
+        assert_eq!(aperture.building_portal_source_index, 0);
+        assert_eq!(aperture.other_cell_id, 0x0100);
+        assert_eq!(aperture.other_portal_id, 0xffff);
+        assert_eq!(aperture.linked_env_cell_ids, vec![0xda55_0100]);
+        assert_eq!(
+            aperture.points,
+            vec![
+                PreparedVec3 {
+                    x: 10.0,
+                    y: 3.0,
+                    z: -2.0,
+                },
+                PreparedVec3 {
+                    x: 11.0,
+                    y: 3.0,
+                    z: -2.0,
+                },
+                PreparedVec3 {
+                    x: 10.0,
+                    y: 4.0,
+                    z: -2.0,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn building_transition_apertures_omit_unmatched_portal_poly_metadata() {
+        let building = synthetic_static_building(Vec::new());
+        let gfx_obj = synthetic_building_gfx_obj(PortalPoly {
+            portal_index: 3,
+            poly_id: 7,
+        });
+        let mut diagnostics = PreparedContentSourceDiagnostics::default();
+
+        let apertures =
+            build_building_transition_apertures_from_gfx_obj(&building, &gfx_obj, &mut diagnostics);
+
+        assert!(apertures.is_empty());
+        assert_eq!(diagnostics.omissions.len(), 1);
+        assert_eq!(diagnostics.omissions[0].reason, "missing-building-portal");
+    }
+
     #[derive(Debug)]
     struct CountingSource {
         files: HashMap<(String, u32), Vec<u8>>,
         reads: Mutex<HashMap<(String, u32), usize>>,
+    }
+
+    fn synthetic_static_building(
+        portals: Vec<StaticOutdoorBuildingPortal>,
+    ) -> StaticOutdoorBuilding {
+        StaticOutdoorBuilding {
+            instance: StaticOutdoorInstance {
+                identity: StaticOutdoorInstanceIdentity::Building {
+                    landblock_id: 0xda55_ffff,
+                    source_index: 0,
+                    source_did: 0x0100_1234,
+                },
+                owning_landblock_id: 0xda55_ffff,
+                source: StaticRenderableSourceRef::from_did(0x0100_1234),
+                source_index: 0,
+                frame: StaticOutdoorFrame {
+                    origin: Vector3 {
+                        x: 10.0,
+                        y: 2.0,
+                        z: 3.0,
+                    },
+                    orientation: Quaternion::identity(),
+                },
+            },
+            num_leaves: 1,
+            portals,
+        }
+    }
+
+    fn synthetic_building_gfx_obj(portal_poly: PortalPoly) -> GfxObj {
+        let mut vertices = HashMap::new();
+        vertices.insert(0, synthetic_vertex(Vector3::zero()));
+        vertices.insert(
+            1,
+            synthetic_vertex(Vector3 {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            }),
+        );
+        vertices.insert(
+            2,
+            synthetic_vertex(Vector3 {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+            }),
+        );
+
+        let mut polygons = HashMap::new();
+        polygons.insert(
+            7,
+            Polygon {
+                num_pts: 3,
+                stippling: 0,
+                sides_type: CULL_MODE_COUNTER_CLOCKWISE,
+                pos_surface: -1,
+                neg_surface: -1,
+                vertex_ids: vec![0, 1, 2],
+                pos_uv_indices: vec![0, 0, 0],
+                neg_uv_indices: Vec::new(),
+            },
+        );
+
+        GfxObj {
+            id: 0x0100_1234,
+            flags: GfxObjFlags::HAS_DRAWING,
+            surfaces: Vec::new(),
+            vertex_array: CVertexArray {
+                vertex_type: 1,
+                vertices,
+            },
+            physics_polygons: HashMap::new(),
+            physics_bsp: None,
+            sort_center: Vector3::zero(),
+            polygons,
+            drawing_bsp: Some(BspNode::Port(BspPortal {
+                plane: Plane {
+                    normal: Vector3 {
+                        x: 0.0,
+                        y: 1.0,
+                        z: 0.0,
+                    },
+                    d: 0.0,
+                },
+                pos: Box::new(BspNode::Leaf(BspLeaf {
+                    index: 0,
+                    solid: 0,
+                    sphere: None,
+                    poly_ids: Vec::new(),
+                })),
+                neg: Box::new(BspNode::Leaf(BspLeaf {
+                    index: 1,
+                    solid: 0,
+                    sphere: None,
+                    poly_ids: Vec::new(),
+                })),
+                sphere: None,
+                poly_ids: Vec::new(),
+                portal_polys: vec![portal_poly],
+            })),
+            did_degrade: None,
+        }
+    }
+
+    fn synthetic_vertex(origin: Vector3) -> SWVertex {
+        SWVertex {
+            num_uvs: 0,
+            origin,
+            normal: Vector3::zero(),
+            uvs: Vec::new(),
+        }
     }
 
     impl CountingSource {

@@ -300,7 +300,7 @@ Phased execution:
      building transition apertures yet" with an empty list instead of letting
      consumers guess whether the producer is old, broken, or merely empty.
 
-2. Building `PortalPoly` extraction - next
+2. Building `PortalPoly` extraction - complete
 
    - In `LandblockOutdoorAssetAssembler`, load each outdoor building instance's
      source `GfxObj` and walk `drawing_bsp` `PortalPoly` records.
@@ -311,11 +311,21 @@ Phased execution:
      aperture geometry.
    - Validate manually with the debug harness against `0xf418ffff`; do not
      check in an asset-backed fixture test.
-   - Still open: no real aperture records are emitted yet. The next phase must
-     populate `LandblockOutdoorAsset.building_transition_apertures` from
-     building `GfxObj` drawing BSP data.
+   - Completed: `LandblockOutdoorAssetAssembler` now emits real
+     `building_transition_apertures` from each outdoor building GfxObj drawing
+     BSP `PortalPoly`.
+   - Completed: `PortalPoly.portal_index` resolves to the building
+     `CBldPortal` metadata and `PortalPoly.poly_id` resolves to drawing polygon
+     points transformed into landblock render-local space.
+   - Completed: mismatches produce omission diagnostics and never fall back to
+     env-cell outside-transition aperture geometry.
+   - Completed: synthetic unit coverage verifies successful extraction and
+     unmatched-portal omission without runtime DAT/HBA fixtures.
+   - Manual validation: `inspect_landblock_building_portals --landblock
+     f418ffff --portal-duplicates` reports `buildingPortals=35` and
+     `buildingTransitionApertures=35`.
 
-3. V2 static commit route
+3. V2 static commit route - next
 
    - Emit building-sourced `TransitionApertureBatch` resources from the outdoor
      static/building bake path.

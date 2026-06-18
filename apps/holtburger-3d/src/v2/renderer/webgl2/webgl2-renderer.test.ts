@@ -178,6 +178,10 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		expect(SOURCE_SCENE_COPY_FRAGMENT_SHADER).toContain(
 			"gl_FragDepth = sourceDepth;",
 		);
+		expect(SOURCE_SCENE_COPY_FRAGMENT_SHADER).toContain("uCompositeMask");
+		expect(SOURCE_SCENE_COPY_FRAGMENT_SHADER).toContain(
+			"uUseCompositeMask == 1",
+		);
 		expect(SOURCE_SCENE_COPY_FRAGMENT_SHADER).not.toContain(
 			"uPreviousCompositeDepth",
 		);
@@ -245,6 +249,17 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			gl.UNSIGNED_INT_24_8,
 			null,
 		);
+		expect(gl.texImage2D).toHaveBeenCalledWith(
+			gl.TEXTURE_2D,
+			0,
+			gl.R8,
+			64,
+			64,
+			0,
+			gl.RED,
+			gl.UNSIGNED_BYTE,
+			null,
+		);
 		expect(latestSnapshot.sceneDomainTargets).toMatchObject({
 			active: true,
 			colorFormat: "rgb8",
@@ -291,7 +306,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		expect(latestSnapshot.sceneDomainTargets).toMatchObject({
 			apertureBatchDrawCalls: 2,
 			compositePasses: 2,
-			compositingMode: "stencil-mask",
+			compositingMode: "texture-mask",
 			executedCompositeDepth: 2,
 		});
 		expect(gl.drawElementsCalls).toEqual([
@@ -309,25 +324,23 @@ describe("V2 WebGL2 structured interior rendering", () => {
 					mask: gl.DEPTH_BUFFER_BIT,
 				}),
 				expect.objectContaining({
-					mask: gl.STENCIL_BUFFER_BIT,
-				}),
-				expect.objectContaining({
 					mask: gl.COLOR_BUFFER_BIT,
 				}),
 			]),
 		);
-		expect(gl.stencilFuncCalls).toEqual(
+		expect(gl.blitFramebufferCalls).not.toEqual(
 			expect.arrayContaining([
-				{ func: gl.ALWAYS, mask: 0xff, ref: 1 },
-				{ func: gl.EQUAL, mask: 0xff, ref: 1 },
-				{ func: gl.ALWAYS, mask: 0xff, ref: 2 },
-				{ func: gl.EQUAL, mask: 0xff, ref: 2 },
+				expect.objectContaining({
+					mask: gl.STENCIL_BUFFER_BIT,
+				}),
 			]),
 		);
-		expect(gl.stencilOpCalls).toEqual(
-			expect.arrayContaining([
-				{ fail: gl.KEEP, zfail: gl.KEEP, zpass: gl.REPLACE },
-			]),
+		expect(gl.framebufferTexture2D).toHaveBeenCalledWith(
+			gl.FRAMEBUFFER,
+			gl.DEPTH_STENCIL_ATTACHMENT,
+			gl.TEXTURE_2D,
+			expect.anything(),
+			0,
 		);
 
 		renderer.dispose();
@@ -674,6 +687,7 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		BLEND: 3042,
 		CLAMP_TO_EDGE: 33071,
 		COLOR_BUFFER_BIT: 16384,
+		COLOR_ATTACHMENT0: 36064,
 		COMPILE_STATUS: 35713,
 		CULL_FACE: 2884,
 		DEPTH_ATTACHMENT: 36096,

@@ -34,6 +34,7 @@ pub struct LandblockOutdoorAsset {
     pub cell_landblock: Option<CellLandblockFact>,
     pub terrain_mesh: Option<PreparedTerrainMesh>,
     pub statics: Vec<LandblockOutdoorStaticMember>,
+    pub building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
     pub outdoor_bvh: Option<PreparedBvh>,
     pub diagnostics: PreparedContentSourceDiagnostics,
 }
@@ -111,6 +112,23 @@ pub struct LandblockBuildingPortal {
     pub other_portal_id: u16,
     pub stab_list: Vec<u16>,
     pub linked_env_cell_ids: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedBuildingTransitionAperture {
+    pub aperture_id: String,
+    pub building_instance_id: String,
+    pub source_did: u32,
+    pub source_asset_id: String,
+    pub portal_index: i16,
+    pub poly_id: u16,
+    pub building_portal_id: String,
+    pub building_portal_source_index: usize,
+    pub flags: u16,
+    pub other_cell_id: u16,
+    pub other_portal_id: u16,
+    pub linked_env_cell_ids: Vec<u32>,
+    pub points: Vec<PreparedVec3>,
 }
 
 #[derive(Debug, Clone)]
@@ -921,6 +939,7 @@ impl LandblockOutdoorAssetAssembler {
             cell_landblock,
             terrain_mesh,
             statics,
+            building_transition_apertures: Vec::new(),
             outdoor_bvh,
             diagnostics,
         }

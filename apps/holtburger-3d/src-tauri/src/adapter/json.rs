@@ -603,6 +603,7 @@ pub fn serialize_landblock_outdoor_payload_with_terrain(
         "classification": "outdoor",
         "terrain": terrain,
         "statics": outdoor.statics.iter().map(serialize_landblock_outdoor_static_member).collect::<Vec<_>>(),
+        "buildingTransitionApertures": outdoor.building_transition_apertures.iter().map(serialize_prepared_building_transition_aperture).collect::<Vec<_>>(),
         "outdoorBvh": serialize_landblock_outdoor_bvh(outdoor),
         "diagnostics": serialize_prepared_content_diagnostics(&outdoor.diagnostics),
         "provenance": {
@@ -611,6 +612,26 @@ pub fn serialize_landblock_outdoor_payload_with_terrain(
             "errorCode": outdoor.diagnostics.errors.first().map(|error| error.error_code),
             "detail": outdoor.diagnostics.errors.first().map(|error| error.detail.clone())
         }
+    })
+}
+
+fn serialize_prepared_building_transition_aperture(
+    aperture: &holtburger_content::PreparedBuildingTransitionAperture,
+) -> serde_json::Value {
+    serde_json::json!({
+        "apertureId": aperture.aperture_id,
+        "buildingInstanceId": aperture.building_instance_id,
+        "sourceDid": aperture.source_did,
+        "sourceAssetId": aperture.source_asset_id,
+        "portalIndex": aperture.portal_index,
+        "polyId": aperture.poly_id,
+        "buildingPortalId": aperture.building_portal_id,
+        "buildingPortalSourceIndex": aperture.building_portal_source_index,
+        "flags": aperture.flags,
+        "otherCellId": aperture.other_cell_id,
+        "otherPortalId": aperture.other_portal_id,
+        "linkedEnvCellIds": aperture.linked_env_cell_ids,
+        "points": aperture.points.iter().map(serialize_prepared_vec3).collect::<Vec<_>>(),
     })
 }
 
@@ -1587,8 +1608,9 @@ mod tests {
     use super::*;
     use holtburger_content::{
         CellLandblockFact, LandblockOutdoorAsset, LandblockOutdoorStaticMember, PreparedAabb,
-        PreparedBvh, PreparedBvhNode, PreparedContentSourceDiagnostics, PreparedStaticInstance,
-        PreparedStaticInstanceKind, PreparedTerrainMesh, PreparedVec3,
+        PreparedBuildingTransitionAperture, PreparedBvh, PreparedBvhNode,
+        PreparedContentSourceDiagnostics, PreparedStaticInstance, PreparedStaticInstanceKind,
+        PreparedTerrainMesh, PreparedVec3,
     };
 
     #[test]
@@ -1822,6 +1844,7 @@ mod tests {
                 max_height: 0.,
             }),
             statics,
+            building_transition_apertures: Vec::new(),
             outdoor_bvh: Some(PreparedBvh {
                 coordinate_space: "test",
                 landblock_id: 1,
@@ -1878,6 +1901,37 @@ mod tests {
                 building: None,
                 generated: None,
             }],
+            building_transition_apertures: vec![PreparedBuildingTransitionAperture {
+                aperture_id: "building-transition-aperture:overhang:0".to_string(),
+                building_instance_id: "overhang".to_string(),
+                source_did: 0x0200_1234,
+                source_asset_id: "gfxobj/02001234".to_string(),
+                portal_index: 0,
+                poly_id: 42,
+                building_portal_id: "building-portal-0".to_string(),
+                building_portal_source_index: 0,
+                flags: 0x0001,
+                other_cell_id: 0x0100,
+                other_portal_id: 0xffff,
+                linked_env_cell_ids: vec![0x0102_0100],
+                points: vec![
+                    PreparedVec3 {
+                        x: 0.,
+                        y: 0.,
+                        z: 0.,
+                    },
+                    PreparedVec3 {
+                        x: 1.,
+                        y: 0.,
+                        z: 0.,
+                    },
+                    PreparedVec3 {
+                        x: 0.,
+                        y: 1.,
+                        z: 0.,
+                    },
+                ],
+            }],
             outdoor_bvh: Some(PreparedBvh {
                 coordinate_space: "landblock-render-local",
                 landblock_id: source_landblock_id,
@@ -1908,6 +1962,35 @@ mod tests {
                 .get("landblockId")
                 .and_then(serde_json::Value::as_u64),
             Some(source_landblock_id as u64)
+        );
+
+        let aperture = payload
+            .get("buildingTransitionApertures")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|apertures| apertures.first())
+            .expect("serialized payload should include building transition apertures");
+        assert_eq!(
+            aperture.pointer("/buildingInstanceId"),
+            Some(&serde_json::Value::String("overhang".to_string()))
+        );
+        assert_eq!(
+            aperture
+                .pointer("/polyId")
+                .and_then(serde_json::Value::as_u64),
+            Some(42)
+        );
+        assert_eq!(
+            aperture
+                .pointer("/linkedEnvCellIds/0")
+                .and_then(serde_json::Value::as_u64),
+            Some(0x0102_0100)
+        );
+        assert_eq!(
+            aperture
+                .pointer("/points")
+                .and_then(serde_json::Value::as_array)
+                .map(Vec::len),
+            Some(3)
         );
 
         let static_member = payload

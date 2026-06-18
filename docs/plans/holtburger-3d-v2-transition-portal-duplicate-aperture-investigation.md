@@ -282,7 +282,7 @@ landblock asset route.
 
 Phased execution:
 
-1. Rust outdoor payload shape
+1. Rust outdoor payload shape - complete
 
    - Extend `LandblockOutdoorAsset` with prepared building transition aperture
      records.
@@ -290,8 +290,17 @@ Phased execution:
      prepared records.
    - Use synthetic unit tests only. Do not add tests that require repo-local or
      user-local runtime DAT/HBA assets.
+   - Completed: added a required `buildingTransitionApertures` field to the
+     V2 landblock outdoor payload contract. Rust assembly currently emits an
+     empty list until Phase 2 extracts real `PortalPoly` geometry.
+   - Completed: added synthetic Rust serialization coverage and synthetic TS
+     contract validation. No asset-backed fixture test was added.
+   - Spicy implementation note: the field is intentionally required, not
+     optional. A landblock outdoor payload should explicitly say "no prepared
+     building transition apertures yet" with an empty list instead of letting
+     consumers guess whether the producer is old, broken, or merely empty.
 
-2. Building `PortalPoly` extraction
+2. Building `PortalPoly` extraction - next
 
    - In `LandblockOutdoorAssetAssembler`, load each outdoor building instance's
      source `GfxObj` and walk `drawing_bsp` `PortalPoly` records.
@@ -302,6 +311,9 @@ Phased execution:
      aperture geometry.
    - Validate manually with the debug harness against `0xf418ffff`; do not
      check in an asset-backed fixture test.
+   - Still open: no real aperture records are emitted yet. The next phase must
+     populate `LandblockOutdoorAsset.building_transition_apertures` from
+     building `GfxObj` drawing BSP data.
 
 3. V2 static commit route
 

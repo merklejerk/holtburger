@@ -20,6 +20,7 @@ import type {
 	StaticObjectSortMetadata,
 	StaticObjectSourceIdentity,
 	StaticSpatialRecord,
+	TransitionApertureBatch,
 } from "../../contracts";
 import {
 	AC_UNIT_SCALE,
@@ -45,6 +46,7 @@ import {
 	isCurrentlyStageableStaticObjectDataUse,
 	isRenderableStaticObjectPartition,
 } from "./static-object-renderability";
+import { deriveBuildingTransitionApertureBatch } from "./building-transition-aperture-batches";
 
 export class StaticObjectCompatibilityBaker implements StaticBaker {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
@@ -69,6 +71,9 @@ export function bakeStaticObjectCompatibility(
 		bakeStaticObjectCompatibilityItem(input, item),
 	);
 	const drawUnits = itemResults.flatMap((result) => result.drawUnits);
+	const transitionApertureBatches = itemResults.flatMap((result) =>
+		result.transitionApertureBatch ? [result.transitionApertureBatch] : [],
+	);
 
 	return {
 		atlasRegistryUpdates: [],
@@ -93,7 +98,7 @@ export function bakeStaticObjectCompatibility(
 		textureUses: mergeTextureUses(
 			itemResults.flatMap((result) => result.textureUses),
 		),
-		transitionApertureBatches: [],
+		transitionApertureBatches,
 		works: input.items.map((item) => item.work),
 	};
 }
@@ -212,8 +217,13 @@ function bakeStaticObjectCompatibilityItem(
 	readonly sourceMappings: StaticBakeBatchResult["staticSourceMappings"];
 	readonly spatialRecords: readonly StaticSpatialRecord[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
+	readonly transitionApertureBatch: TransitionApertureBatch | null;
 } {
 	const scope = createStaticObjectCompatibilityPayload(item);
+	const transitionApertureBatch =
+		item.payload.scope.kind === "outdoor-static-objects"
+			? deriveBuildingTransitionApertureBatch(item.payload.scope)
+			: null;
 	const partitionPlan = partitionStaticObjectCompatibility(scope);
 	const renderablePartitions = partitionPlan.partitions.filter((partition) => {
 		if (isRenderableStaticObjectPartition(partition)) {
@@ -282,6 +292,7 @@ function bakeStaticObjectCompatibilityItem(
 			staticBatchId: input.staticBatchId,
 			work: item.work,
 		}),
+		transitionApertureBatch,
 	};
 }
 
@@ -454,7 +465,10 @@ function createEnvCellStaticObjectSpatialRecords(options: {
 		]),
 	);
 	return [...options.geometry.objectBoundsByObjectKey].flatMap(
-		([objectKey, bounds]): readonly StaticEnvCellStaticObjectSpatialRecord[] => {
+		([
+			objectKey,
+			bounds,
+		]): readonly StaticEnvCellStaticObjectSpatialRecord[] => {
 			const object = objectsByKey.get(objectKey);
 			if (
 				!object ||
@@ -825,13 +839,11 @@ function createStaticObjectBakeTextureUses(options: {
 	});
 }
 
-function createStaticObjectTextureUseId(
-	options: {
-		readonly dataUse: MaterialTextureDataUseIdentity;
-		readonly work: ScheduledStaticWork;
-		readonly wrapMode: StaticObjectCompatibilityPartition["textureWrapMode"];
-	},
-): string {
+function createStaticObjectTextureUseId(options: {
+	readonly dataUse: MaterialTextureDataUseIdentity;
+	readonly work: ScheduledStaticWork;
+	readonly wrapMode: StaticObjectCompatibilityPartition["textureWrapMode"];
+}): string {
 	return createStaticMaterialTextureUseId({
 		dataUse: options.dataUse,
 		textureUseNamespace: "static-object-texture",

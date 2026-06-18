@@ -325,7 +325,7 @@ Phased execution:
      f418ffff --portal-duplicates` reports `buildingPortals=35` and
      `buildingTransitionApertures=35`.
 
-3. V2 static commit route - next
+3. V2 static commit route - complete
 
    - Emit building-sourced `TransitionApertureBatch` resources from the outdoor
      static/building bake path.
@@ -335,8 +335,26 @@ Phased execution:
      expire with outdoor building residency.
    - Replace mandatory env-cell ownership in `TransitionApertureRange` with a
      source variant that can represent building-owned apertures.
+   - Completed: `OutdoorStaticObjectsScopePayload` carries prepared
+     `buildingTransitionApertures` only for the `outdoor-buildings` domain.
+   - Completed: the outdoor static object baker emits an
+     `outdoor-buildings`-sourced `TransitionApertureBatch` from those prepared
+     records.
+   - Completed: `TransitionApertureBatch.sourceDomain` drives coordinator
+     retention/eviction, so building aperture masks are keyed to
+     `outdoor-buildings` instead of `landblock-env-cells`.
+   - Completed: `TransitionApertureRange` now stores a source variant. Building
+     aperture ranges carry building portal/source GfxObj metadata; env-cell
+     fallback ranges carry env-cell portal metadata.
+   - Completed: `StaticSceneQuery` tracks committed transition aperture batches
+     directly, including outdoor-building batches that exist before any
+     env-cell records are committed.
+   - Spicy implementation note: `StaticSceneQuery` still retains the legacy
+     env-cell-derived query fallback when no committed transition aperture
+     batches exist. Phase 4 should remove or further fence that fallback when
+     renderer/debug behavior fully cuts over to building-owned masks.
 
-4. Renderer and debug behavior
+4. Renderer and debug behavior - next
 
    - Keep the WebGL aperture resource upload path batch-oriented.
    - Gate compositing through a resident building aperture on destination

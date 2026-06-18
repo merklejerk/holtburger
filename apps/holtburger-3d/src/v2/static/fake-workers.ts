@@ -189,6 +189,7 @@ export class ImmediateStaticResolver implements StaticResolver {
 			return {
 				job,
 				scope: {
+					buildingTransitionApertures: [],
 					domain: "outdoor-buildings",
 					kind: "outdoor-static-objects",
 					landblock: {

@@ -3014,12 +3014,19 @@ Investigation notes from 2026-06-19:
 
 ### Phase 13B3: Interior Visual Parity And Portal Verification
 
-Status: planned.
+Status: superseded as the next active portal-rendering path by
+[holtburger-3d-v2-portal-renderer-course-correction-plan.md](holtburger-3d-v2-portal-renderer-course-correction-plan.md).
+Keep this section as historical context until the dedicated plan is executed or merged back into the
+main implementation sequence.
 
 Purpose: compare V2 interior behavior against v1 and steer remaining portal rendering, visibility traversal, and indoor/outdoor pass separation gaps before dynamic/cutover work.
 
 Steering:
 
+- The 2026-06-19 course correction changes the direction from whole-domain interior parity checks to
+  a proper env-cell portal renderer. Production interior rendering should be driven by portal
+  traversal and cell-scoped draw submission, with broad resident interior rendering retained only as
+  an explicit diagnostic mode.
 - Phase 13B1g/13B1h should establish the first transition portal render-target and compositing path. Use this phase to verify against v1 and schedule remaining visibility/render-target gaps rather than inventing new routing policy.
 
 Deliverables:

@@ -1324,6 +1324,28 @@ V2 static/source-query deltas should include runtime-ingestible spatial metadata
 
 The env-cell bundle should expose two BVH layers. The landblock-wide env-cell BVH is the coarse residency and candidate-selection structure: its items are env-cell-grained records with bounds in the bundle's implied landblock/env-cell-root space. Each env cell then exposes a local BVH over that cell's cell-structure geometry, static seeds, and env-cell-local portal apertures in implied env-cell-local space. Portal walking is a semantic visibility layer over the candidate/resident cells; it does not replace the landblock-wide BVH needed to establish initial residency or broad query candidates. DTO field ownership implies the spatial space, so V2 env-cell DTOs should not carry `coordinateSpace` decoration except at temporary compatibility boundaries. Building-sourced outdoor transition aperture masks live outside this env-cell-local BVH ownership path and are retained with outdoor building residency.
 
+### Portal Renderer Course Correction
+
+V2 interior rendering should be portal traversal driven, not whole-domain interior rendering. The dedicated implementation plan is [holtburger-3d-v2-portal-renderer-course-correction-plan.md](holtburger-3d-v2-portal-renderer-course-correction-plan.md).
+
+The course correction preserves the existing V2 source and bake ownership model:
+
+- `landblock-env-cells` remains the landblock-owned source domain for outdoor-linked interiors and pure dungeon landblocks.
+- Static resolver and baker output remains source/bake truth: draw units, texture uses, spatial records, visibility records, portal/interior records, source mappings, and dynamic seeds.
+- Texture/atlas ownership remains batch-scoped, while draw units remain landblock/env-cell scoped.
+- Runtime/static-scene query remains the semantic owner of env-cell, portal, BVH, source-mapping, picking, and visibility facts.
+- Renderer owns GPU resources and drawing, but it should receive explicit frame plans or equivalent visibility updates rather than inferring AC portal semantics from source DTOs.
+
+The missing durable concept is env-cell render visibility membership. Resident structured-interior and env-cell static-object resources must be addressable by owning env cell at frame-submission time. This does not imply one host request, atlas batch, or source bake per env cell. It means the renderer or materializer must preserve enough membership indexing or draw-slice data for a portal traversal result to submit env cell A without also submitting unrelated resident env cell B.
+
+Production interior rendering should start from camera/current env-cell residency and traverse committed env-cell portal records to produce a bounded per-frame visible-cell plan. That plan should carry the visible env cells, traversal depth, portal aperture stack, scene-domain crossings, and rejection/truncation diagnostics needed by renderer execution and browser inspection. Browser-only flat resident interior rendering may remain as an explicit diagnostic mode, but it is not the production or future-client architecture.
+
+Outdoor and env-cell execution should not be symmetric. Outdoor terrain, buildings, and detail are large scene-domain inputs, so the renderer may render the outdoor domain into an offscreen target and use that target as a compositor source. Env cells should not be pre-rendered into one broad interior target before compositing. Portal execution should draw traversal-selected env-cell resources directly under the active aperture stencil/depth/clip state. This is the practical consequence of treating env cells as first-class render visibility nodes.
+
+Outdoor-to-indoor and indoor-to-outdoor transition portals are scene-domain crossings in the portal model, not a separate visibility universe. Building-sourced transition aperture geometry remains the mask authority for building portals. Env-cell outside-transition records remain traversal/query/debug metadata unless a later evidence pass proves a non-building transition case that needs them as mask geometry.
+
+The WebGL2 renderer should carry forward the portal depth-copy lesson: aperture coverage must prefer framebuffer depth transfer and fixed-function depth/stencil behavior where WebGL2 can express it. Shader-side sampled-depth comparisons should not become the authority for portal aperture coverage.
+
 ### Scene Anchoring And Renderer-Local Placement
 
 AC static source data is landblock/env-cell owned, but the renderer should not use global outdoor coordinates directly. The client needs a local origin so nearby landblocks, env cells, dynamics, camera, culling, and picking stay numerically stable and easy to inspect. V1 already proved the useful outdoor rule: a focus/anchor landblock is local origin, neighboring outdoor chunks are translated by `(chunkX - anchorX) * 192` in renderer X and `-(chunkY - anchorY) * 192` in renderer Z.
@@ -1499,6 +1521,7 @@ Mitigation: when semantics are uncertain, verify against ACE, ACViewer, checked-
 - Static-authored animated objects can enter the dynamic path as scope-owned dynamic seeds.
 - Texture atlas policy shares compatible texture placements across scopes inside a submitted static atlas batch through leases from resident draw units. Cross-batch sharing is an explicit future optimization, not the default.
 - Static BVH/spatial metadata is included in static deltas; the runtime/static scene query uses those records for semantic picking and visibility queries, and the renderer does not pull prepared assets to build normal culling/picking state.
+- Production interior rendering is portal traversal driven. Resident env-cell resources are addressable by env-cell membership at render-submission time, and browser flat-resident interior drawing is diagnostic-only.
 - Diagnostics are optional observers, not required fields in core data.
 - Independent services and workers have names and directories that reflect ownership rather than proximity to a UI component.
 
@@ -1535,3 +1558,4 @@ Mitigation: when semantics are uncertain, verify against ACE, ACViewer, checked-
 - 2026-06-11: Abstract static and texture service interfaces should use service names (`StaticResolver`, `StaticBaker`, `TexturePacker`). Worker/client names are transport adapter names only. Worker-pool adapters belong on the main-thread composition side beside current worker clients, not inside the static coordinator, texture manager, or worker-side service implementations.
 - 2026-06-11: Worker counts and concurrency/coalesce limits should be surfaced as named code constants at the owning runtime/adapter boundary. Keep them tuneable in code without adding browser controls or broad configuration until diagnostics show a real need.
 - 2026-06-15: Runtime asset service ownership is centralized in front of the host adapter. Resolver workers may use a remote asset facade and per-job memoization, but they should not own durable prepared-asset caches. Static-object resolver payloads should carry lightweight metadata plus typed geometry refs; heavy source geometry buffers should be attached to bake inputs through the asset service.
+- 2026-06-19: V2 interior rendering should course-correct to a proper portal renderer. Env cells become first-class render visibility nodes for frame submission, portal traversal becomes the authority for production interior visibility, and whole-domain/flat resident interior drawing is retained only as an explicit diagnostic mode. Outdoor scene-domain rendering may use an offscreen target because exterior scenes are broad and expensive, but env cells should be drawn directly on demand during portal compositing rather than pre-rendered as one interior source target. Transition portals remain scene-domain crossings in the same portal model, with building-sourced aperture geometry as the mask authority for building portals.

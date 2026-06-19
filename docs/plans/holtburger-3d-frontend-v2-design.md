@@ -1346,6 +1346,21 @@ Outdoor-to-indoor and indoor-to-outdoor transition portals are scene-domain cros
 
 The WebGL2 renderer should carry forward the portal depth-copy lesson: aperture coverage must prefer framebuffer depth transfer and fixed-function depth/stencil behavior where WebGL2 can express it. Shader-side sampled-depth comparisons should not become the authority for portal aperture coverage.
 
+The current source-backed portal-renderer inspection targets are:
+
+- `0x1a73ffff` / `0x1a730103` for pure dungeon/current-cell rendering and the tunnel overlap
+  artifact where the reported obstruction is cell-structure geometry, not a raw env-cell static
+  seed.
+- `0x1a73ffff` tunnel cluster around `0x1a730102`, `0x1a730103`, and `0x1a730304`, with
+  `0x40d8ffff` as the secondary duplicate/coplanar portal-topology comparison target.
+- `0xf418ffff` transition arch involving `0xf4180103/portal/01` and `0xf418010b/portal/00`, where
+  exact duplicate transformed aperture points prove that transition aperture batches are too coarse
+  as the smallest portal-logic unit.
+
+These targets are manual browser-inspection fixtures, not permanent special cases. Production code
+must not hard-code them. They exist to prove that renderer membership, portal traversal, and
+transition scene-domain crossings are working for known high-risk data.
+
 ### Scene Anchoring And Renderer-Local Placement
 
 AC static source data is landblock/env-cell owned, but the renderer should not use global outdoor coordinates directly. The client needs a local origin so nearby landblocks, env cells, dynamics, camera, culling, and picking stay numerically stable and easy to inspect. V1 already proved the useful outdoor rule: a focus/anchor landblock is local origin, neighboring outdoor chunks are translated by `(chunkX - anchorX) * 192` in renderer X and `-(chunkY - anchorY) * 192` in renderer Z.

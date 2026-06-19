@@ -296,7 +296,7 @@ Course corrections from the dry run:
 
 ### Phase 0: Resteer The Active Plan And Freeze Temporary Probes
 
-Status: planned.
+Status: completed on 2026-06-19.
 
 Purpose: make the course correction explicit before more renderer work piles onto the wrong model.
 
@@ -318,9 +318,44 @@ Acceptance criteria:
 - Temporary hard-coded cell suppression or visual probes are documented as blocked cleanup, not
   implementation precedent.
 
+Implementation notes:
+
+- Added this dedicated plan and linked it from the active V2 implementation plan. Phase 13B3 in
+  [holtburger-3d-frontend-v2-implementation-plan.md](holtburger-3d-frontend-v2-implementation-plan.md)
+  is now historical context, not the next active portal-rendering track.
+- Updated [holtburger-3d-frontend-v2-design.md](holtburger-3d-frontend-v2-design.md) with the
+  architectural pivot: outdoor scene-domain rendering may keep an offscreen source target, while
+  env-cell resources must become direct portal-traversal draw submissions rather than a broad
+  all-interiors source target.
+- Code search on 2026-06-19 found no live hard-coded suppression for the old tunnel probe cells
+  `0x1a730100` through `0x1a730103` in `apps/holtburger-3d/src`,
+  `crates/holtburger-content`, or `crates/holtburger-debug-harness`.
+- The temporary `aperture-depth-probe`, `shader-coverage-probe`, sampled-depth visualization modes,
+  incoming portal-plane clipping probes, side-flip probes, and the explicit tunnel-cell hard skip are
+  historical investigation notes only. They are not active renderer policy.
+- Retained diagnostics:
+  - Browser V2 `Env-cell portals` overlay and overlay-gated portal picking. This is retained because
+    Phase 1/2 manual inspection needs authored aperture evidence.
+  - Browser V2 `Flat vision` mode. This is retained as an explicitly named broad resident diagnostic
+    lens, not as production rendering.
+  - Debug-harness commands such as `inspect_env_cell_asset` and `inspect_landblock_env_cell_bvh`.
+    These remain source-data investigation tools, not continuous verification gates.
+- High-risk boundary: `acceptedEnvCellIds` and flat resident rendering are allowed to help load and
+  inspect current data, but they are not recursive portal traversal output and should not drive the
+  final production interior draw set.
+
+Debt recorded:
+
+- Phase 9 must delete or isolate any flat resident interior path that is still reachable as ordinary
+  production rendering after portal traversal lands.
+- Phase 2 should expose renderer resource membership in browser diagnostics so future manual checks
+  do not have to infer "what got drawn" from visual overlap alone.
+- If the `Flat vision` diagnostic becomes noisy or starts shaping production design, remove it
+  earlier than Phase 9.
+
 ### Phase 1: Source Evidence And Verification Targets
 
-Status: planned.
+Status: completed on 2026-06-19.
 
 Purpose: choose source-backed fixtures before changing render behavior.
 
@@ -339,6 +374,88 @@ Acceptance criteria:
 
 - Each target has a repeatable browser flow for inspection.
 - The plan records what visual behavior the target is supposed to prove.
+
+Verification targets:
+
+1. Pure dungeon/current-cell target: `0x1a73ffff`, start env cell `0x1a730103`.
+   - Why this target: it is already source-probed, has no raw statics or prepared static meshes in
+     the reported "boulder" cell, and exercises cell-structure-only interior drawing.
+   - Browser flow: open V2 browser mode, set landblock input mode to `Dungeon`, enter
+     `0x1a730103`, wait for the `landblock-env-cells` commit, then inspect the debug tab. Use the
+     Env-cell AABBs and Env-cell portals overlays to confirm camera/current residency and authored
+     apertures. Toggle `Flat vision` only as a diagnostic comparison against the broad resident draw.
+   - Behavior to prove: Phase 4 current-cell-only drawing should submit only `0x1a730103` resources.
+     The target should make it obvious whether V2 is still drawing unrelated resident cell shells.
+
+2. Interior overlap/tunnel target: `0x1a73ffff`, tunnel cluster around `0x1a730102`,
+   `0x1a730103`, and `0x1a730304`; secondary comparison target `0x40d8ffff` around
+   `0x40d80102`, `0x40d80103`, `0x40d80285`, and `0x40d80286`.
+   - Why these targets: checked-in investigation found duplicate/coplanar portal-aperture clusters
+     with abnormal relationship topology. In `0x1a73ffff`, `0x1a730102/00` and
+     `0x1a730304/00` are non-reciprocal with zero incoming references, while `0x1a730103/00` is
+     reciprocal with two incoming references. The `0x40d8ffff` sample repeats the pattern.
+   - Browser flow: enter the representative env cell as a dungeon target, enable Env-cell portals,
+     inspect portal overlay/pick diagnostics at the tunnel junction, and compare normal rendering
+     against `Flat vision`. Do not use visual disappearance as proof of a source filter; compare
+     active/current env cell, portal records, accepted env-cell set, and eventually renderer
+     membership counts.
+   - Optional harness note: if browser portal diagnostics are insufficient, use
+     `cargo run -p holtburger-debug-harness --bin inspect_landblock_env_cell_bvh -- --landblock 1a73ffff --portal-clusters --portal-cluster-min-size 2`
+     or the equivalent `40d8ffff` command to re-check cluster membership and incoming-reference
+     counts.
+   - Behavior to prove: portal traversal and direct env-cell drawing should prevent unrelated capped
+     neighboring cell shells from reading as a solid tunnel obstruction. This is not a marker/static
+     object filtering target unless picking later proves a distinct explicit source object is
+     involved.
+
+3. Outdoor-to-indoor transition target: `0xf418ffff`, duplicate arch aperture involving
+   `0xf4180103/portal/01` and `0xf418010b/portal/00`.
+   - Why this target: the transition investigation found exact duplicate transformed aperture
+     points across two env cells with different portal flags. The current lesson is that
+     transition aperture batches are too coarse as the smallest portal-logic unit.
+   - Browser flow: open V2 browser mode in outdoor landblock mode for `0xf418ffff`, enable
+     Transition portals, and use the transition aperture overlay mode selector to inspect
+     outside-to-inside, inside-to-outside, and combined overlays. Use Env-cell portals only when
+     comparing the linked env-cell metadata; building-sourced transition aperture geometry remains
+     the mask authority for building portals.
+   - Optional harness note: use
+     `cargo run -p holtburger-debug-harness --bin inspect_env_cell_asset -- --env-cell f4180103`
+     and `--env-cell f418010b`, or
+     `cargo run -p holtburger-debug-harness --bin inspect_landblock_env_cell_bvh -- --landblock f418ffff --limit 0 --portal-duplicates`
+     if the browser overlay cannot explain a duplicate aperture.
+   - Behavior to prove: transition compositing must combine an outdoor offscreen target with
+     traversal-selected direct env-cell draws. It must not composite a single all-resident interior
+     target through every visible transition aperture.
+
+Source evidence notes:
+
+- ACE `EnvCell` decoding records separate `CellPortals`, `VisibleCells`, `StaticObjects`,
+  `EnvironmentId`, `CellStructure`, and `SeenOutside` facts. That supports treating portal traversal,
+  visible-cell/PVS data, static seeds, and cell-structure resources as related but distinct inputs.
+- ACE object maintenance uses current env cell plus `VisibleCells` for dungeon/interior dynamic
+  object visibility, and adds outdoor landblock objects separately when an env cell is `SeenOutside`.
+  This is not a renderer pass model, but it reinforces that "all resident env cells" is not the
+  semantic visibility set.
+- ACViewer is useful geometry-decoding evidence, but not a final portal-renderer parity oracle:
+  `R_CellStruct.Draw` draws cell-structure polygons while skipping `NoPos`, and landblock buffering
+  can add all env cells from a landblock. That is intentionally broader than retail portal view
+  execution.
+- Retail decompile evidence points at an actual portal view renderer. `PView::ConstructView`
+  initializes a draw list from a root env cell or building portal, `PView::ClipPortals` builds
+  clipped portal views, `PView::AddViewToPortals` expands through portal-linked cells, and
+  `PView::DrawCells` draws the resulting cell draw list. `PView::DrawPortal` bridges building
+  portals to an env-cell root. The decompile is secondary evidence, but it strongly argues against
+  wholesale resident interior rendering as the durable model.
+
+Open work for the user:
+
+- Manual browser inspection is expected for these targets once Phase 2 exposes renderer membership
+  counts. The key user-side check is visual: does current-cell/single-hop/portal traversal change
+  the tunnel and transition artifacts for the expected reason?
+- Retail comparison is still needed for the unresolved marker/static family
+  `0x00070145` / `02000c39` and outdoor `0x2f2fffff` object index `104` / `02000c3d`. This is
+  tracked separately from the portal renderer because the tunnel target no longer looks like an
+  authored static-object filter problem.
 
 ### Phase 2: Cell-Scoped Render Resource Membership
 

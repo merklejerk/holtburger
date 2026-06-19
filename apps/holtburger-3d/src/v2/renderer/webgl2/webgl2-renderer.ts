@@ -734,6 +734,7 @@ class Webgl2Renderer implements Renderer {
 	#frameState = defaultFrameState;
 	#staticRenderAnchorLandblockId: number | null = null;
 	#renderPassPlan: RenderPassPlan = { kind: "single-surface-resident" };
+	#flatVisionModeEnabled = false;
 	#lastExteriorSceneDomainDrawCalls = 0;
 	#lastInteriorSceneDomainDrawCalls = 0;
 	#lastCompositePasses = 0;
@@ -849,6 +850,15 @@ class Webgl2Renderer implements Renderer {
 
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void {
 		this.#staticRenderAnchorLandblockId = anchorLandblockId;
+		this.#emit();
+	}
+
+	setFlatVisionModeEnabled(enabled: boolean): void {
+		if (this.#flatVisionModeEnabled === enabled) {
+			return;
+		}
+		this.#flatVisionModeEnabled = enabled;
+		this.#stateCache.invalidate();
 		this.#emit();
 	}
 
@@ -1031,10 +1041,12 @@ class Webgl2Renderer implements Renderer {
 		this.#lastExecutedCompositeDepth = 0;
 		this.#lastCompositingMode = "none";
 
-		if (this.#renderPassPlan.kind === "single-surface-resident") {
+		const effectiveRenderPassPlan = this.#getEffectiveRenderPassPlan();
+
+		if (effectiveRenderPassPlan.kind === "single-surface-resident") {
 			this.#renderSingleSurfaceResident(pulse);
 		} else {
-			this.#renderSceneDomainTargets(pulse, this.#renderPassPlan);
+			this.#renderSceneDomainTargets(pulse, effectiveRenderPassPlan);
 		}
 		this.#drawDebugOverlay();
 
@@ -1566,6 +1578,11 @@ class Webgl2Renderer implements Renderer {
 					this.#stateCache,
 					resource.renderState,
 				);
+				applyStructuredInteriorCullState(
+					gl,
+					this.#stateCache,
+					this.#flatVisionModeEnabled,
+				);
 				this.#drawStaticMaterialResource(resource);
 				drawCalls += 1;
 			}
@@ -1821,6 +1838,7 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	#createSnapshot(): RendererSnapshot {
+		const effectiveRenderPassPlan = this.#getEffectiveRenderPassPlan();
 		return {
 			backend: "webgl2",
 			canvasWidth: this.#canvas.width,
@@ -1830,7 +1848,7 @@ class Webgl2Renderer implements Renderer {
 			frameCount: this.#frameCount,
 			frameHandlerMs: this.#frameHandlerMs,
 			isRunning: !this.#disposed,
-			renderPassPlan: this.#renderPassPlan,
+			renderPassPlan: effectiveRenderPassPlan,
 			renderedTriangles: sumRenderedTriangles([
 				...this.#terrainResources.values(),
 				...this.#staticObjectResources.values(),
@@ -1923,7 +1941,8 @@ class Webgl2Renderer implements Renderer {
 
 	#createSceneDomainTargetSnapshot(): SceneDomainTargetSnapshot {
 		return {
-			active: this.#renderPassPlan.kind === "portal-scene-domains",
+			active:
+				this.#getEffectiveRenderPassPlan().kind === "portal-scene-domains",
 			apertureBatchDrawCalls: this.#lastCompositeApertureBatchDrawCalls,
 			colorFormat: "rgb8",
 			compositePasses: this.#lastCompositePasses,
@@ -1935,6 +1954,13 @@ class Webgl2Renderer implements Renderer {
 			interiorDrawCalls: this.#lastInteriorSceneDomainDrawCalls,
 			width: this.#sceneDomainTargets?.width ?? 0,
 		};
+	}
+
+	#getEffectiveRenderPassPlan(): RenderPassPlan {
+		if (this.#flatVisionModeEnabled) {
+			return { kind: "single-surface-resident" };
+		}
+		return this.#renderPassPlan;
 	}
 
 	#configureDebugOverlayVertexArray(): void {
@@ -3306,6 +3332,7 @@ function applyStaticObjectDepthWritingState(
 ): void {
 	stateCache.setDepthState(createDepthState(gl, true, true));
 	stateCache.setBlendState(createBlendState(gl, false, gl.ONE, gl.ZERO));
+	stateCache.setCullState({ enabled: false, mode: gl.BACK });
 }
 
 function applyStaticObjectRenderState(
@@ -3314,6 +3341,7 @@ function applyStaticObjectRenderState(
 	renderState: StaticObjectRenderState,
 ): void {
 	stateCache.setDepthState(createDepthState(gl, true, renderState.depthWrite));
+	stateCache.setCullState({ enabled: false, mode: gl.BACK });
 	if (!renderState.blend.enabled) {
 		stateCache.setBlendState(createBlendState(gl, false, gl.ONE, gl.ZERO));
 		return;
@@ -3333,12 +3361,24 @@ function applyStaticObjectRenderState(
 	);
 }
 
+function applyStructuredInteriorCullState(
+	gl: WebGL2RenderingContext,
+	stateCache: Webgl2StateCache,
+	flatVisionModeEnabled: boolean,
+): void {
+	stateCache.setCullState({
+		enabled: flatVisionModeEnabled,
+		mode: gl.BACK,
+	});
+}
+
 function restoreStaticObjectRenderState(
 	gl: WebGL2RenderingContext,
 	stateCache: Webgl2StateCache,
 ): void {
 	stateCache.setDepthState(createDepthState(gl, true, true));
 	stateCache.setBlendState(createBlendState(gl, false, gl.ONE, gl.ZERO));
+	stateCache.setCullState({ enabled: false, mode: gl.BACK });
 }
 
 function applyDebugOverlayInvertBlendState(

@@ -968,6 +968,21 @@ export class StaticSceneQuery {
 			);
 	}
 
+	queryPortalInteriorRecords(
+		options: {
+			readonly landblockId?: number;
+		} = {},
+	): readonly StaticPortalInteriorRecord[] {
+		return [...this.#committedPortalInteriorRecordsByKey.values()]
+			.map((entry) => entry.record)
+			.filter(
+				(record) =>
+					options.landblockId === undefined ||
+					record.landblockId === options.landblockId,
+			)
+			.sort((left, right) => left.landblockId - right.landblockId);
+	}
+
 	queryTerrainQuadDetails(options: {
 		readonly landblockId: number;
 		readonly quadIndex: number;

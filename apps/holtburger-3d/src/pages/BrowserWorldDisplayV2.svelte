@@ -105,6 +105,8 @@
 	let detailEnabled = $state(true);
 	let envCellsEnabled = $state(true);
 	let envCellAabbDebugVisible = $state(false);
+	let envCellPortalDebugVisible = $state(false);
+	let flatVisionModeEnabled = $state(false);
 	let transitionApertureDebugVisible = $state(false);
 	let transitionApertureDebugMode =
 		$state<TransitionApertureDebugOverlayMode>("both");
@@ -155,6 +157,8 @@
 		try {
 			runtime = createBrowserV2Runtime(canvasElement);
 			runtime.setEnvCellAabbDebugOverlayVisible(envCellAabbDebugVisible);
+			runtime.setEnvCellPortalDebugOverlayVisible(envCellPortalDebugVisible);
+			runtime.setFlatVisionModeEnabled(flatVisionModeEnabled);
 			runtime.setTransitionApertureDebugOverlayVisible(
 				transitionApertureDebugVisible,
 			);
@@ -427,6 +431,18 @@
 	function handleEnvCellAabbDebugToggle(event: Event): void {
 		envCellAabbDebugVisible = (event.currentTarget as HTMLInputElement).checked;
 		runtime?.setEnvCellAabbDebugOverlayVisible(envCellAabbDebugVisible);
+	}
+
+	function handleEnvCellPortalDebugToggle(event: Event): void {
+		envCellPortalDebugVisible = (
+			event.currentTarget as HTMLInputElement
+		).checked;
+		runtime?.setEnvCellPortalDebugOverlayVisible(envCellPortalDebugVisible);
+	}
+
+	function handleFlatVisionModeToggle(event: Event): void {
+		flatVisionModeEnabled = (event.currentTarget as HTMLInputElement).checked;
+		runtime?.setFlatVisionModeEnabled(flatVisionModeEnabled);
 	}
 
 	function handleTransitionApertureDebugToggle(event: Event): void {
@@ -1458,6 +1474,30 @@
 						/>
 						<span>Env-cell AABBs</span>
 						<small>{snapshot?.debugOverlays.envCellAabbCount ?? 0}</small>
+					</label>
+					<label class="browser-v2__checkbox-row">
+						<input
+							checked={envCellPortalDebugVisible}
+							disabled={!runtime}
+							type="checkbox"
+							onchange={handleEnvCellPortalDebugToggle}
+						/>
+						<span>Env-cell portals</span>
+						<small>
+							{snapshot?.debugOverlays.envCellPortalCount ?? 0}
+						</small>
+					</label>
+					<label class="browser-v2__checkbox-row">
+						<input
+							checked={flatVisionModeEnabled}
+							disabled={!runtime}
+							type="checkbox"
+							onchange={handleFlatVisionModeToggle}
+						/>
+						<span>Flat vision</span>
+						<small>
+							{snapshot?.debugOverlays.flatVisionModeEnabled ? "on" : "off"}
+						</small>
 					</label>
 					<label class="browser-v2__checkbox-row">
 						<input

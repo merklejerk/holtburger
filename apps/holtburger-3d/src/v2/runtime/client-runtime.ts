@@ -41,8 +41,13 @@ import type {
 	StaticMaterialUnrenderedBucket,
 	ScheduledStaticWorkStatus,
 	StaticRetentionReconciliation,
+	StaticPortalInteriorRecord,
 	TransitionApertureBatch,
 } from "../static/contracts";
+import {
+	AC_UNIT_SCALE,
+	buildAcPlacementMatrix,
+} from "../static/bake/ac-placement-transform";
 import { collectStaticDrawUnitResourceIds } from "../static/contracts";
 import {
 	materializeStaticCommit,
@@ -148,6 +153,9 @@ export type TransitionApertureDebugOverlayMode =
 interface RuntimeDebugOverlaySnapshot {
 	readonly envCellAabbsVisible: boolean;
 	readonly envCellAabbCount: number;
+	readonly envCellPortalCount: number;
+	readonly envCellPortalsVisible: boolean;
+	readonly flatVisionModeEnabled: boolean;
 	readonly transitionApertureCount: number;
 	readonly transitionApertureMode: TransitionApertureDebugOverlayMode;
 	readonly transitionAperturesVisible: boolean;
@@ -375,6 +383,8 @@ export interface ClientRuntime {
 	): StaticSelectionDiagnosticsReport;
 	setStaticDebugSelection(selectionKey: StaticSceneSelectionKey | null): void;
 	setEnvCellAabbDebugOverlayVisible(visible: boolean): void;
+	setEnvCellPortalDebugOverlayVisible(visible: boolean): void;
+	setFlatVisionModeEnabled(enabled: boolean): void;
 	setTransitionApertureDebugOverlayMode(
 		mode: TransitionApertureDebugOverlayMode,
 	): void;
@@ -463,6 +473,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #reportedStaticResolverFailures = new Set<string>();
 	#staticDebugSelectionKey: StaticSceneSelectionKey | null = null;
 	#envCellAabbDebugOverlayVisible = false;
+	#envCellPortalDebugOverlayVisible = false;
+	#flatVisionModeEnabled = false;
 	#transitionApertureDebugOverlayVisible = false;
 	#transitionApertureDebugOverlayMode: TransitionApertureDebugOverlayMode =
 		"both";
@@ -672,6 +684,29 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#emit();
 	}
 
+	setEnvCellPortalDebugOverlayVisible(visible: boolean): void {
+		this.#assertActive();
+		if (this.#envCellPortalDebugOverlayVisible === visible) {
+			return;
+		}
+		this.#envCellPortalDebugOverlayVisible = visible;
+		this.#refreshStaticDebugOverlay();
+		this.#emit();
+	}
+
+	setFlatVisionModeEnabled(enabled: boolean): void {
+		this.#assertActive();
+		if (this.#flatVisionModeEnabled === enabled) {
+			return;
+		}
+		this.#flatVisionModeEnabled = enabled;
+		this.#renderer.setFlatVisionModeEnabled(enabled);
+		const renderPassPlanChanged = this.#updateRenderPassPlan();
+		if (!renderPassPlanChanged) {
+			this.#emit();
+		}
+	}
+
 	setTransitionApertureDebugOverlayVisible(visible: boolean): void {
 		this.#assertActive();
 		if (this.#transitionApertureDebugOverlayVisible === visible) {
@@ -813,6 +848,18 @@ class ClientRuntimeImpl implements ClientRuntime {
 	}
 
 	#updateRenderPassPlan(): boolean {
+		const plan = this.#flatVisionModeEnabled
+			? ({ kind: "single-surface-resident" } satisfies RenderPassPlan)
+			: this.#deriveRenderPassPlan();
+		if (renderPassPlanEquals(this.#lastRendererSnapshot.renderPassPlan, plan)) {
+			return false;
+		}
+
+		this.#renderer.setRenderPassPlan(plan);
+		return true;
+	}
+
+	#deriveRenderPassPlan(): RenderPassPlan {
 		const plan = deriveRenderPassPlan(
 			this.#currentCameraResidency,
 			this.#renderAnchorLandblockId,
@@ -821,12 +868,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					landblockId,
 				}),
 		);
-		if (renderPassPlanEquals(this.#lastRendererSnapshot.renderPassPlan, plan)) {
-			return false;
-		}
-
-		this.#renderer.setRenderPassPlan(plan);
-		return true;
+		return plan;
 	}
 
 	#createSnapshot(): RuntimeSnapshot {
@@ -838,6 +880,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 					? this.#staticSceneQuery.queryEnvCellAabbDebugBounds().length
 					: 0,
 				envCellAabbsVisible: this.#envCellAabbDebugOverlayVisible,
+				envCellPortalCount: this.#envCellPortalDebugOverlayVisible
+					? countEnvCellPortalApertures(
+							this.#staticSceneQuery.queryPortalInteriorRecords(),
+						)
+					: 0,
+				envCellPortalsVisible: this.#envCellPortalDebugOverlayVisible,
+				flatVisionModeEnabled: this.#flatVisionModeEnabled,
 				transitionApertureCount: this.#transitionApertureDebugOverlayVisible
 					? countTransitionApertures(
 							this.#staticSceneQuery.queryTransitionApertureBatches(),
@@ -1163,6 +1212,16 @@ class ClientRuntimeImpl implements ClientRuntime {
 						batch,
 						this.#renderAnchorLandblockId,
 						this.#transitionApertureDebugOverlayMode,
+					),
+				);
+			}
+		}
+		if (this.#envCellPortalDebugOverlayVisible) {
+			for (const record of this.#staticSceneQuery.queryPortalInteriorRecords()) {
+				primitives.push(
+					...createEnvCellPortalDebugOverlayPrimitives(
+						record,
+						this.#renderAnchorLandblockId,
 					),
 				);
 			}
@@ -1756,10 +1815,98 @@ function reverseTriangleWinding(
 	return reversed;
 }
 
+function createEnvCellPortalDebugOverlayPrimitives(
+	record: StaticPortalInteriorRecord,
+	renderAnchorLandblockId: number | null,
+): DebugOverlayPrimitive[] {
+	const primitives: DebugOverlayPrimitive[] = [];
+	const translation = createOutdoorLandblockRootTranslation(
+		record.landblockId,
+		renderAnchorLandblockId,
+	);
+	for (const envCell of record.envCells) {
+		const matrix = buildAcPlacementMatrix(envCell.localPlacement, AC_UNIT_SCALE);
+		for (const aperture of envCell.portalApertures) {
+			const vertices = triangulateEnvCellPortalAperture(
+				aperture.points,
+				matrix,
+				translation,
+			);
+			if (vertices.length === 0) {
+				continue;
+			}
+			primitives.push({
+				color: [0.05, 0.85, 1, 0.45],
+				id: `env-cell-portal:${formatHex32(record.landblockId)}:${formatHex32(envCell.envCellId)}:${aperture.portalId}`,
+				kind: "triangles",
+				vertices,
+			});
+		}
+	}
+	return primitives;
+}
+
+function triangulateEnvCellPortalAperture(
+	points: StaticPortalInteriorRecord["envCells"][number]["portalApertures"][number]["points"],
+	matrix: Float32Array,
+	translation: readonly [number, number, number],
+): readonly (readonly [number, number, number])[] {
+	if (points.length < 3) {
+		return [];
+	}
+	const vertices: Array<readonly [number, number, number]> = [];
+	for (let index = 1; index < points.length - 1; index += 1) {
+		vertices.push(
+			transformEnvCellPortalPoint(points[0], matrix, translation),
+			transformEnvCellPortalPoint(points[index], matrix, translation),
+			transformEnvCellPortalPoint(points[index + 1], matrix, translation),
+		);
+	}
+	return vertices;
+}
+
+function transformEnvCellPortalPoint(
+	point: StaticPortalInteriorRecord["envCells"][number]["portalApertures"][number]["points"][number],
+	matrix: Float32Array,
+	translation: readonly [number, number, number],
+): readonly [number, number, number] {
+	return [
+		matrix[0] * point.x +
+			matrix[4] * point.y +
+			matrix[8] * point.z +
+			matrix[12] +
+			translation[0],
+		matrix[1] * point.x +
+			matrix[5] * point.y +
+			matrix[9] * point.z +
+			matrix[13] +
+			translation[1],
+		matrix[2] * point.x +
+			matrix[6] * point.y +
+			matrix[10] * point.z +
+			matrix[14] +
+			translation[2],
+	];
+}
+
 function countTransitionApertures(
 	batches: readonly TransitionApertureBatch[],
 ): number {
 	return batches.reduce((count, batch) => count + batch.ranges.length, 0);
+}
+
+function countEnvCellPortalApertures(
+	records: readonly StaticPortalInteriorRecord[],
+): number {
+	return records.reduce(
+		(recordCount, record) =>
+			recordCount +
+			record.envCells.reduce(
+				(cellCount, envCell) => cellCount + envCell.portalApertures.length,
+				0,
+			),
+		0,
+	);
 }
 
 function createMinimumDebugOverlayBounds(bounds: StaticBounds): StaticBounds {

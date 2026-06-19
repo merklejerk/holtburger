@@ -2920,7 +2920,7 @@ Implementation notes from 2026-06-18:
 
 #### Phase 13B2c: Env-Cell Static Seed Marker Diagnostics And Validation
 
-Status: planned; depends on 13B2a-1 and requires manual browser/retail validation.
+Status: investigation in progress as of 2026-06-19; depends on 13B2a-1 and requires manual browser/retail validation.
 
 Purpose: identify the suspicious spawn-marker-looking dungeon statics before deciding whether to render, filter, or reclassify them.
 
@@ -2940,6 +2940,58 @@ Acceptance criteria:
 - The suspicious marker object can be identified by source DID and owning env cell from browser diagnostics.
 - The render/filter/reclassify decision is backed by manual retail/browser evidence and at least one source-code/reference check.
 - Any code change from the decision has focused tests and does not hide unrelated env-cell static seeds.
+
+Investigation notes from 2026-06-19:
+
+- Added debug-harness-only DAT probes:
+  - `cargo run -p holtburger-debug-harness --bin inspect_static_source_asset -- --did 02000c39 --did 02000c3d --dats dats/assets.hba`
+  - `cargo run -p holtburger-debug-harness --bin scan_static_source_usage -- --did 02000c38 --did 02000c39 --did 02000c3a --did 02000c3b --did 02000c3c --did 02000c3d --did 02000c3e --did 02000c3f --dats dats/assets.hba --limit 8`
+  - `inspect_static_source_asset` now prints setup default-script hook summaries and texture/palette alpha summaries for the inspected source assets.
+- User-provided browser picks identify two suspicious examples:
+  - dungeon/env-cell STAB: `landblock=0x0007ffff`, `envCell=0x00070145`, static index `5`, source `setup-model/02000c39`;
+  - outdoor explicit object: `landblock=0x2f2fffff`, object index `104`, source `setup-model/02000c3d`.
+- `inspect_env_cell_asset --env-cell 00070145` confirms the dungeon object is authored in the raw env-cell STAB list and prepares as `setup-model/02000c39` part `0` using `gfx-obj/010028ca`.
+- `02000c39` and `02000c3d` are not unique one-off bad records. The `02000c39`-`02000c3f` setup-model family shares `gfx-obj/010028ca`, has one part, no default animation/script/motion/sound, no physics polygons, zero-radius sorting/selection spheres, and a tiny 24-triangle render mesh with opaque textured materials `0x08000109`/`0x0800010a`.
+- Usage scan shows this family appears in both outdoor explicit objects and env-cell STABs. Examples: `02000c39` appears in 16 outdoor explicit placements and 772 env-cell STAB placements; `02000c3d` appears in 1 outdoor explicit placement, including `0x2f2ffffe` object index `104`, and 57 env-cell STAB placements.
+- ACViewer/ACE reference check:
+  - ACE/ACViewer decode these as ordinary STAB/static object placements; ACE's `Stab` comment only identifies them as object+position records.
+  - ACViewer draws env-cell static objects and outdoor static objects generally.
+  - ACViewer has explicit render/export/picker skips for `gfx-obj/010001ec` labeled "anchor locations"; that corresponds to nearby `setup-model/02000c38`, not the `010028ca` family in the user's examples. This is a clue that marker-like assets exist, but it is not a direct filter for `02000c39`-`02000c3f`.
+- Retail decompile check:
+  - `CEnvCell::init_static_objects` and `CLandBlock::init_static_objs` instantiate STAB/env-cell and outdoor static objects generally through `CPhysicsObj::makeObject`.
+  - Static placement source DIDs are passed directly as setup-model DIDs into `CPhysicsObj::makeObject`, then `CPhysicsObj::InitPartArrayObject`, then `CPartArray::CreateSetup` / `CPartArray::SetSetupID`. The inspected path does not branch on `02000c39`, `02000c3d`, `010028ca`, or nearby source-family IDs before part-array creation.
+  - `CPhysicsObj::InitDefaults` copies setup-authored defaults into the runtime physics object: default script, motion table, sound table, physics script table, and static animation registration. The sampled `010028ca` setup family has none of these defaults, so this setup-level path does not explain retail suppression.
+  - The normal draw path is generic: `CPhysicsObj::DrawRecursive` -> `CPartArray::Draw` -> `CPhysicsPart::Draw`.
+  - `CPhysicsPart::Draw` skips only when the runtime part no-draw bit is already set; no hard-coded skip for `02000c39`, `02000c3d`, or `010028ca` was found.
+  - `CSetup` flags do not expose an obvious no-draw asset bit. The observed `flags=0x00000005` maps to parent-index data plus `has_physics_bsp`; `0x8` maps to `allow_free_heading`.
+  - `NoDrawHook` is animation hook type `16` and executes `CPhysicsObj::set_nodraw(...)`. The sampled `010028ca` family has no default script, default motion table, sound table, or script table, so it has no obvious setup-authored runtime no-draw path.
+  - Retail rendering does not draw every static object directly from `static_objects`; static objects add their parts into the visible cell's shadow-part lists through `calc_cross_cells_static`, `CPartArray::AddPartsShadow`, and `CPartCell::add_part`; `RenderDeviceD3D::DrawPartCell` then draws those shadow parts. For setup models without cylspheres, `calc_cross_cells_static` falls back through `find_bbox_cell_list` and part bounds, so zero setup selection/sorting spheres and no physics polygons are not enough to exclude the object from the render list.
+- ACViewer-skipped anchor comparison:
+  - `setup-model/02000c38` uses `gfx-obj/010001ec`, has `default_script=0x33000c4a`, and that script contains hook type `21` (`SoundTweaked`) plus hook type `19` (`CallPES`), not hook type `16` (`NoDraw`).
+  - The hook type `19` path calls `CPhysicsObj::CallPES`, which schedules or plays another physics script; for `0x33000c4a` it appears to form a looping sound/script behavior rather than a no-draw behavior.
+  - `010001ec` uses surface `0x08000015` with type `0x14` (`BASE1_CLIP_MAP | TRANSLUCENT`) and `translucency=1.0`, so its retail invisibility is plausibly material/translucency-driven rather than a no-draw script bit.
+  - The user's `010028ca` markers differ: surfaces `0x08000109`/`0x0800010a` are ordinary image surfaces with `translucency=0.0`, and inspected palette entries have nonzero alpha. The "transparent anchor material" explanation does not cover them.
+- Current conclusion:
+  - There is no proven asset no-draw bit for either marker family.
+  - `010001ec` is a known ACViewer "anchor location" and likely self-suppresses through transparent material semantics in retail/ACViewer, with ACViewer also hard-skipping it defensively.
+  - `010028ca` remains unresolved. If retail suppresses it, the suppressing rule is not visible in the inspected setup-source creation path, not the same as the obvious ACViewer `010001ec` anchor skip, not a parsed transparent material, not a setup default NoDrawHook, and not exclusion due merely to zero setup selection/sorting sphere/no physics polygons.
+  - Do not implement a filter for `010028ca` yet without either a stronger retail/client-code predicate or a deliberate, documented source-family classification decision.
+- Current evidence still favors a shared static-source classification/filter if retail validation confirms the family is non-renderable. Do not implement this as an env-cell-only suppression or renderer-only skip; the same source family appears outdoors.
+- Additional user-reported retail-invisible candidate: "big rock" blocking an underground tunnel entrance in or around `0x1a730103`.
+  - `cargo run -p holtburger-debug-harness --bin inspect_env_cell_asset -- --env-cell 1a730103 --dats dats/assets.hba` shows `rawStatics=0`, `preparedStaticMeshes=0`, `renderTriangles=12`, `portals=2`, and `apertures=2`. This candidate is not an env-cell STAB/static-seed object in `0x1a730103`; it is cell-structure geometry or a neighboring cell's cell-structure geometry.
+  - Neighbor probes for `0x1a730100` and linked `0x1a730303` also show pure cell-structure geometry with no raw statics or prepared static meshes.
+  - Follow-up BSP-membership probes show every raw render polygon in `0x1a730103`, `0x1a730100`, and `0x1a730303` is inside its cell BSP by the same positive-half-space classifier used for env-cell BVH bounds. The candidate does not appear to be removable by "drop cell-structure polygons outside the env-cell BSP."
+  - Those same cells report `seenOutside=Some(true)` and 14 authored visible cells. The asset data also does not obviously mark the entire env cell as ignorable.
+  - ACViewer `R_CellStruct.Draw` draws `CellStruct.Polygons.Values` and skips only `StipplingType.NoPos`; retail `RenderDeviceD3D::DrawEnvCell` either draws a built mesh or queues every `structure->polygons` entry into the poly list, with portal polygons naturally skipped when their positive surface is non-renderable. This does not expose a source-object no-draw predicate.
+  - Retail env-cell rendering is portal-view driven (`PView::DrawPortal`, `CEnvCell::setup_view`, portal clipping/view setup). V2 currently commits/draws resident structured-interior resources as whole cell shells for non-exterior passes; the WebGL2 draw loop does not filter structured-interior draw units by a per-frame portal traversal set or clip child-cell geometry to portal apertures.
+  - Working hypothesis: the tunnel "rock" is likely an un-clipped neighboring/accepted cell shell being drawn wholesale, not a hidden authored static marker. Treat this as a separate portal/interior visibility-rendering concern unless a later pick/diagnostic proves an explicit source object is involved.
+- Temporary visual probe added on 2026-06-19: V2 structured-interior baking hard-skips draw units for env cells `0x1a730100` through `0x1a730103` so the scene can be manually compared without those shells. This is intentionally not a final filtering rule and must be removed or replaced with a portal/visibility-derived policy after validation.
+- Manual validation update: the "boulder" appears to be overlapping capped tunnel cell shells at a tunnel junction, not a continuous authored tunnel mesh and not a distinct static object. When V2 draws both capped cells wholesale, the overlapping caps read visually as a solid boulder. This strengthens the portal/interior visibility hypothesis: the fix should come from portal-aware cell-shell draw selection/clipping, not source-asset filtering and not whole-cell hard suppression.
+- Added a browser V2 `Env-cell portals` debug toggle that draws committed env-cell portal aperture polygons as translucent debug triangles. This is intended to visually compare authored portal apertures against capped tunnel shell geometry while investigating portal-aware interior draw filtering.
+- Added a browser/runtime V2 `Flat vision` diagnostic mode. While enabled, runtime forces the renderer into the single-surface resident path instead of portal-scene-domain compositing, and the WebGL2 renderer draws structured-interior cell structures with back-face culling enabled. This is a diagnostic lens for comparing whole-shell rendering against portal/clipped rendering assumptions; it is not the final portal visibility policy.
+- Remaining user/manual work: verify at least `0x00070145` / `02000c39` and outdoor `0x2f2fffff` object index `104` / `02000c3d` against retail. If retail suppresses both, classify the `02000c39`-`02000c3f` source family, or a proven structural predicate that captures it, as non-renderable authored marker/static metadata.
+- Remaining engineering investigation: split the "retail-invisible cell shell" symptom out of marker filtering and into Phase 13B3/portal visibility work. The next proof should compare a V2 frame near `0x1a730103` against the active/current env cell, accepted env-cell set, portal links, and rendered structured-interior draw-unit list.
+- Validation for the investigation tools: `cargo check -p holtburger-debug-harness --bins`.
 
 ### Phase 13B3: Interior Visual Parity And Portal Verification
 

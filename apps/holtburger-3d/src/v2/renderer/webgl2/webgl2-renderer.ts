@@ -1639,7 +1639,7 @@ class Webgl2Renderer implements Renderer {
 			gl.drawArrays(gl.TRIANGLES, 0, this.#debugOverlayTriangleVertexCount);
 		}
 		if (this.#debugOverlayLineVertexCount > 0) {
-			applyDebugOverlayInvertBlendState(gl, this.#stateCache);
+			applyDebugOverlayAlphaBlendState(gl, this.#stateCache);
 			this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
 			gl.lineWidth(1);
 			gl.drawArrays(
@@ -3379,21 +3379,6 @@ function restoreStaticObjectRenderState(
 	stateCache.setDepthState(createDepthState(gl, true, true));
 	stateCache.setBlendState(createBlendState(gl, false, gl.ONE, gl.ZERO));
 	stateCache.setCullState({ enabled: false, mode: gl.BACK });
-}
-
-function applyDebugOverlayInvertBlendState(
-	gl: WebGL2RenderingContext,
-	stateCache: Webgl2StateCache,
-): void {
-	stateCache.setBlendState({
-		dstAlpha: gl.ONE,
-		dstRgb: gl.ONE,
-		enabled: true,
-		equationAlpha: gl.FUNC_ADD,
-		equationRgb: gl.FUNC_SUBTRACT,
-		srcAlpha: gl.ZERO,
-		srcRgb: gl.ONE,
-	});
 }
 
 function applyDebugOverlayAlphaBlendState(

@@ -60,11 +60,13 @@ interface StaticScenePickFilters {
 export type StaticScenePickHit =
 	| OutdoorStaticObjectScenePickHit
 	| EnvCellStaticScenePickHit
+	| EnvCellPortalScenePickHit
 	| TerrainQuadScenePickHit;
 
 export type StaticSceneSelectionKey =
 	| OutdoorStaticObjectSceneSelectionKey
 	| EnvCellStaticSceneSelectionKey
+	| EnvCellPortalSceneSelectionKey
 	| TerrainQuadSceneSelectionKey;
 
 export interface OutdoorStaticObjectSceneSelectionKey {
@@ -80,6 +82,14 @@ export interface EnvCellStaticSceneSelectionKey {
 	readonly landblockId: number;
 	readonly envCellId: number;
 	readonly instanceId: string;
+}
+
+export interface EnvCellPortalSceneSelectionKey {
+	readonly itemKind: "env-cell-portal";
+	readonly domain: "landblock-env-cells";
+	readonly landblockId: number;
+	readonly envCellId: number;
+	readonly portalId: string;
 }
 
 export interface TerrainQuadSceneSelectionKey {
@@ -103,6 +113,14 @@ export interface EnvCellStaticScenePickHit {
 	readonly hitPoint: Vec3;
 	readonly bounds: StaticBounds;
 	readonly selectionKey: EnvCellStaticSceneSelectionKey;
+}
+
+export interface EnvCellPortalScenePickHit {
+	readonly kind: "static-scene-pick-hit";
+	readonly distance: number;
+	readonly hitPoint: Vec3;
+	readonly bounds: StaticBounds;
+	readonly selectionKey: EnvCellPortalSceneSelectionKey;
 }
 
 export interface TerrainQuadScenePickHit {
@@ -1069,6 +1087,10 @@ export class StaticSceneQuery {
 			return null;
 		}
 
+		if (selectionKey.itemKind === "env-cell-portal") {
+			return null;
+		}
+
 		const landblockRoot = this.#envCellRootsByLandblockId.get(
 			selectionKey.landblockId,
 		);
@@ -1378,14 +1400,19 @@ export class StaticSceneQuery {
 	#upsertCommittedSpatialRecords(
 		records: readonly StaticSpatialRecord[],
 	): void {
-		const replacementKeys = new Set(records.map(createCommittedSpatialRecordKey));
+		const replacementKeys = new Set(
+			records.map(createCommittedSpatialRecordKey),
+		);
 		const completeScopeOwnerKeys = new Set(
 			records
 				.filter((record) => record.kind === "env-cell-spatial")
 				.map((record) => createStaticPeerOwnerKey(record.owner)),
 		);
 		for (const [key, entry] of this.#committedSpatialRecordsByKey) {
-			if (replacementKeys.has(key) || completeScopeOwnerKeys.has(entry.ownerKey)) {
+			if (
+				replacementKeys.has(key) ||
+				completeScopeOwnerKeys.has(entry.ownerKey)
+			) {
 				this.#committedSpatialRecordsByKey.delete(key);
 			}
 		}
@@ -1702,10 +1729,7 @@ export class StaticSceneQuery {
 					createAcceptedEnvCellSet(candidate.envCellRoot.acceptedEnvCellIds),
 					nearestHit,
 				);
-				nearestHit = selectNearestHit(
-					nearestHit,
-					envCellHit,
-				);
+				nearestHit = selectNearestHit(nearestHit, envCellHit);
 			}
 		}
 
@@ -1878,7 +1902,9 @@ export class StaticSceneQuery {
 					if (!landblockItem) {
 						continue;
 					}
-					if (!isAcceptedEnvCellId(acceptedEnvCellIds, landblockItem.envCellId)) {
+					if (
+						!isAcceptedEnvCellId(acceptedEnvCellIds, landblockItem.envCellId)
+					) {
 						continue;
 					}
 					const root = landblockRoot.cellsByEnvCellId.get(
@@ -2828,6 +2854,20 @@ export function createEnvCellStaticObjectSelectionKey(options: {
 	};
 }
 
+export function createEnvCellPortalSelectionKey(options: {
+	readonly landblockId: number;
+	readonly envCellId: number;
+	readonly portalId: string;
+}): EnvCellPortalSceneSelectionKey {
+	return {
+		domain: "landblock-env-cells",
+		envCellId: options.envCellId,
+		itemKind: "env-cell-portal",
+		landblockId: options.landblockId,
+		portalId: options.portalId,
+	};
+}
+
 export function createTerrainQuadSelectionKey(options: {
 	readonly landblockId: number;
 	readonly quadIndex: number;
@@ -2866,6 +2906,15 @@ export function describeStaticSceneSelectionKey(
 			selectionKey.domain,
 			selectionKey.landblockId.toString(16),
 			selectionKey.quadIndex,
+		].join(":");
+	}
+	if (selectionKey.itemKind === "env-cell-portal") {
+		return [
+			selectionKey.itemKind,
+			selectionKey.domain,
+			selectionKey.landblockId.toString(16),
+			selectionKey.envCellId.toString(16),
+			selectionKey.portalId,
 		].join(":");
 	}
 

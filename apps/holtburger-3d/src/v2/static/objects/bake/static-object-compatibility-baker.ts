@@ -20,8 +20,10 @@ import type {
 	StaticObjectSortMetadata,
 	StaticObjectSourceIdentity,
 	StaticSpatialRecord,
+	StaticWorkPeerRecordOwner,
 	TransitionApertureBatch,
 } from "../../contracts";
+import { describeStaticScopeKey } from "../../demand-planner";
 import {
 	AC_UNIT_SCALE,
 	buildAcPlacementMatrix,
@@ -442,17 +444,17 @@ function createStaticObjectGeometryBakeOutput(options: {
 	return {
 		drawUnit,
 		objectSpatialRecords: createEnvCellStaticObjectSpatialRecords({
-			drawUnitId,
 			geometry,
 			payload: options.payload,
+			workOwner: createWorkPeerRecordOwner(options.work),
 		}),
 	};
 }
 
 function createEnvCellStaticObjectSpatialRecords(options: {
-	readonly drawUnitId: string;
 	readonly geometry: ReturnType<typeof bakeStaticObjectPartitionGeometry>;
 	readonly payload: StaticObjectCompatibilityPayload;
+	readonly workOwner: StaticWorkPeerRecordOwner;
 }): readonly StaticEnvCellStaticObjectSpatialRecord[] {
 	if (options.payload.domain !== "landblock-env-cells") {
 		return [];
@@ -484,14 +486,23 @@ function createEnvCellStaticObjectSpatialRecords(options: {
 					instanceId: object.identity.instanceId,
 					kind: "env-cell-static-object-bounds",
 					landblockId: object.identity.landblockId,
-					owner: {
-						drawUnitId: options.drawUnitId,
-						kind: "draw-unit",
-					},
+					owner: options.workOwner,
 				},
 			];
 		},
 	);
+}
+
+function createWorkPeerRecordOwner(
+	work: ScheduledStaticWork,
+): StaticWorkPeerRecordOwner {
+	return {
+		domain: work.job.domain,
+		kind: "work",
+		scope: work.job.scope,
+		scopeKey: describeStaticScopeKey(work.job.scope),
+		workId: work.workId,
+	};
 }
 
 function createStaticObjectMaterialTableEntries(options: {

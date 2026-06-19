@@ -793,6 +793,12 @@ describe("V2 landblock env-cell baker", () => {
 					instanceId: "da550100:env-cell-static-0",
 					kind: "env-cell-static-object-bounds",
 					landblockId: 0xda55ffff,
+					owner: expect.objectContaining({
+						domain: "landblock-env-cells",
+						kind: "work",
+						scopeKey: "landblock:da55ffff",
+						workId: "7:landblock:da55ffff:landblock-env-cells",
+					}),
 				}),
 			]),
 		);

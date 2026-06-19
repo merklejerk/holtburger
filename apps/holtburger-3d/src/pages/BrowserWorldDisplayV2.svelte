@@ -721,21 +721,6 @@
 			viewport,
 		});
 		const hit = runtime.pickStaticRay(pickRequest);
-		console.info("[holtburger-3d][v2][browser-static-pick]", {
-			camera,
-			contextLocation,
-			currentCameraResidency: snapshot?.currentCameraResidency ?? null,
-			hit,
-			pickRequest,
-			sceneInterest: snapshot?.sceneInterest ?? null,
-			staticSceneQuery: snapshot?.staticSceneQuery ?? null,
-			viewport: {
-				height: viewport.height,
-				left: viewport.left,
-				top: viewport.top,
-				width: viewport.width,
-			},
-		});
 		selectedStaticSelectionKey = hit?.selectionKey ?? null;
 		selectedStaticPickDistance = hit?.distance ?? null;
 		selectedStaticDiagnosticsReportText = null;

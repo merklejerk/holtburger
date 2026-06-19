@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import type {
 	LandblockEnvCellsStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
-	StaticPeerRecordOwner,
 	StaticBounds,
+	StaticWorkPeerRecordOwner,
 	TerrainStaticScopePayload,
 	TransitionApertureBatch,
 } from "../static/contracts";
@@ -562,7 +562,7 @@ describe("V2 static scene query", () => {
 		});
 	});
 
-	it("removes draw-unit-owned committed records by materialized resource key", () => {
+	it("retains work-owned env-cell static bounds when draw-unit resources are removed", () => {
 		const query = new StaticSceneQuery();
 		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
 		query.applyStaticSpatialRecords({
@@ -576,10 +576,7 @@ describe("V2 static scene query", () => {
 					instanceId: "env-static-0",
 					kind: "env-cell-static-object-bounds",
 					landblockId: 0xda55ffff,
-					owner: {
-						drawUnitId: "env-cell-static-draw-unit#fine-1",
-						kind: "draw-unit",
-					},
+					owner: createEnvCellWorkOwner("work-env-static-object", 0xda55ffff),
 				},
 			],
 		});
@@ -593,7 +590,60 @@ describe("V2 static scene query", () => {
 		]);
 
 		expect(query.createSnapshot()).toMatchObject({
-			committedEnvCellSpatialRecordCount: 1,
+			committedEnvCellSpatialRecordCount: 2,
+		});
+		expect(
+			query.pickRay({
+				context: {
+					acceptedEnvCellIds: [0xda550100],
+					envCellId: 0xda550100,
+					kind: "env-cell",
+					landblockId: 0xda55ffff,
+				},
+				ray: {
+					direction: { x: 0, y: 0, z: -1 },
+					origin: { x: 0, y: 0, z: 0 },
+				},
+			}),
+		).toMatchObject({
+			selectionKey: {
+				envCellId: 0xda550100,
+				instanceId: "env-static-0",
+				itemKind: "env-cell-static-object",
+			},
+		});
+	});
+
+	it("prunes work-owned env-cell static bounds when retained env-cell scopes are released", () => {
+		const query = new StaticSceneQuery();
+		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
+		commitEnvCellStaticObjectBounds(query);
+
+		expect(
+			query.pickRay({
+				context: {
+					acceptedEnvCellIds: [0xda550100],
+					envCellId: 0xda550100,
+					kind: "env-cell",
+					landblockId: 0xda55ffff,
+				},
+				ray: {
+					direction: { x: 0, y: 0, z: -1 },
+					origin: { x: 0, y: 0, z: 0 },
+				},
+			}),
+		).toMatchObject({
+			selectionKey: {
+				envCellId: 0xda550100,
+				instanceId: "env-static-0",
+				itemKind: "env-cell-static-object",
+			},
+		});
+
+		query.retainScopes([]);
+
+		expect(query.createSnapshot()).toMatchObject({
+			committedEnvCellSpatialRecordCount: 0,
 		});
 		expect(
 			query.pickRay({
@@ -1741,7 +1791,7 @@ function createLandblockEnvCellsPayload(
 function createEnvCellWorkOwner(
 	workId: string,
 	landblockId: number,
-): StaticPeerRecordOwner {
+): StaticWorkPeerRecordOwner {
 	return {
 		domain: "landblock-env-cells",
 		kind: "work",
@@ -1825,12 +1875,13 @@ function commitEnvCellStaticObjectBounds(
 	query: StaticSceneQuery,
 	options: {
 		readonly bounds?: StaticBounds;
-		readonly drawUnitId?: string;
 		readonly envCellId?: number;
 		readonly instanceId?: string;
 		readonly landblockId?: number;
+		readonly owner?: StaticWorkPeerRecordOwner;
 	} = {},
 ): void {
+	const landblockId = options.landblockId ?? 0xda55ffff;
 	query.applyStaticSpatialRecords({
 		records: [
 			{
@@ -1841,11 +1892,10 @@ function commitEnvCellStaticObjectBounds(
 				envCellId: options.envCellId ?? 0xda550100,
 				instanceId: options.instanceId ?? "env-static-0",
 				kind: "env-cell-static-object-bounds",
-				landblockId: options.landblockId ?? 0xda55ffff,
-				owner: {
-					drawUnitId: options.drawUnitId ?? "env-cell-static-draw-unit",
-					kind: "draw-unit",
-				},
+				landblockId,
+				owner:
+					options.owner ??
+					createEnvCellWorkOwner("work-env-static-object", landblockId),
 			},
 		],
 	});

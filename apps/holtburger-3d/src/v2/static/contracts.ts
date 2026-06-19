@@ -822,7 +822,7 @@ export interface StaticDrawUnitSpatialRecord {
 
 export interface StaticEnvCellStaticObjectSpatialRecord {
 	readonly kind: "env-cell-static-object-bounds";
-	readonly owner: StaticDrawUnitPeerRecordOwner;
+	readonly owner: StaticWorkPeerRecordOwner;
 	readonly landblockId: number;
 	readonly envCellId: number;
 	readonly instanceId: string;

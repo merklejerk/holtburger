@@ -7,6 +7,7 @@ import type {
 	StaticDrawUnit,
 	StaticObjectGeometryStaticDrawUnit,
 	StaticMaterialTableEntry,
+	StaticWorkPeerRecordOwner,
 	TerrainGeometryStaticDrawUnit,
 	TransitionApertureBatch,
 } from "../static/contracts";
@@ -110,10 +111,7 @@ describe("V2 static materializer", () => {
 						instanceId: "da550100:env-cell-static-0",
 						kind: "env-cell-static-object-bounds",
 						landblockId: 0xda55ffff,
-						owner: {
-							drawUnitId: "static-table",
-							kind: "draw-unit",
-						},
+						owner: createEnvCellWorkOwner(),
 					},
 				],
 				textureUses: drawUnit.textureUseIds.map((textureUseId) =>
@@ -205,10 +203,7 @@ describe("V2 static materializer", () => {
 				instanceId: "da550100:env-cell-static-0",
 				kind: "env-cell-static-object-bounds",
 				landblockId: 0xda55ffff,
-				owner: {
-					drawUnitId: "static-table",
-					kind: "draw-unit",
-				},
+				owner: createEnvCellWorkOwner(),
 			},
 			{
 				drawUnitId: "static-table",
@@ -359,6 +354,16 @@ function createTransitionApertureBatch(): TransitionApertureBatch {
 			{ x: 1, y: 0, z: 0 },
 			{ x: 0, y: 1, z: 0 },
 		],
+	};
+}
+
+function createEnvCellWorkOwner(): StaticWorkPeerRecordOwner {
+	return {
+		domain: "landblock-env-cells",
+		kind: "work",
+		scope: { kind: "landblock", landblockId: 0xda55ffff },
+		scopeKey: "landblock:da55ffff",
+		workId: "7:landblock:da55ffff:landblock-env-cells",
 	};
 }
 

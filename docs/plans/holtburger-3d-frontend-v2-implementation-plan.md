@@ -1533,7 +1533,7 @@ Dry-run notes:
   - Coordinator: `reconcileStaticDemand` returns retained scopes, removed scopes, and removed resources from the same reconciliation; scope-only eviction still returns/commits `removedScopes` when there are no draw units.
   - Runtime: `updateSceneInterest` calls one retention helper and query semantic retention happens immediately from `retainedScopes`, while renderer removals still arrive through materialized resource deltas.
   - Query: `retainScopes([env-cell scope])` keeps both source roots and committed env-cell records; `retainScopes([])` removes both. `applyStaticPeerRecords` no longer accepts `removedScopes`.
-  - Query resource cleanup: draw-unit-owned env-cell static bounds still disappear when the materialized draw-unit resource is removed without evicting the whole landblock scope.
+  - Query resource cleanup: true draw-unit-owned query records still disappear when the materialized draw-unit resource is removed without evicting the whole landblock scope; env-cell static object bounds are scope-owned as of Phase 13B2a-1 and are pruned by retained-scope lifecycle instead.
   - Materializer/runtime split: source draw-unit removal still expands to all materialized draw units, proving the renderer boundary remains resource-keyed.
 - Blind spot to watch while implementing:
   - `retainScopes(...)` currently rebuilds the landblock grid index after deleting roots. If committed env-cell BVH promotion happens later, make sure that index rebuild remains tied to semantic retention, not resource commit timing.
@@ -2767,12 +2767,119 @@ Implementation notes from 2026-06-18:
 - The dungeon debug UX was misleading because Browser V2 reported the submitted env cell directly in interior mode instead of exercising the query layer. Browser V2 now asks the runtime for landblock-local camera residency and only falls back to the submitted env cell if that query misses.
 - The concrete picking bug was coordinate-frame drift: env-cell broad BVH traversal used the raw render-local ray, while terrain/outdoor roots translate rays into root-local space before traversal. Env-cell picking now follows the same model and translates returned bounds back into render-local space.
 - A second explicit-object picking bug was isolated through browser/runtime diagnostics: env-cell static seed draw units rendered, but `bakeLandblockEnvCells` dropped the nested static-object baker's `env-cell-static-object-bounds` spatial records. The baker now forwards those records, and a regression test proves renderable env-cell static seeds emit pick bounds.
-- A third record-lifecycle bug was then exposed: the runtime materializer fine-splits static object draw units, drops source draw-unit-owned peer records, and previously only re-added split draw-unit bounds. It now remaps draw-unit-owned `env-cell-static-object-bounds` records to a materialized draw-unit owner so they survive texture/material fine-splitting and still evict with the materialized draw unit.
+- A third record-lifecycle bug was then exposed: the runtime materializer fine-splits static object draw units, drops source draw-unit-owned peer records, and previously only re-added split draw-unit bounds. The temporary draw-unit-owned remap was replaced in Phase 13B2a-1 with scope/work-owned `env-cell-static-object-bounds`, so explicit env-cell object bounds no longer depend on materialized draw-unit lifecycle.
 - This intentionally does not make walls/floors pickable. Current env-cell picking targets committed env-cell static seed bounds only.
+
+#### Phase 13B2a-1: Scope-Owned Env-Cell Static Object Bounds Course Correction
+
+Status: complete on 2026-06-18.
+
+Purpose: replace the draw-unit-owned `env-cell-static-object-bounds` lifecycle with a scope/work-owned lifecycle that matches env-cell explicit-object semantics and outdoor static picking more closely.
+
+Why this is necessary:
+
+- Env-cell explicit objects originate as DAT-authored `EnvCell.static_objects` / STAB placement facts inside a retained `landblock-env-cells` scope.
+- Their pick identity is semantic: `{ landblockId, envCellId, instanceId }`.
+- Draw units are a render/materialization artifact. They can be fine-split for texture limits, remapped, evicted, or re-created without changing the authored object identity.
+- The temporary draw-unit-owned fix makes picking depend on render materialization lifecycle. It required `static-materializer.ts` to remap `env-cell-static-object-bounds` across fine-split draw units, which is exactly the wrong layer to understand env-cell explicit-object identity.
+- Outdoor static picking does not have this coupling: outdoor object bounds are source/query facts in the outdoor payload/BVH, while draw units may still be materialized separately. Env-cell explicit-object bounds should move toward that model.
+
+Ground truth and current touch points:
+
+- Contract: `StaticEnvCellStaticObjectSpatialRecord` in `apps/holtburger-3d/src/v2/static/contracts.ts`.
+- Bound generation: `createEnvCellStaticObjectSpatialRecords` in `apps/holtburger-3d/src/v2/static/objects/bake/static-object-compatibility-baker.ts`.
+- Env-cell batch aggregation: `bakeLandblockEnvCells` in `apps/holtburger-3d/src/v2/static/env-cells/bake/landblock-env-cells-baker.ts`.
+- Materializer workaround to delete: `remapEnvCellStaticObjectBoundsRecords` in `apps/holtburger-3d/src/v2/runtime/static-materializer.ts`.
+- Query ownership and cleanup: `StaticSceneQuery.#upsertCommittedSpatialRecords`, `retainScopes`, `removeStaticResources`, and `#pruneCommittedRecordsByRetainedScopes` in `apps/holtburger-3d/src/v2/runtime/static-scene-query.ts`.
+
+Deliverables:
+
+- Change `StaticEnvCellStaticObjectSpatialRecord.owner` from `StaticDrawUnitPeerRecordOwner` to `StaticWorkPeerRecordOwner`.
+- Make this a clean cutover, not a compatibility bridge:
+  - do not support both draw-unit-owned and work-owned `env-cell-static-object-bounds`;
+  - update all producers, consumers, tests, and fixtures in the same phase;
+  - remove any helper whose only purpose was preserving the draw-unit-owned model.
+- Emit env-cell static object bounds with the `landblock-env-cells` work/scope owner, not the static object draw-unit owner.
+  - Thread the relevant `ScheduledStaticWork` / `StaticWorkPeerRecordOwner` into `createEnvCellStaticObjectSpatialRecords`.
+  - Keep the record keyed by `{ landblockId, envCellId, instanceId }`; do not introduce draw-unit ids into semantic pick keys.
+- Remove the materializer-specific lifecycle workaround:
+  - delete `remapEnvCellStaticObjectBoundsRecords`;
+  - stop special-casing `env-cell-static-object-bounds` during static object fine-split materialization;
+  - prove `static-materializer.ts` passes scope/work-owned env-cell object bounds through unchanged.
+- Update `StaticSceneQuery` storage/cleanup:
+  - remove `ownerDrawUnitId` from `#envCellStaticBoundsOverridesByKey` values if it is no longer used;
+  - make `removeStaticResources` no longer delete env-cell static object bounds by draw-unit id;
+  - rely on retained-scope pruning for env-cell static object bounds, the same way it prunes other `landblock-env-cells` work-owned records.
+- Browser validation confirmed env-cell explicit-object picking still works after the scope-owned bounds cutover; the temporary browser/runtime pick diagnostics were removed.
+- Update the 13B2a implementation notes after this phase lands, replacing the temporary draw-unit-owner fix with the final scope-owned lifecycle decision.
+- Scrub former draw-unit-owned env-cell object bounds code paths:
+  - remove tests that assert remapping to materialized draw-unit owners;
+  - remove `ownerDrawUnitId` storage and draw-unit cleanup logic for env-cell object bounds;
+  - remove stale comments or docs implying env-cell object bounds lifecycle follows render draw units;
+  - keep draw-unit ownership only for true draw-unit bounds records.
+
+Tests:
+
+- `landblock-env-cells-baker.test.ts` proves renderable env-cell static seeds emit `env-cell-static-object-bounds` owned by the `landblock-env-cells` work/scope owner.
+- `static-materializer.test.ts` proves work-owned `env-cell-static-object-bounds` survive static object fine-splitting unchanged and no materializer remap is required.
+- `static-scene-query.test.ts` proves:
+  - committed env-cell static object bounds are used for explicit-object picking;
+  - draw-unit resource removal does not delete work-owned env-cell object bounds while the scope is retained;
+  - `retainScopes([])` or removing the relevant `landblock-env-cells` scope prunes those bounds and makes the same static seed unpickable.
+- Existing picking/residency tests continue to pass under null-anchor and outdoor-anchor frames.
+
+Acceptance criteria:
+
+- No `env-cell-static-object-bounds` record is draw-unit-owned.
+- No code path accepts, remaps, stores, or deletes `env-cell-static-object-bounds` by draw-unit owner.
+- `static-materializer.ts` has no env-cell explicit-object semantic ownership logic.
+- Env-cell explicit-object pick bounds are retained and evicted by `landblock-env-cells` scope lifecycle.
+- Browser validation confirms env-cell explicit-object picking works after fully loaded env-cell bounds are committed.
+- Outdoor static picking remains unchanged.
+
+Dry-run notes from 2026-06-18:
+
+- Clean execution order:
+  1. Change the `StaticEnvCellStaticObjectSpatialRecord.owner` type to `StaticWorkPeerRecordOwner` first and let TypeScript expose every stale draw-unit-owned producer/test.
+  2. Update `createEnvCellStaticObjectSpatialRecords` to accept a `StaticWorkPeerRecordOwner` or enough work context to create one, then emit work-owned bounds.
+  3. Keep `bakeLandblockEnvCells` forwarding the nested static-object baker's `staticSpatialRecords`; that aggregation fix is still required.
+  4. Delete `remapEnvCellStaticObjectBoundsRecords` and remove the materializer regression that expects remapping to materialized draw-unit owners.
+  5. Simplify `StaticSceneQuery` bounds storage to `{ bounds }` or another owner-free value, remove `ownerDrawUnitId`, and delete the draw-unit resource cleanup branch for env-cell object bounds.
+  6. Replace the current draw-unit-removal query test with scope lifecycle tests: draw-unit removal must not delete bounds while scope is retained, and `retainScopes([])` must delete them.
+- Compatibility check:
+  - `filterStaticBakeResultForWorks` in `static-coordinator.ts` already accepts work-owned peer records via `isPeerRecordOwnedByCurrentWork`, so no coordinator bridge should be needed.
+  - `createCommittedSpatialRecordKey` already keys `env-cell-static-object-bounds` by `{ landblockId, envCellId, instanceId }`, so no key migration is needed.
+  - `#pruneCommittedRecordsByRetainedScopes` already prunes committed records by `getCommittedRecordDomain` / `getCommittedRecordLandblockId`; work-owned env-cell object bounds should naturally follow retained `landblock-env-cells` scope lifecycle once their owner carries that domain/scope.
+- Tests that must be rewritten, not preserved:
+  - `static-scene-query.test.ts` currently has a draw-unit-owned removal test for env-cell object bounds. Replace it with retained-scope behavior tests.
+  - `commitEnvCellStaticObjectBounds` helper currently fabricates draw-unit-owned bounds. Change it to reuse the same work owner as `commitLandblockEnvCells`.
+  - `static-materializer.test.ts` currently proves remapping of env-cell object bounds to materialized draw-unit owners. Replace it with a pass-through test for work-owned bounds.
+  - `landblock-env-cells-baker.test.ts` should assert the bounds record owner is the landblock-env-cells work owner, not merely that the record exists.
+- Cleanup targets:
+  - `ownerDrawUnitId` in `#envCellStaticBoundsOverridesByKey` should disappear.
+  - The browser/runtime diagnostic logs added during investigation should be removed or gated immediately after this phase validates browser picking.
+  - Any implementation note claiming `env-cell-static-object-bounds` follows materialized draw-unit lifecycle should be replaced with the scope-owned decision.
+
+Implementation notes from 2026-06-18:
+
+- `StaticEnvCellStaticObjectSpatialRecord.owner` is now `StaticWorkPeerRecordOwner`; draw-unit-owned `env-cell-static-object-bounds` records are no longer representable by the contract.
+- `createEnvCellStaticObjectSpatialRecords` now emits bounds with the scheduled `landblock-env-cells` work/scope owner while keeping semantic pick identity keyed by `{ landblockId, envCellId, instanceId }`.
+- Deleted the `static-materializer.ts` `remapEnvCellStaticObjectBoundsRecords` workaround. Fine-split static object materialization now filters only true draw-unit-owned peer records; work-owned env-cell object bounds pass through unchanged.
+- `StaticSceneQuery` no longer stores `ownerDrawUnitId` beside env-cell object bounds and `removeStaticResources` no longer deletes those bounds by draw-unit id.
+- Spicy implementation detail: changing object bounds to the same work owner as env-cell spatial roots exposed that spatial peer-record upsert semantics were too broad for partial append batches. `#upsertCommittedSpatialRecords` now treats batches containing `env-cell-spatial` records as complete scope spatial replacement, while object-bounds-only batches replace by semantic record key. This preserves full scope replacement behavior without letting a later object-bounds append delete the env-cell roots needed for picking/residency.
+- Tests were rewritten rather than preserved:
+  - `static-materializer.test.ts` now proves work-owned env-cell object bounds survive fine-splitting unchanged.
+  - `static-scene-query.test.ts` now proves draw-unit resource removal does not delete work-owned env-cell object bounds, and retained-scope pruning does delete them.
+  - `landblock-env-cells-baker.test.ts` now asserts renderable env-cell static seed bounds use the `landblock-env-cells` work owner.
+- Validation passed:
+  - `npm run test:ts -- static-materializer.test.ts static-scene-query.test.ts landblock-env-cells-baker.test.ts`
+  - `npm run check`
+  - `npm run test:ts`
+- Manual browser validation confirmed explicit env-cell static picking still works after this cutover. Removed the temporary `[browser-static-pick]`, `[env-cell-pick-miss]`, and `[outdoor-pick-summary]` diagnostics, plus their runtime counter plumbing.
 
 #### Phase 13B2b: Dungeon Camera Focus Controls
 
-Status: planned; depends on 13B2a.
+Status: planned; depends on 13B2a-1.
 
 Purpose: make pure dungeon inspection ergonomic once committed env-cell query records can be trusted.
 
@@ -2798,7 +2905,7 @@ Acceptance criteria:
 
 #### Phase 13B2c: Env-Cell Static Seed Marker Diagnostics And Validation
 
-Status: planned; depends on 13B2a and requires manual browser/retail validation.
+Status: planned; depends on 13B2a-1 and requires manual browser/retail validation.
 
 Purpose: identify the suspicious spawn-marker-looking dungeon statics before deciding whether to render, filter, or reclassify them.
 

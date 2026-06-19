@@ -329,31 +329,6 @@ interface EnvCellStaticSeedRuntimeRecord {
 	readonly seed: LandblockEnvCellsStaticScopePayload["envCells"][number]["staticObjectSeeds"][number];
 }
 
-interface EnvCellPickDiagnostics {
-	broadCandidateCount: number;
-	broadCandidateItemRefCount: number;
-	filterRejectedCount: number;
-	hitCandidateCount: number;
-	missingBoundsSamples: EnvCellPickMissingBoundsSample[];
-	missingBoundsCount: number;
-	missingCellRootCount: number;
-	nullLandblockItemCount: number;
-	rejectedEnvCellIdCount: number;
-	staticSeedCount: number;
-	staticSeedRayMissCount: number;
-	visitedEnvCellIds: Set<number>;
-}
-
-interface EnvCellPickMissingBoundsSample {
-	readonly boundsKey: string;
-	readonly envCellHexId: string;
-	readonly envCellId: number;
-	readonly instanceId: string;
-	readonly sourceAssetKind: string;
-	readonly sourceDidHex: string;
-	readonly sourceDid: number;
-}
-
 export interface StaticSceneCommittedEnvCellRecords {
 	readonly authoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly landblockId: number;
@@ -610,7 +585,6 @@ export class StaticSceneQuery {
 		string,
 		{
 			readonly bounds: StaticBounds;
-			readonly ownerDrawUnitId: string;
 		}
 	>();
 	readonly #committedSpatialRecordsByKey = new Map<
@@ -746,11 +720,6 @@ export class StaticSceneQuery {
 			}
 		}
 		if (removedDrawUnitResourceIds.size > 0) {
-			for (const [key, record] of this.#envCellStaticBoundsOverridesByKey) {
-				if (removedDrawUnitResourceIds.has(record.ownerDrawUnitId)) {
-					this.#envCellStaticBoundsOverridesByKey.delete(key);
-				}
-			}
 			this.#deleteDrawUnitOwnedCommittedRecords(removedDrawUnitResourceIds);
 		}
 	}
@@ -1340,10 +1309,17 @@ export class StaticSceneQuery {
 	#upsertCommittedSpatialRecords(
 		records: readonly StaticSpatialRecord[],
 	): void {
-		this.#deleteCommittedRecordsForOwners(
-			this.#committedSpatialRecordsByKey,
-			records,
+		const replacementKeys = new Set(records.map(createCommittedSpatialRecordKey));
+		const completeScopeOwnerKeys = new Set(
+			records
+				.filter((record) => record.kind === "env-cell-spatial")
+				.map((record) => createStaticPeerOwnerKey(record.owner)),
 		);
+		for (const [key, entry] of this.#committedSpatialRecordsByKey) {
+			if (replacementKeys.has(key) || completeScopeOwnerKeys.has(entry.ownerKey)) {
+				this.#committedSpatialRecordsByKey.delete(key);
+			}
+		}
 
 		for (const record of records) {
 			this.#committedSpatialRecordsByKey.set(
@@ -1364,7 +1340,6 @@ export class StaticSceneQuery {
 				}),
 				{
 					bounds: record.bounds,
-					ownerDrawUnitId: record.owner.drawUnitId,
 				},
 			);
 		}
@@ -1627,9 +1602,6 @@ export class StaticSceneQuery {
 		request: StaticScenePickRequest,
 	): StaticScenePickHit[] {
 		let nearestHit: StaticScenePickHit | null = null;
-		let outdoorEnvCellCandidateCount = 0;
-		let outdoorEnvCellHitCount = 0;
-		let outdoorEnvCellMissCount = 0;
 
 		for (const candidate of this.#landblockGridIndex.traceOutdoorRay(ray, {
 			getMaxDistance: () => nearestHit?.distance ?? null,
@@ -1654,52 +1626,18 @@ export class StaticSceneQuery {
 			}
 
 			if (candidate.envCellRoot) {
-				outdoorEnvCellCandidateCount += 1;
-				const diagnostics = createEnvCellPickDiagnostics();
 				const envCellHit = this.#pickEnvCellLandblockRoot(
 					ray,
 					request,
 					candidate.envCellRoot,
 					createAcceptedEnvCellSet(candidate.envCellRoot.acceptedEnvCellIds),
 					nearestHit,
-					diagnostics,
 				);
-				if (envCellHit) {
-					outdoorEnvCellHitCount += 1;
-				} else {
-					outdoorEnvCellMissCount += 1;
-					logEnvCellPickMiss(
-						createEnvCellPickMissLog({
-							acceptedEnvCellIds: candidate.envCellRoot.acceptedEnvCellIds,
-							boundsSummary: this.#summarizeEnvCellStaticBoundsForLandblock(
-								candidate.envCellRoot.landblockId,
-							),
-							currentNearestHit: nearestHit,
-							diagnostics,
-							landblockRoot: candidate.envCellRoot,
-							localRay: translateRay(
-								ray,
-								negateTranslation(candidate.envCellRoot.translation),
-							),
-							reason: "outdoor-context-no-env-cell-hit",
-							request,
-						}),
-					);
-				}
 				nearestHit = selectNearestHit(
 					nearestHit,
 					envCellHit,
 				);
 			}
-		}
-
-		if (nearestHit && outdoorEnvCellCandidateCount > 0) {
-			console.info("[holtburger-3d][v2][outdoor-pick-summary]", {
-				envCellCandidateCount: outdoorEnvCellCandidateCount,
-				envCellHitCount: outdoorEnvCellHitCount,
-				envCellMissCount: outdoorEnvCellMissCount,
-				selectedHit: nearestHit,
-			});
 		}
 
 		return nearestHit ? [nearestHit] : [];
@@ -1833,49 +1771,18 @@ export class StaticSceneQuery {
 			request.context.landblockId,
 		);
 		if (!landblockRoot) {
-			logEnvCellPickMiss({
-				reason: "missing-landblock-root",
-				request,
-				availableLandblockIds: [...this.#envCellRootsByLandblockId.keys()].sort(
-					(left, right) => left - right,
-				),
-			});
 			return [];
 		}
 		const acceptedEnvCellIds = new Set(
 			request.context.acceptedEnvCellIds ?? [request.context.envCellId],
 		);
-		const diagnostics = createEnvCellPickDiagnostics();
 		const nearestHit = this.#pickEnvCellLandblockRoot(
 			ray,
 			request,
 			landblockRoot,
 			acceptedEnvCellIds,
 			null,
-			diagnostics,
 		);
-		if (!nearestHit) {
-			logEnvCellPickMiss(
-				createEnvCellPickMissLog({
-					acceptedEnvCellIds: [...acceptedEnvCellIds].sort(
-						(left, right) => left - right,
-					),
-					boundsSummary:
-						this.#summarizeEnvCellStaticBoundsForLandblock(
-							landblockRoot.landblockId,
-						),
-					currentNearestHit: null,
-					diagnostics,
-					landblockRoot,
-					localRay: translateRay(
-						ray,
-						negateTranslation(landblockRoot.translation),
-					),
-					reason: "env-cell-context-no-hit",
-					request,
-				}),
-			);
-		}
 
 		return nearestHit ? [nearestHit] : [];
 	}
@@ -1886,7 +1793,6 @@ export class StaticSceneQuery {
 		landblockRoot: EnvCellLandblockBvhRoot,
 		acceptedEnvCellIds: ReadonlySet<number>,
 		currentNearestHit: StaticScenePickHit | null,
-		diagnostics: EnvCellPickDiagnostics | null = null,
 	): EnvCellStaticScenePickHit | null {
 		let nearestHit: EnvCellStaticScenePickHit | null =
 			isEnvCellStaticScenePickHit(currentNearestHit) ? currentNearestHit : null;
@@ -1898,35 +1804,20 @@ export class StaticSceneQuery {
 		traverseBvhNearest(landblockRoot.nodes, localRay, {
 			getMaxDistance: () => nearestHit?.distance ?? null,
 			visitCandidate: (broadCandidate) => {
-				if (diagnostics) {
-					diagnostics.broadCandidateCount += 1;
-					diagnostics.broadCandidateItemRefCount +=
-						broadCandidate.itemIndices.length;
-				}
 				for (const landblockItemIndex of broadCandidate.itemIndices) {
 					const landblockItem = landblockRoot.items[landblockItemIndex];
 					if (!landblockItem) {
-						if (diagnostics) {
-							diagnostics.nullLandblockItemCount += 1;
-						}
 						continue;
 					}
 					if (!isAcceptedEnvCellId(acceptedEnvCellIds, landblockItem.envCellId)) {
-						if (diagnostics) {
-							diagnostics.rejectedEnvCellIdCount += 1;
-						}
 						continue;
 					}
 					const root = landblockRoot.cellsByEnvCellId.get(
 						landblockItem.envCellId,
 					);
 					if (!root) {
-						if (diagnostics) {
-							diagnostics.missingCellRootCount += 1;
-						}
 						continue;
 					}
-					diagnostics?.visitedEnvCellIds.add(root.envCellId);
 					const hit = this.#pickEnvCellStaticObjects(
 						ray,
 						localRay,
@@ -1934,7 +1825,6 @@ export class StaticSceneQuery {
 						request,
 						root,
 						nearestHit,
-						diagnostics,
 					);
 					nearestHit =
 						hit !== null &&
@@ -1955,40 +1845,15 @@ export class StaticSceneQuery {
 		request: StaticScenePickRequest,
 		root: EnvCellBvhRoot,
 		currentNearestHit: EnvCellStaticScenePickHit | null,
-		diagnostics: EnvCellPickDiagnostics | null = null,
 	): EnvCellStaticScenePickHit | null {
 		let nearestHit = currentNearestHit;
 		for (const item of root.items) {
-			if (diagnostics) {
-				diagnostics.staticSeedCount += 1;
-			}
 			const bounds = this.#getEnvCellStaticSeedBounds(root, item.seed);
 			if (!bounds) {
-				if (diagnostics) {
-					diagnostics.missingBoundsCount += 1;
-					if (diagnostics.missingBoundsSamples.length < 12) {
-						diagnostics.missingBoundsSamples.push({
-							boundsKey: createEnvCellStaticObjectBoundsKey({
-								envCellId: item.seed.envCellId,
-								instanceId: item.seed.seed.identity.instanceId,
-								landblockId: root.landblockId,
-							}),
-							envCellHexId: formatHex32(item.seed.envCellId),
-							envCellId: item.seed.envCellId,
-							instanceId: item.seed.seed.identity.instanceId,
-							sourceAssetKind: item.seed.seed.source.sourceAssetKind,
-							sourceDid: item.seed.seed.source.sourceDid,
-							sourceDidHex: formatHex32(item.seed.seed.source.sourceDid),
-						});
-					}
-				}
 				continue;
 			}
 			const distance = intersectRayBounds(localRay, bounds);
 			if (distance === null) {
-				if (diagnostics) {
-					diagnostics.staticSeedRayMissCount += 1;
-				}
 				continue;
 			}
 			const renderBounds = translateBounds(bounds, landblockTranslation);
@@ -2004,15 +1869,10 @@ export class StaticSceneQuery {
 				}),
 			};
 			if (matchesFilters(hit, request.filters, renderRay.origin)) {
-				if (diagnostics) {
-					diagnostics.hitCandidateCount += 1;
-				}
 				nearestHit =
 					nearestHit === null || comparePickHits(hit, nearestHit) < 0
 						? hit
 						: nearestHit;
-			} else if (diagnostics) {
-				diagnostics.filterRejectedCount += 1;
 			}
 		}
 
@@ -2068,34 +1928,6 @@ export class StaticSceneQuery {
 			});
 		}
 		this.#rebuildLandblockGridIndex();
-	}
-
-	#summarizeEnvCellStaticBoundsForLandblock(landblockId: number): object {
-		const boundsKeys: string[] = [];
-		const boundsCountsByEnvCellId = new Map<number, number>();
-		for (const key of this.#envCellStaticBoundsOverridesByKey.keys()) {
-			const parsed = parseEnvCellStaticObjectBoundsKey(key);
-			if (!parsed || parsed.landblockId !== landblockId) {
-				continue;
-			}
-			boundsKeys.push(key);
-			boundsCountsByEnvCellId.set(
-				parsed.envCellId,
-				(boundsCountsByEnvCellId.get(parsed.envCellId) ?? 0) + 1,
-			);
-		}
-		const sortedEnvCellIds = [...boundsCountsByEnvCellId.keys()].sort(
-			(left, right) => left - right,
-		);
-		return {
-			boundsCount: boundsKeys.length,
-			boundsCountsByEnvCell: sortedEnvCellIds.map((envCellId) => ({
-				count: boundsCountsByEnvCellId.get(envCellId) ?? 0,
-				envCellHexId: formatHex32(envCellId),
-				envCellId,
-			})),
-			sampleBoundsKeys: boundsKeys.sort().slice(0, 12),
-		};
 	}
 
 	#rebuildLandblockGridIndex(): void {
@@ -2589,119 +2421,6 @@ function createAcceptedEnvCellSet(
 	acceptedEnvCellIds: readonly number[],
 ): ReadonlySet<number> {
 	return new Set(acceptedEnvCellIds);
-}
-
-function createEnvCellPickDiagnostics(): EnvCellPickDiagnostics {
-	return {
-		broadCandidateCount: 0,
-		broadCandidateItemRefCount: 0,
-		filterRejectedCount: 0,
-		hitCandidateCount: 0,
-		missingBoundsSamples: [],
-		missingBoundsCount: 0,
-		missingCellRootCount: 0,
-		nullLandblockItemCount: 0,
-		rejectedEnvCellIdCount: 0,
-		staticSeedCount: 0,
-		staticSeedRayMissCount: 0,
-		visitedEnvCellIds: new Set(),
-	};
-}
-
-function snapshotEnvCellPickDiagnostics(
-	diagnostics: EnvCellPickDiagnostics,
-): object {
-	return {
-		broadCandidateCount: diagnostics.broadCandidateCount,
-		broadCandidateItemRefCount: diagnostics.broadCandidateItemRefCount,
-		filterRejectedCount: diagnostics.filterRejectedCount,
-		hitCandidateCount: diagnostics.hitCandidateCount,
-		missingBoundsCount: diagnostics.missingBoundsCount,
-		missingBoundsSamples: diagnostics.missingBoundsSamples,
-		missingCellRootCount: diagnostics.missingCellRootCount,
-		nullLandblockItemCount: diagnostics.nullLandblockItemCount,
-		rejectedEnvCellIdCount: diagnostics.rejectedEnvCellIdCount,
-		staticSeedCount: diagnostics.staticSeedCount,
-		staticSeedRayMissCount: diagnostics.staticSeedRayMissCount,
-		visitedEnvCellIds: [...diagnostics.visitedEnvCellIds].sort(
-			(left, right) => left - right,
-		),
-		visitedEnvCellHexIds: [...diagnostics.visitedEnvCellIds]
-			.sort((left, right) => left - right)
-			.map(formatHex32),
-	};
-}
-
-function summarizeEnvCellLandblockRoot(root: EnvCellLandblockBvhRoot): object {
-	const cells = [...root.cellsByEnvCellId.values()].sort(
-		(left, right) => left.envCellId - right.envCellId,
-	);
-	return {
-		acceptedEnvCellIds: root.acceptedEnvCellIds,
-		acceptedEnvCellHexIds: root.acceptedEnvCellIds.map(formatHex32),
-		cellCount: root.cellsByEnvCellId.size,
-		cells: cells.map((cell) => ({
-			envCellHexId: formatHex32(cell.envCellId),
-			envCellId: cell.envCellId,
-			staticSeedCount: cell.items.length,
-		})),
-		itemCount: root.items.length,
-		landblockHexId: formatHex32(root.landblockId),
-		landblockId: root.landblockId,
-		nodeCount: root.nodes.length,
-		translation: root.translation,
-	};
-}
-
-function createEnvCellPickMissLog(options: {
-	readonly acceptedEnvCellIds: readonly number[];
-	readonly boundsSummary: object;
-	readonly currentNearestHit: StaticScenePickHit | null;
-	readonly diagnostics: EnvCellPickDiagnostics;
-	readonly landblockRoot: EnvCellLandblockBvhRoot;
-	readonly localRay: StaticSceneRay;
-	readonly reason: string;
-	readonly request: StaticScenePickRequest;
-}): object {
-	const diagnostics = snapshotEnvCellPickDiagnostics(
-		options.diagnostics,
-	) as Record<string, unknown>;
-	const landblockRoot = summarizeEnvCellLandblockRoot(
-		options.landblockRoot,
-	) as Record<string, unknown>;
-	return {
-		acceptedEnvCellHexIds: options.acceptedEnvCellIds.map(formatHex32),
-		acceptedEnvCellIds: options.acceptedEnvCellIds,
-		broadCandidateCount: diagnostics.broadCandidateCount,
-		broadCandidateItemRefCount: diagnostics.broadCandidateItemRefCount,
-		boundsSummary: options.boundsSummary,
-		cellCount: landblockRoot.cellCount,
-		currentNearestBeforeEnvCell: options.currentNearestHit,
-		filterRejectedCount: diagnostics.filterRejectedCount,
-		hitCandidateCount: diagnostics.hitCandidateCount,
-		itemCount: landblockRoot.itemCount,
-		landblockHexId: landblockRoot.landblockHexId,
-		landblockId: landblockRoot.landblockId,
-		localRay: options.localRay,
-		missingBoundsCount: diagnostics.missingBoundsCount,
-		missingBoundsSamples: diagnostics.missingBoundsSamples,
-		missingCellRootCount: diagnostics.missingCellRootCount,
-		nodeCount: landblockRoot.nodeCount,
-		nullLandblockItemCount: diagnostics.nullLandblockItemCount,
-		reason: options.reason,
-		rejectedEnvCellIdCount: diagnostics.rejectedEnvCellIdCount,
-		request: options.request,
-		staticSeedCount: diagnostics.staticSeedCount,
-		staticSeedRayMissCount: diagnostics.staticSeedRayMissCount,
-		translation: landblockRoot.translation,
-		visitedEnvCellHexIds: diagnostics.visitedEnvCellHexIds,
-		visitedEnvCellIds: diagnostics.visitedEnvCellIds,
-		landblockRoot,
-	};
-}
-
-function logEnvCellPickMiss(detail: object): void {
-	console.info("[holtburger-3d][v2][env-cell-pick-miss]", detail);
 }
 
 function isAcceptedEnvCellId(

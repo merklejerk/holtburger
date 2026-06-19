@@ -395,6 +395,40 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
+	it("enables backface culling for structured interiors in flat vision mode", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+
+		renderer.applyStaticDelta({
+			addedDrawUnits: [createStructuredInteriorDrawUnit()],
+			addedTransitionApertureBatches: [],
+			removedDrawUnitIds: [],
+			removedTransitionApertureBatchIds: [],
+			revision: 1,
+		});
+
+		pendingFrame?.(16);
+		expect(gl.enabledCapabilities).not.toContain(gl.CULL_FACE);
+
+		gl.enabledCapabilities.length = 0;
+		gl.disabledCapabilities.length = 0;
+		gl.cullFaceModes.length = 0;
+		renderer.setFlatVisionModeEnabled(true);
+		pendingFrame?.(32);
+
+		expect(gl.enabledCapabilities).toContain(gl.CULL_FACE);
+		expect(gl.cullFaceModes).toContain(gl.BACK);
+
+		renderer.dispose();
+	});
+
 	it("uploads and removes transition aperture batches as non-draw-unit resources", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
@@ -688,11 +722,13 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 	readonly bufferDataTargets: GLenum[];
 	readonly cullFaceModes: GLenum[];
 	readonly depthFuncModes: GLenum[];
+	readonly disabledCapabilities: GLenum[];
 	readonly drawElementsCalls: {
 		readonly count: number;
 		readonly mode: GLenum;
 		readonly type: GLenum;
 	}[];
+	readonly enabledCapabilities: GLenum[];
 	readonly enabledVertexAttributes: number[];
 	readonly stencilFuncCalls: {
 		readonly func: GLenum;
@@ -710,7 +746,9 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 	const bufferDataTargets: GLenum[] = [];
 	const cullFaceModes: GLenum[] = [];
 	const depthFuncModes: GLenum[] = [];
+	const disabledCapabilities: GLenum[] = [];
 	const drawElementsCalls: { count: number; mode: GLenum; type: GLenum }[] = [];
+	const enabledCapabilities: GLenum[] = [];
 	const enabledVertexAttributes: number[] = [];
 	const stencilFuncCalls: { func: GLenum; mask: number; ref: number }[] = [];
 	const stencilOpCalls: { fail: GLenum; zfail: GLenum; zpass: GLenum }[] = [];
@@ -834,12 +872,16 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 			depthFuncModes.push(mode);
 		}),
 		depthMask: vi.fn(),
-		disable: vi.fn(),
+		disable: vi.fn((capability: GLenum) => {
+			disabledCapabilities.push(capability);
+		}),
 		drawArrays: vi.fn(),
 		drawElements: vi.fn((mode: GLenum, count: number, type: GLenum) => {
 			drawElementsCalls.push({ count, mode, type });
 		}),
-		enable: vi.fn(),
+		enable: vi.fn((capability: GLenum) => {
+			enabledCapabilities.push(capability);
+		}),
 		enableVertexAttribArray: vi.fn((slot: number) => {
 			enabledVertexAttributes.push(slot);
 		}),
@@ -887,7 +929,9 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		bufferDataTargets,
 		cullFaceModes,
 		depthFuncModes,
+		disabledCapabilities,
 		drawElementsCalls,
+		enabledCapabilities,
 		enabledVertexAttributes,
 		stencilFuncCalls,
 		stencilOpCalls,

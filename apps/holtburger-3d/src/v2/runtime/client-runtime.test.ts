@@ -224,6 +224,30 @@ describe("V2 client runtime", () => {
 		runtime.dispose();
 	});
 
+	it("tracks flat vision mode in runtime snapshots", () => {
+		const renderer = new FakeRenderer();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker: new DeferredStaticBaker(),
+				resolver: new DeferredStaticResolver(),
+			}),
+		});
+		const snapshots: RuntimeSnapshot[] = [];
+		const unsubscribe = runtime.subscribe((nextSnapshot) => {
+			snapshots.push(nextSnapshot);
+		});
+
+		runtime.setFlatVisionModeEnabled(true);
+
+		expect(snapshots.at(-1)?.debugOverlays.flatVisionModeEnabled).toBe(true);
+
+		unsubscribe();
+		runtime.dispose();
+	});
+
 	it("does not derive portal pass plans without a committed interior scene", () => {
 		const renderer = new FakeRenderer();
 		const runtime = createClientRuntime({
@@ -1217,6 +1241,7 @@ class FakeRenderer implements Renderer {
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void {
 		this.staticAnchorLandblockIds.push(anchorLandblockId);
 	}
+	setFlatVisionModeEnabled(): void {}
 	setRenderPassPlan(plan: RenderPassPlan): void {
 		this.renderPassPlans.push(plan);
 		this.#snapshot = {

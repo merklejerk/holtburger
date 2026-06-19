@@ -206,6 +206,7 @@ export interface Renderer {
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void;
 	applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void;
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void;
+	setFlatVisionModeEnabled(enabled: boolean): void;
 	setRenderPassPlan(plan: RenderPassPlan): void;
 	setDebugOverlayPrimitives(primitives: readonly DebugOverlayPrimitive[]): void;
 	updateFrameState(state: FrameState): void;

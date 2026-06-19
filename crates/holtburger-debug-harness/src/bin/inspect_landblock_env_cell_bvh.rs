@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 use holtburger_content::{
-    ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler, PreparedAabb,
-    PreparedVec3, normalize_landblock_id,
+    normalize_landblock_id, ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler,
+    PreparedAabb, PreparedVec3,
 };
 use holtburger_dat::graphics::Frame;
 use holtburger_dat::physics::BspNode;
@@ -26,6 +26,10 @@ struct Args {
     bsp_bounds_summary_only: bool,
     #[arg(long)]
     portal_duplicates: bool,
+    #[arg(long)]
+    portal_clusters: bool,
+    #[arg(long, default_value_t = 2)]
+    portal_cluster_min_size: usize,
 }
 
 fn main() -> Result<()> {
@@ -190,6 +194,9 @@ fn main() -> Result<()> {
     if args.portal_duplicates {
         report_duplicate_transition_portals(&asset.env_cells);
     }
+    if args.portal_clusters {
+        report_portal_clusters(&asset.env_cells, args.portal_cluster_min_size);
+    }
 
     if let Some(detail_cell) = args.detail_cell.as_deref() {
         let env_cell_id = parse_hex_u32(detail_cell)?;
@@ -237,15 +244,47 @@ fn main() -> Result<()> {
 struct TransitionPortalApertureDump {
     env_cell_id: u32,
     portal_id: String,
+    source_index: usize,
     flags: u16,
     polygon_id: u16,
+    other_cell_id: u16,
+    other_portal_id: u16,
+    target_env_cell_id: Option<u32>,
+    is_outside_transition: bool,
     point_count: usize,
     world_points: Vec<PreparedVec3>,
 }
 
-fn report_duplicate_transition_portals(
-    cells: &[holtburger_content::LandblockEnvCellBundleCell],
-) {
+#[derive(Debug, Clone)]
+struct PortalClusterDump {
+    env_cell_id: u32,
+    portal_id: String,
+    source_index: usize,
+    flags: u16,
+    polygon_id: u16,
+    other_cell_id: u16,
+    other_portal_id: u16,
+    target_env_cell_id: Option<u32>,
+    is_outside_transition: bool,
+    incoming_reference_count: usize,
+    reciprocal: bool,
+    point_count: usize,
+    world_points: Vec<PreparedVec3>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct PortalKey {
+    env_cell_id: u32,
+    source_index: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PortalRelationship {
+    incoming_reference_count: usize,
+    reciprocal: bool,
+}
+
+fn report_duplicate_transition_portals(cells: &[holtburger_content::LandblockEnvCellBundleCell]) {
     let mut groups = BTreeMap::<String, Vec<TransitionPortalApertureDump>>::new();
     let mut total_transition_apertures = 0usize;
     for cell in cells {
@@ -266,7 +305,9 @@ fn report_duplicate_transition_portals(
             let world_points = aperture
                 .points
                 .iter()
-                .map(|point| transform_render_local_point(*point, &cell.prepared_cell.local_placement))
+                .map(|point| {
+                    transform_render_local_point(*point, &cell.prepared_cell.local_placement)
+                })
                 .collect::<Vec<_>>();
             let key = canonical_point_set_key(&world_points);
             groups
@@ -275,9 +316,14 @@ fn report_duplicate_transition_portals(
                 .push(TransitionPortalApertureDump {
                     env_cell_id: cell.env_cell.env_cell_id,
                     flags: portal.flags,
+                    is_outside_transition: portal.is_outside_transition,
+                    other_cell_id: portal.other_cell_id,
+                    other_portal_id: portal.other_portal_id,
                     point_count: aperture.points.len(),
                     polygon_id: portal.polygon_id,
                     portal_id: portal.portal_id.clone(),
+                    source_index: portal.source_index,
+                    target_env_cell_id: portal.target_env_cell_id,
                     world_points,
                 });
         }
@@ -292,11 +338,19 @@ fn report_duplicate_transition_portals(
         println!("duplicateTransitionPortalGroup members={}", group.len());
         for member in group {
             println!(
-                "  envCell=0x{:08x} portal={} flags=0x{:04x} polygon={} points={}",
+                "  envCell=0x{:08x} portal={} index={} flags=0x{:04x} polygon={} otherCell=0x{:04x} otherPortal=0x{:04x} target={} outside={} points={}",
                 member.env_cell_id,
                 member.portal_id,
+                member.source_index,
                 member.flags,
                 member.polygon_id,
+                member.other_cell_id,
+                member.other_portal_id,
+                member
+                    .target_env_cell_id
+                    .map(|id| format!("0x{id:08x}"))
+                    .unwrap_or_else(|| "none".to_string()),
+                member.is_outside_transition,
                 member.point_count
             );
         }
@@ -304,6 +358,243 @@ fn report_duplicate_transition_portals(
             println!("    p{}={}", index, format_point(*point));
         }
     }
+}
+
+fn report_portal_clusters(
+    cells: &[holtburger_content::LandblockEnvCellBundleCell],
+    min_size: usize,
+) {
+    let mut groups = BTreeMap::<String, Vec<PortalClusterDump>>::new();
+    let mut total_apertures = 0usize;
+    let relationships = build_portal_relationships(cells);
+    for cell in cells {
+        let apertures_by_portal = cell
+            .prepared_cell
+            .portal_apertures
+            .iter()
+            .map(|aperture| (aperture.portal_id.as_str(), aperture))
+            .collect::<BTreeMap<_, _>>();
+        for portal in &cell.prepared_cell.portals {
+            let Some(aperture) = apertures_by_portal.get(portal.portal_id.as_str()) else {
+                continue;
+            };
+            total_apertures += 1;
+            let world_points = aperture
+                .points
+                .iter()
+                .map(|point| {
+                    transform_render_local_point(*point, &cell.prepared_cell.local_placement)
+                })
+                .collect::<Vec<_>>();
+            let key = canonical_point_set_key(&world_points);
+            let relationship = relationships
+                .get(&PortalKey {
+                    env_cell_id: cell.env_cell.env_cell_id,
+                    source_index: portal.source_index,
+                })
+                .copied()
+                .unwrap_or(PortalRelationship {
+                    incoming_reference_count: 0,
+                    reciprocal: false,
+                });
+            groups.entry(key).or_default().push(PortalClusterDump {
+                env_cell_id: cell.env_cell.env_cell_id,
+                flags: portal.flags,
+                incoming_reference_count: relationship.incoming_reference_count,
+                is_outside_transition: portal.is_outside_transition,
+                other_cell_id: portal.other_cell_id,
+                other_portal_id: portal.other_portal_id,
+                point_count: aperture.points.len(),
+                polygon_id: portal.polygon_id,
+                portal_id: portal.portal_id.clone(),
+                reciprocal: relationship.reciprocal,
+                source_index: portal.source_index,
+                target_env_cell_id: portal.target_env_cell_id,
+                world_points,
+            });
+        }
+    }
+
+    let duplicate_groups = groups.values().filter(|group| group.len() > 1).count();
+    let mut group_size_counts = BTreeMap::<usize, usize>::new();
+    for group in groups.values() {
+        *group_size_counts.entry(group.len()).or_default() += 1;
+    }
+    println!(
+        "portalClusterSummary portals={} groups={} duplicateGroups={} groupSizes={}",
+        total_apertures,
+        groups.len(),
+        duplicate_groups,
+        group_size_counts
+            .iter()
+            .map(|(size, count)| format!("{size}:{count}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    for group in groups
+        .values()
+        .filter(|group| group.len() >= min_size)
+        .collect::<Vec<_>>()
+    {
+        print_portal_cluster_group(group);
+    }
+}
+
+fn print_portal_cluster_group(group: &[PortalClusterDump]) {
+    let plane_text = group
+        .first()
+        .and_then(|member| derive_render_plane(&member.world_points))
+        .map(|plane| {
+            format!(
+                "n=({:.6},{:.6},{:.6}) c={:.6}",
+                plane.normal.x, plane.normal.y, plane.normal.z, plane.constant
+            )
+        })
+        .unwrap_or_else(|| "none".to_string());
+    let bounds = group
+        .first()
+        .map(|member| bounds_for_points(&member.world_points))
+        .map(|bounds| format_bounds(&bounds))
+        .unwrap_or_else(|| "none".to_string());
+    println!(
+        "portalClusterGroup members={} plane={} bounds={}",
+        group.len(),
+        plane_text,
+        bounds
+    );
+    for member in group {
+        println!(
+            "  envCell=0x{:08x} portal={} index={} flags=0x{:04x} polygon={} otherCell=0x{:04x} otherPortal=0x{:04x} target={} outside={} reciprocal={} incomingRefs={} points={}",
+            member.env_cell_id,
+            member.portal_id,
+            member.source_index,
+            member.flags,
+            member.polygon_id,
+            member.other_cell_id,
+            member.other_portal_id,
+            member
+                .target_env_cell_id
+                .map(|id| format!("0x{id:08x}"))
+                .unwrap_or_else(|| "none".to_string()),
+            member.is_outside_transition,
+            member.reciprocal,
+            member.incoming_reference_count,
+            member.point_count
+        );
+    }
+}
+
+fn build_portal_relationships(
+    cells: &[holtburger_content::LandblockEnvCellBundleCell],
+) -> BTreeMap<PortalKey, PortalRelationship> {
+    let mut portal_targets = BTreeMap::<PortalKey, Option<PortalKey>>::new();
+    let mut incoming_counts = BTreeMap::<PortalKey, usize>::new();
+    for cell in cells {
+        for portal in &cell.prepared_cell.portals {
+            let key = PortalKey {
+                env_cell_id: cell.env_cell.env_cell_id,
+                source_index: portal.source_index,
+            };
+            let target_key = portal.target_env_cell_id.and_then(|target_env_cell_id| {
+                normalize_portal_index(portal.other_portal_id).map(|source_index| PortalKey {
+                    env_cell_id: target_env_cell_id,
+                    source_index,
+                })
+            });
+            portal_targets.insert(key, target_key);
+            if let Some(target_key) = target_key {
+                *incoming_counts.entry(target_key).or_default() += 1;
+            }
+        }
+    }
+
+    portal_targets
+        .iter()
+        .map(|(key, target_key)| {
+            let reciprocal = target_key
+                .and_then(|target_key| portal_targets.get(&target_key).copied().flatten())
+                == Some(*key);
+            (
+                *key,
+                PortalRelationship {
+                    incoming_reference_count: *incoming_counts.get(key).unwrap_or(&0),
+                    reciprocal,
+                },
+            )
+        })
+        .collect()
+}
+
+fn normalize_portal_index(portal_id: u16) -> Option<usize> {
+    if portal_id == 0xffff {
+        None
+    } else {
+        Some(usize::from(portal_id))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RenderPlane {
+    normal: PreparedVec3,
+    constant: f32,
+}
+
+fn derive_render_plane(points: &[PreparedVec3]) -> Option<RenderPlane> {
+    if points.len() < 3 {
+        return None;
+    }
+    for first_index in 0..points.len() {
+        for second_index in (first_index + 1)..points.len() {
+            for third_index in (second_index + 1)..points.len() {
+                let edge_a = subtract_prepared(points[second_index], points[first_index]);
+                let edge_b = subtract_prepared(points[third_index], points[first_index]);
+                let normal = cross_prepared(edge_a, edge_b);
+                let length =
+                    (normal.x * normal.x + normal.y * normal.y + normal.z * normal.z).sqrt();
+                if length < 0.0001 {
+                    continue;
+                }
+                let normal = PreparedVec3 {
+                    x: normal.x / length,
+                    y: normal.y / length,
+                    z: normal.z / length,
+                };
+                return Some(RenderPlane {
+                    normal,
+                    constant: -dot_prepared(normal, points[first_index]),
+                });
+            }
+        }
+    }
+    None
+}
+
+fn subtract_prepared(left: PreparedVec3, right: PreparedVec3) -> PreparedVec3 {
+    PreparedVec3 {
+        x: left.x - right.x,
+        y: left.y - right.y,
+        z: left.z - right.z,
+    }
+}
+
+fn cross_prepared(left: PreparedVec3, right: PreparedVec3) -> PreparedVec3 {
+    PreparedVec3 {
+        x: left.y * right.z - left.z * right.y,
+        y: left.z * right.x - left.x * right.z,
+        z: left.x * right.y - left.y * right.x,
+    }
+}
+
+fn dot_prepared(left: PreparedVec3, right: PreparedVec3) -> f32 {
+    left.x * right.x + left.y * right.y + left.z * right.z
+}
+
+fn bounds_for_points(points: &[PreparedVec3]) -> PreparedAabb {
+    points
+        .iter()
+        .copied()
+        .fold(None, |bounds, point| Some(expand_bounds(bounds, point)))
+        .expect("portal cluster group should contain at least one point")
 }
 
 fn canonical_point_set_key(points: &[PreparedVec3]) -> String {
@@ -326,7 +617,9 @@ fn quantize_coord(value: f32) -> i32 {
 }
 
 fn transform_render_local_point(point: PreparedVec3, ac_frame: &Frame) -> PreparedVec3 {
-    ac_to_render_point(ac_frame.origin + rotate_ac_vector(render_to_ac_point(point), ac_frame.orientation))
+    ac_to_render_point(
+        ac_frame.origin + rotate_ac_vector(render_to_ac_point(point), ac_frame.orientation),
+    )
 }
 
 fn render_to_ac_point(point: PreparedVec3) -> holtburger_common::Vector3 {

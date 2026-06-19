@@ -168,6 +168,17 @@ export interface StaticSceneSelectionDebugBounds {
 	readonly selectionKey: StaticSceneSelectionKey;
 }
 
+export interface StaticSceneEnvCellBounds {
+	readonly bounds: StaticBounds;
+	readonly envCellId: number;
+	readonly landblockId: number;
+}
+
+export interface StaticSceneTerrainLandblockBounds {
+	readonly bounds: StaticBounds;
+	readonly landblockId: number;
+}
+
 export interface StaticSceneEnvCellAabbDebugBounds {
 	readonly bounds: StaticBounds;
 	readonly envCellId: number;
@@ -979,6 +990,21 @@ export class StaticSceneQuery {
 		return null;
 	}
 
+	queryTerrainLandblockBounds(options: {
+		readonly landblockId: number;
+	}): StaticSceneTerrainLandblockBounds | null {
+		const root = this.#terrainBvhRootsByLandblockId.get(options.landblockId);
+		const rootBounds = root?.nodes[0]?.bounds;
+		if (!root || !rootBounds) {
+			return null;
+		}
+
+		return {
+			bounds: translateBounds(rootBounds, root.translation),
+			landblockId: root.landblockId,
+		};
+	}
+
 	querySelectionDebugBounds(
 		selectionKey: StaticSceneSelectionKey,
 	): StaticSceneSelectionDebugBounds | null {
@@ -1093,6 +1119,34 @@ export class StaticSceneQuery {
 			);
 
 		return candidates[0]?.item.envCellId ?? null;
+	}
+
+	queryEnvCellBounds(options: {
+		readonly envCellId: number;
+		readonly landblockId: number;
+	}): StaticSceneEnvCellBounds | null {
+		const root = this.#envCellRootsByLandblockId.get(options.landblockId);
+		if (!root) {
+			return null;
+		}
+
+		let bounds: StaticBounds | null = null;
+		for (const item of root.items) {
+			if (item === null || item.envCellId !== options.envCellId) {
+				continue;
+			}
+
+			const renderBounds = translateBounds(item.bounds, root.translation);
+			bounds = bounds ? unionBounds(bounds, renderBounds) : renderBounds;
+		}
+
+		return bounds
+			? {
+					bounds,
+					envCellId: options.envCellId,
+					landblockId: options.landblockId,
+				}
+			: null;
 	}
 
 	queryEnvCellAabbDebugBounds(options?: {
@@ -3099,6 +3153,21 @@ function translateBounds(
 			x: bounds.min.x + translation[0],
 			y: bounds.min.y + translation[1],
 			z: bounds.min.z + translation[2],
+		},
+	};
+}
+
+function unionBounds(left: StaticBounds, right: StaticBounds): StaticBounds {
+	return {
+		max: {
+			x: Math.max(left.max.x, right.max.x),
+			y: Math.max(left.max.y, right.max.y),
+			z: Math.max(left.max.z, right.max.z),
+		},
+		min: {
+			x: Math.min(left.min.x, right.min.x),
+			y: Math.min(left.min.y, right.min.y),
+			z: Math.min(left.min.z, right.min.z),
 		},
 	};
 }

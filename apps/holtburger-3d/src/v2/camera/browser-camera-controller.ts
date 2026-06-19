@@ -81,6 +81,11 @@ export class V2BrowserCameraController {
 		this.#setState(createV2FreeCameraState(this.#config));
 	}
 
+	setState(state: V2FreeCameraState): void {
+		this.#stopMovement();
+		this.#setState(state);
+	}
+
 	setPosition(position: V2FreeCameraState["position"]): void {
 		this.#setState({
 			...this.#state,

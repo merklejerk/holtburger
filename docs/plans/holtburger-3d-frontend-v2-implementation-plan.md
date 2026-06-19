@@ -2877,20 +2877,23 @@ Implementation notes from 2026-06-18:
   - `npm run test:ts`
 - Manual browser validation confirmed explicit env-cell static picking still works after this cutover. Removed the temporary `[browser-static-pick]`, `[env-cell-pick-miss]`, and `[outdoor-pick-summary]` diagnostics, plus their runtime counter plumbing.
 
-#### Phase 13B2b: Dungeon Camera Focus Controls
+#### Phase 13B2b: Browser-Owned Scene Camera Auto-Focus
 
-Status: planned; depends on 13B2a-1.
+Status: complete on 2026-06-18; extended for outdoor manual anchors on 2026-06-19.
 
-Purpose: make pure dungeon inspection ergonomic once committed env-cell query records can be trusted.
+Purpose: make manual scene inspection ergonomic once committed query records can be trusted, while keeping camera placement policy inside Browser V2.
 
 Deliverables:
 
-- Runtime/query API or browser-local helper to derive an interior camera focus target from committed env-cell bounds for a requested `{ landblockId, envCellId }`. Prefer reusing `StaticSceneQuery` committed records; do not read prepared assets or renderer resources.
-- Browser V2 harness behavior for dungeon focus:
-  - when a dungeon/interior location is submitted and committed bounds are available, provide a deterministic "focus selected env cell" action or automatic first-focus behavior that moves the free camera to a useful inspectable pose;
-  - keep manual camera control authoritative once the user has moved the camera;
-  - expose enough status to tell whether the selected env cell has committed bounds, is missing, or was evicted.
-- Documentation or code comments, near the implementation if code changes are needed, recording the null-anchor pure-interior policy:
+- Done on 2026-06-18: `StaticSceneQuery.queryEnvCellBounds` / `ClientRuntime.queryEnvCellBounds` expose neutral committed env-cell render bounds for `{ landblockId, envCellId }`. Runtime owns the fact query only; it does not choose camera placement or timing.
+- Done on 2026-06-19: `StaticSceneQuery.queryTerrainLandblockBounds` / `ClientRuntime.queryTerrainLandblockBounds` expose neutral committed terrain bounds for `{ landblockId }`, translated into the active render frame.
+- Done on 2026-06-18/19: Runtime now emits lightweight `scene-interest-updated` and `scene-interest-settled` events with a runtime-owned scene-interest revision and source (`manual`, `follow`, `settings`, or `none`). The settled event waits for all desired work for the current scene interest to reach a terminal state and for runtime static materialization to drain.
+- Done on 2026-06-18/19: Browser V2 automatically prepares a one-shot camera focus from manual `scene-interest-updated` events and applies it only when the matching `scene-interest-settled` revision reports ready. Follow-mode and settings-refresh interest updates are distinct and do not prepare auto-focus.
+- Done on 2026-06-18: Browser V2 places the camera at the committed AABB center for the submitted env cell with neutral yaw/pitch. Landblock-prefix dungeon input already parses to `0x0100`, so "explicit cell or x100 otherwise" is preserved by the location parser.
+- Done on 2026-06-19: Browser V2 focuses manual outdoor anchors from terrain AABB facts when terrain is available. It uses terrain bounds for the focus target and footprint, chooses a fixed diagonal horizontal offset, raycasts terrain downward at the candidate camera X/Z to find ground height, applies clearance above that hit, and aims back at the terrain center. If terrain bounds or the terrain raycast are absent, it falls back to landblock-local footprint/max-Y bounds.
+- Done on 2026-06-19: Browser V2 logs `[holtburger-3d][v2][camera-focus-failed]` when a matching scene-interest settled event reports failure, including the pending focus, scene interest, failed work, and failed materializations.
+- Done on 2026-06-18: Browser V2 cancels pending auto-focus if manual camera control happens before loading settles, and records focus status as waiting, focused, missing bounds, failed, evicted, or manual control.
+- Still useful to document near a future browser/client camera policy module if this grows beyond the harness:
   - `interior-cell` scene interest means one landblock-local env-cell scope;
   - anchor `null` means no outdoor landblock offset;
   - camera residency carries the focused env cell;
@@ -2898,10 +2901,22 @@ Deliverables:
 
 Acceptance criteria:
 
-- A named dungeon/interior target can be loaded, focused, and inspected from a useful camera pose without outdoor terrain/building/detail work.
+- A named dungeon/interior target can be loaded, focused, and inspected from the submitted env-cell AABB center without outdoor terrain/building/detail work.
+- A manual outdoor anchor can be loaded, focused, and inspected from a terrain-bounds-derived camera pose without follow-mode rebasing.
 - Manual camera movement is not overridden after the user takes control.
-- Focus status distinguishes committed bounds, missing bounds, and evicted/cleared focus.
+- Focus status distinguishes waiting/committed bounds, missing bounds, failed work, evicted/cleared focus, and manual-control cancellation.
 - No follow-mode landblock rebase behavior is introduced for pure dungeon focus.
+
+Implementation notes from 2026-06-18:
+
+- This is intentionally browser-owned policy. Runtime now exposes `queryEnvCellBounds` and `queryTerrainLandblockBounds` as neutral committed-query facts because future clients may also need scene-ready/bounds facts, but runtime does not perform camera placement.
+- Browser V2 no longer uses runtime snapshot emissions as the focus trigger. Snapshots remain for debug/status UI, while focus consumes the semantic runtime event stream.
+- The settled gate is scene-wide, not env-cell-only: all desired work ids returned by the current scene-interest reconciliation must be `committed` or `failed`, and pending runtime static materialization must be empty. The settled result is `failed` if any desired work failed or any active scene work revision failed materialization, `ready` if all committed/materialized, and `cleared` for `none`.
+- The interior focus pose is deliberately literal: camera position is the aggregate env-cell AABB center and orientation is yaw `0`, pitch `0`. If this is visually awkward for some dungeons, any offset/orientation heuristic should remain browser/client camera policy.
+- The outdoor focus pose uses browser-local camera math over terrain bounds and terrain raycast facts: fixed diagonal horizontal framing, terrain-hit/max-Y clearance, and derived yaw/pitch back toward the bounds center. This keeps terrain elevation/framing data-driven without moving camera taste into runtime.
+- Validation passed:
+  - `npm run test:ts -- client-runtime.test.ts browser-camera-controller.test.ts static-scene-query.test.ts`
+  - `npm run check`
 
 #### Phase 13B2c: Env-Cell Static Seed Marker Diagnostics And Validation
 

@@ -111,6 +111,23 @@ describe("V2 browser camera controller", () => {
 
 		expect(controller.createSnapshot()).toEqual(createV2FreeCameraState());
 	});
+
+	it("replaces camera state programmatically", () => {
+		const nextState = {
+			...createV2FreeCameraState(),
+			position: [10, 20, 30] as const,
+			pitchRadians: 0,
+			yawRadians: 1,
+		};
+		const controller = new V2BrowserCameraController({
+			initialState: createV2FreeCameraState(),
+			onChange() {},
+		});
+
+		controller.setState(nextState);
+
+		expect(controller.createSnapshot()).toEqual(nextState);
+	});
 });
 
 function createPointerTarget(): HTMLElement {

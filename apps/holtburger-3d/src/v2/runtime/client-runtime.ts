@@ -57,8 +57,10 @@ import {
 	type StaticScenePickRequest,
 	type StaticScenePickHit,
 	type StaticSceneCameraResidency,
+	type StaticSceneEnvCellBounds,
 	type StaticSceneQuerySnapshot,
 	type StaticSceneSelectionKey,
+	type StaticSceneTerrainLandblockBounds,
 	type Vec3,
 	type TerrainQuadScenePickDetails,
 } from "./static-scene-query";
@@ -85,16 +87,43 @@ export type RuntimeSceneInterest =
 			readonly anchorLandblockId: number;
 			readonly domains: readonly ManualStaticDomain[];
 			readonly lod?: Partial<StaticLodRadii>;
-			readonly source: "manual" | "follow";
+			readonly source: "manual" | "follow" | "settings";
 	  }
 	| {
 			readonly kind: "interior-cell";
 			readonly landblockId: number;
 			readonly envCellId: number;
-			readonly source: "manual" | "follow";
+			readonly source: "manual" | "follow" | "settings";
 	  };
 
 export type RuntimeCameraResidency = StaticSceneCameraResidency;
+
+export type RuntimeSceneInterestSource =
+	| "manual"
+	| "follow"
+	| "settings"
+	| "none";
+
+export type RuntimeEvent =
+	| RuntimeSceneInterestUpdatedEvent
+	| RuntimeSceneInterestSettledEvent;
+
+export interface RuntimeSceneInterestUpdatedEvent {
+	readonly interest: RuntimeSceneInterest;
+	readonly kind: "scene-interest-updated";
+	readonly revision: number;
+	readonly source: RuntimeSceneInterestSource;
+}
+
+export interface RuntimeSceneInterestSettledEvent {
+	readonly failedMaterializations: readonly StaticMaterializationFailureSnapshot[];
+	readonly failedWork: readonly ScheduledStaticWorkStatus[];
+	readonly interest: RuntimeSceneInterest;
+	readonly kind: "scene-interest-settled";
+	readonly result: "ready" | "failed" | "cleared";
+	readonly revision: number;
+	readonly source: RuntimeSceneInterestSource;
+}
 
 export interface RuntimeSnapshot {
 	readonly status: "idle" | "static-active" | "disposed";
@@ -302,6 +331,7 @@ interface MatchedStaticSelectionDrawUnitDiagnostics {
 }
 
 type RuntimeSnapshotListener = (snapshot: RuntimeSnapshot) => void;
+type RuntimeEventListener = (event: RuntimeEvent) => void;
 
 interface RuntimeRenderPolicySnapshot {
 	readonly textureFilteringMode: TextureFilteringMode;
@@ -315,7 +345,7 @@ interface StaticMaterializationSnapshot {
 	readonly sourceDrawUnits: number;
 }
 
-interface StaticMaterializationFailureSnapshot {
+export interface StaticMaterializationFailureSnapshot {
 	readonly revision: number;
 	readonly message: string;
 }
@@ -330,6 +360,13 @@ export interface ClientRuntime {
 		readonly landblockId: number;
 		readonly point: Vec3;
 	}): RuntimeCameraResidency;
+	queryEnvCellBounds(options: {
+		readonly envCellId: number;
+		readonly landblockId: number;
+	}): StaticSceneEnvCellBounds | null;
+	queryTerrainLandblockBounds(options: {
+		readonly landblockId: number;
+	}): StaticSceneTerrainLandblockBounds | null;
 	setCurrentCameraResidency(residency: RuntimeCameraResidency): void;
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null;
 	createStaticSelectionDiagnosticsReport(
@@ -346,6 +383,7 @@ export interface ClientRuntime {
 	updateFrameState(state: FrameState): void;
 	createDiagnosticsReport(): RuntimeDiagnosticsReport;
 	subscribe(listener: RuntimeSnapshotListener): () => void;
+	subscribeEvents(listener: RuntimeEventListener): () => void;
 	dispose(): void;
 }
 
@@ -391,6 +429,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #staticCoordinator: StaticCoordinator;
 	readonly #staticSceneQuery = new StaticSceneQuery();
 	readonly #listeners = new Set<RuntimeSnapshotListener>();
+	readonly #eventListeners = new Set<RuntimeEventListener>();
 	readonly #unsubscribeRenderer: () => void;
 	readonly #unsubscribeStaticCoordinator: () => void;
 	readonly #unsubscribeStaticCommits: () => void;
@@ -401,6 +440,11 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#lastRendererSnapshot: RendererSnapshot;
 	#lastStaticSnapshot: StaticCoordinatorSnapshot;
 	#sceneInterest: RuntimeSceneInterest = { kind: "none" };
+	#sceneInterestRevision = 0;
+	#settledSceneInterestRevision = 0;
+	#activeSceneWorkIds = new Set<string>();
+	#activeSceneWorkRevisions = new Set<number>();
+	#sceneInterestReconciliationActive = false;
 	#currentCameraResidency: RuntimeCameraResidency = {
 		kind: "unknown",
 		landblockId: null,
@@ -477,6 +521,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				this.#lastStaticSnapshot = snapshot;
 				this.#warnAboutStaticResolverFailure(snapshot);
 				this.#emit();
+				this.#maybeEmitSceneInterestSettled();
 			},
 		);
 		this.#unsubscribeStaticCommits = staticCoordinator.subscribeCommits(
@@ -501,14 +546,34 @@ class ClientRuntimeImpl implements ClientRuntime {
 	updateSceneInterest(interest: RuntimeSceneInterest): void {
 		this.#assertActive();
 		this.#sceneInterest = normalizeSceneInterest(interest);
+		this.#sceneInterestRevision += 1;
+		this.#emitRuntimeEvent({
+			interest: this.#sceneInterest,
+			kind: "scene-interest-updated",
+			revision: this.#sceneInterestRevision,
+			source: getSceneInterestSource(this.#sceneInterest),
+		});
 		const nextAnchor =
 			this.#sceneInterest.kind === "outdoor-anchor"
 				? normalizeOutdoorLandblockId(this.#sceneInterest.anchorLandblockId)
 				: null;
 		this.#setRenderAnchorLandblockId(nextAnchor);
-		this.#reconcileStaticRetention(this.#sceneInterest);
+		this.#sceneInterestReconciliationActive = true;
+		let reconciliation: StaticRetentionReconciliation;
+		try {
+			reconciliation = this.#reconcileStaticRetention(this.#sceneInterest);
+			this.#activeSceneWorkIds = new Set(
+				reconciliation.activeWork.map((work) => work.workId),
+			);
+			this.#activeSceneWorkRevisions = new Set(
+				reconciliation.activeWork.map((work) => work.revision),
+			);
+		} finally {
+			this.#sceneInterestReconciliationActive = false;
+		}
 		this.#refreshStaticDebugOverlay();
 		this.#emit();
+		this.#maybeEmitSceneInterestSettled();
 	}
 
 	queryCameraResidencyAtPoint(options: {
@@ -525,6 +590,21 @@ class ClientRuntimeImpl implements ClientRuntime {
 	}): RuntimeCameraResidency {
 		this.#assertActive();
 		return this.#staticSceneQuery.queryCameraResidencyAtLandblockPoint(options);
+	}
+
+	queryEnvCellBounds(options: {
+		readonly envCellId: number;
+		readonly landblockId: number;
+	}): StaticSceneEnvCellBounds | null {
+		this.#assertActive();
+		return this.#staticSceneQuery.queryEnvCellBounds(options);
+	}
+
+	queryTerrainLandblockBounds(options: {
+		readonly landblockId: number;
+	}): StaticSceneTerrainLandblockBounds | null {
+		this.#assertActive();
+		return this.#staticSceneQuery.queryTerrainLandblockBounds(options);
 	}
 
 	setCurrentCameraResidency(residency: RuntimeCameraResidency): void {
@@ -675,6 +755,14 @@ class ClientRuntimeImpl implements ClientRuntime {
 		};
 	}
 
+	subscribeEvents(listener: RuntimeEventListener): () => void {
+		this.#eventListeners.add(listener);
+
+		return () => {
+			this.#eventListeners.delete(listener);
+		};
+	}
+
 	dispose(): void {
 		if (this.#disposed) {
 			return;
@@ -692,6 +780,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#renderer.dispose();
 		this.#emit();
 		this.#listeners.clear();
+		this.#eventListeners.clear();
 	}
 
 	#assertActive(): void {
@@ -791,6 +880,80 @@ class ClientRuntimeImpl implements ClientRuntime {
 		for (const listener of this.#listeners) {
 			listener(snapshot);
 		}
+	}
+
+	#emitRuntimeEvent(event: RuntimeEvent): void {
+		for (const listener of this.#eventListeners) {
+			listener(event);
+		}
+	}
+
+	#maybeEmitSceneInterestSettled(): void {
+		if (
+			this.#sceneInterestRevision === 0 ||
+			this.#settledSceneInterestRevision === this.#sceneInterestRevision ||
+			this.#sceneInterestReconciliationActive ||
+			this.#pendingStaticMaterializations.size > 0
+		) {
+			return;
+		}
+
+		const source = getSceneInterestSource(this.#sceneInterest);
+		if (this.#sceneInterest.kind === "none") {
+			this.#emitSceneInterestSettled({
+				failedMaterializations: [],
+				failedWork: [],
+				result: "cleared",
+				source,
+			});
+			return;
+		}
+
+		const sceneWork = this.#lastStaticSnapshot.activeWork.filter((work) =>
+			this.#activeSceneWorkIds.has(work.workId),
+		);
+		if (sceneWork.length !== this.#activeSceneWorkIds.size) {
+			return;
+		}
+
+		const unsettledWork = sceneWork.filter(
+			(work) => work.status !== "committed" && work.status !== "failed",
+		);
+		if (unsettledWork.length > 0) {
+			return;
+		}
+
+		const failedWork = sceneWork.filter((work) => work.status === "failed");
+		const failedMaterializations = this.#failedStaticMaterializations.filter(
+			(failure) => this.#activeSceneWorkRevisions.has(failure.revision),
+		);
+		this.#emitSceneInterestSettled({
+			failedMaterializations,
+			failedWork,
+			result:
+				failedWork.length > 0 || failedMaterializations.length > 0
+					? "failed"
+					: "ready",
+			source,
+		});
+	}
+
+	#emitSceneInterestSettled(options: {
+		readonly failedMaterializations: readonly StaticMaterializationFailureSnapshot[];
+		readonly failedWork: readonly ScheduledStaticWorkStatus[];
+		readonly result: RuntimeSceneInterestSettledEvent["result"];
+		readonly source: RuntimeSceneInterestSource;
+	}): void {
+		this.#settledSceneInterestRevision = this.#sceneInterestRevision;
+		this.#emitRuntimeEvent({
+			failedMaterializations: options.failedMaterializations,
+			failedWork: options.failedWork,
+			interest: this.#sceneInterest,
+			kind: "scene-interest-settled",
+			result: options.result,
+			revision: this.#sceneInterestRevision,
+			source: options.source,
+		});
 	}
 
 	#pruneExpiredWarmAssets(): void {
@@ -901,6 +1064,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			delta.revision,
 		);
 		this.#emit();
+		this.#maybeEmitSceneInterestSettled();
 	}
 
 	#recordStaticMaterializationFailure(revision: number, error: unknown): void {
@@ -917,6 +1081,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			revision,
 		});
 		this.#emit();
+		this.#maybeEmitSceneInterestSettled();
 	}
 
 	#updateMaterializedDrawUnitIdMappings(
@@ -1903,6 +2068,12 @@ function isUnrefableTimer(timer: unknown): timer is UnrefableTimer {
 		"unref" in timer &&
 		typeof (timer as { readonly unref?: unknown }).unref === "function"
 	);
+}
+
+function getSceneInterestSource(
+	interest: RuntimeSceneInterest,
+): RuntimeSceneInterestSource {
+	return interest.kind === "none" ? "none" : interest.source;
 }
 
 function createStaticCoordinatorDiagnosticsReport(

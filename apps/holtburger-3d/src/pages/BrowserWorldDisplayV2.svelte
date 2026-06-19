@@ -10,6 +10,7 @@
 		clampOutdoorSceneLodRadius,
 		countOutdoorSceneLodTiles,
 	} from "../lib/world-display/outdoor-scene-interest";
+	import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../lib/landblocks";
 	import { V2BrowserCameraController } from "../v2/camera/browser-camera-controller";
 	import {
 		createV2FreeCameraFrameStateCamera,
@@ -31,6 +32,8 @@
 		ClientRuntime,
 		ManualStaticDomain,
 		RuntimeCameraResidency,
+		RuntimeEvent,
+		RuntimeSceneInterestSource,
 		RuntimeSnapshot,
 		TransitionApertureDebugOverlayMode,
 	} from "../v2/runtime/client-runtime";
@@ -47,12 +50,38 @@
 	} from "../v2/ui/performance-metrics";
 
 	type BrowserV2PanelTab = "navigate" | "settings" | "debug";
+	type CameraFocusStatus =
+		| "idle"
+		| "waiting"
+		| "focused"
+		| "focused-with-warnings"
+		| "missing-bounds"
+		| "failed"
+		| "evicted"
+		| "manual-control";
+	type PendingCameraFocus =
+		| {
+				readonly kind: "interior-cell";
+				readonly envCellId: number;
+				readonly landblockId: number;
+				readonly sceneInterestRevision: number;
+		  }
+		| {
+				readonly kind: "outdoor-landblock";
+				readonly landblockId: number;
+				readonly sceneInterestRevision: number;
+		  };
 
 	const STATIC_INTEREST_REFRESH_DEBOUNCE_MS = 250;
 	const CAMERA_POLICY_SYNC_INTERVAL_MS = 1000 / 30;
 	const PERF_OVERLAY_SAMPLE_MS = 500;
 	const PERF_OVERLAY_EMA_ALPHA = 0.18;
 	const STATIC_PICK_CLICK_DRAG_THRESHOLD_PX = 3;
+	const INTERIOR_CAMERA_FOCUS_YAW_RADIANS = 0;
+	const INTERIOR_CAMERA_FOCUS_PITCH_RADIANS = 0;
+	const OUTDOOR_CAMERA_FOCUS_HORIZONTAL_DISTANCE =
+		OUTDOOR_LANDBLOCK_WORLD_SIZE * 0.75;
+	const OUTDOOR_CAMERA_FOCUS_MIN_CLEARANCE = 40;
 	const TEXTURE_FILTERING_OPTIONS: readonly TextureFilteringMode[] = [
 		"nearest",
 		"linear",
@@ -89,6 +118,8 @@
 	let selectedStaticDiagnosticsReportText = $state<string | null>(null);
 	let selectedStaticSelectionKey = $state<StaticSceneSelectionKey | null>(null);
 	let selectedStaticPickDistance = $state<number | null>(null);
+	let pendingCameraFocus = $state<PendingCameraFocus | null>(null);
+	let cameraFocusStatus = $state<CameraFocusStatus>("idle");
 	let pickPointerCandidate: {
 		readonly pointerId: number;
 		readonly startX: number;
@@ -134,10 +165,13 @@
 				initialState: cameraState,
 				onChange(nextCameraState) {
 					cameraState = nextCameraState;
+					if (nextCameraState.hasManualControl) {
+						cancelPendingCameraFocus("manual-control");
+					}
 					pushCameraFrameState();
 				},
 			});
-			const unsubscribe = runtime.subscribe((nextSnapshot) => {
+			const unsubscribeSnapshot = runtime.subscribe((nextSnapshot) => {
 				snapshot = nextSnapshot;
 				selectedTextureFilteringMode =
 					nextSnapshot.renderPolicy.textureFilteringMode;
@@ -145,6 +179,7 @@
 					nextSnapshot.renderer,
 				);
 			});
+			const unsubscribeEvents = runtime.subscribeEvents(handleRuntimeEvent);
 			pushCameraFrameState();
 			const policySyncInterval = window.setInterval(() => {
 				syncCameraPolicy();
@@ -153,7 +188,8 @@
 			return () => {
 				window.clearInterval(policySyncInterval);
 				clearStaticInterestRefresh();
-				unsubscribe();
+				unsubscribeSnapshot();
+				unsubscribeEvents();
 				cameraController?.dispose();
 				cameraController = null;
 				runtime?.dispose();
@@ -172,23 +208,29 @@
 
 		submittedStaticLocation = parsedLocation;
 		clearStaticDebugSelection();
-		updateSceneInterestForLocation(parsedLocation);
+		updateSceneInterestForLocation(parsedLocation, "manual");
 	}
 
 	function updateSceneInterestForLocation(
 		location: V2ParsedLocationInput,
+		source: Exclude<RuntimeSceneInterestSource, "none">,
 	): void {
 		if (!runtime) {
 			return;
 		}
 
 		runtime.updateSceneInterest(
-			createSceneInterestFromLocation(location, selectedDomains(), {
-				buildings: buildingRadius,
-				detail: detailRadius,
-				terrain: terrainRadius,
-				envCells: envCellRadius,
-			}),
+			createSceneInterestFromLocation(
+				location,
+				selectedDomains(),
+				{
+					buildings: buildingRadius,
+					detail: detailRadius,
+					terrain: terrainRadius,
+					envCells: envCellRadius,
+				},
+				source,
+			),
 		);
 	}
 
@@ -201,11 +243,13 @@
 		clearStaticInterestRefresh();
 		submittedStaticLocation = null;
 		clearStaticDebugSelection();
+		cancelPendingCameraFocus("idle");
 		followModeEnabled = false;
 		runtime?.updateSceneInterest({ kind: "none" });
 	}
 
 	function resetCamera(): void {
+		cancelPendingCameraFocus("manual-control");
 		cameraController?.reset();
 	}
 
@@ -402,6 +446,265 @@
 		);
 	}
 
+	function cancelPendingCameraFocus(
+		status: CameraFocusStatus,
+	): void {
+		pendingCameraFocus = null;
+		cameraFocusStatus = status;
+	}
+
+	function handleRuntimeEvent(event: RuntimeEvent): void {
+		if (event.kind === "scene-interest-updated") {
+			handleSceneInterestUpdatedEvent(event);
+			return;
+		}
+
+		handleSceneInterestSettledEvent(event);
+	}
+
+	function handleSceneInterestUpdatedEvent(
+		event: Extract<RuntimeEvent, { readonly kind: "scene-interest-updated" }>,
+	): void {
+		if (event.source !== "manual") {
+			cancelPendingCameraFocus(event.interest.kind === "none" ? "idle" : "evicted");
+			return;
+		}
+
+		if (event.interest.kind === "interior-cell") {
+			pendingCameraFocus = {
+				envCellId: event.interest.envCellId,
+				kind: "interior-cell",
+				landblockId: event.interest.landblockId,
+				sceneInterestRevision: event.revision,
+			};
+			cameraFocusStatus = "waiting";
+			return;
+		}
+
+		if (event.interest.kind === "outdoor-anchor") {
+			pendingCameraFocus = {
+				kind: "outdoor-landblock",
+				landblockId: event.interest.anchorLandblockId,
+				sceneInterestRevision: event.revision,
+			};
+			cameraFocusStatus = "waiting";
+			return;
+		}
+
+		cancelPendingCameraFocus("idle");
+	}
+
+	function handleSceneInterestSettledEvent(
+		event: Extract<RuntimeEvent, { readonly kind: "scene-interest-settled" }>,
+	): void {
+		if (
+			!runtime ||
+			!cameraController ||
+			!pendingCameraFocus ||
+			event.revision !== pendingCameraFocus.sceneInterestRevision
+		) {
+			return;
+		}
+
+		if (event.result === "cleared") {
+			cancelPendingCameraFocus("evicted");
+			return;
+		}
+		if (event.result === "failed") {
+			logCameraFocusSettledFailure(event, pendingCameraFocus);
+			applyPendingCameraFocus("focused-with-warnings");
+			return;
+		}
+
+		applyPendingCameraFocus("focused");
+	}
+
+	function logCameraFocusSettledFailure(
+		event: Extract<RuntimeEvent, { readonly kind: "scene-interest-settled" }>,
+		focus: PendingCameraFocus,
+	): void {
+		console.warn("[holtburger-3d][v2][camera-focus-failed]", {
+			failedMaterializations: event.failedMaterializations,
+			failedWork: event.failedWork,
+			focus,
+			interest: event.interest,
+			result: event.result,
+			revision: event.revision,
+			source: event.source,
+		});
+	}
+
+	function applyPendingCameraFocus(status: CameraFocusStatus): void {
+		if (!runtime || !cameraController || !pendingCameraFocus) {
+			return;
+		}
+
+		const pose =
+			pendingCameraFocus.kind === "interior-cell"
+				? createInteriorCameraFocusPose(pendingCameraFocus)
+				: createOutdoorCameraFocusPose(pendingCameraFocus);
+		if (!pose) {
+			cancelPendingCameraFocus("missing-bounds");
+			return;
+		}
+
+		cameraController.setState({
+			...cameraState,
+			hasManualControl: false,
+			pitchRadians: pose.pitchRadians,
+			position: pose.position,
+			yawRadians: pose.yawRadians,
+		});
+		pendingCameraFocus = null;
+		cameraFocusStatus = status;
+		syncCurrentCameraResidency(pose.position);
+	}
+
+	function createInteriorCameraFocusPose(
+		focus: Extract<PendingCameraFocus, { readonly kind: "interior-cell" }>,
+	): {
+		readonly pitchRadians: number;
+		readonly position: readonly [number, number, number];
+		readonly yawRadians: number;
+	} | null {
+		const bounds = runtime?.queryEnvCellBounds(focus);
+		if (!bounds) {
+			return null;
+		}
+
+		const center = centerOfBounds(bounds.bounds);
+		return {
+			pitchRadians: INTERIOR_CAMERA_FOCUS_PITCH_RADIANS,
+			position: [center.x, center.y, center.z],
+			yawRadians: INTERIOR_CAMERA_FOCUS_YAW_RADIANS,
+		};
+	}
+
+	function createOutdoorCameraFocusPose(
+		focus: Extract<PendingCameraFocus, { readonly kind: "outdoor-landblock" }>,
+	): {
+		readonly pitchRadians: number;
+		readonly position: readonly [number, number, number];
+		readonly yawRadians: number;
+	} | null {
+		const bounds =
+			runtime?.queryTerrainLandblockBounds({
+				landblockId: focus.landblockId,
+			})?.bounds ?? createDefaultOutdoorFocusBounds();
+		const center = centerOfBounds(bounds);
+		const direction = normalizeVector({ x: 1, y: 0, z: 1 });
+		const footprint = Math.max(
+			bounds.max.x - bounds.min.x,
+			Math.abs(bounds.max.z - bounds.min.z),
+			OUTDOOR_LANDBLOCK_WORLD_SIZE,
+		);
+		const horizontalDistance = Math.max(
+			OUTDOOR_CAMERA_FOCUS_HORIZONTAL_DISTANCE,
+			footprint * 0.75,
+		);
+		const clearance = Math.max(
+			OUTDOOR_CAMERA_FOCUS_MIN_CLEARANCE,
+			footprint * 0.25,
+		);
+		const x = center.x + direction.x * horizontalDistance;
+		const z = center.z + direction.z * horizontalDistance;
+		const groundY = queryOutdoorTerrainHeightAtPoint({
+			bounds,
+			clearance,
+			x,
+			z,
+		});
+		const position = {
+			x,
+			y: groundY + clearance,
+			z,
+		};
+		const look = normalizeVector({
+			x: center.x - position.x,
+			y: center.y - position.y,
+			z: center.z - position.z,
+		});
+
+		return {
+			pitchRadians: Math.asin(look.y),
+			position: [position.x, position.y, position.z],
+			yawRadians: Math.atan2(look.x, -look.z),
+		};
+	}
+
+	function queryOutdoorTerrainHeightAtPoint(options: {
+		readonly bounds: {
+			readonly max: { readonly x: number; readonly y: number; readonly z: number };
+			readonly min: { readonly x: number; readonly y: number; readonly z: number };
+		};
+		readonly clearance: number;
+		readonly x: number;
+		readonly z: number;
+	}): number {
+		const hit = runtime?.pickStaticRay({
+			context: { kind: "outdoor" },
+			filters: { itemKinds: ["terrain-quad"] },
+			ray: {
+				direction: { x: 0, y: -1, z: 0 },
+				origin: {
+					x: options.x,
+					y: options.bounds.max.y + options.clearance * 2,
+					z: options.z,
+				},
+			},
+		});
+
+		return hit?.selectionKey.itemKind === "terrain-quad"
+			? hit.hitPoint.y
+			: options.bounds.max.y;
+	}
+
+	function centerOfBounds(bounds: {
+		readonly max: { readonly x: number; readonly y: number; readonly z: number };
+		readonly min: { readonly x: number; readonly y: number; readonly z: number };
+	}): { readonly x: number; readonly y: number; readonly z: number } {
+		return {
+			x: (bounds.min.x + bounds.max.x) * 0.5,
+			y: (bounds.min.y + bounds.max.y) * 0.5,
+			z: (bounds.min.z + bounds.max.z) * 0.5,
+		};
+	}
+
+	function createDefaultOutdoorFocusBounds(): {
+		readonly max: { readonly x: number; readonly y: number; readonly z: number };
+		readonly min: { readonly x: number; readonly y: number; readonly z: number };
+	} {
+		return {
+			max: {
+				x: OUTDOOR_LANDBLOCK_WORLD_SIZE,
+				y: OUTDOOR_LANDBLOCK_WORLD_SIZE * 0.5,
+				z: 0,
+			},
+			min: {
+				x: 0,
+				y: 0,
+				z: -OUTDOOR_LANDBLOCK_WORLD_SIZE,
+			},
+		};
+	}
+
+	function normalizeVector(vector: {
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	}): { readonly x: number; readonly y: number; readonly z: number } {
+		const length = Math.hypot(vector.x, vector.y, vector.z);
+		if (length === 0) {
+			return { x: 0, y: 0, z: -1 };
+		}
+
+		return {
+			x: vector.x / length,
+			y: vector.y / length,
+			z: vector.z / length,
+		};
+	}
+
 	function scheduleStaticInterestRefresh(): void {
 		clearStaticInterestRefresh();
 		if (!runtime || !submittedStaticLocation) {
@@ -418,7 +721,7 @@
 		staticInterestRefreshTimer = window.setTimeout(() => {
 			staticInterestRefreshTimer = null;
 			if (submittedStaticLocation) {
-				updateSceneInterestForLocation(submittedStaticLocation);
+				updateSceneInterestForLocation(submittedStaticLocation, "settings");
 			}
 		}, STATIC_INTEREST_REFRESH_DEBOUNCE_MS);
 	}
@@ -763,6 +1066,35 @@
 
 		return `env ${formatHexId(residency.landblockId)} / ${formatHexId(residency.envCellId)}`;
 	}
+
+	function formatCameraFocusStatus(): string {
+		if (pendingCameraFocus) {
+			if (pendingCameraFocus.kind === "interior-cell") {
+				return `waiting env ${formatHexId(pendingCameraFocus.landblockId)} / ${formatHexId(pendingCameraFocus.envCellId)}`;
+			}
+
+			return `waiting outdoor ${formatHexId(pendingCameraFocus.landblockId)}`;
+		}
+
+		switch (cameraFocusStatus) {
+			case "idle":
+				return "idle";
+			case "waiting":
+				return "waiting";
+			case "focused":
+				return "focused";
+			case "focused-with-warnings":
+				return "focused with warnings";
+			case "missing-bounds":
+				return "missing bounds";
+			case "failed":
+				return "failed";
+			case "evicted":
+				return "evicted";
+			case "manual-control":
+				return "manual control";
+		}
+	}
 </script>
 
 <svelte:head>
@@ -947,6 +1279,10 @@
 										none
 									{/if}
 								</dd>
+							</div>
+							<div>
+								<dt>Camera focus</dt>
+								<dd>{formatCameraFocusStatus()}</dd>
 							</div>
 						</dl>
 
@@ -1286,6 +1622,10 @@
 									? formatCameraResidency(snapshot.currentCameraResidency)
 									: "pending"}
 							</dd>
+						</div>
+						<div>
+							<dt>Camera focus</dt>
+							<dd>{formatCameraFocusStatus()}</dd>
 						</div>
 						<div>
 							<dt>Draw units</dt>

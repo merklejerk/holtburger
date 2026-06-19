@@ -440,6 +440,28 @@ describe("V2 static scene query", () => {
 		});
 	});
 
+	it("exposes committed terrain landblock bounds in the render frame", () => {
+		const query = new StaticSceneQuery();
+		query.setOutdoorAnchorLandblockId(0xda55ffff);
+		query.ingestTerrain(
+			createTerrainPayload({ landblockId: 0xdb55ffff }),
+			0xda55ffff,
+		);
+
+		expect(
+			query.queryTerrainLandblockBounds({ landblockId: 0xdb55ffff }),
+		).toEqual({
+			bounds: {
+				max: { x: 196, y: 1, z: 0 },
+				min: { x: 192, y: 0, z: -4 },
+			},
+			landblockId: 0xdb55ffff,
+		});
+		expect(
+			query.queryTerrainLandblockBounds({ landblockId: 0xdc55ffff }),
+		).toBeNull();
+	});
+
 	it("ingests landblock env-cell static seed facts for object picking", () => {
 		const query = new StaticSceneQuery();
 		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
@@ -834,6 +856,42 @@ describe("V2 static scene query", () => {
 				landblockId: 0xdb55ffff,
 			}),
 		]);
+	});
+
+	it("exposes committed env-cell bounds in the render frame", () => {
+		const query = new StaticSceneQuery();
+		query.setOutdoorAnchorLandblockId(0xda55ffff);
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				envCellId: 0xdb550100,
+				landblockBounds: {
+					max: { x: 8, y: 4, z: 2 },
+					min: { x: 2, y: -1, z: -6 },
+				},
+				landblockId: 0xdb55ffff,
+			}),
+		);
+
+		expect(
+			query.queryEnvCellBounds({
+				envCellId: 0xdb550100,
+				landblockId: 0xdb55ffff,
+			}),
+		).toEqual({
+			bounds: {
+				max: { x: 200, y: 4, z: 2 },
+				min: { x: 194, y: -1, z: -6 },
+			},
+			envCellId: 0xdb550100,
+			landblockId: 0xdb55ffff,
+		});
+		expect(
+			query.queryEnvCellBounds({
+				envCellId: 0xdb550101,
+				landblockId: 0xdb55ffff,
+			}),
+		).toBeNull();
 	});
 
 	it("exposes all committed env-cell debug bounds by default", () => {
@@ -1396,7 +1454,9 @@ function createOutdoorSourceDiagnostics(
 	};
 }
 
-function createTerrainPayload(): TerrainStaticScopePayload {
+function createTerrainPayload(
+	options: { readonly landblockId?: number } = {},
+): TerrainStaticScopePayload {
 	const quad = {
 		averageHeight: 0,
 		bounds: {
@@ -1418,7 +1478,7 @@ function createTerrainPayload(): TerrainStaticScopePayload {
 		kind: "terrain",
 		landblock: {
 			kind: "landblock-source",
-			landblockId: 0xda55ffff,
+			landblockId: options.landblockId ?? 0xda55ffff,
 			source: "outdoor",
 		},
 		mesh: {

@@ -32,7 +32,11 @@ import {
 	DeferredStaticBaker,
 	DeferredStaticResolver,
 } from "../static/fake-workers";
-import { createClientRuntime, type RuntimeSnapshot } from "./client-runtime";
+import {
+	createClientRuntime,
+	type RuntimeEvent,
+	type RuntimeSnapshot,
+} from "./client-runtime";
 import {
 	createOutdoorStaticObjectSelectionKey,
 	createTerrainQuadSelectionKey,
@@ -343,7 +347,7 @@ describe("V2 client runtime", () => {
 		});
 
 		updateInteriorSceneInterest(runtime);
-		await flushPromises();
+		await flushRuntimeWork();
 
 		expect(runtime.createDiagnosticsReport()).toMatchObject({
 			domains: expect.arrayContaining([
@@ -362,6 +366,122 @@ describe("V2 client runtime", () => {
 				sourceStaticDrawUnits: 0,
 			}),
 		});
+		runtime.dispose();
+	});
+
+	it("emits manual scene interest update and settled events", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer: new FakeRenderer(),
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker,
+				resolver,
+			}),
+		});
+		const events: RuntimeEvent[] = [];
+		const unsubscribe = runtime.subscribeEvents((event) => {
+			events.push(event);
+		});
+
+		updateInteriorSceneInterest(runtime);
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? failKey());
+		await flushRuntimeWork();
+		baker.complete(baker.pendingInputs[0]?.staticBatchId ?? failKey());
+		await flushRuntimeWork();
+
+		expect(events).toEqual([
+			expect.objectContaining({
+				interest: expect.objectContaining({
+					envCellId: 0xda550100,
+					kind: "interior-cell",
+					landblockId: 0xda55ffff,
+				}),
+				kind: "scene-interest-updated",
+				revision: 1,
+				source: "manual",
+			}),
+			expect.objectContaining({
+				kind: "scene-interest-settled",
+				result: "ready",
+				revision: 1,
+				source: "manual",
+			}),
+		]);
+
+		unsubscribe();
+		runtime.dispose();
+	});
+
+	it("emits follow scene interest source separately from manual updates", async () => {
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer: new FakeRenderer(),
+		});
+		const events: RuntimeEvent[] = [];
+		const unsubscribe = runtime.subscribeEvents((event) => {
+			events.push(event);
+		});
+
+		updateOutdoorSceneInterest(runtime, {
+			domains: [],
+			source: "follow",
+		});
+		await flushRuntimeWork();
+
+		expect(events).toEqual([
+			expect.objectContaining({
+				kind: "scene-interest-updated",
+				revision: 1,
+				source: "follow",
+			}),
+			expect.objectContaining({
+				kind: "scene-interest-settled",
+				result: "ready",
+				revision: 1,
+				source: "follow",
+			}),
+		]);
+
+		unsubscribe();
+		runtime.dispose();
+	});
+
+	it("emits settings scene interest source separately from manual updates", async () => {
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer: new FakeRenderer(),
+		});
+		const events: RuntimeEvent[] = [];
+		const unsubscribe = runtime.subscribeEvents((event) => {
+			events.push(event);
+		});
+
+		updateOutdoorSceneInterest(runtime, {
+			domains: [],
+			source: "settings",
+		});
+		await flushRuntimeWork();
+
+		expect(events).toEqual([
+			expect.objectContaining({
+				kind: "scene-interest-updated",
+				revision: 1,
+				source: "settings",
+			}),
+			expect.objectContaining({
+				kind: "scene-interest-settled",
+				result: "ready",
+				revision: 1,
+				source: "settings",
+			}),
+		]);
+
+		unsubscribe();
 		runtime.dispose();
 	});
 
@@ -1004,7 +1124,7 @@ function updateOutdoorSceneInterest(
 			readonly envCells?: number;
 			readonly terrain?: number;
 		};
-		readonly source?: "manual" | "follow";
+		readonly source?: "manual" | "follow" | "settings";
 	} = {},
 ): void {
 	runtime.updateSceneInterest({
@@ -1805,4 +1925,10 @@ function failKey(): never {
 
 async function flushPromises(): Promise<void> {
 	await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+async function flushRuntimeWork(): Promise<void> {
+	for (let index = 0; index < 5; index += 1) {
+		await flushPromises();
+	}
 }

@@ -9,7 +9,7 @@ use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE};
 use crate::material_variants::legacy_sampler_material_variant_signature;
 use crate::source_reader::ContentSourceReader;
 use crate::static_outdoor_scene::{StaticOutdoorScene, StaticOutdoorSceneAssembler};
-use crate::{ContentDecodeCache, ContentRepository, normalize_landblock_id};
+use crate::{normalize_landblock_id, ContentDecodeCache, ContentRepository};
 
 pub const LANDBLOCK_GRID_SIZE: usize = 9;
 pub const LANDBLOCK_TILE_SIZE: f32 = 24.0;
@@ -796,17 +796,14 @@ impl EnvCellAssetAssembler {
             env_cells: vec![env_cell.clone()],
             environments: vec![environment],
         };
-        let prepared_cell = build_prepared_interior_cells(
-            &interiors,
-            InteriorCellStructureClipPolicy::OwnerPortalsOnly,
-        )
-        .into_iter()
-        .next()
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "EnvCell 0x{env_cell_id:08X} could not produce prepared interior geometry"
-            )
-        })?;
+        let prepared_cell = build_prepared_interior_cells(&interiors)
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "EnvCell 0x{env_cell_id:08X} could not produce prepared interior geometry"
+                )
+            })?;
         let landblock_id = normalize_landblock_id(env_cell_id & 0xffff_0000);
         let indoor_instances =
             build_prepared_indoor_static_instances(landblock_id, &interiors).collect::<Vec<_>>();
@@ -1047,13 +1044,10 @@ impl LandblockEnvCellsAssetAssembler {
             env_cells: env_cell_facts,
             environments,
         };
-        let prepared_cells_by_id = build_prepared_interior_cells(
-            &interiors,
-            InteriorCellStructureClipPolicy::OwnerAndIncomingPortals,
-        )
-        .into_iter()
-        .map(|cell| (cell.env_cell_id, cell))
-        .collect::<HashMap<_, _>>();
+        let prepared_cells_by_id = build_prepared_interior_cells(&interiors)
+            .into_iter()
+            .map(|cell| (cell.env_cell_id, cell))
+            .collect::<HashMap<_, _>>();
         let indoor_instances =
             build_prepared_indoor_static_instances(landblock_id, &interiors).collect::<Vec<_>>();
         let static_meshes =
@@ -2762,22 +2756,7 @@ fn uses_southwest_to_northeast_cut(landblock_id: u32, cell_x: u32, cell_y: u32) 
     split_direction >= 0x8000_0000
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum InteriorCellStructureClipPolicy {
-    OwnerPortalsOnly,
-    OwnerAndIncomingPortals,
-}
-
-fn build_prepared_interior_cells(
-    interiors: &LandblockInteriorFacts,
-    clip_policy: InteriorCellStructureClipPolicy,
-) -> Vec<PreparedInteriorCell> {
-    let incoming_portal_clip_planes_by_target = match clip_policy {
-        InteriorCellStructureClipPolicy::OwnerPortalsOnly => HashMap::new(),
-        InteriorCellStructureClipPolicy::OwnerAndIncomingPortals => {
-            build_incoming_portal_clip_planes_by_target(interiors)
-        }
-    };
+fn build_prepared_interior_cells(interiors: &LandblockInteriorFacts) -> Vec<PreparedInteriorCell> {
     let mut cells = Vec::new();
     for env_cell in &interiors.env_cells {
         let Some(environment_id) = env_cell.environment_id else {
@@ -2800,16 +2779,8 @@ fn build_prepared_interior_cells(
             continue;
         };
 
+        let render_geometry = build_cell_structure_render_geometry(cell_structure);
         let portal_apertures = build_prepared_portal_apertures(cell_structure, &env_cell.portals);
-        let render_geometry = build_cell_structure_render_geometry(
-            cell_structure,
-            &env_cell.portals,
-            &portal_apertures,
-            incoming_portal_clip_planes_by_target
-                .get(&env_cell.env_cell_id)
-                .map(Vec::as_slice)
-                .unwrap_or(&[]),
-        );
         cells.push(PreparedInteriorCell {
             env_cell_id: env_cell.env_cell_id,
             environment_id,
@@ -2824,92 +2795,6 @@ fn build_prepared_interior_cells(
         });
     }
     cells
-}
-
-fn build_incoming_portal_clip_planes_by_target(
-    interiors: &LandblockInteriorFacts,
-) -> HashMap<u32, Vec<PortalClipPlane>> {
-    let portal_clip_planes_by_env_cell_id = build_portal_clip_planes_by_env_cell_id(interiors);
-    let mut incoming_clip_planes_by_target = HashMap::<u32, Vec<PortalClipPlane>>::new();
-    for source_cell in &interiors.env_cells {
-        for portal in &source_cell.portals {
-            let Some(target_env_cell_id) = portal.target_env_cell_id else {
-                continue;
-            };
-            let Some(target_portal_index) = normalize_portal_index(portal.other_portal_id) else {
-                continue;
-            };
-            let Some(target_clip_plane) = portal_clip_planes_by_env_cell_id
-                .get(&target_env_cell_id)
-                .and_then(|planes| {
-                    planes
-                        .iter()
-                        .find(|clip_plane| clip_plane.source_index == target_portal_index)
-                })
-                .copied()
-            else {
-                continue;
-            };
-            incoming_clip_planes_by_target
-                .entry(target_env_cell_id)
-                .or_default()
-                .push(target_clip_plane);
-        }
-    }
-    incoming_clip_planes_by_target
-}
-
-fn build_portal_clip_planes_by_env_cell_id(
-    interiors: &LandblockInteriorFacts,
-) -> HashMap<u32, Vec<PortalClipPlane>> {
-    let cell_structure_by_env_cell_id = build_cell_structure_by_env_cell_id(interiors);
-    interiors
-        .env_cells
-        .iter()
-        .map(|env_cell| {
-            let clip_planes = cell_structure_by_env_cell_id
-                .get(&env_cell.env_cell_id)
-                .map(|cell_structure| {
-                    let portal_apertures =
-                        build_prepared_portal_apertures(cell_structure, &env_cell.portals);
-                    build_portal_clip_planes(&env_cell.portals, &portal_apertures)
-                })
-                .unwrap_or_default();
-            (env_cell.env_cell_id, clip_planes)
-        })
-        .collect()
-}
-
-fn normalize_portal_index(portal_id: u16) -> Option<usize> {
-    if portal_id == u16::MAX {
-        None
-    } else {
-        Some(usize::from(portal_id))
-    }
-}
-
-fn build_cell_structure_by_env_cell_id<'a>(
-    interiors: &'a LandblockInteriorFacts,
-) -> HashMap<u32, &'a CellStruct> {
-    interiors
-        .env_cells
-        .iter()
-        .filter_map(|env_cell| {
-            let environment_id = env_cell.environment_id?;
-            let cell_structure_id = env_cell.cell_structure_id?;
-            let cell_structure = interiors
-                .environments
-                .iter()
-                .find(|environment| environment.id == environment_id)
-                .and_then(|environment| {
-                    environment
-                        .cell_structures
-                        .iter()
-                        .find(|cell_structure| cell_structure.id == cell_structure_id)
-                })?;
-            Some((env_cell.env_cell_id, cell_structure))
-        })
-        .collect()
 }
 
 fn build_prepared_portal_apertures(
@@ -3013,22 +2898,16 @@ fn derive_portal_aperture_plane_from_points(
 
 fn build_cell_structure_render_geometry(
     cell_structure: &CellStruct,
-    portals: &[EnvCellPortalFact],
-    portal_apertures: &[PreparedPortalAperture],
-    incoming_portal_clip_planes: &[PortalClipPlane],
 ) -> PreparedPolygonSetRenderGeometry {
     // Retail and ACViewer draw the full CellStruct polygon list for env cells.
     // The drawing BSP is still useful for culling/visibility, but it is not the
     // authoritative render polygon set for cell shell geometry.
-    let mut portal_clip_planes = build_portal_clip_planes(portals, portal_apertures);
-    portal_clip_planes.extend_from_slice(incoming_portal_clip_planes);
     build_polygon_set_render_geometry_with_side_policy(
         cell_structure.id,
         &cell_structure.vertex_array,
         &cell_structure.polygons,
         None,
         PolygonRenderSidePolicy::EnvCellPositiveOnly,
-        &portal_clip_planes,
     )
 }
 
@@ -3044,7 +2923,6 @@ fn build_polygon_set_render_geometry(
         drawing_polygons,
         drawing_bsp,
         PolygonRenderSidePolicy::VisualSides,
-        &[],
     )
 }
 
@@ -3054,7 +2932,6 @@ fn build_polygon_set_render_geometry_with_side_policy(
     drawing_polygons: &std::collections::HashMap<u16, Polygon>,
     drawing_bsp: Option<&BspNode>,
     side_policy: PolygonRenderSidePolicy,
-    portal_clip_planes: &[PortalClipPlane],
 ) -> PreparedPolygonSetRenderGeometry {
     let render_polygon_ids = drawing_bsp.map(collect_drawing_bsp_renderable_polygon_ids);
     let mut polygon_entries = drawing_polygons.iter().collect::<Vec<_>>();
@@ -3115,7 +2992,6 @@ fn build_polygon_set_render_geometry_with_side_policy(
                 polygon,
                 vertex_array,
                 render_side,
-                portal_clip_planes,
                 &mut PolygonRenderGeometryBuffers {
                     positions: &mut positions,
                     normals: &mut normals,
@@ -3165,19 +3041,6 @@ enum PreparedPolygonWinding {
     Reversed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PortalPlaneSide {
-    Positive,
-    Negative,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct PortalClipPlane {
-    plane: PreparedPortalAperturePlane,
-    source_index: usize,
-    through_side: PortalPlaneSide,
-}
-
 #[derive(Debug, Clone, Copy)]
 struct PreparedPolygonRenderSide<'a> {
     kind: PreparedPolygonRenderSideKind,
@@ -3192,41 +3055,12 @@ const STIPPLING_REPEAT_POS: u8 = 0x01;
 const STIPPLING_REPEAT_NEG: u8 = 0x02;
 const STIPPLING_NO_POS: u8 = 0x04;
 const STIPPLING_NO_NEG: u8 = 0x08;
-const PORTAL_THROUGH_SIDE_NEGATIVE: u16 = 0x0002;
 const CULL_MODE_NONE: i32 = 1;
 const CULL_MODE_CLOCKWISE: i32 = 2;
 const CULL_MODE_COUNTER_CLOCKWISE: i32 = 3;
-const PORTAL_PLANE_CLIP_EPSILON: f32 = 0.0002;
 const INVALID_POLYGON_REASON_MISSING_VERTICES: &str = "missing-vertices";
 const INVALID_POLYGON_REASON_MALFORMED_POSITIVE_UV_INDICES: &str = "malformed-positive-uv-indices";
 const INVALID_POLYGON_REASON_MALFORMED_NEGATIVE_UV_INDICES: &str = "malformed-negative-uv-indices";
-
-fn build_portal_clip_planes(
-    portals: &[EnvCellPortalFact],
-    portal_apertures: &[PreparedPortalAperture],
-) -> Vec<PortalClipPlane> {
-    portals
-        .iter()
-        .filter_map(|portal| {
-            let aperture = portal_apertures
-                .iter()
-                .find(|aperture| aperture.source_index == portal.source_index)?;
-            Some(PortalClipPlane {
-                plane: aperture.plane?,
-                source_index: portal.source_index,
-                through_side: decode_portal_through_side(portal.flags),
-            })
-        })
-        .collect()
-}
-
-fn decode_portal_through_side(flags: u16) -> PortalPlaneSide {
-    if (flags & PORTAL_THROUGH_SIDE_NEGATIVE) != 0 {
-        PortalPlaneSide::Negative
-    } else {
-        PortalPlaneSide::Positive
-    }
-}
 
 fn record_polygon_side_diagnostics(
     polygon_id: u16,
@@ -3353,7 +3187,6 @@ fn append_polygon_render_side_geometry(
     polygon: &Polygon,
     vertex_array: &holtburger_dat::graphics::CVertexArray,
     render_side: PreparedPolygonRenderSide<'_>,
-    portal_clip_planes: &[PortalClipPlane],
     buffers: &mut PolygonRenderGeometryBuffers<'_>,
 ) {
     let _side_kind = render_side.kind;
@@ -3362,17 +3195,6 @@ fn append_polygon_render_side_geometry(
             PreparedPolygonWinding::Source => [0, vertex_index, vertex_index + 1],
             PreparedPolygonWinding::Reversed => [0, vertex_index + 1, vertex_index],
         };
-        let triangle_positions = triangle_vertex_offsets.map(|polygon_vertex_offset| {
-            let vertex_id = polygon.vertex_ids[polygon_vertex_offset];
-            let vertex = vertex_array
-                .vertices
-                .get(&vertex_id)
-                .expect("missing vertices were filtered before triangulation");
-            ac_vector_to_render_space(vertex.origin)
-        });
-        if triangle_is_fully_on_portal_through_side(&triangle_positions, portal_clip_planes) {
-            continue;
-        }
         buffers.triangles.push(PreparedPolygonSetRenderTriangle {
             polygon_id,
             surface_id: render_side.surface_id,
@@ -3380,15 +3202,13 @@ fn append_polygon_render_side_geometry(
             first_vertex: buffers.positions.len() / 3,
         });
 
-        for (vertex_offset_index, polygon_vertex_offset) in
-            triangle_vertex_offsets.into_iter().enumerate()
-        {
+        for polygon_vertex_offset in triangle_vertex_offsets {
             let vertex_id = polygon.vertex_ids[polygon_vertex_offset];
             let vertex = vertex_array
                 .vertices
                 .get(&vertex_id)
                 .expect("missing vertices were filtered before triangulation");
-            let render_position = triangle_positions[vertex_offset_index];
+            let render_position = ac_vector_to_render_space(vertex.origin);
             let render_normal = ac_vector_to_render_space(vertex.normal);
             buffers
                 .positions
@@ -3406,27 +3226,6 @@ fn append_polygon_render_side_geometry(
                 .extend([uv.map_or(0.0, |uv| uv.u), uv.map_or(0.0, |uv| uv.v)]);
             *buffers.bounds = Some(expand_bounds(*buffers.bounds, render_position));
         }
-    }
-}
-
-fn triangle_is_fully_on_portal_through_side(
-    triangle_positions: &[PreparedVec3; 3],
-    portal_clip_planes: &[PortalClipPlane],
-) -> bool {
-    portal_clip_planes.iter().any(|clip_plane| {
-        // Temporary aggressive visual probe: drop triangles that cross into
-        // the portal through side instead of waiting for exact plane slicing.
-        triangle_positions
-            .iter()
-            .any(|position| point_is_on_portal_through_side(*position, *clip_plane))
-    })
-}
-
-fn point_is_on_portal_through_side(point: PreparedVec3, clip_plane: PortalClipPlane) -> bool {
-    let distance = dot_prepared_vec3(clip_plane.plane.normal, point) - clip_plane.plane.constant;
-    match clip_plane.through_side {
-        PortalPlaneSide::Positive => distance > PORTAL_PLANE_CLIP_EPSILON,
-        PortalPlaneSide::Negative => distance < -PORTAL_PLANE_CLIP_EPSILON,
     }
 }
 
@@ -3476,7 +3275,11 @@ fn render_vector_to_ac_space(vector: PreparedVec3) -> holtburger_common::Vector3
 
 fn scale_normal_component(value: f32, scale: f32) -> f32 {
     let scaled = value * scale;
-    if scaled == 0.0 { 0.0 } else { scaled }
+    if scaled == 0.0 {
+        0.0
+    } else {
+        scaled
+    }
 }
 
 fn normalize_surface_id(surface_id: i16) -> Option<i16> {
@@ -4186,7 +3989,7 @@ mod tests {
             })),
         };
 
-        let geometry = build_cell_structure_render_geometry(&cell_structure, &[], &[], &[]);
+        let geometry = build_cell_structure_render_geometry(&cell_structure);
 
         assert_eq!(geometry.triangle_count, 2);
         assert_eq!(
@@ -4209,7 +4012,7 @@ mod tests {
         polygon.neg_uv_indices = vec![1, 1, 1];
         let cell_structure = test_cell_structure(vertex_array, HashMap::from([(11, polygon)]));
 
-        let geometry = build_cell_structure_render_geometry(&cell_structure, &[], &[], &[]);
+        let geometry = build_cell_structure_render_geometry(&cell_structure);
 
         assert_eq!(geometry.triangle_count, 1);
         assert_eq!(
@@ -4241,7 +4044,7 @@ mod tests {
         polygon.pos_surface = 4;
         let cell_structure = test_cell_structure(vertex_array, HashMap::from([(12, polygon)]));
 
-        let geometry = build_cell_structure_render_geometry(&cell_structure, &[], &[], &[]);
+        let geometry = build_cell_structure_render_geometry(&cell_structure);
 
         assert_eq!(geometry.triangle_count, 1);
         assert_eq!(geometry.triangles[0].surface_id, Some(4));
@@ -4257,76 +4060,12 @@ mod tests {
         polygon.neg_uv_indices = vec![1, 1];
         let cell_structure = test_cell_structure(vertex_array, HashMap::from([(13, polygon)]));
 
-        let geometry = build_cell_structure_render_geometry(&cell_structure, &[], &[], &[]);
+        let geometry = build_cell_structure_render_geometry(&cell_structure);
 
         assert_eq!(geometry.triangle_count, 1);
         assert_eq!(geometry.skipped_polygon_count, 0);
         assert!(geometry.invalid_polygons.is_empty());
         assert_eq!(geometry.triangles[0].surface_id, Some(4));
-    }
-
-    #[test]
-    fn cell_structure_render_geometry_clips_portal_through_side_triangles() {
-        let mut vertex_array = holtburger_dat::graphics::CVertexArray::new();
-        vertex_array.vertices.extend([
-            (0, test_vertex(1.0, 0.0, 0.0, 0.0, 0.0)),
-            (1, test_vertex(2.0, 0.0, 0.0, 1.0, 0.0)),
-            (2, test_vertex(1.0, 1.0, 0.0, 0.0, 1.0)),
-            (3, test_vertex(-1.0, 0.0, 0.0, 0.0, 0.0)),
-            (4, test_vertex(-2.0, 0.0, 0.0, 1.0, 0.0)),
-            (5, test_vertex(-1.0, 1.0, 0.0, 0.0, 1.0)),
-        ]);
-        let positive_triangle = test_triangle_polygon([0, 1, 2]);
-        let negative_triangle = test_triangle_polygon([3, 4, 5]);
-        let cell_structure = test_cell_structure(
-            vertex_array,
-            HashMap::from([(10, positive_triangle), (20, negative_triangle)]),
-        );
-        let portal = test_env_cell_portal(0);
-        let aperture = test_portal_aperture(PreparedPortalAperturePlane {
-            constant: 0.0,
-            normal: PreparedVec3 {
-                x: 1.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            source: PreparedPortalAperturePlaneSource::DerivedFromRenderPoints,
-        });
-
-        let positive_through_geometry = build_cell_structure_render_geometry(
-            &cell_structure,
-            &[portal.clone()],
-            &[aperture.clone()],
-            &[],
-        );
-
-        assert_eq!(
-            positive_through_geometry
-                .triangles
-                .iter()
-                .map(|triangle| triangle.polygon_id)
-                .collect::<Vec<_>>(),
-            vec![20]
-        );
-
-        let negative_through_geometry = build_cell_structure_render_geometry(
-            &cell_structure,
-            &[EnvCellPortalFact {
-                flags: PORTAL_THROUGH_SIDE_NEGATIVE,
-                ..portal
-            }],
-            &[aperture],
-            &[],
-        );
-
-        assert_eq!(
-            negative_through_geometry
-                .triangles
-                .iter()
-                .map(|triangle| triangle.polygon_id)
-                .collect::<Vec<_>>(),
-            vec![10]
-        );
     }
 
     #[test]
@@ -4726,29 +4465,6 @@ mod tests {
             vertex_ids: vertex_ids.to_vec(),
             pos_uv_indices: vec![0, 0, 0],
             neg_uv_indices: vec![0, 0, 0],
-        }
-    }
-
-    fn test_env_cell_portal(flags: u16) -> EnvCellPortalFact {
-        EnvCellPortalFact {
-            flags,
-            is_outside_transition: false,
-            other_cell_id: 0x0101,
-            other_portal_id: 0,
-            polygon_id: 99,
-            portal_id: "test-portal".to_string(),
-            source_index: 0,
-            target_env_cell_id: Some(0x0101),
-        }
-    }
-
-    fn test_portal_aperture(plane: PreparedPortalAperturePlane) -> PreparedPortalAperture {
-        PreparedPortalAperture {
-            plane: Some(plane),
-            points: Vec::new(),
-            polygon_id: 99,
-            portal_id: "test-portal".to_string(),
-            source_index: 0,
         }
     }
 

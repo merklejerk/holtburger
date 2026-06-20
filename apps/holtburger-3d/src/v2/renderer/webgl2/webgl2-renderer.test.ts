@@ -288,6 +288,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			],
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
+			portalApertureDiagnostics: emptyPortalApertureDiagnostics(),
 			portalApertureGeometryResources: [],
 			portalApertureMaskPasses: [],
 			transitionSceneCrossings: [
@@ -321,6 +322,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			],
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
+			portalApertureDiagnostics: emptyPortalApertureDiagnostics(),
 			portalApertureGeometryResources: [],
 			portalApertureMaskPasses: [],
 			transitionSceneCrossings: [
@@ -409,6 +411,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			],
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
+			portalApertureDiagnostics: emptyPortalApertureDiagnostics(),
 			portalApertureGeometryResources: [],
 			portalApertureMaskPasses: [],
 			transitionSceneCrossings: [],
@@ -492,9 +495,11 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			],
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
+			portalApertureDiagnostics: emptyPortalApertureDiagnostics(),
 			portalApertureGeometryResources: [
 				{
 					resourceId: "portal-aperture:a-to-b",
+					sourceKinds: ["env-cell-portal"],
 					vertices: [
 						[0, 0, 0],
 						[1, 0, 0],
@@ -503,6 +508,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 				},
 				{
 					resourceId: "portal-aperture:a-to-b-side",
+					sourceKinds: ["env-cell-portal"],
 					vertices: [
 						[2, 0, 0],
 						[3, 0, 0],
@@ -513,6 +519,8 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			portalApertureMaskPasses: [
 				{
 					apertureResourceId: "portal-aperture:a-to-b",
+					apertureSourceId: "env-cell-portal:0xda55ffff:0xda550100:portal-a",
+					cullMode: "none",
 					linkId: "a-to-b",
 					parentStencilRef: null,
 					portalStackId: "root/a-to-b",
@@ -521,6 +529,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 						kind: "env-cell-direct",
 						landblockId: 0xda55ffff,
 					},
+					sourceKind: "env-cell-portal",
 					sourcePortalStackId: "root",
 					stencilRef: 1,
 					target: {
@@ -532,6 +541,9 @@ describe("V2 WebGL2 structured interior rendering", () => {
 				},
 				{
 					apertureResourceId: "portal-aperture:a-to-b-side",
+					apertureSourceId:
+						"env-cell-portal:0xda55ffff:0xda550100:portal-a-side",
+					cullMode: "none",
 					linkId: "a-to-b-side",
 					parentStencilRef: null,
 					portalStackId: "root/a-to-b",
@@ -540,6 +552,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 						kind: "env-cell-direct",
 						landblockId: 0xda55ffff,
 					},
+					sourceKind: "env-cell-portal",
 					sourcePortalStackId: "root",
 					stencilRef: 1,
 					target: {
@@ -631,9 +644,11 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			],
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
+			portalApertureDiagnostics: emptyPortalApertureDiagnostics(),
 			portalApertureGeometryResources: [
 				{
 					resourceId: "transition-aperture:root",
+					sourceKinds: ["building-transition"],
 					vertices: [
 						[0, 0, 0],
 						[1, 0, 0],
@@ -644,6 +659,9 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			portalApertureMaskPasses: [
 				{
 					apertureResourceId: "transition-aperture:root",
+					apertureSourceId:
+						"building-transition:transition-aperture-batch:da55ffff:transition-portal:0",
+					cullMode: "none",
 					linkId: "transition-root",
 					parentStencilRef: null,
 					portalStackId: "outdoor-root:0xda55ffff/transition:0xda550100",
@@ -651,6 +669,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 						kind: "outdoor-target",
 						landblockId: 0xda55ffff,
 					},
+					sourceKind: "building-transition",
 					sourcePortalStackId: "outdoor-root:0xda55ffff",
 					stencilRef: 1,
 					target: {
@@ -1336,6 +1355,17 @@ function rendererSnapshotPlaceholder() {
 		terrainDrawUnits: 0,
 		transitionApertureBatches: 0,
 		transitionApertures: 0,
+	};
+}
+
+function emptyPortalApertureDiagnostics() {
+	return {
+		buildingTransitionEdges: 0,
+		dedupedGeometryResources: 0,
+		duplicateMaskEdges: 0,
+		envCellPortalEdges: 0,
+		selectedMaskEdges: 0,
+		transitionRootCount: 0,
 	};
 }
 

@@ -48,6 +48,10 @@ export function portalFrameWorkPlanEquals(
 			left.directEnvCellDraws,
 			right.directEnvCellDraws,
 		) &&
+		portalApertureFrameDiagnosticsEqual(
+			left.portalApertureDiagnostics,
+			right.portalApertureDiagnostics,
+		) &&
 		portalApertureGeometryResourcesEqual(
 			left.portalApertureGeometryResources,
 			right.portalApertureGeometryResources,
@@ -193,6 +197,7 @@ function portalApertureGeometryResourcesEqual(
 	return arraysEqual(left, right, (leftResource, rightResource) => {
 		return (
 			leftResource.resourceId === rightResource.resourceId &&
+			stringArraysEqual(leftResource.sourceKinds, rightResource.sourceKinds) &&
 			arraysEqual(
 				leftResource.vertices,
 				rightResource.vertices,
@@ -215,9 +220,12 @@ function portalApertureMaskPassesEqual(
 	return arraysEqual(left, right, (leftPass, rightPass) => {
 		return (
 			leftPass.apertureResourceId === rightPass.apertureResourceId &&
+			leftPass.apertureSourceId === rightPass.apertureSourceId &&
+			leftPass.cullMode === rightPass.cullMode &&
 			leftPass.linkId === rightPass.linkId &&
 			leftPass.parentStencilRef === rightPass.parentStencilRef &&
 			leftPass.portalStackId === rightPass.portalStackId &&
+			leftPass.sourceKind === rightPass.sourceKind &&
 			leftPass.sourcePortalStackId === rightPass.sourcePortalStackId &&
 			leftPass.stencilRef === rightPass.stencilRef &&
 			leftPass.traversalDepth === rightPass.traversalDepth &&
@@ -225,6 +233,26 @@ function portalApertureMaskPassesEqual(
 			portalFrameSceneSourceEquals(leftPass.target, rightPass.target)
 		);
 	});
+}
+
+function portalApertureFrameDiagnosticsEqual(
+	left: Extract<
+		PortalFrameWorkPlan,
+		{ readonly kind: "direct-env-cell" }
+	>["portalApertureDiagnostics"],
+	right: Extract<
+		PortalFrameWorkPlan,
+		{ readonly kind: "direct-env-cell" }
+	>["portalApertureDiagnostics"],
+): boolean {
+	return (
+		left.buildingTransitionEdges === right.buildingTransitionEdges &&
+		left.dedupedGeometryResources === right.dedupedGeometryResources &&
+		left.duplicateMaskEdges === right.duplicateMaskEdges &&
+		left.envCellPortalEdges === right.envCellPortalEdges &&
+		left.selectedMaskEdges === right.selectedMaskEdges &&
+		left.transitionRootCount === right.transitionRootCount
+	);
 }
 
 function portalFrameSceneSourceEquals(

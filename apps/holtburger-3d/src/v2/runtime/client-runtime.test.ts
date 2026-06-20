@@ -369,6 +369,7 @@ describe("V2 client runtime", () => {
 			],
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
+			portalApertureDiagnostics: emptyPortalApertureDiagnostics(),
 			portalApertureGeometryResources: [],
 			portalApertureMaskPasses: [],
 			transitionSceneCrossings: [],
@@ -2174,6 +2175,17 @@ function runtimeSnapshotSummary(
 	return {
 		staticMaterialization: snapshot.staticMaterialization,
 		status: snapshot.status,
+	};
+}
+
+function emptyPortalApertureDiagnostics() {
+	return {
+		buildingTransitionEdges: 0,
+		dedupedGeometryResources: 0,
+		duplicateMaskEdges: 0,
+		envCellPortalEdges: 0,
+		selectedMaskEdges: 0,
+		transitionRootCount: 0,
 	};
 }
 

@@ -1856,7 +1856,9 @@ class Webgl2Renderer implements Renderer {
 			this.#stateCache.setBlendState(
 				createBlendState(gl, false, gl.ONE, gl.ZERO),
 			);
-			this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
+			this.#stateCache.setCullState(
+				resolvePortalApertureCullState(gl, pass.cullMode),
+			);
 			this.#stateCache.setStencilState(
 				createDirectPortalStencilMaskState(gl, operation, pass),
 			);
@@ -4007,6 +4009,19 @@ function resolveTransitionCompositeCullFace(
 	cullFace: TransitionCompositeCullFace,
 ): GLenum {
 	return cullFace === "front" ? gl.FRONT : gl.BACK;
+}
+
+function resolvePortalApertureCullState(
+	gl: WebGL2RenderingContext,
+	cullMode: PortalApertureMaskPass["cullMode"],
+): { readonly enabled: boolean; readonly mode: GLenum } {
+	if (cullMode === "none") {
+		return { enabled: false, mode: gl.BACK };
+	}
+	return {
+		enabled: true,
+		mode: cullMode === "front" ? gl.FRONT : gl.BACK,
+	};
 }
 
 function createDepthState(

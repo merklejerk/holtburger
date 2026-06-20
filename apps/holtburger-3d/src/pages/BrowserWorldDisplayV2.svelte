@@ -1188,7 +1188,8 @@
 			(count, draw) => count + draw.envCellStaticObjectDrawUnitIds.length,
 			0,
 		);
-		return `${plan.mode} base ${base} cells ${uniqueCells} views ${plan.directEnvCellDraws.length} missing ${missingResourceCells} depth ${maxDepth} masks ${plan.portalApertureMaskPasses.length} apertures ${plan.portalApertureGeometryResources.length} resources ${structuredDrawUnits} cell / ${staticDrawUnits} static crossings ${plan.transitionSceneCrossings.length}`;
+		const aperture = plan.portalApertureDiagnostics;
+		return `${plan.mode} base ${base} cells ${uniqueCells} views ${plan.directEnvCellDraws.length} missing ${missingResourceCells} depth ${maxDepth} masks ${plan.portalApertureMaskPasses.length} apertures ${plan.portalApertureGeometryResources.length} edges ${aperture.envCellPortalEdges} env / ${aperture.buildingTransitionEdges} transition dup ${aperture.duplicateMaskEdges} dedupe ${aperture.dedupedGeometryResources} roots ${aperture.transitionRootCount} resources ${structuredDrawUnits} cell / ${staticDrawUnits} static crossings ${plan.transitionSceneCrossings.length}`;
 	}
 
 	function currentCameraEnvCellResourceTarget(): {

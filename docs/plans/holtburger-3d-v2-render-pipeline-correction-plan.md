@@ -428,6 +428,8 @@ Failed to close in Phase 1:
 
 ### Phase 2: Move Planning Resource Membership Out Of Renderer Snapshots
 
+Status: implemented on 2026-06-20.
+
 Deliverables:
 
 - Introduce a narrow resource membership index owned by runtime materialization.
@@ -442,6 +444,32 @@ Acceptance criteria:
 - Portal frame planning has no dependency on renderer frame snapshots.
 - Static resource membership changes invalidate portal frame plans exactly once per relevant delta.
 - Renderer GPU resource maps remain private renderer execution state; they are not planning inputs.
+
+Implementation update:
+
+- Added a runtime-owned env-cell resource membership index built from materialized static draw units.
+- Added an `envCellResourceMembershipRevision` scalar on runtime static-materialization snapshots and diagnostics summaries.
+- `ClientRuntime` now derives direct env-cell and outdoor transition portal frame plans from the runtime membership snapshot, not renderer diagnostics.
+- `RendererSnapshot.envCellResourceMembership` and the renderer-owned membership DTO were removed.
+- Browser V2 env-resource inspection now calls `runtime.queryEnvCellResourceMembership(...)`.
+- Direct frame-plan inputs were renamed from `rendererEnvCellResourceMembership` to `envCellResourceMembership`.
+- Runtime tests now prove membership is derived from materialized structured-interior and shared env-cell static-object draw units.
+
+Validation:
+
+- `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts src/v2/ui/performance-metrics.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Spicy notes:
+
+- The runtime membership index is rebuilt from the materialized draw-unit map after each static materialization commit and only bumps revision when the sorted membership snapshot changes. That is simple and deterministic, but still a whole-index rebuild rather than an incremental mutation path.
+- Runtime snapshots still include broad renderer diagnostics through `createDiagnosticsSnapshot()`. Planning no longer depends on that, but the diagnostics snapshot cleanup remains separate.
+
+Failed to close in Phase 2:
+
+- Portal frame plans are not yet cached by the new membership revision; they are merely unblocked from renderer snapshots. Phase 6 still needs the revision-keyed frame-plan cache.
+- Browser portal-frame status still rides the broad runtime snapshot. Env-resource inspection is now explicit; portal-frame diagnostics still need the later diagnostics-query cleanup.
 
 ### Phase 3: Drop Diagnostic-Only Failure State
 

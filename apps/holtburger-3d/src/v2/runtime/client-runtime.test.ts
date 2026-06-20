@@ -14,7 +14,6 @@ import type {
 	RendererFrameTelemetryListener,
 	RendererSnapshot,
 	PortalFrameWorkPlan,
-	RendererEnvCellResourceMembership,
 	RenderPassPlan,
 	SamplerPolicyUpdate,
 	StaticResidencyDelta,
@@ -28,6 +27,7 @@ import type {
 	OutdoorStaticObjectsScopePayload,
 	StaticObjectGeometryStaticDrawUnit,
 	StaticPortalInteriorRecord,
+	StructuredInteriorGeometryStaticDrawUnit,
 	StaticWorkPeerRecordOwner,
 	TerrainStaticScopePayload,
 	TerrainGeometryStaticDrawUnit,
@@ -323,7 +323,7 @@ describe("V2 client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("publishes direct env-cell frame plans from committed traversal and renderer membership", async () => {
+	it("publishes direct env-cell frame plans from committed traversal and runtime membership", async () => {
 		const renderer = new FakeRenderer();
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -342,19 +342,24 @@ describe("V2 client runtime", () => {
 			kind: "env-cell",
 			landblockId: 0xda55ffff,
 		});
-		renderer.setEnvCellResourceMembership([
-			{
-				envCellId: 0xda550100,
-				envCellStaticObjectDrawUnitIds: [],
-				landblockId: 0xda55ffff,
-				sharedEnvCellStaticObjectDrawUnits: 0,
-				structuredInteriorDrawUnitIds: ["structured:da550100"],
-			},
-		]);
 		updateInteriorSceneInterest(runtime);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
 		baker.complete("1:landblock:da55ffff:landblock-env-cells", {
+			drawUnits: [
+				createStructuredInteriorDrawUnit({
+					drawUnitId: "structured:da550100",
+					envCellId: 0xda550100,
+				}),
+				createStaticObjectDrawUnit("env-static-shared", {
+					ownership: {
+						envCellIds: [0xda550100, 0xda550101],
+						kind: "env-cell-static-object-seeds",
+						landblockId: 0xda55ffff,
+						seedIdentities: [],
+					},
+				}),
+			],
 			staticPortalInteriorRecords: [
 				createPortalInteriorRecord({
 					envCellIds: [0xda550100, 0xda550101],
@@ -381,6 +386,34 @@ describe("V2 client runtime", () => {
 		});
 		await flushRuntimeWork();
 
+		expect(
+			runtime.queryEnvCellResourceMembership({
+				envCellId: 0xda550100,
+				landblockId: 0xda55ffff,
+			}),
+		).toEqual({
+			envCellId: 0xda550100,
+			envCellStaticObjectDrawUnitIds: ["env-static-shared"],
+			landblockId: 0xda55ffff,
+			sharedEnvCellStaticObjectDrawUnits: 1,
+			structuredInteriorDrawUnitIds: ["structured:da550100"],
+		});
+		expect(
+			runtime.queryEnvCellResourceMembership({
+				envCellId: 0xda550101,
+				landblockId: 0xda55ffff,
+			}),
+		).toEqual({
+			envCellId: 0xda550101,
+			envCellStaticObjectDrawUnitIds: ["env-static-shared"],
+			landblockId: 0xda55ffff,
+			sharedEnvCellStaticObjectDrawUnits: 1,
+			structuredInteriorDrawUnitIds: [],
+		});
+		expect(
+			runtime.createDiagnosticsReport().runtime
+				.envCellResourceMembershipRevision,
+		).toBe(1);
 		expect(runtime.createDiagnosticsReport().runtime.renderPassPlan).toEqual({
 			baseScene: {
 				envCellId: 0xda550100,
@@ -411,7 +444,7 @@ describe("V2 client runtime", () => {
 				nodes: [
 				{
 						resources: {
-							envCellStaticObjectDrawUnitIds: [],
+							envCellStaticObjectDrawUnitIds: ["env-static-shared"],
 							resourceState: "ready",
 							structuredInteriorDrawUnitIds: ["structured:da550100"],
 						},
@@ -424,8 +457,8 @@ describe("V2 client runtime", () => {
 				},
 				{
 						resources: {
-							envCellStaticObjectDrawUnitIds: [],
-							resourceState: "missing-resources",
+							envCellStaticObjectDrawUnitIds: ["env-static-shared"],
+							resourceState: "ready",
 							structuredInteriorDrawUnitIds: [],
 						},
 						scene: {
@@ -1089,6 +1122,7 @@ describe("V2 client runtime", () => {
 		]);
 		expect(snapshots.at(-1)?.staticMaterialization).toEqual({
 			committedRevisions: [1],
+			envCellResourceMembershipRevision: 0,
 			failed: [],
 			materializedDrawUnits: 1,
 			pendingRevisions: [],
@@ -1200,6 +1234,7 @@ describe("V2 client runtime", () => {
 		expect(renderer.textureUpdates).toEqual([]);
 		expect(snapshots.at(-1)?.staticMaterialization).toEqual({
 			committedRevisions: [],
+			envCellResourceMembershipRevision: 0,
 			failed: [{ message: "prepared texture unavailable", revision: 1 }],
 			materializedDrawUnits: 0,
 			pendingRevisions: [],
@@ -1494,7 +1529,6 @@ class FakeRenderer implements Renderer {
 		},
 		renderedTriangles: 0,
 		directEnvCellDrawCalls: 0,
-		envCellResourceMembership: [],
 		sceneDomainTargets: {
 			active: false,
 			apertureBatchDrawCalls: 0,
@@ -1544,14 +1578,6 @@ class FakeRenderer implements Renderer {
 	}
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void {
 		this.staticAnchorLandblockIds.push(anchorLandblockId);
-	}
-	setEnvCellResourceMembership(
-		memberships: readonly RendererEnvCellResourceMembership[],
-	): void {
-		this.#snapshot = {
-			...this.#snapshot,
-			envCellResourceMembership: memberships,
-		};
 	}
 	setFlatVisionModeEnabled(): void {}
 	setRenderPassPlan(plan: RenderPassPlan): void {
@@ -1859,6 +1885,9 @@ function createOutdoorStaticObjectsPayload(): OutdoorStaticObjectsScopePayload {
 
 function createStaticObjectDrawUnit(
 	drawUnitId: string,
+	options: {
+		readonly ownership?: StaticObjectGeometryStaticDrawUnit["ownership"];
+	} = {},
 ): StaticObjectGeometryStaticDrawUnit {
 	const renderState = {
 		blend: {
@@ -1876,7 +1905,10 @@ function createStaticObjectDrawUnit(
 		coordinateSpace: "landblock-render-local",
 		detailTextureTiling: 1,
 		detailTextureUseId: null,
-		domain: "outdoor-detail",
+		domain:
+			options.ownership?.kind === "env-cell-static-object-seeds"
+				? "landblock-env-cells"
+				: "outdoor-detail",
 		drawUnitId,
 		indexTextureUseId: null,
 		indexType: "uint16",
@@ -1884,7 +1916,7 @@ function createStaticObjectDrawUnit(
 		indexedTextureFormat: null,
 		indices: new Uint16Array([0, 1, 2]),
 		kind: "static-object-geometry",
-		landblockId: 0xda55ffff,
+		landblockId: options.ownership?.landblockId ?? 0xda55ffff,
 		materialBucketKey: "flat-color:test",
 		materialColor: [1, 1, 1, 1],
 		materialEmissiveColor: [0, 0, 0],
@@ -1916,6 +1948,13 @@ function createStaticObjectDrawUnit(
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 		primaryTextureUseId: null,
 		primaryTextureWrapMode: "clamp",
+		ownership:
+			options.ownership ??
+			({
+				domain: "outdoor-detail",
+				kind: "outdoor-static-objects",
+				landblockId: 0xda55ffff,
+			} satisfies StaticObjectGeometryStaticDrawUnit["ownership"]),
 		renderState,
 		sort: {
 			bounds: null,
@@ -1960,6 +1999,93 @@ function createStaticObjectDrawUnit(
 			},
 			triangleCount: 1,
 		},
+		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+		textureUseIds: [],
+		triangleCount: 1,
+		vertexCount: 3,
+	};
+}
+
+function createStructuredInteriorDrawUnit(
+	options: {
+		readonly drawUnitId: string;
+		readonly envCellId: number;
+	},
+): StructuredInteriorGeometryStaticDrawUnit {
+	const renderState = {
+		blend: {
+			dstFactor: null,
+			enabled: false,
+			mode: "opaque" as const,
+			srcFactor: null,
+		},
+		depthTest: true as const,
+		depthWrite: true,
+	};
+	const material = {
+		kind: "static-material-source" as const,
+		materialId: 0x08000010,
+	};
+
+	return {
+		cellStructure: {
+			cellStructureId: 1,
+			kind: "cell-structure",
+		},
+		coordinateSpace: "landblock-render-local",
+		domain: "landblock-env-cells",
+		drawUnitId: options.drawUnitId,
+		envCellId: options.envCellId,
+		environment: {
+			environmentId: 1,
+			kind: "environment",
+		},
+		indexType: "uint16",
+		indices: new Uint16Array([0, 1, 2]),
+		kind: "structured-interior-geometry",
+		landblockId: 0xda55ffff,
+		localPlacement: createPlacement(),
+		materialBucketKey: "flat-color:test",
+		materialEntries: [
+			{
+				alphaTest: 0,
+				detailTextureTiling: 1,
+				detailTextureUseId: null,
+				indexTextureUseId: null,
+				indexedClipThreshold: 0,
+				indexedTextureFormat: null,
+				materialColor: [1, 1, 1, 1],
+				materialEmissiveColor: [0, 0, 0],
+				materialIds: [material.materialId],
+				paletteFirstIndex: 0,
+				paletteTextureUseId: null,
+				primaryTextureUseId: null,
+				primaryTextureWrapMode: "clamp",
+				renderState,
+				slot: 0,
+			},
+		],
+		materialFamily: "flat-color",
+		materialIds: [material.materialId],
+		materialPass: "opaque",
+		materialPlan: [
+			{
+				diagnostics: [],
+				family: "flat-color",
+				material,
+				outcome: "rendered",
+				pass: "opaque",
+				slotId: 0,
+				surfaceId: 0,
+				textureUseIds: [],
+			},
+		],
+		materialSlotIndices: new Float32Array([0, 0, 0]),
+		memberId: `${options.drawUnitId}:member`,
+		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+		renderState,
+		sourceTriangleIds: [`${options.drawUnitId}:triangle-0`],
+		surfaceIds: [0],
 		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
 		textureUseIds: [],
 		triangleCount: 1,

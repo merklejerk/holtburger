@@ -44,6 +44,7 @@ interface RuntimeDiagnosticsRuntimeSummary {
 	readonly pendingStaticMaterializationRevisions: readonly number[];
 	readonly committedStaticMaterializationRevisions: readonly number[];
 	readonly failedStaticMaterializations: readonly RuntimeDiagnosticsFailure[];
+	readonly envCellResourceMembershipRevision: number;
 	readonly sourceStaticDrawUnits: number;
 	readonly materializedStaticDrawUnits: number;
 }

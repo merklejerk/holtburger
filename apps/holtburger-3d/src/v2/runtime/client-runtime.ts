@@ -3,7 +3,6 @@ import type { AssetService, AssetServiceSnapshot } from "../assets/contracts";
 import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
 import type {
 	Renderer,
-	RendererEnvCellResourceMembership,
 	RendererFrameTelemetry,
 	RendererSnapshot,
 	RenderPassPlan,
@@ -86,6 +85,12 @@ import {
 	type TerrainQuadScenePickDetails,
 } from "./static-scene-query";
 import { createOutdoorLandblockRootTranslation } from "./static-placement";
+import {
+	createEnvCellResourceMembershipIndex,
+	createEnvCellResourceMembershipSnapshot,
+	envCellResourceMembershipSnapshotsEqual,
+	type EnvCellResourceMembership,
+} from "./env-cell-resource-membership";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
@@ -398,6 +403,7 @@ interface StaticMaterializationSnapshot {
 	readonly pendingRevisions: readonly number[];
 	readonly committedRevisions: readonly number[];
 	readonly failed: readonly StaticMaterializationFailureSnapshot[];
+	readonly envCellResourceMembershipRevision: number;
 	readonly materializedDrawUnits: number;
 	readonly sourceDrawUnits: number;
 }
@@ -424,6 +430,10 @@ export interface ClientRuntime {
 	queryTerrainLandblockBounds(options: {
 		readonly landblockId: number;
 	}): StaticSceneTerrainLandblockBounds | null;
+	queryEnvCellResourceMembership(options: {
+		readonly envCellId: number;
+		readonly landblockId: number;
+	}): EnvCellResourceMembership | null;
 	setCurrentCameraResidency(residency: RuntimeCameraResidency): void;
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null;
 	createStaticSelectionDiagnosticsReport(
@@ -530,6 +540,11 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#recentTerrainTextureFallbacks: TerrainTextureFallbackDiagnostics[] = [];
 	readonly #reportedStaticResolverFailures = new Set<string>();
 	#staticDebugSelectionKey: StaticSceneSelectionKey | null = null;
+	#envCellResourceMembership: readonly EnvCellResourceMembership[] = [];
+	#envCellResourceMembershipByLandblock = createEnvCellResourceMembershipIndex(
+		this.#envCellResourceMembership,
+	);
+	#envCellResourceMembershipRevision = 0;
 	#envCellAabbDebugOverlayVisible = false;
 	#envCellPortalDebugOverlayVisible = false;
 	#flatVisionModeEnabled = false;
@@ -664,6 +679,18 @@ class ClientRuntimeImpl implements ClientRuntime {
 	}): StaticSceneTerrainLandblockBounds | null {
 		this.#assertActive();
 		return this.#staticSceneQuery.queryTerrainLandblockBounds(options);
+	}
+
+	queryEnvCellResourceMembership(options: {
+		readonly envCellId: number;
+		readonly landblockId: number;
+	}): EnvCellResourceMembership | null {
+		this.#assertActive();
+		return (
+			this.#envCellResourceMembershipByLandblock
+				.get(options.landblockId)
+				?.get(options.envCellId) ?? null
+		);
 	}
 
 	setCurrentCameraResidency(residency: RuntimeCameraResidency): void {
@@ -826,6 +853,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 				committedStaticMaterializationRevisions:
 					snapshot.staticMaterialization.committedRevisions,
 				currentCameraResidency: snapshot.currentCameraResidency,
+				envCellResourceMembershipRevision:
+					snapshot.staticMaterialization.envCellResourceMembershipRevision,
 				failedStaticMaterializations: snapshot.staticMaterialization.failed,
 				portalFrameWorkPlan: snapshot.portalFrameWorkPlan,
 				renderPassPlan: snapshot.renderPassPlan,
@@ -961,8 +990,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 						landblockId: this.#currentCameraResidency.landblockId,
 					}),
 				renderAnchorLandblockId: this.#renderAnchorLandblockId,
-				rendererEnvCellResourceMembership:
-					this.#queryRendererEnvCellResourceMembership(),
+				envCellResourceMembership: this.#envCellResourceMembership,
 				traversalPlan: this.#staticSceneQuery.queryPortalTraversal({
 					landblockId: this.#currentCameraResidency.landblockId,
 					maxCells: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
@@ -1020,8 +1048,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					landblockId,
 					portalInteriorRecords,
 					renderAnchorLandblockId: this.#renderAnchorLandblockId,
-					rendererEnvCellResourceMembership:
-						this.#queryRendererEnvCellResourceMembership(),
+					envCellResourceMembership: this.#envCellResourceMembership,
 					transitionApertureBatches,
 					traversalPlansByStartEnvCellId,
 				});
@@ -1047,11 +1074,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 				}),
 		);
 		return plan;
-	}
-
-	#queryRendererEnvCellResourceMembership(): readonly RendererEnvCellResourceMembership[] {
-		return this.#refreshRendererDiagnosticsSnapshot()
-			.envCellResourceMembership;
 	}
 
 	#refreshRendererDiagnosticsSnapshot(): RendererSnapshot {
@@ -1096,6 +1118,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 			staticSceneQuery: this.#staticSceneQuery.createSnapshot(),
 			staticMaterialization: {
 				committedRevisions: this.#committedStaticMaterializations,
+				envCellResourceMembershipRevision:
+					this.#envCellResourceMembershipRevision,
 				failed: this.#failedStaticMaterializations,
 				materializedDrawUnits: countMaterializedDrawUnits(
 					this.#materializedDrawUnitIdsBySourceDrawUnitId,
@@ -1288,6 +1312,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			textureUpdate,
 		});
 		this.#updateMaterializedDrawUnitIdMappings(delta, materialized);
+		this.#refreshEnvCellResourceMembership();
 		this.#warnAboutStaticFallbacks(delta);
 		applyMaterializedStaticCommit(this.#renderer, materialized);
 		this.#staticSceneQuery.removeStaticResources(materialized.removedResources);
@@ -1354,6 +1379,25 @@ class ClientRuntimeImpl implements ClientRuntime {
 		for (const drawUnit of materialized.staticDelta.addedDrawUnits) {
 			this.#materializedDrawUnitsById.set(drawUnit.drawUnitId, drawUnit);
 		}
+	}
+
+	#refreshEnvCellResourceMembership(): void {
+		const nextMembership = createEnvCellResourceMembershipSnapshot(
+			this.#materializedDrawUnitsById.values(),
+		);
+		if (
+			envCellResourceMembershipSnapshotsEqual(
+				this.#envCellResourceMembership,
+				nextMembership,
+			)
+		) {
+			return;
+		}
+
+		this.#envCellResourceMembership = nextMembership;
+		this.#envCellResourceMembershipByLandblock =
+			createEnvCellResourceMembershipIndex(nextMembership);
+		this.#envCellResourceMembershipRevision += 1;
 	}
 
 	#warnAboutStaticFallbacks(delta: StaticCoordinatorCommitDelta): void {

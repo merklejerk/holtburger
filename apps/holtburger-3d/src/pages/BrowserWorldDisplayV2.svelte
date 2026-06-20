@@ -39,8 +39,8 @@
 	} from "../v2/runtime/client-runtime";
 	import type {
 		PortalFrameWorkPlan,
-		RendererEnvCellResourceMembership,
 	} from "../v2/renderer/types";
+	import type { EnvCellResourceMembership } from "../v2/runtime/env-cell-resource-membership";
 	import {
 		describeStaticSceneSelectionKey,
 		type StaticSceneSelectionKey,
@@ -1135,12 +1135,10 @@
 	function findEnvCellResourceMembership(
 		landblockId: number,
 		envCellId: number,
-	): RendererEnvCellResourceMembership | null {
+	): EnvCellResourceMembership | null {
 		return (
-			snapshot?.renderer.envCellResourceMembership.find(
-				(entry) =>
-					entry.landblockId === landblockId && entry.envCellId === envCellId,
-			) ?? null
+			runtime?.queryEnvCellResourceMembership({ envCellId, landblockId }) ??
+			null
 		);
 	}
 
@@ -1848,7 +1846,7 @@
 							<dd>
 								{snapshot
 									? formatPortalFrameWorkPlan(
-											snapshot.renderer.portalFrameWorkPlan,
+											snapshot.portalFrameWorkPlan,
 										)
 									: "pending"}
 							</dd>

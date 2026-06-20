@@ -16,7 +16,6 @@ import type {
 	StaticResidencyDelta,
 	TextureDrawUnitBinding,
 	TexturePlacementUpdate,
-	RendererEnvCellResourceMembership,
 } from "../types";
 import {
 	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
@@ -2197,8 +2196,6 @@ class Webgl2Renderer implements Renderer {
 				this.#staticObjectResources.size +
 				this.#structuredInteriorResources.size,
 			terrainDrawUnits: this.#terrainResources.size,
-			envCellResourceMembership:
-				this.#createEnvCellResourceMembershipSnapshot(),
 			directEnvCellDrawCalls: this.#lastDirectEnvCellDrawCalls,
 			transitionApertureBatches: this.#transitionApertureResources.size,
 			transitionApertures: sumTransitionApertureRanges(
@@ -2265,36 +2262,6 @@ class Webgl2Renderer implements Renderer {
 			createEnvCellResourceKey(resource.landblockId, resource.envCellId),
 			drawUnitId,
 		);
-	}
-
-	#createEnvCellResourceMembershipSnapshot(): readonly RendererEnvCellResourceMembership[] {
-		const keys = new Set([
-			...this.#structuredInteriorResourceIdsByEnvCellKey.keys(),
-			...this.#envCellStaticObjectResourceIdsByEnvCellKey.keys(),
-		]);
-
-		return [...keys]
-			.map((key) => {
-				const structuredInteriorDrawUnitIds = sortStrings(
-					this.#structuredInteriorResourceIdsByEnvCellKey.get(key),
-				);
-				const envCellStaticObjectDrawUnitIds = sortStrings(
-					this.#envCellStaticObjectResourceIdsByEnvCellKey.get(key),
-				);
-				const sharedEnvCellStaticObjectDrawUnits =
-					envCellStaticObjectDrawUnitIds.filter((drawUnitId) => {
-						const resource = this.#staticObjectResources.get(drawUnitId);
-						return resource ? resource.envCellIds.length > 1 : false;
-					}).length;
-
-				return {
-					...parseEnvCellResourceKey(key),
-					envCellStaticObjectDrawUnitIds,
-					sharedEnvCellStaticObjectDrawUnits,
-					structuredInteriorDrawUnitIds,
-				};
-			})
-			.sort(compareRendererEnvCellResourceMembership);
 	}
 
 	#emitFrameTelemetry(): void {
@@ -3834,19 +3801,6 @@ function createEnvCellResourceKey(
 	return `${landblockId >>> 0}:${envCellId >>> 0}`;
 }
 
-function parseEnvCellResourceKey(key: string): {
-	readonly envCellId: number;
-	readonly landblockId: number;
-} {
-	const [landblockIdText, envCellIdText] = key.split(":");
-	const landblockId = Number(landblockIdText);
-	const envCellId = Number(envCellIdText);
-	if (!Number.isInteger(landblockId) || !Number.isInteger(envCellId)) {
-		throw new Error(`Invalid env-cell resource key ${key}.`);
-	}
-	return { envCellId, landblockId };
-}
-
 function addResourceMembership(
 	membership: Map<string, Set<string>>,
 	key: string,
@@ -3870,24 +3824,6 @@ function removeResourceMembership(
 	if (drawUnitIds.size === 0) {
 		membership.delete(key);
 	}
-}
-
-function sortStrings(
-	values: ReadonlySet<string> | undefined,
-): readonly string[] {
-	return values
-		? [...values].sort((left, right) => left.localeCompare(right))
-		: [];
-}
-
-function compareRendererEnvCellResourceMembership(
-	left: RendererEnvCellResourceMembership,
-	right: RendererEnvCellResourceMembership,
-): number {
-	return (
-		compareNumbers(left.landblockId, right.landblockId) ||
-		compareNumbers(left.envCellId, right.envCellId)
-	);
 }
 
 function compareNumbers(left: number, right: number): number {

@@ -806,63 +806,6 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
-	it("reports resident env-cell resource membership from uploaded draw units", () => {
-		const gl = createFakeWebgl2Context();
-		const canvas = createFakeCanvas(gl);
-		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-			pendingFrame = callback;
-			return 1;
-		});
-		vi.stubGlobal("cancelAnimationFrame", () => {});
-		vi.stubGlobal("window", { devicePixelRatio: 1 });
-		const renderer = createWebgl2Renderer(canvas);
-
-		renderer.applyStaticDelta({
-			addedDrawUnits: [
-				createStructuredInteriorDrawUnit(),
-				createEnvCellStaticObjectDrawUnit(
-					"env-static-a",
-					[0xda550100, 0xda550101],
-				),
-			],
-			addedTransitionApertureBatches: [],
-			removedDrawUnitIds: [],
-			removedTransitionApertureBatchIds: [],
-			revision: 1,
-		});
-
-		const addedSnapshot = renderer.createDiagnosticsSnapshot();
-		expect(addedSnapshot.envCellResourceMembership).toEqual([
-			{
-				envCellId: 0xda550100,
-				envCellStaticObjectDrawUnitIds: ["env-static-a"],
-				landblockId: 0xda55ffff,
-				sharedEnvCellStaticObjectDrawUnits: 1,
-				structuredInteriorDrawUnitIds: ["structured-interior-a"],
-			},
-			{
-				envCellId: 0xda550101,
-				envCellStaticObjectDrawUnitIds: ["env-static-a"],
-				landblockId: 0xda55ffff,
-				sharedEnvCellStaticObjectDrawUnits: 1,
-				structuredInteriorDrawUnitIds: [],
-			},
-		]);
-
-		renderer.applyStaticDelta({
-			addedDrawUnits: [],
-			addedTransitionApertureBatches: [],
-			removedDrawUnitIds: ["structured-interior-a", "env-static-a"],
-			removedTransitionApertureBatchIds: [],
-			revision: 2,
-		});
-
-		const removedSnapshot = renderer.createDiagnosticsSnapshot();
-		expect(removedSnapshot.envCellResourceMembership).toEqual([]);
-
-		renderer.dispose();
-	});
-
 	it("enables backface culling for structured interiors in flat vision mode", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);

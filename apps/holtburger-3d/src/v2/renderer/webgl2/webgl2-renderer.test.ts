@@ -520,7 +520,6 @@ describe("V2 WebGL2 structured interior rendering", () => {
 				{
 					apertureResourceId: "portal-aperture:a-to-b",
 					apertureSourceId: "env-cell-portal:0xda55ffff:0xda550100:portal-a",
-					cullMode: "none",
 					linkId: "a-to-b",
 					parentStencilRef: null,
 					portalStackId: "root/a-to-b",
@@ -543,7 +542,6 @@ describe("V2 WebGL2 structured interior rendering", () => {
 					apertureResourceId: "portal-aperture:a-to-b-side",
 					apertureSourceId:
 						"env-cell-portal:0xda55ffff:0xda550100:portal-a-side",
-					cullMode: "none",
 					linkId: "a-to-b-side",
 					parentStencilRef: null,
 					portalStackId: "root/a-to-b",
@@ -661,7 +659,6 @@ describe("V2 WebGL2 structured interior rendering", () => {
 					apertureResourceId: "transition-aperture:root",
 					apertureSourceId:
 						"building-transition:transition-aperture-batch:da55ffff:transition-portal:0",
-					cullMode: "none",
 					linkId: "transition-root",
 					parentStencilRef: null,
 					portalStackId: "outdoor-root:0xda55ffff/transition:0xda550100",

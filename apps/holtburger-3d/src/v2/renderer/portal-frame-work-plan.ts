@@ -221,7 +221,6 @@ function portalApertureMaskPassesEqual(
 		return (
 			leftPass.apertureResourceId === rightPass.apertureResourceId &&
 			leftPass.apertureSourceId === rightPass.apertureSourceId &&
-			leftPass.cullMode === rightPass.cullMode &&
 			leftPass.linkId === rightPass.linkId &&
 			leftPass.parentStencilRef === rightPass.parentStencilRef &&
 			leftPass.portalStackId === rightPass.portalStackId &&

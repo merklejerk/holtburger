@@ -194,7 +194,6 @@ describe("direct env-cell frame plan", () => {
 				apertureResourceId:
 					plan?.portalApertureGeometryResources[0]?.resourceId,
 				apertureSourceId: "env-cell-portal:0xda55ffff:0xda550100:portal-a",
-				cullMode: "none",
 				linkId: "a-to-b",
 				parentStencilRef: null,
 				portalStackId: "root:0xda550100/a-to-b",

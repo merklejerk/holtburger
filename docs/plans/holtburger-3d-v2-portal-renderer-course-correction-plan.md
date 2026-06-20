@@ -1722,6 +1722,10 @@ Deliverables:
 - Remove selected-edge `cullMode` from the production portal frame contract and WebGL2 aperture
   mask path. If transition selection is wrong, the renderer should expose it rather than hide it
   behind unproven culling policy.
+- Apply an outdoor-origin `SeenOutside` gate before transition traversal. When the camera/base
+  scene is outside, only env cells whose committed source facts have `seenOutside === true` may
+  become transition roots or descendant direct env-cell draws. Treat `false` and `null` as rejected
+  until source evidence proves a looser policy is required.
 - Add transition selection diagnostics that group selected transition roots and crossings by
   linked env cell, building/aperture source id, canonical aperture geometry resource, source/target
   scene endpoint, and portal-stack context.
@@ -1739,6 +1743,9 @@ Deliverables:
 Acceptance criteria:
 
 - The active frame contract has no `cullMode` field or equivalent always-off placeholder.
+- Outdoor-origin direct portal frames reject transition roots and descendant env-cell draws that are
+  not committed as `seenOutside === true`, and diagnostics report accepted roots, false rejects, and
+  unknown/null rejects.
 - Browser diagnostics can explain why `0xda55ffff` produces hundreds of transition crossings and
   whether those crossings are source-authored, duplicated by grouping, or selected too broadly.
 - A narrowed reproduction identifies whether shimmer starts at outdoor-to-indoor aperture masking,
@@ -1753,6 +1760,28 @@ Implementation notes:
   equality, runtime aperture construction, WebGL2 aperture-mask state, and affected fixtures.
   Direct aperture masks now render with culling disabled while the investigation focuses on selected
   portal edges and compositor/depth behavior.
+- Promoted `seenOutside` into `StaticEnvCellPortalSummary` so committed portal/interior records can
+  carry the outdoor visibility boundary without requiring renderer DTO lookups.
+- Added an outdoor `SeenOutside` filter to transition frame planning:
+  - runtime only asks for traversal plans for linked env cells known to be `seenOutside === true`;
+  - `createOutdoorTransitionPortalFramePlan` rejects transition roots whose linked env cell is
+    `false`, `null`, or missing;
+  - descendant traversal under outdoor transition roots also rejects non-`SeenOutside` env cells
+    before emitting direct draw requests or selected aperture masks.
+- Extended `PORTAL FRAME` diagnostics with transition-root candidate/accepted/rejected counts:
+  `roots accepted/candidates`, `hidden` rejects for `seenOutside === false`, and `unknown` rejects
+  for `null` or missing source facts.
+
+Validation notes:
+
+- Manual outdoor `0xda55ffff` validation after the `SeenOutside` gate still reported the same broad
+  transition shape: `cells 180`, `views 1302`, `masks 1727`, `apertures 236`,
+  `edges 1122 env / 605 transition`, `dup 0`, `dedupe 1491`, `roots 180/180`,
+  `reject 0 hidden / 0 unknown`, `crossings 605`, and `DIRECT ENV DRAWS 2978`.
+- Interpretation: every currently selected transition root is source-marked `seenOutside === true`.
+  The `SeenOutside` gate is still the correct outdoor-origin boundary, but it does not explain the
+  shimmer or frame cost in this target. Continue Phase 6B by investigating transition aperture
+  topology/selection and depth/composite interactions.
 
 ### Phase 6R: Reassessment After Transition Unification
 

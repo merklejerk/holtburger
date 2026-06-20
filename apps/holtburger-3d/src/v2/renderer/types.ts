@@ -267,7 +267,10 @@ export interface PortalApertureFrameDiagnostics {
 	readonly duplicateMaskEdges: number;
 	readonly envCellPortalEdges: number;
 	readonly selectedMaskEdges: number;
+	readonly transitionRootCandidateCount: number;
 	readonly transitionRootCount: number;
+	readonly transitionRootsRejectedNotSeenOutside: number;
+	readonly transitionRootsRejectedUnknownSeenOutside: number;
 }
 
 export interface PortalApertureMaskPass {

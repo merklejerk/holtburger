@@ -1362,7 +1362,10 @@ function emptyPortalApertureDiagnostics() {
 		duplicateMaskEdges: 0,
 		envCellPortalEdges: 0,
 		selectedMaskEdges: 0,
+		transitionRootCandidateCount: 0,
 		transitionRootCount: 0,
+		transitionRootsRejectedNotSeenOutside: 0,
+		transitionRootsRejectedUnknownSeenOutside: 0,
 	};
 }
 

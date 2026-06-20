@@ -249,8 +249,14 @@ function portalApertureFrameDiagnosticsEqual(
 		left.dedupedGeometryResources === right.dedupedGeometryResources &&
 		left.duplicateMaskEdges === right.duplicateMaskEdges &&
 		left.envCellPortalEdges === right.envCellPortalEdges &&
-		left.selectedMaskEdges === right.selectedMaskEdges &&
-		left.transitionRootCount === right.transitionRootCount
+			left.selectedMaskEdges === right.selectedMaskEdges &&
+			left.transitionRootCandidateCount ===
+				right.transitionRootCandidateCount &&
+			left.transitionRootCount === right.transitionRootCount &&
+			left.transitionRootsRejectedNotSeenOutside ===
+				right.transitionRootsRejectedNotSeenOutside &&
+			left.transitionRootsRejectedUnknownSeenOutside ===
+				right.transitionRootsRejectedUnknownSeenOutside
 	);
 }
 

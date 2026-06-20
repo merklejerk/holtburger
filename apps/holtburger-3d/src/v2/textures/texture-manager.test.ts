@@ -752,6 +752,7 @@ describe("V2 texture manager", () => {
 			revision: 1,
 			staticAuthoredDynamicSeeds: [],
 			staticBatchId: "batch-env",
+			staticPortalGraphs: [],
 			staticPortalInteriorRecords: [],
 			staticSourceMappings: [],
 			staticSpatialRecords: [],
@@ -1794,7 +1795,13 @@ function createCommitDelta(options: {
 		materialCoverage: [],
 		removedResources: [],
 		revision: 1,
+		staticAuthoredDynamicSeeds: [],
 		staticBatchId: options.staticBatchId ?? "batch-a",
+		staticPortalGraphs: [],
+		staticPortalInteriorRecords: [],
+		staticSourceMappings: [],
+		staticSpatialRecords: [],
+		staticVisibilityRecords: [],
 		textureUses: [
 			createTextureUseCommit({
 				domain: options.domain,

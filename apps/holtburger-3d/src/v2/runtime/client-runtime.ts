@@ -1267,6 +1267,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#staticSceneQuery.removeStaticResources(materialized.removedResources);
 		this.#staticSceneQuery.applyStaticPeerRecords({
 			authoredDynamicSeeds: materialized.staticAuthoredDynamicSeeds,
+			portalGraphs: materialized.staticPortalGraphs,
 			portalInteriorRecords: materialized.staticPortalInteriorRecords,
 			sourceMappings: materialized.staticSourceMappings,
 			spatialRecords: materialized.staticSpatialRecords,

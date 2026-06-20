@@ -861,6 +861,75 @@ export interface StaticEnvCellVisibleLink {
 
 export type StaticPortalInteriorRecord = StaticEnvCellPortalInteriorRecord;
 
+export interface StaticPortalGraphRecord {
+	readonly kind: "static-portal-graph";
+	readonly owner: StaticWorkPeerRecordOwner;
+	readonly landblockId: number;
+	readonly nodes: readonly StaticPortalGraphNode[];
+	readonly edges: readonly StaticPortalGraphEdge[];
+}
+
+export interface StaticPortalGraphNode {
+	readonly nodeId: string;
+	readonly scene: StaticPortalGraphScene;
+}
+
+export type StaticPortalGraphScene =
+	| {
+			readonly kind: "env-cell";
+			readonly envCellId: number;
+	  }
+	| {
+			readonly kind: "outdoor";
+			readonly landblockId: number;
+	  }
+	| {
+			readonly kind: "landblock-building";
+			readonly buildingInstanceId: string;
+	  };
+
+export interface StaticPortalGraphEdge {
+	readonly edgeId: string;
+	readonly sourceNodeId: string;
+	readonly targetNodeId: string;
+	readonly direction: "directed";
+	readonly linkId: string;
+	readonly sourceIndex: number;
+	readonly flags: number;
+	readonly polygonId: number | null;
+	readonly provenance: StaticPortalGraphEdgeProvenance;
+	readonly sceneCrossing: StaticPortalGraphSceneCrossing | null;
+}
+
+export type StaticPortalGraphEdgeProvenance =
+	| {
+			readonly kind: "env-cell-portal";
+			readonly sourceEnvCellId: number;
+			readonly sourcePortalId: string;
+			readonly targetEnvCellId: number;
+			readonly targetPortalId: string;
+	  }
+	| {
+			readonly kind: "building-transition";
+			readonly apertureBatchId: string;
+			readonly portalId: string;
+			readonly buildingInstanceId: string;
+			readonly buildingPortalId: string;
+			readonly linkedEnvCellId: number;
+	  };
+
+export type StaticPortalGraphSceneCrossing =
+	| {
+			readonly kind: "outdoor-to-env-cell";
+			readonly outdoorLandblockId: number;
+			readonly envCellId: number;
+	  }
+	| {
+			readonly kind: "env-cell-to-env-cell";
+			readonly sourceEnvCellId: number;
+			readonly targetEnvCellId: number;
+	  };
+
 export interface StaticEnvCellPortalInteriorRecord {
 	readonly kind: "env-cell-portal-interior";
 	readonly owner: StaticWorkPeerRecordOwner;
@@ -936,6 +1005,7 @@ export interface StaticBakeBatchResult {
 	readonly staticSpatialRecords: readonly StaticSpatialRecord[];
 	readonly staticVisibilityRecords: readonly StaticVisibilityRecord[];
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
+	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly buildRevision: number;
@@ -1385,6 +1455,7 @@ export interface StaticCoordinatorCommitDelta {
 	readonly staticSpatialRecords: readonly StaticSpatialRecord[];
 	readonly staticVisibilityRecords: readonly StaticVisibilityRecord[];
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
+	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly revision: number;

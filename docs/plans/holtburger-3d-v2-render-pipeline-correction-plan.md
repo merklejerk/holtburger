@@ -524,10 +524,11 @@ Deliverables:
   - typed env-cell nodes;
   - typed portal edges;
   - scene-domain crossing edges;
-  - source provenance for env-cell and building-transition apertures;
+  - narrow source provenance for env-cell and building-transition apertures;
   - stable source/range ids.
 - Move adjacency sorting and static endpoint normalization into the bake/materialization path where source facts are known.
-- Keep ACE/ACViewer/source facts represented losslessly; do not collapse duplicate/asymmetric topology merely because it is inconvenient.
+- Keep topology facts represented losslessly; do not collapse directed, duplicate, or asymmetric edges merely because they share source objects.
+- Keep detailed source facts in source records or explicit diagnostics, not in the production graph contract.
 - Add tests proving env-cell portal edges and building-transition edges enter the same baked graph model with different provenance metadata.
 
 Acceptance criteria:
@@ -535,6 +536,46 @@ Acceptance criteria:
 - Runtime can query a landblock portal graph without rebuilding it from raw committed portal/interior records.
 - The baked graph preserves directed, duplicate, asymmetric, and scene-crossing portal facts.
 - Transition and env-cell portal edges share one graph edge shape.
+
+Status: Complete.
+
+Implementation notes:
+
+- Added `StaticPortalGraphRecord` contracts and a shared `StaticPortalGraphEdge` shape for env-cell portal links and building-transition portal edges.
+- Added `createEnvCellStaticPortalGraph(...)` and `createTransitionStaticPortalGraph(...)` bake helpers.
+- Env-cell baking now emits a static portal graph beside the existing portal/interior record.
+- Static object compatibility baking now emits transition portal graph records from transition aperture batches.
+- Static coordinator commit deltas, materialization, client runtime application, and `StaticSceneQuery` committed-record storage now propagate portal graphs.
+- `StaticSceneQuery.queryPortalGraphs(...)` can return committed landblock graph records without rebuilding them from raw portal/interior records.
+- Committed portal graphs participate in retained-scope pruning, draw-unit removal cleanup, committed-env-cell snapshots, and typed committed-record sorting.
+
+Course correction:
+
+- Phase 4 source provenance was narrowed during implementation. The production graph now carries only the source kind and stable selection/debug pointers needed to identify an env-cell portal or building-transition aperture. Detailed source fields such as source DIDs, paired retail transition cells, and raw source polygon internals remain in source/bake records or diagnostics instead of being duplicated into the graph.
+
+Validation:
+
+- `npm run test:ts -- src/v2/static/portal-graphs.test.ts src/v2/runtime/static-scene-query.test.ts src/v2/runtime/static-materializer.test.ts src/v2/static/coordinator/static-coordinator.test.ts src/v2/textures/texture-manager.test.ts src/v2/static/bake/worker-client.test.ts src/v2/static/terrain/bake/terrain-geometry-baker.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Spicy notes:
+
+- This phase deliberately does not switch traversal to consume the baked graph. That cutover belongs in Phase 5 so cache invalidation and graph reuse can be tested directly.
+- Transition graph records are currently derived from transition aperture batches. That keeps the graph/resource direction isomorphic, but Phase 7 still needs to replace transition-specific aperture batches with a unified portal aperture resource model.
+- The graph stores narrow provenance by design. Re-expanding it into broad source-fact payloads would recreate the diagnostics-shaped contract pressure this plan is trying to remove.
+
+Failed to close in Phase 4:
+
+- Runtime portal traversal still rebuilds from `StaticPortalInteriorRecord`; Phase 5 must move traversal graph caching/querying onto the committed static graph.
+- Env-cell portal aperture geometry is still not a landblock-scoped uploaded aperture resource. Phase 7 remains the cutover for eliminating production dynamic portal mask uploads.
+
+Debt to track:
+
+- `StaticPortalGraphRecord` currently stores sorted node/edge arrays but not a compact adjacency table. Phase 5 should decide whether to cache adjacency from the graph or bake an adjacency payload directly.
+- Transition and env-cell graph records may still arrive as separate records for the same landblock. Phase 5 should define whether query consumers merge records per landblock or whether the coordinator/materializer should publish a single landblock graph view.
+- Static object compatibility baking derives transition graphs from transition aperture resources, which is acceptable for this phase but should collapse into the unified portal aperture pipeline in Phase 7.
 
 ### Phase 5: Cache Static Portal Traversal Graphs
 

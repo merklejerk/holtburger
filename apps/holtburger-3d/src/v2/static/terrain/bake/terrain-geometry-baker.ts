@@ -52,6 +52,7 @@ export function bakeTerrainGeometry(
 		materialCoverage: [],
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: [],
+		staticPortalGraphs: [],
 		staticPortalInteriorRecords: [],
 		staticSourceMappings: createTerrainSourceMappingRecords(drawUnits),
 		staticSpatialRecords: createTerrainSpatialRecords(drawUnits),

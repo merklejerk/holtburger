@@ -444,6 +444,7 @@ export class StaticCoordinator {
 			revision: result.revision,
 			staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds,
 			staticBatchId: result.staticBatchId,
+			staticPortalGraphs: result.staticPortalGraphs,
 			staticPortalInteriorRecords: result.staticPortalInteriorRecords,
 			staticSourceMappings: result.staticSourceMappings,
 			staticSpatialRecords: result.staticSpatialRecords,
@@ -487,6 +488,7 @@ export class StaticCoordinator {
 			revision: this.#revision,
 			staticAuthoredDynamicSeeds: [],
 			staticBatchId: createEvictionStaticBatchId(this.#revision),
+			staticPortalGraphs: [],
 			staticPortalInteriorRecords: [],
 			staticSourceMappings: [],
 			staticSpatialRecords: [],
@@ -807,6 +809,9 @@ function filterStaticBakeResultForWorks(
 		staticPortalInteriorRecords: result.staticPortalInteriorRecords.filter(
 			(record) =>
 				isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
+		),
+		staticPortalGraphs: result.staticPortalGraphs.filter((record) =>
+			isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
 		),
 		staticSourceMappings: result.staticSourceMappings.filter((record) =>
 			isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),

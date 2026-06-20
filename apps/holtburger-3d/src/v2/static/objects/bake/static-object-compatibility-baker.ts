@@ -24,6 +24,7 @@ import type {
 	TransitionApertureBatch,
 } from "../../contracts";
 import { describeStaticScopeKey } from "../../demand-planner";
+import { createTransitionStaticPortalGraph } from "../../portal-graphs";
 import {
 	AC_UNIT_SCALE,
 	buildAcPlacementMatrix,
@@ -89,6 +90,16 @@ export function bakeStaticObjectCompatibility(
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: [],
 		staticBatchId: input.staticBatchId,
+		staticPortalGraphs: itemResults.flatMap((result) =>
+			result.transitionApertureBatch
+				? [
+						createTransitionStaticPortalGraph(
+							createWorkPeerRecordOwner(result.work),
+							result.transitionApertureBatch,
+						),
+					]
+				: [],
+		),
 		staticPortalInteriorRecords: [],
 		staticSourceMappings: itemResults.flatMap(
 			(result) => result.sourceMappings,
@@ -220,6 +231,7 @@ function bakeStaticObjectCompatibilityItem(
 	readonly spatialRecords: readonly StaticSpatialRecord[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly transitionApertureBatch: TransitionApertureBatch | null;
+	readonly work: StaticBakeBatchItem["work"];
 } {
 	const scope = createStaticObjectCompatibilityPayload(item);
 	const transitionApertureBatch =
@@ -295,6 +307,7 @@ function bakeStaticObjectCompatibilityItem(
 			work: item.work,
 		}),
 		transitionApertureBatch,
+		work: item.work,
 	};
 }
 

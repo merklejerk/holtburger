@@ -53,6 +53,7 @@ describe("V2 terrain geometry baker", () => {
 			atlasRegistryUpdates: [],
 			buildRevision: 42,
 			staticAuthoredDynamicSeeds: [],
+			staticPortalGraphs: [],
 			staticPortalInteriorRecords: [],
 			staticSpatialRecords: [
 				{

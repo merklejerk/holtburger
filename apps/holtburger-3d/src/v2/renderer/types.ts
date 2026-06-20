@@ -212,6 +212,7 @@ export type PortalFrameWorkPlan =
 			readonly baseScene: PortalFrameBaseScenePlan;
 			readonly directEnvCellDraws: readonly PortalDirectEnvCellDrawRequest[];
 			readonly portalApertureGeometryResources: readonly PortalApertureGeometryResourcePlan[];
+			readonly portalApertureDiagnostics: PortalApertureFrameDiagnostics;
 			readonly portalApertureMaskPasses: readonly PortalApertureMaskPass[];
 			readonly transitionSceneCrossings: readonly PortalTransitionSceneCrossing[];
 	  };
@@ -250,17 +251,36 @@ export type PortalFrameSceneSource =
 
 export type PortalApertureVertex = readonly [number, number, number];
 
+export type PortalApertureSourceKind =
+	| "env-cell-portal"
+	| "building-transition";
+
+export type PortalApertureCullMode = "none" | "front" | "back";
+
 export interface PortalApertureGeometryResourcePlan {
 	readonly resourceId: string;
+	readonly sourceKinds: readonly PortalApertureSourceKind[];
 	readonly vertices: readonly PortalApertureVertex[];
+}
+
+export interface PortalApertureFrameDiagnostics {
+	readonly buildingTransitionEdges: number;
+	readonly dedupedGeometryResources: number;
+	readonly duplicateMaskEdges: number;
+	readonly envCellPortalEdges: number;
+	readonly selectedMaskEdges: number;
+	readonly transitionRootCount: number;
 }
 
 export interface PortalApertureMaskPass {
 	readonly apertureResourceId: string;
+	readonly apertureSourceId: string;
+	readonly cullMode: PortalApertureCullMode;
 	readonly linkId: string;
 	readonly parentStencilRef: number | null;
 	readonly portalStackId: string;
 	readonly source: PortalFrameSceneSource;
+	readonly sourceKind: PortalApertureSourceKind;
 	readonly sourcePortalStackId: string;
 	readonly stencilRef: number;
 	readonly target: PortalFrameSceneSource;

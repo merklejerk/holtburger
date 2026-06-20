@@ -1,6 +1,4 @@
 import type {
-	PortalApertureGeometryResourcePlan,
-	PortalApertureMaskPass,
 	PortalApertureVertex,
 	PortalFrameWorkPlan,
 	RendererEnvCellResourceMembership,
@@ -18,6 +16,10 @@ import type {
 	PortalTraversalVisibleCell,
 	StaticSceneCameraResidency,
 } from "./static-scene-query";
+import {
+	type PortalApertureFrameResourcePlan,
+	PortalApertureFrameResourceBuilder,
+} from "./portal-aperture-frame-resources";
 import { createOutdoorLandblockRootTranslation } from "./static-placement";
 
 export interface DirectEnvCellFramePlanInput {
@@ -73,6 +75,7 @@ export function createDirectEnvCellFramePlan(
 		),
 		kind: "direct-env-cell",
 		mode: "portal-traversal",
+		portalApertureDiagnostics: aperturePlan.diagnostics,
 		portalApertureGeometryResources: aperturePlan.resources,
 		portalApertureMaskPasses: aperturePlan.maskPasses,
 		transitionSceneCrossings: [],
@@ -108,13 +111,7 @@ export function createOutdoorTransitionPortalFramePlan(
 		PortalFrameWorkPlan,
 		{ readonly kind: "direct-env-cell" }
 	>["directEnvCellDraws"][number][] = [];
-	const portalApertureGeometryResources: PortalApertureGeometryResourcePlan[] =
-		[];
-	const portalApertureGeometryResourcesByKey = new Map<
-		string,
-		PortalApertureGeometryResourcePlan
-	>();
-	const portalApertureMaskPasses: PortalApertureMaskPass[] = [];
+	const apertureBuilder = new PortalApertureFrameResourceBuilder();
 	const transitionSceneCrossings: Extract<
 		PortalFrameWorkPlan,
 		{ readonly kind: "direct-env-cell" }
@@ -154,13 +151,12 @@ export function createOutdoorTransitionPortalFramePlan(
 			if (vertices.length === 0) {
 				continue;
 			}
-			const resource = getOrCreatePortalApertureGeometryResource(
-				vertices,
-				portalApertureGeometryResources,
-				portalApertureGeometryResourcesByKey,
-			);
-			portalApertureMaskPasses.push({
-				apertureResourceId: resource.resourceId,
+			apertureBuilder.addMaskPass({
+				apertureSourceId: createBuildingTransitionApertureSourceId({
+					apertureBatchId: range.batch.apertureBatchId,
+					portalId: range.range.portalId,
+				}),
+				cullMode: "none",
 				linkId: createOutdoorTransitionLinkId({
 					apertureBatchId: range.batch.apertureBatchId,
 					envCellId: root.envCellId,
@@ -172,6 +168,7 @@ export function createOutdoorTransitionPortalFramePlan(
 					kind: "outdoor-target",
 					landblockId: input.landblockId,
 				},
+				sourceKind: "building-transition",
 				sourcePortalStackId: outdoorRootPortalStackId,
 				stencilRef: 1,
 				target: {
@@ -180,6 +177,7 @@ export function createOutdoorTransitionPortalFramePlan(
 					landblockId: input.landblockId,
 				},
 				traversalDepth: 1,
+				vertices,
 			});
 			transitionSceneCrossings.push({
 				apertureBatchId: range.batch.apertureBatchId,
@@ -204,10 +202,8 @@ export function createOutdoorTransitionPortalFramePlan(
 		appendTransitionRootTraversal({
 			directEnvCellDraws,
 			emittedPortalStackIds,
+			apertureBuilder,
 			membershipsByKey,
-			portalApertureGeometryResources,
-			portalApertureGeometryResourcesByKey,
-			portalApertureMaskPasses,
 			portalInteriorRecords: input.portalInteriorRecords,
 			renderAnchorLandblockId: input.renderAnchorLandblockId,
 			transitionRootPortalStackId,
@@ -215,7 +211,10 @@ export function createOutdoorTransitionPortalFramePlan(
 		});
 	}
 
-	if (portalApertureMaskPasses.length === 0) {
+	const aperturePlan = apertureBuilder.build({
+		transitionRootCount: transitionRoots.length,
+	});
+	if (aperturePlan.maskPasses.length === 0) {
 		return null;
 	}
 
@@ -227,8 +226,9 @@ export function createOutdoorTransitionPortalFramePlan(
 		directEnvCellDraws,
 		kind: "direct-env-cell",
 		mode: "portal-traversal",
-		portalApertureGeometryResources,
-		portalApertureMaskPasses,
+		portalApertureDiagnostics: aperturePlan.diagnostics,
+		portalApertureGeometryResources: aperturePlan.resources,
+		portalApertureMaskPasses: aperturePlan.maskPasses,
 		transitionSceneCrossings,
 	};
 }
@@ -308,12 +308,8 @@ function createPortalAperturePlan(options: {
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly renderAnchorLandblockId: number | null;
 	readonly traversalPlan: PortalTraversalPlan;
-}): {
-	readonly maskPasses: readonly PortalApertureMaskPass[];
-	readonly resources: readonly PortalApertureGeometryResourcePlan[];
-} {
-	const resources: PortalApertureGeometryResourcePlan[] = [];
-	const resourcesByKey = new Map<string, PortalApertureGeometryResourcePlan>();
+}): PortalApertureFrameResourcePlan {
+	const apertureBuilder = new PortalApertureFrameResourceBuilder();
 	const envCellsByKey = createPortalEnvCellsByKey(
 		options.portalInteriorRecords,
 	);
@@ -326,8 +322,6 @@ function createPortalAperturePlan(options: {
 	const maskablePortalStackIds = new Set<string>([
 		createRootPortalStackId(options.traversalPlan.startEnvCellId),
 	]);
-	const maskPasses: PortalApertureMaskPass[] = [];
-
 	for (const viewGroup of options.traversalPlan.portalViewGroups) {
 		if (viewGroup.parentPortalStackId === null) {
 			continue;
@@ -370,41 +364,44 @@ function createPortalAperturePlan(options: {
 			if (vertices.length === 0) {
 				continue;
 			}
-			const resource = getOrCreatePortalApertureGeometryResource(
-				vertices,
-				resources,
-				resourcesByKey,
-			);
-			emittedMaskPass = true;
-			maskPasses.push({
-				apertureResourceId: resource.resourceId,
-				linkId: edge.linkId,
-				parentStencilRef: parentStencilRef ?? null,
-				portalStackId: viewGroup.portalStackId,
-				source: {
-					envCellId: edge.sourceEnvCellId,
-					kind: "env-cell-direct",
-					landblockId: viewGroup.landblockId,
-				},
-				sourcePortalStackId: viewGroup.parentPortalStackId,
-				stencilRef: viewGroup.traversalDepth,
-				target: {
-					envCellId: viewGroup.envCellId,
-					kind: "env-cell-direct",
-					landblockId: viewGroup.landblockId,
-				},
-				traversalDepth: viewGroup.traversalDepth,
-			});
+			emittedMaskPass =
+				apertureBuilder.addMaskPass({
+					apertureSourceId: createEnvCellPortalApertureSourceId({
+						envCellId: edge.sourceEnvCellId,
+						landblockId: viewGroup.landblockId,
+						portalId: edge.sourcePortalId,
+					}),
+					cullMode: "none",
+					linkId: edge.linkId,
+					parentStencilRef: parentStencilRef ?? null,
+					portalStackId: viewGroup.portalStackId,
+					source: {
+						envCellId: edge.sourceEnvCellId,
+						kind: "env-cell-direct",
+						landblockId: viewGroup.landblockId,
+					},
+					sourceKind: "env-cell-portal",
+					sourcePortalStackId: viewGroup.parentPortalStackId,
+					stencilRef: viewGroup.traversalDepth,
+					target: {
+						envCellId: viewGroup.envCellId,
+						kind: "env-cell-direct",
+						landblockId: viewGroup.landblockId,
+					},
+					traversalDepth: viewGroup.traversalDepth,
+					vertices,
+				}) || emittedMaskPass;
 		}
 		if (emittedMaskPass) {
 			maskablePortalStackIds.add(viewGroup.portalStackId);
 		}
 	}
 
-	return { maskPasses, resources };
+	return apertureBuilder.build({ transitionRootCount: 0 });
 }
 
 function appendTransitionRootTraversal(options: {
+	readonly apertureBuilder: PortalApertureFrameResourceBuilder;
 	readonly directEnvCellDraws: Extract<
 		PortalFrameWorkPlan,
 		{ readonly kind: "direct-env-cell" }
@@ -414,12 +411,6 @@ function appendTransitionRootTraversal(options: {
 		string,
 		RendererEnvCellResourceMembership
 	>;
-	readonly portalApertureGeometryResources: PortalApertureGeometryResourcePlan[];
-	readonly portalApertureGeometryResourcesByKey: Map<
-		string,
-		PortalApertureGeometryResourcePlan
-	>;
-	readonly portalApertureMaskPasses: PortalApertureMaskPass[];
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly renderAnchorLandblockId: number | null;
 	readonly transitionRootPortalStackId: string;
@@ -453,21 +444,17 @@ function appendTransitionRootTraversal(options: {
 		options.emittedPortalStackIds.add(portalStackId);
 	}
 
-	const resourceIdRemaps = new Map<string, string>();
-	for (const resource of envCellAperturePlan.resources) {
-		const mergedResource = getOrCreatePortalApertureGeometryResource(
-			resource.vertices,
-			options.portalApertureGeometryResources,
-			options.portalApertureGeometryResourcesByKey,
-		);
-		resourceIdRemaps.set(resource.resourceId, mergedResource.resourceId);
-	}
 	for (const pass of envCellAperturePlan.maskPasses) {
-		options.portalApertureMaskPasses.push({
-			...pass,
-			apertureResourceId:
-				resourceIdRemaps.get(pass.apertureResourceId) ??
-				pass.apertureResourceId,
+		const resource = envCellAperturePlan.resources.find(
+			(candidate) => candidate.resourceId === pass.apertureResourceId,
+		);
+		if (!resource) {
+			continue;
+		}
+		options.apertureBuilder.addMaskPass({
+			apertureSourceId: pass.apertureSourceId,
+			cullMode: pass.cullMode,
+			linkId: pass.linkId,
 			parentStencilRef:
 				pass.parentStencilRef === null ? 1 : pass.parentStencilRef + 1,
 			portalStackId: createOutdoorTransitionChildPortalStackId({
@@ -475,13 +462,17 @@ function appendTransitionRootTraversal(options: {
 				transitionRootPortalStackId: options.transitionRootPortalStackId,
 				traversalPortalStackId: pass.portalStackId,
 			}),
+			source: pass.source,
+			sourceKind: pass.sourceKind,
 			sourcePortalStackId: createOutdoorTransitionChildPortalStackId({
 				sourceRootEnvCellId: options.traversalPlan.startEnvCellId,
 				transitionRootPortalStackId: options.transitionRootPortalStackId,
 				traversalPortalStackId: pass.sourcePortalStackId,
 			}),
 			stencilRef: pass.stencilRef + 1,
+			target: pass.target,
 			traversalDepth: pass.traversalDepth + 1,
+			vertices: resource.vertices,
 		});
 	}
 }
@@ -502,25 +493,6 @@ function createPortalEnvCellsByKey(
 		}
 	}
 	return envCellsByKey;
-}
-
-function getOrCreatePortalApertureGeometryResource(
-	vertices: readonly PortalApertureVertex[],
-	resources: PortalApertureGeometryResourcePlan[],
-	resourcesByKey: Map<string, PortalApertureGeometryResourcePlan>,
-): PortalApertureGeometryResourcePlan {
-	const key = createPortalApertureGeometryKey(vertices);
-	const existingResource = resourcesByKey.get(key);
-	if (existingResource) {
-		return existingResource;
-	}
-	const resource: PortalApertureGeometryResourcePlan = {
-		resourceId: `portal-aperture:${hashStringFNV1a(key)}`,
-		vertices,
-	};
-	resourcesByKey.set(key, resource);
-	resources.push(resource);
-	return resource;
 }
 
 function triangulateEnvCellPortalAperture(
@@ -590,23 +562,6 @@ function transformEnvCellPortalPoint(
 	];
 }
 
-function createPortalApertureGeometryKey(
-	vertices: readonly PortalApertureVertex[],
-): string {
-	return vertices
-		.map((vertex) => vertex.map((value) => value.toFixed(6)).join(","))
-		.join(";");
-}
-
-function hashStringFNV1a(value: string): string {
-	let hash = 0x811c9dc5;
-	for (let index = 0; index < value.length; index += 1) {
-		hash ^= value.charCodeAt(index);
-		hash = Math.imul(hash, 0x01000193) >>> 0;
-	}
-	return hash.toString(16).padStart(8, "0");
-}
-
 interface OutdoorTransitionRootGroup {
 	readonly envCellId: number;
 	readonly ranges: readonly OutdoorTransitionRangeRef[];
@@ -660,5 +615,29 @@ function createOutdoorTransitionLinkId(options: {
 		options.apertureBatchId,
 		options.portalId,
 		formatHex32(options.envCellId),
+	].join(":");
+}
+
+function createBuildingTransitionApertureSourceId(options: {
+	readonly apertureBatchId: string;
+	readonly portalId: string;
+}): string {
+	return [
+		"building-transition",
+		options.apertureBatchId,
+		options.portalId,
+	].join(":");
+}
+
+function createEnvCellPortalApertureSourceId(options: {
+	readonly envCellId: number;
+	readonly landblockId: number;
+	readonly portalId: string;
+}): string {
+	return [
+		"env-cell-portal",
+		formatHex32(options.landblockId),
+		formatHex32(options.envCellId),
+		options.portalId,
 	].join(":");
 }

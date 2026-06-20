@@ -58,6 +58,7 @@ describe("direct env-cell frame plan", () => {
 			],
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
+			portalApertureDiagnostics: emptyPortalApertureDiagnostics(),
 			portalApertureGeometryResources: [],
 			portalApertureMaskPasses: [],
 			transitionSceneCrossings: [],
@@ -180,6 +181,7 @@ describe("direct env-cell frame plan", () => {
 		expect(plan?.portalApertureGeometryResources).toEqual([
 			{
 				resourceId: expect.stringMatching(/^portal-aperture:/),
+				sourceKinds: ["env-cell-portal"],
 				vertices: [
 					[0, 0, 0],
 					[1, 0, 0],
@@ -191,6 +193,8 @@ describe("direct env-cell frame plan", () => {
 			{
 				apertureResourceId:
 					plan?.portalApertureGeometryResources[0]?.resourceId,
+				apertureSourceId: "env-cell-portal:0xda55ffff:0xda550100:portal-a",
+				cullMode: "none",
 				linkId: "a-to-b",
 				parentStencilRef: null,
 				portalStackId: "root:0xda550100/a-to-b",
@@ -199,6 +203,7 @@ describe("direct env-cell frame plan", () => {
 					kind: "env-cell-direct",
 					landblockId: 0xda55ffff,
 				},
+				sourceKind: "env-cell-portal",
 				sourcePortalStackId: "root:0xda550100",
 				stencilRef: 1,
 				target: {
@@ -467,6 +472,14 @@ describe("direct env-cell frame plan", () => {
 				traversalDepth: 2,
 			}),
 		]);
+		expect(plan?.portalApertureDiagnostics).toEqual({
+			buildingTransitionEdges: 1,
+			dedupedGeometryResources: 0,
+			duplicateMaskEdges: 0,
+			envCellPortalEdges: 1,
+			selectedMaskEdges: 2,
+			transitionRootCount: 1,
+		});
 		expect(plan?.portalApertureMaskPasses).toEqual([
 			expect.objectContaining({
 				linkId:
@@ -494,6 +507,17 @@ describe("direct env-cell frame plan", () => {
 		]);
 	});
 });
+
+function emptyPortalApertureDiagnostics() {
+	return {
+		buildingTransitionEdges: 0,
+		dedupedGeometryResources: 0,
+		duplicateMaskEdges: 0,
+		envCellPortalEdges: 0,
+		selectedMaskEdges: 0,
+		transitionRootCount: 0,
+	};
+}
 
 function createTraversalPlan(options: {
 	readonly visibleCells: readonly {

@@ -1552,7 +1552,7 @@ Work for mesh:
 
 ### Phase 6A: Unified Portal Aperture Resource Model
 
-Status: planned immediate corrective phase.
+Status: implemented on 2026-06-20; browser/manual validation pending.
 
 Purpose: remove transition aperture specialness from the production renderer resource path before
 building more transition compositing behavior.
@@ -1632,6 +1632,73 @@ Validation targets:
   without the known weirdness of `0xf418ffff`.
 - Secondary: `0xf418ffff`, only after `0xda55ffff` is stable, because it may require a dedicated
   adjustment for unusual env-cell portal topology.
+
+Implementation notes:
+
+- Added `PortalApertureFrameResourceBuilder` as the production selected-aperture resource builder.
+  Env-cell portal apertures and building-sourced transition apertures now enter the same builder and
+  produce the same renderer-facing outputs:
+  - `PortalApertureGeometryResourcePlan`;
+  - `PortalApertureMaskPass`;
+  - `PortalApertureFrameDiagnostics`.
+- `PortalApertureGeometryResourcePlan` now carries `sourceKinds`, so a deduped canonical geometry
+  resource can report whether it is used by env-cell portals, building-transition portals, or both.
+- `PortalApertureMaskPass` now carries selected-edge metadata:
+  - `sourceKind`;
+  - `apertureSourceId`;
+  - `cullMode`.
+  This keeps semantic selected-edge identity separate from deduped geometry identity.
+- The runtime direct frame builder no longer has separate local resource construction paths for
+  env-cell portal masks and building transition masks. Both paths call the unified builder.
+- Outdoor transition roots still read `TransitionApertureBatch` as a source/static DTO, but WebGL2
+  production direct portal execution consumes only the unified selected aperture resources and mask
+  passes from `PortalFrameWorkPlan`.
+- WebGL2 aperture-mask drawing now applies `PortalApertureMaskPass.cullMode`. The planner currently
+  emits `none`, preserving current behavior, but wrong-side transition fixes can now be represented
+  as selected-edge metadata instead of a separate transition compositor.
+- Browser `PORTAL FRAME` diagnostics now include aperture category and folding fields:
+  - env-cell aperture edges;
+  - building-transition aperture edges;
+  - duplicate mask edges folded;
+  - deduped geometry resource count;
+  - transition root count.
+
+Spicy/debt notes:
+
+- This phase fixes the production frame-plan resource model, but it does not create a persistent GPU
+  aperture cache. WebGL2 still dynamically uploads selected aperture triangles for mask draws. That
+  is now a performance/resource-cache debt, not a transition-specific architecture leak.
+- `TransitionApertureBatch` still exists for static/source storage, legacy fallback, and debug
+  overlay presentation. It should not be treated as a production visibility resource in direct
+  portal frames.
+- Exact duplicate mask folding is conservative: it folds only selected masks with the same source
+  kind, source id, source/target view context, cull policy, and canonical geometry. High counts in
+  `0xda55ffff` may still be legitimate distinct portal view contexts or source-authored duplicate
+  transition edges. The new diagnostics should tell us which.
+- `cullMode` exists but is not yet source-derived. If shimmer or wrong-side masks persist, the next
+  correction should decode/build selected-edge cull policy and keep it inside the unified aperture
+  model.
+
+Validation:
+
+- Ran `npm run test:ts`.
+- Ran `npm run check`.
+- Ran `npm run lint:ts`.
+
+Failed to close:
+
+- Manual `0xda55ffff` validation is still needed. The expected diagnostic improvement is not
+  necessarily "counts are low"; it is that high counts are now explainable by `edges`, `dup`,
+  `dedupe`, and `roots` instead of hidden transition batch behavior.
+- Persistent GPU aperture caching remains deferred.
+- Indoor-to-outdoor and outdoor -> indoor -> outdoor remain blocked until manual validation confirms
+  the unified aperture model is stable enough.
+
+Work for mesh:
+
+- Re-check outdoor `0xda55ffff` with `PORTAL FRAME` visible. Please capture the row values for
+  `views`, `masks`, `apertures`, `edges`, `dup`, `dedupe`, `roots`, `resources`, `crossings`, and
+  `DIRECT ENV DRAWS`, plus whether the shimmer changed.
 
 ### Phase 6R: Reassessment After Transition Unification
 

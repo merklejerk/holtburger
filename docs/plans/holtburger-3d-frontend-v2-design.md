@@ -1403,10 +1403,19 @@ portal traversal and grouped aperture-mask recursion used by pure interiors. Thi
 outdoor-to-indoor rendering no longer needs to draw a broad all-resident interior scene target for
 the supported direct path.
 
+Production portal aperture resources are selected-edge resources, not transition-specific renderer
+batches. The frame planner feeds env-cell portal apertures and building-sourced transition
+apertures through one selected aperture builder, which emits deduped
+`PortalApertureGeometryResourcePlan` entries, `PortalApertureMaskPass` records, and aperture
+diagnostics. Geometry resources carry source categories such as `env-cell-portal` and
+`building-transition`; mask passes carry selected-edge metadata such as source id, source kind,
+stack ids, and cull mode. `TransitionApertureBatch` may remain a static/source DTO, legacy fallback
+input, or debug overlay input, but direct portal execution should consume only the unified selected
+aperture resources in `PortalFrameWorkPlan`.
+
 `PortalTransitionSceneCrossing` records both `apertureBatchId` and `aperturePortalId` so transition
-crossings can remain selected-edge facts even though the underlying building aperture geometry may
-still be uploaded in batch form. Batch-level transition aperture resources are therefore a resource
-container and fallback/debug input, not production visibility policy.
+crossings can remain selected-edge facts even when their source data came from a building aperture
+batch. Batch identity is source provenance, not the production draw unit.
 
 Indoor-to-outdoor and outdoor -> indoor -> outdoor composition still need explicit scene-source copy
 work. The outdoor target is now the correct reusable source, but interior-origin return-to-outdoor

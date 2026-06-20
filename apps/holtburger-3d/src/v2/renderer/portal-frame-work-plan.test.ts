@@ -88,6 +88,14 @@ function createDirectEnvCellPlan(): PortalFrameWorkPlan {
 		],
 		kind: "direct-env-cell",
 		mode: "portal-traversal",
+		portalApertureDiagnostics: {
+			buildingTransitionEdges: 0,
+			dedupedGeometryResources: 0,
+			duplicateMaskEdges: 0,
+			envCellPortalEdges: 0,
+			selectedMaskEdges: 0,
+			transitionRootCount: 0,
+		},
 		portalApertureGeometryResources: [],
 		portalApertureMaskPasses: [],
 		transitionSceneCrossings: [

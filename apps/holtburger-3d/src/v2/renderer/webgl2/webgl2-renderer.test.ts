@@ -499,6 +499,14 @@ describe("V2 WebGL2 structured interior rendering", () => {
 						[0, 1, 0],
 					],
 				},
+				{
+					resourceId: "portal-aperture:a-to-b-side",
+					vertices: [
+						[2, 0, 0],
+						[3, 0, 0],
+						[2, 1, 0],
+					],
+				},
 			],
 			portalApertureMaskPasses: [
 				{
@@ -511,6 +519,26 @@ describe("V2 WebGL2 structured interior rendering", () => {
 						kind: "env-cell-direct",
 						landblockId: 0xda55ffff,
 					},
+					sourcePortalStackId: "root",
+					stencilRef: 1,
+					target: {
+						envCellId: 0xda550101,
+						kind: "env-cell-direct",
+						landblockId: 0xda55ffff,
+					},
+					traversalDepth: 1,
+				},
+				{
+					apertureResourceId: "portal-aperture:a-to-b-side",
+					linkId: "a-to-b-side",
+					parentStencilRef: null,
+					portalStackId: "root/a-to-b",
+					source: {
+						envCellId: 0xda550100,
+						kind: "env-cell-direct",
+						landblockId: 0xda55ffff,
+					},
+					sourcePortalStackId: "root",
 					stencilRef: 1,
 					target: {
 						envCellId: 0xda550101,
@@ -531,6 +559,8 @@ describe("V2 WebGL2 structured interior rendering", () => {
 
 		expect(gl.drawElementsCalls).toHaveLength(2);
 		expect(gl.drawArraysCalls).toEqual([
+			{ count: 3, first: 0, mode: gl.TRIANGLES },
+			{ count: 3, first: 0, mode: gl.TRIANGLES },
 			{ count: 3, first: 0, mode: gl.TRIANGLES },
 			{ count: 3, first: 0, mode: gl.TRIANGLES },
 		]);

@@ -217,6 +217,7 @@ function portalApertureMaskPassesEqual(
 			leftPass.linkId === rightPass.linkId &&
 			leftPass.parentStencilRef === rightPass.parentStencilRef &&
 			leftPass.portalStackId === rightPass.portalStackId &&
+			leftPass.sourcePortalStackId === rightPass.sourcePortalStackId &&
 			leftPass.stencilRef === rightPass.stencilRef &&
 			leftPass.traversalDepth === rightPass.traversalDepth &&
 			portalFrameSceneSourceEquals(leftPass.source, rightPass.source) &&

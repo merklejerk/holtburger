@@ -8,6 +8,7 @@ export interface PortalTraversalRequest {
 	readonly landblockId: number;
 	readonly maxCells: number;
 	readonly maxDepth: number;
+	readonly maxPortalViews: number;
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly startEnvCellId: number;
 }
@@ -17,6 +18,8 @@ export interface PortalTraversalPlan {
 	readonly landblockId: number;
 	readonly maxCells: number;
 	readonly maxDepth: number;
+	readonly maxPortalViews: number;
+	readonly portalViewGroups: readonly PortalTraversalViewGroup[];
 	readonly sceneCrossings: readonly PortalTraversalSceneCrossing[];
 	readonly startEnvCellId: number;
 	readonly visibleCells: readonly PortalTraversalVisibleCell[];
@@ -26,6 +29,16 @@ export interface PortalTraversalVisibleCell {
 	readonly envCellId: number;
 	readonly landblockId: number;
 	readonly parentEdge: PortalTraversalEnvCellEdge | null;
+	readonly portalStack: readonly PortalTraversalEnvCellEdge[];
+	readonly portalStackId: string;
+	readonly traversalDepth: number;
+}
+
+export interface PortalTraversalViewGroup {
+	readonly apertureEdges: readonly PortalTraversalEnvCellEdge[];
+	readonly envCellId: number;
+	readonly landblockId: number;
+	readonly parentPortalStackId: string | null;
 	readonly portalStack: readonly PortalTraversalEnvCellEdge[];
 	readonly portalStackId: string;
 	readonly traversalDepth: number;
@@ -75,6 +88,11 @@ export type PortalTraversalDiagnostic =
 			readonly maxCells: number;
 	  }
 	| {
+			readonly kind: "portal-view-cap";
+			readonly edge: PortalTraversalEnvCellEdge;
+			readonly maxPortalViews: number;
+	  }
+	| {
 			readonly kind: "already-visible";
 			readonly edge: PortalTraversalEnvCellEdge;
 			readonly existingTraversalDepth: number;
@@ -105,6 +123,10 @@ export function createPortalTraversalPlan(
 ): PortalTraversalPlan {
 	const maxDepth = normalizeNonNegativeInteger(request.maxDepth, "maxDepth");
 	const maxCells = normalizePositiveInteger(request.maxCells, "maxCells");
+	const maxPortalViews = normalizePositiveInteger(
+		request.maxPortalViews,
+		"maxPortalViews",
+	);
 	const landblockId = request.landblockId >>> 0;
 	const startEnvCellId = request.startEnvCellId >>> 0;
 	const graph = createPortalTraversalGraph({
@@ -124,6 +146,8 @@ export function createPortalTraversalPlan(
 			landblockId,
 			maxCells,
 			maxDepth,
+			maxPortalViews,
+			portalViewGroups: [],
 			sceneCrossings,
 			startEnvCellId,
 			visibleCells: [],
@@ -138,11 +162,21 @@ export function createPortalTraversalPlan(
 		portalStackId: createRootPortalStackId(startEnvCellId),
 		traversalDepth: 0,
 	};
+	const rootViewGroup: PortalTraversalViewGroup = {
+		apertureEdges: [],
+		envCellId: startEnvCellId,
+		landblockId,
+		parentPortalStackId: null,
+		portalStack: [],
+		portalStackId: rootCell.portalStackId,
+		traversalDepth: 0,
+	};
 	const visibleCells: PortalTraversalVisibleCell[] = [rootCell];
 	const visibleCellsByEnvCellId = new Map<number, PortalTraversalVisibleCell>([
 		[startEnvCellId, rootCell],
 	]);
-	const queue: PortalTraversalVisibleCell[] = [rootCell];
+	const portalViewGroups: PortalTraversalViewGroup[] = [rootViewGroup];
+	const queue: PortalTraversalViewGroup[] = [rootViewGroup];
 
 	for (let queueIndex = 0; queueIndex < queue.length; queueIndex += 1) {
 		const cell = queue[queueIndex]!;
@@ -175,16 +209,20 @@ export function createPortalTraversalPlan(
 				});
 				continue;
 			}
-			const existingCell = visibleCellsByEnvCellId.get(edge.targetEnvCellId);
-			if (existingCell) {
+			const existingPathCell = findPortalStackEnvCellDepth(
+				cell,
+				edge.targetEnvCellId,
+			);
+			if (existingPathCell !== null) {
 				diagnostics.push({
 					edge,
-					existingTraversalDepth: existingCell.traversalDepth,
+					existingTraversalDepth: existingPathCell,
 					kind: "already-visible",
 				});
 				continue;
 			}
-			if (visibleCells.length >= maxCells) {
+			const existingCell = visibleCellsByEnvCellId.get(edge.targetEnvCellId);
+			if (!existingCell && visibleCells.length >= maxCells) {
 				diagnostics.push({
 					edge,
 					kind: "cell-cap",
@@ -192,19 +230,55 @@ export function createPortalTraversalPlan(
 				});
 				continue;
 			}
-
 			const portalStack = [...cell.portalStack, edge];
-			const nextCell: PortalTraversalVisibleCell = {
+			const portalStackId = createPortalStackId(startEnvCellId, portalStack);
+			const existingViewGroup = portalViewGroups.find(
+				(viewGroup) =>
+					viewGroup.parentPortalStackId === cell.portalStackId &&
+					viewGroup.envCellId === edge.targetEnvCellId &&
+					viewGroup.traversalDepth === requestedDepth,
+			);
+			if (existingViewGroup) {
+				replacePortalViewGroup(
+					portalViewGroups,
+					queue,
+					existingViewGroup,
+					[...existingViewGroup.apertureEdges, edge],
+				);
+				continue;
+			}
+			if (portalViewGroups.length >= maxPortalViews) {
+				diagnostics.push({
+					edge,
+					kind: "portal-view-cap",
+					maxPortalViews,
+				});
+				continue;
+			}
+
+			const nextViewGroup: PortalTraversalViewGroup = {
+				apertureEdges: [edge],
 				envCellId: edge.targetEnvCellId,
 				landblockId,
-				parentEdge: edge,
+				parentPortalStackId: cell.portalStackId,
 				portalStack,
-				portalStackId: createPortalStackId(startEnvCellId, portalStack),
+				portalStackId,
 				traversalDepth: requestedDepth,
 			};
-			visibleCells.push(nextCell);
-			visibleCellsByEnvCellId.set(nextCell.envCellId, nextCell);
-			queue.push(nextCell);
+			if (!existingCell) {
+				const nextCell: PortalTraversalVisibleCell = {
+					envCellId: edge.targetEnvCellId,
+					landblockId,
+					parentEdge: edge,
+					portalStack,
+					portalStackId,
+					traversalDepth: requestedDepth,
+				};
+				visibleCells.push(nextCell);
+				visibleCellsByEnvCellId.set(nextCell.envCellId, nextCell);
+			}
+			portalViewGroups.push(nextViewGroup);
+			queue.push(nextViewGroup);
 		}
 	}
 
@@ -213,10 +287,48 @@ export function createPortalTraversalPlan(
 		landblockId,
 		maxCells,
 		maxDepth,
+		maxPortalViews,
+		portalViewGroups,
 		sceneCrossings,
 		startEnvCellId,
 		visibleCells,
 	};
+}
+
+function findPortalStackEnvCellDepth(
+	viewGroup: PortalTraversalViewGroup,
+	envCellId: number,
+): number | null {
+	if (viewGroup.envCellId === envCellId) {
+		return viewGroup.traversalDepth;
+	}
+	const firstEdge = viewGroup.portalStack[0];
+	if (firstEdge?.sourceEnvCellId === envCellId) {
+		return 0;
+	}
+	for (const [index, edge] of viewGroup.portalStack.entries()) {
+		if (edge.targetEnvCellId === envCellId) {
+			return index + 1;
+		}
+	}
+	return null;
+}
+
+function replacePortalViewGroup(
+	portalViewGroups: PortalTraversalViewGroup[],
+	queue: PortalTraversalViewGroup[],
+	existingViewGroup: PortalTraversalViewGroup,
+	apertureEdges: readonly PortalTraversalEnvCellEdge[],
+): void {
+	const replacement = { ...existingViewGroup, apertureEdges };
+	const groupIndex = portalViewGroups.indexOf(existingViewGroup);
+	if (groupIndex >= 0) {
+		portalViewGroups[groupIndex] = replacement;
+	}
+	const queueIndex = queue.indexOf(existingViewGroup);
+	if (queueIndex >= 0) {
+		queue[queueIndex] = replacement;
+	}
 }
 
 function createPortalTraversalGraph(options: {

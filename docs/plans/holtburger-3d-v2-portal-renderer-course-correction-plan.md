@@ -1195,11 +1195,12 @@ Implementation notes:
   selection, aperture mask stencil state, transition-composite regressions, portal-frame equality,
   and runtime direct plan publication.
 - Manual inspection in a large subdivided dungeon space exposed black partition planes aligned with
-  selectable env-cell portal polygons. Excluding env-cell portal/aperture polygon IDs from ordinary
-  structured-interior draw-unit baking is still required cleanup: portal polygons are
-  aperture-mask/query/debug facts, not cell walls/floors. However, follow-up browser inspection
-  showed the same black rectangles remain after that cleanup, so the primary rendering failure is
-  likely traversal/frame-plan grouping rather than visible portal-poly baking alone.
+  selectable env-cell portal polygons. A temporary attempt to exclude env-cell portal/aperture
+  polygon IDs from ordinary structured-interior draw-unit baking proved too broad: follow-up
+  browser inspection showed the same black rectangles remained and ceiling geometry disappeared in
+  the sampled dungeon. The filter was reverted. The primary rendering failure was traversal/frame
+  grouping, while source cell-structure polygons should continue to render according to their
+  ordinary material/stippling rules.
 
 Spicy/debt notes:
 
@@ -1207,10 +1208,10 @@ Spicy/debt notes:
   during selected mask passes. That avoids the vestigial whole-landblock baked portal batch path,
   but a later renderer-resource phase should promote stable aperture ranges into a persistent GPU
   cache if profiling shows dynamic upload overhead matters.
-- Portal polygon filtering currently keys off committed env-cell `portals[].polygonId` and
-  `portalApertures[].polygonId`. If future source evidence finds aperture polygons missing from
-  those records but still present in cell-structure render geometry, add a source-backed diagnostic
-  rather than reintroducing broad portal-poly draw batches.
+- Do not reintroduce blanket filtering of structured-interior triangles by committed
+  `portals[].polygonId` or `portalApertures[].polygonId`. ACViewer's cell-structure render path
+  skips `NoPos` stippling, not portal polygon ids, and the portal-id filter removed visible ceiling
+  geometry in the open-grid dungeon sample.
 - The renderer still does not perform literal child-frustum clipping or screen-footprint pruning.
   That remains intentional: correctness is based on camera residency, bounded reachability, and
   stencil/depth aperture masks.
@@ -1232,7 +1233,7 @@ Validation:
 
 ### Phase 5A: Portal View Grouping For Multi-Aperture Open Cells
 
-Status: planned immediate corrective phase.
+Status: implemented on 2026-06-20; browser/manual validation pending.
 
 Purpose: stop collapsing portal traversal too early by unique env cell. Large open dungeon rooms
 can be subdivided into many connected env cells with multiple same-depth apertures between the
@@ -1280,6 +1281,19 @@ Acceptance criteria:
 
 Spicy/debt notes:
 
+- Implemented `PortalTraversalViewGroup` beside the existing unique `visibleCells` output.
+  `visibleCells` remains the deduped env-cell/resource reachability list, while
+  `portalViewGroups` is the renderer-facing traversal output. Same-parent-context links to the
+  same target env cell and depth fold into one view group with multiple aperture edges.
+- Added `maxPortalViews` and `portal-view-cap` diagnostics as a separate limiter from `maxCells`.
+  Runtime currently uses `128` unique cells and `512` portal views for direct env-cell traversal.
+- `PortalFrameWorkPlan` direct env-cell draw requests now come from portal view groups. This means
+  a target env cell may appear in multiple draw requests when reached through distinct parent
+  portal-stack contexts, but renderer resources remain looked up by env-cell membership.
+- `PortalApertureMaskPass` now carries `sourcePortalStackId`. WebGL2 groups child passes by source
+  view and target `portalStackId`: it draws all apertures in a same-context group into the child
+  stencil ref, draws the target view once, recurses, then exits all apertures for that group.
+- Browser `PORTAL FRAME` diagnostics now report both unique `cells` and render `views`.
 - This phase changes the traversal unit from "unique env cell" to "portal view group plus deduped
   env-cell resources." That is the correct portal-renderer shape, but it will touch traversal,
   frame planning, renderer execution, diagnostics, and tests. Do not bury it inside Phase 6
@@ -1290,6 +1304,21 @@ Spicy/debt notes:
 - Depth-level stencil refs can still work if sibling view groups are executed depth-first with
   enter/draw/recurse/exit semantics. If grouped masks reveal stencil collisions, document the exact
   conflict before changing stencil-ref allocation policy.
+
+Validation:
+
+- Ran `npm run test:ts -- src/v2/runtime/portal-traversal-planner.test.ts src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts src/v2/runtime/static-scene-query.test.ts`.
+- Ran `npm run test:ts -- src/v2/runtime/client-runtime.test.ts src/v2/renderer/portal-frame-work-plan.test.ts`.
+- Ran `npm run check`.
+- Ran `npm run lint:ts`.
+
+Failed to close:
+
+- Manual browser inspection is still required in the large open-grid dungeon space. The expected
+  diagnostic change is that `PORTAL FRAME` reports `views` greater than or equal to unique `cells`
+  when multiple apertures or distinct parent contexts are present. The expected visual change is
+  that same-context open-space portal rectangles reveal the target env-cell content instead of
+  cleared background.
 
 ### Phase 5AR: Reassessment After Portal View Grouping
 

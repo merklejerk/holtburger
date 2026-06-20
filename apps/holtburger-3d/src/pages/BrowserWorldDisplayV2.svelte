@@ -1171,6 +1171,11 @@
 		const missingResourceCells = plan.directEnvCellDraws.filter(
 			(draw) => draw.resourceState === "missing-resources",
 		).length;
+		const uniqueCells = new Set(
+			plan.directEnvCellDraws.map(
+				(draw) => `${draw.landblockId >>> 0}:${draw.envCellId >>> 0}`,
+			),
+		).size;
 		const maxDepth = plan.directEnvCellDraws.reduce(
 			(max, draw) => Math.max(max, draw.traversalDepth),
 			0,
@@ -1183,7 +1188,7 @@
 			(count, draw) => count + draw.envCellStaticObjectDrawUnitIds.length,
 			0,
 		);
-		return `${plan.mode} base ${base} cells ${plan.directEnvCellDraws.length} missing ${missingResourceCells} depth ${maxDepth} masks ${plan.portalApertureMaskPasses.length} apertures ${plan.portalApertureGeometryResources.length} resources ${structuredDrawUnits} cell / ${staticDrawUnits} static crossings ${plan.transitionSceneCrossings.length}`;
+		return `${plan.mode} base ${base} cells ${uniqueCells} views ${plan.directEnvCellDraws.length} missing ${missingResourceCells} depth ${maxDepth} masks ${plan.portalApertureMaskPasses.length} apertures ${plan.portalApertureGeometryResources.length} resources ${structuredDrawUnits} cell / ${staticDrawUnits} static crossings ${plan.transitionSceneCrossings.length}`;
 	}
 
 	function currentCameraEnvCellResourceTarget(): {

@@ -1627,13 +1627,13 @@ class Webgl2Renderer implements Renderer {
 				resource,
 			]),
 		);
-		const drawsByEnvCellKey = new Map(
-			plan.directEnvCellDraws.map((draw) => [
-				createEnvCellResourceKey(draw.landblockId, draw.envCellId),
-				draw,
-			]),
+		const drawsByPortalStackId = new Map(
+			plan.directEnvCellDraws.map((draw) => [draw.portalStackId, draw]),
 		);
-		const maskPassesBySourceKey = new Map<string, PortalApertureMaskPass[]>();
+		const maskPassesBySourceStackId = new Map<
+			string,
+			PortalApertureMaskPass[]
+		>();
 		for (const pass of plan.portalApertureMaskPasses) {
 			if (
 				pass.source.kind !== "env-cell-direct" ||
@@ -1641,13 +1641,10 @@ class Webgl2Renderer implements Renderer {
 			) {
 				continue;
 			}
-			const sourceKey = createEnvCellResourceKey(
-				pass.source.landblockId,
-				pass.source.envCellId,
-			);
-			const passes = maskPassesBySourceKey.get(sourceKey) ?? [];
+			const passes =
+				maskPassesBySourceStackId.get(pass.sourcePortalStackId) ?? [];
 			passes.push(pass);
-			maskPassesBySourceKey.set(sourceKey, passes);
+			maskPassesBySourceStackId.set(pass.sourcePortalStackId, passes);
 		}
 
 		let drawCalls = 0;
@@ -1661,12 +1658,9 @@ class Webgl2Renderer implements Renderer {
 			drawCalls += this.#executeDirectEnvCellPortalChildren({
 				apertureResourcesById,
 				aspectRatio,
-				drawsByEnvCellKey,
-				maskPassesBySourceKey,
-				sourceEnvCellKey: createEnvCellResourceKey(
-					rootDraw.landblockId,
-					rootDraw.envCellId,
-				),
+				drawsByPortalStackId,
+				maskPassesBySourceStackId,
+				sourcePortalStackId: rootDraw.portalStackId,
 			});
 		}
 		this.#stateCache.setStencilState(
@@ -1682,47 +1676,47 @@ class Webgl2Renderer implements Renderer {
 			PortalApertureGeometryResourcePlan
 		>;
 		readonly aspectRatio: number;
-		readonly drawsByEnvCellKey: ReadonlyMap<
+		readonly drawsByPortalStackId: ReadonlyMap<
 			string,
 			Extract<
 				PortalFrameWorkPlan,
 				{ readonly kind: "direct-env-cell" }
 			>["directEnvCellDraws"][number]
 		>;
-		readonly maskPassesBySourceKey: ReadonlyMap<
+		readonly maskPassesBySourceStackId: ReadonlyMap<
 			string,
 			readonly PortalApertureMaskPass[]
 		>;
-		readonly sourceEnvCellKey: string;
+		readonly sourcePortalStackId: string;
 	}): number {
 		let drawCalls = 0;
 		const childPasses =
-			options.maskPassesBySourceKey.get(options.sourceEnvCellKey) ?? [];
-		for (const pass of childPasses) {
-			if (pass.target.kind !== "env-cell-direct") {
+			options.maskPassesBySourceStackId.get(options.sourcePortalStackId) ?? [];
+		for (const group of groupPortalApertureMaskPassesByTargetView(childPasses)) {
+			const targetDraw = options.drawsByPortalStackId.get(group.portalStackId);
+			let enteredMaskCount = 0;
+			for (const pass of group.passes) {
+				const apertureResource = options.apertureResourcesById.get(
+					pass.apertureResourceId,
+				);
+				if (!apertureResource) {
+					continue;
+				}
+				this.#drawPortalApertureStencilMask("enter", pass, apertureResource, {
+					aspectRatio: options.aspectRatio,
+				});
+				enteredMaskCount += 1;
+			}
+			if (enteredMaskCount === 0) {
 				continue;
 			}
-			const apertureResource = options.apertureResourcesById.get(
-				pass.apertureResourceId,
-			);
-			if (!apertureResource) {
-				continue;
-			}
-			const targetKey = createEnvCellResourceKey(
-				pass.target.landblockId,
-				pass.target.envCellId,
-			);
-			const targetDraw = options.drawsByEnvCellKey.get(targetKey);
-			this.#drawPortalApertureStencilMask("enter", pass, apertureResource, {
-				aspectRatio: options.aspectRatio,
-			});
 			this.#stateCache.setStencilState(
 				createStencilState(
 					this.#gl,
 					true,
 					0x00,
 					this.#gl.EQUAL,
-					pass.stencilRef,
+					group.stencilRef,
 					this.#gl.KEEP,
 				),
 			);
@@ -1734,11 +1728,19 @@ class Webgl2Renderer implements Renderer {
 			}
 			drawCalls += this.#executeDirectEnvCellPortalChildren({
 				...options,
-				sourceEnvCellKey: targetKey,
+				sourcePortalStackId: group.portalStackId,
 			});
-			this.#drawPortalApertureStencilMask("exit", pass, apertureResource, {
-				aspectRatio: options.aspectRatio,
-			});
+			for (const pass of group.passes.toReversed()) {
+				const apertureResource = options.apertureResourcesById.get(
+					pass.apertureResourceId,
+				);
+				if (!apertureResource) {
+					continue;
+				}
+				this.#drawPortalApertureStencilMask("exit", pass, apertureResource, {
+					aspectRatio: options.aspectRatio,
+				});
+			}
 		}
 		return drawCalls;
 	}
@@ -3703,6 +3705,38 @@ function createDirectPortalStencilMaskState(
 		pass.parentStencilRef,
 		gl.INCR,
 	);
+}
+
+function groupPortalApertureMaskPassesByTargetView(
+	passes: readonly PortalApertureMaskPass[],
+): readonly {
+	readonly passes: readonly PortalApertureMaskPass[];
+	readonly portalStackId: string;
+	readonly stencilRef: number;
+}[] {
+	const groups = new Map<
+		string,
+		{
+			passes: PortalApertureMaskPass[];
+			portalStackId: string;
+			stencilRef: number;
+		}
+	>();
+	for (const pass of passes) {
+		const group = groups.get(pass.portalStackId) ?? {
+			passes: [],
+			portalStackId: pass.portalStackId,
+			stencilRef: pass.stencilRef,
+		};
+		if (group.stencilRef !== pass.stencilRef) {
+			throw new Error(
+				`Portal aperture mask group ${pass.portalStackId} has inconsistent stencil refs.`,
+			);
+		}
+		group.passes.push(pass);
+		groups.set(pass.portalStackId, group);
+	}
+	return [...groups.values()];
 }
 
 function createEnvCellResourceKey(

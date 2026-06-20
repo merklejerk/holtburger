@@ -86,6 +86,7 @@ const DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 4;
 const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 2;
 const MAX_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 16;
 const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS = 128;
+const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS = 512;
 
 export type ManualStaticDomain =
 	| "terrain"
@@ -961,6 +962,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					landblockId: this.#currentCameraResidency.landblockId,
 					maxCells: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
 					maxDepth: this.#directEnvCellPortalMaxDepth,
+					maxPortalViews: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
 					startEnvCellId: this.#currentCameraResidency.envCellId,
 				}),
 			});

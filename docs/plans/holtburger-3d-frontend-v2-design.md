@@ -1376,9 +1376,10 @@ because reciprocal and duplicate portal polygons are common. It must still prese
 per-edge semantics for traversal: source env cell, target endpoint, portal ids, flags, face policy,
 and portal stack identity. A frame plan selects active portal edges/passes and references aperture
 resources; resident baked portal batches must not imply that every portal polygon is drawn in the
-production frame. Env-cell portal/aperture polygon IDs must also be excluded from ordinary
-structured-interior visible draw-unit baking, even when the source polygon carries a render
-surface/material. Those polygons are aperture-mask/query/debug inputs, not walls or floors.
+production frame. This does not mean ordinary structured-interior cell-structure baking should
+blanket-skip polygons whose ids also appear in env-cell portal/aperture metadata. Source
+cell-structure polygons remain visible geometry when their material/stippling rules say they are
+visible; portal metadata selects aperture mask resources and traversal edges.
 
 The current WebGL2 direct env-cell executor uses depth-level stencil refs rather than unique
 per-edge refs. WebGL's fixed-function stencil test uses one ref value for both the comparison and
@@ -1624,5 +1625,5 @@ Mitigation: when semantics are uncertain, verify against ACE, ACViewer, checked-
 - 2026-06-11: Worker counts and concurrency/coalesce limits should be surfaced as named code constants at the owning runtime/adapter boundary. Keep them tuneable in code without adding browser controls or broad configuration until diagnostics show a real need.
 - 2026-06-15: Runtime asset service ownership is centralized in front of the host adapter. Resolver workers may use a remote asset facade and per-job memoization, but they should not own durable prepared-asset caches. Static-object resolver payloads should carry lightweight metadata plus typed geometry refs; heavy source geometry buffers should be attached to bake inputs through the asset service.
 - 2026-06-19: V2 interior rendering should course-correct to a proper portal renderer. Env cells become first-class render visibility nodes for frame submission, portal traversal becomes the authority for production interior visibility, and whole-domain/flat resident interior drawing is retained only as an explicit diagnostic mode. Outdoor scene-domain rendering may use an offscreen target because exterior scenes are broad and expensive, but env cells should be drawn directly on demand during portal compositing rather than pre-rendered as one interior source target. Transition portals remain scene-domain crossings in the same portal model, with building-sourced aperture geometry as the mask authority for building portals.
-- 2026-06-20: Env-cell portal/aperture polygons are excluded from ordinary structured-interior visible draw-unit baking and retained only as aperture-mask/query/debug inputs. Large subdivided dungeon spaces exposed that traversal depth alone does not solve black partition planes if portal polys remain eligible as normal cell-structure surfaces.
+- 2026-06-20: A temporary env-cell portal/aperture polygon-id filter in structured-interior baking was reverted after it removed visible ceiling geometry in a large subdivided dungeon. Portal metadata should drive aperture mask resources and traversal grouping, not blanket suppression of source cell-structure polygons.
 - 2026-06-20: Portal rendering needs a portal-view/group layer in addition to unique reachable env cells. Same-context multi-aperture links to one target env cell should merge into one stencil region and draw the target once; distinct parent portal-stack contexts remain distinct views even if they target the same env cell.

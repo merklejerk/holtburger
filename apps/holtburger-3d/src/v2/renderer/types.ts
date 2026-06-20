@@ -261,6 +261,7 @@ export interface PortalApertureMaskPass {
 	readonly parentStencilRef: number | null;
 	readonly portalStackId: string;
 	readonly source: PortalFrameSceneSource;
+	readonly sourcePortalStackId: string;
 	readonly stencilRef: number;
 	readonly target: PortalFrameSceneSource;
 	readonly traversalDepth: number;

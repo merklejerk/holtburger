@@ -1225,6 +1225,7 @@ describe("V2 static scene query", () => {
 			landblockId: 0xda55ffff,
 			maxCells: 8,
 			maxDepth: 4,
+			maxPortalViews: 16,
 			startEnvCellId: 0xda550100,
 		});
 

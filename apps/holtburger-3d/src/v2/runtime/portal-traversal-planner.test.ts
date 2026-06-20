@@ -13,6 +13,7 @@ describe("portal traversal planner", () => {
 			landblockId: 0xda55ffff,
 			maxCells: 8,
 			maxDepth: 4,
+			maxPortalViews: 16,
 			portalInteriorRecords: [
 				createPortalInteriorRecord({
 					envCellIds: [0xda550100, 0xda550101],
@@ -70,6 +71,7 @@ describe("portal traversal planner", () => {
 			landblockId: 0xda55ffff,
 			maxCells: 8,
 			maxDepth: 4,
+			maxPortalViews: 16,
 			portalInteriorRecords: [
 				createPortalInteriorRecord({
 					envCellIds: [0xda550100, 0xda550101, 0xda550102],
@@ -98,6 +100,7 @@ describe("portal traversal planner", () => {
 			landblockId: 0xda55ffff,
 			maxCells: 8,
 			maxDepth: 1,
+			maxPortalViews: 16,
 			portalInteriorRecords: [
 				createPortalInteriorRecord({
 					envCellIds: [0xda550100, 0xda550101, 0xda550102],
@@ -134,6 +137,7 @@ describe("portal traversal planner", () => {
 			landblockId: 0xda55ffff,
 			maxCells: 2,
 			maxDepth: 4,
+			maxPortalViews: 16,
 			portalInteriorRecords: [
 				createPortalInteriorRecord({
 					envCellIds: [0xda550100, 0xda550101, 0xda550102],
@@ -164,11 +168,170 @@ describe("portal traversal planner", () => {
 		});
 	});
 
+	it("merges same-context portals to the same target into one portal view group", () => {
+		const plan = createPortalTraversalPlan({
+			landblockId: 0xda55ffff,
+			maxCells: 8,
+			maxDepth: 4,
+			maxPortalViews: 16,
+			portalInteriorRecords: [
+				createPortalInteriorRecord({
+					envCellIds: [0xda550100, 0xda550101],
+					portalLinks: [
+						createEnvCellPortalLink({
+							linkId: "a-to-b-0",
+							sourceEnvCellId: 0xda550100,
+							sourceIndex: 0,
+							targetEnvCellId: 0xda550101,
+						}),
+						createEnvCellPortalLink({
+							linkId: "a-to-b-1",
+							sourceEnvCellId: 0xda550100,
+							sourceIndex: 1,
+							targetEnvCellId: 0xda550101,
+						}),
+					],
+				}),
+			],
+			startEnvCellId: 0xda550100,
+		});
+
+		expect(plan.visibleCells.map((cell) => cell.envCellId)).toEqual([
+			0xda550100, 0xda550101,
+		]);
+		expect(
+			plan.portalViewGroups.map((group) => ({
+				apertureEdges: group.apertureEdges.map((edge) => edge.linkId),
+				envCellId: group.envCellId,
+				parentPortalStackId: group.parentPortalStackId,
+				portalStackId: group.portalStackId,
+			})),
+		).toEqual([
+			{
+				apertureEdges: [],
+				envCellId: 0xda550100,
+				parentPortalStackId: null,
+				portalStackId: "root:0xda550100",
+			},
+			{
+				apertureEdges: ["a-to-b-0", "a-to-b-1"],
+				envCellId: 0xda550101,
+				parentPortalStackId: "root:0xda550100",
+				portalStackId: "root:0xda550100/a-to-b-0",
+			},
+		]);
+	});
+
+	it("keeps distinct parent portal-stack contexts as separate portal view groups", () => {
+		const plan = createPortalTraversalPlan({
+			landblockId: 0xda55ffff,
+			maxCells: 8,
+			maxDepth: 2,
+			maxPortalViews: 16,
+			portalInteriorRecords: [
+				createPortalInteriorRecord({
+					envCellIds: [0xda550100, 0xda550101, 0xda550102, 0xda550103],
+					portalLinks: [
+						createEnvCellPortalLink({
+							linkId: "a-to-b",
+							sourceEnvCellId: 0xda550100,
+							sourceIndex: 0,
+							targetEnvCellId: 0xda550101,
+						}),
+						createEnvCellPortalLink({
+							linkId: "a-to-c",
+							sourceEnvCellId: 0xda550100,
+							sourceIndex: 1,
+							targetEnvCellId: 0xda550102,
+						}),
+						createEnvCellPortalLink({
+							linkId: "b-to-d",
+							sourceEnvCellId: 0xda550101,
+							targetEnvCellId: 0xda550103,
+						}),
+						createEnvCellPortalLink({
+							linkId: "c-to-d",
+							sourceEnvCellId: 0xda550102,
+							targetEnvCellId: 0xda550103,
+						}),
+					],
+				}),
+			],
+			startEnvCellId: 0xda550100,
+		});
+
+		expect(plan.visibleCells.map((cell) => cell.envCellId)).toEqual([
+			0xda550100, 0xda550101, 0xda550102, 0xda550103,
+		]);
+		expect(
+			plan.portalViewGroups
+				.filter((group) => group.envCellId === 0xda550103)
+				.map((group) => ({
+					apertureEdges: group.apertureEdges.map((edge) => edge.linkId),
+					parentPortalStackId: group.parentPortalStackId,
+					portalStackId: group.portalStackId,
+				})),
+		).toEqual([
+			{
+				apertureEdges: ["b-to-d"],
+				parentPortalStackId: "root:0xda550100/a-to-b",
+				portalStackId: "root:0xda550100/a-to-b/b-to-d",
+			},
+			{
+				apertureEdges: ["c-to-d"],
+				parentPortalStackId: "root:0xda550100/a-to-c",
+				portalStackId: "root:0xda550100/a-to-c/c-to-d",
+			},
+		]);
+	});
+
+	it("caps portal view groups separately from unique visible cells", () => {
+		const plan = createPortalTraversalPlan({
+			landblockId: 0xda55ffff,
+			maxCells: 8,
+			maxDepth: 4,
+			maxPortalViews: 2,
+			portalInteriorRecords: [
+				createPortalInteriorRecord({
+					envCellIds: [0xda550100, 0xda550101, 0xda550102],
+					portalLinks: [
+						createEnvCellPortalLink({
+							linkId: "a-to-b",
+							sourceEnvCellId: 0xda550100,
+							sourceIndex: 0,
+							targetEnvCellId: 0xda550101,
+						}),
+						createEnvCellPortalLink({
+							linkId: "a-to-c",
+							sourceEnvCellId: 0xda550100,
+							sourceIndex: 1,
+							targetEnvCellId: 0xda550102,
+						}),
+					],
+				}),
+			],
+			startEnvCellId: 0xda550100,
+		});
+
+		expect(plan.visibleCells.map((cell) => cell.envCellId)).toEqual([
+			0xda550100, 0xda550101,
+		]);
+		expect(plan.portalViewGroups.map((group) => group.envCellId)).toEqual([
+			0xda550100, 0xda550101,
+		]);
+		expect(plan.diagnostics).toContainEqual({
+			edge: expect.objectContaining({ linkId: "a-to-c" }),
+			kind: "portal-view-cap",
+			maxPortalViews: 2,
+		});
+	});
+
 	it("keeps transition scene crossings as metadata until a bridge is explicit", () => {
 		const plan = createPortalTraversalPlan({
 			landblockId: 0xda55ffff,
 			maxCells: 8,
 			maxDepth: 4,
+			maxPortalViews: 16,
 			portalInteriorRecords: [
 				createPortalInteriorRecord({
 					envCellIds: [0xda550100],
@@ -221,9 +384,10 @@ describe("portal traversal planner", () => {
 	it("reports missing start and target cells explicitly", () => {
 		expect(
 			createPortalTraversalPlan({
-				landblockId: 0xda55ffff,
-				maxCells: 8,
-				maxDepth: 4,
+					landblockId: 0xda55ffff,
+					maxCells: 8,
+					maxDepth: 4,
+					maxPortalViews: 16,
 				portalInteriorRecords: [
 					createPortalInteriorRecord({
 						envCellIds: [0xda550100],
@@ -244,6 +408,7 @@ describe("portal traversal planner", () => {
 			landblockId: 0xda55ffff,
 			maxCells: 8,
 			maxDepth: 4,
+			maxPortalViews: 16,
 			portalInteriorRecords: [
 				createPortalInteriorRecord({
 					envCellIds: [0xda550100],

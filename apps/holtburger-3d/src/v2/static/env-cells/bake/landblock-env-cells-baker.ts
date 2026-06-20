@@ -51,7 +51,6 @@ import {
 	isCurrentlyStageableStaticObjectDataUse,
 	isRenderableStaticMaterialPlan,
 } from "../../objects/bake/static-object-renderability";
-import { createEnvCellPortalPolygonIdSet } from "./structured-interior-portal-polygons";
 
 const MAX_STRUCTURED_INTERIOR_MATERIAL_ENTRIES_PER_DRAW = 8;
 
@@ -644,13 +643,9 @@ function createStructuredInteriorTriangleCandidates(options: {
 	readonly geometrySurfaceOmissions: StructuredInteriorGeometrySurfaceOmission[];
 	readonly materialPlan: StructuredInteriorCellMaterialPlan;
 }): readonly StructuredInteriorTriangleCandidate[] {
-	const portalPolygonIds = createEnvCellPortalPolygonIdSet(options.envCell);
 	return options.attachment.triangles
 		.map(
 			(triangle, triangleIndex): StructuredInteriorTriangleCandidate | null => {
-				if (portalPolygonIds.has(triangle.polygonId)) {
-					return null;
-				}
 				if (triangle.surfaceId === null) {
 					return null;
 				}

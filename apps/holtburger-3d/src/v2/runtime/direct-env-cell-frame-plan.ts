@@ -31,7 +31,7 @@ export function createDirectEnvCellFramePlan(
 	if (input.currentCameraResidency.kind !== "env-cell") {
 		return null;
 	}
-	if (input.traversalPlan.visibleCells.length === 0) {
+	if (input.traversalPlan.portalViewGroups.length === 0) {
 		return null;
 	}
 
@@ -53,8 +53,8 @@ export function createDirectEnvCellFramePlan(
 			kind: "env-cell-direct",
 			landblockId: input.currentCameraResidency.landblockId,
 		},
-		directEnvCellDraws: input.traversalPlan.visibleCells.map((cell) =>
-			createDirectEnvCellDrawRequest(cell, membershipsByKey),
+		directEnvCellDraws: input.traversalPlan.portalViewGroups.map((viewGroup) =>
+			createDirectEnvCellDrawRequest(viewGroup, membershipsByKey),
 		),
 		kind: "direct-env-cell",
 		mode: "portal-traversal",
@@ -65,7 +65,10 @@ export function createDirectEnvCellFramePlan(
 }
 
 function createDirectEnvCellDrawRequest(
-	cell: PortalTraversalVisibleCell,
+	cell: Pick<
+		PortalTraversalVisibleCell,
+		"envCellId" | "landblockId" | "portalStackId" | "traversalDepth"
+	>,
 	membershipsByKey: ReadonlyMap<string, RendererEnvCellResourceMembership>,
 ): Extract<
 	PortalFrameWorkPlan,
@@ -96,6 +99,14 @@ function createEnvCellKey(landblockId: number, envCellId: number): string {
 	return `${landblockId >>> 0}:${envCellId >>> 0}`;
 }
 
+function createRootPortalStackId(startEnvCellId: number): string {
+	return `root:${formatHex32(startEnvCellId)}`;
+}
+
+function formatHex32(value: number): string {
+	return `0x${(value >>> 0).toString(16).padStart(8, "0")}`;
+}
+
 function createPortalAperturePlan(options: {
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly renderAnchorLandblockId: number | null;
@@ -109,75 +120,88 @@ function createPortalAperturePlan(options: {
 	const envCellsByKey = createPortalEnvCellsByKey(
 		options.portalInteriorRecords,
 	);
-	const visibleCellsByEnvCellId = new Map(
-		options.traversalPlan.visibleCells.map((cell) => [cell.envCellId, cell]),
+	const viewGroupsByPortalStackId = new Map(
+		options.traversalPlan.portalViewGroups.map((viewGroup) => [
+			viewGroup.portalStackId,
+			viewGroup,
+		]),
 	);
-	const maskableEnvCellIds = new Set<number>([
-		options.traversalPlan.startEnvCellId,
+	const maskablePortalStackIds = new Set<string>([
+		createRootPortalStackId(options.traversalPlan.startEnvCellId),
 	]);
 	const maskPasses: PortalApertureMaskPass[] = [];
 
-	for (const cell of options.traversalPlan.visibleCells) {
-		if (cell.parentEdge === null) {
+	for (const viewGroup of options.traversalPlan.portalViewGroups) {
+		if (viewGroup.parentPortalStackId === null) {
 			continue;
 		}
-		const parentEdge = cell.parentEdge;
-		const sourceCell = visibleCellsByEnvCellId.get(parentEdge.sourceEnvCellId);
-		if (!sourceCell) {
+		if (!maskablePortalStackIds.has(viewGroup.parentPortalStackId)) {
 			continue;
 		}
-		if (!maskableEnvCellIds.has(sourceCell.envCellId)) {
+		const parentViewGroup = viewGroupsByPortalStackId.get(
+			viewGroup.parentPortalStackId,
+		);
+		if (!parentViewGroup) {
 			continue;
 		}
 		const parentStencilRef =
-			sourceCell.traversalDepth === 0 ? null : sourceCell.traversalDepth;
-		const sourceEnvCell = envCellsByKey.get(
-			createEnvCellKey(cell.landblockId, parentEdge.sourceEnvCellId),
-		);
-		const aperture = sourceEnvCell?.portalApertures.find(
-			(candidate) => candidate.portalId === parentEdge.sourcePortalId,
-		);
-		if (!sourceEnvCell || !aperture) {
-			continue;
-		}
-		const vertices = triangulateEnvCellPortalAperture(
-			aperture.points,
-			buildAcPlacementMatrix(sourceEnvCell.localPlacement, AC_UNIT_SCALE),
-			createOutdoorLandblockRootTranslation(
-				cell.landblockId,
-				options.renderAnchorLandblockId,
-			),
-		);
-		if (vertices.length === 0) {
-			continue;
-		}
-		if (cell.traversalDepth > 254) {
+			parentViewGroup.traversalDepth === 0
+				? null
+				: parentViewGroup.traversalDepth;
+		if (viewGroup.traversalDepth > 254) {
 			throw new Error("Direct env-cell portal plan exceeded 254 stencil refs.");
 		}
-		const resource = getOrCreatePortalApertureGeometryResource(
-			vertices,
-			resources,
-			resourcesByKey,
-		);
-		maskableEnvCellIds.add(cell.envCellId);
-		maskPasses.push({
-			apertureResourceId: resource.resourceId,
-			linkId: parentEdge.linkId,
-			parentStencilRef: parentStencilRef ?? null,
-			portalStackId: cell.portalStackId,
-			source: {
-				envCellId: parentEdge.sourceEnvCellId,
-				kind: "env-cell-direct",
-				landblockId: cell.landblockId,
-			},
-			stencilRef: cell.traversalDepth,
-			target: {
-				envCellId: cell.envCellId,
-				kind: "env-cell-direct",
-				landblockId: cell.landblockId,
-			},
-			traversalDepth: cell.traversalDepth,
-		});
+		let emittedMaskPass = false;
+		for (const edge of viewGroup.apertureEdges) {
+			const sourceEnvCell = envCellsByKey.get(
+				createEnvCellKey(viewGroup.landblockId, edge.sourceEnvCellId),
+			);
+			const aperture = sourceEnvCell?.portalApertures.find(
+				(candidate) => candidate.portalId === edge.sourcePortalId,
+			);
+			if (!sourceEnvCell || !aperture) {
+				continue;
+			}
+			const vertices = triangulateEnvCellPortalAperture(
+				aperture.points,
+				buildAcPlacementMatrix(sourceEnvCell.localPlacement, AC_UNIT_SCALE),
+				createOutdoorLandblockRootTranslation(
+					viewGroup.landblockId,
+					options.renderAnchorLandblockId,
+				),
+			);
+			if (vertices.length === 0) {
+				continue;
+			}
+			const resource = getOrCreatePortalApertureGeometryResource(
+				vertices,
+				resources,
+				resourcesByKey,
+			);
+			emittedMaskPass = true;
+			maskPasses.push({
+				apertureResourceId: resource.resourceId,
+				linkId: edge.linkId,
+				parentStencilRef: parentStencilRef ?? null,
+				portalStackId: viewGroup.portalStackId,
+				source: {
+					envCellId: edge.sourceEnvCellId,
+					kind: "env-cell-direct",
+					landblockId: viewGroup.landblockId,
+				},
+				sourcePortalStackId: viewGroup.parentPortalStackId,
+				stencilRef: viewGroup.traversalDepth,
+				target: {
+					envCellId: viewGroup.envCellId,
+					kind: "env-cell-direct",
+					landblockId: viewGroup.landblockId,
+				},
+				traversalDepth: viewGroup.traversalDepth,
+			});
+		}
+		if (emittedMaskPass) {
+			maskablePortalStackIds.add(viewGroup.portalStackId);
+		}
 	}
 
 	return { maskPasses, resources };

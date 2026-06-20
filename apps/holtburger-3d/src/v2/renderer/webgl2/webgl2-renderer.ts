@@ -1109,6 +1109,32 @@ class Webgl2Renderer implements Renderer {
 		plan: Extract<PortalFrameWorkPlan, { readonly kind: "direct-env-cell" }>,
 	): void {
 		const gl = this.#gl;
+		const aspectRatio =
+			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight);
+		if (plan.baseScene.kind === "outdoor-target") {
+			const targets = this.#ensureSceneDomainTargets(
+				gl.drawingBufferWidth,
+				gl.drawingBufferHeight,
+			);
+			this.#lastExteriorSceneDomainDrawCalls = this.#renderSceneDomainTarget(
+				targets.exterior,
+				"exterior",
+				pulse,
+				targets.width / Math.max(1, targets.height),
+			);
+			this.#copySceneDomainColorAndDepthToDisplay(targets.exterior);
+			gl.clearStencil(0);
+			this.#stateCache.setStencilState(
+				createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+			);
+			gl.clear(gl.STENCIL_BUFFER_BIT);
+			this.#lastDirectEnvCellDrawCalls = this.#drawDirectEnvCellResources(
+				plan,
+				aspectRatio,
+			);
+			return;
+		}
+
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 		this.#stateCache.setViewport({
 			height: gl.drawingBufferHeight,
@@ -1124,8 +1150,6 @@ class Webgl2Renderer implements Renderer {
 			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
 		);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
-		const aspectRatio =
-			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight);
 		this.#lastDirectEnvCellDrawCalls = this.#drawDirectEnvCellResources(
 			plan,
 			aspectRatio,
@@ -1397,6 +1421,30 @@ class Webgl2Renderer implements Renderer {
 		});
 	}
 
+	#copySceneDomainColorAndDepthToDisplay(target: SceneDomainTarget): void {
+		const gl = this.#gl;
+		this.#stateCache.bindFramebuffer(null);
+		this.#stateCache.setViewport({
+			height: gl.drawingBufferHeight,
+			width: gl.drawingBufferWidth,
+			x: 0,
+			y: 0,
+		});
+		this.#stateCache.setDepthState({
+			enabled: true,
+			func: gl.ALWAYS,
+			write: true,
+		});
+		this.#stateCache.setBlendState(
+			createBlendState(gl, false, gl.ONE, gl.ZERO),
+		);
+		this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
+		this.#stateCache.setStencilState(
+			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+		);
+		this.#drawSourceSceneCopy(target);
+	}
+
 	#copySceneDomainColorAndDepth(
 		source: SceneDomainTarget,
 		destination: SceneDomainTarget,
@@ -1635,10 +1683,7 @@ class Webgl2Renderer implements Renderer {
 			PortalApertureMaskPass[]
 		>();
 		for (const pass of plan.portalApertureMaskPasses) {
-			if (
-				pass.source.kind !== "env-cell-direct" ||
-				pass.target.kind !== "env-cell-direct"
-			) {
+			if (pass.target.kind !== "env-cell-direct") {
 				continue;
 			}
 			const passes =
@@ -1648,20 +1693,32 @@ class Webgl2Renderer implements Renderer {
 		}
 
 		let drawCalls = 0;
-		for (const rootDraw of plan.directEnvCellDraws.filter(
-			(draw) => draw.traversalDepth === 0,
-		)) {
-			this.#stateCache.setStencilState(
-				createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
-			);
-			drawCalls += this.#drawDirectEnvCellDrawRequest(rootDraw, aspectRatio);
+		if (plan.baseScene.kind === "outdoor-target") {
 			drawCalls += this.#executeDirectEnvCellPortalChildren({
 				apertureResourcesById,
 				aspectRatio,
 				drawsByPortalStackId,
 				maskPassesBySourceStackId,
-				sourcePortalStackId: rootDraw.portalStackId,
+				sourcePortalStackId: createOutdoorRootPortalStackId(
+					plan.baseScene.landblockId,
+				),
 			});
+		} else {
+			for (const rootDraw of plan.directEnvCellDraws.filter(
+				(draw) => draw.traversalDepth === 0,
+			)) {
+				this.#stateCache.setStencilState(
+					createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+				);
+				drawCalls += this.#drawDirectEnvCellDrawRequest(rootDraw, aspectRatio);
+				drawCalls += this.#executeDirectEnvCellPortalChildren({
+					apertureResourcesById,
+					aspectRatio,
+					drawsByPortalStackId,
+					maskPassesBySourceStackId,
+					sourcePortalStackId: rootDraw.portalStackId,
+				});
+			}
 		}
 		this.#stateCache.setStencilState(
 			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
@@ -1692,7 +1749,9 @@ class Webgl2Renderer implements Renderer {
 		let drawCalls = 0;
 		const childPasses =
 			options.maskPassesBySourceStackId.get(options.sourcePortalStackId) ?? [];
-		for (const group of groupPortalApertureMaskPassesByTargetView(childPasses)) {
+		for (const group of groupPortalApertureMaskPassesByTargetView(
+			childPasses,
+		)) {
 			const targetDraw = options.drawsByPortalStackId.get(group.portalStackId);
 			let enteredMaskCount = 0;
 			for (const pass of group.passes) {
@@ -2306,10 +2365,14 @@ class Webgl2Renderer implements Renderer {
 	#createSceneDomainTargetSnapshot(): SceneDomainTargetSnapshot {
 		const directEnvCellFramePlanActive =
 			this.#getEffectiveDirectEnvCellFramePlan() !== null;
+		const directOutdoorTargetFramePlanActive =
+			this.#getEffectiveDirectEnvCellFramePlan()?.baseScene.kind ===
+			"outdoor-target";
 		return {
 			active:
-				!directEnvCellFramePlanActive &&
-				this.#getEffectiveRenderPassPlan().kind === "portal-scene-domains",
+				directOutdoorTargetFramePlanActive ||
+				(!directEnvCellFramePlanActive &&
+					this.#getEffectiveRenderPassPlan().kind === "portal-scene-domains"),
 			apertureBatchDrawCalls: this.#lastCompositeApertureBatchDrawCalls,
 			colorFormat: "rgb8",
 			compositePasses: this.#lastCompositePasses,
@@ -2336,9 +2399,15 @@ class Webgl2Renderer implements Renderer {
 	> | null {
 		if (
 			this.#flatVisionModeEnabled ||
-			this.#portalFrameWorkPlan.kind !== "direct-env-cell" ||
-			this.#portalFrameWorkPlan.baseScene.kind !== "env-cell-direct" ||
-			this.#portalFrameWorkPlan.transitionSceneCrossings.length > 0
+			this.#portalFrameWorkPlan.kind !== "direct-env-cell"
+		) {
+			return null;
+		}
+		if (
+			this.#portalFrameWorkPlan.baseScene.kind === "outdoor-target" &&
+			this.#portalFrameWorkPlan.portalApertureMaskPasses.every(
+				(pass) => pass.source.kind !== "outdoor-target",
+			)
 		) {
 			return null;
 		}
@@ -4519,4 +4588,8 @@ function dotVec3(
 	right: readonly [number, number, number],
 ): number {
 	return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
+}
+
+function createOutdoorRootPortalStackId(landblockId: number): string {
+	return `outdoor-root:0x${(landblockId >>> 0).toString(16).padStart(8, "0")}`;
 }

@@ -93,6 +93,7 @@ function createDirectEnvCellPlan(): PortalFrameWorkPlan {
 		transitionSceneCrossings: [
 			{
 				apertureBatchId: "transition-aperture-batch:f418ffff",
+				aperturePortalId: "transition-portal:f4180103/01",
 				from: { kind: "outdoor", landblockId: 0xf418ffff },
 				landblockId: 0xf418ffff,
 				linkedEnvCellIds: [0xf4180103],

@@ -255,8 +255,6 @@ export type PortalApertureSourceKind =
 	| "env-cell-portal"
 	| "building-transition";
 
-export type PortalApertureCullMode = "none" | "front" | "back";
-
 export interface PortalApertureGeometryResourcePlan {
 	readonly resourceId: string;
 	readonly sourceKinds: readonly PortalApertureSourceKind[];
@@ -275,7 +273,6 @@ export interface PortalApertureFrameDiagnostics {
 export interface PortalApertureMaskPass {
 	readonly apertureResourceId: string;
 	readonly apertureSourceId: string;
-	readonly cullMode: PortalApertureCullMode;
 	readonly linkId: string;
 	readonly parentStencilRef: number | null;
 	readonly portalStackId: string;

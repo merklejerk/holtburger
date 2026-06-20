@@ -1645,17 +1645,15 @@ Implementation notes:
   resource can report whether it is used by env-cell portals, building-transition portals, or both.
 - `PortalApertureMaskPass` now carries selected-edge metadata:
   - `sourceKind`;
-  - `apertureSourceId`;
-  - `cullMode`.
+  - `apertureSourceId`.
   This keeps semantic selected-edge identity separate from deduped geometry identity.
 - The runtime direct frame builder no longer has separate local resource construction paths for
   env-cell portal masks and building transition masks. Both paths call the unified builder.
 - Outdoor transition roots still read `TransitionApertureBatch` as a source/static DTO, but WebGL2
   production direct portal execution consumes only the unified selected aperture resources and mask
   passes from `PortalFrameWorkPlan`.
-- WebGL2 aperture-mask drawing now applies `PortalApertureMaskPass.cullMode`. The planner currently
-  emits `none`, preserving current behavior, but wrong-side transition fixes can now be represented
-  as selected-edge metadata instead of a separate transition compositor.
+- WebGL2 aperture-mask drawing consumes the unified selected aperture resources for both env-cell
+  portals and building-transition portals.
 - Browser `PORTAL FRAME` diagnostics now include aperture category and folding fields:
   - env-cell aperture edges;
   - building-transition aperture edges;
@@ -1672,12 +1670,12 @@ Spicy/debt notes:
   overlay presentation. It should not be treated as a production visibility resource in direct
   portal frames.
 - Exact duplicate mask folding is conservative: it folds only selected masks with the same source
-  kind, source id, source/target view context, cull policy, and canonical geometry. High counts in
-  `0xda55ffff` may still be legitimate distinct portal view contexts or source-authored duplicate
-  transition edges. The new diagnostics should tell us which.
-- `cullMode` exists but is not yet source-derived. If shimmer or wrong-side masks persist, the next
-  correction should decode/build selected-edge cull policy and keep it inside the unified aperture
-  model.
+  kind, source id, source/target view context, and canonical geometry. High counts in `0xda55ffff`
+  may still be legitimate distinct portal view contexts or source-authored duplicate transition
+  edges. The new diagnostics should tell us which.
+- Phase 6A briefly introduced selected-edge cull metadata, but Phase 6B removes it because no source
+  evidence currently proves that culling is the correct explanation for the shimmer. Keeping the
+  field would risk hiding portal-selection bugs.
 
 Validation:
 
@@ -1699,6 +1697,62 @@ Work for mesh:
 - Re-check outdoor `0xda55ffff` with `PORTAL FRAME` visible. Please capture the row values for
   `views`, `masks`, `apertures`, `edges`, `dup`, `dedupe`, `roots`, `resources`, `crossings`, and
   `DIRECT ENV DRAWS`, plus whether the shimmer changed.
+
+### Phase 6B: Transition Portal Correctness Investigation
+
+Status: in progress.
+
+Purpose: prove why outdoor transition portals shimmer before adding nested transition behavior,
+culling policy, or performance work.
+
+Context:
+
+- Manual validation after Phase 6A showed no meaningful shimmer improvement in outdoor
+  `0xda55ffff`.
+- The captured `PORTAL FRAME` diagnostics showed `cells 180`, `views 1302`, `masks 1727`,
+  `apertures 236`, `edges 1122 env / 605 transition`, `dup 0`, `dedupe 1491`, `roots 180`,
+  `resources 180`, `crossings 605`, and `DIRECT ENV DRAWS 2978`.
+- `dup 0` argues against exact duplicate selected-mask spam under the current key. The very high
+  transition edge/root/crossing counts still suggest broad or conflicting transition-root
+  selection, recursive expansion from too many outdoor apertures, depth/composite interaction, or
+  source-authored overlapping transition topology.
+
+Deliverables:
+
+- Remove selected-edge `cullMode` from the production portal frame contract and WebGL2 aperture
+  mask path. If transition selection is wrong, the renderer should expose it rather than hide it
+  behind unproven culling policy.
+- Add transition selection diagnostics that group selected transition roots and crossings by
+  linked env cell, building/aperture source id, canonical aperture geometry resource, source/target
+  scene endpoint, and portal-stack context.
+- Add explicit browser/debug investigation modes for transition correctness, not production:
+  single transition root, single aperture source, transition roots without descendant env-cell
+  recursion, and transition apertures without direct env-cell draw. These should be clearly named as
+  diagnostic scopes.
+- Use the debug harness when needed to inspect `0xda55ffff` building transition aperture source
+  facts, linked env-cell ids, duplicate canonical aperture geometry, and portal relationship
+  topology.
+- Separate portal-selection conflicts from depth/composite conflicts by inspecting narrowed cases
+  with outdoor base color/depth copy behavior and direct env-cell drawing controlled independently.
+- Record the first source-backed correction before changing transition root selection policy.
+
+Acceptance criteria:
+
+- The active frame contract has no `cullMode` field or equivalent always-off placeholder.
+- Browser diagnostics can explain why `0xda55ffff` produces hundreds of transition crossings and
+  whether those crossings are source-authored, duplicated by grouping, or selected too broadly.
+- A narrowed reproduction identifies whether shimmer starts at outdoor-to-indoor aperture masking,
+  descendant env-cell recursion, overlapping/conflicting transition roots, or outdoor depth/color
+  compositing.
+- Any transition root-selection fix is justified by source facts or narrowed renderer evidence, not
+  by frame-time reduction alone.
+
+Implementation notes:
+
+- Removed `cullMode` from `PortalApertureMaskPass`, `PortalApertureMaskPassInput`, frame-plan
+  equality, runtime aperture construction, WebGL2 aperture-mask state, and affected fixtures.
+  Direct aperture masks now render with culling disabled while the investigation focuses on selected
+  portal edges and compositor/depth behavior.
 
 ### Phase 6R: Reassessment After Transition Unification
 

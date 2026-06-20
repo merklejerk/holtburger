@@ -156,7 +156,6 @@ export function createOutdoorTransitionPortalFramePlan(
 					apertureBatchId: range.batch.apertureBatchId,
 					portalId: range.range.portalId,
 				}),
-				cullMode: "none",
 				linkId: createOutdoorTransitionLinkId({
 					apertureBatchId: range.batch.apertureBatchId,
 					envCellId: root.envCellId,
@@ -371,7 +370,6 @@ function createPortalAperturePlan(options: {
 						landblockId: viewGroup.landblockId,
 						portalId: edge.sourcePortalId,
 					}),
-					cullMode: "none",
 					linkId: edge.linkId,
 					parentStencilRef: parentStencilRef ?? null,
 					portalStackId: viewGroup.portalStackId,
@@ -453,7 +451,6 @@ function appendTransitionRootTraversal(options: {
 		}
 		options.apertureBuilder.addMaskPass({
 			apertureSourceId: pass.apertureSourceId,
-			cullMode: pass.cullMode,
 			linkId: pass.linkId,
 			parentStencilRef:
 				pass.parentStencilRef === null ? 1 : pass.parentStencilRef + 1,

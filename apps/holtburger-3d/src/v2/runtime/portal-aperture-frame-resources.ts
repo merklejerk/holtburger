@@ -1,5 +1,4 @@
 import type {
-	PortalApertureCullMode,
 	PortalApertureFrameDiagnostics,
 	PortalApertureGeometryResourcePlan,
 	PortalApertureMaskPass,
@@ -16,7 +15,6 @@ export interface PortalApertureFrameResourcePlan {
 
 export interface PortalApertureMaskPassInput {
 	readonly apertureSourceId: string;
-	readonly cullMode: PortalApertureCullMode;
 	readonly linkId: string;
 	readonly parentStencilRef: number | null;
 	readonly portalStackId: string;
@@ -61,7 +59,6 @@ export class PortalApertureFrameResourceBuilder {
 		this.#maskPasses.push({
 			apertureResourceId: resource.resourceId,
 			apertureSourceId: input.apertureSourceId,
-			cullMode: input.cullMode,
 			linkId: input.linkId,
 			parentStencilRef: input.parentStencilRef,
 			portalStackId: input.portalStackId,
@@ -171,7 +168,6 @@ function createPortalApertureMaskPassKey(
 		input.traversalDepth,
 		describePortalFrameSceneSource(input.source),
 		describePortalFrameSceneSource(input.target),
-		input.cullMode,
 		geometryKey,
 	].join("|");
 }

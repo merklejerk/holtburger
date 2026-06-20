@@ -2032,6 +2032,16 @@ Failed to close:
 - I did not remove `portalStackId` from `PortalTraversalPlan`; that requires a traversal-planner
   contract pass and should not be mixed into this renderer execution rewrite.
 
+Blocking correction:
+
+- Follow-up profiling and code audit showed a broader pipeline issue than 6B.1 identity cleanup:
+  renderer snapshots are still broad data-plane objects emitted from the frame loop, runtime planning
+  still depends on renderer snapshot contents, direct portal masks still carry/reupload aperture
+  vertices dynamically, and static traversal graphs are still not cached by committed-record
+  revisions. Do not proceed with later portal-renderer correctness phases until
+  [holtburger-3d-v2-render-pipeline-correction-plan.md](holtburger-3d-v2-render-pipeline-correction-plan.md)
+  is addressed or explicitly superseded.
+
 Debt to track:
 
 - Replace traversal planner stack strings with typed traversal parent/edge references so the graph

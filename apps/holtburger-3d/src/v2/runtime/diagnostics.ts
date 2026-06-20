@@ -43,15 +43,9 @@ interface RuntimeDiagnosticsRuntimeSummary {
 	readonly portalFrameWorkPlan: PortalFrameWorkPlan;
 	readonly pendingStaticMaterializationRevisions: readonly number[];
 	readonly committedStaticMaterializationRevisions: readonly number[];
-	readonly failedStaticMaterializations: readonly RuntimeDiagnosticsFailure[];
 	readonly envCellResourceMembershipRevision: number;
 	readonly sourceStaticDrawUnits: number;
 	readonly materializedStaticDrawUnits: number;
-}
-
-interface RuntimeDiagnosticsFailure {
-	readonly revision: number;
-	readonly message: string;
 }
 
 type RuntimeDiagnosticsDomainReport =
@@ -69,7 +63,6 @@ export interface AssetServiceDiagnosticsReport {
 
 interface AssetServiceDiagnosticsSnapshot {
 	readonly pending: AssetServiceSnapshot["pending"];
-	readonly failures: AssetServiceSnapshot["failures"];
 }
 
 interface AssetServiceDiagnosticsSummary {
@@ -78,7 +71,6 @@ interface AssetServiceDiagnosticsSummary {
 	readonly committed: number;
 	readonly leased: number;
 	readonly warmRetained: number;
-	readonly failures: number;
 }
 
 interface RendererDiagnosticsReport {
@@ -107,7 +99,6 @@ interface StaticCoordinatorDiagnosticsSummary {
 	readonly latestTerrainPayload: string | null;
 	readonly latestOutdoorStaticObjectsPayload: string | null;
 	readonly latestLandblockEnvCellsPayload: string | null;
-	readonly latestResolverFailure: string | null;
 }
 
 interface StaticCoordinatorWorkDiagnostics {
@@ -116,7 +107,6 @@ interface StaticCoordinatorWorkDiagnostics {
 	readonly domain: StaticDomain;
 	readonly scopeKey: string;
 	readonly status: "requested" | "resolving" | "baking" | "failed";
-	readonly failureMessage: string | null;
 }
 
 interface StaticMaterialCoverageDiagnostics {
@@ -248,20 +238,10 @@ export interface StaticObjectRolePageOverflowDiagnostics {
 }
 
 type RuntimeWarningEvent =
-	| StaticResolverFailedWarning
 	| StaticMaterializationFailedWarning
 	| StaticMaterialCoverageDeferredWarning
 	| TerrainRenderableFallbackWarning
 	| StaticDebugSelectionUnresolvedWarning;
-
-interface StaticResolverFailedWarning {
-	readonly kind: "static-resolver-failed";
-	readonly revision: number;
-	readonly workId: string;
-	readonly domain: StaticDomain;
-	readonly scopeKey: string;
-	readonly message: string;
-}
 
 interface StaticMaterializationFailedWarning {
 	readonly kind: "static-materialization-failed";
@@ -303,12 +283,10 @@ export function createAssetServiceDiagnosticsReport(
 	return {
 		kind: "asset-service",
 		snapshot: {
-			failures: snapshot.failures,
 			pending: snapshot.pending,
 		},
 		summary: {
 			committed: snapshot.committed.length,
-			failures: snapshot.failures.length,
 			leased: snapshot.committed.filter((entry) => entry.leaseCount > 0).length,
 			pending: snapshot.pending.length,
 			pendingWaiters: snapshot.pending.reduce(
@@ -329,17 +307,8 @@ class ConsoleRuntimeDiagnostics implements RuntimeDiagnostics {
 
 	warn(event: RuntimeWarningEvent): void {
 		switch (event.kind) {
-			case "static-resolver-failed":
-				console.error(
-					`V2 static resolver work ${event.workId} failed; static content for ${event.scopeKey}/${event.domain} was not resolved.`,
-					{
-						message: event.message,
-						revision: event.revision,
-					},
-				);
-				return;
 			case "static-materialization-failed":
-				console.warn(
+				console.error(
 					`V2 static materialization revision ${event.revision} failed; draw units from this commit were not added to renderer residency.`,
 					event.error,
 				);

@@ -45,7 +45,6 @@ export interface AssetService extends PreparedAssetReader {
 export interface AssetServiceSnapshot {
 	readonly pending: readonly PendingAssetSnapshot[];
 	readonly committed: readonly CommittedAssetSnapshot[];
-	readonly failures: readonly FailedAssetSnapshot[];
 }
 
 interface PendingAssetSnapshot {
@@ -60,10 +59,4 @@ interface CommittedAssetSnapshot {
 	readonly leaseCount: number;
 	readonly warmRetainedUntilMs: number | null;
 	readonly sourceAssetId: string;
-}
-
-export interface FailedAssetSnapshot {
-	readonly key: HostAssetKey;
-	readonly revision: number;
-	readonly message: string;
 }

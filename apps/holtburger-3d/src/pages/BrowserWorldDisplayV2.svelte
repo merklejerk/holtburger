@@ -561,8 +561,6 @@
 		focus: PendingCameraFocus,
 	): void {
 		console.warn("[holtburger-3d][v2][camera-focus-failed]", {
-			failedMaterializations: event.failedMaterializations,
-			failedWork: event.failedWork,
 			focus,
 			interest: event.interest,
 			result: event.result,
@@ -1716,12 +1714,6 @@
 							<dd>{snapshot?.status ?? "starting"}</dd>
 						</div>
 						<div>
-							<dt>Resolver failure</dt>
-							<dd>
-								{snapshot?.static.latestResolverFailure?.message ?? "none"}
-							</dd>
-						</div>
-						<div>
 							<dt>Scene query</dt>
 							<dd>
 								{#if snapshot}
@@ -1760,7 +1752,7 @@
 							<dd>
 								{#if snapshot}
 									p{snapshot.assets.pending.length} c{snapshot.assets.committed
-										.length} f{snapshot.assets.failures.length}
+										.length}
 								{:else}
 									pending
 								{/if}

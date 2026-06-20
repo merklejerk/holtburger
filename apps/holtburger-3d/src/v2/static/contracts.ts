@@ -1373,7 +1373,6 @@ export interface StaticCoordinatorSnapshot {
 	readonly latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null;
 	readonly latestLandblockEnvCellsPayload: LandblockEnvCellsPayloadSummary | null;
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
-	readonly latestResolverFailure: StaticResolverFailureSnapshot | null;
 }
 
 export interface StaticCoordinatorCommitDelta {
@@ -1457,7 +1456,6 @@ export interface ScheduledStaticWorkStatus {
 		| "baking"
 		| "committed"
 		| "failed";
-	readonly failureMessage: string | null;
 }
 
 export interface LandblockEnvCellsPayloadSummary {
@@ -1497,11 +1495,3 @@ export interface OutdoorStaticObjectsPayloadSummary {
 type StaticObjectKindCounts = {
 	readonly [K in StaticObjectInstanceIdentity["objectKind"]]: number;
 };
-
-export interface StaticResolverFailureSnapshot {
-	readonly workId: string;
-	readonly revision: number;
-	readonly domain: StaticDomain;
-	readonly scopeKey: string;
-	readonly message: string;
-}

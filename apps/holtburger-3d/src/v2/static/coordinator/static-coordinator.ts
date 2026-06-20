@@ -14,7 +14,6 @@ import type {
 	StaticMaterialCoverageReport,
 	LandblockEnvCellsPayloadSummary,
 	OutdoorStaticObjectsPayloadSummary,
-	StaticResolverFailureSnapshot,
 	StaticResolver,
 	StaticPeerRecordOwner,
 	StaticResourceKey,
@@ -95,8 +94,6 @@ export class StaticCoordinator {
 		string,
 		StaticMaterialCoverageReport
 	>();
-	#latestResolverFailure: StaticResolverFailureSnapshot | null = null;
-
 	constructor(options: StaticCoordinatorOptions) {
 		this.#resolver = options.resolver;
 		this.#baker = options.baker;
@@ -149,12 +146,11 @@ export class StaticCoordinator {
 			if (existing) {
 				this.#activeWork.delete(existing.workId);
 			}
-			this.#activeWork.set(work.workId, {
-				desiredKey,
-				domain: work.job.domain,
-				failureMessage: null,
-				workId: work.workId,
-				revision: work.revision,
+				this.#activeWork.set(work.workId, {
+					desiredKey,
+					domain: work.job.domain,
+					workId: work.workId,
+					revision: work.revision,
 				scopeKey: describeStaticScopeKey(work.job.scope),
 				status: "requested",
 				work,
@@ -228,7 +224,6 @@ export class StaticCoordinator {
 			).sort(compareMaterialCoverageReports),
 			latestOutdoorStaticObjectsPayload:
 				this.#latestOutdoorStaticObjectsPayload,
-			latestResolverFailure: this.#latestResolverFailure,
 			latestTerrainPayload: this.#latestTerrainPayload,
 			requested: activeWork.length,
 			resolving: countStatus(activeWork, "resolving"),
@@ -534,15 +529,14 @@ export class StaticCoordinator {
 
 		if (status) {
 			status.status = "failed";
-			status.failureMessage = message;
 			this.#failed += 1;
-			this.#latestResolverFailure = {
-				domain: work.job.domain,
-				message,
-				workId: work.workId,
-				revision: work.revision,
-				scopeKey: describeStaticScopeKey(work.job.scope),
-			};
+			console.error(
+				`V2 static resolver work ${work.workId} failed; static content for ${describeStaticScopeKey(work.job.scope)}/${work.job.domain} was not resolved.`,
+				{
+					message,
+					revision: work.revision,
+				},
+			);
 			this.#emit();
 		}
 	}
@@ -593,8 +587,6 @@ export class StaticCoordinator {
 				visibleCellCount: countDistinctVisibleEnvCells(payload.scope.envCells),
 			};
 		}
-
-		this.#latestResolverFailure = null;
 		this.#emit();
 	}
 
@@ -854,7 +846,6 @@ function toScheduledStaticWorkStatus(
 ): ScheduledStaticWorkStatus {
 	return {
 		domain: status.domain,
-		failureMessage: status.failureMessage,
 		revision: status.revision,
 		scopeKey: status.scopeKey,
 		status: status.status,

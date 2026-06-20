@@ -21,7 +21,6 @@ describe("V2 host-backed asset service lifecycle", () => {
 		expect(host.lookupCount).toBe(1);
 		expect(service.createSnapshot()).toEqual({
 			committed: [],
-			failures: [],
 			pending: [
 				{
 					key,
@@ -86,7 +85,7 @@ describe("V2 host-backed asset service lifecycle", () => {
 		expect(service.createSnapshot().committed).toEqual([]);
 	});
 
-	it("records failures and clears them after a successful retry", async () => {
+	it("drops failed requests and retries with a new revision", async () => {
 		const key: HostAssetKey = { id: "06000001", kind: "render-surface" };
 		let shouldFail = true;
 		const service = new HostBackedAssetService({
@@ -102,17 +101,11 @@ describe("V2 host-backed asset service lifecycle", () => {
 		await expect(service.requestPreparedAsset(key)).rejects.toThrow(
 			"host said nope",
 		);
-		expect(service.createSnapshot().failures).toEqual([
-			{
-				key,
-				message: "host said nope",
-				revision: 1,
-			},
-		]);
+		expect(service.createSnapshot().pending).toEqual([]);
+		expect(service.createSnapshot().committed).toEqual([]);
 
 		shouldFail = false;
 		await service.requestPreparedAsset(key);
-		expect(service.createSnapshot().failures).toEqual([]);
 		expect(service.createSnapshot().committed[0]?.revision).toBe(2);
 	});
 });

@@ -473,6 +473,8 @@ Failed to close in Phase 2:
 
 ### Phase 3: Drop Diagnostic-Only Failure State
 
+Status: implemented on 2026-06-20.
+
 Deliverables:
 
 - Remove `AssetServiceSnapshot.failures` and the backing retained asset failure map unless a specific failure entry is needed for lifecycle correctness.
@@ -486,6 +488,33 @@ Acceptance criteria:
 - Failed work is dropped after it has unblocked lifecycle state.
 - No planner, runtime snapshot, or diagnostics report depends on retained failure arrays.
 - Tests assert dropped failed work and console/error behavior, not durable failure snapshots.
+
+Implementation update:
+
+- Removed `AssetServiceSnapshot.failures` and the backing retained asset failure map.
+- Removed `StaticCoordinatorSnapshot.latestResolverFailure`, `ScheduledStaticWorkStatus.failureMessage`, and `StaticResolverFailureSnapshot`.
+- Static resolver/bake failures now log immediately at the coordinator failure boundary and retain only failed status/count for lifecycle.
+- Removed runtime retained static-materialization failure DTOs from snapshots, diagnostics reports, and `scene-interest-settled` events.
+- Runtime now keeps only a private failed materialization revision set so active scene-interest settlement can still return `result: "failed"` when materialization failed after static work committed.
+- Browser V2 no longer displays retained resolver failure messages or asset failure counts.
+- Tests now assert dropped failed work, failed status/counts, console error behavior, and absence of retained failure messages.
+
+Validation:
+
+- `npm run test:ts -- src/v2/assets/asset-service.test.ts src/v2/static/coordinator/static-coordinator.test.ts src/v2/runtime/client-runtime.test.ts src/v2/textures/texture-manager.test.ts src/v2/static/terrain/terrain-resolver.test.ts src/v2/static/objects/outdoor-static-objects-resolver.test.ts src/v2/static/env-cells/landblock-env-cells-resolver.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Spicy notes:
+
+- Static coordinator logs resolver/bake failures directly with `console.error(...)` instead of routing those through runtime diagnostics, because the retained snapshot bridge was the thing being deleted.
+- Runtime still uses a private failed materialization revision set. That is lifecycle state, not diagnostic state; without it, a scene whose texture/materialization failed after static commit would incorrectly settle as ready.
+
+Failed to close in Phase 3:
+
+- Static failed counts are still durable aggregate counters. They are useful lifecycle/summary state, but they are not reset per scene-interest and may eventually want clearer naming.
+- Browser still gets broad asset/static snapshots for general status display. Failure DTOs are gone, but the larger snapshot cleanup remains a later diagnostics-query phase.
 
 ### Phase 4: Bake Traversal-Ready Portal Structures
 

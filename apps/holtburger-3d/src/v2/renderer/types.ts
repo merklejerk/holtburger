@@ -211,6 +211,8 @@ export type PortalFrameWorkPlan =
 			readonly mode: "portal-traversal" | "portal-debug";
 			readonly baseScene: PortalFrameBaseScenePlan;
 			readonly directEnvCellDraws: readonly PortalDirectEnvCellDrawRequest[];
+			readonly portalApertureGeometryResources: readonly PortalApertureGeometryResourcePlan[];
+			readonly portalApertureMaskPasses: readonly PortalApertureMaskPass[];
 			readonly transitionSceneCrossings: readonly PortalTransitionSceneCrossing[];
 	  };
 
@@ -233,6 +235,35 @@ export interface PortalDirectEnvCellDrawRequest {
 	readonly structuredInteriorDrawUnitIds: readonly string[];
 	readonly envCellStaticObjectDrawUnitIds: readonly string[];
 	readonly resourceState: "ready" | "missing-resources";
+}
+
+export type PortalFrameSceneSource =
+	| {
+			readonly kind: "env-cell-direct";
+			readonly landblockId: number;
+			readonly envCellId: number;
+	  }
+	| {
+			readonly kind: "outdoor-target";
+			readonly landblockId: number;
+	  };
+
+export type PortalApertureVertex = readonly [number, number, number];
+
+export interface PortalApertureGeometryResourcePlan {
+	readonly resourceId: string;
+	readonly vertices: readonly PortalApertureVertex[];
+}
+
+export interface PortalApertureMaskPass {
+	readonly apertureResourceId: string;
+	readonly linkId: string;
+	readonly parentStencilRef: number | null;
+	readonly portalStackId: string;
+	readonly source: PortalFrameSceneSource;
+	readonly stencilRef: number;
+	readonly target: PortalFrameSceneSource;
+	readonly traversalDepth: number;
 }
 
 export interface PortalTransitionSceneCrossing {

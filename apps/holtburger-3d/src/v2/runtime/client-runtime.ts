@@ -83,8 +83,9 @@ const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
 const BLENDED_STATIC_AUDIT_WARNING_BUCKET_LIMIT = 8;
 const DEFAULT_ASSET_MAINTENANCE_INTERVAL_MS = 5_000;
 const DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 4;
-const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 1;
-const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS = 8;
+const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 2;
+const MAX_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 16;
+const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS = 128;
 
 export type ManualStaticDomain =
 	| "terrain"
@@ -419,6 +420,7 @@ export interface ClientRuntime {
 	setStaticDebugSelection(selectionKey: StaticSceneSelectionKey | null): void;
 	setEnvCellAabbDebugOverlayVisible(visible: boolean): void;
 	setEnvCellPortalDebugOverlayVisible(visible: boolean): void;
+	setDirectEnvCellPortalMaxDepth(maxDepth: number): void;
 	setFlatVisionModeEnabled(enabled: boolean): void;
 	setTransitionApertureDebugOverlayMode(
 		mode: TransitionApertureDebugOverlayMode,
@@ -510,6 +512,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#envCellAabbDebugOverlayVisible = false;
 	#envCellPortalDebugOverlayVisible = false;
 	#flatVisionModeEnabled = false;
+	#directEnvCellPortalMaxDepth = DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH;
 	#transitionApertureDebugOverlayVisible = false;
 	#transitionApertureDebugOverlayMode: TransitionApertureDebugOverlayMode =
 		"both";
@@ -742,6 +745,19 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#emit();
 	}
 
+	setDirectEnvCellPortalMaxDepth(maxDepth: number): void {
+		this.#assertActive();
+		const normalizedMaxDepth = normalizeDirectEnvCellPortalMaxDepth(maxDepth);
+		if (this.#directEnvCellPortalMaxDepth === normalizedMaxDepth) {
+			return;
+		}
+		this.#directEnvCellPortalMaxDepth = normalizedMaxDepth;
+		const renderPassPlanChanged = this.#updateRenderPassPlan();
+		if (!renderPassPlanChanged) {
+			this.#emit();
+		}
+	}
+
 	setFlatVisionModeEnabled(enabled: boolean): void {
 		this.#assertActive();
 		if (this.#flatVisionModeEnabled === enabled) {
@@ -934,12 +950,17 @@ class ClientRuntimeImpl implements ClientRuntime {
 		) {
 			const directPlan = createDirectEnvCellFramePlan({
 				currentCameraResidency: this.#currentCameraResidency,
+				portalInteriorRecords:
+					this.#staticSceneQuery.queryPortalInteriorRecords({
+						landblockId: this.#currentCameraResidency.landblockId,
+					}),
+				renderAnchorLandblockId: this.#renderAnchorLandblockId,
 				rendererEnvCellResourceMembership:
 					this.#lastRendererSnapshot.envCellResourceMembership,
 				traversalPlan: this.#staticSceneQuery.queryPortalTraversal({
 					landblockId: this.#currentCameraResidency.landblockId,
 					maxCells: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
-					maxDepth: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH,
+					maxDepth: this.#directEnvCellPortalMaxDepth,
 					startEnvCellId: this.#currentCameraResidency.envCellId,
 				}),
 			});
@@ -2777,6 +2798,16 @@ function createStaticCoordinatorWorkDiagnostics(
 
 function formatHex(value: number): string {
 	return `0x${value.toString(16).padStart(8, "0")}`;
+}
+
+function normalizeDirectEnvCellPortalMaxDepth(maxDepth: number): number {
+	if (!Number.isFinite(maxDepth)) {
+		return DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH;
+	}
+	return Math.min(
+		MAX_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH,
+		Math.max(0, Math.trunc(maxDepth)),
+	);
 }
 
 function createStaticDemandFromSceneInterest(

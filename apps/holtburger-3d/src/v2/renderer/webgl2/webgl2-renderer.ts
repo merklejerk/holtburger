@@ -5,6 +5,8 @@ import type {
 	RendererSnapshot,
 	RendererSnapshotListener,
 	RenderPassPlan,
+	PortalApertureGeometryResourcePlan,
+	PortalApertureMaskPass,
 	PortalFrameWorkPlan,
 	SceneDomainTargetKind,
 	SceneDomainTargetSnapshot,
@@ -92,6 +94,7 @@ const STATIC_OBJECT_DETAIL_TEXTURE_UNIT_BASE =
 const SOURCE_SCENE_COPY_COLOR_TEXTURE_UNIT = 0;
 const SOURCE_SCENE_COPY_DEPTH_TEXTURE_UNIT = 1;
 const DEBUG_OVERLAY_FLOATS_PER_VERTEX = 7;
+const PORTAL_APERTURE_FLOATS_PER_VERTEX = 3;
 // Visual-quality/perf tradeoff: sort only transparent statics close enough for
 // object-order artifacts to be obvious.
 const NEAR_TRANSPARENT_STATIC_SORT_DISTANCE = 16;
@@ -679,7 +682,7 @@ export function createWebgl2Renderer(canvas: HTMLCanvasElement): Renderer {
 		alpha: false,
 		antialias: false,
 		depth: true,
-		stencil: false,
+		stencil: true,
 	});
 
 	if (!gl) {
@@ -726,6 +729,8 @@ class Webgl2Renderer implements Renderer {
 	readonly #transitionCompositeProgram: TransitionApertureCompositeProgram;
 	readonly #sourceSceneCopyProgram: SourceSceneCopyProgram;
 	readonly #sourceSceneCopyVertexArray: WebGLVertexArrayObject;
+	readonly #portalApertureVertexArray: WebGLVertexArrayObject;
+	readonly #portalApertureVertexBuffer: WebGLBuffer;
 	readonly #debugOverlayVertexArray: WebGLVertexArrayObject;
 	readonly #debugOverlayVertexBuffer: WebGLBuffer;
 	readonly #stateCache: Webgl2StateCache;
@@ -773,14 +778,25 @@ class Webgl2Renderer implements Renderer {
 		this.#sourceSceneCopyProgram = createSourceSceneCopyProgram(gl);
 		this.#stateCache = new Webgl2StateCache(gl);
 		const sourceSceneCopyVertexArray = gl.createVertexArray();
+		const portalApertureVertexArray = gl.createVertexArray();
+		const portalApertureVertexBuffer = gl.createBuffer();
 		const vertexArray = gl.createVertexArray();
 		const vertexBuffer = gl.createBuffer();
-		if (!sourceSceneCopyVertexArray || !vertexArray || !vertexBuffer) {
-			throw new Error("Failed to create V2 debug overlay resources.");
+		if (
+			!sourceSceneCopyVertexArray ||
+			!portalApertureVertexArray ||
+			!portalApertureVertexBuffer ||
+			!vertexArray ||
+			!vertexBuffer
+		) {
+			throw new Error("Failed to create V2 renderer scratch resources.");
 		}
 		this.#sourceSceneCopyVertexArray = sourceSceneCopyVertexArray;
+		this.#portalApertureVertexArray = portalApertureVertexArray;
+		this.#portalApertureVertexBuffer = portalApertureVertexBuffer;
 		this.#debugOverlayVertexArray = vertexArray;
 		this.#debugOverlayVertexBuffer = vertexBuffer;
+		this.#configurePortalApertureVertexArray();
 		this.#configureDebugOverlayVertexArray();
 		this.#startFrameLoop();
 	}
@@ -1009,7 +1025,9 @@ class Webgl2Renderer implements Renderer {
 		this.#sourceSceneCopyProgram.dispose();
 		this.#sceneDomainTargets?.dispose();
 		this.#sceneDomainTargets = null;
+		this.#gl.deleteBuffer(this.#portalApertureVertexBuffer);
 		this.#gl.deleteBuffer(this.#debugOverlayVertexBuffer);
+		this.#gl.deleteVertexArray(this.#portalApertureVertexArray);
 		this.#gl.deleteVertexArray(this.#debugOverlayVertexArray);
 		this.#gl.deleteVertexArray(this.#sourceSceneCopyVertexArray);
 		this.#listeners.clear();
@@ -1101,7 +1119,11 @@ class Webgl2Renderer implements Renderer {
 		this.#stateCache.setDepthState(createDepthState(gl, true, true));
 		gl.clearColor(0.025 + pulse * 0.015, 0.045, 0.065 + pulse * 0.025, 1);
 		gl.clearDepth(1);
-		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+		gl.clearStencil(0);
+		this.#stateCache.setStencilState(
+			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+		);
+		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
 		const aspectRatio =
 			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight);
 		this.#lastDirectEnvCellDrawCalls = this.#drawDirectEnvCellResources(
@@ -1598,32 +1620,149 @@ class Webgl2Renderer implements Renderer {
 		plan: Extract<PortalFrameWorkPlan, { readonly kind: "direct-env-cell" }>,
 		aspectRatio: number,
 	): number {
+		const gl = this.#gl;
+		const apertureResourcesById = new Map(
+			plan.portalApertureGeometryResources.map((resource) => [
+				resource.resourceId,
+				resource,
+			]),
+		);
+		const drawsByEnvCellKey = new Map(
+			plan.directEnvCellDraws.map((draw) => [
+				createEnvCellResourceKey(draw.landblockId, draw.envCellId),
+				draw,
+			]),
+		);
+		const maskPassesBySourceKey = new Map<string, PortalApertureMaskPass[]>();
+		for (const pass of plan.portalApertureMaskPasses) {
+			if (
+				pass.source.kind !== "env-cell-direct" ||
+				pass.target.kind !== "env-cell-direct"
+			) {
+				continue;
+			}
+			const sourceKey = createEnvCellResourceKey(
+				pass.source.landblockId,
+				pass.source.envCellId,
+			);
+			const passes = maskPassesBySourceKey.get(sourceKey) ?? [];
+			passes.push(pass);
+			maskPassesBySourceKey.set(sourceKey, passes);
+		}
+
+		let drawCalls = 0;
+		for (const rootDraw of plan.directEnvCellDraws.filter(
+			(draw) => draw.traversalDepth === 0,
+		)) {
+			this.#stateCache.setStencilState(
+				createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+			);
+			drawCalls += this.#drawDirectEnvCellDrawRequest(rootDraw, aspectRatio);
+			drawCalls += this.#executeDirectEnvCellPortalChildren({
+				apertureResourcesById,
+				aspectRatio,
+				drawsByEnvCellKey,
+				maskPassesBySourceKey,
+				sourceEnvCellKey: createEnvCellResourceKey(
+					rootDraw.landblockId,
+					rootDraw.envCellId,
+				),
+			});
+		}
+		this.#stateCache.setStencilState(
+			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+		);
+		this.#stateCache.bindVertexArray(null);
+		return drawCalls;
+	}
+
+	#executeDirectEnvCellPortalChildren(options: {
+		readonly apertureResourcesById: ReadonlyMap<
+			string,
+			PortalApertureGeometryResourcePlan
+		>;
+		readonly aspectRatio: number;
+		readonly drawsByEnvCellKey: ReadonlyMap<
+			string,
+			Extract<
+				PortalFrameWorkPlan,
+				{ readonly kind: "direct-env-cell" }
+			>["directEnvCellDraws"][number]
+		>;
+		readonly maskPassesBySourceKey: ReadonlyMap<
+			string,
+			readonly PortalApertureMaskPass[]
+		>;
+		readonly sourceEnvCellKey: string;
+	}): number {
+		let drawCalls = 0;
+		const childPasses =
+			options.maskPassesBySourceKey.get(options.sourceEnvCellKey) ?? [];
+		for (const pass of childPasses) {
+			if (pass.target.kind !== "env-cell-direct") {
+				continue;
+			}
+			const apertureResource = options.apertureResourcesById.get(
+				pass.apertureResourceId,
+			);
+			if (!apertureResource) {
+				continue;
+			}
+			const targetKey = createEnvCellResourceKey(
+				pass.target.landblockId,
+				pass.target.envCellId,
+			);
+			const targetDraw = options.drawsByEnvCellKey.get(targetKey);
+			this.#drawPortalApertureStencilMask("enter", pass, apertureResource, {
+				aspectRatio: options.aspectRatio,
+			});
+			this.#stateCache.setStencilState(
+				createStencilState(
+					this.#gl,
+					true,
+					0x00,
+					this.#gl.EQUAL,
+					pass.stencilRef,
+					this.#gl.KEEP,
+				),
+			);
+			if (targetDraw) {
+				drawCalls += this.#drawDirectEnvCellDrawRequest(
+					targetDraw,
+					options.aspectRatio,
+				);
+			}
+			drawCalls += this.#executeDirectEnvCellPortalChildren({
+				...options,
+				sourceEnvCellKey: targetKey,
+			});
+			this.#drawPortalApertureStencilMask("exit", pass, apertureResource, {
+				aspectRatio: options.aspectRatio,
+			});
+		}
+		return drawCalls;
+	}
+
+	#drawDirectEnvCellDrawRequest(
+		draw: Extract<
+			PortalFrameWorkPlan,
+			{ readonly kind: "direct-env-cell" }
+		>["directEnvCellDraws"][number],
+		aspectRatio: number,
+	): number {
 		const staticObjectResources: StaticObjectGeometryResource[] = [];
 		const structuredInteriorResources: StructuredInteriorGeometryResource[] =
 			[];
-		const seenStaticDrawUnitIds = new Set<string>();
-		const seenStructuredDrawUnitIds = new Set<string>();
-
-		for (const draw of plan.directEnvCellDraws) {
-			for (const drawUnitId of draw.envCellStaticObjectDrawUnitIds) {
-				if (seenStaticDrawUnitIds.has(drawUnitId)) {
-					continue;
-				}
-				seenStaticDrawUnitIds.add(drawUnitId);
-				const resource = this.#staticObjectResources.get(drawUnitId);
-				if (resource) {
-					staticObjectResources.push(resource);
-				}
+		for (const drawUnitId of draw.envCellStaticObjectDrawUnitIds) {
+			const resource = this.#staticObjectResources.get(drawUnitId);
+			if (resource) {
+				staticObjectResources.push(resource);
 			}
-			for (const drawUnitId of draw.structuredInteriorDrawUnitIds) {
-				if (seenStructuredDrawUnitIds.has(drawUnitId)) {
-					continue;
-				}
-				seenStructuredDrawUnitIds.add(drawUnitId);
-				const resource = this.#structuredInteriorResources.get(drawUnitId);
-				if (resource) {
-					structuredInteriorResources.push(resource);
-				}
+		}
+		for (const drawUnitId of draw.structuredInteriorDrawUnitIds) {
+			const resource = this.#structuredInteriorResources.get(drawUnitId);
+			if (resource) {
+				structuredInteriorResources.push(resource);
 			}
 		}
 
@@ -1632,6 +1771,52 @@ class Webgl2Renderer implements Renderer {
 			structuredInteriorResources,
 			aspectRatio,
 		);
+	}
+
+	#drawPortalApertureStencilMask(
+		operation: "enter" | "exit",
+		pass: PortalApertureMaskPass,
+		resource: PortalApertureGeometryResourcePlan,
+		options: { readonly aspectRatio: number },
+	): void {
+		if (resource.vertices.length === 0) {
+			return;
+		}
+		const gl = this.#gl;
+		const positions = new Float32Array(resource.vertices.flat());
+		gl.colorMask(false, false, false, false);
+		try {
+			this.#stateCache.useProgram(this.#transitionCompositeProgram.program);
+			this.#stateCache.setDepthState({
+				enabled: true,
+				func: operation === "enter" ? gl.LEQUAL : gl.ALWAYS,
+				write: false,
+			});
+			this.#stateCache.setBlendState(
+				createBlendState(gl, false, gl.ONE, gl.ZERO),
+			);
+			this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
+			this.#stateCache.setStencilState(
+				createDirectPortalStencilMaskState(gl, operation, pass),
+			);
+			gl.uniformMatrix4fv(
+				this.#transitionCompositeProgram.uniforms.uModelViewProjection,
+				false,
+				createModelViewProjectionMatrix(this.#frameState, options.aspectRatio),
+			);
+			gl.uniform3f(
+				this.#transitionCompositeProgram.uniforms.uPlacementTranslation,
+				0,
+				0,
+				0,
+			);
+			this.#stateCache.bindVertexArray(this.#portalApertureVertexArray);
+			gl.bindBuffer(gl.ARRAY_BUFFER, this.#portalApertureVertexBuffer);
+			gl.bufferData(gl.ARRAY_BUFFER, positions, gl.DYNAMIC_DRAW);
+			gl.drawArrays(gl.TRIANGLES, 0, resource.vertices.length);
+		} finally {
+			gl.colorMask(true, true, true, true);
+		}
 	}
 
 	#drawStaticMaterialResourceSet(
@@ -2175,6 +2360,19 @@ class Webgl2Renderer implements Renderer {
 			stride,
 			3 * Float32Array.BYTES_PER_ELEMENT,
 		);
+		gl.bindVertexArray(null);
+		gl.bindBuffer(gl.ARRAY_BUFFER, null);
+		this.#stateCache.invalidate();
+	}
+
+	#configurePortalApertureVertexArray(): void {
+		const gl = this.#gl;
+		gl.bindVertexArray(this.#portalApertureVertexArray);
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.#portalApertureVertexBuffer);
+		const stride =
+			PORTAL_APERTURE_FLOATS_PER_VERTEX * Float32Array.BYTES_PER_ELEMENT;
+		gl.enableVertexAttribArray(0);
+		gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
 		gl.bindVertexArray(null);
 		gl.bindBuffer(gl.ARRAY_BUFFER, null);
 		this.#stateCache.invalidate();
@@ -3470,6 +3668,41 @@ function createStencilState(
 		zfail: gl.KEEP,
 		zpass,
 	};
+}
+
+function createDirectPortalStencilMaskState(
+	gl: WebGL2RenderingContext,
+	operation: "enter" | "exit",
+	pass: PortalApertureMaskPass,
+): Webgl2StencilState {
+	if (operation === "exit") {
+		return createStencilState(
+			gl,
+			true,
+			0xff,
+			gl.EQUAL,
+			pass.stencilRef,
+			gl.DECR,
+		);
+	}
+	if (pass.parentStencilRef === null) {
+		return createStencilState(
+			gl,
+			true,
+			0xff,
+			gl.ALWAYS,
+			pass.stencilRef,
+			gl.REPLACE,
+		);
+	}
+	return createStencilState(
+		gl,
+		true,
+		0xff,
+		gl.EQUAL,
+		pass.parentStencilRef,
+		gl.INCR,
+	);
 }
 
 function createEnvCellResourceKey(

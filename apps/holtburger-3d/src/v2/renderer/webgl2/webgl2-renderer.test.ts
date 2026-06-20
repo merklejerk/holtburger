@@ -288,6 +288,8 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			],
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
+			portalApertureGeometryResources: [],
+			portalApertureMaskPasses: [],
 			transitionSceneCrossings: [
 				{
 					apertureBatchId: "transition-aperture-batch:f418ffff",
@@ -318,6 +320,8 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			],
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
+			portalApertureGeometryResources: [],
+			portalApertureMaskPasses: [],
 			transitionSceneCrossings: [
 				{
 					apertureBatchId: "transition-aperture-batch:f418ffff",
@@ -403,6 +407,8 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			],
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
+			portalApertureGeometryResources: [],
+			portalApertureMaskPasses: [],
 			transitionSceneCrossings: [],
 		});
 
@@ -421,6 +427,128 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			kind: "portal-scene-domains",
 			transitionDepthPolicy: { maxDepth: 4 },
 		});
+
+		renderer.dispose();
+	});
+
+	it("executes direct env-cell aperture masks around child cell draws", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+		let latestSnapshot = rendererSnapshotPlaceholder();
+		renderer.subscribe((snapshot) => {
+			latestSnapshot = snapshot;
+		});
+
+		renderer.applyStaticDelta({
+			addedDrawUnits: [
+				createStructuredInteriorDrawUnit({
+					drawUnitId: "structured-root",
+					envCellId: 0xda550100,
+				}),
+				createStructuredInteriorDrawUnit({
+					drawUnitId: "structured-child",
+					envCellId: 0xda550101,
+				}),
+			],
+			addedTransitionApertureBatches: [],
+			removedDrawUnitIds: [],
+			removedTransitionApertureBatchIds: [],
+			revision: 1,
+		});
+		renderer.setPortalFrameWorkPlan({
+			baseScene: {
+				envCellId: 0xda550100,
+				kind: "env-cell-direct",
+				landblockId: 0xda55ffff,
+			},
+			directEnvCellDraws: [
+				{
+					envCellId: 0xda550100,
+					envCellStaticObjectDrawUnitIds: [],
+					landblockId: 0xda55ffff,
+					portalStackId: "root",
+					resourceState: "ready",
+					structuredInteriorDrawUnitIds: ["structured-root"],
+					traversalDepth: 0,
+				},
+				{
+					envCellId: 0xda550101,
+					envCellStaticObjectDrawUnitIds: [],
+					landblockId: 0xda55ffff,
+					portalStackId: "root/a-to-b",
+					resourceState: "ready",
+					structuredInteriorDrawUnitIds: ["structured-child"],
+					traversalDepth: 1,
+				},
+			],
+			kind: "direct-env-cell",
+			mode: "portal-traversal",
+			portalApertureGeometryResources: [
+				{
+					resourceId: "portal-aperture:a-to-b",
+					vertices: [
+						[0, 0, 0],
+						[1, 0, 0],
+						[0, 1, 0],
+					],
+				},
+			],
+			portalApertureMaskPasses: [
+				{
+					apertureResourceId: "portal-aperture:a-to-b",
+					linkId: "a-to-b",
+					parentStencilRef: null,
+					portalStackId: "root/a-to-b",
+					source: {
+						envCellId: 0xda550100,
+						kind: "env-cell-direct",
+						landblockId: 0xda55ffff,
+					},
+					stencilRef: 1,
+					target: {
+						envCellId: 0xda550101,
+						kind: "env-cell-direct",
+						landblockId: 0xda55ffff,
+					},
+					traversalDepth: 1,
+				},
+			],
+			transitionSceneCrossings: [],
+		});
+
+		gl.drawArraysCalls.length = 0;
+		gl.drawElementsCalls.length = 0;
+		gl.stencilFuncCalls.length = 0;
+		gl.stencilOpCalls.length = 0;
+		pendingFrame?.(16);
+
+		expect(gl.drawElementsCalls).toHaveLength(2);
+		expect(gl.drawArraysCalls).toEqual([
+			{ count: 3, first: 0, mode: gl.TRIANGLES },
+			{ count: 3, first: 0, mode: gl.TRIANGLES },
+		]);
+		expect(gl.stencilFuncCalls).toEqual(
+			expect.arrayContaining([
+				{ func: gl.ALWAYS, mask: 0xff, ref: 1 },
+				{ func: gl.EQUAL, mask: 0xff, ref: 1 },
+			]),
+		);
+		expect(gl.stencilOpCalls).toEqual(
+			expect.arrayContaining([
+				{ fail: gl.KEEP, zfail: gl.KEEP, zpass: gl.REPLACE },
+				{ fail: gl.KEEP, zfail: gl.KEEP, zpass: gl.DECR },
+			]),
+		);
+		expect(gl.depthFuncModes).toContain(gl.LEQUAL);
+		expect(gl.depthFuncModes).toContain(gl.ALWAYS);
+		expect(latestSnapshot.directEnvCellDrawCalls).toBe(2);
 
 		renderer.dispose();
 	});
@@ -1079,6 +1207,11 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		readonly mode: GLenum;
 		readonly type: GLenum;
 	}[];
+	readonly drawArraysCalls: {
+		readonly count: number;
+		readonly first: number;
+		readonly mode: GLenum;
+	}[];
 	readonly enabledCapabilities: GLenum[];
 	readonly enabledVertexAttributes: number[];
 	readonly stencilFuncCalls: {
@@ -1099,6 +1232,7 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 	const depthFuncModes: GLenum[] = [];
 	const disabledCapabilities: GLenum[] = [];
 	const drawElementsCalls: { count: number; mode: GLenum; type: GLenum }[] = [];
+	const drawArraysCalls: { count: number; first: number; mode: GLenum }[] = [];
 	const enabledCapabilities: GLenum[] = [];
 	const enabledVertexAttributes: number[] = [];
 	const stencilFuncCalls: { func: GLenum; mask: number; ref: number }[] = [];
@@ -1121,6 +1255,7 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		DEPTH24_STENCIL8: 35056,
 		DEPTH_STENCIL: 34041,
 		DEPTH_TEST: 2929,
+		DECR: 7683,
 		drawingBufferHeight: 64,
 		drawingBufferWidth: 64,
 		DRAW_FRAMEBUFFER: 36009,
@@ -1226,7 +1361,9 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		disable: vi.fn((capability: GLenum) => {
 			disabledCapabilities.push(capability);
 		}),
-		drawArrays: vi.fn(),
+		drawArrays: vi.fn((mode: GLenum, first: number, count: number) => {
+			drawArraysCalls.push({ count, first, mode });
+		}),
 		drawElements: vi.fn((mode: GLenum, count: number, type: GLenum) => {
 			drawElementsCalls.push({ count, mode, type });
 		}),
@@ -1280,6 +1417,7 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		bufferDataTargets,
 		cullFaceModes,
 		depthFuncModes,
+		drawArraysCalls,
 		disabledCapabilities,
 		drawElementsCalls,
 		enabledCapabilities,
@@ -1297,6 +1435,11 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 			readonly count: number;
 			readonly mode: GLenum;
 			readonly type: GLenum;
+		}[];
+		readonly drawArraysCalls: {
+			readonly count: number;
+			readonly first: number;
+			readonly mode: GLenum;
 		}[];
 		readonly enabledVertexAttributes: number[];
 		readonly stencilFuncCalls: {

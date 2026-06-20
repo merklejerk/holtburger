@@ -369,6 +369,8 @@ describe("V2 client runtime", () => {
 			],
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
+			portalApertureGeometryResources: [],
+			portalApertureMaskPasses: [],
 			transitionSceneCrossings: [],
 		});
 		expect(renderer.renderPassPlans).toEqual([
@@ -386,6 +388,24 @@ describe("V2 client runtime", () => {
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
 		});
+
+		runtime.setDirectEnvCellPortalMaxDepth(0);
+
+		expect(renderer.portalFrameWorkPlans.at(-1)).toMatchObject({
+			directEnvCellDraws: [
+				expect.objectContaining({
+					envCellId: 0xda550100,
+					traversalDepth: 0,
+				}),
+			],
+			kind: "direct-env-cell",
+			mode: "portal-traversal",
+		});
+		expect(
+			renderer.portalFrameWorkPlans.at(-1)?.kind === "direct-env-cell"
+				? renderer.portalFrameWorkPlans.at(-1)?.directEnvCellDraws.length
+				: 0,
+		).toBe(1);
 
 		runtime.dispose();
 	});

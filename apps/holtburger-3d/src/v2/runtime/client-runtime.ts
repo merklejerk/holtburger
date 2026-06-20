@@ -13,6 +13,7 @@ import {
 	createLegacyPortalFrameWorkPlan,
 	portalFrameWorkPlanEquals,
 } from "../renderer/portal-frame-work-plan";
+import { createDirectEnvCellFramePlan } from "./direct-env-cell-frame-plan";
 import { formatHex32, normalizeOutdoorLandblockId } from "../../lib/landblocks";
 import { TextureManager } from "../textures/texture-manager";
 import type { TexturePacker } from "../textures/packing/packer";
@@ -82,6 +83,8 @@ const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
 const BLENDED_STATIC_AUDIT_WARNING_BUCKET_LIMIT = 8;
 const DEFAULT_ASSET_MAINTENANCE_INTERVAL_MS = 5_000;
 const DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 4;
+const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 1;
+const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS = 8;
 
 export type ManualStaticDomain =
 	| "terrain"
@@ -902,10 +905,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			changed = true;
 		}
 
-		const portalFrameWorkPlan = createLegacyPortalFrameWorkPlan({
-			flatVisionModeEnabled: this.#flatVisionModeEnabled,
-			renderPassPlan: plan,
-		});
+		const portalFrameWorkPlan = this.#derivePortalFrameWorkPlan(plan);
 		if (
 			!portalFrameWorkPlanEquals(
 				this.#lastRendererSnapshot.portalFrameWorkPlan,
@@ -917,6 +917,38 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 
 		return changed;
+	}
+
+	#derivePortalFrameWorkPlan(
+		renderPassPlan: RenderPassPlan,
+	): PortalFrameWorkPlan {
+		if (
+			!this.#flatVisionModeEnabled &&
+			this.#currentCameraResidency.kind === "env-cell" &&
+			this.#staticSceneQuery.hasCommittedPortalInteriorScene({
+				landblockId: this.#currentCameraResidency.landblockId,
+			})
+		) {
+			const directPlan = createDirectEnvCellFramePlan({
+				currentCameraResidency: this.#currentCameraResidency,
+				rendererEnvCellResourceMembership:
+					this.#lastRendererSnapshot.envCellResourceMembership,
+				traversalPlan: this.#staticSceneQuery.queryPortalTraversal({
+					landblockId: this.#currentCameraResidency.landblockId,
+					maxCells: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
+					maxDepth: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH,
+					startEnvCellId: this.#currentCameraResidency.envCellId,
+				}),
+			});
+			if (directPlan) {
+				return directPlan;
+			}
+		}
+
+		return createLegacyPortalFrameWorkPlan({
+			flatVisionModeEnabled: this.#flatVisionModeEnabled,
+			renderPassPlan,
+		});
 	}
 
 	#deriveRenderPassPlan(): RenderPassPlan {

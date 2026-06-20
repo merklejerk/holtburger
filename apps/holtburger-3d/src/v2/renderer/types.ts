@@ -155,6 +155,7 @@ export interface RendererSnapshot {
 	readonly envCellResourceMembership: readonly RendererEnvCellResourceMembership[];
 	readonly transitionApertureBatches: number;
 	readonly transitionApertures: number;
+	readonly directEnvCellDrawCalls: number;
 	readonly renderedTriangles: number;
 	readonly debugOverlayPrimitives: number;
 }

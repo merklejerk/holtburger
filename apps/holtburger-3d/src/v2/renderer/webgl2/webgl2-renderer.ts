@@ -755,6 +755,7 @@ class Webgl2Renderer implements Renderer {
 	#lastCompositePasses = 0;
 	#lastCompositeApertureBatchDrawCalls = 0;
 	#lastExecutedCompositeDepth = 0;
+	#lastDirectEnvCellDrawCalls = 0;
 	#lastCompositingMode: SceneDomainTargetSnapshot["compositingMode"] = "none";
 	#debugOverlayPrimitiveCount = 0;
 	#debugOverlayLineVertexCount = 0;
@@ -1048,11 +1049,15 @@ class Webgl2Renderer implements Renderer {
 		this.#lastCompositePasses = 0;
 		this.#lastCompositeApertureBatchDrawCalls = 0;
 		this.#lastExecutedCompositeDepth = 0;
+		this.#lastDirectEnvCellDrawCalls = 0;
 		this.#lastCompositingMode = "none";
 
 		const effectiveRenderPassPlan = this.#getEffectiveRenderPassPlan();
+		const directEnvCellFramePlan = this.#getEffectiveDirectEnvCellFramePlan();
 
-		if (effectiveRenderPassPlan.kind === "single-surface-resident") {
+		if (directEnvCellFramePlan) {
+			this.#renderDirectEnvCellFramePlan(pulse, directEnvCellFramePlan);
+		} else if (effectiveRenderPassPlan.kind === "single-surface-resident") {
 			this.#renderSingleSurfaceResident(pulse);
 		} else {
 			this.#renderSceneDomainTargets(pulse, effectiveRenderPassPlan);
@@ -1079,6 +1084,30 @@ class Webgl2Renderer implements Renderer {
 			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight);
 		this.#drawTerrain(aspectRatio);
 		this.#drawStaticObjects("single-surface-resident", aspectRatio);
+	}
+
+	#renderDirectEnvCellFramePlan(
+		pulse: number,
+		plan: Extract<PortalFrameWorkPlan, { readonly kind: "direct-env-cell" }>,
+	): void {
+		const gl = this.#gl;
+		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+		this.#stateCache.setViewport({
+			height: gl.drawingBufferHeight,
+			width: gl.drawingBufferWidth,
+			x: 0,
+			y: 0,
+		});
+		this.#stateCache.setDepthState(createDepthState(gl, true, true));
+		gl.clearColor(0.025 + pulse * 0.015, 0.045, 0.065 + pulse * 0.025, 1);
+		gl.clearDepth(1);
+		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+		const aspectRatio =
+			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight);
+		this.#lastDirectEnvCellDrawCalls = this.#drawDirectEnvCellResources(
+			plan,
+			aspectRatio,
+		);
 	}
 
 	#renderSceneDomainTargets(
@@ -1548,9 +1577,71 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	#drawStaticObjects(domain: RenderStaticDomain, aspectRatio: number): number {
+		const staticObjectResources = [
+			...this.#staticObjectResources.values(),
+		].filter((resource) =>
+			shouldDrawStaticObjectResourceInDomain(resource, domain),
+		);
+		const structuredInteriorResources =
+			domain === "exterior"
+				? []
+				: [...this.#structuredInteriorResources.values()];
+
+		return this.#drawStaticMaterialResourceSet(
+			staticObjectResources,
+			structuredInteriorResources,
+			aspectRatio,
+		);
+	}
+
+	#drawDirectEnvCellResources(
+		plan: Extract<PortalFrameWorkPlan, { readonly kind: "direct-env-cell" }>,
+		aspectRatio: number,
+	): number {
+		const staticObjectResources: StaticObjectGeometryResource[] = [];
+		const structuredInteriorResources: StructuredInteriorGeometryResource[] =
+			[];
+		const seenStaticDrawUnitIds = new Set<string>();
+		const seenStructuredDrawUnitIds = new Set<string>();
+
+		for (const draw of plan.directEnvCellDraws) {
+			for (const drawUnitId of draw.envCellStaticObjectDrawUnitIds) {
+				if (seenStaticDrawUnitIds.has(drawUnitId)) {
+					continue;
+				}
+				seenStaticDrawUnitIds.add(drawUnitId);
+				const resource = this.#staticObjectResources.get(drawUnitId);
+				if (resource) {
+					staticObjectResources.push(resource);
+				}
+			}
+			for (const drawUnitId of draw.structuredInteriorDrawUnitIds) {
+				if (seenStructuredDrawUnitIds.has(drawUnitId)) {
+					continue;
+				}
+				seenStructuredDrawUnitIds.add(drawUnitId);
+				const resource = this.#structuredInteriorResources.get(drawUnitId);
+				if (resource) {
+					structuredInteriorResources.push(resource);
+				}
+			}
+		}
+
+		return this.#drawStaticMaterialResourceSet(
+			staticObjectResources,
+			structuredInteriorResources,
+			aspectRatio,
+		);
+	}
+
+	#drawStaticMaterialResourceSet(
+		staticObjectResources: readonly StaticObjectGeometryResource[],
+		structuredInteriorResources: readonly StructuredInteriorGeometryResource[],
+		aspectRatio: number,
+	): number {
 		if (
-			this.#staticObjectResources.size === 0 &&
-			this.#structuredInteriorResources.size === 0
+			staticObjectResources.length === 0 &&
+			structuredInteriorResources.length === 0
 		) {
 			this.#resetTransparentStaticObjectDrawLists();
 			return 0;
@@ -1569,10 +1660,7 @@ class Webgl2Renderer implements Renderer {
 		applyStaticObjectDepthWritingState(gl, this.#stateCache);
 		this.#resetTransparentStaticObjectDrawLists();
 		let drawCalls = 0;
-		for (const resource of this.#staticObjectResources.values()) {
-			if (!shouldDrawStaticObjectResourceInDomain(resource, domain)) {
-				continue;
-			}
+		for (const resource of staticObjectResources) {
 			if (isTransparentStaticObjectResource(resource)) {
 				this.#appendTransparentStaticObjectResource(resource);
 				continue;
@@ -1580,21 +1668,15 @@ class Webgl2Renderer implements Renderer {
 			this.#drawStaticMaterialResource(resource);
 			drawCalls += 1;
 		}
-		if (domain !== "exterior") {
-			for (const resource of this.#structuredInteriorResources.values()) {
-				applyStaticObjectRenderState(
-					gl,
-					this.#stateCache,
-					resource.renderState,
-				);
-				applyStructuredInteriorCullState(
-					gl,
-					this.#stateCache,
-					this.#flatVisionModeEnabled,
-				);
-				this.#drawStaticMaterialResource(resource);
-				drawCalls += 1;
-			}
+		for (const resource of structuredInteriorResources) {
+			applyStaticObjectRenderState(gl, this.#stateCache, resource.renderState);
+			applyStructuredInteriorCullState(
+				gl,
+				this.#stateCache,
+				this.#flatVisionModeEnabled,
+			);
+			this.#drawStaticMaterialResource(resource);
+			drawCalls += 1;
 		}
 
 		for (const resource of this.#farTransparentStaticObjectDrawList) {
@@ -1872,6 +1954,7 @@ class Webgl2Renderer implements Renderer {
 			terrainDrawUnits: this.#terrainResources.size,
 			envCellResourceMembership:
 				this.#createEnvCellResourceMembershipSnapshot(),
+			directEnvCellDrawCalls: this.#lastDirectEnvCellDrawCalls,
 			transitionApertureBatches: this.#transitionApertureResources.size,
 			transitionApertures: sumTransitionApertureRanges(
 				this.#transitionApertureResources,
@@ -2034,8 +2117,11 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	#createSceneDomainTargetSnapshot(): SceneDomainTargetSnapshot {
+		const directEnvCellFramePlanActive =
+			this.#getEffectiveDirectEnvCellFramePlan() !== null;
 		return {
 			active:
+				!directEnvCellFramePlanActive &&
 				this.#getEffectiveRenderPassPlan().kind === "portal-scene-domains",
 			apertureBatchDrawCalls: this.#lastCompositeApertureBatchDrawCalls,
 			colorFormat: "rgb8",
@@ -2055,6 +2141,21 @@ class Webgl2Renderer implements Renderer {
 			return { kind: "single-surface-resident" };
 		}
 		return this.#renderPassPlan;
+	}
+
+	#getEffectiveDirectEnvCellFramePlan(): Extract<
+		PortalFrameWorkPlan,
+		{ readonly kind: "direct-env-cell" }
+	> | null {
+		if (
+			this.#flatVisionModeEnabled ||
+			this.#portalFrameWorkPlan.kind !== "direct-env-cell" ||
+			this.#portalFrameWorkPlan.baseScene.kind !== "env-cell-direct" ||
+			this.#portalFrameWorkPlan.transitionSceneCrossings.length > 0
+		) {
+			return null;
+		}
+		return this.#portalFrameWorkPlan;
 	}
 
 	#configureDebugOverlayVertexArray(): void {

@@ -1833,6 +1833,10 @@
 							</dd>
 						</div>
 						<div>
+							<dt>Direct env draws</dt>
+							<dd>{snapshot?.renderer.directEnvCellDrawCalls ?? 0}</dd>
+						</div>
+						<div>
 							<dt>Triangles</dt>
 							<dd>{snapshot?.renderer.renderedTriangles ?? 0}</dd>
 						</div>

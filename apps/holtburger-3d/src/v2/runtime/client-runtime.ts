@@ -562,11 +562,14 @@ class ClientRuntimeImpl implements ClientRuntime {
 			terrainDrawUnits: 0,
 			transitionApertureBatches: 0,
 			transitionApertures: 0,
+			directEnvCellDrawCalls: 0,
 		};
 		this.#lastStaticSnapshot = staticCoordinator.createSnapshot();
 		this.#unsubscribeRenderer = renderer.subscribe((snapshot) => {
 			this.#lastRendererSnapshot = snapshot;
-			this.#emit();
+			if (!this.#updateRenderPassPlan()) {
+				this.#emit();
+			}
 		});
 		this.#unsubscribeStaticCoordinator = staticCoordinator.subscribe(
 			(snapshot) => {

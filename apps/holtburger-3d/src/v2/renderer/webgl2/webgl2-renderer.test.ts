@@ -339,6 +339,92 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
+	it("draws only direct env-cell frame plan resources when a direct plan is active", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+		let latestSnapshot = rendererSnapshotPlaceholder();
+		renderer.subscribe((snapshot) => {
+			latestSnapshot = snapshot;
+		});
+
+		renderer.applyStaticDelta({
+			addedDrawUnits: [
+				createStructuredInteriorDrawUnit({
+					drawUnitId: "structured-selected",
+					envCellId: 0xda550100,
+				}),
+				createStructuredInteriorDrawUnit({
+					drawUnitId: "structured-resident-unselected",
+					envCellId: 0xda550101,
+				}),
+				createEnvCellStaticObjectDrawUnit("static-selected", [0xda550100]),
+				createEnvCellStaticObjectDrawUnit(
+					"static-resident-unselected",
+					[0xda550101],
+				),
+			],
+			addedTransitionApertureBatches: [],
+			removedDrawUnitIds: [],
+			removedTransitionApertureBatchIds: [],
+			revision: 1,
+		});
+		renderer.setRenderPassPlan({
+			baseScene: {
+				envCellId: 0xda550100,
+				kind: "interior",
+				landblockId: 0xda55ffff,
+			},
+			kind: "portal-scene-domains",
+			transitionDepthPolicy: { maxDepth: 4 },
+		});
+		renderer.setPortalFrameWorkPlan({
+			baseScene: {
+				envCellId: 0xda550100,
+				kind: "env-cell-direct",
+				landblockId: 0xda55ffff,
+			},
+			directEnvCellDraws: [
+				{
+					envCellId: 0xda550100,
+					envCellStaticObjectDrawUnitIds: ["static-selected"],
+					landblockId: 0xda55ffff,
+					portalStackId: "root",
+					resourceState: "ready",
+					structuredInteriorDrawUnitIds: ["structured-selected"],
+					traversalDepth: 0,
+				},
+			],
+			kind: "direct-env-cell",
+			mode: "portal-traversal",
+			transitionSceneCrossings: [],
+		});
+
+		gl.drawElementsCalls.length = 0;
+		pendingFrame?.(16);
+
+		expect(gl.drawElementsCalls).toHaveLength(2);
+		expect(latestSnapshot.directEnvCellDrawCalls).toBe(2);
+		expect(latestSnapshot.sceneDomainTargets.active).toBe(false);
+		expect(latestSnapshot.renderPassPlan).toEqual({
+			baseScene: {
+				envCellId: 0xda550100,
+				kind: "interior",
+				landblockId: 0xda55ffff,
+			},
+			kind: "portal-scene-domains",
+			transitionDepthPolicy: { maxDepth: 4 },
+		});
+
+		renderer.dispose();
+	});
+
 	it("executes planned transition composite passes with depth propagation targets", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
@@ -658,7 +744,14 @@ describe("V2 WebGL2 debug overlay shader contract", () => {
 	});
 });
 
-function createStructuredInteriorDrawUnit(): StructuredInteriorGeometryStaticDrawUnit {
+function createStructuredInteriorDrawUnit(
+	options: {
+		readonly drawUnitId?: string;
+		readonly envCellId?: number;
+	} = {},
+): StructuredInteriorGeometryStaticDrawUnit {
+	const drawUnitId = options.drawUnitId ?? "structured-interior-a";
+	const envCellId = options.envCellId ?? 0xda550100;
 	return {
 		cellStructure: {
 			cellStructureId: 0x0d000001,
@@ -666,8 +759,8 @@ function createStructuredInteriorDrawUnit(): StructuredInteriorGeometryStaticDra
 		},
 		coordinateSpace: "landblock-render-local",
 		domain: "landblock-env-cells",
-		drawUnitId: "structured-interior-a",
-		envCellId: 0xda550100,
+		drawUnitId,
+		envCellId,
 		environment: {
 			environmentId: 0x0e000001,
 			kind: "environment",
@@ -967,6 +1060,7 @@ function rendererSnapshotPlaceholder() {
 			width: 0,
 		},
 		envCellResourceMembership: [],
+		directEnvCellDrawCalls: 0,
 		staticDrawUnits: 0,
 		terrainDrawUnits: 0,
 		transitionApertureBatches: 0,

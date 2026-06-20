@@ -1322,7 +1322,7 @@ Failed to close:
 
 ### Phase 5AR: Reassessment After Portal View Grouping
 
-Status: planned checkpoint.
+Status: completed checkpoint on 2026-06-20.
 
 Purpose: decide whether the interior portal model is stable enough to proceed to outdoor transition
 unification.
@@ -1340,6 +1340,62 @@ Exit criteria:
 
 - Phase 6 proceeds only after same-depth multi-aperture env-cell rendering is stable enough that
   outdoor scene crossings can share the same portal executor model.
+
+Checkpoint result:
+
+- Proceed to Phase 6. Manual browser inspection in the large open-grid dungeon confirmed that
+  same-context portal view grouping fixed the black portal-plane rectangles: multi-aperture open
+  cell connections now reveal the target env-cell content instead of cleared background.
+- The missing roof/ceiling artifact was not the same root cause. It came from the temporary
+  structured-interior portal-polygon exclusion attempt, which was reverted. Source cell-structure
+  polygons must continue to render according to ordinary material/stippling rules; portal metadata
+  selects traversal edges and aperture masks, not blanket geometry deletion.
+- Unique-cell and portal-view diagnostics are useful enough for manual inspection. The important
+  distinction is now explicit: `cells` reports deduped resource reachability, while `views` reports
+  renderer-facing portal visibility contexts.
+- The renderer still avoids full frame-visibility, screen-footprint pruning, narrowed child frusta,
+  and literal CPU-side clipping against portal polygons. No inspected artifact currently requires
+  that machinery before transition unification.
+
+Spicy decisions:
+
+- Keep portal view groups as the renderer-facing traversal unit. Do not collapse back to unique
+  env cells for mask execution just because resources are still deduped by env cell.
+- Keep grouped aperture masks merged only within the same parent portal-stack context, target env
+  cell, and depth. Distinct parent contexts may draw the same env cell through distinct view groups;
+  that duplication is the honest portal-view cost, not a resource-membership bug.
+- Do not reintroduce the portal-polygon-id geometry filter. It was a structural wrong turn and
+  removed valid ceiling geometry.
+- Phase 6 should treat transition portals as another selected-edge scene crossing in the shared
+  executor. It should not revive the old dedicated transition-compositor model as a parallel
+  architecture.
+
+Debt carried forward:
+
+- Watch the `maxPortalViews` cap. The current runtime limit is intentionally separate from the
+  unique-cell cap, but representative large dungeons can approach or hit the `512` view budget. If
+  Phase 6 or later inspection shows visible truncation from the cap, raise the cap with metrics or
+  add a clearer diagnostic before introducing more complex culling.
+- Renderer diagnostics currently report enough for manual inspection, but submitted-resource and
+  submitted-triangle counts are still approximate. Add exact submitted counts only if visual
+  debugging becomes ambiguous.
+- Dynamic aperture upload is acceptable for the current selected-mask path. Persistent aperture GPU
+  resource caching remains a performance debt, not a correctness blocker.
+- Transition overlay/resource cleanup remains Phase 6/Phase 9 work. Until transition portals are
+  represented as categorized portal frame-plan edges, the separate transition overlay is still
+  legacy-but-live.
+
+Failed to close:
+
+- No remaining Phase 5A visual correctness blocker is known after the black-rectangle and roof
+  checks.
+- We have not proven the view budget is universally sufficient. Treat cap diagnostics as live data
+  during Phase 6 and Phase 7.
+
+Work for mesh:
+
+- None required for this checkpoint. Continue manual Phase 6 inspection with the portal frame
+  diagnostics visible, especially `cells`, `views`, `missing`, `depth`, `masks`, and `apertures`.
 
 ### Phase 5R: Reassessment After Recursive Interior Portals
 

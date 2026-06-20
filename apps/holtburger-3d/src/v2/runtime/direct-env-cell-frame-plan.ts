@@ -96,10 +96,25 @@ export function createOutdoorTransitionPortalFramePlan(
 		return null;
 	}
 
-	const transitionRoots = createOutdoorTransitionRootGroups(renderableBatches);
-	if (transitionRoots.length === 0) {
+	const transitionRootCandidates =
+		createOutdoorTransitionRootGroups(renderableBatches);
+	if (transitionRootCandidates.length === 0) {
 		return null;
 	}
+	const outdoorVisibleEnvCellIds = createOutdoorVisibleEnvCellIds(
+		input.portalInteriorRecords,
+		input.landblockId,
+	);
+	const seenOutsideByEnvCellId = createOutdoorEnvCellSeenOutsideById(
+		input.portalInteriorRecords,
+		input.landblockId,
+	);
+	const transitionRootSelection = selectOutdoorVisibleTransitionRoots({
+		outdoorVisibleEnvCellIds,
+		seenOutsideByEnvCellId,
+		transitionRootCandidates,
+	});
+	const transitionRoots = transitionRootSelection.acceptedRoots;
 
 	const membershipsByKey = new Map(
 		input.rendererEnvCellResourceMembership.map((membership) => [
@@ -203,6 +218,7 @@ export function createOutdoorTransitionPortalFramePlan(
 			emittedPortalStackIds,
 			apertureBuilder,
 			membershipsByKey,
+			outdoorVisibleEnvCellIds,
 			portalInteriorRecords: input.portalInteriorRecords,
 			renderAnchorLandblockId: input.renderAnchorLandblockId,
 			transitionRootPortalStackId,
@@ -211,9 +227,18 @@ export function createOutdoorTransitionPortalFramePlan(
 	}
 
 	const aperturePlan = apertureBuilder.build({
+		transitionRootCandidateCount: transitionRootCandidates.length,
 		transitionRootCount: transitionRoots.length,
+		transitionRootsRejectedNotSeenOutside:
+			transitionRootSelection.rejectedNotSeenOutside,
+		transitionRootsRejectedUnknownSeenOutside:
+			transitionRootSelection.rejectedUnknownSeenOutside,
 	});
-	if (aperturePlan.maskPasses.length === 0) {
+	if (
+		aperturePlan.maskPasses.length === 0 &&
+		transitionRootSelection.rejectedNotSeenOutside === 0 &&
+		transitionRootSelection.rejectedUnknownSeenOutside === 0
+	) {
 		return null;
 	}
 
@@ -267,6 +292,49 @@ function createEnvCellKey(landblockId: number, envCellId: number): string {
 	return `${landblockId >>> 0}:${envCellId >>> 0}`;
 }
 
+export function createOutdoorVisibleEnvCellIds(
+	portalInteriorRecords: readonly StaticPortalInteriorRecord[],
+	landblockId: number,
+): ReadonlySet<number> {
+	const envCellIds = new Set<number>();
+	for (const [envCellId, seenOutside] of createOutdoorEnvCellSeenOutsideById(
+		portalInteriorRecords,
+		landblockId,
+	)) {
+		if (seenOutside === true) {
+			envCellIds.add(envCellId);
+		}
+	}
+	return envCellIds;
+}
+
+function createOutdoorEnvCellSeenOutsideById(
+	portalInteriorRecords: readonly StaticPortalInteriorRecord[],
+	landblockId: number,
+): ReadonlyMap<number, boolean | null> {
+	const seenOutsideByEnvCellId = new Map<number, boolean | null>();
+	for (const record of portalInteriorRecords) {
+		if (record.landblockId !== landblockId) {
+			continue;
+		}
+		for (const envCell of record.envCells) {
+			const envCellId = envCell.envCellId >>> 0;
+			const existing = seenOutsideByEnvCellId.get(envCellId);
+			if (existing === true) {
+				continue;
+			}
+			if (envCell.seenOutside === true || existing === undefined) {
+				seenOutsideByEnvCellId.set(envCellId, envCell.seenOutside);
+				continue;
+			}
+			if (envCell.seenOutside === false && existing === null) {
+				seenOutsideByEnvCellId.set(envCellId, false);
+			}
+		}
+	}
+	return seenOutsideByEnvCellId;
+}
+
 function createRootPortalStackId(startEnvCellId: number): string {
 	return `root:${formatHex32(startEnvCellId)}`;
 }
@@ -304,6 +372,7 @@ function formatHex32(value: number): string {
 }
 
 function createPortalAperturePlan(options: {
+	readonly allowedEnvCellIds?: ReadonlySet<number>;
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly renderAnchorLandblockId: number | null;
 	readonly traversalPlan: PortalTraversalPlan;
@@ -323,6 +392,12 @@ function createPortalAperturePlan(options: {
 	]);
 	for (const viewGroup of options.traversalPlan.portalViewGroups) {
 		if (viewGroup.parentPortalStackId === null) {
+			continue;
+		}
+		if (
+			options.allowedEnvCellIds &&
+			!options.allowedEnvCellIds.has(viewGroup.envCellId >>> 0)
+		) {
 			continue;
 		}
 		if (!maskablePortalStackIds.has(viewGroup.parentPortalStackId)) {
@@ -395,7 +470,12 @@ function createPortalAperturePlan(options: {
 		}
 	}
 
-	return apertureBuilder.build({ transitionRootCount: 0 });
+	return apertureBuilder.build({
+		transitionRootCandidateCount: 0,
+		transitionRootCount: 0,
+		transitionRootsRejectedNotSeenOutside: 0,
+		transitionRootsRejectedUnknownSeenOutside: 0,
+	});
 }
 
 function appendTransitionRootTraversal(options: {
@@ -409,17 +489,22 @@ function appendTransitionRootTraversal(options: {
 		string,
 		RendererEnvCellResourceMembership
 	>;
+	readonly outdoorVisibleEnvCellIds: ReadonlySet<number>;
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly renderAnchorLandblockId: number | null;
 	readonly transitionRootPortalStackId: string;
 	readonly traversalPlan: PortalTraversalPlan;
 }): void {
 	const envCellAperturePlan = createPortalAperturePlan({
+		allowedEnvCellIds: options.outdoorVisibleEnvCellIds,
 		portalInteriorRecords: options.portalInteriorRecords,
 		renderAnchorLandblockId: options.renderAnchorLandblockId,
 		traversalPlan: options.traversalPlan,
 	});
 	for (const viewGroup of options.traversalPlan.portalViewGroups) {
+		if (!options.outdoorVisibleEnvCellIds.has(viewGroup.envCellId >>> 0)) {
+			continue;
+		}
 		const portalStackId = createOutdoorTransitionChildPortalStackId({
 			sourceRootEnvCellId: options.traversalPlan.startEnvCellId,
 			transitionRootPortalStackId: options.transitionRootPortalStackId,
@@ -564,6 +649,12 @@ interface OutdoorTransitionRootGroup {
 	readonly ranges: readonly OutdoorTransitionRangeRef[];
 }
 
+interface OutdoorTransitionRootSelection {
+	readonly acceptedRoots: readonly OutdoorTransitionRootGroup[];
+	readonly rejectedNotSeenOutside: number;
+	readonly rejectedUnknownSeenOutside: number;
+}
+
 interface OutdoorTransitionRangeRef {
 	readonly batch: TransitionApertureBatch;
 	readonly range: TransitionApertureBatch["ranges"][number];
@@ -589,6 +680,34 @@ function createOutdoorTransitionRootGroups(
 			envCellId,
 			ranges: [...ranges].sort(compareOutdoorTransitionRangeRefs),
 		}));
+}
+
+function selectOutdoorVisibleTransitionRoots(options: {
+	readonly outdoorVisibleEnvCellIds: ReadonlySet<number>;
+	readonly seenOutsideByEnvCellId: ReadonlyMap<number, boolean | null>;
+	readonly transitionRootCandidates: readonly OutdoorTransitionRootGroup[];
+}): OutdoorTransitionRootSelection {
+	const acceptedRoots: OutdoorTransitionRootGroup[] = [];
+	let rejectedNotSeenOutside = 0;
+	let rejectedUnknownSeenOutside = 0;
+
+	for (const root of options.transitionRootCandidates) {
+		if (options.outdoorVisibleEnvCellIds.has(root.envCellId)) {
+			acceptedRoots.push(root);
+			continue;
+		}
+		if (options.seenOutsideByEnvCellId.get(root.envCellId) === false) {
+			rejectedNotSeenOutside += 1;
+		} else {
+			rejectedUnknownSeenOutside += 1;
+		}
+	}
+
+	return {
+		acceptedRoots,
+		rejectedNotSeenOutside,
+		rejectedUnknownSeenOutside,
+	};
 }
 
 function compareOutdoorTransitionRangeRefs(

@@ -872,6 +872,7 @@ export interface StaticEnvCellPortalInteriorRecord {
 export interface StaticEnvCellPortalSummary {
 	readonly envCellId: number;
 	readonly localPlacement: LandblockEnvCellStaticFacts["localPlacement"];
+	readonly seenOutside: LandblockEnvCellStaticFacts["seenOutside"];
 	readonly portals: LandblockEnvCellStaticFacts["portals"];
 	readonly portalApertures: LandblockEnvCellStaticFacts["portalApertures"];
 }

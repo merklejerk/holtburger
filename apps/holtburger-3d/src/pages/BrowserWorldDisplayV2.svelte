@@ -1189,7 +1189,7 @@
 			0,
 		);
 		const aperture = plan.portalApertureDiagnostics;
-		return `${plan.mode} base ${base} cells ${uniqueCells} views ${plan.directEnvCellDraws.length} missing ${missingResourceCells} depth ${maxDepth} masks ${plan.portalApertureMaskPasses.length} apertures ${plan.portalApertureGeometryResources.length} edges ${aperture.envCellPortalEdges} env / ${aperture.buildingTransitionEdges} transition dup ${aperture.duplicateMaskEdges} dedupe ${aperture.dedupedGeometryResources} roots ${aperture.transitionRootCount} resources ${structuredDrawUnits} cell / ${staticDrawUnits} static crossings ${plan.transitionSceneCrossings.length}`;
+		return `${plan.mode} base ${base} cells ${uniqueCells} views ${plan.directEnvCellDraws.length} missing ${missingResourceCells} depth ${maxDepth} masks ${plan.portalApertureMaskPasses.length} apertures ${plan.portalApertureGeometryResources.length} edges ${aperture.envCellPortalEdges} env / ${aperture.buildingTransitionEdges} transition dup ${aperture.duplicateMaskEdges} dedupe ${aperture.dedupedGeometryResources} roots ${aperture.transitionRootCount}/${aperture.transitionRootCandidateCount} reject ${aperture.transitionRootsRejectedNotSeenOutside} hidden / ${aperture.transitionRootsRejectedUnknownSeenOutside} unknown resources ${structuredDrawUnits} cell / ${staticDrawUnits} static crossings ${plan.transitionSceneCrossings.length}`;
 	}
 
 	function currentCameraEnvCellResourceTarget(): {

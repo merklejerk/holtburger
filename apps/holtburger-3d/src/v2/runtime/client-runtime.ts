@@ -15,6 +15,7 @@ import {
 } from "../renderer/portal-frame-work-plan";
 import {
 	createDirectEnvCellFramePlan,
+	createOutdoorVisibleEnvCellIds,
 	createOutdoorTransitionPortalFramePlan,
 } from "./direct-env-cell-frame-plan";
 import { formatHex32, normalizeOutdoorLandblockId } from "../../lib/landblocks";
@@ -988,8 +989,17 @@ class ClientRuntimeImpl implements ClientRuntime {
 				linkedEnvCellIds.length > 0 &&
 				this.#staticSceneQuery.hasCommittedPortalInteriorScene({ landblockId })
 			) {
+				const portalInteriorRecords =
+					this.#staticSceneQuery.queryPortalInteriorRecords({ landblockId });
+				const outdoorVisibleEnvCellIds = createOutdoorVisibleEnvCellIds(
+					portalInteriorRecords,
+					landblockId,
+				);
+				const outdoorVisibleLinkedEnvCellIds = linkedEnvCellIds.filter(
+					(envCellId) => outdoorVisibleEnvCellIds.has(envCellId >>> 0),
+				);
 				const traversalPlansByStartEnvCellId = new Map(
-					linkedEnvCellIds.map((envCellId) => [
+					outdoorVisibleLinkedEnvCellIds.map((envCellId) => [
 						envCellId,
 						this.#staticSceneQuery.queryPortalTraversal({
 							landblockId,
@@ -1002,8 +1012,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				);
 				const directPlan = createOutdoorTransitionPortalFramePlan({
 					landblockId,
-					portalInteriorRecords:
-						this.#staticSceneQuery.queryPortalInteriorRecords({ landblockId }),
+					portalInteriorRecords,
 					renderAnchorLandblockId: this.#renderAnchorLandblockId,
 					rendererEnvCellResourceMembership:
 						this.#lastRendererSnapshot.envCellResourceMembership,

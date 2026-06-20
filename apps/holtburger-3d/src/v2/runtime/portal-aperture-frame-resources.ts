@@ -79,7 +79,10 @@ export class PortalApertureFrameResourceBuilder {
 	}
 
 	build(options: {
+		readonly transitionRootCandidateCount: number;
 		readonly transitionRootCount: number;
+		readonly transitionRootsRejectedNotSeenOutside: number;
+		readonly transitionRootsRejectedUnknownSeenOutside: number;
 	}): PortalApertureFrameResourcePlan {
 		return {
 			diagnostics: {
@@ -92,7 +95,12 @@ export class PortalApertureFrameResourceBuilder {
 				envCellPortalEdges: this.#envCellPortalEdges,
 				selectedMaskEdges:
 					this.#buildingTransitionEdges + this.#envCellPortalEdges,
+				transitionRootCandidateCount: options.transitionRootCandidateCount,
 				transitionRootCount: options.transitionRootCount,
+				transitionRootsRejectedNotSeenOutside:
+					options.transitionRootsRejectedNotSeenOutside,
+				transitionRootsRejectedUnknownSeenOutside:
+					options.transitionRootsRejectedUnknownSeenOutside,
 			},
 			maskPasses: this.#maskPasses,
 			resources: this.#resources,
@@ -140,7 +148,10 @@ export function createEmptyPortalApertureFrameDiagnostics(): PortalApertureFrame
 		duplicateMaskEdges: 0,
 		envCellPortalEdges: 0,
 		selectedMaskEdges: 0,
+		transitionRootCandidateCount: 0,
 		transitionRootCount: 0,
+		transitionRootsRejectedNotSeenOutside: 0,
+		transitionRootsRejectedUnknownSeenOutside: 0,
 	};
 }
 

@@ -446,6 +446,7 @@ function createPortalInteriorRecord(options: {
 			localPlacement: createPlacement(),
 			portalApertures: [],
 			portals: [],
+			seenOutside: true,
 		})),
 		kind: "env-cell-portal-interior",
 		landblockId,

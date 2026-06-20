@@ -1046,6 +1046,7 @@ function createPortalInteriorRecord(
 			localPlacement: envCell.localPlacement,
 			portalApertures: envCell.portalApertures,
 			portals: envCell.portals,
+			seenOutside: envCell.seenOutside,
 		})),
 		kind: "env-cell-portal-interior",
 		landblockId: payload.landblock.landblockId,

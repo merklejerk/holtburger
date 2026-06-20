@@ -7,7 +7,6 @@ import type {
 	PortalFrameNodeResources,
 	PortalFrameSceneSource,
 	PortalFrameWorkPlan,
-	RendererEnvCellResourceMembership,
 } from "../renderer/types";
 import type {
 	StaticPortalInteriorRecord,
@@ -23,6 +22,7 @@ import type {
 } from "./static-scene-query";
 import { PortalApertureFrameResourceBuilder } from "./portal-aperture-frame-resources";
 import { createOutdoorLandblockRootTranslation } from "./static-placement";
+import type { EnvCellResourceMembership } from "./env-cell-resource-membership";
 
 type PortalAperture =
 	StaticPortalInteriorRecord["envCells"][number]["portalApertures"][number];
@@ -31,7 +31,7 @@ export interface DirectEnvCellFramePlanInput {
 	readonly currentCameraResidency: StaticSceneCameraResidency;
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly renderAnchorLandblockId: number | null;
-	readonly rendererEnvCellResourceMembership: readonly RendererEnvCellResourceMembership[];
+	readonly envCellResourceMembership: readonly EnvCellResourceMembership[];
 	readonly traversalPlan: PortalTraversalPlan;
 }
 
@@ -39,7 +39,7 @@ export interface OutdoorTransitionPortalFramePlanInput {
 	readonly landblockId: number;
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly renderAnchorLandblockId: number | null;
-	readonly rendererEnvCellResourceMembership: readonly RendererEnvCellResourceMembership[];
+	readonly envCellResourceMembership: readonly EnvCellResourceMembership[];
 	readonly transitionApertureBatches: readonly TransitionApertureBatch[];
 	readonly traversalPlansByStartEnvCellId: ReadonlyMap<
 		number,
@@ -50,7 +50,7 @@ export interface OutdoorTransitionPortalFramePlanInput {
 interface PortalFrameIndexes {
 	readonly membershipByLandblock: ReadonlyMap<
 		number,
-		ReadonlyMap<number, RendererEnvCellResourceMembership>
+		ReadonlyMap<number, EnvCellResourceMembership>
 	>;
 	readonly portalEnvCellsByLandblock: ReadonlyMap<
 		number,
@@ -398,13 +398,13 @@ export function createOutdoorVisibleEnvCellIds(
 
 function createPortalFrameIndexes(input: {
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
-	readonly rendererEnvCellResourceMembership: readonly RendererEnvCellResourceMembership[];
+	readonly envCellResourceMembership: readonly EnvCellResourceMembership[];
 }): PortalFrameIndexes {
 	const membershipByLandblock = new Map<
 		number,
-		Map<number, RendererEnvCellResourceMembership>
+		Map<number, EnvCellResourceMembership>
 	>();
-	for (const membership of input.rendererEnvCellResourceMembership) {
+	for (const membership of input.envCellResourceMembership) {
 		getOrCreateNestedMap(
 			membershipByLandblock,
 			membership.landblockId,

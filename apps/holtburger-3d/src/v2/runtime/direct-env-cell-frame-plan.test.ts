@@ -19,7 +19,7 @@ describe("direct env-cell frame plan", () => {
 			},
 			portalInteriorRecords: [],
 			renderAnchorLandblockId: null,
-			rendererEnvCellResourceMembership: [
+			envCellResourceMembership: [
 				{
 					envCellId: 0xda550100,
 					envCellStaticObjectDrawUnitIds: [],
@@ -79,7 +79,7 @@ describe("direct env-cell frame plan", () => {
 			},
 			portalInteriorRecords: [],
 			renderAnchorLandblockId: null,
-			rendererEnvCellResourceMembership: [
+			envCellResourceMembership: [
 				{
 					envCellId: 0xda550100,
 					envCellStaticObjectDrawUnitIds: ["static:da550100"],
@@ -160,7 +160,7 @@ describe("direct env-cell frame plan", () => {
 				}),
 			],
 			renderAnchorLandblockId: 0xda55ffff,
-			rendererEnvCellResourceMembership: [],
+			envCellResourceMembership: [],
 			traversalPlan: createTraversalPlan({
 				visibleCells: [
 					{
@@ -259,7 +259,7 @@ describe("direct env-cell frame plan", () => {
 				}),
 			],
 			renderAnchorLandblockId: 0xda55ffff,
-			rendererEnvCellResourceMembership: [
+			envCellResourceMembership: [
 				{
 					envCellId: 0xda550101,
 					envCellStaticObjectDrawUnitIds: [],
@@ -336,7 +336,7 @@ describe("direct env-cell frame plan", () => {
 				},
 				portalInteriorRecords: [],
 				renderAnchorLandblockId: null,
-				rendererEnvCellResourceMembership: [],
+				envCellResourceMembership: [],
 				traversalPlan: createTraversalPlan({
 					visibleCells: [
 						{
@@ -381,7 +381,7 @@ describe("direct env-cell frame plan", () => {
 				}),
 			],
 			renderAnchorLandblockId: 0xda55ffff,
-			rendererEnvCellResourceMembership: [
+			envCellResourceMembership: [
 				{
 					envCellId: 0xda550100,
 					envCellStaticObjectDrawUnitIds: [],
@@ -506,7 +506,7 @@ describe("direct env-cell frame plan", () => {
 				}),
 			],
 			renderAnchorLandblockId: 0xda55ffff,
-			rendererEnvCellResourceMembership: [
+			envCellResourceMembership: [
 				{
 					envCellId: 0xda550100,
 					envCellStaticObjectDrawUnitIds: [],

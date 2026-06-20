@@ -1385,6 +1385,7 @@ class FakeRenderer implements Renderer {
 			renderPassPlan: { kind: "single-surface-resident" },
 		},
 		renderedTriangles: 0,
+		directEnvCellDrawCalls: 0,
 		envCellResourceMembership: [],
 		sceneDomainTargets: {
 			active: false,

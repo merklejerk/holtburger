@@ -893,7 +893,7 @@ Follow-up debt:
 
 ### Phase 4B: Portal-Aware Single-Cell And Single-Hop Drawing
 
-Status: planned.
+Status: completed on 2026-06-20.
 
 Purpose: prove reachability-scoped env-cell submission before implementing recursive aperture-mask
 passes.
@@ -921,16 +921,119 @@ Acceptance criteria:
 - No frustum narrowing, screen-footprint rejection, or portal-polygon clipping is required for this
   phase.
 
-### Phase 4R: Reassessment After First Portal-Aware Drawing
+Implementation notes:
+
+- The V2 WebGL renderer now treats an active direct env-cell portal frame plan with an env-cell base
+  as the frame execution plan. It bypasses scene-domain target rendering and draws selected
+  structured-interior and env-cell static-object resources directly to the display framebuffer.
+- Direct submission uses the draw-unit ids carried by `PortalDirectEnvCellDrawRequest` and dedupes
+  repeated static/structured draw-unit ids before submission. Shared env-cell static resources are
+  therefore not drawn once per visible cell.
+- Legacy `RenderPassPlan` remains present in snapshots for comparison and fallback, but it no
+  longer drives rendering when a supported direct env-cell frame plan is active.
+- Renderer snapshots now expose direct env-cell draw-call counts, and Browser V2 shows this as
+  `Direct env draws` beside the portal frame summary.
+- Runtime renderer-snapshot handling now re-derives the portal frame work plan when renderer resource
+  membership changes, so direct plans can follow newly uploaded or removed env-cell resources.
+
+High-risk boundaries:
+
+- This phase draws selected cells without aperture clipping. Single-hop neighbors are submitted
+  directly into the same framebuffer, so Phase 5 still owns recursive stencil/aperture correctness.
+- Direct execution is intentionally limited to env-cell base plans with no transition scene
+  crossings. Outdoor bases and transition crossings still fall back to the legacy render-pass path.
+- If a direct plan references a draw-unit id that has disappeared from renderer resources, the
+  renderer skips that missing id rather than failing the frame. The runtime now reduces that window
+  by recomputing plans on renderer membership changes, but this should stay visible as a diagnostic
+  concern during Phase 5.
+- `renderedTriangles` still reports resident resource triangles, not the exact direct-submitted
+  triangle count. Use `Direct env draws` and the portal frame resource counts for Phase 4B browser
+  inspection.
+
+Verification:
+
+- `npm exec prettier -- --write ...`
+- `npm run test:ts -- ...`
+
+Follow-up debt:
+
+- Phase 5 must add per-edge aperture/stencil execution. Phase 4B intentionally does not mask
+  single-hop neighbor draws through portal polygons.
+- Phase 4C must address static-object draw units whose baked geometry spans multiple env cells. The
+  Phase 4B direct renderer can select draw-unit ids correctly, but a selected shared draw unit can
+  still contain unrelated-cell static geometry.
+- Add exact submitted-triangle/frame-resource diagnostics if Phase 4C browser inspection needs more
+  than draw-call counts and plan resource counts.
+- Transition crossings remain unsupported by the direct renderer path until Phase 6 unifies scene
+  crossings.
+
+### Phase 4C: Cell-Scoped Static Object Submission
+
+Status: planned.
+
+Purpose: make env-cell static-object submission match portal-selected env cells instead of drawing
+coarse static-object batches that happen to include the selected cell.
+
+Context:
+
+- Phase 4B proves traversal and direct renderer consumption: the current env-cell structure and
+  depth-1 neighbor structures are selected from the frame plan as intended.
+- Manual browser inspection after Phase 4B shows the remaining overdraw is largely static-object
+  geometry from coarse/shared env-cell static draw units.
+- A static-object draw unit can currently advertise multiple `ownership.envCellIds`, so selecting
+  the draw-unit id for one reachable env cell can submit geometry that belongs to another env cell.
+
+Deliverables:
+
+- Static-object bake or renderer-resource representation that can submit env-cell static geometry at
+  selected-cell granularity.
+- Preserve coarse material/texture batching where it does not cross selected env-cell boundaries at
+  submission time.
+- Renderer membership that distinguishes:
+  - static-object resources wholly owned by one env cell;
+  - static-object resources or slices shared across multiple env cells;
+  - selected submission units that are safe to draw for one portal-visible env cell.
+- Direct env-cell frame-plan consumption updated to submit only the static-object geometry belonging
+  to portal-selected env cells.
+- Browser diagnostics that make shared/sliced static-object resources visible enough to inspect
+  whether unrelated-cell statics are still being submitted.
+- Focused tests for shared static-object resources proving that selecting env cell A does not draw
+  env cell B static geometry from the same source/bake group.
+
+Acceptance criteria:
+
+- With Phase 4B direct drawing active, current-cell-only inspection does not render static-object
+  geometry owned only by unrelated env cells.
+- Single-hop inspection can still draw static objects for reachable neighbor env cells, but not
+  static objects from non-reachable resident cells.
+- Shared source/bake groups do not force the renderer to draw all member env cells when only one
+  member env cell is selected.
+- Material/texture batching remains reasonably coarse inside each selected env-cell submission unit;
+  this phase should not explode every object part into one draw unless source evidence leaves no
+  cleaner option.
+
+High-risk boundaries:
+
+- This phase is about env-cell static-object submission granularity, not aperture masking. Neighbor
+  statics can still appear outside their portal polygon until Phase 5 adds stencil/aperture passes.
+- The preferred implementation should split or slice static-object resources at bake/resource
+  preparation time, not add ad hoc per-frame CPU geometry filtering.
+- If static-object batching cannot be split cleanly without destabilizing material/texture payloads,
+  record the exact blocking resource shape and add a narrower proof phase before Phase 5.
+
+### Phase 4R: Reassessment After Cell-Scoped Direct Drawing
 
 Status: planned checkpoint.
 
-Purpose: decide whether the direct-env-cell drawing model is proving itself before adding recursive
-stencil complexity.
+Purpose: decide whether the direct-env-cell drawing model and env-cell static-object granularity are
+proving themselves before adding recursive stencil complexity.
 
 Questions to answer:
 
-- Did current-cell and single-hop drawing improve the tunnel/overlap target for the reason expected?
+- Did current-cell and single-hop drawing improve the tunnel/overlap target for the reason expected,
+  with both structures and static objects scoped to selected env cells?
+- Are remaining neighbor-cell visuals explained by intentional depth-1 traversal and missing
+  aperture masks, rather than coarse static-object draw units?
 - Are browser inspection affordances sufficient, or is env-cell click picking needed earlier than
   Phase 8 to keep work moving?
 - Is direct env-cell drawing under portal state still the right model, or did WebGL2 constraints
@@ -940,8 +1043,9 @@ Questions to answer:
 
 Exit criteria:
 
-- Either Phase 5 proceeds with a validated direct-draw execution model, or the plan is updated with
-  a narrower renderer/pass proof before recursive portal execution.
+- Either Phase 5 proceeds with a validated direct-draw execution model and cell-scoped static-object
+  submission, or the plan is updated with a narrower renderer/resource proof before recursive portal
+  execution.
 
 ### Phase 5: Recursive Reachability And Aperture-Mask Execution
 

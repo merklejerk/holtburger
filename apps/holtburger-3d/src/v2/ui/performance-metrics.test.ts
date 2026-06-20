@@ -85,6 +85,7 @@ function createRendererSnapshot(
 			interiorDrawCalls: 0,
 			width: 0,
 		},
+		directEnvCellDrawCalls: 0,
 		staticDrawUnits: 0,
 		terrainDrawUnits: 0,
 		...overrides,

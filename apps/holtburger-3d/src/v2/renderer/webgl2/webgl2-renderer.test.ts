@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
+	StaticObjectGeometryStaticDrawUnit,
 	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
 	TransitionApertureBatch,
@@ -395,6 +396,65 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
+	it("reports resident env-cell resource membership from uploaded draw units", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+		let latestSnapshot = rendererSnapshotPlaceholder();
+		renderer.subscribe((snapshot) => {
+			latestSnapshot = snapshot;
+		});
+
+		renderer.applyStaticDelta({
+			addedDrawUnits: [
+				createStructuredInteriorDrawUnit(),
+				createEnvCellStaticObjectDrawUnit(
+					"env-static-a",
+					[0xda550100, 0xda550101],
+				),
+			],
+			addedTransitionApertureBatches: [],
+			removedDrawUnitIds: [],
+			removedTransitionApertureBatchIds: [],
+			revision: 1,
+		});
+
+		expect(latestSnapshot.envCellResourceMembership).toEqual([
+			{
+				envCellId: 0xda550100,
+				envCellStaticObjectDrawUnitIds: ["env-static-a"],
+				landblockId: 0xda55ffff,
+				sharedEnvCellStaticObjectDrawUnits: 1,
+				structuredInteriorDrawUnitIds: ["structured-interior-a"],
+			},
+			{
+				envCellId: 0xda550101,
+				envCellStaticObjectDrawUnitIds: ["env-static-a"],
+				landblockId: 0xda55ffff,
+				sharedEnvCellStaticObjectDrawUnits: 1,
+				structuredInteriorDrawUnitIds: [],
+			},
+		]);
+
+		renderer.applyStaticDelta({
+			addedDrawUnits: [],
+			addedTransitionApertureBatches: [],
+			removedDrawUnitIds: ["structured-interior-a", "env-static-a"],
+			removedTransitionApertureBatchIds: [],
+			revision: 2,
+		});
+
+		expect(latestSnapshot.envCellResourceMembership).toEqual([]);
+
+		renderer.dispose();
+	});
+
 	it("enables backface culling for structured interiors in flat vision mode", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
@@ -608,6 +668,116 @@ function createStructuredInteriorDrawUnit(): StructuredInteriorGeometryStaticDra
 	};
 }
 
+function createEnvCellStaticObjectDrawUnit(
+	drawUnitId: string,
+	envCellIds: readonly number[],
+): StaticObjectGeometryStaticDrawUnit {
+	const renderState = {
+		blend: {
+			dstFactor: null,
+			enabled: false,
+			mode: "opaque" as const,
+			srcFactor: null,
+		},
+		depthTest: true as const,
+		depthWrite: true,
+	};
+	const object = {
+		instanceId: `${drawUnitId}:seed`,
+		kind: "static-object-instance" as const,
+		landblockId: 0xda55ffff,
+		objectKind: "explicit-object" as const,
+	};
+
+	return {
+		alphaTest: 0,
+		coordinateSpace: "landblock-render-local",
+		detailTextureTiling: 1,
+		detailTextureUseId: null,
+		domain: "landblock-env-cells",
+		drawUnitId,
+		indexTextureUseId: null,
+		indexType: "uint16",
+		indexedClipThreshold: 0,
+		indexedTextureFormat: null,
+		indices: new Uint16Array([0, 1, 2]),
+		kind: "static-object-geometry",
+		landblockId: 0xda55ffff,
+		materialBucketKey: "family:flat-color|pass:opaque|material:08000010",
+		materialColor: [1, 1, 1, 1],
+		materialEmissiveColor: [0, 0, 0],
+		materialEntries: [
+			{
+				alphaTest: 0,
+				detailTextureTiling: 1,
+				detailTextureUseId: null,
+				indexTextureUseId: null,
+				indexedClipThreshold: 0,
+				indexedTextureFormat: null,
+				materialColor: [1, 1, 1, 1],
+				materialEmissiveColor: [0, 0, 0],
+				materialIds: [0x08000010],
+				paletteFirstIndex: 0,
+				paletteTextureUseId: null,
+				primaryTextureUseId: null,
+				primaryTextureWrapMode: "clamp",
+				renderState,
+				slot: 0,
+			},
+		],
+		materialFamily: "flat-color",
+		materialIds: [0x08000010],
+		materialPass: "opaque",
+		materialSlotIndices: new Float32Array([0, 0, 0]),
+		ownership: {
+			envCellIds,
+			kind: "env-cell-static-object-seeds",
+			landblockId: 0xda55ffff,
+			seedIdentities: [object],
+		},
+		paletteFirstIndex: 0,
+		paletteTextureUseId: null,
+		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+		primaryTextureUseId: null,
+		primaryTextureWrapMode: "clamp",
+		renderState,
+		sort: {
+			bounds: null,
+			center: [0, 0, 0],
+			objectPartKey: null,
+			policy: "depth-writing",
+		},
+		sourceMappingCoverage: [
+			{
+				geometrySurfaceIds: [0],
+				gfxObj: {
+					kind: "static-object-source",
+					sourceAssetKind: "gfx-obj",
+					sourceDid: 0x01000020,
+				},
+				materialIds: [0x08000010],
+				materialSlot: 0,
+				materialVariantSignatures: [null],
+				object,
+				partIndex: 0,
+				polygonCount: 1,
+				polygonRange: { max: 0, min: 0 },
+				source: {
+					kind: "static-object-source",
+					sourceAssetKind: "setup-model",
+					sourceDid: 0x02000010,
+				},
+				sourceTriangleCount: 1,
+			},
+		],
+		spatialRecord: null,
+		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
+		textureUseIds: [],
+		triangleCount: 1,
+		vertexCount: 3,
+	};
+}
+
 function createTerrainDrawUnit(): TerrainGeometryStaticDrawUnit {
 	return {
 		coordinateSpace: "landblock-render-local",
@@ -710,6 +880,7 @@ function rendererSnapshotPlaceholder() {
 			interiorDrawCalls: 0,
 			width: 0,
 		},
+		envCellResourceMembership: [],
 		staticDrawUnits: 0,
 		terrainDrawUnits: 0,
 		transitionApertureBatches: 0,

@@ -2525,10 +2525,6 @@ function isAcceptedEnvCellId(
 	return acceptedEnvCellIds.size === 0 || acceptedEnvCellIds.has(envCellId);
 }
 
-function formatHex32(value: number): string {
-	return `0x${(value >>> 0).toString(16).padStart(8, "0")}`;
-}
-
 function createEnvCellStaticObjectBoundsKey(input: {
 	readonly landblockId: number;
 	readonly envCellId: number;
@@ -2542,17 +2538,6 @@ function parseEnvCellStaticObjectBoundsKeyLandblockId(
 ): number | null {
 	const landblockId = Number.parseInt(key.split(":", 1)[0] ?? "", 10);
 	return Number.isFinite(landblockId) ? landblockId : null;
-}
-
-function parseEnvCellStaticObjectBoundsKey(
-	key: string,
-): { readonly landblockId: number; readonly envCellId: number } | null {
-	const [landblockIdText, envCellIdText] = key.split(":", 3);
-	const landblockId = Number.parseInt(landblockIdText ?? "", 10);
-	const envCellId = Number.parseInt(envCellIdText ?? "", 10);
-	return Number.isFinite(landblockId) && Number.isFinite(envCellId)
-		? { envCellId, landblockId }
-		: null;
 }
 
 function createCommittedSpatialRecordKey(record: StaticSpatialRecord): string {

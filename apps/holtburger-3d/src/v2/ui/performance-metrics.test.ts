@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { RendererSnapshot } from "../renderer/types";
+import type { RendererFrameTelemetry } from "../renderer/types";
 import { PerformanceMetricsTracker } from "./performance-metrics";
 
 describe("V2 performance metrics tracker", () => {
@@ -11,7 +11,7 @@ describe("V2 performance metrics tracker", () => {
 			sampleMs: 100,
 		});
 
-		expect(tracker.update(createRendererSnapshot({ frameCount: 0 }))).toEqual({
+		expect(tracker.update(createFrameTelemetry({ frameCount: 0 }))).toEqual({
 			fps: 0,
 			frameMs: 0,
 			handlerMs: 1,
@@ -20,7 +20,7 @@ describe("V2 performance metrics tracker", () => {
 		nowMs = 50;
 		expect(
 			tracker.update(
-				createRendererSnapshot({ frameCount: 3, frameHandlerMs: 3 }),
+				createFrameTelemetry({ frameCount: 3, frameHandlerMs: 3 }),
 			),
 		).toEqual({
 			fps: 0,
@@ -31,7 +31,7 @@ describe("V2 performance metrics tracker", () => {
 		nowMs = 100;
 		expect(
 			tracker.update(
-				createRendererSnapshot({ frameCount: 6, frameHandlerMs: 4 }),
+				createFrameTelemetry({ frameCount: 6, frameHandlerMs: 4 }),
 			),
 		).toEqual({
 			fps: 60,
@@ -42,7 +42,7 @@ describe("V2 performance metrics tracker", () => {
 		nowMs = 200;
 		expect(
 			tracker.update(
-				createRendererSnapshot({ frameCount: 9, frameHandlerMs: 7 }),
+				createFrameTelemetry({ frameCount: 9, frameHandlerMs: 7 }),
 			),
 		).toEqual({
 			fps: 45,
@@ -52,42 +52,13 @@ describe("V2 performance metrics tracker", () => {
 	});
 });
 
-function createRendererSnapshot(
-	overrides: Partial<RendererSnapshot>,
-): RendererSnapshot {
+function createFrameTelemetry(
+	overrides: Partial<RendererFrameTelemetry>,
+): RendererFrameTelemetry {
 	return {
-		backend: "webgl2",
-		canvasHeight: 1,
-		canvasWidth: 1,
-		debugOverlayPrimitives: 0,
-		error: null,
+		directEnvCellDrawCalls: 0,
 		frameCount: 0,
 		frameHandlerMs: 1,
-		isRunning: true,
-		renderPassPlan: { kind: "single-surface-resident" },
-		portalFrameWorkPlan: {
-			kind: "legacy-render-pass",
-			mode: "single-surface-resident",
-			renderPassPlan: { kind: "single-surface-resident" },
-		},
-		renderedTriangles: 0,
-		envCellResourceMembership: [],
-		sceneDomainTargets: {
-			active: false,
-			apertureBatchDrawCalls: 0,
-			colorFormat: "rgb8",
-			compositePasses: 0,
-			compositingMode: "none",
-			depthFormat: "depth-component24",
-			executedCompositeDepth: 0,
-			exteriorDrawCalls: 0,
-			height: 0,
-			interiorDrawCalls: 0,
-			width: 0,
-		},
-		directEnvCellDrawCalls: 0,
-		staticDrawUnits: 0,
-		terrainDrawUnits: 0,
 		...overrides,
 	};
 }

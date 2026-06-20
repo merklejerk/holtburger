@@ -160,7 +160,15 @@ export interface RendererSnapshot {
 	readonly debugOverlayPrimitives: number;
 }
 
-export type RendererSnapshotListener = (snapshot: RendererSnapshot) => void;
+export interface RendererFrameTelemetry {
+	readonly frameCount: number;
+	readonly frameHandlerMs: number;
+	readonly directEnvCellDrawCalls: number;
+}
+
+export type RendererFrameTelemetryListener = (
+	telemetry: RendererFrameTelemetry,
+) => void;
 
 export interface RendererEnvCellResourceMembership {
 	readonly landblockId: number;
@@ -310,6 +318,7 @@ export interface Renderer {
 	setPortalFrameWorkPlan(plan: PortalFrameWorkPlan): void;
 	setDebugOverlayPrimitives(primitives: readonly DebugOverlayPrimitive[]): void;
 	updateFrameState(state: FrameState): void;
-	subscribe(listener: RendererSnapshotListener): () => void;
+	subscribeTelemetry(listener: RendererFrameTelemetryListener): () => void;
+	createDiagnosticsSnapshot(): RendererSnapshot;
 	dispose(): void;
 }

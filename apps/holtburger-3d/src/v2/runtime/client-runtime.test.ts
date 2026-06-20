@@ -10,8 +10,9 @@ import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
 import type {
 	DebugOverlayPrimitive,
 	Renderer,
+	RendererFrameTelemetry,
+	RendererFrameTelemetryListener,
 	RendererSnapshot,
-	RendererSnapshotListener,
 	PortalFrameWorkPlan,
 	RendererEnvCellResourceMembership,
 	RenderPassPlan,
@@ -198,6 +199,56 @@ describe("V2 client runtime", () => {
 		);
 
 		unsubscribe();
+		runtime.dispose();
+	});
+
+	it("keeps renderer frame telemetry out of runtime snapshot planning", () => {
+		const renderer = new FakeRenderer();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker: new DeferredStaticBaker(),
+				resolver: new DeferredStaticResolver(),
+			}),
+		});
+		const snapshots: RuntimeSnapshot[] = [];
+		const frameTelemetry: RendererFrameTelemetry[] = [];
+		const unsubscribeSnapshot = runtime.subscribe((nextSnapshot) => {
+			snapshots.push(nextSnapshot);
+		});
+		const unsubscribeFrameTelemetry = runtime.subscribeFrameTelemetry(
+			(telemetry) => {
+				frameTelemetry.push(telemetry);
+			},
+		);
+		const diagnosticsSnapshotCount = renderer.diagnosticsSnapshotCount;
+		const renderPassPlanCount = renderer.renderPassPlans.length;
+		const portalFrameWorkPlanCount = renderer.portalFrameWorkPlans.length;
+
+		renderer.emitFrameTelemetry({
+			directEnvCellDrawCalls: 3,
+			frameCount: 42,
+			frameHandlerMs: 1.5,
+		});
+
+		expect(frameTelemetry).toEqual([
+			{
+				directEnvCellDrawCalls: 3,
+				frameCount: 42,
+				frameHandlerMs: 1.5,
+			},
+		]);
+		expect(snapshots).toHaveLength(1);
+		expect(renderer.diagnosticsSnapshotCount).toBe(diagnosticsSnapshotCount);
+		expect(renderer.renderPassPlans).toHaveLength(renderPassPlanCount);
+		expect(renderer.portalFrameWorkPlans).toHaveLength(
+			portalFrameWorkPlanCount,
+		);
+
+		unsubscribeFrameTelemetry();
+		unsubscribeSnapshot();
 		runtime.dispose();
 	});
 
@@ -1424,7 +1475,8 @@ class FakeRenderer implements Renderer {
 	readonly renderPassPlans: RenderPassPlan[] = [];
 	readonly portalFrameWorkPlans: PortalFrameWorkPlan[] = [];
 	readonly events: string[] = [];
-	readonly #listeners = new Set<RendererSnapshotListener>();
+	readonly #telemetryListeners = new Set<RendererFrameTelemetryListener>();
+	diagnosticsSnapshotCount = 0;
 	#snapshot: RendererSnapshot = {
 		backend: "webgl2",
 		canvasHeight: 1,
@@ -1449,7 +1501,7 @@ class FakeRenderer implements Renderer {
 			colorFormat: "rgb8",
 			compositePasses: 0,
 			compositingMode: "none",
-			depthFormat: "depth-component24",
+			depthFormat: "depth24-stencil8",
 			executedCompositeDepth: 0,
 			exteriorDrawCalls: 0,
 			height: 0,
@@ -1500,7 +1552,6 @@ class FakeRenderer implements Renderer {
 			...this.#snapshot,
 			envCellResourceMembership: memberships,
 		};
-		this.#emit();
 	}
 	setFlatVisionModeEnabled(): void {}
 	setRenderPassPlan(plan: RenderPassPlan): void {
@@ -1509,7 +1560,6 @@ class FakeRenderer implements Renderer {
 			...this.#snapshot,
 			renderPassPlan: plan,
 		};
-		this.#emit();
 	}
 	setPortalFrameWorkPlan(plan: PortalFrameWorkPlan): void {
 		this.portalFrameWorkPlans.push(plan);
@@ -1517,7 +1567,6 @@ class FakeRenderer implements Renderer {
 			...this.#snapshot,
 			portalFrameWorkPlan: plan,
 		};
-		this.#emit();
 	}
 	setDebugOverlayPrimitives(
 		primitives: readonly DebugOverlayPrimitive[],
@@ -1530,12 +1579,29 @@ class FakeRenderer implements Renderer {
 	}
 	updateFrameState(): void {}
 
-	subscribe(listener: RendererSnapshotListener): () => void {
-		this.#listeners.add(listener);
-		listener(this.#snapshot);
+	subscribeTelemetry(listener: RendererFrameTelemetryListener): () => void {
+		this.#telemetryListeners.add(listener);
+		listener(this.#createFrameTelemetry());
 		return () => {
-			this.#listeners.delete(listener);
+			this.#telemetryListeners.delete(listener);
 		};
+	}
+
+	createDiagnosticsSnapshot(): RendererSnapshot {
+		this.diagnosticsSnapshotCount += 1;
+		return this.#snapshot;
+	}
+
+	emitFrameTelemetry(
+		telemetry: Partial<RendererFrameTelemetry> = {},
+	): void {
+		const nextTelemetry = {
+			...this.#createFrameTelemetry(),
+			...telemetry,
+		};
+		for (const listener of this.#telemetryListeners) {
+			listener(nextTelemetry);
+		}
 	}
 
 	dispose(): void {
@@ -1545,11 +1611,12 @@ class FakeRenderer implements Renderer {
 		};
 	}
 
-	#emit(): void {
-		const snapshot = this.#snapshot;
-		for (const listener of this.#listeners) {
-			listener(snapshot);
-		}
+	#createFrameTelemetry(): RendererFrameTelemetry {
+		return {
+			directEnvCellDrawCalls: this.#snapshot.directEnvCellDrawCalls,
+			frameCount: this.#snapshot.frameCount,
+			frameHandlerMs: this.#snapshot.frameHandlerMs,
+		};
 	}
 }
 

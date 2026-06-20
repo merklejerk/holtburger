@@ -3,10 +3,11 @@ import type { AssetService, AssetServiceSnapshot } from "../assets/contracts";
 import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
 import type {
 	Renderer,
+	RendererEnvCellResourceMembership,
+	RendererFrameTelemetry,
 	RendererSnapshot,
 	RenderPassPlan,
 	PortalFrameWorkPlan,
-	SceneDomainTargetSnapshot,
 } from "../renderer/types";
 import type { DebugOverlayPrimitive, FrameState } from "../renderer/types";
 import {
@@ -385,6 +386,9 @@ interface EnvCellPortalPickTarget {
 
 type RuntimeSnapshotListener = (snapshot: RuntimeSnapshot) => void;
 type RuntimeEventListener = (event: RuntimeEvent) => void;
+type RuntimeFrameTelemetryListener = (
+	telemetry: RendererFrameTelemetry,
+) => void;
 
 interface RuntimeRenderPolicySnapshot {
 	readonly textureFilteringMode: TextureFilteringMode;
@@ -439,6 +443,7 @@ export interface ClientRuntime {
 	updateFrameState(state: FrameState): void;
 	createDiagnosticsReport(): RuntimeDiagnosticsReport;
 	subscribe(listener: RuntimeSnapshotListener): () => void;
+	subscribeFrameTelemetry(listener: RuntimeFrameTelemetryListener): () => void;
 	subscribeEvents(listener: RuntimeEventListener): () => void;
 	dispose(): void;
 }
@@ -485,8 +490,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #staticCoordinator: StaticCoordinator;
 	readonly #staticSceneQuery = new StaticSceneQuery();
 	readonly #listeners = new Set<RuntimeSnapshotListener>();
+	readonly #frameTelemetryListeners = new Set<RuntimeFrameTelemetryListener>();
 	readonly #eventListeners = new Set<RuntimeEventListener>();
-	readonly #unsubscribeRenderer: () => void;
+	readonly #unsubscribeRendererTelemetry: () => void;
 	readonly #unsubscribeStaticCoordinator: () => void;
 	readonly #unsubscribeStaticCommits: () => void;
 	readonly #unsubscribeStaticSourcePayloads: () => void;
@@ -495,6 +501,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 	>;
 	#lastRendererSnapshot: RendererSnapshot;
 	#lastStaticSnapshot: StaticCoordinatorSnapshot;
+	#currentRenderPassPlan: RenderPassPlan = { kind: "single-surface-resident" };
+	#currentPortalFrameWorkPlan: PortalFrameWorkPlan =
+		createLegacyPortalFrameWorkPlan({
+			flatVisionModeEnabled: false,
+			renderPassPlan: { kind: "single-surface-resident" },
+		});
 	#sceneInterest: RuntimeSceneInterest = { kind: "none" };
 	#sceneInterestRevision = 0;
 	#settledSceneInterestRevision = 0;
@@ -553,36 +565,16 @@ class ClientRuntimeImpl implements ClientRuntime {
 					staticBatchId,
 				),
 		);
-		this.#lastRendererSnapshot = {
-			backend: "webgl2",
-			canvasWidth: 0,
-			canvasHeight: 0,
-			debugOverlayPrimitives: 0,
-			error: null,
-			frameCount: 0,
-			frameHandlerMs: 0,
-			isRunning: true,
-			renderPassPlan: { kind: "single-surface-resident" },
-			portalFrameWorkPlan: createLegacyPortalFrameWorkPlan({
-				flatVisionModeEnabled: false,
-				renderPassPlan: { kind: "single-surface-resident" },
-			}),
-			renderedTriangles: 0,
-			sceneDomainTargets: createEmptySceneDomainTargetSnapshot(),
-			envCellResourceMembership: [],
-			staticDrawUnits: 0,
-			terrainDrawUnits: 0,
-			transitionApertureBatches: 0,
-			transitionApertures: 0,
-			directEnvCellDrawCalls: 0,
-		};
+		this.#lastRendererSnapshot = renderer.createDiagnosticsSnapshot();
+		this.#currentRenderPassPlan = this.#lastRendererSnapshot.renderPassPlan;
+		this.#currentPortalFrameWorkPlan =
+			this.#lastRendererSnapshot.portalFrameWorkPlan;
 		this.#lastStaticSnapshot = staticCoordinator.createSnapshot();
-		this.#unsubscribeRenderer = renderer.subscribe((snapshot) => {
-			this.#lastRendererSnapshot = snapshot;
-			if (!this.#updateRenderPassPlan()) {
-				this.#emit();
-			}
-		});
+		this.#unsubscribeRendererTelemetry = renderer.subscribeTelemetry(
+			(telemetry) => {
+				this.#emitFrameTelemetry(telemetry);
+			},
+		);
 		this.#unsubscribeStaticCoordinator = staticCoordinator.subscribe(
 			(snapshot) => {
 				this.#lastStaticSnapshot = snapshot;
@@ -682,11 +674,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 
 		this.#currentCameraResidency = normalized;
-		const renderPassPlanChanged = this.#updateRenderPassPlan();
+		this.#updateRenderPassPlan();
 		this.#refreshStaticDebugOverlay();
-		if (!renderPassPlanChanged) {
-			this.#emit();
-		}
+		this.#emit();
 	}
 
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null {
@@ -761,10 +751,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 			return;
 		}
 		this.#directEnvCellPortalMaxDepth = normalizedMaxDepth;
-		const renderPassPlanChanged = this.#updateRenderPassPlan();
-		if (!renderPassPlanChanged) {
-			this.#emit();
-		}
+		this.#updateRenderPassPlan();
+		this.#emit();
 	}
 
 	setFlatVisionModeEnabled(enabled: boolean): void {
@@ -774,10 +762,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 		this.#flatVisionModeEnabled = enabled;
 		this.#renderer.setFlatVisionModeEnabled(enabled);
-		const renderPassPlanChanged = this.#updateRenderPassPlan();
-		if (!renderPassPlanChanged) {
-			this.#emit();
-		}
+		this.#updateRenderPassPlan();
+		this.#emit();
 	}
 
 	setTransitionApertureDebugOverlayVisible(visible: boolean): void {
@@ -824,7 +810,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				createAssetServiceDiagnosticsReport(snapshot.assets),
 				{
 					kind: "renderer",
-					summary: this.#lastRendererSnapshot,
+					summary: snapshot.renderer,
 				},
 				{
 					kind: "static-coordinator",
@@ -864,6 +850,16 @@ class ClientRuntimeImpl implements ClientRuntime {
 		};
 	}
 
+	subscribeFrameTelemetry(
+		listener: RuntimeFrameTelemetryListener,
+	): () => void {
+		this.#frameTelemetryListeners.add(listener);
+
+		return () => {
+			this.#frameTelemetryListeners.delete(listener);
+		};
+	}
+
 	subscribeEvents(listener: RuntimeEventListener): () => void {
 		this.#eventListeners.add(listener);
 
@@ -878,7 +874,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 
 		this.#disposed = true;
-		this.#unsubscribeRenderer();
+		this.#unsubscribeRendererTelemetry();
 		this.#unsubscribeStaticCoordinator();
 		this.#unsubscribeStaticCommits();
 		this.#unsubscribeStaticSourcePayloads();
@@ -889,6 +885,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#renderer.dispose();
 		this.#emit();
 		this.#listeners.clear();
+		this.#frameTelemetryListeners.clear();
 		this.#eventListeners.clear();
 	}
 
@@ -926,21 +923,21 @@ class ClientRuntimeImpl implements ClientRuntime {
 			? ({ kind: "single-surface-resident" } satisfies RenderPassPlan)
 			: this.#deriveRenderPassPlan();
 		let changed = false;
-		if (
-			!renderPassPlanEquals(this.#lastRendererSnapshot.renderPassPlan, plan)
-		) {
+		if (!renderPassPlanEquals(this.#currentRenderPassPlan, plan)) {
 			this.#renderer.setRenderPassPlan(plan);
+			this.#currentRenderPassPlan = plan;
 			changed = true;
 		}
 
 		const portalFrameWorkPlan = this.#derivePortalFrameWorkPlan(plan);
 		if (
 			!portalFrameWorkPlanEquals(
-				this.#lastRendererSnapshot.portalFrameWorkPlan,
+				this.#currentPortalFrameWorkPlan,
 				portalFrameWorkPlan,
 			)
 		) {
 			this.#renderer.setPortalFrameWorkPlan(portalFrameWorkPlan);
+			this.#currentPortalFrameWorkPlan = portalFrameWorkPlan;
 			changed = true;
 		}
 
@@ -965,7 +962,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					}),
 				renderAnchorLandblockId: this.#renderAnchorLandblockId,
 				rendererEnvCellResourceMembership:
-					this.#lastRendererSnapshot.envCellResourceMembership,
+					this.#queryRendererEnvCellResourceMembership(),
 				traversalPlan: this.#staticSceneQuery.queryPortalTraversal({
 					landblockId: this.#currentCameraResidency.landblockId,
 					maxCells: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
@@ -1024,7 +1021,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					portalInteriorRecords,
 					renderAnchorLandblockId: this.#renderAnchorLandblockId,
 					rendererEnvCellResourceMembership:
-						this.#lastRendererSnapshot.envCellResourceMembership,
+						this.#queryRendererEnvCellResourceMembership(),
 					transitionApertureBatches,
 					traversalPlansByStartEnvCellId,
 				});
@@ -1052,7 +1049,18 @@ class ClientRuntimeImpl implements ClientRuntime {
 		return plan;
 	}
 
+	#queryRendererEnvCellResourceMembership(): readonly RendererEnvCellResourceMembership[] {
+		return this.#refreshRendererDiagnosticsSnapshot()
+			.envCellResourceMembership;
+	}
+
+	#refreshRendererDiagnosticsSnapshot(): RendererSnapshot {
+		this.#lastRendererSnapshot = this.#renderer.createDiagnosticsSnapshot();
+		return this.#lastRendererSnapshot;
+	}
+
 	#createSnapshot(): RuntimeSnapshot {
+		const rendererSnapshot = this.#refreshRendererDiagnosticsSnapshot();
 		return {
 			assets: this.#assetService.createSnapshot(),
 			currentCameraResidency: this.#currentCameraResidency,
@@ -1077,12 +1085,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 				transitionAperturesVisible: this.#transitionApertureDebugOverlayVisible,
 			},
 			host: this.#host.createSnapshot(),
-			portalFrameWorkPlan: this.#lastRendererSnapshot.portalFrameWorkPlan,
-			renderPassPlan: this.#lastRendererSnapshot.renderPassPlan,
+			portalFrameWorkPlan: this.#currentPortalFrameWorkPlan,
+			renderPassPlan: this.#currentRenderPassPlan,
 			renderPolicy: {
 				textureFilteringMode: this.#textureManager.filteringMode,
 			},
-			renderer: this.#lastRendererSnapshot,
+			renderer: rendererSnapshot,
 			sceneInterest: this.#sceneInterest,
 			static: this.#lastStaticSnapshot,
 			staticSceneQuery: this.#staticSceneQuery.createSnapshot(),
@@ -1110,6 +1118,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 		for (const listener of this.#listeners) {
 			listener(snapshot);
+		}
+	}
+
+	#emitFrameTelemetry(telemetry: RendererFrameTelemetry): void {
+		for (const listener of this.#frameTelemetryListeners) {
+			listener(telemetry);
 		}
 	}
 
@@ -2656,22 +2670,6 @@ function renderPassPlanEquals(
 	}
 
 	return leftBase.envCellId === rightBase.envCellId;
-}
-
-function createEmptySceneDomainTargetSnapshot(): SceneDomainTargetSnapshot {
-	return {
-		active: false,
-		apertureBatchDrawCalls: 0,
-		colorFormat: "rgb8",
-		compositePasses: 0,
-		compositingMode: "none",
-		depthFormat: "depth24-stencil8",
-		executedCompositeDepth: 0,
-		exteriorDrawCalls: 0,
-		height: 0,
-		interiorDrawCalls: 0,
-		width: 0,
-	};
 }
 
 function cameraResidencyEquals(

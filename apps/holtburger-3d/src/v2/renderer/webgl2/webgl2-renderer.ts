@@ -2,8 +2,9 @@ import type {
 	DebugOverlayPrimitive,
 	FrameState,
 	Renderer,
+	RendererFrameTelemetry,
+	RendererFrameTelemetryListener,
 	RendererSnapshot,
-	RendererSnapshotListener,
 	RenderPassPlan,
 	PortalFrameEdgePlan,
 	PortalApertureGeometryResourcePlan,
@@ -701,7 +702,7 @@ export function createWebgl2Renderer(canvas: HTMLCanvasElement): Renderer {
 class Webgl2Renderer implements Renderer {
 	readonly #canvas: HTMLCanvasElement;
 	readonly #gl: WebGL2RenderingContext;
-	readonly #listeners = new Set<RendererSnapshotListener>();
+	readonly #telemetryListeners = new Set<RendererFrameTelemetryListener>();
 	readonly #terrainResources = new Map<string, TerrainGeometryResource>();
 	readonly #staticObjectResources = new Map<
 		string,
@@ -865,8 +866,6 @@ class Webgl2Renderer implements Renderer {
 		) {
 			this.#stateCache.invalidate();
 		}
-
-		this.#emit();
 	}
 
 	applyDynamicDelta(): void {
@@ -875,7 +874,6 @@ class Webgl2Renderer implements Renderer {
 
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void {
 		this.#staticRenderAnchorLandblockId = anchorLandblockId;
-		this.#emit();
 	}
 
 	setFlatVisionModeEnabled(enabled: boolean): void {
@@ -884,17 +882,14 @@ class Webgl2Renderer implements Renderer {
 		}
 		this.#flatVisionModeEnabled = enabled;
 		this.#stateCache.invalidate();
-		this.#emit();
 	}
 
 	setRenderPassPlan(plan: RenderPassPlan): void {
 		this.#renderPassPlan = plan;
-		this.#emit();
 	}
 
 	setPortalFrameWorkPlan(plan: PortalFrameWorkPlan): void {
 		this.#portalFrameWorkPlan = plan;
-		this.#emit();
 	}
 
 	setDebugOverlayPrimitives(
@@ -911,7 +906,6 @@ class Webgl2Renderer implements Renderer {
 		this.#debugOverlayPrimitiveCount = primitives.length;
 		this.#debugOverlayTriangleVertexCount = overlay.triangleVertexCount;
 		this.#debugOverlayLineVertexCount = overlay.lineVertexCount;
-		this.#emit();
 	}
 
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void {
@@ -983,13 +977,17 @@ class Webgl2Renderer implements Renderer {
 		this.#frameState = state;
 	}
 
-	subscribe(listener: RendererSnapshotListener): () => void {
-		this.#listeners.add(listener);
-		listener(this.#createSnapshot());
+	subscribeTelemetry(listener: RendererFrameTelemetryListener): () => void {
+		this.#telemetryListeners.add(listener);
+		listener(this.#createFrameTelemetry());
 
 		return () => {
-			this.#listeners.delete(listener);
+			this.#telemetryListeners.delete(listener);
 		};
+	}
+
+	createDiagnosticsSnapshot(): RendererSnapshot {
+		return this.#createSnapshot();
 	}
 
 	dispose(): void {
@@ -1036,7 +1034,7 @@ class Webgl2Renderer implements Renderer {
 		this.#gl.deleteVertexArray(this.#portalApertureVertexArray);
 		this.#gl.deleteVertexArray(this.#debugOverlayVertexArray);
 		this.#gl.deleteVertexArray(this.#sourceSceneCopyVertexArray);
-		this.#listeners.clear();
+		this.#telemetryListeners.clear();
 	}
 
 	#startFrameLoop(): void {
@@ -1050,12 +1048,12 @@ class Webgl2Renderer implements Renderer {
 				this.#render(timestampMilliseconds / 1000);
 			} catch (error) {
 				this.#error = error instanceof Error ? error.message : String(error);
-				this.#emit();
+				this.#emitFrameTelemetry();
 				this.dispose();
 				return;
 			}
 			this.#frameHandlerMs = performance.now() - startedAt;
-			this.#emit();
+			this.#emitFrameTelemetry();
 
 			this.#animationFrameId = requestAnimationFrame(renderFrame);
 		};
@@ -2209,6 +2207,14 @@ class Webgl2Renderer implements Renderer {
 		};
 	}
 
+	#createFrameTelemetry(): RendererFrameTelemetry {
+		return {
+			directEnvCellDrawCalls: this.#lastDirectEnvCellDrawCalls,
+			frameCount: this.#frameCount,
+			frameHandlerMs: this.#frameHandlerMs,
+		};
+	}
+
 	#addStaticObjectResource(resource: StaticObjectGeometryResource): void {
 		this.#staticObjectResources.set(resource.drawUnitId, resource);
 		for (const envCellId of resource.envCellIds) {
@@ -2291,11 +2297,11 @@ class Webgl2Renderer implements Renderer {
 			.sort(compareRendererEnvCellResourceMembership);
 	}
 
-	#emit(): void {
-		const snapshot = this.#createSnapshot();
+	#emitFrameTelemetry(): void {
+		const telemetry = this.#createFrameTelemetry();
 
-		for (const listener of this.#listeners) {
-			listener(snapshot);
+		for (const listener of this.#telemetryListeners) {
+			listener(telemetry);
 		}
 	}
 

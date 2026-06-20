@@ -1194,6 +1194,12 @@ Implementation notes:
 - Focused tests cover frame-plan aperture resource/mask creation, direct renderer resource
   selection, aperture mask stencil state, transition-composite regressions, portal-frame equality,
   and runtime direct plan publication.
+- Manual inspection in a large subdivided dungeon space exposed black partition planes aligned with
+  selectable env-cell portal polygons. Excluding env-cell portal/aperture polygon IDs from ordinary
+  structured-interior draw-unit baking is still required cleanup: portal polygons are
+  aperture-mask/query/debug facts, not cell walls/floors. However, follow-up browser inspection
+  showed the same black rectangles remain after that cleanup, so the primary rendering failure is
+  likely traversal/frame-plan grouping rather than visible portal-poly baking alone.
 
 Spicy/debt notes:
 
@@ -1201,6 +1207,10 @@ Spicy/debt notes:
   during selected mask passes. That avoids the vestigial whole-landblock baked portal batch path,
   but a later renderer-resource phase should promote stable aperture ranges into a persistent GPU
   cache if profiling shows dynamic upload overhead matters.
+- Portal polygon filtering currently keys off committed env-cell `portals[].polygonId` and
+  `portalApertures[].polygonId`. If future source evidence finds aperture polygons missing from
+  those records but still present in cell-structure render geometry, add a source-backed diagnostic
+  rather than reintroducing broad portal-poly draw batches.
 - The renderer still does not perform literal child-frustum clipping or screen-footprint pruning.
   That remains intentional: correctness is based on camera residency, bounded reachability, and
   stencil/depth aperture masks.
@@ -1213,15 +1223,99 @@ Spicy/debt notes:
 Validation:
 
 - Ran `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts src/v2/renderer/portal-frame-work-plan.test.ts src/v2/runtime/client-runtime.test.ts`.
+- Ran `npm run test:ts -- src/v2/static/env-cells/bake/landblock-env-cells-baker.test.ts`.
 - Ran `npm run check`.
 - Ran `npm run lint:ts`.
 - Manual browser inspection is still needed against the known Phase 1 dungeon/tunnel targets to
   confirm the visual result and identify whether remaining artifacts are source data, material, or
   pass-order issues.
 
-### Phase 5R: Reassessment After Recursive Interior Portals
+### Phase 5A: Portal View Grouping For Multi-Aperture Open Cells
+
+Status: planned immediate corrective phase.
+
+Purpose: stop collapsing portal traversal too early by unique env cell. Large open dungeon rooms
+can be subdivided into many connected env cells with multiple same-depth apertures between the
+same source visibility region and target cell. Resource selection can remain cell-deduped, but
+aperture masks and portal execution need a view/group layer so every relevant aperture contributes
+to the stencil region.
+
+Deliverables:
+
+- Replace the current "already-visible means traversal-only diagnostic" behavior with explicit
+  portal view/group output.
+- Keep renderer resource membership deduped by env cell, but create render view groups keyed by
+  parent portal-stack/visibility context, target env cell, and traversal depth.
+- Merge duplicate same-context portals into one portal view group: multiple aperture polygons write
+  the same child stencil ref, then the target env cell draws once under that merged stencil region.
+- Preserve genuinely distinct parent contexts as distinct portal view groups even when they target
+  the same env cell. This avoids losing nested portal paths while avoiding blind per-portal
+  duplicate draws.
+- Add explicit caps/diagnostics for portal view groups or aperture mask groups separately from the
+  unique env-cell cap. The current `maxCells` should remain a resource/reachability guard, not the
+  only recursion limiter.
+- Update `PortalFrameWorkPlan` direct-env-cell terminology if needed so renderer execution consumes
+  grouped aperture masks and grouped draw requests rather than assuming one non-root cell equals
+  one selected aperture.
+- Update browser diagnostics to distinguish unique reachable cells, portal view groups, aperture
+  mask groups/polygons, already-visible edges folded into groups, and capped view groups.
+- Focused tests for:
+  - two portals from one parent context to the same target env cell merge into one draw group with
+    multiple aperture masks;
+  - the target env cell draws once for that merged group;
+  - a target env cell reached from two different parent contexts remains two view groups;
+  - caps and diagnostics report skipped portal views without hiding unique reachable cells.
+- Manual validation in the large open-grid dungeon target where black portal rectangles remain with
+  depth set to 16.
+
+Acceptance criteria:
+
+- Same-context multi-aperture open-space portals no longer leave black rectangles where target cell
+  content should be visible.
+- The renderer does not blindly draw a target env cell once per portal edge when several same-depth
+  portals share the same parent visibility context and target cell.
+- Existing resource membership remains env-cell-owned and deduped.
+- `already-visible` edges are not discarded before they can contribute aperture geometry to a
+  render view group.
+
+Spicy/debt notes:
+
+- This phase changes the traversal unit from "unique env cell" to "portal view group plus deduped
+  env-cell resources." That is the correct portal-renderer shape, but it will touch traversal,
+  frame planning, renderer execution, diagnostics, and tests. Do not bury it inside Phase 6
+  transition work.
+- The grouping key should be conservative. Start with parent portal-stack identity, target env
+  cell, and traversal depth; do not add screen-footprint/frustum clipping unless this phase proves
+  merged stencil regions are insufficient.
+- Depth-level stencil refs can still work if sibling view groups are executed depth-first with
+  enter/draw/recurse/exit semantics. If grouped masks reveal stencil collisions, document the exact
+  conflict before changing stencil-ref allocation policy.
+
+### Phase 5AR: Reassessment After Portal View Grouping
 
 Status: planned checkpoint.
+
+Purpose: decide whether the interior portal model is stable enough to proceed to outdoor transition
+unification.
+
+Questions to answer:
+
+- Did grouped portal views fix the open-grid dungeon black-rectangle artifact without reintroducing
+  visible portal divider geometry?
+- Are unique-cell and portal-view diagnostics understandable enough for manual inspection?
+- Are portal view counts bounded in representative dungeons, or do we need a stricter recursion cap
+  before Phase 6?
+- Does the direct renderer still avoid full frame-visibility/frustum clipping?
+
+Exit criteria:
+
+- Phase 6 proceeds only after same-depth multi-aperture env-cell rendering is stable enough that
+  outdoor scene crossings can share the same portal executor model.
+
+### Phase 5R: Reassessment After Recursive Interior Portals
+
+Status: superseded by Phase 5AR unless additional Phase 5-only concerns remain after portal view
+grouping.
 
 Purpose: decide whether transition unification and performance work should proceed on the current
 renderer model.

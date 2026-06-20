@@ -1340,6 +1340,14 @@ The missing durable concept is env-cell render visibility membership. Resident s
 
 Production interior rendering should start from camera/current env-cell residency and traverse committed env-cell portal records to produce a bounded per-frame reachable-cell plan. That plan should carry the reachable env cells, traversal depth, portal aperture stack, scene-domain crossings, and rejection/truncation diagnostics needed by renderer execution and browser inspection. Browser-only flat resident interior rendering may remain as an explicit diagnostic mode, but it is not the production or future-client architecture.
 
+Traversal must not collapse portal rendering to unique env cells too early. Env-cell resources are
+deduped by owning cell for residency and draw-resource lookup, but portal execution needs a
+separate portal-view/group layer. Multiple same-depth apertures from one parent visibility context
+to the same target env cell should merge into one stencil region and draw that target cell once
+under the merged mask. The same target env cell may still need multiple portal view groups when it
+is reached through distinct parent portal-stack contexts. `already-visible` edges are therefore
+render-relevant aperture facts until they have been folded into a view group or explicitly capped.
+
 The renderer-facing frame contract is `PortalFrameWorkPlan`. It is deliberately separate from the
 legacy `RenderPassPlan` while the renderer migrates. `RenderPassPlan` still describes the current
 execution path: single-surface resident drawing or the legacy two-scene-domain transition
@@ -1368,16 +1376,19 @@ because reciprocal and duplicate portal polygons are common. It must still prese
 per-edge semantics for traversal: source env cell, target endpoint, portal ids, flags, face policy,
 and portal stack identity. A frame plan selects active portal edges/passes and references aperture
 resources; resident baked portal batches must not imply that every portal polygon is drawn in the
-production frame.
+production frame. Env-cell portal/aperture polygon IDs must also be excluded from ordinary
+structured-interior visible draw-unit baking, even when the source polygon carries a render
+surface/material. Those polygons are aperture-mask/query/debug inputs, not walls or floors.
 
 The current WebGL2 direct env-cell executor uses depth-level stencil refs rather than unique
 per-edge refs. WebGL's fixed-function stencil test uses one ref value for both the comparison and
 `REPLACE`, so unique child refs cannot be written while testing a different parent ref in one pass.
-The executor therefore runs portal children depth-first: enter a selected aperture mask with fixed
-depth testing, draw the target env-cell resources under the child stencil ref, recurse while that
-mask is active, then draw the same aperture in exit mode to decrement the stencil back to the
-parent level before visiting siblings. This preserves sibling isolation without introducing
-shader-side sampled-depth authority or CPU-side portal-frustum clipping.
+The executor therefore runs portal children depth-first: enter a selected aperture mask or merged
+same-context aperture group with fixed depth testing, draw the target env-cell resources once under
+the child stencil ref, recurse while that mask is active, then draw the same aperture group in exit
+mode to decrement the stencil back to the parent level before visiting siblings. This preserves
+sibling isolation without introducing shader-side sampled-depth authority or CPU-side
+portal-frustum clipping.
 
 Outdoor and env-cell execution should not be symmetric. Outdoor terrain, buildings, and detail are large scene-domain inputs, so the renderer may render the outdoor domain into an offscreen target and use that target as a compositor source. Env cells should not be pre-rendered into one broad interior target before compositing. Portal execution should draw traversal-selected env-cell resources directly under the active aperture stencil/depth mask state. This is the practical consequence of treating env cells as first-class render visibility nodes.
 
@@ -1613,3 +1624,5 @@ Mitigation: when semantics are uncertain, verify against ACE, ACViewer, checked-
 - 2026-06-11: Worker counts and concurrency/coalesce limits should be surfaced as named code constants at the owning runtime/adapter boundary. Keep them tuneable in code without adding browser controls or broad configuration until diagnostics show a real need.
 - 2026-06-15: Runtime asset service ownership is centralized in front of the host adapter. Resolver workers may use a remote asset facade and per-job memoization, but they should not own durable prepared-asset caches. Static-object resolver payloads should carry lightweight metadata plus typed geometry refs; heavy source geometry buffers should be attached to bake inputs through the asset service.
 - 2026-06-19: V2 interior rendering should course-correct to a proper portal renderer. Env cells become first-class render visibility nodes for frame submission, portal traversal becomes the authority for production interior visibility, and whole-domain/flat resident interior drawing is retained only as an explicit diagnostic mode. Outdoor scene-domain rendering may use an offscreen target because exterior scenes are broad and expensive, but env cells should be drawn directly on demand during portal compositing rather than pre-rendered as one interior source target. Transition portals remain scene-domain crossings in the same portal model, with building-sourced aperture geometry as the mask authority for building portals.
+- 2026-06-20: Env-cell portal/aperture polygons are excluded from ordinary structured-interior visible draw-unit baking and retained only as aperture-mask/query/debug inputs. Large subdivided dungeon spaces exposed that traversal depth alone does not solve black partition planes if portal polys remain eligible as normal cell-structure surfaces.
+- 2026-06-20: Portal rendering needs a portal-view/group layer in addition to unique reachable env cells. Same-context multi-aperture links to one target env cell should merge into one stencil region and draw the target once; distinct parent portal-stack contexts remain distinct views even if they target the same env cell.

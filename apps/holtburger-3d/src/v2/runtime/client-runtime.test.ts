@@ -12,6 +12,7 @@ import type {
 	Renderer,
 	RendererSnapshot,
 	RendererSnapshotListener,
+	PortalFrameWorkPlan,
 	RenderPassPlan,
 	SamplerPolicyUpdate,
 	StaticResidencyDelta,
@@ -243,6 +244,26 @@ describe("V2 client runtime", () => {
 		runtime.setFlatVisionModeEnabled(true);
 
 		expect(snapshots.at(-1)?.debugOverlays.flatVisionModeEnabled).toBe(true);
+		expect(snapshots.at(-1)?.portalFrameWorkPlan).toEqual({
+			kind: "legacy-render-pass",
+			mode: "flat-resident-diagnostic",
+			renderPassPlan: { kind: "single-surface-resident" },
+		});
+		expect(
+			runtime.createDiagnosticsReport().runtime.portalFrameWorkPlan,
+		).toEqual({
+			kind: "legacy-render-pass",
+			mode: "flat-resident-diagnostic",
+			renderPassPlan: { kind: "single-surface-resident" },
+		});
+		expect(renderer.renderPassPlans).toEqual([]);
+		expect(renderer.portalFrameWorkPlans).toEqual([
+			{
+				kind: "legacy-render-pass",
+				mode: "flat-resident-diagnostic",
+				renderPassPlan: { kind: "single-surface-resident" },
+			},
+		]);
 
 		unsubscribe();
 		runtime.dispose();
@@ -1178,6 +1199,7 @@ class FakeRenderer implements Renderer {
 	readonly textureUpdates: TexturePlacementUpdate[] = [];
 	readonly samplerPolicyUpdates: SamplerPolicyUpdate[] = [];
 	readonly renderPassPlans: RenderPassPlan[] = [];
+	readonly portalFrameWorkPlans: PortalFrameWorkPlan[] = [];
 	readonly events: string[] = [];
 	readonly #listeners = new Set<RendererSnapshotListener>();
 	#snapshot: RendererSnapshot = {
@@ -1190,6 +1212,11 @@ class FakeRenderer implements Renderer {
 		frameHandlerMs: 0,
 		isRunning: true,
 		renderPassPlan: { kind: "single-surface-resident" },
+		portalFrameWorkPlan: {
+			kind: "legacy-render-pass",
+			mode: "single-surface-resident",
+			renderPassPlan: { kind: "single-surface-resident" },
+		},
 		renderedTriangles: 0,
 		envCellResourceMembership: [],
 		sceneDomainTargets: {
@@ -1248,6 +1275,14 @@ class FakeRenderer implements Renderer {
 		this.#snapshot = {
 			...this.#snapshot,
 			renderPassPlan: plan,
+		};
+		this.#emit();
+	}
+	setPortalFrameWorkPlan(plan: PortalFrameWorkPlan): void {
+		this.portalFrameWorkPlans.push(plan);
+		this.#snapshot = {
+			...this.#snapshot,
+			portalFrameWorkPlan: plan,
 		};
 		this.#emit();
 	}

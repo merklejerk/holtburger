@@ -5,9 +5,14 @@ import type {
 	Renderer,
 	RendererSnapshot,
 	RenderPassPlan,
+	PortalFrameWorkPlan,
 	SceneDomainTargetSnapshot,
 } from "../renderer/types";
 import type { DebugOverlayPrimitive, FrameState } from "../renderer/types";
+import {
+	createLegacyPortalFrameWorkPlan,
+	portalFrameWorkPlanEquals,
+} from "../renderer/portal-frame-work-plan";
 import { formatHex32, normalizeOutdoorLandblockId } from "../../lib/landblocks";
 import { TextureManager } from "../textures/texture-manager";
 import type { TexturePacker } from "../textures/packing/packer";
@@ -137,6 +142,7 @@ export interface RuntimeSnapshot {
 	readonly sceneInterest: RuntimeSceneInterest;
 	readonly currentCameraResidency: RuntimeCameraResidency;
 	readonly renderPassPlan: RenderPassPlan;
+	readonly portalFrameWorkPlan: PortalFrameWorkPlan;
 	readonly debugOverlays: RuntimeDebugOverlaySnapshot;
 	readonly assets: AssetServiceSnapshot;
 	readonly host: RuntimeHostSnapshot;
@@ -542,6 +548,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 			frameHandlerMs: 0,
 			isRunning: true,
 			renderPassPlan: { kind: "single-surface-resident" },
+			portalFrameWorkPlan: createLegacyPortalFrameWorkPlan({
+				flatVisionModeEnabled: false,
+				renderPassPlan: { kind: "single-surface-resident" },
+			}),
 			renderedTriangles: 0,
 			sceneDomainTargets: createEmptySceneDomainTargetSnapshot(),
 			envCellResourceMembership: [],
@@ -800,6 +810,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					snapshot.staticMaterialization.committedRevisions,
 				currentCameraResidency: snapshot.currentCameraResidency,
 				failedStaticMaterializations: snapshot.staticMaterialization.failed,
+				portalFrameWorkPlan: snapshot.portalFrameWorkPlan,
 				renderPassPlan: snapshot.renderPassPlan,
 				sceneInterest: createSceneInterestSummary(snapshot.sceneInterest),
 				materializedStaticDrawUnits:
@@ -883,12 +894,29 @@ class ClientRuntimeImpl implements ClientRuntime {
 		const plan = this.#flatVisionModeEnabled
 			? ({ kind: "single-surface-resident" } satisfies RenderPassPlan)
 			: this.#deriveRenderPassPlan();
-		if (renderPassPlanEquals(this.#lastRendererSnapshot.renderPassPlan, plan)) {
-			return false;
+		let changed = false;
+		if (
+			!renderPassPlanEquals(this.#lastRendererSnapshot.renderPassPlan, plan)
+		) {
+			this.#renderer.setRenderPassPlan(plan);
+			changed = true;
 		}
 
-		this.#renderer.setRenderPassPlan(plan);
-		return true;
+		const portalFrameWorkPlan = createLegacyPortalFrameWorkPlan({
+			flatVisionModeEnabled: this.#flatVisionModeEnabled,
+			renderPassPlan: plan,
+		});
+		if (
+			!portalFrameWorkPlanEquals(
+				this.#lastRendererSnapshot.portalFrameWorkPlan,
+				portalFrameWorkPlan,
+			)
+		) {
+			this.#renderer.setPortalFrameWorkPlan(portalFrameWorkPlan);
+			changed = true;
+		}
+
+		return changed;
 	}
 
 	#deriveRenderPassPlan(): RenderPassPlan {
@@ -928,6 +956,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				transitionAperturesVisible: this.#transitionApertureDebugOverlayVisible,
 			},
 			host: this.#host.createSnapshot(),
+			portalFrameWorkPlan: this.#lastRendererSnapshot.portalFrameWorkPlan,
 			renderPassPlan: this.#lastRendererSnapshot.renderPassPlan,
 			renderPolicy: {
 				textureFilteringMode: this.#textureManager.filteringMode,

@@ -258,6 +258,87 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
+	it("publishes portal frame work plan snapshots independently from render pass execution", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+		let latestSnapshot = rendererSnapshotPlaceholder();
+		renderer.subscribe((snapshot) => {
+			latestSnapshot = snapshot;
+		});
+
+		renderer.setPortalFrameWorkPlan({
+			baseScene: { kind: "outdoor-target", landblockId: 0xf418ffff },
+			directEnvCellDraws: [
+				{
+					envCellId: 0xf4180103,
+					envCellStaticObjectDrawUnitIds: [],
+					landblockId: 0xf418ffff,
+					portalStackId: "transition:f4180103/01",
+					resourceState: "missing-resources",
+					structuredInteriorDrawUnitIds: [],
+					traversalDepth: 1,
+				},
+			],
+			kind: "direct-env-cell",
+			mode: "portal-traversal",
+			transitionSceneCrossings: [
+				{
+					apertureBatchId: "transition-aperture-batch:f418ffff",
+					from: { kind: "outdoor", landblockId: 0xf418ffff },
+					landblockId: 0xf418ffff,
+					linkedEnvCellIds: [0xf4180103],
+					to: {
+						envCellId: 0xf4180103,
+						kind: "env-cell",
+						landblockId: 0xf418ffff,
+					},
+				},
+			],
+		});
+
+		expect(latestSnapshot.portalFrameWorkPlan).toEqual({
+			baseScene: { kind: "outdoor-target", landblockId: 0xf418ffff },
+			directEnvCellDraws: [
+				{
+					envCellId: 0xf4180103,
+					envCellStaticObjectDrawUnitIds: [],
+					landblockId: 0xf418ffff,
+					portalStackId: "transition:f4180103/01",
+					resourceState: "missing-resources",
+					structuredInteriorDrawUnitIds: [],
+					traversalDepth: 1,
+				},
+			],
+			kind: "direct-env-cell",
+			mode: "portal-traversal",
+			transitionSceneCrossings: [
+				{
+					apertureBatchId: "transition-aperture-batch:f418ffff",
+					from: { kind: "outdoor", landblockId: 0xf418ffff },
+					landblockId: 0xf418ffff,
+					linkedEnvCellIds: [0xf4180103],
+					to: {
+						envCellId: 0xf4180103,
+						kind: "env-cell",
+						landblockId: 0xf418ffff,
+					},
+				},
+			],
+		});
+		expect(latestSnapshot.renderPassPlan).toEqual({
+			kind: "single-surface-resident",
+		});
+
+		renderer.dispose();
+	});
+
 	it("executes planned transition composite passes with depth propagation targets", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
@@ -866,6 +947,11 @@ function rendererSnapshotPlaceholder() {
 		frameHandlerMs: 0,
 		isRunning: false,
 		renderPassPlan: { kind: "single-surface-resident" as const },
+		portalFrameWorkPlan: {
+			kind: "legacy-render-pass" as const,
+			mode: "single-surface-resident" as const,
+			renderPassPlan: { kind: "single-surface-resident" as const },
+		},
 		renderedTriangles: 0,
 		sceneDomainTargets: {
 			active: false,

@@ -148,6 +148,7 @@ export interface RendererSnapshot {
 	readonly backend: "webgl2";
 	readonly error: string | null;
 	readonly renderPassPlan: RenderPassPlan;
+	readonly portalFrameWorkPlan: PortalFrameWorkPlan;
 	readonly sceneDomainTargets: SceneDomainTargetSnapshot;
 	readonly staticDrawUnits: number;
 	readonly terrainDrawUnits: number;
@@ -195,6 +196,63 @@ export type RenderPassPlan =
 			readonly transitionDepthPolicy: PortalTransitionDepthPolicy;
 	  };
 
+export type PortalFrameWorkPlan =
+	| {
+			readonly kind: "legacy-render-pass";
+			readonly mode:
+				| "single-surface-resident"
+				| "flat-resident-diagnostic"
+				| "legacy-scene-domain-composite";
+			readonly renderPassPlan: RenderPassPlan;
+	  }
+	| {
+			readonly kind: "direct-env-cell";
+			readonly mode: "portal-traversal" | "portal-debug";
+			readonly baseScene: PortalFrameBaseScenePlan;
+			readonly directEnvCellDraws: readonly PortalDirectEnvCellDrawRequest[];
+			readonly transitionSceneCrossings: readonly PortalTransitionSceneCrossing[];
+	  };
+
+export type PortalFrameBaseScenePlan =
+	| {
+			readonly kind: "outdoor-target";
+			readonly landblockId: number;
+	  }
+	| {
+			readonly kind: "env-cell-direct";
+			readonly landblockId: number;
+			readonly envCellId: number;
+	  };
+
+export interface PortalDirectEnvCellDrawRequest {
+	readonly landblockId: number;
+	readonly envCellId: number;
+	readonly traversalDepth: number;
+	readonly portalStackId: string;
+	readonly structuredInteriorDrawUnitIds: readonly string[];
+	readonly envCellStaticObjectDrawUnitIds: readonly string[];
+	readonly resourceState: "ready" | "missing-resources";
+}
+
+export interface PortalTransitionSceneCrossing {
+	readonly apertureBatchId: string;
+	readonly landblockId: number;
+	readonly from: PortalTransitionSceneEndpoint;
+	readonly to: PortalTransitionSceneEndpoint;
+	readonly linkedEnvCellIds: readonly number[];
+}
+
+export type PortalTransitionSceneEndpoint =
+	| {
+			readonly kind: "outdoor";
+			readonly landblockId: number;
+	  }
+	| {
+			readonly kind: "env-cell";
+			readonly landblockId: number;
+			readonly envCellId: number;
+	  };
+
 export interface SceneDomainTargetSnapshot {
 	readonly active: boolean;
 	readonly width: number;
@@ -217,6 +275,7 @@ export interface Renderer {
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void;
 	setFlatVisionModeEnabled(enabled: boolean): void;
 	setRenderPassPlan(plan: RenderPassPlan): void;
+	setPortalFrameWorkPlan(plan: PortalFrameWorkPlan): void;
 	setDebugOverlayPrimitives(primitives: readonly DebugOverlayPrimitive[]): void;
 	updateFrameState(state: FrameState): void;
 	subscribe(listener: RendererSnapshotListener): () => void;

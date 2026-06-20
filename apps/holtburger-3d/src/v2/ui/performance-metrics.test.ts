@@ -65,6 +65,11 @@ function createRendererSnapshot(
 		frameHandlerMs: 1,
 		isRunning: true,
 		renderPassPlan: { kind: "single-surface-resident" },
+		portalFrameWorkPlan: {
+			kind: "legacy-render-pass",
+			mode: "single-surface-resident",
+			renderPassPlan: { kind: "single-surface-resident" },
+		},
 		renderedTriangles: 0,
 		envCellResourceMembership: [],
 		sceneDomainTargets: {

@@ -28,6 +28,17 @@ import {
 	createOutdoorLandblockRootTranslation,
 	deriveOutdoorCameraLandblockResidency,
 } from "./static-placement";
+import {
+	createPortalTraversalPlan,
+	type PortalTraversalPlan,
+} from "./portal-traversal-planner";
+export type {
+	PortalTraversalDiagnostic,
+	PortalTraversalEnvCellEdge,
+	PortalTraversalPlan,
+	PortalTraversalSceneCrossing,
+	PortalTraversalVisibleCell,
+} from "./portal-traversal-planner";
 
 export interface StaticSceneRay {
 	readonly origin: Vec3;
@@ -999,6 +1010,22 @@ export class StaticSceneQuery {
 					record.landblockId === options.landblockId,
 			)
 			.sort((left, right) => left.landblockId - right.landblockId);
+	}
+
+	queryPortalTraversal(options: {
+		readonly landblockId: number;
+		readonly maxCells: number;
+		readonly maxDepth: number;
+		readonly startEnvCellId: number;
+	}): PortalTraversalPlan {
+		const landblockId = options.landblockId >>> 0;
+		return createPortalTraversalPlan({
+			landblockId,
+			maxCells: options.maxCells,
+			maxDepth: options.maxDepth,
+			portalInteriorRecords: this.queryPortalInteriorRecords({ landblockId }),
+			startEnvCellId: options.startEnvCellId >>> 0,
+		});
 	}
 
 	queryTerrainQuadDetails(options: {

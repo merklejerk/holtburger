@@ -669,7 +669,7 @@ Debt recorded:
 
 ### Phase 3: Portal Graph And Traversal Planner
 
-Status: planned.
+Status: completed on 2026-06-19.
 
 Purpose: derive visible env cells from committed portal/interior records and current camera
 residency.
@@ -695,6 +695,58 @@ Acceptance criteria:
 - Traversal does not depend on browser-only visible-cell closure policy.
 - Traversal output can populate the Phase 3A frame contract without losing depth/parent/aperture
   context.
+
+Implementation notes:
+
+- Added a pure `createPortalTraversalPlan(...)` planner in the V2 runtime layer.
+- The planner consumes committed `StaticPortalInteriorRecord` data and builds a directed graph from
+  landblock-level `portalLinks` whose source and target are both env-cell endpoints.
+- Traversal output records:
+  - visible landblock/env-cell ids;
+  - traversal depth;
+  - parent edge;
+  - full portal stack;
+  - stable `portalStackId`;
+  - rejection diagnostics;
+  - scene crossings discovered from env-cell portal links whose target is `outside` or
+    `landblock-building`.
+- Added `StaticSceneQuery.queryPortalTraversal(...)` as the runtime-owned access point. This keeps
+  traversal over committed source/query records and avoids renderer-source coupling.
+- Added focused tests for reciprocal traversal, already-visible cycle rejection, depth limiting,
+  cell cap truncation, missing start/target cells, and transition scene crossings that remain
+  metadata-only until a later explicit bridge phase.
+- Added an integration test proving `StaticSceneQuery.queryPortalTraversal(...)` does not promote
+  `StaticVisibilityRecord.visibleLinks` into portal traversal edges. `VisibleCells`/accepted cell
+  data remains useful residency/query evidence, but portal links are the production traversal
+  authority.
+
+High-risk boundary:
+
+- The traversal planner is directed. It does not synthesize reciprocal links when source data is
+  asymmetric. This is intentional because the inspection targets include non-reciprocal and
+  duplicate portal relationships.
+- Scene crossings are reported but not traversed. Outdoor/building transition roots still need Phase
+  6 bridge logic and should not be treated as direct interior neighbors.
+- The `frustum/footprint policy` deliverable is represented only by bounded traversal shape and
+  diagnostics in this phase. No screen-footprint, portal-plane clipping, or frustum narrowing has
+  landed yet.
+- Traversal is exposed through `StaticSceneQuery`, but runtime has not yet converted traversal output
+  into `PortalFrameWorkPlan.kind === "direct-env-cell"`.
+
+Verification:
+
+- `npm run test:ts -- src/v2/runtime/portal-traversal-planner.test.ts src/v2/runtime/static-scene-query.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Debt recorded:
+
+- Phase 4 should add the frame-plan population step that maps `PortalTraversalVisibleCell` records
+  plus renderer membership into direct env-cell draw requests.
+- Phase 4/5 still need aperture/frustum/clip policy. The planner currently preserves stack/edge
+  identity so that work has somewhere concrete to attach.
+- Phase 6 must decide how building/outdoor transition crossings become traversal roots or crossings
+  without treating env-cell outside-transition metadata as mask authority.
 
 ### Phase 3R: Reassessment After Traversal Planning
 

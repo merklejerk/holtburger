@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
 	LandblockEnvCellsStaticScopePayload,
+	LandblockPortalLinkFacts,
 	OutdoorStaticObjectsScopePayload,
 	StaticBounds,
 	StaticWorkPeerRecordOwner,
@@ -1179,6 +1180,62 @@ describe("V2 static scene query", () => {
 		});
 	});
 
+	it("derives portal traversal from committed portal links rather than visibility links", () => {
+		const query = new StaticSceneQuery();
+		const owner = createEnvCellWorkOwner("work-env-traversal", 0xda55ffff);
+
+		query.applyStaticPeerRecords({
+			portalInteriorRecords: [
+				{
+					envCells: [
+						createPortalSummary(0xda550100),
+						createPortalSummary(0xda550101),
+						createPortalSummary(0xda550102),
+					],
+					kind: "env-cell-portal-interior",
+					landblockId: 0xda55ffff,
+					owner,
+					portalLinks: [
+						createEnvCellPortalLink({
+							linkId: "a-to-b",
+							sourceEnvCellId: 0xda550100,
+							targetEnvCellId: 0xda550101,
+						}),
+					],
+				},
+			],
+			visibilityRecords: [
+				{
+					acceptedEnvCellIds: [0xda550100, 0xda550101, 0xda550102],
+					diagnostics: [],
+					kind: "env-cell-visibility",
+					landblockId: 0xda55ffff,
+					owner,
+					visibleLinks: [
+						{
+							sourceEnvCellId: 0xda550100,
+							targetEnvCellId: 0xda550102,
+						},
+					],
+				},
+			],
+		});
+
+		const plan = query.queryPortalTraversal({
+			landblockId: 0xda55ffff,
+			maxCells: 8,
+			maxDepth: 4,
+			startEnvCellId: 0xda550100,
+		});
+
+		expect(plan.visibleCells.map((cell) => cell.envCellId)).toEqual([
+			0xda550100, 0xda550101,
+		]);
+		expect(plan.visibleCells.map((cell) => cell.envCellId)).not.toContain(
+			0xda550102,
+		);
+	});
+
 	it("queries committed outdoor building transition aperture batches without env-cell records", () => {
 		const query = new StaticSceneQuery();
 		const batch: TransitionApertureBatch = {
@@ -1845,6 +1902,38 @@ function createLandblockEnvCellsPayload(
 			},
 		},
 		visibilityDiagnostics: [],
+	};
+}
+
+function createPortalSummary(envCellId: number) {
+	return {
+		envCellId,
+		localPlacement: createPlacement(),
+		portalApertures: [],
+		portals: [],
+	};
+}
+
+function createEnvCellPortalLink(options: {
+	readonly linkId: string;
+	readonly sourceEnvCellId: number;
+	readonly targetEnvCellId: number;
+}): LandblockPortalLinkFacts {
+	return {
+		flags: 0,
+		linkId: options.linkId,
+		polygonId: null,
+		source: {
+			envCellId: options.sourceEnvCellId,
+			kind: "env-cell",
+			portalId: `${options.linkId}:source`,
+		},
+		sourceIndex: 0,
+		target: {
+			envCellId: options.targetEnvCellId,
+			kind: "env-cell",
+			portalId: `${options.linkId}:target`,
+		},
 	};
 }
 

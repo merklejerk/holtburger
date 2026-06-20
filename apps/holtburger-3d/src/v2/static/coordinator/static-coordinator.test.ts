@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DeferredStaticBaker, DeferredStaticResolver } from "../fake-workers";
 import type {
 	StaticCoordinatorCommitDelta,
@@ -89,6 +89,9 @@ describe("V2 static coordinator", () => {
 	});
 
 	it("marks work failed when bake attachment creation fails", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
@@ -107,9 +110,12 @@ describe("V2 static coordinator", () => {
 			failed: 1,
 		});
 		expect(coordinator.createSnapshot().activeWork[0]).toMatchObject({
-			failureMessage: "geometry offline",
 			status: "failed",
 		});
+		expect(JSON.stringify(coordinator.createSnapshot())).not.toContain(
+			"geometry offline",
+		);
+		consoleError.mockRestore();
 	});
 
 	it("diffs desired outdoor work across neighboring anchors", async () => {
@@ -189,7 +195,6 @@ describe("V2 static coordinator", () => {
 		expect(coordinator.createSnapshot().activeWork).toEqual([
 			{
 				domain: "outdoor-terrain",
-				failureMessage: null,
 				revision: 1,
 				scopeKey: "landblock:da55ffff",
 				status: "resolving",
@@ -318,6 +323,9 @@ describe("V2 static coordinator", () => {
 	});
 
 	it("rejects ownerless committed draw units instead of inferring batch ownership", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
@@ -344,11 +352,11 @@ describe("V2 static coordinator", () => {
 			committed: 0,
 			committedDrawUnits: 0,
 			failed: 1,
-			latestResolverFailure: {
-				message:
-					"Static coordinator cannot commit ownerless draw unit bad-draw-unit.",
-			},
 		});
+		expect(JSON.stringify(coordinator.createSnapshot())).not.toContain(
+			"bad-draw-unit",
+		);
+		consoleError.mockRestore();
 	});
 
 	it("groups same-domain resolved payloads into one static bake batch", async () => {

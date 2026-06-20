@@ -146,8 +146,6 @@ export interface RuntimeSceneInterestUpdatedEvent {
 }
 
 export interface RuntimeSceneInterestSettledEvent {
-	readonly failedMaterializations: readonly StaticMaterializationFailureSnapshot[];
-	readonly failedWork: readonly ScheduledStaticWorkStatus[];
 	readonly interest: RuntimeSceneInterest;
 	readonly kind: "scene-interest-settled";
 	readonly result: "ready" | "failed" | "cleared";
@@ -402,15 +400,9 @@ interface RuntimeRenderPolicySnapshot {
 interface StaticMaterializationSnapshot {
 	readonly pendingRevisions: readonly number[];
 	readonly committedRevisions: readonly number[];
-	readonly failed: readonly StaticMaterializationFailureSnapshot[];
 	readonly envCellResourceMembershipRevision: number;
 	readonly materializedDrawUnits: number;
 	readonly sourceDrawUnits: number;
-}
-
-export interface StaticMaterializationFailureSnapshot {
-	readonly revision: number;
-	readonly message: string;
 }
 
 export interface ClientRuntime {
@@ -531,14 +523,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#staticMaterializationQueue: Promise<void> = Promise.resolve();
 	#pendingStaticMaterializations = new Set<number>();
 	#committedStaticMaterializations: number[] = [];
-	#failedStaticMaterializations: StaticMaterializationFailureSnapshot[] = [];
+	readonly #failedStaticMaterializationRevisions = new Set<number>();
 	#materializedDrawUnitIdsBySourceDrawUnitId = new Map<
 		string,
 		readonly string[]
 	>();
 	readonly #materializedDrawUnitsById = new Map<string, StaticDrawUnit>();
 	#recentTerrainTextureFallbacks: TerrainTextureFallbackDiagnostics[] = [];
-	readonly #reportedStaticResolverFailures = new Set<string>();
 	#staticDebugSelectionKey: StaticSceneSelectionKey | null = null;
 	#envCellResourceMembership: readonly EnvCellResourceMembership[] = [];
 	#envCellResourceMembershipByLandblock = createEnvCellResourceMembershipIndex(
@@ -593,7 +584,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#unsubscribeStaticCoordinator = staticCoordinator.subscribe(
 			(snapshot) => {
 				this.#lastStaticSnapshot = snapshot;
-				this.#warnAboutStaticResolverFailure(snapshot);
 				this.#emit();
 				this.#maybeEmitSceneInterestSettled();
 			},
@@ -855,7 +845,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 				currentCameraResidency: snapshot.currentCameraResidency,
 				envCellResourceMembershipRevision:
 					snapshot.staticMaterialization.envCellResourceMembershipRevision,
-				failedStaticMaterializations: snapshot.staticMaterialization.failed,
 				portalFrameWorkPlan: snapshot.portalFrameWorkPlan,
 				renderPassPlan: snapshot.renderPassPlan,
 				sceneInterest: createSceneInterestSummary(snapshot.sceneInterest),
@@ -1120,7 +1109,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 				committedRevisions: this.#committedStaticMaterializations,
 				envCellResourceMembershipRevision:
 					this.#envCellResourceMembershipRevision,
-				failed: this.#failedStaticMaterializations,
 				materializedDrawUnits: countMaterializedDrawUnits(
 					this.#materializedDrawUnitIdsBySourceDrawUnitId,
 				),
@@ -1170,8 +1158,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		const source = getSceneInterestSource(this.#sceneInterest);
 		if (this.#sceneInterest.kind === "none") {
 			this.#emitSceneInterestSettled({
-				failedMaterializations: [],
-				failedWork: [],
 				result: "cleared",
 				source,
 			});
@@ -1193,30 +1179,21 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 
 		const failedWork = sceneWork.filter((work) => work.status === "failed");
-		const failedMaterializations = this.#failedStaticMaterializations.filter(
-			(failure) => this.#activeSceneWorkRevisions.has(failure.revision),
-		);
+		const failedMaterialization = Array.from(
+			this.#failedStaticMaterializationRevisions,
+		).some((revision) => this.#activeSceneWorkRevisions.has(revision));
 		this.#emitSceneInterestSettled({
-			failedMaterializations,
-			failedWork,
-			result:
-				failedWork.length > 0 || failedMaterializations.length > 0
-					? "failed"
-					: "ready",
+			result: failedWork.length > 0 || failedMaterialization ? "failed" : "ready",
 			source,
 		});
 	}
 
 	#emitSceneInterestSettled(options: {
-		readonly failedMaterializations: readonly StaticMaterializationFailureSnapshot[];
-		readonly failedWork: readonly ScheduledStaticWorkStatus[];
 		readonly result: RuntimeSceneInterestSettledEvent["result"];
 		readonly source: RuntimeSceneInterestSource;
 	}): void {
 		this.#settledSceneInterestRevision = this.#sceneInterestRevision;
 		this.#emitRuntimeEvent({
-			failedMaterializations: options.failedMaterializations,
-			failedWork: options.failedWork,
 			interest: this.#sceneInterest,
 			kind: "scene-interest-settled",
 			result: options.result,
@@ -1268,34 +1245,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 	}
 
-	#warnAboutStaticResolverFailure(snapshot: StaticCoordinatorSnapshot): void {
-		const failure = snapshot.latestResolverFailure;
-		if (!failure) {
-			return;
-		}
-
-		const warningKey = [
-			failure.revision,
-			failure.workId,
-			failure.domain,
-			failure.scopeKey,
-			failure.message,
-		].join("|");
-		if (this.#reportedStaticResolverFailures.has(warningKey)) {
-			return;
-		}
-
-		this.#reportedStaticResolverFailures.add(warningKey);
-		this.#diagnostics.warn({
-			domain: failure.domain,
-			kind: "static-resolver-failed",
-			message: failure.message,
-			revision: failure.revision,
-			scopeKey: failure.scopeKey,
-			workId: failure.workId,
-		});
-	}
-
 	async #materializeStaticCommit(
 		delta: StaticCoordinatorCommitDelta,
 	): Promise<void> {
@@ -1340,10 +1289,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#recordStaticMaterializationFailure(revision: number, error: unknown): void {
 		this.#pendingStaticMaterializations.delete(revision);
 		const message = error instanceof Error ? error.message : String(error);
-		this.#failedStaticMaterializations = appendBoundedFailure(
-			this.#failedStaticMaterializations,
-			{ message, revision },
-		);
+		this.#failedStaticMaterializationRevisions.add(revision);
 		this.#diagnostics.warn({
 			error,
 			kind: "static-materialization-failed",
@@ -2575,13 +2521,6 @@ function countMaterializedDrawUnits(
 	);
 }
 
-function appendBoundedFailure(
-	failures: readonly StaticMaterializationFailureSnapshot[],
-	failure: StaticMaterializationFailureSnapshot,
-): StaticMaterializationFailureSnapshot[] {
-	return [...failures, failure].slice(-8);
-}
-
 function appendBounded<T>(entries: readonly T[], entry: T, limit: number): T[] {
 	return [...entries, entry].slice(-limit);
 }
@@ -2817,9 +2756,6 @@ function createStaticCoordinatorDiagnosticsReport(
 				snapshot.latestOutdoorStaticObjectsPayload
 					? `lb ${formatHex(snapshot.latestOutdoorStaticObjectsPayload.landblockId)} ${snapshot.latestOutdoorStaticObjectsPayload.domain} objects ${snapshot.latestOutdoorStaticObjectsPayload.objectCount} kinds b:${snapshot.latestOutdoorStaticObjectsPayload.objectKindCounts.building}/g:${snapshot.latestOutdoorStaticObjectsPayload.objectKindCounts["generated-scenery"]}/e:${snapshot.latestOutdoorStaticObjectsPayload.objectKindCounts["explicit-object"]} sources ${snapshot.latestOutdoorStaticObjectsPayload.sourceAssetCount} slots ${snapshot.latestOutdoorStaticObjectsPayload.materialSlotCount} materials ${snapshot.latestOutdoorStaticObjectsPayload.materialSourceCount} tex ${snapshot.latestOutdoorStaticObjectsPayload.textureRefCount} missing ${snapshot.latestOutdoorStaticObjectsPayload.missingRefCount}`
 					: null,
-			latestResolverFailure: snapshot.latestResolverFailure
-				? `${snapshot.latestResolverFailure.workId}: ${snapshot.latestResolverFailure.message}`
-				: null,
 			latestTerrainPayload: snapshot.latestTerrainPayload
 				? `lb ${formatHex(snapshot.latestTerrainPayload.landblockId)} region ${snapshot.latestTerrainPayload.regionNumber} mesh ${snapshot.latestTerrainPayload.vertexCount}v/${snapshot.latestTerrainPayload.triangleCount}t quads ${snapshot.latestTerrainPayload.quadCount} tex ${snapshot.latestTerrainPayload.textureUseCount} missing ${snapshot.latestTerrainPayload.missingRefCount}`
 				: null,
@@ -2909,7 +2845,6 @@ function createStaticCoordinatorWorkDiagnostics(
 ): StaticCoordinatorDiagnosticsReport["inFlightWork"][number] {
 	return {
 		domain: work.domain,
-		failureMessage: work.failureMessage,
 		revision: work.revision,
 		scopeKey: work.scopeKey,
 		status: work.status,

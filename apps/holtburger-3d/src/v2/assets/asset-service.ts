@@ -2,7 +2,6 @@ import type { RuntimeHost } from "../host/contracts";
 import type {
 	AssetService,
 	AssetServiceSnapshot,
-	FailedAssetSnapshot,
 	HostAssetKey,
 	PreparedAsset,
 	PreparedAssetLease,
@@ -22,12 +21,6 @@ interface CommittedAssetEntry {
 	warmRetainedUntilMs: number | null;
 }
 
-interface FailedAssetEntry {
-	readonly key: HostAssetKey;
-	readonly revision: number;
-	readonly message: string;
-}
-
 export interface HostBackedAssetServiceOptions {
 	readonly host: RuntimeHost;
 	readonly warmRetentionMs?: number;
@@ -40,7 +33,6 @@ export class HostBackedAssetService implements AssetService {
 	readonly #nowMs: () => number;
 	readonly #pending = new Map<string, PendingAssetEntry>();
 	readonly #committed = new Map<string, CommittedAssetEntry>();
-	readonly #failures = new Map<string, FailedAssetEntry>();
 	#revision = 0;
 
 	constructor({
@@ -74,15 +66,9 @@ export class HostBackedAssetService implements AssetService {
 			.then((asset) => this.#commitAsset(keyString, key, revision, asset))
 			.catch((error: unknown) => {
 				this.#pending.delete(keyString);
-				this.#failures.set(keyString, {
-					key,
-					message: error instanceof Error ? error.message : String(error),
-					revision,
-				});
 				throw error;
 			});
 
-		this.#failures.delete(keyString);
 		this.#pending.set(keyString, {
 			key,
 			promise,
@@ -141,7 +127,6 @@ export class HostBackedAssetService implements AssetService {
 	createSnapshot(): AssetServiceSnapshot {
 		return {
 			committed: this.#sortCommittedSnapshot(),
-			failures: this.#sortFailuresSnapshot(),
 			pending: this.#sortPendingSnapshot(),
 		};
 	}
@@ -194,10 +179,6 @@ export class HostBackedAssetService implements AssetService {
 				warmRetainedUntilMs: entry.warmRetainedUntilMs,
 			}))
 			.sort(compareSnapshotKeys);
-	}
-
-	#sortFailuresSnapshot(): readonly FailedAssetSnapshot[] {
-		return Array.from(this.#failures.values()).sort(compareSnapshotKeys);
 	}
 }
 

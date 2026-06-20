@@ -1089,7 +1089,6 @@ describe("V2 client runtime", () => {
 		expect(runtime.createDiagnosticsReport().domains).toContainEqual({
 			kind: "asset-service",
 			snapshot: {
-				failures: [],
 				pending: [
 					{
 						key: assetService.pendingKeys[0],
@@ -1100,7 +1099,6 @@ describe("V2 client runtime", () => {
 			},
 			summary: {
 				committed: 0,
-				failures: 0,
 				leased: 0,
 				pending: 1,
 				pendingWaiters: 1,
@@ -1123,7 +1121,6 @@ describe("V2 client runtime", () => {
 		expect(snapshots.at(-1)?.staticMaterialization).toEqual({
 			committedRevisions: [1],
 			envCellResourceMembershipRevision: 0,
-			failed: [],
 			materializedDrawUnits: 1,
 			pendingRevisions: [],
 			sourceDrawUnits: 1,
@@ -1235,14 +1232,10 @@ describe("V2 client runtime", () => {
 		expect(snapshots.at(-1)?.staticMaterialization).toEqual({
 			committedRevisions: [],
 			envCellResourceMembershipRevision: 0,
-			failed: [{ message: "prepared texture unavailable", revision: 1 }],
 			materializedDrawUnits: 0,
 			pendingRevisions: [],
 			sourceDrawUnits: 0,
 		});
-		expect(
-			runtime.createDiagnosticsReport().runtime.failedStaticMaterializations,
-		).toEqual([{ message: "prepared texture unavailable", revision: 1 }]);
 		expect(runtime.createDiagnosticsReport().domains).toContainEqual({
 			kind: "terrain-textures",
 			recentFallbacks: [],
@@ -1352,16 +1345,13 @@ describe("V2 client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("reports static resolver failures through runtime diagnostics", async () => {
-		const warnings: unknown[] = [];
-		const diagnostics: RuntimeDiagnostics = {
-			warn(event) {
-				warnings.push(event);
-			},
-		};
+	it("logs static resolver failures without retaining failure diagnostics", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
 		const resolver = new DeferredStaticResolver();
 		const runtime = createClientRuntime({
-			diagnostics,
+			diagnostics: silentDiagnostics,
 			host: new FakeRuntimeHost(),
 			renderer: new FakeRenderer(),
 			staticCoordinator: createImmediateStaticCoordinator({
@@ -1381,20 +1371,20 @@ describe("V2 client runtime", () => {
 		);
 		await flushPromises();
 
-		expect(warnings).toContainEqual({
-			domain: "outdoor-terrain",
-			kind: "static-resolver-failed",
-			message: "landblock env-cell bundle unavailable",
-			revision: 1,
-			scopeKey: "landblock:da55ffff",
-			workId: "1:landblock:da55ffff:outdoor-terrain",
-		});
-		expect(latestSnapshot?.static.latestResolverFailure).toMatchObject({
-			message: "landblock env-cell bundle unavailable",
-			workId: "1:landblock:da55ffff:outdoor-terrain",
-		});
+		expect(consoleError).toHaveBeenCalledWith(
+			"V2 static resolver work 1:landblock:da55ffff:outdoor-terrain failed; static content for landblock:da55ffff/outdoor-terrain was not resolved.",
+			{
+				message: "landblock env-cell bundle unavailable",
+				revision: 1,
+			},
+		);
+		expect(latestSnapshot?.static.failed).toBe(1);
+		expect(JSON.stringify(latestSnapshot)).not.toContain(
+			"landblock env-cell bundle unavailable",
+		);
 		unsubscribe();
 		runtime.dispose();
+		consoleError.mockRestore();
 	});
 });
 
@@ -1702,7 +1692,6 @@ class DeferredAssetService implements AssetService {
 	createSnapshot(): AssetServiceSnapshot {
 		return {
 			committed: [],
-			failures: [],
 			pending: this.pendingKeys.map((key, index) => ({
 				key,
 				revision: index + 1,

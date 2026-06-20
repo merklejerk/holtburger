@@ -870,7 +870,6 @@ class FixtureAssetService implements AssetService {
 	createSnapshot(): AssetServiceSnapshot {
 		return {
 			committed: [],
-			failures: [],
 			pending: [],
 		};
 	}

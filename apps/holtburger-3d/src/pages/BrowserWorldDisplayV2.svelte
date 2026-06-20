@@ -86,6 +86,9 @@
 	const OUTDOOR_CAMERA_FOCUS_HORIZONTAL_DISTANCE =
 		OUTDOOR_LANDBLOCK_WORLD_SIZE * 0.75;
 	const OUTDOOR_CAMERA_FOCUS_MIN_CLEARANCE = 40;
+	const MIN_DIRECT_ENV_CELL_PORTAL_DEPTH = 0;
+	const MAX_DIRECT_ENV_CELL_PORTAL_DEPTH = 16;
+	const DEFAULT_DIRECT_ENV_CELL_PORTAL_DEPTH = 2;
 	const TEXTURE_FILTERING_OPTIONS: readonly TextureFilteringMode[] = [
 		"nearest",
 		"linear",
@@ -110,6 +113,9 @@
 	let envCellsEnabled = $state(true);
 	let envCellAabbDebugVisible = $state(false);
 	let envCellPortalDebugVisible = $state(false);
+	let directEnvCellPortalMaxDepth = $state(
+		DEFAULT_DIRECT_ENV_CELL_PORTAL_DEPTH,
+	);
 	let flatVisionModeEnabled = $state(false);
 	let transitionApertureDebugVisible = $state(false);
 	let envCellResourceInspectionInput = $state("");
@@ -166,6 +172,7 @@
 			runtime = createBrowserV2Runtime(canvasElement);
 			runtime.setEnvCellAabbDebugOverlayVisible(envCellAabbDebugVisible);
 			runtime.setEnvCellPortalDebugOverlayVisible(envCellPortalDebugVisible);
+			runtime.setDirectEnvCellPortalMaxDepth(directEnvCellPortalMaxDepth);
 			runtime.setFlatVisionModeEnabled(flatVisionModeEnabled);
 			runtime.setTransitionApertureDebugOverlayVisible(
 				transitionApertureDebugVisible,
@@ -450,6 +457,13 @@
 	function handleFlatVisionModeToggle(event: Event): void {
 		flatVisionModeEnabled = (event.currentTarget as HTMLInputElement).checked;
 		runtime?.setFlatVisionModeEnabled(flatVisionModeEnabled);
+	}
+
+	function handleDirectEnvCellPortalMaxDepthInput(event: Event): void {
+		directEnvCellPortalMaxDepth = Number(
+			(event.currentTarget as HTMLInputElement).value,
+		);
+		runtime?.setDirectEnvCellPortalMaxDepth(directEnvCellPortalMaxDepth);
 	}
 
 	function handleTransitionApertureDebugToggle(event: Event): void {
@@ -1169,7 +1183,7 @@
 			(count, draw) => count + draw.envCellStaticObjectDrawUnitIds.length,
 			0,
 		);
-		return `${plan.mode} base ${base} cells ${plan.directEnvCellDraws.length} missing ${missingResourceCells} depth ${maxDepth} resources ${structuredDrawUnits} cell / ${staticDrawUnits} static crossings ${plan.transitionSceneCrossings.length}`;
+		return `${plan.mode} base ${base} cells ${plan.directEnvCellDraws.length} missing ${missingResourceCells} depth ${maxDepth} masks ${plan.portalApertureMaskPasses.length} apertures ${plan.portalApertureGeometryResources.length} resources ${structuredDrawUnits} cell / ${staticDrawUnits} static crossings ${plan.transitionSceneCrossings.length}`;
 	}
 
 	function currentCameraEnvCellResourceTarget(): {
@@ -1614,6 +1628,22 @@
 						<small>
 							{snapshot?.debugOverlays.flatVisionModeEnabled ? "on" : "off"}
 						</small>
+					</label>
+					<label class="browser-v2__range">
+						<span>Env-cell portal depth</span>
+						<strong>
+							{directEnvCellPortalMaxDepth}
+							{directEnvCellPortalMaxDepth === 1 ? "level" : "levels"}
+						</strong>
+						<input
+							disabled={!runtime || flatVisionModeEnabled}
+							max={MAX_DIRECT_ENV_CELL_PORTAL_DEPTH}
+							min={MIN_DIRECT_ENV_CELL_PORTAL_DEPTH}
+							step="1"
+							type="range"
+							value={directEnvCellPortalMaxDepth}
+							oninput={handleDirectEnvCellPortalMaxDepthInput}
+						/>
 					</label>
 					<label class="browser-v2__checkbox-row">
 						<input

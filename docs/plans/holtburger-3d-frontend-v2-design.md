@@ -1348,8 +1348,9 @@ compositor. `PortalFrameWorkPlan` describes the intended portal frame shape:
 - `legacy-render-pass` records whether the current frame is single-surface resident drawing, flat
   resident diagnostics, or legacy scene-domain compositing.
 - `direct-env-cell` records an outdoor offscreen target or direct env-cell base scene, direct
-  env-cell draw requests, traversal depth, portal stack identity, resource availability, and
-  transition aperture batches as outdoor/env-cell scene-domain crossings.
+  env-cell draw requests, traversal depth, portal stack identity, resource availability, selected
+  portal-aperture geometry resources, aperture mask passes, and transition aperture batches as
+  outdoor/env-cell scene-domain crossings.
 
 This split lets runtime and diagnostics expose the future portal contract before WebGL execution has
 fully moved over. It must not become two long-term production render paths. Once direct env-cell
@@ -1368,6 +1369,15 @@ per-edge semantics for traversal: source env cell, target endpoint, portal ids, 
 and portal stack identity. A frame plan selects active portal edges/passes and references aperture
 resources; resident baked portal batches must not imply that every portal polygon is drawn in the
 production frame.
+
+The current WebGL2 direct env-cell executor uses depth-level stencil refs rather than unique
+per-edge refs. WebGL's fixed-function stencil test uses one ref value for both the comparison and
+`REPLACE`, so unique child refs cannot be written while testing a different parent ref in one pass.
+The executor therefore runs portal children depth-first: enter a selected aperture mask with fixed
+depth testing, draw the target env-cell resources under the child stencil ref, recurse while that
+mask is active, then draw the same aperture in exit mode to decrement the stencil back to the
+parent level before visiting siblings. This preserves sibling isolation without introducing
+shader-side sampled-depth authority or CPU-side portal-frustum clipping.
 
 Outdoor and env-cell execution should not be symmetric. Outdoor terrain, buildings, and detail are large scene-domain inputs, so the renderer may render the outdoor domain into an offscreen target and use that target as a compositor source. Env cells should not be pre-rendered into one broad interior target before compositing. Portal execution should draw traversal-selected env-cell resources directly under the active aperture stencil/depth mask state. This is the practical consequence of treating env cells as first-class render visibility nodes.
 

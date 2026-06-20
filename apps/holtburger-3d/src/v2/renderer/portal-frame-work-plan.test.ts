@@ -88,6 +88,8 @@ function createDirectEnvCellPlan(): PortalFrameWorkPlan {
 		],
 		kind: "direct-env-cell",
 		mode: "portal-traversal",
+		portalApertureGeometryResources: [],
+		portalApertureMaskPasses: [],
 		transitionSceneCrossings: [
 			{
 				apertureBatchId: "transition-aperture-batch:f418ffff",

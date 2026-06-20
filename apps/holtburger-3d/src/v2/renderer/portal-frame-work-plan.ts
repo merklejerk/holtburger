@@ -48,6 +48,14 @@ export function portalFrameWorkPlanEquals(
 			left.directEnvCellDraws,
 			right.directEnvCellDraws,
 		) &&
+		portalApertureGeometryResourcesEqual(
+			left.portalApertureGeometryResources,
+			right.portalApertureGeometryResources,
+		) &&
+		portalApertureMaskPassesEqual(
+			left.portalApertureMaskPasses,
+			right.portalApertureMaskPasses,
+		) &&
 		portalTransitionSceneCrossingsEqual(
 			left.transitionSceneCrossings,
 			right.transitionSceneCrossings,
@@ -169,6 +177,71 @@ function portalTransitionSceneCrossingsEqual(
 			)
 		);
 	});
+}
+
+function portalApertureGeometryResourcesEqual(
+	left: Extract<
+		PortalFrameWorkPlan,
+		{ readonly kind: "direct-env-cell" }
+	>["portalApertureGeometryResources"],
+	right: Extract<
+		PortalFrameWorkPlan,
+		{ readonly kind: "direct-env-cell" }
+	>["portalApertureGeometryResources"],
+): boolean {
+	return arraysEqual(left, right, (leftResource, rightResource) => {
+		return (
+			leftResource.resourceId === rightResource.resourceId &&
+			arraysEqual(
+				leftResource.vertices,
+				rightResource.vertices,
+				(leftVertex, rightVertex) => numberArraysEqual(leftVertex, rightVertex),
+			)
+		);
+	});
+}
+
+function portalApertureMaskPassesEqual(
+	left: Extract<
+		PortalFrameWorkPlan,
+		{ readonly kind: "direct-env-cell" }
+	>["portalApertureMaskPasses"],
+	right: Extract<
+		PortalFrameWorkPlan,
+		{ readonly kind: "direct-env-cell" }
+	>["portalApertureMaskPasses"],
+): boolean {
+	return arraysEqual(left, right, (leftPass, rightPass) => {
+		return (
+			leftPass.apertureResourceId === rightPass.apertureResourceId &&
+			leftPass.linkId === rightPass.linkId &&
+			leftPass.parentStencilRef === rightPass.parentStencilRef &&
+			leftPass.portalStackId === rightPass.portalStackId &&
+			leftPass.stencilRef === rightPass.stencilRef &&
+			leftPass.traversalDepth === rightPass.traversalDepth &&
+			portalFrameSceneSourceEquals(leftPass.source, rightPass.source) &&
+			portalFrameSceneSourceEquals(leftPass.target, rightPass.target)
+		);
+	});
+}
+
+function portalFrameSceneSourceEquals(
+	left: Extract<
+		PortalFrameWorkPlan,
+		{ readonly kind: "direct-env-cell" }
+	>["portalApertureMaskPasses"][number]["source"],
+	right: Extract<
+		PortalFrameWorkPlan,
+		{ readonly kind: "direct-env-cell" }
+	>["portalApertureMaskPasses"][number]["source"],
+): boolean {
+	if (left.kind !== right.kind || left.landblockId !== right.landblockId) {
+		return false;
+	}
+	if (left.kind !== "env-cell-direct" || right.kind !== "env-cell-direct") {
+		return true;
+	}
+	return left.envCellId === right.envCellId;
 }
 
 function portalTransitionSceneEndpointEquals(

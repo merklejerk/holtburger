@@ -1128,7 +1128,7 @@ Debt carried forward:
 
 ### Phase 5: Recursive Reachability And Aperture-Mask Execution
 
-Status: planned.
+Status: implemented on 2026-06-20; browser/manual validation pending.
 
 Purpose: draw bounded portal-reachable env cells through aperture-constrained passes instead of
 whole-shell interior targets.
@@ -1164,6 +1164,60 @@ Acceptance criteria:
 - Correctness does not depend on full portal-frustum clipping.
 - Baked portal polygon geometry is used as selected aperture resources for active traversal edges,
   not as whole-landblock production portal batches.
+
+Implementation notes:
+
+- `PortalFrameWorkPlan` direct env-cell frames now carry selected portal-aperture geometry resources
+  separately from per-edge aperture mask passes. Geometry resources are deduped by canonicalized
+  transformed aperture vertices, while mask passes preserve source env cell, target env cell,
+  traversal depth, stack id, link id, and parent/child stencil depth.
+- Runtime direct env-cell planning now reads committed portal/interior records for the camera
+  landblock, triangulates only the source aperture for each traversed env-cell edge, and skips mask
+  creation when the traversed source portal has no committed aperture geometry. The reachable cell
+  draw request can still exist for diagnostics, but WebGL execution will not draw a non-root cell
+  unless a selected mask pass exists.
+- Direct env-cell traversal depth was raised from 1 to 2 and the default cell cap was raised to 128
+  after manual inspection showed granular cell graphs can exhaust an 8-cell budget before reaching
+  the requested depth. This is enough to exercise recursive aperture push/pop behavior without
+  introducing a broad visibility pipeline or unbounded recursion.
+- The WebGL2 direct-env-cell path now requests a stencil buffer, clears stencil for direct frames,
+  and executes direct portal children depth-first. Root cells draw without a stencil mask. Each
+  child pass draws the selected aperture into stencil with fixed-function depth testing, draws the
+  target env-cell resources under the child stencil ref, recurses into descendants while that mask
+  remains active, then redraws the aperture in exit mode to decrement stencil back to the parent
+  level before siblings execute.
+- The implementation intentionally uses depth-level stencil refs rather than unique per-edge refs.
+  WebGL's fixed-function stencil API uses one ref for both the comparison and `REPLACE`, so unique
+  child refs cannot be written while simultaneously testing a different parent ref in a single mask
+  pass. Depth-level refs plus DFS enter/draw/recurse/exit preserve sibling isolation with
+  fixed-function stencil operations.
+- Focused tests cover frame-plan aperture resource/mask creation, direct renderer resource
+  selection, aperture mask stencil state, transition-composite regressions, portal-frame equality,
+  and runtime direct plan publication.
+
+Spicy/debt notes:
+
+- Aperture resources are currently frame-plan resources uploaded through one dynamic WebGL buffer
+  during selected mask passes. That avoids the vestigial whole-landblock baked portal batch path,
+  but a later renderer-resource phase should promote stable aperture ranges into a persistent GPU
+  cache if profiling shows dynamic upload overhead matters.
+- The renderer still does not perform literal child-frustum clipping or screen-footprint pruning.
+  That remains intentional: correctness is based on camera residency, bounded reachability, and
+  stencil/depth aperture masks.
+- Missing selected aperture geometry now fails closed for rendering by skipping that non-root draw
+  in WebGL execution. If browser inspection finds unexpectedly missing cells, inspect the committed
+  portal/interior record for source portal aperture points before changing traversal policy.
+- Outdoor target sampling and transition crossings remain Phase 6 work. Phase 5 only executes
+  env-cell to env-cell masks inside the direct path.
+
+Validation:
+
+- Ran `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts src/v2/renderer/portal-frame-work-plan.test.ts src/v2/runtime/client-runtime.test.ts`.
+- Ran `npm run check`.
+- Ran `npm run lint:ts`.
+- Manual browser inspection is still needed against the known Phase 1 dungeon/tunnel targets to
+  confirm the visual result and identify whether remaining artifacts are source data, material, or
+  pass-order issues.
 
 ### Phase 5R: Reassessment After Recursive Interior Portals
 

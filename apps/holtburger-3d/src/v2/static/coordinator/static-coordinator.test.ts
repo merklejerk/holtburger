@@ -10,7 +10,6 @@ import type {
 	StaticBakeAttachmentProvider,
 	ScheduledStaticWork,
 	StaticSpatialRecord,
-	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
 	TransitionApertureBatch,
 	StaticVisibilityRecord,
@@ -1071,90 +1070,6 @@ function createTransitionApertureBatch(
 			{ x: 1, y: 0, z: 0 },
 			{ x: 0, y: 1, z: 0 },
 		],
-	};
-}
-
-function createStructuredInteriorDrawUnit(
-	drawUnitId: string,
-	landblockId: number,
-): StructuredInteriorGeometryStaticDrawUnit {
-	return {
-		cellStructure: {
-			cellStructureId: 0x0d000001,
-			kind: "cell-structure",
-		},
-		coordinateSpace: "landblock-render-local",
-		domain: "landblock-env-cells",
-		drawUnitId,
-		envCellId: landblockId & 0xffff_ff00,
-		environment: {
-			environmentId: 0x0e000001,
-			kind: "environment",
-		},
-		indexType: "uint16",
-		indices: new Uint16Array([0, 1, 2]),
-		kind: "structured-interior-geometry",
-		landblockId,
-		localPlacement: {
-			orientation: { w: 1, x: 0, y: 0, z: 0 },
-			origin: { x: 0, y: 0, z: 0 },
-		},
-		materialBucketKey: "family:flat-color|pass:opaque|material:08000010",
-		materialEntries: [
-			{
-				alphaTest: 0,
-				detailTextureTiling: 1,
-				detailTextureUseId: null,
-				indexedClipThreshold: -1,
-				indexedTextureFormat: null,
-				indexTextureUseId: null,
-				materialColor: [0.42, 0.72, 1, 1],
-				materialEmissiveColor: [0, 0, 0],
-				materialIds: [0x08000010],
-				paletteFirstIndex: 0,
-				paletteTextureUseId: null,
-				primaryTextureUseId: null,
-				primaryTextureWrapMode: "clamp",
-				renderState: {
-					blend: {
-						dstFactor: null,
-						enabled: false,
-						mode: "opaque",
-						srcFactor: null,
-					},
-					depthTest: true,
-					depthWrite: true,
-				},
-				slot: 0,
-			},
-		],
-		materialFamily: "flat-color",
-		materialIds: [0x08000010],
-		materialPass: "opaque",
-		materialPlan: [
-			{
-				diagnostics: [],
-				family: "flat-color",
-				material: {
-					kind: "static-material-source",
-					materialId: 0x08000010,
-				},
-				outcome: "rendered",
-				pass: "opaque",
-				slotId: 0,
-				surfaceId: 0x08000010,
-				textureUseIds: [],
-			},
-		],
-		materialSlotIndices: new Float32Array([0, 0, 0]),
-		memberId: "cell-0",
-		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]),
-		sourceTriangleIds: ["triangle-a"],
-		surfaceIds: [0x08000010],
-		texCoords: new Float32Array([0, 0, 1, 0, 0, 1]),
-		textureUseIds: [],
-		triangleCount: 1,
-		vertexCount: 3,
 	};
 }
 

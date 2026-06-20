@@ -37,6 +37,7 @@
 		RuntimeSnapshot,
 		TransitionApertureDebugOverlayMode,
 	} from "../v2/runtime/client-runtime";
+	import type { RendererEnvCellResourceMembership } from "../v2/renderer/types";
 	import {
 		describeStaticSceneSelectionKey,
 		type StaticSceneSelectionKey,
@@ -108,6 +109,7 @@
 	let envCellPortalDebugVisible = $state(false);
 	let flatVisionModeEnabled = $state(false);
 	let transitionApertureDebugVisible = $state(false);
+	let envCellResourceInspectionInput = $state("");
 	let transitionApertureDebugMode =
 		$state<TransitionApertureDebugOverlayMode>("both");
 	let terrainRadius = $state(DEFAULT_TERRAIN_LOD_RADIUS);
@@ -144,6 +146,9 @@
 		parseV2LocationInput(locationInput, landblockInputMode),
 	);
 	const parsedIsInterior = $derived(parsedLocation?.kind === "interior-cell");
+	const envCellResourceInspectionTarget = $derived(
+		parseManualEnvCellResourceInspectionTarget(envCellResourceInspectionInput),
+	);
 	const canToggleLandblockMode = $derived(
 		isV2LandblockPrefixInput(locationInput),
 	);
@@ -434,9 +439,8 @@
 	}
 
 	function handleEnvCellPortalDebugToggle(event: Event): void {
-		envCellPortalDebugVisible = (
-			event.currentTarget as HTMLInputElement
-		).checked;
+		envCellPortalDebugVisible = (event.currentTarget as HTMLInputElement)
+			.checked;
 		runtime?.setEnvCellPortalDebugOverlayVisible(envCellPortalDebugVisible);
 	}
 
@@ -446,9 +450,8 @@
 	}
 
 	function handleTransitionApertureDebugToggle(event: Event): void {
-		transitionApertureDebugVisible = (
-			event.currentTarget as HTMLInputElement
-		).checked;
+		transitionApertureDebugVisible = (event.currentTarget as HTMLInputElement)
+			.checked;
 		runtime?.setTransitionApertureDebugOverlayVisible(
 			transitionApertureDebugVisible,
 		);
@@ -457,14 +460,10 @@
 	function handleTransitionApertureDebugModeChange(event: Event): void {
 		transitionApertureDebugMode = (event.currentTarget as HTMLSelectElement)
 			.value as TransitionApertureDebugOverlayMode;
-		runtime?.setTransitionApertureDebugOverlayMode(
-			transitionApertureDebugMode,
-		);
+		runtime?.setTransitionApertureDebugOverlayMode(transitionApertureDebugMode);
 	}
 
-	function cancelPendingCameraFocus(
-		status: CameraFocusStatus,
-	): void {
+	function cancelPendingCameraFocus(status: CameraFocusStatus): void {
 		pendingCameraFocus = null;
 		cameraFocusStatus = status;
 	}
@@ -482,7 +481,9 @@
 		event: Extract<RuntimeEvent, { readonly kind: "scene-interest-updated" }>,
 	): void {
 		if (event.source !== "manual") {
-			cancelPendingCameraFocus(event.interest.kind === "none" ? "idle" : "evicted");
+			cancelPendingCameraFocus(
+				event.interest.kind === "none" ? "idle" : "evicted",
+			);
 			return;
 		}
 
@@ -650,8 +651,16 @@
 
 	function queryOutdoorTerrainHeightAtPoint(options: {
 		readonly bounds: {
-			readonly max: { readonly x: number; readonly y: number; readonly z: number };
-			readonly min: { readonly x: number; readonly y: number; readonly z: number };
+			readonly max: {
+				readonly x: number;
+				readonly y: number;
+				readonly z: number;
+			};
+			readonly min: {
+				readonly x: number;
+				readonly y: number;
+				readonly z: number;
+			};
 		};
 		readonly clearance: number;
 		readonly x: number;
@@ -676,8 +685,16 @@
 	}
 
 	function centerOfBounds(bounds: {
-		readonly max: { readonly x: number; readonly y: number; readonly z: number };
-		readonly min: { readonly x: number; readonly y: number; readonly z: number };
+		readonly max: {
+			readonly x: number;
+			readonly y: number;
+			readonly z: number;
+		};
+		readonly min: {
+			readonly x: number;
+			readonly y: number;
+			readonly z: number;
+		};
 	}): { readonly x: number; readonly y: number; readonly z: number } {
 		return {
 			x: (bounds.min.x + bounds.max.x) * 0.5,
@@ -687,8 +704,16 @@
 	}
 
 	function createDefaultOutdoorFocusBounds(): {
-		readonly max: { readonly x: number; readonly y: number; readonly z: number };
-		readonly min: { readonly x: number; readonly y: number; readonly z: number };
+		readonly max: {
+			readonly x: number;
+			readonly y: number;
+			readonly z: number;
+		};
+		readonly min: {
+			readonly x: number;
+			readonly y: number;
+			readonly z: number;
+		};
 	} {
 		return {
 			max: {
@@ -1067,6 +1092,67 @@
 
 	function formatHexId(value: number): string {
 		return `0x${value.toString(16).padStart(8, "0")}`;
+	}
+
+	function parseManualEnvCellResourceInspectionTarget(
+		value: string,
+	): { readonly envCellId: number; readonly landblockId: number } | null {
+		const trimmed = value.trim();
+		if (trimmed.length === 0) {
+			return null;
+		}
+		const normalized = trimmed.startsWith("0x") ? trimmed.slice(2) : trimmed;
+		if (!/^[0-9a-fA-F]{1,8}$/.test(normalized)) {
+			return null;
+		}
+		const envCellId = Number.parseInt(normalized, 16) >>> 0;
+		return {
+			envCellId,
+			landblockId: envCellId & 0xffff0000,
+		};
+	}
+
+	function findEnvCellResourceMembership(
+		landblockId: number,
+		envCellId: number,
+	): RendererEnvCellResourceMembership | null {
+		return (
+			snapshot?.renderer.envCellResourceMembership.find(
+				(entry) =>
+					entry.landblockId === landblockId && entry.envCellId === envCellId,
+			) ?? null
+		);
+	}
+
+	function formatEnvCellResourceMembership(
+		target: { readonly envCellId: number; readonly landblockId: number } | null,
+	): string {
+		if (!target) {
+			return "none";
+		}
+		const membership = findEnvCellResourceMembership(
+			target.landblockId,
+			target.envCellId,
+		);
+		const structuredCount =
+			membership?.structuredInteriorDrawUnitIds.length ?? 0;
+		const staticCount = membership?.envCellStaticObjectDrawUnitIds.length ?? 0;
+		const sharedStaticCount =
+			membership?.sharedEnvCellStaticObjectDrawUnits ?? 0;
+		return `${formatHexId(target.envCellId)}: ${structuredCount} cell / ${staticCount} static (${sharedStaticCount} shared)`;
+	}
+
+	function currentCameraEnvCellResourceTarget(): {
+		readonly envCellId: number;
+		readonly landblockId: number;
+	} | null {
+		if (snapshot?.currentCameraResidency.kind !== "env-cell") {
+			return null;
+		}
+		return {
+			envCellId: snapshot.currentCameraResidency.envCellId,
+			landblockId: snapshot.currentCameraResidency.landblockId,
+		};
 	}
 
 	function formatCameraResidency(residency: RuntimeCameraResidency): string {
@@ -1664,6 +1750,37 @@
 							</dd>
 						</div>
 						<div>
+							<dt>Camera env resources</dt>
+							<dd>
+								{snapshot
+									? formatEnvCellResourceMembership(
+											currentCameraEnvCellResourceTarget(),
+										)
+									: "pending"}
+							</dd>
+						</div>
+						<div class="browser-v2__status-row--action">
+							<dt>Inspect env resources</dt>
+							<dd>
+								<input
+									aria-label="Env-cell resource id"
+									placeholder="0x1a730103"
+									type="text"
+									value={envCellResourceInspectionInput}
+									oninput={(event) => {
+										envCellResourceInspectionInput = (
+											event.currentTarget as HTMLInputElement
+										).value;
+									}}
+								/>
+								<span>
+									{formatEnvCellResourceMembership(
+										envCellResourceInspectionTarget,
+									)}
+								</span>
+							</dd>
+						</div>
+						<div>
 							<dt>Camera focus</dt>
 							<dd>{formatCameraFocusStatus()}</dd>
 						</div>
@@ -2044,6 +2161,16 @@
 	.browser-v2__status-row--action button {
 		min-height: 24px;
 		padding: 0 7px;
+		font-size: 11px;
+	}
+
+	.browser-v2__status-row--action input {
+		min-width: 0;
+		min-height: 24px;
+		padding: 0 7px;
+		border: 1px solid rgba(117, 255, 209, 0.4);
+		background: rgba(0, 0, 0, 0.28);
+		color: #f1fff6;
 		font-size: 11px;
 	}
 

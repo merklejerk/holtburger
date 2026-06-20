@@ -544,6 +544,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			renderPassPlan: { kind: "single-surface-resident" },
 			renderedTriangles: 0,
 			sceneDomainTargets: createEmptySceneDomainTargetSnapshot(),
+			envCellResourceMembership: [],
 			staticDrawUnits: 0,
 			terrainDrawUnits: 0,
 			transitionApertureBatches: 0,

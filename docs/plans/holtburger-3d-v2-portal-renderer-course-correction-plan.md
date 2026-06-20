@@ -459,7 +459,7 @@ Open work for the user:
 
 ### Phase 2: Cell-Scoped Render Resource Membership
 
-Status: planned.
+Status: completed on 2026-06-19.
 
 Purpose: make uploaded resident resources addressable by env-cell membership without changing source
 loading or atlas ownership. Keep this as the smallest browser-inspectable cut: enough membership
@@ -489,9 +489,71 @@ Acceptance criteria:
   needing to inspect source DTOs.
 - Existing atlas and texture placement lifetimes remain unchanged.
 
+Implementation notes:
+
+- Added `RendererEnvCellResourceMembership` to the WebGL2 `RendererSnapshot`. The report exposes
+  landblock/env-cell ids, structured-interior draw-unit ids, env-cell static-object draw-unit ids,
+  and a count of static-object draw units shared across multiple env cells.
+- Added renderer-local membership maps for:
+  - structured-interior resources, keyed by the resource's `landblockId` and `envCellId`;
+  - env-cell static-object resources, keyed by the uploaded draw unit's
+    `ownership.kind === "env-cell-static-object-seeds"` and `ownership.envCellIds`.
+- Preserved env-cell static seed ownership on uploaded static-object resources. Outdoor static
+  object resources intentionally report no env-cell membership.
+- Added existing-debug-tab browser inspection for:
+  - the current camera-residency env cell, when the camera is in an env cell;
+  - a manually entered full env-cell id such as `0x1a730103`.
+- Added focused WebGL2 renderer test coverage proving structured-interior and env-cell
+  static-object resources report under the expected env cells and are removed from membership on
+  static delta removal.
+
+High-risk boundary:
+
+- Multi-cell env-cell static-object draw units are now visible in the snapshot as shared resources,
+  but they are not yet split into per-env-cell draw slices. Submitting one of those draw units for a
+  single env cell may still draw geometry belonging to another env cell. This is recorded rather
+  than hidden; defer fine splitting until traversal/direct draw execution proves it is required.
+- Renderer membership remains render-resource metadata only. Portal semantics, source truth,
+  picking truth, and env-cell traversal still belong to runtime/static-scene query and later frame
+  planning phases.
+
+Verification:
+
+- `npm run test:ts -- src/v2/renderer/webgl2/webgl2-renderer.test.ts src/v2/runtime/client-runtime.test.ts src/v2/ui/performance-metrics.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Manual browser inspection on 2026-06-19:
+
+- Dungeon context, `0x1a730103`: camera residency resolved to
+  `0x1a73ffff / 0x1a730103`, and the debug tab reported
+  `0x1a730103: 1 cell / 0 static (0 shared)`. This proves the membership snapshot can identify the
+  current structured-interior resource for the dungeon/current-cell target.
+- Outdoor context, `0xf418ffff`: transition aperture overlays were present, but manually inspected
+  linked/env cells reported no renderer membership:
+  - `0xf4180103: 0 cell / 0 static (0 shared)`;
+  - `0xf418010b: 0 cell / 0 static (0 shared)`;
+  - `0xf4180105: 0 cell / 0 static (0 shared)`;
+  - `0xf418010e: 0 cell / 0 static (0 shared)`.
+- Interpretation: outdoor transition portal/query metadata can be resident without uploaded
+  renderer draw resources keyed to the sampled linked env cells. Transition overlays are therefore
+  not evidence that direct env-cell draw candidates are available.
+
+Debt recorded:
+
+- Phase 3A should consume this membership shape in the frame contract rather than inventing a second
+  draw-resource vocabulary.
+- Phase 4 must avoid treating shared env-cell static-object draw units as proof that single-cell
+  submission is fully isolated.
+- The debug-tab display currently shows counts and relies on the renderer snapshot for draw-unit id
+  lists; richer drill-down should wait until a real portal draw plan needs it.
+- Before outdoor-to-indoor direct drawing, determine whether `0xf418ffff` has expected metadata-only
+  residency for the sampled linked cells or whether outdoor-linked env-cell renderer resources are
+  being baked but not uploaded/indexed.
+
 ### Phase 2R: Reassessment After Membership Indexing
 
-Status: planned checkpoint.
+Status: completed checkpoint on 2026-06-19.
 
 Purpose: confirm the plan still has the right granularity before portal traversal depends on the
 membership model.
@@ -511,6 +573,16 @@ Exit criteria:
 
 - Either Phase 3A/Phase 3 can consume the Phase 2 membership shape as-is, or the plan is updated
   with a smaller corrective phase before frame-contract/traversal work proceeds.
+
+Checkpoint result:
+
+- Proceed to Phase 3A with the Phase 2 membership snapshot shape.
+- The membership model is useful for browser inspection and does not appear to leak source DTOs or
+  portal semantics into the renderer.
+- Dungeon current-cell membership is confirmed for the sampled target.
+- Outdoor transition root/resource availability is not confirmed. Phase 3A should model missing
+  direct-env-cell draw candidates explicitly, and Phase 4/6 should not assume transition-linked env
+  cells have uploaded renderer resources merely because transition aperture metadata is resident.
 
 ### Phase 3A: Portal Frame Contract Skeleton
 

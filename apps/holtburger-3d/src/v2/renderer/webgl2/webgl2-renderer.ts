@@ -11,6 +11,7 @@ import type {
 	StaticResidencyDelta,
 	TextureDrawUnitBinding,
 	TexturePlacementUpdate,
+	RendererEnvCellResourceMembership,
 } from "../types";
 import {
 	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
@@ -700,6 +701,14 @@ class Webgl2Renderer implements Renderer {
 		string,
 		StructuredInteriorGeometryResource
 	>();
+	readonly #structuredInteriorResourceIdsByEnvCellKey = new Map<
+		string,
+		Set<string>
+	>();
+	readonly #envCellStaticObjectResourceIdsByEnvCellKey = new Map<
+		string,
+		Set<string>
+	>();
 	readonly #transitionApertureResources = new Map<
 		string,
 		TransitionApertureGeometryResource
@@ -786,27 +795,16 @@ class Webgl2Renderer implements Renderer {
 				this.#terrainResources.delete(drawUnitId);
 				this.#warnedLayeredFallbackDrawUnitIds.delete(drawUnitId);
 			}
-			const staticObjectResource = this.#staticObjectResources.get(drawUnitId);
-			if (staticObjectResource) {
-				staticObjectResource.dispose();
-				this.#staticObjectResources.delete(drawUnitId);
-			}
-			const structuredInteriorResource =
-				this.#structuredInteriorResources.get(drawUnitId);
-			if (structuredInteriorResource) {
-				structuredInteriorResource.dispose();
-				this.#structuredInteriorResources.delete(drawUnitId);
-			}
+			this.#removeStaticObjectResource(drawUnitId);
+			this.#removeStructuredInteriorResource(drawUnitId);
 			this.#textureBindings.delete(drawUnitId);
 		}
 
 		for (const drawUnit of delta.addedDrawUnits) {
 			this.#terrainResources.get(drawUnit.drawUnitId)?.dispose();
-			this.#staticObjectResources.get(drawUnit.drawUnitId)?.dispose();
-			this.#structuredInteriorResources.get(drawUnit.drawUnitId)?.dispose();
 			this.#terrainResources.delete(drawUnit.drawUnitId);
-			this.#staticObjectResources.delete(drawUnit.drawUnitId);
-			this.#structuredInteriorResources.delete(drawUnit.drawUnitId);
+			this.#removeStaticObjectResource(drawUnit.drawUnitId);
+			this.#removeStructuredInteriorResource(drawUnit.drawUnitId);
 
 			if (drawUnit.kind === "terrain-geometry") {
 				this.#terrainResources.set(
@@ -814,13 +812,11 @@ class Webgl2Renderer implements Renderer {
 					createTerrainGeometryResource(this.#gl, drawUnit),
 				);
 			} else if (drawUnit.kind === "static-object-geometry") {
-				this.#staticObjectResources.set(
-					drawUnit.drawUnitId,
+				this.#addStaticObjectResource(
 					createStaticObjectGeometryResource(this.#gl, drawUnit),
 				);
 			} else if (drawUnit.kind === "structured-interior-geometry") {
-				this.#structuredInteriorResources.set(
-					drawUnit.drawUnitId,
+				this.#addStructuredInteriorResource(
 					createStructuredInteriorGeometryResource(this.#gl, drawUnit),
 				);
 			}
@@ -988,6 +984,8 @@ class Webgl2Renderer implements Renderer {
 		this.#terrainResources.clear();
 		this.#staticObjectResources.clear();
 		this.#structuredInteriorResources.clear();
+		this.#structuredInteriorResourceIdsByEnvCellKey.clear();
+		this.#envCellStaticObjectResourceIdsByEnvCellKey.clear();
 		this.#transitionApertureResources.clear();
 		this.#textures.clear();
 		this.#textureBindings.clear();
@@ -1860,11 +1858,95 @@ class Webgl2Renderer implements Renderer {
 				this.#staticObjectResources.size +
 				this.#structuredInteriorResources.size,
 			terrainDrawUnits: this.#terrainResources.size,
+			envCellResourceMembership:
+				this.#createEnvCellResourceMembershipSnapshot(),
 			transitionApertureBatches: this.#transitionApertureResources.size,
 			transitionApertures: sumTransitionApertureRanges(
 				this.#transitionApertureResources,
 			),
 		};
+	}
+
+	#addStaticObjectResource(resource: StaticObjectGeometryResource): void {
+		this.#staticObjectResources.set(resource.drawUnitId, resource);
+		for (const envCellId of resource.envCellIds) {
+			addResourceMembership(
+				this.#envCellStaticObjectResourceIdsByEnvCellKey,
+				createEnvCellResourceKey(resource.landblockId, envCellId),
+				resource.drawUnitId,
+			);
+		}
+	}
+
+	#removeStaticObjectResource(drawUnitId: string): void {
+		const resource = this.#staticObjectResources.get(drawUnitId);
+		if (!resource) {
+			return;
+		}
+		resource.dispose();
+		this.#staticObjectResources.delete(drawUnitId);
+		for (const envCellId of resource.envCellIds) {
+			removeResourceMembership(
+				this.#envCellStaticObjectResourceIdsByEnvCellKey,
+				createEnvCellResourceKey(resource.landblockId, envCellId),
+				drawUnitId,
+			);
+		}
+	}
+
+	#addStructuredInteriorResource(
+		resource: StructuredInteriorGeometryResource,
+	): void {
+		this.#structuredInteriorResources.set(resource.drawUnitId, resource);
+		addResourceMembership(
+			this.#structuredInteriorResourceIdsByEnvCellKey,
+			createEnvCellResourceKey(resource.landblockId, resource.envCellId),
+			resource.drawUnitId,
+		);
+	}
+
+	#removeStructuredInteriorResource(drawUnitId: string): void {
+		const resource = this.#structuredInteriorResources.get(drawUnitId);
+		if (!resource) {
+			return;
+		}
+		resource.dispose();
+		this.#structuredInteriorResources.delete(drawUnitId);
+		removeResourceMembership(
+			this.#structuredInteriorResourceIdsByEnvCellKey,
+			createEnvCellResourceKey(resource.landblockId, resource.envCellId),
+			drawUnitId,
+		);
+	}
+
+	#createEnvCellResourceMembershipSnapshot(): readonly RendererEnvCellResourceMembership[] {
+		const keys = new Set([
+			...this.#structuredInteriorResourceIdsByEnvCellKey.keys(),
+			...this.#envCellStaticObjectResourceIdsByEnvCellKey.keys(),
+		]);
+
+		return [...keys]
+			.map((key) => {
+				const structuredInteriorDrawUnitIds = sortStrings(
+					this.#structuredInteriorResourceIdsByEnvCellKey.get(key),
+				);
+				const envCellStaticObjectDrawUnitIds = sortStrings(
+					this.#envCellStaticObjectResourceIdsByEnvCellKey.get(key),
+				);
+				const sharedEnvCellStaticObjectDrawUnits =
+					envCellStaticObjectDrawUnitIds.filter((drawUnitId) => {
+						const resource = this.#staticObjectResources.get(drawUnitId);
+						return resource ? resource.envCellIds.length > 1 : false;
+					}).length;
+
+				return {
+					...parseEnvCellResourceKey(key),
+					envCellStaticObjectDrawUnitIds,
+					sharedEnvCellStaticObjectDrawUnits,
+					structuredInteriorDrawUnitIds,
+				};
+			})
+			.sort(compareRendererEnvCellResourceMembership);
 	}
 
 	#emit(): void {
@@ -2117,6 +2199,7 @@ interface StaticObjectGeometryResource {
 	readonly drawUnitId: string;
 	readonly landblockId: StaticObjectGeometryStaticDrawUnit["landblockId"];
 	readonly domain: StaticObjectGeometryStaticDrawUnit["domain"];
+	readonly envCellIds: readonly number[];
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
 	readonly materialEntries: StaticObjectGeometryStaticDrawUnit["materialEntries"];
@@ -2927,6 +3010,10 @@ function createStaticObjectGeometryResource(
 	return {
 		domain: drawUnit.domain,
 		drawUnitId: drawUnit.drawUnitId,
+		envCellIds:
+			drawUnit.ownership.kind === "env-cell-static-object-seeds"
+				? [...new Set(drawUnit.ownership.envCellIds)].sort(compareNumbers)
+				: [],
 		indexBuffer,
 		indexCount: drawUnit.indices.length,
 		indexType:
@@ -3270,6 +3357,73 @@ function createStencilState(
 		zfail: gl.KEEP,
 		zpass,
 	};
+}
+
+function createEnvCellResourceKey(
+	landblockId: number,
+	envCellId: number,
+): string {
+	return `${landblockId >>> 0}:${envCellId >>> 0}`;
+}
+
+function parseEnvCellResourceKey(key: string): {
+	readonly envCellId: number;
+	readonly landblockId: number;
+} {
+	const [landblockIdText, envCellIdText] = key.split(":");
+	const landblockId = Number(landblockIdText);
+	const envCellId = Number(envCellIdText);
+	if (!Number.isInteger(landblockId) || !Number.isInteger(envCellId)) {
+		throw new Error(`Invalid env-cell resource key ${key}.`);
+	}
+	return { envCellId, landblockId };
+}
+
+function addResourceMembership(
+	membership: Map<string, Set<string>>,
+	key: string,
+	drawUnitId: string,
+): void {
+	const drawUnitIds = membership.get(key) ?? new Set<string>();
+	drawUnitIds.add(drawUnitId);
+	membership.set(key, drawUnitIds);
+}
+
+function removeResourceMembership(
+	membership: Map<string, Set<string>>,
+	key: string,
+	drawUnitId: string,
+): void {
+	const drawUnitIds = membership.get(key);
+	if (!drawUnitIds) {
+		return;
+	}
+	drawUnitIds.delete(drawUnitId);
+	if (drawUnitIds.size === 0) {
+		membership.delete(key);
+	}
+}
+
+function sortStrings(
+	values: ReadonlySet<string> | undefined,
+): readonly string[] {
+	return values
+		? [...values].sort((left, right) => left.localeCompare(right))
+		: [];
+}
+
+function compareRendererEnvCellResourceMembership(
+	left: RendererEnvCellResourceMembership,
+	right: RendererEnvCellResourceMembership,
+): number {
+	return (
+		compareNumbers(left.landblockId, right.landblockId) ||
+		compareNumbers(left.envCellId, right.envCellId)
+	);
+}
+
+function compareNumbers(left: number, right: number): number {
+	return left - right;
 }
 
 export interface StaticObjectTransparentDrawSortEntry {

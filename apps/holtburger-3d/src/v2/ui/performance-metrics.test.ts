@@ -66,6 +66,7 @@ function createRendererSnapshot(
 		isRunning: true,
 		renderPassPlan: { kind: "single-surface-resident" },
 		renderedTriangles: 0,
+		envCellResourceMembership: [],
 		sceneDomainTargets: {
 			active: false,
 			apertureBatchDrawCalls: 0,

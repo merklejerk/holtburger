@@ -151,6 +151,7 @@ export interface RendererSnapshot {
 	readonly sceneDomainTargets: SceneDomainTargetSnapshot;
 	readonly staticDrawUnits: number;
 	readonly terrainDrawUnits: number;
+	readonly envCellResourceMembership: readonly RendererEnvCellResourceMembership[];
 	readonly transitionApertureBatches: number;
 	readonly transitionApertures: number;
 	readonly renderedTriangles: number;
@@ -158,6 +159,14 @@ export interface RendererSnapshot {
 }
 
 export type RendererSnapshotListener = (snapshot: RendererSnapshot) => void;
+
+export interface RendererEnvCellResourceMembership {
+	readonly landblockId: number;
+	readonly envCellId: number;
+	readonly structuredInteriorDrawUnitIds: readonly string[];
+	readonly envCellStaticObjectDrawUnitIds: readonly string[];
+	readonly sharedEnvCellStaticObjectDrawUnits: number;
+}
 
 export type PortalSceneDomain =
 	| {

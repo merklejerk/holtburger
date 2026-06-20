@@ -10,7 +10,8 @@ The V2 frontend has reached the point where structured interiors are source-reso
 materialized, uploaded, drawn, queried, and partially inspected. That exposed a stronger truth than
 the original transition-portal path assumed: Asheron's Call interiors are not a flat second scene
 domain that can be drawn wholesale behind a few outdoor apertures. They are env-cell graphs whose
-visible contents are defined by portal traversal, clipping, and cell-scoped visibility.
+visible contents are defined first by current residency, portal reachability, aperture constraints,
+and cell-scoped visibility.
 
 Recent V2 work proved several useful pieces:
 
@@ -34,7 +35,7 @@ but it still draws too much of them. Investigation around `0x1a73ffff` suggests 
 "boulder" is likely overlapping capped neighboring cell shells drawn wholesale, not an authored
 static marker, source-object filter issue, or simple portal-plane side decode bug. In other words,
 the visual artifact is a portal renderer problem: V2 is rendering resident env-cell shells without a
-frame-specific portal traversal and clipping plan.
+frame-specific portal reachability and direct submission plan.
 
 The existing two-scene-domain transition compositor remains useful as a bootstrap for outdoor to
 indoor apertures, but it is not enough for correct recursive cell rendering. A proper portal
@@ -44,7 +45,7 @@ authority for which cell-owned draw units are submitted in a frame.
 ## Goal
 
 Course-correct V2 from whole-domain interior rendering toward a portal renderer that draws
-cell-scoped static resources through portal-derived traversal, culling, clipping, and stencil plans
+cell-scoped static resources through camera residency, portal reachability, and aperture-mask plans
 while preserving the existing landblock-owned source, bake, atlas, and runtime ownership model.
 
 ## Scope
@@ -58,9 +59,11 @@ In scope:
 - Partitioning or indexing resident structured-interior and env-cell static-object resources so the
   renderer can submit them by env cell.
 - Runtime/static-scene portal traversal over committed env-cell portal/interior records.
-- Renderer frame-plan inputs for visible cells, portal aperture stacks, stencil/depth levels,
-  clipping/frustum constraints, and transition scene-domain crossings.
-- Portal-aware culling for structured interiors and env-cell static seeds.
+- Renderer frame-plan inputs for reachable cells, portal aperture stacks, stencil/depth levels, and
+  transition scene-domain crossings.
+- Reachability-based env-cell submission for structured interiors and env-cell static seeds.
+- Optional later portal-aware culling or frustum/footprint pruning only if reachability plus
+  stencil/depth aperture constraints prove insufficient for correctness or performance.
 - Preserving browser diagnostic modes that intentionally draw broad resident interiors, as long as
   those modes are clearly not the production portal path.
 - Focused tests for pure traversal and renderer contract helpers, plus browser/manual inspection for
@@ -192,8 +195,13 @@ Traversal output should be bounded:
 
 - max recursion depth;
 - max cells per frame;
-- aperture screen-footprint and frustum rejection;
 - optional debug overrides for browser inspection.
+
+Camera residency plus portal reachability is the minimum production visibility model for the current
+course correction. A full frame visibility pipeline with screen-footprint rejection, narrowed child
+frusta, or CPU-side clipping against portal polygons is not required to land direct env-cell
+rendering. Those techniques remain optional performance/fidelity tools if later evidence proves that
+cell-level reachability and aperture masks are not enough.
 
 ### Renderer Submission Model
 
@@ -204,9 +212,9 @@ Outdoor and env-cell rendering should use different execution strategies:
   reasonable base-scene strategy for portal compositing. The outdoor target can be copied/blitted
   through the compositor as the stable exterior source.
 - **Direct env-cell draws:** env-cell cell structures and env-cell static seeds should be drawn on
-  demand during portal execution under the active stencil/depth/clip state. They should not first be
-  rendered wholesale into a single interior source target. Drawing them directly is the point of
-  making env cells first-class render visibility nodes.
+  demand during portal execution under the active reachability and aperture-mask state. They should
+  not first be rendered wholesale into a single interior source target. Drawing them directly is the
+  point of making env cells first-class render visibility nodes.
 
 The renderer should consume a frame plan shaped roughly like this, with exact names decided during
 implementation:
@@ -227,9 +235,17 @@ The core requirement is not this exact DTO. The requirement is that per-frame re
 - which env cells are visible;
 - through which portal stack or aperture each visible cell is visible;
 - which draw resources belong to each visible cell;
-- which stencil/depth/clipping state applies before drawing those resources;
+- which reusable aperture geometry resource/range belongs to each active portal edge;
+- which stencil/depth aperture-mask state applies before drawing those resources;
 - when an outdoor offscreen target is used as a source or base;
 - which transition apertures cross between outdoor and interior domains.
+
+Portal polygon baking should produce reusable aperture geometry resources, not production
+visibility batches. The resource layer may deduplicate aperture vertex/index ranges by canonicalized
+transformed polygon geometry because reciprocal and duplicate portal polygons are common. The
+semantic layer must remain per portal edge: source env cell, target endpoint, portal ids, flags,
+front-face policy, and traversal stack identity are not deduplicated away merely because two edges
+share the same polygon geometry.
 
 ### Transition Portals
 
@@ -677,8 +693,8 @@ residency.
 Deliverables:
 
 - A pure traversal planner over committed env-cell portal records.
-- Inputs for camera/current env cell, traversal depth cap, cell cap, frustum/footprint policy, and
-  optional browser debug overrides.
+- Inputs for camera/current env cell, traversal depth cap, cell cap, and optional browser debug
+  overrides.
 - Output records for visible cells, parent portal edge, traversal depth, aperture stack, and
   rejection reason diagnostics.
 - Tests for:
@@ -727,9 +743,9 @@ High-risk boundary:
   duplicate portal relationships.
 - Scene crossings are reported but not traversed. Outdoor/building transition roots still need Phase
   6 bridge logic and should not be treated as direct interior neighbors.
-- The `frustum/footprint policy` deliverable is represented only by bounded traversal shape and
-  diagnostics in this phase. No screen-footprint, portal-plane clipping, or frustum narrowing has
-  landed yet.
+- Screen-footprint pruning, portal-plane clipping, and frustum narrowing are explicitly not part of
+  this phase. The planner records enough stack/edge identity for those optimizations later if they
+  become necessary.
 - Traversal is exposed through `StaticSceneQuery`, but runtime has not yet converted traversal output
   into `PortalFrameWorkPlan.kind === "direct-env-cell"`.
 
@@ -743,7 +759,7 @@ Debt recorded:
 
 - Phase 4 should add the frame-plan population step that maps `PortalTraversalVisibleCell` records
   plus renderer membership into direct env-cell draw requests.
-- Phase 4/5 still need aperture/frustum/clip policy. The planner currently preserves stack/edge
+- Phase 4/5 still need aperture-mask pass policy. The planner currently preserves stack/edge
   identity so that work has somewhere concrete to attach.
 - Phase 6 must decide how building/outdoor transition crossings become traversal roots or crossings
   without treating env-cell outside-transition metadata as mask authority.
@@ -773,7 +789,8 @@ Exit criteria:
 
 Status: planned.
 
-Purpose: prove cell-scoped submission before implementing full recursion.
+Purpose: prove reachability-scoped env-cell submission before implementing recursive aperture-mask
+passes.
 
 Deliverables:
 
@@ -795,6 +812,8 @@ Acceptance criteria:
   are not submitted.
 - The renderer can draw a selected env-cell resource set directly without rendering all resident
   interiors to a source target first.
+- No frustum narrowing, screen-footprint rejection, or portal-polygon clipping is required for this
+  phase.
 
 ### Phase 4R: Reassessment After First Portal-Aware Drawing
 
@@ -818,23 +837,29 @@ Exit criteria:
 - Either Phase 5 proceeds with a validated direct-draw execution model, or the plan is updated with
   a narrower renderer/pass proof before recursive portal execution.
 
-### Phase 5: Recursive Portal Stencil And Clip Execution
+### Phase 5: Recursive Reachability And Aperture-Mask Execution
 
 Status: planned.
 
-Purpose: draw recursive env-cell visibility using aperture-constrained passes instead of whole-shell
-interior targets.
+Purpose: draw bounded portal-reachable env cells through aperture-constrained passes instead of
+whole-shell interior targets.
 
 Deliverables:
 
 - A bounded recursive portal execution model for env-cell to env-cell portals.
 - Direct drawing of selected env-cell resources during portal execution, under the active
-  stencil/depth/clip state, without rendering a whole interior source target first.
+  stencil/depth aperture-mask state, without rendering a whole interior source target first.
+- Reusable portal-aperture geometry resources/ranges referenced by traversal edges, with optional
+  geometry dedupe for reciprocal or duplicate transformed portal polygons.
+- Per-edge portal semantics preserved separately from deduped aperture geometry resources.
 - Stencil or equivalent aperture-mask state per traversal depth.
 - Fixed-function depth testing for aperture coverage wherever WebGL2 can express it.
-- Clip/frustum narrowing per portal stack where feasible.
+- Stencil/aperture draws issued per active portal pass or per compatible state group, not by drawing
+  every resident baked portal polygon batch.
 - Tests for pass ordering, stencil state, and resource selection with fake WebGL2 contexts.
 - Manual validation against the Phase 1 dungeon and tunnel targets.
+- Explicit deferral note for literal child-frustum clipping against portal polygons unless visual
+  correctness or performance evidence requires it.
 
 Acceptance criteria:
 
@@ -842,6 +867,9 @@ Acceptance criteria:
   resident cell shells.
 - The renderer does not rely on shader-side sampled-depth comparisons as aperture coverage
   authority.
+- Correctness does not depend on full portal-frustum clipping.
+- Baked portal polygon geometry is used as selected aperture resources for active traversal edges,
+  not as whole-landblock production portal batches.
 
 ### Phase 5R: Reassessment After Recursive Interior Portals
 
@@ -854,10 +882,12 @@ Questions to answer:
 
 - Does bounded recursive portal rendering visually match the selected dungeon/interior targets well
   enough to treat the model as correct?
-- Are stencil/depth/clip mechanics stable without shader-side sampled-depth aperture authority?
+- Are stencil/depth aperture-mask mechanics stable without shader-side sampled-depth aperture
+  authority?
 - Did recursion require more draw-unit splitting than expected?
 - Are the remaining visual issues source-data questions, pass-order questions, material issues, or
   traversal-policy issues?
+- Is literal portal-frustum clipping still unnecessary, or did a specific artifact prove otherwise?
 
 Exit criteria:
 
@@ -914,21 +944,27 @@ Exit criteria:
 
 Status: planned.
 
-Purpose: prevent the correct portal model from becoming a draw-call explosion.
+Purpose: keep the reachability-based portal model bounded without turning early correctness work
+into a full visibility pipeline.
 
 Deliverables:
 
-- Cell-level culling before draw-resource submission.
+- Cell-level acceptance from camera residency plus portal reachability before draw-resource
+  submission.
 - Resource-level culling within visible cells where existing BVH/slice metadata supports it.
 - Metrics for traversal count, submitted cells, submitted draw units, portal passes, triangles, and
   GPU draw calls.
 - Budget policy for browser mode and future client mode kept separate.
 - Assessment of whether additional bake-time cell/material partitioning is needed.
+- Optional assessment of screen-footprint pruning or portal-frustum narrowing if metrics prove cell
+  reachability is too broad.
 
 Acceptance criteria:
 
 - Typical dungeon/interior frames submit a bounded visible subset instead of every resident cell.
 - Diagnostics can explain why a cell or portal was accepted/rejected.
+- Any sub-cell or portal-frustum culling is justified by measured need, not treated as a prerequisite
+  for the portal-renderer cutover.
 
 ### Phase 7R: Reassessment Before Picking And Cleanup
 
@@ -1000,11 +1036,17 @@ Deliverables:
 - Delete or isolate flat resident interior rendering behind an explicit diagnostic mode.
 - Remove temporary hard-skips and one-off investigation toggles.
 - Remove stale two-surface assumptions that conflict with cell-scoped portal execution.
+- Remove or quarantine vestigial baked-portal submission paths where "resident aperture batch"
+  implies "draw this portal this frame."
+- Keep portal polygon baking only as reusable resource preparation and debug-overlay input; delete
+  production code paths that treat baked portal batches as visibility policy.
 - Update the V2 implementation plan and design doc with completed decisions and remaining debt.
 
 Acceptance criteria:
 
 - Production V2 interior rendering is portal traversal driven.
+- Production portal aperture drawing is driven by selected traversal edges/passes, not by wholesale
+  baked portal batches.
 - Historical diagnostics remain documented, but dead code paths are gone.
 
 ## Risks And Mitigations

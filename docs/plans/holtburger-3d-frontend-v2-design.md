@@ -1338,7 +1338,7 @@ The course correction preserves the existing V2 source and bake ownership model:
 
 The missing durable concept is env-cell render visibility membership. Resident structured-interior and env-cell static-object resources must be addressable by owning env cell at frame-submission time. This does not imply one host request, atlas batch, or source bake per env cell. It means the renderer or materializer must preserve enough membership indexing or draw-slice data for a portal traversal result to submit env cell A without also submitting unrelated resident env cell B. The WebGL2 renderer exposes the current minimal form as `RendererEnvCellResourceMembership`: structured-interior draw-unit ids, env-cell static-object draw-unit ids, and the count of shared static-object draw units for each resident landblock/env-cell pair.
 
-Production interior rendering should start from camera/current env-cell residency and traverse committed env-cell portal records to produce a bounded per-frame visible-cell plan. That plan should carry the visible env cells, traversal depth, portal aperture stack, scene-domain crossings, and rejection/truncation diagnostics needed by renderer execution and browser inspection. Browser-only flat resident interior rendering may remain as an explicit diagnostic mode, but it is not the production or future-client architecture.
+Production interior rendering should start from camera/current env-cell residency and traverse committed env-cell portal records to produce a bounded per-frame reachable-cell plan. That plan should carry the reachable env cells, traversal depth, portal aperture stack, scene-domain crossings, and rejection/truncation diagnostics needed by renderer execution and browser inspection. Browser-only flat resident interior rendering may remain as an explicit diagnostic mode, but it is not the production or future-client architecture.
 
 The renderer-facing frame contract is `PortalFrameWorkPlan`. It is deliberately separate from the
 legacy `RenderPassPlan` while the renderer migrates. `RenderPassPlan` still describes the current
@@ -1356,7 +1356,20 @@ fully moved over. It must not become two long-term production render paths. Once
 drawing is the production path, the legacy scene-domain interior compositor should be removed or
 kept only as an explicitly named diagnostic.
 
-Outdoor and env-cell execution should not be symmetric. Outdoor terrain, buildings, and detail are large scene-domain inputs, so the renderer may render the outdoor domain into an offscreen target and use that target as a compositor source. Env cells should not be pre-rendered into one broad interior target before compositing. Portal execution should draw traversal-selected env-cell resources directly under the active aperture stencil/depth/clip state. This is the practical consequence of treating env cells as first-class render visibility nodes.
+This does not require a full frame visibility pipeline before the portal-renderer cutover. The
+minimum production model is camera residency plus bounded portal reachability plus direct env-cell
+submission. Screen-footprint pruning, narrowed child frusta, and literal clipping against portal
+polygons are optional later tools if reachability and aperture masks prove insufficient.
+
+Portal aperture geometry is reusable resource data, not production visibility policy. V2 may
+deduplicate uploaded portal polygon vertex/index ranges by canonicalized transformed geometry,
+because reciprocal and duplicate portal polygons are common. It must still preserve distinct
+per-edge semantics for traversal: source env cell, target endpoint, portal ids, flags, face policy,
+and portal stack identity. A frame plan selects active portal edges/passes and references aperture
+resources; resident baked portal batches must not imply that every portal polygon is drawn in the
+production frame.
+
+Outdoor and env-cell execution should not be symmetric. Outdoor terrain, buildings, and detail are large scene-domain inputs, so the renderer may render the outdoor domain into an offscreen target and use that target as a compositor source. Env cells should not be pre-rendered into one broad interior target before compositing. Portal execution should draw traversal-selected env-cell resources directly under the active aperture stencil/depth mask state. This is the practical consequence of treating env cells as first-class render visibility nodes.
 
 Outdoor-to-indoor and indoor-to-outdoor transition portals are scene-domain crossings in the portal model, not a separate visibility universe. Building-sourced transition aperture geometry remains the mask authority for building portals. Env-cell outside-transition records remain traversal/query/debug metadata unless a later evidence pass proves a non-building transition case that needs them as mask geometry.
 

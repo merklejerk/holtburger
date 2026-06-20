@@ -1,4 +1,13 @@
-import type { PortalFrameWorkPlan, RenderPassPlan } from "./types";
+import type {
+	PortalApertureFrameDiagnostics,
+	PortalApertureGeometryResourcePlan,
+	PortalFrameEdgePlan,
+	PortalFrameGraphPlan,
+	PortalFrameNodePlan,
+	PortalFrameSceneSource,
+	PortalFrameWorkPlan,
+	RenderPassPlan,
+} from "./types";
 
 export function createLegacyPortalFrameWorkPlan(options: {
 	readonly flatVisionModeEnabled: boolean;
@@ -42,29 +51,7 @@ export function portalFrameWorkPlanEquals(
 		return false;
 	}
 
-	return (
-		portalFrameBaseScenePlanEquals(left.baseScene, right.baseScene) &&
-		portalDirectEnvCellDrawRequestsEqual(
-			left.directEnvCellDraws,
-			right.directEnvCellDraws,
-		) &&
-		portalApertureFrameDiagnosticsEqual(
-			left.portalApertureDiagnostics,
-			right.portalApertureDiagnostics,
-		) &&
-		portalApertureGeometryResourcesEqual(
-			left.portalApertureGeometryResources,
-			right.portalApertureGeometryResources,
-		) &&
-		portalApertureMaskPassesEqual(
-			left.portalApertureMaskPasses,
-			right.portalApertureMaskPasses,
-		) &&
-		portalTransitionSceneCrossingsEqual(
-			left.transitionSceneCrossings,
-			right.transitionSceneCrossings,
-		)
-	);
+	return portalFrameGraphPlansEqual(left.graph, right.graph);
 }
 
 function renderPassPlanEquals(
@@ -108,91 +95,63 @@ function portalSceneDomainEquals(
 	return left.envCellId === right.envCellId;
 }
 
-function portalFrameBaseScenePlanEquals(
-	left: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["baseScene"],
-	right: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["baseScene"],
+function portalFrameGraphPlansEqual(
+	left: PortalFrameGraphPlan,
+	right: PortalFrameGraphPlan,
 ): boolean {
-	if (left.kind !== right.kind || left.landblockId !== right.landblockId) {
-		return false;
-	}
-	if (left.kind !== "env-cell-direct" || right.kind !== "env-cell-direct") {
-		return true;
-	}
-	return left.envCellId === right.envCellId;
+	return (
+		left.baseNodeId === right.baseNodeId &&
+		arraysEqual(left.nodes, right.nodes, portalFrameNodePlansEqual) &&
+		arraysEqual(left.edges, right.edges, portalFrameEdgePlansEqual) &&
+		portalApertureGeometryResourcesEqual(
+			left.apertureResources,
+			right.apertureResources,
+		) &&
+		portalApertureFrameDiagnosticsEqual(left.diagnostics, right.diagnostics)
+	);
 }
 
-function portalDirectEnvCellDrawRequestsEqual(
-	left: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["directEnvCellDraws"],
-	right: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["directEnvCellDraws"],
+function portalFrameNodePlansEqual(
+	left: PortalFrameNodePlan,
+	right: PortalFrameNodePlan,
 ): boolean {
-	return arraysEqual(left, right, (leftDraw, rightDraw) => {
-		return (
-			leftDraw.landblockId === rightDraw.landblockId &&
-			leftDraw.envCellId === rightDraw.envCellId &&
-			leftDraw.traversalDepth === rightDraw.traversalDepth &&
-			leftDraw.portalStackId === rightDraw.portalStackId &&
-			leftDraw.resourceState === rightDraw.resourceState &&
-			stringArraysEqual(
-				leftDraw.structuredInteriorDrawUnitIds,
-				rightDraw.structuredInteriorDrawUnitIds,
-			) &&
-			stringArraysEqual(
-				leftDraw.envCellStaticObjectDrawUnitIds,
-				rightDraw.envCellStaticObjectDrawUnitIds,
-			)
-		);
-	});
+	return (
+		left.nodeId === right.nodeId &&
+		left.parentNodeId === right.parentNodeId &&
+		portalFrameSceneSourceEquals(left.scene, right.scene) &&
+		left.traversalDepth === right.traversalDepth &&
+		numberArraysEqual(left.incomingEdgeIds, right.incomingEdgeIds) &&
+		left.debugStackLabel === right.debugStackLabel &&
+		left.resources.resourceState === right.resources.resourceState &&
+		stringArraysEqual(
+			left.resources.structuredInteriorDrawUnitIds,
+			right.resources.structuredInteriorDrawUnitIds,
+		) &&
+		stringArraysEqual(
+			left.resources.envCellStaticObjectDrawUnitIds,
+			right.resources.envCellStaticObjectDrawUnitIds,
+		)
+	);
 }
 
-function portalTransitionSceneCrossingsEqual(
-	left: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["transitionSceneCrossings"],
-	right: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["transitionSceneCrossings"],
+function portalFrameEdgePlansEqual(
+	left: PortalFrameEdgePlan,
+	right: PortalFrameEdgePlan,
 ): boolean {
-	return arraysEqual(left, right, (leftCrossing, rightCrossing) => {
-		return (
-			leftCrossing.apertureBatchId === rightCrossing.apertureBatchId &&
-			leftCrossing.aperturePortalId === rightCrossing.aperturePortalId &&
-			leftCrossing.landblockId === rightCrossing.landblockId &&
-			portalTransitionSceneEndpointEquals(
-				leftCrossing.from,
-				rightCrossing.from,
-			) &&
-			portalTransitionSceneEndpointEquals(leftCrossing.to, rightCrossing.to) &&
-			numberArraysEqual(
-				leftCrossing.linkedEnvCellIds,
-				rightCrossing.linkedEnvCellIds,
-			)
-		);
-	});
+	return (
+		left.edgeId === right.edgeId &&
+		left.parentNodeId === right.parentNodeId &&
+		left.childNodeId === right.childNodeId &&
+		left.apertureResourceId === right.apertureResourceId &&
+		left.apertureSourceId === right.apertureSourceId &&
+		left.linkId === right.linkId &&
+		left.sourceKind === right.sourceKind
+	);
 }
 
 function portalApertureGeometryResourcesEqual(
-	left: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["portalApertureGeometryResources"],
-	right: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["portalApertureGeometryResources"],
+	left: readonly PortalApertureGeometryResourcePlan[],
+	right: readonly PortalApertureGeometryResourcePlan[],
 ): boolean {
 	return arraysEqual(left, right, (leftResource, rightResource) => {
 		return (
@@ -207,42 +166,9 @@ function portalApertureGeometryResourcesEqual(
 	});
 }
 
-function portalApertureMaskPassesEqual(
-	left: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["portalApertureMaskPasses"],
-	right: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["portalApertureMaskPasses"],
-): boolean {
-	return arraysEqual(left, right, (leftPass, rightPass) => {
-		return (
-			leftPass.apertureResourceId === rightPass.apertureResourceId &&
-			leftPass.apertureSourceId === rightPass.apertureSourceId &&
-			leftPass.linkId === rightPass.linkId &&
-			leftPass.parentStencilRef === rightPass.parentStencilRef &&
-			leftPass.portalStackId === rightPass.portalStackId &&
-			leftPass.sourceKind === rightPass.sourceKind &&
-			leftPass.sourcePortalStackId === rightPass.sourcePortalStackId &&
-			leftPass.stencilRef === rightPass.stencilRef &&
-			leftPass.traversalDepth === rightPass.traversalDepth &&
-			portalFrameSceneSourceEquals(leftPass.source, rightPass.source) &&
-			portalFrameSceneSourceEquals(leftPass.target, rightPass.target)
-		);
-	});
-}
-
 function portalApertureFrameDiagnosticsEqual(
-	left: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["portalApertureDiagnostics"],
-	right: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["portalApertureDiagnostics"],
+	left: PortalApertureFrameDiagnostics,
+	right: PortalApertureFrameDiagnostics,
 ): boolean {
 	return (
 		left.buildingTransitionEdges === right.buildingTransitionEdges &&
@@ -261,38 +187,13 @@ function portalApertureFrameDiagnosticsEqual(
 }
 
 function portalFrameSceneSourceEquals(
-	left: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["portalApertureMaskPasses"][number]["source"],
-	right: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["portalApertureMaskPasses"][number]["source"],
+	left: PortalFrameSceneSource,
+	right: PortalFrameSceneSource,
 ): boolean {
 	if (left.kind !== right.kind || left.landblockId !== right.landblockId) {
 		return false;
 	}
 	if (left.kind !== "env-cell-direct" || right.kind !== "env-cell-direct") {
-		return true;
-	}
-	return left.envCellId === right.envCellId;
-}
-
-function portalTransitionSceneEndpointEquals(
-	left: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["transitionSceneCrossings"][number]["from"],
-	right: Extract<
-		PortalFrameWorkPlan,
-		{ readonly kind: "direct-env-cell" }
-	>["transitionSceneCrossings"][number]["from"],
-): boolean {
-	if (left.kind !== right.kind || left.landblockId !== right.landblockId) {
-		return false;
-	}
-	if (left.kind !== "env-cell" || right.kind !== "env-cell") {
 		return true;
 	}
 	return left.envCellId === right.envCellId;

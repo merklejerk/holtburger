@@ -2734,13 +2734,67 @@ function compareCommittedRecords<TRecord>(
 	right: TRecord,
 ): number {
 	return (
-		getCommittedRecordDomain(left).localeCompare(
-			getCommittedRecordDomain(right),
+		compareStrings(getCommittedRecordDomain(left), getCommittedRecordDomain(right)) ||
+		compareNullableNumbers(
+			getCommittedRecordLandblockId(left),
+			getCommittedRecordLandblockId(right),
 		) ||
-		(getCommittedRecordLandblockId(left) ?? -1) -
-			(getCommittedRecordLandblockId(right) ?? -1) ||
-		JSON.stringify(left).localeCompare(JSON.stringify(right))
+		compareStrings(
+			createCommittedRecordSortKey(left),
+			createCommittedRecordSortKey(right),
+		) ||
+		compareStrings(
+			createCommittedRecordOwnerSortKey(left),
+			createCommittedRecordOwnerSortKey(right),
+		)
 	);
+}
+
+function createCommittedRecordSortKey(record: unknown): string {
+	if (!isRecordWithKind(record)) {
+		throw new Error("Static scene query cannot sort committed record without kind.");
+	}
+
+	switch (record.kind) {
+		case "draw-unit-bounds":
+		case "env-cell-static-object-bounds":
+		case "env-cell-spatial":
+			return createCommittedSpatialRecordKey(record as StaticSpatialRecord);
+		case "env-cell-visibility":
+			return createCommittedVisibilityRecordKey(record as StaticVisibilityRecord);
+		case "env-cell-portal-interior":
+			return createCommittedPortalInteriorRecordKey(
+				record as StaticPortalInteriorRecord,
+			);
+		case "terrain-source-triangle":
+		case "env-cell-source":
+			return createCommittedSourceMappingRecordKey(
+				record as StaticSourceMappingRecord,
+			);
+		case "env-cell-static-object-seed":
+			return createCommittedAuthoredDynamicSeedRecordKey(
+				record as StaticAuthoredDynamicSeedRecord,
+			);
+		default:
+			throw new Error(
+				`Static scene query cannot sort unsupported committed record kind ${record.kind}.`,
+			);
+	}
+}
+
+function createCommittedRecordOwnerSortKey(record: unknown): string {
+	if (!isRecordWithPeerOwner(record)) {
+		return "";
+	}
+	return createStaticPeerOwnerKey(record.owner);
+}
+
+function compareStrings(left: string, right: string): number {
+	return left.localeCompare(right);
+}
+
+function compareNullableNumbers(left: number | null, right: number | null): number {
+	return (left ?? -1) - (right ?? -1);
 }
 
 function getCommittedRecordDomain(
@@ -2796,6 +2850,32 @@ function isRecordWithWorkOwner(record: unknown): record is {
 		(record as { owner?: { kind?: unknown } }).owner?.kind === "work" &&
 		typeof (record as { owner?: { domain?: unknown } }).owner?.domain ===
 			"string"
+	);
+}
+
+function isRecordWithPeerOwner(record: unknown): record is {
+	readonly owner: {
+		readonly kind: string;
+		readonly drawUnitId?: string;
+		readonly domain?: StaticDomain;
+		readonly scopeKey?: string;
+		readonly workId?: string;
+	};
+} {
+	return (
+		typeof record === "object" &&
+		record !== null &&
+		"owner" in record &&
+		typeof (record as { owner?: { kind?: unknown } }).owner?.kind === "string"
+	);
+}
+
+function isRecordWithKind(record: unknown): record is { readonly kind: string } {
+	return (
+		typeof record === "object" &&
+		record !== null &&
+		"kind" in record &&
+		typeof (record as { kind?: unknown }).kind === "string"
 	);
 }
 

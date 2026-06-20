@@ -5,9 +5,60 @@ import type {
 	StaticPortalInteriorRecord,
 	StaticWorkPeerRecordOwner,
 } from "../static/contracts";
-import { createPortalTraversalPlan } from "./portal-traversal-planner";
+import {
+	createPortalTraversalGraph,
+	createPortalTraversalPlan,
+	createPortalTraversalPlanFromGraph,
+} from "./portal-traversal-planner";
 
 describe("portal traversal planner", () => {
+	it("derives multiple traversal plans from one prebuilt portal graph", () => {
+		const graph = createPortalTraversalGraph({
+			landblockId: 0xda55ffff,
+			portalInteriorRecords: [
+				createPortalInteriorRecord({
+					envCellIds: [0xda550100, 0xda550101],
+					portalLinks: [
+						createEnvCellPortalLink({
+							linkId: "a-to-b",
+							sourceEnvCellId: 0xda550100,
+							targetEnvCellId: 0xda550101,
+						}),
+						createEnvCellPortalLink({
+							linkId: "b-to-a",
+							sourceEnvCellId: 0xda550101,
+							targetEnvCellId: 0xda550100,
+						}),
+					],
+				}),
+			],
+		});
+
+		const fromA = createPortalTraversalPlanFromGraph({
+			graph,
+			landblockId: 0xda55ffff,
+			maxCells: 8,
+			maxDepth: 4,
+			maxPortalViews: 16,
+			startEnvCellId: 0xda550100,
+		});
+		const fromB = createPortalTraversalPlanFromGraph({
+			graph,
+			landblockId: 0xda55ffff,
+			maxCells: 8,
+			maxDepth: 4,
+			maxPortalViews: 16,
+			startEnvCellId: 0xda550101,
+		});
+
+		expect(fromA.visibleCells.map((cell) => cell.envCellId)).toEqual([
+			0xda550100, 0xda550101,
+		]);
+		expect(fromB.visibleCells.map((cell) => cell.envCellId)).toEqual([
+			0xda550101, 0xda550100,
+		]);
+	});
+
 	it("traverses reciprocal env-cell portal links while rejecting already-visible cells", () => {
 		const plan = createPortalTraversalPlan({
 			landblockId: 0xda55ffff,

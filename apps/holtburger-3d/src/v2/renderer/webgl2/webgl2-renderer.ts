@@ -5,8 +5,9 @@ import type {
 	RendererSnapshot,
 	RendererSnapshotListener,
 	RenderPassPlan,
+	PortalFrameEdgePlan,
 	PortalApertureGeometryResourcePlan,
-	PortalApertureMaskPass,
+	PortalFrameNodePlan,
 	PortalFrameWorkPlan,
 	SceneDomainTargetKind,
 	SceneDomainTargetSnapshot,
@@ -72,6 +73,11 @@ import {
 	type TransitionCompositeCullFace,
 	type TransitionCompositeDepthWork,
 } from "../transition-composite-work-plan";
+
+type DirectEnvCellPortalFrameWorkPlan = Extract<
+	PortalFrameWorkPlan,
+	{ readonly kind: "direct-env-cell" }
+>;
 
 const TERRAIN_ATLAS_MIP_GRADIENT_SCALE = 0.5;
 const CAMERA_NEAR_PLANE = 0.1;
@@ -1106,12 +1112,13 @@ class Webgl2Renderer implements Renderer {
 
 	#renderDirectEnvCellFramePlan(
 		pulse: number,
-		plan: Extract<PortalFrameWorkPlan, { readonly kind: "direct-env-cell" }>,
+		plan: DirectEnvCellPortalFrameWorkPlan,
 	): void {
 		const gl = this.#gl;
 		const aspectRatio =
 			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight);
-		if (plan.baseScene.kind === "outdoor-target") {
+		const baseNode = getPortalFrameGraphBaseNode(plan);
+		if (baseNode.scene.kind === "outdoor-target") {
 			const targets = this.#ensureSceneDomainTargets(
 				gl.drawingBufferWidth,
 				gl.drawingBufferHeight,
@@ -1665,60 +1672,45 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	#drawDirectEnvCellResources(
-		plan: Extract<PortalFrameWorkPlan, { readonly kind: "direct-env-cell" }>,
+		plan: DirectEnvCellPortalFrameWorkPlan,
 		aspectRatio: number,
 	): number {
 		const gl = this.#gl;
 		const apertureResourcesById = new Map(
-			plan.portalApertureGeometryResources.map((resource) => [
+			plan.graph.apertureResources.map((resource) => [
 				resource.resourceId,
 				resource,
 			]),
 		);
-		const drawsByPortalStackId = new Map(
-			plan.directEnvCellDraws.map((draw) => [draw.portalStackId, draw]),
+		const nodesById = new Map(
+			plan.graph.nodes.map((node) => [node.nodeId, node] as const),
 		);
-		const maskPassesBySourceStackId = new Map<
-			string,
-			PortalApertureMaskPass[]
-		>();
-		for (const pass of plan.portalApertureMaskPasses) {
-			if (pass.target.kind !== "env-cell-direct") {
-				continue;
-			}
-			const passes =
-				maskPassesBySourceStackId.get(pass.sourcePortalStackId) ?? [];
-			passes.push(pass);
-			maskPassesBySourceStackId.set(pass.sourcePortalStackId, passes);
-		}
+		const edgesByParentNodeId = groupPortalFrameEdgesByParentNodeId(
+			plan.graph.edges,
+		);
+		const baseNode = getPortalFrameGraphBaseNode(plan);
 
 		let drawCalls = 0;
-		if (plan.baseScene.kind === "outdoor-target") {
-			drawCalls += this.#executeDirectEnvCellPortalChildren({
+		if (baseNode.scene.kind === "outdoor-target") {
+			drawCalls += this.#executeDirectEnvCellPortalGraphChildren({
 				apertureResourcesById,
 				aspectRatio,
-				drawsByPortalStackId,
-				maskPassesBySourceStackId,
-				sourcePortalStackId: createOutdoorRootPortalStackId(
-					plan.baseScene.landblockId,
-				),
+				edgesByParentNodeId,
+				nodesById,
+				parentNode: baseNode,
 			});
 		} else {
-			for (const rootDraw of plan.directEnvCellDraws.filter(
-				(draw) => draw.traversalDepth === 0,
-			)) {
-				this.#stateCache.setStencilState(
-					createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
-				);
-				drawCalls += this.#drawDirectEnvCellDrawRequest(rootDraw, aspectRatio);
-				drawCalls += this.#executeDirectEnvCellPortalChildren({
-					apertureResourcesById,
-					aspectRatio,
-					drawsByPortalStackId,
-					maskPassesBySourceStackId,
-					sourcePortalStackId: rootDraw.portalStackId,
-				});
-			}
+			this.#stateCache.setStencilState(
+				createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+			);
+			drawCalls += this.#drawPortalFrameNodeResources(baseNode, aspectRatio);
+			drawCalls += this.#executeDirectEnvCellPortalGraphChildren({
+				apertureResourcesById,
+				aspectRatio,
+				edgesByParentNodeId,
+				nodesById,
+				parentNode: baseNode,
+			});
 		}
 		this.#stateCache.setStencilState(
 			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
@@ -1727,43 +1719,44 @@ class Webgl2Renderer implements Renderer {
 		return drawCalls;
 	}
 
-	#executeDirectEnvCellPortalChildren(options: {
+	#executeDirectEnvCellPortalGraphChildren(options: {
 		readonly apertureResourcesById: ReadonlyMap<
 			string,
 			PortalApertureGeometryResourcePlan
 		>;
 		readonly aspectRatio: number;
-		readonly drawsByPortalStackId: ReadonlyMap<
-			string,
-			Extract<
-				PortalFrameWorkPlan,
-				{ readonly kind: "direct-env-cell" }
-			>["directEnvCellDraws"][number]
+		readonly edgesByParentNodeId: ReadonlyMap<
+			number,
+			readonly PortalFrameEdgePlan[]
 		>;
-		readonly maskPassesBySourceStackId: ReadonlyMap<
-			string,
-			readonly PortalApertureMaskPass[]
-		>;
-		readonly sourcePortalStackId: string;
+		readonly nodesById: ReadonlyMap<number, PortalFrameNodePlan>;
+		readonly parentNode: PortalFrameNodePlan;
 	}): number {
 		let drawCalls = 0;
-		const childPasses =
-			options.maskPassesBySourceStackId.get(options.sourcePortalStackId) ?? [];
-		for (const group of groupPortalApertureMaskPassesByTargetView(
-			childPasses,
-		)) {
-			const targetDraw = options.drawsByPortalStackId.get(group.portalStackId);
+		const childEdges =
+			options.edgesByParentNodeId.get(options.parentNode.nodeId) ?? [];
+		for (const group of groupPortalFrameEdgesByChildNodeId(childEdges)) {
+			const childNode = options.nodesById.get(group.childNodeId);
+			if (!childNode) {
+				throw new Error(
+					`Portal frame graph edge references missing child node ${group.childNodeId}.`,
+				);
+			}
 			let enteredMaskCount = 0;
-			for (const pass of group.passes) {
+			for (const edge of group.edges) {
 				const apertureResource = options.apertureResourcesById.get(
-					pass.apertureResourceId,
+					edge.apertureResourceId,
 				);
 				if (!apertureResource) {
 					continue;
 				}
-				this.#drawPortalApertureStencilMask("enter", pass, apertureResource, {
-					aspectRatio: options.aspectRatio,
-				});
+				this.#drawPortalApertureStencilMask(
+					"enter",
+					options.parentNode,
+					childNode,
+					apertureResource,
+					{ aspectRatio: options.aspectRatio },
+				);
 				enteredMaskCount += 1;
 			}
 			if (enteredMaskCount === 0) {
@@ -1775,52 +1768,54 @@ class Webgl2Renderer implements Renderer {
 					true,
 					0x00,
 					this.#gl.EQUAL,
-					group.stencilRef,
+					childNode.traversalDepth,
 					this.#gl.KEEP,
 				),
 			);
-			if (targetDraw) {
-				drawCalls += this.#drawDirectEnvCellDrawRequest(
-					targetDraw,
-					options.aspectRatio,
-				);
-			}
-			drawCalls += this.#executeDirectEnvCellPortalChildren({
+			drawCalls += this.#drawPortalFrameNodeResources(
+				childNode,
+				options.aspectRatio,
+			);
+			drawCalls += this.#executeDirectEnvCellPortalGraphChildren({
 				...options,
-				sourcePortalStackId: group.portalStackId,
+				parentNode: childNode,
 			});
-			for (const pass of group.passes.toReversed()) {
+			for (const edge of group.edges.toReversed()) {
 				const apertureResource = options.apertureResourcesById.get(
-					pass.apertureResourceId,
+					edge.apertureResourceId,
 				);
 				if (!apertureResource) {
 					continue;
 				}
-				this.#drawPortalApertureStencilMask("exit", pass, apertureResource, {
-					aspectRatio: options.aspectRatio,
-				});
+				this.#drawPortalApertureStencilMask(
+					"exit",
+					options.parentNode,
+					childNode,
+					apertureResource,
+					{ aspectRatio: options.aspectRatio },
+				);
 			}
 		}
 		return drawCalls;
 	}
 
-	#drawDirectEnvCellDrawRequest(
-		draw: Extract<
-			PortalFrameWorkPlan,
-			{ readonly kind: "direct-env-cell" }
-		>["directEnvCellDraws"][number],
+	#drawPortalFrameNodeResources(
+		node: PortalFrameNodePlan,
 		aspectRatio: number,
 	): number {
+		if (node.scene.kind !== "env-cell-direct") {
+			return 0;
+		}
 		const staticObjectResources: StaticObjectGeometryResource[] = [];
 		const structuredInteriorResources: StructuredInteriorGeometryResource[] =
 			[];
-		for (const drawUnitId of draw.envCellStaticObjectDrawUnitIds) {
+		for (const drawUnitId of node.resources.envCellStaticObjectDrawUnitIds) {
 			const resource = this.#staticObjectResources.get(drawUnitId);
 			if (resource) {
 				staticObjectResources.push(resource);
 			}
 		}
-		for (const drawUnitId of draw.structuredInteriorDrawUnitIds) {
+		for (const drawUnitId of node.resources.structuredInteriorDrawUnitIds) {
 			const resource = this.#structuredInteriorResources.get(drawUnitId);
 			if (resource) {
 				structuredInteriorResources.push(resource);
@@ -1836,7 +1831,8 @@ class Webgl2Renderer implements Renderer {
 
 	#drawPortalApertureStencilMask(
 		operation: "enter" | "exit",
-		pass: PortalApertureMaskPass,
+		parentNode: PortalFrameNodePlan,
+		childNode: PortalFrameNodePlan,
 		resource: PortalApertureGeometryResourcePlan,
 		options: { readonly aspectRatio: number },
 	): void {
@@ -1858,7 +1854,12 @@ class Webgl2Renderer implements Renderer {
 			);
 			this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
 			this.#stateCache.setStencilState(
-				createDirectPortalStencilMaskState(gl, operation, pass),
+				createDirectPortalStencilMaskState(
+					gl,
+					operation,
+					parentNode,
+					childNode,
+				),
 			);
 			gl.uniformMatrix4fv(
 				this.#transitionCompositeProgram.uniforms.uModelViewProjection,
@@ -2363,10 +2364,11 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	#createSceneDomainTargetSnapshot(): SceneDomainTargetSnapshot {
-		const directEnvCellFramePlanActive =
-			this.#getEffectiveDirectEnvCellFramePlan() !== null;
+		const directEnvCellFramePlan = this.#getEffectiveDirectEnvCellFramePlan();
+		const directEnvCellFramePlanActive = directEnvCellFramePlan !== null;
 		const directOutdoorTargetFramePlanActive =
-			this.#getEffectiveDirectEnvCellFramePlan()?.baseScene.kind ===
+			directEnvCellFramePlan !== null &&
+			getPortalFrameGraphBaseNode(directEnvCellFramePlan).scene.kind ===
 			"outdoor-target";
 		return {
 			active:
@@ -2400,14 +2402,6 @@ class Webgl2Renderer implements Renderer {
 		if (
 			this.#flatVisionModeEnabled ||
 			this.#portalFrameWorkPlan.kind !== "direct-env-cell"
-		) {
-			return null;
-		}
-		if (
-			this.#portalFrameWorkPlan.baseScene.kind === "outdoor-target" &&
-			this.#portalFrameWorkPlan.portalApertureMaskPasses.every(
-				(pass) => pass.source.kind !== "outdoor-target",
-			)
 		) {
 			return null;
 		}
@@ -3744,7 +3738,8 @@ function createStencilState(
 function createDirectPortalStencilMaskState(
 	gl: WebGL2RenderingContext,
 	operation: "enter" | "exit",
-	pass: PortalApertureMaskPass,
+	parentNode: PortalFrameNodePlan,
+	childNode: PortalFrameNodePlan,
 ): Webgl2StencilState {
 	if (operation === "exit") {
 		return createStencilState(
@@ -3752,17 +3747,17 @@ function createDirectPortalStencilMaskState(
 			true,
 			0xff,
 			gl.EQUAL,
-			pass.stencilRef,
+			childNode.traversalDepth,
 			gl.DECR,
 		);
 	}
-	if (pass.parentStencilRef === null) {
+	if (parentNode.parentNodeId === null) {
 		return createStencilState(
 			gl,
 			true,
 			0xff,
 			gl.ALWAYS,
-			pass.stencilRef,
+			childNode.traversalDepth,
 			gl.REPLACE,
 		);
 	}
@@ -3771,41 +3766,59 @@ function createDirectPortalStencilMaskState(
 		true,
 		0xff,
 		gl.EQUAL,
-		pass.parentStencilRef,
+		parentNode.traversalDepth,
 		gl.INCR,
 	);
 }
 
-function groupPortalApertureMaskPassesByTargetView(
-	passes: readonly PortalApertureMaskPass[],
+function groupPortalFrameEdgesByParentNodeId(
+	edges: readonly PortalFrameEdgePlan[],
+): ReadonlyMap<number, readonly PortalFrameEdgePlan[]> {
+	const groups = new Map<number, PortalFrameEdgePlan[]>();
+	for (const edge of edges) {
+		const group = groups.get(edge.parentNodeId) ?? [];
+		group.push(edge);
+		groups.set(edge.parentNodeId, group);
+	}
+	return groups;
+}
+
+function groupPortalFrameEdgesByChildNodeId(
+	edges: readonly PortalFrameEdgePlan[],
 ): readonly {
-	readonly passes: readonly PortalApertureMaskPass[];
-	readonly portalStackId: string;
-	readonly stencilRef: number;
+	readonly childNodeId: number;
+	readonly edges: readonly PortalFrameEdgePlan[];
 }[] {
 	const groups = new Map<
-		string,
+		number,
 		{
-			passes: PortalApertureMaskPass[];
-			portalStackId: string;
-			stencilRef: number;
+			childNodeId: number;
+			edges: PortalFrameEdgePlan[];
 		}
 	>();
-	for (const pass of passes) {
-		const group = groups.get(pass.portalStackId) ?? {
-			passes: [],
-			portalStackId: pass.portalStackId,
-			stencilRef: pass.stencilRef,
+	for (const edge of edges) {
+		const group = groups.get(edge.childNodeId) ?? {
+			childNodeId: edge.childNodeId,
+			edges: [],
 		};
-		if (group.stencilRef !== pass.stencilRef) {
-			throw new Error(
-				`Portal aperture mask group ${pass.portalStackId} has inconsistent stencil refs.`,
-			);
-		}
-		group.passes.push(pass);
-		groups.set(pass.portalStackId, group);
+		group.edges.push(edge);
+		groups.set(edge.childNodeId, group);
 	}
 	return [...groups.values()];
+}
+
+function getPortalFrameGraphBaseNode(
+	plan: DirectEnvCellPortalFrameWorkPlan,
+): PortalFrameNodePlan {
+	const baseNode = plan.graph.nodes.find(
+		(node) => node.nodeId === plan.graph.baseNodeId,
+	);
+	if (!baseNode) {
+		throw new Error(
+			`Portal frame graph base node ${plan.graph.baseNodeId} is missing.`,
+		);
+	}
+	return baseNode;
 }
 
 function createEnvCellResourceKey(
@@ -4588,8 +4601,4 @@ function dotVec3(
 	right: readonly [number, number, number],
 ): number {
 	return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
-}
-
-function createOutdoorRootPortalStackId(landblockId: number): string {
-	return `outdoor-root:0x${(landblockId >>> 0).toString(16).padStart(8, "0")}`;
 }

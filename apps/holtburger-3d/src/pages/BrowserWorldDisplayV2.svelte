@@ -1154,7 +1154,22 @@
 			plan.baseScene.kind === "outdoor-target"
 				? `outdoor ${formatHexId(plan.baseScene.landblockId)}`
 				: `env ${formatHexId(plan.baseScene.landblockId)} / ${formatHexId(plan.baseScene.envCellId)}`;
-		return `${plan.mode} base ${base} draws ${plan.directEnvCellDraws.length} crossings ${plan.transitionSceneCrossings.length}`;
+		const missingResourceCells = plan.directEnvCellDraws.filter(
+			(draw) => draw.resourceState === "missing-resources",
+		).length;
+		const maxDepth = plan.directEnvCellDraws.reduce(
+			(max, draw) => Math.max(max, draw.traversalDepth),
+			0,
+		);
+		const structuredDrawUnits = plan.directEnvCellDraws.reduce(
+			(count, draw) => count + draw.structuredInteriorDrawUnitIds.length,
+			0,
+		);
+		const staticDrawUnits = plan.directEnvCellDraws.reduce(
+			(count, draw) => count + draw.envCellStaticObjectDrawUnitIds.length,
+			0,
+		);
+		return `${plan.mode} base ${base} cells ${plan.directEnvCellDraws.length} missing ${missingResourceCells} depth ${maxDepth} resources ${structuredDrawUnits} cell / ${staticDrawUnits} static crossings ${plan.transitionSceneCrossings.length}`;
 	}
 
 	function currentCameraEnvCellResourceTarget(): {

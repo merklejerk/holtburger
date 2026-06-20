@@ -824,7 +824,7 @@ Debt recorded:
 
 ### Phase 4A: Reachability-To-Frame Plan Population
 
-Status: planned.
+Status: completed on 2026-06-20.
 
 Purpose: produce direct-env-cell frame plans from camera residency, portal reachability, and renderer
 resource membership without changing WebGL draw execution yet.
@@ -849,6 +849,47 @@ Acceptance criteria:
   current env cell and, when enabled, direct portal neighbors.
 - Missing renderer membership is explicit in the plan instead of silently dropping cells.
 - Legacy WebGL rendering behavior is unchanged during this phase.
+
+Implementation notes:
+
+- Added a pure `createDirectEnvCellFramePlan(...)` helper that converts committed portal traversal
+  results plus `RendererEnvCellResourceMembership` into a direct env-cell portal frame work plan.
+- The runtime now derives the portal frame work plan from env-cell camera residency, committed portal
+  interiors, and `StaticSceneQuery.queryPortalTraversal(...)`. Phase 4A uses conservative runtime
+  caps of depth 1 and 8 cells.
+- Legacy `RenderPassPlan` production and WebGL execution remain unchanged. The new direct plan is
+  published beside the legacy render pass plan so Phase 4B can consume it without reintroducing the
+  all-interiors source-target path.
+- Browser diagnostics now summarize direct plans with base cell, visible cell count, missing resource
+  count, max traversal depth, selected structured/static draw-resource counts, and transition
+  crossing count.
+
+High-risk boundaries:
+
+- `resourceState: "ready"` only means renderer resource membership has at least one structured or
+  env-cell static draw unit for that cell. It does not mean the renderer has a direct draw path yet.
+- Transition scene crossings remain metadata-only and currently empty in the emitted direct plan.
+  Outdoor crossing draw policy and aperture-resource mapping stay in later phases.
+- Direct plan derivation is intentionally limited to env-cell camera residency and disabled under
+  flat vision. Outdoor camera residency still falls back to the legacy plan path.
+- Renderer membership changes can theoretically make the published plan stale until the next runtime
+  plan update. The current materialization flow updates membership before publishing committed portal
+  interior records, so the Phase 4A path is covered; revisit this if Phase 4B exposes drift.
+
+Verification:
+
+- `npm exec prettier -- --write ...`
+- `npm run test:ts -- ...`
+- `npm run check`
+- `npm run lint:ts`
+
+Follow-up debt:
+
+- Phase 4B must consume the direct plan in the renderer through a real direct env-cell draw path.
+- Add browser/config controls for traversal depth and cell caps only if manual inspection needs more
+  than the Phase 4A constants.
+- Map transition scene crossings to explicit aperture/draw resources before using them for outdoor
+  bridging.
 
 ### Phase 4B: Portal-Aware Single-Cell And Single-Hop Drawing
 
@@ -970,12 +1011,18 @@ Deliverables:
 
 - Transition portal entries in the portal frame plan that bridge outdoor scene domains and env-cell
   traversal roots.
+- Transition portals represented as categorized scene-domain crossing edges in the shared portal
+  frame-plan model, not as a privileged renderer-side transition-mask architecture.
 - Outdoor terrain/buildings/detail rendered to an offscreen outdoor scene target when needed for
   compositing.
 - Env-cell resources drawn directly during transition portal execution from traversal-selected cell
   membership, not from a pre-rendered interior scene target.
 - Building-sourced aperture mask geometry remains the transition aperture authority.
+- Building-sourced transition apertures feed the same selected-edge aperture resource path as
+  env-cell portal apertures, while preserving source/category metadata.
 - Interior passes are filtered by traversal result instead of all resident interiors.
+- Browser portal inspection uses one portal overlay model with category coloring/filtering for
+  env-cell portals and outdoor/env-cell transition portals.
 - Indoor-to-outdoor transition behavior reviewed against the existing transition compositor.
 
 Acceptance criteria:
@@ -983,6 +1030,10 @@ Acceptance criteria:
 - Outdoor-to-indoor transition apertures no longer composite unrelated resident interior cell
   shells.
 - The transition compositor can combine an outdoor offscreen target with direct env-cell draws.
+- Transition portals are driven by shared portal frame-plan edges instead of dedicated resident
+  transition mask batches.
+- Browser inspection can show env-cell portals and transition portals from one overlay model, with
+  transition portals visually distinguished by category rather than by a separate architecture.
 - Existing building seam duplicate suppression remains intact.
 
 ### Phase 6R: Reassessment After Transition Unification
@@ -1105,6 +1156,10 @@ Deliverables:
   implies "draw this portal this frame."
 - Keep portal polygon baking only as reusable resource preparation and debug-overlay input; delete
   production code paths that treat baked portal batches as visibility policy.
+- Remove the legacy dedicated transition portal overlay/resource pipeline once transition crossings
+  are driven by shared portal frame-plan edges.
+- Retain only intentional portal overlay category filtering/coloring for transition portals; do not
+  retain a separate transition overlay architecture.
 - Update the V2 implementation plan and design doc with completed decisions and remaining debt.
 
 Acceptance criteria:
@@ -1112,6 +1167,8 @@ Acceptance criteria:
 - Production V2 interior rendering is portal traversal driven.
 - Production portal aperture drawing is driven by selected traversal edges/passes, not by wholesale
   baked portal batches.
+- Production transition portal drawing is driven by categorized scene-domain crossing edges, not by
+  a dedicated transition-mask resource pipeline.
 - Historical diagnostics remain documented, but dead code paths are gone.
 
 ## Risks And Mitigations
@@ -1132,7 +1189,8 @@ Risk: transition portals and interior portals become two separate architectures.
 
 Mitigation: model transitions as portal graph scene-domain crossings. Keep building aperture
 geometry source-specific, but share traversal outputs, visibility diagnostics, and cell-filtered
-interior submission.
+interior submission. Collapse browser inspection into one portal overlay model with category
+coloring/filtering, and delete the dedicated transition overlay/resource pipeline during cutover.
 
 Risk: WebGL2 stencil/depth constraints force awkward target formats.
 

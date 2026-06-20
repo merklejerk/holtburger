@@ -13,6 +13,7 @@ import type {
 	RendererSnapshot,
 	RendererSnapshotListener,
 	PortalFrameWorkPlan,
+	RendererEnvCellResourceMembership,
 	RenderPassPlan,
 	SamplerPolicyUpdate,
 	StaticResidencyDelta,
@@ -25,6 +26,8 @@ import type {
 	StaticMaterialCoverageReport,
 	OutdoorStaticObjectsScopePayload,
 	StaticObjectGeometryStaticDrawUnit,
+	StaticPortalInteriorRecord,
+	StaticWorkPeerRecordOwner,
 	TerrainStaticScopePayload,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialFallbackReason,
@@ -266,6 +269,124 @@ describe("V2 client runtime", () => {
 		]);
 
 		unsubscribe();
+		runtime.dispose();
+	});
+
+	it("publishes direct env-cell frame plans from committed traversal and renderer membership", async () => {
+		const renderer = new FakeRenderer();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker,
+				resolver,
+			}),
+		});
+
+		runtime.setCurrentCameraResidency({
+			envCellId: 0xda550100,
+			kind: "env-cell",
+			landblockId: 0xda55ffff,
+		});
+		renderer.setEnvCellResourceMembership([
+			{
+				envCellId: 0xda550100,
+				envCellStaticObjectDrawUnitIds: [],
+				landblockId: 0xda55ffff,
+				sharedEnvCellStaticObjectDrawUnits: 0,
+				structuredInteriorDrawUnitIds: ["structured:da550100"],
+			},
+		]);
+		updateInteriorSceneInterest(runtime);
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
+		await flushPromises();
+		baker.complete("1:landblock:da55ffff:landblock-env-cells", {
+			staticPortalInteriorRecords: [
+				createPortalInteriorRecord({
+					envCellIds: [0xda550100, 0xda550101],
+					portalLinks: [
+						{
+							flags: 0,
+							linkId: "a-to-b",
+							polygonId: null,
+							source: {
+								envCellId: 0xda550100,
+								kind: "env-cell",
+								portalId: "portal-a",
+							},
+							sourceIndex: 0,
+							target: {
+								envCellId: 0xda550101,
+								kind: "env-cell",
+								portalId: "portal-b",
+							},
+						},
+					],
+				}),
+			],
+		});
+		await flushPromises();
+
+		expect(runtime.createDiagnosticsReport().runtime.renderPassPlan).toEqual({
+			baseScene: {
+				envCellId: 0xda550100,
+				kind: "interior",
+				landblockId: 0xda55ffff,
+			},
+			kind: "portal-scene-domains",
+			transitionDepthPolicy: { maxDepth: 4 },
+		});
+		expect(
+			runtime.createDiagnosticsReport().runtime.portalFrameWorkPlan,
+		).toEqual({
+			baseScene: {
+				envCellId: 0xda550100,
+				kind: "env-cell-direct",
+				landblockId: 0xda55ffff,
+			},
+			directEnvCellDraws: [
+				{
+					envCellId: 0xda550100,
+					envCellStaticObjectDrawUnitIds: [],
+					landblockId: 0xda55ffff,
+					portalStackId: "root:0xda550100",
+					resourceState: "ready",
+					structuredInteriorDrawUnitIds: ["structured:da550100"],
+					traversalDepth: 0,
+				},
+				{
+					envCellId: 0xda550101,
+					envCellStaticObjectDrawUnitIds: [],
+					landblockId: 0xda55ffff,
+					portalStackId: "root:0xda550100/a-to-b",
+					resourceState: "missing-resources",
+					structuredInteriorDrawUnitIds: [],
+					traversalDepth: 1,
+				},
+			],
+			kind: "direct-env-cell",
+			mode: "portal-traversal",
+			transitionSceneCrossings: [],
+		});
+		expect(renderer.renderPassPlans).toEqual([
+			{
+				baseScene: {
+					envCellId: 0xda550100,
+					kind: "interior",
+					landblockId: 0xda55ffff,
+				},
+				kind: "portal-scene-domains",
+				transitionDepthPolicy: { maxDepth: 4 },
+			},
+		]);
+		expect(renderer.portalFrameWorkPlans.at(-1)).toMatchObject({
+			kind: "direct-env-cell",
+			mode: "portal-traversal",
+		});
+
 		runtime.dispose();
 	});
 
@@ -1192,6 +1313,52 @@ function updateInteriorSceneInterest(
 	});
 }
 
+function createPortalInteriorRecord(options: {
+	readonly envCellIds: readonly number[];
+	readonly landblockId?: number;
+	readonly portalLinks: StaticPortalInteriorRecord["portalLinks"];
+}): StaticPortalInteriorRecord {
+	const landblockId = options.landblockId ?? 0xda55ffff;
+	return {
+		envCells: options.envCellIds.map((envCellId) => ({
+			envCellId,
+			localPlacement: createPlacement(),
+			portalApertures: [],
+			portals: [],
+		})),
+		kind: "env-cell-portal-interior",
+		landblockId,
+		owner: createEnvCellWorkOwner("work-env-portals", landblockId),
+		portalLinks: options.portalLinks,
+	};
+}
+
+function createEnvCellWorkOwner(
+	workId: string,
+	landblockId: number,
+): StaticWorkPeerRecordOwner {
+	return {
+		domain: "landblock-env-cells",
+		kind: "work",
+		scope: {
+			kind: "landblock",
+			landblockId,
+		},
+		scopeKey: `landblock:${landblockId.toString(16).padStart(8, "0")}`,
+		workId,
+	};
+}
+
+function createPlacement() {
+	return {
+		frame: {
+			origin: { x: 0, y: 0, z: 0 },
+			rotation: { w: 1, x: 0, y: 0, z: 0 },
+		},
+		sourceScale: { x: 1, y: 1, z: 1 },
+	};
+}
+
 class FakeRenderer implements Renderer {
 	readonly staticDeltas: StaticResidencyDelta[] = [];
 	readonly staticAnchorLandblockIds: (number | null)[] = [];
@@ -1268,6 +1435,15 @@ class FakeRenderer implements Renderer {
 	}
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void {
 		this.staticAnchorLandblockIds.push(anchorLandblockId);
+	}
+	setEnvCellResourceMembership(
+		memberships: readonly RendererEnvCellResourceMembership[],
+	): void {
+		this.#snapshot = {
+			...this.#snapshot,
+			envCellResourceMembership: memberships,
+		};
+		this.#emit();
 	}
 	setFlatVisionModeEnabled(): void {}
 	setRenderPassPlan(plan: RenderPassPlan): void {

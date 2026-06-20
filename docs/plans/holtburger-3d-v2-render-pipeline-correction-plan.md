@@ -377,6 +377,8 @@ Course correction:
 
 ### Phase 1: Split Renderer Telemetry From Diagnostics Snapshots
 
+Status: substantially implemented on 2026-06-20.
+
 Deliverables:
 
 - Replace `Renderer.subscribe(RendererSnapshotListener)` with narrow subscriptions or callbacks:
@@ -398,6 +400,31 @@ Acceptance criteria:
 - Browser portal-frame status and env-resource inspection still work through explicit diagnostic/query calls, without real-time broad subscriptions.
 - A unit test proves repeated frame telemetry does not call `setRenderPassPlan(...)` or `setPortalFrameWorkPlan(...)`.
 - Tests prove broad renderer/runtime diagnostic snapshots are not created by frame telemetry.
+
+Implementation update:
+
+- `Renderer.subscribe(RendererSnapshotListener)` was replaced with `subscribeTelemetry(...)` plus explicit `createDiagnosticsSnapshot()`.
+- `Webgl2Renderer` now emits only `RendererFrameTelemetry` from the frame loop; broad renderer snapshots are pulled explicitly.
+- `ClientRuntime` forwards renderer telemetry through `subscribeFrameTelemetry(...)` and no longer calls render-pass or portal-frame planning from renderer frame emissions.
+- `ClientRuntime` now owns the current render-pass and portal-frame plan comparison state instead of comparing against renderer snapshots.
+- `PerformanceMetricsTracker` and `BrowserWorldDisplayV2` now consume narrow frame telemetry for live FPS/handler metrics.
+- Renderer and runtime tests were updated so diagnostics assertions call `createDiagnosticsSnapshot()` directly.
+- Added a runtime regression test proving renderer frame telemetry does not emit broad runtime snapshots or call `setRenderPassPlan(...)` / `setPortalFrameWorkPlan(...)`.
+
+Validation:
+
+- `npm run test:ts -- src/v2/ui/performance-metrics.test.ts src/v2/runtime/client-runtime.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Spicy notes:
+
+- Runtime portal-frame planning still uses `renderer.createDiagnosticsSnapshot().envCellResourceMembership` as a temporary semantic-planning bridge. This no longer runs from renderer frame telemetry, but it is still a broad renderer diagnostics dependency and must die in Phase 2.
+- Browser portal-frame/resource panels still read from broad runtime snapshots. They are no longer driven by frame telemetry, but they are not yet explicit diagnostic/query APIs.
+
+Failed to close in Phase 1:
+
+- Broad renderer/runtime diagnostic snapshots can still be constructed by runtime snapshot subscribers. The hot frame telemetry path is split, but manual/semantic UI snapshots remain broad until the diagnostics-query cleanup lands.
 
 ### Phase 2: Move Planning Resource Membership Out Of Renderer Snapshots
 

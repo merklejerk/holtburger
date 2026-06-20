@@ -1,4 +1,4 @@
-import type { RendererSnapshot } from "../renderer/types";
+import type { RendererFrameTelemetry } from "../renderer/types";
 
 export interface PerformanceMetricsTrackerOptions {
 	readonly sampleMs: number;
@@ -34,31 +34,31 @@ export class PerformanceMetricsTracker {
 		this.#nowMs = options.nowMs ?? (() => performance.now());
 	}
 
-	update(renderer: RendererSnapshot): PerformanceMetricsSnapshot {
+	update(telemetry: RendererFrameTelemetry): PerformanceMetricsSnapshot {
 		const nowMs = this.#nowMs();
 		if (!this.#lastSample) {
 			this.#lastSample = {
-				frameCount: renderer.frameCount,
+				frameCount: telemetry.frameCount,
 				timeMs: nowMs,
 			};
 			this.#snapshot = {
 				...this.#snapshot,
 				handlerMs: this.#smooth(
 					this.#snapshot.handlerMs,
-					renderer.frameHandlerMs,
+					telemetry.frameHandlerMs,
 				),
 			};
 			return this.#snapshot;
 		}
 
 		const elapsedMs = nowMs - this.#lastSample.timeMs;
-		const frameDelta = renderer.frameCount - this.#lastSample.frameCount;
+		const frameDelta = telemetry.frameCount - this.#lastSample.frameCount;
 		if (elapsedMs < this.#sampleMs || frameDelta <= 0) {
 			this.#snapshot = {
 				...this.#snapshot,
 				handlerMs: this.#smooth(
 					this.#snapshot.handlerMs,
-					renderer.frameHandlerMs,
+					telemetry.frameHandlerMs,
 				),
 			};
 			return this.#snapshot;
@@ -69,11 +69,11 @@ export class PerformanceMetricsTracker {
 			frameMs: this.#smooth(this.#snapshot.frameMs, elapsedMs / frameDelta),
 			handlerMs: this.#smooth(
 				this.#snapshot.handlerMs,
-				renderer.frameHandlerMs,
+				telemetry.frameHandlerMs,
 			),
 		};
 		this.#lastSample = {
-			frameCount: renderer.frameCount,
+			frameCount: telemetry.frameCount,
 			timeMs: nowMs,
 		};
 

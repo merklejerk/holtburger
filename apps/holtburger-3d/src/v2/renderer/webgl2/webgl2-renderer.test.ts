@@ -206,10 +206,6 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("cancelAnimationFrame", () => {});
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
-		let latestSnapshot = rendererSnapshotPlaceholder();
-		renderer.subscribe((snapshot) => {
-			latestSnapshot = snapshot;
-		});
 
 		expect(getContext).toHaveBeenCalledWith(
 			"webgl2",
@@ -248,6 +244,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			gl.UNSIGNED_INT_24_8,
 			null,
 		);
+		const latestSnapshot = renderer.createDiagnosticsSnapshot();
 		expect(latestSnapshot.sceneDomainTargets).toMatchObject({
 			active: true,
 			colorFormat: "rgb8",
@@ -269,10 +266,6 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("cancelAnimationFrame", () => {});
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
-		let latestSnapshot = rendererSnapshotPlaceholder();
-		renderer.subscribe((snapshot) => {
-			latestSnapshot = snapshot;
-		});
 
 		const portalFrameWorkPlan = createDirectEnvCellPortalFrameWorkPlan({
 			baseScene: { kind: "outdoor-target", landblockId: 0xf418ffff },
@@ -322,6 +315,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		});
 		renderer.setPortalFrameWorkPlan(portalFrameWorkPlan);
 
+		const latestSnapshot = renderer.createDiagnosticsSnapshot();
 		expect(latestSnapshot.portalFrameWorkPlan).toEqual(portalFrameWorkPlan);
 		expect(latestSnapshot.renderPassPlan).toEqual({
 			kind: "single-surface-resident",
@@ -340,10 +334,6 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("cancelAnimationFrame", () => {});
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
-		let latestSnapshot = rendererSnapshotPlaceholder();
-		renderer.subscribe((snapshot) => {
-			latestSnapshot = snapshot;
-		});
 
 		renderer.applyStaticDelta({
 			addedDrawUnits: [
@@ -408,6 +398,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		pendingFrame?.(16);
 
 		expect(gl.drawElementsCalls).toHaveLength(2);
+		const latestSnapshot = renderer.createDiagnosticsSnapshot();
 		expect(latestSnapshot.directEnvCellDrawCalls).toBe(2);
 		expect(latestSnapshot.sceneDomainTargets.active).toBe(false);
 		expect(latestSnapshot.renderPassPlan).toEqual({
@@ -433,10 +424,6 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("cancelAnimationFrame", () => {});
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
-		let latestSnapshot = rendererSnapshotPlaceholder();
-		renderer.subscribe((snapshot) => {
-			latestSnapshot = snapshot;
-		});
 
 		renderer.applyStaticDelta({
 			addedDrawUnits: [
@@ -569,6 +556,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		);
 		expect(gl.depthFuncModes).toContain(gl.LEQUAL);
 		expect(gl.depthFuncModes).toContain(gl.ALWAYS);
+		const latestSnapshot = renderer.createDiagnosticsSnapshot();
 		expect(latestSnapshot.directEnvCellDrawCalls).toBe(2);
 
 		renderer.dispose();
@@ -584,10 +572,6 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("cancelAnimationFrame", () => {});
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
-		let latestSnapshot = rendererSnapshotPlaceholder();
-		renderer.subscribe((snapshot) => {
-			latestSnapshot = snapshot;
-		});
 
 		renderer.applyStaticDelta({
 			addedDrawUnits: [
@@ -671,6 +655,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 
 		pendingFrame?.(16);
 
+		const latestSnapshot = renderer.createDiagnosticsSnapshot();
 		expect(latestSnapshot.sceneDomainTargets).toMatchObject({
 			active: true,
 			compositingMode: "none",
@@ -698,10 +683,6 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("cancelAnimationFrame", () => {});
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
-		let latestSnapshot = rendererSnapshotPlaceholder();
-		renderer.subscribe((snapshot) => {
-			latestSnapshot = snapshot;
-		});
 
 		renderer.applyStaticDelta({
 			addedDrawUnits: [
@@ -720,10 +701,11 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			},
 			kind: "portal-scene-domains",
 			transitionDepthPolicy: { maxDepth: 2 },
-		});
-		pendingFrame?.(16);
+			});
+			pendingFrame?.(16);
 
-		expect(latestSnapshot.sceneDomainTargets).toMatchObject({
+			const latestSnapshot = renderer.createDiagnosticsSnapshot();
+			expect(latestSnapshot.sceneDomainTargets).toMatchObject({
 			apertureBatchDrawCalls: 2,
 			compositePasses: 2,
 			compositingMode: "stencil-mask",
@@ -784,10 +766,6 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("cancelAnimationFrame", () => {});
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
-		let latestSnapshot = rendererSnapshotPlaceholder();
-		renderer.subscribe((snapshot) => {
-			latestSnapshot = snapshot;
-		});
 
 		renderer.applyStaticDelta({
 			addedDrawUnits: [createStructuredInteriorDrawUnit()],
@@ -796,8 +774,9 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			removedTransitionApertureBatchIds: [],
 			revision: 1,
 		});
-		expect(latestSnapshot.staticDrawUnits).toBe(1);
-		expect(latestSnapshot.renderedTriangles).toBe(1);
+		const addedSnapshot = renderer.createDiagnosticsSnapshot();
+		expect(addedSnapshot.staticDrawUnits).toBe(1);
+		expect(addedSnapshot.renderedTriangles).toBe(1);
 
 		pendingFrame?.(16);
 		expect(gl.drawElementsCalls).toEqual([
@@ -817,8 +796,9 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			removedTransitionApertureBatchIds: [],
 			revision: 2,
 		});
-		expect(latestSnapshot.staticDrawUnits).toBe(0);
-		expect(latestSnapshot.renderedTriangles).toBe(0);
+		const removedSnapshot = renderer.createDiagnosticsSnapshot();
+		expect(removedSnapshot.staticDrawUnits).toBe(0);
+		expect(removedSnapshot.renderedTriangles).toBe(0);
 		gl.drawElementsCalls.length = 0;
 		pendingFrame?.(32);
 		expect(gl.drawElementsCalls).toEqual([]);
@@ -836,10 +816,6 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("cancelAnimationFrame", () => {});
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
-		let latestSnapshot = rendererSnapshotPlaceholder();
-		renderer.subscribe((snapshot) => {
-			latestSnapshot = snapshot;
-		});
 
 		renderer.applyStaticDelta({
 			addedDrawUnits: [
@@ -855,7 +831,8 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			revision: 1,
 		});
 
-		expect(latestSnapshot.envCellResourceMembership).toEqual([
+		const addedSnapshot = renderer.createDiagnosticsSnapshot();
+		expect(addedSnapshot.envCellResourceMembership).toEqual([
 			{
 				envCellId: 0xda550100,
 				envCellStaticObjectDrawUnitIds: ["env-static-a"],
@@ -880,7 +857,8 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			revision: 2,
 		});
 
-		expect(latestSnapshot.envCellResourceMembership).toEqual([]);
+		const removedSnapshot = renderer.createDiagnosticsSnapshot();
+		expect(removedSnapshot.envCellResourceMembership).toEqual([]);
 
 		renderer.dispose();
 	});
@@ -929,10 +907,6 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("cancelAnimationFrame", () => {});
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
-		let latestSnapshot = rendererSnapshotPlaceholder();
-		renderer.subscribe((snapshot) => {
-			latestSnapshot = snapshot;
-		});
 
 		renderer.applyStaticDelta({
 			addedDrawUnits: [],
@@ -969,10 +943,11 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			revision: 1,
 		});
 
-		expect(latestSnapshot.staticDrawUnits).toBe(0);
-		expect(latestSnapshot.renderedTriangles).toBe(0);
-		expect(latestSnapshot.transitionApertureBatches).toBe(1);
-		expect(latestSnapshot.transitionApertures).toBe(1);
+		const addedSnapshot = renderer.createDiagnosticsSnapshot();
+		expect(addedSnapshot.staticDrawUnits).toBe(0);
+		expect(addedSnapshot.renderedTriangles).toBe(0);
+		expect(addedSnapshot.transitionApertureBatches).toBe(1);
+		expect(addedSnapshot.transitionApertures).toBe(1);
 		expect(gl.bufferDataTargets).toEqual(
 			expect.arrayContaining([gl.ARRAY_BUFFER, gl.ELEMENT_ARRAY_BUFFER]),
 		);
@@ -985,8 +960,9 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			revision: 2,
 		});
 
-		expect(latestSnapshot.transitionApertureBatches).toBe(0);
-		expect(latestSnapshot.transitionApertures).toBe(0);
+		const removedSnapshot = renderer.createDiagnosticsSnapshot();
+		expect(removedSnapshot.transitionApertureBatches).toBe(0);
+		expect(removedSnapshot.transitionApertures).toBe(0);
 
 		renderer.dispose();
 	});
@@ -1290,45 +1266,6 @@ function createFakeCanvas(gl: WebGL2RenderingContext): HTMLCanvasElement {
 		height: 64,
 		width: 64,
 	} as HTMLCanvasElement;
-}
-
-function rendererSnapshotPlaceholder() {
-	return {
-		backend: "webgl2" as const,
-		canvasHeight: 0,
-		canvasWidth: 0,
-		debugOverlayPrimitives: 0,
-		error: null,
-		frameCount: 0,
-		frameHandlerMs: 0,
-		isRunning: false,
-		renderPassPlan: { kind: "single-surface-resident" as const },
-		portalFrameWorkPlan: {
-			kind: "legacy-render-pass" as const,
-			mode: "single-surface-resident" as const,
-			renderPassPlan: { kind: "single-surface-resident" as const },
-		},
-		renderedTriangles: 0,
-		sceneDomainTargets: {
-			active: false,
-			apertureBatchDrawCalls: 0,
-			colorFormat: "rgb8" as const,
-			compositePasses: 0,
-			compositingMode: "none" as const,
-			depthFormat: "depth24-stencil8" as const,
-			executedCompositeDepth: 0,
-			exteriorDrawCalls: 0,
-			height: 0,
-			interiorDrawCalls: 0,
-			width: 0,
-		},
-		envCellResourceMembership: [],
-		directEnvCellDrawCalls: 0,
-		staticDrawUnits: 0,
-		terrainDrawUnits: 0,
-		transitionApertureBatches: 0,
-		transitionApertures: 0,
-	};
 }
 
 function createDirectEnvCellPortalFrameWorkPlan(options: {

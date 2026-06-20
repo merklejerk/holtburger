@@ -194,10 +194,12 @@
 				snapshot = nextSnapshot;
 				selectedTextureFilteringMode =
 					nextSnapshot.renderPolicy.textureFilteringMode;
-				performanceMetrics = performanceMetricsTracker.update(
-					nextSnapshot.renderer,
-				);
 			});
+			const unsubscribeFrameTelemetry = runtime.subscribeFrameTelemetry(
+				(telemetry) => {
+					performanceMetrics = performanceMetricsTracker.update(telemetry);
+				},
+			);
 			const unsubscribeEvents = runtime.subscribeEvents(handleRuntimeEvent);
 			pushCameraFrameState();
 			const policySyncInterval = window.setInterval(() => {
@@ -208,6 +210,7 @@
 				window.clearInterval(policySyncInterval);
 				clearStaticInterestRefresh();
 				unsubscribeSnapshot();
+				unsubscribeFrameTelemetry();
 				unsubscribeEvents();
 				cameraController?.dispose();
 				cameraController = null;
@@ -1902,8 +1905,8 @@
 						<div>
 							<dt>Frame handler</dt>
 							<dd>
-								{snapshot
-									? `${snapshot.renderer.frameHandlerMs.toFixed(2)} ms`
+								{performanceMetrics.handlerMs > 0
+									? `${performanceMetrics.handlerMs.toFixed(2)} ms`
 									: "pending"}
 							</dd>
 						</div>

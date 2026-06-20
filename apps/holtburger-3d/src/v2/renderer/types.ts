@@ -269,6 +269,7 @@ export interface PortalApertureMaskPass {
 
 export interface PortalTransitionSceneCrossing {
 	readonly apertureBatchId: string;
+	readonly aperturePortalId: string;
 	readonly landblockId: number;
 	readonly from: PortalTransitionSceneEndpoint;
 	readonly to: PortalTransitionSceneEndpoint;

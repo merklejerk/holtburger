@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { StaticPortalInteriorRecord } from "../static/contracts";
+import type {
+	StaticPortalInteriorRecord,
+	TransitionApertureBatch,
+} from "../static/contracts";
 import type { PortalTraversalPlan } from "./static-scene-query";
-import { createDirectEnvCellFramePlan } from "./direct-env-cell-frame-plan";
+import {
+	createDirectEnvCellFramePlan,
+	createOutdoorTransitionPortalFramePlan,
+} from "./direct-env-cell-frame-plan";
 
 describe("direct env-cell frame plan", () => {
 	it("joins current-cell traversal to renderer env-cell resource membership", () => {
@@ -342,6 +348,151 @@ describe("direct env-cell frame plan", () => {
 			}),
 		).toBeNull();
 	});
+
+	it("creates an outdoor-base transition frame plan with direct env-cell traversal", () => {
+		const childEdge = {
+			flags: 0,
+			linkId: "root-to-child",
+			polygonId: null,
+			sourceEnvCellId: 0xda550100,
+			sourceIndex: 0,
+			sourcePortalId: "portal-root",
+			targetEnvCellId: 0xda550101,
+			targetPortalId: "portal-child",
+		};
+		const plan = createOutdoorTransitionPortalFramePlan({
+			landblockId: 0xda55ffff,
+			portalInteriorRecords: [
+				createPortalInteriorRecord({
+					envCellIds: [0xda550100, 0xda550101],
+					portalAperturesByEnvCellId: new Map([
+						[
+							0xda550100,
+							[
+								createPortalAperture("portal-root", 7, [
+									{ x: 10, y: 0, z: 0 },
+									{ x: 11, y: 0, z: 0 },
+									{ x: 10, y: 1, z: 0 },
+								]),
+							],
+						],
+					]),
+				}),
+			],
+			renderAnchorLandblockId: 0xda55ffff,
+			rendererEnvCellResourceMembership: [
+				{
+					envCellId: 0xda550100,
+					envCellStaticObjectDrawUnitIds: [],
+					landblockId: 0xda55ffff,
+					sharedEnvCellStaticObjectDrawUnits: 0,
+					structuredInteriorDrawUnitIds: ["structured-root"],
+				},
+				{
+					envCellId: 0xda550101,
+					envCellStaticObjectDrawUnitIds: ["static-child"],
+					landblockId: 0xda55ffff,
+					sharedEnvCellStaticObjectDrawUnits: 0,
+					structuredInteriorDrawUnitIds: [],
+				},
+			],
+			transitionApertureBatches: [createTransitionApertureBatch()],
+			traversalPlansByStartEnvCellId: new Map([
+				[
+					0xda550100,
+					{
+						diagnostics: [],
+						landblockId: 0xda55ffff,
+						maxCells: 8,
+						maxDepth: 1,
+						maxPortalViews: 16,
+						portalViewGroups: [
+							{
+								apertureEdges: [],
+								envCellId: 0xda550100,
+								landblockId: 0xda55ffff,
+								parentPortalStackId: null,
+								portalStack: [],
+								portalStackId: "root:0xda550100",
+								traversalDepth: 0,
+							},
+							{
+								apertureEdges: [childEdge],
+								envCellId: 0xda550101,
+								landblockId: 0xda55ffff,
+								parentPortalStackId: "root:0xda550100",
+								portalStack: [childEdge],
+								portalStackId: "root:0xda550100/root-to-child",
+								traversalDepth: 1,
+							},
+						],
+						sceneCrossings: [],
+						startEnvCellId: 0xda550100,
+						visibleCells: [],
+					},
+				],
+			]),
+		});
+
+		expect(plan?.baseScene).toEqual({
+			kind: "outdoor-target",
+			landblockId: 0xda55ffff,
+		});
+		expect(plan?.transitionSceneCrossings).toEqual([
+			{
+				apertureBatchId: "transition-aperture-batch:da55ffff",
+				aperturePortalId: "transition-portal:0",
+				from: { kind: "outdoor", landblockId: 0xda55ffff },
+				landblockId: 0xda55ffff,
+				linkedEnvCellIds: [0xda550100],
+				to: {
+					envCellId: 0xda550100,
+					kind: "env-cell",
+					landblockId: 0xda55ffff,
+				},
+			},
+		]);
+		expect(plan?.directEnvCellDraws).toEqual([
+			expect.objectContaining({
+				envCellId: 0xda550100,
+				portalStackId: "outdoor-root:0xda55ffff/transition:0xda550100",
+				structuredInteriorDrawUnitIds: ["structured-root"],
+				traversalDepth: 1,
+			}),
+			expect.objectContaining({
+				envCellId: 0xda550101,
+				envCellStaticObjectDrawUnitIds: ["static-child"],
+				portalStackId:
+					"outdoor-root:0xda55ffff/transition:0xda550100/root-to-child",
+				traversalDepth: 2,
+			}),
+		]);
+		expect(plan?.portalApertureMaskPasses).toEqual([
+			expect.objectContaining({
+				linkId:
+					"transition:transition-aperture-batch:da55ffff:transition-portal:0:0xda550100",
+				portalStackId: "outdoor-root:0xda55ffff/transition:0xda550100",
+				source: { kind: "outdoor-target", landblockId: 0xda55ffff },
+				sourcePortalStackId: "outdoor-root:0xda55ffff",
+				stencilRef: 1,
+				target: {
+					envCellId: 0xda550100,
+					kind: "env-cell-direct",
+					landblockId: 0xda55ffff,
+				},
+				traversalDepth: 1,
+			}),
+			expect.objectContaining({
+				linkId: "root-to-child",
+				parentStencilRef: 1,
+				portalStackId:
+					"outdoor-root:0xda55ffff/transition:0xda550100/root-to-child",
+				sourcePortalStackId: "outdoor-root:0xda55ffff/transition:0xda550100",
+				stencilRef: 2,
+				traversalDepth: 2,
+			}),
+		]);
+	});
 });
 
 function createTraversalPlan(options: {
@@ -431,5 +582,48 @@ function createPortalInteriorRecord(options: {
 			workId: "work",
 		},
 		portalLinks: [],
+	};
+}
+
+function createTransitionApertureBatch(): TransitionApertureBatch {
+	return {
+		apertureBatchId: "transition-aperture-batch:da55ffff",
+		coordinateSpace: "landblock-render-local",
+		frontFace: "indoor-visible",
+		indices: [0, 1, 2],
+		kind: "transition-aperture-batch",
+		landblockId: 0xda55ffff,
+		planes: [null],
+		ranges: [
+			{
+				exterior: {
+					buildingInstanceId: "building-0",
+					buildingPortalId: "building-portal-0",
+					kind: "landblock-building",
+				},
+				firstIndex: 0,
+				indexCount: 3,
+				portalId: "transition-portal:0",
+				source: {
+					buildingInstanceId: "building-0",
+					buildingPortalId: "building-portal-0",
+					buildingPortalSourceIndex: 0,
+					kind: "building-portal",
+					linkedEnvCellIds: [0xda550100],
+					otherCellId: 0x0100,
+					otherPortalId: 0xffff,
+					polyId: 7,
+					portalIndex: 0,
+					sourceAssetId: "gfx-obj/01001234",
+					sourceDid: 0x01001234,
+				},
+			},
+		],
+		sourceDomain: "outdoor-buildings",
+		vertices: [
+			{ x: 0, y: 0, z: 0 },
+			{ x: 1, y: 0, z: 0 },
+			{ x: 0, y: 1, z: 0 },
+		],
 	};
 }

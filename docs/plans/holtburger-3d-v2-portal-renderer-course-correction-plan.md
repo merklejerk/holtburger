@@ -1423,7 +1423,10 @@ Exit criteria:
 
 ### Phase 6: Transition Portal Unification
 
-Status: planned.
+Status: partially implemented on 2026-06-20. Outdoor-to-indoor transition roots now use the shared
+portal frame/executor path; indoor-to-outdoor, outdoor -> indoor -> outdoor, and overlay/resource
+cleanup remain open. Further Phase 6 work is paused until Phase 6A removes transition aperture
+resource specialness from the production path.
 
 Purpose: add outdoor as a reusable scene source in the shared portal executor while preserving the
 building-sourced aperture mask truth.
@@ -1463,6 +1466,172 @@ Acceptance criteria:
 - Browser inspection can show env-cell portals and transition portals from one overlay model, with
   transition portals visually distinguished by category rather than by a separate architecture.
 - Existing building seam duplicate suppression remains intact.
+
+Implementation notes:
+
+- Added `createOutdoorTransitionPortalFramePlan(...)` beside the direct env-cell frame-plan builder.
+  It consumes building-sourced `TransitionApertureBatch` resources, groups selected ranges by linked
+  env-cell root, converts those ranges into normal `PortalApertureGeometryResourcePlan` entries, and
+  emits `PortalApertureMaskPass` records from an outdoor-root scene source to direct env-cell
+  targets.
+- Outdoor transition roots now seed normal env-cell portal traversal. The root linked env cell draws
+  at stencil depth `1`; env-cell-to-env-cell descendants are remapped under that transition root and
+  have their stencil refs/depths offset by one. This keeps outdoor-to-indoor and interior recursion
+  inside one portal executor shape instead of reviving an all-interiors source target.
+- `PortalTransitionSceneCrossing` now carries both `apertureBatchId` and `aperturePortalId`.
+  Batch id alone was too coarse for selected-edge transition semantics.
+- Runtime now attempts an outdoor-base direct portal frame when the camera is in an outdoor
+  landblock and committed building transition apertures plus linked env-cell portal/interior records
+  are resident. If the required transition roots or masks cannot be built, it falls back to the
+  legacy render-pass plan rather than silently drawing a partial transition.
+- WebGL2 direct-env-cell execution now supports `baseScene.kind === "outdoor-target"`. It renders
+  the exterior domain once into the existing outdoor scene-domain target, copies color/depth to the
+  display framebuffer, then uses the same aperture-mask/direct-env-cell recursion path for
+  transition roots and interior descendants. It no longer needs to render the broad interior target
+  for this supported outdoor-to-indoor path.
+- Scene-domain target diagnostics report the outdoor target as active for outdoor-base direct
+  portal frames. Interior scene-domain draw calls remain `0` in the focused renderer test, which is
+  the key invariant for this slice.
+
+Spicy/debt notes:
+
+- The renderer currently draws transition aperture masks through the same dynamic aperture upload
+  path used for env-cell portal masks, but building transition apertures are still stored/uploaded
+  as a separate `TransitionApertureBatch` resource class. This is old-architecture leakage: the
+  selected-edge execution path is new, but the resource path is still transition-specific. Phase 6A
+  must normalize transition and env-cell apertures into one production aperture resource model
+  before more transition behavior is built on top.
+- The old transition compositor had direction-specific cull policy. The shared dynamic mask path
+  currently disables culling. If manual inspection shows through-wall or wrong-side transition
+  masks, add selected-edge front-face/cull metadata to the unified portal aperture edge/pass model
+  instead of restoring a separate transition compositor.
+- Outdoor-to-indoor direct execution copies the outdoor target color/depth to the display using the
+  source-scene copy shader before drawing interior masks. This preserves the outdoor target as a
+  reusable source, but nested indoor-to-outdoor sampling is not implemented yet.
+- Transition range grouping currently uses linked env-cell ids from building aperture source facts.
+  If a building aperture links multiple env cells, each linked env cell gets its own transition root
+  view group and shares/dedupes the aperture geometry resource.
+- The legacy transition aperture resource upload path is still live because building transition
+  apertures are still uploaded as `TransitionApertureBatch` resources and used by diagnostics/legacy
+  fallback. Phase 9 should only delete the legacy production compositor after indoor-to-outdoor and
+  overlay unification are complete.
+- Manual `0xda55ffff` validation showed the outdoor-base shared executor is active and env cells
+  render through expected building apertures from outdoor residency, but the frame is too expensive
+  and visually unstable: `PORTAL FRAME` reported roughly `cells 180`, `views 1302`, `masks 1727`,
+  `apertures 236`, `crossings 605`, and `DIRECT ENV DRAWS 2978` at around `12 FPS`. The shimmer
+  looked more like duplicate/conflicting portal submissions or wrong-facing aperture masks than
+  ordinary depth-buffer banding. Treat this as evidence that transition apertures need the same
+  dedupe/edge/resource normalization as env-cell portal apertures.
+- `0xf418ffff` remains a useful but weird transition target because it has unusual env-cell portal
+  topology. Use the more conventional `0xda55ffff` case for Phase 6A validation, then return to
+  `0xf418ffff` in a dedicated adjustment phase if needed.
+
+Validation:
+
+- Ran `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/renderer/portal-frame-work-plan.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts src/v2/runtime/client-runtime.test.ts`.
+- Ran `npm run check`.
+- Ran `npm run lint:ts`.
+
+Failed to close:
+
+- Indoor-to-outdoor and outdoor -> indoor -> outdoor sampling are still not implemented. The
+  outdoor target is now available as a base/source, but interior-origin return-to-outdoor apertures
+  still need explicit scene-source copy work.
+- Browser portal inspection still has separate Env-cell portals and Transition portals toggles. The
+  one-overlay category/color model remains future work.
+- Transition aperture production resources are still a separate class from env-cell portal aperture
+  resources. This blocks a clean cutover and must be fixed before continuing with nested transition
+  compositing.
+- Outdoor-base transition rendering is too slow and shows likely duplicate/conflicting aperture
+  shimmer in `0xda55ffff`. This is a Phase 6A blocker, not Phase 7-only optimization work.
+
+Work for mesh:
+
+- Phase 6A manual validation should prefer the conventional `0xda55ffff` target. Use
+  `0xf418ffff` later for the dedicated weird-topology adjustment pass.
+
+### Phase 6A: Unified Portal Aperture Resource Model
+
+Status: planned immediate corrective phase.
+
+Purpose: remove transition aperture specialness from the production renderer resource path before
+building more transition compositing behavior.
+
+Context:
+
+- Phase 6 proved the outdoor-base shared executor can render linked env cells through building
+  apertures from outdoor residency.
+- Manual `0xda55ffff` validation also exposed serious warning signs: high portal view/mask/direct
+  draw counts, low frame rate, and shimmering that resembles duplicate/conflicting aperture
+  submission or wrong-facing transition masks.
+- Keeping `TransitionApertureBatch` as a separate production renderer resource class would preserve
+  the old transition architecture under the new executor, making a clean Phase 9 cutover unlikely.
+
+Deliverables:
+
+- A unified portal aperture resource model for production rendering that can represent:
+  - env-cell portal apertures;
+  - building-sourced outdoor/env-cell transition apertures;
+  - future scene-crossing aperture categories without adding another renderer resource class.
+- Stable aperture geometry identity and dedupe across env-cell and transition apertures using
+  canonicalized transformed vertices.
+- Separate selected-edge metadata for every aperture edge:
+  - source scene endpoint;
+  - target scene endpoint;
+  - category/source kind such as `env-cell` or `building-transition`;
+  - source ids such as env-cell portal id or building aperture portal id;
+  - traversal/view stack ids;
+  - optional front-face/cull policy if source evidence or browser validation requires it.
+- Runtime/frame planning should emit selected portal aperture resources/edges directly from this
+  unified model. `TransitionApertureBatch` may remain as a static/source DTO or legacy fallback
+  input, but production `PortalFrameWorkPlan` execution should not depend on a transition-specific
+  renderer resource class.
+- WebGL2 should draw production aperture masks from the unified selected aperture resource path.
+  Avoid per-frame "upload all transition batch ranges again because they are transitions" logic.
+- Browser diagnostics should report unified aperture counts by category:
+  - selected env-cell aperture edges;
+  - selected building-transition aperture edges;
+  - deduped aperture geometry resources;
+  - duplicate/folded aperture edges;
+  - transition roots per linked env cell.
+- Add diagnostics that can explain the `0xda55ffff` cost/shimmer case:
+  - duplicate transition roots targeting the same env cell;
+  - multiple transition aperture ranges sharing canonical geometry;
+  - env cell drawn through multiple transition root contexts;
+  - wrong-side/cull-policy candidates.
+- Keep the separate Transition portals overlay only as a temporary UI/debug presentation until the
+  one-overlay category model lands. Do not let it remain a separate production resource path.
+
+Acceptance criteria:
+
+- Outdoor-base transition rendering uses the same production aperture resource/cache shape as
+  env-cell portal rendering.
+- `TransitionApertureBatch` is not consumed by WebGL2 as a production transition mask resource when
+  the direct portal frame path is active.
+- `0xda55ffff` outdoor validation shows a materially lower or at least explainable `views`,
+  `masks`, `crossings`, and `DIRECT ENV DRAWS` count. If counts remain high, diagnostics identify
+  which selected edges/view contexts are responsible.
+- Shimmering caused by duplicate/conflicting transition aperture masks is eliminated or reduced to a
+  clearly diagnosed source-data/topology case.
+- Any required transition front-face/cull behavior is represented as selected-edge metadata in the
+  unified aperture model, not as a separate transition compositor.
+- Indoor-to-outdoor work remains blocked until this phase lands.
+
+Spicy boundaries:
+
+- Do not solve this by adding a second transition-specific cache beside env-cell aperture resources.
+  That would cement the wrong architecture.
+- Do not optimize away portal view contexts merely because they are expensive. First prove whether
+  duplicate transition roots or duplicated aperture geometry are accidental or source-authored.
+- It is acceptable for legacy fallback/debug to retain `TransitionApertureBatch` temporarily, but
+  production direct portal execution should use unified selected aperture resources.
+
+Validation targets:
+
+- Primary: outdoor `0xda55ffff`, because it is conventional enough to expose architecture problems
+  without the known weirdness of `0xf418ffff`.
+- Secondary: `0xf418ffff`, only after `0xda55ffff` is stable, because it may require a dedicated
+  adjustment for unusual env-cell portal topology.
 
 ### Phase 6R: Reassessment After Transition Unification
 

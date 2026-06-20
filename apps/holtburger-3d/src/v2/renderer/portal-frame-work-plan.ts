@@ -165,6 +165,7 @@ function portalTransitionSceneCrossingsEqual(
 	return arraysEqual(left, right, (leftCrossing, rightCrossing) => {
 		return (
 			leftCrossing.apertureBatchId === rightCrossing.apertureBatchId &&
+			leftCrossing.aperturePortalId === rightCrossing.aperturePortalId &&
 			leftCrossing.landblockId === rightCrossing.landblockId &&
 			portalTransitionSceneEndpointEquals(
 				leftCrossing.from,

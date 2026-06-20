@@ -13,7 +13,10 @@ import {
 	createLegacyPortalFrameWorkPlan,
 	portalFrameWorkPlanEquals,
 } from "../renderer/portal-frame-work-plan";
-import { createDirectEnvCellFramePlan } from "./direct-env-cell-frame-plan";
+import {
+	createDirectEnvCellFramePlan,
+	createOutdoorTransitionPortalFramePlan,
+} from "./direct-env-cell-frame-plan";
 import { formatHex32, normalizeOutdoorLandblockId } from "../../lib/landblocks";
 import { TextureManager } from "../textures/texture-manager";
 import type { TexturePacker } from "../textures/packing/packer";
@@ -968,6 +971,48 @@ class ClientRuntimeImpl implements ClientRuntime {
 			});
 			if (directPlan) {
 				return directPlan;
+			}
+		}
+		if (
+			!this.#flatVisionModeEnabled &&
+			this.#currentCameraResidency.kind === "outdoor-landblock"
+		) {
+			const landblockId = this.#currentCameraResidency.landblockId;
+			const transitionApertureBatches =
+				this.#staticSceneQuery.queryTransitionApertureBatches({ landblockId });
+			const linkedEnvCellIds = collectTransitionLinkedEnvCellIds(
+				transitionApertureBatches,
+			);
+			if (
+				transitionApertureBatches.length > 0 &&
+				linkedEnvCellIds.length > 0 &&
+				this.#staticSceneQuery.hasCommittedPortalInteriorScene({ landblockId })
+			) {
+				const traversalPlansByStartEnvCellId = new Map(
+					linkedEnvCellIds.map((envCellId) => [
+						envCellId,
+						this.#staticSceneQuery.queryPortalTraversal({
+							landblockId,
+							maxCells: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
+							maxDepth: this.#directEnvCellPortalMaxDepth,
+							maxPortalViews: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
+							startEnvCellId: envCellId,
+						}),
+					]),
+				);
+				const directPlan = createOutdoorTransitionPortalFramePlan({
+					landblockId,
+					portalInteriorRecords:
+						this.#staticSceneQuery.queryPortalInteriorRecords({ landblockId }),
+					renderAnchorLandblockId: this.#renderAnchorLandblockId,
+					rendererEnvCellResourceMembership:
+						this.#lastRendererSnapshot.envCellResourceMembership,
+					transitionApertureBatches,
+					traversalPlansByStartEnvCellId,
+				});
+				if (directPlan) {
+					return directPlan;
+				}
 			}
 		}
 
@@ -2339,6 +2384,20 @@ function countTransitionApertures(
 	batches: readonly TransitionApertureBatch[],
 ): number {
 	return batches.reduce((count, batch) => count + batch.ranges.length, 0);
+}
+
+function collectTransitionLinkedEnvCellIds(
+	batches: readonly TransitionApertureBatch[],
+): readonly number[] {
+	const envCellIds = new Set<number>();
+	for (const batch of batches) {
+		for (const range of batch.ranges) {
+			for (const envCellId of range.source.linkedEnvCellIds) {
+				envCellIds.add(envCellId >>> 0);
+			}
+		}
+	}
+	return [...envCellIds].sort((left, right) => left - right);
 }
 
 function countEnvCellPortalApertures(

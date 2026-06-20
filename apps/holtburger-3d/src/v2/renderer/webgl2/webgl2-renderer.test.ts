@@ -293,6 +293,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			transitionSceneCrossings: [
 				{
 					apertureBatchId: "transition-aperture-batch:f418ffff",
+					aperturePortalId: "transition-portal:f4180103/01",
 					from: { kind: "outdoor", landblockId: 0xf418ffff },
 					landblockId: 0xf418ffff,
 					linkedEnvCellIds: [0xf4180103],
@@ -325,6 +326,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			transitionSceneCrossings: [
 				{
 					apertureBatchId: "transition-aperture-batch:f418ffff",
+					aperturePortalId: "transition-portal:f4180103/01",
 					from: { kind: "outdoor", landblockId: 0xf418ffff },
 					landblockId: 0xf418ffff,
 					linkedEnvCellIds: [0xf4180103],
@@ -579,6 +581,117 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		expect(gl.depthFuncModes).toContain(gl.LEQUAL);
 		expect(gl.depthFuncModes).toContain(gl.ALWAYS);
 		expect(latestSnapshot.directEnvCellDrawCalls).toBe(2);
+
+		renderer.dispose();
+	});
+
+	it("executes outdoor-target transition masks through direct env-cell draws", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+		let latestSnapshot = rendererSnapshotPlaceholder();
+		renderer.subscribe((snapshot) => {
+			latestSnapshot = snapshot;
+		});
+
+		renderer.applyStaticDelta({
+			addedDrawUnits: [
+				createTerrainDrawUnit(),
+				createStructuredInteriorDrawUnit({
+					drawUnitId: "structured-transition-root",
+					envCellId: 0xda550100,
+				}),
+			],
+			addedTransitionApertureBatches: [],
+			removedDrawUnitIds: [],
+			removedTransitionApertureBatchIds: [],
+			revision: 1,
+		});
+		renderer.setPortalFrameWorkPlan({
+			baseScene: {
+				kind: "outdoor-target",
+				landblockId: 0xda55ffff,
+			},
+			directEnvCellDraws: [
+				{
+					envCellId: 0xda550100,
+					envCellStaticObjectDrawUnitIds: [],
+					landblockId: 0xda55ffff,
+					portalStackId: "outdoor-root:0xda55ffff/transition:0xda550100",
+					resourceState: "ready",
+					structuredInteriorDrawUnitIds: ["structured-transition-root"],
+					traversalDepth: 1,
+				},
+			],
+			kind: "direct-env-cell",
+			mode: "portal-traversal",
+			portalApertureGeometryResources: [
+				{
+					resourceId: "transition-aperture:root",
+					vertices: [
+						[0, 0, 0],
+						[1, 0, 0],
+						[0, 1, 0],
+					],
+				},
+			],
+			portalApertureMaskPasses: [
+				{
+					apertureResourceId: "transition-aperture:root",
+					linkId: "transition-root",
+					parentStencilRef: null,
+					portalStackId: "outdoor-root:0xda55ffff/transition:0xda550100",
+					source: {
+						kind: "outdoor-target",
+						landblockId: 0xda55ffff,
+					},
+					sourcePortalStackId: "outdoor-root:0xda55ffff",
+					stencilRef: 1,
+					target: {
+						envCellId: 0xda550100,
+						kind: "env-cell-direct",
+						landblockId: 0xda55ffff,
+					},
+					traversalDepth: 1,
+				},
+			],
+			transitionSceneCrossings: [
+				{
+					apertureBatchId: "transition-aperture-batch:da55ffff",
+					aperturePortalId: "transition-portal:0",
+					from: { kind: "outdoor", landblockId: 0xda55ffff },
+					landblockId: 0xda55ffff,
+					linkedEnvCellIds: [0xda550100],
+					to: {
+						envCellId: 0xda550100,
+						kind: "env-cell",
+						landblockId: 0xda55ffff,
+					},
+				},
+			],
+		});
+
+		pendingFrame?.(16);
+
+		expect(latestSnapshot.sceneDomainTargets).toMatchObject({
+			active: true,
+			compositingMode: "none",
+			exteriorDrawCalls: 1,
+			interiorDrawCalls: 0,
+		});
+		expect(latestSnapshot.directEnvCellDrawCalls).toBe(1);
+		expect(gl.stencilFuncCalls).toEqual(
+			expect.arrayContaining([
+				{ func: gl.ALWAYS, mask: 0xff, ref: 1 },
+				{ func: gl.EQUAL, mask: 0xff, ref: 1 },
+			]),
+		);
 
 		renderer.dispose();
 	});

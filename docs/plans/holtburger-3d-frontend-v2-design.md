@@ -1395,6 +1395,24 @@ Outdoor and env-cell execution should not be symmetric. Outdoor terrain, buildin
 
 Outdoor-to-indoor and indoor-to-outdoor transition portals are scene-domain crossings in the portal model, not a separate visibility universe. Building-sourced transition aperture geometry remains the mask authority for building portals. Env-cell outside-transition records remain traversal/query/debug metadata unless a later evidence pass proves a non-building transition case that needs them as mask geometry.
 
+The first transition-unification slice supports outdoor-base transition frames through the shared
+portal executor. Runtime can convert building-sourced `TransitionApertureBatch` ranges into
+selected portal aperture resources and mask passes whose source is an outdoor target and whose
+targets are linked direct env-cell roots. The linked env-cell root then seeds the same env-cell
+portal traversal and grouped aperture-mask recursion used by pure interiors. This means
+outdoor-to-indoor rendering no longer needs to draw a broad all-resident interior scene target for
+the supported direct path.
+
+`PortalTransitionSceneCrossing` records both `apertureBatchId` and `aperturePortalId` so transition
+crossings can remain selected-edge facts even though the underlying building aperture geometry may
+still be uploaded in batch form. Batch-level transition aperture resources are therefore a resource
+container and fallback/debug input, not production visibility policy.
+
+Indoor-to-outdoor and outdoor -> indoor -> outdoor composition still need explicit scene-source copy
+work. The outdoor target is now the correct reusable source, but interior-origin return-to-outdoor
+passes should be added to the shared executor rather than reviving the legacy two-surface transition
+compositor as a second architecture.
+
 The WebGL2 renderer should carry forward the portal depth-copy lesson: aperture coverage must prefer framebuffer depth transfer and fixed-function depth/stencil behavior where WebGL2 can express it. Shader-side sampled-depth comparisons should not become the authority for portal aperture coverage.
 
 The current source-backed portal-renderer inspection targets are:

@@ -1016,6 +1016,7 @@ export class StaticSceneQuery {
 		readonly landblockId: number;
 		readonly maxCells: number;
 		readonly maxDepth: number;
+		readonly maxPortalViews: number;
 		readonly startEnvCellId: number;
 	}): PortalTraversalPlan {
 		const landblockId = options.landblockId >>> 0;
@@ -1023,6 +1024,7 @@ export class StaticSceneQuery {
 			landblockId,
 			maxCells: options.maxCells,
 			maxDepth: options.maxDepth,
+			maxPortalViews: options.maxPortalViews,
 			portalInteriorRecords: this.queryPortalInteriorRecords({ landblockId }),
 			startEnvCellId: options.startEnvCellId >>> 0,
 		});

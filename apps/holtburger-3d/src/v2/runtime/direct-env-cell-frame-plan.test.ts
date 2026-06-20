@@ -193,6 +193,7 @@ describe("direct env-cell frame plan", () => {
 					kind: "env-cell-direct",
 					landblockId: 0xda55ffff,
 				},
+				sourcePortalStackId: "root:0xda550100",
 				stencilRef: 1,
 				target: {
 					envCellId: 0xda550101,
@@ -201,6 +202,121 @@ describe("direct env-cell frame plan", () => {
 				},
 				traversalDepth: 1,
 			},
+		]);
+	});
+
+	it("creates multiple aperture masks for one merged target view group", () => {
+		const firstEdge = {
+			flags: 0,
+			linkId: "a-to-b-0",
+			polygonId: null,
+			sourceEnvCellId: 0xda550100,
+			sourceIndex: 0,
+			sourcePortalId: "portal-a-0",
+			targetEnvCellId: 0xda550101,
+			targetPortalId: "portal-b-0",
+		};
+		const secondEdge = {
+			...firstEdge,
+			linkId: "a-to-b-1",
+			sourceIndex: 1,
+			sourcePortalId: "portal-a-1",
+			targetPortalId: "portal-b-1",
+		};
+		const plan = createDirectEnvCellFramePlan({
+			currentCameraResidency: {
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+			portalInteriorRecords: [
+				createPortalInteriorRecord({
+					envCellIds: [0xda550100, 0xda550101],
+					portalAperturesByEnvCellId: new Map([
+						[
+							0xda550100,
+							[
+								createPortalAperture("portal-a-0", 7, [
+									{ x: 0, y: 0, z: 0 },
+									{ x: 1, y: 0, z: 0 },
+									{ x: 0, y: 1, z: 0 },
+								]),
+								createPortalAperture("portal-a-1", 8, [
+									{ x: 2, y: 0, z: 0 },
+									{ x: 3, y: 0, z: 0 },
+									{ x: 2, y: 1, z: 0 },
+								]),
+							],
+						],
+					]),
+				}),
+			],
+			renderAnchorLandblockId: 0xda55ffff,
+			rendererEnvCellResourceMembership: [
+				{
+					envCellId: 0xda550101,
+					envCellStaticObjectDrawUnitIds: [],
+					landblockId: 0xda55ffff,
+					sharedEnvCellStaticObjectDrawUnits: 0,
+					structuredInteriorDrawUnitIds: ["structured-child"],
+				},
+			],
+			traversalPlan: {
+				diagnostics: [],
+				landblockId: 0xda55ffff,
+				maxCells: 8,
+				maxDepth: 1,
+				maxPortalViews: 16,
+				portalViewGroups: [
+					{
+						apertureEdges: [],
+						envCellId: 0xda550100,
+						landblockId: 0xda55ffff,
+						parentPortalStackId: null,
+						portalStack: [],
+						portalStackId: "root:0xda550100",
+						traversalDepth: 0,
+					},
+					{
+						apertureEdges: [firstEdge, secondEdge],
+						envCellId: 0xda550101,
+						landblockId: 0xda55ffff,
+						parentPortalStackId: "root:0xda550100",
+						portalStack: [firstEdge],
+						portalStackId: "root:0xda550100/a-to-b-0",
+						traversalDepth: 1,
+					},
+				],
+				sceneCrossings: [],
+				startEnvCellId: 0xda550100,
+				visibleCells: [],
+			},
+		});
+
+		expect(plan?.directEnvCellDraws).toEqual([
+			expect.objectContaining({
+				envCellId: 0xda550100,
+				portalStackId: "root:0xda550100",
+			}),
+			expect.objectContaining({
+				envCellId: 0xda550101,
+				portalStackId: "root:0xda550100/a-to-b-0",
+				structuredInteriorDrawUnitIds: ["structured-child"],
+			}),
+		]);
+		expect(plan?.portalApertureMaskPasses).toEqual([
+			expect.objectContaining({
+				linkId: "a-to-b-0",
+				portalStackId: "root:0xda550100/a-to-b-0",
+				sourcePortalStackId: "root:0xda550100",
+				stencilRef: 1,
+			}),
+			expect.objectContaining({
+				linkId: "a-to-b-1",
+				portalStackId: "root:0xda550100/a-to-b-0",
+				sourcePortalStackId: "root:0xda550100",
+				stencilRef: 1,
+			}),
 		]);
 	});
 
@@ -241,6 +357,19 @@ function createTraversalPlan(options: {
 		landblockId: 0xda55ffff,
 		maxCells: 8,
 		maxDepth: 1,
+		maxPortalViews: 16,
+		portalViewGroups: options.visibleCells.map((cell) => ({
+			apertureEdges: cell.parentEdge ? [cell.parentEdge] : [],
+			envCellId: cell.envCellId,
+			landblockId: 0xda55ffff,
+			parentPortalStackId:
+				cell.parentEdge && cell.portalStackId.includes("/")
+					? cell.portalStackId.slice(0, cell.portalStackId.lastIndexOf("/"))
+					: null,
+			portalStack: cell.parentEdge ? [cell.parentEdge] : [],
+			portalStackId: cell.portalStackId,
+			traversalDepth: cell.traversalDepth,
+		})),
 		sceneCrossings: [],
 		startEnvCellId: 0xda550100,
 		visibleCells: options.visibleCells.map((cell) => ({
@@ -251,6 +380,24 @@ function createTraversalPlan(options: {
 			portalStackId: cell.portalStackId,
 			traversalDepth: cell.traversalDepth,
 		})),
+	};
+}
+
+function createPortalAperture(
+	portalId: string,
+	polygonId: number,
+	points: StaticPortalInteriorRecord["envCells"][number]["portalApertures"][number]["points"],
+): StaticPortalInteriorRecord["envCells"][number]["portalApertures"][number] {
+	return {
+		plane: {
+			constant: 0,
+			normal: { x: 0, y: 0, z: 1 },
+			source: "derived-from-render-points",
+		},
+		points,
+		polygonId,
+		portalId,
+		sourceIndex: polygonId,
 	};
 }
 

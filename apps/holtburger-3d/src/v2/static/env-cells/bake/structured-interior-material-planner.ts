@@ -24,7 +24,6 @@ import {
 	type StaticMaterialPlan,
 } from "../../objects/bake/static-object-material-planner";
 import { isRenderableStaticMaterialPlan } from "../../objects/bake/static-object-renderability";
-import { createEnvCellPortalPolygonIdSet } from "./structured-interior-portal-polygons";
 
 export interface StructuredInteriorCellMaterialPlan {
 	readonly entries: readonly StructuredInteriorMaterialPlanEntry[];
@@ -265,7 +264,9 @@ export function createStructuredInteriorMaterialCoverageReport(options: {
 			bucket.triangleCount += surfaceTriangleCount;
 			bucketCounts.set(bucketKey, bucket);
 		}
-		triangleCount += countStructuredInteriorRenderableTriangles(envCell);
+		if (envCell.renderGeometry.triangleCount > 0) {
+			triangleCount += envCell.renderGeometry.triangleCount;
+		}
 	}
 
 	if (materialCount === 0 && triangleCount === 0) {
@@ -346,31 +347,19 @@ function createEmptyCoverageReport(
 function countRenderableEnvCells(
 	payload: LandblockEnvCellsStaticScopePayload,
 ): number {
-	return payload.envCells.filter(
-		(envCell) => countStructuredInteriorRenderableTriangles(envCell) > 0,
-	).length;
+	return payload.envCells.filter((envCell) => envCell.renderGeometry.triangleCount > 0)
+		.length;
 }
 
 function countSurfaceTriangles(
 	envCell: LandblockEnvCellStaticFacts,
 	surfaceId: number,
 ): number {
-	const portalPolygonIds = createEnvCellPortalPolygonIdSet(envCell);
 	return envCell.renderGeometry.triangles.filter(
 		(triangle) =>
-			!portalPolygonIds.has(triangle.polygonId) &&
 			triangle.surfaceId !== null &&
 			resolveStructuredInteriorMaterialSurfaceId(envCell, triangle.surfaceId) ===
 				surfaceId,
-	).length;
-}
-
-function countStructuredInteriorRenderableTriangles(
-	envCell: LandblockEnvCellStaticFacts,
-): number {
-	const portalPolygonIds = createEnvCellPortalPolygonIdSet(envCell);
-	return envCell.renderGeometry.triangles.filter(
-		(triangle) => !portalPolygonIds.has(triangle.polygonId),
 	).length;
 }
 

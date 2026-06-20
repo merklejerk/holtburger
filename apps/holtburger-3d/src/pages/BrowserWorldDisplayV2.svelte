@@ -1164,32 +1164,47 @@
 			return `legacy ${plan.mode}`;
 		}
 
+		const graph = plan.graph;
+		const baseNode = graph.nodes.find((node) => node.nodeId === graph.baseNodeId);
+		if (!baseNode) {
+			return `${plan.mode} invalid graph missing base ${graph.baseNodeId}`;
+		}
 		const base =
-			plan.baseScene.kind === "outdoor-target"
-				? `outdoor ${formatHexId(plan.baseScene.landblockId)}`
-				: `env ${formatHexId(plan.baseScene.landblockId)} / ${formatHexId(plan.baseScene.envCellId)}`;
-		const missingResourceCells = plan.directEnvCellDraws.filter(
-			(draw) => draw.resourceState === "missing-resources",
+			baseNode.scene.kind === "outdoor-target"
+				? `outdoor ${formatHexId(baseNode.scene.landblockId)}`
+				: `env ${formatHexId(baseNode.scene.landblockId)} / ${formatHexId(baseNode.scene.envCellId)}`;
+		const envCellNodes = graph.nodes.filter(
+			(node) => node.scene.kind === "env-cell-direct",
+		);
+		const missingResourceCells = envCellNodes.filter(
+			(node) => node.resources.resourceState === "missing-resources",
 		).length;
 		const uniqueCells = new Set(
-			plan.directEnvCellDraws.map(
-				(draw) => `${draw.landblockId >>> 0}:${draw.envCellId >>> 0}`,
+			envCellNodes.map((node) =>
+				node.scene.kind === "env-cell-direct"
+					? `${node.scene.landblockId >>> 0}:${node.scene.envCellId >>> 0}`
+					: "",
 			),
 		).size;
-		const maxDepth = plan.directEnvCellDraws.reduce(
-			(max, draw) => Math.max(max, draw.traversalDepth),
+		const maxDepth = graph.nodes.reduce(
+			(max, node) => Math.max(max, node.traversalDepth),
 			0,
 		);
-		const structuredDrawUnits = plan.directEnvCellDraws.reduce(
-			(count, draw) => count + draw.structuredInteriorDrawUnitIds.length,
+		const structuredDrawUnits = envCellNodes.reduce(
+			(count, node) =>
+				count + node.resources.structuredInteriorDrawUnitIds.length,
 			0,
 		);
-		const staticDrawUnits = plan.directEnvCellDraws.reduce(
-			(count, draw) => count + draw.envCellStaticObjectDrawUnitIds.length,
+		const staticDrawUnits = envCellNodes.reduce(
+			(count, node) =>
+				count + node.resources.envCellStaticObjectDrawUnitIds.length,
 			0,
 		);
-		const aperture = plan.portalApertureDiagnostics;
-		return `${plan.mode} base ${base} cells ${uniqueCells} views ${plan.directEnvCellDraws.length} missing ${missingResourceCells} depth ${maxDepth} masks ${plan.portalApertureMaskPasses.length} apertures ${plan.portalApertureGeometryResources.length} edges ${aperture.envCellPortalEdges} env / ${aperture.buildingTransitionEdges} transition dup ${aperture.duplicateMaskEdges} dedupe ${aperture.dedupedGeometryResources} roots ${aperture.transitionRootCount}/${aperture.transitionRootCandidateCount} reject ${aperture.transitionRootsRejectedNotSeenOutside} hidden / ${aperture.transitionRootsRejectedUnknownSeenOutside} unknown resources ${structuredDrawUnits} cell / ${staticDrawUnits} static crossings ${plan.transitionSceneCrossings.length}`;
+		const aperture = graph.diagnostics;
+		const transitionEdges = graph.edges.filter(
+			(edge) => edge.sourceKind === "building-transition",
+		).length;
+		return `${plan.mode} base ${base} nodes ${graph.nodes.length} cells ${uniqueCells} views ${envCellNodes.length} missing ${missingResourceCells} depth ${maxDepth} masks ${graph.edges.length} apertures ${graph.apertureResources.length} edges ${aperture.envCellPortalEdges} env / ${aperture.buildingTransitionEdges} transition dup ${aperture.duplicateMaskEdges} dedupe ${aperture.dedupedGeometryResources} roots ${aperture.transitionRootCount}/${aperture.transitionRootCandidateCount} reject ${aperture.transitionRootsRejectedNotSeenOutside} hidden / ${aperture.transitionRootsRejectedUnknownSeenOutside} unknown resources ${structuredDrawUnits} cell / ${staticDrawUnits} static transitions ${transitionEdges}`;
 	}
 
 	function currentCameraEnvCellResourceTarget(): {

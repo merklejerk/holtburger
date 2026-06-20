@@ -11,57 +11,62 @@ import {
 
 describe("direct env-cell frame plan", () => {
 	it("joins current-cell traversal to renderer env-cell resource membership", () => {
-		expect(
-			createDirectEnvCellFramePlan({
-				currentCameraResidency: {
-					envCellId: 0xda550100,
-					kind: "env-cell",
-					landblockId: 0xda55ffff,
-				},
-				portalInteriorRecords: [],
-				renderAnchorLandblockId: null,
-				rendererEnvCellResourceMembership: [
-					{
-						envCellId: 0xda550100,
-						envCellStaticObjectDrawUnitIds: [],
-						landblockId: 0xda55ffff,
-						sharedEnvCellStaticObjectDrawUnits: 0,
-						structuredInteriorDrawUnitIds: ["structured:da550100"],
-					},
-				],
-				traversalPlan: createTraversalPlan({
-					visibleCells: [
-						{
-							envCellId: 0xda550100,
-							portalStackId: "root:0xda550100",
-							traversalDepth: 0,
-						},
-					],
-				}),
-			}),
-		).toEqual({
-			baseScene: {
+		const plan = createDirectEnvCellFramePlan({
+			currentCameraResidency: {
 				envCellId: 0xda550100,
-				kind: "env-cell-direct",
+				kind: "env-cell",
 				landblockId: 0xda55ffff,
 			},
-			directEnvCellDraws: [
+			portalInteriorRecords: [],
+			renderAnchorLandblockId: null,
+			rendererEnvCellResourceMembership: [
 				{
 					envCellId: 0xda550100,
 					envCellStaticObjectDrawUnitIds: [],
 					landblockId: 0xda55ffff,
-					portalStackId: "root:0xda550100",
-					resourceState: "ready",
+					sharedEnvCellStaticObjectDrawUnits: 0,
 					structuredInteriorDrawUnitIds: ["structured:da550100"],
-					traversalDepth: 0,
 				},
 			],
+			traversalPlan: createTraversalPlan({
+				visibleCells: [
+					{
+						envCellId: 0xda550100,
+						portalStackId: "root:0xda550100",
+						traversalDepth: 0,
+					},
+				],
+			}),
+		});
+
+		expect(plan).toEqual({
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
-			portalApertureDiagnostics: emptyPortalApertureDiagnostics(),
-			portalApertureGeometryResources: [],
-			portalApertureMaskPasses: [],
-			transitionSceneCrossings: [],
+			graph: {
+				apertureResources: [],
+				baseNodeId: 0,
+				diagnostics: emptyPortalApertureDiagnostics(),
+				edges: [],
+				nodes: [
+					{
+						debugStackLabel: "root:0xda550100",
+						incomingEdgeIds: [],
+						nodeId: 0,
+						parentNodeId: null,
+						resources: {
+							envCellStaticObjectDrawUnitIds: [],
+							resourceState: "ready",
+							structuredInteriorDrawUnitIds: ["structured:da550100"],
+						},
+						scene: {
+							envCellId: 0xda550100,
+							kind: "env-cell-direct",
+							landblockId: 0xda55ffff,
+						},
+						traversalDepth: 0,
+					},
+				],
+			},
 		});
 	});
 
@@ -99,18 +104,22 @@ describe("direct env-cell frame plan", () => {
 			}),
 		});
 
-		expect(plan?.directEnvCellDraws).toEqual([
+		expect(plan?.graph.nodes).toEqual([
 			expect.objectContaining({
-				envCellId: 0xda550100,
-				envCellStaticObjectDrawUnitIds: ["static:da550100"],
-				resourceState: "ready",
+				resources: expect.objectContaining({
+					envCellStaticObjectDrawUnitIds: ["static:da550100"],
+					resourceState: "ready",
+				}),
+				scene: expect.objectContaining({ envCellId: 0xda550100 }),
 				traversalDepth: 0,
 			}),
 			expect.objectContaining({
-				envCellId: 0xda550101,
-				envCellStaticObjectDrawUnitIds: [],
-				resourceState: "missing-resources",
-				structuredInteriorDrawUnitIds: [],
+				resources: {
+					envCellStaticObjectDrawUnitIds: [],
+					resourceState: "missing-resources",
+					structuredInteriorDrawUnitIds: [],
+				},
+				scene: expect.objectContaining({ envCellId: 0xda550101 }),
 				traversalDepth: 1,
 			}),
 		]);
@@ -178,7 +187,7 @@ describe("direct env-cell frame plan", () => {
 			}),
 		});
 
-		expect(plan?.portalApertureGeometryResources).toEqual([
+		expect(plan?.graph.apertureResources).toEqual([
 			{
 				resourceId: expect.stringMatching(/^portal-aperture:/),
 				sourceKinds: ["env-cell-portal"],
@@ -189,28 +198,16 @@ describe("direct env-cell frame plan", () => {
 				],
 			},
 		]);
-		expect(plan?.portalApertureMaskPasses).toEqual([
+		expect(plan?.graph.edges).toEqual([
 			{
-				apertureResourceId:
-					plan?.portalApertureGeometryResources[0]?.resourceId,
-				apertureSourceId: "env-cell-portal:0xda55ffff:0xda550100:portal-a",
+				apertureResourceId: plan?.graph.apertureResources[0]?.resourceId,
+				apertureSourceId:
+					"env-cell-portal:0xda55ffff:0xda550100:portal-a:0:7",
+				childNodeId: 1,
+				edgeId: 0,
 				linkId: "a-to-b",
-				parentStencilRef: null,
-				portalStackId: "root:0xda550100/a-to-b",
-				source: {
-					envCellId: 0xda550100,
-					kind: "env-cell-direct",
-					landblockId: 0xda55ffff,
-				},
+				parentNodeId: 0,
 				sourceKind: "env-cell-portal",
-				sourcePortalStackId: "root:0xda550100",
-				stencilRef: 1,
-				target: {
-					envCellId: 0xda550101,
-					kind: "env-cell-direct",
-					landblockId: 0xda55ffff,
-				},
-				traversalDepth: 1,
 			},
 		]);
 	});
@@ -303,29 +300,29 @@ describe("direct env-cell frame plan", () => {
 			},
 		});
 
-		expect(plan?.directEnvCellDraws).toEqual([
+		expect(plan?.graph.nodes).toEqual([
 			expect.objectContaining({
-				envCellId: 0xda550100,
-				portalStackId: "root:0xda550100",
+				debugStackLabel: "root:0xda550100",
+				scene: expect.objectContaining({ envCellId: 0xda550100 }),
 			}),
 			expect.objectContaining({
-				envCellId: 0xda550101,
-				portalStackId: "root:0xda550100/a-to-b-0",
-				structuredInteriorDrawUnitIds: ["structured-child"],
+				debugStackLabel: "root:0xda550100/a-to-b-0",
+				resources: expect.objectContaining({
+					structuredInteriorDrawUnitIds: ["structured-child"],
+				}),
+				scene: expect.objectContaining({ envCellId: 0xda550101 }),
 			}),
 		]);
-		expect(plan?.portalApertureMaskPasses).toEqual([
+		expect(plan?.graph.edges).toEqual([
 			expect.objectContaining({
+				childNodeId: 1,
 				linkId: "a-to-b-0",
-				portalStackId: "root:0xda550100/a-to-b-0",
-				sourcePortalStackId: "root:0xda550100",
-				stencilRef: 1,
+				parentNodeId: 0,
 			}),
 			expect.objectContaining({
+				childNodeId: 1,
 				linkId: "a-to-b-1",
-				portalStackId: "root:0xda550100/a-to-b-0",
-				sourcePortalStackId: "root:0xda550100",
-				stencilRef: 1,
+				parentNodeId: 0,
 			}),
 		]);
 	});
@@ -438,40 +435,36 @@ describe("direct env-cell frame plan", () => {
 			]),
 		});
 
-		expect(plan?.baseScene).toEqual({
-			kind: "outdoor-target",
-			landblockId: 0xda55ffff,
-		});
-		expect(plan?.transitionSceneCrossings).toEqual([
-			{
-				apertureBatchId: "transition-aperture-batch:da55ffff",
-				aperturePortalId: "transition-portal:0",
-				from: { kind: "outdoor", landblockId: 0xda55ffff },
-				landblockId: 0xda55ffff,
-				linkedEnvCellIds: [0xda550100],
-				to: {
-					envCellId: 0xda550100,
-					kind: "env-cell",
+		expect(plan?.graph.nodes[0]).toEqual(
+			expect.objectContaining({
+				scene: {
+					kind: "outdoor-target",
 					landblockId: 0xda55ffff,
 				},
-			},
-		]);
-		expect(plan?.directEnvCellDraws).toEqual([
+			}),
+		);
+		expect(plan?.graph.nodes).toEqual([
 			expect.objectContaining({
-				envCellId: 0xda550100,
-				portalStackId: "outdoor-root:0xda55ffff/transition:0xda550100",
-				structuredInteriorDrawUnitIds: ["structured-root"],
+				nodeId: 0,
+				scene: { kind: "outdoor-target", landblockId: 0xda55ffff },
+				traversalDepth: 0,
+			}),
+			expect.objectContaining({
+				resources: expect.objectContaining({
+					structuredInteriorDrawUnitIds: ["structured-root"],
+				}),
+				scene: expect.objectContaining({ envCellId: 0xda550100 }),
 				traversalDepth: 1,
 			}),
 			expect.objectContaining({
-				envCellId: 0xda550101,
-				envCellStaticObjectDrawUnitIds: ["static-child"],
-				portalStackId:
-					"outdoor-root:0xda55ffff/transition:0xda550100/root-to-child",
+				resources: expect.objectContaining({
+					envCellStaticObjectDrawUnitIds: ["static-child"],
+				}),
+				scene: expect.objectContaining({ envCellId: 0xda550101 }),
 				traversalDepth: 2,
 			}),
 		]);
-		expect(plan?.portalApertureDiagnostics).toEqual({
+		expect(plan?.graph.diagnostics).toEqual({
 			buildingTransitionEdges: 1,
 			dedupedGeometryResources: 0,
 			duplicateMaskEdges: 0,
@@ -482,29 +475,19 @@ describe("direct env-cell frame plan", () => {
 			transitionRootsRejectedNotSeenOutside: 0,
 			transitionRootsRejectedUnknownSeenOutside: 0,
 		});
-		expect(plan?.portalApertureMaskPasses).toEqual([
+		expect(plan?.graph.edges).toEqual([
 			expect.objectContaining({
+				childNodeId: 1,
 				linkId:
 					"transition:transition-aperture-batch:da55ffff:transition-portal:0:0xda550100",
-				portalStackId: "outdoor-root:0xda55ffff/transition:0xda550100",
-				source: { kind: "outdoor-target", landblockId: 0xda55ffff },
-				sourcePortalStackId: "outdoor-root:0xda55ffff",
-				stencilRef: 1,
-				target: {
-					envCellId: 0xda550100,
-					kind: "env-cell-direct",
-					landblockId: 0xda55ffff,
-				},
-				traversalDepth: 1,
+				parentNodeId: 0,
+				sourceKind: "building-transition",
 			}),
 			expect.objectContaining({
+				childNodeId: 2,
 				linkId: "root-to-child",
-				parentStencilRef: 1,
-				portalStackId:
-					"outdoor-root:0xda55ffff/transition:0xda550100/root-to-child",
-				sourcePortalStackId: "outdoor-root:0xda55ffff/transition:0xda550100",
-				stencilRef: 2,
-				traversalDepth: 2,
+				parentNodeId: 1,
+				sourceKind: "env-cell-portal",
 			}),
 		]);
 	});
@@ -596,14 +579,22 @@ describe("direct env-cell frame plan", () => {
 			]),
 		});
 
-		expect(plan?.directEnvCellDraws.map((draw) => draw.envCellId)).toEqual([
-			0xda550100,
-		]);
-		expect(plan?.transitionSceneCrossings).toHaveLength(1);
-		expect(plan?.transitionSceneCrossings[0]?.linkedEnvCellIds).toEqual([
-			0xda550100,
-		]);
-		expect(plan?.portalApertureDiagnostics).toEqual({
+		expect(
+			plan?.graph.nodes
+				.filter((node) => node.scene.kind === "env-cell-direct")
+				.map((node) =>
+					node.scene.kind === "env-cell-direct" ? node.scene.envCellId : 0,
+				),
+		).toEqual([0xda550100]);
+		expect(plan?.graph.edges).toHaveLength(1);
+		expect(plan?.graph.edges[0]).toEqual(
+			expect.objectContaining({
+				childNodeId: 1,
+				parentNodeId: 0,
+				sourceKind: "building-transition",
+			}),
+		);
+		expect(plan?.graph.diagnostics).toEqual({
 			buildingTransitionEdges: 1,
 			dedupedGeometryResources: 0,
 			duplicateMaskEdges: 0,

@@ -18,6 +18,10 @@ import {
 	createOutdoorVisibleEnvCellIds,
 	createOutdoorTransitionPortalFramePlan,
 } from "./direct-env-cell-frame-plan";
+import {
+	createPortalTraversalGraph,
+	createPortalTraversalPlanFromGraph,
+} from "./portal-traversal-planner";
 import { formatHex32, normalizeOutdoorLandblockId } from "../../lib/landblocks";
 import { TextureManager } from "../textures/texture-manager";
 import type { TexturePacker } from "../textures/packing/packer";
@@ -998,10 +1002,15 @@ class ClientRuntimeImpl implements ClientRuntime {
 				const outdoorVisibleLinkedEnvCellIds = linkedEnvCellIds.filter(
 					(envCellId) => outdoorVisibleEnvCellIds.has(envCellId >>> 0),
 				);
+				const traversalGraph = createPortalTraversalGraph({
+					landblockId,
+					portalInteriorRecords,
+				});
 				const traversalPlansByStartEnvCellId = new Map(
 					outdoorVisibleLinkedEnvCellIds.map((envCellId) => [
 						envCellId,
-						this.#staticSceneQuery.queryPortalTraversal({
+						createPortalTraversalPlanFromGraph({
+							graph: traversalGraph,
 							landblockId,
 							maxCells: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
 							maxDepth: this.#directEnvCellPortalMaxDepth,

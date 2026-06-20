@@ -1700,7 +1700,7 @@ Work for mesh:
 
 ### Phase 6B: Transition Portal Correctness Investigation
 
-Status: in progress.
+Status: implementation complete; live browser re-profile pending.
 
 Purpose: prove why outdoor transition portals shimmer before adding nested transition behavior,
 culling policy, or performance work.
@@ -1782,6 +1782,277 @@ Validation notes:
   The `SeenOutside` gate is still the correct outdoor-origin boundary, but it does not explain the
   shimmer or frame cost in this target. Continue Phase 6B by investigating transition aperture
   topology/selection and depth/composite interactions.
+- Browser profiling also exposed a structural runtime-identity problem rather than a local hot-loop
+  problem:
+  - direct portal frame planning spends visible time rebuilding env-cell lookup maps and composing
+    string env-cell keys, with `createEnvCellKey` showing up as self time;
+  - static commit/materialization stutters when env-cell records load, with
+    `compareCommittedRecords` falling through to `JSON.stringify(...)` during committed env-cell
+    root rebuild sorting.
+  This should not be fixed by one-off caching or shaving a few calls. Runtime execution should use
+  typed/numeric indexes, while composite strings remain diagnostic/export labels only.
+
+### Phase 6B.1: Runtime Identity And Index Model Correction
+
+Status: implementation complete; live browser re-profile pending after traversal-graph/resource-id fix.
+
+Purpose: remove foundational reliance on composite string identities and stringify-based ordering
+from portal planning and static scene commit paths before adding more transition diagnostics.
+
+Context:
+
+- Portal frame planning currently uses composite string keys for env-cell membership lookup,
+  env-cell source lookup, portal-stack grouping, and renderer grouping. The underlying structure is
+  a portal execution graph, but the code represents it as parallel lists tied together by debug
+  strings.
+- Outdoor transition planning calls env-cell aperture planning once per transition root; that path
+  rebuilds committed env-cell maps and emits composite keys repeatedly.
+- Static scene commit paths sort committed env-cell records with a generic comparator whose final
+  tie-breaker stringifies whole records. This is expensive and hides missing typed ordering.
+- These patterns are now visible in browser profiles and make correctness investigation harder by
+  turning every diagnostic frame into a CPU spike.
+- Follow-up browser profiling after the initial graph rewrite showed two remaining structural
+  identity issues: outdoor transition planning rebuilt/sorted the same portal traversal graph per
+  transition root, and aperture resources were still keyed by formatted transformed vertex
+  geometry.
+
+Target shape:
+
+```ts
+type PortalFrameNodeId = number;
+type PortalFrameEdgeId = number;
+
+interface PortalFrameGraphPlan {
+  readonly baseNodeId: PortalFrameNodeId;
+  readonly nodes: readonly PortalFrameNodePlan[];
+  readonly edges: readonly PortalFrameEdgePlan[];
+  readonly apertureResources: readonly PortalApertureGeometryResourcePlan[];
+  readonly diagnostics: PortalApertureFrameDiagnostics;
+}
+
+interface PortalFrameNodePlan {
+  readonly nodeId: PortalFrameNodeId;
+  readonly parentNodeId: PortalFrameNodeId | null;
+  readonly scene: PortalFrameSceneSource;
+  readonly traversalDepth: number;
+  readonly incomingEdgeIds: readonly PortalFrameEdgeId[];
+  readonly resources: PortalFrameNodeResources;
+  readonly debugStackLabel: string;
+}
+
+interface PortalFrameEdgePlan {
+  readonly edgeId: PortalFrameEdgeId;
+  readonly parentNodeId: PortalFrameNodeId;
+  readonly childNodeId: PortalFrameNodeId;
+  readonly apertureResourceId: string;
+  readonly apertureSourceId: string;
+  readonly linkId: string;
+  readonly sourceKind: PortalApertureSourceKind;
+}
+```
+
+Concrete implementation slices:
+
+1. **Typed frame-source indexes.**
+   Add a small planner-local index builder in
+   `apps/holtburger-3d/src/v2/runtime/direct-env-cell-frame-plan.ts`:
+   - `rendererMembershipByLandblock: Map<number, Map<number, RendererEnvCellResourceMembership>>`;
+   - `portalEnvCellsByLandblock: Map<number, Map<number, PortalFrameEnvCellLookup>>`;
+   - `PortalFrameEnvCellLookup.aperturesByPortalId: Map<string, PortalAperture>`.
+   This index is built once per frame-plan call and passed through planning helpers. It replaces
+   `createEnvCellKey(...)`, `createPortalEnvCellsByKey(...)`, and per-transition-root env-cell map
+   rebuilds.
+
+2. **Graph builder from existing traversal output.**
+   Keep `PortalTraversalPlan.portalViewGroups` temporarily as input, but translate it immediately
+   into a `PortalFrameGraphPlan`.
+   - Root outdoor and root env-cell contexts become graph nodes.
+   - Same parent node + same target scene + same depth folds into one child node with multiple
+     incoming edges.
+   - Same env cell from a different parent node becomes a different child node.
+   - Node ids and edge ids are frame-local numeric ids assigned by array position or monotonic
+     counters.
+   - `debugStackLabel` is derived while building the graph, but no planner or renderer lookup uses
+     it.
+
+3. **Graph-owned resources and edges.**
+   Move resource lookup into node construction:
+   - each env-cell node owns its structured-interior and env-cell-static draw-unit ids;
+   - each edge owns exactly one selected aperture resource id plus source/target/link metadata;
+   - transition crossings become building-transition edges in the graph, not a separate
+     `transitionSceneCrossings` execution list.
+
+4. **Renderer graph execution.**
+   Update WebGL2 direct portal execution to consume `PortalFrameGraphPlan`:
+   - build `edgesByParentNodeId: Map<PortalFrameNodeId, PortalFrameEdgePlan[]>`;
+   - draw root node resources;
+   - for each child node, draw all incoming edge aperture masks for that child, draw the child node
+     resources once, recurse to child edges, then exit those masks;
+   - no renderer grouping by `portalStackId`, `sourcePortalStackId`, or other stack strings.
+
+5. **Delete parallel execution projections.**
+   Once graph execution is active, remove or confine to derived diagnostics:
+   - `directEnvCellDraws`;
+   - `portalApertureMaskPasses`;
+   - `transitionSceneCrossings`;
+   - renderer-facing `portalStackId` / `sourcePortalStackId`.
+   If a temporary adapter is needed inside this subphase, it must be deleted before 6B.1 is
+   complete and marked as temporary in the plan notes.
+
+6. **Typed committed-record ordering.**
+   Replace `compareCommittedRecords` in
+   `apps/holtburger-3d/src/v2/runtime/static-scene-query.ts` with explicit per-kind comparators:
+   - `env-cell-spatial`: `landblockId`, `envCellId`, `memberId`;
+   - `env-cell-static-object-seed`: `landblockId`, `envCellId`, seed instance/source index;
+   - `env-cell-portal-interior`: `landblockId`, owner key;
+   - `env-cell-visibility`: `landblockId`, owner key;
+   - `env-cell-source`: `landblockId`, `envCellId`, `memberId`;
+   - `draw-unit-bounds`: `drawUnitId`.
+   The generic fallback should throw for unknown committed record shapes instead of stringifying
+   whole records.
+
+7. **Tests and profile checks.**
+   Add focused tests that prove:
+   - repeated transition roots do not rebuild committed env-cell lookup indexes;
+   - renderer execution groups children by numeric node id;
+   - two same-parent apertures into one target scene become one child node with multiple edges;
+   - one env cell reached from two different parents becomes two graph nodes;
+   - committed-record sorting does not call `JSON.stringify`.
+   Re-profile `0xda55ffff` after implementation and record before/after numbers for frame planning
+   and env-cell load commit.
+
+8. **Reusable traversal graph for multi-root outdoor planning.**
+   Outdoor transition planning should build the sorted landblock portal traversal graph once, then
+   derive all accepted transition-root traversal plans from that graph. Rebuilding/sorting per root
+   is not acceptable for `0xda55ffff`-scale outdoor transition frames.
+
+9. **Source-derived aperture resource identity.**
+   Aperture vertices are render payload, not resource identity. Replace geometry-string resource
+   keys with stable source-derived resource ids:
+   - env-cell aperture resources derive from `landblockId`, `envCellId`, `portalId`, source index,
+     and polygon id;
+   - building-transition aperture resources derive from transition aperture batch id, portal id,
+     range first index, and range index count;
+   - duplicate edge detection may include source-derived resource id, but must not serialize
+     transformed vertices.
+
+Debug-only strings:
+
+- Readable IDs such as `portalStackId`, source portal ids, draw-unit ids, scope keys, and UI labels
+  may remain as source/debug/display strings.
+- Runtime execution must not parse or join those strings to recover semantic identity.
+
+Acceptance criteria:
+
+- Direct portal frame planning no longer constructs composite env-cell string keys in hot lookup
+  paths.
+- Outdoor transition planning does not rebuild committed portal/interior env-cell lookup maps per
+  transition root.
+- Renderer direct portal execution walks typed portal frame graph nodes and edges instead of
+  grouping children by `portalStackId` strings.
+- Static scene query committed-record sorting has no `JSON.stringify(...)` fallback.
+- Outdoor transition traversal builds the portal traversal graph once per frame-plan derivation,
+  not once per transition root.
+- Aperture resources are keyed by stable source-derived identity, not formatted vertex geometry.
+- Browser profiling no longer shows `createEnvCellKey` or record `stringify` as major contributors
+  during `0xda55ffff` portal-frame planning or env-cell load commit.
+- No renderer, runtime, or static-scene query logic parses diagnostic strings to recover semantic
+  identity.
+- The frame plan no longer needs separate ceremonial lists for the same portal execution facts when
+  those facts can be represented once as graph nodes, graph edges, and node resources.
+
+Out of scope:
+
+- Solving transition shimmer by changing portal selection policy.
+- Adding screen-space portal culling or frustum narrowing.
+- Replacing externally stable source/debug IDs that are legitimately strings, such as source portal
+  ids, draw-unit ids, or UI labels.
+
+Spicy boundary:
+
+- Do not solve this with ad hoc memoization around the current string-key model. If an identity is
+  part of runtime execution, model it as typed data first and derive strings only at the boundary.
+
+Implementation log:
+
+- Implemented: `PortalFrameWorkPlan` direct mode now carries a single `PortalFrameGraphPlan`
+  rather than parallel `baseScene`, `directEnvCellDraws`, `portalApertureMaskPasses`, and
+  `transitionSceneCrossings` projections.
+- Implemented: `direct-env-cell-frame-plan.ts` now builds planner-local numeric/nested indexes for
+  renderer membership and portal env-cell lookup, caches aperture maps and env-cell placement
+  matrices, and translates existing traversal output into graph nodes/edges.
+- Implemented: WebGL2 direct execution now walks graph nodes and groups child work by numeric
+  `PortalFrameNodeId`; `portalStackId` and `sourcePortalStackId` are no longer renderer execution
+  inputs.
+- Implemented: UI/debug formatting and `portalFrameWorkPlanEquals(...)` now read graph nodes,
+  edges, aperture resources, and graph diagnostics.
+- Implemented: committed-record sorting in `static-scene-query.ts` no longer falls through to
+  `JSON.stringify(...)`; unknown committed record kinds now fail hard instead of silently sorting by
+  object serialization.
+- Implemented: fixtures/tests now exercise the graph contract for direct planning, WebGL2 graph
+  execution, runtime publication, work-plan equality, and committed-record typed ordering.
+- Implemented after follow-up profiling: `PortalTraversalGraph` is now reusable via
+  `createPortalTraversalPlanFromGraph(...)`, and outdoor transition runtime builds one graph for all
+  accepted transition roots.
+- Implemented after follow-up profiling: `PortalApertureFrameResourceBuilder` now indexes resources
+  by caller-provided source-derived `apertureResourceId`; it no longer formats or hashes transformed
+  aperture vertices for resource identity.
+
+Validation:
+
+- `npm run test:ts` passes: 144 files, 896 tests.
+- `npm run check` passes: `svelte-check` and `tsc -p tsconfig.node.json`.
+- `npm run lint:ts` passes.
+- Added a regression test whose committed source-mapping records throw from `toJSON()`; committed
+  env-cell record sorting still succeeds, proving the hot-path comparator is not stringifying whole
+  records.
+- Added a traversal-planner regression test that derives two start-cell traversal plans from one
+  prebuilt portal traversal graph.
+
+Spicy notes:
+
+- The runtime integration test exposed a stale fixture: portal links without portal aperture
+  polygons no longer produce graph edges. The fixture now creates minimal aperture polygons because
+  graph execution correctly treats an edge as executable only when there is aperture geometry to
+  mask.
+- Existing `PortalTraversalPlan.portalStackId` strings still exist as traversal/debug input. They
+  are translated immediately into graph nodes in the frame planner and are not renderer execution
+  keys. This is acceptable for 6B.1, but it is still not the final traversal planner shape.
+- `PortalApertureFrameDiagnostics` still uses names such as `selectedMaskEdges` and
+  `duplicateMaskEdges`. The values now describe graph edges selected for stencil masks. The naming
+  is tolerable for continuity, but it should be renamed once the shimmer investigation stabilizes.
+
+Failed to close:
+
+- I did not re-profile the live browser `0xda55ffff` case after the traversal-graph reuse and
+  source-derived aperture resource-id fixes. The code paths that previously showed
+  `createEnvCellKey`, committed-record `JSON.stringify(...)`, repeated traversal graph sorting, and
+  aperture-geometry `toFixed(...)` identity work have been structurally removed, but we still need a
+  browser timeline capture to record the actual frame-plan and env-cell-load numbers.
+- I did not remove `portalStackId` from `PortalTraversalPlan`; that requires a traversal-planner
+  contract pass and should not be mixed into this renderer execution rewrite.
+
+Debt to track:
+
+- Replace traversal planner stack strings with typed traversal parent/edge references so the graph
+  builder no longer needs a temporary `nodeIdByTraversalStack` adapter.
+- Rename aperture diagnostics from mask-pass language to graph-edge language.
+- Add a profiling note after the next `0xda55ffff` capture with before/after frame planning and
+  committed env-cell load costs.
+- Consider replacing duplicate edge keys' remaining joined diagnostic strings with typed nested
+  maps if they show up after the next profile. They no longer include serialized aperture geometry.
+
+Work for Mesh:
+
+- Mesh-facing renderer consumers should treat `PortalFrameGraphPlan` as the direct portal execution
+  contract: nodes own env-cell draw resources, edges own aperture resources, and traversal depth is
+  a node property.
+- Mesh/resource systems should prefer numeric `(landblockId, envCellId)` indexes and derive display
+  strings only at inspection/export boundaries.
+- Mesh/resource systems should treat aperture source identity as the durable handle; transformed
+  aperture vertices are render payload and must not become resource identity.
+- Any future portal mesh partitioning should attach to graph nodes/edges rather than recreating
+  parallel draw/mask/crossing lists.
 
 ### Phase 6R: Reassessment After Transition Unification
 

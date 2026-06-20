@@ -4,6 +4,7 @@ import type {
 	LandblockPortalLinkFacts,
 	OutdoorStaticObjectsScopePayload,
 	StaticBounds,
+	StaticSourceMappingRecord,
 	StaticWorkPeerRecordOwner,
 	TerrainStaticScopePayload,
 	TransitionApertureBatch,
@@ -1180,6 +1181,32 @@ describe("V2 static scene query", () => {
 		});
 	});
 
+	it("sorts committed records by typed keys without JSON stringification", () => {
+		const query = new StaticSceneQuery();
+		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+
+		query.applyStaticPeerRecords({
+			sourceMappings: [
+				createThrowingJsonEnvCellSourceMapping({
+					envCellId: 0xda550101,
+					memberId: "cell-b",
+					owner,
+				}),
+				createThrowingJsonEnvCellSourceMapping({
+					envCellId: 0xda550100,
+					memberId: "cell-a",
+					owner,
+				}),
+			],
+		});
+
+		expect(
+			query
+				.queryCommittedEnvCellRecords({ landblockId: 0xda55ffff })
+				?.sourceMappings.map((record) => record.memberId),
+		).toEqual(["cell-a", "cell-b"]);
+	});
+
 	it("derives portal traversal from committed portal links rather than visibility links", () => {
 		const query = new StaticSceneQuery();
 		const owner = createEnvCellWorkOwner("work-env-traversal", 0xda55ffff);
@@ -1952,6 +1979,33 @@ function createEnvCellWorkOwner(
 		scopeKey: `landblock:${landblockId.toString(16).padStart(8, "0")}`,
 		workId,
 	};
+}
+
+function createThrowingJsonEnvCellSourceMapping(options: {
+	readonly envCellId: number;
+	readonly landblockId?: number;
+	readonly memberId: string;
+	readonly owner: StaticWorkPeerRecordOwner;
+}): StaticSourceMappingRecord {
+	return {
+		cellStructure: {
+			cellStructureId: 0x0d000001,
+			kind: "cell-structure",
+		},
+		envCellId: options.envCellId,
+		environment: {
+			environmentId: 0x0e000001,
+			kind: "environment",
+		},
+		kind: "env-cell-source",
+		landblockId: options.landblockId ?? 0xda55ffff,
+		memberId: options.memberId,
+		owner: options.owner,
+		surfaces: [],
+		toJSON(): never {
+			throw new Error("Committed record sorting must not stringify records.");
+		},
+	} as StaticSourceMappingRecord;
 }
 
 function commitLandblockEnvCells(

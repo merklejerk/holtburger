@@ -106,7 +106,7 @@ export type PortalTraversalDiagnostic =
 			readonly crossing: PortalTraversalSceneCrossing;
 	  };
 
-interface PortalTraversalGraph {
+export interface PortalTraversalGraph {
 	readonly envCellIds: ReadonlySet<number>;
 	readonly outgoingEnvCellEdgesBySource: ReadonlyMap<
 		number,
@@ -121,6 +121,29 @@ interface PortalTraversalGraph {
 export function createPortalTraversalPlan(
 	request: PortalTraversalRequest,
 ): PortalTraversalPlan {
+	const landblockId = request.landblockId >>> 0;
+	const graph = createPortalTraversalGraph({
+		landblockId,
+		portalInteriorRecords: request.portalInteriorRecords,
+	});
+	return createPortalTraversalPlanFromGraph({
+		graph,
+		landblockId,
+		maxCells: request.maxCells,
+		maxDepth: request.maxDepth,
+		maxPortalViews: request.maxPortalViews,
+		startEnvCellId: request.startEnvCellId,
+	});
+}
+
+export function createPortalTraversalPlanFromGraph(request: {
+	readonly graph: PortalTraversalGraph;
+	readonly landblockId: number;
+	readonly maxCells: number;
+	readonly maxDepth: number;
+	readonly maxPortalViews: number;
+	readonly startEnvCellId: number;
+}): PortalTraversalPlan {
 	const maxDepth = normalizeNonNegativeInteger(request.maxDepth, "maxDepth");
 	const maxCells = normalizePositiveInteger(request.maxCells, "maxCells");
 	const maxPortalViews = normalizePositiveInteger(
@@ -129,10 +152,7 @@ export function createPortalTraversalPlan(
 	);
 	const landblockId = request.landblockId >>> 0;
 	const startEnvCellId = request.startEnvCellId >>> 0;
-	const graph = createPortalTraversalGraph({
-		landblockId,
-		portalInteriorRecords: request.portalInteriorRecords,
-	});
+	const graph = request.graph;
 	const diagnostics: PortalTraversalDiagnostic[] = [];
 	const sceneCrossings: PortalTraversalSceneCrossing[] = [];
 	if (!graph.envCellIds.has(startEnvCellId)) {
@@ -331,10 +351,11 @@ function replacePortalViewGroup(
 	}
 }
 
-function createPortalTraversalGraph(options: {
+export function createPortalTraversalGraph(options: {
 	readonly landblockId: number;
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
 }): PortalTraversalGraph {
+	const landblockId = options.landblockId >>> 0;
 	const envCellIds = new Set<number>();
 	const outgoingEnvCellEdgesBySource = new Map<
 		number,
@@ -346,7 +367,7 @@ function createPortalTraversalGraph(options: {
 	>();
 
 	for (const record of options.portalInteriorRecords) {
-		if (record.landblockId !== options.landblockId) {
+		if (record.landblockId !== landblockId) {
 			continue;
 		}
 		for (const envCell of record.envCells) {

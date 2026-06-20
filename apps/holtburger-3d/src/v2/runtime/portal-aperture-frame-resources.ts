@@ -1,37 +1,28 @@
 import type {
 	PortalApertureFrameDiagnostics,
 	PortalApertureGeometryResourcePlan,
-	PortalApertureMaskPass,
 	PortalApertureSourceKind,
 	PortalApertureVertex,
-	PortalFrameSceneSource,
 } from "../renderer/types";
 
 export interface PortalApertureFrameResourcePlan {
 	readonly diagnostics: PortalApertureFrameDiagnostics;
-	readonly maskPasses: readonly PortalApertureMaskPass[];
 	readonly resources: readonly PortalApertureGeometryResourcePlan[];
 }
 
-export interface PortalApertureMaskPassInput {
+export interface PortalApertureEdgeResourceInput {
+	readonly apertureResourceId: string;
 	readonly apertureSourceId: string;
+	readonly duplicateKeyParts: readonly (number | string)[];
 	readonly linkId: string;
-	readonly parentStencilRef: number | null;
-	readonly portalStackId: string;
-	readonly source: PortalFrameSceneSource;
 	readonly sourceKind: PortalApertureSourceKind;
-	readonly sourcePortalStackId: string;
-	readonly stencilRef: number;
-	readonly target: PortalFrameSceneSource;
-	readonly traversalDepth: number;
 	readonly vertices: readonly PortalApertureVertex[];
 }
 
 export class PortalApertureFrameResourceBuilder {
-	readonly #duplicateMaskPassKeys = new Set<string>();
-	readonly #maskPasses: PortalApertureMaskPass[] = [];
+	readonly #duplicateEdgeKeys = new Set<string>();
 	readonly #resources: PortalApertureGeometryResourcePlan[] = [];
-	readonly #resourcesByGeometryKey = new Map<
+	readonly #resourcesById = new Map<
 		string,
 		PortalApertureGeometryResourcePlan
 	>();
@@ -39,43 +30,28 @@ export class PortalApertureFrameResourceBuilder {
 	#duplicateMaskEdges = 0;
 	#envCellPortalEdges = 0;
 
-	addMaskPass(input: PortalApertureMaskPassInput): boolean {
+	addEdgeResource(input: PortalApertureEdgeResourceInput): string | null {
 		if (input.vertices.length === 0) {
-			return false;
+			return null;
 		}
-		const geometryKey = createPortalApertureGeometryKey(input.vertices);
-		const maskPassKey = createPortalApertureMaskPassKey(input, geometryKey);
-		if (this.#duplicateMaskPassKeys.has(maskPassKey)) {
+		const edgeKey = createPortalApertureEdgeKey(input);
+		if (this.#duplicateEdgeKeys.has(edgeKey)) {
 			this.#duplicateMaskEdges += 1;
-			return false;
+			return null;
 		}
-		this.#duplicateMaskPassKeys.add(maskPassKey);
+		this.#duplicateEdgeKeys.add(edgeKey);
 
 		const resource = this.#getOrCreateGeometryResource(
-			geometryKey,
+			input.apertureResourceId,
 			input.vertices,
 			input.sourceKind,
 		);
-		this.#maskPasses.push({
-			apertureResourceId: resource.resourceId,
-			apertureSourceId: input.apertureSourceId,
-			linkId: input.linkId,
-			parentStencilRef: input.parentStencilRef,
-			portalStackId: input.portalStackId,
-			source: input.source,
-			sourceKind: input.sourceKind,
-			sourcePortalStackId: input.sourcePortalStackId,
-			stencilRef: input.stencilRef,
-			target: input.target,
-			traversalDepth: input.traversalDepth,
-		});
-
 		if (input.sourceKind === "building-transition") {
 			this.#buildingTransitionEdges += 1;
 		} else {
 			this.#envCellPortalEdges += 1;
 		}
-		return true;
+		return resource.resourceId;
 	}
 
 	build(options: {
@@ -102,17 +78,16 @@ export class PortalApertureFrameResourceBuilder {
 				transitionRootsRejectedUnknownSeenOutside:
 					options.transitionRootsRejectedUnknownSeenOutside,
 			},
-			maskPasses: this.#maskPasses,
 			resources: this.#resources,
 		};
 	}
 
 	#getOrCreateGeometryResource(
-		geometryKey: string,
+		resourceId: string,
 		vertices: readonly PortalApertureVertex[],
 		sourceKind: PortalApertureSourceKind,
 	): PortalApertureGeometryResourcePlan {
-		const existingResource = this.#resourcesByGeometryKey.get(geometryKey);
+		const existingResource = this.#resourcesById.get(resourceId);
 		if (existingResource) {
 			const sourceKinds = addSourceKind(
 				existingResource.sourceKinds,
@@ -124,18 +99,18 @@ export class PortalApertureFrameResourceBuilder {
 				if (resourceIndex >= 0) {
 					this.#resources[resourceIndex] = replacement;
 				}
-				this.#resourcesByGeometryKey.set(geometryKey, replacement);
+				this.#resourcesById.set(resourceId, replacement);
 				return replacement;
 			}
 			return existingResource;
 		}
 
 		const resource: PortalApertureGeometryResourcePlan = {
-			resourceId: `portal-aperture:${hashStringFNV1a(geometryKey)}`,
+			resourceId,
 			sourceKinds: [sourceKind],
 			vertices,
 		};
-		this.#resourcesByGeometryKey.set(geometryKey, resource);
+		this.#resourcesById.set(resourceId, resource);
 		this.#resources.push(resource);
 		return resource;
 	}
@@ -164,47 +139,14 @@ function addSourceKind(
 		: [...sourceKinds, sourceKind].sort();
 }
 
-function createPortalApertureMaskPassKey(
-	input: PortalApertureMaskPassInput,
-	geometryKey: string,
+function createPortalApertureEdgeKey(
+	input: PortalApertureEdgeResourceInput,
 ): string {
 	return [
 		input.sourceKind,
+		input.apertureResourceId,
 		input.apertureSourceId,
 		input.linkId,
-		input.sourcePortalStackId,
-		input.portalStackId,
-		input.parentStencilRef ?? "root",
-		input.stencilRef,
-		input.traversalDepth,
-		describePortalFrameSceneSource(input.source),
-		describePortalFrameSceneSource(input.target),
-		geometryKey,
+		...input.duplicateKeyParts,
 	].join("|");
-}
-
-function describePortalFrameSceneSource(
-	source: PortalFrameSceneSource,
-): string {
-	if (source.kind === "outdoor-target") {
-		return `outdoor:${source.landblockId >>> 0}`;
-	}
-	return `env:${source.landblockId >>> 0}:${source.envCellId >>> 0}`;
-}
-
-function createPortalApertureGeometryKey(
-	vertices: readonly PortalApertureVertex[],
-): string {
-	return vertices
-		.map((vertex) => vertex.map((value) => value.toFixed(6)).join(","))
-		.join(";");
-}
-
-function hashStringFNV1a(value: string): string {
-	let hash = 0x811c9dc5;
-	for (let index = 0; index < value.length; index += 1) {
-		hash ^= value.charCodeAt(index);
-		hash = Math.imul(hash, 0x01000193) >>> 0;
-	}
-	return hash.toString(16).padStart(8, "0");
 }

@@ -328,7 +328,7 @@ describe("V2 client runtime", () => {
 				}),
 			],
 		});
-		await flushPromises();
+		await flushRuntimeWork();
 
 		expect(runtime.createDiagnosticsReport().runtime.renderPassPlan).toEqual({
 			baseScene: {
@@ -341,38 +341,53 @@ describe("V2 client runtime", () => {
 		});
 		expect(
 			runtime.createDiagnosticsReport().runtime.portalFrameWorkPlan,
-		).toEqual({
-			baseScene: {
-				envCellId: 0xda550100,
-				kind: "env-cell-direct",
-				landblockId: 0xda55ffff,
-			},
-			directEnvCellDraws: [
+		).toMatchObject({
+			graph: {
+				baseNodeId: 0,
+				diagnostics: {
+					...emptyPortalApertureDiagnostics(),
+					envCellPortalEdges: 1,
+					selectedMaskEdges: 1,
+				},
+				edges: [
+					expect.objectContaining({
+						childNodeId: 1,
+						linkId: "a-to-b",
+						parentNodeId: 0,
+						sourceKind: "env-cell-portal",
+					}),
+				],
+				nodes: [
 				{
-					envCellId: 0xda550100,
-					envCellStaticObjectDrawUnitIds: [],
-					landblockId: 0xda55ffff,
-					portalStackId: "root:0xda550100",
-					resourceState: "ready",
-					structuredInteriorDrawUnitIds: ["structured:da550100"],
+						resources: {
+							envCellStaticObjectDrawUnitIds: [],
+							resourceState: "ready",
+							structuredInteriorDrawUnitIds: ["structured:da550100"],
+						},
+						scene: {
+							envCellId: 0xda550100,
+							kind: "env-cell-direct",
+							landblockId: 0xda55ffff,
+						},
 					traversalDepth: 0,
 				},
 				{
-					envCellId: 0xda550101,
-					envCellStaticObjectDrawUnitIds: [],
-					landblockId: 0xda55ffff,
-					portalStackId: "root:0xda550100/a-to-b",
-					resourceState: "missing-resources",
-					structuredInteriorDrawUnitIds: [],
+						resources: {
+							envCellStaticObjectDrawUnitIds: [],
+							resourceState: "missing-resources",
+							structuredInteriorDrawUnitIds: [],
+						},
+						scene: {
+							envCellId: 0xda550101,
+							kind: "env-cell-direct",
+							landblockId: 0xda55ffff,
+						},
 					traversalDepth: 1,
 				},
 			],
+			},
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
-			portalApertureDiagnostics: emptyPortalApertureDiagnostics(),
-			portalApertureGeometryResources: [],
-			portalApertureMaskPasses: [],
-			transitionSceneCrossings: [],
 		});
 		expect(renderer.renderPassPlans).toEqual([
 			{
@@ -393,18 +408,20 @@ describe("V2 client runtime", () => {
 		runtime.setDirectEnvCellPortalMaxDepth(0);
 
 		expect(renderer.portalFrameWorkPlans.at(-1)).toMatchObject({
-			directEnvCellDraws: [
+			graph: {
+				nodes: [
 				expect.objectContaining({
-					envCellId: 0xda550100,
+						scene: expect.objectContaining({ envCellId: 0xda550100 }),
 					traversalDepth: 0,
 				}),
 			],
+			},
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
 		});
 		expect(
 			renderer.portalFrameWorkPlans.at(-1)?.kind === "direct-env-cell"
-				? renderer.portalFrameWorkPlans.at(-1)?.directEnvCellDraws.length
+				? renderer.portalFrameWorkPlans.at(-1)?.graph.nodes.length
 				: 0,
 		).toBe(1);
 
@@ -1344,7 +1361,27 @@ function createPortalInteriorRecord(options: {
 		envCells: options.envCellIds.map((envCellId) => ({
 			envCellId,
 			localPlacement: createPlacement(),
-			portalApertures: [],
+			portalApertures: options.portalLinks
+				.filter(
+					(link) =>
+						link.source.kind === "env-cell" &&
+						link.source.envCellId === envCellId,
+				)
+				.map((link, index) => ({
+					plane: {
+						constant: 0,
+						normal: { x: 0, y: 0, z: 1 },
+						source: "derived-from-render-points" as const,
+					},
+					points: [
+						{ x: index, y: 0, z: 0 },
+						{ x: index + 1, y: 0, z: 0 },
+						{ x: index, y: 1, z: 0 },
+					],
+					polygonId: index,
+					portalId: link.source.portalId,
+					sourceIndex: link.sourceIndex,
+				})),
 			portals: [],
 			seenOutside: true,
 		})),
@@ -1373,11 +1410,8 @@ function createEnvCellWorkOwner(
 
 function createPlacement() {
 	return {
-		frame: {
-			origin: { x: 0, y: 0, z: 0 },
-			rotation: { w: 1, x: 0, y: 0, z: 0 },
-		},
-		sourceScale: { x: 1, y: 1, z: 1 },
+		orientation: { w: 1, x: 0, y: 0, z: 0 },
+		origin: { x: 0, y: 0, z: 0 },
 	};
 }
 

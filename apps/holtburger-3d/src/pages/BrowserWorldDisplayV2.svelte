@@ -37,7 +37,10 @@
 		RuntimeSnapshot,
 		TransitionApertureDebugOverlayMode,
 	} from "../v2/runtime/client-runtime";
-	import type { RendererEnvCellResourceMembership } from "../v2/renderer/types";
+	import type {
+		PortalFrameWorkPlan,
+		RendererEnvCellResourceMembership,
+	} from "../v2/renderer/types";
 	import {
 		describeStaticSceneSelectionKey,
 		type StaticSceneSelectionKey,
@@ -1142,6 +1145,18 @@
 		return `${formatHexId(target.envCellId)}: ${structuredCount} cell / ${staticCount} static (${sharedStaticCount} shared)`;
 	}
 
+	function formatPortalFrameWorkPlan(plan: PortalFrameWorkPlan): string {
+		if (plan.kind === "legacy-render-pass") {
+			return `legacy ${plan.mode}`;
+		}
+
+		const base =
+			plan.baseScene.kind === "outdoor-target"
+				? `outdoor ${formatHexId(plan.baseScene.landblockId)}`
+				: `env ${formatHexId(plan.baseScene.landblockId)} / ${formatHexId(plan.baseScene.envCellId)}`;
+		return `${plan.mode} base ${base} draws ${plan.directEnvCellDraws.length} crossings ${plan.transitionSceneCrossings.length}`;
+	}
+
 	function currentCameraEnvCellResourceTarget(): {
 		readonly envCellId: number;
 		readonly landblockId: number;
@@ -1755,6 +1770,16 @@
 								{snapshot
 									? formatEnvCellResourceMembership(
 											currentCameraEnvCellResourceTarget(),
+										)
+									: "pending"}
+							</dd>
+						</div>
+						<div>
+							<dt>Portal frame</dt>
+							<dd>
+								{snapshot
+									? formatPortalFrameWorkPlan(
+											snapshot.renderer.portalFrameWorkPlan,
 										)
 									: "pending"}
 							</dd>

@@ -5,6 +5,7 @@ import type {
 	RendererSnapshot,
 	RendererSnapshotListener,
 	RenderPassPlan,
+	PortalFrameWorkPlan,
 	SceneDomainTargetKind,
 	SceneDomainTargetSnapshot,
 	SamplerPolicyUpdate,
@@ -743,6 +744,11 @@ class Webgl2Renderer implements Renderer {
 	#frameState = defaultFrameState;
 	#staticRenderAnchorLandblockId: number | null = null;
 	#renderPassPlan: RenderPassPlan = { kind: "single-surface-resident" };
+	#portalFrameWorkPlan: PortalFrameWorkPlan = {
+		kind: "legacy-render-pass",
+		mode: "single-surface-resident",
+		renderPassPlan: { kind: "single-surface-resident" },
+	};
 	#flatVisionModeEnabled = false;
 	#lastExteriorSceneDomainDrawCalls = 0;
 	#lastInteriorSceneDomainDrawCalls = 0;
@@ -860,6 +866,11 @@ class Webgl2Renderer implements Renderer {
 
 	setRenderPassPlan(plan: RenderPassPlan): void {
 		this.#renderPassPlan = plan;
+		this.#emit();
+	}
+
+	setPortalFrameWorkPlan(plan: PortalFrameWorkPlan): void {
+		this.#portalFrameWorkPlan = plan;
 		this.#emit();
 	}
 
@@ -1846,6 +1857,7 @@ class Webgl2Renderer implements Renderer {
 			frameCount: this.#frameCount,
 			frameHandlerMs: this.#frameHandlerMs,
 			isRunning: !this.#disposed,
+			portalFrameWorkPlan: this.#portalFrameWorkPlan,
 			renderPassPlan: effectiveRenderPassPlan,
 			renderedTriangles: sumRenderedTriangles([
 				...this.#terrainResources.values(),

@@ -1,4 +1,5 @@
 import type {
+	PortalFrameWorkPlan,
 	RenderPassPlan,
 	RendererSnapshot,
 	StaticObjectTextureRolePageKind,
@@ -39,6 +40,7 @@ interface RuntimeDiagnosticsRuntimeSummary {
 	readonly sceneInterest: string | null;
 	readonly currentCameraResidency: StaticSceneCameraResidency;
 	readonly renderPassPlan: RenderPassPlan;
+	readonly portalFrameWorkPlan: PortalFrameWorkPlan;
 	readonly pendingStaticMaterializationRevisions: readonly number[];
 	readonly committedStaticMaterializationRevisions: readonly number[];
 	readonly failedStaticMaterializations: readonly RuntimeDiagnosticsFailure[];

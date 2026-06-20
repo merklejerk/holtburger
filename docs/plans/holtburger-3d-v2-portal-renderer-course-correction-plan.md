@@ -586,7 +586,7 @@ Checkpoint result:
 
 ### Phase 3A: Portal Frame Contract Skeleton
 
-Status: planned; inserted by the 2026-06-19 dry run.
+Status: completed on 2026-06-19.
 
 Purpose: replace the too-coarse scene-domain render plan vocabulary before traversal or WebGL
 execution phases depend on it.
@@ -612,6 +612,60 @@ Acceptance criteria:
 - Existing single-surface and transition behavior can continue while the new plan shape is introduced
   behind explicit modes or empty work lists.
 - Phase 3 traversal output has a concrete target contract to populate.
+
+Implementation notes:
+
+- Added `PortalFrameWorkPlan` as a renderer-facing contract alongside the existing execution
+  `RenderPassPlan`.
+- The current legacy variant carries one of:
+  - `single-surface-resident`;
+  - `flat-resident-diagnostic`;
+  - `legacy-scene-domain-composite`.
+- The direct-env-cell variant can express:
+  - an outdoor offscreen target as the base scene;
+  - an env-cell direct base scene;
+  - direct env-cell draw requests by landblock/env-cell id;
+  - traversal depth and portal stack identity for each direct draw request;
+  - renderer resource membership draw-unit ids from the Phase 2 snapshot shape;
+  - explicit `ready` versus `missing-resources` draw-resource state;
+  - transition aperture batches as scene-domain crossings between outdoor and env-cell endpoints.
+- Added `createLegacyPortalFrameWorkPlan` and `portalFrameWorkPlanEquals` helpers so runtime can
+  derive the new frame-work contract without changing current WebGL execution.
+- Updated `RendererSnapshot`, `RuntimeSnapshot`, and runtime diagnostics to expose the portal frame
+  work plan.
+- Added `Renderer.setPortalFrameWorkPlan(...)`. WebGL2 stores and publishes the plan in snapshots,
+  but still executes the existing render-pass path. This is intentional: Phase 3A defines the
+  future contract, not recursive drawing.
+- Updated the Browser V2 debug tab with a `Portal frame` row. It reports the legacy mode today, and
+  reports direct-env-cell base scene, draw count, and crossing count once traversal populates that
+  plan.
+- Updated [holtburger-3d-frontend-v2-design.md](holtburger-3d-frontend-v2-design.md) with the
+  `PortalFrameWorkPlan` vocabulary and its relationship to the legacy render pass.
+
+High-risk boundary:
+
+- This phase does not populate traversal-selected direct env-cell draw requests. The direct variant
+  is tested as a shape only.
+- WebGL2 still draws using `RenderPassPlan`. Any visual improvement must come from later traversal
+  and direct draw phases.
+- `missing-resources` is now an explicit plan state because Phase 2 showed outdoor transition
+  aperture metadata can be resident while the sampled linked env cells have no uploaded renderer
+  membership.
+
+Verification:
+
+- `npm run test:ts -- src/v2/renderer/portal-frame-work-plan.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts src/v2/runtime/client-runtime.test.ts src/v2/ui/performance-metrics.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Debt recorded:
+
+- Phase 3 must populate `PortalFrameWorkPlan.kind === "direct-env-cell"` from committed portal
+  traversal rather than synthesizing it from renderer state.
+- Phase 4 must consume the direct plan for current-cell and single-hop direct drawing without
+  filtering the legacy all-interiors source target.
+- Phase 9 should remove or isolate legacy scene-domain interior composition once the direct portal
+  renderer is the production path.
 
 ### Phase 3: Portal Graph And Traversal Planner
 

@@ -766,7 +766,7 @@ Debt recorded:
 
 ### Phase 3R: Reassessment After Traversal Planning
 
-Status: planned checkpoint.
+Status: completed checkpoint on 2026-06-20.
 
 Purpose: verify the semantic portal model before renderer execution work starts.
 
@@ -785,7 +785,72 @@ Exit criteria:
 - Phase 4 can implement single-cell/single-hop drawing from traversal output, or the plan records
   the missing portal/source facts and schedules the smallest fix.
 
-### Phase 4: Portal-Aware Single-Cell And Single-Hop Drawing
+Checkpoint result:
+
+- Proceed with the reachability-first model. Phase 3 traversal represents the known AC portal
+  topology constraints honestly enough for renderer planning:
+  - portal links are directed and reciprocal links are not synthesized;
+  - `StaticVisibilityRecord.visibleLinks` are not promoted into portal traversal edges;
+  - duplicate, asymmetric, and overlapping portal relationships remain visible through directed
+    edge records and diagnostics instead of being normalized away;
+  - scene crossings are reported but not traversed until transition bridge policy is explicit.
+- The frame-plan vocabulary remains small enough to continue. The `direct-env-cell` variant already
+  has the right shape for base scene, direct env-cell draw requests, portal stack identity,
+  missing-resource state, and transition crossings.
+- The next phase should not jump straight to WebGL direct drawing. The smallest safe next cut is to
+  populate a direct-env-cell frame plan from current camera residency, bounded traversal, and
+  renderer env-cell resource membership while legacy rendering still executes.
+- Browser/manual inspection should confirm the direct plan's selected cells, draw-resource ids, and
+  missing-resource states before changing actual draw submission.
+
+Spicy boundary:
+
+- The traversal output has enough depth/parent/stack identity for reachability-scoped drawing, but
+  it does not yet identify aperture geometry resources/ranges for stencil passes. That is acceptable
+  for Phase 4A frame-plan population, but Phase 5 cannot treat baked portal batches as selected
+  portal pass geometry.
+- Outdoor transition roots are still intentionally blocked. Phase 4A should focus on current
+  env-cell residency and may report transition crossings, but Phase 6 owns building/outdoor bridge
+  policy.
+
+Debt recorded:
+
+- Add a direct frame-plan builder that joins `PortalTraversalVisibleCell` records to
+  `RendererEnvCellResourceMembership`.
+- Add browser/debug reporting for direct plan visible cells and resource states before direct
+  renderer execution.
+- Keep `RenderPassPlan` execution legacy during Phase 4A; do not accidentally reintroduce an
+  all-interiors source target through the new plan path.
+
+### Phase 4A: Reachability-To-Frame Plan Population
+
+Status: planned.
+
+Purpose: produce direct-env-cell frame plans from camera residency, portal reachability, and renderer
+resource membership without changing WebGL draw execution yet.
+
+Deliverables:
+
+- Runtime frame-plan builder that:
+  - starts from current env-cell camera residency;
+  - calls `StaticSceneQuery.queryPortalTraversal(...)` with depth/cell caps;
+  - joins visible env cells to `RendererEnvCellResourceMembership`;
+  - emits `PortalFrameWorkPlan.kind === "direct-env-cell"` with direct draw requests and
+    `ready`/`missing-resources` states;
+  - leaves outdoor transition scene crossings metadata-only unless already bridged by explicit
+    policy.
+- Browser debug-tab summary for the direct plan: base scene, visible/reachable cell count,
+  missing-resource cell count, traversal depth cap, and selected draw-resource counts.
+- Focused TypeScript tests for current-cell and single-hop direct frame-plan population.
+
+Acceptance criteria:
+
+- Pure dungeon/current env-cell residency can publish a direct-env-cell frame plan that selects the
+  current env cell and, when enabled, direct portal neighbors.
+- Missing renderer membership is explicit in the plan instead of silently dropping cells.
+- Legacy WebGL rendering behavior is unchanged during this phase.
+
+### Phase 4B: Portal-Aware Single-Cell And Single-Hop Drawing
 
 Status: planned.
 
@@ -794,8 +859,8 @@ passes.
 
 Deliverables:
 
-- Renderer frame-plan input that selects only the current env cell in pure dungeon/null-anchor mode.
-- Optional single-hop draw mode that adds direct portal neighbors without recursion.
+- Renderer consumption of the Phase 4A direct-env-cell frame plan for current-cell and optional
+  single-hop drawing.
 - Direct renderer draw path for selected env-cell resources. This must not be implemented as
   filtering the current all-interiors source target.
 - Browser debug-tab comparison of:

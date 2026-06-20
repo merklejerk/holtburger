@@ -37,10 +37,11 @@ static marker, source-object filter issue, or simple portal-plane side decode bu
 the visual artifact is a portal renderer problem: V2 is rendering resident env-cell shells without a
 frame-specific portal reachability and direct submission plan.
 
-The existing two-scene-domain transition compositor remains useful as a bootstrap for outdoor to
-indoor apertures, but it is not enough for correct recursive cell rendering. A proper portal
-renderer should treat env cells as first-class scene graph nodes and treat portal traversal as the
-authority for which cell-owned draw units are submitted in a frame.
+The existing two-scene-domain transition compositor remains useful as evidence and temporary
+bootstrap behavior for outdoor to indoor apertures, but it is not the final pipeline. A proper portal
+renderer should treat env cells as first-class scene graph nodes, treat portal traversal as the
+authority for which cell-owned draw units are submitted in a frame, and eventually execute outdoor
+targets and env-cell direct draws through one shared portal executor.
 
 ## Goal
 
@@ -250,10 +251,19 @@ share the same polygon geometry.
 ### Transition Portals
 
 Outdoor to indoor and indoor to outdoor transitions should be modeled as scene-domain crossings in
-the same portal graph, not as a separate visibility universe. Outdoor scenes may still require an
-offscreen target because exterior terrain/buildings/detail are broad and expensive. Env-cell scenes
-should not mirror that model. A transition compositor should combine the outdoor offscreen target
-with direct env-cell draws selected by traversal, rather than compositing a pre-rendered "all
+the same portal graph, not as a separate visibility universe. The renderer should have one shared
+portal executor with multiple scene source providers:
+
+- env-cell direct sources draw selected cell resources under the active portal state;
+- the outdoor source renders terrain/buildings/detail into a reusable offscreen target and can be
+  copied/sampled under the active portal state.
+
+The outdoor target is not only an outdoor-base optimization. It is also the clean source for nested
+visibility such as outdoor -> indoor -> outdoor and indoor -> outdoor, where an aperture inside an
+interior must show the current outdoor scene after earlier portal passes have overwritten parts of
+the display/composite buffer. Env-cell scenes should not mirror the outdoor offscreen model; they
+should remain direct draws selected by traversal. A shared portal executor should combine the
+outdoor source target with direct env-cell draws, rather than compositing a pre-rendered "all
 resident interiors" target.
 
 Building-sourced transition aperture geometry remains the mask authority for building portals.
@@ -1056,7 +1066,7 @@ Follow-up debt:
 
 ### Phase 4R: Reassessment After Cell-Scoped Direct Drawing
 
-Status: planned checkpoint.
+Status: completed on 2026-06-20.
 
 Purpose: decide whether the direct-env-cell drawing model and env-cell static-object granularity are
 proving themselves before adding recursive stencil complexity.
@@ -1080,6 +1090,42 @@ Exit criteria:
   submission, or the plan is updated with a narrower renderer/resource proof before recursive portal
   execution.
 
+Assessment outcome:
+
+- Proceed to Phase 5. Phase 4B validated direct env-cell frame-plan consumption: the renderer can
+  draw the current env cell and depth-1 reachable neighbor env cells from selected draw-unit ids
+  without using the all-interiors source target.
+- Phase 4C validated the resource-granularity course correction. Manual browser inspection after
+  cell-scoped env-cell static-object partitioning no longer showed unrelated floating static
+  objects, so the prior overdraw was a static-object batch granularity problem rather than a portal
+  traversal failure.
+- The remaining expected visual defect is reachable neighbor geometry drawing without portal
+  aperture masking. That is exactly Phase 5's responsibility; do not add another static/resource
+  proof phase before aperture execution unless new evidence shows unrelated resident resources are
+  still being submitted.
+- Browser inspection is sufficient for the next phase. Env-cell click picking remains useful later,
+  but it is not required before implementing recursive aperture-mask drawing.
+- Outdoor/offscreen assumptions remain separate from direct env-cell drawing. Phase 4B/4C did not
+  revive a broad interior source target; outdoor transition scene crossings stay deferred to Phase 6.
+
+Spicy decisions:
+
+- Phase 5 should start from the now-proven direct env-cell draw path and add selected-edge
+  stencil/aperture execution around it. It should not reintroduce an interior source target or a
+  wholesale resident portal batch path.
+- Literal child-frustum clipping remains deferred. The next correctness step is aperture masking,
+  not full frustum clipping.
+- Cell-scoped static-object partitioning may increase env-cell static draw-unit count, but that cost
+  is acceptable because it removes cross-cell submission ambiguity before recursive portal work.
+
+Debt carried forward:
+
+- Phase 5 still needs exact aperture geometry/range selection per active traversal edge.
+- Exact direct-submitted triangle diagnostics remain optional unless browser inspection cannot
+  distinguish aperture overdraw from resource selection bugs.
+- Phase 6 still owns outdoor/interior transition crossings and unified portal overlay/resource
+  cleanup.
+
 ### Phase 5: Recursive Reachability And Aperture-Mask Execution
 
 Status: planned.
@@ -1090,6 +1136,11 @@ whole-shell interior targets.
 Deliverables:
 
 - A bounded recursive portal execution model for env-cell to env-cell portals.
+- Renderer execution that wraps the Phase 4B direct env-cell draw path in selected-edge
+  stencil/aperture state instead of introducing a new broad interior source target.
+- Shared portal-executor vocabulary for scene source operations, even though Phase 5 initially only
+  needs env-cell direct sources. The executor should be ready to accept an outdoor target source in
+  Phase 6 without becoming a second pipeline.
 - Direct drawing of selected env-cell resources during portal execution, under the active
   stencil/depth aperture-mask state, without rendering a whole interior source target first.
 - Reusable portal-aperture geometry resources/ranges referenced by traversal edges, with optional
@@ -1135,13 +1186,13 @@ Questions to answer:
 Exit criteria:
 
 - Phase 6 proceeds only if the interior portal model is stable enough to bridge outdoor scene
-  targets with direct env-cell draws.
+  target sources with direct env-cell draws through the same portal executor.
 
 ### Phase 6: Transition Portal Unification
 
 Status: planned.
 
-Purpose: make outdoor/interior transitions use the same visibility model while preserving the
+Purpose: add outdoor as a reusable scene source in the shared portal executor while preserving the
 building-sourced aperture mask truth.
 
 Deliverables:
@@ -1150,8 +1201,10 @@ Deliverables:
   traversal roots.
 - Transition portals represented as categorized scene-domain crossing edges in the shared portal
   frame-plan model, not as a privileged renderer-side transition-mask architecture.
-- Outdoor terrain/buildings/detail rendered to an offscreen outdoor scene target when needed for
-  compositing.
+- Outdoor terrain/buildings/detail rendered to an offscreen outdoor scene target whenever outdoor is
+  visible as a base scene or as a reachable portal target/source.
+- Outdoor target copied/sampled by the shared portal executor for both directions, including nested
+  outdoor -> indoor -> outdoor and indoor -> outdoor visibility.
 - Env-cell resources drawn directly during transition portal execution from traversal-selected cell
   membership, not from a pre-rendered interior scene target.
 - Building-sourced aperture mask geometry remains the transition aperture authority.
@@ -1160,13 +1213,18 @@ Deliverables:
 - Interior passes are filtered by traversal result instead of all resident interiors.
 - Browser portal inspection uses one portal overlay model with category coloring/filtering for
   env-cell portals and outdoor/env-cell transition portals.
-- Indoor-to-outdoor transition behavior reviewed against the existing transition compositor.
+- Indoor-to-outdoor and outdoor-to-indoor-to-outdoor behavior reviewed as scene-source cases in the
+  shared portal executor, not as separate pipelines.
 
 Acceptance criteria:
 
 - Outdoor-to-indoor transition apertures no longer composite unrelated resident interior cell
   shells.
-- The transition compositor can combine an outdoor offscreen target with direct env-cell draws.
+- The shared portal executor can combine an outdoor offscreen target source with direct env-cell
+  draws.
+- Outdoor -> indoor -> outdoor uses the same outdoor target source for the nested return-to-outdoor
+  aperture instead of replaying outdoor rendering or relying on whatever is currently in the display
+  buffer.
 - Transition portals are driven by shared portal frame-plan edges instead of dedicated resident
   transition mask batches.
 - Browser inspection can show env-cell portals and transition portals from one overlay model, with
@@ -1182,10 +1240,10 @@ work.
 
 Questions to answer:
 
-- Does outdoor-to-indoor compositing correctly use the outdoor target without reviving an
+- Does outdoor-to-indoor compositing correctly use the outdoor target source without reviving an
   all-interiors source target?
-- Does indoor-to-outdoor behavior require a different pass sequence, or can it use the same scene
-  crossing model?
+- Do indoor-to-outdoor and outdoor-to-indoor-to-outdoor behavior use the same scene-source portal
+  executor, or did implementation drift into a second pipeline?
 - Are building-sourced transition apertures still the only mask authority for building portals?
 - Which known visual gaps remain, and are they blockers for culling/picking work?
 
@@ -1324,10 +1382,12 @@ meaning from raw assets.
 
 Risk: transition portals and interior portals become two separate architectures.
 
-Mitigation: model transitions as portal graph scene-domain crossings. Keep building aperture
-geometry source-specific, but share traversal outputs, visibility diagnostics, and cell-filtered
-interior submission. Collapse browser inspection into one portal overlay model with category
-coloring/filtering, and delete the dedicated transition overlay/resource pipeline during cutover.
+Mitigation: model transitions as portal graph scene-domain crossings executed by the same portal
+executor. Keep building aperture geometry source-specific, but share traversal outputs, scene-source
+selection, visibility diagnostics, and cell-filtered interior submission. The outdoor renderer is a
+scene source provider, not a second compositor pipeline. Collapse browser inspection into one portal
+overlay model with category coloring/filtering, and delete the dedicated transition overlay/resource
+pipeline during cutover.
 
 Risk: WebGL2 stencil/depth constraints force awkward target formats.
 
@@ -1338,9 +1398,10 @@ the production path.
 Risk: direct env-cell drawing during compositing creates too many state changes compared with one
 interior source target.
 
-Mitigation: keep outdoor as the heavyweight offscreen source target, but batch env-cell direct draws
-by traversal depth, material pass, and resource compatibility inside the active portal state. Measure
-before adding more bake-time fragmentation.
+Mitigation: keep outdoor as the heavyweight reusable offscreen source target whenever outdoor is
+visible anywhere in the portal stack, but batch env-cell direct draws by traversal depth, material
+pass, and resource compatibility inside the active portal state. Measure before adding more
+bake-time fragmentation.
 
 Risk: browser diagnostic broad-interior rendering masks production bugs.
 
@@ -1360,9 +1421,10 @@ source evidence proves it for a case.
 - Runtime/static-scene query can derive a bounded portal traversal result from committed
   portal/interior records.
 - Production interior rendering uses portal traversal output, not all resident interior resources.
-- Outdoor scene-domain rendering may use an offscreen target for compositing, but env-cell resources
-  are drawn directly on demand during portal execution rather than pre-rendered into one all-interior
-  source target.
+- Outdoor scene-domain rendering may use an offscreen target as a reusable scene source whenever
+  outdoor is visible as a base or nested portal target/source, but env-cell resources are drawn
+  directly on demand during portal execution rather than pre-rendered into one all-interior source
+  target.
 - Recursive env-cell portal drawing is bounded, aperture-constrained, and validated against named
   dungeon/interior targets.
 - Outdoor/interior transition compositing filters the interior side by portal traversal where

@@ -969,7 +969,7 @@ Follow-up debt:
 
 ### Phase 4C: Cell-Scoped Static Object Submission
 
-Status: planned.
+Status: completed on 2026-06-20.
 
 Purpose: make env-cell static-object submission match portal-selected env cells instead of drawing
 coarse static-object batches that happen to include the selected cell.
@@ -1020,6 +1020,39 @@ High-risk boundaries:
   preparation time, not add ad hoc per-frame CPU geometry filtering.
 - If static-object batching cannot be split cleanly without destabilizing material/texture payloads,
   record the exact blocking resource shape and add a narrower proof phase before Phase 5.
+
+Implementation notes:
+
+- Static-object compatibility partitioning now includes `owningEnvCellId` in the ownership axis for
+  `landblock-env-cells` payloads. Compatible env-cell static objects can still batch by material
+  inside one env cell, but not across env-cell boundaries.
+- Env-cell static objects without `owningEnvCellId` now fail partitioning instead of silently
+  falling back to a landblock-wide batch. The env-cell static-object payload adapter already provides
+  this owner from the source env cell.
+- The existing renderer membership and direct frame-plan path did not need a new per-frame filter:
+  once bake output is cell-scoped, selected draw-unit ids naturally map to the selected env cells.
+- Existing `sharedEnvCellStaticObjectDrawUnits` diagnostics remain useful for spotting any resource
+  that still advertises more than one env cell; after this phase, normal env-cell static bake output
+  should trend toward zero shared static draw units for selected cells.
+
+Verification:
+
+- `npm exec prettier -- --write ...`
+- `npm run test:ts -- src/v2/static/objects/bake/static-object-compatibility-partitioner.test.ts`
+- `npm run test:ts -- ...`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run test:ts`
+
+Follow-up debt:
+
+- Phase 5 still owns aperture/stencil correctness; cell-scoped neighbor statics can still draw
+  outside their portal polygon until aperture masks exist.
+- If browser inspection still shows unrelated static overdraw, inspect whether the offending
+  resource has `sharedEnvCellStaticObjectDrawUnits > 0`; that would indicate a remaining non-bake
+  source of shared membership.
+- Exact submitted-triangle diagnostics remain optional unless manual inspection cannot distinguish
+  aperture overdraw from resource granularity.
 
 ### Phase 4R: Reassessment After Cell-Scoped Direct Drawing
 

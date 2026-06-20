@@ -12,6 +12,7 @@ import type {
 	EnvCellCellStructureGeometryAttachment,
 	StaticMaterialCoverageReport,
 	StaticMaterialTableEntry,
+	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
 	StaticSourceMappingRecord,
 	StaticSpatialRecord,
@@ -19,6 +20,7 @@ import type {
 	StaticVisibilityRecord,
 	StaticWorkPeerRecordOwner,
 } from "../../contracts";
+import { createEnvCellStaticPortalGraph } from "../../portal-graphs";
 import {
 	AC_UNIT_SCALE,
 	buildAcPlacementMatrix,
@@ -108,6 +110,9 @@ export function bakeLandblockEnvCells(
 			(result) => result.staticAuthoredDynamicSeeds,
 		),
 		staticBatchId: input.staticBatchId,
+		staticPortalGraphs: itemResults.flatMap(
+			(result) => result.staticPortalGraphs,
+		),
 		staticPortalInteriorRecords: itemResults.flatMap(
 			(result) => result.staticPortalInteriorRecords,
 		),
@@ -174,6 +179,7 @@ function bakeLandblockEnvCellItem(
 	readonly drawUnits: readonly StaticDrawUnit[];
 	readonly materialCoverage: StaticMaterialCoverageReport;
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
+	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
 	readonly staticSpatialRecords: readonly StaticSpatialRecord[];
@@ -218,6 +224,9 @@ function bakeLandblockEnvCellItem(
 			owner,
 			payload,
 		),
+		staticPortalGraphs: [
+			createEnvCellStaticPortalGraph(owner, portalInteriorRecord),
+		],
 		staticPortalInteriorRecords: [portalInteriorRecord],
 		staticSourceMappings: createSourceMappingRecords(owner, payload),
 		staticSpatialRecords: createSpatialRecords(owner, payload),

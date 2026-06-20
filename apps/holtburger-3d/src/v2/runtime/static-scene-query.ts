@@ -8,6 +8,7 @@ import type {
 	StaticDomain,
 	StaticAuthoredDynamicSeedRecord,
 	StaticEnvCellSpatialRecord,
+	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
 	StaticScopePayload,
 	StaticSourceMappingRecord,
@@ -224,6 +225,7 @@ export interface StaticSceneQuerySnapshot {
 	readonly envCellRecordCount: number;
 	readonly envCellLandblockCount: number;
 	readonly committedEnvCellLandblockCount: number;
+	readonly committedEnvCellPortalGraphRecordCount: number;
 	readonly committedEnvCellPortalInteriorRecordCount: number;
 	readonly committedEnvCellSourceMappingRecordCount: number;
 	readonly committedEnvCellSpatialRecordCount: number;
@@ -372,6 +374,7 @@ interface EnvCellStaticSeedRuntimeRecord {
 export interface StaticSceneCommittedEnvCellRecords {
 	readonly authoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly landblockId: number;
+	readonly portalGraphs: readonly StaticPortalGraphRecord[];
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly sourceMappings: readonly StaticSourceMappingRecord[];
 	readonly spatialRecords: readonly StaticSpatialRecord[];
@@ -639,6 +642,10 @@ export class StaticSceneQuery {
 		string,
 		CommittedRecordEntry<StaticPortalInteriorRecord>
 	>();
+	readonly #committedPortalGraphsByKey = new Map<
+		string,
+		CommittedRecordEntry<StaticPortalGraphRecord>
+	>();
 	readonly #committedSourceMappingsByKey = new Map<
 		string,
 		CommittedRecordEntry<StaticSourceMappingRecord>
@@ -788,6 +795,7 @@ export class StaticSceneQuery {
 
 	applyStaticPeerRecords(options: {
 		readonly authoredDynamicSeeds?: readonly StaticAuthoredDynamicSeedRecord[];
+		readonly portalGraphs?: readonly StaticPortalGraphRecord[];
 		readonly portalInteriorRecords?: readonly StaticPortalInteriorRecord[];
 		readonly sourceMappings?: readonly StaticSourceMappingRecord[];
 		readonly spatialRecords?: readonly StaticSpatialRecord[];
@@ -798,6 +806,7 @@ export class StaticSceneQuery {
 		this.#upsertCommittedPortalInteriorRecords(
 			options.portalInteriorRecords ?? [],
 		);
+		this.#upsertCommittedPortalGraphs(options.portalGraphs ?? []);
 		this.#upsertCommittedSourceMappings(options.sourceMappings ?? []);
 		this.#upsertCommittedAuthoredDynamicSeedRecords(
 			options.authoredDynamicSeeds ?? [],
@@ -1003,6 +1012,21 @@ export class StaticSceneQuery {
 		} = {},
 	): readonly StaticPortalInteriorRecord[] {
 		return [...this.#committedPortalInteriorRecordsByKey.values()]
+			.map((entry) => entry.record)
+			.filter(
+				(record) =>
+					options.landblockId === undefined ||
+					record.landblockId === options.landblockId,
+			)
+			.sort((left, right) => left.landblockId - right.landblockId);
+	}
+
+	queryPortalGraphs(
+		options: {
+			readonly landblockId?: number;
+		} = {},
+	): readonly StaticPortalGraphRecord[] {
+		return [...this.#committedPortalGraphsByKey.values()]
 			.map((entry) => entry.record)
 			.filter(
 				(record) =>
@@ -1333,6 +1357,10 @@ export class StaticSceneQuery {
 			this.#committedPortalInteriorRecordsByKey,
 			options.landblockId,
 		);
+		const portalGraphs = collectCommittedRecordsByLandblock(
+			this.#committedPortalGraphsByKey,
+			options.landblockId,
+		);
 		const sourceMappings = collectCommittedRecordsByLandblock(
 			this.#committedSourceMappingsByKey,
 			options.landblockId,
@@ -1352,6 +1380,7 @@ export class StaticSceneQuery {
 
 		if (
 			authoredDynamicSeeds.length === 0 &&
+			portalGraphs.length === 0 &&
 			portalInteriorRecords.length === 0 &&
 			sourceMappings.length === 0 &&
 			spatialRecords.length === 0 &&
@@ -1363,6 +1392,7 @@ export class StaticSceneQuery {
 		return {
 			authoredDynamicSeeds,
 			landblockId: options.landblockId,
+			portalGraphs,
 			portalInteriorRecords,
 			sourceMappings,
 			spatialRecords,
@@ -1391,9 +1421,12 @@ export class StaticSceneQuery {
 				this.#committedSpatialRecordsByKey,
 				this.#committedVisibilityRecordsByKey,
 				this.#committedPortalInteriorRecordsByKey,
+				this.#committedPortalGraphsByKey,
 				this.#committedSourceMappingsByKey,
 				this.#committedAuthoredDynamicSeedRecordsByKey,
 			]),
+			committedEnvCellPortalGraphRecordCount:
+				this.#committedPortalGraphsByKey.size,
 			committedEnvCellPortalInteriorRecordCount:
 				this.#committedPortalInteriorRecordsByKey.size,
 			committedEnvCellSourceMappingRecordCount:
@@ -1498,6 +1531,22 @@ export class StaticSceneQuery {
 		for (const record of records) {
 			this.#committedPortalInteriorRecordsByKey.set(
 				createCommittedPortalInteriorRecordKey(record),
+				{
+					ownerKey: createStaticPeerOwnerKey(record.owner),
+					record,
+				},
+			);
+		}
+	}
+
+	#upsertCommittedPortalGraphs(records: readonly StaticPortalGraphRecord[]): void {
+		this.#deleteCommittedRecordsForOwners(
+			this.#committedPortalGraphsByKey,
+			records,
+		);
+		for (const record of records) {
+			this.#committedPortalGraphsByKey.set(
+				createCommittedPortalGraphRecordKey(record),
 				{
 					ownerKey: createStaticPeerOwnerKey(record.owner),
 					record,
@@ -1642,6 +1691,7 @@ export class StaticSceneQuery {
 			this.#committedSpatialRecordsByKey,
 			this.#committedVisibilityRecordsByKey,
 			this.#committedPortalInteriorRecordsByKey,
+			this.#committedPortalGraphsByKey,
 			this.#committedSourceMappingsByKey,
 			this.#committedAuthoredDynamicSeedRecordsByKey,
 		]) {
@@ -1659,6 +1709,7 @@ export class StaticSceneQuery {
 			this.#committedSpatialRecordsByKey,
 			this.#committedVisibilityRecordsByKey,
 			this.#committedPortalInteriorRecordsByKey,
+			this.#committedPortalGraphsByKey,
 			this.#committedSourceMappingsByKey,
 		]) {
 			for (const entry of recordsByKey.values()) {
@@ -1705,6 +1756,7 @@ export class StaticSceneQuery {
 			this.#committedSpatialRecordsByKey,
 			this.#committedVisibilityRecordsByKey,
 			this.#committedPortalInteriorRecordsByKey,
+			this.#committedPortalGraphsByKey,
 			this.#committedSourceMappingsByKey,
 		]) {
 			for (const [key, entry] of recordsByKey) {
@@ -2592,6 +2644,12 @@ function createCommittedPortalInteriorRecordKey(
 	return `env-cell-portal-interior:${record.landblockId >>> 0}`;
 }
 
+function createCommittedPortalGraphRecordKey(
+	record: StaticPortalGraphRecord,
+): string {
+	return `static-portal-graph:${record.landblockId >>> 0}:${createStaticPeerOwnerKey(record.owner)}`;
+}
+
 function createCommittedSourceMappingRecordKey(
 	record: StaticSourceMappingRecord,
 ): string {
@@ -2707,6 +2765,7 @@ function countCommittedEnvCellLandblocks(
 		string,
 		CommittedRecordEntry<
 			| StaticPortalInteriorRecord
+			| StaticPortalGraphRecord
 			| StaticSourceMappingRecord
 			| StaticSpatialRecord
 			| StaticAuthoredDynamicSeedRecord
@@ -2766,6 +2825,10 @@ function createCommittedRecordSortKey(record: unknown): string {
 			return createCommittedPortalInteriorRecordKey(
 				record as StaticPortalInteriorRecord,
 			);
+		case "static-portal-graph":
+			return createCommittedPortalGraphRecordKey(
+				record as StaticPortalGraphRecord,
+			);
 		case "terrain-source-triangle":
 		case "env-cell-source":
 			return createCommittedSourceMappingRecordKey(
@@ -2800,6 +2863,7 @@ function compareNullableNumbers(left: number | null, right: number | null): numb
 function getCommittedRecordDomain(
 	record:
 		| StaticPortalInteriorRecord
+		| StaticPortalGraphRecord
 		| StaticSourceMappingRecord
 		| StaticSpatialRecord
 		| StaticAuthoredDynamicSeedRecord
@@ -2821,6 +2885,7 @@ function getCommittedRecordDomain(
 function getCommittedRecordLandblockId(
 	record:
 		| StaticPortalInteriorRecord
+		| StaticPortalGraphRecord
 		| StaticSourceMappingRecord
 		| StaticSpatialRecord
 		| StaticAuthoredDynamicSeedRecord

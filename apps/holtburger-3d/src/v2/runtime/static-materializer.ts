@@ -21,6 +21,7 @@ import type {
 	StaticMaterialTableEntry,
 	StaticObjectSourceMappingCoverage,
 	StaticAuthoredDynamicSeedRecord,
+	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
 	StaticResourceKey,
 	StaticSourceMappingRecord,
@@ -42,6 +43,7 @@ export interface StaticMaterializationResult {
 	readonly removedResources: readonly StaticResourceKey[];
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly staticDelta: StaticResidencyDelta;
+	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
 	readonly staticSpatialRecords: readonly StaticSpatialRecord[];
@@ -147,6 +149,7 @@ function materializeStaticPeerRecords(
 ): Pick<
 	StaticMaterializationResult,
 	| "staticAuthoredDynamicSeeds"
+	| "staticPortalGraphs"
 	| "staticPortalInteriorRecords"
 	| "staticSourceMappings"
 	| "staticSpatialRecords"
@@ -164,6 +167,7 @@ function materializeStaticPeerRecords(
 
 	return {
 		staticAuthoredDynamicSeeds: commit.staticAuthoredDynamicSeeds,
+		staticPortalGraphs: commit.staticPortalGraphs,
 		staticPortalInteriorRecords: commit.staticPortalInteriorRecords,
 		staticSourceMappings: [
 			...commit.staticSourceMappings.filter(

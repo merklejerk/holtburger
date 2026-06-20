@@ -4,6 +4,7 @@ import type {
 	LandblockPortalLinkFacts,
 	OutdoorStaticObjectsScopePayload,
 	StaticBounds,
+	StaticPortalGraphRecord,
 	StaticSourceMappingRecord,
 	StaticWorkPeerRecordOwner,
 	TerrainStaticScopePayload,
@@ -506,6 +507,7 @@ describe("V2 static scene query", () => {
 		});
 		expect(query.createSnapshot()).toEqual({
 			committedEnvCellLandblockCount: 1,
+			committedEnvCellPortalGraphRecordCount: 0,
 			committedEnvCellPortalInteriorRecordCount: 1,
 			committedEnvCellSourceMappingRecordCount: 0,
 			committedEnvCellSpatialRecordCount: 2,
@@ -769,6 +771,7 @@ describe("V2 static scene query", () => {
 		expect(hit).toBeNull();
 		expect(query.createSnapshot()).toEqual({
 			committedEnvCellLandblockCount: 1,
+			committedEnvCellPortalGraphRecordCount: 0,
 			committedEnvCellPortalInteriorRecordCount: 1,
 			committedEnvCellSourceMappingRecordCount: 0,
 			committedEnvCellSpatialRecordCount: 1,
@@ -1159,6 +1162,7 @@ describe("V2 static scene query", () => {
 		});
 		expect(query.createSnapshot()).toMatchObject({
 			committedEnvCellLandblockCount: 1,
+			committedEnvCellPortalGraphRecordCount: 0,
 			committedEnvCellPortalInteriorRecordCount: 1,
 			committedEnvCellSourceMappingRecordCount: 1,
 			committedEnvCellSpatialRecordCount: 1,
@@ -1174,10 +1178,46 @@ describe("V2 static scene query", () => {
 		).toBeNull();
 		expect(query.createSnapshot()).toMatchObject({
 			committedEnvCellLandblockCount: 0,
+			committedEnvCellPortalGraphRecordCount: 0,
 			committedEnvCellPortalInteriorRecordCount: 0,
 			committedEnvCellSourceMappingRecordCount: 0,
 			committedEnvCellSpatialRecordCount: 0,
 			committedEnvCellVisibilityRecordCount: 0,
+		});
+	});
+
+	it("commits and prunes static portal graphs by retained scope", () => {
+		const query = new StaticSceneQuery();
+		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+		const graph = createStaticPortalGraphRecord(owner);
+
+		query.applyStaticPeerRecords({
+			portalGraphs: [graph],
+		});
+
+		expect(query.queryPortalGraphs({ landblockId: 0xda55ffff })).toEqual([
+			graph,
+		]);
+		expect(
+			query.queryCommittedEnvCellRecords({ landblockId: 0xda55ffff }),
+		).toMatchObject({
+			landblockId: 0xda55ffff,
+			portalGraphs: [{ kind: "static-portal-graph" }],
+		});
+		expect(query.createSnapshot()).toMatchObject({
+			committedEnvCellLandblockCount: 1,
+			committedEnvCellPortalGraphRecordCount: 1,
+		});
+
+		query.retainScopes([]);
+
+		expect(query.queryPortalGraphs({ landblockId: 0xda55ffff })).toEqual([]);
+		expect(
+			query.queryCommittedEnvCellRecords({ landblockId: 0xda55ffff }),
+		).toBeNull();
+		expect(query.createSnapshot()).toMatchObject({
+			committedEnvCellLandblockCount: 0,
+			committedEnvCellPortalGraphRecordCount: 0,
 		});
 	});
 
@@ -1962,6 +2002,50 @@ function createEnvCellPortalLink(options: {
 			kind: "env-cell",
 			portalId: `${options.linkId}:target`,
 		},
+	};
+}
+
+function createStaticPortalGraphRecord(
+	owner: StaticWorkPeerRecordOwner,
+): StaticPortalGraphRecord {
+	return {
+		edges: [
+			{
+				direction: "directed",
+				edgeId: "env-cell-portal:link-a:0",
+				flags: 0,
+				linkId: "link-a",
+				polygonId: null,
+				provenance: {
+					kind: "env-cell-portal",
+					sourceEnvCellId: 0xda550100,
+					sourcePortalId: "portal-a",
+					targetEnvCellId: 0xda550101,
+					targetPortalId: "portal-b",
+				},
+				sceneCrossing: {
+					kind: "env-cell-to-env-cell",
+					sourceEnvCellId: 0xda550100,
+					targetEnvCellId: 0xda550101,
+				},
+				sourceIndex: 0,
+				sourceNodeId: "env-cell:3663003904",
+				targetNodeId: "env-cell:3663003905",
+			},
+		],
+		kind: "static-portal-graph",
+		landblockId: 0xda55ffff,
+		nodes: [
+			{
+				nodeId: "env-cell:3663003904",
+				scene: { envCellId: 0xda550100, kind: "env-cell" },
+			},
+			{
+				nodeId: "env-cell:3663003905",
+				scene: { envCellId: 0xda550101, kind: "env-cell" },
+			},
+		],
+		owner,
 	};
 }
 

@@ -268,6 +268,7 @@ function createFakeStaticBakeResult(
 		materialCoverage: result.materialCoverage ?? [],
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds ?? [],
+		staticPortalGraphs: result.staticPortalGraphs ?? [],
 		staticPortalInteriorRecords: result.staticPortalInteriorRecords ?? [],
 		staticSourceMappings: result.staticSourceMappings ?? [],
 		staticSpatialRecords: result.staticSpatialRecords ?? [],

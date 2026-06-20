@@ -13,17 +13,17 @@ export function createEnvCellStaticPortalGraph(
 	owner: StaticWorkPeerRecordOwner,
 	record: StaticPortalInteriorRecord,
 ): StaticPortalGraphRecord {
-	const nodes = record.envCells
-		.map((envCell): StaticPortalGraphNode => ({
-			nodeId: createEnvCellPortalGraphNodeId(envCell.envCellId),
-			scene: {
-				envCellId: envCell.envCellId,
-				kind: "env-cell",
-			},
-		}))
-		.sort(comparePortalGraphNodes);
+	const nodesById = new Map<string, StaticPortalGraphNode>();
+	for (const envCell of record.envCells) {
+		const node = createPortalGraphNode({
+			envCellId: envCell.envCellId,
+			kind: "env-cell",
+		});
+		nodesById.set(node.nodeId, node);
+	}
+
 	const edges = record.portalLinks
-		.map((link) => createEnvCellPortalGraphEdge(link))
+		.map((link) => createEnvCellPortalGraphEdge(link, nodesById))
 		.filter((edge): edge is StaticPortalGraphEdge => edge !== null)
 		.sort(comparePortalGraphEdges);
 
@@ -31,7 +31,7 @@ export function createEnvCellStaticPortalGraph(
 		edges,
 		kind: "static-portal-graph",
 		landblockId: record.landblockId,
-		nodes,
+		nodes: [...nodesById.values()].sort(comparePortalGraphNodes),
 		owner,
 	};
 }
@@ -103,10 +103,19 @@ export function createTransitionStaticPortalGraph(
 
 function createEnvCellPortalGraphEdge(
 	link: LandblockPortalLinkFacts,
+	nodesById: Map<string, StaticPortalGraphNode>,
 ): StaticPortalGraphEdge | null {
-	if (link.source.kind !== "env-cell" || link.target.kind !== "env-cell") {
+	if (link.source.kind !== "env-cell") {
 		return null;
 	}
+
+	const sourceNode = createPortalGraphNode({
+		envCellId: link.source.envCellId,
+		kind: "env-cell",
+	});
+	const targetNode = createPortalGraphNodeFromEndpoint(link.target);
+	nodesById.set(sourceNode.nodeId, sourceNode);
+	nodesById.set(targetNode.nodeId, targetNode);
 
 	return {
 		direction: "directed",
@@ -118,18 +127,63 @@ function createEnvCellPortalGraphEdge(
 			kind: "env-cell-portal",
 			sourceEnvCellId: link.source.envCellId,
 			sourcePortalId: link.source.portalId,
-			targetEnvCellId: link.target.envCellId,
-			targetPortalId: link.target.portalId,
+			target: link.target,
 		},
-		sceneCrossing: {
-			kind: "env-cell-to-env-cell",
-			sourceEnvCellId: link.source.envCellId,
-			targetEnvCellId: link.target.envCellId,
-		},
+		sceneCrossing: createEnvCellPortalSceneCrossing(link),
 		sourceIndex: link.sourceIndex,
-		sourceNodeId: createEnvCellPortalGraphNodeId(link.source.envCellId),
-		targetNodeId: createEnvCellPortalGraphNodeId(link.target.envCellId),
+		sourceNodeId: sourceNode.nodeId,
+		targetNodeId: targetNode.nodeId,
 	};
+}
+
+function createPortalGraphNodeFromEndpoint(
+	endpoint: LandblockPortalLinkFacts["target"],
+): StaticPortalGraphNode {
+	switch (endpoint.kind) {
+		case "env-cell":
+			return createPortalGraphNode({
+				envCellId: endpoint.envCellId,
+				kind: "env-cell",
+			});
+		case "landblock-building":
+			return createPortalGraphNode({
+				buildingInstanceId: endpoint.instanceId,
+				kind: "landblock-building",
+			});
+		case "outside":
+			return createPortalGraphNode({
+				kind: "outdoor",
+				landblockId: endpoint.landblockId,
+			});
+	}
+}
+
+function createEnvCellPortalSceneCrossing(
+	link: LandblockPortalLinkFacts,
+): StaticPortalGraphEdge["sceneCrossing"] {
+	if (link.source.kind !== "env-cell") {
+		return null;
+	}
+	switch (link.target.kind) {
+		case "env-cell":
+			return {
+				kind: "env-cell-to-env-cell",
+				sourceEnvCellId: link.source.envCellId,
+				targetEnvCellId: link.target.envCellId,
+			};
+		case "landblock-building":
+			return {
+				buildingInstanceId: link.target.instanceId,
+				kind: "env-cell-to-landblock-building",
+				sourceEnvCellId: link.source.envCellId,
+			};
+		case "outside":
+			return {
+				kind: "env-cell-to-outdoor",
+				outdoorLandblockId: link.target.landblockId,
+				sourceEnvCellId: link.source.envCellId,
+			};
+	}
 }
 
 function createPortalGraphNode(

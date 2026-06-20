@@ -1,6 +1,7 @@
 import type {
 	LandblockPortalLinkFacts,
 	PortalEndpointIdentity,
+	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
 } from "../static/contracts";
 
@@ -392,6 +393,80 @@ export function createPortalTraversalGraph(options: {
 				source.envCellId >>> 0,
 				createSceneCrossing(link, source, target),
 			);
+		}
+	}
+
+	return {
+		envCellIds,
+		outgoingEnvCellEdgesBySource: sortMapValues(
+			outgoingEnvCellEdgesBySource,
+			compareEnvCellEdges,
+		),
+		outgoingSceneCrossingsBySource: sortMapValues(
+			outgoingSceneCrossingsBySource,
+			compareSceneCrossings,
+		),
+	};
+}
+
+export function createPortalTraversalGraphFromStaticPortalGraphs(options: {
+	readonly landblockId: number;
+	readonly portalGraphs: readonly StaticPortalGraphRecord[];
+}): PortalTraversalGraph {
+	const landblockId = options.landblockId >>> 0;
+	const envCellIds = new Set<number>();
+	const outgoingEnvCellEdgesBySource = new Map<
+		number,
+		PortalTraversalEnvCellEdge[]
+	>();
+	const outgoingSceneCrossingsBySource = new Map<
+		number,
+		PortalTraversalSceneCrossing[]
+	>();
+
+	for (const graph of options.portalGraphs) {
+		if (graph.landblockId !== landblockId) {
+			continue;
+		}
+		const nodesById = new Map(graph.nodes.map((node) => [node.nodeId, node]));
+		for (const node of graph.nodes) {
+			if (node.scene.kind === "env-cell") {
+				envCellIds.add(node.scene.envCellId >>> 0);
+			}
+		}
+		for (const edge of graph.edges) {
+			const sourceNode = nodesById.get(edge.sourceNodeId);
+			if (
+				!sourceNode ||
+				sourceNode.scene.kind !== "env-cell" ||
+				edge.provenance.kind !== "env-cell-portal"
+			) {
+				continue;
+			}
+			const sourceEnvCellId = sourceNode.scene.envCellId >>> 0;
+			const target = edge.provenance.target;
+			if (target.kind === "env-cell") {
+				appendMapValue(outgoingEnvCellEdgesBySource, sourceEnvCellId, {
+					flags: edge.flags,
+					linkId: edge.linkId,
+					polygonId: edge.polygonId,
+					sourceEnvCellId,
+					sourceIndex: edge.sourceIndex,
+					sourcePortalId: edge.provenance.sourcePortalId,
+					targetEnvCellId: target.envCellId >>> 0,
+					targetPortalId: target.portalId,
+				});
+				continue;
+			}
+			appendMapValue(outgoingSceneCrossingsBySource, sourceEnvCellId, {
+				flags: edge.flags,
+				linkId: edge.linkId,
+				polygonId: edge.polygonId,
+				sourceEnvCellId,
+				sourceIndex: edge.sourceIndex,
+				sourcePortalId: edge.provenance.sourcePortalId,
+				target,
+			});
 		}
 	}
 

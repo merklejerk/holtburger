@@ -592,6 +592,43 @@ Acceptance criteria:
 - Repeated queries for the same landblock and unchanged records do not rebuild/sort the graph.
 - Tests cover graph cache reuse and invalidation.
 
+Status: Complete.
+
+Implementation notes:
+
+- Added `createPortalTraversalGraphFromStaticPortalGraphs(...)` so traversal graphs can be built from baked static portal graph records.
+- `StaticSceneQuery` now owns per-landblock portal traversal graph revisions and a per-landblock traversal graph cache.
+- `StaticSceneQuery.queryPortalTraversalGraph(...)` returns the cached traversal graph when the landblock portal/interior revision is unchanged.
+- `StaticSceneQuery.queryPortalTraversal(...)` now derives traversal plans from the cached traversal graph instead of rebuilding from raw portal/interior records per query.
+- Outdoor transition portal planning in `ClientRuntime` now asks `StaticSceneQuery` for the cached traversal graph instead of building one locally.
+- Portal/interior record replacement, static portal graph replacement, retained-scope pruning, and portal record removal invalidate only the affected landblock cache entries.
+- Baked static portal graphs now include env-cell scene-crossing links to outdoor/building endpoints. This was necessary so the cached graph path can preserve existing traversal metadata without falling back to raw portal records for topology.
+
+Validation:
+
+- `npm run test:ts -- src/v2/static/portal-graphs.test.ts src/v2/runtime/static-scene-query.test.ts src/v2/runtime/portal-traversal-planner.test.ts src/v2/runtime/client-runtime.test.ts`
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+
+Spicy notes:
+
+- Phase 5 had to extend the Phase 4 graph shape slightly: env-cell portal provenance now stores a typed target endpoint, and baked graphs include env-cell-to-outdoor/building scene crossings. This is topology required for traversal, not diagnostic payload expansion.
+- The cache intentionally lives in `StaticSceneQuery`, not the renderer or diagnostics surface. Runtime planning asks for semantic state; diagnostics do not drive the shape.
+- Traversal plan caching by start cell/caps was not added. The graph cache removes the heavy rebuild/sort path; plan caching belongs with the Phase 6 frame-plan key work so invalidation keys stay coherent.
+
+Failed to close in Phase 5:
+
+- Direct portal frame plans are still derived whenever the current render-pass update path runs. Phase 6 must key and cache the frame plan itself.
+- The traversal graph cache still returns a runtime graph derived from baked records, not a fully baked adjacency-table payload. That is acceptable for this phase but leaves one conversion step on cache miss.
+- Env-cell portal aperture geometry is still frame-plan data rather than static GPU aperture ranges; Phase 7 remains the resource cutover.
+
+Debt to track:
+
+- Consider baking a compact adjacency table directly into `StaticPortalGraphRecord` if graph-cache misses show up in traces after Phase 6.
+- Decide in Phase 6 whether traversal plans should be cached independently by start env cell and traversal caps, or whether the portal frame plan cache makes that redundant.
+- Keep an eye on transition and env-cell graph records arriving separately for the same landblock. The current cache merges all committed graph records per landblock at cache-build time, which is correct but may become a materialization concern once aperture resources are unified.
+
 ### Phase 6: Make Portal Frame Plans Revision-Keyed
 
 Deliverables:

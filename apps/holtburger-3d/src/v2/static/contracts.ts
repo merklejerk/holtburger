@@ -906,8 +906,7 @@ export type StaticPortalGraphEdgeProvenance =
 			readonly kind: "env-cell-portal";
 			readonly sourceEnvCellId: number;
 			readonly sourcePortalId: string;
-			readonly targetEnvCellId: number;
-			readonly targetPortalId: string;
+			readonly target: PortalEndpointIdentity;
 	  }
 	| {
 			readonly kind: "building-transition";
@@ -928,6 +927,16 @@ export type StaticPortalGraphSceneCrossing =
 			readonly kind: "env-cell-to-env-cell";
 			readonly sourceEnvCellId: number;
 			readonly targetEnvCellId: number;
+	  }
+	| {
+			readonly kind: "env-cell-to-outdoor";
+			readonly sourceEnvCellId: number;
+			readonly outdoorLandblockId: number;
+	  }
+	| {
+			readonly kind: "env-cell-to-landblock-building";
+			readonly sourceEnvCellId: number;
+			readonly buildingInstanceId: string;
 	  };
 
 export interface StaticEnvCellPortalInteriorRecord {

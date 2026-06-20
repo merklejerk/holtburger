@@ -52,7 +52,11 @@ describe("V2 static portal graphs", () => {
 				provenance: expect.objectContaining({
 					kind: "env-cell-portal",
 					sourcePortalId: "portal-a-duplicate",
-					targetPortalId: "portal-b-duplicate",
+					target: {
+						envCellId: 0xda550101,
+						kind: "env-cell",
+						portalId: "portal-b-duplicate",
+					},
 				}),
 				sceneCrossing: {
 					kind: "env-cell-to-env-cell",
@@ -65,9 +69,74 @@ describe("V2 static portal graphs", () => {
 				provenance: expect.objectContaining({
 					kind: "env-cell-portal",
 					sourcePortalId: "portal-a",
-					targetPortalId: "portal-b",
+					target: {
+						envCellId: 0xda550101,
+						kind: "env-cell",
+						portalId: "portal-b",
+					},
 				}),
 			}),
+		]);
+	});
+
+	it("normalizes env-cell scene-crossing links into graph edges", () => {
+		const owner = createWorkOwner("work-env", "landblock-env-cells");
+		const graph = createEnvCellStaticPortalGraph(owner, {
+			envCells: [createPortalSummary(0xda550100)],
+			kind: "env-cell-portal-interior",
+			landblockId: 0xda55ffff,
+			owner,
+			portalLinks: [
+				{
+					flags: 0,
+					linkId: "a-to-outside",
+					polygonId: null,
+					source: {
+						envCellId: 0xda550100,
+						kind: "env-cell",
+						portalId: "portal-a",
+					},
+					sourceIndex: 1,
+					target: {
+						kind: "outside",
+						landblockId: 0xda55ffff,
+					},
+				},
+				{
+					flags: 0,
+					linkId: "a-to-building",
+					polygonId: null,
+					source: {
+						envCellId: 0xda550100,
+						kind: "env-cell",
+						portalId: "portal-b",
+					},
+					sourceIndex: 0,
+					target: {
+						instanceId: "building-a",
+						kind: "landblock-building",
+						portalId: "building-portal-a",
+					},
+				},
+			],
+		});
+
+		expect(graph.nodes.map((node) => node.nodeId)).toEqual([
+			"building:building-a",
+			"env-cell:3663003904",
+			"outdoor:3663069183",
+		]);
+		expect(graph.edges.map((edge) => edge.sceneCrossing)).toEqual([
+			{
+				buildingInstanceId: "building-a",
+				kind: "env-cell-to-landblock-building",
+				sourceEnvCellId: 0xda550100,
+			},
+			{
+				kind: "env-cell-to-outdoor",
+				outdoorLandblockId: 0xda55ffff,
+				sourceEnvCellId: 0xda550100,
+			},
 		]);
 	});
 

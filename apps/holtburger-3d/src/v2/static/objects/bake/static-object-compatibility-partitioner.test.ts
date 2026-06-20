@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
+	LandblockEnvCellsStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
 	StaticBakeBatchInput,
 	StaticMaterialSourceIdentity,
@@ -11,6 +12,7 @@ import { bakeStaticObjectCompatibility } from "./static-object-compatibility-bak
 import {
 	partitionStaticObjectCompatibility,
 	STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE,
+	type StaticObjectCompatibilityPayload,
 } from "./static-object-compatibility-partitioner";
 import { createStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
 
@@ -217,6 +219,74 @@ describe("V2 static object compatibility partitioner", () => {
 					drawUnitId:
 						"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0",
 					kind: "draw-unit",
+				},
+				triangleCount: 1,
+			},
+		]);
+	});
+
+	it("partitions env-cell static objects by owning env cell before material batching", () => {
+		const payload = createEnvCellStaticPayload();
+
+		const plan = partitionStaticObjectCompatibility(payload);
+
+		expect(plan.partitions).toHaveLength(2);
+		expect(
+			plan.partitions.map(
+				(partition) => partition.partitionAxes.ownership.envCellId,
+			),
+		).toEqual([0xda550100, 0xda550101]);
+		expect(plan.partitions.map((partition) => partition.triangleCount)).toEqual(
+			[1, 1],
+		);
+		expect(
+			plan.partitions.map((partition) => partition.compatibilityKey),
+		).toEqual([
+			expect.stringContaining("env-cell:da550100"),
+			expect.stringContaining("env-cell:da550101"),
+		]);
+	});
+
+	it("bakes env-cell static objects into cell-scoped draw units", () => {
+		const result = bakeStaticObjectCompatibility(
+			createEnvCellStaticBakeInput(),
+		);
+
+		const drawUnits = result.drawUnits.filter(
+			(drawUnit) => drawUnit.kind === "static-object-geometry",
+		);
+
+		expect(drawUnits).toHaveLength(2);
+		expect(
+			drawUnits.map((drawUnit) => ({
+				drawUnitId: drawUnit.drawUnitId,
+				ownership: drawUnit.ownership,
+				triangleCount: drawUnit.triangleCount,
+			})),
+		).toEqual([
+			{
+				drawUnitId:
+					"1:landblock:da55ffff:landblock-env-cells:static-object-partition:slice-0-0",
+				ownership: {
+					envCellIds: [0xda550100],
+					kind: "env-cell-static-object-seeds",
+					landblockId: 0xda55ffff,
+					seedIdentities: [
+						createObjectIdentity({ instanceId: "da550100:seed-0" }),
+					],
+				},
+				triangleCount: 1,
+			},
+			{
+				drawUnitId:
+					"1:landblock:da55ffff:landblock-env-cells:static-object-partition:slice-1-0",
+				ownership: {
+					envCellIds: [0xda550101],
+					kind: "env-cell-static-object-seeds",
+					landblockId: 0xda55ffff,
+					seedIdentities: [
+						createObjectIdentity({ instanceId: "da550101:seed-0" }),
+					],
 				},
 				triangleCount: 1,
 			},
@@ -1153,6 +1223,204 @@ describe("V2 static object compatibility partitioner", () => {
 		]);
 	});
 });
+
+function createEnvCellStaticPayload(): StaticObjectCompatibilityPayload &
+	OutdoorStaticObjectsScopePayload {
+	const payload = duplicateObjectInstance(
+		createPayload({
+			domain: "landblock-env-cells",
+			materials: [createSolidMaterial(0x08000010)],
+		}),
+	);
+	const firstObject = payload.objects[0];
+	const secondObject = payload.objects[1];
+	if (!firstObject || !secondObject) {
+		throw new Error("Fixture payload did not create env-cell static objects.");
+	}
+
+	const firstIdentity = createObjectIdentity({
+		instanceId: "da550100:seed-0",
+	});
+	const secondIdentity = createObjectIdentity({
+		instanceId: "da550101:seed-0",
+	});
+
+	return {
+		...payload,
+		materialSlots: payload.materialSlots.map((slot) => {
+			const object =
+				slot.object.instanceId === firstObject.identity.instanceId
+					? firstIdentity
+					: secondIdentity;
+			return {
+				...slot,
+				identity: {
+					...slot.identity,
+					part: {
+						...slot.identity.part,
+						object,
+					},
+				},
+				object,
+			};
+		}),
+		objects: [
+			{
+				...firstObject,
+				identity: firstIdentity,
+				owningEnvCellId: 0xda550100,
+			},
+			{
+				...secondObject,
+				identity: secondIdentity,
+				owningEnvCellId: 0xda550101,
+			},
+		],
+	};
+}
+
+function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
+	const payload = createEnvCellStaticScopePayload();
+	const work = {
+		job: {
+			domain: "landblock-env-cells" as const,
+			scope: {
+				kind: "landblock" as const,
+				landblockId: 0xda55ffff,
+			},
+		},
+		priority: 0,
+		revision: 1,
+		workId: "1:landblock:da55ffff:landblock-env-cells",
+	};
+
+	return {
+		atlasSnapshot: {
+			domain: "landblock-env-cells",
+			placements: [],
+			staticBatchId: "static-batch:objects",
+			textureUses: [],
+		},
+		attachments: {
+			envCellCellStructureGeometry: [],
+			staticObjectSourceGeometry: payload.sourceAssets.flatMap((source) =>
+				source.parts.map((part) => {
+					const fixturePart = part as typeof part & {
+						readonly positions: Float32Array;
+						readonly texCoords: Float32Array;
+					};
+					return {
+						identity: part.geometry,
+						positions: fixturePart.positions,
+						texCoords: fixturePart.texCoords,
+					};
+				}),
+			),
+		},
+		domain: "landblock-env-cells",
+		items: [
+			{
+				payload: {
+					job: work.job,
+					scope: payload,
+					sourceRevision: 1,
+				},
+				work,
+			},
+		],
+		revision: 1,
+		staticBatchId: "static-batch:objects",
+	};
+}
+
+function createEnvCellStaticScopePayload(): LandblockEnvCellsStaticScopePayload {
+	const payload = createEnvCellStaticPayload();
+	return {
+		acceptedEnvCellIds: [0xda550100, 0xda550101],
+		envCells: payload.objects.map((object) =>
+			createEnvCellStaticScopeEnvCell(object.owningEnvCellId ?? 0, object),
+		),
+		kind: "landblock-env-cells",
+		landblock: {
+			kind: "landblock-source",
+			landblockId: 0xda55ffff,
+			source: "env-cells",
+		},
+		materialSources: payload.materialSources,
+		missingRefs: [],
+		paletteSources: payload.paletteSources,
+		portalLinks: [],
+		regionRenderProfile: {
+			detailRoles: [],
+			identity: {
+				kind: "region-render-profile",
+				regionNumber: 1,
+			},
+		},
+		residencySpatial: {
+			landblockBounds: null,
+			nodeBounds: [],
+		},
+		sourceAssets: payload.sourceAssets,
+		textureRefs: payload.textureRefs,
+		visibilityDiagnostics: [],
+	};
+}
+
+function createEnvCellStaticScopeEnvCell(
+	envCellId: number,
+	object: StaticObjectCompatibilityPayload["objects"][number],
+): LandblockEnvCellsStaticScopePayload["envCells"][number] {
+	return {
+		cellBsp: {
+			kind: "leaf",
+			polyIds: [],
+			solid: 0,
+			sphere: null,
+		},
+		cellStructure: {
+			cellStructureId: 0x0d000001,
+			kind: "cell-structure",
+		},
+		environment: {
+			environmentId: 0x0e000001,
+			kind: "environment",
+		},
+		identity: {
+			envCellId,
+			kind: "env-cell-source",
+		},
+		landblockId: 0xda55ffff,
+		localPlacement: createPlacement(),
+		memberId: `member-${envCellId.toString(16)}`,
+		portalApertures: [],
+		portals: [],
+		renderGeometry: {
+			bounds: null,
+			invalidPolygons: [],
+			skippedPolygonCount: 0,
+			sourceId: envCellId,
+			surfaceIds: [],
+			triangleCount: 0,
+			triangles: [],
+			vertexCount: 0,
+		},
+		restrictionObjectId: null,
+		seenOutside: null,
+		staticObjectSeeds: [
+			{
+				debug: object.debug,
+				identity: object.identity,
+				localPlacement: object.localPlacement,
+				source: object.source,
+				sourceIndex: object.sourceIndex,
+				sourceScale: object.sourceScale,
+			},
+		],
+		surfaces: [],
+		visibleEnvCellIds: [],
+	};
+}
 
 function duplicateObjectInstance(
 	payload: OutdoorStaticObjectsScopePayload,

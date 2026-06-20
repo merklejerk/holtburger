@@ -140,6 +140,7 @@ interface StaticObjectOwnershipAxis {
 	readonly key: string;
 	readonly domain: StaticObjectCompatibilityPayload["domain"];
 	readonly landblockId: number;
+	readonly envCellId: number | null;
 	readonly sourceKey: string;
 	readonly sourceKeys: readonly string[];
 	readonly gfxKey: string;
@@ -325,6 +326,7 @@ function createTriangleCandidates(
 					landblockId: payload.landblock.landblockId,
 					materialColorKey,
 					objectKey,
+					owningEnvCellId: object.owningEnvCellId ?? null,
 					partIndex: part.partIndex,
 					materialEntryKey,
 					plan,
@@ -595,6 +597,7 @@ function createPartitionAxes(options: {
 	readonly sourceKey: string;
 	readonly gfxKey: string;
 	readonly objectKey: string;
+	readonly owningEnvCellId: number | null;
 	readonly partIndex: number;
 	readonly materialEntryKey: string;
 	readonly materialColorKey: string;
@@ -663,15 +666,30 @@ function createOwnershipAxis(options: {
 	readonly sourceKey: string;
 	readonly gfxKey: string;
 	readonly objectKey: string;
+	readonly owningEnvCellId: number | null;
 	readonly partIndex: number;
 	readonly includeObjectPart: boolean;
 }): StaticObjectOwnershipAxis {
+	if (
+		options.domain === "landblock-env-cells" &&
+		options.owningEnvCellId === null
+	) {
+		throw new Error(
+			`Env-cell static object ${options.objectKey} is missing owningEnvCellId.`,
+		);
+	}
+
 	const objectPartKey = options.includeObjectPart
 		? `${options.objectKey}:part:${options.partIndex}`
 		: null;
+	const envCellKey =
+		options.domain === "landblock-env-cells"
+			? `env-cell:${formatHex32(options.owningEnvCellId ?? 0)}`
+			: null;
 	const keyParts = [
 		`domain:${options.domain}`,
 		`landblock:${formatHex32(options.landblockId)}`,
+		...(envCellKey ? [envCellKey] : []),
 		objectPartKey ? "scope:object-part" : "scope:batchable",
 	];
 	if (objectPartKey) {
@@ -680,6 +698,8 @@ function createOwnershipAxis(options: {
 
 	return {
 		domain: options.domain,
+		envCellId:
+			options.domain === "landblock-env-cells" ? options.owningEnvCellId : null,
 		gfxKey: options.gfxKey,
 		gfxKeys: [options.gfxKey],
 		key: keyParts.join("|"),

@@ -1221,6 +1221,68 @@ describe("V2 static scene query", () => {
 		});
 	});
 
+	it("derives portal traversal from cached static portal graphs", () => {
+		const query = new StaticSceneQuery();
+		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+
+		query.applyStaticPeerRecords({
+			portalGraphs: [createStaticPortalGraphRecord(owner)],
+		});
+
+		const graph = query.queryPortalTraversalGraph({ landblockId: 0xda55ffff });
+		const plan = query.queryPortalTraversal({
+			landblockId: 0xda55ffff,
+			maxCells: 8,
+			maxDepth: 4,
+			maxPortalViews: 16,
+			startEnvCellId: 0xda550100,
+		});
+
+		expect(query.queryPortalTraversalGraph({ landblockId: 0xda55ffff })).toBe(
+			graph,
+		);
+		expect(plan.visibleCells.map((cell) => cell.envCellId)).toEqual([
+			0xda550100, 0xda550101,
+		]);
+	});
+
+	it("invalidates cached portal traversal graphs only for changed landblocks", () => {
+		const query = new StaticSceneQuery();
+		const ownerA = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+		const ownerB = createEnvCellWorkOwner("work-env-b", 0xda56ffff);
+
+		query.applyStaticPeerRecords({
+			portalGraphs: [
+				createStaticPortalGraphRecord(ownerA),
+				createStaticPortalGraphRecord(ownerB, {
+					landblockId: 0xda56ffff,
+					sourceEnvCellId: 0xda560100,
+					targetEnvCellId: 0xda560101,
+				}),
+			],
+		});
+
+		const firstA = query.queryPortalTraversalGraph({ landblockId: 0xda55ffff });
+		const firstB = query.queryPortalTraversalGraph({ landblockId: 0xda56ffff });
+
+		query.applyStaticPeerRecords({
+			portalGraphs: [
+				createStaticPortalGraphRecord(ownerB, {
+					landblockId: 0xda56ffff,
+					sourceEnvCellId: 0xda560100,
+					targetEnvCellId: 0xda560102,
+				}),
+			],
+		});
+
+		expect(query.queryPortalTraversalGraph({ landblockId: 0xda55ffff })).toBe(
+			firstA,
+		);
+		expect(query.queryPortalTraversalGraph({ landblockId: 0xda56ffff })).not.toBe(
+			firstB,
+		);
+	});
+
 	it("sorts committed records by typed keys without JSON stringification", () => {
 		const query = new StaticSceneQuery();
 		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
@@ -2007,7 +2069,15 @@ function createEnvCellPortalLink(options: {
 
 function createStaticPortalGraphRecord(
 	owner: StaticWorkPeerRecordOwner,
+	options: {
+		readonly landblockId?: number;
+		readonly sourceEnvCellId?: number;
+		readonly targetEnvCellId?: number;
+	} = {},
 ): StaticPortalGraphRecord {
+	const landblockId = options.landblockId ?? 0xda55ffff;
+	const sourceEnvCellId = options.sourceEnvCellId ?? 0xda550100;
+	const targetEnvCellId = options.targetEnvCellId ?? 0xda550101;
 	return {
 		edges: [
 			{
@@ -2018,31 +2088,34 @@ function createStaticPortalGraphRecord(
 				polygonId: null,
 				provenance: {
 					kind: "env-cell-portal",
-					sourceEnvCellId: 0xda550100,
+					sourceEnvCellId,
 					sourcePortalId: "portal-a",
-					targetEnvCellId: 0xda550101,
-					targetPortalId: "portal-b",
+					target: {
+						envCellId: targetEnvCellId,
+						kind: "env-cell",
+						portalId: "portal-b",
+					},
 				},
 				sceneCrossing: {
 					kind: "env-cell-to-env-cell",
-					sourceEnvCellId: 0xda550100,
-					targetEnvCellId: 0xda550101,
+					sourceEnvCellId,
+					targetEnvCellId,
 				},
 				sourceIndex: 0,
-				sourceNodeId: "env-cell:3663003904",
-				targetNodeId: "env-cell:3663003905",
+				sourceNodeId: `env-cell:${sourceEnvCellId >>> 0}`,
+				targetNodeId: `env-cell:${targetEnvCellId >>> 0}`,
 			},
 		],
 		kind: "static-portal-graph",
-		landblockId: 0xda55ffff,
+		landblockId,
 		nodes: [
 			{
-				nodeId: "env-cell:3663003904",
-				scene: { envCellId: 0xda550100, kind: "env-cell" },
+				nodeId: `env-cell:${sourceEnvCellId >>> 0}`,
+				scene: { envCellId: sourceEnvCellId, kind: "env-cell" },
 			},
 			{
-				nodeId: "env-cell:3663003905",
-				scene: { envCellId: 0xda550101, kind: "env-cell" },
+				nodeId: `env-cell:${targetEnvCellId >>> 0}`,
+				scene: { envCellId: targetEnvCellId, kind: "env-cell" },
 			},
 		],
 		owner,

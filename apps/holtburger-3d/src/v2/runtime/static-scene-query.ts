@@ -30,12 +30,16 @@ import {
 	deriveOutdoorCameraLandblockResidency,
 } from "./static-placement";
 import {
-	createPortalTraversalPlan,
+	createPortalTraversalGraph,
+	createPortalTraversalGraphFromStaticPortalGraphs,
+	createPortalTraversalPlanFromGraph,
+	type PortalTraversalGraph,
 	type PortalTraversalPlan,
 } from "./portal-traversal-planner";
 export type {
 	PortalTraversalDiagnostic,
 	PortalTraversalEnvCellEdge,
+	PortalTraversalGraph,
 	PortalTraversalPlan,
 	PortalTraversalSceneCrossing,
 	PortalTraversalVisibleCell,
@@ -386,6 +390,11 @@ interface CommittedRecordEntry<TRecord> {
 	readonly record: TRecord;
 }
 
+interface CachedPortalTraversalGraph {
+	readonly graph: PortalTraversalGraph;
+	readonly revision: number;
+}
+
 class LandblockGridSpatialIndex {
 	#outdoorAnchorLandblockId: number | null = null;
 	readonly #bucketsByLandblockId = new Map<number, LandblockSpatialBucket>();
@@ -658,6 +667,14 @@ export class StaticSceneQuery {
 		string,
 		CommittedRecordEntry<StaticAuthoredDynamicSeedRecord>
 	>();
+	readonly #portalTraversalGraphRevisionsByLandblockId = new Map<
+		number,
+		number
+	>();
+	readonly #portalTraversalGraphCacheByLandblockId = new Map<
+		number,
+		CachedPortalTraversalGraph
+	>();
 
 	ingestSourcePayload(
 		payload: StaticScopePayload,
@@ -785,6 +802,11 @@ export class StaticSceneQuery {
 	hasCommittedPortalInteriorScene(options: {
 		readonly landblockId: number;
 	}): boolean {
+		for (const entry of this.#committedPortalGraphsByKey.values()) {
+			if (entry.record.landblockId === options.landblockId) {
+				return true;
+			}
+		}
 		for (const entry of this.#committedPortalInteriorRecordsByKey.values()) {
 			if (entry.record.landblockId === options.landblockId) {
 				return true;
@@ -1044,14 +1066,45 @@ export class StaticSceneQuery {
 		readonly startEnvCellId: number;
 	}): PortalTraversalPlan {
 		const landblockId = options.landblockId >>> 0;
-		return createPortalTraversalPlan({
+		return createPortalTraversalPlanFromGraph({
+			graph: this.queryPortalTraversalGraph({ landblockId }),
 			landblockId,
 			maxCells: options.maxCells,
 			maxDepth: options.maxDepth,
 			maxPortalViews: options.maxPortalViews,
-			portalInteriorRecords: this.queryPortalInteriorRecords({ landblockId }),
 			startEnvCellId: options.startEnvCellId >>> 0,
 		});
+	}
+
+	queryPortalTraversalGraph(options: {
+		readonly landblockId: number;
+	}): PortalTraversalGraph {
+		const landblockId = options.landblockId >>> 0;
+		const revision = this.#getPortalTraversalGraphRevision(landblockId);
+		const cached =
+			this.#portalTraversalGraphCacheByLandblockId.get(landblockId);
+		if (cached?.revision === revision) {
+			return cached.graph;
+		}
+
+		const portalGraphs = this.queryPortalGraphs({ landblockId });
+		const graph =
+			portalGraphs.length > 0
+				? createPortalTraversalGraphFromStaticPortalGraphs({
+						landblockId,
+						portalGraphs,
+					})
+				: createPortalTraversalGraph({
+						landblockId,
+						portalInteriorRecords: this.queryPortalInteriorRecords({
+							landblockId,
+						}),
+					});
+		this.#portalTraversalGraphCacheByLandblockId.set(landblockId, {
+			graph,
+			revision,
+		});
+		return graph;
 	}
 
 	queryTerrainQuadDetails(options: {
@@ -1524,11 +1577,12 @@ export class StaticSceneQuery {
 	#upsertCommittedPortalInteriorRecords(
 		records: readonly StaticPortalInteriorRecord[],
 	): void {
-		this.#deleteCommittedRecordsForOwners(
+		const affectedLandblockIds = this.#collectOwnerReplacementLandblockIds(
 			this.#committedPortalInteriorRecordsByKey,
 			records,
 		);
 		for (const record of records) {
+			affectedLandblockIds.add(record.landblockId >>> 0);
 			this.#committedPortalInteriorRecordsByKey.set(
 				createCommittedPortalInteriorRecordKey(record),
 				{
@@ -1537,14 +1591,16 @@ export class StaticSceneQuery {
 				},
 			);
 		}
+		this.#invalidatePortalTraversalGraphs(affectedLandblockIds);
 	}
 
 	#upsertCommittedPortalGraphs(records: readonly StaticPortalGraphRecord[]): void {
-		this.#deleteCommittedRecordsForOwners(
+		const affectedLandblockIds = this.#collectOwnerReplacementLandblockIds(
 			this.#committedPortalGraphsByKey,
 			records,
 		);
 		for (const record of records) {
+			affectedLandblockIds.add(record.landblockId >>> 0);
 			this.#committedPortalGraphsByKey.set(
 				createCommittedPortalGraphRecordKey(record),
 				{
@@ -1553,6 +1609,7 @@ export class StaticSceneQuery {
 				},
 			);
 		}
+		this.#invalidatePortalTraversalGraphs(affectedLandblockIds);
 	}
 
 	#upsertCommittedSourceMappings(
@@ -1686,7 +1743,37 @@ export class StaticSceneQuery {
 		}
 	}
 
+	#collectOwnerReplacementLandblockIds<
+		TRecord extends {
+			readonly landblockId: number;
+			readonly owner: {
+				readonly kind: string;
+				readonly drawUnitId?: string;
+				readonly domain?: StaticDomain;
+				readonly scopeKey?: string;
+				readonly workId?: string;
+			};
+		},
+	>(
+		recordsByKey: Map<string, CommittedRecordEntry<TRecord>>,
+		records: readonly TRecord[],
+	): Set<number> {
+		const ownerKeys = new Set(
+			records.map((record) => createStaticPeerOwnerKey(record.owner)),
+		);
+		const affectedLandblockIds = new Set<number>();
+		for (const [key, entry] of recordsByKey) {
+			if (!ownerKeys.has(entry.ownerKey)) {
+				continue;
+			}
+			affectedLandblockIds.add(entry.record.landblockId >>> 0);
+			recordsByKey.delete(key);
+		}
+		return affectedLandblockIds;
+	}
+
 	#deleteDrawUnitOwnedCommittedRecords(drawUnitIds: ReadonlySet<string>): void {
+		const affectedPortalLandblockIds = new Set<number>();
 		for (const recordsByKey of [
 			this.#committedSpatialRecordsByKey,
 			this.#committedVisibilityRecordsByKey,
@@ -1698,10 +1785,19 @@ export class StaticSceneQuery {
 			for (const [key, entry] of recordsByKey) {
 				const owner = entry.record.owner;
 				if (owner.kind === "draw-unit" && drawUnitIds.has(owner.drawUnitId)) {
+					if (
+						recordsByKey === this.#committedPortalInteriorRecordsByKey ||
+						recordsByKey === this.#committedPortalGraphsByKey
+					) {
+						affectedPortalLandblockIds.add(
+							getCommittedRecordLandblockId(entry.record) ?? 0,
+						);
+					}
 					recordsByKey.delete(key);
 				}
 			}
 		}
+		this.#invalidatePortalTraversalGraphs(affectedPortalLandblockIds);
 	}
 
 	#hasCommittedEnvCellRecords(landblockId: number): boolean {
@@ -1752,6 +1848,7 @@ export class StaticSceneQuery {
 				createRetainedScopeKey(scope.domain, scope.scope.landblockId),
 			),
 		);
+		const affectedPortalLandblockIds = new Set<number>();
 		for (const recordsByKey of [
 			this.#committedSpatialRecordsByKey,
 			this.#committedVisibilityRecordsByKey,
@@ -1768,10 +1865,35 @@ export class StaticSceneQuery {
 						),
 					)
 				) {
+					if (
+						recordsByKey === this.#committedPortalInteriorRecordsByKey ||
+						recordsByKey === this.#committedPortalGraphsByKey
+					) {
+						const landblockId = getCommittedRecordLandblockId(entry.record);
+						if (landblockId !== null) {
+							affectedPortalLandblockIds.add(landblockId >>> 0);
+						}
+					}
 					recordsByKey.delete(key);
 				}
 			}
 		}
+		this.#invalidatePortalTraversalGraphs(affectedPortalLandblockIds);
+	}
+
+	#invalidatePortalTraversalGraphs(landblockIds: ReadonlySet<number>): void {
+		for (const landblockId of landblockIds) {
+			const normalizedLandblockId = landblockId >>> 0;
+			this.#portalTraversalGraphRevisionsByLandblockId.set(
+				normalizedLandblockId,
+				this.#getPortalTraversalGraphRevision(normalizedLandblockId) + 1,
+			);
+			this.#portalTraversalGraphCacheByLandblockId.delete(normalizedLandblockId);
+		}
+	}
+
+	#getPortalTraversalGraphRevision(landblockId: number): number {
+		return this.#portalTraversalGraphRevisionsByLandblockId.get(landblockId >>> 0) ?? 0;
 	}
 
 	#pickOutdoorScene(

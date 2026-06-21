@@ -1058,6 +1058,49 @@ Implementation update:
   - `npm run lint:ts`
   - `npm run test:ts`
 
+Follow-up implementation update:
+
+- A 2026-06-21 follow-up screenshot showed the transition fanout fix reduced the outside graph to `edges 704 env / 38 transition` and drastically improved performance, but visible terrain/floor leakage still remained through the top building transition aperture.
+- Ran `inspect_landblock_building_portals --landblock da55ffff --aperture-alignment`.
+  - `buildingTransitionApertureAlignment landblock=0xda55ffff apertures=38 matched=38 mismatched=0 missing=0`.
+  - This rules out mismatched building-transition aperture polygons versus target env-cell outside portal apertures for the affected landblock.
+- Proven remaining cause:
+  - The outdoor direct env-cell render path copied exterior color and exterior depth to the display, cleared only stencil, then rendered direct env-cell children through portal masks.
+  - Direct portal mask draws established stencil coverage but did not reset display depth inside the child portal stencil.
+  - As a result, exterior terrain/building depth remained authoritative inside a valid portal aperture. Interior stone floor/walls then had to depth-test against outdoor terrain depth, producing camera-dependent terrain/floor leakage through the building opening.
+- Fix:
+  - Added a direct portal depth-reset shader that writes `gl_FragDepth = 1.0`.
+  - After direct portal enter masks are drawn for a child node, the renderer now draws a fullscreen depth reset with color writes disabled, depth writes enabled, depth func `ALWAYS`, and stencil test `EQUAL child.traversalDepth`.
+  - Child env-cell resources are then drawn under the same child stencil, with a fresh far depth value inside the aperture instead of inherited exterior depth.
+  - The reset applies to both outdoor transition roots and nested env-cell portal children because it is part of shared direct portal graph execution.
+- Validation:
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run test:ts -- src/v2/renderer/webgl2/webgl2-renderer.test.ts`
+  - `npm run test:ts -- src/v2/renderer/webgl2/webgl2-renderer.test.ts src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/static/portal-graphs.test.ts src/v2/runtime/client-runtime.test.ts`
+  - `npm run test:ts`
+  - `uv run cargo check -p holtburger-debug-harness --bin inspect_landblock_building_portals`
+  - `rustfmt --check crates/holtburger-debug-harness/src/bin/inspect_landblock_building_portals.rs`
+
+Banding follow-up:
+
+- Manual validation after the direct portal depth reset removed the shimmering, but left stable banding similar to the earlier depth-copy artifacts documented in `docs/plans/holtburger-3d-frontend-v2-implementation-plan.md`.
+- Relevant prior evidence:
+  - fixed-function aperture coverage against framebuffer depth was stable;
+  - shader-side sampled-depth coverage banded;
+  - fullscreen whole-target depth copies using sampled depth plus `gl_FragDepth` also banded.
+- The outdoor direct path still used a fullscreen shader to copy exterior depth from the offscreen exterior target into the default framebuffer before drawing portal masks and children.
+- Fix:
+  - Outdoor direct rendering now initializes `targets.compositePing` from the exterior target with `#copySceneDomainColorAndDepth(...)`, which draws color with depth writes disabled and transfers depth with `gl.blitFramebuffer(... DEPTH_BUFFER_BIT ...)`.
+  - Direct portal mask/depth-reset/child drawing now happens in that packed offscreen depth-stencil target.
+  - The renderer blits only the final composed color to the default framebuffer for display.
+  - Removed the old shader-depth copy-to-display path.
+- Validation:
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run test:ts -- src/v2/renderer/webgl2/webgl2-renderer.test.ts`
+  - `npm run test:ts`
+
 ### Phase 10: Define Atomic Landblock Layer Contracts
 
 Problem to solve:

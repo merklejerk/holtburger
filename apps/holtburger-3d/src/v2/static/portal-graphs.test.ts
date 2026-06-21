@@ -453,7 +453,7 @@ describe("V2 static portal graphs", () => {
 		]);
 	});
 
-	it("keeps env-cell root cycles finite and layers descendants after the root SCC", () => {
+	it("keeps env-cell root cycles finite without assigning layer zero to non-root cells", () => {
 		const owner = createWorkOwner("work-env", "landblock-env-cells");
 		const record = createPortalInteriorRecord({
 			envCellIds: [0xda550100, 0xda550101, 0xda550102],
@@ -501,12 +501,13 @@ describe("V2 static portal graphs", () => {
 		).toMatchObject({
 			cyclic: true,
 			envCellIds: [0xda550100, 0xda550102],
-			renderLayer: 0,
+			renderLayer: null,
 		});
-		expect(projection?.renderLayerByEnvCellId).toContainEqual({
-			envCellId: 0xda550101,
-			renderLayer: 1,
-		});
+		expect(projection?.renderLayerByEnvCellId).toEqual([
+			{ envCellId: 0xda550100, renderLayer: 0 },
+			{ envCellId: 0xda550101, renderLayer: 2 },
+			{ envCellId: 0xda550102, renderLayer: 1 },
+		]);
 		expect(projection?.diagnostics.componentInternalEdgeCount).toBe(2);
 	});
 });

@@ -1782,6 +1782,24 @@ Dry-run findings on 2026-06-21:
   - no non-root env cell appears in `renderLayerByEnvCellId` with `renderLayer: 0`;
   - `queryEnvCellPortalProjection(...)` cache/source-key behavior from 9E.2 remains unchanged.
 
+9E.2b implementation update on 2026-06-21:
+
+- Completed the resident-cell-only layer-0 correction for env-cell-root projection.
+- Outdoor-root projection still uses component/SCC render layers, preserving Phase 9C outdoor behavior.
+- Env-cell-root projection now keeps SCC/component facts for topology, but derives renderer-facing `renderLayerByEnvCellId` and `renderLayers` through an env-cell-root layer pass:
+  - `startEnvCellId` is the only layer-0 env cell;
+  - other cells inside the root SCC are assigned masked layers starting at `1`;
+  - descendant components are layered from the maximum render layer of their incoming source, so `A -> C`, `C -> A`, `C -> B` produces `A=0`, `C=1`, `B=2`;
+  - cycle edges that point back to the resident env cell do not lift the resident cell or create unbounded layers.
+- Component `renderLayer` is intentionally left `null` for env-cell-root projections because SCC topology and renderer layer semantics are no longer isomorphic in that root policy.
+- Debt introduced/retained:
+  - non-root SCCs still share a single masked render layer internally. This is acceptable for 9E.2b because the urgent correctness rule is "only the resident cell is unmasked," but 9E.3 should keep an eye on whether per-entry stencil identity is needed for same-component masked cells.
+  - `StaticPortalProjectionRenderLayer.componentIds` may list the same component in multiple env-cell-root render layers when the root SCC is split across resident/non-resident cells. Renderer code should treat `envCellIds`/entries as authoritative once 9E.3 generalizes the frame plan.
+- Validation for this slice:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - `npm run test:ts -- src/v2/static/portal-graphs.test.ts src/v2/runtime/static-scene-query.test.ts`.
+
 Acceptance criteria:
 
 - Dungeon/env-cell-origin direct rendering no longer depends on recursive portal-stack `PortalFrameGraphPlan` for production planning.

@@ -626,7 +626,7 @@ describe("V2 client runtime", () => {
 
 		expect(renderer.portalFrameWorkPlans.at(-1)).toMatchObject({
 			kind: "direct-env-cell",
-			mode: "outdoor-projection",
+			mode: "portal-projection",
 			layeredGraph: {
 				renderEntries: [
 					expect.objectContaining({
@@ -642,7 +642,7 @@ describe("V2 client runtime", () => {
 		});
 		expect(
 			renderer.portalFrameWorkPlans.at(-1)?.kind === "direct-env-cell" &&
-				renderer.portalFrameWorkPlans.at(-1)?.mode === "outdoor-projection"
+				renderer.portalFrameWorkPlans.at(-1)?.mode === "portal-projection"
 				? renderer.portalFrameWorkPlans.at(-1)?.layeredGraph.maskEdges.length
 				: 0,
 		).toBe(1);

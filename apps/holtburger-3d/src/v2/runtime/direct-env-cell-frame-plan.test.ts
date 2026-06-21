@@ -6,7 +6,7 @@ import type {
 import type { PortalTraversalPlan } from "./static-scene-query";
 import {
 	createDirectEnvCellFramePlan,
-	createOutdoorProjectionPortalFramePlan,
+	createPortalProjectionFramePlan,
 } from "./direct-env-cell-frame-plan";
 
 describe("direct env-cell frame plan", () => {
@@ -421,7 +421,7 @@ describe("direct env-cell frame plan", () => {
 	});
 
 	it("creates one outdoor projection render entry for a shared diamond target with multiple mask edges", () => {
-		const plan = createOutdoorProjectionPortalFramePlan({
+		const plan = createPortalProjectionFramePlan({
 			landblockId: 0xda55ffff,
 			envCellResourceMembership: [
 				createEnvCellMembership(0xda550100, "structured-a"),
@@ -429,10 +429,10 @@ describe("direct env-cell frame plan", () => {
 				createEnvCellMembership(0xda550102, "structured-c"),
 				createEnvCellMembership(0xda550103, "structured-d"),
 			],
-			maxCells: 16,
+			maxRenderEntries: 16,
 			maxDepth: 4,
-			maxPortalViews: 16,
-			projection: createOutdoorProjectionRecord({
+			maxMaskEdges: 16,
+			projection: createPortalProjectionRecord({
 				edges: [
 					createProjectionEdge({
 						edgeId: "outdoor-a",
@@ -469,9 +469,9 @@ describe("direct env-cell frame plan", () => {
 			}),
 		});
 
-		expect(plan?.mode).toBe("outdoor-projection");
-		if (plan?.mode !== "outdoor-projection") {
-			throw new Error("Expected outdoor projection plan.");
+		expect(plan?.mode).toBe("portal-projection");
+		if (plan?.mode !== "portal-projection") {
+			throw new Error("Expected portal projection plan.");
 		}
 		expect(plan.layeredGraph.renderEntries).toHaveLength(4);
 		expect(
@@ -501,17 +501,17 @@ describe("direct env-cell frame plan", () => {
 	});
 
 	it("caps outdoor projection render entries by render layer without duplicating alternate paths", () => {
-		const plan = createOutdoorProjectionPortalFramePlan({
+		const plan = createPortalProjectionFramePlan({
 			landblockId: 0xda55ffff,
 			envCellResourceMembership: [
 				createEnvCellMembership(0xda550100, "structured-a"),
 				createEnvCellMembership(0xda550101, "structured-b"),
 				createEnvCellMembership(0xda550102, "structured-c"),
 			],
-			maxCells: 16,
+			maxRenderEntries: 16,
 			maxDepth: 2,
-			maxPortalViews: 16,
-			projection: createOutdoorProjectionRecord({
+			maxMaskEdges: 16,
+			projection: createPortalProjectionRecord({
 				edges: [
 					createProjectionEdge({
 						edgeId: "outdoor-a",
@@ -542,9 +542,9 @@ describe("direct env-cell frame plan", () => {
 			}),
 		});
 
-		expect(plan?.mode).toBe("outdoor-projection");
-		if (plan?.mode !== "outdoor-projection") {
-			throw new Error("Expected outdoor projection plan.");
+		expect(plan?.mode).toBe("portal-projection");
+		if (plan?.mode !== "portal-projection") {
+			throw new Error("Expected portal projection plan.");
 		}
 		expect(
 			plan.layeredGraph.renderEntries.map((entry) => entry.envCellId),
@@ -554,6 +554,79 @@ describe("direct env-cell frame plan", () => {
 			renderEntriesSkippedByLayerCap: 1,
 			renderEntryCount: 2,
 		});
+	});
+
+	it("creates an env-cell projection base entry for the resident root without masking it", () => {
+		const plan = createPortalProjectionFramePlan({
+			landblockId: 0xda55ffff,
+			envCellResourceMembership: [
+				createEnvCellMembership(0xda550100, "structured-root"),
+				createEnvCellMembership(0xda550101, "structured-child"),
+			],
+			maxRenderEntries: 16,
+			maxDepth: 2,
+			maxMaskEdges: 16,
+			projection: createPortalProjectionRecord({
+				edges: [
+					createProjectionEdge({
+						edgeId: "a-b",
+						sourceEnvCellId: 0xda550100,
+						targetEnvCellId: 0xda550101,
+					}),
+				],
+				layers: [
+					{ envCellIds: [0xda550100], renderLayer: 0 },
+					{ envCellIds: [0xda550101], renderLayer: 1 },
+				],
+				root: {
+					envCellId: 0xda550100,
+					kind: "env-cell-root",
+					landblockId: 0xda55ffff,
+					rootNodeId: "env-cell:3663003904",
+				},
+			}),
+		});
+
+		expect(plan?.mode).toBe("portal-projection");
+		if (plan?.mode !== "portal-projection") {
+			throw new Error("Expected portal projection plan.");
+		}
+		expect(plan.layeredGraph.baseEntry).toMatchObject({
+			resources: expect.objectContaining({
+				structuredInteriorDrawUnitIds: ["structured-root"],
+			}),
+			scene: {
+				envCellId: 0xda550100,
+				kind: "env-cell-direct",
+				landblockId: 0xda55ffff,
+			},
+		});
+		expect(plan.layeredGraph.renderEntries).toEqual([
+			expect.objectContaining({
+				envCellId: 0xda550101,
+				incomingMaskEdgeIds: [0],
+				renderLayer: 1,
+				resources: expect.objectContaining({
+					structuredInteriorDrawUnitIds: ["structured-child"],
+				}),
+			}),
+		]);
+		expect(plan.layeredGraph.renderEntries).not.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ envCellId: 0xda550100 }),
+			]),
+		);
+		expect(plan.layeredGraph.renderLayers).toEqual([
+			{ renderEntryIds: [0], renderLayer: 1 },
+		]);
+		expect(plan.layeredGraph.maskEdges).toEqual([
+			expect.objectContaining({
+				renderEntryId: 0,
+				renderLayer: 1,
+				sourceEnvCellId: 0xda550100,
+				targetEnvCellId: 0xda550101,
+			}),
+		]);
 	});
 });
 
@@ -675,12 +748,13 @@ function createEnvCellMembership(
 	};
 }
 
-function createOutdoorProjectionRecord(options: {
+function createPortalProjectionRecord(options: {
 	readonly edges: readonly StaticPortalProjectionRecord["edges"][number][];
 	readonly layers: readonly {
 		readonly envCellIds: readonly number[];
 		readonly renderLayer: number;
 	}[];
+	readonly root?: StaticPortalProjectionRecord["root"];
 }): StaticPortalProjectionRecord {
 	const envCellIds = [
 		...new Set(options.layers.flatMap((layer) => layer.envCellIds)),
@@ -752,12 +826,12 @@ function createOutdoorProjectionRecord(options: {
 			envCellIds: layer.envCellIds,
 			renderLayer: layer.renderLayer,
 		})),
-		root: {
+		root: options.root ?? {
 			kind: "outdoor-root",
 			landblockId: 0xda55ffff,
 			rootNodeId: "outdoor-root",
 		},
-		rootNodeId: "outdoor-root",
+		rootNodeId: options.root?.rootNodeId ?? "outdoor-root",
 		sourceRevisionKey: "projection-test-key",
 	};
 }

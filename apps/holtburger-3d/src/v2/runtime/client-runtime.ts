@@ -15,7 +15,7 @@ import {
 } from "../renderer/portal-frame-work-plan";
 import {
 	createDirectEnvCellFramePlan,
-	createOutdoorProjectionPortalFramePlan,
+	createPortalProjectionFramePlan,
 } from "./direct-env-cell-frame-plan";
 import { formatHex32, normalizeOutdoorLandblockId } from "../../lib/landblocks";
 import { TextureManager } from "../textures/texture-manager";
@@ -164,9 +164,9 @@ type PortalFramePlanKey =
 			readonly kind: "outdoor-transition";
 			readonly envCellResourceMembershipRevision: number;
 			readonly landblockId: number;
-			readonly maxCells: number;
+			readonly maxRenderEntries: number;
 			readonly maxDepth: number;
-			readonly maxPortalViews: number;
+			readonly maxMaskEdges: number;
 			readonly projectionSourceRevisionKey: string;
 			readonly renderAnchorLandblockId: number | null;
 	  };
@@ -1051,9 +1051,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 						this.#envCellResourceMembershipRevision,
 					kind: "outdoor-transition",
 					landblockId,
-					maxCells: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
+					maxRenderEntries: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
 					maxDepth: this.#directEnvCellPortalMaxDepth,
-					maxPortalViews: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
+					maxMaskEdges: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
 					projectionSourceRevisionKey: projection.sourceRevisionKey,
 					renderAnchorLandblockId: this.#renderAnchorLandblockId,
 				};
@@ -1061,12 +1061,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 				if (cachedPlan) {
 					return cachedPlan;
 				}
-				const directPlan = createOutdoorProjectionPortalFramePlan({
+				const directPlan = createPortalProjectionFramePlan({
 					landblockId,
 					envCellResourceMembership: this.#envCellResourceMembership,
-					maxCells: portalFramePlanKey.maxCells,
+					maxRenderEntries: portalFramePlanKey.maxRenderEntries,
 					maxDepth: portalFramePlanKey.maxDepth,
-					maxPortalViews: portalFramePlanKey.maxPortalViews,
+					maxMaskEdges: portalFramePlanKey.maxMaskEdges,
 					projection,
 				});
 				if (directPlan) {
@@ -2696,9 +2696,7 @@ function portalFramePlanKeysEqual(
 	if (
 		left.kind !== right.kind ||
 		left.landblockId !== right.landblockId ||
-		left.maxCells !== right.maxCells ||
 		left.maxDepth !== right.maxDepth ||
-		left.maxPortalViews !== right.maxPortalViews ||
 		left.renderAnchorLandblockId !== right.renderAnchorLandblockId ||
 		left.envCellResourceMembershipRevision !==
 			right.envCellResourceMembershipRevision
@@ -2708,12 +2706,16 @@ function portalFramePlanKeysEqual(
 	if (left.kind === "direct-env-cell") {
 		return (
 			right.kind === "direct-env-cell" &&
+			left.maxCells === right.maxCells &&
+			left.maxPortalViews === right.maxPortalViews &&
 			left.envCellId === right.envCellId &&
 			left.portalTraversalGraphRevision === right.portalTraversalGraphRevision
 		);
 	}
 	return (
 		right.kind === "outdoor-transition" &&
+		left.maxRenderEntries === right.maxRenderEntries &&
+		left.maxMaskEdges === right.maxMaskEdges &&
 		left.projectionSourceRevisionKey === right.projectionSourceRevisionKey
 	);
 }

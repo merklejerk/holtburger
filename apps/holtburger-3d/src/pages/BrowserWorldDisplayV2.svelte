@@ -1160,24 +1160,34 @@
 		if (plan.kind === "legacy-render-pass") {
 			return `legacy ${plan.mode}`;
 		}
-		if (plan.mode === "outdoor-projection") {
+		if (plan.mode === "portal-projection") {
 			const graph = plan.layeredGraph;
-			const missingResourceCells = graph.renderEntries.filter(
-				(entry) => entry.resources.resourceState === "missing-resources",
-			).length;
-			const structuredDrawUnits = graph.renderEntries.reduce(
-				(count, entry) =>
-					count + entry.resources.structuredInteriorDrawUnitIds.length,
-				0,
-			);
-			const staticDrawUnits = graph.renderEntries.reduce(
-				(count, entry) =>
-					count + entry.resources.envCellStaticObjectDrawUnitIds.length,
-				0,
-			);
+			const baseEntryResources =
+				"resources" in graph.baseEntry ? graph.baseEntry.resources : null;
+			const missingResourceCells =
+				graph.renderEntries.filter(
+					(entry) => entry.resources.resourceState === "missing-resources",
+				).length +
+				(baseEntryResources?.resourceState === "missing-resources" ? 1 : 0);
+			const structuredDrawUnits =
+				graph.renderEntries.reduce(
+					(count, entry) =>
+						count + entry.resources.structuredInteriorDrawUnitIds.length,
+					0,
+				) + (baseEntryResources?.structuredInteriorDrawUnitIds.length ?? 0);
+			const staticDrawUnits =
+				graph.renderEntries.reduce(
+					(count, entry) =>
+						count + entry.resources.envCellStaticObjectDrawUnitIds.length,
+					0,
+				) + (baseEntryResources?.envCellStaticObjectDrawUnitIds.length ?? 0);
+			const base =
+				graph.baseEntry.scene.kind === "outdoor-target"
+					? `outdoor ${formatHexId(graph.baseEntry.scene.landblockId)}`
+					: `env ${formatHexId(graph.baseEntry.scene.landblockId)} / ${formatHexId(graph.baseEntry.scene.envCellId)}`;
 			const aperture = graph.diagnostics;
 			const projection = graph.projectionDiagnostics;
-			return `${plan.mode} base outdoor ${formatHexId(graph.baseEntry.scene.landblockId)} entries ${graph.renderEntries.length}/${projection.projectedEnvCellCount} cells layers ${graph.renderLayers.length} max ${projection.maxSelectedRenderLayer}/${projection.maxProjectionRenderLayer} missing ${missingResourceCells} masks ${graph.maskEdges.length} apertures ${graph.apertureResources.length} edges ${aperture.envCellPortalEdges} env / ${aperture.buildingTransitionEdges} transition dup ${aperture.duplicateMaskEdges} dedupe ${aperture.dedupedGeometryResources} roots ${aperture.transitionRootCount}/${aperture.transitionRootCandidateCount} components ${projection.componentCount} cyclic ${projection.cyclicComponentCount} internal ${projection.componentInternalEdgeCount} skipped ${projection.renderEntriesSkippedByLayerCap} layer / ${projection.renderEntriesSkippedByMaxCells} cell-cap / ${projection.maskEdgesSkippedByMaxPortalViews} mask-cap resources ${structuredDrawUnits} cell / ${staticDrawUnits} static`;
+			return `${plan.mode} base ${base} entries ${graph.renderEntries.length}/${projection.projectedEnvCellCount} cells layers ${graph.renderLayers.length} max ${projection.maxSelectedRenderLayer}/${projection.maxProjectionRenderLayer} missing ${missingResourceCells} masks ${graph.maskEdges.length} apertures ${graph.apertureResources.length} edges ${aperture.envCellPortalEdges} env / ${aperture.buildingTransitionEdges} transition dup ${aperture.duplicateMaskEdges} dedupe ${aperture.dedupedGeometryResources} roots ${aperture.transitionRootCount}/${aperture.transitionRootCandidateCount} components ${projection.componentCount} cyclic ${projection.cyclicComponentCount} internal ${projection.componentInternalEdgeCount} skipped ${projection.renderEntriesSkippedByLayerCap} layer / ${projection.renderEntriesSkippedByMaxRenderEntries} entry-cap / ${projection.maskEdgesSkippedByMaxMaskEdges} mask-cap resources ${structuredDrawUnits} cell / ${staticDrawUnits} static`;
 		}
 
 		const graph = plan.graph;

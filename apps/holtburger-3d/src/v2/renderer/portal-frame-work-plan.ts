@@ -1,10 +1,10 @@
 import type {
 	PortalApertureFrameDiagnostics,
 	PortalApertureGeometryResourcePlan,
-	OutdoorProjectionPortalFrameGraphPlan,
-	OutdoorProjectionPortalFrameLayerPlan,
-	OutdoorProjectionPortalFrameMaskEdgePlan,
-	OutdoorProjectionPortalFrameRenderEntryPlan,
+	PortalProjectionFrameGraphPlan,
+	PortalProjectionFrameLayerPlan,
+	PortalProjectionFrameMaskEdgePlan,
+	PortalProjectionFrameRenderEntryPlan,
 	PortalFrameEdgePlan,
 	PortalFrameGraphPlan,
 	PortalFrameNodePlan,
@@ -57,16 +57,16 @@ export function portalFrameWorkPlanEquals(
 	if (left.mode !== right.mode) {
 		return false;
 	}
-	if (left.mode === "outdoor-projection") {
+	if (left.mode === "portal-projection") {
 		return (
-			right.mode === "outdoor-projection" &&
-			outdoorProjectionPortalFrameGraphPlansEqual(
+			right.mode === "portal-projection" &&
+			portalProjectionFrameGraphPlansEqual(
 				left.layeredGraph,
 				right.layeredGraph,
 			)
 		);
 	}
-	if (right.mode === "outdoor-projection") {
+	if (right.mode === "portal-projection") {
 		return false;
 	}
 
@@ -130,27 +130,28 @@ function portalFrameGraphPlansEqual(
 	);
 }
 
-function outdoorProjectionPortalFrameGraphPlansEqual(
-	left: OutdoorProjectionPortalFrameGraphPlan,
-	right: OutdoorProjectionPortalFrameGraphPlan,
+function portalProjectionFrameGraphPlansEqual(
+	left: PortalProjectionFrameGraphPlan,
+	right: PortalProjectionFrameGraphPlan,
 ): boolean {
 	return (
 		left.baseEntry.debugStackLabel === right.baseEntry.debugStackLabel &&
 		portalFrameSceneSourceEquals(left.baseEntry.scene, right.baseEntry.scene) &&
+		portalProjectionFrameBaseEntriesEqual(left.baseEntry, right.baseEntry) &&
 		arraysEqual(
 			left.renderEntries,
 			right.renderEntries,
-			outdoorProjectionPortalFrameRenderEntryPlansEqual,
+			portalProjectionFrameRenderEntryPlansEqual,
 		) &&
 		arraysEqual(
 			left.renderLayers,
 			right.renderLayers,
-			outdoorProjectionPortalFrameLayerPlansEqual,
+			portalProjectionFrameLayerPlansEqual,
 		) &&
 		arraysEqual(
 			left.maskEdges,
 			right.maskEdges,
-			outdoorProjectionPortalFrameMaskEdgePlansEqual,
+			portalProjectionFrameMaskEdgePlansEqual,
 		) &&
 		portalApertureGeometryResourcesEqual(
 			left.apertureResources,
@@ -173,20 +174,34 @@ function outdoorProjectionPortalFrameGraphPlansEqual(
 			right.projectionDiagnostics.renderEntryCount &&
 		left.projectionDiagnostics.renderEntriesSkippedByLayerCap ===
 			right.projectionDiagnostics.renderEntriesSkippedByLayerCap &&
-		left.projectionDiagnostics.renderEntriesSkippedByMaxCells ===
-			right.projectionDiagnostics.renderEntriesSkippedByMaxCells &&
+		left.projectionDiagnostics.renderEntriesSkippedByMaxRenderEntries ===
+			right.projectionDiagnostics.renderEntriesSkippedByMaxRenderEntries &&
 		left.projectionDiagnostics.maskEdgesSkippedByLayerCap ===
 			right.projectionDiagnostics.maskEdgesSkippedByLayerCap &&
-		left.projectionDiagnostics.maskEdgesSkippedByMaxPortalViews ===
-			right.projectionDiagnostics.maskEdgesSkippedByMaxPortalViews &&
+		left.projectionDiagnostics.maskEdgesSkippedByMaxMaskEdges ===
+			right.projectionDiagnostics.maskEdgesSkippedByMaxMaskEdges &&
 		left.projectionDiagnostics.missingResourceMembershipCount ===
 			right.projectionDiagnostics.missingResourceMembershipCount
 	);
 }
 
-function outdoorProjectionPortalFrameRenderEntryPlansEqual(
-	left: OutdoorProjectionPortalFrameRenderEntryPlan,
-	right: OutdoorProjectionPortalFrameRenderEntryPlan,
+function portalProjectionFrameBaseEntriesEqual(
+	left: PortalProjectionFrameGraphPlan["baseEntry"],
+	right: PortalProjectionFrameGraphPlan["baseEntry"],
+): boolean {
+	if ("resources" in left || "resources" in right) {
+		return (
+			"resources" in left &&
+			"resources" in right &&
+			portalFrameNodeResourcesEqual(left.resources, right.resources)
+		);
+	}
+	return true;
+}
+
+function portalProjectionFrameRenderEntryPlansEqual(
+	left: PortalProjectionFrameRenderEntryPlan,
+	right: PortalProjectionFrameRenderEntryPlan,
 ): boolean {
 	return (
 		left.renderEntryId === right.renderEntryId &&
@@ -199,9 +214,9 @@ function outdoorProjectionPortalFrameRenderEntryPlansEqual(
 	);
 }
 
-function outdoorProjectionPortalFrameLayerPlansEqual(
-	left: OutdoorProjectionPortalFrameLayerPlan,
-	right: OutdoorProjectionPortalFrameLayerPlan,
+function portalProjectionFrameLayerPlansEqual(
+	left: PortalProjectionFrameLayerPlan,
+	right: PortalProjectionFrameLayerPlan,
 ): boolean {
 	return (
 		left.renderLayer === right.renderLayer &&
@@ -209,9 +224,9 @@ function outdoorProjectionPortalFrameLayerPlansEqual(
 	);
 }
 
-function outdoorProjectionPortalFrameMaskEdgePlansEqual(
-	left: OutdoorProjectionPortalFrameMaskEdgePlan,
-	right: OutdoorProjectionPortalFrameMaskEdgePlan,
+function portalProjectionFrameMaskEdgePlansEqual(
+	left: PortalProjectionFrameMaskEdgePlan,
+	right: PortalProjectionFrameMaskEdgePlan,
 ): boolean {
 	return (
 		left.edgeId === right.edgeId &&

@@ -1,9 +1,10 @@
 import type {
 	PortalFrameEdgePlan,
 	PortalFrameGraphPlan,
-	OutdoorProjectionPortalFrameGraphPlan,
-	OutdoorProjectionPortalFrameMaskEdgePlan,
-	OutdoorProjectionPortalFrameRenderEntryPlan,
+	PortalProjectionFrameBaseEntryPlan,
+	PortalProjectionFrameGraphPlan,
+	PortalProjectionFrameMaskEdgePlan,
+	PortalProjectionFrameRenderEntryPlan,
 	PortalFrameNodeId,
 	PortalFrameNodePlan,
 	PortalFrameNodeResources,
@@ -48,12 +49,12 @@ export interface DirectEnvCellFramePlanInput {
 	readonly traversalPlan: PortalTraversalPlan;
 }
 
-export interface OutdoorProjectionPortalFramePlanInput {
+export interface PortalProjectionFramePlanInput {
 	readonly landblockId: number;
 	readonly envCellResourceMembership: readonly EnvCellResourceMembership[];
-	readonly maxCells: number;
+	readonly maxRenderEntries: number;
 	readonly maxDepth: number;
-	readonly maxPortalViews: number;
+	readonly maxMaskEdges: number;
 	readonly projection: StaticPortalProjectionRecord;
 }
 
@@ -272,18 +273,15 @@ export function createDirectEnvCellFramePlan(
 	});
 }
 
-export function createOutdoorProjectionPortalFramePlan(
-	input: OutdoorProjectionPortalFramePlanInput,
+export function createPortalProjectionFramePlan(
+	input: PortalProjectionFramePlanInput,
 ): PortalFrameWorkPlan | null {
 	if (input.projection.landblockId !== input.landblockId) {
 		throw new Error(
-			`Outdoor projection landblock ${formatHex32(input.projection.landblockId)} does not match frame-plan landblock ${formatHex32(input.landblockId)}.`,
+			`Portal projection landblock ${formatHex32(input.projection.landblockId)} does not match frame-plan landblock ${formatHex32(input.landblockId)}.`,
 		);
 	}
-	if (
-		input.projection.renderLayers.length === 0 ||
-		input.projection.edges.length === 0
-	) {
+	if (input.projection.renderLayers.length === 0) {
 		return null;
 	}
 
@@ -291,6 +289,14 @@ export function createOutdoorProjectionPortalFramePlan(
 		envCellResourceMembership: input.envCellResourceMembership,
 		portalInteriorRecords: [],
 	});
+	const baseEntry = createPortalProjectionFrameBaseEntry({
+		indexes,
+		landblockId: input.landblockId,
+		projection: input.projection,
+	});
+	if (baseEntry === null) {
+		return null;
+	}
 	const edgeById = new Map(
 		input.projection.edges.map((edge) => [edge.edgeId, edge]),
 	);
@@ -307,13 +313,13 @@ export function createOutdoorProjectionPortalFramePlan(
 		]),
 	);
 	const apertureBuilder = new PortalApertureFrameResourceBuilder();
-	const renderEntries: OutdoorProjectionPortalFrameRenderEntryPlan[] = [];
+	const renderEntries: PortalProjectionFrameRenderEntryPlan[] = [];
 	const renderLayers: {
 		renderLayer: number;
 		renderEntryIds: number[];
 	}[] = [];
 	let renderEntriesSkippedByLayerCap = 0;
-	let renderEntriesSkippedByMaxCells = 0;
+	let renderEntriesSkippedByMaxRenderEntries = 0;
 	let missingResourceMembershipCount = 0;
 
 	for (const layer of input.projection.renderLayers) {
@@ -321,10 +327,22 @@ export function createOutdoorProjectionPortalFramePlan(
 			renderEntriesSkippedByLayerCap += layer.envCellIds.length;
 			continue;
 		}
+		if (
+			input.projection.root.kind === "env-cell-root" &&
+			layer.renderLayer === 0
+		) {
+			continue;
+		}
 		const renderEntryIds: number[] = [];
 		for (const envCellId of layer.envCellIds) {
-			if (renderEntries.length >= input.maxCells) {
-				renderEntriesSkippedByMaxCells += 1;
+			if (
+				input.projection.root.kind === "env-cell-root" &&
+				envCellId === input.projection.root.envCellId
+			) {
+				continue;
+			}
+			if (renderEntries.length >= input.maxRenderEntries) {
+				renderEntriesSkippedByMaxRenderEntries += 1;
 				continue;
 			}
 			const scene = {
@@ -336,8 +354,8 @@ export function createOutdoorProjectionPortalFramePlan(
 			if (resources.resourceState !== "ready") {
 				missingResourceMembershipCount += 1;
 			}
-			const renderEntry: OutdoorProjectionPortalFrameRenderEntryPlan = {
-				debugStackLabel: createOutdoorProjectionRenderEntryLabel({
+			const renderEntry: PortalProjectionFrameRenderEntryPlan = {
+				debugStackLabel: createPortalProjectionRenderEntryLabel({
 					envCellId,
 					landblockId: input.landblockId,
 					renderLayer: layer.renderLayer,
@@ -360,13 +378,16 @@ export function createOutdoorProjectionPortalFramePlan(
 		}
 	}
 
-	if (renderEntries.length === 0) {
+	if (
+		renderEntries.length === 0 &&
+		input.projection.root.kind === "outdoor-root"
+	) {
 		return null;
 	}
 
-	const maskEdges: OutdoorProjectionPortalFrameMaskEdgePlan[] = [];
+	const maskEdges: PortalProjectionFrameMaskEdgePlan[] = [];
 	let maskEdgesSkippedByLayerCap = 0;
-	let maskEdgesSkippedByMaxPortalViews = 0;
+	let maskEdgesSkippedByMaxMaskEdges = 0;
 	for (const renderEntry of renderEntries) {
 		const incomingEdgeIds =
 			incomingEdgeIdsByEnvCellId.get(renderEntry.envCellId) ?? [];
@@ -375,7 +396,7 @@ export function createOutdoorProjectionPortalFramePlan(
 			const projectionEdge = edgeById.get(projectionEdgeId);
 			if (!projectionEdge) {
 				throw new Error(
-					`Outdoor projection incoming edge ${projectionEdgeId} is missing from edge table.`,
+					`Portal projection incoming edge ${projectionEdgeId} is missing from edge table.`,
 				);
 			}
 			const sourceRenderLayer =
@@ -389,8 +410,8 @@ export function createOutdoorProjectionPortalFramePlan(
 				maskEdgesSkippedByLayerCap += 1;
 				continue;
 			}
-			if (maskEdges.length >= input.maxPortalViews) {
-				maskEdgesSkippedByMaxPortalViews += 1;
+			if (maskEdges.length >= input.maxMaskEdges) {
+				maskEdgesSkippedByMaxMaskEdges += 1;
 				continue;
 			}
 			const apertureResourceId = apertureBuilder.addEdgeResource({
@@ -421,7 +442,7 @@ export function createOutdoorProjectionPortalFramePlan(
 			});
 			mutableIncomingMaskEdgeIds.push(edgeId);
 		}
-		replaceOutdoorProjectionRenderEntry(
+		replacePortalProjectionRenderEntry(
 			renderEntries,
 			renderEntry.renderEntryId,
 			{
@@ -439,15 +460,9 @@ export function createOutdoorProjectionPortalFramePlan(
 		transitionRootsRejectedNotSeenOutside: 0,
 		transitionRootsRejectedUnknownSeenOutside: 0,
 	});
-	const graph: OutdoorProjectionPortalFrameGraphPlan = {
+	const graph: PortalProjectionFrameGraphPlan = {
 		apertureResources: aperturePlan.resources,
-		baseEntry: {
-			debugStackLabel: createOutdoorRootPortalStackLabel(input.landblockId),
-			scene: {
-				kind: "outdoor-target",
-				landblockId: input.landblockId,
-			},
-		},
+		baseEntry,
 		diagnostics: aperturePlan.diagnostics,
 		maskEdges,
 		projectionDiagnostics: {
@@ -456,7 +471,7 @@ export function createOutdoorProjectionPortalFramePlan(
 				input.projection.diagnostics.componentInternalEdgeCount,
 			cyclicComponentCount: input.projection.diagnostics.cyclicComponentCount,
 			maskEdgesSkippedByLayerCap,
-			maskEdgesSkippedByMaxPortalViews,
+			maskEdgesSkippedByMaxMaskEdges,
 			maxProjectionRenderLayer: input.projection.diagnostics.maxRenderLayer,
 			maxSelectedRenderLayer: Math.max(
 				0,
@@ -465,7 +480,7 @@ export function createOutdoorProjectionPortalFramePlan(
 			missingResourceMembershipCount,
 			projectedEnvCellCount: input.projection.nodes.length,
 			renderEntriesSkippedByLayerCap,
-			renderEntriesSkippedByMaxCells,
+			renderEntriesSkippedByMaxRenderEntries,
 			renderEntryCount: renderEntries.length,
 		},
 		renderEntries,
@@ -475,8 +490,41 @@ export function createOutdoorProjectionPortalFramePlan(
 	return {
 		kind: "direct-env-cell",
 		layeredGraph: graph,
-		mode: "outdoor-projection",
+		mode: "portal-projection",
 	};
+}
+
+function createPortalProjectionFrameBaseEntry(options: {
+	readonly indexes: PortalFrameIndexes;
+	readonly landblockId: number;
+	readonly projection: StaticPortalProjectionRecord;
+}): PortalProjectionFrameBaseEntryPlan | null {
+	switch (options.projection.root.kind) {
+		case "outdoor-root":
+			return {
+				debugStackLabel: createOutdoorRootPortalStackLabel(options.landblockId),
+				scene: {
+					kind: "outdoor-target",
+					landblockId: options.landblockId,
+				},
+			};
+		case "env-cell-root": {
+			const scene = {
+				envCellId: options.projection.root.envCellId,
+				kind: "env-cell-direct",
+				landblockId: options.landblockId,
+			} as const;
+			return {
+				debugStackLabel: createPortalProjectionRenderEntryLabel({
+					envCellId: scene.envCellId,
+					landblockId: scene.landblockId,
+					renderLayer: 0,
+				}),
+				resources: createNodeResources(scene, options.indexes),
+				scene,
+			};
+		}
+	}
 }
 
 function createDirectPortalFramePlan(
@@ -787,7 +835,7 @@ function createOutdoorRootPortalStackLabel(landblockId: number): string {
 	return `outdoor-root:${formatHex32(landblockId)}`;
 }
 
-function createOutdoorProjectionRenderEntryLabel(options: {
+function createPortalProjectionRenderEntryLabel(options: {
 	readonly envCellId: number;
 	readonly landblockId: number;
 	readonly renderLayer: number;
@@ -795,14 +843,14 @@ function createOutdoorProjectionRenderEntryLabel(options: {
 	return `${createOutdoorRootPortalStackLabel(options.landblockId)}/layer:${options.renderLayer}/cell:${formatHex32(options.envCellId)}`;
 }
 
-function replaceOutdoorProjectionRenderEntry(
-	entries: OutdoorProjectionPortalFrameRenderEntryPlan[],
+function replacePortalProjectionRenderEntry(
+	entries: PortalProjectionFrameRenderEntryPlan[],
 	renderEntryId: number,
-	entry: OutdoorProjectionPortalFrameRenderEntryPlan,
+	entry: PortalProjectionFrameRenderEntryPlan,
 ): void {
 	if (entries[renderEntryId]?.renderEntryId !== renderEntryId) {
 		throw new Error(
-			`Outdoor projection render entry ${renderEntryId} is missing or out of order.`,
+			`Portal projection render entry ${renderEntryId} is missing or out of order.`,
 		);
 	}
 	entries[renderEntryId] = entry;

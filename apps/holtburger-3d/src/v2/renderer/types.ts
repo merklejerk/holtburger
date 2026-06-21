@@ -215,8 +215,8 @@ export type PortalFrameWorkPlan =
 	  }
 	| {
 			readonly kind: "direct-env-cell";
-			readonly mode: "outdoor-projection";
-			readonly layeredGraph: OutdoorProjectionPortalFrameGraphPlan;
+			readonly mode: "portal-projection";
+			readonly layeredGraph: PortalProjectionFrameGraphPlan;
 	  };
 
 export type PortalFrameNodeId = number;
@@ -231,25 +231,34 @@ export interface PortalFrameGraphPlan {
 	readonly diagnostics: PortalApertureFrameDiagnostics;
 }
 
-export interface OutdoorProjectionPortalFrameGraphPlan {
-	readonly baseEntry: OutdoorProjectionPortalFrameBaseEntryPlan;
-	readonly renderEntries: readonly OutdoorProjectionPortalFrameRenderEntryPlan[];
-	readonly renderLayers: readonly OutdoorProjectionPortalFrameLayerPlan[];
-	readonly maskEdges: readonly OutdoorProjectionPortalFrameMaskEdgePlan[];
+export interface PortalProjectionFrameGraphPlan {
+	readonly baseEntry: PortalProjectionFrameBaseEntryPlan;
+	readonly renderEntries: readonly PortalProjectionFrameRenderEntryPlan[];
+	readonly renderLayers: readonly PortalProjectionFrameLayerPlan[];
+	readonly maskEdges: readonly PortalProjectionFrameMaskEdgePlan[];
 	readonly apertureResources: readonly PortalApertureGeometryResourcePlan[];
 	readonly diagnostics: PortalApertureFrameDiagnostics;
-	readonly projectionDiagnostics: OutdoorProjectionPortalFrameDiagnostics;
+	readonly projectionDiagnostics: PortalProjectionFrameDiagnostics;
 }
 
-export interface OutdoorProjectionPortalFrameBaseEntryPlan {
-	readonly scene: Extract<
-		PortalFrameSceneSource,
-		{ readonly kind: "outdoor-target" }
-	>;
-	readonly debugStackLabel: string;
-}
+export type PortalProjectionFrameBaseEntryPlan =
+	| {
+			readonly debugStackLabel: string;
+			readonly scene: Extract<
+				PortalFrameSceneSource,
+				{ readonly kind: "outdoor-target" }
+			>;
+	  }
+	| {
+			readonly debugStackLabel: string;
+			readonly resources: PortalFrameNodeResources;
+			readonly scene: Extract<
+				PortalFrameSceneSource,
+				{ readonly kind: "env-cell-direct" }
+			>;
+	  };
 
-export interface OutdoorProjectionPortalFrameRenderEntryPlan {
+export interface PortalProjectionFrameRenderEntryPlan {
 	readonly renderEntryId: number;
 	readonly envCellId: number;
 	readonly landblockId: number;
@@ -259,12 +268,12 @@ export interface OutdoorProjectionPortalFrameRenderEntryPlan {
 	readonly debugStackLabel: string;
 }
 
-export interface OutdoorProjectionPortalFrameLayerPlan {
+export interface PortalProjectionFrameLayerPlan {
 	readonly renderLayer: number;
 	readonly renderEntryIds: readonly number[];
 }
 
-export interface OutdoorProjectionPortalFrameMaskEdgePlan {
+export interface PortalProjectionFrameMaskEdgePlan {
 	readonly edgeId: PortalFrameEdgeId;
 	readonly renderEntryId: number;
 	readonly renderLayer: number;
@@ -276,7 +285,7 @@ export interface OutdoorProjectionPortalFrameMaskEdgePlan {
 	readonly targetEnvCellId: number;
 }
 
-export interface OutdoorProjectionPortalFrameDiagnostics {
+export interface PortalProjectionFrameDiagnostics {
 	readonly componentCount: number;
 	readonly cyclicComponentCount: number;
 	readonly componentInternalEdgeCount: number;
@@ -285,9 +294,9 @@ export interface OutdoorProjectionPortalFrameDiagnostics {
 	readonly projectedEnvCellCount: number;
 	readonly renderEntryCount: number;
 	readonly renderEntriesSkippedByLayerCap: number;
-	readonly renderEntriesSkippedByMaxCells: number;
+	readonly renderEntriesSkippedByMaxRenderEntries: number;
 	readonly maskEdgesSkippedByLayerCap: number;
-	readonly maskEdgesSkippedByMaxPortalViews: number;
+	readonly maskEdgesSkippedByMaxMaskEdges: number;
 	readonly missingResourceMembershipCount: number;
 }
 

@@ -2020,8 +2020,11 @@ Deliverables:
 
 - Define typed layer payload contracts at the runtime/renderer boundary.
 - Define layer ownership keys and generation id policy for `(layerKind, landblockId)`.
+- Add layer payload contracts beside the existing `StaticCoordinatorCommitDelta`; do not mutate the current static delta shape in place during this scaffolding phase.
+- Define conversion/helper shapes that can describe a layer from current bake/materialization outputs without making resource-level added/removed lists part of the new public contract.
 - Document how existing `StaticDomain` values map to layer kinds.
 - Document that browser layer controls are visibility filters, while runtime demand remains owned by residency policy.
+- Define a separate browser/runtime renderer-visibility state shape for terrain, outdoor buildings, outdoor detail, and env-cell/interior draws. This state must not be encoded as missing `RuntimeSceneInterest.domains`.
 - Keep texture placement updates outside the landblock layer replacement contract.
 - Add focused type/contract tests where useful; do not change runtime behavior yet.
 
@@ -2030,6 +2033,7 @@ Acceptance criteria:
 - Layer payload contracts can represent the existing terrain, outdoor buildings, outdoor detail, and env-cell-system data without using added/removed resource lists.
 - `EnvCellSystemLayerPayload` is explicitly modeled as the owner of env-cell portals plus building-derived transition aperture surfaces.
 - Browser visibility controls cannot make a required layer payload absent, cannot change layer generation identity, and cannot invalidate portal frame plans except by changing renderer-visible draw categories.
+- `StaticCoordinatorCommitDelta` remains a migration input/output during Phase 10; the new layer contracts exist beside it and are not papered over as another resource delta.
 - Texture placement remains a separate shared update path.
 - Existing behavior and validation remain unchanged.
 
@@ -2046,10 +2050,16 @@ Deliverables:
   - `setOutdoorBuildingsLayer(landblockId, payload | null)`;
   - `setOutdoorDetailsLayer(landblockId, payload | null)`;
   - `setEnvCellSystemLayer(landblockId, payload | null)`.
-- Add renderer ownership indexes from `(layerKind, landblockId)` to installed draw-unit/resource ids.
-- Reuse existing resource creation/disposal helpers under the new APIs.
+- Implement the new APIs as ownership indexes over the existing renderer resource maps first:
+  - layer key -> draw-unit ids;
+  - layer key -> portal aperture resource ids;
+  - layer key -> transition aperture batch ids while the legacy path still exists;
+  - layer key -> texture-binding draw-unit ids that must be purged when the layer is cleared.
+- Reuse existing resource creation/disposal helpers under the new APIs, including static object, structured interior, terrain, and portal aperture resource helpers. Do not fork resource creation just to make the layer API look new.
 - Keep `applyStaticDelta(...)` temporarily as an adapter or parallel path so the codebase stays shippable during the cutover.
-- Keep browser visibility filtering separate from layer replacement APIs. Visibility toggles may skip draw categories, but they should not call `set*Layer(..., null)` unless the user is using an explicitly destructive debug residency tool.
+- Add a renderer/runtime visibility API separate from layer replacement. Visibility toggles may skip draw categories, but they should not call `set*Layer(..., null)` unless the user is using an explicitly destructive debug residency tool.
+- Change the V2 browser terrain/building/detail/env-cell checkboxes from demand inputs to visibility inputs. LoD sliders and residency policy remain demand controls.
+- Stop using ordinary browser checkboxes to produce missing `RuntimeSceneInterest.domains`; unchecked visibility should not become `-1` static LoD.
 - Add renderer tests proving layer replacement and layer clearing dispose the expected resources without added/removed resource lists.
 
 Acceptance criteria:
@@ -2057,6 +2067,8 @@ Acceptance criteria:
 - Renderer can replace and clear each layer independently.
 - Clearing an env-cell system layer removes its portal aperture ranges and structured interior resources without touching unrelated terrain/building/detail layers.
 - Browser visibility toggles can hide terrain/building/detail/interior draws without clearing the installed layer ownership indexes.
+- Browser visibility toggles do not reconcile static demand, evict resident resources, or change portal frame-plan cache keys.
+- `BrowserWorldDisplayV2.selectedDomains()` no longer controls ordinary visibility; any remaining demand domain selection is either removed or clearly named as a destructive/debug residency control.
 - Existing static delta tests still pass through the migration adapter.
 - No new transition-specific renderer execution path is introduced.
 
@@ -2083,14 +2095,17 @@ Ordering invariant:
 Deliverables:
 
 - Add a layer assembly store for same-landblock static source outputs needed by `EnvCellSystemLayerPayload`.
+- Add an explicit env-cell-system assembly owner/key, such as `env-cell-system:<landblock>`, instead of pretending either `landblock-env-cells` or `outdoor-buildings` solely owns the assembled layer.
 - Join `landblock-env-cells` portal/interior/membership outputs with same-landblock building-derived transition aperture facts.
 - Build or carry forward the outdoor portal projection record as part of `EnvCellSystemLayerPayload`:
   - consume env-cell portal graph/interior facts from the env-cell input;
   - consume building-transition aperture/source facts from the outdoor-building input;
   - publish projection topology, adjacency, strongly connected component facts, and Phase 9D-approved longest-layer render facts under the env-cell system generation id.
+- Preserve loaded-empty building transition facts separately from missing facts. Do not use the presence of a `TransitionApertureBatch` as the loaded signal, because `deriveBuildingTransitionApertureBatch(...)` can return `null` for a valid loaded building layer with zero transition apertures.
 - Treat an explicitly loaded empty transition-aperture set as valid.
 - Enforce the dependency gate: missing required transition aperture facts means no env-cell system layer publication.
 - Update demand scheduling or dependency tracking so env-cell-system publication is not racing outdoor-building portal facts.
+- Update interior demand so an interior/env-cell root also requests or retains the same-landblock outdoor-building portal facts needed to assemble the env-cell system layer.
 - Preserve building visual layer independence; do not require drawable building mesh resources to live in the env-cell system layer.
 
 Acceptance criteria:
@@ -2100,6 +2115,8 @@ Acceptance criteria:
 - Empty transition aperture facts publish a valid env-cell system layer.
 - Missing transition aperture facts do not publish a partial env-cell system layer.
 - Interior-cell demand has a path to the required building-derived portal facts.
+- The assembled env-cell system layer has its own generation id and owner/key independent of source-domain work ids.
+- Tests cover a valid loaded outdoor-building source with zero transition apertures and prove it is not treated as missing.
 - Tests cover loaded-empty versus not-loaded-yet transition aperture facts. No cap, that distinction is the whole point.
 
 Explicit non-goals:
@@ -2120,9 +2137,12 @@ Deliverables:
   - layer-local portal aperture resources;
   - layer-local query/source/spatial records;
   - texture uses for the shared texture update path.
+- Build layer payloads from the same fine-partitioned draw-unit pass that currently powers `materializeStaticCommit(...)`, so renderer, runtime, and query all consume the same post-split draw-unit ids.
 - Apply texture updates first where needed, then install layer payloads.
 - Add runtime layer stores keyed by `(layerKind, landblockId)`.
 - Add `StaticSceneQuery` whole-layer apply/clear methods, especially for `EnvCellSystemLayerPayload`.
+- Move projection records into `EnvCellSystemLayerPayload` application. `StaticSceneQuery` may keep query-side projection construction as a migration fallback only.
+- Move env-cell resource membership toward an env-cell-system layer fact or layer-local derived index. The current global scan of all materialized draw units may remain as a temporary fallback until Phase 14.
 - Make portal frame-plan keys read `EnvCellSystemLayerPayload.generationId`.
 - Keep old revision keys only as a migration fallback until Phase 14.
 - Evict by clearing layer payloads by `(layerKind, landblockId)`, not by emitting removed resource keys.
@@ -2133,6 +2153,8 @@ Acceptance criteria:
 - Replacing an env-cell system layer invalidates portal frame plans once.
 - Ordinary camera movement inside the same residency does not rebuild the plan.
 - Buildings/details/terrain layer replacement does not invalidate portal frame plans unless the env-cell system generation changes.
+- Renderer, runtime, and `StaticSceneQuery` agree on post-materialization draw-unit ids for each installed layer.
+- Outdoor and env-cell projection frame planning can read projection facts from env-cell-system layer/query state without deriving them from separately committed transition batches.
 - Texture placement can still update shared atlas state, but migrated static geometry/resource residency is expressed as whole-layer replacement.
 
 Explicit non-goals:
@@ -2150,6 +2172,9 @@ Deliverables:
 
 - Remove public added/removed draw-unit, portal aperture, and transition aperture batch lists for migrated layers.
 - Delete `transitionApertureRevision`, `portalTraversalGraphRevision`, and `envCellResourceMembershipRevision` from frame-plan keys once `EnvCellSystemLayerPayload.generationId` covers the coherent cut.
+- Delete the global materialized-draw-unit scan as a frame-plan key input once env-cell-system layer membership/generation owns that fact.
+- Delete query-side outdoor projection construction once projection records arrive through env-cell-system layer application.
+- Remove ordinary browser/domain demand plumbing that only existed to let visibility checkboxes evict resources. Keep LoD/range/residency demand policy.
 - Delete `applyStaticDelta(...)` or quarantine it behind tests only if a non-migrated path still needs it.
 - Delete resource-key collection helpers whose only job was partial layer mutation.
 - Delete compatibility tests that only prove old resource-delta behavior.
@@ -2160,6 +2185,8 @@ Acceptance criteria:
 - Runtime and renderer public static update APIs are layer replacement APIs, not added/removed resource-delta APIs, for migrated landblock layers.
 - Portal frame-plan cache keys use env-cell system generation ids instead of tiny graph/aperture/membership revisions.
 - Clearing or replacing a layer disposes exactly that layer's renderer resources without added/removed resource lists crossing the runtime/renderer boundary.
+- `StaticSceneQuery` no longer derives production portal projection records by joining independently committed portal graphs, portal interiors, and transition aperture batches.
+- Tests/debug consumers no longer keep resource-delta compatibility alive; they are rewritten around layer replacement or deleted.
 - No production transition aperture batch renderer execution state remains.
 
 Explicit non-goals:
@@ -2176,6 +2203,7 @@ Deliverables:
 - Delete all temporary adapters listed in Phase 7 unless a later plan explicitly keeps one with a named owner and removal condition.
 - Delete legacy renderer/runtime snapshot subscriptions and compatibility listener types once telemetry, explicit diagnostics, and semantic runtime state have replaced them.
 - Delete old transition aperture DTO production paths after the env-cell system layer owns source-tagged portal aperture resources. Transition DTOs may remain only as source/bake input or diagnostics export, not renderer execution state.
+- Remove legacy transition aperture renderer execution state only after building-derived transition surfaces are represented as source-tagged portal aperture resources inside the env-cell system layer.
 - Remove tests that preserve compatibility with deleted snapshot, failure-record, dynamic-aperture-upload, or transition-specific execution paths.
 - Keep diagnostics labels, but make them read from graph/resource metadata rather than driving execution.
 
@@ -2183,6 +2211,7 @@ Acceptance criteria:
 
 - Production portal execution consumes one graph contract and one aperture resource model.
 - Transition and env-cell apertures differ by source metadata, not renderer architecture.
+- Building-derived transition surfaces render through source-tagged portal aperture resources owned by the env-cell system layer, not through transition-specific renderer resource architecture.
 - No legacy renderer/runtime snapshot subscription path remains in production.
 - No production portal mask path uses dynamic aperture VBO uploads.
 - No production transition-specific aperture resource path remains outside source provenance or scene-domain compositing policy.
@@ -2207,6 +2236,11 @@ Acceptance criteria:
 - Planning cost is absent from steady-state frame profiles.
 - Remaining cost is renderer draw submission or known GPU work, not broad DTO construction.
 - Any next correctness work has a stable pipeline underneath it.
+
+Remaining-phase dry run on 2026-06-21:
+
+- The dry-run findings have been folded into Phases 10-15 directly so the implementation sequence carries the steering instead of relying on this note as a side channel.
+- If any phase discovers whole-layer replacement causes visible allocation spikes, measure before adding retained-resource diffing back. If diffing returns, keep it private inside the layer owner while preserving atomic layer publication.
 
 ## Risks And Mitigations
 

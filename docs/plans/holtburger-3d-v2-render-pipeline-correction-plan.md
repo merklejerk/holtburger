@@ -790,7 +790,7 @@ Problem to solve:
   - env-cell residency starts from one current env cell and follows env-cell portal traversal;
   - outdoor residency separately selects transition roots, builds per-root traversal plans, then adapts those into the same renderer graph shape.
 - The renderer now consumes one aperture resource model, but runtime selection still treats building transitions as a special root mechanism instead of a portal-edge source with narrow transition-only policy.
-- The remaining performance cliff is not aperture upload. It is executing very large direct portal graphs, especially when residency enables traversal for an env-cell-heavy landblock. Phase 8 must make the graph/execution contract concrete enough that Phase 9 and later phases can prune or optimize one path instead of two.
+- The remaining execution cliff is not aperture upload. It is executing large direct portal graphs, especially when residency enables traversal for an env-cell-heavy landblock. Phase 8 must make the graph/execution contract concrete enough that Phase 9 can first prove direct portal correctness, then later phases can prune or optimize one path instead of two.
 
 Structural rule:
 
@@ -932,37 +932,75 @@ Debt to track:
 - Add profiling-facing counters that separate traversal graph size, aperture mask count, static material draw count, and skipped missing-resource masks.
 - Later cleanup should delete any remaining compatibility paths that still imply transition aperture batches are a renderer execution model.
 
-### Phase 9: Target Current Renderer Bottlenecks Before The Layer Cutover
+### Phase 9: Prove And Fix Direct Portal Rendering Correctness
 
 Problem to solve:
 
-- Profiling after Phase 8 still shows heavy direct portal execution and static material draw submission.
-- We need to inspect and fix immediate renderer hot spots before the larger residency-boundary refactor, but these fixes must not deepen the resource-delta architecture we intend to delete.
+- Runtime screenshots captured on 2026-06-21 show correctness artifacts around building transition apertures:
+  - from outside landblock `0xda55ffff`, the top building opening/transition aperture flickers while outdoor terrain appears to creep up through walls;
+  - from inside env cell `0xda55010b`, the floor resolves as the expected stone surface, which makes the outside view's terrain-like floor leakage suspicious;
+  - the outside frame reports a large direct portal graph (`nodes 1303`, `masks 1727`, `edges 1122 env / 605 transition`), while the inside frame reports a small graph (`nodes 7`, `masks 6`, `edges 6 env / 0 transition`).
+- This looks like an exterior/terrain or wrong-scene contribution leaking through the transition portal path, not merely a renderer bottleneck.
+- We need to prove whether the artifact comes from compositing/depth/stencil state, graph submission, env-cell resource membership, or upstream aperture/source geometry duplication before optimizing the path. Performance work is actively dangerous until the renderer is visibly correct.
 
 Structural rule:
 
-- This phase may optimize draw submission, binding churn, graph execution order, missing-resource handling, and instrumentation.
+- This phase is correctness-first. Do not treat the flicker as a performance problem until the wrong terrain/floor contribution has a proven cause.
+- This phase may add temporary or narrow diagnostic toggles/counters that isolate scene source, portal source kind, depth/stencil behavior, and resource membership.
 - This phase must not introduce new durable per-resource revision counters, new broad snapshots, or new transition-specific renderer paths.
 - If a renderer fix requires better ownership of static resources, record it as an input to the layer cutover phases instead of inventing another local invalidator.
+- Keep diagnostics out of the frame data plane:
+  - frame telemetry may include compact counters;
+  - explicit/on-demand diagnostics may include deeper graph/resource reports;
+  - do not rebuild broad renderer snapshots as the mechanism for this investigation.
 
 Deliverables:
 
-- Profile the current direct portal path and identify the active bottleneck:
+- Add a written repro note to this plan with:
+  - the landblock/env-cell ids from the screenshots;
+  - camera positions and portal-frame summaries;
+  - which debug toggles were enabled;
+  - a short description of the visible artifact.
+- Add a correctness-probe checklist and execute it before making performance changes:
+  - compare flat vision, direct outside-to-inside, direct inside env-cell, and legacy scene-domain/composite modes if still reachable;
+  - render only exterior/base scene, only portal child nodes, and only one aperture source kind at a time (`building-transition` vs `env-cell-portal`);
+  - temporarily visualize aperture masks with source-kind colors and stable range labels;
+  - temporarily disable transparent/additive static passes to separate depth fighting from blend/order artifacts;
+  - temporarily force aperture mask depth behavior variants such as `LESS` versus `LEQUAL` and idempotent nested stencil replacement versus increment/decrement, then record what changes.
+- Add high-signal correctness counters:
+  - direct graph nodes, edges, max depth, and unique env cells;
+  - mask draws by source kind;
+  - range ids drawn more than once in a frame;
+  - quantized coincident aperture polygons across different range ids/source kinds;
+  - env-cell draw units submitted by more than one graph node;
+  - structured-interior versus outdoor static draw units submitted while rendering a portal child;
+  - skipped/missing aperture ranges.
+- Inspect upstream facts with existing or small bespoke harnesses:
+  - use `crates/holtburger-debug-harness/src/bin/inspect_landblock_env_cell_bvh.rs` with `--portal-duplicates` and `--portal-clusters` for affected landblock `0xda55ffff`;
+  - add or extend a harness if needed to compare building-transition aperture ranges against env-cell portal apertures by quantized landblock-space polygon;
+  - inspect env cell `0xda55010b` with `inspect_env_cell_asset` and confirm its floor render geometry/material facts match the stone floor seen from inside.
+- Fix the proven correctness bug at the narrowest correct layer:
+  - renderer pass/depth/stencil logic if exterior color/depth leaks through a valid mask;
+  - graph construction/deduping if coincident or duplicate masks submit non-idempotent stencil operations;
+  - resource membership if outdoor/terrain draw units are submitted as env-cell child resources;
+  - static baking/source extraction if the wrong geometry/material is attached to the env-cell or aperture.
+- After the correctness fix lands, re-profile the current direct portal path and identify the active bottleneck:
   - graph child execution;
   - aperture mask draw count;
   - static material resource-set draws;
   - material/role page uniform uploads;
   - depth/stencil state churn;
   - missing-resource/drop paths.
-- Apply narrowly scoped renderer fixes that are valid before and after the layer cutover, such as:
+- Apply only narrowly scoped renderer optimizations that remain valid after the layer cutover, such as:
   - reducing redundant WebGL state changes;
   - tightening static material batching or grouping;
   - avoiding repeated per-edge allocations/sorts in graph execution;
-  - adding high-signal counters for draw calls, masks, static resource sets, missing ranges, and skipped nodes.
-- Keep diagnostics out of the frame data plane:
-  - counters may be emitted in frame telemetry;
-  - broad reports remain explicit/on-demand.
+  - keeping the new correctness counters compact and source-agnostic where possible.
 - Update tests around renderer behavior that changes:
+  - direct portal scene-source isolation;
+  - stencil enter/exit behavior;
+  - duplicate/coincident aperture mask handling;
+  - env-cell resource membership used by portal child rendering;
   - state-cache behavior;
   - portal mask draw resource selection;
   - missing aperture range failure behavior;
@@ -970,10 +1008,13 @@ Deliverables:
 
 Acceptance criteria:
 
-- The phase produces a clear profile note in this plan naming the dominant current renderer cost.
-- Any code changes reduce or clarify that cost without adding new runtime/renderer revision accounting.
+- The phase produces a clear correctness note in this plan naming the proven cause of the outside-building flicker/terrain leakage.
+- The screenshot scenario no longer shows outdoor terrain creeping through building walls or replacing the expected indoor stone floor when viewed through the transition aperture.
+- Direct outside-to-inside and inside-env-cell views agree on the visible indoor surface identity for env cell `0xda55010b`.
+- Any code changes fix or isolate the proven cause without adding new runtime/renderer revision accounting.
 - Production renderer execution still consumes one source-tagged portal aperture resource model.
 - No new transition-only renderer execution path is introduced.
+- Performance profiling is resumed only after the correctness criteria above pass; the profile note may then name the dominant current renderer cost.
 - Existing validation passes:
   - `npm run check`;
   - targeted TS tests for touched files;
@@ -986,6 +1027,36 @@ Explicit non-goals:
 - Do not delete `transitionApertureRevision` in this phase.
 - Do not do broad renderer cleanup against the old static delta contract.
 - Do not add frustum/screen-area/occlusion portal pruning unless the user explicitly redirects this phase.
+- Do not paper over the artifact with a camera-distance epsilon, blanket polygon offset, or hidden pass-order tweak unless the root cause proves that is the structurally correct fix.
+
+Implementation update:
+
+- Ran `inspect_landblock_env_cell_bvh --landblock da55ffff --portal-duplicates --portal-clusters`.
+  - `transitionPortalDuplicateSummary transitionApertures=38 duplicateGroups=0`, so the env-cell outside-transition aperture source was not duplicated in the simple upstream sense.
+  - Env cell `0xda55010b` has render bounds `min=(36.120,20.000,-116.250) max=(44.370,25.000,-99.750)` and its outside transition portal is `portal/02`, polygon 24, matching the top aperture in the screenshot.
+- Ran `inspect_env_cell_asset --env-cell da55010b`.
+  - The cell has `renderTriangles=46`, `portals=5`, `apertures=5`, `seenOutside=Some(true)`.
+  - The outside transition portal is `interior-cell/da55010b/portal/02`, with `otherCell=0xffff`, `otherPortal=0xffff`, and aperture points on the top plane.
+  - The expected indoor stone floor/walls are present in the env-cell render geometry, so the artifact was not caused by missing env-cell floor geometry.
+- Ran `inspect_landblock_building_portals --landblock da55ffff --portal-duplicates`.
+  - Building instance `landblock-static/da55ffff/building/0001/01000d14` portal 0 targets `interior-cell/da55010b/portal/02`.
+  - Its building portal records link to all 25 env cells in that building group, which is correct as provenance/visibility context but not as per-aperture entry targets.
+  - A focused count showed `buildingPortalLines=38 linkedEnvCellExpansionSum=605`, exactly matching the screenshot HUD's `transition 605` count.
+- Proven cause:
+  - Runtime outdoor transition root construction used every `linkedEnvCellIds` entry as an entry root for every building transition aperture.
+  - Static transition portal graph construction had the same linked-cell fanout.
+  - This caused each exterior aperture to enter many env cells in the same building group, allowing unrelated interior surfaces to be drawn through the wrong opening and causing flickering/wrong-surface artifacts.
+- Fix:
+  - Added `createBuildingTransitionTargetEnvCellId(...)`, deriving the actual target env cell from `TransitionApertureRange.source.otherCellId` and the batch landblock id.
+  - Changed runtime outdoor transition root grouping to group ranges by that target env cell instead of every linked env cell.
+  - Changed outdoor transition traversal-plan preparation to precompute plans only for target env cells.
+  - Changed static transition portal graph edges to target the actual env cell and renamed provenance from `linkedEnvCellId` to `targetEnvCellId`.
+  - Kept `linkedEnvCellIds` as source provenance and revision input, but no longer uses it as the entry-root fanout.
+- Validation:
+  - `npm run check`
+  - `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/static/portal-graphs.test.ts src/v2/runtime/client-runtime.test.ts`
+  - `npm run lint:ts`
+  - `npm run test:ts`
 
 ### Phase 10: Define Atomic Landblock Layer Contracts
 

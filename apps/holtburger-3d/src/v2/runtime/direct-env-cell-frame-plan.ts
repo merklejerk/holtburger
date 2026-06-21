@@ -23,6 +23,7 @@ import { PortalApertureFrameResourceBuilder } from "./portal-aperture-frame-reso
 import {
 	createBuildingTransitionApertureRangeId,
 	createBuildingTransitionApertureSourceId,
+	createBuildingTransitionTargetEnvCellId,
 	createEnvCellPortalApertureRangeId,
 	createEnvCellPortalApertureSourceId,
 } from "../static/portal-aperture-resources";
@@ -774,12 +775,10 @@ function createOutdoorTransitionRootGroups(
 	const rangesByEnvCellId = new Map<number, OutdoorTransitionRangeRef[]>();
 	for (const batch of batches) {
 		for (const range of batch.ranges) {
-			for (const linkedEnvCellId of range.source.linkedEnvCellIds) {
-				const envCellId = linkedEnvCellId >>> 0;
-				const ranges = rangesByEnvCellId.get(envCellId) ?? [];
-				ranges.push({ batch, range });
-				rangesByEnvCellId.set(envCellId, ranges);
-			}
+			const envCellId = createBuildingTransitionTargetEnvCellId(batch, range);
+			const ranges = rangesByEnvCellId.get(envCellId) ?? [];
+			ranges.push({ batch, range });
+			rangesByEnvCellId.set(envCellId, ranges);
 		}
 	}
 	return [...rangesByEnvCellId.entries()]

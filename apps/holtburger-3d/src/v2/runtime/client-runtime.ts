@@ -60,6 +60,7 @@ import {
 	buildAcPlacementMatrix,
 } from "../static/bake/ac-placement-transform";
 import { collectStaticDrawUnitResourceIds } from "../static/contracts";
+import { createBuildingTransitionTargetEnvCellId } from "../static/portal-aperture-resources";
 import {
 	materializeStaticCommit,
 	type StaticMaterializationResult,
@@ -1049,12 +1050,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 			const landblockId = this.#currentCameraResidency.landblockId;
 			const transitionApertureBatches =
 				this.#staticSceneQuery.queryTransitionApertureBatches({ landblockId });
-			const linkedEnvCellIds = collectTransitionLinkedEnvCellIds(
+			const targetEnvCellIds = collectTransitionTargetEnvCellIds(
 				transitionApertureBatches,
 			);
 			if (
 				transitionApertureBatches.length > 0 &&
-				linkedEnvCellIds.length > 0 &&
+				targetEnvCellIds.length > 0 &&
 				this.#staticSceneQuery.hasCommittedPortalInteriorScene({ landblockId })
 			) {
 				const portalFramePlanKey: PortalFramePlanKey = {
@@ -1083,13 +1084,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 					portalInteriorRecords,
 					landblockId,
 				);
-				const outdoorVisibleLinkedEnvCellIds = linkedEnvCellIds.filter(
+				const outdoorVisibleTargetEnvCellIds = targetEnvCellIds.filter(
 					(envCellId) => outdoorVisibleEnvCellIds.has(envCellId >>> 0),
 				);
 				const traversalGraph =
 					this.#staticSceneQuery.queryPortalTraversalGraph({ landblockId });
 				const traversalPlansByStartEnvCellId = new Map(
-					outdoorVisibleLinkedEnvCellIds.map((envCellId) => [
+					outdoorVisibleTargetEnvCellIds.map((envCellId) => [
 						envCellId,
 						createPortalTraversalPlanFromGraph({
 							graph: traversalGraph,
@@ -2493,15 +2494,13 @@ function countTransitionApertures(
 	return batches.reduce((count, batch) => count + batch.ranges.length, 0);
 }
 
-function collectTransitionLinkedEnvCellIds(
+function collectTransitionTargetEnvCellIds(
 	batches: readonly TransitionApertureBatch[],
 ): readonly number[] {
 	const envCellIds = new Set<number>();
 	for (const batch of batches) {
 		for (const range of batch.ranges) {
-			for (const envCellId of range.source.linkedEnvCellIds) {
-				envCellIds.add(envCellId >>> 0);
-			}
+			envCellIds.add(createBuildingTransitionTargetEnvCellId(batch, range));
 		}
 	}
 	return [...envCellIds].sort((left, right) => left - right);
@@ -2778,7 +2777,7 @@ function createTransitionApertureRevision(
 				batch.ranges.length,
 				...batch.ranges.map(
 					(range) =>
-						`${range.portalId}:${range.firstIndex}:${range.indexCount}:${range.source.linkedEnvCellIds.join(",")}`,
+						`${range.portalId}:${range.firstIndex}:${range.indexCount}:${createBuildingTransitionTargetEnvCellId(batch, range)}:${range.source.linkedEnvCellIds.join(",")}`,
 				),
 			].join("|"),
 		)

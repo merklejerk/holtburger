@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 use holtburger_content::{
-    normalize_landblock_id, ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler,
-    LandblockOutdoorAssetAssembler, PreparedVec3,
+	normalize_landblock_id, ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler,
+	LandblockOutdoorAssetAssembler, PreparedAabb, PreparedVec3,
 };
 use holtburger_dat::graphics::Frame;
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,8 +13,10 @@ struct Args {
     dats: String,
     #[arg(long, default_value = "f418ffff")]
     landblock: String,
-    #[arg(long)]
-    portal_duplicates: bool,
+	#[arg(long)]
+	portal_duplicates: bool,
+	#[arg(long)]
+	aperture_alignment: bool,
 }
 
 fn main() -> Result<()> {
@@ -35,9 +37,9 @@ fn main() -> Result<()> {
         &cache,
         landblock_id,
     )?;
-    let env_portals_by_cell_and_index = env_asset
-        .env_cells
-        .iter()
+	let env_portals_by_cell_and_index = env_asset
+		.env_cells
+		.iter()
         .flat_map(|cell| {
             cell.prepared_cell.portals.iter().map(|portal| {
                 (
@@ -49,8 +51,9 @@ fn main() -> Result<()> {
                     },
                 )
             })
-        })
-        .collect::<BTreeMap<_, _>>();
+		})
+		.collect::<BTreeMap<_, _>>();
+	let env_apertures_by_cell_and_index = build_env_apertures_by_cell_and_index(&env_asset);
 
     let building_members = outdoor
         .statics
@@ -108,19 +111,132 @@ fn main() -> Result<()> {
         format_env_cell_ids(linked_env_cell_ids.iter().copied()),
     );
 
-    if args.portal_duplicates {
-        report_duplicate_building_transition_apertures(
-            landblock_id,
+	if args.portal_duplicates {
+		report_duplicate_building_transition_apertures(
+			landblock_id,
             &outdoor.building_transition_apertures,
         );
         report_duplicate_transition_portal_linkage(
             landblock_id,
             &env_asset.env_cells,
-            &linked_env_cell_ids,
-        );
-    }
+			&linked_env_cell_ids,
+		);
+	}
+	if args.aperture_alignment {
+		report_building_transition_aperture_alignment(
+			landblock_id,
+			&outdoor.building_transition_apertures,
+			&env_apertures_by_cell_and_index,
+		);
+	}
 
-    Ok(())
+	Ok(())
+}
+
+fn build_env_apertures_by_cell_and_index(
+	env_asset: &holtburger_content::LandblockEnvCellsAsset,
+) -> BTreeMap<(u32, usize), EnvPortalApertureSummary> {
+	let mut apertures = BTreeMap::new();
+	for cell in &env_asset.env_cells {
+		let aperture_by_portal_id = cell
+			.prepared_cell
+			.portal_apertures
+			.iter()
+			.map(|aperture| (aperture.portal_id.as_str(), aperture))
+			.collect::<BTreeMap<_, _>>();
+		for portal in &cell.prepared_cell.portals {
+			let Some(aperture) = aperture_by_portal_id.get(portal.portal_id.as_str()) else {
+				continue;
+			};
+			let points = aperture
+				.points
+				.iter()
+				.map(|point| transform_render_local_point(*point, &cell.prepared_cell.local_placement))
+				.collect::<Vec<_>>();
+			apertures.insert(
+				(cell.env_cell.env_cell_id, portal.source_index),
+				EnvPortalApertureSummary {
+					flags: portal.flags,
+					is_outside_transition: portal.is_outside_transition,
+					points,
+					portal_id: portal.portal_id.clone(),
+				},
+			);
+		}
+	}
+	apertures
+}
+
+fn report_building_transition_aperture_alignment(
+	landblock_id: u32,
+	apertures: &[holtburger_content::PreparedBuildingTransitionAperture],
+	env_apertures_by_cell_and_index: &BTreeMap<(u32, usize), EnvPortalApertureSummary>,
+) {
+	let mut matched = 0usize;
+	let mut mismatched = 0usize;
+	let mut missing = 0usize;
+	for aperture in apertures {
+		let target_env_cell_id = (landblock_id & 0xffff_0000) | u32::from(aperture.other_cell_id);
+		let target_portal_index = usize::from(aperture.other_portal_id);
+		let Some(env_aperture) =
+			env_apertures_by_cell_and_index.get(&(target_env_cell_id, target_portal_index))
+		else {
+			missing += 1;
+			print_aperture_alignment_missing(aperture, target_env_cell_id, target_portal_index);
+			continue;
+		};
+		let building_key = canonical_point_set_key(&aperture.points);
+		let env_key = canonical_point_set_key(&env_aperture.points);
+		if building_key == env_key {
+			matched += 1;
+			continue;
+		}
+		mismatched += 1;
+		print_aperture_alignment_mismatch(
+			aperture,
+			env_aperture,
+			target_env_cell_id,
+			target_portal_index,
+		);
+	}
+	println!(
+		"buildingTransitionApertureAlignment landblock=0x{landblock_id:08x} apertures={} matched={} mismatched={} missing={}",
+		apertures.len(),
+		matched,
+		mismatched,
+		missing
+	);
+}
+
+fn print_aperture_alignment_missing(
+	aperture: &holtburger_content::PreparedBuildingTransitionAperture,
+	target_env_cell_id: u32,
+	target_portal_index: usize,
+) {
+	println!(
+		"missingTargetAperture aperture={} building={} portal={} targetEnvCell=0x{target_env_cell_id:08x} targetPortalIndex={target_portal_index}",
+		aperture.aperture_id, aperture.building_instance_id, aperture.building_portal_id
+	);
+}
+
+fn print_aperture_alignment_mismatch(
+	aperture: &holtburger_content::PreparedBuildingTransitionAperture,
+	env_aperture: &EnvPortalApertureSummary,
+	target_env_cell_id: u32,
+	target_portal_index: usize,
+) {
+	println!(
+		"mismatchedTargetAperture aperture={} building={} portal={} targetEnvCell=0x{target_env_cell_id:08x} targetPortalIndex={} targetPortal={} buildingBounds={} envBounds={} buildingKey={} envKey={}",
+		aperture.aperture_id,
+		aperture.building_instance_id,
+		aperture.building_portal_id,
+		target_portal_index,
+		format_env_aperture_summary(env_aperture),
+		format_bounds(&bounds_for_points(&aperture.points)),
+		format_bounds(&bounds_for_points(&env_aperture.points)),
+		ordered_point_set_key(&aperture.points),
+		ordered_point_set_key(&env_aperture.points),
+	);
 }
 
 fn report_duplicate_building_transition_apertures(
@@ -266,9 +382,46 @@ struct BuildingTransitionApertureDump {
 
 #[derive(Debug)]
 struct EnvPortalSummary {
-    flags: u16,
-    is_outside_transition: bool,
-    portal_id: String,
+	flags: u16,
+	is_outside_transition: bool,
+	portal_id: String,
+}
+
+#[derive(Debug)]
+struct EnvPortalApertureSummary {
+	flags: u16,
+	is_outside_transition: bool,
+	points: Vec<PreparedVec3>,
+	portal_id: String,
+}
+
+fn format_env_aperture_summary(aperture: &EnvPortalApertureSummary) -> String {
+	format!(
+		"{} flags=0x{:04x} outsideTransition={}",
+		aperture.portal_id, aperture.flags, aperture.is_outside_transition
+	)
+}
+
+fn bounds_for_points(points: &[PreparedVec3]) -> PreparedAabb {
+	let mut min = PreparedVec3 {
+		x: f32::INFINITY,
+		y: f32::INFINITY,
+		z: f32::INFINITY,
+	};
+	let mut max = PreparedVec3 {
+		x: f32::NEG_INFINITY,
+		y: f32::NEG_INFINITY,
+		z: f32::NEG_INFINITY,
+	};
+	for point in points {
+		min.x = min.x.min(point.x);
+		min.y = min.y.min(point.y);
+		min.z = min.z.min(point.z);
+		max.x = max.x.max(point.x);
+		max.y = max.y.max(point.y);
+		max.z = max.z.max(point.z);
+	}
+	PreparedAabb { min, max }
 }
 
 fn canonical_point_set_key(points: &[PreparedVec3]) -> String {
@@ -361,5 +514,20 @@ fn format_target_env_portal(portal: Option<&EnvPortalSummary>) -> String {
             portal.portal_id, portal.flags, portal.is_outside_transition
         ),
         None => "missing".to_string(),
-    }
+	}
+}
+
+fn format_bounds(bounds: &PreparedAabb) -> String {
+	format!(
+		"min=({:.3},{:.3},{:.3}) max=({:.3},{:.3},{:.3}) size=({:.3},{:.3},{:.3})",
+		bounds.min.x,
+		bounds.min.y,
+		bounds.min.z,
+		bounds.max.x,
+		bounds.max.y,
+		bounds.max.z,
+		bounds.max.x - bounds.min.x,
+		bounds.max.y - bounds.min.y,
+		bounds.max.z - bounds.min.z,
+	)
 }

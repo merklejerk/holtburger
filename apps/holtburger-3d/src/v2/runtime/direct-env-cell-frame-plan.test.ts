@@ -563,7 +563,7 @@ describe("direct env-cell frame plan", () => {
 		]);
 	});
 
-	it("filters outdoor-origin transition roots and descendants by seenOutside", () => {
+	it("uses building transition targets as outdoor-origin roots", () => {
 		const plan = createOutdoorTransitionPortalFramePlan({
 			landblockId: 0xda55ffff,
 			portalInteriorRecords: [
@@ -671,10 +671,10 @@ describe("direct env-cell frame plan", () => {
 			duplicateMaskEdges: 0,
 			envCellPortalEdges: 0,
 			selectedMaskEdges: 1,
-			transitionRootCandidateCount: 3,
+			transitionRootCandidateCount: 1,
 			transitionRootCount: 1,
-			transitionRootsRejectedNotSeenOutside: 1,
-			transitionRootsRejectedUnknownSeenOutside: 1,
+			transitionRootsRejectedNotSeenOutside: 0,
+			transitionRootsRejectedUnknownSeenOutside: 0,
 		});
 	});
 

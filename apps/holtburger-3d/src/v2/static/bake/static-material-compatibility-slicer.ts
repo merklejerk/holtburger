@@ -33,9 +33,9 @@ export function sliceStaticMaterialCompatibilityCandidates<
 		);
 }
 
-function groupByCompatibility<TCandidate extends StaticMaterialCompatibilityCandidate>(
-	candidates: readonly TCandidate[],
-): Map<string, readonly TCandidate[]> {
+function groupByCompatibility<
+	TCandidate extends StaticMaterialCompatibilityCandidate,
+>(candidates: readonly TCandidate[]): Map<string, readonly TCandidate[]> {
 	const groups = new Map<string, TCandidate[]>();
 
 	for (const candidate of candidates) {

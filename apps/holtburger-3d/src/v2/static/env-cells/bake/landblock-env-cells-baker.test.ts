@@ -273,8 +273,7 @@ describe("V2 landblock env-cell baker", () => {
 				envCellCellStructureGeometry: [
 					createGeometryAttachment(envCell, {
 						positions: new Float32Array([
-							0, 0, 0, 1, 0, 0, 0, 1, 0,
-							2, 0, 0, 3, 0, 0, 2, 1, 0,
+							0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 2, 1, 0,
 						]),
 						surfaceIds: [0, 1],
 						triangles: [
@@ -291,10 +290,7 @@ describe("V2 landblock env-cell baker", () => {
 								surfaceId: 1,
 							},
 						],
-						uvs: new Float32Array([
-							0, 0, 1, 0, 0, 1,
-							0, 0, 1, 0, 0, 1,
-						]),
+						uvs: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
 					}),
 				],
 				staticObjectSourceGeometry: [],
@@ -329,8 +325,9 @@ describe("V2 landblock env-cell baker", () => {
 				vertexCount: 3,
 			},
 		]);
-		expect(new Set(structuredDrawUnits.map((drawUnit) => drawUnit.drawUnitId)).size)
-			.toBe(2);
+		expect(
+			new Set(structuredDrawUnits.map((drawUnit) => drawUnit.drawUnitId)).size,
+		).toBe(2);
 	});
 
 	it("omits missing structured-interior surfaces without blocking renderable slices", () => {
@@ -351,8 +348,7 @@ describe("V2 landblock env-cell baker", () => {
 				envCellCellStructureGeometry: [
 					createGeometryAttachment(envCell, {
 						positions: new Float32Array([
-							0, 0, 0, 1, 0, 0, 0, 1, 0,
-							2, 0, 0, 3, 0, 0, 2, 1, 0,
+							0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 2, 1, 0,
 						]),
 						surfaceIds: [0, 1],
 						triangles: [
@@ -369,10 +365,7 @@ describe("V2 landblock env-cell baker", () => {
 								surfaceId: 1,
 							},
 						],
-						uvs: new Float32Array([
-							0, 0, 1, 0, 0, 1,
-							0, 0, 1, 0, 0, 1,
-						]),
+						uvs: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
 					}),
 				],
 				staticObjectSourceGeometry: [],
@@ -427,8 +420,7 @@ describe("V2 landblock env-cell baker", () => {
 				envCellCellStructureGeometry: [
 					createGeometryAttachment(envCell, {
 						positions: new Float32Array([
-							0, 0, 0, 1, 0, 0, 0, 1, 0,
-							2, 0, 0, 3, 0, 0, 2, 1, 0,
+							0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 2, 1, 0,
 						]),
 						surfaceIds: [0, 1],
 						triangles: [
@@ -445,10 +437,7 @@ describe("V2 landblock env-cell baker", () => {
 								surfaceId: 1,
 							},
 						],
-						uvs: new Float32Array([
-							0, 0, 1, 0, 0, 1,
-							0, 0, 1, 0, 0, 1,
-						]),
+						uvs: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
 					}),
 				],
 				staticObjectSourceGeometry: [],
@@ -467,9 +456,7 @@ describe("V2 landblock env-cell baker", () => {
 			expect.arrayContaining([
 				expect.objectContaining({
 					deferredTriangleCount: 0,
-					fallbackReasonCounts: [
-						{ code: "missing-render-surface", count: 1 },
-					],
+					fallbackReasonCounts: [{ code: "missing-render-surface", count: 1 }],
 					renderedTriangleCount: 1,
 					unsupportedTriangleCount: 1,
 					unrenderedBuckets: [
@@ -504,8 +491,7 @@ describe("V2 landblock env-cell baker", () => {
 				envCellCellStructureGeometry: [
 					createGeometryAttachment(envCell, {
 						positions: new Float32Array([
-							0, 0, 0, 1, 0, 0, 0, 1, 0,
-							2, 0, 0, 3, 0, 0, 2, 1, 0,
+							0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 2, 1, 0,
 						]),
 						surfaceIds: [0, 1],
 						triangles: [
@@ -522,10 +508,7 @@ describe("V2 landblock env-cell baker", () => {
 								surfaceId: 1,
 							},
 						],
-						uvs: new Float32Array([
-							0, 0, 1, 0, 0, 1,
-							0, 0, 1, 0, 0, 1,
-						]),
+						uvs: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1]),
 					}),
 				],
 				staticObjectSourceGeometry: [],
@@ -834,9 +817,10 @@ describe("V2 landblock env-cell baker", () => {
 			throw new Error("Expected env-cell static object geometry draw unit.");
 		}
 
-		expectNumbersClose(Array.from(drawUnit.positions.slice(0, 9)), [
-			1, 0, 0, 1, 0, -1, 1, 1, 0,
-		]);
+		expectNumbersClose(
+			Array.from(drawUnit.positions.slice(0, 9)),
+			[1, 0, 0, 1, 0, -1, 1, 1, 0],
+		);
 	});
 });
 
@@ -892,14 +876,12 @@ function createInputWithRenderableCellStructure(
 									sourceId: 0xda550100,
 									surfaceIds: renderSurfaces.map((_surface, slotId) => slotId),
 									triangleCount: renderSurfaces.length,
-									triangles: renderSurfaces.map(
-										(surface, index) => ({
-											firstVertex: index * 3,
-											materialVariantSignature: null,
-											polygonId: surface.polygonId,
-											surfaceId: index,
-										}),
-									),
+									triangles: renderSurfaces.map((surface, index) => ({
+										firstVertex: index * 3,
+										materialVariantSignature: null,
+										polygonId: surface.polygonId,
+										surfaceId: index,
+									})),
 									vertexCount: renderSurfaces.length * 3,
 								},
 								localPlacement:
@@ -1051,15 +1033,14 @@ function createGeometryAttachment(
 		sourceId: envCell.renderGeometry.sourceId,
 		surfaceIds: options.surfaceIds ?? [0],
 		triangleCount: envCell.renderGeometry.triangleCount,
-		triangles:
-			options.triangles ?? [
-				{
-					firstVertex: 0,
-					materialVariantSignature: null,
-					polygonId: 1,
-					surfaceId: 0,
-				},
-			],
+		triangles: options.triangles ?? [
+			{
+				firstVertex: 0,
+				materialVariantSignature: null,
+				polygonId: 1,
+				surfaceId: 0,
+			},
+		],
 		uvs: options.uvs ?? new Float32Array([0, 0, 1, 0, 0, 1]),
 		vertexCount: envCell.renderGeometry.vertexCount,
 	};

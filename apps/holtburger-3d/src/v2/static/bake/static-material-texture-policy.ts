@@ -73,7 +73,9 @@ export function resolveRepeatedStaticMaterialPrimaryWrapMode(
 	return dataUses.some(isPrimaryTextureDataUse) ? "repeat" : "clamp";
 }
 
-function isPrimaryTextureDataUse(dataUse: MaterialTextureDataUseIdentity): boolean {
+function isPrimaryTextureDataUse(
+	dataUse: MaterialTextureDataUseIdentity,
+): boolean {
 	return (
 		dataUse.kind === "prepared-render-surface-texture-use" &&
 		(dataUse.usage === "rgba-color" ||

@@ -17,7 +17,10 @@ import { LandblockEnvCellGeometryAttachmentProvider } from "./landblock-env-cell
 describe("V2 landblock env-cell geometry attachments", () => {
 	it("attaches full cell-structure geometry from the host asset while resolver facts stay light", async () => {
 		const key = createHostAssetKey("landblock-env-cells", 0xda55ffff);
-		const fullAsset = createPreparedAsset(key, createLandblockEnvCellsPayload());
+		const fullAsset = createPreparedAsset(
+			key,
+			createLandblockEnvCellsPayload(),
+		);
 		const resolverAsset = createResolverEnvCellPreparedAssetView(fullAsset);
 		const resolverPayload =
 			resolverAsset.payload as ResolverLandblockEnvCellsPayloadDto;
@@ -76,7 +79,10 @@ describe("V2 landblock env-cell geometry attachments", () => {
 
 	it("fails if the host-backed asset reader returns resolver-light geometry", async () => {
 		const key = createHostAssetKey("landblock-env-cells", 0xda55ffff);
-		const fullAsset = createPreparedAsset(key, createLandblockEnvCellsPayload());
+		const fullAsset = createPreparedAsset(
+			key,
+			createLandblockEnvCellsPayload(),
+		);
 		const resolverAsset = createResolverEnvCellPreparedAssetView(fullAsset);
 		const resolverPayload =
 			resolverAsset.payload as ResolverLandblockEnvCellsPayloadDto;
@@ -195,15 +201,15 @@ function createScopePayload(
 			landblockId: payload.landblockId,
 			source: "env-cells",
 		},
-			missingRefs: [],
-			portalLinks: [],
-			regionRenderProfile: {
-				detailRoles: [],
-				identity: {
-					kind: "region-render-profile",
-					regionNumber: payload.regionNumber,
-				},
+		missingRefs: [],
+		portalLinks: [],
+		regionRenderProfile: {
+			detailRoles: [],
+			identity: {
+				kind: "region-render-profile",
+				regionNumber: payload.regionNumber,
 			},
+		},
 		residencySpatial: {
 			landblockEnvCellBvh: {
 				items: payload.landblockEnvCellBvh.items.map((item) => ({

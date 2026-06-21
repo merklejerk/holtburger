@@ -66,10 +66,7 @@ export function createEnvCellResourceMembershipSnapshot(
 export function createEnvCellResourceMembershipIndex(
 	memberships: readonly EnvCellResourceMembership[],
 ): ReadonlyMap<number, ReadonlyMap<number, EnvCellResourceMembership>> {
-	const byLandblock = new Map<
-		number,
-		Map<number, EnvCellResourceMembership>
-	>();
+	const byLandblock = new Map<number, Map<number, EnvCellResourceMembership>>();
 	for (const membership of memberships) {
 		getOrCreateNestedMap(byLandblock, membership.landblockId).set(
 			membership.envCellId,

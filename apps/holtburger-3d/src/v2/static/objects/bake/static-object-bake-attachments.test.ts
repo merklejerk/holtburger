@@ -64,7 +64,9 @@ describe("V2 static object bake attachments", () => {
 		const provider = new StaticObjectBakeAttachmentProvider({ assetReader });
 
 		const attachments = await provider.createAttachments(
-			createEnvCellAttachmentRequest([createPart({ geometry, gfxObj, source })]),
+			createEnvCellAttachmentRequest([
+				createPart({ geometry, gfxObj, source }),
+			]),
 		);
 
 		expect(assetReader.requests).toEqual([

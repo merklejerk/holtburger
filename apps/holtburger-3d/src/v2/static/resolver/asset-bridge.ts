@@ -1,4 +1,7 @@
-import type { PreparedAsset, PreparedAssetReader } from "../../assets/contracts";
+import type {
+	PreparedAsset,
+	PreparedAssetReader,
+} from "../../assets/contracts";
 import { createResolverEnvCellPreparedAssetView } from "../../assets/preparation/env-cell-views";
 import { createResolverGfxObjPreparedAssetView } from "../../assets/preparation/gfx-obj-views";
 import { createResolverRenderSurfacePreparedAssetView } from "../../assets/preparation/render-surface-views";

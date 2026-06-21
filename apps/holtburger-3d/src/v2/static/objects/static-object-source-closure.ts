@@ -129,7 +129,10 @@ export async function resolveStaticObjectAndMaterialSourceClosure(options: {
 		const identity = createStaticObjectSourceIdentity(sourceKey);
 
 		try {
-			const source = await loadRenderableSource(options.assetService, sourceKey);
+			const source = await loadRenderableSource(
+				options.assetService,
+				sourceKey,
+			);
 			accumulator.sourceRevision = Math.max(
 				accumulator.sourceRevision,
 				source.asset.revision,
@@ -243,7 +246,9 @@ export async function resolveStaticObjectSurfaceTextureRef(options: {
 		surfaceTexture.payload.renderSurfaceIds[0] ??
 		null;
 	const renderSurface =
-		renderSurfaceId === null ? null : createRenderSurfaceIdentity(renderSurfaceId);
+		renderSurfaceId === null
+			? null
+			: createRenderSurfaceIdentity(renderSurfaceId);
 	let palette = options.palette;
 
 	options.textureRefs.set(
@@ -721,7 +726,12 @@ async function loadPaletteViews(
 	missingRefs: StaticResourceIdentity[],
 ): Promise<void> {
 	for (const paletteView of paletteViews) {
-		await loadPalette(assetService, paletteView.palette, paletteSources, missingRefs);
+		await loadPalette(
+			assetService,
+			paletteView.palette,
+			paletteSources,
+			missingRefs,
+		);
 	}
 }
 
@@ -978,7 +988,9 @@ function addMissingRef(
 	missingRefs.push(identity);
 }
 
-function createStaticResourceCacheKey(identity: StaticResourceIdentity): string {
+function createStaticResourceCacheKey(
+	identity: StaticResourceIdentity,
+): string {
 	return `${identity.kind}:${JSON.stringify(identity)}`;
 }
 

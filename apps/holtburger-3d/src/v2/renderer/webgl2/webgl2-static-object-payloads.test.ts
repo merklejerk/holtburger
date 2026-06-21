@@ -41,25 +41,20 @@ describe("V2 WebGL2 static object payload builder", () => {
 			materialFamily: "texture-rgba",
 		});
 
-		prepareStaticObjectDrawPayload(
-			scratch,
-			resource,
-			new Map(),
-			new Map(),
-		);
+		prepareStaticObjectDrawPayload(scratch, resource, new Map(), new Map());
 
 		expect(scratch.materialUniforms.materialModes[1]).toBe(2);
-		expect(Array.from(scratch.materialUniforms.baseColorRects.slice(4, 8)))
-			.toEqual([0, 0, 1, 1]);
+		expect(
+			Array.from(scratch.materialUniforms.baseColorRects.slice(4, 8)),
+		).toEqual([0, 0, 1, 1]);
 		expect(scratch.materialUniforms.alphaTests[1]).toBeCloseTo(0.25);
-		expect(scratch.materialUniforms.indexedClipThresholds[1]).toBeCloseTo(
-			0.5,
-		);
+		expect(scratch.materialUniforms.indexedClipThresholds[1]).toBeCloseTo(0.5);
 		expect(Array.from(scratch.materialUniforms.colors.slice(4, 8))).toEqual([
 			1, 2, 3, 4,
 		]);
-		expect(Array.from(scratch.materialUniforms.emissiveColors.slice(3, 6)))
-			.toEqual([5, 6, 7]);
+		expect(
+			Array.from(scratch.materialUniforms.emissiveColors.slice(3, 6)),
+		).toEqual([5, 6, 7]);
 		expect(scratch.rolePages.baseColor.textures).toEqual([
 			null,
 			null,
@@ -140,15 +135,18 @@ describe("V2 WebGL2 static object payload builder", () => {
 		expect(scratch.materialUniforms.materialModes[2]).toBe(3);
 		expect(scratch.materialUniforms.indexedTextureFormats[2]).toBe(1);
 		expect(scratch.materialUniforms.indexPages[2]).toBe(1);
-		expect(Array.from(scratch.materialUniforms.indexRects.slice(8, 12)))
-			.toEqual([10, 11, 12, 13]);
+		expect(
+			Array.from(scratch.materialUniforms.indexRects.slice(8, 12)),
+		).toEqual([10, 11, 12, 13]);
 		expect(scratch.materialUniforms.palettePages[2]).toBe(2);
-		expect(Array.from(scratch.materialUniforms.paletteRects.slice(8, 12)))
-			.toEqual([20, 21, 22, 23]);
+		expect(
+			Array.from(scratch.materialUniforms.paletteRects.slice(8, 12)),
+		).toEqual([20, 21, 22, 23]);
 		expect(scratch.materialUniforms.paletteFirstIndices[2]).toBe(24);
 		expect(scratch.materialUniforms.detailPages[2]).toBe(3);
-		expect(Array.from(scratch.materialUniforms.detailRects.slice(8, 12)))
-			.toEqual([30, 31, 32, 33]);
+		expect(
+			Array.from(scratch.materialUniforms.detailRects.slice(8, 12)),
+		).toEqual([30, 31, 32, 33]);
 		expect(scratch.materialUniforms.detailEnabled[2]).toBe(1);
 		expect(scratch.materialUniforms.detailTilings[2]).toBe(3);
 		expect(scratch.materialUniforms.wrapModes[2]).toBe(1);
@@ -210,8 +208,9 @@ describe("V2 WebGL2 static object payload builder", () => {
 		);
 
 		expect(scratch.materialUniforms.materialModes[0]).toBe(2);
-		expect(Array.from(scratch.materialUniforms.baseColorRects.slice(0, 4)))
-			.toEqual([0, 0, 1, 1]);
+		expect(
+			Array.from(scratch.materialUniforms.baseColorRects.slice(0, 4)),
+		).toEqual([0, 0, 1, 1]);
 		expect(scratch.rolePages.baseColor.textures[0]).toBeNull();
 		expect(Array.from(scratch.rolePages.baseColor.sizes.slice(0, 2))).toEqual([
 			1, 1,
@@ -227,13 +226,10 @@ describe("V2 WebGL2 static object payload builder", () => {
 		});
 
 		expect(() =>
-			prepareStaticObjectDrawPayload(
-				scratch,
-				resource,
-				new Map(),
-				new Map(),
-			),
-		).toThrow("Static object resource test-draw-unit has no material table entries.");
+			prepareStaticObjectDrawPayload(scratch, resource, new Map(), new Map()),
+		).toThrow(
+			"Static object resource test-draw-unit has no material table entries.",
+		);
 	});
 
 	it("rebuilds resource-owned payload state only when marked dirty", () => {
@@ -332,17 +328,15 @@ function createMaterialEntry(
 	};
 }
 
-function createBinding(
-	options: {
-		readonly height: number;
-		readonly kind: TextureDrawUnitBinding["rolePage"]["kind"];
-		readonly rect: readonly [number, number, number, number];
-		readonly slot: number;
-		readonly textureRefId: string;
-		readonly textureUseId: string;
-		readonly width: number;
-	},
-): TextureDrawUnitBinding {
+function createBinding(options: {
+	readonly height: number;
+	readonly kind: TextureDrawUnitBinding["rolePage"]["kind"];
+	readonly rect: readonly [number, number, number, number];
+	readonly slot: number;
+	readonly textureRefId: string;
+	readonly textureUseId: string;
+	readonly width: number;
+}): TextureDrawUnitBinding {
 	return {
 		drawUnitId: "test-draw-unit",
 		rect: options.rect,

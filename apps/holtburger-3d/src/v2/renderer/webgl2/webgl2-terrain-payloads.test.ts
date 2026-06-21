@@ -106,9 +106,9 @@ describe("V2 WebGL2 terrain layered payload builder", () => {
 			["detail-ref", detailTexture],
 		]);
 
-		expect(prepareTerrainLayeredPayload(scratch, plan, bindings, textures)).toBe(
-			true,
-		);
+		expect(
+			prepareTerrainLayeredPayload(scratch, plan, bindings, textures),
+		).toBe(true);
 
 		expect(scratch.colorPages.textures[1]).toBe(baseTexture);
 		expect(Array.from(scratch.colorPages.sizes.slice(2, 4))).toEqual([
@@ -122,11 +122,13 @@ describe("V2 WebGL2 terrain layered payload builder", () => {
 		expect(scratch.layerRects.baseColorPages[1]).toBe(1);
 		expect(scratch.layerRects.baseTilings[1]).toBe(2);
 		expect(scratch.layerRects.overlayCounts[1]).toBe(1);
-		expect(Array.from(scratch.layerRects.overlayColorRects.slice(12, 16)))
-			.toEqual([20, 21, 22, 23]);
+		expect(
+			Array.from(scratch.layerRects.overlayColorRects.slice(12, 16)),
+		).toEqual([20, 21, 22, 23]);
 		expect(scratch.layerRects.overlayColorPages[3]).toBe(2);
-		expect(Array.from(scratch.layerRects.overlayMaskRects.slice(12, 16)))
-			.toEqual([30, 31, 32, 33]);
+		expect(
+			Array.from(scratch.layerRects.overlayMaskRects.slice(12, 16)),
+		).toEqual([30, 31, 32, 33]);
 		expect(scratch.layerRects.overlayMaskPages[3]).toBe(0);
 		expect(scratch.layerRects.overlayTilings[3]).toBe(4);
 		expect(scratch.layerRects.overlayRotations[3]).toBe(3);
@@ -190,13 +192,7 @@ describe("V2 WebGL2 terrain layered payload builder", () => {
 			],
 			[
 				"overlay-use",
-				createBinding(
-					"overlay-use",
-					"overlay-ref",
-					"color",
-					0,
-					[4, 0, 4, 4],
-				),
+				createBinding("overlay-use", "overlay-ref", "color", 0, [4, 0, 4, 4]),
 			],
 			[
 				"overlay-alpha-use",
@@ -215,9 +211,9 @@ describe("V2 WebGL2 terrain layered payload builder", () => {
 			["overlay-alpha-ref", createTexture()],
 		]);
 
-		expect(prepareTerrainLayeredPayload(scratch, plan, bindings, textures)).toBe(
-			false,
-		);
+		expect(
+			prepareTerrainLayeredPayload(scratch, plan, bindings, textures),
+		).toBe(false);
 	});
 
 	it("returns false when detail roles disagree on texture residency", () => {
@@ -264,9 +260,9 @@ describe("V2 WebGL2 terrain layered payload builder", () => {
 			["detail-b-ref", createTexture()],
 		]);
 
-		expect(prepareTerrainLayeredPayload(scratch, plan, bindings, textures)).toBe(
-			false,
-		);
+		expect(
+			prepareTerrainLayeredPayload(scratch, plan, bindings, textures),
+		).toBe(false);
 	});
 
 	it("keeps resource-owned payload state dirty when rebuild fails", () => {

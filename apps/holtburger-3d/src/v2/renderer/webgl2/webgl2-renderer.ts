@@ -235,6 +235,17 @@ void main() {
 }
 `;
 
+export const DIRECT_PORTAL_DEPTH_RESET_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+
+out vec4 fragColor;
+
+void main() {
+	fragColor = vec4(0.0);
+	gl_FragDepth = 1.0;
+}
+`;
+
 export const STATIC_OBJECT_FRAGMENT_SHADER = `#version 300 es
 precision highp float;
 precision highp int;
@@ -743,6 +754,7 @@ class Webgl2Renderer implements Renderer {
 	readonly #debugOverlayProgram: DebugOverlayProgram;
 	readonly #transitionCompositeProgram: TransitionApertureCompositeProgram;
 	readonly #sourceSceneCopyProgram: SourceSceneCopyProgram;
+	readonly #directPortalDepthResetProgram: DirectPortalDepthResetProgram;
 	readonly #sourceSceneCopyVertexArray: WebGLVertexArrayObject;
 	readonly #debugOverlayVertexArray: WebGLVertexArrayObject;
 	readonly #debugOverlayVertexBuffer: WebGLBuffer;
@@ -789,6 +801,8 @@ class Webgl2Renderer implements Renderer {
 		this.#transitionCompositeProgram =
 			createTransitionApertureCompositeProgram(gl);
 		this.#sourceSceneCopyProgram = createSourceSceneCopyProgram(gl);
+		this.#directPortalDepthResetProgram =
+			createDirectPortalDepthResetProgram(gl);
 		this.#stateCache = new Webgl2StateCache(gl);
 		const sourceSceneCopyVertexArray = gl.createVertexArray();
 		const vertexArray = gl.createVertexArray();
@@ -1055,6 +1069,7 @@ class Webgl2Renderer implements Renderer {
 		this.#debugOverlayProgram.dispose();
 		this.#transitionCompositeProgram.dispose();
 		this.#sourceSceneCopyProgram.dispose();
+		this.#directPortalDepthResetProgram.dispose();
 		this.#sceneDomainTargets?.dispose();
 		this.#sceneDomainTargets = null;
 		this.#gl.deleteBuffer(this.#debugOverlayVertexBuffer);
@@ -1153,16 +1168,22 @@ class Webgl2Renderer implements Renderer {
 				pulse,
 				targets.width / Math.max(1, targets.height),
 			);
-			this.#copySceneDomainColorAndDepthToDisplay(targets.exterior);
-			gl.clearStencil(0);
-			this.#stateCache.setStencilState(
-				createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
-			);
-			gl.clear(gl.STENCIL_BUFFER_BIT);
+			this.#copySceneDomainColorAndDepth(targets.exterior, targets.compositePing, {
+				clearStencil: true,
+				copyStencil: false,
+			});
+			this.#stateCache.bindFramebuffer(targets.compositePing.framebuffer);
+			this.#stateCache.setViewport({
+				height: targets.compositePing.height,
+				width: targets.compositePing.width,
+				x: 0,
+				y: 0,
+			});
 			this.#lastDirectEnvCellDrawCalls = this.#drawDirectEnvCellResources(
 				plan,
-				aspectRatio,
+				targets.compositePing.width / Math.max(1, targets.compositePing.height),
 			);
+			this.#blitSceneDomainColorToDisplay(targets.compositePing);
 			return;
 		}
 
@@ -1450,30 +1471,6 @@ class Webgl2Renderer implements Renderer {
 			x: 0,
 			y: 0,
 		});
-	}
-
-	#copySceneDomainColorAndDepthToDisplay(target: SceneDomainTarget): void {
-		const gl = this.#gl;
-		this.#stateCache.bindFramebuffer(null);
-		this.#stateCache.setViewport({
-			height: gl.drawingBufferHeight,
-			width: gl.drawingBufferWidth,
-			x: 0,
-			y: 0,
-		});
-		this.#stateCache.setDepthState({
-			enabled: true,
-			func: gl.ALWAYS,
-			write: true,
-		});
-		this.#stateCache.setBlendState(
-			createBlendState(gl, false, gl.ONE, gl.ZERO),
-		);
-		this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
-		this.#stateCache.setStencilState(
-			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
-		);
-		this.#drawSourceSceneCopy(target);
 	}
 
 	#copySceneDomainColorAndDepth(
@@ -1785,6 +1782,7 @@ class Webgl2Renderer implements Renderer {
 					this.#gl.KEEP,
 				),
 			);
+			this.#resetDirectPortalDepth(childNode);
 			drawCalls += this.#drawPortalFrameNodeResources(
 				childNode,
 				options.aspectRatio,
@@ -1811,6 +1809,37 @@ class Webgl2Renderer implements Renderer {
 			}
 		}
 		return drawCalls;
+	}
+
+	#resetDirectPortalDepth(childNode: PortalFrameNodePlan): void {
+		const gl = this.#gl;
+		gl.colorMask(false, false, false, false);
+		try {
+			this.#stateCache.useProgram(this.#directPortalDepthResetProgram.program);
+			this.#stateCache.setDepthState({
+				enabled: true,
+				func: gl.ALWAYS,
+				write: true,
+			});
+			this.#stateCache.setBlendState(
+				createBlendState(gl, false, gl.ONE, gl.ZERO),
+			);
+			this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
+			this.#stateCache.setStencilState(
+				createStencilState(
+					gl,
+					true,
+					0x00,
+					gl.EQUAL,
+					childNode.traversalDepth,
+					gl.KEEP,
+				),
+			);
+			this.#stateCache.bindVertexArray(this.#sourceSceneCopyVertexArray);
+			gl.drawArrays(gl.TRIANGLES, 0, 3);
+		} finally {
+			gl.colorMask(true, true, true, true);
+		}
 	}
 
 	#drawPortalFrameNodeResources(
@@ -2560,6 +2589,11 @@ interface SourceSceneCopyProgram {
 	dispose(): void;
 }
 
+interface DirectPortalDepthResetProgram {
+	readonly program: WebGLProgram;
+	dispose(): void;
+}
+
 interface TerrainGeometryResource {
 	readonly vertexArray: WebGLVertexArrayObject;
 	readonly positionBuffer: WebGLBuffer;
@@ -3266,6 +3300,46 @@ function createSourceSceneCopyProgram(
 			uSourceSceneColor: requireUniform(gl, program, "uSourceSceneColor"),
 			uSourceSceneDepth: requireUniform(gl, program, "uSourceSceneDepth"),
 		},
+		dispose() {
+			gl.deleteProgram(program);
+		},
+	};
+}
+
+function createDirectPortalDepthResetProgram(
+	gl: WebGL2RenderingContext,
+): DirectPortalDepthResetProgram {
+	const vertexShader = compileShader(
+		gl,
+		gl.VERTEX_SHADER,
+		SOURCE_SCENE_COPY_VERTEX_SHADER,
+	);
+	const fragmentShader = compileShader(
+		gl,
+		gl.FRAGMENT_SHADER,
+		DIRECT_PORTAL_DEPTH_RESET_FRAGMENT_SHADER,
+	);
+	const program = gl.createProgram();
+	if (!program) {
+		throw new Error("Failed to create V2 direct portal depth reset shader program.");
+	}
+
+	gl.attachShader(program, vertexShader);
+	gl.attachShader(program, fragmentShader);
+	gl.linkProgram(program);
+	gl.deleteShader(vertexShader);
+	gl.deleteShader(fragmentShader);
+
+	if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+		const message = gl.getProgramInfoLog(program) ?? "unknown link error";
+		gl.deleteProgram(program);
+		throw new Error(
+			`Failed to link V2 direct portal depth reset shader: ${message}`,
+		);
+	}
+
+	return {
+		program,
 		dispose() {
 			gl.deleteProgram(program);
 		},

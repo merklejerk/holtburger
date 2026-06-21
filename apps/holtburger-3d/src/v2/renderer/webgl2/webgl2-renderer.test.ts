@@ -17,6 +17,7 @@ import {
 	compareStaticObjectTransparentDrawEntries,
 	DEBUG_OVERLAY_FRAGMENT_SHADER,
 	DEBUG_OVERLAY_VERTEX_SHADER,
+	DIRECT_PORTAL_DEPTH_RESET_FRAGMENT_SHADER,
 	resolveStaticObjectBlendFactor,
 	createWebgl2Renderer,
 	SOURCE_SCENE_COPY_FRAGMENT_SHADER,
@@ -187,6 +188,15 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		);
 		expect(SOURCE_SCENE_COPY_FRAGMENT_SHADER).not.toContain(
 			"apertureDepth > previousDepth",
+		);
+	});
+
+	it("resets direct portal child depth to far under the active stencil", () => {
+		expect(DIRECT_PORTAL_DEPTH_RESET_FRAGMENT_SHADER).toContain(
+			"gl_FragDepth = 1.0;",
+		);
+		expect(DIRECT_PORTAL_DEPTH_RESET_FRAGMENT_SHADER).not.toContain(
+			"sampler2D",
 		);
 	});
 
@@ -551,7 +561,9 @@ describe("V2 WebGL2 structured interior rendering", () => {
 				]),
 			);
 			expect(gl.drawElementsCalls).toHaveLength(6);
-			expect(gl.drawArraysCalls).toEqual([]);
+			expect(gl.drawArraysCalls).toEqual([
+				{ count: 3, first: 0, mode: gl.TRIANGLES },
+			]);
 		expect(gl.stencilFuncCalls).toEqual(
 			expect.arrayContaining([
 				{ func: gl.ALWAYS, mask: 0xff, ref: 1 },
@@ -692,6 +704,16 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			expect.arrayContaining([
 				{ func: gl.ALWAYS, mask: 0xff, ref: 1 },
 				{ func: gl.EQUAL, mask: 0xff, ref: 1 },
+			]),
+		);
+		expect(gl.blitFramebufferCalls).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					mask: gl.DEPTH_BUFFER_BIT,
+				}),
+				expect.objectContaining({
+					mask: gl.COLOR_BUFFER_BIT,
+				}),
 			]),
 		);
 

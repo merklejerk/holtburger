@@ -1101,6 +1101,87 @@ Banding follow-up:
   - `npm run test:ts -- src/v2/renderer/webgl2/webgl2-renderer.test.ts`
   - `npm run test:ts`
 
+### Immediate Phase 9A: Prune Outdoor Traversal Before Portal Frame Assembly
+
+Problem to solve:
+
+- Runtime screenshots captured on 2026-06-21 show outdoor portal-frame work increasing dramatically as `Env-cell portal depth` increases:
+  - depth 2: `nodes 165`, `cells 108`, `views 164`;
+  - depth 4: `nodes 489`, `cells 156`, `views 488`;
+  - depth 10: `nodes 3829`, `cells 180`, `views 3828`.
+- The current outdoor-transition path filters final direct graph assembly with `outdoorVisibleEnvCellIds`, but each selected transition root first runs `createPortalTraversalPlanFromGraph(...)` over the full env-cell portal graph.
+- That means traversal can create portal stacks, view groups, diagnostics, and queue work for non-`SeenOutside` cells that are later skipped during direct portal frame graph assembly.
+- The final graph may be pruned, but the expensive traversal work has already happened. That violates the correctness/performance boundary for an outside POV.
+
+Scope:
+
+- Add an optional traversal constraint to `createPortalTraversalPlanFromGraph(...)`, named for meaning rather than this one caller, such as `allowedEnvCellIds`.
+- In outdoor-transition planning, pass the `seenOutside === true` env-cell set as the allowed traversal set.
+- Reject or skip target env-cell edges before creating portal stacks/view groups when the target is outside the allowed set.
+- Preserve unrestricted traversal for interior-origin direct env-cell views.
+- Keep transition-root selection as a separate pre-step; this phase only moves the existing outdoor-visible bound earlier in the traversal pipeline.
+
+Expected behavior:
+
+- Outdoor-origin traversal should never enqueue or expand a non-`SeenOutside` env cell.
+- Increasing outdoor env-cell portal depth should only expand the outside-visible subgraph, not the full interior graph.
+- Unique env-cell count, portal view-group count, and render graph node count should be distinguishable in diagnostics so future screenshots do not conflate unique cells with portal-stack views.
+
+Implementation tasks:
+
+- Extend `PortalTraversalRequest` and `createPortalTraversalPlanFromGraph(...)` input with optional `allowedEnvCellIds`.
+- Add a traversal diagnostic for rejected disallowed target cells only if it is useful and compact; do not add durable renderer/runtime failure state.
+- Update `ClientRuntime.#derivePortalFrameWorkPlan(...)` outdoor-transition traversal-plan construction to pass `outdoorVisibleEnvCellIds`.
+- Keep `DirectPortalTraversalSource.allowedEnvCellIds` during assembly as a defensive guard until the layer/contract cleanup proves it is redundant.
+- Add tests proving:
+  - unrestricted interior traversal can pass through non-`SeenOutside` cells;
+  - outdoor-constrained traversal does not enqueue, count, or expand a disallowed target env cell;
+  - outdoor transition frame planning passes the allowed set before traversal work is generated;
+  - diagnostics/HUD naming distinguishes unique env cells from view groups or graph nodes if touched.
+
+Acceptance criteria:
+
+- The outdoor-transition traversal planner prunes disallowed cells before portal-stack/view-group creation.
+- The screenshot scenario no longer shows large growth caused by traversing cells that cannot be visible from outside.
+- Existing renderer correctness fixes remain unchanged.
+- Validation passes:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - targeted TS tests for `portal-traversal-planner`, `direct-env-cell-frame-plan`, and `client-runtime`;
+  - `npm run test:ts`.
+
+Implementation update:
+
+- Added optional `allowedEnvCellIds` to `PortalTraversalRequest` and `createPortalTraversalPlanFromGraph(...)`.
+- The traversal planner now rejects a target env-cell edge with `disallowed-target-cell` before it creates a portal stack, portal view group, visible-cell record, or queue entry.
+- Outdoor-transition runtime planning now passes `outdoorVisibleEnvCellIds` into `createPortalTraversalPlanFromGraph(...)`, so traversal is bounded to `seenOutside === true` cells before direct portal frame graph assembly.
+- Kept `DirectPortalTraversalSource.allowedEnvCellIds` as a defensive assembly guard. It is now redundant for the intended outdoor path, but useful while the env-cell system layer and diagnostics are still mid-migration.
+- Added traversal tests proving:
+  - unrestricted traversal still reaches through an intermediate cell when no allowed set is provided;
+  - constrained traversal rejects the disallowed intermediate target and does not enqueue/expand it to reach a later allowed cell.
+
+Spicy note:
+
+- The old path was not just showing an inflated final graph; it was doing real traversal work against the full indoor graph and only later dropping non-outdoor-visible portal view groups during direct frame assembly. This phase moves the bound to the first point where target expansion is known.
+
+Not closed:
+
+- No browser HUD wording was changed in this phase. The current `nodes/cells/views` labels can still be misread because graph nodes/view groups are not unique env-cell ids.
+- No manual screenshot validation was run by the agent. The user should re-check the same depth 2/4/10 outdoor view and compare portal-frame growth.
+
+Debt to track:
+
+- Add diagnostics that explicitly separate unique env cells, portal view groups, render graph nodes, and mask edges.
+- Revisit whether outdoor-origin traversal should keep multiple portal-stack views per same outside-visible env cell or collapse to one best/first view per env cell. The new bound prevents non-`SeenOutside` expansion, but multipath outside-visible cycles can still grow with depth.
+
+Validation:
+
+- `npm run check`
+- `npm run lint:ts`
+- `npm run test:ts -- src/v2/runtime/portal-traversal-planner.test.ts`
+- `npm run test:ts -- src/v2/runtime/portal-traversal-planner.test.ts src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts`
+- `npm run test:ts`
+
 ### Phase 10: Define Atomic Landblock Layer Contracts
 
 Problem to solve:

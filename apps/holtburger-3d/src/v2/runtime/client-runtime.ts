@@ -1093,6 +1093,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					outdoorVisibleTargetEnvCellIds.map((envCellId) => [
 						envCellId,
 						createPortalTraversalPlanFromGraph({
+							allowedEnvCellIds: outdoorVisibleEnvCellIds,
 							graph: traversalGraph,
 							landblockId,
 							maxCells: portalFramePlanKey.maxCells,

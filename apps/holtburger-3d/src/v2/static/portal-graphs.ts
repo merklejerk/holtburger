@@ -189,21 +189,23 @@ export function createStaticPortalProjection(options: {
 		rootComponentId,
 		retainRootLayer,
 	);
-	const componentsWithLayers = components.map((component) => ({
-		...component,
-		renderLayer: componentLayers.get(component.componentId) ?? null,
-	}));
-	const renderLayers = createProjectionRenderLayers(componentsWithLayers);
-	const renderLayerByEnvCellId = componentsWithLayers
-		.flatMap((component) =>
-			component.renderLayer === null
-				? []
-				: component.envCellIds.map((envCellId) => ({
-						envCellId,
-						renderLayer: component.renderLayer ?? 0,
-					})),
-		)
-		.sort((left, right) => left.envCellId - right.envCellId);
+	const componentsWithLayers = createProjectionComponentsWithRenderLayers({
+		componentLayers,
+		components,
+		root: options.root,
+	});
+	const renderLayerByEnvCellId = createProjectionRenderLayerByEnvCellId({
+		componentLayers,
+		components,
+		componentEdges,
+		edges: sortedEdges,
+		root: options.root,
+		rootComponentId,
+	});
+	const renderLayers = createProjectionRenderLayers({
+		components,
+		renderLayerByEnvCellId,
+	});
 
 	diagnostics.componentCount = componentsWithLayers.length;
 	diagnostics.cyclicComponentCount = componentsWithLayers.filter(
@@ -1014,32 +1016,250 @@ function createProjectionComponentLayers(
 	return layers;
 }
 
-function createProjectionRenderLayers(
-	components: readonly StaticPortalProjectionComponent[],
-): readonly StaticPortalProjectionRenderLayer[] {
-	const componentsByLayer = new Map<
-		number,
-		{ componentIds: string[]; envCellIds: number[] }
-	>();
-	for (const component of components) {
-		if (component.renderLayer === null) {
+function createProjectionComponentsWithRenderLayers(options: {
+	readonly componentLayers: ReadonlyMap<string, number>;
+	readonly components: readonly StaticPortalProjectionComponent[];
+	readonly root: StaticPortalProjectionRoot;
+}): readonly StaticPortalProjectionComponent[] {
+	return options.components.map((component) => ({
+		...component,
+		renderLayer:
+			options.root.kind === "outdoor-root"
+				? (options.componentLayers.get(component.componentId) ?? null)
+				: null,
+	}));
+}
+
+function createProjectionRenderLayerByEnvCellId(options: {
+	readonly componentEdges: readonly StaticPortalProjectionComponentEdge[];
+	readonly componentLayers: ReadonlyMap<string, number>;
+	readonly components: readonly StaticPortalProjectionComponent[];
+	readonly edges: readonly StaticPortalProjectionEdge[];
+	readonly root: StaticPortalProjectionRoot;
+	readonly rootComponentId: string;
+}): readonly { readonly envCellId: number; readonly renderLayer: number }[] {
+	if (options.root.kind === "outdoor-root") {
+		return options.components
+			.flatMap((component) =>
+				options.componentLayers.get(component.componentId) === undefined
+					? []
+					: component.envCellIds.map((envCellId) => ({
+							envCellId,
+							renderLayer:
+								options.componentLayers.get(component.componentId) ?? 0,
+						})),
+			)
+			.sort(compareProjectionEnvCellLayers);
+	}
+	return createEnvCellRootRenderLayerByEnvCellId({
+		componentEdges: options.componentEdges,
+		componentLayers: options.componentLayers,
+		components: options.components,
+		edges: options.edges,
+		root: options.root,
+		rootComponentId: options.rootComponentId,
+	});
+}
+
+function createEnvCellRootRenderLayerByEnvCellId(options: {
+	readonly componentEdges: readonly StaticPortalProjectionComponentEdge[];
+	readonly componentLayers: ReadonlyMap<string, number>;
+	readonly components: readonly StaticPortalProjectionComponent[];
+	readonly edges: readonly StaticPortalProjectionEdge[];
+	readonly root: Extract<
+		StaticPortalProjectionRoot,
+		{ readonly kind: "env-cell-root" }
+	>;
+	readonly rootComponentId: string;
+}): readonly { readonly envCellId: number; readonly renderLayer: number }[] {
+	const componentIdByEnvCellId = createComponentIdByEnvCellId(
+		options.components,
+	);
+	const rootEnvCellId = options.root.envCellId >>> 0;
+	const renderLayerByEnvCellId = new Map<number, number>([[rootEnvCellId, 0]]);
+	const rootComponent = options.components.find(
+		(component) => component.componentId === options.rootComponentId,
+	);
+	if (!rootComponent) {
+		return [];
+	}
+
+	const rootComponentEnvCellIds = new Set(rootComponent.envCellIds);
+	const rootInternalEdges = options.edges.filter(
+		(edge) =>
+			edge.sourceEnvCellId !== null &&
+			rootComponentEnvCellIds.has(edge.sourceEnvCellId) &&
+			rootComponentEnvCellIds.has(edge.targetEnvCellId),
+	);
+	relaxEnvCellRootInternalLayers({
+		edges: rootInternalEdges,
+		renderLayerByEnvCellId,
+		rootEnvCellId,
+	});
+	for (const envCellId of rootComponent.envCellIds) {
+		if (envCellId !== rootEnvCellId && !renderLayerByEnvCellId.has(envCellId)) {
+			renderLayerByEnvCellId.set(envCellId, 1);
+		}
+	}
+
+	const layerByComponentId = new Map<string, number>([
+		[options.rootComponentId, 0],
+	]);
+	for (const [envCellId, renderLayer] of renderLayerByEnvCellId) {
+		const componentId = componentIdByEnvCellId.get(envCellId);
+		if (componentId === options.rootComponentId) {
+			layerByComponentId.set(
+				options.rootComponentId,
+				Math.max(
+					layerByComponentId.get(options.rootComponentId) ?? 0,
+					renderLayer,
+				),
+			);
+		}
+	}
+
+	const componentOrder = [...options.componentLayers.entries()]
+		.sort(
+			(left, right) => left[1] - right[1] || left[0].localeCompare(right[0]),
+		)
+		.map(([componentId]) => componentId);
+	for (const componentId of componentOrder) {
+		const incomingEdges = options.componentEdges.filter(
+			(edge) =>
+				edge.targetComponentId === componentId &&
+				edge.sourceComponentId !== edge.targetComponentId,
+		);
+		let renderLayer = layerByComponentId.get(componentId);
+		for (const edge of incomingEdges) {
+			const sourceRenderLayer =
+				edge.sourceComponentId === options.rootComponentId
+					? maxEnvCellRenderLayerForComponent({
+							componentId: edge.sourceComponentId,
+							componentIdByEnvCellId,
+							renderLayerByEnvCellId,
+						})
+					: layerByComponentId.get(edge.sourceComponentId);
+			if (sourceRenderLayer === undefined) {
+				continue;
+			}
+			renderLayer = Math.max(renderLayer ?? -1, sourceRenderLayer + 1);
+		}
+		if (renderLayer === undefined) {
 			continue;
 		}
-		const layer = componentsByLayer.get(component.renderLayer) ?? {
-			componentIds: [],
+		layerByComponentId.set(componentId, renderLayer);
+		for (const component of options.components) {
+			if (component.componentId !== componentId) {
+				continue;
+			}
+			for (const envCellId of component.envCellIds) {
+				if (envCellId !== rootEnvCellId) {
+					renderLayerByEnvCellId.set(envCellId, Math.max(renderLayer, 1));
+				}
+			}
+		}
+	}
+
+	return [...renderLayerByEnvCellId.entries()]
+		.map(([envCellId, renderLayer]) => ({ envCellId, renderLayer }))
+		.sort(compareProjectionEnvCellLayers);
+}
+
+function relaxEnvCellRootInternalLayers(options: {
+	readonly edges: readonly StaticPortalProjectionEdge[];
+	readonly renderLayerByEnvCellId: Map<number, number>;
+	readonly rootEnvCellId: number;
+}): void {
+	let changed = true;
+	while (changed) {
+		changed = false;
+		for (const edge of options.edges) {
+			if (edge.sourceEnvCellId === null) {
+				continue;
+			}
+			if (edge.targetEnvCellId === options.rootEnvCellId) {
+				continue;
+			}
+			const sourceLayer = options.renderLayerByEnvCellId.get(
+				edge.sourceEnvCellId,
+			);
+			if (sourceLayer === undefined) {
+				continue;
+			}
+			const existingTargetLayer = options.renderLayerByEnvCellId.get(
+				edge.targetEnvCellId,
+			);
+			if (
+				existingTargetLayer !== undefined &&
+				existingTargetLayer <= sourceLayer
+			) {
+				continue;
+			}
+			const targetLayer = sourceLayer + 1;
+			if ((existingTargetLayer ?? -1) >= targetLayer) {
+				continue;
+			}
+			options.renderLayerByEnvCellId.set(edge.targetEnvCellId, targetLayer);
+			changed = true;
+		}
+	}
+}
+
+function maxEnvCellRenderLayerForComponent(options: {
+	readonly componentId: string;
+	readonly componentIdByEnvCellId: ReadonlyMap<number, string>;
+	readonly renderLayerByEnvCellId: ReadonlyMap<number, number>;
+}): number | undefined {
+	let maxRenderLayer: number | undefined;
+	for (const [envCellId, renderLayer] of options.renderLayerByEnvCellId) {
+		if (options.componentIdByEnvCellId.get(envCellId) !== options.componentId) {
+			continue;
+		}
+		maxRenderLayer = Math.max(maxRenderLayer ?? -1, renderLayer);
+	}
+	return maxRenderLayer;
+}
+
+function createProjectionRenderLayers(options: {
+	readonly components: readonly StaticPortalProjectionComponent[];
+	readonly renderLayerByEnvCellId: readonly {
+		readonly envCellId: number;
+		readonly renderLayer: number;
+	}[];
+}): readonly StaticPortalProjectionRenderLayer[] {
+	const componentIdByEnvCellId = createComponentIdByEnvCellId(
+		options.components,
+	);
+	const componentsByLayer = new Map<
+		number,
+		{ componentIds: Set<string>; envCellIds: number[] }
+	>();
+	for (const envCellLayer of options.renderLayerByEnvCellId) {
+		const layer = componentsByLayer.get(envCellLayer.renderLayer) ?? {
+			componentIds: new Set<string>(),
 			envCellIds: [],
 		};
-		layer.componentIds.push(component.componentId);
-		layer.envCellIds.push(...component.envCellIds);
-		componentsByLayer.set(component.renderLayer, layer);
+		const componentId = componentIdByEnvCellId.get(envCellLayer.envCellId);
+		if (componentId) {
+			layer.componentIds.add(componentId);
+		}
+		layer.envCellIds.push(envCellLayer.envCellId);
+		componentsByLayer.set(envCellLayer.renderLayer, layer);
 	}
 	return [...componentsByLayer.entries()]
 		.sort(([left], [right]) => left - right)
 		.map(([renderLayer, layer]) => ({
-			componentIds: layer.componentIds.sort(),
+			componentIds: [...layer.componentIds].sort(),
 			envCellIds: layer.envCellIds.sort(compareNumbers),
 			renderLayer,
 		}));
+}
+
+function compareProjectionEnvCellLayers(
+	left: { readonly envCellId: number },
+	right: { readonly envCellId: number },
+): number {
+	return left.envCellId - right.envCellId;
 }
 
 function createProjectionComponentId(envCellIds: readonly number[]): string {

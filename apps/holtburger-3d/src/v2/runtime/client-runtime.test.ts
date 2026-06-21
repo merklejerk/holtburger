@@ -38,6 +38,7 @@ import {
 	DeferredStaticBaker,
 	DeferredStaticResolver,
 } from "../static/fake-workers";
+import { createEnvCellStaticPortalGraph } from "../static/portal-graphs";
 import {
 	createClientRuntime,
 	type RuntimeEvent,
@@ -324,7 +325,7 @@ describe("V2 client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("publishes direct env-cell frame plans from committed traversal and runtime membership", async () => {
+	it("publishes env-cell projection frame plans from committed projection inputs and runtime membership", async () => {
 		const renderer = new FakeRenderer();
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -346,6 +347,27 @@ describe("V2 client runtime", () => {
 		updateInteriorSceneInterest(runtime);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
 		await flushPromises();
+		const portalInteriorRecord = createPortalInteriorRecord({
+			envCellIds: [0xda550100, 0xda550101],
+			portalLinks: [
+				{
+					flags: 0,
+					linkId: "a-to-b",
+					polygonId: null,
+					source: {
+						envCellId: 0xda550100,
+						kind: "env-cell",
+						portalId: "portal-a",
+					},
+					sourceIndex: 0,
+					target: {
+						envCellId: 0xda550101,
+						kind: "env-cell",
+						portalId: "portal-b",
+					},
+				},
+			],
+		});
 		baker.complete("1:landblock:da55ffff:landblock-env-cells", {
 			drawUnits: [
 				createStructuredInteriorDrawUnit({
@@ -361,29 +383,13 @@ describe("V2 client runtime", () => {
 					},
 				}),
 			],
-			staticPortalInteriorRecords: [
-				createPortalInteriorRecord({
-					envCellIds: [0xda550100, 0xda550101],
-					portalLinks: [
-						{
-							flags: 0,
-							linkId: "a-to-b",
-							polygonId: null,
-							source: {
-								envCellId: 0xda550100,
-								kind: "env-cell",
-								portalId: "portal-a",
-							},
-							sourceIndex: 0,
-							target: {
-								envCellId: 0xda550101,
-								kind: "env-cell",
-								portalId: "portal-b",
-							},
-						},
-					],
-				}),
+			staticPortalGraphs: [
+				createEnvCellStaticPortalGraph(
+					createEnvCellWorkOwner("work-env-portals", 0xda55ffff),
+					portalInteriorRecord,
+				),
 			],
+			staticPortalInteriorRecords: [portalInteriorRecord],
 		});
 		await flushRuntimeWork();
 
@@ -427,52 +433,50 @@ describe("V2 client runtime", () => {
 		expect(
 			runtime.createDiagnosticsReport().runtime.portalFrameWorkPlan,
 		).toMatchObject({
-			graph: {
-				baseNodeId: 0,
+			kind: "direct-env-cell",
+			layeredGraph: {
+				baseEntry: {
+					resources: {
+						envCellStaticObjectDrawUnitIds: ["env-static-shared"],
+						resourceState: "ready",
+						structuredInteriorDrawUnitIds: ["structured:da550100"],
+					},
+					scene: {
+						envCellId: 0xda550100,
+						kind: "env-cell-direct",
+						landblockId: 0xda55ffff,
+					},
+				},
 				diagnostics: {
 					...emptyPortalApertureDiagnostics(),
 					envCellPortalEdges: 1,
 					selectedMaskEdges: 1,
 				},
-				edges: [
+				maskEdges: [
 					expect.objectContaining({
-						childNodeId: 1,
 						linkId: "a-to-b",
-						parentNodeId: 0,
+						renderEntryId: 0,
+						renderLayer: 1,
+						sourceEnvCellId: 0xda550100,
 						sourceKind: "env-cell-portal",
+						targetEnvCellId: 0xda550101,
 					}),
 				],
-				nodes: [
-					{
-						resources: {
-							envCellStaticObjectDrawUnitIds: ["env-static-shared"],
-							resourceState: "ready",
-							structuredInteriorDrawUnitIds: ["structured:da550100"],
-						},
-						scene: {
-							envCellId: 0xda550100,
-							kind: "env-cell-direct",
-							landblockId: 0xda55ffff,
-						},
-						traversalDepth: 0,
-					},
-					{
+				renderEntries: [
+					expect.objectContaining({
+						envCellId: 0xda550101,
+						incomingMaskEdgeIds: [0],
+						renderLayer: 1,
 						resources: {
 							envCellStaticObjectDrawUnitIds: ["env-static-shared"],
 							resourceState: "ready",
 							structuredInteriorDrawUnitIds: [],
 						},
-						scene: {
-							envCellId: 0xda550101,
-							kind: "env-cell-direct",
-							landblockId: 0xda55ffff,
-						},
-						traversalDepth: 1,
-					},
+					}),
 				],
+				renderLayers: [{ renderEntryIds: [0], renderLayer: 1 }],
 			},
-			kind: "direct-env-cell",
-			mode: "portal-traversal",
+			mode: "portal-projection",
 		});
 		expect(renderer.renderPassPlans).toEqual([
 			{
@@ -487,7 +491,7 @@ describe("V2 client runtime", () => {
 		]);
 		expect(renderer.portalFrameWorkPlans.at(-1)).toMatchObject({
 			kind: "direct-env-cell",
-			mode: "portal-traversal",
+			mode: "portal-projection",
 		});
 		const cachedPortalFrameWorkPlanCount = renderer.portalFrameWorkPlans.length;
 
@@ -504,22 +508,23 @@ describe("V2 client runtime", () => {
 		runtime.setDirectEnvCellPortalMaxDepth(0);
 
 		expect(renderer.portalFrameWorkPlans.at(-1)).toMatchObject({
-			graph: {
-				nodes: [
-					expect.objectContaining({
-						scene: expect.objectContaining({ envCellId: 0xda550100 }),
-						traversalDepth: 0,
-					}),
-				],
+			layeredGraph: {
+				baseEntry: expect.objectContaining({
+					scene: expect.objectContaining({ envCellId: 0xda550100 }),
+				}),
+				renderEntries: [],
+				renderLayers: [],
 			},
 			kind: "direct-env-cell",
-			mode: "portal-traversal",
+			mode: "portal-projection",
 		});
 		expect(
-			renderer.portalFrameWorkPlans.at(-1)?.kind === "direct-env-cell"
-				? renderer.portalFrameWorkPlans.at(-1)?.graph.nodes.length
-				: 0,
-		).toBe(1);
+			renderer.portalFrameWorkPlans.at(-1)?.kind === "direct-env-cell" &&
+				renderer.portalFrameWorkPlans.at(-1)?.mode === "portal-projection"
+				? renderer.portalFrameWorkPlans.at(-1)?.layeredGraph.renderEntries
+						.length
+				: -1,
+		).toBe(0);
 		const depthChangedPortalFrameWorkPlanCount =
 			renderer.portalFrameWorkPlans.length;
 

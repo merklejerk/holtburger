@@ -1522,7 +1522,7 @@ Deliverables:
   - longest-acyclic-layer rendering is structurally sound but needs a narrowly scoped renderer follow-up before Phase 10;
   - longest-acyclic-layer rendering loses necessary visibility and must be followed by a per-pixel visibility/mask-propagation renderer phase before Phase 10;
   - projection construction needs corrected source facts before layer contracts proceed.
-- Delete or quarantine the old outdoor per-root path-tree fallback if Phase 9C projection validation passes.
+- Delete the old outdoor per-root path-tree fallback if Phase 9C projection validation passes.
 - If a fallback must remain temporarily:
   - make the fallback explicit in `ClientRuntime` as `legacyOutdoorPathTreePortalPlanning`;
   - log/report when it is used;
@@ -1666,7 +1666,7 @@ Implementation tasks:
   - Cut the env-cell residency branch in `ClientRuntime.#derivePortalFrameWorkPlan(...)` from `queryPortalTraversal(...)` to the env-cell projection query and projection frame-plan builder.
   - Replace the env-cell cache key's `portalTraversalGraphRevision` with projection `sourceRevisionKey` once the projection path is active.
   - Preserve `PortalTraversalPlan` only for diagnostics/debug paths if still useful; it should not remain the production renderer plan after the cutover.
-- 9E.5: Delete or quarantine old recursive direct frame planning.
+- 9E.5: Delete old recursive direct frame planning.
   - Delete `createDirectEnvCellFramePlan(...)` when no production caller remains.
   - Delete recursive `PortalFrameGraphPlan` renderer execution if no debug caller remains; otherwise rename it as a legacy/debug plan path.
   - Replace or delete direct env-cell path-tree frame-plan tests that only prove duplicated portal-stack views. Keep tests that prove resource membership, source aperture identity, and cap behavior through the projection path.
@@ -1716,7 +1716,7 @@ Dry-run findings on 2026-06-21:
   - 9E.2b correct env-cell-root render layer semantics so layer `0` means resident cell only;
   - 9E.3 generalize renderer frame-plan contracts and root rendering policy while outdoor still passes;
   - 9E.4 cut runtime env-cell branch to projection;
-  - 9E.5 delete or quarantine recursive direct traversal leftovers.
+  - 9E.5 delete recursive direct traversal leftovers.
 
 9E.1 implementation update on 2026-06-21:
 
@@ -1825,6 +1825,28 @@ Dry-run findings on 2026-06-21:
   - `npm run check`;
   - `npm run lint:ts`;
   - `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts`.
+
+9E.4 implementation update on 2026-06-21:
+
+- Cut production env-cell residency planning in `ClientRuntime` from recursive `PortalTraversalPlan` construction to env-cell-root portal projection.
+- The env-cell runtime branch now calls `StaticSceneQuery.queryEnvCellPortalProjection({ landblockId, startEnvCellId })` and feeds that projection into `createPortalProjectionFramePlan(...)`.
+- The env-cell frame-plan cache key now uses projection `sourceRevisionKey` plus current env-cell id, resource-membership revision, depth cap, render-entry cap, mask-edge cap, and render-anchor landblock id. It no longer depends on `portalTraversalGraphRevision`.
+- The runtime fixture now provides both static portal interior records and static portal graph records, matching the real env-cell static bake output that projection queries consume.
+- Tests now prove:
+  - the resident env cell is emitted as the unmasked base entry;
+  - reachable descendant env cells are emitted as masked projection render entries;
+  - depth cap `0` keeps the resident base entry and removes descendants;
+  - unchanged residency reuses the cached projection frame plan;
+  - changing env-cell residency invalidates and republishes the plan.
+- Debt introduced/retained:
+  - `createDirectEnvCellFramePlan(...)`, `PortalTraversalPlan`, and `"portal-traversal"` renderer execution still exist for legacy tests/debug paths. Tests/debug are low-priority consumers; delete these in 9E.5 unless a concrete production-grade diagnostic owner is named.
+  - `StaticSceneQuery` still maintains traversal graph revision/cache state only for the legacy traversal path.
+  - No browser screenshot smoke was run in this phase; validation is structural/unit-level. Watch real scenes for same-layer stencil/mask surprises as projection gets exercised interactively.
+- Validation for this slice:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts src/v2/runtime/static-scene-query.test.ts src/v2/static/portal-graphs.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts`;
+  - `npm run test:ts`.
 
 Acceptance criteria:
 

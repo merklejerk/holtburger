@@ -1185,6 +1185,8 @@ Validation:
 
 ### Immediate Phase 9B: Define Outdoor Portal Projection And Query Cache
 
+Status: Complete on 2026-06-21.
+
 Problem to solve:
 
 - Phase 9A still leaves outdoor direct planning shaped as one path-tree traversal per accepted building-transition root.
@@ -1312,6 +1314,47 @@ Acceptance criteria:
   - `npm run lint:ts`;
   - targeted TS tests for `portal-graphs`, `static-scene-query`, and any new projection module;
   - `npm run test:ts`.
+
+Implementation update:
+
+- Added `StaticOutdoorPortalProjectionRecord` and related projection node, edge, component, render-layer, incoming-edge, and diagnostics contracts.
+- Added `createStaticOutdoorPortalProjection(...)` in `static/portal-graphs.ts`.
+  - It joins same-landblock committed portal graph records, portal/interior records, and building transition aperture batches.
+  - It keeps one projected node per `seenOutside === true` env cell.
+  - It builds building-transition root edges from actual transition target env cells, not linked-env-cell fanout.
+  - It keeps env-cell portal edges only when both source and target env cells are outside-visible.
+  - It resolves renderer-ready aperture resource/source ids during projection construction.
+  - It computes strongly connected components, condenses them into an acyclic component graph, and assigns longest render layers from the synthetic outdoor root.
+- Added `createStaticOutdoorPortalProjectionSourceKey(...)` as a deterministic semantic key over relevant graph, portal/interior, aperture, and transition range facts.
+- Added `StaticSceneQuery.queryOutdoorPortalProjection(...)` with a source-keyed cache.
+- Wired projection cache invalidation through portal interior upserts, portal graph upserts, transition aperture batch apply/remove, draw-unit-owned committed-record deletion, retained-scope pruning, and `StaticSceneQuery.clear()`.
+- Fixed `StaticSceneQuery.clear()` so committed portal graph records, portal traversal graph revisions/cache, and outdoor projection cache are cleared with the rest of query state.
+- Added focused tests for:
+  - longest acyclic render layer assignment in a diamond/longer-path graph;
+  - finite SCC handling for cyclic env-cell groups;
+  - multiple building-transition apertures into one projected env-cell node;
+  - `StaticSceneQuery` projection cache reuse and invalidation by graph/transition changes;
+  - full clear removing stale portal graph/projection state.
+
+Validation:
+
+- `npm run check`
+- `npm run lint:ts`
+- `npm run test:ts -- src/v2/static/portal-graphs.test.ts src/v2/runtime/static-scene-query.test.ts`
+- `npm run test:ts`
+
+Spicy notes:
+
+- Projection construction deliberately consumes `TransitionApertureBatch` directly for building-transition edges. `StaticPortalGraphRecord` carries the right topology/provenance shape, but not the range identity needed to build renderer aperture ids.
+- The projection source key is content-shaped, not a new resource-level revision counter. This keeps Phase 9B aligned with the no-new-tiny-invalidator rule.
+- `StaticSceneQuery.clear()` had stale portal graph/traversal state before this phase. That was fixed because adding another semantic cache on top of stale clear behavior would have been cursed.
+
+Failed to close in Phase 9B:
+
+- The projection is query-side only. Phase 12 still needs to move publication into `EnvCellSystemLayerPayload` once coherent layer assembly exists.
+- Outdoor runtime planning still uses the old per-root traversal path. Phase 9C must cut the outdoor branch over to `queryOutdoorPortalProjection(...)`.
+- Renderer execution is unchanged. Phase 9C still needs the layered outdoor plan shape and renderer execution branch.
+- SCC component-internal edge rendering remains a Phase 9C/9D watchpoint.
 
 ### Immediate Phase 9C: Cut Outdoor Direct Planning To The Projection
 

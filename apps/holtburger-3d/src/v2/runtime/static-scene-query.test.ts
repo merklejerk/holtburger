@@ -5,6 +5,7 @@ import type {
 	OutdoorStaticObjectsScopePayload,
 	StaticBounds,
 	StaticPortalGraphRecord,
+	StaticPortalInteriorRecord,
 	StaticSourceMappingRecord,
 	StaticWorkPeerRecordOwner,
 	TerrainStaticScopePayload,
@@ -1283,6 +1284,88 @@ describe("V2 static scene query", () => {
 		);
 	});
 
+	it("caches outdoor portal projections by committed semantic inputs", () => {
+		const query = new StaticSceneQuery();
+		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+		const portalInteriorRecord = createProjectionPortalInteriorRecord(owner);
+		const transitionApertureBatch = createProjectionTransitionApertureBatch({
+			targetCellLowId: 0x0100,
+		});
+
+		query.applyStaticPeerRecords({
+			portalGraphs: [createStaticPortalGraphRecord(owner)],
+			portalInteriorRecords: [portalInteriorRecord],
+		});
+		query.applyTransitionApertureBatches([transitionApertureBatch]);
+
+		const first = query.queryOutdoorPortalProjection({
+			landblockId: 0xda55ffff,
+		});
+		const second = query.queryOutdoorPortalProjection({
+			landblockId: 0xda55ffff,
+		});
+
+		expect(second).toBe(first);
+		expect(first?.renderLayerByEnvCellId).toEqual([
+			{ envCellId: 0xda550100, renderLayer: 1 },
+			{ envCellId: 0xda550101, renderLayer: 2 },
+		]);
+
+		query.applyStaticPeerRecords({
+			portalGraphs: [
+				createStaticPortalGraphRecord(owner, {
+					targetEnvCellId: 0xda550102,
+				}),
+			],
+		});
+
+		const afterGraphChange = query.queryOutdoorPortalProjection({
+			landblockId: 0xda55ffff,
+		});
+
+		expect(afterGraphChange).not.toBe(first);
+		expect(afterGraphChange?.renderLayerByEnvCellId).toEqual([
+			{ envCellId: 0xda550100, renderLayer: 1 },
+			{ envCellId: 0xda550102, renderLayer: 2 },
+		]);
+	});
+
+	it("invalidates outdoor portal projections when transition apertures change or clear runs", () => {
+		const query = new StaticSceneQuery();
+		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+		query.applyStaticPeerRecords({
+			portalGraphs: [createStaticPortalGraphRecord(owner)],
+			portalInteriorRecords: [createProjectionPortalInteriorRecord(owner)],
+		});
+		query.applyTransitionApertureBatches([
+			createProjectionTransitionApertureBatch({ targetCellLowId: 0x0100 }),
+		]);
+
+		const first = query.queryOutdoorPortalProjection({
+			landblockId: 0xda55ffff,
+		});
+
+		query.applyTransitionApertureBatches([
+			createProjectionTransitionApertureBatch({ targetCellLowId: 0x0101 }),
+		]);
+
+		const afterTransitionChange = query.queryOutdoorPortalProjection({
+			landblockId: 0xda55ffff,
+		});
+
+		expect(afterTransitionChange).not.toBe(first);
+		expect(afterTransitionChange?.renderLayerByEnvCellId).toEqual([
+			{ envCellId: 0xda550101, renderLayer: 1 },
+		]);
+
+		query.clear();
+
+		expect(
+			query.queryOutdoorPortalProjection({ landblockId: 0xda55ffff }),
+		).toBeNull();
+		expect(query.queryPortalGraphs({ landblockId: 0xda55ffff })).toEqual([]);
+	});
+
 	it("sorts committed records by typed keys without JSON stringification", () => {
 		const query = new StaticSceneQuery();
 		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
@@ -2119,6 +2202,82 @@ function createStaticPortalGraphRecord(
 			},
 		],
 		owner,
+	};
+}
+
+function createProjectionPortalInteriorRecord(
+	owner: StaticWorkPeerRecordOwner,
+): StaticPortalInteriorRecord {
+	return {
+		envCells: [0xda550100, 0xda550101, 0xda550102].map((envCellId) => ({
+			envCellId,
+			localPlacement: createPlacement(),
+			portalApertures: [
+				{
+					plane: null,
+					points: [
+						{ x: 0, y: 0, z: 0 },
+						{ x: 1, y: 0, z: 0 },
+						{ x: 0, y: 1, z: 0 },
+					],
+					polygonId: null,
+					portalId: "portal-a",
+					sourceIndex: 0,
+				},
+			],
+			portals: [],
+			seenOutside: true,
+		})),
+		kind: "env-cell-portal-interior",
+		landblockId: 0xda55ffff,
+		owner,
+		portalLinks: [],
+	};
+}
+
+function createProjectionTransitionApertureBatch(options: {
+	readonly targetCellLowId: number;
+}): TransitionApertureBatch {
+	return {
+		apertureBatchId: "transition-apertures:outdoor-buildings:3663069183",
+		coordinateSpace: "landblock-render-local",
+		frontFace: "indoor-visible",
+		indices: [0, 2, 1],
+		kind: "transition-aperture-batch",
+		landblockId: 0xda55ffff,
+		planes: [null],
+		ranges: [
+			{
+				exterior: {
+					buildingInstanceId: "building-0",
+					buildingPortalId: "building-portal-0",
+					kind: "landblock-building",
+				},
+				firstIndex: 0,
+				indexCount: 3,
+				portalId:
+					"transition-portal:outdoor-buildings:3663069183:building-transition-aperture:building-0:0",
+				source: {
+					buildingInstanceId: "building-0",
+					buildingPortalId: "building-portal-0",
+					buildingPortalSourceIndex: 0,
+					kind: "building-portal",
+					linkedEnvCellIds: [0xda550100],
+					otherCellId: options.targetCellLowId,
+					otherPortalId: 0xffff,
+					polyId: 7,
+					portalIndex: 0,
+					sourceAssetId: "gfx-obj/01001234",
+					sourceDid: 0x01001234,
+				},
+			},
+		],
+		sourceDomain: "outdoor-buildings",
+		vertices: [
+			{ x: 0, y: 0, z: 0 },
+			{ x: 1, y: 0, z: 0 },
+			{ x: 0, y: 1, z: 0 },
+		],
 	};
 }
 

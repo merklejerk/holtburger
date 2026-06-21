@@ -6,8 +6,12 @@ import type {
 	RendererFrameTelemetryListener,
 	RendererSnapshot,
 	RenderPassPlan,
+	OutdoorProjectionPortalFrameGraphPlan,
+	OutdoorProjectionPortalFrameMaskEdgePlan,
 	PortalFrameEdgePlan,
+	PortalFrameGraphPlan,
 	PortalFrameNodePlan,
+	PortalFrameNodeResources,
 	PortalFrameWorkPlan,
 	SceneDomainTargetKind,
 	SceneDomainTargetSnapshot,
@@ -79,6 +83,20 @@ type DirectEnvCellPortalFrameWorkPlan = Extract<
 	PortalFrameWorkPlan,
 	{ readonly kind: "direct-env-cell" }
 >;
+type DirectEnvCellTraversalPortalFrameWorkPlan = Extract<
+	DirectEnvCellPortalFrameWorkPlan,
+	{ readonly kind: "direct-env-cell" }
+> & {
+	readonly mode: "portal-traversal" | "portal-debug";
+	readonly graph: PortalFrameGraphPlan;
+};
+type DirectEnvCellOutdoorProjectionPortalFrameWorkPlan = Extract<
+	DirectEnvCellPortalFrameWorkPlan,
+	{ readonly kind: "direct-env-cell" }
+> & {
+	readonly mode: "outdoor-projection";
+	readonly layeredGraph: OutdoorProjectionPortalFrameGraphPlan;
+};
 
 const TERRAIN_ATLAS_MIP_GRADIENT_SCALE = 0.5;
 const CAMERA_NEAR_PLANE = 0.1;
@@ -807,11 +825,7 @@ class Webgl2Renderer implements Renderer {
 		const sourceSceneCopyVertexArray = gl.createVertexArray();
 		const vertexArray = gl.createVertexArray();
 		const vertexBuffer = gl.createBuffer();
-		if (
-			!sourceSceneCopyVertexArray ||
-			!vertexArray ||
-			!vertexBuffer
-		) {
+		if (!sourceSceneCopyVertexArray || !vertexArray || !vertexBuffer) {
 			throw new Error("Failed to create V2 renderer scratch resources.");
 		}
 		this.#sourceSceneCopyVertexArray = sourceSceneCopyVertexArray;
@@ -1059,12 +1073,12 @@ class Webgl2Renderer implements Renderer {
 		this.#envCellStaticObjectResourceIdsByEnvCellKey.clear();
 		this.#transitionApertureResources.clear();
 		this.#portalApertureResources.clear();
-			this.#portalApertureRangesById.clear();
-			this.#textures.clear();
-			this.#textureBindings.clear();
-			this.#warnedLayeredFallbackDrawUnitIds.clear();
-			this.#warnedMissingPortalApertureRangeIds.clear();
-			this.#terrainProgram.dispose();
+		this.#portalApertureRangesById.clear();
+		this.#textures.clear();
+		this.#textureBindings.clear();
+		this.#warnedLayeredFallbackDrawUnitIds.clear();
+		this.#warnedMissingPortalApertureRangeIds.clear();
+		this.#terrainProgram.dispose();
 		this.#staticObjectProgram.dispose();
 		this.#debugOverlayProgram.dispose();
 		this.#transitionCompositeProgram.dispose();
@@ -1156,8 +1170,11 @@ class Webgl2Renderer implements Renderer {
 		const gl = this.#gl;
 		const aspectRatio =
 			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight);
-		const baseNode = getPortalFrameGraphBaseNode(plan);
-		if (baseNode.scene.kind === "outdoor-target") {
+		if (
+			(plan.mode === "portal-traversal" &&
+				getPortalFrameGraphBaseNode(plan).scene.kind === "outdoor-target") ||
+			plan.mode === "outdoor-projection"
+		) {
 			const targets = this.#ensureSceneDomainTargets(
 				gl.drawingBufferWidth,
 				gl.drawingBufferHeight,
@@ -1168,10 +1185,14 @@ class Webgl2Renderer implements Renderer {
 				pulse,
 				targets.width / Math.max(1, targets.height),
 			);
-			this.#copySceneDomainColorAndDepth(targets.exterior, targets.compositePing, {
-				clearStencil: true,
-				copyStencil: false,
-			});
+			this.#copySceneDomainColorAndDepth(
+				targets.exterior,
+				targets.compositePing,
+				{
+					clearStencil: true,
+					copyStencil: false,
+				},
+			);
 			this.#stateCache.bindFramebuffer(targets.compositePing.framebuffer);
 			this.#stateCache.setViewport({
 				height: targets.compositePing.height,
@@ -1179,10 +1200,15 @@ class Webgl2Renderer implements Renderer {
 				x: 0,
 				y: 0,
 			});
-			this.#lastDirectEnvCellDrawCalls = this.#drawDirectEnvCellResources(
-				plan,
-				targets.compositePing.width / Math.max(1, targets.compositePing.height),
-			);
+			const targetAspectRatio =
+				targets.compositePing.width / Math.max(1, targets.compositePing.height);
+			this.#lastDirectEnvCellDrawCalls =
+				plan.mode === "outdoor-projection"
+					? this.#drawOutdoorProjectionPortalFrameResources(
+							plan,
+							targetAspectRatio,
+						)
+					: this.#drawDirectEnvCellResources(plan, targetAspectRatio);
 			this.#blitSceneDomainColorToDisplay(targets.compositePing);
 			return;
 		}
@@ -1693,7 +1719,7 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	#drawDirectEnvCellResources(
-		plan: DirectEnvCellPortalFrameWorkPlan,
+		plan: DirectEnvCellTraversalPortalFrameWorkPlan,
 		aspectRatio: number,
 	): number {
 		const gl = this.#gl;
@@ -1725,6 +1751,84 @@ class Webgl2Renderer implements Renderer {
 				parentNode: baseNode,
 			});
 		}
+		this.#stateCache.setStencilState(
+			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+		);
+		this.#stateCache.bindVertexArray(null);
+		return drawCalls;
+	}
+
+	#drawOutdoorProjectionPortalFrameResources(
+		plan: DirectEnvCellOutdoorProjectionPortalFrameWorkPlan,
+		aspectRatio: number,
+	): number {
+		const gl = this.#gl;
+		const renderEntryById = new Map(
+			plan.layeredGraph.renderEntries.map(
+				(entry) => [entry.renderEntryId, entry] as const,
+			),
+		);
+		const maskEdgeById = new Map(
+			plan.layeredGraph.maskEdges.map((edge) => [edge.edgeId, edge] as const),
+		);
+		let drawCalls = 0;
+		for (const layer of plan.layeredGraph.renderLayers) {
+			let layerMaskCount = 0;
+			for (const renderEntryId of layer.renderEntryIds) {
+				const renderEntry = renderEntryById.get(renderEntryId);
+				if (!renderEntry) {
+					throw new Error(
+						`Outdoor projection layer ${layer.renderLayer} references missing render entry ${renderEntryId}.`,
+					);
+				}
+				for (const maskEdgeId of renderEntry.incomingMaskEdgeIds) {
+					const edge = maskEdgeById.get(maskEdgeId);
+					if (!edge) {
+						throw new Error(
+							`Outdoor projection render entry ${renderEntryId} references missing mask edge ${maskEdgeId}.`,
+						);
+					}
+					const apertureRange = this.#portalApertureRangesById.get(
+						edge.apertureResourceId,
+					);
+					if (!apertureRange) {
+						this.#warnMissingOutdoorProjectionPortalApertureRange(edge);
+						continue;
+					}
+					this.#drawOutdoorProjectionApertureStencilMask(edge, apertureRange, {
+						aspectRatio,
+					});
+					layerMaskCount += 1;
+				}
+			}
+			if (layerMaskCount === 0) {
+				continue;
+			}
+			this.#stateCache.setStencilState(
+				createStencilState(
+					gl,
+					true,
+					0x00,
+					gl.EQUAL,
+					layer.renderLayer,
+					gl.KEEP,
+				),
+			);
+			this.#resetDirectPortalDepthForStencilValue(layer.renderLayer);
+			for (const renderEntryId of layer.renderEntryIds) {
+				const renderEntry = renderEntryById.get(renderEntryId);
+				if (!renderEntry) {
+					throw new Error(
+						`Outdoor projection layer ${layer.renderLayer} references missing render entry ${renderEntryId}.`,
+					);
+				}
+				drawCalls += this.#drawPortalFrameResourceSet(
+					renderEntry.resources,
+					aspectRatio,
+				);
+			}
+		}
+
 		this.#stateCache.setStencilState(
 			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
 		);
@@ -1812,6 +1916,10 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	#resetDirectPortalDepth(childNode: PortalFrameNodePlan): void {
+		this.#resetDirectPortalDepthForStencilValue(childNode.traversalDepth);
+	}
+
+	#resetDirectPortalDepthForStencilValue(stencilValue: number): void {
 		const gl = this.#gl;
 		gl.colorMask(false, false, false, false);
 		try {
@@ -1826,14 +1934,7 @@ class Webgl2Renderer implements Renderer {
 			);
 			this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
 			this.#stateCache.setStencilState(
-				createStencilState(
-					gl,
-					true,
-					0x00,
-					gl.EQUAL,
-					childNode.traversalDepth,
-					gl.KEEP,
-				),
+				createStencilState(gl, true, 0x00, gl.EQUAL, stencilValue, gl.KEEP),
 			);
 			this.#stateCache.bindVertexArray(this.#sourceSceneCopyVertexArray);
 			gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -1849,16 +1950,23 @@ class Webgl2Renderer implements Renderer {
 		if (node.scene.kind !== "env-cell-direct") {
 			return 0;
 		}
+		return this.#drawPortalFrameResourceSet(node.resources, aspectRatio);
+	}
+
+	#drawPortalFrameResourceSet(
+		resources: PortalFrameNodeResources,
+		aspectRatio: number,
+	): number {
 		const staticObjectResources: StaticObjectGeometryResource[] = [];
 		const structuredInteriorResources: StructuredInteriorGeometryResource[] =
 			[];
-		for (const drawUnitId of node.resources.envCellStaticObjectDrawUnitIds) {
+		for (const drawUnitId of resources.envCellStaticObjectDrawUnitIds) {
 			const resource = this.#staticObjectResources.get(drawUnitId);
 			if (resource) {
 				staticObjectResources.push(resource);
 			}
 		}
-		for (const drawUnitId of node.resources.structuredInteriorDrawUnitIds) {
+		for (const drawUnitId of resources.structuredInteriorDrawUnitIds) {
 			const resource = this.#structuredInteriorResources.get(drawUnitId);
 			if (resource) {
 				structuredInteriorResources.push(resource);
@@ -1901,6 +2009,64 @@ class Webgl2Renderer implements Renderer {
 					operation,
 					parentNode,
 					childNode,
+				),
+			);
+			gl.uniformMatrix4fv(
+				this.#transitionCompositeProgram.uniforms.uModelViewProjection,
+				false,
+				createModelViewProjectionMatrix(this.#frameState, options.aspectRatio),
+			);
+			const translation = this.#createLandblockTranslation(
+				apertureRange.resource.landblockId,
+			);
+			gl.uniform3f(
+				this.#transitionCompositeProgram.uniforms.uPlacementTranslation,
+				translation[0],
+				translation[1],
+				translation[2],
+			);
+			this.#stateCache.bindVertexArray(apertureRange.resource.vertexArray);
+			gl.drawElements(
+				gl.TRIANGLES,
+				apertureRange.range.indexCount,
+				apertureRange.resource.indexType,
+				apertureRange.range.firstIndex *
+					getIndexElementByteSize(apertureRange.resource.indexType, gl),
+			);
+		} finally {
+			gl.colorMask(true, true, true, true);
+		}
+	}
+
+	#drawOutdoorProjectionApertureStencilMask(
+		edge: OutdoorProjectionPortalFrameMaskEdgePlan,
+		apertureRange: PortalApertureRangeResource,
+		options: { readonly aspectRatio: number },
+	): void {
+		if (apertureRange.range.indexCount === 0) {
+			return;
+		}
+		const gl = this.#gl;
+		gl.colorMask(false, false, false, false);
+		try {
+			this.#stateCache.useProgram(this.#transitionCompositeProgram.program);
+			this.#stateCache.setDepthState({
+				enabled: true,
+				func: gl.LEQUAL,
+				write: false,
+			});
+			this.#stateCache.setBlendState(
+				createBlendState(gl, false, gl.ONE, gl.ZERO),
+			);
+			this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
+			this.#stateCache.setStencilState(
+				createStencilState(
+					gl,
+					true,
+					0xff,
+					gl.ALWAYS,
+					edge.renderLayer,
+					gl.REPLACE,
 				),
 			);
 			gl.uniformMatrix4fv(
@@ -2337,7 +2503,9 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	#warnMissingPortalApertureRange(edge: PortalFrameEdgePlan): void {
-		if (this.#warnedMissingPortalApertureRangeIds.has(edge.apertureResourceId)) {
+		if (
+			this.#warnedMissingPortalApertureRangeIds.has(edge.apertureResourceId)
+		) {
 			return;
 		}
 		this.#warnedMissingPortalApertureRangeIds.add(edge.apertureResourceId);
@@ -2348,6 +2516,28 @@ class Webgl2Renderer implements Renderer {
 				childNodeId: edge.childNodeId,
 				parentNodeId: edge.parentNodeId,
 				sourceKind: edge.sourceKind,
+			},
+		);
+	}
+
+	#warnMissingOutdoorProjectionPortalApertureRange(
+		edge: OutdoorProjectionPortalFrameMaskEdgePlan,
+	): void {
+		if (
+			this.#warnedMissingPortalApertureRangeIds.has(edge.apertureResourceId)
+		) {
+			return;
+		}
+		this.#warnedMissingPortalApertureRangeIds.add(edge.apertureResourceId);
+		console.error(
+			`Outdoor projection portal edge ${edge.linkId} references missing portal aperture range ${edge.apertureResourceId}; dropping mask draw.`,
+			{
+				apertureSourceId: edge.apertureSourceId,
+				renderEntryId: edge.renderEntryId,
+				renderLayer: edge.renderLayer,
+				sourceEnvCellId: edge.sourceEnvCellId,
+				sourceKind: edge.sourceKind,
+				targetEnvCellId: edge.targetEnvCellId,
 			},
 		);
 	}
@@ -2421,8 +2611,9 @@ class Webgl2Renderer implements Renderer {
 		const directEnvCellFramePlanActive = directEnvCellFramePlan !== null;
 		const directOutdoorTargetFramePlanActive =
 			directEnvCellFramePlan !== null &&
-			getPortalFrameGraphBaseNode(directEnvCellFramePlan).scene.kind ===
-			"outdoor-target";
+			(directEnvCellFramePlan.mode === "outdoor-projection" ||
+				getPortalFrameGraphBaseNode(directEnvCellFramePlan).scene.kind ===
+					"outdoor-target");
 		return {
 			active:
 				directOutdoorTargetFramePlanActive ||
@@ -2482,7 +2673,6 @@ class Webgl2Renderer implements Renderer {
 		gl.bindBuffer(gl.ARRAY_BUFFER, null);
 		this.#stateCache.invalidate();
 	}
-
 }
 
 interface TerrainGeometryProgram {
@@ -3321,7 +3511,9 @@ function createDirectPortalDepthResetProgram(
 	);
 	const program = gl.createProgram();
 	if (!program) {
-		throw new Error("Failed to create V2 direct portal depth reset shader program.");
+		throw new Error(
+			"Failed to create V2 direct portal depth reset shader program.",
+		);
 	}
 
 	gl.attachShader(program, vertexShader);
@@ -3788,7 +3980,11 @@ function createTransitionAperturePositionBuffer(
 }
 
 function createStaticVec3PositionBuffer(
-	vertices: readonly { readonly x: number; readonly y: number; readonly z: number }[],
+	vertices: readonly {
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	}[],
 ): Float32Array {
 	const positions = new Float32Array(vertices.length * 3);
 	for (let vertexIndex = 0; vertexIndex < vertices.length; vertexIndex += 1) {
@@ -4002,7 +4198,7 @@ function groupPortalFrameEdgesByChildNodeId(
 }
 
 function getPortalFrameGraphBaseNode(
-	plan: DirectEnvCellPortalFrameWorkPlan,
+	plan: DirectEnvCellTraversalPortalFrameWorkPlan,
 ): PortalFrameNodePlan {
 	const baseNode = plan.graph.nodes.find(
 		(node) => node.nodeId === plan.graph.baseNodeId,

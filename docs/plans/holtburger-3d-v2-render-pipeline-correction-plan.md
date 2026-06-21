@@ -267,8 +267,14 @@ Special treatment must be narrow and named. Acceptable differences include:
 Unacceptable differences include:
 
 - separate production aperture resource classes where one source-tagged resource model is sufficient;
-- separate traversal graph contracts for transition and env-cell portals;
+- separate traversal/projection graph contracts for transition portals, env-cell portals, outdoor-origin traversal, and dungeon/env-cell-origin traversal where one source-tagged model is sufficient;
 - renderer execution branches that exist only because one path failed to use the shared aperture resource model.
+
+The preferred end state is one portal projection and renderer execution contract with narrow named root policies:
+
+- outdoor-origin roots are building-transition apertures from an outdoor scene into outside-visible env cells;
+- dungeon/env-cell-origin roots start at the current env cell and traverse env-cell portal edges;
+- any remaining policy difference should be provenance, root selection, cap semantics, or scene-domain compositing, not a different graph shape.
 
 ### Prefer Baked Static Structures Over Runtime Reconstruction
 
@@ -1352,9 +1358,9 @@ Spicy notes:
 Failed to close in Phase 9B:
 
 - The projection is query-side only. Phase 12 still needs to move publication into `EnvCellSystemLayerPayload` once coherent layer assembly exists.
-- Outdoor runtime planning still uses the old per-root traversal path. Phase 9C must cut the outdoor branch over to `queryOutdoorPortalProjection(...)`.
-- Renderer execution is unchanged. Phase 9C still needs the layered outdoor plan shape and renderer execution branch.
-- SCC component-internal edge rendering remains a Phase 9C/9D watchpoint.
+- Outdoor runtime planning still used the old per-root traversal path at the end of Phase 9B; Phase 9C has since cut the outdoor branch over to `queryOutdoorPortalProjection(...)`.
+- Renderer execution was unchanged at the end of Phase 9B; Phase 9C has since added the layered outdoor execution branch.
+- SCC component-internal edge rendering remains a Phase 9D watchpoint.
 
 ### Immediate Phase 9C: Cut Outdoor Direct Planning To The Projection
 
@@ -1439,6 +1445,52 @@ Acceptance criteria:
   - `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts src/v2/runtime/static-scene-query.test.ts`;
   - `npm run test:ts`.
 
+Status: Complete as of 2026-06-21.
+
+Implemented in this phase:
+
+- Added an explicit `direct-env-cell` / `outdoor-projection` renderer plan variant with:
+  - synthetic outdoor base entry;
+  - projected env-cell render entries;
+  - render-layer buckets;
+  - incoming mask edges;
+  - aperture resource diagnostics;
+  - projection-specific diagnostics.
+- Added `createOutdoorProjectionPortalFramePlan(...)` in `direct-env-cell-frame-plan.ts`.
+  - It consumes `StaticOutdoorPortalProjectionRecord` directly.
+  - It creates at most one render entry per projected env cell.
+  - It preserves all retained incoming projection edges as mask edges until the configured mask cap.
+  - It uses projection-provided aperture resource/source IDs rather than rehydrating edge geometry from portal/interior records.
+- Cut `ClientRuntime.#derivePortalFrameWorkPlan(...)` outdoor-origin planning over to `StaticSceneQuery.queryOutdoorPortalProjection(...)`.
+  - The old outdoor branch no longer builds `traversalPlansByStartEnvCellId`.
+  - Outdoor plan cache identity now uses `projection.sourceRevisionKey` instead of `portalTraversalGraphRevision` plus transition-aperture revision soup.
+- Added WebGL2 execution for outdoor projection plans.
+  - It renders exterior into the composite target, draws projected aperture masks by ascending render layer, resets depth for that layer, and draws each selected env cell's resources once.
+  - It keeps the existing static portal aperture resource model; no transition-only renderer path was added.
+- Updated portal frame plan equality and the V2 browser HUD formatting for outdoor projection plans.
+  - HUD text now reports projected entries/layers/components instead of calling outdoor projected entries portal-stack `views`.
+- Added tests for:
+  - diamond/shared-target projection producing one render entry for the shared target;
+  - multiple incoming aperture masks into one target render entry;
+  - longest-layer/cap behavior without duplicate alternate-path render entries;
+  - runtime publication of an outdoor projection frame plan from committed projection inputs;
+  - existing projection query invalidation from Phase 9B.
+
+Validation run:
+
+- `npm run check`
+- `npm run lint:ts`
+- `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts src/v2/runtime/static-scene-query.test.ts`
+- `npm run test:ts -- src/v2/renderer/portal-frame-work-plan.test.ts`
+- `npm run test:ts`
+
+Debt and spicy bits:
+
+- The old `createOutdoorTransitionPortalFramePlan(...)` implementation still exists for now, but runtime outdoor planning no longer calls it. Phase 9D should delete or quarantine it after visual validation.
+- WebGL2 outdoor projection execution currently uses the render layer as the stencil reference. That means entries in the same layer share one mask namespace. We are intentionally relying on non-overlapping env-cell geometry plus depth for this pass; if same-layer bleed appears, switch to per-entry stencil identity or one-entry-at-a-time mask clearing.
+- `maxPortalViews` is temporarily interpreted as a global mask-edge cap for outdoor projection plans. That keeps the existing safety limit meaningful, but Phase 9D should decide whether the cap should be renamed or replaced with a projection-specific mask-edge cap.
+- The runtime test proves outdoor projection publication for a transition-only projection. Diamond and cycle-ish topology are covered at the frame-plan builder/projection-query level, not by a full fake static coordinator world.
+
 ### Immediate Phase 9D: Resteer Projection Semantics Before Layer Cutover
 
 Problem to solve:
@@ -1499,6 +1551,91 @@ Dry-run findings on 2026-06-21:
 - Strongly connected components need an explicit renderer policy. The projection can assign all cells in a cyclic component one finite layer, but component-internal edges should either be handled by the layered mask policy or counted/skipped with diagnostics until screenshots prove the same-layer behavior is correct.
 - Phase 9C is large enough to split if implementation gets spicy: first add the projection record/query/cache and runtime plan builder behind tests, then add the renderer layered execution branch. Do not mix renderer stencil semantics debugging with projection construction bugs in one unreviewable chunk.
 - `PortalFramePlanKey` should replace the outdoor `portalTraversalGraphRevision` plus `transitionApertureRevision` pair with `projection.sourceRevisionKey` only when the projection path is active. Keep the direct env-cell residency key unchanged for now.
+
+### Immediate Phase 9E: Cut Dungeon-Origin Direct Traversal To Projection Semantics
+
+Problem to solve:
+
+- Phase 9C made outdoor-origin direct portal rendering projection/layer based, but dungeon/env-cell-origin direct rendering still uses `PortalTraversalPlan` and recursive portal-stack `PortalFrameGraphPlan`.
+- That split is structurally non-isomorphic: outdoor planning dedupes env cells into one projected render entry, while dungeon planning can still duplicate the same env cell through alternate portal-stack paths.
+- If Phase 10 bakes `EnvCellSystemLayerPayload` around only the outdoor projection shape, the dungeon path will keep dragging a second graph model forward. Big yikes, architecturally.
+
+Scope:
+
+- Add an env-cell-origin projection mode that uses the same durable projection concepts as outdoor projection:
+  - projected env-cell nodes;
+  - retained portal edges;
+  - incoming mask edges by target env cell;
+  - SCC facts;
+  - longest-acyclic render layers;
+  - one render entry per selected env cell.
+- Keep root selection separate and explicit:
+  - outdoor-origin projection roots are building-transition apertures into outside-visible env cells;
+  - dungeon-origin projection root is the current env cell at render layer `0`.
+- Preserve current dungeon visual behavior as much as practical, but prefer the isomorphic projection contract over keeping portal-stack path-tree shape for compatibility.
+- Do not add aperture clipping or per-pixel visibility propagation in this phase unless Phase 9D proves layer masks are insufficient.
+
+Implementation tasks:
+
+- Generalize the Phase 9B/9C projection builder so it can build from a named root policy:
+  - `outdoor-root`;
+  - `env-cell-root`.
+- Add a `StaticSceneQuery` API for env-cell-origin projection, for example:
+  - `queryEnvCellPortalProjection({ landblockId, startEnvCellId }): StaticEnvCellPortalProjectionRecord | null`;
+  - or a single generic `queryPortalProjection(...)` with an explicit root variant.
+- Prefer one shared projection record shape if the data supports it:
+  - root kind/id;
+  - source revision key;
+  - nodes;
+  - edges;
+  - adjacency;
+  - incoming edges;
+  - components;
+  - component edges;
+  - render layers;
+  - diagnostics.
+- Add a renderer-facing plan shape that is shared between outdoor and dungeon projections where possible.
+  - The current `outdoor-projection` plan variant may become `portal-projection` with a root scene variant.
+  - If keeping two mode names temporarily is clearer, the nested graph/entry/mask contracts should still be shared.
+- Cut the env-cell residency branch in `ClientRuntime.#derivePortalFrameWorkPlan(...)` from `queryPortalTraversal(...)` to the env-cell projection query and projection frame-plan builder.
+- Replace or delete direct env-cell path-tree frame-plan tests that only prove duplicated portal-stack views. Keep tests that prove resource membership, source aperture identity, and cap behavior.
+- Add tests:
+  - `A -> B` and `A -> C -> B` produces one render entry for `B`, assigned to the longest acyclic layer;
+  - `A -> C -> A -> B` does not create an unbounded path and records the SCC/cycle facts;
+  - `A -> F -> G -> C -> B` can still raise `B` to the longer valid acyclic layer;
+  - multiple incoming env-cell portal apertures into the same target create multiple mask edges without duplicate render entries;
+  - current env cell/root renders at layer `0` with its own resources and no incoming mask requirement;
+  - projection source key changes invalidate the env-cell-origin frame-plan cache;
+  - outdoor-origin projection tests still pass unchanged or with only naming updates.
+- Update HUD diagnostics so indoor/dungeon projection and outdoor projection use the same labels:
+  - entries;
+  - cells;
+  - layers;
+  - masks;
+  - components;
+  - cyclic components;
+  - skipped/capped edges.
+
+Acceptance criteria:
+
+- Dungeon/env-cell-origin direct rendering no longer depends on recursive portal-stack `PortalFrameGraphPlan` for production planning.
+- Outdoor-origin and dungeon-origin direct portal rendering use one shared projection/layer render-entry model, or two thin root-policy wrappers around the same model.
+- The current env cell renders exactly once as the projection root entry.
+- A target env cell reached by multiple acyclic paths gets one render entry at its longest acyclic layer.
+- Cycles are represented by SCC facts and cannot create unbounded traversal or repeated render entries.
+- Existing source aperture identity and static aperture resource selection remain intact.
+- Existing outdoor projection behavior from Phase 9C remains intact.
+- Validation passes:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts src/v2/runtime/static-scene-query.test.ts src/v2/static/portal-graphs.test.ts`;
+  - `npm run test:ts`.
+
+Debt and watchpoints:
+
+- If Phase 9D finds same-layer mask bleed in outdoor views, solve that renderer policy before or inside Phase 9E so dungeon cutover does not clone a known bad stencil strategy.
+- If dungeon-origin projection exposes cases where portal-stack nesting is visually necessary, record the exact scene and decide whether the shared contract needs per-entry stencil identity, one-entry mask clearing, or a later per-pixel visibility phase.
+- The old `PortalTraversalPlan` may still be useful as a debug/export view, but it should stop being the production renderer plan if Phase 9E succeeds.
 
 ### Phase 10: Define Atomic Landblock Layer Contracts
 

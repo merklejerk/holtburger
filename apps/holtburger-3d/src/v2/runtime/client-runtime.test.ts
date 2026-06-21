@@ -27,6 +27,7 @@ import type {
 	OutdoorStaticObjectsScopePayload,
 	StaticObjectGeometryStaticDrawUnit,
 	StaticPortalInteriorRecord,
+	TransitionApertureBatch,
 	StructuredInteriorGeometryStaticDrawUnit,
 	StaticWorkPeerRecordOwner,
 	TerrainStaticScopePayload,
@@ -442,7 +443,7 @@ describe("V2 client runtime", () => {
 					}),
 				],
 				nodes: [
-				{
+					{
 						resources: {
 							envCellStaticObjectDrawUnitIds: ["env-static-shared"],
 							resourceState: "ready",
@@ -453,9 +454,9 @@ describe("V2 client runtime", () => {
 							kind: "env-cell-direct",
 							landblockId: 0xda55ffff,
 						},
-					traversalDepth: 0,
-				},
-				{
+						traversalDepth: 0,
+					},
+					{
 						resources: {
 							envCellStaticObjectDrawUnitIds: ["env-static-shared"],
 							resourceState: "ready",
@@ -466,9 +467,9 @@ describe("V2 client runtime", () => {
 							kind: "env-cell-direct",
 							landblockId: 0xda55ffff,
 						},
-					traversalDepth: 1,
-				},
-			],
+						traversalDepth: 1,
+					},
+				],
 			},
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
@@ -505,11 +506,11 @@ describe("V2 client runtime", () => {
 		expect(renderer.portalFrameWorkPlans.at(-1)).toMatchObject({
 			graph: {
 				nodes: [
-				expect.objectContaining({
+					expect.objectContaining({
 						scene: expect.objectContaining({ envCellId: 0xda550100 }),
-					traversalDepth: 0,
-				}),
-			],
+						traversalDepth: 0,
+					}),
+				],
 			},
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
@@ -570,6 +571,81 @@ describe("V2 client runtime", () => {
 			kind: "single-surface-resident",
 		});
 		expect(renderer.renderPassPlans).toEqual([]);
+
+		runtime.dispose();
+	});
+
+	it("publishes outdoor projection frame plans from committed projection inputs", async () => {
+		const renderer = new FakeRenderer();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker,
+				resolver,
+			}),
+		});
+
+		runtime.setCurrentCameraResidency({
+			kind: "outdoor-landblock",
+			landblockId: 0xda55ffff,
+		});
+		updateOutdoorSceneInterest(runtime, {
+			domains: ["terrain", "env-cells"],
+			lod: { envCells: 0, terrain: 0 },
+		});
+		const envCellRequest = resolver.pendingRequests.find(
+			(request) => request.job.domain === "landblock-env-cells",
+		);
+		expect(envCellRequest).toBeDefined();
+		resolver.complete(envCellRequest?.requestId ?? "");
+		await flushPromises();
+		baker.complete("1:landblock:da55ffff:landblock-env-cells", {
+			drawUnits: [
+				createStructuredInteriorDrawUnit({
+					drawUnitId: "structured:da550100",
+					envCellId: 0xda550100,
+				}),
+			],
+			staticPortalInteriorRecords: [
+				createPortalInteriorRecord({
+					envCellIds: [0xda550100],
+					portalLinks: [],
+				}),
+			],
+			transitionApertureBatches: [
+				createTransitionApertureBatch({
+					targetEnvCellId: 0xda550100,
+				}),
+			],
+		});
+		await flushRuntimeWork();
+
+		expect(renderer.portalFrameWorkPlans.at(-1)).toMatchObject({
+			kind: "direct-env-cell",
+			mode: "outdoor-projection",
+			layeredGraph: {
+				renderEntries: [
+					expect.objectContaining({
+						envCellId: 0xda550100,
+						renderLayer: 1,
+						resources: expect.objectContaining({
+							structuredInteriorDrawUnitIds: ["structured:da550100"],
+						}),
+					}),
+				],
+				renderLayers: [{ renderEntryIds: [0], renderLayer: 1 }],
+			},
+		});
+		expect(
+			renderer.portalFrameWorkPlans.at(-1)?.kind === "direct-env-cell" &&
+				renderer.portalFrameWorkPlans.at(-1)?.mode === "outdoor-projection"
+				? renderer.portalFrameWorkPlans.at(-1)?.layeredGraph.maskEdges.length
+				: 0,
+		).toBe(1);
 
 		runtime.dispose();
 	});
@@ -934,15 +1010,15 @@ describe("V2 client runtime", () => {
 		runtime.updateSceneInterest({ kind: "none" });
 		await flushPromises();
 
-			expect(renderer.staticDeltas.at(-1)).toEqual({
-				addedDrawUnits: [],
-				addedPortalApertureResources: [],
-				addedTransitionApertureBatches: [],
-				removedDrawUnitIds: ["terrain-a"],
-				removedPortalApertureResourceIds: [],
-				removedTransitionApertureBatchIds: [],
-				revision: 2,
-			});
+		expect(renderer.staticDeltas.at(-1)).toEqual({
+			addedDrawUnits: [],
+			addedPortalApertureResources: [],
+			addedTransitionApertureBatches: [],
+			removedDrawUnitIds: ["terrain-a"],
+			removedPortalApertureResourceIds: [],
+			removedTransitionApertureBatchIds: [],
+			revision: 2,
+		});
 		expect(renderer.staticAnchorLandblockIds.at(-1)).toBeNull();
 		runtime.dispose();
 	});
@@ -1495,6 +1571,51 @@ function createPortalInteriorRecord(options: {
 	};
 }
 
+function createTransitionApertureBatch(options: {
+	readonly targetEnvCellId: number;
+}): TransitionApertureBatch {
+	return {
+		apertureBatchId: "transition-aperture-batch:da55ffff",
+		coordinateSpace: "landblock-render-local",
+		frontFace: "indoor-visible",
+		indices: [0, 1, 2],
+		kind: "transition-aperture-batch",
+		landblockId: 0xda55ffff,
+		planes: [null],
+		ranges: [
+			{
+				exterior: {
+					buildingInstanceId: "building-0",
+					buildingPortalId: "building-portal-0",
+					kind: "landblock-building",
+				},
+				firstIndex: 0,
+				indexCount: 3,
+				portalId: "transition-portal:0",
+				source: {
+					buildingInstanceId: "building-0",
+					buildingPortalId: "building-portal-0",
+					buildingPortalSourceIndex: 0,
+					kind: "building-portal",
+					linkedEnvCellIds: [options.targetEnvCellId],
+					otherCellId: options.targetEnvCellId & 0xffff,
+					otherPortalId: 0xffff,
+					polyId: 7,
+					portalIndex: 0,
+					sourceAssetId: "gfx-obj/01001234",
+					sourceDid: 0x01001234,
+				},
+			},
+		],
+		sourceDomain: "outdoor-buildings",
+		vertices: [
+			{ x: 0, y: 0, z: 0 },
+			{ x: 1, y: 0, z: 0 },
+			{ x: 0, y: 1, z: 0 },
+		],
+	};
+}
+
 function createEnvCellWorkOwner(
 	workId: string,
 	landblockId: number,
@@ -1635,9 +1756,7 @@ class FakeRenderer implements Renderer {
 		return this.#snapshot;
 	}
 
-	emitFrameTelemetry(
-		telemetry: Partial<RendererFrameTelemetry> = {},
-	): void {
+	emitFrameTelemetry(telemetry: Partial<RendererFrameTelemetry> = {}): void {
 		const nextTelemetry = {
 			...this.#createFrameTelemetry(),
 			...telemetry,
@@ -2022,12 +2141,10 @@ function createStaticObjectDrawUnit(
 	};
 }
 
-function createStructuredInteriorDrawUnit(
-	options: {
-		readonly drawUnitId: string;
-		readonly envCellId: number;
-	},
-): StructuredInteriorGeometryStaticDrawUnit {
+function createStructuredInteriorDrawUnit(options: {
+	readonly drawUnitId: string;
+	readonly envCellId: number;
+}): StructuredInteriorGeometryStaticDrawUnit {
 	const renderState = {
 		blend: {
 			dstFactor: null,

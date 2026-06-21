@@ -15,10 +15,8 @@ import {
 } from "../renderer/portal-frame-work-plan";
 import {
 	createDirectEnvCellFramePlan,
-	createOutdoorVisibleEnvCellIds,
-	createOutdoorTransitionPortalFramePlan,
+	createOutdoorProjectionPortalFramePlan,
 } from "./direct-env-cell-frame-plan";
-import { createPortalTraversalPlanFromGraph } from "./portal-traversal-planner";
 import { formatHex32, normalizeOutdoorLandblockId } from "../../lib/landblocks";
 import { TextureManager } from "../textures/texture-manager";
 import type { TexturePacker } from "../textures/packing/packer";
@@ -60,7 +58,6 @@ import {
 	buildAcPlacementMatrix,
 } from "../static/bake/ac-placement-transform";
 import { collectStaticDrawUnitResourceIds } from "../static/contracts";
-import { createBuildingTransitionTargetEnvCellId } from "../static/portal-aperture-resources";
 import {
 	materializeStaticCommit,
 	type StaticMaterializationResult,
@@ -170,9 +167,8 @@ type PortalFramePlanKey =
 			readonly maxCells: number;
 			readonly maxDepth: number;
 			readonly maxPortalViews: number;
-			readonly portalTraversalGraphRevision: number;
+			readonly projectionSourceRevisionKey: string;
 			readonly renderAnchorLandblockId: number | null;
-			readonly transitionApertureRevision: string;
 	  };
 
 interface CachedPortalFramePlan {
@@ -896,9 +892,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		};
 	}
 
-	subscribeFrameTelemetry(
-		listener: RuntimeFrameTelemetryListener,
-	): () => void {
+	subscribeFrameTelemetry(listener: RuntimeFrameTelemetryListener): () => void {
 		this.#frameTelemetryListeners.add(listener);
 
 		return () => {
@@ -1048,16 +1042,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 			this.#currentCameraResidency.kind === "outdoor-landblock"
 		) {
 			const landblockId = this.#currentCameraResidency.landblockId;
-			const transitionApertureBatches =
-				this.#staticSceneQuery.queryTransitionApertureBatches({ landblockId });
-			const targetEnvCellIds = collectTransitionTargetEnvCellIds(
-				transitionApertureBatches,
-			);
-			if (
-				transitionApertureBatches.length > 0 &&
-				targetEnvCellIds.length > 0 &&
-				this.#staticSceneQuery.hasCommittedPortalInteriorScene({ landblockId })
-			) {
+			const projection = this.#staticSceneQuery.queryOutdoorPortalProjection({
+				landblockId,
+			});
+			if (projection) {
 				const portalFramePlanKey: PortalFramePlanKey = {
 					envCellResourceMembershipRevision:
 						this.#envCellResourceMembershipRevision,
@@ -1066,50 +1054,20 @@ class ClientRuntimeImpl implements ClientRuntime {
 					maxCells: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
 					maxDepth: this.#directEnvCellPortalMaxDepth,
 					maxPortalViews: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
-					portalTraversalGraphRevision:
-						this.#staticSceneQuery.queryPortalTraversalGraphRevision({
-							landblockId,
-						}),
+					projectionSourceRevisionKey: projection.sourceRevisionKey,
 					renderAnchorLandblockId: this.#renderAnchorLandblockId,
-					transitionApertureRevision:
-						createTransitionApertureRevision(transitionApertureBatches),
 				};
 				const cachedPlan = this.#getCachedPortalFramePlan(portalFramePlanKey);
 				if (cachedPlan) {
 					return cachedPlan;
 				}
-				const portalInteriorRecords =
-					this.#staticSceneQuery.queryPortalInteriorRecords({ landblockId });
-				const outdoorVisibleEnvCellIds = createOutdoorVisibleEnvCellIds(
-					portalInteriorRecords,
+				const directPlan = createOutdoorProjectionPortalFramePlan({
 					landblockId,
-				);
-				const outdoorVisibleTargetEnvCellIds = targetEnvCellIds.filter(
-					(envCellId) => outdoorVisibleEnvCellIds.has(envCellId >>> 0),
-				);
-				const traversalGraph =
-					this.#staticSceneQuery.queryPortalTraversalGraph({ landblockId });
-				const traversalPlansByStartEnvCellId = new Map(
-					outdoorVisibleTargetEnvCellIds.map((envCellId) => [
-						envCellId,
-						createPortalTraversalPlanFromGraph({
-							allowedEnvCellIds: outdoorVisibleEnvCellIds,
-							graph: traversalGraph,
-							landblockId,
-							maxCells: portalFramePlanKey.maxCells,
-							maxDepth: portalFramePlanKey.maxDepth,
-							maxPortalViews: portalFramePlanKey.maxPortalViews,
-							startEnvCellId: envCellId,
-						}),
-					]),
-				);
-				const directPlan = createOutdoorTransitionPortalFramePlan({
-					landblockId,
-					portalInteriorRecords,
-					renderAnchorLandblockId: this.#renderAnchorLandblockId,
 					envCellResourceMembership: this.#envCellResourceMembership,
-					transitionApertureBatches,
-					traversalPlansByStartEnvCellId,
+					maxCells: portalFramePlanKey.maxCells,
+					maxDepth: portalFramePlanKey.maxDepth,
+					maxPortalViews: portalFramePlanKey.maxPortalViews,
+					projection,
 				});
 				if (directPlan) {
 					return this.#setCachedPortalFramePlan(portalFramePlanKey, directPlan);
@@ -1124,7 +1082,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		});
 	}
 
-	#getCachedPortalFramePlan(key: PortalFramePlanKey): PortalFrameWorkPlan | null {
+	#getCachedPortalFramePlan(
+		key: PortalFramePlanKey,
+	): PortalFrameWorkPlan | null {
 		return this.#cachedPortalFramePlan &&
 			portalFramePlanKeysEqual(this.#cachedPortalFramePlan.key, key)
 			? this.#cachedPortalFramePlan.plan
@@ -1269,7 +1229,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 			this.#failedStaticMaterializationRevisions,
 		).some((revision) => this.#activeSceneWorkRevisions.has(revision));
 		this.#emitSceneInterestSettled({
-			result: failedWork.length > 0 || failedMaterialization ? "failed" : "ready",
+			result:
+				failedWork.length > 0 || failedMaterialization ? "failed" : "ready",
 			source,
 		});
 	}
@@ -2495,18 +2456,6 @@ function countTransitionApertures(
 	return batches.reduce((count, batch) => count + batch.ranges.length, 0);
 }
 
-function collectTransitionTargetEnvCellIds(
-	batches: readonly TransitionApertureBatch[],
-): readonly number[] {
-	const envCellIds = new Set<number>();
-	for (const batch of batches) {
-		for (const range of batch.ranges) {
-			envCellIds.add(createBuildingTransitionTargetEnvCellId(batch, range));
-		}
-	}
-	return [...envCellIds].sort((left, right) => left - right);
-}
-
 function countEnvCellPortalApertures(
 	records: readonly StaticPortalInteriorRecord[],
 ): number {
@@ -2750,7 +2699,6 @@ function portalFramePlanKeysEqual(
 		left.maxCells !== right.maxCells ||
 		left.maxDepth !== right.maxDepth ||
 		left.maxPortalViews !== right.maxPortalViews ||
-		left.portalTraversalGraphRevision !== right.portalTraversalGraphRevision ||
 		left.renderAnchorLandblockId !== right.renderAnchorLandblockId ||
 		left.envCellResourceMembershipRevision !==
 			right.envCellResourceMembershipRevision
@@ -2759,31 +2707,15 @@ function portalFramePlanKeysEqual(
 	}
 	if (left.kind === "direct-env-cell") {
 		return (
-			right.kind === "direct-env-cell" && left.envCellId === right.envCellId
+			right.kind === "direct-env-cell" &&
+			left.envCellId === right.envCellId &&
+			left.portalTraversalGraphRevision === right.portalTraversalGraphRevision
 		);
 	}
 	return (
 		right.kind === "outdoor-transition" &&
-		left.transitionApertureRevision === right.transitionApertureRevision
+		left.projectionSourceRevisionKey === right.projectionSourceRevisionKey
 	);
-}
-
-function createTransitionApertureRevision(
-	batches: readonly TransitionApertureBatch[],
-): string {
-	return batches
-		.map((batch) =>
-			[
-				batch.apertureBatchId,
-				batch.ranges.length,
-				...batch.ranges.map(
-					(range) =>
-						`${range.portalId}:${range.firstIndex}:${range.indexCount}:${createBuildingTransitionTargetEnvCellId(batch, range)}:${range.source.linkedEnvCellIds.join(",")}`,
-				),
-			].join("|"),
-		)
-		.sort()
-		.join(";");
 }
 
 function cameraResidencyEquals(

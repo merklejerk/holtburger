@@ -1,6 +1,10 @@
 import type {
 	PortalApertureFrameDiagnostics,
 	PortalApertureGeometryResourcePlan,
+	OutdoorProjectionPortalFrameGraphPlan,
+	OutdoorProjectionPortalFrameLayerPlan,
+	OutdoorProjectionPortalFrameMaskEdgePlan,
+	OutdoorProjectionPortalFrameRenderEntryPlan,
 	PortalFrameEdgePlan,
 	PortalFrameGraphPlan,
 	PortalFrameNodePlan,
@@ -48,6 +52,21 @@ export function portalFrameWorkPlanEquals(
 		);
 	}
 	if (right.kind === "legacy-render-pass") {
+		return false;
+	}
+	if (left.mode !== right.mode) {
+		return false;
+	}
+	if (left.mode === "outdoor-projection") {
+		return (
+			right.mode === "outdoor-projection" &&
+			outdoorProjectionPortalFrameGraphPlansEqual(
+				left.layeredGraph,
+				right.layeredGraph,
+			)
+		);
+	}
+	if (right.mode === "outdoor-projection") {
 		return false;
 	}
 
@@ -111,6 +130,102 @@ function portalFrameGraphPlansEqual(
 	);
 }
 
+function outdoorProjectionPortalFrameGraphPlansEqual(
+	left: OutdoorProjectionPortalFrameGraphPlan,
+	right: OutdoorProjectionPortalFrameGraphPlan,
+): boolean {
+	return (
+		left.baseEntry.debugStackLabel === right.baseEntry.debugStackLabel &&
+		portalFrameSceneSourceEquals(left.baseEntry.scene, right.baseEntry.scene) &&
+		arraysEqual(
+			left.renderEntries,
+			right.renderEntries,
+			outdoorProjectionPortalFrameRenderEntryPlansEqual,
+		) &&
+		arraysEqual(
+			left.renderLayers,
+			right.renderLayers,
+			outdoorProjectionPortalFrameLayerPlansEqual,
+		) &&
+		arraysEqual(
+			left.maskEdges,
+			right.maskEdges,
+			outdoorProjectionPortalFrameMaskEdgePlansEqual,
+		) &&
+		portalApertureGeometryResourcesEqual(
+			left.apertureResources,
+			right.apertureResources,
+		) &&
+		portalApertureFrameDiagnosticsEqual(left.diagnostics, right.diagnostics) &&
+		left.projectionDiagnostics.componentCount ===
+			right.projectionDiagnostics.componentCount &&
+		left.projectionDiagnostics.cyclicComponentCount ===
+			right.projectionDiagnostics.cyclicComponentCount &&
+		left.projectionDiagnostics.componentInternalEdgeCount ===
+			right.projectionDiagnostics.componentInternalEdgeCount &&
+		left.projectionDiagnostics.maxProjectionRenderLayer ===
+			right.projectionDiagnostics.maxProjectionRenderLayer &&
+		left.projectionDiagnostics.maxSelectedRenderLayer ===
+			right.projectionDiagnostics.maxSelectedRenderLayer &&
+		left.projectionDiagnostics.projectedEnvCellCount ===
+			right.projectionDiagnostics.projectedEnvCellCount &&
+		left.projectionDiagnostics.renderEntryCount ===
+			right.projectionDiagnostics.renderEntryCount &&
+		left.projectionDiagnostics.renderEntriesSkippedByLayerCap ===
+			right.projectionDiagnostics.renderEntriesSkippedByLayerCap &&
+		left.projectionDiagnostics.renderEntriesSkippedByMaxCells ===
+			right.projectionDiagnostics.renderEntriesSkippedByMaxCells &&
+		left.projectionDiagnostics.maskEdgesSkippedByLayerCap ===
+			right.projectionDiagnostics.maskEdgesSkippedByLayerCap &&
+		left.projectionDiagnostics.maskEdgesSkippedByMaxPortalViews ===
+			right.projectionDiagnostics.maskEdgesSkippedByMaxPortalViews &&
+		left.projectionDiagnostics.missingResourceMembershipCount ===
+			right.projectionDiagnostics.missingResourceMembershipCount
+	);
+}
+
+function outdoorProjectionPortalFrameRenderEntryPlansEqual(
+	left: OutdoorProjectionPortalFrameRenderEntryPlan,
+	right: OutdoorProjectionPortalFrameRenderEntryPlan,
+): boolean {
+	return (
+		left.renderEntryId === right.renderEntryId &&
+		left.envCellId === right.envCellId &&
+		left.landblockId === right.landblockId &&
+		left.renderLayer === right.renderLayer &&
+		numberArraysEqual(left.incomingMaskEdgeIds, right.incomingMaskEdgeIds) &&
+		left.debugStackLabel === right.debugStackLabel &&
+		portalFrameNodeResourcesEqual(left.resources, right.resources)
+	);
+}
+
+function outdoorProjectionPortalFrameLayerPlansEqual(
+	left: OutdoorProjectionPortalFrameLayerPlan,
+	right: OutdoorProjectionPortalFrameLayerPlan,
+): boolean {
+	return (
+		left.renderLayer === right.renderLayer &&
+		numberArraysEqual(left.renderEntryIds, right.renderEntryIds)
+	);
+}
+
+function outdoorProjectionPortalFrameMaskEdgePlansEqual(
+	left: OutdoorProjectionPortalFrameMaskEdgePlan,
+	right: OutdoorProjectionPortalFrameMaskEdgePlan,
+): boolean {
+	return (
+		left.edgeId === right.edgeId &&
+		left.renderEntryId === right.renderEntryId &&
+		left.renderLayer === right.renderLayer &&
+		left.apertureResourceId === right.apertureResourceId &&
+		left.apertureSourceId === right.apertureSourceId &&
+		left.linkId === right.linkId &&
+		left.sourceKind === right.sourceKind &&
+		left.sourceEnvCellId === right.sourceEnvCellId &&
+		left.targetEnvCellId === right.targetEnvCellId
+	);
+}
+
 function portalFrameNodePlansEqual(
 	left: PortalFrameNodePlan,
 	right: PortalFrameNodePlan,
@@ -122,14 +237,23 @@ function portalFrameNodePlansEqual(
 		left.traversalDepth === right.traversalDepth &&
 		numberArraysEqual(left.incomingEdgeIds, right.incomingEdgeIds) &&
 		left.debugStackLabel === right.debugStackLabel &&
-		left.resources.resourceState === right.resources.resourceState &&
+		portalFrameNodeResourcesEqual(left.resources, right.resources)
+	);
+}
+
+function portalFrameNodeResourcesEqual(
+	left: PortalFrameNodePlan["resources"],
+	right: PortalFrameNodePlan["resources"],
+): boolean {
+	return (
+		left.resourceState === right.resourceState &&
 		stringArraysEqual(
-			left.resources.structuredInteriorDrawUnitIds,
-			right.resources.structuredInteriorDrawUnitIds,
+			left.structuredInteriorDrawUnitIds,
+			right.structuredInteriorDrawUnitIds,
 		) &&
 		stringArraysEqual(
-			left.resources.envCellStaticObjectDrawUnitIds,
-			right.resources.envCellStaticObjectDrawUnitIds,
+			left.envCellStaticObjectDrawUnitIds,
+			right.envCellStaticObjectDrawUnitIds,
 		)
 	);
 }
@@ -170,14 +294,13 @@ function portalApertureFrameDiagnosticsEqual(
 		left.dedupedGeometryResources === right.dedupedGeometryResources &&
 		left.duplicateMaskEdges === right.duplicateMaskEdges &&
 		left.envCellPortalEdges === right.envCellPortalEdges &&
-			left.selectedMaskEdges === right.selectedMaskEdges &&
-			left.transitionRootCandidateCount ===
-				right.transitionRootCandidateCount &&
-			left.transitionRootCount === right.transitionRootCount &&
-			left.transitionRootsRejectedNotSeenOutside ===
-				right.transitionRootsRejectedNotSeenOutside &&
-			left.transitionRootsRejectedUnknownSeenOutside ===
-				right.transitionRootsRejectedUnknownSeenOutside
+		left.selectedMaskEdges === right.selectedMaskEdges &&
+		left.transitionRootCandidateCount === right.transitionRootCandidateCount &&
+		left.transitionRootCount === right.transitionRootCount &&
+		left.transitionRootsRejectedNotSeenOutside ===
+			right.transitionRootsRejectedNotSeenOutside &&
+		left.transitionRootsRejectedUnknownSeenOutside ===
+			right.transitionRootsRejectedUnknownSeenOutside
 	);
 }
 

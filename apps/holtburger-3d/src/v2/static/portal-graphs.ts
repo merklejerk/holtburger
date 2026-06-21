@@ -1124,6 +1124,9 @@ function createEnvCellRootRenderLayerByEnvCellId(options: {
 		)
 		.map(([componentId]) => componentId);
 	for (const componentId of componentOrder) {
+		if (componentId === options.rootComponentId) {
+			continue;
+		}
 		const incomingEdges = options.componentEdges.filter(
 			(edge) =>
 				edge.targetComponentId === componentId &&

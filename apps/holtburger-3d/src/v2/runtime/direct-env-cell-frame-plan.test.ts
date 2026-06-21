@@ -2,13 +2,11 @@ import { describe, expect, it } from "vitest";
 import type {
 	StaticOutdoorPortalProjectionRecord,
 	StaticPortalInteriorRecord,
-	TransitionApertureBatch,
 } from "../static/contracts";
 import type { PortalTraversalPlan } from "./static-scene-query";
 import {
 	createDirectEnvCellFramePlan,
 	createOutdoorProjectionPortalFramePlan,
-	createOutdoorTransitionPortalFramePlan,
 } from "./direct-env-cell-frame-plan";
 
 describe("direct env-cell frame plan", () => {
@@ -422,301 +420,6 @@ describe("direct env-cell frame plan", () => {
 		).toBeNull();
 	});
 
-	it("creates an outdoor-base transition frame plan with direct env-cell traversal", () => {
-		const childEdge = {
-			flags: 0,
-			linkId: "root-to-child",
-			polygonId: null,
-			sourceEnvCellId: 0xda550100,
-			sourceIndex: 0,
-			sourcePortalId: "portal-root",
-			targetEnvCellId: 0xda550101,
-			targetPortalId: "portal-child",
-		};
-		const plan = createOutdoorTransitionPortalFramePlan({
-			landblockId: 0xda55ffff,
-			portalInteriorRecords: [
-				createPortalInteriorRecord({
-					envCellIds: [0xda550100, 0xda550101],
-					portalAperturesByEnvCellId: new Map([
-						[
-							0xda550100,
-							[
-								createPortalAperture("portal-root", 7, [
-									{ x: 10, y: 0, z: 0 },
-									{ x: 11, y: 0, z: 0 },
-									{ x: 10, y: 1, z: 0 },
-								]),
-							],
-						],
-					]),
-				}),
-			],
-			renderAnchorLandblockId: 0xda55ffff,
-			envCellResourceMembership: [
-				{
-					envCellId: 0xda550100,
-					envCellStaticObjectDrawUnitIds: [],
-					landblockId: 0xda55ffff,
-					sharedEnvCellStaticObjectDrawUnits: 0,
-					structuredInteriorDrawUnitIds: ["structured-root"],
-				},
-				{
-					envCellId: 0xda550101,
-					envCellStaticObjectDrawUnitIds: ["static-child"],
-					landblockId: 0xda55ffff,
-					sharedEnvCellStaticObjectDrawUnits: 0,
-					structuredInteriorDrawUnitIds: [],
-				},
-			],
-			transitionApertureBatches: [createTransitionApertureBatch()],
-			traversalPlansByStartEnvCellId: new Map([
-				[
-					0xda550100,
-					{
-						diagnostics: [],
-						landblockId: 0xda55ffff,
-						maxCells: 8,
-						maxDepth: 1,
-						maxPortalViews: 16,
-						portalViewGroups: [
-							{
-								apertureEdges: [],
-								envCellId: 0xda550100,
-								landblockId: 0xda55ffff,
-								parentPortalStackId: null,
-								portalStack: [],
-								portalStackId: "root:0xda550100",
-								traversalDepth: 0,
-							},
-							{
-								apertureEdges: [childEdge],
-								envCellId: 0xda550101,
-								landblockId: 0xda55ffff,
-								parentPortalStackId: "root:0xda550100",
-								portalStack: [childEdge],
-								portalStackId: "root:0xda550100/root-to-child",
-								traversalDepth: 1,
-							},
-						],
-						sceneCrossings: [],
-						startEnvCellId: 0xda550100,
-						visibleCells: [],
-					},
-				],
-			]),
-		});
-
-		expect(plan?.graph.nodes[0]).toEqual(
-			expect.objectContaining({
-				scene: {
-					kind: "outdoor-target",
-					landblockId: 0xda55ffff,
-				},
-			}),
-		);
-		expect(plan?.graph.nodes).toEqual([
-			expect.objectContaining({
-				nodeId: 0,
-				scene: { kind: "outdoor-target", landblockId: 0xda55ffff },
-				traversalDepth: 0,
-			}),
-			expect.objectContaining({
-				resources: expect.objectContaining({
-					structuredInteriorDrawUnitIds: ["structured-root"],
-				}),
-				scene: expect.objectContaining({ envCellId: 0xda550100 }),
-				traversalDepth: 1,
-			}),
-			expect.objectContaining({
-				resources: expect.objectContaining({
-					envCellStaticObjectDrawUnitIds: ["static-child"],
-				}),
-				scene: expect.objectContaining({ envCellId: 0xda550101 }),
-				traversalDepth: 2,
-			}),
-		]);
-		expect(plan?.graph.diagnostics).toEqual({
-			buildingTransitionEdges: 1,
-			dedupedGeometryResources: 0,
-			duplicateMaskEdges: 0,
-			envCellPortalEdges: 1,
-			selectedMaskEdges: 2,
-			transitionRootCandidateCount: 1,
-			transitionRootCount: 1,
-			transitionRootsRejectedNotSeenOutside: 0,
-			transitionRootsRejectedUnknownSeenOutside: 0,
-		});
-		expect(plan?.graph.edges).toEqual([
-			expect.objectContaining({
-				childNodeId: 1,
-				linkId:
-					"transition:transition-aperture-batch:da55ffff:transition-portal:0:0xda550100",
-				parentNodeId: 0,
-				sourceKind: "building-transition",
-			}),
-			expect.objectContaining({
-				childNodeId: 2,
-				linkId: "root-to-child",
-				parentNodeId: 1,
-				sourceKind: "env-cell-portal",
-			}),
-		]);
-	});
-
-	it("uses building transition targets as outdoor-origin roots", () => {
-		const plan = createOutdoorTransitionPortalFramePlan({
-			landblockId: 0xda55ffff,
-			portalInteriorRecords: [
-				createPortalInteriorRecord({
-					envCellIds: [0xda550100, 0xda550101, 0xda550102],
-					seenOutsideByEnvCellId: new Map([
-						[0xda550100, true],
-						[0xda550101, false],
-						[0xda550102, null],
-					]),
-				}),
-			],
-			renderAnchorLandblockId: 0xda55ffff,
-			envCellResourceMembership: [
-				{
-					envCellId: 0xda550100,
-					envCellStaticObjectDrawUnitIds: [],
-					landblockId: 0xda55ffff,
-					sharedEnvCellStaticObjectDrawUnits: 0,
-					structuredInteriorDrawUnitIds: ["structured-visible"],
-				},
-				{
-					envCellId: 0xda550101,
-					envCellStaticObjectDrawUnitIds: [],
-					landblockId: 0xda55ffff,
-					sharedEnvCellStaticObjectDrawUnits: 0,
-					structuredInteriorDrawUnitIds: ["structured-hidden"],
-				},
-				{
-					envCellId: 0xda550102,
-					envCellStaticObjectDrawUnitIds: [],
-					landblockId: 0xda55ffff,
-					sharedEnvCellStaticObjectDrawUnits: 0,
-					structuredInteriorDrawUnitIds: ["structured-unknown"],
-				},
-			],
-			transitionApertureBatches: [
-				createTransitionApertureBatch({
-					linkedEnvCellIds: [0xda550100, 0xda550101, 0xda550102],
-				}),
-			],
-			traversalPlansByStartEnvCellId: new Map([
-				[
-					0xda550100,
-					createTraversalPlan({
-						visibleCells: [
-							{
-								envCellId: 0xda550100,
-								portalStackId: "root:0xda550100",
-								traversalDepth: 0,
-							},
-							{
-								envCellId: 0xda550101,
-								portalStackId: "root:0xda550100/visible-to-hidden",
-								traversalDepth: 1,
-							},
-						],
-					}),
-				],
-				[
-					0xda550101,
-					createTraversalPlan({
-						visibleCells: [
-							{
-								envCellId: 0xda550101,
-								portalStackId: "root:0xda550101",
-								traversalDepth: 0,
-							},
-						],
-					}),
-				],
-				[
-					0xda550102,
-					createTraversalPlan({
-						visibleCells: [
-							{
-								envCellId: 0xda550102,
-								portalStackId: "root:0xda550102",
-								traversalDepth: 0,
-							},
-						],
-					}),
-				],
-			]),
-		});
-
-		expect(
-			plan?.graph.nodes
-				.filter((node) => node.scene.kind === "env-cell-direct")
-				.map((node) =>
-					node.scene.kind === "env-cell-direct" ? node.scene.envCellId : 0,
-				),
-		).toEqual([0xda550100]);
-		expect(plan?.graph.edges).toHaveLength(1);
-		expect(plan?.graph.edges[0]).toEqual(
-			expect.objectContaining({
-				childNodeId: 1,
-				parentNodeId: 0,
-				sourceKind: "building-transition",
-			}),
-		);
-		expect(plan?.graph.diagnostics).toEqual({
-			buildingTransitionEdges: 1,
-			dedupedGeometryResources: 0,
-			duplicateMaskEdges: 0,
-			envCellPortalEdges: 0,
-			selectedMaskEdges: 1,
-			transitionRootCandidateCount: 1,
-			transitionRootCount: 1,
-			transitionRootsRejectedNotSeenOutside: 0,
-			transitionRootsRejectedUnknownSeenOutside: 0,
-		});
-	});
-
-	it("dedupes duplicate building-transition entry candidates through shared graph assembly", () => {
-		const transitionBatch = createTransitionApertureBatch();
-		const plan = createOutdoorTransitionPortalFramePlan({
-			landblockId: 0xda55ffff,
-			portalInteriorRecords: [
-				createPortalInteriorRecord({
-					envCellIds: [0xda550100],
-				}),
-			],
-			renderAnchorLandblockId: 0xda55ffff,
-			envCellResourceMembership: [],
-			transitionApertureBatches: [transitionBatch, transitionBatch],
-			traversalPlansByStartEnvCellId: new Map([
-				[
-					0xda550100,
-					createTraversalPlan({
-						visibleCells: [
-							{
-								envCellId: 0xda550100,
-								portalStackId: "root:0xda550100",
-								traversalDepth: 0,
-							},
-						],
-					}),
-				],
-			]),
-		});
-
-		expect(plan?.graph.edges).toHaveLength(1);
-		expect(plan?.graph.diagnostics).toMatchObject({
-			buildingTransitionEdges: 1,
-			duplicateMaskEdges: 1,
-			selectedMaskEdges: 1,
-			transitionRootCandidateCount: 1,
-			transitionRootCount: 1,
-		});
-	});
-
 	it("creates one outdoor projection render entry for a shared diamond target with multiple mask edges", () => {
 		const plan = createOutdoorProjectionPortalFramePlan({
 			landblockId: 0xda55ffff,
@@ -931,7 +634,6 @@ function createPortalInteriorRecord(options: {
 		number,
 		StaticPortalInteriorRecord["envCells"][number]["portalApertures"]
 	>;
-	readonly seenOutsideByEnvCellId?: ReadonlyMap<number, boolean | null>;
 }): StaticPortalInteriorRecord {
 	return {
 		envCells: options.envCellIds.map((envCellId) => ({
@@ -942,9 +644,7 @@ function createPortalInteriorRecord(options: {
 			},
 			portalApertures: options.portalAperturesByEnvCellId?.get(envCellId) ?? [],
 			portals: [],
-			seenOutside: options.seenOutsideByEnvCellId?.has(envCellId)
-				? (options.seenOutsideByEnvCellId.get(envCellId) ?? null)
-				: true,
+			seenOutside: true,
 		})),
 		kind: "env-cell-portal-interior",
 		landblockId: 0xda55ffff,
@@ -959,51 +659,6 @@ function createPortalInteriorRecord(options: {
 			workId: "work",
 		},
 		portalLinks: [],
-	};
-}
-
-function createTransitionApertureBatch(options?: {
-	readonly linkedEnvCellIds?: readonly number[];
-}): TransitionApertureBatch {
-	return {
-		apertureBatchId: "transition-aperture-batch:da55ffff",
-		coordinateSpace: "landblock-render-local",
-		frontFace: "indoor-visible",
-		indices: [0, 1, 2],
-		kind: "transition-aperture-batch",
-		landblockId: 0xda55ffff,
-		planes: [null],
-		ranges: [
-			{
-				exterior: {
-					buildingInstanceId: "building-0",
-					buildingPortalId: "building-portal-0",
-					kind: "landblock-building",
-				},
-				firstIndex: 0,
-				indexCount: 3,
-				portalId: "transition-portal:0",
-				source: {
-					buildingInstanceId: "building-0",
-					buildingPortalId: "building-portal-0",
-					buildingPortalSourceIndex: 0,
-					kind: "building-portal",
-					linkedEnvCellIds: options?.linkedEnvCellIds ?? [0xda550100],
-					otherCellId: 0x0100,
-					otherPortalId: 0xffff,
-					polyId: 7,
-					portalIndex: 0,
-					sourceAssetId: "gfx-obj/01001234",
-					sourceDid: 0x01001234,
-				},
-			},
-		],
-		sourceDomain: "outdoor-buildings",
-		vertices: [
-			{ x: 0, y: 0, z: 0 },
-			{ x: 1, y: 0, z: 0 },
-			{ x: 0, y: 1, z: 0 },
-		],
 	};
 }
 

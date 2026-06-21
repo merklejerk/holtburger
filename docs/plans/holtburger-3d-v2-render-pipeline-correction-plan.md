@@ -1486,7 +1486,7 @@ Validation run:
 
 Debt and spicy bits:
 
-- The old `createOutdoorTransitionPortalFramePlan(...)` implementation still exists for now, but runtime outdoor planning no longer calls it. Phase 9D should delete or quarantine it after visual validation.
+- The old `createOutdoorTransitionPortalFramePlan(...)` implementation existed after Phase 9C but runtime outdoor planning no longer called it. Phase 9D deleted it rather than carrying a dead fallback.
 - WebGL2 outdoor projection execution currently uses the render layer as the stencil reference. That means entries in the same layer share one mask namespace. We are intentionally relying on non-overlapping env-cell geometry plus depth for this pass; if same-layer bleed appears, switch to per-entry stencil identity or one-entry-at-a-time mask clearing.
 - `maxPortalViews` is temporarily interpreted as a global mask-edge cap for outdoor projection plans. That keeps the existing safety limit meaningful, but Phase 9D should decide whether the cap should be renamed or replaced with a projection-specific mask-edge cap.
 - The runtime test proves outdoor projection publication for a transition-only projection. Diamond and cycle-ish topology are covered at the frame-plan builder/projection-query level, not by a full fake static coordinator world.
@@ -1551,6 +1551,31 @@ Dry-run findings on 2026-06-21:
 - Strongly connected components need an explicit renderer policy. The projection can assign all cells in a cyclic component one finite layer, but component-internal edges should either be handled by the layered mask policy or counted/skipped with diagnostics until screenshots prove the same-layer behavior is correct.
 - Phase 9C is large enough to split if implementation gets spicy: first add the projection record/query/cache and runtime plan builder behind tests, then add the renderer layered execution branch. Do not mix renderer stencil semantics debugging with projection construction bugs in one unreviewable chunk.
 - `PortalFramePlanKey` should replace the outdoor `portalTraversalGraphRevision` plus `transitionApertureRevision` pair with `projection.sourceRevisionKey` only when the projection path is active. Keep the direct env-cell residency key unchanged for now.
+
+Status: Complete as of 2026-06-21.
+
+Decision:
+
+- Longest-acyclic-layer rendering is acceptable as the production outdoor direct path for now.
+- This is a structural decision, not a final visual-quality proof. The renderer still needs screenshot validation at `0xda55ffff`, especially for same-layer stencil bleed.
+- Phase 9E may proceed with isomorphic dungeon/env-cell-origin projection work, but it must not treat the current layer-as-stencil-reference policy as sacred if dungeon or outdoor screenshots expose cross-entry bleed.
+
+Implemented in this phase:
+
+- Deleted the old outdoor per-root path-tree frame-plan builder:
+  - `createOutdoorTransitionPortalFramePlan(...)`;
+  - `OutdoorTransitionPortalFramePlanInput`;
+  - transition-root selection helpers that belonged only to that fallback;
+  - old direct frame-plan tests that validated the deleted fallback.
+- Kept production outdoor planning on `StaticSceneQuery.queryOutdoorPortalProjection(...)` with no silent fallback to per-root traversal.
+- Left the shared direct env-cell traversal path intact for dungeon/env-cell-origin rendering until Phase 9E cuts it over deliberately.
+- Updated this plan's Phase 10 wording so `EnvCellSystemLayerPayload` owns projection records as durable topology/SCC/layer facts, not portal-stack path trees.
+
+Debt and spicy bits:
+
+- I could not perform the required interactive screenshot comparison in this phase. User work remains: inspect the `0xda55ffff` scenarios listed above and report whether same-layer mask bleed or missing deeper portal visibility appears.
+- `maxPortalViews` still acts as a temporary global mask-edge cap for projection frame plans. Phase 9E should rename or split this into a projection-specific mask-edge cap while generalizing dungeon projection.
+- `PortalTraversalPlan` is still the production dungeon/env-cell-origin plan until Phase 9E. That is now an explicit next-phase target, not an accidental retained outdoor fallback.
 
 ### Immediate Phase 9E: Cut Dungeon-Origin Direct Traversal To Projection Semantics
 
@@ -1659,9 +1684,9 @@ Layer model:
   - env-cell records/interiors;
   - env-cell static resource membership;
   - static portal graph records for source-provenance/debugging;
-  - outdoor portal projection records from Phase 9B/9C, including durable topology, strongly connected component facts, longest-layer render facts, and any explicitly named execution summaries retained after Phase 9D;
+  - portal projection records, initially outdoor-origin from Phase 9B/9C and generalized to dungeon/env-cell-origin in Phase 9E, including durable topology, strongly connected component facts, longest-layer render facts, and explicitly named renderer execution summaries;
+  - projection root-policy facts, such as outdoor transition roots and env-cell current-root provenance, without encoding those policies as separate graph shapes;
   - source-tagged portal aperture resources for env-cell portals and building-derived transition apertures;
-  - transition-root selection facts/provenance;
   - generation id used by portal frame-plan caching.
 
 Dry-run findings carried forward:

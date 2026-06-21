@@ -13,7 +13,6 @@ import type {
 import type {
 	StaticOutdoorPortalProjectionRecord,
 	StaticPortalInteriorRecord,
-	TransitionApertureBatch,
 } from "../static/contracts";
 import {
 	AC_UNIT_SCALE,
@@ -25,9 +24,6 @@ import type {
 } from "./static-scene-query";
 import { PortalApertureFrameResourceBuilder } from "./portal-aperture-frame-resources";
 import {
-	createBuildingTransitionApertureRangeId,
-	createBuildingTransitionApertureSourceId,
-	createBuildingTransitionTargetEnvCellId,
 	createEnvCellPortalApertureRangeId,
 	createEnvCellPortalApertureSourceId,
 } from "../static/portal-aperture-resources";
@@ -50,18 +46,6 @@ export interface DirectEnvCellFramePlanInput {
 	readonly renderAnchorLandblockId: number | null;
 	readonly envCellResourceMembership: readonly EnvCellResourceMembership[];
 	readonly traversalPlan: PortalTraversalPlan;
-}
-
-export interface OutdoorTransitionPortalFramePlanInput {
-	readonly landblockId: number;
-	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
-	readonly renderAnchorLandblockId: number | null;
-	readonly envCellResourceMembership: readonly EnvCellResourceMembership[];
-	readonly transitionApertureBatches: readonly TransitionApertureBatch[];
-	readonly traversalPlansByStartEnvCellId: ReadonlyMap<
-		number,
-		PortalTraversalPlan
-	>;
 }
 
 export interface OutdoorProjectionPortalFramePlanInput {
@@ -288,126 +272,6 @@ export function createDirectEnvCellFramePlan(
 	});
 }
 
-export function createOutdoorTransitionPortalFramePlan(
-	input: OutdoorTransitionPortalFramePlanInput,
-): PortalFrameWorkPlan | null {
-	const renderableBatches = input.transitionApertureBatches.filter(
-		(batch) =>
-			batch.landblockId === input.landblockId &&
-			batch.frontFace === "indoor-visible" &&
-			batch.indices.length > 0 &&
-			batch.ranges.length > 0,
-	);
-	if (renderableBatches.length === 0) {
-		return null;
-	}
-
-	const transitionRootCandidates =
-		createOutdoorTransitionRootGroups(renderableBatches);
-	if (transitionRootCandidates.length === 0) {
-		return null;
-	}
-	const outdoorVisibleEnvCellIds = createOutdoorVisibleEnvCellIds(
-		input.portalInteriorRecords,
-		input.landblockId,
-	);
-	const seenOutsideByEnvCellId = createOutdoorEnvCellSeenOutsideById(
-		input.portalInteriorRecords,
-		input.landblockId,
-	);
-	const transitionRootSelection = selectOutdoorVisibleTransitionRoots({
-		outdoorVisibleEnvCellIds,
-		seenOutsideByEnvCellId,
-		transitionRootCandidates,
-	});
-	const transitionRoots = transitionRootSelection.acceptedRoots;
-	const outdoorScene: PortalFrameSceneSource = {
-		kind: "outdoor-target",
-		landblockId: input.landblockId,
-	};
-	const graphPlan = createDirectPortalFramePlan({
-		baseNode: {
-			debugStackLabel: createOutdoorRootPortalStackLabel(input.landblockId),
-			scene: outdoorScene,
-			traversalDepth: 0,
-		},
-		diagnostics: {
-			transitionRootCandidateCount: transitionRootCandidates.length,
-			transitionRootCount: transitionRoots.length,
-			transitionRootsRejectedNotSeenOutside:
-				transitionRootSelection.rejectedNotSeenOutside,
-			transitionRootsRejectedUnknownSeenOutside:
-				transitionRootSelection.rejectedUnknownSeenOutside,
-		},
-		envCellResourceMembership: input.envCellResourceMembership,
-		portalInteriorRecords: input.portalInteriorRecords,
-		traversalSources: transitionRoots.map(
-			(root): DirectPortalTraversalSource => {
-				const transitionRootLabel = createOutdoorTransitionPortalStackLabel({
-					envCellId: root.envCellId,
-					landblockId: input.landblockId,
-				});
-				return {
-					allowedEnvCellIds: outdoorVisibleEnvCellIds,
-					createDebugStackLabel: (traversalStackLabel) =>
-						createOutdoorTransitionChildDebugStackLabel({
-							sourceRootEnvCellId: root.envCellId,
-							transitionRootLabel,
-							traversalStackLabel,
-						}),
-					parentlessViewGroupMode: "root-node",
-					root: {
-						entryEdges: root.ranges.map((range) =>
-							createOutdoorTransitionEdgeCandidate(root.envCellId, range),
-						),
-						kind: "child-node",
-						node: {
-							debugStackLabel: transitionRootLabel,
-							scene: {
-								envCellId: root.envCellId,
-								kind: "env-cell-direct",
-								landblockId: input.landblockId,
-							},
-							traversalDepth: 1,
-						},
-					},
-					traversalDepthOffset: 1,
-					traversalPlan: input.traversalPlansByStartEnvCellId.get(
-						root.envCellId,
-					) ?? {
-						diagnostics: [],
-						landblockId: input.landblockId,
-						maxCells: 0,
-						maxDepth: 0,
-						maxPortalViews: 0,
-						portalViewGroups: [],
-						sceneCrossings: [],
-						startEnvCellId: root.envCellId,
-						visibleCells: [],
-					},
-				};
-			},
-		),
-	});
-	if (!graphPlan) {
-		return null;
-	}
-	const graph = graphPlan.graph;
-	if (
-		graph.edges.length === 0 &&
-		transitionRootSelection.rejectedNotSeenOutside === 0 &&
-		transitionRootSelection.rejectedUnknownSeenOutside === 0
-	) {
-		return null;
-	}
-
-	return {
-		graph,
-		kind: "direct-env-cell",
-		mode: "portal-traversal",
-	};
-}
-
 export function createOutdoorProjectionPortalFramePlan(
 	input: OutdoorProjectionPortalFramePlanInput,
 ): PortalFrameWorkPlan | null {
@@ -613,22 +477,6 @@ export function createOutdoorProjectionPortalFramePlan(
 		layeredGraph: graph,
 		mode: "outdoor-projection",
 	};
-}
-
-export function createOutdoorVisibleEnvCellIds(
-	portalInteriorRecords: readonly StaticPortalInteriorRecord[],
-	landblockId: number,
-): ReadonlySet<number> {
-	const envCellIds = new Set<number>();
-	for (const [envCellId, seenOutside] of createOutdoorEnvCellSeenOutsideById(
-		portalInteriorRecords,
-		landblockId,
-	)) {
-		if (seenOutside === true) {
-			envCellIds.add(envCellId);
-		}
-	}
-	return envCellIds;
 }
 
 function createDirectPortalFramePlan(
@@ -927,33 +775,6 @@ function createEnvCellPortalEdgeCandidates(options: {
 	return candidates;
 }
 
-function createOutdoorEnvCellSeenOutsideById(
-	portalInteriorRecords: readonly StaticPortalInteriorRecord[],
-	landblockId: number,
-): ReadonlyMap<number, boolean | null> {
-	const seenOutsideByEnvCellId = new Map<number, boolean | null>();
-	for (const record of portalInteriorRecords) {
-		if (record.landblockId !== landblockId) {
-			continue;
-		}
-		for (const envCell of record.envCells) {
-			const envCellId = envCell.envCellId >>> 0;
-			const existing = seenOutsideByEnvCellId.get(envCellId);
-			if (existing === true) {
-				continue;
-			}
-			if (envCell.seenOutside === true || existing === undefined) {
-				seenOutsideByEnvCellId.set(envCellId, envCell.seenOutside);
-				continue;
-			}
-			if (envCell.seenOutside === false && existing === null) {
-				seenOutsideByEnvCellId.set(envCellId, false);
-			}
-		}
-	}
-	return seenOutsideByEnvCellId;
-}
-
 function formatHex32(value: number): string {
 	return `0x${(value >>> 0).toString(16).padStart(8, "0")}`;
 }
@@ -964,13 +785,6 @@ function createRootPortalStackLabel(startEnvCellId: number): string {
 
 function createOutdoorRootPortalStackLabel(landblockId: number): string {
 	return `outdoor-root:${formatHex32(landblockId)}`;
-}
-
-function createOutdoorTransitionPortalStackLabel(options: {
-	readonly envCellId: number;
-	readonly landblockId: number;
-}): string {
-	return `${createOutdoorRootPortalStackLabel(options.landblockId)}/transition:${formatHex32(options.envCellId)}`;
 }
 
 function createOutdoorProjectionRenderEntryLabel(options: {
@@ -992,141 +806,4 @@ function replaceOutdoorProjectionRenderEntry(
 		);
 	}
 	entries[renderEntryId] = entry;
-}
-
-function createOutdoorTransitionChildDebugStackLabel(options: {
-	readonly sourceRootEnvCellId: number;
-	readonly transitionRootLabel: string;
-	readonly traversalStackLabel: string;
-}): string {
-	const rootPrefix = createRootPortalStackLabel(options.sourceRootEnvCellId);
-	if (options.traversalStackLabel === rootPrefix) {
-		return options.transitionRootLabel;
-	}
-	if (!options.traversalStackLabel.startsWith(`${rootPrefix}/`)) {
-		throw new Error(
-			`Traversal portal stack ${options.traversalStackLabel} does not start at ${rootPrefix}.`,
-		);
-	}
-	return `${options.transitionRootLabel}/${options.traversalStackLabel.slice(rootPrefix.length + 1)}`;
-}
-
-interface OutdoorTransitionRootGroup {
-	readonly envCellId: number;
-	readonly ranges: readonly OutdoorTransitionRangeRef[];
-}
-
-interface OutdoorTransitionRootSelection {
-	readonly acceptedRoots: readonly OutdoorTransitionRootGroup[];
-	readonly rejectedNotSeenOutside: number;
-	readonly rejectedUnknownSeenOutside: number;
-}
-
-interface OutdoorTransitionRangeRef {
-	readonly batch: TransitionApertureBatch;
-	readonly range: TransitionApertureBatch["ranges"][number];
-}
-
-function createOutdoorTransitionRootGroups(
-	batches: readonly TransitionApertureBatch[],
-): readonly OutdoorTransitionRootGroup[] {
-	const rangesByEnvCellId = new Map<number, OutdoorTransitionRangeRef[]>();
-	for (const batch of batches) {
-		for (const range of batch.ranges) {
-			const envCellId = createBuildingTransitionTargetEnvCellId(batch, range);
-			const ranges = rangesByEnvCellId.get(envCellId) ?? [];
-			ranges.push({ batch, range });
-			rangesByEnvCellId.set(envCellId, ranges);
-		}
-	}
-	return [...rangesByEnvCellId.entries()]
-		.sort(([leftEnvCellId], [rightEnvCellId]) => leftEnvCellId - rightEnvCellId)
-		.map(([envCellId, ranges]) => ({
-			envCellId,
-			ranges: [...ranges].sort(compareOutdoorTransitionRangeRefs),
-		}));
-}
-
-function selectOutdoorVisibleTransitionRoots(options: {
-	readonly outdoorVisibleEnvCellIds: ReadonlySet<number>;
-	readonly seenOutsideByEnvCellId: ReadonlyMap<number, boolean | null>;
-	readonly transitionRootCandidates: readonly OutdoorTransitionRootGroup[];
-}): OutdoorTransitionRootSelection {
-	const acceptedRoots: OutdoorTransitionRootGroup[] = [];
-	let rejectedNotSeenOutside = 0;
-	let rejectedUnknownSeenOutside = 0;
-
-	for (const root of options.transitionRootCandidates) {
-		if (options.outdoorVisibleEnvCellIds.has(root.envCellId)) {
-			acceptedRoots.push(root);
-			continue;
-		}
-		if (options.seenOutsideByEnvCellId.get(root.envCellId) === false) {
-			rejectedNotSeenOutside += 1;
-		} else {
-			rejectedUnknownSeenOutside += 1;
-		}
-	}
-
-	return {
-		acceptedRoots,
-		rejectedNotSeenOutside,
-		rejectedUnknownSeenOutside,
-	};
-}
-
-function compareOutdoorTransitionRangeRefs(
-	left: OutdoorTransitionRangeRef,
-	right: OutdoorTransitionRangeRef,
-): number {
-	return (
-		left.batch.apertureBatchId.localeCompare(right.batch.apertureBatchId) ||
-		left.range.firstIndex - right.range.firstIndex ||
-		left.range.portalId.localeCompare(right.range.portalId)
-	);
-}
-
-function createOutdoorTransitionEdgeCandidate(
-	envCellId: number,
-	range: OutdoorTransitionRangeRef,
-): DirectPortalEdgeCandidate {
-	return {
-		apertureSourceId: createBuildingTransitionApertureSourceId({
-			apertureBatchId: range.batch.apertureBatchId,
-			portalId: range.range.portalId,
-			rangeFirstIndex: range.range.firstIndex,
-			rangeIndexCount: range.range.indexCount,
-		}),
-		apertureResourceId: createBuildingTransitionApertureRangeId({
-			apertureBatchId: range.batch.apertureBatchId,
-			portalId: range.range.portalId,
-			rangeFirstIndex: range.range.firstIndex,
-			rangeIndexCount: range.range.indexCount,
-		}),
-		duplicateKeyParts: [
-			range.batch.apertureBatchId,
-			range.range.portalId,
-			range.range.firstIndex,
-			range.range.indexCount,
-		],
-		linkId: createOutdoorTransitionLinkId({
-			apertureBatchId: range.batch.apertureBatchId,
-			envCellId,
-			portalId: range.range.portalId,
-		}),
-		sourceKind: "building-transition",
-	};
-}
-
-function createOutdoorTransitionLinkId(options: {
-	readonly apertureBatchId: string;
-	readonly envCellId: number;
-	readonly portalId: string;
-}): string {
-	return [
-		"transition",
-		options.apertureBatchId,
-		options.portalId,
-		formatHex32(options.envCellId),
-	].join(":");
 }

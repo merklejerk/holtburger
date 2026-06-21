@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
 	LandblockEnvCellsStaticScopePayload,
-	LandblockPortalLinkFacts,
 	OutdoorStaticObjectsScopePayload,
 	StaticBounds,
 	StaticPortalGraphRecord,
@@ -1222,68 +1221,6 @@ describe("V2 static scene query", () => {
 		});
 	});
 
-	it("derives portal traversal from cached static portal graphs", () => {
-		const query = new StaticSceneQuery();
-		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
-
-		query.applyStaticPeerRecords({
-			portalGraphs: [createStaticPortalGraphRecord(owner)],
-		});
-
-		const graph = query.queryPortalTraversalGraph({ landblockId: 0xda55ffff });
-		const plan = query.queryPortalTraversal({
-			landblockId: 0xda55ffff,
-			maxCells: 8,
-			maxDepth: 4,
-			maxPortalViews: 16,
-			startEnvCellId: 0xda550100,
-		});
-
-		expect(query.queryPortalTraversalGraph({ landblockId: 0xda55ffff })).toBe(
-			graph,
-		);
-		expect(plan.visibleCells.map((cell) => cell.envCellId)).toEqual([
-			0xda550100, 0xda550101,
-		]);
-	});
-
-	it("invalidates cached portal traversal graphs only for changed landblocks", () => {
-		const query = new StaticSceneQuery();
-		const ownerA = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
-		const ownerB = createEnvCellWorkOwner("work-env-b", 0xda56ffff);
-
-		query.applyStaticPeerRecords({
-			portalGraphs: [
-				createStaticPortalGraphRecord(ownerA),
-				createStaticPortalGraphRecord(ownerB, {
-					landblockId: 0xda56ffff,
-					sourceEnvCellId: 0xda560100,
-					targetEnvCellId: 0xda560101,
-				}),
-			],
-		});
-
-		const firstA = query.queryPortalTraversalGraph({ landblockId: 0xda55ffff });
-		const firstB = query.queryPortalTraversalGraph({ landblockId: 0xda56ffff });
-
-		query.applyStaticPeerRecords({
-			portalGraphs: [
-				createStaticPortalGraphRecord(ownerB, {
-					landblockId: 0xda56ffff,
-					sourceEnvCellId: 0xda560100,
-					targetEnvCellId: 0xda560102,
-				}),
-			],
-		});
-
-		expect(query.queryPortalTraversalGraph({ landblockId: 0xda55ffff })).toBe(
-			firstA,
-		);
-		expect(
-			query.queryPortalTraversalGraph({ landblockId: 0xda56ffff }),
-		).not.toBe(firstB);
-	});
-
 	it("caches outdoor portal projections by committed semantic inputs", () => {
 		const query = new StaticSceneQuery();
 		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
@@ -1476,63 +1413,6 @@ describe("V2 static scene query", () => {
 				.queryCommittedEnvCellRecords({ landblockId: 0xda55ffff })
 				?.sourceMappings.map((record) => record.memberId),
 		).toEqual(["cell-a", "cell-b"]);
-	});
-
-	it("derives portal traversal from committed portal links rather than visibility links", () => {
-		const query = new StaticSceneQuery();
-		const owner = createEnvCellWorkOwner("work-env-traversal", 0xda55ffff);
-
-		query.applyStaticPeerRecords({
-			portalInteriorRecords: [
-				{
-					envCells: [
-						createPortalSummary(0xda550100),
-						createPortalSummary(0xda550101),
-						createPortalSummary(0xda550102),
-					],
-					kind: "env-cell-portal-interior",
-					landblockId: 0xda55ffff,
-					owner,
-					portalLinks: [
-						createEnvCellPortalLink({
-							linkId: "a-to-b",
-							sourceEnvCellId: 0xda550100,
-							targetEnvCellId: 0xda550101,
-						}),
-					],
-				},
-			],
-			visibilityRecords: [
-				{
-					acceptedEnvCellIds: [0xda550100, 0xda550101, 0xda550102],
-					diagnostics: [],
-					kind: "env-cell-visibility",
-					landblockId: 0xda55ffff,
-					owner,
-					visibleLinks: [
-						{
-							sourceEnvCellId: 0xda550100,
-							targetEnvCellId: 0xda550102,
-						},
-					],
-				},
-			],
-		});
-
-		const plan = query.queryPortalTraversal({
-			landblockId: 0xda55ffff,
-			maxCells: 8,
-			maxDepth: 4,
-			maxPortalViews: 16,
-			startEnvCellId: 0xda550100,
-		});
-
-		expect(plan.visibleCells.map((cell) => cell.envCellId)).toEqual([
-			0xda550100, 0xda550101,
-		]);
-		expect(plan.visibleCells.map((cell) => cell.envCellId)).not.toContain(
-			0xda550102,
-		);
 	});
 
 	it("queries committed outdoor building transition aperture batches without env-cell records", () => {
@@ -2201,38 +2081,6 @@ function createLandblockEnvCellsPayload(
 			},
 		},
 		visibilityDiagnostics: [],
-	};
-}
-
-function createPortalSummary(envCellId: number) {
-	return {
-		envCellId,
-		localPlacement: createPlacement(),
-		portalApertures: [],
-		portals: [],
-	};
-}
-
-function createEnvCellPortalLink(options: {
-	readonly linkId: string;
-	readonly sourceEnvCellId: number;
-	readonly targetEnvCellId: number;
-}): LandblockPortalLinkFacts {
-	return {
-		flags: 0,
-		linkId: options.linkId,
-		polygonId: null,
-		source: {
-			envCellId: options.sourceEnvCellId,
-			kind: "env-cell",
-			portalId: `${options.linkId}:source`,
-		},
-		sourceIndex: 0,
-		target: {
-			envCellId: options.targetEnvCellId,
-			kind: "env-cell",
-			portalId: `${options.linkId}:target`,
-		},
 	};
 }
 

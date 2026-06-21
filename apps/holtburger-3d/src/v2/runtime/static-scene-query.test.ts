@@ -1279,9 +1279,9 @@ describe("V2 static scene query", () => {
 		expect(query.queryPortalTraversalGraph({ landblockId: 0xda55ffff })).toBe(
 			firstA,
 		);
-		expect(query.queryPortalTraversalGraph({ landblockId: 0xda56ffff })).not.toBe(
-			firstB,
-		);
+		expect(
+			query.queryPortalTraversalGraph({ landblockId: 0xda56ffff }),
+		).not.toBe(firstB);
 	});
 
 	it("caches outdoor portal projections by committed semantic inputs", () => {
@@ -1364,6 +1364,92 @@ describe("V2 static scene query", () => {
 			query.queryOutdoorPortalProjection({ landblockId: 0xda55ffff }),
 		).toBeNull();
 		expect(query.queryPortalGraphs({ landblockId: 0xda55ffff })).toEqual([]);
+	});
+
+	it("caches env-cell portal projections by committed semantic inputs and root env cell", () => {
+		const query = new StaticSceneQuery();
+		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+
+		query.applyStaticPeerRecords({
+			portalGraphs: [createStaticPortalGraphRecord(owner)],
+			portalInteriorRecords: [createProjectionPortalInteriorRecord(owner)],
+		});
+		query.applyTransitionApertureBatches([
+			createProjectionTransitionApertureBatch({ targetCellLowId: 0x0102 }),
+		]);
+
+		const first = query.queryEnvCellPortalProjection({
+			landblockId: 0xda55ffff,
+			startEnvCellId: 0xda550100,
+		});
+		const second = query.queryEnvCellPortalProjection({
+			landblockId: 0xda55ffff,
+			startEnvCellId: 0xda550100,
+		});
+		const differentRoot = query.queryEnvCellPortalProjection({
+			landblockId: 0xda55ffff,
+			startEnvCellId: 0xda550101,
+		});
+
+		expect(second).toBe(first);
+		expect(differentRoot).not.toBe(first);
+		expect(first).toMatchObject({
+			root: {
+				envCellId: 0xda550100,
+				kind: "env-cell-root",
+				landblockId: 0xda55ffff,
+			},
+		});
+		expect(first?.renderLayerByEnvCellId).toEqual([
+			{ envCellId: 0xda550100, renderLayer: 0 },
+			{ envCellId: 0xda550101, renderLayer: 1 },
+		]);
+
+		query.applyTransitionApertureBatches([
+			createProjectionTransitionApertureBatch({ targetCellLowId: 0x0101 }),
+		]);
+		expect(
+			query.queryEnvCellPortalProjection({
+				landblockId: 0xda55ffff,
+				startEnvCellId: 0xda550100,
+			}),
+		).toBe(first);
+
+		query.applyStaticPeerRecords({
+			portalGraphs: [
+				createStaticPortalGraphRecord(owner, {
+					targetEnvCellId: 0xda550102,
+				}),
+			],
+		});
+
+		const afterGraphChange = query.queryEnvCellPortalProjection({
+			landblockId: 0xda55ffff,
+			startEnvCellId: 0xda550100,
+		});
+
+		expect(afterGraphChange).not.toBe(first);
+		expect(afterGraphChange?.renderLayerByEnvCellId).toEqual([
+			{ envCellId: 0xda550100, renderLayer: 0 },
+			{ envCellId: 0xda550102, renderLayer: 1 },
+		]);
+	});
+
+	it("returns null for env-cell portal projection roots without committed interiors", () => {
+		const query = new StaticSceneQuery();
+		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+
+		query.applyStaticPeerRecords({
+			portalGraphs: [createStaticPortalGraphRecord(owner)],
+			portalInteriorRecords: [createProjectionPortalInteriorRecord(owner)],
+		});
+
+		expect(
+			query.queryEnvCellPortalProjection({
+				landblockId: 0xda55ffff,
+				startEnvCellId: 0xda550999,
+			}),
+		).toBeNull();
 	});
 
 	it("sorts committed records by typed keys without JSON stringification", () => {

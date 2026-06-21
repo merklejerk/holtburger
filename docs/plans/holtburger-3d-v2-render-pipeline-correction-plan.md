@@ -1629,6 +1629,20 @@ Implementation tasks:
   - Cache env-cell-origin projections by `(landblockId, startEnvCellId, sourceRevisionKey)`.
   - Invalidate env-cell-origin projection cache entries from the same portal graph/interior mutation points as traversal graph invalidation.
   - Do not invalidate env-cell-origin projection cache entries for transition aperture changes unless the generalized source key proves they are part of that root policy.
+- 9E.2b: Correct env-cell-root render-layer semantics before renderer cutover.
+  - Reserve projection `renderLayer: 0` for the resident/current env cell only.
+  - Keep SCC/component facts as topology diagnostics, but do not let root SCC membership make non-resident env cells render-layer `0`.
+  - For env-cell roots, compute renderer-facing env-cell layers from root-cell reachability:
+    - the start env cell is layer `0`;
+    - every other reachable env cell is assigned a masked layer `>= 1`;
+    - if a non-root env cell is reachable by multiple acyclic paths, keep the longest acyclic layer;
+    - if a cycle points back to the resident cell, do not use that back-edge to lift the resident cell or keep same-SCC neighbors at layer `0`.
+  - Keep outdoor roots on component/SCC layering unless screenshot validation proves same-layer bleed or ordering issues.
+  - Update static projection tests so `A -> C`, `C -> A`, `C -> B` yields:
+    - `A` as layer `0`;
+    - `C` as layer `1`;
+    - `B` as layer `2`;
+    - SCC facts still record `A` and `C` as cyclic/topologically strongly connected.
 - 9E.3: Generalize renderer-facing projection frame plans.
   - Rename the renderer-facing outdoor-only plan contracts where practical:
     - `OutdoorProjectionPortalFrameGraphPlan` -> `PortalProjectionFrameGraphPlan`;
@@ -1699,6 +1713,7 @@ Dry-run findings on 2026-06-21:
 - Suggested execution split:
   - 9E.1 land static projection contract rename/generalization with no runtime cutover;
   - 9E.2 add env-cell projection query/cache and tests;
+  - 9E.2b correct env-cell-root render layer semantics so layer `0` means resident cell only;
   - 9E.3 generalize renderer frame-plan contracts and root rendering policy while outdoor still passes;
   - 9E.4 cut runtime env-cell branch to projection;
   - 9E.5 delete or quarantine recursive direct traversal leftovers.
@@ -1723,6 +1738,49 @@ Dry-run findings on 2026-06-21:
   - `npm run lint:ts`;
   - `npm run test:ts -- src/v2/static/portal-graphs.test.ts src/v2/runtime/static-scene-query.test.ts src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts`.
   - `npm run test:ts`.
+
+9E.2 implementation update on 2026-06-21:
+
+- Added env-cell-root projection construction without cutting the renderer/runtime production dungeon path over yet.
+- `createEnvCellPortalProjectionRoot({ landblockId, envCellId })` now creates the root policy for dungeon/env-cell-origin projection.
+- `createStaticPortalProjection(...)` now supports both root policies:
+  - outdoor roots still use outside-visible env cells plus building-transition root edges;
+  - env-cell roots build a valid same-landblock env-cell portal edge set, walk reachability from `startEnvCellId`, and retain one projected node per reachable env cell.
+- Env-cell-root projection uses the SCC containing `startEnvCellId` as the root component, so the static projection records root cycles as finite SCC facts instead of recursive path-stack loops.
+- Env-cell-root source keys include the root env cell and committed portal graph/interior/aperture facts, but intentionally exclude transition aperture batches because that root policy does not consume building transitions.
+- Added `StaticSceneQuery.queryEnvCellPortalProjection({ landblockId, startEnvCellId })`.
+- Added env-cell projection caching by `(landblockId, startEnvCellId, sourceRevisionKey)`.
+- Env-cell projection caches invalidate from portal graph/interior removal, replacement, retained-scope pruning, draw-unit-owned record deletion, and `clear()`. Transition aperture changes intentionally do not invalidate env-cell projection caches.
+- Tests now prove:
+  - `A -> B` plus `A -> C -> B` creates one `B` projection entry at the longest acyclic layer;
+  - root cycles are finite SCCs;
+  - env-cell projection source keys/cache entries ignore transition aperture changes;
+  - graph mutation invalidates the env-cell projection cache;
+  - missing committed root interiors return `null`.
+- Debt introduced/retained:
+  - projection diagnostics still contain outdoor-specific field names such as `envCellPortalEdgesRejectedSourceNotOutsideVisible`; for env-cell roots these currently mean rejected by the root policy's candidate env-cell set. Rename with HUD/renderer diagnostic unification in 9E.3.
+  - current env-cell-root projection lets root SCC membership leak into `renderLayer: 0`, which conflicts with the renderer semantic that layer `0` means the resident/current env cell drawn unmasked. 9E.2b must fix this before 9E.3/9E.4.
+  - production dungeon rendering still uses `PortalTraversalPlan` until 9E.4.
+- Validation for this slice:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - `npm run test:ts -- src/v2/static/portal-graphs.test.ts src/v2/runtime/static-scene-query.test.ts`.
+
+9E.2b resteer on 2026-06-21:
+
+- Decision: `renderLayer: 0` is a renderer-facing semantic, not just a graph/SCC depth. It must mean "resident/current env cell drawn unmasked" for env-cell-origin projection.
+- Problem: the 9E.2 static projection currently assigns render layers at SCC/component level. If the resident cell `A` is strongly connected with `C` via `A -> C` and `C -> A`, both can inherit layer `0`. That is valid topology but wrong render semantics.
+- Resteer:
+  - keep SCC/component facts for cycle detection and diagnostics;
+  - add an env-cell-root layer assignment path that treats `startEnvCellId` as the only layer-0 env cell;
+  - assign all other reachable env cells masked layers `>= 1` using longest acyclic depth from the resident cell;
+  - ignore cycle back-edges that would lift the resident cell or keep a non-root same-SCC cell at layer `0`;
+  - keep outdoor-root component layering unchanged for now because outdoor projection has a synthetic outdoor root and all env cells are masked.
+- Acceptance for 9E.2b:
+  - in `A -> C`, `C -> A`, `C -> B`, env-cell-root projection from `A` records `A` at layer `0`, `C` at layer `1`, and `B` at layer `2`;
+  - SCC diagnostics still record `A` and `C` as cyclic/strongly connected;
+  - no non-root env cell appears in `renderLayerByEnvCellId` with `renderLayer: 0`;
+  - `queryEnvCellPortalProjection(...)` cache/source-key behavior from 9E.2 remains unchanged.
 
 Acceptance criteria:
 

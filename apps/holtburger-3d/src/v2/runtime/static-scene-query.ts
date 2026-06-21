@@ -23,6 +23,7 @@ import type {
 	StaticVisibilityRecord,
 } from "../static/contracts";
 import {
+	createEnvCellPortalProjectionRoot,
 	createOutdoorPortalProjectionRoot,
 	createStaticPortalProjection,
 	createStaticPortalProjectionSourceKey,
@@ -406,6 +407,11 @@ interface CachedOutdoorPortalProjection {
 	readonly sourceKey: string;
 }
 
+interface CachedEnvCellPortalProjection {
+	readonly projection: StaticPortalProjectionRecord | null;
+	readonly sourceKey: string;
+}
+
 class LandblockGridSpatialIndex {
 	#outdoorAnchorLandblockId: number | null = null;
 	readonly #bucketsByLandblockId = new Map<number, LandblockSpatialBucket>();
@@ -689,6 +695,10 @@ export class StaticSceneQuery {
 	readonly #outdoorPortalProjectionCacheByLandblockId = new Map<
 		number,
 		CachedOutdoorPortalProjection
+	>();
+	readonly #envCellPortalProjectionCacheByRootKey = new Map<
+		string,
+		CachedEnvCellPortalProjection
 	>();
 
 	ingestSourcePayload(
@@ -1116,6 +1126,49 @@ export class StaticSceneQuery {
 			transitionApertureBatches,
 		});
 		this.#outdoorPortalProjectionCacheByLandblockId.set(landblockId, {
+			projection,
+			sourceKey,
+		});
+		return projection;
+	}
+
+	queryEnvCellPortalProjection(options: {
+		readonly landblockId: number;
+		readonly startEnvCellId: number;
+	}): StaticPortalProjectionRecord | null {
+		const landblockId = options.landblockId >>> 0;
+		const startEnvCellId = options.startEnvCellId >>> 0;
+		const portalGraphs = this.queryPortalGraphs({ landblockId });
+		const portalInteriorRecords = this.queryPortalInteriorRecords({
+			landblockId,
+		});
+		const root = createEnvCellPortalProjectionRoot({
+			envCellId: startEnvCellId,
+			landblockId,
+		});
+		const sourceKey = createStaticPortalProjectionSourceKey({
+			landblockId,
+			portalGraphs,
+			portalInteriorRecords,
+			root,
+			transitionApertureBatches: [],
+		});
+		const cacheKey = createEnvCellPortalProjectionCacheKey({
+			landblockId,
+			startEnvCellId,
+		});
+		const cached = this.#envCellPortalProjectionCacheByRootKey.get(cacheKey);
+		if (cached?.sourceKey === sourceKey) {
+			return cached.projection;
+		}
+		const projection = createStaticPortalProjection({
+			landblockId,
+			portalGraphs,
+			portalInteriorRecords,
+			root,
+			transitionApertureBatches: [],
+		});
+		this.#envCellPortalProjectionCacheByRootKey.set(cacheKey, {
 			projection,
 			sourceKey,
 		});
@@ -1586,6 +1639,7 @@ export class StaticSceneQuery {
 		this.#portalTraversalGraphRevisionsByLandblockId.clear();
 		this.#portalTraversalGraphCacheByLandblockId.clear();
 		this.#outdoorPortalProjectionCacheByLandblockId.clear();
+		this.#envCellPortalProjectionCacheByRootKey.clear();
 	}
 
 	#upsertCommittedSpatialRecords(
@@ -1669,6 +1723,7 @@ export class StaticSceneQuery {
 		}
 		this.#invalidatePortalTraversalGraphs(affectedLandblockIds);
 		this.#invalidateOutdoorPortalProjections(affectedLandblockIds);
+		this.#invalidateEnvCellPortalProjections(affectedLandblockIds);
 	}
 
 	#upsertCommittedPortalGraphs(
@@ -1690,6 +1745,7 @@ export class StaticSceneQuery {
 		}
 		this.#invalidatePortalTraversalGraphs(affectedLandblockIds);
 		this.#invalidateOutdoorPortalProjections(affectedLandblockIds);
+		this.#invalidateEnvCellPortalProjections(affectedLandblockIds);
 	}
 
 	#upsertCommittedSourceMappings(
@@ -1879,6 +1935,7 @@ export class StaticSceneQuery {
 		}
 		this.#invalidatePortalTraversalGraphs(affectedPortalLandblockIds);
 		this.#invalidateOutdoorPortalProjections(affectedPortalLandblockIds);
+		this.#invalidateEnvCellPortalProjections(affectedPortalLandblockIds);
 	}
 
 	#hasCommittedEnvCellRecords(landblockId: number): boolean {
@@ -1961,6 +2018,7 @@ export class StaticSceneQuery {
 		}
 		this.#invalidatePortalTraversalGraphs(affectedPortalLandblockIds);
 		this.#invalidateOutdoorPortalProjections(affectedPortalLandblockIds);
+		this.#invalidateEnvCellPortalProjections(affectedPortalLandblockIds);
 	}
 
 	#invalidatePortalTraversalGraphs(landblockIds: ReadonlySet<number>): void {
@@ -1979,6 +2037,16 @@ export class StaticSceneQuery {
 	#invalidateOutdoorPortalProjections(landblockIds: ReadonlySet<number>): void {
 		for (const landblockId of landblockIds) {
 			this.#outdoorPortalProjectionCacheByLandblockId.delete(landblockId >>> 0);
+		}
+	}
+
+	#invalidateEnvCellPortalProjections(landblockIds: ReadonlySet<number>): void {
+		for (const cacheKey of this.#envCellPortalProjectionCacheByRootKey.keys()) {
+			const landblockId =
+				parseEnvCellPortalProjectionCacheKeyLandblockId(cacheKey);
+			if (landblockId !== null && landblockIds.has(landblockId)) {
+				this.#envCellPortalProjectionCacheByRootKey.delete(cacheKey);
+			}
 		}
 	}
 
@@ -3083,6 +3151,24 @@ function compareNullableNumbers(
 	right: number | null,
 ): number {
 	return (left ?? -1) - (right ?? -1);
+}
+
+function createEnvCellPortalProjectionCacheKey(options: {
+	readonly landblockId: number;
+	readonly startEnvCellId: number;
+}): string {
+	return `${options.landblockId >>> 0}:${options.startEnvCellId >>> 0}`;
+}
+
+function parseEnvCellPortalProjectionCacheKeyLandblockId(
+	cacheKey: string,
+): number | null {
+	const [landblockIdPart] = cacheKey.split(":", 1);
+	if (!landblockIdPart) {
+		return null;
+	}
+	const landblockId = Number(landblockIdPart);
+	return Number.isFinite(landblockId) ? landblockId >>> 0 : null;
 }
 
 function getCommittedRecordDomain(

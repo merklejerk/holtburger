@@ -1,6 +1,19 @@
 import type {
+	StaticAuthoredDynamicSeedRecord,
+	StaticBakeTextureUse,
+	StaticDomain,
 	StaticPortalApertureResource,
 	StaticDrawUnit,
+	StaticMaterialCoverageReport,
+	StaticObjectGeometryStaticDrawUnit,
+	StaticPortalGraphRecord,
+	StaticPortalInteriorRecord,
+	StaticPortalProjectionRecord,
+	StaticSourceMappingRecord,
+	StaticSpatialRecord,
+	StaticVisibilityRecord,
+	StructuredInteriorGeometryStaticDrawUnit,
+	TerrainGeometryStaticDrawUnit,
 	TransitionApertureBatch,
 } from "../static/contracts";
 import type {
@@ -34,6 +47,132 @@ export interface StaticResidencyDelta {
 	readonly removedPortalApertureResourceIds: readonly string[];
 	readonly removedTransitionApertureBatchIds: readonly string[];
 	readonly revision: number;
+}
+
+export type StaticLandblockLayerKind =
+	| "terrain"
+	| "outdoor-buildings"
+	| "outdoor-detail"
+	| "env-cell-system";
+
+export interface StaticLandblockLayerOwnershipKey {
+	readonly kind: StaticLandblockLayerKind;
+	readonly landblockId: number;
+}
+
+export type StaticLandblockLayerGenerationId = string;
+
+export type StaticLandblockLayerPayload =
+	| TerrainLayerPayload
+	| OutdoorBuildingsLayerPayload
+	| OutdoorDetailsLayerPayload
+	| EnvCellSystemLayerPayload;
+
+interface StaticLandblockLayerPayloadBase {
+	readonly generationId: StaticLandblockLayerGenerationId;
+	readonly landblockId: number;
+	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
+	readonly textureUses: readonly StaticBakeTextureUse[];
+}
+
+export interface TerrainLayerPayload extends StaticLandblockLayerPayloadBase {
+	readonly kind: "terrain";
+	readonly drawUnits: readonly TerrainGeometryStaticDrawUnit[];
+	readonly sourceMappingRecords: readonly StaticSourceMappingRecord[];
+	readonly spatialRecords: readonly StaticSpatialRecord[];
+}
+
+export interface OutdoorBuildingsLayerPayload extends StaticLandblockLayerPayloadBase {
+	readonly kind: "outdoor-buildings";
+	readonly drawUnits: readonly OutdoorStaticObjectLayerDrawUnit<"outdoor-buildings">[];
+	readonly sourceMappingRecords: readonly StaticSourceMappingRecord[];
+	readonly spatialRecords: readonly StaticSpatialRecord[];
+}
+
+export interface OutdoorDetailsLayerPayload extends StaticLandblockLayerPayloadBase {
+	readonly kind: "outdoor-detail";
+	readonly drawUnits: readonly OutdoorStaticObjectLayerDrawUnit<"outdoor-detail">[];
+	readonly sourceMappingRecords: readonly StaticSourceMappingRecord[];
+	readonly spatialRecords: readonly StaticSpatialRecord[];
+}
+
+export interface EnvCellSystemLayerPayload extends StaticLandblockLayerPayloadBase {
+	readonly kind: "env-cell-system";
+	readonly authoredDynamicSeedRecords: readonly StaticAuthoredDynamicSeedRecord[];
+	readonly envCellStaticObjectDrawUnits: readonly OutdoorStaticObjectLayerDrawUnit<"landblock-env-cells">[];
+	readonly portalApertureResources: readonly StaticPortalApertureResource[];
+	readonly portalGraphRecords: readonly StaticPortalGraphRecord[];
+	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
+	readonly portalProjectionRecords: readonly StaticPortalProjectionRecord[];
+	readonly resourceMembership: readonly EnvCellSystemLayerResourceMembership[];
+	readonly sourceMappingRecords: readonly StaticSourceMappingRecord[];
+	readonly spatialRecords: readonly StaticSpatialRecord[];
+	readonly structuredInteriorDrawUnits: readonly StructuredInteriorGeometryStaticDrawUnit[];
+	readonly visibilityRecords: readonly StaticVisibilityRecord[];
+}
+
+type OutdoorStaticObjectLayerDrawUnit<
+	Domain extends StaticObjectGeometryStaticDrawUnit["domain"],
+> = StaticObjectGeometryStaticDrawUnit & {
+	readonly domain: Domain;
+};
+
+export interface EnvCellSystemLayerResourceMembership {
+	readonly envCellId: number;
+	readonly envCellStaticObjectDrawUnitIds: readonly string[];
+	readonly structuredInteriorDrawUnitIds: readonly string[];
+}
+
+export interface RendererStaticLayerVisibility {
+	readonly envCellInteriors: boolean;
+	readonly outdoorBuildings: boolean;
+	readonly outdoorDetail: boolean;
+	readonly terrain: boolean;
+}
+
+export const DEFAULT_RENDERER_STATIC_LAYER_VISIBILITY: RendererStaticLayerVisibility =
+	Object.freeze({
+		envCellInteriors: true,
+		outdoorBuildings: true,
+		outdoorDetail: true,
+		terrain: true,
+	});
+
+export function staticLayerKindForStaticDomain(
+	domain: StaticDomain,
+): StaticLandblockLayerKind {
+	switch (domain) {
+		case "outdoor-terrain":
+			return "terrain";
+		case "outdoor-buildings":
+			return "outdoor-buildings";
+		case "outdoor-detail":
+			return "outdoor-detail";
+		case "landblock-env-cells":
+			return "env-cell-system";
+	}
+}
+
+export function createStaticLandblockLayerKey(
+	key: StaticLandblockLayerOwnershipKey,
+): string {
+	return `${key.kind}:${formatLayerLandblockId(key.landblockId)}`;
+}
+
+export function createStaticLandblockLayerGenerationId(input: {
+	readonly kind: StaticLandblockLayerKind;
+	readonly landblockId: number;
+	readonly sourceKey: number | string;
+}): StaticLandblockLayerGenerationId {
+	return [
+		input.kind,
+		formatLayerLandblockId(input.landblockId),
+		String(input.sourceKey),
+	].join(":");
+}
+
+function formatLayerLandblockId(landblockId: number): string {
+	return `0x${(landblockId >>> 0).toString(16).padStart(8, "0")}`;
 }
 
 export type DebugOverlayPrimitive =

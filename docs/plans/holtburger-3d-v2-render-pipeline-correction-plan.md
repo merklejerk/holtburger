@@ -2045,6 +2045,43 @@ Acceptance criteria:
 - Texture placement remains a separate shared update path.
 - Existing behavior and validation remain unchanged.
 
+Phase 10 implementation update on 2026-06-21:
+
+- Added renderer/runtime boundary contracts beside `StaticResidencyDelta` in `src/v2/renderer/types.ts`:
+  - `StaticLandblockLayerKind`;
+  - `StaticLandblockLayerOwnershipKey`;
+  - `StaticLandblockLayerGenerationId`;
+  - `TerrainLayerPayload`;
+  - `OutdoorBuildingsLayerPayload`;
+  - `OutdoorDetailsLayerPayload`;
+  - `EnvCellSystemLayerPayload`;
+  - `EnvCellSystemLayerResourceMembership`;
+  - `RendererStaticLayerVisibility`.
+- Added pure identity helpers:
+  - `staticLayerKindForStaticDomain(...)`;
+  - `createStaticLandblockLayerKey(...)`;
+  - `createStaticLandblockLayerGenerationId(...)`.
+- Added `DEFAULT_RENDERER_STATIC_LAYER_VISIBILITY` so later browser/runtime work has a visibility state that is not encoded as missing demand domains.
+- Kept `StaticResidencyDelta` unchanged. Phase 10 is a scaffold, not the layer cutover.
+- Modeled env-cell systems around projection records, source-tagged portal aperture resources, portal graph/interior source facts, resource membership, and draw resources. No recursive traversal or portal-stack graph payload was added.
+- Added focused tests in `src/v2/renderer/static-layer-contracts.test.ts` proving:
+  - existing static domains map to atomic layer kinds;
+  - ownership and generation ids are stable strings over layer kind, landblock id, and source key;
+  - renderer visibility state is separate from demand/LoD/domain state;
+  - terrain and env-cell-system payloads do not expose public added/removed resource delta lists;
+  - env-cell-system payloads carry projection/aperture/resource-membership surfaces without portal-stack contract fields.
+- Spicy bits:
+  - the contracts live in `renderer/types.ts` because that is today's runtime/renderer boundary for `StaticResidencyDelta`; this keeps Phase 10 colocated with the migration target instead of creating a parallel boundary module too early.
+  - `EnvCellSystemLayerPayload` intentionally does not include `TransitionApertureBatch[]`; Phase 11 may still need a legacy adapter index while renderer execution cuts over, but the new layer contract carries source-tagged portal aperture resources as the production model.
+- Debt retained:
+  - no renderer layer replacement methods exist yet;
+  - no runtime materialization path produces layer payloads yet;
+  - browser checkboxes still drive demand until Phase 11 changes them to visibility controls.
+- Validation for this slice:
+  - `npm run test:ts -- src/v2/renderer/static-layer-contracts.test.ts`;
+  - `npm run check`;
+  - `npm run lint:ts`.
+
 ### Phase 11: Add Renderer Layer Ownership APIs Beside Static Delta
 
 Problem to solve:
@@ -2104,6 +2141,10 @@ Deliverables:
 
 - Add a layer assembly store for same-landblock static source outputs needed by `EnvCellSystemLayerPayload`.
 - Add an explicit env-cell-system assembly owner/key, such as `env-cell-system:<landblock>`, instead of pretending either `landblock-env-cells` or `outdoor-buildings` solely owns the assembled layer.
+- Decide and document the `EnvCellSystemLayerPayload.generationId` policy as part of the assembly owner/key work:
+  - choose coordinator-assigned, content-addressed, or deterministic semantic-key generation;
+  - name exactly which coherent inputs change the generation id;
+  - keep renderer/runtime consumers treating generation ids as opaque strings.
 - Join `landblock-env-cells` portal/interior/membership outputs with same-landblock building-derived transition aperture facts.
 - Build or carry forward the outdoor portal projection record as part of `EnvCellSystemLayerPayload`:
   - consume env-cell portal graph/interior facts from the env-cell input;
@@ -2124,6 +2165,7 @@ Acceptance criteria:
 - Missing transition aperture facts do not publish a partial env-cell system layer.
 - Interior-cell demand has a path to the required building-derived portal facts.
 - The assembled env-cell system layer has its own generation id and owner/key independent of source-domain work ids.
+- Phase 12 closes the open generation-id policy question by documenting the chosen policy and proving replacement/cache invalidation tests use that policy.
 - Tests cover a valid loaded outdoor-building source with zero transition apertures and prove it is not treated as missing.
 - Tests cover loaded-empty versus not-loaded-yet transition aperture facts. No cap, that distinction is the whole point.
 

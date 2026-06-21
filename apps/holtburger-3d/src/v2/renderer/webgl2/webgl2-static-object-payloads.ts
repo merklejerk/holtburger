@@ -146,16 +146,12 @@ function createStaticObjectRolePageScratch(
 function createStaticObjectMaterialUniformScratch(): StaticObjectPreparedMaterialUniforms {
 	return {
 		alphaTests: new Float32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
-		baseColorPages: new Int32Array(
-			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
-		),
+		baseColorPages: new Int32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
 		baseColorRects: new Float32Array(
 			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
 		),
 		colors: new Float32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4),
-		detailEnabled: new Int32Array(
-			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
-		),
+		detailEnabled: new Int32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
 		detailPages: new Int32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
 		detailRects: new Float32Array(
 			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
@@ -176,9 +172,7 @@ function createStaticObjectMaterialUniformScratch(): StaticObjectPreparedMateria
 		indexRects: new Float32Array(
 			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
 		),
-		materialModes: new Int32Array(
-			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
-		),
+		materialModes: new Int32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
 		paletteFirstIndices: new Float32Array(
 			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
 		),

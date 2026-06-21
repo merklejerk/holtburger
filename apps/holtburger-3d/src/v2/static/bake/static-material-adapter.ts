@@ -48,9 +48,7 @@ export function createStaticMaterialEntryKey(options: {
 	].join("|");
 }
 
-export function createStaticMaterialColorKey(
-	plan: StaticMaterialPlan,
-): string {
+export function createStaticMaterialColorKey(plan: StaticMaterialPlan): string {
 	return [
 		...plan.color.map(formatMaterialScalar),
 		...plan.emissiveColor.map(formatMaterialScalar),
@@ -96,7 +94,10 @@ export function createStaticMaterialTableEntry(options: {
 	readonly slot: number;
 	readonly textureWrapMode: StaticMaterialTextureWrapMode;
 }): StaticMaterialTableEntry {
-	const primaryTextureUse = findPreparedTextureDataUse(options.plan, "rgba-color");
+	const primaryTextureUse = findPreparedTextureDataUse(
+		options.plan,
+		"rgba-color",
+	);
 	const indexTextureUse =
 		findPreparedTextureDataUse(options.plan, "index8") ??
 		findPreparedTextureDataUse(options.plan, "index16");
@@ -163,7 +164,9 @@ export function createStaticMaterialRenderState(
 export function createStaticMaterialTextureUses(options: {
 	readonly createTextureUseId: StaticMaterialTextureUseIdFactory;
 	readonly domain: StaticDomain;
-	readonly isStageableDataUse: (dataUse: MaterialTextureDataUseIdentity) => boolean;
+	readonly isStageableDataUse: (
+		dataUse: MaterialTextureDataUseIdentity,
+	) => boolean;
 	readonly staticBatchId: string;
 	readonly textureUseSpecs: readonly StaticMaterialTextureUseSpec[];
 }): readonly StaticBakeTextureUse[] {
@@ -183,7 +186,10 @@ export function createStaticMaterialTextureUses(options: {
 			if (existing) {
 				textureUsesById.set(textureUseId, {
 					...existing,
-					ownerDrawUnitIds: [...existing.ownerDrawUnitIds, spec.ownerDrawUnitId],
+					ownerDrawUnitIds: [
+						...existing.ownerDrawUnitIds,
+						spec.ownerDrawUnitId,
+					],
 				});
 				continue;
 			}

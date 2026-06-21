@@ -110,7 +110,9 @@ describe("V2 landblock env-cell resolver", () => {
 		expect(setupSource?.parts[0]?.defaultPlacements).toEqual([
 			createPlacement({ x: 3, y: 4, z: 5 }),
 		]);
-		expect(payload.scope.materialSources.map((source) => source.identity)).toEqual([
+		expect(
+			payload.scope.materialSources.map((source) => source.identity),
+		).toEqual([
 			{ kind: "static-material-source", materialId: 0x08000010 },
 			{ kind: "static-material-source", materialId: 0x08000011 },
 		]);
@@ -204,9 +206,9 @@ describe("V2 landblock env-cell resolver", () => {
 			cellStructureId: 0x0d000020,
 			kind: "cell-structure",
 		});
-		expect(payload.scope.envCells.flatMap((cell) => cell.staticObjectSeeds)).toEqual(
-			[],
-		);
+		expect(
+			payload.scope.envCells.flatMap((cell) => cell.staticObjectSeeds),
+		).toEqual([]);
 		expect(payload.scope.sourceAssets).toEqual([]);
 		expect(payload.scope.missingRefs).toEqual([
 			{
@@ -261,21 +263,21 @@ describe("V2 landblock env-cell resolver", () => {
 		}
 		expect(
 			assetService.requestedKeys.map((key) => describeHostAssetKey(key)),
-	).toEqual([
-		"landblock-env-cells:da55ffff",
-		"region-render-profile:1",
-		"material:08000010",
-		"surface-texture:05000010",
-		"render-surface:06000010",
+		).toEqual([
+			"landblock-env-cells:da55ffff",
+			"region-render-profile:1",
+			"material:08000010",
+			"surface-texture:05000010",
+			"render-surface:06000010",
 			"palette:04000010",
 		]);
 		expect(payload.scope.sourceAssets).toEqual([]);
-		expect(payload.scope.envCells.flatMap((cell) => cell.staticObjectSeeds)).toEqual(
-			[],
-		);
-		expect(payload.scope.materialSources.map((source) => source.identity)).toEqual([
-			{ kind: "static-material-source", materialId: 0x08000010 },
-		]);
+		expect(
+			payload.scope.envCells.flatMap((cell) => cell.staticObjectSeeds),
+		).toEqual([]);
+		expect(
+			payload.scope.materialSources.map((source) => source.identity),
+		).toEqual([{ kind: "static-material-source", materialId: 0x08000010 }]);
 		expect(payload.scope.textureRefs.map((ref) => ref.role)).toEqual([
 			"surface-texture",
 			"render-surface",
@@ -343,9 +345,9 @@ describe("V2 landblock env-cell resolver", () => {
 				.filter((key) => key === "material:08000010"),
 		).toEqual(["material:08000010"]);
 		expect(payload.scope.sourceAssets).toHaveLength(1);
-		expect(payload.scope.envCells.flatMap((cell) => cell.staticObjectSeeds)).toHaveLength(
-			2,
-		);
+		expect(
+			payload.scope.envCells.flatMap((cell) => cell.staticObjectSeeds),
+		).toHaveLength(2);
 	});
 
 	it("preserves resolver-light cell-structure geometry metadata supplied by the resolver asset bridge", async () => {
@@ -404,9 +406,9 @@ describe("V2 landblock env-cell resolver", () => {
 		if (payload.scope.kind !== "landblock-env-cells") {
 			throw new Error("expected landblock env-cell payload");
 		}
-		expect(payload.scope.envCells.map((cell) => cell.identity.envCellId)).toEqual([
-			0xda550100, 0xda550101,
-		]);
+		expect(
+			payload.scope.envCells.map((cell) => cell.identity.envCellId),
+		).toEqual([0xda550100, 0xda550101]);
 	});
 
 	it("warns when env cells are omitted from the landblock BVH because they have no bounds", async () => {
@@ -789,10 +791,9 @@ function createLandblockEnvCellsPayload(
 				envCellId: 0xda550101,
 				heavyRenderGeometry: options.heavyRenderGeometry,
 				memberId: "cell-1",
-				staticSourceAssetId:
-					options.omitStatics
-						? null
-						: (options.secondStaticSourceAssetId ?? "setup-model/02000010"),
+				staticSourceAssetId: options.omitStatics
+					? null
+					: (options.secondStaticSourceAssetId ?? "setup-model/02000010"),
 				visibleEnvCellIds: [],
 			}),
 		],

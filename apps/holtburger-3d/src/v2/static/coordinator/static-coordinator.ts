@@ -146,11 +146,11 @@ export class StaticCoordinator {
 			if (existing) {
 				this.#activeWork.delete(existing.workId);
 			}
-				this.#activeWork.set(work.workId, {
-					desiredKey,
-					domain: work.job.domain,
-					workId: work.workId,
-					revision: work.revision,
+			this.#activeWork.set(work.workId, {
+				desiredKey,
+				domain: work.job.domain,
+				workId: work.workId,
+				revision: work.revision,
 				scopeKey: describeStaticScopeKey(work.job.scope),
 				status: "requested",
 				work,

@@ -41,7 +41,10 @@ interface LoadedPayload<
 		LandblockEnvCellsPreparedPayload["kind"],
 > {
 	readonly asset: PreparedAsset;
-	readonly payload: Extract<LandblockEnvCellsPreparedPayload, { readonly kind: TKind }>;
+	readonly payload: Extract<
+		LandblockEnvCellsPreparedPayload,
+		{ readonly kind: TKind }
+	>;
 }
 
 export interface LandblockEnvCellsResolverOptions {
@@ -70,7 +73,10 @@ export class LandblockEnvCellsResolver {
 			"landblock-env-cells",
 		);
 		const regionRenderProfile = await this.#loadPayload(
-			createHostAssetKey("region-render-profile", landblock.payload.regionNumber),
+			createHostAssetKey(
+				"region-render-profile",
+				landblock.payload.regionNumber,
+			),
 			"region-render-profile",
 		);
 		const sourceClosure = await resolveStaticObjectAndMaterialSourceClosure({
@@ -412,7 +418,8 @@ function requirePreparedPayloadKind<
 	asset: PreparedAsset,
 	expectedKind: TKind,
 ): Extract<LandblockEnvCellsPreparedPayload, { readonly kind: TKind }> {
-	const payload = asset.payload as Partial<LandblockEnvCellsPreparedPayload> | null;
+	const payload =
+		asset.payload as Partial<LandblockEnvCellsPreparedPayload> | null;
 	if (!payload || payload.kind !== expectedKind) {
 		throw new Error(
 			`Prepared asset ${asset.sourceAssetId} was ${String(
@@ -421,7 +428,10 @@ function requirePreparedPayloadKind<
 		);
 	}
 
-	return payload as Extract<LandblockEnvCellsPreparedPayload, { readonly kind: TKind }>;
+	return payload as Extract<
+		LandblockEnvCellsPreparedPayload,
+		{ readonly kind: TKind }
+	>;
 }
 
 function compareNumeric(left: number, right: number): number {

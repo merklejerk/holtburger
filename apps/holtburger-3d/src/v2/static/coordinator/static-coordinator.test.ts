@@ -251,10 +251,10 @@ describe("V2 static coordinator", () => {
 		await flushPromises();
 
 		expect(deltas).toEqual([
-				{
-					addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
-					addedPortalApertureResources: [],
-					addedTransitionApertureBatches: [],
+			{
+				addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
+				addedPortalApertureResources: [],
+				addedTransitionApertureBatches: [],
 				materialCoverage: [],
 				removedResources: [],
 				revision: 1,

@@ -111,9 +111,7 @@ function resolveMaterialPlanOutcome(
 	if (plan.renderCoverage === "unsupported") {
 		return "unsupported";
 	}
-	return isRenderableStaticMaterialPlan(plan)
-		? "rendered"
-		: "render-deferred";
+	return isRenderableStaticMaterialPlan(plan) ? "rendered" : "render-deferred";
 }
 
 function resolvePartitionOutcome(

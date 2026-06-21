@@ -36,11 +36,11 @@ export function createEnvCellPortalApertureResource(
 					transformEnvCellPortalPoint(point, placementMatrix),
 				),
 			);
-				indices.push(
-					...triangulatePortalApertureFan(aperture.points.length).map(
-						(index) => firstVertex + index,
-					),
-				);
+			indices.push(
+				...triangulatePortalApertureFan(aperture.points.length).map(
+					(index) => firstVertex + index,
+				),
+			);
 			ranges.push({
 				firstIndex,
 				indexCount: indices.length - firstIndex,
@@ -194,7 +194,9 @@ function createEnvCellPortalApertureResourceId(landblockId: number): string {
 	return `portal-aperture-resource:landblock-env-cells:${formatHex32(landblockId)}`;
 }
 
-function createTransitionPortalApertureResourceId(apertureBatchId: string): string {
+function createTransitionPortalApertureResourceId(
+	apertureBatchId: string,
+): string {
 	return `portal-aperture-resource:building-transition:${apertureBatchId}`;
 }
 

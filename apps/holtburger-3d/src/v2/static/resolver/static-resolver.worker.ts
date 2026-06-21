@@ -1,8 +1,6 @@
 /// <reference lib="webworker" />
 
-import type {
-	PreparedAssetReader,
-} from "../../assets/contracts";
+import type { PreparedAssetReader } from "../../assets/contracts";
 import type {
 	StaticResolver,
 	StaticResolverJob,
@@ -55,9 +53,13 @@ class StaticResolverRouter implements StaticResolver {
 	}
 }
 
-const workerAssetReader = new StaticResolverWorkerPreparedAssetReader(workerPort);
+const workerAssetReader = new StaticResolverWorkerPreparedAssetReader(
+	workerPort,
+);
 
-function createStaticResolver(assetReader: PreparedAssetReader): StaticResolver {
+function createStaticResolver(
+	assetReader: PreparedAssetReader,
+): StaticResolver {
 	return new StaticResolverRouter({
 		landblockEnvCellsResolver: new LandblockEnvCellsResolver({
 			assetService: assetReader,

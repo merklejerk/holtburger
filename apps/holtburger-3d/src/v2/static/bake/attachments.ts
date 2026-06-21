@@ -24,9 +24,7 @@ function mergeStaticBakeBatchAttachments(
 	};
 }
 
-export class CompositeStaticBakeAttachmentProvider
-	implements StaticBakeAttachmentProvider
-{
+export class CompositeStaticBakeAttachmentProvider implements StaticBakeAttachmentProvider {
 	readonly #providers: readonly StaticBakeAttachmentProvider[];
 
 	constructor(providers: readonly StaticBakeAttachmentProvider[]) {

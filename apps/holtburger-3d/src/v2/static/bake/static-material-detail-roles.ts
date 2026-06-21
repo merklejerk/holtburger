@@ -42,7 +42,9 @@ export function planStaticMaterialDetailRoles(options: {
 }): readonly StaticMaterialDetailRolePlan[] {
 	return options.detailRoles
 		.filter((role) => role.role !== "landscape")
-		.map((role) => createStaticMaterialDetailRolePlan(role, options.textureRefs));
+		.map((role) =>
+			createStaticMaterialDetailRolePlan(role, options.textureRefs),
+		);
 }
 
 export function composeStaticMaterialDetailRole(options: {
@@ -152,7 +154,10 @@ function createStaticMaterialDetailRolePlan(
 
 	const textureRef = findStaticSurfaceTextureRef(textureRefs, role.texture);
 	const renderSurface = textureRef?.renderSurface ?? null;
-	if (!renderSurface || !findStaticRenderSurfaceRef(textureRefs, renderSurface)) {
+	if (
+		!renderSurface ||
+		!findStaticRenderSurfaceRef(textureRefs, renderSurface)
+	) {
 		return {
 			dataUse: null,
 			fadeFar: role.fadeFar,

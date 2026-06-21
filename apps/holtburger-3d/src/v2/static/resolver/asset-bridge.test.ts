@@ -216,7 +216,9 @@ describe("V2 static resolver asset bridge", () => {
 	it("dedupes identical prepared asset requests before crossing the worker bridge", async () => {
 		const channel = new FixtureWorkerChannel();
 		const key = createHostAssetKey("landblock-outdoor", 0xda55ffff);
-		const assetReader = new DeferredPreparedAssetReader(createPreparedAsset(key));
+		const assetReader = new DeferredPreparedAssetReader(
+			createPreparedAsset(key),
+		);
 		const bridge = createStaticResolverMainAssetBridge(
 			channel.mainPort,
 			assetReader,

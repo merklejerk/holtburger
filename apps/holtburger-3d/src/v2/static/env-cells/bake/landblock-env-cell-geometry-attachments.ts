@@ -11,9 +11,7 @@ import type {
 	StaticBakeBatchAttachments,
 } from "../../contracts";
 
-export class LandblockEnvCellGeometryAttachmentProvider
-	implements StaticBakeAttachmentProvider
-{
+export class LandblockEnvCellGeometryAttachmentProvider implements StaticBakeAttachmentProvider {
 	readonly #assetReader: PreparedAssetReader;
 
 	constructor(options: { readonly assetReader: PreparedAssetReader }) {
@@ -62,14 +60,12 @@ export class LandblockEnvCellGeometryAttachmentProvider
 	}
 }
 
-export function createEnvCellCellStructureGeometryIdentity(
-	options: {
-		readonly envCell: Pick<
-			LandblockEnvCellStaticFacts,
-			"cellStructure" | "environment" | "identity" | "landblockId"
-		>;
-	},
-): EnvCellCellStructureGeometryIdentity {
+export function createEnvCellCellStructureGeometryIdentity(options: {
+	readonly envCell: Pick<
+		LandblockEnvCellStaticFacts,
+		"cellStructure" | "environment" | "identity" | "landblockId"
+	>;
+}): EnvCellCellStructureGeometryIdentity {
 	return {
 		cellStructure: options.envCell.cellStructure,
 		envCell: options.envCell.identity,
@@ -103,7 +99,10 @@ function collectEnvCellGeometryIdentities(
 
 		for (const envCell of item.payload.scope.envCells) {
 			const identity = createEnvCellCellStructureGeometryIdentity({ envCell });
-			byKey.set(describeEnvCellCellStructureGeometryIdentity(identity), identity);
+			byKey.set(
+				describeEnvCellCellStructureGeometryIdentity(identity),
+				identity,
+			);
 		}
 	}
 
@@ -117,9 +116,9 @@ function collectEnvCellGeometryIdentities(
 function collectLandblockIds(
 	identities: readonly EnvCellCellStructureGeometryIdentity[],
 ): readonly number[] {
-	return [
-		...new Set(identities.map((identity) => identity.landblockId)),
-	].sort((left, right) => left - right);
+	return [...new Set(identities.map((identity) => identity.landblockId))].sort(
+		(left, right) => left - right,
+	);
 }
 
 function createFullEnvCellsByIdentity(

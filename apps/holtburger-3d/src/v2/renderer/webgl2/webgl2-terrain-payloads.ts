@@ -94,9 +94,7 @@ export function prepareTerrainLayeredPayloadState(
 
 export function createTerrainPreparedLayeredPayload(): TerrainPreparedLayeredPayload {
 	return {
-		colorPages: createTerrainRolePageScratch(
-			MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
-		),
+		colorPages: createTerrainRolePageScratch(MAX_TERRAIN_COLOR_PAGES_PER_DRAW),
 		detail: {
 			atlasRect: new Float32Array(DEFAULT_TEXTURE_RECT),
 			atlasSize: new Float32Array([1, 1]),
@@ -252,7 +250,9 @@ function createTerrainLayerRectScratch(): TerrainPreparedLayerRects {
 	};
 }
 
-function resetTerrainLayeredPayload(target: TerrainPreparedLayeredPayload): void {
+function resetTerrainLayeredPayload(
+	target: TerrainPreparedLayeredPayload,
+): void {
 	resetTerrainRolePages(target.colorPages);
 	resetTerrainRolePages(target.maskPages);
 	resetTerrainLayerRects(target.layerRects);
@@ -266,7 +266,9 @@ function resetTerrainLayeredPayload(target: TerrainPreparedLayeredPayload): void
 	target.detail.tiling = 1;
 }
 
-function resetTerrainRolePages(rolePages: TerrainPreparedRolePageBindings): void {
+function resetTerrainRolePages(
+	rolePages: TerrainPreparedRolePageBindings,
+): void {
 	rolePages.textures.fill(null);
 	for (let slot = 0; slot < rolePages.textures.length; slot += 1) {
 		rolePages.sizes[slot * 2] = 1;
@@ -313,7 +315,10 @@ function collectTerrainPageBinding(
 		return false;
 	}
 	const pages = binding.rolePage.kind === "mask" ? maskPages : colorPages;
-	if (binding.rolePage.slot < 0 || binding.rolePage.slot >= pages.textures.length) {
+	if (
+		binding.rolePage.slot < 0 ||
+		binding.rolePage.slot >= pages.textures.length
+	) {
 		return false;
 	}
 	const existingTexture = pages.textures[binding.rolePage.slot] ?? null;
@@ -357,7 +362,10 @@ function fillTerrainLayerRects(
 			resolveBindingRect(bindings, layer.base),
 			layer.slot * 4,
 		);
-		target.baseColorPages[layer.slot] = resolveBindingPage(bindings, layer.base);
+		target.baseColorPages[layer.slot] = resolveBindingPage(
+			bindings,
+			layer.base,
+		);
 		target.baseTilings[layer.slot] = layer.base.tiling;
 		const overlayCount = Math.min(
 			layer.overlays.length,
@@ -413,7 +421,8 @@ function fillTerrainLayerRects(
 			if (!road) {
 				continue;
 			}
-			const index = layer.slot * TERRAIN_LAYERED_MAX_ROADS_PER_LAYER + roadIndex;
+			const index =
+				layer.slot * TERRAIN_LAYERED_MAX_ROADS_PER_LAYER + roadIndex;
 			target.roadMaskRects.set(
 				resolveBindingRect(bindings, road.alpha),
 				index * 4,

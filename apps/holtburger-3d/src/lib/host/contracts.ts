@@ -454,10 +454,12 @@ const envCellStaticMemberDtoSchema = z.object({
 	instanceBounds: preparedAabbDtoSchema,
 });
 
-const landblockEnvCellStaticMemberDtoSchema = envCellStaticMemberDtoSchema.omit({
-	instanceBounds: true,
-	sourceBounds: true,
-});
+const landblockEnvCellStaticMemberDtoSchema = envCellStaticMemberDtoSchema.omit(
+	{
+		instanceBounds: true,
+		sourceBounds: true,
+	},
+);
 
 const preparedEnvCellBvhItemDtoSchema = z.discriminatedUnion("kind", [
 	z.object({

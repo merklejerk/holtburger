@@ -120,13 +120,11 @@ export function planStructuredInteriorCellMaterials(options: {
 	return { entries, materialPlansBySurfaceId };
 }
 
-export function createStructuredInteriorTextureUseId(
-	options: {
-		readonly dataUse: Parameters<typeof createMaterialTextureDataUseKey>[0];
-		readonly work: ScheduledStaticWork;
-		readonly wrapMode: StaticMaterialTextureWrapMode;
-	},
-): string {
+export function createStructuredInteriorTextureUseId(options: {
+	readonly dataUse: Parameters<typeof createMaterialTextureDataUseKey>[0];
+	readonly work: ScheduledStaticWork;
+	readonly wrapMode: StaticMaterialTextureWrapMode;
+}): string {
 	return createStaticMaterialTextureUseId({
 		dataUse: options.dataUse,
 		textureUseNamespace: "structured-interior-texture",
@@ -277,8 +275,7 @@ export function createStructuredInteriorMaterialCoverageReport(options: {
 		buckets: [...bucketCounts.values()]
 			.sort(compareCoverageBuckets)
 			.map((bucket) => ({
-				family:
-					bucket.family === "unsupported" ? "unsupported" : bucket.family,
+				family: bucket.family === "unsupported" ? "unsupported" : bucket.family,
 				filteringMode: "none",
 				materialCount: bucket.materialIds.size,
 				outcome: bucket.outcome,
@@ -347,8 +344,9 @@ function createEmptyCoverageReport(
 function countRenderableEnvCells(
 	payload: LandblockEnvCellsStaticScopePayload,
 ): number {
-	return payload.envCells.filter((envCell) => envCell.renderGeometry.triangleCount > 0)
-		.length;
+	return payload.envCells.filter(
+		(envCell) => envCell.renderGeometry.triangleCount > 0,
+	).length;
 }
 
 function countSurfaceTriangles(
@@ -358,8 +356,10 @@ function countSurfaceTriangles(
 	return envCell.renderGeometry.triangles.filter(
 		(triangle) =>
 			triangle.surfaceId !== null &&
-			resolveStructuredInteriorMaterialSurfaceId(envCell, triangle.surfaceId) ===
-				surfaceId,
+			resolveStructuredInteriorMaterialSurfaceId(
+				envCell,
+				triangle.surfaceId,
+			) === surfaceId,
 	).length;
 }
 

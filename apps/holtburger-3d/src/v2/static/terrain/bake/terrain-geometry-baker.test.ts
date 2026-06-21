@@ -60,8 +60,7 @@ describe("V2 terrain geometry baker", () => {
 					drawUnitId: "7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
 					kind: "draw-unit-bounds",
 					owner: {
-						drawUnitId:
-							"7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
+						drawUnitId: "7:landblock:da55ffff:outdoor-terrain:terrain-geometry",
 						kind: "draw-unit",
 					},
 					triangleCount: 2,

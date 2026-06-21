@@ -7,7 +7,6 @@ import type {
 	RendererSnapshot,
 	RenderPassPlan,
 	PortalFrameEdgePlan,
-	PortalApertureGeometryResourcePlan,
 	PortalFrameNodePlan,
 	PortalFrameWorkPlan,
 	SceneDomainTargetKind,
@@ -30,6 +29,8 @@ import type {
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectRenderState,
 	StaticObjectSortMetadata,
+	StaticPortalApertureResource,
+	StaticPortalApertureRange,
 	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
 	TransitionApertureBatch,
@@ -100,7 +101,6 @@ const STATIC_OBJECT_DETAIL_TEXTURE_UNIT_BASE =
 const SOURCE_SCENE_COPY_COLOR_TEXTURE_UNIT = 0;
 const SOURCE_SCENE_COPY_DEPTH_TEXTURE_UNIT = 1;
 const DEBUG_OVERLAY_FLOATS_PER_VERTEX = 7;
-const PORTAL_APERTURE_FLOATS_PER_VERTEX = 3;
 // Visual-quality/perf tradeoff: sort only transparent statics close enough for
 // object-order artifacts to be obvious.
 const NEAR_TRANSPARENT_STATIC_SORT_DISTANCE = 16;
@@ -723,20 +723,27 @@ class Webgl2Renderer implements Renderer {
 		string,
 		TransitionApertureGeometryResource
 	>();
+	readonly #portalApertureResources = new Map<
+		string,
+		PortalApertureGeometryResource
+	>();
+	readonly #portalApertureRangesById = new Map<
+		string,
+		PortalApertureRangeResource
+	>();
 	readonly #textures = new Map<string, WebGLTexture>();
 	readonly #textureBindings = new Map<
 		string,
 		Map<string, TextureDrawUnitBinding>
 	>();
 	readonly #warnedLayeredFallbackDrawUnitIds = new Set<string>();
+	readonly #warnedMissingPortalApertureRangeIds = new Set<string>();
 	readonly #terrainProgram: TerrainGeometryProgram;
 	readonly #staticObjectProgram: StaticObjectGeometryProgram;
 	readonly #debugOverlayProgram: DebugOverlayProgram;
 	readonly #transitionCompositeProgram: TransitionApertureCompositeProgram;
 	readonly #sourceSceneCopyProgram: SourceSceneCopyProgram;
 	readonly #sourceSceneCopyVertexArray: WebGLVertexArrayObject;
-	readonly #portalApertureVertexArray: WebGLVertexArrayObject;
-	readonly #portalApertureVertexBuffer: WebGLBuffer;
 	readonly #debugOverlayVertexArray: WebGLVertexArrayObject;
 	readonly #debugOverlayVertexBuffer: WebGLBuffer;
 	readonly #stateCache: Webgl2StateCache;
@@ -784,30 +791,27 @@ class Webgl2Renderer implements Renderer {
 		this.#sourceSceneCopyProgram = createSourceSceneCopyProgram(gl);
 		this.#stateCache = new Webgl2StateCache(gl);
 		const sourceSceneCopyVertexArray = gl.createVertexArray();
-		const portalApertureVertexArray = gl.createVertexArray();
-		const portalApertureVertexBuffer = gl.createBuffer();
 		const vertexArray = gl.createVertexArray();
 		const vertexBuffer = gl.createBuffer();
 		if (
 			!sourceSceneCopyVertexArray ||
-			!portalApertureVertexArray ||
-			!portalApertureVertexBuffer ||
 			!vertexArray ||
 			!vertexBuffer
 		) {
 			throw new Error("Failed to create V2 renderer scratch resources.");
 		}
 		this.#sourceSceneCopyVertexArray = sourceSceneCopyVertexArray;
-		this.#portalApertureVertexArray = portalApertureVertexArray;
-		this.#portalApertureVertexBuffer = portalApertureVertexBuffer;
 		this.#debugOverlayVertexArray = vertexArray;
 		this.#debugOverlayVertexBuffer = vertexBuffer;
-		this.#configurePortalApertureVertexArray();
 		this.#configureDebugOverlayVertexArray();
 		this.#startFrameLoop();
 	}
 
 	applyStaticDelta(delta: StaticResidencyDelta): void {
+		for (const apertureResourceId of delta.removedPortalApertureResourceIds ??
+			[]) {
+			this.#removePortalApertureResource(apertureResourceId);
+		}
 		for (const apertureBatchId of delta.removedTransitionApertureBatchIds) {
 			const resource = this.#transitionApertureResources.get(apertureBatchId);
 			if (!resource) {
@@ -858,9 +862,28 @@ class Webgl2Renderer implements Renderer {
 				createTransitionApertureGeometryResource(this.#gl, batch),
 			);
 		}
+		for (const resource of delta.addedPortalApertureResources ?? []) {
+			this.#removePortalApertureResource(resource.apertureResourceId);
+			const geometryResource = createPortalApertureGeometryResource(
+				this.#gl,
+				resource,
+			);
+			this.#portalApertureResources.set(
+				resource.apertureResourceId,
+				geometryResource,
+			);
+			for (const range of geometryResource.ranges) {
+				this.#portalApertureRangesById.set(range.rangeId, {
+					range,
+					resource: geometryResource,
+				});
+			}
+		}
 		if (
 			delta.addedDrawUnits.length > 0 ||
+			(delta.addedPortalApertureResources ?? []).length > 0 ||
 			delta.addedTransitionApertureBatches.length > 0 ||
+			(delta.removedPortalApertureResourceIds ?? []).length > 0 ||
 			delta.removedTransitionApertureBatchIds.length > 0
 		) {
 			this.#stateCache.invalidate();
@@ -1009,6 +1032,9 @@ class Webgl2Renderer implements Renderer {
 		for (const resource of this.#transitionApertureResources.values()) {
 			resource.dispose();
 		}
+		for (const resource of this.#portalApertureResources.values()) {
+			resource.dispose();
+		}
 		for (const texture of this.#textures.values()) {
 			this.#gl.deleteTexture(texture);
 		}
@@ -1018,19 +1044,20 @@ class Webgl2Renderer implements Renderer {
 		this.#structuredInteriorResourceIdsByEnvCellKey.clear();
 		this.#envCellStaticObjectResourceIdsByEnvCellKey.clear();
 		this.#transitionApertureResources.clear();
-		this.#textures.clear();
-		this.#textureBindings.clear();
-		this.#warnedLayeredFallbackDrawUnitIds.clear();
-		this.#terrainProgram.dispose();
+		this.#portalApertureResources.clear();
+			this.#portalApertureRangesById.clear();
+			this.#textures.clear();
+			this.#textureBindings.clear();
+			this.#warnedLayeredFallbackDrawUnitIds.clear();
+			this.#warnedMissingPortalApertureRangeIds.clear();
+			this.#terrainProgram.dispose();
 		this.#staticObjectProgram.dispose();
 		this.#debugOverlayProgram.dispose();
 		this.#transitionCompositeProgram.dispose();
 		this.#sourceSceneCopyProgram.dispose();
 		this.#sceneDomainTargets?.dispose();
 		this.#sceneDomainTargets = null;
-		this.#gl.deleteBuffer(this.#portalApertureVertexBuffer);
 		this.#gl.deleteBuffer(this.#debugOverlayVertexBuffer);
-		this.#gl.deleteVertexArray(this.#portalApertureVertexArray);
 		this.#gl.deleteVertexArray(this.#debugOverlayVertexArray);
 		this.#gl.deleteVertexArray(this.#sourceSceneCopyVertexArray);
 		this.#telemetryListeners.clear();
@@ -1673,12 +1700,6 @@ class Webgl2Renderer implements Renderer {
 		aspectRatio: number,
 	): number {
 		const gl = this.#gl;
-		const apertureResourcesById = new Map(
-			plan.graph.apertureResources.map((resource) => [
-				resource.resourceId,
-				resource,
-			]),
-		);
 		const nodesById = new Map(
 			plan.graph.nodes.map((node) => [node.nodeId, node] as const),
 		);
@@ -1690,7 +1711,6 @@ class Webgl2Renderer implements Renderer {
 		let drawCalls = 0;
 		if (baseNode.scene.kind === "outdoor-target") {
 			drawCalls += this.#executeDirectEnvCellPortalGraphChildren({
-				apertureResourcesById,
 				aspectRatio,
 				edgesByParentNodeId,
 				nodesById,
@@ -1702,7 +1722,6 @@ class Webgl2Renderer implements Renderer {
 			);
 			drawCalls += this.#drawPortalFrameNodeResources(baseNode, aspectRatio);
 			drawCalls += this.#executeDirectEnvCellPortalGraphChildren({
-				apertureResourcesById,
 				aspectRatio,
 				edgesByParentNodeId,
 				nodesById,
@@ -1717,10 +1736,6 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	#executeDirectEnvCellPortalGraphChildren(options: {
-		readonly apertureResourcesById: ReadonlyMap<
-			string,
-			PortalApertureGeometryResourcePlan
-		>;
 		readonly aspectRatio: number;
 		readonly edgesByParentNodeId: ReadonlyMap<
 			number,
@@ -1741,17 +1756,18 @@ class Webgl2Renderer implements Renderer {
 			}
 			let enteredMaskCount = 0;
 			for (const edge of group.edges) {
-				const apertureResource = options.apertureResourcesById.get(
+				const apertureRange = this.#portalApertureRangesById.get(
 					edge.apertureResourceId,
 				);
-				if (!apertureResource) {
+				if (!apertureRange) {
+					this.#warnMissingPortalApertureRange(edge);
 					continue;
 				}
 				this.#drawPortalApertureStencilMask(
 					"enter",
 					options.parentNode,
 					childNode,
-					apertureResource,
+					apertureRange,
 					{ aspectRatio: options.aspectRatio },
 				);
 				enteredMaskCount += 1;
@@ -1778,17 +1794,18 @@ class Webgl2Renderer implements Renderer {
 				parentNode: childNode,
 			});
 			for (const edge of group.edges.toReversed()) {
-				const apertureResource = options.apertureResourcesById.get(
+				const apertureRange = this.#portalApertureRangesById.get(
 					edge.apertureResourceId,
 				);
-				if (!apertureResource) {
+				if (!apertureRange) {
+					this.#warnMissingPortalApertureRange(edge);
 					continue;
 				}
 				this.#drawPortalApertureStencilMask(
 					"exit",
 					options.parentNode,
 					childNode,
-					apertureResource,
+					apertureRange,
 					{ aspectRatio: options.aspectRatio },
 				);
 			}
@@ -1830,14 +1847,13 @@ class Webgl2Renderer implements Renderer {
 		operation: "enter" | "exit",
 		parentNode: PortalFrameNodePlan,
 		childNode: PortalFrameNodePlan,
-		resource: PortalApertureGeometryResourcePlan,
+		apertureRange: PortalApertureRangeResource,
 		options: { readonly aspectRatio: number },
 	): void {
-		if (resource.vertices.length === 0) {
+		if (apertureRange.range.indexCount === 0) {
 			return;
 		}
 		const gl = this.#gl;
-		const positions = new Float32Array(resource.vertices.flat());
 		gl.colorMask(false, false, false, false);
 		try {
 			this.#stateCache.useProgram(this.#transitionCompositeProgram.program);
@@ -1863,16 +1879,23 @@ class Webgl2Renderer implements Renderer {
 				false,
 				createModelViewProjectionMatrix(this.#frameState, options.aspectRatio),
 			);
+			const translation = this.#createLandblockTranslation(
+				apertureRange.resource.landblockId,
+			);
 			gl.uniform3f(
 				this.#transitionCompositeProgram.uniforms.uPlacementTranslation,
-				0,
-				0,
-				0,
+				translation[0],
+				translation[1],
+				translation[2],
 			);
-			this.#stateCache.bindVertexArray(this.#portalApertureVertexArray);
-			gl.bindBuffer(gl.ARRAY_BUFFER, this.#portalApertureVertexBuffer);
-			gl.bufferData(gl.ARRAY_BUFFER, positions, gl.DYNAMIC_DRAW);
-			gl.drawArrays(gl.TRIANGLES, 0, resource.vertices.length);
+			this.#stateCache.bindVertexArray(apertureRange.resource.vertexArray);
+			gl.drawElements(
+				gl.TRIANGLES,
+				apertureRange.range.indexCount,
+				apertureRange.resource.indexType,
+				apertureRange.range.firstIndex *
+					getIndexElementByteSize(apertureRange.resource.indexType, gl),
+			);
 		} finally {
 			gl.colorMask(true, true, true, true);
 		}
@@ -2272,6 +2295,34 @@ class Webgl2Renderer implements Renderer {
 		}
 	}
 
+	#removePortalApertureResource(apertureResourceId: string): void {
+		const resource = this.#portalApertureResources.get(apertureResourceId);
+		if (!resource) {
+			return;
+		}
+		for (const range of resource.ranges) {
+			this.#portalApertureRangesById.delete(range.rangeId);
+		}
+		resource.dispose();
+		this.#portalApertureResources.delete(apertureResourceId);
+	}
+
+	#warnMissingPortalApertureRange(edge: PortalFrameEdgePlan): void {
+		if (this.#warnedMissingPortalApertureRangeIds.has(edge.apertureResourceId)) {
+			return;
+		}
+		this.#warnedMissingPortalApertureRangeIds.add(edge.apertureResourceId);
+		console.error(
+			`Direct portal edge ${edge.linkId} references missing portal aperture range ${edge.apertureResourceId}; dropping mask draw.`,
+			{
+				apertureSourceId: edge.apertureSourceId,
+				childNodeId: edge.childNodeId,
+				parentNodeId: edge.parentNodeId,
+				sourceKind: edge.sourceKind,
+			},
+		);
+	}
+
 	#warnTerrainLayeredFallback(resource: TerrainGeometryResource): void {
 		if (this.#warnedLayeredFallbackDrawUnitIds.has(resource.drawUnitId)) {
 			return;
@@ -2403,18 +2454,6 @@ class Webgl2Renderer implements Renderer {
 		this.#stateCache.invalidate();
 	}
 
-	#configurePortalApertureVertexArray(): void {
-		const gl = this.#gl;
-		gl.bindVertexArray(this.#portalApertureVertexArray);
-		gl.bindBuffer(gl.ARRAY_BUFFER, this.#portalApertureVertexBuffer);
-		const stride =
-			PORTAL_APERTURE_FLOATS_PER_VERTEX * Float32Array.BYTES_PER_ELEMENT;
-		gl.enableVertexAttribArray(0);
-		gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
-		gl.bindVertexArray(null);
-		gl.bindBuffer(gl.ARRAY_BUFFER, null);
-		this.#stateCache.invalidate();
-	}
 }
 
 interface TerrainGeometryProgram {
@@ -2599,6 +2638,23 @@ interface TransitionApertureGeometryResource {
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	dispose(): void;
+}
+
+interface PortalApertureGeometryResource {
+	readonly vertexArray: WebGLVertexArrayObject;
+	readonly positionBuffer: WebGLBuffer;
+	readonly indexBuffer: WebGLBuffer;
+	readonly apertureResourceId: string;
+	readonly landblockId: number;
+	readonly ranges: readonly StaticPortalApertureRange[];
+	readonly indexCount: number;
+	readonly indexType: GLenum;
+	dispose(): void;
+}
+
+interface PortalApertureRangeResource {
+	readonly resource: PortalApertureGeometryResource;
+	readonly range: StaticPortalApertureRange;
 }
 
 interface SceneDomainTargets {
@@ -3556,6 +3612,95 @@ function createTransitionApertureIndexBuffer(
 		: new Uint32Array(batch.indices);
 }
 
+function createPortalApertureGeometryResource(
+	gl: WebGL2RenderingContext,
+	resource: StaticPortalApertureResource,
+): PortalApertureGeometryResource {
+	const vertexArray = gl.createVertexArray();
+	const positionBuffer = gl.createBuffer();
+	const indexBuffer = gl.createBuffer();
+	if (!vertexArray || !positionBuffer || !indexBuffer) {
+		if (vertexArray) {
+			gl.deleteVertexArray(vertexArray);
+		}
+		if (positionBuffer) {
+			gl.deleteBuffer(positionBuffer);
+		}
+		if (indexBuffer) {
+			gl.deleteBuffer(indexBuffer);
+		}
+		throw new Error(
+			`Failed to create GPU buffers for portal aperture resource ${resource.apertureResourceId}.`,
+		);
+	}
+
+	gl.bindVertexArray(vertexArray);
+	gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+	gl.bufferData(
+		gl.ARRAY_BUFFER,
+		createStaticVec3PositionBuffer(resource.vertices),
+		gl.STATIC_DRAW,
+	);
+	gl.enableVertexAttribArray(0);
+	gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+
+	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+	gl.bufferData(
+		gl.ELEMENT_ARRAY_BUFFER,
+		createPortalApertureIndexBuffer(resource),
+		gl.STATIC_DRAW,
+	);
+	gl.bindVertexArray(null);
+	gl.bindBuffer(gl.ARRAY_BUFFER, null);
+	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+
+	return {
+		apertureResourceId: resource.apertureResourceId,
+		indexBuffer,
+		indexCount: resource.indices.length,
+		indexType:
+			getPortalApertureIndexType(resource) === "uint16"
+				? gl.UNSIGNED_SHORT
+				: gl.UNSIGNED_INT,
+		landblockId: resource.landblockId,
+		positionBuffer,
+		ranges: resource.ranges,
+		vertexArray,
+		dispose() {
+			gl.deleteBuffer(positionBuffer);
+			gl.deleteBuffer(indexBuffer);
+			gl.deleteVertexArray(vertexArray);
+		},
+	};
+}
+
+function createPortalApertureIndexBuffer(
+	resource: StaticPortalApertureResource,
+): Uint16Array | Uint32Array {
+	return getPortalApertureIndexType(resource) === "uint16"
+		? new Uint16Array(resource.indices)
+		: new Uint32Array(resource.indices);
+}
+
+function getPortalApertureIndexType(
+	resource: StaticPortalApertureResource,
+): "uint16" | "uint32" {
+	return resource.vertices.length > 0xffff ? "uint32" : "uint16";
+}
+
+function getIndexElementByteSize(
+	indexType: GLenum,
+	gl: WebGL2RenderingContext,
+): number {
+	if (indexType === gl.UNSIGNED_SHORT) {
+		return Uint16Array.BYTES_PER_ELEMENT;
+	}
+	if (indexType === gl.UNSIGNED_INT) {
+		return Uint32Array.BYTES_PER_ELEMENT;
+	}
+	throw new Error(`Unsupported portal aperture index type ${indexType}.`);
+}
+
 function getTransitionApertureIndexType(
 	batch: TransitionApertureBatch,
 ): "uint16" | "uint32" {
@@ -3565,13 +3710,15 @@ function getTransitionApertureIndexType(
 function createTransitionAperturePositionBuffer(
 	batch: TransitionApertureBatch,
 ): Float32Array {
-	const positions = new Float32Array(batch.vertices.length * 3);
-	for (
-		let vertexIndex = 0;
-		vertexIndex < batch.vertices.length;
-		vertexIndex += 1
-	) {
-		const vertex = batch.vertices[vertexIndex];
+	return createStaticVec3PositionBuffer(batch.vertices);
+}
+
+function createStaticVec3PositionBuffer(
+	vertices: readonly { readonly x: number; readonly y: number; readonly z: number }[],
+): Float32Array {
+	const positions = new Float32Array(vertices.length * 3);
+	for (let vertexIndex = 0; vertexIndex < vertices.length; vertexIndex += 1) {
+		const vertex = vertices[vertexIndex];
 		const offset = vertexIndex * 3;
 		positions[offset] = vertex.x;
 		positions[offset + 1] = vertex.y;

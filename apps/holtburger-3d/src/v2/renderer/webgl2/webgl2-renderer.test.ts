@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
 	StaticObjectGeometryStaticDrawUnit,
+	StaticPortalApertureResource,
 	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
 	TransitionApertureBatch,
@@ -425,109 +426,118 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
 
-		renderer.applyStaticDelta({
-			addedDrawUnits: [
-				createStructuredInteriorDrawUnit({
-					drawUnitId: "structured-root",
-					envCellId: 0xda550100,
+			renderer.applyStaticDelta({
+				addedDrawUnits: [
+					createStructuredInteriorDrawUnit({
+						drawUnitId: "structured-root",
+						envCellId: 0xda550100,
 				}),
 				createStructuredInteriorDrawUnit({
 					drawUnitId: "structured-child",
-					envCellId: 0xda550101,
-				}),
-			],
-			addedTransitionApertureBatches: [],
-			removedDrawUnitIds: [],
-			removedTransitionApertureBatchIds: [],
-			revision: 1,
-		});
-		renderer.setPortalFrameWorkPlan(
-			createDirectEnvCellPortalFrameWorkPlan({
-				apertureResources: [
-				{
-						resourceId: "portal-aperture:a-to-b",
-						sourceKinds: ["env-cell-portal"],
-						vertices: [
-							[0, 0, 0],
-							[1, 0, 0],
-							[0, 1, 0],
+						envCellId: 0xda550101,
+					}),
+				],
+				addedPortalApertureResources: [
+					createPortalApertureResource({
+						apertureResourceId: "portal-aperture-resource:env-cell:test",
+						ranges: [
+							{
+								rangeId: "portal-aperture:a-to-b",
+								sourceId: "env-cell-portal:0xda55ffff:0xda550100:portal-a",
+								sourceKind: "env-cell-portal",
+							},
+							{
+								rangeId: "portal-aperture:a-to-b-side",
+								sourceId:
+									"env-cell-portal:0xda55ffff:0xda550100:portal-a-side",
+								sourceKind: "env-cell-portal",
+							},
 						],
-				},
-				{
-						resourceId: "portal-aperture:a-to-b-side",
-						sourceKinds: ["env-cell-portal"],
-						vertices: [
-							[2, 0, 0],
-							[3, 0, 0],
-							[2, 1, 0],
-						],
-				},
-			],
+					}),
+				],
+				addedTransitionApertureBatches: [],
+				removedDrawUnitIds: [],
+				removedPortalApertureResourceIds: [],
+				removedTransitionApertureBatchIds: [],
+				revision: 1,
+			});
+			renderer.setPortalFrameWorkPlan(
+				createDirectEnvCellPortalFrameWorkPlan({
+					apertureResources: [
+						{
+							resourceId: "portal-aperture:a-to-b",
+							sourceKinds: ["env-cell-portal"],
+						},
+						{
+							resourceId: "portal-aperture:a-to-b-side",
+							sourceKinds: ["env-cell-portal"],
+						},
+					],
 				baseScene: {
 					envCellId: 0xda550100,
 					kind: "env-cell-direct",
 					landblockId: 0xda55ffff,
 				},
 				edges: [
-				{
-						apertureResourceId: "portal-aperture:a-to-b",
-						apertureSourceId:
-							"env-cell-portal:0xda55ffff:0xda550100:portal-a",
+						{
+							apertureResourceId: "portal-aperture:a-to-b",
+							apertureSourceId:
+								"env-cell-portal:0xda55ffff:0xda550100:portal-a",
 						childNodeId: 1,
 						edgeId: 0,
-						linkId: "a-to-b",
-						parentNodeId: 0,
-						sourceKind: "env-cell-portal",
-				},
-				{
-						apertureResourceId: "portal-aperture:a-to-b-side",
-						apertureSourceId:
-							"env-cell-portal:0xda55ffff:0xda550100:portal-a-side",
+							linkId: "a-to-b",
+							parentNodeId: 0,
+							sourceKind: "env-cell-portal",
+						},
+						{
+							apertureResourceId: "portal-aperture:a-to-b-side",
+							apertureSourceId:
+								"env-cell-portal:0xda55ffff:0xda550100:portal-a-side",
 						childNodeId: 1,
 						edgeId: 1,
-						linkId: "a-to-b-side",
-						parentNodeId: 0,
-						sourceKind: "env-cell-portal",
-				},
-			],
+							linkId: "a-to-b-side",
+							parentNodeId: 0,
+							sourceKind: "env-cell-portal",
+						},
+					],
 				nodes: [
-				{
-						debugStackLabel: "root",
-						incomingEdgeIds: [],
-						nodeId: 0,
+						{
+							debugStackLabel: "root",
+							incomingEdgeIds: [],
+							nodeId: 0,
 						parentNodeId: null,
 						resources: {
 							envCellStaticObjectDrawUnitIds: [],
 							resourceState: "ready",
 							structuredInteriorDrawUnitIds: ["structured-root"],
 						},
-						scene: {
-						envCellId: 0xda550100,
-						kind: "env-cell-direct",
-						landblockId: 0xda55ffff,
-					},
-						traversalDepth: 0,
-				},
-				{
-						debugStackLabel: "root/a-to-b",
-						incomingEdgeIds: [0, 1],
-						nodeId: 1,
+							scene: {
+								envCellId: 0xda550100,
+								kind: "env-cell-direct",
+								landblockId: 0xda55ffff,
+							},
+							traversalDepth: 0,
+						},
+						{
+							debugStackLabel: "root/a-to-b",
+							incomingEdgeIds: [0, 1],
+							nodeId: 1,
 						parentNodeId: 0,
 						resources: {
 							envCellStaticObjectDrawUnitIds: [],
 							resourceState: "ready",
 							structuredInteriorDrawUnitIds: ["structured-child"],
 						},
-						scene: {
-						envCellId: 0xda550101,
-						kind: "env-cell-direct",
-						landblockId: 0xda55ffff,
-					},
-						traversalDepth: 1,
-				},
-			],
-			}),
-		);
+							scene: {
+								envCellId: 0xda550101,
+								kind: "env-cell-direct",
+								landblockId: 0xda55ffff,
+							},
+							traversalDepth: 1,
+						},
+					],
+				}),
+			);
 
 		gl.drawArraysCalls.length = 0;
 		gl.drawElementsCalls.length = 0;
@@ -535,13 +545,13 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		gl.stencilOpCalls.length = 0;
 		pendingFrame?.(16);
 
-		expect(gl.drawElementsCalls).toHaveLength(2);
-		expect(gl.drawArraysCalls).toEqual([
-			{ count: 3, first: 0, mode: gl.TRIANGLES },
-			{ count: 3, first: 0, mode: gl.TRIANGLES },
-			{ count: 3, first: 0, mode: gl.TRIANGLES },
-			{ count: 3, first: 0, mode: gl.TRIANGLES },
-		]);
+			expect(gl.drawElementsCalls).toEqual(
+				expect.arrayContaining([
+					{ count: 3, mode: gl.TRIANGLES, type: gl.UNSIGNED_SHORT },
+				]),
+			);
+			expect(gl.drawElementsCalls).toHaveLength(6);
+			expect(gl.drawArraysCalls).toEqual([]);
 		expect(gl.stencilFuncCalls).toEqual(
 			expect.arrayContaining([
 				{ func: gl.ALWAYS, mask: 0xff, ref: 1 },
@@ -573,85 +583,95 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		vi.stubGlobal("window", { devicePixelRatio: 1 });
 		const renderer = createWebgl2Renderer(canvas);
 
-		renderer.applyStaticDelta({
-			addedDrawUnits: [
-				createTerrainDrawUnit(),
-				createStructuredInteriorDrawUnit({
-					drawUnitId: "structured-transition-root",
-					envCellId: 0xda550100,
-				}),
-			],
-			addedTransitionApertureBatches: [],
-			removedDrawUnitIds: [],
-			removedTransitionApertureBatchIds: [],
-			revision: 1,
-		});
-		renderer.setPortalFrameWorkPlan(
-			createDirectEnvCellPortalFrameWorkPlan({
-				apertureResources: [
-				{
-						resourceId: "transition-aperture:root",
-						sourceKinds: ["building-transition"],
-						vertices: [
-							[0, 0, 0],
-							[1, 0, 0],
-							[0, 1, 0],
+			renderer.applyStaticDelta({
+				addedDrawUnits: [
+					createTerrainDrawUnit(),
+					createStructuredInteriorDrawUnit({
+						drawUnitId: "structured-transition-root",
+						envCellId: 0xda550100,
+					}),
+				],
+				addedPortalApertureResources: [
+					createPortalApertureResource({
+						apertureResourceId: "portal-aperture-resource:transition:test",
+						ranges: [
+							{
+								rangeId: "transition-aperture:root",
+								sourceId:
+									"building-transition:transition-aperture-batch:da55ffff:transition-portal:0",
+								sourceKind: "building-transition",
+							},
 						],
-				},
-			],
+						sourceDomain: "outdoor-buildings",
+					}),
+				],
+				addedTransitionApertureBatches: [],
+				removedDrawUnitIds: [],
+				removedPortalApertureResourceIds: [],
+				removedTransitionApertureBatchIds: [],
+				revision: 1,
+			});
+			renderer.setPortalFrameWorkPlan(
+				createDirectEnvCellPortalFrameWorkPlan({
+					apertureResources: [
+						{
+							resourceId: "transition-aperture:root",
+							sourceKinds: ["building-transition"],
+						},
+					],
 				baseScene: {
 					kind: "outdoor-target",
 					landblockId: 0xda55ffff,
 				},
 				edges: [
-				{
-						apertureResourceId: "transition-aperture:root",
-						apertureSourceId:
-							"building-transition:transition-aperture-batch:da55ffff:transition-portal:0",
+						{
+							apertureResourceId: "transition-aperture:root",
+							apertureSourceId:
+								"building-transition:transition-aperture-batch:da55ffff:transition-portal:0",
 						childNodeId: 1,
 						edgeId: 0,
-						linkId: "transition-root",
-						parentNodeId: 0,
-						sourceKind: "building-transition",
-				},
-			],
+							linkId: "transition-root",
+							parentNodeId: 0,
+							sourceKind: "building-transition",
+						},
+					],
 				nodes: [
-				{
-						debugStackLabel: "outdoor-root",
-						incomingEdgeIds: [],
-						nodeId: 0,
+						{
+							debugStackLabel: "outdoor-root",
+							incomingEdgeIds: [],
+							nodeId: 0,
 						parentNodeId: null,
 						resources: {
 							envCellStaticObjectDrawUnitIds: [],
 							resourceState: "not-applicable",
 							structuredInteriorDrawUnitIds: [],
 						},
-						scene: {
-						kind: "outdoor-target",
-						landblockId: 0xda55ffff,
-					},
-						traversalDepth: 0,
-				},
-				{
-						debugStackLabel: "transition-root",
-						incomingEdgeIds: [0],
-						nodeId: 1,
+							scene: {
+								kind: "outdoor-target",
+								landblockId: 0xda55ffff,
+							},
+							traversalDepth: 0,
+						},
+						{
+							debugStackLabel: "transition-root",
+							incomingEdgeIds: [0],
+							nodeId: 1,
 						parentNodeId: 0,
 						resources: {
 							envCellStaticObjectDrawUnitIds: [],
 							resourceState: "ready",
 							structuredInteriorDrawUnitIds: ["structured-transition-root"],
 						},
-						scene: {
-						envCellId: 0xda550100,
-						kind: "env-cell-direct",
-						landblockId: 0xda55ffff,
-					},
-					traversalDepth: 1,
-				},
-			],
-			}),
-		);
+							scene: {
+								envCellId: 0xda550100,
+								kind: "env-cell-direct",
+								landblockId: 0xda55ffff,
+							},
+							traversalDepth: 1,
+						},
+					],
+				}),
+			);
 
 		pendingFrame?.(16);
 
@@ -662,7 +682,12 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			exteriorDrawCalls: 1,
 			interiorDrawCalls: 0,
 		});
-		expect(latestSnapshot.directEnvCellDrawCalls).toBe(1);
+			expect(latestSnapshot.directEnvCellDrawCalls).toBe(1);
+			expect(gl.drawElementsCalls).toEqual(
+				expect.arrayContaining([
+					{ count: 3, mode: gl.TRIANGLES, type: gl.UNSIGNED_SHORT },
+				]),
+			);
 		expect(gl.stencilFuncCalls).toEqual(
 			expect.arrayContaining([
 				{ func: gl.ALWAYS, mask: 0xff, ref: 1 },
@@ -1198,6 +1223,43 @@ function createTransitionApertureBatch(): TransitionApertureBatch {
 			{ x: 1, y: 0, z: 0 },
 			{ x: 0, y: 1, z: 0 },
 		],
+	};
+}
+
+function createPortalApertureResource(options: {
+	readonly apertureResourceId: string;
+	readonly ranges: readonly {
+		readonly rangeId: string;
+		readonly sourceId: string;
+		readonly sourceKind: "building-transition" | "env-cell-portal";
+	}[];
+	readonly sourceDomain?: StaticPortalApertureResource["sourceDomain"];
+}): StaticPortalApertureResource {
+	return {
+		apertureResourceId: options.apertureResourceId,
+		coordinateSpace: "landblock-render-local",
+		indices: options.ranges.flatMap((_range, rangeIndex) => {
+			const firstVertex = rangeIndex * 3;
+			return [firstVertex, firstVertex + 1, firstVertex + 2];
+		}),
+		kind: "portal-aperture-resource",
+		landblockId: 0xda55ffff,
+		ranges: options.ranges.map((range, rangeIndex) => ({
+			firstIndex: rangeIndex * 3,
+			indexCount: 3,
+			rangeId: range.rangeId,
+			sourceId: range.sourceId,
+			sourceKind: range.sourceKind,
+		})),
+		sourceDomain: options.sourceDomain ?? "landblock-env-cells",
+		vertices: options.ranges.flatMap((_range, rangeIndex) => {
+			const offset = rangeIndex * 2;
+			return [
+				{ x: offset, y: 0, z: 0 },
+				{ x: offset + 1, y: 0, z: 0 },
+				{ x: offset, y: 1, z: 0 },
+			];
+		}),
 	};
 }
 

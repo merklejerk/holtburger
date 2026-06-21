@@ -191,11 +191,6 @@ describe("direct env-cell frame plan", () => {
 			{
 				resourceId: expect.stringMatching(/^portal-aperture:/),
 				sourceKinds: ["env-cell-portal"],
-				vertices: [
-					[0, 0, 0],
-					[1, 0, 0],
-					[0, 1, 0],
-				],
 			},
 		]);
 		expect(plan?.graph.edges).toEqual([

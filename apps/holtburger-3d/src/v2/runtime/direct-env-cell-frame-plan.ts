@@ -1,5 +1,4 @@
 import type {
-	PortalApertureVertex,
 	PortalFrameEdgePlan,
 	PortalFrameGraphPlan,
 	PortalFrameNodeId,
@@ -21,7 +20,12 @@ import type {
 	StaticSceneCameraResidency,
 } from "./static-scene-query";
 import { PortalApertureFrameResourceBuilder } from "./portal-aperture-frame-resources";
-import { createOutdoorLandblockRootTranslation } from "./static-placement";
+import {
+	createBuildingTransitionApertureRangeId,
+	createBuildingTransitionApertureSourceId,
+	createEnvCellPortalApertureRangeId,
+	createEnvCellPortalApertureSourceId,
+} from "../static/portal-aperture-resources";
 import type { EnvCellResourceMembership } from "./env-cell-resource-membership";
 
 type PortalAperture =
@@ -107,7 +111,6 @@ class PortalFrameGraphBuilder {
 		readonly linkId: string;
 		readonly parentNodeId: PortalFrameNodeId;
 		readonly sourceKind: PortalFrameEdgePlan["sourceKind"];
-		readonly vertices: readonly PortalApertureVertex[];
 	}): PortalFrameEdgePlan | null {
 		const apertureResourceId = this.#apertureBuilder.addEdgeResource({
 			apertureResourceId: input.apertureResourceId,
@@ -119,7 +122,6 @@ class PortalFrameGraphBuilder {
 			],
 			linkId: input.linkId,
 			sourceKind: input.sourceKind,
-			vertices: input.vertices,
 		});
 		if (!apertureResourceId) {
 			return null;
@@ -300,14 +302,6 @@ export function createOutdoorTransitionPortalFramePlan(
 		});
 
 		for (const range of root.ranges) {
-			const vertices = triangulateTransitionApertureRange(
-				range.batch,
-				range.range,
-				createOutdoorLandblockRootTranslation(
-					input.landblockId,
-					input.renderAnchorLandblockId,
-				),
-			);
 			graphBuilder.addEdge({
 				apertureSourceId: createBuildingTransitionApertureSourceId({
 					apertureBatchId: range.batch.apertureBatchId,
@@ -315,7 +309,7 @@ export function createOutdoorTransitionPortalFramePlan(
 					rangeFirstIndex: range.range.firstIndex,
 					rangeIndexCount: range.range.indexCount,
 				}),
-				apertureResourceId: createBuildingTransitionApertureResourceId({
+				apertureResourceId: createBuildingTransitionApertureRangeId({
 					apertureBatchId: range.batch.apertureBatchId,
 					portalId: range.range.portalId,
 					rangeFirstIndex: range.range.firstIndex,
@@ -335,7 +329,6 @@ export function createOutdoorTransitionPortalFramePlan(
 				}),
 				parentNodeId: baseNodeId,
 				sourceKind: "building-transition",
-				vertices,
 			});
 		}
 
@@ -498,19 +491,11 @@ function addEnvCellPortalEdges(options: {
 		const aperture = sourceEnvCell?.aperturesByPortalId.get(
 			edge.sourcePortalId,
 		);
-		if (!sourceEnvCell || !aperture) {
+		if (!sourceEnvCell || !aperture || aperture.points.length < 3) {
 			continue;
 		}
-		const vertices = triangulateEnvCellPortalAperture(
-			aperture.points,
-			sourceEnvCell.placementMatrix,
-			createOutdoorLandblockRootTranslation(
-				options.viewGroup.landblockId,
-				options.renderAnchorLandblockId,
-			),
-		);
 		options.graphBuilder.addEdge({
-			apertureResourceId: createEnvCellPortalApertureResourceId({
+			apertureResourceId: createEnvCellPortalApertureRangeId({
 				envCellId: edge.sourceEnvCellId,
 				landblockId: options.viewGroup.landblockId,
 				polygonId: aperture.polygonId,
@@ -534,7 +519,6 @@ function addEnvCellPortalEdges(options: {
 			linkId: edge.linkId,
 			parentNodeId: options.parentNodeId,
 			sourceKind: "env-cell-portal",
-			vertices,
 		});
 	}
 }
@@ -656,73 +640,6 @@ function createOutdoorTransitionChildDebugStackLabel(options: {
 	return `${options.transitionRootLabel}/${options.traversalStackLabel.slice(rootPrefix.length + 1)}`;
 }
 
-function triangulateEnvCellPortalAperture(
-	points: PortalAperture["points"],
-	matrix: Float32Array,
-	translation: readonly [number, number, number],
-): readonly PortalApertureVertex[] {
-	if (points.length < 3) {
-		return [];
-	}
-	const vertices: PortalApertureVertex[] = [];
-	for (let index = 1; index < points.length - 1; index += 1) {
-		vertices.push(
-			transformEnvCellPortalPoint(points[0], matrix, translation),
-			transformEnvCellPortalPoint(points[index], matrix, translation),
-			transformEnvCellPortalPoint(points[index + 1], matrix, translation),
-		);
-	}
-	return vertices;
-}
-
-function triangulateTransitionApertureRange(
-	batch: TransitionApertureBatch,
-	range: TransitionApertureBatch["ranges"][number],
-	translation: readonly [number, number, number],
-): readonly PortalApertureVertex[] {
-	const vertices: PortalApertureVertex[] = [];
-	for (let indexOffset = 0; indexOffset < range.indexCount; indexOffset += 1) {
-		const vertexIndex = batch.indices[range.firstIndex + indexOffset];
-		const vertex =
-			vertexIndex === undefined ? null : batch.vertices[vertexIndex];
-		if (!vertex) {
-			throw new Error(
-				`Transition aperture range ${range.portalId} references missing vertex ${vertexIndex}.`,
-			);
-		}
-		vertices.push([
-			vertex.x + translation[0],
-			vertex.y + translation[1],
-			vertex.z + translation[2],
-		]);
-	}
-	return vertices;
-}
-
-function transformEnvCellPortalPoint(
-	point: PortalAperture["points"][number],
-	matrix: Float32Array,
-	translation: readonly [number, number, number],
-): PortalApertureVertex {
-	return [
-		matrix[0] * point.x +
-			matrix[4] * point.y +
-			matrix[8] * point.z +
-			matrix[12] +
-			translation[0],
-		matrix[1] * point.x +
-			matrix[5] * point.y +
-			matrix[9] * point.z +
-			matrix[13] +
-			translation[1],
-		matrix[2] * point.x +
-			matrix[6] * point.y +
-			matrix[10] * point.z +
-			matrix[14] +
-			translation[2],
-	];
-}
-
 interface OutdoorTransitionRootGroup {
 	readonly envCellId: number;
 	readonly ranges: readonly OutdoorTransitionRangeRef[];
@@ -810,71 +727,5 @@ function createOutdoorTransitionLinkId(options: {
 		options.apertureBatchId,
 		options.portalId,
 		formatHex32(options.envCellId),
-	].join(":");
-}
-
-function createBuildingTransitionApertureSourceId(options: {
-	readonly apertureBatchId: string;
-	readonly portalId: string;
-	readonly rangeFirstIndex: number;
-	readonly rangeIndexCount: number;
-}): string {
-	return [
-		"building-transition",
-		options.apertureBatchId,
-		options.portalId,
-		options.rangeFirstIndex,
-		options.rangeIndexCount,
-	].join(":");
-}
-
-function createBuildingTransitionApertureResourceId(options: {
-	readonly apertureBatchId: string;
-	readonly portalId: string;
-	readonly rangeFirstIndex: number;
-	readonly rangeIndexCount: number;
-}): string {
-	return [
-		"portal-aperture",
-		"building-transition",
-		options.apertureBatchId,
-		options.portalId,
-		options.rangeFirstIndex,
-		options.rangeIndexCount,
-	].join(":");
-}
-
-function createEnvCellPortalApertureSourceId(options: {
-	readonly envCellId: number;
-	readonly landblockId: number;
-	readonly polygonId: number | null;
-	readonly portalId: string;
-	readonly sourceIndex: number;
-}): string {
-	return [
-		"env-cell-portal",
-		formatHex32(options.landblockId),
-		formatHex32(options.envCellId),
-		options.portalId,
-		options.sourceIndex,
-		options.polygonId ?? "none",
-	].join(":");
-}
-
-function createEnvCellPortalApertureResourceId(options: {
-	readonly envCellId: number;
-	readonly landblockId: number;
-	readonly polygonId: number | null;
-	readonly portalId: string;
-	readonly sourceIndex: number;
-}): string {
-	return [
-		"portal-aperture",
-		"env-cell-portal",
-		formatHex32(options.landblockId),
-		formatHex32(options.envCellId),
-		options.portalId,
-		options.sourceIndex,
-		options.polygonId ?? "none",
 	].join(":");
 }

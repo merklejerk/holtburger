@@ -921,8 +921,10 @@ describe("V2 client runtime", () => {
 		expect(renderer.staticDeltas).toEqual([
 			{
 				addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xdb55ffff)],
+				addedPortalApertureResources: [],
 				addedTransitionApertureBatches: [],
 				removedDrawUnitIds: [],
+				removedPortalApertureResourceIds: [],
 				removedTransitionApertureBatchIds: [],
 				revision: 1,
 			},
@@ -932,13 +934,15 @@ describe("V2 client runtime", () => {
 		runtime.updateSceneInterest({ kind: "none" });
 		await flushPromises();
 
-		expect(renderer.staticDeltas.at(-1)).toEqual({
-			addedDrawUnits: [],
-			addedTransitionApertureBatches: [],
-			removedDrawUnitIds: ["terrain-a"],
-			removedTransitionApertureBatchIds: [],
-			revision: 2,
-		});
+			expect(renderer.staticDeltas.at(-1)).toEqual({
+				addedDrawUnits: [],
+				addedPortalApertureResources: [],
+				addedTransitionApertureBatches: [],
+				removedDrawUnitIds: ["terrain-a"],
+				removedPortalApertureResourceIds: [],
+				removedTransitionApertureBatchIds: [],
+				revision: 2,
+			});
 		expect(renderer.staticAnchorLandblockIds.at(-1)).toBeNull();
 		runtime.dispose();
 	});

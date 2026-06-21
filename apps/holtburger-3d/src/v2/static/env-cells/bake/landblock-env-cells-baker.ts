@@ -12,6 +12,7 @@ import type {
 	EnvCellCellStructureGeometryAttachment,
 	StaticMaterialCoverageReport,
 	StaticMaterialTableEntry,
+	StaticPortalApertureResource,
 	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
 	StaticSourceMappingRecord,
@@ -20,6 +21,7 @@ import type {
 	StaticVisibilityRecord,
 	StaticWorkPeerRecordOwner,
 } from "../../contracts";
+import { createEnvCellPortalApertureResource } from "../../portal-aperture-resources";
 import { createEnvCellStaticPortalGraph } from "../../portal-graphs";
 import {
 	AC_UNIT_SCALE,
@@ -105,6 +107,9 @@ export function bakeLandblockEnvCells(
 				(coverage) => coverage.materialCount > 0 || coverage.partitionCount > 0,
 			),
 		],
+		portalApertureResources: itemResults.flatMap((result) =>
+			result.portalApertureResource ? [result.portalApertureResource] : [],
+		),
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: itemResults.flatMap(
 			(result) => result.staticAuthoredDynamicSeeds,
@@ -178,6 +183,7 @@ function bakeLandblockEnvCellItem(
 ): {
 	readonly drawUnits: readonly StaticDrawUnit[];
 	readonly materialCoverage: StaticMaterialCoverageReport;
+	readonly portalApertureResource: StaticPortalApertureResource | null;
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
@@ -213,6 +219,8 @@ function bakeLandblockEnvCellItem(
 		materialPlansByEnvCellId,
 	);
 	const portalInteriorRecord = createPortalInteriorRecord(owner, payload);
+	const portalApertureResource =
+		createEnvCellPortalApertureResource(portalInteriorRecord);
 
 	return {
 		drawUnits,
@@ -220,6 +228,7 @@ function bakeLandblockEnvCellItem(
 			materialPlansByEnvCellId,
 			payload,
 		}),
+		portalApertureResource,
 		staticAuthoredDynamicSeeds: createAuthoredDynamicSeedRecords(
 			owner,
 			payload,

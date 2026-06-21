@@ -438,6 +438,7 @@ export class StaticCoordinator {
 		this.#committedDrawUnits = this.#residentDrawUnitIds.size;
 		this.#emitCommitDelta({
 			addedDrawUnits: result.drawUnits,
+			addedPortalApertureResources: result.portalApertureResources,
 			addedTransitionApertureBatches: result.transitionApertureBatches,
 			materialCoverage: result.materialCoverage,
 			removedResources: [],
@@ -482,6 +483,7 @@ export class StaticCoordinator {
 	}): void {
 		this.#emitCommitDelta({
 			addedDrawUnits: [],
+			addedPortalApertureResources: [],
 			addedTransitionApertureBatches: [],
 			materialCoverage: [],
 			removedResources: options.removedResources,
@@ -747,6 +749,19 @@ function collectCommittedResourceKeysByDesiredKey(
 			},
 		);
 	}
+	for (const resource of result.portalApertureResources) {
+		addResourceKey(
+			resourcesByDesiredKey,
+			createDesiredKeyForDrawUnit({
+				domain: resource.sourceDomain,
+				landblockId: resource.landblockId,
+			}),
+			{
+				apertureResourceId: resource.apertureResourceId,
+				kind: "portal-aperture-resource",
+			},
+		);
+	}
 	return resourcesByDesiredKey;
 }
 
@@ -793,6 +808,18 @@ function filterStaticBakeResultForWorks(
 			)
 			.map((batch) => batch.apertureBatchId),
 	);
+	const retainedPortalApertureResourceIds = new Set(
+		result.portalApertureResources
+			.filter((resource) =>
+				desiredKeys.has(
+					createDesiredKeyForDrawUnit({
+						domain: resource.sourceDomain,
+						landblockId: resource.landblockId,
+					}),
+				),
+			)
+			.map((resource) => resource.apertureResourceId),
+	);
 
 	return {
 		...result,
@@ -801,6 +828,9 @@ function filterStaticBakeResultForWorks(
 		),
 		materialCoverage: result.materialCoverage.filter((coverage) =>
 			works.some((work) => work.job.domain === coverage.domain),
+		),
+		portalApertureResources: result.portalApertureResources.filter((resource) =>
+			retainedPortalApertureResourceIds.has(resource.apertureResourceId),
 		),
 		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds.filter(
 			(record) =>

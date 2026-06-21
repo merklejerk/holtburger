@@ -33,8 +33,10 @@ describe("V2 static materializer", () => {
 		expect(materialized.staticSpatialRecords).toEqual([]);
 		expect(materialized.staticDelta).toEqual({
 			addedDrawUnits: [drawUnit],
+			addedPortalApertureResources: [],
 			addedTransitionApertureBatches: [],
 			removedDrawUnitIds: [],
+			removedPortalApertureResourceIds: [],
 			removedTransitionApertureBatchIds: [],
 			revision: 7,
 		});
@@ -54,8 +56,10 @@ describe("V2 static materializer", () => {
 
 		expect(materialized.staticDelta).toEqual({
 			addedDrawUnits: [],
+			addedPortalApertureResources: [],
 			addedTransitionApertureBatches: [batch],
 			removedDrawUnitIds: [],
+			removedPortalApertureResourceIds: [],
 			removedTransitionApertureBatchIds: [],
 			revision: 7,
 		});
@@ -284,8 +288,10 @@ describe("V2 static materializer", () => {
 
 		expect(materialized.staticDelta).toEqual({
 			addedDrawUnits: [],
+			addedPortalApertureResources: [],
 			addedTransitionApertureBatches: [],
 			removedDrawUnitIds: [],
+			removedPortalApertureResourceIds: [],
 			removedTransitionApertureBatchIds: ["transition-aperture-batch:da55ffff"],
 			revision: 9,
 		});

@@ -156,12 +156,7 @@ function portalApertureGeometryResourcesEqual(
 	return arraysEqual(left, right, (leftResource, rightResource) => {
 		return (
 			leftResource.resourceId === rightResource.resourceId &&
-			stringArraysEqual(leftResource.sourceKinds, rightResource.sourceKinds) &&
-			arraysEqual(
-				leftResource.vertices,
-				rightResource.vertices,
-				(leftVertex, rightVertex) => numberArraysEqual(leftVertex, rightVertex),
-			)
+			stringArraysEqual(leftResource.sourceKinds, rightResource.sourceKinds)
 		);
 	});
 }

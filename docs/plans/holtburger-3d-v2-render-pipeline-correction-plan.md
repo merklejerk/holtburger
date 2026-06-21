@@ -1574,7 +1574,9 @@ Implemented in this phase:
 Debt and spicy bits:
 
 - I could not perform the required interactive screenshot comparison in this phase. User work remains: inspect the `0xda55ffff` scenarios listed above and report whether same-layer mask bleed or missing deeper portal visibility appears.
+- Follow-up on 2026-06-21: outdoor projection screenshots showed `128/180` render entries with `52 cell-cap` skips, causing some building portals not to composite. `DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS` was raised from `128` to `512` as a tactical fix.
 - `maxPortalViews` still acts as a temporary global mask-edge cap for projection frame plans. Phase 9E should rename or split this into a projection-specific mask-edge cap while generalizing dungeon projection.
+- `maxCells` still acts as a temporary global render-entry cap. Phase 9E should rename or split this into a projection-specific render-entry cap, and projection mode should prefer the projected env-cell count over old recursive traversal defaults.
 - `PortalTraversalPlan` is still the production dungeon/env-cell-origin plan until Phase 9E. That is now an explicit next-phase target, not an accidental retained outdoor fallback.
 
 ### Immediate Phase 9E: Cut Dungeon-Origin Direct Traversal To Projection Semantics
@@ -1622,6 +1624,11 @@ Implementation tasks:
 - Add a renderer-facing plan shape that is shared between outdoor and dungeon projections where possible.
   - The current `outdoor-projection` plan variant may become `portal-projection` with a root scene variant.
   - If keeping two mode names temporarily is clearer, the nested graph/entry/mask contracts should still be shared.
+- Replace legacy traversal cap names in projection planning with projection-specific caps:
+  - `maxCells` becomes `maxRenderEntries` for projection frame plans;
+  - `maxPortalViews` becomes `maxMaskEdges` for projection frame plans;
+  - keep `maxCells` and `maxPortalViews` only inside legacy/recursive `PortalTraversalPlan` code until that path is removed or demoted to diagnostics;
+  - projection defaults must not inherit old portal-stack traversal limits when the projected env-cell count is already finite and known.
 - Cut the env-cell residency branch in `ClientRuntime.#derivePortalFrameWorkPlan(...)` from `queryPortalTraversal(...)` to the env-cell projection query and projection frame-plan builder.
 - Replace or delete direct env-cell path-tree frame-plan tests that only prove duplicated portal-stack views. Keep tests that prove resource membership, source aperture identity, and cap behavior.
 - Add tests:

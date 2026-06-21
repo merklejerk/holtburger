@@ -1604,33 +1604,58 @@ Scope:
 
 Implementation tasks:
 
-- Generalize the Phase 9B/9C projection builder so it can build from a named root policy:
-  - `outdoor-root`;
-  - `env-cell-root`.
-- Add a `StaticSceneQuery` API for env-cell-origin projection, for example:
-  - `queryEnvCellPortalProjection({ landblockId, startEnvCellId }): StaticEnvCellPortalProjectionRecord | null`;
-  - or a single generic `queryPortalProjection(...)` with an explicit root variant.
-- Prefer one shared projection record shape if the data supports it:
-  - root kind/id;
-  - source revision key;
-  - nodes;
-  - edges;
-  - adjacency;
-  - incoming edges;
-  - components;
-  - component edges;
-  - render layers;
-  - diagnostics.
-- Add a renderer-facing plan shape that is shared between outdoor and dungeon projections where possible.
-  - The current `outdoor-projection` plan variant may become `portal-projection` with a root scene variant.
-  - If keeping two mode names temporarily is clearer, the nested graph/entry/mask contracts should still be shared.
+- 9E.1: Generalize static projection contracts and construction.
+  - Replace the outdoor-only projection contract names with root-generic projection names where practical:
+    - `StaticOutdoorPortalProjectionRecord` -> `StaticPortalProjectionRecord`;
+    - `StaticOutdoorPortalProjectionEdge` -> `StaticPortalProjectionEdge`;
+    - `StaticOutdoorPortalProjectionComponent` -> `StaticPortalProjectionComponent`;
+    - equivalent renames for adjacency, incoming edges, render layers, env-cell layer facts, and diagnostics.
+  - Add an explicit root variant to the projection record:
+    - `{ kind: "outdoor-root"; landblockId; rootNodeId }`;
+    - `{ kind: "env-cell-root"; landblockId; envCellId; rootNodeId }`.
+  - Generalize `createStaticOutdoorPortalProjection(...)` into a root-policy builder, for example `createStaticPortalProjection(...)`.
+  - Keep `queryOutdoorPortalProjection(...)` as a thin compatibility wrapper only if that materially reduces churn; do not keep a second outdoor graph shape.
+  - For outdoor roots:
+    - node set remains outside-visible env cells;
+    - root edges come from building-transition aperture batches;
+    - source key includes transition aperture batch/range identities.
+  - For env-cell roots:
+    - node set is the finite env-cell graph reachable from `startEnvCellId` through retained env-cell-to-env-cell portal edges in the same landblock;
+    - root component is the SCC containing `startEnvCellId`;
+    - source key includes `startEnvCellId`, portal graph/interior facts, and aperture identity, but not transition aperture batches unless they are actually used.
+  - Parameterize component-layer construction by a root component id instead of hard-coding `component:outdoor`.
+- 9E.2: Add env-cell-origin query/cache API.
+  - Add `StaticSceneQuery.queryEnvCellPortalProjection({ landblockId, startEnvCellId })`.
+  - Cache env-cell-origin projections by `(landblockId, startEnvCellId, sourceRevisionKey)`.
+  - Invalidate env-cell-origin projection cache entries from the same portal graph/interior mutation points as traversal graph invalidation.
+  - Do not invalidate env-cell-origin projection cache entries for transition aperture changes unless the generalized source key proves they are part of that root policy.
+- 9E.3: Generalize renderer-facing projection frame plans.
+  - Rename the renderer-facing outdoor-only plan contracts where practical:
+    - `OutdoorProjectionPortalFrameGraphPlan` -> `PortalProjectionFrameGraphPlan`;
+    - `OutdoorProjectionPortalFrameRenderEntryPlan` -> `PortalProjectionFrameRenderEntryPlan`;
+    - `OutdoorProjectionPortalFrameMaskEdgePlan` -> `PortalProjectionFrameMaskEdgePlan`;
+    - equivalent diagnostic names.
+  - The current `outdoor-projection` mode may become `portal-projection` with a root scene variant. If keeping two mode names temporarily is clearer, the nested graph/entry/mask contracts should still be shared.
+  - Add an explicit root entry:
+    - outdoor root has scene `{ kind: "outdoor-target" }` and no direct env-cell resources;
+    - env-cell root has scene `{ kind: "env-cell-direct" }`, resources, and renders unmasked before descendant layers.
+  - Do not use stencil value `0` for masked descendant projection rendering. The stencil buffer clears to `0`, so dungeon/env-cell projection needs either:
+    - an unmasked root draw plus descendant render layers starting at stencil value `1`; or
+    - per-entry stencil identities.
+  - Keep the current outdoor layer-stencil policy only if Phase 9D screenshot validation remains acceptable.
 - Replace legacy traversal cap names in projection planning with projection-specific caps:
   - `maxCells` becomes `maxRenderEntries` for projection frame plans;
   - `maxPortalViews` becomes `maxMaskEdges` for projection frame plans;
   - keep `maxCells` and `maxPortalViews` only inside legacy/recursive `PortalTraversalPlan` code until that path is removed or demoted to diagnostics;
   - projection defaults must not inherit old portal-stack traversal limits when the projected env-cell count is already finite and known.
-- Cut the env-cell residency branch in `ClientRuntime.#derivePortalFrameWorkPlan(...)` from `queryPortalTraversal(...)` to the env-cell projection query and projection frame-plan builder.
-- Replace or delete direct env-cell path-tree frame-plan tests that only prove duplicated portal-stack views. Keep tests that prove resource membership, source aperture identity, and cap behavior.
+- 9E.4: Cut runtime over.
+  - Cut the env-cell residency branch in `ClientRuntime.#derivePortalFrameWorkPlan(...)` from `queryPortalTraversal(...)` to the env-cell projection query and projection frame-plan builder.
+  - Replace the env-cell cache key's `portalTraversalGraphRevision` with projection `sourceRevisionKey` once the projection path is active.
+  - Preserve `PortalTraversalPlan` only for diagnostics/debug paths if still useful; it should not remain the production renderer plan after the cutover.
+- 9E.5: Delete or quarantine old recursive direct frame planning.
+  - Delete `createDirectEnvCellFramePlan(...)` when no production caller remains.
+  - Delete recursive `PortalFrameGraphPlan` renderer execution if no debug caller remains; otherwise rename it as a legacy/debug plan path.
+  - Replace or delete direct env-cell path-tree frame-plan tests that only prove duplicated portal-stack views. Keep tests that prove resource membership, source aperture identity, and cap behavior through the projection path.
 - Add tests:
   - `A -> B` and `A -> C -> B` produces one render entry for `B`, assigned to the longest acyclic layer;
   - `A -> C -> A -> B` does not create an unbounded path and records the SCC/cycle facts;
@@ -1647,6 +1672,36 @@ Implementation tasks:
   - components;
   - cyclic components;
   - skipped/capped edges.
+
+Dry-run findings on 2026-06-21:
+
+- 9E should not start by cutting `ClientRuntime`; it first needs root-generic projection contracts. Current code has outdoor baked into names and shapes:
+  - `StaticOutdoorPortalProjectionRecord` in `static/contracts.ts`;
+  - `createStaticOutdoorPortalProjection(...)` and `createOutdoorComponentId()` in `static/portal-graphs.ts`;
+  - `OutdoorProjectionPortalFrameGraphPlan` and related renderer contracts in `renderer/types.ts`;
+  - `createOutdoorProjectionPortalFramePlan(...)` in `runtime/direct-env-cell-frame-plan.ts`;
+  - WebGL2 method names and warning text in `renderer/webgl2/webgl2-renderer.ts`.
+- The SCC/layer machinery in `portal-graphs.ts` is reusable, but it is currently rooted at a synthetic outdoor component. The dry-run target is to parameterize root component id and root-edge construction, not duplicate Tarjan/SCC code for dungeons.
+- Env-cell-origin projection must not use `seenOutside` as its node filter. It should build the reachable same-landblock env-cell closure from `startEnvCellId` over retained env-cell portal edges.
+- Dungeon root rendering has a stencil trap:
+  - the current outdoor projection path uses numeric render layer as the stencil reference;
+  - WebGL clears stencil to `0`;
+  - if the current env-cell root is assigned render layer `0`, drawing masked layer-0 entries would match the whole screen;
+  - therefore the env-cell root must draw unmasked, and descendant masked layers should start at stencil value `1`, unless Phase 9E switches to per-entry stencil identity.
+- Root SCC policy needs to be explicit. If `startEnvCellId` is in a cyclic component with other env cells, do not blindly draw every cell in that component unmasked at layer `0`. Either:
+  - make only the current env cell the unmasked root entry and treat other same-component cells as same-layer masked entries; or
+  - solve projection rendering with per-entry stencil identity before dungeon cutover.
+- Cache shape changes are non-trivial:
+  - outdoor projection cache is currently keyed by landblock only;
+  - env-cell projection cache must include `startEnvCellId`;
+  - generic projection `sourceRevisionKey` must include root policy, or an outdoor and env-cell projection over the same graph facts can collide.
+- Runtime cap cleanup belongs in 9E, not after it. Projection frame planning should accept `maxRenderEntries` and `maxMaskEdges`; old `maxCells`/`maxPortalViews` should be isolated to recursive `PortalTraversalPlan` until that path is deleted or demoted.
+- Suggested execution split:
+  - 9E.1 land static projection contract rename/generalization with no runtime cutover;
+  - 9E.2 add env-cell projection query/cache and tests;
+  - 9E.3 generalize renderer frame-plan contracts and root rendering policy while outdoor still passes;
+  - 9E.4 cut runtime env-cell branch to projection;
+  - 9E.5 delete or quarantine recursive direct traversal leftovers.
 
 Acceptance criteria:
 

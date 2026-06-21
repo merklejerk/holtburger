@@ -917,28 +917,42 @@ export interface StaticPortalGraphEdge {
 	readonly sceneCrossing: StaticPortalGraphSceneCrossing | null;
 }
 
-export interface StaticOutdoorPortalProjectionRecord {
-	readonly kind: "outdoor-portal-projection";
+export interface StaticPortalProjectionRecord {
+	readonly kind: "portal-projection";
 	readonly landblockId: number;
 	readonly sourceRevisionKey: string;
+	readonly root: StaticPortalProjectionRoot;
 	readonly rootNodeId: string;
-	readonly nodes: readonly StaticOutdoorPortalProjectionNode[];
-	readonly edges: readonly StaticOutdoorPortalProjectionEdge[];
-	readonly adjacency: readonly StaticOutdoorPortalProjectionAdjacency[];
-	readonly incomingEdges: readonly StaticOutdoorPortalProjectionIncomingEdges[];
-	readonly components: readonly StaticOutdoorPortalProjectionComponent[];
-	readonly componentEdges: readonly StaticOutdoorPortalProjectionComponentEdge[];
-	readonly renderLayers: readonly StaticOutdoorPortalProjectionRenderLayer[];
-	readonly renderLayerByEnvCellId: readonly StaticOutdoorPortalProjectionEnvCellLayer[];
-	readonly diagnostics: StaticOutdoorPortalProjectionDiagnostics;
+	readonly nodes: readonly StaticPortalProjectionNode[];
+	readonly edges: readonly StaticPortalProjectionEdge[];
+	readonly adjacency: readonly StaticPortalProjectionAdjacency[];
+	readonly incomingEdges: readonly StaticPortalProjectionIncomingEdges[];
+	readonly components: readonly StaticPortalProjectionComponent[];
+	readonly componentEdges: readonly StaticPortalProjectionComponentEdge[];
+	readonly renderLayers: readonly StaticPortalProjectionRenderLayer[];
+	readonly renderLayerByEnvCellId: readonly StaticPortalProjectionEnvCellLayer[];
+	readonly diagnostics: StaticPortalProjectionDiagnostics;
 }
 
-export interface StaticOutdoorPortalProjectionNode {
+export type StaticPortalProjectionRoot =
+	| {
+			readonly kind: "outdoor-root";
+			readonly landblockId: number;
+			readonly rootNodeId: string;
+	  }
+	| {
+			readonly kind: "env-cell-root";
+			readonly landblockId: number;
+			readonly envCellId: number;
+			readonly rootNodeId: string;
+	  };
+
+export interface StaticPortalProjectionNode {
 	readonly nodeId: string;
 	readonly envCellId: number;
 }
 
-export interface StaticOutdoorPortalProjectionEdge {
+export interface StaticPortalProjectionEdge {
 	readonly edgeId: string;
 	readonly sourceNodeId: string;
 	readonly targetNodeId: string;
@@ -948,10 +962,10 @@ export interface StaticOutdoorPortalProjectionEdge {
 	readonly apertureSourceId: string;
 	readonly linkId: string;
 	readonly sourceKind: PortalApertureResourceSourceKind;
-	readonly provenance: StaticOutdoorPortalProjectionEdgeProvenance;
+	readonly provenance: StaticPortalProjectionEdgeProvenance;
 }
 
-export type StaticOutdoorPortalProjectionEdgeProvenance =
+export type StaticPortalProjectionEdgeProvenance =
 	| {
 			readonly kind: "building-transition";
 			readonly apertureBatchId: string;
@@ -970,41 +984,41 @@ export type StaticOutdoorPortalProjectionEdgeProvenance =
 			readonly polygonId: number | null;
 	  };
 
-export interface StaticOutdoorPortalProjectionAdjacency {
+export interface StaticPortalProjectionAdjacency {
 	readonly sourceNodeId: string;
 	readonly edgeIds: readonly string[];
 }
 
-export interface StaticOutdoorPortalProjectionIncomingEdges {
+export interface StaticPortalProjectionIncomingEdges {
 	readonly targetEnvCellId: number;
 	readonly edgeIds: readonly string[];
 }
 
-export interface StaticOutdoorPortalProjectionComponent {
+export interface StaticPortalProjectionComponent {
 	readonly componentId: string;
 	readonly envCellIds: readonly number[];
 	readonly cyclic: boolean;
 	readonly renderLayer: number | null;
 }
 
-export interface StaticOutdoorPortalProjectionComponentEdge {
+export interface StaticPortalProjectionComponentEdge {
 	readonly sourceComponentId: string;
 	readonly targetComponentId: string;
 	readonly edgeIds: readonly string[];
 }
 
-export interface StaticOutdoorPortalProjectionRenderLayer {
+export interface StaticPortalProjectionRenderLayer {
 	readonly renderLayer: number;
 	readonly componentIds: readonly string[];
 	readonly envCellIds: readonly number[];
 }
 
-export interface StaticOutdoorPortalProjectionEnvCellLayer {
+export interface StaticPortalProjectionEnvCellLayer {
 	readonly envCellId: number;
 	readonly renderLayer: number;
 }
 
-export interface StaticOutdoorPortalProjectionDiagnostics {
+export interface StaticPortalProjectionDiagnostics {
 	readonly outsideVisibleEnvCellCount: number;
 	readonly componentCount: number;
 	readonly cyclicComponentCount: number;

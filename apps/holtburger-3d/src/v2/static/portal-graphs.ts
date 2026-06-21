@@ -1,13 +1,14 @@
 import type {
 	LandblockPortalLinkFacts,
-	StaticOutdoorPortalProjectionAdjacency,
-	StaticOutdoorPortalProjectionComponent,
-	StaticOutdoorPortalProjectionComponentEdge,
-	StaticOutdoorPortalProjectionDiagnostics,
-	StaticOutdoorPortalProjectionEdge,
-	StaticOutdoorPortalProjectionIncomingEdges,
-	StaticOutdoorPortalProjectionRecord,
-	StaticOutdoorPortalProjectionRenderLayer,
+	StaticPortalProjectionAdjacency,
+	StaticPortalProjectionComponent,
+	StaticPortalProjectionComponentEdge,
+	StaticPortalProjectionDiagnostics,
+	StaticPortalProjectionEdge,
+	StaticPortalProjectionIncomingEdges,
+	StaticPortalProjectionRecord,
+	StaticPortalProjectionRenderLayer,
+	StaticPortalProjectionRoot,
 	StaticPortalGraphEdge,
 	StaticPortalGraphNode,
 	StaticPortalGraphRecord,
@@ -27,7 +28,7 @@ import {
 type PortalAperture =
 	StaticPortalInteriorRecord["envCells"][number]["portalApertures"][number];
 type MutableProjectionDiagnostics = {
-	-readonly [Key in keyof StaticOutdoorPortalProjectionDiagnostics]: StaticOutdoorPortalProjectionDiagnostics[Key];
+	-readonly [Key in keyof StaticPortalProjectionDiagnostics]: StaticPortalProjectionDiagnostics[Key];
 };
 
 const OUTDOOR_ROOT_NODE_ID_PREFIX = "outdoor";
@@ -122,14 +123,26 @@ export function createTransitionStaticPortalGraph(
 	};
 }
 
-export function createStaticOutdoorPortalProjection(options: {
+export function createStaticPortalProjection(options: {
 	readonly landblockId: number;
 	readonly portalGraphs: readonly StaticPortalGraphRecord[];
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
+	readonly root: StaticPortalProjectionRoot;
 	readonly transitionApertureBatches: readonly TransitionApertureBatch[];
-}): StaticOutdoorPortalProjectionRecord | null {
+}): StaticPortalProjectionRecord | null {
 	const landblockId = options.landblockId >>> 0;
-	const rootNodeId = createOutdoorPortalGraphNodeId(landblockId);
+	if (options.root.kind !== "outdoor-root") {
+		throw new Error(
+			`Portal projection root policy ${options.root.kind} is not implemented yet.`,
+		);
+	}
+	if (options.root.landblockId !== landblockId) {
+		throw new Error(
+			`Portal projection root landblock ${options.root.landblockId >>> 0} does not match projection landblock ${landblockId}.`,
+		);
+	}
+	const rootNodeId = options.root.rootNodeId;
+	const rootComponentId = createProjectionRootComponentId(options.root);
 	const outsideVisibleEnvCellIds = createOutsideVisibleEnvCellIds(
 		options.portalInteriorRecords,
 		landblockId,
@@ -144,7 +157,7 @@ export function createStaticOutdoorPortalProjection(options: {
 			envCellId,
 			nodeId: createEnvCellPortalGraphNodeId(envCellId),
 		}));
-	const edges: StaticOutdoorPortalProjectionEdge[] = [];
+	const edges: StaticPortalProjectionEdge[] = [];
 	const diagnostics = createProjectionDiagnostics({
 		outsideVisibleEnvCellCount: outsideVisibleEnvCellIds.size,
 	});
@@ -223,15 +236,15 @@ export function createStaticOutdoorPortalProjection(options: {
 				diagnostics.envCellPortalEdgesRejectedTargetNotOutsideVisible += 1;
 				continue;
 			}
-			const aperture = envCellPortalApertures
-				.get(sourceEnvCellId)
-				?.get(createEnvCellPortalApertureLookupKey({
+			const aperture = envCellPortalApertures.get(sourceEnvCellId)?.get(
+				createEnvCellPortalApertureLookupKey({
 					portalId:
 						edge.provenance.kind === "env-cell-portal"
 							? edge.provenance.sourcePortalId
 							: "",
 					sourceIndex: edge.sourceIndex,
-				}));
+				}),
+			);
 			if (!aperture || edge.provenance.kind !== "env-cell-portal") {
 				diagnostics.envCellPortalEdgesRejectedMissingAperture += 1;
 				continue;
@@ -279,8 +292,15 @@ export function createStaticOutdoorPortalProjection(options: {
 	const adjacency = createProjectionAdjacency(sortedEdges);
 	const incomingEdges = createProjectionIncomingEdges(sortedEdges);
 	const components = createProjectionComponents(nodes, sortedEdges);
-	const componentEdges = createProjectionComponentEdges(sortedEdges, components);
-	const componentLayers = createProjectionComponentLayers(componentEdges);
+	const componentEdges = createProjectionComponentEdges(
+		sortedEdges,
+		components,
+		rootComponentId,
+	);
+	const componentLayers = createProjectionComponentLayers(
+		componentEdges,
+		rootComponentId,
+	);
 	const componentsWithLayers = components.map((component) => ({
 		...component,
 		renderLayer: componentLayers.get(component.componentId) ?? null,
@@ -320,20 +340,33 @@ export function createStaticOutdoorPortalProjection(options: {
 				diagnostics,
 				edges: sortedEdges,
 				incomingEdges,
-				kind: "outdoor-portal-projection",
+				kind: "portal-projection",
 				landblockId,
 				nodes,
 				renderLayerByEnvCellId,
 				renderLayers,
+				root: options.root,
 				rootNodeId,
-				sourceRevisionKey: createStaticOutdoorPortalProjectionSourceKey({
+				sourceRevisionKey: createStaticPortalProjectionSourceKey({
 					landblockId,
 					portalGraphs: options.portalGraphs,
 					portalInteriorRecords: options.portalInteriorRecords,
+					root: options.root,
 					transitionApertureBatches: options.transitionApertureBatches,
 				}),
 			}
 		: null;
+}
+
+export function createOutdoorPortalProjectionRoot(
+	landblockId: number,
+): StaticPortalProjectionRoot {
+	const normalizedLandblockId = landblockId >>> 0;
+	return {
+		kind: "outdoor-root",
+		landblockId: normalizedLandblockId,
+		rootNodeId: createOutdoorPortalGraphNodeId(normalizedLandblockId),
+	};
 }
 
 function createEnvCellPortalGraphEdge(
@@ -565,8 +598,8 @@ function createProjectionBuildingTransitionLinkId(options: {
 }
 
 function createProjectionAdjacency(
-	edges: readonly StaticOutdoorPortalProjectionEdge[],
-): readonly StaticOutdoorPortalProjectionAdjacency[] {
+	edges: readonly StaticPortalProjectionEdge[],
+): readonly StaticPortalProjectionAdjacency[] {
 	const edgeIdsBySource = new Map<string, string[]>();
 	for (const edge of edges) {
 		const edgeIds = edgeIdsBySource.get(edge.sourceNodeId) ?? [];
@@ -582,8 +615,8 @@ function createProjectionAdjacency(
 }
 
 function createProjectionIncomingEdges(
-	edges: readonly StaticOutdoorPortalProjectionEdge[],
-): readonly StaticOutdoorPortalProjectionIncomingEdges[] {
+	edges: readonly StaticPortalProjectionEdge[],
+): readonly StaticPortalProjectionIncomingEdges[] {
 	const edgeIdsByTarget = new Map<number, string[]>();
 	for (const edge of edges) {
 		const edgeIds = edgeIdsByTarget.get(edge.targetEnvCellId) ?? [];
@@ -600,8 +633,8 @@ function createProjectionIncomingEdges(
 
 function createProjectionComponents(
 	nodes: readonly { readonly envCellId: number }[],
-	edges: readonly StaticOutdoorPortalProjectionEdge[],
-): readonly StaticOutdoorPortalProjectionComponent[] {
+	edges: readonly StaticPortalProjectionEdge[],
+): readonly StaticPortalProjectionComponent[] {
 	const envCellIds = nodes.map((node) => node.envCellId).sort(compareNumbers);
 	const outgoingBySource = new Map<number, number[]>();
 	for (const edge of edges) {
@@ -621,7 +654,7 @@ function createProjectionComponents(
 	const indexByEnvCellId = new Map<number, number>();
 	const lowLinkByEnvCellId = new Map<number, number>();
 	const onStack = new Set<number>();
-	const components: StaticOutdoorPortalProjectionComponent[] = [];
+	const components: StaticPortalProjectionComponent[] = [];
 
 	const strongConnect = (envCellId: number): void => {
 		indexByEnvCellId.set(envCellId, index);
@@ -694,15 +727,16 @@ function createProjectionComponents(
 }
 
 function createProjectionComponentEdges(
-	edges: readonly StaticOutdoorPortalProjectionEdge[],
-	components: readonly StaticOutdoorPortalProjectionComponent[],
-): readonly StaticOutdoorPortalProjectionComponentEdge[] {
+	edges: readonly StaticPortalProjectionEdge[],
+	components: readonly StaticPortalProjectionComponent[],
+	rootComponentId: string,
+): readonly StaticPortalProjectionComponentEdge[] {
 	const componentIdByEnvCellId = createComponentIdByEnvCellId(components);
 	const edgeIdsByComponentEdge = new Map<string, string[]>();
 	for (const edge of edges) {
 		const sourceComponentId =
 			edge.sourceEnvCellId === null
-				? createOutdoorComponentId()
+				? rootComponentId
 				: componentIdByEnvCellId.get(edge.sourceEnvCellId);
 		const targetComponentId = componentIdByEnvCellId.get(edge.targetEnvCellId);
 		if (!sourceComponentId || !targetComponentId) {
@@ -729,7 +763,8 @@ function createProjectionComponentEdges(
 }
 
 function createProjectionComponentLayers(
-	componentEdges: readonly StaticOutdoorPortalProjectionComponentEdge[],
+	componentEdges: readonly StaticPortalProjectionComponentEdge[],
+	rootComponentId: string,
 ): ReadonlyMap<string, number> {
 	const outgoingBySource = new Map<string, string[]>();
 	for (const edge of componentEdges) {
@@ -744,15 +779,16 @@ function createProjectionComponentLayers(
 		outgoing.sort();
 	}
 
-	const layers = new Map<string, number>([[createOutdoorComponentId(), 0]]);
-	const queue = [createOutdoorComponentId()];
+	const layers = new Map<string, number>([[rootComponentId, 0]]);
+	const queue = [rootComponentId];
 	while (queue.length > 0) {
 		const sourceComponentId = queue.shift();
 		if (!sourceComponentId) {
 			continue;
 		}
 		const sourceLayer = layers.get(sourceComponentId) ?? 0;
-		for (const targetComponentId of outgoingBySource.get(sourceComponentId) ?? []) {
+		for (const targetComponentId of outgoingBySource.get(sourceComponentId) ??
+			[]) {
 			const targetLayer = sourceLayer + 1;
 			if ((layers.get(targetComponentId) ?? -1) >= targetLayer) {
 				continue;
@@ -761,13 +797,13 @@ function createProjectionComponentLayers(
 			queue.push(targetComponentId);
 		}
 	}
-	layers.delete(createOutdoorComponentId());
+	layers.delete(rootComponentId);
 	return layers;
 }
 
 function createProjectionRenderLayers(
-	components: readonly StaticOutdoorPortalProjectionComponent[],
-): readonly StaticOutdoorPortalProjectionRenderLayer[] {
+	components: readonly StaticPortalProjectionComponent[],
+): readonly StaticPortalProjectionRenderLayer[] {
 	const componentsByLayer = new Map<
 		number,
 		{ componentIds: string[]; envCellIds: number[] }
@@ -797,12 +833,19 @@ function createProjectionComponentId(envCellIds: readonly number[]): string {
 	return `component:${envCellIds.map((envCellId) => envCellId >>> 0).join(",")}`;
 }
 
-function createOutdoorComponentId(): string {
-	return "component:outdoor";
+function createProjectionRootComponentId(
+	root: StaticPortalProjectionRoot,
+): string {
+	switch (root.kind) {
+		case "outdoor-root":
+			return "component:outdoor";
+		case "env-cell-root":
+			return `component:env-cell-root:${root.envCellId >>> 0}`;
+	}
 }
 
 function createComponentIdByEnvCellId(
-	components: readonly StaticOutdoorPortalProjectionComponent[],
+	components: readonly StaticPortalProjectionComponent[],
 ): ReadonlyMap<number, string> {
 	const componentIdByEnvCellId = new Map<number, string>();
 	for (const component of components) {
@@ -814,7 +857,7 @@ function createComponentIdByEnvCellId(
 }
 
 function findComponentIdForEnvCell(
-	components: readonly StaticOutdoorPortalProjectionComponent[],
+	components: readonly StaticPortalProjectionComponent[],
 	envCellId: number,
 ): string | null {
 	for (const component of components) {
@@ -825,12 +868,22 @@ function findComponentIdForEnvCell(
 	return null;
 }
 
-export function createStaticOutdoorPortalProjectionSourceKey(options: {
+export function createStaticPortalProjectionSourceKey(options: {
 	readonly landblockId: number;
 	readonly portalGraphs: readonly StaticPortalGraphRecord[];
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
+	readonly root: StaticPortalProjectionRoot;
 	readonly transitionApertureBatches: readonly TransitionApertureBatch[];
 }): string {
+	const rootParts = [
+		"root",
+		options.root.kind,
+		options.root.landblockId >>> 0,
+		options.root.rootNodeId,
+		options.root.kind === "env-cell-root"
+			? options.root.envCellId >>> 0
+			: "none",
+	].join(":");
 	const graphParts = options.portalGraphs
 		.filter((graph) => graph.landblockId === options.landblockId)
 		.flatMap((graph) =>
@@ -847,7 +900,7 @@ export function createStaticOutdoorPortalProjectionSourceKey(options: {
 						? edge.provenance.sourcePortalId
 						: edge.provenance.portalId,
 					edge.provenance.kind === "env-cell-portal" &&
-						edge.provenance.target.kind === "env-cell"
+					edge.provenance.target.kind === "env-cell"
 						? edge.provenance.target.portalId
 						: "none",
 				].join(":"),
@@ -858,11 +911,9 @@ export function createStaticOutdoorPortalProjectionSourceKey(options: {
 		.filter((record) => record.landblockId === options.landblockId)
 		.flatMap((record) =>
 			record.envCells.flatMap((envCell) => [
-				[
-					"env-cell",
-					envCell.envCellId,
-					envCell.seenOutside ?? "unknown",
-				].join(":"),
+				["env-cell", envCell.envCellId, envCell.seenOutside ?? "unknown"].join(
+					":",
+				),
 				...envCell.portalApertures.map((aperture) =>
 					[
 						"aperture",
@@ -892,6 +943,7 @@ export function createStaticOutdoorPortalProjectionSourceKey(options: {
 		)
 		.sort();
 	return [
+		rootParts,
 		`landblock:${options.landblockId >>> 0}`,
 		...graphParts,
 		...interiorParts,
@@ -900,8 +952,8 @@ export function createStaticOutdoorPortalProjectionSourceKey(options: {
 }
 
 function compareProjectionEdges(
-	left: StaticOutdoorPortalProjectionEdge,
-	right: StaticOutdoorPortalProjectionEdge,
+	left: StaticPortalProjectionEdge,
+	right: StaticPortalProjectionEdge,
 ): number {
 	return left.edgeId.localeCompare(right.edgeId);
 }

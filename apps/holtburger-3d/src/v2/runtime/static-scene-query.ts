@@ -8,7 +8,7 @@ import type {
 	StaticDomain,
 	StaticAuthoredDynamicSeedRecord,
 	StaticEnvCellSpatialRecord,
-	StaticOutdoorPortalProjectionRecord,
+	StaticPortalProjectionRecord,
 	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
 	StaticScopePayload,
@@ -23,8 +23,9 @@ import type {
 	StaticVisibilityRecord,
 } from "../static/contracts";
 import {
-	createStaticOutdoorPortalProjection,
-	createStaticOutdoorPortalProjectionSourceKey,
+	createOutdoorPortalProjectionRoot,
+	createStaticPortalProjection,
+	createStaticPortalProjectionSourceKey,
 } from "../static/portal-graphs";
 import {
 	OUTDOOR_LANDBLOCK_WORLD_SIZE,
@@ -401,7 +402,7 @@ interface CachedPortalTraversalGraph {
 }
 
 interface CachedOutdoorPortalProjection {
-	readonly projection: StaticOutdoorPortalProjectionRecord | null;
+	readonly projection: StaticPortalProjectionRecord | null;
 	readonly sourceKey: string;
 }
 
@@ -1085,17 +1086,21 @@ export class StaticSceneQuery {
 
 	queryOutdoorPortalProjection(options: {
 		readonly landblockId: number;
-	}): StaticOutdoorPortalProjectionRecord | null {
+	}): StaticPortalProjectionRecord | null {
 		const landblockId = options.landblockId >>> 0;
 		const portalGraphs = this.queryPortalGraphs({ landblockId });
-		const portalInteriorRecords = this.queryPortalInteriorRecords({ landblockId });
+		const portalInteriorRecords = this.queryPortalInteriorRecords({
+			landblockId,
+		});
 		const transitionApertureBatches = this.queryTransitionApertureBatches({
 			landblockId,
 		});
-		const sourceKey = createStaticOutdoorPortalProjectionSourceKey({
+		const root = createOutdoorPortalProjectionRoot(landblockId);
+		const sourceKey = createStaticPortalProjectionSourceKey({
 			landblockId,
 			portalGraphs,
 			portalInteriorRecords,
+			root,
 			transitionApertureBatches,
 		});
 		const cached =
@@ -1103,10 +1108,11 @@ export class StaticSceneQuery {
 		if (cached?.sourceKey === sourceKey) {
 			return cached.projection;
 		}
-		const projection = createStaticOutdoorPortalProjection({
+		const projection = createStaticPortalProjection({
 			landblockId,
 			portalGraphs,
 			portalInteriorRecords,
+			root,
 			transitionApertureBatches,
 		});
 		this.#outdoorPortalProjectionCacheByLandblockId.set(landblockId, {
@@ -1665,7 +1671,9 @@ export class StaticSceneQuery {
 		this.#invalidateOutdoorPortalProjections(affectedLandblockIds);
 	}
 
-	#upsertCommittedPortalGraphs(records: readonly StaticPortalGraphRecord[]): void {
+	#upsertCommittedPortalGraphs(
+		records: readonly StaticPortalGraphRecord[],
+	): void {
 		const affectedLandblockIds = this.#collectOwnerReplacementLandblockIds(
 			this.#committedPortalGraphsByKey,
 			records,
@@ -1962,7 +1970,9 @@ export class StaticSceneQuery {
 				normalizedLandblockId,
 				this.#getPortalTraversalGraphRevision(normalizedLandblockId) + 1,
 			);
-			this.#portalTraversalGraphCacheByLandblockId.delete(normalizedLandblockId);
+			this.#portalTraversalGraphCacheByLandblockId.delete(
+				normalizedLandblockId,
+			);
 		}
 	}
 
@@ -1973,7 +1983,10 @@ export class StaticSceneQuery {
 	}
 
 	#getPortalTraversalGraphRevision(landblockId: number): number {
-		return this.#portalTraversalGraphRevisionsByLandblockId.get(landblockId >>> 0) ?? 0;
+		return (
+			this.#portalTraversalGraphRevisionsByLandblockId.get(landblockId >>> 0) ??
+			0
+		);
 	}
 
 	#pickOutdoorScene(
@@ -2995,7 +3008,10 @@ function compareCommittedRecords<TRecord>(
 	right: TRecord,
 ): number {
 	return (
-		compareStrings(getCommittedRecordDomain(left), getCommittedRecordDomain(right)) ||
+		compareStrings(
+			getCommittedRecordDomain(left),
+			getCommittedRecordDomain(right),
+		) ||
 		compareNullableNumbers(
 			getCommittedRecordLandblockId(left),
 			getCommittedRecordLandblockId(right),
@@ -3013,7 +3029,9 @@ function compareCommittedRecords<TRecord>(
 
 function createCommittedRecordSortKey(record: unknown): string {
 	if (!isRecordWithKind(record)) {
-		throw new Error("Static scene query cannot sort committed record without kind.");
+		throw new Error(
+			"Static scene query cannot sort committed record without kind.",
+		);
 	}
 
 	switch (record.kind) {
@@ -3022,7 +3040,9 @@ function createCommittedRecordSortKey(record: unknown): string {
 		case "env-cell-spatial":
 			return createCommittedSpatialRecordKey(record as StaticSpatialRecord);
 		case "env-cell-visibility":
-			return createCommittedVisibilityRecordKey(record as StaticVisibilityRecord);
+			return createCommittedVisibilityRecordKey(
+				record as StaticVisibilityRecord,
+			);
 		case "env-cell-portal-interior":
 			return createCommittedPortalInteriorRecordKey(
 				record as StaticPortalInteriorRecord,
@@ -3058,7 +3078,10 @@ function compareStrings(left: string, right: string): number {
 	return left.localeCompare(right);
 }
 
-function compareNullableNumbers(left: number | null, right: number | null): number {
+function compareNullableNumbers(
+	left: number | null,
+	right: number | null,
+): number {
 	return (left ?? -1) - (right ?? -1);
 }
 
@@ -3137,7 +3160,9 @@ function isRecordWithPeerOwner(record: unknown): record is {
 	);
 }
 
-function isRecordWithKind(record: unknown): record is { readonly kind: string } {
+function isRecordWithKind(
+	record: unknown,
+): record is { readonly kind: string } {
 	return (
 		typeof record === "object" &&
 		record !== null &&

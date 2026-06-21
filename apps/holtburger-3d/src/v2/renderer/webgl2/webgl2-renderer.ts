@@ -6,8 +6,8 @@ import type {
 	RendererFrameTelemetryListener,
 	RendererSnapshot,
 	RenderPassPlan,
-	OutdoorProjectionPortalFrameGraphPlan,
-	OutdoorProjectionPortalFrameMaskEdgePlan,
+	PortalProjectionFrameGraphPlan,
+	PortalProjectionFrameMaskEdgePlan,
 	PortalFrameEdgePlan,
 	PortalFrameGraphPlan,
 	PortalFrameNodePlan,
@@ -90,12 +90,12 @@ type DirectEnvCellTraversalPortalFrameWorkPlan = Extract<
 	readonly mode: "portal-traversal" | "portal-debug";
 	readonly graph: PortalFrameGraphPlan;
 };
-type DirectEnvCellOutdoorProjectionPortalFrameWorkPlan = Extract<
+type DirectEnvCellPortalProjectionFrameWorkPlan = Extract<
 	DirectEnvCellPortalFrameWorkPlan,
 	{ readonly kind: "direct-env-cell" }
 > & {
-	readonly mode: "outdoor-projection";
-	readonly layeredGraph: OutdoorProjectionPortalFrameGraphPlan;
+	readonly mode: "portal-projection";
+	readonly layeredGraph: PortalProjectionFrameGraphPlan;
 };
 
 const TERRAIN_ATLAS_MIP_GRADIENT_SCALE = 0.5;
@@ -1170,10 +1170,13 @@ class Webgl2Renderer implements Renderer {
 		const gl = this.#gl;
 		const aspectRatio =
 			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight);
+		const portalProjectionUsesExteriorBase =
+			plan.mode === "portal-projection" &&
+			plan.layeredGraph.baseEntry.scene.kind === "outdoor-target";
 		if (
 			(plan.mode === "portal-traversal" &&
 				getPortalFrameGraphBaseNode(plan).scene.kind === "outdoor-target") ||
-			plan.mode === "outdoor-projection"
+			portalProjectionUsesExteriorBase
 		) {
 			const targets = this.#ensureSceneDomainTargets(
 				gl.drawingBufferWidth,
@@ -1203,11 +1206,8 @@ class Webgl2Renderer implements Renderer {
 			const targetAspectRatio =
 				targets.compositePing.width / Math.max(1, targets.compositePing.height);
 			this.#lastDirectEnvCellDrawCalls =
-				plan.mode === "outdoor-projection"
-					? this.#drawOutdoorProjectionPortalFrameResources(
-							plan,
-							targetAspectRatio,
-						)
+				plan.mode === "portal-projection"
+					? this.#drawPortalProjectionFrameResources(plan, targetAspectRatio)
 					: this.#drawDirectEnvCellResources(plan, targetAspectRatio);
 			this.#blitSceneDomainColorToDisplay(targets.compositePing);
 			return;
@@ -1228,10 +1228,10 @@ class Webgl2Renderer implements Renderer {
 			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
 		);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
-		this.#lastDirectEnvCellDrawCalls = this.#drawDirectEnvCellResources(
-			plan,
-			aspectRatio,
-		);
+		this.#lastDirectEnvCellDrawCalls =
+			plan.mode === "portal-projection"
+				? this.#drawPortalProjectionFrameResources(plan, aspectRatio)
+				: this.#drawDirectEnvCellResources(plan, aspectRatio);
 	}
 
 	#renderSceneDomainTargets(
@@ -1758,8 +1758,8 @@ class Webgl2Renderer implements Renderer {
 		return drawCalls;
 	}
 
-	#drawOutdoorProjectionPortalFrameResources(
-		plan: DirectEnvCellOutdoorProjectionPortalFrameWorkPlan,
+	#drawPortalProjectionFrameResources(
+		plan: DirectEnvCellPortalProjectionFrameWorkPlan,
 		aspectRatio: number,
 	): number {
 		const gl = this.#gl;
@@ -1772,30 +1772,36 @@ class Webgl2Renderer implements Renderer {
 			plan.layeredGraph.maskEdges.map((edge) => [edge.edgeId, edge] as const),
 		);
 		let drawCalls = 0;
+		if ("resources" in plan.layeredGraph.baseEntry) {
+			drawCalls += this.#drawPortalFrameResourceSet(
+				plan.layeredGraph.baseEntry.resources,
+				aspectRatio,
+			);
+		}
 		for (const layer of plan.layeredGraph.renderLayers) {
 			let layerMaskCount = 0;
 			for (const renderEntryId of layer.renderEntryIds) {
 				const renderEntry = renderEntryById.get(renderEntryId);
 				if (!renderEntry) {
 					throw new Error(
-						`Outdoor projection layer ${layer.renderLayer} references missing render entry ${renderEntryId}.`,
+						`Portal projection layer ${layer.renderLayer} references missing render entry ${renderEntryId}.`,
 					);
 				}
 				for (const maskEdgeId of renderEntry.incomingMaskEdgeIds) {
 					const edge = maskEdgeById.get(maskEdgeId);
 					if (!edge) {
 						throw new Error(
-							`Outdoor projection render entry ${renderEntryId} references missing mask edge ${maskEdgeId}.`,
+							`Portal projection render entry ${renderEntryId} references missing mask edge ${maskEdgeId}.`,
 						);
 					}
 					const apertureRange = this.#portalApertureRangesById.get(
 						edge.apertureResourceId,
 					);
 					if (!apertureRange) {
-						this.#warnMissingOutdoorProjectionPortalApertureRange(edge);
+						this.#warnMissingPortalProjectionPortalApertureRange(edge);
 						continue;
 					}
-					this.#drawOutdoorProjectionApertureStencilMask(edge, apertureRange, {
+					this.#drawPortalProjectionApertureStencilMask(edge, apertureRange, {
 						aspectRatio,
 					});
 					layerMaskCount += 1;
@@ -1819,7 +1825,7 @@ class Webgl2Renderer implements Renderer {
 				const renderEntry = renderEntryById.get(renderEntryId);
 				if (!renderEntry) {
 					throw new Error(
-						`Outdoor projection layer ${layer.renderLayer} references missing render entry ${renderEntryId}.`,
+						`Portal projection layer ${layer.renderLayer} references missing render entry ${renderEntryId}.`,
 					);
 				}
 				drawCalls += this.#drawPortalFrameResourceSet(
@@ -2038,8 +2044,8 @@ class Webgl2Renderer implements Renderer {
 		}
 	}
 
-	#drawOutdoorProjectionApertureStencilMask(
-		edge: OutdoorProjectionPortalFrameMaskEdgePlan,
+	#drawPortalProjectionApertureStencilMask(
+		edge: PortalProjectionFrameMaskEdgePlan,
 		apertureRange: PortalApertureRangeResource,
 		options: { readonly aspectRatio: number },
 	): void {
@@ -2520,8 +2526,8 @@ class Webgl2Renderer implements Renderer {
 		);
 	}
 
-	#warnMissingOutdoorProjectionPortalApertureRange(
-		edge: OutdoorProjectionPortalFrameMaskEdgePlan,
+	#warnMissingPortalProjectionPortalApertureRange(
+		edge: PortalProjectionFrameMaskEdgePlan,
 	): void {
 		if (
 			this.#warnedMissingPortalApertureRangeIds.has(edge.apertureResourceId)
@@ -2530,7 +2536,7 @@ class Webgl2Renderer implements Renderer {
 		}
 		this.#warnedMissingPortalApertureRangeIds.add(edge.apertureResourceId);
 		console.error(
-			`Outdoor projection portal edge ${edge.linkId} references missing portal aperture range ${edge.apertureResourceId}; dropping mask draw.`,
+			`Portal projection edge ${edge.linkId} references missing portal aperture range ${edge.apertureResourceId}; dropping mask draw.`,
 			{
 				apertureSourceId: edge.apertureSourceId,
 				renderEntryId: edge.renderEntryId,
@@ -2611,7 +2617,7 @@ class Webgl2Renderer implements Renderer {
 		const directEnvCellFramePlanActive = directEnvCellFramePlan !== null;
 		const directOutdoorTargetFramePlanActive =
 			directEnvCellFramePlan !== null &&
-			(directEnvCellFramePlan.mode === "outdoor-projection" ||
+			(directEnvCellFramePlan.mode === "portal-projection" ||
 				getPortalFrameGraphBaseNode(directEnvCellFramePlan).scene.kind ===
 					"outdoor-target");
 		return {

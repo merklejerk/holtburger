@@ -1800,6 +1800,32 @@ Dry-run findings on 2026-06-21:
   - `npm run lint:ts`;
   - `npm run test:ts -- src/v2/static/portal-graphs.test.ts src/v2/runtime/static-scene-query.test.ts`.
 
+9E.3 implementation update on 2026-06-21:
+
+- Generalized renderer-facing projection frame-plan contracts:
+  - `OutdoorProjectionPortalFrame*` contracts are now `PortalProjectionFrame*`;
+  - projection frame-plan mode is now `"portal-projection"`;
+  - projection frame-plan cap inputs/counters now use `maxRenderEntries` and `maxMaskEdges` instead of traversal-flavored `maxCells` and `maxPortalViews`.
+- `createPortalProjectionFramePlan(...)` now supports both root policies:
+  - outdoor roots create an outdoor base entry and masked env-cell render entries, preserving current outdoor behavior;
+  - env-cell roots create an env-cell-direct base entry with resources, skip the resident env cell as a masked render entry, and create masked descendant entries from projection layers.
+- `PortalProjectionFrameBaseEntryPlan` is now a root variant:
+  - outdoor base entries carry only an outdoor scene;
+  - env-cell base entries carry the resident env-cell scene and resources for unmasked root drawing.
+- `Webgl2Renderer` now routes `"portal-projection"` by root base scene:
+  - outdoor projection still renders over the exterior scene-domain target;
+  - env-cell-root projection clears the direct target, draws the base entry unmasked, then draws masked descendant layers.
+- HUD/frame-plan equality/debug summaries now use generic projection naming and projection-specific cap counters.
+- Added a focused frame-plan test proving an env-cell-root projection renders the resident cell as the base entry, not as a masked render entry.
+- Debt introduced/retained:
+  - `ClientRuntime` still only calls `queryOutdoorPortalProjection(...)`; env-cell residency remains on `PortalTraversalPlan` until 9E.4.
+  - Runtime projection cache key kind is still named `"outdoor-transition"` for the outdoor projection branch. It is accurate for the current caller, but should be revisited if 9E.4 shares the cache key shape for env-cell projection.
+  - WebGL env-cell-root projection has not been screenshot-validated yet because production runtime is not cut over. 9E.4 should include a visual smoke pass once the env-cell branch uses projection.
+- Validation for this slice:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts`.
+
 Acceptance criteria:
 
 - Dungeon/env-cell-origin direct rendering no longer depends on recursive portal-stack `PortalFrameGraphPlan` for production planning.

@@ -2,7 +2,6 @@ import type {
 	PortalApertureFrameDiagnostics,
 	PortalApertureGeometryResourcePlan,
 	PortalApertureSourceKind,
-	PortalApertureVertex,
 } from "../renderer/types";
 
 export interface PortalApertureFrameResourcePlan {
@@ -16,7 +15,6 @@ export interface PortalApertureEdgeResourceInput {
 	readonly duplicateKeyParts: readonly (number | string)[];
 	readonly linkId: string;
 	readonly sourceKind: PortalApertureSourceKind;
-	readonly vertices: readonly PortalApertureVertex[];
 }
 
 export class PortalApertureFrameResourceBuilder {
@@ -31,9 +29,6 @@ export class PortalApertureFrameResourceBuilder {
 	#envCellPortalEdges = 0;
 
 	addEdgeResource(input: PortalApertureEdgeResourceInput): string | null {
-		if (input.vertices.length === 0) {
-			return null;
-		}
 		const edgeKey = createPortalApertureEdgeKey(input);
 		if (this.#duplicateEdgeKeys.has(edgeKey)) {
 			this.#duplicateMaskEdges += 1;
@@ -43,7 +38,6 @@ export class PortalApertureFrameResourceBuilder {
 
 		const resource = this.#getOrCreateGeometryResource(
 			input.apertureResourceId,
-			input.vertices,
 			input.sourceKind,
 		);
 		if (input.sourceKind === "building-transition") {
@@ -84,7 +78,6 @@ export class PortalApertureFrameResourceBuilder {
 
 	#getOrCreateGeometryResource(
 		resourceId: string,
-		vertices: readonly PortalApertureVertex[],
 		sourceKind: PortalApertureSourceKind,
 	): PortalApertureGeometryResourcePlan {
 		const existingResource = this.#resourcesById.get(resourceId);
@@ -108,7 +101,6 @@ export class PortalApertureFrameResourceBuilder {
 		const resource: PortalApertureGeometryResourcePlan = {
 			resourceId,
 			sourceKinds: [sourceKind],
-			vertices,
 		};
 		this.#resourcesById.set(resourceId, resource);
 		this.#resources.push(resource);

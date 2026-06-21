@@ -62,6 +62,7 @@ export interface StaticRetentionReconciliation {
 
 export type StaticResourceKey =
 	| StaticDrawUnitResourceKey
+	| StaticPortalApertureResourceKey
 	| StaticTransitionApertureBatchResourceKey;
 
 export interface StaticDrawUnitResourceKey {
@@ -72,6 +73,11 @@ export interface StaticDrawUnitResourceKey {
 export interface StaticTransitionApertureBatchResourceKey {
 	readonly kind: "transition-aperture-batch";
 	readonly apertureBatchId: string;
+}
+
+export interface StaticPortalApertureResourceKey {
+	readonly kind: "portal-aperture-resource";
+	readonly apertureResourceId: string;
 }
 
 export function collectStaticDrawUnitResourceIds(
@@ -88,6 +94,16 @@ export function collectStaticTransitionApertureBatchResourceIds(
 	return resources.flatMap((resource) =>
 		resource.kind === "transition-aperture-batch"
 			? [resource.apertureBatchId]
+			: [],
+	);
+}
+
+export function collectStaticPortalApertureResourceIds(
+	resources: readonly StaticResourceKey[],
+): readonly string[] {
+	return resources.flatMap((resource) =>
+		resource.kind === "portal-aperture-resource"
+			? [resource.apertureResourceId]
 			: [],
 	);
 }
@@ -1007,6 +1023,7 @@ export interface StaticBakeBatchResult {
 	readonly revision: number;
 	readonly works: readonly ScheduledStaticWork[];
 	readonly drawUnits: readonly StaticDrawUnit[];
+	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly transitionApertureBatches: readonly TransitionApertureBatch[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
@@ -1457,6 +1474,7 @@ export interface StaticCoordinatorSnapshot {
 export interface StaticCoordinatorCommitDelta {
 	readonly staticBatchId: string;
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
+	readonly addedPortalApertureResources: readonly StaticPortalApertureResource[];
 	readonly addedTransitionApertureBatches: readonly TransitionApertureBatch[];
 	readonly removedResources: readonly StaticResourceKey[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
@@ -1468,6 +1486,29 @@ export interface StaticCoordinatorCommitDelta {
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly revision: number;
+}
+
+export type PortalApertureResourceSourceKind =
+	| "env-cell-portal"
+	| "building-transition";
+
+export interface StaticPortalApertureResource {
+	readonly kind: "portal-aperture-resource";
+	readonly apertureResourceId: string;
+	readonly coordinateSpace: "landblock-render-local";
+	readonly landblockId: number;
+	readonly indices: readonly number[];
+	readonly ranges: readonly StaticPortalApertureRange[];
+	readonly sourceDomain: StaticDomain;
+	readonly vertices: readonly StaticVec3[];
+}
+
+export interface StaticPortalApertureRange {
+	readonly rangeId: string;
+	readonly sourceId: string;
+	readonly sourceKind: PortalApertureResourceSourceKind;
+	readonly firstIndex: number;
+	readonly indexCount: number;
 }
 
 export type TransitionApertureFrontFace = "indoor-visible";

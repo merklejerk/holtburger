@@ -24,6 +24,7 @@ import type {
 	TransitionApertureBatch,
 } from "../../contracts";
 import { describeStaticScopeKey } from "../../demand-planner";
+import { createTransitionPortalApertureResource } from "../../portal-aperture-resources";
 import { createTransitionStaticPortalGraph } from "../../portal-graphs";
 import {
 	AC_UNIT_SCALE,
@@ -87,6 +88,9 @@ export function bakeStaticObjectCompatibility(
 		domain: input.domain,
 		drawUnits,
 		materialCoverage: itemResults.map((result) => result.materialCoverage),
+		portalApertureResources: transitionApertureBatches.map(
+			createTransitionPortalApertureResource,
+		),
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: [],
 		staticBatchId: input.staticBatchId,

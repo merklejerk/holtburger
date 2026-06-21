@@ -700,6 +700,51 @@ Acceptance criteria:
 - Dynamic VBO usage remains only for debug overlay or explicitly dynamic data.
 - Env-cell portal apertures and building-transition apertures differ by provenance and scene-crossing metadata, not by renderer resource architecture.
 
+Status: Complete.
+
+Implementation notes:
+
+- Added a source-tagged `StaticPortalApertureResource` contract with stable range ids, source ids, source kind metadata, landblock render-local vertices, and indexed ranges.
+- Env-cell baking now emits portal aperture resources from `StaticPortalInteriorRecord` portal apertures, transformed once into landblock render-local space.
+- Static object compatibility baking adapts building transition aperture batches into the same source-tagged portal aperture resource model.
+- Static coordinator commit deltas, static materialization, and renderer residency deltas now carry added/removed portal aperture resources beside draw units.
+- Direct portal frame plans now keep only aperture resource/range references and source kinds. They no longer carry transformed aperture triangle arrays.
+- Runtime direct frame planning selects env-cell and transition aperture range ids through shared static aperture id helpers instead of triangulating/copying vertices into the frame plan.
+- `Webgl2Renderer` uploads portal aperture resources on static delta, maintains a range-id lookup, and draws direct portal stencil masks with existing VAOs and indexed ranges.
+- Removed the old renderer scratch portal aperture VAO/VBO used only for dynamic direct-mask uploads.
+- Missing direct portal aperture ranges now log a clear `console.error(...)` once per range id and drop the mask draw.
+
+Temporary adapter list:
+
+- `TransitionApertureBatch` still exists as a bake/source adapter and as the legacy scene-domain compositor resource. Direct portal masks no longer consume it directly.
+- `createTransitionPortalApertureResource(...)` adapts transition aperture batches into `StaticPortalApertureResource` during the migration.
+- Transition aperture debug overlays still read `TransitionApertureBatch` geometry for diagnostic visualization.
+
+Validation:
+
+- `npm run check`
+- `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/static-materializer.test.ts src/v2/static/coordinator/static-coordinator.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts src/v2/runtime/client-runtime.test.ts`
+- `npm run test:ts`
+- `npm run lint:ts`
+
+Spicy notes:
+
+- This phase removes the insane part: production direct portal masks no longer allocate/flatten/upload aperture vertices during renderer graph execution.
+- The direct graph executor still iterates mask edges and draw groups per frame. Phase 7 fixed geometry residency and upload behavior, not broader draw-submission cost.
+- `TransitionApertureBatch` is still alive because the legacy scene-domain compositor and debug overlay still depend on it. That is explicitly temporary, not a second production resource architecture for direct masks.
+
+Failed to close in Phase 7:
+
+- The legacy scene-domain transition compositor still has a transition-specific aperture resource path. Phase 8/9 must either move that compositor onto source-tagged portal aperture resources or delete the path if the direct pipeline replaces it.
+- The portal frame plan still carries an `apertureResources` summary list for diagnostics/equality. It is now metadata-only, but Phase 9 should decide whether direct plans need that list at all.
+- Phase 6 still keys outdoor-transition frame plans with `transitionApertureRevision`; that should become unified portal aperture resource revisioning.
+
+Debt to track:
+
+- Collapse transition aperture DTO usage down to source/bake input and diagnostics only.
+- Rename transition-specific diagnostics once Phase 8 makes planning/execution more isomorphic.
+- Re-profile direct portal execution after Phase 8/9; the remaining bottleneck should be draw submission/static material binding, not per-mask geometry upload.
+
 ### Phase 8: Enforce Isomorphic Portal Planning And Execution
 
 Deliverables:

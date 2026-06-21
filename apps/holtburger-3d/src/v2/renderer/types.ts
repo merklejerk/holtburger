@@ -1,4 +1,5 @@
 import type {
+	StaticPortalApertureResource,
 	StaticDrawUnit,
 	TransitionApertureBatch,
 } from "../static/contracts";
@@ -27,8 +28,10 @@ export interface FrameState {
 
 export interface StaticResidencyDelta {
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
+	readonly addedPortalApertureResources: readonly StaticPortalApertureResource[];
 	readonly addedTransitionApertureBatches: readonly TransitionApertureBatch[];
 	readonly removedDrawUnitIds: readonly string[];
+	readonly removedPortalApertureResourceIds: readonly string[];
 	readonly removedTransitionApertureBatchIds: readonly string[];
 	readonly revision: number;
 }
@@ -260,8 +263,6 @@ export type PortalFrameSceneSource =
 			readonly landblockId: number;
 	  };
 
-export type PortalApertureVertex = readonly [number, number, number];
-
 export type PortalApertureSourceKind =
 	| "env-cell-portal"
 	| "building-transition";
@@ -269,7 +270,6 @@ export type PortalApertureSourceKind =
 export interface PortalApertureGeometryResourcePlan {
 	readonly resourceId: string;
 	readonly sourceKinds: readonly PortalApertureSourceKind[];
-	readonly vertices: readonly PortalApertureVertex[];
 }
 
 export interface PortalApertureFrameDiagnostics {

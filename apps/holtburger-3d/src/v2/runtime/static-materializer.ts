@@ -7,6 +7,7 @@ import {
 } from "../renderer/types";
 import {
 	collectStaticDrawUnitResourceIds,
+	collectStaticPortalApertureResourceIds,
 	collectStaticTransitionApertureBatchResourceIds,
 } from "../static/contracts";
 import type {
@@ -83,9 +84,13 @@ export function materializeStaticCommit(
 		...materializeStaticPeerRecords(input.commit, finePartitioned),
 		staticDelta: {
 			addedDrawUnits: finePartitioned.drawUnits,
+			addedPortalApertureResources:
+				input.commit.addedPortalApertureResources ?? [],
 			addedTransitionApertureBatches:
 				input.commit.addedTransitionApertureBatches,
 			removedDrawUnitIds: collectStaticDrawUnitResourceIds(removedResources),
+			removedPortalApertureResourceIds:
+				collectStaticPortalApertureResourceIds(removedResources),
 			removedTransitionApertureBatchIds:
 				collectStaticTransitionApertureBatchResourceIds(removedResources),
 			revision: input.commit.revision,

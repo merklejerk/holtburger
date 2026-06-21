@@ -178,6 +178,18 @@ export function createBuildingTransitionApertureSourceId(options: {
 	].join(":");
 }
 
+export function createBuildingTransitionTargetEnvCellId(
+	batch: TransitionApertureBatch,
+	range: TransitionApertureBatch["ranges"][number],
+): number {
+	if (range.source.otherCellId === 0xffff) {
+		throw new Error(
+			`Building transition aperture ${range.portalId} in ${batch.apertureBatchId} does not target an env cell.`,
+		);
+	}
+	return ((batch.landblockId & 0xffff_0000) | range.source.otherCellId) >>> 0;
+}
+
 function createEnvCellPortalApertureResourceId(landblockId: number): string {
 	return `portal-aperture-resource:landblock-env-cells:${formatHex32(landblockId)}`;
 }

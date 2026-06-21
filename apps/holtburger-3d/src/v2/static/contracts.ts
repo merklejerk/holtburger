@@ -930,7 +930,7 @@ export type StaticPortalGraphEdgeProvenance =
 			readonly portalId: string;
 			readonly buildingInstanceId: string;
 			readonly buildingPortalId: string;
-			readonly linkedEnvCellId: number;
+			readonly targetEnvCellId: number;
 	  };
 
 export type StaticPortalGraphSceneCrossing =

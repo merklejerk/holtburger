@@ -8,6 +8,7 @@ import type {
 	StaticWorkPeerRecordOwner,
 	TransitionApertureBatch,
 } from "./contracts";
+import { createBuildingTransitionTargetEnvCellId } from "./portal-aperture-resources";
 
 export function createEnvCellStaticPortalGraph(
 	owner: StaticWorkPeerRecordOwner,
@@ -49,47 +50,45 @@ export function createTransitionStaticPortalGraph(
 
 	const edges: StaticPortalGraphEdge[] = [];
 	for (const range of batch.ranges) {
-		for (const linkedEnvCellId of range.source.linkedEnvCellIds) {
-			const envCellId = linkedEnvCellId >>> 0;
-			const envCellNode = createPortalGraphNode({
+		const envCellId = createBuildingTransitionTargetEnvCellId(batch, range);
+		const envCellNode = createPortalGraphNode({
+			envCellId,
+			kind: "env-cell",
+		});
+		nodesById.set(envCellNode.nodeId, envCellNode);
+		edges.push({
+			direction: "directed",
+			edgeId: [
+				"building-transition",
+				batch.apertureBatchId,
+				range.portalId,
 				envCellId,
-				kind: "env-cell",
-			});
-			nodesById.set(envCellNode.nodeId, envCellNode);
-			edges.push({
-				direction: "directed",
-				edgeId: [
-					"building-transition",
-					batch.apertureBatchId,
-					range.portalId,
-					envCellId,
-				].join(":"),
-				flags: 0,
-				linkId: [
-					"transition",
-					batch.apertureBatchId,
-					range.portalId,
-					envCellId,
-				].join(":"),
-				polygonId: range.source.polyId,
-				provenance: {
-					apertureBatchId: batch.apertureBatchId,
-					buildingInstanceId: range.source.buildingInstanceId,
-					buildingPortalId: range.source.buildingPortalId,
-					kind: "building-transition",
-					linkedEnvCellId: envCellId,
-					portalId: range.portalId,
-				},
-				sceneCrossing: {
-					envCellId,
-					kind: "outdoor-to-env-cell",
-					outdoorLandblockId: batch.landblockId,
-				},
-				sourceIndex: range.source.buildingPortalSourceIndex,
-				sourceNodeId: outdoorNode.nodeId,
-				targetNodeId: envCellNode.nodeId,
-			});
-		}
+			].join(":"),
+			flags: 0,
+			linkId: [
+				"transition",
+				batch.apertureBatchId,
+				range.portalId,
+				envCellId,
+			].join(":"),
+			polygonId: range.source.polyId,
+			provenance: {
+				apertureBatchId: batch.apertureBatchId,
+				buildingInstanceId: range.source.buildingInstanceId,
+				buildingPortalId: range.source.buildingPortalId,
+				kind: "building-transition",
+				portalId: range.portalId,
+				targetEnvCellId: envCellId,
+			},
+			sceneCrossing: {
+				envCellId,
+				kind: "outdoor-to-env-cell",
+				outdoorLandblockId: batch.landblockId,
+			},
+			sourceIndex: range.source.buildingPortalSourceIndex,
+			sourceNodeId: outdoorNode.nodeId,
+			targetNodeId: envCellNode.nodeId,
+		});
 	}
 
 	return {

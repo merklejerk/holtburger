@@ -6,6 +6,7 @@ import type {
 } from "../static/contracts";
 
 export interface PortalTraversalRequest {
+	readonly allowedEnvCellIds?: ReadonlySet<number>;
 	readonly landblockId: number;
 	readonly maxCells: number;
 	readonly maxDepth: number;
@@ -78,6 +79,10 @@ export type PortalTraversalDiagnostic =
 			readonly landblockId: number;
 	  }
 	| {
+			readonly kind: "disallowed-target-cell";
+			readonly edge: PortalTraversalEnvCellEdge;
+	  }
+	| {
 			readonly kind: "depth-limit";
 			readonly edge: PortalTraversalEnvCellEdge;
 			readonly maxDepth: number;
@@ -128,6 +133,7 @@ export function createPortalTraversalPlan(
 		portalInteriorRecords: request.portalInteriorRecords,
 	});
 	return createPortalTraversalPlanFromGraph({
+		allowedEnvCellIds: request.allowedEnvCellIds,
 		graph,
 		landblockId,
 		maxCells: request.maxCells,
@@ -138,6 +144,7 @@ export function createPortalTraversalPlan(
 }
 
 export function createPortalTraversalPlanFromGraph(request: {
+	readonly allowedEnvCellIds?: ReadonlySet<number>;
 	readonly graph: PortalTraversalGraph;
 	readonly landblockId: number;
 	readonly maxCells: number;
@@ -227,6 +234,16 @@ export function createPortalTraversalPlanFromGraph(request: {
 				diagnostics.push({
 					edge,
 					kind: "missing-target-cell",
+				});
+				continue;
+			}
+			if (
+				request.allowedEnvCellIds &&
+				!request.allowedEnvCellIds.has(edge.targetEnvCellId)
+			) {
+				diagnostics.push({
+					edge,
+					kind: "disallowed-target-cell",
 				});
 				continue;
 			}

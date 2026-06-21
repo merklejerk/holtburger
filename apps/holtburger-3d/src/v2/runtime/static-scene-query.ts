@@ -1059,6 +1059,7 @@ export class StaticSceneQuery {
 	}
 
 	queryPortalTraversal(options: {
+		readonly allowedEnvCellIds?: ReadonlySet<number>;
 		readonly landblockId: number;
 		readonly maxCells: number;
 		readonly maxDepth: number;
@@ -1067,6 +1068,7 @@ export class StaticSceneQuery {
 	}): PortalTraversalPlan {
 		const landblockId = options.landblockId >>> 0;
 		return createPortalTraversalPlanFromGraph({
+			allowedEnvCellIds: options.allowedEnvCellIds,
 			graph: this.queryPortalTraversalGraph({ landblockId }),
 			landblockId,
 			maxCells: options.maxCells,

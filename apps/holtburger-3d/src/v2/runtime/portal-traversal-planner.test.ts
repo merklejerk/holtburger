@@ -146,6 +146,87 @@ describe("portal traversal planner", () => {
 		);
 	});
 
+	it("keeps traversal unrestricted when no allowed env-cell set is provided", () => {
+		const plan = createPortalTraversalPlan({
+			landblockId: 0xda55ffff,
+			maxCells: 8,
+			maxDepth: 4,
+			maxPortalViews: 16,
+			portalInteriorRecords: [
+				createPortalInteriorRecord({
+					envCellIds: [0xda550100, 0xda550101, 0xda550102],
+					portalLinks: [
+						createEnvCellPortalLink({
+							linkId: "a-to-b",
+							sourceEnvCellId: 0xda550100,
+							targetEnvCellId: 0xda550101,
+						}),
+						createEnvCellPortalLink({
+							linkId: "b-to-c",
+							sourceEnvCellId: 0xda550101,
+							targetEnvCellId: 0xda550102,
+						}),
+					],
+				}),
+			],
+			startEnvCellId: 0xda550100,
+		});
+
+		expect(plan.visibleCells.map((cell) => cell.envCellId)).toEqual([
+			0xda550100, 0xda550101, 0xda550102,
+		]);
+		expect(plan.portalViewGroups.map((group) => group.envCellId)).toEqual([
+			0xda550100, 0xda550101, 0xda550102,
+		]);
+	});
+
+	it("prunes disallowed env-cell targets before creating portal-stack views", () => {
+		const plan = createPortalTraversalPlan({
+			allowedEnvCellIds: new Set([0xda550100, 0xda550102]),
+			landblockId: 0xda55ffff,
+			maxCells: 8,
+			maxDepth: 4,
+			maxPortalViews: 16,
+			portalInteriorRecords: [
+				createPortalInteriorRecord({
+					envCellIds: [0xda550100, 0xda550101, 0xda550102],
+					portalLinks: [
+						createEnvCellPortalLink({
+							linkId: "a-to-b",
+							sourceEnvCellId: 0xda550100,
+							targetEnvCellId: 0xda550101,
+						}),
+						createEnvCellPortalLink({
+							linkId: "b-to-c",
+							sourceEnvCellId: 0xda550101,
+							targetEnvCellId: 0xda550102,
+						}),
+					],
+				}),
+			],
+			startEnvCellId: 0xda550100,
+		});
+
+		expect(plan.visibleCells.map((cell) => cell.envCellId)).toEqual([
+			0xda550100,
+		]);
+		expect(plan.portalViewGroups.map((group) => group.envCellId)).toEqual([
+			0xda550100,
+		]);
+		expect(plan.diagnostics).toContainEqual({
+			edge: expect.objectContaining({
+				linkId: "a-to-b",
+				targetEnvCellId: 0xda550101,
+			}),
+			kind: "disallowed-target-cell",
+		});
+		expect(plan.diagnostics).not.toContainEqual(
+			expect.objectContaining({
+				edge: expect.objectContaining({ linkId: "b-to-c" }),
+			}),
+		);
+	});
+
 	it("records depth-limit rejection diagnostics", () => {
 		const plan = createPortalTraversalPlan({
 			landblockId: 0xda55ffff,

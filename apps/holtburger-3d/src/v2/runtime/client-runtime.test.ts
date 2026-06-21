@@ -488,6 +488,17 @@ describe("V2 client runtime", () => {
 			kind: "direct-env-cell",
 			mode: "portal-traversal",
 		});
+		const cachedPortalFrameWorkPlanCount = renderer.portalFrameWorkPlans.length;
+
+		runtime.setCurrentCameraResidency({
+			envCellId: 0xda550100,
+			kind: "env-cell",
+			landblockId: 0xda55ffff,
+		});
+
+		expect(renderer.portalFrameWorkPlans).toHaveLength(
+			cachedPortalFrameWorkPlanCount,
+		);
 
 		runtime.setDirectEnvCellPortalMaxDepth(0);
 
@@ -508,6 +519,18 @@ describe("V2 client runtime", () => {
 				? renderer.portalFrameWorkPlans.at(-1)?.graph.nodes.length
 				: 0,
 		).toBe(1);
+		const depthChangedPortalFrameWorkPlanCount =
+			renderer.portalFrameWorkPlans.length;
+
+		runtime.setCurrentCameraResidency({
+			envCellId: 0xda550101,
+			kind: "env-cell",
+			landblockId: 0xda55ffff,
+		});
+
+		expect(renderer.portalFrameWorkPlans.length).toBeGreaterThan(
+			depthChangedPortalFrameWorkPlanCount,
+		);
 
 		runtime.dispose();
 	});

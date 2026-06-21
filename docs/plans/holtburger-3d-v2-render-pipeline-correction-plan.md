@@ -644,6 +644,43 @@ Acceptance criteria:
 - Changing residency, portal cap, resource membership revision, or committed static revision invalidates the cached frame plan.
 - Tests prove ordinary renderer frame events and camera pose updates do not rederive portal frame plans.
 
+Status: Complete.
+
+Implementation notes:
+
+- Added a runtime-local `PortalFramePlanKey` for direct env-cell and outdoor-transition frame plans.
+- `ClientRuntime` now caches the last direct portal frame plan by semantic key.
+- Direct env-cell keys include camera residency, direct portal caps, render anchor, env-cell resource membership revision, and portal traversal graph revision.
+- Outdoor-transition keys include landblock, direct portal caps, render anchor, env-cell resource membership revision, portal traversal graph revision, and transition aperture revision.
+- `#updateRenderPassPlan()` now skips the expensive `portalFrameWorkPlanEquals(...)` graph comparison when the semantic cache returns the same plan object.
+- `StaticSceneQuery` exposes `queryPortalTraversalGraphRevision(...)` so runtime keys can depend on committed portal topology without reaching into query internals.
+- Runtime tests now assert repeated same-residency updates do not push new portal frame plans, while portal cap and residency changes do.
+
+Validation:
+
+- `npm run test:ts -- src/v2/runtime/client-runtime.test.ts src/v2/runtime/static-scene-query.test.ts`
+- `npm run check`
+- `npm run test:ts`
+- `npm run lint:ts`
+
+Spicy notes:
+
+- This phase caches only the final direct portal frame plan. It intentionally does not add a separate traversal-plan cache by start cell/caps because the frame-plan key is the broader semantic boundary that Phase 6 needed.
+- Legacy portal frame plans still use the old lightweight equality path. The heavy deep graph comparison is avoided when a direct portal frame plan cache hit returns the existing object.
+- The transition aperture revision is a deterministic semantic string over batch/range identities. This is a temporary key component until Phase 7 replaces transition-specific aperture batches with unified portal aperture resources.
+
+Failed to close in Phase 6:
+
+- Renderer execution is still expensive. The capture after Phase 5 already showed cost concentrated in direct portal graph child execution, aperture stencil masks, and static material draw submission.
+- Portal aperture mask draws still carry frame-local geometry/dynamic upload behavior. Phase 7 remains the real renderer-resource cutover.
+- There is still one cached frame plan, not a multi-entry LRU. That matches the current camera/residency workflow; broader caching can wait until profiling proves it matters.
+
+Debt to track:
+
+- Phase 7 should replace the transition aperture revision string with unified aperture resource revisioning.
+- After Phase 7, re-check whether `portalFrameWorkPlanEquals(...)` can be reduced to tests/diagnostics only for direct plans.
+- If users rapidly switch between multiple portal roots, consider a small key-indexed frame plan cache, but do not add it without profiling evidence.
+
 ### Phase 7: Promote Portal Apertures To Static GPU Resources
 
 Deliverables:

@@ -1189,50 +1189,7 @@
 			const projection = graph.projectionDiagnostics;
 			return `${plan.mode} base ${base} entries ${graph.renderEntries.length}/${projection.projectedEnvCellCount} cells layers ${graph.renderLayers.length} max ${projection.maxSelectedRenderLayer}/${projection.maxProjectionRenderLayer} missing ${missingResourceCells} masks ${graph.maskEdges.length} apertures ${graph.apertureResources.length} edges ${aperture.envCellPortalEdges} env / ${aperture.buildingTransitionEdges} transition dup ${aperture.duplicateMaskEdges} dedupe ${aperture.dedupedGeometryResources} roots ${aperture.transitionRootCount}/${aperture.transitionRootCandidateCount} components ${projection.componentCount} cyclic ${projection.cyclicComponentCount} internal ${projection.componentInternalEdgeCount} skipped ${projection.renderEntriesSkippedByLayerCap} layer / ${projection.renderEntriesSkippedByMaxRenderEntries} entry-cap / ${projection.maskEdgesSkippedByMaxMaskEdges} mask-cap resources ${structuredDrawUnits} cell / ${staticDrawUnits} static`;
 		}
-
-		const graph = plan.graph;
-		const baseNode = graph.nodes.find(
-			(node) => node.nodeId === graph.baseNodeId,
-		);
-		if (!baseNode) {
-			return `${plan.mode} invalid graph missing base ${graph.baseNodeId}`;
-		}
-		const base =
-			baseNode.scene.kind === "outdoor-target"
-				? `outdoor ${formatHexId(baseNode.scene.landblockId)}`
-				: `env ${formatHexId(baseNode.scene.landblockId)} / ${formatHexId(baseNode.scene.envCellId)}`;
-		const envCellNodes = graph.nodes.filter(
-			(node) => node.scene.kind === "env-cell-direct",
-		);
-		const missingResourceCells = envCellNodes.filter(
-			(node) => node.resources.resourceState === "missing-resources",
-		).length;
-		const uniqueCells = new Set(
-			envCellNodes.map((node) =>
-				node.scene.kind === "env-cell-direct"
-					? `${node.scene.landblockId >>> 0}:${node.scene.envCellId >>> 0}`
-					: "",
-			),
-		).size;
-		const maxDepth = graph.nodes.reduce(
-			(max, node) => Math.max(max, node.traversalDepth),
-			0,
-		);
-		const structuredDrawUnits = envCellNodes.reduce(
-			(count, node) =>
-				count + node.resources.structuredInteriorDrawUnitIds.length,
-			0,
-		);
-		const staticDrawUnits = envCellNodes.reduce(
-			(count, node) =>
-				count + node.resources.envCellStaticObjectDrawUnitIds.length,
-			0,
-		);
-		const aperture = graph.diagnostics;
-		const transitionEdges = graph.edges.filter(
-			(edge) => edge.sourceKind === "building-transition",
-		).length;
-		return `${plan.mode} base ${base} nodes ${graph.nodes.length} cells ${uniqueCells} views ${envCellNodes.length} missing ${missingResourceCells} depth ${maxDepth} masks ${graph.edges.length} apertures ${graph.apertureResources.length} edges ${aperture.envCellPortalEdges} env / ${aperture.buildingTransitionEdges} transition dup ${aperture.duplicateMaskEdges} dedupe ${aperture.dedupedGeometryResources} roots ${aperture.transitionRootCount}/${aperture.transitionRootCandidateCount} reject ${aperture.transitionRootsRejectedNotSeenOutside} hidden / ${aperture.transitionRootsRejectedUnknownSeenOutside} unknown resources ${structuredDrawUnits} cell / ${staticDrawUnits} static transitions ${transitionEdges}`;
+		return "unsupported direct env-cell frame mode";
 	}
 
 	function currentCameraEnvCellResourceTarget(): {

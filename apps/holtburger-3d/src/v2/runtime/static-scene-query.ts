@@ -36,21 +36,6 @@ import {
 	createOutdoorLandblockRootTranslation,
 	deriveOutdoorCameraLandblockResidency,
 } from "./static-placement";
-import {
-	createPortalTraversalGraph,
-	createPortalTraversalGraphFromStaticPortalGraphs,
-	createPortalTraversalPlanFromGraph,
-	type PortalTraversalGraph,
-	type PortalTraversalPlan,
-} from "./portal-traversal-planner";
-export type {
-	PortalTraversalDiagnostic,
-	PortalTraversalEnvCellEdge,
-	PortalTraversalGraph,
-	PortalTraversalPlan,
-	PortalTraversalSceneCrossing,
-	PortalTraversalVisibleCell,
-} from "./portal-traversal-planner";
 
 export interface StaticSceneRay {
 	readonly origin: Vec3;
@@ -397,11 +382,6 @@ interface CommittedRecordEntry<TRecord> {
 	readonly record: TRecord;
 }
 
-interface CachedPortalTraversalGraph {
-	readonly graph: PortalTraversalGraph;
-	readonly revision: number;
-}
-
 interface CachedOutdoorPortalProjection {
 	readonly projection: StaticPortalProjectionRecord | null;
 	readonly sourceKey: string;
@@ -683,14 +663,6 @@ export class StaticSceneQuery {
 	readonly #committedAuthoredDynamicSeedRecordsByKey = new Map<
 		string,
 		CommittedRecordEntry<StaticAuthoredDynamicSeedRecord>
-	>();
-	readonly #portalTraversalGraphRevisionsByLandblockId = new Map<
-		number,
-		number
-	>();
-	readonly #portalTraversalGraphCacheByLandblockId = new Map<
-		number,
-		CachedPortalTraversalGraph
 	>();
 	readonly #outdoorPortalProjectionCacheByLandblockId = new Map<
 		number,
@@ -1175,63 +1147,6 @@ export class StaticSceneQuery {
 		return projection;
 	}
 
-	queryPortalTraversal(options: {
-		readonly allowedEnvCellIds?: ReadonlySet<number>;
-		readonly landblockId: number;
-		readonly maxCells: number;
-		readonly maxDepth: number;
-		readonly maxPortalViews: number;
-		readonly startEnvCellId: number;
-	}): PortalTraversalPlan {
-		const landblockId = options.landblockId >>> 0;
-		return createPortalTraversalPlanFromGraph({
-			allowedEnvCellIds: options.allowedEnvCellIds,
-			graph: this.queryPortalTraversalGraph({ landblockId }),
-			landblockId,
-			maxCells: options.maxCells,
-			maxDepth: options.maxDepth,
-			maxPortalViews: options.maxPortalViews,
-			startEnvCellId: options.startEnvCellId >>> 0,
-		});
-	}
-
-	queryPortalTraversalGraph(options: {
-		readonly landblockId: number;
-	}): PortalTraversalGraph {
-		const landblockId = options.landblockId >>> 0;
-		const revision = this.#getPortalTraversalGraphRevision(landblockId);
-		const cached =
-			this.#portalTraversalGraphCacheByLandblockId.get(landblockId);
-		if (cached?.revision === revision) {
-			return cached.graph;
-		}
-
-		const portalGraphs = this.queryPortalGraphs({ landblockId });
-		const graph =
-			portalGraphs.length > 0
-				? createPortalTraversalGraphFromStaticPortalGraphs({
-						landblockId,
-						portalGraphs,
-					})
-				: createPortalTraversalGraph({
-						landblockId,
-						portalInteriorRecords: this.queryPortalInteriorRecords({
-							landblockId,
-						}),
-					});
-		this.#portalTraversalGraphCacheByLandblockId.set(landblockId, {
-			graph,
-			revision,
-		});
-		return graph;
-	}
-
-	queryPortalTraversalGraphRevision(options: {
-		readonly landblockId: number;
-	}): number {
-		return this.#getPortalTraversalGraphRevision(options.landblockId);
-	}
-
 	queryTerrainQuadDetails(options: {
 		readonly landblockId: number;
 		readonly quadIndex: number;
@@ -1636,8 +1551,6 @@ export class StaticSceneQuery {
 		this.#committedSourceMappingsByKey.clear();
 		this.#committedTransitionApertureBatchesById.clear();
 		this.#committedAuthoredDynamicSeedRecordsByKey.clear();
-		this.#portalTraversalGraphRevisionsByLandblockId.clear();
-		this.#portalTraversalGraphCacheByLandblockId.clear();
 		this.#outdoorPortalProjectionCacheByLandblockId.clear();
 		this.#envCellPortalProjectionCacheByRootKey.clear();
 	}
@@ -1721,7 +1634,6 @@ export class StaticSceneQuery {
 				},
 			);
 		}
-		this.#invalidatePortalTraversalGraphs(affectedLandblockIds);
 		this.#invalidateOutdoorPortalProjections(affectedLandblockIds);
 		this.#invalidateEnvCellPortalProjections(affectedLandblockIds);
 	}
@@ -1743,7 +1655,6 @@ export class StaticSceneQuery {
 				},
 			);
 		}
-		this.#invalidatePortalTraversalGraphs(affectedLandblockIds);
 		this.#invalidateOutdoorPortalProjections(affectedLandblockIds);
 		this.#invalidateEnvCellPortalProjections(affectedLandblockIds);
 	}
@@ -1933,7 +1844,6 @@ export class StaticSceneQuery {
 				}
 			}
 		}
-		this.#invalidatePortalTraversalGraphs(affectedPortalLandblockIds);
 		this.#invalidateOutdoorPortalProjections(affectedPortalLandblockIds);
 		this.#invalidateEnvCellPortalProjections(affectedPortalLandblockIds);
 	}
@@ -2016,22 +1926,8 @@ export class StaticSceneQuery {
 				}
 			}
 		}
-		this.#invalidatePortalTraversalGraphs(affectedPortalLandblockIds);
 		this.#invalidateOutdoorPortalProjections(affectedPortalLandblockIds);
 		this.#invalidateEnvCellPortalProjections(affectedPortalLandblockIds);
-	}
-
-	#invalidatePortalTraversalGraphs(landblockIds: ReadonlySet<number>): void {
-		for (const landblockId of landblockIds) {
-			const normalizedLandblockId = landblockId >>> 0;
-			this.#portalTraversalGraphRevisionsByLandblockId.set(
-				normalizedLandblockId,
-				this.#getPortalTraversalGraphRevision(normalizedLandblockId) + 1,
-			);
-			this.#portalTraversalGraphCacheByLandblockId.delete(
-				normalizedLandblockId,
-			);
-		}
 	}
 
 	#invalidateOutdoorPortalProjections(landblockIds: ReadonlySet<number>): void {
@@ -2048,13 +1944,6 @@ export class StaticSceneQuery {
 				this.#envCellPortalProjectionCacheByRootKey.delete(cacheKey);
 			}
 		}
-	}
-
-	#getPortalTraversalGraphRevision(landblockId: number): number {
-		return (
-			this.#portalTraversalGraphRevisionsByLandblockId.get(landblockId >>> 0) ??
-			0
-		);
 	}
 
 	#pickOutdoorScene(

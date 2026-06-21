@@ -49,7 +49,7 @@ describe("portal frame work plan", () => {
 		});
 	});
 
-	it("compares direct env-cell plans without naming an all-interior source target", () => {
+	it("compares direct env-cell projection plans", () => {
 		const plan = createDirectEnvCellPlan();
 
 		expect(portalFrameWorkPlanEquals(plan, createDirectEnvCellPlan())).toBe(
@@ -58,13 +58,14 @@ describe("portal frame work plan", () => {
 		expect(
 			portalFrameWorkPlanEquals(plan, {
 				...createDirectEnvCellPlan(),
-				graph: {
-					...createDirectEnvCellPlan().graph,
-					nodes: [
-					{
-							...createDirectEnvCellPlan().graph.nodes[1]!,
+				layeredGraph: {
+					...createDirectEnvCellPlan().layeredGraph,
+					renderEntries: [
+						{
+							...createDirectEnvCellPlan().layeredGraph.renderEntries[0]!,
 							resources: {
-								...createDirectEnvCellPlan().graph.nodes[1]!.resources,
+								...createDirectEnvCellPlan().layeredGraph.renderEntries[0]!
+									.resources,
 								resourceState: "ready",
 							},
 						},
@@ -75,15 +76,15 @@ describe("portal frame work plan", () => {
 		expect(
 			portalFrameWorkPlanEquals(plan, {
 				...createDirectEnvCellPlan(),
-				graph: {
-					...createDirectEnvCellPlan().graph,
-					edges: [
+				layeredGraph: {
+					...createDirectEnvCellPlan().layeredGraph,
+					maskEdges: [
 						{
-							...createDirectEnvCellPlan().graph.edges[0]!,
+							...createDirectEnvCellPlan().layeredGraph.maskEdges[0]!,
 							linkId: "different-link",
 						},
 					],
-					},
+				},
 			}),
 		).toBe(false);
 	});
@@ -92,8 +93,8 @@ describe("portal frame work plan", () => {
 function createDirectEnvCellPlan(): PortalFrameWorkPlan {
 	return {
 		kind: "direct-env-cell",
-		mode: "portal-traversal",
-		graph: {
+		mode: "portal-projection",
+		layeredGraph: {
 			apertureResources: [
 				{
 					resourceId: "portal-aperture:f4180103",
@@ -105,7 +106,13 @@ function createDirectEnvCellPlan(): PortalFrameWorkPlan {
 					],
 				},
 			],
-			baseNodeId: 0,
+			baseEntry: {
+				debugStackLabel: "outdoor-root:0xf418ffff",
+				scene: {
+					kind: "outdoor-target",
+					landblockId: 0xf418ffff,
+				},
+			},
 			diagnostics: {
 				buildingTransitionEdges: 1,
 				dedupedGeometryResources: 0,
@@ -117,52 +124,49 @@ function createDirectEnvCellPlan(): PortalFrameWorkPlan {
 				transitionRootsRejectedNotSeenOutside: 0,
 				transitionRootsRejectedUnknownSeenOutside: 0,
 			},
-			edges: [
+			maskEdges: [
 				{
 					apertureResourceId: "portal-aperture:f4180103",
 					apertureSourceId: "transition-portal:f4180103/01",
-					childNodeId: 1,
 					edgeId: 0,
 					linkId: "transition:f4180103/01",
-					parentNodeId: 0,
+					renderEntryId: 0,
+					renderLayer: 1,
+					sourceEnvCellId: null,
 					sourceKind: "building-transition",
+					targetEnvCellId: 0xf4180103,
 				},
 			],
-			nodes: [
+			projectionDiagnostics: {
+				componentCount: 1,
+				componentInternalEdgeCount: 0,
+				cyclicComponentCount: 0,
+				maskEdgesSkippedByLayerCap: 0,
+				maskEdgesSkippedByMaxMaskEdges: 0,
+				maxProjectionRenderLayer: 1,
+				maxSelectedRenderLayer: 1,
+				missingResourceMembershipCount: 1,
+				projectedEnvCellCount: 1,
+				renderEntriesSkippedByLayerCap: 0,
+				renderEntriesSkippedByMaxRenderEntries: 0,
+				renderEntryCount: 1,
+			},
+			renderEntries: [
 				{
-					debugStackLabel: "outdoor-root:0xf418ffff",
-					incomingEdgeIds: [],
-					nodeId: 0,
-					parentNodeId: null,
-					resources: {
-						envCellStaticObjectDrawUnitIds: [],
-						resourceState: "not-applicable",
-						structuredInteriorDrawUnitIds: [],
-					},
-					scene: {
-						kind: "outdoor-target",
-						landblockId: 0xf418ffff,
-					},
-					traversalDepth: 0,
-				},
-				{
-					debugStackLabel: "transition:f4180103/01",
-					incomingEdgeIds: [0],
-					nodeId: 1,
-					parentNodeId: 0,
+					debugStackLabel: "outdoor-root:0xf418ffff/layer:1/cell:0xf4180103",
+					envCellId: 0xf4180103,
+					incomingMaskEdgeIds: [0],
+					landblockId: 0xf418ffff,
+					renderEntryId: 0,
+					renderLayer: 1,
 					resources: {
 						envCellStaticObjectDrawUnitIds: [],
 						resourceState: "missing-resources",
 						structuredInteriorDrawUnitIds: [],
 					},
-					scene: {
-						envCellId: 0xf4180103,
-						kind: "env-cell-direct",
-						landblockId: 0xf418ffff,
-					},
-					traversalDepth: 1,
 				},
 			],
+			renderLayers: [{ renderEntryIds: [0], renderLayer: 1 }],
 		},
 	};
 }

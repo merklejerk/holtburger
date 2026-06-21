@@ -210,26 +210,11 @@ export type PortalFrameWorkPlan =
 	  }
 	| {
 			readonly kind: "direct-env-cell";
-			readonly mode: "portal-traversal" | "portal-debug";
-			readonly graph: PortalFrameGraphPlan;
-	  }
-	| {
-			readonly kind: "direct-env-cell";
 			readonly mode: "portal-projection";
 			readonly layeredGraph: PortalProjectionFrameGraphPlan;
 	  };
 
-export type PortalFrameNodeId = number;
-
 export type PortalFrameEdgeId = number;
-
-export interface PortalFrameGraphPlan {
-	readonly baseNodeId: PortalFrameNodeId;
-	readonly nodes: readonly PortalFrameNodePlan[];
-	readonly edges: readonly PortalFrameEdgePlan[];
-	readonly apertureResources: readonly PortalApertureGeometryResourcePlan[];
-	readonly diagnostics: PortalApertureFrameDiagnostics;
-}
 
 export interface PortalProjectionFrameGraphPlan {
 	readonly baseEntry: PortalProjectionFrameBaseEntryPlan;
@@ -300,30 +285,10 @@ export interface PortalProjectionFrameDiagnostics {
 	readonly missingResourceMembershipCount: number;
 }
 
-export interface PortalFrameNodePlan {
-	readonly nodeId: PortalFrameNodeId;
-	readonly parentNodeId: PortalFrameNodeId | null;
-	readonly scene: PortalFrameSceneSource;
-	readonly traversalDepth: number;
-	readonly incomingEdgeIds: readonly PortalFrameEdgeId[];
-	readonly resources: PortalFrameNodeResources;
-	readonly debugStackLabel: string;
-}
-
 export interface PortalFrameNodeResources {
 	readonly structuredInteriorDrawUnitIds: readonly string[];
 	readonly envCellStaticObjectDrawUnitIds: readonly string[];
 	readonly resourceState: "ready" | "missing-resources" | "not-applicable";
-}
-
-export interface PortalFrameEdgePlan {
-	readonly edgeId: PortalFrameEdgeId;
-	readonly parentNodeId: PortalFrameNodeId;
-	readonly childNodeId: PortalFrameNodeId;
-	readonly apertureResourceId: string;
-	readonly apertureSourceId: string;
-	readonly linkId: string;
-	readonly sourceKind: PortalApertureSourceKind;
 }
 
 export type PortalFrameSceneSource =

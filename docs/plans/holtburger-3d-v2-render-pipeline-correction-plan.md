@@ -1848,6 +1848,37 @@ Dry-run findings on 2026-06-21:
   - `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts src/v2/runtime/static-scene-query.test.ts src/v2/static/portal-graphs.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts`;
   - `npm run test:ts`.
 
+9E.5 implementation update on 2026-06-21:
+
+- Deleted the recursive direct env-cell traversal planner and tests:
+  - `src/v2/runtime/portal-traversal-planner.ts`;
+  - `src/v2/runtime/portal-traversal-planner.test.ts`.
+- Removed `createDirectEnvCellFramePlan(...)` and the graph-shaped `"portal-traversal"` direct frame-plan contract from `direct-env-cell-frame-plan.ts`.
+- Removed `StaticSceneQuery` traversal APIs and cache/revision state:
+  - `queryPortalTraversal(...)`;
+  - `queryPortalTraversalGraph(...)`;
+  - `queryPortalTraversalGraphRevision(...)`;
+  - traversal graph invalidation bookkeeping.
+- Removed recursive `PortalFrameGraphPlan` renderer contracts and WebGL execution:
+  - direct env-cell frame plans now only support `mode: "portal-projection"`;
+  - WebGL direct-env-cell rendering now always routes through the projection/layered renderer;
+  - HUD summaries now only describe projection-shaped direct frame plans.
+- Reworked tests to keep projection/resource/mask coverage and delete traversal-only coverage:
+  - frame-plan tests now assert projection render entries, base entries, mask edges, caps, and resource membership;
+  - WebGL tests now build projection-shaped direct plans;
+  - static-query tests no longer pin traversal cache behavior that no production code consumes.
+- Spicy bits:
+  - tests/debug did not justify keeping the old recursive path; deleted behavior lost its tests instead of growing compatibility shims.
+  - projection mask execution no longer performs recursive enter/exit stencil decrement, so WebGL expectations now match layered mask replacement plus depth reset.
+- Debt retained:
+  - the file name `direct-env-cell-frame-plan.ts` now houses projection-only planning and should probably be renamed once Phase 9 settles.
+  - no browser screenshot smoke was run in this phase; validation remains structural/unit-level.
+- Validation for this slice:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts src/v2/runtime/static-scene-query.test.ts src/v2/static/portal-graphs.test.ts src/v2/renderer/portal-frame-work-plan.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts`;
+  - `npm run test:ts`.
+
 Acceptance criteria:
 
 - Dungeon/env-cell-origin direct rendering no longer depends on recursive portal-stack `PortalFrameGraphPlan` for production planning.

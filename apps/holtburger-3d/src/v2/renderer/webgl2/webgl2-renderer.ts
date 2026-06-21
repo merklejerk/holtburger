@@ -8,9 +8,6 @@ import type {
 	RenderPassPlan,
 	PortalProjectionFrameGraphPlan,
 	PortalProjectionFrameMaskEdgePlan,
-	PortalFrameEdgePlan,
-	PortalFrameGraphPlan,
-	PortalFrameNodePlan,
 	PortalFrameNodeResources,
 	PortalFrameWorkPlan,
 	SceneDomainTargetKind,
@@ -83,13 +80,6 @@ type DirectEnvCellPortalFrameWorkPlan = Extract<
 	PortalFrameWorkPlan,
 	{ readonly kind: "direct-env-cell" }
 >;
-type DirectEnvCellTraversalPortalFrameWorkPlan = Extract<
-	DirectEnvCellPortalFrameWorkPlan,
-	{ readonly kind: "direct-env-cell" }
-> & {
-	readonly mode: "portal-traversal" | "portal-debug";
-	readonly graph: PortalFrameGraphPlan;
-};
 type DirectEnvCellPortalProjectionFrameWorkPlan = Extract<
 	DirectEnvCellPortalFrameWorkPlan,
 	{ readonly kind: "direct-env-cell" }
@@ -1171,13 +1161,8 @@ class Webgl2Renderer implements Renderer {
 		const aspectRatio =
 			gl.drawingBufferWidth / Math.max(1, gl.drawingBufferHeight);
 		const portalProjectionUsesExteriorBase =
-			plan.mode === "portal-projection" &&
 			plan.layeredGraph.baseEntry.scene.kind === "outdoor-target";
-		if (
-			(plan.mode === "portal-traversal" &&
-				getPortalFrameGraphBaseNode(plan).scene.kind === "outdoor-target") ||
-			portalProjectionUsesExteriorBase
-		) {
+		if (portalProjectionUsesExteriorBase) {
 			const targets = this.#ensureSceneDomainTargets(
 				gl.drawingBufferWidth,
 				gl.drawingBufferHeight,
@@ -1206,9 +1191,7 @@ class Webgl2Renderer implements Renderer {
 			const targetAspectRatio =
 				targets.compositePing.width / Math.max(1, targets.compositePing.height);
 			this.#lastDirectEnvCellDrawCalls =
-				plan.mode === "portal-projection"
-					? this.#drawPortalProjectionFrameResources(plan, targetAspectRatio)
-					: this.#drawDirectEnvCellResources(plan, targetAspectRatio);
+				this.#drawPortalProjectionFrameResources(plan, targetAspectRatio);
 			this.#blitSceneDomainColorToDisplay(targets.compositePing);
 			return;
 		}
@@ -1228,10 +1211,10 @@ class Webgl2Renderer implements Renderer {
 			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
 		);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
-		this.#lastDirectEnvCellDrawCalls =
-			plan.mode === "portal-projection"
-				? this.#drawPortalProjectionFrameResources(plan, aspectRatio)
-				: this.#drawDirectEnvCellResources(plan, aspectRatio);
+		this.#lastDirectEnvCellDrawCalls = this.#drawPortalProjectionFrameResources(
+			plan,
+			aspectRatio,
+		);
 	}
 
 	#renderSceneDomainTargets(
@@ -1718,46 +1701,6 @@ class Webgl2Renderer implements Renderer {
 		);
 	}
 
-	#drawDirectEnvCellResources(
-		plan: DirectEnvCellTraversalPortalFrameWorkPlan,
-		aspectRatio: number,
-	): number {
-		const gl = this.#gl;
-		const nodesById = new Map(
-			plan.graph.nodes.map((node) => [node.nodeId, node] as const),
-		);
-		const edgesByParentNodeId = groupPortalFrameEdgesByParentNodeId(
-			plan.graph.edges,
-		);
-		const baseNode = getPortalFrameGraphBaseNode(plan);
-
-		let drawCalls = 0;
-		if (baseNode.scene.kind === "outdoor-target") {
-			drawCalls += this.#executeDirectEnvCellPortalGraphChildren({
-				aspectRatio,
-				edgesByParentNodeId,
-				nodesById,
-				parentNode: baseNode,
-			});
-		} else {
-			this.#stateCache.setStencilState(
-				createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
-			);
-			drawCalls += this.#drawPortalFrameNodeResources(baseNode, aspectRatio);
-			drawCalls += this.#executeDirectEnvCellPortalGraphChildren({
-				aspectRatio,
-				edgesByParentNodeId,
-				nodesById,
-				parentNode: baseNode,
-			});
-		}
-		this.#stateCache.setStencilState(
-			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
-		);
-		this.#stateCache.bindVertexArray(null);
-		return drawCalls;
-	}
-
 	#drawPortalProjectionFrameResources(
 		plan: DirectEnvCellPortalProjectionFrameWorkPlan,
 		aspectRatio: number,
@@ -1842,89 +1785,6 @@ class Webgl2Renderer implements Renderer {
 		return drawCalls;
 	}
 
-	#executeDirectEnvCellPortalGraphChildren(options: {
-		readonly aspectRatio: number;
-		readonly edgesByParentNodeId: ReadonlyMap<
-			number,
-			readonly PortalFrameEdgePlan[]
-		>;
-		readonly nodesById: ReadonlyMap<number, PortalFrameNodePlan>;
-		readonly parentNode: PortalFrameNodePlan;
-	}): number {
-		let drawCalls = 0;
-		const childEdges =
-			options.edgesByParentNodeId.get(options.parentNode.nodeId) ?? [];
-		for (const group of groupPortalFrameEdgesByChildNodeId(childEdges)) {
-			const childNode = options.nodesById.get(group.childNodeId);
-			if (!childNode) {
-				throw new Error(
-					`Portal frame graph edge references missing child node ${group.childNodeId}.`,
-				);
-			}
-			let enteredMaskCount = 0;
-			for (const edge of group.edges) {
-				const apertureRange = this.#portalApertureRangesById.get(
-					edge.apertureResourceId,
-				);
-				if (!apertureRange) {
-					this.#warnMissingPortalApertureRange(edge);
-					continue;
-				}
-				this.#drawPortalApertureStencilMask(
-					"enter",
-					options.parentNode,
-					childNode,
-					apertureRange,
-					{ aspectRatio: options.aspectRatio },
-				);
-				enteredMaskCount += 1;
-			}
-			if (enteredMaskCount === 0) {
-				continue;
-			}
-			this.#stateCache.setStencilState(
-				createStencilState(
-					this.#gl,
-					true,
-					0x00,
-					this.#gl.EQUAL,
-					childNode.traversalDepth,
-					this.#gl.KEEP,
-				),
-			);
-			this.#resetDirectPortalDepth(childNode);
-			drawCalls += this.#drawPortalFrameNodeResources(
-				childNode,
-				options.aspectRatio,
-			);
-			drawCalls += this.#executeDirectEnvCellPortalGraphChildren({
-				...options,
-				parentNode: childNode,
-			});
-			for (const edge of group.edges.toReversed()) {
-				const apertureRange = this.#portalApertureRangesById.get(
-					edge.apertureResourceId,
-				);
-				if (!apertureRange) {
-					this.#warnMissingPortalApertureRange(edge);
-					continue;
-				}
-				this.#drawPortalApertureStencilMask(
-					"exit",
-					options.parentNode,
-					childNode,
-					apertureRange,
-					{ aspectRatio: options.aspectRatio },
-				);
-			}
-		}
-		return drawCalls;
-	}
-
-	#resetDirectPortalDepth(childNode: PortalFrameNodePlan): void {
-		this.#resetDirectPortalDepthForStencilValue(childNode.traversalDepth);
-	}
-
 	#resetDirectPortalDepthForStencilValue(stencilValue: number): void {
 		const gl = this.#gl;
 		gl.colorMask(false, false, false, false);
@@ -1947,16 +1807,6 @@ class Webgl2Renderer implements Renderer {
 		} finally {
 			gl.colorMask(true, true, true, true);
 		}
-	}
-
-	#drawPortalFrameNodeResources(
-		node: PortalFrameNodePlan,
-		aspectRatio: number,
-	): number {
-		if (node.scene.kind !== "env-cell-direct") {
-			return 0;
-		}
-		return this.#drawPortalFrameResourceSet(node.resources, aspectRatio);
 	}
 
 	#drawPortalFrameResourceSet(
@@ -1984,64 +1834,6 @@ class Webgl2Renderer implements Renderer {
 			structuredInteriorResources,
 			aspectRatio,
 		);
-	}
-
-	#drawPortalApertureStencilMask(
-		operation: "enter" | "exit",
-		parentNode: PortalFrameNodePlan,
-		childNode: PortalFrameNodePlan,
-		apertureRange: PortalApertureRangeResource,
-		options: { readonly aspectRatio: number },
-	): void {
-		if (apertureRange.range.indexCount === 0) {
-			return;
-		}
-		const gl = this.#gl;
-		gl.colorMask(false, false, false, false);
-		try {
-			this.#stateCache.useProgram(this.#transitionCompositeProgram.program);
-			this.#stateCache.setDepthState({
-				enabled: true,
-				func: operation === "enter" ? gl.LEQUAL : gl.ALWAYS,
-				write: false,
-			});
-			this.#stateCache.setBlendState(
-				createBlendState(gl, false, gl.ONE, gl.ZERO),
-			);
-			this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
-			this.#stateCache.setStencilState(
-				createDirectPortalStencilMaskState(
-					gl,
-					operation,
-					parentNode,
-					childNode,
-				),
-			);
-			gl.uniformMatrix4fv(
-				this.#transitionCompositeProgram.uniforms.uModelViewProjection,
-				false,
-				createModelViewProjectionMatrix(this.#frameState, options.aspectRatio),
-			);
-			const translation = this.#createLandblockTranslation(
-				apertureRange.resource.landblockId,
-			);
-			gl.uniform3f(
-				this.#transitionCompositeProgram.uniforms.uPlacementTranslation,
-				translation[0],
-				translation[1],
-				translation[2],
-			);
-			this.#stateCache.bindVertexArray(apertureRange.resource.vertexArray);
-			gl.drawElements(
-				gl.TRIANGLES,
-				apertureRange.range.indexCount,
-				apertureRange.resource.indexType,
-				apertureRange.range.firstIndex *
-					getIndexElementByteSize(apertureRange.resource.indexType, gl),
-			);
-		} finally {
-			gl.colorMask(true, true, true, true);
-		}
 	}
 
 	#drawPortalProjectionApertureStencilMask(
@@ -2508,24 +2300,6 @@ class Webgl2Renderer implements Renderer {
 		this.#portalApertureResources.delete(apertureResourceId);
 	}
 
-	#warnMissingPortalApertureRange(edge: PortalFrameEdgePlan): void {
-		if (
-			this.#warnedMissingPortalApertureRangeIds.has(edge.apertureResourceId)
-		) {
-			return;
-		}
-		this.#warnedMissingPortalApertureRangeIds.add(edge.apertureResourceId);
-		console.error(
-			`Direct portal edge ${edge.linkId} references missing portal aperture range ${edge.apertureResourceId}; dropping mask draw.`,
-			{
-				apertureSourceId: edge.apertureSourceId,
-				childNodeId: edge.childNodeId,
-				parentNodeId: edge.parentNodeId,
-				sourceKind: edge.sourceKind,
-			},
-		);
-	}
-
 	#warnMissingPortalProjectionPortalApertureRange(
 		edge: PortalProjectionFrameMaskEdgePlan,
 	): void {
@@ -2617,9 +2391,8 @@ class Webgl2Renderer implements Renderer {
 		const directEnvCellFramePlanActive = directEnvCellFramePlan !== null;
 		const directOutdoorTargetFramePlanActive =
 			directEnvCellFramePlan !== null &&
-			(directEnvCellFramePlan.mode === "portal-projection" ||
-				getPortalFrameGraphBaseNode(directEnvCellFramePlan).scene.kind ===
-					"outdoor-target");
+			directEnvCellFramePlan.layeredGraph.baseEntry.scene.kind ===
+				"outdoor-target";
 		return {
 			active:
 				directOutdoorTargetFramePlanActive ||
@@ -4129,92 +3902,6 @@ function createStencilState(
 		zfail: gl.KEEP,
 		zpass,
 	};
-}
-
-function createDirectPortalStencilMaskState(
-	gl: WebGL2RenderingContext,
-	operation: "enter" | "exit",
-	parentNode: PortalFrameNodePlan,
-	childNode: PortalFrameNodePlan,
-): Webgl2StencilState {
-	if (operation === "exit") {
-		return createStencilState(
-			gl,
-			true,
-			0xff,
-			gl.EQUAL,
-			childNode.traversalDepth,
-			gl.DECR,
-		);
-	}
-	if (parentNode.parentNodeId === null) {
-		return createStencilState(
-			gl,
-			true,
-			0xff,
-			gl.ALWAYS,
-			childNode.traversalDepth,
-			gl.REPLACE,
-		);
-	}
-	return createStencilState(
-		gl,
-		true,
-		0xff,
-		gl.EQUAL,
-		parentNode.traversalDepth,
-		gl.INCR,
-	);
-}
-
-function groupPortalFrameEdgesByParentNodeId(
-	edges: readonly PortalFrameEdgePlan[],
-): ReadonlyMap<number, readonly PortalFrameEdgePlan[]> {
-	const groups = new Map<number, PortalFrameEdgePlan[]>();
-	for (const edge of edges) {
-		const group = groups.get(edge.parentNodeId) ?? [];
-		group.push(edge);
-		groups.set(edge.parentNodeId, group);
-	}
-	return groups;
-}
-
-function groupPortalFrameEdgesByChildNodeId(
-	edges: readonly PortalFrameEdgePlan[],
-): readonly {
-	readonly childNodeId: number;
-	readonly edges: readonly PortalFrameEdgePlan[];
-}[] {
-	const groups = new Map<
-		number,
-		{
-			childNodeId: number;
-			edges: PortalFrameEdgePlan[];
-		}
-	>();
-	for (const edge of edges) {
-		const group = groups.get(edge.childNodeId) ?? {
-			childNodeId: edge.childNodeId,
-			edges: [],
-		};
-		group.edges.push(edge);
-		groups.set(edge.childNodeId, group);
-	}
-	return [...groups.values()];
-}
-
-function getPortalFrameGraphBaseNode(
-	plan: DirectEnvCellTraversalPortalFrameWorkPlan,
-): PortalFrameNodePlan {
-	const baseNode = plan.graph.nodes.find(
-		(node) => node.nodeId === plan.graph.baseNodeId,
-	);
-	if (!baseNode) {
-		throw new Error(
-			`Portal frame graph base node ${plan.graph.baseNodeId} is missing.`,
-		);
-	}
-	return baseNode;
 }
 
 function createEnvCellResourceKey(

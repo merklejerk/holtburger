@@ -5,9 +5,7 @@ import type {
 	PortalProjectionFrameLayerPlan,
 	PortalProjectionFrameMaskEdgePlan,
 	PortalProjectionFrameRenderEntryPlan,
-	PortalFrameEdgePlan,
-	PortalFrameGraphPlan,
-	PortalFrameNodePlan,
+	PortalFrameNodeResources,
 	PortalFrameSceneSource,
 	PortalFrameWorkPlan,
 	RenderPassPlan,
@@ -54,23 +52,10 @@ export function portalFrameWorkPlanEquals(
 	if (right.kind === "legacy-render-pass") {
 		return false;
 	}
-	if (left.mode !== right.mode) {
-		return false;
-	}
-	if (left.mode === "portal-projection") {
-		return (
-			right.mode === "portal-projection" &&
-			portalProjectionFrameGraphPlansEqual(
-				left.layeredGraph,
-				right.layeredGraph,
-			)
-		);
-	}
-	if (right.mode === "portal-projection") {
-		return false;
-	}
-
-	return portalFrameGraphPlansEqual(left.graph, right.graph);
+	return portalProjectionFrameGraphPlansEqual(
+		left.layeredGraph,
+		right.layeredGraph,
+	);
 }
 
 function renderPassPlanEquals(
@@ -112,22 +97,6 @@ function portalSceneDomainEquals(
 		return true;
 	}
 	return left.envCellId === right.envCellId;
-}
-
-function portalFrameGraphPlansEqual(
-	left: PortalFrameGraphPlan,
-	right: PortalFrameGraphPlan,
-): boolean {
-	return (
-		left.baseNodeId === right.baseNodeId &&
-		arraysEqual(left.nodes, right.nodes, portalFrameNodePlansEqual) &&
-		arraysEqual(left.edges, right.edges, portalFrameEdgePlansEqual) &&
-		portalApertureGeometryResourcesEqual(
-			left.apertureResources,
-			right.apertureResources,
-		) &&
-		portalApertureFrameDiagnosticsEqual(left.diagnostics, right.diagnostics)
-	);
 }
 
 function portalProjectionFrameGraphPlansEqual(
@@ -241,24 +210,9 @@ function portalProjectionFrameMaskEdgePlansEqual(
 	);
 }
 
-function portalFrameNodePlansEqual(
-	left: PortalFrameNodePlan,
-	right: PortalFrameNodePlan,
-): boolean {
-	return (
-		left.nodeId === right.nodeId &&
-		left.parentNodeId === right.parentNodeId &&
-		portalFrameSceneSourceEquals(left.scene, right.scene) &&
-		left.traversalDepth === right.traversalDepth &&
-		numberArraysEqual(left.incomingEdgeIds, right.incomingEdgeIds) &&
-		left.debugStackLabel === right.debugStackLabel &&
-		portalFrameNodeResourcesEqual(left.resources, right.resources)
-	);
-}
-
 function portalFrameNodeResourcesEqual(
-	left: PortalFrameNodePlan["resources"],
-	right: PortalFrameNodePlan["resources"],
+	left: PortalFrameNodeResources,
+	right: PortalFrameNodeResources,
 ): boolean {
 	return (
 		left.resourceState === right.resourceState &&
@@ -270,21 +224,6 @@ function portalFrameNodeResourcesEqual(
 			left.envCellStaticObjectDrawUnitIds,
 			right.envCellStaticObjectDrawUnitIds,
 		)
-	);
-}
-
-function portalFrameEdgePlansEqual(
-	left: PortalFrameEdgePlan,
-	right: PortalFrameEdgePlan,
-): boolean {
-	return (
-		left.edgeId === right.edgeId &&
-		left.parentNodeId === right.parentNodeId &&
-		left.childNodeId === right.childNodeId &&
-		left.apertureResourceId === right.apertureResourceId &&
-		left.apertureSourceId === right.apertureSourceId &&
-		left.linkId === right.linkId &&
-		left.sourceKind === right.sourceKind
 	);
 }
 

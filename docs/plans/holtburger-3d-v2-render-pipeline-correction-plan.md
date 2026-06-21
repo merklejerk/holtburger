@@ -1173,6 +1173,7 @@ Debt to track:
 
 - Add diagnostics that explicitly separate unique env cells, portal view groups, render graph nodes, and mask edges.
 - Revisit whether outdoor-origin traversal should keep multiple portal-stack views per same outside-visible env cell or collapse to one best/first view per env cell. The new bound prevents non-`SeenOutside` expansion, but multipath outside-visible cycles can still grow with depth.
+- Phases 9B-9D below replace this debt with an outdoor projection query/cache first, then a runtime cutover and layer-owned publication. Do not solve the remaining cliff with a budget-only cap.
 
 Validation:
 
@@ -1181,6 +1182,231 @@ Validation:
 - `npm run test:ts -- src/v2/runtime/portal-traversal-planner.test.ts`
 - `npm run test:ts -- src/v2/runtime/portal-traversal-planner.test.ts src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts`
 - `npm run test:ts`
+
+### Immediate Phase 9B: Define Outdoor Portal Projection And Query Cache
+
+Problem to solve:
+
+- Phase 9A still leaves outdoor direct planning shaped as one path-tree traversal per accepted building-transition root.
+- Follow-up screenshots on 2026-06-21 show the active cliff:
+  - depth 8: `nodes 2337`, `cells 180`, `views 2336`, `masks 2337`, `roots 37/37`;
+  - depth 13: `nodes 3898`, `cells 180`, `views 3897`, `masks 3898`, `roots 37/37`.
+- The cell count staying fixed while views/nodes/masks grow proves the remaining growth is portal-stack path duplication through the same outside-visible env-cell set, not discovery of additional renderable cells.
+- A cap would make the frame cheaper by dropping work blindly. That is not the structural fix. Outdoor rendering needs a landblock projection whose identities are cells and portal edges, not arbitrary portal-stack paths.
+
+Scope:
+
+- Add an outdoor-origin portal projection contract for one landblock.
+- The projection is static topology. It must not include camera position, screen-space portal coverage, renderer resource readiness, or frame-local stencil state.
+- The projection may include canonical tree facts for the current tree-shaped renderer, but it must also retain enough source edge identity to avoid baking away transition/env-cell provenance.
+- Do not precompute all possible per-start-cell visibility closures.
+- Do not add a diagnostic-only proving phase before this; the phase itself must include tests that prove the projection bounds expansion by graph facts rather than portal-stack paths.
+
+Anti-ceremony rule:
+
+- Do not add projection pass-through fields to `StaticBakeBatchResult`, `StaticCoordinatorCommitDelta`, `StaticMaterializationResult`, or renderer static deltas merely to "thread the record through."
+- Phase 9B should introduce the projection as a typed semantic query over already-committed static facts, backed by a pure deterministic builder and a `StaticSceneQuery` cache.
+- Add storage or publication fields only at a boundary that actually owns the projection:
+  - `StaticSceneQuery` cache in Phase 9B/9C;
+  - `EnvCellSystemLayerPayload` assembly in Phase 12.
+- If an added field's only behavior is copying an array from one DTO to another unchanged, do not add it in this phase. No ceremonial bookkeeping, no cap.
+
+Proposed contract:
+
+- Add `StaticOutdoorPortalProjectionRecord` in `apps/holtburger-3d/src/v2/static/contracts.ts`.
+- Include:
+  - `kind: "outdoor-portal-projection"`;
+  - `landblockId`;
+  - `sourceRevisionKey`, a deterministic semantic key derived from the committed portal graph/interior inputs and transition aperture batch/range identities used to build the projection;
+  - `rootNodeId` for a synthetic outdoor root;
+  - sorted `nodes`, one per `seenOutside === true` env cell accepted into the projection;
+  - sorted `edges`, containing:
+    - building-transition edges from the synthetic outdoor root to the actual target env cell;
+    - env-cell portal edges where source and target env cells are both in the outside-visible set;
+  - stable source provenance for each edge:
+    - `building-transition` edges carry aperture batch/range/source portal identifiers, target env cell, and the exact aperture resource/source ids needed by the renderer;
+    - `env-cell-portal` edges carry source env cell, target env cell, source/target portal ids, source index, polygon id, flags, and the exact aperture resource/source ids needed by the renderer;
+  - adjacency ranges or equivalent sorted lookup data keyed by source node id;
+  - canonical outdoor traversal facts:
+    - `canonicalDepthByEnvCellId`;
+    - `canonicalParentEdgeIdByEnvCellId`;
+    - `canonicalReachableEnvCellIds`;
+  - diagnostics:
+    - outside-visible env-cell count;
+    - transition-root candidate count;
+    - accepted transition-root count;
+    - env-cell portal edge count retained;
+    - env-cell portal edge count rejected because the target was not outside-visible;
+    - env-cell portal edge count rejected because the source was not outside-visible.
+- Name the canonical facts explicitly. Do not let the canonical tree masquerade as the whole portal graph.
+- Do not add a fake `owner` to query-derived projections. Until Phase 12 layer assembly owns publication, use `sourceRevisionKey` and source provenance to explain where the projection came from.
+
+Implementation tasks:
+
+- Add projection record types and source-provenance types to `apps/holtburger-3d/src/v2/static/contracts.ts`.
+- Add a pure construction helper in `apps/holtburger-3d/src/v2/static/portal-graphs.ts` or a colocated `outdoor-portal-projection.ts`:
+  - merge env-cell portal graph facts with transition aperture batches for the same landblock;
+  - derive the `seenOutside` set from `StaticPortalInteriorRecord.envCells`;
+  - create the synthetic outdoor root node;
+  - group building-transition edges by actual target env cell using `createBuildingTransitionTargetEnvCellId(...)`;
+  - derive building-transition aperture resource/source ids from transition aperture batch/range identity;
+  - retain only env-cell portal edges whose source and target env cells are both outside-visible;
+  - derive env-cell portal aperture resource/source ids by looking up the source env-cell portal aperture in `StaticPortalInteriorRecord.envCells`;
+  - build deterministic adjacency ranges;
+  - derive canonical BFS parent/depth from the synthetic outdoor root, preferring lower depth and then stable edge id.
+- Add a `StaticSceneQuery` projection cache:
+  - derive the projection from committed same-landblock portal graph/interior records and transition aperture batches;
+  - key invalidation off existing committed graph/interior/transition-aperture mutation points rather than adding a new resource-level revision counter;
+  - invalidate affected landblock projection cache entries from `#upsertCommittedPortalInteriorRecords(...)`, `#upsertCommittedPortalGraphs(...)`, `applyTransitionApertureBatches(...)`, and transition-aperture removals in `removeStaticResources(...)`;
+  - clear affected landblock projection cache entries on retained-scope pruning and `removeStaticResources(...)`;
+  - expose `sourceRevisionKey` for Phase 9C frame-plan caching, but derive it from existing committed semantic inputs rather than incrementing a new counter.
+- Do not modify worker bake result or materialization DTOs in Phase 9B. Phase 12 moves projection publication to `EnvCellSystemLayerPayload` once the coherent layer assembly boundary exists.
+- Add tests:
+  - `apps/holtburger-3d/src/v2/static/portal-graphs.test.ts` or a new projection test file proving deterministic projection output;
+  - `apps/holtburger-3d/src/v2/runtime/static-scene-query.test.ts` proving committed graph/interior changes invalidate cached projection records;
+  - a diamond graph test where multiple portal paths reach the same env cell, proving the projection has one node for that env cell and finite retained edges, not one node per path.
+  - a same-target multi-aperture test proving two transition apertures into one env cell produce one projected env-cell node and multiple retained root-to-cell edges.
+
+Dry-run findings:
+
+- `StaticSceneQuery` already holds committed portal graphs, portal/interior records, and transition aperture batches, so Phase 9B can be implemented locally as a semantic query cache without touching bake/materialization DTOs.
+- `StaticPortalGraphRecord` building-transition provenance is not enough by itself to build renderer aperture range ids because the range identity lives in `TransitionApertureBatch`. Projection construction must consume transition aperture batches directly for building-transition edges.
+- Env-cell portal edges should also resolve aperture resource/source ids during projection construction. That prevents Phase 9C from redoing portal-aperture lookups through `portalInteriorRecords` while assembling the frame graph.
+- A fake `owner` field would be misleading for query-derived projections. Use `sourceRevisionKey` until Phase 12 gives the projection a real env-cell-system layer generation owner.
+- Existing portal traversal graph invalidation only covers portal graph/interior changes. Projection invalidation must also cover transition aperture batch additions/removals because the outdoor root edges come from those batches.
+
+Acceptance criteria:
+
+- The outdoor projection for a landblock is represented by stable graph identities:
+  - one synthetic outdoor root;
+  - one node per outside-visible env cell;
+  - one edge per retained source portal/transition edge.
+- Projection edges contain renderer-ready aperture resource/source ids, not just enough provenance to rediscover them later.
+- The projection does not contain portal-stack ids.
+- The projection can represent the affected `0xda55ffff` case with `37` building-transition root targets and roughly `180` outside-visible env-cell nodes without creating thousands of path nodes.
+- Projection construction is deterministic across repeated commits of equivalent static data.
+- Phase 9B does not add DTO relay fields whose only purpose is to copy projection arrays through unrelated static/materialization layers.
+- Existing direct traversal behavior is unchanged until Phase 9C.
+- Validation passes:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - targeted TS tests for `portal-graphs`, `static-scene-query`, and any new projection module;
+  - `npm run test:ts`.
+
+### Immediate Phase 9C: Cut Outdoor Direct Planning To The Projection
+
+Problem to solve:
+
+- Outdoor direct runtime planning still builds `traversalPlansByStartEnvCellId` with one `createPortalTraversalPlanFromGraph(...)` call per accepted transition root.
+- That makes `maxPortalViews` a per-root cap and keeps the render graph identity tied to portal stacks instead of static projection cells.
+- The runtime should consume the outdoor projection and assemble a direct portal frame graph whose expansion unit is a projected env-cell node.
+
+Scope:
+
+- Change only outdoor-origin direct env-cell planning in this phase.
+- Interior/env-cell-origin direct traversal may keep using `PortalTraversalPlan` until a separate correctness/performance need appears.
+- Preserve the current renderer's tree-shaped execution contract at first by consuming the projection's canonical BFS parent/depth facts.
+- Retain noncanonical incoming projection edges for diagnostics and future DAG renderer work, but do not render them through the tree executor until Phase 9D explicitly decides the renderer contract.
+- Do not solve this with a lower `DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS`.
+
+Implementation tasks:
+
+- Add a query API to `StaticSceneQuery`, for example:
+  - `queryOutdoorPortalProjection({ landblockId }): StaticOutdoorPortalProjectionRecord | null`;
+  - `queryOutdoorPortalProjectionSourceKey({ landblockId }): string`, or use `projection.sourceRevisionKey` directly.
+- Update `PortalFramePlanKey` for `kind: "outdoor-transition"`:
+  - replace `portalTraversalGraphRevision` plus `transitionApertureRevision` with `projection.sourceRevisionKey` where available;
+  - keep temporary fallback keys only if needed for the old path during the migration.
+- Add a projection-driven frame-plan builder in `apps/holtburger-3d/src/v2/runtime/direct-env-cell-frame-plan.ts`, for example `createOutdoorProjectionPortalFramePlan(...)`.
+- Builder behavior:
+  - create one base node for the synthetic outdoor root;
+  - create at most one frame node per projected env cell selected by `maxDepth`;
+  - use `canonicalParentEdgeIdByEnvCellId` to assign `parentNodeId`;
+  - add all retained aperture edges whose source node is the selected canonical parent and whose target is the child node;
+  - skip or diagnose retained incoming edges from noncanonical parents until Phase 9D decides whether a DAG renderer is needed;
+  - use projection-provided aperture resource/source ids directly rather than recreating them from portal/interior records;
+  - attach node resources from `EnvCellResourceMembership` by env cell id exactly once per projected env cell;
+  - preserve diagnostics for noncanonical incoming edges that were retained in the projection but not rendered by the current tree executor.
+- Replace the outdoor branch in `ClientRuntime.#derivePortalFrameWorkPlan(...)`:
+  - query the projection;
+  - call `createOutdoorProjectionPortalFramePlan(...)`;
+  - delete per-root `traversalPlansByStartEnvCellId` construction from the outdoor path;
+  - keep the old path behind a narrow fallback only for missing projection records during migration, and mark that fallback for deletion in Phase 9D.
+- Update HUD text in `apps/holtburger-3d/src/pages/BrowserWorldDisplayV2.svelte` if needed:
+  - distinguish projected env-cell nodes from portal-stack views;
+  - include retained noncanonical incoming edge count if exposed;
+  - stop labeling outdoor projection nodes as `views` if they are no longer portal-stack views.
+- Add tests:
+  - direct frame-plan test proving a diamond projection creates one child node for the shared target env cell;
+  - direct frame-plan test proving multiple apertures from the same canonical parent to one child create one child node with multiple mask edges;
+  - runtime test proving outdoor planning does not call or require per-root traversal plans when projection is available;
+  - cache-key test proving `projection.sourceRevisionKey` changes invalidate the outdoor frame plan without a new resource-level revision counter;
+  - renderer-facing plan test proving node count is bounded by projected env-cell count plus the outdoor root.
+
+Acceptance criteria:
+
+- Outdoor-origin direct portal planning no longer creates one traversal plan per transition root.
+- Outdoor-origin frame graph node count is bounded by:
+  - one synthetic outdoor root node;
+  - one frame node per selected projected env cell.
+- Outdoor-origin mask edge count remains tied to retained source aperture edges, not projected node count. Multiple apertures between the same canonical parent/child may create multiple mask edges without creating duplicate child nodes.
+- Raising env-cell portal depth can include more projected env cells up to the outside-visible set, but it must not create additional nodes for alternate portal-stack paths to the same env cell.
+- The affected screenshot scenario should no longer show `views/nodes/masks` growing into the thousands while `cells` remains around `180`.
+- Existing building-transition correctness fixes remain intact:
+  - target env cell is derived from the transition aperture source;
+  - transition source provenance is retained;
+  - no linked-env-cell fanout returns.
+- Validation passes:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts src/v2/runtime/static-scene-query.test.ts`;
+  - `npm run test:ts`.
+
+### Immediate Phase 9D: Resteer Projection Semantics Before Layer Cutover
+
+Problem to solve:
+
+- Phase 9C intentionally uses canonical tree projection facts to fit the current recursive stencil renderer.
+- That is the right short-term cutover, but the static projection record must not permanently collapse the richer portal graph into "one true path" semantics if future rendering needs multiple incoming apertures for the same env cell.
+- Before Phase 10 defines atomic layer contracts, we need to decide which parts of the projection are durable layer payload and which parts are tree-renderer migration scaffolding.
+
+Required review:
+
+- Compare outdoor views at `0xda55ffff` before and after Phase 9C:
+  - the top building transition aperture into env cell `0xda55010b`;
+  - at least one building with multiple outdoor transition apertures into different target cells;
+  - at least one deeper env-cell portal path with `Env-cell portal depth` above the default.
+- Inspect diagnostics:
+  - projected env-cell node count;
+  - rendered canonical edge count;
+  - retained noncanonical incoming edge count;
+  - skipped noncanonical edge samples by source kind.
+- Decide whether the current renderer can remain canonical-tree-only for outdoor projection until a later DAG renderer phase.
+- Treat same-parent multi-aperture edges as supported by the current tree renderer. The DAG/multi-parent question is only about retained incoming edges where the source node differs from the selected canonical parent for the same child env cell.
+
+Deliverables:
+
+- Update this plan with a Phase 9D implementation note that explicitly states one of:
+  - canonical tree rendering is acceptable as the production outdoor direct path for now;
+  - canonical tree rendering loses necessary apertures and must be followed immediately by a DAG/multi-parent renderer phase before Phase 10;
+  - projection construction needs corrected source facts before layer contracts proceed.
+- Delete or quarantine the old outdoor per-root path-tree fallback if Phase 9C projection validation passes.
+- If a fallback must remain temporarily:
+  - make the fallback explicit in `ClientRuntime` as `legacyOutdoorPathTreePortalPlanning`;
+  - log/report when it is used;
+  - add a deletion target in Phase 14.
+- Update Phase 10's `EnvCellSystemLayerPayload` wording based on the actual projection shape.
+
+Acceptance criteria:
+
+- The plan has a concrete recorded decision about canonical tree versus DAG/multi-parent rendering before layer contracts are implemented.
+- The static projection contract is not ambiguous about which fields are durable topology and which fields are renderer-compatibility facts.
+- No production path silently falls back to per-root path-tree traversal when projection records are available.
+- Same-parent multi-aperture rendering is not misclassified as a DAG requirement.
+- Validation passes:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - targeted tests for any fallback deletion or diagnostics changes.
 
 ### Phase 10: Define Atomic Landblock Layer Contracts
 
@@ -1203,7 +1429,8 @@ Layer model:
 - `EnvCellSystemLayerPayload`
   - env-cell records/interiors;
   - env-cell static resource membership;
-  - portal traversal graph inputs;
+  - static portal graph records for source-provenance/debugging;
+  - outdoor portal projection records from Phase 9B/9C, including durable topology and any explicitly named renderer-compatibility canonical facts retained after Phase 9D;
   - source-tagged portal aperture resources for env-cell portals and building-derived transition apertures;
   - transition-root selection facts/provenance;
   - generation id used by portal frame-plan caching.
@@ -1304,6 +1531,7 @@ Explicit non-goals:
 Problem to solve:
 
 - Building transition aperture facts are emitted by the `outdoor-buildings` static object bake path, while env-cell portal/interior facts are emitted by the `landblock-env-cells` bake path. `EnvCellSystemLayerPayload` therefore needs an assembly step that joins the latest coherent same-landblock outputs from both domains.
+- Phase 9B may temporarily derive `StaticOutdoorPortalProjectionRecord` inside `StaticSceneQuery` from committed same-landblock facts. This phase must move that join into the env-cell system assembly boundary so projection publication is part of one coherent layer generation, not query-side compatibility magic.
 
 Ordering invariant:
 
@@ -1316,6 +1544,10 @@ Deliverables:
 
 - Add a layer assembly store for same-landblock static source outputs needed by `EnvCellSystemLayerPayload`.
 - Join `landblock-env-cells` portal/interior/membership outputs with same-landblock building-derived transition aperture facts.
+- Build or carry forward the outdoor portal projection record as part of `EnvCellSystemLayerPayload`:
+  - consume env-cell portal graph/interior facts from the env-cell input;
+  - consume building-transition aperture/source facts from the outdoor-building input;
+  - publish projection topology, adjacency, and Phase 9D-approved canonical renderer facts under the env-cell system generation id.
 - Treat an explicitly loaded empty transition-aperture set as valid.
 - Enforce the dependency gate: missing required transition aperture facts means no env-cell system layer publication.
 - Update demand scheduling or dependency tracking so env-cell-system publication is not racing outdoor-building portal facts.
@@ -1324,6 +1556,7 @@ Deliverables:
 Acceptance criteria:
 
 - Env-cell system layer assembly waits for required same-landblock building-derived transition aperture facts.
+- Env-cell system layer assembly publishes outdoor portal projection records from coherent same-landblock inputs, not from stale independently committed query records.
 - Empty transition aperture facts publish a valid env-cell system layer.
 - Missing transition aperture facts do not publish a partial env-cell system layer.
 - Interior-cell demand has a path to the required building-derived portal facts.

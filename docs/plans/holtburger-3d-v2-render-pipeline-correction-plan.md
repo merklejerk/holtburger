@@ -1974,6 +1974,14 @@ Dry-run findings carried forward:
 - Texture atlas placement is still naturally shared and mutable. Layer payloads may carry texture uses needed to produce `TexturePlacementUpdate`, but texture packing itself remains a shared update path.
 - `static-materializer.ts` currently performs fine partitioning and source-to-materialized draw-unit id mapping to support texture role-page limits. The layer contracts should allow layer-local materialized draw units without deleting that materialization yet.
 
+Browser visibility vs demand policy:
+
+- Browser/static-layer controls should become visibility filters over already resident layers, not demand/residency toggles.
+- Camera residency, landblock range policy, dungeon/env-cell residency, and later memory/LoD policy own demand.
+- Debug/browser controls may hide draws, overlays, or categories within a layer, but they must not clear layer ownership, suppress static source loading, or prevent `EnvCellSystemLayerPayload` publication.
+- The env-cell system layer is structural, not merely visual. Hiding interiors or portal overlays must not remove env-cell records, portal topology, aperture resources, projection facts, SCC/layer facts, or the generation id used by frame-plan caches.
+- If a future diagnostic needs to force-unload a layer, make it an explicitly named destructive/debug residency control with expected portal-plan invalidation. Do not wire ordinary visibility checkboxes to renderer `set*Layer(..., null)` calls or static demand cancellation.
+
 Simplification and elimination tour:
 
 - Delete tiny invalidators that exist only because one static landblock concept is split across multiple runtime streams:
@@ -2013,6 +2021,7 @@ Deliverables:
 - Define typed layer payload contracts at the runtime/renderer boundary.
 - Define layer ownership keys and generation id policy for `(layerKind, landblockId)`.
 - Document how existing `StaticDomain` values map to layer kinds.
+- Document that browser layer controls are visibility filters, while runtime demand remains owned by residency policy.
 - Keep texture placement updates outside the landblock layer replacement contract.
 - Add focused type/contract tests where useful; do not change runtime behavior yet.
 
@@ -2020,6 +2029,7 @@ Acceptance criteria:
 
 - Layer payload contracts can represent the existing terrain, outdoor buildings, outdoor detail, and env-cell-system data without using added/removed resource lists.
 - `EnvCellSystemLayerPayload` is explicitly modeled as the owner of env-cell portals plus building-derived transition aperture surfaces.
+- Browser visibility controls cannot make a required layer payload absent, cannot change layer generation identity, and cannot invalidate portal frame plans except by changing renderer-visible draw categories.
 - Texture placement remains a separate shared update path.
 - Existing behavior and validation remain unchanged.
 
@@ -2039,12 +2049,14 @@ Deliverables:
 - Add renderer ownership indexes from `(layerKind, landblockId)` to installed draw-unit/resource ids.
 - Reuse existing resource creation/disposal helpers under the new APIs.
 - Keep `applyStaticDelta(...)` temporarily as an adapter or parallel path so the codebase stays shippable during the cutover.
+- Keep browser visibility filtering separate from layer replacement APIs. Visibility toggles may skip draw categories, but they should not call `set*Layer(..., null)` unless the user is using an explicitly destructive debug residency tool.
 - Add renderer tests proving layer replacement and layer clearing dispose the expected resources without added/removed resource lists.
 
 Acceptance criteria:
 
 - Renderer can replace and clear each layer independently.
 - Clearing an env-cell system layer removes its portal aperture ranges and structured interior resources without touching unrelated terrain/building/detail layers.
+- Browser visibility toggles can hide terrain/building/detail/interior draws without clearing the installed layer ownership indexes.
 - Existing static delta tests still pass through the migration adapter.
 - No new transition-specific renderer execution path is introduced.
 

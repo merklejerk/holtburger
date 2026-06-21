@@ -212,6 +212,11 @@ export type PortalFrameWorkPlan =
 			readonly kind: "direct-env-cell";
 			readonly mode: "portal-traversal" | "portal-debug";
 			readonly graph: PortalFrameGraphPlan;
+	  }
+	| {
+			readonly kind: "direct-env-cell";
+			readonly mode: "outdoor-projection";
+			readonly layeredGraph: OutdoorProjectionPortalFrameGraphPlan;
 	  };
 
 export type PortalFrameNodeId = number;
@@ -224,6 +229,66 @@ export interface PortalFrameGraphPlan {
 	readonly edges: readonly PortalFrameEdgePlan[];
 	readonly apertureResources: readonly PortalApertureGeometryResourcePlan[];
 	readonly diagnostics: PortalApertureFrameDiagnostics;
+}
+
+export interface OutdoorProjectionPortalFrameGraphPlan {
+	readonly baseEntry: OutdoorProjectionPortalFrameBaseEntryPlan;
+	readonly renderEntries: readonly OutdoorProjectionPortalFrameRenderEntryPlan[];
+	readonly renderLayers: readonly OutdoorProjectionPortalFrameLayerPlan[];
+	readonly maskEdges: readonly OutdoorProjectionPortalFrameMaskEdgePlan[];
+	readonly apertureResources: readonly PortalApertureGeometryResourcePlan[];
+	readonly diagnostics: PortalApertureFrameDiagnostics;
+	readonly projectionDiagnostics: OutdoorProjectionPortalFrameDiagnostics;
+}
+
+export interface OutdoorProjectionPortalFrameBaseEntryPlan {
+	readonly scene: Extract<
+		PortalFrameSceneSource,
+		{ readonly kind: "outdoor-target" }
+	>;
+	readonly debugStackLabel: string;
+}
+
+export interface OutdoorProjectionPortalFrameRenderEntryPlan {
+	readonly renderEntryId: number;
+	readonly envCellId: number;
+	readonly landblockId: number;
+	readonly renderLayer: number;
+	readonly incomingMaskEdgeIds: readonly PortalFrameEdgeId[];
+	readonly resources: PortalFrameNodeResources;
+	readonly debugStackLabel: string;
+}
+
+export interface OutdoorProjectionPortalFrameLayerPlan {
+	readonly renderLayer: number;
+	readonly renderEntryIds: readonly number[];
+}
+
+export interface OutdoorProjectionPortalFrameMaskEdgePlan {
+	readonly edgeId: PortalFrameEdgeId;
+	readonly renderEntryId: number;
+	readonly renderLayer: number;
+	readonly apertureResourceId: string;
+	readonly apertureSourceId: string;
+	readonly linkId: string;
+	readonly sourceKind: PortalApertureSourceKind;
+	readonly sourceEnvCellId: number | null;
+	readonly targetEnvCellId: number;
+}
+
+export interface OutdoorProjectionPortalFrameDiagnostics {
+	readonly componentCount: number;
+	readonly cyclicComponentCount: number;
+	readonly componentInternalEdgeCount: number;
+	readonly maxProjectionRenderLayer: number;
+	readonly maxSelectedRenderLayer: number;
+	readonly projectedEnvCellCount: number;
+	readonly renderEntryCount: number;
+	readonly renderEntriesSkippedByLayerCap: number;
+	readonly renderEntriesSkippedByMaxCells: number;
+	readonly maskEdgesSkippedByLayerCap: number;
+	readonly maskEdgesSkippedByMaxPortalViews: number;
+	readonly missingResourceMembershipCount: number;
 }
 
 export interface PortalFrameNodePlan {

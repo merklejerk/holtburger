@@ -37,9 +37,7 @@
 		RuntimeSnapshot,
 		TransitionApertureDebugOverlayMode,
 	} from "../v2/runtime/client-runtime";
-	import type {
-		PortalFrameWorkPlan,
-	} from "../v2/renderer/types";
+	import type { PortalFrameWorkPlan } from "../v2/renderer/types";
 	import type { EnvCellResourceMembership } from "../v2/runtime/env-cell-resource-membership";
 	import {
 		describeStaticSceneSelectionKey,
@@ -1162,9 +1160,30 @@
 		if (plan.kind === "legacy-render-pass") {
 			return `legacy ${plan.mode}`;
 		}
+		if (plan.mode === "outdoor-projection") {
+			const graph = plan.layeredGraph;
+			const missingResourceCells = graph.renderEntries.filter(
+				(entry) => entry.resources.resourceState === "missing-resources",
+			).length;
+			const structuredDrawUnits = graph.renderEntries.reduce(
+				(count, entry) =>
+					count + entry.resources.structuredInteriorDrawUnitIds.length,
+				0,
+			);
+			const staticDrawUnits = graph.renderEntries.reduce(
+				(count, entry) =>
+					count + entry.resources.envCellStaticObjectDrawUnitIds.length,
+				0,
+			);
+			const aperture = graph.diagnostics;
+			const projection = graph.projectionDiagnostics;
+			return `${plan.mode} base outdoor ${formatHexId(graph.baseEntry.scene.landblockId)} entries ${graph.renderEntries.length}/${projection.projectedEnvCellCount} cells layers ${graph.renderLayers.length} max ${projection.maxSelectedRenderLayer}/${projection.maxProjectionRenderLayer} missing ${missingResourceCells} masks ${graph.maskEdges.length} apertures ${graph.apertureResources.length} edges ${aperture.envCellPortalEdges} env / ${aperture.buildingTransitionEdges} transition dup ${aperture.duplicateMaskEdges} dedupe ${aperture.dedupedGeometryResources} roots ${aperture.transitionRootCount}/${aperture.transitionRootCandidateCount} components ${projection.componentCount} cyclic ${projection.cyclicComponentCount} internal ${projection.componentInternalEdgeCount} skipped ${projection.renderEntriesSkippedByLayerCap} layer / ${projection.renderEntriesSkippedByMaxCells} cell-cap / ${projection.maskEdgesSkippedByMaxPortalViews} mask-cap resources ${structuredDrawUnits} cell / ${staticDrawUnits} static`;
+		}
 
 		const graph = plan.graph;
-		const baseNode = graph.nodes.find((node) => node.nodeId === graph.baseNodeId);
+		const baseNode = graph.nodes.find(
+			(node) => node.nodeId === graph.baseNodeId,
+		);
 		if (!baseNode) {
 			return `${plan.mode} invalid graph missing base ${graph.baseNodeId}`;
 		}
@@ -1837,9 +1856,7 @@
 							<dt>Portal frame</dt>
 							<dd>
 								{snapshot
-									? formatPortalFrameWorkPlan(
-											snapshot.portalFrameWorkPlan,
-										)
+									? formatPortalFrameWorkPlan(snapshot.portalFrameWorkPlan)
 									: "pending"}
 							</dd>
 						</div>

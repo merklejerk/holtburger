@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type {
+	StaticOutdoorPortalProjectionRecord,
 	StaticPortalInteriorRecord,
 	TransitionApertureBatch,
 } from "../static/contracts";
 import type { PortalTraversalPlan } from "./static-scene-query";
 import {
 	createDirectEnvCellFramePlan,
+	createOutdoorProjectionPortalFramePlan,
 	createOutdoorTransitionPortalFramePlan,
 } from "./direct-env-cell-frame-plan";
 
@@ -196,8 +198,7 @@ describe("direct env-cell frame plan", () => {
 		expect(plan?.graph.edges).toEqual([
 			{
 				apertureResourceId: plan?.graph.apertureResources[0]?.resourceId,
-				apertureSourceId:
-					"env-cell-portal:0xda55ffff:0xda550100:portal-a:0:7",
+				apertureSourceId: "env-cell-portal:0xda55ffff:0xda550100:portal-a:0:7",
 				childNodeId: 1,
 				edgeId: 0,
 				linkId: "a-to-b",
@@ -319,8 +320,8 @@ describe("direct env-cell frame plan", () => {
 				linkId: "a-to-b-1",
 				parentNodeId: 0,
 			}),
-			]);
-		});
+		]);
+	});
 
 	it("dedupes duplicate env-cell portal candidates through shared graph assembly", () => {
 		const duplicateEdge = {
@@ -715,6 +716,142 @@ describe("direct env-cell frame plan", () => {
 			transitionRootCount: 1,
 		});
 	});
+
+	it("creates one outdoor projection render entry for a shared diamond target with multiple mask edges", () => {
+		const plan = createOutdoorProjectionPortalFramePlan({
+			landblockId: 0xda55ffff,
+			envCellResourceMembership: [
+				createEnvCellMembership(0xda550100, "structured-a"),
+				createEnvCellMembership(0xda550101, "structured-b"),
+				createEnvCellMembership(0xda550102, "structured-c"),
+				createEnvCellMembership(0xda550103, "structured-d"),
+			],
+			maxCells: 16,
+			maxDepth: 4,
+			maxPortalViews: 16,
+			projection: createOutdoorProjectionRecord({
+				edges: [
+					createProjectionEdge({
+						edgeId: "outdoor-a",
+						sourceEnvCellId: null,
+						targetEnvCellId: 0xda550100,
+					}),
+					createProjectionEdge({
+						edgeId: "a-b",
+						sourceEnvCellId: 0xda550100,
+						targetEnvCellId: 0xda550101,
+					}),
+					createProjectionEdge({
+						edgeId: "b-c",
+						sourceEnvCellId: 0xda550101,
+						targetEnvCellId: 0xda550102,
+					}),
+					createProjectionEdge({
+						edgeId: "b-d",
+						sourceEnvCellId: 0xda550101,
+						targetEnvCellId: 0xda550103,
+					}),
+					createProjectionEdge({
+						edgeId: "c-d",
+						sourceEnvCellId: 0xda550102,
+						targetEnvCellId: 0xda550103,
+					}),
+				],
+				layers: [
+					{ envCellIds: [0xda550100], renderLayer: 1 },
+					{ envCellIds: [0xda550101], renderLayer: 2 },
+					{ envCellIds: [0xda550102], renderLayer: 3 },
+					{ envCellIds: [0xda550103], renderLayer: 4 },
+				],
+			}),
+		});
+
+		expect(plan?.mode).toBe("outdoor-projection");
+		if (plan?.mode !== "outdoor-projection") {
+			throw new Error("Expected outdoor projection plan.");
+		}
+		expect(plan.layeredGraph.renderEntries).toHaveLength(4);
+		expect(
+			plan.layeredGraph.renderEntries.map((entry) => [
+				entry.envCellId,
+				entry.renderLayer,
+				entry.incomingMaskEdgeIds.length,
+			]),
+		).toEqual([
+			[0xda550100, 1, 1],
+			[0xda550101, 2, 1],
+			[0xda550102, 3, 1],
+			[0xda550103, 4, 2],
+		]);
+		expect(plan.layeredGraph.renderLayers).toEqual([
+			{ renderEntryIds: [0], renderLayer: 1 },
+			{ renderEntryIds: [1], renderLayer: 2 },
+			{ renderEntryIds: [2], renderLayer: 3 },
+			{ renderEntryIds: [3], renderLayer: 4 },
+		]);
+		expect(plan.layeredGraph.maskEdges).toHaveLength(5);
+		expect(plan.layeredGraph.diagnostics).toMatchObject({
+			buildingTransitionEdges: 1,
+			envCellPortalEdges: 4,
+			selectedMaskEdges: 5,
+		});
+	});
+
+	it("caps outdoor projection render entries by render layer without duplicating alternate paths", () => {
+		const plan = createOutdoorProjectionPortalFramePlan({
+			landblockId: 0xda55ffff,
+			envCellResourceMembership: [
+				createEnvCellMembership(0xda550100, "structured-a"),
+				createEnvCellMembership(0xda550101, "structured-b"),
+				createEnvCellMembership(0xda550102, "structured-c"),
+			],
+			maxCells: 16,
+			maxDepth: 2,
+			maxPortalViews: 16,
+			projection: createOutdoorProjectionRecord({
+				edges: [
+					createProjectionEdge({
+						edgeId: "outdoor-a",
+						sourceEnvCellId: null,
+						targetEnvCellId: 0xda550100,
+					}),
+					createProjectionEdge({
+						edgeId: "a-b",
+						sourceEnvCellId: 0xda550100,
+						targetEnvCellId: 0xda550101,
+					}),
+					createProjectionEdge({
+						edgeId: "a-c",
+						sourceEnvCellId: 0xda550100,
+						targetEnvCellId: 0xda550102,
+					}),
+					createProjectionEdge({
+						edgeId: "b-c",
+						sourceEnvCellId: 0xda550101,
+						targetEnvCellId: 0xda550102,
+					}),
+				],
+				layers: [
+					{ envCellIds: [0xda550100], renderLayer: 1 },
+					{ envCellIds: [0xda550101], renderLayer: 2 },
+					{ envCellIds: [0xda550102], renderLayer: 3 },
+				],
+			}),
+		});
+
+		expect(plan?.mode).toBe("outdoor-projection");
+		if (plan?.mode !== "outdoor-projection") {
+			throw new Error("Expected outdoor projection plan.");
+		}
+		expect(
+			plan.layeredGraph.renderEntries.map((entry) => entry.envCellId),
+		).toEqual([0xda550100, 0xda550101]);
+		expect(plan.layeredGraph.projectionDiagnostics).toMatchObject({
+			projectedEnvCellCount: 3,
+			renderEntriesSkippedByLayerCap: 1,
+			renderEntryCount: 2,
+		});
+	});
 });
 
 function emptyPortalApertureDiagnostics() {
@@ -868,4 +1005,151 @@ function createTransitionApertureBatch(options?: {
 			{ x: 0, y: 1, z: 0 },
 		],
 	};
+}
+
+function createEnvCellMembership(
+	envCellId: number,
+	structuredDrawUnitId: string,
+) {
+	return {
+		envCellId,
+		envCellStaticObjectDrawUnitIds: [],
+		landblockId: 0xda55ffff,
+		sharedEnvCellStaticObjectDrawUnits: 0,
+		structuredInteriorDrawUnitIds: [structuredDrawUnitId],
+	};
+}
+
+function createOutdoorProjectionRecord(options: {
+	readonly edges: readonly StaticOutdoorPortalProjectionRecord["edges"][number][];
+	readonly layers: readonly {
+		readonly envCellIds: readonly number[];
+		readonly renderLayer: number;
+	}[];
+}): StaticOutdoorPortalProjectionRecord {
+	const envCellIds = [
+		...new Set(options.layers.flatMap((layer) => layer.envCellIds)),
+	];
+	return {
+		adjacency: envCellIds.map((envCellId) => ({
+			edgeIds: options.edges
+				.filter((edge) => edge.sourceEnvCellId === envCellId)
+				.map((edge) => edge.edgeId),
+			sourceNodeId: createProjectionNodeId(envCellId),
+		})),
+		componentEdges: [],
+		components: envCellIds.map((envCellId) => {
+			const renderLayer =
+				options.layers.find((layer) => layer.envCellIds.includes(envCellId))
+					?.renderLayer ?? null;
+			return {
+				componentId: `component:${formatHex32(envCellId)}`,
+				cyclic: false,
+				envCellIds: [envCellId],
+				renderLayer,
+			};
+		}),
+		diagnostics: {
+			acceptedTransitionRootCount: options.edges.filter(
+				(edge) => edge.sourceKind === "building-transition",
+			).length,
+			componentCount: envCellIds.length,
+			componentInternalEdgeCount: 0,
+			cyclicComponentCount: 0,
+			envCellPortalEdgesRejectedMissingAperture: 0,
+			envCellPortalEdgesRejectedSourceNotOutsideVisible: 0,
+			envCellPortalEdgesRejectedTargetNotOutsideVisible: 0,
+			envCellPortalEdgesRetained: options.edges.filter(
+				(edge) => edge.sourceKind === "env-cell-portal",
+			).length,
+			maxRenderLayer: Math.max(
+				0,
+				...options.layers.map((layer) => layer.renderLayer),
+			),
+			outsideVisibleEnvCellCount: envCellIds.length,
+			transitionRootCandidateCount: options.edges.filter(
+				(edge) => edge.sourceKind === "building-transition",
+			).length,
+		},
+		edges: options.edges,
+		incomingEdges: envCellIds.map((envCellId) => ({
+			edgeIds: options.edges
+				.filter((edge) => edge.targetEnvCellId === envCellId)
+				.map((edge) => edge.edgeId),
+			targetEnvCellId: envCellId,
+		})),
+		kind: "outdoor-portal-projection",
+		landblockId: 0xda55ffff,
+		nodes: envCellIds.map((envCellId) => ({
+			envCellId,
+			nodeId: createProjectionNodeId(envCellId),
+		})),
+		renderLayerByEnvCellId: options.layers.flatMap((layer) =>
+			layer.envCellIds.map((envCellId) => ({
+				envCellId,
+				renderLayer: layer.renderLayer,
+			})),
+		),
+		renderLayers: options.layers.map((layer) => ({
+			componentIds: layer.envCellIds.map(
+				(envCellId) => `component:${formatHex32(envCellId)}`,
+			),
+			envCellIds: layer.envCellIds,
+			renderLayer: layer.renderLayer,
+		})),
+		rootNodeId: "outdoor-root",
+		sourceRevisionKey: "projection-test-key",
+	};
+}
+
+function createProjectionEdge(options: {
+	readonly edgeId: string;
+	readonly sourceEnvCellId: number | null;
+	readonly targetEnvCellId: number;
+}): StaticOutdoorPortalProjectionRecord["edges"][number] {
+	const sourceKind =
+		options.sourceEnvCellId === null
+			? "building-transition"
+			: "env-cell-portal";
+	return {
+		apertureResourceId: `${sourceKind}:${options.edgeId}:range`,
+		apertureSourceId: `${sourceKind}:${options.edgeId}:source`,
+		edgeId: options.edgeId,
+		linkId: options.edgeId,
+		provenance:
+			sourceKind === "building-transition"
+				? {
+						apertureBatchId: "transition-aperture-batch:da55ffff",
+						buildingInstanceId: "building-0",
+						buildingPortalId: "building-portal-0",
+						kind: "building-transition",
+						portalId: options.edgeId,
+						targetEnvCellId: options.targetEnvCellId,
+					}
+				: {
+						kind: "env-cell-portal",
+						polygonId: null,
+						sourceEnvCellId: options.sourceEnvCellId,
+						sourceIndex: 0,
+						sourcePortalId: `${options.edgeId}:source-portal`,
+						targetEnvCellId: options.targetEnvCellId,
+						targetPortalId: `${options.edgeId}:target-portal`,
+					},
+		sourceEnvCellId: options.sourceEnvCellId,
+		sourceKind,
+		sourceNodeId:
+			options.sourceEnvCellId === null
+				? "outdoor-root"
+				: createProjectionNodeId(options.sourceEnvCellId),
+		targetEnvCellId: options.targetEnvCellId,
+		targetNodeId: createProjectionNodeId(options.targetEnvCellId),
+	};
+}
+
+function createProjectionNodeId(envCellId: number): string {
+	return `env-cell:${formatHex32(envCellId)}`;
+}
+
+function formatHex32(value: number): string {
+	return `0x${(value >>> 0).toString(16).padStart(8, "0")}`;
 }

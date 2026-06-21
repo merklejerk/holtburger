@@ -6,6 +6,7 @@ import type {
 	TransitionApertureBatch,
 } from "./contracts";
 import {
+	createEnvCellPortalProjectionRoot,
 	createEnvCellStaticPortalGraph,
 	createOutdoorPortalProjectionRoot,
 	createStaticPortalProjection,
@@ -369,6 +370,145 @@ describe("V2 static portal graphs", () => {
 		]);
 		expect(projection?.diagnostics.acceptedTransitionRootCount).toBe(2);
 	});
+
+	it("projects env-cell roots by reachable portal links and longest acyclic layer", () => {
+		const owner = createWorkOwner("work-env", "landblock-env-cells");
+		const record = createPortalInteriorRecord({
+			envCellIds: [0xda550100, 0xda550101, 0xda550102, 0xda550103],
+			links: [
+				createEnvCellLink({
+					linkId: "a-to-b",
+					sourceEnvCellId: 0xda550100,
+					sourcePortalId: "portal-ab",
+					targetEnvCellId: 0xda550101,
+					targetPortalId: "portal-ba",
+				}),
+				createEnvCellLink({
+					linkId: "a-to-c",
+					sourceEnvCellId: 0xda550100,
+					sourcePortalId: "portal-ac",
+					targetEnvCellId: 0xda550102,
+					targetPortalId: "portal-ca",
+				}),
+				createEnvCellLink({
+					linkId: "c-to-b",
+					sourceEnvCellId: 0xda550102,
+					sourcePortalId: "portal-cb",
+					targetEnvCellId: 0xda550101,
+					targetPortalId: "portal-bc",
+				}),
+			],
+			owner,
+		});
+
+		const projection = createStaticPortalProjection({
+			landblockId: 0xda55ffff,
+			root: createEnvCellPortalProjectionRoot({
+				envCellId: 0xda550100,
+				landblockId: 0xda55ffff,
+			}),
+			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
+			portalInteriorRecords: [record],
+			transitionApertureBatches: [
+				createTransitionApertureBatch({
+					ranges: [
+						createTransitionApertureRange({
+							portalId: "ignored-transition",
+							targetCellLowId: 0x0103,
+						}),
+					],
+				}),
+			],
+		});
+
+		expect(projection).toMatchObject({
+			kind: "portal-projection",
+			root: {
+				envCellId: 0xda550100,
+				kind: "env-cell-root",
+				landblockId: 0xda55ffff,
+				rootNodeId: "env-cell:3663003904",
+			},
+			rootNodeId: "env-cell:3663003904",
+		});
+		expect(projection?.sourceRevisionKey).toContain(
+			"root:env-cell-root:3663069183:env-cell:3663003904:3663003904",
+		);
+		expect(projection?.sourceRevisionKey).not.toContain("ignored-transition");
+		expect(projection?.nodes.map((node) => node.envCellId)).toEqual([
+			0xda550100, 0xda550101, 0xda550102,
+		]);
+		expect(projection?.renderLayerByEnvCellId).toEqual([
+			{ envCellId: 0xda550100, renderLayer: 0 },
+			{ envCellId: 0xda550101, renderLayer: 2 },
+			{ envCellId: 0xda550102, renderLayer: 1 },
+		]);
+		expect(
+			projection?.incomingEdges.find(
+				(incoming) => incoming.targetEnvCellId === 0xda550101,
+			)?.edgeIds,
+		).toEqual([
+			"env-cell-portal:env-cell-portal:a-to-b:0",
+			"env-cell-portal:env-cell-portal:c-to-b:0",
+		]);
+	});
+
+	it("keeps env-cell root cycles finite and layers descendants after the root SCC", () => {
+		const owner = createWorkOwner("work-env", "landblock-env-cells");
+		const record = createPortalInteriorRecord({
+			envCellIds: [0xda550100, 0xda550101, 0xda550102],
+			links: [
+				createEnvCellLink({
+					linkId: "a-to-c",
+					sourceEnvCellId: 0xda550100,
+					sourcePortalId: "portal-ac",
+					targetEnvCellId: 0xda550102,
+					targetPortalId: "portal-ca",
+				}),
+				createEnvCellLink({
+					linkId: "c-to-a",
+					sourceEnvCellId: 0xda550102,
+					sourcePortalId: "portal-ca",
+					targetEnvCellId: 0xda550100,
+					targetPortalId: "portal-ac",
+				}),
+				createEnvCellLink({
+					linkId: "c-to-b",
+					sourceEnvCellId: 0xda550102,
+					sourcePortalId: "portal-cb",
+					targetEnvCellId: 0xda550101,
+					targetPortalId: "portal-bc",
+				}),
+			],
+			owner,
+		});
+
+		const projection = createStaticPortalProjection({
+			landblockId: 0xda55ffff,
+			root: createEnvCellPortalProjectionRoot({
+				envCellId: 0xda550100,
+				landblockId: 0xda55ffff,
+			}),
+			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
+			portalInteriorRecords: [record],
+			transitionApertureBatches: [],
+		});
+
+		expect(
+			projection?.components.find((component) =>
+				component.envCellIds.includes(0xda550100),
+			),
+		).toMatchObject({
+			cyclic: true,
+			envCellIds: [0xda550100, 0xda550102],
+			renderLayer: 0,
+		});
+		expect(projection?.renderLayerByEnvCellId).toContainEqual({
+			envCellId: 0xda550101,
+			renderLayer: 1,
+		});
+		expect(projection?.diagnostics.componentInternalEdgeCount).toBe(2);
+	});
 });
 
 function createWorkOwner(
@@ -435,29 +575,31 @@ function createPortalInteriorRecord(options: {
 	readonly owner: StaticWorkPeerRecordOwner;
 }): StaticPortalInteriorRecord {
 	return {
-		envCells: options.envCellIds.map((envCellId) =>
-			createPortalSummary(envCellId, {
-				portalApertures: [
+		envCells: options.envCellIds.map((envCellId) => {
+			const portalIds = new Set([
+				"portal-bd",
+				"portal-bc",
+				"portal-cd",
+				"portal-cb",
+			]);
+			for (const link of options.links) {
+				if (
+					link.source.kind === "env-cell" &&
+					link.source.envCellId === envCellId
+				) {
+					portalIds.add(link.source.portalId);
+				}
+			}
+			return createPortalSummary(envCellId, {
+				portalApertures: [...portalIds].map((portalId) =>
 					createPortalAperture({
-						portalId: "portal-bd",
+						portalId,
 						sourceIndex: 0,
 					}),
-					createPortalAperture({
-						portalId: "portal-bc",
-						sourceIndex: 0,
-					}),
-					createPortalAperture({
-						portalId: "portal-cd",
-						sourceIndex: 0,
-					}),
-					createPortalAperture({
-						portalId: "portal-cb",
-						sourceIndex: 0,
-					}),
-				],
+				),
 				seenOutside: true,
-			}),
-		),
+			});
+		}),
 		kind: "env-cell-portal-interior",
 		landblockId: 0xda55ffff,
 		owner: options.owner,

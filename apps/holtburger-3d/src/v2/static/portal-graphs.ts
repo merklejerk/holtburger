@@ -131,19 +131,17 @@ export function createStaticPortalProjection(options: {
 	readonly transitionApertureBatches: readonly TransitionApertureBatch[];
 }): StaticPortalProjectionRecord | null {
 	const landblockId = options.landblockId >>> 0;
-	if (options.root.kind !== "outdoor-root") {
-		throw new Error(
-			`Portal projection root policy ${options.root.kind} is not implemented yet.`,
-		);
-	}
 	if (options.root.landblockId !== landblockId) {
 		throw new Error(
 			`Portal projection root landblock ${options.root.landblockId >>> 0} does not match projection landblock ${landblockId}.`,
 		);
 	}
 	const rootNodeId = options.root.rootNodeId;
-	const rootComponentId = createProjectionRootComponentId(options.root);
 	const outsideVisibleEnvCellIds = createOutsideVisibleEnvCellIds(
+		options.portalInteriorRecords,
+		landblockId,
+	);
+	const knownEnvCellIds = createKnownEnvCellIds(
 		options.portalInteriorRecords,
 		landblockId,
 	);
@@ -151,147 +149,36 @@ export function createStaticPortalProjection(options: {
 		options.portalInteriorRecords,
 		landblockId,
 	);
-	const nodes = [...outsideVisibleEnvCellIds]
-		.sort(compareNumbers)
-		.map((envCellId) => ({
-			envCellId,
-			nodeId: createEnvCellPortalGraphNodeId(envCellId),
-		}));
-	const edges: StaticPortalProjectionEdge[] = [];
 	const diagnostics = createProjectionDiagnostics({
 		outsideVisibleEnvCellCount: outsideVisibleEnvCellIds.size,
 	});
-
-	for (const batch of options.transitionApertureBatches) {
-		if (batch.landblockId !== landblockId) {
-			continue;
-		}
-		for (const range of batch.ranges) {
-			diagnostics.transitionRootCandidateCount += 1;
-			const targetEnvCellId = createBuildingTransitionTargetEnvCellId(
-				batch,
-				range,
-			);
-			if (!outsideVisibleEnvCellIds.has(targetEnvCellId)) {
-				continue;
-			}
-			diagnostics.acceptedTransitionRootCount += 1;
-			edges.push({
-				apertureResourceId: createBuildingTransitionApertureRangeId({
-					apertureBatchId: batch.apertureBatchId,
-					portalId: range.portalId,
-					rangeFirstIndex: range.firstIndex,
-					rangeIndexCount: range.indexCount,
-				}),
-				apertureSourceId: createBuildingTransitionApertureSourceId({
-					apertureBatchId: batch.apertureBatchId,
-					portalId: range.portalId,
-					rangeFirstIndex: range.firstIndex,
-					rangeIndexCount: range.indexCount,
-				}),
-				edgeId: createProjectionBuildingTransitionEdgeId({
-					apertureBatchId: batch.apertureBatchId,
-					portalId: range.portalId,
-					rangeFirstIndex: range.firstIndex,
-					rangeIndexCount: range.indexCount,
-					targetEnvCellId,
-				}),
-				linkId: createProjectionBuildingTransitionLinkId({
-					apertureBatchId: batch.apertureBatchId,
-					portalId: range.portalId,
-					targetEnvCellId,
-				}),
-				provenance: {
-					apertureBatchId: batch.apertureBatchId,
-					buildingInstanceId: range.source.buildingInstanceId,
-					buildingPortalId: range.source.buildingPortalId,
-					kind: "building-transition",
-					portalId: range.portalId,
-					targetEnvCellId,
-				},
-				sourceEnvCellId: null,
-				sourceKind: "building-transition",
-				sourceNodeId: rootNodeId,
-				targetEnvCellId,
-				targetNodeId: createEnvCellPortalGraphNodeId(targetEnvCellId),
-			});
-		}
+	const projected = createProjectionNodesAndEdges({
+		diagnostics,
+		envCellPortalApertures,
+		knownEnvCellIds,
+		landblockId,
+		outsideVisibleEnvCellIds,
+		portalGraphs: options.portalGraphs,
+		root: options.root,
+		rootNodeId,
+		transitionApertureBatches: options.transitionApertureBatches,
+	});
+	if (projected === null) {
+		return null;
 	}
-
-	for (const graph of options.portalGraphs) {
-		if (graph.landblockId !== landblockId) {
-			continue;
-		}
-		for (const edge of graph.edges) {
-			if (edge.sceneCrossing?.kind !== "env-cell-to-env-cell") {
-				continue;
-			}
-			const sourceEnvCellId = edge.sceneCrossing.sourceEnvCellId >>> 0;
-			const targetEnvCellId = edge.sceneCrossing.targetEnvCellId >>> 0;
-			if (!outsideVisibleEnvCellIds.has(sourceEnvCellId)) {
-				diagnostics.envCellPortalEdgesRejectedSourceNotOutsideVisible += 1;
-				continue;
-			}
-			if (!outsideVisibleEnvCellIds.has(targetEnvCellId)) {
-				diagnostics.envCellPortalEdgesRejectedTargetNotOutsideVisible += 1;
-				continue;
-			}
-			const aperture = envCellPortalApertures.get(sourceEnvCellId)?.get(
-				createEnvCellPortalApertureLookupKey({
-					portalId:
-						edge.provenance.kind === "env-cell-portal"
-							? edge.provenance.sourcePortalId
-							: "",
-					sourceIndex: edge.sourceIndex,
-				}),
-			);
-			if (!aperture || edge.provenance.kind !== "env-cell-portal") {
-				diagnostics.envCellPortalEdgesRejectedMissingAperture += 1;
-				continue;
-			}
-			diagnostics.envCellPortalEdgesRetained += 1;
-			edges.push({
-				apertureResourceId: createEnvCellPortalApertureRangeId({
-					envCellId: sourceEnvCellId,
-					landblockId,
-					polygonId: aperture.polygonId,
-					portalId: edge.provenance.sourcePortalId,
-					sourceIndex: aperture.sourceIndex,
-				}),
-				apertureSourceId: createEnvCellPortalApertureSourceId({
-					envCellId: sourceEnvCellId,
-					landblockId,
-					polygonId: aperture.polygonId,
-					portalId: edge.provenance.sourcePortalId,
-					sourceIndex: aperture.sourceIndex,
-				}),
-				edgeId: `env-cell-portal:${edge.edgeId}`,
-				linkId: edge.linkId,
-				provenance: {
-					kind: "env-cell-portal",
-					polygonId: edge.polygonId,
-					sourceEnvCellId,
-					sourceIndex: edge.sourceIndex,
-					sourcePortalId: edge.provenance.sourcePortalId,
-					targetEnvCellId,
-					targetPortalId:
-						edge.provenance.target.kind === "env-cell"
-							? edge.provenance.target.portalId
-							: "",
-				},
-				sourceEnvCellId,
-				sourceKind: "env-cell-portal",
-				sourceNodeId: createEnvCellPortalGraphNodeId(sourceEnvCellId),
-				targetEnvCellId,
-				targetNodeId: createEnvCellPortalGraphNodeId(targetEnvCellId),
-			});
-		}
-	}
+	const { edges, nodes, retainRootLayer } = projected;
 
 	const sortedEdges = edges.sort(compareProjectionEdges);
 	const adjacency = createProjectionAdjacency(sortedEdges);
 	const incomingEdges = createProjectionIncomingEdges(sortedEdges);
 	const components = createProjectionComponents(nodes, sortedEdges);
+	const rootComponentId = createProjectionRootComponentId(
+		options.root,
+		components,
+	);
+	if (rootComponentId === null) {
+		return null;
+	}
 	const componentEdges = createProjectionComponentEdges(
 		sortedEdges,
 		components,
@@ -300,6 +187,7 @@ export function createStaticPortalProjection(options: {
 	const componentLayers = createProjectionComponentLayers(
 		componentEdges,
 		rootComponentId,
+		retainRootLayer,
 	);
 	const componentsWithLayers = components.map((component) => ({
 		...component,
@@ -332,7 +220,7 @@ export function createStaticPortalProjection(options: {
 		);
 	}).length;
 
-	return sortedEdges.length > 0
+	return edges.length > 0 || retainRootLayer
 		? {
 				adjacency,
 				componentEdges,
@@ -366,6 +254,20 @@ export function createOutdoorPortalProjectionRoot(
 		kind: "outdoor-root",
 		landblockId: normalizedLandblockId,
 		rootNodeId: createOutdoorPortalGraphNodeId(normalizedLandblockId),
+	};
+}
+
+export function createEnvCellPortalProjectionRoot(options: {
+	readonly envCellId: number;
+	readonly landblockId: number;
+}): StaticPortalProjectionRoot {
+	const envCellId = options.envCellId >>> 0;
+	const landblockId = options.landblockId >>> 0;
+	return {
+		envCellId,
+		kind: "env-cell-root",
+		landblockId,
+		rootNodeId: createEnvCellPortalGraphNodeId(envCellId),
 	};
 }
 
@@ -516,6 +418,22 @@ function createOutsideVisibleEnvCellIds(
 	return envCellIds;
 }
 
+function createKnownEnvCellIds(
+	records: readonly StaticPortalInteriorRecord[],
+	landblockId: number,
+): ReadonlySet<number> {
+	const envCellIds = new Set<number>();
+	for (const record of records) {
+		if (record.landblockId !== landblockId) {
+			continue;
+		}
+		for (const envCell of record.envCells) {
+			envCellIds.add(envCell.envCellId >>> 0);
+		}
+	}
+	return envCellIds;
+}
+
 function createEnvCellPortalApertureLookup(
 	records: readonly StaticPortalInteriorRecord[],
 	landblockId: number,
@@ -547,6 +465,298 @@ function createEnvCellPortalApertureLookupKey(options: {
 	readonly sourceIndex: number;
 }): string {
 	return `${options.portalId}:${options.sourceIndex}`;
+}
+
+function createProjectionNodesAndEdges(options: {
+	readonly diagnostics: MutableProjectionDiagnostics;
+	readonly envCellPortalApertures: ReadonlyMap<
+		number,
+		ReadonlyMap<string, PortalAperture>
+	>;
+	readonly knownEnvCellIds: ReadonlySet<number>;
+	readonly landblockId: number;
+	readonly outsideVisibleEnvCellIds: ReadonlySet<number>;
+	readonly portalGraphs: readonly StaticPortalGraphRecord[];
+	readonly root: StaticPortalProjectionRoot;
+	readonly rootNodeId: string;
+	readonly transitionApertureBatches: readonly TransitionApertureBatch[];
+}): {
+	readonly edges: StaticPortalProjectionEdge[];
+	readonly nodes: readonly {
+		readonly envCellId: number;
+		readonly nodeId: string;
+	}[];
+	readonly retainRootLayer: boolean;
+} | null {
+	const root = options.root;
+	switch (root.kind) {
+		case "outdoor-root":
+			return createOutdoorProjectionNodesAndEdges(options);
+		case "env-cell-root":
+			return createEnvCellProjectionNodesAndEdges({ ...options, root });
+	}
+}
+
+function createOutdoorProjectionNodesAndEdges(options: {
+	readonly diagnostics: MutableProjectionDiagnostics;
+	readonly envCellPortalApertures: ReadonlyMap<
+		number,
+		ReadonlyMap<string, PortalAperture>
+	>;
+	readonly landblockId: number;
+	readonly outsideVisibleEnvCellIds: ReadonlySet<number>;
+	readonly portalGraphs: readonly StaticPortalGraphRecord[];
+	readonly rootNodeId: string;
+	readonly transitionApertureBatches: readonly TransitionApertureBatch[];
+}): {
+	readonly edges: StaticPortalProjectionEdge[];
+	readonly nodes: readonly {
+		readonly envCellId: number;
+		readonly nodeId: string;
+	}[];
+	readonly retainRootLayer: false;
+} {
+	const nodes = createProjectionNodes(options.outsideVisibleEnvCellIds);
+	const edges: StaticPortalProjectionEdge[] = [];
+	for (const batch of options.transitionApertureBatches) {
+		if (batch.landblockId !== options.landblockId) {
+			continue;
+		}
+		for (const range of batch.ranges) {
+			options.diagnostics.transitionRootCandidateCount += 1;
+			const targetEnvCellId = createBuildingTransitionTargetEnvCellId(
+				batch,
+				range,
+			);
+			if (!options.outsideVisibleEnvCellIds.has(targetEnvCellId)) {
+				continue;
+			}
+			options.diagnostics.acceptedTransitionRootCount += 1;
+			edges.push({
+				apertureResourceId: createBuildingTransitionApertureRangeId({
+					apertureBatchId: batch.apertureBatchId,
+					portalId: range.portalId,
+					rangeFirstIndex: range.firstIndex,
+					rangeIndexCount: range.indexCount,
+				}),
+				apertureSourceId: createBuildingTransitionApertureSourceId({
+					apertureBatchId: batch.apertureBatchId,
+					portalId: range.portalId,
+					rangeFirstIndex: range.firstIndex,
+					rangeIndexCount: range.indexCount,
+				}),
+				edgeId: createProjectionBuildingTransitionEdgeId({
+					apertureBatchId: batch.apertureBatchId,
+					portalId: range.portalId,
+					rangeFirstIndex: range.firstIndex,
+					rangeIndexCount: range.indexCount,
+					targetEnvCellId,
+				}),
+				linkId: createProjectionBuildingTransitionLinkId({
+					apertureBatchId: batch.apertureBatchId,
+					portalId: range.portalId,
+					targetEnvCellId,
+				}),
+				provenance: {
+					apertureBatchId: batch.apertureBatchId,
+					buildingInstanceId: range.source.buildingInstanceId,
+					buildingPortalId: range.source.buildingPortalId,
+					kind: "building-transition",
+					portalId: range.portalId,
+					targetEnvCellId,
+				},
+				sourceEnvCellId: null,
+				sourceKind: "building-transition",
+				sourceNodeId: options.rootNodeId,
+				targetEnvCellId,
+				targetNodeId: createEnvCellPortalGraphNodeId(targetEnvCellId),
+			});
+		}
+	}
+	edges.push(
+		...createRetainedEnvCellProjectionEdges({
+			diagnostics: options.diagnostics,
+			envCellPortalApertures: options.envCellPortalApertures,
+			includeEnvCellId: (envCellId) =>
+				options.outsideVisibleEnvCellIds.has(envCellId),
+			landblockId: options.landblockId,
+			portalGraphs: options.portalGraphs,
+		}),
+	);
+	return { edges, nodes, retainRootLayer: false };
+}
+
+function createEnvCellProjectionNodesAndEdges(options: {
+	readonly diagnostics: MutableProjectionDiagnostics;
+	readonly envCellPortalApertures: ReadonlyMap<
+		number,
+		ReadonlyMap<string, PortalAperture>
+	>;
+	readonly knownEnvCellIds: ReadonlySet<number>;
+	readonly landblockId: number;
+	readonly portalGraphs: readonly StaticPortalGraphRecord[];
+	readonly root: Extract<
+		StaticPortalProjectionRoot,
+		{ readonly kind: "env-cell-root" }
+	>;
+}): {
+	readonly edges: StaticPortalProjectionEdge[];
+	readonly nodes: readonly {
+		readonly envCellId: number;
+		readonly nodeId: string;
+	}[];
+	readonly retainRootLayer: true;
+} | null {
+	const startEnvCellId = options.root.envCellId >>> 0;
+	if (!options.knownEnvCellIds.has(startEnvCellId)) {
+		return null;
+	}
+	const retainedEdges = createRetainedEnvCellProjectionEdges({
+		diagnostics: options.diagnostics,
+		envCellPortalApertures: options.envCellPortalApertures,
+		includeEnvCellId: (envCellId) => options.knownEnvCellIds.has(envCellId),
+		landblockId: options.landblockId,
+		portalGraphs: options.portalGraphs,
+	});
+	const reachableEnvCellIds = createReachableEnvCellIds({
+		edges: retainedEdges,
+		startEnvCellId,
+	});
+	const edges = retainedEdges.filter(
+		(edge) =>
+			edge.sourceEnvCellId !== null &&
+			reachableEnvCellIds.has(edge.sourceEnvCellId) &&
+			reachableEnvCellIds.has(edge.targetEnvCellId),
+	);
+	return {
+		edges,
+		nodes: createProjectionNodes(reachableEnvCellIds),
+		retainRootLayer: true,
+	};
+}
+
+function createRetainedEnvCellProjectionEdges(options: {
+	readonly diagnostics: MutableProjectionDiagnostics;
+	readonly envCellPortalApertures: ReadonlyMap<
+		number,
+		ReadonlyMap<string, PortalAperture>
+	>;
+	readonly includeEnvCellId: (envCellId: number) => boolean;
+	readonly landblockId: number;
+	readonly portalGraphs: readonly StaticPortalGraphRecord[];
+}): StaticPortalProjectionEdge[] {
+	const edges: StaticPortalProjectionEdge[] = [];
+	for (const graph of options.portalGraphs) {
+		if (graph.landblockId !== options.landblockId) {
+			continue;
+		}
+		for (const edge of graph.edges) {
+			if (edge.sceneCrossing?.kind !== "env-cell-to-env-cell") {
+				continue;
+			}
+			const sourceEnvCellId = edge.sceneCrossing.sourceEnvCellId >>> 0;
+			const targetEnvCellId = edge.sceneCrossing.targetEnvCellId >>> 0;
+			if (!options.includeEnvCellId(sourceEnvCellId)) {
+				options.diagnostics.envCellPortalEdgesRejectedSourceNotOutsideVisible += 1;
+				continue;
+			}
+			if (!options.includeEnvCellId(targetEnvCellId)) {
+				options.diagnostics.envCellPortalEdgesRejectedTargetNotOutsideVisible += 1;
+				continue;
+			}
+			const aperture = options.envCellPortalApertures.get(sourceEnvCellId)?.get(
+				createEnvCellPortalApertureLookupKey({
+					portalId:
+						edge.provenance.kind === "env-cell-portal"
+							? edge.provenance.sourcePortalId
+							: "",
+					sourceIndex: edge.sourceIndex,
+				}),
+			);
+			if (!aperture || edge.provenance.kind !== "env-cell-portal") {
+				options.diagnostics.envCellPortalEdgesRejectedMissingAperture += 1;
+				continue;
+			}
+			options.diagnostics.envCellPortalEdgesRetained += 1;
+			edges.push({
+				apertureResourceId: createEnvCellPortalApertureRangeId({
+					envCellId: sourceEnvCellId,
+					landblockId: options.landblockId,
+					polygonId: aperture.polygonId,
+					portalId: edge.provenance.sourcePortalId,
+					sourceIndex: aperture.sourceIndex,
+				}),
+				apertureSourceId: createEnvCellPortalApertureSourceId({
+					envCellId: sourceEnvCellId,
+					landblockId: options.landblockId,
+					polygonId: aperture.polygonId,
+					portalId: edge.provenance.sourcePortalId,
+					sourceIndex: aperture.sourceIndex,
+				}),
+				edgeId: `env-cell-portal:${edge.edgeId}`,
+				linkId: edge.linkId,
+				provenance: {
+					kind: "env-cell-portal",
+					polygonId: edge.polygonId,
+					sourceEnvCellId,
+					sourceIndex: edge.sourceIndex,
+					sourcePortalId: edge.provenance.sourcePortalId,
+					targetEnvCellId,
+					targetPortalId:
+						edge.provenance.target.kind === "env-cell"
+							? edge.provenance.target.portalId
+							: "",
+				},
+				sourceEnvCellId,
+				sourceKind: "env-cell-portal",
+				sourceNodeId: createEnvCellPortalGraphNodeId(sourceEnvCellId),
+				targetEnvCellId,
+				targetNodeId: createEnvCellPortalGraphNodeId(targetEnvCellId),
+			});
+		}
+	}
+	return edges;
+}
+
+function createReachableEnvCellIds(options: {
+	readonly edges: readonly StaticPortalProjectionEdge[];
+	readonly startEnvCellId: number;
+}): ReadonlySet<number> {
+	const outgoingBySource = new Map<number, number[]>();
+	for (const edge of options.edges) {
+		if (edge.sourceEnvCellId === null) {
+			continue;
+		}
+		const outgoing = outgoingBySource.get(edge.sourceEnvCellId) ?? [];
+		outgoing.push(edge.targetEnvCellId);
+		outgoingBySource.set(edge.sourceEnvCellId, outgoing);
+	}
+
+	const reachableEnvCellIds = new Set<number>([options.startEnvCellId]);
+	const queue = [options.startEnvCellId];
+	while (queue.length > 0) {
+		const sourceEnvCellId = queue.shift();
+		if (sourceEnvCellId === undefined) {
+			continue;
+		}
+		for (const targetEnvCellId of outgoingBySource.get(sourceEnvCellId) ?? []) {
+			if (reachableEnvCellIds.has(targetEnvCellId)) {
+				continue;
+			}
+			reachableEnvCellIds.add(targetEnvCellId);
+			queue.push(targetEnvCellId);
+		}
+	}
+	return reachableEnvCellIds;
+}
+
+function createProjectionNodes(
+	envCellIds: ReadonlySet<number>,
+): readonly { readonly envCellId: number; readonly nodeId: string }[] {
+	return [...envCellIds].sort(compareNumbers).map((envCellId) => ({
+		envCellId,
+		nodeId: createEnvCellPortalGraphNodeId(envCellId),
+	}));
 }
 
 function createProjectionDiagnostics(options: {
@@ -765,6 +975,7 @@ function createProjectionComponentEdges(
 function createProjectionComponentLayers(
 	componentEdges: readonly StaticPortalProjectionComponentEdge[],
 	rootComponentId: string,
+	retainRootLayer: boolean,
 ): ReadonlyMap<string, number> {
 	const outgoingBySource = new Map<string, string[]>();
 	for (const edge of componentEdges) {
@@ -797,7 +1008,9 @@ function createProjectionComponentLayers(
 			queue.push(targetComponentId);
 		}
 	}
-	layers.delete(rootComponentId);
+	if (!retainRootLayer) {
+		layers.delete(rootComponentId);
+	}
 	return layers;
 }
 
@@ -835,12 +1048,13 @@ function createProjectionComponentId(envCellIds: readonly number[]): string {
 
 function createProjectionRootComponentId(
 	root: StaticPortalProjectionRoot,
-): string {
+	components: readonly StaticPortalProjectionComponent[],
+): string | null {
 	switch (root.kind) {
 		case "outdoor-root":
 			return "component:outdoor";
 		case "env-cell-root":
-			return `component:env-cell-root:${root.envCellId >>> 0}`;
+			return findComponentIdForEnvCell(components, root.envCellId);
 	}
 }
 
@@ -927,21 +1141,24 @@ export function createStaticPortalProjectionSourceKey(options: {
 			]),
 		)
 		.sort();
-	const transitionParts = options.transitionApertureBatches
-		.filter((batch) => batch.landblockId === options.landblockId)
-		.flatMap((batch) =>
-			batch.ranges.map((range) =>
-				[
-					"transition",
-					batch.apertureBatchId,
-					range.portalId,
-					range.firstIndex,
-					range.indexCount,
-					createBuildingTransitionTargetEnvCellId(batch, range),
-				].join(":"),
-			),
-		)
-		.sort();
+	const transitionParts =
+		options.root.kind === "outdoor-root"
+			? options.transitionApertureBatches
+					.filter((batch) => batch.landblockId === options.landblockId)
+					.flatMap((batch) =>
+						batch.ranges.map((range) =>
+							[
+								"transition",
+								batch.apertureBatchId,
+								range.portalId,
+								range.firstIndex,
+								range.indexCount,
+								createBuildingTransitionTargetEnvCellId(batch, range),
+							].join(":"),
+						),
+					)
+					.sort()
+			: [];
 	return [
 		rootParts,
 		`landblock:${options.landblockId >>> 0}`,

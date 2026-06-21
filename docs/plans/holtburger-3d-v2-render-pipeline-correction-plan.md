@@ -1898,6 +1898,23 @@ Dry-run findings on 2026-06-21:
   - `npm run check`;
   - `npm run test:ts -- src/v2/static/portal-graphs.test.ts src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/static-scene-query.test.ts src/v2/runtime/client-runtime.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts`.
 
+9E.5 cleanup checkpoint added on 2026-06-21:
+
+- `npm run lint:dead` currently fails with 5 unused value exports and 65 unused exported types.
+- Do not clean this up opportunistically inside the render-pipeline correction unless the next phase already touches those files.
+- Add a dedicated cleanup pass after Phase 9 projection validation:
+  - delete truly dead value exports;
+  - de-export values/types that are only module-local;
+  - explicitly keep intentional app-local contract/debug DTO exports;
+  - do not preserve production code solely because tests/debug consumers still reference it.
+- Highest-signal value exports to classify first:
+  - `createEmptyPortalApertureFrameDiagnostics`;
+  - `createStaticMaterialRenderState`;
+  - `createStaticMaterialTextureSamplingPolicyKey`;
+  - `createEnvCellStaticObjectCompatibilityPayload`;
+  - `resolveStaticMaterialSourceClosure`.
+- Treat the 65 unused exported types as a classification pass, not a blanket deletion pass, because many are boundary/contract/report shapes.
+
 Acceptance criteria:
 
 - Dungeon/env-cell-origin direct rendering no longer depends on recursive portal-stack `PortalFrameGraphPlan` for production planning.

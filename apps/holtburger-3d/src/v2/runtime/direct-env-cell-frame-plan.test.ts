@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
-	StaticOutdoorPortalProjectionRecord,
+	StaticPortalProjectionRecord,
 	StaticPortalInteriorRecord,
 } from "../static/contracts";
 import type { PortalTraversalPlan } from "./static-scene-query";
@@ -676,12 +676,12 @@ function createEnvCellMembership(
 }
 
 function createOutdoorProjectionRecord(options: {
-	readonly edges: readonly StaticOutdoorPortalProjectionRecord["edges"][number][];
+	readonly edges: readonly StaticPortalProjectionRecord["edges"][number][];
 	readonly layers: readonly {
 		readonly envCellIds: readonly number[];
 		readonly renderLayer: number;
 	}[];
-}): StaticOutdoorPortalProjectionRecord {
+}): StaticPortalProjectionRecord {
 	const envCellIds = [
 		...new Set(options.layers.flatMap((layer) => layer.envCellIds)),
 	];
@@ -733,7 +733,7 @@ function createOutdoorProjectionRecord(options: {
 				.map((edge) => edge.edgeId),
 			targetEnvCellId: envCellId,
 		})),
-		kind: "outdoor-portal-projection",
+		kind: "portal-projection",
 		landblockId: 0xda55ffff,
 		nodes: envCellIds.map((envCellId) => ({
 			envCellId,
@@ -752,6 +752,11 @@ function createOutdoorProjectionRecord(options: {
 			envCellIds: layer.envCellIds,
 			renderLayer: layer.renderLayer,
 		})),
+		root: {
+			kind: "outdoor-root",
+			landblockId: 0xda55ffff,
+			rootNodeId: "outdoor-root",
+		},
 		rootNodeId: "outdoor-root",
 		sourceRevisionKey: "projection-test-key",
 	};
@@ -761,7 +766,7 @@ function createProjectionEdge(options: {
 	readonly edgeId: string;
 	readonly sourceEnvCellId: number | null;
 	readonly targetEnvCellId: number;
-}): StaticOutdoorPortalProjectionRecord["edges"][number] {
+}): StaticPortalProjectionRecord["edges"][number] {
 	const sourceKind =
 		options.sourceEnvCellId === null
 			? "building-transition"

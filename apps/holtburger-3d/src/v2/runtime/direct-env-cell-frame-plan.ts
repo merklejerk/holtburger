@@ -11,7 +11,7 @@ import type {
 	PortalFrameWorkPlan,
 } from "../renderer/types";
 import type {
-	StaticOutdoorPortalProjectionRecord,
+	StaticPortalProjectionRecord,
 	StaticPortalInteriorRecord,
 } from "../static/contracts";
 import {
@@ -54,7 +54,7 @@ export interface OutdoorProjectionPortalFramePlanInput {
 	readonly maxCells: number;
 	readonly maxDepth: number;
 	readonly maxPortalViews: number;
-	readonly projection: StaticOutdoorPortalProjectionRecord;
+	readonly projection: StaticPortalProjectionRecord;
 }
 
 interface PortalFrameIndexes {

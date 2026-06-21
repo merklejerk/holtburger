@@ -1703,6 +1703,27 @@ Dry-run findings on 2026-06-21:
   - 9E.4 cut runtime env-cell branch to projection;
   - 9E.5 delete or quarantine recursive direct traversal leftovers.
 
+9E.1 implementation update on 2026-06-21:
+
+- Completed the static projection contract rename/generalization slice without cutting runtime dungeon rendering over yet.
+- `StaticOutdoorPortalProjection*` code contracts are now `StaticPortalProjection*`, and projection records now use `kind: "portal-projection"`.
+- Projection records now carry an explicit root policy:
+  - `{ kind: "outdoor-root"; landblockId; rootNodeId }`;
+  - `{ kind: "env-cell-root"; landblockId; envCellId; rootNodeId }`.
+- `createStaticPortalProjection(...)` now accepts a root policy, validates root landblock identity, uses the root node/component id in SCC/layer construction, and includes root policy facts in `sourceRevisionKey`.
+- `createOutdoorPortalProjectionRoot(...)` is the current thin outdoor-root helper. `StaticSceneQuery.queryOutdoorPortalProjection(...)` remains as a compatibility wrapper over the generic projection builder and cache.
+- The generic builder intentionally supports only `outdoor-root` today. `env-cell-root` currently fails fast until 9E.2 adds reachable env-cell closure construction, root-SCC handling, and an env-cell keyed query/cache.
+- Renderer-facing names and mode values such as `OutdoorProjectionPortalFrameGraphPlan`, `createOutdoorProjectionPortalFramePlan(...)`, and `"outdoor-projection"` are intentionally still outdoor-specific. Generalizing those is 9E.3 work, because it needs the dungeon root rendering/stencil policy at the same time.
+- Debt introduced/retained:
+  - `StaticSceneQuery` still has outdoor-specific cache field names around a generic projection record;
+  - projection frame-plan caps are still named `maxCells`/`maxPortalViews` until 9E.3 replaces them with `maxRenderEntries`/`maxMaskEdges`;
+  - historical plan sections still mention `StaticOutdoorPortalProjectionRecord`; those are kept as phase history, not current implementation truth.
+- Validation for this slice:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - `npm run test:ts -- src/v2/static/portal-graphs.test.ts src/v2/runtime/static-scene-query.test.ts src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts`.
+  - `npm run test:ts`.
+
 Acceptance criteria:
 
 - Dungeon/env-cell-origin direct rendering no longer depends on recursive portal-stack `PortalFrameGraphPlan` for production planning.

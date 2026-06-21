@@ -7,7 +7,8 @@ import type {
 } from "./contracts";
 import {
 	createEnvCellStaticPortalGraph,
-	createStaticOutdoorPortalProjection,
+	createOutdoorPortalProjectionRoot,
+	createStaticPortalProjection,
 	createTransitionStaticPortalGraph,
 } from "./portal-graphs";
 
@@ -15,7 +16,10 @@ describe("V2 static portal graphs", () => {
 	it("normalizes env-cell portal links into directed graph edges", () => {
 		const owner = createWorkOwner("work-env", "landblock-env-cells");
 		const graph = createEnvCellStaticPortalGraph(owner, {
-			envCells: [createPortalSummary(0xda550100), createPortalSummary(0xda550101)],
+			envCells: [
+				createPortalSummary(0xda550100),
+				createPortalSummary(0xda550101),
+			],
 			kind: "env-cell-portal-interior",
 			landblockId: 0xda55ffff,
 			owner,
@@ -155,8 +159,10 @@ describe("V2 static portal graphs", () => {
 		expect(graph.edges).toEqual([
 			expect.objectContaining({
 				direction: "directed",
-				edgeId: "building-transition:transition-apertures:da55ffff:building-a:portal-0:3663003904",
-				linkId: "transition:transition-apertures:da55ffff:building-a:portal-0:3663003904",
+				edgeId:
+					"building-transition:transition-apertures:da55ffff:building-a:portal-0:3663003904",
+				linkId:
+					"transition:transition-apertures:da55ffff:building-a:portal-0:3663003904",
 				provenance: {
 					apertureBatchId: "transition-apertures:da55ffff:building-a",
 					buildingInstanceId: "building-a",
@@ -206,8 +212,9 @@ describe("V2 static portal graphs", () => {
 			owner,
 		});
 
-		const projection = createStaticOutdoorPortalProjection({
+		const projection = createStaticPortalProjection({
 			landblockId: 0xda55ffff,
+			root: createOutdoorPortalProjectionRoot(0xda55ffff),
 			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
 			portalInteriorRecords: [record],
 			transitionApertureBatches: [
@@ -222,6 +229,18 @@ describe("V2 static portal graphs", () => {
 			],
 		});
 
+		expect(projection).toMatchObject({
+			kind: "portal-projection",
+			root: {
+				kind: "outdoor-root",
+				landblockId: 0xda55ffff,
+				rootNodeId: "outdoor:3663069183",
+			},
+			rootNodeId: "outdoor:3663069183",
+		});
+		expect(projection?.sourceRevisionKey).toContain(
+			"root:outdoor-root:3663069183:outdoor:3663069183:none",
+		);
 		expect(projection?.nodes.map((node) => node.envCellId)).toEqual([
 			0xda550100, 0xda550101, 0xda550102, 0xda550103,
 		]);
@@ -270,8 +289,9 @@ describe("V2 static portal graphs", () => {
 			owner,
 		});
 
-		const projection = createStaticOutdoorPortalProjection({
+		const projection = createStaticPortalProjection({
 			landblockId: 0xda55ffff,
+			root: createOutdoorPortalProjectionRoot(0xda55ffff),
 			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
 			portalInteriorRecords: [record],
 			transitionApertureBatches: [
@@ -312,8 +332,9 @@ describe("V2 static portal graphs", () => {
 			owner,
 		});
 
-		const projection = createStaticOutdoorPortalProjection({
+		const projection = createStaticPortalProjection({
 			landblockId: 0xda55ffff,
+			root: createOutdoorPortalProjectionRoot(0xda55ffff),
 			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
 			portalInteriorRecords: [record],
 			transitionApertureBatches: [
@@ -461,9 +482,11 @@ function createPortalAperture(options: {
 	};
 }
 
-function createTransitionApertureBatch(options: {
-	readonly ranges?: readonly TransitionApertureBatch["ranges"][number][];
-} = {}): TransitionApertureBatch {
+function createTransitionApertureBatch(
+	options: {
+		readonly ranges?: readonly TransitionApertureBatch["ranges"][number][];
+	} = {},
+): TransitionApertureBatch {
 	return {
 		apertureBatchId: "transition-apertures:da55ffff:building-a",
 		coordinateSpace: "landblock-render-local",
@@ -482,11 +505,13 @@ function createTransitionApertureBatch(options: {
 	};
 }
 
-function createTransitionApertureRange(options: {
-	readonly firstIndex?: number;
-	readonly portalId?: string;
-	readonly targetCellLowId?: number;
-} = {}): TransitionApertureBatch["ranges"][number] {
+function createTransitionApertureRange(
+	options: {
+		readonly firstIndex?: number;
+		readonly portalId?: string;
+		readonly targetCellLowId?: number;
+	} = {},
+): TransitionApertureBatch["ranges"][number] {
 	return {
 		exterior: {
 			kind: "outside",

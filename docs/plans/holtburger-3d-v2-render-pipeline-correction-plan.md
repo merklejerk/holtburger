@@ -1936,6 +1936,13 @@ Debt and watchpoints:
 - If dungeon-origin projection exposes cases where portal-stack nesting is visually necessary, record the exact scene and decide whether the shared contract needs per-entry stencil identity, one-entry mask clearing, or a later per-pixel visibility phase.
 - The old `PortalTraversalPlan` may still be useful as a debug/export view, but it should stop being the production renderer plan if Phase 9E succeeds.
 
+Phase 10+ anti-regression guardrail:
+
+- The layer cutover phases must preserve the Phase 9 projection/layer pivot.
+- Do not reintroduce recursive portal traversal, portal-stack render graphs, per-root traversal plans, or transition-specific renderer execution while implementing layer replacement.
+- `EnvCellSystemLayerPayload` should own projection topology, SCC/layer facts, source-tagged aperture resources, and generation identity for both outdoor-origin and dungeon/env-cell-origin direct rendering.
+- If a future correctness problem appears to require portal-stack nesting again, record the exact scene and add an explicit renderer-visibility follow-up. Do not smuggle the recursive traversal model back through layer contracts, query APIs, diagnostics, or compatibility tests.
+
 ### Phase 10: Define Atomic Landblock Layer Contracts
 
 Problem to solve:
@@ -2034,6 +2041,7 @@ Acceptance criteria:
 - `EnvCellSystemLayerPayload` is explicitly modeled as the owner of env-cell portals plus building-derived transition aperture surfaces.
 - Browser visibility controls cannot make a required layer payload absent, cannot change layer generation identity, and cannot invalidate portal frame plans except by changing renderer-visible draw categories.
 - `StaticCoordinatorCommitDelta` remains a migration input/output during Phase 10; the new layer contracts exist beside it and are not papered over as another resource delta.
+- Phase 10 contracts make the Phase 9 projection/layer model the carried-forward renderer model; they do not define new recursive traversal or portal-stack graph contracts.
 - Texture placement remains a separate shared update path.
 - Existing behavior and validation remain unchanged.
 

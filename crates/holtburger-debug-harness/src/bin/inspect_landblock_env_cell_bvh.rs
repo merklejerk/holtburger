@@ -6,7 +6,7 @@ use holtburger_content::{
 };
 use holtburger_dat::graphics::Frame;
 use holtburger_dat::physics::BspNode;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -30,6 +30,10 @@ struct Args {
     portal_clusters: bool,
     #[arg(long, default_value_t = 2)]
     portal_cluster_min_size: usize,
+    #[arg(long)]
+    portal_reachability_root: Option<String>,
+    #[arg(long, default_value_t = 16)]
+    portal_reachability_max_depth: usize,
 }
 
 fn main() -> Result<()> {
@@ -196,6 +200,13 @@ fn main() -> Result<()> {
     }
     if args.portal_clusters {
         report_portal_clusters(&asset.env_cells, args.portal_cluster_min_size);
+    }
+    if let Some(root) = args.portal_reachability_root.as_deref() {
+        report_portal_reachability_layers(
+            &asset.env_cells,
+            parse_hex_u32(root)?,
+            args.portal_reachability_max_depth,
+        );
     }
 
     if let Some(detail_cell) = args.detail_cell.as_deref() {
@@ -531,6 +542,98 @@ fn normalize_portal_index(portal_id: u16) -> Option<usize> {
     } else {
         Some(usize::from(portal_id))
     }
+}
+
+fn report_portal_reachability_layers(
+    cells: &[holtburger_content::LandblockEnvCellBundleCell],
+    root_env_cell_id: u32,
+    max_depth: usize,
+) {
+    let env_cell_ids = cells
+        .iter()
+        .map(|cell| cell.env_cell.env_cell_id)
+        .collect::<BTreeSet<_>>();
+    if !env_cell_ids.contains(&root_env_cell_id) {
+        println!("portalReachability root=0x{root_env_cell_id:08x} missingRoot=true");
+        return;
+    }
+
+    let edges = cells
+        .iter()
+        .flat_map(|cell| {
+            cell.prepared_cell.portals.iter().filter_map(|portal| {
+                let target_env_cell_id = portal.target_env_cell_id?;
+                if portal.is_outside_transition || !env_cell_ids.contains(&target_env_cell_id) {
+                    return None;
+                }
+                Some((cell.env_cell.env_cell_id, target_env_cell_id))
+            })
+        })
+        .collect::<Vec<_>>();
+    let reciprocal_edges = edges
+        .iter()
+        .filter(|(source, target)| edges.contains(&(*target, *source)))
+        .count();
+    let mut render_layer_by_env_cell_id = BTreeMap::<u32, usize>::new();
+    render_layer_by_env_cell_id.insert(root_env_cell_id, 0);
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (source_env_cell_id, target_env_cell_id) in &edges {
+            if *target_env_cell_id == root_env_cell_id {
+                continue;
+            }
+            let Some(source_layer) = render_layer_by_env_cell_id.get(source_env_cell_id).copied()
+            else {
+                continue;
+            };
+            let existing_target_layer =
+                render_layer_by_env_cell_id.get(target_env_cell_id).copied();
+            if existing_target_layer.is_some_and(|layer| layer <= source_layer) {
+                continue;
+            }
+            let target_layer = source_layer + 1;
+            if existing_target_layer.is_some_and(|layer| layer >= target_layer) {
+                continue;
+            }
+            render_layer_by_env_cell_id.insert(*target_env_cell_id, target_layer);
+            changed = true;
+        }
+    }
+
+    let mut layer_counts = BTreeMap::<usize, usize>::new();
+    for render_layer in render_layer_by_env_cell_id.values() {
+        *layer_counts.entry(*render_layer).or_default() += 1;
+    }
+    let selected_non_root_cells = render_layer_by_env_cell_id
+        .iter()
+        .filter(|(env_cell_id, render_layer)| {
+            **env_cell_id != root_env_cell_id && **render_layer <= max_depth
+        })
+        .count();
+    let skipped_by_depth = render_layer_by_env_cell_id
+        .iter()
+        .filter(|(env_cell_id, render_layer)| {
+            **env_cell_id != root_env_cell_id && **render_layer > max_depth
+        })
+        .count();
+    println!(
+        "portalReachability root=0x{root_env_cell_id:08x} cells={} directedEdges={} reciprocalEdges={} reached={} maxLayer={} maxDepth={} selectedNonRoot={} skippedByDepth={} layerCounts={}",
+        cells.len(),
+        edges.len(),
+        reciprocal_edges,
+        render_layer_by_env_cell_id.len(),
+        render_layer_by_env_cell_id.values().max().copied().unwrap_or(0),
+        max_depth,
+        selected_non_root_cells,
+        skipped_by_depth,
+        layer_counts
+            .iter()
+            .map(|(layer, count)| format!("{layer}:{count}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
 }
 
 #[derive(Debug, Clone, Copy)]

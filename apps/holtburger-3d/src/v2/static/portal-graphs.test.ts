@@ -510,6 +510,63 @@ describe("V2 static portal graphs", () => {
 		]);
 		expect(projection?.diagnostics.componentInternalEdgeCount).toBe(2);
 	});
+
+	it("preserves per-cell layers inside a cyclic env-cell root component", () => {
+		const owner = createWorkOwner("work-env", "landblock-env-cells");
+		const record = createPortalInteriorRecord({
+			envCellIds: [0xda550100, 0xda550101, 0xda550102],
+			links: [
+				createEnvCellLink({
+					linkId: "a-to-b",
+					sourceEnvCellId: 0xda550100,
+					sourcePortalId: "portal-ab",
+					targetEnvCellId: 0xda550101,
+					targetPortalId: "portal-ba",
+				}),
+				createEnvCellLink({
+					linkId: "b-to-c",
+					sourceEnvCellId: 0xda550101,
+					sourcePortalId: "portal-bc",
+					targetEnvCellId: 0xda550102,
+					targetPortalId: "portal-cb",
+				}),
+				createEnvCellLink({
+					linkId: "c-to-a",
+					sourceEnvCellId: 0xda550102,
+					sourcePortalId: "portal-ca",
+					targetEnvCellId: 0xda550100,
+					targetPortalId: "portal-ac",
+				}),
+			],
+			owner,
+		});
+
+		const projection = createStaticPortalProjection({
+			landblockId: 0xda55ffff,
+			root: createEnvCellPortalProjectionRoot({
+				envCellId: 0xda550100,
+				landblockId: 0xda55ffff,
+			}),
+			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
+			portalInteriorRecords: [record],
+			transitionApertureBatches: [],
+		});
+
+		expect(
+			projection?.components.find((component) =>
+				component.envCellIds.includes(0xda550100),
+			),
+		).toMatchObject({
+			cyclic: true,
+			envCellIds: [0xda550100, 0xda550101, 0xda550102],
+			renderLayer: null,
+		});
+		expect(projection?.renderLayerByEnvCellId).toEqual([
+			{ envCellId: 0xda550100, renderLayer: 0 },
+			{ envCellId: 0xda550101, renderLayer: 1 },
+			{ envCellId: 0xda550102, renderLayer: 2 },
+		]);
+	});
 });
 
 function createWorkOwner(

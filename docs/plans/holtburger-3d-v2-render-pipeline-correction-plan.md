@@ -1879,6 +1879,25 @@ Dry-run findings on 2026-06-21:
   - `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts src/v2/runtime/static-scene-query.test.ts src/v2/static/portal-graphs.test.ts src/v2/renderer/portal-frame-work-plan.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts`;
   - `npm run test:ts`.
 
+9E.5 correction update on 2026-06-21:
+
+- Fixed env-cell-root projection layer collapse inside cyclic root components.
+- Bug: when the resident env cell lived in a large SCC, the env-cell-root layer pass first computed per-cell layers, then the component-level propagation pass revisited the root component and smeared the component's max layer onto every non-root env cell in that SCC.
+- Symptom from `0x0007ffff / 0x00070100`: HUD showed `entries 0/205`, `max 0/21`, `skipped 204 layer` at UI depth `16`; all non-root cells were effectively assigned past the selected depth.
+- Fix: skip `rootComponentId` during component-level propagation for env-cell-root projections. Root-component SCC facts remain diagnostic; renderer-facing layers for that component stay per-env-cell.
+- Added regression coverage proving `A -> B -> C -> A` keeps `A=0`, `B=1`, and `C=2` instead of smearing `B` to the root SCC max layer.
+- Added a harness confidence report to `inspect_landblock_env_cell_bvh`:
+  - `--portal-reachability-root <env-cell-id>`;
+  - `--portal-reachability-max-depth <depth>`.
+- Harness check for `0x0007ffff / 0x00070100` reports `cells=205`, `directedEdges=476`, `reciprocalEdges=476`, `reached=205`, `maxLayer=21`, and at `maxDepth=16` selects `106` non-root cells while skipping `98`. This confirms the corrected per-cell layering should visibly render descendants in that dungeon instead of selecting none.
+- Debt retained:
+  - env-cell-root SCC layering is still a pragmatic finite per-cell relaxation, not a fully formal longest-simple-path solver for arbitrary strongly connected directed graphs.
+- Validation for this correction:
+  - `cargo run -p holtburger-debug-harness --bin inspect_landblock_env_cell_bvh -- --landblock 0007ffff --limit 0 --portal-reachability-root 00070100 --portal-reachability-max-depth 16`;
+  - `cargo check -p holtburger-debug-harness --bin inspect_landblock_env_cell_bvh`;
+  - `npm run check`;
+  - `npm run test:ts -- src/v2/static/portal-graphs.test.ts src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/static-scene-query.test.ts src/v2/runtime/client-runtime.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts`.
+
 Acceptance criteria:
 
 - Dungeon/env-cell-origin direct rendering no longer depends on recursive portal-stack `PortalFrameGraphPlan` for production planning.

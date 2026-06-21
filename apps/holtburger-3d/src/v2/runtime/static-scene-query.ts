@@ -1107,6 +1107,12 @@ export class StaticSceneQuery {
 		return graph;
 	}
 
+	queryPortalTraversalGraphRevision(options: {
+		readonly landblockId: number;
+	}): number {
+		return this.#getPortalTraversalGraphRevision(options.landblockId);
+	}
+
 	queryTerrainQuadDetails(options: {
 		readonly landblockId: number;
 		readonly quadIndex: number;

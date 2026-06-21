@@ -319,7 +319,83 @@ describe("direct env-cell frame plan", () => {
 				linkId: "a-to-b-1",
 				parentNodeId: 0,
 			}),
-		]);
+			]);
+		});
+
+	it("dedupes duplicate env-cell portal candidates through shared graph assembly", () => {
+		const duplicateEdge = {
+			flags: 0,
+			linkId: "a-to-b",
+			polygonId: null,
+			sourceEnvCellId: 0xda550100,
+			sourceIndex: 0,
+			sourcePortalId: "portal-a",
+			targetEnvCellId: 0xda550101,
+			targetPortalId: "portal-b",
+		};
+		const plan = createDirectEnvCellFramePlan({
+			currentCameraResidency: {
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+			portalInteriorRecords: [
+				createPortalInteriorRecord({
+					envCellIds: [0xda550100, 0xda550101],
+					portalAperturesByEnvCellId: new Map([
+						[
+							0xda550100,
+							[
+								createPortalAperture("portal-a", 7, [
+									{ x: 0, y: 0, z: 0 },
+									{ x: 1, y: 0, z: 0 },
+									{ x: 0, y: 1, z: 0 },
+								]),
+							],
+						],
+					]),
+				}),
+			],
+			renderAnchorLandblockId: 0xda55ffff,
+			envCellResourceMembership: [],
+			traversalPlan: {
+				diagnostics: [],
+				landblockId: 0xda55ffff,
+				maxCells: 8,
+				maxDepth: 1,
+				maxPortalViews: 16,
+				portalViewGroups: [
+					{
+						apertureEdges: [],
+						envCellId: 0xda550100,
+						landblockId: 0xda55ffff,
+						parentPortalStackId: null,
+						portalStack: [],
+						portalStackId: "root:0xda550100",
+						traversalDepth: 0,
+					},
+					{
+						apertureEdges: [duplicateEdge, duplicateEdge],
+						envCellId: 0xda550101,
+						landblockId: 0xda55ffff,
+						parentPortalStackId: "root:0xda550100",
+						portalStack: [duplicateEdge],
+						portalStackId: "root:0xda550100/a-to-b",
+						traversalDepth: 1,
+					},
+				],
+				sceneCrossings: [],
+				startEnvCellId: 0xda550100,
+				visibleCells: [],
+			},
+		});
+
+		expect(plan?.graph.edges).toHaveLength(1);
+		expect(plan?.graph.diagnostics).toMatchObject({
+			duplicateMaskEdges: 1,
+			envCellPortalEdges: 1,
+			selectedMaskEdges: 1,
+		});
 	});
 
 	it("does not produce a direct env-cell frame plan outside env-cell residency", () => {
@@ -599,6 +675,44 @@ describe("direct env-cell frame plan", () => {
 			transitionRootCount: 1,
 			transitionRootsRejectedNotSeenOutside: 1,
 			transitionRootsRejectedUnknownSeenOutside: 1,
+		});
+	});
+
+	it("dedupes duplicate building-transition entry candidates through shared graph assembly", () => {
+		const transitionBatch = createTransitionApertureBatch();
+		const plan = createOutdoorTransitionPortalFramePlan({
+			landblockId: 0xda55ffff,
+			portalInteriorRecords: [
+				createPortalInteriorRecord({
+					envCellIds: [0xda550100],
+				}),
+			],
+			renderAnchorLandblockId: 0xda55ffff,
+			envCellResourceMembership: [],
+			transitionApertureBatches: [transitionBatch, transitionBatch],
+			traversalPlansByStartEnvCellId: new Map([
+				[
+					0xda550100,
+					createTraversalPlan({
+						visibleCells: [
+							{
+								envCellId: 0xda550100,
+								portalStackId: "root:0xda550100",
+								traversalDepth: 0,
+							},
+						],
+					}),
+				],
+			]),
+		});
+
+		expect(plan?.graph.edges).toHaveLength(1);
+		expect(plan?.graph.diagnostics).toMatchObject({
+			buildingTransitionEdges: 1,
+			duplicateMaskEdges: 1,
+			selectedMaskEdges: 1,
+			transitionRootCandidateCount: 1,
+			transitionRootCount: 1,
 		});
 	});
 });

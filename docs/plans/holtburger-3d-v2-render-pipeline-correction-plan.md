@@ -2,7 +2,7 @@
 
 ## Context And Boundaries
 
-Goal: replace the current broad snapshot-driven render planning path with narrow, revision-keyed runtime and renderer contracts before continuing portal-renderer feature work.
+Goal: replace the current broad snapshot-driven render planning path with narrow runtime and renderer contracts, then cut static residency over to atomically replaced landblock layers before continuing portal-renderer feature work.
 
 This plan is a corrective gate for the V2 portal renderer course correction. The current pipeline has let diagnostics-shaped snapshots and temporary portal geometry plumbing become part of frame pacing. That is structurally wrong: rendering should consume already-prepared plans and GPU resources, while diagnostics should observe via explicitly narrow or on-demand channels.
 
@@ -13,6 +13,7 @@ In scope:
 - Replacing direct portal dynamic aperture uploads with static landblock-scoped aperture GPU resources and indexed ranges.
 - Having the baker emit traversal-ready, landblock-scoped portal graph/resource structures where the inputs are static.
 - Caching committed portal traversal graphs and portal frame plans by explicit semantic revision keys when runtime caching is still needed.
+- Replacing fine-grained runtime/renderer static deltas with independently resident, atomically replaced landblock layer payloads where practical.
 - Making transition portals and env-cell portals use the same preparation, graph, resource, and renderer-selection pipelines except where source facts prove a necessary difference.
 - Replacing durable renderer/resource/asset/graph failure records with loud console errors and dropped work unless failure state is required for correctness.
 - Updating tests so they prove invalidation boundaries and no per-frame planner execution.
@@ -136,6 +137,29 @@ Interpretation:
   - renderer/runtime static resource membership revision.
 - Ordinary camera pose changes should update renderer frame state only.
 
+### Incremental Static Deltas Leak Too Far Downstream
+
+Evidence:
+
+- Static coordinator and materialization emit resource-level deltas such as added/removed draw units, portal aperture resources, and transition aperture batches.
+- Runtime cache keys now need multiple small invalidators:
+  - portal traversal graph revision;
+  - env-cell resource membership revision;
+  - transition aperture revision.
+- Transition aperture resources are sourced from outdoor building/static object data, while env-cell traversal/compositing consumes them as part of the env-cell portal system.
+- Building visual LoD is wider than env-cell LoD, so building-derived transition aperture facts should be available before or during env-cell-system residency, but current runtime contracts still expose the split as separate accounting.
+
+Interpretation:
+
+- Incremental async work is valid inside the coordinator/baker, but runtime and renderer should not consume half-products that force downstream revision soup.
+- Static residency should be modeled as independent landblock layers, each atomically replaced as a whole:
+  - terrain;
+  - outdoor buildings;
+  - outdoor details;
+  - env-cell system.
+- The env-cell system layer should own everything needed for env-cell traversal and compositing, including building-derived transition aperture surfaces. Building visual meshes may remain in the outdoor-building layer.
+- Whole-layer replacement should be the default runtime/renderer contract. Resource-level diffing can return only if measured replacement cost proves it necessary.
+
 ## Desired Architecture
 
 ### Runtime Owns Planning Inputs
@@ -143,13 +167,14 @@ Interpretation:
 The runtime should not need a broad renderer snapshot to derive render plans. It should either own or receive narrow indexes for:
 
 - materialized draw-unit membership by env cell;
-- committed static query revisions by landblock;
-- transition aperture batch availability by landblock;
-- renderer resource revision, not durable renderer failure state.
+- committed static query records by landblock while the layer cutover is in flight;
+- transition aperture availability by landblock while the layer cutover is in flight;
+- layer generation identities, not durable renderer failure state.
 
 The renderer should receive:
 
-- static/dynamic/texture/sampler deltas;
+- atomically replaced static landblock layers after the layer cutover;
+- dynamic/texture/sampler updates where those systems remain naturally shared or mutable;
 - frame state;
 - render pass plan;
 - direct portal frame plan;
@@ -158,7 +183,7 @@ The renderer should receive:
 The renderer should expose:
 
 - narrow per-frame telemetry for UI counters;
-- narrow resource-change revision counters when needed for planning invalidation;
+- narrow layer-generation/resource-change events only where needed for planning invalidation during migration;
 - explicit diagnostic reports only on demand.
 
 ### Fail Loudly And Drop Failed Work
@@ -189,7 +214,7 @@ Allowed patterns:
 
 - `getDiagnosticsSnapshot()` called manually or throttled by UI.
 - `subscribeTelemetry(listener)` emitting small frame counters only.
-- `subscribeResourceRevision(listener)` emitting scalar revision counters only when resource state changes.
+- `subscribeLayerGeneration(listener)` or a temporary resource-revision listener only when semantic resource state changes.
 - UI panels requesting detailed portal/resource/asset diagnostics on interaction, explicit refresh, or a low-frequency throttle.
 
 Disallowed patterns:
@@ -259,26 +284,36 @@ The bake stage should produce, where practical:
 
 Runtime may still cache derived traversal plans, but that cache should sit on top of baked topology. The runtime should not repeatedly convert broad committed DTOs into graph structures when the baker could have emitted those structures directly.
 
-### Traversal And Frame Plans Are Revision-Keyed
+### Runtime Static Residency Is Layered And Atomically Replaced
 
-`StaticSceneQuery` should maintain revisioned indexes:
+Runtime and renderer should hold independent landblock layers, each replaced as a whole:
 
-- portal/interior record revision by landblock;
-- transition aperture revision by landblock;
-- cached traversal graph by landblock and portal/interior revision;
-- optional traversal-plan cache keyed by start env cell, max depth, max cells, max views, and traversal graph revision.
+- `TerrainLayerPayload`;
+- `OutdoorBuildingsLayerPayload`;
+- `OutdoorDetailsLayerPayload`;
+- `EnvCellSystemLayerPayload`.
 
-`ClientRuntime` should maintain a portal frame plan cache keyed by:
+Layer residency may follow different LoD distances. The important rule is that cross-referenced artifacts inside a layer are committed from one immutable cut.
+
+The env-cell system layer should include:
+
+- env-cell interior records and traversal facts;
+- env-cell static resource membership;
+- unified portal graph inputs;
+- unified portal aperture resources for env-cell portal apertures and building-derived transition aperture surfaces;
+- source/provenance metadata needed for diagnostics and scene-domain compositing.
+
+The runtime frame-plan cache should key by semantic layer generation identities rather than resource-level revisions:
 
 - current camera residency;
 - render anchor landblock;
 - direct portal caps;
 - flat vision mode;
-- portal/interior revision;
-- transition aperture revision;
-- resource membership revision.
+- relevant `EnvCellSystemLayerPayload.generationId` values.
 
 When the key is unchanged, `#updateRenderPassPlan()` should not derive or compare a new deep graph.
+
+Resource-level static deltas are allowed inside the coordinator/baker. They should not be the public runtime/renderer contract for these static landblock layers.
 
 ## Dry Run Findings
 
@@ -667,7 +702,7 @@ Spicy notes:
 
 - This phase caches only the final direct portal frame plan. It intentionally does not add a separate traversal-plan cache by start cell/caps because the frame-plan key is the broader semantic boundary that Phase 6 needed.
 - Legacy portal frame plans still use the old lightweight equality path. The heavy deep graph comparison is avoided when a direct portal frame plan cache hit returns the existing object.
-- The transition aperture revision is a deterministic semantic string over batch/range identities. This is a temporary key component until Phase 7 replaces transition-specific aperture batches with unified portal aperture resources.
+- The transition aperture revision is a deterministic semantic string over batch/range identities. It remains temporary even after Phase 7 because unified aperture resources alone do not give the runtime a coherent landblock-layer generation boundary.
 
 Failed to close in Phase 6:
 
@@ -677,7 +712,7 @@ Failed to close in Phase 6:
 
 Debt to track:
 
-- Phase 7 should replace the transition aperture revision string with unified aperture resource revisioning.
+- Phase 14 should delete the transition aperture revision by replacing graph/aperture/membership invalidators with the env-cell system layer generation id.
 - After Phase 7, re-check whether `portalFrameWorkPlanEquals(...)` can be reduced to tests/diagnostics only for direct plans.
 - If users rapidly switch between multiple portal roots, consider a small key-indexed frame plan cache, but do not add it without profiling evidence.
 
@@ -735,9 +770,9 @@ Spicy notes:
 
 Failed to close in Phase 7:
 
-- The legacy scene-domain transition compositor still has a transition-specific aperture resource path. Phase 8/9 must either move that compositor onto source-tagged portal aperture resources or delete the path if the direct pipeline replaces it.
-- The portal frame plan still carries an `apertureResources` summary list for diagnostics/equality. It is now metadata-only, but Phase 9 should decide whether direct plans need that list at all.
-- Phase 6 still keys outdoor-transition frame plans with `transitionApertureRevision`; that should become unified portal aperture resource revisioning.
+- The legacy scene-domain transition compositor still has a transition-specific aperture resource path. Phase 15 must either move that compositor onto source-tagged portal aperture resources or delete the path if the direct pipeline replaces it.
+- The portal frame plan still carries an `apertureResources` summary list for diagnostics/equality. It is now metadata-only, but Phase 14/15 should decide whether direct plans need that list after env-cell system layers own portal aperture resources.
+- Phase 6 still keys outdoor-transition frame plans with `transitionApertureRevision`; Phase 14 should delete it by replacing graph/aperture/membership invalidators with `EnvCellSystemLayerPayload.generationId`.
 
 Debt to track:
 
@@ -747,20 +782,424 @@ Debt to track:
 
 ### Phase 8: Enforce Isomorphic Portal Planning And Execution
 
+Status: substantially implemented on 2026-06-21.
+
+Problem to solve:
+
+- The current direct path still has two conceptual planners:
+  - env-cell residency starts from one current env cell and follows env-cell portal traversal;
+  - outdoor residency separately selects transition roots, builds per-root traversal plans, then adapts those into the same renderer graph shape.
+- The renderer now consumes one aperture resource model, but runtime selection still treats building transitions as a special root mechanism instead of a portal-edge source with narrow transition-only policy.
+- The remaining performance cliff is not aperture upload. It is executing very large direct portal graphs, especially when residency enables traversal for an env-cell-heavy landblock. Phase 8 must make the graph/execution contract concrete enough that Phase 9 and later phases can prune or optimize one path instead of two.
+
+Structural rule:
+
+- Do not "unify" by building one large function controlled by transition/env-cell flags.
+- Do not model building transitions as fake env-cell portal edges just to reuse env-cell traversal code.
+- Correct shape:
+  - source-specific seed selection;
+  - shared direct portal graph assembly;
+  - shared renderer execution.
+- Source-specific seed selection is allowed to know source rules:
+  - env-cell residency creates a seed from the current env cell;
+  - outdoor transition selection creates seeds from building-transition roots after applying `SeenOutside`, linked-env-cell, and scene-crossing rules.
+- After seed selection, shared graph assembly should operate on seed, traversal, aperture range id, source metadata, and resource membership contracts. It should not branch on transition-vs-env-cell except to preserve source kind/provenance and diagnostics counters.
+
+Code touchpoints:
+
+- `apps/holtburger-3d/src/v2/runtime/client-runtime.ts`
+  - `#derivePortalFrameWorkPlan(...)`
+  - `createTransitionApertureRevision(...)`
+  - `collectTransitionLinkedEnvCellIds(...)`
+  - `createOutdoorVisibleEnvCellIds(...)`
+- `apps/holtburger-3d/src/v2/runtime/direct-env-cell-frame-plan.ts`
+  - `createDirectEnvCellFramePlan(...)`
+  - `createOutdoorTransitionPortalFramePlan(...)`
+  - `addEnvCellPortalEdges(...)`
+  - `createOutdoorTransitionRootGroups(...)`
+  - `selectOutdoorTransitionRoots(...)`
+- `apps/holtburger-3d/src/v2/runtime/portal-aperture-frame-resources.ts`
+  - `PortalApertureFrameResourceBuilder`
+- `apps/holtburger-3d/src/v2/renderer/webgl2/webgl2-renderer.ts`
+  - `#drawDirectEnvCellResources(...)`
+  - `#executeDirectEnvCellPortalGraphChildren(...)`
+  - `#drawPortalApertureStencilMask(...)`
+- Tests:
+  - `apps/holtburger-3d/src/v2/runtime/direct-env-cell-frame-plan.test.ts`
+  - `apps/holtburger-3d/src/v2/runtime/client-runtime.test.ts`
+  - `apps/holtburger-3d/src/v2/renderer/webgl2/webgl2-renderer.test.ts`
+
 Deliverables:
 
-- Replace separate transition-root and env-cell portal planning branches with shared portal-edge selection where possible.
-- Keep scene-domain crossing/compositing policy as explicit edge/source metadata.
-- Rename diagnostics away from transition-specific or mask-pass-specific concepts when they are describing shared portal graph facts.
-- Add tests proving equivalent env-cell and transition aperture edges flow through the same planner and renderer contracts.
+- Introduce a single runtime-side direct portal graph build input, tentatively `DirectPortalSeed`, with two seed variants:
+  - `env-cell-residency`: one start env cell from current camera residency;
+  - `outdoor-transition`: one or more transition-root start env cells selected from building transition apertures.
+- Replace `createDirectEnvCellFramePlan(...)` and `createOutdoorTransitionPortalFramePlan(...)` internals with a shared graph assembly path:
+  - seed base node;
+  - traversal plan lookup by start env cell;
+  - aperture edge selection;
+  - node resource lookup;
+  - diagnostics accumulation.
+- Keep transition-root selection as a named pre-step, not a separate graph architecture:
+  - it may inspect `SeenOutside`, linked env cells, transition aperture provenance, and scene crossing policy;
+  - after it produces seeds, the shared graph builder must handle the rest.
+- Introduce small typed contracts instead of boolean flags in the shared path, likely:
+  - `DirectPortalSeed`;
+  - `DirectPortalTraversalSource`;
+  - `DirectPortalEdgeCandidate`;
+  - `DirectPortalGraphBuildInput`.
+- Keep direct portal frame-plan cache keys honest while the old static delta contract remains:
+  - leave `transitionApertureRevision` in place until Phase 14;
+  - do not replace it with another tiny revision before the env-cell system layer cutover.
+- Make `PortalFrameEdgePlan` source metadata explicit enough that renderer execution does not need to know whether an edge came from an env-cell portal or a building transition except for diagnostics labels.
+- Rename diagnostics that describe shared facts:
+  - keep counters for `envCellPortalEdges` and `buildingTransitionEdges`;
+  - rename generic counts away from transition-specific language where they are actually portal-edge/portal-mask counts.
+- Add an execution guardrail for graph size:
+  - expose per-plan counts for nodes, edges, views, missing resources, and static-transition/resource edges as already shown in the HUD;
+  - add a focused test proving direct graph construction respects max depth, max cells, and max portal views for both seed variants.
+- Do not add frustum, screen-area, distance, or occlusion pruning in this phase. Those are later optimization policies once the shared execution shape is stable.
 
 Acceptance criteria:
 
-- There is one production portal graph edge contract.
-- There is one production portal aperture resource contract.
-- Transition-specific code remains only for source provenance, transition-root selection facts, and scene-domain compositing policy.
+- Both env-cell-residency and outdoor-transition portal plans call one shared graph assembly function after seed selection.
+- No renderer execution branch exists solely because a portal edge is `building-transition` versus `env-cell-portal`.
+- Shared graph assembly receives typed seed/source/candidate contracts, not transition/env-cell boolean flags.
+- `PortalFrameEdgePlan` contains the source kind/provenance needed for diagnostics, but renderer mask execution consumes only range id, parent/child node ids, traversal depth, and scene metadata.
+- Transition-specific runtime code is limited to:
+  - selecting outdoor transition root seeds;
+  - preserving building-transition provenance/source ids;
+  - scene-domain crossing/compositing policy.
+- Tests prove:
+  - env-cell portal edges and building-transition edges enter the same frame graph builder path;
+  - duplicate aperture edges are deduped consistently across both source kinds;
+  - graph caps are enforced for env-cell-residency and outdoor-transition seeds;
+  - renderer direct execution draws masks from static aperture ranges for both source kinds without separate transition-only mask code;
+  - moving between outdoor residency and env-cell residency changes the seed set/cache key, not the renderer execution model.
 
-### Phase 9: Renderer Execution Cleanup
+Explicit non-goals:
+
+- Do not implement frustum/screen-footprint portal pruning.
+- Do not change `SeenOutside` correctness policy.
+- Do not remove the legacy scene-domain compositor yet unless the shared direct path makes a small deletion obviously safe.
+- Do not precompute all possible visible cells.
+- Do not broaden provenance payloads to make diagnostics prettier.
+- Do not hide transition behavior inside env-cell-shaped placeholder data.
+- Do not introduce a shared builder whose main abstraction is `if (sourceKind === "building-transition")`.
+
+Expected end state:
+
+- The code may still produce a large portal graph for `0xda55ffff`, but there should be one place to inspect and optimize why it produced that graph.
+- The next profiling pass should distinguish graph-size cost from draw-submission/material-binding cost without having to mentally merge transition and env-cell special cases.
+
+Implementation update:
+
+- Added typed direct portal assembly contracts in `direct-env-cell-frame-plan.ts`:
+  - `DirectPortalGraphBuildInput`;
+  - `DirectPortalTraversalSource`;
+  - `DirectPortalTraversalRoot`;
+  - `DirectPortalEdgeCandidate`.
+- `createDirectEnvCellFramePlan(...)` now builds an env-cell-residency traversal source and feeds the shared direct portal graph assembler.
+- `createOutdoorTransitionPortalFramePlan(...)` now keeps transition-root selection as a source-specific pre-step, then feeds outdoor-transition traversal sources into the same direct portal graph assembler.
+- Building-transition entry masks and env-cell portal masks now both enter graph construction as `DirectPortalEdgeCandidate` values and are deduped by the same `PortalApertureFrameResourceBuilder` path.
+- The shared assembler owns base-node creation, traversal-source attachment, node resource lookup, aperture candidate attachment, and graph diagnostics accumulation.
+- Added focused tests proving duplicate env-cell portal candidates and duplicate building-transition entry candidates are deduped by the same graph assembly path.
+
+Validation:
+
+- `npm run check`
+- `npm run test:ts -- src/v2/runtime/direct-env-cell-frame-plan.test.ts src/v2/runtime/client-runtime.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts`
+- `npm run test:ts`
+- `npm run lint:ts`
+
+Spicy notes:
+
+- This is structural unification, not a performance cure by itself. A camera-resident env-cell landblock can still produce a huge graph; the win is that there is now one assembly path to inspect and optimize.
+- The shared path deliberately uses typed roots/sources/candidates instead of source-kind booleans. Env-cell residency and outdoor transition still differ at seed selection, which is the correct boundary.
+- The renderer was already mostly source-kind agnostic after Phase 7; this phase moves the runtime graph assembly in the same direction.
+
+Failed to close in Phase 8:
+
+- `PortalFramePlanKey` still has a transition-specific `transitionApertureRevision`. It is still load-bearing today because transition aperture range IDs include `firstIndex/indexCount`, while the committed portal graph does not encode those range identities. Do not delete it until the env-cell system layer owns portal graph, aperture resources, and membership as one atomic generation.
+- Diagnostics still use transition-specific names such as `transitionRootCandidateCount` and `buildingTransitionEdges`. Some are valid source/provenance counters, but generic portal-edge/mask counts need a cleanup pass and should not preserve legacy implementation naming.
+- Graph-size guardrails are still indirect: existing traversal caps flow through the traversal plans, but this phase did not add new graph-size pruning or hard execution limits.
+
+Debt to track:
+
+- Delete `transitionApertureRevision` during the env-cell system layer cutover. Do not replace it with another tiny revision unless whole-layer replacement proves too expensive under measured profiles.
+- Rename legacy transition-shaped diagnostics that describe shared portal graph or mask execution facts. Keep transition names only for true source/provenance or transition-root selection counters.
+- Decide whether `PortalApertureFrameResourceBuilder` should be renamed now that it is metadata/dedupe plumbing rather than frame-local resource construction.
+- Add profiling-facing counters that separate traversal graph size, aperture mask count, static material draw count, and skipped missing-resource masks.
+- Later cleanup should delete any remaining compatibility paths that still imply transition aperture batches are a renderer execution model.
+
+### Phase 9: Target Current Renderer Bottlenecks Before The Layer Cutover
+
+Problem to solve:
+
+- Profiling after Phase 8 still shows heavy direct portal execution and static material draw submission.
+- We need to inspect and fix immediate renderer hot spots before the larger residency-boundary refactor, but these fixes must not deepen the resource-delta architecture we intend to delete.
+
+Structural rule:
+
+- This phase may optimize draw submission, binding churn, graph execution order, missing-resource handling, and instrumentation.
+- This phase must not introduce new durable per-resource revision counters, new broad snapshots, or new transition-specific renderer paths.
+- If a renderer fix requires better ownership of static resources, record it as an input to the layer cutover phases instead of inventing another local invalidator.
+
+Deliverables:
+
+- Profile the current direct portal path and identify the active bottleneck:
+  - graph child execution;
+  - aperture mask draw count;
+  - static material resource-set draws;
+  - material/role page uniform uploads;
+  - depth/stencil state churn;
+  - missing-resource/drop paths.
+- Apply narrowly scoped renderer fixes that are valid before and after the layer cutover, such as:
+  - reducing redundant WebGL state changes;
+  - tightening static material batching or grouping;
+  - avoiding repeated per-edge allocations/sorts in graph execution;
+  - adding high-signal counters for draw calls, masks, static resource sets, missing ranges, and skipped nodes.
+- Keep diagnostics out of the frame data plane:
+  - counters may be emitted in frame telemetry;
+  - broad reports remain explicit/on-demand.
+- Update tests around renderer behavior that changes:
+  - state-cache behavior;
+  - portal mask draw resource selection;
+  - missing aperture range failure behavior;
+  - direct graph execution ordering if observable.
+
+Acceptance criteria:
+
+- The phase produces a clear profile note in this plan naming the dominant current renderer cost.
+- Any code changes reduce or clarify that cost without adding new runtime/renderer revision accounting.
+- Production renderer execution still consumes one source-tagged portal aperture resource model.
+- No new transition-only renderer execution path is introduced.
+- Existing validation passes:
+  - `npm run check`;
+  - targeted TS tests for touched files;
+  - `npm run test:ts`;
+  - `npm run lint:ts`.
+
+Explicit non-goals:
+
+- Do not implement whole-layer replacement in this phase.
+- Do not delete `transitionApertureRevision` in this phase.
+- Do not do broad renderer cleanup against the old static delta contract.
+- Do not add frustum/screen-area/occlusion portal pruning unless the user explicitly redirects this phase.
+
+### Phase 10: Define Atomic Landblock Layer Contracts
+
+Problem to solve:
+
+- Runtime and renderer still consume resource-level static deltas. Before cutting behavior over, we need a shared vocabulary for independently resident landblock layers, generation identity, and ownership.
+- This phase is intentionally scaffolding-first. It should make the target architecture concrete without changing renderer/runtime behavior yet.
+
+Layer model:
+
+- `TerrainLayerPayload`
+  - terrain meshes/resources for one landblock;
+  - owns terrain visual residency only.
+- `OutdoorBuildingsLayerPayload`
+  - drawable outdoor building/static-object meshes and materials for one landblock;
+  - does not own env-cell traversal/compositing state.
+- `OutdoorDetailsLayerPayload`
+  - detail/static decorative draw resources for one landblock;
+  - can follow its own LoD radius.
+- `EnvCellSystemLayerPayload`
+  - env-cell records/interiors;
+  - env-cell static resource membership;
+  - portal traversal graph inputs;
+  - source-tagged portal aperture resources for env-cell portals and building-derived transition apertures;
+  - transition-root selection facts/provenance;
+  - generation id used by portal frame-plan caching.
+
+Dry-run findings carried forward:
+
+- The existing static domains map cleanly to layer names:
+  - `outdoor-terrain` -> `TerrainLayerPayload`;
+  - `outdoor-buildings` -> `OutdoorBuildingsLayerPayload`;
+  - `outdoor-detail` -> `OutdoorDetailsLayerPayload`;
+  - `landblock-env-cells` -> the env-cell-owned part of `EnvCellSystemLayerPayload`.
+- `StaticCoordinatorCommitDelta` currently mixes internal static bake output with public runtime/renderer resource mutation. The layer payload contract must be introduced as a separate internal/public boundary instead of mutating that delta into a new shape in place.
+- Texture atlas placement is still naturally shared and mutable. Layer payloads may carry texture uses needed to produce `TexturePlacementUpdate`, but texture packing itself remains a shared update path.
+- `static-materializer.ts` currently performs fine partitioning and source-to-materialized draw-unit id mapping to support texture role-page limits. The layer contracts should allow layer-local materialized draw units without deleting that materialization yet.
+
+Simplification and elimination tour:
+
+- Delete tiny invalidators that exist only because one static landblock concept is split across multiple runtime streams:
+  - `transitionApertureRevision`;
+  - portal traversal graph revision as a frame-plan key input;
+  - env-cell resource membership revision as a separate frame-plan key input;
+  - any renderer resource revision that only mirrors static layer residency.
+- Delete public added/removed static resource delta ceremony for migrated layers:
+  - added/removed draw-unit lists at the runtime/renderer boundary;
+  - added/removed portal aperture resource lists at the runtime/renderer boundary;
+  - added/removed transition aperture batch lists at the runtime/renderer boundary;
+  - resource-key collection helpers whose only job is to support partial layer mutation.
+- Delete split transition/env-cell runtime accounting where the env-cell system layer can own one coherent portal system:
+  - transition aperture batches as renderer execution state;
+  - transition-specific aperture availability checks in frame-plan cache keys;
+  - compatibility adapters that turn transition resources into portal resources after runtime has already observed them separately.
+- Delete defensive cache invalidation code whose purpose is to reconcile independently committed half-products:
+  - "graph changed but aperture resource did not" guards;
+  - "membership changed but graph did not" guards;
+  - stale range-id cache refresh logic that disappears when a layer replacement swaps all portal resources and graph inputs together.
+- Delete broad diagnostic/accounting fields that only explain partial commit state:
+  - counters for pending/missing sub-resources inside an otherwise committed env-cell system;
+  - diagnostic names that preserve old transition-vs-env-cell implementation split instead of source provenance;
+  - tests that preserve resource-delta compatibility instead of proving whole-layer replacement behavior.
+- Prefer replacing whole files or modules when they become pure compatibility plumbing. Phase 14 should leave a list of modules that Phase 15 can delete outright rather than polish.
+
+Expected developer-facing payoff:
+
+- Frame-plan cache keys become readable: residency, render anchor, portal caps, env-cell system generation.
+- Renderer static updates become obvious: set or clear one layer for one landblock.
+- Transition portals stop being a second production resource architecture; they become building-derived inputs inside the env-cell system layer.
+- Most "revision" code becomes either historical migration scaffolding or disappears entirely.
+- The codebase should lose low-value maps, helper reducers, equality paths, and tests that only exist to make partial static commits look coherent after the fact.
+
+Deliverables:
+
+- Define typed layer payload contracts at the runtime/renderer boundary.
+- Define layer ownership keys and generation id policy for `(layerKind, landblockId)`.
+- Document how existing `StaticDomain` values map to layer kinds.
+- Keep texture placement updates outside the landblock layer replacement contract.
+- Add focused type/contract tests where useful; do not change runtime behavior yet.
+
+Acceptance criteria:
+
+- Layer payload contracts can represent the existing terrain, outdoor buildings, outdoor detail, and env-cell-system data without using added/removed resource lists.
+- `EnvCellSystemLayerPayload` is explicitly modeled as the owner of env-cell portals plus building-derived transition aperture surfaces.
+- Texture placement remains a separate shared update path.
+- Existing behavior and validation remain unchanged.
+
+### Phase 11: Add Renderer Layer Ownership APIs Beside Static Delta
+
+Problem to solve:
+
+- `Webgl2Renderer` currently stores static resources in flat maps keyed by draw-unit/resource id. Whole-layer replacement needs layer ownership indexes so replacing or clearing `(layerKind, landblockId)` disposes exactly the old layer.
+
+Deliverables:
+
+- Implement renderer layer replacement APIs:
+  - `setTerrainLayer(landblockId, payload | null)`;
+  - `setOutdoorBuildingsLayer(landblockId, payload | null)`;
+  - `setOutdoorDetailsLayer(landblockId, payload | null)`;
+  - `setEnvCellSystemLayer(landblockId, payload | null)`.
+- Add renderer ownership indexes from `(layerKind, landblockId)` to installed draw-unit/resource ids.
+- Reuse existing resource creation/disposal helpers under the new APIs.
+- Keep `applyStaticDelta(...)` temporarily as an adapter or parallel path so the codebase stays shippable during the cutover.
+- Add renderer tests proving layer replacement and layer clearing dispose the expected resources without added/removed resource lists.
+
+Acceptance criteria:
+
+- Renderer can replace and clear each layer independently.
+- Clearing an env-cell system layer removes its portal aperture ranges and structured interior resources without touching unrelated terrain/building/detail layers.
+- Existing static delta tests still pass through the migration adapter.
+- No new transition-specific renderer execution path is introduced.
+
+Explicit non-goals:
+
+- Do not switch runtime materialization to layer replacement yet.
+- Do not delete `applyStaticDelta(...)` yet.
+- Do not rewrite texture atlas packing into layer replacement.
+
+### Phase 12: Build The Env-Cell System Assembly Gate
+
+Problem to solve:
+
+- Building transition aperture facts are emitted by the `outdoor-buildings` static object bake path, while env-cell portal/interior facts are emitted by the `landblock-env-cells` bake path. `EnvCellSystemLayerPayload` therefore needs an assembly step that joins the latest coherent same-landblock outputs from both domains.
+
+Ordering invariant:
+
+- Building LoD is wider than env-cell LoD, so building-derived transition aperture facts should be available before or during env-cell-system requests.
+- The current scheduler does not enforce that invariant: `landblock-env-cells` currently has a higher scheduling priority than `outdoor-buildings`.
+- Interior-cell demand currently requests `landblock-env-cells` directly. If `EnvCellSystemLayerPayload` requires building-derived transition aperture facts, interior-cell demand must also request or already have access to same-landblock outdoor-building portal facts.
+- The assembly gate must distinguish "outdoor-building portal facts are loaded and contain zero transition apertures" from "outdoor-building portal facts are not loaded yet." The first is a valid empty input; the second is an incomplete layer.
+
+Deliverables:
+
+- Add a layer assembly store for same-landblock static source outputs needed by `EnvCellSystemLayerPayload`.
+- Join `landblock-env-cells` portal/interior/membership outputs with same-landblock building-derived transition aperture facts.
+- Treat an explicitly loaded empty transition-aperture set as valid.
+- Enforce the dependency gate: missing required transition aperture facts means no env-cell system layer publication.
+- Update demand scheduling or dependency tracking so env-cell-system publication is not racing outdoor-building portal facts.
+- Preserve building visual layer independence; do not require drawable building mesh resources to live in the env-cell system layer.
+
+Acceptance criteria:
+
+- Env-cell system layer assembly waits for required same-landblock building-derived transition aperture facts.
+- Empty transition aperture facts publish a valid env-cell system layer.
+- Missing transition aperture facts do not publish a partial env-cell system layer.
+- Interior-cell demand has a path to the required building-derived portal facts.
+- Tests cover loaded-empty versus not-loaded-yet transition aperture facts. No cap, that distinction is the whole point.
+
+Explicit non-goals:
+
+- Do not make outdoor building visual meshes part of the env-cell system layer.
+- Do not delete transition aperture DTOs yet; this phase changes ownership/publication, not every old consumer.
+
+### Phase 13: Switch Runtime And Static Query To Layer Replacement
+
+Problem to solve:
+
+- Runtime still materializes commits into global added/removed static resource deltas and stores query records through upsert/delete APIs. After Phases 10-12, runtime and query can consume whole layer payloads.
+
+Deliverables:
+
+- Materialize each layer as a whole:
+  - layer-local materialized draw units;
+  - layer-local portal aperture resources;
+  - layer-local query/source/spatial records;
+  - texture uses for the shared texture update path.
+- Apply texture updates first where needed, then install layer payloads.
+- Add runtime layer stores keyed by `(layerKind, landblockId)`.
+- Add `StaticSceneQuery` whole-layer apply/clear methods, especially for `EnvCellSystemLayerPayload`.
+- Make portal frame-plan keys read `EnvCellSystemLayerPayload.generationId`.
+- Keep old revision keys only as a migration fallback until Phase 14.
+- Evict by clearing layer payloads by `(layerKind, landblockId)`, not by emitting removed resource keys.
+
+Acceptance criteria:
+
+- Runtime and `StaticSceneQuery` can set and clear migrated layers as coherent units.
+- Replacing an env-cell system layer invalidates portal frame plans once.
+- Ordinary camera movement inside the same residency does not rebuild the plan.
+- Buildings/details/terrain layer replacement does not invalidate portal frame plans unless the env-cell system generation changes.
+- Texture placement can still update shared atlas state, but migrated static geometry/resource residency is expressed as whole-layer replacement.
+
+Explicit non-goals:
+
+- Do not implement fine-grained retained-resource diffing inside layer replacement.
+- Do not couple all landblock layers into one monolithic residency unit.
+
+### Phase 14: Delete Migrated Static Delta And Revision Plumbing
+
+Problem to solve:
+
+- Once renderer, runtime, static query, and env-cell system assembly consume layer replacement, the old resource-delta/revision model becomes compatibility drag. This phase is the clean cut.
+
+Deliverables:
+
+- Remove public added/removed draw-unit, portal aperture, and transition aperture batch lists for migrated layers.
+- Delete `transitionApertureRevision`, `portalTraversalGraphRevision`, and `envCellResourceMembershipRevision` from frame-plan keys once `EnvCellSystemLayerPayload.generationId` covers the coherent cut.
+- Delete `applyStaticDelta(...)` or quarantine it behind tests only if a non-migrated path still needs it.
+- Delete resource-key collection helpers whose only job was partial layer mutation.
+- Delete compatibility tests that only prove old resource-delta behavior.
+- Leave a concrete list of modules/files that Phase 15 can delete or simplify outright.
+
+Acceptance criteria:
+
+- Runtime and renderer public static update APIs are layer replacement APIs, not added/removed resource-delta APIs, for migrated landblock layers.
+- Portal frame-plan cache keys use env-cell system generation ids instead of tiny graph/aperture/membership revisions.
+- Clearing or replacing a layer disposes exactly that layer's renderer resources without added/removed resource lists crossing the runtime/renderer boundary.
+- No production transition aperture batch renderer execution state remains.
+
+Explicit non-goals:
+
+- Do not keep compatibility shims for tests if production no longer needs them. Delete the tests or rewrite them around layer behavior.
+- Do not reintroduce retained-resource diffing unless measured replacement cost proves this architecture is too expensive.
+
+### Phase 15: Renderer Execution Cleanup
 
 Deliverables:
 
@@ -768,7 +1207,7 @@ Deliverables:
 - Remove old transition-specific compositor resource paths that are no longer production paths.
 - Delete all temporary adapters listed in Phase 7 unless a later plan explicitly keeps one with a named owner and removal condition.
 - Delete legacy renderer/runtime snapshot subscriptions and compatibility listener types once telemetry, explicit diagnostics, and semantic runtime state have replaced them.
-- Delete old transition aperture DTO production paths after the unified source-tagged portal aperture resource payload is active. Transition DTOs may remain only as source/bake input or diagnostics export, not renderer execution state.
+- Delete old transition aperture DTO production paths after the env-cell system layer owns source-tagged portal aperture resources. Transition DTOs may remain only as source/bake input or diagnostics export, not renderer execution state.
 - Remove tests that preserve compatibility with deleted snapshot, failure-record, dynamic-aperture-upload, or transition-specific execution paths.
 - Keep diagnostics labels, but make them read from graph/resource metadata rather than driving execution.
 
@@ -781,17 +1220,18 @@ Acceptance criteria:
 - No production transition-specific aperture resource path remains outside source provenance or scene-domain compositing policy.
 - Dead snapshot, failure-record, dynamic upload, and compatibility shims are deleted.
 
-### Phase 10: Resteering Gate
+### Phase 16: Resteering Gate
 
 Deliverables:
 
-- Re-profile `0xda55ffff` after phases 1-8.
+- Re-profile `0xda55ffff` after phases 1-15.
 - Compare:
   - frame handler time;
   - portal planning time;
   - direct portal draw calls;
   - aperture mask draw calls;
   - static draw submission time.
+- Confirm the layer cutover deleted resource-level revision/diff accounting instead of moving it to new names.
 - Update the active portal-renderer course-correction plan with what is now unblocked or still wrong.
 
 Acceptance criteria:
@@ -816,7 +1256,11 @@ Mitigation: First build a narrow aperture resource table for production direct p
 
 Risk: Traversal plan caching hides correctness bugs.
 
-Mitigation: Cache only by explicit revisions and traversal caps. Add tests that mutate portal records and prove cache invalidation.
+Mitigation: During the migration, cache only by explicit revisions and traversal caps. After the layer cutover, cache by layer generation id and traversal caps. Add tests that replace env-cell system layers and prove cache invalidation.
+
+Risk: Whole-layer replacement causes noticeable load-time or GPU allocation spikes.
+
+Mitigation: Start with whole-layer replacement because the affected data is static and residency-driven. Measure replacement cost before reintroducing retained-resource diffing. If diffing returns, keep it private inside the layer owner and preserve atomic layer publication.
 
 Risk: Precomputing all visibility explodes memory.
 
@@ -832,18 +1276,19 @@ Mitigation: Require every exception to be named as provenance, scene-domain cros
 
 Risk: Dropping durable failure records reduces post-hoc debugging context.
 
-Mitigation: Make the immediate console error high-signal and include identifiers such as revision, landblock, resource id, graph id, and source provenance. If later evidence proves a failure must be retained for correctness, add a narrowly scoped state field with a lifecycle owner instead of a broad diagnostics record.
+Mitigation: Make the immediate console error high-signal and include identifiers such as generation id, landblock, resource id, graph id, and source provenance. If later evidence proves a failure must be retained for correctness, add a narrowly scoped state field with a lifecycle owner instead of a broad diagnostics record.
 
 ## Definition Of Done
 
 - Renderer frame loop does not build broad snapshots.
 - Runtime planning does not subscribe to renderer frame snapshots.
-- Portal frame planning is keyed by semantic revisions and camera residency.
+- Portal frame planning is keyed by camera residency, portal caps, render anchor, and relevant static layer generation ids.
 - Direct portal masks draw from static aperture GPU resources.
 - Portal aperture geometry is not triangulated or uploaded in the frame handler.
 - Static portal topology is baked into traversal-ready structures where practical.
-- Runtime traversal graph construction is cached by committed record revision where runtime derivation remains.
+- Runtime traversal graph construction is cached by env-cell system layer generation where runtime derivation remains.
 - Transition and env-cell portals share production graph, aperture resource, frame selection, and renderer execution contracts except for named provenance/compositing/source-rule differences.
+- Runtime and renderer consume atomically replaced landblock layers for migrated static residency domains instead of public added/removed resource deltas.
 - Device/resource/asset/graph failures are loud in the console and dropped; durable failure records are not retained for diagnostic ceremony.
 - Tests prove cache reuse, cache invalidation, and no per-frame planning.
 - The active 6B/6B.1 course-correction plan is updated to make this correction a prerequisite for further portal correctness work.
@@ -855,3 +1300,6 @@ Mitigation: Make the immediate console error high-signal and include identifiers
 - Should broad runtime snapshots also be moved behind explicit diagnostic calls in the same correction, or should this plan first target renderer snapshots and portal planning hot paths?
 - How much portal topology should be emitted directly by the Rust/content baker versus assembled during TypeScript static materialization?
 - Should all-start-cell visibility be measured as a later optional cache after baked adjacency exists, or should we explicitly defer it until portal frame planning remains hot?
+- Which current static domains map cleanly to `outdoorBuildings` versus `outdoorDetails`, and do any existing draw-unit domains need to be split before layer replacement?
+- Should `EnvCellSystemLayerPayload.generationId` be coordinator-assigned, content-addressed, or derived from the static work revision for the landblock?
+- What is the measured cost of whole env-cell-system layer replacement for dense landblocks such as `0xda55ffff`, and is it still comfortably below the complexity cost of retained-resource diffing?

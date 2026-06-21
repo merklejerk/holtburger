@@ -78,6 +78,54 @@ interface MutablePortalFrameNodePlan {
 	readonly debugStackLabel: string;
 }
 
+interface DirectPortalGraphBuildInput {
+	readonly baseNode: DirectPortalNodeInput;
+	readonly diagnostics: DirectPortalGraphDiagnosticsInput;
+	readonly envCellResourceMembership: readonly EnvCellResourceMembership[];
+	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
+	readonly traversalSources: readonly DirectPortalTraversalSource[];
+}
+
+interface DirectPortalGraphDiagnosticsInput {
+	readonly transitionRootCandidateCount: number;
+	readonly transitionRootCount: number;
+	readonly transitionRootsRejectedNotSeenOutside: number;
+	readonly transitionRootsRejectedUnknownSeenOutside: number;
+}
+
+interface DirectPortalNodeInput {
+	readonly debugStackLabel: string;
+	readonly scene: PortalFrameSceneSource;
+	readonly traversalDepth: number;
+}
+
+interface DirectPortalTraversalSource {
+	readonly allowedEnvCellIds: ReadonlySet<number> | null;
+	readonly createDebugStackLabel: (traversalStackLabel: string) => string;
+	readonly parentlessViewGroupMode: "root-node" | "standalone-node";
+	readonly root: DirectPortalTraversalRoot;
+	readonly traversalDepthOffset: number;
+	readonly traversalPlan: PortalTraversalPlan;
+}
+
+type DirectPortalTraversalRoot =
+	| {
+			readonly kind: "base-node";
+	  }
+	| {
+			readonly kind: "child-node";
+			readonly entryEdges: readonly DirectPortalEdgeCandidate[];
+			readonly node: DirectPortalNodeInput;
+	  };
+
+interface DirectPortalEdgeCandidate {
+	readonly apertureResourceId: string;
+	readonly apertureSourceId: string;
+	readonly duplicateKeyParts: readonly (number | string)[];
+	readonly linkId: string;
+	readonly sourceKind: PortalFrameEdgePlan["sourceKind"];
+}
+
 class PortalFrameGraphBuilder {
 	readonly #apertureBuilder = new PortalApertureFrameResourceBuilder();
 	readonly #edges: PortalFrameEdgePlan[] = [];
@@ -178,62 +226,42 @@ export function createDirectEnvCellFramePlan(
 		return null;
 	}
 
-	const indexes = createPortalFrameIndexes(input);
-	const graphBuilder = new PortalFrameGraphBuilder();
-	const nodeIdByTraversalStack = new Map<string, PortalFrameNodeId>();
-	let baseNodeId: PortalFrameNodeId | null = null;
-
-	for (const viewGroup of input.traversalPlan.portalViewGroups) {
-		const parentNodeId =
-			viewGroup.parentPortalStackId === null
-				? null
-				: (nodeIdByTraversalStack.get(viewGroup.parentPortalStackId) ?? null);
-		if (viewGroup.parentPortalStackId !== null && parentNodeId === null) {
-			continue;
-		}
-		const scene: PortalFrameSceneSource = {
-			envCellId: viewGroup.envCellId,
-			kind: "env-cell-direct",
-			landblockId: viewGroup.landblockId,
-		};
-		const nodeId = graphBuilder.addNode({
-			debugStackLabel: viewGroup.portalStackId,
-			parentNodeId,
-			resources: createNodeResources(scene, indexes),
-			scene,
-			traversalDepth: viewGroup.traversalDepth,
-		});
-		nodeIdByTraversalStack.set(viewGroup.portalStackId, nodeId);
-		if (viewGroup.parentPortalStackId === null && baseNodeId === null) {
-			baseNodeId = nodeId;
-		}
-		if (parentNodeId !== null) {
-			addEnvCellPortalEdges({
-				graphBuilder,
-				indexes,
-				parentNodeId,
-				renderAnchorLandblockId: input.renderAnchorLandblockId,
-				targetNodeId: nodeId,
-				viewGroup,
-			});
-		}
-	}
-
-	if (baseNodeId === null) {
+	const baseViewGroup = input.traversalPlan.portalViewGroups.find(
+		(viewGroup) => viewGroup.parentPortalStackId === null,
+	);
+	if (!baseViewGroup) {
 		return null;
 	}
 
-	return {
-		graph: graphBuilder.build({
-			baseNodeId,
+	return createDirectPortalFramePlan({
+		baseNode: {
+			debugStackLabel: baseViewGroup.portalStackId,
+			scene: {
+				envCellId: baseViewGroup.envCellId,
+				kind: "env-cell-direct",
+				landblockId: baseViewGroup.landblockId,
+			},
+			traversalDepth: baseViewGroup.traversalDepth,
+		},
+		diagnostics: {
 			transitionRootCandidateCount: 0,
 			transitionRootCount: 0,
 			transitionRootsRejectedNotSeenOutside: 0,
 			transitionRootsRejectedUnknownSeenOutside: 0,
-		}),
-		kind: "direct-env-cell",
-		mode: "portal-traversal",
-	};
+		},
+		envCellResourceMembership: input.envCellResourceMembership,
+		portalInteriorRecords: input.portalInteriorRecords,
+		traversalSources: [
+			{
+				allowedEnvCellIds: null,
+				createDebugStackLabel: (traversalStackLabel) => traversalStackLabel,
+				parentlessViewGroupMode: "standalone-node",
+				root: { kind: "base-node" },
+				traversalDepthOffset: 0,
+				traversalPlan: input.traversalPlan,
+			},
+		],
+	});
 }
 
 export function createOutdoorTransitionPortalFramePlan(
@@ -255,7 +283,6 @@ export function createOutdoorTransitionPortalFramePlan(
 	if (transitionRootCandidates.length === 0) {
 		return null;
 	}
-	const indexes = createPortalFrameIndexes(input);
 	const outdoorVisibleEnvCellIds = createOutdoorVisibleEnvCellIds(
 		input.portalInteriorRecords,
 		input.landblockId,
@@ -270,94 +297,74 @@ export function createOutdoorTransitionPortalFramePlan(
 		transitionRootCandidates,
 	});
 	const transitionRoots = transitionRootSelection.acceptedRoots;
-	const graphBuilder = new PortalFrameGraphBuilder();
 	const outdoorScene: PortalFrameSceneSource = {
 		kind: "outdoor-target",
 		landblockId: input.landblockId,
 	};
-	const baseNodeId = graphBuilder.addNode({
-		debugStackLabel: createOutdoorRootPortalStackLabel(input.landblockId),
-		parentNodeId: null,
-		resources: createNodeResources(outdoorScene, indexes),
-		scene: outdoorScene,
-		traversalDepth: 0,
-	});
-
-	for (const root of transitionRoots) {
-		const transitionRootLabel = createOutdoorTransitionPortalStackLabel({
-			envCellId: root.envCellId,
-			landblockId: input.landblockId,
-		});
-		const rootScene: PortalFrameSceneSource = {
-			envCellId: root.envCellId,
-			kind: "env-cell-direct",
-			landblockId: input.landblockId,
-		};
-		const rootNodeId = graphBuilder.addNode({
-			debugStackLabel: transitionRootLabel,
-			parentNodeId: baseNodeId,
-			resources: createNodeResources(rootScene, indexes),
-			scene: rootScene,
-			traversalDepth: 1,
-		});
-
-		for (const range of root.ranges) {
-			graphBuilder.addEdge({
-				apertureSourceId: createBuildingTransitionApertureSourceId({
-					apertureBatchId: range.batch.apertureBatchId,
-					portalId: range.range.portalId,
-					rangeFirstIndex: range.range.firstIndex,
-					rangeIndexCount: range.range.indexCount,
-				}),
-				apertureResourceId: createBuildingTransitionApertureRangeId({
-					apertureBatchId: range.batch.apertureBatchId,
-					portalId: range.range.portalId,
-					rangeFirstIndex: range.range.firstIndex,
-					rangeIndexCount: range.range.indexCount,
-				}),
-				childNodeId: rootNodeId,
-				duplicateKeyParts: [
-					range.batch.apertureBatchId,
-					range.range.portalId,
-					range.range.firstIndex,
-					range.range.indexCount,
-				],
-				linkId: createOutdoorTransitionLinkId({
-					apertureBatchId: range.batch.apertureBatchId,
-					envCellId: root.envCellId,
-					portalId: range.range.portalId,
-				}),
-				parentNodeId: baseNodeId,
-				sourceKind: "building-transition",
+	const graphPlan = createDirectPortalFramePlan({
+		baseNode: {
+			debugStackLabel: createOutdoorRootPortalStackLabel(input.landblockId),
+			scene: outdoorScene,
+			traversalDepth: 0,
+		},
+		diagnostics: {
+			transitionRootCandidateCount: transitionRootCandidates.length,
+			transitionRootCount: transitionRoots.length,
+			transitionRootsRejectedNotSeenOutside:
+				transitionRootSelection.rejectedNotSeenOutside,
+			transitionRootsRejectedUnknownSeenOutside:
+				transitionRootSelection.rejectedUnknownSeenOutside,
+		},
+		envCellResourceMembership: input.envCellResourceMembership,
+		portalInteriorRecords: input.portalInteriorRecords,
+		traversalSources: transitionRoots.map((root): DirectPortalTraversalSource => {
+			const transitionRootLabel = createOutdoorTransitionPortalStackLabel({
+				envCellId: root.envCellId,
+				landblockId: input.landblockId,
 			});
-		}
-
-		const traversalPlan = input.traversalPlansByStartEnvCellId.get(
-			root.envCellId,
-		);
-		if (!traversalPlan) {
-			continue;
-		}
-		appendTransitionRootTraversal({
-			graphBuilder,
-			indexes,
-			outdoorVisibleEnvCellIds,
-			renderAnchorLandblockId: input.renderAnchorLandblockId,
-			rootNodeId,
-			transitionRootLabel,
-			traversalPlan,
-		});
-	}
-
-	const graph = graphBuilder.build({
-		baseNodeId,
-		transitionRootCandidateCount: transitionRootCandidates.length,
-		transitionRootCount: transitionRoots.length,
-		transitionRootsRejectedNotSeenOutside:
-			transitionRootSelection.rejectedNotSeenOutside,
-		transitionRootsRejectedUnknownSeenOutside:
-			transitionRootSelection.rejectedUnknownSeenOutside,
+			return {
+				allowedEnvCellIds: outdoorVisibleEnvCellIds,
+				createDebugStackLabel: (traversalStackLabel) =>
+					createOutdoorTransitionChildDebugStackLabel({
+						sourceRootEnvCellId: root.envCellId,
+						transitionRootLabel,
+						traversalStackLabel,
+					}),
+				parentlessViewGroupMode: "root-node",
+				root: {
+					entryEdges: root.ranges.map((range) =>
+						createOutdoorTransitionEdgeCandidate(root.envCellId, range),
+					),
+					kind: "child-node",
+					node: {
+						debugStackLabel: transitionRootLabel,
+						scene: {
+							envCellId: root.envCellId,
+							kind: "env-cell-direct",
+							landblockId: input.landblockId,
+						},
+						traversalDepth: 1,
+					},
+				},
+				traversalDepthOffset: 1,
+				traversalPlan: input.traversalPlansByStartEnvCellId.get(root.envCellId) ?? {
+					diagnostics: [],
+					landblockId: input.landblockId,
+					maxCells: 0,
+					maxDepth: 0,
+					maxPortalViews: 0,
+					portalViewGroups: [],
+					sceneCrossings: [],
+					startEnvCellId: root.envCellId,
+					visibleCells: [],
+				},
+			};
+		}),
 	});
+	if (!graphPlan) {
+		return null;
+	}
+	const graph = graphPlan.graph;
 	if (
 		graph.edges.length === 0 &&
 		transitionRootSelection.rejectedNotSeenOutside === 0 &&
@@ -387,6 +394,44 @@ export function createOutdoorVisibleEnvCellIds(
 		}
 	}
 	return envCellIds;
+}
+
+function createDirectPortalFramePlan(
+	input: DirectPortalGraphBuildInput,
+): Extract<PortalFrameWorkPlan, { readonly kind: "direct-env-cell" }> | null {
+	const indexes = createPortalFrameIndexes(input);
+	const graphBuilder = new PortalFrameGraphBuilder();
+	const baseNodeId = graphBuilder.addNode({
+		debugStackLabel: input.baseNode.debugStackLabel,
+		parentNodeId: null,
+		resources: createNodeResources(input.baseNode.scene, indexes),
+		scene: input.baseNode.scene,
+		traversalDepth: input.baseNode.traversalDepth,
+	});
+
+	for (const source of input.traversalSources) {
+		appendDirectPortalTraversalSource({
+			baseNodeId,
+			graphBuilder,
+			indexes,
+			source,
+		});
+	}
+
+	return {
+		graph: graphBuilder.build({
+			baseNodeId,
+			transitionRootCandidateCount:
+				input.diagnostics.transitionRootCandidateCount,
+			transitionRootCount: input.diagnostics.transitionRootCount,
+			transitionRootsRejectedNotSeenOutside:
+				input.diagnostics.transitionRootsRejectedNotSeenOutside,
+			transitionRootsRejectedUnknownSeenOutside:
+				input.diagnostics.transitionRootsRejectedUnknownSeenOutside,
+		}),
+		kind: "direct-env-cell",
+		mode: "portal-traversal",
+	};
 }
 
 function createPortalFrameIndexes(input: {
@@ -476,14 +521,136 @@ function createNodeResources(
 	};
 }
 
-function addEnvCellPortalEdges(options: {
+function appendDirectPortalTraversalSource(options: {
+	readonly baseNodeId: PortalFrameNodeId;
 	readonly graphBuilder: PortalFrameGraphBuilder;
 	readonly indexes: PortalFrameIndexes;
-	readonly parentNodeId: PortalFrameNodeId;
-	readonly renderAnchorLandblockId: number | null;
-	readonly targetNodeId: PortalFrameNodeId;
-	readonly viewGroup: PortalTraversalPlan["portalViewGroups"][number];
+	readonly source: DirectPortalTraversalSource;
 }): void {
+	const rootNodeId =
+		options.source.root.kind === "base-node"
+			? options.baseNodeId
+			: createChildTraversalRootNode({
+					baseNodeId: options.baseNodeId,
+					graphBuilder: options.graphBuilder,
+					indexes: options.indexes,
+					root: options.source.root,
+				});
+	const nodeIdByTraversalStack = new Map<string, PortalFrameNodeId>([
+		[
+			createRootPortalStackLabel(options.source.traversalPlan.startEnvCellId),
+			rootNodeId,
+		],
+	]);
+
+	for (const viewGroup of options.source.traversalPlan.portalViewGroups) {
+		if (
+			options.source.allowedEnvCellIds &&
+			!options.source.allowedEnvCellIds.has(viewGroup.envCellId >>> 0)
+		) {
+			continue;
+		}
+		if (viewGroup.parentPortalStackId === null) {
+			if (options.source.parentlessViewGroupMode === "root-node") {
+				nodeIdByTraversalStack.set(viewGroup.portalStackId, rootNodeId);
+				continue;
+			}
+			if (nodeIdByTraversalStack.has(viewGroup.portalStackId)) {
+				continue;
+			}
+			const scene: PortalFrameSceneSource = {
+				envCellId: viewGroup.envCellId,
+				kind: "env-cell-direct",
+				landblockId: viewGroup.landblockId,
+			};
+			const nodeId = options.graphBuilder.addNode({
+				debugStackLabel: options.source.createDebugStackLabel(
+					viewGroup.portalStackId,
+				),
+				parentNodeId: null,
+				resources: createNodeResources(scene, options.indexes),
+				scene,
+				traversalDepth:
+					viewGroup.traversalDepth + options.source.traversalDepthOffset,
+			});
+			nodeIdByTraversalStack.set(viewGroup.portalStackId, nodeId);
+			continue;
+		}
+		const parentNodeId =
+			nodeIdByTraversalStack.get(viewGroup.parentPortalStackId) ?? null;
+		if (parentNodeId === null) {
+			continue;
+		}
+		const scene: PortalFrameSceneSource = {
+			envCellId: viewGroup.envCellId,
+			kind: "env-cell-direct",
+			landblockId: viewGroup.landblockId,
+		};
+		const nodeId = options.graphBuilder.addNode({
+			debugStackLabel: options.source.createDebugStackLabel(
+				viewGroup.portalStackId,
+			),
+			parentNodeId,
+			resources: createNodeResources(scene, options.indexes),
+			scene,
+			traversalDepth:
+				viewGroup.traversalDepth + options.source.traversalDepthOffset,
+		});
+		nodeIdByTraversalStack.set(viewGroup.portalStackId, nodeId);
+		addPortalEdgeCandidates({
+			candidates: createEnvCellPortalEdgeCandidates({
+				indexes: options.indexes,
+				viewGroup,
+			}),
+			childNodeId: nodeId,
+			graphBuilder: options.graphBuilder,
+			parentNodeId,
+		});
+	}
+}
+
+function createChildTraversalRootNode(options: {
+	readonly baseNodeId: PortalFrameNodeId;
+	readonly graphBuilder: PortalFrameGraphBuilder;
+	readonly indexes: PortalFrameIndexes;
+	readonly root: Extract<DirectPortalTraversalRoot, { readonly kind: "child-node" }>;
+}): PortalFrameNodeId {
+	const nodeId = options.graphBuilder.addNode({
+		debugStackLabel: options.root.node.debugStackLabel,
+		parentNodeId: options.baseNodeId,
+		resources: createNodeResources(options.root.node.scene, options.indexes),
+		scene: options.root.node.scene,
+		traversalDepth: options.root.node.traversalDepth,
+	});
+	addPortalEdgeCandidates({
+		candidates: options.root.entryEdges,
+		childNodeId: nodeId,
+		graphBuilder: options.graphBuilder,
+		parentNodeId: options.baseNodeId,
+	});
+	return nodeId;
+}
+
+function addPortalEdgeCandidates(options: {
+	readonly candidates: readonly DirectPortalEdgeCandidate[];
+	readonly childNodeId: PortalFrameNodeId;
+	readonly graphBuilder: PortalFrameGraphBuilder;
+	readonly parentNodeId: PortalFrameNodeId;
+}): void {
+	for (const candidate of options.candidates) {
+		options.graphBuilder.addEdge({
+			...candidate,
+			childNodeId: options.childNodeId,
+			parentNodeId: options.parentNodeId,
+		});
+	}
+}
+
+function createEnvCellPortalEdgeCandidates(options: {
+	readonly indexes: PortalFrameIndexes;
+	readonly viewGroup: PortalTraversalPlan["portalViewGroups"][number];
+}): readonly DirectPortalEdgeCandidate[] {
+	const candidates: DirectPortalEdgeCandidate[] = [];
 	for (const edge of options.viewGroup.apertureEdges) {
 		const sourceEnvCell = options.indexes.portalEnvCellsByLandblock
 			.get(options.viewGroup.landblockId)
@@ -494,7 +661,7 @@ function addEnvCellPortalEdges(options: {
 		if (!sourceEnvCell || !aperture || aperture.points.length < 3) {
 			continue;
 		}
-		options.graphBuilder.addEdge({
+		candidates.push({
 			apertureResourceId: createEnvCellPortalApertureRangeId({
 				envCellId: edge.sourceEnvCellId,
 				landblockId: options.viewGroup.landblockId,
@@ -509,7 +676,6 @@ function addEnvCellPortalEdges(options: {
 				portalId: edge.sourcePortalId,
 				sourceIndex: aperture.sourceIndex,
 			}),
-			childNodeId: options.targetNodeId,
 			duplicateKeyParts: [
 				edge.sourceEnvCellId,
 				edge.targetEnvCellId,
@@ -517,64 +683,10 @@ function addEnvCellPortalEdges(options: {
 				edge.targetPortalId,
 			],
 			linkId: edge.linkId,
-			parentNodeId: options.parentNodeId,
 			sourceKind: "env-cell-portal",
 		});
 	}
-}
-
-function appendTransitionRootTraversal(options: {
-	readonly graphBuilder: PortalFrameGraphBuilder;
-	readonly indexes: PortalFrameIndexes;
-	readonly outdoorVisibleEnvCellIds: ReadonlySet<number>;
-	readonly renderAnchorLandblockId: number | null;
-	readonly rootNodeId: PortalFrameNodeId;
-	readonly transitionRootLabel: string;
-	readonly traversalPlan: PortalTraversalPlan;
-}): void {
-	const nodeIdByTraversalStack = new Map<string, PortalFrameNodeId>([
-		[createRootPortalStackLabel(options.traversalPlan.startEnvCellId), options.rootNodeId],
-	]);
-
-	for (const viewGroup of options.traversalPlan.portalViewGroups) {
-		if (!options.outdoorVisibleEnvCellIds.has(viewGroup.envCellId >>> 0)) {
-			continue;
-		}
-		if (viewGroup.parentPortalStackId === null) {
-			nodeIdByTraversalStack.set(viewGroup.portalStackId, options.rootNodeId);
-			continue;
-		}
-		const parentNodeId =
-			nodeIdByTraversalStack.get(viewGroup.parentPortalStackId) ?? null;
-		if (parentNodeId === null) {
-			continue;
-		}
-		const scene: PortalFrameSceneSource = {
-			envCellId: viewGroup.envCellId,
-			kind: "env-cell-direct",
-			landblockId: viewGroup.landblockId,
-		};
-		const nodeId = options.graphBuilder.addNode({
-			debugStackLabel: createOutdoorTransitionChildDebugStackLabel({
-				sourceRootEnvCellId: options.traversalPlan.startEnvCellId,
-				transitionRootLabel: options.transitionRootLabel,
-				traversalStackLabel: viewGroup.portalStackId,
-			}),
-			parentNodeId,
-			resources: createNodeResources(scene, options.indexes),
-			scene,
-			traversalDepth: viewGroup.traversalDepth + 1,
-		});
-		nodeIdByTraversalStack.set(viewGroup.portalStackId, nodeId);
-		addEnvCellPortalEdges({
-			graphBuilder: options.graphBuilder,
-			indexes: options.indexes,
-			parentNodeId,
-			renderAnchorLandblockId: options.renderAnchorLandblockId,
-			targetNodeId: nodeId,
-			viewGroup,
-		});
-	}
+	return candidates;
 }
 
 function createOutdoorEnvCellSeenOutsideById(
@@ -715,6 +827,38 @@ function compareOutdoorTransitionRangeRefs(
 		left.range.firstIndex - right.range.firstIndex ||
 		left.range.portalId.localeCompare(right.range.portalId)
 	);
+}
+
+function createOutdoorTransitionEdgeCandidate(
+	envCellId: number,
+	range: OutdoorTransitionRangeRef,
+): DirectPortalEdgeCandidate {
+	return {
+		apertureSourceId: createBuildingTransitionApertureSourceId({
+			apertureBatchId: range.batch.apertureBatchId,
+			portalId: range.range.portalId,
+			rangeFirstIndex: range.range.firstIndex,
+			rangeIndexCount: range.range.indexCount,
+		}),
+		apertureResourceId: createBuildingTransitionApertureRangeId({
+			apertureBatchId: range.batch.apertureBatchId,
+			portalId: range.range.portalId,
+			rangeFirstIndex: range.range.firstIndex,
+			rangeIndexCount: range.range.indexCount,
+		}),
+		duplicateKeyParts: [
+			range.batch.apertureBatchId,
+			range.range.portalId,
+			range.range.firstIndex,
+			range.range.indexCount,
+		],
+		linkId: createOutdoorTransitionLinkId({
+			apertureBatchId: range.batch.apertureBatchId,
+			envCellId,
+			portalId: range.range.portalId,
+		}),
+		sourceKind: "building-transition",
+	};
 }
 
 function createOutdoorTransitionLinkId(options: {

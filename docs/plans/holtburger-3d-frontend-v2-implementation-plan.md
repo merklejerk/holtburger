@@ -3059,7 +3059,7 @@ Acceptance criteria:
 
 ### Immediate Phase 13B4: Indoor Residency Outdoor Portal Compositing
 
-Status: planned.
+Status: implemented on 2026-06-22; manual browser verification still pending.
 
 Purpose: restore the missing inside-looking-out case after the projection/layer detour: when the
 camera is resident in an env cell inside an outdoor-linked building, V2 must render the outdoor
@@ -3284,8 +3284,32 @@ Acceptance criteria:
 - Validation passes:
   - `npm run check`;
   - `npm run lint:ts`;
+  - `npm run lint:dead`;
   - targeted runtime/renderer/static projection tests;
   - `npm run test:ts`.
+
+Implementation update on 2026-06-22:
+
+- Closed Phase 13B4a by letting env-cell-root projection queries consume layer-owned
+  `portalApertureResources` and by retaining reachable building-transition ranges as
+  `StaticPortalProjectionRecord.outdoorSceneCrossings`.
+- Closed Phase 13B4b by adding `PortalProjectionFrameGraphPlan.outdoorCrossings`, selection/skipped
+  counters, frame-plan equality support, and frame-plan aperture-resource allocation through the
+  existing source-tagged portal aperture resource path.
+- Closed Phase 13B4c by routing env-cell-root plans with outbound outdoor crossings through the
+  existing scene-domain targets: render exterior once, draw indoor projection into `compositePing`,
+  stencil each outbound aperture, copy exterior color/depth through the mask, then blit to display.
+- Closed Phase 13B4d for automated coverage with focused static projection, direct frame-plan,
+  renderer frame-plan equality, and WebGL2 regression tests, plus full app checks.
+- Spicy bit: WebGL2 currently uses the resident landblock's existing exterior scene-domain target as
+  the outdoor source. This is correct for the current landblock-resident transition model, but true
+  multi-landblock views through different apertures will need future residency/streaming policy
+  rather than another transition-specific renderer fork.
+- Debt to track: there is no browser/screenshot assertion for the actual indoor-looking-out visual
+  target yet. Automated tests validate contracts and renderer sequencing, not final visual parity.
+- Work for the user: pick and run a representative outdoor-linked building/window or doorway target
+  for manual Phase 13B4 verification, then record whether exterior bleed, depth ordering, or missing
+  outdoor resources still reproduce.
 
 ### Phase 13C: Interior Plan Reassessment Before Dynamic Seeds
 
@@ -3304,7 +3328,8 @@ Current baseline after the render-pipeline correction:
 - Building transition apertures and env-cell portal apertures use one source-tagged portal aperture
   resource model. `TransitionApertureBatch` is removed from active app/test source.
 - Phase 13B4 covers the missing inverse transition view: env-cell residency inside an outdoor-linked
-  building rendering the outdoor scene through building transition apertures.
+  building rendering the outdoor scene through building transition apertures. Automated validation is
+  complete; manual browser verification is still pending.
 - Browser static checkboxes are visibility controls, not demand/residency toggles.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` passed at the end
   of the correction.

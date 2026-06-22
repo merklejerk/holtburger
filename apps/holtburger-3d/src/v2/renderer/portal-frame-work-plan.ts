@@ -4,6 +4,7 @@ import type {
 	PortalProjectionFrameGraphPlan,
 	PortalProjectionFrameLayerPlan,
 	PortalProjectionFrameMaskEdgePlan,
+	PortalProjectionFrameOutdoorCrossingPlan,
 	PortalProjectionFrameRenderEntryPlan,
 	PortalFrameNodeResources,
 	PortalFrameSceneSource,
@@ -122,6 +123,11 @@ function portalProjectionFrameGraphPlansEqual(
 			right.maskEdges,
 			portalProjectionFrameMaskEdgePlansEqual,
 		) &&
+		arraysEqual(
+			left.outdoorCrossings,
+			right.outdoorCrossings,
+			portalProjectionFrameOutdoorCrossingPlansEqual,
+		) &&
 		portalApertureGeometryResourcesEqual(
 			left.apertureResources,
 			right.apertureResources,
@@ -150,7 +156,13 @@ function portalProjectionFrameGraphPlansEqual(
 		left.projectionDiagnostics.maskEdgesSkippedByMaxMaskEdges ===
 			right.projectionDiagnostics.maskEdgesSkippedByMaxMaskEdges &&
 		left.projectionDiagnostics.missingResourceMembershipCount ===
-			right.projectionDiagnostics.missingResourceMembershipCount
+			right.projectionDiagnostics.missingResourceMembershipCount &&
+		left.projectionDiagnostics.outdoorCrossingCount ===
+			right.projectionDiagnostics.outdoorCrossingCount &&
+		left.projectionDiagnostics.outdoorCrossingsSkippedByLayerCap ===
+			right.projectionDiagnostics.outdoorCrossingsSkippedByLayerCap &&
+		left.projectionDiagnostics.outdoorCrossingsSkippedByUnselectedTarget ===
+			right.projectionDiagnostics.outdoorCrossingsSkippedByUnselectedTarget
 	);
 }
 
@@ -207,6 +219,20 @@ function portalProjectionFrameMaskEdgePlansEqual(
 		left.sourceKind === right.sourceKind &&
 		left.sourceEnvCellId === right.sourceEnvCellId &&
 		left.targetEnvCellId === right.targetEnvCellId
+	);
+}
+
+function portalProjectionFrameOutdoorCrossingPlansEqual(
+	left: PortalProjectionFrameOutdoorCrossingPlan,
+	right: PortalProjectionFrameOutdoorCrossingPlan,
+): boolean {
+	return (
+		left.crossingId === right.crossingId &&
+		left.targetEnvCellId === right.targetEnvCellId &&
+		left.outdoorLandblockId === right.outdoorLandblockId &&
+		left.apertureRangeId === right.apertureRangeId &&
+		left.apertureSourceId === right.apertureSourceId &&
+		left.linkId === right.linkId
 	);
 }
 

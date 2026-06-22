@@ -1393,6 +1393,7 @@ function createDirectEnvCellPortalFrameWorkPlan(options: {
 					targetEnvCellId: childNode.scene.envCellId,
 				};
 			}),
+			outdoorCrossings: [],
 			projectionDiagnostics: {
 				componentCount: renderEntries.length,
 				componentInternalEdgeCount: 0,
@@ -1410,6 +1411,9 @@ function createDirectEnvCellPortalFrameWorkPlan(options: {
 				missingResourceMembershipCount: renderEntries.filter(
 					(entry) => entry.resources.resourceState !== "ready",
 				).length,
+				outdoorCrossingCount: 0,
+				outdoorCrossingsSkippedByLayerCap: 0,
+				outdoorCrossingsSkippedByUnselectedTarget: 0,
 				projectedEnvCellCount: renderEntries.length,
 				renderEntriesSkippedByLayerCap: 0,
 				renderEntriesSkippedByMaxRenderEntries: 0,

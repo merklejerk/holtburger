@@ -346,6 +346,7 @@ export interface PortalProjectionFrameGraphPlan {
 	readonly renderEntries: readonly PortalProjectionFrameRenderEntryPlan[];
 	readonly renderLayers: readonly PortalProjectionFrameLayerPlan[];
 	readonly maskEdges: readonly PortalProjectionFrameMaskEdgePlan[];
+	readonly outdoorCrossings: readonly PortalProjectionFrameOutdoorCrossingPlan[];
 	readonly apertureResources: readonly PortalApertureGeometryResourcePlan[];
 	readonly diagnostics: PortalApertureFrameDiagnostics;
 	readonly projectionDiagnostics: PortalProjectionFrameDiagnostics;
@@ -395,6 +396,15 @@ export interface PortalProjectionFrameMaskEdgePlan {
 	readonly targetEnvCellId: number;
 }
 
+export interface PortalProjectionFrameOutdoorCrossingPlan {
+	readonly crossingId: number;
+	readonly targetEnvCellId: number;
+	readonly outdoorLandblockId: number;
+	readonly apertureRangeId: string;
+	readonly apertureSourceId: string;
+	readonly linkId: string;
+}
+
 interface PortalProjectionFrameDiagnostics {
 	readonly componentCount: number;
 	readonly cyclicComponentCount: number;
@@ -408,6 +418,9 @@ interface PortalProjectionFrameDiagnostics {
 	readonly maskEdgesSkippedByLayerCap: number;
 	readonly maskEdgesSkippedByMaxMaskEdges: number;
 	readonly missingResourceMembershipCount: number;
+	readonly outdoorCrossingCount: number;
+	readonly outdoorCrossingsSkippedByLayerCap: number;
+	readonly outdoorCrossingsSkippedByUnselectedTarget: number;
 }
 
 export interface PortalFrameNodeResources {

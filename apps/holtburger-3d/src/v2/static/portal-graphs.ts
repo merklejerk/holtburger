@@ -6,6 +6,7 @@ import type {
 	StaticPortalProjectionDiagnostics,
 	StaticPortalProjectionEdge,
 	StaticPortalProjectionIncomingEdges,
+	StaticPortalProjectionOutdoorSceneCrossing,
 	StaticPortalProjectionRecord,
 	StaticPortalProjectionRenderLayer,
 	StaticPortalProjectionRoot,
@@ -164,7 +165,7 @@ export function createStaticPortalProjection(options: {
 	if (projected === null) {
 		return null;
 	}
-	const { edges, nodes, retainRootLayer } = projected;
+	const { edges, nodes, outdoorSceneCrossings, retainRootLayer } = projected;
 
 	const sortedEdges = edges.sort(compareProjectionEdges);
 	const adjacency = createProjectionAdjacency(sortedEdges);
@@ -231,6 +232,9 @@ export function createStaticPortalProjection(options: {
 				kind: "portal-projection",
 				landblockId,
 				nodes,
+				outdoorSceneCrossings: outdoorSceneCrossings.sort(
+					compareOutdoorSceneCrossings,
+				),
 				renderLayerByEnvCellId,
 				renderLayers,
 				root: options.root,
@@ -486,6 +490,7 @@ function createProjectionNodesAndEdges(options: {
 		readonly envCellId: number;
 		readonly nodeId: string;
 	}[];
+	readonly outdoorSceneCrossings: StaticPortalProjectionOutdoorSceneCrossing[];
 	readonly retainRootLayer: boolean;
 } | null {
 	const root = options.root;
@@ -514,6 +519,7 @@ function createOutdoorProjectionNodesAndEdges(options: {
 		readonly envCellId: number;
 		readonly nodeId: string;
 	}[];
+	readonly outdoorSceneCrossings: [];
 	readonly retainRootLayer: false;
 } {
 	const nodes = createProjectionNodes(options.outsideVisibleEnvCellIds);
@@ -573,7 +579,7 @@ function createOutdoorProjectionNodesAndEdges(options: {
 			portalGraphs: options.portalGraphs,
 		}),
 	);
-	return { edges, nodes, retainRootLayer: false };
+	return { edges, nodes, outdoorSceneCrossings: [], retainRootLayer: false };
 }
 
 function createEnvCellProjectionNodesAndEdges(options: {
@@ -584,6 +590,7 @@ function createEnvCellProjectionNodesAndEdges(options: {
 	>;
 	readonly knownEnvCellIds: ReadonlySet<number>;
 	readonly landblockId: number;
+	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly portalGraphs: readonly StaticPortalGraphRecord[];
 	readonly root: Extract<
 		StaticPortalProjectionRoot,
@@ -595,6 +602,7 @@ function createEnvCellProjectionNodesAndEdges(options: {
 		readonly envCellId: number;
 		readonly nodeId: string;
 	}[];
+	readonly outdoorSceneCrossings: StaticPortalProjectionOutdoorSceneCrossing[];
 	readonly retainRootLayer: true;
 } | null {
 	const startEnvCellId = options.root.envCellId >>> 0;
@@ -618,11 +626,71 @@ function createEnvCellProjectionNodesAndEdges(options: {
 			reachableEnvCellIds.has(edge.sourceEnvCellId) &&
 			reachableEnvCellIds.has(edge.targetEnvCellId),
 	);
+	const outdoorSceneCrossings = createEnvCellOutdoorSceneCrossings({
+		diagnostics: options.diagnostics,
+		landblockId: options.landblockId,
+		portalApertureResources: options.portalApertureResources,
+		reachableEnvCellIds,
+	});
 	return {
 		edges,
 		nodes: createProjectionNodes(reachableEnvCellIds),
+		outdoorSceneCrossings,
 		retainRootLayer: true,
 	};
+}
+
+function createEnvCellOutdoorSceneCrossings(options: {
+	readonly diagnostics: MutableProjectionDiagnostics;
+	readonly landblockId: number;
+	readonly portalApertureResources: readonly StaticPortalApertureResource[];
+	readonly reachableEnvCellIds: ReadonlySet<number>;
+}): StaticPortalProjectionOutdoorSceneCrossing[] {
+	const crossings: StaticPortalProjectionOutdoorSceneCrossing[] = [];
+	for (const resource of options.portalApertureResources) {
+		if (
+			resource.landblockId !== options.landblockId ||
+			resource.sourceDomain !== "outdoor-buildings"
+		) {
+			continue;
+		}
+		for (const range of getBuildingTransitionApertureRanges(resource)) {
+			options.diagnostics.outboundOutdoorCrossingCandidateCount += 1;
+			const targetEnvCellId = range.source.targetEnvCellId >>> 0;
+			if (!options.reachableEnvCellIds.has(targetEnvCellId)) {
+				options.diagnostics.outboundOutdoorCrossingSkippedUnreachableTarget += 1;
+				continue;
+			}
+			options.diagnostics.outboundOutdoorCrossingRetainedCount += 1;
+			crossings.push({
+				apertureRangeId: range.rangeId,
+				apertureSourceId: range.sourceId,
+				crossingId: createProjectionOutdoorSceneCrossingId({
+					apertureResourceId: resource.apertureResourceId,
+					portalId: range.source.portalId,
+					rangeFirstIndex: range.firstIndex,
+					rangeIndexCount: range.indexCount,
+					targetEnvCellId,
+				}),
+				linkId: createProjectionBuildingTransitionLinkId({
+					apertureResourceId: resource.apertureResourceId,
+					portalId: range.source.portalId,
+					targetEnvCellId,
+				}),
+				outdoorLandblockId: resource.landblockId,
+				provenance: {
+					apertureResourceId: resource.apertureResourceId,
+					buildingInstanceId: range.source.buildingInstanceId,
+					buildingPortalId: range.source.buildingPortalId,
+					kind: "building-transition",
+					portalId: range.source.portalId,
+					targetEnvCellId,
+				},
+				targetEnvCellId,
+			});
+		}
+	}
+	return crossings.sort(compareOutdoorSceneCrossings);
 }
 
 function createRetainedEnvCellProjectionEdges(options: {
@@ -762,6 +830,9 @@ function createProjectionDiagnostics(options: {
 		envCellPortalEdgesRejectedTargetNotOutsideVisible: 0,
 		envCellPortalEdgesRetained: 0,
 		maxRenderLayer: 0,
+		outboundOutdoorCrossingCandidateCount: 0,
+		outboundOutdoorCrossingRetainedCount: 0,
+		outboundOutdoorCrossingSkippedUnreachableTarget: 0,
 		outsideVisibleEnvCellCount: options.outsideVisibleEnvCellCount,
 		transitionRootCandidateCount: 0,
 	};
@@ -781,6 +852,23 @@ function createProjectionBuildingTransitionEdgeId(options: {
 		options.rangeFirstIndex,
 		options.rangeIndexCount,
 		options.targetEnvCellId >>> 0,
+	].join(":");
+}
+
+function createProjectionOutdoorSceneCrossingId(options: {
+	readonly apertureResourceId: string;
+	readonly portalId: string;
+	readonly rangeFirstIndex: number;
+	readonly rangeIndexCount: number;
+	readonly targetEnvCellId: number;
+}): string {
+	return [
+		"outdoor-scene-crossing",
+		options.apertureResourceId,
+		options.portalId,
+		options.rangeFirstIndex,
+		options.rangeIndexCount,
+		options.targetEnvCellId,
 	].join(":");
 }
 
@@ -1352,28 +1440,25 @@ export function createStaticPortalProjectionSourceKey(options: {
 			]),
 		)
 		.sort();
-	const transitionParts =
-		options.root.kind === "outdoor-root"
-			? options.portalApertureResources
-					.filter(
-						(resource) =>
-							resource.landblockId === options.landblockId &&
-							resource.sourceDomain === "outdoor-buildings",
-					)
-					.flatMap((resource) =>
-						getBuildingTransitionApertureRanges(resource).map((range) =>
-							[
-								"transition",
-								resource.apertureResourceId,
-								range.source.portalId,
-								range.firstIndex,
-								range.indexCount,
-								range.source.targetEnvCellId,
-							].join(":"),
-						),
-					)
-					.sort()
-			: [];
+	const transitionParts = options.portalApertureResources
+		.filter(
+			(resource) =>
+				resource.landblockId === options.landblockId &&
+				resource.sourceDomain === "outdoor-buildings",
+		)
+		.flatMap((resource) =>
+			getBuildingTransitionApertureRanges(resource).map((range) =>
+				[
+					"transition",
+					resource.apertureResourceId,
+					range.source.portalId,
+					range.firstIndex,
+					range.indexCount,
+					range.source.targetEnvCellId,
+				].join(":"),
+			),
+		)
+		.sort();
 	return [
 		rootParts,
 		`landblock:${options.landblockId >>> 0}`,
@@ -1397,6 +1482,13 @@ function compareProjectionEdges(
 	right: StaticPortalProjectionEdge,
 ): number {
 	return left.edgeId.localeCompare(right.edgeId);
+}
+
+function compareOutdoorSceneCrossings(
+	left: StaticPortalProjectionOutdoorSceneCrossing,
+	right: StaticPortalProjectionOutdoorSceneCrossing,
+): number {
+	return left.crossingId.localeCompare(right.crossingId);
 }
 
 function compareNumbers(left: number, right: number): number {

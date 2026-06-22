@@ -2,6 +2,7 @@ import type {
 	PortalProjectionFrameBaseEntryPlan,
 	PortalProjectionFrameGraphPlan,
 	PortalProjectionFrameMaskEdgePlan,
+	PortalProjectionFrameOutdoorCrossingPlan,
 	PortalProjectionFrameRenderEntryPlan,
 	PortalFrameNodeResources,
 	PortalFrameSceneSource,
@@ -205,6 +206,20 @@ export function createPortalProjectionFramePlan(
 		);
 	}
 
+	const selectedEnvCellIds = new Set<number>(
+		renderEntries.map((entry) => entry.envCellId),
+	);
+	if (input.projection.root.kind === "env-cell-root") {
+		selectedEnvCellIds.add(input.projection.root.envCellId);
+	}
+	const outdoorCrossingResult = createPortalProjectionOutdoorCrossings({
+		apertureBuilder,
+		maxDepth: input.maxDepth,
+		projection: input.projection,
+		renderLayerByEnvCellId,
+		selectedEnvCellIds,
+	});
+
 	const aperturePlan = apertureBuilder.build({
 		transitionRootCandidateCount:
 			input.projection.diagnostics.transitionRootCandidateCount,
@@ -218,6 +233,7 @@ export function createPortalProjectionFramePlan(
 		baseEntry,
 		diagnostics: aperturePlan.diagnostics,
 		maskEdges,
+		outdoorCrossings: outdoorCrossingResult.outdoorCrossings,
 		projectionDiagnostics: {
 			componentCount: input.projection.diagnostics.componentCount,
 			componentInternalEdgeCount:
@@ -231,6 +247,12 @@ export function createPortalProjectionFramePlan(
 				...renderLayers.map((layer) => layer.renderLayer),
 			),
 			missingResourceMembershipCount,
+			outdoorCrossingCount:
+				outdoorCrossingResult.outdoorCrossings.length,
+			outdoorCrossingsSkippedByLayerCap:
+				outdoorCrossingResult.outdoorCrossingsSkippedByLayerCap,
+			outdoorCrossingsSkippedByUnselectedTarget:
+				outdoorCrossingResult.outdoorCrossingsSkippedByUnselectedTarget,
 			projectedEnvCellCount: input.projection.nodes.length,
 			renderEntriesSkippedByLayerCap,
 			renderEntriesSkippedByMaxRenderEntries,
@@ -244,6 +266,70 @@ export function createPortalProjectionFramePlan(
 		kind: "direct-env-cell",
 		layeredGraph: graph,
 		mode: "portal-projection",
+	};
+}
+
+function createPortalProjectionOutdoorCrossings(options: {
+	readonly apertureBuilder: PortalApertureFrameResourceBuilder;
+	readonly maxDepth: number;
+	readonly projection: StaticPortalProjectionRecord;
+	readonly renderLayerByEnvCellId: ReadonlyMap<number, number>;
+	readonly selectedEnvCellIds: ReadonlySet<number>;
+}): {
+	readonly outdoorCrossings: PortalProjectionFrameOutdoorCrossingPlan[];
+	readonly outdoorCrossingsSkippedByLayerCap: number;
+	readonly outdoorCrossingsSkippedByUnselectedTarget: number;
+} {
+	if (options.projection.root.kind !== "env-cell-root") {
+		return {
+			outdoorCrossings: [],
+			outdoorCrossingsSkippedByLayerCap: 0,
+			outdoorCrossingsSkippedByUnselectedTarget: 0,
+		};
+	}
+	const outdoorCrossings: PortalProjectionFrameOutdoorCrossingPlan[] = [];
+	let outdoorCrossingsSkippedByLayerCap = 0;
+	let outdoorCrossingsSkippedByUnselectedTarget = 0;
+	for (const crossing of options.projection.outdoorSceneCrossings) {
+		const targetLayer =
+			crossing.targetEnvCellId === options.projection.root.envCellId
+				? 0
+				: options.renderLayerByEnvCellId.get(crossing.targetEnvCellId);
+		if (targetLayer === undefined) {
+			outdoorCrossingsSkippedByUnselectedTarget += 1;
+			continue;
+		}
+		if (targetLayer > options.maxDepth) {
+			outdoorCrossingsSkippedByLayerCap += 1;
+			continue;
+		}
+		if (!options.selectedEnvCellIds.has(crossing.targetEnvCellId)) {
+			outdoorCrossingsSkippedByUnselectedTarget += 1;
+			continue;
+		}
+		const apertureRangeId = options.apertureBuilder.addEdgeResource({
+			apertureRangeId: crossing.apertureRangeId,
+			apertureSourceId: crossing.apertureSourceId,
+			duplicateKeyParts: ["outdoor-crossing", crossing.crossingId],
+			linkId: crossing.linkId,
+			sourceKind: "building-transition",
+		});
+		if (!apertureRangeId) {
+			continue;
+		}
+		outdoorCrossings.push({
+			apertureRangeId,
+			apertureSourceId: crossing.apertureSourceId,
+			crossingId: outdoorCrossings.length,
+			linkId: crossing.linkId,
+			outdoorLandblockId: crossing.outdoorLandblockId,
+			targetEnvCellId: crossing.targetEnvCellId,
+		});
+	}
+	return {
+		outdoorCrossings,
+		outdoorCrossingsSkippedByLayerCap,
+		outdoorCrossingsSkippedByUnselectedTarget,
 	};
 }
 

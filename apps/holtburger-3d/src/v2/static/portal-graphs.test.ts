@@ -435,7 +435,7 @@ describe("V2 static portal graphs", () => {
 		expect(projection?.sourceRevisionKey).toContain(
 			"root:env-cell-root:3663069183:env-cell:3663003904:3663003904",
 		);
-		expect(projection?.sourceRevisionKey).not.toContain("ignored-transition");
+		expect(projection?.sourceRevisionKey).toContain("ignored-transition");
 		expect(projection?.nodes.map((node) => node.envCellId)).toEqual([
 			0xda550100, 0xda550101, 0xda550102,
 		]);
@@ -452,6 +452,64 @@ describe("V2 static portal graphs", () => {
 			"env-cell-portal:env-cell-portal:a-to-b:0",
 			"env-cell-portal:env-cell-portal:c-to-b:0",
 		]);
+	});
+
+	it("projects env-cell root outbound outdoor crossings from building transition apertures", () => {
+		const owner = createWorkOwner("work-env", "landblock-env-cells");
+		const record = createPortalInteriorRecord({
+			envCellIds: [0xda550100, 0xda550101],
+			links: [
+				createEnvCellLink({
+					linkId: "a-to-b",
+					sourceEnvCellId: 0xda550100,
+					sourcePortalId: "portal-ab",
+					targetEnvCellId: 0xda550101,
+					targetPortalId: "portal-ba",
+				}),
+			],
+			owner,
+		});
+
+		const projection = createStaticPortalProjection({
+			landblockId: 0xda55ffff,
+			root: createEnvCellPortalProjectionRoot({
+				envCellId: 0xda550100,
+				landblockId: 0xda55ffff,
+			}),
+			portalApertureResources: [
+				createBuildingTransitionPortalApertureResource({
+					ranges: [
+						createBuildingTransitionApertureRange({
+							portalId: "window-b",
+							targetCellLowId: 0x0101,
+						}),
+						createBuildingTransitionApertureRange({
+							firstIndex: 3,
+							portalId: "unreachable-window",
+							targetCellLowId: 0x0102,
+						}),
+					],
+				}),
+			],
+			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
+			portalInteriorRecords: [record],
+		});
+
+		expect(projection?.outdoorSceneCrossings).toEqual([
+			expect.objectContaining({
+				crossingId:
+					"outdoor-scene-crossing:portal-aperture-resource:building-transition:0xda55ffff:window-b:0:3:3663003905",
+				linkId:
+					"transition:portal-aperture-resource:building-transition:0xda55ffff:window-b:3663003905",
+				outdoorLandblockId: 0xda55ffff,
+				targetEnvCellId: 0xda550101,
+			}),
+		]);
+		expect(projection?.diagnostics).toMatchObject({
+			outboundOutdoorCrossingCandidateCount: 2,
+			outboundOutdoorCrossingRetainedCount: 1,
+			outboundOutdoorCrossingSkippedUnreachableTarget: 1,
+		});
 	});
 
 	it("keeps env-cell root cycles finite without assigning layer zero to non-root cells", () => {

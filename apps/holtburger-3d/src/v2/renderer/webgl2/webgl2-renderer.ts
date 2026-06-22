@@ -8,6 +8,7 @@ import type {
 	RenderPassPlan,
 	PortalProjectionFrameGraphPlan,
 	PortalProjectionFrameMaskEdgePlan,
+	PortalProjectionFrameOutdoorCrossingPlan,
 	PortalFrameNodeResources,
 	PortalFrameWorkPlan,
 	SceneDomainTargetKind,
@@ -107,6 +108,7 @@ const STATIC_OBJECT_DETAIL_TEXTURE_UNIT_BASE =
 	MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW;
 const SOURCE_SCENE_COPY_COLOR_TEXTURE_UNIT = 0;
 const SOURCE_SCENE_COPY_DEPTH_TEXTURE_UNIT = 1;
+const OUTDOOR_CROSSING_STENCIL_VALUE = 0xfe;
 const DEBUG_OVERLAY_FLOATS_PER_VERTEX = 7;
 // Visual-quality/perf tradeoff: sort only transparent statics close enough for
 // object-order artifacts to be obvious.
@@ -1216,6 +1218,46 @@ class Webgl2Renderer implements Renderer {
 			this.#blitSceneDomainColorToDisplay(targets.compositePing);
 			return;
 		}
+		if (plan.layeredGraph.outdoorCrossings.length > 0) {
+			const targets = this.#ensureSceneDomainTargets(
+				gl.drawingBufferWidth,
+				gl.drawingBufferHeight,
+			);
+			this.#lastExteriorSceneDomainDrawCalls = this.#renderSceneDomainTarget(
+				targets.exterior,
+				"exterior",
+				pulse,
+				targets.width / Math.max(1, targets.height),
+			);
+			this.#stateCache.bindFramebuffer(targets.compositePing.framebuffer);
+			this.#stateCache.setViewport({
+				height: targets.compositePing.height,
+				width: targets.compositePing.width,
+				x: 0,
+				y: 0,
+			});
+			this.#stateCache.setDepthState(createDepthState(gl, true, true));
+			gl.clearColor(0.025 + pulse * 0.015, 0.045, 0.065 + pulse * 0.025, 1);
+			gl.clearDepth(1);
+			gl.clearStencil(0);
+			this.#stateCache.setStencilState(
+				createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+			);
+			gl.clear(
+				gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT,
+			);
+			const targetAspectRatio =
+				targets.compositePing.width / Math.max(1, targets.compositePing.height);
+			this.#lastDirectEnvCellDrawCalls =
+				this.#drawPortalProjectionFrameResources(plan, targetAspectRatio);
+			this.#drawPortalProjectionOutdoorCrossings(
+				plan.layeredGraph,
+				targets.exterior,
+				targetAspectRatio,
+			);
+			this.#blitSceneDomainColorToDisplay(targets.compositePing);
+			return;
+		}
 
 		gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 		this.#stateCache.setViewport({
@@ -1655,6 +1697,59 @@ class Webgl2Renderer implements Renderer {
 		}
 	}
 
+	#drawPortalProjectionOutdoorCrossings(
+		graph: PortalProjectionFrameGraphPlan,
+		exterior: SceneDomainTarget,
+		aspectRatio: number,
+	): void {
+		if (graph.outdoorCrossings.length === 0) {
+			return;
+		}
+		const gl = this.#gl;
+		for (const crossing of graph.outdoorCrossings) {
+			const apertureRange = this.#portalApertureRangesById.get(
+				crossing.apertureRangeId,
+			);
+			if (!apertureRange) {
+				this.#warnMissingPortalProjectionOutdoorCrossingApertureRange(crossing);
+				continue;
+			}
+			this.#stateCache.setStencilState(
+				createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+			);
+			gl.clearStencil(0);
+			gl.clear(gl.STENCIL_BUFFER_BIT);
+			this.#drawPortalApertureStencilMask(apertureRange, {
+				aspectRatio,
+				stencilValue: OUTDOOR_CROSSING_STENCIL_VALUE,
+			});
+			this.#stateCache.setDepthState({
+				enabled: true,
+				func: gl.ALWAYS,
+				write: true,
+			});
+			this.#stateCache.setBlendState(
+				createBlendState(gl, false, gl.ONE, gl.ZERO),
+			);
+			this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
+			this.#stateCache.setStencilState(
+				createStencilState(
+					gl,
+					true,
+					0x00,
+					gl.EQUAL,
+					OUTDOOR_CROSSING_STENCIL_VALUE,
+					gl.KEEP,
+				),
+			);
+			this.#drawSourceSceneCopy(exterior);
+		}
+		this.#stateCache.setStencilState(
+			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+		);
+		this.#stateCache.bindVertexArray(null);
+	}
+
 	#drawPortalFrameResourceSet(
 		resources: PortalFrameNodeResources,
 		aspectRatio: number,
@@ -1690,6 +1785,19 @@ class Webgl2Renderer implements Renderer {
 		apertureRange: PortalApertureRangeResource,
 		options: { readonly aspectRatio: number },
 	): void {
+		this.#drawPortalApertureStencilMask(apertureRange, {
+			aspectRatio: options.aspectRatio,
+			stencilValue: edge.renderLayer,
+		});
+	}
+
+	#drawPortalApertureStencilMask(
+		apertureRange: PortalApertureRangeResource,
+		options: {
+			readonly aspectRatio: number;
+			readonly stencilValue: number;
+		},
+	): void {
 		if (apertureRange.range.indexCount === 0) {
 			return;
 		}
@@ -1712,7 +1820,7 @@ class Webgl2Renderer implements Renderer {
 					true,
 					0xff,
 					gl.ALWAYS,
-					edge.renderLayer,
+					options.stencilValue,
 					gl.REPLACE,
 				),
 			);
@@ -2232,6 +2340,26 @@ class Webgl2Renderer implements Renderer {
 				sourceEnvCellId: edge.sourceEnvCellId,
 				sourceKind: edge.sourceKind,
 				targetEnvCellId: edge.targetEnvCellId,
+			},
+		);
+	}
+
+	#warnMissingPortalProjectionOutdoorCrossingApertureRange(
+		crossing: PortalProjectionFrameOutdoorCrossingPlan,
+	): void {
+		if (
+			this.#warnedMissingPortalApertureRangeIds.has(crossing.apertureRangeId)
+		) {
+			return;
+		}
+		this.#warnedMissingPortalApertureRangeIds.add(crossing.apertureRangeId);
+		console.error(
+			`Portal projection outdoor crossing ${crossing.linkId} references missing portal aperture range ${crossing.apertureRangeId}; dropping outdoor scene copy.`,
+			{
+				apertureSourceId: crossing.apertureSourceId,
+				crossingId: crossing.crossingId,
+				outdoorLandblockId: crossing.outdoorLandblockId,
+				targetEnvCellId: crossing.targetEnvCellId,
 			},
 		);
 	}

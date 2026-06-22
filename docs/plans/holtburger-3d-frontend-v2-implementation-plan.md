@@ -3361,7 +3361,7 @@ Implementation update on 2026-06-22:
 
 ### Immediate Phase 13B5: Portal-Aware Retained Outdoor Source Compositing
 
-Status: planned; next incomplete phase before Phase 13C.
+Status: implemented on 2026-06-22; manual multi-landblock visual signoff still pending.
 
 Purpose: generalize portal compositing so both outdoor-to-indoor and indoor-to-outdoor views can use
 all currently retained outdoor landblock layers, without making portal/env-cell residency demand new
@@ -3394,15 +3394,15 @@ Scope:
 
 Implementation tasks:
 
-- Add static-scene query helpers that expose retained/committed outdoor source landblocks by domain
+- [x] Add static-scene query helpers that expose retained/committed outdoor source landblocks by domain
   and return outdoor-root portal projections for a provided retained landblock set.
-- Extend `ClientRuntime.#derivePortalFrameWorkPlan(...)` so outdoor-to-indoor projection can consider
+- [x] Extend `ClientRuntime.#derivePortalFrameWorkPlan(...)` so outdoor-to-indoor projection can consider
   outdoor-root projections for retained neighboring landblocks, not only the current camera
   landblock.
-- Keep env-cell-root outbound crossings renderer-facing only: they copy from the shared exterior
+- [x] Keep env-cell-root outbound crossings renderer-facing only: they copy from the shared exterior
   target and may report whether their `outdoorLandblockId` is currently represented by retained
   outdoor layers, but they must not create demand.
-- Keep renderer execution simple:
+- [x] Keep renderer execution simple:
   - render the exterior scene-domain target from installed outdoor resources;
   - copy that source through outdoor-root or env-cell-root aperture masks;
   - add source filters or multiple exterior targets only after tests show installed-resource rendering
@@ -3424,19 +3424,19 @@ Grounded code touchpoints:
 
 Acceptance criteria:
 
-- Interior-cell demand remains same-landblock only and cannot recursively expand outdoor residency.
-- Outdoor-origin portal compositing can include building transition apertures from retained
+- [x] Interior-cell demand remains same-landblock only and cannot recursively expand outdoor residency.
+- [x] Outdoor-origin portal compositing can include building transition apertures from retained
   neighboring landblocks instead of only the camera landblock.
-- Indoor-origin outdoor crossings copy from the shared exterior target and do not allocate private
+- [x] Indoor-origin outdoor crossings copy from the shared exterior target and do not allocate private
   exterior targets or request more landblocks.
-- Existing same-landblock 13B4 tests still pass.
-- Focused tests cover:
+- [x] Existing same-landblock 13B4 tests still pass.
+- [x] Focused tests cover:
   - interior-cell demand does not include neighboring outdoor terrain/buildings/detail/env-cell work;
   - retained-neighbor projection query returns projections for committed neighboring env-cell system
     layers;
   - outdoor-to-indoor projection across a retained neighboring outdoor landblock;
   - indoor-to-outdoor crossing uses the shared exterior target from installed resources.
-- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` pass.
+- [x] `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` pass.
 
 Dry-run steering:
 
@@ -3448,6 +3448,40 @@ Dry-run steering:
 - Keep Phase 13B4 code as the same-landblock proof of the aperture copy path. 13B5 should widen
   projection/query coverage over available retained layers without reviving old compositor
   architecture.
+
+Implementation update on 2026-06-22:
+
+- Added `StaticSceneQuery.queryRetainedOutdoorSourceLandblocks(...)` and
+  `queryRetainedOutdoorPortalProjections(...)`. These APIs report/query already retained layer state;
+  they do not schedule resolver work and do not add a portal-specific demand path.
+- `ClientRuntime.#derivePortalFrameWorkPlan(...)` now builds outdoor-origin portal projection plans
+  from the retained outdoor source set instead of only the current camera landblock.
+- Added `combineOutdoorPortalProjectionFramePlans(...)` so multiple retained outdoor-root projection
+  plans can feed the existing `direct-env-cell`/`portal-projection` renderer path as one layered graph.
+  This avoids reviving the old transition compositor or adding a second per-direction renderer model.
+- Kept env-cell-root indoor-to-outdoor crossings on the existing shared exterior target path. No
+  private exterior targets, source filters, or demand expansion were added.
+- Added guard coverage:
+  - `demand-planner.test.ts` proves interior-cell demand remains same-landblock even when lod radii
+    are non-zero;
+  - `static-scene-query.test.ts` proves retained projection query works across a provided multi-LB set;
+  - `client-runtime.test.ts` proves outdoor-origin frame planning can use a retained neighboring
+    outdoor landblock projection.
+- Spicy bit: the runtime now merges outdoor-root projection frame graphs, remapping render-entry and
+  mask-edge ids while preserving source-tagged aperture resources. That is structurally cleaner than a
+  second compositor, but it means multi-LB outdoor-origin compositing still depends on the renderer's
+  existing shared exterior target containing all installed outdoor layers.
+
+Failed to close / debt:
+
+- No manual visual verification target was selected or captured for a real multi-landblock
+  window/doorway. Automated contract coverage is green; visual parity is still open.
+- The renderer still uses one shared exterior target with no per-source filtering. If installed
+  resource rendering proves too broad or too narrow in a real scene, add measured source filters after
+  visual evidence rather than prebuilding them now.
+- The fake baker batches multi-work results with one shared override, so the runtime test uses an
+  explicitly retained neighboring source rather than a current-plus-neighbor batch with distinct
+  per-LB bake outputs. That is a test harness limitation, not a production demand-model compromise.
 
 ### Phase 13C: Interior Plan Reassessment Before Dynamic Seeds
 

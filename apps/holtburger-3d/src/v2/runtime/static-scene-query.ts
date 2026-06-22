@@ -227,6 +227,16 @@ export interface StaticSceneQuerySnapshot {
 	readonly committedEnvCellVisibilityRecordCount: number;
 }
 
+export interface RetainedOutdoorSourceLandblock {
+	readonly landblockId: number;
+	readonly domains: {
+		readonly terrain: boolean;
+		readonly buildings: boolean;
+		readonly detail: boolean;
+		readonly envCells: boolean;
+	};
+}
+
 export interface StaticSceneQuerySourcePayloadOptions {
 	readonly outdoorAnchorLandblockId?: number | null;
 }
@@ -1050,6 +1060,57 @@ export class StaticSceneQuery {
 		);
 	}
 
+	queryRetainedOutdoorSourceLandblocks(): readonly RetainedOutdoorSourceLandblock[] {
+		const landblockIds = new Set<number>();
+		for (const landblockId of this.#terrainBvhRootsByLandblockId.keys()) {
+			landblockIds.add(landblockId);
+		}
+		for (const root of this.#outdoorBvhRootsByDomainAndLandblock.values()) {
+			landblockIds.add(root.landblockId);
+		}
+		for (const key of this.#outdoorSourceDiagnosticsByDomainAndLandblock.keys()) {
+			const landblockId = parseOutdoorRootKeyLandblockId(key);
+			if (landblockId !== null) {
+				landblockIds.add(landblockId);
+			}
+		}
+		for (const landblockId of this.#envCellSystemLayersByLandblockId.keys()) {
+			landblockIds.add(landblockId);
+		}
+
+		return [...landblockIds]
+			.sort((left, right) => left - right)
+			.map((landblockId) => ({
+				domains: {
+					buildings: this.#hasRetainedOutdoorStaticDomain(
+						"outdoor-buildings",
+						landblockId,
+					),
+					detail: this.#hasRetainedOutdoorStaticDomain(
+						"outdoor-detail",
+						landblockId,
+					),
+					envCells: this.#envCellSystemLayersByLandblockId.has(landblockId),
+					terrain: this.#terrainBvhRootsByLandblockId.has(landblockId),
+				},
+				landblockId,
+			}));
+	}
+
+	queryRetainedOutdoorPortalProjections(
+		landblockIds: readonly number[],
+	): readonly StaticPortalProjectionRecord[] {
+		const uniqueLandblockIds = [...new Set(landblockIds.map((id) => id >>> 0))];
+		return uniqueLandblockIds
+			.map((landblockId) => this.queryOutdoorPortalProjection({ landblockId }))
+			.filter(
+				(
+					projection,
+				): projection is StaticPortalProjectionRecord => projection !== null,
+			)
+			.sort((left, right) => left.landblockId - right.landblockId);
+	}
+
 	queryEnvCellPortalProjection(options: {
 		readonly landblockId: number;
 		readonly startEnvCellId: number;
@@ -1094,6 +1155,17 @@ export class StaticSceneQuery {
 			sourceKey,
 		});
 		return projection;
+	}
+
+	#hasRetainedOutdoorStaticDomain(
+		domain: OutdoorStaticObjectsScopePayload["domain"],
+		landblockId: number,
+	): boolean {
+		const key = createOutdoorRootKey(domain, landblockId);
+		return (
+			this.#outdoorBvhRootsByDomainAndLandblock.has(key) ||
+			this.#outdoorSourceDiagnosticsByDomainAndLandblock.has(key)
+		);
 	}
 
 	queryTerrainQuadDetails(options: {
@@ -3264,6 +3336,15 @@ function createOutdoorRootKey(
 	landblockId: number,
 ): string {
 	return `${domain}:${landblockId.toString(16)}`;
+}
+
+function parseOutdoorRootKeyLandblockId(key: string): number | null {
+	const [, landblockHex] = key.split(":");
+	if (!landblockHex) {
+		return null;
+	}
+	const landblockId = Number.parseInt(landblockHex, 16);
+	return Number.isFinite(landblockId) ? landblockId >>> 0 : null;
 }
 
 function createOutdoorSourceDiagnosticsRoot(

@@ -33,6 +33,7 @@ import type {
 	StaticPortalApertureResource,
 	StaticPortalInteriorRecord,
 	StructuredInteriorGeometryStaticDrawUnit,
+	StaticDomain,
 	StaticWorkPeerRecordOwner,
 	TerrainStaticScopePayload,
 	TerrainGeometryStaticDrawUnit,
@@ -737,6 +738,95 @@ describe("V2 client runtime", () => {
 			renderer.portalFrameWorkPlans.at(-1)?.kind === "direct-env-cell" &&
 				renderer.portalFrameWorkPlans.at(-1)?.mode === "portal-projection"
 				? renderer.portalFrameWorkPlans.at(-1)?.layeredGraph.maskEdges.length
+				: 0,
+		).toBe(1);
+
+		runtime.dispose();
+	});
+
+	it("publishes outdoor projection frame plans across retained neighboring outdoor landblocks", async () => {
+		const renderer = new FakeRenderer();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker,
+				resolver,
+			}),
+		});
+
+		runtime.setCurrentCameraResidency({
+			kind: "outdoor-landblock",
+			landblockId: 0xda55ffff,
+		});
+		updateOutdoorSceneInterest(runtime, {
+			anchorLandblockId: 0xdb55ffff,
+			domains: ["buildings", "env-cells", "terrain"],
+			lod: { buildings: 0, envCells: 0, terrain: 0 },
+		});
+
+		completeResolverRequest(resolver, "outdoor-terrain", 0xdb55ffff);
+		completeResolverRequest(resolver, "outdoor-buildings", 0xdb55ffff, {
+			scope: {
+				...createOutdoorStaticObjectsPayload({
+					domain: "outdoor-buildings",
+					landblockId: 0xdb55ffff,
+				}),
+				buildingTransitionApertures: [
+					createBuildingTransitionAperture(0xdb55ffff, 0xdb550100),
+				],
+			},
+		});
+		completeResolverRequest(resolver, "landblock-env-cells", 0xdb55ffff);
+		await flushPromises();
+
+		completeBakerWork(baker, "outdoor-terrain", 0xdb55ffff);
+		completeBakerWork(baker, "outdoor-buildings", 0xdb55ffff, {
+			portalApertureResources: [
+				createBuildingTransitionPortalApertureResource({
+					landblockId: 0xdb55ffff,
+					targetEnvCellId: 0xdb550100,
+				}),
+			],
+		});
+		completeBakerWork(baker, "landblock-env-cells", 0xdb55ffff, {
+			drawUnits: [
+				createStructuredInteriorDrawUnit({
+					drawUnitId: "structured:db550100",
+					envCellId: 0xdb550100,
+					landblockId: 0xdb55ffff,
+				}),
+			],
+			staticPortalInteriorRecords: [
+				createPortalInteriorRecord({
+					envCellIds: [0xdb550100],
+					landblockId: 0xdb55ffff,
+					portalLinks: [],
+				}),
+			],
+		});
+		await flushRuntimeWork();
+
+		expect(renderer.portalFrameWorkPlans.at(-1)).toMatchObject({
+			kind: "direct-env-cell",
+			mode: "portal-projection",
+			layeredGraph: {
+				renderEntries: [
+					expect.objectContaining({
+						envCellId: 0xdb550100,
+						landblockId: 0xdb55ffff,
+						renderLayer: 1,
+					}),
+				],
+			},
+		});
+		expect(
+			renderer.portalFrameWorkPlans.at(-1)?.kind === "direct-env-cell" &&
+				renderer.portalFrameWorkPlans.at(-1).mode === "portal-projection"
+				? renderer.portalFrameWorkPlans.at(-1).layeredGraph.maskEdges.length
 				: 0,
 		).toBe(1);
 
@@ -1624,6 +1714,44 @@ function updateInteriorSceneInterest(
 	});
 }
 
+function completeResolverRequest(
+	resolver: DeferredStaticResolver,
+	domain: StaticDomain,
+	landblockId: number,
+	payload: Parameters<DeferredStaticResolver["complete"]>[1] = {},
+): void {
+	const request = resolver.pendingRequests.find(
+		(candidate) =>
+			candidate.job.domain === domain &&
+			candidate.job.scope.kind === "landblock" &&
+			candidate.job.scope.landblockId === landblockId,
+	);
+	resolver.complete(request?.requestId ?? failKey(), payload);
+}
+
+function completeBakerWork(
+	baker: DeferredStaticBaker,
+	domain: StaticDomain,
+	landblockId: number,
+	result: Parameters<DeferredStaticBaker["complete"]>[1] = {},
+): void {
+	const input = baker.pendingInputs.find((candidate) =>
+		candidate.items.some(
+			(item) =>
+				item.work.job.domain === domain &&
+				item.work.job.scope.kind === "landblock" &&
+				item.work.job.scope.landblockId === landblockId,
+		),
+	);
+	const work = input?.items.find(
+		(item) =>
+			item.work.job.domain === domain &&
+			item.work.job.scope.kind === "landblock" &&
+			item.work.job.scope.landblockId === landblockId,
+	);
+	baker.complete(work?.work.workId ?? failKey(), result);
+}
+
 function createPortalInteriorRecord(options: {
 	readonly envCellIds: readonly number[];
 	readonly landblockId?: number;
@@ -1665,18 +1793,47 @@ function createPortalInteriorRecord(options: {
 	};
 }
 
+function createBuildingTransitionAperture(
+	landblockId: number,
+	targetEnvCellId: number,
+): OutdoorStaticObjectsScopePayload["buildingTransitionApertures"][number] {
+	return {
+		apertureId: `transition-aperture:${landblockId.toString(16)}:0`,
+		buildingInstanceId: "building-0",
+		buildingPortalId: "building-portal-0",
+		buildingPortalSourceIndex: 0,
+		flags: 0,
+		linkedEnvCellIds: [targetEnvCellId],
+		otherCellId: targetEnvCellId & 0xffff,
+		otherPortalId: 0xffff,
+		points: [
+			{ x: 0, y: 0, z: 0 },
+			{ x: 1, y: 0, z: 0 },
+			{ x: 0, y: 1, z: 0 },
+		],
+		polyId: 7,
+		portalIndex: 0,
+		sourceAssetId: "gfx-obj/01001234",
+		sourceDid: 0x01001234,
+	};
+}
+
 function createBuildingTransitionPortalApertureResource(options: {
+	readonly landblockId?: number;
 	readonly targetEnvCellId: number;
 }): StaticPortalApertureResource {
+	const landblockId = options.landblockId ?? 0xda55ffff;
 	const apertureResourceId =
-		"portal-aperture-resource:building-transition:0xda55ffff";
+		`portal-aperture-resource:building-transition:0x${landblockId
+			.toString(16)
+			.padStart(8, "0")}`;
 	const portalId = "transition-portal:0";
 	return {
 		apertureResourceId,
 		coordinateSpace: "landblock-render-local",
 		indices: [0, 1, 2],
 		kind: "portal-aperture-resource",
-		landblockId: 0xda55ffff,
+		landblockId,
 		ranges: [
 			{
 				firstIndex: 0,
@@ -1694,7 +1851,7 @@ function createBuildingTransitionPortalApertureResource(options: {
 					buildingPortalId: "building-portal-0",
 					buildingPortalSourceIndex: 0,
 					kind: "building-transition",
-					landblockId: 0xda55ffff,
+					landblockId,
 					linkedEnvCellIds: [options.targetEnvCellId],
 					otherCellId: options.targetEnvCellId & 0xffff,
 					otherPortalId: 0xffff,
@@ -1992,14 +2149,20 @@ interface DeferredAssetRequest {
 	readonly reject: (error: Error) => void;
 }
 
-function createOutdoorStaticObjectsPayload(): OutdoorStaticObjectsScopePayload {
+function createOutdoorStaticObjectsPayload(
+	options: {
+		readonly domain?: OutdoorStaticObjectsScopePayload["domain"];
+		readonly landblockId?: number;
+	} = {},
+): OutdoorStaticObjectsScopePayload {
+	const landblockId = options.landblockId ?? 0xda55ffff;
 	const object = {
 		debug: { sourceAssetId: "setup-model/02000010" },
 		generated: null,
 		identity: {
 			instanceId: "outdoor-static-0",
 			kind: "static-object-instance" as const,
-			landblockId: 0xda55ffff,
+			landblockId,
 			objectKind: "explicit-object" as const,
 		},
 		instanceBounds: {
@@ -2051,11 +2214,11 @@ function createOutdoorStaticObjectsPayload(): OutdoorStaticObjectsScopePayload {
 	};
 
 	return {
-		domain: "outdoor-detail",
+		domain: options.domain ?? "outdoor-detail",
 		kind: "outdoor-static-objects",
 		landblock: {
 			kind: "landblock-source",
-			landblockId: 0xda55ffff,
+			landblockId,
 			source: "outdoor",
 		},
 		materialSlots: [
@@ -2284,6 +2447,7 @@ function createStaticObjectDrawUnit(
 function createStructuredInteriorDrawUnit(options: {
 	readonly drawUnitId: string;
 	readonly envCellId: number;
+	readonly landblockId?: number;
 }): StructuredInteriorGeometryStaticDrawUnit {
 	const renderState = {
 		blend: {
@@ -2316,7 +2480,7 @@ function createStructuredInteriorDrawUnit(options: {
 		indexType: "uint16",
 		indices: new Uint16Array([0, 1, 2]),
 		kind: "structured-interior-geometry",
-		landblockId: 0xda55ffff,
+		landblockId: options.landblockId ?? 0xda55ffff,
 		localPlacement: createPlacement(),
 		materialBucketKey: "flat-color:test",
 		materialEntries: [

@@ -21,7 +21,7 @@ export interface StaticObjectPreparedDrawPayload {
 	readonly rolePages: StaticObjectPreparedRolePageBindingsByRole;
 }
 
-export interface StaticObjectPreparedRolePageBindingsByRole {
+interface StaticObjectPreparedRolePageBindingsByRole {
 	readonly baseColor: StaticObjectPreparedRolePageBindings;
 	readonly detail: StaticObjectPreparedRolePageBindings;
 	readonly index: StaticObjectPreparedRolePageBindings;

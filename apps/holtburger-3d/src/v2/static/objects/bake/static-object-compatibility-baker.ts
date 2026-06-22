@@ -936,7 +936,7 @@ function createStaticObjectSourcePartMatrix(
 	);
 }
 
-export function createEnvCellStaticObjectCompatibilityPayload(
+function createEnvCellStaticObjectCompatibilityPayload(
 	payload: LandblockEnvCellsStaticScopePayload,
 ): StaticObjectCompatibilityPayload {
 	const sourceByKey = new Set(

@@ -145,14 +145,14 @@ export type RuntimeEvent =
 	| RuntimeSceneInterestUpdatedEvent
 	| RuntimeSceneInterestSettledEvent;
 
-export interface RuntimeSceneInterestUpdatedEvent {
+interface RuntimeSceneInterestUpdatedEvent {
 	readonly interest: RuntimeSceneInterest;
 	readonly kind: "scene-interest-updated";
 	readonly revision: number;
 	readonly source: RuntimeSceneInterestSource;
 }
 
-export interface RuntimeSceneInterestSettledEvent {
+interface RuntimeSceneInterestSettledEvent {
 	readonly interest: RuntimeSceneInterest;
 	readonly kind: "scene-interest-settled";
 	readonly result: "ready" | "failed" | "cleared";
@@ -216,7 +216,7 @@ interface RuntimeDebugOverlaySnapshot {
 	readonly portalsVisible: boolean;
 }
 
-export interface StaticSelectionDiagnosticsReport {
+interface StaticSelectionDiagnosticsReport {
 	readonly kind: "static-selection-diagnostics-report";
 	readonly selection: {
 		readonly key: StaticSceneSelectionKey;
@@ -233,7 +233,7 @@ export interface StaticSelectionDiagnosticsReport {
 	};
 }
 
-export type StaticSelectionDiagnosticsDetails =
+type StaticSelectionDiagnosticsDetails =
 	| {
 			readonly kind: "outdoor-static-object";
 			readonly detail: OutdoorStaticObjectSelectionDetails;
@@ -251,7 +251,7 @@ export type StaticSelectionDiagnosticsDetails =
 			readonly detail: TerrainQuadScenePickDetails;
 	  };
 
-export interface EnvCellPortalSelectionDetails {
+interface EnvCellPortalSelectionDetails {
 	readonly envCellId: number;
 	readonly landblockId: number;
 	readonly portal:
@@ -260,7 +260,7 @@ export interface EnvCellPortalSelectionDetails {
 	readonly portalAperture: StaticPortalInteriorRecord["envCells"][number]["portalApertures"][number];
 }
 
-export interface OutdoorStaticObjectSelectionDetails {
+interface OutdoorStaticObjectSelectionDetails {
 	readonly bvhItemIndex: number;
 	readonly bvhItemKind: "static" | "building";
 	readonly domain: OutdoorStaticObjectScenePickDetails["domain"];
@@ -269,7 +269,7 @@ export interface OutdoorStaticObjectSelectionDetails {
 	readonly object: StaticSelectionObjectSummary;
 }
 
-export interface StaticSelectionObjectSummary {
+interface StaticSelectionObjectSummary {
 	readonly instanceId: string;
 	readonly objectKind: "explicit-object" | "building" | "generated-scenery";
 	readonly portalCount: number;
@@ -278,16 +278,16 @@ export interface StaticSelectionObjectSummary {
 	readonly sourceIndex: number;
 }
 
-export interface StaticObjectSourceSummary {
+interface StaticObjectSourceSummary {
 	readonly sourceAssetKind: StaticObjectSourceIdentity["sourceAssetKind"];
 	readonly sourceDid: number;
 }
 
-export type StaticSelectionRenderingDiagnostics =
+type StaticSelectionRenderingDiagnostics =
 	| OutdoorStaticSelectionRenderingDiagnostics
 	| UnsupportedStaticSelectionRenderingDiagnostics;
 
-export interface OutdoorStaticSelectionRenderingDiagnostics {
+interface OutdoorStaticSelectionRenderingDiagnostics {
 	readonly kind: "outdoor-static-object-rendering";
 	readonly drawUnits: readonly StaticSelectionDrawUnitDiagnostics[];
 	readonly partCoverage: readonly StaticSelectionPartCoverageDiagnostics[];
@@ -295,12 +295,12 @@ export interface OutdoorStaticSelectionRenderingDiagnostics {
 	readonly unmatchedReason: string | null;
 }
 
-export interface UnsupportedStaticSelectionRenderingDiagnostics {
+interface UnsupportedStaticSelectionRenderingDiagnostics {
 	readonly kind: "unsupported-static-selection-rendering";
 	readonly reason: string;
 }
 
-export interface StaticSelectionDrawUnitDiagnostics {
+interface StaticSelectionDrawUnitDiagnostics {
 	readonly drawUnitId: string;
 	readonly sourceDrawUnitId: string | null;
 	readonly domain: StaticObjectGeometryStaticDrawUnit["domain"];
@@ -315,7 +315,7 @@ export interface StaticSelectionDrawUnitDiagnostics {
 	readonly vertexCount: number;
 }
 
-export interface StaticSelectionDrawUnitMaterialEntryDiagnostics {
+interface StaticSelectionDrawUnitMaterialEntryDiagnostics {
 	readonly alphaTest: number;
 	readonly blendMode: string;
 	readonly indexTextureDid: string | null;
@@ -326,7 +326,7 @@ export interface StaticSelectionDrawUnitMaterialEntryDiagnostics {
 	readonly wrapMode: "clamp" | "repeat";
 }
 
-export interface StaticSelectionSourceMappingSummaryDiagnostics {
+interface StaticSelectionSourceMappingSummaryDiagnostics {
 	readonly geometrySurfaceIds: readonly number[];
 	readonly materialVariantSignatures: readonly (string | null)[];
 	readonly partIndices: readonly number[];
@@ -335,12 +335,12 @@ export interface StaticSelectionSourceMappingSummaryDiagnostics {
 	readonly sourceTriangleCount: number;
 }
 
-export interface StaticSelectionNumericRange {
+interface StaticSelectionNumericRange {
 	readonly max: number;
 	readonly min: number;
 }
 
-export interface StaticSelectionPartCoverageDiagnostics {
+interface StaticSelectionPartCoverageDiagnostics {
 	readonly drawUnitIds: readonly string[];
 	readonly materialIds: readonly number[];
 	readonly partIndex: number;
@@ -349,7 +349,7 @@ export interface StaticSelectionPartCoverageDiagnostics {
 	readonly sourceTriangleCount: number;
 }
 
-export interface OutdoorStaticObjectSourceDiagnosticsSummary {
+interface OutdoorStaticObjectSourceDiagnosticsSummary {
 	readonly domain: OutdoorStaticObjectSourceDiagnostics["domain"];
 	readonly instanceId: string;
 	readonly landblockId: number;
@@ -360,7 +360,7 @@ export interface OutdoorStaticObjectSourceDiagnosticsSummary {
 	readonly textureRefs: StaticSelectionTextureRefSummary;
 }
 
-export interface StaticSelectionMaterialSlotDiagnostics {
+interface StaticSelectionMaterialSlotDiagnostics {
 	readonly diffuse: number | null;
 	readonly geometrySurfaceId: number;
 	readonly luminosity: number | null;
@@ -373,7 +373,7 @@ export interface StaticSelectionMaterialSlotDiagnostics {
 	readonly translucency: number | null;
 }
 
-export interface StaticSelectionSourceAssetDiagnostics {
+interface StaticSelectionSourceAssetDiagnostics {
 	readonly identity: StaticObjectSourceSummary;
 	readonly invalidPolygonCount: number;
 	readonly materialSlotCount: number;
@@ -384,7 +384,7 @@ export interface StaticSelectionSourceAssetDiagnostics {
 	readonly skippedPolygonCount: number;
 }
 
-export interface StaticSelectionSourcePartDiagnostics {
+interface StaticSelectionSourcePartDiagnostics {
 	readonly geometrySurfaceIds: readonly number[];
 	readonly materialIds: readonly number[];
 	readonly materialSlotCount: number;
@@ -394,7 +394,7 @@ export interface StaticSelectionSourcePartDiagnostics {
 	readonly skippedPolygonCount: number;
 }
 
-export interface StaticSelectionTextureRefSummary {
+interface StaticSelectionTextureRefSummary {
 	readonly count: number;
 	readonly paletteIds: readonly number[];
 	readonly renderSurfaceIds: readonly number[];

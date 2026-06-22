@@ -68,11 +68,6 @@ export interface StaticObjectSourceClosure {
 	readonly sourceRevision: number;
 }
 
-export type StaticMaterialSourceClosure = Omit<
-	StaticObjectSourceClosure,
-	"sourceAssets"
->;
-
 interface StaticSourceClosureAccumulator {
 	readonly sourceAssets: Map<string, StaticObjectSourceAssetFacts>;
 	readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
@@ -103,18 +98,6 @@ export async function resolveStaticObjectSourceClosure(options: {
 	});
 
 	return closure;
-}
-
-export async function resolveStaticMaterialSourceClosure(options: {
-	readonly assetService: PreparedAssetReader;
-	readonly materialIds: readonly number[];
-}): Promise<StaticMaterialSourceClosure> {
-	const accumulator = createStaticSourceClosureAccumulator();
-	await resolveMaterialSourcesIntoAccumulator(accumulator, {
-		assetService: options.assetService,
-		materialIds: options.materialIds,
-	});
-	return finalizeStaticMaterialSourceClosure(accumulator);
 }
 
 export async function resolveStaticObjectAndMaterialSourceClosure(options: {
@@ -202,18 +185,6 @@ function finalizeStaticObjectSourceClosure(
 		missingRefs: accumulator.missingRefs,
 		paletteSources: [...accumulator.paletteSources.values()],
 		sourceAssets: [...accumulator.sourceAssets.values()],
-		sourceRevision: accumulator.sourceRevision,
-		textureRefs: [...accumulator.textureRefs.values()],
-	};
-}
-
-function finalizeStaticMaterialSourceClosure(
-	accumulator: StaticSourceClosureAccumulator,
-): StaticMaterialSourceClosure {
-	return {
-		materialSources: [...accumulator.materialSources.values()],
-		missingRefs: accumulator.missingRefs,
-		paletteSources: [...accumulator.paletteSources.values()],
 		sourceRevision: accumulator.sourceRevision,
 		textureRefs: [...accumulator.textureRefs.values()],
 	};

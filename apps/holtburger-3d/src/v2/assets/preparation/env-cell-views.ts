@@ -5,12 +5,12 @@ import type {
 import type { PreparedAsset } from "../contracts";
 import { omitRenderGeometryVertexBuffers } from "./render-geometry-views";
 
-export type ResolverEnvCellRenderGeometryDto = Omit<
+type ResolverEnvCellRenderGeometryDto = Omit<
 	LandblockEnvCellsPayloadDto["envCells"][number]["renderGeometry"],
 	"normals" | "positions" | "uvs"
 >;
 
-export type ResolverLandblockEnvCellDto = Omit<
+type ResolverLandblockEnvCellDto = Omit<
 	LandblockEnvCellsPayloadDto["envCells"][number],
 	"renderGeometry"
 > & {
@@ -24,10 +24,7 @@ export type ResolverLandblockEnvCellsPayloadDto = Omit<
 	readonly envCells: readonly ResolverLandblockEnvCellDto[];
 };
 
-export type ResolverEnvCellPayloadDto = Omit<
-	EnvCellPayloadDto,
-	"renderGeometry"
-> & {
+type ResolverEnvCellPayloadDto = Omit<EnvCellPayloadDto, "renderGeometry"> & {
 	readonly renderGeometry: ResolverEnvCellRenderGeometryDto;
 };
 

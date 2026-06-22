@@ -202,9 +202,7 @@ export class EnvCellSystemLayerAssemblyStore {
 	}
 }
 
-export function createEnvCellSystemLayerAssemblyKey(
-	landblockId: number,
-): string {
+function createEnvCellSystemLayerAssemblyKey(landblockId: number): string {
 	return `env-cell-system:0x${(landblockId >>> 0).toString(16).padStart(8, "0")}`;
 }
 

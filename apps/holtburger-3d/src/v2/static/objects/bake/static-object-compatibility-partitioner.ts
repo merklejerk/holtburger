@@ -55,7 +55,7 @@ export interface StaticObjectCompatibilityPayload {
 	readonly textureRefs: OutdoorStaticObjectsScopePayload["textureRefs"];
 }
 
-export type StaticObjectCompatibilityObject =
+type StaticObjectCompatibilityObject =
 	OutdoorStaticObjectsScopePayload["objects"][number] & {
 		readonly owningEnvCellId?: number | null;
 	};

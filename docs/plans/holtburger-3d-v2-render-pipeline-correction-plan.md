@@ -2461,7 +2461,7 @@ Implementation update (2026-06-21, follow-up unification):
   - `npm run check`;
   - `npm run lint:ts`;
   - `npm run test:ts`;
-  - `npm run lint:dead` currently fails only on the unrelated unused-export backlog described above.
+  - `npm run lint:dead` initially failed only on the unrelated unused-export backlog described above; the Phase 16 cleanup later made it pass.
 
 ### Phase 16: Resteering Gate
 
@@ -2487,6 +2487,38 @@ Remaining-phase dry run on 2026-06-21:
 
 - The dry-run findings have been folded into Phases 10-15 directly so the implementation sequence carries the steering instead of relying on this note as a side channel.
 - If any phase discovers whole-layer replacement causes visible allocation spikes, measure before adding retained-resource diffing back. If diffing returns, keep it private inside the layer owner while preserving atomic layer publication.
+
+Implementation update (2026-06-21):
+
+- User-provided outdoor screenshot for `0xda55ffff` showed the corrected pipeline holding steady at roughly 60 FPS with a 7.51 ms frame handler:
+  - portal frame: `portal-projection base outdoor`;
+  - entries `180/180`, cells `236`, layers `1`, max `1/1`;
+  - missing `0`, masks `1`, apertures `434`, edges `434`;
+  - env edges `396`, transition edges `38`, roots `38/38`;
+  - components `14`, cyclic `14`, skipped layer `0`;
+  - entry-cap `0`, mask-cap `0`;
+  - resources `128 cell / 187 static`.
+- User-provided dungeon screenshot showed the env-cell-origin path rendering beyond the resident cell at roughly 60 FPS with a 4.96 ms frame handler:
+  - portal frame: `portal-projection base env 0x0007ffff / 0x0007014a`;
+  - entries `204/205`, layers `15`, max `15/15`;
+  - missing `1`, masks `471`, apertures `471`, edges `471`;
+  - transition edges `0`, duplicate masks `0`;
+  - components `1`, cyclic `1`, skipped layer `0`;
+  - entry-cap `0`, mask-cap `0`;
+  - resources `204 cell / 100 static`.
+- These screenshots are not a profiler trace, but they are enough to confirm the post-cutover renderer is not obviously capped, not falling back to resident-cell-only dungeon rendering, and not hitting the portal entry/mask emergency caps in the exercised scenes.
+- Cleaned the knip unused-export backlog instead of deferring it:
+  - removed genuinely dead helpers such as the unused empty portal aperture diagnostics factory, portal aperture resource-id collector, and static-material-only source closure helper;
+  - de-exported internal-only DTO/helper types and helper functions across the renderer/runtime/static modules;
+  - deleted vestigial `Plane`/`StaticPlane` types that were only surviving because they were exported.
+- Spicy bits:
+  - this was intentionally API-surface cleanup, not a behavior rewrite. The useful internal shapes remain colocated with their consumers; only accidental public exports were removed.
+  - `knip` is now useful again as a regression guard instead of being noisy background radiation. No cap.
+- Validation for this cleanup:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - `npm run lint:dead`;
+  - `npm run test:ts`.
 
 ## Risks And Mitigations
 

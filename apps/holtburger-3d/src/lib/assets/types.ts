@@ -226,7 +226,7 @@ interface PreparedLandblockBuildingPortal {
 	linkedEnvCellIds: number[];
 }
 
-export interface PreparedBuildingTransitionAperture {
+interface PreparedBuildingTransitionAperture {
 	apertureId: string;
 	buildingInstanceId: string;
 	sourceDid: number;

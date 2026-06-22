@@ -61,7 +61,7 @@ export function createStaticMaterialTextureSamplingPolicy(options: {
 	};
 }
 
-export function createStaticMaterialTextureSamplingPolicyKey(
+function createStaticMaterialTextureSamplingPolicyKey(
 	policy: StaticBakeTextureSamplingPolicy,
 ): string {
 	return `sampling:wrap=${policy.wrapS},${policy.wrapT}`;

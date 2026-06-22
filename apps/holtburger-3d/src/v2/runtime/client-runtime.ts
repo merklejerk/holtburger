@@ -7,6 +7,7 @@ import type {
 	RendererStaticLayerVisibility,
 	RendererSnapshot,
 	RenderPassPlan,
+	PortalProjectionFrameGraphPlan,
 	PortalFrameWorkPlan,
 	StaticLandblockLayerPayload,
 	StaticLandblockLayerKind,
@@ -112,7 +113,7 @@ const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 2;
 const MAX_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 16;
 const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS = 512;
 const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS = 512;
-const DEFAULT_EXTERIOR_SUFFIX_MAX_DEPTH = 2;
+const DEFAULT_EXTERIOR_SUFFIX_MAX_DEPTH = 1;
 
 export type ManualStaticDomain =
 	| "terrain"
@@ -1060,10 +1061,14 @@ class ClientRuntimeImpl implements ClientRuntime {
 							: {
 									...baseDirectPlan,
 									exteriorComposite: {
-										graphs: Array.from(
-											{ length: exteriorSuffixMaxDepth },
-											() => exteriorSuffix.plan.layeredGraph,
-										),
+										graphs: [
+											excludePortalProjectionGraphEnvCells(
+												exteriorSuffix.plan.layeredGraph,
+												collectDirectEnvCellFrameEnvCellIds(
+													baseDirectPlan.layeredGraph,
+												),
+											),
+										],
 										maxDepth: exteriorSuffixMaxDepth,
 									},
 								};
@@ -3163,6 +3168,82 @@ function createRetainedOutdoorProjectionSourceKey(
 		)
 		.sort()
 		.join("|");
+}
+
+function collectDirectEnvCellFrameEnvCellIds(
+	graph: PortalProjectionFrameGraphPlan,
+): ReadonlySet<number> {
+	const envCellIds = new Set<number>();
+	if (graph.baseEntry.scene.kind === "env-cell-direct") {
+		envCellIds.add(graph.baseEntry.scene.envCellId);
+	}
+	for (const entry of graph.renderEntries) {
+		envCellIds.add(entry.envCellId);
+	}
+	return envCellIds;
+}
+
+function excludePortalProjectionGraphEnvCells(
+	graph: PortalProjectionFrameGraphPlan,
+	excludedEnvCellIds: ReadonlySet<number>,
+): PortalProjectionFrameGraphPlan {
+	if (excludedEnvCellIds.size === 0) {
+		return graph;
+	}
+
+	const retainedRenderEntryIds = new Set(
+		graph.renderEntries
+			.filter((entry) => !excludedEnvCellIds.has(entry.envCellId))
+			.map((entry) => entry.renderEntryId),
+	);
+	const retainedMaskEdgeIds = new Set(
+		graph.maskEdges
+			.filter(
+				(edge) =>
+					retainedRenderEntryIds.has(edge.renderEntryId) &&
+					!excludedEnvCellIds.has(edge.targetEnvCellId) &&
+					(edge.sourceEnvCellId === null ||
+						!excludedEnvCellIds.has(edge.sourceEnvCellId)),
+			)
+			.map((edge) => edge.edgeId),
+	);
+	const renderEntries = graph.renderEntries
+		.filter((entry) => retainedRenderEntryIds.has(entry.renderEntryId))
+		.map((entry) => ({
+			...entry,
+			incomingMaskEdgeIds: entry.incomingMaskEdgeIds.filter((edgeId) =>
+				retainedMaskEdgeIds.has(edgeId),
+			),
+		}));
+	const renderEntryIds = new Set(
+		renderEntries.map((entry) => entry.renderEntryId),
+	);
+	const renderLayers = graph.renderLayers
+		.map((layer) => ({
+			...layer,
+			renderEntryIds: layer.renderEntryIds.filter((renderEntryId) =>
+				renderEntryIds.has(renderEntryId),
+			),
+		}))
+		.filter((layer) => layer.renderEntryIds.length > 0);
+	const maskEdges = graph.maskEdges.filter((edge) =>
+		retainedMaskEdgeIds.has(edge.edgeId),
+	);
+	const outdoorCrossings = graph.outdoorCrossings.filter(
+		(crossing) => !excludedEnvCellIds.has(crossing.targetEnvCellId),
+	);
+	return {
+		...graph,
+		maskEdges,
+		outdoorCrossings,
+		projectionDiagnostics: {
+			...graph.projectionDiagnostics,
+			outdoorCrossingCount: outdoorCrossings.length,
+			renderEntryCount: renderEntries.length,
+		},
+		renderEntries,
+		renderLayers,
+	};
 }
 
 function cameraResidencyEquals(

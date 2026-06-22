@@ -656,7 +656,7 @@ describe("V2 client runtime", () => {
 		const plan = renderer.portalFrameWorkPlans.at(-1);
 		expect(plan).toMatchObject({
 			exteriorComposite: {
-				maxDepth: 2,
+				maxDepth: 1,
 			},
 			kind: "direct-env-cell",
 			mode: "portal-projection",
@@ -670,17 +670,15 @@ describe("V2 client runtime", () => {
 				targetEnvCellId: 0xda550100,
 			}),
 		]);
-		expect(plan.exteriorComposite?.graphs).toHaveLength(2);
+		expect(plan.exteriorComposite?.graphs).toHaveLength(1);
 		expect(plan.exteriorComposite?.graphs[0]?.baseEntry.scene).toEqual({
 			kind: "outdoor-target",
 			landblockId: 0xda55ffff,
 		});
-		expect(plan.exteriorComposite?.graphs[0]?.outdoorCrossings).toEqual([
-			expect.objectContaining({
-				outdoorLandblockId: 0xda55ffff,
-				targetEnvCellId: 0xda550100,
-			}),
-		]);
+		expect(plan.exteriorComposite?.graphs[0]?.renderEntries).toEqual([]);
+		expect(plan.exteriorComposite?.graphs[0]?.renderLayers).toEqual([]);
+		expect(plan.exteriorComposite?.graphs[0]?.maskEdges).toEqual([]);
+		expect(plan.exteriorComposite?.graphs[0]?.outdoorCrossings).toEqual([]);
 
 		runtime.dispose();
 	});

@@ -88,6 +88,50 @@ describe("portal frame work plan", () => {
 			}),
 		).toBe(false);
 	});
+
+	it("compares direct env-cell exterior composite suffix plans", () => {
+		const plan = {
+			...createDirectEnvCellPlan(),
+			exteriorComposite: {
+				graphs: [createDirectEnvCellPlan().layeredGraph],
+				maxDepth: 1,
+			},
+		};
+
+		expect(portalFrameWorkPlanEquals(plan, { ...plan })).toBe(true);
+		expect(
+			portalFrameWorkPlanEquals(plan, {
+				...plan,
+				exteriorComposite: {
+					graphs: [createDirectEnvCellPlan().layeredGraph],
+					maxDepth: 2,
+				},
+			}),
+		).toBe(false);
+		expect(
+			portalFrameWorkPlanEquals(plan, {
+				...plan,
+				exteriorComposite: {
+					graphs: [
+						{
+							...createDirectEnvCellPlan().layeredGraph,
+							outdoorCrossings: [
+								{
+									apertureRangeId: "range-a",
+									apertureSourceId: "source-a",
+									crossingId: 0,
+									linkId: "different-crossing",
+									outdoorLandblockId: 0xf418ffff,
+									targetEnvCellId: 0xf4180103,
+								},
+							],
+						},
+					],
+					maxDepth: 1,
+				},
+			}),
+		).toBe(false);
+	});
 });
 
 function createDirectEnvCellPlan(): PortalFrameWorkPlan {

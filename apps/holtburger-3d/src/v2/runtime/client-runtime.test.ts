@@ -595,6 +595,96 @@ describe("V2 client runtime", () => {
 		runtime.dispose();
 	});
 
+	it("attaches retained exterior suffix composites to env-cell outdoor crossing plans", async () => {
+		const renderer = new FakeRenderer();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker,
+				resolver,
+			}),
+		});
+
+		runtime.setCurrentCameraResidency({
+			envCellId: 0xda550100,
+			kind: "env-cell",
+			landblockId: 0xda55ffff,
+		});
+		updateInteriorSceneInterest(runtime);
+
+		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff, {
+			scope: {
+				...createOutdoorStaticObjectsPayload({
+					domain: "outdoor-buildings",
+					landblockId: 0xda55ffff,
+				}),
+				buildingTransitionApertures: [
+					createBuildingTransitionAperture(0xda55ffff, 0xda550100),
+				],
+			},
+		});
+		completeResolverRequest(resolver, "landblock-env-cells", 0xda55ffff);
+		await flushPromises();
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
+			portalApertureResources: [
+				createBuildingTransitionPortalApertureResource({
+					landblockId: 0xda55ffff,
+					targetEnvCellId: 0xda550100,
+				}),
+			],
+		});
+		completeBakerWork(baker, "landblock-env-cells", 0xda55ffff, {
+			drawUnits: [
+				createStructuredInteriorDrawUnit({
+					drawUnitId: "structured:da550100",
+					envCellId: 0xda550100,
+				}),
+			],
+			staticPortalInteriorRecords: [
+				createPortalInteriorRecord({
+					envCellIds: [0xda550100],
+					portalLinks: [],
+				}),
+			],
+		});
+		await flushRuntimeWork();
+
+		const plan = renderer.portalFrameWorkPlans.at(-1);
+		expect(plan).toMatchObject({
+			exteriorComposite: {
+				maxDepth: 2,
+			},
+			kind: "direct-env-cell",
+			mode: "portal-projection",
+		});
+		if (plan?.kind !== "direct-env-cell") {
+			throw new Error("Expected direct env-cell portal projection plan.");
+		}
+		expect(plan.layeredGraph.outdoorCrossings).toEqual([
+			expect.objectContaining({
+				outdoorLandblockId: 0xda55ffff,
+				targetEnvCellId: 0xda550100,
+			}),
+		]);
+		expect(plan.exteriorComposite?.graphs).toHaveLength(2);
+		expect(plan.exteriorComposite?.graphs[0]?.baseEntry.scene).toEqual({
+			kind: "outdoor-target",
+			landblockId: 0xda55ffff,
+		});
+		expect(plan.exteriorComposite?.graphs[0]?.outdoorCrossings).toEqual([
+			expect.objectContaining({
+				outdoorLandblockId: 0xda55ffff,
+				targetEnvCellId: 0xda550100,
+			}),
+		]);
+
+		runtime.dispose();
+	});
+
 	it("does not derive portal pass plans without a committed interior scene", () => {
 		const renderer = new FakeRenderer();
 		const runtime = createClientRuntime({
@@ -1956,9 +2046,12 @@ class FakeRenderer implements Renderer {
 			compositingMode: "none",
 			depthFormat: "depth24-stencil8",
 			executedCompositeDepth: 0,
+			exteriorSuffixCompositeDepth: 0,
+			exteriorSuffixCompositePasses: 0,
 			exteriorDrawCalls: 0,
 			height: 0,
 			interiorDrawCalls: 0,
+			outdoorCrossingSource: "none",
 			width: 0,
 		},
 		staticDrawUnits: 0,

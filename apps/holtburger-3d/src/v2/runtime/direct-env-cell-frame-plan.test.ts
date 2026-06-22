@@ -273,6 +273,75 @@ describe("direct env-cell frame plan", () => {
 			buildingTransitionEdges: 1,
 		});
 	});
+
+	it("retains outdoor crossings for outdoor projections through selected target cells", () => {
+		const plan = createPortalProjectionFramePlan({
+			landblockId: 0xda55ffff,
+			envCellResourceMembership: [
+				createEnvCellMembership(0xda550100, "structured-a"),
+				createEnvCellMembership(0xda550101, "structured-b"),
+			],
+			maxRenderEntries: 16,
+			maxDepth: 1,
+			maxMaskEdges: 16,
+			projection: createPortalProjectionRecord({
+				edges: [
+					createProjectionEdge({
+						edgeId: "outdoor-a",
+						sourceEnvCellId: null,
+						targetEnvCellId: 0xda550100,
+					}),
+					createProjectionEdge({
+						edgeId: "a-b",
+						sourceEnvCellId: 0xda550100,
+						targetEnvCellId: 0xda550101,
+					}),
+				],
+				layers: [
+					{ envCellIds: [0xda550100], renderLayer: 1 },
+					{ envCellIds: [0xda550101], renderLayer: 2 },
+				],
+				outdoorSceneCrossings: [
+					createOutdoorSceneCrossing({
+						crossingId: "outdoor-crossing:selected",
+						targetEnvCellId: 0xda550100,
+					}),
+					createOutdoorSceneCrossing({
+						crossingId: "outdoor-crossing:layer-capped",
+						targetEnvCellId: 0xda550101,
+					}),
+					createOutdoorSceneCrossing({
+						crossingId: "outdoor-crossing:unselected",
+						targetEnvCellId: 0xda550102,
+					}),
+				],
+			}),
+		});
+
+		expect(plan?.mode).toBe("portal-projection");
+		if (plan?.mode !== "portal-projection") {
+			throw new Error("Expected portal projection plan.");
+		}
+		expect(plan.layeredGraph.outdoorCrossings).toEqual([
+			{
+				apertureRangeId: "building-transition:outdoor-crossing:selected:range",
+				apertureSourceId:
+					"building-transition:outdoor-crossing:selected:source",
+				crossingId: 0,
+				linkId: "outdoor-crossing:selected",
+				outdoorLandblockId: 0xda55ffff,
+				targetEnvCellId: 0xda550100,
+			},
+		]);
+		expect(plan.layeredGraph.projectionDiagnostics).toMatchObject({
+			outdoorCrossingCount: 1,
+			outdoorCrossingsSkippedByLayerCap: 1,
+			outdoorCrossingsSkippedByUnselectedTarget: 1,
+		});
+		expect(plan.layeredGraph.diagnostics).toMatchObject({
+			buildingTransitionEdges: 2,
+		});
+	});
 });
 
 function createEnvCellMembership(

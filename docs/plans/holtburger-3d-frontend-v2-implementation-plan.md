@@ -4052,6 +4052,245 @@ Acceptance criteria:
 - Manual browser validation confirms the black void at the `0xf4180104`/`0xf4180106` join is gone
   without regressing ordinary inside-looking-out portal views.
 
+### Immediate Phase 13B9: Graph-Evidenced Env-Cell Residency Candidate Ranking
+
+Status: planned.
+
+Purpose: make stateless camera residency robust at overlapping tunnel/cap joins by ranking
+BSP/AABB candidates with authored env-cell graph evidence instead of letting decorative overlap caps
+win by coarse containment, env-cell id ordering, or nearest center alone.
+
+Problem:
+
+- Phase 13B7 fixed the first residency failure class by testing coarse landblock BVH/AABB candidates
+  against each candidate cell's BSP. That is necessary but not sufficient for authored tunnel joins
+  made from overlapping cap shells.
+- In landblock `0x40d8ffff`, the underground tunnel join contains multiple env-cell shells whose
+  BSP/AABB volumes overlap at the transition:
+  - real reciprocal route: `0x40d80102/portal01 <-> 0x40d80285/portal01`;
+  - overlapping non-reciprocal contributors:
+    `0x40d80103/portal00 -> 0x40d80102/portal01` and
+    `0x40d80286/portal00 -> 0x40d80285/portal01`.
+- `0x40d80103` and `0x40d80286` are not "empty" cells and they are not outside-transition portals.
+  They have render geometry, BSPs, and outgoing non-outside env-cell portals. The issue is that
+  nothing in the env-cell graph selects them as a navigable destination from the surrounding tunnel.
+- If the camera point intersects one of these overlapping cap shells, a purely stateless
+  point-in-cell query can report residency in the cap cell. That makes the portal renderer start from
+  the wrong resident cell, so the viewer sees an end cap that should only contribute through the
+  intended graph/projection context.
+
+Evidence collected:
+
+- `cargo run -p holtburger-debug-harness --bin inspect_env_cell_asset -- --env-cell 40d80100`
+  showed both outgoing portals are reciprocal:
+  - `0x40d80100/portal00 -> 0x40d80101/portal00`;
+  - `0x40d80100/portal01 -> 0x40d80102/portal00`.
+- `cargo run -p holtburger-debug-harness --bin inspect_env_cell_asset -- --env-cell 40d80102`
+  showed both outgoing portals are reciprocal:
+  - `0x40d80102/portal00 -> 0x40d80100/portal01`;
+  - `0x40d80102/portal01 -> 0x40d80285/portal01`.
+- `cargo run -p holtburger-debug-harness --bin inspect_env_cell_asset -- --env-cell 40d80285`
+  showed both outgoing portals are reciprocal:
+  - `0x40d80285/portal00 -> 0x40d80284/portal01`;
+  - `0x40d80285/portal01 -> 0x40d80102/portal01`.
+- `cargo run -p holtburger-debug-harness --bin inspect_env_cell_asset -- --env-cell 40d80103`
+  showed one outgoing non-outside portal:
+  - `0x40d80103/portal00 -> 0x40d80102/portal01`;
+  - this is non-reciprocal because `0x40d80102/portal01` targets `0x40d80285/portal01`.
+- `cargo run -p holtburger-debug-harness --bin inspect_env_cell_asset -- --env-cell 40d80286`
+  showed one outgoing non-outside portal:
+  - `0x40d80286/portal00 -> 0x40d80285/portal01`;
+  - this is non-reciprocal because `0x40d80285/portal01` targets `0x40d80102/portal01`.
+- `cargo run -p holtburger-debug-harness --bin inspect_landblock_env_cell_bvh -- --landblock 40d8ffff --portal-clusters --portal-cluster-min-size 2`
+  reported the suspect join as a three-member exact duplicate aperture cluster on the same plane:
+  - `0x40d80102/portal01`: `reciprocal=true`, `incomingRefs=2`;
+  - `0x40d80103/portal00`: `reciprocal=false`, `incomingRefs=0`;
+  - `0x40d80286/portal00`: `reciprocal=false`, `incomingRefs=0`.
+- The same focused inspection showed ordinary neighboring tunnel portals such as
+  `0x40d80100 <-> 0x40d80102`, `0x40d80100 <-> 0x40d80101`, and
+  `0x40d80282 <-> 0x40d80284` as `reciprocal=true`, `incomingRefs=1`.
+- Earlier focused reference reporting for `0x40d80103` showed `incomingPortalRefs=0` and
+  `visibleListRefs=0`, while `0x40d80102` and `0x40d80285` had normal inbound portal and
+  visible-list support. This points to graph-orphaned cap contributors, not a missing building portal
+  edge.
+
+Grounded code touchpoints:
+
+- `apps/holtburger-3d/src/lib/world-display/world-residency-index.ts`
+  - Browser/WebGL camera residency is derived from `buildWorldResidencyIndexFromLandblockArtifacts(...)`
+    or `buildWorldResidencyIndex(...)`.
+  - `queryWorldResidencyIndex(...)` and `queryDungeonResidencyIndex(...)` currently collect
+    AABB candidates, filter to `cellBspMatches`, and call `selectNearestResidencyCell(...)`.
+  - `selectNearestResidencyCell(...)` currently ranks only by distance to cell bounds center, then
+    env-cell id as a tie-breaker.
+  - `ResidencyCellSource` currently carries placement, render geometry, BSP, and optional source
+    vertex bounds, but not graph-reference evidence.
+- `apps/holtburger-3d/src/lib/world-display/landblock-render-product.ts`
+  - `DetailedLandblockRenderArtifacts.structuredInteriorCells[].portals` contains per-cell
+    `DetailedEnvCellPortalSidecar` records, including `targetEnvCellId`, `otherPortalId`, and
+    `isOutsideTransition`.
+  - `DetailedLandblockRenderArtifacts.visibility.cellVisibilityRecords[]` contains
+    `visibleEnvCellIds`.
+  - `DetailedLandblockRenderArtifacts.portalLinks` may include building-transition links, but this
+    phase should not merge building refs into the tunnel heuristic. Building refs can be counted
+    separately for diagnostics if useful.
+- `apps/holtburger-3d/src/lib/world-display/structured-interior-scene.ts`
+  - Legacy/non-landblock-artifact residency sources expose `StructuredInteriorCell.portals`, which
+    can supply env-cell target evidence for the older structured-interior scene path.
+- `apps/holtburger-3d/src/v2/runtime/static-scene-query.ts`
+  - The V2 runtime/static-scene query has the same conceptual problem if multiple committed
+    env-cell BVH/BSP candidates remain valid. It already owns committed spatial and visibility
+    records, so the same graph-evidence ranking should eventually be shared or mirrored there.
+- Debug harness:
+  - `crates/holtburger-debug-harness/src/bin/inspect_landblock_env_cell_bvh.rs`
+    groups portal aperture clusters and reports `reciprocal` / `incomingRefs`.
+  - `crates/holtburger-debug-harness/src/bin/inspect_env_cell_asset.rs`
+    dumps raw per-cell portal targets and visible-cell lists.
+
+Fix direction:
+
+- Keep all env cells renderable. Do not suppress `0x40d80103`, `0x40d80286`, or similar cap cells
+  from geometry residency/render resources.
+- Change only camera residency candidate ranking after coarse AABB and BSP filtering.
+- Prefer candidates with authored env-cell graph support when several candidates contain the camera:
+  1. reciprocal env-cell portal support;
+  2. inbound env-cell portal support;
+  3. visible-list support;
+  4. existing nearest-center / env-cell id tie-breaker.
+- Treat zero-inbound, zero-visible, non-reciprocal cells as weak residency candidates, not as invalid
+  cells. If a weak candidate is the only BSP/AABB match, keep the existing behavior.
+- Do not count building portal refs as part of the tunnel graph score. Building refs are relevant for
+  outdoor-to-indoor transition evidence, but this tunnel class is env-cell-only and building refs
+  would blur two different semantics.
+- Avoid spatial-overlap polygon tests in the runtime hot path. Duplicate aperture cluster detection
+  belongs in diagnostics/audits, not per-frame residency.
+
+Implementation tasks:
+
+1. Audit graph-reference patterns before changing selection.
+   - Extend or use the existing harness to report, per env cell in a landblock:
+     `incomingEnvCellPortalRefs`, `reciprocalIncomingRefs`, `visibleListRefs`,
+     `outgoingNonReciprocalRefs`, and optional `incomingBuildingPortalRefs` as a separate column.
+   - Run it on at least `0x40d8ffff` and the earlier tunnel evidence landblock `0x1a73ffff`.
+   - Confirm weak candidates cluster around cap/overlap contributors rather than ordinary navigable
+     rooms.
+
+2. Add graph-evidence metadata to browser residency sources.
+   - For `buildWorldResidencyIndexFromLandblockArtifacts(...)`, derive scores from
+     `DetailedLandblockRenderArtifacts.structuredInteriorCells[].portals` and
+     `visibility.cellVisibilityRecords`.
+   - For `buildWorldResidencyIndex(...)`, derive at least portal-target/inbound evidence from
+     `StructuredInteriorCell.portals`; visible-list evidence may be unavailable on this older path.
+   - Keep the score typed and explicit, e.g. separate counts instead of one opaque number:
+     `incomingEnvCellPortalRefs`, `reciprocalEnvCellPortalRefs`, `visibleListRefs`.
+
+3. Rank candidates after BSP filtering.
+   - Apply ranking to `cellBspMatches` before falling back to AABB-only candidates.
+   - Do not replace the coarse BVH or BSP checks.
+   - Prefer graph-supported candidates over graph-orphan candidates; when both candidates have equal
+     graph strength, preserve the existing nearest-center and env-cell-id ordering.
+   - Use the same ranking for dungeon and outdoor-linked landblock residency paths in
+     `world-residency-index.ts`.
+
+4. Mirror or route the rule into V2 runtime/static-scene residency.
+   - `StaticSceneQuery.queryEnvCellAtPoint(...)` should not drift semantically from browser/WebGL
+     residency once the renderer path proves the rule.
+   - Prefer adding a small pure scorer/helper that both paths can test against, unless import
+     boundaries make duplication cleaner than cross-layer coupling.
+
+5. Add diagnostics.
+   - Surface whether the selected candidate won by BSP only, graph evidence, or nearest fallback.
+   - Include enough counts in browser diagnostics to identify future cases like:
+     `candidate 0103 weak, candidate 0102 supported`.
+   - Keep building-ref counts separate if exposed.
+
+6. Add focused tests.
+   - A browser residency test with overlapping BSP-positive cells where the graph-supported cell wins
+     over a closer or lower-id graph-orphan cap.
+   - A fallback test proving a graph-orphan candidate still wins when it is the only containing
+     candidate.
+   - A test proving building portal refs do not influence env-cell-only tunnel ranking.
+   - A runtime/static-scene query test, if the rule is mirrored there in the same phase.
+
+Dry-run notes:
+
+- Browser/WebGL residency is the first implementation target. The hot path is
+  `world-residency-index.ts`:
+  - `buildWorldResidencyIndexFromLandblockArtifacts(...)` gathers detailed V2 landblock artifacts;
+  - `collectArtifactResidencyCellSources(...)` currently drops portal/visibility evidence when it
+    maps detailed cells into `ResidencyCellSource`;
+  - `deriveResidencyCellItem(...)` should carry a small typed graph score onto `ResidencyCellItem`;
+  - `queryWorldResidencyIndex(...)` and `queryDungeonResidencyIndex(...)` should call a renamed
+    selector such as `selectResidencyCell(...)`, not the current nearest-only selector.
+- Add the scoring model as an explicit type before changing selection:
+  - suggested shape:
+    `EnvCellResidencyGraphEvidence { reciprocalEnvCellPortalRefs; incomingEnvCellPortalRefs; visibleListRefs; }`;
+  - keep derived building refs out of this type. If building diagnostics are useful, add a separate
+    `incomingBuildingPortalRefs` diagnostic value and do not include it in the comparator.
+- The graph score can be derived at source-build time:
+  - build a `Map<envCellId, portalByPortalId>` for detailed artifact cells;
+  - for each non-outside env-cell portal with a `targetEnvCellId`, increment
+    `incomingEnvCellPortalRefs` on the target if that target is present in the same detailed artifact;
+  - mark a reciprocal ref when the target portal named by `otherPortalId` exists and points back to
+    the source cell/portal;
+  - for each `visibility.cellVisibilityRecords[].visibleEnvCellIds`, increment `visibleListRefs`
+    for present target cells;
+  - do not rely on duplicate/coplanar aperture grouping in runtime code.
+- The legacy `buildWorldResidencyIndex(...)` path only has `StructuredInteriorCell.portals`; it can
+  derive portal inbound/reciprocal evidence, but not visible-list evidence. That is acceptable if the
+  comparator treats missing visible evidence as zero and falls back to nearest behavior when all
+  candidates are equally weak.
+- Existing `world-residency-index.test.ts` fixtures need widening before meaningful tests can be
+  written:
+  - `createCell(...)` currently emits `portals: []`;
+  - `createDetailedLandblockProductArtifact(...)` currently creates one cell and empty
+    `portalLinks` / empty `visibility.cellVisibilityRecords`;
+  - add a multi-cell detailed artifact fixture rather than overloading the one-cell helper with too
+    many optional fields.
+- The comparator should be lexicographic and boring:
+  1. supported graph class over unsupported graph class;
+  2. higher `reciprocalEnvCellPortalRefs`;
+  3. higher `incomingEnvCellPortalRefs`;
+  4. higher `visibleListRefs`;
+  5. lower center distance;
+  6. lower env-cell id.
+  This avoids hard-excluding graph-orphan cells while making the tunnel route beat caps.
+- `StaticSceneQuery.queryEnvCellAtPoint(...)` has the same conceptual selection point after
+  `bspCandidates` are computed. It currently sorts coarse candidates by env-cell id and returns the
+  first BSP-positive candidate. To keep browser/runtime semantics aligned:
+  - derive a per-landblock score map inside `#rebuildCommittedEnvCellRoots()`;
+  - use committed `StaticVisibilityRecord.visibleLinks` for visible/inbound evidence;
+  - optionally use committed `StaticPortalInteriorRecord.envCells[].portals` for reciprocal portal
+    evidence if the runtime path needs the same reciprocal/inbound split as browser artifacts;
+  - cache the score on each `EnvCellLandblockBvhRuntimeItem` rather than looking up records during
+    every point query.
+- `static-scene-query.test.ts` already has overlapping BSP candidate tests. Extend those fixtures
+  with explicit env-cell portal links through `payload.portalLinks`; the helper already turns
+  env-cell-to-env-cell portal links into `visibilityRecords.visibleLinks`. Do not depend only on
+  `visibleEnvCellIds`, because the helper currently maps them to `envCells[].visibleEnvCellIds` but
+  not to committed visibility links.
+- Diagnostics should stay incremental:
+  - first expose selected candidate graph evidence through a focused debug/test surface if available;
+  - avoid bloating `WorldResidencyQueryDiagnostics.source` with several new string variants unless
+    the UI needs them immediately. A small optional `selectionReason` / graph-evidence object is
+    clearer than overloading `source: "cell-bsp"`.
+- Risk check: a cell with `incomingRefs=2` can be the correct join cell, as shown by
+  `0x40d80102/portal01`. Do not treat `incomingRefs !== 1` as bad in residency ranking. The weak
+  pattern is zero inbound plus non-reciprocal/outgoing-only support when another containing candidate
+  has real inbound/reciprocal/visible support.
+
+Acceptance criteria:
+
+- At the `0x40d8ffff` tunnel join, camera residency does not select `0x40d80103` or `0x40d80286`
+  when the reciprocal `0x40d80102` / `0x40d80285` route also contains the point.
+- Ordinary reciprocal tunnel portals such as `0x40d80100 <-> 0x40d80102` are not penalized.
+- Geometry for weak/cap cells remains renderable through normal portal/projection paths; only the
+  camera-residency winner changes.
+- Building portal refs are not merged into the env-cell tunnel score.
+- Focused `world-residency-index` tests and any touched runtime/static-scene query tests pass.
+- Full validation target before closing the phase: `npm run check`, `npm run lint:ts`,
+  `npm run lint:dead`, and `npm run test:ts`.
+
 ### Phase 13C: Interior Plan Reassessment Before Dynamic Seeds
 
 Status: planned.

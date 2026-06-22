@@ -201,7 +201,7 @@ function portalProjectionFrameMaskEdgePlansEqual(
 		left.edgeId === right.edgeId &&
 		left.renderEntryId === right.renderEntryId &&
 		left.renderLayer === right.renderLayer &&
-		left.apertureResourceId === right.apertureResourceId &&
+		left.apertureRangeId === right.apertureRangeId &&
 		left.apertureSourceId === right.apertureSourceId &&
 		left.linkId === right.linkId &&
 		left.sourceKind === right.sourceKind &&

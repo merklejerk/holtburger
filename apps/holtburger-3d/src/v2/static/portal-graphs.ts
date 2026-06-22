@@ -533,7 +533,7 @@ function createOutdoorProjectionNodesAndEdges(options: {
 			}
 			options.diagnostics.acceptedTransitionRootCount += 1;
 			edges.push({
-				apertureResourceId: range.rangeId,
+				apertureRangeId: range.rangeId,
 				apertureSourceId: range.sourceId,
 				edgeId: createProjectionBuildingTransitionEdgeId({
 					apertureResourceId: resource.apertureResourceId,
@@ -669,7 +669,7 @@ function createRetainedEnvCellProjectionEdges(options: {
 			}
 			options.diagnostics.envCellPortalEdgesRetained += 1;
 			edges.push({
-				apertureResourceId: createEnvCellPortalApertureRangeId({
+				apertureRangeId: createEnvCellPortalApertureRangeId({
 					envCellId: sourceEnvCellId,
 					landblockId: options.landblockId,
 					polygonId: aperture.polygonId,

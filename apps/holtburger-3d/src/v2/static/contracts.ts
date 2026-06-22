@@ -942,7 +942,7 @@ export interface StaticPortalProjectionEdge {
 	readonly targetNodeId: string;
 	readonly sourceEnvCellId: number | null;
 	readonly targetEnvCellId: number;
-	readonly apertureResourceId: string;
+	readonly apertureRangeId: string;
 	readonly apertureSourceId: string;
 	readonly linkId: string;
 	readonly sourceKind: PortalApertureResourceSourceKind;

@@ -387,7 +387,7 @@ export interface PortalProjectionFrameMaskEdgePlan {
 	readonly edgeId: PortalFrameEdgeId;
 	readonly renderEntryId: number;
 	readonly renderLayer: number;
-	readonly apertureResourceId: string;
+	readonly apertureRangeId: string;
 	readonly apertureSourceId: string;
 	readonly linkId: string;
 	readonly sourceKind: PortalApertureSourceKind;

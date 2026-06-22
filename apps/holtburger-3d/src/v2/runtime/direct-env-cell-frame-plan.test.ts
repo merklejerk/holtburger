@@ -324,7 +324,7 @@ function createProjectionEdge(options: {
 			? "building-transition"
 			: "env-cell-portal";
 	return {
-		apertureResourceId: `${sourceKind}:${options.edgeId}:range`,
+		apertureRangeId: `${sourceKind}:${options.edgeId}:range`,
 		apertureSourceId: `${sourceKind}:${options.edgeId}:source`,
 		edgeId: options.edgeId,
 		linkId: options.edgeId,

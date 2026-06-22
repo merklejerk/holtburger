@@ -167,8 +167,8 @@ export function createPortalProjectionFramePlan(
 				maskEdgesSkippedByMaxMaskEdges += 1;
 				continue;
 			}
-			const apertureResourceId = apertureBuilder.addEdgeResource({
-				apertureResourceId: projectionEdge.apertureResourceId,
+			const apertureRangeId = apertureBuilder.addEdgeResource({
+				apertureRangeId: projectionEdge.apertureRangeId,
 				apertureSourceId: projectionEdge.apertureSourceId,
 				duplicateKeyParts: [
 					renderEntry.renderEntryId,
@@ -178,12 +178,12 @@ export function createPortalProjectionFramePlan(
 				linkId: projectionEdge.linkId,
 				sourceKind: projectionEdge.sourceKind,
 			});
-			if (!apertureResourceId) {
+			if (!apertureRangeId) {
 				continue;
 			}
 			const edgeId = maskEdges.length;
 			maskEdges.push({
-				apertureResourceId,
+				apertureRangeId,
 				apertureSourceId: projectionEdge.apertureSourceId,
 				edgeId,
 				linkId: projectionEdge.linkId,

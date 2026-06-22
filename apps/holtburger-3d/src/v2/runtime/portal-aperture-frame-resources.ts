@@ -10,7 +10,7 @@ export interface PortalApertureFrameResourcePlan {
 }
 
 export interface PortalApertureEdgeResourceInput {
-	readonly apertureResourceId: string;
+	readonly apertureRangeId: string;
 	readonly apertureSourceId: string;
 	readonly duplicateKeyParts: readonly (number | string)[];
 	readonly linkId: string;
@@ -37,7 +37,7 @@ export class PortalApertureFrameResourceBuilder {
 		this.#duplicateEdgeKeys.add(edgeKey);
 
 		const resource = this.#getOrCreateGeometryResource(
-			input.apertureResourceId,
+			input.apertureRangeId,
 			input.sourceKind,
 		);
 		if (input.sourceKind === "building-transition") {
@@ -136,7 +136,7 @@ function createPortalApertureEdgeKey(
 ): string {
 	return [
 		input.sourceKind,
-		input.apertureResourceId,
+		input.apertureRangeId,
 		input.apertureSourceId,
 		input.linkId,
 		...input.duplicateKeyParts,

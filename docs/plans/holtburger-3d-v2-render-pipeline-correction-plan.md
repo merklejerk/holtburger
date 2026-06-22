@@ -2208,6 +2208,44 @@ Explicit non-goals:
 - Do not make outdoor building visual meshes part of the env-cell system layer.
 - Do not delete transition aperture DTOs yet; this phase changes ownership/publication, not every old consumer.
 
+Implementation update (2026-06-21):
+
+- Added `EnvCellSystemLayerAssemblyStore` as the runtime-local assembly gate for coherent same-landblock env-cell-system layer publication.
+- Added the explicit assembled owner/key shape `env-cell-system:<landblock>` via `createEnvCellSystemLayerAssemblyKey(...)`.
+- Chose deterministic semantic-key generation for `EnvCellSystemLayerPayload.generationId`:
+  - generation ids are created with `createStaticLandblockLayerGenerationId({ kind: "env-cell-system", landblockId, sourceKey })`;
+  - the semantic `sourceKey` changes when the env-cell materialized revision changes, the building source revision changes, the building materialized revision changes, the transition aperture batch ids change, or the derived portal projection source keys change;
+  - renderer/runtime consumers still treat generation ids as opaque strings.
+- The assembly store now distinguishes:
+  - same-landblock outdoor-building portal facts loaded with zero transition apertures;
+  - same-landblock outdoor-building portal facts not loaded yet;
+  - nonempty building source facts loaded but not yet materialized.
+- The assembly store joins:
+  - materialized env-cell draw units, structured interiors, portal aperture resources, portal graph/interior records, visibility/source/spatial records, and authored dynamic seeds;
+  - materialized outdoor-building transition aperture batches, transition portal aperture resources, and transition portal graphs.
+- Outdoor-root portal projections are derived at the assembly boundary using the existing `createStaticPortalProjection(...)` graph/layering algorithm, instead of inventing a parallel traversal implementation.
+- Updated static demand planning:
+  - `outdoor-buildings` now schedules before `landblock-env-cells`;
+  - interior-cell demand now retains same-landblock `outdoor-buildings` work before `landblock-env-cells`, so dungeon roots can satisfy the env-cell-system building-fact dependency.
+- Wired `ClientRuntime` to feed source payloads and materialized commits into the assembly store. Runtime still applies legacy deltas to renderer/query; Phase 13 owns the consumption cutover.
+- Added focused tests covering:
+  - missing building facts suppress publication;
+  - loaded-empty building transition facts publish a valid env-cell-system layer;
+  - nonempty building source facts wait for building materialization;
+  - interior demand schedules building facts before env-cells.
+- Spicy bits:
+  - the loaded-empty signal comes from source payloads, not transition batches, because a valid source can produce no `TransitionApertureBatch`.
+  - transition portal facts are now part of env-cell-system assembly, but building visual meshes remain independent and are not copied into the env-cell-system layer.
+  - runtime currently computes assembled publications and drops them on the floor. That is intentional for Phase 12 because Phase 13 switches renderer/query consumption to layer replacement.
+- Debt retained:
+  - assembly eviction is still coarse. Legacy `StaticResidencyDelta` eviction remains the active renderer/query cleanup path until Phase 13 consumes assembled layers directly.
+  - env-cell-root projection publication is still query-side compatibility work; this phase publishes outdoor-root projection records at the assembly boundary.
+  - texture uses are still batch/domain scoped rather than landblock scoped, so env-cell-system payload texture uses currently include the materialized env-cell domain batch texture uses.
+- Validation for this slice:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - `npm run test:ts -- src/v2/runtime/env-cell-system-layer-assembly.test.ts src/v2/static/demand-planner.test.ts src/v2/runtime/client-runtime.test.ts`.
+
 ### Phase 13: Switch Runtime And Static Query To Layer Replacement
 
 Problem to solve:

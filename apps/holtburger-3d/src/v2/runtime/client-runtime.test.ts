@@ -389,7 +389,17 @@ describe("V2 client runtime", () => {
 			landblockId: 0xda55ffff,
 		});
 		updateInteriorSceneInterest(runtime);
-		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
+		const buildingRequest = resolver.pendingRequests.find(
+			(request) => request.job.domain === "outdoor-buildings",
+		);
+		const envCellRequest = resolver.pendingRequests.find(
+			(request) => request.job.domain === "landblock-env-cells",
+		);
+		resolver.complete(buildingRequest?.requestId ?? failKey());
+		await flushPromises();
+		baker.complete("1:landblock:da55ffff:outdoor-buildings");
+		await flushPromises();
+		resolver.complete(envCellRequest?.requestId ?? failKey());
 		await flushPromises();
 		const portalInteriorRecord = createPortalInteriorRecord({
 			envCellIds: [0xda550100, 0xda550101],
@@ -823,9 +833,19 @@ describe("V2 client runtime", () => {
 		});
 
 		updateInteriorSceneInterest(runtime);
-		resolver.complete(resolver.pendingRequests[0]?.requestId ?? failKey());
+		const buildingRequest = resolver.pendingRequests.find(
+			(request) => request.job.domain === "outdoor-buildings",
+		);
+		const envCellRequest = resolver.pendingRequests.find(
+			(request) => request.job.domain === "landblock-env-cells",
+		);
+		resolver.complete(buildingRequest?.requestId ?? failKey());
 		await flushRuntimeWork();
-		baker.complete(baker.pendingInputs[0]?.staticBatchId ?? failKey());
+		baker.complete("1:landblock:da55ffff:outdoor-buildings");
+		await flushRuntimeWork();
+		resolver.complete(envCellRequest?.requestId ?? failKey());
+		await flushRuntimeWork();
+		baker.complete("1:landblock:da55ffff:landblock-env-cells");
 		await flushRuntimeWork();
 
 		expect(events).toEqual([

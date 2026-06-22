@@ -15,8 +15,8 @@ import type {
 
 const domainPriorities: Record<StaticDomain, number> = {
 	"outdoor-terrain": 0,
-	"landblock-env-cells": 5,
-	"outdoor-buildings": 10,
+	"outdoor-buildings": 5,
+	"landblock-env-cells": 10,
 	"outdoor-detail": 20,
 };
 
@@ -32,20 +32,21 @@ export function planStaticDemand(
 		const landblockId = normalizeOutdoorLandblockId(
 			demand.location.landblockId,
 		);
-		const job: StaticResolverJob = {
-			domain: "landblock-env-cells",
-			scope: {
-				kind: "landblock",
-				landblockId,
-			},
-		};
 		const work = [
-			createScheduledStaticWork({
-				job,
-				priority: domainPriorities["landblock-env-cells"],
-				revision,
-			}),
-		];
+			...(["outdoor-buildings", "landblock-env-cells"] as const).map((domain) =>
+				createScheduledStaticWork({
+					job: {
+						domain,
+						scope: {
+							kind: "landblock",
+							landblockId,
+						},
+					},
+					priority: domainPriorities[domain],
+					revision,
+				}),
+			),
+		].sort(compareScheduledStaticWork);
 
 		return {
 			retainedScopes: work.map(createRetainedScopeFromWork),

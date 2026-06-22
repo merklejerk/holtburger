@@ -672,7 +672,7 @@ describe("V2 static coordinator", () => {
 			resolver,
 		});
 
-		const [work] = activeWorkForDemand(coordinator, {
+		const envCellWork = activeWorkForDemand(coordinator, {
 			location: {
 				envCellId: 0xda550100,
 				kind: "interior-cell",
@@ -684,13 +684,16 @@ describe("V2 static coordinator", () => {
 				envCells: 0,
 				terrain: -1,
 			},
-		});
+		}).find((item) => item.job.domain === "landblock-env-cells");
+		const envCellRequest = resolver.pendingRequests.find(
+			(request) => request.job.domain === "landblock-env-cells",
+		);
 		resolver.complete(
-			resolver.pendingRequests[0]?.requestId ?? "",
+			envCellRequest?.requestId ?? "",
 			createLandblockEnvCellsResolverPayload(),
 		);
 		await flushPromises();
-		baker.complete(work?.workId ?? "", {
+		baker.complete(envCellWork?.workId ?? "", {
 			materialCoverage: [
 				createMaterialCoverage("landblock-env-cells", {
 					coverageKey: "landblock-env-cells:structured-interior",
@@ -725,7 +728,7 @@ describe("V2 static coordinator", () => {
 		const sourcePayloads: StaticCoordinatorSourcePayloadDelta[] = [];
 		coordinator.subscribeSourcePayloads((delta) => sourcePayloads.push(delta));
 
-		const [work] = activeWorkForDemand(coordinator, {
+		const work = activeWorkForDemand(coordinator, {
 			location: {
 				envCellId: 0xda550100,
 				kind: "interior-cell",
@@ -737,10 +740,13 @@ describe("V2 static coordinator", () => {
 				envCells: 0,
 				terrain: -1,
 			},
-		});
+		}).find((item) => item.job.domain === "landblock-env-cells");
+		const envCellRequest = resolver.pendingRequests.find(
+			(request) => request.job.domain === "landblock-env-cells",
+		);
 
 		resolver.complete(
-			resolver.pendingRequests[0]?.requestId ?? "",
+			envCellRequest?.requestId ?? "",
 			createLandblockEnvCellsResolverPayload(),
 		);
 		await flushPromises();
@@ -787,9 +793,12 @@ describe("V2 static coordinator", () => {
 			committed: 1,
 			committedDrawUnits: 0,
 		});
-		expect(coordinator.createSnapshot().activeWork[0]?.status).toBe(
-			"committed",
-		);
+		expect(
+			coordinator
+				.createSnapshot()
+				.activeWork.find((item) => item.domain === "landblock-env-cells")
+				?.status,
+		).toBe("committed");
 	});
 
 	it("filters typed work-owned env-cell peer records for superseded batch members", async () => {

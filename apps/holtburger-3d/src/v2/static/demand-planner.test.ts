@@ -104,7 +104,7 @@ describe("V2 static demand planner", () => {
 					landblockId: 0xda55ffff,
 				},
 			},
-			priority: 5,
+			priority: 10,
 			workId: "4:landblock:da55ffff:landblock-env-cells",
 		});
 		expect(retainedScopes).toContainEqual({
@@ -117,7 +117,7 @@ describe("V2 static demand planner", () => {
 		});
 	});
 
-	it("plans dungeon/interior demand as one landblock-owned env-cell resolver job", () => {
+	it("plans dungeon/interior demand with same-landblock building portal facts before env-cells", () => {
 		const { retainedScopes, work } = planStaticDemand(
 			{
 				location: {
@@ -138,7 +138,7 @@ describe("V2 static demand planner", () => {
 		expect(work).toEqual([
 			{
 				job: {
-					domain: "landblock-env-cells",
+					domain: "outdoor-buildings",
 					scope: {
 						kind: "landblock",
 						landblockId: 0xda55ffff,
@@ -146,10 +146,30 @@ describe("V2 static demand planner", () => {
 				},
 				priority: 5,
 				revision: 12,
+				workId: "12:landblock:da55ffff:outdoor-buildings",
+			},
+			{
+				job: {
+					domain: "landblock-env-cells",
+					scope: {
+						kind: "landblock",
+						landblockId: 0xda55ffff,
+					},
+				},
+				priority: 10,
+				revision: 12,
 				workId: "12:landblock:da55ffff:landblock-env-cells",
 			},
 		]);
 		expect(retainedScopes).toEqual([
+			{
+				domain: "outdoor-buildings",
+				scope: {
+					kind: "landblock",
+					landblockId: 0xda55ffff,
+				},
+				scopeKey: "landblock:da55ffff",
+			},
 			{
 				domain: "landblock-env-cells",
 				scope: {

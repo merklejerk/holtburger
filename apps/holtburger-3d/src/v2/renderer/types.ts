@@ -481,6 +481,23 @@ export interface Renderer {
 	applyDynamicDelta(delta: DynamicResidencyDelta): void;
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void;
 	applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void;
+	setTerrainLayer(
+		landblockId: number,
+		payload: TerrainLayerPayload | null,
+	): void;
+	setOutdoorBuildingsLayer(
+		landblockId: number,
+		payload: OutdoorBuildingsLayerPayload | null,
+	): void;
+	setOutdoorDetailsLayer(
+		landblockId: number,
+		payload: OutdoorDetailsLayerPayload | null,
+	): void;
+	setEnvCellSystemLayer(
+		landblockId: number,
+		payload: EnvCellSystemLayerPayload | null,
+	): void;
+	setStaticLayerVisibility(visibility: RendererStaticLayerVisibility): void;
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void;
 	setFlatVisionModeEnabled(enabled: boolean): void;
 	setRenderPassPlan(plan: RenderPassPlan): void;

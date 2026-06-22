@@ -2123,6 +2123,40 @@ Explicit non-goals:
 - Do not delete `applyStaticDelta(...)` yet.
 - Do not rewrite texture atlas packing into layer replacement.
 
+Implementation update (2026-06-21):
+
+- Added the renderer-facing layer replacement API to `Renderer` and `Webgl2Renderer`:
+  - `setTerrainLayer(...)`;
+  - `setOutdoorBuildingsLayer(...)`;
+  - `setOutdoorDetailsLayer(...)`;
+  - `setEnvCellSystemLayer(...)`.
+- Added `Webgl2Renderer` static layer ownership indexes keyed by `(layerKind, landblockId)`. The indexes currently track owned draw units, texture binding ids, portal aperture resources, and transition aperture batch ids so a future legacy-adapter bridge can clear transition resources through the same path.
+- Reused the existing resource creation/disposal helpers for terrain, static objects, structured interiors, and portal aperture resources. `applyStaticDelta(...)` now shares the portal aperture add helper with the layer path instead of maintaining a second copy of the upload/indexing logic.
+- Added `RendererStaticLayerVisibility` plumbing through `Renderer`, `Webgl2Renderer`, and `ClientRuntime`.
+- Changed `BrowserWorldDisplayV2` static checkboxes from demand toggles to visibility toggles:
+  - the browser now always requests all four ordinary outdoor static domains for manual/follow outdoor demand;
+  - the checkboxes call `runtime.setStaticLayerVisibility(...)`;
+  - visibility toggles no longer schedule static demand reconciliation, clear layers, or influence portal frame-plan cache keys;
+  - env-cell visibility remains available in dungeon contexts instead of being disabled with the outdoor-only controls.
+- Added focused tests:
+  - terrain layer replace/clear without remove lists;
+  - env-cell-system layer clear preserving unrelated terrain resources;
+  - visibility hiding draw submission while ownership/snapshot counts remain installed;
+  - landblock mismatch fails hard;
+  - runtime visibility forwarding does not mutate render-pass or portal-frame plans.
+- Spicy bits:
+  - browser demand is now intentionally coarse: ordinary browser mode requests terrain/buildings/detail/env-cells together. That is the cleanest way to keep visibility from becoming accidental residency eviction, but it means demand-domain checkboxes are gone until/unless we add an explicitly destructive/debug residency tool.
+  - layer ownership currently coexists with legacy `applyStaticDelta(...)` resource maps. If the same draw-unit id is installed through both paths, the last writer wins in the flat resource map; the migration must avoid mixed ownership for the same layer generation.
+  - visibility suppresses draw submission, not diagnostics counts. Installed resource counts remain visible in renderer snapshots by design.
+- Debt retained:
+  - runtime materialization still emits `StaticResidencyDelta`; Phase 12+ must assemble/publish layer payloads before the new renderer APIs become the production ingestion path.
+  - texture placement is still draw-unit based, so layer clearing also purges texture bindings by draw-unit id rather than through a first-class layer texture binding object.
+  - transition aperture batches are represented in the ownership model but not yet produced by `EnvCellSystemLayerPayload`; the Phase 12 assembly gate should decide whether any legacy transition cleanup remains necessary or can be deleted.
+- Validation for this slice:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - `npm run test:ts -- src/v2/renderer/webgl2/webgl2-renderer.test.ts src/v2/runtime/client-runtime.test.ts src/v2/renderer/static-layer-contracts.test.ts`.
+
 ### Phase 12: Build The Env-Cell System Assembly Gate
 
 Problem to solve:

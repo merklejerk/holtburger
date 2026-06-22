@@ -37,7 +37,10 @@
 		RuntimeSnapshot,
 		TransitionApertureDebugOverlayMode,
 	} from "../v2/runtime/client-runtime";
-	import type { PortalFrameWorkPlan } from "../v2/renderer/types";
+	import type {
+		PortalFrameWorkPlan,
+		RendererStaticLayerVisibility,
+	} from "../v2/renderer/types";
 	import type { EnvCellResourceMembership } from "../v2/runtime/env-cell-resource-membership";
 	import {
 		describeStaticSceneSelectionKey,
@@ -105,10 +108,10 @@
 	let landblockInputMode = $state<V2LandblockInputMode>("outdoor");
 	let submittedStaticLocation = $state<V2ParsedLocationInput | null>(null);
 	let followModeEnabled = $state(false);
-	let terrainEnabled = $state(true);
-	let buildingsEnabled = $state(true);
-	let detailEnabled = $state(true);
-	let envCellsEnabled = $state(true);
+	let terrainVisible = $state(true);
+	let buildingsVisible = $state(true);
+	let detailVisible = $state(true);
+	let envCellsVisible = $state(true);
 	let envCellAabbDebugVisible = $state(false);
 	let envCellPortalDebugVisible = $state(false);
 	let directEnvCellPortalMaxDepth = $state(
@@ -168,6 +171,7 @@
 
 		try {
 			runtime = createBrowserV2Runtime(canvasElement);
+			runtime.setStaticLayerVisibility(createStaticLayerVisibility());
 			runtime.setEnvCellAabbDebugOverlayVisible(envCellAabbDebugVisible);
 			runtime.setEnvCellPortalDebugOverlayVisible(envCellPortalDebugVisible);
 			runtime.setDirectEnvCellPortalMaxDepth(directEnvCellPortalMaxDepth);
@@ -242,7 +246,7 @@
 		runtime.updateSceneInterest(
 			createSceneInterestFromLocation(
 				location,
-				selectedDomains(),
+				selectedDemandDomains(),
 				{
 					buildings: buildingRadius,
 					detail: detailRadius,
@@ -343,8 +347,8 @@
 		landblockInputMode = "dungeon";
 	}
 
-	function handleStaticDomainChange(): void {
-		scheduleStaticInterestRefresh();
+	function handleStaticVisibilityChange(): void {
+		syncStaticLayerVisibility();
 	}
 
 	function handleFollowModeChange(event: Event): void {
@@ -372,28 +376,24 @@
 			return false;
 		}
 
-		return (
-			parsedLocation.kind === "interior-cell" || selectedDomains().length > 0
-		);
+		return true;
 	}
 
-	function selectedDomains(): ManualStaticDomain[] {
-		const domains: ManualStaticDomain[] = [];
+	function selectedDemandDomains(): ManualStaticDomain[] {
+		return ["terrain", "buildings", "detail", "env-cells"];
+	}
 
-		if (terrainEnabled) {
-			domains.push("terrain");
-		}
-		if (buildingsEnabled) {
-			domains.push("buildings");
-		}
-		if (detailEnabled) {
-			domains.push("detail");
-		}
-		if (envCellsEnabled) {
-			domains.push("env-cells");
-		}
+	function createStaticLayerVisibility(): RendererStaticLayerVisibility {
+		return {
+			envCellInteriors: envCellsVisible,
+			outdoorBuildings: buildingsVisible,
+			outdoorDetail: detailVisible,
+			terrain: terrainVisible,
+		};
+	}
 
-		return domains;
+	function syncStaticLayerVisibility(): void {
+		runtime?.setStaticLayerVisibility(createStaticLayerVisibility());
 	}
 
 	function togglePanelCollapsed(): void {
@@ -768,13 +768,6 @@
 			return;
 		}
 
-		if (
-			submittedStaticLocation.kind !== "interior-cell" &&
-			selectedDomains().length === 0
-		) {
-			return;
-		}
-
 		staticInterestRefreshTimer = window.setTimeout(() => {
 			staticInterestRefreshTimer = null;
 			if (submittedStaticLocation) {
@@ -879,7 +872,7 @@
 
 		const rebase = resolveBrowserFollowModeRebase({
 			cameraPosition: camera.position,
-			domains: selectedDomains(),
+			domains: selectedDemandDomains(),
 			enabled: followModeEnabled,
 			lod: {
 				buildings: buildingRadius,
@@ -1449,40 +1442,36 @@
 				</div>
 			{:else if activeTab === "settings"}
 				<div class="browser-v2__tab-panel" role="tabpanel">
-					<div class="browser-v2__toggles" aria-label="Static domains">
+					<div class="browser-v2__toggles" aria-label="Static visibility">
 						<label>
 							<input
-								bind:checked={terrainEnabled}
-								disabled={parsedIsInterior}
+								bind:checked={terrainVisible}
 								type="checkbox"
-								onchange={handleStaticDomainChange}
+								onchange={handleStaticVisibilityChange}
 							/>
 							<span>Terrain</span>
 						</label>
 						<label>
 							<input
-								bind:checked={buildingsEnabled}
-								disabled={parsedIsInterior}
+								bind:checked={buildingsVisible}
 								type="checkbox"
-								onchange={handleStaticDomainChange}
+								onchange={handleStaticVisibilityChange}
 							/>
 							<span>Buildings</span>
 						</label>
 						<label>
 							<input
-								bind:checked={detailEnabled}
-								disabled={parsedIsInterior}
+								bind:checked={detailVisible}
 								type="checkbox"
-								onchange={handleStaticDomainChange}
+								onchange={handleStaticVisibilityChange}
 							/>
 							<span>Detail</span>
 						</label>
 						<label>
 							<input
-								bind:checked={envCellsEnabled}
-								disabled={parsedIsInterior}
+								bind:checked={envCellsVisible}
 								type="checkbox"
-								onchange={handleStaticDomainChange}
+								onchange={handleStaticVisibilityChange}
 							/>
 							<span>Env Cells</span>
 						</label>

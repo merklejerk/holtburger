@@ -13,11 +13,17 @@ import type {
 	SceneDomainTargetKind,
 	SceneDomainTargetSnapshot,
 	SamplerPolicyUpdate,
+	EnvCellSystemLayerPayload,
+	OutdoorBuildingsLayerPayload,
+	OutdoorDetailsLayerPayload,
+	RendererStaticLayerVisibility,
 	StaticResidencyDelta,
+	TerrainLayerPayload,
 	TextureDrawUnitBinding,
 	TexturePlacementUpdate,
 } from "../types";
 import {
+	DEFAULT_RENDERER_STATIC_LAYER_VISIBILITY,
 	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
 	MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW,
 	MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW,
@@ -25,6 +31,7 @@ import {
 	MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
 	MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
 	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
+	createStaticLandblockLayerKey,
 } from "../types";
 import type {
 	StaticObjectGeometryStaticDrawUnit,
@@ -118,6 +125,13 @@ const EMPTY_TEXTURE_DRAW_UNIT_BINDINGS: ReadonlyMap<
 	string,
 	TextureDrawUnitBinding
 > = new Map();
+
+interface StaticLayerResourceOwnership {
+	readonly drawUnitIds: Set<string>;
+	readonly portalApertureResourceIds: Set<string>;
+	readonly textureBindingDrawUnitIds: Set<string>;
+	readonly transitionApertureBatchIds: Set<string>;
+}
 
 const defaultFrameState: FrameState = {
 	camera: {
@@ -755,6 +769,10 @@ class Webgl2Renderer implements Renderer {
 		string,
 		Map<string, TextureDrawUnitBinding>
 	>();
+	readonly #staticLayerOwnershipByKey = new Map<
+		string,
+		StaticLayerResourceOwnership
+	>();
 	readonly #warnedLayeredFallbackDrawUnitIds = new Set<string>();
 	readonly #warnedMissingPortalApertureRangeIds = new Set<string>();
 	readonly #terrainProgram: TerrainGeometryProgram;
@@ -787,6 +805,7 @@ class Webgl2Renderer implements Renderer {
 		mode: "single-surface-resident",
 		renderPassPlan: { kind: "single-surface-resident" },
 	};
+	#staticLayerVisibility = DEFAULT_RENDERER_STATIC_LAYER_VISIBILITY;
 	#flatVisionModeEnabled = false;
 	#lastExteriorSceneDomainDrawCalls = 0;
 	#lastInteriorSceneDomainDrawCalls = 0;
@@ -881,21 +900,7 @@ class Webgl2Renderer implements Renderer {
 			);
 		}
 		for (const resource of delta.addedPortalApertureResources ?? []) {
-			this.#removePortalApertureResource(resource.apertureResourceId);
-			const geometryResource = createPortalApertureGeometryResource(
-				this.#gl,
-				resource,
-			);
-			this.#portalApertureResources.set(
-				resource.apertureResourceId,
-				geometryResource,
-			);
-			for (const range of geometryResource.ranges) {
-				this.#portalApertureRangesById.set(range.rangeId, {
-					range,
-					resource: geometryResource,
-				});
-			}
+			this.#addPortalApertureResource(resource);
 		}
 		if (
 			delta.addedDrawUnits.length > 0 ||
@@ -910,6 +915,107 @@ class Webgl2Renderer implements Renderer {
 
 	applyDynamicDelta(): void {
 		// Dynamic renderer residency starts after static pipeline contracts are proven.
+	}
+
+	setTerrainLayer(
+		landblockId: number,
+		payload: TerrainLayerPayload | null,
+	): void {
+		this.#replaceStaticLayer(
+			{ kind: "terrain", landblockId },
+			payload,
+			(ownership) => {
+				for (const drawUnit of payload?.drawUnits ?? []) {
+					this.#terrainResources.get(drawUnit.drawUnitId)?.dispose();
+					this.#terrainResources.set(
+						drawUnit.drawUnitId,
+						createTerrainGeometryResource(this.#gl, drawUnit),
+					);
+					ownership.drawUnitIds.add(drawUnit.drawUnitId);
+					ownership.textureBindingDrawUnitIds.add(drawUnit.drawUnitId);
+				}
+			},
+		);
+	}
+
+	setOutdoorBuildingsLayer(
+		landblockId: number,
+		payload: OutdoorBuildingsLayerPayload | null,
+	): void {
+		this.#replaceStaticLayer(
+			{ kind: "outdoor-buildings", landblockId },
+			payload,
+			(ownership) => {
+				for (const drawUnit of payload?.drawUnits ?? []) {
+					this.#removeStaticObjectResource(drawUnit.drawUnitId);
+					this.#addStaticObjectResource(
+						createStaticObjectGeometryResource(this.#gl, drawUnit),
+					);
+					ownership.drawUnitIds.add(drawUnit.drawUnitId);
+					ownership.textureBindingDrawUnitIds.add(drawUnit.drawUnitId);
+				}
+			},
+		);
+	}
+
+	setOutdoorDetailsLayer(
+		landblockId: number,
+		payload: OutdoorDetailsLayerPayload | null,
+	): void {
+		this.#replaceStaticLayer(
+			{ kind: "outdoor-detail", landblockId },
+			payload,
+			(ownership) => {
+				for (const drawUnit of payload?.drawUnits ?? []) {
+					this.#removeStaticObjectResource(drawUnit.drawUnitId);
+					this.#addStaticObjectResource(
+						createStaticObjectGeometryResource(this.#gl, drawUnit),
+					);
+					ownership.drawUnitIds.add(drawUnit.drawUnitId);
+					ownership.textureBindingDrawUnitIds.add(drawUnit.drawUnitId);
+				}
+			},
+		);
+	}
+
+	setEnvCellSystemLayer(
+		landblockId: number,
+		payload: EnvCellSystemLayerPayload | null,
+	): void {
+		this.#replaceStaticLayer(
+			{ kind: "env-cell-system", landblockId },
+			payload,
+			(ownership) => {
+				for (const drawUnit of payload?.envCellStaticObjectDrawUnits ?? []) {
+					this.#removeStaticObjectResource(drawUnit.drawUnitId);
+					this.#addStaticObjectResource(
+						createStaticObjectGeometryResource(this.#gl, drawUnit),
+					);
+					ownership.drawUnitIds.add(drawUnit.drawUnitId);
+					ownership.textureBindingDrawUnitIds.add(drawUnit.drawUnitId);
+				}
+				for (const drawUnit of payload?.structuredInteriorDrawUnits ?? []) {
+					this.#removeStructuredInteriorResource(drawUnit.drawUnitId);
+					this.#addStructuredInteriorResource(
+						createStructuredInteriorGeometryResource(this.#gl, drawUnit),
+					);
+					ownership.drawUnitIds.add(drawUnit.drawUnitId);
+					ownership.textureBindingDrawUnitIds.add(drawUnit.drawUnitId);
+				}
+				for (const resource of payload?.portalApertureResources ?? []) {
+					this.#addPortalApertureResource(resource);
+					ownership.portalApertureResourceIds.add(resource.apertureResourceId);
+				}
+			},
+		);
+	}
+
+	setStaticLayerVisibility(visibility: RendererStaticLayerVisibility): void {
+		if (staticLayerVisibilityEquals(this.#staticLayerVisibility, visibility)) {
+			return;
+		}
+		this.#staticLayerVisibility = visibility;
+		this.#stateCache.invalidate();
 	}
 
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void {
@@ -1066,6 +1172,7 @@ class Webgl2Renderer implements Renderer {
 		this.#portalApertureRangesById.clear();
 		this.#textures.clear();
 		this.#textureBindings.clear();
+		this.#staticLayerOwnershipByKey.clear();
 		this.#warnedLayeredFallbackDrawUnitIds.clear();
 		this.#warnedMissingPortalApertureRangeIds.clear();
 		this.#terrainProgram.dispose();
@@ -1603,7 +1710,10 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	#drawTerrain(aspectRatio: number): number {
-		if (this.#terrainResources.size === 0) {
+		if (
+			!this.#staticLayerVisibility.terrain ||
+			this.#terrainResources.size === 0
+		) {
 			return 0;
 		}
 
@@ -1687,10 +1797,14 @@ class Webgl2Renderer implements Renderer {
 		const staticObjectResources = [
 			...this.#staticObjectResources.values(),
 		].filter((resource) =>
-			shouldDrawStaticObjectResourceInDomain(resource, domain),
+			shouldDrawStaticObjectResourceInDomain(
+				resource,
+				domain,
+				this.#staticLayerVisibility,
+			),
 		);
 		const structuredInteriorResources =
-			domain === "exterior"
+			domain === "exterior" || !this.#staticLayerVisibility.envCellInteriors
 				? []
 				: [...this.#structuredInteriorResources.values()];
 
@@ -1813,6 +1927,9 @@ class Webgl2Renderer implements Renderer {
 		resources: PortalFrameNodeResources,
 		aspectRatio: number,
 	): number {
+		if (!this.#staticLayerVisibility.envCellInteriors) {
+			return 0;
+		}
 		const staticObjectResources: StaticObjectGeometryResource[] = [];
 		const structuredInteriorResources: StructuredInteriorGeometryResource[] =
 			[];
@@ -2228,6 +2345,67 @@ class Webgl2Renderer implements Renderer {
 		};
 	}
 
+	#replaceStaticLayer(
+		key: Parameters<typeof createStaticLandblockLayerKey>[0],
+		payload: { readonly landblockId: number } | null,
+		install: (ownership: StaticLayerResourceOwnership) => void,
+	): void {
+		const normalizedKey = {
+			...key,
+			landblockId: key.landblockId >>> 0,
+		};
+		const layerKey = createStaticLandblockLayerKey(normalizedKey);
+		this.#clearStaticLayerByKey(layerKey);
+
+		if (!payload) {
+			this.#stateCache.invalidate();
+			return;
+		}
+		if (payload.landblockId >>> 0 !== normalizedKey.landblockId) {
+			throw new Error(
+				`Static layer ${layerKey} received payload for 0x${(payload.landblockId >>> 0).toString(16).padStart(8, "0")}.`,
+			);
+		}
+
+		const ownership = createEmptyStaticLayerResourceOwnership();
+		install(ownership);
+		this.#staticLayerOwnershipByKey.set(layerKey, ownership);
+		this.#stateCache.invalidate();
+	}
+
+	#clearStaticLayerByKey(layerKey: string): void {
+		const ownership = this.#staticLayerOwnershipByKey.get(layerKey);
+		if (!ownership) {
+			return;
+		}
+
+		for (const apertureResourceId of ownership.portalApertureResourceIds) {
+			this.#removePortalApertureResource(apertureResourceId);
+		}
+		for (const apertureBatchId of ownership.transitionApertureBatchIds) {
+			const resource = this.#transitionApertureResources.get(apertureBatchId);
+			if (!resource) {
+				continue;
+			}
+			resource.dispose();
+			this.#transitionApertureResources.delete(apertureBatchId);
+		}
+		for (const drawUnitId of ownership.drawUnitIds) {
+			const terrainResource = this.#terrainResources.get(drawUnitId);
+			if (terrainResource) {
+				terrainResource.dispose();
+				this.#terrainResources.delete(drawUnitId);
+				this.#warnedLayeredFallbackDrawUnitIds.delete(drawUnitId);
+			}
+			this.#removeStaticObjectResource(drawUnitId);
+			this.#removeStructuredInteriorResource(drawUnitId);
+		}
+		for (const drawUnitId of ownership.textureBindingDrawUnitIds) {
+			this.#textureBindings.delete(drawUnitId);
+		}
+		this.#staticLayerOwnershipByKey.delete(layerKey);
+	}
+
 	#addStaticObjectResource(resource: StaticObjectGeometryResource): void {
 		this.#staticObjectResources.set(resource.drawUnitId, resource);
 		for (const envCellId of resource.envCellIds) {
@@ -2278,6 +2456,24 @@ class Webgl2Renderer implements Renderer {
 			createEnvCellResourceKey(resource.landblockId, resource.envCellId),
 			drawUnitId,
 		);
+	}
+
+	#addPortalApertureResource(resource: StaticPortalApertureResource): void {
+		this.#removePortalApertureResource(resource.apertureResourceId);
+		const geometryResource = createPortalApertureGeometryResource(
+			this.#gl,
+			resource,
+		);
+		this.#portalApertureResources.set(
+			resource.apertureResourceId,
+			geometryResource,
+		);
+		for (const range of geometryResource.ranges) {
+			this.#portalApertureRangesById.set(range.rangeId, {
+				range,
+				resource: geometryResource,
+			});
+		}
 	}
 
 	#emitFrameTelemetry(): void {
@@ -2607,6 +2803,27 @@ interface StaticObjectGeometryResource {
 type SceneDomain = "exterior" | "interior";
 type RenderStaticDomain = SceneDomain | "single-surface-resident";
 
+function createEmptyStaticLayerResourceOwnership(): StaticLayerResourceOwnership {
+	return {
+		drawUnitIds: new Set<string>(),
+		portalApertureResourceIds: new Set<string>(),
+		textureBindingDrawUnitIds: new Set<string>(),
+		transitionApertureBatchIds: new Set<string>(),
+	};
+}
+
+function staticLayerVisibilityEquals(
+	left: RendererStaticLayerVisibility,
+	right: RendererStaticLayerVisibility,
+): boolean {
+	return (
+		left.envCellInteriors === right.envCellInteriors &&
+		left.outdoorBuildings === right.outdoorBuildings &&
+		left.outdoorDetail === right.outdoorDetail &&
+		left.terrain === right.terrain
+	);
+}
+
 type StaticMaterialGeometryResource =
 	| StaticObjectGeometryResource
 	| StructuredInteriorGeometryResource;
@@ -2858,14 +3075,27 @@ function createSceneDomainTexture(gl: WebGL2RenderingContext): WebGLTexture {
 function shouldDrawStaticObjectResourceInDomain(
 	resource: StaticObjectGeometryResource,
 	domain: RenderStaticDomain,
+	visibility: RendererStaticLayerVisibility,
 ): boolean {
 	if (domain === "single-surface-resident") {
-		return true;
+		if (resource.domain === "outdoor-buildings") {
+			return visibility.outdoorBuildings;
+		}
+		if (resource.domain === "outdoor-detail") {
+			return visibility.outdoorDetail;
+		}
+		return visibility.envCellInteriors;
 	}
 	const isInteriorStaticObject = resource.domain === "landblock-env-cells";
-	return domain === "interior"
-		? isInteriorStaticObject
-		: !isInteriorStaticObject;
+	if (domain === "interior") {
+		return isInteriorStaticObject && visibility.envCellInteriors;
+	}
+	if (isInteriorStaticObject) {
+		return false;
+	}
+	return resource.domain === "outdoor-buildings"
+		? visibility.outdoorBuildings
+		: visibility.outdoorDetail;
 }
 
 function createTerrainGeometryProgram(

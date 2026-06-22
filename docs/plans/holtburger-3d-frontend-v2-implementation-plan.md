@@ -3914,7 +3914,7 @@ Debt / follow-up:
 
 ### Immediate Phase 13B8: Building Module Seam Portals In Env-Cell Projection
 
-Status: investigation documented on 2026-06-22; implementation pending.
+Status: root cause validated on 2026-06-22; content-side duplicate aperture suppression removed.
 
 Purpose: fix the black-void artifact at fitted outdoor-building module joins where two adjacent
 building modules each expose an env-cell outside-transition portal on the same physical aperture.
@@ -3937,10 +3937,15 @@ Problem:
 - Current V2 projection treats these as outdoor scene crossings, because env-cell projection only
   traverses `env-cell-to-env-cell` graph edges and building-transition aperture ranges become
   `outdoorSceneCrossings`.
+- Content preparation was suppressing duplicate transformed building-transition apertures before
+  they reached browser V2. In `0xf418ffff`, that reduced `35` building portals down to `13`
+  building-transition apertures, exactly dropping the `11 * 2 = 22` fitted module-seam apertures.
 - That is correct for real windows/doors/open exterior portals, but wrong for module seams where the
   matching outside-transition portal on the other building module is the intended next interior
-  scope. The renderer asks the exterior source to fill the seam aperture, so the view shows black
-  void instead of the neighboring module's env-cell geometry.
+  scope. With those duplicate transition apertures missing, the renderer asks the exterior source to
+  fill the seam aperture but lacks the matching outdoor-root/exterior-suffix aperture for the
+  adjacent module, so the view shows black void instead of the neighboring module's env-cell
+  geometry.
 
 Evidence collected:
 
@@ -3972,10 +3977,19 @@ Evidence collected:
   It reported `outsideTransitionModuleSeamSummary ... seamGroups=11` and lists the building portal
   targeting each side of every duplicate outside-transition seam. This is diagnostic-only and does
   not change production behavior.
+- Suppression removal experiment:
+  - replacing `suppress_building_module_seam_transition_apertures(apertures)` with `apertures` in
+    `crates/holtburger-content/src/landblock_scene_assets.rs` changed the diagnostic count to
+    `buildingTransitionApertures=35`;
+  - browser validation at the `0xf4180104` seam showed the neighboring module rendered through the
+    aperture instead of black void;
+  - this proves the immediate regression was caused by content-side duplicate aperture suppression,
+    not by an unavoidable inability of the V2 exterior-suffix path to render the paired module.
 - ACE/ACViewer physics reference supports the raw-data interpretation: ordinary env-cell portals use
   `OtherCellId` to load/check the neighboring cell, while `OtherCellId == ushort.MaxValue` is handled
   as outside-cell traversal. The authored data really does say "outside"; the missing V2 semantic is
-  detecting when two outside portals form a building-module seam.
+  preserving the building-transition apertures that let the outdoor-root/exterior-suffix composite
+  render the other side of those outside-transition seams.
 
 Current V2 code touchpoints:
 
@@ -3988,70 +4002,51 @@ Current V2 code touchpoints:
 - `apps/holtburger-3d/src/v2/runtime/direct-env-cell-frame-plan.ts`
   - `createPortalProjectionOutdoorCrossings(...)` materializes those crossings into renderer
     outdoor-crossing masks whenever the target env cell is selected/reachable.
+- `crates/holtburger-content/src/landblock_scene_assets.rs`
+  - `build_prepared_building_transition_apertures(...)` previously dropped duplicate transformed
+    building-transition apertures with `suppress_building_module_seam_transition_apertures(...)`.
+    That suppression removed exactly the apertures needed for fitted building-module seams.
 
-Likely fix direction:
+Revised fix direction:
 
-- Add a typed derived relation for **building module seam portals** before frame-plan construction.
-  The relation should be evidence-backed by:
-  - matching transformed env-cell outside-transition aperture point sets;
-  - both sides targeted by building portals;
-  - distinct env cells;
-  - preferably distinct building instances or distinct building portal source groups.
-- Treat that relation as env-cell traversal for projection purposes, not as an outdoor scene crossing.
-- Suppress the matching outdoor crossing for seam-paired outside-transition portals so real exterior
-  windows/doors still render outdoor sources while module seams traverse into the adjacent env-cell
-  island.
-- Keep the seam relation explicit in portal diagnostics so browser V2 can report how many seams were
-  derived and which outdoor crossings were suppressed. Do not hide it as a renderer-only skip.
+- Preserve duplicate building-transition apertures in prepared content. Browser V2 can use the
+  normal exterior-suffix/outdoor-root projection path to draw the adjacent module through the
+  matching outside-transition seam.
+- Keep `--module-seams` as a diagnostic audit tool so future regressions can distinguish authored
+  module seams from ordinary exterior portals.
+- Do not add a derived env-cell seam edge yet. The screenshot experiment shows it is not required for
+  the current artifact, and adding a semantic graph edge would be a larger behavior change.
+- Revisit typed seam edges only if broader samples reveal cases where preserving duplicate
+  building-transition apertures is insufficient, unstable, or causes ordering/depth artifacts.
 
 Implementation tasks:
 
-1. Promote the diagnostic predicate into V2/content contracts.
-   - Decide whether the derived seam relation belongs in `holtburger-content` prepared
-     `landblock-env-cells` output, or can be computed in V2 static/query from committed portal
-     interior records plus building-transition aperture resources.
-   - Prefer the layer/query side first if all required facts are already present there; avoid
-     changing Rust shared data unless the TS path lacks source facts.
+1. Remove content-side duplicate building-transition aperture suppression.
+   - Delete the obsolete suppression helper and tests that asserted duplicate seam apertures should
+     be dropped.
+   - Preserve all building-transition aperture ranges emitted from building portal metadata.
 
-2. Add typed seam records.
-   - Shape should identify both env-cell portal endpoints, their building portal provenance, aperture
-     geometry key/source ids, and landblock id.
-   - Do not model seam endpoints as `outside` once derived; use a distinct
-     `building-module-seam`/`outside-transition-seam` discriminant.
+2. Keep and use the seam diagnostic.
+   - `inspect_landblock_building_portals --module-seams` should continue reporting duplicate
+     outside-transition seam groups and the building portal targeting each endpoint.
+   - Use it to audit other dense building landblocks before turning this into a final regression
+     closure.
 
-3. Update projection construction.
-   - For env-cell-root projections, include seam edges in reachability and render-layer/component
-     construction as interior traversal edges.
-   - Preserve ordinary outside-transition building apertures as outdoor crossings.
-   - If two seam endpoints are mutually paired only by geometry and building portal provenance, make
-     the derived edge bidirectional unless evidence proves portal-side flags require direction.
-
-4. Suppress seam outdoor crossings.
-   - `createEnvCellOutdoorSceneCrossings(...)` should skip building-transition ranges whose target
-     env-cell portal participates in a derived module seam.
-   - Add diagnostics for seam candidate count, accepted seam edge count, and suppressed outdoor
-     crossing count.
-
-5. Add focused tests.
-   - Synthetic fixture: two env cells with duplicate outside-transition apertures, both targeted by
-     distinct building portals, should produce an env-cell projection edge and no outdoor crossing for
-     that seam.
-   - Synthetic fixture: a single building-transition portal/window with no duplicate outside portal
-     remains an outdoor crossing.
-   - Synthetic fixture: duplicate outside-transition apertures without building portal provenance are
-     reported/skipped, not silently treated as a seam.
-   - Regression target using `0xf418ffff` facts should identify the `0104/portal00` and
-     `0106/portal02` seam in diagnostics.
+3. Add or adjust focused tests.
+   - Rust/content tests should no longer assert duplicate building-transition apertures are dropped.
+   - Add a small prepared-content test if practical that duplicate building-transition apertures are
+     preserved.
+   - Keep renderer/projection tests focused on outdoor crossings and exterior suffix behavior; do not
+     add derived seam-edge expectations unless the semantic edge approach is revived.
 
 Acceptance criteria:
 
-- From camera residency `0xf4180104`, projection can traverse through the `0104/portal00` /
-  `0106/portal02` building-module seam and select the adjacent module cells instead of sampling the
-  exterior source through that aperture.
+- From camera residency `0xf4180104`, the seam at `0104/portal00` / `0106/portal02` renders the
+  adjacent module through the exterior-suffix/outdoor-root path instead of black void.
 - Real exterior building transition portals still render outdoor terrain/buildings/detail through
   authored window/door apertures.
-- The `--module-seams` harness diagnostic and V2 runtime diagnostics agree on seam counts for
-  `0xf418ffff`.
+- `inspect_landblock_building_portals -- --landblock f418ffff --module-seams` reports
+  `buildingTransitionApertures=35` and `outsideTransitionModuleSeamSummary ... seamGroups=11`.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, focused portal projection/frame-plan
   tests, and full `npm run test:ts` pass.
 - Manual browser validation confirms the black void at the `0xf4180104`/`0xf4180106` join is gone

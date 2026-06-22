@@ -84,6 +84,7 @@ import {
 	envCellResourceMembershipSnapshotsEqual,
 	type EnvCellResourceMembership,
 } from "./env-cell-resource-membership";
+import { EnvCellSystemLayerAssemblyStore } from "./env-cell-system-layer-assembly";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
@@ -558,6 +559,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#envCellResourceMembershipByLandblock = createEnvCellResourceMembershipIndex(
 		this.#envCellResourceMembership,
 	);
+	readonly #envCellSystemLayerAssembly = new EnvCellSystemLayerAssemblyStore();
 	#envCellResourceMembershipRevision = 0;
 	#envCellAabbDebugOverlayVisible = false;
 	#envCellPortalDebugOverlayVisible = false;
@@ -618,6 +620,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		);
 		this.#unsubscribeStaticSourcePayloads =
 			staticCoordinator.subscribeSourcePayloads((delta) => {
+				this.#envCellSystemLayerAssembly.ingestSourcePayload(delta);
 				this.#staticSceneQuery.ingestSourcePayload(delta.payload, {
 					outdoorAnchorLandblockId: this.#renderAnchorLandblockId,
 				});
@@ -1308,6 +1311,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 			textureUpdate,
 		});
 		this.#updateMaterializedDrawUnitIdMappings(delta, materialized);
+		this.#envCellSystemLayerAssembly.ingestMaterializedCommit(
+			delta,
+			materialized,
+		);
 		this.#refreshEnvCellResourceMembership();
 		this.#warnAboutStaticFallbacks(delta);
 		applyMaterializedStaticCommit(this.#renderer, materialized);

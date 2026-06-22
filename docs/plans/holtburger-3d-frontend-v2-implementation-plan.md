@@ -3747,7 +3747,7 @@ Dry-run update on 2026-06-22:
 
 ### Immediate Phase 13B7: Fine-Grained BSP Env-Cell Residency After BVH Candidates
 
-Status: planned.
+Status: completed.
 
 Purpose: make camera env-cell residency deterministic when landblock env-cell BVH/AABB candidates
 overlap by confirming coarse candidates against the candidate cell's BSP.
@@ -3761,20 +3761,21 @@ Problem:
 - That is not enough for tunnels, stacked/intersecting interiors, or transition-adjacent cells where
   AABBs overlap. It can pick a neighboring/overlapping env cell even when the camera point is outside
   that cell's BSP.
-- The resolver/bake source already carries `LandblockEnvCellStaticFacts.cellBsp`, but
-  `StaticEnvCellSpatialRecord` does not preserve it into runtime spatial roots yet.
+- The resolver/bake source already carries `LandblockEnvCellStaticFacts.cellBsp`; this phase now
+  preserves it, plus `localPlacement`, into committed runtime spatial roots.
 
 Grounded code touchpoints:
 
 - `apps/holtburger-3d/src/v2/static/contracts.ts`
   - `LandblockEnvCellStaticFacts.cellBsp` already references
     `LandblockEnvCellsPayloadDto["envCells"][number]["cellBsp"]`.
-  - `StaticEnvCellSpatialRecord` must gain a BSP field for runtime residency checks.
+  - `StaticEnvCellSpatialRecord` now carries BSP and placement fields for runtime residency checks.
 - `apps/holtburger-3d/src/v2/static/env-cells/bake/landblock-env-cells-baker.ts`
-  - `createSpatialRecords(...)` should copy `envCell.cellBsp` into each env-cell spatial record.
+  - `createSpatialRecords(...)` copies `envCell.cellBsp` and `envCell.localPlacement` into each
+    env-cell spatial record.
 - `apps/holtburger-3d/src/v2/runtime/static-scene-query.ts`
-  - `EnvCellLandblockBvhRoot` / `EnvCellLandblockBvhRuntimeItem` should retain the per-cell BSP.
-  - `queryEnvCellAtPoint(...)` should keep BVH/AABB as the coarse candidate generator, then run the
+  - `EnvCellLandblockBvhRoot` / `EnvCellLandblockBvhRuntimeItem` retain the per-cell BSP.
+  - `queryEnvCellAtPoint(...)` keeps BVH/AABB as the coarse candidate generator, then runs the
     BSP point classifier before selecting the resident env cell.
 - Existing frontend precedent:
   - `apps/holtburger-3d/src/lib/world-display/cell-bsp-residency.ts`
@@ -3812,7 +3813,7 @@ Implementation tasks:
    - Reuse or move the existing helpers from `src/lib/world-display/cell-bsp-residency.ts` if their
      current import boundary is acceptable. Otherwise port them into a V2-local runtime helper with
      the same semantics and tests.
-   - Use `buildAcPlacementMatrix(localPlacement, zeroOffset, unitScale)` plus `invertMat4(...)` to
+   - Use V2's `buildAcPlacementMatrix(localPlacement, unitScale)` plus `invertMat4(...)` to
      transform the landblock-local render point into cell render-local space, then convert render
      local to AC-local with the existing `{ x, y: -z, z: y }` mapping before evaluating the BSP.
    - Use the payload DTO node discriminants directly; do not flatten to ad hoc strings if a typed
@@ -3833,7 +3834,7 @@ Implementation tasks:
 
 4. Add diagnostics.
    - Track at least coarse candidate count, BSP-tested candidate count, BSP-accepted candidate count,
-     and coarse-fallback count for the most recent residency query or query snapshot.
+     and coarse-fallback count in the query snapshot.
    - Surface enough data in the diagnostics report to tell whether residency is being decided by BSP
      or by fallback.
 
@@ -3876,6 +3877,40 @@ Acceptance criteria:
 - Missing/invalid BSP data falls back to the coarse AABB result with diagnostics rather than
   returning outdoor/unknown silently.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` pass.
+
+Completion notes:
+
+- `StaticEnvCellSpatialRecord` now carries `cellBsp` and `localPlacement`, populated by
+  `LandblockEnvCellsBaker.createSpatialRecords(...)` and the V2 test commit helper.
+- `StaticSceneQuery.queryEnvCellAtPoint(...)` now:
+  - uses the committed landblock env-cell BVH/AABB pass only as a coarse candidate generator;
+  - evaluates each coarse candidate's cell BSP after transforming the landblock-local render point
+    through that candidate cell's inverse placement and converting render-local to AC-local;
+  - prefers BSP-positive candidates while retaining the old coarse winner as an explicit fallback;
+  - records cumulative coarse/tested/accepted/fallback counters in `StaticSceneQuerySnapshot`.
+- The runtime item caches the inverse cell render matrix when committed roots are rebuilt, so the
+  residency hot path does not rebuild placement matrices per query.
+- Course correction: the old `src/lib/world-display/cell-bsp-residency.ts` and
+  `src/lib/world-display/render-math.ts` helpers described the right semantics, but V2's import
+  boundary forbids importing legacy frontend implementation modules. The BSP residency classifier
+  landed V2-local in `static-scene-query.ts`; generic matrix inverse/point-transform helpers landed
+  beside V2's existing AC placement transform helper in
+  `src/v2/static/bake/ac-placement-transform.ts`.
+- Focused tests cover overlapping coarse candidates, translated env-cell placement, fallback
+  diagnostics, and existing camera residency callers through the shared query path.
+- Verification passed from `apps/holtburger-3d`:
+  - `npm run test:ts`
+  - `npm run check`
+  - `npm run lint:ts`
+  - `npm run lint:dead`
+
+Debt / follow-up:
+
+- Snapshot counters are cumulative since the query object was created or cleared. That is enough for
+  diagnostics now, but a later diagnostics phase may want per-frame or most-recent-query accounting
+  if cumulative counts are noisy in the UI.
+- The fallback path intentionally keeps residency robust for malformed BSP data. If fallback counts
+  show up often in real scenes, we should inspect the specific cells rather than masking the count.
 
 ### Phase 13C: Interior Plan Reassessment Before Dynamic Seeds
 

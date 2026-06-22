@@ -518,6 +518,10 @@ describe("V2 static scene query", () => {
 			committedEnvCellSpatialRecordCount: 2,
 			committedEnvCellVisibilityRecordCount: 1,
 			envCellLandblockCount: 1,
+			envCellResidencyBspAcceptedCandidateCount: 0,
+			envCellResidencyBspFallbackCount: 0,
+			envCellResidencyBspTestedCandidateCount: 0,
+			envCellResidencyCoarseCandidateCount: 0,
 			envCellRecordCount: 1,
 			landblockBucketCount: 1,
 			outdoorRecordCount: 0,
@@ -782,6 +786,10 @@ describe("V2 static scene query", () => {
 			committedEnvCellSpatialRecordCount: 1,
 			committedEnvCellVisibilityRecordCount: 1,
 			envCellLandblockCount: 0,
+			envCellResidencyBspAcceptedCandidateCount: 0,
+			envCellResidencyBspFallbackCount: 0,
+			envCellResidencyBspTestedCandidateCount: 0,
+			envCellResidencyCoarseCandidateCount: 0,
 			envCellRecordCount: 0,
 			landblockBucketCount: 0,
 			outdoorRecordCount: 0,
@@ -808,6 +816,131 @@ describe("V2 static scene query", () => {
 				point: { x: 40, y: 0, z: -4.5 },
 			}),
 		).toBeNull();
+	});
+
+	it("refines overlapping landblock env-cell residency candidates with cell BSPs", () => {
+		const query = new StaticSceneQuery();
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				envCells: [
+					{
+						cellBsp: createCellBspRejectingBelowX(2),
+						envCellId: 0xda550100,
+						landblockBounds: createBounds(-4, -4, -8, 4, 4, 4),
+					},
+					{
+						cellBsp: createCellBspLeaf(),
+						envCellId: 0xda550101,
+						landblockBounds: createBounds(-4, -4, -8, 4, 4, 4),
+					},
+				],
+			}),
+		);
+
+		expect(
+			query.queryEnvCellAtPoint({
+				acceptedEnvCellIds: [0xda550100, 0xda550101],
+				landblockId: 0xda55ffff,
+				point: { x: 0, y: 0, z: 0 },
+			}),
+		).toBe(0xda550101);
+		expect(query.createSnapshot()).toMatchObject({
+			envCellResidencyBspAcceptedCandidateCount: 1,
+			envCellResidencyBspFallbackCount: 0,
+			envCellResidencyBspTestedCandidateCount: 2,
+			envCellResidencyCoarseCandidateCount: 2,
+		});
+	});
+
+	it("uses port BSP planes for env-cell residency refinement", () => {
+		const query = new StaticSceneQuery();
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				envCells: [
+					{
+						cellBsp: createCellBspPortRejectingBelowX(2),
+						envCellId: 0xda550100,
+						landblockBounds: createBounds(-4, -4, -8, 4, 4, 4),
+					},
+					{
+						cellBsp: createCellBspLeaf(),
+						envCellId: 0xda550101,
+						landblockBounds: createBounds(-4, -4, -8, 4, 4, 4),
+					},
+				],
+			}),
+		);
+
+		expect(
+			query.queryEnvCellAtPoint({
+				acceptedEnvCellIds: [0xda550100, 0xda550101],
+				landblockId: 0xda55ffff,
+				point: { x: 0, y: 0, z: 0 },
+			}),
+		).toBe(0xda550101);
+	});
+
+	it("evaluates env-cell residency BSPs in the candidate cell placement space", () => {
+		const query = new StaticSceneQuery();
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				envCells: [
+					{
+						cellBsp: createCellBspRejectingBelowX(2),
+						envCellId: 0xda550100,
+						landblockBounds: createBounds(8, -4, -8, 14, 4, 4),
+						localPlacement: createPlacement({ origin: { x: 10, y: 0, z: 0 } }),
+					},
+					{
+						cellBsp: createCellBspLeaf(),
+						envCellId: 0xda550101,
+						landblockBounds: createBounds(8, -4, -8, 14, 4, 4),
+						localPlacement: createPlacement({ origin: { x: 10, y: 0, z: 0 } }),
+					},
+				],
+			}),
+		);
+
+		expect(
+			query.queryEnvCellAtPoint({
+				acceptedEnvCellIds: [0xda550100, 0xda550101],
+				landblockId: 0xda55ffff,
+				point: { x: 11, y: 0, z: 0 },
+			}),
+		).toBe(0xda550101);
+	});
+
+	it("falls back to the coarse env-cell residency candidate when all BSPs reject", () => {
+		const query = new StaticSceneQuery();
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				envCells: [
+					{
+						cellBsp: createCellBspRejectingBelowX(2),
+						envCellId: 0xda550100,
+						landblockBounds: createBounds(-4, -4, -8, 4, 4, 4),
+					},
+				],
+			}),
+		);
+
+		expect(
+			query.queryEnvCellAtPoint({
+				acceptedEnvCellIds: [0xda550100],
+				landblockId: 0xda55ffff,
+				point: { x: 0, y: 0, z: 0 },
+			}),
+		).toBe(0xda550100);
+		expect(query.createSnapshot()).toMatchObject({
+			envCellResidencyBspAcceptedCandidateCount: 0,
+			envCellResidencyBspFallbackCount: 1,
+			envCellResidencyBspTestedCandidateCount: 1,
+			envCellResidencyCoarseCandidateCount: 1,
+		});
 	});
 
 	it("exposes committed env-cell landblock BVH bounds for debug overlays", () => {
@@ -1130,8 +1263,10 @@ describe("V2 static scene query", () => {
 						environmentId: 0x0e000001,
 						kind: "environment",
 					},
+					cellBsp: createCellBspLeaf(),
 					kind: "env-cell-spatial",
 					landblockId: 0xda55ffff,
+					localPlacement: createPlacement(),
 					memberId: "cell-0",
 					owner,
 					renderBounds: null,
@@ -1906,6 +2041,7 @@ function createOutdoorStaticObject(input: {
 
 function createLandblockEnvCellsPayload(
 	options: {
+		readonly envCells?: readonly TestLandblockEnvCell[];
 		readonly envCellPlacement?: ReturnType<typeof createPlacement>;
 		readonly envCellId?: number;
 		readonly includeLandblockBvh?: boolean;
@@ -1926,32 +2062,41 @@ function createLandblockEnvCellsPayload(
 		max: { x: 1, y: 1, z: -4 },
 		min: { x: -1, y: -1, z: -5 },
 	};
-	const landblockNodeBounds = options.landblockNodeBounds ?? landblockBounds;
+	const envCells = options.envCells ?? [
+		{
+			cellBsp: createCellBspLeaf(),
+			envCellId,
+			landblockBounds,
+			localPlacement: envCellPlacement,
+			memberId: "cell-0",
+		},
+	];
+	const envCellBounds = envCells.map(
+		(cell) => cell.landblockBounds ?? landblockBounds,
+	);
+	const landblockNodeBounds =
+		options.landblockNodeBounds ?? unionTestBounds(envCellBounds);
 	return {
-		acceptedEnvCellIds: [envCellId],
-		envCells: [
-			{
-				cellBsp: {
-					kind: "leaf",
-					polyIds: [],
-					solid: 0,
-					sphere: null,
-				},
+		acceptedEnvCellIds: envCells.map((cell) => cell.envCellId),
+		envCells: envCells.map((cell, index) => {
+			const cellId = cell.envCellId;
+			return {
+				cellBsp: cell.cellBsp ?? createCellBspLeaf(),
 				cellStructure: {
-					cellStructureId: 0x0d000001,
+					cellStructureId: 0x0d000001 + index,
 					kind: "cell-structure",
 				},
 				environment: {
-					environmentId: 0x0e000001,
+					environmentId: 0x0e000001 + index,
 					kind: "environment",
 				},
 				identity: {
-					envCellId,
+					envCellId: cellId,
 					kind: "env-cell-source",
 				},
 				landblockId,
-				localPlacement: envCellPlacement,
-				memberId: "cell-0",
+				localPlacement: cell.localPlacement ?? envCellPlacement,
+				memberId: cell.memberId ?? `cell-${index}`,
 				portalApertures: options.portalApertures ?? [],
 				portals: options.portals ?? [],
 				renderGeometry: {
@@ -1973,7 +2118,7 @@ function createLandblockEnvCellsPayload(
 					{
 						debug: { sourceAssetId: "setup-model/02000010" },
 						identity: {
-							instanceId: "env-static-0",
+							instanceId: `env-static-${index}`,
 							kind: "static-object-instance",
 							landblockId,
 							objectKind: "explicit-object",
@@ -1990,8 +2135,8 @@ function createLandblockEnvCellsPayload(
 				],
 				surfaces: [],
 				visibleEnvCellIds: [],
-			},
-		],
+			};
+		}),
 		kind: "landblock-env-cells",
 		landblock: {
 			kind: "landblock-source",
@@ -2005,27 +2150,25 @@ function createLandblockEnvCellsPayload(
 			regionNumber: 1,
 		},
 		residencySpatial: {
-			landblockEnvCellBvhItemCount: includeLandblockBvh ? 1 : 0,
+			landblockEnvCellBvhItemCount: includeLandblockBvh ? envCells.length : 0,
 			landblockEnvCellBvhNodeCount: includeLandblockBvh ? 1 : 0,
 			landblockEnvCellBvh: {
 				items: includeLandblockBvh
-					? [
-							{
-								bounds: landblockBounds,
-								identity: {
-									envCellId,
-									kind: "env-cell-source",
-								},
-								memberId: "cell-0",
-								source: "env-cell-root",
+					? envCells.map((cell, index) => ({
+							bounds: cell.landblockBounds ?? landblockBounds,
+							identity: {
+								envCellId: cell.envCellId,
+								kind: "env-cell-source",
 							},
-						]
+							memberId: cell.memberId ?? `cell-${index}`,
+							source: "env-cell-root",
+						}))
 					: [],
 				nodes: includeLandblockBvh
 					? [
 							{
 								bounds: landblockNodeBounds,
-								itemIndices: [0],
+								itemIndices: envCells.map((_, index) => index),
 								kindMask: {
 									domain: "landblock-env-cells",
 									envCellRoot: true,
@@ -2039,6 +2182,93 @@ function createLandblockEnvCellsPayload(
 		},
 		visibilityDiagnostics: [],
 	};
+}
+
+type TestLandblockEnvCell = {
+	readonly cellBsp?: LandblockEnvCellsStaticScopePayload["envCells"][number]["cellBsp"];
+	readonly envCellId: number;
+	readonly landblockBounds?: LandblockEnvCellsStaticScopePayload["residencySpatial"]["landblockEnvCellBvh"]["items"][number]["bounds"];
+	readonly localPlacement?: ReturnType<typeof createPlacement>;
+	readonly memberId?: string;
+};
+
+function createCellBspLeaf(): LandblockEnvCellsStaticScopePayload["envCells"][number]["cellBsp"] {
+	return {
+		kind: "leaf",
+		polyIds: [],
+		solid: 0,
+		sphere: null,
+	};
+}
+
+function createCellBspRejectingBelowX(
+	minX: number,
+): LandblockEnvCellsStaticScopePayload["envCells"][number]["cellBsp"] {
+	return {
+		kind: "internal",
+		neg: { ...createCellBspLeaf(), solid: 1 },
+		plane: {
+			d: -minX,
+			normal: { x: 1, y: 0, z: 0 },
+		},
+		polyIds: [],
+		pos: createCellBspLeaf(),
+		sphere: null,
+		tag: "test",
+	};
+}
+
+function createCellBspPortRejectingBelowX(
+	minX: number,
+): LandblockEnvCellsStaticScopePayload["envCells"][number]["cellBsp"] {
+	return {
+		kind: "port",
+		neg: { ...createCellBspLeaf(), solid: 1 },
+		plane: {
+			d: -minX,
+			normal: { x: 1, y: 0, z: 0 },
+		},
+		polyIds: [],
+		portalPolys: [],
+		pos: createCellBspLeaf(),
+		sphere: null,
+	};
+}
+
+function createBounds(
+	minX: number,
+	minY: number,
+	minZ: number,
+	maxX: number,
+	maxY: number,
+	maxZ: number,
+): StaticBounds {
+	return {
+		max: { x: maxX, y: maxY, z: maxZ },
+		min: { x: minX, y: minY, z: minZ },
+	};
+}
+
+function unionTestBounds(bounds: readonly StaticBounds[]): StaticBounds {
+	const first = bounds[0];
+	if (!first) {
+		throw new Error("Cannot create a test bounds union without bounds.");
+	}
+	return bounds.slice(1).reduce(
+		(union, current) => ({
+			max: {
+				x: Math.max(union.max.x, current.max.x),
+				y: Math.max(union.max.y, current.max.y),
+				z: Math.max(union.max.z, current.max.z),
+			},
+			min: {
+				x: Math.min(union.min.x, current.min.x),
+				y: Math.min(union.min.y, current.min.y),
+				z: Math.min(union.min.z, current.min.z),
+			},
+		}),
+		first,
+	);
 }
 
 function createStaticPortalGraphRecord(
@@ -2332,11 +2562,13 @@ function commitLandblockEnvCells(
 			},
 		],
 		spatialRecords: payload.envCells.map((envCell) => ({
+			cellBsp: envCell.cellBsp,
 			cellStructure: envCell.cellStructure,
 			envCellId: envCell.identity.envCellId,
 			environment: envCell.environment,
 			kind: "env-cell-spatial" as const,
 			landblockId,
+			localPlacement: envCell.localPlacement,
 			memberId: envCell.memberId,
 			owner,
 			renderBounds: envCell.renderGeometry.bounds,

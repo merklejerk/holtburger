@@ -1018,11 +1018,13 @@ function createSpatialRecords(
 	payload: LandblockEnvCellsStaticScopePayload,
 ): readonly StaticSpatialRecord[] {
 	return payload.envCells.map((envCell) => ({
+		cellBsp: envCell.cellBsp,
 		cellStructure: envCell.cellStructure,
 		envCellId: envCell.identity.envCellId,
 		environment: envCell.environment,
 		kind: "env-cell-spatial",
 		landblockId: payload.landblock.landblockId,
+		localPlacement: envCell.localPlacement,
 		memberId: envCell.memberId,
 		owner,
 		renderBounds: envCell.renderGeometry.bounds,

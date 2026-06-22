@@ -822,6 +822,8 @@ export interface StaticEnvCellSpatialRecord {
 	readonly memberId: string;
 	readonly environment: EnvironmentIdentity;
 	readonly cellStructure: CellStructureIdentity;
+	readonly cellBsp: LandblockEnvCellStaticFacts["cellBsp"];
+	readonly localPlacement: LandblockEnvCellStaticFacts["localPlacement"];
 	readonly renderBounds: StaticBounds | null;
 	readonly residencyBvh: LandblockEnvCellResidencyBvhFacts;
 	readonly residencyBvhNodeCount: number;

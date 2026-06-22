@@ -32,6 +32,13 @@ import {
 	getOutdoorLandblockCoords,
 } from "../../lib/landblocks";
 import {
+	AC_UNIT_SCALE,
+	type RenderMat4,
+	buildAcPlacementMatrix,
+	invertMat4,
+	transformPointByMat4,
+} from "../static/bake/ac-placement-transform";
+import {
 	createOutdoorLandblockRootTranslation,
 	deriveOutdoorCameraLandblockResidency,
 } from "./static-placement";
@@ -225,6 +232,10 @@ export interface StaticSceneQuerySnapshot {
 	readonly committedEnvCellSourceMappingRecordCount: number;
 	readonly committedEnvCellSpatialRecordCount: number;
 	readonly committedEnvCellVisibilityRecordCount: number;
+	readonly envCellResidencyBspAcceptedCandidateCount: number;
+	readonly envCellResidencyBspFallbackCount: number;
+	readonly envCellResidencyBspTestedCandidateCount: number;
+	readonly envCellResidencyCoarseCandidateCount: number;
 }
 
 export interface RetainedOutdoorSourceLandblock {
@@ -320,7 +331,10 @@ interface EnvCellLandblockBvhRoot {
 
 interface EnvCellLandblockBvhRuntimeItem {
 	readonly bounds: StaticBounds;
+	readonly cellBsp: StaticEnvCellSpatialRecord["cellBsp"];
 	readonly envCellId: number;
+	readonly inverseCellRenderMatrix: RenderMat4;
+	readonly localPlacement: StaticEnvCellSpatialRecord["localPlacement"];
 	readonly memberId: string;
 	readonly source: "env-cell-root" | "derived";
 }
@@ -667,6 +681,10 @@ export class StaticSceneQuery {
 		number,
 		EnvCellSystemLayerPayload
 	>();
+	#envCellResidencyBspAcceptedCandidateCount = 0;
+	#envCellResidencyBspFallbackCount = 0;
+	#envCellResidencyBspTestedCandidateCount = 0;
+	#envCellResidencyCoarseCandidateCount = 0;
 
 	ingestSourcePayload(
 		payload: StaticScopePayload,
@@ -1322,6 +1340,21 @@ export class StaticSceneQuery {
 					left.nodeIndex - right.nodeIndex,
 			);
 
+		this.#envCellResidencyCoarseCandidateCount += candidates.length;
+		if (candidates.length === 0) {
+			return null;
+		}
+
+		const bspCandidates = candidates.filter((candidate) =>
+			pointInsideEnvCellResidencyBsp(candidate.item, options.point),
+		);
+		this.#envCellResidencyBspTestedCandidateCount += candidates.length;
+		this.#envCellResidencyBspAcceptedCandidateCount += bspCandidates.length;
+		if (bspCandidates.length > 0) {
+			return bspCandidates[0]?.item.envCellId ?? null;
+		}
+
+		this.#envCellResidencyBspFallbackCount += 1;
 		return candidates[0]?.item.envCellId ?? null;
 	}
 
@@ -1549,6 +1582,14 @@ export class StaticSceneQuery {
 				this.#committedSpatialRecordsByKey.size,
 			committedEnvCellVisibilityRecordCount:
 				this.#committedVisibilityRecordsByKey.size,
+			envCellResidencyBspAcceptedCandidateCount:
+				this.#envCellResidencyBspAcceptedCandidateCount,
+			envCellResidencyBspFallbackCount:
+				this.#envCellResidencyBspFallbackCount,
+			envCellResidencyBspTestedCandidateCount:
+				this.#envCellResidencyBspTestedCandidateCount,
+			envCellResidencyCoarseCandidateCount:
+				this.#envCellResidencyCoarseCandidateCount,
 			envCellLandblockCount: this.#envCellRootsByLandblockId.size,
 			envCellRecordCount,
 			outdoorRecordCount: outdoorBvhRecordCount,
@@ -1572,6 +1613,10 @@ export class StaticSceneQuery {
 		this.#committedSourceMappingsByKey.clear();
 		this.#committedAuthoredDynamicSeedRecordsByKey.clear();
 		this.#envCellPortalProjectionCacheByRootKey.clear();
+		this.#envCellResidencyBspAcceptedCandidateCount = 0;
+		this.#envCellResidencyBspFallbackCount = 0;
+		this.#envCellResidencyBspTestedCandidateCount = 0;
+		this.#envCellResidencyCoarseCandidateCount = 0;
 	}
 
 	#upsertCommittedSpatialRecords(
@@ -1750,16 +1795,24 @@ export class StaticSceneQuery {
 					landblockId,
 				});
 			}
-			const items = residencyBvh.items.map((item) =>
-				spatialRecordsByEnvCellId.has(item.identity.envCellId)
+			const items = residencyBvh.items.map((item) => {
+				const spatialRecord = spatialRecordsByEnvCellId.get(
+					item.identity.envCellId,
+				);
+				return spatialRecord
 					? {
 							bounds: item.bounds,
+							cellBsp: spatialRecord.cellBsp,
 							envCellId: item.identity.envCellId,
+							inverseCellRenderMatrix: createInverseEnvCellRenderMatrix(
+								spatialRecord.localPlacement,
+							),
+							localPlacement: spatialRecord.localPlacement,
 							memberId: item.memberId,
 							source: item.source,
 						}
-					: null,
-			);
+					: null;
+			});
 
 			rootsByLandblock.set(landblockId, {
 				acceptedEnvCellIds:
@@ -3573,6 +3626,65 @@ function containsPoint(bounds: StaticBounds, point: Vec3): boolean {
 	);
 }
 
+function pointInsideEnvCellResidencyBsp(
+	item: EnvCellLandblockBvhRuntimeItem,
+	point: Vec3,
+): boolean {
+	const cellAcLocalPoint = landblockRenderPointToCellAcLocalPoint(
+		point,
+		item.inverseCellRenderMatrix,
+	);
+	return pointInsideCellBsp(item.cellBsp, cellAcLocalPoint);
+}
+
+function createInverseEnvCellRenderMatrix(
+	localPlacement: StaticEnvCellSpatialRecord["localPlacement"],
+): RenderMat4 {
+	return invertMat4(buildAcPlacementMatrix(localPlacement, AC_UNIT_SCALE));
+}
+
+function landblockRenderPointToCellAcLocalPoint(
+	point: Vec3,
+	inverseCellRenderMatrix: RenderMat4,
+): Vec3 {
+	return renderLocalPointToAcLocalPoint(
+		transformPointByMat4(point, inverseCellRenderMatrix),
+	);
+}
+
+function renderLocalPointToAcLocalPoint(point: Vec3): Vec3 {
+	return {
+		x: point.x,
+		y: -point.z,
+		z: point.y,
+	};
+}
+
+function pointInsideCellBsp(
+	node: StaticEnvCellSpatialRecord["cellBsp"],
+	point: Vec3,
+): boolean {
+	let current: StaticEnvCellSpatialRecord["cellBsp"] | null = node;
+	while (current) {
+		if (current.kind === "leaf") {
+			return true;
+		}
+
+		const signedDistance =
+			current.plane.normal.x * point.x +
+			current.plane.normal.y * point.y +
+			current.plane.normal.z * point.z +
+			current.plane.d;
+		if (signedDistance < -CELL_BSP_PLANE_EPSILON) {
+			return false;
+		}
+
+		current = current.pos;
+	}
+
+	return true;
+}
+
 function boundsCenterDistanceSquared(
 	bounds: StaticBounds,
 	point: Vec3,
@@ -3661,3 +3773,5 @@ function normalizeVec3(vector: Vec3): Vec3 {
 		z: vector.z / length,
 	};
 }
+
+const CELL_BSP_PLANE_EPSILON = 0.0002;

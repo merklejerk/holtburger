@@ -965,6 +965,9 @@ class Webgl2Renderer implements Renderer {
 	setDebugOverlayPrimitives(
 		primitives: readonly DebugOverlayPrimitive[],
 	): void {
+		if (this.#disposed) {
+			return;
+		}
 		const overlay = createDebugOverlayVertices(primitives);
 		const gl = this.#gl;
 		gl.bindVertexArray(this.#debugOverlayVertexArray);
@@ -1061,6 +1064,9 @@ class Webgl2Renderer implements Renderer {
 	}
 
 	dispose(): void {
+		if (this.#disposed) {
+			return;
+		}
 		this.#disposed = true;
 
 		if (this.#animationFrameId !== null) {
@@ -1120,6 +1126,7 @@ class Webgl2Renderer implements Renderer {
 				this.#render(timestampMilliseconds / 1000);
 			} catch (error) {
 				this.#error = error instanceof Error ? error.message : String(error);
+				console.error("V2 WebGL2 render frame failed.", error);
 				this.#emitFrameTelemetry();
 				this.dispose();
 				return;
@@ -1135,6 +1142,7 @@ class Webgl2Renderer implements Renderer {
 
 	#render(timeSeconds: number): void {
 		this.#resizeToDisplaySize();
+		this.#resetFramebufferTransferState();
 
 		const frameTime = this.#frameState.timeSeconds || timeSeconds;
 		const pulse = 0.5 + Math.sin(frameTime * 0.7) * 0.5;
@@ -1162,6 +1170,12 @@ class Webgl2Renderer implements Renderer {
 		this.#drawDebugOverlay();
 
 		this.#frameCount += 1;
+	}
+
+	#resetFramebufferTransferState(): void {
+		const gl = this.#gl;
+		gl.colorMask(true, true, true, true);
+		gl.disable(gl.SCISSOR_TEST);
 	}
 
 	#renderSingleSurfaceResident(pulse: number): void {
@@ -1203,26 +1217,13 @@ class Webgl2Renderer implements Renderer {
 				pulse,
 				targets.width / Math.max(1, targets.height),
 			);
-			this.#copySceneDomainColorAndDepth(
-				targets.exterior,
-				targets.compositePing,
-				{
-					clearStencil: true,
-					copyStencil: false,
-				},
-			);
-			this.#stateCache.bindFramebuffer(targets.compositePing.framebuffer);
-			this.#stateCache.setViewport({
-				height: targets.compositePing.height,
-				width: targets.compositePing.width,
-				x: 0,
-				y: 0,
-			});
-			const targetAspectRatio =
-				targets.compositePing.width / Math.max(1, targets.compositePing.height);
 			this.#lastDirectEnvCellDrawCalls +=
-				this.#drawPortalProjectionFrameResources(plan, targetAspectRatio);
-			this.#blitSceneDomainColorToDisplay(targets.compositePing);
+				this.#renderOutdoorProjectionComposite(
+					plan.layeredGraph,
+					targets,
+					targets.compositePing,
+				);
+			this.#copySceneDomainColorToDisplay(targets.compositePing);
 			return;
 		}
 		if (plan.layeredGraph.outdoorCrossings.length > 0) {
@@ -1272,7 +1273,7 @@ class Webgl2Renderer implements Renderer {
 				outdoorCrossingSource,
 				targetAspectRatio,
 			);
-			this.#blitSceneDomainColorToDisplay(destination);
+			this.#copySceneDomainColorToDisplay(destination);
 			return;
 		}
 
@@ -1320,7 +1321,7 @@ class Webgl2Renderer implements Renderer {
 			aspectRatio,
 		);
 		const baseTarget = this.#getSceneDomainTarget(targets, plan.baseScene.kind);
-		this.#blitSceneDomainColorToDisplay(baseTarget);
+		this.#copySceneDomainColorToDisplay(baseTarget);
 	}
 
 	#renderExteriorSuffixComposite(
@@ -1332,51 +1333,49 @@ class Webgl2Renderer implements Renderer {
 			return targets.exterior;
 		}
 
-		let source: SceneDomainTarget = targets.exterior;
-		let destination: SceneDomainTarget = targets.compositePing;
-		for (const graph of graphs) {
-			if (source === destination) {
-				throw new Error(
-					"Exterior suffix composite source and destination targets must differ.",
-				);
-			}
-			this.#copySceneDomainColorAndDepth(targets.exterior, destination, {
-				clearStencil: true,
-				copyStencil: false,
-			});
-			this.#stateCache.bindFramebuffer(destination.framebuffer);
-			this.#stateCache.setViewport({
-				height: destination.height,
-				width: destination.width,
-				x: 0,
-				y: 0,
-			});
-			const targetAspectRatio =
-				destination.width / Math.max(1, destination.height);
-			this.#lastDirectEnvCellDrawCalls +=
-				this.#drawPortalProjectionFrameResources(
-					{
-						kind: "direct-env-cell",
-						layeredGraph: graph,
-						mode: "portal-projection",
-					},
-					targetAspectRatio,
-				);
-			this.#drawPortalProjectionOutdoorCrossings(
-				graph,
-				source,
-				targetAspectRatio,
-			);
-			this.#lastExteriorSuffixCompositePasses += 1;
-			this.#lastExteriorSuffixCompositeDepth =
-				this.#lastExteriorSuffixCompositePasses;
-			source = destination;
-			destination =
-				destination === targets.compositePing
-					? targets.compositePong
-					: targets.compositePing;
+		const graph = graphs[0];
+		if (!graph) {
+			return targets.exterior;
 		}
-		return source;
+		this.#lastDirectEnvCellDrawCalls += this.#renderOutdoorProjectionComposite(
+			graph,
+			targets,
+			targets.compositePing,
+		);
+		this.#lastExteriorSuffixCompositePasses = 1;
+		this.#lastExteriorSuffixCompositeDepth = 1;
+		return targets.compositePing;
+	}
+
+	#renderOutdoorProjectionComposite(
+		graph: PortalProjectionFrameGraphPlan,
+		targets: SceneDomainTargets,
+		destination: SceneDomainTarget,
+	): number {
+		if (graph.baseEntry.scene.kind !== "outdoor-target") {
+			throw new Error(
+				"Outdoor projection composites require an outdoor-target base graph.",
+			);
+		}
+		this.#copySceneDomainColorAndDepth(targets.exterior, destination, {
+			clearStencil: true,
+			copyStencil: false,
+		});
+		this.#stateCache.bindFramebuffer(destination.framebuffer);
+		this.#stateCache.setViewport({
+			height: destination.height,
+			width: destination.width,
+			x: 0,
+			y: 0,
+		});
+		return this.#drawPortalProjectionFrameResources(
+			{
+				kind: "direct-env-cell",
+				layeredGraph: graph,
+				mode: "portal-projection",
+			},
+			destination.width / Math.max(1, destination.height),
+		);
 	}
 
 	#renderSceneDomainTarget(
@@ -1410,30 +1409,29 @@ class Webgl2Renderer implements Renderer {
 		return drawCalls;
 	}
 
-	#blitSceneDomainColorToDisplay(target: SceneDomainTarget): void {
+	#copySceneDomainColorToDisplay(target: SceneDomainTarget): void {
 		const gl = this.#gl;
-		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, target.framebuffer);
-		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-		gl.blitFramebuffer(
-			0,
-			0,
-			target.width,
-			target.height,
-			0,
-			0,
-			gl.drawingBufferWidth,
-			gl.drawingBufferHeight,
-			gl.COLOR_BUFFER_BIT,
-			gl.NEAREST,
-		);
-		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-		this.#stateCache.invalidate();
+		this.#resetFramebufferTransferState();
+		this.#stateCache.bindFramebuffer(null);
 		this.#stateCache.setViewport({
 			height: gl.drawingBufferHeight,
 			width: gl.drawingBufferWidth,
 			x: 0,
 			y: 0,
 		});
+		this.#stateCache.setDepthState({
+			enabled: false,
+			func: gl.ALWAYS,
+			write: false,
+		});
+		this.#stateCache.setBlendState(
+			createBlendState(gl, false, gl.ONE, gl.ZERO),
+		);
+		this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
+		this.#stateCache.setStencilState(
+			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+		);
+		this.#drawSourceSceneCopy(target);
 	}
 
 	#copySceneDomainColorAndDepth(
@@ -1445,6 +1443,7 @@ class Webgl2Renderer implements Renderer {
 		},
 	): void {
 		const gl = this.#gl;
+		this.#resetFramebufferTransferState();
 		this.#stateCache.bindFramebuffer(destination.framebuffer);
 		this.#stateCache.setViewport({
 			height: destination.height,
@@ -1483,6 +1482,7 @@ class Webgl2Renderer implements Renderer {
 		destination: SceneDomainTarget,
 	): void {
 		const gl = this.#gl;
+		this.#resetFramebufferTransferState();
 		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, source.framebuffer);
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, destination.framebuffer);
 		gl.blitFramebuffer(
@@ -1507,6 +1507,7 @@ class Webgl2Renderer implements Renderer {
 		destination: SceneDomainTarget,
 	): void {
 		const gl = this.#gl;
+		this.#resetFramebufferTransferState();
 		gl.bindFramebuffer(gl.READ_FRAMEBUFFER, source.framebuffer);
 		gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, destination.framebuffer);
 		gl.blitFramebuffer(
@@ -1528,6 +1529,7 @@ class Webgl2Renderer implements Renderer {
 
 	#drawSourceSceneCopy(source: SceneDomainTarget): void {
 		const gl = this.#gl;
+		this.#resetFramebufferTransferState();
 		this.#stateCache.useProgram(this.#sourceSceneCopyProgram.program);
 		this.#stateCache.bindVertexArray(this.#sourceSceneCopyVertexArray);
 		this.#stateCache.bindTexture2D(
@@ -1815,6 +1817,7 @@ class Webgl2Renderer implements Renderer {
 					gl.KEEP,
 				),
 			);
+			this.#resetFramebufferTransferState();
 			this.#drawSourceSceneCopy(exterior);
 		}
 		this.#stateCache.setStencilState(

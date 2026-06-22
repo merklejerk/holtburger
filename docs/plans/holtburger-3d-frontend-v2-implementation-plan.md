@@ -3492,7 +3492,7 @@ Debt / next-phase carryover:
 Status: implemented for automated coverage on 2026-06-22; manual visual validation pending.
 
 Purpose: complete indoor-origin outdoor compositing by making env-cell-root outdoor crossings sample
-a bounded outside-origin portal composite, not the raw exterior target.
+the retained outdoor-root portal composite, not the raw exterior target.
 
 Problem:
 
@@ -3500,25 +3500,25 @@ Problem:
   current interior and copy the exterior target through a building transition aperture.
 - Phase 13B5 proved retained neighboring outdoor landblocks can contribute outside-to-inside portal
   projections, but that is an outdoor-origin path.
-- The current indoor-origin outdoor crossing source is effectively raw exterior. That can show
-  terrain/buildings/detail through a window, but it does not prove the suffix:
-  `inside -> outside -> inside -> outside`.
-- Reusing one exterior composite target recursively would be structurally wrong because a pass cannot
-  safely sample from the same target it is writing. The fix is a bounded suffix schedule with explicit
-  source/destination targets.
+- The current indoor-origin outdoor crossing source was effectively raw exterior. That can show
+  terrain/buildings/detail through a window, but it misses outdoor-root projected interiors that are
+  visible from outside.
+- The retained exterior source must be the same outdoor-root composite used by outdoor residency:
+  raw exterior plus retained outside-to-inside projected env cells. It must not recursively run a
+  sibling outdoor-crossing compositor while building the sampled source.
 
 Core model:
 
 ```text
 O0 = raw exterior scene target
-O1 = outside-origin portal projection composite whose nested indoor->outdoor crossings sample O0
-O2 = outside-origin portal projection composite whose nested indoor->outdoor crossings sample O1
-...
+Oe = retained outdoor-root portal projection composite over O0
+Ic = current env-cell-root frame whose indoor-origin outdoor crossings sample Oe
 
-current indoor frame = env-cell-root projection whose outdoor crossings sample On
+Oe excludes env cells already drawn by Ic so the current interior is not re-composited into its own
+window/door source.
 ```
 
-`On` is not a new demand source. It is a render-time composite over already retained terrain,
+`Oe` is not a new demand source. It is a render-time composite over already retained terrain,
 building, detail, env-cell, portal projection, aperture, and resource-membership layers.
 
 Scope:
@@ -3527,8 +3527,9 @@ Scope:
   plans.
 - Reuse the retained outdoor-root projection plans from Phase 13B5; do not add another portal graph,
   aperture resource, or transition-batch model.
-- Implement a bounded exterior suffix depth, initially `2` unless dry-run or tests prove a smaller
-  `1` is the only safe first landing.
+- Implement a depth-1 retained exterior source. Deeper
+  `inside -> outside -> inside -> outside` recursion remains explicit debt until it can reuse the
+  same outdoor-root composite operation without a sibling render path.
 - Keep demand planning unchanged:
   - `interior-cell` demand remains same-landblock `outdoor-buildings` plus `landblock-env-cells`;
   - outdoor source breadth comes only from explicit retained outdoor scene interest/LOD;
@@ -3538,7 +3539,7 @@ Scope:
 
 Non-goals:
 
-- Do not implement unbounded recursion.
+- Do not implement recursive suffix passes in this phase.
 - Do not reintroduce recursive portal-stack frame graphs.
 - Do not allocate one exterior target per outdoor crossing.
 - Do not add source filters unless visual evidence proves the installed-resource exterior target is
@@ -3574,33 +3575,27 @@ Implementation tasks:
      `env-cell` and the env-cell-root plan has `outdoorCrossings`, derive retained outdoor-root
      projection plans using the same retained outdoor source query path as Phase 13B5.
    - Combine those outdoor-root plans with `combineOutdoorPortalProjectionFramePlans(...)`.
-   - Attach the combined outdoor-root graph as the exterior suffix graph for depth `1`.
-   - For depth `2`, attach the same graph shape again as a second suffix pass, but the renderer must
-     bind its outdoor-crossing source to the previous suffix target. Do not clone demand or resource
-     state; this is only a render target/source schedule.
+   - Attach the combined outdoor-root graph as the depth-1 exterior source graph.
+   - For env-cell-origin frames, filter the retained outdoor-root graph to exclude env cells already
+     present in the current indoor frame graph. The current interior must not be re-composited into
+     the exterior source it samples through a window/door aperture.
 
 3. Renderer target schedule: completed on 2026-06-22.
-   - Add a helper such as `#renderExteriorSuffixComposite(plan, rawExteriorTarget): SceneDomainTarget`.
-   - Reuse the existing `compositePing`/`compositePong` scene-domain targets for suffix depth
-     ping-pong. They already match the color/depth-stencil format used by portal projection
-     compositing.
-   - Render `O0` by drawing the raw exterior scene target.
-   - For each suffix depth:
-     - copy the raw exterior color/depth into the destination suffix target;
-     - draw the retained outdoor-root portal projection graph into that destination;
-     - when that graph contains nested `outdoorCrossings`, sample the previous suffix source target
-       through the crossing apertures;
-     - swap source/destination for the next suffix depth.
-   - When rendering the current env-cell-root frame, choose the indoor destination target as the
-     ping/pong target that is not the final suffix source target, draw the current indoor graph there,
-     then pass the final suffix target to `#drawPortalProjectionOutdoorCrossings(...)` instead of the
-     raw exterior target.
+   - Add a helper such as `#renderOutdoorProjectionComposite(...)` that copies raw exterior
+     color/depth into a composite target, then draws the retained outdoor-root portal graph into that
+     target.
+   - Reuse the existing `compositePing` scene-domain target for the retained exterior source. No new
+     offscreen surface family is needed.
+   - When rendering the current env-cell-root frame, draw the indoor graph into a different composite
+     target, then pass the retained exterior source target to
+     `#drawPortalProjectionOutdoorCrossings(...)` instead of the raw exterior target.
 
 4. Renderer draw helper split: completed on 2026-06-22.
    - Today's outdoor-crossing copy helper already accepts an explicit source scene target:
      `#drawPortalProjectionOutdoorCrossings(graph, exterior, aspectRatio)`.
-   - Rename the parameter from `exterior` to `sourceExteriorTarget` if needed, then call the helper
-     both while building suffix composites and while rendering the current indoor frame.
+   - Use that explicit source parameter only when rendering the current indoor frame's outdoor
+     crossings. The retained exterior source itself is built with the ordinary outdoor-root composite
+     helper, not a recursive crossing-copy loop.
    - Keep stencil/depth reset behavior local to the destination target currently being composed.
 
 5. Diagnostics and safety: automated diagnostics completed on 2026-06-22; manual visual safety pass pending.
@@ -3608,8 +3603,8 @@ Implementation tasks:
      indoor-origin outdoor crossings sampled raw exterior or a suffix composite.
    - Fail loudly or fall back to raw exterior if framebuffer setup fails; do not silently skip aperture
      masks.
-   - Add a warning/test guard for accidental read/write feedback: source and destination suffix
-     targets must be different objects for each suffix pass.
+   - Add tests proving the retained exterior source is built without default-framebuffer color blits
+     or recursive outdoor-crossing copies.
 
 Implementation update on 2026-06-22:
 
@@ -3621,11 +3616,12 @@ Implementation update on 2026-06-22:
   cache key includes retained outdoor projection source identity and suffix depth, so suffix plans
   invalidate with retained outdoor source changes.
 - Runtime derives the suffix from the same retained outdoor-root projection path used by Phase 13B5,
-  combines the retained outdoor graphs, and attaches a bounded depth-2 suffix to env-cell plans that
-  have indoor-origin outdoor crossings.
-- WebGL renders `O1`/`O2` with the existing scene-domain `compositePing`/`compositePong` targets,
-  then renders the current indoor frame into the other composite target and samples the final suffix
-  target through the current outdoor-crossing apertures. No new offscreen surface family was added.
+  combines the retained outdoor graphs, and attaches a depth-1 outdoor-root composite source to
+  env-cell plans that have indoor-origin outdoor crossings.
+- WebGL now renders the exterior source with the same outdoor-root composite operation used by
+  outdoor contexts: raw exterior plus outdoor-to-indoor projected resources. The current indoor frame
+  renders into the other composite target and samples that outdoor-root composite through the current
+  outdoor-crossing apertures. No new offscreen surface family was added.
 - Renderer diagnostics now report exterior suffix depth, suffix pass count, and whether indoor-origin
   outdoor crossings sampled raw exterior or an exterior suffix composite.
 - Focused and full automated gates passed:
@@ -3638,11 +3634,12 @@ Spicy implementation notes:
 
 - The biggest miss was not the ping-pong render schedule; it was that outdoor-root projection/frame
   plans could not actually carry the outbound `outside -> inside -> outside` crossing facts. Without
-  that prerequisite, a depth-2 suffix would have been theater.
-- The suffix currently repeats the same retained outdoor graph shape for each depth. That is
-  intentional: the graph describes the retained source set, while the renderer changes only the
-  sampled source target from `O0` to the previous suffix target. Do not turn this into per-depth
-  demand expansion.
+  that prerequisite, deeper suffix composition would have been theater.
+- A later visual correction removed the depth-2 recursive suffix schedule. It was not isomorphic with
+  outdoor-root rendering because it also ran outdoor-crossing copies while building the sampled
+  exterior source. The retained exterior source is now the depth-1 outdoor-root composite result.
+  Deeper `inside -> outside -> inside -> outside` recursion remains debt until it can reuse the same
+  outdoor-root composite operation without a sibling render path.
 - The existing `interior` scene-domain target remains allocated but is not used by the direct
   env-cell suffix path. Keep an eye on it during later renderer cleanup rather than inventing a use
   for it here.
@@ -3663,8 +3660,20 @@ Post-implementation visual finding on 2026-06-22:
 - A proposed fix that made the first projected env-cell layer test against copied exterior depth was
   rejected: env-cell geometry rendered through a portal must use portal-local depth after aperture
   clipping, or carved/underground interiors fight the outdoor depth buffer. The real correction needs
-  to preserve the existing portal-layer depth reset and investigate aperture stencil coverage,
-  aperture source geometry, and suffix copy/reset ordering instead.
+  to preserve the existing portal-layer depth reset and fix stencil coverage.
+- The structural fix was hierarchical stencil ownership. Portal frame plans now carry the parent
+  render layer for mask edges and outdoor crossings. The renderer keeps ordinary portal layers in the
+  low stencil bits, requires nested masks to be drawn inside their parent layer, and uses a transient
+  high-bit marker for outdoor-crossing aperture copies. This prevents deeper apertures from stamping
+  directly onto the exterior composite while keeping env-cell geometry on portal-local depth.
+- A follow-up visual review still found drift in inside-origin exterior sources. The renderer now uses
+  a shared outdoor-root composite helper for both outdoor contexts and indoor-origin exterior sources,
+  and the default exterior suffix depth is one.
+- A later visual review showed the inside-origin exterior source could still re-composite the
+  resident interior because the exterior source is rendered from the indoor camera pose. Runtime now
+  filters the retained outdoor-root source graph for env-cell-origin frames so env cells already
+  present in the current indoor graph are excluded from the sampled exterior source. Outdoor residency
+  continues to use the unfiltered outdoor-root graph.
 
 Grounded code touchpoints:
 
@@ -3675,7 +3684,7 @@ Grounded code touchpoints:
 - `apps/holtburger-3d/src/v2/runtime/client-runtime.ts`
   - derive retained outdoor-root suffix plans for env-cell-root frames with outdoor crossings.
 - `apps/holtburger-3d/src/v2/renderer/webgl2/webgl2-renderer.ts`
-  - suffix ping-pong targets, render schedule, explicit source target for outdoor-crossing copy.
+  - shared outdoor-root composite helper, explicit source target for outdoor-crossing copy.
 - Tests:
   - `apps/holtburger-3d/src/v2/runtime/direct-env-cell-frame-plan.test.ts`;
   - `apps/holtburger-3d/src/v2/runtime/client-runtime.test.ts`;
@@ -3689,56 +3698,48 @@ Acceptance criteria:
   selected outside-visible interior cells.
 - Same-landblock indoor-origin outdoor crossing samples a suffix exterior composite, not just raw
   exterior, when retained outdoor-root portal projections are available.
-- Same-landblock `inside -> outside -> inside -> outside` is represented by bounded suffix depth in
-  renderer sequencing tests.
+- Same-landblock indoor-origin outdoor crossing samples the same outdoor-root composite result that
+  outdoor contexts render.
 - Neighbor-landblock indoor-origin outdoor crossing can sample a retained neighbor-aware suffix
   exterior composite when the neighbor outdoor-root projection is retained.
 - No interior-cell demand expands into neighboring terrain/buildings/detail/env-cell work.
-- Renderer tests prove suffix pass source and destination targets are never the same target.
+- Renderer tests prove indoor-origin exterior sources do not use default-framebuffer color blits or
+  recursive outdoor-crossing copies while building the sampled exterior source.
 - Renderer diagnostics expose suffix depth/pass execution so manual validation can prove whether the
   suffix path ran.
 - Manual validation covers at least:
   - same-LB inside-looking-out;
-  - same-LB inside-looking-out-then-into-another-interior;
   - retained neighbor-LB inside-looking-out;
-  - retained neighbor-LB inside-looking-out-then-into-another-interior.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` pass.
 
 Dry-run notes:
 
-- Start by adding the frame-plan contract and runtime derivation tests before touching WebGL. If the
-  plan cannot represent `O0 -> O1 -> O2` without per-crossing demand fields, stop and correct the
-  contract.
-- Then split the renderer outdoor-crossing copy helper to accept a source target. This should be a
-  mechanical prerequisite before suffix ping-pong targets if the helper shape changes; current code
-  already has the explicit source parameter, so this may only be a naming/readability pass.
-- Land depth `1` with automated sequencing tests first if depth `2` makes the first patch too large,
-  but keep the public contract depth-indexed so depth `2` does not require another redesign.
+- Start by adding the frame-plan contract and runtime derivation tests before touching WebGL. The
+  contract should represent one retained outdoor-root source graph for the current env-cell frame,
+  not recursive per-crossing demand.
+- Then share the renderer outdoor-root composite helper between outdoor residency and indoor-origin
+  exterior sources. If the indoor path needs a separate sibling compositor, stop and correct the
+  helper boundary.
+- Keep the contract depth-indexed only as diagnostics and future-proofing. The implemented source is
+  depth `1`; depth `2` is not accepted until it reuses the same outdoor-root composite operation
+  without recursive crossing-copy behavior.
 - Treat visual failure as evidence about render target/depth/stencil sequencing, not as permission to
   add demand expansion or a parallel transition compositor.
 
 Dry-run update on 2026-06-22:
 
 - Current WebGL already has reusable `exterior`, `interior`, `compositePing`, and `compositePong`
-  scene-domain targets. 13B6 should not add a new target family unless implementation proves the
-  existing ping/pong pair cannot preserve the final suffix source while drawing the current indoor
-  frame.
+  scene-domain targets. 13B6 should not add a new target family.
 - Current `#drawPortalProjectionOutdoorCrossings(...)` already accepts an explicit source target. The
-  implementation should thread a suffix source into that helper, not invent a parallel crossing-copy
-  path.
-- Current outdoor-root projection/frame plans do not carry outbound outdoor crossings. Depth `2` is
-  therefore not real until the projection/frame-plan prerequisite above lands.
+  current indoor frame should pass the retained exterior source into that helper.
 - Concrete target schedule:
   - `O0`: render raw exterior into `targets.exterior`;
-  - `O1`: copy `targets.exterior` into `compositePing`, draw outside-origin portal graph into
-    `compositePing`, and use `targets.exterior` as nested outdoor-crossing source;
-  - `O2`: copy `targets.exterior` into `compositePong`, draw the same outside-origin portal graph into
-    `compositePong`, and use `compositePing` as nested outdoor-crossing source;
-  - current indoor frame: choose the composite target that is not the final suffix target, draw the
-    env-cell-root graph there, then draw its outdoor crossings using the final suffix target as source.
-- If the first implementation lands only `O1`, keep the contract depth-indexed and add a skipped or
-  pending explicit `O2` test note in the plan update; do not flatten the design back to a boolean
-  "use composite exterior" flag.
+  - `Oe`: copy `targets.exterior` into `compositePing`, then draw the retained outdoor-root portal
+    graph into `compositePing`;
+  - `Ic`: draw the current env-cell-root graph into `compositePong`, then draw its outdoor crossings
+    using `Oe` as source.
+- Filter `Oe` for env-cell-origin frames so any env cell already present in `Ic` is omitted from the
+  sampled exterior source.
 
 ### Phase 13C: Interior Plan Reassessment Before Dynamic Seeds
 
@@ -4049,7 +4050,8 @@ Mitigation: picking, inspection, frame metrics, terrain visual parity, static ma
   outdoor-to-indoor and indoor-to-outdoor portal compositing still rely on resident/current-landblock
   outdoor source assumptions. Phase 13B5 was inserted before 13C to introduce a shared
   retained multi-landblock outdoor source model before declaring indoor/outdoor compositing complete.
-- 2026-06-22: Phase 13B6 landed bounded exterior suffix compositing for indoor-origin outdoor
+- 2026-06-22: Phase 13B6 landed retained exterior-source compositing for indoor-origin outdoor
   crossings. Outdoor-root projection/frame plans now retain outbound crossing facts, env-cell frame
-  plans can carry retained exterior suffix graphs, and WebGL composes depth-2 suffixes with existing
-  ping/pong scene-domain targets. Automated checks passed; manual visual validation remains open.
+  plans can carry a retained exterior source graph, and WebGL samples the same depth-1 outdoor-root
+  composite used by outdoor residency while filtering the current resident env cells from that
+  source. Automated checks passed; manual visual validation remains open.

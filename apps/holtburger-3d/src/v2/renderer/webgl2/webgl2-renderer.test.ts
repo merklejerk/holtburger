@@ -270,6 +270,26 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
+	it("resets unmanaged framebuffer write state before rendering", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+
+		gl.disabledCapabilities.length = 0;
+		pendingFrame?.(16);
+
+		expect(gl.colorMask).toHaveBeenCalledWith(true, true, true, true);
+		expect(gl.disabledCapabilities).toContain(gl.SCISSOR_TEST);
+
+		renderer.dispose();
+	});
+
 	it("publishes portal frame work plan snapshots independently from render pass execution", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
@@ -703,6 +723,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		expect(gl.drawArraysCalls).toEqual([
 			{ count: 3, first: 0, mode: gl.TRIANGLES },
 			{ count: 3, first: 0, mode: gl.TRIANGLES },
+			{ count: 3, first: 0, mode: gl.TRIANGLES },
 		]);
 		expect(gl.stencilFuncCalls).toEqual(
 			expect.arrayContaining([
@@ -715,6 +736,10 @@ describe("V2 WebGL2 structured interior rendering", () => {
 				expect.objectContaining({
 					mask: gl.DEPTH_BUFFER_BIT,
 				}),
+			]),
+		);
+		expect(gl.blitFramebufferCalls).not.toEqual(
+			expect.arrayContaining([
 				expect.objectContaining({
 					mask: gl.COLOR_BUFFER_BIT,
 				}),
@@ -849,8 +874,8 @@ describe("V2 WebGL2 structured interior rendering", () => {
 					landblockId: 0xda55ffff,
 				},
 				exteriorComposite: {
-					graphs: [exteriorPlan.layeredGraph, exteriorPlan.layeredGraph],
-					maxDepth: 2,
+					graphs: [exteriorPlan.layeredGraph],
+					maxDepth: 1,
 				},
 				nodes: [
 					{
@@ -891,15 +916,24 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		expect(latestSnapshot.sceneDomainTargets).toMatchObject({
 			active: true,
 			exteriorDrawCalls: 1,
-			exteriorSuffixCompositeDepth: 2,
-			exteriorSuffixCompositePasses: 2,
+			exteriorSuffixCompositeDepth: 1,
+			exteriorSuffixCompositePasses: 1,
 			outdoorCrossingSource: "exterior-suffix",
 		});
-		expect(latestSnapshot.directEnvCellDrawCalls).toBe(3);
+		expect(latestSnapshot.directEnvCellDrawCalls).toBe(2);
 		expect(gl.blitFramebufferCalls).toEqual(
 			expect.arrayContaining([
-				expect.objectContaining({ mask: gl.COLOR_BUFFER_BIT }),
 				expect.objectContaining({ mask: gl.DEPTH_BUFFER_BIT }),
+			]),
+		);
+		expect(gl.blitFramebufferCalls).not.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ mask: gl.COLOR_BUFFER_BIT }),
+			]),
+		);
+		expect(gl.stencilFuncCalls).toEqual(
+			expect.arrayContaining([
+				{ func: gl.EQUAL, mask: 0xff, ref: 0xfe },
 			]),
 		);
 
@@ -1129,6 +1163,49 @@ describe("V2 WebGL2 debug overlay shader contract", () => {
 			"layout(location = 1) in vec4 color;",
 		);
 		expect(DEBUG_OVERLAY_FRAGMENT_SHADER).toContain("fragColor = vColor;");
+	});
+
+	it("ignores debug overlay updates after disposal", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+		const bufferDataCallsBeforeDispose = gl.bufferData.mock.calls.length;
+
+		renderer.dispose();
+		renderer.setDebugOverlayPrimitives([
+			{
+				color: [1, 0, 0, 1],
+				id: "late-overlay",
+				kind: "aabb",
+				max: [1, 1, 1],
+				min: [0, 0, 0],
+			},
+		]);
+
+		expect(gl.bufferData.mock.calls).toHaveLength(bufferDataCallsBeforeDispose);
+	});
+
+	it("allows renderer disposal to be called more than once", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+
+		renderer.dispose();
+		renderer.dispose();
+
+		expect(gl.deleteVertexArray).toHaveBeenCalledTimes(2);
 	});
 });
 
@@ -1771,6 +1848,7 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		RG: 33319,
 		RG8: 33323,
 		RGBA: 6408,
+		SCISSOR_TEST: 3089,
 		SRC_ALPHA: 770,
 		STATIC_DRAW: 35044,
 		STENCIL_BUFFER_BIT: 1024,

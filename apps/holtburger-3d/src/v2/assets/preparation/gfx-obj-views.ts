@@ -2,7 +2,7 @@ import type { GfxObjPayloadDto } from "../../../lib/host/contracts";
 import type { PreparedAsset } from "../contracts";
 import { omitRenderGeometryVertexBuffers } from "./render-geometry-views";
 
-export type ResolverGfxObjRenderGeometryDto = Omit<
+type ResolverGfxObjRenderGeometryDto = Omit<
 	GfxObjPayloadDto["renderGeometry"],
 	"normals" | "positions" | "uvs"
 >;

@@ -105,7 +105,7 @@ type OutdoorStaticObjectLayerDrawUnit<
 	readonly domain: Domain;
 };
 
-export interface EnvCellSystemLayerResourceMembership {
+interface EnvCellSystemLayerResourceMembership {
 	readonly envCellId: number;
 	readonly envCellStaticObjectDrawUnitIds: readonly string[];
 	readonly structuredInteriorDrawUnitIds: readonly string[];
@@ -297,7 +297,7 @@ export type RendererFrameTelemetryListener = (
 	telemetry: RendererFrameTelemetry,
 ) => void;
 
-export type PortalSceneDomain =
+type PortalSceneDomain =
 	| {
 			readonly kind: "exterior";
 			readonly landblockId: number;
@@ -308,7 +308,7 @@ export type PortalSceneDomain =
 			readonly envCellId: number;
 	  };
 
-export interface PortalTransitionDepthPolicy {
+interface PortalTransitionDepthPolicy {
 	readonly maxDepth: number;
 }
 
@@ -339,7 +339,7 @@ export type PortalFrameWorkPlan =
 			readonly layeredGraph: PortalProjectionFrameGraphPlan;
 	  };
 
-export type PortalFrameEdgeId = number;
+type PortalFrameEdgeId = number;
 
 export interface PortalProjectionFrameGraphPlan {
 	readonly baseEntry: PortalProjectionFrameBaseEntryPlan;
@@ -395,7 +395,7 @@ export interface PortalProjectionFrameMaskEdgePlan {
 	readonly targetEnvCellId: number;
 }
 
-export interface PortalProjectionFrameDiagnostics {
+interface PortalProjectionFrameDiagnostics {
 	readonly componentCount: number;
 	readonly cyclicComponentCount: number;
 	readonly componentInternalEdgeCount: number;

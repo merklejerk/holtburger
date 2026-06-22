@@ -146,7 +146,7 @@ export function createStaticMaterialTableEntry(options: {
 	};
 }
 
-export function createStaticMaterialRenderState(
+function createStaticMaterialRenderState(
 	blend: StaticMaterialPlan["blend"],
 ): StaticObjectRenderState {
 	return {

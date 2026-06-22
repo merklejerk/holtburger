@@ -64,12 +64,12 @@ export type StaticResourceKey =
 	| StaticDrawUnitResourceKey
 	| StaticPortalApertureResourceKey;
 
-export interface StaticDrawUnitResourceKey {
+interface StaticDrawUnitResourceKey {
 	readonly kind: "draw-unit";
 	readonly drawUnitId: string;
 }
 
-export interface StaticPortalApertureResourceKey {
+interface StaticPortalApertureResourceKey {
 	readonly kind: "portal-aperture-resource";
 	readonly apertureResourceId: string;
 }
@@ -79,16 +79,6 @@ export function collectStaticDrawUnitResourceIds(
 ): readonly string[] {
 	return resources.flatMap((resource) =>
 		resource.kind === "draw-unit" ? [resource.drawUnitId] : [],
-	);
-}
-
-export function collectStaticPortalApertureResourceIds(
-	resources: readonly StaticResourceKey[],
-): readonly string[] {
-	return resources.flatMap((resource) =>
-		resource.kind === "portal-aperture-resource"
-			? [resource.apertureResourceId]
-			: [],
 	);
 }
 
@@ -346,11 +336,6 @@ export interface StaticVec3 {
 	readonly z: number;
 }
 
-export interface StaticPlane {
-	readonly normal: StaticVec3;
-	readonly constant: number;
-}
-
 export interface TerrainMaterialSourceFacts {
 	readonly identity: TerrainMaterialIdentity;
 	readonly materialKind: "tex-merge-table";
@@ -597,7 +582,7 @@ interface OutdoorStaticBvhItemFacts {
 	readonly object: StaticObjectInstanceFacts | null;
 }
 
-export interface StaticPlacementTransform {
+interface StaticPlacementTransform {
 	readonly origin: StaticVec3;
 	readonly orientation: StaticQuaternion;
 }
@@ -647,18 +632,18 @@ export interface LandblockEnvCellStaticFacts {
 	readonly cellBsp: LandblockEnvCellsPayloadDto["envCells"][number]["cellBsp"];
 }
 
-export type LandblockEnvCellRenderGeometryFacts = Omit<
+type LandblockEnvCellRenderGeometryFacts = Omit<
 	LandblockEnvCellsPayloadDto["envCells"][number]["renderGeometry"],
 	"normals" | "positions" | "uvs"
 >;
 
-export interface LandblockEnvCellSurfaceFacts {
+interface LandblockEnvCellSurfaceFacts {
 	readonly slotId: number;
 	readonly surfaceId: number;
 	readonly material: StaticMaterialSourceIdentity;
 }
 
-export interface LandblockEnvCellStaticObjectSeedFacts {
+interface LandblockEnvCellStaticObjectSeedFacts {
 	readonly identity: StaticObjectInstanceIdentity;
 	readonly source: StaticObjectSourceIdentity;
 	readonly sourceIndex: number;
@@ -698,7 +683,7 @@ export interface LandblockPortalLinkFacts {
 	readonly polygonId: number | null;
 }
 
-export type PortalEndpointIdentity =
+type PortalEndpointIdentity =
 	| {
 			readonly kind: "landblock-building";
 			readonly instanceId: string;
@@ -795,7 +780,7 @@ export type StaticPeerRecordOwner =
 	| StaticDrawUnitPeerRecordOwner
 	| StaticWorkPeerRecordOwner;
 
-export interface StaticDrawUnitPeerRecordOwner {
+interface StaticDrawUnitPeerRecordOwner {
 	readonly kind: "draw-unit";
 	readonly drawUnitId: string;
 }
@@ -813,7 +798,7 @@ export type StaticSpatialRecord =
 	| StaticEnvCellStaticObjectSpatialRecord
 	| StaticEnvCellSpatialRecord;
 
-export interface StaticDrawUnitSpatialRecord {
+interface StaticDrawUnitSpatialRecord {
 	readonly kind: "draw-unit-bounds";
 	readonly owner: StaticDrawUnitPeerRecordOwner;
 	readonly drawUnitId: string;
@@ -845,7 +830,7 @@ export interface StaticEnvCellSpatialRecord {
 
 export type StaticVisibilityRecord = StaticEnvCellVisibilityRecord;
 
-export interface StaticEnvCellVisibilityRecord {
+interface StaticEnvCellVisibilityRecord {
 	readonly kind: "env-cell-visibility";
 	readonly owner: StaticWorkPeerRecordOwner;
 	readonly landblockId: number;
@@ -854,7 +839,7 @@ export interface StaticEnvCellVisibilityRecord {
 	readonly diagnostics: readonly EnvCellVisibilityDiagnostic[];
 }
 
-export interface StaticEnvCellVisibleLink {
+interface StaticEnvCellVisibleLink {
 	readonly sourceEnvCellId: number;
 	readonly targetEnvCellId: number;
 }
@@ -931,7 +916,7 @@ export type StaticPortalProjectionRoot =
 			readonly rootNodeId: string;
 	  };
 
-export interface StaticPortalProjectionNode {
+interface StaticPortalProjectionNode {
 	readonly nodeId: string;
 	readonly envCellId: number;
 }
@@ -949,7 +934,7 @@ export interface StaticPortalProjectionEdge {
 	readonly provenance: StaticPortalProjectionEdgeProvenance;
 }
 
-export type StaticPortalProjectionEdgeProvenance =
+type StaticPortalProjectionEdgeProvenance =
 	| {
 			readonly kind: "building-transition";
 			readonly apertureResourceId: string;
@@ -997,7 +982,7 @@ export interface StaticPortalProjectionRenderLayer {
 	readonly envCellIds: readonly number[];
 }
 
-export interface StaticPortalProjectionEnvCellLayer {
+interface StaticPortalProjectionEnvCellLayer {
 	readonly envCellId: number;
 	readonly renderLayer: number;
 }
@@ -1016,7 +1001,7 @@ export interface StaticPortalProjectionDiagnostics {
 	readonly componentInternalEdgeCount: number;
 }
 
-export type StaticPortalGraphEdgeProvenance =
+type StaticPortalGraphEdgeProvenance =
 	| {
 			readonly kind: "env-cell-portal";
 			readonly sourceEnvCellId: number;
@@ -1032,7 +1017,7 @@ export type StaticPortalGraphEdgeProvenance =
 			readonly targetEnvCellId: number;
 	  };
 
-export type StaticPortalGraphSceneCrossing =
+type StaticPortalGraphSceneCrossing =
 	| {
 			readonly kind: "outdoor-to-env-cell";
 			readonly outdoorLandblockId: number;
@@ -1054,7 +1039,7 @@ export type StaticPortalGraphSceneCrossing =
 			readonly buildingInstanceId: string;
 	  };
 
-export interface StaticEnvCellPortalInteriorRecord {
+interface StaticEnvCellPortalInteriorRecord {
 	readonly kind: "env-cell-portal-interior";
 	readonly owner: StaticWorkPeerRecordOwner;
 	readonly landblockId: number;
@@ -1062,7 +1047,7 @@ export interface StaticEnvCellPortalInteriorRecord {
 	readonly envCells: readonly StaticEnvCellPortalSummary[];
 }
 
-export interface StaticEnvCellPortalSummary {
+interface StaticEnvCellPortalSummary {
 	readonly envCellId: number;
 	readonly localPlacement: LandblockEnvCellStaticFacts["localPlacement"];
 	readonly seenOutside: LandblockEnvCellStaticFacts["seenOutside"];
@@ -1074,14 +1059,14 @@ export type StaticSourceMappingRecord =
 	| StaticTerrainSourceTriangleMappingRecord
 	| StaticEnvCellSourceMappingRecord;
 
-export interface StaticTerrainSourceTriangleMappingRecord {
+interface StaticTerrainSourceTriangleMappingRecord {
 	readonly kind: "terrain-source-triangle";
 	readonly owner: StaticDrawUnitPeerRecordOwner;
 	readonly drawUnitId: string;
 	readonly sourceTriangleId: string;
 }
 
-export interface StaticEnvCellSourceMappingRecord {
+interface StaticEnvCellSourceMappingRecord {
 	readonly kind: "env-cell-source";
 	readonly owner: StaticWorkPeerRecordOwner;
 	readonly landblockId: number;
@@ -1095,7 +1080,7 @@ export interface StaticEnvCellSourceMappingRecord {
 export type StaticAuthoredDynamicSeedRecord =
 	StaticEnvCellStaticObjectSeedRecord;
 
-export interface StaticEnvCellStaticObjectSeedRecord {
+interface StaticEnvCellStaticObjectSeedRecord {
 	readonly kind: "env-cell-static-object-seed";
 	readonly owner: StaticWorkPeerRecordOwner;
 	readonly landblockId: number;
@@ -1411,7 +1396,7 @@ export interface StaticObjectSourceMappingCoverage {
 	readonly sourceTriangleCount: number;
 }
 
-export interface StaticNumericRange {
+interface StaticNumericRange {
 	readonly max: number;
 	readonly min: number;
 }
@@ -1585,7 +1570,7 @@ export interface StaticCoordinatorCommitDelta {
 	readonly revision: number;
 }
 
-export type PortalApertureResourceSourceKind =
+type PortalApertureResourceSourceKind =
 	| "env-cell-portal"
 	| "building-transition";
 
@@ -1604,19 +1589,19 @@ export type StaticPortalApertureRange =
 	| StaticEnvCellPortalApertureRange
 	| StaticBuildingTransitionApertureRange;
 
-export interface StaticPortalApertureRangeBase {
+interface StaticPortalApertureRangeBase {
 	readonly rangeId: string;
 	readonly sourceId: string;
 	readonly firstIndex: number;
 	readonly indexCount: number;
 }
 
-export interface StaticEnvCellPortalApertureRange extends StaticPortalApertureRangeBase {
+interface StaticEnvCellPortalApertureRange extends StaticPortalApertureRangeBase {
 	readonly source: StaticEnvCellPortalApertureRangeSource;
 	readonly sourceKind: "env-cell-portal";
 }
 
-export interface StaticEnvCellPortalApertureRangeSource {
+interface StaticEnvCellPortalApertureRangeSource {
 	readonly envCellId: number;
 	readonly kind: "env-cell-portal";
 	readonly landblockId: number;
@@ -1630,7 +1615,7 @@ export interface StaticBuildingTransitionApertureRange extends StaticPortalApert
 	readonly sourceKind: "building-transition";
 }
 
-export interface StaticBuildingTransitionApertureRangeSource {
+interface StaticBuildingTransitionApertureRangeSource {
 	readonly buildingInstanceId: string;
 	readonly buildingPortalId: string;
 	readonly buildingPortalSourceIndex: number;

@@ -122,7 +122,7 @@ export interface EnvCellStaticScenePickHit {
 	readonly selectionKey: EnvCellStaticSceneSelectionKey;
 }
 
-export interface EnvCellPortalScenePickHit {
+interface EnvCellPortalScenePickHit {
 	readonly kind: "static-scene-pick-hit";
 	readonly distance: number;
 	readonly hitPoint: Vec3;
@@ -158,19 +158,19 @@ export interface OutdoorStaticObjectSourceDiagnostics {
 	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
 }
 
-export type OutdoorStaticObjectPartDiagnostics = Omit<
+type OutdoorStaticObjectPartDiagnostics = Omit<
 	StaticObjectPartSourceFacts,
 	"normals" | "positions" | "texCoords" | "triangles"
 >;
 
-export type OutdoorStaticObjectSourceAssetDiagnostics = Omit<
+type OutdoorStaticObjectSourceAssetDiagnostics = Omit<
 	OutdoorStaticObjectsScopePayload["sourceAssets"][number],
 	"parts"
 > & {
 	readonly parts: readonly OutdoorStaticObjectPartDiagnostics[];
 };
 
-export interface OutdoorStaticObjectMaterialSlotDiagnostics {
+interface OutdoorStaticObjectMaterialSlotDiagnostics {
 	readonly material: StaticObjectMaterialSourceFacts | null;
 	readonly slot: OutdoorStaticObjectsScopePayload["materialSlots"][number];
 }
@@ -235,11 +235,6 @@ export interface Vec3 {
 	readonly x: number;
 	readonly y: number;
 	readonly z: number;
-}
-
-export interface Plane {
-	readonly normal: Vec3;
-	readonly constant: number;
 }
 
 export type StaticSceneCameraResidency =

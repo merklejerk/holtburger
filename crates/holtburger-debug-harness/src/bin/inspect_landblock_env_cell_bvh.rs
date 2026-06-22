@@ -34,6 +34,8 @@ struct Args {
     portal_reachability_root: Option<String>,
     #[arg(long, default_value_t = 16)]
     portal_reachability_max_depth: usize,
+    #[arg(long)]
+    portal_reference_cell: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -207,6 +209,9 @@ fn main() -> Result<()> {
             parse_hex_u32(root)?,
             args.portal_reachability_max_depth,
         );
+    }
+    if let Some(reference_cell) = args.portal_reference_cell.as_deref() {
+        report_portal_reference_cell(&asset.env_cells, parse_hex_u32(reference_cell)?);
     }
 
     if let Some(detail_cell) = args.detail_cell.as_deref() {
@@ -634,6 +639,123 @@ fn report_portal_reachability_layers(
             .collect::<Vec<_>>()
             .join(",")
     );
+}
+
+fn report_portal_reference_cell(
+    cells: &[holtburger_content::LandblockEnvCellBundleCell],
+    focus_env_cell_id: u32,
+) {
+    let Some(focus_cell) = cells
+        .iter()
+        .find(|cell| cell.env_cell.env_cell_id == focus_env_cell_id)
+    else {
+        println!("portalReferenceCell cell=0x{focus_env_cell_id:08x} missingCell=true");
+        return;
+    };
+
+    let portal_targets = cells
+        .iter()
+        .flat_map(|cell| {
+            cell.prepared_cell.portals.iter().map(|portal| {
+                let key = PortalKey {
+                    env_cell_id: cell.env_cell.env_cell_id,
+                    source_index: portal.source_index,
+                };
+                let target_key = portal.target_env_cell_id.and_then(|target_env_cell_id| {
+                    normalize_portal_index(portal.other_portal_id).map(|source_index| PortalKey {
+                        env_cell_id: target_env_cell_id,
+                        source_index,
+                    })
+                });
+                (key, target_key)
+            })
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let incoming_portal_refs = cells
+        .iter()
+        .flat_map(|cell| {
+            cell.prepared_cell
+                .portals
+                .iter()
+                .filter(move |portal| portal.target_env_cell_id == Some(focus_env_cell_id))
+                .map(move |portal| (cell.env_cell.env_cell_id, portal))
+        })
+        .collect::<Vec<_>>();
+    let visible_list_refs = cells
+        .iter()
+        .filter(|cell| cell.env_cell.visible_cell_ids.contains(&focus_env_cell_id))
+        .map(|cell| cell.env_cell.env_cell_id)
+        .collect::<Vec<_>>();
+    println!(
+        "portalReferenceCell cell=0x{focus_env_cell_id:08x} portals={} incomingPortalRefs={} visibleListRefs={} seenOutside={:?}",
+        focus_cell.prepared_cell.portals.len(),
+        incoming_portal_refs.len(),
+        visible_list_refs.len(),
+        focus_cell.env_cell.seen_outside
+    );
+
+    for portal in &focus_cell.prepared_cell.portals {
+        let key = PortalKey {
+            env_cell_id: focus_env_cell_id,
+            source_index: portal.source_index,
+        };
+        let target_key = portal_targets.get(&key).copied().flatten();
+        let reverse_target = target_key.and_then(|target_key| {
+            portal_targets
+                .get(&target_key)
+                .copied()
+                .flatten()
+                .map(|reverse| (target_key, reverse))
+        });
+        let reciprocal = reverse_target.is_some_and(|(_, reverse_key)| reverse_key == key);
+        println!(
+            "  outgoing portal={} index={} flags=0x{:04x} otherCell=0x{:04x} otherPortal=0x{:04x} target={} outside={} reciprocal={} targetReverse={}",
+            portal.portal_id,
+            portal.source_index,
+            portal.flags,
+            portal.other_cell_id,
+            portal.other_portal_id,
+            portal
+                .target_env_cell_id
+                .map(|id| format!("0x{id:08x}"))
+                .unwrap_or_else(|| "none".to_string()),
+            portal.is_outside_transition,
+            reciprocal,
+            reverse_target
+                .map(|(target_key, reverse_key)| {
+                    format!(
+                        "0x{:08x}/{}->0x{:08x}/{}",
+                        target_key.env_cell_id,
+                        target_key.source_index,
+                        reverse_key.env_cell_id,
+                        reverse_key.source_index
+                    )
+                })
+                .unwrap_or_else(|| "none".to_string())
+        );
+    }
+
+    for (source_env_cell_id, portal) in incoming_portal_refs {
+        println!(
+            "  incoming from=0x{source_env_cell_id:08x} portal={} index={} flags=0x{:04x} otherPortal=0x{:04x} outside={}",
+            portal.portal_id,
+            portal.source_index,
+            portal.flags,
+            portal.other_portal_id,
+            portal.is_outside_transition
+        );
+    }
+    if !visible_list_refs.is_empty() {
+        println!(
+            "  visibleListReferencedBy={}",
+            visible_list_refs
+                .iter()
+                .map(|id| format!("0x{id:08x}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

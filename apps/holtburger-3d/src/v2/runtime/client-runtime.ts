@@ -8,6 +8,15 @@ import type {
 	RendererSnapshot,
 	RenderPassPlan,
 	PortalFrameWorkPlan,
+	StaticLandblockLayerPayload,
+	StaticLandblockLayerKind,
+	TerrainLayerPayload,
+	OutdoorBuildingsLayerPayload,
+	OutdoorDetailsLayerPayload,
+} from "../renderer/types";
+import {
+	createStaticLandblockLayerGenerationId,
+	createStaticLandblockLayerKey,
 } from "../renderer/types";
 import type { DebugOverlayPrimitive, FrameState } from "../renderer/types";
 import {
@@ -49,6 +58,7 @@ import type {
 	ScheduledStaticWorkStatus,
 	StaticRetentionReconciliation,
 	StaticPortalInteriorRecord,
+	StaticResourceKey,
 	TransitionApertureBatch,
 } from "../static/contracts";
 import {
@@ -84,7 +94,10 @@ import {
 	envCellResourceMembershipSnapshotsEqual,
 	type EnvCellResourceMembership,
 } from "./env-cell-resource-membership";
-import { EnvCellSystemLayerAssemblyStore } from "./env-cell-system-layer-assembly";
+import {
+	EnvCellSystemLayerAssemblyStore,
+	type EnvCellSystemLayerAssemblyPublication,
+} from "./env-cell-system-layer-assembly";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
@@ -560,6 +573,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#envCellResourceMembership,
 	);
 	readonly #envCellSystemLayerAssembly = new EnvCellSystemLayerAssemblyStore();
+	readonly #staticLayersByKey = new Map<string, StaticLandblockLayerPayload>();
+	readonly #staticLayerKeyByResourceId = new Map<string, string>();
 	#envCellResourceMembershipRevision = 0;
 	#envCellAabbDebugOverlayVisible = false;
 	#envCellPortalDebugOverlayVisible = false;
@@ -620,7 +635,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		);
 		this.#unsubscribeStaticSourcePayloads =
 			staticCoordinator.subscribeSourcePayloads((delta) => {
-				this.#envCellSystemLayerAssembly.ingestSourcePayload(delta);
+				this.#applyEnvCellSystemLayerPublication(
+					this.#envCellSystemLayerAssembly.ingestSourcePayload(delta),
+				);
 				this.#staticSceneQuery.ingestSourcePayload(delta.payload, {
 					outdoorAnchorLandblockId: this.#renderAnchorLandblockId,
 				});
@@ -1311,9 +1328,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 			textureUpdate,
 		});
 		this.#updateMaterializedDrawUnitIdMappings(delta, materialized);
-		this.#envCellSystemLayerAssembly.ingestMaterializedCommit(
-			delta,
-			materialized,
+		this.#clearStaticLayersForRemovedResources(materialized.removedResources);
+		this.#applyMaterializedStaticLayers(delta, materialized);
+		this.#applyEnvCellSystemLayerPublications(
+			this.#envCellSystemLayerAssembly.ingestMaterializedCommit(
+				delta,
+				materialized,
+			),
 		);
 		this.#refreshEnvCellResourceMembership();
 		this.#warnAboutStaticFallbacks(delta);
@@ -1380,6 +1401,148 @@ class ClientRuntimeImpl implements ClientRuntime {
 		for (const drawUnit of materialized.staticDelta.addedDrawUnits) {
 			this.#materializedDrawUnitsById.set(drawUnit.drawUnitId, drawUnit);
 		}
+	}
+
+	#applyMaterializedStaticLayers(
+		delta: StaticCoordinatorCommitDelta,
+		materialized: StaticMaterializationResult,
+	): void {
+		for (const payload of createMaterializedLandblockLayerPayloads(
+			delta,
+			materialized,
+		)) {
+			this.#installStaticLayer(payload);
+		}
+	}
+
+	#applyEnvCellSystemLayerPublications(
+		publications: readonly EnvCellSystemLayerAssemblyPublication[],
+	): void {
+		for (const publication of publications) {
+			this.#applyEnvCellSystemLayerPublication(publication);
+		}
+	}
+
+	#applyEnvCellSystemLayerPublication(
+		publication: EnvCellSystemLayerAssemblyPublication | null,
+	): void {
+		if (!publication) {
+			return;
+		}
+
+		this.#installStaticLayer(publication.payload);
+		this.#staticSceneQuery.setEnvCellSystemLayer(publication.payload);
+		this.#setEnvCellResourceMembershipFromLayer(publication.payload);
+		this.#updateRenderPassPlan();
+	}
+
+	#installStaticLayer(payload: StaticLandblockLayerPayload): void {
+		const layerKey = createStaticLandblockLayerKey({
+			kind: payload.kind,
+			landblockId: payload.landblockId,
+		});
+		this.#unindexStaticLayerResources(layerKey);
+		this.#staticLayersByKey.set(layerKey, payload);
+		this.#indexStaticLayerResources(layerKey, payload);
+
+		switch (payload.kind) {
+			case "terrain":
+				this.#renderer.setTerrainLayer(payload.landblockId, payload);
+				break;
+			case "outdoor-buildings":
+				this.#renderer.setOutdoorBuildingsLayer(payload.landblockId, payload);
+				break;
+			case "outdoor-detail":
+				this.#renderer.setOutdoorDetailsLayer(payload.landblockId, payload);
+				break;
+			case "env-cell-system":
+				this.#renderer.setEnvCellSystemLayer(payload.landblockId, payload);
+				break;
+		}
+	}
+
+	#clearStaticLayersForRemovedResources(
+		removedResources: readonly StaticResourceKey[],
+	): void {
+		const layerKeys = new Set(
+			removedResources
+				.map((resource) =>
+					this.#staticLayerKeyByResourceId.get(resourceKeyId(resource)),
+				)
+				.filter((key): key is string => key !== undefined),
+		);
+		for (const layerKey of layerKeys) {
+			this.#clearStaticLayer(layerKey);
+		}
+	}
+
+	#clearStaticLayer(layerKey: string): void {
+		const payload = this.#staticLayersByKey.get(layerKey);
+		if (!payload) {
+			return;
+		}
+		this.#unindexStaticLayerResources(layerKey);
+		this.#staticLayersByKey.delete(layerKey);
+
+		switch (payload.kind) {
+			case "terrain":
+				this.#renderer.setTerrainLayer(payload.landblockId, null);
+				break;
+			case "outdoor-buildings":
+				this.#renderer.setOutdoorBuildingsLayer(payload.landblockId, null);
+				break;
+			case "outdoor-detail":
+				this.#renderer.setOutdoorDetailsLayer(payload.landblockId, null);
+				break;
+			case "env-cell-system":
+				this.#renderer.setEnvCellSystemLayer(payload.landblockId, null);
+				this.#staticSceneQuery.clearEnvCellSystemLayer(payload.landblockId);
+				break;
+		}
+	}
+
+	#indexStaticLayerResources(
+		layerKey: string,
+		payload: StaticLandblockLayerPayload,
+	): void {
+		for (const resourceId of collectStaticLayerResourceIds(payload)) {
+			this.#staticLayerKeyByResourceId.set(resourceId, layerKey);
+		}
+	}
+
+	#unindexStaticLayerResources(layerKey: string): void {
+		for (const [resourceId, ownerLayerKey] of Array.from(
+			this.#staticLayerKeyByResourceId,
+		)) {
+			if (ownerLayerKey === layerKey) {
+				this.#staticLayerKeyByResourceId.delete(resourceId);
+			}
+		}
+	}
+
+	#setEnvCellResourceMembershipFromLayer(
+		payload: Extract<StaticLandblockLayerPayload, { kind: "env-cell-system" }>,
+	): void {
+		const nextMembership = payload.resourceMembership.map((membership) => ({
+			envCellId: membership.envCellId,
+			envCellStaticObjectDrawUnitIds: membership.envCellStaticObjectDrawUnitIds,
+			landblockId: payload.landblockId,
+			sharedEnvCellStaticObjectDrawUnits: 0,
+			structuredInteriorDrawUnitIds: membership.structuredInteriorDrawUnitIds,
+		}));
+		if (
+			envCellResourceMembershipSnapshotsEqual(
+				this.#envCellResourceMembership,
+				nextMembership,
+			)
+		) {
+			return;
+		}
+		this.#envCellResourceMembership = nextMembership;
+		this.#envCellResourceMembershipByLandblock =
+			createEnvCellResourceMembershipIndex(this.#envCellResourceMembership);
+		this.#envCellResourceMembershipRevision += 1;
+		this.#cachedPortalFramePlan = null;
 	}
 
 	#refreshEnvCellResourceMembership(): void {
@@ -2544,6 +2707,205 @@ function applyMaterializedStaticCommit(
 		renderer.applyTexturePlacementUpdate(materialized.textureUpdate);
 	}
 	renderer.applyStaticDelta(materialized.staticDelta);
+}
+
+function createMaterializedLandblockLayerPayloads(
+	delta: StaticCoordinatorCommitDelta,
+	materialized: StaticMaterializationResult,
+): readonly (
+	| TerrainLayerPayload
+	| OutdoorBuildingsLayerPayload
+	| OutdoorDetailsLayerPayload
+)[] {
+	const payloads: (
+		| TerrainLayerPayload
+		| OutdoorBuildingsLayerPayload
+		| OutdoorDetailsLayerPayload
+	)[] = [];
+	const terrainByLandblock = new Map<
+		number,
+		TerrainLayerPayload["drawUnits"]
+	>();
+	const buildingsByLandblock = new Map<
+		number,
+		OutdoorBuildingsLayerPayload["drawUnits"]
+	>();
+	const detailByLandblock = new Map<
+		number,
+		OutdoorDetailsLayerPayload["drawUnits"]
+	>();
+
+	for (const drawUnit of materialized.staticDelta.addedDrawUnits) {
+		if (drawUnit.kind === "terrain-geometry") {
+			terrainByLandblock.set(drawUnit.landblockId, [
+				...(terrainByLandblock.get(drawUnit.landblockId) ?? []),
+				drawUnit,
+			]);
+			continue;
+		}
+		if (drawUnit.kind !== "static-object-geometry") {
+			continue;
+		}
+		if (drawUnit.domain === "outdoor-buildings") {
+			buildingsByLandblock.set(drawUnit.landblockId, [
+				...(buildingsByLandblock.get(drawUnit.landblockId) ?? []),
+				drawUnit as OutdoorBuildingsLayerPayload["drawUnits"][number],
+			]);
+			continue;
+		}
+		if (drawUnit.domain === "outdoor-detail") {
+			detailByLandblock.set(drawUnit.landblockId, [
+				...(detailByLandblock.get(drawUnit.landblockId) ?? []),
+				drawUnit as OutdoorDetailsLayerPayload["drawUnits"][number],
+			]);
+		}
+	}
+
+	for (const [landblockId, drawUnits] of terrainByLandblock) {
+		const drawUnitIds = new Set(
+			drawUnits.map((drawUnit) => drawUnit.drawUnitId),
+		);
+		payloads.push({
+			drawUnits,
+			generationId: createStaticLandblockLayerGenerationIdForRuntime(
+				"terrain",
+				landblockId,
+				delta.revision,
+			),
+			kind: "terrain",
+			landblockId,
+			materialCoverage: delta.materialCoverage.filter(
+				(coverage) =>
+					coverage.domain === "outdoor-terrain" &&
+					coverage.landblockId === landblockId,
+			),
+			sourceMappingRecords: materialized.staticSourceMappings.filter(
+				(record) =>
+					record.owner.kind === "draw-unit" &&
+					drawUnitIds.has(record.owner.drawUnitId),
+			),
+			spatialRecords: materialized.staticSpatialRecords.filter(
+				(record) =>
+					record.owner.kind === "draw-unit" &&
+					drawUnitIds.has(record.owner.drawUnitId),
+			),
+			textureUses: delta.textureUses.filter(
+				(textureUse) => textureUse.domain === "outdoor-terrain",
+			),
+		});
+	}
+	for (const [landblockId, drawUnits] of buildingsByLandblock) {
+		payloads.push({
+			drawUnits,
+			generationId: createStaticLandblockLayerGenerationIdForRuntime(
+				"outdoor-buildings",
+				landblockId,
+				delta.revision,
+			),
+			kind: "outdoor-buildings",
+			landblockId,
+			materialCoverage: delta.materialCoverage.filter(
+				(coverage) =>
+					coverage.domain === "outdoor-buildings" &&
+					coverage.landblockId === landblockId,
+			),
+			sourceMappingRecords: materialized.staticSourceMappings.filter(
+				(record) =>
+					record.owner.kind === "work" &&
+					record.owner.domain === "outdoor-buildings" &&
+					record.owner.scope.landblockId === landblockId,
+			),
+			spatialRecords: materialized.staticSpatialRecords.filter(
+				(record) =>
+					record.owner.kind === "work" &&
+					record.owner.domain === "outdoor-buildings" &&
+					record.owner.scope.landblockId === landblockId,
+			),
+			textureUses: delta.textureUses.filter(
+				(textureUse) => textureUse.domain === "outdoor-buildings",
+			),
+		});
+	}
+	for (const [landblockId, drawUnits] of detailByLandblock) {
+		payloads.push({
+			drawUnits,
+			generationId: createStaticLandblockLayerGenerationIdForRuntime(
+				"outdoor-detail",
+				landblockId,
+				delta.revision,
+			),
+			kind: "outdoor-detail",
+			landblockId,
+			materialCoverage: delta.materialCoverage.filter(
+				(coverage) =>
+					coverage.domain === "outdoor-detail" &&
+					coverage.landblockId === landblockId,
+			),
+			sourceMappingRecords: materialized.staticSourceMappings.filter(
+				(record) =>
+					record.owner.kind === "work" &&
+					record.owner.domain === "outdoor-detail" &&
+					record.owner.scope.landblockId === landblockId,
+			),
+			spatialRecords: materialized.staticSpatialRecords.filter(
+				(record) =>
+					record.owner.kind === "work" &&
+					record.owner.domain === "outdoor-detail" &&
+					record.owner.scope.landblockId === landblockId,
+			),
+			textureUses: delta.textureUses.filter(
+				(textureUse) => textureUse.domain === "outdoor-detail",
+			),
+		});
+	}
+
+	return payloads;
+}
+
+function createStaticLandblockLayerGenerationIdForRuntime(
+	kind: StaticLandblockLayerKind,
+	landblockId: number,
+	revision: number,
+): string {
+	return createStaticLandblockLayerGenerationId({
+		kind,
+		landblockId,
+		sourceKey: `runtime:${revision}`,
+	});
+}
+
+function collectStaticLayerResourceIds(
+	payload: StaticLandblockLayerPayload,
+): readonly string[] {
+	switch (payload.kind) {
+		case "terrain":
+		case "outdoor-buildings":
+		case "outdoor-detail":
+			return payload.drawUnits.map((drawUnit) => drawUnit.drawUnitId);
+		case "env-cell-system":
+			return [
+				...payload.envCellStaticObjectDrawUnits.map(
+					(drawUnit) => drawUnit.drawUnitId,
+				),
+				...payload.structuredInteriorDrawUnits.map(
+					(drawUnit) => drawUnit.drawUnitId,
+				),
+				...payload.portalApertureResources.map(
+					(resource) => resource.apertureResourceId,
+				),
+			];
+	}
+}
+
+function resourceKeyId(resource: StaticResourceKey): string {
+	switch (resource.kind) {
+		case "draw-unit":
+			return resource.drawUnitId;
+		case "portal-aperture-resource":
+			return resource.apertureResourceId;
+		case "transition-aperture-batch":
+			return resource.apertureBatchId;
+	}
 }
 
 function appendBoundedRevision(

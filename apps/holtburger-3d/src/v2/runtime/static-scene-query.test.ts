@@ -10,6 +10,7 @@ import type {
 	TerrainStaticScopePayload,
 	TransitionApertureBatch,
 } from "../static/contracts";
+import type { EnvCellSystemLayerPayload } from "../renderer/types";
 import {
 	StaticSceneQuery,
 	compareStaticSceneSelectionKeys,
@@ -1267,6 +1268,34 @@ describe("V2 static scene query", () => {
 		]);
 	});
 
+	it("reads outdoor portal projections from env-cell-system layers", () => {
+		const sourceQuery = new StaticSceneQuery();
+		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+		sourceQuery.applyStaticPeerRecords({
+			portalGraphs: [createStaticPortalGraphRecord(owner)],
+			portalInteriorRecords: [createProjectionPortalInteriorRecord(owner)],
+		});
+		sourceQuery.applyTransitionApertureBatches([
+			createProjectionTransitionApertureBatch({ targetCellLowId: 0x0100 }),
+		]);
+		const projection = sourceQuery.queryOutdoorPortalProjection({
+			landblockId: 0xda55ffff,
+		});
+		if (!projection) {
+			throw new Error("Expected source projection.");
+		}
+
+		const query = new StaticSceneQuery();
+		query.setEnvCellSystemLayer(createEnvCellSystemLayerPayload([projection]));
+
+		expect(
+			query.queryTransitionApertureBatches({ landblockId: 0xda55ffff }),
+		).toEqual([]);
+		expect(
+			query.queryOutdoorPortalProjection({ landblockId: 0xda55ffff }),
+		).toBe(projection);
+	});
+
 	it("invalidates outdoor portal projections when transition apertures change or clear runs", () => {
 		const query = new StaticSceneQuery();
 		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
@@ -2166,6 +2195,29 @@ function createProjectionPortalInteriorRecord(
 		landblockId: 0xda55ffff,
 		owner,
 		portalLinks: [],
+	};
+}
+
+function createEnvCellSystemLayerPayload(
+	portalProjectionRecords: EnvCellSystemLayerPayload["portalProjectionRecords"],
+): EnvCellSystemLayerPayload {
+	return {
+		authoredDynamicSeedRecords: [],
+		envCellStaticObjectDrawUnits: [],
+		generationId: "env-cell-system:0xda55ffff:test",
+		kind: "env-cell-system",
+		landblockId: 0xda55ffff,
+		materialCoverage: [],
+		portalApertureResources: [],
+		portalGraphRecords: [],
+		portalInteriorRecords: [],
+		portalProjectionRecords,
+		resourceMembership: [],
+		sourceMappingRecords: [],
+		spatialRecords: [],
+		structuredInteriorDrawUnits: [],
+		textureUses: [],
+		visibilityRecords: [],
 	};
 }
 

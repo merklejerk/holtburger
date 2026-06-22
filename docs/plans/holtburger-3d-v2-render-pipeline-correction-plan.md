@@ -2451,11 +2451,11 @@ Implementation update (2026-06-21, follow-up unification):
   - env-cell-root projections intentionally pass an empty building-transition aperture list because that root policy does not consume outdoor transition roots.
 - Runtime debug overlay now draws building transition apertures from env-cell-system layer portal aperture resources instead of committed transition batches.
 - Spicy bits:
-  - `StaticPortalProjectionEdge.apertureResourceId` is still semantically a portal aperture **range id**. That naming is pre-existing and still confusing, but renaming it is a separate renderer/frame-plan contract cleanup.
+  - Follow-up cleanup resolved the misleading range field name: `StaticPortalProjectionEdge` and frame mask edge plans now use `apertureRangeId` for mask/range lookup. Actual portal aperture resource ids and building-transition provenance resource ids still use `apertureResourceId`.
   - `npm run lint:dead` was used as requested. It no longer reports any transition-batch symbols, but it still fails on a broad unrelated unused-export backlog: 7 unused exports and 67 unused exported types across renderer/runtime/static contract modules. Do not treat that as transition-batch debt.
 - Debt carried to Phase 16/resteering:
   - decide whether to clean up the broader knip unused-export backlog as its own phase;
-  - decide whether to rename `StaticPortalProjectionEdge.apertureResourceId` to clarify range-id semantics.
+  - resolved: `StaticPortalProjectionEdge.apertureResourceId` was renamed to `apertureRangeId` to clarify range-id semantics.
 - Validation for this follow-up:
   - `rg` found no `TransitionApertureBatch`, `transitionApertureBatches`, `addedTransitionApertureBatches`, `transition-aperture-batch`, `apertureBatchId`, `createTransitionPortalApertureResource`, `deriveBuildingTransitionApertureBatch`, `createTransitionStaticPortalGraph`, `queryTransitionApertureBatches`, or `applyTransitionApertureBatches` under `apps/holtburger-3d/src`;
   - `npm run check`;

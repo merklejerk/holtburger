@@ -1584,7 +1584,7 @@ class Webgl2Renderer implements Renderer {
 						);
 					}
 					const apertureRange = this.#portalApertureRangesById.get(
-						edge.apertureResourceId,
+						edge.apertureRangeId,
 					);
 					if (!apertureRange) {
 						this.#warnMissingPortalProjectionPortalApertureRange(edge);
@@ -2219,14 +2219,12 @@ class Webgl2Renderer implements Renderer {
 	#warnMissingPortalProjectionPortalApertureRange(
 		edge: PortalProjectionFrameMaskEdgePlan,
 	): void {
-		if (
-			this.#warnedMissingPortalApertureRangeIds.has(edge.apertureResourceId)
-		) {
+		if (this.#warnedMissingPortalApertureRangeIds.has(edge.apertureRangeId)) {
 			return;
 		}
-		this.#warnedMissingPortalApertureRangeIds.add(edge.apertureResourceId);
+		this.#warnedMissingPortalApertureRangeIds.add(edge.apertureRangeId);
 		console.error(
-			`Portal projection edge ${edge.linkId} references missing portal aperture range ${edge.apertureResourceId}; dropping mask draw.`,
+			`Portal projection edge ${edge.linkId} references missing portal aperture range ${edge.apertureRangeId}; dropping mask draw.`,
 			{
 				apertureSourceId: edge.apertureSourceId,
 				renderEntryId: edge.renderEntryId,

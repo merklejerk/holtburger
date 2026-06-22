@@ -126,7 +126,7 @@ function createDirectEnvCellPlan(): PortalFrameWorkPlan {
 			},
 			maskEdges: [
 				{
-					apertureResourceId: "portal-aperture:f4180103",
+					apertureRangeId: "portal-aperture:f4180103",
 					apertureSourceId: "transition-portal:f4180103/01",
 					edgeId: 0,
 					linkId: "transition:f4180103/01",

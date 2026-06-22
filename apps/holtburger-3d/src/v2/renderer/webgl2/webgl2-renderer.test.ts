@@ -285,7 +285,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			baseScene: { kind: "outdoor-target", landblockId: 0xf418ffff },
 			edges: [
 				{
-					apertureResourceId: "transition-aperture:f4180103",
+					apertureRangeId: "transition-aperture:f4180103",
 					apertureSourceId: "transition-portal:f4180103/01",
 					childNodeId: 1,
 					edgeId: 0,
@@ -491,7 +491,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 				},
 				edges: [
 					{
-						apertureResourceId: "portal-aperture:a-to-b",
+						apertureRangeId: "portal-aperture:a-to-b",
 						apertureSourceId: "env-cell-portal:0xda55ffff:0xda550100:portal-a",
 						childNodeId: 1,
 						edgeId: 0,
@@ -500,7 +500,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 						sourceKind: "env-cell-portal",
 					},
 					{
-						apertureResourceId: "portal-aperture:a-to-b-side",
+						apertureRangeId: "portal-aperture:a-to-b-side",
 						apertureSourceId:
 							"env-cell-portal:0xda55ffff:0xda550100:portal-a-side",
 						childNodeId: 1,
@@ -637,7 +637,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 				},
 				edges: [
 					{
-						apertureResourceId: "transition-aperture:root",
+						apertureRangeId: "transition-aperture:root",
 						apertureSourceId:
 							"building-transition:portal-aperture-resource:da55ffff:transition-portal:0",
 						childNodeId: 1,
@@ -1379,7 +1379,7 @@ function createDirectEnvCellPortalFrameWorkPlan(options: {
 					);
 				}
 				return {
-					apertureResourceId: edge.apertureResourceId,
+					apertureRangeId: edge.apertureRangeId,
 					apertureSourceId: edge.apertureSourceId,
 					edgeId: edge.edgeId,
 					linkId: edge.linkId,
@@ -1428,7 +1428,7 @@ type DirectEnvCellFixtureApertureResource = Extract<
 >["layeredGraph"]["apertureResources"][number];
 
 interface DirectEnvCellFixtureEdge {
-	readonly apertureResourceId: string;
+	readonly apertureRangeId: string;
 	readonly apertureSourceId: string;
 	readonly childNodeId: number;
 	readonly edgeId: number;

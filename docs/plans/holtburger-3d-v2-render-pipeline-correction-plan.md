@@ -2401,6 +2401,68 @@ Acceptance criteria:
 - No production transition-specific aperture resource path remains outside source provenance or scene-domain compositing policy.
 - Dead snapshot, failure-record, dynamic upload, and compatibility shims are deleted.
 
+Implementation update (2026-06-21):
+
+- Deleted `StaticResidencyDelta` from the renderer boundary and removed the remaining `Webgl2Renderer.applyStaticDelta(...)` ingestion method.
+- Renamed the materializer output away from the renderer-delta model:
+  - `StaticMaterializationResult.materializedDrawUnits`;
+  - `portalApertureResources`;
+  - `transitionApertureBatches`;
+  - `removedResources`.
+- Updated runtime and env-cell-system assembly to consume those materialized facts directly instead of reading `materialized.staticDelta`.
+- Deleted the old transition-batch scene-domain compositor execution path:
+  - removed renderer transition aperture batch GPU residency;
+  - removed the standalone `transition-composite-work-plan` module and its compatibility tests;
+  - scene-domain rendering now renders its exterior/interior targets and blits the selected base target, while direct portal projection remains the production portal mask path.
+- Rewrote WebGL renderer tests that still covered production behavior to install terrain/env-cell-system layers. Deleted tests that only proved legacy transition-batch upload/composite behavior.
+- Follow-up cleanup removed renderer snapshot fields for transition aperture batch/aperture counts and deleted counterfactual static-layer tests that only asserted old delta fields were absent.
+- Follow-up overlay cleanup removed the separate transition-portal visibility control:
+  - the browser now has one `Portals` overlay toggle;
+  - the runtime draws env-cell portal apertures and building transition apertures together when that toggle is enabled;
+  - the direction selector remains as the portal overlay mode and filters transition aperture direction coloring.
+- Spicy bits:
+  - Superseded by the follow-up unification below: `TransitionApertureBatch` no longer exists in active app/test source.
+  - `static/portal-aperture-resources.ts` remains because it builds durable source-tagged portal aperture resources. It is no longer a frame-local dynamic VBO path.
+  - legacy renderer/runtime snapshot subscription cleanup was not tackled in this slice; no active `StaticResidencyDelta` compatibility remains, but broader snapshot API cleanup belongs in a follow-up if Phase 16 still finds dead consumers.
+- Debt carried to Phase 16/resteering:
+  - resolved by the follow-up unification below: transition batch source DTOs were removed rather than renamed.
+- Validation for this slice:
+  - `npm run test:ts -- src/v2/runtime/static-materializer.test.ts src/v2/runtime/env-cell-system-layer-assembly.test.ts src/v2/runtime/client-runtime.test.ts src/v2/renderer/webgl2/webgl2-renderer.test.ts`;
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - `npm run test:ts`.
+
+Implementation update (2026-06-21, follow-up unification):
+
+- Fully removed `TransitionApertureBatch` from the active app/test source:
+  - deleted the transition-batch contract/resource key/delta fields;
+  - deleted the batch-to-portal-aperture adapter path;
+  - replaced `building-transition-aperture-batches.ts` with direct `StaticPortalApertureResource` production in `building-transition-portal-apertures.ts`;
+  - removed `StaticMaterializationResult.transitionApertureBatches`;
+  - removed `StaticSceneQuery.applyTransitionApertureBatches(...)` and `queryTransitionApertureBatches(...)`;
+  - removed transition-batch retention/removal paths from the static coordinator;
+  - updated tests and fixtures so building transitions enter the pipeline as source-tagged portal aperture ranges.
+- Promoted building-transition provenance onto the unified aperture range variant:
+  - `StaticPortalApertureRange` now distinguishes `env-cell-portal` and `building-transition` source variants;
+  - building-transition ranges carry `targetEnvCellId`, portal/source ids, building portal ids, retail source ids, and source polygon facts needed by graph/projection/debug code.
+- Portal graph/projection construction now consumes unified portal aperture resources:
+  - `createBuildingTransitionStaticPortalGraph(...)` derives outdoor-to-env-cell graph edges from building-transition aperture ranges;
+  - outdoor-root projection root edges read building-transition ranges from `portalApertureResources`;
+  - env-cell-root projections intentionally pass an empty building-transition aperture list because that root policy does not consume outdoor transition roots.
+- Runtime debug overlay now draws building transition apertures from env-cell-system layer portal aperture resources instead of committed transition batches.
+- Spicy bits:
+  - `StaticPortalProjectionEdge.apertureResourceId` is still semantically a portal aperture **range id**. That naming is pre-existing and still confusing, but renaming it is a separate renderer/frame-plan contract cleanup.
+  - `npm run lint:dead` was used as requested. It no longer reports any transition-batch symbols, but it still fails on a broad unrelated unused-export backlog: 7 unused exports and 67 unused exported types across renderer/runtime/static contract modules. Do not treat that as transition-batch debt.
+- Debt carried to Phase 16/resteering:
+  - decide whether to clean up the broader knip unused-export backlog as its own phase;
+  - decide whether to rename `StaticPortalProjectionEdge.apertureResourceId` to clarify range-id semantics.
+- Validation for this follow-up:
+  - `rg` found no `TransitionApertureBatch`, `transitionApertureBatches`, `addedTransitionApertureBatches`, `transition-aperture-batch`, `apertureBatchId`, `createTransitionPortalApertureResource`, `deriveBuildingTransitionApertureBatch`, `createTransitionStaticPortalGraph`, `queryTransitionApertureBatches`, or `applyTransitionApertureBatches` under `apps/holtburger-3d/src`;
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - `npm run test:ts`;
+  - `npm run lint:dead` currently fails only on the unrelated unused-export backlog described above.
+
 ### Phase 16: Resteering Gate
 
 Deliverables:

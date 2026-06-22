@@ -31,11 +31,11 @@
 	import type {
 		ClientRuntime,
 		ManualStaticDomain,
+		PortalDebugOverlayMode,
 		RuntimeCameraResidency,
 		RuntimeEvent,
 		RuntimeSceneInterestSource,
 		RuntimeSnapshot,
-		TransitionApertureDebugOverlayMode,
 	} from "../v2/runtime/client-runtime";
 	import type {
 		PortalFrameWorkPlan,
@@ -118,10 +118,8 @@
 		DEFAULT_DIRECT_ENV_CELL_PORTAL_DEPTH,
 	);
 	let flatVisionModeEnabled = $state(false);
-	let transitionApertureDebugVisible = $state(false);
 	let envCellResourceInspectionInput = $state("");
-	let transitionApertureDebugMode =
-		$state<TransitionApertureDebugOverlayMode>("both");
+	let portalDebugOverlayMode = $state<PortalDebugOverlayMode>("both");
 	let terrainRadius = $state(DEFAULT_TERRAIN_LOD_RADIUS);
 	let buildingRadius = $state(DEFAULT_BUILDING_LOD_RADIUS);
 	let detailRadius = $state(DEFAULT_DETAIL_LOD_RADIUS);
@@ -176,12 +174,7 @@
 			runtime.setEnvCellPortalDebugOverlayVisible(envCellPortalDebugVisible);
 			runtime.setDirectEnvCellPortalMaxDepth(directEnvCellPortalMaxDepth);
 			runtime.setFlatVisionModeEnabled(flatVisionModeEnabled);
-			runtime.setTransitionApertureDebugOverlayVisible(
-				transitionApertureDebugVisible,
-			);
-			runtime.setTransitionApertureDebugOverlayMode(
-				transitionApertureDebugMode,
-			);
+			runtime.setPortalDebugOverlayMode(portalDebugOverlayMode);
 			cameraController = new V2BrowserCameraController({
 				initialState: cameraState,
 				onChange(nextCameraState) {
@@ -467,18 +460,10 @@
 		runtime?.setDirectEnvCellPortalMaxDepth(directEnvCellPortalMaxDepth);
 	}
 
-	function handleTransitionApertureDebugToggle(event: Event): void {
-		transitionApertureDebugVisible = (event.currentTarget as HTMLInputElement)
-			.checked;
-		runtime?.setTransitionApertureDebugOverlayVisible(
-			transitionApertureDebugVisible,
-		);
-	}
-
-	function handleTransitionApertureDebugModeChange(event: Event): void {
-		transitionApertureDebugMode = (event.currentTarget as HTMLSelectElement)
-			.value as TransitionApertureDebugOverlayMode;
-		runtime?.setTransitionApertureDebugOverlayMode(transitionApertureDebugMode);
+	function handlePortalDebugModeChange(event: Event): void {
+		portalDebugOverlayMode = (event.currentTarget as HTMLSelectElement)
+			.value as PortalDebugOverlayMode;
+		runtime?.setPortalDebugOverlayMode(portalDebugOverlayMode);
 	}
 
 	function cancelPendingCameraFocus(status: CameraFocusStatus): void {
@@ -1607,9 +1592,9 @@
 							type="checkbox"
 							onchange={handleEnvCellPortalDebugToggle}
 						/>
-						<span>Env-cell portals</span>
+						<span>Portals</span>
 						<small>
-							{snapshot?.debugOverlays.envCellPortalCount ?? 0}
+							{snapshot?.debugOverlays.portalCount ?? 0}
 						</small>
 					</label>
 					<label class="browser-v2__checkbox-row">
@@ -1640,24 +1625,12 @@
 							oninput={handleDirectEnvCellPortalMaxDepthInput}
 						/>
 					</label>
-					<label class="browser-v2__checkbox-row">
-						<input
-							checked={transitionApertureDebugVisible}
-							disabled={!runtime}
-							type="checkbox"
-							onchange={handleTransitionApertureDebugToggle}
-						/>
-						<span>Transition portals</span>
-						<small>
-							{snapshot?.debugOverlays.transitionApertureCount ?? 0}
-						</small>
-					</label>
 					<label class="browser-v2__field">
 						<span>Portal overlay</span>
 						<select
-							bind:value={transitionApertureDebugMode}
+							bind:value={portalDebugOverlayMode}
 							disabled={!runtime}
-							onchange={handleTransitionApertureDebugModeChange}
+							onchange={handlePortalDebugModeChange}
 						>
 							<option value="both">Both directions</option>
 							<option value="outdoor-to-indoor">Outdoor to indoor</option>

@@ -58,8 +58,8 @@ import type {
 	ScheduledStaticWorkStatus,
 	StaticRetentionReconciliation,
 	StaticPortalInteriorRecord,
+	StaticPortalApertureResource,
 	StaticResourceKey,
-	TransitionApertureBatch,
 } from "../static/contracts";
 import {
 	AC_UNIT_SCALE,
@@ -202,7 +202,7 @@ export interface RuntimeSnapshot {
 	readonly staticMaterialization: StaticMaterializationSnapshot;
 }
 
-export type TransitionApertureDebugOverlayMode =
+export type PortalDebugOverlayMode =
 	| "both"
 	| "outdoor-to-indoor"
 	| "indoor-to-outdoor";
@@ -210,12 +210,10 @@ export type TransitionApertureDebugOverlayMode =
 interface RuntimeDebugOverlaySnapshot {
 	readonly envCellAabbsVisible: boolean;
 	readonly envCellAabbCount: number;
-	readonly envCellPortalCount: number;
-	readonly envCellPortalsVisible: boolean;
 	readonly flatVisionModeEnabled: boolean;
-	readonly transitionApertureCount: number;
-	readonly transitionApertureMode: TransitionApertureDebugOverlayMode;
-	readonly transitionAperturesVisible: boolean;
+	readonly portalCount: number;
+	readonly portalOverlayMode: PortalDebugOverlayMode;
+	readonly portalsVisible: boolean;
 }
 
 export interface StaticSelectionDiagnosticsReport {
@@ -471,10 +469,7 @@ export interface ClientRuntime {
 	setDirectEnvCellPortalMaxDepth(maxDepth: number): void;
 	setFlatVisionModeEnabled(enabled: boolean): void;
 	setStaticLayerVisibility(visibility: RendererStaticLayerVisibility): void;
-	setTransitionApertureDebugOverlayMode(
-		mode: TransitionApertureDebugOverlayMode,
-	): void;
-	setTransitionApertureDebugOverlayVisible(visible: boolean): void;
+	setPortalDebugOverlayMode(mode: PortalDebugOverlayMode): void;
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void;
 	updateFrameState(state: FrameState): void;
 	createDiagnosticsReport(): RuntimeDiagnosticsReport;
@@ -578,9 +573,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#envCellPortalDebugOverlayVisible = false;
 	#flatVisionModeEnabled = false;
 	#directEnvCellPortalMaxDepth = DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH;
-	#transitionApertureDebugOverlayVisible = false;
-	#transitionApertureDebugOverlayMode: TransitionApertureDebugOverlayMode =
-		"both";
+	#portalDebugOverlayMode: PortalDebugOverlayMode = "both";
 	#disposed = false;
 
 	constructor(
@@ -830,24 +823,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#emit();
 	}
 
-	setTransitionApertureDebugOverlayVisible(visible: boolean): void {
+	setPortalDebugOverlayMode(mode: PortalDebugOverlayMode): void {
 		this.#assertActive();
-		if (this.#transitionApertureDebugOverlayVisible === visible) {
+		if (this.#portalDebugOverlayMode === mode) {
 			return;
 		}
-		this.#transitionApertureDebugOverlayVisible = visible;
-		this.#refreshStaticDebugOverlay();
-		this.#emit();
-	}
-
-	setTransitionApertureDebugOverlayMode(
-		mode: TransitionApertureDebugOverlayMode,
-	): void {
-		this.#assertActive();
-		if (this.#transitionApertureDebugOverlayMode === mode) {
-			return;
-		}
-		this.#transitionApertureDebugOverlayMode = mode;
+		this.#portalDebugOverlayMode = mode;
 		this.#refreshStaticDebugOverlay();
 		this.#emit();
 	}
@@ -1142,20 +1123,17 @@ class ClientRuntimeImpl implements ClientRuntime {
 					? this.#staticSceneQuery.queryEnvCellAabbDebugBounds().length
 					: 0,
 				envCellAabbsVisible: this.#envCellAabbDebugOverlayVisible,
-				envCellPortalCount: this.#envCellPortalDebugOverlayVisible
+				flatVisionModeEnabled: this.#flatVisionModeEnabled,
+				portalCount: this.#envCellPortalDebugOverlayVisible
 					? countEnvCellPortalApertures(
 							this.#staticSceneQuery.queryPortalInteriorRecords(),
+						) +
+						countBuildingTransitionApertures(
+							this.#staticSceneQuery.queryEnvCellSystemLayers(),
 						)
 					: 0,
-				envCellPortalsVisible: this.#envCellPortalDebugOverlayVisible,
-				flatVisionModeEnabled: this.#flatVisionModeEnabled,
-				transitionApertureCount: this.#transitionApertureDebugOverlayVisible
-					? countTransitionApertures(
-							this.#staticSceneQuery.queryTransitionApertureBatches(),
-						)
-					: 0,
-				transitionApertureMode: this.#transitionApertureDebugOverlayMode,
-				transitionAperturesVisible: this.#transitionApertureDebugOverlayVisible,
+				portalOverlayMode: this.#portalDebugOverlayMode,
+				portalsVisible: this.#envCellPortalDebugOverlayVisible,
 			},
 			host: this.#host.createSnapshot(),
 			portalFrameWorkPlan: this.#currentPortalFrameWorkPlan,
@@ -1346,9 +1324,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 			spatialRecords: materialized.staticSpatialRecords,
 			visibilityRecords: materialized.staticVisibilityRecords,
 		});
-		this.#staticSceneQuery.applyTransitionApertureBatches(
-			materialized.staticDelta.addedTransitionApertureBatches,
-		);
 		this.#updateRenderPassPlan();
 		this.#refreshStaticDebugOverlay();
 		this.#pendingStaticMaterializations.delete(delta.revision);
@@ -1396,7 +1371,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				mapping.materializedDrawUnitIds,
 			);
 		}
-		for (const drawUnit of materialized.staticDelta.addedDrawUnits) {
+		for (const drawUnit of materialized.materializedDrawUnits) {
 			this.#materializedDrawUnitsById.set(drawUnit.drawUnitId, drawUnit);
 		}
 	}
@@ -1617,18 +1592,18 @@ class ClientRuntimeImpl implements ClientRuntime {
 				);
 			}
 		}
-		if (this.#transitionApertureDebugOverlayVisible) {
-			for (const batch of this.#staticSceneQuery.queryTransitionApertureBatches()) {
-				primitives.push(
-					...createTransitionApertureDebugOverlayPrimitives(
-						batch,
-						this.#renderAnchorLandblockId,
-						this.#transitionApertureDebugOverlayMode,
-					),
-				);
-			}
-		}
 		if (this.#envCellPortalDebugOverlayVisible) {
+			for (const layer of this.#staticSceneQuery.queryEnvCellSystemLayers()) {
+				for (const resource of layer.portalApertureResources) {
+					primitives.push(
+						...createBuildingTransitionApertureDebugOverlayPrimitives(
+							resource,
+							this.#renderAnchorLandblockId,
+							this.#portalDebugOverlayMode,
+						),
+					);
+				}
+			}
 			for (const record of this.#staticSceneQuery.queryPortalInteriorRecords()) {
 				primitives.push(
 					...createEnvCellPortalDebugOverlayPrimitives(
@@ -2456,24 +2431,30 @@ function createEnvCellAabbDebugOverlayPrimitive(
 	};
 }
 
-function createTransitionApertureDebugOverlayPrimitives(
-	batch: TransitionApertureBatch,
+function createBuildingTransitionApertureDebugOverlayPrimitives(
+	resource: StaticPortalApertureResource,
 	renderAnchorLandblockId: number | null,
-	mode: TransitionApertureDebugOverlayMode,
+	mode: PortalDebugOverlayMode,
 ): DebugOverlayPrimitive[] {
+	if (resource.sourceDomain !== "outdoor-buildings") {
+		return [];
+	}
 	const primitives: DebugOverlayPrimitive[] = [];
 	const translation = createOutdoorLandblockRootTranslation(
-		batch.landblockId,
+		resource.landblockId,
 		renderAnchorLandblockId,
 	);
-	for (const range of batch.ranges) {
-		const storedWindingVertices = readTransitionApertureRangeVertices(
-			batch,
+	for (const range of resource.ranges) {
+		if (range.sourceKind !== "building-transition") {
+			continue;
+		}
+		const storedWindingVertices = readPortalApertureRangeVertices(
+			resource,
 			range.firstIndex,
 			range.indexCount,
 			translation,
 		);
-		const baseId = `transition-aperture:${formatHex32(batch.landblockId)}:${describeTransitionApertureRangeSource(range.source)}:${range.portalId}`;
+		const baseId = `transition-aperture:${formatHex32(resource.landblockId)}:${describeBuildingTransitionApertureRangeSource(range.source)}:${range.source.portalId}`;
 		if (mode === "both" || mode === "indoor-to-outdoor") {
 			primitives.push({
 				color: [0.95, 0.12, 0.08, 0.35],
@@ -2495,9 +2476,13 @@ function createTransitionApertureDebugOverlayPrimitives(
 	return primitives;
 }
 
-function describeTransitionApertureRangeSource(
-	source: TransitionApertureBatch["ranges"][number]["source"],
-): string {
+function describeBuildingTransitionApertureRangeSource(source: {
+	readonly buildingInstanceId: string;
+	readonly buildingPortalId: string;
+	readonly portalIndex: number;
+	readonly polyId: number;
+	readonly sourceDid: number;
+}): string {
 	return [
 		"building",
 		source.buildingInstanceId,
@@ -2508,20 +2493,20 @@ function describeTransitionApertureRangeSource(
 	].join(":");
 }
 
-function readTransitionApertureRangeVertices(
-	batch: TransitionApertureBatch,
+function readPortalApertureRangeVertices(
+	resource: StaticPortalApertureResource,
 	firstIndex: number,
 	indexCount: number,
 	translation: readonly [number, number, number],
 ): readonly (readonly [number, number, number])[] {
 	const vertices: Array<readonly [number, number, number]> = [];
 	for (let indexOffset = 0; indexOffset < indexCount; indexOffset += 1) {
-		const vertexIndex = batch.indices[firstIndex + indexOffset];
+		const vertexIndex = resource.indices[firstIndex + indexOffset];
 		const vertex =
-			vertexIndex === undefined ? undefined : batch.vertices[vertexIndex];
+			vertexIndex === undefined ? undefined : resource.vertices[vertexIndex];
 		if (!vertex) {
 			throw new Error(
-				`Transition aperture batch ${batch.apertureBatchId} has invalid index at ${firstIndex + indexOffset}.`,
+				`Portal aperture resource ${resource.apertureResourceId} has invalid index at ${firstIndex + indexOffset}.`,
 			);
 		}
 		vertices.push([
@@ -2628,10 +2613,24 @@ function transformEnvCellPortalPoint(
 	];
 }
 
-function countTransitionApertures(
-	batches: readonly TransitionApertureBatch[],
+function countBuildingTransitionApertures(
+	layers: readonly {
+		readonly portalApertureResources: readonly StaticPortalApertureResource[];
+	}[],
 ): number {
-	return batches.reduce((count, batch) => count + batch.ranges.length, 0);
+	return layers.reduce(
+		(layerCount, layer) =>
+			layerCount +
+			layer.portalApertureResources.reduce(
+				(resourceCount, resource) =>
+					resourceCount +
+					resource.ranges.filter(
+						(range) => range.sourceKind === "building-transition",
+					).length,
+				0,
+			),
+		0,
+	);
 }
 
 function countEnvCellPortalApertures(
@@ -2733,7 +2732,7 @@ function createMaterializedLandblockLayerPayloads(
 		OutdoorDetailsLayerPayload["drawUnits"]
 	>();
 
-	for (const drawUnit of materialized.staticDelta.addedDrawUnits) {
+	for (const drawUnit of materialized.materializedDrawUnits) {
 		if (drawUnit.kind === "terrain-geometry") {
 			terrainByLandblock.set(drawUnit.landblockId, [
 				...(terrainByLandblock.get(drawUnit.landblockId) ?? []),
@@ -2901,8 +2900,6 @@ function resourceKeyId(resource: StaticResourceKey): string {
 			return resource.drawUnitId;
 		case "portal-aperture-resource":
 			return resource.apertureResourceId;
-		case "transition-aperture-batch":
-			return resource.apertureBatchId;
 	}
 }
 

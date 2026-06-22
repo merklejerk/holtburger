@@ -17,7 +17,6 @@ import type {
 	OutdoorBuildingsLayerPayload,
 	OutdoorDetailsLayerPayload,
 	RendererStaticLayerVisibility,
-	StaticResidencyDelta,
 	TerrainLayerPayload,
 	TextureDrawUnitBinding,
 	TexturePlacementUpdate,
@@ -41,7 +40,6 @@ import type {
 	StaticPortalApertureRange,
 	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
-	TransitionApertureBatch,
 } from "../../static/contracts";
 import {
 	type TextureFilteringMode,
@@ -76,12 +74,6 @@ import {
 	type TerrainPreparedLayeredPayloadState,
 	type TerrainPreparedRolePageBindings,
 } from "./webgl2-terrain-payloads";
-import {
-	planTransitionCompositeWork,
-	type TransitionCompositeApertureBatchInput,
-	type TransitionCompositeCullFace,
-	type TransitionCompositeDepthWork,
-} from "../transition-composite-work-plan";
 
 type DirectEnvCellPortalFrameWorkPlan = Extract<
 	PortalFrameWorkPlan,
@@ -130,7 +122,6 @@ interface StaticLayerResourceOwnership {
 	readonly drawUnitIds: Set<string>;
 	readonly portalApertureResourceIds: Set<string>;
 	readonly textureBindingDrawUnitIds: Set<string>;
-	readonly transitionApertureBatchIds: Set<string>;
 }
 
 const defaultFrameState: FrameState = {
@@ -752,10 +743,6 @@ class Webgl2Renderer implements Renderer {
 		string,
 		Set<string>
 	>();
-	readonly #transitionApertureResources = new Map<
-		string,
-		TransitionApertureGeometryResource
-	>();
 	readonly #portalApertureResources = new Map<
 		string,
 		PortalApertureGeometryResource
@@ -842,75 +829,6 @@ class Webgl2Renderer implements Renderer {
 		this.#debugOverlayVertexBuffer = vertexBuffer;
 		this.#configureDebugOverlayVertexArray();
 		this.#startFrameLoop();
-	}
-
-	applyStaticDelta(delta: StaticResidencyDelta): void {
-		for (const apertureResourceId of delta.removedPortalApertureResourceIds ??
-			[]) {
-			this.#removePortalApertureResource(apertureResourceId);
-		}
-		for (const apertureBatchId of delta.removedTransitionApertureBatchIds) {
-			const resource = this.#transitionApertureResources.get(apertureBatchId);
-			if (!resource) {
-				continue;
-			}
-			resource.dispose();
-			this.#transitionApertureResources.delete(apertureBatchId);
-		}
-
-		for (const drawUnitId of delta.removedDrawUnitIds) {
-			const terrainResource = this.#terrainResources.get(drawUnitId);
-			if (terrainResource) {
-				terrainResource.dispose();
-				this.#terrainResources.delete(drawUnitId);
-				this.#warnedLayeredFallbackDrawUnitIds.delete(drawUnitId);
-			}
-			this.#removeStaticObjectResource(drawUnitId);
-			this.#removeStructuredInteriorResource(drawUnitId);
-			this.#textureBindings.delete(drawUnitId);
-		}
-
-		for (const drawUnit of delta.addedDrawUnits) {
-			this.#terrainResources.get(drawUnit.drawUnitId)?.dispose();
-			this.#terrainResources.delete(drawUnit.drawUnitId);
-			this.#removeStaticObjectResource(drawUnit.drawUnitId);
-			this.#removeStructuredInteriorResource(drawUnit.drawUnitId);
-
-			if (drawUnit.kind === "terrain-geometry") {
-				this.#terrainResources.set(
-					drawUnit.drawUnitId,
-					createTerrainGeometryResource(this.#gl, drawUnit),
-				);
-			} else if (drawUnit.kind === "static-object-geometry") {
-				this.#addStaticObjectResource(
-					createStaticObjectGeometryResource(this.#gl, drawUnit),
-				);
-			} else if (drawUnit.kind === "structured-interior-geometry") {
-				this.#addStructuredInteriorResource(
-					createStructuredInteriorGeometryResource(this.#gl, drawUnit),
-				);
-			}
-		}
-
-		for (const batch of delta.addedTransitionApertureBatches) {
-			this.#transitionApertureResources.get(batch.apertureBatchId)?.dispose();
-			this.#transitionApertureResources.set(
-				batch.apertureBatchId,
-				createTransitionApertureGeometryResource(this.#gl, batch),
-			);
-		}
-		for (const resource of delta.addedPortalApertureResources ?? []) {
-			this.#addPortalApertureResource(resource);
-		}
-		if (
-			delta.addedDrawUnits.length > 0 ||
-			(delta.addedPortalApertureResources ?? []).length > 0 ||
-			delta.addedTransitionApertureBatches.length > 0 ||
-			(delta.removedPortalApertureResourceIds ?? []).length > 0 ||
-			delta.removedTransitionApertureBatchIds.length > 0
-		) {
-			this.#stateCache.invalidate();
-		}
 	}
 
 	applyDynamicDelta(): void {
@@ -1153,9 +1071,6 @@ class Webgl2Renderer implements Renderer {
 		for (const resource of this.#structuredInteriorResources.values()) {
 			resource.dispose();
 		}
-		for (const resource of this.#transitionApertureResources.values()) {
-			resource.dispose();
-		}
 		for (const resource of this.#portalApertureResources.values()) {
 			resource.dispose();
 		}
@@ -1167,7 +1082,6 @@ class Webgl2Renderer implements Renderer {
 		this.#structuredInteriorResources.clear();
 		this.#structuredInteriorResourceIdsByEnvCellKey.clear();
 		this.#envCellStaticObjectResourceIdsByEnvCellKey.clear();
-		this.#transitionApertureResources.clear();
 		this.#portalApertureResources.clear();
 		this.#portalApertureRangesById.clear();
 		this.#textures.clear();
@@ -1346,190 +1260,8 @@ class Webgl2Renderer implements Renderer {
 			pulse,
 			aspectRatio,
 		);
-		const workPlan = planTransitionCompositeWork({
-			apertureBatches: this.#createTransitionCompositeApertureBatchInputs(),
-			renderPassPlan: plan,
-		});
 		const baseTarget = this.#getSceneDomainTarget(targets, plan.baseScene.kind);
-		if (workPlan.kind === "none" || workPlan.apertureBatchIds.length === 0) {
-			this.#blitSceneDomainColorToDisplay(baseTarget);
-			return;
-		}
-		this.#executeTransitionCompositeWork(
-			targets,
-			workPlan.depthWork,
-			baseTarget,
-		);
-	}
-
-	#createTransitionCompositeApertureBatchInputs(): readonly TransitionCompositeApertureBatchInput[] {
-		return [...this.#transitionApertureResources.values()].map((resource) => ({
-			apertureBatchId: resource.apertureBatchId,
-			frontFace: resource.frontFace,
-			indexCount: resource.indexCount,
-			landblockId: resource.landblockId,
-			rangeCount: resource.ranges.length,
-		}));
-	}
-
-	#executeTransitionCompositeWork(
-		targets: SceneDomainTargets,
-		depthWork: readonly TransitionCompositeDepthWork[],
-		baseTarget: SceneDomainTarget,
-	): void {
-		const gl = this.#gl;
-		if (depthWork.length === 0) {
-			this.#blitSceneDomainColorToDisplay(baseTarget);
-			return;
-		}
-
-		let compositeRead = targets.compositePing;
-		let compositeWrite = targets.compositePong;
-		this.#copySceneDomainColorAndDepth(baseTarget, compositeRead, {
-			clearStencil: true,
-			copyStencil: false,
-		});
-
-		for (const work of depthWork) {
-			this.#copySceneDomainColorAndDepth(compositeRead, compositeWrite, {
-				clearStencil: false,
-				copyStencil: true,
-			});
-			const stencilRef = transitionCompositeStencilRef(work.transitionDepth);
-			const parentStencilRef =
-				work.transitionDepth === 0
-					? null
-					: transitionCompositeStencilRef(work.transitionDepth - 1);
-			this.#drawTransitionCompositeStencilMask(
-				compositeWrite,
-				work,
-				stencilRef,
-				parentStencilRef,
-			);
-			this.#drawTransitionCompositeSourceCopy(
-				targets,
-				compositeWrite,
-				work,
-				stencilRef,
-			);
-			this.#lastCompositePasses += 1;
-			this.#lastExecutedCompositeDepth = work.transitionDepth + 1;
-			this.#lastCompositingMode = "stencil-mask";
-			const nextRead = compositeWrite;
-			compositeWrite = compositeRead;
-			compositeRead = nextRead;
-		}
-		this.#stateCache.setStencilState(
-			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
-		);
-
-		this.#blitSceneDomainColorToDisplay(compositeRead);
-	}
-
-	#drawTransitionCompositeStencilMask(
-		destination: SceneDomainTarget,
-		work: TransitionCompositeDepthWork,
-		stencilRef: number,
-		parentStencilRef: number | null,
-	): void {
-		const gl = this.#gl;
-		const aspectRatio = destination.width / Math.max(1, destination.height);
-		this.#stateCache.bindFramebuffer(destination.framebuffer);
-		this.#stateCache.setViewport({
-			height: destination.height,
-			width: destination.width,
-			x: 0,
-			y: 0,
-		});
-		gl.colorMask(false, false, false, false);
-		try {
-			this.#stateCache.useProgram(this.#transitionCompositeProgram.program);
-			this.#stateCache.setDepthState({
-				enabled: true,
-				func: gl.LEQUAL,
-				write: false,
-			});
-			this.#stateCache.setBlendState(
-				createBlendState(gl, false, gl.ONE, gl.ZERO),
-			);
-			this.#stateCache.setCullState({
-				enabled: true,
-				mode: resolveTransitionCompositeCullFace(gl, work.cullFace),
-			});
-			this.#stateCache.setStencilState(
-				createStencilState(
-					gl,
-					true,
-					0xff,
-					parentStencilRef === null ? gl.ALWAYS : gl.EQUAL,
-					parentStencilRef ?? stencilRef,
-					parentStencilRef === null ? gl.REPLACE : gl.INCR,
-				),
-			);
-			gl.uniformMatrix4fv(
-				this.#transitionCompositeProgram.uniforms.uModelViewProjection,
-				false,
-				createModelViewProjectionMatrix(this.#frameState, aspectRatio),
-			);
-
-			for (const apertureBatchId of work.apertureBatchIds) {
-				const resource = this.#transitionApertureResources.get(apertureBatchId);
-				if (!resource) {
-					continue;
-				}
-				const translation = this.#createLandblockTranslation(
-					resource.landblockId,
-				);
-				gl.uniform3f(
-					this.#transitionCompositeProgram.uniforms.uPlacementTranslation,
-					translation[0],
-					translation[1],
-					translation[2],
-				);
-				this.#stateCache.bindVertexArray(resource.vertexArray);
-				gl.drawElements(
-					gl.TRIANGLES,
-					resource.indexCount,
-					resource.indexType,
-					0,
-				);
-				this.#lastCompositeApertureBatchDrawCalls += 1;
-			}
-		} finally {
-			gl.colorMask(true, true, true, true);
-		}
-		this.#stateCache.bindVertexArray(null);
-		this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
-	}
-
-	#drawTransitionCompositeSourceCopy(
-		targets: SceneDomainTargets,
-		destination: SceneDomainTarget,
-		work: TransitionCompositeDepthWork,
-		stencilRef: number,
-	): void {
-		const gl = this.#gl;
-		const sourceTarget = this.#getSceneDomainTarget(targets, work.sourceTarget);
-		this.#stateCache.bindFramebuffer(destination.framebuffer);
-		this.#stateCache.setViewport({
-			height: destination.height,
-			width: destination.width,
-			x: 0,
-			y: 0,
-		});
-		this.#stateCache.setDepthState({
-			enabled: true,
-			func: gl.ALWAYS,
-			write: true,
-		});
-		this.#stateCache.setBlendState(
-			createBlendState(gl, false, gl.ONE, gl.ZERO),
-		);
-		this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
-		this.#stateCache.setStencilState(
-			createStencilState(gl, true, 0x00, gl.EQUAL, stencilRef, gl.KEEP),
-		);
-		this.#drawSourceSceneCopy(sourceTarget);
+		this.#blitSceneDomainColorToDisplay(baseTarget);
 	}
 
 	#renderSceneDomainTarget(
@@ -2330,10 +2062,6 @@ class Webgl2Renderer implements Renderer {
 				this.#structuredInteriorResources.size,
 			terrainDrawUnits: this.#terrainResources.size,
 			directEnvCellDrawCalls: this.#lastDirectEnvCellDrawCalls,
-			transitionApertureBatches: this.#transitionApertureResources.size,
-			transitionApertures: sumTransitionApertureRanges(
-				this.#transitionApertureResources,
-			),
 		};
 	}
 
@@ -2381,14 +2109,6 @@ class Webgl2Renderer implements Renderer {
 
 		for (const apertureResourceId of ownership.portalApertureResourceIds) {
 			this.#removePortalApertureResource(apertureResourceId);
-		}
-		for (const apertureBatchId of ownership.transitionApertureBatchIds) {
-			const resource = this.#transitionApertureResources.get(apertureBatchId);
-			if (!resource) {
-				continue;
-			}
-			resource.dispose();
-			this.#transitionApertureResources.delete(apertureBatchId);
 		}
 		for (const drawUnitId of ownership.drawUnitIds) {
 			const terrainResource = this.#terrainResources.get(drawUnitId);
@@ -2808,7 +2528,6 @@ function createEmptyStaticLayerResourceOwnership(): StaticLayerResourceOwnership
 		drawUnitIds: new Set<string>(),
 		portalApertureResourceIds: new Set<string>(),
 		textureBindingDrawUnitIds: new Set<string>(),
-		transitionApertureBatchIds: new Set<string>(),
 	};
 }
 
@@ -2844,19 +2563,6 @@ interface StructuredInteriorGeometryResource {
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
-	dispose(): void;
-}
-
-interface TransitionApertureGeometryResource {
-	readonly vertexArray: WebGLVertexArrayObject;
-	readonly positionBuffer: WebGLBuffer;
-	readonly indexBuffer: WebGLBuffer;
-	readonly apertureBatchId: string;
-	readonly landblockId: number;
-	readonly frontFace: TransitionApertureBatch["frontFace"];
-	readonly ranges: TransitionApertureBatch["ranges"];
-	readonly indexCount: number;
-	readonly indexType: GLenum;
 	dispose(): void;
 }
 
@@ -3816,77 +3522,6 @@ function createStructuredInteriorGeometryResource(
 	};
 }
 
-function createTransitionApertureGeometryResource(
-	gl: WebGL2RenderingContext,
-	batch: TransitionApertureBatch,
-): TransitionApertureGeometryResource {
-	const vertexArray = gl.createVertexArray();
-	const positionBuffer = gl.createBuffer();
-	const indexBuffer = gl.createBuffer();
-	if (!vertexArray || !positionBuffer || !indexBuffer) {
-		if (vertexArray) {
-			gl.deleteVertexArray(vertexArray);
-		}
-		if (positionBuffer) {
-			gl.deleteBuffer(positionBuffer);
-		}
-		if (indexBuffer) {
-			gl.deleteBuffer(indexBuffer);
-		}
-		throw new Error(
-			`Failed to create GPU buffers for transition aperture batch ${batch.apertureBatchId}.`,
-		);
-	}
-
-	gl.bindVertexArray(vertexArray);
-	gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-	gl.bufferData(
-		gl.ARRAY_BUFFER,
-		createTransitionAperturePositionBuffer(batch),
-		gl.STATIC_DRAW,
-	);
-	gl.enableVertexAttribArray(0);
-	gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
-
-	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-	gl.bufferData(
-		gl.ELEMENT_ARRAY_BUFFER,
-		createTransitionApertureIndexBuffer(batch),
-		gl.STATIC_DRAW,
-	);
-	gl.bindVertexArray(null);
-	gl.bindBuffer(gl.ARRAY_BUFFER, null);
-	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
-
-	return {
-		apertureBatchId: batch.apertureBatchId,
-		frontFace: batch.frontFace,
-		indexBuffer,
-		indexCount: batch.indices.length,
-		indexType:
-			getTransitionApertureIndexType(batch) === "uint16"
-				? gl.UNSIGNED_SHORT
-				: gl.UNSIGNED_INT,
-		landblockId: batch.landblockId,
-		positionBuffer,
-		ranges: batch.ranges,
-		vertexArray,
-		dispose() {
-			gl.deleteBuffer(positionBuffer);
-			gl.deleteBuffer(indexBuffer);
-			gl.deleteVertexArray(vertexArray);
-		},
-	};
-}
-
-function createTransitionApertureIndexBuffer(
-	batch: TransitionApertureBatch,
-): Uint16Array | Uint32Array {
-	return getTransitionApertureIndexType(batch) === "uint16"
-		? new Uint16Array(batch.indices)
-		: new Uint32Array(batch.indices);
-}
-
 function createPortalApertureGeometryResource(
 	gl: WebGL2RenderingContext,
 	resource: StaticPortalApertureResource,
@@ -3974,18 +3609,6 @@ function getIndexElementByteSize(
 		return Uint32Array.BYTES_PER_ELEMENT;
 	}
 	throw new Error(`Unsupported portal aperture index type ${indexType}.`);
-}
-
-function getTransitionApertureIndexType(
-	batch: TransitionApertureBatch,
-): "uint16" | "uint32" {
-	return batch.vertices.length > 0xffff ? "uint32" : "uint16";
-}
-
-function createTransitionAperturePositionBuffer(
-	batch: TransitionApertureBatch,
-): Float32Array {
-	return createStaticVec3PositionBuffer(batch.vertices);
 }
 
 function createStaticVec3PositionBuffer(
@@ -4098,20 +3721,6 @@ function sumRenderedTriangles(
 		(total, resource) => total + resource.triangleCount,
 		0,
 	);
-}
-
-function sumTransitionApertureRanges(
-	resources: ReadonlyMap<string, TransitionApertureGeometryResource>,
-): number {
-	let total = 0;
-	for (const resource of resources.values()) {
-		total += resource.ranges.length;
-	}
-	return total;
-}
-
-function transitionCompositeStencilRef(transitionDepth: number): number {
-	return transitionDepth + 1;
 }
 
 function createStencilState(
@@ -4295,13 +3904,6 @@ function restoreDebugOverlayRenderState(
 	stateCache.setDepthState(createDepthState(gl, true, true));
 	stateCache.setBlendState(createBlendState(gl, false, gl.ONE, gl.ZERO));
 	stateCache.setCullState({ enabled: false, mode: gl.BACK });
-}
-
-function resolveTransitionCompositeCullFace(
-	gl: WebGL2RenderingContext,
-	cullFace: TransitionCompositeCullFace,
-): GLenum {
-	return cullFace === "front" ? gl.FRONT : gl.BACK;
 }
 
 function createDepthState(

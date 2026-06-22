@@ -439,7 +439,6 @@ export class StaticCoordinator {
 		this.#emitCommitDelta({
 			addedDrawUnits: result.drawUnits,
 			addedPortalApertureResources: result.portalApertureResources,
-			addedTransitionApertureBatches: result.transitionApertureBatches,
 			materialCoverage: result.materialCoverage,
 			removedResources: [],
 			revision: result.revision,
@@ -484,7 +483,6 @@ export class StaticCoordinator {
 		this.#emitCommitDelta({
 			addedDrawUnits: [],
 			addedPortalApertureResources: [],
-			addedTransitionApertureBatches: [],
 			materialCoverage: [],
 			removedResources: options.removedResources,
 			revision: this.#revision,
@@ -736,19 +734,6 @@ function collectCommittedResourceKeysByDesiredKey(
 			kind: "draw-unit",
 		});
 	}
-	for (const batch of result.transitionApertureBatches) {
-		addResourceKey(
-			resourcesByDesiredKey,
-			createDesiredKeyForDrawUnit({
-				domain: batch.sourceDomain,
-				landblockId: batch.landblockId,
-			}),
-			{
-				apertureBatchId: batch.apertureBatchId,
-				kind: "transition-aperture-batch",
-			},
-		);
-	}
 	for (const resource of result.portalApertureResources) {
 		addResourceKey(
 			resourcesByDesiredKey,
@@ -795,18 +780,6 @@ function filterStaticBakeResultForWorks(
 		result.drawUnits
 			.filter((drawUnit) => desiredKeys.has(getDrawUnitDesiredKey(drawUnit)))
 			.map((drawUnit) => drawUnit.drawUnitId),
-	);
-	const retainedTransitionApertureBatchIds = new Set(
-		result.transitionApertureBatches
-			.filter((batch) =>
-				desiredKeys.has(
-					createDesiredKeyForDrawUnit({
-						domain: batch.sourceDomain,
-						landblockId: batch.landblockId,
-					}),
-				),
-			)
-			.map((batch) => batch.apertureBatchId),
 	);
 	const retainedPortalApertureResourceIds = new Set(
 		result.portalApertureResources
@@ -856,9 +829,6 @@ function filterStaticBakeResultForWorks(
 			textureUse.ownerDrawUnitIds.some((drawUnitId) =>
 				drawUnitIds.has(drawUnitId),
 			),
-		),
-		transitionApertureBatches: result.transitionApertureBatches.filter(
-			(batch) => retainedTransitionApertureBatchIds.has(batch.apertureBatchId),
 		),
 		works,
 	};

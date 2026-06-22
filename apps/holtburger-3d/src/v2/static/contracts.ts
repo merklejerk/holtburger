@@ -62,17 +62,11 @@ export interface StaticRetentionReconciliation {
 
 export type StaticResourceKey =
 	| StaticDrawUnitResourceKey
-	| StaticPortalApertureResourceKey
-	| StaticTransitionApertureBatchResourceKey;
+	| StaticPortalApertureResourceKey;
 
 export interface StaticDrawUnitResourceKey {
 	readonly kind: "draw-unit";
 	readonly drawUnitId: string;
-}
-
-export interface StaticTransitionApertureBatchResourceKey {
-	readonly kind: "transition-aperture-batch";
-	readonly apertureBatchId: string;
 }
 
 export interface StaticPortalApertureResourceKey {
@@ -85,16 +79,6 @@ export function collectStaticDrawUnitResourceIds(
 ): readonly string[] {
 	return resources.flatMap((resource) =>
 		resource.kind === "draw-unit" ? [resource.drawUnitId] : [],
-	);
-}
-
-export function collectStaticTransitionApertureBatchResourceIds(
-	resources: readonly StaticResourceKey[],
-): readonly string[] {
-	return resources.flatMap((resource) =>
-		resource.kind === "transition-aperture-batch"
-			? [resource.apertureBatchId]
-			: [],
 	);
 }
 
@@ -968,7 +952,7 @@ export interface StaticPortalProjectionEdge {
 export type StaticPortalProjectionEdgeProvenance =
 	| {
 			readonly kind: "building-transition";
-			readonly apertureBatchId: string;
+			readonly apertureResourceId: string;
 			readonly portalId: string;
 			readonly buildingInstanceId: string;
 			readonly buildingPortalId: string;
@@ -1041,7 +1025,7 @@ export type StaticPortalGraphEdgeProvenance =
 	  }
 	| {
 			readonly kind: "building-transition";
-			readonly apertureBatchId: string;
+			readonly apertureResourceId: string;
 			readonly portalId: string;
 			readonly buildingInstanceId: string;
 			readonly buildingPortalId: string;
@@ -1139,7 +1123,6 @@ export interface StaticBakeBatchResult {
 	readonly works: readonly ScheduledStaticWork[];
 	readonly drawUnits: readonly StaticDrawUnit[];
 	readonly portalApertureResources: readonly StaticPortalApertureResource[];
-	readonly transitionApertureBatches: readonly TransitionApertureBatch[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
 	readonly atlasRegistryUpdates: readonly string[];
@@ -1590,7 +1573,6 @@ export interface StaticCoordinatorCommitDelta {
 	readonly staticBatchId: string;
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
 	readonly addedPortalApertureResources: readonly StaticPortalApertureResource[];
-	readonly addedTransitionApertureBatches: readonly TransitionApertureBatch[];
 	readonly removedResources: readonly StaticResourceKey[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
@@ -1618,60 +1600,51 @@ export interface StaticPortalApertureResource {
 	readonly vertices: readonly StaticVec3[];
 }
 
-export interface StaticPortalApertureRange {
+export type StaticPortalApertureRange =
+	| StaticEnvCellPortalApertureRange
+	| StaticBuildingTransitionApertureRange;
+
+export interface StaticPortalApertureRangeBase {
 	readonly rangeId: string;
 	readonly sourceId: string;
-	readonly sourceKind: PortalApertureResourceSourceKind;
 	readonly firstIndex: number;
 	readonly indexCount: number;
 }
 
-export type TransitionApertureFrontFace = "indoor-visible";
+export interface StaticEnvCellPortalApertureRange extends StaticPortalApertureRangeBase {
+	readonly source: StaticEnvCellPortalApertureRangeSource;
+	readonly sourceKind: "env-cell-portal";
+}
 
-export type TransitionApertureExteriorEndpoint =
-	| {
-			readonly kind: "landblock-building";
-			readonly buildingInstanceId: string;
-			readonly buildingPortalId: string;
-	  }
-	| {
-			readonly kind: "outside";
-			readonly landblockId: number;
-	  };
+export interface StaticEnvCellPortalApertureRangeSource {
+	readonly envCellId: number;
+	readonly kind: "env-cell-portal";
+	readonly landblockId: number;
+	readonly polygonId: number | null;
+	readonly portalId: string;
+	readonly sourceIndex: number;
+}
 
-export interface TransitionApertureRangeSource {
-	readonly kind: "building-portal";
+export interface StaticBuildingTransitionApertureRange extends StaticPortalApertureRangeBase {
+	readonly source: StaticBuildingTransitionApertureRangeSource;
+	readonly sourceKind: "building-transition";
+}
+
+export interface StaticBuildingTransitionApertureRangeSource {
 	readonly buildingInstanceId: string;
 	readonly buildingPortalId: string;
 	readonly buildingPortalSourceIndex: number;
+	readonly kind: "building-transition";
 	readonly linkedEnvCellIds: readonly number[];
 	readonly otherCellId: number;
 	readonly otherPortalId: number;
 	readonly polyId: number;
+	readonly portalId: string;
 	readonly portalIndex: number;
 	readonly sourceAssetId: string;
 	readonly sourceDid: number;
-}
-
-export interface TransitionApertureRange {
-	readonly exterior: TransitionApertureExteriorEndpoint;
-	readonly firstIndex: number;
-	readonly indexCount: number;
-	readonly portalId: string;
-	readonly source: TransitionApertureRangeSource;
-}
-
-export interface TransitionApertureBatch {
-	readonly apertureBatchId: string;
-	readonly coordinateSpace: "landblock-render-local";
-	readonly frontFace: TransitionApertureFrontFace;
-	readonly indices: readonly number[];
-	readonly kind: "transition-aperture-batch";
 	readonly landblockId: number;
-	readonly planes: readonly (StaticPlane | null)[];
-	readonly ranges: readonly TransitionApertureRange[];
-	readonly sourceDomain: "outdoor-buildings";
-	readonly vertices: readonly StaticVec3[];
+	readonly targetEnvCellId: number;
 }
 
 export interface StaticCoordinatorSourcePayloadDelta {

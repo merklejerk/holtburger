@@ -1,24 +1,31 @@
 import type {
 	OutdoorStaticObjectsScopePayload,
+	StaticBuildingTransitionApertureRange,
+	StaticPortalApertureResource,
 	StaticVec3,
-	TransitionApertureBatch,
-	TransitionApertureExteriorEndpoint,
-	TransitionApertureRange,
 } from "../../contracts";
+import {
+	createBuildingTransitionApertureRangeId,
+	createBuildingTransitionApertureSourceId,
+	createBuildingTransitionPortalApertureResourceId,
+	createBuildingTransitionTargetEnvCellId,
+} from "../../portal-aperture-resources";
 
 type TransitionPortalVisibleSide = "positive" | "negative";
 
-export function deriveBuildingTransitionApertureBatch(
+export function deriveBuildingTransitionPortalApertureResource(
 	payload: OutdoorStaticObjectsScopePayload,
-): TransitionApertureBatch | null {
+): StaticPortalApertureResource | null {
 	if (payload.domain !== "outdoor-buildings") {
 		return null;
 	}
 
 	const vertices: StaticVec3[] = [];
 	const indices: number[] = [];
-	const ranges: TransitionApertureRange[] = [];
-	const planes: null[] = [];
+	const ranges: StaticBuildingTransitionApertureRange[] = [];
+	const apertureResourceId = createBuildingTransitionPortalApertureResourceId(
+		payload.landblock.landblockId,
+	);
 	const sortedApertures = [...payload.buildingTransitionApertures].sort(
 		(left, right) => left.apertureId.localeCompare(right.apertureId),
 	);
@@ -44,37 +51,52 @@ export function deriveBuildingTransitionApertureBatch(
 
 		const firstIndex = indices.length;
 		const firstVertex = vertices.length;
+		const portalId = createBuildingTransitionAperturePortalId({
+			apertureId: aperture.apertureId,
+			landblockId: payload.landblock.landblockId,
+		});
+		const sourceId = createBuildingTransitionApertureSourceId({
+			apertureResourceId,
+			portalId,
+			rangeFirstIndex: firstIndex,
+			rangeIndexCount: apertureIndices.length,
+		});
+		const targetEnvCellId = createBuildingTransitionTargetEnvCellId({
+			landblockId: payload.landblock.landblockId,
+			otherCellId: aperture.otherCellId,
+			sourceId,
+		});
+
 		vertices.push(...aperture.points);
 		indices.push(...apertureIndices.map((index) => firstVertex + index));
-
-		const exterior: TransitionApertureExteriorEndpoint = {
-			buildingInstanceId: aperture.buildingInstanceId,
-			buildingPortalId: aperture.buildingPortalId,
-			kind: "landblock-building",
-		};
 		ranges.push({
-			exterior,
 			firstIndex,
 			indexCount: apertureIndices.length,
-			portalId: createBuildingTransitionAperturePortalId({
-				apertureId: aperture.apertureId,
-				landblockId: payload.landblock.landblockId,
+			rangeId: createBuildingTransitionApertureRangeId({
+				apertureResourceId,
+				portalId,
+				rangeFirstIndex: firstIndex,
+				rangeIndexCount: apertureIndices.length,
 			}),
 			source: {
 				buildingInstanceId: aperture.buildingInstanceId,
 				buildingPortalId: aperture.buildingPortalId,
 				buildingPortalSourceIndex: aperture.buildingPortalSourceIndex,
-				kind: "building-portal",
+				kind: "building-transition",
+				landblockId: payload.landblock.landblockId,
 				linkedEnvCellIds: aperture.linkedEnvCellIds,
 				otherCellId: aperture.otherCellId,
 				otherPortalId: aperture.otherPortalId,
 				polyId: aperture.polyId,
+				portalId,
 				portalIndex: aperture.portalIndex,
 				sourceAssetId: aperture.sourceAssetId,
 				sourceDid: aperture.sourceDid,
+				targetEnvCellId,
 			},
+			sourceId,
+			sourceKind: "building-transition",
 		});
-		planes.push(null);
 	}
 
 	if (indices.length === 0) {
@@ -82,23 +104,15 @@ export function deriveBuildingTransitionApertureBatch(
 	}
 
 	return {
-		apertureBatchId: createBuildingTransitionApertureBatchId(
-			payload.landblock.landblockId,
-		),
+		apertureResourceId,
 		coordinateSpace: "landblock-render-local",
-		frontFace: "indoor-visible",
 		indices,
-		kind: "transition-aperture-batch",
+		kind: "portal-aperture-resource",
 		landblockId: payload.landblock.landblockId,
-		planes,
 		ranges,
 		sourceDomain: "outdoor-buildings",
 		vertices,
 	};
-}
-
-function createBuildingTransitionApertureBatchId(landblockId: number): string {
-	return `transition-apertures:outdoor-buildings:${landblockId >>> 0}`;
 }
 
 function createBuildingTransitionAperturePortalId(options: {
@@ -142,8 +156,7 @@ function decodeBuildingTransitionPortalInteriorVisibleSide(
 	flags: number,
 ): TransitionPortalVisibleSide {
 	// CBldPortal flags describe the building/outdoor side of the aperture. V2
-	// stores transition aperture front faces as indoor-visible, so building
-	// portal winding must use the opposite side.
+	// stores building transition aperture ranges as indoor-visible.
 	return oppositeTransitionPortalVisibleSide(
 		decodeTransitionPortalVisibleSide(flags),
 	);

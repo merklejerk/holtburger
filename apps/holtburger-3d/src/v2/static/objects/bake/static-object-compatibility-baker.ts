@@ -19,13 +19,12 @@ import type {
 	StaticObjectSourceMappingCoverage,
 	StaticObjectSortMetadata,
 	StaticObjectSourceIdentity,
+	StaticPortalApertureResource,
 	StaticSpatialRecord,
 	StaticWorkPeerRecordOwner,
-	TransitionApertureBatch,
 } from "../../contracts";
 import { describeStaticScopeKey } from "../../demand-planner";
-import { createTransitionPortalApertureResource } from "../../portal-aperture-resources";
-import { createTransitionStaticPortalGraph } from "../../portal-graphs";
+import { createBuildingTransitionStaticPortalGraph } from "../../portal-graphs";
 import {
 	AC_UNIT_SCALE,
 	buildAcPlacementMatrix,
@@ -50,7 +49,7 @@ import {
 	isCurrentlyStageableStaticObjectDataUse,
 	isRenderableStaticObjectPartition,
 } from "./static-object-renderability";
-import { deriveBuildingTransitionApertureBatch } from "./building-transition-aperture-batches";
+import { deriveBuildingTransitionPortalApertureResource } from "./building-transition-portal-apertures";
 
 export class StaticObjectCompatibilityBaker implements StaticBaker {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
@@ -75,8 +74,11 @@ export function bakeStaticObjectCompatibility(
 		bakeStaticObjectCompatibilityItem(input, item),
 	);
 	const drawUnits = itemResults.flatMap((result) => result.drawUnits);
-	const transitionApertureBatches = itemResults.flatMap((result) =>
-		result.transitionApertureBatch ? [result.transitionApertureBatch] : [],
+	const buildingTransitionPortalApertureResources = itemResults.flatMap(
+		(result) =>
+			result.buildingTransitionPortalApertureResource
+				? [result.buildingTransitionPortalApertureResource]
+				: [],
 	);
 
 	return {
@@ -88,18 +90,16 @@ export function bakeStaticObjectCompatibility(
 		domain: input.domain,
 		drawUnits,
 		materialCoverage: itemResults.map((result) => result.materialCoverage),
-		portalApertureResources: transitionApertureBatches.map(
-			createTransitionPortalApertureResource,
-		),
+		portalApertureResources: buildingTransitionPortalApertureResources,
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: [],
 		staticBatchId: input.staticBatchId,
 		staticPortalGraphs: itemResults.flatMap((result) =>
-			result.transitionApertureBatch
+			result.buildingTransitionPortalApertureResource
 				? [
-						createTransitionStaticPortalGraph(
+						createBuildingTransitionStaticPortalGraph(
 							createWorkPeerRecordOwner(result.work),
-							result.transitionApertureBatch,
+							result.buildingTransitionPortalApertureResource,
 						),
 					]
 				: [],
@@ -115,7 +115,6 @@ export function bakeStaticObjectCompatibility(
 		textureUses: mergeTextureUses(
 			itemResults.flatMap((result) => result.textureUses),
 		),
-		transitionApertureBatches,
 		works: input.items.map((item) => item.work),
 	};
 }
@@ -234,13 +233,13 @@ function bakeStaticObjectCompatibilityItem(
 	readonly sourceMappings: StaticBakeBatchResult["staticSourceMappings"];
 	readonly spatialRecords: readonly StaticSpatialRecord[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
-	readonly transitionApertureBatch: TransitionApertureBatch | null;
+	readonly buildingTransitionPortalApertureResource: StaticPortalApertureResource | null;
 	readonly work: StaticBakeBatchItem["work"];
 } {
 	const scope = createStaticObjectCompatibilityPayload(item);
-	const transitionApertureBatch =
+	const buildingTransitionPortalApertureResource =
 		item.payload.scope.kind === "outdoor-static-objects"
-			? deriveBuildingTransitionApertureBatch(item.payload.scope)
+			? deriveBuildingTransitionPortalApertureResource(item.payload.scope)
 			: null;
 	const partitionPlan = partitionStaticObjectCompatibility(scope);
 	const renderablePartitions = partitionPlan.partitions.filter((partition) => {
@@ -310,7 +309,7 @@ function bakeStaticObjectCompatibilityItem(
 			staticBatchId: input.staticBatchId,
 			work: item.work,
 		}),
-		transitionApertureBatch,
+		buildingTransitionPortalApertureResource,
 		work: item.work,
 	};
 }

@@ -9,7 +9,6 @@ import type {
 	StaticMaterialTableEntry,
 	StaticWorkPeerRecordOwner,
 	TerrainGeometryStaticDrawUnit,
-	TransitionApertureBatch,
 } from "../static/contracts";
 import { materializeStaticCommit } from "./static-materializer";
 
@@ -31,38 +30,9 @@ describe("V2 static materializer", () => {
 		expect(materialized.textureUpdate).toBe(textureUpdate);
 		expect(materialized.staticSourceMappings).toEqual([]);
 		expect(materialized.staticSpatialRecords).toEqual([]);
-		expect(materialized.staticDelta).toEqual({
-			addedDrawUnits: [drawUnit],
-			addedPortalApertureResources: [],
-			addedTransitionApertureBatches: [],
-			removedDrawUnitIds: [],
-			removedPortalApertureResourceIds: [],
-			removedTransitionApertureBatchIds: [],
-			revision: 7,
-		});
-	});
-
-	it("forwards committed transition aperture batches into static residency", () => {
-		const batch = createTransitionApertureBatch();
-
-		const materialized = materializeStaticCommit({
-			commit: createCommitDelta({
-				addedDrawUnits: [],
-				addedTransitionApertureBatches: [batch],
-				textureUses: [],
-			}),
-			textureUpdate: null,
-		});
-
-		expect(materialized.staticDelta).toEqual({
-			addedDrawUnits: [],
-			addedPortalApertureResources: [],
-			addedTransitionApertureBatches: [batch],
-			removedDrawUnitIds: [],
-			removedPortalApertureResourceIds: [],
-			removedTransitionApertureBatchIds: [],
-			revision: 7,
-		});
+		expect(materialized.materializedDrawUnits).toEqual([drawUnit]);
+		expect(materialized.portalApertureResources).toEqual([]);
+		expect(materialized.removedResources).toEqual([]);
 	});
 
 	it("rejects textured draw units without committed texture bindings", () => {
@@ -94,7 +64,7 @@ describe("V2 static materializer", () => {
 			textureUpdate: null,
 		});
 
-		expect(materialized.staticDelta.addedDrawUnits).toEqual([drawUnit]);
+		expect(materialized.materializedDrawUnits).toEqual([drawUnit]);
 		expect(materialized.textureUpdate).toBeNull();
 	});
 
@@ -129,7 +99,7 @@ describe("V2 static materializer", () => {
 			textureUpdate,
 		});
 
-		const addedDrawUnits = materialized.staticDelta.addedDrawUnits;
+		const addedDrawUnits = materialized.materializedDrawUnits;
 		expect(addedDrawUnits.map((added) => added.drawUnitId)).toEqual([
 			"static-table",
 			"static-table#fine-1",
@@ -234,7 +204,7 @@ describe("V2 static materializer", () => {
 		const materialized = materializeStaticCommit({
 			commit: {
 				addedDrawUnits: [],
-				addedTransitionApertureBatches: [],
+				addedPortalApertureResources: [],
 				removedResources: [{ drawUnitId: "static-table", kind: "draw-unit" }],
 				revision: 8,
 				staticAuthoredDynamicSeeds: [],
@@ -252,25 +222,21 @@ describe("V2 static materializer", () => {
 			textureUpdate: null,
 		});
 
-		expect(materialized.staticDelta.removedDrawUnitIds).toEqual([
-			"static-table",
-			"static-table#fine-1",
-		]);
 		expect(materialized.removedResources).toEqual([
 			{ drawUnitId: "static-table", kind: "draw-unit" },
 			{ drawUnitId: "static-table#fine-1", kind: "draw-unit" },
 		]);
 	});
 
-	it("preserves removed transition aperture batch resources", () => {
+	it("preserves removed portal aperture resources", () => {
 		const materialized = materializeStaticCommit({
 			commit: {
 				addedDrawUnits: [],
-				addedTransitionApertureBatches: [],
+				addedPortalApertureResources: [],
 				removedResources: [
 					{
-						apertureBatchId: "transition-aperture-batch:da55ffff",
-						kind: "transition-aperture-batch",
+						apertureResourceId: "portal-aperture-resource:da55ffff",
+						kind: "portal-aperture-resource",
 					},
 				],
 				revision: 9,
@@ -286,28 +252,25 @@ describe("V2 static materializer", () => {
 			textureUpdate: null,
 		});
 
-		expect(materialized.staticDelta).toEqual({
-			addedDrawUnits: [],
-			addedPortalApertureResources: [],
-			addedTransitionApertureBatches: [],
-			removedDrawUnitIds: [],
-			removedPortalApertureResourceIds: [],
-			removedTransitionApertureBatchIds: ["transition-aperture-batch:da55ffff"],
-			revision: 9,
-		});
+		expect(materialized.materializedDrawUnits).toEqual([]);
+		expect(materialized.portalApertureResources).toEqual([]);
+		expect(materialized.removedResources).toEqual([
+			{
+				apertureResourceId: "portal-aperture-resource:da55ffff",
+				kind: "portal-aperture-resource",
+			},
+		]);
 	});
 });
 
 function createCommitDelta(options: {
 	readonly addedDrawUnits: readonly StaticDrawUnit[];
-	readonly addedTransitionApertureBatches?: readonly TransitionApertureBatch[];
 	readonly staticSpatialRecords?: StaticCoordinatorCommitDelta["staticSpatialRecords"];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 }): StaticCoordinatorCommitDelta {
 	return {
 		addedDrawUnits: options.addedDrawUnits,
-		addedTransitionApertureBatches:
-			options.addedTransitionApertureBatches ?? [],
+		addedPortalApertureResources: [],
 		materialCoverage: [],
 		removedResources: [],
 		revision: 7,
@@ -319,50 +282,6 @@ function createCommitDelta(options: {
 		staticSpatialRecords: options.staticSpatialRecords ?? [],
 		staticVisibilityRecords: [],
 		textureUses: options.textureUses,
-	};
-}
-
-function createTransitionApertureBatch(): TransitionApertureBatch {
-	return {
-		apertureBatchId: "transition-apertures:3663069183",
-		coordinateSpace: "landblock-render-local",
-		frontFace: "indoor-visible",
-		indices: [0, 1, 2],
-		kind: "transition-aperture-batch",
-		landblockId: 0xda55ffff,
-		planes: [null],
-		ranges: [
-			{
-				exterior: {
-					buildingInstanceId: "building-0",
-					buildingPortalId: "building-portal-0",
-					kind: "landblock-building",
-				},
-				firstIndex: 0,
-				indexCount: 3,
-				portalId:
-					"transition-portal:3663069183:outside:3663069183:3663003904:p0",
-				source: {
-					buildingInstanceId: "building-0",
-					buildingPortalId: "building-portal-0",
-					buildingPortalSourceIndex: 0,
-					kind: "building-portal",
-					linkedEnvCellIds: [0xda550100],
-					otherCellId: 0x0100,
-					otherPortalId: 0xffff,
-					polyId: 7,
-					portalIndex: 0,
-					sourceAssetId: "gfx-obj/01001234",
-					sourceDid: 0x01001234,
-				},
-			},
-		],
-		sourceDomain: "outdoor-buildings",
-		vertices: [
-			{ x: 0, y: 0, z: 0 },
-			{ x: 1, y: 0, z: 0 },
-			{ x: 0, y: 1, z: 0 },
-		],
 	};
 }
 

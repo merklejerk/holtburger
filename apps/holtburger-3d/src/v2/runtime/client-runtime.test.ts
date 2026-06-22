@@ -30,8 +30,8 @@ import type {
 	StaticMaterialCoverageReport,
 	OutdoorStaticObjectsScopePayload,
 	StaticObjectGeometryStaticDrawUnit,
+	StaticPortalApertureResource,
 	StaticPortalInteriorRecord,
-	TransitionApertureBatch,
 	StructuredInteriorGeometryStaticDrawUnit,
 	StaticWorkPeerRecordOwner,
 	TerrainStaticScopePayload,
@@ -258,7 +258,7 @@ describe("V2 client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("tracks transition aperture debug overlay direction mode", () => {
+	it("tracks portal debug overlay direction mode", () => {
 		const renderer = new FakeRenderer();
 		const runtime = createClientRuntime({
 			diagnostics: silentDiagnostics,
@@ -274,9 +274,9 @@ describe("V2 client runtime", () => {
 			snapshots.push(nextSnapshot);
 		});
 
-		runtime.setTransitionApertureDebugOverlayMode("outdoor-to-indoor");
+		runtime.setPortalDebugOverlayMode("outdoor-to-indoor");
 
-		expect(snapshots.at(-1)?.debugOverlays.transitionApertureMode).toBe(
+		expect(snapshots.at(-1)?.debugOverlays.portalOverlayMode).toBe(
 			"outdoor-to-indoor",
 		);
 		expect(renderer.debugOverlayUpdates.at(-1)).toEqual([]);
@@ -652,9 +652,49 @@ describe("V2 client runtime", () => {
 			landblockId: 0xda55ffff,
 		});
 		updateOutdoorSceneInterest(runtime, {
-			domains: ["terrain", "env-cells"],
-			lod: { envCells: 0, terrain: 0 },
+			domains: ["terrain", "buildings", "env-cells"],
+			lod: { buildings: 0, envCells: 0, terrain: 0 },
 		});
+		const buildingRequest = resolver.pendingRequests.find(
+			(request) => request.job.domain === "outdoor-buildings",
+		);
+		expect(buildingRequest).toBeDefined();
+		resolver.complete(buildingRequest?.requestId ?? "", {
+			scope: {
+				...createOutdoorStaticObjectsPayload(),
+				buildingTransitionApertures: [
+					{
+						apertureId: "transition-aperture:0",
+						buildingInstanceId: "building-0",
+						buildingPortalId: "building-portal-0",
+						buildingPortalSourceIndex: 0,
+						flags: 0,
+						linkedEnvCellIds: [0xda550100],
+						otherCellId: 0x0100,
+						otherPortalId: 0xffff,
+						points: [
+							{ x: 0, y: 0, z: 0 },
+							{ x: 1, y: 0, z: 0 },
+							{ x: 0, y: 1, z: 0 },
+						],
+						polyId: 7,
+						portalIndex: 0,
+						sourceAssetId: "gfx-obj/01001234",
+						sourceDid: 0x01001234,
+					},
+				],
+				domain: "outdoor-buildings",
+			},
+		});
+		await flushPromises();
+		baker.complete("1:landblock:da55ffff:outdoor-buildings", {
+			portalApertureResources: [
+				createBuildingTransitionPortalApertureResource({
+					targetEnvCellId: 0xda550100,
+				}),
+			],
+		});
+		await flushPromises();
 		const envCellRequest = resolver.pendingRequests.find(
 			(request) => request.job.domain === "landblock-env-cells",
 		);
@@ -672,11 +712,6 @@ describe("V2 client runtime", () => {
 				createPortalInteriorRecord({
 					envCellIds: [0xda550100],
 					portalLinks: [],
-				}),
-			],
-			transitionApertureBatches: [
-				createTransitionApertureBatch({
-					targetEnvCellId: 0xda550100,
 				}),
 			],
 		});
@@ -1630,40 +1665,54 @@ function createPortalInteriorRecord(options: {
 	};
 }
 
-function createTransitionApertureBatch(options: {
+function createBuildingTransitionPortalApertureResource(options: {
 	readonly targetEnvCellId: number;
-}): TransitionApertureBatch {
+}): StaticPortalApertureResource {
+	const apertureResourceId =
+		"portal-aperture-resource:building-transition:0xda55ffff";
+	const portalId = "transition-portal:0";
 	return {
-		apertureBatchId: "transition-aperture-batch:da55ffff",
+		apertureResourceId,
 		coordinateSpace: "landblock-render-local",
-		frontFace: "indoor-visible",
 		indices: [0, 1, 2],
-		kind: "transition-aperture-batch",
+		kind: "portal-aperture-resource",
 		landblockId: 0xda55ffff,
-		planes: [null],
 		ranges: [
 			{
-				exterior: {
-					buildingInstanceId: "building-0",
-					buildingPortalId: "building-portal-0",
-					kind: "landblock-building",
-				},
 				firstIndex: 0,
 				indexCount: 3,
-				portalId: "transition-portal:0",
+				rangeId: [
+					"portal-aperture",
+					"building-transition",
+					apertureResourceId,
+					portalId,
+					0,
+					3,
+				].join(":"),
 				source: {
 					buildingInstanceId: "building-0",
 					buildingPortalId: "building-portal-0",
 					buildingPortalSourceIndex: 0,
-					kind: "building-portal",
+					kind: "building-transition",
+					landblockId: 0xda55ffff,
 					linkedEnvCellIds: [options.targetEnvCellId],
 					otherCellId: options.targetEnvCellId & 0xffff,
 					otherPortalId: 0xffff,
 					polyId: 7,
+					portalId,
 					portalIndex: 0,
 					sourceAssetId: "gfx-obj/01001234",
 					sourceDid: 0x01001234,
+					targetEnvCellId: options.targetEnvCellId,
 				},
+				sourceId: [
+					"building-transition",
+					apertureResourceId,
+					portalId,
+					0,
+					3,
+				].join(":"),
+				sourceKind: "building-transition",
 			},
 		],
 		sourceDomain: "outdoor-buildings",
@@ -1757,8 +1806,6 @@ class FakeRenderer implements Renderer {
 		},
 		staticDrawUnits: 0,
 		terrainDrawUnits: 0,
-		transitionApertureBatches: 0,
-		transitionApertures: 0,
 	};
 
 	applyDynamicDelta(): void {}
@@ -1768,9 +1815,10 @@ class FakeRenderer implements Renderer {
 	): void {
 		this.terrainLayerUpdates.push([landblockId, payload]);
 		this.events.push(
-			`terrain-layer:${landblockId}:${payload?.drawUnits
-				.map((drawUnit) => drawUnit.drawUnitId)
-				.join(",") ?? "clear"}`,
+			`terrain-layer:${landblockId}:${
+				payload?.drawUnits.map((drawUnit) => drawUnit.drawUnitId).join(",") ??
+				"clear"
+			}`,
 		);
 	}
 	setOutdoorBuildingsLayer(

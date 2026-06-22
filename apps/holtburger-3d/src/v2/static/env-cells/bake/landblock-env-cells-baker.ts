@@ -134,7 +134,6 @@ export function bakeLandblockEnvCells(
 			...itemResults.flatMap((result) => result.textureUses),
 			...staticObjectResult.textureUses,
 		]),
-		transitionApertureBatches: [],
 		works: input.items.map((item) => item.work),
 	};
 }

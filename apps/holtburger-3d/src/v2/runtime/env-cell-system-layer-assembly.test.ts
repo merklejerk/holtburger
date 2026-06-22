@@ -5,7 +5,6 @@ import type {
 	StaticCoordinatorCommitDelta,
 	StaticCoordinatorSourcePayloadDelta,
 	StaticPortalInteriorRecord,
-	TransitionApertureBatch,
 } from "../static/contracts";
 import type { StaticMaterializationResult } from "./static-materializer";
 import { EnvCellSystemLayerAssemblyStore } from "./env-cell-system-layer-assembly";
@@ -145,6 +144,22 @@ function createBuildingCommitDelta(
 						firstIndex: 0,
 						indexCount: 3,
 						rangeId: "portal-range:building-transition",
+						source: {
+							buildingInstanceId: "building-a",
+							buildingPortalId: "building-portal-a",
+							buildingPortalSourceIndex: 0,
+							kind: "building-transition",
+							landblockId: 0xda55ffff,
+							linkedEnvCellIds: [0xda550100],
+							otherCellId: 0x0100,
+							otherPortalId: 0,
+							polyId: 7,
+							portalId: "transition-portal-a",
+							portalIndex: 0,
+							sourceAssetId: "gfx-obj/01000001",
+							sourceDid: 0x01000001,
+							targetEnvCellId: 0xda550100,
+						},
 						sourceId: "transition-source:0",
 						sourceKind: "building-transition",
 					},
@@ -157,7 +172,6 @@ function createBuildingCommitDelta(
 				],
 			},
 		],
-		addedTransitionApertureBatches: [createTransitionApertureBatch()],
 		revision,
 		staticBatchId: `static-batch:${revision}:outdoor-buildings`,
 	});
@@ -178,7 +192,6 @@ function createBuildingMaterialization(
 	const commit = createBuildingCommitDelta(revision);
 	return createMaterializationResult({
 		addedPortalApertureResources: commit.addedPortalApertureResources,
-		addedTransitionApertureBatches: commit.addedTransitionApertureBatches,
 		revision,
 	});
 }
@@ -192,7 +205,6 @@ function createCommitDelta(
 	return {
 		addedDrawUnits: [],
 		addedPortalApertureResources: [],
-		addedTransitionApertureBatches: [],
 		materialCoverage: [],
 		removedResources: [],
 		staticAuthoredDynamicSeeds: [],
@@ -214,18 +226,10 @@ function createMaterializationResult(
 ): StaticMaterializationResult {
 	return {
 		drawUnitIdMappings: [],
+		materializedDrawUnits: [],
+		portalApertureResources: options.addedPortalApertureResources ?? [],
 		removedResources: [],
 		staticAuthoredDynamicSeeds: [],
-		staticDelta: {
-			addedDrawUnits: [],
-			addedPortalApertureResources: options.addedPortalApertureResources ?? [],
-			addedTransitionApertureBatches:
-				options.addedTransitionApertureBatches ?? [],
-			removedDrawUnitIds: [],
-			removedPortalApertureResourceIds: [],
-			removedTransitionApertureBatchIds: [],
-			revision: options.revision,
-		},
 		staticPortalGraphs: [],
 		staticPortalInteriorRecords: [],
 		staticSourceMappings: [],
@@ -245,49 +249,6 @@ function createPortalInteriorRecord(
 		landblockId: 0xda55ffff,
 		owner: createWorkPeerRecordOwner("landblock-env-cells", revision),
 		portalLinks: [],
-	};
-}
-
-function createTransitionApertureBatch(): TransitionApertureBatch {
-	return {
-		apertureBatchId: "transition-apertures:outdoor-buildings:3663069183",
-		coordinateSpace: "landblock-render-local",
-		frontFace: "indoor-visible",
-		indices: [0, 1, 2],
-		kind: "transition-aperture-batch",
-		landblockId: 0xda55ffff,
-		planes: [null],
-		ranges: [
-			{
-				exterior: {
-					buildingInstanceId: "building-a",
-					buildingPortalId: "building-portal-a",
-					kind: "landblock-building",
-				},
-				firstIndex: 0,
-				indexCount: 3,
-				portalId: "transition-portal-a",
-				source: {
-					buildingInstanceId: "building-a",
-					buildingPortalId: "building-portal-a",
-					buildingPortalSourceIndex: 0,
-					kind: "building-portal",
-					linkedEnvCellIds: [0xda550100],
-					otherCellId: 0x0100,
-					otherPortalId: 0,
-					polyId: 7,
-					portalIndex: 0,
-					sourceAssetId: "gfx-obj/01000001",
-					sourceDid: 0x01000001,
-				},
-			},
-		],
-		sourceDomain: "outdoor-buildings",
-		vertices: [
-			{ x: 0, y: 0, z: 0 },
-			{ x: 1, y: 0, z: 0 },
-			{ x: 0, y: 1, z: 0 },
-		],
 	};
 }
 

@@ -22,6 +22,7 @@ import type {
 	TransitionApertureBatch,
 	StaticVisibilityRecord,
 } from "../static/contracts";
+import type { EnvCellSystemLayerPayload } from "../renderer/types";
 import {
 	createEnvCellPortalProjectionRoot,
 	createOutdoorPortalProjectionRoot,
@@ -672,6 +673,10 @@ export class StaticSceneQuery {
 		string,
 		CachedEnvCellPortalProjection
 	>();
+	readonly #envCellSystemLayersByLandblockId = new Map<
+		number,
+		EnvCellSystemLayerPayload
+	>();
 
 	ingestSourcePayload(
 		payload: StaticScopePayload,
@@ -842,6 +847,33 @@ export class StaticSceneQuery {
 			options.authoredDynamicSeeds ?? [],
 		);
 		this.#rebuildCommittedEnvCellRoots();
+	}
+
+	setEnvCellSystemLayer(payload: EnvCellSystemLayerPayload | null): void {
+		if (!payload) {
+			return;
+		}
+		const landblockId = payload.landblockId >>> 0;
+		this.#clearEnvCellSystemLayerRecords(landblockId);
+		this.#envCellSystemLayersByLandblockId.set(landblockId, payload);
+		this.applyStaticPeerRecords({
+			authoredDynamicSeeds: payload.authoredDynamicSeedRecords,
+			portalGraphs: payload.portalGraphRecords,
+			portalInteriorRecords: payload.portalInteriorRecords,
+			sourceMappings: payload.sourceMappingRecords,
+			spatialRecords: payload.spatialRecords,
+			visibilityRecords: payload.visibilityRecords,
+		});
+		this.#invalidateOutdoorPortalProjections(new Set([landblockId]));
+		this.#invalidateEnvCellPortalProjectionsForLandblock(landblockId);
+	}
+
+	clearEnvCellSystemLayer(landblockId: number): void {
+		const normalizedLandblockId = landblockId >>> 0;
+		this.#clearEnvCellSystemLayerRecords(normalizedLandblockId);
+		this.#rebuildCommittedEnvCellRoots();
+		this.#invalidateOutdoorPortalProjections(new Set([normalizedLandblockId]));
+		this.#invalidateEnvCellPortalProjectionsForLandblock(normalizedLandblockId);
 	}
 
 	ingestTerrain(
@@ -1070,6 +1102,14 @@ export class StaticSceneQuery {
 		readonly landblockId: number;
 	}): StaticPortalProjectionRecord | null {
 		const landblockId = options.landblockId >>> 0;
+		const layerProjection = this.#envCellSystemLayersByLandblockId
+			.get(landblockId)
+			?.portalProjectionRecords.find(
+				(projection) => projection.root.kind === "outdoor-root",
+			);
+		if (layerProjection) {
+			return layerProjection;
+		}
 		const portalGraphs = this.queryPortalGraphs({ landblockId });
 		const portalInteriorRecords = this.queryPortalInteriorRecords({
 			landblockId,
@@ -1848,6 +1888,36 @@ export class StaticSceneQuery {
 		this.#invalidateEnvCellPortalProjections(affectedPortalLandblockIds);
 	}
 
+	#clearEnvCellSystemLayerRecords(landblockId: number): void {
+		const normalizedLandblockId = landblockId >>> 0;
+		this.#envCellSystemLayersByLandblockId.delete(normalizedLandblockId);
+		for (const recordsByKey of [
+			this.#committedSpatialRecordsByKey,
+			this.#committedVisibilityRecordsByKey,
+			this.#committedPortalInteriorRecordsByKey,
+			this.#committedPortalGraphsByKey,
+			this.#committedSourceMappingsByKey,
+			this.#committedAuthoredDynamicSeedRecordsByKey,
+		]) {
+			for (const [key, entry] of recordsByKey) {
+				if (
+					getCommittedRecordDomain(entry.record) === "landblock-env-cells" &&
+					getCommittedRecordLandblockId(entry.record) === normalizedLandblockId
+				) {
+					recordsByKey.delete(key);
+				}
+			}
+		}
+		for (const key of this.#envCellStaticBoundsOverridesByKey.keys()) {
+			if (
+				parseEnvCellStaticObjectBoundsKeyLandblockId(key) ===
+				normalizedLandblockId
+			) {
+				this.#envCellStaticBoundsOverridesByKey.delete(key);
+			}
+		}
+	}
+
 	#hasCommittedEnvCellRecords(landblockId: number): boolean {
 		for (const recordsByKey of [
 			this.#committedSpatialRecordsByKey,
@@ -1944,6 +2014,10 @@ export class StaticSceneQuery {
 				this.#envCellPortalProjectionCacheByRootKey.delete(cacheKey);
 			}
 		}
+	}
+
+	#invalidateEnvCellPortalProjectionsForLandblock(landblockId: number): void {
+		this.#invalidateEnvCellPortalProjections(new Set([landblockId >>> 0]));
 	}
 
 	#pickOutdoorScene(

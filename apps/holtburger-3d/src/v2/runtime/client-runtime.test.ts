@@ -1040,7 +1040,7 @@ describe("V2 client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("forwards committed static draw units and eviction deltas to the renderer", async () => {
+	it("forwards committed static layers and transitional deltas to the renderer", async () => {
 		const renderer = new FakeRenderer();
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -1063,6 +1063,16 @@ describe("V2 client runtime", () => {
 		});
 		await flushPromises();
 
+		expect(renderer.terrainLayerUpdates).toEqual([
+			[
+				0xdb55ffff,
+				expect.objectContaining({
+					drawUnits: [createTerrainDrawUnit("terrain-a", 0xdb55ffff)],
+					kind: "terrain",
+					landblockId: 0xdb55ffff,
+				}),
+			],
+		]);
 		expect(renderer.staticDeltas).toEqual([
 			{
 				addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xdb55ffff)],
@@ -1088,6 +1098,7 @@ describe("V2 client runtime", () => {
 			removedTransitionApertureBatchIds: [],
 			revision: 2,
 		});
+		expect(renderer.terrainLayerUpdates.at(-1)).toEqual([0xdb55ffff, null]);
 		expect(renderer.staticAnchorLandblockIds.at(-1)).toBeNull();
 		runtime.dispose();
 	});

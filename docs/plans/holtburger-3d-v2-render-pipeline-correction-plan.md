@@ -2284,6 +2284,38 @@ Explicit non-goals:
 - Do not implement fine-grained retained-resource diffing inside layer replacement.
 - Do not couple all landblock layers into one monolithic residency unit.
 
+Implementation update (2026-06-21):
+
+- Runtime now installs materialized terrain, outdoor-building, and outdoor-detail outputs through renderer layer replacement APIs:
+  - layer payloads are built from the same fine-partitioned materialized draw-unit pass used by `materializeStaticCommit(...)`;
+  - texture placement still applies before layer installation;
+  - runtime tracks installed layers by `(layerKind, landblockId)`.
+- Runtime now consumes `EnvCellSystemLayerAssemblyStore` publications:
+  - assembled env-cell-system payloads are installed into the renderer with `setEnvCellSystemLayer(...)`;
+  - env-cell-system query records are applied as a coherent layer;
+  - env-cell resource membership is derived from the installed env-cell-system layer payload, with the old global scan retained as fallback for legacy delta inputs.
+- Added runtime layer resource indexes:
+  - draw-unit ids and portal aperture resource ids map back to the owning layer key;
+  - legacy eviction resource keys clear the owning whole layer instead of requiring a matching fine-grained renderer diff.
+- Added `StaticSceneQuery.setEnvCellSystemLayer(...)` and `clearEnvCellSystemLayer(...)`.
+- `StaticSceneQuery.queryOutdoorPortalProjection(...)` now prefers projection records published by the installed env-cell-system layer before falling back to query-side derivation from committed portal graphs/interiors/transition batches.
+- Added tests proving:
+  - runtime forwards materialized terrain through layer replacement and clears the layer on legacy eviction;
+  - static query can read an outdoor portal projection directly from an env-cell-system layer payload without committed transition aperture batches.
+- Spicy bits:
+  - `applyStaticDelta(...)` is still called as a transitional fallback after layer installation. That means renderer maps may still see last-writer-wins behavior for the same draw-unit id until Phase 14 deletes the migrated delta path.
+  - runtime layer eviction is deliberately whole-layer, not retained-resource diffing. That is consistent with the phase non-goal but can over-clear if a legacy eviction reports a single resource from a multi-resource layer.
+  - `StaticSceneQuery` still keeps query-side projection derivation as migration fallback; production should increasingly hit layer-published projection records as Phase 14 removes the old transition-batch path.
+- Debt retained:
+  - portal frame-plan cache keys still include `projection.sourceRevisionKey` and env-cell membership revision; Phase 14 must switch the key to env-cell-system `generationId` once env-cell-root projection publication is also layer-owned.
+  - terrain/building/detail query source BVH ingestion still comes from source payloads, not whole-layer query payloads.
+  - transition aperture debug/query state still exists as legacy compatibility.
+- Validation for this slice:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - `npm run test:ts -- src/v2/runtime/client-runtime.test.ts src/v2/runtime/static-scene-query.test.ts src/v2/runtime/env-cell-system-layer-assembly.test.ts src/v2/runtime/static-materializer.test.ts`;
+  - `npm run test:ts`.
+
 ### Phase 14: Delete Migrated Static Delta And Revision Plumbing
 
 Problem to solve:

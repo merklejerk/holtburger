@@ -20,7 +20,6 @@ import type {
 	PortalFrameWorkPlan,
 	RenderPassPlan,
 	SamplerPolicyUpdate,
-	StaticResidencyDelta,
 	TerrainLayerPayload,
 	TexturePlacementUpdate,
 } from "../renderer/types";
@@ -1040,7 +1039,7 @@ describe("V2 client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("forwards committed static layers and transitional deltas to the renderer", async () => {
+	it("forwards committed static layers to the renderer", async () => {
 		const renderer = new FakeRenderer();
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -1073,31 +1072,11 @@ describe("V2 client runtime", () => {
 				}),
 			],
 		]);
-		expect(renderer.staticDeltas).toEqual([
-			{
-				addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xdb55ffff)],
-				addedPortalApertureResources: [],
-				addedTransitionApertureBatches: [],
-				removedDrawUnitIds: [],
-				removedPortalApertureResourceIds: [],
-				removedTransitionApertureBatchIds: [],
-				revision: 1,
-			},
-		]);
 		expect(renderer.staticAnchorLandblockIds).toEqual([0xda55ffff]);
 
 		runtime.updateSceneInterest({ kind: "none" });
 		await flushPromises();
 
-		expect(renderer.staticDeltas.at(-1)).toEqual({
-			addedDrawUnits: [],
-			addedPortalApertureResources: [],
-			addedTransitionApertureBatches: [],
-			removedDrawUnitIds: ["terrain-a"],
-			removedPortalApertureResourceIds: [],
-			removedTransitionApertureBatchIds: [],
-			revision: 2,
-		});
 		expect(renderer.terrainLayerUpdates.at(-1)).toEqual([0xdb55ffff, null]);
 		expect(renderer.staticAnchorLandblockIds.at(-1)).toBeNull();
 		runtime.dispose();
@@ -1224,7 +1203,7 @@ describe("V2 client runtime", () => {
 			source: "follow",
 		});
 
-		expect(renderer.staticDeltas).toHaveLength(1);
+		expect(renderer.terrainLayerUpdates).toHaveLength(1);
 		expect(renderer.staticAnchorLandblockIds).toEqual([0xda55ffff, 0xdb55ffff]);
 		runtime.dispose();
 	});
@@ -1264,7 +1243,7 @@ describe("V2 client runtime", () => {
 		});
 		await flushPromises();
 
-		expect(renderer.staticDeltas).toEqual([]);
+		expect(renderer.terrainLayerUpdates).toEqual([]);
 		expect(renderer.textureUpdates).toEqual([]);
 		expect(snapshots.at(-1)?.staticMaterialization.pendingRevisions).toEqual([
 			1,
@@ -1299,7 +1278,7 @@ describe("V2 client runtime", () => {
 
 		expect(renderer.events).toEqual([
 			"texture:1:terrain-textured",
-			"static:1:terrain-textured",
+			"terrain-layer:3663069183:terrain-textured",
 		]);
 		expect(snapshots.at(-1)?.staticMaterialization).toEqual({
 			committedRevisions: [1],
@@ -1365,7 +1344,7 @@ describe("V2 client runtime", () => {
 				revision: 2,
 			},
 		]);
-		expect(renderer.staticDeltas).toHaveLength(1);
+		expect(renderer.terrainLayerUpdates).toHaveLength(1);
 		expect(runtime.createDiagnosticsReport().runtime.textureFilteringMode).toBe(
 			"nearest",
 		);
@@ -1410,7 +1389,7 @@ describe("V2 client runtime", () => {
 		assetService.rejectNext(new Error("prepared texture unavailable"));
 		await flushPromises();
 
-		expect(renderer.staticDeltas).toEqual([]);
+		expect(renderer.terrainLayerUpdates).toEqual([]);
 		expect(renderer.textureUpdates).toEqual([]);
 		expect(snapshots.at(-1)?.staticMaterialization).toEqual({
 			committedRevisions: [],
@@ -1720,7 +1699,6 @@ function createPlacement() {
 }
 
 class FakeRenderer implements Renderer {
-	readonly staticDeltas: StaticResidencyDelta[] = [];
 	readonly staticAnchorLandblockIds: (number | null)[] = [];
 	readonly debugOverlayUpdates: readonly DebugOverlayPrimitive[][] = [];
 	readonly textureUpdates: TexturePlacementUpdate[] = [];
@@ -1783,27 +1761,17 @@ class FakeRenderer implements Renderer {
 		transitionApertures: 0,
 	};
 
-	applyStaticDelta(delta: StaticResidencyDelta): void {
-		this.staticDeltas.push(delta);
-		this.events.push(
-			`static:${delta.revision}:${delta.addedDrawUnits
-				.map((drawUnit) => drawUnit.drawUnitId)
-				.join(",")}`,
-		);
-		this.#snapshot = {
-			...this.#snapshot,
-			renderedTriangles: delta.addedDrawUnits.length,
-			staticDrawUnits: delta.addedDrawUnits.length,
-			terrainDrawUnits: delta.addedDrawUnits.length,
-		};
-	}
-
 	applyDynamicDelta(): void {}
 	setTerrainLayer(
 		landblockId: number,
 		payload: TerrainLayerPayload | null,
 	): void {
 		this.terrainLayerUpdates.push([landblockId, payload]);
+		this.events.push(
+			`terrain-layer:${landblockId}:${payload?.drawUnits
+				.map((drawUnit) => drawUnit.drawUnitId)
+				.join(",") ?? "clear"}`,
+		);
 	}
 	setOutdoorBuildingsLayer(
 		landblockId: number,

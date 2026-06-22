@@ -164,22 +164,20 @@ type PortalFramePlanKey =
 	| {
 			readonly kind: "env-cell-projection";
 			readonly envCellId: number;
-			readonly envCellResourceMembershipRevision: number;
+			readonly envCellSystemGenerationId: string | null;
 			readonly landblockId: number;
 			readonly maxRenderEntries: number;
 			readonly maxDepth: number;
 			readonly maxMaskEdges: number;
-			readonly projectionSourceRevisionKey: string;
 			readonly renderAnchorLandblockId: number | null;
 	  }
 	| {
 			readonly kind: "outdoor-transition";
-			readonly envCellResourceMembershipRevision: number;
+			readonly envCellSystemGenerationId: string | null;
 			readonly landblockId: number;
 			readonly maxRenderEntries: number;
 			readonly maxDepth: number;
 			readonly maxMaskEdges: number;
-			readonly projectionSourceRevisionKey: string;
 			readonly renderAnchorLandblockId: number | null;
 	  };
 
@@ -1030,14 +1028,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 			if (projection) {
 				const portalFramePlanKey: PortalFramePlanKey = {
 					envCellId: this.#currentCameraResidency.envCellId,
-					envCellResourceMembershipRevision:
-						this.#envCellResourceMembershipRevision,
+					envCellSystemGenerationId:
+						this.#getEnvCellSystemLayerGenerationId(landblockId),
 					kind: "env-cell-projection",
 					landblockId,
 					maxRenderEntries: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
 					maxDepth: this.#directEnvCellPortalMaxDepth,
 					maxMaskEdges: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
-					projectionSourceRevisionKey: projection.sourceRevisionKey,
 					renderAnchorLandblockId: this.#renderAnchorLandblockId,
 				};
 				const cachedPlan = this.#getCachedPortalFramePlan(portalFramePlanKey);
@@ -1067,14 +1064,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 			});
 			if (projection) {
 				const portalFramePlanKey: PortalFramePlanKey = {
-					envCellResourceMembershipRevision:
-						this.#envCellResourceMembershipRevision,
+					envCellSystemGenerationId:
+						this.#getEnvCellSystemLayerGenerationId(landblockId),
 					kind: "outdoor-transition",
 					landblockId,
 					maxRenderEntries: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
 					maxDepth: this.#directEnvCellPortalMaxDepth,
 					maxMaskEdges: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
-					projectionSourceRevisionKey: projection.sourceRevisionKey,
 					renderAnchorLandblockId: this.#renderAnchorLandblockId,
 				};
 				const cachedPlan = this.#getCachedPortalFramePlan(portalFramePlanKey);
@@ -1329,6 +1325,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		});
 		this.#updateMaterializedDrawUnitIdMappings(delta, materialized);
 		this.#clearStaticLayersForRemovedResources(materialized.removedResources);
+		if (materialized.textureUpdate) {
+			this.#renderer.applyTexturePlacementUpdate(materialized.textureUpdate);
+		}
 		this.#applyMaterializedStaticLayers(delta, materialized);
 		this.#applyEnvCellSystemLayerPublications(
 			this.#envCellSystemLayerAssembly.ingestMaterializedCommit(
@@ -1338,7 +1337,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		);
 		this.#refreshEnvCellResourceMembership();
 		this.#warnAboutStaticFallbacks(delta);
-		applyMaterializedStaticCommit(this.#renderer, materialized);
 		this.#staticSceneQuery.removeStaticResources(materialized.removedResources);
 		this.#staticSceneQuery.applyStaticPeerRecords({
 			authoredDynamicSeeds: materialized.staticAuthoredDynamicSeeds,
@@ -1518,6 +1516,16 @@ class ClientRuntimeImpl implements ClientRuntime {
 				this.#staticLayerKeyByResourceId.delete(resourceId);
 			}
 		}
+	}
+
+	#getEnvCellSystemLayerGenerationId(landblockId: number): string | null {
+		const payload = this.#staticLayersByKey.get(
+			createStaticLandblockLayerKey({
+				kind: "env-cell-system",
+				landblockId,
+			}),
+		);
+		return payload?.kind === "env-cell-system" ? payload.generationId : null;
 	}
 
 	#setEnvCellResourceMembershipFromLayer(
@@ -2699,16 +2707,6 @@ function createTerrainTextureDiagnosticsReport(
 	};
 }
 
-function applyMaterializedStaticCommit(
-	renderer: Renderer,
-	materialized: StaticMaterializationResult,
-): void {
-	if (materialized.textureUpdate) {
-		renderer.applyTexturePlacementUpdate(materialized.textureUpdate);
-	}
-	renderer.applyStaticDelta(materialized.staticDelta);
-}
-
 function createMaterializedLandblockLayerPayloads(
 	delta: StaticCoordinatorCommitDelta,
 	materialized: StaticMaterializationResult,
@@ -3067,8 +3065,7 @@ function portalFramePlanKeysEqual(
 		left.landblockId !== right.landblockId ||
 		left.maxDepth !== right.maxDepth ||
 		left.renderAnchorLandblockId !== right.renderAnchorLandblockId ||
-		left.envCellResourceMembershipRevision !==
-			right.envCellResourceMembershipRevision
+		left.envCellSystemGenerationId !== right.envCellSystemGenerationId
 	) {
 		return false;
 	}
@@ -3077,15 +3074,13 @@ function portalFramePlanKeysEqual(
 			right.kind === "env-cell-projection" &&
 			left.maxRenderEntries === right.maxRenderEntries &&
 			left.maxMaskEdges === right.maxMaskEdges &&
-			left.envCellId === right.envCellId &&
-			left.projectionSourceRevisionKey === right.projectionSourceRevisionKey
+			left.envCellId === right.envCellId
 		);
 	}
 	return (
 		right.kind === "outdoor-transition" &&
 		left.maxRenderEntries === right.maxRenderEntries &&
-		left.maxMaskEdges === right.maxMaskEdges &&
-		left.projectionSourceRevisionKey === right.projectionSourceRevisionKey
+		left.maxMaskEdges === right.maxMaskEdges
 	);
 }
 

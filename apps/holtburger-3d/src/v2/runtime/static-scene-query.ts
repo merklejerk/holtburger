@@ -25,7 +25,6 @@ import type {
 import type { EnvCellSystemLayerPayload } from "../renderer/types";
 import {
 	createEnvCellPortalProjectionRoot,
-	createOutdoorPortalProjectionRoot,
 	createStaticPortalProjection,
 	createStaticPortalProjectionSourceKey,
 } from "../static/portal-graphs";
@@ -383,11 +382,6 @@ interface CommittedRecordEntry<TRecord> {
 	readonly record: TRecord;
 }
 
-interface CachedOutdoorPortalProjection {
-	readonly projection: StaticPortalProjectionRecord | null;
-	readonly sourceKey: string;
-}
-
 interface CachedEnvCellPortalProjection {
 	readonly projection: StaticPortalProjectionRecord | null;
 	readonly sourceKey: string;
@@ -665,10 +659,6 @@ export class StaticSceneQuery {
 		string,
 		CommittedRecordEntry<StaticAuthoredDynamicSeedRecord>
 	>();
-	readonly #outdoorPortalProjectionCacheByLandblockId = new Map<
-		number,
-		CachedOutdoorPortalProjection
-	>();
 	readonly #envCellPortalProjectionCacheByRootKey = new Map<
 		string,
 		CachedEnvCellPortalProjection
@@ -778,15 +768,8 @@ export class StaticSceneQuery {
 				resource.kind === "draw-unit" ? [resource.drawUnitId] : [],
 			),
 		);
-		const affectedProjectionLandblockIds = new Set<number>();
 		for (const resource of resources) {
 			if (resource.kind === "transition-aperture-batch") {
-				const removedBatch = this.#committedTransitionApertureBatchesById.get(
-					resource.apertureBatchId,
-				);
-				if (removedBatch) {
-					affectedProjectionLandblockIds.add(removedBatch.landblockId >>> 0);
-				}
 				this.#committedTransitionApertureBatchesById.delete(
 					resource.apertureBatchId,
 				);
@@ -795,21 +778,17 @@ export class StaticSceneQuery {
 		if (removedDrawUnitResourceIds.size > 0) {
 			this.#deleteDrawUnitOwnedCommittedRecords(removedDrawUnitResourceIds);
 		}
-		this.#invalidateOutdoorPortalProjections(affectedProjectionLandblockIds);
 	}
 
 	applyTransitionApertureBatches(
 		batches: readonly TransitionApertureBatch[],
 	): void {
-		const affectedProjectionLandblockIds = new Set<number>();
 		for (const batch of batches) {
-			affectedProjectionLandblockIds.add(batch.landblockId >>> 0);
 			this.#committedTransitionApertureBatchesById.set(
 				batch.apertureBatchId,
 				batch,
 			);
 		}
-		this.#invalidateOutdoorPortalProjections(affectedProjectionLandblockIds);
 	}
 
 	hasCommittedPortalInteriorScene(options: {
@@ -864,7 +843,6 @@ export class StaticSceneQuery {
 			spatialRecords: payload.spatialRecords,
 			visibilityRecords: payload.visibilityRecords,
 		});
-		this.#invalidateOutdoorPortalProjections(new Set([landblockId]));
 		this.#invalidateEnvCellPortalProjectionsForLandblock(landblockId);
 	}
 
@@ -872,7 +850,6 @@ export class StaticSceneQuery {
 		const normalizedLandblockId = landblockId >>> 0;
 		this.#clearEnvCellSystemLayerRecords(normalizedLandblockId);
 		this.#rebuildCommittedEnvCellRoots();
-		this.#invalidateOutdoorPortalProjections(new Set([normalizedLandblockId]));
 		this.#invalidateEnvCellPortalProjectionsForLandblock(normalizedLandblockId);
 	}
 
@@ -1102,46 +1079,13 @@ export class StaticSceneQuery {
 		readonly landblockId: number;
 	}): StaticPortalProjectionRecord | null {
 		const landblockId = options.landblockId >>> 0;
-		const layerProjection = this.#envCellSystemLayersByLandblockId
-			.get(landblockId)
-			?.portalProjectionRecords.find(
-				(projection) => projection.root.kind === "outdoor-root",
-			);
-		if (layerProjection) {
-			return layerProjection;
-		}
-		const portalGraphs = this.queryPortalGraphs({ landblockId });
-		const portalInteriorRecords = this.queryPortalInteriorRecords({
-			landblockId,
-		});
-		const transitionApertureBatches = this.queryTransitionApertureBatches({
-			landblockId,
-		});
-		const root = createOutdoorPortalProjectionRoot(landblockId);
-		const sourceKey = createStaticPortalProjectionSourceKey({
-			landblockId,
-			portalGraphs,
-			portalInteriorRecords,
-			root,
-			transitionApertureBatches,
-		});
-		const cached =
-			this.#outdoorPortalProjectionCacheByLandblockId.get(landblockId);
-		if (cached?.sourceKey === sourceKey) {
-			return cached.projection;
-		}
-		const projection = createStaticPortalProjection({
-			landblockId,
-			portalGraphs,
-			portalInteriorRecords,
-			root,
-			transitionApertureBatches,
-		});
-		this.#outdoorPortalProjectionCacheByLandblockId.set(landblockId, {
-			projection,
-			sourceKey,
-		});
-		return projection;
+		return (
+			this.#envCellSystemLayersByLandblockId
+				.get(landblockId)
+				?.portalProjectionRecords.find(
+					(projection) => projection.root.kind === "outdoor-root",
+				) ?? null
+		);
 	}
 
 	queryEnvCellPortalProjection(options: {
@@ -1591,7 +1535,6 @@ export class StaticSceneQuery {
 		this.#committedSourceMappingsByKey.clear();
 		this.#committedTransitionApertureBatchesById.clear();
 		this.#committedAuthoredDynamicSeedRecordsByKey.clear();
-		this.#outdoorPortalProjectionCacheByLandblockId.clear();
 		this.#envCellPortalProjectionCacheByRootKey.clear();
 	}
 
@@ -1674,7 +1617,6 @@ export class StaticSceneQuery {
 				},
 			);
 		}
-		this.#invalidateOutdoorPortalProjections(affectedLandblockIds);
 		this.#invalidateEnvCellPortalProjections(affectedLandblockIds);
 	}
 
@@ -1695,7 +1637,6 @@ export class StaticSceneQuery {
 				},
 			);
 		}
-		this.#invalidateOutdoorPortalProjections(affectedLandblockIds);
 		this.#invalidateEnvCellPortalProjections(affectedLandblockIds);
 	}
 
@@ -1884,7 +1825,6 @@ export class StaticSceneQuery {
 				}
 			}
 		}
-		this.#invalidateOutdoorPortalProjections(affectedPortalLandblockIds);
 		this.#invalidateEnvCellPortalProjections(affectedPortalLandblockIds);
 	}
 
@@ -1996,14 +1936,7 @@ export class StaticSceneQuery {
 				}
 			}
 		}
-		this.#invalidateOutdoorPortalProjections(affectedPortalLandblockIds);
 		this.#invalidateEnvCellPortalProjections(affectedPortalLandblockIds);
-	}
-
-	#invalidateOutdoorPortalProjections(landblockIds: ReadonlySet<number>): void {
-		for (const landblockId of landblockIds) {
-			this.#outdoorPortalProjectionCacheByLandblockId.delete(landblockId >>> 0);
-		}
 	}
 
 	#invalidateEnvCellPortalProjections(landblockIds: ReadonlySet<number>): void {

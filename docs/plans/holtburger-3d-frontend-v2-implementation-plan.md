@@ -934,7 +934,11 @@ Completed work:
 
 Spicy bits:
 
-- Structured interiors currently draw in the static material pass after opaque/non-transparent static objects and before transparent static-object sorting. That is acceptable for 13B0 first pixels and alpha-test/opaque structured slices, but any future transparent structured-interior support should get explicit render-pass steering in Phase 13B3 rather than quietly inheriting object sorting.
+- At the 13B0 first-pixels point, structured interiors drew in the static material pass after
+  opaque/non-transparent static objects and before transparent static-object sorting. That was
+  acceptable for alpha-test/opaque structured slices. Any future transparent structured-interior
+  support should get explicit render-pass steering during Phase 13C/14A reassessment rather than
+  quietly inheriting object sorting.
 - The implementation reuses renderer internals, not public static-object DTOs. `StructuredInteriorGeometryStaticDrawUnit` remains a first-class public draw-unit contract.
 - The renderer now fails loudly if a structured-interior resource reaches WebGL2 with an empty material table. That should be unreachable after 13A4, and it is better than a fallback material.
 
@@ -2110,7 +2114,11 @@ Completed implementation notes:
 
 Spicy / failed to close:
 
-- Interior rendering is domain-separated but not yet per-cell/portal-visible clipped. The interior target currently draws all resident env-cell static resources and structured interiors. That is acceptable for 13B1g because visibility planning/compositing belongs to 13B1h0/13B1h, but it should not be mistaken for final portal correctness.
+- At the 13B1g scene-domain target point, interior rendering was domain-separated but not yet
+  per-cell/portal-visible clipped, and the interior target drew all resident env-cell static
+  resources and structured interiors. That was acceptable evidence for 13B1g, but it was superseded
+  by the later projection/layer portal renderer and should not be mistaken for current production
+  portal correctness.
 - 13B1g allocates composite ping/pong targets with the final RGB8/depth24 policy, but does not execute composite passes yet. 13B1h0/13B1h must consume them rather than introducing a parallel target model.
 - Scene-domain target allocation failure uses `console.error` and the existing fatal renderer error/dispose path rather than durable diagnostic counters. This is intentional: diagnostics should expose current operational facts, not become a journal of failed attempts.
 
@@ -2983,7 +2991,7 @@ Investigation notes from 2026-06-19:
   - Follow-up BSP-membership probes show every raw render polygon in `0x1a730103`, `0x1a730100`, and `0x1a730303` is inside its cell BSP by the same positive-half-space classifier used for env-cell BVH bounds. The candidate does not appear to be removable by "drop cell-structure polygons outside the env-cell BSP."
   - Those same cells report `seenOutside=Some(true)` and 14 authored visible cells. The asset data also does not obviously mark the entire env cell as ignorable.
   - ACViewer `R_CellStruct.Draw` draws `CellStruct.Polygons.Values` and skips only `StipplingType.NoPos`; retail `RenderDeviceD3D::DrawEnvCell` either draws a built mesh or queues every `structure->polygons` entry into the poly list, with portal polygons naturally skipped when their positive surface is non-renderable. This does not expose a source-object no-draw predicate.
-  - Retail env-cell rendering is portal-view driven (`PView::DrawPortal`, `CEnvCell::setup_view`, portal clipping/view setup). V2 currently commits/draws resident structured-interior resources as whole cell shells for non-exterior passes; the WebGL2 draw loop does not filter structured-interior draw units by a per-frame portal traversal set or clip child-cell geometry to portal apertures.
+  - Retail env-cell rendering is portal-view driven (`PView::DrawPortal`, `CEnvCell::setup_view`, portal clipping/view setup). At this investigation point, V2 committed/drew resident structured-interior resources as whole cell shells for non-exterior passes; later projection/layer portal rendering changed the production submission model, so this note is evidence history rather than current architecture.
   - Working hypothesis: the tunnel "rock" is likely an un-clipped neighboring/accepted cell shell being drawn wholesale, not a hidden authored static marker. Treat this as a separate portal/interior visibility-rendering concern unless a later pick/diagnostic proves an explicit source object is involved.
 - Temporary visual probe added on 2026-06-19: V2 structured-interior baking hard-skips draw units for env cells `0x1a730100` through `0x1a730103` so the scene can be manually compared without those shells. This is intentionally not a final filtering rule and must be removed or replaced with a portal/visibility-derived policy after validation.
 - Manual validation update: the "boulder" appears to be overlapping capped tunnel cell shells at a tunnel junction, not a continuous authored tunnel mesh and not a distinct static object. When V2 draws both capped cells wholesale, the overlapping caps read visually as a solid boulder. This strengthens the portal/interior visibility hypothesis: the fix should come from portal-aware cell-shell draw selection/clipping, not source-asset filtering and not whole-cell hard suppression.
@@ -3009,15 +3017,18 @@ Investigation notes from 2026-06-19:
   - Course correction: incoming portal clipping now resolves the target cell's complementary portal by `other_portal_id` and uses the target-local portal plane instead of applying the source cell's local portal plane to target-local geometry. With complementary target-local planes and the aggressive any-vertex rejection probe, `0x1a730100`, `0x1a730101`, `0x1a730102`, and `0x1a730103` all retain render geometry. The earlier total suppression of `0x1a730103` was caused by a coordinate-frame mismatch, not a valid clipping result.
   - If the visual result is too aggressive, the next refinement is finite aperture clipping or triangle slicing against incoming portal volumes rather than whole-triangle deletion against infinite planes.
 - Remaining user/manual work: verify at least `0x00070145` / `02000c39` and outdoor `0x2f2fffff` object index `104` / `02000c3d` against retail. If retail suppresses both, classify the `02000c39`-`02000c3f` source family, or a proven structural predicate that captures it, as non-renderable authored marker/static metadata.
-- Remaining engineering investigation: split the "retail-invisible cell shell" symptom out of marker filtering and into Phase 13B3/portal visibility work. The next proof should compare a V2 frame near `0x1a730103` against the active/current env cell, accepted env-cell set, portal links, and rendered structured-interior draw-unit list.
+- Remaining engineering investigation: split the "retail-invisible cell shell" symptom out of marker
+  filtering and into the Phase 13C gap list. After the projection/layer renderer correction, the
+  next proof should compare a V2 frame near `0x1a730103` against the active/current env cell,
+  projected render entries, portal links, selected aperture masks, and rendered structured-interior
+  draw-unit list.
 - Validation for the investigation tools: `cargo check -p holtburger-debug-harness --bins`.
 
 ### Phase 13B3: Interior Visual Parity And Portal Verification
 
-Status: superseded as the next active portal-rendering path by
-[holtburger-3d-v2-portal-renderer-course-correction-plan.md](holtburger-3d-v2-portal-renderer-course-correction-plan.md).
-Keep this section as historical context until the dedicated plan is executed or merged back into the
-main implementation sequence.
+Status: superseded by the portal-renderer work and then merged back into the main sequence by
+[holtburger-3d-v2-render-pipeline-correction-plan.md](holtburger-3d-v2-render-pipeline-correction-plan.md).
+Keep this section as historical context only.
 
 Purpose: compare V2 interior behavior against v1 and steer remaining portal rendering, visibility traversal, and indoor/outdoor pass separation gaps before dynamic/cutover work.
 
@@ -3027,93 +3038,406 @@ Steering:
   a proper env-cell portal renderer. Production interior rendering should be driven by portal
   traversal and cell-scoped draw submission, with broad resident interior rendering retained only as
   an explicit diagnostic mode.
-- Phase 13B1g/13B1h should establish the first transition portal render-target and compositing path. Use this phase to verify against v1 and schedule remaining visibility/render-target gaps rather than inventing new routing policy.
+- The later 2026-06-21 render-pipeline correction replaced the recursive traversal/render graph and
+  transition-specific aperture paths with projection-based portal rendering, source-tagged portal
+  aperture resources, `EnvCellSystemLayerPayload` ownership, and atomic static landblock layer
+  replacement.
+- Do not resume this phase as an implementation phase. Its remaining validation concerns are folded
+  into Phase 13C so the plan can either schedule concrete blockers or move on to Phase 14.
 
 Deliverables:
 
-- Named dungeon/interior verification targets covering ordinary env-cell geometry, portal visibility, visible-cell traversal, and omission/deferred cases.
-- Named outdoor-to-indoor transition portal verification targets proving portal compositing only applies to transition portals.
-- Manual visual comparison checklist against v1 harness behavior for those targets.
-- Plan update with remaining dungeon parity gaps and any required portal/render-target design changes.
+- Historical deliverables are now evidence inputs for Phase 13C, not a separate build phase.
+- Named dungeon/interior verification targets should still cover ordinary env-cell geometry, portal visibility, visible-cell traversal, and omission/deferred cases.
+- Named outdoor-to-indoor transition portal verification targets should still prove transition apertures are handled by the shared projection/aperture resource path.
+- Any remaining dungeon parity gaps should be typed as Phase 14 blockers or explicit deferrals.
 
 Acceptance criteria:
 
-- V2 can visually inspect at least one real dungeon/interior target through the landblock env-cell bundle pipeline.
-- V2 can visually inspect at least one real outdoor-to-indoor transition portal with compositing behavior comparable to v1.
-- Remaining dungeon parity gaps are typed and scheduled rather than hidden under cutover.
+- Superseded by Phase 13C reassessment criteria.
+- Do not add new implementation work here unless Phase 13C identifies a specific pre-Phase-14 blocker.
+
+### Immediate Phase 13B4: Indoor Residency Outdoor Portal Compositing
+
+Status: planned.
+
+Purpose: restore the missing inside-looking-out case after the projection/layer detour: when the
+camera is resident in an env cell inside an outdoor-linked building, V2 must render the outdoor
+scene through building transition apertures such as windows and doors without reviving the old
+two-domain all-interior compositor.
+
+Problem:
+
+- The render-pipeline correction correctly moved outdoor-to-indoor rendering onto
+  `portal-projection` frame plans and source-tagged portal aperture resources.
+- Env-cell-root projection currently starts at the current env cell and traverses env-cell portal
+  edges. That handles pure dungeon and interior-to-interior visibility, but it intentionally does
+  not consume building-transition roots.
+- For indoor residency inside an outdoor-linked building, building-transition apertures should also
+  act as outbound scene-domain crossing edges from reachable env cells to the outdoor scene source.
+- Without this, standing inside a building and looking out a window/door can render interior cells
+  but miss the exterior scene visible through the transition aperture. Big yikes, because that is a
+  core client behavior, not a debug nicety.
+
+Scope:
+
+- Add indoor-residency outdoor scene crossing support to the current projection/layer renderer.
+- Keep the existing source-tagged portal aperture resource model. Do not reintroduce
+  `TransitionApertureBatch`, transition-specific renderer resources, or the old all-interior
+  scene-domain compositor.
+- Treat the outdoor scene as a reusable source target/base source for crossing edges, while env-cell
+  resources remain drawn directly through the projection/layer path.
+- Start with same-landblock outdoor-linked interiors. Nested outdoor -> indoor -> outdoor chains
+  beyond the current env-cell-root outward view can be scheduled only if this phase proves a concrete
+  need.
+- Preserve pure dungeon behavior: if an env-cell-root projection has no building-transition
+  apertures for reachable cells, it should behave exactly as it does today.
+
+Implementation tasks:
+
+- Identify the source facts needed to map a reachable env cell to building-transition aperture
+  ranges:
+  - `StaticPortalApertureResource` ranges with `source.kind === "building-transition"`;
+  - `targetEnvCellId` on those ranges;
+  - env-cell-root projection render entries/layers for the target env cell;
+  - outdoor scene/layer availability for the same landblock and retained neighboring landblocks if
+    already resident.
+- Extend env-cell-root projection or frame-plan assembly with outbound scene-crossing facts:
+  - retain building-transition aperture ranges whose `targetEnvCellId` is the current env cell or a
+    reachable projected env cell;
+  - do not treat those ranges as additional env-cell traversal roots;
+  - keep source/provenance as `building-transition`, not fake env-cell portal edges.
+- Add renderer-facing projection plan entries for outdoor scene crossings from env-cell-root plans:
+  - mask by the selected building-transition aperture range;
+  - render/copy the outdoor scene source through that mask into the env-cell-root direct target;
+  - preserve existing env-cell base and descendant layer rendering semantics.
+- Define depth/stencil ordering explicitly:
+  - current env-cell base draw remains unmasked;
+  - interior descendant layers remain aperture-masked by env-cell portal projection;
+  - outdoor scene crossing masks must respect the current direct target depth/stencil state so
+    exterior pixels appear only through valid building transition apertures;
+  - use framebuffer depth blits/fixed-function mask behavior where possible, not shader-side
+    sampled-depth authority.
+- Keep frame-plan cache keys on `EnvCellSystemLayerPayload.generationId`, camera residency,
+  render-anchor, and relevant projection/cap inputs. Do not add a tiny transition-aperture revision.
+- Add diagnostics/HUD counters for env-cell-root outdoor scene crossings:
+  - reachable transition aperture ranges;
+  - rendered outdoor crossing masks;
+  - skipped crossings because outdoor scene/layer resources are missing;
+  - skipped crossings because the target env cell is not in the current projection.
+- Add focused tests:
+  - env-cell-root projection/frame-plan includes an outbound outdoor crossing for a building
+    transition range targeting the current env cell;
+  - a transition range targeting an unreachable env cell is skipped;
+  - pure dungeon env-cell-root plans remain unchanged;
+  - renderer execution uses the shared portal aperture resource path for the outdoor crossing;
+  - no `TransitionApertureBatch` or transition-specific renderer resource path returns.
+- Add a manual/browser verification target:
+  - stand inside a known outdoor-linked building and verify outdoor terrain/buildings are visible
+    through a window/door aperture;
+  - compare against standing outside looking in through the same aperture where practical;
+  - verify pure dungeon projection still renders and does not acquire bogus outdoor crossings.
+
+Dry-run findings on 2026-06-22:
+
+- `EnvCellSystemLayerPayload` already carries the required source facts in one coherent layer:
+  `portalApertureResources` includes both env-cell portal apertures and building-derived transition
+  apertures, while `portalGraphRecords` includes env-cell and building-transition graph records.
+- `EnvCellSystemLayerAssemblyStore.createPortalProjectionRecords(...)` currently publishes only an
+  outdoor-root projection. That is fine for outdoor-to-indoor rendering, but it means env-cell-root
+  projection records are still query-derived rather than layer-published.
+- `StaticSceneQuery.queryEnvCellPortalProjection(...)` currently calls `createStaticPortalProjection`
+  with `portalApertureResources: []`. That keeps pure env-cell portal traversal working, but it
+  guarantees env-cell-root projections cannot see building-transition ranges. This is the clean first
+  fix point.
+- `createStaticPortalProjection(...)` already accepts building-transition aperture resources for
+  outdoor roots and can represent `StaticPortalProjectionEdge.sourceKind === "building-transition"`.
+  The missing behavior is root-policy handling for env-cell roots: keep building-transition ranges
+  as outbound scene-crossing facts for reachable env cells instead of treating them as traversal
+  roots.
+- `createPortalProjectionFramePlan(...)` currently has one mask-edge shape, and mask edges always
+  target an env-cell render entry. An indoor-to-outdoor crossing should not create a fake env-cell
+  render entry. It needs a separate renderer-facing crossing list or a generalized masked scene-source
+  entry.
+- `PortalProjectionFrameBaseEntryPlan` already has two root variants:
+  - outdoor root: no resources, exterior scene target base;
+  - env-cell root: resident env-cell resources drawn unmasked.
+  This is the right boundary. Do not make env-cell-root plans pretend the outdoor scene is another
+  env cell.
+- WebGL2 outdoor-root projection already renders the exterior scene-domain target, copies its
+  color/depth into `compositePing`, draws env-cell aperture masks, draws direct env-cell resources,
+  and blits `compositePing` to display.
+- WebGL2 env-cell-root projection currently clears the default framebuffer and draws env-cell
+  resources directly. To composite outdoor pixels into an indoor view, the env-cell-root path needs
+  an offscreen composition target too:
+  1. render the exterior target;
+  2. clear/bind `compositePing`;
+  3. draw the env-cell base and descendant layers into `compositePing`;
+  4. apply building-transition masks for outbound outdoor crossings;
+  5. copy/blit exterior color through those masks;
+  6. blit `compositePing` color to display.
+- Reusing the existing scene-domain target allocation is preferable to adding a new target family.
+  The old all-interior target should stay dead; only the exterior target is a reusable source for
+  the env-cell-root crossing.
+- The existing `PortalProjectionFrameMaskEdgePlan` uses `renderLayer` as the stencil value. For
+  outbound outdoor crossings, reusing an env-cell layer stencil value is risky because the mask
+  destination is the outdoor source, not an env-cell render entry. Give outbound crossings their own
+  stencil/reference policy or draw them one-at-a-time with explicit stencil clearing.
+- `ClientRuntime.#derivePortalFrameWorkPlan(...)` already keys env-cell projection plans by
+  `EnvCellSystemLayerPayload.generationId`, current env cell, depth/caps, and render anchor. If the
+  env-cell projection source starts consuming layer-owned portal aperture resources, that existing
+  generation key should remain sufficient.
+- The existing tests are close to the needed coverage:
+  - `static/portal-graphs.test.ts` already fabricates building-transition ranges and env-cell-root
+    projections;
+  - `runtime/direct-env-cell-frame-plan.test.ts` already validates projection frame entries/masks;
+  - `renderer/webgl2/webgl2-renderer.test.ts` already covers outdoor-target transition masks through
+    direct env-cell draws.
+  Add narrowly to those tests instead of creating a separate test stack.
+
+Implementation split:
+
+- Phase 13B4a: source/query projection facts.
+  - Change env-cell-root projection creation so it can consume layer-owned
+    `portalApertureResources`.
+  - Retain building-transition ranges targeting reachable env cells as outbound crossing facts.
+  - Keep pure dungeon output unchanged when no building-transition ranges are present.
+  - Decide whether outbound crossings live in `StaticPortalProjectionRecord` as a new peer list or
+    as source-tagged projection edges with a non-env-cell target. Prefer a new peer list if forcing
+    them into `edges` would require fake target nodes.
+- Phase 13B4b: renderer frame-plan contract.
+  - Add a renderer-facing outbound crossing contract to `PortalProjectionFrameGraphPlan`, for
+    example `sceneCrossings` or `outdoorCrossings`.
+  - Build outbound crossing plans only for env-cell-root projections and only when the target env
+    cell is the root or a selected reachable render entry within caps.
+  - Add projection diagnostics/counters for selected, skipped-unreachable, skipped-layer-cap, and
+    skipped-missing-aperture outbound crossings.
+- Phase 13B4c: WebGL2 execution.
+  - Route env-cell-root projection with outbound outdoor crossings through scene-domain targets and
+    `compositePing` instead of drawing directly to the default framebuffer.
+  - Render exterior once into the existing exterior scene-domain target.
+  - Draw the env-cell-root base and descendant env-cell layers into `compositePing`.
+  - Draw outbound building-transition aperture masks and copy/blit exterior color through those masks.
+  - Keep depth/stencil behavior explicit and fixed-function-first; do not implement shader-side
+    sampled-depth authority unless a narrow test proves it is required.
+- Phase 13B4d: validation and cleanup.
+  - Add targeted tests for static projection, frame-plan construction, WebGL execution sequencing,
+    and cache-key reuse.
+  - Add manual browser verification notes for the selected indoor-looking-out target.
+  - Update Phase 13C with any remaining indoor/outdoor crossing gaps or mark this blocker closed.
+
+Likely code touchpoints:
+
+- `apps/holtburger-3d/src/v2/static/contracts.ts`
+  - projection/crossing contract additions.
+- `apps/holtburger-3d/src/v2/static/portal-graphs.ts`
+  - env-cell-root projection construction with building-transition aperture resources.
+- `apps/holtburger-3d/src/v2/runtime/static-scene-query.ts`
+  - pass layer-owned portal aperture resources into env-cell-root projection construction.
+- `apps/holtburger-3d/src/v2/runtime/env-cell-system-layer-assembly.ts`
+  - consider publishing env-cell-root-ready source/crossing facts through the layer, but do not
+    precompute every possible env-cell-root projection unless measured need appears.
+- `apps/holtburger-3d/src/v2/runtime/direct-env-cell-frame-plan.ts`
+  - frame-plan outbound crossing selection/counters.
+- `apps/holtburger-3d/src/v2/runtime/client-runtime.ts`
+  - cache-key review only; avoid new tiny invalidators.
+- `apps/holtburger-3d/src/v2/renderer/types.ts`
+  - renderer-facing outbound crossing contract.
+- `apps/holtburger-3d/src/v2/renderer/webgl2/webgl2-renderer.ts`
+  - env-cell-root exterior-source composition path.
+- Tests:
+  - `apps/holtburger-3d/src/v2/static/portal-graphs.test.ts`;
+  - `apps/holtburger-3d/src/v2/runtime/static-scene-query.test.ts`;
+  - `apps/holtburger-3d/src/v2/runtime/direct-env-cell-frame-plan.test.ts`;
+  - `apps/holtburger-3d/src/v2/runtime/client-runtime.test.ts`;
+  - `apps/holtburger-3d/src/v2/renderer/portal-frame-work-plan.test.ts`;
+  - `apps/holtburger-3d/src/v2/renderer/webgl2/webgl2-renderer.test.ts`.
+
+Dry-run steering:
+
+- Do not start in WebGL. First make the static/query/frame-plan contracts able to express outbound
+  outdoor crossings without fake env-cell nodes. If the contract shape is wrong, renderer work will
+  turn into spaghetti, respectfully.
+- Do not publish one env-cell-root projection per env cell in `EnvCellSystemLayerPayload` in the
+  first pass. Dense landblocks can have hundreds of env cells. Query-time projection plus layer
+  generation caching is acceptable until profiling proves otherwise.
+- Do not add a second outdoor source renderer. Reuse the existing exterior scene-domain target path
+  because outdoor is the reusable scene source for this crossing.
+- Do not let visibility checkboxes become demand gates again. If outdoor terrain/building/detail
+  visibility is off, the crossing may intentionally render no exterior source, but it must not evict
+  or suppress env-cell-system layer publication.
+- If depth/stencil ordering gets murky, split 13B4c into a small renderer probe phase before trying
+  to make it visually perfect. Fixed-function aperture masks and framebuffer depth transfer are the
+  known-good direction from the previous compositor work.
+
+Acceptance criteria:
+
+- Indoor/env-cell residency inside an outdoor-linked building can render the exterior scene through
+  authored building transition apertures.
+- Outdoor pixels do not bleed across interior walls or appear outside transition aperture masks.
+- The implementation uses `portal-projection`, `EnvCellSystemLayerPayload`, and source-tagged
+  `StaticPortalApertureResource` ranges; it does not restore `TransitionApertureBatch` or the legacy
+  transition compositor as production architecture.
+- Pure dungeon/env-cell-root rendering remains unchanged when no building-transition aperture targets
+  the reachable env cells.
+- Existing outdoor-to-indoor projection behavior remains intact.
+- Validation passes:
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - targeted runtime/renderer/static projection tests;
+  - `npm run test:ts`.
 
 ### Phase 13C: Interior Plan Reassessment Before Dynamic Seeds
 
 Status: planned.
 
-Purpose: reassess the interior/static-rendering work completed through 13B3 before starting static-authored dynamic seeds.
+Purpose: steer from the completed portal/render-pipeline correction and the indoor-residency outdoor
+crossing fix back into the main V2 sequence before starting static-authored dynamic seeds.
+
+Current baseline after the render-pipeline correction:
+
+- Outdoor-origin and env-cell-origin direct portal rendering use projection/layer semantics with
+  `mode: "portal-projection"` rather than recursive portal-stack render graphs.
+- Portal frame-plan caching is keyed by the installed `EnvCellSystemLayerPayload.generationId`
+  instead of small graph/aperture/membership revision soup.
+- Runtime/renderer static residency uses atomic landblock layer replacement for migrated domains.
+- Building transition apertures and env-cell portal apertures use one source-tagged portal aperture
+  resource model. `TransitionApertureBatch` is removed from active app/test source.
+- Phase 13B4 covers the missing inverse transition view: env-cell residency inside an outdoor-linked
+  building rendering the outdoor scene through building transition apertures.
+- Browser static checkboxes are visibility controls, not demand/residency toggles.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` passed at the end
+  of the correction.
 
 Deliverables:
 
-- Review completed structured-interior rendering, portal/visibility consumption, anchoring, and visual parity outcomes.
-- Confirm any remaining interior parity gaps are either scheduled before Phase 14 or explicitly deferred because they do not block static-authored dynamic seeds.
-- Update Phase 14/14A if interior rendering reveals dynamic-seed requirements that were previously hidden.
+- Review the corrected portal/layer pipeline against the original 13B interior goals: structured
+  interiors, env-cell static seeds, outdoor-to-indoor transitions, indoor-to-outdoor transition
+  views, pure dungeon focus, anchoring, picking/debug inspection, and visual parity on known targets.
+- Classify remaining interior/static-rendering gaps into:
+  - blockers for Phase 14 static-authored dynamic seeds;
+  - non-blocking visual/parity follow-ups;
+  - diagnostics or retail-validation tasks.
+- Decide whether the unresolved marker/static source family investigation (`02000c39`-`02000c3f`,
+  including `02000c39` and `02000c3d`) blocks dynamic seed work or remains a static-rendering
+  evidence task.
+- Decide whether the `0x1a73...` tunnel/cell-shell portal-visibility investigation blocks dynamic
+  seed work after projection-based rendering, or whether it becomes a named visual correctness
+  follow-up.
+- Update Phase 14/14A only for requirements that actually affect dynamic seed ownership, lifetime,
+  hydration, animation, rendering, or eviction.
+- Keep
+  [holtburger-3d-v2-portal-renderer-course-correction-plan.md](holtburger-3d-v2-portal-renderer-course-correction-plan.md)
+  marked historical/superseded so stale planned portal phases do not compete with the completed
+  render-pipeline correction.
 
 Acceptance criteria:
 
-- Phase 14 starts with a current list of interior/static-rendering gaps and no duplicate parity work hidden in the plan.
-- Any blocker for static-authored dynamic seeds is explicitly scheduled before Phase 14.
+- Phase 14 starts with a current list of interior/static-rendering gaps and no duplicate portal/parity
+  work hidden in stale plans.
+- Any blocker for static-authored dynamic seeds is explicitly scheduled before Phase 14 with a named
+  reason.
+- Any non-blocking interior parity gap is explicitly deferred with enough source/context to resume it
+  later without re-litigating the portal architecture.
+- No new dedicated reconciliation phase is added; Phase 13C is the steering checkpoint.
 
 ### Phase 14: Static-Authored Dynamic Seeds
 
 Status: planned.
 
-Purpose: start the dynamic path from real static-authored animation needs rather than abstract future creature rendering.
+Purpose: start the dynamic path from concrete static-authored runtime needs rather than abstract
+future creature/player rendering.
+
+Definition:
+
+- A static-authored dynamic seed is source data discovered while resolving or baking a static
+  landblock/env-cell scope that should create a dynamic runtime instance instead of becoming a
+  permanently baked static draw unit.
+- The static pipeline owns discovering the seed and tying its lifetime to the owning static scope.
+  The dynamic service owns hydrated runtime state, animation/resource state, renderer instance state,
+  and eviction of the dynamic instance when the owning seed disappears.
+- Do not classify a source as dynamic because it looks suspicious. Use ACE/ACViewer/retail evidence,
+  source-authored animation/script/physics behavior, or a concrete static-bake limitation that proves
+  the source is not an inert static draw.
 
 Deliverables:
 
-- `StaticAuthoredDynamicSeed` output from resolver/baker where source data requires dynamic treatment.
-- Dynamic service ownership of seed lifetime tied to owning static scope.
-- Dynamic resource hydration through shared asset preparation code.
-- Renderer `applyDynamicDelta` path for seeded animated instances.
+- Define the `StaticAuthoredDynamicSeed` contract with:
+  - owning static scope/work identity;
+  - source identity and provenance;
+  - placement/anchor information in the same render frame used by static scope ownership;
+  - setup/model/animation/resource references needed for hydration;
+  - enough evidence metadata to explain why the source is dynamic instead of static.
+- Emit seeds from resolver/baker paths only where source data requires dynamic treatment.
+- Add dynamic service ownership of seed lifetime tied to the owning static scope.
+- Hydrate dynamic resources through shared asset preparation code where facts are isomorphic with
+  static asset preparation.
+- Add a renderer dynamic update path for seeded instances. Keep it separate from static layer
+  replacement; dynamic instance changes must not rebake static geometry or atlas placement.
+- Add eviction behavior: removing or replacing the owning static scope removes its authored dynamic
+  instances without leaking renderer resources or dynamic service state.
 
 Acceptance criteria:
 
-- A static-scoped animated object can be resident, animated, and evicted without static VAO/atlas rebake.
-- Dynamic service owns animation/resource/instance state.
-- Static coordinator owns only the seed lifetime relationship to the static scope.
+- A static-scoped dynamic source can hydrate, render, update/animate, and evict without static
+  geometry or atlas rebake.
+- Dynamic service owns animation/resource/instance state; static coordinator owns only seed
+  discovery, publication, and scope-lifetime relationship.
+- Static-authored dynamic instances do not live inside terrain/building/detail/env-cell-system layer
+  payloads as fake static draw units.
+- Tests prove seed publication, replacement, eviction, and renderer update behavior for at least one
+  evidence-backed seeded dynamic source.
 
 ### Phase 14A: Plan Reassessment Before Cutover
 
 Status: planned.
 
-Purpose: perform a final design-vs-implementation check before replacing the old browser display.
+Purpose: perform the final design-vs-implementation check before replacing the old browser display.
 
 Deliverables:
 
-- Review V2 behavior against v1 feature expectations: terrain, outdoor static objects, dungeon/interior support, camera controls, picking, texture/resource inspection, frame metrics, eviction, and diagnostics.
+- Review V2 behavior against v1/browser expectations: terrain, outdoor static objects,
+  dungeon/interior support, projection portal rendering, camera controls, picking, texture/resource
+  inspection, frame metrics, eviction, diagnostics, and static-authored dynamic seeds.
 - Identify old browser/world-display features that are intentionally not ported and document why.
-- Update Phase 15 with final cutover blockers, cleanup targets, and required verification commands.
+- Update Phase 15 with final route/UX cutover blockers, legacy deletion targets, diagnostics that
+  survive cutover, and required verification commands.
+- Confirm stale historical portal/rendering plans no longer describe active work that should block
+  browser cutover.
 
 Acceptance criteria:
 
 - Browser cutover starts with an explicit known-gap list, not a vague "minimal panels" promise.
 - Any remaining legacy dependency needed by `/browser` is either scheduled for removal or documented as intentionally retained outside the V2 replacement scope.
+- Dynamic seed support is either complete enough for cutover or explicitly listed as a cutover
+  blocker with a narrow remaining task.
 
 ### Phase 15: Browser UX Cutover And Legacy Removal
 
 Status: planned.
 
-Purpose: replace the old browser world display only after V2 can carry the important behavior.
+Purpose: replace the old browser world display after V2 can carry the important behavior and delete
+legacy browser-display paths that no longer own production behavior.
 
 Deliverables:
 
 - Route/mode cutover from current `BrowserWorldDisplay.svelte` to the V2 runtime/harness-derived page.
-- Minimal V2 panels for navigation, domain/LOD controls, picking, texture inspection, and targeted diagnostics.
-- Removal of old TS pathways that V2 replaces.
-- Knip/eslint cleanup for dead contracts, stores, and worker clients.
+- V2 browser panels for navigation, visibility/LOD controls, picking, texture/resource inspection,
+  portal/static diagnostics, dynamic-seed diagnostics, and targeted debug overlays.
+- Remove old browser-display TS pathways that V2 replaces, including legacy render-product,
+  world-display, asset-worker, and static-landblock-render-worker integration where they are no
+  longer production inputs.
+- Delete compatibility tests that exist only to preserve replaced browser-display behavior.
+- Knip/eslint cleanup for dead contracts, stores, route helpers, worker clients, and diagnostics.
 
 Acceptance criteria:
 
 - Browser mode uses V2 runtime, V2 static pipeline, V2 texture manager, and V2 renderer API.
 - Current `world-display` static landblock render-product path is no longer required for browser world rendering.
-- `npm run check`, `npm run lint:ts`, and `npm run test:ts` pass in `apps/holtburger-3d`.
-- Remaining diagnostics are consumers of runtime/renderer snapshots, not architecture-driving service inputs.
+- Remaining diagnostics are consumers of runtime/renderer telemetry, explicit reports, and layer/query
+  inspection APIs, not architecture-driving service inputs.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` pass in
+  `apps/holtburger-3d`.
 
 ## Visual Verification Strategy
 
@@ -3130,13 +3454,14 @@ The V2 harness should always provide:
 
 Remaining manual verification milestones:
 
-- Phase 13A2a: automated fixtures prove full cell-structure geometry attachments while resolver-facing env-cell facts remain light. A named pure dungeon or outdoor-linked interior landblock should still be exercised during 13A2b/13B once geometry produces visible draw units.
-- Phase 13A2b: automated fixtures prove structured-interior debug/flat draw units, typed portal/visibility/source peer records, and correct placement without requesting outdoor terrain. Named-landblock visual verification moves to Phase 13B because 13A2b resource residency is not drawn yet.
-- Phase 13A2c: the same target produces structured-interior material/texture coverage or explicit typed fallback records.
-- Phase 13B: at least one real env-cell/interior target renders structured geometry through committed static deltas, with picking/debug overlay still using runtime-owned query records.
-- Phase 13C: dungeon/interior behavior is compared against v1 on named targets before dynamic and cutover work.
+- Phase 13B4: an indoor/env-cell residency inside an outdoor-linked building renders the outdoor
+  scene through a window/door transition aperture without exterior bleed outside the mask.
+- Phase 13C: projection/layer portal behavior, dungeon/interior behavior, static seed rendering, and
+  remaining visual parity gaps are compared against known targets before dynamic and cutover work.
 - Phase 14: a static-authored dynamic seed can hydrate, render, animate, and evict without static geometry/atlas rebake.
 - Phase 14A: final design-vs-implementation reassessment happens before replacing the old browser display.
+- Phase 15: browser cutover is verified on representative outdoor, outdoor-to-interior, pure dungeon,
+  static seed, and dynamic seed targets.
 
 ## Plan Reassessment Cadence
 
@@ -3179,11 +3504,11 @@ Mitigation: terrain remains a dedicated resolver/baker/draw-unit family. Shared 
 
 Risk: dungeon support becomes a late interior bolt-on.
 
-Mitigation: `landblock-env-cells` is already the source domain for outdoor-linked interiors and pure dungeon landblocks. Phase 13A must build on that bundle path, not introduce a separate dungeon renderer architecture or the old topology-plus-N-env-cell request pattern.
+Mitigation: `landblock-env-cells` is already the source domain for outdoor-linked interiors and pure dungeon landblocks. The current renderer path uses projection/layer portal rendering over landblock-owned env-cell system layers. Do not reintroduce a separate dungeon renderer architecture or the old topology-plus-N-env-cell request pattern.
 
 Risk: portal/interior and visibility records stay stringly because early bake outputs used placeholder arrays.
 
-Mitigation: Phase 13A must introduce typed peer records as soon as env-cell baking needs them. Do not add new string placeholders for facts that runtime query, visibility, debug selection, or renderer visibility will consume.
+Mitigation: typed peer records, projection records, and env-cell system layer payloads are now the active model. Do not add new string placeholders for facts that runtime query, visibility, debug selection, or renderer visibility will consume.
 
 Risk: legacy code shapes V2 by gravity.
 
@@ -3195,11 +3520,13 @@ Mitigation: make static-authored dynamic seeds the first dynamic requirement, bu
 
 Risk: parity work hides inside final cutover.
 
-Mitigation: picking, inspection, frame metrics, terrain visual parity, static material coverage, dungeon visual parity, and plan reassessments are explicit pre-cutover gates. Phase 15 should be route/UX replacement and cleanup, not first discovery of missing behavior.
+Mitigation: picking, inspection, frame metrics, terrain visual parity, static material coverage, dungeon visual parity, dynamic seed behavior, and plan reassessments are explicit pre-cutover gates. Phase 15 should be route/UX replacement and cleanup, not first discovery of missing behavior.
 
 ## Definition Of Done
 
-- The V2 browser path can render terrain, outdoor static objects, interiors/portals, and static-authored dynamic seeds through the new runtime/worker/atlas/renderer seams.
+- The V2 browser path can render terrain, outdoor static objects, interiors/portals, outdoor-to-indoor
+  and indoor-to-outdoor transition views, and static-authored dynamic seeds through the new
+  runtime/worker/atlas/renderer seams.
 - Svelte remains a presentation harness and browser UX layer.
 - Static workers run expensive source resolution and baking off the render thread.
 - Texture sharing is batch-scoped and lease-counted independently of individual landblock draw-unit lifetime.
@@ -3212,10 +3539,17 @@ Mitigation: picking, inspection, frame metrics, terrain visual parity, static ma
 
 ## Open Questions
 
-- Which known pure dungeon or outdoor-linked interior landblock/env-cell should be the standard Phase 13 verification target?
-- Which env-cell target has enough surface/material variety to validate both cell-structure geometry and static object seed enrichment?
-- After Phase 13A2b, should Phase 13B add a dedicated renderer resource path for `structured-interior-geometry`, or materialize it into an existing static-object shader payload internally while preserving the public draw-unit contract?
-- How soon should Playwright/screenshot regression coverage be introduced for the V2 harness?
+- Which outdoor-linked building/window or doorway should be the standard Phase 13B4
+  inside-looking-out verification target?
+- Which evidence-backed source should be the first Phase 14 static-authored dynamic seed target?
+- Do the `02000c39`-`02000c3f` marker-like setup families require a renderability classification
+  before dynamic seed work, or can that evidence task remain a static-rendering follow-up?
+- Does the `0x1a73...` tunnel/cell-shell visibility issue still reproduce under projection/layer
+  rendering, and if so does it block cutover or remain a named visual correctness follow-up?
+- Which V2 browser diagnostics should survive Phase 15 as intentional tools instead of historical
+  investigation controls?
+- How soon should Playwright/screenshot regression coverage be introduced for the V2 harness and
+  eventual browser cutover route?
 
 ## Decisions And Course Corrections
 
@@ -3238,3 +3572,13 @@ Mitigation: picking, inspection, frame metrics, terrain visual parity, static ma
 - 2026-06-15: Resolver-facing env-cell and `gfx-obj` prepared-asset views use dedicated metadata-only DTOs with vertex-buffer fields absent, not host DTOs with empty arrays. Full vertex buffers remain host/full-prepared-asset data for bake attachment paths.
 - 2026-06-15: Host placement DTOs crossing into V2 remain AC frames unless a contract explicitly says otherwise. V2 render/query helpers own AC-to-render conversion; route-local pre-conversion creates double-application risk. Setup-model default placement selection mirrors Rust/V1: key `0x65`, then `0`, then lowest key.
 - 2026-06-15: Env-cell static objects are env-cell owned for lifetime/visibility, but their pickable object bounds follow the same STAB/render-space placement used by rendering. Baked object bounds are the preferred query input; resolver `instanceBounds` are bootstrap metadata only.
+- 2026-06-21: The portal-renderer course correction merged back through the render-pipeline
+  correction. Outdoor and env-cell roots now use projection/layer portal rendering, source-tagged
+  portal aperture resources, `EnvCellSystemLayerPayload.generationId` frame-plan invalidation, and
+  atomic static landblock layer replacement. Recursive portal-stack frame graphs,
+  `TransitionApertureBatch`, and production static resource deltas are no longer active V2 browser
+  architecture.
+- 2026-06-22: Phase 13B4 was inserted before 13C after identifying a missed inverse transition case:
+  env-cell residency inside an outdoor-linked building must render the outdoor scene through
+  building transition apertures. This should extend the current projection/layer renderer with
+  outbound scene-crossing facts, not revive the old transition compositor.

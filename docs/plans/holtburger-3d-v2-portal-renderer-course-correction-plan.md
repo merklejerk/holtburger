@@ -2,7 +2,25 @@
 
 Date: 2026-06-19
 
-Status: draft planning document; first dry run completed on 2026-06-19.
+Status: historical/superseded. This plan captured the first portal-renderer course correction and
+was partially executed through Phase 6B.1. The active renderer architecture was later corrected and
+merged back into the main V2 sequence by
+[holtburger-3d-v2-render-pipeline-correction-plan.md](holtburger-3d-v2-render-pipeline-correction-plan.md).
+Do not resume the planned phases in this document without first reconciling them against that newer
+plan.
+
+Supersession summary:
+
+- Production direct portal rendering now uses projection/layer frame plans for both outdoor and
+  env-cell roots.
+- Recursive portal-stack frame graphs and the old `PortalTraversalPlan` production path were
+  deleted.
+- Building transition apertures and env-cell portal apertures use one source-tagged portal aperture
+  resource model.
+- `TransitionApertureBatch` and transition-specific renderer execution paths were removed from
+  active app/test source.
+- Static residency for migrated domains now flows through atomic landblock layer replacement and
+  `EnvCellSystemLayerPayload.generationId` owns portal frame-plan invalidation.
 
 ## Context
 
@@ -2066,7 +2084,8 @@ Work for Mesh:
 
 ### Phase 6R: Reassessment After Transition Unification
 
-Status: planned checkpoint.
+Status: superseded by
+[holtburger-3d-v2-render-pipeline-correction-plan.md](holtburger-3d-v2-render-pipeline-correction-plan.md).
 
 Purpose: verify the outdoor/offscreen plus direct-env-cell model before optimization and picking
 work.
@@ -2086,7 +2105,8 @@ Exit criteria:
 
 ### Phase 7: Portal-Based Culling And Performance Guardrails
 
-Status: planned.
+Status: superseded by the projection/layer and atomic-layer correction work. Treat the metrics and
+guardrail ideas below as historical context only.
 
 Purpose: keep the reachability-based portal model bounded without turning early correctness work
 into a full visibility pipeline.
@@ -2112,7 +2132,7 @@ Acceptance criteria:
 
 ### Phase 7R: Reassessment Before Picking And Cleanup
 
-Status: planned checkpoint.
+Status: superseded by the render-pipeline correction's Phase 16 gate.
 
 Purpose: decide whether the portal renderer is correct and maintainable enough to align picking and
 start deleting obsolete paths.
@@ -2132,7 +2152,8 @@ Exit criteria:
 
 ### Phase 8: Portal-Aware Picking And Query Consistency
 
-Status: planned.
+Status: not yet merged into a new active implementation phase. Re-evaluate from the current
+projection/layer renderer before implementing.
 
 Purpose: align semantic picking with the portal-rendered scene.
 
@@ -2154,7 +2175,7 @@ Acceptance criteria:
 
 ### Phase 8R: Final Reassessment Before Cleanup
 
-Status: planned checkpoint.
+Status: superseded by the render-pipeline correction cleanup and Phase 16 gate.
 
 Purpose: make sure cleanup deletes obsolete paths instead of deleting active escape hatches.
 
@@ -2171,7 +2192,8 @@ Exit criteria:
 
 ### Phase 9: Cleanup And Cutover
 
-Status: planned.
+Status: superseded by the render-pipeline correction cleanup. Any remaining cleanup should be
+scheduled from the current code and main V2 implementation plan, not from this historical phase.
 
 Purpose: remove obsolete whole-domain interior paths and investigation-only probes.
 

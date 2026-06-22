@@ -19,7 +19,6 @@ import type {
 	StaticScopeOwnerKey,
 	TerrainMeshQuadFacts,
 	TerrainStaticScopePayload,
-	TransitionApertureBatch,
 	StaticVisibilityRecord,
 } from "../static/contracts";
 import type { EnvCellSystemLayerPayload } from "../renderer/types";
@@ -651,10 +650,6 @@ export class StaticSceneQuery {
 		string,
 		CommittedRecordEntry<StaticSourceMappingRecord>
 	>();
-	readonly #committedTransitionApertureBatchesById = new Map<
-		string,
-		TransitionApertureBatch
-	>();
 	readonly #committedAuthoredDynamicSeedRecordsByKey = new Map<
 		string,
 		CommittedRecordEntry<StaticAuthoredDynamicSeedRecord>
@@ -768,26 +763,8 @@ export class StaticSceneQuery {
 				resource.kind === "draw-unit" ? [resource.drawUnitId] : [],
 			),
 		);
-		for (const resource of resources) {
-			if (resource.kind === "transition-aperture-batch") {
-				this.#committedTransitionApertureBatchesById.delete(
-					resource.apertureBatchId,
-				);
-			}
-		}
 		if (removedDrawUnitResourceIds.size > 0) {
 			this.#deleteDrawUnitOwnedCommittedRecords(removedDrawUnitResourceIds);
-		}
-	}
-
-	applyTransitionApertureBatches(
-		batches: readonly TransitionApertureBatch[],
-	): void {
-		for (const batch of batches) {
-			this.#committedTransitionApertureBatchesById.set(
-				batch.apertureBatchId,
-				batch,
-			);
 		}
 	}
 
@@ -851,6 +828,12 @@ export class StaticSceneQuery {
 		this.#clearEnvCellSystemLayerRecords(normalizedLandblockId);
 		this.#rebuildCommittedEnvCellRoots();
 		this.#invalidateEnvCellPortalProjectionsForLandblock(normalizedLandblockId);
+	}
+
+	queryEnvCellSystemLayers(): readonly EnvCellSystemLayerPayload[] {
+		return [...this.#envCellSystemLayersByLandblockId.values()].sort(
+			(left, right) => left.landblockId - right.landblockId,
+		);
 	}
 
 	ingestTerrain(
@@ -1029,22 +1012,6 @@ export class StaticSceneQuery {
 		return null;
 	}
 
-	queryTransitionApertureBatches(
-		options: {
-			readonly landblockId?: number;
-		} = {},
-	): readonly TransitionApertureBatch[] {
-		return [...this.#committedTransitionApertureBatchesById.values()]
-			.filter(
-				(batch) =>
-					options.landblockId === undefined ||
-					batch.landblockId === options.landblockId,
-			)
-			.sort((left, right) =>
-				left.apertureBatchId.localeCompare(right.apertureBatchId),
-			);
-	}
-
 	queryPortalInteriorRecords(
 		options: {
 			readonly landblockId?: number;
@@ -1104,10 +1071,10 @@ export class StaticSceneQuery {
 		});
 		const sourceKey = createStaticPortalProjectionSourceKey({
 			landblockId,
+			portalApertureResources: [],
 			portalGraphs,
 			portalInteriorRecords,
 			root,
-			transitionApertureBatches: [],
 		});
 		const cacheKey = createEnvCellPortalProjectionCacheKey({
 			landblockId,
@@ -1119,10 +1086,10 @@ export class StaticSceneQuery {
 		}
 		const projection = createStaticPortalProjection({
 			landblockId,
+			portalApertureResources: [],
 			portalGraphs,
 			portalInteriorRecords,
 			root,
-			transitionApertureBatches: [],
 		});
 		this.#envCellPortalProjectionCacheByRootKey.set(cacheKey, {
 			projection,
@@ -1533,7 +1500,6 @@ export class StaticSceneQuery {
 		this.#committedPortalInteriorRecordsByKey.clear();
 		this.#committedPortalGraphsByKey.clear();
 		this.#committedSourceMappingsByKey.clear();
-		this.#committedTransitionApertureBatchesById.clear();
 		this.#committedAuthoredDynamicSeedRecordsByKey.clear();
 		this.#envCellPortalProjectionCacheByRootKey.clear();
 	}

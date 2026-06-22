@@ -9,18 +9,16 @@ import type {
 	StaticPortalProjectionRecord,
 	StaticPortalProjectionRenderLayer,
 	StaticPortalProjectionRoot,
+	StaticBuildingTransitionApertureRange,
+	StaticPortalApertureResource,
 	StaticPortalGraphEdge,
 	StaticPortalGraphNode,
 	StaticPortalGraphRecord,
 	StaticPortalGraphScene,
 	StaticPortalInteriorRecord,
 	StaticWorkPeerRecordOwner,
-	TransitionApertureBatch,
 } from "./contracts";
 import {
-	createBuildingTransitionApertureRangeId,
-	createBuildingTransitionApertureSourceId,
-	createBuildingTransitionTargetEnvCellId,
 	createEnvCellPortalApertureRangeId,
 	createEnvCellPortalApertureSourceId,
 } from "./portal-aperture-resources";
@@ -60,20 +58,20 @@ export function createEnvCellStaticPortalGraph(
 	};
 }
 
-export function createTransitionStaticPortalGraph(
+export function createBuildingTransitionStaticPortalGraph(
 	owner: StaticWorkPeerRecordOwner,
-	batch: TransitionApertureBatch,
+	resource: StaticPortalApertureResource,
 ): StaticPortalGraphRecord {
 	const nodesById = new Map<string, StaticPortalGraphNode>();
 	const outdoorNode = createPortalGraphNode({
 		kind: "outdoor",
-		landblockId: batch.landblockId,
+		landblockId: resource.landblockId,
 	});
 	nodesById.set(outdoorNode.nodeId, outdoorNode);
 
 	const edges: StaticPortalGraphEdge[] = [];
-	for (const range of batch.ranges) {
-		const envCellId = createBuildingTransitionTargetEnvCellId(batch, range);
+	for (const range of getBuildingTransitionApertureRanges(resource)) {
+		const envCellId = range.source.targetEnvCellId;
 		const envCellNode = createPortalGraphNode({
 			envCellId,
 			kind: "env-cell",
@@ -83,30 +81,30 @@ export function createTransitionStaticPortalGraph(
 			direction: "directed",
 			edgeId: [
 				"building-transition",
-				batch.apertureBatchId,
-				range.portalId,
+				resource.apertureResourceId,
+				range.source.portalId,
 				envCellId,
 			].join(":"),
 			flags: 0,
 			linkId: [
 				"transition",
-				batch.apertureBatchId,
-				range.portalId,
+				resource.apertureResourceId,
+				range.source.portalId,
 				envCellId,
 			].join(":"),
 			polygonId: range.source.polyId,
 			provenance: {
-				apertureBatchId: batch.apertureBatchId,
+				apertureResourceId: resource.apertureResourceId,
 				buildingInstanceId: range.source.buildingInstanceId,
 				buildingPortalId: range.source.buildingPortalId,
 				kind: "building-transition",
-				portalId: range.portalId,
+				portalId: range.source.portalId,
 				targetEnvCellId: envCellId,
 			},
 			sceneCrossing: {
 				envCellId,
 				kind: "outdoor-to-env-cell",
-				outdoorLandblockId: batch.landblockId,
+				outdoorLandblockId: resource.landblockId,
 			},
 			sourceIndex: range.source.buildingPortalSourceIndex,
 			sourceNodeId: outdoorNode.nodeId,
@@ -117,7 +115,7 @@ export function createTransitionStaticPortalGraph(
 	return {
 		edges: edges.sort(comparePortalGraphEdges),
 		kind: "static-portal-graph",
-		landblockId: batch.landblockId,
+		landblockId: resource.landblockId,
 		nodes: [...nodesById.values()].sort(comparePortalGraphNodes),
 		owner,
 	};
@@ -125,10 +123,10 @@ export function createTransitionStaticPortalGraph(
 
 export function createStaticPortalProjection(options: {
 	readonly landblockId: number;
+	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly portalGraphs: readonly StaticPortalGraphRecord[];
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly root: StaticPortalProjectionRoot;
-	readonly transitionApertureBatches: readonly TransitionApertureBatch[];
 }): StaticPortalProjectionRecord | null {
 	const landblockId = options.landblockId >>> 0;
 	if (options.root.landblockId !== landblockId) {
@@ -158,10 +156,10 @@ export function createStaticPortalProjection(options: {
 		knownEnvCellIds,
 		landblockId,
 		outsideVisibleEnvCellIds,
+		portalApertureResources: options.portalApertureResources,
 		portalGraphs: options.portalGraphs,
 		root: options.root,
 		rootNodeId,
-		transitionApertureBatches: options.transitionApertureBatches,
 	});
 	if (projected === null) {
 		return null;
@@ -239,10 +237,10 @@ export function createStaticPortalProjection(options: {
 				rootNodeId,
 				sourceRevisionKey: createStaticPortalProjectionSourceKey({
 					landblockId,
+					portalApertureResources: options.portalApertureResources,
 					portalGraphs: options.portalGraphs,
 					portalInteriorRecords: options.portalInteriorRecords,
 					root: options.root,
-					transitionApertureBatches: options.transitionApertureBatches,
 				}),
 			}
 		: null;
@@ -478,10 +476,10 @@ function createProjectionNodesAndEdges(options: {
 	readonly knownEnvCellIds: ReadonlySet<number>;
 	readonly landblockId: number;
 	readonly outsideVisibleEnvCellIds: ReadonlySet<number>;
+	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly portalGraphs: readonly StaticPortalGraphRecord[];
 	readonly root: StaticPortalProjectionRoot;
 	readonly rootNodeId: string;
-	readonly transitionApertureBatches: readonly TransitionApertureBatch[];
 }): {
 	readonly edges: StaticPortalProjectionEdge[];
 	readonly nodes: readonly {
@@ -507,9 +505,9 @@ function createOutdoorProjectionNodesAndEdges(options: {
 	>;
 	readonly landblockId: number;
 	readonly outsideVisibleEnvCellIds: ReadonlySet<number>;
+	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly portalGraphs: readonly StaticPortalGraphRecord[];
 	readonly rootNodeId: string;
-	readonly transitionApertureBatches: readonly TransitionApertureBatch[];
 }): {
 	readonly edges: StaticPortalProjectionEdge[];
 	readonly nodes: readonly {
@@ -520,51 +518,41 @@ function createOutdoorProjectionNodesAndEdges(options: {
 } {
 	const nodes = createProjectionNodes(options.outsideVisibleEnvCellIds);
 	const edges: StaticPortalProjectionEdge[] = [];
-	for (const batch of options.transitionApertureBatches) {
-		if (batch.landblockId !== options.landblockId) {
+	for (const resource of options.portalApertureResources) {
+		if (
+			resource.landblockId !== options.landblockId ||
+			resource.sourceDomain !== "outdoor-buildings"
+		) {
 			continue;
 		}
-		for (const range of batch.ranges) {
+		for (const range of getBuildingTransitionApertureRanges(resource)) {
 			options.diagnostics.transitionRootCandidateCount += 1;
-			const targetEnvCellId = createBuildingTransitionTargetEnvCellId(
-				batch,
-				range,
-			);
+			const targetEnvCellId = range.source.targetEnvCellId;
 			if (!options.outsideVisibleEnvCellIds.has(targetEnvCellId)) {
 				continue;
 			}
 			options.diagnostics.acceptedTransitionRootCount += 1;
 			edges.push({
-				apertureResourceId: createBuildingTransitionApertureRangeId({
-					apertureBatchId: batch.apertureBatchId,
-					portalId: range.portalId,
-					rangeFirstIndex: range.firstIndex,
-					rangeIndexCount: range.indexCount,
-				}),
-				apertureSourceId: createBuildingTransitionApertureSourceId({
-					apertureBatchId: batch.apertureBatchId,
-					portalId: range.portalId,
-					rangeFirstIndex: range.firstIndex,
-					rangeIndexCount: range.indexCount,
-				}),
+				apertureResourceId: range.rangeId,
+				apertureSourceId: range.sourceId,
 				edgeId: createProjectionBuildingTransitionEdgeId({
-					apertureBatchId: batch.apertureBatchId,
-					portalId: range.portalId,
+					apertureResourceId: resource.apertureResourceId,
+					portalId: range.source.portalId,
 					rangeFirstIndex: range.firstIndex,
 					rangeIndexCount: range.indexCount,
 					targetEnvCellId,
 				}),
 				linkId: createProjectionBuildingTransitionLinkId({
-					apertureBatchId: batch.apertureBatchId,
-					portalId: range.portalId,
+					apertureResourceId: resource.apertureResourceId,
+					portalId: range.source.portalId,
 					targetEnvCellId,
 				}),
 				provenance: {
-					apertureBatchId: batch.apertureBatchId,
+					apertureResourceId: resource.apertureResourceId,
 					buildingInstanceId: range.source.buildingInstanceId,
 					buildingPortalId: range.source.buildingPortalId,
 					kind: "building-transition",
-					portalId: range.portalId,
+					portalId: range.source.portalId,
 					targetEnvCellId,
 				},
 				sourceEnvCellId: null,
@@ -780,7 +768,7 @@ function createProjectionDiagnostics(options: {
 }
 
 function createProjectionBuildingTransitionEdgeId(options: {
-	readonly apertureBatchId: string;
+	readonly apertureResourceId: string;
 	readonly portalId: string;
 	readonly rangeFirstIndex: number;
 	readonly rangeIndexCount: number;
@@ -788,7 +776,7 @@ function createProjectionBuildingTransitionEdgeId(options: {
 }): string {
 	return [
 		"building-transition",
-		options.apertureBatchId,
+		options.apertureResourceId,
 		options.portalId,
 		options.rangeFirstIndex,
 		options.rangeIndexCount,
@@ -797,13 +785,13 @@ function createProjectionBuildingTransitionEdgeId(options: {
 }
 
 function createProjectionBuildingTransitionLinkId(options: {
-	readonly apertureBatchId: string;
+	readonly apertureResourceId: string;
 	readonly portalId: string;
 	readonly targetEnvCellId: number;
 }): string {
 	return [
 		"transition",
-		options.apertureBatchId,
+		options.apertureResourceId,
 		options.portalId,
 		options.targetEnvCellId >>> 0,
 	].join(":");
@@ -1307,10 +1295,10 @@ function findComponentIdForEnvCell(
 
 export function createStaticPortalProjectionSourceKey(options: {
 	readonly landblockId: number;
+	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly portalGraphs: readonly StaticPortalGraphRecord[];
 	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly root: StaticPortalProjectionRoot;
-	readonly transitionApertureBatches: readonly TransitionApertureBatch[];
 }): string {
 	const rootParts = [
 		"root",
@@ -1366,17 +1354,21 @@ export function createStaticPortalProjectionSourceKey(options: {
 		.sort();
 	const transitionParts =
 		options.root.kind === "outdoor-root"
-			? options.transitionApertureBatches
-					.filter((batch) => batch.landblockId === options.landblockId)
-					.flatMap((batch) =>
-						batch.ranges.map((range) =>
+			? options.portalApertureResources
+					.filter(
+						(resource) =>
+							resource.landblockId === options.landblockId &&
+							resource.sourceDomain === "outdoor-buildings",
+					)
+					.flatMap((resource) =>
+						getBuildingTransitionApertureRanges(resource).map((range) =>
 							[
 								"transition",
-								batch.apertureBatchId,
-								range.portalId,
+								resource.apertureResourceId,
+								range.source.portalId,
 								range.firstIndex,
 								range.indexCount,
-								createBuildingTransitionTargetEnvCellId(batch, range),
+								range.source.targetEnvCellId,
 							].join(":"),
 						),
 					)
@@ -1389,6 +1381,15 @@ export function createStaticPortalProjectionSourceKey(options: {
 		...interiorParts,
 		...transitionParts,
 	].join("|");
+}
+
+function getBuildingTransitionApertureRanges(
+	resource: StaticPortalApertureResource,
+): readonly StaticBuildingTransitionApertureRange[] {
+	return resource.ranges.filter(
+		(range): range is StaticBuildingTransitionApertureRange =>
+			range.sourceKind === "building-transition",
+	);
 }
 
 function compareProjectionEdges(

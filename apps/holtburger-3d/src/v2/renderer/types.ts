@@ -3,7 +3,6 @@ import type {
 	StaticBakeTextureUse,
 	StaticDomain,
 	StaticPortalApertureResource,
-	StaticDrawUnit,
 	StaticMaterialCoverageReport,
 	StaticObjectGeometryStaticDrawUnit,
 	StaticPortalGraphRecord,
@@ -14,7 +13,6 @@ import type {
 	StaticVisibilityRecord,
 	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
-	TransitionApertureBatch,
 } from "../static/contracts";
 import type {
 	TextureFilteringMode,
@@ -37,16 +35,6 @@ export interface FrameState {
 		readonly pitchRadians: number;
 	};
 	readonly timeSeconds: number;
-}
-
-export interface StaticResidencyDelta {
-	readonly addedDrawUnits: readonly StaticDrawUnit[];
-	readonly addedPortalApertureResources: readonly StaticPortalApertureResource[];
-	readonly addedTransitionApertureBatches: readonly TransitionApertureBatch[];
-	readonly removedDrawUnitIds: readonly string[];
-	readonly removedPortalApertureResourceIds: readonly string[];
-	readonly removedTransitionApertureBatchIds: readonly string[];
-	readonly revision: number;
 }
 
 export type StaticLandblockLayerKind =
@@ -294,8 +282,6 @@ export interface RendererSnapshot {
 	readonly sceneDomainTargets: SceneDomainTargetSnapshot;
 	readonly staticDrawUnits: number;
 	readonly terrainDrawUnits: number;
-	readonly transitionApertureBatches: number;
-	readonly transitionApertures: number;
 	readonly directEnvCellDrawCalls: number;
 	readonly renderedTriangles: number;
 	readonly debugOverlayPrimitives: number;

@@ -331,7 +331,8 @@ function createProjectionEdge(options: {
 		provenance:
 			sourceKind === "building-transition"
 				? {
-						apertureBatchId: "transition-aperture-batch:da55ffff",
+						apertureResourceId:
+							"portal-aperture-resource:building-transition:da55ffff",
 						buildingInstanceId: "building-0",
 						buildingPortalId: "building-portal-0",
 						kind: "building-transition",

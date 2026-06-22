@@ -11,7 +11,6 @@ import type {
 	ScheduledStaticWork,
 	StaticSpatialRecord,
 	TerrainGeometryStaticDrawUnit,
-	TransitionApertureBatch,
 	StaticVisibilityRecord,
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
@@ -254,7 +253,6 @@ describe("V2 static coordinator", () => {
 			{
 				addedDrawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
 				addedPortalApertureResources: [],
-				addedTransitionApertureBatches: [],
 				materialCoverage: [],
 				removedResources: [],
 				revision: 1,
@@ -283,7 +281,6 @@ describe("V2 static coordinator", () => {
 		expect(deltas.at(-1)).toEqual({
 			addedDrawUnits: [],
 			addedPortalApertureResources: [],
-			addedTransitionApertureBatches: [],
 			materialCoverage: [],
 			removedResources: [{ drawUnitId: "terrain-a", kind: "draw-unit" }],
 			revision: 2,
@@ -906,7 +903,7 @@ describe("V2 static coordinator", () => {
 		).toBe(false);
 	});
 
-	it("commits and evicts transition aperture batches with outdoor building work", async () => {
+	it("commits and evicts portal aperture resources with outdoor building work", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
@@ -936,9 +933,9 @@ describe("V2 static coordinator", () => {
 		await flushPromises();
 
 		baker.complete(work?.workId ?? "", {
-			transitionApertureBatches: [
-				createTransitionApertureBatch(
-					"transition-apertures:outdoor-buildings:3663069183",
+			portalApertureResources: [
+				createPortalApertureResource(
+					"portal-aperture-resource:outdoor-buildings:3663069183",
 					0xda55ffff,
 				),
 			],
@@ -946,10 +943,11 @@ describe("V2 static coordinator", () => {
 		await flushPromises();
 
 		expect(deltas.at(-1)).toMatchObject({
-			addedTransitionApertureBatches: [
+			addedPortalApertureResources: [
 				{
-					apertureBatchId: "transition-apertures:outdoor-buildings:3663069183",
-					kind: "transition-aperture-batch",
+					apertureResourceId:
+						"portal-aperture-resource:outdoor-buildings:3663069183",
+					kind: "portal-aperture-resource",
 					landblockId: 0xda55ffff,
 					sourceDomain: "outdoor-buildings",
 				},
@@ -968,11 +966,12 @@ describe("V2 static coordinator", () => {
 		});
 
 		expect(deltas.at(-1)).toMatchObject({
-			addedTransitionApertureBatches: [],
+			addedPortalApertureResources: [],
 			removedResources: [
 				{
-					apertureBatchId: "transition-apertures:outdoor-buildings:3663069183",
-					kind: "transition-aperture-batch",
+					apertureResourceId:
+						"portal-aperture-resource:outdoor-buildings:3663069183",
+					kind: "portal-aperture-resource",
 				},
 			],
 		});
@@ -1048,41 +1047,39 @@ function createTerrainDrawUnit(
 	};
 }
 
-function createTransitionApertureBatch(
-	apertureBatchId: string,
+function createPortalApertureResource(
+	apertureResourceId: string,
 	landblockId: number,
-): TransitionApertureBatch {
+): StaticCoordinatorCommitDelta["addedPortalApertureResources"][number] {
 	return {
-		apertureBatchId,
+		apertureResourceId,
 		coordinateSpace: "landblock-render-local",
-		frontFace: "indoor-visible",
 		indices: [0, 1, 2],
-		kind: "transition-aperture-batch",
+		kind: "portal-aperture-resource",
 		landblockId,
-		planes: [null],
 		ranges: [
 			{
-				exterior: {
-					buildingInstanceId: "building-a",
-					buildingPortalId: "portal-a",
-					kind: "landblock-building",
-				},
 				firstIndex: 0,
 				indexCount: 3,
-				portalId: `${apertureBatchId}:portal-a`,
+				rangeId: `${apertureResourceId}:range-a`,
 				source: {
 					buildingInstanceId: "building-a",
 					buildingPortalId: "portal-a",
 					buildingPortalSourceIndex: 0,
-					kind: "building-portal",
+					kind: "building-transition",
+					landblockId,
 					linkedEnvCellIds: [landblockId & 0xffff_ff00],
 					otherCellId: 0x0100,
 					otherPortalId: 0xffff,
 					polyId: 7,
+					portalId: `${apertureResourceId}:portal-a`,
 					portalIndex: 0,
 					sourceAssetId: "gfx-obj/01001234",
 					sourceDid: 0x01001234,
+					targetEnvCellId: (landblockId & 0xffff_0000) | 0x0100,
 				},
+				sourceId: `${apertureResourceId}:source-a`,
+				sourceKind: "building-transition",
 			},
 		],
 		sourceDomain: "outdoor-buildings",

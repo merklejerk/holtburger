@@ -5,13 +5,7 @@ import {
 	MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
 	MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
 } from "../renderer/types";
-import {
-	collectStaticDrawUnitResourceIds,
-	collectStaticPortalApertureResourceIds,
-	collectStaticTransitionApertureBatchResourceIds,
-} from "../static/contracts";
 import type {
-	StaticResidencyDelta,
 	TextureDrawUnitBinding,
 	TexturePlacementUpdate,
 } from "../renderer/types";
@@ -24,6 +18,7 @@ import type {
 	StaticAuthoredDynamicSeedRecord,
 	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
+	StaticPortalApertureResource,
 	StaticResourceKey,
 	StaticSourceMappingRecord,
 	StaticSpatialRecord,
@@ -41,9 +36,10 @@ export interface StaticMaterializationInput {
 
 export interface StaticMaterializationResult {
 	readonly drawUnitIdMappings: readonly StaticMaterializedDrawUnitIdMapping[];
+	readonly materializedDrawUnits: readonly StaticDrawUnit[];
+	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly removedResources: readonly StaticResourceKey[];
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
-	readonly staticDelta: StaticResidencyDelta;
 	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
@@ -80,21 +76,10 @@ export function materializeStaticCommit(
 
 	return {
 		drawUnitIdMappings: finePartitioned.drawUnitIdMappings,
+		materializedDrawUnits: finePartitioned.drawUnits,
+		portalApertureResources: input.commit.addedPortalApertureResources ?? [],
 		removedResources,
 		...materializeStaticPeerRecords(input.commit, finePartitioned),
-		staticDelta: {
-			addedDrawUnits: finePartitioned.drawUnits,
-			addedPortalApertureResources:
-				input.commit.addedPortalApertureResources ?? [],
-			addedTransitionApertureBatches:
-				input.commit.addedTransitionApertureBatches,
-			removedDrawUnitIds: collectStaticDrawUnitResourceIds(removedResources),
-			removedPortalApertureResourceIds:
-				collectStaticPortalApertureResourceIds(removedResources),
-			removedTransitionApertureBatchIds:
-				collectStaticTransitionApertureBatchResourceIds(removedResources),
-			revision: input.commit.revision,
-		},
 		textureUpdate,
 	};
 }

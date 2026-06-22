@@ -3,7 +3,6 @@ import type {
 	StaticPortalApertureResource,
 	StaticPortalInteriorRecord,
 	StaticVec3,
-	TransitionApertureBatch,
 } from "./contracts";
 import {
 	AC_UNIT_SCALE,
@@ -58,6 +57,14 @@ export function createEnvCellPortalApertureResource(
 					portalId: aperture.portalId,
 					sourceIndex: aperture.sourceIndex,
 				}),
+				source: {
+					envCellId: envCell.envCellId,
+					kind: "env-cell-portal",
+					landblockId: record.landblockId,
+					polygonId: aperture.polygonId,
+					portalId: aperture.portalId,
+					sourceIndex: aperture.sourceIndex,
+				},
 				sourceKind: "env-cell-portal",
 			});
 		}
@@ -79,39 +86,6 @@ export function createEnvCellPortalApertureResource(
 		: null;
 }
 
-export function createTransitionPortalApertureResource(
-	batch: TransitionApertureBatch,
-): StaticPortalApertureResource {
-	return {
-		apertureResourceId: createTransitionPortalApertureResourceId(
-			batch.apertureBatchId,
-		),
-		coordinateSpace: "landblock-render-local",
-		indices: batch.indices,
-		kind: "portal-aperture-resource",
-		landblockId: batch.landblockId,
-		ranges: batch.ranges.map((range) => ({
-			firstIndex: range.firstIndex,
-			indexCount: range.indexCount,
-			rangeId: createBuildingTransitionApertureRangeId({
-				apertureBatchId: batch.apertureBatchId,
-				portalId: range.portalId,
-				rangeFirstIndex: range.firstIndex,
-				rangeIndexCount: range.indexCount,
-			}),
-			sourceId: createBuildingTransitionApertureSourceId({
-				apertureBatchId: batch.apertureBatchId,
-				portalId: range.portalId,
-				rangeFirstIndex: range.firstIndex,
-				rangeIndexCount: range.indexCount,
-			}),
-			sourceKind: "building-transition",
-		})),
-		sourceDomain: batch.sourceDomain,
-		vertices: batch.vertices,
-	};
-}
-
 export function createEnvCellPortalApertureRangeId(options: {
 	readonly envCellId: number;
 	readonly landblockId: number;
@@ -131,7 +105,7 @@ export function createEnvCellPortalApertureRangeId(options: {
 }
 
 export function createBuildingTransitionApertureRangeId(options: {
-	readonly apertureBatchId: string;
+	readonly apertureResourceId: string;
 	readonly portalId: string;
 	readonly rangeFirstIndex: number;
 	readonly rangeIndexCount: number;
@@ -139,7 +113,7 @@ export function createBuildingTransitionApertureRangeId(options: {
 	return [
 		"portal-aperture",
 		"building-transition",
-		options.apertureBatchId,
+		options.apertureResourceId,
 		options.portalId,
 		options.rangeFirstIndex,
 		options.rangeIndexCount,
@@ -164,40 +138,41 @@ export function createEnvCellPortalApertureSourceId(options: {
 }
 
 export function createBuildingTransitionApertureSourceId(options: {
-	readonly apertureBatchId: string;
+	readonly apertureResourceId: string;
 	readonly portalId: string;
 	readonly rangeFirstIndex: number;
 	readonly rangeIndexCount: number;
 }): string {
 	return [
 		"building-transition",
-		options.apertureBatchId,
+		options.apertureResourceId,
 		options.portalId,
 		options.rangeFirstIndex,
 		options.rangeIndexCount,
 	].join(":");
 }
 
-export function createBuildingTransitionTargetEnvCellId(
-	batch: TransitionApertureBatch,
-	range: TransitionApertureBatch["ranges"][number],
-): number {
-	if (range.source.otherCellId === 0xffff) {
+export function createBuildingTransitionTargetEnvCellId(options: {
+	readonly landblockId: number;
+	readonly otherCellId: number;
+	readonly sourceId: string;
+}): number {
+	if (options.otherCellId === 0xffff) {
 		throw new Error(
-			`Building transition aperture ${range.portalId} in ${batch.apertureBatchId} does not target an env cell.`,
+			`Building transition aperture ${options.sourceId} does not target an env cell.`,
 		);
 	}
-	return ((batch.landblockId & 0xffff_0000) | range.source.otherCellId) >>> 0;
+	return ((options.landblockId & 0xffff_0000) | options.otherCellId) >>> 0;
 }
 
 function createEnvCellPortalApertureResourceId(landblockId: number): string {
 	return `portal-aperture-resource:landblock-env-cells:${formatHex32(landblockId)}`;
 }
 
-function createTransitionPortalApertureResourceId(
-	apertureBatchId: string,
+export function createBuildingTransitionPortalApertureResourceId(
+	landblockId: number,
 ): string {
-	return `portal-aperture-resource:building-transition:${apertureBatchId}`;
+	return `portal-aperture-resource:building-transition:${formatHex32(landblockId)}`;
 }
 
 function triangulatePortalApertureFan(vertexCount: number): readonly number[] {

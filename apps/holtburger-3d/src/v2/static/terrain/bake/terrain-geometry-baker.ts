@@ -60,7 +60,6 @@ export function bakeTerrainGeometry(
 		staticVisibilityRecords: [],
 		staticBatchId: input.staticBatchId,
 		textureUses: itemResults.flatMap((result) => result.textureUses),
-		transitionApertureBatches: [],
 		works: input.items.map((item) => item.work),
 	};
 }

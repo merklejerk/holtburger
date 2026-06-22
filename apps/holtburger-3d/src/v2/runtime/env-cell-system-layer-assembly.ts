@@ -19,7 +19,6 @@ import type {
 	StaticSpatialRecord,
 	StaticVisibilityRecord,
 	StructuredInteriorGeometryStaticDrawUnit,
-	TransitionApertureBatch,
 } from "../static/contracts";
 import type { StaticMaterializationResult } from "./static-materializer";
 
@@ -35,7 +34,6 @@ interface BuildingTransitionFacts {
 	readonly portalGraphs: readonly StaticPortalGraphRecord[];
 	readonly sourceRevision: number;
 	readonly sourceTransitionApertureCount: number;
-	readonly transitionApertureBatches: readonly TransitionApertureBatch[];
 }
 
 interface EnvCellFacts {
@@ -82,13 +80,11 @@ export class EnvCellSystemLayerAssemblyStore {
 			sourceRevision: delta.payload.sourceRevision,
 			sourceTransitionApertureCount:
 				delta.payload.scope.buildingTransitionApertures.length,
-			transitionApertureBatches: [],
 			...(existing
 				? {
 						materializedRevision: existing.materializedRevision,
 						portalApertureResources: existing.portalApertureResources,
 						portalGraphs: existing.portalGraphs,
-						transitionApertureBatches: existing.transitionApertureBatches,
 					}
 				: {}),
 		});
@@ -110,12 +106,11 @@ export class EnvCellSystemLayerAssemblyStore {
 			this.#buildingFactsByLandblock.set(landblockId, {
 				landblockId,
 				materializedRevision: delta.revision,
-				portalApertureResources:
-					materialized.staticDelta.addedPortalApertureResources.filter(
-						(resource) =>
-							resource.sourceDomain === "outdoor-buildings" &&
-							resource.landblockId === landblockId,
-					),
+				portalApertureResources: materialized.portalApertureResources.filter(
+					(resource) =>
+						resource.sourceDomain === "outdoor-buildings" &&
+						resource.landblockId === landblockId,
+				),
 				portalGraphs: materialized.staticPortalGraphs.filter(
 					(record) =>
 						record.owner.domain === "outdoor-buildings" &&
@@ -124,12 +119,12 @@ export class EnvCellSystemLayerAssemblyStore {
 				sourceRevision: existing?.sourceRevision ?? delta.revision,
 				sourceTransitionApertureCount:
 					existing?.sourceTransitionApertureCount ??
-					materialized.staticDelta.addedTransitionApertureBatches.filter(
-						(batch) => batch.landblockId === landblockId,
-					).length,
-				transitionApertureBatches:
-					materialized.staticDelta.addedTransitionApertureBatches.filter(
-						(batch) => batch.landblockId === landblockId,
+					countBuildingTransitionApertureRanges(
+						materialized.portalApertureResources.filter(
+							(resource) =>
+								resource.sourceDomain === "outdoor-buildings" &&
+								resource.landblockId === landblockId,
+						),
 					),
 			});
 			appendPublication(publications, this.#publishIfReady(landblockId));
@@ -221,7 +216,7 @@ function createEnvCellFactsByLandblock(
 	const factsByLandblock = new Map<number, EnvCellFacts>();
 	for (const landblockId of landblockIds) {
 		const envCellStaticObjectDrawUnits =
-			materialized.staticDelta.addedDrawUnits.filter(
+			materialized.materializedDrawUnits.filter(
 				(
 					drawUnit,
 				): drawUnit is EnvCellFacts["envCellStaticObjectDrawUnits"][number] =>
@@ -230,7 +225,7 @@ function createEnvCellFactsByLandblock(
 					drawUnit.landblockId === landblockId,
 			);
 		const structuredInteriorDrawUnits =
-			materialized.staticDelta.addedDrawUnits.filter(
+			materialized.materializedDrawUnits.filter(
 				(drawUnit): drawUnit is StructuredInteriorGeometryStaticDrawUnit =>
 					drawUnit.kind === "structured-interior-geometry" &&
 					drawUnit.landblockId === landblockId,
@@ -250,12 +245,11 @@ function createEnvCellFactsByLandblock(
 					record.landblockId === landblockId,
 			),
 			materializedRevision: delta.revision,
-			portalApertureResources:
-				materialized.staticDelta.addedPortalApertureResources.filter(
-					(resource) =>
-						resource.sourceDomain === "landblock-env-cells" &&
-						resource.landblockId === landblockId,
-				),
+			portalApertureResources: materialized.portalApertureResources.filter(
+				(resource) =>
+					resource.sourceDomain === "landblock-env-cells" &&
+					resource.landblockId === landblockId,
+			),
 			portalGraphs: materialized.staticPortalGraphs.filter(
 				(record) =>
 					record.owner.domain === "landblock-env-cells" &&
@@ -295,13 +289,16 @@ function createPortalProjectionRecords(options: {
 }): readonly StaticPortalProjectionRecord[] {
 	const projection = createStaticPortalProjection({
 		landblockId: options.landblockId,
+		portalApertureResources: [
+			...options.envCellFacts.portalApertureResources,
+			...options.buildingFacts.portalApertureResources,
+		],
 		portalGraphs: [
 			...options.envCellFacts.portalGraphs,
 			...options.buildingFacts.portalGraphs,
 		],
 		portalInteriorRecords: options.envCellFacts.portalInteriorRecords,
 		root: createOutdoorPortalProjectionRoot(options.landblockId),
-		transitionApertureBatches: options.buildingFacts.transitionApertureBatches,
 	});
 	return projection ? [projection] : [];
 }
@@ -319,7 +316,14 @@ function createEnvCellSystemLayerGenerationId(options: {
 			`env:${options.envCellFacts.materializedRevision}`,
 			`building-source:${options.buildingFacts.sourceRevision}`,
 			`building-materialized:${options.buildingFacts.materializedRevision ?? "empty"}`,
-			`transition-batches:${options.buildingFacts.transitionApertureBatches.map((batch) => batch.apertureBatchId).join(",")}`,
+			`transition-apertures:${options.buildingFacts.portalApertureResources
+				.flatMap((resource) =>
+					resource.ranges
+						.filter((range) => range.sourceKind === "building-transition")
+						.map((range) => range.rangeId),
+				)
+				.sort(compareStrings)
+				.join(",")}`,
 			`projections:${options.portalProjectionRecords.map((record) => record.sourceRevisionKey).join(",")}`,
 		].join("|"),
 	});
@@ -398,14 +402,17 @@ function collectBuildingLandblockIds(
 				? [record.landblockId]
 				: [],
 		),
-		...materialized.staticDelta.addedDrawUnits.flatMap((drawUnit) =>
+		...materialized.materializedDrawUnits.flatMap((drawUnit) =>
 			drawUnit.kind === "static-object-geometry" &&
 			drawUnit.domain === "outdoor-buildings"
 				? [drawUnit.landblockId]
 				: [],
 		),
-		...materialized.staticDelta.addedTransitionApertureBatches.map(
-			(batch) => batch.landblockId,
+		...materialized.portalApertureResources.flatMap((resource) =>
+			resource.sourceDomain === "outdoor-buildings" &&
+			countBuildingTransitionApertureRanges([resource]) > 0
+				? [resource.landblockId]
+				: [],
 		),
 		...materialized.staticPortalGraphs.flatMap((record) =>
 			record.owner.domain === "outdoor-buildings" ? [record.landblockId] : [],
@@ -413,11 +420,24 @@ function collectBuildingLandblockIds(
 	]);
 }
 
+function countBuildingTransitionApertureRanges(
+	resources: readonly StaticPortalApertureResource[],
+): number {
+	return resources.reduce(
+		(count, resource) =>
+			count +
+			resource.ranges.filter(
+				(range) => range.sourceKind === "building-transition",
+			).length,
+		0,
+	);
+}
+
 function collectEnvCellLandblockIds(
 	materialized: StaticMaterializationResult,
 ): readonly number[] {
 	return uniqueNumbers([
-		...materialized.staticDelta.addedDrawUnits.flatMap((drawUnit) =>
+		...materialized.materializedDrawUnits.flatMap((drawUnit) =>
 			(drawUnit.kind === "static-object-geometry" &&
 				drawUnit.domain === "landblock-env-cells") ||
 			drawUnit.kind === "structured-interior-geometry"

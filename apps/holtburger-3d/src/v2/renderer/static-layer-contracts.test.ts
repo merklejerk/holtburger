@@ -5,7 +5,6 @@ import {
 	createStaticLandblockLayerKey,
 	staticLayerKindForStaticDomain,
 	type EnvCellSystemLayerPayload,
-	type StaticLandblockLayerPayload,
 	type TerrainLayerPayload,
 } from "./types";
 
@@ -61,7 +60,7 @@ describe("static landblock layer contracts", () => {
 		expect(visibility).not.toHaveProperty("lod");
 	});
 
-	it("models terrain as a whole layer without public resource deltas", () => {
+	it("models terrain as a whole layer", () => {
 		const layer: TerrainLayerPayload = {
 			drawUnits: [],
 			generationId: createStaticLandblockLayerGenerationId({
@@ -77,7 +76,8 @@ describe("static landblock layer contracts", () => {
 			textureUses: [],
 		};
 
-		expectLayerHasNoPublicDeltaLists(layer);
+		expect(layer.kind).toBe("terrain");
+		expect(layer.drawUnits).toEqual([]);
 	});
 
 	it("models env-cell systems as projection/aperture layers without portal-stack contracts", () => {
@@ -119,20 +119,5 @@ describe("static landblock layer contracts", () => {
 				structuredInteriorDrawUnitIds: ["interior:room"],
 			},
 		]);
-		expectLayerHasNoPublicDeltaLists(layer);
-		expect(layer).not.toHaveProperty("portalTraversalPlan");
-		expect(layer).not.toHaveProperty("portalFrameGraph");
-		expect(layer).not.toHaveProperty("transitionApertureBatches");
 	});
 });
-
-function expectLayerHasNoPublicDeltaLists(
-	layer: StaticLandblockLayerPayload,
-): void {
-	expect(layer).not.toHaveProperty("addedDrawUnits");
-	expect(layer).not.toHaveProperty("removedDrawUnitIds");
-	expect(layer).not.toHaveProperty("addedPortalApertureResources");
-	expect(layer).not.toHaveProperty("removedPortalApertureResourceIds");
-	expect(layer).not.toHaveProperty("addedTransitionApertureBatches");
-	expect(layer).not.toHaveProperty("removedTransitionApertureBatchIds");
-}

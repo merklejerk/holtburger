@@ -731,6 +731,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 				{ func: gl.EQUAL, mask: 0xff, ref: 1 },
 			]),
 		);
+		expect(gl.enabledCapabilities).not.toContain(gl.CULL_FACE);
 		expect(gl.blitFramebufferCalls).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
@@ -936,6 +937,8 @@ describe("V2 WebGL2 structured interior rendering", () => {
 				{ func: gl.EQUAL, mask: 0xff, ref: 0xfe },
 			]),
 		);
+		expect(gl.enabledCapabilities).toContain(gl.CULL_FACE);
+		expect(gl.cullFaceModes).toContain(gl.BACK);
 
 		renderer.dispose();
 	});

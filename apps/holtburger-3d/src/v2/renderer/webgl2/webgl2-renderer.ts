@@ -1236,6 +1236,7 @@ class Webgl2Renderer implements Renderer {
 				"exterior",
 				pulse,
 				targets.width / Math.max(1, targets.height),
+				{ cullTerrainBackfaces: true },
 			);
 			const outdoorCrossingSource = plan.exteriorComposite
 				? this.#renderExteriorSuffixComposite(plan, targets)
@@ -1383,6 +1384,7 @@ class Webgl2Renderer implements Renderer {
 		domain: SceneDomain,
 		pulse: number,
 		aspectRatio: number,
+		options: { readonly cullTerrainBackfaces?: boolean } = {},
 	): number {
 		const gl = this.#gl;
 		gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
@@ -1403,7 +1405,9 @@ class Webgl2Renderer implements Renderer {
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
 		let drawCalls = 0;
 		if (domain === "exterior") {
-			drawCalls += this.#drawTerrain(aspectRatio);
+			drawCalls += this.#drawTerrain(aspectRatio, {
+				cullBackfaces: options.cullTerrainBackfaces ?? false,
+			});
 		}
 		drawCalls += this.#drawStaticObjects(domain, aspectRatio);
 		return drawCalls;
@@ -1558,7 +1562,10 @@ class Webgl2Renderer implements Renderer {
 		return target === "exterior" ? targets.exterior : targets.interior;
 	}
 
-	#drawTerrain(aspectRatio: number): number {
+	#drawTerrain(
+		aspectRatio: number,
+		options: { readonly cullBackfaces?: boolean } = {},
+	): number {
 		if (
 			!this.#staticLayerVisibility.terrain ||
 			this.#terrainResources.size === 0
@@ -1576,6 +1583,10 @@ class Webgl2Renderer implements Renderer {
 			mvp,
 		);
 		gl.uniform4f(this.#terrainProgram.uniforms.uColor, 0.22, 0.72, 0.42, 1);
+		this.#stateCache.setCullState({
+			enabled: options.cullBackfaces ?? false,
+			mode: gl.BACK,
+		});
 
 		for (const resource of this.#terrainResources.values()) {
 			const bindings =

@@ -17,6 +17,8 @@ struct Args {
     portal_duplicates: bool,
     #[arg(long)]
     aperture_alignment: bool,
+    #[arg(long)]
+    module_seams: bool,
 }
 
 fn main() -> Result<()> {
@@ -65,6 +67,8 @@ fn main() -> Result<()> {
         .filter_map(|member| member.building.as_ref())
         .map(|building| building.portals.len())
         .sum::<usize>();
+    let building_portals_by_target =
+        build_building_portals_by_target(landblock_id, &building_members);
 
     println!("landblock=0x{landblock_id:08x}");
     println!(
@@ -129,8 +133,42 @@ fn main() -> Result<()> {
             &env_apertures_by_cell_and_index,
         );
     }
+    if args.module_seams {
+        report_duplicate_outside_transition_module_seams(
+            landblock_id,
+            &env_asset.env_cells,
+            &building_portals_by_target,
+        );
+    }
 
     Ok(())
+}
+
+fn build_building_portals_by_target(
+    landblock_id: u32,
+    building_members: &[&holtburger_content::LandblockOutdoorStaticMember],
+) -> BTreeMap<(u32, usize), Vec<BuildingPortalTargetDump>> {
+    let mut targets = BTreeMap::<(u32, usize), Vec<BuildingPortalTargetDump>>::new();
+    for member in building_members {
+        let Some(building) = member.building.as_ref() else {
+            continue;
+        };
+        for portal in &building.portals {
+            let target_env_cell_id = (landblock_id & 0xffff_0000) | u32::from(portal.other_cell_id);
+            targets
+                .entry((target_env_cell_id, usize::from(portal.other_portal_id)))
+                .or_default()
+                .push(BuildingPortalTargetDump {
+                    building_instance_id: member.instance.instance_id.clone(),
+                    building_portal_id: portal.portal_id.clone(),
+                    flags: portal.flags,
+                    linked_env_cell_ids: portal.linked_env_cell_ids.clone(),
+                    source_did: member.instance.source_did,
+                    source_index: member.instance.source_index,
+                });
+        }
+    }
+    targets
 }
 
 fn build_env_apertures_by_cell_and_index(
@@ -360,6 +398,100 @@ fn report_duplicate_transition_portal_linkage(
     }
 }
 
+fn report_duplicate_outside_transition_module_seams(
+    landblock_id: u32,
+    cells: &[holtburger_content::LandblockEnvCellBundleCell],
+    building_portals_by_target: &BTreeMap<(u32, usize), Vec<BuildingPortalTargetDump>>,
+) {
+    let mut groups = BTreeMap::<String, Vec<TransitionPortalApertureDump>>::new();
+    for cell in cells {
+        let apertures_by_portal = cell
+            .prepared_cell
+            .portal_apertures
+            .iter()
+            .map(|aperture| (aperture.portal_id.as_str(), aperture))
+            .collect::<BTreeMap<_, _>>();
+        for portal in &cell.prepared_cell.portals {
+            if !portal.is_outside_transition {
+                continue;
+            }
+            let Some(aperture) = apertures_by_portal.get(portal.portal_id.as_str()) else {
+                continue;
+            };
+            let world_points = aperture
+                .points
+                .iter()
+                .map(|point| {
+                    transform_render_local_point(*point, &cell.prepared_cell.local_placement)
+                })
+                .collect::<Vec<_>>();
+            groups
+                .entry(canonical_point_set_key(&world_points))
+                .or_default()
+                .push(TransitionPortalApertureDump {
+                    env_cell_id: cell.env_cell.env_cell_id,
+                    flags: portal.flags,
+                    portal_id: portal.portal_id.clone(),
+                });
+        }
+    }
+
+    let seam_groups = groups
+        .values()
+        .filter(|group| {
+            group.len() > 1
+                && group.iter().all(|member| {
+                    building_portals_by_target
+                        .get(&(member.env_cell_id, extract_portal_index(&member.portal_id)))
+                        .is_some_and(|portals| !portals.is_empty())
+                })
+        })
+        .count();
+    println!(
+        "outsideTransitionModuleSeamSummary landblock=0x{landblock_id:08x} seamGroups={seam_groups}"
+    );
+
+    for group in groups.values().filter(|group| group.len() > 1) {
+        let all_have_building_targets = group.iter().all(|member| {
+            building_portals_by_target
+                .get(&(member.env_cell_id, extract_portal_index(&member.portal_id)))
+                .is_some_and(|portals| !portals.is_empty())
+        });
+        if !all_have_building_targets {
+            continue;
+        }
+        println!("outsideTransitionModuleSeam members={}", group.len());
+        for member in group {
+            println!(
+                "  envCell=0x{:08x} portal={} flags=0x{:04x}",
+                member.env_cell_id, member.portal_id, member.flags
+            );
+            let building_portals = building_portals_by_target
+                .get(&(member.env_cell_id, extract_portal_index(&member.portal_id)))
+                .into_iter()
+                .flatten();
+            for portal in building_portals {
+                println!(
+                    "    building={} sourceDid=0x{:08x} sourceIndex={} portal={} flags=0x{:04x} linkedEnvCells={}",
+                    portal.building_instance_id,
+                    portal.source_did,
+                    portal.source_index,
+                    portal.building_portal_id,
+                    portal.flags,
+                    format_env_cell_ids(portal.linked_env_cell_ids.iter().copied()),
+                );
+            }
+        }
+    }
+}
+
+fn extract_portal_index(portal_id: &str) -> usize {
+    portal_id
+        .rsplit_once("/portal/")
+        .and_then(|(_, index)| index.parse::<usize>().ok())
+        .unwrap_or(usize::MAX)
+}
+
 #[derive(Debug)]
 struct TransitionPortalApertureDump {
     env_cell_id: u32,
@@ -380,6 +512,16 @@ struct BuildingTransitionApertureDump {
     poly_id: u16,
     portal_index: i16,
     source_did: u32,
+}
+
+#[derive(Debug)]
+struct BuildingPortalTargetDump {
+    building_instance_id: String,
+    building_portal_id: String,
+    flags: u16,
+    linked_env_cell_ids: Vec<u32>,
+    source_did: u32,
+    source_index: usize,
 }
 
 #[derive(Debug)]

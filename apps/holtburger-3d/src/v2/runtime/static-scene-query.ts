@@ -1060,13 +1060,16 @@ export class StaticSceneQuery {
 		const portalInteriorRecords = this.queryPortalInteriorRecords({
 			landblockId,
 		});
+		const portalApertureResources =
+			this.#envCellSystemLayersByLandblockId.get(landblockId)
+				?.portalApertureResources ?? [];
 		const root = createEnvCellPortalProjectionRoot({
 			envCellId: startEnvCellId,
 			landblockId,
 		});
 		const sourceKey = createStaticPortalProjectionSourceKey({
 			landblockId,
-			portalApertureResources: [],
+			portalApertureResources,
 			portalGraphs,
 			portalInteriorRecords,
 			root,
@@ -1081,7 +1084,7 @@ export class StaticSceneQuery {
 		}
 		const projection = createStaticPortalProjection({
 			landblockId,
-			portalApertureResources: [],
+			portalApertureResources,
 			portalGraphs,
 			portalInteriorRecords,
 			root,

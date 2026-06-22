@@ -894,6 +894,7 @@ export interface StaticPortalProjectionRecord {
 	readonly rootNodeId: string;
 	readonly nodes: readonly StaticPortalProjectionNode[];
 	readonly edges: readonly StaticPortalProjectionEdge[];
+	readonly outdoorSceneCrossings: readonly StaticPortalProjectionOutdoorSceneCrossing[];
 	readonly adjacency: readonly StaticPortalProjectionAdjacency[];
 	readonly incomingEdges: readonly StaticPortalProjectionIncomingEdges[];
 	readonly components: readonly StaticPortalProjectionComponent[];
@@ -953,6 +954,23 @@ type StaticPortalProjectionEdgeProvenance =
 			readonly polygonId: number | null;
 	  };
 
+export interface StaticPortalProjectionOutdoorSceneCrossing {
+	readonly crossingId: string;
+	readonly targetEnvCellId: number;
+	readonly outdoorLandblockId: number;
+	readonly apertureRangeId: string;
+	readonly apertureSourceId: string;
+	readonly linkId: string;
+	readonly provenance: {
+		readonly kind: "building-transition";
+		readonly apertureResourceId: string;
+		readonly portalId: string;
+		readonly buildingInstanceId: string;
+		readonly buildingPortalId: string;
+		readonly targetEnvCellId: number;
+	};
+}
+
 export interface StaticPortalProjectionAdjacency {
 	readonly sourceNodeId: string;
 	readonly edgeIds: readonly string[];
@@ -998,6 +1016,9 @@ export interface StaticPortalProjectionDiagnostics {
 	readonly envCellPortalEdgesRejectedTargetNotOutsideVisible: number;
 	readonly envCellPortalEdgesRejectedSourceNotOutsideVisible: number;
 	readonly envCellPortalEdgesRejectedMissingAperture: number;
+	readonly outboundOutdoorCrossingCandidateCount: number;
+	readonly outboundOutdoorCrossingRetainedCount: number;
+	readonly outboundOutdoorCrossingSkippedUnreachableTarget: number;
 	readonly componentInternalEdgeCount: number;
 }
 

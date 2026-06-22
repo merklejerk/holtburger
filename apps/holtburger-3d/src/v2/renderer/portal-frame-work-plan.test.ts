@@ -137,6 +137,7 @@ function createDirectEnvCellPlan(): PortalFrameWorkPlan {
 					targetEnvCellId: 0xf4180103,
 				},
 			],
+			outdoorCrossings: [],
 			projectionDiagnostics: {
 				componentCount: 1,
 				componentInternalEdgeCount: 0,
@@ -146,6 +147,9 @@ function createDirectEnvCellPlan(): PortalFrameWorkPlan {
 				maxProjectionRenderLayer: 1,
 				maxSelectedRenderLayer: 1,
 				missingResourceMembershipCount: 1,
+				outdoorCrossingCount: 0,
+				outdoorCrossingsSkippedByLayerCap: 0,
+				outdoorCrossingsSkippedByUnselectedTarget: 0,
 				projectedEnvCellCount: 1,
 				renderEntriesSkippedByLayerCap: 0,
 				renderEntriesSkippedByMaxRenderEntries: 0,

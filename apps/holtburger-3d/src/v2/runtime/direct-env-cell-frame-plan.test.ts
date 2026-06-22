@@ -211,6 +211,68 @@ describe("direct env-cell frame plan", () => {
 			}),
 		]);
 	});
+
+	it("retains outdoor crossings for env-cell projections through selected target cells", () => {
+		const plan = createPortalProjectionFramePlan({
+			landblockId: 0xda55ffff,
+			envCellResourceMembership: [
+				createEnvCellMembership(0xda550100, "structured-root"),
+				createEnvCellMembership(0xda550101, "structured-child"),
+			],
+			maxRenderEntries: 16,
+			maxDepth: 2,
+			maxMaskEdges: 16,
+			projection: createPortalProjectionRecord({
+				edges: [
+					createProjectionEdge({
+						edgeId: "a-b",
+						sourceEnvCellId: 0xda550100,
+						targetEnvCellId: 0xda550101,
+					}),
+				],
+				layers: [
+					{ envCellIds: [0xda550100], renderLayer: 0 },
+					{ envCellIds: [0xda550101], renderLayer: 1 },
+				],
+				outdoorSceneCrossings: [
+					createOutdoorSceneCrossing({
+						crossingId: "outdoor-crossing:child",
+						targetEnvCellId: 0xda550101,
+					}),
+				],
+				root: {
+					envCellId: 0xda550100,
+					kind: "env-cell-root",
+					landblockId: 0xda55ffff,
+					rootNodeId: "env-cell:3663003904",
+				},
+			}),
+		});
+
+		expect(plan?.mode).toBe("portal-projection");
+		if (plan?.mode !== "portal-projection") {
+			throw new Error("Expected portal projection plan.");
+		}
+		expect(plan.layeredGraph.outdoorCrossings).toEqual([
+			{
+				apertureRangeId: "building-transition:outdoor-crossing:child:range",
+				apertureSourceId:
+					"building-transition:outdoor-crossing:child:source",
+				crossingId: 0,
+				linkId: "outdoor-crossing:child",
+				outdoorLandblockId: 0xda55ffff,
+				targetEnvCellId: 0xda550101,
+			},
+		]);
+		expect(plan.layeredGraph.projectionDiagnostics).toMatchObject({
+			outdoorCrossingCount: 1,
+			outdoorCrossingsSkippedByLayerCap: 0,
+			outdoorCrossingsSkippedByUnselectedTarget: 0,
+		});
+		expect(plan.layeredGraph.diagnostics).toMatchObject({
+			buildingTransitionEdges: 1,
+		});
+	});
 });
 
 function createEnvCellMembership(
@@ -233,6 +295,7 @@ function createPortalProjectionRecord(options: {
 		readonly renderLayer: number;
 	}[];
 	readonly root?: StaticPortalProjectionRecord["root"];
+	readonly outdoorSceneCrossings?: readonly StaticPortalProjectionRecord["outdoorSceneCrossings"][number][];
 }): StaticPortalProjectionRecord {
 	const envCellIds = [
 		...new Set(options.layers.flatMap((layer) => layer.envCellIds)),
@@ -273,6 +336,11 @@ function createPortalProjectionRecord(options: {
 				0,
 				...options.layers.map((layer) => layer.renderLayer),
 			),
+			outboundOutdoorCrossingCandidateCount:
+				options.outdoorSceneCrossings?.length ?? 0,
+			outboundOutdoorCrossingRetainedCount:
+				options.outdoorSceneCrossings?.length ?? 0,
+			outboundOutdoorCrossingSkippedUnreachableTarget: 0,
 			outsideVisibleEnvCellCount: envCellIds.length,
 			transitionRootCandidateCount: options.edges.filter(
 				(edge) => edge.sourceKind === "building-transition",
@@ -291,6 +359,7 @@ function createPortalProjectionRecord(options: {
 			envCellId,
 			nodeId: createProjectionNodeId(envCellId),
 		})),
+		outdoorSceneCrossings: options.outdoorSceneCrossings ?? [],
 		renderLayerByEnvCellId: options.layers.flatMap((layer) =>
 			layer.envCellIds.map((envCellId) => ({
 				envCellId,
@@ -311,6 +380,28 @@ function createPortalProjectionRecord(options: {
 		},
 		rootNodeId: options.root?.rootNodeId ?? "outdoor-root",
 		sourceRevisionKey: "projection-test-key",
+	};
+}
+
+function createOutdoorSceneCrossing(options: {
+	readonly crossingId: string;
+	readonly targetEnvCellId: number;
+}): StaticPortalProjectionRecord["outdoorSceneCrossings"][number] {
+	return {
+		apertureRangeId: `building-transition:${options.crossingId}:range`,
+		apertureSourceId: `building-transition:${options.crossingId}:source`,
+		crossingId: options.crossingId,
+		linkId: options.crossingId,
+		outdoorLandblockId: 0xda55ffff,
+		provenance: {
+			apertureResourceId: "portal-aperture-resource:building-transition:da55ffff",
+			buildingInstanceId: "building-0",
+			buildingPortalId: "building-portal-0",
+			kind: "building-transition",
+			portalId: options.crossingId,
+			targetEnvCellId: options.targetEnvCellId,
+		},
+		targetEnvCellId: options.targetEnvCellId,
 	};
 }
 

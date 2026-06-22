@@ -3674,6 +3674,10 @@ Post-implementation visual finding on 2026-06-22:
   filters the retained outdoor-root source graph for env-cell-origin frames so env cells already
   present in the current indoor graph are excluded from the sampled exterior source. Outdoor residency
   continues to use the unfiltered outdoor-root graph.
+- Underground tunnel review showed the sampled exterior could include the underside of outdoor
+  terrain when looking up through an indoor-origin transition. WebGL now backface-culls terrain only
+  while rendering the env-cell-origin exterior source. More exact aperture-depth rejection remains
+  future debt if non-terrain exterior geometry leaks in front of transition apertures.
 
 Grounded code touchpoints:
 

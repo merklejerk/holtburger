@@ -180,6 +180,49 @@ describe("V2 static demand planner", () => {
 			},
 		]);
 	});
+
+	it("does not expand interior-cell demand into neighboring outdoor source landblocks", () => {
+		const { retainedScopes, work } = planStaticDemand(
+			{
+				location: {
+					envCellId: 0xda550123,
+					kind: "interior-cell",
+					landblockId: 0xda550123,
+				},
+				lod: {
+					buildings: 4,
+					detail: 4,
+					envCells: 4,
+					terrain: 4,
+				},
+			},
+			13,
+		);
+
+		expect(work.map((item) => item.job)).toEqual([
+			{
+				domain: "outdoor-buildings",
+				scope: {
+					kind: "landblock",
+					landblockId: 0xda55ffff,
+				},
+			},
+			{
+				domain: "landblock-env-cells",
+				scope: {
+					kind: "landblock",
+					landblockId: 0xda55ffff,
+				},
+			},
+		]);
+		expect(
+			new Set(work.map((item) => item.job.scope.landblockId)),
+		).toEqual(new Set([0xda55ffff]));
+		expect(retainedScopes.map((scope) => scope.scope.landblockId)).toEqual([
+			0xda55ffff,
+			0xda55ffff,
+		]);
+	});
 });
 
 function createOutdoorDemand(

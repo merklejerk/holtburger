@@ -405,7 +405,7 @@ export interface PortalProjectionFrameOutdoorCrossingPlan {
 	readonly linkId: string;
 }
 
-interface PortalProjectionFrameDiagnostics {
+export interface PortalProjectionFrameDiagnostics {
 	readonly componentCount: number;
 	readonly cyclicComponentCount: number;
 	readonly componentInternalEdgeCount: number;

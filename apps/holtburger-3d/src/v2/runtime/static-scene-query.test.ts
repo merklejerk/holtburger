@@ -1268,6 +1268,56 @@ describe("V2 static scene query", () => {
 		).toBeNull();
 	});
 
+	it("reports retained outdoor source landblocks and projections without expanding demand", () => {
+		const query = new StaticSceneQuery();
+		const currentProjection = createProjectionOutdoorPortalProjection({
+			landblockId: 0xda55ffff,
+		});
+		const neighborProjection = createProjectionOutdoorPortalProjection({
+			landblockId: 0xdb55ffff,
+		});
+
+		query.setEnvCellSystemLayer(
+			createEnvCellSystemLayerPayload([currentProjection], {
+				landblockId: 0xda55ffff,
+			}),
+		);
+		query.setEnvCellSystemLayer(
+			createEnvCellSystemLayerPayload([neighborProjection], {
+				landblockId: 0xdb55ffff,
+			}),
+		);
+
+		expect(query.queryRetainedOutdoorSourceLandblocks()).toEqual([
+			{
+				domains: {
+					buildings: false,
+					detail: false,
+					envCells: true,
+					terrain: false,
+				},
+				landblockId: 0xda55ffff,
+			},
+			{
+				domains: {
+					buildings: false,
+					detail: false,
+					envCells: true,
+					terrain: false,
+				},
+				landblockId: 0xdb55ffff,
+			},
+		]);
+		expect(
+			query.queryRetainedOutdoorPortalProjections([
+				0xdb55ffff,
+				0xda55ffff,
+				0xdb55ffff,
+				0xdc55ffff,
+			]),
+		).toEqual([currentProjection, neighborProjection]);
+	});
+
 	it("caches env-cell portal projections by committed semantic inputs and root env cell", () => {
 		const query = new StaticSceneQuery();
 		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
@@ -2048,10 +2098,15 @@ function createStaticPortalGraphRecord(
 
 function createProjectionPortalInteriorRecord(
 	owner: StaticWorkPeerRecordOwner,
+	options: {
+		readonly landblockId?: number;
+	} = {},
 ): StaticPortalInteriorRecord {
+	const landblockId = options.landblockId ?? 0xda55ffff;
+	const landblockPrefix = landblockId & 0xffff0000;
 	return {
-		envCells: [0xda550100, 0xda550101, 0xda550102].map((envCellId) => ({
-			envCellId,
+		envCells: [0x0100, 0x0101, 0x0102].map((cellLowId) => ({
+			envCellId: (landblockPrefix | cellLowId) >>> 0,
 			localPlacement: createPlacement(),
 			portalApertures: [
 				{
@@ -2070,7 +2125,7 @@ function createProjectionPortalInteriorRecord(
 			seenOutside: true,
 		})),
 		kind: "env-cell-portal-interior",
-		landblockId: 0xda55ffff,
+		landblockId,
 		owner,
 		portalLinks: [],
 	};
@@ -2078,13 +2133,17 @@ function createProjectionPortalInteriorRecord(
 
 function createEnvCellSystemLayerPayload(
 	portalProjectionRecords: EnvCellSystemLayerPayload["portalProjectionRecords"],
+	options: {
+		readonly landblockId?: number;
+	} = {},
 ): EnvCellSystemLayerPayload {
+	const landblockId = options.landblockId ?? 0xda55ffff;
 	return {
 		authoredDynamicSeedRecords: [],
 		envCellStaticObjectDrawUnits: [],
-		generationId: "env-cell-system:0xda55ffff:test",
+		generationId: `env-cell-system:${landblockId.toString(16)}:test`,
 		kind: "env-cell-system",
-		landblockId: 0xda55ffff,
+		landblockId,
 		materialCoverage: [],
 		portalApertureResources: [],
 		portalGraphRecords: [],
@@ -2099,18 +2158,33 @@ function createEnvCellSystemLayerPayload(
 	};
 }
 
-function createProjectionOutdoorPortalProjection(): EnvCellSystemLayerPayload["portalProjectionRecords"][number] {
-	const landblockId = 0xda55ffff;
+function createProjectionOutdoorPortalProjection(
+	options: {
+		readonly landblockId?: number;
+	} = {},
+): EnvCellSystemLayerPayload["portalProjectionRecords"][number] {
+	const landblockId = options.landblockId ?? 0xda55ffff;
 	const owner = createEnvCellWorkOwner("work-env-a", landblockId);
+	const sourceEnvCellId = ((landblockId & 0xffff0000) | 0x0100) >>> 0;
+	const targetEnvCellId = ((landblockId & 0xffff0000) | 0x0101) >>> 0;
 	const projection = createStaticPortalProjection({
 		landblockId,
 		portalApertureResources: [
 			createProjectionBuildingTransitionPortalApertureResource({
+				landblockId,
 				targetCellLowId: 0x0100,
 			}),
 		],
-		portalGraphs: [createStaticPortalGraphRecord(owner)],
-		portalInteriorRecords: [createProjectionPortalInteriorRecord(owner)],
+		portalGraphs: [
+			createStaticPortalGraphRecord(owner, {
+				landblockId,
+				sourceEnvCellId,
+				targetEnvCellId,
+			}),
+		],
+		portalInteriorRecords: [
+			createProjectionPortalInteriorRecord(owner, { landblockId }),
+		],
 		root: createOutdoorPortalProjectionRoot(landblockId),
 	});
 	if (!projection) {
@@ -2120,18 +2194,23 @@ function createProjectionOutdoorPortalProjection(): EnvCellSystemLayerPayload["p
 }
 
 function createProjectionBuildingTransitionPortalApertureResource(options: {
+	readonly landblockId?: number;
 	readonly targetCellLowId: number;
 }): StaticPortalApertureResource {
+	const landblockId = options.landblockId ?? 0xda55ffff;
 	const apertureResourceId =
-		"portal-aperture-resource:building-transition:0xda55ffff";
+		`portal-aperture-resource:building-transition:0x${landblockId
+			.toString(16)
+			.padStart(8, "0")}`;
 	const portalId =
 		"transition-portal:outdoor-buildings:3663069183:building-transition-aperture:building-0:0";
+	const targetEnvCellId = ((landblockId & 0xffff0000) | options.targetCellLowId) >>> 0;
 	return {
 		apertureResourceId,
 		coordinateSpace: "landblock-render-local",
 		indices: [0, 2, 1],
 		kind: "portal-aperture-resource",
-		landblockId: 0xda55ffff,
+		landblockId,
 		ranges: [
 			{
 				firstIndex: 0,
@@ -2149,8 +2228,8 @@ function createProjectionBuildingTransitionPortalApertureResource(options: {
 					buildingPortalId: "building-portal-0",
 					buildingPortalSourceIndex: 0,
 					kind: "building-transition",
-					landblockId: 0xda55ffff,
-					linkedEnvCellIds: [0xda550100],
+					landblockId,
+					linkedEnvCellIds: [targetEnvCellId],
 					otherCellId: options.targetCellLowId,
 					otherPortalId: 0xffff,
 					polyId: 7,
@@ -2158,7 +2237,7 @@ function createProjectionBuildingTransitionPortalApertureResource(options: {
 					portalIndex: 0,
 					sourceAssetId: "gfx-obj/01001234",
 					sourceDid: 0x01001234,
-					targetEnvCellId: (0xda55_0000 | options.targetCellLowId) >>> 0,
+					targetEnvCellId,
 				},
 				sourceId: [
 					"building-transition",

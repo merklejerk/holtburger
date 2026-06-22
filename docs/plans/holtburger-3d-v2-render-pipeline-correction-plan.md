@@ -1726,7 +1726,7 @@ Dry-run findings on 2026-06-21:
   - `{ kind: "outdoor-root"; landblockId; rootNodeId }`;
   - `{ kind: "env-cell-root"; landblockId; envCellId; rootNodeId }`.
 - `createStaticPortalProjection(...)` now accepts a root policy, validates root landblock identity, uses the root node/component id in SCC/layer construction, and includes root policy facts in `sourceRevisionKey`.
-- `createOutdoorPortalProjectionRoot(...)` is the current thin outdoor-root helper. `StaticSceneQuery.queryOutdoorPortalProjection(...)` remains as a compatibility wrapper over the generic projection builder and cache.
+- `createOutdoorPortalProjectionRoot(...)` is the thin outdoor-root helper introduced in this slice. Phase 14 later removed `StaticSceneQuery.queryOutdoorPortalProjection(...)`'s query-side builder/cache fallback so outdoor projections are now layer-owned.
 - The generic builder intentionally supports only `outdoor-root` today. `env-cell-root` currently fails fast until 9E.2 adds reachable env-cell closure construction, root-SCC handling, and an env-cell keyed query/cache.
 - Renderer-facing names and mode values such as `OutdoorProjectionPortalFrameGraphPlan`, `createOutdoorProjectionPortalFramePlan(...)`, and `"outdoor-projection"` are intentionally still outdoor-specific. Generalizing those is 9E.3 work, because it needs the dungeon root rendering/stencil policy at the same time.
 - Debt introduced/retained:
@@ -2298,7 +2298,7 @@ Implementation update (2026-06-21):
   - draw-unit ids and portal aperture resource ids map back to the owning layer key;
   - legacy eviction resource keys clear the owning whole layer instead of requiring a matching fine-grained renderer diff.
 - Added `StaticSceneQuery.setEnvCellSystemLayer(...)` and `clearEnvCellSystemLayer(...)`.
-- `StaticSceneQuery.queryOutdoorPortalProjection(...)` now prefers projection records published by the installed env-cell-system layer before falling back to query-side derivation from committed portal graphs/interiors/transition batches.
+- `StaticSceneQuery.queryOutdoorPortalProjection(...)` now prefers projection records published by the installed env-cell-system layer before falling back to query-side derivation from committed portal graphs/interiors/transition batches. Phase 14 later deleted that fallback and made outdoor projection lookup layer-only.
 - Added tests proving:
   - runtime forwards materialized terrain through layer replacement and clears the layer on legacy eviction;
   - static query can read an outdoor portal projection directly from an env-cell-system layer payload without committed transition aperture batches.
@@ -2347,6 +2347,36 @@ Explicit non-goals:
 
 - Do not keep compatibility shims for tests if production no longer needs them. Delete the tests or rewrite them around layer behavior.
 - Do not reintroduce retained-resource diffing unless measured replacement cost proves this architecture is too expensive.
+
+Implementation update (2026-06-21):
+
+- Runtime no longer sends `StaticResidencyDelta` to the renderer after materialization:
+  - texture placement updates are applied first;
+  - materialized terrain/building/detail outputs are installed through layer replacement;
+  - env-cell-system publications remain the source of portal projection/resource-membership layer facts.
+- Removed `Renderer.applyStaticDelta(...)` from the production renderer interface. The WebGL2 implementation still has the method as a quarantined legacy/debug/test path until Phase 15 deletes the remaining transition-specific execution state.
+- Portal frame-plan cache keys now use the installed env-cell-system layer generation id instead of `projection.sourceRevisionKey` plus env-cell membership revision.
+- `StaticSceneQuery.queryOutdoorPortalProjection(...)` is now layer-only:
+  - it returns the outdoor-root projection published by the installed env-cell-system layer;
+  - it no longer derives outdoor projections by joining committed portal graphs, portal interiors, and transition aperture batches;
+  - outdoor projection cache/invalidation plumbing was deleted because the layer payload is the cache boundary.
+- Rewrote runtime/query tests that were pinning the legacy delta/outdoor-derivation behavior around layer replacement and layer-owned projections.
+- Spicy bits:
+  - deleting the fallback exposed a real ordering bug: layer replacement was happening before texture placement. The runtime now applies texture placement before layer installation.
+  - `StaticResidencyDelta` still exists as an internal materializer/assembly DTO in `renderer/types.ts`, which is an awkward home. It should move out of the renderer boundary or be dissolved when materialization emits layer payloads directly.
+  - `ClientRuntime` still maintains the global materialized-draw-unit membership fallback and `envCellResourceMembershipRevision` for diagnostics/fallback state, but frame-plan cache keys no longer depend on it.
+  - transition aperture batches still exist in `StaticSceneQuery` and WebGL2 renderer debug/test execution paths. Phase 15 must delete or replace those paths with source-tagged portal aperture resources.
+- Debt carried to Phase 15:
+  - remove/quarantine `Webgl2Renderer.applyStaticDelta(...)` tests by rewriting them around layer APIs or deleting legacy-only coverage;
+  - delete `StaticResidencyDelta` from `renderer/types.ts` once `static-materializer` stops returning it;
+  - delete transition aperture batch renderer execution state after building-derived transition surfaces are represented only as source-tagged portal aperture resources;
+  - decide whether `envCellResourceMembershipRevision` remains useful diagnostics or should be replaced by env-cell-system generation reporting.
+- Validation for this slice:
+  - `npm run test:ts -- src/v2/runtime/client-runtime.test.ts src/v2/runtime/static-scene-query.test.ts`;
+  - `npm run check`;
+  - `npm run lint:ts`;
+  - `npm run test:ts`;
+  - `git diff --check`.
 
 ### Phase 15: Renderer Execution Cleanup
 

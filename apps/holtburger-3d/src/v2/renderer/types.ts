@@ -477,7 +477,6 @@ export interface SceneDomainTargetSnapshot {
 }
 
 export interface Renderer {
-	applyStaticDelta(delta: StaticResidencyDelta): void;
 	applyDynamicDelta(delta: DynamicResidencyDelta): void;
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void;
 	applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void;

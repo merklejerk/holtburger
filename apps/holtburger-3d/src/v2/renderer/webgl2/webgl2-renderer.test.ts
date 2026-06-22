@@ -12,7 +12,11 @@ import {
 	MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
 	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
 } from "../types";
-import type { PortalFrameWorkPlan } from "../types";
+import type {
+	EnvCellSystemLayerPayload,
+	PortalFrameWorkPlan,
+	TerrainLayerPayload,
+} from "../types";
 import {
 	compareStaticObjectTransparentDrawEntries,
 	DEBUG_OVERLAY_FRAGMENT_SHADER,
@@ -953,6 +957,136 @@ describe("V2 WebGL2 structured interior rendering", () => {
 
 		renderer.dispose();
 	});
+
+	it("replaces and clears terrain layers without static delta remove lists", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+
+		renderer.setTerrainLayer(
+			0xda55ffff,
+			createTerrainLayerPayload("terrain-a"),
+		);
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			renderedTriangles: 1,
+			staticDrawUnits: 1,
+			terrainDrawUnits: 1,
+		});
+
+		renderer.setTerrainLayer(
+			0xda55ffff,
+			createTerrainLayerPayload("terrain-b"),
+		);
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			renderedTriangles: 1,
+			staticDrawUnits: 1,
+			terrainDrawUnits: 1,
+		});
+
+		renderer.setTerrainLayer(0xda55ffff, null);
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			renderedTriangles: 0,
+			staticDrawUnits: 0,
+			terrainDrawUnits: 0,
+		});
+
+		renderer.dispose();
+	});
+
+	it("clears env-cell system layers without touching terrain layers", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+
+		renderer.setTerrainLayer(
+			0xda55ffff,
+			createTerrainLayerPayload("terrain-a"),
+		);
+		renderer.setEnvCellSystemLayer(
+			0xda55ffff,
+			createEnvCellSystemLayerPayload(),
+		);
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			renderedTriangles: 3,
+			staticDrawUnits: 3,
+			terrainDrawUnits: 1,
+		});
+
+		renderer.setEnvCellSystemLayer(0xda55ffff, null);
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			renderedTriangles: 1,
+			staticDrawUnits: 1,
+			terrainDrawUnits: 1,
+		});
+
+		renderer.dispose();
+	});
+
+	it("hides static layers without clearing installed layer ownership", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+
+		renderer.setTerrainLayer(
+			0xda55ffff,
+			createTerrainLayerPayload("terrain-a"),
+		);
+		renderer.setStaticLayerVisibility({
+			envCellInteriors: true,
+			outdoorBuildings: true,
+			outdoorDetail: true,
+			terrain: false,
+		});
+		pendingFrame?.(16);
+
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			renderedTriangles: 1,
+			staticDrawUnits: 1,
+			terrainDrawUnits: 1,
+		});
+		expect(gl.drawElementsCalls).toEqual([]);
+
+		renderer.dispose();
+	});
+
+	it("rejects mismatched layer payload landblocks", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+
+		expect(() =>
+			renderer.setTerrainLayer(
+				0xda55ffff,
+				createTerrainLayerPayload("terrain-a", 0xdb00ffff),
+			),
+		).toThrow(/received payload/);
+
+		renderer.dispose();
+	});
 });
 
 describe("V2 WebGL2 debug overlay shader contract", () => {
@@ -1178,15 +1312,70 @@ function createEnvCellStaticObjectDrawUnit(
 	};
 }
 
-function createTerrainDrawUnit(): TerrainGeometryStaticDrawUnit {
+function createTerrainLayerPayload(
+	drawUnitId: string,
+	landblockId = 0xda55ffff,
+): TerrainLayerPayload {
+	return {
+		drawUnits: [createTerrainDrawUnit({ drawUnitId, landblockId })],
+		generationId: `terrain:${drawUnitId}`,
+		kind: "terrain",
+		landblockId,
+		materialCoverage: [],
+		sourceMappingRecords: [],
+		spatialRecords: [],
+		textureUses: [],
+	};
+}
+
+function createEnvCellSystemLayerPayload(): EnvCellSystemLayerPayload {
+	return {
+		authoredDynamicSeedRecords: [],
+		envCellStaticObjectDrawUnits: [
+			createEnvCellStaticObjectDrawUnit("env-cell-static-a", [0xda550100]),
+		],
+		generationId: "env-cell-system:a",
+		kind: "env-cell-system",
+		landblockId: 0xda55ffff,
+		materialCoverage: [],
+		portalApertureResources: [
+			createPortalApertureResource({
+				apertureResourceId: "portal-aperture-resource:env-layer",
+				ranges: [
+					{
+						rangeId: "portal-range:env-layer",
+						sourceId: "env-portal:0",
+						sourceKind: "env-cell-portal",
+					},
+				],
+			}),
+		],
+		portalGraphRecords: [],
+		portalInteriorRecords: [],
+		portalProjectionRecords: [],
+		resourceMembership: [],
+		sourceMappingRecords: [],
+		spatialRecords: [],
+		structuredInteriorDrawUnits: [createStructuredInteriorDrawUnit()],
+		textureUses: [],
+		visibilityRecords: [],
+	};
+}
+
+function createTerrainDrawUnit(
+	options: {
+		readonly drawUnitId?: string;
+		readonly landblockId?: number;
+	} = {},
+): TerrainGeometryStaticDrawUnit {
 	return {
 		coordinateSpace: "landblock-render-local",
 		domain: "outdoor-terrain",
-		drawUnitId: "terrain-a",
+		drawUnitId: options.drawUnitId ?? "terrain-a",
 		indexType: "uint16",
 		indices: new Uint16Array([0, 1, 2]),
 		kind: "terrain-geometry",
-		landblockId: 0xda55ffff,
+		landblockId: options.landblockId ?? 0xda55ffff,
 		layerSlots: new Float32Array([0, 0, 0, 0, 0, 0]),
 		materialBucketKey: "family:terrain-debug-flat|material:debug",
 		materialFamily: "terrain-debug-flat",

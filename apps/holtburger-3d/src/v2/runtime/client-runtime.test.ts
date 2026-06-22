@@ -12,11 +12,16 @@ import type {
 	Renderer,
 	RendererFrameTelemetry,
 	RendererFrameTelemetryListener,
+	RendererStaticLayerVisibility,
 	RendererSnapshot,
+	EnvCellSystemLayerPayload,
+	OutdoorBuildingsLayerPayload,
+	OutdoorDetailsLayerPayload,
 	PortalFrameWorkPlan,
 	RenderPassPlan,
 	SamplerPolicyUpdate,
 	StaticResidencyDelta,
+	TerrainLayerPayload,
 	TexturePlacementUpdate,
 } from "../renderer/types";
 import { StaticCoordinator } from "../static/coordinator/static-coordinator";
@@ -320,6 +325,45 @@ describe("V2 client runtime", () => {
 				renderPassPlan: { kind: "single-surface-resident" },
 			},
 		]);
+
+		unsubscribe();
+		runtime.dispose();
+	});
+
+	it("forwards static layer visibility without changing scene interest plans", () => {
+		const renderer = new FakeRenderer();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker: new DeferredStaticBaker(),
+				resolver: new DeferredStaticResolver(),
+			}),
+		});
+		const snapshots: RuntimeSnapshot[] = [];
+		const unsubscribe = runtime.subscribe((nextSnapshot) => {
+			snapshots.push(nextSnapshot);
+		});
+
+		runtime.setStaticLayerVisibility({
+			envCellInteriors: true,
+			outdoorBuildings: false,
+			outdoorDetail: true,
+			terrain: false,
+		});
+
+		expect(renderer.staticLayerVisibilityUpdates).toEqual([
+			{
+				envCellInteriors: true,
+				outdoorBuildings: false,
+				outdoorDetail: true,
+				terrain: false,
+			},
+		]);
+		expect(renderer.renderPassPlans).toEqual([]);
+		expect(renderer.portalFrameWorkPlans).toEqual([]);
+		expect(snapshots).toHaveLength(2);
 
 		unsubscribe();
 		runtime.dispose();
@@ -1652,6 +1696,23 @@ class FakeRenderer implements Renderer {
 	readonly samplerPolicyUpdates: SamplerPolicyUpdate[] = [];
 	readonly renderPassPlans: RenderPassPlan[] = [];
 	readonly portalFrameWorkPlans: PortalFrameWorkPlan[] = [];
+	readonly terrainLayerUpdates: readonly [
+		number,
+		TerrainLayerPayload | null,
+	][] = [];
+	readonly outdoorBuildingsLayerUpdates: readonly [
+		number,
+		OutdoorBuildingsLayerPayload | null,
+	][] = [];
+	readonly outdoorDetailsLayerUpdates: readonly [
+		number,
+		OutdoorDetailsLayerPayload | null,
+	][] = [];
+	readonly envCellSystemLayerUpdates: readonly [
+		number,
+		EnvCellSystemLayerPayload | null,
+	][] = [];
+	readonly staticLayerVisibilityUpdates: RendererStaticLayerVisibility[] = [];
 	readonly events: string[] = [];
 	readonly #telemetryListeners = new Set<RendererFrameTelemetryListener>();
 	diagnosticsSnapshotCount = 0;
@@ -1707,6 +1768,30 @@ class FakeRenderer implements Renderer {
 	}
 
 	applyDynamicDelta(): void {}
+	setTerrainLayer(
+		landblockId: number,
+		payload: TerrainLayerPayload | null,
+	): void {
+		this.terrainLayerUpdates.push([landblockId, payload]);
+	}
+	setOutdoorBuildingsLayer(
+		landblockId: number,
+		payload: OutdoorBuildingsLayerPayload | null,
+	): void {
+		this.outdoorBuildingsLayerUpdates.push([landblockId, payload]);
+	}
+	setOutdoorDetailsLayer(
+		landblockId: number,
+		payload: OutdoorDetailsLayerPayload | null,
+	): void {
+		this.outdoorDetailsLayerUpdates.push([landblockId, payload]);
+	}
+	setEnvCellSystemLayer(
+		landblockId: number,
+		payload: EnvCellSystemLayerPayload | null,
+	): void {
+		this.envCellSystemLayerUpdates.push([landblockId, payload]);
+	}
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void {
 		this.textureUpdates.push(update);
 		this.events.push(
@@ -1723,6 +1808,9 @@ class FakeRenderer implements Renderer {
 		this.staticAnchorLandblockIds.push(anchorLandblockId);
 	}
 	setFlatVisionModeEnabled(): void {}
+	setStaticLayerVisibility(visibility: RendererStaticLayerVisibility): void {
+		this.staticLayerVisibilityUpdates.push(visibility);
+	}
 	setRenderPassPlan(plan: RenderPassPlan): void {
 		this.renderPassPlans.push(plan);
 		this.#snapshot = {

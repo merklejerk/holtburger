@@ -4,6 +4,7 @@ import type { RuntimeHost, RuntimeHostSnapshot } from "../host/contracts";
 import type {
 	Renderer,
 	RendererFrameTelemetry,
+	RendererStaticLayerVisibility,
 	RendererSnapshot,
 	RenderPassPlan,
 	PortalFrameWorkPlan,
@@ -457,6 +458,7 @@ export interface ClientRuntime {
 	setEnvCellPortalDebugOverlayVisible(visible: boolean): void;
 	setDirectEnvCellPortalMaxDepth(maxDepth: number): void;
 	setFlatVisionModeEnabled(enabled: boolean): void;
+	setStaticLayerVisibility(visibility: RendererStaticLayerVisibility): void;
 	setTransitionApertureDebugOverlayMode(
 		mode: TransitionApertureDebugOverlayMode,
 	): void;
@@ -801,6 +803,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#flatVisionModeEnabled = enabled;
 		this.#renderer.setFlatVisionModeEnabled(enabled);
 		this.#updateRenderPassPlan();
+		this.#emit();
+	}
+
+	setStaticLayerVisibility(visibility: RendererStaticLayerVisibility): void {
+		this.#assertActive();
+		this.#renderer.setStaticLayerVisibility(visibility);
 		this.#emit();
 	}
 

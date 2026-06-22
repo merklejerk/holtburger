@@ -3745,6 +3745,138 @@ Dry-run update on 2026-06-22:
 - Filter `Oe` for env-cell-origin frames so any env cell already present in `Ic` is omitted from the
   sampled exterior source.
 
+### Immediate Phase 13B7: Fine-Grained BSP Env-Cell Residency After BVH Candidates
+
+Status: planned.
+
+Purpose: make camera env-cell residency deterministic when landblock env-cell BVH/AABB candidates
+overlap by confirming coarse candidates against the candidate cell's BSP.
+
+Problem:
+
+- Current runtime residency is intentionally coarse. `StaticSceneQuery.queryEnvCellAtPoint(...)`
+  traverses the committed landblock env-cell BVH, filters item AABBs with `containsPoint(...)`,
+  applies accepted-env-cell filtering, sorts by env-cell id/node index, and returns the first
+  candidate.
+- That is not enough for tunnels, stacked/intersecting interiors, or transition-adjacent cells where
+  AABBs overlap. It can pick a neighboring/overlapping env cell even when the camera point is outside
+  that cell's BSP.
+- The resolver/bake source already carries `LandblockEnvCellStaticFacts.cellBsp`, but
+  `StaticEnvCellSpatialRecord` does not preserve it into runtime spatial roots yet.
+
+Grounded code touchpoints:
+
+- `apps/holtburger-3d/src/v2/static/contracts.ts`
+  - `LandblockEnvCellStaticFacts.cellBsp` already references
+    `LandblockEnvCellsPayloadDto["envCells"][number]["cellBsp"]`.
+  - `StaticEnvCellSpatialRecord` must gain a BSP field for runtime residency checks.
+- `apps/holtburger-3d/src/v2/static/env-cells/bake/landblock-env-cells-baker.ts`
+  - `createSpatialRecords(...)` should copy `envCell.cellBsp` into each env-cell spatial record.
+- `apps/holtburger-3d/src/v2/runtime/static-scene-query.ts`
+  - `EnvCellLandblockBvhRoot` / `EnvCellLandblockBvhRuntimeItem` should retain the per-cell BSP.
+  - `queryEnvCellAtPoint(...)` should keep BVH/AABB as the coarse candidate generator, then run the
+    BSP point classifier before selecting the resident env cell.
+- Existing frontend precedent:
+  - `apps/holtburger-3d/src/lib/world-display/cell-bsp-residency.ts`
+    - `landblockRenderPointToCellAcLocalPoint(...)` already captures the required coordinate
+      conversion shape: inverse cell render placement first, then render-local to AC-local.
+    - `pointInsideCellBsp(...)` already implements the front-side BSP rule with epsilon `0.0002`.
+  - `apps/holtburger-3d/src/lib/world-display/render-math.ts`
+    - `buildAcPlacementMatrix(...)` and `invertMat4(...)` already provide the matrix machinery
+      needed to inverse-transform a landblock render-space point into cell render-local space.
+- Rust/debug reference:
+  - `crates/holtburger-debug-harness/src/bin/inspect_landblock_env_cell_bvh.rs`
+  - `crates/holtburger-debug-harness/src/bin/inspect_env_cell_asset.rs`
+  - Both use the same point-in-cell BSP rule: reject when the candidate point is on the negative side
+    of a `Port`/`Internal` plane by more than epsilon, otherwise continue through the positive child;
+    `Leaf` accepts.
+  - `crates/holtburger-content/src/landblock_scene_assets.rs`
+    - `PreparedInteriorCell.cell_bsp` is cloned directly from the cell structure, so it remains
+      cell-structure-local AC-space.
+    - `derive_cell_bsp_render_bounds_by_plane_triples(...)` evaluates the BSP in AC-local space,
+      converts accepted intersection points to render-space, then
+      `transform_render_local_bounds_by_ac_frame(...)` applies the env-cell local placement. The
+      committed residency BVH/AABB bounds are therefore landblock-local render-space, while the BSP
+      itself is not.
+
+Implementation tasks:
+
+1. Preserve BSP facts in runtime spatial records.
+   - Add `cellBsp` or `residencyBsp` to `StaticEnvCellSpatialRecord`.
+   - Preserve `localPlacement` on the same record or otherwise make it available next to `cellBsp`;
+     BSP testing needs the inverse env-cell placement, not only the BSP tree.
+   - Populate it from `LandblockEnvCellStaticFacts.cellBsp` in `createSpatialRecords(...)`.
+   - Update test payload/record helpers that construct `StaticEnvCellSpatialRecord`.
+
+2. Add a typed BSP point classifier in TypeScript.
+   - Reuse or move the existing helpers from `src/lib/world-display/cell-bsp-residency.ts` if their
+     current import boundary is acceptable. Otherwise port them into a V2-local runtime helper with
+     the same semantics and tests.
+   - Use `buildAcPlacementMatrix(localPlacement, zeroOffset, unitScale)` plus `invertMat4(...)` to
+     transform the landblock-local render point into cell render-local space, then convert render
+     local to AC-local with the existing `{ x, y: -z, z: y }` mapping before evaluating the BSP.
+   - Use the payload DTO node discriminants directly; do not flatten to ad hoc strings if a typed
+     shape already exists.
+   - Match the debug-harness epsilon initially: `0.0002`.
+   - Keep the function pure and unit tested with explicit `leaf`, `port`, and `internal` fixtures,
+     plus at least one translated env-cell placement fixture.
+
+3. Refine candidate selection in `queryEnvCellAtPoint(...)`.
+   - Keep the current BVH traversal and AABB containment filter as the coarse pass.
+   - For each coarse candidate, evaluate the candidate's BSP against the candidate-local AC point
+     derived from the landblock-local render point and that candidate env cell's `localPlacement`.
+     Do not feed the landblock-local render point directly to the BSP.
+   - Prefer BSP-positive candidates over BSP-negative candidates.
+   - If no BSP-positive candidate exists but coarse candidates exist, fall back to the current coarse
+     selection and increment/report a fallback diagnostic. This avoids hard-breaking residency for
+     malformed/missing BSP data while making the failure visible.
+
+4. Add diagnostics.
+   - Track at least coarse candidate count, BSP-tested candidate count, BSP-accepted candidate count,
+     and coarse-fallback count for the most recent residency query or query snapshot.
+   - Surface enough data in the diagnostics report to tell whether residency is being decided by BSP
+     or by fallback.
+
+5. Add focused tests.
+   - `pointInsideEnvCellBsp(...)` accepts a leaf.
+   - A `port`/`internal` plane rejects a point on the negative side beyond epsilon and accepts a point
+     on/inside the positive side.
+   - `queryEnvCellAtPoint(...)` with two overlapping AABB/BVH candidates chooses the BSP-positive
+     env cell even when env-cell id sorting would otherwise choose the wrong cell.
+   - Missing/malformed/always-negative BSP candidates fall back to the coarse winner and expose a
+     fallback diagnostic.
+   - `queryCameraResidencyAtPoint(...)` and `queryCameraResidencyAtLandblockPoint(...)` inherit the
+     refined selection without duplicating residency logic.
+
+Dry-run notes:
+
+- Expected minimal data-flow change:
+  - `LandblockEnvCellStaticFacts.cellBsp`
+  - `LandblockEnvCellStaticFacts.localPlacement`
+  - `StaticEnvCellSpatialRecord.cellBsp` and `StaticEnvCellSpatialRecord.localPlacement`
+  - committed spatial record map
+  - `EnvCellLandblockBvhRuntimeItem.cellBsp` and `EnvCellLandblockBvhRuntimeItem.localPlacement`
+  - `queryEnvCellAtPoint(...)` candidate refinement
+- The coarse BVH remains the broad-phase. Do not replace it with a full scan over all env cells.
+- The BSP classifier should run on the small candidate set only, so cost should be bounded by local
+  AABB overlap rather than landblock cell count.
+- Coordinate-space validation result: `cellBsp` is cell-structure-local AC-space; residency BVH/AABB
+  bounds are landblock-local render-space. The implementation must inverse-transform the point
+  through the candidate env cell placement and convert render-local to AC-local before BSP testing.
+  Feeding the landblock-local render point directly into `cellBsp` is wrong.
+- Do not use this phase to change portal visibility, accepted-cell traversal, render graph selection,
+  or demand expansion. This phase decides only which env cell the camera is resident in after coarse
+  residency candidates are available.
+
+Acceptance criteria:
+
+- A camera point inside overlapping env-cell AABBs resolves to the BSP-containing env cell, not the
+  lowest env-cell id.
+- Existing outdoor-landblock residency still works when no committed env-cell records are available.
+- Missing/invalid BSP data falls back to the coarse AABB result with diagnostics rather than
+  returning outdoor/unknown silently.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` pass.
+
 ### Phase 13C: Interior Plan Reassessment Before Dynamic Seeds
 
 Status: planned.

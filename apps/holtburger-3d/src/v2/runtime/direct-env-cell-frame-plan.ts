@@ -379,18 +379,12 @@ function createPortalProjectionOutdoorCrossings(options: {
 	readonly outdoorCrossingsSkippedByLayerCap: number;
 	readonly outdoorCrossingsSkippedByUnselectedTarget: number;
 } {
-	if (options.projection.root.kind !== "env-cell-root") {
-		return {
-			outdoorCrossings: [],
-			outdoorCrossingsSkippedByLayerCap: 0,
-			outdoorCrossingsSkippedByUnselectedTarget: 0,
-		};
-	}
 	const outdoorCrossings: PortalProjectionFrameOutdoorCrossingPlan[] = [];
 	let outdoorCrossingsSkippedByLayerCap = 0;
 	let outdoorCrossingsSkippedByUnselectedTarget = 0;
 	for (const crossing of options.projection.outdoorSceneCrossings) {
 		const targetLayer =
+			options.projection.root.kind === "env-cell-root" &&
 			crossing.targetEnvCellId === options.projection.root.envCellId
 				? 0
 				: options.renderLayerByEnvCellId.get(crossing.targetEnvCellId);

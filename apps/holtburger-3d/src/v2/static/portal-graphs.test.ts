@@ -372,6 +372,70 @@ describe("V2 static portal graphs", () => {
 		expect(projection?.diagnostics.acceptedTransitionRootCount).toBe(2);
 	});
 
+	it("projects outdoor-root outbound outdoor crossings for outside-visible env cells", () => {
+		const owner = createWorkOwner("work-env", "landblock-env-cells");
+		const record = createPortalInteriorRecord({
+			envCellIds: [0xda550100, 0xda550101],
+			links: [
+				createEnvCellLink({
+					linkId: "a-to-b",
+					sourceEnvCellId: 0xda550100,
+					sourcePortalId: "portal-ab",
+					targetEnvCellId: 0xda550101,
+					targetPortalId: "portal-ba",
+				}),
+			],
+			owner,
+		});
+
+		const projection = createStaticPortalProjection({
+			landblockId: 0xda55ffff,
+			root: createOutdoorPortalProjectionRoot(0xda55ffff),
+			portalApertureResources: [
+				createBuildingTransitionPortalApertureResource({
+					ranges: [
+						createBuildingTransitionApertureRange({
+							portalId: "window-a",
+							targetCellLowId: 0x0100,
+						}),
+						createBuildingTransitionApertureRange({
+							firstIndex: 3,
+							portalId: "window-b",
+							targetCellLowId: 0x0101,
+						}),
+						createBuildingTransitionApertureRange({
+							firstIndex: 6,
+							portalId: "not-outside-visible",
+							targetCellLowId: 0x0102,
+						}),
+					],
+				}),
+			],
+			portalGraphs: [createEnvCellStaticPortalGraph(owner, record)],
+			portalInteriorRecords: [record],
+		});
+
+		expect(projection?.outdoorSceneCrossings).toEqual([
+			expect.objectContaining({
+				linkId:
+					"transition:portal-aperture-resource:building-transition:0xda55ffff:window-a:3663003904",
+				outdoorLandblockId: 0xda55ffff,
+				targetEnvCellId: 0xda550100,
+			}),
+			expect.objectContaining({
+				linkId:
+					"transition:portal-aperture-resource:building-transition:0xda55ffff:window-b:3663003905",
+				outdoorLandblockId: 0xda55ffff,
+				targetEnvCellId: 0xda550101,
+			}),
+		]);
+		expect(projection?.diagnostics).toMatchObject({
+			outboundOutdoorCrossingCandidateCount: 3,
+			outboundOutdoorCrossingRetainedCount: 2,
+			outboundOutdoorCrossingSkippedUnreachableTarget: 1,
+		});
+	});
+
 	it("projects env-cell roots by reachable portal links and longest acyclic layer", () => {
 		const owner = createWorkOwner("work-env", "landblock-env-cells");
 		const record = createPortalInteriorRecord({

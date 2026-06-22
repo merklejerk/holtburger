@@ -803,6 +803,10 @@ class Webgl2Renderer implements Renderer {
 	#lastExecutedCompositeDepth = 0;
 	#lastDirectEnvCellDrawCalls = 0;
 	#lastCompositingMode: SceneDomainTargetSnapshot["compositingMode"] = "none";
+	#lastExteriorSuffixCompositeDepth = 0;
+	#lastExteriorSuffixCompositePasses = 0;
+	#lastOutdoorCrossingSource: SceneDomainTargetSnapshot["outdoorCrossingSource"] =
+		"none";
 	#debugOverlayPrimitiveCount = 0;
 	#debugOverlayLineVertexCount = 0;
 	#debugOverlayTriangleVertexCount = 0;
@@ -1141,6 +1145,9 @@ class Webgl2Renderer implements Renderer {
 		this.#lastExecutedCompositeDepth = 0;
 		this.#lastDirectEnvCellDrawCalls = 0;
 		this.#lastCompositingMode = "none";
+		this.#lastExteriorSuffixCompositeDepth = 0;
+		this.#lastExteriorSuffixCompositePasses = 0;
+		this.#lastOutdoorCrossingSource = "none";
 
 		const effectiveRenderPassPlan = this.#getEffectiveRenderPassPlan();
 		const directEnvCellFramePlan = this.#getEffectiveDirectEnvCellFramePlan();
@@ -1213,7 +1220,7 @@ class Webgl2Renderer implements Renderer {
 			});
 			const targetAspectRatio =
 				targets.compositePing.width / Math.max(1, targets.compositePing.height);
-			this.#lastDirectEnvCellDrawCalls =
+			this.#lastDirectEnvCellDrawCalls +=
 				this.#drawPortalProjectionFrameResources(plan, targetAspectRatio);
 			this.#blitSceneDomainColorToDisplay(targets.compositePing);
 			return;
@@ -1229,10 +1236,20 @@ class Webgl2Renderer implements Renderer {
 				pulse,
 				targets.width / Math.max(1, targets.height),
 			);
-			this.#stateCache.bindFramebuffer(targets.compositePing.framebuffer);
+			const outdoorCrossingSource = plan.exteriorComposite
+				? this.#renderExteriorSuffixComposite(plan, targets)
+				: targets.exterior;
+			this.#lastOutdoorCrossingSource = plan.exteriorComposite
+				? "exterior-suffix"
+				: "raw-exterior";
+			const destination =
+				outdoorCrossingSource === targets.compositePing
+					? targets.compositePong
+					: targets.compositePing;
+			this.#stateCache.bindFramebuffer(destination.framebuffer);
 			this.#stateCache.setViewport({
-				height: targets.compositePing.height,
-				width: targets.compositePing.width,
+				height: destination.height,
+				width: destination.width,
 				x: 0,
 				y: 0,
 			});
@@ -1247,15 +1264,15 @@ class Webgl2Renderer implements Renderer {
 				gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT,
 			);
 			const targetAspectRatio =
-				targets.compositePing.width / Math.max(1, targets.compositePing.height);
-			this.#lastDirectEnvCellDrawCalls =
+				destination.width / Math.max(1, destination.height);
+			this.#lastDirectEnvCellDrawCalls +=
 				this.#drawPortalProjectionFrameResources(plan, targetAspectRatio);
 			this.#drawPortalProjectionOutdoorCrossings(
 				plan.layeredGraph,
-				targets.exterior,
+				outdoorCrossingSource,
 				targetAspectRatio,
 			);
-			this.#blitSceneDomainColorToDisplay(targets.compositePing);
+			this.#blitSceneDomainColorToDisplay(destination);
 			return;
 		}
 
@@ -1304,6 +1321,62 @@ class Webgl2Renderer implements Renderer {
 		);
 		const baseTarget = this.#getSceneDomainTarget(targets, plan.baseScene.kind);
 		this.#blitSceneDomainColorToDisplay(baseTarget);
+	}
+
+	#renderExteriorSuffixComposite(
+		plan: DirectEnvCellPortalProjectionFrameWorkPlan,
+		targets: SceneDomainTargets,
+	): SceneDomainTarget {
+		const graphs = plan.exteriorComposite?.graphs ?? [];
+		if (graphs.length === 0) {
+			return targets.exterior;
+		}
+
+		let source: SceneDomainTarget = targets.exterior;
+		let destination: SceneDomainTarget = targets.compositePing;
+		for (const graph of graphs) {
+			if (source === destination) {
+				throw new Error(
+					"Exterior suffix composite source and destination targets must differ.",
+				);
+			}
+			this.#copySceneDomainColorAndDepth(targets.exterior, destination, {
+				clearStencil: true,
+				copyStencil: false,
+			});
+			this.#stateCache.bindFramebuffer(destination.framebuffer);
+			this.#stateCache.setViewport({
+				height: destination.height,
+				width: destination.width,
+				x: 0,
+				y: 0,
+			});
+			const targetAspectRatio =
+				destination.width / Math.max(1, destination.height);
+			this.#lastDirectEnvCellDrawCalls +=
+				this.#drawPortalProjectionFrameResources(
+					{
+						kind: "direct-env-cell",
+						layeredGraph: graph,
+						mode: "portal-projection",
+					},
+					targetAspectRatio,
+				);
+			this.#drawPortalProjectionOutdoorCrossings(
+				graph,
+				source,
+				targetAspectRatio,
+			);
+			this.#lastExteriorSuffixCompositePasses += 1;
+			this.#lastExteriorSuffixCompositeDepth =
+				this.#lastExteriorSuffixCompositePasses;
+			source = destination;
+			destination =
+				destination === targets.compositePing
+					? targets.compositePong
+					: targets.compositePing;
+		}
+		return source;
 	}
 
 	#renderSceneDomainTarget(
@@ -2431,13 +2504,14 @@ class Webgl2Renderer implements Renderer {
 	#createSceneDomainTargetSnapshot(): SceneDomainTargetSnapshot {
 		const directEnvCellFramePlan = this.#getEffectiveDirectEnvCellFramePlan();
 		const directEnvCellFramePlanActive = directEnvCellFramePlan !== null;
-		const directOutdoorTargetFramePlanActive =
+		const directFramePlanUsesSceneTargets =
 			directEnvCellFramePlan !== null &&
-			directEnvCellFramePlan.layeredGraph.baseEntry.scene.kind ===
-				"outdoor-target";
+			(directEnvCellFramePlan.layeredGraph.baseEntry.scene.kind ===
+				"outdoor-target" ||
+				directEnvCellFramePlan.layeredGraph.outdoorCrossings.length > 0);
 		return {
 			active:
-				directOutdoorTargetFramePlanActive ||
+				directFramePlanUsesSceneTargets ||
 				(!directEnvCellFramePlanActive &&
 					this.#getEffectiveRenderPassPlan().kind === "portal-scene-domains"),
 			apertureBatchDrawCalls: this.#lastCompositeApertureBatchDrawCalls,
@@ -2446,9 +2520,12 @@ class Webgl2Renderer implements Renderer {
 			compositingMode: this.#lastCompositingMode,
 			depthFormat: "depth24-stencil8",
 			executedCompositeDepth: this.#lastExecutedCompositeDepth,
+			exteriorSuffixCompositeDepth: this.#lastExteriorSuffixCompositeDepth,
+			exteriorSuffixCompositePasses: this.#lastExteriorSuffixCompositePasses,
 			exteriorDrawCalls: this.#lastExteriorSceneDomainDrawCalls,
 			height: this.#sceneDomainTargets?.height ?? 0,
 			interiorDrawCalls: this.#lastInteriorSceneDomainDrawCalls,
+			outdoorCrossingSource: this.#lastOutdoorCrossingSource,
 			width: this.#sceneDomainTargets?.width ?? 0,
 		};
 	}

@@ -519,7 +519,7 @@ function createOutdoorProjectionNodesAndEdges(options: {
 		readonly envCellId: number;
 		readonly nodeId: string;
 	}[];
-	readonly outdoorSceneCrossings: [];
+	readonly outdoorSceneCrossings: StaticPortalProjectionOutdoorSceneCrossing[];
 	readonly retainRootLayer: false;
 } {
 	const nodes = createProjectionNodes(options.outsideVisibleEnvCellIds);
@@ -569,6 +569,12 @@ function createOutdoorProjectionNodesAndEdges(options: {
 			});
 		}
 	}
+	const outdoorSceneCrossings = createEnvCellOutdoorSceneCrossings({
+		diagnostics: options.diagnostics,
+		landblockId: options.landblockId,
+		portalApertureResources: options.portalApertureResources,
+		reachableEnvCellIds: options.outsideVisibleEnvCellIds,
+	});
 	edges.push(
 		...createRetainedEnvCellProjectionEdges({
 			diagnostics: options.diagnostics,
@@ -579,7 +585,7 @@ function createOutdoorProjectionNodesAndEdges(options: {
 			portalGraphs: options.portalGraphs,
 		}),
 	);
-	return { edges, nodes, outdoorSceneCrossings: [], retainRootLayer: false };
+	return { edges, nodes, outdoorSceneCrossings, retainRootLayer: false };
 }
 
 function createEnvCellProjectionNodesAndEdges(options: {

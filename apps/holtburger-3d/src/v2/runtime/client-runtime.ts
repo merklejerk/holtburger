@@ -112,6 +112,7 @@ const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 2;
 const MAX_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 16;
 const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS = 512;
 const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS = 512;
+const DEFAULT_EXTERIOR_SUFFIX_MAX_DEPTH = 2;
 
 export type ManualStaticDomain =
 	| "terrain"
@@ -169,10 +170,12 @@ type PortalFramePlanKey =
 			readonly kind: "env-cell-projection";
 			readonly envCellId: number;
 			readonly envCellSystemGenerationId: string | null;
+			readonly exteriorSuffixMaxDepth: number;
 			readonly landblockId: number;
 			readonly maxRenderEntries: number;
 			readonly maxDepth: number;
 			readonly maxMaskEdges: number;
+			readonly retainedProjectionSourceKey: string | null;
 			readonly renderAnchorLandblockId: number | null;
 	  }
 	| {
@@ -188,6 +191,14 @@ type PortalFramePlanKey =
 interface CachedPortalFramePlan {
 	readonly key: PortalFramePlanKey;
 	readonly plan: PortalFrameWorkPlan;
+}
+
+interface RetainedOutdoorPortalFramePlan {
+	readonly plan: Extract<
+		PortalFrameWorkPlan,
+		{ readonly kind: "direct-env-cell"; readonly mode: "portal-projection" }
+	>;
+	readonly sourceKey: string;
 }
 
 export interface RuntimeSnapshot {
@@ -1011,30 +1022,51 @@ class ClientRuntimeImpl implements ClientRuntime {
 				startEnvCellId: this.#currentCameraResidency.envCellId,
 			});
 			if (projection) {
-				const portalFramePlanKey: PortalFramePlanKey = {
-					envCellId: this.#currentCameraResidency.envCellId,
-					envCellSystemGenerationId:
-						this.#getEnvCellSystemLayerGenerationId(landblockId),
-					kind: "env-cell-projection",
+				const baseDirectPlan = createPortalProjectionFramePlan({
 					landblockId,
+					envCellResourceMembership: this.#envCellResourceMembership,
 					maxRenderEntries: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
 					maxDepth: this.#directEnvCellPortalMaxDepth,
 					maxMaskEdges: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
-					renderAnchorLandblockId: this.#renderAnchorLandblockId,
-				};
-				const cachedPlan = this.#getCachedPortalFramePlan(portalFramePlanKey);
-				if (cachedPlan) {
-					return cachedPlan;
-				}
-				const directPlan = createPortalProjectionFramePlan({
-					landblockId,
-					envCellResourceMembership: this.#envCellResourceMembership,
-					maxRenderEntries: portalFramePlanKey.maxRenderEntries,
-					maxDepth: portalFramePlanKey.maxDepth,
-					maxMaskEdges: portalFramePlanKey.maxMaskEdges,
 					projection,
 				});
-				if (directPlan) {
+				if (baseDirectPlan?.kind === "direct-env-cell") {
+					const exteriorSuffix =
+						baseDirectPlan.layeredGraph.outdoorCrossings.length > 0
+							? this.#deriveRetainedOutdoorPortalFramePlan(landblockId)
+							: null;
+					const exteriorSuffixMaxDepth =
+						exteriorSuffix === null ? 0 : DEFAULT_EXTERIOR_SUFFIX_MAX_DEPTH;
+					const portalFramePlanKey: PortalFramePlanKey = {
+						envCellId: this.#currentCameraResidency.envCellId,
+						envCellSystemGenerationId:
+							this.#getEnvCellSystemLayerGenerationId(landblockId),
+						exteriorSuffixMaxDepth,
+						kind: "env-cell-projection",
+						landblockId,
+						maxRenderEntries: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
+						maxDepth: this.#directEnvCellPortalMaxDepth,
+						maxMaskEdges: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
+						retainedProjectionSourceKey: exteriorSuffix?.sourceKey ?? null,
+						renderAnchorLandblockId: this.#renderAnchorLandblockId,
+					};
+					const cachedPlan = this.#getCachedPortalFramePlan(portalFramePlanKey);
+					if (cachedPlan) {
+						return cachedPlan;
+					}
+					const directPlan =
+						exteriorSuffix === null
+							? baseDirectPlan
+							: {
+									...baseDirectPlan,
+									exteriorComposite: {
+										graphs: Array.from(
+											{ length: exteriorSuffixMaxDepth },
+											() => exteriorSuffix.plan.layeredGraph,
+										),
+										maxDepth: exteriorSuffixMaxDepth,
+									},
+								};
 					return this.#setCachedPortalFramePlan(portalFramePlanKey, directPlan);
 				}
 			}
@@ -1044,51 +1076,26 @@ class ClientRuntimeImpl implements ClientRuntime {
 			this.#currentCameraResidency.kind === "outdoor-landblock"
 		) {
 			const landblockId = this.#currentCameraResidency.landblockId;
-			const retainedOutdoorSourceLandblockIds =
-				this.#staticSceneQuery
-					.queryRetainedOutdoorSourceLandblocks()
-					.filter(
-						(source) =>
-							source.domains.buildings &&
-							source.domains.envCells,
-					)
-					.map((source) => source.landblockId);
-			const projections =
-				this.#staticSceneQuery.queryRetainedOutdoorPortalProjections([
-					landblockId,
-					...retainedOutdoorSourceLandblockIds,
-				]);
-			if (projections.length > 0) {
+			const retainedPlan =
+				this.#deriveRetainedOutdoorPortalFramePlan(landblockId);
+			if (retainedPlan) {
 				const portalFramePlanKey: PortalFramePlanKey = {
 					kind: "outdoor-transition",
 					landblockId,
 					maxRenderEntries: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
 					maxDepth: this.#directEnvCellPortalMaxDepth,
 					maxMaskEdges: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
-					retainedProjectionSourceKey:
-						createRetainedOutdoorProjectionSourceKey(projections),
+					retainedProjectionSourceKey: retainedPlan.sourceKey,
 					renderAnchorLandblockId: this.#renderAnchorLandblockId,
 				};
 				const cachedPlan = this.#getCachedPortalFramePlan(portalFramePlanKey);
 				if (cachedPlan) {
 					return cachedPlan;
 				}
-				const directPlan = combineOutdoorPortalProjectionFramePlans(
-					projections.flatMap((projection) => {
-						const plan = createPortalProjectionFramePlan({
-							landblockId: projection.landblockId,
-							envCellResourceMembership: this.#envCellResourceMembership,
-							maxRenderEntries: portalFramePlanKey.maxRenderEntries,
-							maxDepth: portalFramePlanKey.maxDepth,
-							maxMaskEdges: portalFramePlanKey.maxMaskEdges,
-							projection,
-						});
-						return plan ? [plan] : [];
-					}),
+				return this.#setCachedPortalFramePlan(
+					portalFramePlanKey,
+					retainedPlan.plan,
 				);
-				if (directPlan) {
-					return this.#setCachedPortalFramePlan(portalFramePlanKey, directPlan);
-				}
 			}
 		}
 
@@ -1097,6 +1104,46 @@ class ClientRuntimeImpl implements ClientRuntime {
 			flatVisionModeEnabled: this.#flatVisionModeEnabled,
 			renderPassPlan,
 		});
+	}
+
+	#deriveRetainedOutdoorPortalFramePlan(
+		seedLandblockId: number,
+	): RetainedOutdoorPortalFramePlan | null {
+		const retainedOutdoorSourceLandblockIds =
+			this.#staticSceneQuery
+				.queryRetainedOutdoorSourceLandblocks()
+				.filter(
+					(source) => source.domains.buildings && source.domains.envCells,
+				)
+				.map((source) => source.landblockId);
+		const projections =
+			this.#staticSceneQuery.queryRetainedOutdoorPortalProjections([
+				seedLandblockId,
+				...retainedOutdoorSourceLandblockIds,
+			]);
+		if (projections.length === 0) {
+			return null;
+		}
+		const plan = combineOutdoorPortalProjectionFramePlans(
+			projections.flatMap((projection) => {
+				const projectionPlan = createPortalProjectionFramePlan({
+					landblockId: projection.landblockId,
+					envCellResourceMembership: this.#envCellResourceMembership,
+					maxRenderEntries: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
+					maxDepth: this.#directEnvCellPortalMaxDepth,
+					maxMaskEdges: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
+					projection,
+				});
+				return projectionPlan ? [projectionPlan] : [];
+			}),
+		);
+		if (plan?.kind !== "direct-env-cell") {
+			return null;
+		}
+		return {
+			plan,
+			sourceKey: createRetainedOutdoorProjectionSourceKey(projections),
+		};
 	}
 
 	#getCachedPortalFramePlan(
@@ -3093,7 +3140,9 @@ function portalFramePlanKeysEqual(
 			right.kind === "env-cell-projection" &&
 			left.maxRenderEntries === right.maxRenderEntries &&
 			left.maxMaskEdges === right.maxMaskEdges &&
-			left.envCellId === right.envCellId
+			left.envCellId === right.envCellId &&
+			left.exteriorSuffixMaxDepth === right.exteriorSuffixMaxDepth &&
+			left.retainedProjectionSourceKey === right.retainedProjectionSourceKey
 		);
 	}
 	return (

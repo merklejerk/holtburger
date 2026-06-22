@@ -336,8 +336,14 @@ export type PortalFrameWorkPlan =
 	| {
 			readonly kind: "direct-env-cell";
 			readonly mode: "portal-projection";
+			readonly exteriorComposite?: PortalFrameExteriorCompositePlan;
 			readonly layeredGraph: PortalProjectionFrameGraphPlan;
 	  };
+
+export interface PortalFrameExteriorCompositePlan {
+	readonly graphs: readonly PortalProjectionFrameGraphPlan[];
+	readonly maxDepth: number;
+}
 
 type PortalFrameEdgeId = number;
 
@@ -471,8 +477,11 @@ export interface SceneDomainTargetSnapshot {
 	readonly executedCompositeDepth: number;
 	readonly compositePasses: number;
 	readonly apertureBatchDrawCalls: number;
+	readonly exteriorSuffixCompositeDepth: number;
+	readonly exteriorSuffixCompositePasses: number;
 	readonly exteriorDrawCalls: number;
 	readonly interiorDrawCalls: number;
+	readonly outdoorCrossingSource: "none" | "raw-exterior" | "exterior-suffix";
 }
 
 export interface Renderer {

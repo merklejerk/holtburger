@@ -6,6 +6,7 @@ import type {
 	PortalProjectionFrameMaskEdgePlan,
 	PortalProjectionFrameOutdoorCrossingPlan,
 	PortalProjectionFrameRenderEntryPlan,
+	PortalFrameExteriorCompositePlan,
 	PortalFrameNodeResources,
 	PortalFrameSceneSource,
 	PortalFrameWorkPlan,
@@ -56,6 +57,26 @@ export function portalFrameWorkPlanEquals(
 	return portalProjectionFrameGraphPlansEqual(
 		left.layeredGraph,
 		right.layeredGraph,
+	) && portalFrameExteriorCompositePlansEqual(
+		left.exteriorComposite ?? null,
+		right.exteriorComposite ?? null,
+	);
+}
+
+function portalFrameExteriorCompositePlansEqual(
+	left: PortalFrameExteriorCompositePlan | null,
+	right: PortalFrameExteriorCompositePlan | null,
+): boolean {
+	if (left === null || right === null) {
+		return left === right;
+	}
+	return (
+		left.maxDepth === right.maxDepth &&
+		arraysEqual(
+			left.graphs,
+			right.graphs,
+			portalProjectionFrameGraphPlansEqual,
+		)
 	);
 }
 

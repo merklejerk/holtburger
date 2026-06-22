@@ -700,6 +700,10 @@ describe("V2 WebGL2 structured interior rendering", () => {
 				{ count: 3, mode: gl.TRIANGLES, type: gl.UNSIGNED_SHORT },
 			]),
 		);
+		expect(gl.drawArraysCalls).toEqual([
+			{ count: 3, first: 0, mode: gl.TRIANGLES },
+			{ count: 3, first: 0, mode: gl.TRIANGLES },
+		]);
 		expect(gl.stencilFuncCalls).toEqual(
 			expect.arrayContaining([
 				{ func: gl.ALWAYS, mask: 0xff, ref: 1 },
@@ -714,6 +718,188 @@ describe("V2 WebGL2 structured interior rendering", () => {
 				expect.objectContaining({
 					mask: gl.COLOR_BUFFER_BIT,
 				}),
+			]),
+		);
+
+		renderer.dispose();
+	});
+
+	it("samples bounded exterior suffix composites for indoor outdoor crossings", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+
+		renderer.setTerrainLayer(
+			0xda55ffff,
+			createTerrainLayerPayload("terrain-a"),
+		);
+		renderer.setEnvCellSystemLayer(
+			0xda55ffff,
+			createEnvCellSystemLayerPayload({
+				structuredInteriorDrawUnits: [
+					createStructuredInteriorDrawUnit({
+						drawUnitId: "structured-root",
+						envCellId: 0xda550100,
+					}),
+					createStructuredInteriorDrawUnit({
+						drawUnitId: "structured-transition-root",
+						envCellId: 0xda550101,
+					}),
+				],
+				portalApertureResources: [
+					createPortalApertureResource({
+						apertureResourceId: "portal-aperture-resource:transition:test",
+						ranges: [
+							{
+								rangeId: "transition-aperture:root",
+								sourceId:
+									"building-transition:portal-aperture-resource:da55ffff:transition-portal:0",
+								sourceKind: "building-transition",
+							},
+						],
+						sourceDomain: "outdoor-buildings",
+					}),
+				],
+			}),
+		);
+		const exteriorPlan = createDirectEnvCellPortalFrameWorkPlan({
+			apertureResources: [
+				{
+					resourceId: "transition-aperture:root",
+					sourceKinds: ["building-transition"],
+				},
+			],
+			baseScene: {
+				kind: "outdoor-target",
+				landblockId: 0xda55ffff,
+			},
+			edges: [
+				{
+					apertureRangeId: "transition-aperture:root",
+					apertureSourceId:
+						"building-transition:portal-aperture-resource:da55ffff:transition-portal:0",
+					childNodeId: 1,
+					edgeId: 0,
+					linkId: "transition-root",
+					parentNodeId: 0,
+					sourceKind: "building-transition",
+				},
+			],
+			nodes: [
+				{
+					debugStackLabel: "outdoor-root",
+					incomingEdgeIds: [],
+					nodeId: 0,
+					parentNodeId: null,
+					resources: {
+						envCellStaticObjectDrawUnitIds: [],
+						resourceState: "not-applicable",
+						structuredInteriorDrawUnitIds: [],
+					},
+					scene: {
+						kind: "outdoor-target",
+						landblockId: 0xda55ffff,
+					},
+					traversalDepth: 0,
+				},
+				{
+					debugStackLabel: "transition-root",
+					incomingEdgeIds: [0],
+					nodeId: 1,
+					parentNodeId: 0,
+					resources: {
+						envCellStaticObjectDrawUnitIds: [],
+						resourceState: "ready",
+						structuredInteriorDrawUnitIds: ["structured-transition-root"],
+					},
+					scene: {
+						envCellId: 0xda550101,
+						kind: "env-cell-direct",
+						landblockId: 0xda55ffff,
+					},
+					traversalDepth: 1,
+				},
+			],
+			outdoorCrossings: [
+				{
+					apertureRangeId: "transition-aperture:root",
+					apertureSourceId:
+						"building-transition:portal-aperture-resource:da55ffff:transition-portal:0",
+					crossingId: 0,
+					linkId: "transition-root",
+					outdoorLandblockId: 0xda55ffff,
+					targetEnvCellId: 0xda550101,
+				},
+			],
+		});
+		if (exteriorPlan.kind !== "direct-env-cell") {
+			throw new Error("Expected direct env-cell fixture.");
+		}
+		renderer.setPortalFrameWorkPlan(
+			createDirectEnvCellPortalFrameWorkPlan({
+				baseScene: {
+					envCellId: 0xda550100,
+					kind: "env-cell-direct",
+					landblockId: 0xda55ffff,
+				},
+				exteriorComposite: {
+					graphs: [exteriorPlan.layeredGraph, exteriorPlan.layeredGraph],
+					maxDepth: 2,
+				},
+				nodes: [
+					{
+						debugStackLabel: "root",
+						incomingEdgeIds: [],
+						nodeId: 0,
+						parentNodeId: null,
+						resources: {
+							envCellStaticObjectDrawUnitIds: [],
+							resourceState: "ready",
+							structuredInteriorDrawUnitIds: ["structured-root"],
+						},
+						scene: {
+							envCellId: 0xda550100,
+							kind: "env-cell-direct",
+							landblockId: 0xda55ffff,
+						},
+						traversalDepth: 0,
+					},
+				],
+				outdoorCrossings: [
+					{
+						apertureRangeId: "transition-aperture:root",
+						apertureSourceId:
+							"building-transition:portal-aperture-resource:da55ffff:transition-portal:0",
+						crossingId: 0,
+						linkId: "transition-root",
+						outdoorLandblockId: 0xda55ffff,
+						targetEnvCellId: 0xda550100,
+					},
+				],
+			}),
+		);
+
+		pendingFrame?.(16);
+
+		const latestSnapshot = renderer.createDiagnosticsSnapshot();
+		expect(latestSnapshot.sceneDomainTargets).toMatchObject({
+			active: true,
+			exteriorDrawCalls: 1,
+			exteriorSuffixCompositeDepth: 2,
+			exteriorSuffixCompositePasses: 2,
+			outdoorCrossingSource: "exterior-suffix",
+		});
+		expect(latestSnapshot.directEnvCellDrawCalls).toBe(3);
+		expect(gl.blitFramebufferCalls).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ mask: gl.COLOR_BUFFER_BIT }),
+				expect.objectContaining({ mask: gl.DEPTH_BUFFER_BIT }),
 			]),
 		);
 
@@ -1299,7 +1485,15 @@ function createDirectEnvCellPortalFrameWorkPlan(options: {
 	readonly apertureResources?: DirectEnvCellFixtureApertureResource[];
 	readonly diagnostics?: ReturnType<typeof emptyPortalApertureDiagnostics>;
 	readonly edges?: DirectEnvCellFixtureEdge[];
+	readonly exteriorComposite?: Extract<
+		PortalFrameWorkPlan,
+		{ readonly kind: "direct-env-cell" }
+	>["exteriorComposite"];
 	readonly nodes?: DirectEnvCellFixtureNode[];
+	readonly outdoorCrossings?: Extract<
+		PortalFrameWorkPlan,
+		{ readonly kind: "direct-env-cell" }
+	>["layeredGraph"]["outdoorCrossings"];
 }): PortalFrameWorkPlan {
 	const baseNode: DirectEnvCellFixtureNode = {
 		debugStackLabel:
@@ -1393,7 +1587,7 @@ function createDirectEnvCellPortalFrameWorkPlan(options: {
 					targetEnvCellId: childNode.scene.envCellId,
 				};
 			}),
-			outdoorCrossings: [],
+			outdoorCrossings: options.outdoorCrossings ?? [],
 			projectionDiagnostics: {
 				componentCount: renderEntries.length,
 				componentInternalEdgeCount: 0,
@@ -1411,7 +1605,7 @@ function createDirectEnvCellPortalFrameWorkPlan(options: {
 				missingResourceMembershipCount: renderEntries.filter(
 					(entry) => entry.resources.resourceState !== "ready",
 				).length,
-				outdoorCrossingCount: 0,
+				outdoorCrossingCount: options.outdoorCrossings?.length ?? 0,
 				outdoorCrossingsSkippedByLayerCap: 0,
 				outdoorCrossingsSkippedByUnselectedTarget: 0,
 				projectedEnvCellCount: renderEntries.length,
@@ -1422,6 +1616,9 @@ function createDirectEnvCellPortalFrameWorkPlan(options: {
 			renderEntries,
 			renderLayers,
 		},
+		...(options.exteriorComposite
+			? { exteriorComposite: options.exteriorComposite }
+			: {}),
 		mode: "portal-projection",
 	};
 }

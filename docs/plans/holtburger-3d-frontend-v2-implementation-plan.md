@@ -3060,7 +3060,7 @@ Acceptance criteria:
 ### Immediate Phase 13B4: Indoor Residency Outdoor Portal Compositing
 
 Status: same-landblock implementation landed on 2026-06-22; superseded as a completion gate by
-Phase 13B5 multi-landblock outdoor source coverage.
+Phase 13B5 retained multi-landblock outdoor source compositing.
 
 Purpose: restore the missing inside-looking-out case after the projection/layer detour: when the
 camera is resident in an env cell inside an outdoor-linked building, V2 must render the outdoor
@@ -3304,210 +3304,150 @@ Implementation update on 2026-06-22:
 - Spicy bit: WebGL2 currently uses the resident landblock's existing exterior scene-domain target as
   the outdoor source. This proved the aperture/copy mechanism, but it is not the final source model:
   both outdoor-to-indoor and indoor-to-outdoor compositing need portal-aware multi-landblock outdoor
-  source coverage.
+  source composition over retained layers.
 - Debt to track: 13B4 tests validate same-landblock contracts and renderer sequencing, not
   multi-landblock portal-source residency or final visual parity.
 - Course correction: do not polish/manual-sign-off this phase in isolation. Land Phase 13B5 next so
   the shared outdoor source model is correct before declaring indoor/outdoor compositing complete.
 
-### Immediate Phase 13B5: Portal-Aware Multi-Landblock Outdoor Sources
+### Immediate Phase 13B5A: Retained Outdoor Source Course Correction
+
+Status: implemented on 2026-06-22.
+
+Purpose: remove the rejected idea that env-cell/interior residency should expand outdoor landblock
+demand, and steer multi-landblock portal compositing around already-retained outdoor source layers.
+
+Problem:
+
+- The first 13B5a draft incorrectly treated indoor-looking-out compositing as a reason for
+  `interior-cell` scene interest to demand neighboring outdoor terrain/buildings/detail/env-cells.
+- That creates the wrong ownership model: loading env cells for landblock A must not imply demand for
+  A+1, which would invite recursive A+1 -> A+2 -> A+3 reasoning and tie portal rendering to hidden
+  residency expansion.
+- The renderer already draws all installed outdoor resources into the exterior target. The correct
+  compositor behavior is to use whatever outdoor terrain/buildings/detail layers are already retained
+  by normal outdoor scene interest/LOD policy.
+
+Scope:
+
+- Remove `StaticDemand.portalOutdoorSource` and any interior-cell default outdoor-radius expansion.
+- Keep `StaticDemand` and resolver jobs as concrete demand selected by user/camera scene interest,
+  not by portal traversal.
+- Update Phase 13B5 so multi-landblock compositing means "query and compose across available
+  retained outdoor layers," not "demand new neighbor layers from an interior cell."
+- Add tests/acceptance criteria that guard against reintroducing this demand-expansion pattern.
+
+Acceptance criteria:
+
+- `StaticDemand` has no portal-specific outdoor source field.
+- `createStaticDemandFromSceneInterest(...)` maps `interior-cell` interest to the bounded
+  same-landblock building/env-cell demand used before the rejected draft.
+- `planStaticDemand(...)` does not expand interior-cell demand into neighboring terrain/buildings,
+  detail, or env-cell work.
+- The plan names available/retained outdoor layer composition as the 13B5 direction.
+
+Implementation update on 2026-06-22:
+
+- Removed the rejected `StaticDemand.portalOutdoorSource` field and runtime default portal outdoor
+  source radii before they landed as a retained pattern.
+- Restored interior-cell demand planning to same-landblock `outdoor-buildings` plus
+  `landblock-env-cells` only.
+- Restored the runtime scene-interest settled-event test to complete the same bounded interior work
+  shape.
+- Spicy bit: this deliberately leaves indoor-looking-out views dependent on whatever outdoor layers
+  are already retained by normal scene interest. That is the correct non-recursive ownership model;
+  visual completeness should be controlled by explicit outdoor interest/LOD policy, not env-cell
+  residency side effects.
+
+### Immediate Phase 13B5: Portal-Aware Retained Outdoor Source Compositing
 
 Status: planned; next incomplete phase before Phase 13C.
 
-Purpose: generalize portal compositing so both outdoor-to-indoor and indoor-to-outdoor views consume
-an explicit outdoor scene source coverage model instead of implicitly assuming the resident/current
-landblock is the only outdoor source.
+Purpose: generalize portal compositing so both outdoor-to-indoor and indoor-to-outdoor views can use
+all currently retained outdoor landblock layers, without making portal/env-cell residency demand new
+neighboring landblocks.
 
 Problem:
 
 - Outdoor-anchor static demand already supports radius-based terrain/building/detail/env-cell loading
-  across neighboring landblocks.
-- Interior-cell demand still requests same-landblock `outdoor-buildings` and `landblock-env-cells`
-  only, with terrain/detail disabled. That makes indoor-looking-out portal views under-resident for
-  exterior terrain/detail and neighboring outdoor landblocks.
+  across neighboring landblocks when the user/camera scene interest asks for it.
+- Interior-cell demand should stay bounded to same-landblock building aperture facts and env-cell
+  systems. It should not pull neighboring landblocks just because a window might see them.
 - Outdoor-to-indoor portal frame derivation currently queries exactly one outdoor-root projection for
-  the current outdoor camera landblock. That misses transition apertures and env-cell systems whose
-  relevant buildings sit in neighboring resident landblocks.
-- WebGL2 exterior rendering already draws all installed outdoor terrain/static resources translated
-  against the render anchor, so the immediate blocker is not a new renderer family. The missing
-  boundary is an explicit outdoor source/coverage contract that demand planning, portal projection,
-  and frame-plan construction can share.
+  the current outdoor camera landblock. That misses transition apertures and env-cell systems from
+  neighboring landblocks that are already retained.
+- Indoor-to-outdoor compositing currently copies from the shared exterior target. That target already
+  contains every retained outdoor terrain/building/detail layer, but diagnostics and projection
+  queries do not yet make retained multi-landblock source availability explicit.
 
 Scope:
 
-- Add a shared outdoor scene source concept for portal compositing. It should describe the outdoor
-  anchor plus required landblock coverage/domains, not just one `landblockId`.
-- Use the same source model for:
-  - outdoor-origin projection through building transition apertures into interiors;
-  - env-cell-origin outbound crossings through windows/doors to the outdoor scene.
+- Treat the outdoor scene source as the shared exterior target containing all currently installed
+  outdoor resources for the render anchor.
+- Query portal projections and transition aperture facts across already-retained/committed outdoor
+  landblock layers.
+- Do not add portal-specific fields to `StaticDemand`.
+- Do not expand interior-cell demand into neighboring terrain/buildings/detail/env-cell work.
 - Keep the existing source-tagged `StaticPortalApertureResource` and `portal-projection` renderer
   path. Do not reintroduce `TransitionApertureBatch`, the old transition compositor, or a separate
   per-direction renderer architecture.
-- Prefer one exterior scene-domain target that renders all installed outdoor resources for the
-  current render anchor. Add multiple exterior targets only if a grounded visibility/source test
-  proves one target cannot represent the required source coverage.
 
 Implementation tasks:
 
-- Define an explicit portal outdoor source contract, likely app-local under `src/v2/renderer/types.ts`
-  or runtime-owned if demand planning must consume it directly. It should distinguish:
-  - anchor landblock/render anchor;
-  - landblocks required for outdoor terrain/buildings/detail;
-  - landblocks required for outdoor-root transition projections;
-  - whether source coverage is satisfied, partial, or missing.
-- Extend static demand planning so `interior-cell` interest can request portal-outdoor coverage:
-  - at minimum terrain/buildings/detail for the resident outdoor landblock;
-  - neighboring landblocks according to the same radius semantics used by outdoor-anchor demand;
-  - env-cell systems for outdoor-linked buildings in the outdoor source coverage set.
+- Add static-scene query helpers that expose retained/committed outdoor source landblocks by domain
+  and return outdoor-root portal projections for a provided retained landblock set.
 - Extend `ClientRuntime.#derivePortalFrameWorkPlan(...)` so outdoor-to-indoor projection can consider
-  outdoor-root projections for the portal outdoor source coverage set, not only the current camera
+  outdoor-root projections for retained neighboring landblocks, not only the current camera
   landblock.
-- Extend env-cell-root outbound crossing planning so each `outdoorCrossing` records the outdoor
-  source coverage it expects, and diagnostics can report missing/partial outdoor source coverage
-  separately from missing aperture resources.
-- Keep renderer execution simple in the first pass:
-  - render the exterior scene-domain target from all installed outdoor resources;
+- Keep env-cell-root outbound crossings renderer-facing only: they copy from the shared exterior
+  target and may report whether their `outdoorLandblockId` is currently represented by retained
+  outdoor layers, but they must not create demand.
+- Keep renderer execution simple:
+  - render the exterior scene-domain target from installed outdoor resources;
   - copy that source through outdoor-root or env-cell-root aperture masks;
   - add source filters or multiple exterior targets only after tests show installed-resource rendering
     is insufficient.
 
 Grounded code touchpoints:
 
-- `apps/holtburger-3d/src/v2/static/contracts.ts`
-  - widen `StaticDemand`/location or add source coverage requirements without making lifecycle policy
-    part of resolver jobs.
 - `apps/holtburger-3d/src/v2/static/demand-planner.ts`
-  - replace the interior-cell same-landblock-only branch with portal-aware outdoor coverage planning.
-- `apps/holtburger-3d/src/v2/runtime/client-runtime.ts`
-  - derive portal outdoor source coverage from scene interest/camera residency;
-  - include source coverage in portal-frame cache keys;
-  - consider multiple outdoor-root projections for outdoor-origin compositing.
+  - add a guard test proving interior-cell demand remains bounded and non-recursive.
 - `apps/holtburger-3d/src/v2/runtime/static-scene-query.ts`
-  - expose source-coverage-aware projection queries, not just one `queryOutdoorPortalProjection`.
+  - expose retained/committed outdoor source layer/projection queries.
+- `apps/holtburger-3d/src/v2/runtime/client-runtime.ts`
+  - derive portal frame plans from retained projection sets without changing demand planning.
 - `apps/holtburger-3d/src/v2/runtime/direct-env-cell-frame-plan.ts`
-  - carry source coverage/diagnostics on `outdoorCrossings`.
+  - add retained-source diagnostics to `outdoorCrossings` if useful, without making those diagnostics
+    demand inputs.
 - `apps/holtburger-3d/src/v2/renderer/webgl2/webgl2-renderer.ts`
-  - continue using the exterior scene-domain target initially; add assertions/diagnostics around
-    missing source coverage before adding more targets.
+  - continue using the shared exterior scene-domain target initially.
 
 Acceptance criteria:
 
-- Interior-cell demand can retain/load outdoor terrain/buildings/detail for the portal outdoor source
-  coverage needed by indoor-looking-out views.
-- Outdoor-origin portal compositing can include building transition apertures from relevant resident
+- Interior-cell demand remains same-landblock only and cannot recursively expand outdoor residency.
+- Outdoor-origin portal compositing can include building transition apertures from retained
   neighboring landblocks instead of only the camera landblock.
-- Env-cell-root outdoor crossings identify the outdoor source coverage they require and report
-  missing coverage distinctly.
+- Indoor-origin outdoor crossings copy from the shared exterior target and do not allocate private
+  exterior targets or request more landblocks.
 - Existing same-landblock 13B4 tests still pass.
 - Focused tests cover:
-  - interior-cell demand with portal outdoor source radius;
-  - outdoor-to-indoor projection across a neighboring outdoor landblock;
-  - indoor-to-outdoor crossing requiring neighboring outdoor source coverage;
-  - renderer still renders one exterior target from installed outdoor resources in the initial pass.
+  - interior-cell demand does not include neighboring outdoor terrain/buildings/detail/env-cell work;
+  - retained-neighbor projection query returns projections for committed neighboring env-cell system
+    layers;
+  - outdoor-to-indoor projection across a retained neighboring outdoor landblock;
+  - indoor-to-outdoor crossing uses the shared exterior target from installed resources.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` pass.
-
-Dry-run findings on 2026-06-22:
-
-- The shared exterior render target does not need to become per-aperture. `Webgl2Renderer.#drawTerrain`
-  and `#drawStaticObjects("exterior", ...)` already draw every installed outdoor terrain/building/detail
-  resource translated against the current render anchor. The first-pass fix is therefore source
-  coverage and projection selection, not a new framebuffer family.
-- `StaticDemand.location.kind === "interior-cell"` is the first concrete bottleneck. Today it creates
-  work only for same-landblock `outdoor-buildings` and `landblock-env-cells`, while returning
-  `terrain: -1` and `detail: -1` from `createStaticDemandFromSceneInterest(...)`. That is enough for
-  same-landblock building aperture geometry, but not enough for an exterior view through a window or
-  for neighboring landblock transitions.
-- The least leaky contract is to add a demand-side `portalOutdoorSource`/`outdoorSourceCoverage`
-  requirement to `StaticDemand` or to the `interior-cell` location variant. It should compile into
-  ordinary landblock/domain work via `planStaticDemand(...)`; resolver jobs must remain unchanged.
-- The first implementation should probably model source coverage as radii by domain around one
-  outdoor anchor, using the same `buildOutdoorCoverageLandblocks(...)` helper as outdoor-anchor
-  demand. A concrete initial default can be:
-  - terrain: `1`;
-  - buildings: `1`;
-  - detail: `0` or `1` depending on current perf tolerance;
-  - envCells: `1`.
-  This is deliberately a demand policy, not a renderer policy.
-- `StaticSceneQuery.queryOutdoorPortalProjection({ landblockId })` is too narrow for outdoor-origin
-  compositing after source coverage widens. Add a query such as
-  `queryOutdoorPortalProjectionsForCoverage({ landblockIds })` that returns one outdoor-root
-  projection per committed env-cell system layer in the coverage set.
-- `ClientRuntime.#derivePortalFrameWorkPlan(...)` currently returns one `direct-env-cell` portal plan.
-  Outdoor-origin multi-landblock projection has two possible execution shapes:
-  - preferred first pass: merge multiple outdoor-root projection records into one frame graph by
-    calling a new frame-plan helper that accepts multiple projections sharing the same exterior base;
-  - acceptable stepping stone: build one projection plan per source landblock and combine their
-    mask/render entries into a single renderer-facing graph before reaching WebGL.
-  Do not run multiple full outdoor exterior passes for this.
-- The existing `StaticPortalProjectionRecord` can remain landblock-scoped. Do not force a
-  cross-landblock static projection record unless merging landblock-scoped records creates real
-  duplication or ambiguous ids. Landblock-scoped projections are easier to cache and match the layer
-  publication model.
-- For indoor-origin outbound crossings, `StaticPortalProjectionOutdoorSceneCrossing.outdoorLandblockId`
-  already carries the critical source landblock. The next change should attach a normalized
-  source-coverage key or required landblock list to the frame-plan crossing diagnostics, not create a
-  private exterior target per crossing.
-- Portal-frame cache keys need a compact source-coverage identity. Use sorted landblock ids and
-  domain/radius policy, or a derived revision key from committed layer generation ids. Do not key only
-  on the resident env cell/current outdoor landblock once source coverage spans neighbors.
-- Missing coverage should be visible and non-fatal:
-  - if an aperture range is missing, keep the existing hard diagnostic path;
-  - if outdoor source coverage is incomplete, render with installed resources and report
-    `missingOutdoorSourceCoverage`/`partialOutdoorSourceCoverage`;
-  - if a neighboring env-cell system layer is missing, skip that landblock's outdoor-root projection
-    and count it separately from layer-cap skips.
-- Existing tests give a clean progression:
-  - `static/demand-planner.test.ts`: interior-cell demand expands to concrete neighboring
-    terrain/building/detail/env-cell work without changing resolver job shape;
-  - `runtime/static-scene-query.test.ts`: coverage query returns projections for multiple committed
-    landblocks and skips missing layers deterministically;
-  - `runtime/direct-env-cell-frame-plan.test.ts`: outbound crossings retain source landblock/coverage
-    diagnostics;
-  - `runtime/client-runtime.test.ts`: outdoor camera residency can produce one portal frame plan from
-    multiple outdoor-root projections;
-  - `renderer/webgl2/webgl2-renderer.test.ts`: still one exterior target/pass is used for the merged
-    plan.
-
-Implementation split:
-
-- Phase 13B5a: demand/source coverage contract.
-  - Add the smallest typed source coverage requirement to `StaticDemand`.
-  - Compile that requirement into normal landblock/domain work in `planStaticDemand(...)`.
-  - Update runtime scene-interest conversion so interior-cell interest requests portal outdoor
-    coverage instead of same-landblock buildings/env-cells only.
-  - Tests prove resolver jobs remain plain `{ domain, scope }` landblock work.
-- Phase 13B5b: source-coverage projection queries.
-  - Add coverage-aware static-scene queries for outdoor-root projections and committed source
-    coverage diagnostics.
-  - Keep `StaticPortalProjectionRecord` landblock-scoped unless merging requires a new wrapper.
-  - Tests prove multiple neighboring committed env-cell system layers contribute projections and
-    missing layers are counted, not guessed.
-- Phase 13B5c: outdoor-origin multi-projection frame plan.
-  - Add a runtime/frame-plan helper that merges outdoor-root projections sharing the same exterior
-    base scene into one `PortalProjectionFrameGraphPlan`.
-  - Preserve existing same-landblock outdoor->indoor behavior as the one-projection case.
-  - Tests prove transition apertures from a neighboring landblock produce mask edges/render entries
-    in the merged plan.
-- Phase 13B5d: indoor-origin source coverage diagnostics.
-  - Add source coverage identity/diagnostics to env-cell-root `outdoorCrossings`.
-  - Keep renderer execution copying from the shared exterior target.
-  - Tests prove a crossing for a neighboring outdoor landblock requests/counts the correct coverage
-    without allocating a separate exterior target.
-- Phase 13B5e: validation and plan cleanup.
-  - Run `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts`.
-  - Update Phase 13C with any remaining visual parity or manual verification gaps.
 
 Dry-run steering:
 
-- Start in demand/source contracts, not WebGL. The renderer already draws all installed outdoor
-  resources in the exterior pass; the broken assumption is what gets installed and which projection
-  sources are considered.
+- Start in retained-layer/static-scene query contracts, not demand planning and not WebGL.
 - Avoid a per-direction patch. Outdoor-to-indoor and indoor-to-outdoor should consume the same
-  outdoor source coverage model.
-- Do not make resolver jobs carry camera state or portal policy. Demand planning can expand concrete
-  landblock/domain requests; resolver jobs remain landblock/domain work.
+  retained outdoor source set.
+- Do not make resolver jobs carry camera state or portal policy. Demand planning remains explicit
+  scene-interest-to-landblock/domain work.
 - Keep Phase 13B4 code as the same-landblock proof of the aperture copy path. 13B5 should widen
-  source coverage without reviving old compositor architecture.
+  projection/query coverage over available retained layers without reviving old compositor
+  architecture.
 
 ### Phase 13C: Interior Plan Reassessment Before Dynamic Seeds
 
@@ -3529,7 +3469,8 @@ Current baseline after the render-pipeline correction:
 - Phase 13B4 proves the same-landblock inverse transition mechanism: env-cell residency inside an
   outdoor-linked building rendering the outdoor scene through building transition apertures.
 - Phase 13B5 is required before declaring indoor/outdoor compositing complete because both
-  outdoor-to-indoor and indoor-to-outdoor portal views need multi-landblock outdoor source coverage.
+  outdoor-to-indoor and indoor-to-outdoor portal views need retained multi-landblock outdoor source
+  composition.
 - Browser static checkboxes are visibility controls, not demand/residency toggles.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` passed at the end
   of the correction.
@@ -3814,5 +3755,4 @@ Mitigation: picking, inspection, frame metrics, terrain visual parity, static ma
 - 2026-06-22: Phase 13B4 landed the same-landblock aperture/copy mechanism, but review found both
   outdoor-to-indoor and indoor-to-outdoor portal compositing still rely on resident/current-landblock
   outdoor source assumptions. Phase 13B5 was inserted before 13C to introduce a shared
-  portal-aware multi-landblock outdoor source coverage model before declaring indoor/outdoor
-  compositing complete.
+  retained multi-landblock outdoor source model before declaring indoor/outdoor compositing complete.

@@ -1204,6 +1204,30 @@ describe("V2 static scene query", () => {
 		});
 	});
 
+	it("prefers retained env-cell render-frame residency before outdoor boundary fallback", () => {
+		const query = new StaticSceneQuery();
+		query.setOutdoorAnchorLandblockId(0x1a73ffff);
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				envCellId: 0x1a7301f6,
+				landblockBounds: createBounds(191, -1, -14, 201, 1, -4),
+				landblockId: 0x1a73ffff,
+			}),
+		);
+
+		expect(
+			query.queryCameraResidencyAtPoint({
+				outdoorAnchorLandblockId: 0x1a73ffff,
+				point: { x: 193.4, y: 0, z: -9.3 },
+			}),
+		).toEqual({
+			envCellId: 0x1a7301f6,
+			kind: "env-cell",
+			landblockId: 0x1a73ffff,
+		});
+	});
+
 	it("does not infer env-cell camera residency from source BVHs after committed records are gone", () => {
 		const query = new StaticSceneQuery();
 		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());

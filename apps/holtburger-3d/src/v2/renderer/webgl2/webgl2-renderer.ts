@@ -818,6 +818,7 @@ class Webgl2Renderer implements Renderer {
 	#lastCompositingMode: SceneDomainTargetSnapshot["compositingMode"] = "none";
 	#lastExteriorSuffixCompositeDepth = 0;
 	#lastExteriorSuffixCompositePasses = 0;
+	#lastEnvCellOutdoorCrossingCopyBypassed = false;
 	#lastExteriorSeededBase = false;
 	#lastOutdoorCrossingSource: SceneDomainTargetSnapshot["outdoorCrossingSource"] =
 		"none";
@@ -1169,6 +1170,7 @@ class Webgl2Renderer implements Renderer {
 		this.#lastCompositingMode = "none";
 		this.#lastExteriorSuffixCompositeDepth = 0;
 		this.#lastExteriorSuffixCompositePasses = 0;
+		this.#lastEnvCellOutdoorCrossingCopyBypassed = false;
 		this.#lastExteriorSeededBase = false;
 		this.#lastOutdoorCrossingSource = "none";
 
@@ -1254,31 +1256,30 @@ class Webgl2Renderer implements Renderer {
 				targets.width / Math.max(1, targets.height),
 				{ cullTerrainBackfaces: true },
 			);
-			const outdoorCrossingSource = plan.exteriorComposite
-				? this.#renderExteriorSuffixComposite(plan, targets)
-				: targets.exterior;
-			this.#lastOutdoorCrossingSource = plan.exteriorComposite
-				? "exterior-suffix"
-				: "raw-exterior";
+			const outdoorCompositeSource = this.#renderSelectedOutdoorCompositeSource(
+				plan,
+				targets,
+			);
 			const destination =
-				outdoorCrossingSource === targets.compositePing
+				outdoorCompositeSource.target === targets.compositePing
 					? targets.compositePong
 					: targets.compositePing;
-			this.#prepareEnvCellOutdoorCrossingDestination({
+			this.#prepareEnvCellOutdoorOwnershipDestination({
 				destination,
-				outdoorCrossingSource,
-				pulse,
-				requiresExteriorSeed: plan.baseOverlap.requiresExteriorSeed,
+				outdoorCompositeSource: outdoorCompositeSource.target,
 			});
 			const targetAspectRatio =
 				destination.width / Math.max(1, destination.height);
 			this.#lastDirectEnvCellDrawCalls +=
-				this.#drawPortalProjectionFrameResources(plan, targetAspectRatio);
-			this.#drawPortalProjectionOutdoorCrossings(
-				plan.layeredGraph,
-				outdoorCrossingSource,
-				targetAspectRatio,
+				this.#drawEnvCellOutdoorOwnershipProjectionFrameResources(
+					plan,
+					targetAspectRatio,
+				);
+			this.#lastEnvCellOutdoorCrossingCopyBypassed = true;
+			this.#stateCache.setStencilState(
+				createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
 			);
+			this.#stateCache.bindVertexArray(null);
 			this.#copySceneDomainColorToDisplay(destination);
 			return;
 		}
@@ -1352,6 +1353,25 @@ class Webgl2Renderer implements Renderer {
 		this.#lastExteriorSuffixCompositePasses = 1;
 		this.#lastExteriorSuffixCompositeDepth = 1;
 		return targets.compositePing;
+	}
+
+	#renderSelectedOutdoorCompositeSource(
+		plan: DirectEnvCellPortalProjectionFrameWorkPlan,
+		targets: SceneDomainTargets,
+	): SelectedOutdoorCompositeSource {
+		if (!plan.exteriorComposite) {
+			this.#lastOutdoorCrossingSource = "raw-exterior";
+			return {
+				kind: "raw-exterior",
+				target: targets.exterior,
+			};
+		}
+
+		this.#lastOutdoorCrossingSource = "exterior-suffix";
+		return {
+			kind: "exterior-suffix",
+			target: this.#renderExteriorSuffixComposite(plan, targets),
+		};
 	}
 
 	#renderOutdoorProjectionComposite(
@@ -1487,6 +1507,34 @@ class Webgl2Renderer implements Renderer {
 		if (options.copyStencil) {
 			this.#blitSceneDomainStencil(source, destination);
 		}
+	}
+
+	#copySceneDomainColorOnly(
+		source: SceneDomainTarget,
+		destination: SceneDomainTarget,
+	): void {
+		const gl = this.#gl;
+		this.#resetFramebufferTransferState();
+		this.#stateCache.bindFramebuffer(destination.framebuffer);
+		this.#stateCache.setViewport({
+			height: destination.height,
+			width: destination.width,
+			x: 0,
+			y: 0,
+		});
+		this.#stateCache.setDepthState({
+			enabled: false,
+			func: gl.ALWAYS,
+			write: false,
+		});
+		this.#stateCache.setBlendState(
+			createBlendState(gl, false, gl.ONE, gl.ZERO),
+		);
+		this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
+		this.#stateCache.setStencilState(
+			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+		);
+		this.#drawSourceSceneCopy(source);
 	}
 
 	#blitSceneDomainDepth(
@@ -1688,11 +1736,51 @@ class Webgl2Renderer implements Renderer {
 		aspectRatio: number,
 	): number {
 		const gl = this.#gl;
-		const drawCalls =
-			this.#drawPortalProjectionBaseResources(
-				plan.layeredGraph,
-				aspectRatio,
-			) +
+		let drawCalls = this.#drawPortalProjectionBaseResources(
+			plan.layeredGraph,
+			aspectRatio,
+		);
+		this.#stateCache.setStencilState(
+			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+		);
+		drawCalls +=
+			this.#drawPortalBaseOverlapEnvCells(plan.baseOverlap, aspectRatio) +
+			this.#drawPortalProjectionMaskedLayers(plan.layeredGraph, aspectRatio);
+
+		this.#stateCache.setStencilState(
+			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+		);
+		this.#stateCache.bindVertexArray(null);
+		return drawCalls;
+	}
+
+	#drawEnvCellOutdoorOwnershipProjectionFrameResources(
+		plan: DirectEnvCellPortalProjectionFrameWorkPlan,
+		aspectRatio: number,
+	): number {
+		const gl = this.#gl;
+		this.#drawOutdoorTransitionOwnershipStencil(
+			plan.layeredGraph,
+			aspectRatio,
+		);
+		this.#stateCache.setStencilState(
+			createStencilState(
+				gl,
+				true,
+				0x00,
+				gl.NOTEQUAL,
+				OUTDOOR_CROSSING_STENCIL_VALUE,
+				gl.KEEP,
+			),
+		);
+		let drawCalls = this.#drawPortalProjectionBaseResources(
+			plan.layeredGraph,
+			aspectRatio,
+		);
+		this.#stateCache.setStencilState(
+			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+		);
+		drawCalls +=
 			this.#drawPortalBaseOverlapEnvCells(plan.baseOverlap, aspectRatio) +
 			this.#drawPortalProjectionMaskedLayers(plan.layeredGraph, aspectRatio);
 
@@ -1803,42 +1891,53 @@ class Webgl2Renderer implements Renderer {
 		return drawCalls;
 	}
 
-	#prepareEnvCellOutdoorCrossingDestination(options: {
+	#prepareEnvCellOutdoorOwnershipDestination(options: {
 		readonly destination: SceneDomainTarget;
-		readonly outdoorCrossingSource: SceneDomainTarget;
-		readonly pulse: number;
-		readonly requiresExteriorSeed: boolean;
+		readonly outdoorCompositeSource: SceneDomainTarget;
 	}): void {
 		const gl = this.#gl;
-		this.#lastExteriorSeededBase = options.requiresExteriorSeed;
-		if (options.requiresExteriorSeed) {
-			this.#copySceneDomainColorAndDepth(
-				options.outdoorCrossingSource,
-				options.destination,
-				{ clearStencil: true, copyStencil: false },
-			);
-			return;
-		}
-		this.#stateCache.bindFramebuffer(options.destination.framebuffer);
-		this.#stateCache.setViewport({
-			height: options.destination.height,
-			width: options.destination.width,
-			x: 0,
-			y: 0,
-		});
-		this.#stateCache.setDepthState(createDepthState(gl, true, true));
-		gl.clearColor(
-			0.025 + options.pulse * 0.015,
-			0.045,
-			0.065 + options.pulse * 0.025,
-			1,
+		this.#lastExteriorSeededBase = true;
+		this.#copySceneDomainColorOnly(
+			options.outdoorCompositeSource,
+			options.destination,
 		);
+		this.#stateCache.bindFramebuffer(options.destination.framebuffer);
+		this.#stateCache.setDepthState({
+			enabled: false,
+			func: gl.ALWAYS,
+			write: true,
+		});
 		gl.clearDepth(1);
 		gl.clearStencil(0);
 		this.#stateCache.setStencilState(
 			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
 		);
-		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+		gl.clear(gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+	}
+
+	#drawOutdoorTransitionOwnershipStencil(
+		graph: PortalProjectionFrameGraphPlan,
+		aspectRatio: number,
+	): void {
+		const gl = this.#gl;
+		this.#stateCache.setStencilState(
+			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+		);
+		gl.clearStencil(0);
+		gl.clear(gl.STENCIL_BUFFER_BIT);
+		for (const crossing of graph.outdoorCrossings) {
+			const apertureRange = this.#portalApertureRangesById.get(
+				crossing.apertureRangeId,
+			);
+			if (!apertureRange) {
+				this.#warnMissingPortalProjectionOutdoorCrossingApertureRange(crossing);
+				continue;
+			}
+			this.#drawPortalApertureStencilMask(apertureRange, {
+				aspectRatio,
+				stencilValue: OUTDOOR_CROSSING_STENCIL_VALUE,
+			});
+		}
 	}
 
 	#resetDirectPortalDepthForStencilValue(stencilValue: number): void {
@@ -1863,60 +1962,6 @@ class Webgl2Renderer implements Renderer {
 		} finally {
 			gl.colorMask(true, true, true, true);
 		}
-	}
-
-	#drawPortalProjectionOutdoorCrossings(
-		graph: PortalProjectionFrameGraphPlan,
-		exterior: SceneDomainTarget,
-		aspectRatio: number,
-	): void {
-		if (graph.outdoorCrossings.length === 0) {
-			return;
-		}
-		const gl = this.#gl;
-		for (const crossing of graph.outdoorCrossings) {
-			const apertureRange = this.#portalApertureRangesById.get(
-				crossing.apertureRangeId,
-			);
-			if (!apertureRange) {
-				this.#warnMissingPortalProjectionOutdoorCrossingApertureRange(crossing);
-				continue;
-			}
-			this.#stateCache.setStencilState(
-				createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
-			);
-			gl.clearStencil(0);
-			gl.clear(gl.STENCIL_BUFFER_BIT);
-			this.#drawPortalApertureStencilMask(apertureRange, {
-				aspectRatio,
-				stencilValue: OUTDOOR_CROSSING_STENCIL_VALUE,
-			});
-			this.#stateCache.setDepthState({
-				enabled: true,
-				func: gl.ALWAYS,
-				write: true,
-			});
-			this.#stateCache.setBlendState(
-				createBlendState(gl, false, gl.ONE, gl.ZERO),
-			);
-			this.#stateCache.setCullState({ enabled: false, mode: gl.BACK });
-			this.#stateCache.setStencilState(
-				createStencilState(
-					gl,
-					true,
-					0x00,
-					gl.EQUAL,
-					OUTDOOR_CROSSING_STENCIL_VALUE,
-					gl.KEEP,
-				),
-			);
-			this.#resetFramebufferTransferState();
-			this.#drawSourceSceneCopy(exterior);
-		}
-		this.#stateCache.setStencilState(
-			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
-		);
-		this.#stateCache.bindVertexArray(null);
 	}
 
 	#drawPortalFrameResourceSet(
@@ -2616,6 +2661,8 @@ class Webgl2Renderer implements Renderer {
 			compositingMode: this.#lastCompositingMode,
 			depthFormat: "depth24-stencil8",
 			executedCompositeDepth: this.#lastExecutedCompositeDepth,
+			envCellOutdoorCrossingCopyBypassed:
+				this.#lastEnvCellOutdoorCrossingCopyBypassed,
 			exteriorSuffixCompositeDepth: this.#lastExteriorSuffixCompositeDepth,
 			exteriorSuffixCompositePasses: this.#lastExteriorSuffixCompositePasses,
 			exteriorSeededBase: this.#lastExteriorSeededBase,
@@ -2901,6 +2948,11 @@ interface SceneDomainTarget {
 	readonly colorTexture: WebGLTexture;
 	readonly depthTexture: WebGLTexture;
 	dispose(): void;
+}
+
+interface SelectedOutdoorCompositeSource {
+	readonly kind: "raw-exterior" | "exterior-suffix";
+	readonly target: SceneDomainTarget;
 }
 
 interface RenderedTriangleResource {

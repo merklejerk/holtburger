@@ -1187,7 +1187,7 @@
 		const overlap = snapshot.currentPortalOverlapResidency;
 		const overlapDiagnostics = overlap.diagnostics;
 		if (plan.kind !== "direct-env-cell" || plan.mode !== "portal-projection") {
-			return `probe plan=${plan.kind} residency=${formatCameraResidency(snapshot.currentCameraResidency)} seeded=${targets.exteriorSeededBase} source=${targets.outdoorCrossingSource} directDraws=${renderer.directEnvCellDrawCalls}`;
+			return `probe plan=${plan.kind} residency=${formatCameraResidency(snapshot.currentCameraResidency)} seeded=${targets.exteriorSeededBase} source=${targets.outdoorCrossingSource} ownershipBypass=${targets.envCellOutdoorCrossingCopyBypassed} directDraws=${renderer.directEnvCellDrawCalls}`;
 		}
 		const graph = plan.layeredGraph;
 		const base =
@@ -1219,7 +1219,7 @@
 						`${crossing.crossingId}->${formatHexId(crossing.targetEnvCellId)}`,
 				)
 				.join(",") || "none";
-		return `probe residency=${formatCameraResidency(snapshot.currentCameraResidency)} base=${base} seeded=${targets.exteriorSeededBase} source=${targets.outdoorCrossingSource} directDraws=${renderer.directEnvCellDrawCalls} exteriorDraws=${targets.exteriorDrawCalls} suffix=${targets.exteriorSuffixCompositePasses}/${targets.exteriorSuffixCompositeDepth} baseRes=${baseResources} overlapReqExterior=${plan.baseOverlap.requiresExteriorSeed} overlapCells=${overlapCells} renderEntries=${renderEntries} outdoorCrossings=${outdoorCrossings} masks=${graph.maskEdges.length} overlapRuntime=${overlap.kind}:${overlap.baseOverlapEnvCellIds.map(formatHexId).join(",") || "none"} primary=${overlapDiagnostics.primaryAcceptedBoundaryCount}/${overlapDiagnostics.primaryCandidateCount} oneHop=${overlapDiagnostics.oneHopAcceptedBoundaryCount}/${overlapDiagnostics.oneHopCandidateCount}`;
+		return `probe residency=${formatCameraResidency(snapshot.currentCameraResidency)} base=${base} seeded=${targets.exteriorSeededBase} source=${targets.outdoorCrossingSource} ownershipBypass=${targets.envCellOutdoorCrossingCopyBypassed} directDraws=${renderer.directEnvCellDrawCalls} exteriorDraws=${targets.exteriorDrawCalls} suffix=${targets.exteriorSuffixCompositePasses}/${targets.exteriorSuffixCompositeDepth} baseRes=${baseResources} overlapReqExterior=${plan.baseOverlap.requiresExteriorSeed} overlapCells=${overlapCells} renderEntries=${renderEntries} outdoorCrossings=${outdoorCrossings} masks=${graph.maskEdges.length} overlapRuntime=${overlap.kind}:${overlap.baseOverlapEnvCellIds.map(formatHexId).join(",") || "none"} primary=${overlapDiagnostics.primaryAcceptedBoundaryCount}/${overlapDiagnostics.primaryCandidateCount} oneHop=${overlapDiagnostics.oneHopAcceptedBoundaryCount}/${overlapDiagnostics.oneHopCandidateCount}`;
 	}
 
 	function formatPortalResourceCounts(

@@ -251,11 +251,12 @@ function createPrimaryPortalOverlapCandidates(
 	input: PortalOverlapResidencyInput,
 ): readonly PortalOverlapCandidate[] {
 	if (input.residency.kind === "env-cell") {
+		const { envCellId } = input.residency;
 		const edgeCandidates = input.projection.edges
 			.filter(
 				(edge) =>
 					edge.sourceKind === "env-cell-portal" &&
-					edge.sourceEnvCellId === input.residency.envCellId,
+					edge.sourceEnvCellId === envCellId,
 			)
 			.map(
 				(edge): PortalOverlapCandidate => ({
@@ -267,7 +268,7 @@ function createPrimaryPortalOverlapCandidates(
 				}),
 			);
 		const outdoorCrossingCandidates = input.projection.outdoorSceneCrossings
-			.filter((crossing) => crossing.targetEnvCellId === input.residency.envCellId)
+			.filter((crossing) => crossing.targetEnvCellId === envCellId)
 			.map(
 				(crossing): PortalOverlapCandidate => ({
 					apertureRangeId: crossing.apertureRangeId,
@@ -306,6 +307,7 @@ function createOneHopEnvCellPortalCandidates(
 	if (input.residency.kind !== "env-cell") {
 		return [];
 	}
+	const { envCellId } = input.residency;
 	const seedEnvCellIds = createOneHopSeedEnvCellIds(primaryBoundaries);
 	if (seedEnvCellIds.size === 0) {
 		return [];
@@ -316,7 +318,7 @@ function createOneHopEnvCellPortalCandidates(
 				edge.sourceKind === "env-cell-portal" &&
 				edge.sourceEnvCellId !== null &&
 				seedEnvCellIds.has(edge.sourceEnvCellId) &&
-				edge.targetEnvCellId !== input.residency.envCellId,
+				edge.targetEnvCellId !== envCellId,
 		)
 		.map(
 			(edge): PortalOverlapCandidate => ({

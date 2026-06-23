@@ -717,15 +717,15 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add selected outdoor composite source helper.
-- [ ] Route env-cell-root outdoor crossing destination setup through the selected source helper.
-- [ ] Add an outdoor-transition stencil build step for env-cell-root outdoor-crossing frames.
-- [ ] Draw resident/base env-cell resources through the inverted outdoor-transition stencil.
-- [ ] Keep base-overlap env-cell resources direct/unmasked after the inverted base pass.
-- [ ] Bypass the late outdoor-crossing source-copy pass for env-cell-root outdoor-crossing frames.
-- [ ] Add ownership-path bypass diagnostics.
-- [ ] Update debug probe to include selected source and ownership-path bypass state.
-- [ ] Add renderer tests for raw source, suffix source, inverted base draw, direct overlap draw, and
+- [x] Add selected outdoor composite source helper.
+- [x] Route env-cell-root outdoor crossing destination setup through the selected source helper.
+- [x] Add an outdoor-transition stencil build step for env-cell-root outdoor-crossing frames.
+- [x] Draw resident/base env-cell resources through the inverted outdoor-transition stencil.
+- [x] Keep base-overlap env-cell resources direct/unmasked after the inverted base pass.
+- [x] Bypass the late outdoor-crossing source-copy pass for env-cell-root outdoor-crossing frames.
+- [x] Add ownership-path bypass diagnostics.
+- [x] Update debug probe to include selected source and ownership-path bypass state.
+- [x] Add renderer tests for raw source, suffix source, inverted base draw, direct overlap draw, and
       bypassed outdoor-crossing copy.
 
 Decisions and course corrections:
@@ -750,6 +750,34 @@ Decisions and course corrections:
 - The late outdoor-crossing copy is intentionally bypassed for this frame shape because it is a
   source-scene copy under stencil with depth func `gl.ALWAYS`; it is not equivalent to re-rendering
   outdoor geometry with normal depth testing.
+- Implemented the proof path by adding `#renderSelectedOutdoorCompositeSource`,
+  `#prepareEnvCellOutdoorOwnershipDestination`, and
+  `#drawEnvCellOutdoorOwnershipProjectionFrameResources` in the WebGL2 renderer. The env-cell-root
+  outdoor-crossing path now copies selected outdoor color only, clears destination depth/stencil,
+  builds the outdoor-transition stencil, draws the resident/base env cell with `NOTEQUAL 0xfe`,
+  draws base-overlap env cells directly, runs normal masked env-cell layers, and skips the removed
+  late outdoor source-copy method.
+- Added `envCellOutdoorCrossingCopyBypassed` renderer diagnostics and surfaced it in the browser
+  portal crossing probe so manual repro captures can show whether the ownership path ran.
+- Renderer tests now cover raw exterior and exterior suffix selected sources, color-only seeding
+  without a destination depth blit, inverted base draw, direct base-overlap draw presence, and the
+  bypass flag. Outdoor-root projection composite behavior remains on the existing outdoor-base path.
+- `npm run check` exposed TypeScript narrowing failures in `portal-base-overlap.ts` where
+  `input.residency.envCellId` was read inside callbacks after an outer discriminant check. Hoisted
+  the env cell id into locals; this was a type-safety cleanup with no intended behavior change.
+
+Verification:
+
+- `npm exec vitest -- src/v2/renderer/webgl2/webgl2-renderer.test.ts --run`
+- `npm run lint:ts`
+- `npm run check`
+- `npm run test:ts`
+
+Unclosed:
+
+- Manual visual proof is still required for indoor-to-outdoor transition crossings. Confirm the
+  building no longer hollows, the transition-plane black region is gone, and outdoor-as-color-base
+  does not create unacceptable leaks where indoor geometry has no coverage.
 
 ### Phase 7: Resteer After Visual Proof
 

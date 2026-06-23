@@ -635,9 +635,123 @@ Decisions and course corrections:
   copied again through transition masks after the base surface has already been seeded.
 - Added renderer diagnostics `exteriorSeededBase` for this branch and tests that prove seeded frames
   copy exterior before direct resource draws while non-straddled suffix frames remain unseeded.
-- Manual indoor-to-outdoor transition validation remains pending.
+- Manual indoor-to-outdoor transition validation found that the seeded branch activates, but the
+  later outdoor crossing copy can still overwrite the indoor scene through the same
+  near-plane-intersecting transition mask. The current raw-exterior/exterior-suffix split is also
+  too exposed in the env-cell crossing path; we should collapse it into a selected outdoor composite
+  source before changing the indoor-to-outdoor composition order.
 
-### Phase 6: Resteer After Visual Proof
+### Phase 6: Course Correct Indoor-To-Outdoor Composition
+
+Deliverables:
+
+- Introduce a single selected outdoor composite source abstraction for env-cell-root frames with
+  outdoor crossings.
+- Hide whether the source is raw exterior or an exterior suffix composite behind that abstraction.
+- Render/copy flow should match:
+  1. render the selected outdoor composite source,
+  2. copy its color to the env-cell destination as the visual base surface for indoor-to-outdoor
+     frames, while clearing destination depth/stencil,
+  3. stencil the outdoor transition apertures,
+  4. draw the resident/base env cell through the inverted outdoor-transition stencil,
+  5. draw accepted base-overlap env cells directly/unmasked,
+  6. draw normal masked env-cell layers,
+  7. skip the late outdoor-crossing source-copy pass for this env-cell-root frame shape.
+- Treat outdoor color as the transition-side visual owner and indoor env-cell geometry/depth as the
+  inverse-side owner instead of stamping outdoor over an already-composed indoor target late in the
+  frame. The proof slice does not copy outdoor depth into the env-cell destination.
+- Keep diagnostics that report the selected outdoor source kind, exterior seeded base flag, and
+  whether the env-cell-root outdoor crossing pass was bypassed by this ownership path.
+
+Likely files:
+
+- `apps/holtburger-3d/src/v2/renderer/webgl2/webgl2-renderer.ts`
+- `apps/holtburger-3d/src/v2/renderer/webgl2/webgl2-renderer.test.ts`
+- `apps/holtburger-3d/src/v2/renderer/types.ts`
+- `apps/holtburger-3d/src/pages/BrowserWorldDisplayV2.svelte`
+
+Dry-run notes:
+
+- Add a helper such as `#renderSelectedOutdoorCompositeSource(plan, targets)` that always returns
+  the source surface for outdoor crossing/base seeding. Internally, it renders raw exterior first
+  and, when `plan.exteriorComposite` exists, renders the suffix composite from that exterior source.
+- Model the helper return explicitly, for example:
+  - `kind: "raw-exterior" | "exterior-suffix"`,
+  - `target: SceneDomainTarget`.
+- Env-cell-root outdoor crossing path should consume the selected source without caring whether it
+  is raw exterior or suffix.
+- For env-cell-root frames with outdoor crossings, copy selected outdoor source color to the
+  destination before direct env-cell resources draw, then clear destination depth/stencil. This is no
+  longer conditional on overlap; the selected outdoor source is the visual base surface for the
+  frame shape.
+- Build the outdoor-transition stencil from the frame's `outdoorCrossings` before drawing the
+  resident/base env-cell resources.
+- Draw the resident/base env-cell resources with a stencil test that accepts pixels outside the
+  outdoor-transition stencil. This is the "inverted transition mask" path.
+- Draw `baseOverlap.envCells` after the resident/base env cell with ordinary direct geometry
+  depth/stencil behavior, so straddled cells cover the near-plane intersection without depending on
+  the transition aperture.
+- Draw normal masked env-cell layers after direct base/overlap resources.
+- Do not call `#drawPortalProjectionOutdoorCrossings` for this env-cell-root outdoor-crossing path;
+  the outdoor source is already the base surface, and the late copy currently uses `gl.ALWAYS`
+  depth with copied source depth.
+- Do not change outdoor-root projection composite behavior in this phase unless the helper naturally
+  removes duplication.
+
+Acceptance criteria:
+
+- Renderer tests prove raw exterior and exterior suffix paths both expose the same selected-source
+  behavior to env-cell-root crossing rendering.
+- Renderer tests prove env-cell-root outdoor-crossing frames use selected outdoor source color as
+  the destination visual base, clear destination depth/stencil before indoor geometry draws, draw
+  base env-cell resources through the inverted transition stencil, and bypass the late outdoor
+  crossing source-copy pass.
+- Renderer tests prove accepted base-overlap env cells draw directly/unmasked after the inverted
+  base env-cell pass.
+- Renderer tests prove outdoor-root projection composite behavior still renders through the existing
+  outdoor-base path.
+- Browser diagnostics expose selected source, exterior seeded base, and the ownership-path bypass.
+- Manual indoor-to-outdoor repro no longer hollows the building when exterior seeding is active, and
+  outdoor terrain depth cannot reject indoor geometry below the outdoor ground surface because it is
+  not copied into the env-cell destination.
+
+Task checklist:
+
+- [ ] Add selected outdoor composite source helper.
+- [ ] Route env-cell-root outdoor crossing destination setup through the selected source helper.
+- [ ] Add an outdoor-transition stencil build step for env-cell-root outdoor-crossing frames.
+- [ ] Draw resident/base env-cell resources through the inverted outdoor-transition stencil.
+- [ ] Keep base-overlap env-cell resources direct/unmasked after the inverted base pass.
+- [ ] Bypass the late outdoor-crossing source-copy pass for env-cell-root outdoor-crossing frames.
+- [ ] Add ownership-path bypass diagnostics.
+- [ ] Update debug probe to include selected source and ownership-path bypass state.
+- [ ] Add renderer tests for raw source, suffix source, inverted base draw, direct overlap draw, and
+      bypassed outdoor-crossing copy.
+
+Decisions and course corrections:
+
+- Added after Phase 5 diagnostics proved the indoor-to-outdoor branch was seeded and direct env-cell
+  resources were planned/drawn, while the later outdoor crossing copy still targeted the same
+  straddled env cell. The remaining failure is likely the composition model itself: indoor-to-outdoor
+  currently uses an indoor base plus a late outdoor stencil-copy, while outdoor-to-indoor already
+  behaves like an outdoor base plus inserted env-cell geometry.
+- The renderer should treat raw exterior and exterior suffix as implementation details of one
+  selected outdoor composite source. The suffix still depends on raw exterior internally, but
+  env-cell crossing composition should not branch on that distinction.
+- User course correction: duplicate-copy suppression is less attractive than making
+  indoor-to-outdoor isomorphic with outdoor-to-indoor. The new model lays down outdoor first, uses
+  the transition aperture as an ownership stencil, draws the resident/base env cell through the
+  inverted stencil, and draws straddled overlap env cells directly so there is no black region when
+  the camera intersects the transition plane.
+- Outdoor depth will not be copied for the proof slice: terrain can be above interior cells, and
+  copying outdoor depth into the env-cell destination can reject valid indoor geometry. The inverted
+  ownership stencil is intended to let outdoor color own the transition side while indoor geometry
+  owns destination depth where it draws.
+- The late outdoor-crossing copy is intentionally bypassed for this frame shape because it is a
+  source-scene copy under stencil with depth func `gl.ALWAYS`; it is not equivalent to re-rendering
+  outdoor geometry with normal depth testing.
+
+### Phase 7: Resteer After Visual Proof
 
 Deliverables:
 
@@ -665,7 +779,7 @@ Decisions and course corrections:
 
 - Pending.
 
-### Phase 7: Stabilization And Cleanup
+### Phase 8: Stabilization And Cleanup
 
 Deliverables:
 

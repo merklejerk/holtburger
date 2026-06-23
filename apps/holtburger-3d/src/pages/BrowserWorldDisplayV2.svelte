@@ -38,6 +38,7 @@
 		RuntimeSnapshot,
 	} from "../v2/runtime/client-runtime";
 	import type {
+		PortalFrameNodeResources,
 		PortalFrameWorkPlan,
 		RendererStaticLayerVisibility,
 	} from "../v2/renderer/types";
@@ -1179,6 +1180,54 @@
 		return `${overlap.kind} cells ${overlap.baseOverlapEnvCellIds.length} boundaries ${overlap.boundaries.length} primary ${diagnostics.primaryAcceptedBoundaryCount}/${diagnostics.primaryCandidateCount} one-hop ${diagnostics.oneHopAcceptedBoundaryCount}/${diagnostics.oneHopCandidateCount} seeds ${diagnostics.oneHopSeedEnvCellCount} capped ${diagnostics.oneHopTraversalCapped ? "yes" : "no"}`;
 	}
 
+	function formatPortalCrossingProbe(snapshot: RuntimeSnapshot): string {
+		const plan = snapshot.portalFrameWorkPlan;
+		const renderer = snapshot.renderer;
+		const targets = renderer.sceneDomainTargets;
+		const overlap = snapshot.currentPortalOverlapResidency;
+		const overlapDiagnostics = overlap.diagnostics;
+		if (plan.kind !== "direct-env-cell" || plan.mode !== "portal-projection") {
+			return `probe plan=${plan.kind} residency=${formatCameraResidency(snapshot.currentCameraResidency)} seeded=${targets.exteriorSeededBase} source=${targets.outdoorCrossingSource} directDraws=${renderer.directEnvCellDrawCalls}`;
+		}
+		const graph = plan.layeredGraph;
+		const base =
+			graph.baseEntry.scene.kind === "outdoor-target"
+				? `outdoor:${formatHexId(graph.baseEntry.scene.landblockId)}`
+				: `env:${formatHexId(graph.baseEntry.scene.envCellId)}`;
+		const baseResources =
+			"resources" in graph.baseEntry
+				? formatPortalResourceCounts(graph.baseEntry.resources)
+				: "none";
+		const overlapCells =
+			plan.baseOverlap.envCells
+				.map(
+					(envCell) =>
+						`${formatHexId(envCell.envCellId)}:${formatPortalResourceCounts(envCell.resources)}:${envCell.reasons.map((reason) => reason.kind).join("+") || "unknown"}`,
+				)
+				.join(",") || "none";
+		const renderEntries =
+			graph.renderEntries
+				.map(
+					(entry) =>
+						`${formatHexId(entry.envCellId)}@${entry.renderLayer}:${formatPortalResourceCounts(entry.resources)}:m${entry.incomingMaskEdgeIds.length}`,
+				)
+				.join(",") || "none";
+		const outdoorCrossings =
+			graph.outdoorCrossings
+				.map(
+					(crossing) =>
+						`${crossing.crossingId}->${formatHexId(crossing.targetEnvCellId)}`,
+				)
+				.join(",") || "none";
+		return `probe residency=${formatCameraResidency(snapshot.currentCameraResidency)} base=${base} seeded=${targets.exteriorSeededBase} source=${targets.outdoorCrossingSource} directDraws=${renderer.directEnvCellDrawCalls} exteriorDraws=${targets.exteriorDrawCalls} suffix=${targets.exteriorSuffixCompositePasses}/${targets.exteriorSuffixCompositeDepth} baseRes=${baseResources} overlapReqExterior=${plan.baseOverlap.requiresExteriorSeed} overlapCells=${overlapCells} renderEntries=${renderEntries} outdoorCrossings=${outdoorCrossings} masks=${graph.maskEdges.length} overlapRuntime=${overlap.kind}:${overlap.baseOverlapEnvCellIds.map(formatHexId).join(",") || "none"} primary=${overlapDiagnostics.primaryAcceptedBoundaryCount}/${overlapDiagnostics.primaryCandidateCount} oneHop=${overlapDiagnostics.oneHopAcceptedBoundaryCount}/${overlapDiagnostics.oneHopCandidateCount}`;
+	}
+
+	function formatPortalResourceCounts(
+		resources: PortalFrameNodeResources,
+	): string {
+		return `${resources.resourceState}:${resources.structuredInteriorDrawUnitIds.length}cell/${resources.envCellStaticObjectDrawUnitIds.length}static`;
+	}
+
 	function currentCameraEnvCellResourceTarget(): {
 		readonly envCellId: number;
 		readonly landblockId: number;
@@ -1806,6 +1855,12 @@
 											snapshot.currentPortalOverlapResidency,
 										)
 									: "pending"}
+							</dd>
+						</div>
+						<div>
+							<dt>Portal crossing probe</dt>
+							<dd>
+								{snapshot ? formatPortalCrossingProbe(snapshot) : "pending"}
 							</dd>
 						</div>
 						<div class="browser-v2__status-row--action">

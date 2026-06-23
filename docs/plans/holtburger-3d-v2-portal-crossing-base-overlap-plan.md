@@ -262,6 +262,8 @@ surface source, not an env-cell resource set.
 
 ### Phase 1: Add Portal Overlap Residency Detection
 
+Status: complete as of 2026-06-23.
+
 Deliverables:
 
 - A pure helper that evaluates portal aperture ranges against the camera frame.
@@ -316,17 +318,33 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Define detector input/output types and `RuntimePortalOverlapResidency`.
-- [ ] Implement landblock render-local camera/aperture coordinate conversion.
-- [ ] Implement plane/slab and padded aperture tests.
-- [ ] Compute deterministic overlap signatures.
-- [ ] Store current runtime portal overlap state next to current camera residency.
-- [ ] Add synthetic tests for env-cell and building-transition boundaries.
-- [ ] Add minimal runtime diagnostics plumbing.
+- [x] Define detector input/output types and `RuntimePortalOverlapResidency`.
+- [x] Implement landblock render-local camera/aperture coordinate conversion.
+- [x] Implement plane/slab and padded aperture tests.
+- [x] Compute deterministic overlap signatures.
+- [x] Store current runtime portal overlap state next to current camera residency.
+- [x] Add synthetic tests for env-cell and building-transition boundaries.
+- [x] Add minimal runtime diagnostics plumbing.
 
 Decisions and course corrections:
 
-- Pending.
+- Added `apps/holtburger-3d/src/v2/runtime/portal-base-overlap.ts` as a pure detector/runtime
+  classification helper. It accepts env-cell portal edges attached to the current env cell,
+  env-cell-root outdoor scene crossings targeting the current env cell, and outdoor-root
+  building-transition edges.
+- Added `StaticSceneQuery.queryPortalApertureResources` so detection uses committed CPU aperture
+  resources, not renderer GPU resources or debug overlay geometry.
+- Runtime now retains the latest `FrameState`, derives `RuntimePortalOverlapResidency` alongside
+  current camera residency, exposes it in `RuntimeSnapshot` and diagnostics, and refreshes render
+  planning only when the overlap signature changes.
+- The detector currently uses projected aperture bounds after plane projection, not an exact
+  polygon containment test. That is intentional for the first proof and should be tightened only if
+  visual testing shows false-positive overlap cells.
+- Missing overlap target resources are reported through
+  `RuntimePortalOverlapResidency.missingResourceEnvCellIds`.
+- Phase 1 deliberately does not add `portalOverlapSignature` to `PortalFramePlanKey`, attach
+  `PortalBaseOverlapPlan` to frame plans, or draw overlap resources. Those remain Phase 2 and Phase
+  3 work.
 
 ### Phase 2: Propagate Overlap Residency Into Frame Plans
 

@@ -103,6 +103,11 @@ import {
 	EnvCellSystemLayerAssemblyStore,
 	type EnvCellSystemLayerAssemblyPublication,
 } from "./env-cell-system-layer-assembly";
+import {
+	EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY,
+	deriveRuntimePortalOverlapResidency,
+	type RuntimePortalOverlapResidency,
+} from "./portal-base-overlap";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
@@ -114,6 +119,8 @@ const MAX_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 16;
 const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS = 512;
 const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS = 512;
 const DEFAULT_EXTERIOR_SUFFIX_MAX_DEPTH = 1;
+const DEFAULT_PORTAL_BASE_OVERLAP_PLANE_EPSILON = 0.25;
+const DEFAULT_PORTAL_BASE_OVERLAP_APERTURE_PADDING = 0.25;
 
 export type ManualStaticDomain =
 	| "terrain"
@@ -207,6 +214,7 @@ export interface RuntimeSnapshot {
 	readonly renderPolicy: RuntimeRenderPolicySnapshot;
 	readonly sceneInterest: RuntimeSceneInterest;
 	readonly currentCameraResidency: RuntimeCameraResidency;
+	readonly currentPortalOverlapResidency: RuntimePortalOverlapResidency;
 	readonly renderPassPlan: RenderPassPlan;
 	readonly portalFrameWorkPlan: PortalFrameWorkPlan;
 	readonly debugOverlays: RuntimeDebugOverlaySnapshot;
@@ -565,6 +573,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		kind: "unknown",
 		landblockId: null,
 	};
+	#currentPortalOverlapResidency: RuntimePortalOverlapResidency =
+		EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY;
+	#lastFrameState: FrameState | null = null;
 	#renderAnchorLandblockId: number | null = null;
 	#staticMaterializationQueue: Promise<void> = Promise.resolve();
 	#pendingStaticMaterializations = new Set<number>();
@@ -741,6 +752,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 
 		this.#currentCameraResidency = normalized;
+		this.#refreshPortalOverlapResidency();
 		this.#updateRenderPassPlan();
 		this.#refreshStaticDebugOverlay();
 		this.#emit();
@@ -860,7 +872,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 	updateFrameState(state: FrameState): void {
 		this.#assertActive();
+		this.#lastFrameState = state;
 		this.#renderer.updateFrameState(state);
+		if (this.#refreshPortalOverlapResidency()) {
+			this.#updateRenderPassPlan();
+			this.#emit();
+		}
 	}
 
 	createDiagnosticsReport(): RuntimeDiagnosticsReport {
@@ -887,6 +904,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 				committedStaticMaterializationRevisions:
 					snapshot.staticMaterialization.committedRevisions,
 				currentCameraResidency: snapshot.currentCameraResidency,
+				currentPortalOverlapResidency:
+					snapshot.currentPortalOverlapResidency,
 				envCellResourceMembershipRevision:
 					snapshot.staticMaterialization.envCellResourceMembershipRevision,
 				portalFrameWorkPlan: snapshot.portalFrameWorkPlan,
@@ -979,6 +998,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	}
 
 	#updateRenderPassPlan(): boolean {
+		this.#refreshPortalOverlapResidency();
 		const plan = this.#flatVisionModeEnabled
 			? ({ kind: "single-surface-resident" } satisfies RenderPassPlan)
 			: this.#deriveRenderPassPlan();
@@ -1111,6 +1131,68 @@ class ClientRuntimeImpl implements ClientRuntime {
 		});
 	}
 
+	#refreshPortalOverlapResidency(): boolean {
+		const next = this.#derivePortalOverlapResidency();
+		if (
+			portalOverlapResidencyEquals(
+				this.#currentPortalOverlapResidency,
+				next,
+			)
+		) {
+			return false;
+		}
+		this.#currentPortalOverlapResidency = next;
+		return true;
+	}
+
+	#derivePortalOverlapResidency(): RuntimePortalOverlapResidency {
+		if (this.#lastFrameState === null) {
+			return EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY;
+		}
+		if (this.#currentCameraResidency.kind === "env-cell") {
+			const landblockId = this.#currentCameraResidency.landblockId;
+			const projection = this.#staticSceneQuery.queryEnvCellPortalProjection({
+				landblockId,
+				startEnvCellId: this.#currentCameraResidency.envCellId,
+			});
+			if (projection === null) {
+				return EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY;
+			}
+			return deriveRuntimePortalOverlapResidency({
+				aperturePadding: DEFAULT_PORTAL_BASE_OVERLAP_APERTURE_PADDING,
+				envCellResourceMembership: this.#envCellResourceMembership,
+				frameState: this.#lastFrameState,
+				planeEpsilon: DEFAULT_PORTAL_BASE_OVERLAP_PLANE_EPSILON,
+				portalApertureResources:
+					this.#staticSceneQuery.queryPortalApertureResources({ landblockId }),
+				projection,
+				renderAnchorLandblockId: this.#renderAnchorLandblockId,
+				residency: this.#currentCameraResidency,
+			});
+		}
+		if (this.#currentCameraResidency.kind === "outdoor-landblock") {
+			const landblockId = this.#currentCameraResidency.landblockId;
+			const projection = this.#staticSceneQuery.queryOutdoorPortalProjection({
+				landblockId,
+			});
+			if (projection === null) {
+				return EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY;
+			}
+			return deriveRuntimePortalOverlapResidency({
+				aperturePadding: DEFAULT_PORTAL_BASE_OVERLAP_APERTURE_PADDING,
+				envCellResourceMembership: this.#envCellResourceMembership,
+				frameState: this.#lastFrameState,
+				planeEpsilon: DEFAULT_PORTAL_BASE_OVERLAP_PLANE_EPSILON,
+				portalApertureResources:
+					this.#staticSceneQuery.queryPortalApertureResources({ landblockId }),
+				projection,
+				renderAnchorLandblockId: this.#renderAnchorLandblockId,
+				residency: this.#currentCameraResidency,
+			});
+		}
+		return EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY;
+	}
+
 	#deriveRetainedOutdoorPortalFramePlan(
 		seedLandblockId: number,
 	): RetainedOutdoorPortalFramePlan | null {
@@ -1190,6 +1272,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 		return {
 			assets: this.#assetService.createSnapshot(),
 			currentCameraResidency: this.#currentCameraResidency,
+			currentPortalOverlapResidency:
+				this.#currentPortalOverlapResidency,
 			debugOverlays: {
 				envCellAabbCount: this.#envCellAabbDebugOverlayVisible
 					? this.#staticSceneQuery.queryEnvCellAabbDebugBounds().length
@@ -3045,6 +3129,13 @@ function normalizeCameraResidency(
 		kind: "env-cell",
 		landblockId: normalizeOutdoorLandblockId(residency.landblockId),
 	};
+}
+
+function portalOverlapResidencyEquals(
+	left: RuntimePortalOverlapResidency,
+	right: RuntimePortalOverlapResidency,
+): boolean {
+	return left.signature === right.signature;
 }
 
 function deriveRenderPassPlan(

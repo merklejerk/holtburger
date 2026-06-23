@@ -652,16 +652,15 @@ Deliverables:
   1. render the selected outdoor composite source,
   2. copy its color to the env-cell destination as the visual base surface for indoor-to-outdoor
      frames, while clearing destination depth/stencil,
-  3. stencil the outdoor transition apertures,
-  4. draw the resident/base env cell through the inverted outdoor-transition stencil,
-  5. draw accepted base-overlap env cells directly/unmasked,
-  6. draw normal masked env-cell layers,
-  7. skip the late outdoor-crossing source-copy pass for this env-cell-root frame shape.
-- Treat outdoor color as the transition-side visual owner and indoor env-cell geometry/depth as the
-  inverse-side owner instead of stamping outdoor over an already-composed indoor target late in the
-  frame. The proof slice does not copy outdoor depth into the env-cell destination.
+  3. draw the resident/base env cell normally with color and depth,
+  4. draw accepted base-overlap env cells directly/unmasked,
+  5. draw normal masked env-cell layers,
+  6. stencil the outdoor transition apertures against the accumulated indoor/env-cell depth,
+  7. copy the selected outdoor composite through those visible aperture pixels.
+- Treat outdoor color as the visual background/fill, then let indoor env-cell geometry own depth
+  where it draws. The proof slice does not copy outdoor depth into the env-cell destination.
 - Keep diagnostics that report the selected outdoor source kind, exterior seeded base flag, and
-  whether the env-cell-root outdoor crossing pass was bypassed by this ownership path.
+  whether the env-cell-root outdoor crossing path used outdoor color as its base surface.
 
 Likely files:
 
@@ -684,17 +683,12 @@ Dry-run notes:
   destination before direct env-cell resources draw, then clear destination depth/stencil. This is no
   longer conditional on overlap; the selected outdoor source is the visual base surface for the
   frame shape.
-- Build the outdoor-transition stencil from the frame's `outdoorCrossings` before drawing the
-  resident/base env-cell resources.
-- Draw the resident/base env-cell resources with a stencil test that accepts pixels outside the
-  outdoor-transition stencil. This is the "inverted transition mask" path.
-- Draw `baseOverlap.envCells` after the resident/base env cell with ordinary direct geometry
-  depth/stencil behavior, so straddled cells cover the near-plane intersection without depending on
-  the transition aperture.
+- Draw resident/base resources, `baseOverlap.envCells`, and normal masked env-cell layers before
+  outdoor transition copies, so the transition aperture stencil is depth-tested against actual
+  indoor/env-cell depth instead of a blank depth buffer.
 - Draw normal masked env-cell layers after direct base/overlap resources.
-- Do not call `#drawPortalProjectionOutdoorCrossings` for this env-cell-root outdoor-crossing path;
-  the outdoor source is already the base surface, and the late copy currently uses `gl.ALWAYS`
-  depth with copied source depth.
+- Call `#drawPortalProjectionOutdoorCrossings` after indoor/env-cell drawing. The copy shader can
+  still use `gl.ALWAYS` under stencil because the stencil is generated after indoor depth exists.
 - Do not change outdoor-root projection composite behavior in this phase unless the helper naturally
   removes duplication.
 
@@ -704,13 +698,13 @@ Acceptance criteria:
   behavior to env-cell-root crossing rendering.
 - Renderer tests prove env-cell-root outdoor-crossing frames use selected outdoor source color as
   the destination visual base, clear destination depth/stencil before indoor geometry draws, draw
-  base env-cell resources through the inverted transition stencil, and bypass the late outdoor
-  crossing source-copy pass.
-- Renderer tests prove accepted base-overlap env cells draw directly/unmasked after the inverted
-  base env-cell pass.
+  indoor/env-cell resources before outdoor transition copies, and do not copy outdoor depth into the
+  env-cell destination.
+- Renderer tests prove accepted base-overlap env cells draw directly/unmasked before the
+  depth-tested outdoor transition copy.
 - Renderer tests prove outdoor-root projection composite behavior still renders through the existing
   outdoor-base path.
-- Browser diagnostics expose selected source, exterior seeded base, and the ownership-path bypass.
+- Browser diagnostics expose selected source, exterior seeded base, and outdoor-color-base state.
 - Manual indoor-to-outdoor repro no longer hollows the building when exterior seeding is active, and
   outdoor terrain depth cannot reject indoor geometry below the outdoor ground surface because it is
   not copied into the env-cell destination.
@@ -720,13 +714,13 @@ Task checklist:
 - [x] Add selected outdoor composite source helper.
 - [x] Route env-cell-root outdoor crossing destination setup through the selected source helper.
 - [x] Add an outdoor-transition stencil build step for env-cell-root outdoor-crossing frames.
-- [x] Draw resident/base env-cell resources through the inverted outdoor-transition stencil.
-- [x] Keep base-overlap env-cell resources direct/unmasked after the inverted base pass.
-- [x] Bypass the late outdoor-crossing source-copy pass for env-cell-root outdoor-crossing frames.
-- [x] Add ownership-path bypass diagnostics.
-- [x] Update debug probe to include selected source and ownership-path bypass state.
-- [x] Add renderer tests for raw source, suffix source, inverted base draw, direct overlap draw, and
-      bypassed outdoor-crossing copy.
+- [x] Draw resident/base env-cell resources normally before outdoor transition copies.
+- [x] Keep base-overlap env-cell resources direct/unmasked before outdoor transition copies.
+- [x] Restore the outdoor-crossing source-copy pass after indoor/env-cell depth exists.
+- [x] Add outdoor-color-base diagnostics.
+- [x] Update debug probe to include selected source and outdoor-color-base state.
+- [x] Add renderer tests for raw source, suffix source, color-only base draw, direct overlap draw,
+      and post-indoor outdoor-crossing copy.
 
 Decisions and course corrections:
 
@@ -744,24 +738,24 @@ Decisions and course corrections:
   inverted stencil, and draws straddled overlap env cells directly so there is no black region when
   the camera intersects the transition plane.
 - Outdoor depth will not be copied for the proof slice: terrain can be above interior cells, and
-  copying outdoor depth into the env-cell destination can reject valid indoor geometry. The inverted
-  ownership stencil is intended to let outdoor color own the transition side while indoor geometry
-  owns destination depth where it draws.
-- The late outdoor-crossing copy is intentionally bypassed for this frame shape because it is a
-  source-scene copy under stencil with depth func `gl.ALWAYS`; it is not equivalent to re-rendering
-  outdoor geometry with normal depth testing.
-- Implemented the proof path by adding `#renderSelectedOutdoorCompositeSource`,
-  `#prepareEnvCellOutdoorOwnershipDestination`, and
-  `#drawEnvCellOutdoorOwnershipProjectionFrameResources` in the WebGL2 renderer. The env-cell-root
+  copying outdoor depth into the env-cell destination can reject valid indoor geometry. Indoor
+  geometry owns destination depth where it draws.
+- Course correction after visual feedback: building the transition ownership stencil before indoor
+  depth existed made outdoor apertures draw over indoor/env-cell geometry in non-overlap
+  indoor-to-outdoor scenes. The corrected path draws indoor/env-cell geometry first, then builds the
+  outdoor-transition stencil against the accumulated indoor depth and copies outdoor only through
+  those visible aperture pixels.
+- Implemented the corrected proof path by adding `#renderSelectedOutdoorCompositeSource` and
+  `#prepareEnvCellOutdoorColorBaseDestination` in the WebGL2 renderer. The env-cell-root
   outdoor-crossing path now copies selected outdoor color only, clears destination depth/stencil,
-  builds the outdoor-transition stencil, draws the resident/base env cell with `NOTEQUAL 0xfe`,
-  draws base-overlap env cells directly, runs normal masked env-cell layers, and skips the removed
-  late outdoor source-copy method.
-- Added `envCellOutdoorCrossingCopyBypassed` renderer diagnostics and surfaced it in the browser
-  portal crossing probe so manual repro captures can show whether the ownership path ran.
+  draws resident/base resources, draws base-overlap env cells directly, runs normal masked env-cell
+  layers, and then runs `#drawPortalProjectionOutdoorCrossings` against the populated indoor depth.
+- Added `envCellOutdoorCrossingColorBase` renderer diagnostics and surfaced it in the browser portal
+  crossing probe so manual repro captures can show whether the color-base path ran.
 - Renderer tests now cover raw exterior and exterior suffix selected sources, color-only seeding
-  without a destination depth blit, inverted base draw, direct base-overlap draw presence, and the
-  bypass flag. Outdoor-root projection composite behavior remains on the existing outdoor-base path.
+  without a destination depth blit, direct base-overlap draw presence, post-indoor outdoor copy, and
+  the color-base flag. Outdoor-root projection composite behavior remains on the existing
+  outdoor-base path.
 - `npm run check` exposed TypeScript narrowing failures in `portal-base-overlap.ts` where
   `input.residency.envCellId` was read inside callbacks after an outer discriminant check. Hoisted
   the env cell id into locals; this was a type-safety cleanup with no intended behavior change.

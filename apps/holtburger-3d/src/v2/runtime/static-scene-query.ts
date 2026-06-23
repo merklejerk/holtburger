@@ -274,6 +274,8 @@ export type StaticSceneCameraResidency =
 	  };
 
 type TerrainBvh = TerrainStaticScopePayload["sourceSpatial"]["terrainBvh"];
+type EnvCellInteriorPortal =
+	StaticPortalInteriorRecord["envCells"][number]["portals"][number];
 type BvhNode =
 	| NonNullable<
 			OutdoorStaticObjectsScopePayload["sourceSpatial"]["outdoorBvh"]
@@ -333,10 +335,22 @@ interface EnvCellLandblockBvhRuntimeItem {
 	readonly bounds: StaticBounds;
 	readonly cellBsp: StaticEnvCellSpatialRecord["cellBsp"];
 	readonly envCellId: number;
+	readonly graphEvidence: EnvCellResidencyGraphEvidence;
 	readonly inverseCellRenderMatrix: RenderMat4;
 	readonly localPlacement: StaticEnvCellSpatialRecord["localPlacement"];
 	readonly memberId: string;
 	readonly source: "env-cell-root" | "derived";
+}
+
+interface EnvCellResidencyGraphEvidence {
+	readonly incomingEnvCellPortalRefs: number;
+	readonly reciprocalEnvCellPortalRefs: number;
+	readonly visibleListRefs: number;
+}
+
+interface EnvCellResidencyCandidate {
+	readonly item: EnvCellLandblockBvhRuntimeItem;
+	readonly nodeIndex: number;
 }
 
 interface LandblockSpatialBucket {
@@ -1326,18 +1340,10 @@ export class StaticSceneQuery {
 			.filter(
 				(
 					candidate,
-				): candidate is {
-					readonly item: EnvCellLandblockBvhRuntimeItem;
-					readonly nodeIndex: number;
-				} =>
+				): candidate is EnvCellResidencyCandidate =>
 					candidate.item !== null &&
 					containsPoint(candidate.item.bounds, options.point) &&
 					isAcceptedEnvCellId(acceptedEnvCellIds, candidate.item.envCellId),
-			)
-			.sort(
-				(left, right) =>
-					left.item.envCellId - right.item.envCellId ||
-					left.nodeIndex - right.nodeIndex,
 			);
 
 		this.#envCellResidencyCoarseCandidateCount += candidates.length;
@@ -1351,11 +1357,17 @@ export class StaticSceneQuery {
 		this.#envCellResidencyBspTestedCandidateCount += candidates.length;
 		this.#envCellResidencyBspAcceptedCandidateCount += bspCandidates.length;
 		if (bspCandidates.length > 0) {
-			return bspCandidates[0]?.item.envCellId ?? null;
+			return (
+				selectEnvCellResidencyCandidate(bspCandidates, options.point)?.item
+					.envCellId ?? null
+			);
 		}
 
 		this.#envCellResidencyBspFallbackCount += 1;
-		return candidates[0]?.item.envCellId ?? null;
+		return (
+			selectEnvCellResidencyCandidate(candidates, options.point)?.item
+				.envCellId ?? null
+		);
 	}
 
 	queryEnvCellBounds(options: {
@@ -1775,6 +1787,11 @@ export class StaticSceneQuery {
 			const spatialRecordsByEnvCellId = new Map(
 				spatialRecords.map((record) => [record.envCellId, record]),
 			);
+			const graphEvidenceByEnvCellId =
+				this.#deriveCommittedEnvCellResidencyGraphEvidence(
+					landblockId,
+					spatialRecordsByEnvCellId,
+				);
 			const cellsByEnvCellId = new Map<number, EnvCellBvhRoot>();
 			for (const record of spatialRecords) {
 				const seeds =
@@ -1804,6 +1821,9 @@ export class StaticSceneQuery {
 							bounds: item.bounds,
 							cellBsp: spatialRecord.cellBsp,
 							envCellId: item.identity.envCellId,
+							graphEvidence:
+								graphEvidenceByEnvCellId.get(item.identity.envCellId) ??
+								createEmptyEnvCellResidencyGraphEvidence(),
 							inverseCellRenderMatrix: createInverseEnvCellRenderMatrix(
 								spatialRecord.localPlacement,
 							),
@@ -1834,6 +1854,93 @@ export class StaticSceneQuery {
 			this.#envCellRootsByLandblockId.set(landblockId, root);
 		}
 		this.#rebuildLandblockGridIndex();
+	}
+
+	#deriveCommittedEnvCellResidencyGraphEvidence(
+		landblockId: number,
+		spatialRecordsByEnvCellId: ReadonlyMap<number, StaticEnvCellSpatialRecord>,
+	): ReadonlyMap<number, EnvCellResidencyGraphEvidence> {
+		const graphEvidenceByEnvCellId = new Map<
+			number,
+			EnvCellResidencyGraphEvidence
+		>();
+		for (const envCellId of spatialRecordsByEnvCellId.keys()) {
+			graphEvidenceByEnvCellId.set(
+				envCellId,
+				createEmptyEnvCellResidencyGraphEvidence(),
+			);
+		}
+
+		for (const entry of this.#committedVisibilityRecordsByKey.values()) {
+			const record = entry.record;
+			if (
+				record.kind !== "env-cell-visibility" ||
+				record.landblockId !== landblockId
+			) {
+				continue;
+			}
+			for (const link of record.visibleLinks) {
+				if (!spatialRecordsByEnvCellId.has(link.targetEnvCellId)) {
+					continue;
+				}
+				incrementEnvCellGraphEvidence(
+					graphEvidenceByEnvCellId,
+					link.targetEnvCellId,
+					"visibleListRefs",
+				);
+			}
+		}
+
+		const portalsByEnvCellId = new Map<
+			number,
+			readonly EnvCellInteriorPortal[]
+		>();
+		for (const entry of this.#committedPortalInteriorRecordsByKey.values()) {
+			const record = entry.record;
+			if (record.landblockId !== landblockId) {
+				continue;
+			}
+			for (const cell of record.envCells) {
+				if (!spatialRecordsByEnvCellId.has(cell.envCellId)) {
+					continue;
+				}
+				portalsByEnvCellId.set(cell.envCellId, cell.portals);
+			}
+		}
+
+		for (const [sourceEnvCellId, portals] of portalsByEnvCellId) {
+			for (const portal of portals) {
+				const targetEnvCellId = portal.targetEnvCellId;
+				if (
+					portal.isOutsideTransition ||
+					targetEnvCellId === null ||
+					!spatialRecordsByEnvCellId.has(targetEnvCellId)
+				) {
+					continue;
+				}
+
+				incrementEnvCellGraphEvidence(
+					graphEvidenceByEnvCellId,
+					targetEnvCellId,
+					"incomingEnvCellPortalRefs",
+				);
+				if (
+					isReciprocalCommittedEnvCellPortal(
+						sourceEnvCellId,
+						portal,
+						portalsByEnvCellId.get(targetEnvCellId) ?? [],
+					)
+				) {
+					incrementEnvCellGraphEvidence(
+						graphEvidenceByEnvCellId,
+						targetEnvCellId,
+						"reciprocalEnvCellPortalRefs",
+					);
+				}
+			}
+		}
+
+		return graphEvidenceByEnvCellId;
 	}
 
 	#deleteCommittedRecordsForOwners<
@@ -2874,6 +2981,104 @@ function isAcceptedEnvCellId(
 	return acceptedEnvCellIds.size === 0 || acceptedEnvCellIds.has(envCellId);
 }
 
+function selectEnvCellResidencyCandidate(
+	candidates: readonly EnvCellResidencyCandidate[],
+	point: Vec3,
+): EnvCellResidencyCandidate | null {
+	let selected: EnvCellResidencyCandidate | null = null;
+	for (const candidate of candidates) {
+		if (
+			!selected ||
+			compareEnvCellResidencyCandidates(candidate, selected, point) < 0
+		) {
+			selected = candidate;
+		}
+	}
+	return selected;
+}
+
+function compareEnvCellResidencyCandidates(
+	left: EnvCellResidencyCandidate,
+	right: EnvCellResidencyCandidate,
+	point: Vec3,
+): number {
+	const leftDistanceSq = boundsCenterDistanceSquared(left.item.bounds, point);
+	const rightDistanceSq = boundsCenterDistanceSquared(right.item.bounds, point);
+
+	return (
+		compareNumbers(
+			hasEnvCellResidencyGraphSupport(right.item.graphEvidence) ? 1 : 0,
+			hasEnvCellResidencyGraphSupport(left.item.graphEvidence) ? 1 : 0,
+		) ||
+		compareNumbers(
+			right.item.graphEvidence.reciprocalEnvCellPortalRefs,
+			left.item.graphEvidence.reciprocalEnvCellPortalRefs,
+		) ||
+		compareNumbers(
+			right.item.graphEvidence.incomingEnvCellPortalRefs,
+			left.item.graphEvidence.incomingEnvCellPortalRefs,
+		) ||
+		compareNumbers(
+			right.item.graphEvidence.visibleListRefs,
+			left.item.graphEvidence.visibleListRefs,
+		) ||
+		compareNumbers(leftDistanceSq, rightDistanceSq) ||
+		compareNumbers(left.item.envCellId, right.item.envCellId) ||
+		compareNumbers(left.nodeIndex, right.nodeIndex)
+	);
+}
+
+function hasEnvCellResidencyGraphSupport(
+	graphEvidence: EnvCellResidencyGraphEvidence,
+): boolean {
+	return (
+		graphEvidence.reciprocalEnvCellPortalRefs > 0 ||
+		graphEvidence.incomingEnvCellPortalRefs > 0 ||
+		graphEvidence.visibleListRefs > 0
+	);
+}
+
+function createEmptyEnvCellResidencyGraphEvidence(): EnvCellResidencyGraphEvidence {
+	return {
+		incomingEnvCellPortalRefs: 0,
+		reciprocalEnvCellPortalRefs: 0,
+		visibleListRefs: 0,
+	};
+}
+
+function incrementEnvCellGraphEvidence(
+	graphEvidenceByEnvCellId: Map<number, EnvCellResidencyGraphEvidence>,
+	envCellId: number,
+	field: keyof EnvCellResidencyGraphEvidence,
+): void {
+	const graphEvidence =
+		graphEvidenceByEnvCellId.get(envCellId) ??
+		createEmptyEnvCellResidencyGraphEvidence();
+	graphEvidenceByEnvCellId.set(envCellId, {
+		...graphEvidence,
+		[field]: graphEvidence[field] + 1,
+	});
+}
+
+function isReciprocalCommittedEnvCellPortal(
+	sourceEnvCellId: number,
+	sourcePortal: EnvCellInteriorPortal,
+	targetPortals: readonly EnvCellInteriorPortal[],
+): boolean {
+	if (sourcePortal.otherPortalId === 0xffff) {
+		return false;
+	}
+	const targetPortal = targetPortals.find(
+		(portal) => portal.sourceIndex === sourcePortal.otherPortalId,
+	);
+	return (
+		targetPortal !== undefined &&
+		!targetPortal.isOutsideTransition &&
+		targetPortal.targetEnvCellId === sourceEnvCellId &&
+		targetPortal.otherPortalId === sourcePortal.sourceIndex
+	);
+}
+
 function createEnvCellStaticObjectBoundsKey(input: {
 	readonly landblockId: number;
 	readonly envCellId: number;
@@ -3129,6 +3334,10 @@ function createCommittedRecordOwnerSortKey(record: unknown): string {
 
 function compareStrings(left: string, right: string): number {
 	return left.localeCompare(right);
+}
+
+function compareNumbers(left: number, right: number): number {
+	return left - right;
 }
 
 function compareNullableNumbers(

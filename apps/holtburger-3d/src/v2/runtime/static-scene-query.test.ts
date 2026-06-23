@@ -853,6 +853,36 @@ describe("V2 static scene query", () => {
 		});
 	});
 
+	it("prefers graph-supported env-cell residency candidates over graph-orphan overlap caps", () => {
+		const query = new StaticSceneQuery();
+		commitLandblockEnvCells(
+			query,
+			createLandblockEnvCellsPayload({
+				envCells: [
+					{
+						cellBsp: createCellBspLeaf(),
+						envCellId: 0xda550100,
+						landblockBounds: createBounds(-4, -4, -8, 4, 4, 4),
+					},
+					{
+						cellBsp: createCellBspLeaf(),
+						envCellId: 0xda550101,
+						landblockBounds: createBounds(-4, -4, -8, 4, 4, 4),
+					},
+				],
+				portalLinks: [createEnvCellPortalLink(0xda550100, 0xda550101)],
+			}),
+		);
+
+		expect(
+			query.queryEnvCellAtPoint({
+				acceptedEnvCellIds: [0xda550100, 0xda550101],
+				landblockId: 0xda55ffff,
+				point: { x: 0, y: 0, z: 0 },
+			}),
+		).toBe(0xda550101);
+	});
+
 	it("uses port BSP planes for env-cell residency refinement", () => {
 		const query = new StaticSceneQuery();
 		commitLandblockEnvCells(
@@ -2191,6 +2221,28 @@ type TestLandblockEnvCell = {
 	readonly localPlacement?: ReturnType<typeof createPlacement>;
 	readonly memberId?: string;
 };
+
+function createEnvCellPortalLink(
+	sourceEnvCellId: number,
+	targetEnvCellId: number,
+): LandblockEnvCellsStaticScopePayload["portalLinks"][number] {
+	return {
+		flags: 0,
+		linkId: `env-cell:${sourceEnvCellId.toString(16)}->${targetEnvCellId.toString(16)}`,
+		polygonId: null,
+		source: {
+			envCellId: sourceEnvCellId,
+			kind: "env-cell",
+			portalId: "portal/00",
+		},
+		sourceIndex: 0,
+		target: {
+			envCellId: targetEnvCellId,
+			kind: "env-cell",
+			portalId: "portal/00",
+		},
+	};
+}
 
 function createCellBspLeaf(): LandblockEnvCellsStaticScopePayload["envCells"][number]["cellBsp"] {
 	return {

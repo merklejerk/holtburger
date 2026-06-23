@@ -1182,14 +1182,16 @@
 		return `${overlap.kind} cells ${overlap.baseOverlapEnvCellIds.length} boundaries ${overlap.boundaries.length} primary ${diagnostics.primaryAcceptedBoundaryCount}/${diagnostics.primaryCandidateCount} one-hop ${diagnostics.oneHopAcceptedBoundaryCount}/${diagnostics.oneHopCandidateCount} seeds ${diagnostics.oneHopSeedEnvCellCount} capped ${diagnostics.oneHopTraversalCapped ? "yes" : "no"}`;
 	}
 
-	function formatPortalCrossingProbe(snapshot: RuntimeSnapshot): string {
+	function formatPortalBaseCompositionDiagnostics(
+		snapshot: RuntimeSnapshot,
+	): string {
 		const plan = snapshot.portalFrameWorkPlan;
 		const renderer = snapshot.renderer;
 		const targets = renderer.sceneDomainTargets;
 		const overlap = snapshot.currentPortalOverlapResidency;
 		const overlapDiagnostics = overlap.diagnostics;
 		if (plan.kind !== "direct-env-cell" || plan.mode !== "portal-projection") {
-			return `probe plan=${plan.kind} residency=${formatCameraResidency(snapshot.currentCameraResidency)} seeded=${targets.exteriorSeededBase} source=${targets.outdoorCrossingSource} colorBase=${targets.envCellOutdoorCrossingColorBase} directDraws=${renderer.directEnvCellDrawCalls}`;
+			return `plan=${plan.kind} residency=${formatCameraResidency(snapshot.currentCameraResidency)} source=${targets.outdoorCrossingSource} colorBase=${targets.envCellOutdoorCrossingColorBase} directDraws=${renderer.directEnvCellDrawCalls}`;
 		}
 		const graph = plan.layeredGraph;
 		const base =
@@ -1221,7 +1223,7 @@
 						`${crossing.crossingId}->${formatHexId(crossing.targetEnvCellId)}`,
 				)
 				.join(",") || "none";
-		return `probe residency=${formatCameraResidency(snapshot.currentCameraResidency)} base=${base} seeded=${targets.exteriorSeededBase} source=${targets.outdoorCrossingSource} colorBase=${targets.envCellOutdoorCrossingColorBase} directDraws=${renderer.directEnvCellDrawCalls} exteriorDraws=${targets.exteriorDrawCalls} suffix=${targets.exteriorSuffixCompositePasses}/${targets.exteriorSuffixCompositeDepth} baseRes=${baseResources} overlapReqExterior=${plan.baseOverlap.requiresExteriorSeed} overlapCells=${overlapCells} renderEntries=${renderEntries} outdoorCrossings=${outdoorCrossings} masks=${graph.maskEdges.length} overlapRuntime=${overlap.kind}:${overlap.baseOverlapEnvCellIds.map(formatHexId).join(",") || "none"} primary=${overlapDiagnostics.primaryAcceptedBoundaryCount}/${overlapDiagnostics.primaryCandidateCount} oneHop=${overlapDiagnostics.oneHopAcceptedBoundaryCount}/${overlapDiagnostics.oneHopCandidateCount}`;
+		return `residency=${formatCameraResidency(snapshot.currentCameraResidency)} base=${base} source=${targets.outdoorCrossingSource} colorBase=${targets.envCellOutdoorCrossingColorBase} directDraws=${renderer.directEnvCellDrawCalls} exteriorDraws=${targets.exteriorDrawCalls} suffix=${targets.exteriorSuffixCompositePasses}/${targets.exteriorSuffixCompositeDepth} baseRes=${baseResources} overlapReqExterior=${plan.baseOverlap.requiresExteriorSeed} overlapCells=${overlapCells} renderEntries=${renderEntries} outdoorCrossings=${outdoorCrossings} masks=${graph.maskEdges.length} overlapRuntime=${overlap.kind}:${overlap.baseOverlapEnvCellIds.map(formatHexId).join(",") || "none"} primary=${overlapDiagnostics.primaryAcceptedBoundaryCount}/${overlapDiagnostics.primaryCandidateCount} oneHop=${overlapDiagnostics.oneHopAcceptedBoundaryCount}/${overlapDiagnostics.oneHopCandidateCount}`;
 	}
 
 	function formatPortalResourceCounts(
@@ -1860,9 +1862,11 @@
 							</dd>
 						</div>
 						<div>
-							<dt>Portal crossing probe</dt>
+							<dt>Portal base composition</dt>
 							<dd>
-								{snapshot ? formatPortalCrossingProbe(snapshot) : "pending"}
+								{snapshot
+									? formatPortalBaseCompositionDiagnostics(snapshot)
+									: "pending"}
 							</dd>
 						</div>
 						<div class="browser-v2__status-row--action">

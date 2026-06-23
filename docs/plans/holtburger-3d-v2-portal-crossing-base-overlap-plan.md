@@ -633,8 +633,8 @@ Decisions and course corrections:
   present, or the exterior suffix composite when retained outdoor projection is needed.
 - Existing outdoor crossing copy passes remain unchanged for this proof, so exterior may still be
   copied again through transition masks after the base surface has already been seeded.
-- Added renderer diagnostics `exteriorSeededBase` for this branch and tests that prove seeded frames
-  copy exterior before direct resource draws while non-straddled suffix frames remain unseeded.
+- Added renderer diagnostics for the seeded branch and tests that prove seeded frames copy exterior
+  before direct resource draws while non-straddled suffix frames remain unseeded.
 - Manual indoor-to-outdoor transition validation found that the seeded branch activates, but the
   later outdoor crossing copy can still overwrite the indoor scene through the same
   near-plane-intersecting transition mask. The current raw-exterior/exterior-suffix split is also
@@ -659,8 +659,8 @@ Deliverables:
   7. copy the selected outdoor composite through those visible aperture pixels.
 - Treat outdoor color as the visual background/fill, then let indoor env-cell geometry own depth
   where it draws. The proof slice does not copy outdoor depth into the env-cell destination.
-- Keep diagnostics that report the selected outdoor source kind, exterior seeded base flag, and
-  whether the env-cell-root outdoor crossing path used outdoor color as its base surface.
+- Keep diagnostics that report the selected outdoor source kind and whether the env-cell-root
+  outdoor crossing path used outdoor color as its base surface.
 
 Likely files:
 
@@ -704,7 +704,7 @@ Acceptance criteria:
   depth-tested outdoor transition copy.
 - Renderer tests prove outdoor-root projection composite behavior still renders through the existing
   outdoor-base path.
-- Browser diagnostics expose selected source, exterior seeded base, and outdoor-color-base state.
+- Browser diagnostics expose selected source and outdoor-color-base state.
 - Manual indoor-to-outdoor repro no longer hollows the building when exterior seeding is active, and
   outdoor terrain depth cannot reject indoor geometry below the outdoor ground surface because it is
   not copied into the env-cell destination.
@@ -733,14 +733,14 @@ Decisions and course corrections:
   selected outdoor composite source. The suffix still depends on raw exterior internally, but
   env-cell crossing composition should not branch on that distinction.
 - User course correction: duplicate-copy suppression is less attractive than making
-  indoor-to-outdoor isomorphic with outdoor-to-indoor. The new model lays down outdoor first, uses
-  the transition aperture as an ownership stencil, draws the resident/base env cell through the
-  inverted stencil, and draws straddled overlap env cells directly so there is no black region when
-  the camera intersects the transition plane.
+  indoor-to-outdoor isomorphic with outdoor-to-indoor. An intermediate ownership-stencil design was
+  considered, then superseded by the final color-base flow: lay down outdoor color first, clear
+  depth/stencil, draw indoor/env-cell geometry normally, then copy outdoor through transition
+  apertures against the accumulated indoor depth.
 - Outdoor depth will not be copied for the proof slice: terrain can be above interior cells, and
   copying outdoor depth into the env-cell destination can reject valid indoor geometry. Indoor
   geometry owns destination depth where it draws.
-- Course correction after visual feedback: building the transition ownership stencil before indoor
+- Course correction after visual feedback: building the transition aperture stencil before indoor
   depth existed made outdoor apertures draw over indoor/env-cell geometry in non-overlap
   indoor-to-outdoor scenes. The corrected path draws indoor/env-cell geometry first, then builds the
   outdoor-transition stencil against the accumulated indoor depth and copies outdoor only through
@@ -750,8 +750,8 @@ Decisions and course corrections:
   outdoor-crossing path now copies selected outdoor color only, clears destination depth/stencil,
   draws resident/base resources, draws base-overlap env cells directly, runs normal masked env-cell
   layers, and then runs `#drawPortalProjectionOutdoorCrossings` against the populated indoor depth.
-- Added `envCellOutdoorCrossingColorBase` renderer diagnostics and surfaced it in the browser portal
-  crossing probe so manual repro captures can show whether the color-base path ran.
+- Added `envCellOutdoorCrossingColorBase` renderer diagnostics and surfaced it in browser base
+  composition diagnostics so manual repro captures can show whether the color-base path ran.
 - Renderer tests now cover raw exterior and exterior suffix selected sources, color-only seeding
   without a destination depth blit, direct base-overlap draw presence, post-indoor outdoor copy, and
   the color-base flag. Outdoor-root projection composite behavior remains on the existing
@@ -775,6 +775,8 @@ Unclosed:
 
 ### Phase 7: Resteer After Visual Proof
 
+Status: complete as of 2026-06-23.
+
 Deliverables:
 
 - Update this document with visual findings from:
@@ -792,16 +794,28 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Capture repro notes for each crossing direction.
-- [ ] Record draw counts and diagnostics for accepted overlap cells.
-- [ ] Decide whether to suppress duplicate masks/crossings later.
-- [ ] Decide whether to broaden the detector beyond camera-eye classification.
+- [x] Capture repro notes for each crossing direction.
+- [x] Record draw counts and diagnostics for accepted overlap cells.
+- [x] Decide whether to suppress duplicate masks/crossings later.
+- [x] Decide whether to broaden the detector beyond camera-eye classification.
 
 Decisions and course corrections:
 
-- Pending.
+- Visual proof is good enough to keep base overlap as the primary solution. Env-cell portal
+  crossings improved substantially, including the one-hop grid-junction follow-up.
+- Outdoor-to-indoor transition crossings are acceptable enough for this phase.
+- Indoor-to-outdoor transition crossings required the Phase 6 correction: seed the env-cell
+  destination with outdoor color only, clear depth/stencil, draw base/overlap env cells with normal
+  depth, then run outdoor transition copies against the accumulated indoor depth.
+- We are not adding mask/crossing suppression now. The current evidence does not justify the added
+  ownership complexity, and leaving existing masked passes unchanged keeps the solution isomorphic
+  across env-cell and outdoor-transition cases.
+- We are not broadening detection beyond camera-eye classification yet. The current result is
+  acceptable enough to move to stabilization; edge cases can be reopened with concrete repros.
 
 ### Phase 8: Stabilization And Cleanup
+
+Status: complete as of 2026-06-23.
 
 Deliverables:
 
@@ -817,14 +831,38 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Remove obsolete nudge terminology from diagnostics/docs.
-- [ ] Add focused regression tests for finalized base-overlap behavior.
-- [ ] Run `cd apps/holtburger-3d && npm run test:ts` for relevant tests at minimum.
-- [ ] Run `cd apps/holtburger-3d && npm run lint:ts`.
+- [x] Remove obsolete nudge terminology from diagnostics/docs.
+- [x] Add focused regression tests for finalized base-overlap behavior.
+- [x] Run `cd apps/holtburger-3d && npm run test:ts` for relevant tests at minimum.
+- [x] Run `cd apps/holtburger-3d && npm run lint:ts`.
 
 Decisions and course corrections:
 
-- Pending.
+- Renamed the browser debug row from `Portal crossing probe` to `Portal base composition`, and
+  removed the `probe` prefix from the formatted diagnostic text. The row now describes the
+  production base-composition state instead of a temporary investigation hook.
+- Kept the historical nudge discussion in this document's rejected-attempt and open-question
+  sections. Those notes are no longer live diagnostics, and retaining them explains why the plan
+  chose base overlap instead of another mask nudge.
+- Hardened the indoor-to-outdoor renderer regression: the exterior color base must not use a
+  framebuffer color or depth blit. The intended path is shader color copy, depth/stencil clear,
+  direct env-cell drawing, then outdoor transition copy against accumulated indoor depth.
+- Removed the older `exteriorSeededBase` renderer diagnostic after Phase 8 review. It had become a
+  duplicate alias for `envCellOutdoorCrossingColorBase`, so keeping both made the snapshot noisier
+  without adding state.
+
+Verification:
+
+- `npm exec vitest -- src/v2/renderer/webgl2/webgl2-renderer.test.ts --run`
+- `npm run lint:ts`
+- `npm run check`
+- `npm run test:ts`
+
+Unclosed:
+
+- Manual visual validation remains the final authority for new portal crossing edge cases. The code
+  and diagnostics are stable enough for now, but unusual transition geometry can still justify a new
+  targeted phase if it produces a concrete repro.
 
 ## Dry Run Summary
 

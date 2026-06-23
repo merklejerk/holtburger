@@ -509,6 +509,7 @@ export interface SceneDomainTargetSnapshot {
 	readonly apertureBatchDrawCalls: number;
 	readonly exteriorSuffixCompositeDepth: number;
 	readonly exteriorSuffixCompositePasses: number;
+	readonly exteriorSeededBase: boolean;
 	readonly exteriorDrawCalls: number;
 	readonly interiorDrawCalls: number;
 	readonly outdoorCrossingSource: "none" | "raw-exterior" | "exterior-suffix";

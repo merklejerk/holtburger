@@ -818,6 +818,7 @@ class Webgl2Renderer implements Renderer {
 	#lastCompositingMode: SceneDomainTargetSnapshot["compositingMode"] = "none";
 	#lastExteriorSuffixCompositeDepth = 0;
 	#lastExteriorSuffixCompositePasses = 0;
+	#lastExteriorSeededBase = false;
 	#lastOutdoorCrossingSource: SceneDomainTargetSnapshot["outdoorCrossingSource"] =
 		"none";
 	#debugOverlayPrimitiveCount = 0;
@@ -1168,6 +1169,7 @@ class Webgl2Renderer implements Renderer {
 		this.#lastCompositingMode = "none";
 		this.#lastExteriorSuffixCompositeDepth = 0;
 		this.#lastExteriorSuffixCompositePasses = 0;
+		this.#lastExteriorSeededBase = false;
 		this.#lastOutdoorCrossingSource = "none";
 
 		const effectiveRenderPassPlan = this.#getEffectiveRenderPassPlan();
@@ -1262,23 +1264,12 @@ class Webgl2Renderer implements Renderer {
 				outdoorCrossingSource === targets.compositePing
 					? targets.compositePong
 					: targets.compositePing;
-			this.#stateCache.bindFramebuffer(destination.framebuffer);
-			this.#stateCache.setViewport({
-				height: destination.height,
-				width: destination.width,
-				x: 0,
-				y: 0,
+			this.#prepareEnvCellOutdoorCrossingDestination({
+				destination,
+				outdoorCrossingSource,
+				pulse,
+				requiresExteriorSeed: plan.baseOverlap.requiresExteriorSeed,
 			});
-			this.#stateCache.setDepthState(createDepthState(gl, true, true));
-			gl.clearColor(0.025 + pulse * 0.015, 0.045, 0.065 + pulse * 0.025, 1);
-			gl.clearDepth(1);
-			gl.clearStencil(0);
-			this.#stateCache.setStencilState(
-				createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
-			);
-			gl.clear(
-				gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT,
-			);
 			const targetAspectRatio =
 				destination.width / Math.max(1, destination.height);
 			this.#lastDirectEnvCellDrawCalls +=
@@ -1810,6 +1801,44 @@ class Webgl2Renderer implements Renderer {
 			}
 		}
 		return drawCalls;
+	}
+
+	#prepareEnvCellOutdoorCrossingDestination(options: {
+		readonly destination: SceneDomainTarget;
+		readonly outdoorCrossingSource: SceneDomainTarget;
+		readonly pulse: number;
+		readonly requiresExteriorSeed: boolean;
+	}): void {
+		const gl = this.#gl;
+		this.#lastExteriorSeededBase = options.requiresExteriorSeed;
+		if (options.requiresExteriorSeed) {
+			this.#copySceneDomainColorAndDepth(
+				options.outdoorCrossingSource,
+				options.destination,
+				{ clearStencil: true, copyStencil: false },
+			);
+			return;
+		}
+		this.#stateCache.bindFramebuffer(options.destination.framebuffer);
+		this.#stateCache.setViewport({
+			height: options.destination.height,
+			width: options.destination.width,
+			x: 0,
+			y: 0,
+		});
+		this.#stateCache.setDepthState(createDepthState(gl, true, true));
+		gl.clearColor(
+			0.025 + options.pulse * 0.015,
+			0.045,
+			0.065 + options.pulse * 0.025,
+			1,
+		);
+		gl.clearDepth(1);
+		gl.clearStencil(0);
+		this.#stateCache.setStencilState(
+			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+		);
+		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
 	}
 
 	#resetDirectPortalDepthForStencilValue(stencilValue: number): void {
@@ -2589,6 +2618,7 @@ class Webgl2Renderer implements Renderer {
 			executedCompositeDepth: this.#lastExecutedCompositeDepth,
 			exteriorSuffixCompositeDepth: this.#lastExteriorSuffixCompositeDepth,
 			exteriorSuffixCompositePasses: this.#lastExteriorSuffixCompositePasses,
+			exteriorSeededBase: this.#lastExteriorSeededBase,
 			exteriorDrawCalls: this.#lastExteriorSceneDomainDrawCalls,
 			height: this.#sceneDomainTargets?.height ?? 0,
 			interiorDrawCalls: this.#lastInteriorSceneDomainDrawCalls,

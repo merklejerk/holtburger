@@ -1209,6 +1209,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			exteriorDrawCalls: 1,
 			exteriorSuffixCompositeDepth: 1,
 			exteriorSuffixCompositePasses: 1,
+			exteriorSeededBase: false,
 			outdoorCrossingSource: "exterior-suffix",
 		});
 		expect(latestSnapshot.directEnvCellDrawCalls).toBe(2);
@@ -1229,6 +1230,119 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		);
 		expect(gl.enabledCapabilities).toContain(gl.CULL_FACE);
 		expect(gl.cullFaceModes).toContain(gl.BACK);
+
+		renderer.dispose();
+	});
+
+	it("seeds env-cell outdoor crossing destinations from exterior when straddled", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+
+		renderer.setTerrainLayer(
+			0xda55ffff,
+			createTerrainLayerPayload("terrain-a"),
+		);
+		renderer.setEnvCellSystemLayer(
+			0xda55ffff,
+			createEnvCellSystemLayerPayload({
+				structuredInteriorDrawUnits: [
+					createStructuredInteriorDrawUnit({
+						drawUnitId: "structured-root",
+						envCellId: 0xda550100,
+					}),
+				],
+				portalApertureResources: [
+					createPortalApertureResource({
+						apertureResourceId: "portal-aperture-resource:transition:test",
+						ranges: [
+							{
+								rangeId: "transition-aperture:root",
+								sourceId:
+									"building-transition:portal-aperture-resource:da55ffff:transition-portal:0",
+								sourceKind: "building-transition",
+							},
+						],
+						sourceDomain: "outdoor-buildings",
+					}),
+				],
+			}),
+		);
+		renderer.setPortalFrameWorkPlan(
+			createDirectEnvCellPortalFrameWorkPlan({
+				baseOverlap: {
+					diagnostics: {
+						envCellCount: 0,
+						missingResourceEnvCellCount: 0,
+					},
+					envCells: [],
+					overlapSignature: "exterior-seed-test",
+					requiresExteriorSeed: true,
+				},
+				baseScene: {
+					envCellId: 0xda550100,
+					kind: "env-cell-direct",
+					landblockId: 0xda55ffff,
+				},
+				nodes: [
+					{
+						debugStackLabel: "root",
+						incomingEdgeIds: [],
+						nodeId: 0,
+						parentNodeId: null,
+						resources: {
+							envCellStaticObjectDrawUnitIds: [],
+							resourceState: "ready",
+							structuredInteriorDrawUnitIds: ["structured-root"],
+						},
+						scene: {
+							envCellId: 0xda550100,
+							kind: "env-cell-direct",
+							landblockId: 0xda55ffff,
+						},
+						traversalDepth: 0,
+					},
+				],
+				outdoorCrossings: [
+					{
+						apertureRangeId: "transition-aperture:root",
+						apertureSourceId:
+							"building-transition:portal-aperture-resource:da55ffff:transition-portal:0",
+						crossingId: 0,
+						linkId: "transition-root",
+						outdoorLandblockId: 0xda55ffff,
+						targetEnvCellId: 0xda550100,
+					},
+				],
+			}),
+		);
+
+		gl.drawArraysCalls.length = 0;
+		gl.drawElementsCalls.length = 0;
+		pendingFrame?.(16);
+
+		const latestSnapshot = renderer.createDiagnosticsSnapshot();
+		expect(latestSnapshot.sceneDomainTargets).toMatchObject({
+			active: true,
+			exteriorSeededBase: true,
+			outdoorCrossingSource: "raw-exterior",
+		});
+		const firstSourceCopyOrder = vi.mocked(gl.drawArrays).mock
+			.invocationCallOrder[0];
+		const lastResourceDrawOrder = vi.mocked(gl.drawElements).mock
+			.invocationCallOrder.at(-1);
+		expect(firstSourceCopyOrder).toBeLessThan(lastResourceDrawOrder ?? 0);
+		expect(gl.blitFramebufferCalls).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ mask: gl.DEPTH_BUFFER_BIT }),
+			]),
+		);
 
 		renderer.dispose();
 	});

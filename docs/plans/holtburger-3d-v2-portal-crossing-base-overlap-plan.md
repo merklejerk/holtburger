@@ -350,12 +350,14 @@ Dry-run notes:
   path.
 - Do not remove overlap env cells from existing render entries or outdoor crossings.
 - Do not filter mask edges in this phase.
-- Include the discrete overlap signature in portal frame-work plan invalidation/equality, but do not
-  include continuous camera coordinates. If the signature is unchanged, the plan can be reused while
-  the camera moves within the same straddled boundary set.
-- Keep static projection graph caching keyed by static inputs. Attach base-overlap data from
-  `RuntimePortalOverlapResidency` after retrieving the cached static projection graph, or split the
-  cache into static graph and dynamic frame-work wrapper layers.
+- Include the discrete overlap signature in `PortalFramePlanKey` and portal frame-work equality, the
+  same way the existing key already includes discrete camera-derived residency such as env-cell id
+  or outdoor landblock id.
+- Do not include continuous camera coordinates. If the signature is unchanged, the plan can be
+  reused while the camera moves within the same straddled boundary set.
+- Keep the existing static projection caches unchanged. They already cache static projection records
+  by static source inputs; the runtime plan key should describe the enriched residency state that
+  consumes those records.
 
 Acceptance criteria:
 
@@ -369,8 +371,8 @@ Acceptance criteria:
 Task checklist:
 
 - [ ] Add renderer types for base-overlap plan data.
-- [ ] Add overlap signature handling to runtime plan invalidation/equality.
-- [ ] Layer overlap onto cached static portal graphs using `RuntimePortalOverlapResidency`.
+- [ ] Add overlap signature handling to `PortalFramePlanKey` and portal frame-work equality.
+- [ ] Derive base-overlap frame-plan data from `RuntimePortalOverlapResidency`.
 - [ ] Resolve overlap env-cell resources from membership.
 - [ ] Add deterministic sorting and dedupe.
 - [ ] Add frame-plan tests for env-cell and building-transition overlap data.
@@ -559,12 +561,11 @@ Why this is viable in the current code:
   portal plan derivation. Base-overlap draw resources are derived from that state; the renderer only
   consumes the planned result.
 
-- **Do not bake continuous camera pose into `PortalFramePlanKey`.**  
-  The existing cache key tracks static projection inputs: residency/root, generation ids, max depth,
-  retained source key, and render anchor. Adding raw camera coordinates to that key would thrash the
-  static portal-plan cache. Better shape: give overlap residency a stable signature and use that
-  signature for portal frame-work invalidation/equality while keeping static projection graph caches
-  keyed by static inputs.
+- **Augment the existing residency-based cache key.**  
+  The existing runtime plan key is already driven by discrete camera-derived residency: env-cell id
+  or outdoor landblock id. Portal overlap should follow the same pattern. Add a stable
+  `portalOverlapSignature` to `PortalFramePlanKey` and equality, but never add raw camera
+  coordinates. The static projection caches stay unchanged.
 
 - **Aperture CPU geometry must come from committed static data, not renderer resources.**  
   `StaticPortalApertureResource` already stores landblock-render-local vertices, indices, and

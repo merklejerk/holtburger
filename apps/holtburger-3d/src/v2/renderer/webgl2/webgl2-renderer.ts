@@ -819,7 +819,6 @@ class Webgl2Renderer implements Renderer {
 	#lastExteriorSuffixCompositeDepth = 0;
 	#lastExteriorSuffixCompositePasses = 0;
 	#lastEnvCellOutdoorCrossingColorBase = false;
-	#lastExteriorSeededBase = false;
 	#lastOutdoorCrossingSource: SceneDomainTargetSnapshot["outdoorCrossingSource"] =
 		"none";
 	#debugOverlayPrimitiveCount = 0;
@@ -1171,7 +1170,6 @@ class Webgl2Renderer implements Renderer {
 		this.#lastExteriorSuffixCompositeDepth = 0;
 		this.#lastExteriorSuffixCompositePasses = 0;
 		this.#lastEnvCellOutdoorCrossingColorBase = false;
-		this.#lastExteriorSeededBase = false;
 		this.#lastOutdoorCrossingSource = "none";
 
 		const effectiveRenderPassPlan = this.#getEffectiveRenderPassPlan();
@@ -1861,7 +1859,6 @@ class Webgl2Renderer implements Renderer {
 	}): void {
 		const gl = this.#gl;
 		this.#lastEnvCellOutdoorCrossingColorBase = true;
-		this.#lastExteriorSeededBase = true;
 		this.#copySceneDomainColorOnly(
 			options.outdoorCompositeSource,
 			options.destination,
@@ -2659,7 +2656,6 @@ class Webgl2Renderer implements Renderer {
 				this.#lastEnvCellOutdoorCrossingColorBase,
 			exteriorSuffixCompositeDepth: this.#lastExteriorSuffixCompositeDepth,
 			exteriorSuffixCompositePasses: this.#lastExteriorSuffixCompositePasses,
-			exteriorSeededBase: this.#lastExteriorSeededBase,
 			exteriorDrawCalls: this.#lastExteriorSceneDomainDrawCalls,
 			height: this.#sceneDomainTargets?.height ?? 0,
 			interiorDrawCalls: this.#lastInteriorSceneDomainDrawCalls,

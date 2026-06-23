@@ -1210,7 +1210,6 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			exteriorSuffixCompositeDepth: 1,
 			exteriorSuffixCompositePasses: 1,
 			envCellOutdoorCrossingColorBase: true,
-			exteriorSeededBase: true,
 			outdoorCrossingSource: "exterior-suffix",
 		});
 		expect(latestSnapshot.directEnvCellDrawCalls).toBe(2);
@@ -1352,7 +1351,6 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		expect(latestSnapshot.sceneDomainTargets).toMatchObject({
 			active: true,
 			envCellOutdoorCrossingColorBase: true,
-			exteriorSeededBase: true,
 			outdoorCrossingSource: "raw-exterior",
 		});
 		expect(latestSnapshot.directEnvCellDrawCalls).toBe(2);
@@ -1367,6 +1365,11 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		expect(gl.blitFramebufferCalls).not.toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ mask: gl.DEPTH_BUFFER_BIT }),
+			]),
+		);
+		expect(gl.blitFramebufferCalls).not.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ mask: gl.COLOR_BUFFER_BIT }),
 			]),
 		);
 		expect(gl.stencilFuncCalls).toEqual(

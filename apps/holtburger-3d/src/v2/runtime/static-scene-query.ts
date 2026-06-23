@@ -11,6 +11,7 @@ import type {
 	StaticPortalProjectionRecord,
 	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
+	StaticPortalApertureResource,
 	StaticScopePayload,
 	StaticSourceMappingRecord,
 	StaticSpatialRecord,
@@ -870,6 +871,15 @@ export class StaticSceneQuery {
 	queryEnvCellSystemLayers(): readonly EnvCellSystemLayerPayload[] {
 		return [...this.#envCellSystemLayersByLandblockId.values()].sort(
 			(left, right) => left.landblockId - right.landblockId,
+		);
+	}
+
+	queryPortalApertureResources(options: {
+		readonly landblockId: number;
+	}): readonly StaticPortalApertureResource[] {
+		return (
+			this.#envCellSystemLayersByLandblockId.get(options.landblockId >>> 0)
+				?.portalApertureResources ?? []
 		);
 	}
 

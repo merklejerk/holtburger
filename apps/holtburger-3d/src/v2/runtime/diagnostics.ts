@@ -23,6 +23,7 @@ import type {
 	TextureWrapMode,
 } from "../textures/sampling-policy";
 import type { StaticSceneCameraResidency } from "./static-scene-query";
+import type { RuntimePortalOverlapResidency } from "./portal-base-overlap";
 
 export interface RuntimeDiagnostics {
 	warn(event: RuntimeWarningEvent): void;
@@ -39,6 +40,7 @@ interface RuntimeDiagnosticsRuntimeSummary {
 	readonly textureFilteringMode: TextureFilteringMode;
 	readonly sceneInterest: string | null;
 	readonly currentCameraResidency: StaticSceneCameraResidency;
+	readonly currentPortalOverlapResidency: RuntimePortalOverlapResidency;
 	readonly renderPassPlan: RenderPassPlan;
 	readonly portalFrameWorkPlan: PortalFrameWorkPlan;
 	readonly pendingStaticMaterializationRevisions: readonly number[];

@@ -577,6 +577,8 @@ Decisions and course corrections:
 
 ### Phase 5: Exterior-Seeded Indoor-To-Outdoor Straddles
 
+Status: implementation complete as of 2026-06-23; manual indoor-to-outdoor validation pending.
+
 Deliverables:
 
 - When an env-cell-root frame has an accepted building-transition straddle to outdoor, seed the
@@ -612,15 +614,28 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add a frame-plan flag for exterior-seeded base surfaces.
-- [ ] Branch env-cell-root outdoor crossing path on that flag.
-- [ ] Copy outdoor crossing source color/depth into destination instead of clearing when selected.
-- [ ] Draw base and overlap env cells into the exterior-seeded destination.
-- [ ] Keep outdoor crossing copy pass unchanged for proof.
+- [x] Add a frame-plan flag for exterior-seeded base surfaces.
+- [x] Branch env-cell-root outdoor crossing path on that flag.
+- [x] Copy outdoor crossing source color/depth into destination instead of clearing when selected.
+- [x] Draw base and overlap env cells into the exterior-seeded destination.
+- [x] Keep outdoor crossing copy pass unchanged for proof.
 
 Decisions and course corrections:
 
-- Pending.
+- Reused `PortalBaseOverlapPlan.requiresExteriorSeed` as the frame-plan flag instead of adding a
+  second renderer-specific flag. It already captures the straddled indoor-to-outdoor transition
+  condition from runtime overlap residency.
+- Env-cell-root frames with outdoor crossings now prepare the working destination through a single
+  helper. Non-straddled frames keep the old clear-to-background behavior. Straddled frames copy the
+  selected outdoor crossing source color/depth into the destination before direct env-cell and
+  base-overlap resources draw.
+- The outdoor crossing source is unchanged: raw exterior when no exterior suffix composite is
+  present, or the exterior suffix composite when retained outdoor projection is needed.
+- Existing outdoor crossing copy passes remain unchanged for this proof, so exterior may still be
+  copied again through transition masks after the base surface has already been seeded.
+- Added renderer diagnostics `exteriorSeededBase` for this branch and tests that prove seeded frames
+  copy exterior before direct resource draws while non-straddled suffix frames remain unseeded.
+- Manual indoor-to-outdoor transition validation remains pending.
 
 ### Phase 6: Resteer After Visual Proof
 

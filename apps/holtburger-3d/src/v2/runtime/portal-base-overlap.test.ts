@@ -178,6 +178,170 @@ describe("portal base overlap residency", () => {
 		expect(second.signature).toBe(first.signature);
 	});
 
+	it("accepts one-hop env-cell overlap through a first-pass neighbor", () => {
+		const overlap = deriveRuntimePortalOverlapResidency({
+			aperturePadding: 0,
+			envCellResourceMembership: [
+				createEnvCellMembership(0xda550101),
+				createEnvCellMembership(0xda550102),
+			],
+			frameState: createFrameState([0, 0, 0.1]),
+			planeEpsilon: 0.25,
+			portalApertureResources: [createPortalApertureResource()],
+			projection: createProjectionRecord({
+				edges: [
+					createProjectionEdge({
+						edgeId: "edge-a-b",
+						sourceEnvCellId: 0xda550100,
+						sourceKind: "env-cell-portal",
+						targetEnvCellId: 0xda550101,
+					}),
+					createProjectionEdge({
+						edgeId: "edge-b-c",
+						sourceEnvCellId: 0xda550101,
+						sourceKind: "env-cell-portal",
+						targetEnvCellId: 0xda550102,
+					}),
+				],
+				root: {
+					envCellId: 0xda550100,
+					kind: "env-cell-root",
+					landblockId: 0xda55ffff,
+					rootNodeId: "env-cell:root",
+				},
+			}),
+			renderAnchorLandblockId: null,
+			residency: {
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+		});
+
+		expect(overlap.kind).toBe("portal-overlap");
+		expect(overlap.baseOverlapEnvCellIds).toEqual([0xda550101, 0xda550102]);
+		expect(overlap.boundaries.map((boundary) => boundary.boundaryId)).toEqual([
+			"edge-a-b",
+			"edge-b-c",
+		]);
+		expect(overlap.diagnostics).toMatchObject({
+			oneHopAcceptedBoundaryCount: 1,
+			oneHopCandidateCount: 1,
+			oneHopSeedEnvCellCount: 1,
+			oneHopTraversalCapped: true,
+			primaryAcceptedBoundaryCount: 1,
+			primaryCandidateCount: 1,
+		});
+	});
+
+	it("does not traverse beyond one extra env-cell hop", () => {
+		const overlap = deriveRuntimePortalOverlapResidency({
+			aperturePadding: 0,
+			envCellResourceMembership: [
+				createEnvCellMembership(0xda550101),
+				createEnvCellMembership(0xda550102),
+				createEnvCellMembership(0xda550103),
+			],
+			frameState: createFrameState([0, 0, 0.1]),
+			planeEpsilon: 0.25,
+			portalApertureResources: [createPortalApertureResource()],
+			projection: createProjectionRecord({
+				edges: [
+					createProjectionEdge({
+						edgeId: "edge-a-b",
+						sourceEnvCellId: 0xda550100,
+						sourceKind: "env-cell-portal",
+						targetEnvCellId: 0xda550101,
+					}),
+					createProjectionEdge({
+						edgeId: "edge-b-c",
+						sourceEnvCellId: 0xda550101,
+						sourceKind: "env-cell-portal",
+						targetEnvCellId: 0xda550102,
+					}),
+					createProjectionEdge({
+						edgeId: "edge-c-d",
+						sourceEnvCellId: 0xda550102,
+						sourceKind: "env-cell-portal",
+						targetEnvCellId: 0xda550103,
+					}),
+				],
+				root: {
+					envCellId: 0xda550100,
+					kind: "env-cell-root",
+					landblockId: 0xda55ffff,
+					rootNodeId: "env-cell:root",
+				},
+			}),
+			renderAnchorLandblockId: null,
+			residency: {
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+		});
+
+		expect(overlap.baseOverlapEnvCellIds).toEqual([0xda550101, 0xda550102]);
+		expect(overlap.boundaries.map((boundary) => boundary.boundaryId)).toEqual([
+			"edge-a-b",
+			"edge-b-c",
+		]);
+	});
+
+	it("rejects one-hop reverse edges back to the current env cell", () => {
+		const overlap = deriveRuntimePortalOverlapResidency({
+			aperturePadding: 0,
+			envCellResourceMembership: [
+				createEnvCellMembership(0xda550101),
+				createEnvCellMembership(0xda550102),
+			],
+			frameState: createFrameState([0, 0, 0.1]),
+			planeEpsilon: 0.25,
+			portalApertureResources: [createPortalApertureResource()],
+			projection: createProjectionRecord({
+				edges: [
+					createProjectionEdge({
+						edgeId: "edge-a-b",
+						sourceEnvCellId: 0xda550100,
+						sourceKind: "env-cell-portal",
+						targetEnvCellId: 0xda550101,
+					}),
+					createProjectionEdge({
+						edgeId: "edge-b-a",
+						sourceEnvCellId: 0xda550101,
+						sourceKind: "env-cell-portal",
+						targetEnvCellId: 0xda550100,
+					}),
+					createProjectionEdge({
+						edgeId: "edge-b-c",
+						sourceEnvCellId: 0xda550101,
+						sourceKind: "env-cell-portal",
+						targetEnvCellId: 0xda550102,
+					}),
+				],
+				root: {
+					envCellId: 0xda550100,
+					kind: "env-cell-root",
+					landblockId: 0xda55ffff,
+					rootNodeId: "env-cell:root",
+				},
+			}),
+			renderAnchorLandblockId: null,
+			residency: {
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+		});
+
+		expect(overlap.baseOverlapEnvCellIds).toEqual([0xda550101, 0xda550102]);
+		expect(overlap.boundaries.map((boundary) => boundary.boundaryId)).toEqual([
+			"edge-a-b",
+			"edge-b-c",
+		]);
+		expect(overlap.diagnostics.oneHopCandidateCount).toBe(1);
+	});
+
 	it("accepts an outdoor building transition aperture", () => {
 		const overlap = deriveRuntimePortalOverlapResidency({
 			aperturePadding: 0,

@@ -13,6 +13,7 @@ import {
 } from "../types";
 import type {
 	EnvCellSystemLayerPayload,
+	PortalBaseOverlapPlan,
 	PortalFrameWorkPlan,
 	TerrainLayerPayload,
 } from "../types";
@@ -603,6 +604,157 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
+	it("draws base-overlap env cells before portal layer masks", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+
+		renderer.setEnvCellSystemLayer(
+			0xda55ffff,
+			createEnvCellSystemLayerPayload({
+				structuredInteriorDrawUnits: [
+					createStructuredInteriorDrawUnit({
+						drawUnitId: "structured-root",
+						envCellId: 0xda550100,
+					}),
+					createStructuredInteriorDrawUnit({
+						drawUnitId: "structured-overlap",
+						envCellId: 0xda550102,
+					}),
+					createStructuredInteriorDrawUnit({
+						drawUnitId: "structured-child",
+						envCellId: 0xda550101,
+					}),
+				],
+				portalApertureResources: [
+					createPortalApertureResource({
+						apertureResourceId: "portal-aperture-resource:a-to-b",
+						ranges: [
+							{
+								rangeId: "portal-aperture:a-to-b",
+								sourceId: "env-cell-portal:0xda550100:a-to-b",
+								sourceKind: "env-cell-portal",
+							},
+						],
+						sourceDomain: "env-cells",
+					}),
+				],
+			}),
+		);
+		renderer.setPortalFrameWorkPlan(
+			createDirectEnvCellPortalFrameWorkPlan({
+				apertureResources: [
+					{
+						resourceId: "portal-aperture:a-to-b",
+						sourceKinds: ["env-cell-portal"],
+					},
+				],
+				baseOverlap: {
+					diagnostics: {
+						envCellCount: 1,
+						missingResourceEnvCellCount: 0,
+					},
+					envCells: [
+						{
+							envCellId: 0xda550102,
+							landblockId: 0xda55ffff,
+							reasons: [
+								{
+									apertureRangeId: "portal-aperture:overlap",
+									kind: "env-cell-portal",
+								},
+							],
+							resources: {
+								envCellStaticObjectDrawUnitIds: [],
+								resourceState: "ready",
+								structuredInteriorDrawUnitIds: ["structured-overlap"],
+							},
+						},
+					],
+					overlapSignature: "overlap-test",
+					requiresExteriorSeed: false,
+				},
+				baseScene: {
+					envCellId: 0xda550100,
+					kind: "env-cell-direct",
+					landblockId: 0xda55ffff,
+				},
+				edges: [
+					{
+						apertureRangeId: "portal-aperture:a-to-b",
+						apertureSourceId: "env-cell-portal:0xda550100:a-to-b",
+						childNodeId: 1,
+						edgeId: 0,
+						linkId: "a-to-b",
+						parentNodeId: 0,
+						sourceKind: "env-cell-portal",
+					},
+				],
+				nodes: [
+					{
+						debugStackLabel: "root",
+						incomingEdgeIds: [],
+						nodeId: 0,
+						parentNodeId: null,
+						resources: {
+							envCellStaticObjectDrawUnitIds: [],
+							resourceState: "ready",
+							structuredInteriorDrawUnitIds: ["structured-root"],
+						},
+						scene: {
+							envCellId: 0xda550100,
+							kind: "env-cell-direct",
+							landblockId: 0xda55ffff,
+						},
+						traversalDepth: 0,
+					},
+					{
+						debugStackLabel: "root/a-to-b",
+						incomingEdgeIds: [0],
+						nodeId: 1,
+						parentNodeId: 0,
+						resources: {
+							envCellStaticObjectDrawUnitIds: [],
+							resourceState: "ready",
+							structuredInteriorDrawUnitIds: ["structured-child"],
+						},
+						scene: {
+							envCellId: 0xda550101,
+							kind: "env-cell-direct",
+							landblockId: 0xda55ffff,
+						},
+						traversalDepth: 1,
+					},
+				],
+			}),
+		);
+
+		gl.drawArraysCalls.length = 0;
+		gl.drawElementsCalls.length = 0;
+		pendingFrame?.(16);
+
+		const firstMaskDrawOrder = vi.mocked(gl.drawArrays).mock
+			.invocationCallOrder[0];
+		if (firstMaskDrawOrder === undefined) {
+			throw new Error("Expected a portal mask draw.");
+		}
+		const drawElementsBeforeMask = vi
+			.mocked(gl.drawElements)
+			.mock.invocationCallOrder.filter(
+				(drawOrder) => drawOrder < firstMaskDrawOrder,
+			).length;
+		expect(drawElementsBeforeMask).toBe(3);
+		expect(renderer.createDiagnosticsSnapshot().directEnvCellDrawCalls).toBe(3);
+
+		renderer.dispose();
+	});
+
 	it("executes outdoor-target transition masks through direct env-cell draws", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
@@ -746,6 +898,144 @@ describe("V2 WebGL2 structured interior rendering", () => {
 				}),
 			]),
 		);
+
+		renderer.dispose();
+	});
+
+	it("draws outdoor-root base-overlap env cells before transition masks", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+
+		renderer.setTerrainLayer(
+			0xda55ffff,
+			createTerrainLayerPayload("terrain-a"),
+		);
+		renderer.setEnvCellSystemLayer(
+			0xda55ffff,
+			createEnvCellSystemLayerPayload({
+				structuredInteriorDrawUnits: [
+					createStructuredInteriorDrawUnit({
+						drawUnitId: "structured-overlap",
+						envCellId: 0xda550102,
+					}),
+					createStructuredInteriorDrawUnit({
+						drawUnitId: "structured-transition-root",
+						envCellId: 0xda550100,
+					}),
+				],
+				portalApertureResources: [
+					createPortalApertureResource({
+						apertureResourceId: "portal-aperture-resource:transition:test",
+						ranges: [
+							{
+								rangeId: "transition-aperture:root",
+								sourceId:
+									"building-transition:portal-aperture-resource:da55ffff:transition-portal:0",
+								sourceKind: "building-transition",
+							},
+						],
+						sourceDomain: "outdoor-buildings",
+					}),
+				],
+			}),
+		);
+		renderer.setPortalFrameWorkPlan(
+			createDirectEnvCellPortalFrameWorkPlan({
+				apertureResources: [
+					{
+						resourceId: "transition-aperture:root",
+						sourceKinds: ["building-transition"],
+					},
+				],
+				baseOverlap: {
+					diagnostics: {
+						envCellCount: 1,
+						missingResourceEnvCellCount: 0,
+					},
+					envCells: [
+						{
+							envCellId: 0xda550102,
+							landblockId: 0xda55ffff,
+							reasons: [
+								{
+									apertureRangeId: "transition-aperture:root",
+									kind: "building-transition",
+								},
+							],
+							resources: {
+								envCellStaticObjectDrawUnitIds: [],
+								resourceState: "ready",
+								structuredInteriorDrawUnitIds: ["structured-overlap"],
+							},
+						},
+					],
+					overlapSignature: "outdoor-overlap-test",
+					requiresExteriorSeed: false,
+				},
+				baseScene: {
+					kind: "outdoor-target",
+					landblockId: 0xda55ffff,
+				},
+				edges: [
+					{
+						apertureRangeId: "transition-aperture:root",
+						apertureSourceId:
+							"building-transition:portal-aperture-resource:da55ffff:transition-portal:0",
+						childNodeId: 1,
+						edgeId: 0,
+						linkId: "transition-root",
+						parentNodeId: 0,
+						sourceKind: "building-transition",
+					},
+				],
+				nodes: [
+					{
+						debugStackLabel: "outdoor-root",
+						incomingEdgeIds: [],
+						nodeId: 0,
+						parentNodeId: null,
+						resources: {
+							envCellStaticObjectDrawUnitIds: [],
+							resourceState: "not-applicable",
+							structuredInteriorDrawUnitIds: [],
+						},
+						scene: {
+							kind: "outdoor-target",
+							landblockId: 0xda55ffff,
+						},
+						traversalDepth: 0,
+					},
+					{
+						debugStackLabel: "transition-root",
+						incomingEdgeIds: [0],
+						nodeId: 1,
+						parentNodeId: 0,
+						resources: {
+							envCellStaticObjectDrawUnitIds: [],
+							resourceState: "ready",
+							structuredInteriorDrawUnitIds: ["structured-transition-root"],
+						},
+						scene: {
+							envCellId: 0xda550100,
+							kind: "env-cell-direct",
+							landblockId: 0xda55ffff,
+						},
+						traversalDepth: 1,
+					},
+				],
+			}),
+		);
+
+		pendingFrame?.(16);
+
+		expect(renderer.createDiagnosticsSnapshot().directEnvCellDrawCalls).toBe(2);
 
 		renderer.dispose();
 	});
@@ -1563,6 +1853,7 @@ function createDirectEnvCellPortalFrameWorkPlan(options: {
 				readonly envCellId: number;
 		  };
 	readonly apertureResources?: DirectEnvCellFixtureApertureResource[];
+	readonly baseOverlap?: PortalBaseOverlapPlan;
 	readonly diagnostics?: ReturnType<typeof emptyPortalApertureDiagnostics>;
 	readonly edges?: DirectEnvCellFixtureEdge[];
 	readonly exteriorComposite?: Extract<
@@ -1638,6 +1929,7 @@ function createDirectEnvCellPortalFrameWorkPlan(options: {
 			renderLayer,
 		}));
 	return {
+		baseOverlap: options.baseOverlap ?? createEmptyPortalBaseOverlapPlan(),
 		kind: "direct-env-cell",
 		layeredGraph: {
 			apertureResources: options.apertureResources ?? [],
@@ -1700,6 +1992,18 @@ function createDirectEnvCellPortalFrameWorkPlan(options: {
 			? { exteriorComposite: options.exteriorComposite }
 			: {}),
 		mode: "portal-projection",
+	};
+}
+
+function createEmptyPortalBaseOverlapPlan(): PortalBaseOverlapPlan {
+	return {
+		diagnostics: {
+			envCellCount: 0,
+			missingResourceEnvCellCount: 0,
+		},
+		envCells: [],
+		overlapSignature: "none",
+		requiresExteriorSeed: false,
 	};
 }
 

@@ -417,9 +417,11 @@ Decisions and course corrections:
 - Browser debug frame-plan summary now reports base-overlap cell count, missing overlap resources,
   exterior-seed requirement, and overlap signature.
 - Phase 2 intentionally still does not draw overlap resources or seed indoor-to-outdoor exterior
-  surfaces. Those are Phase 3 and Phase 4 respectively.
+  surfaces. Those are Phase 3 and Phase 5 respectively.
 
 ### Phase 3: Draw Base-Overlap Env Cells In Existing Paths
+
+Status: implementation complete as of 2026-06-23; manual visual validation pending.
 
 Deliverables:
 
@@ -453,18 +455,114 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Split `#drawPortalProjectionFrameResources` into explicit base-resource and masked-layer
+- [x] Split `#drawPortalProjectionFrameResources` into explicit base-resource and masked-layer
       helpers.
-- [ ] Add `#drawPortalBaseOverlapEnvCells`.
-- [ ] Insert overlap draw in ordinary env-cell and outdoor-root paths.
-- [ ] Verify depth state is normal before and after overlap draws.
-- [ ] Add renderer pass-order tests.
+- [x] Add `#drawPortalBaseOverlapEnvCells`.
+- [x] Insert overlap draw in ordinary env-cell and outdoor-root paths.
+- [x] Verify depth state is normal before and after overlap draws.
+- [x] Add renderer pass-order tests.
 
 Decisions and course corrections:
 
-- Pending.
+- Split direct portal drawing into base-resource, base-overlap, and masked-layer helpers. The draw
+  order is now explicit: base resources, overlap env-cell resources, then existing aperture-mask
+  layers.
+- `PortalBaseOverlapEnvCellPlan.resources` are drawn through the existing
+  `#drawPortalFrameResourceSet` path, so overlap draws use the same static-object and structured
+  interior material/depth behavior as ordinary direct env-cell resources.
+- Outdoor-root projection composites now preserve the active `PortalBaseOverlapPlan` instead of
+  passing only the projection graph. Exterior suffix helper composites intentionally receive an
+  empty overlap plan because they are not the active camera base surface.
+- Existing portal masks, masked layer rendering, and outdoor crossing copies remain unchanged.
+- Added renderer tests for ordinary env-cell pass ordering and outdoor-root overlap propagation.
+- Manual visual validation is still pending. This phase proves renderer pass order in tests, but it
+  does not prove the black wedge is gone in live inside-inside or outdoor-to-indoor repros.
 
-### Phase 4: Exterior-Seeded Indoor-To-Outdoor Straddles
+### Phase 4: One-Hop Env-Cell Overlap Closure
+
+Deliverables:
+
+- Extend env-cell portal overlap detection to evaluate straddled portals attached to the immediate
+  overlap env cells discovered from the canonical current env cell.
+- Keep the closure strictly one env-cell hop beyond the canonical current env cell.
+- Add diagnostics for seed env-cell count, one-hop candidate count, accepted one-hop cells, and
+  whether the one-hop cap was reached.
+- Add explicit runtime overlap diagnostics:
+  - primary candidate count,
+  - primary accepted boundary count,
+  - one-hop seed env-cell count,
+  - one-hop candidate count,
+  - one-hop accepted boundary count,
+  - one-hop traversal capped flag.
+- Preserve the existing overlap signature model by including newly accepted one-hop boundaries and
+  target env-cell ids.
+- Add focused synthetic tests for a four-cell junction where the canonical current cell sees only
+  part of the straddled neighborhood.
+
+Likely files:
+
+- `apps/holtburger-3d/src/v2/runtime/portal-base-overlap.ts`
+- `apps/holtburger-3d/src/v2/runtime/portal-base-overlap.test.ts`
+- `apps/holtburger-3d/src/v2/runtime/diagnostics.ts`
+- `apps/holtburger-3d/src/pages/BrowserWorldDisplayV2.svelte`
+
+Dry-run notes:
+
+- This is not general portal visibility traversal. The detector should only run a second pass over
+  env cells already accepted by the first pass from the canonical current env cell.
+- Implementation should split the current candidate/classification flow into:
+  - `createPrimaryPortalOverlapCandidates`,
+  - `classifyPortalOverlapCandidates`,
+  - `createOneHopEnvCellPortalCandidates`.
+- The second pass should evaluate portals whose `sourceEnvCellId` is one of those first-pass overlap
+  env cells, using the same camera-eye plane slab and projected aperture bounds.
+- The second pass should explicitly reject reverse edges whose `targetEnvCellId` is the canonical
+  current env cell. We want missing neighboring cells, not the current cell re-added as overlap.
+- Do not recursively evaluate env cells accepted by the second pass. The cap is intentionally fixed
+  at one extra env-cell hop to cover junctions without expanding into full graph search.
+- Outdoor building-transition overlap remains governed by the current outdoor/transition rules in
+  this phase. Keep this phase focused on env-cell-to-env-cell junction closure.
+- Do not seed one-hop closure from building-transition boundaries.
+- Stable sorting and dedupe should make a one-hop accepted cell indistinguishable from a first-pass
+  cell to later frame-plan and renderer phases, except for diagnostics/reasons.
+
+Acceptance criteria:
+
+- Synthetic tests prove a four-cell junction can accept the missing adjacent env cell through a
+  first-pass neighbor's straddled portal.
+- Tests prove the detector does not traverse beyond one extra env-cell hop.
+- Tests prove reverse edges back to the canonical current env cell are not emitted as base-overlap
+  cells.
+- The overlap signature changes when the one-hop accepted set changes and remains stable under
+  continuous camera movement inside the same accepted boundary set.
+- Existing single-portal overlap tests remain unchanged.
+- Manual env-cell grid junction repro no longer shows the remaining black wedge when all involved
+  resources are resident.
+
+Task checklist:
+
+- [ ] Add one-hop closure inputs/diagnostics to runtime overlap detection.
+- [ ] Split candidate creation/classification so primary and one-hop passes share classifier logic.
+- [ ] Collect first-pass overlap env cells as one-hop seeds.
+- [ ] Evaluate only env-cell portal edges sourced from one-hop seeds.
+- [ ] Filter one-hop reverse edges back to the canonical current env cell.
+- [ ] Dedupe and sort first-pass and one-hop overlap cells into one base-overlap set.
+- [ ] Add four-cell junction tests and one-hop cap tests.
+- [ ] Add reverse-edge rejection test.
+- [ ] Surface concise one-hop diagnostics in existing debug summaries.
+
+Decisions and course corrections:
+
+- Added after Phase 3 visual testing showed base overlap removed most env-cell portal artifacts, but
+  a remaining black wedge can appear at grid junctions where the camera intersects multiple portal
+  polygons at once.
+- The closure is deliberately capped at one env-cell hop. We want boundary-neighborhood fill, not a
+  second portal visibility system.
+- Dry-run finding: most of this phase should stay inside `portal-base-overlap.ts`. Frame-plan
+  construction and renderer drawing should keep consuming the final base-overlap env-cell set
+  unchanged.
+
+### Phase 5: Exterior-Seeded Indoor-To-Outdoor Straddles
 
 Deliverables:
 
@@ -511,7 +609,7 @@ Decisions and course corrections:
 
 - Pending.
 
-### Phase 5: Resteer After Visual Proof
+### Phase 6: Resteer After Visual Proof
 
 Deliverables:
 
@@ -539,7 +637,7 @@ Decisions and course corrections:
 
 - Pending.
 
-### Phase 6: Stabilization And Cleanup
+### Phase 7: Stabilization And Cleanup
 
 Deliverables:
 

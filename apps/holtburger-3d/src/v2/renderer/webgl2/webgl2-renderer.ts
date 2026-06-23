@@ -9,6 +9,7 @@ import type {
 	PortalProjectionFrameGraphPlan,
 	PortalProjectionFrameMaskEdgePlan,
 	PortalProjectionFrameOutdoorCrossingPlan,
+	PortalBaseOverlapPlan,
 	PortalFrameNodeResources,
 	PortalFrameWorkPlan,
 	SceneDomainTargetKind,
@@ -87,6 +88,18 @@ type DirectEnvCellPortalProjectionFrameWorkPlan = Extract<
 	readonly mode: "portal-projection";
 	readonly layeredGraph: PortalProjectionFrameGraphPlan;
 };
+
+function createEmptyPortalBaseOverlapPlan(): PortalBaseOverlapPlan {
+	return {
+		diagnostics: {
+			envCellCount: 0,
+			missingResourceEnvCellCount: 0,
+		},
+		envCells: [],
+		overlapSignature: "none",
+		requiresExteriorSeed: false,
+	};
+}
 
 const TERRAIN_ATLAS_MIP_GRADIENT_SCALE = 0.5;
 const CAMERA_NEAR_PLANE = 0.1;
@@ -1220,6 +1233,7 @@ class Webgl2Renderer implements Renderer {
 			this.#lastDirectEnvCellDrawCalls +=
 				this.#renderOutdoorProjectionComposite(
 					plan.layeredGraph,
+					plan.baseOverlap,
 					targets,
 					targets.compositePing,
 				);
@@ -1340,6 +1354,7 @@ class Webgl2Renderer implements Renderer {
 		}
 		this.#lastDirectEnvCellDrawCalls += this.#renderOutdoorProjectionComposite(
 			graph,
+			createEmptyPortalBaseOverlapPlan(),
 			targets,
 			targets.compositePing,
 		);
@@ -1350,6 +1365,7 @@ class Webgl2Renderer implements Renderer {
 
 	#renderOutdoorProjectionComposite(
 		graph: PortalProjectionFrameGraphPlan,
+		baseOverlap: PortalBaseOverlapPlan,
 		targets: SceneDomainTargets,
 		destination: SceneDomainTarget,
 	): number {
@@ -1371,6 +1387,7 @@ class Webgl2Renderer implements Renderer {
 		});
 		return this.#drawPortalProjectionFrameResources(
 			{
+				baseOverlap,
 				kind: "direct-env-cell",
 				layeredGraph: graph,
 				mode: "portal-projection",
@@ -1680,22 +1697,63 @@ class Webgl2Renderer implements Renderer {
 		aspectRatio: number,
 	): number {
 		const gl = this.#gl;
+		const drawCalls =
+			this.#drawPortalProjectionBaseResources(
+				plan.layeredGraph,
+				aspectRatio,
+			) +
+			this.#drawPortalBaseOverlapEnvCells(plan.baseOverlap, aspectRatio) +
+			this.#drawPortalProjectionMaskedLayers(plan.layeredGraph, aspectRatio);
+
+		this.#stateCache.setStencilState(
+			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
+		);
+		this.#stateCache.bindVertexArray(null);
+		return drawCalls;
+	}
+
+	#drawPortalProjectionBaseResources(
+		graph: PortalProjectionFrameGraphPlan,
+		aspectRatio: number,
+	): number {
+		if (!("resources" in graph.baseEntry)) {
+			return 0;
+		}
+		return this.#drawPortalFrameResourceSet(
+			graph.baseEntry.resources,
+			aspectRatio,
+		);
+	}
+
+	#drawPortalBaseOverlapEnvCells(
+		baseOverlap: PortalBaseOverlapPlan,
+		aspectRatio: number,
+	): number {
+		let drawCalls = 0;
+		for (const envCell of baseOverlap.envCells) {
+			drawCalls += this.#drawPortalFrameResourceSet(
+				envCell.resources,
+				aspectRatio,
+			);
+		}
+		return drawCalls;
+	}
+
+	#drawPortalProjectionMaskedLayers(
+		graph: PortalProjectionFrameGraphPlan,
+		aspectRatio: number,
+	): number {
+		const gl = this.#gl;
 		const renderEntryById = new Map(
-			plan.layeredGraph.renderEntries.map(
+			graph.renderEntries.map(
 				(entry) => [entry.renderEntryId, entry] as const,
 			),
 		);
 		const maskEdgeById = new Map(
-			plan.layeredGraph.maskEdges.map((edge) => [edge.edgeId, edge] as const),
+			graph.maskEdges.map((edge) => [edge.edgeId, edge] as const),
 		);
 		let drawCalls = 0;
-		if ("resources" in plan.layeredGraph.baseEntry) {
-			drawCalls += this.#drawPortalFrameResourceSet(
-				plan.layeredGraph.baseEntry.resources,
-				aspectRatio,
-			);
-		}
-		for (const layer of plan.layeredGraph.renderLayers) {
+		for (const layer of graph.renderLayers) {
 			let layerMaskCount = 0;
 			for (const renderEntryId of layer.renderEntryIds) {
 				const renderEntry = renderEntryById.get(renderEntryId);
@@ -1751,11 +1809,6 @@ class Webgl2Renderer implements Renderer {
 				);
 			}
 		}
-
-		this.#stateCache.setStencilState(
-			createStencilState(gl, false, 0xff, gl.ALWAYS, 0, gl.KEEP),
-		);
-		this.#stateCache.bindVertexArray(null);
 		return drawCalls;
 	}
 

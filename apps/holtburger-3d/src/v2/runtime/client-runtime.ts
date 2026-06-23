@@ -114,8 +114,9 @@ const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
 const BLENDED_STATIC_AUDIT_WARNING_BUCKET_LIMIT = 8;
 const DEFAULT_ASSET_MAINTENANCE_INTERVAL_MS = 5_000;
 const DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 4;
-const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 2;
-const MAX_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 16;
+export const MIN_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 0;
+export const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 18;
+export const MAX_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 24;
 const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS = 512;
 const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS = 512;
 const DEFAULT_EXTERIOR_SUFFIX_MAX_DEPTH = 1;
@@ -906,8 +907,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				committedStaticMaterializationRevisions:
 					snapshot.staticMaterialization.committedRevisions,
 				currentCameraResidency: snapshot.currentCameraResidency,
-				currentPortalOverlapResidency:
-					snapshot.currentPortalOverlapResidency,
+				currentPortalOverlapResidency: snapshot.currentPortalOverlapResidency,
 				envCellResourceMembershipRevision:
 					snapshot.staticMaterialization.envCellResourceMembershipRevision,
 				portalFrameWorkPlan: snapshot.portalFrameWorkPlan,
@@ -1117,8 +1117,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					maxRenderEntries: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
 					maxDepth: this.#directEnvCellPortalMaxDepth,
 					maxMaskEdges: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
-					portalOverlapSignature:
-						this.#currentPortalOverlapResidency.signature,
+					portalOverlapSignature: this.#currentPortalOverlapResidency.signature,
 					retainedProjectionSourceKey: retainedPlan.sourceKey,
 					renderAnchorLandblockId: this.#renderAnchorLandblockId,
 				};
@@ -1143,10 +1142,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#refreshPortalOverlapResidency(): boolean {
 		const next = this.#derivePortalOverlapResidency();
 		if (
-			portalOverlapResidencyEquals(
-				this.#currentPortalOverlapResidency,
-				next,
-			)
+			portalOverlapResidencyEquals(this.#currentPortalOverlapResidency, next)
 		) {
 			return false;
 		}
@@ -1204,16 +1200,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 	#deriveRetainedOutdoorPortalFramePlan(
 		seedLandblockId: number,
-		portalOverlap: RuntimePortalOverlapResidency =
-			EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY,
+		portalOverlap: RuntimePortalOverlapResidency = EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY,
 	): RetainedOutdoorPortalFramePlan | null {
-		const retainedOutdoorSourceLandblockIds =
-			this.#staticSceneQuery
-				.queryRetainedOutdoorSourceLandblocks()
-				.filter(
-					(source) => source.domains.buildings && source.domains.envCells,
-				)
-				.map((source) => source.landblockId);
+		const retainedOutdoorSourceLandblockIds = this.#staticSceneQuery
+			.queryRetainedOutdoorSourceLandblocks()
+			.filter((source) => source.domains.buildings && source.domains.envCells)
+			.map((source) => source.landblockId);
 		const projections =
 			this.#staticSceneQuery.queryRetainedOutdoorPortalProjections([
 				seedLandblockId,
@@ -1287,8 +1279,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		return {
 			assets: this.#assetService.createSnapshot(),
 			currentCameraResidency: this.#currentCameraResidency,
-			currentPortalOverlapResidency:
-				this.#currentPortalOverlapResidency,
+			currentPortalOverlapResidency: this.#currentPortalOverlapResidency,
 			debugOverlays: {
 				envCellAabbCount: this.#envCellAabbDebugOverlayVisible
 					? this.#staticSceneQuery.queryEnvCellAabbDebugBounds().length
@@ -3560,7 +3551,7 @@ function normalizeDirectEnvCellPortalMaxDepth(maxDepth: number): number {
 	}
 	return Math.min(
 		MAX_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH,
-		Math.max(0, Math.trunc(maxDepth)),
+		Math.max(MIN_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH, Math.trunc(maxDepth)),
 	);
 }
 

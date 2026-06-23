@@ -943,7 +943,7 @@ describe("V2 static scene query", () => {
 		).toBe(0xda550101);
 	});
 
-	it("falls back to the coarse env-cell residency candidate when all BSPs reject", () => {
+	it("rejects coarse env-cell residency candidates when all BSPs reject", () => {
 		const query = new StaticSceneQuery();
 		commitLandblockEnvCells(
 			query,
@@ -964,7 +964,7 @@ describe("V2 static scene query", () => {
 				landblockId: 0xda55ffff,
 				point: { x: 0, y: 0, z: 0 },
 			}),
-		).toBe(0xda550100);
+		).toBeNull();
 		expect(query.createSnapshot()).toMatchObject({
 			envCellResidencyBspAcceptedCandidateCount: 0,
 			envCellResidencyBspFallbackCount: 1,

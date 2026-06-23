@@ -28,6 +28,11 @@
 		type V2ParsedLocationInput,
 	} from "../v2/browser/location-input";
 	import { resolveBrowserFollowModeRebase } from "../v2/browser/follow-mode";
+	import {
+		DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH,
+		MAX_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH,
+		MIN_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH,
+	} from "../v2/runtime/client-runtime";
 	import type {
 		ClientRuntime,
 		ManualStaticDomain,
@@ -89,9 +94,6 @@
 	const OUTDOOR_CAMERA_FOCUS_HORIZONTAL_DISTANCE =
 		OUTDOOR_LANDBLOCK_WORLD_SIZE * 0.75;
 	const OUTDOOR_CAMERA_FOCUS_MIN_CLEARANCE = 40;
-	const MIN_DIRECT_ENV_CELL_PORTAL_DEPTH = 0;
-	const MAX_DIRECT_ENV_CELL_PORTAL_DEPTH = 16;
-	const DEFAULT_DIRECT_ENV_CELL_PORTAL_DEPTH = 2;
 	const TEXTURE_FILTERING_OPTIONS: readonly TextureFilteringMode[] = [
 		"nearest",
 		"linear",
@@ -117,7 +119,7 @@
 	let envCellAabbDebugVisible = $state(false);
 	let envCellPortalDebugVisible = $state(false);
 	let directEnvCellPortalMaxDepth = $state(
-		DEFAULT_DIRECT_ENV_CELL_PORTAL_DEPTH,
+		DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH,
 	);
 	let flatVisionModeEnabled = $state(false);
 	let envCellResourceInspectionInput = $state("");
@@ -1675,8 +1677,8 @@
 						</strong>
 						<input
 							disabled={!runtime || flatVisionModeEnabled}
-							max={MAX_DIRECT_ENV_CELL_PORTAL_DEPTH}
-							min={MIN_DIRECT_ENV_CELL_PORTAL_DEPTH}
+							max={MAX_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH}
+							min={MIN_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH}
 							step="1"
 							type="range"
 							value={directEnvCellPortalMaxDepth}

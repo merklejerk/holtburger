@@ -1374,10 +1374,7 @@ export class StaticSceneQuery {
 		}
 
 		this.#envCellResidencyBspFallbackCount += 1;
-		return (
-			selectEnvCellResidencyCandidate(candidates, options.point)?.item
-				.envCellId ?? null
-		);
+		return null;
 	}
 
 	#queryEnvCellResidencyFromRenderSpacePoint(

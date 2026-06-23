@@ -480,6 +480,8 @@ Decisions and course corrections:
 
 ### Phase 4: One-Hop Env-Cell Overlap Closure
 
+Status: implementation complete as of 2026-06-23; manual grid-junction validation pending.
+
 Deliverables:
 
 - Extend env-cell portal overlap detection to evaluate straddled portals attached to the immediate
@@ -541,15 +543,15 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add one-hop closure inputs/diagnostics to runtime overlap detection.
-- [ ] Split candidate creation/classification so primary and one-hop passes share classifier logic.
-- [ ] Collect first-pass overlap env cells as one-hop seeds.
-- [ ] Evaluate only env-cell portal edges sourced from one-hop seeds.
-- [ ] Filter one-hop reverse edges back to the canonical current env cell.
-- [ ] Dedupe and sort first-pass and one-hop overlap cells into one base-overlap set.
-- [ ] Add four-cell junction tests and one-hop cap tests.
-- [ ] Add reverse-edge rejection test.
-- [ ] Surface concise one-hop diagnostics in existing debug summaries.
+- [x] Add one-hop closure inputs/diagnostics to runtime overlap detection.
+- [x] Split candidate creation/classification so primary and one-hop passes share classifier logic.
+- [x] Collect first-pass overlap env cells as one-hop seeds.
+- [x] Evaluate only env-cell portal edges sourced from one-hop seeds.
+- [x] Filter one-hop reverse edges back to the canonical current env cell.
+- [x] Dedupe and sort first-pass and one-hop overlap cells into one base-overlap set.
+- [x] Add four-cell junction tests and one-hop cap tests.
+- [x] Add reverse-edge rejection test.
+- [x] Surface concise one-hop diagnostics in existing debug summaries.
 
 Decisions and course corrections:
 
@@ -561,6 +563,17 @@ Decisions and course corrections:
 - Dry-run finding: most of this phase should stay inside `portal-base-overlap.ts`. Frame-plan
   construction and renderer drawing should keep consuming the final base-overlap env-cell set
   unchanged.
+- Split detector flow into primary candidate creation, shared candidate classification, and one-hop
+  candidate creation. The one-hop pass only runs for env-cell residency and only seeds from accepted
+  first-pass env-cell portal boundaries.
+- Added runtime overlap diagnostics for primary candidates/acceptances, one-hop seeds,
+  candidates/acceptances, and the one-hop cap. `oneHopTraversalCapped` means one-hop boundaries were
+  accepted and traversal intentionally stopped there; it does not imply that a deeper candidate was
+  separately detected.
+- Reverse edges targeting the canonical current env cell are filtered before one-hop classification
+  so the base-overlap set does not re-add the current cell.
+- Browser debug output now includes a `Portal overlap` row with primary and one-hop detector counts.
+- Manual validation of the grid-junction repro remains pending.
 
 ### Phase 5: Exterior-Seeded Indoor-To-Outdoor Straddles
 

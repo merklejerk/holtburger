@@ -42,6 +42,7 @@
 		RendererStaticLayerVisibility,
 	} from "../v2/renderer/types";
 	import type { EnvCellResourceMembership } from "../v2/runtime/env-cell-resource-membership";
+	import type { RuntimePortalOverlapResidency } from "../v2/runtime/portal-base-overlap";
 	import {
 		describeStaticSceneSelectionKey,
 		type StaticSceneSelectionKey,
@@ -1171,6 +1172,13 @@
 		return "unsupported direct env-cell frame mode";
 	}
 
+	function formatPortalOverlapResidency(
+		overlap: RuntimePortalOverlapResidency,
+	): string {
+		const diagnostics = overlap.diagnostics;
+		return `${overlap.kind} cells ${overlap.baseOverlapEnvCellIds.length} boundaries ${overlap.boundaries.length} primary ${diagnostics.primaryAcceptedBoundaryCount}/${diagnostics.primaryCandidateCount} one-hop ${diagnostics.oneHopAcceptedBoundaryCount}/${diagnostics.oneHopCandidateCount} seeds ${diagnostics.oneHopSeedEnvCellCount} capped ${diagnostics.oneHopTraversalCapped ? "yes" : "no"}`;
+	}
+
 	function currentCameraEnvCellResourceTarget(): {
 		readonly envCellId: number;
 		readonly landblockId: number;
@@ -1787,6 +1795,16 @@
 							<dd>
 								{snapshot
 									? formatPortalFrameWorkPlan(snapshot.portalFrameWorkPlan)
+									: "pending"}
+							</dd>
+						</div>
+						<div>
+							<dt>Portal overlap</dt>
+							<dd>
+								{snapshot
+									? formatPortalOverlapResidency(
+											snapshot.currentPortalOverlapResidency,
+										)
 									: "pending"}
 							</dd>
 						</div>

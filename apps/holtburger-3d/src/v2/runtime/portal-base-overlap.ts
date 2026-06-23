@@ -11,6 +11,7 @@ export const EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY: RuntimePortalOverlapResiden
 	{
 		baseOverlapEnvCellIds: [],
 		boundaries: [],
+		diagnostics: createEmptyPortalOverlapDiagnostics(),
 		kind: "none",
 		missingResourceEnvCellIds: [],
 		requiresExteriorSeed: false,
@@ -22,8 +23,18 @@ export interface RuntimePortalOverlapResidency {
 	readonly signature: string;
 	readonly boundaries: readonly RuntimePortalOverlapBoundary[];
 	readonly baseOverlapEnvCellIds: readonly number[];
+	readonly diagnostics: RuntimePortalOverlapDiagnostics;
 	readonly missingResourceEnvCellIds: readonly number[];
 	readonly requiresExteriorSeed: boolean;
+}
+
+export interface RuntimePortalOverlapDiagnostics {
+	readonly oneHopAcceptedBoundaryCount: number;
+	readonly oneHopCandidateCount: number;
+	readonly oneHopSeedEnvCellCount: number;
+	readonly oneHopTraversalCapped: boolean;
+	readonly primaryAcceptedBoundaryCount: number;
+	readonly primaryCandidateCount: number;
 }
 
 export interface RuntimePortalOverlapBoundary {
@@ -77,36 +88,40 @@ export function deriveRuntimePortalOverlapResidency(
 	const apertureRangeById = createApertureRangeLookup(
 		input.portalApertureResources,
 	);
-	const boundaries = createPortalOverlapCandidates(input)
-		.flatMap((candidate) => {
-			const apertureRange = apertureRangeById.get(candidate.apertureRangeId);
-			if (!apertureRange) {
-				return [];
-			}
-			const signedCameraPlaneDistance = classifyApertureRange({
-				aperturePadding: input.aperturePadding,
-				frameState: input.frameState,
-				planeEpsilon: input.planeEpsilon,
-				range: apertureRange.range,
-				renderAnchorLandblockId: input.renderAnchorLandblockId,
-				resource: apertureRange.resource,
-			});
-			return signedCameraPlaneDistance === null
-				? []
-				: [
-						{
-							apertureRangeId: candidate.apertureRangeId,
-							boundaryId: candidate.boundaryId,
-							signedCameraPlaneDistance,
-							sourceEnvCellId: candidate.sourceEnvCellId,
-							sourceKind: candidate.sourceKind,
-							targetEnvCellId: candidate.targetEnvCellId,
-						} satisfies RuntimePortalOverlapBoundary,
-					];
-		})
-		.sort(comparePortalOverlapBoundaries);
+	const primaryCandidates = createPrimaryPortalOverlapCandidates(input);
+	const primaryBoundaries = classifyPortalOverlapCandidates({
+		aperturePadding: input.aperturePadding,
+		apertureRangeById,
+		candidates: primaryCandidates,
+		frameState: input.frameState,
+		planeEpsilon: input.planeEpsilon,
+		renderAnchorLandblockId: input.renderAnchorLandblockId,
+	});
+	const oneHopCandidates = createOneHopEnvCellPortalCandidates(
+		input,
+		primaryBoundaries,
+	);
+	const oneHopBoundaries = classifyPortalOverlapCandidates({
+		aperturePadding: input.aperturePadding,
+		apertureRangeById,
+		candidates: oneHopCandidates,
+		frameState: input.frameState,
+		planeEpsilon: input.planeEpsilon,
+		renderAnchorLandblockId: input.renderAnchorLandblockId,
+	});
+	const diagnostics = {
+		oneHopAcceptedBoundaryCount: oneHopBoundaries.length,
+		oneHopCandidateCount: oneHopCandidates.length,
+		oneHopSeedEnvCellCount: countOneHopSeedEnvCells(primaryBoundaries),
+		oneHopTraversalCapped: oneHopBoundaries.length > 0,
+		primaryAcceptedBoundaryCount: primaryBoundaries.length,
+		primaryCandidateCount: primaryCandidates.length,
+	} satisfies RuntimePortalOverlapDiagnostics;
+	const boundaries = [...primaryBoundaries, ...oneHopBoundaries].sort(
+		comparePortalOverlapBoundaries,
+	);
 	if (boundaries.length === 0) {
-		return EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY;
+		return createEmptyPortalOverlapResidency(diagnostics);
 	}
 	const baseOverlapEnvCellIds = [
 		...new Set(boundaries.map((boundary) => boundary.targetEnvCellId)),
@@ -122,6 +137,7 @@ export function deriveRuntimePortalOverlapResidency(
 	return {
 		baseOverlapEnvCellIds,
 		boundaries,
+		diagnostics,
 		kind: "portal-overlap",
 		missingResourceEnvCellIds,
 		requiresExteriorSeed,
@@ -130,6 +146,31 @@ export function deriveRuntimePortalOverlapResidency(
 			boundaries,
 			requiresExteriorSeed,
 		}),
+	};
+}
+
+function createEmptyPortalOverlapResidency(
+	diagnostics: RuntimePortalOverlapDiagnostics,
+): RuntimePortalOverlapResidency {
+	return {
+		baseOverlapEnvCellIds: [],
+		boundaries: [],
+		diagnostics,
+		kind: "none",
+		missingResourceEnvCellIds: [],
+		requiresExteriorSeed: false,
+		signature: "none",
+	};
+}
+
+function createEmptyPortalOverlapDiagnostics(): RuntimePortalOverlapDiagnostics {
+	return {
+		oneHopAcceptedBoundaryCount: 0,
+		oneHopCandidateCount: 0,
+		oneHopSeedEnvCellCount: 0,
+		oneHopTraversalCapped: false,
+		primaryAcceptedBoundaryCount: 0,
+		primaryCandidateCount: 0,
 	};
 }
 
@@ -168,7 +209,45 @@ function createApertureRangeLookup(
 	return lookup;
 }
 
-function createPortalOverlapCandidates(
+function classifyPortalOverlapCandidates(options: {
+	readonly aperturePadding: number;
+	readonly apertureRangeById: ReadonlyMap<string, ApertureRangeLookup>;
+	readonly candidates: readonly PortalOverlapCandidate[];
+	readonly frameState: FrameState;
+	readonly planeEpsilon: number;
+	readonly renderAnchorLandblockId: number | null;
+}): readonly RuntimePortalOverlapBoundary[] {
+	return options.candidates.flatMap((candidate) => {
+		const apertureRange = options.apertureRangeById.get(
+			candidate.apertureRangeId,
+		);
+		if (!apertureRange) {
+			return [];
+		}
+		const signedCameraPlaneDistance = classifyApertureRange({
+			aperturePadding: options.aperturePadding,
+			frameState: options.frameState,
+			planeEpsilon: options.planeEpsilon,
+			range: apertureRange.range,
+			renderAnchorLandblockId: options.renderAnchorLandblockId,
+			resource: apertureRange.resource,
+		});
+		return signedCameraPlaneDistance === null
+			? []
+			: [
+					{
+						apertureRangeId: candidate.apertureRangeId,
+						boundaryId: candidate.boundaryId,
+						signedCameraPlaneDistance,
+						sourceEnvCellId: candidate.sourceEnvCellId,
+						sourceKind: candidate.sourceKind,
+						targetEnvCellId: candidate.targetEnvCellId,
+					} satisfies RuntimePortalOverlapBoundary,
+				];
+	});
+}
+
+function createPrimaryPortalOverlapCandidates(
 	input: PortalOverlapResidencyInput,
 ): readonly PortalOverlapCandidate[] {
 	if (input.residency.kind === "env-cell") {
@@ -218,6 +297,52 @@ function createPortalOverlapCandidates(
 			);
 	}
 	return [];
+}
+
+function createOneHopEnvCellPortalCandidates(
+	input: PortalOverlapResidencyInput,
+	primaryBoundaries: readonly RuntimePortalOverlapBoundary[],
+): readonly PortalOverlapCandidate[] {
+	if (input.residency.kind !== "env-cell") {
+		return [];
+	}
+	const seedEnvCellIds = createOneHopSeedEnvCellIds(primaryBoundaries);
+	if (seedEnvCellIds.size === 0) {
+		return [];
+	}
+	return input.projection.edges
+		.filter(
+			(edge) =>
+				edge.sourceKind === "env-cell-portal" &&
+				edge.sourceEnvCellId !== null &&
+				seedEnvCellIds.has(edge.sourceEnvCellId) &&
+				edge.targetEnvCellId !== input.residency.envCellId,
+		)
+		.map(
+			(edge): PortalOverlapCandidate => ({
+				apertureRangeId: edge.apertureRangeId,
+				boundaryId: edge.edgeId,
+				sourceEnvCellId: edge.sourceEnvCellId,
+				sourceKind: "env-cell-portal",
+				targetEnvCellId: edge.targetEnvCellId,
+			}),
+		);
+}
+
+function countOneHopSeedEnvCells(
+	primaryBoundaries: readonly RuntimePortalOverlapBoundary[],
+): number {
+	return createOneHopSeedEnvCellIds(primaryBoundaries).size;
+}
+
+function createOneHopSeedEnvCellIds(
+	primaryBoundaries: readonly RuntimePortalOverlapBoundary[],
+): ReadonlySet<number> {
+	return new Set(
+		primaryBoundaries
+			.filter((boundary) => boundary.sourceKind === "env-cell-portal")
+			.map((boundary) => boundary.targetEnvCellId),
+	);
 }
 
 function classifyApertureRange(options: {

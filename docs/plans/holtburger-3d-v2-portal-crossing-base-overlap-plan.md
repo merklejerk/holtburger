@@ -348,6 +348,8 @@ Decisions and course corrections:
 
 ### Phase 2: Propagate Overlap Residency Into Frame Plans
 
+Status: complete as of 2026-06-23.
+
 Deliverables:
 
 - `PortalBaseOverlapPlan` attached to the direct env-cell portal frame plan.
@@ -388,16 +390,34 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add renderer types for base-overlap plan data.
-- [ ] Add overlap signature handling to `PortalFramePlanKey` and portal frame-work equality.
-- [ ] Derive base-overlap frame-plan data from `RuntimePortalOverlapResidency`.
-- [ ] Resolve overlap env-cell resources from membership.
-- [ ] Add deterministic sorting and dedupe.
-- [ ] Add frame-plan tests for env-cell and building-transition overlap data.
+- [x] Add renderer types for base-overlap plan data.
+- [x] Add overlap signature handling to `PortalFramePlanKey` and portal frame-work equality.
+- [x] Derive base-overlap frame-plan data from `RuntimePortalOverlapResidency`.
+- [x] Resolve overlap env-cell resources from membership.
+- [x] Add deterministic sorting and dedupe.
+- [x] Add frame-plan tests for env-cell and building-transition overlap data.
 
 Decisions and course corrections:
 
-- Pending.
+- Added `PortalBaseOverlapPlan` to direct env-cell portal frame-work plans. This is required data on
+  direct plans rather than an optional diagnostics side channel, because the renderer will consume
+  it in Phase 3.
+- Runtime now adds `portalOverlapSignature` to `PortalFramePlanKey` and key equality. The signature
+  is the discrete overlap-residency state; raw camera coordinates remain outside the key so cached
+  plans can be reused while the camera moves within the same straddled boundary set.
+- Env-cell-root plans receive the current runtime overlap residency directly. Outdoor-root retained
+  plans pass overlap only to the seed landblock projection before retained projections are combined;
+  non-seed retained projections receive empty overlap residency for the first proof.
+- `createPortalProjectionFramePlan` resolves overlap env-cell ids through the existing
+  `createNodeResources` path and records stable reasons per env cell. Duplicate overlap env-cell ids
+  collapse to one base-overlap entry.
+- `combineOutdoorPortalProjectionFramePlans` merges per-projection base-overlap plans after retained
+  projection planning. This keeps the static projection graph unchanged while preserving overlap
+  state for the renderer.
+- Browser debug frame-plan summary now reports base-overlap cell count, missing overlap resources,
+  exterior-seed requirement, and overlap signature.
+- Phase 2 intentionally still does not draw overlap resources or seed indoor-to-outdoor exterior
+  surfaces. Those are Phase 3 and Phase 4 respectively.
 
 ### Phase 3: Draw Base-Overlap Env Cells In Existing Paths
 

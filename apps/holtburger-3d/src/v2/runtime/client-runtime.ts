@@ -183,6 +183,7 @@ type PortalFramePlanKey =
 			readonly maxRenderEntries: number;
 			readonly maxDepth: number;
 			readonly maxMaskEdges: number;
+			readonly portalOverlapSignature: string;
 			readonly retainedProjectionSourceKey: string | null;
 			readonly renderAnchorLandblockId: number | null;
 	  }
@@ -192,6 +193,7 @@ type PortalFramePlanKey =
 			readonly maxRenderEntries: number;
 			readonly maxDepth: number;
 			readonly maxMaskEdges: number;
+			readonly portalOverlapSignature: string;
 			readonly retainedProjectionSourceKey: string;
 			readonly renderAnchorLandblockId: number | null;
 	  };
@@ -1049,6 +1051,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					maxRenderEntries: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
 					maxDepth: this.#directEnvCellPortalMaxDepth,
 					maxMaskEdges: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
+					portalOverlap: this.#currentPortalOverlapResidency,
 					projection,
 				});
 				if (baseDirectPlan?.kind === "direct-env-cell") {
@@ -1068,6 +1071,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 						maxRenderEntries: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
 						maxDepth: this.#directEnvCellPortalMaxDepth,
 						maxMaskEdges: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
+						portalOverlapSignature:
+							this.#currentPortalOverlapResidency.signature,
 						retainedProjectionSourceKey: exteriorSuffix?.sourceKey ?? null,
 						renderAnchorLandblockId: this.#renderAnchorLandblockId,
 					};
@@ -1101,8 +1106,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 			this.#currentCameraResidency.kind === "outdoor-landblock"
 		) {
 			const landblockId = this.#currentCameraResidency.landblockId;
-			const retainedPlan =
-				this.#deriveRetainedOutdoorPortalFramePlan(landblockId);
+			const retainedPlan = this.#deriveRetainedOutdoorPortalFramePlan(
+				landblockId,
+				this.#currentPortalOverlapResidency,
+			);
 			if (retainedPlan) {
 				const portalFramePlanKey: PortalFramePlanKey = {
 					kind: "outdoor-transition",
@@ -1110,6 +1117,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 					maxRenderEntries: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
 					maxDepth: this.#directEnvCellPortalMaxDepth,
 					maxMaskEdges: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
+					portalOverlapSignature:
+						this.#currentPortalOverlapResidency.signature,
 					retainedProjectionSourceKey: retainedPlan.sourceKey,
 					renderAnchorLandblockId: this.#renderAnchorLandblockId,
 				};
@@ -1195,6 +1204,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 	#deriveRetainedOutdoorPortalFramePlan(
 		seedLandblockId: number,
+		portalOverlap: RuntimePortalOverlapResidency =
+			EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY,
 	): RetainedOutdoorPortalFramePlan | null {
 		const retainedOutdoorSourceLandblockIds =
 			this.#staticSceneQuery
@@ -1219,6 +1230,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 					maxRenderEntries: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_CELLS,
 					maxDepth: this.#directEnvCellPortalMaxDepth,
 					maxMaskEdges: DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_VIEWS,
+					portalOverlap:
+						projection.landblockId === seedLandblockId
+							? portalOverlap
+							: EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY,
 					projection,
 				});
 				return projectionPlan ? [projectionPlan] : [];
@@ -3224,6 +3239,7 @@ function portalFramePlanKeysEqual(
 		left.kind !== right.kind ||
 		left.landblockId !== right.landblockId ||
 		left.maxDepth !== right.maxDepth ||
+		left.portalOverlapSignature !== right.portalOverlapSignature ||
 		left.renderAnchorLandblockId !== right.renderAnchorLandblockId ||
 		(left.kind === "env-cell-projection" &&
 			right.kind === "env-cell-projection" &&

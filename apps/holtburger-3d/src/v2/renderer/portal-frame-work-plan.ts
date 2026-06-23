@@ -1,6 +1,9 @@
 import type {
 	PortalApertureFrameDiagnostics,
 	PortalApertureGeometryResourcePlan,
+	PortalBaseOverlapEnvCellPlan,
+	PortalBaseOverlapPlan,
+	PortalBaseOverlapReason,
 	PortalProjectionFrameGraphPlan,
 	PortalProjectionFrameLayerPlan,
 	PortalProjectionFrameMaskEdgePlan,
@@ -57,9 +60,50 @@ export function portalFrameWorkPlanEquals(
 	return portalProjectionFrameGraphPlansEqual(
 		left.layeredGraph,
 		right.layeredGraph,
-	) && portalFrameExteriorCompositePlansEqual(
-		left.exteriorComposite ?? null,
-		right.exteriorComposite ?? null,
+	) && portalBaseOverlapPlansEqual(left.baseOverlap, right.baseOverlap) &&
+		portalFrameExteriorCompositePlansEqual(
+			left.exteriorComposite ?? null,
+			right.exteriorComposite ?? null,
+		);
+}
+
+function portalBaseOverlapPlansEqual(
+	left: PortalBaseOverlapPlan,
+	right: PortalBaseOverlapPlan,
+): boolean {
+	return (
+		left.overlapSignature === right.overlapSignature &&
+		left.requiresExteriorSeed === right.requiresExteriorSeed &&
+		left.diagnostics.envCellCount === right.diagnostics.envCellCount &&
+		left.diagnostics.missingResourceEnvCellCount ===
+			right.diagnostics.missingResourceEnvCellCount &&
+		arraysEqual(
+			left.envCells,
+			right.envCells,
+			portalBaseOverlapEnvCellPlansEqual,
+		)
+	);
+}
+
+function portalBaseOverlapEnvCellPlansEqual(
+	left: PortalBaseOverlapEnvCellPlan,
+	right: PortalBaseOverlapEnvCellPlan,
+): boolean {
+	return (
+		left.envCellId === right.envCellId &&
+		left.landblockId === right.landblockId &&
+		portalFrameNodeResourcesEqual(left.resources, right.resources) &&
+		arraysEqual(left.reasons, right.reasons, portalBaseOverlapReasonsEqual)
+	);
+}
+
+function portalBaseOverlapReasonsEqual(
+	left: PortalBaseOverlapReason,
+	right: PortalBaseOverlapReason,
+): boolean {
+	return (
+		left.kind === right.kind &&
+		left.apertureRangeId === right.apertureRangeId
 	);
 }
 

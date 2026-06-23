@@ -1,6 +1,9 @@
 import type {
 	PortalApertureFrameDiagnostics,
 	PortalApertureGeometryResourcePlan,
+	PortalBaseOverlapEnvCellPlan,
+	PortalBaseOverlapPlan,
+	PortalBaseOverlapReason,
 	PortalProjectionFrameBaseEntryPlan,
 	PortalProjectionFrameDiagnostics,
 	PortalProjectionFrameGraphPlan,
@@ -21,7 +24,22 @@ export interface PortalProjectionFramePlanInput {
 	readonly maxRenderEntries: number;
 	readonly maxDepth: number;
 	readonly maxMaskEdges: number;
+	readonly portalOverlap?: PortalProjectionFrameOverlapInput;
 	readonly projection: StaticPortalProjectionRecord;
+}
+
+export interface PortalProjectionFrameOverlapInput {
+	readonly baseOverlapEnvCellIds: readonly number[];
+	readonly boundaries: readonly PortalProjectionFrameOverlapBoundaryInput[];
+	readonly missingResourceEnvCellIds: readonly number[];
+	readonly requiresExteriorSeed: boolean;
+	readonly signature: string;
+}
+
+export interface PortalProjectionFrameOverlapBoundaryInput {
+	readonly apertureRangeId: string;
+	readonly sourceKind: "env-cell-portal" | "building-transition";
+	readonly targetEnvCellId: number;
 }
 
 interface PortalFrameIndexes {
@@ -265,7 +283,14 @@ export function createPortalProjectionFramePlan(
 		renderLayers,
 	};
 
+	const baseOverlap = createPortalBaseOverlapPlan({
+		indexes,
+		landblockId: input.landblockId,
+		portalOverlap: input.portalOverlap ?? null,
+	});
+
 	return {
+		baseOverlap,
 		kind: "direct-env-cell",
 		layeredGraph: graph,
 		mode: "portal-projection",
@@ -362,10 +387,142 @@ export function combineOutdoorPortalProjectionFramePlans(
 	};
 
 	return {
+		baseOverlap: combinePortalBaseOverlapPlans(
+			directPlans.map((plan) => plan.baseOverlap),
+		),
 		kind: "direct-env-cell",
 		layeredGraph: graph,
 		mode: "portal-projection",
 	};
+}
+
+function createPortalBaseOverlapPlan(options: {
+	readonly indexes: PortalFrameIndexes;
+	readonly landblockId: number;
+	readonly portalOverlap: PortalProjectionFrameOverlapInput | null;
+}): PortalBaseOverlapPlan {
+	if (!options.portalOverlap || options.portalOverlap.signature === "none") {
+		return createEmptyPortalBaseOverlapPlan();
+	}
+	const missingResourceEnvCellIds = new Set(
+		options.portalOverlap.missingResourceEnvCellIds,
+	);
+	const boundariesByTargetEnvCellId = new Map<
+		number,
+		PortalProjectionFrameOverlapBoundaryInput[]
+	>();
+	for (const boundary of options.portalOverlap.boundaries) {
+		const boundaries = boundariesByTargetEnvCellId.get(boundary.targetEnvCellId);
+		if (boundaries) {
+			boundaries.push(boundary);
+			continue;
+		}
+		boundariesByTargetEnvCellId.set(boundary.targetEnvCellId, [boundary]);
+	}
+	const envCells = [...new Set(options.portalOverlap.baseOverlapEnvCellIds)]
+		.sort(compareNumbers)
+		.map((envCellId): PortalBaseOverlapEnvCellPlan => {
+			const scene = {
+				envCellId,
+				kind: "env-cell-direct",
+				landblockId: options.landblockId,
+			} as const;
+			const resources = createNodeResources(scene, options.indexes);
+			const reasons = (boundariesByTargetEnvCellId.get(envCellId) ?? [])
+				.map(
+					(boundary): PortalBaseOverlapReason => ({
+						apertureRangeId: boundary.apertureRangeId,
+						kind: boundary.sourceKind,
+					}),
+				)
+				.sort(comparePortalBaseOverlapReasons);
+			return {
+				envCellId,
+				landblockId: options.landblockId,
+				reasons,
+				resources,
+			};
+		});
+	return {
+		diagnostics: {
+			envCellCount: envCells.length,
+			missingResourceEnvCellCount: missingResourceEnvCellIds.size,
+		},
+		envCells,
+		overlapSignature: options.portalOverlap.signature,
+		requiresExteriorSeed: options.portalOverlap.requiresExteriorSeed,
+	};
+}
+
+function createEmptyPortalBaseOverlapPlan(): PortalBaseOverlapPlan {
+	return {
+		diagnostics: {
+			envCellCount: 0,
+			missingResourceEnvCellCount: 0,
+		},
+		envCells: [],
+		overlapSignature: "none",
+		requiresExteriorSeed: false,
+	};
+}
+
+function combinePortalBaseOverlapPlans(
+	plans: readonly PortalBaseOverlapPlan[],
+): PortalBaseOverlapPlan {
+	const activePlans = plans.filter((plan) => plan.overlapSignature !== "none");
+	if (activePlans.length === 0) {
+		return createEmptyPortalBaseOverlapPlan();
+	}
+	const envCellByKey = new Map<string, PortalBaseOverlapEnvCellPlan>();
+	for (const plan of activePlans) {
+		for (const envCell of plan.envCells) {
+			const key = `${envCell.landblockId}:${envCell.envCellId}`;
+			const existing = envCellByKey.get(key);
+			if (!existing) {
+				envCellByKey.set(key, envCell);
+				continue;
+			}
+			envCellByKey.set(key, {
+				...existing,
+				reasons: [...existing.reasons, ...envCell.reasons].sort(
+					comparePortalBaseOverlapReasons,
+				),
+			});
+		}
+	}
+	const envCells = [...envCellByKey.values()].sort(
+		(left, right) =>
+			left.landblockId - right.landblockId || left.envCellId - right.envCellId,
+	);
+	return {
+		diagnostics: {
+			envCellCount: envCells.length,
+			missingResourceEnvCellCount: activePlans.reduce(
+				(count, plan) => count + plan.diagnostics.missingResourceEnvCellCount,
+				0,
+			),
+		},
+		envCells,
+		overlapSignature: activePlans
+			.map((plan) => plan.overlapSignature)
+			.sort()
+			.join("|"),
+		requiresExteriorSeed: activePlans.some((plan) => plan.requiresExteriorSeed),
+	};
+}
+
+function comparePortalBaseOverlapReasons(
+	left: PortalBaseOverlapReason,
+	right: PortalBaseOverlapReason,
+): number {
+	return (
+		left.kind.localeCompare(right.kind) ||
+		left.apertureRangeId.localeCompare(right.apertureRangeId)
+	);
+}
+
+function compareNumbers(left: number, right: number): number {
+	return left - right;
 }
 
 function createPortalProjectionOutdoorCrossings(options: {

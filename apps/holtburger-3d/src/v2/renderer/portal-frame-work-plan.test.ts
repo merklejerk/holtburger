@@ -87,6 +87,20 @@ describe("portal frame work plan", () => {
 				},
 			}),
 		).toBe(false);
+		expect(
+			portalFrameWorkPlanEquals(plan, {
+				...createDirectEnvCellPlan(),
+				baseOverlap: {
+					diagnostics: {
+						envCellCount: 1,
+						missingResourceEnvCellCount: 0,
+					},
+					envCells: [],
+					overlapSignature: "different-overlap",
+					requiresExteriorSeed: false,
+				},
+			}),
+		).toBe(false);
 	});
 
 	it("compares direct env-cell exterior composite suffix plans", () => {
@@ -136,6 +150,15 @@ describe("portal frame work plan", () => {
 
 function createDirectEnvCellPlan(): PortalFrameWorkPlan {
 	return {
+		baseOverlap: {
+			diagnostics: {
+				envCellCount: 0,
+				missingResourceEnvCellCount: 0,
+			},
+			envCells: [],
+			overlapSignature: "none",
+			requiresExteriorSeed: false,
+		},
 		kind: "direct-env-cell",
 		mode: "portal-projection",
 		layeredGraph: {

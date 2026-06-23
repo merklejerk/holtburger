@@ -212,6 +212,99 @@ describe("direct env-cell frame plan", () => {
 		]);
 	});
 
+	it("resolves portal-overlap env cells into base-overlap resources", () => {
+		const plan = createPortalProjectionFramePlan({
+			landblockId: 0xda55ffff,
+			envCellResourceMembership: [
+				createEnvCellMembership(0xda550100, "structured-root"),
+				createEnvCellMembership(0xda550101, "structured-neighbor"),
+				createEnvCellMembership(0xda550102, "structured-other"),
+			],
+			maxRenderEntries: 16,
+			maxDepth: 2,
+			maxMaskEdges: 16,
+			portalOverlap: {
+				baseOverlapEnvCellIds: [0xda550102, 0xda550101, 0xda550101],
+				boundaries: [
+					{
+						apertureRangeId: "env-cell-portal:a-b:range",
+						sourceKind: "env-cell-portal",
+						targetEnvCellId: 0xda550101,
+					},
+					{
+						apertureRangeId: "building-transition:outdoor-c:range",
+						sourceKind: "building-transition",
+						targetEnvCellId: 0xda550102,
+					},
+				],
+				missingResourceEnvCellIds: [0xda550103, 0xda550103],
+				requiresExteriorSeed: true,
+				signature: "overlap-test-signature",
+			},
+			projection: createPortalProjectionRecord({
+				edges: [
+					createProjectionEdge({
+						edgeId: "a-b",
+						sourceEnvCellId: 0xda550100,
+						targetEnvCellId: 0xda550101,
+					}),
+				],
+				layers: [
+					{ envCellIds: [0xda550100], renderLayer: 0 },
+					{ envCellIds: [0xda550101], renderLayer: 1 },
+					{ envCellIds: [0xda550102], renderLayer: 1 },
+				],
+				root: {
+					envCellId: 0xda550100,
+					kind: "env-cell-root",
+					landblockId: 0xda55ffff,
+					rootNodeId: "env-cell:3663003904",
+				},
+			}),
+		});
+
+		expect(plan?.mode).toBe("portal-projection");
+		if (plan?.mode !== "portal-projection") {
+			throw new Error("Expected portal projection plan.");
+		}
+		expect(plan.baseOverlap).toMatchObject({
+			diagnostics: {
+				envCellCount: 2,
+				missingResourceEnvCellCount: 1,
+			},
+			overlapSignature: "overlap-test-signature",
+			requiresExteriorSeed: true,
+		});
+		expect(
+			plan.baseOverlap.envCells.map((envCell) => [
+				envCell.envCellId,
+				envCell.resources.structuredInteriorDrawUnitIds,
+				envCell.reasons,
+			]),
+		).toEqual([
+			[
+				0xda550101,
+				["structured-neighbor"],
+				[
+					{
+						apertureRangeId: "env-cell-portal:a-b:range",
+						kind: "env-cell-portal",
+					},
+				],
+			],
+			[
+				0xda550102,
+				["structured-other"],
+				[
+					{
+						apertureRangeId: "building-transition:outdoor-c:range",
+						kind: "building-transition",
+					},
+				],
+			],
+		]);
+	});
+
 	it("retains outdoor crossings for env-cell projections through selected target cells", () => {
 		const plan = createPortalProjectionFramePlan({
 			landblockId: 0xda55ffff,

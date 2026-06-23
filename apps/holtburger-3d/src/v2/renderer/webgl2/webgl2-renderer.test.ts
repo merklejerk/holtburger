@@ -1209,7 +1209,8 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			exteriorDrawCalls: 1,
 			exteriorSuffixCompositeDepth: 1,
 			exteriorSuffixCompositePasses: 1,
-			exteriorSeededBase: false,
+			envCellOutdoorCrossingCopyBypassed: true,
+			exteriorSeededBase: true,
 			outdoorCrossingSource: "exterior-suffix",
 		});
 		expect(latestSnapshot.directEnvCellDrawCalls).toBe(2);
@@ -1225,7 +1226,7 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		);
 		expect(gl.stencilFuncCalls).toEqual(
 			expect.arrayContaining([
-				{ func: gl.EQUAL, mask: 0xff, ref: 0xfe },
+				{ func: gl.NOTEQUAL, mask: 0xff, ref: 0xfe },
 			]),
 		);
 		expect(gl.enabledCapabilities).toContain(gl.CULL_FACE);
@@ -1257,6 +1258,10 @@ describe("V2 WebGL2 structured interior rendering", () => {
 						drawUnitId: "structured-root",
 						envCellId: 0xda550100,
 					}),
+					createStructuredInteriorDrawUnit({
+						drawUnitId: "structured-overlap",
+						envCellId: 0xda550101,
+					}),
 				],
 				portalApertureResources: [
 					createPortalApertureResource({
@@ -1278,10 +1283,26 @@ describe("V2 WebGL2 structured interior rendering", () => {
 			createDirectEnvCellPortalFrameWorkPlan({
 				baseOverlap: {
 					diagnostics: {
-						envCellCount: 0,
-						missingResourceEnvCellCount: 0,
-					},
-					envCells: [],
+					envCellCount: 0,
+					missingResourceEnvCellCount: 0,
+				},
+					envCells: [
+						{
+							envCellId: 0xda550101,
+							landblockId: 0xda55ffff,
+							reasons: [
+								{
+									apertureRangeId: "transition-aperture:root",
+									kind: "building-transition",
+								},
+							],
+							resources: {
+								envCellStaticObjectDrawUnitIds: [],
+								resourceState: "ready",
+								structuredInteriorDrawUnitIds: ["structured-overlap"],
+							},
+						},
+					],
 					overlapSignature: "exterior-seed-test",
 					requiresExteriorSeed: true,
 				},
@@ -1330,17 +1351,31 @@ describe("V2 WebGL2 structured interior rendering", () => {
 		const latestSnapshot = renderer.createDiagnosticsSnapshot();
 		expect(latestSnapshot.sceneDomainTargets).toMatchObject({
 			active: true,
+			envCellOutdoorCrossingCopyBypassed: true,
 			exteriorSeededBase: true,
 			outdoorCrossingSource: "raw-exterior",
 		});
+		expect(latestSnapshot.directEnvCellDrawCalls).toBe(2);
 		const firstSourceCopyOrder = vi.mocked(gl.drawArrays).mock
 			.invocationCallOrder[0];
 		const lastResourceDrawOrder = vi.mocked(gl.drawElements).mock
 			.invocationCallOrder.at(-1);
 		expect(firstSourceCopyOrder).toBeLessThan(lastResourceDrawOrder ?? 0);
-		expect(gl.blitFramebufferCalls).toEqual(
+		const notequalStencilCallIndex = vi
+			.mocked(gl.stencilFunc)
+			.mock.calls.findIndex(
+				([func, ref]) => func === gl.NOTEQUAL && ref === 0xfe,
+			);
+		expect(notequalStencilCallIndex).toBeGreaterThanOrEqual(0);
+		expect(gl.disabledCapabilities).toContain(gl.STENCIL_TEST);
+		expect(gl.blitFramebufferCalls).not.toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({ mask: gl.DEPTH_BUFFER_BIT }),
+			]),
+		);
+		expect(gl.stencilFuncCalls).toEqual(
+			expect.arrayContaining([
+				{ func: gl.NOTEQUAL, mask: 0xff, ref: 0xfe },
 			]),
 		);
 
@@ -2259,6 +2294,7 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		LINES: 1,
 		LINK_STATUS: 35714,
 		NEAREST: 9728,
+		NOTEQUAL: 517,
 		ONE: 1,
 		ONE_MINUS_SRC_ALPHA: 771,
 		R8: 33321,

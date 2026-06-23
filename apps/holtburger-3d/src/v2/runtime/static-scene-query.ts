@@ -1370,6 +1370,64 @@ export class StaticSceneQuery {
 		);
 	}
 
+	#queryEnvCellResidencyFromRenderSpacePoint(
+		renderPoint: Vec3,
+	): StaticSceneCameraResidency | null {
+		const candidates: {
+			readonly distance: number;
+			readonly envCellId: number;
+			readonly landblockId: number;
+		}[] = [];
+
+		for (const root of this.#envCellRootsByLandblockId.values()) {
+			const rootBounds = root.nodes[0]?.bounds;
+			if (!rootBounds) {
+				continue;
+			}
+
+			// Env-cell roots remain landblock-local; only the query point and
+			// coarse root bounds are moved through the current render-anchor
+			// translation.
+			const renderBounds = translateBounds(rootBounds, root.translation);
+			if (!containsPoint(renderBounds, renderPoint)) {
+				continue;
+			}
+
+			const envCellId = this.queryEnvCellAtPoint({
+				acceptedEnvCellIds:
+					this.#getCommittedAcceptedEnvCellIds(root.landblockId) ?? undefined,
+				landblockId: root.landblockId,
+				point: translatePoint(
+					renderPoint,
+					negateTranslation(root.translation),
+				),
+			});
+			if (envCellId === null) {
+				continue;
+			}
+
+			candidates.push({
+				distance: boundsCenterDistanceSquared(renderBounds, renderPoint),
+				envCellId,
+				landblockId: root.landblockId,
+			});
+		}
+
+		const selected = candidates.sort(
+			(left, right) =>
+				compareNumbers(left.distance, right.distance) ||
+				compareNumbers(left.landblockId, right.landblockId) ||
+				compareNumbers(left.envCellId, right.envCellId),
+		)[0];
+		return selected
+			? {
+					envCellId: selected.envCellId,
+					kind: "env-cell",
+					landblockId: selected.landblockId,
+				}
+			: null;
+	}
+
 	queryEnvCellBounds(options: {
 		readonly envCellId: number;
 		readonly landblockId: number;
@@ -1444,6 +1502,12 @@ export class StaticSceneQuery {
 		readonly outdoorAnchorLandblockId: number;
 		readonly point: Vec3;
 	}): StaticSceneCameraResidency {
+		const envCellResidency =
+			this.#queryEnvCellResidencyFromRenderSpacePoint(options.point);
+		if (envCellResidency) {
+			return envCellResidency;
+		}
+
 		const outdoorResidency = deriveOutdoorCameraLandblockResidency({
 			anchorLandblockId: options.outdoorAnchorLandblockId,
 			cameraPosition: [options.point.x, options.point.y, options.point.z],
@@ -3928,6 +3992,17 @@ function translateRay(
 			y: ray.origin.y + translation[1],
 			z: ray.origin.z + translation[2],
 		},
+	};
+}
+
+function translatePoint(
+	point: Vec3,
+	translation: readonly [number, number, number],
+): Vec3 {
+	return {
+		x: point.x + translation[0],
+		y: point.y + translation[1],
+		z: point.z + translation[2],
 	};
 }
 

@@ -4256,8 +4256,16 @@ Closed implementation notes:
   `StaticPortalInteriorRecord.envCells[].portals`. Building portal refs are not counted.
 - The legacy v1 `src/lib/world-display/world-residency-index.ts` path was intentionally left
   unchanged because V2 is replacing that frontend code.
+- Follow-up correction: `queryCameraResidencyAtPoint(...)` now tests retained committed env-cell
+  roots by translating the render-space camera point into each landblock-local root before falling
+  back to outdoor landblock derivation. Env-cell BVHs remain landblock-local across reanchors. This
+  fixes ordinary env cells whose landblock-local topology bounds cross an outdoor `192` unit
+  boundary, such as `0x1a7301f6` around `x=193`, which was previously misread as outdoor
+  `0x1b73ffff`.
 - Focused tests added:
   - runtime `StaticSceneQuery` chooses the graph-supported overlapping candidate.
+  - runtime camera residency prefers retained landblock-local env-cell containment over outdoor
+    boundary fallback after converting the render-space camera point.
 
 Post-implementation evidence:
 
@@ -4277,11 +4285,11 @@ Post-implementation evidence:
 Validation:
 
 - `npm run test:ts -- --run src/v2/runtime/static-scene-query.test.ts`
-  passed: 1 file, 48 tests.
+  passed: 1 file, 49 tests.
 - `npm run check` passed.
 - `npm run lint:ts` passed.
 - `npm run lint:dead` passed.
-- `npm run test:ts` passed: 145 files, 919 tests.
+- `npm run test:ts` passed: 145 files, 920 tests.
 
 What did not close:
 

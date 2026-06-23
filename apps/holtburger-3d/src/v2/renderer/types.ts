@@ -335,6 +335,7 @@ export type PortalFrameWorkPlan =
 	  }
 	| {
 			readonly kind: "direct-env-cell";
+			readonly baseOverlap: PortalBaseOverlapPlan;
 			readonly mode: "portal-projection";
 			readonly exteriorComposite?: PortalFrameExteriorCompositePlan;
 			readonly layeredGraph: PortalProjectionFrameGraphPlan;
@@ -427,6 +428,35 @@ export interface PortalProjectionFrameDiagnostics {
 	readonly outdoorCrossingCount: number;
 	readonly outdoorCrossingsSkippedByLayerCap: number;
 	readonly outdoorCrossingsSkippedByUnselectedTarget: number;
+}
+
+export interface PortalBaseOverlapPlan {
+	readonly diagnostics: PortalBaseOverlapDiagnostics;
+	readonly envCells: readonly PortalBaseOverlapEnvCellPlan[];
+	readonly overlapSignature: string;
+	readonly requiresExteriorSeed: boolean;
+}
+
+export interface PortalBaseOverlapEnvCellPlan {
+	readonly envCellId: number;
+	readonly landblockId: number;
+	readonly reasons: readonly PortalBaseOverlapReason[];
+	readonly resources: PortalFrameNodeResources;
+}
+
+export type PortalBaseOverlapReason =
+	| {
+			readonly apertureRangeId: string;
+			readonly kind: "env-cell-portal";
+	  }
+	| {
+			readonly apertureRangeId: string;
+			readonly kind: "building-transition";
+	  };
+
+export interface PortalBaseOverlapDiagnostics {
+	readonly envCellCount: number;
+	readonly missingResourceEnvCellCount: number;
 }
 
 export interface PortalFrameNodeResources {

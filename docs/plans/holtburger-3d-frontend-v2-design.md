@@ -1,12 +1,25 @@
-# Holtburger 3D Frontend V2 Design
+# Holtburger 3D Frontend Canonical Design
 
 ## Context
 
-The current `apps/holtburger-3d` TypeScript frontend proved several important ideas: browser-mode world inspection is useful, landblock-scoped streaming is viable, expensive preparation and baking must run off the render thread, and a WebGL2 renderer can render terrain, static objects, structured interiors, portals, indexed materials, and diagnostic overlays from Tauri-provided game data.
+This document began as the V2 frontend design, but Phase 15 cut the browser over to the canonical
+implementation on 2026-06-24. Historical sections still mention V2 and the replaced frontend where
+they record migration evidence or decisions. Active architecture language should describe the
+canonical `apps/holtburger-3d` frontend, not a parallel V2 mode.
 
-It also accumulated too much implementation debt to remain a good foundation. The broad architecture is still useful, but the code now mixes old and new models: early renderer-owned hydration, later worker-owned preparation, reactive Svelte state bridges, imperative renderer setters, diagnostics-driven interfaces, and patchwork material compaction/atlassing.
+The pre-cutover `apps/holtburger-3d` TypeScript frontend proved several important ideas:
+browser-mode world inspection is useful, landblock-scoped streaming is viable, expensive preparation
+and baking must run off the render thread, and a WebGL2 renderer can render terrain, static objects,
+structured interiors, portals, indexed materials, and diagnostic overlays from Tauri-provided game
+data.
 
-V2 should be a first-principles replacement of the TypeScript frontend, not a refactor that preserves accidental structure.
+It also accumulated too much implementation debt to remain a good foundation. The broad architecture
+was useful, but the code mixed old and new models: early renderer-owned hydration, later
+worker-owned preparation, reactive Svelte state bridges, imperative renderer setters,
+diagnostics-driven interfaces, and patchwork material compaction/atlassing.
+
+The canonical frontend is the first-principles replacement of that TypeScript frontend, not a
+refactor that preserves accidental structure.
 
 ## Goal
 
@@ -24,20 +37,25 @@ In scope:
 - Worker protocols for expensive preparation, static landblock baking, and future dynamic renderable hydration.
 - Renderer input construction and WebGL2 integration.
 - UI panels, picking, texture/resource inspection, and targeted diagnostics.
-- A migration strategy that can replace the current frontend without requiring old code as a reference.
+- A migration record for decisions that replaced the old frontend without requiring old code as a
+  reference.
 
 Out of scope:
 
 - Rewriting Rust shared crates.
 - Changing ACE, ACViewer, or client-data decoding rules.
 - Replacing Tauri as the host boundary.
-- Replacing WebGL2 with a different graphics API during the first V2 pass.
-- Designing backwards compatibility for current frontend internals.
-- Preserving current debug panels, metric fields, or diagnostic interfaces unless they prove useful in V2.
+- Replacing WebGL2 with a different graphics API during this frontend architecture pass.
+- Designing backwards compatibility for replaced frontend internals.
+- Preserving old debug panels, metric fields, or diagnostic interfaces unless they prove useful in
+  the canonical frontend.
 
-## Current System Breakdown
+## Historical System Breakdown
 
-The current implementation has these major subsystems:
+This section describes the pre-cutover implementation that Phase 15 removed from active app source.
+It is retained as historical evidence and anti-requirements, not as the current architecture.
+
+The pre-cutover implementation had these major subsystems:
 
 - `App.svelte`: composition root for asset store, asset worker channel, scene streamer, landblock render-product coordinator, scene runtime, and browser page.
 - `src/app`: browser-mode state, location parsing, LOD settings, asset presentation state, and Svelte store facade.
@@ -46,15 +64,18 @@ The current implementation has these major subsystems:
 - `src/workers/asset-worker.ts`: worker-side generic asset preparation.
 - `src/workers/static-landblock-render-worker.ts`: worker-side landblock render-product construction.
 - `src/lib/world-display`: renderer contracts, scene derivation, render product stores, WebGL2 resources, material planning, texture pages, compaction, portal work, BVH/picking, diagnostics, and `WorldDisplay.svelte`.
-- `src/pages`: browser-mode Svelte components that currently bridge app state, renderer state, asset diagnostics, camera controls, picking, texture previews, and debug panels.
+- `src/pages`: browser-mode Svelte components that bridged app state, renderer state, asset
+  diagnostics, camera controls, picking, texture previews, and debug panels.
 
 The dominant structural problem is not that these concepts exist. It is that their ownership is unclear and much of the code is organized around the `WorldDisplay` component even when it represents independent client services.
 
-## Current Design Topology
+## Historical Design Topology
 
-This section describes the current frontend as it exists today. It is not a proposed design. Its purpose is to make the old system legible enough that V2 can keep the useful requirements and discard the accidental shape.
+This section describes the replaced frontend as it existed before the canonical cutover. It is not a
+proposed design. Its purpose is to make the old system legible enough that the canonical frontend can
+keep useful requirements and discard accidental shape.
 
-Primary source files:
+Historical primary source files:
 
 - `src/App.svelte`
 - `src/app/frontend-state.ts`
@@ -1312,7 +1333,7 @@ Worker output should use bake-local typed texture-use IDs rather than renderer t
 
 ### Static BVH And Spatial Metadata
 
-The current implementation has separate BVH/spatial concepts that should stay separate in V2:
+The frontend architecture has separate BVH/spatial concepts that should stay separate:
 
 - Prepared source BVHs: terrain BVH, outdoor static BVH, landblock-wide env-cell BVH, and env-cell local BVHs.
 - Resolver/source-query records: preserved prepared BVH nodes/items, object/cell/static-seed bindings, portal refs, accepted/visible cell sets, and source spatial facts that can feed runtime queries before bake/materialization.
@@ -1320,25 +1341,50 @@ The current implementation has separate BVH/spatial concepts that should stay se
 - Static scene query state: live semantic picking, visibility-query, portal traversal, and future culling inputs derived from source-query records and committed static deltas.
 - Renderer visibility state: draw submission state derived from runtime/static-scene visibility decisions and committed renderer deltas.
 
-V2 static/source-query deltas should include runtime-ingestible spatial metadata rather than forcing the renderer or browser UI to pull prepared assets for BVH queries. Resolver workers preserve host/prepared BVHs and source spatial facts; baker workers produce draw/source mappings and BVH item bindings for baked output; the runtime-owned static scene query builds and owns live semantic picking/visibility structures from those records. Normal object picking should traverse preserved outdoor/env-cell BVHs and use runtime-owned root transforms for scene anchoring/rebasing. Draw-unit or frontend-computed bounds are diagnostic output facts, not semantic picking fallbacks; if a source object is not reachable through its prepared/source BVH, V2 should treat it as non-queryable and surface diagnostics. The renderer may later mirror a reduced acceleration structure for draw submission, but it is not the semantic owner of AC object, material, env-cell, or portal identity.
+Static/source-query deltas should include runtime-ingestible spatial metadata rather than forcing the
+renderer or browser UI to pull prepared assets for BVH queries. Resolver workers preserve
+host/prepared BVHs and source spatial facts; baker workers produce draw/source mappings and BVH item
+bindings for baked output; the runtime-owned static scene query builds and owns live semantic
+picking/visibility structures from those records. Normal object picking should traverse preserved
+outdoor/env-cell BVHs and use runtime-owned root transforms for scene anchoring/rebasing. Draw-unit
+or frontend-computed bounds are diagnostic output facts, not semantic picking fallbacks; if a source
+object is not reachable through its prepared/source BVH, the canonical frontend should treat it as
+non-queryable and surface diagnostics. The renderer may later mirror a reduced acceleration
+structure for draw submission, but it is not the semantic owner of AC object, material, env-cell, or
+portal identity.
 
 The env-cell bundle should expose two BVH layers. The landblock-wide env-cell BVH is the coarse residency and candidate-selection structure: its items are env-cell-grained records with bounds in the bundle's implied landblock/env-cell-root space. Each env cell then exposes a local BVH over that cell's cell-structure geometry, static seeds, and env-cell-local portal apertures in implied env-cell-local space. Portal walking is a semantic visibility layer over the candidate/resident cells; it does not replace the landblock-wide BVH needed to establish initial residency or broad query candidates. DTO field ownership implies the spatial space, so V2 env-cell DTOs should not carry `coordinateSpace` decoration except at temporary compatibility boundaries. Building-sourced outdoor transition aperture masks live outside this env-cell-local BVH ownership path and are retained with outdoor building residency.
 
-### Portal Renderer Course Correction
+### Portal Renderer Architecture
 
-V2 interior rendering should be portal traversal driven, not whole-domain interior rendering. The dedicated implementation plan is [holtburger-3d-v2-portal-renderer-course-correction-plan.md](holtburger-3d-v2-portal-renderer-course-correction-plan.md).
+Canonical interior rendering is portal traversal driven, not whole-domain interior rendering. The
+historical course-correction plan is
+[holtburger-3d-v2-portal-renderer-course-correction-plan.md](holtburger-3d-v2-portal-renderer-course-correction-plan.md).
 
-The course correction preserves the existing V2 source and bake ownership model:
+The portal renderer preserves the source and bake ownership model:
 
 - `landblock-env-cells` remains the landblock-owned source domain for outdoor-linked interiors and pure dungeon landblocks.
 - Static resolver and baker output remains source/bake truth: draw units, texture uses, spatial records, visibility records, portal/interior records, source mappings, and dynamic seeds.
 - Texture/atlas ownership remains batch-scoped, while draw units remain landblock/env-cell scoped.
 - Runtime/static-scene query remains the semantic owner of env-cell, portal, BVH, source-mapping, picking, and visibility facts.
-- Renderer owns GPU resources and drawing, but it should receive explicit frame plans or equivalent visibility updates rather than inferring AC portal semantics from source DTOs.
+- Renderer owns GPU resources and drawing, but it receives explicit frame plans or equivalent
+  visibility updates rather than inferring AC portal semantics from source DTOs.
 
-The missing durable concept is env-cell render visibility membership. Resident structured-interior and env-cell static-object resources must be addressable by owning env cell at frame-submission time. This does not imply one host request, atlas batch, or source bake per env cell. It means the renderer or materializer must preserve enough membership indexing or draw-slice data for a portal traversal result to submit env cell A without also submitting unrelated resident env cell B. The WebGL2 renderer exposes the current minimal form as `RendererEnvCellResourceMembership`: structured-interior draw-unit ids, env-cell static-object draw-unit ids, and the count of shared static-object draw units for each resident landblock/env-cell pair.
+The durable concept is env-cell render visibility membership. Resident structured-interior and
+env-cell static-object resources must be addressable by owning env cell at frame-submission time.
+This does not imply one host request, atlas batch, or source bake per env cell. It means the renderer
+or materializer must preserve enough membership indexing or draw-slice data for a portal traversal
+result to submit env cell A without also submitting unrelated resident env cell B. The WebGL2
+renderer exposes this as `RendererEnvCellResourceMembership`: structured-interior draw-unit ids,
+env-cell static-object draw-unit ids, and the count of shared static-object draw units for each
+resident landblock/env-cell pair.
 
-Production interior rendering should start from camera/current env-cell residency and traverse committed env-cell portal records to produce a bounded per-frame reachable-cell plan. That plan should carry the reachable env cells, traversal depth, portal aperture stack, scene-domain crossings, and rejection/truncation diagnostics needed by renderer execution and browser inspection. Browser-only flat resident interior rendering may remain as an explicit diagnostic mode, but it is not the production or future-client architecture.
+Production interior rendering starts from camera/current env-cell residency and traverses committed
+env-cell portal records to produce a bounded per-frame reachable-cell plan. That plan carries the
+reachable env cells, traversal depth, portal aperture stack, scene-domain crossings, and
+rejection/truncation diagnostics needed by renderer execution and browser inspection. Browser-only
+flat resident interior rendering may remain as an explicit diagnostic mode, but it is not the
+production or future-client architecture.
 
 Traversal must not collapse portal rendering to unique env cells too early. Env-cell resources are
 deduped by owning cell for residency and draw-resource lookup, but portal execution needs a
@@ -1348,29 +1394,25 @@ under the merged mask. The same target env cell may still need multiple portal v
 is reached through distinct parent portal-stack contexts. `already-visible` edges are therefore
 render-relevant aperture facts until they have been folded into a view group or explicitly capped.
 
-The renderer-facing frame contract is `PortalFrameWorkPlan`. It is deliberately separate from the
-legacy `RenderPassPlan` while the renderer migrates. `RenderPassPlan` still describes the current
-execution path: single-surface resident drawing or the legacy two-scene-domain transition
-compositor. `PortalFrameWorkPlan` describes the intended portal frame shape:
+The renderer-facing frame contract is `PortalFrameWorkPlan`. It is the production portal-frame
+shape:
 
-- `legacy-render-pass` records whether the current frame is single-surface resident drawing, flat
-  resident diagnostics, or legacy scene-domain compositing.
 - `direct-env-cell` records an outdoor offscreen target or direct env-cell base scene, direct
   env-cell draw requests, traversal depth, portal stack identity, resource availability, selected
-  portal-aperture geometry resources, aperture mask passes, and transition aperture batches as
+  portal-aperture geometry resources, aperture mask passes, and transition crossings as
   outdoor/env-cell scene-domain crossings.
+- `legacy-render-pass` is retained only where diagnostics need to label historical or flat-resident
+  behavior. It must not become a second production execution path.
 
-This split lets runtime and diagnostics expose the future portal contract before WebGL execution has
-fully moved over. It must not become two long-term production render paths. Once direct env-cell
-drawing is the production path, the legacy scene-domain interior compositor should be removed or
-kept only as an explicitly named diagnostic.
+Runtime and diagnostics may still report historical render-pass labels, but direct env-cell portal
+execution is the production path. The legacy scene-domain interior compositor should remain removed
+or explicitly diagnostic-only.
 
-This does not require a full frame visibility pipeline before the portal-renderer cutover. The
-minimum production model is camera residency plus bounded portal reachability plus direct env-cell
-submission. Screen-footprint pruning, narrowed child frusta, and literal clipping against portal
-polygons are optional later tools if reachability and aperture masks prove insufficient.
+The minimum production model is camera residency plus bounded portal reachability plus direct
+env-cell submission. Screen-footprint pruning, narrowed child frusta, and literal clipping against
+portal polygons are optional later tools if reachability and aperture masks prove insufficient.
 
-Portal aperture geometry is reusable resource data, not production visibility policy. V2 may
+Portal aperture geometry is reusable resource data, not production visibility policy. The renderer may
 deduplicate uploaded portal polygon vertex/index ranges by canonicalized transformed geometry,
 because reciprocal and duplicate portal polygons are common. It must still preserve distinct
 per-edge semantics for traversal: source env cell, target endpoint, portal ids, flags, face policy,
@@ -1395,13 +1437,12 @@ Outdoor and env-cell execution should not be symmetric. Outdoor terrain, buildin
 
 Outdoor-to-indoor and indoor-to-outdoor transition portals are scene-domain crossings in the portal model, not a separate visibility universe. Building-sourced transition aperture geometry remains the mask authority for building portals. Env-cell outside-transition records remain traversal/query/debug metadata unless a later evidence pass proves a non-building transition case that needs them as mask geometry.
 
-The first transition-unification slice supports outdoor-base transition frames through the shared
-portal executor. Runtime can convert building-sourced `TransitionApertureBatch` ranges into
-selected portal aperture resources and mask passes whose source is an outdoor target and whose
-targets are linked direct env-cell roots. The linked env-cell root then seeds the same env-cell
-portal traversal and grouped aperture-mask recursion used by pure interiors. This means
-outdoor-to-indoor rendering no longer needs to draw a broad all-resident interior scene target for
-the supported direct path.
+Transition unification routes outdoor-base transition frames through the shared portal executor.
+Runtime converts building-sourced transition aperture facts into selected portal aperture resources
+and mask passes whose source is an outdoor target and whose targets are linked direct env-cell roots.
+The linked env-cell root then seeds the same env-cell portal traversal and grouped aperture-mask
+recursion used by pure interiors. This means outdoor-to-indoor rendering does not draw a broad
+all-resident interior scene target for the supported direct path.
 
 Production portal aperture resources are selected-edge resources, not transition-specific renderer
 batches. The frame planner feeds env-cell portal apertures and building-sourced transition
@@ -1409,18 +1450,17 @@ apertures through one selected aperture builder, which emits deduped
 `PortalApertureGeometryResourcePlan` entries, `PortalApertureMaskPass` records, and aperture
 diagnostics. Geometry resources carry source categories such as `env-cell-portal` and
 `building-transition`; mask passes carry selected-edge metadata such as source id, source kind,
-stack ids, and cull mode. `TransitionApertureBatch` may remain a static/source DTO, legacy fallback
-input, or debug overlay input, but direct portal execution should consume only the unified selected
-aperture resources in `PortalFrameWorkPlan`.
+stack ids, and cull mode. `TransitionApertureBatch` is historical/source-provenance vocabulary, not
+a production renderer input. Direct portal execution consumes only the unified selected aperture
+resources in `PortalFrameWorkPlan`.
 
 `PortalTransitionSceneCrossing` records both `apertureBatchId` and `aperturePortalId` so transition
 crossings can remain selected-edge facts even when their source data came from a building aperture
 batch. Batch identity is source provenance, not the production draw unit.
 
-Indoor-to-outdoor and outdoor -> indoor -> outdoor composition still need explicit scene-source copy
-work. The outdoor target is now the correct reusable source, but interior-origin return-to-outdoor
-passes should be added to the shared executor rather than reviving the legacy two-surface transition
-compositor as a second architecture.
+Indoor-to-outdoor and outdoor -> indoor -> outdoor composition use explicit scene-source copy work.
+The outdoor target is the reusable source, and interior-origin return-to-outdoor passes belong in
+the shared executor rather than a revived two-surface transition compositor.
 
 The WebGL2 renderer should carry forward the portal depth-copy lesson: aperture coverage must prefer framebuffer depth transfer and fixed-function depth/stencil behavior where WebGL2 can express it. Shader-side sampled-depth comparisons should not become the authority for portal aperture coverage.
 
@@ -1654,3 +1694,7 @@ Mitigation: when semantics are uncertain, verify against ACE, ACViewer, checked-
 - 2026-06-19: V2 interior rendering should course-correct to a proper portal renderer. Env cells become first-class render visibility nodes for frame submission, portal traversal becomes the authority for production interior visibility, and whole-domain/flat resident interior drawing is retained only as an explicit diagnostic mode. Outdoor scene-domain rendering may use an offscreen target because exterior scenes are broad and expensive, but env cells should be drawn directly on demand during portal compositing rather than pre-rendered as one interior source target. Transition portals remain scene-domain crossings in the same portal model, with building-sourced aperture geometry as the mask authority for building portals.
 - 2026-06-20: A temporary env-cell portal/aperture polygon-id filter in structured-interior baking was reverted after it removed visible ceiling geometry in a large subdivided dungeon. Portal metadata should drive aperture mask resources and traversal grouping, not blanket suppression of source cell-structure polygons.
 - 2026-06-20: Portal rendering needs a portal-view/group layer in addition to unique reachable env cells. Same-context multi-aperture links to one target env cell should merge into one stencil region and draw the target once; distinct parent portal-stack contexts remain distinct views even if they target the same env cell.
+- 2026-06-24: Phase 15 cut over the browser implementation to canonical source paths and deleted the
+  replaced `WorldDisplay`, `src/v2`, old prepared-asset/render-product pipeline, and old worker
+  architecture from active app source. Design language after this point should treat direct portal
+  execution as current architecture, not a future V2 harness.

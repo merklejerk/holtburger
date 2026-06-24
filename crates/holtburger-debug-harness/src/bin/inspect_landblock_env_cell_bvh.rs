@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 use holtburger_content::{
-    normalize_landblock_id, ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler,
-    PreparedAabb, PreparedVec3,
+    ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler, PreparedAabb,
+    PreparedVec3, normalize_landblock_id,
 };
 use holtburger_dat::graphics::Frame;
 use holtburger_dat::physics::BspNode;
@@ -629,7 +629,11 @@ fn report_portal_reachability_layers(
         edges.len(),
         reciprocal_edges,
         render_layer_by_env_cell_id.len(),
-        render_layer_by_env_cell_id.values().max().copied().unwrap_or(0),
+        render_layer_by_env_cell_id
+            .values()
+            .max()
+            .copied()
+            .unwrap_or(0),
         max_depth,
         selected_non_root_cells,
         skipped_by_depth,

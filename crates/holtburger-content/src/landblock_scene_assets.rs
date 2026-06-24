@@ -9,7 +9,7 @@ use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE};
 use crate::material_variants::legacy_sampler_material_variant_signature;
 use crate::source_reader::ContentSourceReader;
 use crate::static_outdoor_scene::{StaticOutdoorScene, StaticOutdoorSceneAssembler};
-use crate::{normalize_landblock_id, ContentDecodeCache, ContentRepository};
+use crate::{ContentDecodeCache, ContentRepository, normalize_landblock_id};
 
 pub const LANDBLOCK_GRID_SIZE: usize = 9;
 pub const LANDBLOCK_TILE_SIZE: f32 = 24.0;
@@ -3181,11 +3181,7 @@ fn render_vector_to_ac_space(vector: PreparedVec3) -> holtburger_common::Vector3
 
 fn scale_normal_component(value: f32, scale: f32) -> f32 {
     let scaled = value * scale;
-    if scaled == 0.0 {
-        0.0
-    } else {
-        scaled
-    }
+    if scaled == 0.0 { 0.0 } else { scaled }
 }
 
 fn normalize_surface_id(surface_id: i16) -> Option<i16> {

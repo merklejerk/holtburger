@@ -4,11 +4,12 @@ import {
 	assetLookupResponseDtoSchema,
 	type AssetLookupResponseDto,
 } from "./contracts";
-import { formatLegacySamplerMaterialVariantSignature } from "../assets/material-variants";
 
 const HEADER_LENGTH = 16;
 const MAGIC = "HBAB";
 const VERSION = 1;
+const SAMPLER_CLAMP_MATERIAL_VARIANT_SIGNATURE = "sampler=clamp";
+const SAMPLER_REPEAT_MATERIAL_VARIANT_SIGNATURE = "sampler=repeat";
 
 const binarySectionScalarTypeSchema = z.enum(["f32", "i32", "u8", "u32"]);
 
@@ -284,10 +285,10 @@ function decodeBinarySection(
 
 function decodeMaterialVariantSignature(code: number): string | null {
 	if (code === 1) {
-		return formatLegacySamplerMaterialVariantSignature("clamp");
+		return SAMPLER_CLAMP_MATERIAL_VARIANT_SIGNATURE;
 	}
 	if (code === 2) {
-		return formatLegacySamplerMaterialVariantSignature("repeat");
+		return SAMPLER_REPEAT_MATERIAL_VARIANT_SIGNATURE;
 	}
 	return null;
 }

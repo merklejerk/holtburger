@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 use holtburger_content::{
-    normalize_landblock_id, ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler,
-    LandblockOutdoorAssetAssembler, PreparedAabb, PreparedVec3,
+    ContentDecodeCache, ContentRepository, LandblockEnvCellsAssetAssembler,
+    LandblockOutdoorAssetAssembler, PreparedAabb, PreparedVec3, normalize_landblock_id,
 };
 use holtburger_dat::graphics::Frame;
 use std::collections::{BTreeMap, BTreeSet};
@@ -240,12 +240,12 @@ fn report_building_transition_aperture_alignment(
         );
     }
     println!(
-		"buildingTransitionApertureAlignment landblock=0x{landblock_id:08x} apertures={} matched={} mismatched={} missing={}",
-		apertures.len(),
-		matched,
-		mismatched,
-		missing
-	);
+        "buildingTransitionApertureAlignment landblock=0x{landblock_id:08x} apertures={} matched={} mismatched={} missing={}",
+        apertures.len(),
+        matched,
+        mismatched,
+        missing
+    );
 }
 
 fn print_aperture_alignment_missing(
@@ -254,9 +254,9 @@ fn print_aperture_alignment_missing(
     target_portal_index: usize,
 ) {
     println!(
-		"missingTargetAperture aperture={} building={} portal={} targetEnvCell=0x{target_env_cell_id:08x} targetPortalIndex={target_portal_index}",
-		aperture.aperture_id, aperture.building_instance_id, aperture.building_portal_id
-	);
+        "missingTargetAperture aperture={} building={} portal={} targetEnvCell=0x{target_env_cell_id:08x} targetPortalIndex={target_portal_index}",
+        aperture.aperture_id, aperture.building_instance_id, aperture.building_portal_id
+    );
 }
 
 fn print_aperture_alignment_mismatch(
@@ -266,17 +266,17 @@ fn print_aperture_alignment_mismatch(
     target_portal_index: usize,
 ) {
     println!(
-		"mismatchedTargetAperture aperture={} building={} portal={} targetEnvCell=0x{target_env_cell_id:08x} targetPortalIndex={} targetPortal={} buildingBounds={} envBounds={} buildingKey={} envKey={}",
-		aperture.aperture_id,
-		aperture.building_instance_id,
-		aperture.building_portal_id,
-		target_portal_index,
-		format_env_aperture_summary(env_aperture),
-		format_bounds(&bounds_for_points(&aperture.points)),
-		format_bounds(&bounds_for_points(&env_aperture.points)),
-		ordered_point_set_key(&aperture.points),
-		ordered_point_set_key(&env_aperture.points),
-	);
+        "mismatchedTargetAperture aperture={} building={} portal={} targetEnvCell=0x{target_env_cell_id:08x} targetPortalIndex={} targetPortal={} buildingBounds={} envBounds={} buildingKey={} envKey={}",
+        aperture.aperture_id,
+        aperture.building_instance_id,
+        aperture.building_portal_id,
+        target_portal_index,
+        format_env_aperture_summary(env_aperture),
+        format_bounds(&bounds_for_points(&aperture.points)),
+        format_bounds(&bounds_for_points(&env_aperture.points)),
+        ordered_point_set_key(&aperture.points),
+        ordered_point_set_key(&env_aperture.points),
+    );
 }
 
 fn report_duplicate_building_transition_apertures(

@@ -19,7 +19,6 @@
 		"profile": "bash scripts/profile.sh",
 		"tauri": "tauri",
 		"tauri:dev": "tauri dev",
-		"tauri:dev:v2": "tauri dev --config '{\"build\":{\"devUrl\":\"http://127.0.0.1:1420/browser-v2\"}}'",
 		"tauri:build": "tauri build"
 	},
 	"devDependencies": {

@@ -36,7 +36,6 @@
 	import type {
 		ClientRuntime,
 		ManualStaticDomain,
-		PortalDebugOverlayMode,
 		RuntimeCameraResidency,
 		RuntimeEvent,
 		RuntimeSceneInterestSource,
@@ -123,7 +122,6 @@
 	);
 	let flatVisionModeEnabled = $state(false);
 	let envCellResourceInspectionInput = $state("");
-	let portalDebugOverlayMode = $state<PortalDebugOverlayMode>("both");
 	let terrainRadius = $state(DEFAULT_TERRAIN_LOD_RADIUS);
 	let buildingRadius = $state(DEFAULT_BUILDING_LOD_RADIUS);
 	let detailRadius = $state(DEFAULT_DETAIL_LOD_RADIUS);
@@ -149,11 +147,34 @@
 		fps: 0,
 		frameMs: 0,
 		handlerMs: 0,
+		extrapolatedFps: 0,
 	});
 	const performanceMetricsTracker = new PerformanceMetricsTracker({
 		emaAlpha: PERF_OVERLAY_EMA_ALPHA,
 		sampleMs: PERF_OVERLAY_SAMPLE_MS,
 	});
+
+	let copiedField = $state<string | null>(null);
+	let copyTimeout: number | null = null;
+
+	function copyToClipboard(value: string, label: string): void {
+		navigator.clipboard
+			.writeText(value)
+			.then(() => {
+				copiedField = label;
+				if (copyTimeout) {
+					window.clearTimeout(copyTimeout);
+				}
+				copyTimeout = window.setTimeout(() => {
+					copiedField = null;
+					copyTimeout = null;
+				}, 1500);
+			})
+			.catch((err) => {
+				console.error("Failed to copy to clipboard", err);
+			});
+	}
+
 	const parsedLocation = $derived(
 		parseLocationInput(locationInput, landblockInputMode),
 	);
@@ -178,7 +199,6 @@
 			runtime.setEnvCellPortalDebugOverlayVisible(envCellPortalDebugVisible);
 			runtime.setDirectEnvCellPortalMaxDepth(directEnvCellPortalMaxDepth);
 			runtime.setFlatVisionModeEnabled(flatVisionModeEnabled);
-			runtime.setPortalDebugOverlayMode(portalDebugOverlayMode);
 			cameraController = new BrowserCameraController({
 				initialState: cameraState,
 				onChange(nextCameraState) {
@@ -462,12 +482,6 @@
 			(event.currentTarget as HTMLInputElement).value,
 		);
 		runtime?.setDirectEnvCellPortalMaxDepth(directEnvCellPortalMaxDepth);
-	}
-
-	function handlePortalDebugModeChange(event: Event): void {
-		portalDebugOverlayMode = (event.currentTarget as HTMLSelectElement)
-			.value as PortalDebugOverlayMode;
-		runtime?.setPortalDebugOverlayMode(portalDebugOverlayMode);
 	}
 
 	function cancelPendingCameraFocus(status: CameraFocusStatus): void {
@@ -1182,56 +1196,6 @@
 		return `${overlap.kind} cells ${overlap.baseOverlapEnvCellIds.length} boundaries ${overlap.boundaries.length} primary ${diagnostics.primaryAcceptedBoundaryCount}/${diagnostics.primaryCandidateCount} one-hop ${diagnostics.oneHopAcceptedBoundaryCount}/${diagnostics.oneHopCandidateCount} seeds ${diagnostics.oneHopSeedEnvCellCount} capped ${diagnostics.oneHopTraversalCapped ? "yes" : "no"}`;
 	}
 
-	function formatPortalBaseCompositionDiagnostics(
-		snapshot: RuntimeSnapshot,
-	): string {
-		const plan = snapshot.portalFrameWorkPlan;
-		const renderer = snapshot.renderer;
-		const targets = renderer.sceneDomainTargets;
-		const overlap = snapshot.currentPortalOverlapResidency;
-		const overlapDiagnostics = overlap.diagnostics;
-		if (plan.kind !== "direct-env-cell" || plan.mode !== "portal-projection") {
-			return `plan=${plan.kind} residency=${formatCameraResidency(snapshot.currentCameraResidency)} source=${targets.outdoorCrossingSource} colorBase=${targets.envCellOutdoorCrossingColorBase} directDraws=${renderer.directEnvCellDrawCalls}`;
-		}
-		const graph = plan.layeredGraph;
-		const base =
-			graph.baseEntry.scene.kind === "outdoor-target"
-				? `outdoor:${formatHexId(graph.baseEntry.scene.landblockId)}`
-				: `env:${formatHexId(graph.baseEntry.scene.envCellId)}`;
-		const baseResources =
-			"resources" in graph.baseEntry
-				? formatPortalResourceCounts(graph.baseEntry.resources)
-				: "none";
-		const overlapCells =
-			plan.baseOverlap.envCells
-				.map(
-					(envCell) =>
-						`${formatHexId(envCell.envCellId)}:${formatPortalResourceCounts(envCell.resources)}:${envCell.reasons.map((reason) => reason.kind).join("+") || "unknown"}`,
-				)
-				.join(",") || "none";
-		const renderEntries =
-			graph.renderEntries
-				.map(
-					(entry) =>
-						`${formatHexId(entry.envCellId)}@${entry.renderLayer}:${formatPortalResourceCounts(entry.resources)}:m${entry.incomingMaskEdgeIds.length}`,
-				)
-				.join(",") || "none";
-		const outdoorCrossings =
-			graph.outdoorCrossings
-				.map(
-					(crossing) =>
-						`${crossing.crossingId}->${formatHexId(crossing.targetEnvCellId)}`,
-				)
-				.join(",") || "none";
-		return `residency=${formatCameraResidency(snapshot.currentCameraResidency)} base=${base} source=${targets.outdoorCrossingSource} colorBase=${targets.envCellOutdoorCrossingColorBase} directDraws=${renderer.directEnvCellDrawCalls} exteriorDraws=${targets.exteriorDrawCalls} suffix=${targets.exteriorSuffixCompositePasses}/${targets.exteriorSuffixCompositeDepth} baseRes=${baseResources} overlapReqExterior=${plan.baseOverlap.requiresExteriorSeed} overlapCells=${overlapCells} renderEntries=${renderEntries} outdoorCrossings=${outdoorCrossings} masks=${graph.maskEdges.length} overlapRuntime=${overlap.kind}:${overlap.baseOverlapEnvCellIds.map(formatHexId).join(",") || "none"} primary=${overlapDiagnostics.primaryAcceptedBoundaryCount}/${overlapDiagnostics.primaryCandidateCount} oneHop=${overlapDiagnostics.oneHopAcceptedBoundaryCount}/${overlapDiagnostics.oneHopCandidateCount}`;
-	}
-
-	function formatPortalResourceCounts(
-		resources: PortalFrameNodeResources,
-	): string {
-		return `${resources.resourceState}:${resources.structuredInteriorDrawUnitIds.length}cell/${resources.envCellStaticObjectDrawUnitIds.length}static`;
-	}
-
 	function currentCameraEnvCellResourceTarget(): {
 		readonly envCellId: number;
 		readonly landblockId: number;
@@ -1311,6 +1275,21 @@
 	onpointerupcapture={handleViewportPointerUp}
 	onwheelcapture={handleViewportWheel}
 >
+	{#snippet copyOverlay(value: string, label: string)}
+		<button
+			class="browser-display__copy-overlay"
+			class:copied={copiedField === label}
+			title="Copy {label}"
+			type="button"
+			onclick={(e) => {
+				e.stopPropagation();
+				copyToClipboard(value, label);
+			}}
+		>
+			<span>{copiedField === label ? "Copied!" : "Copy"}</span>
+		</button>
+	{/snippet}
+
 	<canvas bind:this={canvasElement} class="browser-display__canvas"></canvas>
 
 	<PerformanceOverlay metrics={performanceMetrics} />
@@ -1612,6 +1591,12 @@
 									? "single dungeon landblock"
 									: `${countOutdoorSceneLodTiles(terrainRadius)} terrain tiles max`}
 							</dd>
+							{@render copyOverlay(
+								parsedIsInterior
+									? "single dungeon landblock"
+									: `${countOutdoorSceneLodTiles(terrainRadius)} terrain tiles max`,
+								"Coverage",
+							)}
 						</div>
 					</dl>
 
@@ -1694,26 +1679,8 @@
 							oninput={handleDirectEnvCellPortalMaxDepthInput}
 						/>
 					</label>
-					<label class="browser-display__field">
-						<span>Portal overlay</span>
-						<select
-							bind:value={portalDebugOverlayMode}
-							disabled={!runtime}
-							onchange={handlePortalDebugModeChange}
-						>
-							<option value="both">Both directions</option>
-							<option value="outdoor-to-indoor">Outdoor to indoor</option>
-							<option value="indoor-to-outdoor">Indoor to outdoor</option>
-						</select>
-					</label>
 
 					<dl class="browser-display__status">
-						<div>
-							<dt>Filtering</dt>
-							<dd>
-								{snapshot?.renderPolicy.textureFilteringMode ?? "starting"}
-							</dd>
-						</div>
 						<div>
 							<dt>Static</dt>
 							<dd>
@@ -1725,10 +1692,12 @@
 									pending
 								{/if}
 							</dd>
-						</div>
-						<div>
-							<dt>Status</dt>
-							<dd>{snapshot?.status ?? "starting"}</dd>
+							{@render copyOverlay(
+								snapshot
+									? `r${snapshot.static.revision} req ${snapshot.static.requested} res ${snapshot.static.resolving} bake ${snapshot.static.baking} commit ${snapshot.static.committed}`
+									: "pending",
+								"Static",
+							)}
 						</div>
 						<div>
 							<dt>Scene query</dt>
@@ -1741,14 +1710,27 @@
 									pending
 								{/if}
 							</dd>
+							{@render copyOverlay(
+								snapshot
+									? `out ${snapshot.staticSceneQuery.outdoorRecordCount} env ${snapshot.staticSceneQuery.envCellRecordCount} lb ${snapshot.staticSceneQuery.envCellLandblockCount}`
+									: "pending",
+								"Scene query",
+							)}
 						</div>
 						<div class="browser-display__status-row--action">
 							<dt>Selected static</dt>
 							<dd>
-								<span>
+								<span class="browser-display__copy-target">
 									{formatStaticPickSummary(
 										selectedStaticSelectionKey,
 										selectedStaticPickDistance,
+									)}
+									{@render copyOverlay(
+										formatStaticPickSummary(
+											selectedStaticSelectionKey,
+											selectedStaticPickDistance,
+										),
+										"Selected static",
 									)}
 								</span>
 								<button
@@ -1761,10 +1743,6 @@
 							</dd>
 						</div>
 						<div>
-							<dt>Host</dt>
-							<dd>{snapshot?.host.isAvailable ? "tauri" : "unavailable"}</dd>
-						</div>
-						<div>
 							<dt>Assets</dt>
 							<dd>
 								{#if snapshot}
@@ -1774,10 +1752,12 @@
 									pending
 								{/if}
 							</dd>
-						</div>
-						<div>
-							<dt>Renderer</dt>
-							<dd>{snapshot?.renderer.backend ?? "none"}</dd>
+							{@render copyOverlay(
+								snapshot
+									? `p${snapshot.assets.pending.length} c${snapshot.assets.committed.length}`
+									: "pending",
+								"Assets",
+							)}
 						</div>
 						<div>
 							<dt>Terrain payload</dt>
@@ -1795,6 +1775,12 @@
 									none
 								{/if}
 							</dd>
+							{@render copyOverlay(
+								snapshot?.static.latestTerrainPayload
+									? `lb ${snapshot.static.latestTerrainPayload.landblockId.toString(16).padStart(8, "0")} region ${snapshot.static.latestTerrainPayload.regionNumber} mesh ${snapshot.static.latestTerrainPayload.vertexCount}v/${snapshot.static.latestTerrainPayload.triangleCount}t tex ${snapshot.static.latestTerrainPayload.textureUseCount} missing ${snapshot.static.latestTerrainPayload.missingRefCount}`
+									: "none",
+								"Terrain payload",
+							)}
 						</div>
 						<div>
 							<dt>Env-cell payload</dt>
@@ -1823,6 +1809,12 @@
 									none
 								{/if}
 							</dd>
+							{@render copyOverlay(
+								snapshot?.static.latestLandblockEnvCellsPayload
+									? `lb ${snapshot.static.latestLandblockEnvCellsPayload.landblockId.toString(16).padStart(8, "0")} cells ${snapshot.static.latestLandblockEnvCellsPayload.envCellCount} accepted ${snapshot.static.latestLandblockEnvCellsPayload.acceptedEnvCellCount} visible ${snapshot.static.latestLandblockEnvCellsPayload.visibleCellCount} portals ${snapshot.static.latestLandblockEnvCellsPayload.portalCount} links ${snapshot.static.latestLandblockEnvCellsPayload.portalLinkCount} seeds ${snapshot.static.latestLandblockEnvCellsPayload.staticObjectSeedCount} missing ${snapshot.static.latestLandblockEnvCellsPayload.missingRefCount}`
+									: "none",
+								"Env-cell payload",
+							)}
 						</div>
 						<div>
 							<dt>Camera</dt>
@@ -1831,6 +1823,10 @@
 								{cameraState.yawRadians.toFixed(2)} pitch
 								{cameraState.pitchRadians.toFixed(2)}
 							</dd>
+							{@render copyOverlay(
+								`${formatCameraPosition(cameraState.position)} yaw ${cameraState.yawRadians.toFixed(2)} pitch ${cameraState.pitchRadians.toFixed(2)}`,
+								"Camera",
+							)}
 						</div>
 						<div>
 							<dt>Camera residency</dt>
@@ -1839,6 +1835,12 @@
 									? formatCameraResidency(snapshot.currentCameraResidency)
 									: "pending"}
 							</dd>
+							{@render copyOverlay(
+								snapshot
+									? formatCameraResidency(snapshot.currentCameraResidency)
+									: "pending",
+								"Camera residency",
+							)}
 						</div>
 						<div>
 							<dt>Camera env resources</dt>
@@ -1849,32 +1851,32 @@
 										)
 									: "pending"}
 							</dd>
-						</div>
-						<div>
-							<dt>Portal frame</dt>
-							<dd>
-								{snapshot
-									? formatPortalFrameWorkPlan(snapshot.portalFrameWorkPlan)
-									: "pending"}
-							</dd>
-						</div>
-						<div>
-							<dt>Portal overlap</dt>
-							<dd>
-								{snapshot
-									? formatPortalOverlapResidency(
-											snapshot.currentPortalOverlapResidency,
+							{@render copyOverlay(
+								snapshot
+									? formatEnvCellResourceMembership(
+											currentCameraEnvCellResourceTarget(),
 										)
-									: "pending"}
-							</dd>
+									: "pending",
+								"Camera env resources",
+							)}
 						</div>
 						<div>
-							<dt>Portal base composition</dt>
+							<dt>Portal frame & overlap</dt>
 							<dd>
-								{snapshot
-									? formatPortalBaseCompositionDiagnostics(snapshot)
-									: "pending"}
+								{#if snapshot}
+									{formatPortalFrameWorkPlan(snapshot.portalFrameWorkPlan)} | {formatPortalOverlapResidency(
+										snapshot.currentPortalOverlapResidency,
+									)}
+								{:else}
+									pending
+								{/if}
 							</dd>
+							{@render copyOverlay(
+								snapshot
+									? `${formatPortalFrameWorkPlan(snapshot.portalFrameWorkPlan)} | ${formatPortalOverlapResidency(snapshot.currentPortalOverlapResidency)}`
+									: "pending",
+								"Portal frame & overlap",
+							)}
 						</div>
 						<div class="browser-display__status-row--action">
 							<dt>Inspect env resources</dt>
@@ -1890,9 +1892,15 @@
 										).value;
 									}}
 								/>
-								<span>
+								<span class="browser-display__copy-target">
 									{formatEnvCellResourceMembership(
 										envCellResourceInspectionTarget,
+									)}
+									{@render copyOverlay(
+										formatEnvCellResourceMembership(
+											envCellResourceInspectionTarget,
+										),
+										"Inspect env resources",
 									)}
 								</span>
 							</dd>
@@ -1900,38 +1908,7 @@
 						<div>
 							<dt>Camera focus</dt>
 							<dd>{formatCameraFocusStatus()}</dd>
-						</div>
-						<div>
-							<dt>Draw units</dt>
-							<dd>
-								{snapshot
-									? `${snapshot.renderer.staticDrawUnits} static / ${snapshot.renderer.terrainDrawUnits} terrain`
-									: "pending"}
-							</dd>
-						</div>
-						<div>
-							<dt>Direct env draws</dt>
-							<dd>{snapshot?.renderer.directEnvCellDrawCalls ?? 0}</dd>
-						</div>
-						<div>
-							<dt>Triangles</dt>
-							<dd>{snapshot?.renderer.renderedTriangles ?? 0}</dd>
-						</div>
-						<div>
-							<dt>Canvas</dt>
-							<dd>
-								{snapshot
-									? `${snapshot.renderer.canvasWidth}x${snapshot.renderer.canvasHeight}`
-									: "pending"}
-							</dd>
-						</div>
-						<div>
-							<dt>Frame handler</dt>
-							<dd>
-								{performanceMetrics.handlerMs > 0
-									? `${performanceMetrics.handlerMs.toFixed(2)} ms`
-									: "pending"}
-							</dd>
+							{@render copyOverlay(formatCameraFocusStatus(), "Camera focus")}
 						</div>
 					</dl>
 				</div>
@@ -2257,6 +2234,15 @@
 		padding: 6px 7px;
 		border-left: 2px solid rgba(91, 255, 187, 0.42);
 		background: rgba(1, 9, 8, 0.42);
+		position: relative;
+		transition:
+			background-color 0.15s ease,
+			border-left-color 0.15s ease;
+	}
+
+	.browser-display__status div:hover {
+		background: rgba(1, 9, 8, 0.65);
+		border-left-color: rgba(255, 214, 102, 0.8);
 	}
 
 	.browser-display__status dt {
@@ -2270,6 +2256,7 @@
 		color: #f1fff6;
 		font-size: 12px;
 		overflow-wrap: anywhere;
+		padding-right: 28px;
 	}
 
 	.browser-display__status-row--action dd {
@@ -2277,6 +2264,7 @@
 		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
 		gap: 6px;
+		padding-right: 28px;
 	}
 
 	.browser-display__status-row--action button {
@@ -2293,6 +2281,73 @@
 		background: rgba(0, 0, 0, 0.28);
 		color: #f1fff6;
 		font-size: 11px;
+	}
+
+	:global(.browser-display__copy-overlay) {
+		position: absolute;
+		inset: 0;
+		display: flex !important;
+		align-items: center;
+		justify-content: center;
+		background: rgba(0, 0, 0, 0.45) !important;
+		color: #75ffd1 !important;
+		font-family: inherit;
+		font-size: 11px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 1.5px;
+		border: none !important;
+		border-radius: 4px;
+		cursor: pointer;
+		opacity: 0;
+		transition:
+			opacity 0.12s ease,
+			background-color 0.12s ease,
+			color 0.12s ease;
+		pointer-events: none;
+		width: 100% !important;
+		height: 100% !important;
+		margin: 0 !important;
+		padding: 0 !important;
+		min-width: 0 !important;
+		min-height: 0 !important;
+		box-sizing: border-box;
+		z-index: 10;
+		box-shadow: none !important;
+	}
+
+	.browser-display__status div:hover > :global(.browser-display__copy-overlay),
+	:global(.browser-display__copy-target):hover
+		> :global(.browser-display__copy-overlay) {
+		opacity: 1;
+		pointer-events: auto;
+	}
+
+	:global(.browser-display__copy-overlay):hover {
+		color: #ffd666 !important;
+		background: rgba(0, 0, 0, 0.6) !important;
+	}
+
+	:global(.browser-display__copy-overlay.copied) {
+		opacity: 1 !important;
+		pointer-events: auto !important;
+		background: rgba(9, 38, 31, 0.7) !important;
+		color: #4bffad !important;
+		border: none !important;
+	}
+
+	:global(.browser-display__copy-target) {
+		position: relative;
+		display: inline-block;
+		cursor: pointer;
+		padding: 0 4px;
+		background: rgba(0, 0, 0, 0.25);
+		border-radius: 3px;
+		border: 1px dashed rgba(91, 255, 187, 0.2);
+	}
+
+	:global(.browser-display__copy-target):hover {
+		border-color: rgba(255, 214, 102, 0.4);
 	}
 
 	.browser-display__error {

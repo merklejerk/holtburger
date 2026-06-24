@@ -9,7 +9,11 @@
 </script>
 
 <div class="performance-overlay" aria-label="Renderer performance">
-	<span>{metrics.fps.toFixed(1)} FPS</span>
+	<span
+		>{metrics.fps.toFixed(1)} FPS (≈{metrics.extrapolatedFps >= 9999
+			? "9999+"
+			: metrics.extrapolatedFps.toFixed(0)})</span
+	>
 	<span>{metrics.frameMs.toFixed(1)} ms</span>
 	<span>handler {metrics.handlerMs.toFixed(2)} ms</span>
 </div>

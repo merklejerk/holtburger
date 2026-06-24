@@ -232,17 +232,11 @@ export interface RuntimeSnapshot {
 	readonly staticMaterialization: StaticMaterializationSnapshot;
 }
 
-export type PortalDebugOverlayMode =
-	| "both"
-	| "outdoor-to-indoor"
-	| "indoor-to-outdoor";
-
 interface RuntimeDebugOverlaySnapshot {
 	readonly envCellAabbsVisible: boolean;
 	readonly envCellAabbCount: number;
 	readonly flatVisionModeEnabled: boolean;
 	readonly portalCount: number;
-	readonly portalOverlayMode: PortalDebugOverlayMode;
 	readonly portalsVisible: boolean;
 }
 
@@ -499,7 +493,6 @@ export interface ClientRuntime {
 	setDirectEnvCellPortalMaxDepth(maxDepth: number): void;
 	setFlatVisionModeEnabled(enabled: boolean): void;
 	setStaticLayerVisibility(visibility: RendererStaticLayerVisibility): void;
-	setPortalDebugOverlayMode(mode: PortalDebugOverlayMode): void;
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void;
 	updateFrameState(state: FrameState): void;
 	createDiagnosticsReport(): RuntimeDiagnosticsReport;
@@ -606,7 +599,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#envCellPortalDebugOverlayVisible = false;
 	#flatVisionModeEnabled = false;
 	#directEnvCellPortalMaxDepth = DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH;
-	#portalDebugOverlayMode: PortalDebugOverlayMode = "both";
 	#disposed = false;
 
 	constructor(
@@ -854,16 +846,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 	setStaticLayerVisibility(visibility: RendererStaticLayerVisibility): void {
 		this.#assertActive();
 		this.#renderer.setStaticLayerVisibility(visibility);
-		this.#emit();
-	}
-
-	setPortalDebugOverlayMode(mode: PortalDebugOverlayMode): void {
-		this.#assertActive();
-		if (this.#portalDebugOverlayMode === mode) {
-			return;
-		}
-		this.#portalDebugOverlayMode = mode;
-		this.#refreshStaticDebugOverlay();
 		this.#emit();
 	}
 
@@ -1297,7 +1279,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 							this.#staticSceneQuery.queryEnvCellSystemLayers(),
 						)
 					: 0,
-				portalOverlayMode: this.#portalDebugOverlayMode,
 				portalsVisible: this.#envCellPortalDebugOverlayVisible,
 			},
 			host: this.#host.createSnapshot(),
@@ -1764,7 +1745,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 						...createBuildingTransitionApertureDebugOverlayPrimitives(
 							resource,
 							this.#renderAnchorLandblockId,
-							this.#portalDebugOverlayMode,
 						),
 					);
 				}
@@ -2599,7 +2579,6 @@ function createEnvCellAabbDebugOverlayPrimitive(
 function createBuildingTransitionApertureDebugOverlayPrimitives(
 	resource: StaticPortalApertureResource,
 	renderAnchorLandblockId: number | null,
-	mode: PortalDebugOverlayMode,
 ): DebugOverlayPrimitive[] {
 	if (resource.sourceDomain !== "outdoor-buildings") {
 		return [];
@@ -2620,22 +2599,18 @@ function createBuildingTransitionApertureDebugOverlayPrimitives(
 			translation,
 		);
 		const baseId = `transition-aperture:${formatHex32(resource.landblockId)}:${describeBuildingTransitionApertureRangeSource(range.source)}:${range.source.portalId}`;
-		if (mode === "both" || mode === "indoor-to-outdoor") {
-			primitives.push({
-				color: [0.95, 0.12, 0.08, 0.35],
-				id: `${baseId}:indoor-to-outdoor`,
-				kind: "triangles",
-				vertices: storedWindingVertices,
-			});
-		}
-		if (mode === "both" || mode === "outdoor-to-indoor") {
-			primitives.push({
-				color: [0.05, 0.95, 0.25, 0.35],
-				id: `${baseId}:outdoor-to-indoor`,
-				kind: "triangles",
-				vertices: reverseTriangleWinding(storedWindingVertices),
-			});
-		}
+		primitives.push({
+			color: [0.95, 0.12, 0.08, 0.35],
+			id: `${baseId}:indoor-to-outdoor`,
+			kind: "triangles",
+			vertices: storedWindingVertices,
+		});
+		primitives.push({
+			color: [0.05, 0.95, 0.25, 0.35],
+			id: `${baseId}:outdoor-to-indoor`,
+			kind: "triangles",
+			vertices: reverseTriangleWinding(storedWindingVertices),
+		});
 	}
 
 	return primitives;

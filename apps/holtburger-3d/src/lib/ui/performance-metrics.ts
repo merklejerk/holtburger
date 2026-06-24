@@ -10,6 +10,7 @@ export interface PerformanceMetricsSnapshot {
 	readonly fps: number;
 	readonly frameMs: number;
 	readonly handlerMs: number;
+	readonly extrapolatedFps: number;
 }
 
 interface PerformanceMetricsSample {
@@ -22,10 +23,12 @@ export class PerformanceMetricsTracker {
 	readonly #emaAlpha: number;
 	readonly #nowMs: () => number;
 	#lastSample: PerformanceMetricsSample | null = null;
+	#smoothedHandlerMs = 0;
 	#snapshot: PerformanceMetricsSnapshot = {
 		fps: 0,
 		frameMs: 0,
 		handlerMs: 0,
+		extrapolatedFps: 0,
 	};
 
 	constructor(options: PerformanceMetricsTrackerOptions) {
@@ -36,17 +39,22 @@ export class PerformanceMetricsTracker {
 
 	update(telemetry: RendererFrameTelemetry): PerformanceMetricsSnapshot {
 		const nowMs = this.#nowMs();
+
+		this.#smoothedHandlerMs = this.#smooth(
+			this.#smoothedHandlerMs,
+			telemetry.frameHandlerMs,
+		);
+
 		if (!this.#lastSample) {
 			this.#lastSample = {
 				frameCount: telemetry.frameCount,
 				timeMs: nowMs,
 			};
 			this.#snapshot = {
-				...this.#snapshot,
-				handlerMs: this.#smooth(
-					this.#snapshot.handlerMs,
-					telemetry.frameHandlerMs,
-				),
+				fps: 0,
+				frameMs: 0,
+				handlerMs: this.#smoothedHandlerMs,
+				extrapolatedFps: this.#calculateExtrapolatedFps(this.#smoothedHandlerMs),
 			};
 			return this.#snapshot;
 		}
@@ -54,23 +62,14 @@ export class PerformanceMetricsTracker {
 		const elapsedMs = nowMs - this.#lastSample.timeMs;
 		const frameDelta = telemetry.frameCount - this.#lastSample.frameCount;
 		if (elapsedMs < this.#sampleMs || frameDelta <= 0) {
-			this.#snapshot = {
-				...this.#snapshot,
-				handlerMs: this.#smooth(
-					this.#snapshot.handlerMs,
-					telemetry.frameHandlerMs,
-				),
-			};
 			return this.#snapshot;
 		}
 
 		this.#snapshot = {
 			fps: this.#smooth(this.#snapshot.fps, (frameDelta * 1000) / elapsedMs),
 			frameMs: this.#smooth(this.#snapshot.frameMs, elapsedMs / frameDelta),
-			handlerMs: this.#smooth(
-				this.#snapshot.handlerMs,
-				telemetry.frameHandlerMs,
-			),
+			handlerMs: this.#smoothedHandlerMs,
+			extrapolatedFps: this.#calculateExtrapolatedFps(this.#smoothedHandlerMs),
 		};
 		this.#lastSample = {
 			frameCount: telemetry.frameCount,
@@ -86,5 +85,9 @@ export class PerformanceMetricsTracker {
 		}
 
 		return previous + (next - previous) * this.#emaAlpha;
+	}
+
+	#calculateExtrapolatedFps(handlerMs: number): number {
+		return handlerMs > 0 ? Math.min(9999, 1000 / handlerMs) : 9999;
 	}
 }

@@ -1,21 +1,10 @@
 import type {
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
-	DebugConfigDto,
 } from "./contracts";
-import {
-	assetLookupResponseDtoSchema,
-	debugConfigDtoSchema,
-} from "./contracts";
-import {
-	decodeBinaryAssetBatchEnvelope,
-	encodeJsonAssetBatchEnvelope,
-} from "./binary-asset-envelope";
+import { assetLookupResponseDtoSchema } from "./contracts";
+import { decodeBinaryAssetBatchEnvelope } from "./binary-asset-envelope";
 import type { ZodType } from "zod";
-
-export interface BinaryAssetLookupEnvelopeDto {
-	payload: ArrayBuffer;
-}
 
 declare global {
 	interface Window {
@@ -46,12 +35,6 @@ async function invokeCommand<T>(
 	const { invoke } = await import("@tauri-apps/api/core");
 	const payload = await invoke<unknown>(command, args);
 	return schema.parse(payload);
-}
-
-export async function readDebugConfig(): Promise<DebugConfigDto> {
-	requireTauriRuntime();
-
-	return invokeCommand("get_debug_config", debugConfigDtoSchema);
 }
 
 export async function lookupAsset(
@@ -122,87 +105,10 @@ async function lookupBinaryAssetBatch(
 	);
 }
 
-export async function lookupBinaryAssetEnvelopes(
-	requests: readonly AssetLookupRequestDto[],
-): Promise<BinaryAssetLookupEnvelopeDto[]> {
-	requireTauriRuntime();
-
-	if (requests.length === 0) {
-		return [];
-	}
-
-	const plan = planAssetLookupEnvelopeRequests(requests);
-	const binaryEnvelopes = await Promise.all(
-		plan.binaryBatches.map(async (batch) => ({
-			payload: normalizeBinaryPayloadToArrayBuffer(
-				await invokeRawBinaryLookupBatch(batch),
-			),
-		})),
-	);
-	const jsonResponses = await Promise.all(
-		plan.jsonRequests.map((request) =>
-			invokeCommand("lookup_asset", assetLookupResponseDtoSchema, { request }),
-		),
-	);
-	const jsonEnvelopes =
-		jsonResponses.length === 0
-			? []
-			: [{ payload: encodeJsonAssetBatchEnvelope(jsonResponses) }];
-	return [...binaryEnvelopes, ...jsonEnvelopes];
-}
-
-async function invokeRawBinaryLookupBatch(
-	requests: readonly AssetLookupRequestDto[],
-): Promise<unknown> {
-	const { invoke } = await import("@tauri-apps/api/core");
-	return invoke<unknown>("lookup_assets_binary", {
-		batch: { requests },
-	});
-}
-
-function normalizeBinaryPayloadToArrayBuffer(payload: unknown): ArrayBuffer {
-	if (payload instanceof ArrayBuffer) {
-		return payload;
-	}
-	if (ArrayBuffer.isView(payload)) {
-		const view = new Uint8Array(
-			payload.buffer,
-			payload.byteOffset,
-			payload.byteLength,
-		);
-		const copy = new Uint8Array(view.byteLength);
-		copy.set(view);
-		return copy.buffer;
-	}
-	if (Array.isArray(payload)) {
-		return Uint8Array.from(payload).buffer;
-	}
-	throw new Error("Binary asset response was not returned as bytes.");
-}
-
 export function planBinaryLookupBatches(
 	requests: readonly AssetLookupRequestDto[],
 ): AssetLookupRequestDto[][] {
 	return requests.length === 0 ? [] : [[...requests]];
-}
-
-export interface AssetLookupEnvelopePlan {
-	binaryBatches: AssetLookupRequestDto[][];
-	jsonRequests: AssetLookupRequestDto[];
-}
-
-export function planAssetLookupEnvelopeRequests(
-	requests: readonly AssetLookupRequestDto[],
-): AssetLookupEnvelopePlan {
-	const binaryRequests = requests.filter((request) =>
-		usesBinaryAssetLookup(request.assetId),
-	);
-	return {
-		binaryBatches: planBinaryLookupBatches(binaryRequests),
-		jsonRequests: requests.filter(
-			(request) => !usesBinaryAssetLookup(request.assetId),
-		),
-	};
 }
 
 function usesBinaryAssetLookup(assetId: string): boolean {

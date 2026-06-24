@@ -209,7 +209,9 @@ fn print_material_alpha_summary(
         let render_surface = match read_render_surface(content, render_surface_id) {
             Ok(render_surface) => render_surface,
             Err(error) => {
-                println!("      renderSurface[{surface_index}]=0x{render_surface_id:08x} error={error:#}");
+                println!(
+                    "      renderSurface[{surface_index}]=0x{render_surface_id:08x} error={error:#}"
+                );
                 continue;
             }
         };
@@ -223,7 +225,10 @@ fn print_material_alpha_summary(
             format_optional_did(render_surface.default_palette_id),
         );
 
-        if matches!(render_surface.format, PixelFormatId::P8 | PixelFormatId::Index16) {
+        if matches!(
+            render_surface.format,
+            PixelFormatId::P8 | PixelFormatId::Index16
+        ) {
             if let Some(palette_id) = render_surface.default_palette_id {
                 let palette = read_palette(content, palette_id)?;
                 println!(
@@ -267,7 +272,10 @@ fn read_gfx_obj(content: &ContentRepository, gfx_obj_id: u32) -> Result<GfxObj> 
         .with_context(|| format!("failed to parse GfxObj 0x{gfx_obj_id:08X}"))
 }
 
-fn read_render_surface(content: &ContentRepository, render_surface_id: u32) -> Result<RenderSurface> {
+fn read_render_surface(
+    content: &ContentRepository,
+    render_surface_id: u32,
+) -> Result<RenderSurface> {
     let resource = content
         .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, render_surface_id))
         .with_context(|| format!("failed to read RenderSurface 0x{render_surface_id:08X}"))?;
@@ -444,17 +452,23 @@ fn format_hook_payload(payload: &HookPayload) -> String {
 
 fn read_u32(cursor: &mut Cursor<Vec<u8>>) -> Result<u32> {
     let bytes = read_bytes(cursor, 4)?;
-    Ok(u32::from_le_bytes(bytes.try_into().expect("read size is fixed")))
+    Ok(u32::from_le_bytes(
+        bytes.try_into().expect("read size is fixed"),
+    ))
 }
 
 fn read_i32(cursor: &mut Cursor<Vec<u8>>) -> Result<i32> {
     let bytes = read_bytes(cursor, 4)?;
-    Ok(i32::from_le_bytes(bytes.try_into().expect("read size is fixed")))
+    Ok(i32::from_le_bytes(
+        bytes.try_into().expect("read size is fixed"),
+    ))
 }
 
 fn read_f64(cursor: &mut Cursor<Vec<u8>>) -> Result<f64> {
     let bytes = read_bytes(cursor, 8)?;
-    Ok(f64::from_le_bytes(bytes.try_into().expect("read size is fixed")))
+    Ok(f64::from_le_bytes(
+        bytes.try_into().expect("read size is fixed"),
+    ))
 }
 
 fn read_bytes(cursor: &mut Cursor<Vec<u8>>, size: usize) -> Result<Vec<u8>> {

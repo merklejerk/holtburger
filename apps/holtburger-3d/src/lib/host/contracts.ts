@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export type AssetPriority = "bootstrap" | "streaming" | "prefetch";
+type AssetPriority = "bootstrap" | "streaming" | "prefetch";
 
 const assetPayloadKindValueSchema = z.literal("json");
 
@@ -10,9 +10,6 @@ const assetProvenanceSourceValueSchema = z.enum([
 	"app-local-stub",
 	"unknown",
 ]);
-export type AssetProvenanceSource = z.infer<
-	typeof assetProvenanceSourceValueSchema
->;
 
 const assetErrorCodeValueSchema = z.enum([
 	"asset-id-unknown",
@@ -21,14 +18,13 @@ const assetErrorCodeValueSchema = z.enum([
 	"asset-decode-failed",
 	"cell-landblock-unavailable",
 ]);
-export type AssetErrorCode = z.infer<typeof assetErrorCodeValueSchema>;
 
 const vec3DtoSchema = z.object({
 	x: z.number().finite(),
 	y: z.number().finite(),
 	z: z.number().finite(),
 });
-export type Vec3Dto = z.infer<typeof vec3DtoSchema>;
+type Vec3Dto = z.infer<typeof vec3DtoSchema>;
 
 const quaternionDtoSchema = z.object({
 	w: z.number().finite(),
@@ -47,7 +43,7 @@ const sphereDtoSchema = z.object({
 	center: vec3DtoSchema,
 	radius: z.number().finite(),
 });
-export type SphereDto = z.infer<typeof sphereDtoSchema>;
+type SphereDto = z.infer<typeof sphereDtoSchema>;
 
 export interface AssetLookupRequestDto {
 	requestId: string;
@@ -67,14 +63,12 @@ export type AssetLookupResponseDto = z.infer<
 	typeof assetLookupResponseDtoSchema
 >;
 
-export const assetProvenanceDtoSchema = z.object({
+const assetProvenanceDtoSchema = z.object({
 	source: assetProvenanceSourceValueSchema,
 	sourceAssetKind: z.string().nullable(),
 	errorCode: assetErrorCodeValueSchema.nullable(),
 	detail: z.string().nullable(),
 });
-
-const landblockClassificationValueSchema = z.enum(["outdoor", "dungeon"]);
 
 const preparedPolygonSetRenderTriangleDtoSchema = z.object({
 	polygonId: z.number().int().nonnegative(),
@@ -157,8 +151,6 @@ const preparedBvhKindMaskDtoSchema = z.discriminatedUnion("domain", [
 		.strict(),
 ]);
 
-const preparedLegacyBvhKindMaskDtoSchema = z.number().int().nonnegative();
-
 const preparedLandblockBvhNodeDtoSchema = z.object({
 	bounds: z.object({ min: vec3DtoSchema, max: vec3DtoSchema }),
 	left: z.number().int().nonnegative().nullable(),
@@ -166,11 +158,6 @@ const preparedLandblockBvhNodeDtoSchema = z.object({
 	itemIndices: z.array(z.number().int().nonnegative()),
 	kindMask: preparedBvhKindMaskDtoSchema,
 });
-
-const preparedLegacyLandblockBvhNodeDtoSchema =
-	preparedLandblockBvhNodeDtoSchema.extend({
-		kindMask: preparedLegacyBvhKindMaskDtoSchema,
-	});
 
 const sourceRecordDiagnosticDtoSchema = z.object({
 	namespace: z.string().min(1),
@@ -301,29 +288,6 @@ const landblockBuildingTransitionApertureDtoSchema = z.object({
 	points: z.array(vec3DtoSchema).min(3),
 });
 
-const landblockSceneEnvCellMemberDtoSchema = z.object({
-	memberId: z.string().min(1),
-	envCellId: z.number().int().nonnegative(),
-	assetId: z.string().min(1),
-	localPlacement: placementTransformDtoSchema,
-	visibleEnvCellIds: z.array(z.number().int().nonnegative()),
-	restrictionObjectId: z.number().int().nonnegative().nullable(),
-	seenOutside: z.boolean().nullable(),
-});
-
-const preparedEnvCellResidencyBvhItemDtoSchema = z.object({
-	envCellId: z.number().int().nonnegative(),
-	memberId: z.string().min(1),
-	assetId: z.string().min(1),
-	source: z.enum(["building-portal-link", "env-cell-placement", "derived"]),
-});
-
-const preparedEnvCellResidencyBvhDtoSchema = z.object({
-	coordinateSpace: z.literal("landblock-topology-residency"),
-	nodes: z.array(preparedLegacyLandblockBvhNodeDtoSchema),
-	items: z.array(preparedEnvCellResidencyBvhItemDtoSchema),
-});
-
 const preparedOutdoorBvhItemDtoSchema = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("static"), instanceId: z.string().min(1) }),
 	z.object({ kind: z.literal("building"), instanceId: z.string().min(1) }),
@@ -409,23 +373,6 @@ export type LandblockOutdoorPayloadDto = z.infer<
 	typeof landblockOutdoorPayloadDtoSchema
 >;
 
-export const landblockTopologyPayloadDtoSchema = z.object({
-	kind: z.literal("landblock-topology"),
-	residencyKind: z.literal("landblock"),
-	sourceAssetKind: z.literal("landblock-topology"),
-	landblockId: z.number().int().nonnegative(),
-	landblockInfoId: z.number().int().nonnegative(),
-	classification: landblockClassificationValueSchema,
-	envCells: z.array(landblockSceneEnvCellMemberDtoSchema),
-	portalLinks: z.array(landblockScenePortalLinkDtoSchema),
-	envCellResidencyBvh: preparedEnvCellResidencyBvhDtoSchema,
-	diagnostics: landblockPackDiagnosticsDtoSchema,
-	provenance: assetProvenanceDtoSchema,
-});
-export type LandblockTopologyPayloadDto = z.infer<
-	typeof landblockTopologyPayloadDtoSchema
->;
-
 const envCellSurfaceSlotDtoSchema = z.object({
 	slotId: z.number().int().nonnegative(),
 	surfaceId: z.number().int().nonnegative(),
@@ -461,25 +408,6 @@ const landblockEnvCellStaticMemberDtoSchema = envCellStaticMemberDtoSchema.omit(
 	},
 );
 
-const preparedEnvCellBvhItemDtoSchema = z.discriminatedUnion("kind", [
-	z.object({
-		kind: z.literal("render-geometry"),
-		polygonId: z.number().int().nonnegative().nullable(),
-		triangleRange: z.tuple([
-			z.number().int().nonnegative(),
-			z.number().int().nonnegative(),
-		]),
-	}),
-	z.object({ kind: z.literal("static"), instanceId: z.string().min(1) }),
-	z.object({ kind: z.literal("portal"), portalId: z.string().min(1) }),
-]);
-
-const preparedEnvCellBvhDtoSchema = z.object({
-	coordinateSpace: z.literal("env-cell-local"),
-	nodes: z.array(preparedLegacyLandblockBvhNodeDtoSchema),
-	items: z.array(preparedEnvCellBvhItemDtoSchema),
-});
-
 const preparedLandblockEnvCellBvhItemDtoSchema = z
 	.object({
 		envCellId: z.number().int().nonnegative(),
@@ -495,28 +423,6 @@ const preparedLandblockEnvCellBvhDtoSchema = z
 		items: z.array(preparedLandblockEnvCellBvhItemDtoSchema),
 	})
 	.strict();
-
-export const envCellPayloadDtoSchema = z.object({
-	kind: z.literal("env-cell"),
-	residencyKind: z.literal("interior-cell"),
-	sourceAssetKind: z.literal("env-cell"),
-	envCellId: z.number().int().nonnegative(),
-	regionId: z.number().int().nonnegative(),
-	regionNumber: z.number().int().nonnegative(),
-	environmentId: z.number().int().nonnegative(),
-	cellStructureId: z.number().int().nonnegative(),
-	localPlacement: placementTransformDtoSchema,
-	surfaces: z.array(envCellSurfaceSlotDtoSchema),
-	portals: z.array(envCellPortalDtoSchema),
-	visibleEnvCellIds: z.array(z.number().int().nonnegative()),
-	portalApertures: z.array(preparedPortalApertureDtoSchema),
-	statics: z.array(envCellStaticMemberDtoSchema),
-	renderGeometry: preparedPolygonSetRenderGeometryDtoSchema,
-	cellBsp: z.lazy(() => polygonSetBspNodeDtoSchema),
-	localBvh: preparedEnvCellBvhDtoSchema,
-	provenance: assetProvenanceDtoSchema,
-});
-export type EnvCellPayloadDto = z.infer<typeof envCellPayloadDtoSchema>;
 
 const landblockEnvCellDtoSchema = z
 	.object({
@@ -1052,18 +958,3 @@ export const palettePayloadDtoSchema = z
 		path: ["colorsArgb"],
 	});
 export type PalettePayloadDto = z.infer<typeof palettePayloadDtoSchema>;
-
-export const genericAssetPayloadDtoSchema = z
-	.object({
-		kind: z.string().min(1),
-		residencyKind: z.string().optional(),
-		debugPrimitive: z.string().optional(),
-		paletteKey: z.string().optional(),
-		provenance: assetProvenanceDtoSchema.optional(),
-	})
-	.passthrough();
-
-export const debugConfigDtoSchema = z.object({
-	verbose: z.boolean(),
-});
-export type DebugConfigDto = z.infer<typeof debugConfigDtoSchema>;

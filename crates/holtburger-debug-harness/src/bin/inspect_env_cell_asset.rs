@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Parser;
+use holtburger_common::Vector3;
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, EnvCellAssetAssembler, PreparedAabb,
     PreparedInteriorCell,
@@ -9,7 +10,6 @@ use holtburger_dat::{
     file_type::{CSurface, CSurfaceSource, CellStruct, Environment},
     physics::BspNode,
 };
-use holtburger_common::Vector3;
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::Cursor,
@@ -135,7 +135,11 @@ fn main() -> Result<()> {
                 .map(|plane| {
                     format!(
                         "n=({:.6},{:.6},{:.6}) c={:.6} source={:?}",
-                        plane.normal.x, plane.normal.y, plane.normal.z, plane.constant, plane.source
+                        plane.normal.x,
+                        plane.normal.y,
+                        plane.normal.z,
+                        plane.constant,
+                        plane.source
                     )
                 })
                 .unwrap_or_else(|| "none".to_string()),

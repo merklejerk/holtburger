@@ -4364,7 +4364,7 @@ Acceptance criteria:
 
 ### Phase 15: Canonical Browser Cutover
 
-Status: planned; promoted to the next immediate phase on 2026-06-24 after clean-cutover dry run.
+Status: complete on 2026-06-24.
 
 Purpose: make the current browser implementation canonical in naming, paths, routes, diagnostics, and
 source ownership, then delete the replaced browser architecture rather than retaining a parallel mode.
@@ -4393,7 +4393,7 @@ Implementation order:
    - Do not keep a wrapper module under `src/lib/world-display`.
 
 2. Replace route ownership.
-   - Rename `src/pages/BrowserWorldDisplayV2.svelte` to `src/pages/BrowserWorldDisplay.svelte`.
+   - Rename `src/pages/BrowserWorldDisplayV2.svelte` to a canonical browser page.
    - Delete the old `src/pages/BrowserWorldDisplay.svelte`.
    - Simplify `src/App.svelte` so `/` and `/browser` mount the canonical browser directly.
    - Remove `/browser-v2` handling and the `tauri:dev:v2` npm script.
@@ -4448,6 +4448,41 @@ Implementation order:
    - Run a final active-source grep for migration leftovers:
      `rg -n "browser-v2|BrowserWorldDisplayV2|src/v2|/v2/|\\bV2\\b|\\bv2\\b|WorldDisplay|landblock-render-product|static-landblock-render-worker|asset-worker" src package.json`.
 
+Implementation notes:
+
+- Promoted the current browser implementation into canonical app source:
+  - `src/v2/assets` -> `src/lib/assets`;
+  - `src/v2/browser` -> `src/lib/browser`;
+  - `src/v2/camera` -> `src/lib/camera`;
+  - `src/v2/runtime` -> `src/lib/runtime`;
+  - `src/v2/static` -> `src/lib/static`;
+  - `src/v2/textures` -> `src/lib/textures`;
+  - `src/v2/renderer` -> `src/lib/renderer`;
+  - `src/v2/ui` -> `src/lib/ui`;
+  - `src/v2/host` host runtime contracts/adapters -> canonical `src/lib/host` modules.
+- Promoted `outdoor-scene-interest` into `src/lib/browser` before deleting the old
+  `src/lib/world-display` tree.
+- Replaced route ownership with a canonical `src/pages/BrowserDisplay.svelte` page. `/` and
+  `/browser` now mount the canonical browser directly; `/browser-v2` handling was removed.
+- Removed migration-era names from active app source, including runtime factory, camera types,
+  location-input helpers, CSS/data attributes, diagnostics, log labels, and npm scripts.
+- Deleted the replaced browser architecture:
+  - old `src/lib/world-display`;
+  - old `src/lib/assets` before promoting the current asset service into that path;
+  - old `src/app`;
+  - old browser workers;
+  - old `BrowserModePanel.svelte`;
+  - the remaining old scene-runtime bridge after dead-code validation proved it was only supporting
+    the deleted render-product pipeline.
+- Replaced the old migration import-boundary test with
+  `src/lib/browser/canonical-source-boundary.test.ts`, which fails active app source on migration
+  paths/names and removed browser-pipeline concepts.
+- Removed dead host/debug code exposed by the cutover:
+  - unused browser launch/profiler diagnostics;
+  - unused binary-envelope host lookup API and its hollow route-planning test;
+  - unused standalone topology/env-cell/generic DTO schemas that were no longer parse routes;
+  - unused exported DTO/interface surface reported by Knip.
+
 Acceptance criteria:
 
 - `/` and `/browser` use the canonical browser implementation with no `/browser-v2` route.
@@ -4460,6 +4495,31 @@ Acceptance criteria:
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` pass in
   `apps/holtburger-3d`.
 
+Validation:
+
+- `npm run check` passed.
+- `npm run lint:ts` passed.
+- `npm run lint:dead` passed.
+- `npm run test:ts` passed: 53 files, 431 tests.
+- Final active-source/package grep passed with zero matches:
+  `rg -n "browser-v2|BrowserWorldDisplayV2|src/v2|/v2/|\\bV2\\b|\\bv2\\b|WorldDisplay|landblock-render-product|static-landblock-render-worker|asset-worker" apps/holtburger-3d/src apps/holtburger-3d/package.json`.
+
+What did not close:
+
+- No manual Tauri/browser visual pass was performed in this phase. The cutover was validated by
+  source guards, type/Svelte checks, dead-code checks, and the TypeScript test suite.
+- `npm run dev` started Vite on `http://127.0.0.1:1420/`, but sibling sandbox commands could not
+  connect to that local port for an HTTP smoke check. The dev server was stopped after the failed
+  smoke attempt.
+
+Debt to track:
+
+- The plan file and historical docs still use V2 terminology because they record the migration
+  history. Active app source does not.
+- If direct single `env-cell/*` host assets become a supported browser route again, add an explicit
+  canonical parser/schema path. This cutover removed unused standalone env-cell DTO schema surface
+  that had no current parse route.
+
 Spicy bits:
 
 - The old `src/lib/assets` path must be deleted before the current asset service is promoted there.
@@ -4467,6 +4527,9 @@ Spicy bits:
 - The path churn is intentionally broad. Review should focus on whether canonical browser behavior is
   preserved and old architecture is gone, not whether the diff is small.
 - Historical plan docs can retain migration context. Active app source should not.
+- The canonical browser page was named `BrowserDisplay.svelte`, not `BrowserWorldDisplay.svelte`.
+  The latter would have been functional, but retaining `WorldDisplay` in an active route filename was
+  too close to the deleted implementation vocabulary for this cutover.
 
 ### Phase 14: Static-Authored Dynamic Seeds
 

@@ -4304,16 +4304,25 @@ Debt to track:
 
 - Add a focused residency diagnostic report that can show each containing candidate's graph
   evidence and final comparator reason.
-- Keep v1 `src/lib/world-display` out of future V2 residency fixes unless the work is explicitly
-  about deleting or isolating that legacy path.
+- Keep replaced `src/lib/world-display` code out of future residency fixes unless the work is
+  explicitly about deleting that path.
 
-### Phase 13C: Interior Plan Reassessment Before Dynamic Seeds
+### Phase 13C: Cutover Resteering Outcome
 
-Status: planned.
+Status: complete as a steering decision on 2026-06-24.
 
-Purpose: steer from the completed portal/render-pipeline correction, same-landblock indoor-residency
-outdoor crossing proof, portal-aware multi-landblock outdoor source correction, and bounded exterior
-suffix composition back into the main V2 sequence before starting static-authored dynamic seeds.
+Purpose: record the decision to promote the canonical browser cutover ahead of static-authored
+dynamic seed work.
+
+Decision:
+
+- The next immediate implementation phase is Phase 15, a true canonical browser cutover.
+- Static-authored dynamic seeds move to post-cutover feature work. They are no longer a prerequisite
+  for replacing the old browser display because they are not required for current browser parity.
+- Phase 14A is retired. There will not be a separate final reassessment before cutover; this section
+  is the reassessment.
+- Remaining manual visual checks and source-classification investigations are accepted as named
+  follow-up evidence tasks unless they directly block the cutover implementation.
 
 Current baseline after the render-pipeline correction:
 
@@ -4327,47 +4336,141 @@ Current baseline after the render-pipeline correction:
 - Phase 13B4 proves the same-landblock inverse transition mechanism: env-cell residency inside an
   outdoor-linked building rendering the outdoor scene through building transition apertures.
 - Phase 13B6 added bounded exterior suffix compositing for indoor-origin outdoor crossings, with
-  automated same-landblock/retained-source sequencing coverage. Manual visual validation remains
-  open before declaring indoor/outdoor compositing visually complete.
+  automated same-landblock/retained-source sequencing coverage. Manual visual validation remains a
+  follow-up, not a cutover blocker.
+- Phase 13B9 made camera residency robust at overlapping tunnel/cap joins by ranking BSP/AABB
+  candidates with authored env-cell graph evidence.
 - Browser static checkboxes are visibility controls, not demand/residency toggles.
 - `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` passed at the end
   of the correction.
 
-Deliverables:
+Remaining named follow-ups after cutover:
 
-- Review the corrected portal/layer pipeline against the original 13B interior goals: structured
-  interiors, env-cell static seeds, outdoor-to-indoor transitions, indoor-to-outdoor transition
-  views, pure dungeon focus, anchoring, picking/debug inspection, and visual parity on known targets.
-- Classify remaining interior/static-rendering gaps into:
-  - blockers for Phase 14 static-authored dynamic seeds;
-  - non-blocking visual/parity follow-ups;
-  - diagnostics or retail-validation tasks.
-- Decide whether the unresolved marker/static source family investigation (`02000c39`-`02000c3f`,
-  including `02000c39` and `02000c3d`) blocks dynamic seed work or remains a static-rendering
-  evidence task.
-- Decide whether the `0x1a73...` tunnel/cell-shell portal-visibility investigation blocks dynamic
-  seed work after projection-based rendering, or whether it becomes a named visual correctness
-  follow-up.
-- Update Phase 14/14A only for requirements that actually affect dynamic seed ownership, lifetime,
-  hydration, animation, rendering, or eviction.
-- Keep
-  [holtburger-3d-v2-portal-renderer-course-correction-plan.md](holtburger-3d-v2-portal-renderer-course-correction-plan.md)
-  marked historical/superseded so stale planned portal phases do not compete with the completed
-  render-pipeline correction.
+- Validate the `02000c39`-`02000c3f` marker-like static source family against retail/browser evidence
+  before adding any source classification or filtering rule.
+- Recheck the `0x1a73...` tunnel/cell-shell visual issue under the projection/layer renderer and
+  decide whether it is still a rendering bug, a diagnostic task, or closed by the later residency and
+  portal corrections.
+- Manually validate representative indoor-origin exterior suffix views for same-landblock and
+  retained-neighbor cases.
 
 Acceptance criteria:
 
-- Phase 14 starts with a current list of interior/static-rendering gaps and no duplicate portal/parity
-  work hidden in stale plans.
-- Any blocker for static-authored dynamic seeds is explicitly scheduled before Phase 14 with a named
-  reason.
-- Any non-blocking interior parity gap is explicitly deferred with enough source/context to resume it
-  later without re-litigating the portal architecture.
-- No new dedicated reconciliation phase is added; Phase 13C is the steering checkpoint.
+- Phase 15 starts with the cutover decision recorded here and does not wait on dynamic seeds.
+- Any replaced-browser source needed only for comparison is not retained in app source. Git history
+  is the reference.
+- Any non-blocking visual/parity gap remains named above with enough context to resume later without
+  preserving old architecture.
+
+### Phase 15: Canonical Browser Cutover
+
+Status: planned; promoted to the next immediate phase on 2026-06-24 after clean-cutover dry run.
+
+Purpose: make the current browser implementation canonical in naming, paths, routes, diagnostics, and
+source ownership, then delete the replaced browser architecture rather than retaining a parallel mode.
+
+Dry-run findings:
+
+- `App.svelte` still boots the replaced browser asset/render-product pipeline for `/browser` and mounts
+  the newer browser only at `/browser-v2`.
+- `BrowserWorldDisplayV2.svelte` is the implementation to promote, but it still carries `V2`/`v2`
+  naming in imports, type names, CSS classes, data attributes, diagnostics, log labels, and test
+  names.
+- The newer browser page still imports `outdoor-scene-interest` from `src/lib/world-display`. That
+  leaf must be promoted before deleting `src/lib/world-display`.
+- The newer runtime already owns resolver, bake, and texture-packing workers under its own static and
+  texture pipeline. The old `asset-worker`, `static-landblock-render-worker`, old prepared-asset
+  store, and render-product pipeline are replaced-browser architecture.
+- The current `src/v2` tree has about 119 files. The replaced browser implementation has about 161
+  `src/lib/world-display` files, 32 old `src/lib/assets` files, 13 `src/app` files, plus old workers.
+
+Implementation order:
+
+1. Promote the shared outdoor scene-interest leaf.
+   - Move `src/lib/world-display/outdoor-scene-interest.ts` and its test to a canonical non-
+     `world-display` path.
+   - Update the browser page and any promoted code to import the canonical module.
+   - Do not keep a wrapper module under `src/lib/world-display`.
+
+2. Replace route ownership.
+   - Rename `src/pages/BrowserWorldDisplayV2.svelte` to `src/pages/BrowserWorldDisplay.svelte`.
+   - Delete the old `src/pages/BrowserWorldDisplay.svelte`.
+   - Simplify `src/App.svelte` so `/` and `/browser` mount the canonical browser directly.
+   - Remove `/browser-v2` handling and the `tauri:dev:v2` npm script.
+   - Remove route copy that describes a current scene browser versus a separate V2 harness.
+
+3. Promote `src/v2` into canonical app-local library paths.
+   - `src/v2/assets` becomes `src/lib/assets`.
+   - `src/v2/browser` becomes `src/lib/browser`.
+   - `src/v2/camera` becomes `src/lib/camera`.
+   - `src/v2/runtime` becomes `src/lib/runtime`.
+   - `src/v2/static` becomes `src/lib/static`.
+   - `src/v2/textures` becomes `src/lib/textures`.
+   - `src/v2/renderer` becomes `src/lib/renderer`.
+   - `src/v2/ui` becomes `src/lib/ui`.
+   - Fold `src/v2/host` into `src/lib/host` only after resolving collisions with existing host DTO
+     and Tauri adapter modules.
+
+4. Remove migration-era names from promoted source.
+   - Rename `createBrowserV2Runtime` to `createBrowserRuntime`.
+   - Rename `V2BrowserCameraController` to `BrowserCameraController`.
+   - Rename `V2FreeCameraState`, `V2FreeCameraConfig`, `createV2FreeCameraState`, and related free
+     camera helpers to unversioned names.
+   - Rename `parseV2LocationInput`, `inferV2LandblockInputMode`, and
+     `isV2LandblockPrefixInput` to unversioned names.
+   - Remove `V2`/`v2` from test descriptions, README headers, diagnostics, errors, console labels,
+     CSS classes, DOM data attributes, route names, and npm scripts unless the text refers to a real
+     external versioned protocol rather than this migration.
+
+5. Delete replaced browser architecture.
+   - Delete `src/lib/world-display/**`.
+   - Delete the old `src/lib/assets/**` before promoting the current asset service into that path.
+   - Delete `src/app/**`.
+   - Delete `src/pages/BrowserModePanel.svelte`.
+   - Delete `src/workers/asset-worker.ts`.
+   - Delete `src/workers/static-landblock-render-worker.ts`.
+   - Delete `src/workers/shared/**` unless a promoted worker still imports a specific helper after
+     the move. The dry run found those helpers used by old workers only.
+
+6. Replace migration-boundary tests with canonical guards.
+   - Delete `src/v2/import-boundary.test.ts`.
+   - Add a canonical source guard that fails on active source references to removed migration and replaced
+     browser concepts such as `src/v2`, `/browser-v2`, `BrowserWorldDisplayV2`, `WorldDisplay.svelte`,
+     `landblock-render-product`, `static-landblock-render-worker`, and `asset-worker`.
+   - Keep the guard focused on active app source and tests; historical plan docs may mention the
+     migration.
+
+7. Validate aggressively.
+   - Run `npm run check`.
+   - Run `npm run lint:ts`.
+   - Run `npm run lint:dead`.
+   - Run `npm run test:ts`.
+   - Run a final active-source grep for migration leftovers:
+     `rg -n "browser-v2|BrowserWorldDisplayV2|src/v2|/v2/|\\bV2\\b|\\bv2\\b|WorldDisplay|landblock-render-product|static-landblock-render-worker|asset-worker" src package.json`.
+
+Acceptance criteria:
+
+- `/` and `/browser` use the canonical browser implementation with no `/browser-v2` route.
+- Active app source no longer has a `src/v2` directory.
+- Active app source no longer has the replaced browser implementation, render-product pipeline,
+  old prepared-asset pipeline, old browser state stores, or old browser workers.
+- Active app source no longer uses `V2`/`v2` naming for the browser runtime, renderer, static
+  pipeline, diagnostics, CSS, route, tests, or logs.
+- Canonical browser source does not import from removed old-browser paths.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` pass in
+  `apps/holtburger-3d`.
+
+Spicy bits:
+
+- The old `src/lib/assets` path must be deleted before the current asset service is promoted there.
+  Keeping both creates exactly the ambiguity this phase is meant to remove.
+- The path churn is intentionally broad. Review should focus on whether canonical browser behavior is
+  preserved and old architecture is gone, not whether the diff is small.
+- Historical plan docs can retain migration context. Active app source should not.
 
 ### Phase 14: Static-Authored Dynamic Seeds
 
-Status: planned.
+Status: planned after the canonical browser cutover.
 
 Purpose: start the dynamic path from concrete static-authored runtime needs rather than abstract
 future creature/player rendering.
@@ -4412,64 +4515,13 @@ Acceptance criteria:
 - Tests prove seed publication, replacement, eviction, and renderer update behavior for at least one
   evidence-backed seeded dynamic source.
 
-### Phase 14A: Plan Reassessment Before Cutover
-
-Status: planned.
-
-Purpose: perform the final design-vs-implementation check before replacing the old browser display.
-
-Deliverables:
-
-- Review V2 behavior against v1/browser expectations: terrain, outdoor static objects,
-  dungeon/interior support, projection portal rendering, camera controls, picking, texture/resource
-  inspection, frame metrics, eviction, diagnostics, and static-authored dynamic seeds.
-- Identify old browser/world-display features that are intentionally not ported and document why.
-- Update Phase 15 with final route/UX cutover blockers, legacy deletion targets, diagnostics that
-  survive cutover, and required verification commands.
-- Confirm stale historical portal/rendering plans no longer describe active work that should block
-  browser cutover.
-
-Acceptance criteria:
-
-- Browser cutover starts with an explicit known-gap list, not a vague "minimal panels" promise.
-- Any remaining legacy dependency needed by `/browser` is either scheduled for removal or documented as intentionally retained outside the V2 replacement scope.
-- Dynamic seed support is either complete enough for cutover or explicitly listed as a cutover
-  blocker with a narrow remaining task.
-
-### Phase 15: Browser UX Cutover And Legacy Removal
-
-Status: planned.
-
-Purpose: replace the old browser world display after V2 can carry the important behavior and delete
-legacy browser-display paths that no longer own production behavior.
-
-Deliverables:
-
-- Route/mode cutover from current `BrowserWorldDisplay.svelte` to the V2 runtime/harness-derived page.
-- V2 browser panels for navigation, visibility/LOD controls, picking, texture/resource inspection,
-  portal/static diagnostics, dynamic-seed diagnostics, and targeted debug overlays.
-- Remove old browser-display TS pathways that V2 replaces, including legacy render-product,
-  world-display, asset-worker, and static-landblock-render-worker integration where they are no
-  longer production inputs.
-- Delete compatibility tests that exist only to preserve replaced browser-display behavior.
-- Knip/eslint cleanup for dead contracts, stores, route helpers, worker clients, and diagnostics.
-
-Acceptance criteria:
-
-- Browser mode uses V2 runtime, V2 static pipeline, V2 texture manager, and V2 renderer API.
-- Current `world-display` static landblock render-product path is no longer required for browser world rendering.
-- Remaining diagnostics are consumers of runtime/renderer telemetry, explicit reports, and layer/query
-  inspection APIs, not architecture-driving service inputs.
-- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` pass in
-  `apps/holtburger-3d`.
-
 ## Visual Verification Strategy
 
 Svelte is allowed as the windshield, not as the engine control unit.
 
-The V2 harness should always provide:
+The canonical browser should always provide:
 
-- a canvas backed by the V2 renderer;
+- a canvas backed by the renderer;
 - location and domain controls that compile into runtime scene interest;
 - basic camera controls and follow-mode controls;
 - compact runtime/renderer status projections;
@@ -4484,12 +4536,10 @@ Remaining manual verification milestones:
   multiple resident/neighboring landblocks.
 - Phase 13B6: indoor-to-outdoor suffix compositing works from same-landblock and retained-neighbor
   interiors, including the bounded `inside -> outside -> inside -> outside` case.
-- Phase 13C: projection/layer portal behavior, dungeon/interior behavior, static seed rendering, and
-  remaining visual parity gaps are compared against known targets before dynamic and cutover work.
-- Phase 14: a static-authored dynamic seed can hydrate, render, animate, and evict without static geometry/atlas rebake.
-- Phase 14A: final design-vs-implementation reassessment happens before replacing the old browser display.
-- Phase 15: browser cutover is verified on representative outdoor, outdoor-to-interior, pure dungeon,
-  static seed, and dynamic seed targets.
+- Phase 15: canonical browser cutover is verified on representative outdoor, outdoor-to-interior,
+  pure dungeon, and static seed targets.
+- Phase 14: after cutover, a static-authored dynamic seed can hydrate, render, animate, and evict
+  without static geometry/atlas rebake.
 
 ## Plan Reassessment Cadence
 
@@ -4498,7 +4548,7 @@ This plan should be reassessed after every major ownership boundary becomes real
 Each reassessment phase should:
 
 - compare the implemented code against the design doc ownership model;
-- compare visible behavior against the v1 harness where v1 has relevant behavior;
+- compare visible behavior against named retail/reference targets where behavior remains uncertain;
 - identify temporary concepts that risk becoming canonical;
 - update later phases before the next implementation phase starts;
 - record known gaps, explicit deferrals, and cleanup owners.
@@ -4538,9 +4588,11 @@ Risk: portal/interior and visibility records stay stringly because early bake ou
 
 Mitigation: typed peer records, projection records, and env-cell system layer payloads are now the active model. Do not add new string placeholders for facts that runtime query, visibility, debug selection, or renderer visibility will consume.
 
-Risk: legacy code shapes V2 by gravity.
+Risk: replaced browser code shapes the canonical browser by gravity.
 
-Mitigation: current TS sources are references for required behavior, not patterns to preserve. Prefer clean V2 types under `src/v2/`; delete or cut over old paths only when the V2 slice works.
+Mitigation: current replaced browser TS sources are references for required behavior, not patterns to
+preserve. Phase 15 deletes replaced paths and promotes the current implementation into canonical
+app-local paths without wrapper modules or migration labels.
 
 Risk: dynamic rendering inherits static landblock bake assumptions.
 
@@ -4548,18 +4600,26 @@ Mitigation: make static-authored dynamic seeds the first dynamic requirement, bu
 
 Risk: parity work hides inside final cutover.
 
-Mitigation: picking, inspection, frame metrics, terrain visual parity, static material coverage, dungeon visual parity, dynamic seed behavior, and plan reassessments are explicit pre-cutover gates. Phase 15 should be route/UX replacement and cleanup, not first discovery of missing behavior.
+Mitigation: Phase 13C names the remaining visual/source-classification follow-ups before cutover.
+Phase 15 is allowed to be a decisive canonicalization pass; any issue found during the cutover must
+either block the cutover directly or be logged as post-cutover product work without preserving the
+replaced architecture.
 
 ## Definition Of Done
 
-- The V2 browser path can render terrain, outdoor static objects, interiors/portals, outdoor-to-indoor
-  and indoor-to-outdoor transition views, and static-authored dynamic seeds through the new
-  runtime/worker/atlas/renderer seams.
+- The canonical browser path can render terrain, outdoor static objects, interiors/portals,
+  outdoor-to-indoor transition views, and indoor-to-outdoor transition views through the runtime,
+  worker, atlas, and renderer seams.
+- Static-authored dynamic seeds can hydrate, render, update/animate, and evict after Phase 14 without
+  static geometry or atlas rebake.
 - Svelte remains a presentation harness and browser UX layer.
 - Static workers run expensive source resolution and baking off the render thread.
 - Texture sharing is batch-scoped and lease-counted independently of individual landblock draw-unit lifetime.
 - Renderer APIs are imperative and explicit.
-- Old world-display render-product and asset-prepare-worker assumptions are removed or no longer used by browser world rendering.
+- Replaced world-display render-product and asset-prepare-worker assumptions are removed from active
+  browser source.
+- Active app source contains no `src/v2`, `/browser-v2`, `BrowserWorldDisplayV2`, or migration-era
+  `V2`/`v2` browser naming.
 - `cd apps/holtburger-3d && npm run check`
 - `cd apps/holtburger-3d && npm run lint:ts`
 - `cd apps/holtburger-3d && npm run lint:dead`
@@ -4575,11 +4635,11 @@ Mitigation: picking, inspection, frame metrics, terrain visual parity, static ma
 - Do the `02000c39`-`02000c3f` marker-like setup families require a renderability classification
   before dynamic seed work, or can that evidence task remain a static-rendering follow-up?
 - Does the `0x1a73...` tunnel/cell-shell visibility issue still reproduce under projection/layer
-  rendering, and if so does it block cutover or remain a named visual correctness follow-up?
-- Which V2 browser diagnostics should survive Phase 15 as intentional tools instead of historical
-  investigation controls?
-- How soon should Playwright/screenshot regression coverage be introduced for the V2 harness and
-  eventual browser cutover route?
+  rendering, and if so what post-cutover visual correctness task should own it?
+- Which canonical browser diagnostics should survive Phase 15 as intentional tools instead of
+  historical investigation controls?
+- How soon should Playwright/screenshot regression coverage be introduced for the canonical browser
+  route?
 
 ## Decisions And Course Corrections
 
@@ -4621,3 +4681,7 @@ Mitigation: picking, inspection, frame metrics, terrain visual parity, static ma
   plans can carry a retained exterior source graph, and WebGL samples the same depth-1 outdoor-root
   composite used by outdoor residency while filtering the current resident env cells from that
   source. Automated checks passed; manual visual validation remains open.
+- 2026-06-24: Phase 13C promoted Phase 15 to the next immediate implementation phase. The cutover is
+  now a true canonical browser cutover: remove the old browser path, promote current implementation
+  code out of `src/v2`, remove migration labels from active source, delete replaced render-product
+  and prepared-asset pathways, and move static-authored dynamic seeds to post-cutover Phase 14 work.

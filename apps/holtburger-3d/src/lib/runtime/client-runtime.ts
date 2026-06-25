@@ -2982,6 +2982,20 @@ function createMaterializedLandblockLayerPayloads(
 				landblockId,
 				delta.revision,
 			),
+			instancedObjectInstances:
+				materialized.staticObjectRenderInstances.filter(
+					(instance) =>
+						instance.domain === "outdoor-detail" &&
+						instance.landblockId === landblockId,
+				),
+			instancedObjectResources: materialized.staticObjectVisualResources.filter(
+				(resource) =>
+					materialized.staticObjectRenderInstances.some(
+						(instance) =>
+							instance.landblockId === landblockId &&
+							instance.resourceId === resource.resourceId,
+					),
+			),
 			kind: "outdoor-detail",
 			landblockId,
 			materialCoverage: delta.materialCoverage.filter(
@@ -3028,8 +3042,14 @@ function collectStaticLayerResourceIds(
 	switch (payload.kind) {
 		case "terrain":
 		case "outdoor-buildings":
-		case "outdoor-detail":
 			return payload.drawUnits.map((drawUnit) => drawUnit.drawUnitId);
+		case "outdoor-detail":
+			return [
+				...payload.drawUnits.map((drawUnit) => drawUnit.drawUnitId),
+				...payload.instancedObjectResources.map(
+					(resource) => resource.resourceId,
+				),
+			];
 		case "env-cell-system":
 			return [
 				...payload.envCellStaticObjectDrawUnits.map(

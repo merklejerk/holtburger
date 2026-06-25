@@ -146,6 +146,8 @@ function createResult(input: StaticBakeBatchInput): StaticBakeBatchResult {
 		buildRevision: 1,
 		domain: input.domain,
 		drawUnits: [],
+		staticObjectRenderInstances: [],
+		staticObjectVisualResources: [],
 		materialCoverage: [],
 		portalApertureResources: [],
 		revision: input.revision,

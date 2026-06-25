@@ -5,6 +5,8 @@ import type {
 	StaticPortalApertureResource,
 	StaticMaterialCoverageReport,
 	StaticObjectGeometryStaticDrawUnit,
+	StaticObjectRenderInstance,
+	StaticObjectVisualResource,
 	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
 	StaticPortalProjectionRecord,
@@ -80,6 +82,8 @@ export interface OutdoorBuildingsLayerPayload extends StaticLandblockLayerPayloa
 export interface OutdoorDetailsLayerPayload extends StaticLandblockLayerPayloadBase {
 	readonly kind: "outdoor-detail";
 	readonly drawUnits: readonly OutdoorStaticObjectLayerDrawUnit<"outdoor-detail">[];
+	readonly instancedObjectInstances: readonly StaticObjectRenderInstance[];
+	readonly instancedObjectResources: readonly StaticObjectVisualResource[];
 	readonly sourceMappingRecords: readonly StaticSourceMappingRecord[];
 	readonly spatialRecords: readonly StaticSpatialRecord[];
 }

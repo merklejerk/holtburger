@@ -15,6 +15,8 @@ import type {
 	StaticObjectGeometryStaticDrawUnit,
 	StaticMaterialTableEntry,
 	StaticObjectSourceMappingCoverage,
+	StaticObjectRenderInstance,
+	StaticObjectVisualResource,
 	StaticAuthoredDynamicSeedRecord,
 	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
@@ -40,6 +42,8 @@ export interface StaticMaterializationResult {
 	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly removedResources: readonly StaticResourceKey[];
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
+	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
+	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
 	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticPortalInteriorRecords: readonly StaticPortalInteriorRecord[];
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
@@ -79,6 +83,8 @@ export function materializeStaticCommit(
 		materializedDrawUnits: finePartitioned.drawUnits,
 		portalApertureResources: input.commit.addedPortalApertureResources ?? [],
 		removedResources,
+		staticObjectRenderInstances: input.commit.staticObjectRenderInstances,
+		staticObjectVisualResources: input.commit.staticObjectVisualResources,
 		...materializeStaticPeerRecords(input.commit, finePartitioned),
 		textureUpdate,
 	};

@@ -266,6 +266,8 @@ function createFakeStaticBakeResult(
 		domain: input.domain,
 		drawUnits: result.drawUnits ?? [],
 		staticObjectBakeDiagnostics: result.staticObjectBakeDiagnostics ?? [],
+		staticObjectRenderInstances: result.staticObjectRenderInstances ?? [],
+		staticObjectVisualResources: result.staticObjectVisualResources ?? [],
 		materialCoverage: result.materialCoverage ?? [],
 		portalApertureResources: result.portalApertureResources ?? [],
 		revision: input.revision,

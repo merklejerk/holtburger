@@ -50,6 +50,8 @@ export function bakeTerrainGeometry(
 		domain: input.domain,
 		drawUnits,
 		staticObjectBakeDiagnostics: [],
+		staticObjectRenderInstances: [],
+		staticObjectVisualResources: [],
 		materialCoverage: [],
 		portalApertureResources: [],
 		revision: input.revision,

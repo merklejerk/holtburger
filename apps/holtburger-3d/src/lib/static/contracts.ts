@@ -1141,6 +1141,8 @@ export interface StaticBakeBatchResult {
 	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
+	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
+	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
 	readonly buildRevision: number;
 }
 
@@ -1707,6 +1709,8 @@ export interface StaticCoordinatorCommitDelta {
 	readonly staticPortalGraphs: readonly StaticPortalGraphRecord[];
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
+	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
+	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
 	readonly revision: number;
 }
 

@@ -411,6 +411,36 @@ Spicy bits and debt:
 - Texture binding ownership is still draw-unit keyed in the texture manager and renderer. Phase 3
   remains responsible for introducing the shared visual-resource owner path.
 
+### 2026-06-25 Phase 2 Progress
+
+- Extended `StaticBakeBatchResult`, `StaticCoordinatorCommitDelta`, materialization results, and
+  `OutdoorDetailsLayerPayload` with first-class `staticObjectVisualResources` /
+  `staticObjectRenderInstances` fields. The fields are propagated through the coordinator,
+  materializer, and runtime outdoor-detail layer assembly.
+- The static object compatibility bake now emits candidate shared visual resources and render
+  instances for repeated generated outdoor-detail objects that retain source mapping coverage,
+  generated facts, and instance bounds. Current baked draw units are still emitted in parallel.
+- Candidate construction now burns off nullable host/content facts through a local eligibility gate:
+  emitted render instances require generated facts and non-null instance bounds, while ineligible
+  objects remain on the baked path.
+- Added a bake test proving repeated generated outdoor-detail scenery produces one shared visual
+  resource and multiple render instances that reference the same resource id.
+
+Spicy bits and debt:
+
+- This is a production-data bridge, not the byte-saving cutover. Eligible generated instances are
+  still baked into draw units so the current renderer remains visually unchanged. Phase 2 still needs
+  a follow-up cut that keeps eligible generated candidates out of the flattened baked path once the
+  renderer can consume shared resources.
+- Candidate emission requires `instanceBounds`; generated objects without bounds stay baked-only for
+  now. The nullable source data is contained at the eligibility boundary, but Phase 2 should report
+  retained-baked reasons before broad enablement.
+- Candidate resources currently use source geometry identity plus renderer-visible material entries,
+  but they do not yet carry source-local vertex/index buffers. Phase 3 cannot upload shared resources
+  until Phase 2 adds that data or a source-geometry lookup path.
+- Runtime layer resource collection now includes `instancedObjectResources`, but the WebGL2 renderer
+  intentionally ignores them until the shared resource cache lands.
+
 ## Implementation Phases
 
 ### Phase 0: Baseline And De-Instancing Diagnostics

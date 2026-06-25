@@ -43,6 +43,9 @@ Current frontend constraints to preserve:
 - Renderer consumes explicit static layer commits, dynamic resource/instance commits, texture/
   resource updates, and frame state. It does not fetch assets, walk dependencies, classify AC source
   data, or own semantic entity identity.
+- Dynamic renderer submissions should consume the shared resource-backed render instance path planned
+  in `docs/plans/holtburger-3d-shared-render-instance-static-instancing-plan.md` rather than creating
+  a dynamic-only VAO, texture, material, or draw-submission stack.
 - Host route strings are transport/provenance only. Dynamic records must use typed identities,
   runtime-assigned handles, or opaque cache keys derived from typed identities.
 - Static-authored dynamic seeds may be discovered by static resolver/bake paths, but the dynamic
@@ -94,7 +97,9 @@ Recorded on 2026-06-24 before deeper ACE/ACViewer/retail investigation:
   affect whether a source is dynamic. This needs evidence before it shapes implementation.
 - Animation mechanics are currently unclear for both characters and static scenery animations. This
   needs evidence before implementation phases are written.
-- Dynamic rendering should use instancing for dynamic parts where it is a good fit.
+- Dynamic rendering should use the shared render instance/resource path introduced for generated
+  outdoor static instancing. Actual WebGL2 instanced draws remain an optimization; the architectural
+  requirement is shared resources plus per-instance submissions.
 - Dynamic rendering can skip atlasing and VAO compaction initially.
 - Dynamic entities need the same material support as static entities. The preferred direction is to
   make material/render pipelines part-agnostic where possible, so the reusable core is not split
@@ -152,9 +157,9 @@ Recorded on 2026-06-24 after checking project, ACE, and ACViewer references:
   position frames, per-part animation frames, movement/kinematics state, or object state updates.
   Physics-script effects can be spatially anchored, such as particle offsets, and can mutate
   transform-adjacent state such as scale or omega, but they are not the primary translation path.
-- Dynamic instancing is desirable but not a first-slice architecture dependency. The current WebGL2
+- WebGL2 instanced draws are desirable but not a first-slice architecture dependency. The current
   renderer does not have an instanced draw path, so initial dynamic rendering should prefer correct
-  shared resources plus per-instance submissions.
+  shared resources plus per-instance submissions that can later be batched.
 - The material pipeline is more reusable than the static names imply. Structured interiors already
   reuse static object material classification, so dynamic rendering should generalize the material
   planner primitives instead of creating a second material interpretation path.
@@ -252,8 +257,8 @@ Proposed frontend runtime shape:
 - First-slice ECS-like data should live on `DynamicEntityRecord` as nested typed sub-records. Do not
   start with separate component arrays/maps for animation, resources, transforms, bounds, or
   renderability.
-- Keep behavior in explicit runtime modules coordinated by `DynamicRuntime.tick()` and static-scope
-  reconciliation:
+- Keep behavior in explicit dynamic entity modules coordinated by `DynamicEntityController.tick()` and
+  static-scope reconciliation:
   - seed ingestion / host delta ingestion;
   - resource coordination;
   - animation playback;
@@ -272,7 +277,8 @@ Proposed frontend runtime shape:
   pressure, such as many active animations, active script timelines, independent bounds updates,
   pending resource queues, or measured frontend performance pressure.
 - Renderer objects are output/resource handles, not source-of-truth dynamic components. The dynamic
-  runtime owns semantic state; the renderer consumes submission snapshots.
+  runtime owns semantic state; the renderer consumes submission snapshots whose renderable parts
+  reference shared visual resources where possible.
 
 Known trigger channels:
 
@@ -372,7 +378,7 @@ Classify each hook as `host-authoritative`, `frontend-presentation`, `both-proje
   unsupported/deferred behavior, and evidence links.
 - The first implemented hook capability can be `SetOmega`, but the first hook architecture should not
   be a `SetOmega`-specific path. It should decode typed hook payloads, pass hook invocations from
-  animation/script playback into a shared hook runtime/router, apply supported effects through typed
+  animation/script playback into a shared hook dispatcher/router, apply supported effects through typed
   handlers, and diagnose unsupported hooks with entity, timeline, frame, and hook context.
 
 ### 4. Equipment And Attachments
@@ -432,6 +438,9 @@ Define dynamic resource ownership and reuse:
   Unsupported render-affecting hooks may be skipped for first-slice rendering as long as the runtime
   reports them through diagnostics and console warnings with enough context to inspect the visual
   compromise.
+- Dynamic resource readiness should resolve setup/gfx/material/texture dependencies into the same
+  shared visual resource keys used by generated static instances wherever the visual facts are
+  isomorphic. Per-entity animation, transform, bounds, and residence remain dynamic instance state.
 
 ### 9. Bridge Contract
 
@@ -687,16 +696,16 @@ Status: Proposed. Confidence: High for first target.
   `0x020005ac` can become the next target by adding a `SetOmega` handler rather than reshaping the
   data model.
 
-### Hook Runtime
+### Hook Dispatcher
 
 Status: Proposed. Confidence: Medium-high.
 
-- Add a small imperative hook runtime before broad hook execution is supported.
-- Animation playback and future script playback should call the hook runtime directly when they cross
+- Add a small imperative hook dispatcher before broad hook execution is supported.
+- Animation playback and future script playback should call the hook dispatcher directly when they cross
   a hook. No event bus is required for the first slice.
 - Hook invocations should carry entity id, timeline source, asset id, frame/time, hook id/name, typed
   payload when decoded, and support/ownership classification.
-- The hook runtime should apply only explicitly supported hook handlers and produce diagnostics for
+- The hook dispatcher should apply only explicitly supported hook handlers and produce diagnostics for
   unsupported hooks.
 - `SetOmega` is the first intended hook handler because the second target needs it for visual parity,
   but the routing and diagnostic shape should be hook-generic.
@@ -710,7 +719,7 @@ Status: Proposed. Confidence: Medium-high.
 
 - Dynamic transform integration is distinct from animation playback conceptually, but it does not need
   a separate first-target pass beyond feeding base pose and future transform state into
-  `DynamicPlacementRuntime`.
+  `DynamicPlacementTracker`.
 - It starts from the authoritative/base landblock-local entity frame provided by static seed facts or
   host/runtime entity state.
 - Once needed, a separate ECS-like transform integration pass can own presentation integration for
@@ -718,9 +727,9 @@ Status: Proposed. Confidence: Medium-high.
   transform-adjacent effects like scale.
 - Velocity, acceleration, and omega are first-class inputs because they already appear in host/server
   entity state and object-description payloads.
-- Animation frame hooks such as `SetOmega` update dynamic transform state through the hook runtime;
+- Animation frame hooks such as `SetOmega` update dynamic transform state through the hook dispatcher;
   they do not become part of the animation part-frame sampler.
-- `DynamicPlacementRuntime` consumes the base pose plus current transform state and outputs the
+- `DynamicPlacementTracker` consumes the base pose plus current transform state and outputs the
   current object/part frames used by bounds, spatial indexing, and renderer submission.
 - Frontend transform integration must not create authoritative truth. Host/runtime state remains the
   authority for entity existence, base pose, residence, collision, gameplay movement, and correction.
@@ -757,12 +766,18 @@ Status: Proposed. Confidence: Medium-high.
 - Dynamic rendering should submit live per-part drawables instead of baked static draw units.
 - Geometry/material resources should be shared where possible; per-entity/per-part transforms are
   live submission data.
+- Dynamic part submissions should use the shared visual resource/render instance contracts from
+  `docs/plans/holtburger-3d-shared-render-instance-static-instancing-plan.md` once that path exists.
+  If dynamic implementation starts before the full static instancing plan is complete, it should
+  still target the same resource-keyed cache and renderer-facing instance shape rather than
+  introducing throwaway dynamic-only bindings.
 - The current WebGL renderer has an empty `applyDynamicDelta()` placeholder, but no dynamic resource
   ownership or draw path. Do not let this placeholder define the architecture. Delete/replace it
   with a declarative dynamic scene commit API rather than building caller-authored diffing around it.
 - First target can be outdoor-only and residence-aware: submit with the outdoor scene for its owning
   landblock, and submit nothing if residence is missing.
-- Dynamic atlas packing, VAO compaction, and instancing are deferred.
+- Dynamic atlas packing and VAO compaction are deferred. WebGL2 instanced draws are also deferred as
+  an optimization, but resource reuse and per-instance submission are not deferred.
 
 ### Scene Query And Bounds
 
@@ -856,7 +871,7 @@ Status: Proposed. Confidence: Medium-high for first slice.
 - Effective outdoor residence should be resolved from current frontend pose/bounds. The primary
   effective landblock can come from current object origin, while index membership should include every
   outdoor landblock overlapped by current-frame bounds so cross-boundary entities remain queryable.
-- Effective residence/index membership can be polling-and-diff based during `DynamicPlacementRuntime`
+- Effective residence/index membership can be polling-and-diff based during `DynamicPlacementTracker`
   updates. At the expected first-slice scale, no event bus or host feedback path is needed.
 - Env-cell resident dynamic indexes can stay flat by env-cell membership for now.
 - Bounds records should be landblock-local so later spatial indexing follows the same reanchoring
@@ -887,7 +902,7 @@ These are the implementation-facing answers that need to be pinned before writin
   enough asset, runtime, renderer, and query state for manual inspection of `0x020003e5`.
 - DTO ownership: static source classification/resolution creates static-authored dynamic seed facts;
   the Tauri/content asset route creates animation asset payloads; frontend host contracts validate
-  both; the dynamic runtime consumes seed facts and requests animation assets through the asset
+  both; `DynamicEntityController` consumes seed facts and requests animation assets through the asset
   service.
 - Spatial index strategy: reuse the existing outdoor landblock-grid traversal as the outer broad
   phase, then use a per-landblock R-tree/RBush-style mutable AABB index with current-frame
@@ -898,12 +913,12 @@ These are the implementation-facing answers that need to be pinned before writin
 - Renderer contract: resource commits and instance commits stay separate. Renderer handles are
   derived output, while semantic dynamic entity state remains owned by the frontend dynamic runtime.
 
-### First-Slice Runtime Modules
+### First-Slice Dynamic Entity Modules
 
 Status: proposed. Confidence: medium-high.
 
-The first slice should be a hybrid runtime coordinated by a small owner, not a full ECS. Some modules
-are ECS-like passes over typed records, while others are imperative services because they cross async,
+The first slice should use a hybrid dynamic entity controller, not a full ECS. Some modules are
+ECS-like passes over typed records, while others are imperative services because they cross async,
 diagnostic, hook-routing, or tightly coupled update boundaries. The useful abstraction is clear
 ownership and update order rather than generic components, queries, events, or archetypes.
 
@@ -911,51 +926,51 @@ High-level tick/reconcile flow:
 
 ```text
 static source classification
-  -> DynamicRuntime.ingestStaticSeed()
+  -> DynamicEntityController.ingestStaticSeed()
 
-DynamicRuntime.reconcileStaticScopes()
+DynamicEntityController.reconcileStaticScopes()
   -> remove evicted source records
   -> remove renderer submissions
   -> remove spatial index entries
 
-DynamicRuntime.tick(dt)
-  -> DynamicResourceCoordinator.ensureReady(record)
-  -> DynamicAnimationPlayer.advance(record, dt, hookRuntime)
-  -> DynamicPlacementRuntime.updatePoseBoundsResidencyAndIndex(record)
-  -> DynamicRuntime.commitDynamicRendererSnapshot()
+DynamicEntityController.tick(dt)
+  -> DynamicEntityResourceManager.ensureReady(record)
+  -> DynamicAnimationPlayer.advance(record, dt, hookDispatcher)
+  -> DynamicPlacementTracker.update(record)
+  -> DynamicEntityController.commitRendererSnapshot()
 ```
 
 First-slice modules:
 
-- `DynamicRuntime`: owns the store, static-scope reconciliation, update order, and renderer commit
-  production. It is the coordinator, not a generic ECS scheduler.
+- `DynamicEntityController`: owns the store, static-scope reconciliation, update order, and renderer
+  commit production. It is the coordinator, not a generic ECS scheduler.
 - `DynamicEntityStore`: typed `Map<DynamicEntityId, DynamicEntityRecord>` with nested typed state for
   provenance, source residence, effective presentation residence, resources, animation, transform,
   renderability, bounds/index membership, and current issues. First-slice ECS-like passes iterate
   these records directly; component arrays/maps are deferred until measured iteration pressure or
   proven requirements justify extraction.
-- `DynamicResourceCoordinator`: requests setup, part/gfx/material/texture resources, and animation
+- `DynamicEntityResourceManager`: requests setup, part/gfx/material/texture resources, and animation
   assets. It is async orchestration/service behavior, not an ECS system. Missing required assets
   produce loud console diagnostics and transient non-renderable state; source records remain alive for
   later retry/source refresh.
 - `DynamicAnimationPlayer`: advances setup default animation from static seed facts, samples integer
-  part frames, and calls the hook runtime directly when a hook is crossed. This is ECS-like: it can
+  part frames, and calls the hook dispatcher directly when a hook is crossed. This is ECS-like: it can
   iterate records with active animation state and update typed animation/pose inputs.
-- `DynamicHookRuntime`: shared imperative hook interpreter/router. Animation playback uses it first;
-  future physics-script playback should call the same runtime. It applies supported hooks directly
+- `DynamicHookDispatcher`: shared imperative hook interpreter/router. Animation playback uses it first;
+  future physics-script playback should call the same dispatcher. It applies supported hooks directly
   and warns/diagnoses unsupported hooks.
-- `DynamicPlacementRuntime`: imperatively composes current object/part transforms, computes
+- `DynamicPlacementTracker`: imperatively composes current object/part transforms, computes
   current-frame bounds, resolves effective frontend presentation residence, and synchronizes outdoor
   dynamic spatial index entries when bounds, effective residence, or membership changes. It consumes
   animation output and runtime transform state, but it should not be a separate ECS pass because
   pose, bounds, effective residency, and index sync are tightly coupled for the first slice.
 - `OutdoorDynamicSpatialIndex`: owns the per-landblock R-tree/RBush-style mutable AABB indexes used
   after existing landblock-grid candidate traversal.
-- Dynamic renderer commit: `DynamicRuntime` builds and applies a coherent dynamic renderer snapshot
-  after resource, animation, placement, bounds, and index state are current. This can use helper
-  functions, but it does not need a separate ECS-style builder module for the first slice. It can
-  reuse static material, geometry, texture, shader, upload, and batching helpers where the facts are
-  isomorphic, but it must not bake animated transforms into static draw units or make renderer
+- Dynamic renderer commit: `DynamicEntityController` builds and applies a coherent dynamic renderer
+  snapshot after resource, animation, placement, bounds, and index state are current. This can use
+  helper functions, but it does not need a separate ECS-style builder module for the first slice. It
+  can reuse static material, geometry, texture, shader, upload, and batching helpers where the facts
+  are isomorphic, but it must not bake animated transforms into static draw units or make renderer
   handles the semantic dynamic identity.
 - Diagnostics API: read-only projection from runtime records, current issues, renderer submission
   counters, and spatial index membership. Do not create a standalone diagnostics system unless the
@@ -965,10 +980,10 @@ Module shape summary:
 
 ```text
 imperative/orchestration:
-  DynamicRuntime
-  DynamicResourceCoordinator
-  DynamicHookRuntime
-  DynamicPlacementRuntime
+  DynamicEntityController
+  DynamicEntityResourceManager
+  DynamicHookDispatcher
+  DynamicPlacementTracker
   dynamic renderer snapshot/commit
   Diagnostics API
 
@@ -986,19 +1001,19 @@ Imperative hook call shape:
 ```text
 DynamicAnimationPlayer.advance(record, dt)
   -> crosses animation frame hook
-  -> DynamicHookRuntime.applyAnimationHook(record, hookInvocation)
+  -> DynamicHookDispatcher.applyAnimationHook(record, hookInvocation)
        -> supported handler mutates typed runtime state
        -> unsupported handler logs and records diagnostics
 
 Future DynamicScriptPlayer.advance(record, dt)
   -> crosses script hook
-  -> DynamicHookRuntime.applyScriptHook(record, hookInvocation)
+  -> DynamicHookDispatcher.applyScriptHook(record, hookInvocation)
 ```
 
 Placement, effective residency, bounds, and index coupling:
 
 ```text
-DynamicPlacementRuntime.updatePoseBoundsResidencyAndIndex(record)
+DynamicPlacementTracker.update(record)
   -> current object frame
   -> current part transforms
   -> current-frame landblock-local bounds
@@ -1012,8 +1027,10 @@ Renderer reuse boundary:
 
 ```text
 reuse:
+  shared visual resource/render instance contracts
   static material planning where part-agnostic
   prepared gfx/material/texture resources
+  shared object visual resource cache where keys are isomorphic
   shader/material binding helpers
   renderer upload/batching helpers where they accept live transforms
 
@@ -1154,13 +1171,17 @@ Evidence found:
 - The same renderer currently has an empty `applyDynamicDelta()` method.
 - Static object material pass and transparency behavior are tied to baked static object draw-unit
   resources.
+- `docs/plans/holtburger-3d-shared-render-instance-static-instancing-plan.md` is the intended
+  precursor for splitting reusable visual resources from per-instance placement for generated outdoor
+  statics and future dynamic entity parts.
 
 Conclusion:
 
 - Dynamic renderer work should add a real dynamic resource/instance commit path instead of mutating
   static draw units.
-- Prepared geometry/material facts can be shared conceptually, but first-slice dynamic rendering
-  needs live per-part transforms and scene-domain membership.
+- Prepared geometry/material facts should be shared through the planned shared render instance path,
+  while first-slice dynamic rendering still owns live per-part transforms and scene-domain
+  membership.
 - The current `applyDynamicDelta()` placeholder is a cleanup pressure point: delete or replace it
   with the final declarative dynamic commit API.
 
@@ -1639,7 +1660,7 @@ Requirement direction:
 - Renderer consumes committed instance transforms/animation parameters for the current dynamic scene
   state.
 - Frontend dynamic runtime keeps animation playback distinct from transform state. Animation playback
-  samples authored local part frames and calls the hook runtime when hooks are crossed. A separate
+  samples authored local part frames and calls the hook dispatcher when hooks are crossed. A separate
   transform integration pass should be added when velocity, acceleration, omega, or supported
   transform hooks require object-frame advancement beyond the first target's base pose.
 - Setup, animation, motion table, physics script, physics script table, and PlayScript concepts stay
@@ -1688,7 +1709,9 @@ Requirement direction:
   not become the durable dynamic entity record.
 - Dynamic renderer identity must not be the semantic entity identity, but it must map back to it for
   inspection and selection.
-- Initial dynamic rendering may skip atlas packing and static-style VAO compaction.
+- Initial dynamic rendering may skip atlas packing, static-style VAO compaction, and WebGL2
+  instanced draws, but it should still use the shared visual resource/render instance path planned for
+  generated outdoor static instancing.
 - Dynamic rendering should share static material support where the source/material facts are
   isomorphic.
 - Dynamic rendering must support residence-aware submission so env-cell entities draw inside their
@@ -1763,8 +1786,8 @@ Requirement direction:
 - Do not add a dedicated dynamic worker just because static has resolver/bake workers.
 - Worker boundaries should follow measured IO/CPU pressure and clean ownership, not symmetry.
 - Dynamic resources should share prepared asset/cache authority through the asset service.
-- Skip dynamic atlasing and static-style VAO compaction until requirements or profiling prove they are
-  needed.
+- Skip dynamic atlasing, static-style VAO compaction, and WebGL2 instanced draws until requirements
+  or profiling prove they are needed. Do not skip the shared-resource/per-instance submission split.
 
 ## First-Slice Requirements Gate
 
@@ -1792,9 +1815,9 @@ satisfied:
 - The setup/animation/motion-table/script/script-table dependency set is classified for the first
   target, and motion tables, physics scripts, and script tables are either proven irrelevant or given
   an explicit defer policy.
-- The first-slice hook runtime is defined: typed hook invocation shape, ownership/support routing,
+- The first-slice hook dispatcher is defined: typed hook invocation shape, ownership/support routing,
   supported-handler dispatch, and unsupported-hook diagnostics. The first target does not need hook
-  execution, but the runtime must be able to add `SetOmega` as the first handler.
+  execution, but the dispatcher must be able to add `SetOmega` as the first handler.
 - The first-slice frontend dynamic runtime shape is defined as a typed entity store plus explicit
   systems, with criteria for later component-map/index extraction.
 - The first-target transform composition rule is defined for authoritative/base pose, animation
@@ -1802,6 +1825,9 @@ satisfied:
   omega.
 - The renderer dynamic commit contract is sketched enough to distinguish resource commits from
   instance commits without exposing caller-authored diffs as the public API.
+- Dynamic renderer resource identity is compatible with the shared visual resource keys from
+  `docs/plans/holtburger-3d-shared-render-instance-static-instancing-plan.md`, so duplicated dynamic
+  parts can reuse GPU resources rather than creating per-entity VAOs/textures by default.
 - Dynamic transform and bounds records are defined as landblock-local, with scene/render-local values
   treated as derived submission data.
 - Dynamic spatial indexing ownership and API requirements are known for early dynamic rendering:
@@ -1887,7 +1913,8 @@ and broad hook execution remain open for later targets under the Full Dynamic Sy
   rather than as per-part residence exceptions.
 - Dynamic entities require first-class spatial query support for gameplay actions, selection,
   inspection, and diagnostics.
-- Initial dynamic rendering can defer atlasing and VAO compaction.
+- Initial dynamic rendering can defer atlasing, VAO compaction, and WebGL2 instanced draws, but not
+  the shared-resource/per-instance submission split.
 - Dynamic entity transform and spatial records are landblock-local. Runtime/render submission derives
   scene-space placement from the effective presentation residence/anchor the same way static draw
   units do, so reanchoring remains cheap.
@@ -1948,6 +1975,6 @@ and broad hook execution remain open for later targets under the Full Dynamic Sy
 - Animation playback is an ECS-like record pass. Runtime transform integration can become a separate
   ECS-like pass once velocity, acceleration, omega, scale-style modifiers, or other supported
   object-frame transform effects require it; the first target can keep base pose plus animation
-  output flowing into `DynamicPlacementRuntime`.
+  output flowing into `DynamicPlacementTracker`.
 - Frontend dynamic transform integration is presentation/runtime projection, not authoritative world
   physics. Host/runtime state owns durable position, residence, collision, and gameplay corrections.

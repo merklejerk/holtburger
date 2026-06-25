@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
 	StaticObjectGeometryStaticDrawUnit,
+	StaticObjectRenderInstance,
+	StaticObjectVisualResource,
 	StaticPortalApertureResource,
 	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
@@ -1538,6 +1540,85 @@ describe("WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
+	it("uses instanced draws for compatible shared outdoor-detail render instances", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+		const visualResource = createOutdoorDetailStaticObjectVisualResource(
+			"static-object-visual-resource:test",
+		);
+
+		renderer.setOutdoorDetailsLayer(0xda55ffff, {
+			...createOutdoorDetailsLayerPayload(),
+			drawUnits: [],
+			instancedObjectInstances: [
+				createOutdoorDetailStaticObjectRenderInstance({
+					instanceId: "instance-a",
+					resourceId: visualResource.resourceId,
+				}),
+				createOutdoorDetailStaticObjectRenderInstance({
+					instanceId: "instance-b",
+					resourceId: visualResource.resourceId,
+				}),
+			],
+			instancedObjectResources: [visualResource],
+		});
+		pendingFrame?.(16);
+
+		expect(gl.drawElementsInstancedCalls).toEqual([
+			{
+				count: 3,
+				instanceCount: 2,
+				mode: gl.TRIANGLES,
+				type: gl.UNSIGNED_SHORT,
+			},
+		]);
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			staticObjectDirectRenderInstanceDrawCalls: 0,
+			staticObjectInstancedRenderInstanceDrawCalls: 1,
+			staticObjectInstancedRenderInstances: 2,
+		});
+
+		renderer.dispose();
+	});
+
+	it("reports baked outdoor-detail direct draw calls by material pass", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+
+		renderer.setOutdoorDetailsLayer(
+			0xda55ffff,
+			createOutdoorDetailsLayerPayload(),
+		);
+		pendingFrame?.(16);
+
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			outdoorDetailStaticObjectBakedDirectDrawCalls: 1,
+			outdoorDetailStaticObjectBakedDirectDrawCallsByPass: {
+				additive: 0,
+				alphaTest: 0,
+				opaque: 1,
+				transparent: 0,
+			},
+			staticObjectBakedDirectDrawCalls: 1,
+		});
+
+		renderer.dispose();
+	});
+
 	it("clears env-cell system layers without touching terrain layers", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
@@ -1939,12 +2020,107 @@ function createOutdoorDetailsLayerPayload(): OutdoorDetailsLayerPayload {
 	return {
 		drawUnits: [createOutdoorDetailStaticObjectDrawUnit("outdoor-detail-a")],
 		generationId: "outdoor-detail:a",
+		instancedObjectInstances: [],
+		instancedObjectResources: [],
 		kind: "outdoor-detail",
 		landblockId: 0xda55ffff,
 		materialCoverage: [],
 		sourceMappingRecords: [],
 		spatialRecords: [],
 		textureUses: [],
+	};
+}
+
+function createOutdoorDetailStaticObjectVisualResource(
+	resourceId: string,
+): StaticObjectVisualResource {
+	const drawUnit = createOutdoorDetailStaticObjectDrawUnit(
+		"outdoor-detail-visual-source",
+	);
+	const geometry = {
+		gfxObj: {
+			kind: "static-object-source" as const,
+			sourceAssetKind: "gfx-obj" as const,
+			sourceDid: 0x01000020,
+		},
+		kind: "static-object-source-geometry" as const,
+		partIndex: 0,
+		source: {
+			kind: "static-object-source" as const,
+			sourceAssetKind: "setup-model" as const,
+			sourceDid: 0x02000010,
+		},
+	};
+	const key = {
+		geometry,
+		indexType: drawUnit.indexType,
+		kind: "static-object-visual-resource-key" as const,
+		materialEntries: drawUnit.materialEntries,
+		materialFamily: drawUnit.materialFamily,
+		materialPass: drawUnit.materialPass,
+		renderState: drawUnit.renderState,
+		textureUseIds: drawUnit.textureUseIds,
+	};
+
+	return {
+		bounds: null,
+		coordinateSpace: "static-object-source-local",
+		geometry,
+		indexType: drawUnit.indexType,
+		indices: drawUnit.indices,
+		key,
+		kind: "static-object-visual-resource",
+		materialEntries: drawUnit.materialEntries,
+		materialFamily: drawUnit.materialFamily,
+		materialPass: drawUnit.materialPass,
+		materialSlotIndices: drawUnit.materialSlotIndices,
+		positions: drawUnit.positions,
+		renderState: drawUnit.renderState,
+		resourceId,
+		texCoords: drawUnit.texCoords,
+		textureUseIds: drawUnit.textureUseIds,
+		triangleCount: drawUnit.triangleCount,
+		vertexCount: drawUnit.vertexCount,
+	};
+}
+
+function createOutdoorDetailStaticObjectRenderInstance(options: {
+	readonly instanceId: string;
+	readonly resourceId: string;
+}): StaticObjectRenderInstance {
+	return {
+		bounds: {
+			max: { x: 1, y: 1, z: 0 },
+			min: { x: 0, y: 0, z: 0 },
+		},
+		domain: "outdoor-detail",
+		generated: {
+			sceneId: 1,
+			sceneTemplateIndex: 0,
+			terrainIndex: 0,
+		},
+		instanceId: options.instanceId,
+		kind: "static-object-render-instance",
+		landblockId: 0xda55ffff,
+		resourceId: options.resourceId,
+		sortCenter: { x: 0.5, y: 0.5, z: 0 },
+		source: {
+			instanceId: options.instanceId,
+			kind: "static-object-instance",
+			landblockId: 0xda55ffff,
+			objectKind: "generated-scenery",
+		},
+		sourceToLandblockMatrix: new Float32Array([
+			1, 0, 0, 0,
+			0, 1, 0, 0,
+			0, 0, 1, 0,
+			0, 0, 0, 1,
+		]),
+		transform: {
+			orientation: { w: 1, x: 0, y: 0, z: 0 },
+			origin: { x: 0, y: 0, z: 0 },
+		},
+		transparency: { kind: "depth-writing" },
 	};
 }
 
@@ -2296,6 +2472,12 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		readonly mode: GLenum;
 		readonly type: GLenum;
 	}[];
+	readonly drawElementsInstancedCalls: {
+		readonly count: number;
+		readonly instanceCount: number;
+		readonly mode: GLenum;
+		readonly type: GLenum;
+	}[];
 	readonly drawArraysCalls: {
 		readonly count: number;
 		readonly first: number;
@@ -2321,6 +2503,12 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 	const depthFuncModes: GLenum[] = [];
 	const disabledCapabilities: GLenum[] = [];
 	const drawElementsCalls: { count: number; mode: GLenum; type: GLenum }[] = [];
+	const drawElementsInstancedCalls: {
+		count: number;
+		instanceCount: number;
+		mode: GLenum;
+		type: GLenum;
+	}[] = [];
 	const drawArraysCalls: { count: number; first: number; mode: GLenum }[] = [];
 	const enabledCapabilities: GLenum[] = [];
 	const enabledVertexAttributes: number[] = [];
@@ -2457,6 +2645,22 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		drawElements: vi.fn((mode: GLenum, count: number, type: GLenum) => {
 			drawElementsCalls.push({ count, mode, type });
 		}),
+		drawElementsInstanced: vi.fn(
+			(
+				mode: GLenum,
+				count: number,
+				type: GLenum,
+				_offset: number,
+				instanceCount: number,
+			) => {
+				drawElementsInstancedCalls.push({
+					count,
+					instanceCount,
+					mode,
+					type,
+				});
+			},
+		),
 		enable: vi.fn((capability: GLenum) => {
 			enabledCapabilities.push(capability);
 		}),
@@ -2501,6 +2705,7 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		uniform4fv: vi.fn(),
 		uniformMatrix4fv: vi.fn(),
 		useProgram: vi.fn(),
+		vertexAttribDivisor: vi.fn(),
 		vertexAttribPointer: vi.fn(),
 		viewport: vi.fn(),
 		blitFramebufferCalls,
@@ -2510,6 +2715,7 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		drawArraysCalls,
 		disabledCapabilities,
 		drawElementsCalls,
+		drawElementsInstancedCalls,
 		enabledCapabilities,
 		enabledVertexAttributes,
 		stencilFuncCalls,
@@ -2523,6 +2729,12 @@ function createFakeWebgl2Context(): WebGL2RenderingContext & {
 		readonly depthFuncModes: GLenum[];
 		readonly drawElementsCalls: {
 			readonly count: number;
+			readonly mode: GLenum;
+			readonly type: GLenum;
+		}[];
+		readonly drawElementsInstancedCalls: {
+			readonly count: number;
+			readonly instanceCount: number;
 			readonly mode: GLenum;
 			readonly type: GLenum;
 		}[];

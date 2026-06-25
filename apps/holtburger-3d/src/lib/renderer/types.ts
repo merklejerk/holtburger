@@ -286,9 +286,15 @@ export interface RendererSnapshot {
 	readonly sceneDomainTargets: SceneDomainTargetSnapshot;
 	readonly staticDrawUnits: number;
 	readonly staticObjectResources: number;
+	readonly staticObjectBakedDirectDrawCalls: number;
 	readonly staticObjectVisualResources: number;
 	readonly staticObjectRenderInstances: number;
+	readonly staticObjectDirectRenderInstanceDrawCalls: number;
+	readonly staticObjectInstancedRenderInstanceDrawCalls: number;
+	readonly staticObjectInstancedRenderInstances: number;
 	readonly outdoorDetailStaticObjectResources: number;
+	readonly outdoorDetailStaticObjectBakedDirectDrawCalls: number;
+	readonly outdoorDetailStaticObjectBakedDirectDrawCallsByPass: StaticObjectMaterialPassDrawCallCounts;
 	readonly outdoorDetailStaticObjectVisualResources: number;
 	readonly outdoorDetailStaticObjectRenderInstances: number;
 	readonly staticObjectUploadedBufferBytes: number;
@@ -298,6 +304,13 @@ export interface RendererSnapshot {
 	readonly directEnvCellDrawCalls: number;
 	readonly renderedTriangles: number;
 	readonly debugOverlayPrimitives: number;
+}
+
+export interface StaticObjectMaterialPassDrawCallCounts {
+	readonly opaque: number;
+	readonly alphaTest: number;
+	readonly transparent: number;
+	readonly additive: number;
 }
 
 export interface StaticObjectUploadDiagnostics {

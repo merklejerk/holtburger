@@ -132,6 +132,8 @@ const NEAR_TRANSPARENT_STATIC_SORT_DISTANCE = 16;
 const NEAR_TRANSPARENT_STATIC_SORT_DISTANCE_SQUARED =
 	NEAR_TRANSPARENT_STATIC_SORT_DISTANCE * NEAR_TRANSPARENT_STATIC_SORT_DISTANCE;
 const RECENT_STATIC_OBJECT_UPLOAD_DIAGNOSTICS_LIMIT = 20;
+const STATIC_OBJECT_INSTANCE_TRANSFORM_ATTRIBUTE_LOCATION = 3;
+const STATIC_OBJECT_INSTANCE_TRANSFORM_FLOATS = 16;
 const EMPTY_TEXTURE_DRAW_UNIT_BINDINGS: ReadonlyMap<
 	string,
 	TextureDrawUnitBinding
@@ -143,6 +145,13 @@ interface StaticLayerResourceOwnership {
 	readonly staticObjectVisualResourceIds: Set<string>;
 	readonly portalApertureResourceIds: Set<string>;
 	readonly textureBindingDrawUnitIds: Set<string>;
+}
+
+interface StaticObjectMaterialPassDrawCallAccumulator {
+	additive: number;
+	alphaTest: number;
+	opaque: number;
+	transparent: number;
 }
 
 const defaultFrameState: FrameState = {
@@ -179,9 +188,11 @@ const STATIC_OBJECT_VERTEX_SHADER = `#version 300 es
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec2 texCoord;
 layout(location = 2) in float materialSlot;
+layout(location = 3) in mat4 instanceObjectTransform;
 
 uniform mat4 uModelViewProjection;
 uniform mat4 uObjectTransform;
+uniform int uUseInstanceObjectTransform;
 
 out vec2 vTexCoord;
 flat out int vMaterialSlot;
@@ -189,7 +200,10 @@ flat out int vMaterialSlot;
 void main() {
 	vTexCoord = texCoord;
 	vMaterialSlot = int(materialSlot);
-	gl_Position = uModelViewProjection * uObjectTransform * vec4(position, 1.0);
+	mat4 objectTransform = uUseInstanceObjectTransform == 1
+		? instanceObjectTransform
+		: uObjectTransform;
+	gl_Position = uModelViewProjection * objectTransform * vec4(position, 1.0);
 }
 `;
 
@@ -803,6 +817,7 @@ class Webgl2Renderer implements Renderer {
 	readonly #sourceSceneCopyProgram: SourceSceneCopyProgram;
 	readonly #directPortalDepthResetProgram: DirectPortalDepthResetProgram;
 	readonly #sourceSceneCopyVertexArray: WebGLVertexArrayObject;
+	readonly #staticObjectInstanceTransformBuffer: WebGLBuffer;
 	readonly #debugOverlayVertexArray: WebGLVertexArrayObject;
 	readonly #debugOverlayVertexBuffer: WebGLBuffer;
 	readonly #stateCache: Webgl2StateCache;
@@ -842,6 +857,14 @@ class Webgl2Renderer implements Renderer {
 	#lastEnvCellOutdoorCrossingColorBase = false;
 	#lastOutdoorCrossingSource: SceneDomainTargetSnapshot["outdoorCrossingSource"] =
 		"none";
+	#lastStaticObjectBakedDirectDrawCalls = 0;
+	#lastOutdoorDetailStaticObjectBakedDirectDrawCalls = 0;
+	#lastOutdoorDetailStaticObjectBakedDirectDrawCallsByPass =
+		createEmptyStaticObjectMaterialPassDrawCallCounts();
+	#lastStaticObjectDirectRenderInstanceDrawCalls = 0;
+	#lastStaticObjectInstancedRenderInstanceDrawCalls = 0;
+	#lastStaticObjectInstancedRenderInstances = 0;
+	#staticObjectInstanceTransformScratch = new Float32Array(0);
 	#debugOverlayPrimitiveCount = 0;
 	#debugOverlayLineVertexCount = 0;
 	#debugOverlayTriangleVertexCount = 0;
@@ -860,12 +883,20 @@ class Webgl2Renderer implements Renderer {
 			createDirectPortalDepthResetProgram(gl);
 		this.#stateCache = new Webgl2StateCache(gl);
 		const sourceSceneCopyVertexArray = gl.createVertexArray();
+		const staticObjectInstanceTransformBuffer = gl.createBuffer();
 		const vertexArray = gl.createVertexArray();
 		const vertexBuffer = gl.createBuffer();
-		if (!sourceSceneCopyVertexArray || !vertexArray || !vertexBuffer) {
+		if (
+			!sourceSceneCopyVertexArray ||
+			!staticObjectInstanceTransformBuffer ||
+			!vertexArray ||
+			!vertexBuffer
+		) {
 			throw new Error("Failed to create renderer scratch resources.");
 		}
 		this.#sourceSceneCopyVertexArray = sourceSceneCopyVertexArray;
+		this.#staticObjectInstanceTransformBuffer =
+			staticObjectInstanceTransformBuffer;
 		this.#debugOverlayVertexArray = vertexArray;
 		this.#debugOverlayVertexBuffer = vertexBuffer;
 		this.#configureDebugOverlayVertexArray();
@@ -1215,6 +1246,7 @@ class Webgl2Renderer implements Renderer {
 		this.#directPortalDepthResetProgram.dispose();
 		this.#sceneDomainTargets?.dispose();
 		this.#sceneDomainTargets = null;
+		this.#gl.deleteBuffer(this.#staticObjectInstanceTransformBuffer);
 		this.#gl.deleteBuffer(this.#debugOverlayVertexBuffer);
 		this.#gl.deleteVertexArray(this.#debugOverlayVertexArray);
 		this.#gl.deleteVertexArray(this.#sourceSceneCopyVertexArray);
@@ -1263,6 +1295,13 @@ class Webgl2Renderer implements Renderer {
 		this.#lastExteriorSuffixCompositePasses = 0;
 		this.#lastEnvCellOutdoorCrossingColorBase = false;
 		this.#lastOutdoorCrossingSource = "none";
+		this.#lastStaticObjectBakedDirectDrawCalls = 0;
+		this.#lastOutdoorDetailStaticObjectBakedDirectDrawCalls = 0;
+		this.#lastOutdoorDetailStaticObjectBakedDirectDrawCallsByPass =
+			createEmptyStaticObjectMaterialPassDrawCallCounts();
+		this.#lastStaticObjectDirectRenderInstanceDrawCalls = 0;
+		this.#lastStaticObjectInstancedRenderInstanceDrawCalls = 0;
+		this.#lastStaticObjectInstancedRenderInstances = 0;
 
 		const effectiveRenderPassPlan = this.#getEffectiveRenderPassPlan();
 		const directEnvCellFramePlan = this.#getEffectiveDirectEnvCellFramePlan();
@@ -2194,6 +2233,10 @@ class Webgl2Renderer implements Renderer {
 		applyStaticObjectDepthWritingState(gl, this.#stateCache);
 		this.#resetTransparentStaticObjectDrawLists();
 		let drawCalls = 0;
+		const instanceGroupsByResourceId = new Map<
+			string,
+			StaticObjectInstanceDrawResource[]
+		>();
 		for (const resource of staticObjectResources) {
 			if (isTransparentStaticObjectResource(resource)) {
 				this.#appendTransparentStaticObjectResource(resource);
@@ -2203,6 +2246,7 @@ class Webgl2Renderer implements Renderer {
 				resource,
 				this.#createResourceTransform(resource),
 			);
+			this.#recordBakedStaticObjectDirectDraw(resource);
 			drawCalls += 1;
 		}
 		for (const resource of staticObjectInstanceResources) {
@@ -2210,11 +2254,15 @@ class Webgl2Renderer implements Renderer {
 				this.#appendTransparentStaticObjectInstanceResource(resource);
 				continue;
 			}
-			this.#drawStaticMaterialResource(
-				resource.resource,
-				this.#createStaticObjectInstanceTransform(resource.instance),
-			);
-			drawCalls += 1;
+			const group = instanceGroupsByResourceId.get(resource.resource.resourceId);
+			if (group) {
+				group.push(resource);
+			} else {
+				instanceGroupsByResourceId.set(resource.resource.resourceId, [resource]);
+			}
+		}
+		for (const group of instanceGroupsByResourceId.values()) {
+			drawCalls += this.#drawStaticObjectInstanceGroup(group);
 		}
 		for (const resource of structuredInteriorResources) {
 			applyStaticObjectRenderState(gl, this.#stateCache, resource.renderState);
@@ -2236,6 +2284,7 @@ class Webgl2Renderer implements Renderer {
 				resource,
 				this.#createResourceTransform(resource),
 			);
+			this.#recordBakedStaticObjectDirectDraw(resource);
 			drawCalls += 1;
 		}
 		for (const resource of this.#farTransparentStaticObjectInstanceDrawList) {
@@ -2248,6 +2297,7 @@ class Webgl2Renderer implements Renderer {
 				resource.resource,
 				this.#createStaticObjectInstanceTransform(resource.instance),
 			);
+			this.#lastStaticObjectDirectRenderInstanceDrawCalls += 1;
 			drawCalls += 1;
 		}
 		this.#nearTransparentStaticObjectDrawEntries.sort(
@@ -2265,12 +2315,53 @@ class Webgl2Renderer implements Renderer {
 					? this.#createStaticObjectInstanceTransform(entry.instance)
 					: this.#createResourceTransform(resource),
 			);
+			if (entry.instance) {
+				this.#lastStaticObjectDirectRenderInstanceDrawCalls += 1;
+			} else if (isStaticObjectGeometryResource(resource)) {
+				this.#recordBakedStaticObjectDirectDraw(resource);
+			}
 			drawCalls += 1;
 		}
 
 		this.#stateCache.bindVertexArray(null);
 		restoreStaticObjectRenderState(gl, this.#stateCache);
 		return drawCalls;
+	}
+
+	#recordBakedStaticObjectDirectDraw(
+		resource: StaticObjectGeometryResource,
+	): void {
+		this.#lastStaticObjectBakedDirectDrawCalls += 1;
+		if (resource.domain !== "outdoor-detail") {
+			return;
+		}
+		this.#lastOutdoorDetailStaticObjectBakedDirectDrawCalls += 1;
+		incrementStaticObjectMaterialPassDrawCallCounts(
+			this.#lastOutdoorDetailStaticObjectBakedDirectDrawCallsByPass,
+			resource.materialPass,
+		);
+	}
+
+	#drawStaticObjectInstanceGroup(
+		group: readonly StaticObjectInstanceDrawResource[],
+	): number {
+		const first = group[0];
+		if (!first) {
+			return 0;
+		}
+		if (group.length < 2) {
+			this.#drawStaticMaterialResource(
+				first.resource,
+				this.#createStaticObjectInstanceTransform(first.instance),
+			);
+			this.#lastStaticObjectDirectRenderInstanceDrawCalls += 1;
+			return 1;
+		}
+
+		this.#drawStaticMaterialResourceInstanced(first.resource, group);
+		this.#lastStaticObjectInstancedRenderInstanceDrawCalls += 1;
+		this.#lastStaticObjectInstancedRenderInstances += group.length;
+		return 1;
 	}
 
 	#drawDebugOverlay(): void {
@@ -2365,8 +2456,127 @@ class Webgl2Renderer implements Renderer {
 			false,
 			objectTransform,
 		);
+		gl.uniform1i(
+			this.#staticObjectProgram.uniforms.uUseInstanceObjectTransform,
+			0,
+		);
 		this.#stateCache.bindVertexArray(resource.vertexArray);
 		gl.drawElements(gl.TRIANGLES, resource.indexCount, resource.indexType, 0);
+	}
+
+	#drawStaticMaterialResourceInstanced(
+		resource: StaticObjectVisualGeometryResource,
+		group: readonly StaticObjectInstanceDrawResource[],
+	): void {
+		const gl = this.#gl;
+		const { materialUniforms, rolePages } =
+			this.#getStaticObjectPreparedPayload(resource);
+
+		uploadStaticObjectRolePageBindings(
+			gl,
+			this.#stateCache,
+			this.#staticObjectProgram.uniforms.uStaticBaseColorTextures,
+			this.#staticObjectProgram.uniforms.uStaticBaseColorSizes,
+			rolePages.baseColor,
+			STATIC_OBJECT_BASE_COLOR_TEXTURE_UNIT_BASE,
+		);
+		uploadStaticObjectRolePageBindings(
+			gl,
+			this.#stateCache,
+			this.#staticObjectProgram.uniforms.uStaticIndexTextures,
+			null,
+			rolePages.index,
+			STATIC_OBJECT_INDEX_TEXTURE_UNIT_BASE,
+		);
+		uploadStaticObjectRolePageBindings(
+			gl,
+			this.#stateCache,
+			this.#staticObjectProgram.uniforms.uStaticPaletteTextures,
+			this.#staticObjectProgram.uniforms.uStaticPaletteSizes,
+			rolePages.palette,
+			STATIC_OBJECT_PALETTE_TEXTURE_UNIT_BASE,
+		);
+		uploadStaticObjectRolePageBindings(
+			gl,
+			this.#stateCache,
+			this.#staticObjectProgram.uniforms.uStaticDetailTextures,
+			this.#staticObjectProgram.uniforms.uStaticDetailSizes,
+			rolePages.detail,
+			STATIC_OBJECT_DETAIL_TEXTURE_UNIT_BASE,
+		);
+
+		uploadStaticObjectMaterialTableUniforms(
+			gl,
+			this.#staticObjectProgram,
+			materialUniforms,
+		);
+		this.#writeStaticObjectInstanceTransforms(group);
+		gl.uniform1i(
+			this.#staticObjectProgram.uniforms.uUseInstanceObjectTransform,
+			1,
+		);
+		this.#stateCache.bindVertexArray(resource.vertexArray);
+		this.#bindStaticObjectInstanceTransformAttributes();
+		gl.drawElementsInstanced(
+			gl.TRIANGLES,
+			resource.indexCount,
+			resource.indexType,
+			0,
+			group.length,
+		);
+	}
+
+	#writeStaticObjectInstanceTransforms(
+		group: readonly StaticObjectInstanceDrawResource[],
+	): void {
+		const requiredLength =
+			group.length * STATIC_OBJECT_INSTANCE_TRANSFORM_FLOATS;
+		if (this.#staticObjectInstanceTransformScratch.length < requiredLength) {
+			this.#staticObjectInstanceTransformScratch = new Float32Array(
+				requiredLength,
+			);
+		}
+		for (const [index, drawResource] of group.entries()) {
+			this.#staticObjectInstanceTransformScratch.set(
+				this.#createStaticObjectInstanceTransform(drawResource.instance),
+				index * STATIC_OBJECT_INSTANCE_TRANSFORM_FLOATS,
+			);
+		}
+
+		const gl = this.#gl;
+		gl.bindBuffer(
+			gl.ARRAY_BUFFER,
+			this.#staticObjectInstanceTransformBuffer,
+		);
+		gl.bufferData(
+			gl.ARRAY_BUFFER,
+			this.#staticObjectInstanceTransformScratch.subarray(0, requiredLength),
+			gl.DYNAMIC_DRAW,
+		);
+	}
+
+	#bindStaticObjectInstanceTransformAttributes(): void {
+		const gl = this.#gl;
+		const stride =
+			STATIC_OBJECT_INSTANCE_TRANSFORM_FLOATS * Float32Array.BYTES_PER_ELEMENT;
+		gl.bindBuffer(
+			gl.ARRAY_BUFFER,
+			this.#staticObjectInstanceTransformBuffer,
+		);
+		for (let column = 0; column < 4; column += 1) {
+			const location =
+				STATIC_OBJECT_INSTANCE_TRANSFORM_ATTRIBUTE_LOCATION + column;
+			gl.enableVertexAttribArray(location);
+			gl.vertexAttribPointer(
+				location,
+				4,
+				gl.FLOAT,
+				false,
+				stride,
+				column * 4 * Float32Array.BYTES_PER_ELEMENT,
+			);
+			gl.vertexAttribDivisor(location, 1);
+		}
 	}
 
 	#getTerrainPreparedLayeredPayload(
@@ -2589,12 +2799,25 @@ class Webgl2Renderer implements Renderer {
 				this.#staticObjectResources.size +
 				this.#staticObjectVisualResources.size +
 				this.#structuredInteriorResources.size,
+			staticObjectBakedDirectDrawCalls:
+				this.#lastStaticObjectBakedDirectDrawCalls,
 			staticObjectResources: staticObjectResources.length,
 			staticObjectVisualResources: staticObjectVisualResources.length,
 			staticObjectRenderInstances: this.#staticObjectRenderInstances.size,
+			staticObjectDirectRenderInstanceDrawCalls:
+				this.#lastStaticObjectDirectRenderInstanceDrawCalls,
+			staticObjectInstancedRenderInstanceDrawCalls:
+				this.#lastStaticObjectInstancedRenderInstanceDrawCalls,
+			staticObjectInstancedRenderInstances:
+				this.#lastStaticObjectInstancedRenderInstances,
 			outdoorDetailStaticObjectResources: staticObjectResources.filter(
 				(resource) => resource.domain === "outdoor-detail",
 			).length,
+			outdoorDetailStaticObjectBakedDirectDrawCalls:
+				this.#lastOutdoorDetailStaticObjectBakedDirectDrawCalls,
+			outdoorDetailStaticObjectBakedDirectDrawCallsByPass: {
+				...this.#lastOutdoorDetailStaticObjectBakedDirectDrawCallsByPass,
+			},
 			outdoorDetailStaticObjectVisualResources:
 				staticObjectVisualResources.length,
 			outdoorDetailStaticObjectRenderInstances:
@@ -3080,6 +3303,7 @@ interface StaticObjectGeometryProgram {
 		readonly uMaterialWrapModes: WebGLUniformLocation;
 		readonly uModelViewProjection: WebGLUniformLocation;
 		readonly uObjectTransform: WebGLUniformLocation;
+		readonly uUseInstanceObjectTransform: WebGLUniformLocation;
 		readonly uStaticBaseColorSizes: WebGLUniformLocation;
 		readonly uStaticBaseColorTextures: readonly WebGLUniformLocation[];
 		readonly uStaticDetailSizes: WebGLUniformLocation;
@@ -3206,6 +3430,35 @@ function createEmptyStaticLayerResourceOwnership(): StaticLayerResourceOwnership
 		portalApertureResourceIds: new Set<string>(),
 		textureBindingDrawUnitIds: new Set<string>(),
 	};
+}
+
+function createEmptyStaticObjectMaterialPassDrawCallCounts(): StaticObjectMaterialPassDrawCallAccumulator {
+	return {
+		additive: 0,
+		alphaTest: 0,
+		opaque: 0,
+		transparent: 0,
+	};
+}
+
+function incrementStaticObjectMaterialPassDrawCallCounts(
+	counts: StaticObjectMaterialPassDrawCallAccumulator,
+	pass: StaticObjectGeometryStaticDrawUnit["materialPass"],
+): void {
+	switch (pass) {
+		case "opaque":
+			counts.opaque += 1;
+			return;
+		case "alpha-test":
+			counts.alphaTest += 1;
+			return;
+		case "transparent":
+			counts.transparent += 1;
+			return;
+		case "additive":
+			counts.additive += 1;
+			return;
+	}
 }
 
 function staticLayerVisibilityEquals(
@@ -3714,6 +3967,11 @@ function createStaticObjectGeometryProgram(
 				gl,
 				program,
 				"uObjectTransform",
+			),
+			uUseInstanceObjectTransform: requireUniform(
+				gl,
+				program,
+				"uUseInstanceObjectTransform",
 			),
 			uStaticBaseColorSizes: requireUniform(
 				gl,
@@ -4654,6 +4912,12 @@ function isTransparentStaticObjectInstanceDrawResource(
 	resource: StaticObjectInstanceDrawResource,
 ): boolean {
 	return isTransparentStaticObjectResource(resource.resource);
+}
+
+function isStaticObjectGeometryResource(
+	resource: StaticMaterialGeometryResource,
+): resource is StaticObjectGeometryResource {
+	return "envCellIds" in resource;
 }
 
 function applyStaticObjectDepthWritingState(

@@ -3484,6 +3484,10 @@ function createRendererDiagnosticsSummary(
 		isRunning: snapshot.isRunning,
 		outdoorDetailStaticObjectResources:
 			snapshot.outdoorDetailStaticObjectResources,
+		outdoorDetailStaticObjectBakedDirectDrawCalls:
+			snapshot.outdoorDetailStaticObjectBakedDirectDrawCalls,
+		outdoorDetailStaticObjectBakedDirectDrawCallsByPass:
+			snapshot.outdoorDetailStaticObjectBakedDirectDrawCallsByPass,
 		outdoorDetailStaticObjectRenderInstances:
 			snapshot.outdoorDetailStaticObjectRenderInstances,
 		outdoorDetailStaticObjectVisualResources:
@@ -3493,6 +3497,14 @@ function createRendererDiagnosticsSummary(
 		renderedTriangles: snapshot.renderedTriangles,
 		renderPassKind: snapshot.renderPassPlan.kind,
 		staticDrawUnits: snapshot.staticDrawUnits,
+		staticObjectBakedDirectDrawCalls:
+			snapshot.staticObjectBakedDirectDrawCalls,
+		staticObjectDirectRenderInstanceDrawCalls:
+			snapshot.staticObjectDirectRenderInstanceDrawCalls,
+		staticObjectInstancedRenderInstanceDrawCalls:
+			snapshot.staticObjectInstancedRenderInstanceDrawCalls,
+		staticObjectInstancedRenderInstances:
+			snapshot.staticObjectInstancedRenderInstances,
 		staticObjectRenderInstances: snapshot.staticObjectRenderInstances,
 		staticObjectResources: snapshot.staticObjectResources,
 		staticObjectUploadSummary: createStaticObjectUploadSummary(

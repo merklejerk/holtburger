@@ -448,8 +448,36 @@ Spicy bits and debt:
 - Retained-baked reasons are still implicit. Phase 4/debug parity should expose a compact reason
   summary for missing bounds, one-off generated sources, non-generated objects, and non-renderable
   partitions without expanding the copied runtime report into row-level noise.
-- Runtime layer resource collection now includes `instancedObjectResources`, but the WebGL2 renderer
-  intentionally ignores them until the shared resource cache lands.
+- Runtime layer resource collection now includes `instancedObjectResources`; Phase 3 adds the WebGL2
+  cache and guarded direct draw path for those resources.
+
+### 2026-06-25 Phase 3 Progress
+
+- Added a WebGL2 static object visual-resource cache for outdoor-detail shared resources. The cache
+  uploads source-local positions, texcoords, material-slot indices, and indices once per visual
+  resource id, and evicts those GPU resources with their owning outdoor-detail layer.
+- Updated the static object shader path from a translation-only placement uniform to a full object
+  transform matrix. Baked static draw units still receive the same landblock-root translation as
+  before, while render instances can supply `landblockRoot * sourceToLandblockMatrix`.
+- Added a direct render-instance draw path over shared resources, including near/far transparent
+  classification using the existing static transparent distance policy. Instance drawing is
+  suppressed while the same outdoor-detail layer still carries baked draw units, avoiding double
+  rendering until the flattened-path cutover lands.
+- Added renderer/runtime summary counters for shared visual resources and render instances, plus
+  visual-resource uploaded bytes in the existing static object upload byte totals.
+
+Spicy bits and debt:
+
+- Texture binding ownership is only partially generalized. The renderer can resolve visual-resource
+  material bindings from texture-use ids, but runtime texture placement updates still arrive as
+  draw-unit binding rows. A clean owner-key contract remains Phase 3/cleanup debt.
+- The direct instance draw path is intentionally gated by baked draw-unit suppression. It proves cache,
+  shader, lifetime, material binding, and sort plumbing without visual duplication, but it does not
+  produce a visible/generated-static win until the next cut keeps eligible generated objects out of
+  baked outdoor-detail draw units.
+- Far transparent generated instances still use direct per-instance draws. That is correct for this
+  phase but not the desired steady state; Phase 6 should replace compatible far transparent groups
+  with real instanced draw calls.
 
 ## Implementation Phases
 

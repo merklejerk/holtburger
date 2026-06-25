@@ -3,7 +3,11 @@ use clap::Parser;
 use holtburger_content::{
     ContentRepository, ResolvedMaterialSource, build_gfx_obj_render_geometry,
 };
-use holtburger_dat::file_type::{GfxObj, Palette, PixelFormatId, RenderSurface, SetupModel};
+use holtburger_dat::file_type::{
+    Animation, GfxObj, Palette, PixelFormatId, RenderSurface, SetupModel,
+    setup_model::AnimationHookPayload,
+};
+use holtburger_dat::graphics::Frame;
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use std::collections::BTreeMap;
 use std::io::Cursor;
@@ -75,9 +79,6 @@ fn inspect_setup_model(content: &ContentRepository, setup_model_id: u32) -> Resu
         format_optional_did(setup_model.default_sound_table),
         format_optional_did(setup_model.default_script_table),
     );
-    if let Some(default_script_id) = setup_model.default_script {
-        inspect_physics_script(content, default_script_id)?;
-    }
 
     let mut placement_keys = setup_model
         .placement_frames
@@ -86,6 +87,26 @@ fn inspect_setup_model(content: &ContentRepository, setup_model_id: u32) -> Resu
         .collect::<Vec<_>>();
     placement_keys.sort();
     println!("  placementKeys={placement_keys:?}");
+    if !setup_model.parent_index.is_empty() {
+        println!("  parentIndices={:?}", setup_model.parent_index);
+    }
+    for key in &placement_keys {
+        if let Some(placement) = setup_model.placement_frames.get(key) {
+            println!(
+                "  placement[{key}] parts={} hooks={}",
+                placement.anim_frame.frames.len(),
+                placement.anim_frame.hooks.len(),
+            );
+            print_frame_samples_owned("    placementFrame", &placement.anim_frame.frames);
+        }
+    }
+
+    if let Some(default_animation_id) = setup_model.default_animation {
+        inspect_animation(content, default_animation_id)?;
+    }
+    if let Some(default_script_id) = setup_model.default_script {
+        inspect_physics_script(content, default_script_id)?;
+    }
 
     for (part_index, gfx_obj_id) in setup_model.parts.iter().copied().enumerate() {
         let scale = setup_model
@@ -96,6 +117,55 @@ fn inspect_setup_model(content: &ContentRepository, setup_model_id: u32) -> Resu
         println!("  part={part_index} gfx=0x{gfx_obj_id:08x} defaultScale={scale}");
         inspect_gfx_obj(content, gfx_obj_id)?;
     }
+
+    Ok(())
+}
+
+fn inspect_animation(content: &ContentRepository, animation_id: u32) -> Result<()> {
+    let resource = content
+        .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, animation_id))
+        .with_context(|| format!("failed to read Animation 0x{animation_id:08X}"))?;
+    let animation = Animation::read(&mut Cursor::new(resource.bytes))
+        .with_context(|| format!("failed to parse Animation 0x{animation_id:08X}"))?;
+
+    let mut hook_type_counts = BTreeMap::<u32, usize>::new();
+    let mut total_hooks = 0usize;
+    for frame in &animation.part_frames {
+        total_hooks += frame.hooks.len();
+        for hook in &frame.hooks {
+            *hook_type_counts.entry(hook.hook_type).or_default() += 1;
+        }
+    }
+
+    println!(
+        "  defaultAnimation=0x{animation_id:08x} stored=0x{:08x} flags=0x{:08x} parts={} frames={} posFrames={} hooks={}",
+        animation.id,
+        animation.flags.bits(),
+        animation.num_parts,
+        animation.num_frames,
+        animation.pos_frames.len(),
+        total_hooks,
+    );
+    if !hook_type_counts.is_empty() {
+        println!("    hookTypeCounts={hook_type_counts:?}");
+    }
+    for (frame_index, frame) in animation.part_frames.iter().enumerate() {
+        for (hook_index, hook) in frame.hooks.iter().enumerate() {
+            println!(
+                "    frame[{frame_index}] hook[{hook_index}] type={} direction={} payload={}",
+                hook.hook_type,
+                hook.direction,
+                format_animation_hook_payload(&hook.payload),
+            );
+        }
+    }
+    if let Some((min, max)) = animation_pos_frame_bounds(&animation) {
+        println!(
+            "    posFrameBounds min=({:.6},{:.6},{:.6}) max=({:.6},{:.6},{:.6})",
+            min.0, min.1, min.2, max.0, max.1, max.2,
+        );
+    }
+    print_animation_motion_summary(&animation);
 
     Ok(())
 }
@@ -254,6 +324,122 @@ fn print_material_alpha_summary(
     }
 
     Ok(())
+}
+
+fn animation_pos_frame_bounds(animation: &Animation) -> Option<((f32, f32, f32), (f32, f32, f32))> {
+    let first = animation.pos_frames.first()?;
+    let mut min = (first.origin.x, first.origin.y, first.origin.z);
+    let mut max = min;
+    for frame in &animation.pos_frames {
+        min.0 = min.0.min(frame.origin.x);
+        min.1 = min.1.min(frame.origin.y);
+        min.2 = min.2.min(frame.origin.z);
+        max.0 = max.0.max(frame.origin.x);
+        max.1 = max.1.max(frame.origin.y);
+        max.2 = max.2.max(frame.origin.z);
+    }
+    Some((min, max))
+}
+
+fn print_animation_motion_summary(animation: &Animation) {
+    let num_parts = animation.num_parts as usize;
+    if animation.part_frames.is_empty() || num_parts == 0 {
+        return;
+    }
+
+    for part_index in 0..num_parts {
+        let frames = animation
+            .part_frames
+            .iter()
+            .filter_map(|frame| frame.frames.get(part_index))
+            .collect::<Vec<_>>();
+        if frames.is_empty() {
+            continue;
+        }
+        let first = frames[0];
+        let mut origin_min = first.origin;
+        let mut origin_max = first.origin;
+        let mut max_origin_delta = 0.0f32;
+        let mut angle_min = quaternion_angle_degrees(&first.orientation);
+        let mut angle_max = angle_min;
+        for frame in &frames {
+            origin_min.x = origin_min.x.min(frame.origin.x);
+            origin_min.y = origin_min.y.min(frame.origin.y);
+            origin_min.z = origin_min.z.min(frame.origin.z);
+            origin_max.x = origin_max.x.max(frame.origin.x);
+            origin_max.y = origin_max.y.max(frame.origin.y);
+            origin_max.z = origin_max.z.max(frame.origin.z);
+            max_origin_delta = max_origin_delta.max(first.origin.distance(&frame.origin));
+            let angle = quaternion_angle_degrees(&frame.orientation);
+            angle_min = angle_min.min(angle);
+            angle_max = angle_max.max(angle);
+        }
+        println!(
+            "    partMotion[{part_index}] originMin={} originMax={} maxOriginDelta={:.6} quatAngleDegRange=({:.3},{:.3})",
+            format_vector3(&origin_min),
+            format_vector3(&origin_max),
+            max_origin_delta,
+            angle_min,
+            angle_max,
+        );
+        print_frame_samples("      sample", frames.as_slice());
+    }
+}
+
+fn print_frame_samples(label: &str, frames: &[&Frame]) {
+    if frames.is_empty() {
+        return;
+    }
+
+    let mut sample_indices = vec![0usize];
+    if frames.len() > 2 {
+        sample_indices.push(frames.len() / 2);
+    }
+    if frames.len() > 1 {
+        sample_indices.push(frames.len() - 1);
+    }
+    sample_indices.sort_unstable();
+    sample_indices.dedup();
+
+    for index in sample_indices {
+        if let Some(frame) = frames.get(index) {
+            println!("{label}[{index}] {}", format_frame(frame));
+        }
+    }
+}
+
+fn print_frame_samples_owned(label: &str, frames: &[Frame]) {
+    let frame_refs = frames.iter().collect::<Vec<_>>();
+    print_frame_samples(label, frame_refs.as_slice());
+}
+
+fn format_animation_hook_payload(payload: &AnimationHookPayload) -> String {
+    match payload {
+        AnimationHookPayload::NoPayload => "none".to_string(),
+        AnimationHookPayload::Raw(bytes) => format_raw_hook_payload(bytes),
+        AnimationHookPayload::ReplaceObject(bytes) => format_raw_bytes(bytes),
+        AnimationHookPayload::TextureVelocity(payload) => {
+            format!(
+                "textureVelocity(u={:.6},v={:.6})",
+                payload.u_speed, payload.v_speed
+            )
+        }
+        AnimationHookPayload::TextureVelocityPart(payload) => format!(
+            "textureVelocityPart(part={},u={:.6},v={:.6})",
+            payload.part_index, payload.u_speed, payload.v_speed,
+        ),
+    }
+}
+
+fn format_raw_hook_payload(bytes: &[u8]) -> String {
+    if bytes.len() == 12 {
+        let x = f32::from_le_bytes(bytes[0..4].try_into().expect("slice length is fixed"));
+        let y = f32::from_le_bytes(bytes[4..8].try_into().expect("slice length is fixed"));
+        let z = f32::from_le_bytes(bytes[8..12].try_into().expect("slice length is fixed"));
+        format!("{} vec3=({x:.6},{y:.6},{z:.6})", format_raw_bytes(bytes))
+    } else {
+        format_raw_bytes(bytes)
+    }
 }
 
 fn read_setup_model(content: &ContentRepository, setup_model_id: u32) -> Result<SetupModel> {
@@ -439,15 +625,48 @@ fn read_hook_payload(cursor: &mut Cursor<Vec<u8>>, hook_type: u32) -> Result<Hoo
 fn format_hook_payload(payload: &HookPayload) -> String {
     match payload {
         HookPayload::NoPayload => "none".to_string(),
-        HookPayload::Raw(bytes) => format!(
-            "raw({})",
-            bytes
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<Vec<_>>()
-                .join(" "),
-        ),
+        HookPayload::Raw(bytes) => format_raw_bytes(bytes),
     }
+}
+
+fn format_raw_bytes(bytes: &[u8]) -> String {
+    format!(
+        "raw({})",
+        bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+fn format_frame(frame: &Frame) -> String {
+    format!(
+        "origin={} quat=({:.6},{:.6},{:.6},{:.6}) angleDeg={:.3}",
+        format_vector3(&frame.origin),
+        frame.orientation.w,
+        frame.orientation.x,
+        frame.orientation.y,
+        frame.orientation.z,
+        quaternion_angle_degrees(&frame.orientation),
+    )
+}
+
+fn format_vector3(vector: &holtburger_common::Vector3) -> String {
+    format!("({:.6},{:.6},{:.6})", vector.x, vector.y, vector.z)
+}
+
+fn quaternion_angle_degrees(quaternion: &holtburger_common::Quaternion) -> f32 {
+    let magnitude = (quaternion.w * quaternion.w
+        + quaternion.x * quaternion.x
+        + quaternion.y * quaternion.y
+        + quaternion.z * quaternion.z)
+        .sqrt();
+    if magnitude <= f32::EPSILON {
+        return 0.0;
+    }
+    let w = (quaternion.w / magnitude).clamp(-1.0, 1.0);
+    (2.0 * w.acos()).to_degrees()
 }
 
 fn read_u32(cursor: &mut Cursor<Vec<u8>>) -> Result<u32> {

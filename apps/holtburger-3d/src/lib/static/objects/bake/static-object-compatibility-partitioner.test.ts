@@ -973,7 +973,7 @@ describe("static object compatibility partitioner", () => {
 		]);
 	});
 
-	it("summarizes retained transparent outdoor-detail bake reasons", () => {
+	it("cuts over repeated transparent generated outdoor-detail partitions to shared instances", () => {
 		const payload = duplicateObjectInstance(
 			createPayload({
 				domain: "outdoor-detail",
@@ -985,14 +985,58 @@ describe("static object compatibility partitioner", () => {
 
 		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
 
-		expect(result.drawUnits).toHaveLength(2);
+		expect(result.drawUnits).toHaveLength(0);
+		expect(result.staticObjectVisualResources).toHaveLength(1);
+		expect(result.staticObjectVisualResources[0]).toMatchObject({
+			coordinateSpace: "static-object-source-local",
+			materialFamily: "texture-rgba",
+			materialPass: "transparent",
+			triangleCount: 1,
+			vertexCount: 3,
+		});
+		expect(result.staticObjectRenderInstances).toHaveLength(2);
+		expect(
+			result.staticObjectRenderInstances.map((instance) => ({
+				source: instance.source,
+				transparency: instance.transparency,
+			})),
+		).toEqual([
+			{
+				source: createObjectIdentity({
+					instanceId: "detail-0",
+					objectKind: "generated-scenery",
+				}),
+				transparency: {
+					kind: "direct-sorted-transparent",
+					sortCenter: { x: 0.5, y: 0.5, z: 0.5 },
+				},
+			},
+			{
+				source: createObjectIdentity({
+					instanceId: "detail-1",
+					objectKind: "generated-scenery",
+				}),
+				transparency: {
+					kind: "direct-sorted-transparent",
+					sortCenter: { x: 0.5, y: 0.5, z: 0.5 },
+				},
+			},
+		]);
+		expect(
+			new Set(
+				result.staticObjectRenderInstances.map((instance) => instance.resourceId),
+			),
+		).toHaveProperty("size", 1);
 		expect(result.staticObjectBakeDiagnostics[0]).toMatchObject({
+			drawUnitCount: 0,
+			instancedRenderInstanceCount: 2,
+			instancedVisualResourceCount: 1,
 			retainedTransparentOutdoorDetailPartitionReasons: {
 				explicitObject: 0,
 				missingInstanceBounds: 0,
 				nonRenderableOrDeferredMaterialBucket: 0,
 				oneOffGeneratedSource: 0,
-				repeatedGeneratedSourceRetainedByPartitionPolicy: 2,
+				repeatedGeneratedSourceRetainedByPartitionPolicy: 0,
 				unsupportedMaterialBucket: 0,
 			},
 		});

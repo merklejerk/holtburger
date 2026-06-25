@@ -668,6 +668,32 @@ Spicy bits and debt:
   keep it baked until we have a principled split. Do not invent a best-effort half-cutover path just
   to make counters look better.
 
+### 2026-06-25 Phase 5A Progress
+
+- Reworked outdoor-detail generated instance grouping so compatible transparent/additive generated
+  candidates can form a shared visual resource across baked transparent partition slices.
+- Coverage is still tracked per partition slice. A baked transparent partition is only removed when
+  all of its triangle coverage is owned by qualifying repeated generated groups, so mixed or explicit
+  transparent partitions stay baked/direct.
+- Render-instance emission now filters candidates by cutover-owned partition slices. This preserves
+  the no-duplicate-rendering invariant even when a visual-resource group spans multiple transparent
+  sort partitions.
+- Updated the repeated transparent generated outdoor-detail test from "stays baked and reports why"
+  to "cuts over to one transparent shared visual resource plus two render instances." The retained
+  repeated-source reason bucket is expected to stay at zero for that shape now.
+
+Spicy bits and debt:
+
+- The bake layer now correctly treats "instance-able" as resource eligibility rather than "must always
+  be instanced." Transparent render instances still carry direct-sorted transparency metadata so the
+  renderer can direct draw near-camera cases and batch far-camera cases later.
+- Phase 5B still owns the actual far-transparent `drawElementsInstanced` submission. After this phase,
+  live diagnostics should show fewer retained transparent baked draw units, but perf will only fully
+  pay off once far transparent render instances stop direct-drawing one by one.
+- Mixed transparent partitions remain intentionally conservative. If the live scene still reports
+  retained repeated-generated transparent partitions after this, inspect whether those partitions are
+  genuinely mixed/unsupported before reaching for geometry surgery.
+
 ## Implementation Phases
 
 ### Phase 0: Baseline And De-Instancing Diagnostics

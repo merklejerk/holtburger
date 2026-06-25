@@ -23,6 +23,10 @@ import type {
 	StaticPortalApertureResource,
 	StaticSpatialRecord,
 	StaticWorkPeerRecordOwner,
+	StaticObjectRenderInstance,
+	StaticObjectVisualResource,
+	StaticObjectSourceGeometryIdentity,
+	StaticObjectInstanceFacts,
 } from "../../contracts";
 import { describeStaticScopeKey } from "../../demand-planner";
 import { createBuildingTransitionStaticPortalGraph } from "../../portal-graphs";
@@ -51,6 +55,11 @@ import {
 	isRenderableStaticObjectPartition,
 } from "./static-object-renderability";
 import { deriveBuildingTransitionPortalApertureResource } from "./building-transition-portal-apertures";
+import {
+	createStaticObjectVisualResourceId,
+	createStaticObjectVisualResourceKey,
+	createStaticObjectVisualResourceKeyString,
+} from "../static-object-visual-resource-key";
 
 export class StaticObjectCompatibilityBaker implements StaticBaker {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
@@ -90,6 +99,12 @@ export function bakeStaticObjectCompatibility(
 		),
 		domain: input.domain,
 		drawUnits,
+		staticObjectRenderInstances: itemResults.flatMap(
+			(result) => result.staticObjectRenderInstances,
+		),
+		staticObjectVisualResources: dedupeStaticObjectVisualResources(
+			itemResults.flatMap((result) => result.staticObjectVisualResources),
+		),
 		staticObjectBakeDiagnostics: itemResults.map(
 			(result) => result.diagnostics,
 		),
@@ -238,6 +253,8 @@ function bakeStaticObjectCompatibilityItem(
 	readonly sourceMappings: StaticBakeBatchResult["staticSourceMappings"];
 	readonly spatialRecords: readonly StaticSpatialRecord[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
+	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
+	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
 	readonly buildingTransitionPortalApertureResource: StaticPortalApertureResource | null;
 	readonly work: StaticBakeBatchItem["work"];
 } {
@@ -291,8 +308,7 @@ function bakeStaticObjectCompatibilityItem(
 		}),
 	);
 
-	return {
-		drawUnits: drawUnits.map((output, index) => ({
+	const bakedDrawUnits = drawUnits.map((output, index) => ({
 			...output.drawUnit,
 			sourceMappingCoverage:
 				sourceMappingCoverageBySliceId.get(
@@ -302,7 +318,14 @@ function bakeStaticObjectCompatibilityItem(
 				spatialRecordBySliceId.get(
 					renderablePartitions[index]?.sliceId ?? "",
 				) ?? null,
-		})),
+		}));
+	const instancedOutput = createStaticObjectInstancedOutput({
+		drawUnits: bakedDrawUnits,
+		payload: scope,
+	});
+
+	return {
+		drawUnits: bakedDrawUnits,
 		diagnostics: createStaticObjectBakeDiagnostics({
 			drawUnits: drawUnits.map((output) => output.drawUnit),
 			input,
@@ -315,6 +338,8 @@ function bakeStaticObjectCompatibilityItem(
 			...spatialRecordBySliceId.values(),
 			...drawUnits.flatMap((output) => output.objectSpatialRecords),
 		],
+		staticObjectRenderInstances: instancedOutput.instances,
+		staticObjectVisualResources: instancedOutput.resources,
 		textureUses: createStaticObjectBakeTextureUses({
 			partitions: partitionPlan.partitions,
 			staticBatchId: input.staticBatchId,
@@ -399,6 +424,225 @@ function estimateStaticObjectDrawUnitTypedArrayBytes(
 
 function sumNumbers(values: readonly number[]): number {
 	return values.reduce((sum, value) => sum + value, 0);
+}
+
+function createStaticObjectInstancedOutput(options: {
+	readonly drawUnits: readonly StaticObjectGeometryStaticDrawUnit[];
+	readonly payload: StaticObjectCompatibilityPayload;
+}): {
+	readonly instances: readonly StaticObjectRenderInstance[];
+	readonly resources: readonly StaticObjectVisualResource[];
+} {
+	if (options.payload.domain !== "outdoor-detail") {
+		return { instances: [], resources: [] };
+	}
+
+	const objectByInstanceId = new Map(
+		options.payload.objects.map((object) => [object.identity.instanceId, object]),
+	);
+	const coveragesByResourceKey = new Map<
+		string,
+		{
+			readonly drawUnit: StaticObjectGeometryStaticDrawUnit;
+			readonly geometry: StaticObjectSourceGeometryIdentity;
+			readonly materialEntry: StaticMaterialTableEntry;
+			readonly objectInstanceIds: Set<string>;
+			readonly sourceCoverages: StaticObjectSourceMappingCoverage[];
+		}
+	>();
+
+	for (const drawUnit of options.drawUnits) {
+		for (const coverage of drawUnit.sourceMappingCoverage) {
+			if (coverage.object.objectKind !== "generated-scenery") {
+				continue;
+			}
+			const object = objectByInstanceId.get(coverage.object.instanceId);
+			const candidate = selectGeneratedStaticObjectRenderInstanceCandidate(object);
+			if (candidate.kind === "ineligible") {
+				continue;
+			}
+			const materialEntry = drawUnit.materialEntries.find(
+				(entry) => entry.slot === coverage.materialSlot,
+			);
+			if (!materialEntry) {
+				continue;
+			}
+			const geometry = createStaticObjectSourceGeometryIdentityFromCoverage(coverage);
+			const resourceKey = createStaticObjectVisualResourceKey({
+				geometry,
+				indexType: drawUnit.indexType,
+				materialEntries: [materialEntry],
+				materialFamily: drawUnit.materialFamily,
+				materialPass: drawUnit.materialPass,
+				renderState: materialEntry.renderState,
+				textureUseIds: textureUseIdsForMaterialEntry(materialEntry),
+			});
+			const resourceKeyString =
+				createStaticObjectVisualResourceKeyString(resourceKey);
+			const group = coveragesByResourceKey.get(resourceKeyString) ?? {
+				drawUnit,
+				geometry,
+				materialEntry,
+				objectInstanceIds: new Set<string>(),
+				sourceCoverages: [],
+			};
+			group.objectInstanceIds.add(coverage.object.instanceId);
+			group.sourceCoverages.push(coverage);
+			coveragesByResourceKey.set(resourceKeyString, group);
+		}
+	}
+
+	const resources: StaticObjectVisualResource[] = [];
+	const instances: StaticObjectRenderInstance[] = [];
+	for (const group of coveragesByResourceKey.values()) {
+		if (group.objectInstanceIds.size < 2) {
+			continue;
+		}
+
+		const resourceKey = createStaticObjectVisualResourceKey({
+			geometry: group.geometry,
+			indexType: group.drawUnit.indexType,
+			materialEntries: [group.materialEntry],
+			materialFamily: group.drawUnit.materialFamily,
+			materialPass: group.drawUnit.materialPass,
+			renderState: group.materialEntry.renderState,
+			textureUseIds: textureUseIdsForMaterialEntry(group.materialEntry),
+		});
+		const resourceId = createStaticObjectVisualResourceId(resourceKey);
+		resources.push({
+			geometry: group.geometry,
+			indexType: group.drawUnit.indexType,
+			key: resourceKey,
+			kind: "static-object-visual-resource",
+			materialEntries: [group.materialEntry],
+			materialFamily: group.drawUnit.materialFamily,
+			materialPass: group.drawUnit.materialPass,
+			renderState: group.materialEntry.renderState,
+			resourceId,
+			textureUseIds: textureUseIdsForMaterialEntry(group.materialEntry),
+		});
+
+		for (const coverage of group.sourceCoverages) {
+			const object = objectByInstanceId.get(coverage.object.instanceId);
+			const candidate = selectGeneratedStaticObjectRenderInstanceCandidate(object);
+			if (candidate.kind === "ineligible") {
+				continue;
+			}
+			instances.push({
+				bounds: candidate.bounds,
+				domain: "outdoor-detail",
+				generated: candidate.generated,
+				instanceId: [
+					"static-object-render-instance",
+					coverage.object.instanceId,
+					`part:${coverage.partIndex}`,
+					`slot:${coverage.materialSlot}`,
+				].join(":"),
+				kind: "static-object-render-instance",
+				landblockId: options.payload.landblock.landblockId,
+				resourceId,
+				sortCenter: centerVec3OfBounds(candidate.bounds),
+				source: candidate.object.identity,
+				transform: candidate.object.localPlacement,
+				transparency:
+					group.drawUnit.materialPass === "transparent" ||
+					group.drawUnit.materialPass === "additive"
+						? {
+								kind: "direct-sorted-transparent",
+								sortCenter: centerVec3OfBounds(candidate.bounds),
+							}
+						: { kind: "depth-writing" },
+			});
+		}
+	}
+
+	return {
+		instances: instances.sort((left, right) =>
+			left.instanceId.localeCompare(right.instanceId),
+		),
+		resources: dedupeStaticObjectVisualResources(resources),
+	};
+}
+
+type GeneratedStaticObjectRenderInstanceCandidateEligibility =
+	| {
+			/** Candidate object with nullable host/content fields promoted to required render-instance facts. */
+			readonly kind: "eligible";
+			readonly object: StaticObjectInstanceFacts;
+			readonly bounds: StaticBounds;
+			readonly generated: NonNullable<StaticObjectInstanceFacts["generated"]>;
+	  }
+	| {
+			/** Rejection reason kept local so nullable host data does not leak into candidate construction. */
+			readonly kind: "ineligible";
+			readonly reason:
+				| "missing-object"
+				| "missing-generated-facts"
+				| "missing-instance-bounds";
+	  };
+
+function selectGeneratedStaticObjectRenderInstanceCandidate(
+	object: StaticObjectInstanceFacts | undefined,
+): GeneratedStaticObjectRenderInstanceCandidateEligibility {
+	if (!object) {
+		return { kind: "ineligible", reason: "missing-object" };
+	}
+	if (!object.generated) {
+		return { kind: "ineligible", reason: "missing-generated-facts" };
+	}
+	if (!object.instanceBounds) {
+		return { kind: "ineligible", reason: "missing-instance-bounds" };
+	}
+	return {
+		bounds: object.instanceBounds,
+		generated: object.generated,
+		kind: "eligible",
+		object,
+	};
+}
+
+function createStaticObjectSourceGeometryIdentityFromCoverage(
+	coverage: StaticObjectSourceMappingCoverage,
+): StaticObjectSourceGeometryIdentity {
+	return {
+		gfxObj: coverage.gfxObj,
+		kind: "static-object-source-geometry",
+		partIndex: coverage.partIndex,
+		source: coverage.source,
+	};
+}
+
+function textureUseIdsForMaterialEntry(
+	entry: StaticMaterialTableEntry,
+): readonly string[] {
+	return uniqueSortedStrings(
+		[
+			entry.primaryTextureUseId,
+			entry.indexTextureUseId,
+			entry.paletteTextureUseId,
+			entry.detailTextureUseId,
+		].filter((textureUseId): textureUseId is string => textureUseId !== null),
+	);
+}
+
+function centerVec3OfBounds(bounds: StaticBounds) {
+	return {
+		x: (bounds.min.x + bounds.max.x) / 2,
+		y: (bounds.min.y + bounds.max.y) / 2,
+		z: (bounds.min.z + bounds.max.z) / 2,
+	};
+}
+
+function dedupeStaticObjectVisualResources(
+	resources: readonly StaticObjectVisualResource[],
+): readonly StaticObjectVisualResource[] {
+	const byKey = new Map<string, StaticObjectVisualResource>();
+	for (const resource of resources) {
+		byKey.set(createStaticObjectVisualResourceKeyString(resource.key), resource);
+	}
+	return Array.from(byKey.values()).sort((left, right) =>
+		left.resourceId.localeCompare(right.resourceId),
+	);
 }
 
 function createStaticObjectCompatibilityPayload(

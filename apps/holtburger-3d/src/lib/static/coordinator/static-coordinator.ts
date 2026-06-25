@@ -500,6 +500,8 @@ export class StaticCoordinator {
 			revision: result.revision,
 			staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds,
 			staticBatchId: result.staticBatchId,
+			staticObjectRenderInstances: result.staticObjectRenderInstances,
+			staticObjectVisualResources: result.staticObjectVisualResources,
 			staticPortalGraphs: result.staticPortalGraphs,
 			staticPortalInteriorRecords: result.staticPortalInteriorRecords,
 			staticSourceMappings: result.staticSourceMappings,
@@ -544,6 +546,8 @@ export class StaticCoordinator {
 			revision: this.#revision,
 			staticAuthoredDynamicSeeds: [],
 			staticBatchId: createEvictionStaticBatchId(this.#revision),
+			staticObjectRenderInstances: [],
+			staticObjectVisualResources: [],
 			staticPortalGraphs: [],
 			staticPortalInteriorRecords: [],
 			staticSourceMappings: [],
@@ -879,6 +883,18 @@ function filterStaticBakeResultForWorks(
 			)
 			.map((resource) => resource.apertureResourceId),
 	);
+	const retainedStaticObjectRenderInstances =
+		result.staticObjectRenderInstances.filter((instance) =>
+			desiredKeys.has(
+				createDesiredKeyForDrawUnit({
+					domain: instance.domain,
+					landblockId: instance.landblockId,
+				}),
+			),
+		);
+	const retainedStaticObjectVisualResourceIds = new Set(
+		retainedStaticObjectRenderInstances.map((instance) => instance.resourceId),
+	);
 
 	return {
 		...result,
@@ -903,6 +919,11 @@ function filterStaticBakeResultForWorks(
 		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds.filter(
 			(record) =>
 				isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
+		),
+		staticObjectRenderInstances: retainedStaticObjectRenderInstances,
+		staticObjectVisualResources: result.staticObjectVisualResources.filter(
+			(resource) =>
+				retainedStaticObjectVisualResourceIds.has(resource.resourceId),
 		),
 		staticPortalInteriorRecords: result.staticPortalInteriorRecords.filter(
 			(record) =>

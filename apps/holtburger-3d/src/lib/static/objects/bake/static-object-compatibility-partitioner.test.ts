@@ -3,6 +3,7 @@ import type {
 	LandblockEnvCellsStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
 	StaticBakeBatchInput,
+	StaticBounds,
 	StaticMaterialSourceIdentity,
 	StaticObjectMaterialSourceFacts,
 	StaticObjectPaletteViewFacts,
@@ -559,6 +560,7 @@ describe("static object compatibility partitioner", () => {
 	it("bakes outdoor-detail alpha-test generated scenery into rendered draw units", () => {
 		const payload = createPayload({
 			domain: "outdoor-detail",
+			instanceBounds: createBounds(),
 			materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x4 })],
 			textureRefs: createRgbaTextureRefs(),
 		});
@@ -599,6 +601,58 @@ describe("static object compatibility partitioner", () => {
 			}),
 		]);
 		expect(result.textureUses).toHaveLength(1);
+	});
+
+	it("emits shared visual resources and render instances for repeated generated outdoor detail", () => {
+		const payload = duplicateObjectInstance(
+			createPayload({
+				domain: "outdoor-detail",
+				instanceBounds: createBounds(),
+				materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x4 })],
+				textureRefs: createRgbaTextureRefs(),
+			}),
+		);
+
+		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+
+		expect(result.staticObjectVisualResources).toHaveLength(1);
+		expect(result.staticObjectRenderInstances).toMatchObject([
+			{
+				domain: "outdoor-detail",
+				generated: { sceneId: 1, sceneTemplateIndex: 0, terrainIndex: 0 },
+				landblockId: 0xda55ffff,
+				source: createObjectIdentity({
+					instanceId: "detail-0",
+					objectKind: "generated-scenery",
+				}),
+			},
+			{
+				domain: "outdoor-detail",
+				generated: { sceneId: 1, sceneTemplateIndex: 0, terrainIndex: 0 },
+				landblockId: 0xda55ffff,
+				source: createObjectIdentity({
+					instanceId: "detail-1",
+					objectKind: "generated-scenery",
+				}),
+			},
+		]);
+		expect(
+			new Set(
+				result.staticObjectRenderInstances.map((instance) => instance.resourceId),
+			),
+		).toHaveProperty("size", 1);
+		expect(result.staticObjectVisualResources[0]).toMatchObject({
+			geometry: createStaticObjectSourceGeometryIdentity({
+				gfxObj: createGfxObjIdentity(),
+				partIndex: 0,
+				source: createSourceIdentity(),
+			}),
+			materialFamily: "texture-rgba",
+			materialPass: "alpha-test",
+			textureUseIds: expect.arrayContaining([
+				expect.stringContaining("prepared-render-surface-texture-use"),
+			]),
+		});
 	});
 
 	it("keeps compatible opaque object ownership as metadata without splitting batches", () => {
@@ -1452,7 +1506,13 @@ function duplicateObjectInstance(
 	}
 	const duplicateObject = {
 		...object,
-		identity: createObjectIdentity({ instanceId: "building-1" }),
+		identity: createObjectIdentity({
+			instanceId:
+				object.identity.objectKind === "generated-scenery"
+					? "detail-1"
+					: "building-1",
+			objectKind: object.identity.objectKind,
+		}),
 		sourceIndex: object.sourceIndex + 1,
 	};
 
@@ -1537,6 +1597,7 @@ function createPayload(options: {
 	readonly domain?: OutdoorStaticObjectsScopePayload["domain"];
 	readonly materials: readonly StaticObjectMaterialSourceFacts[];
 	readonly objectPlacement?: ReturnType<typeof createPlacement>;
+	readonly instanceBounds?: StaticBounds;
 	readonly partPositions?: Float32Array;
 	readonly sourceScale?: {
 		readonly x: number;
@@ -1593,7 +1654,7 @@ function createPayload(options: {
 						? { sceneId: 1, sceneTemplateIndex: 0, terrainIndex: 0 }
 						: null,
 				identity: objectIdentity,
-				instanceBounds: null,
+				instanceBounds: options.instanceBounds ?? null,
 				localPlacement: options.objectPlacement ?? createPlacement(),
 				portalCount: 0,
 				source: createSourceIdentity(),
@@ -2008,6 +2069,13 @@ function createPartPositions(triangleCount: number): Float32Array {
 	}
 
 	return positions;
+}
+
+function createBounds(): StaticBounds {
+	return {
+		max: { x: 1, y: 1, z: 1 },
+		min: { x: 0, y: 0, z: 0 },
+	};
 }
 
 function createPlacement(

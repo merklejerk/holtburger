@@ -717,6 +717,42 @@ Spicy bits and debt:
 - Direct and instanced static material binding setup remain duplicated. Phase 8 cleanup should extract
   the shared bind/upload helper before adding more submission branches.
 
+### 2026-06-25 Phase 5A/5B Live Diagnostic Readout
+
+Fresh runtime diagnostics after the transparent cutover and far-transparent instancing show the
+course correction worked:
+
+- Outdoor-detail baked direct draw calls dropped from `186` to `27`.
+- Outdoor-detail transparent baked direct draw calls dropped from `162` to `3`.
+- Retained repeated generated transparent outdoor-detail partitions dropped from `159` to `0`.
+- Far transparent shared render instances now submit as `26` instanced draw calls for `159`
+  instances.
+- The remaining `3` outdoor-detail transparent baked direct draws line up with the intentionally
+  retained `explicitObject: 3` bucket.
+
+Decision:
+
+- The transparent generated outdoor-detail path is no longer the main perf pressure point. Remaining
+  direct draw pressure is mostly outside outdoor detail: total baked static direct draws are still
+  `242`, `directEnvCellDrawCalls` is still `417`, and the largest recent static-object upload is
+  `landblock-env-cells`.
+- Treat the mismatch between `staticObjectBakeSummary.instancedRenderInstanceCount` (`392`) and
+  renderer `staticObjectRenderInstances` (`344`) as diagnostic accounting debt, not as a rendering
+  correctness bug. The bake summary is summing bake diagnostic reports; the renderer count is live
+  committed/drawable state.
+- Narrow Phase 6 to a mini hardening pass before the next perf hunt. Clean up diagnostic accounting
+  and run a query identity smoke test first, then resteer toward the next pressure point.
+
+Spicy bits and debt:
+
+- The current report names make bake-output totals look like live state. That is sus because it sends
+  reviewers hunting for dropped instances when the populations are not required to match.
+- Do not add warning logic for this mismatch unless we first define two counts that are supposed to
+  describe the same population.
+- Env-cell/static direct draw pressure probably deserves the next perf hunt, but doing that before
+  the diagnostic accounting cleanup leaves us driving with muddy counters. Do the small cleanup first;
+  do not turn Phase 6 into a giant debug-panel polish phase.
+
 ## Implementation Phases
 
 ### Phase 0: Baseline And De-Instancing Diagnostics
@@ -813,14 +849,34 @@ Spicy bits and debt:
   instanced draw calls, and far transparent instanced instance count.
 - Add tests for sort-policy classification and renderer draw-list construction where practical.
 
-### Phase 6: Query And Debug Parity
+### Phase 6A: Diagnostic And Query Hardening Mini-Phase
 
-- Ensure static scene query continues to return semantic static source identity for instanced
-  generated objects.
-- Surface debug counters for shared resources, render instances, direct draws, instanced draw
-  eligibility, and retained-baked reasons.
-- Verify that generated static instance bounds are current and landblock-local in the same coordinate
+- Keep this phase intentionally small. Its job is to make the next perf hunt trustworthy, not to
+  polish every debug surface.
+- Split diagnostics that describe bake-produced totals from diagnostics that describe live committed
+  renderer/coordinator state. Rename or supplement `instancedRenderInstanceCount`-style bake summary
+  fields so they cannot be mistaken for current drawable render-instance counts.
+- Add live committed shared static-object counters only if coordinator-side parity is needed:
+  committed render-instance count, committed visual-resource count, and retained baked draw-unit
+  count. Renderer live counters remain the draw-state source of truth.
+- Add or run a focused static scene-query smoke test proving instanced generated objects still expose
+  semantic source identity, landblock ownership, and required bounds in the expected coordinate
+  convention.
+- Verify generated static instance bounds are current and landblock-local in the same coordinate
   convention as existing outdoor static query records.
+- Avoid broad debug UI work, row-level report expansion, or tests that only assert diagnostic report
+  shape.
+
+### Phase 6B: Perf Resteer Gate
+
+- Record final outdoor-detail generated-static before/after numbers from the compact diagnostics:
+  baked draw calls, transparent baked draw calls, render instances, visual resources, instanced draw
+  calls, retained transparent reasons, flattened bytes, and uploaded bytes.
+- Decide whether the next perf effort should become a new env-cell/static direct-draw plan or a
+  follow-on subphase in this plan. Current evidence points at `directEnvCellDrawCalls`,
+  `landblock-env-cells` static-object uploads, and non-outdoor-detail baked static direct draws.
+- Do not start env-cell/static direct-draw optimization until Phase 6A has clarified live-vs-bake
+  diagnostic semantics enough that new perf counters can be trusted.
 
 ### Phase 7: Dynamic Entity Resteering Gate
 
@@ -839,16 +895,21 @@ Spicy bits and debt:
   inspectors.
 - Delete temporary compatibility shims, bring-up-only direct draw paths, and transitional names after
   the shared resource/instance contracts become the primary generated-static path.
-- Remove the renderer-side `isDrawSuppressedByBakedLayer` remnant after query/debug parity confirms
-  instance emission is exclusively cutover-owned.
+- Remove the renderer-side `isDrawSuppressedByBakedLayer` remnant after Phase 6A confirms instance
+  emission is exclusively cutover-owned and query identity does not depend on the old suppression
+  bridge.
 - Extract shared static-material binding setup for direct and instanced static-object draws so
   texture/material uniform upload logic does not fork across draw modes.
 - Collapse or remove transitional static object draw-unit fields that duplicate `materialEntries`,
   `materialSlotIndices`, visual resource metadata, or renderer-owned derived summaries.
 - Audit texture binding ownership and remove draw-unit-only assumptions for shared object visual
   resources.
-- Revisit report output after Phase 6 and keep the general runtime report summary-level. Row-level
+- Revisit report output after Phase 6A and keep the general runtime report summary-level. Row-level
   bake/upload/timing detail should live behind explicit inspectors, not the copy report.
+- Remove or rename misleading diagnostic fields that blur bake-output history with current renderer
+  state. The report should not imply `staticObjectBakeSummary.instancedRenderInstanceCount` and
+  renderer `staticObjectRenderInstances` are expected to match unless they are computed from the same
+  committed population.
 - Re-run the `0xda56ffff` baseline comparison and update the plan with final before/after numbers:
   flattened triangles, flattened bytes, uploaded object bytes, shared resource count, retained-baked
   count, direct draw count, and instanced draw count.

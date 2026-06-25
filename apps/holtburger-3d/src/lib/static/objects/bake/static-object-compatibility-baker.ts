@@ -273,7 +273,16 @@ function bakeStaticObjectCompatibilityItem(
 		warnAboutSkippedStaticObjectPartition(item.work, scope, partition);
 		return false;
 	});
-	const drawUnits = renderablePartitions.map((partition) =>
+	const instancedOutput = createStaticObjectInstancedOutput({
+		partitions: renderablePartitions,
+		payload: scope,
+		sourceIndex,
+		work: item.work,
+	});
+	const bakedPartitions = renderablePartitions.filter(
+		(partition) => !instancedOutput.cutoverPartitionSliceIds.has(partition.sliceId),
+	);
+	const drawUnits = bakedPartitions.map((partition) =>
 		createStaticObjectGeometryBakeOutput({
 			partition,
 			payload: scope,
@@ -282,13 +291,13 @@ function bakeStaticObjectCompatibilityItem(
 		}),
 	);
 	const drawUnitIdBySliceId = new Map(
-		renderablePartitions.map((partition, index) => [
+		bakedPartitions.map((partition, index) => [
 			partition.sliceId,
 			drawUnits[index]?.drawUnit.drawUnitId ?? "",
 		]),
 	);
 	const sourceMappingCoverageBySliceId = new Map(
-		renderablePartitions.map(
+		bakedPartitions.map(
 			(partition) =>
 				[
 					partition.sliceId,
@@ -297,7 +306,7 @@ function bakeStaticObjectCompatibilityItem(
 		),
 	);
 	const spatialRecordBySliceId = new Map(
-		renderablePartitions.map((partition) => {
+		bakedPartitions.map((partition) => {
 			const drawUnitId = drawUnitIdBySliceId.get(partition.sliceId);
 			return [
 				partition.sliceId,
@@ -312,19 +321,11 @@ function bakeStaticObjectCompatibilityItem(
 	const bakedDrawUnits = drawUnits.map((output, index) => ({
 		...output.drawUnit,
 		sourceMappingCoverage:
-			sourceMappingCoverageBySliceId.get(
-				renderablePartitions[index]?.sliceId ?? "",
-			) ?? [],
+			sourceMappingCoverageBySliceId.get(bakedPartitions[index]?.sliceId ?? "") ??
+			[],
 		spatialRecord:
-			spatialRecordBySliceId.get(renderablePartitions[index]?.sliceId ?? "") ??
-			null,
+			spatialRecordBySliceId.get(bakedPartitions[index]?.sliceId ?? "") ?? null,
 	}));
-	const instancedOutput = createStaticObjectInstancedOutput({
-		partitions: renderablePartitions,
-		payload: scope,
-		sourceIndex,
-		work: item.work,
-	});
 
 	return {
 		drawUnits: bakedDrawUnits,
@@ -334,6 +335,7 @@ function bakeStaticObjectCompatibilityItem(
 			instancedOutput,
 			partitionPlan,
 			payload: scope,
+			renderablePartitionCount: renderablePartitions.length,
 		}),
 		materialCoverage: partitionPlan.materialCoverage,
 		sourceMappings: [],
@@ -344,7 +346,7 @@ function bakeStaticObjectCompatibilityItem(
 		staticObjectRenderInstances: instancedOutput.instances,
 		staticObjectVisualResources: instancedOutput.resources,
 		textureUses: createStaticObjectBakeTextureUses({
-			partitions: partitionPlan.partitions,
+			partitions: renderablePartitions,
 			staticBatchId: input.staticBatchId,
 			work: item.work,
 		}),
@@ -361,6 +363,7 @@ function createStaticObjectBakeDiagnostics(options: {
 	};
 	readonly payload: StaticObjectCompatibilityPayload;
 	readonly partitionPlan: ReturnType<typeof partitionStaticObjectCompatibility>;
+	readonly renderablePartitionCount: number;
 	readonly drawUnits: readonly StaticObjectGeometryStaticDrawUnit[];
 }): StaticObjectBakeDiagnostics {
 	const uniqueSourceKeys = new Set<string>();
@@ -423,9 +426,9 @@ function createStaticObjectBakeDiagnostics(options: {
 		landblockId: options.payload.landblock.landblockId,
 		objectCount: options.payload.objects.length,
 		partitionCount: options.partitionPlan.partitions.length,
-		renderablePartitionCount: options.drawUnits.length,
+		renderablePartitionCount: options.renderablePartitionCount,
 		skippedPartitionCount:
-			options.partitionPlan.partitions.length - options.drawUnits.length,
+			options.partitionPlan.partitions.length - options.renderablePartitionCount,
 		staticBatchId: options.input.staticBatchId,
 		uniqueSourceCount: uniqueSourceKeys.size,
 		uniqueSourcePartGeometryCount: uniqueSourcePartGeometryKeys.size,
@@ -512,15 +515,29 @@ function createStaticObjectInstancedOutput(options: {
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
 	readonly work: ScheduledStaticWork;
 }): {
+	readonly cutoverPartitionSliceIds: ReadonlySet<string>;
 	readonly instances: readonly StaticObjectRenderInstance[];
 	readonly resources: readonly StaticObjectVisualResource[];
 } {
 	if (options.payload.domain !== "outdoor-detail") {
-		return { instances: [], resources: [] };
+		return {
+			cutoverPartitionSliceIds: new Set<string>(),
+			instances: [],
+			resources: [],
+		};
 	}
 
 	const groupsByKey = new Map<string, StaticObjectVisualResourceTriangleGroup>();
+	const triangleCoverageKeysByPartitionSliceId = new Map<string, Set<string>>();
 	for (const partition of options.partitions) {
+		triangleCoverageKeysByPartitionSliceId.set(
+			partition.sliceId,
+			new Set(
+				partition.triangles.map((triangle) =>
+					createStaticObjectTriangleCoverageKey(partition, triangle),
+				),
+			),
+		);
 		const materialEntries = createStaticObjectMaterialTableEntries({
 			partition,
 			work: options.work,
@@ -556,15 +573,18 @@ function createStaticObjectInstancedOutput(options: {
 				materialEntries: [materialEntry],
 				materialFamily: resolveRenderableStaticObjectFamily(partition),
 				materialPass: resolveRenderableStaticObjectPass(partition),
+				partitionSliceId: partition.sliceId,
 				renderState: materialEntry.renderState,
 				textureUseIds: textureUseIdsForMaterialEntry(materialEntry),
 			});
 			const group = groupsByKey.get(groupKey) ?? {
 				candidatesByInstanceId: new Map(),
+				coveredTriangleKeys: new Set(),
 				geometry,
 				materialEntry,
 				materialFamily: resolveRenderableStaticObjectFamily(partition),
 				materialPass: resolveRenderableStaticObjectPass(partition),
+				partitionSliceId: partition.sliceId,
 				sourceTrianglesById: new Map(),
 				textureUseIds: textureUseIdsForMaterialEntry(materialEntry),
 			};
@@ -572,15 +592,58 @@ function createStaticObjectInstancedOutput(options: {
 				candidate.object.identity.instanceId,
 				candidate,
 			);
-			group.sourceTrianglesById.set(triangle.sourceTriangleId, triangle);
+			group.coveredTriangleKeys.add(
+				createStaticObjectTriangleCoverageKey(partition, triangle),
+			);
+			group.sourceTrianglesById.set(
+				createStaticObjectSourceLocalTriangleKey(triangle),
+				triangle,
+			);
 			groupsByKey.set(groupKey, group);
+		}
+	}
+
+	const coveredTriangleKeysByPartitionSliceId = new Map<string, Set<string>>();
+	for (const group of groupsByKey.values()) {
+		if (group.candidatesByInstanceId.size < 2) {
+			continue;
+		}
+		const coveredTriangleKeys =
+			coveredTriangleKeysByPartitionSliceId.get(group.partitionSliceId) ??
+			new Set<string>();
+		for (const triangleKey of group.coveredTriangleKeys) {
+			coveredTriangleKeys.add(triangleKey);
+		}
+		coveredTriangleKeysByPartitionSliceId.set(
+			group.partitionSliceId,
+			coveredTriangleKeys,
+		);
+	}
+
+	const cutoverPartitionSliceIds = new Set<string>();
+	for (const [
+		partitionSliceId,
+		triangleCoverageKeys,
+	] of triangleCoverageKeysByPartitionSliceId) {
+		const coveredTriangleKeys =
+			coveredTriangleKeysByPartitionSliceId.get(partitionSliceId);
+		if (
+			coveredTriangleKeys &&
+			[...triangleCoverageKeys].every((triangleKey) =>
+				coveredTriangleKeys.has(triangleKey),
+			)
+		) {
+			cutoverPartitionSliceIds.add(partitionSliceId);
 		}
 	}
 
 	const resources: StaticObjectVisualResource[] = [];
 	const instances: StaticObjectRenderInstance[] = [];
 	for (const group of groupsByKey.values()) {
-		if (group.candidatesByInstanceId.size < 2) {
+		if (
+			group.candidatesByInstanceId.size < 2 ||
+			!cutoverPartitionSliceIds.has(group.partitionSliceId)
+		) {
 			continue;
 		}
 		const resourceGeometry = bakeStaticObjectVisualResourceGeometry({
@@ -665,6 +728,7 @@ function createStaticObjectInstancedOutput(options: {
 	}
 
 	return {
+		cutoverPartitionSliceIds,
 		instances: instances.sort((left, right) =>
 			left.instanceId.localeCompare(right.instanceId),
 		),
@@ -697,10 +761,14 @@ interface StaticObjectVisualResourceTriangleGroup {
 			{ readonly kind: "eligible" }
 		>
 	>;
+	/** Triangle keys that this qualifying group can replace in its owning partition. */
+	readonly coveredTriangleKeys: Set<string>;
 	readonly geometry: StaticObjectSourceGeometryIdentity;
 	readonly materialEntry: StaticMaterialTableEntry;
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
+	/** Partition-local ownership keeps mixed baked/instanced partitions from double rendering. */
+	readonly partitionSliceId: string;
 	readonly sourceTrianglesById: Map<
 		string,
 		StaticObjectCompatibilityTriangle
@@ -733,17 +801,49 @@ function createStaticObjectVisualResourceTriangleGroupKey(input: {
 	readonly materialEntries: readonly StaticMaterialTableEntry[];
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
+	readonly partitionSliceId: string;
 	readonly renderState: StaticObjectGeometryStaticDrawUnit["renderState"];
 	readonly textureUseIds: readonly string[];
 }): string {
-	return createStaticObjectVisualResourceKeyString(
+	const resourceKey = createStaticObjectVisualResourceKeyString(
 		createStaticObjectVisualResourceKey({
-			...input,
-			// Index width depends on the deduped source triangle count. The final
-			// resource key is rebuilt after source-local geometry is materialized.
+			geometry: input.geometry,
 			indexType: "uint32",
+			materialEntries: input.materialEntries,
+			materialFamily: input.materialFamily,
+			materialPass: input.materialPass,
+			renderState: input.renderState,
+			textureUseIds: input.textureUseIds,
 		}),
 	);
+	return [input.partitionSliceId, resourceKey].join("|");
+}
+
+function createStaticObjectTriangleCoverageKey(
+	partition: StaticObjectCompatibilityPartition,
+	triangle: StaticObjectCompatibilityTriangle,
+): string {
+	return [
+		partition.sliceId,
+		createObjectKey(triangle.object),
+		triangle.sourceTriangleId,
+		triangle.materialEntryKey,
+	].join("|");
+}
+
+function createStaticObjectSourceLocalTriangleKey(
+	triangle: StaticObjectCompatibilityTriangle,
+): string {
+	return [
+		createSourceKey(triangle.source),
+		createSourceKey(triangle.gfxObj),
+		`part:${triangle.partIndex}`,
+		`polygon:${triangle.polygonId}`,
+		`first-vertex:${triangle.firstVertex}`,
+		`geometry-surface:${triangle.geometrySurfaceId}`,
+		`variant:${triangle.materialVariantSignature ?? "base"}`,
+		`material:${triangle.materialEntryKey}`,
+	].join("|");
 }
 
 function bakeStaticObjectVisualResourceGeometry(options: {

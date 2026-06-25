@@ -967,7 +967,7 @@ class Webgl2Renderer implements Renderer {
 				for (const instance of payload?.instancedObjectInstances ?? []) {
 					this.#staticObjectRenderInstances.set(instance.instanceId, {
 						...instance,
-						isDrawSuppressedByBakedLayer: (payload?.drawUnits.length ?? 0) > 0,
+						isDrawSuppressedByBakedLayer: false,
 					});
 					ownership.staticObjectRenderInstanceIds.add(instance.instanceId);
 				}

@@ -286,7 +286,11 @@ export interface RendererSnapshot {
 	readonly sceneDomainTargets: SceneDomainTargetSnapshot;
 	readonly staticDrawUnits: number;
 	readonly staticObjectResources: number;
+	readonly staticObjectVisualResources: number;
+	readonly staticObjectRenderInstances: number;
 	readonly outdoorDetailStaticObjectResources: number;
+	readonly outdoorDetailStaticObjectVisualResources: number;
+	readonly outdoorDetailStaticObjectRenderInstances: number;
 	readonly staticObjectUploadedBufferBytes: number;
 	readonly outdoorDetailStaticObjectUploadedBufferBytes: number;
 	readonly recentStaticObjectUploads: readonly StaticObjectUploadDiagnostics[];

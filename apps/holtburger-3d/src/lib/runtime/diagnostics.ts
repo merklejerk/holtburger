@@ -99,7 +99,11 @@ export interface RendererDiagnosticsSummary {
 	readonly renderedTriangles: number;
 	readonly debugOverlayPrimitives: number;
 	readonly staticObjectResources: number;
+	readonly staticObjectVisualResources: number;
+	readonly staticObjectRenderInstances: number;
 	readonly outdoorDetailStaticObjectResources: number;
+	readonly outdoorDetailStaticObjectVisualResources: number;
+	readonly outdoorDetailStaticObjectRenderInstances: number;
 	readonly staticObjectUploadedBufferBytes: number;
 	readonly outdoorDetailStaticObjectUploadedBufferBytes: number;
 	readonly staticObjectUploadSummary: StaticObjectUploadSummaryDiagnostics;

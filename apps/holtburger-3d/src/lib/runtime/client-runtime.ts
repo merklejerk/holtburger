@@ -3484,16 +3484,22 @@ function createRendererDiagnosticsSummary(
 		isRunning: snapshot.isRunning,
 		outdoorDetailStaticObjectResources:
 			snapshot.outdoorDetailStaticObjectResources,
+		outdoorDetailStaticObjectRenderInstances:
+			snapshot.outdoorDetailStaticObjectRenderInstances,
+		outdoorDetailStaticObjectVisualResources:
+			snapshot.outdoorDetailStaticObjectVisualResources,
 		outdoorDetailStaticObjectUploadedBufferBytes:
 			snapshot.outdoorDetailStaticObjectUploadedBufferBytes,
 		renderedTriangles: snapshot.renderedTriangles,
 		renderPassKind: snapshot.renderPassPlan.kind,
 		staticDrawUnits: snapshot.staticDrawUnits,
+		staticObjectRenderInstances: snapshot.staticObjectRenderInstances,
 		staticObjectResources: snapshot.staticObjectResources,
 		staticObjectUploadSummary: createStaticObjectUploadSummary(
 			snapshot.recentStaticObjectUploads,
 		),
 		staticObjectUploadedBufferBytes: snapshot.staticObjectUploadedBufferBytes,
+		staticObjectVisualResources: snapshot.staticObjectVisualResources,
 		terrainDrawUnits: snapshot.terrainDrawUnits,
 	};
 }

@@ -99,9 +99,15 @@ export interface RendererDiagnosticsSummary {
 	readonly renderedTriangles: number;
 	readonly debugOverlayPrimitives: number;
 	readonly staticObjectResources: number;
+	readonly staticObjectBakedDirectDrawCalls: number;
 	readonly staticObjectVisualResources: number;
 	readonly staticObjectRenderInstances: number;
+	readonly staticObjectDirectRenderInstanceDrawCalls: number;
+	readonly staticObjectInstancedRenderInstanceDrawCalls: number;
+	readonly staticObjectInstancedRenderInstances: number;
 	readonly outdoorDetailStaticObjectResources: number;
+	readonly outdoorDetailStaticObjectBakedDirectDrawCalls: number;
+	readonly outdoorDetailStaticObjectBakedDirectDrawCallsByPass: RendererSnapshot["outdoorDetailStaticObjectBakedDirectDrawCallsByPass"];
 	readonly outdoorDetailStaticObjectVisualResources: number;
 	readonly outdoorDetailStaticObjectRenderInstances: number;
 	readonly staticObjectUploadedBufferBytes: number;

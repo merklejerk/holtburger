@@ -535,6 +535,78 @@ Decision:
   part of the instanced submission phase, not after it. We need those counters to prove the perf fix
   is real and not vibes.
 
+### 2026-06-25 Phase 4 Progress
+
+- Added a WebGL2 instanced submission path for compatible non-transparent shared outdoor-detail
+  render instances. Instances are grouped by shared visual resource id; groups of two or more submit
+  through `drawElementsInstanced`, while singleton groups remain direct draws.
+- Added a dynamic renderer-owned transform buffer for per-instance `sourceToLandblock` matrices.
+  The static object shader now accepts either the existing uniform object transform or a per-instance
+  matrix attribute.
+- Preserved direct sorted draws for transparent shared render instances. Alpha-blended/far
+  transparent instancing remains Phase 5 so near-camera sorting behavior does not regress.
+- Added renderer/runtime summary counters for direct shared render-instance draw calls, instanced
+  shared render-instance draw calls, and render instances submitted through instanced draws.
+- Added a focused WebGL2 renderer test proving two compatible shared outdoor-detail render instances
+  submit as one instanced draw and report the new counters.
+
+Spicy bits and debt:
+
+- The direct and instanced static-material draw helpers duplicate texture/material uniform upload
+  setup. That is intentionally local for this phase, but cleanup should extract a shared
+  `prepare/bind static material resource` helper before the draw path grows more branches.
+- Instanced grouping is intentionally conservative and resource-id local. It does not yet merge
+  compatible transparent/far-sort groups, and it does not batch singleton resources.
+- Instance transform scratch storage avoids per-group matrix-array allocation, but each instance
+  still materializes a temporary transform matrix while filling the scratch buffer. If this remains
+  hot after live profiling, write transforms directly into the scratch array.
+- The texture binding owner bridge is still unchanged. Instanced drawing reduces submission count but
+  does not solve the draw-unit-shaped texture binding contract.
+
+### 2026-06-25 Direct Static Draw Breakdown Progress
+
+- Added renderer/runtime summary counters for actual baked static-object direct draw submissions.
+  The report now separates total baked static-object direct draw calls from outdoor-detail baked
+  direct draw calls.
+- Added an outdoor-detail baked direct draw breakdown by material pass: opaque, alpha-test,
+  transparent, and additive. This is the compact signal needed to decide whether Phase 5
+  alpha-blended instancing is a real perf lever or just aesthetic yak-shaving.
+
+Spicy bits and debt:
+
+- This breakdown explains what is still submitted directly, not why it stayed baked. Retained-baked
+  reason summaries are still needed to distinguish explicit objects, one-off generated sources,
+  missing instance bounds, mixed partitions, and unsupported material buckets.
+- The breakdown currently focuses on outdoor detail because that is where the shared-instance cutover
+  is active. Outdoor buildings/env-cell direct draw breakdowns can be added if the remaining draw
+  pressure points there after this data lands.
+
+### 2026-06-25 Transparent Retained-Draw Resteer
+
+Fresh direct-draw breakdown shows the remaining outdoor-detail baked direct draws are overwhelmingly
+transparent:
+
+- Outdoor-detail baked direct draw calls: `186`
+- Transparent: `162`
+- Alpha-test: `14`
+- Opaque: `10`
+- Additive: `0`
+- Shared render instances: `233`
+- Shared instanced draw calls: `70`
+- Shared direct render-instance draw calls: `0`
+
+Decision:
+
+- Phase 5 remains the right next perf phase, but it should start by explaining why transparent
+  outdoor-detail partitions stayed baked. The current numbers say alpha-blended work matters, but
+  not whether the retained transparent draws are repeated generated sources, explicit objects,
+  mixed partitions, missing-bounds candidates, or unsupported material buckets.
+- Do not blindly batch all transparent geometry. Near-camera transparent objects still need sorted
+  direct submission unless we build sorted per-frame instance buffers and prove the artifacts are
+  acceptable.
+- Prioritize far-transparent generated scenery where repeated sources can cut over cleanly to shared
+  resources and use instanced draws outside `NEAR_TRANSPARENT_STATIC_SORT_DISTANCE`.
+
 ## Implementation Phases
 
 ### Phase 0: Baseline And De-Instancing Diagnostics
@@ -601,14 +673,22 @@ Decision:
 
 ### Phase 5: Alpha-Blended Policy
 
+- Add retained-baked reason diagnostics for outdoor-detail transparent partitions before changing
+  submission policy. Split at least: explicit object, one-off generated source, repeated generated
+  source retained by mixed partition, missing instance bounds, unsupported material bucket, and
+  non-renderable/deferred material bucket.
 - Carry transparency sort policy on generated static instances.
 - Preserve existing depth-sorted behavior for near-camera transparent objects using direct sorted
   draws when needed.
+- Extend cutover eligibility for repeated generated transparent partitions only when the whole
+  partition can move to shared visual resources without partial transparent geometry surgery.
 - Add per-instance transform/sort metadata buffers for compatible transparent generated static
   instances outside `NEAR_TRANSPARENT_STATIC_SORT_DISTANCE`.
 - Use instanced draws for compatible transparent generated statics outside
   `NEAR_TRANSPARENT_STATIC_SORT_DISTANCE`. Direct grouped transparent draws are a bring-up/fallback
   behavior only, not the desired steady-state for generated outdoor statics.
+- Report near transparent direct sorted draws, far transparent direct sorted draws, far transparent
+  instanced draw calls, and far transparent instanced instance count.
 - Add tests for sort-policy classification and renderer draw-list construction where practical.
 
 ### Phase 6: Query And Debug Parity
@@ -639,6 +719,8 @@ Decision:
   the shared resource/instance contracts become the primary generated-static path.
 - Remove the renderer-side `isDrawSuppressedByBakedLayer` remnant after query/debug parity confirms
   instance emission is exclusively cutover-owned.
+- Extract shared static-material binding setup for direct and instanced static-object draws so
+  texture/material uniform upload logic does not fork across draw modes.
 - Collapse or remove transitional static object draw-unit fields that duplicate `materialEntries`,
   `materialSlotIndices`, visual resource metadata, or renderer-owned derived summaries.
 - Audit texture binding ownership and remove draw-unit-only assumptions for shared object visual

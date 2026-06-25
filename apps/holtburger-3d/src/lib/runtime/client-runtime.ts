@@ -3675,13 +3675,13 @@ function createStaticObjectBakeSummary(
 		generatedInstanceCount: sumNumbers(
 			diagnostics.map((entry) => entry.generatedInstanceCount),
 		),
-		instancedRenderInstanceCount: sumNumbers(
+		bakedInstancedRenderInstanceCount: sumNumbers(
 			diagnostics.map((entry) => entry.instancedRenderInstanceCount),
 		),
 		instancedSourceTriangleCount: sumNumbers(
 			diagnostics.map((entry) => entry.instancedSourceTriangleCount),
 		),
-		instancedVisualResourceCount: sumNumbers(
+		bakedInstancedVisualResourceCount: sumNumbers(
 			diagnostics.map((entry) => entry.instancedVisualResourceCount),
 		),
 		largestBake:
@@ -3696,9 +3696,9 @@ function createStaticObjectBakeSummary(
 							largestBake.estimatedFlattenedTypedArrayBytes,
 						flattenedTriangleCount: largestBake.flattenedTriangleCount,
 						generatedInstanceCount: largestBake.generatedInstanceCount,
-						instancedRenderInstanceCount:
+						bakedInstancedRenderInstanceCount:
 							largestBake.instancedRenderInstanceCount,
-						instancedVisualResourceCount:
+						bakedInstancedVisualResourceCount:
 							largestBake.instancedVisualResourceCount,
 						landblockId: formatHex(largestBake.landblockId),
 						objectCount: largestBake.objectCount,

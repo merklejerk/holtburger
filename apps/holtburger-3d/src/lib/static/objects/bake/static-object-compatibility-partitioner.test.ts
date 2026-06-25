@@ -625,6 +625,7 @@ describe("static object compatibility partitioner", () => {
 		expect(result.staticObjectVisualResources).toHaveLength(1);
 		expect(result.staticObjectRenderInstances).toMatchObject([
 			{
+				bounds: createBounds(),
 				domain: "outdoor-detail",
 				generated: { sceneId: 1, sceneTemplateIndex: 0, terrainIndex: 0 },
 				landblockId: 0xda55ffff,
@@ -634,6 +635,7 @@ describe("static object compatibility partitioner", () => {
 				}),
 			},
 			{
+				bounds: createBounds(),
 				domain: "outdoor-detail",
 				generated: { sceneId: 1, sceneTemplateIndex: 0, terrainIndex: 0 },
 				landblockId: 0xda55ffff,

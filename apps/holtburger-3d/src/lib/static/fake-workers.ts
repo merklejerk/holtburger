@@ -265,6 +265,7 @@ function createFakeStaticBakeResult(
 			Math.max(...input.items.map((item) => item.payload.sourceRevision), 0),
 		domain: input.domain,
 		drawUnits: result.drawUnits ?? [],
+		staticObjectBakeDiagnostics: result.staticObjectBakeDiagnostics ?? [],
 		materialCoverage: result.materialCoverage ?? [],
 		portalApertureResources: result.portalApertureResources ?? [],
 		revision: input.revision,

@@ -294,6 +294,87 @@ versus instanced draws at draw-list construction time.
 The first implementation should preserve current transparent behavior before optimizing it. Any
 known sorting compromise must be visible in diagnostics.
 
+## Implementation Progress
+
+### 2026-06-25 Phase 0 Progress
+
+- Added first-class static-object bake diagnostics to `StaticBakeBatchResult` for object counts,
+  generated/explicit/building counts, unique source and source-part geometry counts, unique source
+  triangle count, flattened triangle/vertex counts, draw-unit and partition counts, skipped
+  partition count, and estimated flattened typed-array bytes.
+- Added coordinator timing diagnostics for resolver, attachment creation, bake worker, and commit
+  wall-clock time. These are coarse runtime timings intended for comparison between landblocks, not
+  profiler-grade measurements.
+- Added renderer diagnostics for static object resource count, outdoor-detail static object resource
+  count, current uploaded static object buffer bytes, outdoor-detail uploaded buffer bytes, and recent
+  static object upload batches grouped by domain/landblock.
+- The env-cell static object compatibility sub-bake forwards its diagnostics because it shares the
+  same de-instancing path, even though generated outdoor detail remains the first optimization target.
+
+Spicy bits and debt:
+
+- Renderer upload timing measures CPU-side WebGL resource creation and `bufferData` calls, not GPU
+  completion. Async GPU timer queries would be heavier than Phase 0 needs.
+- The flattened byte estimate intentionally mirrors the current four static-object geometry buffers:
+  positions, texcoords, material slot indices, and indices. It does not include JS object overhead,
+  material table metadata, texture pages, VAOs, or driver-side padding.
+- Static object draw units still carry transitional derived material summary fields alongside
+  `materialEntries` and `materialSlotIndices`. Phase 0 leaves that debt alone; cleaning it up belongs
+  in a renderer/material contract cutover, not diagnostics.
+- The captured outdoor-anchor baseline is good enough to steer Phase 1. The timing fields are useful
+  context, but byte counts, draw-unit counts, generated instance counts, flattened triangle counts,
+  and largest-bake data are the structural scoreboard.
+- Follow-up `jq` review of a saved runtime report found the largest report offenders were renderer's
+  embedded portal frame work plan, static-object bake rows from non-target domains, and texture-atlas
+  per-domain sampler/material detail. The report now summarizes renderer portal plans, collapses static
+  material coverage, filters static-object bake rows to non-empty outdoor-detail domains, and keeps
+  texture atlas domain diagnostics to count-level fields. Projected minified report size on the saved
+  sample fell from roughly 54 KB to roughly 11 KB.
+- A second pass collapsed remaining repeated rows into dashboard-style summaries: renderer static
+  uploads are totals by domain plus the largest upload, static bake diagnostics are aggregate totals
+  plus the largest bake, coordinator timings are totals by domain plus slowest resolver/bake samples,
+  and texture-atlas per-domain rows were removed from the copy report. The updated sample projects to
+  roughly 7 KB minified.
+- A third pass tightened the report to be a summary instead of a diary: copied reports no longer
+  include current residency objects, full render-pass plans, committed/pending revision arrays,
+  latest payload strings, renderer portal-plan duplicates, asset pending snapshots, or by-domain
+  mini tables. Deeper row-level data should live behind targeted inspectors, not the general runtime
+  report.
+- A fourth pass omitted empty warning/failure/fallback arrays and flattened portal diagnostics to the
+  handful of counts that matter in the summary. Empty sections should not appear in copied diagnostics.
+- Baseline capture for `manual|outdoor-anchor|0xda55ffff|buildings,detail,env-cells,terrain` with
+  anisotropic filtering and portal projection active:
+  - Runtime materialized 713 static draw units from 713 source static draw units with 8 committed
+    materialization revisions and no pending materialization work.
+  - Renderer held 425 static object resources and 193 outdoor-detail static object resources. Recent
+    static object uploads totaled 11,086,218 bytes across 425 draw units; outdoor-detail accounted for
+    7,439,406 uploaded bytes.
+  - Outdoor-detail static object bake diagnostics covered 488 objects, including 370 generated
+    instances, producing 193 draw units, 95,377 flattened triangles, 286,131 flattened vertices, and an
+    estimated 7,439,406 flattened typed-array bytes.
+  - Largest outdoor-detail bake target was landblock `0xda56ffff`: 179 objects, 178 generated
+    instances, 116 draw units, 39,692 flattened triangles, and 3,095,976 estimated flattened bytes.
+  - Static coordinator timing remained resolver-heavy: 58,945 ms resolver time and 6,019 ms bake time
+    across 28 items. Slowest bake was outdoor-detail at 2,195 ms; slowest resolver was outdoor-terrain
+    at 24,442 ms.
+  - Portal frame summary for base scene `outdoor:0xda55ffff` had 204 render entries, 490 aperture
+    resources, 490 mask edges, 444 env-cell portal edges, 536 selected mask edges, and 46 transition
+    roots.
+- Plan impact from the baseline:
+  - Phase 1 should target outdoor-detail landblock `0xda56ffff` first because it is the largest
+    captured generated-static bake: 178 generated instances, 116 draw units, and 3,095,976 estimated
+    flattened bytes.
+  - The optimization target remains bake/upload duplication, not portal projection or texture atlas
+    memory. Portal and texture numbers are useful guardrails, but they should not drive the shared
+    instance contract.
+  - Resolver time is still large, especially terrain resolution, but the shared render instance plan
+    should not chase resolver optimization before proving reduced flattened static-object bytes.
+  - Phase 2 diagnostics should report avoided flattened bytes and retained-baked reasons for the
+    `0xda56ffff` baseline so the before/after comparison is unambiguous.
+- Report-shape tests were intentionally dropped; the report is operational scaffolding, not a stable
+  contract. Behavior tests remain around the renderer/static/texture paths that produce the underlying
+  state.
+
 ## Implementation Phases
 
 ### Phase 0: Baseline And De-Instancing Diagnostics
@@ -445,7 +526,9 @@ known sorting compromise must be visible in diagnostics.
 
 ## Open Questions
 
-- Which generated-heavy landblocks should be used as the first baseline and visual regression targets?
+- First baseline target is `0xda56ffff` under
+  `manual|outdoor-anchor|0xda55ffff|buildings,detail,env-cells,terrain`; we should add more targets
+  only if Phase 1 discovers this landblock is not representative.
 - What instance-count threshold should choose direct draws versus WebGL2 instanced draws for low-count
   generated static groups? The near transparent static sort distance already exists and should be
   reused initially.

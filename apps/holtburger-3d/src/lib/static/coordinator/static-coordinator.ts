@@ -8,12 +8,14 @@ import type {
 	StaticCoordinatorCommitDelta,
 	StaticCoordinatorSourcePayloadDelta,
 	StaticCoordinatorSnapshot,
+	StaticCoordinatorTimingDiagnostics,
 	StaticDemand,
 	StaticDomain,
 	StaticDrawUnit,
 	StaticMaterialCoverageReport,
 	LandblockEnvCellsPayloadSummary,
 	OutdoorStaticObjectsPayloadSummary,
+	StaticObjectBakeDiagnostics,
 	StaticResolver,
 	StaticPeerRecordOwner,
 	StaticResourceKey,
@@ -28,6 +30,7 @@ import { createEmptyStaticBakeAttachments } from "../bake/attachments";
 
 const DEFAULT_STATIC_BATCH_MAX_PAYLOADS = 10;
 const DEFAULT_STATIC_BATCH_COALESCE_DELAY_MS = 500;
+const STATIC_COORDINATOR_RECENT_DIAGNOSTICS_LIMIT = 20;
 const DEFAULT_STATIC_BAKE_ATTACHMENT_PROVIDER: StaticBakeAttachmentProvider = {
 	createAttachments: () => Promise.resolve(createEmptyStaticBakeAttachments()),
 };
@@ -90,6 +93,12 @@ export class StaticCoordinator {
 		null;
 	#latestLandblockEnvCellsPayload: LandblockEnvCellsPayloadSummary | null =
 		null;
+	readonly #latestStaticObjectBakeDiagnosticsByKey = new Map<
+		string,
+		StaticObjectBakeDiagnostics
+	>();
+	readonly #recentTiming: StaticCoordinatorTimingDiagnostics[] = [];
+	readonly #resolverMsByWorkId = new Map<string, number>();
 	readonly #latestMaterialCoverageByKey = new Map<
 		string,
 		StaticMaterialCoverageReport
@@ -136,6 +145,7 @@ export class StaticCoordinator {
 			this.#emitEvictionCommitDelta({ removedResources });
 		}
 		this.#pruneMaterialCoverageByDesiredKeys(desiredKeys);
+		this.#pruneStaticObjectBakeDiagnosticsByDesiredKeys(desiredKeys);
 
 		for (const work of demandPlan.work) {
 			const desiredKey = createDesiredWorkKey(work);
@@ -225,11 +235,15 @@ export class StaticCoordinator {
 			latestOutdoorStaticObjectsPayload:
 				this.#latestOutdoorStaticObjectsPayload,
 			latestTerrainPayload: this.#latestTerrainPayload,
+			recentTiming: [...this.#recentTiming],
 			requested: activeWork.length,
 			resolving: countStatus(activeWork, "resolving"),
 			revision: this.#revision,
 			staleBakeResults: this.#staleBakeResults,
 			staleResolverResults: this.#staleResolverResults,
+			staticObjectBakeDiagnostics: Array.from(
+				this.#latestStaticObjectBakeDiagnosticsByKey.values(),
+			).sort(compareStaticObjectBakeDiagnostics),
 		};
 	}
 
@@ -259,6 +273,7 @@ export class StaticCoordinator {
 		this.#setStatus(work, "resolving");
 
 		let payload: StaticScopePayload;
+		const resolverStartedAt = nowMs();
 		try {
 			payload = await this.#resolver.resolve(work.job);
 		} catch (error: unknown) {
@@ -268,6 +283,7 @@ export class StaticCoordinator {
 			);
 			return;
 		}
+		this.#resolverMsByWorkId.set(work.workId, nowMs() - resolverStartedAt);
 
 		if (!this.#isCurrent(work)) {
 			this.#staleResolverResults += 1;
@@ -344,6 +360,7 @@ export class StaticCoordinator {
 			revision: pendingBatch.revision,
 		});
 		let attachments: StaticBakeBatchInput["attachments"];
+		const attachmentStartedAt = nowMs();
 		try {
 			attachments = await this.#attachmentProvider.createAttachments({
 				domain: pendingBatch.domain,
@@ -360,6 +377,7 @@ export class StaticCoordinator {
 			}
 			return;
 		}
+		const attachmentMs = nowMs() - attachmentStartedAt;
 		const bakeInput: StaticBakeBatchInput = {
 			atlasSnapshot: this.#createAtlasSnapshot(
 				items.map((item) => item.payload),
@@ -373,6 +391,7 @@ export class StaticCoordinator {
 		};
 
 		let result: StaticBakeBatchResult;
+		const bakeStartedAt = nowMs();
 		try {
 			result = await this.#baker.bake(bakeInput);
 		} catch (error: unknown) {
@@ -384,6 +403,7 @@ export class StaticCoordinator {
 			}
 			return;
 		}
+		const bakeMs = nowMs() - bakeStartedAt;
 
 		const currentWorks = result.works.filter((work) => this.#isCurrent(work));
 		if (currentWorks.length !== result.works.length) {
@@ -396,7 +416,15 @@ export class StaticCoordinator {
 		}
 
 		try {
-			this.#commit(result);
+			this.#commit(result, {
+				attachmentMs,
+				bakeMs,
+				resolverMs: sumNullableNumbers(
+					currentWorks.map(
+						(work) => this.#resolverMsByWorkId.get(work.workId) ?? null,
+					),
+				),
+			});
 		} catch (error: unknown) {
 			for (const work of currentWorks) {
 				this.#markFailedIfCurrent(
@@ -407,7 +435,15 @@ export class StaticCoordinator {
 		}
 	}
 
-	#commit(result: StaticBakeBatchResult): void {
+	#commit(
+		result: StaticBakeBatchResult,
+		timing: {
+			readonly resolverMs: number | null;
+			readonly attachmentMs: number | null;
+			readonly bakeMs: number | null;
+		},
+	): void {
+		const commitStartedAt = nowMs();
 		const resourcesByDesiredKey =
 			collectCommittedResourceKeysByDesiredKey(result);
 
@@ -435,7 +471,27 @@ export class StaticCoordinator {
 		for (const coverage of result.materialCoverage) {
 			this.#latestMaterialCoverageByKey.set(coverage.coverageKey, coverage);
 		}
+		for (const diagnostics of result.staticObjectBakeDiagnostics) {
+			this.#latestStaticObjectBakeDiagnosticsByKey.set(
+				createStaticObjectBakeDiagnosticsKey(diagnostics),
+				diagnostics,
+			);
+		}
 		this.#committedDrawUnits = this.#residentDrawUnitIds.size;
+		for (const work of result.works) {
+			this.#resolverMsByWorkId.delete(work.workId);
+		}
+		this.#recordTiming({
+			attachmentMs: timing.attachmentMs,
+			bakeMs: timing.bakeMs,
+			commitMs: nowMs() - commitStartedAt,
+			domain: result.domain,
+			itemCount: result.works.length,
+			kind: "static-coordinator-timing",
+			resolverMs: timing.resolverMs,
+			revision: result.revision,
+			staticBatchId: result.staticBatchId,
+		});
 		this.#emitCommitDelta({
 			addedDrawUnits: result.drawUnits,
 			addedPortalApertureResources: result.portalApertureResources,
@@ -519,6 +575,36 @@ export class StaticCoordinator {
 			if (!hasDesiredDomain) {
 				this.#latestMaterialCoverageByKey.delete(coverage.coverageKey);
 			}
+		}
+	}
+
+	#pruneStaticObjectBakeDiagnosticsByDesiredKeys(
+		desiredKeys: ReadonlySet<string>,
+	): void {
+		for (const diagnostics of Array.from(
+			this.#latestStaticObjectBakeDiagnosticsByKey.values(),
+		)) {
+			const desiredKey = createDesiredKeyForDrawUnit({
+				domain: diagnostics.domain,
+				landblockId: diagnostics.landblockId,
+			});
+			if (!desiredKeys.has(desiredKey)) {
+				this.#latestStaticObjectBakeDiagnosticsByKey.delete(
+					createStaticObjectBakeDiagnosticsKey(diagnostics),
+				);
+			}
+		}
+	}
+
+	#recordTiming(timing: StaticCoordinatorTimingDiagnostics): void {
+		this.#recentTiming.push(timing);
+		if (
+			this.#recentTiming.length > STATIC_COORDINATOR_RECENT_DIAGNOSTICS_LIMIT
+		) {
+			this.#recentTiming.splice(
+				0,
+				this.#recentTiming.length - STATIC_COORDINATOR_RECENT_DIAGNOSTICS_LIMIT,
+			);
 		}
 	}
 
@@ -799,6 +885,15 @@ function filterStaticBakeResultForWorks(
 		drawUnits: result.drawUnits.filter((drawUnit) =>
 			drawUnitIds.has(drawUnit.drawUnitId),
 		),
+		staticObjectBakeDiagnostics: result.staticObjectBakeDiagnostics.filter(
+			(diagnostics) =>
+				desiredKeys.has(
+					createDesiredKeyForDrawUnit({
+						domain: diagnostics.domain,
+						landblockId: diagnostics.landblockId,
+					}),
+				),
+		),
 		materialCoverage: result.materialCoverage.filter((coverage) =>
 			works.some((work) => work.job.domain === coverage.domain),
 		),
@@ -860,6 +955,37 @@ function toScheduledStaticWorkStatus(
 
 function createEvictionStaticBatchId(revision: number): string {
 	return ["static-batch", revision.toString(), "evict"].join(":");
+}
+
+function createStaticObjectBakeDiagnosticsKey(
+	diagnostics: StaticObjectBakeDiagnostics,
+): string {
+	return createDesiredKeyForDrawUnit({
+		domain: diagnostics.domain,
+		landblockId: diagnostics.landblockId,
+	});
+}
+
+function compareStaticObjectBakeDiagnostics(
+	left: StaticObjectBakeDiagnostics,
+	right: StaticObjectBakeDiagnostics,
+): number {
+	return (
+		left.domain.localeCompare(right.domain) ||
+		left.landblockId - right.landblockId
+	);
+}
+
+function sumNullableNumbers(values: readonly (number | null)[]): number | null {
+	const present = values.filter((value): value is number => value !== null);
+	if (present.length === 0) {
+		return null;
+	}
+	return present.reduce((sum, value) => sum + value, 0);
+}
+
+function nowMs(): number {
+	return globalThis.performance?.now() ?? Date.now();
 }
 
 function countDistinctVisibleEnvCells(

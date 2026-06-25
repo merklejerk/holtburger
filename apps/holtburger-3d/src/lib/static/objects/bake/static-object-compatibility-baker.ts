@@ -11,6 +11,7 @@ import type {
 	StaticDrawUnit,
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectDrawUnitOwnership,
+	StaticObjectBakeDiagnostics,
 	StaticMaterialTableEntry,
 	StaticObjectInstanceIdentity,
 	StaticEnvCellStaticObjectSpatialRecord,
@@ -89,6 +90,9 @@ export function bakeStaticObjectCompatibility(
 		),
 		domain: input.domain,
 		drawUnits,
+		staticObjectBakeDiagnostics: itemResults.map(
+			(result) => result.diagnostics,
+		),
 		materialCoverage: itemResults.map((result) => result.materialCoverage),
 		portalApertureResources: buildingTransitionPortalApertureResources,
 		revision: input.revision,
@@ -230,6 +234,7 @@ function bakeStaticObjectCompatibilityItem(
 ): {
 	readonly drawUnits: readonly StaticDrawUnit[];
 	readonly materialCoverage: StaticBakeBatchResult["materialCoverage"][number];
+	readonly diagnostics: StaticObjectBakeDiagnostics;
 	readonly sourceMappings: StaticBakeBatchResult["staticSourceMappings"];
 	readonly spatialRecords: readonly StaticSpatialRecord[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
@@ -298,6 +303,12 @@ function bakeStaticObjectCompatibilityItem(
 					renderablePartitions[index]?.sliceId ?? "",
 				) ?? null,
 		})),
+		diagnostics: createStaticObjectBakeDiagnostics({
+			drawUnits: drawUnits.map((output) => output.drawUnit),
+			input,
+			partitionPlan,
+			payload: scope,
+		}),
 		materialCoverage: partitionPlan.materialCoverage,
 		sourceMappings: [],
 		spatialRecords: [
@@ -312,6 +323,82 @@ function bakeStaticObjectCompatibilityItem(
 		buildingTransitionPortalApertureResource,
 		work: item.work,
 	};
+}
+
+function createStaticObjectBakeDiagnostics(options: {
+	readonly input: StaticBakeBatchInput;
+	readonly payload: StaticObjectCompatibilityPayload;
+	readonly partitionPlan: ReturnType<typeof partitionStaticObjectCompatibility>;
+	readonly drawUnits: readonly StaticObjectGeometryStaticDrawUnit[];
+}): StaticObjectBakeDiagnostics {
+	const uniqueSourceKeys = new Set<string>();
+	const uniqueSourcePartGeometryKeys = new Set<string>();
+	let uniqueSourceTriangleCount = 0;
+	for (const source of options.payload.sourceAssets) {
+		uniqueSourceKeys.add(createSourceKey(source.identity));
+		uniqueSourceTriangleCount += source.renderTriangleCount;
+		for (const part of source.parts) {
+			uniqueSourcePartGeometryKeys.add(
+				[
+					createSourceKey(source.identity),
+					`part:${part.partIndex}`,
+					describeStaticObjectSourceGeometryIdentity(part.geometry),
+				].join(":"),
+			);
+		}
+	}
+
+	const flattenedTriangleCount = sumNumbers(
+		options.drawUnits.map((drawUnit) => drawUnit.triangleCount),
+	);
+	const flattenedVertexCount = sumNumbers(
+		options.drawUnits.map((drawUnit) => drawUnit.vertexCount),
+	);
+
+	return {
+		buildingObjectCount: options.payload.objects.filter(
+			(object) => object.identity.objectKind === "building",
+		).length,
+		domain: options.payload.domain,
+		drawUnitCount: options.drawUnits.length,
+		estimatedFlattenedTypedArrayBytes: sumNumbers(
+			options.drawUnits.map(estimateStaticObjectDrawUnitTypedArrayBytes),
+		),
+		explicitObjectCount: options.payload.objects.filter(
+			(object) => object.identity.objectKind === "explicit-object",
+		).length,
+		flattenedTriangleCount,
+		flattenedVertexCount,
+		generatedInstanceCount: options.payload.objects.filter(
+			(object) => object.identity.objectKind === "generated-scenery",
+		).length,
+		kind: "static-object-bake-diagnostics",
+		landblockId: options.payload.landblock.landblockId,
+		objectCount: options.payload.objects.length,
+		partitionCount: options.partitionPlan.partitions.length,
+		renderablePartitionCount: options.drawUnits.length,
+		skippedPartitionCount:
+			options.partitionPlan.partitions.length - options.drawUnits.length,
+		staticBatchId: options.input.staticBatchId,
+		uniqueSourceCount: uniqueSourceKeys.size,
+		uniqueSourcePartGeometryCount: uniqueSourcePartGeometryKeys.size,
+		uniqueSourceTriangleCount,
+	};
+}
+
+function estimateStaticObjectDrawUnitTypedArrayBytes(
+	drawUnit: StaticObjectGeometryStaticDrawUnit,
+): number {
+	return (
+		drawUnit.positions.byteLength +
+		drawUnit.texCoords.byteLength +
+		drawUnit.materialSlotIndices.byteLength +
+		drawUnit.indices.byteLength
+	);
+}
+
+function sumNumbers(values: readonly number[]): number {
+	return values.reduce((sum, value) => sum + value, 0);
 }
 
 function createStaticObjectCompatibilityPayload(

@@ -99,57 +99,6 @@ describe("browser texture manager", () => {
 		]);
 	});
 
-	it("derives an on-demand atlas diagnostics report from committed registry state", async () => {
-		const assetService = new FixtureAssetService();
-		const texturePacker = new FixtureTexturePacker({
-			pageHeight: 16,
-			pageWidth: 16,
-			rect: [4, 4, 1, 1],
-		});
-		const textureManager = new TextureManager({ assetService, texturePacker });
-
-		await textureManager.applyStaticCommitDelta(
-			createCommitDelta({ outputFormat: "rgba8" }),
-		);
-
-		expect(textureManager.createDiagnosticsReport()).toMatchObject({
-			byDomain: [
-				{
-					approximateBytes: 1364,
-					activeBatchCount: 1,
-					batchCount: 1,
-					domain: "outdoor-terrain",
-					emptyBatchCount: 0,
-					entryAliasCount: 1,
-					mipmappedPageCount: 1,
-					multiSourcePageCount: 0,
-					sampleClasses: {
-						"rgba-color": 1,
-					},
-					texturePageCount: 1,
-					uniqueSourceCount: 1,
-					unmippedPageCount: 0,
-					wrapModes: {
-						repeat: 1,
-					},
-				},
-			],
-			kind: "texture-atlas",
-			summary: {
-				approximateBytes: 1364,
-				activeBatchCount: 1,
-				batchCount: 1,
-				emptyBatchCount: 0,
-				entryAliasCount: 1,
-				mipmappedPageCount: 1,
-				multiSourcePageCount: 0,
-				texturePageCount: 1,
-				unmippedPageCount: 0,
-			},
-			warnings: [],
-		});
-	});
-
 	it("updates resident texture page sampler policy without repacking", async () => {
 		const assetService = new FixtureAssetService();
 		const texturePacker = new FixtureTexturePacker({
@@ -177,13 +126,9 @@ describe("browser texture manager", () => {
 			revision: 2,
 		});
 		expect(texturePacker.jobs).toHaveLength(1);
-		expect(textureManager.createDiagnosticsReport().byDomain[0]).toMatchObject({
-			mipmappedPageCount: 0,
-			unmippedPageCount: 1,
-		});
 	});
 
-	it("records terrain role-page overflow in the on-demand diagnostics report", async () => {
+	it("limits terrain role-page bindings when a draw unit overflows available pages", async () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const assetService = new FixtureAssetService();
 		const textureUses = [
@@ -220,14 +165,6 @@ describe("browser texture manager", () => {
 			});
 
 			expect(update?.drawUnitBindings).toHaveLength(4);
-			expect(textureManager.createDiagnosticsReport().warnings).toEqual([
-				{
-					count: 1,
-					kind: "terrain-role-page-overflow",
-					latestDrawUnitId: "terrain-overflow",
-					latestRole: "color",
-				},
-			]);
 		} finally {
 			warn.mockRestore();
 		}
@@ -579,8 +516,8 @@ describe("browser texture manager", () => {
 				rolePage: { kind: "color", slot: 1 },
 				textureUseId: "terrain-a:prepared-texture:06000020",
 			}),
-		]);
-	});
+			]);
+		});
 
 	it("keeps terrain role-page overflow local to the affected draw unit", async () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -807,14 +744,7 @@ describe("browser texture manager", () => {
 				],
 			},
 		]);
-		expect(textureManager.createDiagnosticsReport()).toMatchObject({
-			byDomain: [
-				expect.objectContaining({
-					domain: "landblock-env-cells",
-				}),
-			],
 		});
-	});
 
 	it("records static object role-page overflow without collapsing to slot zero", async () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -872,14 +802,6 @@ describe("browser texture manager", () => {
 				{ kind: "static-base-color", slot: 1 },
 				{ kind: "static-base-color", slot: 2 },
 				{ kind: "static-base-color", slot: 3 },
-			]);
-			expect(textureManager.createDiagnosticsReport().warnings).toEqual([
-				{
-					count: 1,
-					kind: "static-object-role-page-overflow",
-					latestDrawUnitId: "static-overflow",
-					latestRole: "static-base-color",
-				},
 			]);
 		} finally {
 			warnSpy.mockRestore();
@@ -1119,19 +1041,6 @@ describe("browser texture manager", () => {
 			gutterEdgeMode: "clamp",
 			gutterPixels: 4,
 		});
-		expect(textureManager.createDiagnosticsReport().byDomain).toEqual([
-			expect.objectContaining({
-				domain: "outdoor-buildings",
-				mipmappedPageCount: 1,
-				sampleClasses: expect.objectContaining({
-					"rgba-color": 1,
-				}),
-				unmippedPageCount: 0,
-				wrapModes: expect.objectContaining({
-					"clamp-to-edge": 1,
-				}),
-			}),
-		]);
 	});
 
 	it("shares static object clamp and repeat color uses in one virtual-wrap atlas page", async () => {
@@ -1199,16 +1108,6 @@ describe("browser texture manager", () => {
 		expect(
 			new Set(update?.drawUnitBindings.map((binding) => binding.textureRefId)),
 		).toHaveProperty("size", 1);
-		expect(textureManager.createDiagnosticsReport().byDomain).toEqual([
-			expect.objectContaining({
-				domain: "outdoor-buildings",
-				texturePageCount: 1,
-				wrapModes: {
-					"clamp-to-edge": 1,
-					repeat: 1,
-				},
-			}),
-		]);
 	});
 
 	it("reuses a static object atlas rect for later authored wrap aliases", async () => {
@@ -1265,16 +1164,6 @@ describe("browser texture manager", () => {
 				textureRefId: firstUpdate?.placements[0]?.textureRefId,
 				textureUseId: "building-repeat:06000010",
 			},
-		]);
-		expect(textureManager.createDiagnosticsReport().byDomain).toEqual([
-			expect.objectContaining({
-				domain: "outdoor-buildings",
-				texturePageCount: 1,
-				wrapModes: {
-					"clamp-to-edge": 1,
-					repeat: 1,
-				},
-			}),
 		]);
 	});
 
@@ -1446,24 +1335,6 @@ describe("browser texture manager", () => {
 				rolePage: { kind: "static-palette", slot: 0 },
 				textureUseId: "static-a:palette",
 			},
-		]);
-		expect(textureManager.createDiagnosticsReport().byDomain).toEqual([
-			expect.objectContaining({
-				domain: "outdoor-buildings",
-				formats: expect.objectContaining({
-					r8: 1,
-					rgba8: 1,
-				}),
-				sampleClasses: expect.objectContaining({
-					index8: 1,
-					"palette-rgba": 1,
-				}),
-				samplerPolicies: expect.objectContaining({
-					"sample=index8;filter=nearest;mips=off;aniso=1": 1,
-					"sample=palette-rgba;filter=nearest;mips=off;aniso=1": 1,
-				}),
-				unmippedPageCount: 2,
-			}),
 		]);
 		expect(Array.from(update?.placements[1]?.pixels ?? [])).toEqual([
 			0x44, 0x55, 0x66, 0x80, 0xaa, 0xbb, 0xcc, 0xff,

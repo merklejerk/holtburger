@@ -5,6 +5,7 @@ import type {
 	RendererFrameTelemetry,
 	RendererFrameTelemetryListener,
 	RendererSnapshot,
+	StaticObjectUploadDiagnostics,
 	RenderPassPlan,
 	PortalProjectionFrameGraphPlan,
 	PortalProjectionFrameMaskEdgePlan,
@@ -128,6 +129,7 @@ const DEBUG_OVERLAY_FLOATS_PER_VERTEX = 7;
 const NEAR_TRANSPARENT_STATIC_SORT_DISTANCE = 16;
 const NEAR_TRANSPARENT_STATIC_SORT_DISTANCE_SQUARED =
 	NEAR_TRANSPARENT_STATIC_SORT_DISTANCE * NEAR_TRANSPARENT_STATIC_SORT_DISTANCE;
+const RECENT_STATIC_OBJECT_UPLOAD_DIAGNOSTICS_LIMIT = 20;
 const EMPTY_TEXTURE_DRAW_UNIT_BINDINGS: ReadonlyMap<
 	string,
 	TextureDrawUnitBinding
@@ -775,6 +777,7 @@ class Webgl2Renderer implements Renderer {
 		string,
 		StaticLayerResourceOwnership
 	>();
+	readonly #recentStaticObjectUploads: StaticObjectUploadDiagnostics[] = [];
 	readonly #warnedLayeredFallbackDrawUnitIds = new Set<string>();
 	readonly #warnedMissingPortalApertureRangeIds = new Set<string>();
 	readonly #terrainProgram: TerrainGeometryProgram;
@@ -884,6 +887,9 @@ class Webgl2Renderer implements Renderer {
 			{ kind: "outdoor-buildings", landblockId },
 			payload,
 			(ownership) => {
+				const uploadStartedAt = nowMs();
+				let uploadedBufferBytes = 0;
+				let drawUnitCount = 0;
 				for (const drawUnit of payload?.drawUnits ?? []) {
 					this.#removeStaticObjectResource(drawUnit.drawUnitId);
 					this.#addStaticObjectResource(
@@ -891,6 +897,19 @@ class Webgl2Renderer implements Renderer {
 					);
 					ownership.drawUnitIds.add(drawUnit.drawUnitId);
 					ownership.textureBindingDrawUnitIds.add(drawUnit.drawUnitId);
+					uploadedBufferBytes +=
+						estimateStaticObjectUploadedBufferBytes(drawUnit);
+					drawUnitCount += 1;
+				}
+				if (payload && drawUnitCount > 0) {
+					this.#recordStaticObjectUpload({
+						domain: "outdoor-buildings",
+						drawUnitCount,
+						kind: "static-object-upload-diagnostics",
+						landblockId,
+						uploadedBufferBytes,
+						uploadMs: nowMs() - uploadStartedAt,
+					});
 				}
 			},
 		);
@@ -904,6 +923,9 @@ class Webgl2Renderer implements Renderer {
 			{ kind: "outdoor-detail", landblockId },
 			payload,
 			(ownership) => {
+				const uploadStartedAt = nowMs();
+				let uploadedBufferBytes = 0;
+				let drawUnitCount = 0;
 				for (const drawUnit of payload?.drawUnits ?? []) {
 					this.#removeStaticObjectResource(drawUnit.drawUnitId);
 					this.#addStaticObjectResource(
@@ -911,6 +933,19 @@ class Webgl2Renderer implements Renderer {
 					);
 					ownership.drawUnitIds.add(drawUnit.drawUnitId);
 					ownership.textureBindingDrawUnitIds.add(drawUnit.drawUnitId);
+					uploadedBufferBytes +=
+						estimateStaticObjectUploadedBufferBytes(drawUnit);
+					drawUnitCount += 1;
+				}
+				if (payload && drawUnitCount > 0) {
+					this.#recordStaticObjectUpload({
+						domain: "outdoor-detail",
+						drawUnitCount,
+						kind: "static-object-upload-diagnostics",
+						landblockId,
+						uploadedBufferBytes,
+						uploadMs: nowMs() - uploadStartedAt,
+					});
 				}
 			},
 		);
@@ -924,6 +959,9 @@ class Webgl2Renderer implements Renderer {
 			{ kind: "env-cell-system", landblockId },
 			payload,
 			(ownership) => {
+				const uploadStartedAt = nowMs();
+				let uploadedBufferBytes = 0;
+				let drawUnitCount = 0;
 				for (const drawUnit of payload?.envCellStaticObjectDrawUnits ?? []) {
 					this.#removeStaticObjectResource(drawUnit.drawUnitId);
 					this.#addStaticObjectResource(
@@ -931,6 +969,19 @@ class Webgl2Renderer implements Renderer {
 					);
 					ownership.drawUnitIds.add(drawUnit.drawUnitId);
 					ownership.textureBindingDrawUnitIds.add(drawUnit.drawUnitId);
+					uploadedBufferBytes +=
+						estimateStaticObjectUploadedBufferBytes(drawUnit);
+					drawUnitCount += 1;
+				}
+				if (payload && drawUnitCount > 0) {
+					this.#recordStaticObjectUpload({
+						domain: "landblock-env-cells",
+						drawUnitCount,
+						kind: "static-object-upload-diagnostics",
+						landblockId,
+						uploadedBufferBytes,
+						uploadMs: nowMs() - uploadStartedAt,
+					});
 				}
 				for (const drawUnit of payload?.structuredInteriorDrawUnits ?? []) {
 					this.#removeStructuredInteriorResource(drawUnit.drawUnitId);
@@ -2350,6 +2401,7 @@ class Webgl2Renderer implements Renderer {
 
 	#createSnapshot(): RendererSnapshot {
 		const effectiveRenderPassPlan = this.#getEffectiveRenderPassPlan();
+		const staticObjectResources = [...this.#staticObjectResources.values()];
 		return {
 			backend: "webgl2",
 			canvasWidth: this.#canvas.width,
@@ -2363,14 +2415,27 @@ class Webgl2Renderer implements Renderer {
 			renderPassPlan: effectiveRenderPassPlan,
 			renderedTriangles: sumRenderedTriangles([
 				...this.#terrainResources.values(),
-				...this.#staticObjectResources.values(),
+				...staticObjectResources,
 				...this.#structuredInteriorResources.values(),
 			]),
+			recentStaticObjectUploads: [...this.#recentStaticObjectUploads],
 			sceneDomainTargets: this.#createSceneDomainTargetSnapshot(),
 			staticDrawUnits:
 				this.#terrainResources.size +
 				this.#staticObjectResources.size +
 				this.#structuredInteriorResources.size,
+			staticObjectResources: staticObjectResources.length,
+			outdoorDetailStaticObjectResources: staticObjectResources.filter(
+				(resource) => resource.domain === "outdoor-detail",
+			).length,
+			staticObjectUploadedBufferBytes: sumNumbers(
+				staticObjectResources.map((resource) => resource.uploadedBufferBytes),
+			),
+			outdoorDetailStaticObjectUploadedBufferBytes: sumNumbers(
+				staticObjectResources
+					.filter((resource) => resource.domain === "outdoor-detail")
+					.map((resource) => resource.uploadedBufferBytes),
+			),
 			terrainDrawUnits: this.#terrainResources.size,
 			directEnvCellDrawCalls: this.#lastDirectEnvCellDrawCalls,
 		};
@@ -2460,6 +2525,20 @@ class Webgl2Renderer implements Renderer {
 				this.#envCellStaticObjectResourceIdsByEnvCellKey,
 				createEnvCellResourceKey(resource.landblockId, envCellId),
 				drawUnitId,
+			);
+		}
+	}
+
+	#recordStaticObjectUpload(diagnostics: StaticObjectUploadDiagnostics): void {
+		this.#recentStaticObjectUploads.push(diagnostics);
+		if (
+			this.#recentStaticObjectUploads.length >
+			RECENT_STATIC_OBJECT_UPLOAD_DIAGNOSTICS_LIMIT
+		) {
+			this.#recentStaticObjectUploads.splice(
+				0,
+				this.#recentStaticObjectUploads.length -
+					RECENT_STATIC_OBJECT_UPLOAD_DIAGNOSTICS_LIMIT,
 			);
 		}
 	}
@@ -2849,6 +2928,7 @@ interface StaticObjectGeometryResource {
 	readonly renderState: StaticObjectRenderState;
 	readonly localSortCenter: StaticObjectSortMetadata["center"];
 	readonly sortPolicy: StaticObjectSortMetadata["policy"];
+	readonly uploadedBufferBytes: number;
 	readonly indexCount: number;
 	readonly indexType: GLenum;
 	readonly triangleCount: number;
@@ -3756,6 +3836,7 @@ function createStaticObjectGeometryResource(
 		sortPolicy: drawUnit.sort.policy,
 		texCoordBuffer,
 		triangleCount: drawUnit.triangleCount,
+		uploadedBufferBytes: estimateStaticObjectUploadedBufferBytes(drawUnit),
 		vertexArray,
 		dispose() {
 			gl.deleteBuffer(positionBuffer);
@@ -4061,6 +4142,25 @@ function sumRenderedTriangles(
 		(total, resource) => total + resource.triangleCount,
 		0,
 	);
+}
+
+function sumNumbers(values: readonly number[]): number {
+	return values.reduce((sum, value) => sum + value, 0);
+}
+
+function estimateStaticObjectUploadedBufferBytes(
+	drawUnit: StaticObjectGeometryStaticDrawUnit,
+): number {
+	return (
+		drawUnit.positions.byteLength +
+		drawUnit.texCoords.byteLength +
+		drawUnit.materialSlotIndices.byteLength +
+		drawUnit.indices.byteLength
+	);
+}
+
+function nowMs(): number {
+	return globalThis.performance?.now() ?? Date.now();
 }
 
 function createStencilState(

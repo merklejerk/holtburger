@@ -1174,6 +1174,16 @@ export interface StaticObjectBakeDiagnostics {
 	readonly estimatedInstancedSourceTypedArrayBytes: number;
 	readonly estimatedAvoidedFlattenedTriangleCount: number;
 	readonly estimatedAvoidedFlattenedTypedArrayBytes: number;
+	readonly retainedTransparentOutdoorDetailPartitionReasons: StaticObjectRetainedTransparentPartitionReasonCounts;
+}
+
+export interface StaticObjectRetainedTransparentPartitionReasonCounts {
+	readonly explicitObject: number;
+	readonly oneOffGeneratedSource: number;
+	readonly repeatedGeneratedSourceRetainedByPartitionPolicy: number;
+	readonly missingInstanceBounds: number;
+	readonly unsupportedMaterialBucket: number;
+	readonly nonRenderableOrDeferredMaterialBucket: number;
 }
 
 export type StaticMaterialCoverageFamily =

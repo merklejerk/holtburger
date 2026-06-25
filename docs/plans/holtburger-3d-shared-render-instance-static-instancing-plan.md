@@ -476,7 +476,7 @@ Spicy bits and debt:
   produce a visible/generated-static win until the next cut keeps eligible generated objects out of
   baked outdoor-detail draw units.
 - Far transparent generated instances still use direct per-instance draws. That is correct for this
-  phase but not the desired steady state; Phase 6 should replace compatible far transparent groups
+  phase but not the desired steady state; Phase 5B should replace compatible far transparent groups
   with real instanced draw calls.
 
 ### 2026-06-25 Flattened-Path Cutover Progress
@@ -499,8 +499,8 @@ Spicy bits and debt:
 
 - This is intentionally conservative. Mixed generated/non-generated partitions, one-off generated
   objects, missing-bounds candidates, and unsupported material partitions remain baked. That avoids
-  geometry surgery inside a partition, but it means the retained-baked reason summary still needs to
-  become explicit in Phase 4/debug parity.
+  geometry surgery inside a partition, but later diagnostics showed transparent sort-policy
+  partitions are too conservative for repeated generated scenery; Phase 5A owns that correction.
 - Texture staging still flows through renderable partition texture uses and the draw-unit-shaped
   texture binding bridge. This keeps shared visual resources bindable today, but it is still a
   transitional owner model and belongs in the cleanup phase.
@@ -607,6 +607,67 @@ Decision:
 - Prioritize far-transparent generated scenery where repeated sources can cut over cleanly to shared
   resources and use instanced draws outside `NEAR_TRANSPARENT_STATIC_SORT_DISTANCE`.
 
+### 2026-06-25 Transparent Retained-Reason Progress
+
+- Added compact bake diagnostics for retained transparent outdoor-detail partitions. The report now
+  rolls these up under `staticObjectBakeSummary.retainedTransparentOutdoorDetailPartitionReasons`.
+- Reason buckets are: explicit object, one-off generated source, repeated generated source retained
+  by partition policy, missing instance bounds, unsupported material bucket, and
+  non-renderable/deferred material bucket.
+- The repeated-source bucket intentionally covers transparent sort-policy partitioning as well as
+  mixed partitions. Transparent policy can split otherwise repeated generated sources into
+  per-object partitions, which is the exact shape Phase 5 needs to understand before changing
+  submission.
+- Added a focused bake test proving repeated transparent generated outdoor detail stays baked today
+  and is counted as repeated-source-retained-by-partition-policy.
+
+Spicy bits and debt:
+
+- This explains retained baked transparent draw units, not all skipped transparent material coverage.
+  Fully non-renderable/deferred buckets that never become baked draw units may still only appear in
+  material coverage summaries.
+- The reason summary is partition-count based, matching direct draw pressure. It does not yet report
+  triangle counts or byte estimates per reason.
+
+### 2026-06-25 Transparent Generated Course Correction
+
+Fresh retained-reason diagnostics show the remaining transparent outdoor-detail pressure is not a
+missing-data problem:
+
+- Retained transparent outdoor-detail partitions caused by repeated generated sources: `159`
+- Retained transparent outdoor-detail partitions caused by explicit objects: `3`
+- Missing instance bounds: `0`
+- Unsupported or non-renderable material buckets: `0`
+- One-off generated transparent sources: `0`
+
+Decision:
+
+- Add an immediate Phase 5A before the broader alpha-blended renderer policy work. The current plan's
+  "whole partition can move" language is too conservative for this shape because transparent
+  sort-policy partitioning is what splits otherwise repeated generated sources into per-object baked
+  partitions.
+- Decouple repeated generated transparent instance eligibility from baked transparent sort
+  partitioning. The cutover owner should be the generated source/object facts plus coverage identity,
+  not the current partition slice.
+- Preserve explicit transparent objects on the baked/direct path for now. The data says only `3`
+  retained outdoor-detail transparent partitions are explicit objects, so chasing them now would be
+  a distraction.
+- Preserve near-camera sorted transparent behavior. Far enough from the camera, repeated generated
+  transparent scenery can be treated as shared instances and batched; near the camera it can still
+  fall back to direct sorted submission.
+
+Spicy bits and debt:
+
+- This is a real course correction, not a renderer-only optimization. The bake/cutover layer currently
+  treats transparent sort partitions as ownership boundaries, which blocks shared visual resources
+  from forming across repeated generated sources.
+- The hardest part is avoiding double rendering without doing sloppy partial transparent geometry
+  surgery. We need coverage tracking that can remove fully covered generated transparent partitions
+  from baked draw units while still leaving mixed or explicit partitions alone.
+- If a transparent partition mixes generated cutover geometry with explicit or unsupported geometry,
+  keep it baked until we have a principled split. Do not invent a best-effort half-cutover path just
+  to make counters look better.
+
 ## Implementation Phases
 
 ### Phase 0: Baseline And De-Instancing Diagnostics
@@ -671,17 +732,29 @@ Decision:
   groups, and small instance counts where batching is not useful.
 - Report direct sorted, direct unsorted, and instanced draw counts in renderer diagnostics.
 
-### Phase 5: Alpha-Blended Policy
+### Phase 5A: Transparent Generated Cutover Course Correct
 
-- Add retained-baked reason diagnostics for outdoor-detail transparent partitions before changing
-  submission policy. Split at least: explicit object, one-off generated source, repeated generated
-  source retained by mixed partition, missing instance bounds, unsupported material bucket, and
-  non-renderable/deferred material bucket.
-- Carry transparency sort policy on generated static instances.
-- Preserve existing depth-sorted behavior for near-camera transparent objects using direct sorted
-  draws when needed.
-- Extend cutover eligibility for repeated generated transparent partitions only when the whole
-  partition can move to shared visual resources without partial transparent geometry surgery.
+- Treat repeated generated transparent outdoor-detail objects as shared-instance candidates even when
+  transparent sort policy split them into per-object baked partitions.
+- Build transparent generated visual-resource candidate groups across partition slices using
+  source-local geometry, material binding identity, and generated source identity. Partition slice id
+  must not be part of the shared visual-resource grouping key for this case.
+- Track candidate coverage per partition slice so fully covered generated transparent partitions can
+  be removed from baked draw units without duplicate rendering.
+- Keep mixed, explicit, unsupported, missing-bounds, and non-renderable/deferred transparent
+  partitions baked/direct until a later phase proves a clean split.
+- Carry transparency sort policy and bounds on the emitted render instances so renderer submission can
+  choose near direct sorting or far instanced batching without re-deriving eligibility.
+- Update retained transparent diagnostics so the `repeatedGeneratedSourceRetainedByPartitionPolicy`
+  bucket falls sharply after cutover; any remaining count must describe true mixed/unsupported cases,
+  not merely sort-policy partitioning.
+- Add focused bake tests showing repeated generated transparent outdoor-detail partitions cut over to
+  one shared visual resource plus render instances and no longer emit duplicate baked draw units.
+
+### Phase 5B: Alpha-Blended Instanced Submission Policy
+
+- Preserve existing depth-sorted behavior for near-camera transparent render instances using direct
+  sorted draws when needed.
 - Add per-instance transform/sort metadata buffers for compatible transparent generated static
   instances outside `NEAR_TRANSPARENT_STATIC_SORT_DISTANCE`.
 - Use instanced draws for compatible transparent generated statics outside

@@ -27,6 +27,7 @@ import type {
 	StaticObjectVisualResource,
 	StaticObjectSourceGeometryIdentity,
 	StaticObjectInstanceFacts,
+	StaticObjectRetainedTransparentPartitionReasonCounts,
 } from "../../contracts";
 import { describeStaticScopeKey } from "../../demand-planner";
 import { createBuildingTransitionStaticPortalGraph } from "../../portal-graphs";
@@ -335,6 +336,8 @@ function bakeStaticObjectCompatibilityItem(
 			instancedOutput,
 			partitionPlan,
 			payload: scope,
+			retainedBakedPartitions: bakedPartitions,
+			sourceIndex,
 			renderablePartitionCount: renderablePartitions.length,
 		}),
 		materialCoverage: partitionPlan.materialCoverage,
@@ -363,6 +366,8 @@ function createStaticObjectBakeDiagnostics(options: {
 	};
 	readonly payload: StaticObjectCompatibilityPayload;
 	readonly partitionPlan: ReturnType<typeof partitionStaticObjectCompatibility>;
+	readonly retainedBakedPartitions: readonly StaticObjectCompatibilityPartition[];
+	readonly sourceIndex: StaticObjectBakeSourceIndex;
 	readonly renderablePartitionCount: number;
 	readonly drawUnits: readonly StaticObjectGeometryStaticDrawUnit[];
 }): StaticObjectBakeDiagnostics {
@@ -427,6 +432,12 @@ function createStaticObjectBakeDiagnostics(options: {
 		objectCount: options.payload.objects.length,
 		partitionCount: options.partitionPlan.partitions.length,
 		renderablePartitionCount: options.renderablePartitionCount,
+		retainedTransparentOutdoorDetailPartitionReasons:
+			createRetainedTransparentOutdoorDetailPartitionReasons({
+				partitions: options.retainedBakedPartitions,
+				payload: options.payload,
+				sourceIndex: options.sourceIndex,
+			}),
 		skippedPartitionCount:
 			options.partitionPlan.partitions.length - options.renderablePartitionCount,
 		staticBatchId: options.input.staticBatchId,
@@ -481,6 +492,147 @@ function createStaticObjectInstancingBakeDiagnostics(input: {
 		instancedSourceTriangleCount,
 		instancedVisualResourceCount: input.resources.length,
 	};
+}
+
+function createRetainedTransparentOutdoorDetailPartitionReasons(options: {
+	readonly partitions: readonly StaticObjectCompatibilityPartition[];
+	readonly payload: StaticObjectCompatibilityPayload;
+	readonly sourceIndex: StaticObjectBakeSourceIndex;
+}): StaticObjectRetainedTransparentPartitionReasonCounts {
+	const counts = createEmptyRetainedTransparentPartitionReasonCounts();
+	if (options.payload.domain !== "outdoor-detail") {
+		return counts;
+	}
+
+	const generatedObjectCountBySourceLocalTriangleKey =
+		createGeneratedObjectCountBySourceLocalTriangleKey(options.partitions);
+	for (const partition of options.partitions) {
+		if (
+			resolveRenderableStaticObjectPass(partition) !== "transparent" &&
+			resolveRenderableStaticObjectPass(partition) !== "additive"
+		) {
+			continue;
+		}
+		incrementRetainedTransparentPartitionReason(
+			counts,
+			classifyRetainedTransparentPartition({
+				generatedObjectCountBySourceLocalTriangleKey,
+				partition,
+				sourceIndex: options.sourceIndex,
+			}),
+		);
+	}
+	return counts;
+}
+
+function createGeneratedObjectCountBySourceLocalTriangleKey(
+	partitions: readonly StaticObjectCompatibilityPartition[],
+): ReadonlyMap<string, number> {
+	const objectKeysBySourceLocalTriangleKey = new Map<string, Set<string>>();
+	for (const partition of partitions) {
+		for (const triangle of partition.triangles) {
+			if (triangle.object.objectKind !== "generated-scenery") {
+				continue;
+			}
+			const sourceLocalTriangleKey =
+				createStaticObjectSourceLocalTriangleKey(triangle);
+			const objectKeys =
+				objectKeysBySourceLocalTriangleKey.get(sourceLocalTriangleKey) ??
+				new Set<string>();
+			objectKeys.add(createObjectKey(triangle.object));
+			objectKeysBySourceLocalTriangleKey.set(
+				sourceLocalTriangleKey,
+				objectKeys,
+			);
+		}
+	}
+
+	return new Map(
+		[...objectKeysBySourceLocalTriangleKey].map(
+			([sourceLocalTriangleKey, objectKeys]) =>
+				[sourceLocalTriangleKey, objectKeys.size] as const,
+		),
+	);
+}
+
+function createEmptyRetainedTransparentPartitionReasonCounts(): StaticObjectRetainedTransparentPartitionReasonCounts {
+	return {
+		explicitObject: 0,
+		missingInstanceBounds: 0,
+		nonRenderableOrDeferredMaterialBucket: 0,
+		oneOffGeneratedSource: 0,
+		repeatedGeneratedSourceRetainedByPartitionPolicy: 0,
+		unsupportedMaterialBucket: 0,
+	};
+}
+
+type RetainedTransparentPartitionReason =
+	keyof StaticObjectRetainedTransparentPartitionReasonCounts;
+
+function classifyRetainedTransparentPartition(options: {
+	readonly generatedObjectCountBySourceLocalTriangleKey: ReadonlyMap<
+		string,
+		number
+	>;
+	readonly partition: StaticObjectCompatibilityPartition;
+	readonly sourceIndex: StaticObjectBakeSourceIndex;
+}): RetainedTransparentPartitionReason {
+	const { partition, sourceIndex } = options;
+	if (partition.renderCoverage !== "classified-render-candidate") {
+		return partition.family === "unsupported"
+			? "unsupportedMaterialBucket"
+			: "nonRenderableOrDeferredMaterialBucket";
+	}
+
+	let hasGenerated = false;
+	let hasNonGenerated = false;
+	let missingInstanceBounds = false;
+	let hasRepeatedGeneratedSource = false;
+	for (const triangle of partition.triangles) {
+		if (triangle.object.objectKind !== "generated-scenery") {
+			hasNonGenerated = true;
+			continue;
+		}
+		hasGenerated = true;
+		hasRepeatedGeneratedSource ||=
+			(options.generatedObjectCountBySourceLocalTriangleKey.get(
+				createStaticObjectSourceLocalTriangleKey(triangle),
+			) ?? 0) > 1;
+		const candidate = selectGeneratedStaticObjectRenderInstanceCandidate(
+			sourceIndex.getObject(triangle.object),
+		);
+		if (candidate.kind === "ineligible") {
+			missingInstanceBounds ||= candidate.reason === "missing-instance-bounds";
+		}
+	}
+
+	if (!hasGenerated) {
+		return "explicitObject";
+	}
+	if (missingInstanceBounds) {
+		return "missingInstanceBounds";
+	}
+	if (hasNonGenerated) {
+		return "repeatedGeneratedSourceRetainedByPartitionPolicy";
+	}
+	if (!hasRepeatedGeneratedSource) {
+		return "oneOffGeneratedSource";
+	}
+	return "repeatedGeneratedSourceRetainedByPartitionPolicy";
+}
+
+function incrementRetainedTransparentPartitionReason(
+	counts: {
+		explicitObject: number;
+		missingInstanceBounds: number;
+		nonRenderableOrDeferredMaterialBucket: number;
+		oneOffGeneratedSource: number;
+		repeatedGeneratedSourceRetainedByPartitionPolicy: number;
+		unsupportedMaterialBucket: number;
+	},
+	reason: RetainedTransparentPartitionReason,
+): void {
+	counts[reason] += 1;
 }
 
 function estimateStaticObjectDrawUnitTypedArrayBytes(

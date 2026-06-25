@@ -973,6 +973,31 @@ describe("static object compatibility partitioner", () => {
 		]);
 	});
 
+	it("summarizes retained transparent outdoor-detail bake reasons", () => {
+		const payload = duplicateObjectInstance(
+			createPayload({
+				domain: "outdoor-detail",
+				instanceBounds: createBounds(),
+				materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x10 })],
+				textureRefs: createRgbaTextureRefs(),
+			}),
+		);
+
+		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+
+		expect(result.drawUnits).toHaveLength(2);
+		expect(result.staticObjectBakeDiagnostics[0]).toMatchObject({
+			retainedTransparentOutdoorDetailPartitionReasons: {
+				explicitObject: 0,
+				missingInstanceBounds: 0,
+				nonRenderableOrDeferredMaterialBucket: 0,
+				oneOffGeneratedSource: 0,
+				repeatedGeneratedSourceRetainedByPartitionPolicy: 2,
+				unsupportedMaterialBucket: 0,
+			},
+		});
+	});
+
 	it("reports compact material coverage by rendered, deferred, and unsupported buckets", () => {
 		const payload = createPayload({
 			materials: [

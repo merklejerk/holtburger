@@ -3701,6 +3701,8 @@ function createStaticObjectBakeSummary(
 			diagnostics.map((entry) => entry.partitionCount),
 		),
 		reportCount: diagnostics.length,
+		retainedTransparentOutdoorDetailPartitionReasons:
+			sumRetainedTransparentOutdoorDetailPartitionReasons(diagnostics),
 		uniqueSourceCount: sumNumbers(
 			diagnostics.map((entry) => entry.uniqueSourceCount),
 		),
@@ -3709,6 +3711,54 @@ function createStaticObjectBakeSummary(
 		),
 		uniqueSourceTriangleCount: sumNumbers(
 			diagnostics.map((entry) => entry.uniqueSourceTriangleCount),
+		),
+	};
+}
+
+function sumRetainedTransparentOutdoorDetailPartitionReasons(
+	diagnostics: readonly StaticObjectBakeDiagnostics[],
+): StaticObjectBakeDiagnostics["retainedTransparentOutdoorDetailPartitionReasons"] {
+	return {
+		explicitObject: sumNumbers(
+			diagnostics.map(
+				(entry) =>
+					entry.retainedTransparentOutdoorDetailPartitionReasons.explicitObject,
+			),
+		),
+		missingInstanceBounds: sumNumbers(
+			diagnostics.map(
+				(entry) =>
+					entry.retainedTransparentOutdoorDetailPartitionReasons
+						.missingInstanceBounds,
+			),
+		),
+		nonRenderableOrDeferredMaterialBucket: sumNumbers(
+			diagnostics.map(
+				(entry) =>
+					entry.retainedTransparentOutdoorDetailPartitionReasons
+						.nonRenderableOrDeferredMaterialBucket,
+			),
+		),
+		oneOffGeneratedSource: sumNumbers(
+			diagnostics.map(
+				(entry) =>
+					entry.retainedTransparentOutdoorDetailPartitionReasons
+						.oneOffGeneratedSource,
+			),
+		),
+		repeatedGeneratedSourceRetainedByPartitionPolicy: sumNumbers(
+			diagnostics.map(
+				(entry) =>
+					entry.retainedTransparentOutdoorDetailPartitionReasons
+						.repeatedGeneratedSourceRetainedByPartitionPolicy,
+			),
+		),
+		unsupportedMaterialBucket: sumNumbers(
+			diagnostics.map(
+				(entry) =>
+					entry.retainedTransparentOutdoorDetailPartitionReasons
+						.unsupportedMaterialBucket,
+			),
 		),
 	};
 }

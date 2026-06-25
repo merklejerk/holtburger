@@ -281,10 +281,24 @@ export interface RendererSnapshot {
 	readonly portalFrameWorkPlan: PortalFrameWorkPlan;
 	readonly sceneDomainTargets: SceneDomainTargetSnapshot;
 	readonly staticDrawUnits: number;
+	readonly staticObjectResources: number;
+	readonly outdoorDetailStaticObjectResources: number;
+	readonly staticObjectUploadedBufferBytes: number;
+	readonly outdoorDetailStaticObjectUploadedBufferBytes: number;
+	readonly recentStaticObjectUploads: readonly StaticObjectUploadDiagnostics[];
 	readonly terrainDrawUnits: number;
 	readonly directEnvCellDrawCalls: number;
 	readonly renderedTriangles: number;
 	readonly debugOverlayPrimitives: number;
+}
+
+export interface StaticObjectUploadDiagnostics {
+	readonly kind: "static-object-upload-diagnostics";
+	readonly domain: StaticObjectGeometryStaticDrawUnit["domain"];
+	readonly landblockId: number;
+	readonly drawUnitCount: number;
+	readonly uploadedBufferBytes: number;
+	readonly uploadMs: number;
 }
 
 export interface RendererFrameTelemetry {

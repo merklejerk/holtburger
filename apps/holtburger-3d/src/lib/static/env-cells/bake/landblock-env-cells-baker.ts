@@ -101,6 +101,7 @@ export function bakeLandblockEnvCells(
 		),
 		domain: input.domain,
 		drawUnits,
+		staticObjectBakeDiagnostics: staticObjectResult.staticObjectBakeDiagnostics,
 		materialCoverage: [
 			...itemResults.map((result) => result.materialCoverage),
 			...staticObjectResult.materialCoverage.filter(

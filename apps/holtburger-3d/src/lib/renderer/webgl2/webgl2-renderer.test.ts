@@ -13,6 +13,7 @@ import {
 } from "../types";
 import type {
 	EnvCellSystemLayerPayload,
+	OutdoorDetailsLayerPayload,
 	PortalBaseOverlapPlan,
 	PortalFrameWorkPlan,
 	TerrainLayerPayload,
@@ -1502,6 +1503,41 @@ describe("WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
+	it("reports outdoor-detail static object upload diagnostics", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+
+		renderer.setOutdoorDetailsLayer(
+			0xda55ffff,
+			createOutdoorDetailsLayerPayload(),
+		);
+
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			outdoorDetailStaticObjectResources: 1,
+			outdoorDetailStaticObjectUploadedBufferBytes: 78,
+			staticObjectResources: 1,
+			staticObjectUploadedBufferBytes: 78,
+			recentStaticObjectUploads: [
+				expect.objectContaining({
+					domain: "outdoor-detail",
+					drawUnitCount: 1,
+					kind: "static-object-upload-diagnostics",
+					landblockId: 0xda55ffff,
+					uploadedBufferBytes: 78,
+				}),
+			],
+		});
+
+		renderer.dispose();
+	});
+
 	it("clears env-cell system layers without touching terrain layers", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
@@ -1858,6 +1894,31 @@ function createEnvCellStaticObjectDrawUnit(
 	};
 }
 
+function createOutdoorDetailStaticObjectDrawUnit(
+	drawUnitId: string,
+): OutdoorDetailsLayerPayload["drawUnits"][number] {
+	const base = createEnvCellStaticObjectDrawUnit(drawUnitId, []);
+	const object = {
+		...base.sourceMappingCoverage[0]!.object,
+		instanceId: `${drawUnitId}:generated`,
+		objectKind: "generated-scenery" as const,
+	};
+
+	return {
+		...base,
+		domain: "outdoor-detail",
+		ownership: {
+			domain: "outdoor-detail",
+			kind: "outdoor-static-objects",
+			landblockId: base.landblockId,
+		},
+		sourceMappingCoverage: base.sourceMappingCoverage.map((coverage) => ({
+			...coverage,
+			object,
+		})),
+	};
+}
+
 function createTerrainLayerPayload(
 	drawUnitId: string,
 	landblockId = 0xda55ffff,
@@ -1867,6 +1928,19 @@ function createTerrainLayerPayload(
 		generationId: `terrain:${drawUnitId}`,
 		kind: "terrain",
 		landblockId,
+		materialCoverage: [],
+		sourceMappingRecords: [],
+		spatialRecords: [],
+		textureUses: [],
+	};
+}
+
+function createOutdoorDetailsLayerPayload(): OutdoorDetailsLayerPayload {
+	return {
+		drawUnits: [createOutdoorDetailStaticObjectDrawUnit("outdoor-detail-a")],
+		generationId: "outdoor-detail:a",
+		kind: "outdoor-detail",
+		landblockId: 0xda55ffff,
 		materialCoverage: [],
 		sourceMappingRecords: [],
 		spatialRecords: [],

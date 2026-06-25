@@ -1130,6 +1130,7 @@ export interface StaticBakeBatchResult {
 	readonly revision: number;
 	readonly works: readonly ScheduledStaticWork[];
 	readonly drawUnits: readonly StaticDrawUnit[];
+	readonly staticObjectBakeDiagnostics: readonly StaticObjectBakeDiagnostics[];
 	readonly portalApertureResources: readonly StaticPortalApertureResource[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
@@ -1141,6 +1142,30 @@ export interface StaticBakeBatchResult {
 	readonly staticSourceMappings: readonly StaticSourceMappingRecord[];
 	readonly staticAuthoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
 	readonly buildRevision: number;
+}
+
+export interface StaticObjectBakeDiagnostics {
+	readonly kind: "static-object-bake-diagnostics";
+	readonly staticBatchId: string;
+	readonly domain: Extract<
+		StaticDomain,
+		"outdoor-buildings" | "outdoor-detail" | "landblock-env-cells"
+	>;
+	readonly landblockId: number;
+	readonly objectCount: number;
+	readonly generatedInstanceCount: number;
+	readonly explicitObjectCount: number;
+	readonly buildingObjectCount: number;
+	readonly uniqueSourceCount: number;
+	readonly uniqueSourcePartGeometryCount: number;
+	readonly uniqueSourceTriangleCount: number;
+	readonly flattenedTriangleCount: number;
+	readonly flattenedVertexCount: number;
+	readonly drawUnitCount: number;
+	readonly partitionCount: number;
+	readonly renderablePartitionCount: number;
+	readonly skippedPartitionCount: number;
+	readonly estimatedFlattenedTypedArrayBytes: number;
 }
 
 export type StaticMaterialCoverageFamily =
@@ -1575,6 +1600,20 @@ export interface StaticCoordinatorSnapshot {
 	readonly latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null;
 	readonly latestLandblockEnvCellsPayload: LandblockEnvCellsPayloadSummary | null;
 	readonly materialCoverage: readonly StaticMaterialCoverageReport[];
+	readonly staticObjectBakeDiagnostics: readonly StaticObjectBakeDiagnostics[];
+	readonly recentTiming: readonly StaticCoordinatorTimingDiagnostics[];
+}
+
+export interface StaticCoordinatorTimingDiagnostics {
+	readonly kind: "static-coordinator-timing";
+	readonly staticBatchId: string;
+	readonly domain: StaticDomain;
+	readonly revision: number;
+	readonly itemCount: number;
+	readonly resolverMs: number | null;
+	readonly attachmentMs: number | null;
+	readonly bakeMs: number | null;
+	readonly commitMs: number | null;
 }
 
 export interface StaticCoordinatorCommitDelta {

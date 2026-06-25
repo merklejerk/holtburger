@@ -102,64 +102,6 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("creates an on-demand diagnostics report across runtime domains", () => {
-		const runtime = createClientRuntime({
-			diagnostics: silentDiagnostics,
-			host: new FakeRuntimeHost(),
-			renderer: new FakeRenderer(),
-			staticCoordinator: createImmediateStaticCoordinator({
-				baker: new DeferredStaticBaker(),
-				resolver: new DeferredStaticResolver(),
-			}),
-		});
-
-		updateOutdoorSceneInterest(runtime);
-
-		expect(runtime.createDiagnosticsReport()).toMatchObject({
-			domains: expect.arrayContaining([
-				expect.objectContaining({
-					kind: "renderer",
-				}),
-				expect.objectContaining({
-					kind: "static-coordinator",
-					summary: expect.objectContaining({
-						committed: 0,
-						requested: 1,
-						resolving: 1,
-					}),
-				}),
-				expect.objectContaining({
-					kind: "texture-atlas",
-					summary: expect.objectContaining({
-						approximateBytes: 0,
-						batchCount: 0,
-						entryAliasCount: 0,
-						multiSourcePageCount: 0,
-						texturePageCount: 0,
-					}),
-				}),
-				expect.objectContaining({
-					kind: "terrain-textures",
-					summary: {
-						recentFallbackCount: 0,
-					},
-				}),
-			]),
-			kind: "runtime-diagnostics-report",
-			runtime: {
-				sceneInterest: "manual|outdoor-anchor|0xda55ffff|terrain",
-				materializedStaticDrawUnits: 0,
-				pendingStaticMaterializationRevisions: [],
-				sourceStaticDrawUnits: 0,
-				status: "static-active",
-			},
-		});
-		expect(JSON.stringify(runtime.createDiagnosticsReport())).not.toContain(
-			"activeWork",
-		);
-		runtime.dispose();
-	});
-
 	it("accepts explicit current camera residency without provenance accounting", () => {
 		const renderer = new FakeRenderer();
 		const runtime = createClientRuntime({
@@ -194,19 +136,6 @@ describe("browser client runtime", () => {
 			landblockId: 0xda55ffff,
 		});
 		expect(renderer.renderPassPlans).toEqual([]);
-		expect(runtime.createDiagnosticsReport().runtime).toMatchObject({
-			currentCameraResidency: {
-				envCellId: 0xda550100,
-				kind: "env-cell",
-				landblockId: 0xda55ffff,
-			},
-			renderPassPlan: {
-				kind: "single-surface-resident",
-			},
-		});
-		expect(JSON.stringify(runtime.createDiagnosticsReport())).not.toContain(
-			'"source"',
-		);
 
 		unsubscribe();
 		runtime.dispose();
@@ -282,13 +211,6 @@ describe("browser client runtime", () => {
 
 		expect(snapshots.at(-1)?.debugOverlays.flatVisionModeEnabled).toBe(true);
 		expect(snapshots.at(-1)?.portalFrameWorkPlan).toEqual({
-			kind: "legacy-render-pass",
-			mode: "flat-resident-diagnostic",
-			renderPassPlan: { kind: "single-surface-resident" },
-		});
-		expect(
-			runtime.createDiagnosticsReport().runtime.portalFrameWorkPlan,
-		).toEqual({
 			kind: "legacy-render-pass",
 			mode: "flat-resident-diagnostic",
 			renderPassPlan: { kind: "single-surface-resident" },
@@ -446,67 +368,6 @@ describe("browser client runtime", () => {
 			landblockId: 0xda55ffff,
 			sharedEnvCellStaticObjectDrawUnits: 1,
 			structuredInteriorDrawUnitIds: [],
-		});
-		expect(
-			runtime.createDiagnosticsReport().runtime
-				.envCellResourceMembershipRevision,
-		).toBe(1);
-		expect(runtime.createDiagnosticsReport().runtime.renderPassPlan).toEqual({
-			baseScene: {
-				envCellId: 0xda550100,
-				kind: "interior",
-				landblockId: 0xda55ffff,
-			},
-			kind: "portal-scene-domains",
-			transitionDepthPolicy: { maxDepth: 4 },
-		});
-		expect(
-			runtime.createDiagnosticsReport().runtime.portalFrameWorkPlan,
-		).toMatchObject({
-			kind: "direct-env-cell",
-			layeredGraph: {
-				baseEntry: {
-					resources: {
-						envCellStaticObjectDrawUnitIds: ["env-static-shared"],
-						resourceState: "ready",
-						structuredInteriorDrawUnitIds: ["structured:da550100"],
-					},
-					scene: {
-						envCellId: 0xda550100,
-						kind: "env-cell-direct",
-						landblockId: 0xda55ffff,
-					},
-				},
-				diagnostics: {
-					...emptyPortalApertureDiagnostics(),
-					envCellPortalEdges: 1,
-					selectedMaskEdges: 1,
-				},
-				maskEdges: [
-					expect.objectContaining({
-						linkId: "a-to-b",
-						renderEntryId: 0,
-						renderLayer: 1,
-						sourceEnvCellId: 0xda550100,
-						sourceKind: "env-cell-portal",
-						targetEnvCellId: 0xda550101,
-					}),
-				],
-				renderEntries: [
-					expect.objectContaining({
-						envCellId: 0xda550101,
-						incomingMaskEdgeIds: [0],
-						renderLayer: 1,
-						resources: {
-							envCellStaticObjectDrawUnitIds: ["env-static-shared"],
-							resourceState: "ready",
-							structuredInteriorDrawUnitIds: [],
-						},
-					}),
-				],
-				renderLayers: [{ renderEntryIds: [0], renderLayer: 1 }],
-			},
-			mode: "portal-projection",
 		});
 		expect(renderer.renderPassPlans).toEqual([
 			{
@@ -671,18 +532,11 @@ describe("browser client runtime", () => {
 			}),
 		});
 
-		expect(runtime.createDiagnosticsReport().runtime.renderPassPlan).toEqual({
-			kind: "single-surface-resident",
-		});
-
 		runtime.setCurrentCameraResidency({
 			kind: "outdoor-landblock",
 			landblockId: 0xda55ffff,
 		});
 
-		expect(runtime.createDiagnosticsReport().runtime.renderPassPlan).toEqual({
-			kind: "single-surface-resident",
-		});
 		expect(renderer.renderPassPlans).toEqual([]);
 
 		runtime.setCurrentCameraResidency({
@@ -690,9 +544,6 @@ describe("browser client runtime", () => {
 			landblockId: 0xdb55ffff,
 		});
 
-		expect(runtime.createDiagnosticsReport().runtime.renderPassPlan).toEqual({
-			kind: "single-surface-resident",
-		});
 		expect(renderer.renderPassPlans).toEqual([]);
 
 		runtime.dispose();
@@ -911,9 +762,6 @@ describe("browser client runtime", () => {
 
 		updateOutdoorSceneInterest(runtime);
 
-		expect(runtime.createDiagnosticsReport().runtime.renderPassPlan).toEqual({
-			kind: "single-surface-resident",
-		});
 		expect(renderer.renderPassPlans).toEqual([]);
 
 		runtime.dispose();
@@ -971,36 +819,6 @@ describe("browser client runtime", () => {
 		} finally {
 			vi.useRealTimers();
 		}
-	});
-
-	it("ingests env-cell source facts without static materialization or atlas batches", async () => {
-		const runtime = createClientRuntime({
-			diagnostics: silentDiagnostics,
-			host: new FakeRuntimeHost(),
-			renderer: new FakeRenderer(),
-		});
-
-		updateInteriorSceneInterest(runtime);
-		await flushRuntimeWork();
-
-		expect(runtime.createDiagnosticsReport()).toMatchObject({
-			domains: expect.arrayContaining([
-				expect.objectContaining({
-					kind: "texture-atlas",
-					summary: expect.objectContaining({
-						batchCount: 0,
-						emptyBatchCount: 0,
-					}),
-				}),
-			]),
-			runtime: expect.objectContaining({
-				committedStaticMaterializationRevisions: [],
-				materializedStaticDrawUnits: 0,
-				pendingStaticMaterializationRevisions: [],
-				sourceStaticDrawUnits: 0,
-			}),
-		});
-		runtime.dispose();
 	});
 
 	it("emits manual scene interest update and settled events", async () => {
@@ -1437,29 +1255,6 @@ describe("browser client runtime", () => {
 		expect(snapshots.at(-1)?.staticMaterialization.pendingRevisions).toEqual([
 			1,
 		]);
-		expect(runtime.createDiagnosticsReport().domains).toContainEqual({
-			kind: "asset-service",
-			snapshot: {
-				pending: [
-					{
-						key: assetService.pendingKeys[0],
-						revision: 1,
-						waiterCount: 1,
-					},
-				],
-			},
-			summary: {
-				committed: 0,
-				leased: 0,
-				pending: 1,
-				pendingWaiters: 1,
-				warmRetained: 0,
-			},
-		});
-		expect(JSON.stringify(runtime.createDiagnosticsReport())).not.toContain(
-			'"committed":[',
-		);
-
 		assetService.resolveNext(
 			createPreparedTextureAsset(assetService.pendingKeys[0] ?? failKey()),
 		);
@@ -1534,9 +1329,6 @@ describe("browser client runtime", () => {
 			},
 		]);
 		expect(renderer.terrainLayerUpdates).toHaveLength(1);
-		expect(runtime.createDiagnosticsReport().runtime.textureFilteringMode).toBe(
-			"nearest",
-		);
 		runtime.dispose();
 	});
 
@@ -1587,64 +1379,7 @@ describe("browser client runtime", () => {
 			pendingRevisions: [],
 			sourceDrawUnits: 0,
 		});
-		expect(runtime.createDiagnosticsReport().domains).toContainEqual({
-			kind: "terrain-textures",
-			recentFallbacks: [],
-			summary: {
-				recentFallbackCount: 0,
-			},
-		});
 		unsubscribe();
-		runtime.dispose();
-	});
-
-	it("surfaces terrain material fallback reasons in diagnostics reports", async () => {
-		const renderer = new FakeRenderer();
-		const resolver = new DeferredStaticResolver();
-		const baker = new DeferredStaticBaker();
-		const runtime = createClientRuntime({
-			diagnostics: silentDiagnostics,
-			host: new FakeRuntimeHost(),
-			renderer,
-			staticCoordinator: createImmediateStaticCoordinator({
-				baker,
-				resolver,
-			}),
-		});
-		const fallbackReason: TerrainMaterialFallbackReason = {
-			code: "unsupported-material-binding",
-			message: "Terrain material binding requires a prepared texture use.",
-			pcode: 33825,
-		};
-
-		updateOutdoorSceneInterest(runtime);
-		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
-		await flushPromises();
-		baker.complete("1:landblock:da55ffff:outdoor-terrain", {
-			drawUnits: [
-				createTerrainDrawUnit("terrain-fallback", 0xda55ffff, {
-					fallbackReasons: [fallbackReason],
-				}),
-			],
-		});
-		await flushPromises();
-
-		expect(runtime.createDiagnosticsReport().domains).toContainEqual({
-			kind: "terrain-textures",
-			recentFallbacks: [
-				{
-					drawUnitId: "terrain-fallback",
-					materialBucketKey:
-						"shader:terrain-debug-flat|domain:outdoor-terrain|sampler:none|placement:none",
-					materialFamily: "terrain-debug-flat",
-					reasons: [fallbackReason],
-					revision: 1,
-				},
-			],
-			summary: {
-				recentFallbackCount: 1,
-			},
-		});
 		runtime.dispose();
 	});
 
@@ -2906,20 +2641,6 @@ function runtimeSnapshotSummary(
 	return {
 		staticMaterialization: snapshot.staticMaterialization,
 		status: snapshot.status,
-	};
-}
-
-function emptyPortalApertureDiagnostics() {
-	return {
-		buildingTransitionEdges: 0,
-		dedupedGeometryResources: 0,
-		duplicateMaskEdges: 0,
-		envCellPortalEdges: 0,
-		selectedMaskEdges: 0,
-		transitionRootCandidateCount: 0,
-		transitionRootCount: 0,
-		transitionRootsRejectedNotSeenOutside: 0,
-		transitionRootsRejectedUnknownSeenOutside: 0,
 	};
 }
 

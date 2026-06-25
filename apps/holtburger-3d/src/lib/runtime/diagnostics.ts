@@ -8,22 +8,11 @@ import type {
 import type { AssetServiceSnapshot } from "../assets/contracts";
 import type {
 	StaticDomain,
-	StaticMaterialCoverageFilteringMode,
-	StaticMaterialCoverageFamily,
-	StaticMaterialCoverageKind,
-	StaticMaterialCoveragePass,
 	StaticMaterialUnrenderedBucket,
-	StaticMaterialRenderOutcome,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialFallbackReason,
 } from "../static/contracts";
-import type {
-	TextureFilteringMode,
-	TexturePageSampleClass,
-	TextureWrapMode,
-} from "../textures/sampling-policy";
-import type { StaticSceneCameraResidency } from "./static-scene-query";
-import type { RuntimePortalOverlapResidency } from "./portal-base-overlap";
+import type { TextureFilteringMode } from "../textures/sampling-policy";
 
 export interface RuntimeDiagnostics {
 	warn(event: RuntimeWarningEvent): void;
@@ -39,16 +28,36 @@ interface RuntimeDiagnosticsRuntimeSummary {
 	readonly status: "idle" | "static-active" | "disposed";
 	readonly textureFilteringMode: TextureFilteringMode;
 	readonly sceneInterest: string | null;
-	readonly currentCameraResidency: StaticSceneCameraResidency;
-	readonly currentPortalOverlapResidency: RuntimePortalOverlapResidency;
-	readonly renderPassPlan: RenderPassPlan;
-	readonly portalFrameWorkPlan: PortalFrameWorkPlan;
-	readonly pendingStaticMaterializationRevisions: readonly number[];
-	readonly committedStaticMaterializationRevisions: readonly number[];
+	readonly renderPassKind: RenderPassPlan["kind"];
+	readonly portalFrameWorkPlan: PortalFrameWorkPlanDiagnostics;
+	readonly pendingStaticMaterializationCount: number;
+	readonly committedStaticMaterializationCount: number;
 	readonly envCellResourceMembershipRevision: number;
 	readonly sourceStaticDrawUnits: number;
 	readonly materializedStaticDrawUnits: number;
 }
+
+type PortalFrameWorkPlanDiagnostics =
+	| {
+			readonly kind: "legacy-render-pass";
+			readonly mode: Extract<
+				PortalFrameWorkPlan,
+				{ readonly kind: "legacy-render-pass" }
+			>["mode"];
+			readonly renderPassKind: RenderPassPlan["kind"];
+	  }
+	| {
+			readonly kind: "direct-env-cell";
+			readonly mode: "portal-projection";
+			readonly baseScene: string;
+			readonly renderEntryCount: number;
+			readonly renderLayerCount: number;
+			readonly maskEdgeCount: number;
+			readonly apertureResourceCount: number;
+			readonly transitionRootCount: number;
+			readonly envCellPortalEdgeCount: number;
+			readonly selectedMaskEdgeCount: number;
+	  };
 
 type RuntimeDiagnosticsDomainReport =
 	| AssetServiceDiagnosticsReport
@@ -60,11 +69,6 @@ type RuntimeDiagnosticsDomainReport =
 export interface AssetServiceDiagnosticsReport {
 	readonly kind: "asset-service";
 	readonly summary: AssetServiceDiagnosticsSummary;
-	readonly snapshot: AssetServiceDiagnosticsSnapshot;
-}
-
-interface AssetServiceDiagnosticsSnapshot {
-	readonly pending: AssetServiceSnapshot["pending"];
 }
 
 interface AssetServiceDiagnosticsSummary {
@@ -77,15 +81,54 @@ interface AssetServiceDiagnosticsSummary {
 
 interface RendererDiagnosticsReport {
 	readonly kind: "renderer";
-	readonly summary: RendererSnapshot;
+	readonly summary: RendererDiagnosticsSummary;
+}
+
+export interface RendererDiagnosticsSummary {
+	readonly backend: RendererSnapshot["backend"];
+	readonly canvasWidth: number;
+	readonly canvasHeight: number;
+	readonly frameCount: number;
+	readonly frameHandlerMs: number;
+	readonly isRunning: boolean;
+	readonly error: string | null;
+	readonly renderPassKind: RenderPassPlan["kind"];
+	readonly staticDrawUnits: number;
+	readonly terrainDrawUnits: number;
+	readonly directEnvCellDrawCalls: number;
+	readonly renderedTriangles: number;
+	readonly debugOverlayPrimitives: number;
+	readonly staticObjectResources: number;
+	readonly outdoorDetailStaticObjectResources: number;
+	readonly staticObjectUploadedBufferBytes: number;
+	readonly outdoorDetailStaticObjectUploadedBufferBytes: number;
+	readonly staticObjectUploadSummary: StaticObjectUploadSummaryDiagnostics;
+}
+
+interface StaticObjectUploadSummaryDiagnostics {
+	readonly recentUploadCount: number;
+	readonly totalDrawUnits: number;
+	readonly totalUploadedBufferBytes: number;
+	readonly totalUploadMs: number;
+	readonly largestUpload: StaticObjectUploadSampleDiagnostics | null;
+}
+
+interface StaticObjectUploadSampleDiagnostics {
+	readonly domain: StaticDomain;
+	readonly landblockId: string;
+	readonly drawUnitCount: number;
+	readonly uploadedBufferBytes: number;
+	readonly uploadMs: number;
 }
 
 export interface StaticCoordinatorDiagnosticsReport {
 	readonly kind: "static-coordinator";
 	readonly summary: StaticCoordinatorDiagnosticsSummary;
-	readonly materialCoverage: readonly StaticMaterialCoverageDiagnostics[];
-	readonly inFlightWork: readonly StaticCoordinatorWorkDiagnostics[];
-	readonly recentFailures: readonly StaticCoordinatorWorkDiagnostics[];
+	readonly materialCoverageSummary: StaticMaterialCoverageSummaryDiagnostics;
+	readonly staticObjectBakeSummary: StaticObjectBakeSummaryDiagnostics;
+	readonly timingSummary: StaticCoordinatorTimingSummaryDiagnostics;
+	readonly inFlightWork?: readonly StaticCoordinatorWorkDiagnostics[];
+	readonly recentFailures?: readonly StaticCoordinatorWorkDiagnostics[];
 }
 
 interface StaticCoordinatorDiagnosticsSummary {
@@ -98,9 +141,6 @@ interface StaticCoordinatorDiagnosticsSummary {
 	readonly staleResolverResults: number;
 	readonly staleBakeResults: number;
 	readonly committedDrawUnits: number;
-	readonly latestTerrainPayload: string | null;
-	readonly latestOutdoorStaticObjectsPayload: string | null;
-	readonly latestLandblockEnvCellsPayload: string | null;
 }
 
 interface StaticCoordinatorWorkDiagnostics {
@@ -111,50 +151,72 @@ interface StaticCoordinatorWorkDiagnostics {
 	readonly status: "requested" | "resolving" | "baking" | "failed";
 }
 
-interface StaticMaterialCoverageDiagnostics {
-	readonly coverageKey: string;
-	readonly coverageKind: StaticMaterialCoverageKind;
-	readonly domain: StaticDomain;
-	readonly landblockId: string | null;
+export type StaticCoordinatorWorkReportDiagnostics =
+	StaticCoordinatorWorkDiagnostics;
+
+interface StaticMaterialCoverageSummaryDiagnostics {
+	readonly reportCount: number;
 	readonly materialCount: number;
 	readonly partitionCount: number;
 	readonly triangleCount: number;
 	readonly renderedTriangles: number;
 	readonly deferredTriangles: number;
 	readonly unsupportedTriangles: number;
-	readonly detailRoleCount: number;
-	readonly fallbackReasonCount: number;
-	readonly buckets: readonly StaticMaterialCoverageBucketDiagnostics[];
-	readonly fallbackReasons: Record<string, number>;
-	readonly unrenderedBuckets: readonly StaticMaterialUnrenderedBucketDiagnostics[];
+	readonly fallbackReasonCounts: Record<string, number>;
+	readonly unrenderedBucketCount: number;
 }
 
-interface StaticMaterialCoverageBucketDiagnostics {
-	readonly family: StaticMaterialCoverageFamily;
-	readonly pass: StaticMaterialCoveragePass;
-	readonly outcome: StaticMaterialRenderOutcome;
-	readonly filteringMode: StaticMaterialCoverageFilteringMode;
-	readonly materials: number;
-	readonly partitions: number;
-	readonly triangles: number;
-	readonly textureRoles: number;
+interface StaticObjectBakeSummaryDiagnostics {
+	readonly reportCount: number;
+	readonly objectCount: number;
+	readonly generatedInstanceCount: number;
+	readonly explicitObjectCount: number;
+	readonly uniqueSourceCount: number;
+	readonly uniqueSourcePartGeometryCount: number;
+	readonly uniqueSourceTriangleCount: number;
+	readonly flattenedTriangleCount: number;
+	readonly flattenedVertexCount: number;
+	readonly drawUnitCount: number;
+	readonly partitionCount: number;
+	readonly estimatedFlattenedTypedArrayBytes: number;
+	readonly largestBake: StaticObjectBakeSampleDiagnostics | null;
 }
 
-interface StaticMaterialUnrenderedBucketDiagnostics {
-	readonly family: StaticMaterialCoverageFamily;
-	readonly pass: StaticMaterialCoveragePass;
-	readonly outcome: Exclude<StaticMaterialRenderOutcome, "rendered">;
-	readonly materials: number;
-	readonly partitions: number;
-	readonly triangles: number;
-	readonly reasonCodes: readonly string[];
+interface StaticObjectBakeSampleDiagnostics {
+	readonly domain: StaticDomain;
+	readonly landblockId: string;
+	readonly objectCount: number;
+	readonly generatedInstanceCount: number;
+	readonly drawUnitCount: number;
+	readonly flattenedTriangleCount: number;
+	readonly estimatedFlattenedTypedArrayBytes: number;
+	readonly uniqueSourceCount: number;
+}
+
+interface StaticCoordinatorTimingSummaryDiagnostics {
+	readonly reportCount: number;
+	readonly totalItemCount: number;
+	readonly resolverMs: number;
+	readonly attachmentMs: number;
+	readonly bakeMs: number;
+	readonly commitMs: number;
+	readonly slowestResolver: StaticCoordinatorTimingSampleDiagnostics | null;
+	readonly slowestBake: StaticCoordinatorTimingSampleDiagnostics | null;
+}
+
+interface StaticCoordinatorTimingSampleDiagnostics {
+	readonly domain: StaticDomain;
+	readonly itemCount: number;
+	readonly resolverMs: number | null;
+	readonly attachmentMs: number | null;
+	readonly bakeMs: number | null;
+	readonly commitMs: number | null;
 }
 
 export interface TextureAtlasDiagnosticsReport {
 	readonly kind: "texture-atlas";
 	readonly summary: TextureAtlasDiagnosticsSummary;
-	readonly byDomain: readonly TextureAtlasDomainDiagnostics[];
-	readonly warnings: readonly TextureAtlasWarningDiagnostics[];
+	readonly warnings?: readonly TextureAtlasWarningDiagnostics[];
 }
 
 interface TextureAtlasDiagnosticsSummary {
@@ -169,29 +231,11 @@ interface TextureAtlasDiagnosticsSummary {
 	readonly approximateBytes: number;
 }
 
-interface TextureAtlasDomainDiagnostics {
-	readonly domain: StaticDomain;
-	readonly batchCount: number;
-	readonly activeBatchCount: number;
-	readonly emptyBatchCount: number;
-	readonly entryAliasCount: number;
-	readonly uniqueSourceCount: number;
-	readonly texturePageCount: number;
-	readonly multiSourcePageCount: number;
-	readonly mipmappedPageCount: number;
-	readonly unmippedPageCount: number;
-	readonly approximateBytes: number;
-	readonly sampleClasses: Record<TexturePageSampleClass, number>;
-	readonly formats: Record<TextureAtlasPageFormat, number>;
-	readonly samplerPolicies: Record<string, number>;
-	readonly wrapModes: Record<TextureWrapMode, number>;
-}
-
-type TextureAtlasPageFormat = "rgba8" | "r8" | "rg8";
-
 type TextureAtlasWarningDiagnostics =
 	| TerrainRolePageOverflowSummaryDiagnostics
 	| StaticObjectRolePageOverflowSummaryDiagnostics;
+
+export type TextureAtlasWarningReportDiagnostics = TextureAtlasWarningDiagnostics;
 
 interface TerrainRolePageOverflowSummaryDiagnostics {
 	readonly kind: "terrain-role-page-overflow";
@@ -210,7 +254,7 @@ interface StaticObjectRolePageOverflowSummaryDiagnostics {
 export interface TerrainTextureDiagnosticsReport {
 	readonly kind: "terrain-textures";
 	readonly summary: TerrainTextureDiagnosticsSummary;
-	readonly recentFallbacks: readonly TerrainTextureFallbackDiagnostics[];
+	readonly recentFallbacks?: readonly TerrainTextureFallbackDiagnostics[];
 }
 
 interface TerrainTextureDiagnosticsSummary {
@@ -284,9 +328,6 @@ export function createAssetServiceDiagnosticsReport(
 ): AssetServiceDiagnosticsReport {
 	return {
 		kind: "asset-service",
-		snapshot: {
-			pending: snapshot.pending,
-		},
 		summary: {
 			committed: snapshot.committed.length,
 			leased: snapshot.committed.filter((entry) => entry.leaseCount > 0).length,

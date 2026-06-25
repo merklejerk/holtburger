@@ -17,6 +17,7 @@ import type {
 	TerrainLayerPayload,
 	OutdoorBuildingsLayerPayload,
 	OutdoorDetailsLayerPayload,
+	StaticObjectUploadDiagnostics,
 } from "../renderer/types";
 import {
 	createStaticLandblockLayerGenerationId,
@@ -38,9 +39,11 @@ import type { TextureFilteringMode } from "../textures/sampling-policy";
 import {
 	createAssetServiceDiagnosticsReport,
 	createConsoleRuntimeDiagnostics,
+	type RendererDiagnosticsSummary,
 	type RuntimeDiagnostics,
 	type RuntimeDiagnosticsReport,
 	type StaticCoordinatorDiagnosticsReport,
+	type StaticCoordinatorWorkReportDiagnostics,
 	type TerrainTextureDiagnosticsReport,
 	type TerrainTextureFallbackDiagnostics,
 } from "./diagnostics";
@@ -68,6 +71,8 @@ import type {
 	StaticPortalApertureResource,
 	StaticPortalProjectionRecord,
 	StaticResourceKey,
+	StaticCoordinatorTimingDiagnostics,
+	StaticObjectBakeDiagnostics,
 } from "../static/contracts";
 import {
 	AC_UNIT_SCALE,
@@ -876,7 +881,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				createAssetServiceDiagnosticsReport(snapshot.assets),
 				{
 					kind: "renderer",
-					summary: snapshot.renderer,
+					summary: createRendererDiagnosticsSummary(snapshot.renderer),
 				},
 				{
 					kind: "static-coordinator",
@@ -889,19 +894,19 @@ class ClientRuntimeImpl implements ClientRuntime {
 			],
 			kind: "runtime-diagnostics-report",
 			runtime: {
-				committedStaticMaterializationRevisions:
-					snapshot.staticMaterialization.committedRevisions,
-				currentCameraResidency: snapshot.currentCameraResidency,
-				currentPortalOverlapResidency: snapshot.currentPortalOverlapResidency,
+				committedStaticMaterializationCount:
+					snapshot.staticMaterialization.committedRevisions.length,
 				envCellResourceMembershipRevision:
 					snapshot.staticMaterialization.envCellResourceMembershipRevision,
-				portalFrameWorkPlan: snapshot.portalFrameWorkPlan,
-				renderPassPlan: snapshot.renderPassPlan,
+				portalFrameWorkPlan: createPortalFrameWorkPlanDiagnostics(
+					snapshot.portalFrameWorkPlan,
+				),
+				renderPassKind: snapshot.renderPassPlan.kind,
 				sceneInterest: createSceneInterestSummary(snapshot.sceneInterest),
 				materializedStaticDrawUnits:
 					snapshot.staticMaterialization.materializedDrawUnits,
-				pendingStaticMaterializationRevisions:
-					snapshot.staticMaterialization.pendingRevisions,
+				pendingStaticMaterializationCount:
+					snapshot.staticMaterialization.pendingRevisions.length,
 				sourceStaticDrawUnits: snapshot.staticMaterialization.sourceDrawUnits,
 				status: snapshot.status,
 				textureFilteringMode: snapshot.renderPolicy.textureFilteringMode,
@@ -2837,13 +2842,19 @@ function isBlendedStaticAuditBucket(
 function createTerrainTextureDiagnosticsReport(
 	recentFallbacks: readonly TerrainTextureFallbackDiagnostics[],
 ): TerrainTextureDiagnosticsReport {
-	return {
+	const report: TerrainTextureDiagnosticsReport = {
 		kind: "terrain-textures",
-		recentFallbacks,
 		summary: {
 			recentFallbackCount: recentFallbacks.length,
 		},
 	};
+	if (recentFallbacks.length > 0) {
+		return {
+			...report,
+			recentFallbacks,
+		};
+	}
+	return report;
 }
 
 function createMaterializedLandblockLayerPayloads(
@@ -3405,79 +3416,312 @@ function createStaticCoordinatorDiagnosticsReport(
 		.slice(-STATIC_DIAGNOSTICS_FAILURE_LIMIT)
 		.map((work) => createStaticCoordinatorWorkDiagnostics(work));
 
-	return {
-		inFlightWork,
-		materialCoverage: snapshot.materialCoverage.map(
-			createStaticMaterialCoverageDiagnostics,
+	const targetStaticObjectBakeDiagnostics =
+		snapshot.staticObjectBakeDiagnostics.filter(
+			(diagnostics) =>
+				diagnostics.domain === "outdoor-detail" && diagnostics.objectCount > 0,
+		);
+
+	const report: Omit<StaticCoordinatorDiagnosticsReport, "kind"> = {
+		materialCoverageSummary: createStaticMaterialCoverageSummary(
+			snapshot.materialCoverage,
 		),
-		recentFailures,
+		staticObjectBakeSummary: createStaticObjectBakeSummary(
+			targetStaticObjectBakeDiagnostics,
+		),
 		summary: {
 			baking: snapshot.baking,
 			committed: snapshot.committed,
 			committedDrawUnits: snapshot.committedDrawUnits,
 			failed: snapshot.failed,
-			latestLandblockEnvCellsPayload: snapshot.latestLandblockEnvCellsPayload
-				? `lb ${formatHex(snapshot.latestLandblockEnvCellsPayload.landblockId)} cells ${snapshot.latestLandblockEnvCellsPayload.envCellCount} accepted ${snapshot.latestLandblockEnvCellsPayload.acceptedEnvCellCount} visible ${snapshot.latestLandblockEnvCellsPayload.visibleCellCount} portals ${snapshot.latestLandblockEnvCellsPayload.portalCount} links ${snapshot.latestLandblockEnvCellsPayload.portalLinkCount} seeds ${snapshot.latestLandblockEnvCellsPayload.staticObjectSeedCount} missing ${snapshot.latestLandblockEnvCellsPayload.missingRefCount}`
-				: null,
-			latestOutdoorStaticObjectsPayload:
-				snapshot.latestOutdoorStaticObjectsPayload
-					? `lb ${formatHex(snapshot.latestOutdoorStaticObjectsPayload.landblockId)} ${snapshot.latestOutdoorStaticObjectsPayload.domain} objects ${snapshot.latestOutdoorStaticObjectsPayload.objectCount} kinds b:${snapshot.latestOutdoorStaticObjectsPayload.objectKindCounts.building}/g:${snapshot.latestOutdoorStaticObjectsPayload.objectKindCounts["generated-scenery"]}/e:${snapshot.latestOutdoorStaticObjectsPayload.objectKindCounts["explicit-object"]} sources ${snapshot.latestOutdoorStaticObjectsPayload.sourceAssetCount} slots ${snapshot.latestOutdoorStaticObjectsPayload.materialSlotCount} materials ${snapshot.latestOutdoorStaticObjectsPayload.materialSourceCount} tex ${snapshot.latestOutdoorStaticObjectsPayload.textureRefCount} missing ${snapshot.latestOutdoorStaticObjectsPayload.missingRefCount}`
-					: null,
-			latestTerrainPayload: snapshot.latestTerrainPayload
-				? `lb ${formatHex(snapshot.latestTerrainPayload.landblockId)} region ${snapshot.latestTerrainPayload.regionNumber} mesh ${snapshot.latestTerrainPayload.vertexCount}v/${snapshot.latestTerrainPayload.triangleCount}t quads ${snapshot.latestTerrainPayload.quadCount} tex ${snapshot.latestTerrainPayload.textureUseCount} missing ${snapshot.latestTerrainPayload.missingRefCount}`
-				: null,
 			requested: snapshot.requested,
 			resolving: snapshot.resolving,
 			revision: snapshot.revision,
 			staleBakeResults: snapshot.staleBakeResults,
 			staleResolverResults: snapshot.staleResolverResults,
 		},
+		timingSummary: createStaticCoordinatorTimingSummary(snapshot.recentTiming),
+	};
+	return {
+		...report,
+		...(inFlightWork.length > 0 ? { inFlightWork } : {}),
+		...(recentFailures.length > 0 ? { recentFailures } : {}),
 	};
 }
 
-function createStaticMaterialCoverageDiagnostics(
-	coverage: StaticMaterialCoverageReport,
-): StaticCoordinatorDiagnosticsReport["materialCoverage"][number] {
+function createRendererDiagnosticsSummary(
+	snapshot: RendererSnapshot,
+): RendererDiagnosticsSummary {
 	return {
-		buckets: coverage.buckets.map((bucket) => ({
-			family: bucket.family,
-			filteringMode: bucket.filteringMode,
-			materials: bucket.materialCount,
-			outcome: bucket.outcome,
-			partitions: bucket.partitionCount,
-			pass: bucket.pass,
-			textureRoles: bucket.textureRoleCount,
-			triangles: bucket.triangleCount,
-		})),
-		coverageKey: coverage.coverageKey,
-		coverageKind: coverage.coverageKind,
-		deferredTriangles: coverage.deferredTriangleCount,
-		detailRoleCount: coverage.detailRoleCount,
-		domain: coverage.domain,
-		fallbackReasonCount: coverage.fallbackReasonCount,
-		fallbackReasons: Object.fromEntries(
-			coverage.fallbackReasonCounts.map((reason) => [
-				reason.code,
-				reason.count,
-			]),
+		backend: snapshot.backend,
+		canvasHeight: snapshot.canvasHeight,
+		canvasWidth: snapshot.canvasWidth,
+		debugOverlayPrimitives: snapshot.debugOverlayPrimitives,
+		directEnvCellDrawCalls: snapshot.directEnvCellDrawCalls,
+		error: snapshot.error,
+		frameCount: snapshot.frameCount,
+		frameHandlerMs: snapshot.frameHandlerMs,
+		isRunning: snapshot.isRunning,
+		outdoorDetailStaticObjectResources:
+			snapshot.outdoorDetailStaticObjectResources,
+		outdoorDetailStaticObjectUploadedBufferBytes:
+			snapshot.outdoorDetailStaticObjectUploadedBufferBytes,
+		renderedTriangles: snapshot.renderedTriangles,
+		renderPassKind: snapshot.renderPassPlan.kind,
+		staticDrawUnits: snapshot.staticDrawUnits,
+		staticObjectResources: snapshot.staticObjectResources,
+		staticObjectUploadSummary: createStaticObjectUploadSummary(
+			snapshot.recentStaticObjectUploads,
 		),
-		landblockId:
-			coverage.landblockId === null ? null : formatHex(coverage.landblockId),
-		materialCount: coverage.materialCount,
-		partitionCount: coverage.partitionCount,
-		renderedTriangles: coverage.renderedTriangleCount,
-		triangleCount: coverage.triangleCount,
-		unrenderedBuckets: coverage.unrenderedBuckets.map((bucket) => ({
-			family: bucket.family,
-			materials: bucket.materialCount,
-			outcome: bucket.outcome,
-			partitions: bucket.partitionCount,
-			pass: bucket.pass,
-			reasonCodes: bucket.reasonCodes,
-			triangles: bucket.triangleCount,
-		})),
-		unsupportedTriangles: coverage.unsupportedTriangleCount,
+		staticObjectUploadedBufferBytes: snapshot.staticObjectUploadedBufferBytes,
+		terrainDrawUnits: snapshot.terrainDrawUnits,
 	};
+}
+
+function createPortalFrameWorkPlanDiagnostics(plan: PortalFrameWorkPlan) {
+	if (plan.kind === "legacy-render-pass") {
+		return {
+			kind: plan.kind,
+			mode: plan.mode,
+			renderPassKind: plan.renderPassPlan.kind,
+		};
+	}
+
+	return {
+		apertureResourceCount: plan.layeredGraph.apertureResources.length,
+		baseScene: describePortalFrameBaseScene(plan.layeredGraph.baseEntry.scene),
+		envCellPortalEdgeCount: plan.layeredGraph.diagnostics.envCellPortalEdges,
+		kind: plan.kind,
+		maskEdgeCount: plan.layeredGraph.maskEdges.length,
+		mode: plan.mode,
+		renderEntryCount: plan.layeredGraph.renderEntries.length,
+		renderLayerCount: plan.layeredGraph.renderLayers.length,
+		selectedMaskEdgeCount: plan.layeredGraph.diagnostics.selectedMaskEdges,
+		transitionRootCount: plan.layeredGraph.diagnostics.transitionRootCount,
+	};
+}
+
+function describePortalFrameBaseScene(
+	scene: Extract<
+		PortalFrameWorkPlan,
+		{ readonly kind: "direct-env-cell" }
+	>["layeredGraph"]["baseEntry"]["scene"],
+): string {
+	if (scene.kind === "outdoor-target") {
+		return `outdoor:${formatHex(scene.landblockId)}`;
+	}
+	return `env-cell:${formatHex(scene.landblockId)}:${formatHex(scene.envCellId)}`;
+}
+
+function createStaticObjectUploadSummary(
+	uploads: readonly StaticObjectUploadDiagnostics[],
+): RendererDiagnosticsSummary["staticObjectUploadSummary"] {
+	const largestUpload = uploads.reduce<StaticObjectUploadDiagnostics | null>(
+		(largest, upload) =>
+			largest === null ||
+			upload.uploadedBufferBytes > largest.uploadedBufferBytes
+				? upload
+				: largest,
+		null,
+	);
+
+	return {
+		largestUpload:
+			largestUpload === null
+				? null
+				: {
+						domain: largestUpload.domain,
+						drawUnitCount: largestUpload.drawUnitCount,
+						landblockId: formatHex(largestUpload.landblockId),
+						uploadedBufferBytes: largestUpload.uploadedBufferBytes,
+						uploadMs: roundMilliseconds(largestUpload.uploadMs),
+					},
+		recentUploadCount: uploads.length,
+		totalDrawUnits: sumNumbers(uploads.map((upload) => upload.drawUnitCount)),
+		totalUploadedBufferBytes: sumNumbers(
+			uploads.map((upload) => upload.uploadedBufferBytes),
+		),
+		totalUploadMs: roundMilliseconds(
+			sumNumbers(uploads.map((upload) => upload.uploadMs)),
+		),
+	};
+}
+
+function createStaticMaterialCoverageSummary(
+	coverages: readonly StaticMaterialCoverageReport[],
+): StaticCoordinatorDiagnosticsReport["materialCoverageSummary"] {
+	const fallbackReasonCounts: Record<string, number> = {};
+
+	for (const coverage of coverages) {
+		for (const reason of coverage.fallbackReasonCounts) {
+			fallbackReasonCounts[reason.code] =
+				(fallbackReasonCounts[reason.code] ?? 0) + reason.count;
+		}
+	}
+
+	return {
+		deferredTriangles: sumNumbers(
+			coverages.map((coverage) => coverage.deferredTriangleCount),
+		),
+		fallbackReasonCounts,
+		materialCount: sumNumbers(
+			coverages.map((coverage) => coverage.materialCount),
+		),
+		partitionCount: sumNumbers(
+			coverages.map((coverage) => coverage.partitionCount),
+		),
+		renderedTriangles: sumNumbers(
+			coverages.map((coverage) => coverage.renderedTriangleCount),
+		),
+		reportCount: coverages.length,
+		triangleCount: sumNumbers(
+			coverages.map((coverage) => coverage.triangleCount),
+		),
+		unrenderedBucketCount: sumNumbers(
+			coverages.map((coverage) => coverage.unrenderedBuckets.length),
+		),
+		unsupportedTriangles: sumNumbers(
+			coverages.map((coverage) => coverage.unsupportedTriangleCount),
+		),
+	};
+}
+
+function createStaticObjectBakeSummary(
+	diagnostics: readonly StaticObjectBakeDiagnostics[],
+): StaticCoordinatorDiagnosticsReport["staticObjectBakeSummary"] {
+	const largestBake = diagnostics.reduce<StaticObjectBakeDiagnostics | null>(
+		(largest, entry) =>
+			largest === null ||
+			entry.estimatedFlattenedTypedArrayBytes >
+				largest.estimatedFlattenedTypedArrayBytes
+				? entry
+				: largest,
+		null,
+	);
+
+	return {
+		drawUnitCount: sumNumbers(
+			diagnostics.map((entry) => entry.drawUnitCount),
+		),
+		estimatedFlattenedTypedArrayBytes: sumNumbers(
+			diagnostics.map((entry) => entry.estimatedFlattenedTypedArrayBytes),
+		),
+		explicitObjectCount: sumNumbers(
+			diagnostics.map((entry) => entry.explicitObjectCount),
+		),
+		flattenedTriangleCount: sumNumbers(
+			diagnostics.map((entry) => entry.flattenedTriangleCount),
+		),
+		flattenedVertexCount: sumNumbers(
+			diagnostics.map((entry) => entry.flattenedVertexCount),
+		),
+		generatedInstanceCount: sumNumbers(
+			diagnostics.map((entry) => entry.generatedInstanceCount),
+		),
+		largestBake:
+			largestBake === null
+				? null
+				: {
+						domain: largestBake.domain,
+						drawUnitCount: largestBake.drawUnitCount,
+						estimatedFlattenedTypedArrayBytes:
+							largestBake.estimatedFlattenedTypedArrayBytes,
+						flattenedTriangleCount: largestBake.flattenedTriangleCount,
+						generatedInstanceCount: largestBake.generatedInstanceCount,
+						landblockId: formatHex(largestBake.landblockId),
+						objectCount: largestBake.objectCount,
+						uniqueSourceCount: largestBake.uniqueSourceCount,
+					},
+		objectCount: sumNumbers(diagnostics.map((entry) => entry.objectCount)),
+		partitionCount: sumNumbers(
+			diagnostics.map((entry) => entry.partitionCount),
+		),
+		reportCount: diagnostics.length,
+		uniqueSourceCount: sumNumbers(
+			diagnostics.map((entry) => entry.uniqueSourceCount),
+		),
+		uniqueSourcePartGeometryCount: sumNumbers(
+			diagnostics.map((entry) => entry.uniqueSourcePartGeometryCount),
+		),
+		uniqueSourceTriangleCount: sumNumbers(
+			diagnostics.map((entry) => entry.uniqueSourceTriangleCount),
+		),
+	};
+}
+
+function createStaticCoordinatorTimingSummary(
+	timings: readonly StaticCoordinatorTimingDiagnostics[],
+): StaticCoordinatorDiagnosticsReport["timingSummary"] {
+	return {
+		attachmentMs: roundMilliseconds(
+			sumNumbers(timings.map((timing) => nullableMilliseconds(timing.attachmentMs))),
+		),
+		bakeMs: roundMilliseconds(
+			sumNumbers(timings.map((timing) => nullableMilliseconds(timing.bakeMs))),
+		),
+		commitMs: roundMilliseconds(
+			sumNumbers(timings.map((timing) => nullableMilliseconds(timing.commitMs))),
+		),
+		reportCount: timings.length,
+		resolverMs: roundMilliseconds(
+			sumNumbers(timings.map((timing) => nullableMilliseconds(timing.resolverMs))),
+		),
+		slowestBake: createTimingSample(
+			maxByNullableNumber(timings, (timing) => timing.bakeMs),
+		),
+		slowestResolver: createTimingSample(
+			maxByNullableNumber(timings, (timing) => timing.resolverMs),
+		),
+		totalItemCount: sumNumbers(timings.map((timing) => timing.itemCount)),
+	};
+}
+
+function createTimingSample(
+	timing: StaticCoordinatorTimingDiagnostics | null,
+): StaticCoordinatorDiagnosticsReport["timingSummary"]["slowestBake"] {
+	if (timing === null) {
+		return null;
+	}
+	return {
+		attachmentMs: roundNullableMilliseconds(timing.attachmentMs),
+		bakeMs: roundNullableMilliseconds(timing.bakeMs),
+		commitMs: roundNullableMilliseconds(timing.commitMs),
+		domain: timing.domain,
+		itemCount: timing.itemCount,
+		resolverMs: roundNullableMilliseconds(timing.resolverMs),
+	};
+}
+
+function maxByNullableNumber<T>(
+	items: readonly T[],
+	getValue: (item: T) => number | null,
+): T | null {
+	let maxItem: T | null = null;
+	let maxValue = Number.NEGATIVE_INFINITY;
+	for (const item of items) {
+		const value = getValue(item);
+		if (value !== null && value > maxValue) {
+			maxItem = item;
+			maxValue = value;
+		}
+	}
+	return maxItem;
+}
+
+function nullableMilliseconds(value: number | null): number {
+	return value ?? 0;
+}
+
+function roundNullableMilliseconds(value: number | null): number | null {
+	return value === null ? null : roundMilliseconds(value);
+}
+
+function roundMilliseconds(value: number): number {
+	return Math.round(value * 100) / 100;
+}
+
+function sumNumbers(values: readonly number[]): number {
+	return values.reduce((sum, value) => sum + value, 0);
 }
 
 type StaticCoordinatorReportWorkStatus = Exclude<
@@ -3509,7 +3753,7 @@ function isFailedStaticWorkStatus(
 
 function createStaticCoordinatorWorkDiagnostics(
 	work: StaticCoordinatorReportWork,
-): StaticCoordinatorDiagnosticsReport["inFlightWork"][number] {
+): StaticCoordinatorWorkReportDiagnostics {
 	return {
 		domain: work.domain,
 		revision: work.revision,

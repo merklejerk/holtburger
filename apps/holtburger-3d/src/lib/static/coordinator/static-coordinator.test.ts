@@ -12,6 +12,7 @@ import type {
 	StaticSpatialRecord,
 	TerrainGeometryStaticDrawUnit,
 	StaticVisibilityRecord,
+	StaticObjectBakeDiagnostics,
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
 
@@ -294,6 +295,48 @@ describe("static coordinator", () => {
 			textureUses: [],
 		});
 		expect(coordinator.createSnapshot().committedDrawUnits).toBe(0);
+	});
+
+	it("retains static object bake diagnostics and recent timing samples", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+		const work = activeWorkForDemand(
+			coordinator,
+			createSingleOutdoorDetailDemand(0xda55ffff),
+		).find((candidate) => candidate.job.domain === "outdoor-detail");
+		const diagnostics = createStaticObjectBakeDiagnostics();
+
+		expect(work).toBeDefined();
+		resolver.complete(
+			resolver.pendingRequests.find(
+				(request) => request.job.domain === "outdoor-detail",
+			)?.requestId ?? "",
+		);
+		await flushPromises();
+		baker.complete(work?.workId ?? "", {
+			staticObjectBakeDiagnostics: [diagnostics],
+		});
+		await flushPromises();
+
+		const snapshot = coordinator.createSnapshot();
+		expect(snapshot.staticObjectBakeDiagnostics).toEqual([diagnostics]);
+		expect(snapshot.recentTiming).toHaveLength(1);
+		expect(snapshot.recentTiming[0]).toMatchObject({
+			domain: "outdoor-detail",
+			itemCount: 1,
+			kind: "static-coordinator-timing",
+			revision: 1,
+			staticBatchId: "static-batch:1:outdoor-detail:landblock:da55ffff:1",
+		});
+		expect(snapshot.recentTiming[0]?.resolverMs).toEqual(expect.any(Number));
+		expect(snapshot.recentTiming[0]?.attachmentMs).toEqual(expect.any(Number));
+		expect(snapshot.recentTiming[0]?.bakeMs).toEqual(expect.any(Number));
+		expect(snapshot.recentTiming[0]?.commitMs).toEqual(expect.any(Number));
 	});
 
 	it("does not emit eviction commit deltas without concrete resources", () => {
@@ -990,6 +1033,44 @@ function createSingleTerrainDemand(landblockId: number): StaticDemand {
 			terrain: 0,
 			envCells: -1,
 		},
+	};
+}
+
+function createSingleOutdoorDetailDemand(landblockId: number): StaticDemand {
+	return {
+		location: {
+			kind: "outdoor-landblock",
+			landblockId,
+		},
+		lod: {
+			buildings: -1,
+			detail: 0,
+			terrain: 0,
+			envCells: -1,
+		},
+	};
+}
+
+function createStaticObjectBakeDiagnostics(): StaticObjectBakeDiagnostics {
+	return {
+		buildingObjectCount: 0,
+		domain: "outdoor-detail",
+		drawUnitCount: 1,
+		estimatedFlattenedTypedArrayBytes: 78,
+		explicitObjectCount: 0,
+		flattenedTriangleCount: 1,
+		flattenedVertexCount: 3,
+		generatedInstanceCount: 1,
+		kind: "static-object-bake-diagnostics",
+		landblockId: 0xda55ffff,
+		objectCount: 1,
+		partitionCount: 1,
+		renderablePartitionCount: 1,
+		skippedPartitionCount: 0,
+		staticBatchId: "static-batch:1:outdoor-detail:landblock:da55ffff:1",
+		uniqueSourceCount: 1,
+		uniqueSourcePartGeometryCount: 1,
+		uniqueSourceTriangleCount: 1,
 	};
 }
 

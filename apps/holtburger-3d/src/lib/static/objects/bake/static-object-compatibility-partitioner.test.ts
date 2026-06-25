@@ -578,6 +578,26 @@ describe("static object compatibility partitioner", () => {
 			renderedTriangleCount: 1,
 			triangleCount: 1,
 		});
+		expect(result.staticObjectBakeDiagnostics).toEqual([
+			expect.objectContaining({
+				domain: "outdoor-detail",
+				drawUnitCount: 1,
+				estimatedFlattenedTypedArrayBytes: 78,
+				explicitObjectCount: 0,
+				flattenedTriangleCount: 1,
+				flattenedVertexCount: 3,
+				generatedInstanceCount: 1,
+				landblockId: 0xda55ffff,
+				objectCount: 1,
+				partitionCount: 1,
+				renderablePartitionCount: 1,
+				skippedPartitionCount: 0,
+				staticBatchId: "static-batch:objects",
+				uniqueSourceCount: 1,
+				uniqueSourcePartGeometryCount: 1,
+				uniqueSourceTriangleCount: 1,
+			}),
+		]);
 		expect(result.textureUses).toHaveLength(1);
 	});
 

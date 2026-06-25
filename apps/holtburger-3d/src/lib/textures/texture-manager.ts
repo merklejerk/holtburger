@@ -10,6 +10,7 @@ import type {
 	StaticObjectRolePageOverflowDiagnostics,
 	TerrainRolePageOverflowDiagnostics,
 	TextureAtlasDiagnosticsReport,
+	TextureAtlasWarningReportDiagnostics,
 } from "../runtime/diagnostics";
 import type {
 	SamplerPolicyUpdate,
@@ -177,8 +178,13 @@ export class TextureManager {
 			(batch) => batch.texturePageCount > 0,
 		).length;
 
+		const warnings = createTextureAtlasWarnings({
+			staticObjectRolePageOverflows:
+				this.#recentStaticObjectRolePageOverflows,
+			terrainRolePageOverflows: this.#recentTerrainRolePageOverflows,
+		});
+
 		return {
-			byDomain: createTextureAtlasDomainDiagnostics(batches),
 			kind: "texture-atlas",
 			summary: {
 				approximateBytes: sumNumbers(
@@ -199,11 +205,7 @@ export class TextureManager {
 				unmippedPageCount: pages.filter((page) => !page.mipmapsGenerated)
 					.length,
 			},
-			warnings: createTextureAtlasWarnings({
-				staticObjectRolePageOverflows:
-					this.#recentStaticObjectRolePageOverflows,
-				terrainRolePageOverflows: this.#recentTerrainRolePageOverflows,
-			}),
+			...(warnings.length > 0 ? { warnings } : {}),
 		};
 	}
 
@@ -1461,57 +1463,11 @@ function createTextureAtlasPageDiagnostics(
 		.sort((left, right) => left.pageId.localeCompare(right.pageId));
 }
 
-function createTextureAtlasDomainDiagnostics(
-	batches: readonly TextureAtlasBatchFacts[],
-): TextureAtlasDiagnosticsReport["byDomain"] {
-	const batchesByDomain = new Map<StaticDomain, TextureAtlasBatchFacts[]>();
-	for (const batch of batches) {
-		const domainBatches = batchesByDomain.get(batch.domain) ?? [];
-		domainBatches.push(batch);
-		batchesByDomain.set(batch.domain, domainBatches);
-	}
-
-	return Array.from(batchesByDomain.entries())
-		.map(([domain, domainBatches]) => {
-			const pages = domainBatches.flatMap((batch) => batch.pages);
-			const activeBatchCount = domainBatches.filter(
-				(batch) => batch.texturePageCount > 0,
-			).length;
-
-			return {
-				activeBatchCount,
-				approximateBytes: sumNumbers(
-					pages.map((page) => page.approximateBytes),
-				),
-				batchCount: domainBatches.length,
-				domain,
-				emptyBatchCount: domainBatches.length - activeBatchCount,
-				entryAliasCount: sumNumbers(
-					domainBatches.map((batch) => batch.entryAliasCount),
-				),
-				mipmappedPageCount: pages.filter((page) => page.mipmapsGenerated)
-					.length,
-				multiSourcePageCount: sumNumbers(
-					domainBatches.map((batch) => batch.multiSourcePageCount),
-				),
-				formats: countFormats(pages),
-				sampleClasses: countSampleClasses(pages),
-				samplerPolicies: countSamplerPolicies(pages),
-				texturePageCount: pages.length,
-				uniqueSourceCount: countUniqueDomainSources(domainBatches),
-				unmippedPageCount: pages.filter((page) => !page.mipmapsGenerated)
-					.length,
-				wrapModes: sumWrapModes(domainBatches),
-			};
-		})
-		.sort((left, right) => left.domain.localeCompare(right.domain));
-}
-
 function createTextureAtlasWarnings(input: {
 	readonly staticObjectRolePageOverflows: readonly StaticObjectRolePageOverflowDiagnostics[];
 	readonly terrainRolePageOverflows: readonly TerrainRolePageOverflowDiagnostics[];
-}): TextureAtlasDiagnosticsReport["warnings"] {
-	const warnings: Array<TextureAtlasDiagnosticsReport["warnings"][number]> = [];
+}): readonly TextureAtlasWarningReportDiagnostics[] {
+	const warnings: TextureAtlasWarningReportDiagnostics[] = [];
 	const latestTerrain = input.terrainRolePageOverflows.at(-1);
 	if (input.terrainRolePageOverflows.length > 0) {
 		warnings.push({
@@ -1535,60 +1491,9 @@ function createTextureAtlasWarnings(input: {
 	return warnings;
 }
 
-function countFormats(
-	pages: readonly TextureAtlasPageFacts[],
-): TextureAtlasDiagnosticsReport["byDomain"][number]["formats"] {
-	return {
-		rg8: pages.filter((page) => page.format === "rg8").length,
-		r8: pages.filter((page) => page.format === "r8").length,
-		rgba8: pages.filter((page) => page.format === "rgba8").length,
-	};
-}
-
-function countSamplerPolicies(
-	pages: readonly TextureAtlasPageFacts[],
-): TextureAtlasDiagnosticsReport["byDomain"][number]["samplerPolicies"] {
-	const counts: Record<string, number> = {};
-	for (const page of pages) {
-		counts[page.samplerPolicyKey] = (counts[page.samplerPolicyKey] ?? 0) + 1;
-	}
-
-	return counts;
-}
-
-function countSampleClasses(
-	pages: readonly TextureAtlasPageFacts[],
-): TextureAtlasDiagnosticsReport["byDomain"][number]["sampleClasses"] {
-	return {
-		index8: pages.filter((page) => page.sampleClass === "index8").length,
-		index16: pages.filter((page) => page.sampleClass === "index16").length,
-		"palette-rgba": pages.filter((page) => page.sampleClass === "palette-rgba")
-			.length,
-		"rgba-color": pages.filter((page) => page.sampleClass === "rgba-color")
-			.length,
-		"rgba-detail": pages.filter((page) => page.sampleClass === "rgba-detail")
-			.length,
-		"rgba-exact": pages.filter((page) => page.sampleClass === "rgba-exact")
-			.length,
-		"rgba-mask": pages.filter((page) => page.sampleClass === "rgba-mask")
-			.length,
-	};
-}
-
-function sumWrapModes(
-	batches: readonly TextureAtlasBatchFacts[],
-): TextureAtlasDiagnosticsReport["byDomain"][number]["wrapModes"] {
-	return {
-		"clamp-to-edge": sumNumbers(
-			batches.map((batch) => batch.wrapModes["clamp-to-edge"]),
-		),
-		repeat: sumNumbers(batches.map((batch) => batch.wrapModes.repeat)),
-	};
-}
-
 function countWrapModesForEntries(
 	entries: readonly StaticBatchTextureRegistryEntry[],
-): TextureAtlasDiagnosticsReport["byDomain"][number]["wrapModes"] {
+): TextureAtlasBatchFacts["wrapModes"] {
 	return {
 		"clamp-to-edge": entries.filter(
 			(entry) =>
@@ -1598,12 +1503,6 @@ function countWrapModesForEntries(
 			(entry) => entry.wrapS === "repeat" && entry.wrapT === "repeat",
 		).length,
 	};
-}
-
-function countUniqueDomainSources(
-	batches: readonly TextureAtlasBatchFacts[],
-): number {
-	return sumNumbers(batches.map((batch) => batch.uniqueSourceCount));
 }
 
 function countUniqueSources(

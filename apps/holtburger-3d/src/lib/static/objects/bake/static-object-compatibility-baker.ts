@@ -264,6 +264,7 @@ function bakeStaticObjectCompatibilityItem(
 			? deriveBuildingTransitionPortalApertureResource(item.payload.scope)
 			: null;
 	const partitionPlan = partitionStaticObjectCompatibility(scope);
+	const sourceIndex = new StaticObjectBakeSourceIndex(scope, input.attachments);
 	const renderablePartitions = partitionPlan.partitions.filter((partition) => {
 		if (isRenderableStaticObjectPartition(partition)) {
 			return true;
@@ -274,9 +275,9 @@ function bakeStaticObjectCompatibilityItem(
 	});
 	const drawUnits = renderablePartitions.map((partition) =>
 		createStaticObjectGeometryBakeOutput({
-			attachments: input.attachments,
 			partition,
 			payload: scope,
+			sourceIndex,
 			work: item.work,
 		}),
 	);
@@ -309,19 +310,20 @@ function bakeStaticObjectCompatibilityItem(
 	);
 
 	const bakedDrawUnits = drawUnits.map((output, index) => ({
-			...output.drawUnit,
-			sourceMappingCoverage:
-				sourceMappingCoverageBySliceId.get(
-					renderablePartitions[index]?.sliceId ?? "",
-				) ?? [],
-			spatialRecord:
-				spatialRecordBySliceId.get(
-					renderablePartitions[index]?.sliceId ?? "",
-				) ?? null,
-		}));
+		...output.drawUnit,
+		sourceMappingCoverage:
+			sourceMappingCoverageBySliceId.get(
+				renderablePartitions[index]?.sliceId ?? "",
+			) ?? [],
+		spatialRecord:
+			spatialRecordBySliceId.get(renderablePartitions[index]?.sliceId ?? "") ??
+			null,
+	}));
 	const instancedOutput = createStaticObjectInstancedOutput({
-		drawUnits: bakedDrawUnits,
+		partitions: renderablePartitions,
 		payload: scope,
+		sourceIndex,
+		work: item.work,
 	});
 
 	return {
@@ -329,6 +331,7 @@ function bakeStaticObjectCompatibilityItem(
 		diagnostics: createStaticObjectBakeDiagnostics({
 			drawUnits: drawUnits.map((output) => output.drawUnit),
 			input,
+			instancedOutput,
 			partitionPlan,
 			payload: scope,
 		}),
@@ -352,6 +355,10 @@ function bakeStaticObjectCompatibilityItem(
 
 function createStaticObjectBakeDiagnostics(options: {
 	readonly input: StaticBakeBatchInput;
+	readonly instancedOutput: {
+		readonly instances: readonly StaticObjectRenderInstance[];
+		readonly resources: readonly StaticObjectVisualResource[];
+	};
 	readonly payload: StaticObjectCompatibilityPayload;
 	readonly partitionPlan: ReturnType<typeof partitionStaticObjectCompatibility>;
 	readonly drawUnits: readonly StaticObjectGeometryStaticDrawUnit[];
@@ -379,6 +386,9 @@ function createStaticObjectBakeDiagnostics(options: {
 	const flattenedVertexCount = sumNumbers(
 		options.drawUnits.map((drawUnit) => drawUnit.vertexCount),
 	);
+	const instancingDiagnostics = createStaticObjectInstancingBakeDiagnostics(
+		options.instancedOutput,
+	);
 
 	return {
 		buildingObjectCount: options.payload.objects.filter(
@@ -397,6 +407,18 @@ function createStaticObjectBakeDiagnostics(options: {
 		generatedInstanceCount: options.payload.objects.filter(
 			(object) => object.identity.objectKind === "generated-scenery",
 		).length,
+		estimatedAvoidedFlattenedTriangleCount:
+			instancingDiagnostics.estimatedAvoidedFlattenedTriangleCount,
+		estimatedAvoidedFlattenedTypedArrayBytes:
+			instancingDiagnostics.estimatedAvoidedFlattenedTypedArrayBytes,
+		estimatedInstancedSourceTypedArrayBytes:
+			instancingDiagnostics.estimatedInstancedSourceTypedArrayBytes,
+		instancedRenderInstanceCount:
+			instancingDiagnostics.instancedRenderInstanceCount,
+		instancedSourceTriangleCount:
+			instancingDiagnostics.instancedSourceTriangleCount,
+		instancedVisualResourceCount:
+			instancingDiagnostics.instancedVisualResourceCount,
 		kind: "static-object-bake-diagnostics",
 		landblockId: options.payload.landblock.landblockId,
 		objectCount: options.payload.objects.length,
@@ -411,6 +433,53 @@ function createStaticObjectBakeDiagnostics(options: {
 	};
 }
 
+function createStaticObjectInstancingBakeDiagnostics(input: {
+	readonly instances: readonly StaticObjectRenderInstance[];
+	readonly resources: readonly StaticObjectVisualResource[];
+}): Pick<
+	StaticObjectBakeDiagnostics,
+	| "estimatedAvoidedFlattenedTriangleCount"
+	| "estimatedAvoidedFlattenedTypedArrayBytes"
+	| "estimatedInstancedSourceTypedArrayBytes"
+	| "instancedRenderInstanceCount"
+	| "instancedSourceTriangleCount"
+	| "instancedVisualResourceCount"
+> {
+	const instanceCountByResourceId = new Map<string, number>();
+	for (const instance of input.instances) {
+		instanceCountByResourceId.set(
+			instance.resourceId,
+			(instanceCountByResourceId.get(instance.resourceId) ?? 0) + 1,
+		);
+	}
+
+	let estimatedAvoidedFlattenedTriangleCount = 0;
+	let estimatedAvoidedFlattenedTypedArrayBytes = 0;
+	let estimatedInstancedSourceTypedArrayBytes = 0;
+	let instancedSourceTriangleCount = 0;
+	for (const resource of input.resources) {
+		const resourceBytes = estimateStaticObjectVisualResourceTypedArrayBytes(
+			resource,
+		);
+		const instanceCount = instanceCountByResourceId.get(resource.resourceId) ?? 0;
+		estimatedInstancedSourceTypedArrayBytes += resourceBytes;
+		instancedSourceTriangleCount += resource.triangleCount;
+		estimatedAvoidedFlattenedTriangleCount +=
+			resource.triangleCount * Math.max(instanceCount - 1, 0);
+		estimatedAvoidedFlattenedTypedArrayBytes +=
+			resourceBytes * Math.max(instanceCount - 1, 0);
+	}
+
+	return {
+		estimatedAvoidedFlattenedTriangleCount,
+		estimatedAvoidedFlattenedTypedArrayBytes,
+		estimatedInstancedSourceTypedArrayBytes,
+		instancedRenderInstanceCount: input.instances.length,
+		instancedSourceTriangleCount,
+		instancedVisualResourceCount: input.resources.length,
+	};
+}
+
 function estimateStaticObjectDrawUnitTypedArrayBytes(
 	drawUnit: StaticObjectGeometryStaticDrawUnit,
 ): number {
@@ -422,13 +491,26 @@ function estimateStaticObjectDrawUnitTypedArrayBytes(
 	);
 }
 
+function estimateStaticObjectVisualResourceTypedArrayBytes(
+	resource: StaticObjectVisualResource,
+): number {
+	return (
+		resource.positions.byteLength +
+		resource.texCoords.byteLength +
+		resource.materialSlotIndices.byteLength +
+		resource.indices.byteLength
+	);
+}
+
 function sumNumbers(values: readonly number[]): number {
 	return values.reduce((sum, value) => sum + value, 0);
 }
 
 function createStaticObjectInstancedOutput(options: {
-	readonly drawUnits: readonly StaticObjectGeometryStaticDrawUnit[];
+	readonly partitions: readonly StaticObjectCompatibilityPartition[];
 	readonly payload: StaticObjectCompatibilityPayload;
+	readonly sourceIndex: StaticObjectBakeSourceIndex;
+	readonly work: ScheduledStaticWork;
 }): {
 	readonly instances: readonly StaticObjectRenderInstance[];
 	readonly resources: readonly StaticObjectVisualResource[];
@@ -437,116 +519,142 @@ function createStaticObjectInstancedOutput(options: {
 		return { instances: [], resources: [] };
 	}
 
-	const objectByInstanceId = new Map(
-		options.payload.objects.map((object) => [object.identity.instanceId, object]),
-	);
-	const coveragesByResourceKey = new Map<
-		string,
-		{
-			readonly drawUnit: StaticObjectGeometryStaticDrawUnit;
-			readonly geometry: StaticObjectSourceGeometryIdentity;
-			readonly materialEntry: StaticMaterialTableEntry;
-			readonly objectInstanceIds: Set<string>;
-			readonly sourceCoverages: StaticObjectSourceMappingCoverage[];
-		}
-	>();
+	const groupsByKey = new Map<string, StaticObjectVisualResourceTriangleGroup>();
+	for (const partition of options.partitions) {
+		const materialEntries = createStaticObjectMaterialTableEntries({
+			partition,
+			work: options.work,
+		});
+		const materialEntryByKey = new Map(
+			partition.coarseTablePlan.entries.map((entry, index) => [
+				entry.materialEntryKey,
+				materialEntries[index],
+			]),
+		);
 
-	for (const drawUnit of options.drawUnits) {
-		for (const coverage of drawUnit.sourceMappingCoverage) {
-			if (coverage.object.objectKind !== "generated-scenery") {
+		for (const triangle of partition.triangles) {
+			if (triangle.object.objectKind !== "generated-scenery") {
 				continue;
 			}
-			const object = objectByInstanceId.get(coverage.object.instanceId);
+			const object = options.sourceIndex.getObject(triangle.object);
 			const candidate = selectGeneratedStaticObjectRenderInstanceCandidate(object);
 			if (candidate.kind === "ineligible") {
 				continue;
 			}
-			const materialEntry = drawUnit.materialEntries.find(
-				(entry) => entry.slot === coverage.materialSlot,
-			);
+			const materialEntry = materialEntryByKey.get(triangle.materialEntryKey);
 			if (!materialEntry) {
 				continue;
 			}
-			const geometry = createStaticObjectSourceGeometryIdentityFromCoverage(coverage);
-			const resourceKey = createStaticObjectVisualResourceKey({
+			const part = options.sourceIndex.getPart(
+				triangle.source,
+				triangle.gfxObj,
+				triangle.partIndex,
+			);
+			const geometry = part.geometry;
+			const groupKey = createStaticObjectVisualResourceTriangleGroupKey({
 				geometry,
-				indexType: drawUnit.indexType,
 				materialEntries: [materialEntry],
-				materialFamily: drawUnit.materialFamily,
-				materialPass: drawUnit.materialPass,
+				materialFamily: resolveRenderableStaticObjectFamily(partition),
+				materialPass: resolveRenderableStaticObjectPass(partition),
 				renderState: materialEntry.renderState,
 				textureUseIds: textureUseIdsForMaterialEntry(materialEntry),
 			});
-			const resourceKeyString =
-				createStaticObjectVisualResourceKeyString(resourceKey);
-			const group = coveragesByResourceKey.get(resourceKeyString) ?? {
-				drawUnit,
+			const group = groupsByKey.get(groupKey) ?? {
+				candidatesByInstanceId: new Map(),
 				geometry,
 				materialEntry,
-				objectInstanceIds: new Set<string>(),
-				sourceCoverages: [],
+				materialFamily: resolveRenderableStaticObjectFamily(partition),
+				materialPass: resolveRenderableStaticObjectPass(partition),
+				sourceTrianglesById: new Map(),
+				textureUseIds: textureUseIdsForMaterialEntry(materialEntry),
 			};
-			group.objectInstanceIds.add(coverage.object.instanceId);
-			group.sourceCoverages.push(coverage);
-			coveragesByResourceKey.set(resourceKeyString, group);
+			group.candidatesByInstanceId.set(
+				candidate.object.identity.instanceId,
+				candidate,
+			);
+			group.sourceTrianglesById.set(triangle.sourceTriangleId, triangle);
+			groupsByKey.set(groupKey, group);
 		}
 	}
 
 	const resources: StaticObjectVisualResource[] = [];
 	const instances: StaticObjectRenderInstance[] = [];
-	for (const group of coveragesByResourceKey.values()) {
-		if (group.objectInstanceIds.size < 2) {
+	for (const group of groupsByKey.values()) {
+		if (group.candidatesByInstanceId.size < 2) {
 			continue;
 		}
+		const resourceGeometry = bakeStaticObjectVisualResourceGeometry({
+			materialSlot: group.materialEntry.slot,
+			sourceIndex: options.sourceIndex,
+			triangles: [...group.sourceTrianglesById.values()],
+		});
 
 		const resourceKey = createStaticObjectVisualResourceKey({
 			geometry: group.geometry,
-			indexType: group.drawUnit.indexType,
+			indexType: resourceGeometry.indexType,
 			materialEntries: [group.materialEntry],
-			materialFamily: group.drawUnit.materialFamily,
-			materialPass: group.drawUnit.materialPass,
+			materialFamily: group.materialFamily,
+			materialPass: group.materialPass,
 			renderState: group.materialEntry.renderState,
-			textureUseIds: textureUseIdsForMaterialEntry(group.materialEntry),
+			textureUseIds: group.textureUseIds,
 		});
 		const resourceId = createStaticObjectVisualResourceId(resourceKey);
 		resources.push({
+			bounds: resourceGeometry.bounds,
+			coordinateSpace: "static-object-source-local",
 			geometry: group.geometry,
-			indexType: group.drawUnit.indexType,
+			indexType: resourceGeometry.indexType,
+			indices: resourceGeometry.indices,
 			key: resourceKey,
 			kind: "static-object-visual-resource",
 			materialEntries: [group.materialEntry],
-			materialFamily: group.drawUnit.materialFamily,
-			materialPass: group.drawUnit.materialPass,
+			materialFamily: group.materialFamily,
+			materialPass: group.materialPass,
+			materialSlotIndices: resourceGeometry.materialSlotIndices,
+			positions: resourceGeometry.positions,
 			renderState: group.materialEntry.renderState,
 			resourceId,
-			textureUseIds: textureUseIdsForMaterialEntry(group.materialEntry),
+			texCoords: resourceGeometry.texCoords,
+			textureUseIds: group.textureUseIds,
+			triangleCount: resourceGeometry.triangleCount,
+			vertexCount: resourceGeometry.vertexCount,
 		});
 
-		for (const coverage of group.sourceCoverages) {
-			const object = objectByInstanceId.get(coverage.object.instanceId);
-			const candidate = selectGeneratedStaticObjectRenderInstanceCandidate(object);
-			if (candidate.kind === "ineligible") {
-				continue;
-			}
+		const part = options.sourceIndex.getPart(
+			group.geometry.source,
+			group.geometry.gfxObj,
+			group.geometry.partIndex,
+		);
+		const sortedCandidates = [...group.candidatesByInstanceId.values()].sort(
+			(left, right) =>
+				left.object.identity.instanceId.localeCompare(
+					right.object.identity.instanceId,
+				),
+		);
+		for (const candidate of sortedCandidates) {
 			instances.push({
 				bounds: candidate.bounds,
 				domain: "outdoor-detail",
 				generated: candidate.generated,
 				instanceId: [
 					"static-object-render-instance",
-					coverage.object.instanceId,
-					`part:${coverage.partIndex}`,
-					`slot:${coverage.materialSlot}`,
+					candidate.object.identity.instanceId,
+					`part:${group.geometry.partIndex}`,
+					`slot:${group.materialEntry.slot}`,
 				].join(":"),
 				kind: "static-object-render-instance",
 				landblockId: options.payload.landblock.landblockId,
 				resourceId,
 				sortCenter: centerVec3OfBounds(candidate.bounds),
 				source: candidate.object.identity,
+				sourceToLandblockMatrix: createStaticObjectSourcePartMatrix(
+					candidate.object,
+					part,
+				),
 				transform: candidate.object.localPlacement,
 				transparency:
-					group.drawUnit.materialPass === "transparent" ||
-					group.drawUnit.materialPass === "additive"
+					group.materialPass === "transparent" ||
+					group.materialPass === "additive"
 						? {
 								kind: "direct-sorted-transparent",
 								sortCenter: centerVec3OfBounds(candidate.bounds),
@@ -581,6 +689,25 @@ type GeneratedStaticObjectRenderInstanceCandidateEligibility =
 				| "missing-instance-bounds";
 	  };
 
+interface StaticObjectVisualResourceTriangleGroup {
+	readonly candidatesByInstanceId: Map<
+		string,
+		Extract<
+			GeneratedStaticObjectRenderInstanceCandidateEligibility,
+			{ readonly kind: "eligible" }
+		>
+	>;
+	readonly geometry: StaticObjectSourceGeometryIdentity;
+	readonly materialEntry: StaticMaterialTableEntry;
+	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
+	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
+	readonly sourceTrianglesById: Map<
+		string,
+		StaticObjectCompatibilityTriangle
+	>;
+	readonly textureUseIds: readonly string[];
+}
+
 function selectGeneratedStaticObjectRenderInstanceCandidate(
 	object: StaticObjectInstanceFacts | undefined,
 ): GeneratedStaticObjectRenderInstanceCandidateEligibility {
@@ -601,15 +728,119 @@ function selectGeneratedStaticObjectRenderInstanceCandidate(
 	};
 }
 
-function createStaticObjectSourceGeometryIdentityFromCoverage(
-	coverage: StaticObjectSourceMappingCoverage,
-): StaticObjectSourceGeometryIdentity {
+function createStaticObjectVisualResourceTriangleGroupKey(input: {
+	readonly geometry: StaticObjectSourceGeometryIdentity;
+	readonly materialEntries: readonly StaticMaterialTableEntry[];
+	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
+	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
+	readonly renderState: StaticObjectGeometryStaticDrawUnit["renderState"];
+	readonly textureUseIds: readonly string[];
+}): string {
+	return createStaticObjectVisualResourceKeyString(
+		createStaticObjectVisualResourceKey({
+			...input,
+			// Index width depends on the deduped source triangle count. The final
+			// resource key is rebuilt after source-local geometry is materialized.
+			indexType: "uint32",
+		}),
+	);
+}
+
+function bakeStaticObjectVisualResourceGeometry(options: {
+	readonly materialSlot: number;
+	readonly sourceIndex: StaticObjectBakeSourceIndex;
+	readonly triangles: readonly StaticObjectCompatibilityTriangle[];
+}): {
+	readonly bounds: StaticBounds | null;
+	readonly positions: Float32Array;
+	readonly texCoords: Float32Array;
+	readonly materialSlotIndices: Float32Array;
+	readonly indices: Uint16Array | Uint32Array;
+	readonly indexType: StaticObjectGeometryStaticDrawUnit["indexType"];
+	readonly vertexCount: number;
+	readonly triangleCount: number;
+} {
+	const sortedTriangles = [...options.triangles].sort((left, right) =>
+		left.sourceTriangleId.localeCompare(right.sourceTriangleId),
+	);
+	const vertexCount = sortedTriangles.length * 3;
+	const positions = new Float32Array(vertexCount * 3);
+	const texCoords = new Float32Array(vertexCount * 2);
+	const materialSlotIndices = new Float32Array(vertexCount);
+	const indices = createIndexArray(vertexCount);
+
+	for (const [triangleIndex, triangle] of sortedTriangles.entries()) {
+		const part = options.sourceIndex.getPart(
+			triangle.source,
+			triangle.gfxObj,
+			triangle.partIndex,
+		);
+		const sourceGeometry = options.sourceIndex.getGeometry(part);
+		const sourceTriangle = findStaticObjectSourceTriangle(part, triangle);
+
+		for (let triangleVertex = 0; triangleVertex < 3; triangleVertex += 1) {
+			const sourceVertexIndex = sourceTriangle.firstVertex + triangleVertex;
+			const targetVertexIndex = triangleIndex * 3 + triangleVertex;
+			copySourcePosition({
+				source: sourceGeometry.positions,
+				sourceVertexIndex,
+				target: positions,
+				targetVertexIndex,
+			});
+			writeTexCoord({
+				source: sourceGeometry.texCoords,
+				sourceVertexIndex,
+				target: texCoords,
+				targetVertexIndex,
+			});
+			materialSlotIndices[targetVertexIndex] = options.materialSlot;
+			indices[targetVertexIndex] = targetVertexIndex;
+		}
+	}
+
 	return {
-		gfxObj: coverage.gfxObj,
-		kind: "static-object-source-geometry",
-		partIndex: coverage.partIndex,
-		source: coverage.source,
+		bounds: computePositionBounds(positions),
+		indexType: indices instanceof Uint16Array ? "uint16" : "uint32",
+		indices,
+		materialSlotIndices,
+		positions,
+		texCoords,
+		triangleCount: sortedTriangles.length,
+		vertexCount,
 	};
+}
+
+function findStaticObjectSourceTriangle(
+	part: StaticObjectPartSourceFacts,
+	triangle: StaticObjectCompatibilityTriangle,
+): StaticObjectPartSourceFacts["triangles"][number] {
+	const sourceTriangle = part.triangles.find(
+		(candidate) =>
+			candidate.polygonId === triangle.polygonId &&
+			candidate.firstVertex === triangle.firstVertex &&
+			candidate.geometrySurfaceId === triangle.geometrySurfaceId &&
+			candidate.materialVariantSignature === triangle.materialVariantSignature,
+	);
+	if (!sourceTriangle) {
+		throw new Error(
+			`Static object visual resource references missing source triangle ${triangle.sourceTriangleId}.`,
+		);
+	}
+
+	return sourceTriangle;
+}
+
+function copySourcePosition(options: {
+	readonly source: Float32Array;
+	readonly sourceVertexIndex: number;
+	readonly target: Float32Array;
+	readonly targetVertexIndex: number;
+}): void {
+	const sourceOffset = options.sourceVertexIndex * 3;
+	const targetOffset = options.targetVertexIndex * 3;
+	options.target[targetOffset] = options.source[sourceOffset] ?? 0;
+	options.target[targetOffset + 1] = options.source[sourceOffset + 1] ?? 0;
+	options.target[targetOffset + 2] = options.source[sourceOffset + 2] ?? 0;
 }
 
 function textureUseIdsForMaterialEntry(
@@ -709,15 +940,11 @@ interface StaticObjectGeometryBakeOutput {
 }
 
 function createStaticObjectGeometryBakeOutput(options: {
-	readonly attachments: StaticBakeBatchInput["attachments"];
 	readonly work: ScheduledStaticWork;
 	readonly payload: StaticObjectCompatibilityPayload;
 	readonly partition: StaticObjectCompatibilityPartition;
+	readonly sourceIndex: StaticObjectBakeSourceIndex;
 }): StaticObjectGeometryBakeOutput {
-	const sourceIndex = new StaticObjectBakeSourceIndex(
-		options.payload,
-		options.attachments,
-	);
 	const materialEntries = createStaticObjectMaterialTableEntries(options);
 	const materialSlotByEntryKey = new Map<string, number>(
 		options.partition.coarseTablePlan.entries.map((entry, index) => [
@@ -727,7 +954,7 @@ function createStaticObjectGeometryBakeOutput(options: {
 	);
 	const geometry = bakeStaticObjectPartitionGeometry(
 		options.partition.triangles,
-		sourceIndex,
+		options.sourceIndex,
 		materialSlotByEntryKey,
 	);
 	const textureUseIds = uniqueSortedStrings(
@@ -1111,19 +1338,7 @@ function bakeStaticObjectPartitionGeometry(
 			triangle.partIndex,
 		);
 		const sourceGeometry = sourceIndex.getGeometry(part);
-		const sourceTriangle = part.triangles.find(
-			(candidate) =>
-				candidate.polygonId === triangle.polygonId &&
-				candidate.firstVertex === triangle.firstVertex &&
-				candidate.geometrySurfaceId === triangle.geometrySurfaceId &&
-				candidate.materialVariantSignature ===
-					triangle.materialVariantSignature,
-		);
-		if (!sourceTriangle) {
-			throw new Error(
-				`Static object geometry partition references missing triangle ${triangle.sourceTriangleId}.`,
-			);
-		}
+		const sourceTriangle = findStaticObjectSourceTriangle(part, triangle);
 		const materialSlot = materialSlotByEntryKey.get(triangle.materialEntryKey);
 		if (materialSlot === undefined) {
 			throw new Error(

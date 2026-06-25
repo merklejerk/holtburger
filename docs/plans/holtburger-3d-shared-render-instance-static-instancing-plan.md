@@ -423,8 +423,16 @@ Spicy bits and debt:
 - Candidate construction now burns off nullable host/content facts through a local eligibility gate:
   emitted render instances require generated facts and non-null instance bounds, while ineligible
   objects remain on the baked path.
+- Shared visual resources now carry source-local uploadable geometry: positions, texcoords,
+  material-slot indices, indices, counts, and local bounds. Render instances carry a full
+  source-geometry-to-landblock matrix so source scale and setup part placement do not get baked into
+  the shared buffers.
+- Static-object bake diagnostics now report shared visual resource count, render instance count,
+  instanced source triangle/byte counts, and estimated duplicate flattened triangles/bytes that the
+  eventual shared-resource cutover can avoid.
 - Added a bake test proving repeated generated outdoor-detail scenery produces one shared visual
-  resource and multiple render instances that reference the same resource id.
+  resource with source-local geometry and multiple render instances that reference the same resource
+  id.
 
 Spicy bits and debt:
 
@@ -435,9 +443,11 @@ Spicy bits and debt:
 - Candidate emission requires `instanceBounds`; generated objects without bounds stay baked-only for
   now. The nullable source data is contained at the eligibility boundary, but Phase 2 should report
   retained-baked reasons before broad enablement.
-- Candidate resources currently use source geometry identity plus renderer-visible material entries,
-  but they do not yet carry source-local vertex/index buffers. Phase 3 cannot upload shared resources
-  until Phase 2 adds that data or a source-geometry lookup path.
+- The duplicate-byte counters are estimates of what the post-cutover path can avoid, not current
+  runtime savings. The baked draw-unit path is still emitted and uploaded today.
+- Retained-baked reasons are still implicit. Phase 4/debug parity should expose a compact reason
+  summary for missing bounds, one-off generated sources, non-generated objects, and non-renderable
+  partitions without expanding the copied runtime report into row-level noise.
 - Runtime layer resource collection now includes `instancedObjectResources`, but the WebGL2 renderer
   intentionally ignores them until the shared resource cache lands.
 

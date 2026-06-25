@@ -584,11 +584,17 @@ describe("static object compatibility partitioner", () => {
 			expect.objectContaining({
 				domain: "outdoor-detail",
 				drawUnitCount: 1,
+				estimatedAvoidedFlattenedTriangleCount: 0,
+				estimatedAvoidedFlattenedTypedArrayBytes: 0,
 				estimatedFlattenedTypedArrayBytes: 78,
+				estimatedInstancedSourceTypedArrayBytes: 0,
 				explicitObjectCount: 0,
 				flattenedTriangleCount: 1,
 				flattenedVertexCount: 3,
 				generatedInstanceCount: 1,
+				instancedRenderInstanceCount: 0,
+				instancedSourceTriangleCount: 0,
+				instancedVisualResourceCount: 0,
 				landblockId: 0xda55ffff,
 				objectCount: 1,
 				partitionCount: 1,
@@ -642,16 +648,38 @@ describe("static object compatibility partitioner", () => {
 			),
 		).toHaveProperty("size", 1);
 		expect(result.staticObjectVisualResources[0]).toMatchObject({
+			coordinateSpace: "static-object-source-local",
 			geometry: createStaticObjectSourceGeometryIdentity({
 				gfxObj: createGfxObjIdentity(),
 				partIndex: 0,
 				source: createSourceIdentity(),
 			}),
+			indexType: "uint16",
 			materialFamily: "texture-rgba",
 			materialPass: "alpha-test",
 			textureUseIds: expect.arrayContaining([
 				expect.stringContaining("prepared-render-surface-texture-use"),
 			]),
+			triangleCount: 2,
+			vertexCount: 6,
+		});
+		expect(result.staticObjectVisualResources[0]?.positions).toBeInstanceOf(
+			Float32Array,
+		);
+		expect(result.staticObjectVisualResources[0]?.positions).toHaveLength(18);
+		expect(result.staticObjectVisualResources[0]?.indices).toBeInstanceOf(
+			Uint16Array,
+		);
+		expect(
+			result.staticObjectRenderInstances[0]?.sourceToLandblockMatrix,
+		).toBeInstanceOf(Float32Array);
+		expect(result.staticObjectBakeDiagnostics[0]).toMatchObject({
+			estimatedAvoidedFlattenedTriangleCount: 2,
+			estimatedAvoidedFlattenedTypedArrayBytes: 156,
+			estimatedInstancedSourceTypedArrayBytes: 156,
+			instancedRenderInstanceCount: 2,
+			instancedSourceTriangleCount: 2,
+			instancedVisualResourceCount: 1,
 		});
 	});
 

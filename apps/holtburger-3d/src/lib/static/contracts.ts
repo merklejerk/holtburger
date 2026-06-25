@@ -1168,6 +1168,12 @@ export interface StaticObjectBakeDiagnostics {
 	readonly renderablePartitionCount: number;
 	readonly skippedPartitionCount: number;
 	readonly estimatedFlattenedTypedArrayBytes: number;
+	readonly instancedVisualResourceCount: number;
+	readonly instancedRenderInstanceCount: number;
+	readonly instancedSourceTriangleCount: number;
+	readonly estimatedInstancedSourceTypedArrayBytes: number;
+	readonly estimatedAvoidedFlattenedTriangleCount: number;
+	readonly estimatedAvoidedFlattenedTypedArrayBytes: number;
 }
 
 export type StaticMaterialCoverageFamily =
@@ -1403,11 +1409,23 @@ export interface StaticObjectVisualResource {
 	readonly resourceId: StaticObjectVisualResourceId;
 	readonly key: StaticObjectVisualResourceKey;
 	readonly geometry: StaticObjectSourceGeometryIdentity;
+	/**
+	 * Source-local geometry copied from the static object source attachment.
+	 * Per-instance placement and scale are applied by the render instance.
+	 */
+	readonly coordinateSpace: "static-object-source-local";
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
 	readonly renderState: StaticObjectRenderState;
 	readonly materialEntries: readonly StaticMaterialTableEntry[];
+	readonly positions: Float32Array;
+	readonly texCoords: Float32Array;
+	readonly materialSlotIndices: Float32Array;
+	readonly indices: Uint16Array | Uint32Array;
 	readonly indexType: StaticObjectGeometryStaticDrawUnit["indexType"];
+	readonly vertexCount: number;
+	readonly triangleCount: number;
+	readonly bounds: StaticBounds | null;
 	readonly textureUseIds: readonly string[];
 }
 
@@ -1418,6 +1436,11 @@ export interface StaticObjectRenderInstance {
 	readonly domain: "outdoor-detail";
 	readonly landblockId: number;
 	readonly transform: StaticPlacementTransform;
+	/**
+	 * Full source-geometry-to-landblock matrix for this object/part. This keeps
+	 * source scale and setup part placement out of the shared resource buffers.
+	 */
+	readonly sourceToLandblockMatrix: Float32Array;
 	readonly bounds: StaticBounds;
 	readonly sortCenter: StaticVec3;
 	readonly transparency: StaticObjectTransparencySubmission;

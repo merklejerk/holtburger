@@ -3626,6 +3626,17 @@ function createStaticObjectBakeSummary(
 		estimatedFlattenedTypedArrayBytes: sumNumbers(
 			diagnostics.map((entry) => entry.estimatedFlattenedTypedArrayBytes),
 		),
+		estimatedAvoidedFlattenedTriangleCount: sumNumbers(
+			diagnostics.map((entry) => entry.estimatedAvoidedFlattenedTriangleCount),
+		),
+		estimatedAvoidedFlattenedTypedArrayBytes: sumNumbers(
+			diagnostics.map(
+				(entry) => entry.estimatedAvoidedFlattenedTypedArrayBytes,
+			),
+		),
+		estimatedInstancedSourceTypedArrayBytes: sumNumbers(
+			diagnostics.map((entry) => entry.estimatedInstancedSourceTypedArrayBytes),
+		),
 		explicitObjectCount: sumNumbers(
 			diagnostics.map((entry) => entry.explicitObjectCount),
 		),
@@ -3638,16 +3649,31 @@ function createStaticObjectBakeSummary(
 		generatedInstanceCount: sumNumbers(
 			diagnostics.map((entry) => entry.generatedInstanceCount),
 		),
+		instancedRenderInstanceCount: sumNumbers(
+			diagnostics.map((entry) => entry.instancedRenderInstanceCount),
+		),
+		instancedSourceTriangleCount: sumNumbers(
+			diagnostics.map((entry) => entry.instancedSourceTriangleCount),
+		),
+		instancedVisualResourceCount: sumNumbers(
+			diagnostics.map((entry) => entry.instancedVisualResourceCount),
+		),
 		largestBake:
 			largestBake === null
 				? null
 				: {
 						domain: largestBake.domain,
 						drawUnitCount: largestBake.drawUnitCount,
+						estimatedAvoidedFlattenedTypedArrayBytes:
+							largestBake.estimatedAvoidedFlattenedTypedArrayBytes,
 						estimatedFlattenedTypedArrayBytes:
 							largestBake.estimatedFlattenedTypedArrayBytes,
 						flattenedTriangleCount: largestBake.flattenedTriangleCount,
 						generatedInstanceCount: largestBake.generatedInstanceCount,
+						instancedRenderInstanceCount:
+							largestBake.instancedRenderInstanceCount,
+						instancedVisualResourceCount:
+							largestBake.instancedVisualResourceCount,
 						landblockId: formatHex(largestBake.landblockId),
 						objectCount: largestBake.objectCount,
 						uniqueSourceCount: largestBake.uniqueSourceCount,

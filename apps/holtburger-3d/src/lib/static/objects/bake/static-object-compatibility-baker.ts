@@ -720,32 +720,55 @@ function createStaticObjectInstancedOutput(options: {
 				triangle.partIndex,
 			);
 			const geometry = part.geometry;
+			const materialFamily = resolveRenderableStaticObjectFamily(partition);
+			const materialPass = resolveRenderableStaticObjectPass(partition);
+			const textureUseIds = textureUseIdsForMaterialEntry(materialEntry);
+			const groupingPartitionSliceId =
+				materialPass === "transparent" || materialPass === "additive"
+					? null
+					: partition.sliceId;
 			const groupKey = createStaticObjectVisualResourceTriangleGroupKey({
 				geometry,
 				materialEntries: [materialEntry],
-				materialFamily: resolveRenderableStaticObjectFamily(partition),
-				materialPass: resolveRenderableStaticObjectPass(partition),
-				partitionSliceId: partition.sliceId,
+				materialFamily,
+				materialPass,
+				partitionSliceId: groupingPartitionSliceId,
 				renderState: materialEntry.renderState,
-				textureUseIds: textureUseIdsForMaterialEntry(materialEntry),
+				textureUseIds,
 			});
 			const group = groupsByKey.get(groupKey) ?? {
 				candidatesByInstanceId: new Map(),
-				coveredTriangleKeys: new Set(),
+				candidatePartitionSliceIdsByInstanceId: new Map(),
+				coveredTriangleKeysByPartitionSliceId: new Map(),
 				geometry,
 				materialEntry,
-				materialFamily: resolveRenderableStaticObjectFamily(partition),
-				materialPass: resolveRenderableStaticObjectPass(partition),
-				partitionSliceId: partition.sliceId,
+				materialFamily,
+				materialPass,
 				sourceTrianglesById: new Map(),
-				textureUseIds: textureUseIdsForMaterialEntry(materialEntry),
+				textureUseIds,
 			};
 			group.candidatesByInstanceId.set(
 				candidate.object.identity.instanceId,
 				candidate,
 			);
-			group.coveredTriangleKeys.add(
+			const candidatePartitionSliceIds =
+				group.candidatePartitionSliceIdsByInstanceId.get(
+					candidate.object.identity.instanceId,
+				) ?? new Set<string>();
+			candidatePartitionSliceIds.add(partition.sliceId);
+			group.candidatePartitionSliceIdsByInstanceId.set(
+				candidate.object.identity.instanceId,
+				candidatePartitionSliceIds,
+			);
+			const coveredTriangleKeys =
+				group.coveredTriangleKeysByPartitionSliceId.get(partition.sliceId) ??
+				new Set<string>();
+			coveredTriangleKeys.add(
 				createStaticObjectTriangleCoverageKey(partition, triangle),
+			);
+			group.coveredTriangleKeysByPartitionSliceId.set(
+				partition.sliceId,
+				coveredTriangleKeys,
 			);
 			group.sourceTrianglesById.set(
 				createStaticObjectSourceLocalTriangleKey(triangle),
@@ -760,16 +783,21 @@ function createStaticObjectInstancedOutput(options: {
 		if (group.candidatesByInstanceId.size < 2) {
 			continue;
 		}
-		const coveredTriangleKeys =
-			coveredTriangleKeysByPartitionSliceId.get(group.partitionSliceId) ??
-			new Set<string>();
-		for (const triangleKey of group.coveredTriangleKeys) {
-			coveredTriangleKeys.add(triangleKey);
+		for (const [
+			partitionSliceId,
+			groupCoveredTriangleKeys,
+		] of group.coveredTriangleKeysByPartitionSliceId) {
+			const coveredTriangleKeys =
+				coveredTriangleKeysByPartitionSliceId.get(partitionSliceId) ??
+				new Set<string>();
+			for (const triangleKey of groupCoveredTriangleKeys) {
+				coveredTriangleKeys.add(triangleKey);
+			}
+			coveredTriangleKeysByPartitionSliceId.set(
+				partitionSliceId,
+				coveredTriangleKeys,
+			);
 		}
-		coveredTriangleKeysByPartitionSliceId.set(
-			group.partitionSliceId,
-			coveredTriangleKeys,
-		);
 	}
 
 	const cutoverPartitionSliceIds = new Set<string>();
@@ -792,10 +820,14 @@ function createStaticObjectInstancedOutput(options: {
 	const resources: StaticObjectVisualResource[] = [];
 	const instances: StaticObjectRenderInstance[] = [];
 	for (const group of groupsByKey.values()) {
-		if (
-			group.candidatesByInstanceId.size < 2 ||
-			!cutoverPartitionSliceIds.has(group.partitionSliceId)
-		) {
+		if (group.candidatesByInstanceId.size < 2) {
+			continue;
+		}
+		const cutoverCandidates = selectCutoverStaticObjectInstanceCandidates({
+			cutoverPartitionSliceIds,
+			group,
+		});
+		if (cutoverCandidates.length === 0) {
 			continue;
 		}
 		const resourceGeometry = bakeStaticObjectVisualResourceGeometry({
@@ -840,13 +872,7 @@ function createStaticObjectInstancedOutput(options: {
 			group.geometry.gfxObj,
 			group.geometry.partIndex,
 		);
-		const sortedCandidates = [...group.candidatesByInstanceId.values()].sort(
-			(left, right) =>
-				left.object.identity.instanceId.localeCompare(
-					right.object.identity.instanceId,
-				),
-		);
-		for (const candidate of sortedCandidates) {
+		for (const candidate of cutoverCandidates) {
 			instances.push({
 				bounds: candidate.bounds,
 				domain: "outdoor-detail",
@@ -913,19 +939,46 @@ interface StaticObjectVisualResourceTriangleGroup {
 			{ readonly kind: "eligible" }
 		>
 	>;
-	/** Triangle keys that this qualifying group can replace in its owning partition. */
-	readonly coveredTriangleKeys: Set<string>;
+	/** Partition slices touched by each candidate; all touched slices must cut over before emitting it. */
+	readonly candidatePartitionSliceIdsByInstanceId: Map<string, Set<string>>;
+	/** Triangle keys that this qualifying group can replace, tracked per baked partition slice. */
+	readonly coveredTriangleKeysByPartitionSliceId: Map<string, Set<string>>;
 	readonly geometry: StaticObjectSourceGeometryIdentity;
 	readonly materialEntry: StaticMaterialTableEntry;
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
-	/** Partition-local ownership keeps mixed baked/instanced partitions from double rendering. */
-	readonly partitionSliceId: string;
 	readonly sourceTrianglesById: Map<
 		string,
 		StaticObjectCompatibilityTriangle
 	>;
 	readonly textureUseIds: readonly string[];
+}
+
+function selectCutoverStaticObjectInstanceCandidates(options: {
+	readonly cutoverPartitionSliceIds: ReadonlySet<string>;
+	readonly group: StaticObjectVisualResourceTriangleGroup;
+}): readonly Extract<
+	GeneratedStaticObjectRenderInstanceCandidateEligibility,
+	{ readonly kind: "eligible" }
+>[] {
+	return [...options.group.candidatesByInstanceId.values()]
+		.filter((candidate) => {
+			const partitionSliceIds =
+				options.group.candidatePartitionSliceIdsByInstanceId.get(
+					candidate.object.identity.instanceId,
+				);
+			return (
+				partitionSliceIds !== undefined &&
+				[...partitionSliceIds].every((partitionSliceId) =>
+					options.cutoverPartitionSliceIds.has(partitionSliceId),
+				)
+			);
+		})
+		.sort((left, right) =>
+			left.object.identity.instanceId.localeCompare(
+				right.object.identity.instanceId,
+			),
+		);
 }
 
 function selectGeneratedStaticObjectRenderInstanceCandidate(
@@ -953,7 +1006,7 @@ function createStaticObjectVisualResourceTriangleGroupKey(input: {
 	readonly materialEntries: readonly StaticMaterialTableEntry[];
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
-	readonly partitionSliceId: string;
+	readonly partitionSliceId: string | null;
 	readonly renderState: StaticObjectGeometryStaticDrawUnit["renderState"];
 	readonly textureUseIds: readonly string[];
 }): string {
@@ -968,7 +1021,9 @@ function createStaticObjectVisualResourceTriangleGroupKey(input: {
 			textureUseIds: input.textureUseIds,
 		}),
 	);
-	return [input.partitionSliceId, resourceKey].join("|");
+	return [input.partitionSliceId ?? "cross-partition-generated", resourceKey].join(
+		"|",
+	);
 }
 
 function createStaticObjectTriangleCoverageKey(

@@ -375,6 +375,42 @@ Spicy bits and debt:
   contract. Behavior tests remain around the renderer/static/texture paths that produce the underlying
   state.
 
+### 2026-06-25 Phase 1 Progress
+
+- Added first-class shared static object visual resource and render instance contracts to
+  `apps/holtburger-3d/src/lib/static/contracts.ts`. The contracts explicitly split reusable visual
+  facts from per-instance placement, bounds, generated-source identity, and transparency submission
+  policy.
+- Added deterministic visual resource key helpers in
+  `apps/holtburger-3d/src/lib/static/objects/static-object-visual-resource-key.ts`, including stable
+  key string/id creation and grouping of render instances by visual resource id.
+- Added generated outdoor-detail inventory helpers in
+  `apps/holtburger-3d/src/lib/static/objects/static-object-instance-inventory.ts` to identify repeated
+  generated source/part/material coverage that survived into baked draw-unit source mappings. This is
+  Phase 2's bridge from current baked output to candidate shared resources.
+- Added focused tests proving visual resource keys ignore per-instance placement/source identity,
+  normalize material-entry and texture-use ordering, change when geometry/material/render-state/index
+  type changes, group multiple render instances under a shared resource id, and inventory repeated
+  generated candidates without counting explicit objects or one-off generated objects.
+
+Spicy bits and debt:
+
+- `StaticPlacementTransform` and `StaticObjectGeneratedFacts` are now exported because the render
+  instance contract should use the existing authoritative shapes instead of clone types. That is a
+  small API expansion, but it avoids parallel frontend DTO drift.
+- The visual resource contract currently references source geometry identity and renderer-visible
+  material data; Phase 2 still needs to decide the exact produced payload fields for source-local
+  vertex/index data and retained-baked reasons.
+- The key helper uses a deterministic JSON string over a curated object. That is acceptable for
+  Phase 1 contract tests, but Phase 3 can replace the string format if renderer cache profiling shows
+  key construction cost matters.
+- Inventory currently groups by retained source mapping coverage, not by full future visual resource
+  keys. That is intentional: current baked draw units no longer retain source-local vertex/index
+  resources, so Phase 2 still has to produce real visual resources before renderer cache grouping can
+  be exact.
+- Texture binding ownership is still draw-unit keyed in the texture manager and renderer. Phase 3
+  remains responsible for introducing the shared visual-resource owner path.
+
 ## Implementation Phases
 
 ### Phase 0: Baseline And De-Instancing Diagnostics

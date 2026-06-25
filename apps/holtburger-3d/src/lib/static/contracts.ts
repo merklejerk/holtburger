@@ -553,7 +553,7 @@ export type StaticObjectTextureRefFacts =
 			readonly palette: PaletteIdentity | null;
 	  };
 
-interface StaticObjectGeneratedFacts {
+export interface StaticObjectGeneratedFacts {
 	readonly terrainIndex: number;
 	readonly sceneId: number;
 	readonly sceneTemplateIndex: number;
@@ -582,12 +582,12 @@ interface OutdoorStaticBvhItemFacts {
 	readonly object: StaticObjectInstanceFacts | null;
 }
 
-interface StaticPlacementTransform {
+export interface StaticPlacementTransform {
 	readonly origin: StaticVec3;
 	readonly orientation: StaticQuaternion;
 }
 
-interface StaticQuaternion {
+export interface StaticQuaternion {
 	readonly w: number;
 	readonly x: number;
 	readonly y: number;
@@ -1357,6 +1357,84 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly textureUseIds: readonly string[];
 	readonly materialIds: readonly number[];
 }
+
+export type StaticObjectVisualResourceId = string;
+
+export interface StaticObjectVisualResourceKey {
+	readonly kind: "static-object-visual-resource-key";
+	/**
+	 * Source-local geometry identity. Per-instance placement, landblock residence,
+	 * object id, bounds, and current sort bucket do not belong in the reusable key.
+	 */
+	readonly geometry: StaticObjectSourceGeometryIdentity;
+	/**
+	 * Material family/pass choose shader and draw-list behavior. Changing either
+	 * requires a distinct visual resource even if the source geometry is identical.
+	 */
+	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
+	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
+	/**
+	 * Render state affects depth/blend/cull-equivalent behavior and is part of
+	 * resource compatibility. Current camera distance and transparent sort bucket
+	 * are instance/draw-list state instead.
+	 */
+	readonly renderState: StaticObjectRenderState;
+	/**
+	 * Material entries describe the renderer-visible material/texture layout for
+	 * every material slot used by the shared geometry.
+	 */
+	readonly materialEntries: readonly StaticMaterialTableEntry[];
+	/**
+	 * Index type is a GPU buffer contract. Two otherwise-identical resources with
+	 * different index element widths cannot share the same index buffer upload.
+	 */
+	readonly indexType: StaticObjectGeometryStaticDrawUnit["indexType"];
+	/**
+	 * Texture use ids are included so renderer texture bindings can move from
+	 * draw-unit ownership to visual-resource ownership without hidden side data.
+	 */
+	readonly textureUseIds: readonly string[];
+}
+
+export interface StaticObjectVisualResource {
+	readonly kind: "static-object-visual-resource";
+	readonly resourceId: StaticObjectVisualResourceId;
+	readonly key: StaticObjectVisualResourceKey;
+	readonly geometry: StaticObjectSourceGeometryIdentity;
+	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
+	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
+	readonly renderState: StaticObjectRenderState;
+	readonly materialEntries: readonly StaticMaterialTableEntry[];
+	readonly indexType: StaticObjectGeometryStaticDrawUnit["indexType"];
+	readonly textureUseIds: readonly string[];
+}
+
+export interface StaticObjectRenderInstance {
+	readonly kind: "static-object-render-instance";
+	readonly instanceId: string;
+	readonly resourceId: StaticObjectVisualResourceId;
+	readonly domain: "outdoor-detail";
+	readonly landblockId: number;
+	readonly transform: StaticPlacementTransform;
+	readonly bounds: StaticBounds;
+	readonly sortCenter: StaticVec3;
+	readonly transparency: StaticObjectTransparencySubmission;
+	readonly source: StaticObjectInstanceIdentity;
+	readonly generated: StaticObjectGeneratedFacts | null;
+}
+
+export type StaticObjectTransparencySubmission =
+	| {
+			readonly kind: "depth-writing";
+	  }
+	| {
+			readonly kind: "instanced-transparent";
+			readonly sortCenter: StaticVec3;
+	  }
+	| {
+			readonly kind: "direct-sorted-transparent";
+			readonly sortCenter: StaticVec3;
+	  };
 
 export type StaticObjectDrawUnitOwnership =
 	| {

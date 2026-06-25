@@ -479,6 +479,38 @@ Spicy bits and debt:
   phase but not the desired steady state; Phase 6 should replace compatible far transparent groups
   with real instanced draw calls.
 
+### 2026-06-25 Flattened-Path Cutover Progress
+
+- Eligible repeated generated outdoor-detail partitions now cut over from flattened baked draw units
+  to shared visual resources plus render instances. The cutover is partition-local and all-or-nothing:
+  every triangle in the partition must be covered by qualifying generated render-instance groups, or
+  the whole partition stays on the baked path.
+- Shared visual-resource geometry now dedupes by source-local triangle identity rather than
+  per-object partition triangle id. That keeps one repeated source mesh from carrying duplicate
+  copies of the same triangle before it is drawn once per instance.
+- Bake diagnostics now distinguish renderable partition count from baked draw-unit count. After this
+  cutover, an eligible generated partition can be renderable while contributing zero flattened
+  triangles, zero flattened vertices, and zero baked draw units.
+- The renderer no longer suppresses outdoor-detail render instances just because the same layer still
+  has some baked draw units. The baker is responsible for only emitting instances for partitions that
+  were removed from the baked path.
+
+Spicy bits and debt:
+
+- This is intentionally conservative. Mixed generated/non-generated partitions, one-off generated
+  objects, missing-bounds candidates, and unsupported material partitions remain baked. That avoids
+  geometry surgery inside a partition, but it means the retained-baked reason summary still needs to
+  become explicit in Phase 4/debug parity.
+- Texture staging still flows through renderable partition texture uses and the draw-unit-shaped
+  texture binding bridge. This keeps shared visual resources bindable today, but it is still a
+  transitional owner model and belongs in the cleanup phase.
+- Static scene query/source-mapping parity for instanced generated objects is not done. Baked
+  partitions keep their existing source mappings; cutover partitions now rely on render-instance
+  identity and need the query/debug path to consume it.
+- `isDrawSuppressedByBakedLayer` is now a bring-up remnant forced to `false`. It should disappear
+  once the direct render-instance path is no longer sharing transitional state with the old baked
+  layer suppression model.
+
 ## Implementation Phases
 
 ### Phase 0: Baseline And De-Instancing Diagnostics
@@ -581,6 +613,8 @@ Spicy bits and debt:
   inspectors.
 - Delete temporary compatibility shims, bring-up-only direct draw paths, and transitional names after
   the shared resource/instance contracts become the primary generated-static path.
+- Remove the renderer-side `isDrawSuppressedByBakedLayer` remnant after query/debug parity confirms
+  instance emission is exclusively cutover-owned.
 - Collapse or remove transitional static object draw-unit fields that duplicate `materialEntries`,
   `materialSlotIndices`, visual resource metadata, or renderer-owned derived summaries.
 - Audit texture binding ownership and remove draw-unit-only assumptions for shared object visual

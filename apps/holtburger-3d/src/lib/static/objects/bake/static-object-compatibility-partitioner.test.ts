@@ -621,6 +621,7 @@ describe("static object compatibility partitioner", () => {
 
 		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
 
+		expect(result.drawUnits).toHaveLength(0);
 		expect(result.staticObjectVisualResources).toHaveLength(1);
 		expect(result.staticObjectRenderInstances).toMatchObject([
 			{
@@ -660,13 +661,13 @@ describe("static object compatibility partitioner", () => {
 			textureUseIds: expect.arrayContaining([
 				expect.stringContaining("prepared-render-surface-texture-use"),
 			]),
-			triangleCount: 2,
-			vertexCount: 6,
+			triangleCount: 1,
+			vertexCount: 3,
 		});
 		expect(result.staticObjectVisualResources[0]?.positions).toBeInstanceOf(
 			Float32Array,
 		);
-		expect(result.staticObjectVisualResources[0]?.positions).toHaveLength(18);
+		expect(result.staticObjectVisualResources[0]?.positions).toHaveLength(9);
 		expect(result.staticObjectVisualResources[0]?.indices).toBeInstanceOf(
 			Uint16Array,
 		);
@@ -674,12 +675,17 @@ describe("static object compatibility partitioner", () => {
 			result.staticObjectRenderInstances[0]?.sourceToLandblockMatrix,
 		).toBeInstanceOf(Float32Array);
 		expect(result.staticObjectBakeDiagnostics[0]).toMatchObject({
-			estimatedAvoidedFlattenedTriangleCount: 2,
-			estimatedAvoidedFlattenedTypedArrayBytes: 156,
-			estimatedInstancedSourceTypedArrayBytes: 156,
+			drawUnitCount: 0,
+			estimatedAvoidedFlattenedTriangleCount: 1,
+			estimatedAvoidedFlattenedTypedArrayBytes: 78,
+			estimatedFlattenedTypedArrayBytes: 0,
+			estimatedInstancedSourceTypedArrayBytes: 78,
+			flattenedTriangleCount: 0,
+			flattenedVertexCount: 0,
 			instancedRenderInstanceCount: 2,
-			instancedSourceTriangleCount: 2,
+			instancedSourceTriangleCount: 1,
 			instancedVisualResourceCount: 1,
+			renderablePartitionCount: 1,
 		});
 	});
 

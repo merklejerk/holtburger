@@ -195,7 +195,17 @@ interface StaticObjectBakeSummaryDiagnostics {
 	readonly estimatedInstancedSourceTypedArrayBytes: number;
 	readonly estimatedAvoidedFlattenedTriangleCount: number;
 	readonly estimatedAvoidedFlattenedTypedArrayBytes: number;
+	readonly retainedTransparentOutdoorDetailPartitionReasons: StaticObjectRetainedTransparentPartitionReasonSummaryDiagnostics;
 	readonly largestBake: StaticObjectBakeSampleDiagnostics | null;
+}
+
+interface StaticObjectRetainedTransparentPartitionReasonSummaryDiagnostics {
+	readonly explicitObject: number;
+	readonly oneOffGeneratedSource: number;
+	readonly repeatedGeneratedSourceRetainedByPartitionPolicy: number;
+	readonly missingInstanceBounds: number;
+	readonly unsupportedMaterialBucket: number;
+	readonly nonRenderableOrDeferredMaterialBucket: number;
 }
 
 interface StaticObjectBakeSampleDiagnostics {

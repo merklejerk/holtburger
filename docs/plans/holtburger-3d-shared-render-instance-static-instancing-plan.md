@@ -694,6 +694,29 @@ Spicy bits and debt:
   retained repeated-generated transparent partitions after this, inspect whether those partitions are
   genuinely mixed/unsupported before reaching for geometry surgery.
 
+### 2026-06-25 Phase 5B Progress
+
+- Far transparent shared render instances now group by shared visual resource id and use the existing
+  `drawElementsInstanced` path when at least two compatible instances are outside
+  `NEAR_TRANSPARENT_STATIC_SORT_DISTANCE`.
+- Near transparent shared render instances keep the direct sorted path. This preserves the existing
+  near-camera alpha behavior while allowing far generated scenery to batch.
+- Added renderer/runtime summary counters for near transparent direct render-instance draws, far
+  transparent direct fallback draws, far transparent instanced draw calls, and far transparent
+  instanced instance count.
+- Added a focused WebGL2 renderer test proving two far transparent shared outdoor-detail render
+  instances submit as one instanced draw and report the transparent-specific counters.
+
+Spicy bits and debt:
+
+- Singleton far transparent render-instance groups still direct draw. That is intentional because
+  instancing a one-item group is bookkeeping cosplay, not a perf win.
+- Transparent grouping is still resource-id local. It will not merge across compatible resources with
+  equivalent material state, and that is fine until live data proves resource fragmentation is the
+  next bottleneck.
+- Direct and instanced static material binding setup remain duplicated. Phase 8 cleanup should extract
+  the shared bind/upload helper before adding more submission branches.
+
 ## Implementation Phases
 
 ### Phase 0: Baseline And De-Instancing Diagnostics

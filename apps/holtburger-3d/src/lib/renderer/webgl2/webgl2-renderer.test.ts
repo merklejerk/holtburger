@@ -1588,6 +1588,61 @@ describe("WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
+	it("uses instanced draws for far transparent shared outdoor-detail render instances", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+		const visualResource = createOutdoorDetailStaticObjectVisualResource(
+			"static-object-visual-resource:transparent-test",
+			{ materialPass: "transparent" },
+		);
+
+		renderer.setOutdoorDetailsLayer(0xda55ffff, {
+			...createOutdoorDetailsLayerPayload(),
+			drawUnits: [],
+			instancedObjectInstances: [
+				createOutdoorDetailStaticObjectRenderInstance({
+					instanceId: "far-transparent-a",
+					resourceId: visualResource.resourceId,
+					transparency: "transparent",
+				}),
+				createOutdoorDetailStaticObjectRenderInstance({
+					instanceId: "far-transparent-b",
+					resourceId: visualResource.resourceId,
+					transparency: "transparent",
+				}),
+			],
+			instancedObjectResources: [visualResource],
+		});
+		pendingFrame?.(16);
+
+		expect(gl.drawElementsInstancedCalls).toEqual([
+			{
+				count: 3,
+				instanceCount: 2,
+				mode: gl.TRIANGLES,
+				type: gl.UNSIGNED_SHORT,
+			},
+		]);
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			staticObjectDirectRenderInstanceDrawCalls: 0,
+			staticObjectFarTransparentDirectRenderInstanceDrawCalls: 0,
+			staticObjectFarTransparentInstancedRenderInstanceDrawCalls: 1,
+			staticObjectFarTransparentInstancedRenderInstances: 2,
+			staticObjectInstancedRenderInstanceDrawCalls: 1,
+			staticObjectInstancedRenderInstances: 2,
+			staticObjectNearTransparentDirectRenderInstanceDrawCalls: 0,
+		});
+
+		renderer.dispose();
+	});
+
 	it("reports baked outdoor-detail direct draw calls by material pass", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
@@ -2033,10 +2088,31 @@ function createOutdoorDetailsLayerPayload(): OutdoorDetailsLayerPayload {
 
 function createOutdoorDetailStaticObjectVisualResource(
 	resourceId: string,
+	options: {
+		readonly materialPass?: StaticObjectVisualResource["materialPass"];
+	} = {},
 ): StaticObjectVisualResource {
 	const drawUnit = createOutdoorDetailStaticObjectDrawUnit(
 		"outdoor-detail-visual-source",
 	);
+	const materialPass = options.materialPass ?? drawUnit.materialPass;
+	const renderState =
+		materialPass === "transparent"
+			? {
+					blend: {
+						dstFactor: "one-minus-src-alpha" as const,
+						enabled: true,
+						mode: "translucent" as const,
+						srcFactor: "src-alpha" as const,
+					},
+					depthTest: true,
+					depthWrite: false,
+				}
+			: drawUnit.renderState;
+	const materialEntries = drawUnit.materialEntries.map((entry) => ({
+		...entry,
+		renderState,
+	}));
 	const geometry = {
 		gfxObj: {
 			kind: "static-object-source" as const,
@@ -2055,10 +2131,10 @@ function createOutdoorDetailStaticObjectVisualResource(
 		geometry,
 		indexType: drawUnit.indexType,
 		kind: "static-object-visual-resource-key" as const,
-		materialEntries: drawUnit.materialEntries,
+		materialEntries,
 		materialFamily: drawUnit.materialFamily,
-		materialPass: drawUnit.materialPass,
-		renderState: drawUnit.renderState,
+		materialPass,
+		renderState,
 		textureUseIds: drawUnit.textureUseIds,
 	};
 
@@ -2070,12 +2146,12 @@ function createOutdoorDetailStaticObjectVisualResource(
 		indices: drawUnit.indices,
 		key,
 		kind: "static-object-visual-resource",
-		materialEntries: drawUnit.materialEntries,
+		materialEntries,
 		materialFamily: drawUnit.materialFamily,
-		materialPass: drawUnit.materialPass,
+		materialPass,
 		materialSlotIndices: drawUnit.materialSlotIndices,
 		positions: drawUnit.positions,
-		renderState: drawUnit.renderState,
+		renderState,
 		resourceId,
 		texCoords: drawUnit.texCoords,
 		textureUseIds: drawUnit.textureUseIds,
@@ -2087,6 +2163,7 @@ function createOutdoorDetailStaticObjectVisualResource(
 function createOutdoorDetailStaticObjectRenderInstance(options: {
 	readonly instanceId: string;
 	readonly resourceId: string;
+	readonly transparency?: "depth-writing" | "transparent";
 }): StaticObjectRenderInstance {
 	return {
 		bounds: {
@@ -2120,7 +2197,13 @@ function createOutdoorDetailStaticObjectRenderInstance(options: {
 			orientation: { w: 1, x: 0, y: 0, z: 0 },
 			origin: { x: 0, y: 0, z: 0 },
 		},
-		transparency: { kind: "depth-writing" },
+		transparency:
+			options.transparency === "transparent"
+				? {
+						kind: "direct-sorted-transparent",
+						sortCenter: { x: 0.5, y: 0.5, z: 0 },
+					}
+				: { kind: "depth-writing" },
 	};
 }
 

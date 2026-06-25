@@ -511,6 +511,30 @@ Spicy bits and debt:
   once the direct render-instance path is no longer sharing transitional state with the old baked
   layer suppression model.
 
+### 2026-06-25 Resteer: Instanced Submission Moves Up
+
+Fresh post-cutover diagnostics show the shared-resource path is active but still submitted through
+direct per-instance draws:
+
+- Outdoor-detail shared visual resources: `70`
+- Outdoor-detail shared render instances: `233`
+- Outdoor-detail baked draw units: `193 -> 186`
+- Outdoor-detail uploaded static object bytes: `7,439,406 -> 6,918,288`
+- Total static object uploaded bytes: `11,086,218 -> 10,565,100`
+- Renderer pass changed between captures from `single-surface-resident` to `portal-scene-domains`, so
+  frame-time comparisons are not perfectly apples-to-apples.
+
+Decision:
+
+- Move the WebGL2 instanced draw path ahead of query/debug parity and alpha-blended policy. The
+  cutover reduced flattened/uploaded bytes, but direct-drawing the new `233` render instances can
+  make frame handling worse until compatible groups use `drawElementsInstanced`.
+- Start with opaque and alpha-tested generated statics. Keep near transparent direct sorted behavior
+  for a later transparency-policy pass.
+- Add renderer diagnostics for direct shared-resource draws versus instanced shared-resource draws as
+  part of the instanced submission phase, not after it. We need those counters to prove the perf fix
+  is real and not vibes.
+
 ## Implementation Phases
 
 ### Phase 0: Baseline And De-Instancing Diagnostics
@@ -565,7 +589,29 @@ Spicy bits and debt:
   transform.
 - Keep existing baked static draw-unit rendering as a first-class parallel path.
 
-### Phase 4: Query And Debug Parity
+### Phase 4: WebGL2 Instanced Draw Path
+
+- Add per-instance transform buffers for compatible opaque and alpha-tested generated static
+  instances.
+- Use `drawElementsInstanced` only for groups with identical visual resource, material pass, render
+  state, and sort policy.
+- Preserve direct draw fallback for unsupported browsers, debug modes, transparent near-camera
+  groups, and small instance counts where batching is not useful.
+- Report direct sorted, direct unsorted, and instanced draw counts in renderer diagnostics.
+
+### Phase 5: Alpha-Blended Policy
+
+- Carry transparency sort policy on generated static instances.
+- Preserve existing depth-sorted behavior for near-camera transparent objects using direct sorted
+  draws when needed.
+- Add per-instance transform/sort metadata buffers for compatible transparent generated static
+  instances outside `NEAR_TRANSPARENT_STATIC_SORT_DISTANCE`.
+- Use instanced draws for compatible transparent generated statics outside
+  `NEAR_TRANSPARENT_STATIC_SORT_DISTANCE`. Direct grouped transparent draws are a bring-up/fallback
+  behavior only, not the desired steady-state for generated outdoor statics.
+- Add tests for sort-policy classification and renderer draw-list construction where practical.
+
+### Phase 6: Query And Debug Parity
 
 - Ensure static scene query continues to return semantic static source identity for instanced
   generated objects.
@@ -573,28 +619,6 @@ Spicy bits and debt:
   eligibility, and retained-baked reasons.
 - Verify that generated static instance bounds are current and landblock-local in the same coordinate
   convention as existing outdoor static query records.
-
-### Phase 5: Alpha-Blended Policy
-
-- Carry transparency sort policy on generated static instances.
-- Preserve existing depth-sorted behavior for near-camera transparent objects using direct sorted
-  draws when needed.
-- Use instanced draws for compatible transparent generated statics outside
-  `NEAR_TRANSPARENT_STATIC_SORT_DISTANCE`. Direct grouped transparent draws are a bring-up/fallback
-  behavior only, not the desired steady-state for generated outdoor statics.
-- Add tests for sort-policy classification and renderer draw-list construction where practical.
-
-### Phase 6: WebGL2 Instanced Draw Path
-
-- Add per-instance transform buffers for compatible opaque and alpha-tested generated static
-  instances.
-- Add per-instance transform/sort metadata buffers for compatible transparent generated static
-  instances outside `NEAR_TRANSPARENT_STATIC_SORT_DISTANCE`.
-- Use `drawElementsInstanced` only for groups with identical visual resource, material pass, render
-  state, and sort policy.
-- Preserve direct draw fallback for unsupported browsers, debug modes, transparent near-camera
-  groups, and small instance counts where batching is not useful.
-- Report direct sorted, direct unsorted, and instanced draw counts in renderer diagnostics.
 
 ### Phase 7: Dynamic Entity Resteering Gate
 

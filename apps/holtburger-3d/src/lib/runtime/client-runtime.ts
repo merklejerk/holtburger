@@ -3505,6 +3505,14 @@ function createRendererDiagnosticsSummary(
 			snapshot.staticObjectInstancedRenderInstanceDrawCalls,
 		staticObjectInstancedRenderInstances:
 			snapshot.staticObjectInstancedRenderInstances,
+		staticObjectNearTransparentDirectRenderInstanceDrawCalls:
+			snapshot.staticObjectNearTransparentDirectRenderInstanceDrawCalls,
+		staticObjectFarTransparentDirectRenderInstanceDrawCalls:
+			snapshot.staticObjectFarTransparentDirectRenderInstanceDrawCalls,
+		staticObjectFarTransparentInstancedRenderInstanceDrawCalls:
+			snapshot.staticObjectFarTransparentInstancedRenderInstanceDrawCalls,
+		staticObjectFarTransparentInstancedRenderInstances:
+			snapshot.staticObjectFarTransparentInstancedRenderInstances,
 		staticObjectRenderInstances: snapshot.staticObjectRenderInstances,
 		staticObjectResources: snapshot.staticObjectResources,
 		staticObjectUploadSummary: createStaticObjectUploadSummary(

@@ -864,6 +864,10 @@ class Webgl2Renderer implements Renderer {
 	#lastStaticObjectDirectRenderInstanceDrawCalls = 0;
 	#lastStaticObjectInstancedRenderInstanceDrawCalls = 0;
 	#lastStaticObjectInstancedRenderInstances = 0;
+	#lastStaticObjectNearTransparentDirectRenderInstanceDrawCalls = 0;
+	#lastStaticObjectFarTransparentDirectRenderInstanceDrawCalls = 0;
+	#lastStaticObjectFarTransparentInstancedRenderInstanceDrawCalls = 0;
+	#lastStaticObjectFarTransparentInstancedRenderInstances = 0;
 	#staticObjectInstanceTransformScratch = new Float32Array(0);
 	#debugOverlayPrimitiveCount = 0;
 	#debugOverlayLineVertexCount = 0;
@@ -1302,6 +1306,10 @@ class Webgl2Renderer implements Renderer {
 		this.#lastStaticObjectDirectRenderInstanceDrawCalls = 0;
 		this.#lastStaticObjectInstancedRenderInstanceDrawCalls = 0;
 		this.#lastStaticObjectInstancedRenderInstances = 0;
+		this.#lastStaticObjectNearTransparentDirectRenderInstanceDrawCalls = 0;
+		this.#lastStaticObjectFarTransparentDirectRenderInstanceDrawCalls = 0;
+		this.#lastStaticObjectFarTransparentInstancedRenderInstanceDrawCalls = 0;
+		this.#lastStaticObjectFarTransparentInstancedRenderInstances = 0;
 
 		const effectiveRenderPassPlan = this.#getEffectiveRenderPassPlan();
 		const directEnvCellFramePlan = this.#getEffectiveDirectEnvCellFramePlan();
@@ -2287,18 +2295,42 @@ class Webgl2Renderer implements Renderer {
 			this.#recordBakedStaticObjectDirectDraw(resource);
 			drawCalls += 1;
 		}
+		const farTransparentInstanceGroupsByResourceId = new Map<
+			string,
+			StaticObjectInstanceDrawResource[]
+		>();
 		for (const resource of this.#farTransparentStaticObjectInstanceDrawList) {
+			const group = farTransparentInstanceGroupsByResourceId.get(
+				resource.resource.resourceId,
+			);
+			if (group) {
+				group.push(resource);
+			} else {
+				farTransparentInstanceGroupsByResourceId.set(
+					resource.resource.resourceId,
+					[resource],
+				);
+			}
+		}
+		for (const group of farTransparentInstanceGroupsByResourceId.values()) {
+			const first = group[0];
+			if (!first) {
+				continue;
+			}
 			applyStaticObjectRenderState(
 				gl,
 				this.#stateCache,
-				resource.resource.renderState,
+				first.resource.renderState,
 			);
-			this.#drawStaticMaterialResource(
-				resource.resource,
-				this.#createStaticObjectInstanceTransform(resource.instance),
-			);
-			this.#lastStaticObjectDirectRenderInstanceDrawCalls += 1;
-			drawCalls += 1;
+			drawCalls += this.#drawStaticObjectInstanceGroup(group);
+			if (group.length < 2) {
+				this.#lastStaticObjectFarTransparentDirectRenderInstanceDrawCalls += 1;
+			} else {
+				this.#lastStaticObjectFarTransparentInstancedRenderInstanceDrawCalls +=
+					1;
+				this.#lastStaticObjectFarTransparentInstancedRenderInstances +=
+					group.length;
+			}
 		}
 		this.#nearTransparentStaticObjectDrawEntries.sort(
 			compareStaticObjectTransparentDrawEntries,
@@ -2317,6 +2349,8 @@ class Webgl2Renderer implements Renderer {
 			);
 			if (entry.instance) {
 				this.#lastStaticObjectDirectRenderInstanceDrawCalls += 1;
+				this.#lastStaticObjectNearTransparentDirectRenderInstanceDrawCalls +=
+					1;
 			} else if (isStaticObjectGeometryResource(resource)) {
 				this.#recordBakedStaticObjectDirectDraw(resource);
 			}
@@ -2810,6 +2844,14 @@ class Webgl2Renderer implements Renderer {
 				this.#lastStaticObjectInstancedRenderInstanceDrawCalls,
 			staticObjectInstancedRenderInstances:
 				this.#lastStaticObjectInstancedRenderInstances,
+			staticObjectNearTransparentDirectRenderInstanceDrawCalls:
+				this.#lastStaticObjectNearTransparentDirectRenderInstanceDrawCalls,
+			staticObjectFarTransparentDirectRenderInstanceDrawCalls:
+				this.#lastStaticObjectFarTransparentDirectRenderInstanceDrawCalls,
+			staticObjectFarTransparentInstancedRenderInstanceDrawCalls:
+				this.#lastStaticObjectFarTransparentInstancedRenderInstanceDrawCalls,
+			staticObjectFarTransparentInstancedRenderInstances:
+				this.#lastStaticObjectFarTransparentInstancedRenderInstances,
 			outdoorDetailStaticObjectResources: staticObjectResources.filter(
 				(resource) => resource.domain === "outdoor-detail",
 			).length,

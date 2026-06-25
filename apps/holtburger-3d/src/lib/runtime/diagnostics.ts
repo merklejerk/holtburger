@@ -105,6 +105,10 @@ export interface RendererDiagnosticsSummary {
 	readonly staticObjectDirectRenderInstanceDrawCalls: number;
 	readonly staticObjectInstancedRenderInstanceDrawCalls: number;
 	readonly staticObjectInstancedRenderInstances: number;
+	readonly staticObjectNearTransparentDirectRenderInstanceDrawCalls: number;
+	readonly staticObjectFarTransparentDirectRenderInstanceDrawCalls: number;
+	readonly staticObjectFarTransparentInstancedRenderInstanceDrawCalls: number;
+	readonly staticObjectFarTransparentInstancedRenderInstances: number;
 	readonly outdoorDetailStaticObjectResources: number;
 	readonly outdoorDetailStaticObjectBakedDirectDrawCalls: number;
 	readonly outdoorDetailStaticObjectBakedDirectDrawCallsByPass: RendererSnapshot["outdoorDetailStaticObjectBakedDirectDrawCallsByPass"];

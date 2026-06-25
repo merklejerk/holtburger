@@ -470,6 +470,25 @@ Spicy bits and debt:
 - Delete or replace `applyDynamicDelta()` with the real declarative dynamic scene commit API before
   implementing dynamic renderer submissions.
 
+### Phase 8: Cleanup And Contract Hardening
+
+- Remove or demote Phase 0 diagnostics that no longer guide implementation once before/after
+  generated-static metrics are captured. Keep only stable, useful runtime counters and targeted
+  inspectors.
+- Delete temporary compatibility shims, bring-up-only direct draw paths, and transitional names after
+  the shared resource/instance contracts become the primary generated-static path.
+- Collapse or remove transitional static object draw-unit fields that duplicate `materialEntries`,
+  `materialSlotIndices`, visual resource metadata, or renderer-owned derived summaries.
+- Audit texture binding ownership and remove draw-unit-only assumptions for shared object visual
+  resources.
+- Revisit report output after Phase 6 and keep the general runtime report summary-level. Row-level
+  bake/upload/timing detail should live behind explicit inspectors, not the copy report.
+- Re-run the `0xda56ffff` baseline comparison and update the plan with final before/after numbers:
+  flattened triangles, flattened bytes, uploaded object bytes, shared resource count, retained-baked
+  count, direct draw count, and instanced draw count.
+- Scrub tests that only assert diagnostic report shape or legacy absence. Keep behavior tests for
+  resource keying, instance grouping, renderer submission, query identity, and transparency policy.
+
 ## Acceptance Criteria
 
 - Repeated eligible generated outdoor static objects share GPU geometry/material resources instead of

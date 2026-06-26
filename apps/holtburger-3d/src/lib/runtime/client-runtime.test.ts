@@ -153,7 +153,10 @@ describe("browser client runtime", () => {
 				setupAnimation: {
 					status: "ready",
 				},
-				status: "setup-animation-ready",
+				status: "ready",
+				visual: {
+					status: "ready",
+				},
 			},
 		});
 
@@ -273,7 +276,7 @@ describe("browser client runtime", () => {
 
 		expect(snapshots.at(-1)?.dynamic).toMatchObject({
 			activeEntityCount: 1,
-			issueCount: 2,
+			issueCount: 1,
 			nonRenderableEntityCount: 1,
 			staticSeedCount: 1,
 		});
@@ -284,14 +287,17 @@ describe("browser client runtime", () => {
 				sourceScopeKey: "landblock-env-cells:landblock:da55ffff",
 			},
 			renderability: {
-				reasons: ["visual-resources-pending", "residence-render-path-pending"],
+				reasons: ["residence-render-path-pending"],
 				status: "non-renderable",
 			},
 			resources: {
 				setupAnimation: {
 					status: "ready",
 				},
-				status: "setup-animation-ready",
+				status: "ready",
+				visual: {
+					status: "ready",
+				},
 			},
 			sourceResidence: {
 				envCellId: 0xda550100,
@@ -3150,10 +3156,220 @@ function runtimeSnapshotSummary(
 function createPreparedAsset(key: HostAssetKey, revision = 1): PreparedAsset {
 	return {
 		key,
-		payload: { ok: true },
+		payload: createDynamicPreparedPayload(key),
 		preparedAt: "2026-06-26T00:00:00.000Z",
 		revision,
 		sourceAssetId: `${key.kind}/${key.id}`,
+	};
+}
+
+function createDynamicPreparedPayload(key: HostAssetKey): unknown {
+	switch (key.kind) {
+		case "setup-model":
+			return createDynamicSetupModelPayload();
+		case "setup-appearance":
+			return createDynamicSetupAppearancePayload();
+		case "gfx-obj":
+			return createDynamicGfxObjPayload();
+		case "material":
+			return createDynamicMaterialPayload();
+		case "surface-texture":
+			return createDynamicSurfaceTexturePayload();
+		case "render-surface":
+			return createDynamicRenderSurfacePayload();
+		case "palette":
+			return {
+				colorCount: 256,
+				colorsArgb: new Uint32Array(256),
+				kind: "palette",
+				paletteId: Number.parseInt(key.id, 16),
+			};
+		case "prepared-texture":
+			return { kind: "prepared-texture" };
+		default:
+			return { kind: key.kind };
+	}
+}
+
+function createDynamicSetupModelPayload() {
+	return {
+		connectionPoints: [],
+		defaultAnimation: 0x0300061b,
+		defaultScript: null,
+		defaultSoundTable: null,
+		dependencies: { gfxObjAssetIds: ["gfx-obj/01000020"] },
+		flags: null,
+		height: null,
+		holdingLocations: [],
+		kind: "setup-model",
+		lights: [],
+		parts: [
+			{
+				gfxObjAssetId: "gfx-obj/01000020",
+				gfxObjId: 0x01000020,
+				parentIndex: null,
+				partIndex: 0,
+				scale: null,
+			},
+		],
+		placementSets: [],
+		provenance: createProvenance("setup-model"),
+		radius: null,
+		residencyKind: "unknown",
+		selectionSphere: null,
+		setupModelId: 0x020003e5,
+		sortingSphere: null,
+		sourceAssetKind: "setup-model",
+		stepDown: null,
+		stepUp: null,
+	};
+}
+
+function createDynamicSetupAppearancePayload() {
+	return {
+		animPartChanges: [],
+		appearanceKey: "setup-appearance/020003e5",
+		dependencies: {
+			materialAssetIds: ["material/08000011"],
+			paletteAssetIds: [],
+		},
+		kind: "setup-appearance",
+		paletteId: null,
+		parts: [
+			{
+				gfxObjAssetId: "gfx-obj/01000020",
+				gfxObjId: 0x01000020,
+				materialSlots: [
+					{
+						materialAssetId: "material/08000011",
+						slotIndex: 0,
+						surfaceId: 0x08000010,
+					},
+				],
+				partIndex: 0,
+			},
+		],
+		provenance: createProvenance("setup-appearance"),
+		residencyKind: "unknown",
+		setupModelId: 0x020003e5,
+		sourceAssetKind: "setup-appearance",
+		subPalettes: [],
+		textureChanges: [],
+	};
+}
+
+function createDynamicGfxObjPayload() {
+	return {
+		dependencies: { materialAssetIds: ["material/08000010"] },
+		didDegrade: null,
+		drawingBsp: null,
+		drawingPolygons: [],
+		flags: null,
+		gfxObjId: 0x01000020,
+		kind: "gfx-obj",
+		physicsWitness: { hasBsp: false, polygonCount: 1, rootKind: null },
+		provenance: createProvenance("gfx-obj"),
+		renderGeometry: {
+			bounds: createBounds(),
+			invalidPolygons: [],
+			normals: [],
+			positions: [],
+			skippedPolygonCount: 0,
+			sourceId: 0x01000020,
+			surfaceIds: [0x08000010],
+			triangleCount: 1,
+			triangles: [
+				{
+					firstVertex: 0,
+					materialVariantSignature: null,
+					polygonId: 7,
+					surfaceId: 0x08000010,
+				},
+			],
+			uvs: [],
+			vertexCount: 3,
+		},
+		residencyKind: "unknown",
+		sortCenter: null,
+		sourceAssetKind: "gfx-obj",
+		surfaceIds: [0x08000010],
+		vertexArray: { vertices: [] },
+	};
+}
+
+function createDynamicMaterialPayload() {
+	return {
+		dependencies: {
+			paletteAssetIds: ["palette/04000010"],
+			renderSurfaceAssetIds: ["render-surface/06000010"],
+			surfaceTextureAssetIds: ["surface-texture/05000010"],
+		},
+		diffuse: 1,
+		kind: "material-recipe",
+		luminosity: 0,
+		provenance: createProvenance("material-recipe"),
+		residencyKind: "unknown",
+		source: {
+			kind: "texture",
+			paletteId: null,
+			renderSurfaceDefaultPaletteIds: [0x04000010],
+			selectedRenderSurfaceId: 0x06000010,
+			surfaceTextureId: 0x05000010,
+		},
+		sourceAssetKind: "material-recipe",
+		surfaceId: 0x08000011,
+		surfaceType: 0,
+		translucency: 0,
+	};
+}
+
+function createDynamicSurfaceTexturePayload() {
+	return {
+		dependencies: { renderSurfaceAssetIds: ["render-surface/06000010"] },
+		kind: "surface-texture",
+		provenance: createProvenance("surface-texture"),
+		renderSurfaceIds: [0x06000010],
+		residencyKind: "unknown",
+		selectedRenderSurfaceId: 0x06000010,
+		sourceAssetKind: "surface-texture",
+		surfaceTextureId: 0x05000010,
+		textureType: 0,
+		unknown: 0,
+	};
+}
+
+function createDynamicRenderSurfacePayload() {
+	return {
+		defaultPaletteId: 0x04000010,
+		dependencies: { paletteAssetIds: ["palette/04000010"] },
+		format: "A8R8G8B8",
+		formatRaw: 0,
+		height: 1,
+		kind: "render-surface",
+		provenance: createProvenance("render-surface"),
+		renderSurfaceId: 0x06000010,
+		residencyKind: "unknown",
+		sourceAssetKind: "render-surface",
+		sourceByteLength: 4,
+		sourceBytes: new Uint8Array([255, 255, 255, 255]),
+		unknown: 0,
+		width: 1,
+	};
+}
+
+function createBounds() {
+	return {
+		max: { x: 1, y: 1, z: 1 },
+		min: { x: 0, y: 0, z: 0 },
+	};
+}
+
+function createProvenance(sourceAssetKind: string) {
+	return {
+		detail: null,
+		errorCode: null,
+		source: "repo-local-hba" as const,
+		sourceAssetKind,
 	};
 }
 

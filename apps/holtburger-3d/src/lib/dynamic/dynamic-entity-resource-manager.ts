@@ -3,13 +3,35 @@ import type {
 	HostAssetKey,
 	PreparedAssetLease,
 } from "../assets/contracts";
-import { createHostAssetKey } from "../assets/keys";
+import { createPreparedTextureHostKey } from "../assets/preparation/prepared-texture-source";
+import { createHostAssetKey, describeHostAssetKey } from "../assets/keys";
+import {
+	createStaticMaterialTextureSamplingPolicy,
+	resolveRepeatedStaticMaterialPrimaryWrapMode,
+} from "../static/bake/static-material-texture-policy";
+import type {
+	MaterialTextureDataUseIdentity,
+	StaticMaterialSlotIdentity,
+	StaticObjectInstanceIdentity,
+	StaticObjectMaterialSlotFacts,
+	StaticObjectPartMaterialSlotFacts,
+	StaticObjectSourceAssetFacts,
+	StaticResourceIdentity,
+} from "../static/contracts";
+import {
+	planStaticObjectMaterials,
+	type StaticMaterialFallbackReason,
+	type StaticMaterialPlan,
+} from "../static/objects/bake/static-object-material-planner";
+import { resolveStaticObjectSourceClosure } from "../static/objects/static-object-source-closure";
 import type {
 	DynamicEntityId,
 	DynamicEntityIssue,
 	DynamicEntityResourceKey,
 	DynamicEntityResourceState,
 	DynamicEntityRequiredResource,
+	DynamicEntityTextureRequirement,
+	DynamicEntityUnsupportedMaterialReason,
 	StaticAuthoredDynamicSeedFacts,
 } from "./contracts";
 
@@ -19,6 +41,8 @@ export interface DynamicEntityResourceManagerOptions {
 }
 
 export type DynamicEntityResourceChange =
+	| DynamicEntityVisualResourcesFailedChange
+	| DynamicEntityVisualResourcesReadyChange
 	| DynamicEntitySetupAnimationReadyChange
 	| DynamicEntitySetupAnimationFailedChange;
 
@@ -35,6 +59,19 @@ interface DynamicEntitySetupAnimationFailedChange {
 	readonly resources: DynamicEntityResourceState;
 }
 
+interface DynamicEntityVisualResourcesReadyChange {
+	readonly entityId: DynamicEntityId;
+	readonly kind: "visual-resources-ready";
+	readonly resources: DynamicEntityResourceState;
+}
+
+interface DynamicEntityVisualResourcesFailedChange {
+	readonly entityId: DynamicEntityId;
+	readonly issues: readonly DynamicEntityIssue[];
+	readonly kind: "visual-resources-failed";
+	readonly resources: DynamicEntityResourceState;
+}
+
 interface TrackedDynamicEntityResources {
 	readonly animationHostKey: HostAssetKey;
 	readonly animationResourceKey: DynamicEntityResourceKey;
@@ -42,11 +79,20 @@ interface TrackedDynamicEntityResources {
 	readonly leases: PreparedAssetLease[];
 	readonly setupHostKey: HostAssetKey;
 	readonly setupResourceKey: DynamicEntityResourceKey;
+	readonly seed: StaticAuthoredDynamicSeedFacts;
 }
 
 const SETUP_ANIMATION_REQUIRED_RESOURCES = [
 	"setup-model",
 	"animation",
+] as const satisfies readonly DynamicEntityRequiredResource[];
+const VISUAL_REQUIRED_RESOURCES = [
+	"setup-appearance",
+	"gfx",
+	"material",
+	"palette",
+	"render-surface",
+	"prepared-texture",
 ] as const satisfies readonly DynamicEntityRequiredResource[];
 
 /** Owns dynamic semantic resource state and leases over host-prepared assets. */
@@ -85,6 +131,9 @@ export class DynamicEntityResourceManager {
 				status: "pending",
 			},
 			status: "pending",
+			visual: {
+				status: "pending",
+			},
 		};
 	}
 
@@ -100,6 +149,7 @@ export class DynamicEntityResourceManager {
 			...keys,
 			generation,
 			leases: [],
+			seed,
 		});
 
 		void Promise.allSettled([
@@ -152,6 +202,9 @@ export class DynamicEntityResourceManager {
 						status: "failed",
 					},
 					status: "failed",
+					visual: {
+						status: "blocked",
+					},
 				},
 			});
 			return;
@@ -166,13 +219,169 @@ export class DynamicEntityResourceManager {
 			kind: "setup-animation-ready",
 			resources: {
 				required: SETUP_ANIMATION_REQUIRED_RESOURCES,
+					setupAnimation: {
+						animationKey: tracked.animationResourceKey,
+						setupModelKey: tracked.setupResourceKey,
+						status: "ready",
+					},
+					status: "setup-animation-ready",
+					visual: {
+						status: "pending",
+					},
+				},
+			});
+		void this.#requestVisualResources(entityId, generation, tracked);
+	}
+
+	async #requestVisualResources(
+		entityId: DynamicEntityId,
+		generation: number,
+		tracked: TrackedDynamicEntityResources,
+	): Promise<void> {
+		const closure = await resolveStaticObjectSourceClosure({
+			assetService: this.#assetService,
+			sourceAssetIds: [tracked.seed.sourceAssetId],
+		});
+		const sourceAssets = closure.sourceAssets.filter(
+			(source) => source.identity.sourceDid === tracked.seed.setupModelId,
+		);
+		const missingRefs = closure.missingRefs.filter(
+			(ref) =>
+				!(
+					ref.kind === "static-object-source" &&
+					ref.sourceAssetKind === "setup-appearance"
+				),
+		);
+		const materialSlots = createDynamicMaterialSlotRequirements(
+			tracked.seed.object,
+			sourceAssets,
+		);
+		const materialPlans = planStaticObjectMaterials({
+			domain: createDynamicMaterialPlanningDomain(tracked.seed),
+			landblock: tracked.seed.sourceResidence,
+			materialSlots: materialSlots.map((slot) => slot.slotFacts),
+			materialSources: closure.materialSources,
+			paletteSources: closure.paletteSources,
+			regionRenderProfile: { detailRoles: [] },
+			textureRefs: closure.textureRefs,
+		});
+		const unsupportedReasons = createUnsupportedMaterialReasons(
+			materialPlans.fallbackReasons,
+		);
+		const textureRequirements = createTextureRequirements(
+			materialPlans.materialPlans,
+		);
+		const resourceKeys = createVisualHostAssetKeys({
+			closure,
+			seed: tracked.seed,
+			setupAppearanceIsMissing: closure.missingRefs.some(isSetupAppearanceRef),
+			textureRequirements,
+		});
+		const loadIssues = await this.#requestVisualHostAssets(resourceKeys);
+		const current = this.#trackedByEntityId.get(entityId);
+		if (!current || current.generation !== generation) {
+			return;
+		}
+
+		if (
+			missingRefs.length > 0 ||
+			unsupportedReasons.length > 0 ||
+			loadIssues.length > 0
+		) {
+			this.#onResourcesChanged?.({
+				entityId,
+				issues: [
+					...createMissingRefIssues(missingRefs),
+					...loadIssues,
+					...(unsupportedReasons.length > 0
+						? [
+								{
+									kind: "visual-resources-unsupported" as const,
+									reasons: unsupportedReasons,
+								},
+							]
+						: []),
+				],
+				kind: "visual-resources-failed",
+				resources: {
+					required: [...SETUP_ANIMATION_REQUIRED_RESOURCES, ...VISUAL_REQUIRED_RESOURCES],
+					setupAnimation: {
+						animationKey: tracked.animationResourceKey,
+						setupModelKey: tracked.setupResourceKey,
+						status: "ready",
+					},
+					status: "failed",
+					visual: {
+						missingRefs,
+						status: "failed",
+						unsupportedReasons,
+					},
+				},
+			});
+			return;
+		}
+
+		current.leases.push(
+			...resourceKeys.map((key) =>
+				this.#assetService.acquirePreparedAssetLease(key),
+			),
+		);
+		this.#onResourcesChanged?.({
+			entityId,
+			kind: "visual-resources-ready",
+			resources: {
+				required: [...SETUP_ANIMATION_REQUIRED_RESOURCES, ...VISUAL_REQUIRED_RESOURCES],
 				setupAnimation: {
 					animationKey: tracked.animationResourceKey,
 					setupModelKey: tracked.setupResourceKey,
 					status: "ready",
 				},
-				status: "setup-animation-ready",
+				status: "ready",
+				visual: {
+					materialSlots: materialSlots.map((slot) => ({
+						material: slot.slotFacts.material,
+						partIndex: slot.partIndex,
+						slot: slot.partSlot,
+					})),
+					materialSources: closure.materialSources,
+					paletteSources: closure.paletteSources,
+					sourceAssets,
+					status: "ready",
+					textureRefs: closure.textureRefs,
+					textureRequirements,
+				},
 			},
+		});
+	}
+
+	async #requestVisualHostAssets(
+		keys: readonly HostAssetKey[],
+	): Promise<readonly DynamicEntityIssue[]> {
+		const results = await Promise.allSettled(
+			uniqueHostAssetKeys(keys).map((key) =>
+				this.#assetService.requestPreparedAsset(key).then(() => ({
+				key,
+				status: "fulfilled" as const,
+			}), (error: unknown) => ({
+				error,
+				key,
+				status: "rejected" as const,
+			})),
+			),
+		);
+		return results.flatMap((result) => {
+			if (result.status !== "fulfilled" || result.value.status === "fulfilled") {
+				return [];
+			}
+			const key = result.value.key;
+			return [
+				{
+					kind: "dynamic-resource-load-failed" as const,
+					message: formatErrorMessage(result.value.error),
+					resource: createRequiredResourceFromHostKey(key),
+					resourceKey: createResourceKeyFromHostKey(key),
+				},
+			];
 		});
 	}
 
@@ -233,4 +442,282 @@ function createSetupAnimationLoadIssues(
 
 function formatErrorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+interface DynamicMaterialSlotFacts {
+	readonly partIndex: number;
+	readonly partSlot: StaticObjectPartMaterialSlotFacts;
+	readonly slotFacts: StaticObjectMaterialSlotFacts;
+}
+
+function createDynamicMaterialSlotRequirements(
+	object: StaticObjectInstanceIdentity,
+	sourceAssets: readonly StaticObjectSourceAssetFacts[],
+): readonly DynamicMaterialSlotFacts[] {
+	return sourceAssets.flatMap((source) =>
+		source.parts.flatMap((part) =>
+			part.materialSlots.map((slot) => ({
+				partIndex: part.partIndex,
+				partSlot: slot,
+				slotFacts: {
+					gfxObj: part.gfxObj,
+					identity: createStaticMaterialSlotIdentity({
+						geometrySurfaceId: slot.geometrySurfaceId,
+						materialSurfaceId: slot.materialSurfaceId,
+						object,
+						partIndex: part.partIndex,
+						slotIndex: slot.slotIndex,
+					}),
+					material: slot.material,
+					materialVariantSignature: slot.materialVariantSignature,
+					object,
+					paletteOverride: slot.paletteOverride,
+					paletteViews: slot.paletteViews,
+					source: source.identity,
+				},
+			})),
+		),
+	);
+}
+
+function createStaticMaterialSlotIdentity(options: {
+	readonly geometrySurfaceId: number;
+	readonly materialSurfaceId: number;
+	readonly object: StaticObjectInstanceIdentity;
+	readonly partIndex: number;
+	readonly slotIndex: number;
+}): StaticMaterialSlotIdentity {
+	return {
+		geometrySurfaceId: options.geometrySurfaceId,
+		kind: "static-material-slot",
+		materialSurfaceId: options.materialSurfaceId,
+		part: {
+			kind: "static-object-part",
+			object: options.object,
+			partIndex: options.partIndex,
+		},
+		slotIndex: options.slotIndex,
+	};
+}
+
+function createTextureRequirements(
+	materialPlans: readonly StaticMaterialPlan[],
+): readonly DynamicEntityTextureRequirement[] {
+	return materialPlans.flatMap((plan) => {
+		const dataUses = plan.textureRoles.map((role) => role.dataUse);
+		const wrapMode = resolveRepeatedStaticMaterialPrimaryWrapMode(dataUses);
+		return plan.textureRoles.map((role): DynamicEntityTextureRequirement => ({
+			dataUse: role.dataUse,
+			key: createTextureRequirementKey(role.dataUse),
+			material: plan.material,
+			role: role.role,
+			samplingPolicy: createStaticMaterialTextureSamplingPolicy({
+				dataUse: role.dataUse,
+				wrapMode,
+			}),
+		}));
+	});
+}
+
+function createTextureRequirementKey(
+	dataUse: MaterialTextureDataUseIdentity,
+): DynamicEntityResourceKey {
+	if (dataUse.kind === "palette-texture-use") {
+		return {
+			id: dataUse.palette.paletteId,
+			kind: "palette",
+		};
+	}
+
+	return {
+		id: createPreparedTextureHostKey(dataUse).id,
+		kind: "prepared-texture",
+	};
+}
+
+function createUnsupportedMaterialReasons(
+	reasons: readonly StaticMaterialFallbackReason[],
+): readonly DynamicEntityUnsupportedMaterialReason[] {
+	return reasons.map((reason) => ({
+		code: reason.code,
+		material: reason.material,
+		message: reason.message,
+	}));
+}
+
+function createMissingRefIssues(
+	missingRefs: readonly StaticResourceIdentity[],
+): readonly DynamicEntityIssue[] {
+	return missingRefs.map((ref) => {
+		const resourceKey = createResourceKeyFromMissingRef(ref);
+		return {
+			kind: "dynamic-resource-load-failed" as const,
+			message: `Missing dynamic visual resource ${formatMissingRef(ref)}.`,
+			resource: resourceKey.kind,
+			resourceKey,
+		};
+	});
+}
+
+function createResourceKeyFromMissingRef(
+	ref: StaticResourceIdentity,
+): DynamicEntityResourceKey {
+	switch (ref.kind) {
+		case "static-object-source":
+			return {
+				id: ref.sourceDid,
+				kind: ref.sourceAssetKind === "gfx-obj" ? "gfx" : ref.sourceAssetKind,
+			};
+		case "static-material-source":
+			return {
+				id: ref.materialId,
+				kind: "material",
+			};
+		case "surface-texture":
+			return {
+				id: ref.surfaceTextureId,
+				kind: "prepared-texture",
+			};
+		case "render-surface":
+			return {
+				id: ref.renderSurfaceId,
+				kind: "render-surface",
+			};
+		case "palette":
+			return {
+				id: ref.paletteId,
+				kind: "palette",
+			};
+		default:
+			return {
+				id: formatMissingRef(ref),
+				kind: "prepared-texture",
+			};
+	}
+}
+
+function formatMissingRef(ref: StaticResourceIdentity): string {
+	if (ref.kind === "static-object-source") {
+		return `${ref.sourceAssetKind}:${ref.sourceDid.toString(16).padStart(8, "0")}`;
+	}
+	if (ref.kind === "static-material-source") {
+		return `material:${ref.materialId.toString(16).padStart(8, "0")}`;
+	}
+	if (ref.kind === "surface-texture") {
+		return `surface-texture:${ref.surfaceTextureId.toString(16).padStart(8, "0")}`;
+	}
+	if (ref.kind === "render-surface") {
+		return `render-surface:${ref.renderSurfaceId.toString(16).padStart(8, "0")}`;
+	}
+	if (ref.kind === "palette") {
+		return `palette:${ref.paletteId.toString(16).padStart(8, "0")}`;
+	}
+	return ref.kind;
+}
+
+function createVisualHostAssetKeys(options: {
+	readonly closure: Awaited<ReturnType<typeof resolveStaticObjectSourceClosure>>;
+	readonly seed: StaticAuthoredDynamicSeedFacts;
+	readonly setupAppearanceIsMissing: boolean;
+	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
+}): readonly HostAssetKey[] {
+	return uniqueHostAssetKeys([
+		...(options.setupAppearanceIsMissing
+			? []
+			: [createHostAssetKey("setup-appearance", options.seed.setupModelId)]),
+		...options.closure.sourceAssets.flatMap((source) =>
+			source.parts.map((part) => createHostAssetKey("gfx-obj", part.gfxObj.sourceDid)),
+		),
+		...options.closure.materialSources.map((source) =>
+			createHostAssetKey("material", source.identity.materialId),
+		),
+		...options.closure.textureRefs.flatMap((ref) => {
+			if (ref.role === "surface-texture") {
+				return [createHostAssetKey("surface-texture", ref.texture.surfaceTextureId)];
+			}
+			return [
+				createHostAssetKey("render-surface", ref.renderSurface.renderSurfaceId),
+			];
+		}),
+		...options.closure.paletteSources.map((source) =>
+			createHostAssetKey("palette", source.palette.paletteId),
+		),
+		...options.textureRequirements.flatMap((requirement) =>
+			createTextureRequirementHostKeys(requirement.dataUse),
+		),
+	]);
+}
+
+function createDynamicMaterialPlanningDomain(
+	seed: StaticAuthoredDynamicSeedFacts,
+): "landblock-env-cells" | "outdoor-buildings" | "outdoor-detail" {
+	return seed.sourceResidence.source === "env-cells"
+		? "landblock-env-cells"
+		: "domain" in seed
+			? seed.domain
+			: "outdoor-buildings";
+}
+
+function isSetupAppearanceRef(ref: StaticResourceIdentity): boolean {
+	return (
+		ref.kind === "static-object-source" &&
+		ref.sourceAssetKind === "setup-appearance"
+	);
+}
+
+function createRequiredResourceFromHostKey(
+	key: HostAssetKey,
+): DynamicEntityRequiredResource {
+	switch (key.kind) {
+		case "setup-appearance":
+			return "setup-appearance";
+		case "gfx-obj":
+			return "gfx";
+		case "material":
+			return "material";
+		case "palette":
+			return "palette";
+		case "render-surface":
+			return "render-surface";
+		case "prepared-texture":
+			return "prepared-texture";
+		default:
+			return "prepared-texture";
+	}
+}
+
+function createResourceKeyFromHostKey(key: HostAssetKey): DynamicEntityResourceKey {
+	const resource = createRequiredResourceFromHostKey(key);
+	if (resource === "animation" || resource === "setup-model") {
+		return {
+			id: Number.parseInt(key.id, 16) >>> 0,
+			kind: resource,
+		};
+	}
+
+	return {
+		id: key.id,
+		kind: resource,
+	};
+}
+
+function createTextureRequirementHostKeys(
+	dataUse: MaterialTextureDataUseIdentity,
+): readonly HostAssetKey[] {
+	if (dataUse.kind === "palette-texture-use") {
+		return [
+			createHostAssetKey("palette", dataUse.palette.paletteId),
+			...dataUse.subPalettes.map((subPalette) =>
+				createHostAssetKey("palette", subPalette.palette.paletteId),
+			),
+		];
+	}
+
+	return [createPreparedTextureHostKey(dataUse)];
+}
+
+function uniqueHostAssetKeys(keys: readonly HostAssetKey[]): readonly HostAssetKey[] {
+	return [...new Map(keys.map((key) => [describeHostAssetKey(key), key])).values()].sort(
+		(left, right) => describeHostAssetKey(left).localeCompare(describeHostAssetKey(right)),
+	);
 }

@@ -688,7 +688,7 @@ Debt and follow-up:
 
 ### Phase 4B: Dynamic Visual, Material, And Texture Readiness
 
-Status: pending.
+Status: completed 2026-06-26.
 
 Purpose:
 
@@ -732,19 +732,19 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Define dynamic visual/material/texture resource state and issue types.
-- [ ] Define typed dynamic resource keys for setup appearance, gfx, material, palette,
+- [x] Define dynamic visual/material/texture resource state and issue types.
+- [x] Define typed dynamic resource keys for setup appearance, gfx, material, palette,
       render-surface, and prepared texture-use dependencies.
-- [ ] Reuse or extract part-agnostic source closure and material planning helpers.
-- [ ] Preserve atlas-compatible prepared texture identities and sampler/material requirements without
+- [x] Reuse or extract part-agnostic source closure and material planning helpers.
+- [x] Preserve atlas-compatible prepared texture identities and sampler/material requirements without
       static ownership.
-- [ ] Prove dynamic readiness does not reference static draw-unit, static batch, or static
+- [x] Prove dynamic readiness does not reference static draw-unit, static batch, or static
       visual-resource owner keys.
-- [ ] Add tests for success, missing setup appearance, missing visual/material/texture dependency,
+- [x] Add tests for success, missing setup appearance, missing visual/material/texture dependency,
       unsupported material plan, dedupe, and lease release.
-- [ ] Remove or narrow `visual-resources-pending` after concrete visual/material/texture outcomes are
+- [x] Remove or narrow `visual-resources-pending` after concrete visual/material/texture outcomes are
       available.
-- [ ] Run phase verification commands.
+- [x] Run phase verification commands.
 
 Decisions and course corrections:
 
@@ -756,6 +756,43 @@ Decisions and course corrections:
   missing refs, but it does not expose every successfully loaded asset key. Phase 4B must either
   derive leases from returned facts or extend the closure result with loaded asset keys before
   claiming complete lease release for visual/material/texture resources.
+- 2026-06-26: Implemented visual readiness by reusing `resolveStaticObjectSourceClosure()` and
+  `planStaticObjectMaterials()` as fact/classification helpers. Dynamic readiness derives its own
+  material slot requirements from source parts so promoted dynamic objects do not depend on static
+  resolver material slots, which intentionally exclude dynamic-promoted objects.
+- 2026-06-26: Dynamic visual readiness stores source/material/palette/texture facts plus neutral
+  texture requirements containing `MaterialTextureDataUseIdentity` and sampling policy. It does not
+  create baked draw units, static batch ids, static visual-resource owner ids, or
+  `StaticTextureUseOwner` records.
+- 2026-06-26: Missing setup appearance remains nonfatal. Other missing visual dependencies and
+  unsupported material planner fallback reasons fail visual readiness with explicit diagnostics.
+- 2026-06-26: `visual-resources-pending` is now only an in-flight state between setup/animation
+  readiness and visual readiness completion. Once visual readiness completes or fails, records carry
+  either `ready` resources or concrete missing/unsupported diagnostics.
+
+Verification:
+
+- 2026-06-26: `npm run test:ts -- dynamic-entity-resource-manager.test.ts
+  dynamic-entity-controller.test.ts client-runtime.test.ts`
+- 2026-06-26: `npm run check`
+- 2026-06-26: `npm run lint:ts`
+- 2026-06-26: `npm run test:ts`
+- 2026-06-26: `npm run lint:dead`
+- 2026-06-26: `npm run check:rust`
+- 2026-06-26: `npm run lint:rust`
+- 2026-06-26: `git diff --check`
+
+Debt and follow-up:
+
+- Dynamic records are resource-ready but still renderer-non-renderable. Phase 5 can consume setup,
+  animation, and source part facts for playback; later renderer phases must turn these facts into
+  dynamic visual resources and instances.
+- Texture requirements preserve atlas-compatible data-use identity and sampling policy, but they do
+  not allocate atlas space or install texture placements. Phase 8 still owns dynamic texture binding
+  ownership and shared atlas/cache integration.
+- Unsupported material planner fallback reasons currently fail dynamic visual readiness. If later
+  phases intentionally support deferred translucent/detail paths, this policy should become more
+  granular instead of a blanket visual-readiness failure.
 
 ### Phase 5: Animation Playback And Hook Dispatcher Shell
 

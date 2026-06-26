@@ -1,7 +1,15 @@
 import type {
 	EnvCellStaticObjectDynamicSeedFacts,
+	MaterialTextureDataUseIdentity,
 	OutdoorStaticObjectDynamicSeedFacts,
+	StaticBakeTextureSamplingPolicy,
 	StaticAuthoredDynamicSeedRecord,
+	StaticObjectMaterialSourceFacts,
+	StaticObjectPaletteSourceFacts,
+	StaticObjectPartMaterialSlotFacts,
+	StaticObjectSourceAssetFacts,
+	StaticObjectTextureRefFacts,
+	StaticResourceIdentity,
 	StaticScopeOwnerKey,
 	StaticWorkPeerRecordOwner,
 } from "../static/contracts";
@@ -62,13 +70,61 @@ interface DynamicEntityBoundsState {
 export interface DynamicEntityResourceState {
 	readonly required: readonly DynamicEntityRequiredResource[];
 	readonly setupAnimation: DynamicEntitySetupAnimationResourceState;
-	readonly status: "failed" | "pending" | "setup-animation-ready";
+	readonly status: "failed" | "pending" | "ready" | "setup-animation-ready";
+	readonly visual: DynamicEntityVisualResourceState;
 }
 
 interface DynamicEntitySetupAnimationResourceState {
 	readonly animationKey: DynamicEntityResourceKey;
 	readonly setupModelKey: DynamicEntityResourceKey;
 	readonly status: "failed" | "pending" | "ready";
+}
+
+type DynamicEntityVisualResourceState =
+	| {
+			readonly status: "blocked" | "pending";
+	  }
+	| DynamicEntityVisualResourcesReadyState
+	| DynamicEntityVisualResourcesFailedState;
+
+interface DynamicEntityVisualResourcesReadyState {
+	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
+	readonly materialSlots: readonly DynamicEntityMaterialSlotRequirement[];
+	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
+	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
+	readonly status: "ready";
+	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
+	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
+}
+
+interface DynamicEntityVisualResourcesFailedState {
+	readonly missingRefs: readonly StaticResourceIdentity[];
+	readonly status: "failed";
+	readonly unsupportedReasons: readonly DynamicEntityUnsupportedMaterialReason[];
+}
+
+interface DynamicEntityMaterialSlotRequirement {
+	readonly material: StaticObjectMaterialSourceFacts["identity"];
+	readonly partIndex: number;
+	readonly slot: StaticObjectPartMaterialSlotFacts;
+}
+
+export interface DynamicEntityTextureRequirement {
+	readonly dataUse: MaterialTextureDataUseIdentity;
+	readonly key: DynamicEntityResourceKey;
+	readonly material: StaticObjectMaterialSourceFacts["identity"];
+	readonly role:
+		| "base-color"
+		| "base-index"
+		| "detail-overlay"
+		| "palette-rgba";
+	readonly samplingPolicy: StaticBakeTextureSamplingPolicy;
+}
+
+export interface DynamicEntityUnsupportedMaterialReason {
+	readonly code: string;
+	readonly message: string;
+	readonly material: StaticObjectMaterialSourceFacts["identity"] | null;
 }
 
 export type DynamicEntityRequiredResource =
@@ -116,7 +172,7 @@ export type DynamicEntityIssue =
 	| {
 			readonly kind: "dynamic-resource-load-failed";
 			readonly message: string;
-			readonly resource: "animation" | "setup-model";
+			readonly resource: DynamicEntityRequiredResource;
 			readonly resourceKey: DynamicEntityResourceKey;
 	  }
 	| {
@@ -130,6 +186,10 @@ export type DynamicEntityIssue =
 	| {
 			readonly kind: "visual-resources-pending";
 			readonly required: readonly DynamicEntityRequiredResource[];
+	  }
+	| {
+			readonly kind: "visual-resources-unsupported";
+			readonly reasons: readonly DynamicEntityUnsupportedMaterialReason[];
 	  };
 
 export interface DynamicRuntimeSnapshot {

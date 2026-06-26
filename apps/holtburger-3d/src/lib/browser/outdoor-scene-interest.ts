@@ -1,5 +1,6 @@
 import {
 	buildOutdoorCoverageLandblockIds,
+	isOutdoorCoverageOffsetIncluded,
 	normalizeOutdoorLandblockId,
 } from "../landblocks";
 
@@ -95,12 +96,11 @@ export function unionOutdoorSceneLandblockIds(
 
 export function countOutdoorSceneLodTiles(radius: number): number {
 	const clampedRadius = clampOutdoorSceneLodRadius(radius);
-	const radiusSquared = clampedRadius * clampedRadius;
 	let tileCount = 0;
 
 	for (let offsetY = -clampedRadius; offsetY <= clampedRadius; offsetY += 1) {
 		for (let offsetX = -clampedRadius; offsetX <= clampedRadius; offsetX += 1) {
-			if (offsetX * offsetX + offsetY * offsetY <= radiusSquared) {
+			if (isOutdoorCoverageOffsetIncluded(offsetX, offsetY, clampedRadius)) {
 				tileCount += 1;
 			}
 		}

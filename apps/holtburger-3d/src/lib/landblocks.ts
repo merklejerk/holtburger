@@ -37,13 +37,11 @@ export function buildOutdoorCoverageLandblocks(
 ): OutdoorCoverageLandblock[] {
 	const center = getOutdoorLandblockCoords(focusLandblockId);
 	const radius = Math.max(0, Math.trunc(landblockRadius));
-	const radiusSquared = radius * radius;
 	const landblocks: OutdoorCoverageLandblock[] = [];
 
 	for (let offsetY = -radius; offsetY <= radius; offsetY += 1) {
 		for (let offsetX = -radius; offsetX <= radius; offsetX += 1) {
-			const distanceSquared = offsetX * offsetX + offsetY * offsetY;
-			if (distanceSquared > radiusSquared) {
+			if (!isOutdoorCoverageOffsetIncluded(offsetX, offsetY, radius)) {
 				continue;
 			}
 
@@ -58,12 +56,26 @@ export function buildOutdoorCoverageLandblocks(
 				landblockId: makeOutdoorLandblockId(nextX, nextY),
 				offsetX,
 				offsetY,
-				distance: Math.sqrt(distanceSquared),
+				distance: Math.hypot(offsetX, offsetY),
 			});
 		}
 	}
 
 	return landblocks.sort(compareOutdoorCoverageLandblocks);
+}
+
+export function isOutdoorCoverageOffsetIncluded(
+	offsetX: number,
+	offsetY: number,
+	landblockRadius: number,
+): boolean {
+	const radius = Math.max(0, Math.trunc(landblockRadius));
+	// Half-tile padding selects landblocks touched by the interest disk instead
+	// of only landblocks whose centers are inside it. That keeps radius 1 from
+	// degenerating into a cross-shaped footprint.
+	const paddedRadius = radius + 0.5;
+
+	return offsetX * offsetX + offsetY * offsetY <= paddedRadius * paddedRadius;
 }
 
 export function buildOutdoorCoverageLandblockIds(

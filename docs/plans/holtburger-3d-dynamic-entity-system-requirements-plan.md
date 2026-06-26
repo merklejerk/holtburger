@@ -188,6 +188,11 @@ bucket.
 - PlayScript is a semantic cue enum, not a script asset. Examples include launch, explode, hide,
   unhide, and breathe-flame style events. A cue can resolve through a script table, while other
   network paths can directly queue a script asset by id.
+- Animation, motion-table, sound-table, physics-script, and physics-script-table references are
+  authored DAT ids, not entries in a required process-global lookup table. Motion tables, sound
+  tables, and physics script tables are per-resource tables: load the referenced resource by id when
+  active entity behavior requires it. Do not introduce startup hydration for a global
+  animation/motion/script/effect LUT unless later ACE/ACViewer evidence proves such a table exists.
 
 Hook/effect semantics:
 
@@ -435,6 +440,13 @@ Define dynamic resource ownership and reuse:
 
 - prepared setup, animation, script, particle, sound, light, material, and texture dependencies.
 - sharing, leasing, eviction, missing-dependency diagnostics, and resource readiness reporting.
+- Dynamic resource ownership should use typed resource keys, in-flight dedupe, committed resource
+  reuse, and reference-counted leases. Multiple dynamic entities that reference the same setup,
+  animation, motion table, sound table, physics script, or physics script table should share one
+  prepared resource entry rather than hydrating duplicate per-entity copies.
+- Do not solve sharing by creating a startup-hydrated global animation/motion/script/effect lookup
+  table. Authored setup, motion, hook, and script data already carries direct DAT ids; per-resource
+  table assets should be resident only while referenced by active entities or implemented behavior.
 - For the first slice, require only dependencies needed to render the selected target honestly:
   setup, part/gfx/material/texture resources, and animation frames. Unsupported dependency references
   should still be preserved and diagnosed; they should not be turned into a baked static fallback.
@@ -670,6 +682,11 @@ Status: Proposed. Confidence: Medium-high.
 - The current host/frontend asset contract exposes `SetupModel.defaultAnimation`, but it does not
   expose animation assets as independent payloads. Dynamic playback needs a first-class animation
   lookup/payload instead of embedding frame data into setup payloads.
+- Dynamic resource readiness should be backed by a shared keyed resource manager. The first slice
+  only needs setup, setup appearance or part/gfx/material/texture facts, and animation payloads, but
+  the key model should be explicit enough to add demand-resident motion table, sound table, physics
+  script, and physics script table resources later without introducing per-entity duplicate loads or
+  a fake global LUT.
 - Scripts, particles, sounds, lights, and script tables remain deferred unless a selected target
   depends on them.
 - Resource planning should preserve and diagnose unsupported dependency references without preparing
@@ -1911,6 +1928,10 @@ First-slice bridge DTO inventory:
   texture resources, and animation payloads through the existing asset service. Script, particle,
   sound, light, motion-table, and script-table payloads stay deferred unless a later target requires
   them.
+- First-slice resource management should still prove shared keyed readiness: duplicate dynamic
+  entities that reference the same setup or animation share one committed prepared resource entry and
+  hold separate leases. No first-slice requirement depends on startup-hydrating a global
+  animation/motion/script/effect lookup table.
 
 Implementation plan implications:
 

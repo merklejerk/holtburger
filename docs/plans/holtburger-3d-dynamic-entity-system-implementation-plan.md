@@ -912,10 +912,10 @@ Purpose:
 
 Deliverables:
 
-- Add typed `SetOmega` payload decoding at the animation asset boundary while preserving raw bytes
-  for diagnostics and future parity checks.
+- Add typed `SetOmega` payload decoding at the animation asset boundary while preserving the original
+  raw bytes for diagnostics and future parity checks.
 - Extend the frontend animation hook DTO/schema with a typed `SetOmega` payload containing the omega
-  vector.
+  vector and the original raw bytes. Do not reconstruct raw bytes from decoded floats.
 - Add dynamic transform-effect state for current object/root omega without redefining source
   residence or static-scope lifetime.
 - Add a `DynamicHookDispatcher` handler for `SetOmega` that writes omega state instead of producing
@@ -923,19 +923,22 @@ Deliverables:
 - Integrate omega over runtime delta time as object/root transform state under the base placement and
   before part-local animation poses are consumed by bounds/rendering.
 - Keep repeated frame-0 `SetOmega` dispatch idempotent across animation loops when the hook payload
-  repeats the same vector.
+  repeats the same vector: refresh active omega/provenance, but do not reset accumulated omega
+  rotation phase.
 - Preserve unsupported diagnostics for every other effect-bearing hook.
 
 Acceptance criteria:
 
 - Animation `0x03000751` exposes a typed `SetOmega` payload with vector `(0.0, 0.0, -0.038397)` and
-  still preserves raw payload bytes.
+  still preserves the exact original raw payload bytes.
 - The `0x020005ac` dynamic record no longer reports unsupported-hook diagnostics for its frame-0
   `SetOmega` hook.
 - Playback stores active omega transform state with entity id, animation asset id, frame/loop source,
   and vector provenance.
 - Runtime ticks integrate omega independently of integer part-frame sampling while preserving the
   existing part-frame playback behavior.
+- Re-entering the same looping frame-0 `SetOmega` hook does not snap or restart the accumulated
+  omega transform phase when the vector is unchanged.
 - Hook-free target `0x020003e5` remains unchanged and does not allocate fake omega state.
 - Tests cover typed decode, dispatcher handling, idempotent repeated loop dispatch, and unsupported
   fallback for non-`SetOmega` hooks.
@@ -946,6 +949,7 @@ Task checklist:
 - [ ] Add dynamic omega transform state types.
 - [ ] Implement `SetOmega` hook handler in the dispatcher.
 - [ ] Integrate omega object/root transform over runtime delta time.
+- [ ] Preserve accumulated omega rotation phase across repeated same-vector loop dispatches.
 - [ ] Add playback/controller tests for `0x03000751`-style frame-0 `SetOmega`.
 - [ ] Update diagnostics so supported `SetOmega` is reported as active transform state, not skipped.
 - [ ] Run phase verification commands.
@@ -957,6 +961,9 @@ Decisions and course corrections:
   can claim to represent the bird target honestly.
 - 2026-06-26: Broad hook execution remains out of scope. This phase adds a hook-generic typed
   handler path using `SetOmega` as the first concrete handler, not a one-off bird-specific shortcut.
+- 2026-06-26: Dry run found two implementation constraints for `SetOmega`: typed payloads must carry
+  decoded vector plus exact raw bytes, and repeated loop dispatch must not reset accumulated omega
+  phase when the vector is unchanged.
 
 ### Phase 6: Dynamic Placement, Bounds, And Outdoor Spatial Index
 
@@ -972,6 +979,8 @@ Deliverables:
 - Add `DynamicPlacementTracker`.
 - Compute current-frame part transforms and conservative bounds from current renderable geometry,
   including active object/root omega transform state.
+- Compose dynamic transforms in this order for bounds: source/base placement, authored object/root
+  pose, omega-integrated object/root transform, then part-local animation pose.
 - Resolve effective outdoor presentation residence from current pose/bounds while preserving source
   residence.
 - Add `OutdoorDynamicSpatialIndex` behind a small local interface.
@@ -996,8 +1005,8 @@ Task checklist:
 
 - [ ] Add package dependency with package-manager tooling.
 - [ ] Define dynamic bounds and precision metadata types.
-- [ ] Implement placement and bounds derivation from base placement, object/root transform,
-      transform-hook state, and part-local poses.
+- [ ] Implement placement and bounds derivation from source/base placement, authored object/root
+      pose, omega-integrated object/root transform, and part-local poses.
 - [ ] Implement outdoor dynamic index wrapper and tests.
 - [ ] Wire placement/index sync into controller tick order.
 - [ ] Run phase verification commands.

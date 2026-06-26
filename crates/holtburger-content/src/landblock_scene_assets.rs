@@ -529,6 +529,13 @@ struct PreparedContentAssemblyContext<'a> {
     diagnostics: PreparedContentSourceDiagnostics,
 }
 
+/// Source record load result with missing assets separated from corrupt/unreadable assets.
+enum SourceRecordLoad<T> {
+    Loaded(T),
+    Missing,
+    DecodeFailed,
+}
+
 impl<'a> PreparedContentAssemblyContext<'a> {
     fn new(content: &'a ContentRepository) -> Self {
         Self {
@@ -578,6 +585,13 @@ impl<'a> PreparedContentAssemblyContext<'a> {
     }
 
     fn load_landblock_info(&mut self, landblock_id: u32) -> Option<LandblockInfo> {
+        match self.load_landblock_info_record(landblock_id) {
+            SourceRecordLoad::Loaded(info) => Some(info),
+            SourceRecordLoad::Missing | SourceRecordLoad::DecodeFailed => None,
+        }
+    }
+
+    fn load_landblock_info_record(&mut self, landblock_id: u32) -> SourceRecordLoad<LandblockInfo> {
         let landblock_info_id = derive_landblock_info_id(landblock_id);
         match self.source.landblock_info(landblock_info_id) {
             Ok(info) => {
@@ -587,14 +601,15 @@ impl<'a> PreparedContentAssemblyContext<'a> {
                     "landblock-info",
                     SourceRecordStatus::Loaded,
                 );
-                Some(info)
+                SourceRecordLoad::Loaded(info)
             }
             Err(error) => {
+                let status = source_status_from_error(&error);
                 self.report_source_record(
                     EOR_CELL_NAMESPACE,
                     landblock_info_id,
                     "landblock-info",
-                    source_status_from_error(&error),
+                    status,
                 );
                 self.report_source_error(
                     EOR_CELL_NAMESPACE,
@@ -603,7 +618,11 @@ impl<'a> PreparedContentAssemblyContext<'a> {
                     source_error_code_from_error(&error),
                     format!("Could not load LandblockInfo 0x{landblock_info_id:08X}: {error:#}"),
                 );
-                None
+                match status {
+                    SourceRecordStatus::Missing => SourceRecordLoad::Missing,
+                    SourceRecordStatus::DecodeFailed => SourceRecordLoad::DecodeFailed,
+                    SourceRecordStatus::Loaded => unreachable!("source error cannot be loaded"),
+                }
             }
         }
     }
@@ -845,6 +864,32 @@ fn env_cell_assembly_error(
     }
 }
 
+fn landblock_env_cells_assembly_error(
+    landblock_id: u32,
+    diagnostics: &PreparedContentSourceDiagnostics,
+) -> anyhow::Error {
+    let details = diagnostics
+        .errors
+        .iter()
+        .map(|error| {
+            format!(
+                "{}:0x{:08X} {} {}: {}",
+                error.namespace, error.file_id, error.role, error.error_code, error.detail
+            )
+        })
+        .collect::<Vec<_>>();
+    if details.is_empty() {
+        anyhow::anyhow!(
+            "Could not assemble landblock env-cell bundle 0x{landblock_id:08X}; no source diagnostics were recorded"
+        )
+    } else {
+        anyhow::anyhow!(
+            "Could not assemble landblock env-cell bundle 0x{landblock_id:08X}; {}",
+            details.join("; ")
+        )
+    }
+}
+
 impl LandblockOutdoorAssetAssembler {
     pub fn new() -> Self {
         Self
@@ -1028,15 +1073,24 @@ impl LandblockEnvCellsAssetAssembler {
     ) -> anyhow::Result<LandblockEnvCellsAsset> {
         let landblock_id = normalize_landblock_id(raw_landblock_id);
         let landblock_info_id = derive_landblock_info_id(landblock_id);
-        let landblock_info = context
-            .load_landblock_info(landblock_id)
-            .as_ref()
-            .map(|info| LandblockInfoFact::from_info(info, landblock_id))
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Could not assemble landblock env-cell bundle 0x{landblock_id:08X}; landblock info unavailable"
-                )
-            })?;
+        let landblock_info = match context.load_landblock_info_record(landblock_id) {
+            SourceRecordLoad::Loaded(info) => LandblockInfoFact::from_info(&info, landblock_id),
+            SourceRecordLoad::Missing => {
+                let diagnostics = context.into_diagnostics();
+                return Ok(empty_landblock_env_cells_asset(
+                    landblock_id,
+                    landblock_info_id,
+                    diagnostics,
+                ));
+            }
+            SourceRecordLoad::DecodeFailed => {
+                let diagnostics = context.into_diagnostics();
+                return Err(landblock_env_cells_assembly_error(
+                    landblock_id,
+                    &diagnostics,
+                ));
+            }
+        };
         let env_cell_facts = load_env_cell_facts(&mut context, landblock_id, &landblock_info);
         let environments = load_bundle_environment_facts(&mut context, &env_cell_facts);
         let interiors = LandblockInteriorFacts {
@@ -1118,6 +1172,21 @@ impl LandblockEnvCellsAssetAssembler {
             landblock_bvh,
             diagnostics,
         })
+    }
+}
+
+fn empty_landblock_env_cells_asset(
+    landblock_id: u32,
+    landblock_info_id: u32,
+    diagnostics: PreparedContentSourceDiagnostics,
+) -> LandblockEnvCellsAsset {
+    LandblockEnvCellsAsset {
+        landblock_id,
+        landblock_info_id,
+        env_cells: Vec::new(),
+        landblock_bvh_items: Vec::new(),
+        landblock_bvh: None,
+        diagnostics,
     }
 }
 
@@ -3579,6 +3648,56 @@ mod tests {
                 env_cell_root: true
             }
         );
+    }
+
+    #[test]
+    fn landblock_env_cell_bundle_treats_missing_landblock_info_as_empty() {
+        let source = Arc::new(CountingSource::new(HashMap::new()));
+        let repository = ContentRepository::from_mounts(vec![source.clone()]);
+        let landblock_id = 0xe25b_ffff;
+        let landblock_info_id = derive_landblock_info_id(landblock_id);
+        let decode_cache = ContentDecodeCache::new();
+
+        let asset = LandblockEnvCellsAssetAssembler::new()
+            .assemble_landblock_with_cache(&repository, &decode_cache, landblock_id)
+            .expect("missing LandblockInfo should mean no env-cell bundle content");
+
+        assert_eq!(asset.landblock_id, landblock_id);
+        assert_eq!(asset.landblock_info_id, landblock_info_id);
+        assert!(asset.env_cells.is_empty());
+        assert!(asset.landblock_bvh_items.is_empty());
+        assert!(asset.landblock_bvh.is_none());
+        assert_eq!(
+            asset.diagnostics.source_records,
+            vec![SourceRecordDiagnostic {
+                namespace: EOR_CELL_NAMESPACE,
+                file_id: landblock_info_id,
+                role: "landblock-info",
+                status: SourceRecordStatus::Missing,
+            }]
+        );
+        assert_eq!(asset.diagnostics.errors.len(), 1);
+        assert_eq!(asset.diagnostics.errors[0].error_code, "asset-read-failed");
+    }
+
+    #[test]
+    fn landblock_env_cell_bundle_rejects_decode_failed_landblock_info() {
+        let landblock_id = 0xe25b_ffff;
+        let landblock_info_id = derive_landblock_info_id(landblock_id);
+        let source = Arc::new(CountingSource::new(HashMap::from([(
+            (EOR_CELL_NAMESPACE.to_string(), landblock_info_id),
+            vec![0; 4],
+        )])));
+        let repository = ContentRepository::from_mounts(vec![source]);
+        let decode_cache = ContentDecodeCache::new();
+
+        let error = LandblockEnvCellsAssetAssembler::new()
+            .assemble_landblock_with_cache(&repository, &decode_cache, landblock_id)
+            .expect_err("corrupt LandblockInfo should remain a hard assembly error");
+
+        let message = error.to_string();
+        assert!(message.contains("Could not assemble landblock env-cell bundle 0xE25BFFFF"));
+        assert!(message.contains("landblock-info asset-decode-failed"));
     }
 
     #[test]

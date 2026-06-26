@@ -993,7 +993,7 @@ Debt and follow-up:
 
 ### Phase 6: Dynamic Placement, Bounds, And Outdoor Spatial Index
 
-Status: pending.
+Status: completed.
 
 Purpose:
 
@@ -1041,15 +1041,15 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add package dependency with package-manager tooling.
-- [ ] Extract neutral AC placement/matrix helpers and update existing imports.
-- [ ] Define dynamic bounds and precision metadata types.
-- [ ] Implement placement and bounds derivation from source/base placement, authored object/root
+- [x] Add package dependency with package-manager tooling.
+- [x] Extract neutral AC placement/matrix helpers and update existing imports.
+- [x] Define dynamic bounds and precision metadata types.
+- [x] Implement placement and bounds derivation from source/base placement, authored object/root
       pose, omega-integrated object/root transform, part-local poses, and visual source-part bounds.
-- [ ] Implement outdoor dynamic index wrapper and tests.
-- [ ] Extract or share outdoor bounds-to-render-cell membership helpers.
-- [ ] Wire animation playback plus placement/index sync into `DynamicEntityController.tick()`.
-- [ ] Run phase verification commands.
+- [x] Implement outdoor dynamic index wrapper and tests.
+- [x] Extract or share outdoor bounds-to-render-cell membership helpers.
+- [x] Wire animation playback plus placement/index sync into `DynamicEntityController.tick()`.
+- [x] Run phase verification commands.
 
 Decisions and course corrections:
 
@@ -1067,13 +1067,27 @@ Decisions and course corrections:
   attachments. Phase 6 should compute conservative current-frame bounds from transformed source-part
   bounds and record precision metadata; vertex/triangle-precise dynamic bounds can wait until a
   target proves that precision is needed.
+- 2026-06-26: Phase 6 uses `rbush` with `@types/rbush` as the hidden mutable 2D AABB/R-tree
+  dependency behind `OutdoorDynamicSpatialIndex`.
+- 2026-06-26: The neutral AC placement helpers now live in `src/lib/math/ac-placement-transform.ts`.
+  Static bake/runtime callers import from that neutral module directly; no compatibility wrapper was
+  needed.
+- 2026-06-26: `DynamicPlacementTracker` computes conservative source-landblock-local current-frame
+  bounds from transformed visual source-part bounds, syncs outdoor index membership, and keeps
+  env-cell dynamic records flat/unindexed for this phase.
+- 2026-06-26: `DynamicEntityController.tick(timeSeconds)` now coordinates animation playback followed
+  by placement/bounds/index synchronization.
 
 Debt and follow-up:
 
-- If static callers need a short-lived compatibility export for the moved AC placement helpers, mark
-  it as cleanup debt and remove it once all imports use the neutral math module directly.
 - Phase 7 should consume `OutdoorDynamicSpatialIndex` through its local wrapper; callers should not
   learn the package API.
+- Phase 7 still needs the merged scene-query adapter that turns indexed dynamic AABBs into debug and
+  selection-filtered query hits.
+- Dynamic bounds are current-frame AABBs from source part bounds, not vertex/triangle precise bounds.
+  Keep the precision metadata visible and upgrade only when a target proves this is insufficient.
+- `npm install` reported 4 audit findings after adding the dependency. They were not auto-fixed during
+  this phase because `npm audit fix` would mutate unrelated package versions.
 
 ### Phase 7: Merged Scene Query Surface
 
@@ -1405,7 +1419,5 @@ Decisions and course corrections:
 
 ## Open Questions
 
-- Which mutable 2D AABB package should back `OutdoorDynamicSpatialIndex`? Choose during
-  implementation with package-manager tooling.
 - Should the first-cut target validation get a dedicated browser diagnostics panel row, or is the
   existing diagnostics report enough once dynamic fields are added?

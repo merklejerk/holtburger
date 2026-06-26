@@ -41,7 +41,7 @@ import {
 	multiplyMat4,
 	writeTexCoord,
 	writeTransformedPosition,
-} from "../../bake/ac-placement-transform";
+} from "../../../math/ac-placement-transform";
 import {
 	createStaticMaterialTableEntry,
 	createStaticMaterialTextureUses,

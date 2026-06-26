@@ -21,6 +21,19 @@ export interface AcPlacementScale {
 	readonly z: number;
 }
 
+export interface AxisAlignedBounds {
+	readonly min: {
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	};
+	readonly max: {
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	};
+}
+
 export function buildAcPlacementMatrix(
 	placement: AcPlacementTransform,
 	scale: AcPlacementScale,
@@ -104,6 +117,56 @@ export function transformPointByMat4(
 		x: (matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12]) * inverseW,
 		y: (matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13]) * inverseW,
 		z: (matrix[2] * x + matrix[6] * y + matrix[10] * z + matrix[14]) * inverseW,
+	};
+}
+
+export function transformBoundsByMat4(
+	bounds: AxisAlignedBounds,
+	matrix: RenderMat4,
+): AxisAlignedBounds {
+	const corners = [
+		{ x: bounds.min.x, y: bounds.min.y, z: bounds.min.z },
+		{ x: bounds.min.x, y: bounds.min.y, z: bounds.max.z },
+		{ x: bounds.min.x, y: bounds.max.y, z: bounds.min.z },
+		{ x: bounds.min.x, y: bounds.max.y, z: bounds.max.z },
+		{ x: bounds.max.x, y: bounds.min.y, z: bounds.min.z },
+		{ x: bounds.max.x, y: bounds.min.y, z: bounds.max.z },
+		{ x: bounds.max.x, y: bounds.max.y, z: bounds.min.z },
+		{ x: bounds.max.x, y: bounds.max.y, z: bounds.max.z },
+	].map((corner) => transformPointByMat4(corner, matrix));
+
+	return createBoundsForPoints(corners);
+}
+
+function createBoundsForPoints(
+	points: readonly {
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	}[],
+): AxisAlignedBounds {
+	if (points.length === 0) {
+		throw new Error("Cannot create bounds from an empty point list.");
+	}
+
+	let minX = Number.POSITIVE_INFINITY;
+	let minY = Number.POSITIVE_INFINITY;
+	let minZ = Number.POSITIVE_INFINITY;
+	let maxX = Number.NEGATIVE_INFINITY;
+	let maxY = Number.NEGATIVE_INFINITY;
+	let maxZ = Number.NEGATIVE_INFINITY;
+	for (const point of points) {
+		minX = Math.min(minX, point.x);
+		minY = Math.min(minY, point.y);
+		minZ = Math.min(minZ, point.z);
+		maxX = Math.max(maxX, point.x);
+		maxY = Math.max(maxY, point.y);
+		maxZ = Math.max(maxZ, point.z);
+	}
+
+	return {
+		max: { x: maxX, y: maxY, z: maxZ },
+		min: { x: minX, y: minY, z: minZ },
 	};
 }
 

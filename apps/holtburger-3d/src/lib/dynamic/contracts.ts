@@ -4,6 +4,7 @@ import type {
 	OutdoorStaticObjectDynamicSeedFacts,
 	StaticBakeTextureSamplingPolicy,
 	StaticAuthoredDynamicSeedRecord,
+	StaticBounds,
 	StaticObjectMaterialSourceFacts,
 	StaticObjectPaletteSourceFacts,
 	StaticObjectPartMaterialSlotFacts,
@@ -126,9 +127,33 @@ interface DynamicEntityTransformState {
 	readonly sourceScale: StaticAuthoredDynamicSeedFacts["sourceScale"];
 }
 
+export type DynamicEntityBoundsPrecision =
+	| "none"
+	| "current-frame-source-part-bounds-aabb";
+
 interface DynamicEntityBoundsState {
-	readonly currentBounds: null;
-	readonly indexed: false;
+	readonly currentBounds: DynamicEntityCurrentBounds | null;
+	readonly indexed: boolean;
+	readonly indexedLandblockIds: readonly number[];
+	readonly precision: DynamicEntityBoundsPrecision;
+}
+
+export interface DynamicEntityCurrentBounds {
+	readonly bounds: StaticBounds;
+	readonly coordinateSpace: "source-landblock-local";
+	readonly effectiveOutdoorLandblockIds: readonly number[];
+	readonly partBounds: readonly DynamicEntityPartBounds[];
+	readonly precision: Extract<
+		DynamicEntityBoundsPrecision,
+		"current-frame-source-part-bounds-aabb"
+	>;
+	readonly sourceLandblockId: number;
+}
+
+export interface DynamicEntityPartBounds {
+	readonly bounds: StaticBounds;
+	readonly partIndex: number;
+	readonly sourceBounds: StaticBounds;
 }
 
 export interface DynamicEntityResourceState {
@@ -299,6 +324,7 @@ export interface DynamicRuntimeSnapshot {
 
 export interface DynamicEntitySummaryDto {
 	readonly animation: DynamicEntityAnimationSummaryDto;
+	readonly bounds: DynamicEntityBoundsState;
 	readonly diagnostics: readonly DynamicEntityIssue[];
 	readonly effectiveResidence: DynamicEntityResidence;
 	readonly id: DynamicEntityId;

@@ -7,7 +7,7 @@ import type {
 import {
 	AC_UNIT_SCALE,
 	buildAcPlacementMatrix,
-} from "./bake/ac-placement-transform";
+} from "../math/ac-placement-transform";
 
 type PortalAperture =
 	StaticPortalInteriorRecord["envCells"][number]["portalApertures"][number];

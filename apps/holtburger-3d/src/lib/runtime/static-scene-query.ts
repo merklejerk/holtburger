@@ -28,21 +28,26 @@ import {
 	createStaticPortalProjection,
 	createStaticPortalProjectionSourceKey,
 } from "../static/portal-graphs";
-import {
-	OUTDOOR_LANDBLOCK_WORLD_SIZE,
-	getOutdoorLandblockCoords,
-} from "../../lib/landblocks";
+import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../../lib/landblocks";
 import {
 	AC_UNIT_SCALE,
 	type RenderMat4,
 	buildAcPlacementMatrix,
 	invertMat4,
 	transformPointByMat4,
-} from "../static/bake/ac-placement-transform";
+} from "../math/ac-placement-transform";
 import {
 	createOutdoorLandblockRootTranslation,
 	deriveOutdoorCameraLandblockResidency,
 } from "./static-placement";
+import {
+	LAND_BLOCK_GRID_EPSILON,
+	createRenderCellKey,
+	createRenderCellKeysForBounds,
+	gridCellAt,
+	parseRenderCellKey,
+	projectLandblockIdToRenderCell,
+} from "./outdoor-landblock-grid";
 
 export interface StaticSceneRay {
 	readonly origin: Vec3;
@@ -2642,24 +2647,6 @@ function getBucketOutdoorRenderBounds(
 	return bounds;
 }
 
-function createRenderCellKeysForBounds(
-	bounds: StaticBounds,
-): readonly string[] {
-	const minCellX = gridCellAt(bounds.min.x, 1, OUTDOOR_LANDBLOCK_WORLD_SIZE);
-	const maxCellX = gridCellAt(bounds.max.x, -1, OUTDOOR_LANDBLOCK_WORLD_SIZE);
-	const minCellZ = gridCellAt(bounds.min.z, 1, OUTDOOR_LANDBLOCK_WORLD_SIZE);
-	const maxCellZ = gridCellAt(bounds.max.z, -1, OUTDOOR_LANDBLOCK_WORLD_SIZE);
-	const cellKeys: string[] = [];
-
-	for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
-		for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
-			cellKeys.push(createRenderCellKey(cellX, cellZ));
-		}
-	}
-
-	return cellKeys;
-}
-
 function estimateLandblockSpatialCandidateDistance(
 	ray: StaticSceneRay,
 	bucket: LandblockSpatialBucket,
@@ -2735,8 +2722,8 @@ export function* traceLandblockGridRayCells(
 			return;
 		}
 
-		const advanceX = nextDistanceX <= nextDistance + GRID_EPSILON;
-		const advanceZ = nextDistanceZ <= nextDistance + GRID_EPSILON;
+		const advanceX = nextDistanceX <= nextDistance + LAND_BLOCK_GRID_EPSILON;
+		const advanceZ = nextDistanceZ <= nextDistance + LAND_BLOCK_GRID_EPSILON;
 		currentDistance = nextDistance;
 		if (advanceX) {
 			cellX += stepX;
@@ -2747,39 +2734,6 @@ export function* traceLandblockGridRayCells(
 			nextDistanceZ += deltaDistanceZ;
 		}
 	}
-}
-
-function projectLandblockIdToRenderCell(
-	landblockId: number,
-	outdoorAnchorLandblockId: number,
-): { readonly cellX: number; readonly cellZ: number } {
-	const landblockCoords = getOutdoorLandblockCoords(landblockId);
-	const anchorCoords = getOutdoorLandblockCoords(outdoorAnchorLandblockId);
-
-	return {
-		cellX: landblockCoords.x - anchorCoords.x,
-		// Local outdoor render Z runs from -landblockSize to 0, so the anchor
-		// landblock lives in render cell Z -1 rather than 0.
-		cellZ: anchorCoords.y - landblockCoords.y - 1,
-	};
-}
-
-function createRenderCellKey(cellX: number, cellZ: number): string {
-	return `${cellX}:${cellZ}`;
-}
-
-function parseRenderCellKey(key: string): {
-	readonly cellX: number;
-	readonly cellZ: number;
-} {
-	const [cellX, cellZ] = key
-		.split(":")
-		.map((entry) => Number.parseInt(entry, 10));
-	if (!Number.isFinite(cellX) || !Number.isFinite(cellZ)) {
-		throw new Error(`Invalid landblock render cell key: ${key}`);
-	}
-
-	return { cellX, cellZ };
 }
 
 function intersectRayGridBounds(
@@ -2798,7 +2752,7 @@ function intersectRayGridBounds(
 		{ direction: ray.direction.x, max: maxX, min: minX, origin: ray.origin.x },
 		{ direction: ray.direction.z, max: maxZ, min: minZ, origin: ray.origin.z },
 	]) {
-		if (Math.abs(slab.direction) < GRID_EPSILON) {
+		if (Math.abs(slab.direction) < LAND_BLOCK_GRID_EPSILON) {
 			if (slab.origin < slab.min || slab.origin > slab.max) {
 				return null;
 			}
@@ -2820,20 +2774,6 @@ function intersectRayGridBounds(
 	}
 
 	return Math.max(tMin, 0);
-}
-
-function gridCellAt(
-	value: number,
-	direction: number,
-	cellSize: number,
-): number {
-	const scaled = value / cellSize;
-	const rounded = Math.round(scaled);
-	if (direction < 0 && Math.abs(scaled - rounded) < GRID_EPSILON) {
-		return rounded - 1;
-	}
-
-	return Math.floor(scaled);
 }
 
 function nextGridBoundaryDistance(
@@ -2899,8 +2839,6 @@ function isEnvCellStaticScenePickHit(
 ): hit is EnvCellStaticScenePickHit {
 	return hit?.selectionKey.itemKind === "env-cell-static-object";
 }
-
-const GRID_EPSILON = 1e-8;
 
 interface BvhCandidate {
 	readonly distance: number;

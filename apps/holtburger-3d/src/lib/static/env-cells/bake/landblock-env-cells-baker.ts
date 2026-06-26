@@ -30,7 +30,7 @@ import {
 	buildAcPlacementMatrix,
 	writeTexCoord,
 	writeTransformedPosition,
-} from "../../bake/ac-placement-transform";
+} from "../../../math/ac-placement-transform";
 import {
 	createStaticMaterialEntryKey,
 	createStaticMaterialTableEntry,

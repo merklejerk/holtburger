@@ -1003,43 +1003,77 @@ Purpose:
 Deliverables:
 
 - Add `DynamicPlacementTracker`.
-- Compute current-frame part transforms and conservative bounds from current renderable geometry,
-  including active object/root omega transform state.
+- Extract reusable AC placement/matrix helpers from the static bake namespace into a neutral frontend
+  math module before dynamic placement consumes them.
+- Compute current-frame part transforms and conservative bounds from current renderable source-part
+  bounds carried by dynamic visual source facts, including active object/root omega transform state.
 - Compose dynamic transforms in this order for bounds: source/base placement, authored object/root
   pose, omega-integrated object/root transform, then part-local animation pose.
 - Resolve effective outdoor presentation residence from current pose/bounds while preserving source
   residence.
 - Add `OutdoorDynamicSpatialIndex` behind a small local interface.
 - Use existing outdoor landblock-grid traversal as the outer query candidate phase.
-- Add the chosen mutable 2D AABB dependency through `npm` during implementation.
+- Add a proven mutable 2D AABB/R-tree dependency through `npm` during implementation and keep the
+  package hidden behind `OutdoorDynamicSpatialIndex`.
+- Extract or share the existing outdoor bounds-to-render-cell helper so dynamic and static indexing
+  use the same landblock-boundary conventions.
+- Introduce `DynamicEntityController.tick(timeSeconds)` as the imperative runtime orchestration entry
+  point for animation playback followed by placement/bounds/index synchronization.
 - Keep env-cell dynamic membership flat for now.
 - Preserve source residence even when omega-driven current bounds cross outdoor landblock
   boundaries.
 
 Acceptance criteria:
 
+- Existing static AC placement/matrix consumers import from the neutral math module or a compatibility
+  wrapper that is marked as temporary cleanup debt.
 - Current-frame dynamic bounds update as animation frames change.
 - Current-frame dynamic bounds update as `SetOmega` object/root transform state changes.
 - Dynamic index membership is keyed by effective outdoor landblock membership.
 - Cross-boundary bounds can be indexed into every overlapped outdoor landblock.
 - Removing an entity removes all index items.
-- The index wrapper is tested independently of browser runtime.
+- The index wrapper is backed by the chosen mutable AABB/R-tree package and tested independently of
+  browser runtime.
+- `DynamicEntityController.tick(timeSeconds)` updates animation playback, placement, bounds, and
+  index membership in one coherent imperative pass.
 - The bird target's bounds/index membership are derived from animation plus active omega state, not
   from static setup bounds alone.
 
 Task checklist:
 
 - [ ] Add package dependency with package-manager tooling.
+- [ ] Extract neutral AC placement/matrix helpers and update existing imports.
 - [ ] Define dynamic bounds and precision metadata types.
 - [ ] Implement placement and bounds derivation from source/base placement, authored object/root
-      pose, omega-integrated object/root transform, and part-local poses.
+      pose, omega-integrated object/root transform, part-local poses, and visual source-part bounds.
 - [ ] Implement outdoor dynamic index wrapper and tests.
-- [ ] Wire placement/index sync into controller tick order.
+- [ ] Extract or share outdoor bounds-to-render-cell membership helpers.
+- [ ] Wire animation playback plus placement/index sync into `DynamicEntityController.tick()`.
 - [ ] Run phase verification commands.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-26: Requirements already require a per-landblock mutable AABB/R-tree-style outdoor dynamic
+  index for the first slice. Do not replace it with a flat map as a temporary simplification; hide the
+  chosen dependency behind `OutdoorDynamicSpatialIndex` so future broadphase changes stay local.
+- 2026-06-26: The existing AC placement/matrix helpers live under the static bake namespace, but
+  Phase 6 is the first dynamic consumer. Extract a neutral frontend math module now instead of making
+  dynamic placement depend on static bake ownership.
+- 2026-06-26: `DynamicPlacementTracker` is an imperative synchronization service, not an optional
+  post-processing helper. The controller should expose `tick(timeSeconds)` so animation playback,
+  transform integration, current-frame bounds, effective residence, and index membership are updated
+  coherently.
+- 2026-06-26: Dynamic visual readiness currently carries source part bounds, not full source geometry
+  attachments. Phase 6 should compute conservative current-frame bounds from transformed source-part
+  bounds and record precision metadata; vertex/triangle-precise dynamic bounds can wait until a
+  target proves that precision is needed.
+
+Debt and follow-up:
+
+- If static callers need a short-lived compatibility export for the moved AC placement helpers, mark
+  it as cleanup debt and remove it once all imports use the neutral math module directly.
+- Phase 7 should consume `OutdoorDynamicSpatialIndex` through its local wrapper; callers should not
+  learn the package API.
 
 ### Phase 7: Merged Scene Query Surface
 
@@ -1295,6 +1329,11 @@ Decisions and course corrections:
 - Risk: new broadphase dependency adds type or package churn.
   Mitigation: hide it behind `OutdoorDynamicSpatialIndex` and add it through `npm` tooling during
   implementation.
+
+- Risk: extracting AC placement/matrix helpers from the static bake namespace creates broad import
+  churn or ambiguous ownership.
+  Mitigation: move only the already shared math primitives into a neutral frontend math module, keep
+  behavior unchanged with focused tests, and mark any compatibility export as temporary cleanup debt.
 
 - Risk: resource readiness duplicates static material logic.
   Mitigation: extract part-agnostic helpers only where facts are isomorphic; avoid dynamic-only

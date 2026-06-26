@@ -10,7 +10,10 @@
 		clampOutdoorSceneLodRadius,
 		countOutdoorSceneLodTiles,
 	} from "../lib/browser/outdoor-scene-interest";
-	import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../lib/landblocks";
+	import {
+		OUTDOOR_LANDBLOCK_WORLD_SIZE,
+		getOutdoorLandblockCoords,
+	} from "../lib/landblocks";
 	import { BrowserCameraController } from "../lib/camera/browser-camera-controller";
 	import {
 		createFreeCameraFrameStateCamera,
@@ -28,6 +31,7 @@
 		type ParsedLocationInput,
 	} from "../lib/browser/location-input";
 	import { resolveBrowserFollowModeRebase } from "../lib/browser/follow-mode";
+	import { deriveOutdoorCameraLandblockResidency } from "../lib/runtime/static-placement";
 	import {
 		DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH,
 		MAX_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH,
@@ -909,7 +913,118 @@
 	function formatCameraPosition(
 		position: readonly [number, number, number],
 	): string {
-		return `${position[0].toFixed(1)}, ${position[1].toFixed(1)}, ${position[2].toFixed(1)}`;
+		return `${position[0].toFixed(1)} ${position[1].toFixed(1)} ${position[2].toFixed(1)}`;
+	}
+
+	function formatOutdoorCameraPosition(
+		position: readonly [number, number, number],
+	): string {
+		return `${position[0].toFixed(1)} ${(-position[2]).toFixed(1)} ${position[1].toFixed(1)}`;
+	}
+
+	function formatCameraPositionWithCell(): string {
+		const residency = snapshot?.currentCameraResidency;
+		if (residency?.kind === "env-cell") {
+			return `${formatHexId(residency.envCellId)} ${formatCameraPosition(cameraState.position)}`;
+		}
+
+		const outdoorPosition = getOutdoorCameraMapPosition();
+		if (outdoorPosition) {
+			const cellId = deriveOutdoorCellId(
+				outdoorPosition.landblockId,
+				outdoorPosition.localPosition,
+			);
+			return `${formatHexId(cellId)} ${formatOutdoorCameraPosition(outdoorPosition.localPosition)}`;
+		}
+
+		return `unknown ${formatCameraPosition(cameraState.position)}`;
+	}
+
+	function formatCameraMapCoords(): string {
+		const residency = snapshot?.currentCameraResidency;
+		if (residency?.kind === "env-cell") {
+			return "indoor";
+		}
+
+		const outdoorPosition = getOutdoorCameraMapPosition();
+		if (!outdoorPosition) {
+			return "unknown";
+		}
+
+		const landblockCoords = getOutdoorLandblockCoords(
+			outdoorPosition.landblockId,
+		);
+		const totalX =
+			landblockCoords.x * OUTDOOR_LANDBLOCK_WORLD_SIZE +
+			outdoorPosition.localPosition[0];
+		const totalY =
+			landblockCoords.y * OUTDOOR_LANDBLOCK_WORLD_SIZE -
+			outdoorPosition.localPosition[2];
+		const longitude = totalX / 240 - 102;
+		const latitude = totalY / 240 - 102;
+
+		return `${formatMapCoord(latitude, "N", "S")} ${formatMapCoord(longitude, "E", "W")}`;
+	}
+
+	function getOutdoorCameraMapPosition(): {
+		readonly landblockId: number;
+		readonly localPosition: readonly [number, number, number];
+	} | null {
+		if (submittedStaticLocation?.kind !== "outdoor-landblock") {
+			return null;
+		}
+
+		const residency = deriveOutdoorCameraLandblockResidency({
+			anchorLandblockId: submittedStaticLocation.landblockId,
+			cameraPosition: cameraState.position,
+		});
+
+		return residency
+			? {
+					landblockId: residency.landblockId,
+					localPosition: residency.localCameraPosition,
+				}
+			: null;
+	}
+
+	function deriveOutdoorCellId(
+		landblockId: number,
+		localPosition: readonly [number, number, number],
+	): number {
+		const maxLocal = OUTDOOR_LANDBLOCK_WORLD_SIZE - 0.0001;
+		const localX = clamp(localPosition[0], 0, maxLocal);
+		const localY = clamp(-localPosition[2], 0, maxLocal);
+		const cellLength = OUTDOOR_LANDBLOCK_WORLD_SIZE / 8;
+		const cellX = Math.trunc(localX / cellLength);
+		const cellY = Math.trunc(localY / cellLength);
+		const cellId = cellX * 8 + cellY + 1;
+
+		return ((landblockId & 0xffff0000) | cellId) >>> 0;
+	}
+
+	function formatMapCoord(
+		value: number,
+		positiveHemisphere: string,
+		negativeHemisphere: string,
+	): string {
+		const hemisphere = value >= 0 ? positiveHemisphere : negativeHemisphere;
+		return `${Math.abs(value).toFixed(2)}${hemisphere}`;
+	}
+
+	function clamp(value: number, min: number, max: number): number {
+		return Math.max(min, Math.min(max, value));
+	}
+
+	function formatRequestedStaticScope(): string {
+		if (snapshot?.sceneInterest.kind === "outdoor-anchor") {
+			return `anchor ${formatHexId(snapshot.sceneInterest.anchorLandblockId)} ${snapshot.sceneInterest.domains.join(", ") || "no domains"} [${snapshot.sceneInterest.source}]`;
+		}
+
+		if (snapshot?.sceneInterest.kind === "interior-cell") {
+			return `env ${formatHexId(snapshot.sceneInterest.landblockId)} / ${formatHexId(snapshot.sceneInterest.envCellId)} [${snapshot.sceneInterest.source}]`;
+		}
+
+		return "none";
 	}
 
 	function isControlPanelEvent(event: Event): boolean {
@@ -1300,13 +1415,6 @@
 		aria-label="Browser runtime controls"
 	>
 		<div class="browser-display__panel-bar">
-			{#if !panelCollapsed}
-				<header>
-					<p class="kicker">Browser</p>
-					<h1>Runtime Harness</h1>
-				</header>
-			{/if}
-
 			<button
 				class="browser-display__collapse"
 				type="button"
@@ -1373,92 +1481,90 @@
 			{#if activeTab === "navigate"}
 				<div class="browser-display__tab-panel" role="tabpanel">
 					<form class="browser-display__form" onsubmit={handleStaticWorkSubmit}>
-						<label class="browser-display__field">
-							<span>Location</span>
-							<input
-								autocomplete="off"
-								placeholder="33.50S, 72.80E, 0xda55, or 0xda550123"
-								spellcheck="false"
-								value={locationInput}
-								oninput={handleLocationInput}
-							/>
-						</label>
-
-						<div
-							class="browser-display__toggles"
-							aria-label="Landblock focus mode"
-						>
-							<label>
+						<section class="browser-display__control-group">
+							<h2>Location</h2>
+							<label class="browser-display__field">
+								<span>Target</span>
 								<input
-									checked={landblockInputMode === "outdoor"}
-									disabled={!canToggleLandblockMode}
-									name="browser-display-landblock-mode"
-									type="radio"
-									onchange={handleOutdoorModeChange}
+									autocomplete="off"
+									placeholder="33.50S, 72.80E, 0xda55, or 0xda550123"
+									spellcheck="false"
+									value={locationInput}
+									oninput={handleLocationInput}
 								/>
-								<span>Outdoor</span>
 							</label>
-							<label>
-								<input
-									checked={landblockInputMode === "dungeon"}
-									disabled={!canToggleLandblockMode}
-									name="browser-display-landblock-mode"
-									type="radio"
-									onchange={handleDungeonModeChange}
-								/>
-								<span>Dungeon</span>
-							</label>
-						</div>
 
-						<div class="browser-display__toggles" aria-label="Follow mode">
-							<label>
-								<input
-									checked={followModeEnabled}
-									disabled={!runtime ||
-										parsedLocation?.kind === "interior-cell"}
-									type="checkbox"
-									onchange={handleFollowModeChange}
-								/>
-								<span>Follow camera</span>
-							</label>
-						</div>
+							<div
+								class="browser-display__toggles"
+								aria-label="Landblock focus mode"
+							>
+								<label>
+									<input
+										checked={landblockInputMode === "outdoor"}
+										disabled={!canToggleLandblockMode}
+										name="browser-display-landblock-mode"
+										type="radio"
+										onchange={handleOutdoorModeChange}
+									/>
+									<span>Outdoor</span>
+								</label>
+								<label>
+									<input
+										checked={landblockInputMode === "dungeon"}
+										disabled={!canToggleLandblockMode}
+										name="browser-display-landblock-mode"
+										type="radio"
+										onchange={handleDungeonModeChange}
+									/>
+									<span>Dungeon</span>
+								</label>
+							</div>
 
-						<dl class="browser-display__status">
-							<div>
-								<dt>Parsed</dt>
-								<dd>{parsedLocation?.label ?? "invalid"}</dd>
+							<dl class="browser-display__status">
+								<div>
+									<dt>Parsed</dt>
+									<dd>{parsedLocation?.label ?? "invalid"}</dd>
+								</div>
+								<div>
+									<dt>Requested</dt>
+									<dd>{formatRequestedStaticScope()}</dd>
+								</div>
+								<div>
+									<dt>Focus</dt>
+									<dd>{formatCameraFocusStatus()}</dd>
+								</div>
+							</dl>
+						</section>
+
+						<section class="browser-display__control-group">
+							<h2>Follow</h2>
+							<div class="browser-display__toggles" aria-label="Follow mode">
+								<label>
+									<input
+										checked={followModeEnabled}
+										disabled={!runtime ||
+											parsedLocation?.kind === "interior-cell"}
+										type="checkbox"
+										onchange={handleFollowModeChange}
+									/>
+									<span>Follow camera</span>
+								</label>
 							</div>
-							<div>
-								<dt>Mode</dt>
-								<dd>
-									{parsedLocation?.kind === "interior-cell"
-										? "interior cell"
-										: parsedLocation?.kind === "outdoor-landblock"
-											? "outdoor landblock"
-											: "unknown"}
-								</dd>
-							</div>
-							<div>
-								<dt>Scene interest</dt>
-								<dd>
-									{#if snapshot?.sceneInterest.kind === "outdoor-anchor"}
-										{formatHexId(snapshot.sceneInterest.anchorLandblockId)}
-										({snapshot.sceneInterest.domains.join(", ") || "none"}) [{snapshot
-											.sceneInterest.source}]
-									{:else if snapshot?.sceneInterest.kind === "interior-cell"}
-										{formatHexId(snapshot.sceneInterest.landblockId)}
-										/ {formatHexId(snapshot.sceneInterest.envCellId)}
-										[{snapshot.sceneInterest.source}]
-									{:else}
-										none
-									{/if}
-								</dd>
-							</div>
-							<div>
-								<dt>Camera focus</dt>
-								<dd>{formatCameraFocusStatus()}</dd>
-							</div>
-						</dl>
+						</section>
+
+						<section class="browser-display__control-group">
+							<h2>Camera Residency</h2>
+							<dl class="browser-display__status">
+								<div>
+									<dt>Position</dt>
+									<dd>{formatCameraPositionWithCell()}</dd>
+								</div>
+								<div>
+									<dt>Coords</dt>
+									<dd>{formatCameraMapCoords()}</dd>
+								</div>
+							</dl>
+						</section>
 
 						<button
 							class="browser-display__request"
@@ -1999,35 +2105,13 @@
 	.browser-display__panel-bar {
 		display: flex;
 		align-items: start;
-		justify-content: space-between;
+		justify-content: flex-end;
 		gap: 10px;
 		margin-bottom: 10px;
 	}
 
 	.browser-display__panel--collapsed .browser-display__panel-bar {
 		margin-bottom: 0;
-	}
-
-	.browser-display__panel header {
-		display: grid;
-		gap: 2px;
-		min-width: 0;
-	}
-
-	.kicker {
-		margin: 0;
-		color: #75ffd1;
-		font-size: 10px;
-		text-transform: uppercase;
-		letter-spacing: 0;
-	}
-
-	h1 {
-		margin: 0;
-		color: #f1fff6;
-		font-size: 16px;
-		font-weight: 700;
-		letter-spacing: 0;
 	}
 
 	button,
@@ -2100,6 +2184,22 @@
 		display: grid;
 		gap: 9px;
 		margin: 0;
+	}
+
+	.browser-display__control-group {
+		display: grid;
+		gap: 7px;
+		padding: 0;
+		margin: 0;
+	}
+
+	.browser-display__control-group h2 {
+		margin: 0;
+		color: #75ffd1;
+		font-size: 11px;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0;
 	}
 
 	.browser-display__field,

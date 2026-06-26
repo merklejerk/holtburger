@@ -3021,7 +3021,9 @@ struct PreparedPolygonRenderSide<'a> {
     kind: PreparedPolygonRenderSideKind,
     surface_id: Option<i16>,
     material_variant_signature: &'static str,
-    uv_indices: &'a [u8],
+    /// Authored UV indices for this side. Some legacy solid-color polygons
+    /// omit UV indices entirely; those still produce geometry with zero UVs.
+    uv_indices: Option<&'a [u8]>,
     winding: PreparedPolygonWinding,
     normal_scale: f32,
 }
@@ -3081,7 +3083,7 @@ fn derive_polygon_render_sides(
             kind: PreparedPolygonRenderSideKind::Positive,
             surface_id: normalize_surface_id(polygon.pos_surface),
             material_variant_signature: positive_polygon_side_material_variant(polygon),
-            uv_indices: &polygon.pos_uv_indices,
+            uv_indices: polygon_side_uv_indices(polygon, PolygonSideKind::Positive),
             winding: PreparedPolygonWinding::Source,
             normal_scale: 1.0,
         });
@@ -3097,7 +3099,7 @@ fn derive_polygon_render_sides(
                 kind: PreparedPolygonRenderSideKind::PositiveReversed,
                 surface_id: normalize_surface_id(polygon.pos_surface),
                 material_variant_signature: positive_polygon_side_material_variant(polygon),
-                uv_indices: &polygon.pos_uv_indices,
+                uv_indices: polygon_side_uv_indices(polygon, PolygonSideKind::Positive),
                 winding: PreparedPolygonWinding::Reversed,
                 normal_scale: -1.0,
             });
@@ -3107,7 +3109,7 @@ fn derive_polygon_render_sides(
                 kind: PreparedPolygonRenderSideKind::Negative,
                 surface_id: normalize_surface_id(polygon.neg_surface),
                 material_variant_signature: negative_polygon_side_material_variant(polygon),
-                uv_indices: &polygon.neg_uv_indices,
+                uv_indices: polygon_side_uv_indices(polygon, PolygonSideKind::Negative),
                 winding: PreparedPolygonWinding::Reversed,
                 normal_scale: -1.0,
             });
@@ -3123,14 +3125,34 @@ fn derive_polygon_render_sides(
 }
 
 fn positive_polygon_side_is_renderable(polygon: &Polygon) -> bool {
-    (polygon.stippling & STIPPLING_NO_POS) == 0
-        && polygon.pos_uv_indices.len() == polygon.vertex_ids.len()
+    polygon_side_uv_indices(polygon, PolygonSideKind::Positive).is_some()
+        || (polygon.stippling & STIPPLING_NO_POS) != 0
 }
 
 fn negative_polygon_side_is_renderable(polygon: &Polygon) -> bool {
     polygon.sides_type == CULL_MODE_CLOCKWISE
-        && (polygon.stippling & STIPPLING_NO_NEG) == 0
-        && polygon.neg_uv_indices.len() == polygon.vertex_ids.len()
+        && polygon_side_uv_indices(polygon, PolygonSideKind::Negative).is_some()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PolygonSideKind {
+    Positive,
+    Negative,
+}
+
+fn polygon_side_uv_indices(polygon: &Polygon, side: PolygonSideKind) -> Option<&[u8]> {
+    let (omit_uv_bit, uv_indices) = match side {
+        PolygonSideKind::Positive => (STIPPLING_NO_POS, polygon.pos_uv_indices.as_slice()),
+        PolygonSideKind::Negative => (STIPPLING_NO_NEG, polygon.neg_uv_indices.as_slice()),
+    };
+    if (polygon.stippling & omit_uv_bit) != 0 {
+        return None;
+    }
+    if uv_indices.len() == polygon.vertex_ids.len() {
+        Some(uv_indices)
+    } else {
+        None
+    }
 }
 
 fn positive_polygon_side_material_variant(polygon: &Polygon) -> &'static str {
@@ -3194,8 +3216,10 @@ fn append_polygon_render_side_geometry(
                 scale_normal_component(render_normal.z, render_side.normal_scale),
             ]);
 
-            let uv_index = render_side.uv_indices[polygon_vertex_offset] as usize;
-            let uv = vertex.uvs.get(uv_index);
+            let uv = render_side
+                .uv_indices
+                .and_then(|indices| indices.get(polygon_vertex_offset))
+                .and_then(|uv_index| vertex.uvs.get(usize::from(*uv_index)));
             buffers
                 .uvs
                 .extend([uv.map_or(0.0, |uv| uv.u), uv.map_or(0.0, |uv| uv.v)]);
@@ -3963,14 +3987,16 @@ mod tests {
     }
 
     #[test]
-    fn polygon_side_expansion_suppresses_no_pos_positive_side() {
+    fn polygon_side_expansion_emits_no_pos_positive_side_without_uvs() {
         let mut polygon = test_triangle_polygon([0, 1, 2]);
         polygon.stippling = STIPPLING_NO_POS;
         polygon.pos_uv_indices.clear();
 
-        assert!(
-            derive_polygon_render_sides(&polygon, PolygonRenderSidePolicy::VisualSides).is_empty()
-        );
+        let sides = derive_polygon_render_sides(&polygon, PolygonRenderSidePolicy::VisualSides);
+
+        assert_eq!(sides.len(), 1);
+        assert_eq!(sides[0].kind, PreparedPolygonRenderSideKind::Positive);
+        assert_eq!(sides[0].uv_indices, None);
     }
 
     #[test]
@@ -3999,7 +4025,7 @@ mod tests {
             sides[1].material_variant_signature,
             legacy_sampler_material_variant_signature(false)
         );
-        assert_eq!(sides[1].uv_indices, polygon.pos_uv_indices);
+        assert_eq!(sides[1].uv_indices, Some(polygon.pos_uv_indices.as_slice()));
         assert_eq!(sides[1].winding, PreparedPolygonWinding::Reversed);
         assert_eq!(sides[1].normal_scale, -1.0);
     }
@@ -4021,7 +4047,7 @@ mod tests {
             sides[0].material_variant_signature,
             legacy_sampler_material_variant_signature(false)
         );
-        assert_eq!(sides[0].uv_indices, polygon.pos_uv_indices);
+        assert_eq!(sides[0].uv_indices, Some(polygon.pos_uv_indices.as_slice()));
         assert_eq!(sides[0].winding, PreparedPolygonWinding::Source);
         assert_eq!(sides[1].kind, PreparedPolygonRenderSideKind::Negative);
         assert_eq!(sides[1].surface_id, Some(7));
@@ -4029,7 +4055,7 @@ mod tests {
             sides[1].material_variant_signature,
             legacy_sampler_material_variant_signature(false)
         );
-        assert_eq!(sides[1].uv_indices, polygon.neg_uv_indices);
+        assert_eq!(sides[1].uv_indices, Some(polygon.neg_uv_indices.as_slice()));
         assert_eq!(sides[1].winding, PreparedPolygonWinding::Reversed);
         assert_eq!(sides[1].normal_scale, -1.0);
     }
@@ -4144,6 +4170,24 @@ mod tests {
                 (Some(4), legacy_sampler_material_variant_signature(false))
             ]
         );
+    }
+
+    #[test]
+    fn polygon_render_geometry_emits_no_pos_polygons_with_zero_uvs() {
+        let vertex_array = test_vertex_array();
+        let mut polygon = test_triangle_polygon([0, 1, 2]);
+        polygon.stippling = STIPPLING_NO_POS;
+        polygon.pos_uv_indices.clear();
+        let polygons = HashMap::from([(15, polygon)]);
+
+        let geometry =
+            build_polygon_set_render_geometry(0x0200_0001, &vertex_array, &polygons, None);
+
+        assert_eq!(geometry.triangle_count, 1);
+        assert_eq!(geometry.skipped_polygon_count, 0);
+        assert!(geometry.invalid_polygons.is_empty());
+        assert_eq!(geometry.triangles[0].surface_id, Some(0));
+        assert_eq!(geometry.uvs, vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
     }
 
     #[test]

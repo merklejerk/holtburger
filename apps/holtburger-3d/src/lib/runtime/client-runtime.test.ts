@@ -33,6 +33,8 @@ import type {
 	StaticMaterialCoverageReport,
 	OutdoorStaticObjectsScopePayload,
 	StaticObjectGeometryStaticDrawUnit,
+	StaticObjectRenderInstance,
+	StaticObjectVisualResource,
 	StaticPortalApertureResource,
 	StaticPortalInteriorRecord,
 	StructuredInteriorGeometryStaticDrawUnit,
@@ -1086,6 +1088,64 @@ describe("browser client runtime", () => {
 
 		expect(renderer.terrainLayerUpdates.at(-1)).toEqual([0xdb55ffff, null]);
 		expect(renderer.staticAnchorLandblockIds.at(-1)).toBeNull();
+		runtime.dispose();
+	});
+
+	it("forwards instanced-only outdoor detail layers to the renderer", async () => {
+		const renderer = new FakeRenderer();
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const staticCoordinator = createImmediateStaticCoordinator({
+			baker,
+			resolver,
+		});
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator,
+		});
+		const landblockId = 0xdc59ffff;
+		const resource = createStaticObjectVisualResource({
+			resourceId: "detail-resource-a",
+		});
+		const instance = createStaticObjectRenderInstance({
+			instanceId: "detail-instance-a",
+			landblockId,
+			resourceId: resource.resourceId,
+		});
+
+		updateOutdoorSceneInterest(runtime, {
+			anchorLandblockId: landblockId,
+			domains: ["terrain", "detail"],
+			lod: { detail: 0, terrain: 0 },
+		});
+		const detailRequest = resolver.pendingRequests.find(
+			(request) => request.job.domain === "outdoor-detail",
+		);
+		resolver.complete(detailRequest?.requestId ?? "", {
+			scope: createOutdoorStaticObjectsPayload({ landblockId }),
+		});
+		await flushPromises();
+		baker.complete("1:landblock:dc59ffff:outdoor-detail", {
+			drawUnits: [],
+			staticObjectRenderInstances: [instance],
+			staticObjectVisualResources: [resource],
+		});
+		await flushPromises();
+
+		expect(renderer.outdoorDetailsLayerUpdates).toEqual([
+			[
+				landblockId,
+				expect.objectContaining({
+					drawUnits: [],
+					instancedObjectInstances: [instance],
+					instancedObjectResources: [resource],
+					kind: "outdoor-detail",
+					landblockId,
+				}),
+			],
+		]);
 		runtime.dispose();
 	});
 
@@ -2257,6 +2317,94 @@ function createStaticObjectDrawUnit(
 		textureUseIds: [],
 		triangleCount: 1,
 		vertexCount: 3,
+	};
+}
+
+function createStaticObjectVisualResource(options: {
+	readonly resourceId: string;
+}): StaticObjectVisualResource {
+	const source = {
+		kind: "static-object-source" as const,
+		sourceAssetKind: "setup-model" as const,
+		sourceDid: 0x02000010,
+	};
+	const gfxObj = {
+		kind: "static-object-source" as const,
+		sourceAssetKind: "gfx-obj" as const,
+		sourceDid: 0x01000020,
+	};
+	const drawUnit = createStaticObjectDrawUnit(`${options.resourceId}:source`);
+	const geometry = {
+		gfxObj,
+		kind: "static-object-source-geometry" as const,
+		partIndex: 0,
+		source,
+	};
+
+	return {
+		bounds: {
+			max: { x: 1, y: 1, z: 1 },
+			min: { x: -1, y: -1, z: -1 },
+		},
+		coordinateSpace: "static-object-source-local",
+		geometry,
+		indexType: drawUnit.indexType,
+		indices: drawUnit.indices,
+		kind: "static-object-visual-resource",
+		key: {
+			geometry,
+			indexType: drawUnit.indexType,
+			kind: "static-object-visual-resource-key",
+			materialEntries: drawUnit.materialEntries,
+			materialFamily: drawUnit.materialFamily,
+			materialPass: drawUnit.materialPass,
+			renderState: drawUnit.renderState,
+			textureUseIds: [],
+		},
+		materialEntries: drawUnit.materialEntries,
+		materialFamily: drawUnit.materialFamily,
+		materialPass: drawUnit.materialPass,
+		materialSlotIndices: drawUnit.materialSlotIndices,
+		positions: drawUnit.positions,
+		renderState: drawUnit.renderState,
+		resourceId: options.resourceId,
+		texCoords: drawUnit.texCoords,
+		textureUseIds: [],
+		triangleCount: drawUnit.triangleCount,
+		vertexCount: drawUnit.vertexCount,
+	};
+}
+
+function createStaticObjectRenderInstance(options: {
+	readonly instanceId: string;
+	readonly landblockId: number;
+	readonly resourceId: string;
+}): StaticObjectRenderInstance {
+	const bounds = {
+		max: { x: 1, y: 1, z: 1 },
+		min: { x: -1, y: -1, z: -1 },
+	};
+
+	return {
+		bounds,
+		domain: "outdoor-detail",
+		generated: null,
+		instanceId: options.instanceId,
+		kind: "static-object-render-instance",
+		landblockId: options.landblockId,
+		resourceId: options.resourceId,
+		sortCenter: { x: 0, y: 0, z: 0 },
+		source: {
+			instanceId: options.instanceId,
+			kind: "static-object-instance",
+			landblockId: options.landblockId,
+			objectKind: "generated-scenery",
+		},
+		sourceToLandblockMatrix: new Float32Array([
+			1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
+		]),
+		transform: createStaticPlacement(),
+		transparency: { kind: "depth-writing" },
 	};
 }
 

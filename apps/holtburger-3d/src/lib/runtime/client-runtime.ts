@@ -2908,6 +2908,14 @@ function createMaterializedLandblockLayerPayloads(
 			]);
 		}
 	}
+	for (const instance of materialized.staticObjectRenderInstances) {
+		if (instance.domain !== "outdoor-detail") {
+			continue;
+		}
+		if (!detailByLandblock.has(instance.landblockId)) {
+			detailByLandblock.set(instance.landblockId, []);
+		}
+	}
 
 	for (const [landblockId, drawUnits] of terrainByLandblock) {
 		const drawUnitIds = new Set(

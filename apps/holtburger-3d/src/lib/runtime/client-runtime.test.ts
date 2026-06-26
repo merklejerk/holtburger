@@ -1790,7 +1790,6 @@ class FakeRenderer implements Renderer {
 		terrainDrawUnits: 0,
 	};
 
-	applyDynamicDelta(): void {}
 	setTerrainLayer(
 		landblockId: number,
 		payload: TerrainLayerPayload | null,

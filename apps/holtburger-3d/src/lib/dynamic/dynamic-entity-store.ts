@@ -11,12 +11,31 @@ export class DynamicEntityStore {
 		this.#recordsById.set(record.id, record);
 	}
 
-	retainSourceScopeKeys(retainedScopeKeys: ReadonlySet<string>): void {
+	update(
+		id: DynamicEntityId,
+		updateRecord: (record: DynamicEntityRecord) => DynamicEntityRecord,
+	): DynamicEntityRecord | null {
+		const record = this.#recordsById.get(id);
+		if (!record) {
+			return null;
+		}
+
+		const updated = updateRecord(record);
+		this.#recordsById.set(id, updated);
+		return updated;
+	}
+
+	retainSourceScopeKeys(
+		retainedScopeKeys: ReadonlySet<string>,
+	): readonly DynamicEntityRecord[] {
+		const removed: DynamicEntityRecord[] = [];
 		for (const [id, record] of this.#recordsById) {
 			if (!retainedScopeKeys.has(record.provenance.sourceScopeKey)) {
+				removed.push(record);
 				this.#recordsById.delete(id);
 			}
 		}
+		return removed;
 	}
 
 	get(id: DynamicEntityId): DynamicEntityRecord | null {

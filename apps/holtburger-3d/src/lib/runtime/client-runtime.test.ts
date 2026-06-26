@@ -6,6 +6,7 @@ import type {
 	PreparedAsset,
 	PreparedAssetLease,
 } from "../assets/contracts";
+import { HostBackedAssetService } from "../assets/asset-service";
 import type {
 	RuntimeHost,
 	RuntimeHostSnapshot,
@@ -109,6 +110,7 @@ describe("browser client runtime", () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const runtime = createClientRuntime({
+			assetService: createResolvingAssetService(),
 			diagnostics: silentDiagnostics,
 			host: new FakeRuntimeHost(),
 			renderer: new FakeRenderer(),
@@ -133,7 +135,7 @@ describe("browser client runtime", () => {
 		baker.complete(workId, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord(workId)],
 		});
-		await flushPromises();
+		await flushRuntimeWork();
 
 		expect(snapshots.at(-1)?.dynamic).toMatchObject({
 			activeEntityCount: 1,
@@ -147,6 +149,12 @@ describe("browser client runtime", () => {
 			sourceSeed: {
 				setupModelId: 0x020003e5,
 			},
+			resources: {
+				setupAnimation: {
+					status: "ready",
+				},
+				status: "setup-animation-ready",
+			},
 		});
 
 		runtime.updateSceneInterest({ kind: "none" });
@@ -159,10 +167,87 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
+	it("emits a runtime snapshot when dynamic setup and animation resources become ready", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const assetService = new DeferredAssetService();
+		const runtime = createClientRuntime({
+			assetService,
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer: new FakeRenderer(),
+			staticCoordinator: createImmediateStaticCoordinator({ baker, resolver }),
+		});
+		const snapshots: RuntimeSnapshot[] = [];
+		const unsubscribe = runtime.subscribe((snapshot) => {
+			snapshots.push(snapshot);
+		});
+
+		updateOutdoorSceneInterest(runtime, {
+			domains: ["buildings", "terrain"],
+			lod: {
+				buildings: 0,
+				terrain: 0,
+			},
+		});
+		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
+		await flushPromises();
+		const workId = "1:landblock:da55ffff:outdoor-buildings";
+		baker.complete(workId, {
+			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord(workId)],
+		});
+		await flushPromises();
+
+		const snapshotCountBeforeResourcesReady = snapshots.length;
+		expect(snapshots.at(-1)?.dynamic.records[0]?.resources).toMatchObject({
+			setupAnimation: {
+				status: "pending",
+			},
+			status: "pending",
+		});
+		expect(assetService.pendingKeys).toEqual([
+			{ id: "020003e5", kind: "setup-model" },
+			{ id: "0300061b", kind: "animation" },
+		]);
+
+		assetService.resolveNext(
+			createPreparedAsset(assetService.pendingKeys[0] ?? failKey()),
+		);
+		assetService.resolveNext(
+			createPreparedAsset(assetService.pendingKeys[1] ?? failKey()),
+		);
+		await flushRuntimeWork();
+
+		expect(snapshots.length).toBeGreaterThan(snapshotCountBeforeResourcesReady);
+		expect(snapshots.at(-1)?.dynamic.records[0]).toMatchObject({
+			animation: {
+				status: "ready",
+			},
+			diagnostics: [
+				{
+					kind: "visual-resources-pending",
+				},
+			],
+			renderability: {
+				reasons: ["visual-resources-pending"],
+			},
+			resources: {
+				setupAnimation: {
+					status: "ready",
+				},
+				status: "setup-animation-ready",
+			},
+		});
+
+		unsubscribe();
+		runtime.dispose();
+	});
+
 	it("ingests classified env-cell dynamic seeds without dropping static env-cell seed records", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const runtime = createClientRuntime({
+			assetService: createResolvingAssetService(),
 			diagnostics: silentDiagnostics,
 			host: new FakeRuntimeHost(),
 			renderer: new FakeRenderer(),
@@ -184,7 +269,7 @@ describe("browser client runtime", () => {
 				createEnvCellDynamicSeedRecord(workId),
 			],
 		});
-		await flushPromises();
+		await flushRuntimeWork();
 
 		expect(snapshots.at(-1)?.dynamic).toMatchObject({
 			activeEntityCount: 1,
@@ -199,8 +284,14 @@ describe("browser client runtime", () => {
 				sourceScopeKey: "landblock-env-cells:landblock:da55ffff",
 			},
 			renderability: {
-				reasons: ["resources-pending", "residence-render-path-pending"],
+				reasons: ["visual-resources-pending", "residence-render-path-pending"],
 				status: "non-renderable",
+			},
+			resources: {
+				setupAnimation: {
+					status: "ready",
+				},
+				status: "setup-animation-ready",
 			},
 			sourceResidence: {
 				envCellId: 0xda550100,
@@ -2210,6 +2301,19 @@ class FakeRuntimeHost implements RuntimeHost {
 	}
 }
 
+class ResolvingAssetRuntimeHost implements RuntimeHost {
+	lookupAsset(key: HostAssetKey, revision: number): Promise<PreparedAsset> {
+		return Promise.resolve(createPreparedAsset(key, revision));
+	}
+
+	createSnapshot(): RuntimeHostSnapshot {
+		return {
+			failure: null,
+			isAvailable: true,
+		};
+	}
+}
+
 class DeferredAssetService implements AssetService {
 	readonly pendingKeys: HostAssetKey[] = [];
 	pruneCalls = 0;
@@ -2265,6 +2369,12 @@ class DeferredAssetService implements AssetService {
 interface DeferredAssetRequest {
 	readonly resolve: (asset: PreparedAsset) => void;
 	readonly reject: (error: Error) => void;
+}
+
+function createResolvingAssetService(): HostBackedAssetService {
+	return new HostBackedAssetService({
+		host: new ResolvingAssetRuntimeHost(),
+	});
 }
 
 function createOutdoorStaticObjectsPayload(
@@ -3034,6 +3144,16 @@ function runtimeSnapshotSummary(
 	return {
 		staticMaterialization: snapshot.staticMaterialization,
 		status: snapshot.status,
+	};
+}
+
+function createPreparedAsset(key: HostAssetKey, revision = 1): PreparedAsset {
+	return {
+		key,
+		payload: { ok: true },
+		preparedAt: "2026-06-26T00:00:00.000Z",
+		revision,
+		sourceAssetId: `${key.kind}/${key.id}`,
 	};
 }
 

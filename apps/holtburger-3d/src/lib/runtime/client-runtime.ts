@@ -117,6 +117,7 @@ import {
 	type RuntimePortalOverlapResidency,
 } from "./portal-base-overlap";
 import { DynamicEntityController } from "../dynamic/dynamic-entity-controller";
+import { DynamicEntityResourceManager } from "../dynamic/dynamic-entity-resource-manager";
 import type { DynamicRuntimeSnapshot } from "../dynamic/contracts";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
@@ -603,7 +604,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #staticLayersByKey = new Map<string, StaticLandblockLayerPayload>();
 	readonly #staticLayerKeyByResourceId = new Map<string, string>();
 	#envCellResourceMembershipRevision = 0;
-	readonly #dynamicEntityController = new DynamicEntityController();
+	readonly #dynamicEntityController: DynamicEntityController;
 	#envCellAabbDebugOverlayVisible = false;
 	#envCellPortalDebugOverlayVisible = false;
 	#flatVisionModeEnabled = false;
@@ -627,6 +628,14 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#host = host;
 		this.#assetService = assetService;
 		this.#diagnostics = diagnostics;
+		this.#dynamicEntityController = new DynamicEntityController({
+			onResourcesChanged: () => {
+				if (!this.#disposed) {
+					this.#emit();
+				}
+			},
+			resourceManager: new DynamicEntityResourceManager({ assetService }),
+		});
 		this.#textureManager = new TextureManager({ assetService, texturePacker });
 		this.#staticCoordinator = staticCoordinator;
 		this.#staticCoordinator.setAtlasSnapshotProvider(
@@ -959,6 +968,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		globalThis.clearInterval(this.#assetMaintenanceIntervalId);
 		this.#renderer.setDebugOverlayPrimitives([]);
 		this.#staticCoordinator.dispose();
+		this.#dynamicEntityController.dispose();
 		this.#textureManager.dispose();
 		this.#renderer.dispose();
 		this.#emit();

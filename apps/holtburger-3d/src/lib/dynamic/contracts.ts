@@ -46,7 +46,7 @@ type DynamicEntityResidence =
 
 interface DynamicEntityAnimationState {
 	readonly defaultAnimationId: number;
-	readonly status: "pending-resource";
+	readonly status: "pending-resource" | "ready";
 }
 
 interface DynamicEntityTransformState {
@@ -59,12 +59,48 @@ interface DynamicEntityBoundsState {
 	readonly indexed: false;
 }
 
-interface DynamicEntityResourceState {
+export interface DynamicEntityResourceState {
 	readonly required: readonly DynamicEntityRequiredResource[];
-	readonly status: "pending";
+	readonly setupAnimation: DynamicEntitySetupAnimationResourceState;
+	readonly status: "failed" | "pending" | "setup-animation-ready";
 }
 
-type DynamicEntityRequiredResource = "animation" | "setup-model";
+interface DynamicEntitySetupAnimationResourceState {
+	readonly animationKey: DynamicEntityResourceKey;
+	readonly setupModelKey: DynamicEntityResourceKey;
+	readonly status: "failed" | "pending" | "ready";
+}
+
+export type DynamicEntityRequiredResource =
+	| "animation"
+	| "setup-model"
+	| "setup-appearance"
+	| "gfx"
+	| "material"
+	| "palette"
+	| "render-surface"
+	| "prepared-texture"
+	| "motion-table"
+	| "sound-table"
+	| "physics-script"
+	| "physics-script-table";
+
+export type DynamicEntityResourceKey =
+	| {
+			readonly kind: "animation";
+			readonly id: number;
+	  }
+	| {
+			readonly kind: "setup-model";
+			readonly id: number;
+	  }
+	| {
+			readonly kind: Exclude<
+				DynamicEntityRequiredResource,
+				"animation" | "setup-model"
+			>;
+			readonly id: number | string;
+	  };
 
 interface DynamicEntityRenderability {
 	readonly reasons: readonly DynamicEntityRenderabilityReason[];
@@ -73,15 +109,26 @@ interface DynamicEntityRenderability {
 
 type DynamicEntityRenderabilityReason =
 	| "residence-render-path-pending"
-	| "resources-pending";
+	| "resources-pending"
+	| "visual-resources-pending";
 
-type DynamicEntityIssue =
+export type DynamicEntityIssue =
+	| {
+			readonly kind: "dynamic-resource-load-failed";
+			readonly message: string;
+			readonly resource: "animation" | "setup-model";
+			readonly resourceKey: DynamicEntityResourceKey;
+	  }
 	| {
 			readonly kind: "residence-render-path-pending";
 			readonly residence: DynamicEntityResidence;
 	  }
 	| {
 			readonly kind: "resources-pending";
+			readonly required: readonly DynamicEntityRequiredResource[];
+	  }
+	| {
+			readonly kind: "visual-resources-pending";
 			readonly required: readonly DynamicEntityRequiredResource[];
 	  };
 

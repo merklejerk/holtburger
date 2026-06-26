@@ -10,6 +10,10 @@ pub fn parse_setup_model_asset_id(asset_id: &str) -> Option<u32> {
     parse_prefixed_data_id(asset_id, "setup-model/", DatFileType::SetupModel as u32)
 }
 
+pub fn parse_animation_asset_id(asset_id: &str) -> Option<u32> {
+    parse_prefixed_data_id(asset_id, "animation/", DatFileType::Animation as u32)
+}
+
 pub fn parse_setup_appearance_asset_id(asset_id: &str) -> Option<SetupAppearanceRequest> {
     parse_prefixed_data_id(
         asset_id,
@@ -117,6 +121,7 @@ pub fn content_asset_request_from_asset_id(asset_id: &str) -> Option<ContentAsse
             parse_region_render_profile_asset_id(asset_id)
                 .map(ContentAssetRequest::RegionRenderProfile)
         })
+        .or_else(|| parse_animation_asset_id(asset_id).map(ContentAssetRequest::Animation))
         .or_else(|| parse_gfx_obj_asset_id(asset_id).map(ContentAssetRequest::GfxObj))
         .or_else(|| parse_setup_model_asset_id(asset_id).map(ContentAssetRequest::SetupModel))
         .or_else(|| {
@@ -146,5 +151,18 @@ mod tests {
             content_asset_request_from_asset_id("landblock/da550123/env-cells"),
             Some(ContentAssetRequest::LandblockEnvCells(0xda55ffff))
         );
+    }
+
+    #[test]
+    fn parses_animation_route_as_portal_animation_asset() {
+        assert_eq!(
+            parse_animation_asset_id("animation/0300061b"),
+            Some(0x0300_061b)
+        );
+        assert_eq!(
+            content_asset_request_from_asset_id("animation/0300061b"),
+            Some(ContentAssetRequest::Animation(0x0300_061b))
+        );
+        assert_eq!(parse_animation_asset_id("animation/0200061b"), None);
     }
 }

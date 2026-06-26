@@ -91,6 +91,7 @@ describe("host asset preparation", () => {
 		const routes = [
 			["landblock/da55ffff/outdoor", "landblock-outdoor"],
 			["landblock/da55ffff/env-cells", "landblock-env-cells"],
+			["animation/0300061b", "animation"],
 			["gfx-obj/01000001", "gfx-obj"],
 			["setup-model/02000001", "setup-model"],
 			["setup-appearance/02000001", "setup-appearance"],
@@ -115,6 +116,49 @@ describe("host asset preparation", () => {
 				`Asset ${assetId} matched the ${expectedKind} route but its payload failed the ${expectedKind} contract`,
 			);
 		}
+	});
+
+	it("prepares animation payloads with raw known hook bytes intact", () => {
+		const payload = createAnimationPayload();
+
+		const prepared = prepareV2StaticAssetPayload({
+			assetId: "animation/03000751",
+			payload,
+			payloadKind: "json",
+			requestId: "request-animation",
+		});
+
+		expect(prepared).toMatchObject({
+			animationId: 0x03000751,
+			frameCount: 1,
+			kind: "animation",
+			partCount: 2,
+		});
+		if (prepared.kind !== "animation") {
+			throw new Error("expected animation payload");
+		}
+		expect(prepared.partFrames[0]?.hooks[0]).toMatchObject({
+			hookName: "SetOmega",
+			hookType: 22,
+			payloadKind: "raw",
+			rawPayloadBytes: [0, 0, 0, 0, 0, 0, 0, 0, 0x72, 0x20, 0x1d, 0xbd],
+		});
+	});
+
+	it("rejects malformed animation frame counts", () => {
+		expect(() =>
+			prepareV2StaticAssetPayload({
+				assetId: "animation/03000751",
+				payload: {
+					...createAnimationPayload(),
+					frameCount: 2,
+				},
+				payloadKind: "json",
+				requestId: "request-animation",
+			}),
+		).toThrow(
+			"Asset animation/03000751 matched the animation route but its payload failed the animation contract",
+		);
 	});
 
 	it("rejects routes outside the static preparation set", () => {
@@ -292,6 +336,46 @@ function createPlacement(origin = { x: 0, y: 0, z: 0 }) {
 	return {
 		orientation: { w: 1, x: 0, y: 0, z: 0 },
 		origin,
+	};
+}
+
+function createAnimationPayload() {
+	return {
+		animationId: 0x03000751,
+		animationAssetId: "animation/03000751",
+		dependencies: {},
+		flags: 0,
+		frameCount: 1,
+		kind: "animation",
+		objectPositionFrames: [],
+		partCount: 2,
+		partFrames: [
+			{
+				frameIndex: 0,
+				hooks: [
+					{
+						direction: 0,
+						directionName: "Both",
+						hookName: "SetOmega",
+						hookType: 22,
+						payload: null,
+						payloadKind: "raw",
+						rawPayloadBytes: [
+							0, 0, 0, 0, 0, 0, 0, 0, 0x72, 0x20, 0x1d, 0xbd,
+						],
+					},
+				],
+				localPlacements: [createPlacement(), createPlacement({ x: 1, y: 0, z: 0 })],
+			},
+		],
+		provenance: {
+			detail: null,
+			errorCode: null,
+			source: "repo-local-hba",
+			sourceAssetKind: "animation",
+		},
+		residencyKind: "unknown",
+		sourceAssetKind: "animation",
 	};
 }
 

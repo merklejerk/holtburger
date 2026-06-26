@@ -139,7 +139,7 @@ describe("static coordinator", () => {
 				terrain: 1,
 			},
 		});
-		expect(resolver.pendingRequests).toHaveLength(5);
+		expect(resolver.pendingRequests).toHaveLength(9);
 
 		activeWorkForDemand(coordinator, {
 			location: {
@@ -154,19 +154,23 @@ describe("static coordinator", () => {
 			},
 		});
 
-		expect(resolver.pendingRequests).toHaveLength(8);
-		expect(coordinator.createSnapshot().activeWork).toHaveLength(5);
+		expect(resolver.pendingRequests).toHaveLength(12);
+		expect(coordinator.createSnapshot().activeWork).toHaveLength(9);
 		expect(
 			new Set(
 				coordinator.createSnapshot().activeWork.map((work) => work.scopeKey),
 			),
 		).toEqual(
 			new Set([
+				"landblock:da54ffff",
 				"landblock:da55ffff",
-				"landblock:db55ffff",
+				"landblock:da56ffff",
 				"landblock:db54ffff",
+				"landblock:db55ffff",
 				"landblock:db56ffff",
+				"landblock:dc54ffff",
 				"landblock:dc55ffff",
+				"landblock:dc56ffff",
 			]),
 		);
 

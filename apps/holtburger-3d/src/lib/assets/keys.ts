@@ -11,6 +11,7 @@ import type { HostAssetKey, HostAssetKeyKind } from "./contracts";
 
 const HEX32_ROUTE_KINDS = new Set<HostAssetKeyKind>([
 	"env-cell",
+	"animation",
 	"gfx-obj",
 	"setup-model",
 	"setup-appearance",
@@ -158,6 +159,7 @@ function isKnownHostAssetKeyKind(kind: string): kind is HostAssetKeyKind {
 		kind === "landblock-outdoor" ||
 		kind === "landblock-env-cells" ||
 		kind === "env-cell" ||
+		kind === "animation" ||
 		kind === "gfx-obj" ||
 		kind === "setup-model" ||
 		kind === "setup-appearance" ||

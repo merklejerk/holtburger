@@ -907,10 +907,6 @@ class Webgl2Renderer implements Renderer {
 		this.#startFrameLoop();
 	}
 
-	applyDynamicDelta(): void {
-		// Dynamic renderer residency starts after static pipeline contracts are proven.
-	}
-
 	setTerrainLayer(
 		landblockId: number,
 		payload: TerrainLayerPayload | null,

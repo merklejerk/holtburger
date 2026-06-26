@@ -61,8 +61,8 @@ Current evidence:
   material entries, render state, sort metadata, source mapping, and spatial record data.
 - The WebGL2 renderer stores static object GPU resources by draw-unit id and texture bindings by
   draw-unit id.
-- The WebGL2 renderer has an empty `applyDynamicDelta()` placeholder, but no real dynamic resource or
-  instance path.
+- The old empty `applyDynamicDelta()` placeholder has been removed; there is no real dynamic resource
+  or instance path yet.
 - Generated outdoor detail objects are a likely high-value first consumer because repeated trees and
   scenery props can produce large VAOs while sharing setup/gfx/material inputs.
 - Existing static scene query already depends on semantic source and bounds records, so any
@@ -822,6 +822,67 @@ Spicy bits and debt:
 - The remaining perf cliff is probably architectural around env-cell/static direct draw pressure.
   Treat it as out of scope here so this plan can actually finish instead of turning into an amoeba.
 
+### 2026-06-25 Phase 7 Dynamic Entity Resteer
+
+- Removed the placeholder `Renderer.applyDynamicDelta()` API. It had no production callers and only
+  carried `addedInstanceIds` / `removedInstanceIds`, which is not a real dynamic scene commit
+  contract.
+- Confirmed the shared visual-resource key/cache shape is the reusable part for future dynamic
+  entities: source-local geometry, material table entries, render state, index type, and texture-use
+  identity are not static-landblock-specific.
+- Confirmed the current `StaticObjectRenderInstance` contract should not be reused directly for
+  dynamic entities. It is intentionally static/outdoor-detail-shaped today: `domain` is
+  `outdoor-detail`, `source` is `StaticObjectInstanceIdentity`, and placement/bounds semantics are
+  static landblock-local.
+
+Decision:
+
+- Future dynamic entities should get a real declarative dynamic scene commit API that can carry live
+  entity identity, residency/lifetime, animation or pose state, and resource references. That API can
+  reuse the shared visual-resource cache and material binding machinery but should not be hidden
+  behind the deleted `applyDynamicDelta()` placeholder.
+- Do not add optional dynamic metadata to `StaticObjectRenderInstance` just to force reuse. If dynamic
+  entities need extra per-instance fields, add a domain-specific dynamic instance contract that shares
+  lower-level resource/cache primitives.
+- Defer dynamic renderer submission until the cleanup phase removes the remaining static bring-up
+  shims and shared material binding is less duplicated.
+
+Spicy bits and debt:
+
+- The spicy bit is that the word "instance" now means two things: reusable renderer submission
+  mechanics and static source identity. The former is reusable for dynamic entities; the latter is not.
+- Dynamic entity planning should start from live runtime authority and residency semantics, not from a
+  renderer-only add/remove id list. Otherwise we will build another ghost API that looks clean and
+  says nothing.
+
+### 2026-06-25 Phase 8 Dry Run
+
+Collected the cleanup targets and split Phase 8 into ordered slices instead of one broad hardening
+grab bag.
+
+Decision:
+
+- Implement Phase 8A first: extract shared static-material binding setup for direct and instanced
+  static-object draws. This is scoped, behavior-preserving, and profiler-relevant.
+- Treat `isDrawSuppressedByBakedLayer` as already removed from production code. Only stale plan or
+  historical references should remain.
+- Keep report trimming small until final before/after numbers are recorded. The `bakedInstanced*`
+  field names already fixed the most misleading report issue.
+- Do not bundle texture binding ownership into material binding extraction. The bridge still
+  reconstructs visual-resource bindings from `textureUseId` while `TextureDrawUnitBinding` remains
+  draw-unit-shaped, and that deserves a deliberate owner model.
+- Defer draw-unit field collapse. Baked draw units remain primary for terrain, buildings, env-cells,
+  and explicit static leftovers, so collapsing fields now would be fake cleanliness.
+
+Spicy bits and debt:
+
+- Material binding extraction is no longer pure cleanup; the profiler shows static material setup in
+  the hot sampled path.
+- Texture ownership is the real contract debt. It should get its own audit instead of being smuggled
+  through a helper extraction.
+- Collapsing draw-unit fields too early would obscure the remaining baked paths and make review worse,
+  not better.
+
 ## Implementation Phases
 
 ### Phase 0: Baseline And De-Instancing Diagnostics
@@ -950,41 +1011,66 @@ Spicy bits and debt:
 
 ### Phase 7: Dynamic Entity Resteering Gate
 
-- Revisit the dynamic entity requirements plan after the shared static instance path lands.
-- Confirm that dynamic entity parts can reuse the same shared visual resource key, material binding
-  ownership, texture cache, scene-domain submission, and render instance contract.
-- If dynamic entities need extra per-instance fields, add them as optional or domain-specific
-  metadata without forking the core resource cache.
-- Delete or replace `applyDynamicDelta()` with the real declarative dynamic scene commit API before
-  implementing dynamic renderer submissions.
+- Completed: revisit dynamic entity requirements after the shared static instance path landed.
+- Completed: confirm that dynamic entity parts can reuse the same shared visual resource key,
+  material binding ownership, texture cache, scene-domain submission, and render instance contract.
+- Completed: remove the placeholder `applyDynamicDelta()` API so future dynamic renderer work must
+  define a real declarative scene commit contract.
+- Correction: dynamic entities can reuse the shared visual-resource/cache model, but should not reuse
+  `StaticObjectRenderInstance` directly while that type remains static/outdoor-detail-specific.
+- If dynamic entities need extra per-instance fields, add a domain-specific dynamic instance contract
+  without forking the core visual-resource cache.
 
-### Phase 8: Cleanup And Contract Hardening
+### Phase 8A: Shared Static Material Binding Extraction
 
-- Remove or demote Phase 0 diagnostics that no longer guide implementation once before/after
-  generated-static metrics are captured. Keep only stable, useful runtime counters and targeted
-  inspectors.
-- Delete temporary compatibility shims, bring-up-only direct draw paths, and transitional names after
-  the shared resource/instance contracts become the primary generated-static path.
-- Remove the renderer-side `isDrawSuppressedByBakedLayer` remnant after Phase 6A confirms instance
-  emission is exclusively cutover-owned and query identity does not depend on the old suppression
-  bridge.
-- Extract shared static-material binding setup for direct and instanced static-object draws so
-  texture/material uniform upload logic does not fork across draw modes.
-- Collapse or remove transitional static object draw-unit fields that duplicate `materialEntries`,
-  `materialSlotIndices`, visual resource metadata, or renderer-owned derived summaries.
-- Audit texture binding ownership and remove draw-unit-only assumptions for shared object visual
-  resources.
-- Revisit report output after Phase 6A and keep the general runtime report summary-level. Row-level
-  bake/upload/timing detail should live behind explicit inspectors, not the copy report.
-- Audit remaining diagnostic fields that blur bake-output history with current renderer state. The
-  report should not imply `staticObjectBakeSummary.bakedInstancedRenderInstanceCount` and renderer
-  `staticObjectRenderInstances` are expected to match unless they are computed from the same committed
-  population.
-- Re-run the `0xda56ffff` baseline comparison and update the plan with final before/after numbers:
-  flattened triangles, flattened bytes, uploaded object bytes, shared resource count, retained-baked
-  count, direct draw count, and instanced draw count.
-- Scrub tests that only assert diagnostic report shape or legacy absence. Keep behavior tests for
-  resource keying, instance grouping, renderer submission, query identity, and transparency policy.
+- Extract shared static-material payload bind/upload setup for direct and instanced static-object
+  draws.
+- Keep direct and instanced draw paths responsible for their own transform mode, VAO binding,
+  instance attributes, counter increments, and draw call.
+- Preserve render state behavior and runtime counters.
+- Keep existing behavior tests intact. Add a focused renderer test only if the extraction changes a
+  visible submission branch; do not add tests that assert private helper shape.
+
+### Phase 8B: Stale Checklist And Report Hygiene
+
+- Mark/remove stale `isDrawSuppressedByBakedLayer` cleanup references if no code references remain.
+- Keep the runtime report summary-level. Row-level bake/upload/timing detail belongs behind explicit
+  inspectors, not the copy report.
+- Keep stable live renderer counters and compact bake counters until final before/after numbers are
+  recorded.
+- Scrub stale doc wording that implies old diagnostic names, removed placeholder APIs, or legacy
+  generated-static suppression bridges.
+- Scrub tests that only assert diagnostic report shape or legacy absence if encountered. Keep behavior
+  tests for resource keying, instance grouping, renderer submission, query identity, and transparency
+  policy.
+
+### Phase 8C: Final Baseline Capture
+
+- Re-run the `0xda56ffff` generated-static comparison and update the plan with final before/after
+  numbers: flattened triangles, flattened bytes, uploaded object bytes, shared visual resource count,
+  render instance count, retained-baked count, baked direct draw count, instanced draw count, and far
+  transparent instanced counts.
+- Close the generated-static perf scope after the final baseline. Do not fold env-cell,
+  portal-projection, or non-outdoor-detail static direct-draw work into this plan.
+
+### Phase 8D: Texture Binding Ownership Audit
+
+- Audit `TextureDrawUnitBinding`, `textureUseId`, and static visual-resource binding reconstruction.
+- Decide a shared resource owner shape before changing code.
+- Remove draw-unit-only assumptions for shared object visual resources only after the owner model is
+  explicit.
+- Keep this out of Phase 8A unless the material binding helper extraction proves impossible without
+  touching ownership.
+
+### Phase 8E: Deferred Contract Hardening
+
+- Defer collapsing transitional static object draw-unit fields until baked draw-unit users are
+  narrowed or a follow-up plan owns the migration.
+- Delete temporary compatibility shims, bring-up-only direct draw paths, and transitional names only
+  when they are no longer serving terrain, buildings, env-cells, explicit statics, or final baseline
+  comparison.
+- Keep behavior tests for resource keying, instance grouping, renderer submission, query identity, and
+  transparency policy.
 
 ## Acceptance Criteria
 

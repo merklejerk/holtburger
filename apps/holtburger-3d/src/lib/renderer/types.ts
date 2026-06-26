@@ -186,12 +186,6 @@ interface DebugOverlayTrianglePrimitive {
 	readonly color: readonly [number, number, number, number];
 }
 
-interface DynamicResidencyDelta {
-	readonly addedInstanceIds: readonly string[];
-	readonly removedInstanceIds: readonly string[];
-	readonly revision: number;
-}
-
 export interface TexturePlacementUpdate {
 	readonly placements: readonly TexturePlacement[];
 	readonly removedTextureRefIds: readonly string[];
@@ -555,7 +549,6 @@ export interface SceneDomainTargetSnapshot {
 }
 
 export interface Renderer {
-	applyDynamicDelta(delta: DynamicResidencyDelta): void;
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void;
 	applySamplerPolicyUpdate(update: SamplerPolicyUpdate): void;
 	setTerrainLayer(

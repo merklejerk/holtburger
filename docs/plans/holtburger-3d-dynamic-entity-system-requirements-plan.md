@@ -43,9 +43,11 @@ Current frontend constraints to preserve:
 - Renderer consumes explicit static layer commits, dynamic resource/instance commits, texture/
   resource updates, and frame state. It does not fetch assets, walk dependencies, classify AC source
   data, or own semantic entity identity.
-- Dynamic renderer submissions should consume the shared resource-backed render instance path planned
-  in `docs/plans/holtburger-3d-shared-render-instance-static-instancing-plan.md` rather than creating
-  a dynamic-only VAO, texture, material, or draw-submission stack.
+- Dynamic renderer submissions should consume the shared visual-resource/cache primitives from
+  `docs/plans/holtburger-3d-shared-render-instance-static-instancing-plan.md` rather than creating a
+  dynamic-only VAO, texture, material, or draw-submission stack. Dynamic entities still need their
+  own renderer-facing instance commit shape because static render instances are outdoor-detail/static
+  source shaped.
 - Host route strings are transport/provenance only. Dynamic records must use typed identities,
   runtime-assigned handles, or opaque cache keys derived from typed identities.
 - Static-authored dynamic seeds may be discovered by static resolver/bake paths, but the dynamic
@@ -97,8 +99,8 @@ Recorded on 2026-06-24 before deeper ACE/ACViewer/retail investigation:
   affect whether a source is dynamic. This needs evidence before it shapes implementation.
 - Animation mechanics are currently unclear for both characters and static scenery animations. This
   needs evidence before implementation phases are written.
-- Dynamic rendering should use the shared render instance/resource path introduced for generated
-  outdoor static instancing. Actual WebGL2 instanced draws remain an optimization; the architectural
+- Dynamic rendering should use the shared visual-resource/cache path introduced for generated outdoor
+  static instancing. Actual WebGL2 instanced draws remain an optimization; the architectural
   requirement is shared resources plus per-instance submissions.
 - Dynamic rendering can skip atlasing and VAO compaction initially.
 - Dynamic entities need the same material support as static entities. The preferred direction is to
@@ -157,9 +159,10 @@ Recorded on 2026-06-24 after checking project, ACE, and ACViewer references:
   position frames, per-part animation frames, movement/kinematics state, or object state updates.
   Physics-script effects can be spatially anchored, such as particle offsets, and can mutate
   transform-adjacent state such as scale or omega, but they are not the primary translation path.
-- WebGL2 instanced draws are desirable but not a first-slice architecture dependency. The current
-  renderer does not have an instanced draw path, so initial dynamic rendering should prefer correct
-  shared resources plus per-instance submissions that can later be batched.
+- WebGL2 instanced draws exist for compatible static object render instances, but they are not a
+  first-slice dynamic architecture dependency. Initial dynamic rendering should prefer correct shared
+  resources plus per-instance submissions; batching can follow once the dynamic commit contract and
+  residency behavior are proven.
 - The material pipeline is more reusable than the static names imply. Structured interiors already
   reuse static object material classification, so dynamic rendering should generalize the material
   planner primitives instead of creating a second material interpretation path.
@@ -766,14 +769,12 @@ Status: Proposed. Confidence: Medium-high.
 - Dynamic rendering should submit live per-part drawables instead of baked static draw units.
 - Geometry/material resources should be shared where possible; per-entity/per-part transforms are
   live submission data.
-- Dynamic part submissions should use the shared visual resource/render instance contracts from
-  `docs/plans/holtburger-3d-shared-render-instance-static-instancing-plan.md` once that path exists.
-  If dynamic implementation starts before the full static instancing plan is complete, it should
-  still target the same resource-keyed cache and renderer-facing instance shape rather than
-  introducing throwaway dynamic-only bindings.
-- The current WebGL renderer has an empty `applyDynamicDelta()` placeholder, but no dynamic resource
-  ownership or draw path. Do not let this placeholder define the architecture. Delete/replace it
-  with a declarative dynamic scene commit API rather than building caller-authored diffing around it.
+- Dynamic part submissions should use the shared visual-resource/cache primitives from
+  `docs/plans/holtburger-3d-shared-render-instance-static-instancing-plan.md`. They should not reuse
+  `StaticObjectRenderInstance` directly while that contract remains static/outdoor-detail-specific.
+- The old empty WebGL renderer `applyDynamicDelta()` placeholder has been removed. Dynamic renderer
+  work must define a declarative dynamic scene commit API rather than building caller-authored
+  diffing around a placeholder.
 - First target can be outdoor-only and residence-aware: submit with the outdoor scene for its owning
   landblock, and submit nothing if residence is missing.
 - Dynamic atlas packing and VAO compaction are deferred. WebGL2 instanced draws are also deferred as
@@ -1027,7 +1028,7 @@ Renderer reuse boundary:
 
 ```text
 reuse:
-  shared visual resource/render instance contracts
+  shared visual resource/cache contracts
   static material planning where part-agnostic
   prepared gfx/material/texture resources
   shared object visual resource cache where keys are isomorphic
@@ -1038,6 +1039,7 @@ do not reuse as:
   baked static vertices for animated parts
   static layer lifetime as dynamic entity lifetime
   static draw-unit id as semantic dynamic entity id
+  StaticObjectRenderInstance as the dynamic entity instance contract
 ```
 
 ## Investigation Worksheet
@@ -1168,22 +1170,24 @@ Evidence found:
 - `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-renderer.ts` owns static GPU resources by
   layer, disposes them through `#replaceStaticLayer`, and renders static object resource sets per
   outdoor or env-cell scene domain.
-- The same renderer currently has an empty `applyDynamicDelta()` method.
+- The old empty `applyDynamicDelta()` method has been removed; there is no dynamic resource/instance
+  commit API yet.
 - Static object material pass and transparency behavior are tied to baked static object draw-unit
   resources.
-- `docs/plans/holtburger-3d-shared-render-instance-static-instancing-plan.md` is the intended
+- `docs/plans/holtburger-3d-shared-render-instance-static-instancing-plan.md` established the
   precursor for splitting reusable visual resources from per-instance placement for generated outdoor
-  statics and future dynamic entity parts.
+  statics. Future dynamic entity parts should reuse the visual-resource/cache model, not the
+  static-only render-instance identity type.
 
 Conclusion:
 
 - Dynamic renderer work should add a real dynamic resource/instance commit path instead of mutating
   static draw units.
-- Prepared geometry/material facts should be shared through the planned shared render instance path,
-  while first-slice dynamic rendering still owns live per-part transforms and scene-domain
+- Prepared geometry/material facts should be shared through the established visual-resource/cache
+  model, while first-slice dynamic rendering still owns live per-part transforms and scene-domain
   membership.
-- The current `applyDynamicDelta()` placeholder is a cleanup pressure point: delete or replace it
-  with the final declarative dynamic commit API.
+- The deleted `applyDynamicDelta()` placeholder remains a design warning: dynamic rendering still
+  needs a final declarative dynamic commit API.
 
 ### Scene Query And Bounds
 
@@ -1710,7 +1714,7 @@ Requirement direction:
 - Dynamic renderer identity must not be the semantic entity identity, but it must map back to it for
   inspection and selection.
 - Initial dynamic rendering may skip atlas packing, static-style VAO compaction, and WebGL2
-  instanced draws, but it should still use the shared visual resource/render instance path planned for
+  instanced draws, but it should still use the shared visual-resource/cache path established by
   generated outdoor static instancing.
 - Dynamic rendering should share static material support where the source/material facts are
   isomorphic.

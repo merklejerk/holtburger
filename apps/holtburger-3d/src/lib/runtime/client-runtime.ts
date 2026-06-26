@@ -116,6 +116,8 @@ import {
 	deriveRuntimePortalOverlapResidency,
 	type RuntimePortalOverlapResidency,
 } from "./portal-base-overlap";
+import { DynamicEntityController } from "../dynamic/dynamic-entity-controller";
+import type { DynamicRuntimeSnapshot } from "../dynamic/contracts";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
@@ -230,6 +232,7 @@ export interface RuntimeSnapshot {
 	readonly portalFrameWorkPlan: PortalFrameWorkPlan;
 	readonly debugOverlays: RuntimeDebugOverlaySnapshot;
 	readonly assets: AssetServiceSnapshot;
+	readonly dynamic: DynamicRuntimeSnapshot;
 	readonly host: RuntimeHostSnapshot;
 	readonly renderer: RendererSnapshot;
 	readonly static: StaticCoordinatorSnapshot;
@@ -600,6 +603,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #staticLayersByKey = new Map<string, StaticLandblockLayerPayload>();
 	readonly #staticLayerKeyByResourceId = new Map<string, string>();
 	#envCellResourceMembershipRevision = 0;
+	readonly #dynamicEntityController = new DynamicEntityController();
 	#envCellAabbDebugOverlayVisible = false;
 	#envCellPortalDebugOverlayVisible = false;
 	#flatVisionModeEnabled = false;
@@ -690,6 +694,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		let reconciliation: StaticRetentionReconciliation;
 		try {
 			reconciliation = this.#reconcileStaticRetention(this.#sceneInterest);
+			this.#dynamicEntityController.retainStaticScopes(
+				reconciliation.retainedScopes,
+			);
 			this.#activeSceneWorkIds = new Set(
 				reconciliation.activeWork.map((work) => work.workId),
 			);
@@ -1286,6 +1293,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					: 0,
 				portalsVisible: this.#envCellPortalDebugOverlayVisible,
 			},
+			dynamic: this.#dynamicEntityController.createSnapshot(),
 			host: this.#host.createSnapshot(),
 			portalFrameWorkPlan: this.#currentPortalFrameWorkPlan,
 			renderPassPlan: this.#currentRenderPassPlan,
@@ -1475,6 +1483,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 			spatialRecords: materialized.staticSpatialRecords,
 			visibilityRecords: materialized.staticVisibilityRecords,
 		});
+		this.#dynamicEntityController.ingestStaticSeeds(
+			materialized.staticAuthoredDynamicSeeds,
+		);
 		this.#updateRenderPassPlan();
 		this.#refreshStaticDebugOverlay();
 		this.#pendingStaticMaterializations.delete(delta.revision);

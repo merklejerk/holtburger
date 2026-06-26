@@ -118,6 +118,87 @@ describe("browser landblock env-cell baker", () => {
 		);
 	});
 
+	it("emits classified env-cell dynamic seeds for setup sources with default animations", () => {
+		const input = createInputWithEnvCellStaticSource(
+			createSetupStaticObjectSourceAsset({
+				defaultAnimation: 0x0300061b,
+				sourceDid: 0x020003e5,
+			}),
+			{
+				sourceAssetId: "setup-model/020003e5",
+				sourceDid: 0x020003e5,
+				sourceScale: null,
+			},
+		);
+
+		const result = bakeLandblockEnvCells(input);
+
+		expect(result.staticAuthoredDynamicSeeds).toEqual([
+			expect.objectContaining({
+				envCellId: 0xda550100,
+				kind: "env-cell-static-object-seed",
+			}),
+			{
+				kind: "env-cell-static-object-dynamic-seed",
+				owner: expect.objectContaining({
+					domain: "landblock-env-cells",
+					workId: "7:landblock:da55ffff:landblock-env-cells",
+				}),
+				seed: {
+					classificationReason: "setup-default-animation",
+					defaultAnimationId: 0x0300061b,
+					envCellId: 0xda550100,
+					landblockId: 0xda55ffff,
+					localPlacement: {
+						orientation: { w: 1, x: 0, y: 0, z: 0 },
+						origin: { x: 1, y: 2, z: 3 },
+					},
+					object: {
+						instanceId: "env-cell-static-0",
+						kind: "static-object-instance",
+						landblockId: 0xda55ffff,
+						objectKind: "explicit-object",
+					},
+					setupModelId: 0x020003e5,
+					source: {
+						kind: "static-object-source",
+						sourceAssetKind: "setup-model",
+						sourceDid: 0x020003e5,
+					},
+					sourceAssetId: "setup-model/020003e5",
+					sourceResidence: {
+						kind: "landblock-source",
+						landblockId: 0xda55ffff,
+						source: "env-cells",
+					},
+					sourceScale: { x: 1, y: 1, z: 1 },
+				},
+			},
+		]);
+	});
+
+	it("does not mirror unclassified env-cell statics into dynamic seeds", () => {
+		const input = createInputWithEnvCellStaticSource(
+			createSetupStaticObjectSourceAsset({
+				defaultAnimation: null,
+				sourceDid: 0x020003e5,
+			}),
+			{
+				sourceAssetId: "setup-model/020003e5",
+				sourceDid: 0x020003e5,
+			},
+		);
+
+		const result = bakeLandblockEnvCells(input);
+
+		expect(result.staticAuthoredDynamicSeeds).toEqual([
+			expect.objectContaining({
+				envCellId: 0xda550100,
+				kind: "env-cell-static-object-seed",
+			}),
+		]);
+	});
+
 	it("requires full geometry attachments for renderable cell structures", () => {
 		const input = createInputWithRenderableCellStructure();
 
@@ -1003,6 +1084,57 @@ function createInputWithRenderableStaticSeed(
 	};
 }
 
+function createInputWithEnvCellStaticSource(
+	source: StaticObjectSourceAssetFacts,
+	options: {
+		readonly sourceAssetId: string;
+		readonly sourceDid: number;
+		readonly sourceScale?: LandblockEnvCellStaticFacts["staticObjectSeeds"][number]["sourceScale"];
+	},
+): StaticBakeBatchInput {
+	const input = createInput();
+	const item = input.items[0];
+	if (!item || item.payload.scope.kind !== "landblock-env-cells") {
+		throw new Error("Missing fixture env-cell scope.");
+	}
+	const scope = item.payload.scope;
+	const envCell = scope.envCells[0];
+	if (!envCell) {
+		throw new Error("Missing fixture env cell.");
+	}
+
+	return {
+		...input,
+		items: [
+			{
+				...item,
+				payload: {
+					...item.payload,
+					scope: {
+						...scope,
+						envCells: [
+							{
+								...envCell,
+								staticObjectSeeds: envCell.staticObjectSeeds.map((seed) => ({
+									...seed,
+									debug: { sourceAssetId: options.sourceAssetId },
+									source: {
+										kind: "static-object-source" as const,
+										sourceAssetKind: "setup-model" as const,
+										sourceDid: options.sourceDid,
+									},
+									sourceScale: options.sourceScale ?? seed.sourceScale,
+								})),
+							},
+						],
+						sourceAssets: [source],
+					},
+				},
+			},
+		],
+	};
+}
+
 function expectNumbersClose(
 	actual: readonly number[],
 	expected: readonly number[],
@@ -1246,6 +1378,31 @@ function createStaticObjectSourceAsset(
 	};
 }
 
+function createSetupStaticObjectSourceAsset(options: {
+	readonly defaultAnimation: number | null;
+	readonly sourceDid: number;
+}): StaticObjectSourceAssetFacts {
+	const source = {
+		kind: "static-object-source" as const,
+		sourceAssetKind: "setup-model" as const,
+		sourceDid: options.sourceDid,
+	};
+	return {
+		bounds: null,
+		debug: { sourceAssetId: `setup-model/${formatHex32(options.sourceDid)}` },
+		defaultAnimation: options.defaultAnimation,
+		identity: source,
+		invalidPolygonCount: 0,
+		materialSlotCount: 0,
+		partCount: 0,
+		parts: [],
+		physicsPolygonCount: 0,
+		renderTriangleCount: 0,
+		skippedPolygonCount: 0,
+		sourceAssetKind: "setup-model",
+	};
+}
+
 function createStaticObjectGeometry() {
 	const source = {
 		kind: "static-object-source" as const,
@@ -1257,6 +1414,10 @@ function createStaticObjectGeometry() {
 		partIndex: 0,
 		source,
 	});
+}
+
+function formatHex32(value: number): string {
+	return (value >>> 0).toString(16).padStart(8, "0");
 }
 
 function createInput(): StaticBakeBatchInput {

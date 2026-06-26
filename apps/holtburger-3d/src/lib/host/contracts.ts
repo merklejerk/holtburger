@@ -24,7 +24,7 @@ const vec3DtoSchema = z.object({
 	y: z.number().finite(),
 	z: z.number().finite(),
 });
-type Vec3Dto = z.infer<typeof vec3DtoSchema>;
+export type Vec3Dto = z.infer<typeof vec3DtoSchema>;
 
 const quaternionDtoSchema = z.object({
 	w: z.number().finite(),
@@ -788,6 +788,13 @@ const animationHookDtoSchema = z.discriminatedUnion("payloadKind", [
 		rawPayloadBytes: animationRawPayloadBytesDtoSchema,
 	}),
 	animationHookBaseDtoSchema.extend({
+		payloadKind: z.literal("set-omega"),
+		payload: z.object({
+			omega: vec3DtoSchema,
+		}),
+		rawPayloadBytes: animationRawPayloadBytesDtoSchema,
+	}),
+	animationHookBaseDtoSchema.extend({
 		payloadKind: z.literal("texture-velocity"),
 		payload: z.object({
 			uSpeed: z.number().finite(),
@@ -837,7 +844,8 @@ export const animationPayloadDtoSchema = z
 				(frame) => frame.localPlacements.length === payload.partCount,
 			),
 		{
-			message: "animation part count must match every frame localPlacements length",
+			message:
+				"animation part count must match every frame localPlacements length",
 			path: ["partFrames"],
 		},
 	);

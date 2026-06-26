@@ -99,10 +99,10 @@ The phase order is viable, but several implementation details need to be pinned 
 - `prepareV2StaticAssetPayload` is now a misleading name for a route parser that will include
   animation payloads. Do not rename it during Phase 1 unless the diff is small; if it remains, record
   it as cleanup debt and rename it during the cleanup phase.
-- `holtburger-dat` currently keeps hook `22` / `SetOmega` as raw 12-byte payload. Phase 1 should
-  preserve raw payload bytes and hook names for all known hooks. Typed `SetOmega` decoding is a hard
-  precondition before first-cut omega behavior and now belongs before bounds/indexing consumes hook
-  state.
+- `holtburger-dat` originally kept hook `22` / `SetOmega` as raw 12-byte payload. Phase 1 preserved
+  raw payload bytes and hook names for all known hooks; Phase 5B promoted `SetOmega` to a typed
+  payload while still carrying exact raw payload bytes. Hook-aware bounds and renderer composition
+  can now consume typed omega state instead of parsing raw bytes downstream.
 - Static-authored dynamic seed records cannot be treated as one env-cell-shaped record. Phase 2 split
   committed-key creation and env-cell grouping by seed kind for outdoor support. Phase 3B must now
   complete the symmetric runtime registration path for classified env-cell dynamic seeds while
@@ -281,9 +281,8 @@ Deliverables:
 - Preserve object position frames, per-part frame origins/orientations, frame counts, part counts,
   flags, and decoded hook summaries where available.
 - Preserve raw hook payload bytes for known hooks whose payloads are not typed yet. Include stable
-  hook names and hook ids so diagnostics remain useful before full hook support.
-- Either add typed `SetOmega` payload decoding now or record it as a first-cut blocker before omega
-  behavior is implemented.
+  hook names and hook ids so diagnostics remain useful before full hook support. `SetOmega` is typed
+  by Phase 5B, not Phase 1.
 
 Acceptance criteria:
 
@@ -315,6 +314,8 @@ Decisions and course corrections:
   `SetOmega` as a named hook with raw 12-byte payload bytes. The implementation plan now adds a
   dedicated first-cut phase for typed decoding and transform behavior before bounds/indexing relies
   on hook state.
+- 2026-06-26: Phase 5B completed that follow-up: `SetOmega` now has typed decode/DTO/runtime state
+  while retaining exact raw payload bytes for diagnostics and parity checks.
 - 2026-06-26: `prepareV2StaticAssetPayload` now parses animation payloads, so the name is broader
   than static assets. This remains cleanup debt for Phase 11 rather than being renamed during the
   route diff.
@@ -903,7 +904,7 @@ Debt and follow-up:
 
 ### Phase 5B: SetOmega Decode And Transform Hook Handler
 
-Status: pending.
+Status: completed.
 
 Purpose:
 
@@ -945,14 +946,14 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add typed `SetOmega` hook payload decoding and DTO/schema tests.
-- [ ] Add dynamic omega transform state types.
-- [ ] Implement `SetOmega` hook handler in the dispatcher.
-- [ ] Integrate omega object/root transform over runtime delta time.
-- [ ] Preserve accumulated omega rotation phase across repeated same-vector loop dispatches.
-- [ ] Add playback/controller tests for `0x03000751`-style frame-0 `SetOmega`.
-- [ ] Update diagnostics so supported `SetOmega` is reported as active transform state, not skipped.
-- [ ] Run phase verification commands.
+- [x] Add typed `SetOmega` hook payload decoding and DTO/schema tests.
+- [x] Add dynamic omega transform state types.
+- [x] Implement `SetOmega` hook handler in the dispatcher.
+- [x] Integrate omega object/root transform over runtime delta time.
+- [x] Preserve accumulated omega rotation phase across repeated same-vector loop dispatches.
+- [x] Add playback/controller tests for `0x03000751`-style frame-0 `SetOmega`.
+- [x] Update diagnostics so supported `SetOmega` is reported as active transform state, not skipped.
+- [x] Run phase verification commands.
 
 Decisions and course corrections:
 
@@ -964,6 +965,31 @@ Decisions and course corrections:
 - 2026-06-26: Dry run found two implementation constraints for `SetOmega`: typed payloads must carry
   decoded vector plus exact raw bytes, and repeated loop dispatch must not reset accumulated omega
   phase when the vector is unchanged.
+- 2026-06-26: Phase 5B added typed DAT decode, Tauri JSON serialization, frontend schema validation,
+  and runtime active-omega state. The original 12 payload bytes remain the serialized source for
+  round-trip/parity purposes; runtime behavior consumes the decoded vector.
+- 2026-06-26: The playback runtime keeps authored `objectRootPose` separate from
+  `transformEffects.activeOmega.objectRootRotation`. Phase 6 must compose base placement, authored
+  object/root pose, omega object/root rotation, and part-local poses for bounds/query. This avoids
+  overwriting authored animation pose data before the renderer and index paths have a real
+  composition contract.
+- 2026-06-26: ACE reference check confirmed the relevant model shape:
+  `Sequence.apply_physics` rotates the animation frame by `Omega * quantum`. The frontend runtime now
+  integrates omega per wall-clock delta and refreshes repeated frame-0 `SetOmega` provenance without
+  resetting accumulated rotation.
+- 2026-06-26: The existing frontend fixture raw bytes
+  `[00 00 00 00 00 00 00 00 72 20 1d bd]` decode to `z = -0.0383600667`. The requirements evidence
+  records this target as approximately `-0.038397`; exact runtime behavior should treat the DAT raw
+  bytes as authoritative and use the decoded float carried by the typed payload.
+
+Debt and follow-up:
+
+- Phase 6 must consume `transformEffects.activeOmega.objectRootRotation` when computing current
+  dynamic bounds and spatial index records. Phase 5B deliberately stores the effect state but does
+  not yet apply it to geometry, picking, or renderer submissions.
+- Renderer validation should confirm the visual rotation direction for non-identity base/object-root
+  orientations once Phase 8 submits the bird target. The first-cut target proves continuous
+  negative-Z omega accumulation, but final visual parity still belongs with renderer composition.
 
 ### Phase 6: Dynamic Placement, Bounds, And Outdoor Spatial Index
 
@@ -1304,9 +1330,9 @@ Decisions and course corrections:
   non-renderable or render-pending until env-cell placement/render membership is implemented and
   tested.
 
-- Risk: `SetOmega` remains raw bytes when first-cut bounds or rendering consume hook state.
-  Mitigation: Phase 5B must add typed `SetOmega` decoding and a supported transform handler before
-  Phase 6 computes hook-aware bounds and before Phase 8 renders the bird target.
+- Risk: typed `SetOmega` state exists but is not consumed by bounds or rendering.
+  Mitigation: Phase 5B added typed decode and active transform state; Phase 6 must compose it into
+  hook-aware bounds before Phase 8 renders the bird target.
 
 ## Definition Of Done
 

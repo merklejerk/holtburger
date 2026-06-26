@@ -72,6 +72,9 @@ describe("dynamic animation player", () => {
 
 		expect(update.record.animation.playback).toMatchObject({
 			objectRootPose: createPlacement({ x: 0, y: 0, z: 0 }),
+			transformEffects: {
+				activeOmega: null,
+			},
 		});
 		expect(update.record.diagnostics).toEqual([]);
 	});
@@ -149,6 +152,85 @@ describe("dynamic animation player", () => {
 				(issue) => issue.kind === "dynamic-animation-hook-unsupported",
 			),
 		).toEqual([]);
+	});
+
+	it("stores and integrates SetOmega as active object-root transform state", () => {
+		const player = new DynamicAnimationPlayer();
+		const payload = createAnimationPayload({
+			frameCount: 7,
+			hooksByFrame: [[createSetOmegaHook()]],
+			objectPositionFrames: [],
+			partCount: 2,
+		});
+
+		const started = player.update(createRecord({ payload }), 0);
+		const advanced = player.update(started.record, 0.1);
+
+		expect(unsupportedHookIssues(started.record)).toEqual([]);
+		expect(started.record.animation.playback).toMatchObject({
+			status: "playing",
+			transformEffects: {
+				activeOmega: {
+					animationAssetId: "animation/0300061b",
+					animationId: 0x0300061b,
+					entityId: "dynamic-test-entity",
+					hookName: "SetOmega",
+					hookType: 22,
+					lastAppliedFrameIndex: 0,
+					lastAppliedLoopIteration: 0,
+					omega: { x: 0, y: 0, z: -0.03836006671190262 },
+					rawPayloadBytes: [0, 0, 0, 0, 0, 0, 0, 0, 0x72, 0x20, 0x1d, 0xbd],
+				},
+			},
+		});
+		if (advanced.record.animation.playback.status !== "playing") {
+			throw new Error("expected playing playback");
+		}
+		expect(
+			advanced.record.animation.playback.transformEffects.activeOmega
+				?.objectRootRotation.z,
+		).toBeLessThan(0);
+		expect(
+			advanced.record.animation.playback.transformEffects.activeOmega
+				?.lastAppliedFrameIndex,
+		).toBe(0);
+	});
+
+	it("does not reset accumulated SetOmega rotation when the same frame-0 hook loops", () => {
+		const player = new DynamicAnimationPlayer();
+		const payload = createAnimationPayload({
+			frameCount: 1,
+			hooks: [createSetOmegaHook()],
+			objectPositionFrames: [],
+			partCount: 2,
+		});
+
+		const started = player.update(createRecord({ payload }), 0);
+		const firstLoop = player.update(started.record, 1 / 30);
+		const secondLoop = player.update(firstLoop.record, 2 / 30);
+
+		if (
+			firstLoop.record.animation.playback.status !== "playing" ||
+			secondLoop.record.animation.playback.status !== "playing"
+		) {
+			throw new Error("expected playing playback");
+		}
+		const firstRotation =
+			firstLoop.record.animation.playback.transformEffects.activeOmega
+				?.objectRootRotation.z ?? 0;
+		const secondRotation =
+			secondLoop.record.animation.playback.transformEffects.activeOmega
+				?.objectRootRotation.z ?? 0;
+
+		expect(firstRotation).toBeLessThan(0);
+		expect(secondRotation).toBeLessThan(firstRotation);
+		expect(
+			secondLoop.record.animation.playback.transformEffects.activeOmega,
+		).toMatchObject({
+			lastAppliedFrameIndex: 0,
+			lastAppliedLoopIteration: 2,
+		});
+		expect(unsupportedHookIssues(secondLoop.record)).toEqual([]);
 	});
 
 	it("dispatches unsupported hook diagnostics once per sampled frame and loop", () => {
@@ -298,6 +380,7 @@ function createRecord(options: {
 function createAnimationPayload(options: {
 	readonly frameCount: number;
 	readonly hooks?: AnimationPayloadDto["partFrames"][number]["hooks"];
+	readonly hooksByFrame?: readonly AnimationPayloadDto["partFrames"][number]["hooks"][];
 	readonly objectPositionFrames: readonly PlacementTransformDto[];
 	readonly partCount: number;
 }): AnimationPayloadDto {
@@ -312,7 +395,7 @@ function createAnimationPayload(options: {
 		partCount: options.partCount,
 		partFrames: Array.from({ length: options.frameCount }, (_, frameIndex) => ({
 			frameIndex,
-			hooks: options.hooks ?? [],
+			hooks: options.hooksByFrame?.[frameIndex] ?? options.hooks ?? [],
 			localPlacements: Array.from(
 				{ length: options.partCount },
 				(_, partIndex) =>
@@ -322,6 +405,20 @@ function createAnimationPayload(options: {
 		provenance: createProvenance(),
 		residencyKind: "unknown",
 		sourceAssetKind: "animation",
+	};
+}
+
+function createSetOmegaHook(): AnimationPayloadDto["partFrames"][number]["hooks"][number] {
+	return {
+		direction: 0,
+		directionName: "Both",
+		hookName: "SetOmega",
+		hookType: 22,
+		payload: {
+			omega: { x: 0, y: 0, z: -0.03836006671190262 },
+		},
+		payloadKind: "set-omega",
+		rawPayloadBytes: [0, 0, 0, 0, 0, 0, 0, 0, 0x72, 0x20, 0x1d, 0xbd],
 	};
 }
 

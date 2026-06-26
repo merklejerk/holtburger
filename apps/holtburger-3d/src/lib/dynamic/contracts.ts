@@ -16,6 +16,7 @@ import type {
 import type {
 	AnimationPayloadDto,
 	PlacementTransformDto,
+	Vec3Dto,
 } from "../host/contracts";
 
 export type DynamicEntityId = string;
@@ -56,13 +57,13 @@ type DynamicEntityResidence =
 			readonly landblockId: number;
 	  };
 
-export interface DynamicEntityAnimationState {
+interface DynamicEntityAnimationState {
 	readonly defaultAnimationId: number;
 	readonly playback: DynamicEntityAnimationPlaybackState;
 	readonly status: "failed" | "pending-resource" | "ready";
 }
 
-export type DynamicEntityAnimationPlaybackState =
+type DynamicEntityAnimationPlaybackState =
 	| {
 			readonly status: "pending-resource";
 	  }
@@ -81,6 +82,7 @@ export type DynamicEntityAnimationPlaybackState =
 			readonly partPoses: readonly DynamicEntityPartPose[];
 			readonly startedAtSeconds: number;
 			readonly status: "playing";
+			readonly transformEffects: DynamicEntityTransformEffectState;
 	  }
 	| {
 			readonly animationAssetId: string;
@@ -89,9 +91,29 @@ export type DynamicEntityAnimationPlaybackState =
 			readonly status: "failed";
 	  };
 
-export interface DynamicEntityPartPose {
+interface DynamicEntityPartPose {
 	readonly localPlacement: PlacementTransformDto;
 	readonly partIndex: number;
+}
+
+interface DynamicEntityTransformEffectState {
+	/** Active object/root angular velocity set by animation hooks, if any. */
+	readonly activeOmega: DynamicEntityActiveOmegaState | null;
+}
+
+export interface DynamicEntityActiveOmegaState {
+	readonly animationAssetId: string;
+	readonly animationId: number;
+	readonly entityId: DynamicEntityId;
+	readonly hookName: string;
+	readonly hookType: number;
+	readonly lastAppliedFrameIndex: number;
+	readonly lastAppliedLoopIteration: number;
+	readonly lastIntegratedAtSeconds: number;
+	readonly objectRootRotation: PlacementTransformDto["orientation"];
+	readonly omega: Vec3Dto;
+	/** Original hook payload bytes retained for diagnostics and retail parity checks. */
+	readonly rawPayloadBytes: readonly number[];
 }
 
 export interface DynamicAnimationHookFrameKey {
@@ -310,6 +332,7 @@ type DynamicEntityAnimationPlaybackSummaryDto =
 			readonly partCount: number;
 			readonly partPoses: readonly DynamicEntityPartPose[];
 			readonly status: "playing";
+			readonly transformEffects: DynamicEntityTransformEffectSummaryDto;
 	  }
 	| {
 			readonly animationAssetId: string;
@@ -317,6 +340,15 @@ type DynamicEntityAnimationPlaybackSummaryDto =
 			readonly reason: "zero-frame";
 			readonly status: "failed";
 	  };
+
+interface DynamicEntityTransformEffectSummaryDto {
+	readonly activeOmega: DynamicEntityActiveOmegaSummaryDto | null;
+}
+
+type DynamicEntityActiveOmegaSummaryDto = Omit<
+	DynamicEntityActiveOmegaState,
+	"lastIntegratedAtSeconds"
+>;
 
 interface DynamicEntityResourceSummaryDto {
 	readonly required: readonly DynamicEntityRequiredResource[];

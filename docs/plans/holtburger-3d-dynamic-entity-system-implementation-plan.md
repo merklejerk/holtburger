@@ -577,8 +577,9 @@ Decisions and course corrections:
 Debt and follow-up:
 
 - Env-cell dynamic records are registered, diagnosable, retained, and evicted, but they are not
-  resource-ready or rendered. Phase 4 must hydrate setup, visual, material, texture, and animation
-  resources for both outdoor and env-cell dynamic records through the same resource manager.
+  resource-ready or rendered. Phase 4A must hydrate setup and animation resources for both outdoor
+  and env-cell dynamic records through the same resource manager; Phase 4B must add visual,
+  material, texture, and setup-appearance readiness without changing env-cell static rendering.
 - Classified env-cell dynamic records deliberately do not cut over rendering yet. Static env-cell
   output still includes those objects through `env-cell-static-object-seed`; a later render cutover
   phase must explicitly remove classified env-cell dynamic objects from static output before
@@ -586,84 +587,139 @@ Debt and follow-up:
 - `residence-render-path-pending` is intentional temporary debt, not a terminal state. Remove or
   narrow that diagnostic once env-cell dynamic placement/render membership is implemented and tested.
 
-### Phase 4: Dynamic Resource Readiness
+### Phase 4A: Dynamic Setup And Animation Resource Readiness
 
 Status: pending.
 
 Purpose:
 
-- Hydrate setup, appearance/gfx/material/texture, and animation dependencies through the existing
-  asset service for static-authored dynamic records while keeping dynamic resource readiness separate
-  from static bake output.
+- Hydrate the first required dynamic resources, setup model and default animation, through the
+  existing asset service while keeping dynamic readiness separate from static bake output.
 
 Deliverables:
 
-- Add `DynamicEntityResourceManager`.
-- Give `DynamicEntityResourceManager` typed resource keys for dynamic-authored dependencies. The
-  first implemented key set is setup model, setup appearance, animation, and visual/material/texture
-  resources; reserve explicit key variants for future per-resource table families such as motion
-  table, sound table, physics script, and physics script table.
-- Implement the manager as a shared keyed cache with in-flight request dedupe, committed resource
-  reuse, reference-counted leases, and release-on-entity-removal semantics. Multiple entities that
-  reference the same setup, animation, motion table, sound table, or script table must converge on
-  one prepared resource entry instead of performing per-entity duplicate hydration.
+- Add `DynamicEntityResourceManager` for dynamic semantic resource readiness and leases.
+- Define typed dynamic resource keys for setup model and animation. Reserve explicit key variants for
+  later setup appearance, gfx/material/texture, and future table families such as motion table, sound
+  table, physics script, and physics script table.
+- Use `AssetService.requestPreparedAsset()` and `AssetService.acquirePreparedAssetLease()` instead
+  of creating another raw host request cache. The asset service already dedupes pending/committed
+  host assets; the dynamic manager owns dynamic resource readiness, per-entity leases, and
+  release-on-entity-removal semantics.
+- Request setup model and animation payloads from static seed facts for both outdoor and env-cell
+  source residences.
+- Add an async state-change path from dynamic resource completion back to `ClientRuntimeImpl` so
+  resource readiness emits a fresh runtime snapshot instead of waiting for an unrelated runtime
+  event.
+- Record missing setup or animation dependencies as explicit diagnostics.
+- Mark the setup/animation portion of resource readiness ready only when both required assets are
+  committed and leased.
 - Do not introduce a startup-hydrated global animation/motion/script/effect lookup table. Authored
   setup and hook data already carries direct DAT ids; per-resource tables are loaded by those ids
   only when referenced by active entities or implemented hook/playback behavior.
-- Request setup model and animation payloads from static seed facts.
-- Support both outdoor landblock and env-cell source residences. Resource readiness should not care
-  which residence produced the authored dynamic seed except where diagnostics need residence context.
-- Reuse existing setup/gfx/material/texture preparation helpers where their facts are isomorphic.
-- Preserve prepared texture identities and sampler/material requirements in dynamic visual resource
-  readiness so Phase 8 can request the same shared atlas/cache entries as static consumers.
-- Do not bind dynamic material readiness to static draw-unit texture uses, static batch ids, or
-  static visual-resource owner keys.
-- Track leases for committed prepared resources.
-- Record missing required dependencies and unsupported dependency references.
-- Mark records renderable only when all first-target required resources are ready.
-- Treat missing setup appearance as non-fatal for the first target when base setup parts, part/gfx,
-  material/texture resources, and animation are available.
 
 Acceptance criteria:
 
-- `0x020003e5` reaches renderable resource readiness when setup, parts/materials/textures, and
-  animation are available.
-- Env-cell static-authored dynamic records can reach the same resource-ready/non-renderable state
-  without entering outdoor-only placement or renderer paths.
-- Missing animation or setup resources make the entity non-renderable with explicit diagnostics.
-- Missing setup appearance is diagnosed but does not block rendering when setup-provided parts are
-  sufficient.
-- Resource readiness does not create or depend on baked static draw units.
-- Dynamic resource readiness carries enough texture-use identity to let renderer resources share
-  atlas/cache entries with compatible static consumers without borrowing static ownership.
-- Two dynamic entities that request the same prepared animation or setup resource share one committed
-  manager entry and hold separate leases.
+- Outdoor and env-cell static-authored dynamic records use the same setup/animation readiness path.
+- Missing setup or animation resources keep the entity non-renderable with explicit diagnostics.
+- Two dynamic entities that request the same setup or animation converge on one asset-service
+  committed entry while holding separate dynamic resource leases.
+- Resource leases are released when dynamic entities are removed by static scope retention.
+- Setup/animation readiness completion emits a runtime snapshot update.
 - The first-slice manager has no ambient startup table load and no global LUT required for
   animation/motion/script/effect lookup.
-- Resource leases are released on entity removal.
 
 Task checklist:
 
-- [ ] Define dynamic resource state and issue types.
-- [ ] Define typed dynamic resource keys, including reserved future table key variants.
-- [ ] Implement shared resource request, in-flight dedupe, committed reuse, lease acquisition, and
-      release handling.
+- [ ] Define dynamic setup/animation resource state and issue types.
+- [ ] Define typed dynamic resource keys, including reserved future key variants.
+- [ ] Implement manager coordination around asset-service request dedupe, committed reuse, leases,
+      and release-on-entity-removal.
+- [ ] Add controller/runtime wiring so async readiness completion emits snapshots.
 - [ ] Prove resource readiness works for outdoor and env-cell source residences without duplicating
-      resource manager logic.
-- [ ] Prove duplicate entity references to the same setup or animation share one committed resource
-      entry.
-- [ ] Prove no startup-hydrated global lookup table is required for first-slice dynamic resources.
-- [ ] Reuse or extract part-agnostic material/visual resource preparation helpers.
-- [ ] Preserve atlas-compatible prepared texture identities and sampler/material requirements in
-      dynamic resource readiness.
-- [ ] Prove dynamic resource readiness does not reference static draw-unit or static visual-resource
-      owner keys.
-- [ ] Add tests for success, missing animation, missing setup, dedupe, and lease release.
+      manager logic.
+- [ ] Prove duplicate entity references to the same setup or animation share asset-service committed
+      entries while retaining separate dynamic leases.
+- [ ] Prove missing setup and missing animation diagnostics.
+- [ ] Prove no startup-hydrated global lookup table is required.
 - [ ] Run phase verification commands.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-26: Dry run split the original Phase 4. Setup/animation readiness is a smaller, reviewable
+  resource-manager slice; visual/material/texture readiness is deferred to Phase 4B.
+- 2026-06-26: `AssetService` already provides host request dedupe and committed asset leases. The
+  dynamic resource manager should coordinate dynamic semantic readiness and per-entity ownership, not
+  duplicate the asset-service cache.
+- 2026-06-26: Async readiness must publish runtime snapshots. Without a callback/event path from
+  dynamic resource completion to `ClientRuntimeImpl`, entities could become ready silently until some
+  unrelated runtime event emits.
+
+### Phase 4B: Dynamic Visual, Material, And Texture Readiness
+
+Status: pending.
+
+Purpose:
+
+- Hydrate setup appearance, gfx, material, palette, render-surface, and texture-use readiness for
+  dynamic records while preserving atlas-compatible texture identity without borrowing static bake
+  ownership.
+
+Deliverables:
+
+- Extend `DynamicEntityResourceManager` with setup appearance, gfx, material, palette,
+  render-surface, and prepared texture-use resource keys.
+- Reuse `resolveStaticObjectSourceClosure()` or extract shared source-closure helpers where the
+  setup/gfx/material facts are isomorphic.
+- Preserve prepared texture identities, sampler policy, wrap requirements, and material role layout
+  needed by Phase 8 to route compatible static and dynamic consumers through shared atlas/cache
+  entries.
+- Do not create baked static draw units, static batch ids, static object visual-resource ids, or
+  static texture-use owners during dynamic readiness.
+- Treat missing setup appearance as non-fatal for the first target when setup-provided parts, gfx,
+  material/texture resources, and animation are available.
+- Record missing visual/material/texture dependencies and unsupported material plans as explicit
+  diagnostics.
+
+Acceptance criteria:
+
+- `0x020003e5` reaches full dynamic resource readiness when setup, parts/materials/textures, and
+  animation are available.
+- Env-cell static-authored dynamic records can reach the same resource-ready/non-renderable state
+  without entering outdoor-only placement or renderer paths.
+- Missing setup appearance is diagnosed but does not block readiness when setup-provided parts are
+  sufficient.
+- Resource readiness does not create or depend on baked static draw units.
+- Dynamic visual readiness carries enough texture-use identity and sampler/material requirements for
+  Phase 8 to share atlas/cache entries with compatible static consumers.
+- Dynamic visual readiness does not reference static draw-unit ids, static batch ids, static
+  visual-resource owner keys, or `StaticTextureUseOwner`.
+- Visual/material/texture leases are released on entity removal.
+
+Task checklist:
+
+- [ ] Define dynamic visual/material/texture resource state and issue types.
+- [ ] Define typed dynamic resource keys for setup appearance, gfx, material, palette,
+      render-surface, and prepared texture-use dependencies.
+- [ ] Reuse or extract part-agnostic source closure and material planning helpers.
+- [ ] Preserve atlas-compatible prepared texture identities and sampler/material requirements without
+      static ownership.
+- [ ] Prove dynamic readiness does not reference static draw-unit, static batch, or static
+      visual-resource owner keys.
+- [ ] Add tests for success, missing setup appearance, missing visual/material/texture dependency,
+      unsupported material plan, dedupe, and lease release.
+- [ ] Run phase verification commands.
+
+Decisions and course corrections:
+
+- 2026-06-26: Dry run found that current texture manager ownership is still static-shaped through
+  `StaticTextureUseOwner`. Phase 4B should preserve atlas-compatible texture specs and identities,
+  but actual dynamic atlas ownership belongs in Phase 8 unless texture owner types are generalized
+  earlier.
+- 2026-06-26: `resolveStaticObjectSourceClosure()` already loads setup/gfx/material/texture facts and
+  missing refs, but it does not expose every successfully loaded asset key. Phase 4B must either
+  derive leases from returned facts or extend the closure result with loaded asset keys before
+  claiming complete lease release for visual/material/texture resources.
 
 ### Phase 5: Animation Playback And Hook Dispatcher Shell
 
@@ -972,9 +1028,9 @@ Decisions and course corrections:
   resource identity and sampler/material requirements, not by static owner identity.
 
 - Risk: dynamic textures bypass the existing atlas/cache path and create duplicate uploads.
-  Mitigation: Phase 4 must preserve atlas-compatible prepared texture identity and Phase 8 must prove
-  compatible static and dynamic consumers converge on one shared atlas/cache entry with distinct
-  owners.
+  Mitigation: Phase 4B must preserve atlas-compatible prepared texture identity and sampler/material
+  requirements; Phase 8 must prove compatible static and dynamic consumers converge on one shared
+  atlas/cache entry with distinct owners.
 
 - Risk: merged query becomes a debug-only path.
   Mitigation: migrate browser picking through the merged scene-query surface and express default
@@ -1001,7 +1057,7 @@ Decisions and course corrections:
 - Risk: static-authored dynamic registration remains split by source residence and accumulates
   outdoor-only branches.
   Mitigation: Phase 3B registers classified env-cell authored dynamic seeds in the same dynamic
-  runtime family before Phase 4 resource readiness, while keeping placement/query/render behavior
+  runtime family before Phase 4A/4B resource readiness, while keeping placement/query/render behavior
   staged by source residence.
 
 - Risk: env-cell parity becomes nominal rather than functional by mirroring every env-cell static

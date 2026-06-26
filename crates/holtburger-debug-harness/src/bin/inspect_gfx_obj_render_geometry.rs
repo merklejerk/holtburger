@@ -175,7 +175,7 @@ fn print_policy_sensitive_polygons(gfx_obj: &GfxObj, drawing_bsp_polygon_ids: &B
             continue;
         }
         rows.push(format!(
-            "polygon={polygon_id} outsideDrawingBsp={outside_drawing_bsp} noPos={no_pos} stippling=0x{:02X} sidesType={} posSurface={} negSurface={} points={} posUvs={} negUvs={} vertexIds={:?}",
+            "polygon={polygon_id} outsideDrawingBsp={outside_drawing_bsp} noPos={no_pos} stippling=0x{:02X} sidesType={} posSurface={} negSurface={} points={} posUvs={} negUvs={} vertexIds={:?} {}",
             polygon.stippling,
             polygon.sides_type,
             polygon.pos_surface,
@@ -184,12 +184,58 @@ fn print_policy_sensitive_polygons(gfx_obj: &GfxObj, drawing_bsp_polygon_ids: &B
             polygon.pos_uv_indices.len(),
             polygon.neg_uv_indices.len(),
             polygon.vertex_ids,
+            format_polygon_vertices(gfx_obj, &polygon),
         ));
     }
     println!("policy-sensitive drawing polygons={}", rows.len());
     for line in rows {
         println!("  {line}");
     }
+}
+
+fn format_polygon_vertices(gfx_obj: &GfxObj, polygon: &Polygon) -> String {
+    let mut min = None::<(f32, f32, f32)>;
+    let mut max = None::<(f32, f32, f32)>;
+    let mut points = Vec::new();
+
+    for vertex_id in &polygon.vertex_ids {
+        let Some(vertex) = gfx_obj.vertex_array.vertices.get(vertex_id) else {
+            points.push(format!("{vertex_id}:<missing>"));
+            continue;
+        };
+        let point = (vertex.origin.x, vertex.origin.y, vertex.origin.z);
+        min = Some(expand_min(min.unwrap_or(point), point));
+        max = Some(expand_max(max.unwrap_or(point), point));
+        points.push(format!(
+            "{}:({:.3},{:.3},{:.3})",
+            vertex_id, vertex.origin.x, vertex.origin.y, vertex.origin.z
+        ));
+    }
+
+    let bounds = match (min, max) {
+        (Some(min), Some(max)) => format!(
+            "bounds=min({:.3},{:.3},{:.3}) max({:.3},{:.3},{:.3})",
+            min.0, min.1, min.2, max.0, max.1, max.2
+        ),
+        _ => "bounds=none".to_string(),
+    };
+    format!("{bounds} vertices=[{}]", points.join(","))
+}
+
+fn expand_min(left: (f32, f32, f32), right: (f32, f32, f32)) -> (f32, f32, f32) {
+    (
+        left.0.min(right.0),
+        left.1.min(right.1),
+        left.2.min(right.2),
+    )
+}
+
+fn expand_max(left: (f32, f32, f32), right: (f32, f32, f32)) -> (f32, f32, f32) {
+    (
+        left.0.max(right.0),
+        left.1.max(right.1),
+        left.2.max(right.2),
+    )
 }
 
 fn print_unrendered_polygons(
@@ -268,8 +314,8 @@ fn derive_renderable_side_count(polygon: &Polygon) -> usize {
 }
 
 fn positive_side_is_renderable(polygon: &Polygon) -> bool {
-    (polygon.stippling & STIPPLING_NO_POS) == 0
-        && polygon.pos_uv_indices.len() == polygon.vertex_ids.len()
+    (polygon.stippling & STIPPLING_NO_POS) != 0
+        || polygon.pos_uv_indices.len() == polygon.vertex_ids.len()
 }
 
 fn negative_side_is_renderable(polygon: &Polygon) -> bool {

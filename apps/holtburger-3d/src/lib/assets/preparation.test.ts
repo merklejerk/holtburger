@@ -118,7 +118,7 @@ describe("host asset preparation", () => {
 		}
 	});
 
-	it("prepares animation payloads with raw known hook bytes intact", () => {
+	it("prepares animation payloads with typed SetOmega hook bytes intact", () => {
 		const payload = createAnimationPayload();
 
 		const prepared = prepareV2StaticAssetPayload({
@@ -140,7 +140,14 @@ describe("host asset preparation", () => {
 		expect(prepared.partFrames[0]?.hooks[0]).toMatchObject({
 			hookName: "SetOmega",
 			hookType: 22,
-			payloadKind: "raw",
+			payload: {
+				omega: {
+					x: 0,
+					y: 0,
+					z: expect.closeTo(-0.03836006671190262, 12),
+				},
+			},
+			payloadKind: "set-omega",
 			rawPayloadBytes: [0, 0, 0, 0, 0, 0, 0, 0, 0x72, 0x20, 0x1d, 0xbd],
 		});
 	});
@@ -358,14 +365,21 @@ function createAnimationPayload() {
 						directionName: "Both",
 						hookName: "SetOmega",
 						hookType: 22,
-						payload: null,
-						payloadKind: "raw",
-						rawPayloadBytes: [
-							0, 0, 0, 0, 0, 0, 0, 0, 0x72, 0x20, 0x1d, 0xbd,
-						],
+						payload: {
+							omega: {
+								x: 0,
+								y: 0,
+								z: -0.03836006671190262,
+							},
+						},
+						payloadKind: "set-omega",
+						rawPayloadBytes: [0, 0, 0, 0, 0, 0, 0, 0, 0x72, 0x20, 0x1d, 0xbd],
 					},
 				],
-				localPlacements: [createPlacement(), createPlacement({ x: 1, y: 0, z: 0 })],
+				localPlacements: [
+					createPlacement(),
+					createPlacement({ x: 1, y: 0, z: 0 }),
+				],
 			},
 		],
 		provenance: {

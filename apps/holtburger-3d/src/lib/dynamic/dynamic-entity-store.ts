@@ -115,6 +115,28 @@ function createAnimationPlaybackSummary(
 		partCount: playback.partCount,
 		partPoses: playback.partPoses,
 		status: "playing",
+		transformEffects: {
+			activeOmega:
+				playback.transformEffects.activeOmega === null
+					? null
+					: {
+							animationAssetId:
+								playback.transformEffects.activeOmega.animationAssetId,
+							animationId: playback.transformEffects.activeOmega.animationId,
+							entityId: playback.transformEffects.activeOmega.entityId,
+							hookName: playback.transformEffects.activeOmega.hookName,
+							hookType: playback.transformEffects.activeOmega.hookType,
+							lastAppliedFrameIndex:
+								playback.transformEffects.activeOmega.lastAppliedFrameIndex,
+							lastAppliedLoopIteration:
+								playback.transformEffects.activeOmega.lastAppliedLoopIteration,
+							objectRootRotation:
+								playback.transformEffects.activeOmega.objectRootRotation,
+							omega: playback.transformEffects.activeOmega.omega,
+							rawPayloadBytes:
+								playback.transformEffects.activeOmega.rawPayloadBytes,
+						},
+		},
 	};
 }
 

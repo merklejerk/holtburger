@@ -3,6 +3,7 @@ import type {
 	PlacementTransformDto,
 } from "../host/contracts";
 import type {
+	DynamicEntityActiveOmegaState,
 	DynamicAnimationHookFrameKey,
 	DynamicEntityIssue,
 	DynamicEntityRecord,
@@ -24,6 +25,15 @@ interface SampledAnimationFrame {
 	readonly elapsedSeconds: number;
 	readonly frameNumber: number;
 	readonly loopIteration: number;
+}
+
+type AnimationHookDto =
+	AnimationPayloadDto["partFrames"][number]["hooks"][number];
+type QuaternionDto = PlacementTransformDto["orientation"];
+
+interface HookDispatchResult {
+	readonly activeOmega: DynamicEntityActiveOmegaState | null;
+	readonly issues: readonly DynamicEntityIssue[];
 }
 
 /** Samples default setup animations into dynamic entity runtime pose state. */
@@ -68,19 +78,30 @@ export class DynamicAnimationPlayer {
 			record.animation.playback.status === "playing"
 				? record.animation.playback.lastDispatchedHookFrame
 				: null;
-		const hookIssues = shouldDispatchHooks(previousHookFrame, hookFrame)
+		const previousActiveOmega =
+			record.animation.playback.status === "playing" &&
+			record.animation.playback.animationAssetId === animationResource.assetId
+				? record.animation.playback.transformEffects.activeOmega
+				: null;
+		const integratedActiveOmega = integrateActiveOmega(
+			previousActiveOmega,
+			timeSeconds,
+		);
+		const hookDispatch = shouldDispatchHooks(previousHookFrame, hookFrame)
 			? this.#hookDispatcher.dispatch({
+					activeOmega: integratedActiveOmega,
 					animationAssetId: animationResource.assetId,
 					entityId: record.id,
 					frameIndex: sampled.currentFrameIndex,
 					hooks: partFrame.hooks,
 					loopIteration: sampled.loopIteration,
 					payload,
+					timeSeconds,
 				})
-			: [];
+			: { activeOmega: integratedActiveOmega, issues: [] };
 		const diagnostics = appendUniqueDiagnostics(record.diagnostics, [
 			...(objectFrameDiagnostic === null ? [] : [objectFrameDiagnostic]),
-			...hookIssues,
+			...hookDispatch.issues,
 		]);
 		const next: DynamicEntityRecord = {
 			...record,
@@ -95,7 +116,7 @@ export class DynamicAnimationPlayer {
 					frameNumber: sampled.frameNumber,
 					frameRateFps: DEFAULT_FRAME_RATE_FPS,
 					lastDispatchedHookFrame:
-						hookIssues.length > 0 || partFrame.hooks.length > 0
+						hookDispatch.issues.length > 0 || partFrame.hooks.length > 0
 							? hookFrame
 							: previousHookFrame,
 					loopIteration: sampled.loopIteration,
@@ -109,6 +130,9 @@ export class DynamicAnimationPlayer {
 					),
 					startedAtSeconds,
 					status: "playing",
+					transformEffects: {
+						activeOmega: hookDispatch.activeOmega,
+					},
 				},
 				status: "ready",
 			},
@@ -121,32 +145,156 @@ export class DynamicAnimationPlayer {
 class DynamicHookDispatcher {
 	dispatch(options: {
 		readonly animationAssetId: string;
+		readonly activeOmega: DynamicEntityActiveOmegaState | null;
 		readonly entityId: string;
 		readonly frameIndex: number;
 		readonly hooks: AnimationPayloadDto["partFrames"][number]["hooks"];
 		readonly loopIteration: number;
 		readonly payload: AnimationPayloadDto;
-	}): readonly DynamicEntityIssue[] {
-		return options.hooks.flatMap((hook): readonly DynamicEntityIssue[] => {
+		readonly timeSeconds: number;
+	}): HookDispatchResult {
+		const issues: DynamicEntityIssue[] = [];
+		let activeOmega = options.activeOmega;
+		for (const hook of options.hooks) {
 			if (hook.payloadKind === "none") {
-				return [];
+				continue;
 			}
-			return [
-				{
+			if (hook.payloadKind === "set-omega") {
+				activeOmega = applySetOmegaHook({
+					activeOmega,
 					animationAssetId: options.animationAssetId,
 					animationId: options.payload.animationId,
 					entityId: options.entityId,
 					frameIndex: options.frameIndex,
-					hookName: hook.hookName,
-					hookType: hook.hookType,
-					kind: "dynamic-animation-hook-unsupported",
+					hook,
 					loopIteration: options.loopIteration,
-					payloadKind: hook.payloadKind,
-					skippedEffect: "unsupported animation hook effect",
-				},
-			];
-		});
+					timeSeconds: options.timeSeconds,
+				});
+				continue;
+			}
+			issues.push({
+				animationAssetId: options.animationAssetId,
+				animationId: options.payload.animationId,
+				entityId: options.entityId,
+				frameIndex: options.frameIndex,
+				hookName: hook.hookName,
+				hookType: hook.hookType,
+				kind: "dynamic-animation-hook-unsupported",
+				loopIteration: options.loopIteration,
+				payloadKind: hook.payloadKind,
+				skippedEffect: "unsupported animation hook effect",
+			});
+		}
+		return { activeOmega, issues };
 	}
+}
+
+function applySetOmegaHook(options: {
+	readonly activeOmega: DynamicEntityActiveOmegaState | null;
+	readonly animationAssetId: string;
+	readonly animationId: number;
+	readonly entityId: string;
+	readonly frameIndex: number;
+	readonly hook: Extract<
+		AnimationHookDto,
+		{ readonly payloadKind: "set-omega" }
+	>;
+	readonly loopIteration: number;
+	readonly timeSeconds: number;
+}): DynamicEntityActiveOmegaState {
+	return {
+		animationAssetId: options.animationAssetId,
+		animationId: options.animationId,
+		entityId: options.entityId,
+		hookName: options.hook.hookName,
+		hookType: options.hook.hookType,
+		lastAppliedFrameIndex: options.frameIndex,
+		lastAppliedLoopIteration: options.loopIteration,
+		lastIntegratedAtSeconds: options.timeSeconds,
+		objectRootRotation:
+			options.activeOmega?.objectRootRotation ?? IDENTITY_PLACEMENT.orientation,
+		omega: options.hook.payload.omega,
+		rawPayloadBytes: options.hook.rawPayloadBytes,
+	};
+}
+
+function integrateActiveOmega(
+	activeOmega: DynamicEntityActiveOmegaState | null,
+	timeSeconds: number,
+): DynamicEntityActiveOmegaState | null {
+	if (activeOmega === null) {
+		return null;
+	}
+	const deltaSeconds = Math.max(
+		0,
+		timeSeconds - activeOmega.lastIntegratedAtSeconds,
+	);
+	if (deltaSeconds === 0) {
+		return activeOmega;
+	}
+	return {
+		...activeOmega,
+		lastIntegratedAtSeconds: timeSeconds,
+		objectRootRotation: integrateOmegaRotation(
+			activeOmega.objectRootRotation,
+			activeOmega.omega,
+			deltaSeconds,
+		),
+	};
+}
+
+function integrateOmegaRotation(
+	rotation: QuaternionDto,
+	omega: DynamicEntityActiveOmegaState["omega"],
+	deltaSeconds: number,
+): QuaternionDto {
+	const speed = Math.hypot(omega.x, omega.y, omega.z);
+	if (speed === 0) {
+		return rotation;
+	}
+	const halfAngle = (speed * deltaSeconds) / 2;
+	const sinHalfAngle = Math.sin(halfAngle);
+	const deltaRotation = normalizeQuaternion({
+		w: Math.cos(halfAngle),
+		x: (omega.x / speed) * sinHalfAngle,
+		y: (omega.y / speed) * sinHalfAngle,
+		z: (omega.z / speed) * sinHalfAngle,
+	});
+	return normalizeQuaternion(multiplyQuaternions(rotation, deltaRotation));
+}
+
+function multiplyQuaternions(
+	left: QuaternionDto,
+	right: QuaternionDto,
+): QuaternionDto {
+	return {
+		w:
+			left.w * right.w - left.x * right.x - left.y * right.y - left.z * right.z,
+		x:
+			left.w * right.x + left.x * right.w + left.y * right.z - left.z * right.y,
+		y:
+			left.w * right.y - left.x * right.z + left.y * right.w + left.z * right.x,
+		z:
+			left.w * right.z + left.x * right.y - left.y * right.x + left.z * right.w,
+	};
+}
+
+function normalizeQuaternion(quaternion: QuaternionDto): QuaternionDto {
+	const length = Math.hypot(
+		quaternion.w,
+		quaternion.x,
+		quaternion.y,
+		quaternion.z,
+	);
+	if (length === 0) {
+		return IDENTITY_PLACEMENT.orientation;
+	}
+	return {
+		w: quaternion.w / length,
+		x: quaternion.x / length,
+		y: quaternion.y / length,
+		z: quaternion.z / length,
+	};
 }
 
 function sampleAnimationFrame(options: {

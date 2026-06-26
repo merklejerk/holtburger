@@ -1593,6 +1593,19 @@ fn serialize_animation_hook(
             serde_json::Value::Null,
             Some(bytes.iter().map(|byte| *byte as u32).collect::<Vec<_>>()),
         ),
+        AnimationHookPayload::SetOmega(payload) => (
+            "set-omega",
+            serde_json::json!({
+                "omega": serialize_vector3(&payload.omega),
+            }),
+            Some(
+                payload
+                    .raw_payload_bytes
+                    .iter()
+                    .map(|byte| *byte as u32)
+                    .collect::<Vec<_>>(),
+            ),
+        ),
         AnimationHookPayload::TextureVelocity(payload) => (
             "texture-velocity",
             serde_json::json!({

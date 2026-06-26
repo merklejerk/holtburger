@@ -46,8 +46,15 @@ pub enum AnimationHookPayload {
     NoPayload,
     Raw(Vec<u8>),
     ReplaceObject(Vec<u8>),
+    SetOmega(SetOmegaHookPayload),
     TextureVelocity(TextureVelocityHookPayload),
     TextureVelocityPart(TextureVelocityPartHookPayload),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SetOmegaHookPayload {
+    pub omega: Vector3,
+    pub raw_payload_bytes: [u8; 12],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -91,7 +98,7 @@ impl AnimationHook {
             19 => AnimationHookPayload::Raw(read_exact_payload(reader, 8)?), // CallPES
             20 => AnimationHookPayload::Raw(read_exact_payload(reader, 12)?), // Transparent
             21 => AnimationHookPayload::Raw(read_exact_payload(reader, 16)?), // SoundTweaked
-            22 => AnimationHookPayload::Raw(read_exact_payload(reader, 12)?), // SetOmega
+            22 => AnimationHookPayload::SetOmega(read_set_omega_payload(reader)?),
             23 => AnimationHookPayload::TextureVelocity(TextureVelocityHookPayload {
                 u_speed: f32::read_le(reader)?,
                 v_speed: f32::read_le(reader)?,
@@ -137,6 +144,10 @@ impl AnimationHookPayload {
                 writer.write_all(data)?;
                 Ok(())
             }
+            Self::SetOmega(payload) => {
+                writer.write_all(&payload.raw_payload_bytes)?;
+                Ok(())
+            }
             Self::TextureVelocity(payload) => {
                 payload.u_speed.write_le(writer)?;
                 payload.v_speed.write_le(writer)
@@ -156,6 +167,35 @@ fn read_exact_payload<R: Read + Seek>(reader: &mut R, payload_size: usize) -> Bi
         reader.read_exact(&mut data)?;
     }
     Ok(data)
+}
+
+fn read_set_omega_payload<R: Read + Seek>(reader: &mut R) -> BinResult<SetOmegaHookPayload> {
+    let mut raw_payload_bytes = [0u8; 12];
+    reader.read_exact(&mut raw_payload_bytes)?;
+    let omega = Vector3 {
+        x: f32::from_le_bytes([
+            raw_payload_bytes[0],
+            raw_payload_bytes[1],
+            raw_payload_bytes[2],
+            raw_payload_bytes[3],
+        ]),
+        y: f32::from_le_bytes([
+            raw_payload_bytes[4],
+            raw_payload_bytes[5],
+            raw_payload_bytes[6],
+            raw_payload_bytes[7],
+        ]),
+        z: f32::from_le_bytes([
+            raw_payload_bytes[8],
+            raw_payload_bytes[9],
+            raw_payload_bytes[10],
+            raw_payload_bytes[11],
+        ]),
+    };
+    Ok(SetOmegaHookPayload {
+        omega,
+        raw_payload_bytes,
+    })
 }
 
 fn read_replace_object_payload<R: Read + Seek>(reader: &mut R) -> BinResult<Vec<u8>> {
@@ -639,6 +679,31 @@ mod tests {
             AnimationHookPayload::TextureVelocity(TextureVelocityHookPayload {
                 u_speed: 1.25,
                 v_speed: -0.5
+            })
+        );
+    }
+
+    #[test]
+    fn animation_hook_set_omega_reads_typed_payload_and_preserves_raw_bytes() {
+        let raw_payload_bytes = [0, 0, 0, 0, 0, 0, 0, 0, 0x72, 0x20, 0x1d, 0xbd];
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&22u32.to_le_bytes());
+        bytes.extend_from_slice(&0i32.to_le_bytes());
+        bytes.extend_from_slice(&raw_payload_bytes);
+
+        let hook = AnimationHook::read(&mut Cursor::new(bytes)).expect("SetOmega should parse");
+
+        assert_eq!(hook.hook_type, 22);
+        assert_eq!(hook.direction, 0);
+        assert_eq!(
+            hook.payload,
+            AnimationHookPayload::SetOmega(SetOmegaHookPayload {
+                omega: Vector3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: f32::from_le_bytes([0x72, 0x20, 0x1d, 0xbd]),
+                },
+                raw_payload_bytes,
             })
         );
     }

@@ -6,13 +6,15 @@ The dynamic entity requirements gate is satisfied for the first static-authored 
 slice. The requirements source remains
 [docs/plans/holtburger-3d-dynamic-entity-system-requirements-plan.md](holtburger-3d-dynamic-entity-system-requirements-plan.md).
 
-This implementation plan turns that resolved first slice into a phased build path. The first target
-is outdoor static-authored setup `0x020003e5` with default animation `0x0300061b`. The immediate
-follow-up target is `0x020005ac` with animation `0x03000751` and a frame-0 `SetOmega` hook.
+This implementation plan turns that resolved first slice into a phased build path. The first-cut
+targets are outdoor static-authored setup `0x020003e5` with default animation `0x0300061b` and
+outdoor static-authored setup `0x020005ac` with animation `0x03000751` plus a frame-0 `SetOmega`
+hook.
 
 The implementation should prove dynamic seed ingestion, animation asset lookup, runtime-owned
-dynamic state, live part-frame playback, dynamic query/index records, renderer submission, and
-diagnostics without designing the entire live player/creature/equipment system up front.
+dynamic state, live part-frame playback, the first transform hook, dynamic query/index records,
+renderer submission, and diagnostics without designing the entire live player/creature/equipment
+system up front.
 
 ## Resolved Evidence Carried Forward
 
@@ -31,13 +33,13 @@ First target evidence:
   fixed origin and changing orientation.
 - User retail-client visual check identifies the target as windmill blades that rotate continuously
   as soon as the scene loads.
-- This target proves the first slice must evaluate live animation part frames. It does not require
-  hook execution, physics scripts, motion-table selection, object position frames, particles, sounds,
-  or material transitions.
+- This target proves the first cut must evaluate live animation part frames. It does not require
+  hook execution, physics scripts, motion-table selection, particles, sounds, or material
+  transitions.
 
 Second target evidence:
 
-- Static-authored outdoor setup `0x020005ac` is the immediate follow-up target.
+- Static-authored outdoor setup `0x020005ac` is the second first-cut validation target.
 - It has default animation `0x03000751`.
 - The setup has two parts, no default script, no default motion table, no default sound table, and no
   default script table.
@@ -46,8 +48,8 @@ Second target evidence:
 - Harness evidence decodes the `SetOmega` payload as vector `(0.0, 0.0, -0.038397)`.
 - User retail-client visual check identifies the target as a bird that flaps its wings while
   circling a spot continuously.
-- This target is the first transform-side hook validation target. Rendering it without omega support
-  is acceptable only as a diagnosed visual compromise.
+- This target is the first transform-side hook validation target. The first cut should render it with
+  typed `SetOmega` support rather than treating unsupported omega as an acceptable final compromise.
 
 Initial code blockers and current implications:
 
@@ -74,8 +76,8 @@ Selection and query evidence:
 
 Phase-order rationale:
 
-- DTO and seed plumbing come before renderer work because the first target cannot enter the frontend
-  runtime honestly without an outdoor seed variant and animation asset payload.
+- DTO and seed plumbing come before renderer work because the first-cut targets cannot enter the
+  frontend runtime honestly without outdoor seed variants and animation asset payloads.
 - Runtime/resource/playback work comes before renderer commits because renderer submissions should
   consume current semantic dynamic state, not create it.
 - Query/index work comes before validation because the first visible target must be inspectable and
@@ -98,9 +100,9 @@ The phase order is viable, but several implementation details need to be pinned 
   animation payloads. Do not rename it during Phase 1 unless the diff is small; if it remains, record
   it as cleanup debt and rename it during the cleanup phase.
 - `holtburger-dat` currently keeps hook `22` / `SetOmega` as raw 12-byte payload. Phase 1 should
-  preserve raw payload bytes and hook names for all known hooks. Typed `SetOmega` decoding can land in
-  Phase 1 if small, but it is a hard precondition before the Phase 10 follow-up proceeds to actual
-  omega behavior.
+  preserve raw payload bytes and hook names for all known hooks. Typed `SetOmega` decoding is a hard
+  precondition before first-cut omega behavior and now belongs before bounds/indexing consumes hook
+  state.
 - Static-authored dynamic seed records cannot be treated as one env-cell-shaped record. Phase 2 split
   committed-key creation and env-cell grouping by seed kind for outdoor support. Phase 3B must now
   complete the symmetric runtime registration path for classified env-cell dynamic seeds while
@@ -129,8 +131,9 @@ The phase order is viable, but several implementation details need to be pinned 
 
 ## Goal
 
-Render and inspect the first static-authored dynamic outdoor target through a real dynamic entity
-runtime instead of baking it into static draw units.
+Render and inspect both first-cut static-authored dynamic outdoor targets through a real dynamic
+entity runtime instead of baking them into static draw units: the hook-free windmill target and the
+`SetOmega` bird target.
 
 ## Scope
 
@@ -141,12 +144,13 @@ In scope:
 - A browser frontend dynamic runtime for static-authored seeds.
 - Setup default animation playback using integer part-frame sampling.
 - A hook-generic dispatcher shape with unsupported-hook diagnostics.
+- Typed `SetOmega` decoding and the first supported transform-hook handler.
 - Dynamic current-frame bounds, effective outdoor residence, and spatial query records.
 - A merged scene-query API surface that can return static and dynamic hit variants.
 - Renderer dynamic resource and instance commits for outdoor dynamic parts.
 - Diagnostics for seed classification, resource readiness, animation frame state, bounds/index
   membership, renderer submission counts, and unsupported hooks.
-- End-to-end validation against `0x020003e5`.
+- End-to-end validation against `0x020003e5` and `0x020005ac`.
 
 Out of scope for this first implementation plan:
 
@@ -154,7 +158,7 @@ Out of scope for this first implementation plan:
 - Browser/client-authored spawn ownership, TTL, or explicit destruction APIs.
 - Full motion-table animation selection.
 - Physics script playback.
-- Broad hook execution beyond the dispatcher shell and planned `SetOmega` follow-up.
+- Broad hook execution beyond the dispatcher shell and supported `SetOmega` handler.
 - Particle, sound, light, material transition, replacement-object, `NoDraw`, `Scale`,
   `DefaultScript`, and `DefaultScriptPart` support.
 - Dynamic atlas page allocation policy changes, VAO compaction, WebGL2 instanced draws, or dynamic
@@ -278,7 +282,7 @@ Deliverables:
   flags, and decoded hook summaries where available.
 - Preserve raw hook payload bytes for known hooks whose payloads are not typed yet. Include stable
   hook names and hook ids so diagnostics remain useful before full hook support.
-- Either add typed `SetOmega` payload decoding now or record it as a Phase 10 blocker before omega
+- Either add typed `SetOmega` payload decoding now or record it as a first-cut blocker before omega
   behavior is implemented.
 
 Acceptance criteria:
@@ -308,8 +312,9 @@ Decisions and course corrections:
   explicitly unsupported for animation until payload size or streaming evidence proves binary
   sections are needed.
 - 2026-06-26: Typed `SetOmega` decoding was not added in Phase 1. Animation payloads preserve
-  `SetOmega` as a named hook with raw 12-byte payload bytes, and Phase 10 must add typed decoding
-  before omega behavior is implemented.
+  `SetOmega` as a named hook with raw 12-byte payload bytes. The implementation plan now adds a
+  dedicated first-cut phase for typed decoding and transform behavior before bounds/indexing relies
+  on hook state.
 - 2026-06-26: `prepareV2StaticAssetPayload` now parses animation payloads, so the name is broader
   than static assets. This remains cleanup debt for Phase 11 rather than being renamed during the
   route diff.
@@ -707,7 +712,7 @@ Deliverables:
   entries.
 - Do not create baked static draw units, static batch ids, static object visual-resource ids, or
   static texture-use owners during dynamic readiness.
-- Treat missing setup appearance as non-fatal for the first target when setup-provided parts, gfx,
+- Treat missing setup appearance as non-fatal for first-cut targets when setup-provided parts, gfx,
   material/texture resources, and animation are available.
 - Record missing visual/material/texture dependencies and unsupported material plans as explicit
   diagnostics.
@@ -896,38 +901,103 @@ Debt and follow-up:
 - Playback state is produced but not rendered. Phase 6/7/8 still need to turn sampled base,
   object/root, and part-local poses into dynamic bounds, spatial membership, and draw instances.
 
+### Phase 5B: SetOmega Decode And Transform Hook Handler
+
+Status: pending.
+
+Purpose:
+
+- Promote `SetOmega` from unsupported diagnostic to the first supported transform hook so the first
+  cut covers both `0x020003e5` and `0x020005ac`.
+
+Deliverables:
+
+- Add typed `SetOmega` payload decoding at the animation asset boundary while preserving raw bytes
+  for diagnostics and future parity checks.
+- Extend the frontend animation hook DTO/schema with a typed `SetOmega` payload containing the omega
+  vector.
+- Add dynamic transform-effect state for current object/root omega without redefining source
+  residence or static-scope lifetime.
+- Add a `DynamicHookDispatcher` handler for `SetOmega` that writes omega state instead of producing
+  an unsupported-hook diagnostic.
+- Integrate omega over runtime delta time as object/root transform state under the base placement and
+  before part-local animation poses are consumed by bounds/rendering.
+- Keep repeated frame-0 `SetOmega` dispatch idempotent across animation loops when the hook payload
+  repeats the same vector.
+- Preserve unsupported diagnostics for every other effect-bearing hook.
+
+Acceptance criteria:
+
+- Animation `0x03000751` exposes a typed `SetOmega` payload with vector `(0.0, 0.0, -0.038397)` and
+  still preserves raw payload bytes.
+- The `0x020005ac` dynamic record no longer reports unsupported-hook diagnostics for its frame-0
+  `SetOmega` hook.
+- Playback stores active omega transform state with entity id, animation asset id, frame/loop source,
+  and vector provenance.
+- Runtime ticks integrate omega independently of integer part-frame sampling while preserving the
+  existing part-frame playback behavior.
+- Hook-free target `0x020003e5` remains unchanged and does not allocate fake omega state.
+- Tests cover typed decode, dispatcher handling, idempotent repeated loop dispatch, and unsupported
+  fallback for non-`SetOmega` hooks.
+
+Task checklist:
+
+- [ ] Add typed `SetOmega` hook payload decoding and DTO/schema tests.
+- [ ] Add dynamic omega transform state types.
+- [ ] Implement `SetOmega` hook handler in the dispatcher.
+- [ ] Integrate omega object/root transform over runtime delta time.
+- [ ] Add playback/controller tests for `0x03000751`-style frame-0 `SetOmega`.
+- [ ] Update diagnostics so supported `SetOmega` is reported as active transform state, not skipped.
+- [ ] Run phase verification commands.
+
+Decisions and course corrections:
+
+- 2026-06-26: First-cut scope now includes both evidence-backed targets. `SetOmega` is no longer a
+  post-validation maybe; it is the first supported hook handler and must land before bounds/indexing
+  can claim to represent the bird target honestly.
+- 2026-06-26: Broad hook execution remains out of scope. This phase adds a hook-generic typed
+  handler path using `SetOmega` as the first concrete handler, not a one-off bird-specific shortcut.
+
 ### Phase 6: Dynamic Placement, Bounds, And Outdoor Spatial Index
 
 Status: pending.
 
 Purpose:
 
-- Convert current animation/resource state into landblock-local bounds and query/index membership.
+- Convert current animation/resource/hook transform state into landblock-local bounds and query/index
+  membership.
 
 Deliverables:
 
 - Add `DynamicPlacementTracker`.
-- Compute current-frame part transforms and conservative bounds from current renderable geometry.
+- Compute current-frame part transforms and conservative bounds from current renderable geometry,
+  including active object/root omega transform state.
 - Resolve effective outdoor presentation residence from current pose/bounds while preserving source
   residence.
 - Add `OutdoorDynamicSpatialIndex` behind a small local interface.
 - Use existing outdoor landblock-grid traversal as the outer query candidate phase.
 - Add the chosen mutable 2D AABB dependency through `npm` during implementation.
 - Keep env-cell dynamic membership flat for now.
+- Preserve source residence even when omega-driven current bounds cross outdoor landblock
+  boundaries.
 
 Acceptance criteria:
 
 - Current-frame dynamic bounds update as animation frames change.
+- Current-frame dynamic bounds update as `SetOmega` object/root transform state changes.
 - Dynamic index membership is keyed by effective outdoor landblock membership.
 - Cross-boundary bounds can be indexed into every overlapped outdoor landblock.
 - Removing an entity removes all index items.
 - The index wrapper is tested independently of browser runtime.
+- The bird target's bounds/index membership are derived from animation plus active omega state, not
+  from static setup bounds alone.
 
 Task checklist:
 
 - [ ] Add package dependency with package-manager tooling.
 - [ ] Define dynamic bounds and precision metadata types.
-- [ ] Implement placement and bounds derivation.
+- [ ] Implement placement and bounds derivation from base placement, object/root transform,
+      transform-hook state, and part-local poses.
 - [ ] Implement outdoor dynamic index wrapper and tests.
 - [ ] Wire placement/index sync into controller tick order.
 - [ ] Run phase verification commands.
@@ -998,7 +1068,8 @@ Deliverables:
 - Route dynamic texture use through the shared prepared texture atlas/cache path when a dynamic
   material resolves to an atlas-compatible prepared texture and matching sampler/material
   requirements.
-- Use live per-part transforms from dynamic runtime.
+- Use live object/root and per-part transforms from dynamic runtime, including active `SetOmega`
+  transform state.
 - Keep dynamic resource identity separate from semantic dynamic entity identity.
 - Add renderer diagnostics for dynamic visual resources, dynamic instances, dynamic draw calls, and
   skipped dynamic submissions.
@@ -1010,6 +1081,8 @@ Deliverables:
 Acceptance criteria:
 
 - The renderer can draw the windmill target from dynamic resource/instance commits.
+- The renderer can draw the bird target with animated wing poses and active `SetOmega` object/root
+  transform state.
 - Dynamic submissions do not go through static layer payloads or `StaticObjectRenderInstance`.
 - Dynamic renderer state is not stored in `#staticObjectRenderInstances` and is not cleared through
   static layer replacement ownership.
@@ -1021,6 +1094,7 @@ Acceptance criteria:
   with an explicit diagnostic; no silent per-entity texture upload fallback.
 - Removing a dynamic record removes renderer submissions/resources that are no longer leased.
 - Existing static rendering diagnostics remain stable.
+- Neither first-cut target is submitted as baked static outdoor detail geometry.
 
 Task checklist:
 
@@ -1032,21 +1106,21 @@ Task checklist:
       across compatible static and dynamic consumers.
 - [ ] Implement WebGL2 dynamic resource storage and draw path.
 - [ ] Commit dynamic snapshots from `DynamicEntityController`.
-- [ ] Add renderer and runtime tests for add/update/remove.
+- [ ] Add renderer and runtime tests for add/update/remove and `SetOmega` transform consumption.
 - [ ] Run phase verification commands.
 
 Decisions and course corrections:
 
 - Pending.
 
-### Phase 9: Diagnostics And First-Target Validation
+### Phase 9: Diagnostics And First-Cut Target Validation
 
 Status: pending.
 
 Purpose:
 
-- Make the first slice reviewable and prove that `0x020003e5` is dynamic, animated, indexed, and
-  rendered for the right reasons.
+- Make the first cut reviewable and prove that both `0x020003e5` and `0x020005ac` are dynamic,
+  animated, indexed, and rendered for the right reasons.
 
 Deliverables:
 
@@ -1055,22 +1129,26 @@ Deliverables:
   current frame/time, part count, bounds, index membership, resource readiness, renderer submission
   counts, and issues.
 - Add debug overlay support for dynamic bounds where useful.
-- Validate `0x020003e5` manually in the browser app.
+- Validate `0x020003e5` and `0x020005ac` manually in the browser app.
 - Record evidence and any visual concessions in this plan.
 
 Acceptance criteria:
 
 - Diagnostics can explain why the windmill is dynamic and currently renderable.
 - The windmill animates from per-part origin/orientation frames.
+- Diagnostics can explain why the bird is dynamic, has active `SetOmega`, and is currently
+  renderable.
+- The bird animates from per-part wing frames and active object/root omega state.
 - It is debug/inspection-queryable but not default browser-selectable.
-- Missing dynamic dependencies or unsupported hooks are visible in diagnostics and console output.
+- Missing dynamic dependencies or unsupported hooks are visible in diagnostics and console output;
+  the bird target's `SetOmega` hook is not reported as unsupported.
 - No runtime asset dependent tests are retained in the repo.
 
 Task checklist:
 
 - [ ] Add diagnostics projection and browser report fields.
 - [ ] Add dynamic bounds debug overlay if needed for validation.
-- [ ] Validate target in browser mode with real DAT/static scene data.
+- [ ] Validate both first-cut targets in browser mode with real DAT/static scene data.
 - [ ] Update this plan with validation evidence, decisions, and concessions.
 - [ ] Run full verification commands.
 
@@ -1078,33 +1156,38 @@ Decisions and course corrections:
 
 - Pending.
 
-### Phase 10: Resteer For SetOmega Follow-Up
+### Phase 10: Resteer For Broader Hook And Dynamic-System Gate
 
 Status: pending.
 
 Purpose:
 
-- Reassess the architecture after the hook-free target before implementing the first transform hook.
+- Reassess the architecture after both first-cut targets are validated before expanding beyond
+  `SetOmega`.
 
 Questions to answer:
 
-- Did DTO, runtime, renderer, and query contracts stay clean enough for `SetOmega`?
+- Did DTO, runtime, renderer, and query contracts stay clean enough after supporting one real
+  transform hook?
 - Are dynamic bounds updates cheap and accurate enough for current-frame animated geometry?
 - Did merged query migration leave any static-only wrapper debt?
 - Did renderer visual-resource generalization create duplicated static/dynamic material logic?
-- Is `0x020005ac` still the right next target?
+- Which next hook/effect family has enough evidence to justify implementation: script chaining,
+  texture velocity, particles, sound, material transitions, replacement visuals, or a live entity
+  target?
 
 Acceptance criteria:
 
-- The plan records whether to proceed directly to `SetOmega`, split cleanup first, or revise the
-  dynamic runtime shape.
-- Any blocking debt is converted into explicit tasks before new hook behavior is added.
+- The plan records whether to proceed to the next hook/effect family, split cleanup first, or revise
+  the dynamic runtime shape.
+- Any blocking debt is converted into explicit tasks before broad hook behavior is added.
 
 Task checklist:
 
 - [ ] Review implementation diff and diagnostics.
-- [ ] Compare first-target behavior against requirements evidence.
-- [ ] Add typed `SetOmega` payload decoding before implementing omega transform behavior.
+- [ ] Compare both first-cut targets against requirements evidence.
+- [ ] Review whether `SetOmega` transform state, bounds, query, and rendering created reusable hook
+      handler structure.
 - [ ] Update future phases before proceeding.
 
 Decisions and course corrections:
@@ -1117,7 +1200,7 @@ Status: pending.
 
 Purpose:
 
-- Remove transitional naming, wrappers, and duplication introduced during the first slice.
+- Remove transitional naming, wrappers, and duplication introduced during the first cut.
 
 Cleanup targets:
 
@@ -1140,7 +1223,7 @@ Task checklist:
 - [ ] Remove temporary wrappers and stale names.
 - [ ] Delete hollow or legacy-path tests.
 - [ ] Re-run full verification commands.
-- [ ] Update this plan with final first-slice status.
+- [ ] Update this plan with final first-cut status.
 
 Decisions and course corrections:
 
@@ -1149,8 +1232,8 @@ Decisions and course corrections:
 ## Risks And Mitigations
 
 - Risk: dynamic seeds accidentally remain in baked static output.
-  Mitigation: add tests that assert default-animation seeds are diverted and not baked for the first
-  target.
+  Mitigation: add tests that assert default-animation seeds are diverted and not baked for the
+  first-cut targets.
 
 - Risk: animation route work leaks host route strings into runtime identity.
   Mitigation: keep route strings at host/preparation boundaries and create typed animation identity
@@ -1212,19 +1295,24 @@ Decisions and course corrections:
   non-renderable or render-pending until env-cell placement/render membership is implemented and
   tested.
 
-- Risk: `SetOmega` remains raw bytes when the follow-up target starts.
-  Mitigation: keep raw hook payload diagnostics in Phase 1 and require typed `SetOmega` decoding
-  before Phase 10 proceeds to transform behavior.
+- Risk: `SetOmega` remains raw bytes when first-cut bounds or rendering consume hook state.
+  Mitigation: Phase 5B must add typed `SetOmega` decoding and a supported transform handler before
+  Phase 6 computes hook-aware bounds and before Phase 8 renders the bird target.
 
 ## Definition Of Done
 
 - `0x020003e5` is rendered through the dynamic runtime, not baked static geometry.
+- `0x020005ac` is rendered through the dynamic runtime with typed `SetOmega` transform behavior, not
+  baked static geometry and not a final unsupported-hook compromise.
 - Static-authored dynamic registration supports both outdoor landblock and env-cell source
-  residence; outdoor rendering is first-target complete, while classified env-cell records are at
+  residence; outdoor rendering is first-cut complete, while classified env-cell records are at
   least registered through the `env-cell-static-object-dynamic-seed` variant, diagnosable, retained,
   and evicted through the shared dynamic runtime without changing env-cell static rendering until the
   explicit env-cell render cutover phase.
-- The target plays default animation `0x0300061b` with live per-part origin/orientation frames.
+- The windmill target plays default animation `0x0300061b` with live per-part origin/orientation
+  frames.
+- The bird target plays default animation `0x03000751` with live per-part wing frames and active
+  object/root omega state from its frame-0 `SetOmega` hook.
 - Dynamic resource readiness uses setup, available setup appearance/gfx/material/texture facts, and
   animation assets through the asset service; missing setup appearance is allowed only when the
   setup-provided part resources are sufficient and diagnostics say so.
@@ -1232,11 +1320,12 @@ Decisions and course corrections:
 - Dynamic renderer texture use shares compatible prepared texture atlas/cache entries with static
   consumers while using dynamic or neutral owner keys and dynamic leases.
 - Dynamic current-frame bounds are indexed and queryable through the merged scene-query surface.
-- Browser default selection excludes the first static-authored dynamic scenery target, while
-  debug/inspection queries can report it.
+- Browser default selection excludes both static-authored dynamic scenery targets, while
+  debug/inspection queries can report them.
 - Diagnostics explain dynamic classification, readiness, playback, bounds, index membership, and
   renderer submission state.
-- Unsupported hooks are preserved and diagnosed.
+- Unsupported hooks are preserved and diagnosed; supported `SetOmega` is reported as active transform
+  state, not skipped behavior.
 - Full verification commands pass, or unrelated pre-existing failures are documented.
 - This plan is updated with completed decisions, concessions, and remaining full-system open gates.
 
@@ -1244,7 +1333,5 @@ Decisions and course corrections:
 
 - Which mutable 2D AABB package should back `OutdoorDynamicSpatialIndex`? Choose during
   implementation with package-manager tooling.
-- Should the first target validation get a dedicated browser diagnostics panel row, or is the
+- Should the first-cut target validation get a dedicated browser diagnostics panel row, or is the
   existing diagnostics report enough once dynamic fields are added?
-- After the first target lands, should `SetOmega` be implemented immediately or should query/renderer
-  cleanup happen first? Phase 10 owns that call.

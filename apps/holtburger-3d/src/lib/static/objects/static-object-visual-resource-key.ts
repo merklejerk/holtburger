@@ -57,7 +57,10 @@ export function createStaticObjectVisualResourceKeyString(
 
 export function groupStaticObjectRenderInstancesByVisualResource(
 	instances: readonly StaticObjectRenderInstance[],
-): ReadonlyMap<StaticObjectVisualResourceId, readonly StaticObjectRenderInstance[]> {
+): ReadonlyMap<
+	StaticObjectVisualResourceId,
+	readonly StaticObjectRenderInstance[]
+> {
 	const grouped = new Map<
 		StaticObjectVisualResourceId,
 		StaticObjectRenderInstance[]
@@ -90,7 +93,9 @@ function createStaticObjectSourceKey(
 	};
 }
 
-function createStaticObjectRenderStateKey(renderState: StaticObjectRenderState) {
+function createStaticObjectRenderStateKey(
+	renderState: StaticObjectRenderState,
+) {
 	return {
 		blend: {
 			dstFactor: renderState.blend.dstFactor,
@@ -123,7 +128,9 @@ function createStaticObjectMaterialEntryKey(entry: StaticMaterialTableEntry) {
 	};
 }
 
-function createUniqueSortedStrings(values: readonly string[]): readonly string[] {
+function createUniqueSortedStrings(
+	values: readonly string[],
+): readonly string[] {
 	return Array.from(new Set(values)).sort((left, right) =>
 		left.localeCompare(right),
 	);

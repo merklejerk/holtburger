@@ -23,8 +23,8 @@ describe("static demand planner", () => {
 			(item) => item.job.domain === "outdoor-buildings",
 		);
 
-		expect(terrainWork).toHaveLength(5);
-		expect(buildingWork).toHaveLength(5);
+		expect(terrainWork).toHaveLength(9);
+		expect(buildingWork).toHaveLength(9);
 		expect(work.every((item) => item.revision === 7)).toBe(true);
 		expect(work.every((item) => item.job.scope.kind === "landblock")).toBe(
 			true,
@@ -95,7 +95,7 @@ describe("static demand planner", () => {
 			(item) => item.job.domain === "landblock-env-cells",
 		);
 
-		expect(envCellWork).toHaveLength(5);
+		expect(envCellWork).toHaveLength(9);
 		expect(envCellWork[0]).toMatchObject({
 			job: {
 				domain: "landblock-env-cells",

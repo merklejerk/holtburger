@@ -47,9 +47,9 @@ describe("outdoor landblock helpers", () => {
 
 		expect(landblockIds[0]).toBe(0xda55ffff);
 		expect(landblockIds).toContain(0xda54ffff);
-		expect(landblockIds).not.toContain(0xdb56ffff);
+		expect(landblockIds).toContain(0xdb56ffff);
 		expect(landblockIds.every((landblockId) => landblockId > 0)).toBe(true);
-		expect(landblockIds).toHaveLength(5);
+		expect(landblockIds).toHaveLength(9);
 	});
 
 	it("derives contiguous env-cell ids from landblock start and count", () => {

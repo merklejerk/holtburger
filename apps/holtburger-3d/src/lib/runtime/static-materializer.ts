@@ -6,7 +6,8 @@ import {
 	MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
 } from "../renderer/types";
 import type {
-	TextureDrawUnitBinding,
+	StaticTextureBinding,
+	StaticTextureBindingOwner,
 	TexturePlacementUpdate,
 } from "../renderer/types";
 import type {
@@ -71,7 +72,7 @@ export function materializeStaticCommit(
 
 	assertTexturedDrawUnitsHaveCommittedBindings(
 		finePartitioned.drawUnits,
-		textureUpdate?.drawUnitBindings ?? [],
+		textureUpdate?.textureBindings ?? [],
 	);
 	const removedResources = materializeRemovedStaticResources(
 		input.commit.removedResources,
@@ -345,7 +346,6 @@ function remapStaticObjectDrawUnit(
 		drawUnit.drawUnitId,
 		sliceIndex,
 	);
-	const summary = materialEntries[0] ?? drawUnit.materialEntries[0];
 	const textureUseIds = uniqueSortedStrings(
 		materialEntries.flatMap((entry) =>
 			[
@@ -360,32 +360,11 @@ function remapStaticObjectDrawUnit(
 	return {
 		...drawUnit,
 		...geometry,
-		alphaTest: summary?.alphaTest ?? drawUnit.alphaTest,
-		detailTextureTiling:
-			summary?.detailTextureTiling ?? drawUnit.detailTextureTiling,
-		detailTextureUseId:
-			summary?.detailTextureUseId ?? drawUnit.detailTextureUseId,
 		drawUnitId,
-		indexTextureUseId: summary?.indexTextureUseId ?? drawUnit.indexTextureUseId,
-		indexedClipThreshold:
-			summary?.indexedClipThreshold ?? drawUnit.indexedClipThreshold,
-		indexedTextureFormat:
-			summary?.indexedTextureFormat ?? drawUnit.indexedTextureFormat,
-		materialColor: summary?.materialColor ?? drawUnit.materialColor,
-		materialEmissiveColor:
-			summary?.materialEmissiveColor ?? drawUnit.materialEmissiveColor,
 		materialEntries,
 		materialIds: uniqueNumbers(
 			materialEntries.flatMap((entry) => entry.materialIds),
 		),
-		renderState: summary?.renderState ?? drawUnit.renderState,
-		paletteFirstIndex: summary?.paletteFirstIndex ?? drawUnit.paletteFirstIndex,
-		paletteTextureUseId:
-			summary?.paletteTextureUseId ?? drawUnit.paletteTextureUseId,
-		primaryTextureUseId:
-			summary?.primaryTextureUseId ?? drawUnit.primaryTextureUseId,
-		primaryTextureWrapMode:
-			summary?.primaryTextureWrapMode ?? drawUnit.primaryTextureWrapMode,
 		sourceMappingCoverage: geometry.sourceMappingCoverage,
 		spatialRecord: createDrawUnitSpatialRecord(
 			drawUnitId,
@@ -546,7 +525,7 @@ function createTextureBindingFactsByTextureUseId(
 			textureWidth: placement.textureWidth,
 		});
 	}
-	for (const binding of textureUpdate.drawUnitBindings) {
+	for (const binding of textureUpdate.textureBindings) {
 		bindings.set(binding.textureUseId, {
 			rect: binding.rect,
 			textureHeight: binding.textureHeight,
@@ -575,36 +554,46 @@ function materializeTextureUpdate(
 		remappedStaticObjectDrawUnits.map((mapping) => mapping.sourceDrawUnitId),
 	);
 	const bindings = createTextureBindingFactsByTextureUseId(textureUpdate);
-	const remappedBindings = textureUpdate.drawUnitBindings.filter(
-		(binding) => !sourceDrawUnitIds.has(binding.drawUnitId),
+	const remappedBindings = textureUpdate.textureBindings.filter(
+		(binding) =>
+			binding.owner.kind !== "draw-unit" ||
+			!sourceDrawUnitIds.has(binding.owner.drawUnitId),
 	);
 
 	for (const mapping of remappedStaticObjectDrawUnits) {
 		for (const drawUnit of mapping.drawUnits) {
-			for (const binding of createStaticObjectDrawUnitBindings(
-				drawUnit,
+			for (const binding of createStaticObjectResourceBindings(
+				{
+					materialEntries: drawUnit.materialEntries,
+					owner: {
+						drawUnitId: drawUnit.drawUnitId,
+						kind: "draw-unit",
+					},
+				},
 				bindings,
 			)) {
 				remappedBindings.push(binding);
 			}
 		}
 	}
-
 	return {
 		...textureUpdate,
-		drawUnitBindings: remappedBindings,
+		textureBindings: remappedBindings,
 	};
 }
 
-function createStaticObjectDrawUnitBindings(
-	drawUnit: StaticObjectGeometryStaticDrawUnit,
+function createStaticObjectResourceBindings(
+	resource: {
+		readonly materialEntries: readonly StaticMaterialTableEntry[];
+		readonly owner: StaticTextureBindingOwner;
+	},
 	bindings: ReadonlyMap<string, StaticTextureBindingFacts>,
-): readonly TextureDrawUnitBinding[] {
+): readonly StaticTextureBinding[] {
 	const roleSlots = createEmptyStaticRolePageSets();
-	const drawUnitBindings: TextureDrawUnitBinding[] = [];
+	const textureBindings: StaticTextureBinding[] = [];
 	const seenTextureUseIds = new Set<string>();
 
-	for (const roleUse of drawUnit.materialEntries.flatMap(
+	for (const roleUse of resource.materialEntries.flatMap(
 		createStaticRoleTextureUses,
 	)) {
 		if (seenTextureUseIds.has(roleUse.textureUseId)) {
@@ -621,8 +610,8 @@ function createStaticObjectDrawUnitBindings(
 			continue;
 		}
 
-		drawUnitBindings.push({
-			drawUnitId: drawUnit.drawUnitId,
+		textureBindings.push({
+			owner: resource.owner,
 			rect: binding.rect,
 			rolePage,
 			textureHeight: binding.textureHeight,
@@ -632,7 +621,7 @@ function createStaticObjectDrawUnitBindings(
 		});
 	}
 
-	return drawUnitBindings;
+	return textureBindings;
 }
 
 function uniqueSortedStrings(values: readonly string[]): readonly string[] {
@@ -690,7 +679,7 @@ function assignStaticRolePageSlot(
 	pages: StaticRolePageSets,
 	kind: StaticRolePageKind,
 	binding: StaticTextureBindingFacts,
-): TextureDrawUnitBinding["rolePage"] | null {
+): StaticTextureBinding["rolePage"] | null {
 	const rolePages = getStaticRolePageSet(pages, kind);
 	const existingSlot = [...rolePages].indexOf(binding.textureRefId);
 	if (existingSlot >= 0) {
@@ -763,14 +752,18 @@ function materializeRemovedStaticResources(
 
 function assertTexturedDrawUnitsHaveCommittedBindings(
 	drawUnits: readonly StaticDrawUnit[],
-	bindings: readonly TextureDrawUnitBinding[],
+	bindings: readonly StaticTextureBinding[],
 ): void {
 	const textureUseIdsByDrawUnitId = new Map<string, Set<string>>();
 	for (const binding of bindings) {
+		if (binding.owner.kind !== "draw-unit") {
+			continue;
+		}
 		const textureUseIds =
-			textureUseIdsByDrawUnitId.get(binding.drawUnitId) ?? new Set<string>();
+			textureUseIdsByDrawUnitId.get(binding.owner.drawUnitId) ??
+			new Set<string>();
 		textureUseIds.add(binding.textureUseId);
-		textureUseIdsByDrawUnitId.set(binding.drawUnitId, textureUseIds);
+		textureUseIdsByDrawUnitId.set(binding.owner.drawUnitId, textureUseIds);
 	}
 
 	for (const drawUnit of drawUnits) {

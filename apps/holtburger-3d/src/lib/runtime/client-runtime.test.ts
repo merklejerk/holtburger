@@ -1823,8 +1823,12 @@ class FakeRenderer implements Renderer {
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void {
 		this.textureUpdates.push(update);
 		this.events.push(
-			`texture:${update.revision}:${update.drawUnitBindings
-				.map((binding) => binding.drawUnitId)
+			`texture:${update.revision}:${update.textureBindings
+				.map((binding) =>
+					binding.owner.kind === "draw-unit"
+						? binding.owner.drawUnitId
+						: binding.owner.resourceId,
+				)
 				.join(",")}`,
 		);
 	}
@@ -2163,25 +2167,17 @@ function createStaticObjectDrawUnit(
 	};
 
 	return {
-		alphaTest: 0,
 		coordinateSpace: "landblock-render-local",
-		detailTextureTiling: 1,
-		detailTextureUseId: null,
 		domain:
 			options.ownership?.kind === "env-cell-static-object-seeds"
 				? "landblock-env-cells"
 				: "outdoor-detail",
 		drawUnitId,
-		indexTextureUseId: null,
 		indexType: "uint16",
-		indexedClipThreshold: 0,
-		indexedTextureFormat: null,
 		indices: new Uint16Array([0, 1, 2]),
 		kind: "static-object-geometry",
 		landblockId: options.ownership?.landblockId ?? 0xda55ffff,
 		materialBucketKey: "flat-color:test",
-		materialColor: [1, 1, 1, 1],
-		materialEmissiveColor: [0, 0, 0],
 		materialEntries: [
 			{
 				alphaTest: 0,
@@ -2205,11 +2201,7 @@ function createStaticObjectDrawUnit(
 		materialIds: [0x08000010],
 		materialPass: "opaque",
 		materialSlotIndices: new Float32Array([0, 0, 0]),
-		paletteFirstIndex: 0,
-		paletteTextureUseId: null,
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-		primaryTextureUseId: null,
-		primaryTextureWrapMode: "clamp",
 		ownership:
 			options.ownership ??
 			({
@@ -2551,7 +2543,7 @@ function createBakeTextureUse(
 ): StaticBakeTextureUse {
 	return {
 		domain: "outdoor-terrain",
-		ownerDrawUnitIds: [drawUnitId],
+		owners: [{ drawUnitId, kind: "draw-unit" }],
 		source,
 		staticBatchId: "batch-a",
 		textureUseId: `${drawUnitId}:prepared-texture:${source.renderSurface.renderSurfaceId

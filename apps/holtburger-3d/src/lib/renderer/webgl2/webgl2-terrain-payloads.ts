@@ -2,7 +2,7 @@ import type {
 	TerrainMaterialLayerPlan,
 	TerrainMaterialTextureRoleBinding,
 } from "../../static/contracts";
-import type { TextureDrawUnitBinding } from "../types";
+import type { StaticTextureBinding } from "../types";
 import {
 	MAX_TERRAIN_COLOR_PAGES_PER_DRAW,
 	MAX_TERRAIN_MASK_PAGES_PER_DRAW,
@@ -77,7 +77,7 @@ export function markTerrainPreparedLayeredPayloadDirty(
 export function prepareTerrainLayeredPayloadState(
 	state: TerrainPreparedLayeredPayloadState,
 	plan: TerrainMaterialLayerPlan,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): TerrainPreparedLayeredPayload | null {
 	if (!state.isDirty) {
@@ -112,7 +112,7 @@ export function createTerrainPreparedLayeredPayload(): TerrainPreparedLayeredPay
 export function prepareTerrainLayeredPayload(
 	target: TerrainPreparedLayeredPayload,
 	plan: TerrainMaterialLayerPlan,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): boolean {
 	resetTerrainLayeredPayload(target);
@@ -298,7 +298,7 @@ function resetTerrainLayerRects(layerRects: TerrainPreparedLayerRects): void {
 
 function collectTerrainPageBinding(
 	role: TerrainMaterialTextureRoleBinding,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 	colorPages: TerrainPreparedRolePageBindings,
 	maskPages: TerrainPreparedRolePageBindings,
@@ -333,9 +333,9 @@ function collectTerrainPageBinding(
 
 function resolveDetailBinding(
 	plan: TerrainMaterialLayerPlan,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
-): TextureDrawUnitBinding | null | false {
-	let detailBinding: TextureDrawUnitBinding | null = null;
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
+): StaticTextureBinding | null | false {
+	let detailBinding: StaticTextureBinding | null = null;
 	for (const detailRole of plan.detailRoles) {
 		const binding = detailRole.texture.textureUseId
 			? bindings.get(detailRole.texture.textureUseId)
@@ -355,7 +355,7 @@ function resolveDetailBinding(
 function fillTerrainLayerRects(
 	target: TerrainPreparedLayerRects,
 	plan: TerrainMaterialLayerPlan,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
 ): void {
 	for (const layer of plan.layerEntries) {
 		target.baseColorRects.set(
@@ -436,8 +436,8 @@ function fillTerrainLayerRects(
 function fillTerrainDetailUniforms(
 	target: TerrainPreparedDetailUniforms,
 	plan: TerrainMaterialLayerPlan,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
-	detailBinding: TextureDrawUnitBinding | null,
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
+	detailBinding: StaticTextureBinding | null,
 ): void {
 	const detailRole = plan.detailRoles[0] ?? null;
 	target.isEnabled = Boolean(detailRole && detailBinding);
@@ -452,7 +452,7 @@ function fillTerrainDetailUniforms(
 }
 
 function resolveBindingRect(
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
 	role: TerrainMaterialTextureRoleBinding,
 ): readonly [number, number, number, number] {
 	if (!role.textureUseId) {
@@ -463,7 +463,7 @@ function resolveBindingRect(
 }
 
 function resolveBindingPage(
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
 	role: TerrainMaterialTextureRoleBinding,
 ): number {
 	if (!role.textureUseId) {

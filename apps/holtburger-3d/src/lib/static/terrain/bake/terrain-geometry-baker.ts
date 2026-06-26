@@ -16,6 +16,7 @@ import type {
 	TerrainStaticScopePayload,
 	TerrainTextureUseFacts,
 } from "../../contracts";
+import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
 import { classifyTerrainMaterialFamily } from "./terrain-material-family-classifier";
 import { buildTerrainMaterialLayerPlan } from "./terrain-material-layer-planner";
 
@@ -414,14 +415,17 @@ function createTerrainBakeTextureUses(
 			if (existing) {
 				textureUsesById.set(textureUseId, {
 					...existing,
-					ownerDrawUnitIds: [...existing.ownerDrawUnitIds, drawUnit.drawUnitId],
+					owners: uniqueSortedStaticTextureUseOwners([
+						...existing.owners,
+						{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" },
+					]),
 				});
 				continue;
 			}
 
 			textureUsesById.set(textureUseId, {
 				domain: "outdoor-terrain",
-				ownerDrawUnitIds: [drawUnit.drawUnitId],
+				owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
 				source: textureUse.preparedTextureUse,
 				staticBatchId: input.staticBatchId,
 				textureUseId,

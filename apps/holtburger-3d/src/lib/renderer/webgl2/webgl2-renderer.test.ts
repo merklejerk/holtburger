@@ -1942,22 +1942,14 @@ function createEnvCellStaticObjectDrawUnit(
 	};
 
 	return {
-		alphaTest: 0,
 		coordinateSpace: "landblock-render-local",
-		detailTextureTiling: 1,
-		detailTextureUseId: null,
 		domain: "landblock-env-cells",
 		drawUnitId,
-		indexTextureUseId: null,
 		indexType: "uint16",
-		indexedClipThreshold: 0,
-		indexedTextureFormat: null,
 		indices: new Uint16Array([0, 1, 2]),
 		kind: "static-object-geometry",
 		landblockId: 0xda55ffff,
 		materialBucketKey: "family:flat-color|pass:opaque|material:08000010",
-		materialColor: [1, 1, 1, 1],
-		materialEmissiveColor: [0, 0, 0],
 		materialEntries: [
 			{
 				alphaTest: 0,
@@ -1987,11 +1979,7 @@ function createEnvCellStaticObjectDrawUnit(
 			landblockId: 0xda55ffff,
 			seedIdentities: [object],
 		},
-		paletteFirstIndex: 0,
-		paletteTextureUseId: null,
 		positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-		primaryTextureUseId: null,
-		primaryTextureWrapMode: "clamp",
 		renderState,
 		sort: {
 			bounds: null,
@@ -2188,10 +2176,7 @@ function createOutdoorDetailStaticObjectRenderInstance(options: {
 			objectKind: "generated-scenery",
 		},
 		sourceToLandblockMatrix: new Float32Array([
-			1, 0, 0, 0,
-			0, 1, 0, 0,
-			0, 0, 1, 0,
-			0, 0, 0, 1,
+			1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
 		]),
 		transform: {
 			orientation: { w: 1, x: 0, y: 0, z: 0 },

@@ -122,10 +122,14 @@ describe("static object compatibility partitioner", () => {
 					"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0",
 				kind: "static-object-geometry",
 				materialFamily: "texture-rgba",
+				materialEntries: [
+					expect.objectContaining({
+						primaryTextureUseId:
+							"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
+					}),
+				],
 				materialPass: "opaque",
 				materialSlotIndices: new Float32Array([0, 0, 0]),
-				primaryTextureUseId:
-					"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
 				renderState: {
 					blend: {
 						dstFactor: null,
@@ -178,8 +182,12 @@ describe("static object compatibility partitioner", () => {
 		expect(result.textureUses).toEqual([
 			expect.objectContaining({
 				domain: "outdoor-buildings",
-				ownerDrawUnitIds: [
-					"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0",
+				owners: [
+					{
+						drawUnitId:
+							"1:landblock:da55ffff:outdoor-buildings:static-object-partition:slice-0-0",
+						kind: "draw-unit",
+					},
 				],
 				source: {
 					kind: "prepared-render-surface-texture-use",
@@ -409,16 +417,21 @@ describe("static object compatibility partitioner", () => {
 		const drawUnit = result.drawUnits.find(
 			(candidate) => candidate.kind === "static-object-geometry",
 		);
+		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
+			throw new Error("Expected building detail static object draw unit.");
+		}
 
 		expect(drawUnit).toMatchObject({
-			detailTextureTiling: 7,
-			detailTextureUseId:
-				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:sampling:wrap=repeat,repeat",
 			kind: "static-object-geometry",
 			textureUseIds: [
 				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000010:rgba-color:sampling:wrap=clamp-to-edge,clamp-to-edge",
 				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:sampling:wrap=repeat,repeat",
 			],
+		});
+		expect(drawUnit.materialEntries[0]).toMatchObject({
+			detailTextureTiling: 7,
+			detailTextureUseId:
+				"1:landblock:da55ffff:outdoor-buildings:static-object-texture:prepared-render-surface-texture-use:06000030:rgba-detail:sampling:wrap=repeat,repeat",
 		});
 		expect(
 			result.textureUses.map((textureUse) => ({
@@ -471,15 +484,19 @@ describe("static object compatibility partitioner", () => {
 		expect(result.drawUnits).toEqual([
 			expect.objectContaining({
 				kind: "static-object-geometry",
-				materialColor: [
-					(0x33 / 255) * 0.5,
-					(0x66 / 255) * 0.5,
-					(0x99 / 255) * 0.5,
-					1,
+				materialEntries: [
+					expect.objectContaining({
+						materialColor: [
+							(0x33 / 255) * 0.5,
+							(0x66 / 255) * 0.5,
+							(0x99 / 255) * 0.5,
+							1,
+						],
+						materialEmissiveColor: [0.25, 0.25, 0.25],
+						primaryTextureUseId: null,
+					}),
 				],
-				materialEmissiveColor: [0.25, 0.25, 0.25],
 				materialFamily: "flat-color",
-				primaryTextureUseId: null,
 				textureUseIds: [],
 			}),
 		]);
@@ -525,11 +542,15 @@ describe("static object compatibility partitioner", () => {
 		const drawUnit = result.drawUnits[0];
 
 		expect(drawUnit).toMatchObject({
-			alphaTest: 200 / 255,
 			kind: "static-object-geometry",
 			materialFamily: "texture-rgba",
 			materialPass: "alpha-test",
 		});
+		expect(
+			drawUnit?.kind === "static-object-geometry"
+				? drawUnit.materialEntries[0]?.alphaTest
+				: null,
+		).toBe(200 / 255);
 		expect(result.textureUses).toHaveLength(1);
 	});
 
@@ -544,12 +565,15 @@ describe("static object compatibility partitioner", () => {
 		const drawUnit = result.drawUnits[0];
 
 		expect(drawUnit).toMatchObject({
-			alphaTest: 100 / 255,
-			indexedClipThreshold: 8,
 			kind: "static-object-geometry",
 			materialFamily: "indexed-paletted",
 			materialPass: "alpha-test",
 		});
+		expect(
+			drawUnit?.kind === "static-object-geometry"
+				? drawUnit.materialEntries[0]?.alphaTest
+				: null,
+		).toBe(100 / 255);
 		expect(
 			drawUnit?.kind === "static-object-geometry"
 				? drawUnit.materialEntries[0]?.indexedClipThreshold
@@ -647,7 +671,9 @@ describe("static object compatibility partitioner", () => {
 		]);
 		expect(
 			new Set(
-				result.staticObjectRenderInstances.map((instance) => instance.resourceId),
+				result.staticObjectRenderInstances.map(
+					(instance) => instance.resourceId,
+				),
 			),
 		).toHaveProperty("size", 1);
 		expect(result.staticObjectVisualResources[0]).toMatchObject({
@@ -1026,7 +1052,9 @@ describe("static object compatibility partitioner", () => {
 		]);
 		expect(
 			new Set(
-				result.staticObjectRenderInstances.map((instance) => instance.resourceId),
+				result.staticObjectRenderInstances.map(
+					(instance) => instance.resourceId,
+				),
 			),
 		).toHaveProperty("size", 1);
 		expect(result.staticObjectBakeDiagnostics[0]).toMatchObject({
@@ -1131,22 +1159,26 @@ describe("static object compatibility partitioner", () => {
 		const drawUnit = result.drawUnits[0];
 
 		expect(drawUnit).toMatchObject({
-			indexedTextureFormat: "p8",
 			kind: "static-object-geometry",
 			materialFamily: "indexed-paletted",
-			primaryTextureUseId: null,
 		});
 		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
 			throw new Error("Expected indexed static object geometry draw unit.");
 		}
-		expect(drawUnit.indexTextureUseId).toContain("index8");
-		expect(drawUnit.paletteTextureUseId).toContain("palette-texture-use");
-		expect(drawUnit.paletteFirstIndex).toBe(0);
+		const materialEntry = drawUnit.materialEntries[0];
+		if (!materialEntry) {
+			throw new Error("Expected indexed static object material entry.");
+		}
+		expect(materialEntry.indexedTextureFormat).toBe("p8");
+		expect(materialEntry.primaryTextureUseId).toBeNull();
+		expect(materialEntry.indexTextureUseId).toContain("index8");
+		expect(materialEntry.paletteTextureUseId).toContain("palette-texture-use");
+		expect(materialEntry.paletteFirstIndex).toBe(0);
 		expect(drawUnit.textureUseIds).toHaveLength(2);
 		expect(drawUnit.textureUseIds).toEqual(
 			expect.arrayContaining([
-				drawUnit.indexTextureUseId,
-				drawUnit.paletteTextureUseId,
+				materialEntry.indexTextureUseId,
+				materialEntry.paletteTextureUseId,
 			]),
 		);
 		expect(result.textureUses.map((textureUse) => textureUse.source)).toEqual(

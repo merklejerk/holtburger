@@ -154,7 +154,7 @@ describe("terrain geometry baker", () => {
 		expect(result.textureUses).toEqual([
 			{
 				domain: "outdoor-terrain",
-				ownerDrawUnitIds: [drawUnit.drawUnitId],
+				owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
 				staticBatchId: "batch-a",
 				source: {
 					kind: "prepared-render-surface-texture-use",
@@ -231,17 +231,23 @@ describe("terrain geometry baker", () => {
 		]);
 		expect(result.textureUses).toHaveLength(9);
 		expect(
-			result.textureUses
-				.slice(0, 8)
-				.map((textureUse) => textureUse.ownerDrawUnitIds),
+			result.textureUses.slice(0, 8).map((textureUse) => textureUse.owners),
 		).toEqual(
 			Array.from({ length: 8 }, () => [
-				"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-0",
+				{
+					drawUnitId:
+						"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-0",
+					kind: "draw-unit",
+				},
 			]),
 		);
 		expect(result.textureUses[8]).toMatchObject({
-			ownerDrawUnitIds: [
-				"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-1",
+			owners: [
+				{
+					drawUnitId:
+						"7:landblock:da55ffff:outdoor-terrain:terrain-geometry:slice-1",
+					kind: "draw-unit",
+				},
 			],
 		});
 	});

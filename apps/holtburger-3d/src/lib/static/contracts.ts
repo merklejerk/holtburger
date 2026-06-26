@@ -62,6 +62,7 @@ export interface StaticRetentionReconciliation {
 
 export type StaticResourceKey =
 	| StaticDrawUnitResourceKey
+	| StaticObjectVisualResourceResourceKey
 	| StaticPortalApertureResourceKey;
 
 interface StaticDrawUnitResourceKey {
@@ -74,12 +75,66 @@ interface StaticPortalApertureResourceKey {
 	readonly apertureResourceId: string;
 }
 
+interface StaticObjectVisualResourceResourceKey {
+	readonly kind: "static-object-visual-resource";
+	readonly resourceId: string;
+}
+
 export function collectStaticDrawUnitResourceIds(
 	resources: readonly StaticResourceKey[],
 ): readonly string[] {
 	return resources.flatMap((resource) =>
 		resource.kind === "draw-unit" ? [resource.drawUnitId] : [],
 	);
+}
+
+export function collectStaticObjectVisualResourceIds(
+	resources: readonly StaticResourceKey[],
+): readonly string[] {
+	return resources.flatMap((resource) =>
+		resource.kind === "static-object-visual-resource"
+			? [resource.resourceId]
+			: [],
+	);
+}
+
+export type StaticTextureUseOwner =
+	/** Texture residency owned by a baked static draw unit. */
+	| {
+			readonly kind: "draw-unit";
+			readonly drawUnitId: string;
+	  }
+	/** Texture residency owned by reusable static object source geometry. */
+	| {
+			readonly kind: "static-object-visual-resource";
+			readonly resourceId: string;
+	  };
+
+export function createStaticTextureUseOwnerKey(
+	owner: StaticTextureUseOwner,
+): string {
+	return owner.kind === "draw-unit"
+		? `draw-unit:${owner.drawUnitId}`
+		: `static-object-visual-resource:${owner.resourceId}`;
+}
+
+function compareStaticTextureUseOwners(
+	left: StaticTextureUseOwner,
+	right: StaticTextureUseOwner,
+): number {
+	return createStaticTextureUseOwnerKey(left).localeCompare(
+		createStaticTextureUseOwnerKey(right),
+	);
+}
+
+export function uniqueSortedStaticTextureUseOwners(
+	owners: readonly StaticTextureUseOwner[],
+): readonly StaticTextureUseOwner[] {
+	const ownersByKey = new Map<string, StaticTextureUseOwner>();
+	for (const owner of owners) {
+		ownersByKey.set(createStaticTextureUseOwnerKey(owner), owner);
+	}
+	return [...ownersByKey.values()].sort(compareStaticTextureUseOwners);
 }
 
 export interface ScheduledStaticWork {
@@ -553,7 +608,7 @@ export type StaticObjectTextureRefFacts =
 			readonly palette: PaletteIdentity | null;
 	  };
 
-export interface StaticObjectGeneratedFacts {
+interface StaticObjectGeneratedFacts {
 	readonly terrainIndex: number;
 	readonly sceneId: number;
 	readonly sceneTemplateIndex: number;
@@ -582,12 +637,12 @@ interface OutdoorStaticBvhItemFacts {
 	readonly object: StaticObjectInstanceFacts | null;
 }
 
-export interface StaticPlacementTransform {
+interface StaticPlacementTransform {
 	readonly origin: StaticVec3;
 	readonly orientation: StaticQuaternion;
 }
 
-export interface StaticQuaternion {
+interface StaticQuaternion {
 	readonly w: number;
 	readonly x: number;
 	readonly y: number;
@@ -1207,7 +1262,7 @@ export type StaticMaterialCoverageFilteringMode =
 	| "none"
 	| "shader-palette-linear";
 
-export type StaticMaterialCoverageKind =
+type StaticMaterialCoverageKind =
 	| "env-cell-static-object-seeds"
 	| "outdoor-static-objects"
 	| "structured-interior"
@@ -1312,66 +1367,6 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly sourceMappingCoverage: readonly StaticObjectSourceMappingCoverage[];
 	readonly spatialRecord: StaticSpatialRecord | null;
 	readonly materialEntries: readonly StaticMaterialTableEntry[];
-	/**
-	 * Derived one-entry summary retained while the renderer/test surface cuts over
-	 * to materialEntries and materialSlotIndices.
-	 */
-	readonly alphaTest: number;
-	/**
-	 * Derived one-entry summary retained while the renderer/test surface cuts over
-	 * to materialEntries and materialSlotIndices.
-	 */
-	readonly indexedClipThreshold: number;
-	/**
-	 * Derived one-entry summary retained while the renderer/test surface cuts over
-	 * to materialEntries and materialSlotIndices.
-	 */
-	readonly materialColor: readonly [number, number, number, number];
-	/**
-	 * Derived one-entry summary retained while the renderer/test surface cuts over
-	 * to materialEntries and materialSlotIndices.
-	 */
-	readonly materialEmissiveColor: readonly [number, number, number];
-	/**
-	 * Derived one-entry summary retained while the renderer/test surface cuts over
-	 * to materialEntries and materialSlotIndices.
-	 */
-	readonly primaryTextureUseId: string | null;
-	/**
-	 * Derived one-entry summary retained while the renderer/test surface cuts over
-	 * to materialEntries and materialSlotIndices.
-	 */
-	readonly indexTextureUseId: string | null;
-	/**
-	 * Derived one-entry summary retained while the renderer/test surface cuts over
-	 * to materialEntries and materialSlotIndices.
-	 */
-	readonly indexedTextureFormat: "p8" | "index16" | null;
-	/**
-	 * Derived one-entry summary retained while the renderer/test surface cuts over
-	 * to materialEntries and materialSlotIndices.
-	 */
-	readonly paletteTextureUseId: string | null;
-	/**
-	 * Derived one-entry summary retained while the renderer/test surface cuts over
-	 * to materialEntries and materialSlotIndices.
-	 */
-	readonly paletteFirstIndex: number;
-	/**
-	 * Derived one-entry summary retained while the renderer/test surface cuts over
-	 * to materialEntries and materialSlotIndices.
-	 */
-	readonly detailTextureUseId: string | null;
-	/**
-	 * Derived one-entry summary retained while the renderer/test surface cuts over
-	 * to materialEntries and materialSlotIndices.
-	 */
-	readonly detailTextureTiling: number;
-	/**
-	 * Derived one-entry summary retained while the renderer/test surface cuts over
-	 * to materialEntries and materialSlotIndices.
-	 */
-	readonly primaryTextureWrapMode: "clamp" | "repeat";
 	readonly textureUseIds: readonly string[];
 	readonly materialIds: readonly number[];
 }
@@ -1458,7 +1453,7 @@ export interface StaticObjectRenderInstance {
 	readonly generated: StaticObjectGeneratedFacts | null;
 }
 
-export type StaticObjectTransparencySubmission =
+type StaticObjectTransparencySubmission =
 	| {
 			readonly kind: "depth-writing";
 	  }
@@ -1685,7 +1680,7 @@ export interface StaticBakeTextureUse {
 	readonly textureUseId: string;
 	readonly staticBatchId: string;
 	readonly domain: StaticDomain;
-	readonly ownerDrawUnitIds: readonly string[];
+	readonly owners: readonly StaticTextureUseOwner[];
 	readonly source: MaterialTextureDataUseIdentity;
 	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
 }

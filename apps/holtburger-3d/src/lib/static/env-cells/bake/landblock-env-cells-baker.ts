@@ -21,6 +21,7 @@ import type {
 	StaticVisibilityRecord,
 	StaticWorkPeerRecordOwner,
 } from "../../contracts";
+import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
 import { createEnvCellPortalApertureResource } from "../../portal-aperture-resources";
 import { createEnvCellStaticPortalGraph } from "../../portal-graphs";
 import {
@@ -837,7 +838,7 @@ function createStructuredInteriorTextureUses(options: {
 					}
 					return [
 						{
-							ownerDrawUnitId: drawUnit.drawUnitId,
+							owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
 							textureDataUses,
 							textureWrapMode,
 						},
@@ -1002,10 +1003,10 @@ function mergeTextureUses(
 		if (existing) {
 			merged.set(textureUse.textureUseId, {
 				...existing,
-				ownerDrawUnitIds: [
-					...existing.ownerDrawUnitIds,
-					...textureUse.ownerDrawUnitIds,
-				],
+				owners: uniqueSortedStaticTextureUseOwners([
+					...existing.owners,
+					...textureUse.owners,
+				]),
 			});
 			continue;
 		}

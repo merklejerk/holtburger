@@ -2982,12 +2982,11 @@ function createMaterializedLandblockLayerPayloads(
 				landblockId,
 				delta.revision,
 			),
-			instancedObjectInstances:
-				materialized.staticObjectRenderInstances.filter(
-					(instance) =>
-						instance.domain === "outdoor-detail" &&
-						instance.landblockId === landblockId,
-				),
+			instancedObjectInstances: materialized.staticObjectRenderInstances.filter(
+				(instance) =>
+					instance.domain === "outdoor-detail" &&
+					instance.landblockId === landblockId,
+			),
 			instancedObjectResources: materialized.staticObjectVisualResources.filter(
 				(resource) =>
 					materialized.staticObjectRenderInstances.some(
@@ -3069,6 +3068,8 @@ function resourceKeyId(resource: StaticResourceKey): string {
 	switch (resource.kind) {
 		case "draw-unit":
 			return resource.drawUnitId;
+		case "static-object-visual-resource":
+			return resource.resourceId;
 		case "portal-aperture-resource":
 			return resource.apertureResourceId;
 	}
@@ -3497,8 +3498,7 @@ function createRendererDiagnosticsSummary(
 		renderedTriangles: snapshot.renderedTriangles,
 		renderPassKind: snapshot.renderPassPlan.kind,
 		staticDrawUnits: snapshot.staticDrawUnits,
-		staticObjectBakedDirectDrawCalls:
-			snapshot.staticObjectBakedDirectDrawCalls,
+		staticObjectBakedDirectDrawCalls: snapshot.staticObjectBakedDirectDrawCalls,
 		staticObjectDirectRenderInstanceDrawCalls:
 			snapshot.staticObjectDirectRenderInstanceDrawCalls,
 		staticObjectInstancedRenderInstanceDrawCalls:
@@ -3646,9 +3646,7 @@ function createStaticObjectBakeSummary(
 	);
 
 	return {
-		drawUnitCount: sumNumbers(
-			diagnostics.map((entry) => entry.drawUnitCount),
-		),
+		drawUnitCount: sumNumbers(diagnostics.map((entry) => entry.drawUnitCount)),
 		estimatedFlattenedTypedArrayBytes: sumNumbers(
 			diagnostics.map((entry) => entry.estimatedFlattenedTypedArrayBytes),
 		),
@@ -3776,17 +3774,23 @@ function createStaticCoordinatorTimingSummary(
 ): StaticCoordinatorDiagnosticsReport["timingSummary"] {
 	return {
 		attachmentMs: roundMilliseconds(
-			sumNumbers(timings.map((timing) => nullableMilliseconds(timing.attachmentMs))),
+			sumNumbers(
+				timings.map((timing) => nullableMilliseconds(timing.attachmentMs)),
+			),
 		),
 		bakeMs: roundMilliseconds(
 			sumNumbers(timings.map((timing) => nullableMilliseconds(timing.bakeMs))),
 		),
 		commitMs: roundMilliseconds(
-			sumNumbers(timings.map((timing) => nullableMilliseconds(timing.commitMs))),
+			sumNumbers(
+				timings.map((timing) => nullableMilliseconds(timing.commitMs)),
+			),
 		),
 		reportCount: timings.length,
 		resolverMs: roundMilliseconds(
-			sumNumbers(timings.map((timing) => nullableMilliseconds(timing.resolverMs))),
+			sumNumbers(
+				timings.map((timing) => nullableMilliseconds(timing.resolverMs)),
+			),
 		),
 		slowestBake: createTimingSample(
 			maxByNullableNumber(timings, (timing) => timing.bakeMs),

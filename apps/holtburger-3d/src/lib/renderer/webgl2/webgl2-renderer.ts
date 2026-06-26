@@ -21,7 +21,8 @@ import type {
 	OutdoorDetailsLayerPayload,
 	RendererStaticLayerVisibility,
 	TerrainLayerPayload,
-	TextureDrawUnitBinding,
+	StaticTextureBinding,
+	StaticTextureBindingOwner,
 	TexturePlacementUpdate,
 } from "../types";
 import {
@@ -134,17 +135,15 @@ const NEAR_TRANSPARENT_STATIC_SORT_DISTANCE_SQUARED =
 const RECENT_STATIC_OBJECT_UPLOAD_DIAGNOSTICS_LIMIT = 20;
 const STATIC_OBJECT_INSTANCE_TRANSFORM_ATTRIBUTE_LOCATION = 3;
 const STATIC_OBJECT_INSTANCE_TRANSFORM_FLOATS = 16;
-const EMPTY_TEXTURE_DRAW_UNIT_BINDINGS: ReadonlyMap<
-	string,
-	TextureDrawUnitBinding
-> = new Map();
+const EMPTY_STATIC_TEXTURE_BINDINGS: ReadonlyMap<string, StaticTextureBinding> =
+	new Map();
 
 interface StaticLayerResourceOwnership {
 	readonly drawUnitIds: Set<string>;
 	readonly staticObjectRenderInstanceIds: Set<string>;
 	readonly staticObjectVisualResourceIds: Set<string>;
 	readonly portalApertureResourceIds: Set<string>;
-	readonly textureBindingDrawUnitIds: Set<string>;
+	readonly textureBindingOwnerKeys: Set<string>;
 }
 
 interface StaticObjectMaterialPassDrawCallAccumulator {
@@ -772,7 +771,7 @@ class Webgl2Renderer implements Renderer {
 	>();
 	readonly #staticObjectRenderInstances = new Map<
 		string,
-		StaticObjectRenderInstanceResource
+		StaticObjectRenderInstance
 	>();
 	readonly #structuredInteriorResources = new Map<
 		string,
@@ -797,11 +796,7 @@ class Webgl2Renderer implements Renderer {
 	readonly #textures = new Map<string, WebGLTexture>();
 	readonly #textureBindings = new Map<
 		string,
-		Map<string, TextureDrawUnitBinding>
-	>();
-	readonly #textureBindingsByTextureUseId = new Map<
-		string,
-		TextureDrawUnitBinding
+		Map<string, StaticTextureBinding>
 	>();
 	readonly #staticLayerOwnershipByKey = new Map<
 		string,
@@ -922,7 +917,12 @@ class Webgl2Renderer implements Renderer {
 						createTerrainGeometryResource(this.#gl, drawUnit),
 					);
 					ownership.drawUnitIds.add(drawUnit.drawUnitId);
-					ownership.textureBindingDrawUnitIds.add(drawUnit.drawUnitId);
+					ownership.textureBindingOwnerKeys.add(
+						createStaticTextureBindingOwnerKey({
+							drawUnitId: drawUnit.drawUnitId,
+							kind: "draw-unit",
+						}),
+					);
 				}
 			},
 		);
@@ -945,7 +945,12 @@ class Webgl2Renderer implements Renderer {
 						createStaticObjectGeometryResource(this.#gl, drawUnit),
 					);
 					ownership.drawUnitIds.add(drawUnit.drawUnitId);
-					ownership.textureBindingDrawUnitIds.add(drawUnit.drawUnitId);
+					ownership.textureBindingOwnerKeys.add(
+						createStaticTextureBindingOwnerKey({
+							drawUnitId: drawUnit.drawUnitId,
+							kind: "draw-unit",
+						}),
+					);
 					uploadedBufferBytes +=
 						estimateStaticObjectUploadedBufferBytes(drawUnit);
 					drawUnitCount += 1;
@@ -981,7 +986,12 @@ class Webgl2Renderer implements Renderer {
 						createStaticObjectGeometryResource(this.#gl, drawUnit),
 					);
 					ownership.drawUnitIds.add(drawUnit.drawUnitId);
-					ownership.textureBindingDrawUnitIds.add(drawUnit.drawUnitId);
+					ownership.textureBindingOwnerKeys.add(
+						createStaticTextureBindingOwnerKey({
+							drawUnitId: drawUnit.drawUnitId,
+							kind: "draw-unit",
+						}),
+					);
 					uploadedBufferBytes +=
 						estimateStaticObjectUploadedBufferBytes(drawUnit);
 					drawUnitCount += 1;
@@ -992,14 +1002,17 @@ class Webgl2Renderer implements Renderer {
 						createStaticObjectVisualGeometryResource(this.#gl, resource),
 					);
 					ownership.staticObjectVisualResourceIds.add(resource.resourceId);
+					ownership.textureBindingOwnerKeys.add(
+						createStaticTextureBindingOwnerKey({
+							kind: "static-object-visual-resource",
+							resourceId: resource.resourceId,
+						}),
+					);
 					uploadedBufferBytes +=
 						estimateStaticObjectVisualResourceUploadedBufferBytes(resource);
 				}
 				for (const instance of payload?.instancedObjectInstances ?? []) {
-					this.#staticObjectRenderInstances.set(instance.instanceId, {
-						...instance,
-						isDrawSuppressedByBakedLayer: false,
-					});
+					this.#staticObjectRenderInstances.set(instance.instanceId, instance);
 					ownership.staticObjectRenderInstanceIds.add(instance.instanceId);
 				}
 				if (payload && drawUnitCount > 0) {
@@ -1033,7 +1046,12 @@ class Webgl2Renderer implements Renderer {
 						createStaticObjectGeometryResource(this.#gl, drawUnit),
 					);
 					ownership.drawUnitIds.add(drawUnit.drawUnitId);
-					ownership.textureBindingDrawUnitIds.add(drawUnit.drawUnitId);
+					ownership.textureBindingOwnerKeys.add(
+						createStaticTextureBindingOwnerKey({
+							drawUnitId: drawUnit.drawUnitId,
+							kind: "draw-unit",
+						}),
+					);
 					uploadedBufferBytes +=
 						estimateStaticObjectUploadedBufferBytes(drawUnit);
 					drawUnitCount += 1;
@@ -1054,7 +1072,12 @@ class Webgl2Renderer implements Renderer {
 						createStructuredInteriorGeometryResource(this.#gl, drawUnit),
 					);
 					ownership.drawUnitIds.add(drawUnit.drawUnitId);
-					ownership.textureBindingDrawUnitIds.add(drawUnit.drawUnitId);
+					ownership.textureBindingOwnerKeys.add(
+						createStaticTextureBindingOwnerKey({
+							drawUnitId: drawUnit.drawUnitId,
+							kind: "draw-unit",
+						}),
+					);
 				}
 				for (const resource of payload?.portalApertureResources ?? []) {
 					this.#addPortalApertureResource(resource);
@@ -1140,14 +1163,12 @@ class Webgl2Renderer implements Renderer {
 			this.#stateCache.invalidate();
 		}
 
-		for (const binding of update.drawUnitBindings) {
-			const bindings =
-				this.#textureBindings.get(binding.drawUnitId) ?? new Map();
+		for (const binding of update.textureBindings) {
+			const ownerKey = createStaticTextureBindingOwnerKey(binding.owner);
+			const bindings = this.#textureBindings.get(ownerKey) ?? new Map();
 			bindings.set(binding.textureUseId, binding);
-			this.#textureBindings.set(binding.drawUnitId, bindings);
-			this.#textureBindingsByTextureUseId.set(binding.textureUseId, binding);
-			this.#markStaticObjectPreparedPayloadDirty(binding.drawUnitId);
-			this.#markTerrainPreparedPayloadDirty(binding.drawUnitId);
+			this.#textureBindings.set(ownerKey, bindings);
+			this.#markPreparedPayloadDirtyForTextureBindingOwner(binding.owner);
 		}
 
 		// Prepared payloads hold WebGLTexture handles. Without a reverse
@@ -1234,7 +1255,6 @@ class Webgl2Renderer implements Renderer {
 		this.#portalApertureRangesById.clear();
 		this.#textures.clear();
 		this.#textureBindings.clear();
-		this.#textureBindingsByTextureUseId.clear();
 		this.#staticLayerOwnershipByKey.clear();
 		this.#warnedLayeredFallbackDrawUnitIds.clear();
 		this.#warnedMissingPortalApertureRangeIds.clear();
@@ -1780,8 +1800,12 @@ class Webgl2Renderer implements Renderer {
 
 		for (const resource of this.#terrainResources.values()) {
 			const bindings =
-				this.#textureBindings.get(resource.drawUnitId) ??
-				EMPTY_TEXTURE_DRAW_UNIT_BINDINGS;
+				this.#textureBindings.get(
+					createStaticTextureBindingOwnerKey({
+						drawUnitId: resource.drawUnitId,
+						kind: "draw-unit",
+					}),
+				) ?? EMPTY_STATIC_TEXTURE_BINDINGS;
 			const binding = resource.primaryTextureUseId
 				? bindings.get(resource.primaryTextureUseId)
 				: undefined;
@@ -1874,14 +1898,14 @@ class Webgl2Renderer implements Renderer {
 		if (!this.#staticLayerVisibility.outdoorDetail || domain === "interior") {
 			return [];
 		}
-		return [...this.#staticObjectRenderInstances.values()]
-			.filter((instance) => !instance.isDrawSuppressedByBakedLayer)
-			.flatMap((instance) => {
+		return [...this.#staticObjectRenderInstances.values()].flatMap(
+			(instance) => {
 				const resource = this.#staticObjectVisualResources.get(
 					instance.resourceId,
 				);
 				return resource ? [{ instance, resource }] : [];
-			});
+			},
+		);
 	}
 
 	#drawPortalProjectionFrameResources(
@@ -2258,11 +2282,15 @@ class Webgl2Renderer implements Renderer {
 				this.#appendTransparentStaticObjectInstanceResource(resource);
 				continue;
 			}
-			const group = instanceGroupsByResourceId.get(resource.resource.resourceId);
+			const group = instanceGroupsByResourceId.get(
+				resource.resource.resourceId,
+			);
 			if (group) {
 				group.push(resource);
 			} else {
-				instanceGroupsByResourceId.set(resource.resource.resourceId, [resource]);
+				instanceGroupsByResourceId.set(resource.resource.resourceId, [
+					resource,
+				]);
 			}
 		}
 		for (const group of instanceGroupsByResourceId.values()) {
@@ -2322,8 +2350,7 @@ class Webgl2Renderer implements Renderer {
 			if (group.length < 2) {
 				this.#lastStaticObjectFarTransparentDirectRenderInstanceDrawCalls += 1;
 			} else {
-				this.#lastStaticObjectFarTransparentInstancedRenderInstanceDrawCalls +=
-					1;
+				this.#lastStaticObjectFarTransparentInstancedRenderInstanceDrawCalls += 1;
 				this.#lastStaticObjectFarTransparentInstancedRenderInstances +=
 					group.length;
 			}
@@ -2345,8 +2372,7 @@ class Webgl2Renderer implements Renderer {
 			);
 			if (entry.instance) {
 				this.#lastStaticObjectDirectRenderInstanceDrawCalls += 1;
-				this.#lastStaticObjectNearTransparentDirectRenderInstanceDrawCalls +=
-					1;
+				this.#lastStaticObjectNearTransparentDirectRenderInstanceDrawCalls += 1;
 			} else if (isStaticObjectGeometryResource(resource)) {
 				this.#recordBakedStaticObjectDirectDraw(resource);
 			}
@@ -2440,47 +2466,7 @@ class Webgl2Renderer implements Renderer {
 		objectTransform: Float32Array,
 	): void {
 		const gl = this.#gl;
-		const { materialUniforms, rolePages } =
-			this.#getStaticObjectPreparedPayload(resource);
-
-		uploadStaticObjectRolePageBindings(
-			gl,
-			this.#stateCache,
-			this.#staticObjectProgram.uniforms.uStaticBaseColorTextures,
-			this.#staticObjectProgram.uniforms.uStaticBaseColorSizes,
-			rolePages.baseColor,
-			STATIC_OBJECT_BASE_COLOR_TEXTURE_UNIT_BASE,
-		);
-		uploadStaticObjectRolePageBindings(
-			gl,
-			this.#stateCache,
-			this.#staticObjectProgram.uniforms.uStaticIndexTextures,
-			null,
-			rolePages.index,
-			STATIC_OBJECT_INDEX_TEXTURE_UNIT_BASE,
-		);
-		uploadStaticObjectRolePageBindings(
-			gl,
-			this.#stateCache,
-			this.#staticObjectProgram.uniforms.uStaticPaletteTextures,
-			this.#staticObjectProgram.uniforms.uStaticPaletteSizes,
-			rolePages.palette,
-			STATIC_OBJECT_PALETTE_TEXTURE_UNIT_BASE,
-		);
-		uploadStaticObjectRolePageBindings(
-			gl,
-			this.#stateCache,
-			this.#staticObjectProgram.uniforms.uStaticDetailTextures,
-			this.#staticObjectProgram.uniforms.uStaticDetailSizes,
-			rolePages.detail,
-			STATIC_OBJECT_DETAIL_TEXTURE_UNIT_BASE,
-		);
-
-		uploadStaticObjectMaterialTableUniforms(
-			gl,
-			this.#staticObjectProgram,
-			materialUniforms,
-		);
+		this.#bindStaticMaterialResourcePayload(resource);
 		gl.uniformMatrix4fv(
 			this.#staticObjectProgram.uniforms.uObjectTransform,
 			false,
@@ -2497,6 +2483,27 @@ class Webgl2Renderer implements Renderer {
 	#drawStaticMaterialResourceInstanced(
 		resource: StaticObjectVisualGeometryResource,
 		group: readonly StaticObjectInstanceDrawResource[],
+	): void {
+		const gl = this.#gl;
+		this.#bindStaticMaterialResourcePayload(resource);
+		this.#writeStaticObjectInstanceTransforms(group);
+		gl.uniform1i(
+			this.#staticObjectProgram.uniforms.uUseInstanceObjectTransform,
+			1,
+		);
+		this.#stateCache.bindVertexArray(resource.vertexArray);
+		this.#bindStaticObjectInstanceTransformAttributes();
+		gl.drawElementsInstanced(
+			gl.TRIANGLES,
+			resource.indexCount,
+			resource.indexType,
+			0,
+			group.length,
+		);
+	}
+
+	#bindStaticMaterialResourcePayload(
+		resource: StaticMaterialGeometryResource,
 	): void {
 		const gl = this.#gl;
 		const { materialUniforms, rolePages } =
@@ -2539,20 +2546,6 @@ class Webgl2Renderer implements Renderer {
 			gl,
 			this.#staticObjectProgram,
 			materialUniforms,
-		);
-		this.#writeStaticObjectInstanceTransforms(group);
-		gl.uniform1i(
-			this.#staticObjectProgram.uniforms.uUseInstanceObjectTransform,
-			1,
-		);
-		this.#stateCache.bindVertexArray(resource.vertexArray);
-		this.#bindStaticObjectInstanceTransformAttributes();
-		gl.drawElementsInstanced(
-			gl.TRIANGLES,
-			resource.indexCount,
-			resource.indexType,
-			0,
-			group.length,
 		);
 	}
 
@@ -2574,10 +2567,7 @@ class Webgl2Renderer implements Renderer {
 		}
 
 		const gl = this.#gl;
-		gl.bindBuffer(
-			gl.ARRAY_BUFFER,
-			this.#staticObjectInstanceTransformBuffer,
-		);
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.#staticObjectInstanceTransformBuffer);
 		gl.bufferData(
 			gl.ARRAY_BUFFER,
 			this.#staticObjectInstanceTransformScratch.subarray(0, requiredLength),
@@ -2589,10 +2579,7 @@ class Webgl2Renderer implements Renderer {
 		const gl = this.#gl;
 		const stride =
 			STATIC_OBJECT_INSTANCE_TRANSFORM_FLOATS * Float32Array.BYTES_PER_ELEMENT;
-		gl.bindBuffer(
-			gl.ARRAY_BUFFER,
-			this.#staticObjectInstanceTransformBuffer,
-		);
+		gl.bindBuffer(gl.ARRAY_BUFFER, this.#staticObjectInstanceTransformBuffer);
 		for (let column = 0; column < 4; column += 1) {
 			const location =
 				STATIC_OBJECT_INSTANCE_TRANSFORM_ATTRIBUTE_LOCATION + column;
@@ -2611,7 +2598,7 @@ class Webgl2Renderer implements Renderer {
 
 	#getTerrainPreparedLayeredPayload(
 		resource: TerrainGeometryResource,
-		bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+		bindings: ReadonlyMap<string, StaticTextureBinding>,
 	): TerrainPreparedLayeredPayload | null {
 		const plan = resource.terrainMaterialPlan;
 		if (!plan) {
@@ -2648,8 +2635,11 @@ class Webgl2Renderer implements Renderer {
 		resource: StaticMaterialGeometryResource,
 	): StaticObjectPreparedDrawPayload {
 		const bindings =
-			this.#textureBindings.get(resource.drawUnitId) ??
-			this.#createTextureUseBindingsForStaticResource(resource);
+			this.#textureBindings.get(
+				createStaticTextureBindingOwnerKey(
+					createStaticTextureBindingOwnerForResource(resource),
+				),
+			) ?? EMPTY_STATIC_TEXTURE_BINDINGS;
 
 		return prepareStaticObjectDrawPayloadState(
 			resource.preparedDrawPayloadState,
@@ -2657,24 +2647,6 @@ class Webgl2Renderer implements Renderer {
 			bindings,
 			this.#textures,
 		);
-	}
-
-	#createTextureUseBindingsForStaticResource(
-		resource: StaticMaterialGeometryResource,
-	): ReadonlyMap<string, TextureDrawUnitBinding> {
-		const bindings = new Map<string, TextureDrawUnitBinding>();
-		for (const entry of resource.materialEntries) {
-			for (const textureUseId of getStaticMaterialEntryTextureUseIds(entry)) {
-				const binding = this.#textureBindingsByTextureUseId.get(textureUseId);
-				if (binding) {
-					bindings.set(textureUseId, {
-						...binding,
-						drawUnitId: resource.drawUnitId,
-					});
-				}
-			}
-		}
-		return bindings.size > 0 ? bindings : EMPTY_TEXTURE_DRAW_UNIT_BINDINGS;
 	}
 
 	#resetTransparentStaticObjectDrawLists(): void {
@@ -2721,9 +2693,10 @@ class Webgl2Renderer implements Renderer {
 	#appendTransparentStaticObjectInstanceResource(
 		drawResource: StaticObjectInstanceDrawResource,
 	): void {
-		const distanceSquared = this.#computeStaticObjectInstanceSortDistanceSquared(
-			drawResource.instance,
-		);
+		const distanceSquared =
+			this.#computeStaticObjectInstanceSortDistanceSquared(
+				drawResource.instance,
+			);
 		if (distanceSquared > NEAR_TRANSPARENT_STATIC_SORT_DISTANCE_SQUARED) {
 			this.#farTransparentStaticObjectInstanceDrawList.push(drawResource);
 			return;
@@ -2749,12 +2722,6 @@ class Webgl2Renderer implements Renderer {
 				resource.preparedDrawPayloadState,
 			);
 		}
-		const visualResource = this.#staticObjectVisualResources.get(drawUnitId);
-		if (visualResource) {
-			markStaticObjectPreparedDrawPayloadDirty(
-				visualResource.preparedDrawPayloadState,
-			);
-		}
 		const structuredInteriorResource =
 			this.#structuredInteriorResources.get(drawUnitId);
 		if (structuredInteriorResource) {
@@ -2762,6 +2729,28 @@ class Webgl2Renderer implements Renderer {
 				structuredInteriorResource.preparedDrawPayloadState,
 			);
 		}
+	}
+
+	#markStaticObjectVisualResourcePreparedPayloadDirty(
+		resourceId: string,
+	): void {
+		const resource = this.#staticObjectVisualResources.get(resourceId);
+		if (resource) {
+			markStaticObjectPreparedDrawPayloadDirty(
+				resource.preparedDrawPayloadState,
+			);
+		}
+	}
+
+	#markPreparedPayloadDirtyForTextureBindingOwner(
+		owner: StaticTextureBindingOwner,
+	): void {
+		if (owner.kind === "draw-unit") {
+			this.#markStaticObjectPreparedPayloadDirty(owner.drawUnitId);
+			this.#markTerrainPreparedPayloadDirty(owner.drawUnitId);
+			return;
+		}
+		this.#markStaticObjectVisualResourcePreparedPayloadDirty(owner.resourceId);
 	}
 
 	#markAllStaticObjectPreparedPayloadsDirty(): void {
@@ -2933,8 +2922,8 @@ class Webgl2Renderer implements Renderer {
 			this.#removeStaticObjectResource(drawUnitId);
 			this.#removeStructuredInteriorResource(drawUnitId);
 		}
-		for (const drawUnitId of ownership.textureBindingDrawUnitIds) {
-			this.#textureBindings.delete(drawUnitId);
+		for (const ownerKey of ownership.textureBindingOwnerKeys) {
+			this.#textureBindings.delete(ownerKey);
 		}
 		for (const instanceId of ownership.staticObjectRenderInstanceIds) {
 			this.#staticObjectRenderInstances.delete(instanceId);
@@ -3142,7 +3131,9 @@ class Webgl2Renderer implements Renderer {
 		instance: StaticObjectRenderInstance,
 	): Float32Array {
 		return multiplyMat4(
-			createTranslationMatrix(this.#createLandblockTranslation(instance.landblockId)),
+			createTranslationMatrix(
+				this.#createLandblockTranslation(instance.landblockId),
+			),
 			instance.sourceToLandblockMatrix,
 		);
 	}
@@ -3448,17 +3439,36 @@ interface StaticObjectVisualGeometryResource {
 	dispose(): void;
 }
 
-interface StaticObjectRenderInstanceResource extends StaticObjectRenderInstance {
-	readonly isDrawSuppressedByBakedLayer: boolean;
-}
-
 interface StaticObjectInstanceDrawResource {
-	readonly instance: StaticObjectRenderInstanceResource;
+	readonly instance: StaticObjectRenderInstance;
 	readonly resource: StaticObjectVisualGeometryResource;
 }
 
 type SceneDomain = "exterior" | "interior";
 type RenderStaticDomain = SceneDomain | "single-surface-resident";
+
+function createStaticTextureBindingOwnerForResource(
+	resource: StaticMaterialGeometryResource,
+): StaticTextureBindingOwner {
+	if ("resourceId" in resource) {
+		return {
+			kind: "static-object-visual-resource",
+			resourceId: resource.resourceId,
+		};
+	}
+	return {
+		drawUnitId: resource.drawUnitId,
+		kind: "draw-unit",
+	};
+}
+
+function createStaticTextureBindingOwnerKey(
+	owner: StaticTextureBindingOwner,
+): string {
+	return owner.kind === "draw-unit"
+		? `draw-unit:${owner.drawUnitId}`
+		: `static-object-visual-resource:${owner.resourceId}`;
+}
 
 function createEmptyStaticLayerResourceOwnership(): StaticLayerResourceOwnership {
 	return {
@@ -3466,7 +3476,7 @@ function createEmptyStaticLayerResourceOwnership(): StaticLayerResourceOwnership
 		staticObjectRenderInstanceIds: new Set<string>(),
 		staticObjectVisualResourceIds: new Set<string>(),
 		portalApertureResourceIds: new Set<string>(),
-		textureBindingDrawUnitIds: new Set<string>(),
+		textureBindingOwnerKeys: new Set<string>(),
 	};
 }
 
@@ -4001,11 +4011,7 @@ function createStaticObjectGeometryProgram(
 			),
 			uMaterialWrapModes: requireUniform(gl, program, "uMaterialWrapModes[0]"),
 			uModelViewProjection: requireUniform(gl, program, "uModelViewProjection"),
-			uObjectTransform: requireUniform(
-				gl,
-				program,
-				"uObjectTransform",
-			),
+			uObjectTransform: requireUniform(gl, program, "uObjectTransform"),
 			uUseInstanceObjectTransform: requireUniform(
 				gl,
 				program,
@@ -4822,17 +4828,6 @@ function estimateStaticObjectVisualResourceUploadedBufferBytes(
 	);
 }
 
-function getStaticMaterialEntryTextureUseIds(
-	entry: StaticObjectVisualResource["materialEntries"][number],
-): readonly string[] {
-	return [
-		entry.primaryTextureUseId,
-		entry.indexTextureUseId,
-		entry.paletteTextureUseId,
-		entry.detailTextureUseId,
-	].filter((textureUseId): textureUseId is string => textureUseId !== null);
-}
-
 function createStencilState(
 	gl: WebGL2RenderingContext,
 	enabled: boolean,
@@ -4896,7 +4891,7 @@ export interface StaticObjectTransparentDrawSortEntry {
 
 interface StaticObjectTransparentDrawEntry {
 	resource: StaticMaterialGeometryResource | null;
-	instance: StaticObjectRenderInstanceResource | null;
+	instance: StaticObjectRenderInstance | null;
 	distanceSquared: number;
 	drawUnitId: string;
 }

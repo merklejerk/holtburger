@@ -12,6 +12,7 @@ import type {
 	StaticPortalProjectionRecord,
 	StaticSourceMappingRecord,
 	StaticSpatialRecord,
+	StaticTextureUseOwner,
 	StaticVisibilityRecord,
 	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
@@ -190,7 +191,7 @@ export interface TexturePlacementUpdate {
 	readonly placements: readonly TexturePlacement[];
 	readonly removedTextureRefIds: readonly string[];
 	readonly textureUsePlacements: readonly TextureUsePlacement[];
-	readonly drawUnitBindings: readonly TextureDrawUnitBinding[];
+	readonly textureBindings: readonly StaticTextureBinding[];
 	readonly revision: number;
 }
 
@@ -212,8 +213,11 @@ interface TexturePlacement {
 	readonly rect: readonly [number, number, number, number];
 }
 
-export interface TextureDrawUnitBinding {
-	readonly drawUnitId: string;
+export type StaticTextureBindingOwner = StaticTextureUseOwner;
+
+export interface StaticTextureBinding {
+	/** Resource that owns the shader role-page slot assignment. */
+	readonly owner: StaticTextureBindingOwner;
 	readonly textureUseId: string;
 	readonly textureRefId: string;
 	readonly rolePage: TextureRolePageSlot;
@@ -304,7 +308,7 @@ export interface RendererSnapshot {
 	readonly debugOverlayPrimitives: number;
 }
 
-export interface StaticObjectMaterialPassDrawCallCounts {
+interface StaticObjectMaterialPassDrawCallCounts {
 	readonly opaque: number;
 	readonly alphaTest: number;
 	readonly transparent: number;

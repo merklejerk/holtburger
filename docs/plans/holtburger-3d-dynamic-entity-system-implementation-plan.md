@@ -589,7 +589,7 @@ Debt and follow-up:
 
 ### Phase 4A: Dynamic Setup And Animation Resource Readiness
 
-Status: pending.
+Status: completed 2026-06-26.
 
 Purpose:
 
@@ -631,18 +631,18 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Define dynamic setup/animation resource state and issue types.
-- [ ] Define typed dynamic resource keys, including reserved future key variants.
-- [ ] Implement manager coordination around asset-service request dedupe, committed reuse, leases,
+- [x] Define dynamic setup/animation resource state and issue types.
+- [x] Define typed dynamic resource keys, including reserved future key variants.
+- [x] Implement manager coordination around asset-service request dedupe, committed reuse, leases,
       and release-on-entity-removal.
-- [ ] Add controller/runtime wiring so async readiness completion emits snapshots.
-- [ ] Prove resource readiness works for outdoor and env-cell source residences without duplicating
+- [x] Add controller/runtime wiring so async readiness completion emits snapshots.
+- [x] Prove resource readiness works for outdoor and env-cell source residences without duplicating
       manager logic.
-- [ ] Prove duplicate entity references to the same setup or animation share asset-service committed
+- [x] Prove duplicate entity references to the same setup or animation share asset-service committed
       entries while retaining separate dynamic leases.
-- [ ] Prove missing setup and missing animation diagnostics.
-- [ ] Prove no startup-hydrated global lookup table is required.
-- [ ] Run phase verification commands.
+- [x] Prove missing setup and missing animation diagnostics.
+- [x] Prove no startup-hydrated global lookup table is required.
+- [x] Run phase verification commands.
 
 Decisions and course corrections:
 
@@ -654,6 +654,37 @@ Decisions and course corrections:
 - 2026-06-26: Async readiness must publish runtime snapshots. Without a callback/event path from
   dynamic resource completion to `ClientRuntimeImpl`, entities could become ready silently until some
   unrelated runtime event emits.
+- 2026-06-26: Implemented `DynamicEntityResourceManager` as the dynamic semantic owner over
+  `AssetService` prepared asset requests and leases. The manager requests setup model and default
+  animation assets by direct DAT ids from the static-authored seed; it does not build or require any
+  startup-hydrated animation, motion, script, or effect lookup table.
+- 2026-06-26: Setup/animation readiness is represented as a partial resource state,
+  `setup-animation-ready`, rather than renderability. Until Phase 4B resolves visual/material/texture
+  resources, ready records remain non-renderable with `visual-resources-pending`.
+- 2026-06-26: Runtime resource completion now flows manager -> controller -> `ClientRuntimeImpl`
+  snapshot emission. Retention removal routes through the controller so dynamic leases are released
+  before records disappear.
+
+Verification:
+
+- 2026-06-26: `npm run test:ts -- dynamic-entity-resource-manager.test.ts
+  dynamic-entity-controller.test.ts client-runtime.test.ts`
+- 2026-06-26: `npm run check`
+- 2026-06-26: `npm run lint:ts`
+- 2026-06-26: `npm run test:ts`
+- 2026-06-26: `npm run lint:dead`
+- 2026-06-26: `npm run check:rust`
+- 2026-06-26: `npm run lint:rust`
+
+Debt and follow-up:
+
+- `visual-resources-pending` is intentional Phase 4A handoff state. Phase 4B must replace it with
+  concrete visual/material/texture readiness or explicit missing-resource diagnostics.
+- The manager currently acquires no lease for a successfully loaded peer asset if the paired
+  setup/animation request fails. This is correct for all-or-nothing setup/animation readiness, but
+  Phase 4B should revisit partial lease policy once visual/material dependencies become multi-asset.
+- `DynamicEntityResourceManager` owns setup/animation leases only. Visual/material/texture leases and
+  atlas-compatible texture identity preservation remain Phase 4B work.
 
 ### Phase 4B: Dynamic Visual, Material, And Texture Readiness
 
@@ -680,6 +711,8 @@ Deliverables:
   material/texture resources, and animation are available.
 - Record missing visual/material/texture dependencies and unsupported material plans as explicit
   diagnostics.
+- Replace the Phase 4A `visual-resources-pending` handoff state with either full visual readiness or
+  concrete missing/unsupported visual resource diagnostics.
 
 Acceptance criteria:
 
@@ -695,6 +728,7 @@ Acceptance criteria:
 - Dynamic visual readiness does not reference static draw-unit ids, static batch ids, static
   visual-resource owner keys, or `StaticTextureUseOwner`.
 - Visual/material/texture leases are released on entity removal.
+- Records no longer use `visual-resources-pending` once Phase 4B readiness has completed or failed.
 
 Task checklist:
 
@@ -708,6 +742,8 @@ Task checklist:
       visual-resource owner keys.
 - [ ] Add tests for success, missing setup appearance, missing visual/material/texture dependency,
       unsupported material plan, dedupe, and lease release.
+- [ ] Remove or narrow `visual-resources-pending` after concrete visual/material/texture outcomes are
+      available.
 - [ ] Run phase verification commands.
 
 Decisions and course corrections:

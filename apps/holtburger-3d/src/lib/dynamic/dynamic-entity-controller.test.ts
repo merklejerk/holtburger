@@ -82,12 +82,74 @@ describe("dynamic entity controller", () => {
 		});
 	});
 
-	it("ignores env-cell authored seeds until they are promoted to dynamic runtime ownership", () => {
+	it("ignores unclassified env-cell static seed records", () => {
 		const controller = new DynamicEntityController();
 
 		controller.ingestStaticSeeds([createEnvCellSeedRecord()]);
 
 		expect(controller.createSnapshot().records).toEqual([]);
+	});
+
+	it("creates non-renderable records from classified env-cell dynamic seeds", () => {
+		const controller = new DynamicEntityController();
+
+		controller.ingestStaticSeeds([createEnvCellDynamicSeedRecord()]);
+
+		expect(controller.createSnapshot()).toMatchObject({
+			activeEntityCount: 1,
+			issueCount: 2,
+			nonRenderableEntityCount: 1,
+			staticSeedCount: 1,
+		});
+		expect(controller.createSnapshot().records[0]).toMatchObject({
+			animation: {
+				defaultAnimationId: 0x0300061b,
+				status: "pending-resource",
+			},
+			diagnostics: [
+				{
+					kind: "resources-pending",
+					required: ["setup-model", "animation"],
+				},
+				{
+					kind: "residence-render-path-pending",
+					residence: {
+						envCellId: 0xda550100,
+						kind: "env-cell",
+						landblockId: 0xda55ffff,
+					},
+				},
+			],
+			id: "static-authored-env-cell:landblock-env-cells:landblock:da55ffff:env-cell:da550100:object:building:seed-0:setup:020003e5",
+			provenance: {
+				kind: "static-authored-env-cell",
+				sourceScopeKey: "landblock-env-cells:landblock:da55ffff",
+			},
+			renderability: {
+				reasons: ["resources-pending", "residence-render-path-pending"],
+				status: "non-renderable",
+			},
+			sourceResidence: {
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+		});
+	});
+
+	it("removes classified env-cell records with unretained env-cell scopes", () => {
+		const controller = new DynamicEntityController();
+		controller.ingestStaticSeeds([
+			createOutdoorSeedRecord(),
+			createEnvCellDynamicSeedRecord(),
+		]);
+
+		controller.retainStaticScopes([createRetainedScope()]);
+
+		expect(controller.createSnapshot().records).toHaveLength(1);
+		expect(controller.createSnapshot().records[0]?.provenance.kind).toBe(
+			"static-authored-outdoor",
+		);
 	});
 });
 
@@ -162,6 +224,42 @@ function createEnvCellSeedRecord(): StaticAuthoredDynamicSeedRecord {
 				sourceDid: 0x020003e5,
 			},
 			sourceIndex: 0,
+			sourceScale: { x: 1, y: 1, z: 1 },
+		},
+	};
+}
+
+function createEnvCellDynamicSeedRecord(): StaticAuthoredDynamicSeedRecord {
+	return {
+		kind: "env-cell-static-object-dynamic-seed",
+		owner: createOwner({
+			domain: "landblock-env-cells",
+			workId: "1:landblock:da55ffff:landblock-env-cells",
+		}),
+		seed: {
+			classificationReason: "setup-default-animation",
+			defaultAnimationId: 0x0300061b,
+			envCellId: 0xda550100,
+			landblockId: 0xda55ffff,
+			localPlacement: createPlacement(),
+			object: {
+				instanceId: "seed-0",
+				kind: "static-object-instance",
+				landblockId: 0xda55ffff,
+				objectKind: "building",
+			},
+			setupModelId: 0x020003e5,
+			source: {
+				kind: "static-object-source",
+				sourceAssetKind: "setup-model",
+				sourceDid: 0x020003e5,
+			},
+			sourceAssetId: "setup-model/020003e5",
+			sourceResidence: {
+				kind: "landblock-source",
+				landblockId: 0xda55ffff,
+				source: "env-cells",
+			},
 			sourceScale: { x: 1, y: 1, z: 1 },
 		},
 	};

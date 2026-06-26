@@ -1160,6 +1160,7 @@ interface StaticEnvCellSourceMappingRecord {
 
 export type StaticAuthoredDynamicSeedRecord =
 	| OutdoorStaticObjectDynamicSeedRecord
+	| StaticEnvCellStaticObjectDynamicSeedRecord
 	| StaticEnvCellStaticObjectSeedRecord;
 
 interface OutdoorStaticObjectDynamicSeedRecord {
@@ -1171,6 +1172,28 @@ interface OutdoorStaticObjectDynamicSeedRecord {
 export interface OutdoorStaticObjectDynamicSeedFacts {
 	readonly landblockId: number;
 	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
+	readonly object: StaticObjectInstanceIdentity;
+	readonly source: StaticObjectSourceIdentity;
+	readonly sourceAssetId: string;
+	readonly setupModelId: number;
+	readonly defaultAnimationId: number;
+	readonly sourceResidence: LandblockSourceIdentity;
+	readonly localPlacement: StaticPlacementTransform;
+	readonly sourceScale: StaticVec3;
+	readonly classificationReason: "setup-default-animation";
+}
+
+/** Classified env-cell authored static that should enter dynamic runtime registration. */
+interface StaticEnvCellStaticObjectDynamicSeedRecord {
+	readonly kind: "env-cell-static-object-dynamic-seed";
+	readonly owner: StaticWorkPeerRecordOwner;
+	readonly seed: EnvCellStaticObjectDynamicSeedFacts;
+}
+
+/** Lossless env-cell counterpart to outdoor static-authored dynamic seed facts. */
+export interface EnvCellStaticObjectDynamicSeedFacts {
+	readonly landblockId: number;
+	readonly envCellId: number;
 	readonly object: StaticObjectInstanceIdentity;
 	readonly source: StaticObjectSourceIdentity;
 	readonly sourceAssetId: string;

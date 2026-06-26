@@ -1,4 +1,5 @@
 import type {
+	EnvCellStaticObjectDynamicSeedFacts,
 	OutdoorStaticObjectDynamicSeedFacts,
 	StaticAuthoredDynamicSeedRecord,
 	StaticScopeOwnerKey,
@@ -6,6 +7,11 @@ import type {
 } from "../static/contracts";
 
 export type DynamicEntityId = string;
+
+/** Static-authored seed fact shapes that can become dynamic runtime records. */
+export type StaticAuthoredDynamicSeedFacts =
+	| EnvCellStaticObjectDynamicSeedFacts
+	| OutdoorStaticObjectDynamicSeedFacts;
 
 export interface DynamicEntityRecord {
 	readonly animation: DynamicEntityAnimationState;
@@ -18,19 +24,25 @@ export interface DynamicEntityRecord {
 	readonly renderability: DynamicEntityRenderability;
 	readonly resources: DynamicEntityResourceState;
 	readonly sourceResidence: DynamicEntityResidence;
-	readonly sourceSeed: OutdoorStaticObjectDynamicSeedFacts;
+	readonly sourceSeed: StaticAuthoredDynamicSeedFacts;
 }
 
 interface DynamicEntityProvenance {
-	readonly kind: "static-authored-outdoor";
+	readonly kind: "static-authored-env-cell" | "static-authored-outdoor";
 	readonly owner: StaticWorkPeerRecordOwner;
 	readonly sourceScopeKey: string;
 }
 
-interface DynamicEntityResidence {
-	readonly kind: "outdoor-landblock";
-	readonly landblockId: number;
-}
+type DynamicEntityResidence =
+	| {
+			readonly kind: "env-cell";
+			readonly envCellId: number;
+			readonly landblockId: number;
+	  }
+	| {
+			readonly kind: "outdoor-landblock";
+			readonly landblockId: number;
+	  };
 
 interface DynamicEntityAnimationState {
 	readonly defaultAnimationId: number;
@@ -38,8 +50,8 @@ interface DynamicEntityAnimationState {
 }
 
 interface DynamicEntityTransformState {
-	readonly baseLocalPlacement: OutdoorStaticObjectDynamicSeedFacts["localPlacement"];
-	readonly sourceScale: OutdoorStaticObjectDynamicSeedFacts["sourceScale"];
+	readonly baseLocalPlacement: StaticAuthoredDynamicSeedFacts["localPlacement"];
+	readonly sourceScale: StaticAuthoredDynamicSeedFacts["sourceScale"];
 }
 
 interface DynamicEntityBoundsState {
@@ -59,12 +71,19 @@ interface DynamicEntityRenderability {
 	readonly status: "non-renderable";
 }
 
-type DynamicEntityRenderabilityReason = "resources-pending";
+type DynamicEntityRenderabilityReason =
+	| "residence-render-path-pending"
+	| "resources-pending";
 
-interface DynamicEntityIssue {
-	readonly kind: "resources-pending";
-	readonly required: readonly DynamicEntityRequiredResource[];
-}
+type DynamicEntityIssue =
+	| {
+			readonly kind: "residence-render-path-pending";
+			readonly residence: DynamicEntityResidence;
+	  }
+	| {
+			readonly kind: "resources-pending";
+			readonly required: readonly DynamicEntityRequiredResource[];
+	  };
 
 export interface DynamicRuntimeSnapshot {
 	readonly activeEntityCount: number;
@@ -81,6 +100,15 @@ export function isOutdoorDynamicSeedRecord(
 	{ readonly kind: "outdoor-static-object-dynamic-seed" }
 > {
 	return record.kind === "outdoor-static-object-dynamic-seed";
+}
+
+export function isEnvCellDynamicSeedRecord(
+	record: StaticAuthoredDynamicSeedRecord,
+): record is Extract<
+	StaticAuthoredDynamicSeedRecord,
+	{ readonly kind: "env-cell-static-object-dynamic-seed" }
+> {
+	return record.kind === "env-cell-static-object-dynamic-seed";
 }
 
 export function createStaticScopeOwnerKey(

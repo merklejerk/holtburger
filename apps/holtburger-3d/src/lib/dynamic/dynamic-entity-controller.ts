@@ -1,14 +1,15 @@
 import type {
-	OutdoorStaticObjectDynamicSeedFacts,
 	StaticAuthoredDynamicSeedRecord,
 	StaticScopeOwnerKey,
 	StaticWorkPeerRecordOwner,
 } from "../static/contracts";
 import {
 	createStaticScopeOwnerKey,
+	isEnvCellDynamicSeedRecord,
 	isOutdoorDynamicSeedRecord,
 	type DynamicEntityId,
 	type DynamicEntityRecord,
+	type StaticAuthoredDynamicSeedFacts,
 	type DynamicRuntimeSnapshot,
 } from "./contracts";
 import { DynamicEntityStore } from "./dynamic-entity-store";
@@ -24,7 +25,10 @@ export class DynamicEntityController {
 
 	ingestStaticSeeds(records: readonly StaticAuthoredDynamicSeedRecord[]): void {
 		for (const record of records) {
-			if (!isOutdoorDynamicSeedRecord(record)) {
+			if (
+				!isOutdoorDynamicSeedRecord(record) &&
+				!isEnvCellDynamicSeedRecord(record)
+			) {
 				continue;
 			}
 			this.#store.upsert(createDynamicEntityRecord(record));
@@ -45,14 +49,34 @@ export class DynamicEntityController {
 function createDynamicEntityRecord(
 	record: Extract<
 		StaticAuthoredDynamicSeedRecord,
-		{ readonly kind: "outdoor-static-object-dynamic-seed" }
+		{
+			readonly kind:
+				| "env-cell-static-object-dynamic-seed"
+				| "outdoor-static-object-dynamic-seed";
+		}
 	>,
 ): DynamicEntityRecord {
 	const sourceScopeKey = createSourceScopeKey(record.owner);
-	const sourceResidence = {
-		kind: "outdoor-landblock" as const,
-		landblockId: record.seed.sourceResidence.landblockId,
-	};
+	const sourceResidence =
+		record.kind === "env-cell-static-object-dynamic-seed"
+			? {
+					kind: "env-cell" as const,
+					envCellId: record.seed.envCellId,
+					landblockId: record.seed.landblockId,
+				}
+			: {
+					kind: "outdoor-landblock" as const,
+					landblockId: record.seed.sourceResidence.landblockId,
+				};
+	const residenceDiagnostics =
+		record.kind === "env-cell-static-object-dynamic-seed"
+			? [
+					{
+						kind: "residence-render-path-pending" as const,
+						residence: sourceResidence,
+					},
+				]
+			: [];
 
 	return {
 		animation: {
@@ -72,16 +96,23 @@ function createDynamicEntityRecord(
 				kind: "resources-pending",
 				required: FIRST_SLICE_REQUIRED_RESOURCES,
 			},
+			...residenceDiagnostics,
 		],
 		effectiveResidence: sourceResidence,
-		id: createDynamicEntityId(record.seed, sourceScopeKey),
+		id: createDynamicEntityId(record, sourceScopeKey),
 		provenance: {
-			kind: "static-authored-outdoor",
+			kind:
+				record.kind === "env-cell-static-object-dynamic-seed"
+					? "static-authored-env-cell"
+					: "static-authored-outdoor",
 			owner: record.owner,
 			sourceScopeKey,
 		},
 		renderability: {
-			reasons: ["resources-pending"],
+			reasons:
+				record.kind === "env-cell-static-object-dynamic-seed"
+					? ["resources-pending", "residence-render-path-pending"]
+					: ["resources-pending"],
 			status: "non-renderable",
 		},
 		resources: {
@@ -94,9 +125,28 @@ function createDynamicEntityRecord(
 }
 
 function createDynamicEntityId(
-	seed: OutdoorStaticObjectDynamicSeedFacts,
+	record: Extract<
+		StaticAuthoredDynamicSeedRecord,
+		{
+			readonly kind:
+				| "env-cell-static-object-dynamic-seed"
+				| "outdoor-static-object-dynamic-seed";
+		}
+	>,
 	sourceScopeKey: string,
 ): DynamicEntityId {
+	if (record.kind === "env-cell-static-object-dynamic-seed") {
+		const seed = record.seed;
+		return [
+			"static-authored-env-cell",
+			sourceScopeKey,
+			`env-cell:${formatHex32(seed.envCellId)}`,
+			`object:${seed.object.objectKind}:${seed.object.instanceId}`,
+			`setup:${formatHex32(seed.setupModelId)}`,
+		].join(":");
+	}
+
+	const seed: StaticAuthoredDynamicSeedFacts = record.seed;
 	return [
 		"static-authored-outdoor",
 		sourceScopeKey,

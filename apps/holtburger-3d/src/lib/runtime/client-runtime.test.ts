@@ -38,6 +38,7 @@ import type {
 	StaticPortalApertureResource,
 	StaticPortalInteriorRecord,
 	StructuredInteriorGeometryStaticDrawUnit,
+	StaticAuthoredDynamicSeedRecord,
 	StaticDomain,
 	StaticWorkPeerRecordOwner,
 	TerrainStaticScopePayload,
@@ -101,6 +102,120 @@ describe("browser client runtime", () => {
 				(request) => request.job.domain === "landblock-env-cells",
 			),
 		).toHaveLength(1);
+		runtime.dispose();
+	});
+
+	it("ingests outdoor static-authored dynamic seeds and evicts them with source scopes", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer: new FakeRenderer(),
+			staticCoordinator: createImmediateStaticCoordinator({ baker, resolver }),
+		});
+		const snapshots: RuntimeSnapshot[] = [];
+		const unsubscribe = runtime.subscribe((snapshot) => {
+			snapshots.push(snapshot);
+		});
+
+		updateOutdoorSceneInterest(runtime, {
+			domains: ["buildings", "terrain"],
+			lod: {
+				buildings: 0,
+				terrain: 0,
+			},
+		});
+		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
+		await flushPromises();
+
+		const workId = "1:landblock:da55ffff:outdoor-buildings";
+		baker.complete(workId, {
+			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord(workId)],
+		});
+		await flushPromises();
+
+		expect(snapshots.at(-1)?.dynamic).toMatchObject({
+			activeEntityCount: 1,
+			nonRenderableEntityCount: 1,
+			staticSeedCount: 1,
+		});
+		expect(snapshots.at(-1)?.dynamic.records[0]).toMatchObject({
+			animation: {
+				defaultAnimationId: 0x0300061b,
+			},
+			sourceSeed: {
+				setupModelId: 0x020003e5,
+			},
+		});
+
+		runtime.updateSceneInterest({ kind: "none" });
+
+		expect(snapshots.at(-1)?.dynamic).toMatchObject({
+			activeEntityCount: 0,
+			staticSeedCount: 0,
+		});
+		unsubscribe();
+		runtime.dispose();
+	});
+
+	it("ingests classified env-cell dynamic seeds without dropping static env-cell seed records", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer: new FakeRenderer(),
+			staticCoordinator: createImmediateStaticCoordinator({ baker, resolver }),
+		});
+		const snapshots: RuntimeSnapshot[] = [];
+		const unsubscribe = runtime.subscribe((snapshot) => {
+			snapshots.push(snapshot);
+		});
+
+		updateInteriorSceneInterest(runtime);
+		completeResolverRequest(resolver, "landblock-env-cells", 0xda55ffff);
+		await flushPromises();
+
+		const workId = "1:landblock:da55ffff:landblock-env-cells";
+		baker.complete(workId, {
+			staticAuthoredDynamicSeeds: [
+				createEnvCellStaticSeedRecord(workId),
+				createEnvCellDynamicSeedRecord(workId),
+			],
+		});
+		await flushPromises();
+
+		expect(snapshots.at(-1)?.dynamic).toMatchObject({
+			activeEntityCount: 1,
+			issueCount: 2,
+			nonRenderableEntityCount: 1,
+			staticSeedCount: 1,
+		});
+		expect(snapshots.at(-1)?.dynamic.records[0]).toMatchObject({
+			id: "static-authored-env-cell:landblock-env-cells:landblock:da55ffff:env-cell:da550100:object:building:env-cell-static-0:setup:020003e5",
+			provenance: {
+				kind: "static-authored-env-cell",
+				sourceScopeKey: "landblock-env-cells:landblock:da55ffff",
+			},
+			renderability: {
+				reasons: ["resources-pending", "residence-render-path-pending"],
+				status: "non-renderable",
+			},
+			sourceResidence: {
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+		});
+
+		runtime.updateSceneInterest({ kind: "none" });
+
+		expect(snapshots.at(-1)?.dynamic).toMatchObject({
+			activeEntityCount: 0,
+			staticSeedCount: 0,
+		});
+		unsubscribe();
 		runtime.dispose();
 	});
 
@@ -1752,6 +1867,121 @@ function createEnvCellWorkOwner(
 		},
 		scopeKey: `landblock:${landblockId.toString(16).padStart(8, "0")}`,
 		workId,
+	};
+}
+
+function createOutdoorWorkOwner(
+	workId: string,
+	landblockId: number,
+	domain: "outdoor-buildings" | "outdoor-detail" = "outdoor-buildings",
+): StaticWorkPeerRecordOwner {
+	return {
+		domain,
+		kind: "work",
+		scope: {
+			kind: "landblock",
+			landblockId,
+		},
+		scopeKey: `landblock:${landblockId.toString(16).padStart(8, "0")}`,
+		workId,
+	};
+}
+
+function createOutdoorDynamicSeedRecord(
+	workId: string,
+): StaticAuthoredDynamicSeedRecord {
+	return {
+		kind: "outdoor-static-object-dynamic-seed",
+		owner: createOutdoorWorkOwner(workId, 0xda55ffff),
+		seed: {
+			classificationReason: "setup-default-animation",
+			defaultAnimationId: 0x0300061b,
+			domain: "outdoor-buildings",
+			landblockId: 0xda55ffff,
+			localPlacement: createPlacement(),
+			object: {
+				instanceId: "windmill-0",
+				kind: "static-object-instance",
+				landblockId: 0xda55ffff,
+				objectKind: "building",
+			},
+			setupModelId: 0x020003e5,
+			source: {
+				kind: "static-object-source",
+				sourceAssetKind: "setup-model",
+				sourceDid: 0x020003e5,
+			},
+			sourceAssetId: "setup-model/020003e5",
+			sourceResidence: {
+				kind: "landblock-source",
+				landblockId: 0xda55ffff,
+				source: "outdoor",
+			},
+			sourceScale: { x: 1, y: 1, z: 1 },
+		},
+	};
+}
+
+function createEnvCellStaticSeedRecord(
+	workId: string,
+): StaticAuthoredDynamicSeedRecord {
+	return {
+		envCellId: 0xda550100,
+		kind: "env-cell-static-object-seed",
+		landblockId: 0xda55ffff,
+		owner: createEnvCellWorkOwner(workId, 0xda55ffff),
+		seed: {
+			debug: { sourceAssetId: "setup-model/020003e5" },
+			identity: {
+				instanceId: "env-cell-static-0",
+				kind: "static-object-instance",
+				landblockId: 0xda55ffff,
+				objectKind: "building",
+			},
+			localPlacement: createPlacement(),
+			source: {
+				kind: "static-object-source",
+				sourceAssetKind: "setup-model",
+				sourceDid: 0x020003e5,
+			},
+			sourceIndex: 0,
+			sourceScale: { x: 1, y: 1, z: 1 },
+		},
+	};
+}
+
+function createEnvCellDynamicSeedRecord(
+	workId: string,
+): StaticAuthoredDynamicSeedRecord {
+	return {
+		kind: "env-cell-static-object-dynamic-seed",
+		owner: createEnvCellWorkOwner(workId, 0xda55ffff),
+		seed: {
+			classificationReason: "setup-default-animation",
+			defaultAnimationId: 0x0300061b,
+			envCellId: 0xda550100,
+			landblockId: 0xda55ffff,
+			localPlacement: createPlacement(),
+			object: {
+				instanceId: "env-cell-static-0",
+				kind: "static-object-instance",
+				landblockId: 0xda55ffff,
+				objectKind: "building",
+			},
+			setupModelId: 0x020003e5,
+			source: {
+				kind: "static-object-source",
+				sourceAssetKind: "setup-model",
+				sourceDid: 0x020003e5,
+			},
+			sourceAssetId: "setup-model/020003e5",
+			sourceResidence: {
+				kind: "landblock-source",
+				landblockId: 0xda55ffff,
+				source: "env-cells",
+			},
+			sourceScale: { x: 1, y: 1, z: 1 },
+		},
 	};
 }
 

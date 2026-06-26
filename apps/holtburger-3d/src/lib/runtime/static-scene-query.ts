@@ -3205,6 +3205,8 @@ function createCommittedAuthoredDynamicSeedRecordKey(
 	switch (record.kind) {
 		case "env-cell-static-object-seed":
 			return `env-cell-static-object-seed:${record.landblockId >>> 0}:${record.envCellId >>> 0}:${record.seed.identity.instanceId}`;
+		case "env-cell-static-object-dynamic-seed":
+			return `env-cell-static-object-dynamic-seed:${record.seed.landblockId >>> 0}:${record.seed.envCellId >>> 0}:${record.seed.object.instanceId}`;
 		case "outdoor-static-object-dynamic-seed":
 			return `outdoor-static-object-dynamic-seed:${record.seed.landblockId >>> 0}:${record.seed.domain}:${record.seed.object.instanceId}`;
 	}
@@ -3397,6 +3399,7 @@ function createCommittedRecordSortKey(record: unknown): string {
 			return createCommittedSourceMappingRecordKey(
 				record as StaticSourceMappingRecord,
 			);
+		case "env-cell-static-object-dynamic-seed":
 		case "env-cell-static-object-seed":
 			return createCommittedAuthoredDynamicSeedRecordKey(
 				record as StaticAuthoredDynamicSeedRecord,

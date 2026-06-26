@@ -471,7 +471,7 @@ Decisions and course corrections:
 
 ### Phase 3B: Env-Cell Static-Authored Dynamic Registration Parity
 
-Status: pending.
+Status: completed.
 
 Purpose:
 
@@ -530,25 +530,25 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add env-cell residence variants to dynamic contracts and snapshots.
-- [ ] Add the `env-cell-static-object-dynamic-seed` variant and env-cell dynamic seed facts in
+- [x] Add env-cell residence variants to dynamic contracts and snapshots.
+- [x] Add the `env-cell-static-object-dynamic-seed` variant and env-cell dynamic seed facts in
       static contracts.
-- [ ] Add env-cell dynamic classification in `LandblockEnvCellsBaker` using `payload.sourceAssets`
+- [x] Add env-cell dynamic classification in `LandblockEnvCellsBaker` using `payload.sourceAssets`
       rather than controller-side lookups.
-- [ ] Preserve existing `env-cell-static-object-seed` emission for env-cell static scene/query and
+- [x] Preserve existing `env-cell-static-object-seed` emission for env-cell static scene/query and
       system layer assembly.
-- [ ] Add classified env-cell dynamic seed ingestion and id construction in
+- [x] Add classified env-cell dynamic seed ingestion and id construction in
       `DynamicEntityController`.
-- [ ] Add coverage proving unclassified env-cell static seeds are not mirrored into dynamic state.
-- [ ] Add baker coverage proving setup-model/default-animation env-cell seeds emit the classified
+- [x] Add coverage proving unclassified env-cell static seeds are not mirrored into dynamic state.
+- [x] Add baker coverage proving setup-model/default-animation env-cell seeds emit the classified
       dynamic variant and gfx/no-default-animation seeds do not.
-- [ ] Add non-renderable diagnostics for env-cell records whose resource/render path is pending.
-- [ ] Add retention tests for `landblock-env-cells` source scopes.
-- [ ] Add runtime integration coverage proving classified env-cell seeds appear in dynamic
+- [x] Add non-renderable diagnostics for env-cell records whose resource/render path is pending.
+- [x] Add retention tests for `landblock-env-cells` source scopes.
+- [x] Add runtime integration coverage proving classified env-cell seeds appear in dynamic
       diagnostics without changing env-cell static rendering behavior.
-- [ ] Update future phases to refer to source residence instead of outdoor-only seeds where
+- [x] Update future phases to refer to source residence instead of outdoor-only seeds where
       applicable.
-- [ ] Run phase verification commands.
+- [x] Run phase verification commands.
 
 Decisions and course corrections:
 
@@ -559,6 +559,32 @@ Decisions and course corrections:
   Static scene query and env-cell system layer assembly already consume that variant as static
   membership data. Phase 3B should add a separate classified dynamic variant and leave the static
   variant untouched until the explicit env-cell render cutover phase.
+- 2026-06-26: Implementation keeps `env-cell-static-object-seed` emission unchanged and appends
+  `env-cell-static-object-dynamic-seed` only for setup-model/default-animation seeds. Static scene
+  query can key the new variant, but env-cell grouping and system layer assembly continue to filter
+  only the static membership variant.
+- 2026-06-26: Classified env-cell dynamic runtime records use env-cell residence, retain against the
+  existing `landblock-env-cells` static source scope key, and stay non-renderable with both
+  `resources-pending` and `residence-render-path-pending` diagnostics.
+- 2026-06-26: Focused verification passed:
+  `npm run test:ts -- dynamic-entity-controller landblock-env-cells-baker client-runtime`.
+- 2026-06-26: Full verification passed from `apps/holtburger-3d`: `npm run check`,
+  `npm run lint:ts`, `npm run lint:dead`, `npm run test:ts`, `npm run check:rust`, and
+  `npm run lint:rust`. Repository-level `git diff --check` also passed. The app-local Rust wrappers
+  must be run from `apps/holtburger-3d`; running `npm run check:rust` or `npm run lint:rust` from the
+  repository root fails because this checkout has no root `package.json`.
+
+Debt and follow-up:
+
+- Env-cell dynamic records are registered, diagnosable, retained, and evicted, but they are not
+  resource-ready or rendered. Phase 4 must hydrate setup, visual, material, texture, and animation
+  resources for both outdoor and env-cell dynamic records through the same resource manager.
+- Classified env-cell dynamic records deliberately do not cut over rendering yet. Static env-cell
+  output still includes those objects through `env-cell-static-object-seed`; a later render cutover
+  phase must explicitly remove classified env-cell dynamic objects from static output before
+  submitting them through dynamic renderer membership.
+- `residence-render-path-pending` is intentional temporary debt, not a terminal state. Remove or
+  narrow that diagnostic once env-cell dynamic placement/render membership is implemented and tested.
 
 ### Phase 4: Dynamic Resource Readiness
 

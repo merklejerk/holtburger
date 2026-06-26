@@ -1,0 +1,207 @@
+import { describe, expect, it } from "vitest";
+import type {
+	StaticAuthoredDynamicSeedRecord,
+	StaticScopeOwnerKey,
+	StaticWorkPeerRecordOwner,
+} from "../static/contracts";
+import { DynamicEntityController } from "./dynamic-entity-controller";
+
+describe("dynamic entity controller", () => {
+	it("creates stable non-renderable records from outdoor static-authored seeds", () => {
+		const controller = new DynamicEntityController();
+
+		controller.ingestStaticSeeds([createOutdoorSeedRecord()]);
+
+		expect(controller.createSnapshot()).toMatchObject({
+			activeEntityCount: 1,
+			issueCount: 1,
+			nonRenderableEntityCount: 1,
+			staticSeedCount: 1,
+		});
+		expect(controller.createSnapshot().records[0]).toMatchObject({
+			animation: {
+				defaultAnimationId: 0x0300061b,
+				status: "pending-resource",
+			},
+			id: "static-authored-outdoor:outdoor-buildings:landblock:da55ffff:object:building:windmill-0:setup:020003e5",
+			renderability: {
+				reasons: ["resources-pending"],
+				status: "non-renderable",
+			},
+			resources: {
+				required: ["setup-model", "animation"],
+				status: "pending",
+			},
+		});
+	});
+
+	it("re-ingests the same static source identity idempotently", () => {
+		const controller = new DynamicEntityController();
+		const seed = createOutdoorSeedRecord();
+
+		controller.ingestStaticSeeds([seed]);
+		controller.ingestStaticSeeds([seed]);
+
+		expect(controller.createSnapshot().records).toHaveLength(1);
+	});
+
+	it("replaces records for the same source identity when the static work owner changes", () => {
+		const controller = new DynamicEntityController();
+
+		controller.ingestStaticSeeds([
+			createOutdoorSeedRecord({ workId: "1:landblock:da55ffff:outdoor-buildings" }),
+		]);
+		controller.ingestStaticSeeds([
+			createOutdoorSeedRecord({ workId: "7:landblock:da55ffff:outdoor-buildings" }),
+		]);
+
+		expect(controller.createSnapshot().records).toHaveLength(1);
+		expect(controller.createSnapshot().records[0]?.provenance.owner.workId).toBe(
+			"7:landblock:da55ffff:outdoor-buildings",
+		);
+	});
+
+	it("removes records whose static source scope is no longer retained", () => {
+		const controller = new DynamicEntityController();
+		controller.ingestStaticSeeds([
+			createOutdoorSeedRecord(),
+			createOutdoorSeedRecord({
+				instanceId: "windmill-1",
+				landblockId: 0xdb55ffff,
+				scopeKey: "landblock:db55ffff",
+				workId: "1:landblock:db55ffff:outdoor-buildings",
+			}),
+		]);
+
+		controller.retainStaticScopes([createRetainedScope()]);
+
+		expect(controller.createSnapshot().records).toHaveLength(1);
+		expect(controller.createSnapshot().records[0]?.sourceResidence).toEqual({
+			kind: "outdoor-landblock",
+			landblockId: 0xda55ffff,
+		});
+	});
+
+	it("ignores env-cell authored seeds until they are promoted to dynamic runtime ownership", () => {
+		const controller = new DynamicEntityController();
+
+		controller.ingestStaticSeeds([createEnvCellSeedRecord()]);
+
+		expect(controller.createSnapshot().records).toEqual([]);
+	});
+});
+
+function createOutdoorSeedRecord(
+	options: {
+		readonly instanceId?: string;
+		readonly landblockId?: number;
+		readonly scopeKey?: string;
+		readonly workId?: string;
+	} = {},
+): StaticAuthoredDynamicSeedRecord {
+	const landblockId = options.landblockId ?? 0xda55ffff;
+	const scopeKey = options.scopeKey ?? "landblock:da55ffff";
+	return {
+		kind: "outdoor-static-object-dynamic-seed",
+		owner: createOwner({
+			landblockId,
+			scopeKey,
+			workId:
+				options.workId ?? "1:landblock:da55ffff:outdoor-buildings",
+		}),
+		seed: {
+			classificationReason: "setup-default-animation",
+			defaultAnimationId: 0x0300061b,
+			domain: "outdoor-buildings",
+			landblockId,
+			localPlacement: createPlacement(),
+			object: {
+				instanceId: options.instanceId ?? "windmill-0",
+				kind: "static-object-instance",
+				landblockId,
+				objectKind: "building",
+			},
+			setupModelId: 0x020003e5,
+			source: {
+				kind: "static-object-source",
+				sourceAssetKind: "setup-model",
+				sourceDid: 0x020003e5,
+			},
+			sourceAssetId: "setup-model/020003e5",
+			sourceResidence: {
+				kind: "landblock-source",
+				landblockId,
+				source: "outdoor",
+			},
+			sourceScale: { x: 1, y: 1, z: 1 },
+		},
+	};
+}
+
+function createEnvCellSeedRecord(): StaticAuthoredDynamicSeedRecord {
+	return {
+		envCellId: 0xda550100,
+		kind: "env-cell-static-object-seed",
+		landblockId: 0xda55ffff,
+		owner: createOwner({
+			domain: "landblock-env-cells",
+			workId: "1:landblock:da55ffff:landblock-env-cells",
+		}),
+		seed: {
+			debug: { sourceAssetId: "setup-model/020003e5" },
+			identity: {
+				instanceId: "seed-0",
+				kind: "static-object-instance",
+				landblockId: 0xda55ffff,
+				objectKind: "building",
+			},
+			localPlacement: createPlacement(),
+			source: {
+				kind: "static-object-source",
+				sourceAssetKind: "setup-model",
+				sourceDid: 0x020003e5,
+			},
+			sourceIndex: 0,
+			sourceScale: { x: 1, y: 1, z: 1 },
+		},
+	};
+}
+
+function createRetainedScope(): StaticScopeOwnerKey {
+	return {
+		domain: "outdoor-buildings",
+		scope: {
+			kind: "landblock",
+			landblockId: 0xda55ffff,
+		},
+		scopeKey: "landblock:da55ffff",
+	};
+}
+
+function createOwner(
+	options: {
+		readonly domain?: StaticWorkPeerRecordOwner["domain"];
+		readonly landblockId?: number;
+		readonly scopeKey?: string;
+		readonly workId: string;
+	},
+): StaticWorkPeerRecordOwner {
+	const landblockId = options.landblockId ?? 0xda55ffff;
+	return {
+		domain: options.domain ?? "outdoor-buildings",
+		kind: "work",
+		scope: {
+			kind: "landblock",
+			landblockId,
+		},
+		scopeKey: options.scopeKey ?? "landblock:da55ffff",
+		workId: options.workId,
+	};
+}
+
+function createPlacement() {
+	return {
+		orientation: { w: 1, x: 0, y: 0, z: 0 },
+		origin: { x: 1, y: 2, z: 3 },
+	};
+}

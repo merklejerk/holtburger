@@ -49,14 +49,15 @@ Second target evidence:
 - This target is the first transform-side hook validation target. Rendering it without omega support
   is acceptable only as a diagnosed visual compromise.
 
-Current code blockers:
+Initial code blockers and current implications:
 
-- `StaticAuthoredDynamicSeedRecord` currently represents env-cell static object seeds only. The
-  outdoor windmill target cannot be modeled honestly until the union includes outdoor static-authored
-  dynamic seed facts.
-- Setup payloads expose `defaultAnimation`, but animation assets are not first-class frontend asset
-  payloads. There is no `animation/0300....` route through `ContentAssetRequest`, Tauri asset id
-  parsing, Tauri JSON serialization, frontend zod validation, or asset preparation.
+- `StaticAuthoredDynamicSeedRecord` originally represented env-cell static object seeds only. Phase 2
+  added outdoor static-authored dynamic seed facts; Phase 3B now course-corrects the plan so
+  classified env-cell authored dynamic seeds are registered in the same dynamic runtime family
+  instead of remaining a separate static-only special case.
+- Setup payloads expose `defaultAnimation`, but animation assets were not first-class frontend asset
+  payloads at plan creation time. Phase 1 added the `animation/0300....` route, Tauri JSON
+  serialization, frontend zod validation, and asset preparation.
 - The runtime/browser picking path is static-shaped through `pickStaticRay`,
   `StaticScenePickRequest`, `StaticScenePickHit`, and `StaticSceneSelectionKey`.
 - Reusable static object visual resources exist, but today they are installed through outdoor-detail
@@ -100,12 +101,10 @@ The phase order is viable, but several implementation details need to be pinned 
   preserve raw payload bytes and hook names for all known hooks. Typed `SetOmega` decoding can land in
   Phase 1 if small, but it is a hard precondition before the Phase 10 follow-up proceeds to actual
   omega behavior.
-- Outdoor seed records cannot simply be added to `StaticAuthoredDynamicSeedRecord` and then pushed
-  through the existing `StaticSceneQuery.applyStaticPeerRecords` path. That code assumes authored
-  dynamic seeds are env-cell seeds with `envCellId`, including committed-key creation and
-  `groupEnvCellSeedsByLandblockAndEnvCell`. Either filter outdoor dynamic seeds before static scene
-  query ingestion or split env-cell static seeds from outdoor dynamic seeds at the materialized
-  commit boundary.
+- Static-authored dynamic seed records cannot be treated as one env-cell-shaped record. Phase 2 split
+  committed-key creation and env-cell grouping by seed kind for outdoor support. Phase 3B must now
+  complete the symmetric runtime registration path for classified env-cell dynamic seeds while
+  preserving env-cell static scene query behavior until a tested render/query cutover exists.
 - The static object source closure already has setup payloads, setup appearance, part/gfx/material
   facts, and default placement facts. Classification should happen before compatibility
   partitioning/bake output so dynamic seeds are never flattened into baked draw units. Classifying in
@@ -393,7 +392,7 @@ Decisions and course corrections:
 
 ### Phase 3: Dynamic Entity Store And Static Scope Reconciliation
 
-Status: pending.
+Status: completed.
 
 Purpose:
 
@@ -421,16 +420,145 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Define dynamic runtime contracts and record types.
-- [ ] Implement dynamic store helpers with narrow mutation APIs.
-- [ ] Wire controller creation into `ClientRuntimeImpl`.
-- [ ] Forward materialized dynamic seed records to the controller.
-- [ ] Add unit tests for ingest, idempotence, replacement, and eviction.
+- [x] Define dynamic runtime contracts and record types.
+- [x] Implement dynamic store helpers with narrow mutation APIs.
+- [x] Wire controller creation into `ClientRuntimeImpl`.
+- [x] Forward materialized dynamic seed records to the controller.
+- [x] Add unit tests for ingest, idempotence, replacement, and eviction.
+- [x] Run phase verification commands.
+
+Decisions and course corrections:
+
+- 2026-06-26: Added app-local dynamic runtime modules under
+  `apps/holtburger-3d/src/lib/dynamic/`. The first slice has contracts, a narrow
+  `DynamicEntityStore`, and `DynamicEntityController`; it does not add renderer state, resource
+  hydration, animation playback, or spatial indexing yet.
+- 2026-06-26: Dynamic entity ids are keyed from static source scope plus authored object/setup
+  identity, not static work revision or renderer resource identity. Re-ingesting a later committed
+  work item for the same source replaces the record while keeping the semantic id stable.
+- 2026-06-26: `ClientRuntimeImpl` now forwards materialized outdoor dynamic seed records to the
+  dynamic controller and exposes a `dynamic` snapshot. Runtime scene-interest reconciliation passes
+  retained static scopes to the controller so source-scope eviction removes dynamic records even
+  though authored seeds are not concrete `StaticResourceKey` values.
+- 2026-06-26: Phase 3 intentionally ignores existing env-cell static object seed records. Those
+  records remain part of the env-cell static rendering/query path until a later phase explicitly
+  registers classified env-cell dynamic seeds in the dynamic runtime.
+- 2026-06-26: New records are explicitly non-renderable with `resources-pending` diagnostics. This
+  closes the Phase 3 "missing resources keep source record alive" requirement without pretending
+  setup/animation leases or renderer submissions exist before Phases 4 and 8.
+- 2026-06-26: Scope eviction currently removes semantic records only. Resource leases, spatial index
+  entries, and renderer submissions have no concrete Phase 3 state to release yet; Phase 4, Phase 6,
+  and Phase 8 must hook their cleanup into the same controller removal path when they add those
+  derived states.
+- 2026-06-26: Verification results: focused
+  `npm run test:ts -- dynamic-entity-controller client-runtime`, `npm run check`,
+  `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` pass.
+- 2026-06-26: Course correction before Phase 4: dynamic registration should not stay outdoor-only.
+  Static-authored dynamic seed registration is a shared concept across outdoor landblock and
+  env-cell authored statics; source residence and render/query membership are the
+  residence-specific pieces. Keep the completed Phase 2/3 outdoor work as the first slice, then add
+  Phase 3B to register classified env-cell authored dynamic seeds in the same dynamic runtime before
+  resource readiness grows around an outdoor-only assumption.
+- 2026-06-26: Tightened Phase 3B terminology: "promotion" means classified dynamic runtime
+  registration, not env-cell dynamic rendering cutover. Env-cell static rendering remains unchanged
+  until a later phase introduces an explicit, tested rule for diverting classified env-cell objects
+  away from static output and into dynamic renderer membership.
+- 2026-06-26: Phase 3B dry run found that existing `env-cell-static-object-seed` records are
+  already the env-cell static scene/query membership records and should not be repurposed as dynamic
+  records. Add a separate classified `env-cell-static-object-dynamic-seed` variant instead; the
+  env-cell baker should emit it from `payload.sourceAssets` only when the source is a setup model
+  with a non-null default animation.
+
+### Phase 3B: Env-Cell Static-Authored Dynamic Registration Parity
+
+Status: pending.
+
+Purpose:
+
+- Register env-cell authored static object seeds that meet the dynamic classification predicate in
+  the dynamic runtime so dynamic entity registration is source-residence-aware rather than
+  outdoor-only.
+- Do not perform env-cell rendering cutover in this phase. Phase 3B establishes stable identity,
+  source residence, retention, and diagnostics for classified env-cell dynamic records while the
+  existing env-cell static rendering/query path remains authoritative for visible output.
+
+Deliverables:
+
+- Extend dynamic source/effective residence types to include env-cell residence with landblock id and
+  env-cell id.
+- Extend `StaticAuthoredDynamicSeedRecord` with a new classified
+  `env-cell-static-object-dynamic-seed` variant. Keep the existing `env-cell-static-object-seed`
+  variant unchanged for env-cell static scene/query and layer assembly.
+- In `LandblockEnvCellsBaker`, classify env-cell dynamic seeds from
+  `LandblockEnvCellsStaticScopePayload.sourceAssets` plus each env-cell static seed source. The first
+  accepted predicate must match the outdoor path's authored dynamic evidence: setup-model source with
+  a non-null `defaultAnimation`.
+- Shape env-cell dynamic seed facts like the outdoor dynamic seed facts where possible: landblock id,
+  env-cell id, object identity, source identity, source asset id, setup model id, default animation
+  id, local placement, normalized source scale, and
+  `classificationReason: "setup-default-animation"`.
+- Normalize missing/null env-cell source scale to `{ x: 1, y: 1, z: 1 }` before dynamic facts reach
+  the controller.
+- Update `DynamicEntityController` to ingest `outdoor-static-object-dynamic-seed` and
+  `env-cell-static-object-dynamic-seed` records as static-authored dynamic records while continuing
+  to ignore unclassified `env-cell-static-object-seed` records.
+- Keep env-cell records non-renderable with explicit "residence render path pending" or
+  "resources-pending" diagnostics until resource readiness and env-cell render membership are
+  implemented.
+- Preserve existing env-cell static rendering/query behavior during this parity phase. Do not remove
+  classified env-cell dynamic objects from static output until a later phase adds and tests a
+  rendering cutover rule.
+- Reconcile env-cell dynamic records against retained `landblock-env-cells` source scopes.
+- Update runtime diagnostics/snapshots so outdoor and env-cell static-authored dynamic records are
+  visible under the same dynamic snapshot family.
+
+Acceptance criteria:
+
+- Env-cell static authored seeds create stable dynamic records only when they satisfy the dynamic
+  classification predicate.
+- Env-cell seeds that do not satisfy the predicate continue to emit only
+  `env-cell-static-object-seed` records and are not mirrored into the dynamic store.
+- Classified env-cell seeds emit an additional `env-cell-static-object-dynamic-seed` record without
+  removing or mutating the existing static `env-cell-static-object-seed` record.
+- Classified env-cell dynamic records are keyed by source scope, env-cell id, object identity, and
+  setup/source identity.
+- Re-ingesting the same classified env-cell dynamic seed is idempotent.
+- Removing the retained `landblock-env-cells` scope removes its env-cell dynamic records.
+- Env-cell dynamic records do not enter outdoor-only placement, outdoor dynamic spatial index, or
+  outdoor renderer submission paths.
+- Existing env-cell static scene query and env-cell system layer tests continue to pass.
+
+Task checklist:
+
+- [ ] Add env-cell residence variants to dynamic contracts and snapshots.
+- [ ] Add the `env-cell-static-object-dynamic-seed` variant and env-cell dynamic seed facts in
+      static contracts.
+- [ ] Add env-cell dynamic classification in `LandblockEnvCellsBaker` using `payload.sourceAssets`
+      rather than controller-side lookups.
+- [ ] Preserve existing `env-cell-static-object-seed` emission for env-cell static scene/query and
+      system layer assembly.
+- [ ] Add classified env-cell dynamic seed ingestion and id construction in
+      `DynamicEntityController`.
+- [ ] Add coverage proving unclassified env-cell static seeds are not mirrored into dynamic state.
+- [ ] Add baker coverage proving setup-model/default-animation env-cell seeds emit the classified
+      dynamic variant and gfx/no-default-animation seeds do not.
+- [ ] Add non-renderable diagnostics for env-cell records whose resource/render path is pending.
+- [ ] Add retention tests for `landblock-env-cells` source scopes.
+- [ ] Add runtime integration coverage proving classified env-cell seeds appear in dynamic
+      diagnostics without changing env-cell static rendering behavior.
+- [ ] Update future phases to refer to source residence instead of outdoor-only seeds where
+      applicable.
 - [ ] Run phase verification commands.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-26: Dry run rejected controller-side env-cell classification because the controller would
+  need source-asset lookup context or an ambient table. Classification belongs in the env-cell baker,
+  where `payload.sourceAssets` is already resident for the static object compatibility bake.
+- 2026-06-26: Dry run rejected repurposing `env-cell-static-object-seed` as the dynamic record.
+  Static scene query and env-cell system layer assembly already consume that variant as static
+  membership data. Phase 3B should add a separate classified dynamic variant and leave the static
+  variant untouched until the explicit env-cell render cutover phase.
 
 ### Phase 4: Dynamic Resource Readiness
 
@@ -439,7 +567,8 @@ Status: pending.
 Purpose:
 
 - Hydrate setup, appearance/gfx/material/texture, and animation dependencies through the existing
-  asset service while keeping dynamic resource readiness separate from static bake output.
+  asset service for static-authored dynamic records while keeping dynamic resource readiness separate
+  from static bake output.
 
 Deliverables:
 
@@ -456,6 +585,8 @@ Deliverables:
   setup and hook data already carries direct DAT ids; per-resource tables are loaded by those ids
   only when referenced by active entities or implemented hook/playback behavior.
 - Request setup model and animation payloads from static seed facts.
+- Support both outdoor landblock and env-cell source residences. Resource readiness should not care
+  which residence produced the authored dynamic seed except where diagnostics need residence context.
 - Reuse existing setup/gfx/material/texture preparation helpers where their facts are isomorphic.
 - Preserve prepared texture identities and sampler/material requirements in dynamic visual resource
   readiness so Phase 8 can request the same shared atlas/cache entries as static consumers.
@@ -471,6 +602,8 @@ Acceptance criteria:
 
 - `0x020003e5` reaches renderable resource readiness when setup, parts/materials/textures, and
   animation are available.
+- Env-cell static-authored dynamic records can reach the same resource-ready/non-renderable state
+  without entering outdoor-only placement or renderer paths.
 - Missing animation or setup resources make the entity non-renderable with explicit diagnostics.
 - Missing setup appearance is diagnosed but does not block rendering when setup-provided parts are
   sufficient.
@@ -489,6 +622,8 @@ Task checklist:
 - [ ] Define typed dynamic resource keys, including reserved future table key variants.
 - [ ] Implement shared resource request, in-flight dedupe, committed reuse, lease acquisition, and
       release handling.
+- [ ] Prove resource readiness works for outdoor and env-cell source residences without duplicating
+      resource manager logic.
 - [ ] Prove duplicate entity references to the same setup or animation share one committed resource
       entry.
 - [ ] Prove no startup-hydrated global lookup table is required for first-slice dynamic resources.
@@ -837,9 +972,29 @@ Decisions and course corrections:
   prepared entries, and load per-resource table assets only when referenced by active entities or
   implemented behavior.
 
-- Risk: outdoor dynamic seed records poison env-cell-only static scene query helpers.
-  Mitigation: split or filter seed flows at materialized commit ingestion until static scene query
-  supports outdoor dynamic seeds intentionally.
+- Risk: static-authored dynamic registration remains split by source residence and accumulates
+  outdoor-only branches.
+  Mitigation: Phase 3B registers classified env-cell authored dynamic seeds in the same dynamic
+  runtime family before Phase 4 resource readiness, while keeping placement/query/render behavior
+  staged by source residence.
+
+- Risk: env-cell parity becomes nominal rather than functional by mirroring every env-cell static
+  object into dynamic state without evidence that it should behave dynamically.
+  Mitigation: classify in the env-cell baker from `payload.sourceAssets`, emit a separate
+  `env-cell-static-object-dynamic-seed` only for setup-model/default-animation seeds, prove
+  unclassified env-cell statics are not registered, and keep rendering cutover explicitly out of
+  Phase 3B.
+
+- Risk: env-cell dynamic registration corrupts static env-cell scene/query membership by changing
+  the meaning of `env-cell-static-object-seed`.
+  Mitigation: keep `env-cell-static-object-seed` as the static membership record and add a separate
+  classified dynamic variant. Existing env-cell static scene query and system layer tests must pass
+  unchanged unless a later phase intentionally changes static cutover behavior.
+
+- Risk: env-cell dynamic records poison outdoor-only placement, indexing, or renderer paths.
+  Mitigation: model source/effective residence explicitly and keep env-cell dynamic records
+  non-renderable or render-pending until env-cell placement/render membership is implemented and
+  tested.
 
 - Risk: `SetOmega` remains raw bytes when the follow-up target starts.
   Mitigation: keep raw hook payload diagnostics in Phase 1 and require typed `SetOmega` decoding
@@ -848,6 +1003,11 @@ Decisions and course corrections:
 ## Definition Of Done
 
 - `0x020003e5` is rendered through the dynamic runtime, not baked static geometry.
+- Static-authored dynamic registration supports both outdoor landblock and env-cell source
+  residence; outdoor rendering is first-target complete, while classified env-cell records are at
+  least registered through the `env-cell-static-object-dynamic-seed` variant, diagnosable, retained,
+  and evicted through the shared dynamic runtime without changing env-cell static rendering until the
+  explicit env-cell render cutover phase.
 - The target plays default animation `0x0300061b` with live per-part origin/orientation frames.
 - Dynamic resource readiness uses setup, available setup appearance/gfx/material/texture facts, and
   animation assets through the asset service; missing setup appearance is allowed only when the

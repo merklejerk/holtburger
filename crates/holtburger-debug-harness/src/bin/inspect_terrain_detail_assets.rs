@@ -116,7 +116,7 @@ fn print_surface_summary(hba: &HbaReader, surface: &RenderSurface) -> Result<()>
         max,
         surface.default_palette_id
     );
-    if surface.format_raw == 0x15 && surface.source_data.len() % 4 == 0 {
+    if surface.format_raw == 0x15 && surface.source_data.len().is_multiple_of(4) {
         for (label, offset) in [("b", 0usize), ("g", 1), ("r", 2), ("a", 3)] {
             let values = surface
                 .source_data

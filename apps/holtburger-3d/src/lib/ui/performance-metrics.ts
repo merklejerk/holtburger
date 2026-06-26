@@ -54,7 +54,9 @@ export class PerformanceMetricsTracker {
 				fps: 0,
 				frameMs: 0,
 				handlerMs: this.#smoothedHandlerMs,
-				extrapolatedFps: this.#calculateExtrapolatedFps(this.#smoothedHandlerMs),
+				extrapolatedFps: this.#calculateExtrapolatedFps(
+					this.#smoothedHandlerMs,
+				),
 			};
 			return this.#snapshot;
 		}

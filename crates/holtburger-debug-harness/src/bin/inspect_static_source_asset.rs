@@ -12,6 +12,9 @@ use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use std::collections::BTreeMap;
 use std::io::Cursor;
 
+type Vec3Tuple = (f32, f32, f32);
+type BoundsTuple = (Vec3Tuple, Vec3Tuple);
+
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(long, default_value = "dats/assets.hba")]
@@ -326,7 +329,7 @@ fn print_material_alpha_summary(
     Ok(())
 }
 
-fn animation_pos_frame_bounds(animation: &Animation) -> Option<((f32, f32, f32), (f32, f32, f32))> {
+fn animation_pos_frame_bounds(animation: &Animation) -> Option<BoundsTuple> {
     let first = animation.pos_frames.first()?;
     let mut min = (first.origin.x, first.origin.y, first.origin.z);
     let mut max = min;

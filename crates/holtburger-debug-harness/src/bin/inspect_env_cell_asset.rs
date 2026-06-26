@@ -163,7 +163,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn load_cell_structure<'a>(
+fn load_cell_structure(
     content: &ContentRepository,
     prepared_cell: &PreparedInteriorCell,
 ) -> Result<Option<CellStruct>> {

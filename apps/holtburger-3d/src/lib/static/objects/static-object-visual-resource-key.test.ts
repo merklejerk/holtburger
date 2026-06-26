@@ -160,11 +160,13 @@ function createVisualKeyInput(
 	};
 }
 
-function createGeometryIdentity(options: {
-	readonly gfxObjDid?: number;
-	readonly sourceDid?: number;
-	readonly partIndex?: number;
-} = {}): StaticObjectSourceGeometryIdentity {
+function createGeometryIdentity(
+	options: {
+		readonly gfxObjDid?: number;
+		readonly sourceDid?: number;
+		readonly partIndex?: number;
+	} = {},
+): StaticObjectSourceGeometryIdentity {
 	return {
 		gfxObj: {
 			kind: "static-object-source",
@@ -197,11 +199,13 @@ function createRenderState(
 	};
 }
 
-function createMaterialEntry(options: {
-	readonly alphaTest?: number;
-	readonly slot?: number;
-	readonly textureUseId?: string;
-} = {}): StaticMaterialTableEntry {
+function createMaterialEntry(
+	options: {
+		readonly alphaTest?: number;
+		readonly slot?: number;
+		readonly textureUseId?: string;
+	} = {},
+): StaticMaterialTableEntry {
 	const textureUseId = options.textureUseId ?? "texture-a";
 	return {
 		alphaTest: options.alphaTest ?? 0.5,

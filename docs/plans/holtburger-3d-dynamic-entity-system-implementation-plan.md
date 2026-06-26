@@ -806,34 +806,60 @@ Purpose:
 Deliverables:
 
 - Add `DynamicAnimationPlayer`.
+- Carry the validated animation payload into dynamic resource state when setup/animation readiness
+  completes, so playback consumes an owned resource result instead of re-querying ambient host state.
 - Start setup default animation from frame 0 at 30 frames per second for static-authored first-slice
   records.
-- Sample integer part frames using `floor(frame_number)`.
+- Sample integer animation frames using `floor(frame_number)`.
+- Sample `objectPositionFrames` along with `partFrames` and store the current object/root pose
+  separately from source/base placement.
+- Treat source/base placement, current object/root pose, and current part poses as separate
+  transforms: base placement anchors the entity in its source residence, object/root pose is the
+  animation root transform beneath that base, and part poses are local to the animated object/root
+  frame.
 - Apply active animation part frame origin and orientation as current part pose, not as a delta on
   setup default placement.
 - Add `DynamicHookDispatcher` with no-op and unsupported-hook diagnostic paths.
 - Preserve hook invocation context even when no handler exists.
+- Dispatch hooks once per entered sampled frame and loop cycle, not once per render/runtime tick.
+- Handle zero-frame and malformed object-position-frame cases with explicit diagnostics rather than
+  modulo-by-zero or silent fallback.
 
 Acceptance criteria:
 
-- The windmill target advances frames and produces current part poses for all five parts.
+- The windmill target advances frames and produces current object/root pose plus current part poses
+  for all five parts.
 - Active animation frames replace setup/default placement frames during playback.
+- Object-position frames are applied as root/object animation state beneath base placement. If
+  `objectPositionFrames` is empty, playback uses an identity object/root pose; if present but
+  malformed for the sampled frame range, playback records a diagnostic.
 - Hook-free animation produces no unsupported-hook diagnostics.
 - A fixture animation with an unsupported hook records entity, asset id, frame, hook id/name, and
   skipped effect.
+- Repeated runtime ticks inside the same sampled frame do not dispatch duplicate hook diagnostics.
 
 Task checklist:
 
 - [ ] Add animation playback state to dynamic records.
+- [ ] Carry validated animation payloads from resource readiness into playback-owned state.
 - [ ] Implement integer frame advancement and looping.
+- [ ] Implement object/root pose sampling from `objectPositionFrames`.
 - [ ] Implement current part-pose output.
 - [ ] Add hook invocation DTO/runtime type.
-- [ ] Add unsupported-hook diagnostics and tests.
+- [ ] Add zero-frame and malformed object-position-frame diagnostics and tests.
+- [ ] Add unsupported-hook diagnostics, one-shot frame-entry dispatch, and tests.
 - [ ] Run phase verification commands.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-26: Dry run found that Phase 4A/4B records know animation readiness but do not yet carry
+  the animation payload needed for playback. Phase 5 should make the animation payload an explicit
+  dynamic resource result consumed by `DynamicAnimationPlayer`.
+- 2026-06-26: Object-position frames are in scope for Phase 5. They are not renderer debt. Playback
+  must sample them alongside part frames and preserve the transform layering between source/base
+  placement, object/root animation pose, and per-part local poses.
+- 2026-06-26: Hook dispatch must be tied to sampled-frame entry and loop cycle, not raw runtime tick
+  frequency, to avoid duplicate hook diagnostics at render rates above 30 fps.
 
 ### Phase 6: Dynamic Placement, Bounds, And Outdoor Spatial Index
 

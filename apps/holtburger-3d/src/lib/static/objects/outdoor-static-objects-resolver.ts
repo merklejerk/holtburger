@@ -14,6 +14,7 @@ import type {
 	StaticObjectInstanceFacts,
 	StaticObjectInstanceIdentity,
 	StaticObjectMaterialSlotFacts,
+	OutdoorStaticObjectDynamicSeedFacts,
 	OutdoorStaticBvhFacts,
 	StaticObjectPartIdentity,
 	RegionDetailRoleFacts,
@@ -131,7 +132,7 @@ export class OutdoorStaticObjectsResolver {
 				source,
 			]),
 		);
-		const objects = selectedObjects
+		const allObjects = selectedObjects
 			.map((object): StaticObjectInstanceFacts => {
 				const source = createStaticObjectSourceIdentity(
 					parseHostAssetId(object.sourceAssetId),
@@ -160,6 +161,23 @@ export class OutdoorStaticObjectsResolver {
 				};
 			})
 			.filter((object) => sourceByKey.has(createSourceCacheKey(object.source)));
+		const dynamicSeedFacts = createOutdoorDynamicSeedFacts({
+			domain,
+			landblockId: landblock.payload.landblockId,
+			landblockSource: {
+				kind: "landblock-source",
+				landblockId: landblock.payload.landblockId,
+				source: "outdoor",
+			},
+			objects: allObjects,
+			sourceByKey,
+		});
+		const dynamicObjectKeys = new Set(
+			dynamicSeedFacts.map((seed) => createObjectInstanceKey(seed.object)),
+		);
+		const objects = allObjects.filter(
+			(object) => !dynamicObjectKeys.has(createObjectInstanceKey(object.identity)),
+		);
 		const objectsByInstanceId = new Map(
 			objects.map((object) => [object.identity.instanceId, object]),
 		);
@@ -168,6 +186,7 @@ export class OutdoorStaticObjectsResolver {
 			sourceByKey,
 		});
 		const scope: OutdoorStaticObjectsScopePayload = {
+			authoredDynamicSeeds: dynamicSeedFacts,
 			buildingTransitionApertures:
 				domain === "outdoor-buildings"
 					? landblock.payload.buildingTransitionApertures
@@ -254,6 +273,49 @@ export class OutdoorStaticObjectsResolver {
 		const payload = requirePreparedPayloadKind(asset, expectedKind);
 		return { asset, payload };
 	}
+}
+
+function createOutdoorDynamicSeedFacts(options: {
+	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
+	readonly landblockId: number;
+	readonly landblockSource: OutdoorStaticObjectsScopePayload["landblock"];
+	readonly objects: readonly StaticObjectInstanceFacts[];
+	readonly sourceByKey: ReadonlyMap<string, StaticObjectSourceAssetFacts>;
+}): readonly OutdoorStaticObjectDynamicSeedFacts[] {
+	return options.objects.flatMap((object) => {
+		const source = options.sourceByKey.get(createSourceCacheKey(object.source));
+		if (
+			!source ||
+			source.sourceAssetKind !== "setup-model" ||
+			source.defaultAnimation === null
+		) {
+			return [];
+		}
+
+		return [
+			{
+				classificationReason: "setup-default-animation",
+				defaultAnimationId: source.defaultAnimation,
+				domain: options.domain,
+				landblockId: options.landblockId,
+				localPlacement: object.localPlacement,
+				object: object.identity,
+				setupModelId: source.identity.sourceDid,
+				source: object.source,
+				sourceAssetId: source.debug.sourceAssetId,
+				sourceResidence: options.landblockSource,
+				sourceScale: object.sourceScale,
+			},
+		];
+	});
+}
+
+function createObjectInstanceKey(identity: StaticObjectInstanceIdentity): string {
+	return [
+		identity.landblockId >>> 0,
+		identity.objectKind,
+		identity.instanceId,
+	].join(":");
 }
 
 function isOutdoorStaticObjectDomain(

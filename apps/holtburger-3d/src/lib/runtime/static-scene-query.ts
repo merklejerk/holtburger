@@ -3202,7 +3202,12 @@ function createCommittedSourceMappingRecordKey(
 function createCommittedAuthoredDynamicSeedRecordKey(
 	record: StaticAuthoredDynamicSeedRecord,
 ): string {
-	return `env-cell-static-object-seed:${record.landblockId >>> 0}:${record.envCellId >>> 0}:${record.seed.identity.instanceId}`;
+	switch (record.kind) {
+		case "env-cell-static-object-seed":
+			return `env-cell-static-object-seed:${record.landblockId >>> 0}:${record.envCellId >>> 0}:${record.seed.identity.instanceId}`;
+		case "outdoor-static-object-dynamic-seed":
+			return `outdoor-static-object-dynamic-seed:${record.seed.landblockId >>> 0}:${record.seed.domain}:${record.seed.object.instanceId}`;
+	}
 }
 
 function createStaticPeerOwnerKey(owner: {
@@ -3273,17 +3278,30 @@ function groupEnvCellSeedsByLandblockAndEnvCell(
 	>,
 ): ReadonlyMap<
 	number,
-	ReadonlyMap<number, readonly StaticAuthoredDynamicSeedRecord[]>
+	ReadonlyMap<
+		number,
+		readonly Extract<
+			StaticAuthoredDynamicSeedRecord,
+			{ readonly kind: "env-cell-static-object-seed" }
+		>[]
+	>
 > {
+	type EnvCellSeedRecord = Extract<
+		StaticAuthoredDynamicSeedRecord,
+		{ readonly kind: "env-cell-static-object-seed" }
+	>;
 	const recordsByLandblockAndEnvCell = new Map<
 		number,
-		Map<number, StaticAuthoredDynamicSeedRecord[]>
+		Map<number, EnvCellSeedRecord[]>
 	>();
 	for (const entry of recordsByKey.values()) {
 		const record = entry.record;
+		if (record.kind !== "env-cell-static-object-seed") {
+			continue;
+		}
 		let recordsByEnvCell = recordsByLandblockAndEnvCell.get(record.landblockId);
 		if (!recordsByEnvCell) {
-			recordsByEnvCell = new Map<number, StaticAuthoredDynamicSeedRecord[]>();
+			recordsByEnvCell = new Map<number, EnvCellSeedRecord[]>();
 			recordsByLandblockAndEnvCell.set(record.landblockId, recordsByEnvCell);
 		}
 		const records = recordsByEnvCell.get(record.envCellId) ?? [];

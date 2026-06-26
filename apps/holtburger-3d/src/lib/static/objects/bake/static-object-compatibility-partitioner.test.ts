@@ -554,6 +554,59 @@ describe("static object compatibility partitioner", () => {
 		expect(result.textureUses).toHaveLength(1);
 	});
 
+	it("forwards outdoor authored dynamic seeds without baking static geometry", () => {
+		const basePayload = createPayload({
+			materials: [createSolidMaterial(0x08000010)],
+		});
+		const object = basePayload.objects[0];
+		const source = basePayload.sourceAssets[0];
+		if (!object || !source) {
+			throw new Error("Fixture payload did not create an object source.");
+		}
+		const dynamicSeed = {
+			classificationReason: "setup-default-animation" as const,
+			defaultAnimationId: 0x0300061b,
+			domain: basePayload.domain,
+			landblockId: basePayload.landblock.landblockId,
+			localPlacement: object.localPlacement,
+			object: object.identity,
+			setupModelId: source.identity.sourceDid,
+			source: object.source,
+			sourceAssetId: source.debug.sourceAssetId,
+			sourceResidence: basePayload.landblock,
+			sourceScale: object.sourceScale,
+		};
+		const payload = {
+			...basePayload,
+			authoredDynamicSeeds: [dynamicSeed],
+			materialSlots: [],
+			objects: [],
+		} satisfies OutdoorStaticObjectsScopePayload;
+
+		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+
+		expect(result.drawUnits).toEqual([]);
+		expect(result.staticObjectRenderInstances).toEqual([]);
+		expect(result.staticAuthoredDynamicSeeds).toEqual([
+			{
+				kind: "outdoor-static-object-dynamic-seed",
+				owner: expect.objectContaining({
+					domain: "outdoor-buildings",
+					workId: "1:landblock:da55ffff:outdoor-buildings",
+				}),
+				seed: dynamicSeed,
+			},
+		]);
+		expect(result.staticObjectBakeDiagnostics[0]).toMatchObject({
+			authoredDynamicSeedClassificationReasons: {
+				setupDefaultAnimation: 1,
+			},
+			authoredDynamicSeedCount: 1,
+			drawUnitCount: 0,
+			objectCount: 0,
+		});
+	});
+
 	it("bakes Base1ClipMap indexed partitions with retail index cutoff", () => {
 		const payload = createPayload({
 			materials: [createIndexedMaterial(0x08000010, { surfaceType: 0x4 })],
@@ -1753,6 +1806,7 @@ function createPayload(options: {
 	});
 
 	return {
+		authoredDynamicSeeds: [],
 		buildingTransitionApertures: options.buildingTransitionApertures ?? [],
 		domain,
 		kind: "outdoor-static-objects",
@@ -1812,6 +1866,7 @@ function createPayload(options: {
 			{
 				bounds: null,
 				debug: { sourceAssetId: "setup-model/02000010" },
+				defaultAnimation: null,
 				identity: createSourceIdentity(),
 				invalidPolygonCount: 0,
 				materialSlotCount: options.materials.length,

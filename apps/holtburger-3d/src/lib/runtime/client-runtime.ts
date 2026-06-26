@@ -77,7 +77,7 @@ import type {
 import {
 	AC_UNIT_SCALE,
 	buildAcPlacementMatrix,
-} from "../static/bake/ac-placement-transform";
+} from "../math/ac-placement-transform";
 import { collectStaticDrawUnitResourceIds } from "../static/contracts";
 import {
 	materializeStaticCommit,
@@ -883,8 +883,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#assertActive();
 		this.#lastFrameState = state;
 		this.#renderer.updateFrameState(state);
-		const dynamicPlaybackChanged =
-			this.#dynamicEntityController.updateAnimationPlayback(state.timeSeconds);
+		const dynamicPlaybackChanged = this.#dynamicEntityController.tick(
+			state.timeSeconds,
+		);
 		const portalOverlapChanged = this.#refreshPortalOverlapResidency();
 		if (portalOverlapChanged) {
 			this.#updateRenderPassPlan();

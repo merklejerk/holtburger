@@ -20,6 +20,7 @@ import {
 	DynamicEntityResourceManager,
 	type DynamicEntityResourceChange,
 } from "./dynamic-entity-resource-manager";
+import { DynamicPlacementTracker } from "./dynamic-placement-tracker";
 
 const FIRST_SLICE_REQUIRED_RESOURCES = ["setup-model", "animation"] as const;
 const PHASE_4B_REQUIRED_RESOURCES = [
@@ -33,17 +34,21 @@ const PHASE_4B_REQUIRED_RESOURCES = [
 
 export interface DynamicEntityControllerOptions {
 	readonly onResourcesChanged?: () => void;
+	readonly placementTracker?: DynamicPlacementTracker;
 	readonly resourceManager?: DynamicEntityResourceManager;
 	readonly store?: DynamicEntityStore;
 }
 
 export class DynamicEntityController {
 	readonly #animationPlayer = new DynamicAnimationPlayer();
+	readonly #placementTracker: DynamicPlacementTracker;
 	readonly #resourceManager: DynamicEntityResourceManager | null;
 	readonly #store: DynamicEntityStore;
 	readonly #onResourcesChanged: () => void;
 
 	constructor(options: DynamicEntityControllerOptions = {}) {
+		this.#placementTracker =
+			options.placementTracker ?? new DynamicPlacementTracker();
 		this.#resourceManager = options.resourceManager ?? null;
 		this.#store = options.store ?? new DynamicEntityStore();
 		this.#onResourcesChanged = options.onResourcesChanged ?? (() => {});
@@ -77,6 +82,7 @@ export class DynamicEntityController {
 			new Set(scopes.map(createStaticScopeOwnerKey)),
 		);
 		for (const record of removed) {
+			this.#placementTracker.release(record.id);
 			this.#resourceManager?.releaseEntity(record.id);
 		}
 	}
@@ -86,16 +92,18 @@ export class DynamicEntityController {
 			applyResourceChange(record, change),
 		);
 		if (updated) {
+			this.#upsertPlacementUpdate(updated);
 			this.#onResourcesChanged();
 		}
 	}
 
-	updateAnimationPlayback(timeSeconds: number): boolean {
+	tick(timeSeconds: number): boolean {
 		let changed = false;
 		for (const record of this.#store.records()) {
 			const update = this.#animationPlayer.update(record, timeSeconds);
-			if (update.changed) {
-				this.#store.upsert(update.record);
+			const placementUpdate = this.#placementTracker.update(update.record);
+			if (update.changed || placementUpdate.changed) {
+				this.#store.upsert(placementUpdate.record);
 				changed = true;
 			}
 		}
@@ -103,11 +111,19 @@ export class DynamicEntityController {
 	}
 
 	dispose(): void {
+		this.#placementTracker.releaseAll();
 		this.#resourceManager?.releaseAll();
 	}
 
 	createSnapshot(): DynamicRuntimeSnapshot {
 		return this.#store.createSnapshot();
+	}
+
+	#upsertPlacementUpdate(record: DynamicEntityRecord): void {
+		const placementUpdate = this.#placementTracker.update(record);
+		if (placementUpdate.changed) {
+			this.#store.upsert(placementUpdate.record);
+		}
 	}
 }
 
@@ -162,6 +178,8 @@ function createDynamicEntityRecord(
 		bounds: {
 			currentBounds: null,
 			indexed: false,
+			indexedLandblockIds: [],
+			precision: "none",
 		},
 		diagnostics: [
 			{

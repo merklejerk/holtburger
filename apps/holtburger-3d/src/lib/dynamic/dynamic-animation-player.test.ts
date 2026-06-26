@@ -327,6 +327,8 @@ function createRecord(options: {
 		bounds: {
 			currentBounds: null,
 			indexed: false,
+			indexedLandblockIds: [],
+			precision: "none",
 		},
 		diagnostics: [],
 		effectiveResidence: {

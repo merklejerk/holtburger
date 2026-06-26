@@ -796,7 +796,7 @@ Debt and follow-up:
 
 ### Phase 5: Animation Playback And Hook Dispatcher Shell
 
-Status: pending.
+Status: completed 2026-06-26.
 
 Purpose:
 
@@ -840,15 +840,15 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add animation playback state to dynamic records.
-- [ ] Carry validated animation payloads from resource readiness into playback-owned state.
-- [ ] Implement integer frame advancement and looping.
-- [ ] Implement object/root pose sampling from `objectPositionFrames`.
-- [ ] Implement current part-pose output.
-- [ ] Add hook invocation DTO/runtime type.
-- [ ] Add zero-frame and malformed object-position-frame diagnostics and tests.
-- [ ] Add unsupported-hook diagnostics, one-shot frame-entry dispatch, and tests.
-- [ ] Run phase verification commands.
+- [x] Add animation playback state to dynamic records.
+- [x] Carry validated animation payloads from resource readiness into playback-owned state.
+- [x] Implement integer frame advancement and looping.
+- [x] Implement object/root pose sampling from `objectPositionFrames`.
+- [x] Implement current part-pose output.
+- [x] Add hook invocation DTO/runtime type.
+- [x] Add zero-frame and malformed object-position-frame diagnostics and tests.
+- [x] Add unsupported-hook diagnostics, one-shot frame-entry dispatch, and tests.
+- [x] Run phase verification commands.
 
 Decisions and course corrections:
 
@@ -860,6 +860,41 @@ Decisions and course corrections:
   placement, object/root animation pose, and per-part local poses.
 - 2026-06-26: Hook dispatch must be tied to sampled-frame entry and loop cycle, not raw runtime tick
   frequency, to avoid duplicate hook diagnostics at render rates above 30 fps.
+- 2026-06-26: Implemented `DynamicAnimationPlayer` as a frontend runtime sampler over
+  resource-manager-owned animation payloads. The player starts playback from frame 0 at first
+  runtime tick, advances at 30 fps with `floor(frame_number)`, loops by sampled frame index, and
+  stores current object/root pose plus per-part local poses separately from source/base placement.
+- 2026-06-26: Setup animation readiness now validates the host-prepared payload with
+  `animationPayloadDtoSchema` and stores the validated payload in `resources.setupAnimation` before
+  playback can run. Wrong-kind or malformed animation payloads fail resource readiness loudly instead
+  of letting playback sample an unknown shape.
+- 2026-06-26: Hook dispatch is intentionally a shell. `payloadKind: "none"` is treated as no-op;
+  effect-bearing hooks record unsupported-hook diagnostics with entity id, animation asset id,
+  sampled frame, loop iteration, hook id/name, payload kind, and skipped effect. Diagnostics are
+  one-shot per sampled frame and loop cycle.
+- 2026-06-26: Runtime frame updates now advance dynamic animation playback and emit snapshots when
+  playback state changes. Dynamic promoted records remain renderer-non-renderable until later
+  renderer phases consume this pose state.
+- 2026-06-26: Course-corrected the Phase 5 snapshot surface to use lightweight
+  `DynamicEntitySummaryDto` records. Internal dynamic records still own validated animation payloads
+  for playback, but runtime snapshots now expose animation/resource summaries and sampled pose state
+  without serializing the full `AnimationPayloadDto`.
+
+Verification:
+
+- 2026-06-26: `npm run test:ts -- --run src/lib/dynamic/dynamic-animation-player.test.ts
+  src/lib/dynamic/dynamic-entity-resource-manager.test.ts
+  src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/runtime/client-runtime.test.ts`
+- 2026-06-26: `npm run check`
+- 2026-06-26: `npm run lint:ts`
+
+Debt and follow-up:
+
+- Unsupported hook diagnostics can grow by loop cycle for animations with unsupported effect hooks.
+  This is useful while hook support is absent, but later hook implementation should replace the
+  repeated diagnostic stream with real handlers or a bounded reporting policy.
+- Playback state is produced but not rendered. Phase 6/7/8 still need to turn sampled base,
+  object/root, and part-local poses into dynamic bounds, spatial membership, and draw instances.
 
 ### Phase 6: Dynamic Placement, Bounds, And Outdoor Spatial Index
 

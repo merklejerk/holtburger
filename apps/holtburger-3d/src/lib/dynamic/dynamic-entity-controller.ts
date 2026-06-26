@@ -14,6 +14,7 @@ import {
 	type StaticAuthoredDynamicSeedFacts,
 	type DynamicRuntimeSnapshot,
 } from "./contracts";
+import { DynamicAnimationPlayer } from "./dynamic-animation-player";
 import { DynamicEntityStore } from "./dynamic-entity-store";
 import {
 	DynamicEntityResourceManager,
@@ -37,6 +38,7 @@ export interface DynamicEntityControllerOptions {
 }
 
 export class DynamicEntityController {
+	readonly #animationPlayer = new DynamicAnimationPlayer();
 	readonly #resourceManager: DynamicEntityResourceManager | null;
 	readonly #store: DynamicEntityStore;
 	readonly #onResourcesChanged: () => void;
@@ -58,7 +60,10 @@ export class DynamicEntityController {
 			) {
 				continue;
 			}
-			const entityRecord = createDynamicEntityRecord(record, this.#resourceManager);
+			const entityRecord = createDynamicEntityRecord(
+				record,
+				this.#resourceManager,
+			);
 			this.#store.upsert(entityRecord);
 			this.#resourceManager?.trackSetupAnimationResources(
 				entityRecord.id,
@@ -83,6 +88,18 @@ export class DynamicEntityController {
 		if (updated) {
 			this.#onResourcesChanged();
 		}
+	}
+
+	updateAnimationPlayback(timeSeconds: number): boolean {
+		let changed = false;
+		for (const record of this.#store.records()) {
+			const update = this.#animationPlayer.update(record, timeSeconds);
+			if (update.changed) {
+				this.#store.upsert(update.record);
+				changed = true;
+			}
+		}
+		return changed;
 	}
 
 	dispose(): void {
@@ -133,6 +150,9 @@ function createDynamicEntityRecord(
 	return {
 		animation: {
 			defaultAnimationId: record.seed.defaultAnimationId,
+			playback: {
+				status: "pending-resource",
+			},
 			status: "pending-resource",
 		},
 		baseTransform: {
@@ -270,7 +290,9 @@ function createVisualResourcesPendingIssue(): DynamicEntityIssue {
 function createRenderabilityReasons(
 	diagnostics: readonly DynamicEntityIssue[],
 ): DynamicEntityRecord["renderability"]["reasons"] {
-	const reasons = new Set<DynamicEntityRecord["renderability"]["reasons"][number]>();
+	const reasons = new Set<
+		DynamicEntityRecord["renderability"]["reasons"][number]
+	>();
 	for (const diagnostic of diagnostics) {
 		if (diagnostic.kind === "resources-pending") {
 			reasons.add("resources-pending");

@@ -1,4 +1,5 @@
 import type {
+	DynamicEntitySummaryDto,
 	DynamicEntityId,
 	DynamicEntityRecord,
 	DynamicRuntimeSnapshot,
@@ -57,10 +58,81 @@ export class DynamicEntityStore {
 			nonRenderableEntityCount: records.filter(
 				(record) => record.renderability.status === "non-renderable",
 			).length,
-			records,
+			records: records.map(createDynamicEntitySummaryDto),
 			staticSeedCount: records.length,
 		};
 	}
+}
+
+function createDynamicEntitySummaryDto(
+	record: DynamicEntityRecord,
+): DynamicEntitySummaryDto {
+	return {
+		animation: {
+			defaultAnimationId: record.animation.defaultAnimationId,
+			playback: createAnimationPlaybackSummary(record.animation.playback),
+			status: record.animation.status,
+		},
+		diagnostics: record.diagnostics,
+		effectiveResidence: record.effectiveResidence,
+		id: record.id,
+		provenance: record.provenance,
+		renderability: record.renderability,
+		resources: {
+			required: record.resources.required,
+			setupAnimation: createSetupAnimationResourceSummary(
+				record.resources.setupAnimation,
+			),
+			status: record.resources.status,
+			visual: record.resources.visual,
+		},
+		source: {
+			defaultAnimationId: record.sourceSeed.defaultAnimationId,
+			object: record.sourceSeed.object,
+			setupModelId: record.sourceSeed.setupModelId,
+			sourceAssetId: record.sourceSeed.sourceAssetId,
+		},
+		sourceResidence: record.sourceResidence,
+	};
+}
+
+function createAnimationPlaybackSummary(
+	playback: DynamicEntityRecord["animation"]["playback"],
+): DynamicEntitySummaryDto["animation"]["playback"] {
+	if (playback.status !== "playing") {
+		return playback;
+	}
+	return {
+		animationAssetId: playback.animationAssetId,
+		animationId: playback.animationId,
+		currentFrameIndex: playback.currentFrameIndex,
+		elapsedSeconds: playback.elapsedSeconds,
+		frameCount: playback.frameCount,
+		frameNumber: playback.frameNumber,
+		frameRateFps: playback.frameRateFps,
+		loopIteration: playback.loopIteration,
+		objectRootPose: playback.objectRootPose,
+		partCount: playback.partCount,
+		partPoses: playback.partPoses,
+		status: "playing",
+	};
+}
+
+function createSetupAnimationResourceSummary(
+	setupAnimation: DynamicEntityRecord["resources"]["setupAnimation"],
+): DynamicEntitySummaryDto["resources"]["setupAnimation"] {
+	if (setupAnimation.status !== "ready") {
+		return setupAnimation;
+	}
+	return {
+		animationAssetId: setupAnimation.animation.assetId,
+		animationId: setupAnimation.animation.payload.animationId,
+		animationKey: setupAnimation.animationKey,
+		frameCount: setupAnimation.animation.payload.frameCount,
+		partCount: setupAnimation.animation.payload.partCount,
+		setupModelKey: setupAnimation.setupModelKey,
+		status: "ready",
+	};
 }
 
 function compareDynamicEntityRecords(

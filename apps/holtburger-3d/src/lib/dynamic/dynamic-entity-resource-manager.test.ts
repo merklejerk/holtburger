@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { HostBackedAssetService } from "../assets/asset-service";
 import type { HostAssetKey, PreparedAsset } from "../assets/contracts";
 import type {
+	AnimationPayloadDto,
 	GfxObjPayloadDto,
 	MaterialRecipePayloadDto,
 	RenderSurfacePayloadDto,
@@ -33,10 +34,9 @@ describe("dynamic entity resource manager", () => {
 
 		const records = controller.createSnapshot().records;
 		expect(records).toHaveLength(2);
-		expect(records.map((record) => record.resources.setupAnimation.status)).toEqual([
-			"ready",
-			"ready",
-		]);
+		expect(
+			records.map((record) => record.resources.setupAnimation.status),
+		).toEqual(["ready", "ready"]);
 		expect(records.map((record) => record.animation.status)).toEqual([
 			"ready",
 			"ready",
@@ -73,7 +73,10 @@ describe("dynamic entity resource manager", () => {
 				["gfx-obj:01000020", 1],
 				["material:08000011", 1],
 				["palette:04000010", 1],
-				["prepared-texture:06000010?cs=linear&mips=none&out=rgba8&usage=color", 1],
+				[
+					"prepared-texture:06000010?cs=linear&mips=none&out=rgba8&usage=color",
+					1,
+				],
 				["render-surface:06000010", 1],
 				["setup-appearance:020003e5", 1],
 				["surface-texture:05000010", 1],
@@ -191,7 +194,9 @@ describe("dynamic entity resource manager", () => {
 	});
 });
 
-function createController(assetService: HostBackedAssetService): DynamicEntityController {
+function createController(
+	assetService: HostBackedAssetService,
+): DynamicEntityController {
 	const resourceManager = new DynamicEntityResourceManager({ assetService });
 	return new DynamicEntityController({ resourceManager });
 }
@@ -237,6 +242,8 @@ class ResolvingRuntimeHost implements RuntimeHost {
 
 function createPayload(key: HostAssetKey): unknown {
 	switch (key.kind) {
+		case "animation":
+			return createAnimationPayload();
 		case "setup-model":
 			return createSetupModelPayload();
 		case "setup-appearance":
@@ -294,6 +301,29 @@ function createSetupModelPayload(): SetupModelPayloadDto {
 		sourceAssetKind: "setup-model",
 		stepDown: null,
 		stepUp: null,
+	};
+}
+
+function createAnimationPayload(): AnimationPayloadDto {
+	return {
+		animationAssetId: "animation/0300061b",
+		animationId: 0x0300061b,
+		dependencies: {},
+		flags: 0,
+		frameCount: 1,
+		kind: "animation",
+		objectPositionFrames: [],
+		partCount: 1,
+		partFrames: [
+			{
+				frameIndex: 0,
+				hooks: [],
+				localPlacements: [createPlacement()],
+			},
+		],
+		provenance: createProvenance("animation"),
+		residencyKind: "unknown",
+		sourceAssetKind: "animation",
 	};
 }
 

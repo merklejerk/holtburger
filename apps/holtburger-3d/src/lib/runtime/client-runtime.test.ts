@@ -11,6 +11,7 @@ import type {
 	RuntimeHost,
 	RuntimeHostSnapshot,
 } from "../host/runtime-contracts";
+import type { AnimationPayloadDto } from "../host/contracts";
 import type {
 	DebugOverlayPrimitive,
 	Renderer,
@@ -146,11 +147,12 @@ describe("browser client runtime", () => {
 			animation: {
 				defaultAnimationId: 0x0300061b,
 			},
-			sourceSeed: {
+			source: {
 				setupModelId: 0x020003e5,
 			},
 			resources: {
 				setupAnimation: {
+					animationAssetId: "animation/0300061b",
 					status: "ready",
 				},
 				status: "ready",
@@ -236,11 +238,16 @@ describe("browser client runtime", () => {
 			},
 			resources: {
 				setupAnimation: {
+					animationAssetId: "animation/0300061b",
 					status: "ready",
 				},
 				status: "setup-animation-ready",
 			},
 		});
+		expect(
+			"payload" in
+				(snapshots.at(-1)?.dynamic.records[0]?.resources.setupAnimation ?? {}),
+		).toBe(false);
 
 		unsubscribe();
 		runtime.dispose();
@@ -292,6 +299,7 @@ describe("browser client runtime", () => {
 			},
 			resources: {
 				setupAnimation: {
+					animationAssetId: "animation/0300061b",
 					status: "ready",
 				},
 				status: "ready",
@@ -3165,6 +3173,8 @@ function createPreparedAsset(key: HostAssetKey, revision = 1): PreparedAsset {
 
 function createDynamicPreparedPayload(key: HostAssetKey): unknown {
 	switch (key.kind) {
+		case "animation":
+			return createDynamicAnimationPayload();
 		case "setup-model":
 			return createDynamicSetupModelPayload();
 		case "setup-appearance":
@@ -3189,6 +3199,29 @@ function createDynamicPreparedPayload(key: HostAssetKey): unknown {
 		default:
 			return { kind: key.kind };
 	}
+}
+
+function createDynamicAnimationPayload(): AnimationPayloadDto {
+	return {
+		animationAssetId: "animation/0300061b",
+		animationId: 0x0300061b,
+		dependencies: {},
+		flags: 0,
+		frameCount: 1,
+		kind: "animation",
+		objectPositionFrames: [],
+		partCount: 1,
+		partFrames: [
+			{
+				frameIndex: 0,
+				hooks: [],
+				localPlacements: [createPlacement()],
+			},
+		],
+		provenance: createProvenance("animation"),
+		residencyKind: "unknown",
+		sourceAssetKind: "animation",
+	};
 }
 
 function createDynamicSetupModelPayload() {

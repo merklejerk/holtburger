@@ -1,6 +1,7 @@
 import type {
 	AssetService,
 	HostAssetKey,
+	PreparedAsset,
 	PreparedAssetLease,
 } from "../assets/contracts";
 import { createPreparedTextureHostKey } from "../assets/preparation/prepared-texture-source";
@@ -24,7 +25,12 @@ import {
 	type StaticMaterialPlan,
 } from "../static/objects/bake/static-object-material-planner";
 import { resolveStaticObjectSourceClosure } from "../static/objects/static-object-source-closure";
+import {
+	animationPayloadDtoSchema,
+	type AnimationPayloadDto,
+} from "../host/contracts";
 import type {
+	DynamicEntityAnimationResource,
 	DynamicEntityId,
 	DynamicEntityIssue,
 	DynamicEntityResourceKey,
@@ -74,6 +80,7 @@ interface DynamicEntityVisualResourcesFailedChange {
 
 interface TrackedDynamicEntityResources {
 	readonly animationHostKey: HostAssetKey;
+	animationResource: DynamicEntityAnimationResource | null;
 	readonly animationResourceKey: DynamicEntityResourceKey;
 	readonly generation: number;
 	readonly leases: PreparedAssetLease[];
@@ -147,6 +154,7 @@ export class DynamicEntityResourceManager {
 		const generation = this.#nextGeneration();
 		this.#trackedByEntityId.set(entityId, {
 			...keys,
+			animationResource: null,
 			generation,
 			leases: [],
 			seed,
@@ -189,10 +197,27 @@ export class DynamicEntityResourceManager {
 		}
 
 		const issues = createSetupAnimationLoadIssues(tracked, results);
-		if (issues.length > 0) {
+		const animationAsset =
+			issues.length === 0 ? resolveAnimationAssetResult(results[1]) : null;
+		const animationPayload =
+			animationAsset === null ? null : resolveAnimationPayload(animationAsset);
+		const payloadIssues =
+			issues.length === 0 && animationPayload === null
+				? [
+						{
+							kind: "dynamic-resource-load-failed" as const,
+							message:
+								"Prepared animation asset did not contain an animation payload.",
+							resource: "animation" as const,
+							resourceKey: tracked.animationResourceKey,
+						},
+					]
+				: [];
+		const setupIssues = [...issues, ...payloadIssues];
+		if (setupIssues.length > 0) {
 			this.#onResourcesChanged?.({
 				entityId,
-				issues,
+				issues: setupIssues,
 				kind: "setup-animation-failed",
 				resources: {
 					required: SETUP_ANIMATION_REQUIRED_RESOURCES,
@@ -210,6 +235,13 @@ export class DynamicEntityResourceManager {
 			return;
 		}
 
+		if (animationAsset === null || animationPayload === null) {
+			throw new Error("setup animation payload was expected after validation");
+		}
+		tracked.animationResource = {
+			assetId: animationAsset.sourceAssetId,
+			payload: animationPayload,
+		};
 		tracked.leases.push(
 			this.#assetService.acquirePreparedAssetLease(tracked.setupHostKey),
 			this.#assetService.acquirePreparedAssetLease(tracked.animationHostKey),
@@ -219,17 +251,13 @@ export class DynamicEntityResourceManager {
 			kind: "setup-animation-ready",
 			resources: {
 				required: SETUP_ANIMATION_REQUIRED_RESOURCES,
-					setupAnimation: {
-						animationKey: tracked.animationResourceKey,
-						setupModelKey: tracked.setupResourceKey,
-						status: "ready",
-					},
-					status: "setup-animation-ready",
-					visual: {
-						status: "pending",
-					},
+				setupAnimation: createReadySetupAnimationResourceState(tracked),
+				status: "setup-animation-ready",
+				visual: {
+					status: "pending",
 				},
-			});
+			},
+		});
 		void this.#requestVisualResources(entityId, generation, tracked);
 	}
 
@@ -304,12 +332,11 @@ export class DynamicEntityResourceManager {
 				],
 				kind: "visual-resources-failed",
 				resources: {
-					required: [...SETUP_ANIMATION_REQUIRED_RESOURCES, ...VISUAL_REQUIRED_RESOURCES],
-					setupAnimation: {
-						animationKey: tracked.animationResourceKey,
-						setupModelKey: tracked.setupResourceKey,
-						status: "ready",
-					},
+					required: [
+						...SETUP_ANIMATION_REQUIRED_RESOURCES,
+						...VISUAL_REQUIRED_RESOURCES,
+					],
+					setupAnimation: createReadySetupAnimationResourceState(tracked),
 					status: "failed",
 					visual: {
 						missingRefs,
@@ -330,12 +357,11 @@ export class DynamicEntityResourceManager {
 			entityId,
 			kind: "visual-resources-ready",
 			resources: {
-				required: [...SETUP_ANIMATION_REQUIRED_RESOURCES, ...VISUAL_REQUIRED_RESOURCES],
-				setupAnimation: {
-					animationKey: tracked.animationResourceKey,
-					setupModelKey: tracked.setupResourceKey,
-					status: "ready",
-				},
+				required: [
+					...SETUP_ANIMATION_REQUIRED_RESOURCES,
+					...VISUAL_REQUIRED_RESOURCES,
+				],
+				setupAnimation: createReadySetupAnimationResourceState(tracked),
 				status: "ready",
 				visual: {
 					materialSlots: materialSlots.map((slot) => ({
@@ -359,18 +385,24 @@ export class DynamicEntityResourceManager {
 	): Promise<readonly DynamicEntityIssue[]> {
 		const results = await Promise.allSettled(
 			uniqueHostAssetKeys(keys).map((key) =>
-				this.#assetService.requestPreparedAsset(key).then(() => ({
-				key,
-				status: "fulfilled" as const,
-			}), (error: unknown) => ({
-				error,
-				key,
-				status: "rejected" as const,
-			})),
+				this.#assetService.requestPreparedAsset(key).then(
+					() => ({
+						key,
+						status: "fulfilled" as const,
+					}),
+					(error: unknown) => ({
+						error,
+						key,
+						status: "rejected" as const,
+					}),
+				),
 			),
 		);
 		return results.flatMap((result) => {
-			if (result.status !== "fulfilled" || result.value.status === "fulfilled") {
+			if (
+				result.status !== "fulfilled" ||
+				result.value.status === "fulfilled"
+			) {
 				return [];
 			}
 			const key = result.value.key;
@@ -391,7 +423,9 @@ export class DynamicEntityResourceManager {
 	}
 }
 
-function createSetupAnimationResourceKeys(seed: StaticAuthoredDynamicSeedFacts): {
+function createSetupAnimationResourceKeys(
+	seed: StaticAuthoredDynamicSeedFacts,
+): {
 	readonly animationHostKey: HostAssetKey;
 	readonly animationResourceKey: DynamicEntityResourceKey;
 	readonly setupHostKey: HostAssetKey;
@@ -409,6 +443,54 @@ function createSetupAnimationResourceKeys(seed: StaticAuthoredDynamicSeedFacts):
 			kind: "setup-model",
 		},
 	};
+}
+
+function createReadySetupAnimationResourceState(
+	tracked: TrackedDynamicEntityResources,
+): Extract<
+	DynamicEntityResourceState["setupAnimation"],
+	{ readonly status: "ready" }
+> {
+	if (tracked.animationResource === null) {
+		throw new Error("dynamic setup animation resource is not ready");
+	}
+	return {
+		animation: tracked.animationResource,
+		animationKey: tracked.animationResourceKey,
+		setupModelKey: tracked.setupResourceKey,
+		status: "ready",
+	};
+}
+
+function resolveAnimationAssetResult(
+	result: PromiseSettledResult<unknown> | undefined,
+): PreparedAsset | null {
+	if (result?.status !== "fulfilled") {
+		return null;
+	}
+	return isPreparedAsset(result.value) ? result.value : null;
+}
+
+function resolveAnimationPayload(
+	asset: PreparedAsset,
+): AnimationPayloadDto | null {
+	return isAnimationPayload(asset.payload) ? asset.payload : null;
+}
+
+function isPreparedAsset(value: unknown): value is PreparedAsset {
+	if (typeof value !== "object" || value === null) {
+		return false;
+	}
+	const candidate = value as Partial<PreparedAsset>;
+	return (
+		typeof candidate.sourceAssetId === "string" &&
+		typeof candidate.payload === "object" &&
+		candidate.payload !== null
+	);
+}
+
+function isAnimationPayload(value: unknown): value is AnimationPayloadDto {
+	return animationPayloadDtoSchema.safeParse(value).success;
 }
 
 function createSetupAnimationLoadIssues(
@@ -506,16 +588,18 @@ function createTextureRequirements(
 	return materialPlans.flatMap((plan) => {
 		const dataUses = plan.textureRoles.map((role) => role.dataUse);
 		const wrapMode = resolveRepeatedStaticMaterialPrimaryWrapMode(dataUses);
-		return plan.textureRoles.map((role): DynamicEntityTextureRequirement => ({
-			dataUse: role.dataUse,
-			key: createTextureRequirementKey(role.dataUse),
-			material: plan.material,
-			role: role.role,
-			samplingPolicy: createStaticMaterialTextureSamplingPolicy({
+		return plan.textureRoles.map(
+			(role): DynamicEntityTextureRequirement => ({
 				dataUse: role.dataUse,
-				wrapMode,
+				key: createTextureRequirementKey(role.dataUse),
+				material: plan.material,
+				role: role.role,
+				samplingPolicy: createStaticMaterialTextureSamplingPolicy({
+					dataUse: role.dataUse,
+					wrapMode,
+				}),
 			}),
-		}));
+		);
 	});
 }
 
@@ -616,7 +700,9 @@ function formatMissingRef(ref: StaticResourceIdentity): string {
 }
 
 function createVisualHostAssetKeys(options: {
-	readonly closure: Awaited<ReturnType<typeof resolveStaticObjectSourceClosure>>;
+	readonly closure: Awaited<
+		ReturnType<typeof resolveStaticObjectSourceClosure>
+	>;
 	readonly seed: StaticAuthoredDynamicSeedFacts;
 	readonly setupAppearanceIsMissing: boolean;
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
@@ -626,14 +712,18 @@ function createVisualHostAssetKeys(options: {
 			? []
 			: [createHostAssetKey("setup-appearance", options.seed.setupModelId)]),
 		...options.closure.sourceAssets.flatMap((source) =>
-			source.parts.map((part) => createHostAssetKey("gfx-obj", part.gfxObj.sourceDid)),
+			source.parts.map((part) =>
+				createHostAssetKey("gfx-obj", part.gfxObj.sourceDid),
+			),
 		),
 		...options.closure.materialSources.map((source) =>
 			createHostAssetKey("material", source.identity.materialId),
 		),
 		...options.closure.textureRefs.flatMap((ref) => {
 			if (ref.role === "surface-texture") {
-				return [createHostAssetKey("surface-texture", ref.texture.surfaceTextureId)];
+				return [
+					createHostAssetKey("surface-texture", ref.texture.surfaceTextureId),
+				];
 			}
 			return [
 				createHostAssetKey("render-surface", ref.renderSurface.renderSurfaceId),
@@ -686,7 +776,9 @@ function createRequiredResourceFromHostKey(
 	}
 }
 
-function createResourceKeyFromHostKey(key: HostAssetKey): DynamicEntityResourceKey {
+function createResourceKeyFromHostKey(
+	key: HostAssetKey,
+): DynamicEntityResourceKey {
 	const resource = createRequiredResourceFromHostKey(key);
 	if (resource === "animation" || resource === "setup-model") {
 		return {
@@ -716,8 +808,12 @@ function createTextureRequirementHostKeys(
 	return [createPreparedTextureHostKey(dataUse)];
 }
 
-function uniqueHostAssetKeys(keys: readonly HostAssetKey[]): readonly HostAssetKey[] {
-	return [...new Map(keys.map((key) => [describeHostAssetKey(key), key])).values()].sort(
-		(left, right) => describeHostAssetKey(left).localeCompare(describeHostAssetKey(right)),
+function uniqueHostAssetKeys(
+	keys: readonly HostAssetKey[],
+): readonly HostAssetKey[] {
+	return [
+		...new Map(keys.map((key) => [describeHostAssetKey(key), key])).values(),
+	].sort((left, right) =>
+		describeHostAssetKey(left).localeCompare(describeHostAssetKey(right)),
 	);
 }

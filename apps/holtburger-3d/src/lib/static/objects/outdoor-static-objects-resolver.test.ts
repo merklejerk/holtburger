@@ -290,6 +290,82 @@ describe("browser outdoor static object resolver", () => {
 		expect(payload.scope.missingRefs).toEqual([]);
 	});
 
+	it("classifies setup-backed outdoor objects with default animations as dynamic seeds", async () => {
+		const assetService = new FixtureAssetService([
+			createPreparedAsset(
+				createHostAssetKey("landblock-outdoor", 0xda55ffff),
+				createLandblockOutdoorPayload({
+					buildingSourceAssetId: "setup-model/020003e5",
+				}),
+			),
+			createPreparedAsset(
+				createHostAssetKey("region-render-profile", 1),
+				createRegionRenderProfilePayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("setup-model", 0x020003e5),
+				createSetupModelPayload({
+					defaultAnimation: 0x0300061b,
+					setupModelId: 0x020003e5,
+				}),
+			),
+			createPreparedAsset(
+				createHostAssetKey("setup-appearance", 0x020003e5),
+				createSetupAppearancePayload({ setupModelId: 0x020003e5 }),
+			),
+			createPreparedAsset(
+				createHostAssetKey("gfx-obj", 0x01000020),
+				createGfxObjPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("material", 0x08000011),
+				createMaterialPayload(),
+			),
+			createPreparedAsset(
+				createHostAssetKey("surface-texture", 0x05000010),
+				createSurfaceTexturePayload({
+					renderSurfaceId: 0x06000010,
+					surfaceTextureId: 0x05000010,
+				}),
+			),
+			createPreparedAsset(
+				createHostAssetKey("render-surface", 0x06000010),
+				createRenderSurfacePayload({
+					renderSurfaceId: 0x06000010,
+				}),
+			),
+		]);
+
+		const payload = await new OutdoorStaticObjectsResolver({
+			assetService,
+		}).resolve(createBuildingRequest());
+
+		expect(payload.scope.kind).toBe("outdoor-static-objects");
+		if (payload.scope.kind !== "outdoor-static-objects") {
+			throw new Error("expected outdoor static object payload");
+		}
+
+		expect(payload.scope.objects).toEqual([]);
+		expect(payload.scope.materialSlots).toEqual([]);
+		expect(payload.scope.authoredDynamicSeeds).toEqual([
+			expect.objectContaining({
+				classificationReason: "setup-default-animation",
+				defaultAnimationId: 0x0300061b,
+				domain: "outdoor-buildings",
+				landblockId: 0xda55ffff,
+				object: expect.objectContaining({
+					instanceId: "building-0",
+					objectKind: "building",
+				}),
+				setupModelId: 0x020003e5,
+				sourceAssetId: "setup-model/020003e5",
+			}),
+		]);
+		expect(payload.scope.sourceAssets[0]).toMatchObject({
+			defaultAnimation: 0x0300061b,
+		});
+	});
+
 	it("resolves outdoor-detail generated scenery without building detail roles", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
@@ -987,11 +1063,17 @@ function createLandblockOutdoorPayload(
 	};
 }
 
-function createSetupModelPayload(): SetupModelPayloadDto {
+function createSetupModelPayload(
+	options: {
+		readonly defaultAnimation?: number | null;
+		readonly setupModelId?: number;
+	} = {},
+): SetupModelPayloadDto {
+	const setupModelId = options.setupModelId ?? 0x02000010;
 	return {
 		collisionWitness: { cylSphereCount: 0, sphereCount: 0 },
 		connectionPoints: [],
-		defaultAnimation: null,
+		defaultAnimation: options.defaultAnimation ?? null,
 		defaultMotionTable: null,
 		defaultScript: null,
 		defaultScriptTable: null,
@@ -1016,7 +1098,7 @@ function createSetupModelPayload(): SetupModelPayloadDto {
 		radius: null,
 		residencyKind: "unknown",
 		selectionSphere: null,
-		setupModelId: 0x02000010,
+		setupModelId,
 		sortingSphere: null,
 		sourceAssetKind: "setup-model",
 		stepDown: null,
@@ -1060,12 +1142,14 @@ function createSetupAppearancePayload(
 	options: {
 		readonly materialSlots?: SetupAppearancePayloadDto["parts"][number]["materialSlots"];
 		readonly paletteId?: number | null;
+		readonly setupModelId?: number;
 		readonly subPalettes?: SetupAppearancePayloadDto["subPalettes"];
 	} = {},
 ): SetupAppearancePayloadDto {
+	const setupModelId = options.setupModelId ?? 0x02000010;
 	return {
 		animPartChanges: [],
-		appearanceKey: "setup-appearance/02000010",
+		appearanceKey: `setup-appearance/${setupModelId.toString(16).padStart(8, "0")}`,
 		dependencies: {
 			materialAssetIds: ["material/08000011"],
 			paletteAssetIds: [],
@@ -1088,7 +1172,7 @@ function createSetupAppearancePayload(
 		],
 		provenance: createProvenance("setup-appearance"),
 		residencyKind: "unknown",
-		setupModelId: 0x02000010,
+		setupModelId,
 		sourceAssetKind: "setup-appearance",
 		subPalettes: options.subPalettes ?? [],
 		textureChanges: [],

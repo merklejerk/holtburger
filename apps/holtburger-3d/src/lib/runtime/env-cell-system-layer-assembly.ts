@@ -232,6 +232,7 @@ function createEnvCellFactsByLandblock(
 			authoredDynamicSeedRecords:
 				materialized.staticAuthoredDynamicSeeds.filter(
 					(record) =>
+						record.kind === "env-cell-static-object-seed" &&
 						record.owner.domain === "landblock-env-cells" &&
 						record.owner.scope.landblockId === landblockId,
 				),

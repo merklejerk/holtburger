@@ -120,6 +120,10 @@ The phase order is viable, but several implementation details need to be pinned 
   and are installed through static layer replacement. Phase 8 must extract or generalize helper
   functions before adding dynamic commits; it should not make dynamic renderer state another entry in
   `#staticObjectRenderInstances`.
+- Dynamic entities should share prepared texture atlas/cache entries with static consumers when
+  prepared texture identity and sampler/material requirements match. The shared primitive is the
+  atlas/cache entry; ownership and lifetime must remain dynamic-resource-owned instead of borrowing
+  static draw-unit or static visual-resource placement.
 - Query migration affects browser picking and diagnostics, not only `StaticSceneQuery`. Existing
   browser code builds `StaticScenePickRequest` and displays static selection diagnostics. Phase 7
   must include compatibility naming and UI diagnostics cleanup in its migration debt.
@@ -154,7 +158,9 @@ Out of scope for this first implementation plan:
 - Broad hook execution beyond the dispatcher shell and planned `SetOmega` follow-up.
 - Particle, sound, light, material transition, replacement-object, `NoDraw`, `Scale`,
   `DefaultScript`, and `DefaultScriptPart` support.
-- Dynamic atlasing, VAO compaction, WebGL2 instanced draws, or dynamic workers.
+- Dynamic atlas page allocation policy changes, VAO compaction, WebGL2 instanced draws, or dynamic
+  workers. Dynamic entities may still consume existing shared prepared texture atlas/cache entries
+  through independent dynamic ownership.
 - Treating dynamic scenery as default browser-selectable. The first targets are inspectable/debug
   query records but not default selection targets.
 
@@ -319,7 +325,7 @@ Decisions and course corrections:
 
 ### Phase 2: Outdoor Static-Authored Dynamic Seed Contract
 
-Status: pending.
+Status: completed.
 
 Purpose:
 
@@ -330,9 +336,9 @@ Deliverables:
 
 - Expand `StaticAuthoredDynamicSeedRecord` from env-cell-only to a union that includes outdoor static
   object dynamic seeds.
-- Define outdoor seed facts: owner/scope, domain, landblock id, static object identity, source key,
-  setup id, default animation id, source residence, landblock-local base transform, source scale, and
-  classification reason.
+- Define outdoor seed facts: domain, landblock id, static object identity, source key, setup id,
+  default animation id, source residence, landblock-local base transform, source scale, and
+  classification reason; the bake step wraps those facts with the static work owner.
 - Update static source resolution/classification to identify setup-backed sources with
   `defaultAnimation`.
 - Divert supported dynamic seeds out of the baked static object draw-unit path.
@@ -351,16 +357,39 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add outdoor seed record type and descriptive helpers.
-- [ ] Update static contracts, coordinator commits, materializer forwarding, and tests.
-- [ ] Add classification in the outdoor static object resolver or source-closure path before bake.
-- [ ] Filter or split outdoor seed records before env-cell-only static scene query ingestion.
-- [ ] Add regression coverage for the windmill-style setup default animation case.
-- [ ] Run phase verification commands.
+- [x] Add outdoor seed record type and descriptive helpers.
+- [x] Update static contracts, coordinator commits, materializer forwarding, and tests.
+- [x] Add classification in the outdoor static object resolver or source-closure path before bake.
+- [x] Filter or split outdoor seed records before env-cell-only static scene query ingestion.
+- [x] Add regression coverage for the windmill-style setup default animation case.
+- [x] Run phase verification commands.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-26: Outdoor dynamic seed ownership is assigned in the static object bake step, not the
+  resolver. The resolver emits ownerless seed facts on `OutdoorStaticObjectsScopePayload` because it
+  does not know `workId`; the baker wraps those facts into `StaticAuthoredDynamicSeedRecord` values
+  with the real `StaticWorkPeerRecordOwner`.
+- 2026-06-26: Classification is intentionally narrow: setup-model sources with non-null
+  `defaultAnimation` become `setup-default-animation` outdoor dynamic seed facts. Those objects are
+  removed from `objects` and `materialSlots` before static object partitioning, so they cannot also
+  flatten into static draw units.
+- 2026-06-26: `StaticObjectSourceAssetFacts` now carries `defaultAnimation` for setup-model sources.
+  Direct gfx sources carry `null` and remain static.
+- 2026-06-26: Static scene query handling now switches on the authored seed record kind. Outdoor
+  dynamic seed records get distinct committed-record keys and are ignored by env-cell-only grouping
+  and env-cell system layer assembly.
+- 2026-06-26: Bake diagnostics now include `authoredDynamicSeedCount` and
+  `authoredDynamicSeedClassificationReasons.setupDefaultAnimation`, making the static-to-dynamic
+  diversion visible in batch diagnostics.
+- 2026-06-26: Regression coverage uses a synthetic `0x020003e5` setup-model fixture with
+  `defaultAnimation: 0x0300061b` to prove the windmill-style contract without depending on local DAT
+  assets in checked-in tests. The fixture verifies the source becomes an outdoor dynamic seed and no
+  longer appears in bakeable static object payloads.
+- 2026-06-26: Verification results: focused
+  `npm run test:ts -- outdoor-static-objects-resolver static-object-compatibility-partitioner`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run test:ts`,
+  `npm run check:rust`, and `npm run lint:rust` pass.
 
 ### Phase 3: Dynamic Entity Store And Static Scope Reconciliation
 
@@ -428,6 +457,10 @@ Deliverables:
   only when referenced by active entities or implemented hook/playback behavior.
 - Request setup model and animation payloads from static seed facts.
 - Reuse existing setup/gfx/material/texture preparation helpers where their facts are isomorphic.
+- Preserve prepared texture identities and sampler/material requirements in dynamic visual resource
+  readiness so Phase 8 can request the same shared atlas/cache entries as static consumers.
+- Do not bind dynamic material readiness to static draw-unit texture uses, static batch ids, or
+  static visual-resource owner keys.
 - Track leases for committed prepared resources.
 - Record missing required dependencies and unsupported dependency references.
 - Mark records renderable only when all first-target required resources are ready.
@@ -442,6 +475,8 @@ Acceptance criteria:
 - Missing setup appearance is diagnosed but does not block rendering when setup-provided parts are
   sufficient.
 - Resource readiness does not create or depend on baked static draw units.
+- Dynamic resource readiness carries enough texture-use identity to let renderer resources share
+  atlas/cache entries with compatible static consumers without borrowing static ownership.
 - Two dynamic entities that request the same prepared animation or setup resource share one committed
   manager entry and hold separate leases.
 - The first-slice manager has no ambient startup table load and no global LUT required for
@@ -458,6 +493,10 @@ Task checklist:
       entry.
 - [ ] Prove no startup-hydrated global lookup table is required for first-slice dynamic resources.
 - [ ] Reuse or extract part-agnostic material/visual resource preparation helpers.
+- [ ] Preserve atlas-compatible prepared texture identities and sampler/material requirements in
+      dynamic resource readiness.
+- [ ] Prove dynamic resource readiness does not reference static draw-unit or static visual-resource
+      owner keys.
 - [ ] Add tests for success, missing animation, missing setup, dedupe, and lease release.
 - [ ] Run phase verification commands.
 
@@ -605,12 +644,17 @@ Deliverables:
 - Generalize reusable visual resource upload/cache helpers currently tied to outdoor-detail static
   layer replacement.
 - Add WebGL2 dynamic resource installation/removal and per-frame dynamic instance submission.
+- Route dynamic texture use through the shared prepared texture atlas/cache path when a dynamic
+  material resolves to an atlas-compatible prepared texture and matching sampler/material
+  requirements.
 - Use live per-part transforms from dynamic runtime.
 - Keep dynamic resource identity separate from semantic dynamic entity identity.
 - Add renderer diagnostics for dynamic visual resources, dynamic instances, dynamic draw calls, and
   skipped dynamic submissions.
 - Add neutral or dynamic texture-binding owner records for dynamic visual resources instead of
   pretending they are static object visual resources.
+- Do not let dynamic resources borrow static draw-unit or static visual-resource owner keys, static
+  batch ids, or static layer replacement lifetime.
 
 Acceptance criteria:
 
@@ -618,6 +662,12 @@ Acceptance criteria:
 - Dynamic submissions do not go through static layer payloads or `StaticObjectRenderInstance`.
 - Dynamic renderer state is not stored in `#staticObjectRenderInstances` and is not cleared through
   static layer replacement ownership.
+- Compatible static and dynamic consumers of the same prepared texture converge on one atlas/cache
+  entry while retaining distinct static/dynamic owners or leases.
+- Dynamic texture placement survives unrelated static layer replacement when the dynamic resource is
+  still leased.
+- Any dynamic material that cannot use the shared atlas/cache path is skipped or separately handled
+  with an explicit diagnostic; no silent per-entity texture upload fallback.
 - Removing a dynamic record removes renderer submissions/resources that are no longer leased.
 - Existing static rendering diagnostics remain stable.
 
@@ -625,6 +675,10 @@ Task checklist:
 
 - [ ] Define dynamic renderer commit DTOs.
 - [ ] Extract/generalize visual resource upload helpers.
+- [ ] Add dynamic or neutral texture-use owner keys and lease/release handling for dynamic visual
+      resources.
+- [ ] Share atlas/cache entries by prepared texture identity plus sampler/material requirements
+      across compatible static and dynamic consumers.
 - [ ] Implement WebGL2 dynamic resource storage and draw path.
 - [ ] Commit dynamic snapshots from `DynamicEntityController`.
 - [ ] Add renderer and runtime tests for add/update/remove.
@@ -753,7 +807,13 @@ Decisions and course corrections:
 
 - Risk: renderer visual-resource reuse becomes a static-layer dependency.
   Mitigation: extract/generalize helpers before adding dynamic commits; do not call
-  `setOutdoorDetailsLayer` for dynamic resources.
+  `setOutdoorDetailsLayer` for dynamic resources. Share prepared texture atlas/cache entries by
+  resource identity and sampler/material requirements, not by static owner identity.
+
+- Risk: dynamic textures bypass the existing atlas/cache path and create duplicate uploads.
+  Mitigation: Phase 4 must preserve atlas-compatible prepared texture identity and Phase 8 must prove
+  compatible static and dynamic consumers converge on one shared atlas/cache entry with distinct
+  owners.
 
 - Risk: merged query becomes a debug-only path.
   Mitigation: migrate browser picking through the merged scene-query surface and express default
@@ -793,6 +853,8 @@ Decisions and course corrections:
   animation assets through the asset service; missing setup appearance is allowed only when the
   setup-provided part resources are sufficient and diagnostics say so.
 - Dynamic renderer submissions use explicit dynamic resource and instance commits.
+- Dynamic renderer texture use shares compatible prepared texture atlas/cache entries with static
+  consumers while using dynamic or neutral owner keys and dynamic leases.
 - Dynamic current-frame bounds are indexed and queryable through the merged scene-query surface.
 - Browser default selection excludes the first static-authored dynamic scenery target, while
   debug/inspection queries can report it.

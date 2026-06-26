@@ -471,6 +471,7 @@ interface TerrainRenderLocalBvh {
 export interface OutdoorStaticObjectsScopePayload {
 	readonly kind: "outdoor-static-objects";
 	readonly domain: "outdoor-buildings" | "outdoor-detail";
+	readonly authoredDynamicSeeds: readonly OutdoorStaticObjectDynamicSeedFacts[];
 	readonly buildingTransitionApertures: LandblockOutdoorPayloadDto["buildingTransitionApertures"];
 	readonly landblock: LandblockSourceIdentity;
 	readonly regionRenderProfile: StaticObjectRegionRenderProfileFacts;
@@ -505,6 +506,8 @@ export interface StaticObjectInstanceFacts {
 export interface StaticObjectSourceAssetFacts {
 	readonly identity: StaticObjectSourceIdentity;
 	readonly sourceAssetKind: StaticObjectSourceIdentity["sourceAssetKind"];
+	/** Default animation authored by setup-model sources. Direct gfx sources do not carry one. */
+	readonly defaultAnimation: number | null;
 	readonly partCount: number;
 	readonly materialSlotCount: number;
 	readonly renderTriangleCount: number;
@@ -1156,7 +1159,28 @@ interface StaticEnvCellSourceMappingRecord {
 }
 
 export type StaticAuthoredDynamicSeedRecord =
-	StaticEnvCellStaticObjectSeedRecord;
+	| OutdoorStaticObjectDynamicSeedRecord
+	| StaticEnvCellStaticObjectSeedRecord;
+
+interface OutdoorStaticObjectDynamicSeedRecord {
+	readonly kind: "outdoor-static-object-dynamic-seed";
+	readonly owner: StaticWorkPeerRecordOwner;
+	readonly seed: OutdoorStaticObjectDynamicSeedFacts;
+}
+
+export interface OutdoorStaticObjectDynamicSeedFacts {
+	readonly landblockId: number;
+	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
+	readonly object: StaticObjectInstanceIdentity;
+	readonly source: StaticObjectSourceIdentity;
+	readonly sourceAssetId: string;
+	readonly setupModelId: number;
+	readonly defaultAnimationId: number;
+	readonly sourceResidence: LandblockSourceIdentity;
+	readonly localPlacement: StaticPlacementTransform;
+	readonly sourceScale: StaticVec3;
+	readonly classificationReason: "setup-default-animation";
+}
 
 interface StaticEnvCellStaticObjectSeedRecord {
 	readonly kind: "env-cell-static-object-seed";
@@ -1211,6 +1235,8 @@ export interface StaticObjectBakeDiagnostics {
 	readonly landblockId: number;
 	readonly objectCount: number;
 	readonly generatedInstanceCount: number;
+	readonly authoredDynamicSeedCount: number;
+	readonly authoredDynamicSeedClassificationReasons: StaticObjectDynamicSeedClassificationReasonCounts;
 	readonly explicitObjectCount: number;
 	readonly buildingObjectCount: number;
 	readonly uniqueSourceCount: number;
@@ -1239,6 +1265,10 @@ export interface StaticObjectRetainedTransparentPartitionReasonCounts {
 	readonly missingInstanceBounds: number;
 	readonly unsupportedMaterialBucket: number;
 	readonly nonRenderableOrDeferredMaterialBucket: number;
+}
+
+export interface StaticObjectDynamicSeedClassificationReasonCounts {
+	readonly setupDefaultAnimation: number;
 }
 
 export type StaticMaterialCoverageFamily =

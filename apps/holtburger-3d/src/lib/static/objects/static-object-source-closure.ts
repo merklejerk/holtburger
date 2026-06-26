@@ -311,6 +311,10 @@ async function createSourceAssetFacts(options: {
 	return {
 		bounds: mergePartBounds(parts),
 		debug: { sourceAssetId: options.source.asset.sourceAssetId },
+		defaultAnimation:
+			options.source.payload.kind === "setup-model"
+				? options.source.payload.defaultAnimation
+				: null,
 		identity: options.identity,
 		invalidPolygonCount: sum(parts, (part) => part.invalidPolygonCount),
 		materialSlotCount: sum(parts, (part) => part.materialSlotCount),

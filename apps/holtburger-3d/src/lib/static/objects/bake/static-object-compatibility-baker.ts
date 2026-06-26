@@ -9,6 +9,7 @@ import type {
 	StaticBakeTextureUse,
 	StaticBaker,
 	StaticDrawUnit,
+	OutdoorStaticObjectsScopePayload,
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectDrawUnitOwnership,
 	StaticObjectBakeDiagnostics,
@@ -28,6 +29,7 @@ import type {
 	StaticObjectSourceGeometryIdentity,
 	StaticObjectInstanceFacts,
 	StaticObjectRetainedTransparentPartitionReasonCounts,
+	StaticObjectDynamicSeedClassificationReasonCounts,
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
 import { describeStaticScopeKey } from "../../demand-planner";
@@ -113,7 +115,9 @@ export function bakeStaticObjectCompatibility(
 		materialCoverage: itemResults.map((result) => result.materialCoverage),
 		portalApertureResources: buildingTransitionPortalApertureResources,
 		revision: input.revision,
-		staticAuthoredDynamicSeeds: [],
+		staticAuthoredDynamicSeeds: itemResults.flatMap(
+			(result) => result.staticAuthoredDynamicSeeds,
+		),
 		staticBatchId: input.staticBatchId,
 		staticPortalGraphs: itemResults.flatMap((result) =>
 			result.buildingTransitionPortalApertureResource
@@ -257,6 +261,7 @@ function bakeStaticObjectCompatibilityItem(
 	readonly textureUses: readonly StaticBakeTextureUse[];
 	readonly staticObjectRenderInstances: readonly StaticObjectRenderInstance[];
 	readonly staticObjectVisualResources: readonly StaticObjectVisualResource[];
+	readonly staticAuthoredDynamicSeeds: StaticBakeBatchResult["staticAuthoredDynamicSeeds"];
 	readonly buildingTransitionPortalApertureResource: StaticPortalApertureResource | null;
 	readonly work: StaticBakeBatchItem["work"];
 } {
@@ -335,6 +340,7 @@ function bakeStaticObjectCompatibilityItem(
 	return {
 		drawUnits: bakedDrawUnits,
 		diagnostics: createStaticObjectBakeDiagnostics({
+			authoredDynamicSeeds: getOutdoorAuthoredDynamicSeeds(item.payload.scope),
 			drawUnits: drawUnits.map((output) => output.drawUnit),
 			input,
 			instancedOutput,
@@ -350,6 +356,10 @@ function bakeStaticObjectCompatibilityItem(
 			...spatialRecordBySliceId.values(),
 			...drawUnits.flatMap((output) => output.objectSpatialRecords),
 		],
+		staticAuthoredDynamicSeeds: createOutdoorAuthoredDynamicSeedRecords(
+			item.work,
+			item.payload.scope,
+		),
 		staticObjectRenderInstances: instancedOutput.instances,
 		staticObjectVisualResources: instancedOutput.resources,
 		textureUses: createStaticObjectBakeTextureUses({
@@ -364,6 +374,7 @@ function bakeStaticObjectCompatibilityItem(
 
 function createStaticObjectBakeDiagnostics(options: {
 	readonly input: StaticBakeBatchInput;
+	readonly authoredDynamicSeeds: readonly OutdoorStaticObjectsScopePayload["authoredDynamicSeeds"][number][];
 	readonly instancedOutput: {
 		readonly instances: readonly StaticObjectRenderInstance[];
 		readonly resources: readonly StaticObjectVisualResource[];
@@ -406,6 +417,11 @@ function createStaticObjectBakeDiagnostics(options: {
 		buildingObjectCount: options.payload.objects.filter(
 			(object) => object.identity.objectKind === "building",
 		).length,
+		authoredDynamicSeedCount: options.authoredDynamicSeeds.length,
+		authoredDynamicSeedClassificationReasons:
+			createStaticObjectDynamicSeedClassificationReasonCounts(
+				options.authoredDynamicSeeds,
+			),
 		domain: options.payload.domain,
 		drawUnitCount: options.drawUnits.length,
 		estimatedFlattenedTypedArrayBytes: sumNumbers(
@@ -449,6 +465,39 @@ function createStaticObjectBakeDiagnostics(options: {
 		uniqueSourceCount: uniqueSourceKeys.size,
 		uniqueSourcePartGeometryCount: uniqueSourcePartGeometryKeys.size,
 		uniqueSourceTriangleCount,
+	};
+}
+
+function createOutdoorAuthoredDynamicSeedRecords(
+	work: StaticBakeBatchItem["work"],
+	payload: StaticBakeBatchItem["payload"]["scope"],
+): StaticBakeBatchResult["staticAuthoredDynamicSeeds"] {
+	if (payload.kind !== "outdoor-static-objects") {
+		return [];
+	}
+	const owner = createWorkPeerRecordOwner(work);
+	return payload.authoredDynamicSeeds.map((seed) => ({
+		kind: "outdoor-static-object-dynamic-seed",
+		owner,
+		seed,
+	}));
+}
+
+function getOutdoorAuthoredDynamicSeeds(
+	payload: StaticBakeBatchItem["payload"]["scope"],
+): readonly OutdoorStaticObjectsScopePayload["authoredDynamicSeeds"][number][] {
+	return payload.kind === "outdoor-static-objects"
+		? payload.authoredDynamicSeeds
+		: [];
+}
+
+function createStaticObjectDynamicSeedClassificationReasonCounts(
+	seeds: readonly OutdoorStaticObjectsScopePayload["authoredDynamicSeeds"][number][],
+): StaticObjectDynamicSeedClassificationReasonCounts {
+	return {
+		setupDefaultAnimation: seeds.filter(
+			(seed) => seed.classificationReason === "setup-default-animation",
+		).length,
 	};
 }
 

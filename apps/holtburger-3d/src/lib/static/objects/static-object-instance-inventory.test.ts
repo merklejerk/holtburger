@@ -83,22 +83,14 @@ function createDrawUnit(options: {
 	readonly domain?: StaticObjectGeometryStaticDrawUnit["domain"];
 }): StaticObjectGeometryStaticDrawUnit {
 	return {
-		alphaTest: 0.5,
 		coordinateSpace: "landblock-render-local",
-		detailTextureTiling: 1,
-		detailTextureUseId: null,
 		domain: options.domain ?? "outdoor-detail",
 		drawUnitId: options.drawUnitId,
-		indexTextureUseId: null,
-		indexedClipThreshold: 0,
-		indexedTextureFormat: null,
 		indexType: "uint16",
 		indices: new Uint16Array([0, 1, 2]),
 		kind: "static-object-geometry",
 		landblockId: 0xda56ffff,
 		materialBucketKey: "bucket-a",
-		materialColor: [1, 1, 1, 1],
-		materialEmissiveColor: [0, 0, 0],
 		materialEntries: [
 			{
 				alphaTest: 0.5,
@@ -123,15 +115,14 @@ function createDrawUnit(options: {
 		materialPass: "alpha-test",
 		materialSlotIndices: new Float32Array([0, 0, 0]),
 		ownership: {
-			domain: options.domain === "outdoor-buildings" ? "outdoor-buildings" : "outdoor-detail",
+			domain:
+				options.domain === "outdoor-buildings"
+					? "outdoor-buildings"
+					: "outdoor-detail",
 			kind: "outdoor-static-objects",
 			landblockId: 0xda56ffff,
 		},
-		paletteFirstIndex: 0,
-		paletteTextureUseId: null,
 		positions: new Float32Array(9),
-		primaryTextureUseId: "texture-a",
-		primaryTextureWrapMode: "repeat",
 		renderState: createRenderState(),
 		sort: {
 			bounds: null,

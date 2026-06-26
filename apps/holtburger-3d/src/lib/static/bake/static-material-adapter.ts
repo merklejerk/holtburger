@@ -4,7 +4,9 @@ import type {
 	StaticDomain,
 	StaticMaterialTableEntry,
 	StaticObjectRenderState,
+	StaticTextureUseOwner,
 } from "../contracts";
+import { uniqueSortedStaticTextureUseOwners } from "../contracts";
 import type {
 	StaticMaterialPlan,
 	StaticMaterialTextureUseRole,
@@ -23,7 +25,7 @@ export interface StaticMaterialTextureUseIdFactory {
 }
 
 export interface StaticMaterialTextureUseSpec {
-	readonly ownerDrawUnitId: string;
+	readonly owners: readonly StaticTextureUseOwner[];
 	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
 	readonly textureWrapMode: StaticMaterialTextureWrapMode;
 }
@@ -186,17 +188,17 @@ export function createStaticMaterialTextureUses(options: {
 			if (existing) {
 				textureUsesById.set(textureUseId, {
 					...existing,
-					ownerDrawUnitIds: [
-						...existing.ownerDrawUnitIds,
-						spec.ownerDrawUnitId,
-					],
+					owners: uniqueSortedStaticTextureUseOwners([
+						...existing.owners,
+						...spec.owners,
+					]),
 				});
 				continue;
 			}
 
 			textureUsesById.set(textureUseId, {
 				domain: options.domain,
-				ownerDrawUnitIds: [spec.ownerDrawUnitId],
+				owners: uniqueSortedStaticTextureUseOwners(spec.owners),
 				samplingPolicy: createStaticMaterialTextureSamplingPolicy({
 					dataUse,
 					wrapMode: spec.textureWrapMode,

@@ -584,7 +584,7 @@ describe("browser landblock env-cell baker", () => {
 		expect(result.textureUses).toEqual([
 			expect.objectContaining({
 				domain: "landblock-env-cells",
-				ownerDrawUnitIds: [drawUnit.drawUnitId],
+				owners: [{ drawUnitId: drawUnit.drawUnitId, kind: "draw-unit" }],
 				samplingPolicy: {
 					wrapS: "repeat",
 					wrapT: "repeat",

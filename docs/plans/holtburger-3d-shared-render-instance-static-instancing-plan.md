@@ -210,8 +210,10 @@ Naming inventory to settle during Phase 1:
   `StaticObjectGeometryStaticDrawUnit` collection.
 - `instancedObjectResources` and `instancedObjectInstances`: proposed payload and commit field names
   for generated static instancing.
-- `TextureBindingOwner`: proposed discriminated owner for texture bindings, replacing object-only
-  reliance on `TextureDrawUnitBinding.drawUnitId` with draw-unit and visual-resource owner variants.
+- `StaticTextureBindingOwner`: discriminated owner for texture bindings, replacing object-only
+  reliance on draw-unit ids with draw-unit and visual-resource owner variants.
+- `StaticTextureBinding`: shader binding facts keyed by owner plus `textureUseId`, with role-page
+  slot, texture ref, rect, and dimensions.
 
 ### Shared Visual Resource Key
 
@@ -395,9 +397,9 @@ Spicy bits and debt:
 
 Spicy bits and debt:
 
-- `StaticPlacementTransform` and `StaticObjectGeneratedFacts` are now exported because the render
-  instance contract should use the existing authoritative shapes instead of clone types. That is a
-  small API expansion, but it avoids parallel frontend DTO drift.
+- `StaticPlacementTransform` and `StaticObjectGeneratedFacts` remain the authoritative colocated
+  shapes for render instances instead of clone types. Phase 8B later de-exported them after `knip`
+  proved no direct imports needed that API surface.
 - The visual resource contract currently references source geometry identity and renderer-visible
   material data; Phase 2 still needs to decide the exact produced payload fields for source-local
   vertex/index data and retained-baked reasons.
@@ -507,9 +509,9 @@ Spicy bits and debt:
 - Static scene query/source-mapping parity for instanced generated objects is not done. Baked
   partitions keep their existing source mappings; cutover partitions now rely on render-instance
   identity and need the query/debug path to consume it.
-- `isDrawSuppressedByBakedLayer` is now a bring-up remnant forced to `false`. It should disappear
-  once the direct render-instance path is no longer sharing transitional state with the old baked
-  layer suppression model.
+- `isDrawSuppressedByBakedLayer` was a bring-up remnant forced to `false`; Phase 8B removed it once
+  direct render instances no longer shared transitional state with the old baked layer suppression
+  model.
 
 ### 2026-06-25 Resteer: Instanced Submission Moves Up
 
@@ -864,13 +866,13 @@ Decision:
 
 - Implement Phase 8A first: extract shared static-material binding setup for direct and instanced
   static-object draws. This is scoped, behavior-preserving, and profiler-relevant.
-- Treat `isDrawSuppressedByBakedLayer` as already removed from production code. Only stale plan or
-  historical references should remain.
+- Check `isDrawSuppressedByBakedLayer` directly during Phase 8B. The dry run expected only stale plan
+  references, but production code still had a false-only bridge to remove.
 - Keep report trimming small until final before/after numbers are recorded. The `bakedInstanced*`
   field names already fixed the most misleading report issue.
-- Do not bundle texture binding ownership into material binding extraction. The bridge still
-  reconstructs visual-resource bindings from `textureUseId` while `TextureDrawUnitBinding` remains
-  draw-unit-shaped, and that deserves a deliberate owner model.
+- Do not bundle texture binding ownership into material binding extraction. At the dry-run point, the
+  bridge still reconstructed visual-resource bindings from `textureUseId` while texture bindings were
+  draw-unit-shaped; Phase 8D/8E owns that deliberate cutover.
 - Defer draw-unit field collapse. Baked draw units remain primary for terrain, buildings, env-cells,
   and explicit static leftovers, so collapsing fields now would be fake cleanliness.
 
@@ -882,6 +884,218 @@ Spicy bits and debt:
   through a helper extraction.
 - Collapsing draw-unit fields too early would obscure the remaining baked paths and make review worse,
   not better.
+
+### 2026-06-25 Phase 8A Progress
+
+- Extracted `#bindStaticMaterialResourcePayload()` in the WebGL2 renderer.
+- Direct static-object draws and instanced static-object draws now share the same prepared payload
+  lookup, role-page texture binding uploads, and static material table uniform upload path.
+- Kept transform selection, VAO binding, instance transform buffer setup, counter increments, and
+  draw calls in the direct/instanced draw methods.
+- Preserved existing render behavior and counters; no new diagnostic-shape tests were added.
+
+Validation:
+
+- `npm run check`
+- `npm run lint:ts`
+- `npm run test:ts`
+
+Spicy bits and debt:
+
+- This is intentionally a class-private helper. Moving the binding setup into a free helper would
+  require passing renderer-owned program/state/cache plumbing through another API before we have a
+  cleaner texture-owner model.
+- Texture binding ownership is still the next real contract debt. The helper still calls
+  `#getStaticObjectPreparedPayload()`, which may reconstruct visual-resource bindings from
+  `textureUseId` while the underlying binding type remains draw-unit-shaped.
+- The helper extraction reduces duplication in the sampled hot path, but it is not expected to solve
+  the larger env-cell/portal-projection direct draw cost by itself.
+
+### 2026-06-25 Phase 8B Progress
+
+- Removed the renderer-side `isDrawSuppressedByBakedLayer` bridge. The field was always initialized
+  to `false`, then read only by a filter that therefore never suppressed anything.
+- Stored committed static object render instances as `StaticObjectRenderInstance` directly instead of
+  wrapping them in a renderer-only suppression resource type.
+- De-exported unused local-only helper types surfaced by `knip`: renderer material pass draw-call
+  counters, static placement/generated/transparency helper shapes, material coverage kind, and
+  generated-instance inventory candidate groups.
+- Kept the copied runtime diagnostics report summary-level. No stable counters were removed because
+  Phase 8C still needs the final generated-static baseline.
+- Searched for diagnostics-only report-shape and legacy-absence tests. No hollow tests were deleted in
+  this phase; the matches were behavior tests or unrelated resource removal tests.
+
+Validation:
+
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
+- `npm run test:ts`
+
+Spicy bits and debt:
+
+- The dry run was wrong about `isDrawSuppressedByBakedLayer` already being gone. The code still had
+  the bridge, but it was inert, so the right fix was deletion instead of another note.
+- `knip` found exported type noise rather than dead runtime code. The fix was to de-export internal
+  helper shapes, preserving type safety without keeping fake API surface.
+- Runtime report counters stay for now because Phase 8C needs them for the final before/after. Cutting
+  them before baseline capture would be neat-looking but strategically cooked.
+- Texture binding ownership remains intentionally untouched; that is still Phase 8D.
+
+### 2026-06-25 Phase 8C Final Baseline
+
+Captured from the fresh copied runtime diagnostics report for
+`manual|outdoor-anchor|0xda55ffff|buildings,detail,env-cells,terrain`, with the generated-heavy
+outdoor-detail neighbor `0xda56ffff` still represented as the largest outdoor-detail bake sample.
+
+Original generated-static baseline:
+
+- Outdoor-detail baked static object resources: `193`.
+- Outdoor-detail uploaded object bytes: `7,439,406`.
+- Static object resources: `425`.
+- Static draw units: `713`.
+- Static object bake draw units: `193`.
+- Static object flattened triangles: `95,377`.
+- Static object estimated flattened typed-array bytes: `7,439,406`.
+- Shared visual resources/render instances/instanced draw calls: `0` by construction; those counters
+  did not exist yet because generated statics were still flattened into baked draw units.
+
+Final generated-static baseline:
+
+- Outdoor-detail baked direct draw calls: `27`.
+- Outdoor-detail baked direct draw calls by pass: `10` opaque, `14` alpha-test, `3` transparent,
+  `0` additive.
+- Outdoor-detail visual resources: `96`.
+- Outdoor-detail live render instances: `344`.
+- Outdoor-detail uploaded object bytes: `6,760,494`.
+- Static object resources: `259`.
+- Static draw units: `643`.
+- Static object bake draw units: `27`.
+- Static object flattened triangles: `83,285`.
+- Static object estimated flattened typed-array bytes: `6,496,230`.
+- Static object estimated avoided flattened typed-array bytes: `678,912`.
+- Bake-produced instanced render instances: `392`.
+- Static object instanced render-instance draw calls: `81` for `344` live instances.
+- Far transparent instanced render-instance draw calls: `26` for `159` far transparent instances.
+- Retained repeated generated transparent outdoor-detail partitions: `0`.
+- Largest outdoor-detail bake sample, `0xda56ffff`: `7` baked draw units, `42` baked instanced visual
+  resources, `214` bake-produced instanced render instances, and `2,405,286` estimated flattened
+  typed-array bytes.
+
+Comparison:
+
+- Outdoor-detail baked resource/draw-call pressure moved from `193` flattened resources to `27`
+  baked direct draw calls.
+- Outdoor-detail uploaded bytes dropped by `678,912` bytes, from `7,439,406` to `6,760,494`.
+- Static object resources dropped by `166`, from `425` to `259`.
+- Static object bake draw units dropped by `166`, from `193` to `27`.
+- Static object flattened triangles dropped by `12,092`, from `95,377` to `83,285`.
+- Static object estimated flattened typed-array bytes dropped by `943,176`, from `7,439,406` to
+  `6,496,230`. Renderer uploaded bytes include the shared visual source buffers, so the renderer-side
+  byte reduction is the smaller `678,912` avoided flattened bytes.
+- Generated transparent outdoor-detail partition retention reached the desired steady state:
+  repeated generated transparent partitions are instanced when far enough from the camera, and only
+  `3` explicit transparent outdoor-detail baked direct draws remain.
+
+Decision:
+
+- Close the generated outdoor-detail static-instancing perf scope. The plan achieved the intended
+  generated-static structural cutover: repeated generated scenery no longer has to remain as
+  one-baked-resource-per-instance, and far transparent generated scenery submits through instanced
+  draws.
+- Do not continue optimizing `directEnvCellDrawCalls`, `landblock-env-cells` uploads, portal
+  projection masked layers, or non-outdoor-detail baked static direct draws inside this plan. They are
+  real remaining pressure, but they are outside the generated-static scope.
+- Keep Phase 8D as a contract cleanup phase for texture binding ownership only. It should not become a
+  performance hunt.
+
+Spicy bits and debt:
+
+- `frameHandlerMs` in the final copied report is `8`, but earlier samples still varied around
+  `10`-`18`. Treat the structural counters as the reliable completion signal; a real perf claim needs
+  a controlled profile run.
+- Static draw units only dropped from `713` to `643` because most remaining draw pressure is not
+  generated outdoor detail. Total baked static direct draws are still `242`, and
+  `directEnvCellDrawCalls` is still `417`.
+- The largest current upload is `landblock-env-cells`, not outdoor detail. That is follow-up-plan
+  material, not a reason to keep stretching this one.
+
+### 2026-06-25 Phase 8D Texture Binding Ownership Audit
+
+Audited the static texture binding path before the Phase 8E cutover:
+
+- `StaticBakeTextureUse.ownerDrawUnitIds` is still the producer-side ownership field.
+- `TextureManager.applyStaticCommitDelta()` leased atlas entries per owner draw unit, resolved
+  role-page slots per draw unit, and emitted `TexturePlacementUpdate.drawUnitBindings`.
+- `TexturePlacementUpdate.textureUsePlacements` already carries texture placement facts keyed by
+  `textureUseId`, independent of draw-unit ownership.
+- The WebGL2 renderer stored draw-unit bindings in `#textureBindings` and also stored the latest
+  binding by `textureUseId` in `#textureBindingsByTextureUseId`.
+- Shared static visual resources called `#createTextureUseBindingsForStaticResource()`, which looked
+  up each material entry's `textureUseId`, copied the latest binding, and rewrote `drawUnitId` to the
+  visual resource's synthetic draw id.
+- `static-materializer.ts` already has a draw-unit rebinding path for fine-partitioned static object
+  draw units, which confirms role-page slot ownership is a separate concern from atlas placement.
+
+Decision:
+
+- Split the model conceptually before changing code:
+  - Texture placement facts are keyed by `textureUseId` and describe atlas placement/source data.
+  - Shader binding facts are keyed by an explicit binding owner plus `textureUseId`.
+  - The future owner shape should be a union, starting with `draw-unit` and
+    `static-object-visual-resource`, and leaving room for a dynamic visual-resource owner later.
+- Phase 8E should replace `TextureDrawUnitBinding` with a static texture binding type for an owner,
+  with role-page slot, texture ref, rect, and dimensions.
+- Renderer lookup should become owner-keyed: baked draw units bind by draw-unit owner, shared static
+  visual resources bind by visual-resource owner, and dynamic visual resources can use the same lower
+  level contract later.
+- Implement this cutover inside the cleanup sequence. It touches static contracts, texture manager
+  leasing, role-page slot allocation, static materializer rebinding, renderer dirtying, and
+  texture-binding tests, but that is exactly the contract debt Phase 8 exists to retire.
+
+Spicy bits and debt:
+
+- The current visual-resource bridge works because role-page slots are derived from texture refs and
+  material roles, but it lies about ownership by manufacturing a draw-unit id for a visual resource.
+- `textureUseId` is enough to recover placement facts, but not enough to own role-page slots once draw
+  units and reusable visual resources both need first-class binding ownership.
+- This debt matters more for dynamic entities than for the now-closed generated outdoor-detail perf
+  scope. Dynamic renderer work should not inherit `ownerDrawUnitIds` as its resource ownership model,
+  so Phase 8E owns the cutover before this plan closes.
+
+### 2026-06-25 Phase 8E Progress
+
+- Replaced `TextureDrawUnitBinding` with `StaticTextureBinding` and added explicit
+  `StaticTextureBindingOwner` variants for `draw-unit` and `static-object-visual-resource`.
+- Renamed `TexturePlacementUpdate.drawUnitBindings` to `textureBindings`.
+- Kept `TextureUsePlacement` as the atlas placement fact keyed by `textureUseId`.
+- Updated `TextureManager` to emit draw-unit owner bindings for existing baked resources.
+- Updated `static-materializer.ts` to synthesize static-object visual-resource owner bindings from
+  committed `StaticObjectVisualResource.materialEntries` plus `textureUsePlacements`.
+- Updated the WebGL2 renderer to store texture bindings by owner key, dirty prepared payloads by
+  owner kind, and bind shared visual resources without reconstructing bindings from `textureUseId`.
+- Added a focused materializer test proving static object visual resources receive
+  `static-object-visual-resource` owner bindings.
+- Updated texture-manager, runtime, terrain/static payload, and materializer tests to assert the new
+  owner-keyed binding shape.
+
+Validation:
+
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
+- `npm run test:ts`
+
+Spicy bits and debt:
+
+- The producer-side `StaticBakeTextureUse.ownerDrawUnitIds` still exists because bake texture uses are
+  still produced from draw-unit residency. That is honest for terrain/buildings/env-cells and retained
+  baked statics, but dynamic visual resources should get a separate producer owner shape when they
+  arrive.
+- Texture atlas leasing is still draw-unit based. Shader binding ownership is now owner-keyed; atlas
+  lifetime ownership can be split later if dynamic visual resources need non-draw-unit leasing.
+- The renderer no longer has the `#textureBindingsByTextureUseId` bridge. Missing visual-resource
+  owner bindings now fail as missing bindings instead of silently borrowing a draw-unit-shaped record.
 
 ## Implementation Phases
 
@@ -1023,54 +1237,222 @@ Spicy bits and debt:
 
 ### Phase 8A: Shared Static Material Binding Extraction
 
-- Extract shared static-material payload bind/upload setup for direct and instanced static-object
+- Completed: extract shared static-material payload bind/upload setup for direct and instanced static-object
   draws.
-- Keep direct and instanced draw paths responsible for their own transform mode, VAO binding,
+- Completed: keep direct and instanced draw paths responsible for their own transform mode, VAO binding,
   instance attributes, counter increments, and draw call.
-- Preserve render state behavior and runtime counters.
-- Keep existing behavior tests intact. Add a focused renderer test only if the extraction changes a
-  visible submission branch; do not add tests that assert private helper shape.
+- Completed: preserve render state behavior and runtime counters.
+- Completed: keep existing behavior tests intact. No helper-shape test was added because the
+  extraction is behavior-preserving.
 
 ### Phase 8B: Stale Checklist And Report Hygiene
 
-- Mark/remove stale `isDrawSuppressedByBakedLayer` cleanup references if no code references remain.
-- Keep the runtime report summary-level. Row-level bake/upload/timing detail belongs behind explicit
-  inspectors, not the copy report.
-- Keep stable live renderer counters and compact bake counters until final before/after numbers are
-  recorded.
-- Scrub stale doc wording that implies old diagnostic names, removed placeholder APIs, or legacy
-  generated-static suppression bridges.
-- Scrub tests that only assert diagnostic report shape or legacy absence if encountered. Keep behavior
-  tests for resource keying, instance grouping, renderer submission, query identity, and transparency
-  policy.
+- Completed: remove the dead `isDrawSuppressedByBakedLayer` renderer bridge after confirming it was
+  always initialized to `false`.
+- Completed: keep the runtime report summary-level. Row-level bake/upload/timing detail belongs
+  behind explicit inspectors, not the copy report.
+- Completed: keep stable live renderer counters and compact bake counters until final before/after
+  numbers are recorded.
+- Completed: scrub stale doc wording that implied the suppression bridge was only a plan reference.
+- Completed: search for tests that only assert diagnostic report shape or legacy absence. No such
+  tests were removed in this phase.
 
 ### Phase 8C: Final Baseline Capture
 
-- Re-run the `0xda56ffff` generated-static comparison and update the plan with final before/after
+- Completed: re-run the `0xda56ffff` generated-static comparison and update the plan with final before/after
   numbers: flattened triangles, flattened bytes, uploaded object bytes, shared visual resource count,
   render instance count, retained-baked count, baked direct draw count, instanced draw count, and far
   transparent instanced counts.
-- Close the generated-static perf scope after the final baseline. Do not fold env-cell,
+- Completed: close the generated-static perf scope after the final baseline. Do not fold env-cell,
   portal-projection, or non-outdoor-detail static direct-draw work into this plan.
 
 ### Phase 8D: Texture Binding Ownership Audit
 
-- Audit `TextureDrawUnitBinding`, `textureUseId`, and static visual-resource binding reconstruction.
-- Decide a shared resource owner shape before changing code.
-- Remove draw-unit-only assumptions for shared object visual resources only after the owner model is
-  explicit.
-- Keep this out of Phase 8A unless the material binding helper extraction proves impossible without
-  touching ownership.
+- Completed: audit `TextureDrawUnitBinding`, `textureUseId`, and static visual-resource binding
+  reconstruction.
+- Completed: decide the shared resource owner shape before changing code.
+- Course correction: remove draw-unit-only binding assumptions inside this cleanup sequence instead of
+  deferring the known lie to dynamic renderer work. Phase 8E owns the cutover.
+- Completed: keep this out of Phase 8A; the material binding helper extraction did not need texture
+  ownership changes.
 
-### Phase 8E: Deferred Contract Hardening
+### Phase 8E: Owner-Keyed Texture Binding Cutover
 
-- Defer collapsing transitional static object draw-unit fields until baked draw-unit users are
-  narrowed or a follow-up plan owns the migration.
-- Delete temporary compatibility shims, bring-up-only direct draw paths, and transitional names only
-  when they are no longer serving terrain, buildings, env-cells, explicit statics, or final baseline
-  comparison.
-- Keep behavior tests for resource keying, instance grouping, renderer submission, query identity, and
-  transparency policy.
+- Completed: introduce an explicit static texture binding owner union with at least `draw-unit` and
+  `static-object-visual-resource`.
+- Completed: replace/rename `TextureDrawUnitBinding` so shader binding facts are keyed by owner plus
+  `textureUseId`, while `TextureUsePlacement` remains the placement fact keyed by `textureUseId`.
+- Completed: update renderer binding storage, prepared-payload invalidation, and shared
+  visual-resource lookup so visual resources no longer synthesize draw-unit ownership from
+  `textureUseId`.
+- Completed: update static materializer rebinding and assertions to preserve owner-keyed bindings for
+  fine-partitioned draw units.
+- Completed: synthesize static-object visual-resource owner bindings from texture placement facts and
+  visual-resource material entries.
+- Completed: keep terrain/buildings/env-cells on `draw-unit` owners where that is still the honest
+  owner.
+- Completed: update behavior tests around texture placement, static materializer rebinding, and WebGL2
+  prepared payload binding.
+- Debt: texture atlas leasing is still draw-unit based through `StaticBakeTextureUse.ownerDrawUnitIds`;
+  dynamic visual resources should not inherit that producer-side shape.
+
+### Phase 8F: Deferred Contract Hardening
+
+- Completed: remove the transitional one-entry material summary fields from
+  `StaticObjectGeometryStaticDrawUnit`; static object draw units now expose material facts through
+  `materialEntries` plus `materialSlotIndices`, not duplicated top-level summary fields.
+- Completed: remove summary-field production from the static object compatibility baker and
+  static-materializer fine-partition remap path.
+- Completed: update tests that asserted draw-unit-level material facts to assert the corresponding
+  `StaticMaterialTableEntry` fields instead.
+- Completed: keep terrain `primaryTextureUseId` and structured-interior material-table fields intact;
+  they are separate contracts, not part of the static-object summary-field cleanup.
+- Completed: keep behavior tests for resource keying, instance grouping, renderer submission, query
+  identity, and transparency policy.
+- Validation: `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run test:ts`,
+  targeted `prettier --check`, and `git diff --check`.
+
+Spicy bits and debt:
+
+- The old summary fields were not runtime-critical anymore; they were compatibility residue that made
+  tests and fixtures look like the pre-material-table API still existed.
+- `StaticMaterialTableEntry` intentionally keeps those same material fields. The cleanup removed
+  duplicate draw-unit summaries, not the renderer-visible material table.
+- `StaticBakeTextureUse.ownerDrawUnitIds` remains the producer-side atlas lifetime owner shape. That
+  is still honest for baked draw-unit residency, but dynamic visual resources need a non-draw-unit
+  producer owner shape in their own implementation work.
+
+### Phase 8G: Atlas Lifetime Owner Cutover
+
+Goal: close the remaining draw-unit-only texture residency debt before dynamic visual resources
+inherit it.
+
+Deliverables:
+
+- Introduce a producer-side `StaticTextureUseOwner` contract with at least:
+  - `{ kind: "draw-unit"; drawUnitId: string }`
+  - `{ kind: "static-object-visual-resource"; resourceId: StaticObjectVisualResourceId }`
+- Replace `StaticBakeTextureUse.ownerDrawUnitIds` with `owners: readonly StaticTextureUseOwner[]`.
+- Add a `static-object-visual-resource` variant to `StaticResourceKey`/removal materialization so
+  atlas leases owned by visual resources receive an eviction signal when the owning static layer is
+  removed.
+- Update every static bake producer that emits `StaticBakeTextureUse`:
+  - terrain emits draw-unit owners.
+  - buildings, retained outdoor-detail baked partitions, and env-cell baked statics emit draw-unit
+    owners.
+  - shared generated static visual resources emit static-object-visual-resource owners for the
+    texture uses referenced by their `materialEntries`.
+- Update texture-use merge helpers to merge and sort owner keys, not draw-unit id arrays.
+- Update `TextureManager` atlas residency tracking:
+  - replace `#textureKeysByDrawUnitId` with owner-keyed residency tracking.
+  - increment and decrement texture leases by owner key.
+  - track pending placement owners as owner keys.
+  - generalize packing cohorts from `draw-unit:<id>` to stable owner keys.
+- Keep draw-unit owners valid for baked resources; the phase is a union cutover, not a ban on
+  draw-unit ownership.
+- Make `TextureManager` emit `StaticTextureBinding` records directly for both draw-unit owners and
+  static-object-visual-resource owners.
+- Remove the static-materializer bridge that synthesizes static-object visual-resource bindings from
+  `textureUsePlacements` plus `StaticObjectVisualResource.materialEntries`.
+- Update diagnostics/report names only if they expose owner concepts; avoid expanding the report.
+
+Acceptance criteria:
+
+- No production code references `ownerDrawUnitIds`.
+- `StaticBakeTextureUse` can represent draw-unit and static-object visual-resource owners without
+  lossy string conventions.
+- Texture lease accounting releases packed textures when the last owner of any supported kind is
+  removed.
+- Static object visual resources receive owner-keyed texture bindings from the texture manager, not
+  from a materializer reconstruction step.
+- Terrain, buildings, env-cells, retained baked statics, and shared generated outdoor-detail statics
+  keep rendering with the same texture bindings as before.
+- `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run test:ts`, targeted
+  `prettier --check`, and `git diff --check` pass.
+
+Tests to update or add:
+
+- Texture manager tests for owner-keyed lease increment/decrement, pending placement owner merging,
+  and emitted `StaticTextureBinding.owner` values.
+- Static materializer tests that currently prove visual-resource binding synthesis should either be
+  deleted or rewritten to prove the bridge is gone.
+- Static coordinator/materializer removal tests proving visual-resource owned texture leases are
+  released when a static layer with visual resources is evicted.
+- Terrain, static object, and env-cell bake tests that currently assert `ownerDrawUnitIds`.
+- A generated shared static object test proving a visual resource with textured material entries emits
+  a `static-object-visual-resource` owner texture use before materialization.
+
+Dry-run sequence:
+
+1. Add owner-key helpers first: `createStaticTextureUseOwnerKey`, owner sorting/dedupe, and
+   draw-unit/static-object-visual-resource constructors.
+2. Change `StaticBakeTextureUse` and `createStaticMaterialTextureUses` to accept owner objects. Keep
+   all current baked producers on draw-unit owners at this step.
+3. Update texture-use merge helpers and tests until `ownerDrawUnitIds` disappears from baked terrain,
+   static object, env-cell, and shared material adapter paths.
+4. Update `TextureManager` residency tracking from draw-unit id keys to owner keys, including pending
+   placements and packing cohorts.
+5. Add `StaticResourceKey` support for static-object visual-resource removal and wire coordinator,
+   materializer, texture manager, and renderer removal paths to the same owner key.
+6. Move generated shared static object texture-use production to visual-resource owners and make the
+   texture manager emit `static-object-visual-resource` bindings directly.
+7. Delete the static-materializer visual-resource binding synthesis bridge and any tests that only
+   prove the bridge exists.
+8. Run full validation and confirm `rg ownerDrawUnitIds apps/holtburger-3d/src/lib --glob '*.ts'`
+   returns no production hits.
+
+Dry-run findings:
+
+- `createStaticMaterialTextureUses` is the right first cut point. It currently accepts
+  `ownerDrawUnitId`, so changing each baker independently would duplicate the migration.
+- `TextureManager` has four coupled owner assumptions: lease maps, pending placement owner sets,
+  role-page binding emission, and packing cohorts.
+- Renderer binding storage is already owner-keyed through `StaticTextureBindingOwner`; renderer churn
+  should be limited to removal ownership and test expectations.
+- The current materializer bridge is explicit and removable:
+  `materializeTextureUpdate()` reconstructs static-object visual-resource bindings from
+  `textureUsePlacements` plus `StaticObjectVisualResource.materialEntries`.
+- `StaticResourceKey` currently only represents draw units and portal apertures. Without a
+  visual-resource removal key, visual-resource-owned atlas leases would be easy to leak.
+
+Spicy bits:
+
+- Packing cohorts are currently named and grouped around draw-unit ids. The cohort algorithm can stay,
+  but its owner key must become explicit and stable across owner kinds.
+- Do not encode visual resource ownership by inventing fake draw-unit ids. That would keep the debt
+  wearing a new hat.
+- Do not add a dynamic owner variant in this phase unless the dynamic renderer contract lands in the
+  same change. The static visual-resource owner is enough to close this plan's debt.
+
+### 2026-06-26 Phase 8G Progress
+
+- Added `StaticTextureUseOwner`, owner-key helpers, and `StaticBakeTextureUse.owners`.
+- Added `static-object-visual-resource` removal resource keys so visual-resource-owned atlas leases
+  receive eviction signals.
+- Converted terrain, retained baked statics, env-cell structured interiors, and generated shared
+  outdoor-detail visual resources to emit owner-based texture uses.
+- Updated `TextureManager` atlas residency, pending placement ownership, lease release, packing
+  cohorts, and emitted `StaticTextureBinding.owner` values to use owner keys.
+- Deleted the static-materializer visual-resource binding synthesis branch. Fine-partitioned baked
+  draw-unit binding remap remains because those draw-unit ids are still materialized after texture
+  manager placement.
+- Updated tests and fixtures from `ownerDrawUnitIds` to explicit owners. The production and test
+  source tree no longer references `ownerDrawUnitIds`.
+
+Validation:
+
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
+- `npm run test:ts`
+
+Spicy bits and debt:
+
+- Follow-up naming cleanup is done: static object role-page overflow diagnostics now report
+  `ownerKey`/`latestOwnerKey`. Terrain overflow diagnostics still report `drawUnitId` because terrain
+  role-page ownership is still draw-unit scoped.
+- Dynamic visual resources still need their own owner variant later. This phase intentionally stopped
+  at draw-unit and static-object visual-resource owners.
 
 ## Acceptance Criteria
 
@@ -1086,7 +1468,8 @@ Spicy bits and debt:
   transparent generated statics use WebGL2 instanced draws before the generated-static instance path
   is broadly enabled.
 - Static scene query and debug inspection continue to return semantic per-instance source identity.
-- Texture bindings for shared object resources no longer require draw-unit id ownership.
+- Texture binding ownership uses explicit owners rather than draw-unit-only ownership before dynamic
+  entities consume the shared visual-resource path.
 - Alpha-blended generated statics preserve current near-camera sorting behavior or report any known
   compromise explicitly.
 - Dynamic entity renderer planning can point at the shared resource/instance path as the intended
@@ -1107,8 +1490,9 @@ Spicy bits and debt:
   WebGL2 instanced draws before broadly enabling generated outdoor static instancing.
 - Transparent sorting may conflict with batching. Mitigate with explicit sort policy and direct sorted
   fallback.
-- Texture binding code is currently draw-unit keyed. Mitigate by moving object texture bindings to
-  shared resource ownership before dynamic entities consume the path.
+- Texture atlas lifetime ownership now supports draw-unit and static-object visual-resource owners.
+  Mitigate future dynamic resource work by adding a dynamic owner variant only when the dynamic
+  renderer contract lands.
 - Instanced draw implementation can become a distraction if attempted before the resource/instance
   contract is proven. Mitigate by using direct draws for bring-up only, then requiring instanced draws
   for compatible generated groups before broad enablement.
@@ -1124,6 +1508,7 @@ Spicy bits and debt:
 - Static scene query and debug inspection still identify individual generated static instances.
 - Renderer texture/material binding ownership is no longer coupled only to draw-unit id for shared
   object visual resources.
+- Texture atlas lifetime ownership uses explicit owners rather than `ownerDrawUnitIds`.
 - Dynamic entity renderer planning can reuse the same visual resource and render instance contracts.
 
 ## Open Questions

@@ -268,7 +268,8 @@ type TextureAtlasWarningDiagnostics =
 	| TerrainRolePageOverflowSummaryDiagnostics
 	| StaticObjectRolePageOverflowSummaryDiagnostics;
 
-export type TextureAtlasWarningReportDiagnostics = TextureAtlasWarningDiagnostics;
+export type TextureAtlasWarningReportDiagnostics =
+	TextureAtlasWarningDiagnostics;
 
 interface TerrainRolePageOverflowSummaryDiagnostics {
 	readonly kind: "terrain-role-page-overflow";
@@ -280,7 +281,7 @@ interface TerrainRolePageOverflowSummaryDiagnostics {
 interface StaticObjectRolePageOverflowSummaryDiagnostics {
 	readonly kind: "static-object-role-page-overflow";
 	readonly count: number;
-	readonly latestDrawUnitId: string | null;
+	readonly latestOwnerKey: string | null;
 	readonly latestRole: StaticObjectTextureRolePageKind | null;
 }
 
@@ -310,7 +311,7 @@ export interface TerrainRolePageOverflowDiagnostics {
 }
 
 export interface StaticObjectRolePageOverflowDiagnostics {
-	readonly drawUnitId: string;
+	readonly ownerKey: string;
 	readonly kind: StaticObjectTextureRolePageKind;
 	readonly maxSlots: number;
 	readonly textureRefId: string;

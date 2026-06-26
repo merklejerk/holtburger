@@ -3,7 +3,7 @@ import type {
 	StaticMaterialTableEntry,
 	StaticObjectRenderState,
 } from "../../static/contracts";
-import type { TextureDrawUnitBinding } from "../types";
+import type { StaticTextureBinding } from "../types";
 import {
 	createStaticObjectPreparedDrawPayload,
 	createStaticObjectPreparedDrawPayloadState,
@@ -86,7 +86,7 @@ describe("WebGL2 static object payload builder", () => {
 			],
 			materialFamily: "indexed-paletted",
 		});
-		const bindings = new Map<string, TextureDrawUnitBinding>([
+		const bindings = new Map<string, StaticTextureBinding>([
 			[
 				"index-use",
 				createBinding({
@@ -244,7 +244,7 @@ describe("WebGL2 static object payload builder", () => {
 			],
 			materialFamily: "texture-rgba",
 		});
-		const bindings = new Map<string, TextureDrawUnitBinding>([
+		const bindings = new Map<string, StaticTextureBinding>([
 			[
 				"base-use",
 				createBinding({
@@ -330,15 +330,15 @@ function createMaterialEntry(
 
 function createBinding(options: {
 	readonly height: number;
-	readonly kind: TextureDrawUnitBinding["rolePage"]["kind"];
+	readonly kind: StaticTextureBinding["rolePage"]["kind"];
 	readonly rect: readonly [number, number, number, number];
 	readonly slot: number;
 	readonly textureRefId: string;
 	readonly textureUseId: string;
 	readonly width: number;
-}): TextureDrawUnitBinding {
+}): StaticTextureBinding {
 	return {
-		drawUnitId: "test-draw-unit",
+		owner: { drawUnitId: "test-draw-unit", kind: "draw-unit" },
 		rect: options.rect,
 		rolePage: {
 			kind: options.kind,

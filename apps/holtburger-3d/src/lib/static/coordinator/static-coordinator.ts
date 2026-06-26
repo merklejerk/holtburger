@@ -837,6 +837,33 @@ function collectCommittedResourceKeysByDesiredKey(
 			},
 		);
 	}
+	const visualResourceDomains = new Map<
+		string,
+		{ readonly domain: "outdoor-detail"; readonly landblockId: number }
+	>();
+	for (const instance of result.staticObjectRenderInstances) {
+		visualResourceDomains.set(instance.resourceId, {
+			domain: instance.domain,
+			landblockId: instance.landblockId,
+		});
+	}
+	for (const resource of result.staticObjectVisualResources) {
+		const owner = visualResourceDomains.get(resource.resourceId);
+		if (!owner) {
+			continue;
+		}
+		addResourceKey(
+			resourcesByDesiredKey,
+			createDesiredKeyForDrawUnit({
+				domain: owner.domain,
+				landblockId: owner.landblockId,
+			}),
+			{
+				kind: "static-object-visual-resource",
+				resourceId: resource.resourceId,
+			},
+		);
+	}
 	return resourcesByDesiredKey;
 }
 
@@ -942,8 +969,10 @@ function filterStaticBakeResultForWorks(
 			isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
 		),
 		textureUses: result.textureUses.filter((textureUse) =>
-			textureUse.ownerDrawUnitIds.some((drawUnitId) =>
-				drawUnitIds.has(drawUnitId),
+			textureUse.owners.some((owner) =>
+				owner.kind === "draw-unit"
+					? drawUnitIds.has(owner.drawUnitId)
+					: retainedStaticObjectVisualResourceIds.has(owner.resourceId),
 			),
 		),
 		works,

@@ -41,9 +41,9 @@ describe("browser texture manager", () => {
 			},
 		]);
 		expect(update).toMatchObject({
-			drawUnitBindings: [
+			textureBindings: [
 				{
-					drawUnitId: "terrain-a",
+					owner: { drawUnitId: "terrain-a", kind: "draw-unit" },
 					rect: [0, 0, 1, 1],
 					textureHeight: 256,
 					textureRefId: STABLE_TEXTURE_REF_ID,
@@ -164,7 +164,7 @@ describe("browser texture manager", () => {
 				textureUses,
 			});
 
-			expect(update?.drawUnitBindings).toHaveLength(4);
+			expect(update?.textureBindings).toHaveLength(4);
 		} finally {
 			warn.mockRestore();
 		}
@@ -224,14 +224,14 @@ describe("browser texture manager", () => {
 		]);
 		expect(texturePacker.jobs[0]?.cohorts).toBeUndefined();
 		expect(update?.placements).toHaveLength(1);
-		expect(update?.drawUnitBindings).toEqual([
+		expect(update?.textureBindings).toEqual([
 			expect.objectContaining({
-				drawUnitId: "terrain-a",
+				owner: { drawUnitId: "terrain-a", kind: "draw-unit" },
 				rect: [4, 4, 1, 1],
 				textureRefId: update?.placements[0]?.textureRefId,
 			}),
 			expect.objectContaining({
-				drawUnitId: "terrain-b",
+				owner: { drawUnitId: "terrain-b", kind: "draw-unit" },
 				rect: [4, 4, 1, 1],
 				textureRefId: update?.placements[0]?.textureRefId,
 			}),
@@ -363,9 +363,9 @@ describe("browser texture manager", () => {
 
 		expect(update?.placements.length).toBeGreaterThan(1);
 		expect(update?.textureUsePlacements).toHaveLength(textureUses.length);
-		expect(update?.drawUnitBindings).toHaveLength(textureUses.length);
+		expect(update?.textureBindings).toHaveLength(textureUses.length);
 		expect(
-			new Set(update?.drawUnitBindings.map((binding) => binding.rolePage?.slot))
+			new Set(update?.textureBindings.map((binding) => binding.rolePage?.slot))
 				.size,
 		).toBeGreaterThan(1);
 	});
@@ -433,9 +433,9 @@ describe("browser texture manager", () => {
 		);
 
 		expect(firstUpdate).toMatchObject({
-			drawUnitBindings: [
+			textureBindings: [
 				{
-					drawUnitId: "terrain-a",
+					owner: { drawUnitId: "terrain-a", kind: "draw-unit" },
 					rect: [2, 1, 1, 1],
 					textureHeight: 4,
 					textureWidth: 4,
@@ -450,9 +450,9 @@ describe("browser texture manager", () => {
 			],
 		});
 		expect(secondUpdate).toMatchObject({
-			drawUnitBindings: [
+			textureBindings: [
 				{
-					drawUnitId: "terrain-b",
+					owner: { drawUnitId: "terrain-b", kind: "draw-unit" },
 					rect: [2, 1, 1, 1],
 					textureHeight: 4,
 					textureWidth: 4,
@@ -507,7 +507,7 @@ describe("browser texture manager", () => {
 			],
 		});
 
-		expect(update?.drawUnitBindings).toEqual([
+		expect(update?.textureBindings).toEqual([
 			expect.objectContaining({
 				rolePage: { kind: "color", slot: 0 },
 				textureUseId: "terrain-a:prepared-texture:06000010",
@@ -516,8 +516,8 @@ describe("browser texture manager", () => {
 				rolePage: { kind: "color", slot: 1 },
 				textureUseId: "terrain-a:prepared-texture:06000020",
 			}),
-			]);
-		});
+		]);
+	});
 
 	it("keeps terrain role-page overflow local to the affected draw unit", async () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -569,14 +569,16 @@ describe("browser texture manager", () => {
 			});
 
 			expect(
-				update?.drawUnitBindings.filter(
-					(binding) => binding.drawUnitId === "terrain-overflow",
+				update?.textureBindings.filter(
+					(binding) =>
+						binding.owner.kind === "draw-unit" &&
+						binding.owner.drawUnitId === "terrain-overflow",
 				),
 			).toHaveLength(4);
-			expect(update?.drawUnitBindings).toEqual(
+			expect(update?.textureBindings).toEqual(
 				expect.arrayContaining([
 					expect.objectContaining({
-						drawUnitId: "terrain-ok",
+						owner: { drawUnitId: "terrain-ok", kind: "draw-unit" },
 						rolePage: { kind: "color", slot: 0 },
 						textureUseId: "unrelated-texture",
 					}),
@@ -638,14 +640,14 @@ describe("browser texture manager", () => {
 			],
 		});
 
-		expect(update?.drawUnitBindings).toEqual([
+		expect(update?.textureBindings).toEqual([
 			expect.objectContaining({
-				drawUnitId: "static-a",
+				owner: { drawUnitId: "static-a", kind: "draw-unit" },
 				rolePage: { kind: "static-base-color", slot: 0 },
 				textureUseId: "static-a:base:0",
 			}),
 			expect.objectContaining({
-				drawUnitId: "static-a",
+				owner: { drawUnitId: "static-a", kind: "draw-unit" },
 				rolePage: { kind: "static-base-color", slot: 1 },
 				textureUseId: "static-a:base:1",
 			}),
@@ -714,14 +716,20 @@ describe("browser texture manager", () => {
 			],
 		});
 
-		expect(update?.drawUnitBindings).toEqual([
+		expect(update?.textureBindings).toEqual([
 			expect.objectContaining({
-				drawUnitId: "structured-interior-a",
+				owner: {
+					drawUnitId: "structured-interior-a",
+					kind: "draw-unit",
+				},
 				rolePage: { kind: "static-base-color", slot: 0 },
 				textureUseId: "structured-interior-a:base:0",
 			}),
 			expect.objectContaining({
-				drawUnitId: "structured-interior-a",
+				owner: {
+					drawUnitId: "structured-interior-a",
+					kind: "draw-unit",
+				},
 				rolePage: { kind: "static-base-color", slot: 1 },
 				textureUseId: "structured-interior-a:base:1",
 			}),
@@ -744,7 +752,7 @@ describe("browser texture manager", () => {
 				],
 			},
 		]);
-		});
+	});
 
 	it("records static object role-page overflow without collapsing to slot zero", async () => {
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -789,14 +797,14 @@ describe("browser texture manager", () => {
 				textureUses,
 			});
 
-			expect(update?.drawUnitBindings).toHaveLength(
+			expect(update?.textureBindings).toHaveLength(
 				MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
 			);
 			expect(
 				update?.textureUsePlacements.map((placement) => placement.textureUseId),
 			).toEqual(textureUses.map((textureUse) => textureUse.textureUseId));
 			expect(
-				update?.drawUnitBindings.map((binding) => binding.rolePage),
+				update?.textureBindings.map((binding) => binding.rolePage),
 			).toEqual([
 				{ kind: "static-base-color", slot: 0 },
 				{ kind: "static-base-color", slot: 1 },
@@ -825,7 +833,7 @@ describe("browser texture manager", () => {
 		});
 
 		expect(update).toMatchObject({
-			drawUnitBindings: [],
+			textureBindings: [],
 			placements: [],
 			removedTextureRefIds: [STABLE_TEXTURE_REF_ID],
 			revision: 2,
@@ -854,9 +862,9 @@ describe("browser texture manager", () => {
 		expect(assetService.requestedKeys).toHaveLength(1);
 		expect(firstUpdate?.placements).toHaveLength(1);
 		expect(secondUpdate).toMatchObject({
-			drawUnitBindings: [
+			textureBindings: [
 				{
-					drawUnitId: "terrain-b",
+					owner: { drawUnitId: "terrain-b", kind: "draw-unit" },
 					textureRefId: STABLE_TEXTURE_REF_ID,
 					textureUseId: "terrain-b:prepared-texture:06000010",
 				},
@@ -908,9 +916,9 @@ describe("browser texture manager", () => {
 		expect(assetService.requestedKeys).toHaveLength(2);
 		expect(firstUpdate?.placements).toHaveLength(1);
 		expect(secondUpdate).toMatchObject({
-			drawUnitBindings: [
+			textureBindings: [
 				{
-					drawUnitId: "terrain-b",
+					owner: { drawUnitId: "terrain-b", kind: "draw-unit" },
 					textureRefId:
 						"texture-ref:outdoor-terrain:batch-b:terrain-b:prepared-texture:06000010",
 				},
@@ -1106,7 +1114,7 @@ describe("browser texture manager", () => {
 			},
 		]);
 		expect(
-			new Set(update?.drawUnitBindings.map((binding) => binding.textureRefId)),
+			new Set(update?.textureBindings.map((binding) => binding.textureRefId)),
 		).toHaveProperty("size", 1);
 	});
 
@@ -1158,9 +1166,9 @@ describe("browser texture manager", () => {
 
 		expect(texturePacker.jobs).toHaveLength(1);
 		expect(secondUpdate?.placements).toEqual([]);
-		expect(secondUpdate?.drawUnitBindings).toMatchObject([
+		expect(secondUpdate?.textureBindings).toMatchObject([
 			{
-				drawUnitId: "building-repeat",
+				owner: { drawUnitId: "building-repeat", kind: "draw-unit" },
 				textureRefId: firstUpdate?.placements[0]?.textureRefId,
 				textureUseId: "building-repeat:06000010",
 			},
@@ -1213,7 +1221,7 @@ describe("browser texture manager", () => {
 			textureUses: [
 				{
 					domain: "outdoor-buildings",
-					ownerDrawUnitIds: ["static-a"],
+					owners: [{ drawUnitId: "static-a", kind: "draw-unit" }],
 					samplingPolicy: {
 						wrapS: "repeat",
 						wrapT: "repeat",
@@ -1231,7 +1239,7 @@ describe("browser texture manager", () => {
 				},
 				{
 					domain: "outdoor-buildings",
-					ownerDrawUnitIds: ["static-a"],
+					owners: [{ drawUnitId: "static-a", kind: "draw-unit" }],
 					source: {
 						firstIndex: 1,
 						indexCount: 2,
@@ -1324,14 +1332,14 @@ describe("browser texture manager", () => {
 				wrapT: "clamp-to-edge",
 			},
 		]);
-		expect(update?.drawUnitBindings).toMatchObject([
+		expect(update?.textureBindings).toMatchObject([
 			{
-				drawUnitId: "static-a",
+				owner: { drawUnitId: "static-a", kind: "draw-unit" },
 				rolePage: { kind: "static-index", slot: 0 },
 				textureUseId: "static-a:index",
 			},
 			{
-				drawUnitId: "static-a",
+				owner: { drawUnitId: "static-a", kind: "draw-unit" },
 				rolePage: { kind: "static-palette", slot: 0 },
 				textureUseId: "static-a:palette",
 			},
@@ -1354,7 +1362,7 @@ describe("browser texture manager", () => {
 			textureUses: [
 				{
 					domain: "outdoor-buildings",
-					ownerDrawUnitIds: ["static-a"],
+					owners: [{ drawUnitId: "static-a", kind: "draw-unit" }],
 					source: {
 						firstIndex: 0,
 						indexCount: 3,
@@ -1700,7 +1708,7 @@ function createTextureUseCommit(options: {
 }): StaticCoordinatorCommitDelta["textureUses"][number] {
 	return {
 		domain: options.domain ?? "outdoor-terrain",
-		ownerDrawUnitIds: [options.drawUnitId],
+		owners: [{ drawUnitId: options.drawUnitId, kind: "draw-unit" }],
 		source: {
 			kind: "prepared-render-surface-texture-use",
 			renderSurface: {

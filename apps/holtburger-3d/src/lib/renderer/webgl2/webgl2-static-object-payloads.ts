@@ -1,5 +1,5 @@
 import type { StaticMaterialTableEntry } from "../../static/contracts";
-import type { TextureDrawUnitBinding } from "../types";
+import type { StaticTextureBinding } from "../types";
 import {
 	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
 	MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW,
@@ -75,7 +75,7 @@ export function markStaticObjectPreparedDrawPayloadDirty(
 export function prepareStaticObjectDrawPayloadState(
 	state: StaticObjectPreparedDrawPayloadState,
 	resource: StaticObjectMaterialPayloadResource,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): StaticObjectPreparedDrawPayload {
 	if (state.isDirty) {
@@ -109,7 +109,7 @@ export function createStaticObjectPreparedDrawPayload(): StaticObjectPreparedDra
 export function prepareStaticObjectDrawPayload(
 	target: StaticObjectPreparedDrawPayload,
 	resource: StaticObjectMaterialPayloadResource,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): void {
 	if (resource.materialEntries.length === 0) {
@@ -239,7 +239,7 @@ function fillDefaultMaterialRectTable(rects: Float32Array): void {
 function fillStaticObjectRolePageBindings(
 	target: StaticObjectPreparedRolePageBindingsByRole,
 	resource: StaticObjectMaterialPayloadResource,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): void {
 	for (const entry of resource.materialEntries) {
@@ -276,8 +276,8 @@ function fillStaticObjectRolePageBindings(
 
 function collectStaticObjectPageBinding(
 	textureUseId: string | null,
-	expectedKind: TextureDrawUnitBinding["rolePage"]["kind"],
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	expectedKind: StaticTextureBinding["rolePage"]["kind"],
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 	target: StaticObjectPreparedRolePageBindings,
 ): void {
@@ -305,7 +305,7 @@ function collectStaticObjectPageBinding(
 function fillStaticObjectMaterialUniforms(
 	target: StaticObjectPreparedMaterialUniforms,
 	resource: StaticObjectMaterialPayloadResource,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): void {
 	const materialEntryCount = Math.min(
@@ -381,7 +381,7 @@ function fillStaticObjectMaterialUniforms(
 function resolveStaticObjectMaterialEntryMode(
 	resource: StaticObjectMaterialPayloadResource,
 	materialEntry: StaticMaterialTableEntry,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): number {
 	if (resource.materialFamily === "flat-color") {
@@ -419,9 +419,9 @@ function resolveStaticObjectMaterialEntryMode(
 
 function hasResidentBinding(
 	textureUseId: string | null,
-	expectedKind: TextureDrawUnitBinding["rolePage"]["kind"],
+	expectedKind: StaticTextureBinding["rolePage"]["kind"],
 	maxSlots: number,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): boolean {
 	if (!textureUseId) {
@@ -439,13 +439,13 @@ function hasResidentBinding(
 
 function writeStaticObjectTextureEntry(
 	textureUseId: string | null,
-	expectedKind: TextureDrawUnitBinding["rolePage"]["kind"],
+	expectedKind: StaticTextureBinding["rolePage"]["kind"],
 	maxSlots: number,
-	bindings: ReadonlyMap<string, TextureDrawUnitBinding>,
+	bindings: ReadonlyMap<string, StaticTextureBinding>,
 	pages: Int32Array,
 	rects: Float32Array,
 	slot: number,
-): TextureDrawUnitBinding | null {
+): StaticTextureBinding | null {
 	if (!textureUseId) {
 		return null;
 	}

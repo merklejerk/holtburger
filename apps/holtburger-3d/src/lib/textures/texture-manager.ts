@@ -15,7 +15,7 @@ import type {
 import type {
 	SamplerPolicyUpdate,
 	StaticObjectTextureRolePageKind,
-	TextureDrawUnitBinding,
+	StaticTextureBinding,
 	TerrainTextureRolePageKind,
 	TexturePlacementUpdate,
 	TextureUsePlacement,
@@ -37,8 +37,13 @@ import type {
 	StaticBakeTextureUse,
 	StaticCoordinatorCommitDelta,
 	StaticDomain,
+	StaticTextureUseOwner,
 } from "../static/contracts";
-import { collectStaticDrawUnitResourceIds } from "../static/contracts";
+import {
+	collectStaticDrawUnitResourceIds,
+	collectStaticObjectVisualResourceIds,
+	createStaticTextureUseOwnerKey,
+} from "../static/contracts";
 import { AtlasTexturePacker, type TexturePacker } from "./packing/packer";
 import type {
 	TexturePackingJob,
@@ -79,7 +84,7 @@ export class TextureManager {
 		StaticBatchRegistryKey,
 		StaticBatchTextureRegistry
 	>();
-	readonly #textureKeysByDrawUnitId = new Map<
+	readonly #textureKeysByOwnerKey = new Map<
 		string,
 		Set<StaticBatchTextureKey>
 	>();
@@ -179,8 +184,7 @@ export class TextureManager {
 		).length;
 
 		const warnings = createTextureAtlasWarnings({
-			staticObjectRolePageOverflows:
-				this.#recentStaticObjectRolePageOverflows,
+			staticObjectRolePageOverflows: this.#recentStaticObjectRolePageOverflows,
 			terrainRolePageOverflows: this.#recentTerrainRolePageOverflows,
 		});
 
@@ -253,11 +257,22 @@ export class TextureManager {
 	async applyStaticCommitDelta(
 		delta: StaticCoordinatorCommitDelta,
 	): Promise<TexturePlacementUpdate | null> {
-		const removedTextureRefIds = this.#removeDrawUnitTextureRefs(
-			collectStaticDrawUnitResourceIds(delta.removedResources),
-		);
+		const removedTextureRefIds = this.#removeOwnerTextureRefs([
+			...collectStaticDrawUnitResourceIds(delta.removedResources).map(
+				(drawUnitId): StaticTextureUseOwner => ({
+					drawUnitId,
+					kind: "draw-unit",
+				}),
+			),
+			...collectStaticObjectVisualResourceIds(delta.removedResources).map(
+				(resourceId): StaticTextureUseOwner => ({
+					kind: "static-object-visual-resource",
+					resourceId,
+				}),
+			),
+		]);
 		const placements: RuntimeTexturePlacement[] = [];
-		const drawUnitBindings: TextureDrawUnitBinding[] = [];
+		const textureBindings: StaticTextureBinding[] = [];
 		const textureUsePlacements: TextureUsePlacement[] = [];
 		const terrainRolePageSlots = new TerrainDrawUnitRolePageSlots(
 			(overflow) => {
@@ -268,7 +283,7 @@ export class TextureManager {
 				);
 			},
 		);
-		const staticObjectRolePageSlots = new StaticObjectDrawUnitRolePageSlots(
+		const staticObjectRolePageSlots = new StaticObjectOwnerRolePageSlots(
 			(overflow) => {
 				this.#recentStaticObjectRolePageOverflows = appendBounded(
 					this.#recentStaticObjectRolePageOverflows,
@@ -284,11 +299,12 @@ export class TextureManager {
 				textureUse,
 				pendingPlacements,
 			);
-			for (const drawUnitId of textureUse.ownerDrawUnitIds) {
-				let textureKeys = this.#textureKeysByDrawUnitId.get(drawUnitId);
+			for (const owner of textureUse.owners) {
+				const ownerKey = createStaticTextureUseOwnerKey(owner);
+				let textureKeys = this.#textureKeysByOwnerKey.get(ownerKey);
 				if (!textureKeys) {
 					textureKeys = new Set<StaticBatchTextureKey>();
-					this.#textureKeysByDrawUnitId.set(drawUnitId, textureKeys);
+					this.#textureKeysByOwnerKey.set(ownerKey, textureKeys);
 				}
 				if (!textureKeys.has(staged.textureKey)) {
 					textureKeys.add(staged.textureKey);
@@ -333,10 +349,10 @@ export class TextureManager {
 				textureUseId: textureUse.textureUseId,
 				textureWidth: entry.textureWidth,
 			});
-			for (const drawUnitId of textureUse.ownerDrawUnitIds) {
+			for (const owner of textureUse.owners) {
 				const rolePage = resolveTextureRolePageSlot({
 					domain: textureUse.domain,
-					drawUnitId,
+					owner,
 					source: textureUse.source,
 					staticObjectRolePageSlots,
 					terrainRolePageSlots,
@@ -345,8 +361,8 @@ export class TextureManager {
 				if (!rolePage) {
 					continue;
 				}
-				drawUnitBindings.push({
-					drawUnitId,
+				textureBindings.push({
+					owner,
 					rect: entry.rect,
 					rolePage,
 					textureHeight: entry.textureHeight,
@@ -361,7 +377,7 @@ export class TextureManager {
 			placements.length === 0 &&
 			removedTextureRefIds.length === 0 &&
 			textureUsePlacements.length === 0 &&
-			drawUnitBindings.length === 0
+			textureBindings.length === 0
 		) {
 			return null;
 		}
@@ -369,7 +385,7 @@ export class TextureManager {
 		this.#revision += 1;
 
 		return {
-			drawUnitBindings,
+			textureBindings,
 			placements,
 			removedTextureRefIds,
 			textureUsePlacements,
@@ -377,18 +393,19 @@ export class TextureManager {
 		};
 	}
 
-	#removeDrawUnitTextureRefs(
-		removedDrawUnitResourceIds: readonly string[],
+	#removeOwnerTextureRefs(
+		removedOwners: readonly StaticTextureUseOwner[],
 	): readonly string[] {
 		const removedTextureRefIds: string[] = [];
 
-		for (const drawUnitId of removedDrawUnitResourceIds) {
-			const textureKeys = this.#textureKeysByDrawUnitId.get(drawUnitId);
+		for (const owner of removedOwners) {
+			const ownerKey = createStaticTextureUseOwnerKey(owner);
+			const textureKeys = this.#textureKeysByOwnerKey.get(ownerKey);
 			if (!textureKeys) {
 				continue;
 			}
 
-			this.#textureKeysByDrawUnitId.delete(drawUnitId);
+			this.#textureKeysByOwnerKey.delete(ownerKey);
 			for (const textureKey of textureKeys) {
 				const entry = this.#findEntry(textureKey);
 				if (!entry) {
@@ -455,7 +472,7 @@ export class TextureManager {
 		const placementKey = createStaticBatchSourcePlacementKey(textureUse);
 		const pending = pendingPlacements.get(placementKey);
 		if (pending) {
-			addPendingPlacementOwners(pending, textureUse.ownerDrawUnitIds);
+			addPendingPlacementOwners(pending, textureUse.owners);
 			pending.textureKeys.add(textureKey);
 			pendingPlacements.set(textureKey, pending);
 			return {
@@ -480,7 +497,7 @@ export class TextureManager {
 			staticBatchId: textureUse.staticBatchId,
 			textureKeys: new Set([textureKey]),
 			textureUse,
-			ownerDrawUnitIds: new Set(textureUse.ownerDrawUnitIds),
+			ownerKeys: new Set(textureUse.owners.map(createStaticTextureUseOwnerKey)),
 		};
 		pendingPlacements.set(placementKey, staged);
 		pendingPlacements.set(textureKey, staged);
@@ -828,7 +845,7 @@ interface PendingTexturePlacement {
 	readonly source: DirectMaterialTextureSource;
 	readonly pagePolicy: RuntimeTexturePagePolicy;
 	readonly samplerPolicy: RuntimeTextureSamplerPolicy;
-	readonly ownerDrawUnitIds: Set<string>;
+	readonly ownerKeys: Set<string>;
 	entry: StaticBatchTextureRegistryEntry | null;
 	pendingLeaseCount: number;
 }
@@ -859,7 +876,7 @@ interface TerrainRolePageSlotInput {
 }
 
 interface StaticObjectRolePageSlotInput {
-	readonly drawUnitId: string;
+	readonly ownerKey: string;
 	readonly textureRefId: string;
 	readonly source: MaterialTextureDataUseIdentity;
 }
@@ -1187,10 +1204,10 @@ function uniquePendingTexturePlacements(
 
 function addPendingPlacementOwners(
 	placement: PendingTexturePlacement,
-	ownerDrawUnitIds: readonly string[],
+	owners: readonly StaticTextureUseOwner[],
 ): void {
-	for (const ownerDrawUnitId of ownerDrawUnitIds) {
-		placement.ownerDrawUnitIds.add(ownerDrawUnitId);
+	for (const owner of owners) {
+		placement.ownerKeys.add(createStaticTextureUseOwnerKey(owner));
 	}
 }
 
@@ -1247,18 +1264,18 @@ function createTexturePackingCohorts(
 		return undefined;
 	}
 
-	const textureUseIdsByDrawUnitId = new Map<string, string[]>();
+	const textureUseIdsByOwnerKey = new Map<string, string[]>();
 	for (const entry of group.entries) {
-		for (const drawUnitId of entry.ownerDrawUnitIds) {
-			const textureUseIds = textureUseIdsByDrawUnitId.get(drawUnitId) ?? [];
+		for (const ownerKey of entry.ownerKeys) {
+			const textureUseIds = textureUseIdsByOwnerKey.get(ownerKey) ?? [];
 			textureUseIds.push(entry.textureUse.textureUseId);
-			textureUseIdsByDrawUnitId.set(drawUnitId, textureUseIds);
+			textureUseIdsByOwnerKey.set(ownerKey, textureUseIds);
 		}
 	}
 
-	return [...textureUseIdsByDrawUnitId.entries()]
-		.map(([drawUnitId, textureUseIds]) => ({
-			key: `${group.pageClassKey}|draw-unit:${drawUnitId}`,
+	return [...textureUseIdsByOwnerKey.entries()]
+		.map(([ownerKey, textureUseIds]) => ({
+			key: `${group.pageClassKey}|${ownerKey}`,
 			textureUseIds: uniqueSortedStrings(textureUseIds),
 		}))
 		.sort((left, right) => left.key.localeCompare(right.key));
@@ -1483,7 +1500,7 @@ function createTextureAtlasWarnings(input: {
 		warnings.push({
 			count: input.staticObjectRolePageOverflows.length,
 			kind: "static-object-role-page-overflow",
-			latestDrawUnitId: latestStaticObject?.drawUnitId ?? null,
+			latestOwnerKey: latestStaticObject?.ownerKey ?? null,
 			latestRole: latestStaticObject?.kind ?? null,
 		});
 	}
@@ -1573,22 +1590,27 @@ function createTerrainTextureRolePageKind(
 
 function resolveTextureRolePageSlot(options: {
 	readonly domain: StaticDomain;
-	readonly drawUnitId: string;
+	readonly owner: StaticTextureUseOwner;
 	readonly source: MaterialTextureDataUseIdentity;
-	readonly staticObjectRolePageSlots: StaticObjectDrawUnitRolePageSlots;
+	readonly staticObjectRolePageSlots: StaticObjectOwnerRolePageSlots;
 	readonly terrainRolePageSlots: TerrainDrawUnitRolePageSlots;
 	readonly textureRefId: string;
-}): TextureDrawUnitBinding["rolePage"] | null {
+}): StaticTextureBinding["rolePage"] | null {
 	if (options.domain === "outdoor-terrain") {
+		if (options.owner.kind !== "draw-unit") {
+			throw new Error(
+				`Terrain texture use cannot be owned by ${options.owner.kind}.`,
+			);
+		}
 		return options.terrainRolePageSlots.resolveSlot({
-			drawUnitId: options.drawUnitId,
+			drawUnitId: options.owner.drawUnitId,
 			textureRefId: options.textureRefId,
 			usage: options.source.usage,
 		});
 	}
 
 	return options.staticObjectRolePageSlots.resolveSlot({
-		drawUnitId: options.drawUnitId,
+		ownerKey: createStaticTextureUseOwnerKey(options.owner),
 		source: options.source,
 		textureRefId: options.textureRefId,
 	});
@@ -1609,7 +1631,7 @@ class TerrainDrawUnitRolePageSlots {
 
 	resolveSlot(
 		input: TerrainRolePageSlotInput,
-	): TextureDrawUnitBinding["rolePage"] | null {
+	): StaticTextureBinding["rolePage"] | null {
 		const kind = createTerrainTextureRolePageKind(input.usage);
 		const drawUnitKindKey = `${input.drawUnitId}:${kind}`;
 		if (this.#overflowKeys.has(drawUnitKindKey)) {
@@ -1660,8 +1682,8 @@ function getMaxTerrainRolePageSlots(kind: TerrainTextureRolePageKind): number {
 	return 1;
 }
 
-class StaticObjectDrawUnitRolePageSlots {
-	readonly #slotKeysByDrawUnitAndKind = new Map<string, string[]>();
+class StaticObjectOwnerRolePageSlots {
+	readonly #slotKeysByOwnerAndKind = new Map<string, string[]>();
 	readonly #overflowKeys = new Set<string>();
 	readonly #recordOverflow: (
 		overflow: StaticObjectRolePageOverflowDiagnostics,
@@ -1675,14 +1697,14 @@ class StaticObjectDrawUnitRolePageSlots {
 
 	resolveSlot(
 		input: StaticObjectRolePageSlotInput,
-	): TextureDrawUnitBinding["rolePage"] | null {
+	): StaticTextureBinding["rolePage"] | null {
 		const kind = createStaticObjectTextureRolePageKind(input.source);
-		const drawUnitKindKey = `${input.drawUnitId}:${kind}`;
-		if (this.#overflowKeys.has(drawUnitKindKey)) {
+		const ownerKindKey = `${input.ownerKey}:${kind}`;
+		if (this.#overflowKeys.has(ownerKindKey)) {
 			return null;
 		}
 
-		const slots = this.#slotKeysByDrawUnitAndKind.get(drawUnitKindKey) ?? [];
+		const slots = this.#slotKeysByOwnerAndKind.get(ownerKindKey) ?? [];
 		const existingSlot = slots.indexOf(input.textureRefId);
 		if (existingSlot >= 0) {
 			return { kind, slot: existingSlot };
@@ -1690,18 +1712,19 @@ class StaticObjectDrawUnitRolePageSlots {
 
 		const maxSlots = getMaxStaticObjectRolePageSlots(kind);
 		if (slots.length >= maxSlots) {
-			this.#overflowKeys.add(drawUnitKindKey);
+			this.#overflowKeys.add(ownerKindKey);
 			this.#recordOverflow({
-				drawUnitId: input.drawUnitId,
 				kind,
 				maxSlots,
+				ownerKey: input.ownerKey,
 				textureRefId: input.textureRefId,
 			});
 			console.warn(
-				`static object draw unit ${input.drawUnitId} exceeded ${kind} role-page capacity ${maxSlots}; bindings for that role are omitted for local fallback.`,
+				`static object owner ${input.ownerKey} exceeded ${kind} role-page capacity ${maxSlots}; bindings for that role are omitted for local fallback.`,
 				{
 					kind,
 					maxSlots,
+					ownerKey: input.ownerKey,
 					textureRefId: input.textureRefId,
 				},
 			);
@@ -1709,7 +1732,7 @@ class StaticObjectDrawUnitRolePageSlots {
 		}
 
 		slots.push(input.textureRefId);
-		this.#slotKeysByDrawUnitAndKind.set(drawUnitKindKey, slots);
+		this.#slotKeysByOwnerAndKind.set(ownerKindKey, slots);
 
 		return { kind, slot: slots.length - 1 };
 	}

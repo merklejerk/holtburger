@@ -13,7 +13,7 @@ export interface GeneratedStaticObjectInstanceInventory {
 	readonly candidateGroups: readonly GeneratedStaticObjectInstanceCandidateGroup[];
 }
 
-export interface GeneratedStaticObjectInstanceCandidateGroup {
+interface GeneratedStaticObjectInstanceCandidateGroup {
 	readonly key: string;
 	readonly sourceDid: number;
 	readonly gfxObjDid: number;
@@ -68,8 +68,7 @@ export function inventoryGeneratedOutdoorDetailInstances(
 		.map(finalizeCandidateGroup)
 		.filter((group) => group.generatedObjectCount > 1)
 		.sort((left, right) => {
-			const countDelta =
-				right.generatedObjectCount - left.generatedObjectCount;
+			const countDelta = right.generatedObjectCount - left.generatedObjectCount;
 			if (countDelta !== 0) {
 				return countDelta;
 			}
@@ -79,8 +78,9 @@ export function inventoryGeneratedOutdoorDetailInstances(
 	return {
 		candidateGroups,
 		domain: "outdoor-detail",
-		drawUnitCount: drawUnits.filter((drawUnit) => drawUnit.domain === "outdoor-detail")
-			.length,
+		drawUnitCount: drawUnits.filter(
+			(drawUnit) => drawUnit.domain === "outdoor-detail",
+		).length,
 		generatedCoverageCount,
 		generatedObjectCount: generatedObjectIds.size,
 		repeatedGeneratedObjectCount: candidateGroups.reduce(
@@ -140,8 +140,8 @@ function finalizeCandidateGroup(
 		gfxObjDid: builder.gfxObjDid,
 		key: builder.key,
 		materialSlot: builder.materialSlot,
-		objectInstanceIds: Array.from(builder.objectInstanceIds).sort((left, right) =>
-			left.localeCompare(right),
+		objectInstanceIds: Array.from(builder.objectInstanceIds).sort(
+			(left, right) => left.localeCompare(right),
 		),
 		partIndex: builder.partIndex,
 		sourceDid: builder.sourceDid,

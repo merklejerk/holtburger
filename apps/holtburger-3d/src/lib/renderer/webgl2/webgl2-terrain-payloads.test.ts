@@ -3,7 +3,7 @@ import type {
 	TerrainMaterialLayerPlan,
 	TerrainMaterialTextureRoleBinding,
 } from "../../static/contracts";
-import type { TextureDrawUnitBinding } from "../types";
+import type { StaticTextureBinding } from "../types";
 import {
 	createTerrainPreparedLayeredPayload,
 	createTerrainPreparedLayeredPayloadState,
@@ -47,7 +47,7 @@ describe("WebGL2 terrain layered payload builder", () => {
 		const roadTexture = createTexture();
 		const roadMaskTexture = createTexture();
 		const detailTexture = createTexture();
-		const bindings = new Map<string, TextureDrawUnitBinding>([
+		const bindings = new Map<string, StaticTextureBinding>([
 			[
 				"base-use",
 				createBinding("base-use", "base-ref", "color", 1, [10, 11, 12, 13]),
@@ -185,7 +185,7 @@ describe("WebGL2 terrain layered payload builder", () => {
 				roads: [],
 			},
 		});
-		const bindings = new Map<string, TextureDrawUnitBinding>([
+		const bindings = new Map<string, StaticTextureBinding>([
 			[
 				"base-use",
 				createBinding("base-use", "base-ref", "color", 0, [0, 0, 4, 4]),
@@ -228,7 +228,7 @@ describe("WebGL2 terrain layered payload builder", () => {
 				roads: [],
 			},
 		});
-		const bindings = new Map<string, TextureDrawUnitBinding>([
+		const bindings = new Map<string, StaticTextureBinding>([
 			[
 				"base-use",
 				createBinding("base-use", "base-ref", "color", 0, [0, 0, 4, 4]),
@@ -275,7 +275,7 @@ describe("WebGL2 terrain layered payload builder", () => {
 				roads: [],
 			},
 		});
-		const bindings = new Map<string, TextureDrawUnitBinding>([
+		const bindings = new Map<string, StaticTextureBinding>([
 			[
 				"base-use",
 				createBinding("base-use", "base-ref", "color", 0, [1, 2, 3, 4]),
@@ -387,12 +387,12 @@ function createRole(
 function createBinding(
 	textureUseId: string,
 	textureRefId: string,
-	kind: TextureDrawUnitBinding["rolePage"]["kind"],
+	kind: StaticTextureBinding["rolePage"]["kind"],
 	slot: number,
 	rect: readonly [number, number, number, number],
-): TextureDrawUnitBinding {
+): StaticTextureBinding {
 	return {
-		drawUnitId: "terrain-test",
+		owner: { drawUnitId: "terrain-test", kind: "draw-unit" },
 		rect,
 		rolePage: {
 			kind,

@@ -29,6 +29,7 @@ import type {
 	StaticObjectInstanceFacts,
 	StaticObjectRetainedTransparentPartitionReasonCounts,
 } from "../../contracts";
+import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
 import { describeStaticScopeKey } from "../../demand-planner";
 import { createBuildingTransitionStaticPortalGraph } from "../../portal-graphs";
 import {
@@ -278,10 +279,12 @@ function bakeStaticObjectCompatibilityItem(
 		partitions: renderablePartitions,
 		payload: scope,
 		sourceIndex,
+		staticBatchId: input.staticBatchId,
 		work: item.work,
 	});
 	const bakedPartitions = renderablePartitions.filter(
-		(partition) => !instancedOutput.cutoverPartitionSliceIds.has(partition.sliceId),
+		(partition) =>
+			!instancedOutput.cutoverPartitionSliceIds.has(partition.sliceId),
 	);
 	const drawUnits = bakedPartitions.map((partition) =>
 		createStaticObjectGeometryBakeOutput({
@@ -322,8 +325,9 @@ function bakeStaticObjectCompatibilityItem(
 	const bakedDrawUnits = drawUnits.map((output, index) => ({
 		...output.drawUnit,
 		sourceMappingCoverage:
-			sourceMappingCoverageBySliceId.get(bakedPartitions[index]?.sliceId ?? "") ??
-			[],
+			sourceMappingCoverageBySliceId.get(
+				bakedPartitions[index]?.sliceId ?? "",
+			) ?? [],
 		spatialRecord:
 			spatialRecordBySliceId.get(bakedPartitions[index]?.sliceId ?? "") ?? null,
 	}));
@@ -349,10 +353,10 @@ function bakeStaticObjectCompatibilityItem(
 		staticObjectRenderInstances: instancedOutput.instances,
 		staticObjectVisualResources: instancedOutput.resources,
 		textureUses: createStaticObjectBakeTextureUses({
-			partitions: renderablePartitions,
+			partitions: bakedPartitions,
 			staticBatchId: input.staticBatchId,
 			work: item.work,
-		}),
+		}).concat(instancedOutput.textureUses),
 		buildingTransitionPortalApertureResource,
 		work: item.work,
 	};
@@ -439,7 +443,8 @@ function createStaticObjectBakeDiagnostics(options: {
 				sourceIndex: options.sourceIndex,
 			}),
 		skippedPartitionCount:
-			options.partitionPlan.partitions.length - options.renderablePartitionCount,
+			options.partitionPlan.partitions.length -
+			options.renderablePartitionCount,
 		staticBatchId: options.input.staticBatchId,
 		uniqueSourceCount: uniqueSourceKeys.size,
 		uniqueSourcePartGeometryCount: uniqueSourcePartGeometryKeys.size,
@@ -472,10 +477,10 @@ function createStaticObjectInstancingBakeDiagnostics(input: {
 	let estimatedInstancedSourceTypedArrayBytes = 0;
 	let instancedSourceTriangleCount = 0;
 	for (const resource of input.resources) {
-		const resourceBytes = estimateStaticObjectVisualResourceTypedArrayBytes(
-			resource,
-		);
-		const instanceCount = instanceCountByResourceId.get(resource.resourceId) ?? 0;
+		const resourceBytes =
+			estimateStaticObjectVisualResourceTypedArrayBytes(resource);
+		const instanceCount =
+			instanceCountByResourceId.get(resource.resourceId) ?? 0;
 		estimatedInstancedSourceTypedArrayBytes += resourceBytes;
 		instancedSourceTriangleCount += resource.triangleCount;
 		estimatedAvoidedFlattenedTriangleCount +=
@@ -665,21 +670,27 @@ function createStaticObjectInstancedOutput(options: {
 	readonly partitions: readonly StaticObjectCompatibilityPartition[];
 	readonly payload: StaticObjectCompatibilityPayload;
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
+	readonly staticBatchId: string;
 	readonly work: ScheduledStaticWork;
 }): {
 	readonly cutoverPartitionSliceIds: ReadonlySet<string>;
 	readonly instances: readonly StaticObjectRenderInstance[];
 	readonly resources: readonly StaticObjectVisualResource[];
+	readonly textureUses: readonly StaticBakeTextureUse[];
 } {
 	if (options.payload.domain !== "outdoor-detail") {
 		return {
 			cutoverPartitionSliceIds: new Set<string>(),
 			instances: [],
 			resources: [],
+			textureUses: [],
 		};
 	}
 
-	const groupsByKey = new Map<string, StaticObjectVisualResourceTriangleGroup>();
+	const groupsByKey = new Map<
+		string,
+		StaticObjectVisualResourceTriangleGroup
+	>();
 	const triangleCoverageKeysByPartitionSliceId = new Map<string, Set<string>>();
 	for (const partition of options.partitions) {
 		triangleCoverageKeysByPartitionSliceId.set(
@@ -706,12 +717,19 @@ function createStaticObjectInstancedOutput(options: {
 				continue;
 			}
 			const object = options.sourceIndex.getObject(triangle.object);
-			const candidate = selectGeneratedStaticObjectRenderInstanceCandidate(object);
+			const candidate =
+				selectGeneratedStaticObjectRenderInstanceCandidate(object);
 			if (candidate.kind === "ineligible") {
 				continue;
 			}
 			const materialEntry = materialEntryByKey.get(triangle.materialEntryKey);
 			if (!materialEntry) {
+				continue;
+			}
+			const coarseMaterialEntry = partition.coarseTablePlan.entries.find(
+				(entry) => entry.materialEntryKey === triangle.materialEntryKey,
+			);
+			if (!coarseMaterialEntry) {
 				continue;
 			}
 			const part = options.sourceIndex.getPart(
@@ -745,7 +763,9 @@ function createStaticObjectInstancedOutput(options: {
 				materialFamily,
 				materialPass,
 				sourceTrianglesById: new Map(),
+				textureDataUses: coarseMaterialEntry.textureDataUses,
 				textureUseIds,
+				textureWrapMode: coarseMaterialEntry.textureWrapMode,
 			};
 			group.candidatesByInstanceId.set(
 				candidate.object.identity.instanceId,
@@ -819,6 +839,7 @@ function createStaticObjectInstancedOutput(options: {
 
 	const resources: StaticObjectVisualResource[] = [];
 	const instances: StaticObjectRenderInstance[] = [];
+	const textureUses: StaticBakeTextureUse[] = [];
 	for (const group of groupsByKey.values()) {
 		if (group.candidatesByInstanceId.size < 2) {
 			continue;
@@ -846,6 +867,31 @@ function createStaticObjectInstancedOutput(options: {
 			textureUseIds: group.textureUseIds,
 		});
 		const resourceId = createStaticObjectVisualResourceId(resourceKey);
+		textureUses.push(
+			...createStaticMaterialTextureUses({
+				createTextureUseId: (dataUse, wrapMode) =>
+					createStaticObjectTextureUseId({
+						dataUse,
+						work: options.work,
+						wrapMode,
+					}),
+				domain: options.payload.domain,
+				isStageableDataUse: isCurrentlyStageableStaticObjectDataUse,
+				staticBatchId: options.staticBatchId,
+				textureUseSpecs: [
+					{
+						owners: [
+							{
+								kind: "static-object-visual-resource",
+								resourceId,
+							},
+						],
+						textureDataUses: group.textureDataUses,
+						textureWrapMode: group.textureWrapMode,
+					},
+				],
+			}),
+		);
 		resources.push({
 			bounds: resourceGeometry.bounds,
 			coordinateSpace: "static-object-source-local",
@@ -911,6 +957,7 @@ function createStaticObjectInstancedOutput(options: {
 			left.instanceId.localeCompare(right.instanceId),
 		),
 		resources: dedupeStaticObjectVisualResources(resources),
+		textureUses: mergeTextureUses(textureUses),
 	};
 }
 
@@ -947,11 +994,10 @@ interface StaticObjectVisualResourceTriangleGroup {
 	readonly materialEntry: StaticMaterialTableEntry;
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
-	readonly sourceTrianglesById: Map<
-		string,
-		StaticObjectCompatibilityTriangle
-	>;
+	readonly sourceTrianglesById: Map<string, StaticObjectCompatibilityTriangle>;
+	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
 	readonly textureUseIds: readonly string[];
+	readonly textureWrapMode: StaticObjectCompatibilityPartition["textureWrapMode"];
 }
 
 function selectCutoverStaticObjectInstanceCandidates(options: {
@@ -1021,9 +1067,10 @@ function createStaticObjectVisualResourceTriangleGroupKey(input: {
 			textureUseIds: input.textureUseIds,
 		}),
 	);
-	return [input.partitionSliceId ?? "cross-partition-generated", resourceKey].join(
-		"|",
-	);
+	return [
+		input.partitionSliceId ?? "cross-partition-generated",
+		resourceKey,
+	].join("|");
 }
 
 function createStaticObjectTriangleCoverageKey(
@@ -1176,7 +1223,10 @@ function dedupeStaticObjectVisualResources(
 ): readonly StaticObjectVisualResource[] {
 	const byKey = new Map<string, StaticObjectVisualResource>();
 	for (const resource of resources) {
-		byKey.set(createStaticObjectVisualResourceKeyString(resource.key), resource);
+		byKey.set(
+			createStaticObjectVisualResourceKeyString(resource.key),
+			resource,
+		);
 	}
 	return Array.from(byKey.values()).sort((left, right) =>
 		left.resourceId.localeCompare(right.resourceId),
@@ -1283,7 +1333,6 @@ function createStaticObjectGeometryBakeOutput(options: {
 	const drawUnitId = `${options.work.workId}:static-object-partition:${options.partition.sliceId.replaceAll("/", "-")}`;
 
 	const drawUnit: StaticObjectGeometryStaticDrawUnit = {
-		alphaTest: materialEntry.alphaTest,
 		coordinateSpace: "landblock-render-local",
 		domain: options.payload.domain,
 		drawUnitId,
@@ -1296,24 +1345,13 @@ function createStaticObjectGeometryBakeOutput(options: {
 			options.partition,
 		),
 		materialBucketKey: options.partition.compatibilityKey,
-		materialColor: materialEntry.materialColor,
-		materialEmissiveColor: materialEntry.materialEmissiveColor,
 		materialEntries,
 		materialFamily: resolveRenderableStaticObjectFamily(options.partition),
 		materialIds: options.partition.materialIds,
 		materialPass: resolveRenderableStaticObjectPass(options.partition),
 		renderState: materialEntry.renderState,
 		sort: createStaticObjectSortMetadata(options.partition, geometry.positions),
-		detailTextureTiling: materialEntry.detailTextureTiling,
-		detailTextureUseId: materialEntry.detailTextureUseId,
 		positions: geometry.positions,
-		indexTextureUseId: materialEntry.indexTextureUseId,
-		indexedTextureFormat: materialEntry.indexedTextureFormat,
-		indexedClipThreshold: materialEntry.indexedClipThreshold,
-		paletteFirstIndex: materialEntry.paletteFirstIndex,
-		paletteTextureUseId: materialEntry.paletteTextureUseId,
-		primaryTextureUseId: materialEntry.primaryTextureUseId,
-		primaryTextureWrapMode: materialEntry.primaryTextureWrapMode,
 		sourceMappingCoverage: [],
 		spatialRecord: null,
 		texCoords: geometry.texCoords,
@@ -1709,9 +1747,9 @@ function createStaticObjectBakeTextureUses(options: {
 			if (partition.renderCoverage !== "classified-render-candidate") {
 				return [];
 			}
-			const ownerDrawUnitId = `${options.work.workId}:static-object-partition:${partition.sliceId.replaceAll("/", "-")}`;
+			const drawUnitOwnerId = `${options.work.workId}:static-object-partition:${partition.sliceId.replaceAll("/", "-")}`;
 			return partition.coarseTablePlan.entries.map((entry) => ({
-				ownerDrawUnitId,
+				owners: [{ drawUnitId: drawUnitOwnerId, kind: "draw-unit" as const }],
 				textureDataUses: entry.textureDataUses,
 				textureWrapMode: entry.textureWrapMode,
 			}));
@@ -1742,10 +1780,10 @@ function mergeTextureUses(
 		if (existing) {
 			merged.set(textureUse.textureUseId, {
 				...existing,
-				ownerDrawUnitIds: [
-					...existing.ownerDrawUnitIds,
-					...textureUse.ownerDrawUnitIds,
-				],
+				owners: uniqueSortedStaticTextureUseOwners([
+					...existing.owners,
+					...textureUse.owners,
+				]),
 			});
 			continue;
 		}

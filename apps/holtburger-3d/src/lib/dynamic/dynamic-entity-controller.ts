@@ -199,6 +199,19 @@ function applyResourceChange(
 		};
 	}
 
+	if (change.kind === "visual-resources-ready") {
+		const diagnostics = createResidenceDiagnostics(record);
+		return {
+			...record,
+			diagnostics,
+			renderability: {
+				reasons: createRenderabilityReasons(diagnostics),
+				status: "non-renderable",
+			},
+			resources: change.resources,
+		};
+	}
+
 	const diagnostics = [...change.issues, ...createResidenceDiagnostics(record)];
 	return {
 		...record,
@@ -228,6 +241,9 @@ function createFallbackInitialResourceState(
 			status: "pending",
 		},
 		status: "pending",
+		visual: {
+			status: "pending",
+		},
 	};
 }
 

@@ -34,6 +34,13 @@ describe("host asset keys", () => {
 		expect(formatHostAssetId(createHostAssetKey("terrain-material", 3))).toBe(
 			"terrain-material/3",
 		);
+		expect(parseHostAssetId("animation/0300061b")).toEqual({
+			id: "0300061b",
+			kind: "animation",
+		});
+		expect(formatHostAssetId(createHostAssetKey("animation", 0x0300061b))).toBe(
+			"animation/0300061b",
+		);
 	});
 
 	it("preserves unknown routes as raw keys", () => {

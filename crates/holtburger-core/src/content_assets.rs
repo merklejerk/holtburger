@@ -12,7 +12,7 @@ use holtburger_content::{
     ResolvedSetupAppearance, ResolvedSurfaceTexture, ResolvedTerrainMaterialTable,
     normalize_landblock_id,
 };
-use holtburger_dat::file_type::{GfxObj, Palette, RenderSurface, SetupModel};
+use holtburger_dat::file_type::{Animation, GfxObj, Palette, RenderSurface, SetupModel};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use tokio::sync::{Mutex, Semaphore};
 
@@ -26,6 +26,7 @@ pub enum ContentAssetRequest {
     EnvCell(u32),
     TerrainMaterial(u32),
     RegionRenderProfile(u32),
+    Animation(u32),
     GfxObj(u32),
     SetupModel(u32),
     MaterialRecipe(u32),
@@ -70,6 +71,7 @@ pub enum ContentAsset {
     },
     TerrainMaterial(Box<ResolvedTerrainMaterialTable>),
     RegionRenderProfile(Box<ResolvedRegionRenderProfile>),
+    Animation(Box<Animation>),
     GfxObj(Box<GfxObj>),
     SetupModel(Box<SetupModel>),
     MaterialRecipe(Box<ResolvedMaterialRecipe>),
@@ -172,6 +174,19 @@ impl ContentAssetService {
                         })?,
                 )),
             ),
+            ContentAssetRequest::Animation(animation_id) => {
+                let resource = self
+                    .content
+                    .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, animation_id))
+                    .with_context(|| {
+                        format!("Could not load Animation 0x{animation_id:08X}")
+                    })?;
+                Ok(ContentAsset::Animation(Box::new(
+                    Animation::read(&mut Cursor::new(resource.bytes)).with_context(|| {
+                        format!("Could not parse Animation 0x{animation_id:08X}")
+                    })?,
+                )))
+            }
             ContentAssetRequest::GfxObj(gfx_obj_id) => Ok(ContentAsset::GfxObj(Box::new(
                 self.decode_cache
                     .gfx_obj(&self.content, gfx_obj_id)
@@ -322,5 +337,120 @@ impl ContentAssetRuntime {
         }
         .boxed()
         .shared()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_common::{Quaternion, Vector3};
+    use holtburger_dat::{DatError, FileMetadata, ResourceSource};
+    use std::collections::HashMap;
+
+    #[derive(Debug, Default)]
+    struct InMemoryResourceSource {
+        files: HashMap<(String, u32), Vec<u8>>,
+    }
+
+    impl InMemoryResourceSource {
+        fn with_file(mut self, namespace: &str, file_id: u32, bytes: Vec<u8>) -> Self {
+            self.files.insert((namespace.to_string(), file_id), bytes);
+            self
+        }
+    }
+
+    impl ResourceSource for InMemoryResourceSource {
+        fn get_file_by_key(&self, key: ResourceKey<'_>) -> holtburger_dat::Result<Vec<u8>> {
+            self.files
+                .get(&(key.namespace.to_string(), key.file_id))
+                .cloned()
+                .ok_or(DatError::NotFound(key.file_id))
+        }
+
+        fn get_metadata_by_key(&self, key: ResourceKey<'_>) -> Option<FileMetadata> {
+            self.files
+                .get(&(key.namespace.to_string(), key.file_id))
+                .map(|bytes| FileMetadata {
+                    id: key.file_id,
+                    is_pruned: false,
+                    size: bytes.len() as u32,
+                })
+        }
+
+        fn has_namespace(&self, namespace: &str) -> bool {
+            self.files
+                .keys()
+                .any(|(candidate_namespace, _)| candidate_namespace == namespace)
+        }
+    }
+
+    #[test]
+    fn content_asset_service_loads_animation_assets_by_id() {
+        let animation_id = 0x0300_1234;
+        let repository = ContentRepository::from_mounts(vec![Arc::new(
+            InMemoryResourceSource::default().with_file(
+                EOR_PORTAL_NAMESPACE,
+                animation_id,
+                animation_bytes(animation_id),
+            ),
+        )]);
+        let service =
+            ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new()));
+
+        let asset = service
+            .load(ContentAssetRequest::Animation(animation_id))
+            .expect("animation should load");
+        let ContentAsset::Animation(animation) = asset else {
+            panic!("content asset service returned mismatched animation asset");
+        };
+
+        assert_eq!(animation.id, animation_id);
+        assert_eq!(animation.num_parts, 1);
+        assert_eq!(animation.num_frames, 1);
+        assert_eq!(animation.part_frames.len(), 1);
+    }
+
+    #[test]
+    fn content_asset_service_reports_missing_animation_assets() {
+        let repository =
+            ContentRepository::from_mounts(vec![Arc::new(InMemoryResourceSource::default())]);
+        let service =
+            ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new()));
+
+        let error = service
+            .load(ContentAssetRequest::Animation(0x0300_9999))
+            .expect_err("missing animation should fail");
+
+        assert!(error.to_string().contains("Could not load Animation"));
+    }
+
+    fn animation_bytes(animation_id: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&animation_id.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // flags
+        bytes.extend_from_slice(&1_u32.to_le_bytes()); // num_parts
+        bytes.extend_from_slice(&1_u32.to_le_bytes()); // num_frames
+        push_frame(
+            &mut bytes,
+            Vector3::new(1.0, 2.0, 3.0),
+            Quaternion {
+                w: 1.0,
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        );
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // hook count
+        bytes
+    }
+
+    fn push_frame(bytes: &mut Vec<u8>, origin: Vector3, orientation: Quaternion) {
+        bytes.extend_from_slice(&origin.x.to_le_bytes());
+        bytes.extend_from_slice(&origin.y.to_le_bytes());
+        bytes.extend_from_slice(&origin.z.to_le_bytes());
+        bytes.extend_from_slice(&orientation.w.to_le_bytes());
+        bytes.extend_from_slice(&orientation.x.to_le_bytes());
+        bytes.extend_from_slice(&orientation.y.to_le_bytes());
+        bytes.extend_from_slice(&orientation.z.to_le_bytes());
     }
 }

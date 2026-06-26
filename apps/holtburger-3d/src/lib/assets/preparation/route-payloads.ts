@@ -1,6 +1,7 @@
 import type { ZodIssue } from "zod";
 import type {
 	AssetLookupResponseDto,
+	AnimationPayloadDto,
 	LandblockEnvCellsPayloadDto,
 	LandblockOutdoorPayloadDto,
 	GfxObjPayloadDto,
@@ -15,6 +16,7 @@ import type {
 	TerrainMaterialPayloadDto,
 } from "../../../lib/host/contracts";
 import {
+	animationPayloadDtoSchema,
 	gfxObjPayloadDtoSchema,
 	landblockEnvCellsPayloadDtoSchema,
 	landblockOutdoorPayloadDtoSchema,
@@ -32,6 +34,7 @@ import {
 export type V2PreparedAssetPayload =
 	| LandblockOutdoorPayloadDto
 	| LandblockEnvCellsPayloadDto
+	| AnimationPayloadDto
 	| GfxObjPayloadDto
 	| SetupModelPayloadDto
 	| SetupAppearancePayloadDto
@@ -68,6 +71,11 @@ const V2_PAYLOAD_PARSERS: readonly RoutePayloadParser<V2PreparedAssetPayload>[] 
 			expectedKind: "landblock-env-cells",
 			route: /^landblock\/[0-9a-fA-F]{8}\/env-cells$/,
 			schema: landblockEnvCellsPayloadDtoSchema,
+		},
+		{
+			expectedKind: "animation",
+			route: /^animation\/[0-9a-fA-F]{8}$/,
+			schema: animationPayloadDtoSchema,
 		},
 		{
 			expectedKind: "gfx-obj",

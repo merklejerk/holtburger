@@ -760,6 +760,89 @@ export const setupModelPayloadDtoSchema = z.object({
 });
 export type SetupModelPayloadDto = z.infer<typeof setupModelPayloadDtoSchema>;
 
+const animationHookBaseDtoSchema = z.object({
+	hookType: z.number().int().nonnegative(),
+	hookName: z.string().min(1),
+	direction: z.number().int(),
+	directionName: z.enum(["Backward", "Both", "Forward", "Unknown"]),
+});
+
+const animationRawPayloadBytesDtoSchema = z.array(
+	z.number().int().nonnegative().max(0xff),
+);
+
+const animationHookDtoSchema = z.discriminatedUnion("payloadKind", [
+	animationHookBaseDtoSchema.extend({
+		payloadKind: z.literal("none"),
+		payload: z.null(),
+		rawPayloadBytes: z.null(),
+	}),
+	animationHookBaseDtoSchema.extend({
+		payloadKind: z.literal("raw"),
+		payload: z.null(),
+		rawPayloadBytes: animationRawPayloadBytesDtoSchema,
+	}),
+	animationHookBaseDtoSchema.extend({
+		payloadKind: z.literal("replace-object"),
+		payload: z.null(),
+		rawPayloadBytes: animationRawPayloadBytesDtoSchema,
+	}),
+	animationHookBaseDtoSchema.extend({
+		payloadKind: z.literal("texture-velocity"),
+		payload: z.object({
+			uSpeed: z.number().finite(),
+			vSpeed: z.number().finite(),
+		}),
+		rawPayloadBytes: z.null(),
+	}),
+	animationHookBaseDtoSchema.extend({
+		payloadKind: z.literal("texture-velocity-part"),
+		payload: z.object({
+			partIndex: z.number().int().nonnegative(),
+			uSpeed: z.number().finite(),
+			vSpeed: z.number().finite(),
+		}),
+		rawPayloadBytes: z.null(),
+	}),
+]);
+
+const animationPartFrameDtoSchema = z.object({
+	frameIndex: z.number().int().nonnegative(),
+	localPlacements: z.array(placementTransformDtoSchema),
+	hooks: z.array(animationHookDtoSchema),
+});
+
+export const animationPayloadDtoSchema = z
+	.object({
+		kind: z.literal("animation"),
+		residencyKind: z.literal("unknown"),
+		sourceAssetKind: z.literal("animation"),
+		animationId: z.number().int().nonnegative(),
+		animationAssetId: z.string().min(1),
+		flags: z.number().int().nonnegative().nullable(),
+		partCount: z.number().int().nonnegative(),
+		frameCount: z.number().int().nonnegative(),
+		objectPositionFrames: z.array(placementTransformDtoSchema),
+		partFrames: z.array(animationPartFrameDtoSchema),
+		dependencies: z.object({}),
+		provenance: assetProvenanceDtoSchema,
+	})
+	.refine((payload) => payload.partFrames.length === payload.frameCount, {
+		message: "animation frame count must match partFrames length",
+		path: ["partFrames"],
+	})
+	.refine(
+		(payload) =>
+			payload.partFrames.every(
+				(frame) => frame.localPlacements.length === payload.partCount,
+			),
+		{
+			message: "animation part count must match every frame localPlacements length",
+			path: ["partFrames"],
+		},
+	);
+export type AnimationPayloadDto = z.infer<typeof animationPayloadDtoSchema>;
+
 const materialRecipeDependenciesDtoSchema = z.object({
 	surfaceTextureAssetIds: z.array(z.string().min(1)),
 	renderSurfaceAssetIds: z.array(z.string().min(1)),

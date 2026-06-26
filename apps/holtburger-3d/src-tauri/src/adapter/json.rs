@@ -3,7 +3,7 @@ use crate::adapter::service::asset_cache_error_code;
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_content::*;
 use holtburger_dat::file_type::setup_model::AnimationHookPayload;
-use holtburger_dat::file_type::{Palette, RenderSurface, SetupModel};
+use holtburger_dat::file_type::{Animation, Palette, RenderSurface, SetupModel};
 use holtburger_dat::physics::BspNode;
 
 const RETAIL_HIGH_DETAIL_SURFACE_TEXTURE_SOURCE_LEVEL_INDEX: usize = 0;
@@ -46,6 +46,53 @@ pub fn serialize_setup_model_payload(setup_model: &SetupModel) -> serde_json::Va
             "errorCode": null,
             "detail": null
         }
+    })
+}
+
+pub fn serialize_animation_payload(animation: &Animation) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "animation",
+        "residencyKind": "unknown",
+        "sourceAssetKind": "animation",
+        "animationId": animation.id,
+        "animationAssetId": format_animation_asset_id(animation.id),
+        "flags": animation.flags.bits(),
+        "partCount": animation.num_parts,
+        "frameCount": animation.num_frames,
+        "objectPositionFrames": animation.pos_frames.iter().map(serialize_frame).collect::<Vec<_>>(),
+        "partFrames": animation.part_frames.iter().enumerate().map(|(frame_index, frame)| {
+            serde_json::json!({
+                "frameIndex": frame_index,
+                "localPlacements": frame.frames.iter().map(serialize_frame).collect::<Vec<_>>(),
+                "hooks": frame.hooks.iter().map(serialize_animation_hook).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>(),
+        "dependencies": {},
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "animation",
+            "errorCode": null,
+            "detail": null
+        }
+    })
+}
+
+pub fn failed_animation_payload(animation_id: u32, error: anyhow::Error) -> serde_json::Value {
+    let detail = format!("{error:#}");
+    let error_code = asset_cache_error_code(&error);
+    serde_json::json!({
+        "kind": "animation",
+        "residencyKind": "unknown",
+        "sourceAssetKind": "animation",
+        "animationId": animation_id,
+        "animationAssetId": format_animation_asset_id(animation_id),
+        "flags": null,
+        "partCount": 0,
+        "frameCount": 0,
+        "objectPositionFrames": [],
+        "partFrames": [],
+        "dependencies": {},
+        "provenance": failed_provenance("animation", error_code, &detail),
     })
 }
 
@@ -1331,6 +1378,10 @@ pub fn format_gfx_obj_asset_id(gfx_obj_id: u32) -> String {
     format!("gfx-obj/{gfx_obj_id:08x}")
 }
 
+pub fn format_animation_asset_id(animation_id: u32) -> String {
+    format!("animation/{animation_id:08x}")
+}
+
 pub fn format_env_cell_asset_id(env_cell_id: u32) -> String {
     format!("env-cell/{env_cell_id:08x}")
 }
@@ -1525,6 +1576,93 @@ fn serialize_texture_velocity_hooks(
             _ => None,
         })
         .collect()
+}
+
+fn serialize_animation_hook(
+    hook: &holtburger_dat::file_type::setup_model::AnimationHook,
+) -> serde_json::Value {
+    let (payload_kind, payload, raw_payload_bytes) = match &hook.payload {
+        AnimationHookPayload::NoPayload => ("none", serde_json::Value::Null, None),
+        AnimationHookPayload::Raw(bytes) => (
+            "raw",
+            serde_json::Value::Null,
+            Some(bytes.iter().map(|byte| *byte as u32).collect::<Vec<_>>()),
+        ),
+        AnimationHookPayload::ReplaceObject(bytes) => (
+            "replace-object",
+            serde_json::Value::Null,
+            Some(bytes.iter().map(|byte| *byte as u32).collect::<Vec<_>>()),
+        ),
+        AnimationHookPayload::TextureVelocity(payload) => (
+            "texture-velocity",
+            serde_json::json!({
+                "uSpeed": payload.u_speed,
+                "vSpeed": payload.v_speed,
+            }),
+            None,
+        ),
+        AnimationHookPayload::TextureVelocityPart(payload) => (
+            "texture-velocity-part",
+            serde_json::json!({
+                "partIndex": payload.part_index,
+                "uSpeed": payload.u_speed,
+                "vSpeed": payload.v_speed,
+            }),
+            None,
+        ),
+    };
+
+    serde_json::json!({
+        "hookType": hook.hook_type,
+        "hookName": animation_hook_name(hook.hook_type),
+        "direction": hook.direction,
+        "directionName": animation_hook_direction_name(hook.direction),
+        "payloadKind": payload_kind,
+        "payload": payload,
+        "rawPayloadBytes": raw_payload_bytes,
+    })
+}
+
+fn animation_hook_name(hook_type: u32) -> &'static str {
+    match hook_type {
+        0 => "NoOp",
+        1 => "Sound",
+        2 => "SoundTable",
+        3 => "Attack",
+        4 => "AnimationDone",
+        5 => "ReplaceObject",
+        6 => "Ethereal",
+        7 => "TransparentPart",
+        8 => "Luminous",
+        9 => "LuminousPart",
+        10 => "Diffuse",
+        11 => "DiffusePart",
+        12 => "Scale",
+        13 => "CreateParticle",
+        14 => "DestroyParticle",
+        15 => "StopParticle",
+        16 => "NoDraw",
+        17 => "DefaultScript",
+        18 => "DefaultScriptPart",
+        19 => "CallPES",
+        20 => "Transparent",
+        21 => "SoundTweaked",
+        22 => "SetOmega",
+        23 => "TextureVelocity",
+        24 => "TextureVelocityPart",
+        25 => "SetLight",
+        26 => "CreateBlockingParticle",
+        _ => "Unknown",
+    }
+}
+
+fn animation_hook_direction_name(direction: i32) -> &'static str {
+    match direction {
+        -1 => "Backward",
+        0 => "Both",
+        1 => "Forward",
+        _ => "Unknown",
+    }
 }
 
 pub fn serialize_lights(

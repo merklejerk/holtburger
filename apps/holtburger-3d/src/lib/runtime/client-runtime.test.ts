@@ -90,7 +90,7 @@ describe("browser client runtime", () => {
 			resolver.pendingRequests.filter(
 				(request) => request.job.domain === "outdoor-terrain",
 			),
-		).toHaveLength(5);
+		).toHaveLength(9);
 		expect(
 			resolver.pendingRequests.filter(
 				(request) => request.job.domain === "outdoor-buildings",

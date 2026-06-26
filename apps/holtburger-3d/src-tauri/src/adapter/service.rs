@@ -303,6 +303,9 @@ impl HostBoundaryAdapter {
             ContentAssetRequest::RegionRenderProfile(region_number) => {
                 self.build_region_render_profile_lookup_response(request, region_number, asset)
             }
+            ContentAssetRequest::Animation(animation_id) => {
+                self.build_animation_lookup_response(request, animation_id, asset)
+            }
             ContentAssetRequest::SetupModel(setup_model_id) => {
                 self.build_setup_model_lookup_response(request, setup_model_id, asset)
             }
@@ -454,6 +457,26 @@ impl HostBoundaryAdapter {
         }
     }
 
+    fn build_animation_lookup_response(
+        &self,
+        request: AssetLookupRequestDto,
+        animation_id: u32,
+        asset: anyhow::Result<ContentAsset>,
+    ) -> AssetLookupResponseDto {
+        let payload = match asset {
+            Ok(ContentAsset::Animation(animation)) => serialize_animation_payload(&animation),
+            Ok(_) => unreachable!("content asset runtime returned mismatched animation"),
+            Err(error) => failed_animation_payload(animation_id, error),
+        };
+
+        AssetLookupResponseDto {
+            request_id: request.request_id,
+            asset_id: request.asset_id,
+            payload_kind: AssetPayloadKindDto::Json,
+            payload,
+        }
+    }
+
     fn build_material_recipe_lookup_response(
         &self,
         request: AssetLookupRequestDto,
@@ -574,6 +597,7 @@ fn binary_asset_lookup_required_message(
         )),
         ContentAssetRequest::TerrainMaterial(_)
         | ContentAssetRequest::RegionRenderProfile(_)
+        | ContentAssetRequest::Animation(_)
         | ContentAssetRequest::SetupModel(_)
         | ContentAssetRequest::MaterialRecipe(_)
         | ContentAssetRequest::SetupAppearance(_)
@@ -646,6 +670,44 @@ mod tests {
             .expect_err("app-local debug manifest fallback should be removed");
 
         assert!(error.to_string().contains("no debug manifest fallback"));
+    }
+
+    #[test]
+    fn animation_lookup_uses_direct_json_route_with_failed_payload_for_missing_assets() {
+        let runtime = HostRuntimeService::new(false);
+        let asset = runtime.asset_lookup_blocking(AssetLookupRequestDto {
+            request_id: "test-missing-animation-json".to_string(),
+            asset_id: "animation/03009999".to_string(),
+            priority: crate::contracts::AssetPriorityDto::Bootstrap,
+        });
+
+        assert_eq!(asset.payload["kind"], "animation");
+        assert_eq!(asset.payload["animationId"], serde_json::json!(0x0300_9999));
+        assert!(
+            asset.payload["provenance"]["detail"]
+                .as_str()
+                .is_some_and(|detail| detail.contains("Could not load Animation"))
+        );
+    }
+
+    #[test]
+    fn binary_lookup_rejects_animation_assets_until_binary_sections_are_needed() {
+        let adapter = HostBoundaryAdapter::new(false);
+        let error = tauri::async_runtime::block_on(adapter.asset_lookup_binary_batch(vec![
+            AssetLookupRequestDto {
+                request_id: "test-animation-binary".to_string(),
+                asset_id: "animation/0300061b".to_string(),
+                priority: crate::contracts::AssetPriorityDto::Bootstrap,
+            },
+        ]))
+        .expect_err("animation binary lookup should stay unsupported in phase 1");
+
+        assert!(
+            error
+                .to_string()
+                .contains("binary asset lookup does not support Animation"),
+            "unexpected binary animation error: {error:#}"
+        );
     }
 
     #[test]

@@ -254,7 +254,7 @@ static-authored dynamic seed facts.
 
 ### Phase 1: Animation Asset Route And DTO Contract
 
-Status: pending.
+Status: completed.
 
 Purpose:
 
@@ -288,18 +288,34 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Extend Rust content asset request/result enums.
-- [ ] Add animation asset id parse/format helpers.
-- [ ] Serialize animation frames and hooks with typed DTO names.
-- [ ] Add frontend host schema and route payload preparation.
-- [ ] Update host asset key parsing, hex32 route kind handling, and known-kind guards.
-- [ ] Update JSON response dispatch and binary-route rejection/ignore tests.
-- [ ] Add unit tests on Rust and TypeScript boundaries.
-- [ ] Run phase verification commands.
+- [x] Extend Rust content asset request/result enums.
+- [x] Add animation asset id parse/format helpers.
+- [x] Serialize animation frames and hooks with typed DTO names.
+- [x] Add frontend host schema and route payload preparation.
+- [x] Update host asset key parsing, hex32 route kind handling, and known-kind guards.
+- [x] Update JSON response dispatch and binary-route rejection/ignore tests.
+- [x] Add unit tests on Rust and TypeScript boundaries.
+- [x] Run phase verification commands.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-26: Phase 1 keeps animation assets on the direct JSON lookup path. Binary lookup remains
+  explicitly unsupported for animation until payload size or streaming evidence proves binary
+  sections are needed.
+- 2026-06-26: Typed `SetOmega` decoding was not added in Phase 1. Animation payloads preserve
+  `SetOmega` as a named hook with raw 12-byte payload bytes, and Phase 10 must add typed decoding
+  before omega behavior is implemented.
+- 2026-06-26: `prepareV2StaticAssetPayload` now parses animation payloads, so the name is broader
+  than static assets. This remains cleanup debt for Phase 11 rather than being renamed during the
+  route diff.
+- 2026-06-26: Verification results: `cargo test -p holtburger-core content_asset_service_`,
+  `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml animation`,
+  `npm run check`, `npm run lint:ts`, `npm run lint:dead`, `npm run check:rust`,
+  `npm run lint:rust`, and `npm run test:ts` pass.
+- 2026-06-26: Two stale static-demand tests expected a cross-shaped radius-1 outdoor footprint with
+  5 landblocks. Existing `buildOutdoorCoverageLandblocks` behavior and demand-planner tests define
+  radius 1 as the full padded 3x3 neighborhood, so the tests were updated to expect 9 terrain
+  requests and 9 retained active work scopes after anchor movement.
 
 ### Phase 2: Outdoor Static-Authored Dynamic Seed Contract
 
@@ -683,6 +699,7 @@ Task checklist:
 
 - [ ] Review implementation diff and diagnostics.
 - [ ] Compare first-target behavior against requirements evidence.
+- [ ] Add typed `SetOmega` payload decoding before implementing omega transform behavior.
 - [ ] Update future phases before proceeding.
 
 Decisions and course corrections:

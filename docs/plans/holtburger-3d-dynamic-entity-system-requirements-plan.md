@@ -1795,7 +1795,11 @@ Requirement direction:
 
 ## First-Slice Requirements Gate
 
-Implementation phases for the first static-authored dynamic target remain blocked until this gate is
+Status: satisfied by the 2026-06-26 dry run for the first static-authored default-animation slice.
+Implementation phases may now be written for that slice, but the full live/spawned/script-bearing
+dynamic system remains gated separately below.
+
+Implementation phases for the first static-authored dynamic target required this gate to be
 satisfied:
 
 - A first dynamic target is selected with ACE/ACViewer/retail evidence.
@@ -1845,6 +1849,82 @@ satisfied:
 - At least one validation strategy is defined for proving the first target without relying on
   runtime assets that cannot be checked into the repo.
 
+### Dry Run Resolution
+
+Recorded on 2026-06-26 after dry-running the first slice against current frontend, Tauri adapter,
+content asset, renderer, and scene-query code.
+
+First-slice answers:
+
+- First target: confirmed. Use `0x020003e5` / animation `0x0300061b` as the first implementation
+  target. It is a real static-authored outdoor dynamic target, has retail/user visual confirmation,
+  needs setup default animation playback, and has no hooks, scripts, motion table, sound table, or
+  script table.
+- Immediate second target: confirmed. Use `0x020005ac` / animation `0x03000751` after the first
+  target because it adds a frame-0 `SetOmega` hook and validates transform-side hook integration,
+  current-frame bounds updates, and spatial index membership without introducing physics scripts.
+- First-slice validation source policy: use real DAT/static-scene targets for end-to-end validation.
+  Synthetic browser-mode entities are allowed only for focused unit/contract tests of renderer,
+  resource, and query plumbing; they are not evidence for target selection or visual parity.
+- Seed classification: confirmed for the first slice. A setup-backed static source with
+  `defaultAnimation` becomes a static-authored dynamic seed instead of baked static geometry when the
+  dynamic runtime supports its required dependencies. Do not use this rule to hide visually odd or
+  marker-like static objects without authored dynamic evidence.
+- Static-authored lifecycle: confirmed. The seed identity is source/scope-owned; the dynamic entity
+  record is frontend-runtime-owned; renderer resource/instance identities are renderer-owned output.
+  Static-scope eviction removes the seed, dynamic record, dynamic spatial index entries, and renderer
+  submissions. Missing required resources make the entity currently non-renderable with loud
+  diagnostics, not a baked static fallback.
+- Hook policy: confirmed for first and second targets. The first target exercises the hook-generic
+  dispatcher shape but has no hook execution. The second target should add typed `SetOmega` decoding
+  and a supported transform-state handler; until that handler lands, rendering `0x020005ac` without
+  omega is an explicit diagnosed visual compromise.
+- Spatial/query strategy: confirmed. Reuse the existing outdoor landblock-grid traversal as the
+  outer candidate phase. Add a per-landblock mutable 2D AABB hierarchy behind a small local wrapper,
+  using a proven package added through the package manager during implementation rather than a
+  bespoke tree or assumed version. Env-cell dynamic membership can stay flat for the first slice.
+- Renderer contract: confirmed. Dynamic renderer work needs declarative resource and instance
+  commits. It should generalize/reuse the visual-resource/cache and material-binding primitives from
+  generated static instancing, but must not push dynamic entities through `setOutdoorDetailsLayer`,
+  `StaticObjectRenderInstance`, baked static draw units, or layer-owned static lifetimes.
+- Scene query: confirmed. Introduce a merged scene-query surface that can return static and dynamic
+  hits ordered by distance. Keep browser/client selection as caller policy over query results.
+  Static-authored scenery targets are debug/inspection-queryable but excluded by default browser
+  selection filters because retail confirms they are not selectable.
+
+First-slice bridge DTO inventory:
+
+- Add an outdoor static-authored dynamic seed record variant. The current
+  `StaticAuthoredDynamicSeedRecord` only represents env-cell static object seeds, so the outdoor
+  windmill target cannot be modeled honestly until this union includes outdoor source facts.
+- Static-authored dynamic seed facts must include source key/provenance, owning static work/scope,
+  source residence, setup id, landblock-local base transform, static object identity, and the default
+  animation id that triggered dynamic classification.
+- Add a first-class `animation/0300....` content asset route and host asset key kind. The route should
+  be wired through `ContentAssetRequest`, Tauri asset id parsing, Tauri JSON serialization, frontend
+  zod contract validation, asset preparation routing, and `DynamicEntityResourceManager`.
+- `AnimationAssetPayload` must preserve animation id, flags, part count, frame count, object
+  position frames, per-part frames with origin/orientation, and typed hook summaries/invocations.
+  Do not embed per-frame animation output in setup payloads and do not stream evaluated per-frame
+  transforms over the bridge.
+- First-slice dynamic resource readiness consumes setup, setup appearance or part/gfx/material/
+  texture resources, and animation payloads through the existing asset service. Script, particle,
+  sound, light, motion-table, and script-table payloads stay deferred unless a later target requires
+  them.
+
+Implementation plan implications:
+
+- Start with DTO/contract plumbing before renderer work. Without outdoor dynamic seed records and an
+  animation asset route, the selected target cannot enter the runtime honestly.
+- Generalize renderer visual-resource ownership before adding dynamic instance submission. The
+  existing reusable static-object visual resource cache is real, but today it is installed through
+  outdoor-detail static layer replacement.
+- Rename or wrap the current static picking API when introducing dynamic hits. A long-lived
+  `pickStaticRay` plus a separate dynamic sibling would encode the wrong abstraction; the durable
+  caller-facing shape is a scene query with static/dynamic hit variants.
+- Add the mutable broadphase dependency during implementation with `npm` package-manager tooling so
+  the latest compatible package/version is resolved by tooling, not assumed in this plan.
+
 ## Full Dynamic System Gate
 
 These requirements remain open for later live/spawned/script-bearing dynamic targets. They should not
@@ -1876,19 +1956,21 @@ block the first static-authored default-animation slice:
 
 ## Open Questions
 
-The detailed unknowns live in the discovery worksheet. Before first-slice implementation phases are
-written, the remaining first-slice work should be reduced to these concrete artifacts:
+First-slice open questions are resolved by the 2026-06-26 dry run and recorded in
+`Dry Run Resolution` above:
 
-- Select the first evidence-backed dynamic target.
-- Confirm or replace the proposed first-slice answers above.
-- Validate/refine the proposed Hook Ownership Matrix for the first target and immediate second
-  target.
-- Validate/refine the static-authored portions of the proposed Dynamic Entity Lifecycle Matrix.
-- Fill the first-slice bridge DTO inventory for static seed facts and animation asset lookup.
-- Choose the first-slice dynamic spatial index/query strategy.
-- Define the first-slice validation strategy, including whether synthetic browser-mode entities are
-  allowed for renderer/resource validation or whether every target must come from real
-  captured/server data.
+- First evidence-backed target: `0x020003e5`, with `0x020005ac` as the `SetOmega` follow-up.
+- Proposed first-slice answers: confirmed with DTO, renderer, query, and validation refinements.
+- Hook ownership: confirmed for the hook-free first target and `SetOmega` follow-up; broader hook
+  ownership remains under the full-system gate.
+- Static-authored lifecycle: confirmed for static-scope entry, source update, scope eviction,
+  resource failure, no-residence, and renderer submission removal.
+- Bridge DTO inventory: first slice needs an outdoor dynamic seed record variant and a first-class
+  animation asset route/payload.
+- Spatial index/query strategy: first slice uses outdoor landblock-grid traversal plus a
+  per-landblock mutable 2D AABB hierarchy behind a local wrapper; env-cell membership stays flat.
+- Validation strategy: use real DAT/static-scene targets for end-to-end validation. Synthetic
+  browser-mode entities are only test fixtures for focused renderer/resource/query contracts.
 
 Full live/spawned bridge DTOs, browser/client spawn ownership, equipment/attachment orchestration,
 and broad hook execution remain open for later targets under the Full Dynamic System Gate.

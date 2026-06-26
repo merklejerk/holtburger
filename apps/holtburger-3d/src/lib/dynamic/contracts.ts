@@ -13,6 +13,10 @@ import type {
 	StaticScopeOwnerKey,
 	StaticWorkPeerRecordOwner,
 } from "../static/contracts";
+import type {
+	AnimationPayloadDto,
+	PlacementTransformDto,
+} from "../host/contracts";
 
 export type DynamicEntityId = string;
 
@@ -52,9 +56,47 @@ type DynamicEntityResidence =
 			readonly landblockId: number;
 	  };
 
-interface DynamicEntityAnimationState {
+export interface DynamicEntityAnimationState {
 	readonly defaultAnimationId: number;
-	readonly status: "pending-resource" | "ready";
+	readonly playback: DynamicEntityAnimationPlaybackState;
+	readonly status: "failed" | "pending-resource" | "ready";
+}
+
+export type DynamicEntityAnimationPlaybackState =
+	| {
+			readonly status: "pending-resource";
+	  }
+	| {
+			readonly animationAssetId: string;
+			readonly animationId: number;
+			readonly currentFrameIndex: number;
+			readonly elapsedSeconds: number;
+			readonly frameCount: number;
+			readonly frameNumber: number;
+			readonly frameRateFps: number;
+			readonly lastDispatchedHookFrame: DynamicAnimationHookFrameKey | null;
+			readonly loopIteration: number;
+			readonly objectRootPose: PlacementTransformDto;
+			readonly partCount: number;
+			readonly partPoses: readonly DynamicEntityPartPose[];
+			readonly startedAtSeconds: number;
+			readonly status: "playing";
+	  }
+	| {
+			readonly animationAssetId: string;
+			readonly animationId: number | null;
+			readonly reason: "zero-frame";
+			readonly status: "failed";
+	  };
+
+export interface DynamicEntityPartPose {
+	readonly localPlacement: PlacementTransformDto;
+	readonly partIndex: number;
+}
+
+export interface DynamicAnimationHookFrameKey {
+	readonly frameIndex: number;
+	readonly loopIteration: number;
 }
 
 interface DynamicEntityTransformState {
@@ -74,10 +116,22 @@ export interface DynamicEntityResourceState {
 	readonly visual: DynamicEntityVisualResourceState;
 }
 
-interface DynamicEntitySetupAnimationResourceState {
-	readonly animationKey: DynamicEntityResourceKey;
-	readonly setupModelKey: DynamicEntityResourceKey;
-	readonly status: "failed" | "pending" | "ready";
+type DynamicEntitySetupAnimationResourceState =
+	| {
+			readonly animationKey: DynamicEntityResourceKey;
+			readonly setupModelKey: DynamicEntityResourceKey;
+			readonly status: "failed" | "pending";
+	  }
+	| {
+			readonly animation: DynamicEntityAnimationResource;
+			readonly animationKey: DynamicEntityResourceKey;
+			readonly setupModelKey: DynamicEntityResourceKey;
+			readonly status: "ready";
+	  };
+
+export interface DynamicEntityAnimationResource {
+	readonly assetId: string;
+	readonly payload: AnimationPayloadDto;
 }
 
 type DynamicEntityVisualResourceState =
@@ -176,6 +230,27 @@ export type DynamicEntityIssue =
 			readonly resourceKey: DynamicEntityResourceKey;
 	  }
 	| {
+			readonly animationAssetId: string;
+			readonly animationId: number | null;
+			readonly kind: "dynamic-animation-invalid";
+			readonly message: string;
+			readonly objectPositionFrameCount: number | null;
+			readonly reason: "malformed-object-position-frames" | "zero-frame";
+			readonly expectedFrameCount: number;
+	  }
+	| {
+			readonly animationAssetId: string;
+			readonly animationId: number;
+			readonly entityId: DynamicEntityId;
+			readonly frameIndex: number;
+			readonly hookName: string;
+			readonly hookType: number;
+			readonly kind: "dynamic-animation-hook-unsupported";
+			readonly loopIteration: number;
+			readonly payloadKind: AnimationPayloadDto["partFrames"][number]["hooks"][number]["payloadKind"];
+			readonly skippedEffect: string;
+	  }
+	| {
 			readonly kind: "residence-render-path-pending";
 			readonly residence: DynamicEntityResidence;
 	  }
@@ -196,8 +271,81 @@ export interface DynamicRuntimeSnapshot {
 	readonly activeEntityCount: number;
 	readonly issueCount: number;
 	readonly nonRenderableEntityCount: number;
-	readonly records: readonly DynamicEntityRecord[];
+	readonly records: readonly DynamicEntitySummaryDto[];
 	readonly staticSeedCount: number;
+}
+
+export interface DynamicEntitySummaryDto {
+	readonly animation: DynamicEntityAnimationSummaryDto;
+	readonly diagnostics: readonly DynamicEntityIssue[];
+	readonly effectiveResidence: DynamicEntityResidence;
+	readonly id: DynamicEntityId;
+	readonly provenance: DynamicEntityProvenance;
+	readonly renderability: DynamicEntityRenderability;
+	readonly resources: DynamicEntityResourceSummaryDto;
+	readonly source: DynamicEntitySourceSummaryDto;
+	readonly sourceResidence: DynamicEntityResidence;
+}
+
+interface DynamicEntityAnimationSummaryDto {
+	readonly defaultAnimationId: number;
+	readonly playback: DynamicEntityAnimationPlaybackSummaryDto;
+	readonly status: DynamicEntityAnimationState["status"];
+}
+
+type DynamicEntityAnimationPlaybackSummaryDto =
+	| {
+			readonly status: "pending-resource";
+	  }
+	| {
+			readonly animationAssetId: string;
+			readonly animationId: number;
+			readonly currentFrameIndex: number;
+			readonly elapsedSeconds: number;
+			readonly frameCount: number;
+			readonly frameNumber: number;
+			readonly frameRateFps: number;
+			readonly loopIteration: number;
+			readonly objectRootPose: PlacementTransformDto;
+			readonly partCount: number;
+			readonly partPoses: readonly DynamicEntityPartPose[];
+			readonly status: "playing";
+	  }
+	| {
+			readonly animationAssetId: string;
+			readonly animationId: number | null;
+			readonly reason: "zero-frame";
+			readonly status: "failed";
+	  };
+
+interface DynamicEntityResourceSummaryDto {
+	readonly required: readonly DynamicEntityRequiredResource[];
+	readonly setupAnimation: DynamicEntitySetupAnimationResourceSummaryDto;
+	readonly status: DynamicEntityResourceState["status"];
+	readonly visual: DynamicEntityVisualResourceState;
+}
+
+type DynamicEntitySetupAnimationResourceSummaryDto =
+	| {
+			readonly animationKey: DynamicEntityResourceKey;
+			readonly setupModelKey: DynamicEntityResourceKey;
+			readonly status: "failed" | "pending";
+	  }
+	| {
+			readonly animationAssetId: string;
+			readonly animationId: number;
+			readonly animationKey: DynamicEntityResourceKey;
+			readonly frameCount: number;
+			readonly partCount: number;
+			readonly setupModelKey: DynamicEntityResourceKey;
+			readonly status: "ready";
+	  };
+
+interface DynamicEntitySourceSummaryDto {
+	readonly defaultAnimationId: number;
+	readonly object: StaticAuthoredDynamicSeedFacts["object"];
+	readonly setupModelId: number;
+	readonly sourceAssetId: string;
 }
 
 export function isOutdoorDynamicSeedRecord(

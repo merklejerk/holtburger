@@ -883,8 +883,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#assertActive();
 		this.#lastFrameState = state;
 		this.#renderer.updateFrameState(state);
-		if (this.#refreshPortalOverlapResidency()) {
+		const dynamicPlaybackChanged =
+			this.#dynamicEntityController.updateAnimationPlayback(state.timeSeconds);
+		const portalOverlapChanged = this.#refreshPortalOverlapResidency();
+		if (portalOverlapChanged) {
 			this.#updateRenderPassPlan();
+		}
+		if (portalOverlapChanged || dynamicPlaybackChanged) {
 			this.#emit();
 		}
 	}

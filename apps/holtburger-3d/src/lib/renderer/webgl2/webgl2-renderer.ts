@@ -2008,13 +2008,13 @@ class Webgl2Renderer implements Renderer {
 		}
 
 		#drawDynamicResources(domain: RenderStaticDomain): number {
-			if (domain === "interior") {
-				return 0;
-			}
 			const gl = this.#gl;
 			let drawCalls = 0;
 			let skipped = 0;
 			for (const instance of this.#dynamicInstances.values()) {
+				if (!shouldDrawDynamicInstanceInDomain(instance, domain)) {
+					continue;
+				}
 				const resources = this.#dynamicGeometryResources.get(instance.resourceId);
 				if (!resources || resources.length === 0) {
 					skipped += 1;
@@ -2026,11 +2026,8 @@ class Webgl2Renderer implements Renderer {
 						new Float32Array(part.matrix),
 					]),
 				);
-				const landblockTransform = createTranslationMatrix(
-					this.#createLandblockTranslation(instance.landblockId),
-				);
 				const objectToRenderMatrix = multiplyMat4(
-					landblockTransform,
+					this.#createDynamicInstanceResidenceTransform(instance),
 					new Float32Array(instance.objectToRenderMatrix),
 				);
 				for (const resource of resources) {
@@ -2054,6 +2051,17 @@ class Webgl2Renderer implements Renderer {
 			this.#lastDynamicDrawCalls += drawCalls;
 			this.#lastSkippedDynamicSubmissions += skipped;
 			return drawCalls;
+		}
+
+		#createDynamicInstanceResidenceTransform(
+			instance: DynamicRendererInstance,
+		): Float32Array {
+			if (instance.renderResidence.kind === "env-cell") {
+				return createTranslationMatrix([0, 0, 0]);
+			}
+			return createTranslationMatrix(
+				this.#createLandblockTranslation(instance.renderResidence.landblockId),
+			);
 		}
 
 		#drawPortalProjectionFrameResources(
@@ -4013,6 +4021,19 @@ function shouldDrawStaticObjectResourceInDomain(
 	return resource.domain === "outdoor-buildings"
 		? visibility.outdoorBuildings
 		: visibility.outdoorDetail;
+}
+
+function shouldDrawDynamicInstanceInDomain(
+	instance: DynamicRendererInstance,
+	domain: RenderStaticDomain,
+): boolean {
+	if (domain === "single-surface-resident") {
+		return true;
+	}
+	if (instance.renderResidence.kind === "env-cell") {
+		return domain === "interior";
+	}
+	return domain === "exterior";
 }
 
 function createTerrainGeometryProgram(

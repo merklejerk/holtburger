@@ -79,7 +79,7 @@ describe("dynamic entity resource manager", () => {
 			"dynamic-texture:08000011:base-color:06000010?cs=linear&mips=none&out=rgba8&usage=color",
 		]);
 		expect(records.map((record) => record.renderability.reasons)).toEqual([
-			["residence-render-path-pending"],
+			[],
 			[],
 		]);
 	});

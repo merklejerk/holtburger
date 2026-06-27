@@ -21,7 +21,10 @@ import {
 	DynamicEntityResourceManager,
 	type DynamicEntityResourceChange,
 } from "./dynamic-entity-resource-manager";
-import { DynamicPlacementTracker } from "./dynamic-placement-tracker";
+import {
+	DynamicPlacementTracker,
+	type EnvCellDynamicSpatialIndexRecord,
+} from "./dynamic-placement-tracker";
 import type { OutdoorDynamicSpatialIndexRecord } from "./outdoor-dynamic-spatial-index";
 
 const FIRST_SLICE_REQUIRED_RESOURCES = ["setup-model", "animation"] as const;
@@ -132,6 +135,13 @@ export class DynamicEntityController {
 		return this.#placementTracker.outdoorLandblockIds();
 	}
 
+	queryEnvCellDynamicBounds(options: {
+		readonly envCellIds: readonly number[];
+		readonly landblockId: number;
+	}): readonly EnvCellDynamicSpatialIndexRecord[] {
+		return this.#placementTracker.queryEnvCellBounds(options);
+	}
+
 	#upsertPlacementUpdate(record: DynamicEntityRecord): void {
 		const placementUpdate = this.#placementTracker.update(record);
 		if (placementUpdate.changed) {
@@ -163,15 +173,6 @@ function createDynamicEntityRecord(
 					kind: "outdoor-landblock" as const,
 					landblockId: record.seed.sourceResidence.landblockId,
 				};
-	const residenceDiagnostics =
-		record.kind === "env-cell-static-object-dynamic-seed"
-			? [
-					{
-						kind: "residence-render-path-pending" as const,
-						residence: sourceResidence,
-					},
-				]
-			: [];
 	const resourceState =
 		resourceManager?.createInitialResourceState(record.seed) ??
 		createFallbackInitialResourceState(record.seed);
@@ -190,8 +191,8 @@ function createDynamicEntityRecord(
 		},
 		bounds: {
 			currentBounds: null,
+			indexMembership: { kind: "none" },
 			indexed: false,
-			indexedLandblockIds: [],
 			precision: "none",
 		},
 		diagnostics: [
@@ -199,7 +200,6 @@ function createDynamicEntityRecord(
 				kind: "resources-pending",
 				required: FIRST_SLICE_REQUIRED_RESOURCES,
 			},
-			...residenceDiagnostics,
 		],
 		effectiveResidence: sourceResidence,
 		id: createDynamicEntityId(record, sourceScopeKey),
@@ -212,10 +212,7 @@ function createDynamicEntityRecord(
 			sourceScopeKey,
 		},
 		renderability: {
-			reasons:
-				record.kind === "env-cell-static-object-dynamic-seed"
-					? ["resources-pending", "residence-render-path-pending"]
-					: ["resources-pending"],
+			reasons: ["resources-pending"],
 			status: "non-renderable",
 		},
 		resources: {
@@ -233,7 +230,7 @@ function applyResourceChange(
 	if (change.kind === "setup-animation-ready") {
 		const diagnostics = [
 			createVisualResourcesPendingIssue(),
-			...createResidenceDiagnostics(record),
+			...createResidenceDiagnostics(),
 		];
 		return {
 			...record,
@@ -242,35 +239,26 @@ function applyResourceChange(
 				status: "ready",
 			},
 			diagnostics,
-			renderability: {
-				reasons: createRenderabilityReasons(diagnostics),
-				status: "non-renderable",
-			},
+			renderability: createRenderability(diagnostics),
 			resources: change.resources,
 		};
 	}
 
 	if (change.kind === "visual-resources-ready") {
-		const diagnostics = createResidenceDiagnostics(record);
+		const diagnostics = createResidenceDiagnostics();
 		return {
 			...record,
 			diagnostics,
-			renderability: {
-				reasons: createRenderabilityReasons(diagnostics),
-				status: "non-renderable",
-			},
+			renderability: createRenderability(diagnostics),
 			resources: change.resources,
 		};
 	}
 
-	const diagnostics = [...change.issues, ...createResidenceDiagnostics(record)];
+	const diagnostics = [...change.issues, ...createResidenceDiagnostics()];
 	return {
 		...record,
 		diagnostics,
-		renderability: {
-			reasons: createRenderabilityReasons(diagnostics),
-			status: "non-renderable",
-		},
+		renderability: createRenderability(diagnostics),
 		resources: change.resources,
 	};
 }
@@ -298,23 +286,24 @@ function createFallbackInitialResourceState(
 	};
 }
 
-function createResidenceDiagnostics(
-	record: DynamicEntityRecord,
-): readonly DynamicEntityIssue[] {
-	return record.sourceResidence.kind === "env-cell"
-		? [
-				{
-					kind: "residence-render-path-pending",
-					residence: record.sourceResidence,
-				},
-			]
-		: [];
+function createResidenceDiagnostics(): readonly DynamicEntityIssue[] {
+	return [];
 }
 
 function createVisualResourcesPendingIssue(): DynamicEntityIssue {
 	return {
 		kind: "visual-resources-pending",
 		required: PHASE_4B_REQUIRED_RESOURCES,
+	};
+}
+
+function createRenderability(
+	diagnostics: readonly DynamicEntityIssue[],
+): DynamicEntityRecord["renderability"] {
+	const reasons = createRenderabilityReasons(diagnostics);
+	return {
+		reasons,
+		status: reasons.length === 0 ? "renderable" : "non-renderable",
 	};
 }
 
@@ -333,9 +322,6 @@ function createRenderabilityReasons(
 		}
 		if (diagnostic.kind === "dynamic-resource-load-failed") {
 			reasons.add("resources-pending");
-		}
-		if (diagnostic.kind === "residence-render-path-pending") {
-			reasons.add("residence-render-path-pending");
 		}
 	}
 	return [...reasons];

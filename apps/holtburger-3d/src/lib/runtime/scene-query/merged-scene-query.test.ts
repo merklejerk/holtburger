@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeOutdoorLandblockId } from "../../landblocks";
+import type { EnvCellDynamicSpatialIndexRecord } from "../../dynamic/dynamic-placement-tracker";
 import type { OutdoorDynamicSpatialIndexRecord } from "../../dynamic/outdoor-dynamic-spatial-index";
 import type { StaticBounds } from "../../static/contracts";
 import type { StaticScenePickHit } from "./contracts";
@@ -118,18 +119,74 @@ describe("merged scene query", () => {
 		});
 	});
 
-	it("keeps env-cell dynamic records out until an env-cell dynamic query path exists", () => {
-		let dynamicLandblockQueries = 0;
+	it("returns env-cell dynamic hits through debug modes while default selection excludes them", () => {
+		const sources = createSources({
+			envCellDynamicRecords: [
+				createEnvCellDynamicRecord({
+					bounds: createBounds({
+						max: { x: 1, y: 1, z: -4 },
+						min: { x: -1, y: -1, z: -5 },
+					}),
+					envCellId: 0xda550100,
+					landblockId: 0xda55ffff,
+				}),
+			],
+			staticHit: null,
+		});
+		const request = {
+			context: {
+				envCellId: 0xda550100,
+				kind: "env-cell" as const,
+				landblockId: 0xda55ffff,
+			},
+			ray: {
+				direction: { x: 0, y: 0, z: -1 },
+				origin: { x: 0, y: 0, z: 0 },
+			},
+		};
+
+		expect(
+			pickMergedSceneRay(sources, {
+				...request,
+				mode: "default-selection",
+			}),
+		).toBeNull();
+		expect(
+			pickMergedSceneRay(sources, {
+				...request,
+				mode: "debug-inspection",
+			}),
+		).toMatchObject({
+			defaultSelectable: false,
+			distance: 4,
+			entityId: "dynamic-test-entity",
+			source: "dynamic",
+			sourceResidence: {
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+		});
+	});
+
+	it("filters env-cell dynamic hits through accepted env-cell visibility", () => {
 		const hit = pickMergedSceneRay(
 			createSources({
-				dynamicLandblockQuery: () => {
-					dynamicLandblockQueries += 1;
-					return [makeOutdoorLandblockId(0xda, 0x55)];
-				},
+				envCellDynamicRecords: [
+					createEnvCellDynamicRecord({
+						bounds: createBounds({
+							max: { x: 1, y: 1, z: -4 },
+							min: { x: -1, y: -1, z: -5 },
+						}),
+						envCellId: 0xda550101,
+						landblockId: 0xda55ffff,
+					}),
+				],
 				staticHit: null,
 			}),
 			{
 				context: {
+					acceptedEnvCellIds: [0xda550100],
 					envCellId: 0xda550100,
 					kind: "env-cell",
 					landblockId: 0xda55ffff,
@@ -143,20 +200,27 @@ describe("merged scene query", () => {
 		);
 
 		expect(hit).toBeNull();
-		expect(dynamicLandblockQueries).toBe(0);
 	});
 });
 
 function createSources(options: {
 	readonly dynamicLandblockQuery?: () => readonly number[];
 	readonly dynamicRecords?: readonly OutdoorDynamicSpatialIndexRecord[];
+	readonly envCellDynamicRecords?: readonly EnvCellDynamicSpatialIndexRecord[];
 	readonly outdoorAnchorLandblockId?: number | null;
 	readonly staticHit?: StaticScenePickHit | null;
 }): MergedSceneQuerySources {
 	const dynamicRecords = options.dynamicRecords ?? [];
+	const envCellDynamicRecords = options.envCellDynamicRecords ?? [];
 	return {
 		outdoorAnchorLandblockId: options.outdoorAnchorLandblockId ?? null,
 		pickStaticRay: () => options.staticHit ?? null,
+		queryEnvCellDynamicBounds: (query) =>
+			envCellDynamicRecords.filter(
+				(record) =>
+					record.landblockId === query.landblockId &&
+					query.envCellIds.includes(record.envCellId),
+			),
 		queryOutdoorDynamicBounds: (query) =>
 			dynamicRecords.filter((record) => record.landblockId === query.landblockId),
 		queryOutdoorDynamicLandblockIds:
@@ -189,6 +253,20 @@ function createDynamicRecord(
 		"bounds" | "landblockId" | "sourceLandblockId"
 	>,
 ): OutdoorDynamicSpatialIndexRecord {
+	return {
+		...options,
+		entityId: "dynamic-test-entity",
+		precision: "current-frame-source-part-bounds-aabb",
+		sourceBounds: options.bounds,
+	};
+}
+
+function createEnvCellDynamicRecord(
+	options: Pick<
+		EnvCellDynamicSpatialIndexRecord,
+		"bounds" | "envCellId" | "landblockId"
+	>,
+): EnvCellDynamicSpatialIndexRecord {
 	return {
 		...options,
 		entityId: "dynamic-test-entity",

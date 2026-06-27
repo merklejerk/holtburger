@@ -32,8 +32,11 @@ describe("dynamic placement tracker", () => {
 				precision: "current-frame-source-part-bounds-aabb",
 				sourceLandblockId,
 			},
+			indexMembership: {
+				kind: "outdoor-landblocks",
+				landblockIds: [sourceLandblockId, eastLandblockId],
+			},
 			indexed: true,
-			indexedLandblockIds: [sourceLandblockId, eastLandblockId],
 			precision: "current-frame-source-part-bounds-aabb",
 		});
 		expect(update.record.effectiveResidence).toEqual({
@@ -70,7 +73,7 @@ describe("dynamic placement tracker", () => {
 		expect(withOmega).not.toEqual(withoutOmega);
 	});
 
-	it("keeps env-cell dynamic records out of the outdoor index for this phase", () => {
+	it("indexes env-cell dynamic records through env-cell membership without using the outdoor index", () => {
 		const index = new OutdoorDynamicSpatialIndex();
 		const tracker = new DynamicPlacementTracker({ outdoorIndex: index });
 
@@ -84,12 +87,33 @@ describe("dynamic placement tracker", () => {
 			}),
 		);
 
-		expect(update.record.bounds).toEqual({
-			currentBounds: null,
-			indexed: false,
-			indexedLandblockIds: [],
-			precision: "none",
+		expect(update.record.bounds).toMatchObject({
+			currentBounds: {
+				coordinateSpace: "env-cell-landblock-render-local",
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+				precision: "current-frame-source-part-bounds-aabb",
+			},
+			indexMembership: {
+				envCellIds: [0xda550100],
+				kind: "env-cells",
+				landblockId: 0xda55ffff,
+			},
+			indexed: true,
+			precision: "current-frame-source-part-bounds-aabb",
 		});
+		expect(tracker.queryEnvCellBounds({
+			envCellIds: [0xda550100],
+			landblockId: 0xda55ffff,
+		})).toMatchObject([
+			{
+				entityId: update.record.id,
+				envCellId: 0xda550100,
+				landblockId: 0xda55ffff,
+				precision: "current-frame-source-part-bounds-aabb",
+			},
+		]);
 		expect(index.records()).toEqual([]);
 	});
 });
@@ -224,8 +248,8 @@ function createReadyRecord(
 		},
 		bounds: {
 			currentBounds: null,
+			indexMembership: { kind: "none" },
 			indexed: false,
-			indexedLandblockIds: [],
 			precision: "none",
 		},
 		diagnostics: [],

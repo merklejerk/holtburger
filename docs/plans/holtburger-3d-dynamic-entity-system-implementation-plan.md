@@ -1811,16 +1811,30 @@ Deliverables:
 
 - Remove classified env-cell dynamic statics from env-cell static output once they are represented
   by `env-cell-static-object-dynamic-seed`, mirroring the outdoor diversion from static bake output.
+  This filtering must happen before env-cell static-object compatibility partitioning/bake creates
+  draw units, not as a post-bake draw-unit cleanup.
 - Replace `residence-render-path-pending` as the default env-cell dynamic renderability reason with
   real env-cell dynamic placement/render membership.
+- Replace outdoor-only dynamic bounds/index summaries with a residence-aware shape. Outdoor records
+  can keep outdoor landblock index metadata; env-cell records need env-cell membership metadata
+  rather than fake outdoor `indexedLandblockIds`.
 - Generalize dynamic renderer instance creation so source/effective residence can produce the
   correct render-space transform for both outdoor landblock and env-cell dynamic records.
+- Extend dynamic renderer instance DTOs with explicit render residence/render-domain metadata.
+  Outdoor dynamic instances may use landblock-anchor translation; env-cell dynamic instances must
+  describe interior/env-cell render membership without borrowing outdoor landblock-anchor semantics.
 - Route env-cell dynamic renderer resource and instance commits through the same dynamic commit
   APIs as outdoor records. Do not add an env-cell-only renderer API or a second dynamic resource
   manager.
+- Update WebGL2 dynamic draw filtering so dynamic instances are drawn in the correct scene domain.
+  The renderer must not keep skipping all dynamic submissions for `domain === "interior"`, and it
+  must not draw env-cell dynamics in exterior-only passes.
 - Add env-cell-aware dynamic query membership that composes with the merged scene-query surface and
   portal/interior visibility context. The spatial/query layer may use residence-specific indexes,
   but callers should still consume one dynamic hit/query family.
+- Use the existing env-cell pick/query context, including `acceptedEnvCellIds` where present, as the
+  visibility filter for env-cell dynamic debug hits. Do not create a second portal-visibility policy
+  beside the merged scene-query context.
 - Preserve default browser selection policy: dynamic scenery remains debug/inspection-queryable but
   not default-selectable unless caller policy explicitly asks for it.
 - Keep source residence, effective residence, and render-pass membership explicit. Do not fake
@@ -1831,17 +1845,21 @@ Deliverables:
 Acceptance criteria:
 
 - A classified env-cell setup/default-animation static seed no longer appears in env-cell static
-  draw output and does not double-render.
+  draw output and does not double-render. Tests prove the object is filtered before compatibility
+  partition/bake output, not merely hidden from a published layer.
 - The same classified env-cell seed reaches dynamic setup/animation/visual readiness through the
   existing `DynamicEntityResourceManager`.
 - Env-cell dynamic records can produce dynamic renderer resources and instances without
   `residence-render-path-pending`.
 - Env-cell dynamic renderer submissions use the same `commitDynamicResources()` and
   `commitDynamicInstances()` APIs as outdoor submissions.
+- Dynamic renderer instance DTOs carry enough residence/render-domain metadata for WebGL2 to choose
+  exterior versus interior drawing without inspecting semantic dynamic records.
 - Env-cell dynamic placement/render-space conversion is correct for interior/portal render context
   and does not use outdoor landblock-anchor assumptions where they do not apply.
 - Env-cell dynamic query/debug hits are available through the merged scene-query family with
-  residence-aware filtering, and default selection still excludes dynamic scenery.
+  residence-aware filtering, use `acceptedEnvCellIds` for env-cell visibility when available, and
+  default selection still excludes dynamic scenery.
 - Tests prove classified env-cell dynamic statics are not emitted as static env-cell draw units once
   cut over.
 - Existing outdoor dynamic windmill/bird behavior and static env-cell rendering for unclassified
@@ -1850,13 +1868,21 @@ Acceptance criteria:
 Task checklist:
 
 - [ ] Move env-cell dynamic classification from "mirror static seed" to "divert classified static
-      output into dynamic seed plus dynamic render membership".
+      output into dynamic seed plus dynamic render membership" before static compatibility
+      partitioning/bake.
 - [ ] Remove or narrow `residence-render-path-pending` so it only describes genuinely unsupported
       residences, not classified env-cell dynamic statics.
-- [ ] Generalize dynamic placement/render transform helpers across outdoor and env-cell residence.
+- [ ] Generalize dynamic bounds/index summaries across outdoor and env-cell residence without
+      preserving outdoor-only `indexedLandblockIds` as the universal shape.
+- [ ] Generalize dynamic placement/render transform helpers across outdoor and env-cell residence,
+      proving env-cell transforms match the static env-cell object coordinate space.
 - [ ] Generalize dynamic renderer instance creation across outdoor and env-cell residence without
       adding env-cell-only renderer APIs.
+- [ ] Add dynamic renderer instance render-residence/domain metadata and WebGL2 dynamic draw
+      filtering for exterior versus interior domains.
 - [ ] Add env-cell dynamic query/index membership behind the merged scene-query surface.
+- [ ] Use merged scene-query env-cell context and `acceptedEnvCellIds` for env-cell dynamic debug
+      filtering.
 - [ ] Add tests for no double-render, dynamic renderer commit eligibility, query membership,
       default-selection exclusion, and unclassified env-cell static stability.
 - [ ] Update diagnostics/report fields so env-cell dynamic cutover can be inspected.
@@ -1874,6 +1900,22 @@ Decisions and course corrections:
 - 2026-06-27: Do not paper over the problem by submitting env-cell records through outdoor dynamic
   assumptions. Env-cell dynamics need correct interior/portal render membership, not a fake outdoor
   residence.
+- 2026-06-27 dry run: The current env-cell baker emits both static and dynamic seed records for
+  classified env-cell objects, and the static object compatibility baker still turns every sourced
+  env-cell static seed into bakeable objects. Phase 8F must filter classified dynamic seeds before
+  compatibility partitioning, or the implementation will still pay bake cost and risk shared
+  partition leftovers.
+- 2026-06-27 dry run: Current dynamic placement and current-bounds contracts are outdoor-shaped:
+  env-cell records are cleared before bounds/indexing, and current bounds expose outdoor landblock
+  metadata. Phase 8F should introduce a residence-aware bounds/index summary rather than retaining
+  outdoor fields as ambient requirements.
+- 2026-06-27 dry run: Runtime dynamic instance creation and WebGL2 draw traversal are outdoor-shaped:
+  instances carry `landblockId`, WebGL applies outdoor landblock-anchor translation, and dynamic draw
+  currently returns zero for `domain === "interior"`. Phase 8F needs explicit render residence/domain
+  metadata on instance DTOs and renderer-side domain filtering.
+- 2026-06-27 dry run: Merged dynamic query is outdoor-only today. Phase 8F should widen the same
+  query family with env-cell dynamic source methods and use the existing env-cell pick context,
+  especially `acceptedEnvCellIds`, for visibility filtering.
 
 Debt and follow-up:
 
@@ -1882,6 +1924,9 @@ Debt and follow-up:
   not need to know which residence-specific index answered.
 - Phase 8F should retire or sharply narrow the earlier `residence-render-path-pending` debt. Leaving
   it as the normal env-cell path after this phase would be a failed cutover, not acceptable debt.
+- If the env-cell transform evidence is ambiguous during implementation, prove it against existing
+  static env-cell object bake matrices before committing renderer behavior. Do not add a quiet
+  transform fudge factor.
 
 ### Phase 9A: Dynamic Diagnostics And Inspection Readiness
 

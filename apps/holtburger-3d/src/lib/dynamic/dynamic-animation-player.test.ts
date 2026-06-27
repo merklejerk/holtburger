@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
 	AnimationPayloadDto,
 	PlacementTransformDto,
@@ -16,7 +16,54 @@ const TEST_SET_OMEGA_RAW_PAYLOAD_BYTES = [
 ] as const;
 
 describe("dynamic animation player", () => {
-	it("samples object root and all part poses from the setup animation", () => {
+	it("interpolates object root and part poses inside the authored frame range", () => {
+		const player = new DynamicAnimationPlayer();
+		const record = createRecord({
+			payload: createAnimationPayload({
+				frameCount: 3,
+				objectPositionFrames: [
+					createPlacement({ x: 0, y: 0, z: 0 }),
+					createPlacement({ x: 10, y: 0, z: 0 }),
+					createPlacement({ x: 20, y: 0, z: 0 }),
+				],
+				partCount: 5,
+			}),
+		});
+
+		const started = player.update(record, 10);
+		const advanced = player.update(
+			started.record,
+			10 + 1.5 / DYNAMIC_ANIMATION_FRAME_RATE_FPS,
+		);
+
+		expect(started.record.animation.playback).toMatchObject({
+			currentFrameIndex: 0,
+			frameRateFps: DYNAMIC_ANIMATION_FRAME_RATE_FPS,
+			objectRootPose: createPlacement({ x: 0, y: 0, z: 0 }),
+			partCount: 5,
+		});
+		if (advanced.record.animation.playback.status !== "playing") {
+			throw new Error("expected playing playback");
+		}
+		expect(advanced.record.animation.playback.currentFrameIndex).toBe(1);
+		expect(
+			advanced.record.animation.playback.objectRootPose.origin.x,
+		).toBeCloseTo(15, 7);
+		expect(
+			advanced.record.animation.playback.partPoses.map((pose) => ({
+				partIndex: pose.partIndex,
+				x: pose.localPlacement.origin.x,
+			})),
+		).toEqual([
+			{ partIndex: 0, x: expect.closeTo(150, 7) },
+			{ partIndex: 1, x: expect.closeTo(151, 7) },
+			{ partIndex: 2, x: expect.closeTo(152, 7) },
+			{ partIndex: 3, x: expect.closeTo(153, 7) },
+			{ partIndex: 4, x: expect.closeTo(154, 7) },
+		]);
+	});
+
+	it("holds the final authored pose instead of interpolating across the loop seam", () => {
 		const player = new DynamicAnimationPlayer();
 		const record = createRecord({
 			payload: createAnimationPayload({
@@ -25,45 +72,68 @@ describe("dynamic animation player", () => {
 					createPlacement({ x: 0, y: 0, z: 0 }),
 					createPlacement({ x: 10, y: 0, z: 0 }),
 				],
-				partCount: 5,
+				partCount: 2,
 			}),
 		});
 
-		const started = player.update(record, 10);
-		const advanced = player.update(started.record, 10.04);
+		const started = player.update(record, 0);
+		const update = player.update(
+			started.record,
+			1.5 / DYNAMIC_ANIMATION_FRAME_RATE_FPS,
+		);
 
-		expect(started.record.animation.playback).toMatchObject({
-			currentFrameIndex: 0,
-			frameRateFps: DYNAMIC_ANIMATION_FRAME_RATE_FPS,
-			objectRootPose: createPlacement({ x: 0, y: 0, z: 0 }),
-			partCount: 5,
-		});
-		expect(advanced.record.animation.playback).toMatchObject({
-			currentFrameIndex: 1,
-			objectRootPose: createPlacement({ x: 10, y: 0, z: 0 }),
-			partPoses: [
-				{
-					localPlacement: createPlacement({ x: 100, y: 0, z: 0 }),
-					partIndex: 0,
-				},
-				{
-					localPlacement: createPlacement({ x: 101, y: 0, z: 0 }),
-					partIndex: 1,
-				},
-				{
-					localPlacement: createPlacement({ x: 102, y: 0, z: 0 }),
-					partIndex: 2,
-				},
-				{
-					localPlacement: createPlacement({ x: 103, y: 0, z: 0 }),
-					partIndex: 3,
-				},
-				{
-					localPlacement: createPlacement({ x: 104, y: 0, z: 0 }),
-					partIndex: 4,
-				},
-			],
-		});
+		if (update.record.animation.playback.status !== "playing") {
+			throw new Error("expected playing playback");
+		}
+		expect(update.record.animation.playback.currentFrameIndex).toBe(1);
+		expect(update.record.animation.playback.objectRootPose.origin.x).toBe(10);
+		expect(
+			update.record.animation.playback.partPoses.map((pose) => ({
+				partIndex: pose.partIndex,
+				x: pose.localPlacement.origin.x,
+			})),
+		).toEqual([
+			{ partIndex: 0, x: 100 },
+			{ partIndex: 1, x: 101 },
+		]);
+	});
+
+	it("slerps object root orientation between authored frames", () => {
+		const player = new DynamicAnimationPlayer();
+		const started = player.update(
+			createRecord({
+				payload: createAnimationPayload({
+					frameCount: 2,
+					objectPositionFrames: [
+						createPlacement({ x: 0, y: 0, z: 0 }),
+						createPlacement({
+							orientation: { w: 0, x: 0, y: 0, z: 1 },
+							x: 0,
+							y: 0,
+							z: 0,
+						}),
+					],
+					partCount: 1,
+				}),
+			}),
+			0,
+		);
+		const update = player.update(
+			started.record,
+			0.5 / DYNAMIC_ANIMATION_FRAME_RATE_FPS,
+		);
+
+		if (update.record.animation.playback.status !== "playing") {
+			throw new Error("expected playing playback");
+		}
+		expect(update.record.animation.playback.objectRootPose.orientation.w).toBeCloseTo(
+			Math.SQRT1_2,
+			7,
+		);
+		expect(update.record.animation.playback.objectRootPose.orientation.z).toBeCloseTo(
+			Math.SQRT1_2,
+			7,
+		);
 	});
 
 	it("uses identity object root pose when object position frames are empty", () => {
@@ -285,6 +355,105 @@ describe("dynamic animation player", () => {
 			},
 		]);
 	});
+
+	it("dispatches crossed authored-frame hooks in order after a hitch", () => {
+		const player = new DynamicAnimationPlayer();
+		const payload = createAnimationPayload({
+			frameCount: 5,
+			hooksByFrame: [
+				[],
+				[createUnsupportedHook({ hookType: 101 })],
+				[createUnsupportedHook({ hookType: 102 })],
+				[createUnsupportedHook({ hookType: 103 })],
+				[createUnsupportedHook({ hookType: 104 })],
+			],
+			objectPositionFrames: [],
+			partCount: 1,
+		});
+
+		const started = player.update(createRecord({ payload }), 0);
+		const hitched = player.update(
+			started.record,
+			4 / DYNAMIC_ANIMATION_FRAME_RATE_FPS,
+		);
+
+		expect(
+			unsupportedHookIssues(hitched.record).map((issue) => ({
+				frameIndex: issue.frameIndex,
+				hookType: issue.hookType,
+				loopIteration: issue.loopIteration,
+			})),
+		).toEqual([
+			{ frameIndex: 1, hookType: 101, loopIteration: 0 },
+			{ frameIndex: 2, hookType: 102, loopIteration: 0 },
+			{ frameIndex: 3, hookType: 103, loopIteration: 0 },
+			{ frameIndex: 4, hookType: 104, loopIteration: 0 },
+		]);
+	});
+
+	it("caps crossed hook catch-up to the latest eight authored frames", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const player = new DynamicAnimationPlayer();
+			const payload = createAnimationPayload({
+				frameCount: 20,
+				hooksByFrame: Array.from({ length: 20 }, (_, frameIndex) =>
+					frameIndex === 0
+						? []
+						: [createUnsupportedHook({ hookType: 200 + frameIndex })],
+				),
+				objectPositionFrames: [],
+				partCount: 1,
+			});
+
+			const started = player.update(createRecord({ payload }), 0);
+			const hitched = player.update(
+				started.record,
+				12 / DYNAMIC_ANIMATION_FRAME_RATE_FPS,
+			);
+
+			expect(
+				unsupportedHookIssues(hitched.record).map((issue) => ({
+					frameIndex: issue.frameIndex,
+					hookType: issue.hookType,
+				})),
+			).toEqual([
+				{ frameIndex: 5, hookType: 205 },
+				{ frameIndex: 6, hookType: 206 },
+				{ frameIndex: 7, hookType: 207 },
+				{ frameIndex: 8, hookType: 208 },
+				{ frameIndex: 9, hookType: 209 },
+				{ frameIndex: 10, hookType: 210 },
+				{ frameIndex: 11, hookType: 211 },
+				{ frameIndex: 12, hookType: 212 },
+			]);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	it("advances the hook cursor across hookless crossed frames", () => {
+		const player = new DynamicAnimationPlayer();
+		const payload = createAnimationPayload({
+			frameCount: 5,
+			objectPositionFrames: [],
+			partCount: 1,
+		});
+
+		const started = player.update(createRecord({ payload }), 0);
+		const hitched = player.update(
+			started.record,
+			3 / DYNAMIC_ANIMATION_FRAME_RATE_FPS,
+		);
+
+		expect(hitched.record.animation.playback).toMatchObject({
+			lastDispatchedHookFrame: {
+				frameIndex: 3,
+				loopIteration: 0,
+			},
+			status: "playing",
+		});
+	});
 });
 
 function unsupportedHookIssues(record: DynamicEntityRecord) {
@@ -394,6 +563,7 @@ function createAnimationPayload(options: {
 	readonly hooks?: AnimationPayloadDto["partFrames"][number]["hooks"];
 	readonly hooksByFrame?: readonly AnimationPayloadDto["partFrames"][number]["hooks"][];
 	readonly objectPositionFrames: readonly PlacementTransformDto[];
+	readonly partPlacementsByFrame?: readonly (readonly PlacementTransformDto[])[];
 	readonly partCount: number;
 }): AnimationPayloadDto {
 	return {
@@ -408,15 +578,29 @@ function createAnimationPayload(options: {
 		partFrames: Array.from({ length: options.frameCount }, (_, frameIndex) => ({
 			frameIndex,
 			hooks: options.hooksByFrame?.[frameIndex] ?? options.hooks ?? [],
-			localPlacements: Array.from(
-				{ length: options.partCount },
-				(_, partIndex) =>
+			localPlacements:
+				options.partPlacementsByFrame?.[frameIndex] ??
+				Array.from({ length: options.partCount }, (_, partIndex) =>
 					createPlacement({ x: frameIndex * 100 + partIndex, y: 0, z: 0 }),
-			),
+				),
 		})),
 		provenance: createProvenance(),
 		residencyKind: "unknown",
 		sourceAssetKind: "animation",
+	};
+}
+
+function createUnsupportedHook(options: {
+	readonly hookType: number;
+}): AnimationPayloadDto["partFrames"][number]["hooks"][number] {
+	return {
+		direction: 0,
+		directionName: "Both",
+		hookName: `Unsupported${options.hookType}`,
+		hookType: options.hookType,
+		payload: null,
+		payloadKind: "raw",
+		rawPayloadBytes: [options.hookType & 0xff],
 	};
 }
 
@@ -435,13 +619,15 @@ function createSetOmegaHook(): AnimationPayloadDto["partFrames"][number]["hooks"
 }
 
 function createPlacement(origin: {
+	readonly orientation?: PlacementTransformDto["orientation"];
 	readonly x: number;
 	readonly y: number;
 	readonly z: number;
 }): PlacementTransformDto {
+	const { orientation, ...position } = origin;
 	return {
-		orientation: { w: 1, x: 0, y: 0, z: 0 },
-		origin,
+		orientation: orientation ?? { w: 1, x: 0, y: 0, z: 0 },
+		origin: position,
 	};
 }
 

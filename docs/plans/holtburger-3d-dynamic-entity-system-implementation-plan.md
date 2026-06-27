@@ -118,9 +118,9 @@ The phase order is viable, but several implementation details need to be pinned 
   renderer resources need a neutral visual-resource binding owner or a dynamic owner variant; reusing
   a static owner name for dynamic resources would leak static lifetime semantics.
 - The current WebGL2 reusable visual resource maps and diagnostics are named static-object-specific
-  and are installed through static layer replacement. Phase 8 must extract or generalize helper
-  functions before adding dynamic commits; it should not make dynamic renderer state another entry in
-  `#staticObjectRenderInstances`.
+  and are installed through static layer replacement. Phases 8A and 8B must extract or generalize
+  helper functions before adding dynamic draw submission; they should not make dynamic renderer
+  state another entry in `#staticObjectRenderInstances`.
 - Dynamic entities should share prepared texture atlas/cache entries with static consumers when
   prepared texture identity and sampler/material requirements match. The shared primitive is the
   atlas/cache entry; ownership and lifetime must remain dynamic-resource-owned instead of borrowing
@@ -465,8 +465,8 @@ Decisions and course corrections:
   setup/animation leases or renderer submissions exist before Phases 4 and 8.
 - 2026-06-26: Scope eviction currently removes semantic records only. Resource leases, spatial index
   entries, and renderer submissions have no concrete Phase 3 state to release yet; Phase 4, Phase 6,
-  and Phase 8 must hook their cleanup into the same controller removal path when they add those
-  derived states.
+  Phase 8B, and Phase 8C must hook their cleanup into the same controller removal path when they add
+  those derived states.
 - 2026-06-26: Verification results: focused
   `npm run test:ts -- dynamic-entity-controller client-runtime`, `npm run check`,
   `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts` pass.
@@ -720,7 +720,7 @@ Deliverables:
 - Reuse `resolveStaticObjectSourceClosure()` or extract shared source-closure helpers where the
   setup/gfx/material facts are isomorphic.
 - Preserve prepared texture identities, sampler policy, wrap requirements, and material role layout
-  needed by Phase 8 to route compatible static and dynamic consumers through shared atlas/cache
+  needed by Phase 8A to route compatible static and dynamic consumers through shared atlas/cache
   entries.
 - Do not create baked static draw units, static batch ids, static object visual-resource ids, or
   static texture-use owners during dynamic readiness.
@@ -741,7 +741,7 @@ Acceptance criteria:
   sufficient.
 - Resource readiness does not create or depend on baked static draw units.
 - Dynamic visual readiness carries enough texture-use identity and sampler/material requirements for
-  Phase 8 to share atlas/cache entries with compatible static consumers.
+  Phase 8A to share atlas/cache entries with compatible static consumers.
 - Dynamic visual readiness does not reference static draw-unit ids, static batch ids, static
   visual-resource owner keys, or `StaticTextureUseOwner`.
 - Visual/material/texture leases are released on entity removal.
@@ -767,7 +767,7 @@ Decisions and course corrections:
 
 - 2026-06-26: Dry run found that current texture manager ownership is still static-shaped through
   `StaticTextureUseOwner`. Phase 4B should preserve atlas-compatible texture specs and identities,
-  but actual dynamic atlas ownership belongs in Phase 8 unless texture owner types are generalized
+  but actual dynamic atlas ownership belongs in Phase 8A unless texture owner types are generalized
   earlier.
 - 2026-06-26: `resolveStaticObjectSourceClosure()` already loads setup/gfx/material/texture facts and
   missing refs, but it does not expose every successfully loaded asset key. Phase 4B must either
@@ -805,8 +805,8 @@ Debt and follow-up:
   animation, and source part facts for playback; later renderer phases must turn these facts into
   dynamic visual resources and instances.
 - Texture requirements preserve atlas-compatible data-use identity and sampling policy, but they do
-  not allocate atlas space or install texture placements. Phase 8 still owns dynamic texture binding
-  ownership and shared atlas/cache integration.
+  not allocate atlas space or install texture placements. Phase 8A still owns dynamic texture
+  binding ownership and shared atlas/cache integration.
 - Unsupported material planner fallback reasons currently fail dynamic visual readiness. If later
   phases intentionally support deferred translucent/detail paths, this policy should become more
   granular instead of a blanket visual-readiness failure.
@@ -999,7 +999,7 @@ Debt and follow-up:
   dynamic bounds and spatial index records. Phase 5B deliberately stores the effect state but does
   not yet apply it to geometry, picking, or renderer submissions.
 - Renderer validation should confirm the visual rotation direction for non-identity base/object-root
-  orientations once Phase 8 submits the bird target. The first-cut target proves continuous
+  orientations once Phase 8C submits the bird target. The first-cut target proves continuous
   negative-Z omega accumulation, but final visual parity still belongs with renderer composition.
 
 ### Phase 6: Dynamic Placement, Bounds, And Outdoor Spatial Index
@@ -1363,33 +1363,141 @@ Debt and follow-up:
   a later performance pass can tighten the RBush search bounds to the ray segment inside each
   landblock if needed.
 
-### Phase 8: Dynamic Renderer Resource And Instance Commits
+### Phase 8A: Dynamic Renderer Contracts And Neutral Texture Ownership
 
 Status: pending.
 
 Purpose:
 
-- Render dynamic entity parts through declarative dynamic commits while sharing visual-resource and
-  material primitives with static generated instancing.
+- Define the renderer/runtime contract for dynamic visual resources and instances, and generalize
+  texture ownership so dynamic resources can use the prepared texture atlas/cache path without
+  pretending to be static draw units or static object visual resources.
 
 Deliverables:
 
 - Add renderer-facing dynamic resource and instance commit types.
-- Generalize reusable visual resource upload/cache helpers currently tied to outdoor-detail static
-  layer replacement.
-- Add WebGL2 dynamic resource installation/removal and per-frame dynamic instance submission.
+- Add neutral or dynamic texture-binding owner records for dynamic visual resources.
+- Rename or wrap static-only texture binding helpers where they represent generic prepared texture
+  placement and binding behavior.
+- Refactor `TextureManager.applyStaticCommitDelta` or extract its shared placement/lease path so
+  dynamic texture uses can participate without constructing fake static commit deltas.
+- Generalize renderer texture binding storage from static-only owner keys to visual texture owner
+  keys while keeping existing static owner semantics intact.
 - Route dynamic texture use through the shared prepared texture atlas/cache path when a dynamic
   material resolves to an atlas-compatible prepared texture and matching sampler/material
   requirements.
-- Use live object/root and per-part transforms from dynamic runtime, including active `SetOmega`
-  transform state.
 - Keep dynamic resource identity separate from semantic dynamic entity identity.
-- Add renderer diagnostics for dynamic visual resources, dynamic instances, dynamic draw calls, and
-  skipped dynamic submissions.
-- Add neutral or dynamic texture-binding owner records for dynamic visual resources instead of
-  pretending they are static object visual resources.
 - Do not let dynamic resources borrow static draw-unit or static visual-resource owner keys, static
   batch ids, or static layer replacement lifetime.
+
+Acceptance criteria:
+
+- Dynamic renderer commit DTOs exist and are typed separately from static layer payloads and
+  `StaticObjectRenderInstance`.
+- Dynamic texture binding owners can be keyed, compared, leased, released, and diagnosed without
+  using `draw-unit` or `static-object-visual-resource` owner kinds.
+- Compatible static and dynamic consumers of the same prepared texture converge on one atlas/cache
+  entry while retaining distinct static/dynamic owners or leases.
+- Any dynamic material that cannot use the shared atlas/cache path is explicitly represented as
+  skipped/unsupported in the dynamic commit diagnostics contract; no silent per-entity texture upload
+  fallback is introduced.
+- Existing static rendering diagnostics remain stable.
+
+Task checklist:
+
+- [ ] Define dynamic renderer commit DTOs.
+- [ ] Add dynamic or neutral texture-use owner keys.
+- [ ] Generalize prepared texture placement/binding helper names and types where needed.
+- [ ] Extract shared texture placement/lease accounting from `TextureManager.applyStaticCommitDelta`.
+- [ ] Generalize WebGL2 texture binding owner maps away from static-only owner keys.
+- [ ] Share atlas/cache entries by prepared texture identity plus sampler/material requirements
+      across compatible static and dynamic consumers.
+- [ ] Add renderer/runtime tests proving owner key separation and atlas/cache convergence.
+- [ ] Run phase verification commands.
+
+Decisions and course corrections:
+
+- 2026-06-27: Split the previous monolithic renderer phase into contract/ownership, resource
+  residency, and per-frame submission phases. The texture owner model is the riskiest seam because
+  the current renderer vocabulary is intentionally static-authored; dynamic resources must get their
+  own owner identity before WebGL2 storage or draw submission is added.
+- 2026-06-27 dry run: `TextureManager.applyStaticCommitDelta` currently owns prepared texture lease
+  accounting, texture-ref owner cleanup, and static texture binding emission together. Phase 8A
+  should extract a shared texture-use placement path rather than add a parallel dynamic packer or
+  force dynamic resources through fake static commit deltas.
+- 2026-06-27 dry run: WebGL2 texture bindings are currently stored by `StaticTextureBindingOwner`
+  and dirty static payloads by static owner. Phase 8A must introduce a neutral owner/key surface
+  before dynamic resource residency is added; otherwise Phase 8B would have to choose between
+  static owner spoofing and duplicate texture upload behavior.
+
+### Phase 8B: Dynamic Renderer Resource Residency
+
+Status: pending.
+
+Purpose:
+
+- Install, retain, and remove dynamic visual resources in WebGL2-owned dynamic renderer state,
+  independent of static layer replacement.
+
+Deliverables:
+
+- Generalize reusable visual resource upload/cache helpers currently tied to outdoor-detail static
+  layer replacement.
+- Add WebGL2 dynamic visual resource storage keyed by dynamic renderer resource identity.
+- Add dynamic resource installation and removal commits.
+- Hook dynamic renderer resource cleanup into dynamic record/resource removal.
+- Add renderer diagnostics for dynamic visual resources and skipped dynamic resource installs.
+- Add dynamic resource counts to renderer diagnostics snapshots without inflating existing static
+  counters.
+- Keep dynamic resource residency separate from static draw-unit, static object visual-resource, and
+  static layer replacement ownership.
+
+Acceptance criteria:
+
+- Dynamic renderer resources are not stored in `#staticObjectRenderInstances` or static visual
+  resource maps.
+- Dynamic renderer resources are not cleared through unrelated static layer replacement ownership.
+- Dynamic texture placement survives unrelated static layer replacement when the dynamic resource is
+  still leased.
+- Removing a dynamic record removes renderer resources that are no longer leased.
+- Static rendering diagnostics and static resource removal behavior remain stable.
+- Neither first-cut target is submitted as baked static outdoor detail geometry.
+
+Task checklist:
+
+- [ ] Extract/generalize visual resource upload helpers.
+- [ ] Implement WebGL2 dynamic resource storage.
+- [ ] Implement dynamic resource install/remove commits.
+- [ ] Connect dynamic resource cleanup to `DynamicEntityController`/resource-manager removal.
+- [ ] Add renderer tests for add/update/remove and static layer replacement isolation.
+- [ ] Run phase verification commands.
+
+Decisions and course corrections:
+
+- 2026-06-27 dry run: `Webgl2Renderer` currently disposes and snapshots static resources through
+  static-specific maps and counts. Phase 8B should add dynamic resource maps and diagnostics before
+  drawing, so later draw-path work cannot accidentally hide dynamic residency inside
+  `#staticObjectVisualResources`, `#staticObjectRenderInstances`, or static layer ownership.
+
+### Phase 8C: Dynamic Renderer Instance Submission And Animated Poses
+
+Status: pending.
+
+Purpose:
+
+- Submit per-frame dynamic instances using live dynamic runtime transforms and draw the first-cut
+  windmill and bird targets through the dynamic renderer path.
+
+Deliverables:
+
+- Add per-frame dynamic instance submission from `DynamicEntityController` summaries.
+- Use live object/root and per-part transforms from dynamic runtime, including active `SetOmega`
+  transform state.
+- Add WebGL2 dynamic instance draw path.
+- Add renderer diagnostics for dynamic instances, dynamic draw calls, and skipped dynamic
+  submissions.
+- Keep dynamic instance identity separate from semantic dynamic entity identity and dynamic resource
+  identity.
 
 Acceptance criteria:
 
@@ -1399,32 +1507,25 @@ Acceptance criteria:
 - Dynamic submissions do not go through static layer payloads or `StaticObjectRenderInstance`.
 - Dynamic renderer state is not stored in `#staticObjectRenderInstances` and is not cleared through
   static layer replacement ownership.
-- Compatible static and dynamic consumers of the same prepared texture converge on one atlas/cache
-  entry while retaining distinct static/dynamic owners or leases.
-- Dynamic texture placement survives unrelated static layer replacement when the dynamic resource is
-  still leased.
-- Any dynamic material that cannot use the shared atlas/cache path is skipped or separately handled
-  with an explicit diagnostic; no silent per-entity texture upload fallback.
-- Removing a dynamic record removes renderer submissions/resources that are no longer leased.
+- Removing a dynamic record removes renderer submissions that are no longer valid.
 - Existing static rendering diagnostics remain stable.
 - Neither first-cut target is submitted as baked static outdoor detail geometry.
 
 Task checklist:
 
-- [ ] Define dynamic renderer commit DTOs.
-- [ ] Extract/generalize visual resource upload helpers.
-- [ ] Add dynamic or neutral texture-use owner keys and lease/release handling for dynamic visual
-      resources.
-- [ ] Share atlas/cache entries by prepared texture identity plus sampler/material requirements
-      across compatible static and dynamic consumers.
-- [ ] Implement WebGL2 dynamic resource storage and draw path.
-- [ ] Commit dynamic snapshots from `DynamicEntityController`.
+- [ ] Commit lightweight dynamic render summaries from `DynamicEntityController`, derived from
+      `DynamicEntitySummaryDto` rather than full `DynamicEntityRecord` objects.
+- [ ] Implement WebGL2 dynamic instance storage/submission.
+- [ ] Add dynamic draw calls for installed dynamic visual resources.
 - [ ] Add renderer and runtime tests for add/update/remove and `SetOmega` transform consumption.
 - [ ] Run phase verification commands.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-27 dry run: `DynamicRuntimeSnapshot.records` already contains lightweight animation
+  playback summaries, object-root pose, part poses, and active omega summaries. Phase 8C should
+  derive render submissions from those summary DTOs or an even narrower render-summary DTO; the
+  renderer should not receive full dynamic records or resource-manager internals.
 
 ### Phase 9: Diagnostics And First-Cut Target Validation
 
@@ -1559,7 +1660,7 @@ Decisions and course corrections:
 
 - Risk: dynamic textures bypass the existing atlas/cache path and create duplicate uploads.
   Mitigation: Phase 4B must preserve atlas-compatible prepared texture identity and sampler/material
-  requirements; Phase 8 must prove compatible static and dynamic consumers converge on one shared
+  requirements; Phase 8A must prove compatible static and dynamic consumers converge on one shared
   atlas/cache entry with distinct owners.
 
 - Risk: merged query becomes a debug-only path.
@@ -1619,7 +1720,7 @@ Decisions and course corrections:
 
 - Risk: typed `SetOmega` state exists but is not consumed by bounds or rendering.
   Mitigation: Phase 5B added typed decode and active transform state; Phase 6 must compose it into
-  hook-aware bounds before Phase 8 renders the bird target.
+  hook-aware bounds before Phase 8C renders the bird target.
 
 ## Definition Of Done
 

@@ -22,10 +22,8 @@ import {
 	createTerrainQuadSelectionKey,
 	describeStaticSceneSelectionKey,
 } from "./scene-query/static-selection-keys";
-import {
-	StaticSceneQuery,
-	traceLandblockGridRayCells,
-} from "./static-scene-query";
+import { traceLandblockGridRayCells } from "./scene-query/landblock-grid-spatial-index";
+import { StaticSceneQuery } from "./static-scene-query";
 
 describe("static scene query", () => {
 	it("traces outdoor landblock grid cells in ray order", () => {

@@ -128,6 +128,11 @@ The phase order is viable, but several implementation details need to be pinned 
 - Query migration affects browser picking and diagnostics, not only `StaticSceneQuery`. Existing
   browser code builds `StaticScenePickRequest` and displays static selection diagnostics. Phase 7
   must include compatibility naming and UI diagnostics cleanup in its migration debt.
+- `apps/holtburger-3d/src/lib/runtime/static-scene-query.ts` is too broad to be the place where
+  merged static/dynamic query behavior is born. Before Phase 7, decompose it through
+  [docs/plans/holtburger-3d-static-scene-query-refactor-plan.md](holtburger-3d-static-scene-query-refactor-plan.md)
+  so merged query composition can depend on a static query facade instead of a static-only god
+  module.
 
 ## Goal
 
@@ -173,6 +178,7 @@ Primary sources:
 
 - [docs/plans/holtburger-3d-dynamic-entity-system-requirements-plan.md](holtburger-3d-dynamic-entity-system-requirements-plan.md)
 - [docs/plans/holtburger-3d-shared-render-instance-static-instancing-plan.md](holtburger-3d-shared-render-instance-static-instancing-plan.md)
+- [docs/plans/holtburger-3d-static-scene-query-refactor-plan.md](holtburger-3d-static-scene-query-refactor-plan.md)
 - `crates/holtburger-dat/src/file_type/animation.rs`
 - `crates/holtburger-dat/src/file_type/setup_model.rs`
 - `crates/holtburger-core/src/content_assets.rs`
@@ -1084,10 +1090,48 @@ Debt and follow-up:
   learn the package API.
 - Phase 7 still needs the merged scene-query adapter that turns indexed dynamic AABBs into debug and
   selection-filtered query hits.
+- Phase 6.5 must decompose the static scene-query module before Phase 7 adds merged query behavior.
+  Do not add dynamic query code to the current 4k-line static-only module.
 - Dynamic bounds are current-frame AABBs from source part bounds, not vertex/triangle precise bounds.
   Keep the precision metadata visible and upgrade only when a target proves this is insufficient.
 - `npm install` reported 4 audit findings after adding the dependency. They were not auto-fixed during
   this phase because `npm audit fix` would mutate unrelated package versions.
+
+### Phase 6.5: Static Scene Query Decomposition Detour
+
+Status: pending.
+
+Purpose:
+
+- Refactor the existing static scene-query implementation into focused modules before merged
+  static/dynamic query work begins.
+
+Deliverables:
+
+- Execute
+  [docs/plans/holtburger-3d-static-scene-query-refactor-plan.md](holtburger-3d-static-scene-query-refactor-plan.md).
+- Preserve existing static query, picking, diagnostics, env-cell residency, and portal debug behavior.
+- Leave `StaticSceneQuery` as a facade that Phase 7 can adapt cleanly.
+- Keep dynamic query behavior out of this detour.
+
+Acceptance criteria:
+
+- The static scene-query refactor plan reaches its definition of done.
+- Full static query/browser/runtime verification passes or unrelated pre-existing failures are
+  documented.
+- Phase 7 has a clear static adapter boundary and no need to import static-only internals.
+
+Task checklist:
+
+- [ ] Complete the static scene-query refactor plan.
+- [ ] Update this dynamic implementation plan with final module names and any Phase 7 adjustments.
+- [ ] Confirm no dynamic query behavior was introduced during the refactor.
+
+Decisions and course corrections:
+
+- 2026-06-26: Added as a deliberate detour after reviewing the next Phase 7 surface. Targeted
+  extraction would risk strengthening `static-scene-query.ts` as a god module; this detour gives the
+  static query boundary a full responsibility-based decomposition before dynamic query composition.
 
 ### Phase 7: Merged Scene Query Surface
 
@@ -1101,7 +1145,7 @@ Purpose:
 Deliverables:
 
 - Add scene-query request/hit types with static and dynamic variants.
-- Preserve existing static hit behavior as one variant.
+- Preserve existing static hit behavior as one variant through the decomposed static query facade.
 - Add dynamic hit records with semantic dynamic entity id, source/setup metadata, optional part
   metadata, bounds, distance, hit point, precision, and filter metadata.
 - Add caller filters for default browser selection, debug inspection, and diagnostics.
@@ -1123,7 +1167,7 @@ Acceptance criteria:
 Task checklist:
 
 - [ ] Define merged query contracts.
-- [ ] Add static adapter from current `StaticSceneQuery`.
+- [ ] Add static adapter from the decomposed `StaticSceneQuery` facade.
 - [ ] Add dynamic query adapter from `OutdoorDynamicSpatialIndex`.
 - [ ] Update browser picking and diagnostics call sites.
 - [ ] Add tests for hit ordering and filter policy.
@@ -1335,6 +1379,10 @@ Decisions and course corrections:
 - Risk: merged query becomes a debug-only path.
   Mitigation: migrate browser picking through the merged scene-query surface and express default
   selection as filters.
+
+- Risk: merged query integration reinforces the current static scene-query god module.
+  Mitigation: complete the static scene-query decomposition detour before Phase 7 and compose merged
+  query behavior through the resulting static facade.
 
 - Risk: current-frame AABB bounds are too conservative or visibly wrong.
   Mitigation: expose precision metadata and part bounds diagnostics; defer per-part sphere/polygon

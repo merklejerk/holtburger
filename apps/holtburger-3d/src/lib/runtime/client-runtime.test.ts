@@ -60,7 +60,7 @@ import {
 import {
 	createOutdoorStaticObjectSelectionKey,
 	createTerrainQuadSelectionKey,
-} from "./static-scene-query";
+} from "./scene-query/static-selection-keys";
 import type { RuntimeDiagnostics } from "./diagnostics";
 
 const silentDiagnostics: RuntimeDiagnostics = {

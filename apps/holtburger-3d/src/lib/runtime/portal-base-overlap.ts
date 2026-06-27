@@ -4,8 +4,8 @@ import type {
 	StaticPortalProjectionRecord,
 } from "../static/contracts";
 import type { EnvCellResourceMembership } from "./env-cell-resource-membership";
+import type { StaticSceneCameraResidency } from "./scene-query/contracts";
 import { createOutdoorLandblockRootTranslation } from "./static-placement";
-import type { StaticSceneCameraResidency } from "./static-scene-query";
 
 export const EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY: RuntimePortalOverlapResidency =
 	{

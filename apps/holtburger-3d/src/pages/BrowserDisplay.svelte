@@ -52,10 +52,10 @@
 	} from "../lib/renderer/types";
 	import type { EnvCellResourceMembership } from "../lib/runtime/env-cell-resource-membership";
 	import type { RuntimePortalOverlapResidency } from "../lib/runtime/portal-base-overlap";
+	import type { StaticSceneSelectionKey } from "../lib/runtime/scene-query/contracts";
 	import {
 		describeStaticSceneSelectionKey,
-		type StaticSceneSelectionKey,
-	} from "../lib/runtime/static-scene-query";
+	} from "../lib/runtime/scene-query/static-selection-keys";
 	import type { TextureFilteringMode } from "../lib/textures/sampling-policy";
 	import DiagnosticsModal from "../lib/ui/DiagnosticsModal.svelte";
 	import PerformanceOverlay from "../lib/ui/PerformanceOverlay.svelte";

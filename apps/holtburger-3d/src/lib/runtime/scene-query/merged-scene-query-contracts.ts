@@ -46,5 +46,9 @@ interface DynamicScenePickHit {
 	readonly sourceResidence: {
 		readonly kind: "outdoor-landblock";
 		readonly landblockId: number;
+	} | {
+		readonly envCellId: number;
+		readonly kind: "env-cell";
+		readonly landblockId: number;
 	};
 }

@@ -134,10 +134,6 @@ describe("browser landblock env-cell baker", () => {
 		const result = bakeLandblockEnvCells(input);
 
 		expect(result.staticAuthoredDynamicSeeds).toEqual([
-			expect.objectContaining({
-				envCellId: 0xda550100,
-				kind: "env-cell-static-object-seed",
-			}),
 			{
 				kind: "env-cell-static-object-dynamic-seed",
 				owner: expect.objectContaining({
@@ -175,6 +171,11 @@ describe("browser landblock env-cell baker", () => {
 				},
 			},
 		]);
+		expect(
+			result.drawUnits.filter(
+				(drawUnit) => drawUnit.kind === "static-object-geometry",
+			),
+		).toEqual([]);
 	});
 
 	it("does not mirror unclassified env-cell statics into dynamic seeds", () => {

@@ -319,17 +319,28 @@ export interface DynamicRendererInstance {
 	/** Renderer instance id; distinct from semantic dynamic entity id. */
 	readonly instanceId: DynamicRendererInstanceId;
 	readonly entityId: DynamicRendererEntityId;
-	/** Landblock anchor used to translate the landblock-local dynamic transform into render space. */
-	readonly landblockId: number;
 	readonly resourceId: DynamicRendererResourceId;
 	readonly objectToRenderMatrix: readonly number[];
 	readonly partToObjectMatrices: readonly DynamicRendererPartTransform[];
+	/** Render-space residence used by the renderer to select scene domain and anchor transform. */
+	readonly renderResidence: DynamicRendererInstanceResidence;
 }
 
 interface DynamicRendererPartTransform {
 	readonly matrix: readonly number[];
 	readonly partIndex: number;
 }
+
+type DynamicRendererInstanceResidence =
+	| {
+			readonly kind: "outdoor-landblock";
+			readonly landblockId: number;
+	  }
+	| {
+			readonly envCellId: number;
+			readonly kind: "env-cell";
+			readonly landblockId: number;
+	  };
 
 export interface TextureUsePlacement {
 	readonly textureUseId: string;

@@ -11,7 +11,10 @@ import type {
 	RuntimeHost,
 	RuntimeHostSnapshot,
 } from "../host/runtime-contracts";
-import type { AnimationPayloadDto } from "../host/contracts";
+import type {
+	AnimationPayloadDto,
+	PreparedTexturePayloadDto,
+} from "../host/contracts";
 import type {
 	DebugOverlayPrimitive,
 	Renderer,
@@ -142,7 +145,7 @@ describe("browser client runtime", () => {
 
 		expect(snapshots.at(-1)?.dynamic).toMatchObject({
 			activeEntityCount: 1,
-			nonRenderableEntityCount: 1,
+			nonRenderableEntityCount: 0,
 			staticSeedCount: 1,
 		});
 		expect(snapshots.at(-1)?.dynamic.records[0]).toMatchObject({
@@ -403,14 +406,20 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("ingests classified env-cell dynamic seeds without dropping static env-cell seed records", async () => {
+	it("ingests classified env-cell dynamic seeds through the dynamic render path", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
+		const renderer = new FakeRenderer();
+		const warnings: unknown[] = [];
 		const runtime = createClientRuntime({
 			assetService: createResolvingAssetService(),
-			diagnostics: silentDiagnostics,
+			diagnostics: {
+				warn(event) {
+					warnings.push(event);
+				},
+			},
 			host: new FakeRuntimeHost(),
-			renderer: new FakeRenderer(),
+			renderer,
 			staticCoordinator: createImmediateStaticCoordinator({ baker, resolver }),
 		});
 		const snapshots: RuntimeSnapshot[] = [];
@@ -433,8 +442,8 @@ describe("browser client runtime", () => {
 
 		expect(snapshots.at(-1)?.dynamic).toMatchObject({
 			activeEntityCount: 1,
-			issueCount: 1,
-			nonRenderableEntityCount: 1,
+			issueCount: 0,
+			nonRenderableEntityCount: 0,
 			staticSeedCount: 1,
 		});
 		expect(snapshots.at(-1)?.dynamic.records[0]).toMatchObject({
@@ -444,8 +453,8 @@ describe("browser client runtime", () => {
 				sourceScopeKey: "landblock-env-cells:landblock:da55ffff",
 			},
 			renderability: {
-				reasons: ["residence-render-path-pending"],
-				status: "non-renderable",
+				reasons: [],
+				status: "renderable",
 			},
 			resources: {
 				setupAnimation: {
@@ -458,6 +467,45 @@ describe("browser client runtime", () => {
 				},
 			},
 			sourceResidence: {
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+		});
+		for (let attempt = 0; attempt < 10; attempt += 1) {
+			if (renderer.createDiagnosticsSnapshot().dynamicVisualResources > 0) {
+				break;
+			}
+			await flushRuntimeWork();
+		}
+		if (
+			!renderer.dynamicResourceCommits.some(
+				(commit) => commit.addedVisualResources.length === 1,
+			)
+		) {
+			throw new Error(
+				`Expected env-cell dynamic visual resource commit. Warnings: ${JSON.stringify(warnings)}`,
+			);
+		}
+		expect(warnings).toEqual([]);
+		runtime.updateFrameState({
+			camera: {
+				pitchRadians: 0,
+				position: [0, 0, 0],
+				yawRadians: 0,
+			},
+			timeSeconds: 1,
+		});
+		runtime.updateFrameState({
+			camera: {
+				pitchRadians: 0,
+				position: [0, 0, 0],
+				yawRadians: 0,
+			},
+			timeSeconds: 2,
+		});
+		expect(renderer.dynamicInstanceCommits.at(-1)?.instances[0]).toMatchObject({
+			renderResidence: {
 				envCellId: 0xda550100,
 				kind: "env-cell",
 				landblockId: 0xda55ffff,
@@ -3334,6 +3382,7 @@ function createDeferredBlendedMaterialCoverage(): StaticMaterialCoverageReport {
 }
 
 function createPreparedTextureAsset(key: HostAssetKey): PreparedAsset {
+	const policy = parsePreparedTexturePolicyFromKey(key);
 	const bytes = new Uint8Array([
 		255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
 	]);
@@ -3341,7 +3390,7 @@ function createPreparedTextureAsset(key: HostAssetKey): PreparedAsset {
 	return {
 		key,
 		payload: {
-			colorSpace: "linear",
+			colorSpace: policy.colorSpace,
 			dependencies: {
 				renderSurfaceAssetIds: ["render-surface/06000010"],
 			},
@@ -3365,8 +3414,8 @@ function createPreparedTextureAsset(key: HostAssetKey): PreparedAsset {
 					width: 2,
 				},
 			],
-			mipPolicy: "none",
-			outputFormat: "rgba8",
+			mipPolicy: policy.mipPolicy,
+			outputFormat: policy.outputFormat,
 			provenance: {
 				detail: null,
 				errorCode: null,
@@ -3382,12 +3431,79 @@ function createPreparedTextureAsset(key: HostAssetKey): PreparedAsset {
 			sourceHash: "hash",
 			sourceHeight: 2,
 			sourceWidth: 2,
-			usage: "color",
+			usage: policy.usage,
 		},
 		preparedAt: "2026-06-11T00:00:00.000Z",
 		revision: 1,
 		sourceAssetId: "prepared-texture/06000010",
 	};
+}
+
+function parsePreparedTexturePolicyFromKey(key: HostAssetKey): Pick<
+	PreparedTexturePayloadDto,
+	"colorSpace" | "mipPolicy" | "outputFormat" | "usage"
+> {
+	if (key.kind !== "prepared-texture") {
+		throw new Error(`Expected prepared-texture key, got ${key.kind}.`);
+	}
+	const [, query = ""] = key.id.split("?", 2);
+	const params = new URLSearchParams(query);
+	return {
+		colorSpace: parsePreparedTextureColorSpace(params.get("cs")),
+		mipPolicy: parsePreparedTextureMipPolicy(params.get("mips")),
+		outputFormat: parsePreparedTextureOutputFormat(params.get("out")),
+		usage: parsePreparedTextureUsage(params.get("usage")),
+	};
+}
+
+function parsePreparedTextureColorSpace(
+	value: string | null,
+): PreparedTexturePayloadDto["colorSpace"] {
+	if (
+		value === "data" ||
+		value === "linear" ||
+		value === "source" ||
+		value === "srgb"
+	) {
+		return value;
+	}
+	return "linear";
+}
+
+function parsePreparedTextureMipPolicy(
+	value: string | null,
+): PreparedTexturePayloadDto["mipPolicy"] {
+	return value === "retail4" ? "retail4" : "none";
+}
+
+function parsePreparedTextureOutputFormat(
+	value: string | null,
+): PreparedTexturePayloadDto["outputFormat"] {
+	if (
+		value === "dxt1" ||
+		value === "dxt3" ||
+		value === "dxt5" ||
+		value === "index16" ||
+		value === "r8" ||
+		value === "rgba8"
+	) {
+		return value;
+	}
+	return "rgba8";
+}
+
+function parsePreparedTextureUsage(
+	value: string | null,
+): PreparedTexturePayloadDto["usage"] {
+	if (
+		value === "color" ||
+		value === "detail" ||
+		value === "mask" ||
+		value === "raw"
+	) {
+		return value;
+	}
+	return "color";
 }
 
 function runtimeSnapshotSummary(
@@ -3460,7 +3576,7 @@ function createDynamicPreparedPayload(key: HostAssetKey): unknown {
 				paletteId: Number.parseInt(key.id, 16),
 			};
 		case "prepared-texture":
-			return { kind: "prepared-texture" };
+			return createPreparedTextureAsset(key).payload;
 		default:
 			return { kind: key.kind };
 	}

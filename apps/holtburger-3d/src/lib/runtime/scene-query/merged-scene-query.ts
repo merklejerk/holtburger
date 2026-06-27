@@ -1,4 +1,5 @@
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../../../lib/landblocks";
+import type { EnvCellDynamicSpatialIndexRecord } from "../../dynamic/dynamic-placement-tracker";
 import type { OutdoorDynamicSpatialIndexRecord } from "../../dynamic/outdoor-dynamic-spatial-index";
 import type { StaticBounds } from "../../static/contracts";
 import { createOutdoorLandblockRootTranslation } from "../static-placement";
@@ -33,6 +34,10 @@ export interface MergedSceneQuerySources {
 		readonly bounds: StaticBounds;
 	}) => readonly OutdoorDynamicSpatialIndexRecord[];
 	readonly queryOutdoorDynamicLandblockIds: () => readonly number[];
+	readonly queryEnvCellDynamicBounds: (options: {
+		readonly envCellIds: readonly number[];
+		readonly landblockId: number;
+	}) => readonly EnvCellDynamicSpatialIndexRecord[];
 }
 
 export function pickMergedSceneRay(
@@ -56,6 +61,7 @@ export function pickMergedSceneRay(
 		});
 	}
 	hits.push(...pickOutdoorDynamicHits(sources, request));
+	hits.push(...pickEnvCellDynamicHits(sources, request));
 
 	return hits.sort(compareScenePickHits)[0] ?? null;
 }
@@ -105,6 +111,46 @@ function pickOutdoorDynamicHits(
 	}
 
 	return [...hitsByEntityId.values()];
+}
+
+function pickEnvCellDynamicHits(
+	sources: MergedSceneQuerySources,
+	request: ScenePickRequest,
+): readonly ScenePickHit[] {
+	if (request.context.kind !== "env-cell" || request.mode === "default-selection") {
+		return [];
+	}
+	const acceptedEnvCellIds =
+		request.context.acceptedEnvCellIds ?? [request.context.envCellId];
+	const ray = normalizeRay(request.ray);
+	return sources
+		.queryEnvCellDynamicBounds({
+			envCellIds: acceptedEnvCellIds,
+			landblockId: request.context.landblockId,
+		})
+		.flatMap((record): readonly ScenePickHit[] => {
+			const distance = intersectRayBounds(ray, record.bounds);
+			if (distance === null) {
+				return [];
+			}
+			return [
+				{
+					bounds: record.bounds,
+					defaultSelectable: false,
+					distance,
+					entityId: record.entityId,
+					hitPoint: pointOnRay(ray, distance),
+					kind: "scene-pick-hit",
+					precision: record.precision,
+					source: "dynamic",
+					sourceResidence: {
+						envCellId: record.envCellId,
+						kind: "env-cell",
+						landblockId: record.landblockId,
+					},
+				},
+			];
+		});
 }
 
 function compareScenePickHits(left: ScenePickHit, right: ScenePickHit): number {

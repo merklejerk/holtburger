@@ -581,8 +581,9 @@ Decisions and course corrections:
   query can key the new variant, but env-cell grouping and system layer assembly continue to filter
   only the static membership variant.
 - 2026-06-26: Classified env-cell dynamic runtime records use env-cell residence, retain against the
-  existing `landblock-env-cells` static source scope key, and stay non-renderable with both
-  `resources-pending` and `residence-render-path-pending` diagnostics.
+  existing `landblock-env-cells` static source scope key, and initially stayed non-renderable with
+  both resource and temporary render-path diagnostics. Phase 8F removed that temporary render-path
+  diagnostic entirely.
 - 2026-06-26: Focused verification passed:
   `npm run test:ts -- dynamic-entity-controller landblock-env-cells-baker client-runtime`.
 - 2026-06-26: Full verification passed from `apps/holtburger-3d`: `npm run check`,
@@ -601,9 +602,8 @@ Debt and follow-up:
   output still includes those objects through `env-cell-static-object-seed`; Phase 8F must
   explicitly remove classified env-cell dynamic objects from static output before submitting them
   through dynamic renderer membership.
-- `residence-render-path-pending` is intentional temporary debt, not a terminal state. Remove or
-  narrow that diagnostic in Phase 8F once env-cell dynamic placement/render membership is
-  implemented and tested.
+- Closed by Phase 8F: the temporary render-path-pending diagnostic was removed after env-cell
+  dynamic placement/render membership became real.
 
 ### Phase 4A: Dynamic Setup And Animation Resource Readiness
 
@@ -1698,8 +1698,8 @@ Debt and follow-up:
   per-part material entries. Phase 8E did not need to split resident GPU resources by material pass
   for the first draw path. If later transparent/additive sorting requires a split, keep semantic
   dynamic resource identity separate from that GPU storage split.
-- Env-cell dynamic records stay registered and diagnosable but non-rendered until Phase 8F performs
-  the explicit env-cell dynamic render-membership cutover.
+- Closed by Phase 8F: env-cell dynamic records no longer stay renderer-gated after resource
+  readiness. They now use dynamic renderer resource, instance, bounds, and merged query membership.
 
 ### Phase 8E: WebGL2 Dynamic Geometry Upload And Draw Path
 
@@ -1768,11 +1768,12 @@ Decisions and course corrections:
   geometry because the shader payload cache is shared.
 - 2026-06-27: Dynamic draw traversal composes landblock render-anchor translation, submitted
   object/root matrix, and submitted part matrix per resource part. `DynamicRendererInstance` now
-  carries `landblockId` so landblock-local dynamic transforms are not drawn near the render origin.
+  carries explicit render residence so outdoor landblock-local dynamic transforms are translated by
+  landblock anchor while env-cell dynamics remain in interior render-local space.
 - 2026-06-27: Dynamic renderer commits remain gated by renderability reasons. Env-cell dynamic
-  records can be registered and diagnosed, but records with `residence-render-path-pending` do not
-  produce dynamic renderer resources or instances until Phase 8F replaces that temporary gate with
-  real env-cell dynamic render membership.
+  records used to be registered and diagnosed but gated by a temporary render-path-pending
+  diagnostic; Phase 8F removed that label from code and replaced the gate with real env-cell dynamic
+  render membership.
 - 2026-06-27: Added WebGL2 tests proving dynamic resource residency emits a real `drawElements`
   call, tracks `dynamicDrawCalls`, skips missing-resource submissions, survives unrelated static
   layer replacement, and stops drawing after dynamic resource removal. Texture binding reuse remains
@@ -1798,7 +1799,7 @@ Debt and follow-up:
 
 ### Phase 8F: Env-Cell Dynamic Cutover Through Shared Dynamic Paths
 
-Status: pending.
+Status: completed on 2026-06-27.
 
 Purpose:
 
@@ -1813,8 +1814,8 @@ Deliverables:
   by `env-cell-static-object-dynamic-seed`, mirroring the outdoor diversion from static bake output.
   This filtering must happen before env-cell static-object compatibility partitioning/bake creates
   draw units, not as a post-bake draw-unit cleanup.
-- Replace `residence-render-path-pending` as the default env-cell dynamic renderability reason with
-  real env-cell dynamic placement/render membership.
+- Remove the temporary render-path-pending env-cell diagnostic and replace the default env-cell
+  dynamic renderability gate with real env-cell dynamic placement/render membership.
 - Replace outdoor-only dynamic bounds/index summaries with a residence-aware shape. Outdoor records
   can keep outdoor landblock index metadata; env-cell records need env-cell membership metadata
   rather than fake outdoor `indexedLandblockIds`.
@@ -1849,8 +1850,8 @@ Acceptance criteria:
   partition/bake output, not merely hidden from a published layer.
 - The same classified env-cell seed reaches dynamic setup/animation/visual readiness through the
   existing `DynamicEntityResourceManager`.
-- Env-cell dynamic records can produce dynamic renderer resources and instances without
-  `residence-render-path-pending`.
+- Env-cell dynamic records can produce dynamic renderer resources and instances without a temporary
+  render-path-pending diagnostic.
 - Env-cell dynamic renderer submissions use the same `commitDynamicResources()` and
   `commitDynamicInstances()` APIs as outdoor submissions.
 - Dynamic renderer instance DTOs carry enough residence/render-domain metadata for WebGL2 to choose
@@ -1867,26 +1868,26 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Move env-cell dynamic classification from "mirror static seed" to "divert classified static
+- [x] Move env-cell dynamic classification from "mirror static seed" to "divert classified static
       output into dynamic seed plus dynamic render membership" before static compatibility
       partitioning/bake.
-- [ ] Remove or narrow `residence-render-path-pending` so it only describes genuinely unsupported
-      residences, not classified env-cell dynamic statics.
-- [ ] Generalize dynamic bounds/index summaries across outdoor and env-cell residence without
+- [x] Remove the temporary render-path-pending diagnostic instead of preserving it as a future
+      unsupported-residence escape hatch.
+- [x] Generalize dynamic bounds/index summaries across outdoor and env-cell residence without
       preserving outdoor-only `indexedLandblockIds` as the universal shape.
-- [ ] Generalize dynamic placement/render transform helpers across outdoor and env-cell residence,
+- [x] Generalize dynamic placement/render transform helpers across outdoor and env-cell residence,
       proving env-cell transforms match the static env-cell object coordinate space.
-- [ ] Generalize dynamic renderer instance creation across outdoor and env-cell residence without
+- [x] Generalize dynamic renderer instance creation across outdoor and env-cell residence without
       adding env-cell-only renderer APIs.
-- [ ] Add dynamic renderer instance render-residence/domain metadata and WebGL2 dynamic draw
+- [x] Add dynamic renderer instance render-residence/domain metadata and WebGL2 dynamic draw
       filtering for exterior versus interior domains.
-- [ ] Add env-cell dynamic query/index membership behind the merged scene-query surface.
-- [ ] Use merged scene-query env-cell context and `acceptedEnvCellIds` for env-cell dynamic debug
+- [x] Add env-cell dynamic query/index membership behind the merged scene-query surface.
+- [x] Use merged scene-query env-cell context and `acceptedEnvCellIds` for env-cell dynamic debug
       filtering.
-- [ ] Add tests for no double-render, dynamic renderer commit eligibility, query membership,
+- [x] Add tests for no double-render, dynamic renderer commit eligibility, query membership,
       default-selection exclusion, and unclassified env-cell static stability.
-- [ ] Update diagnostics/report fields so env-cell dynamic cutover can be inspected.
-- [ ] Run full verification commands.
+- [x] Update diagnostics/report fields so env-cell dynamic cutover can be inspected.
+- [x] Run full verification commands.
 
 Decisions and course corrections:
 
@@ -1916,17 +1917,44 @@ Decisions and course corrections:
 - 2026-06-27 dry run: Merged dynamic query is outdoor-only today. Phase 8F should widen the same
   query family with env-cell dynamic source methods and use the existing env-cell pick context,
   especially `acceptedEnvCellIds`, for visibility filtering.
+- 2026-06-27: Classified env-cell setup/default-animation statics are no longer emitted as mirrored
+  static env-cell object seeds. The env-cell baker emits the dynamic seed only, and the static object
+  compatibility baker filters setup-model/default-animation env-cell sources before compatibility
+  partitioning so the object is not baked as static draw output.
+- 2026-06-27: Dynamic bounds state is now residence-aware. Outdoor dynamics keep outdoor landblock
+  index membership, while env-cell dynamics use env-cell membership keyed by landblock id plus
+  accepted env-cell ids. The old universal `indexedLandblockIds` shape is gone.
+- 2026-06-27: Dynamic renderer instances now carry explicit `renderResidence`. WebGL2 uses outdoor
+  landblock-anchor translation only for outdoor instances and draws env-cell dynamic instances in
+  interior domain passes without adding an env-cell-only renderer API.
+- 2026-06-27: Env-cell dynamic query records are exposed through the merged scene-query family.
+  Debug/query modes can return env-cell dynamic hits, `acceptedEnvCellIds` filters visibility, and
+  `default-selection` still excludes dynamic scenery.
+- 2026-06-27: Renderability status is now honest: records with no renderability reasons report
+  `status: "renderable"` and no longer count as non-renderable. This prevents Phase 9 diagnostics
+  from carrying a contradiction after the env-cell cutover.
+- 2026-06-27: The runtime test fixture had been returning a stub prepared-texture payload for the
+  resolving host path. The fixture now returns policy-valid prepared texture payloads derived from
+  the requested prepared-texture key, preserving the texture manager's strict policy validation.
+- 2026-06-27: Verification results from `apps/holtburger-3d`: focused
+  `npm run test:ts -- landblock-env-cells-baker.test.ts dynamic-placement-tracker.test.ts
+  dynamic-entity-controller.test.ts dynamic-entity-resource-manager.test.ts client-runtime.test.ts
+  webgl2-renderer.test.ts merged-scene-query.test.ts`, plus `npm run check`, `npm run lint:ts`,
+  `npm run lint:dead`, `npm run test:ts` (61 files / 493 tests), `npm run check:rust`, and
+  `npm run lint:rust` pass.
 
 Debt and follow-up:
 
-- If Phase 8F exposes that env-cell dynamic query needs a second residence-specific index beside the
-  outdoor RBush, keep that index behind the merged dynamic query/access surface. The caller should
-  not need to know which residence-specific index answered.
-- Phase 8F should retire or sharply narrow the earlier `residence-render-path-pending` debt. Leaving
-  it as the normal env-cell path after this phase would be a failed cutover, not acceptable debt.
-- If the env-cell transform evidence is ambiguous during implementation, prove it against existing
-  static env-cell object bake matrices before committing renderer behavior. Do not add a quiet
-  transform fudge factor.
+- Env-cell dynamic query currently uses a residence-specific env-cell record map behind the same
+  dynamic query/access surface instead of the outdoor RBush. That is intentional; callers consume
+  merged dynamic hits and do not choose the backing index.
+- The temporary render-path-pending diagnostic was removed from code. Add a new concrete diagnostic
+  later only if a real unsupported residence case appears.
+- Env-cell dynamic render transforms intentionally use env-cell landblock render-local coordinates.
+  WebGL applies the identity matrix for the residence transform, meaning no extra residence
+  translation is applied after the dynamic object matrix. If later visual validation finds a
+  static/dynamic mismatch, compare against static env-cell object bake matrices before adding any
+  correction factor.
 
 ### Phase 9A: Dynamic Diagnostics And Inspection Readiness
 
@@ -2053,7 +2081,7 @@ Decisions and course corrections:
   Manual validation without the compact dynamic report would be too much raw snapshot spelunking and
   too easy to misread.
 - 2026-06-27 dry run, superseded: The validation target was previously outdoor-only while env-cell
-  dynamic render membership was gated by `residence-render-path-pending`.
+  dynamic render membership was gated by a temporary render-path-pending diagnostic.
 - 2026-06-27: Phase 8F now owns env-cell dynamic cutover before manual target validation. Phase 9B
   still validates the two known first-cut outdoor targets, while env-cell dynamic correctness should
   already be proven by Phase 8F tests and surfaced in Phase 9A diagnostics.

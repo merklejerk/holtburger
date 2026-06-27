@@ -1555,6 +1555,65 @@ describe("WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
+	it("draws env-cell dynamic instances in interior scene-domain passes", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+		renderer.setRenderPassPlan({
+			baseScene: {
+				envCellId: 0xda550100,
+				kind: "interior",
+				landblockId: 0xda55ffff,
+			},
+			kind: "portal-scene-domains",
+			transitionDepthPolicy: { maxDepth: 4 },
+		});
+		renderer.commitDynamicResources(
+			createDynamicResourceCommit({
+				resourceId: "dynamic-env-cell-part-0",
+				revision: 1,
+				textureUseIds: ["dynamic-env-cell-part-0:06000010"],
+			}),
+		);
+		renderer.commitDynamicInstances({
+			frameTimeSeconds: 1,
+			instances: [
+				createDynamicRendererInstance("dynamic-env-cell-part-0", {
+					renderResidence: {
+						envCellId: 0xda550100,
+						kind: "env-cell",
+						landblockId: 0xda55ffff,
+					},
+				}),
+			],
+			revision: 2,
+		});
+
+		pendingFrame?.(16);
+
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicDrawCalls: 1,
+			dynamicInstances: 1,
+		});
+		expect(renderer.createDiagnosticsSnapshot().sceneDomainTargets).toMatchObject({
+			active: true,
+			interiorDrawCalls: 1,
+		});
+		expect(gl.drawElementsCalls.at(-1)).toMatchObject({
+			count: 3,
+			mode: gl.TRIANGLES,
+			type: gl.UNSIGNED_SHORT,
+		});
+
+		renderer.dispose();
+	});
+
 	it("replaces and clears terrain layers without static delta remove lists", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
@@ -2221,12 +2280,14 @@ function createDynamicResourceCommit(options: {
 
 function createDynamicRendererInstance(
 	resourceId: string,
+	options: {
+		readonly renderResidence?: DynamicRendererInstance["renderResidence"];
+	} = {},
 ): DynamicRendererInstance {
-		return {
-			entityId: "dynamic-entity:windmill",
-			instanceId: `dynamic-instance:${resourceId}`,
-			landblockId: 0xda55ffff,
-			objectToRenderMatrix: [
+	return {
+		entityId: "dynamic-entity:windmill",
+		instanceId: `dynamic-instance:${resourceId}`,
+		objectToRenderMatrix: [
 			1, 0, 0, 0,
 			0, 1, 0, 0,
 			0, 0, 1, 0,
@@ -2243,6 +2304,10 @@ function createDynamicRendererInstance(
 				partIndex: 0,
 			},
 		],
+		renderResidence: options.renderResidence ?? {
+			kind: "outdoor-landblock",
+			landblockId: 0xda55ffff,
+		},
 		resourceId,
 	};
 }

@@ -813,6 +813,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 					this.#dynamicEntityController.queryOutdoorDynamicBounds(options),
 				queryOutdoorDynamicLandblockIds: () =>
 					this.#dynamicEntityController.queryOutdoorDynamicLandblockIds(),
+				queryEnvCellDynamicBounds: (options) =>
+					this.#dynamicEntityController.queryEnvCellDynamicBounds(options),
 			},
 			request,
 		);
@@ -3428,12 +3430,21 @@ function createDynamicRendererInstances(
 ): readonly {
 	readonly entityId: string;
 	readonly instanceId: string;
-	readonly landblockId: number;
 	readonly objectToRenderMatrix: readonly number[];
 	readonly partToObjectMatrices: readonly {
 		readonly matrix: readonly number[];
 		readonly partIndex: number;
 	}[];
+	readonly renderResidence:
+		| {
+				readonly kind: "outdoor-landblock";
+				readonly landblockId: number;
+		  }
+		| {
+				readonly envCellId: number;
+				readonly kind: "env-cell";
+				readonly landblockId: number;
+		  };
 	readonly resourceId: string;
 }[] {
 	if (
@@ -3463,7 +3474,6 @@ function createDynamicRendererInstances(
 		{
 			entityId: record.id,
 			instanceId: `dynamic-instance:${record.id}`,
-			landblockId: record.effectiveResidence.landblockId,
 			objectToRenderMatrix: Array.from(objectToRenderMatrix),
 			partToObjectMatrices: playback.partPoses.map((pose) => ({
 				matrix: Array.from(
@@ -3471,6 +3481,7 @@ function createDynamicRendererInstances(
 				),
 				partIndex: pose.partIndex,
 			})),
+			renderResidence: record.effectiveResidence,
 			resourceId: createDynamicRendererVisualResourceId(record),
 		},
 	];

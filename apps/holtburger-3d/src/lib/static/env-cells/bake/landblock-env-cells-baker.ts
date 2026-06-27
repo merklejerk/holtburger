@@ -1140,9 +1140,7 @@ function createAuthoredDynamicSeedRecordsForSeed(
 		sourceByKey,
 	});
 
-	return dynamicSeedRecord
-		? [staticSeedRecord, dynamicSeedRecord]
-		: [staticSeedRecord];
+	return dynamicSeedRecord ? [dynamicSeedRecord] : [staticSeedRecord];
 }
 
 function createEnvCellStaticObjectDynamicSeedRecord(options: {

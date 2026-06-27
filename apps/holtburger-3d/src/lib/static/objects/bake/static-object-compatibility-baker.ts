@@ -1879,14 +1879,16 @@ function createStaticObjectSourcePartMatrix(
 function createEnvCellStaticObjectCompatibilityPayload(
 	payload: LandblockEnvCellsStaticScopePayload,
 ): StaticObjectCompatibilityPayload {
-	const sourceByKey = new Set(
-		(payload.sourceAssets ?? []).map((source) =>
+	const sourceByKey = new Map(
+		(payload.sourceAssets ?? []).map((source) => [
 			createSourceKey(source.identity),
-		),
+			source,
+		]),
 	);
 	const objects = payload.envCells.flatMap((envCell) =>
 		envCell.staticObjectSeeds.flatMap((seed) => {
-			if (!sourceByKey.has(createSourceKey(seed.source))) {
+			const source = sourceByKey.get(createSourceKey(seed.source));
+			if (!source || isEnvCellStaticObjectDynamicSource(source)) {
 				return [];
 			}
 			return {
@@ -1916,6 +1918,14 @@ function createEnvCellStaticObjectCompatibilityPayload(
 		sourceAssets: payload.sourceAssets ?? [],
 		textureRefs: payload.textureRefs ?? [],
 	};
+}
+
+function isEnvCellStaticObjectDynamicSource(
+	source: StaticObjectCompatibilityPayload["sourceAssets"][number],
+): boolean {
+	return (
+		source.sourceAssetKind === "setup-model" && source.defaultAnimation !== null
+	);
 }
 
 function createStaticObjectDrawUnitOwnership(

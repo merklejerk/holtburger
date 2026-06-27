@@ -135,22 +135,50 @@ export type DynamicEntityBoundsPrecision =
 
 interface DynamicEntityBoundsState {
 	readonly currentBounds: DynamicEntityCurrentBounds | null;
+	readonly indexMembership: DynamicEntityIndexMembership;
 	readonly indexed: boolean;
-	readonly indexedLandblockIds: readonly number[];
 	readonly precision: DynamicEntityBoundsPrecision;
 }
 
-export interface DynamicEntityCurrentBounds {
-	readonly bounds: StaticBounds;
-	readonly coordinateSpace: "source-landblock-local";
-	readonly effectiveOutdoorLandblockIds: readonly number[];
-	readonly partBounds: readonly DynamicEntityPartBounds[];
-	readonly precision: Extract<
-		DynamicEntityBoundsPrecision,
-		"current-frame-source-part-bounds-aabb"
-	>;
-	readonly sourceLandblockId: number;
-}
+type DynamicEntityIndexMembership =
+	| {
+			readonly kind: "none";
+	  }
+	| {
+			readonly kind: "outdoor-landblocks";
+			readonly landblockIds: readonly number[];
+	  }
+	| {
+			readonly envCellIds: readonly number[];
+			readonly kind: "env-cells";
+			readonly landblockId: number;
+	  };
+
+export type DynamicEntityCurrentBounds =
+	| {
+			readonly bounds: StaticBounds;
+			readonly coordinateSpace: "source-landblock-local";
+			readonly effectiveOutdoorLandblockIds: readonly number[];
+			readonly kind: "outdoor-landblock";
+			readonly partBounds: readonly DynamicEntityPartBounds[];
+			readonly precision: Extract<
+				DynamicEntityBoundsPrecision,
+				"current-frame-source-part-bounds-aabb"
+			>;
+			readonly sourceLandblockId: number;
+	  }
+	| {
+			readonly bounds: StaticBounds;
+			readonly coordinateSpace: "env-cell-landblock-render-local";
+			readonly envCellId: number;
+			readonly kind: "env-cell";
+			readonly landblockId: number;
+			readonly partBounds: readonly DynamicEntityPartBounds[];
+			readonly precision: Extract<
+				DynamicEntityBoundsPrecision,
+				"current-frame-source-part-bounds-aabb"
+			>;
+	  };
 
 export interface DynamicEntityPartBounds {
 	readonly bounds: StaticBounds;
@@ -283,11 +311,10 @@ export type DynamicEntityResourceKey =
 
 interface DynamicEntityRenderability {
 	readonly reasons: readonly DynamicEntityRenderabilityReason[];
-	readonly status: "non-renderable";
+	readonly status: "non-renderable" | "renderable";
 }
 
 type DynamicEntityRenderabilityReason =
-	| "residence-render-path-pending"
 	| "resources-pending"
 	| "visual-resources-pending";
 
@@ -318,10 +345,6 @@ export type DynamicEntityIssue =
 			readonly loopIteration: number;
 			readonly payloadKind: AnimationPayloadDto["partFrames"][number]["hooks"][number]["payloadKind"];
 			readonly skippedEffect: string;
-	  }
-	| {
-			readonly kind: "residence-render-path-pending";
-			readonly residence: DynamicEntityResidence;
 	  }
 	| {
 			readonly kind: "resources-pending";

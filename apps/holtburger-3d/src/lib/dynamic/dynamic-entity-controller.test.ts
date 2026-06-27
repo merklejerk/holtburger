@@ -97,7 +97,7 @@ describe("dynamic entity controller", () => {
 
 		expect(controller.createSnapshot()).toMatchObject({
 			activeEntityCount: 1,
-			issueCount: 2,
+			issueCount: 1,
 			nonRenderableEntityCount: 1,
 			staticSeedCount: 1,
 		});
@@ -111,14 +111,6 @@ describe("dynamic entity controller", () => {
 					kind: "resources-pending",
 					required: ["setup-model", "animation"],
 				},
-				{
-					kind: "residence-render-path-pending",
-					residence: {
-						envCellId: 0xda550100,
-						kind: "env-cell",
-						landblockId: 0xda55ffff,
-					},
-				},
 			],
 			id: "static-authored-env-cell:landblock-env-cells:landblock:da55ffff:env-cell:da550100:object:building:seed-0:setup:020003e5",
 			provenance: {
@@ -126,7 +118,7 @@ describe("dynamic entity controller", () => {
 				sourceScopeKey: "landblock-env-cells:landblock:da55ffff",
 			},
 			renderability: {
-				reasons: ["resources-pending", "residence-render-path-pending"],
+				reasons: ["resources-pending"],
 				status: "non-renderable",
 			},
 			sourceResidence: {

@@ -16,6 +16,7 @@ import type {
 	DynamicEntityCurrentBounds,
 	DynamicEntityPartBounds,
 	DynamicEntityRecord,
+	DynamicEntityBoundsPrecision,
 } from "./contracts";
 import {
 	OutdoorDynamicSpatialIndex,
@@ -30,6 +31,15 @@ const IDENTITY_OBJECT_ROOT_POSE = {
 	origin: { x: 0, y: 0, z: 0 },
 } as const;
 
+export interface EnvCellDynamicSpatialIndexRecord {
+	readonly bounds: StaticBounds;
+	readonly entityId: string;
+	readonly envCellId: number;
+	readonly landblockId: number;
+	readonly precision: DynamicEntityBoundsPrecision;
+	readonly sourceBounds: StaticBounds;
+}
+
 export interface DynamicPlacementUpdate {
 	readonly changed: boolean;
 	readonly record: DynamicEntityRecord;
@@ -39,8 +49,12 @@ export interface DynamicPlacementTrackerOptions {
 	readonly outdoorIndex?: OutdoorDynamicSpatialIndex;
 }
 
-/** Synchronizes dynamic current-frame bounds and outdoor spatial index membership. */
+/** Synchronizes dynamic current-frame bounds and residence-specific index membership. */
 export class DynamicPlacementTracker {
+	readonly #envCellRecordsByEntityId = new Map<
+		string,
+		EnvCellDynamicSpatialIndexRecord
+	>();
 	readonly #outdoorIndex: OutdoorDynamicSpatialIndex;
 
 	constructor(options: DynamicPlacementTrackerOptions = {}) {
@@ -49,15 +63,21 @@ export class DynamicPlacementTracker {
 	}
 
 	update(record: DynamicEntityRecord): DynamicPlacementUpdate {
-		const next = derivePlacedRecord(record, this.#outdoorIndex);
+		const next = derivePlacedRecord(
+			record,
+			this.#outdoorIndex,
+			this.#envCellRecordsByEntityId,
+		);
 		return { changed: !sameBoundsAndResidence(record, next), record: next };
 	}
 
 	release(entityId: string): void {
+		this.#envCellRecordsByEntityId.delete(entityId);
 		this.#outdoorIndex.remove(entityId);
 	}
 
 	releaseAll(): void {
+		this.#envCellRecordsByEntityId.clear();
 		for (const record of this.#outdoorIndex.records()) {
 			this.#outdoorIndex.remove(record.entityId);
 		}
@@ -77,22 +97,54 @@ export class DynamicPlacementTracker {
 	outdoorLandblockIds(): readonly number[] {
 		return this.#outdoorIndex.landblockIds();
 	}
+
+	queryEnvCellBounds(options: {
+		readonly envCellIds: readonly number[];
+		readonly landblockId: number;
+	}): readonly EnvCellDynamicSpatialIndexRecord[] {
+		const acceptedEnvCellIds = new Set(options.envCellIds);
+		return [...this.#envCellRecordsByEntityId.values()]
+			.filter(
+				(record) =>
+					record.landblockId === options.landblockId &&
+					acceptedEnvCellIds.has(record.envCellId),
+			)
+			.sort((left, right) => left.entityId.localeCompare(right.entityId));
+	}
 }
 
 function derivePlacedRecord(
 	record: DynamicEntityRecord,
 	outdoorIndex: OutdoorDynamicSpatialIndex,
+	envCellRecordsByEntityId: Map<string, EnvCellDynamicSpatialIndexRecord>,
 ): DynamicEntityRecord {
 	if (
-		record.sourceResidence.kind !== "outdoor-landblock" ||
 		record.animation.playback.status !== "playing" ||
 		record.resources.visual.status !== "ready"
 	) {
 		outdoorIndex.remove(record.id);
+		envCellRecordsByEntityId.delete(record.id);
 		return clearDynamicBounds(record);
 	}
 
-	const currentBounds = deriveCurrentBounds({
+	if (record.sourceResidence.kind === "env-cell") {
+		return deriveEnvCellPlacedRecord(record, outdoorIndex, envCellRecordsByEntityId);
+	}
+
+	return deriveOutdoorPlacedRecord(record, outdoorIndex, envCellRecordsByEntityId);
+}
+
+function deriveOutdoorPlacedRecord(
+	record: DynamicEntityRecord,
+	outdoorIndex: OutdoorDynamicSpatialIndex,
+	envCellRecordsByEntityId: Map<string, EnvCellDynamicSpatialIndexRecord>,
+): DynamicEntityRecord {
+	envCellRecordsByEntityId.delete(record.id);
+	if (record.resources.visual.status !== "ready") {
+		throw new Error("Cannot derive outdoor dynamic placement without visual resources.");
+	}
+
+	const currentBounds = deriveOutdoorCurrentBounds({
 		record,
 		sourceAssets: record.resources.visual.sourceAssets,
 		sourceLandblockId: record.sourceResidence.landblockId,
@@ -118,8 +170,11 @@ function derivePlacedRecord(
 		...record,
 		bounds: {
 			currentBounds,
+			indexMembership: {
+				kind: "outdoor-landblocks",
+				landblockIds: indexedLandblockIds,
+			},
 			indexed: indexedLandblockIds.length > 0,
-			indexedLandblockIds,
 			precision: currentBounds.precision,
 		},
 		effectiveResidence: {
@@ -129,11 +184,65 @@ function derivePlacedRecord(
 	};
 }
 
-function deriveCurrentBounds(options: {
+function deriveEnvCellPlacedRecord(
+	record: DynamicEntityRecord,
+	outdoorIndex: OutdoorDynamicSpatialIndex,
+	envCellRecordsByEntityId: Map<string, EnvCellDynamicSpatialIndexRecord>,
+): DynamicEntityRecord {
+	outdoorIndex.remove(record.id);
+	if (record.sourceResidence.kind !== "env-cell") {
+		throw new Error("Cannot derive env-cell dynamic placement for outdoor record.");
+	}
+	if (record.resources.visual.status !== "ready") {
+		throw new Error("Cannot derive env-cell dynamic placement without visual resources.");
+	}
+	const partBounds = derivePartBounds({
+		record,
+		sourceAssets: record.resources.visual.sourceAssets,
+	});
+	if (partBounds.length === 0) {
+		envCellRecordsByEntityId.delete(record.id);
+		return clearDynamicBounds(record);
+	}
+	const currentBounds: DynamicEntityCurrentBounds = {
+		bounds: unionBounds(partBounds.map((part) => part.bounds)),
+		coordinateSpace: "env-cell-landblock-render-local",
+		envCellId: record.sourceResidence.envCellId,
+		kind: "env-cell",
+		landblockId: record.sourceResidence.landblockId,
+		partBounds,
+		precision: CURRENT_FRAME_BOUNDS_PRECISION,
+	};
+	envCellRecordsByEntityId.set(record.id, {
+		bounds: currentBounds.bounds,
+		entityId: record.id,
+		envCellId: record.sourceResidence.envCellId,
+		landblockId: record.sourceResidence.landblockId,
+		precision: currentBounds.precision,
+		sourceBounds: currentBounds.bounds,
+	});
+
+	return {
+		...record,
+		bounds: {
+			currentBounds,
+			indexMembership: {
+				envCellIds: [record.sourceResidence.envCellId],
+				kind: "env-cells",
+				landblockId: record.sourceResidence.landblockId,
+			},
+			indexed: true,
+			precision: currentBounds.precision,
+		},
+		effectiveResidence: record.sourceResidence,
+	};
+}
+
+function deriveOutdoorCurrentBounds(options: {
 	readonly record: DynamicEntityRecord;
 	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
 	readonly sourceLandblockId: number;
-}): DynamicEntityCurrentBounds | null {
+}): Extract<DynamicEntityCurrentBounds, { readonly kind: "outdoor-landblock" }> | null {
 	const partBounds = derivePartBounds({
 		record: options.record,
 		sourceAssets: options.sourceAssets,
@@ -155,6 +264,7 @@ function deriveCurrentBounds(options: {
 		bounds,
 		coordinateSpace: "source-landblock-local",
 		effectiveOutdoorLandblockIds,
+		kind: "outdoor-landblock",
 		partBounds,
 		precision: CURRENT_FRAME_BOUNDS_PRECISION,
 		sourceLandblockId: options.sourceLandblockId,
@@ -249,8 +359,8 @@ function clearDynamicBounds(record: DynamicEntityRecord): DynamicEntityRecord {
 		...record,
 		bounds: {
 			currentBounds: null,
+			indexMembership: { kind: "none" },
 			indexed: false,
-			indexedLandblockIds: [],
 			precision: "none",
 		},
 		effectiveResidence: record.sourceResidence,

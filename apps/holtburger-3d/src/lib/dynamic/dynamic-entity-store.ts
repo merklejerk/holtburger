@@ -73,6 +73,7 @@ function createDynamicEntitySummaryDto(
 			playback: createAnimationPlaybackSummary(record.animation.playback),
 			status: record.animation.status,
 		},
+		baseTransform: record.baseTransform,
 		bounds: record.bounds,
 		diagnostics: record.diagnostics,
 		effectiveResidence: record.effectiveResidence,

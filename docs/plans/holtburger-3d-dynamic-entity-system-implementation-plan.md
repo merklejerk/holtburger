@@ -458,7 +458,7 @@ Decisions and course corrections:
   retained static scopes to the controller so source-scope eviction removes dynamic records even
   though authored seeds are not concrete `StaticResourceKey` values.
 - 2026-06-26: Phase 3 intentionally ignores existing env-cell static object seed records. Those
-  records remain part of the env-cell static rendering/query path until a later phase explicitly
+  records remain part of the env-cell static rendering/query path until Phase 3B explicitly
   registers classified env-cell dynamic seeds in the dynamic runtime.
 - 2026-06-26: New records are explicitly non-renderable with `resources-pending` diagnostics. This
   closes the Phase 3 "missing resources keep source record alive" requirement without pretending
@@ -478,8 +478,8 @@ Decisions and course corrections:
   resource readiness grows around an outdoor-only assumption.
 - 2026-06-26: Tightened Phase 3B terminology: "promotion" means classified dynamic runtime
   registration, not env-cell dynamic rendering cutover. Env-cell static rendering remains unchanged
-  until a later phase introduces an explicit, tested rule for diverting classified env-cell objects
-  away from static output and into dynamic renderer membership.
+  until Phase 8F introduces an explicit, tested rule for diverting classified env-cell objects away
+  from static output and into dynamic renderer membership.
 - 2026-06-26: Phase 3B dry run found that existing `env-cell-static-object-seed` records are
   already the env-cell static scene/query membership records and should not be repurposed as dynamic
   records. Add a separate classified `env-cell-static-object-dynamic-seed` variant instead; the
@@ -520,11 +520,11 @@ Deliverables:
   `env-cell-static-object-dynamic-seed` records as static-authored dynamic records while continuing
   to ignore unclassified `env-cell-static-object-seed` records.
 - Keep env-cell records non-renderable with explicit "residence render path pending" or
-  "resources-pending" diagnostics until resource readiness and env-cell render membership are
-  implemented.
+  "resources-pending" diagnostics until resource readiness and Phase 8F env-cell render membership
+  are implemented.
 - Preserve existing env-cell static rendering/query behavior during this parity phase. Do not remove
-  classified env-cell dynamic objects from static output until a later phase adds and tests a
-  rendering cutover rule.
+  classified env-cell dynamic objects from static output until Phase 8F adds and tests the rendering
+  cutover rule.
 - Reconcile env-cell dynamic records against retained `landblock-env-cells` source scopes.
 - Update runtime diagnostics/snapshots so outdoor and env-cell static-authored dynamic records are
   visible under the same dynamic snapshot family.
@@ -575,7 +575,7 @@ Decisions and course corrections:
 - 2026-06-26: Dry run rejected repurposing `env-cell-static-object-seed` as the dynamic record.
   Static scene query and env-cell system layer assembly already consume that variant as static
   membership data. Phase 3B should add a separate classified dynamic variant and leave the static
-  variant untouched until the explicit env-cell render cutover phase.
+  variant untouched until the Phase 8F env-cell render cutover.
 - 2026-06-26: Implementation keeps `env-cell-static-object-seed` emission unchanged and appends
   `env-cell-static-object-dynamic-seed` only for setup-model/default-animation seeds. Static scene
   query can key the new variant, but env-cell grouping and system layer assembly continue to filter
@@ -598,11 +598,12 @@ Debt and follow-up:
   and env-cell dynamic records through the same resource manager; Phase 4B must add visual,
   material, texture, and setup-appearance readiness without changing env-cell static rendering.
 - Classified env-cell dynamic records deliberately do not cut over rendering yet. Static env-cell
-  output still includes those objects through `env-cell-static-object-seed`; a later render cutover
-  phase must explicitly remove classified env-cell dynamic objects from static output before
-  submitting them through dynamic renderer membership.
+  output still includes those objects through `env-cell-static-object-seed`; Phase 8F must
+  explicitly remove classified env-cell dynamic objects from static output before submitting them
+  through dynamic renderer membership.
 - `residence-render-path-pending` is intentional temporary debt, not a terminal state. Remove or
-  narrow that diagnostic once env-cell dynamic placement/render membership is implemented and tested.
+  narrow that diagnostic in Phase 8F once env-cell dynamic placement/render membership is
+  implemented and tested.
 
 ### Phase 4A: Dynamic Setup And Animation Resource Readiness
 
@@ -1294,8 +1295,8 @@ Acceptance criteria:
 - Debug/inspection filters can return those same dynamic targets.
 - Browser picking calls the merged scene-query surface even when the default selection filter excludes
   first-cut dynamic scenery; otherwise the merged query is not considered wired into the runtime.
-- Env-cell dynamic records remain absent from merged query hits until an explicit env-cell dynamic
-  query/index path exists.
+- Env-cell dynamic records remain absent from merged query hits until Phase 8F adds an explicit
+  env-cell dynamic query/index path behind the same merged dynamic query family.
 - Any remaining `pickStaticRay` wrapper is documented as temporary cleanup debt with no new callers
   added.
 
@@ -1317,7 +1318,7 @@ Task checklist:
 - [x] Update browser picking and diagnostics call sites to use the merged surface.
 - [x] Add tests proving hit ordering, no dynamic snapshot scans for picking, default-selection
       exclusion for first-cut dynamic scenery, debug/inspection inclusion for the same dynamic
-      targets, and env-cell dynamic exclusion until a real query path exists.
+      targets, and env-cell dynamic exclusion until Phase 8F adds a real query path.
 - [x] Run phase verification commands.
 
 Decisions and course corrections:
@@ -1349,7 +1350,7 @@ Decisions and course corrections:
   runtime callers/tests and delegates through the merged query surface.
 - 2026-06-27: Default browser selection excludes first-cut static-authored dynamic scenery while
   `debug-inspection` and `diagnostics` scene query modes can return those dynamic hits. Env-cell
-  dynamic records remain excluded until an explicit env-cell dynamic query/index path exists.
+  dynamic records remain excluded until Phase 8F adds the env-cell dynamic query/index path.
 
 Debt and follow-up:
 
@@ -1365,7 +1366,7 @@ Debt and follow-up:
 
 ### Phase 8A: Dynamic Renderer Contracts And Neutral Texture Ownership
 
-Status: pending.
+Status: completed on 2026-06-27.
 
 Purpose:
 
@@ -1405,15 +1406,15 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Define dynamic renderer commit DTOs.
-- [ ] Add dynamic or neutral texture-use owner keys.
-- [ ] Generalize prepared texture placement/binding helper names and types where needed.
-- [ ] Extract shared texture placement/lease accounting from `TextureManager.applyStaticCommitDelta`.
-- [ ] Generalize WebGL2 texture binding owner maps away from static-only owner keys.
-- [ ] Share atlas/cache entries by prepared texture identity plus sampler/material requirements
+- [x] Define dynamic renderer commit DTOs.
+- [x] Add dynamic or neutral texture-use owner keys.
+- [x] Generalize prepared texture placement/binding helper names and types where needed.
+- [x] Extract shared texture placement/lease accounting from `TextureManager.applyStaticCommitDelta`.
+- [x] Generalize WebGL2 texture binding owner maps away from static-only owner keys.
+- [x] Share atlas/cache entries by prepared texture identity plus sampler/material requirements
       across compatible static and dynamic consumers.
-- [ ] Add renderer/runtime tests proving owner key separation and atlas/cache convergence.
-- [ ] Run phase verification commands.
+- [x] Add renderer/runtime tests proving owner key separation and atlas/cache convergence.
+- [x] Run phase verification commands.
 
 Decisions and course corrections:
 
@@ -1429,10 +1430,33 @@ Decisions and course corrections:
   and dirty static payloads by static owner. Phase 8A must introduce a neutral owner/key surface
   before dynamic resource residency is added; otherwise Phase 8B would have to choose between
   static owner spoofing and duplicate texture upload behavior.
+- 2026-06-27: Added neutral `TextureBindingOwner`/`TextureBinding` contracts with a
+  `dynamic-visual-resource` owner variant and shared owner-key helper. `StaticTextureBinding`
+  remains as a compatibility alias while static payload helpers are still static-named.
+- 2026-06-27: Added renderer-facing dynamic resource and instance commit DTOs. These are contract
+  types only in Phase 8A; WebGL2 residency and draw submission are intentionally left to Phases 8B
+  and 8C.
+- 2026-06-27: Extracted texture manager static commit handling through a shared visual texture-use
+  delta path and added `applyDynamicTextureUseDelta()`. Dynamic callers can now lease compatible
+  prepared texture atlas/cache entries through a `dynamic-visual-resource` owner without creating
+  fake static commit deltas.
+- 2026-06-27: WebGL2 now keys texture bindings through the shared owner-key helper. Dynamic owner
+  dirtying was initially a no-op during Phase 8A, then Phase 8E closed that handoff by dirtying
+  resident dynamic prepared payload state.
+- 2026-06-27: Verification results: `npm run test:ts -- texture-manager.test.ts` and
+  `npm run check` pass from `apps/holtburger-3d`.
+
+Debt and follow-up:
+
+- Static payload helpers and tests still use `StaticTextureBinding` naming even though the type is
+  now a compatibility alias for the neutral texture binding contract. Cleanup should rename helper
+  surfaces only where dynamic resources actually consume them.
+- 2026-06-27: The earlier dynamic prepared-payload dirtying handoff is closed by Phase 8E.
+  `dynamic-visual-resource` texture owners now dirty resident dynamic prepared payload state.
 
 ### Phase 8B: Dynamic Renderer Resource Residency
 
-Status: pending.
+Status: completed on 2026-06-27.
 
 Purpose:
 
@@ -1465,12 +1489,12 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Extract/generalize visual resource upload helpers.
-- [ ] Implement WebGL2 dynamic resource storage.
-- [ ] Implement dynamic resource install/remove commits.
-- [ ] Connect dynamic resource cleanup to `DynamicEntityController`/resource-manager removal.
-- [ ] Add renderer tests for add/update/remove and static layer replacement isolation.
-- [ ] Run phase verification commands.
+- [x] Extract/generalize visual resource upload helpers.
+- [x] Implement WebGL2 dynamic resource storage.
+- [x] Implement dynamic resource install/remove commits.
+- [x] Connect dynamic resource cleanup to `DynamicEntityController`/resource-manager removal.
+- [x] Add renderer tests for add/update/remove and static layer replacement isolation.
+- [x] Run phase verification commands.
 
 Decisions and course corrections:
 
@@ -1478,22 +1502,45 @@ Decisions and course corrections:
   static-specific maps and counts. Phase 8B should add dynamic resource maps and diagnostics before
   drawing, so later draw-path work cannot accidentally hide dynamic residency inside
   `#staticObjectVisualResources`, `#staticObjectRenderInstances`, or static layer ownership.
+- 2026-06-27: Added `Renderer.commitDynamicResources()` and WebGL2 dynamic visual-resource
+  residency keyed by `DynamicRendererResourceId`. Dynamic residency, texture-use count, and recent
+  commit diagnostics are exposed through `RendererSnapshot` without changing static counters.
+- 2026-06-27: Runtime now queues dynamic renderer resource sync from dynamic resource changes,
+  static seed ingestion, and static scope retention. Ready `DynamicEntitySummaryDto` records are
+  converted into dynamic visual-resource commits; removed records release dynamic texture owners and
+  renderer resources.
+- 2026-06-27: Runtime records source-scope to committed `staticBatchId` mappings from static
+  materialization so dynamic texture commits can target the same atlas scope when the static source
+  batch is known. If no static batch mapping exists, dynamic texture commits use a stable
+  `dynamic:${sourceScopeKey}` batch id rather than borrowing fake static ownership.
+- 2026-06-27: Added a dynamic renderer resource sync warning event instead of reporting dynamic sync
+  failures as static materialization failures.
+- 2026-06-27: Verification results: `npm run test:ts -- client-runtime.test.ts
+  webgl2-renderer.test.ts texture-manager.test.ts` and `npm run check` pass from
+  `apps/holtburger-3d`.
+
+Debt and follow-up:
+
+- 2026-06-27: The earlier GPU geometry upload handoff is closed by Phase 8E.
+- Dynamic visual resource identity remains one renderer resource per ready dynamic entity. Phase 8E
+  uploads one GPU geometry resource per source part underneath that semantic resource identity; if a
+  later render-quality pass needs material-pass splitting, split GPU storage without changing
+  semantic dynamic entity/resource identity.
 
 ### Phase 8C: Dynamic Renderer Instance Submission And Animated Poses
 
-Status: pending.
+Status: completed on 2026-06-27.
 
 Purpose:
 
-- Submit per-frame dynamic instances using live dynamic runtime transforms and draw the first-cut
-  windmill and bird targets through the dynamic renderer path.
+- Submit per-frame dynamic instances using live dynamic runtime transforms without sending full
+  dynamic records into the renderer.
 
 Deliverables:
 
 - Add per-frame dynamic instance submission from `DynamicEntityController` summaries.
 - Use live object/root and per-part transforms from dynamic runtime, including active `SetOmega`
   transform state.
-- Add WebGL2 dynamic instance draw path.
 - Add renderer diagnostics for dynamic instances, dynamic draw calls, and skipped dynamic
   submissions.
 - Keep dynamic instance identity separate from semantic dynamic entity identity and dynamic resource
@@ -1501,9 +1548,10 @@ Deliverables:
 
 Acceptance criteria:
 
-- The renderer can draw the windmill target from dynamic resource/instance commits.
-- The renderer can draw the bird target with animated wing poses and active `SetOmega` object/root
-  transform state.
+- The renderer receives lightweight dynamic instance commits derived from dynamic summary DTOs.
+- Dynamic instance commits include composed object/root placement and per-part transforms.
+- Dynamic instance commits consume active `SetOmega` transform state through the dynamic animation
+  summary path rather than parsing hook payloads in the renderer.
 - Dynamic submissions do not go through static layer payloads or `StaticObjectRenderInstance`.
 - Dynamic renderer state is not stored in `#staticObjectRenderInstances` and is not cleared through
   static layer replacement ownership.
@@ -1513,12 +1561,11 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Commit lightweight dynamic render summaries from `DynamicEntityController`, derived from
+- [x] Commit lightweight dynamic render summaries from `DynamicEntityController`, derived from
       `DynamicEntitySummaryDto` rather than full `DynamicEntityRecord` objects.
-- [ ] Implement WebGL2 dynamic instance storage/submission.
-- [ ] Add dynamic draw calls for installed dynamic visual resources.
-- [ ] Add renderer and runtime tests for add/update/remove and `SetOmega` transform consumption.
-- [ ] Run phase verification commands.
+- [x] Implement WebGL2 dynamic instance storage/submission.
+- [x] Add renderer and runtime tests for add/update/remove and dynamic instance submission.
+- [x] Run phase verification commands.
 
 Decisions and course corrections:
 
@@ -1526,49 +1573,455 @@ Decisions and course corrections:
   playback summaries, object-root pose, part poses, and active omega summaries. Phase 8C should
   derive render submissions from those summary DTOs or an even narrower render-summary DTO; the
   renderer should not receive full dynamic records or resource-manager internals.
+- 2026-06-27: Added `Renderer.commitDynamicInstances()` and WebGL2 dynamic instance storage.
+  Runtime commits per-frame dynamic instances from lightweight dynamic summaries after animation
+  ticking. Instance object matrices compose the base source placement/scale with current object-root
+  pose, and part matrices use current per-part poses.
+- 2026-06-27: Added `baseTransform` to `DynamicEntitySummaryDto` so renderer submissions can consume
+  source placement/scale without receiving full dynamic records.
+- 2026-06-27: WebGL2 initially recorded dynamic instances and skipped submissions without issuing
+  draw calls during Phase 8C. Phase 8E closed that handoff by uploading dynamic geometry and drawing
+  matching resource/instance submissions.
+- 2026-06-27: Verification results so far: `npm run test:ts -- client-runtime.test.ts
+  webgl2-renderer.test.ts texture-manager.test.ts dynamic-entity-store.test.ts
+  dynamic-placement-tracker.test.ts` and `npm run check` pass from `apps/holtburger-3d`.
+- 2026-06-27: Closed Phase 8C as the instance-submission milestone and split the remaining visual
+  work into Phase 8D and Phase 8E. The prior phase title overloaded "animated poses" and "draw the
+  targets"; the cleaner boundary is now instance summaries first, dynamic visual geometry extraction
+  second, and WebGL2 dynamic draw execution third.
 
-### Phase 9: Diagnostics And First-Cut Target Validation
+Debt and follow-up:
+
+- 2026-06-27: The earlier dynamic draw-call handoff is closed by Phase 8E. WebGL2 now uploads
+  dynamic geometry and issues draw calls for installed dynamic resources with matching instances.
+- 2026-06-27: The earlier `SetOmega` renderer-submission assertion is closed by Phase 8D runtime
+  coverage. Runtime dynamic instance composition now includes active omega object-root rotation.
+- The first-cut windmill and bird visual acceptance criteria remain open for Phase 9 manual browser
+  validation, even though Phase 8E now implements dynamic draw calls.
+
+### Phase 8D: Dynamic Visual Geometry DTOs And Resource Extraction
+
+Status: completed on 2026-06-27.
+
+Purpose:
+
+- Turn ready dynamic visual resources into renderer-owned part geometry/material DTOs without
+  borrowing static layer payloads or hiding static-bake assumptions inside the dynamic resource
+  manager.
+
+Deliverables:
+
+- Extend dynamic visual readiness records with per-part render geometry, material entries, material
+  slot indices, texture-use ids, render state, and bounds.
+- Build those dynamic render parts from setup/gfx/material facts already requested by the dynamic
+  resource manager.
+- Preserve texture-use identity between dynamic material requirements, texture-manager placement,
+  and renderer material entries.
+- Fail loudly for malformed dynamic geometry or missing material facts that should be present after
+  readiness. Do not add magenta/default material fallbacks for internal extraction failures.
+- Keep source residence and lifetime ownership unchanged; this phase is resource extraction, not
+  env-cell render cutover.
+
+Acceptance criteria:
+
+- A ready dynamic visual resource can report one or more renderer visual parts with positions,
+  texcoords, indices, material slot ids, material entries, texture-use ids, render state, and local
+  bounds.
+- Dynamic texture-use ids are stable across material requirements, dynamic texture placement, and
+  renderer material entries.
+- The resource manager does not issue duplicate uncached asset requests for gfx payloads if a
+  prepared asset was already obtained during readiness.
+- Unsupported or malformed dynamic part extraction appears in dynamic diagnostics or rejects the
+  resource request; it is not silently represented as renderable fallback geometry.
+- Existing static resource readiness, static bake, and texture-manager tests remain stable.
+
+Task checklist:
+
+- [x] Add renderer visual-part fields to dynamic resource DTO contracts.
+- [x] Extract dynamic render parts from setup/gfx/material facts in
+      `dynamic-entity-resource-manager.ts`.
+- [x] Reuse or return prepared gfx/material assets from the readiness request path instead of
+      re-requesting them blindly.
+- [x] Align dynamic texture-use ids across material requirements and renderer material entries.
+- [x] Add resource-manager/runtime tests for dynamic render-part extraction and `SetOmega` summary
+      consumption in instance DTOs.
+- [x] Run focused verification commands.
+
+Decisions and course corrections:
+
+- 2026-06-27 dry run: The codebase already has partial 8D-shaped work: dynamic visual readiness
+  exposes `renderParts`, texture requirements carry `textureUseId`, and
+  `dynamic-entity-resource-manager.ts` has a first pass at `createDynamicRenderParts()`. Treat the
+  next implementation as a hardening/completion phase, not a blank-slate design phase.
+- 2026-06-27 dry run: The partial extraction currently re-requests gfx prepared assets after the
+  visual host asset request path has already requested them. Phase 8D should return or cache the
+  prepared gfx payloads from the readiness request path instead of relying on asset-service caching
+  as an implicit correctness requirement.
+- 2026-06-27 dry run: Dynamic part extraction must remove fallback material entries and zero-filled
+  vertex/uv fallbacks. Missing material slots, malformed triangle vertex ranges, missing UVs, or
+  unexpected payload kinds should fail the dynamic resource request with diagnostics rather than
+  producing renderable-looking garbage.
+- 2026-06-27 dry run: Runtime conversion still builds `DynamicRendererVisualPart` from
+  `visual.sourceAssets` instead of `visual.renderParts`, and dynamic texture-use ids are recomputed
+  in runtime. Phase 8D should make the resource-manager-produced texture-use ids the source of truth
+  so material entries, texture placement, and renderer DTOs cannot drift.
+- 2026-06-27: Added full dynamic renderer visual-part DTO fields for bounds, geometry buffers,
+  material slots, material entries, render state, material family/pass, texture-use ids, and counts.
+  Runtime now converts from `visual.renderParts` rather than reconstructing parts from
+  `visual.sourceAssets`.
+- 2026-06-27: Dynamic visual resource readiness now returns prepared gfx payloads from the visual
+  host asset request path and passes those payloads into render-part extraction. The extractor no
+  longer issues a second gfx request and no longer depends on asset-service caching as a hidden
+  correctness requirement.
+- 2026-06-27: Removed fallback material entries and zero-filled vertex/UV fallbacks from dynamic
+  render-part extraction. Missing prepared gfx payloads, unexpected payload kinds, missing material
+  entries, unmapped triangle surfaces, and out-of-range vertex/UV references now fail the visual
+  resource request with dynamic diagnostics.
+- 2026-06-27: Dynamic material table entries are built through the shared static material adapter,
+  while dynamic resource extraction preserves the material plan's renderable family and pass for
+  renderer DTOs. This avoids a second material-table implementation and avoids flattening indexed,
+  alpha-test, transparent, or additive semantics before Phase 8E.
+- 2026-06-27: Dynamic triangle material resolution now accepts both `geometrySurfaceId` and
+  `materialSurfaceId` from source-closure material slot facts. Setup-appearance material slots can
+  carry slot-index geometry ids while render triangles carry surface ids; the extractor remains
+  strict but recognizes both ids carried by the fact model.
+- 2026-06-27: Runtime dynamic instance composition now includes active `SetOmega`
+  `objectRootRotation` in the submitted object matrix. Bounds already consumed this state, but the
+  renderer instance summary path had only consumed sampled `objectRootPose`.
+- 2026-06-27: Verification results: `npm run test:ts -- dynamic-entity-resource-manager.test.ts
+  client-runtime.test.ts webgl2-renderer.test.ts texture-manager.test.ts dynamic-entity-store.test.ts
+  dynamic-placement-tracker.test.ts` and `npm run check` pass from `apps/holtburger-3d`.
+
+Debt and follow-up:
+
+- Dynamic render-part extraction currently creates one renderer part per source part and keeps
+  per-part material entries. Phase 8E did not need to split resident GPU resources by material pass
+  for the first draw path. If later transparent/additive sorting requires a split, keep semantic
+  dynamic resource identity separate from that GPU storage split.
+- Env-cell dynamic records stay registered and diagnosable but non-rendered until Phase 8F performs
+  the explicit env-cell dynamic render-membership cutover.
+
+### Phase 8E: WebGL2 Dynamic Geometry Upload And Draw Path
+
+Status: completed on 2026-06-27.
+
+Purpose:
+
+- Upload dynamic visual parts into WebGL2-owned dynamic geometry resources and issue draw calls for
+  dynamic instances using live object/root and part transforms.
+
+Deliverables:
+
+- Add WebGL2 dynamic geometry-resource storage keyed by dynamic renderer resource id and part id.
+- Reuse the static material shader, texture binding lookup, and prepared payload machinery through a
+  neutral resource/texture owner path rather than copying static draw code wholesale.
+- Compose instance object/root transforms with per-part transforms at draw time.
+- Update dynamic draw diagnostics for submitted resources, skipped resources, skipped instances, and
+  issued draw calls.
+- Dispose dynamic GPU resources on dynamic resource removal and renderer teardown.
+
+Acceptance criteria:
+
+- The renderer issues dynamic draw calls for installed dynamic visual resources with matching dynamic
+  instances.
+- Dynamic draw submission does not use `setOutdoorDetailsLayer`, static layer payloads,
+  `StaticObjectRenderInstance`, or `#staticObjectRenderInstances`.
+- Dynamic texture bindings use `dynamic-visual-resource` owners and share compatible atlas/cache
+  entries with static consumers.
+- Missing dynamic resources, missing texture bindings, unsupported material states, or missing GPU
+  resources are counted as skipped dynamic submissions with actionable diagnostics.
+- The windmill target can render through the dynamic draw path; the bird target can render through
+  the same path with active object/root omega state from Phase 8C instance summaries.
+- Existing static WebGL2 tests remain stable.
+
+Task checklist:
+
+- [x] Add WebGL2 dynamic geometry upload/disposal.
+- [x] Add dynamic prepared-payload lookup keyed by dynamic texture owner.
+- [x] Add dynamic draw traversal for resident dynamic instances and visual parts.
+- [x] Add renderer tests for draw call emission, resource removal, texture binding reuse, and skipped
+      dynamic submissions.
+- [x] Add runtime/browser smoke hooks or diagnostics needed by Phase 9 validation.
+- [x] Run focused verification commands.
+
+Decisions and course corrections:
+
+- 2026-06-27 dry run: WebGL2 already has dynamic resource and instance maps plus dynamic texture
+  owner cleanup, but `commitDynamicResources()` stores DTOs only and `commitDynamicInstances()`
+  deliberately resets `dynamicDrawCalls` to zero. Phase 8E is the first phase that should allocate
+  dynamic GPU geometry resources.
+- 2026-06-27 dry run: The static material shader and prepared-payload machinery are reusable, but the
+  current helper names and owner assumptions are static-heavy. Phase 8E should add a narrow neutral
+  prepared-payload lookup for dynamic visual-resource owners instead of making dynamic resources look
+  like static object visual resources.
+- 2026-06-27 dry run: The first draw path can be per-part/per-instance draw calls. Do not introduce
+  batching, instancing, or VAO compaction while the correctness gate is still proving that windmill
+  and bird visuals render from dynamic resource/instance commits.
+- 2026-06-27: Added WebGL2-owned dynamic geometry resources keyed by dynamic renderer resource id,
+  with one uploaded GPU resource per dynamic visual part. Dynamic GPU resources are disposed on
+  dynamic resource removal and renderer teardown, and they are not stored in
+  `#staticObjectVisualResources`, `#staticObjectRenderInstances`, static layer payloads, or static
+  layer ownership maps.
+- 2026-06-27: Dynamic geometry now reuses the static material shader and prepared payload path
+  through a dynamic texture owner lookup. `dynamic-visual-resource` texture owners dirty resident
+  dynamic prepared payload state, and global static-object payload invalidation now includes dynamic
+  geometry because the shader payload cache is shared.
+- 2026-06-27: Dynamic draw traversal composes landblock render-anchor translation, submitted
+  object/root matrix, and submitted part matrix per resource part. `DynamicRendererInstance` now
+  carries `landblockId` so landblock-local dynamic transforms are not drawn near the render origin.
+- 2026-06-27: Dynamic renderer commits remain gated by renderability reasons. Env-cell dynamic
+  records can be registered and diagnosed, but records with `residence-render-path-pending` do not
+  produce dynamic renderer resources or instances until Phase 8F replaces that temporary gate with
+  real env-cell dynamic render membership.
+- 2026-06-27: Added WebGL2 tests proving dynamic resource residency emits a real `drawElements`
+  call, tracks `dynamicDrawCalls`, skips missing-resource submissions, survives unrelated static
+  layer replacement, and stops drawing after dynamic resource removal. Texture binding reuse remains
+  covered by the dynamic owner/atlas tests from Phase 8A plus the Phase 8E dynamic prepared-payload
+  owner path.
+- 2026-06-27: Verification results: `npm run test:ts -- webgl2-renderer.test.ts
+  client-runtime.test.ts dynamic-entity-resource-manager.test.ts texture-manager.test.ts
+  dynamic-entity-store.test.ts dynamic-placement-tracker.test.ts` and `npm run check` pass from
+  `apps/holtburger-3d`.
+- 2026-06-27: Final Phase 8 verification results: `npm run lint:ts`, `npm run lint:dead`,
+  `npm run test:ts` (61 files / 491 tests), `npm run check`, `npm run check:rust`,
+  `npm run lint:rust`, and repository-level `git diff --check` pass.
+
+Debt and follow-up:
+
+- This first draw path may issue straightforward per-part draw calls. WebGL2 instancing, VAO
+  compaction, and batching policy remain out of scope unless first-cut validation proves correctness
+  depends on them.
+- Dynamic transparent/additive parts are submitted through the first direct dynamic traversal without
+  a dedicated dynamic transparent sort list. Phase 9 visual validation should flag any visible
+  ordering issue; otherwise a later render-quality pass can share the static transparent ordering
+  machinery.
+
+### Phase 8F: Env-Cell Dynamic Cutover Through Shared Dynamic Paths
 
 Status: pending.
 
 Purpose:
 
-- Make the first cut reviewable and prove that both `0x020003e5` and `0x020005ac` are dynamic,
-  animated, indexed, and rendered for the right reasons.
+- Remove the temporary env-cell dynamic special case before diagnostics validation. Classified
+  env-cell static-authored dynamics should use the same dynamic resource, playback, renderer
+  resource, renderer instance, diagnostics, and query-family paths as outdoor dynamics, with
+  residence-specific handling isolated to placement, visibility, and render-pass membership.
 
 Deliverables:
 
-- Add dynamic diagnostics to runtime snapshots/reports.
+- Remove classified env-cell dynamic statics from env-cell static output once they are represented
+  by `env-cell-static-object-dynamic-seed`, mirroring the outdoor diversion from static bake output.
+- Replace `residence-render-path-pending` as the default env-cell dynamic renderability reason with
+  real env-cell dynamic placement/render membership.
+- Generalize dynamic renderer instance creation so source/effective residence can produce the
+  correct render-space transform for both outdoor landblock and env-cell dynamic records.
+- Route env-cell dynamic renderer resource and instance commits through the same dynamic commit
+  APIs as outdoor records. Do not add an env-cell-only renderer API or a second dynamic resource
+  manager.
+- Add env-cell-aware dynamic query membership that composes with the merged scene-query surface and
+  portal/interior visibility context. The spatial/query layer may use residence-specific indexes,
+  but callers should still consume one dynamic hit/query family.
+- Preserve default browser selection policy: dynamic scenery remains debug/inspection-queryable but
+  not default-selectable unless caller policy explicitly asks for it.
+- Keep source residence, effective residence, and render-pass membership explicit. Do not fake
+  env-cell dynamics as outdoor landblock dynamics just to reuse code.
+- Add diagnostics that can prove an env-cell dynamic was classified, removed from static output,
+  resource-ready, dynamically submitted, and queryable through the shared dynamic surface.
+
+Acceptance criteria:
+
+- A classified env-cell setup/default-animation static seed no longer appears in env-cell static
+  draw output and does not double-render.
+- The same classified env-cell seed reaches dynamic setup/animation/visual readiness through the
+  existing `DynamicEntityResourceManager`.
+- Env-cell dynamic records can produce dynamic renderer resources and instances without
+  `residence-render-path-pending`.
+- Env-cell dynamic renderer submissions use the same `commitDynamicResources()` and
+  `commitDynamicInstances()` APIs as outdoor submissions.
+- Env-cell dynamic placement/render-space conversion is correct for interior/portal render context
+  and does not use outdoor landblock-anchor assumptions where they do not apply.
+- Env-cell dynamic query/debug hits are available through the merged scene-query family with
+  residence-aware filtering, and default selection still excludes dynamic scenery.
+- Tests prove classified env-cell dynamic statics are not emitted as static env-cell draw units once
+  cut over.
+- Existing outdoor dynamic windmill/bird behavior and static env-cell rendering for unclassified
+  objects remain stable.
+
+Task checklist:
+
+- [ ] Move env-cell dynamic classification from "mirror static seed" to "divert classified static
+      output into dynamic seed plus dynamic render membership".
+- [ ] Remove or narrow `residence-render-path-pending` so it only describes genuinely unsupported
+      residences, not classified env-cell dynamic statics.
+- [ ] Generalize dynamic placement/render transform helpers across outdoor and env-cell residence.
+- [ ] Generalize dynamic renderer instance creation across outdoor and env-cell residence without
+      adding env-cell-only renderer APIs.
+- [ ] Add env-cell dynamic query/index membership behind the merged scene-query surface.
+- [ ] Add tests for no double-render, dynamic renderer commit eligibility, query membership,
+      default-selection exclusion, and unclassified env-cell static stability.
+- [ ] Update diagnostics/report fields so env-cell dynamic cutover can be inspected.
+- [ ] Run full verification commands.
+
+Decisions and course corrections:
+
+- 2026-06-27: Added as an immediate phase after reviewing the env-cell deferral. Keeping env-cell
+  dynamics registered but renderer-gated creates more complexity than doing the cutover now because
+  every later phase has to remember that env-cell dynamics are "dynamic except not really rendered".
+- 2026-06-27: The shared path target is explicit: resource readiness, animation playback, texture
+  ownership, renderer resource commits, renderer instance commits, diagnostics, and merged query
+  result shapes should be common. Residence-specific code is allowed only at the boundary where
+  placement, visibility, render pass, or query context genuinely differs.
+- 2026-06-27: Do not paper over the problem by submitting env-cell records through outdoor dynamic
+  assumptions. Env-cell dynamics need correct interior/portal render membership, not a fake outdoor
+  residence.
+
+Debt and follow-up:
+
+- If Phase 8F exposes that env-cell dynamic query needs a second residence-specific index beside the
+  outdoor RBush, keep that index behind the merged dynamic query/access surface. The caller should
+  not need to know which residence-specific index answered.
+- Phase 8F should retire or sharply narrow the earlier `residence-render-path-pending` debt. Leaving
+  it as the normal env-cell path after this phase would be a failed cutover, not acceptable debt.
+
+### Phase 9A: Dynamic Diagnostics And Inspection Readiness
+
+Status: pending.
+
+Purpose:
+
+- Make the dynamic runtime/render path reviewable before manual DAT validation. This phase should
+  expose enough state to explain why an entity is dynamic, whether it is renderable, whether it is
+  indexed/queryable, what animation/hook state is active, and what the renderer submitted or skipped.
+
+Deliverables:
+
+- Add or harden dynamic diagnostics projection in runtime snapshots/reports.
 - Surface classification reason, source residence, effective residence, setup id, animation id,
-  current frame/time, part count, bounds, index membership, resource readiness, renderer submission
-  counts, and issues.
-- Add debug overlay support for dynamic bounds where useful.
-- Validate `0x020003e5` and `0x020005ac` manually in the browser app.
-- Record evidence and any visual concessions in this plan.
+  current frame/time, part count, active `SetOmega` summary, bounds, index membership, resource
+  readiness, renderer resource/instance ids, renderer submission counts, skipped dynamic submissions,
+  and issues.
+- Preserve the merged query distinction between dynamic query membership and default browser
+  selection policy in visible diagnostics or tests.
+- Add debug overlay support for dynamic bounds only if existing runtime/selection diagnostics are not
+  enough to validate spatial/query membership. Do not add a decorative overlay just because this
+  phase mentions bounds.
+- Add targeted smoke coverage for the dynamic report projection and renderer diagnostics fields
+  needed by Phase 9B.
+- Record any remaining validation debt in this plan before moving to browser/manual checks.
 
 Acceptance criteria:
 
 - Diagnostics can explain why the windmill is dynamic and currently renderable.
-- The windmill animates from per-part origin/orientation frames.
 - Diagnostics can explain why the bird is dynamic, has active `SetOmega`, and is currently
   renderable.
-- The bird animates from per-part wing frames and active object/root omega state.
-- It is debug/inspection-queryable but not default browser-selectable.
+- Diagnostics expose whether dynamic renderer resources, instances, draw calls, and skipped
+  submissions are nonzero/zero for the expected reasons.
+- Dynamic entities are debug/inspection-queryable but not default browser-selectable.
 - Missing dynamic dependencies or unsupported hooks are visible in diagnostics and console output;
   the bird target's `SetOmega` hook is not reported as unsupported.
+- Env-cell dynamic records use the Phase 8F cutover path and are diagnosable through the same dynamic
+  report family as outdoor dynamic records.
 - No runtime asset dependent tests are retained in the repo.
 
 Task checklist:
 
 - [ ] Add diagnostics projection and browser report fields.
-- [ ] Add dynamic bounds debug overlay if needed for validation.
-- [ ] Validate both first-cut targets in browser mode with real DAT/static scene data.
-- [ ] Update this plan with validation evidence, decisions, and concessions.
+- [ ] Add dynamic bounds debug overlay only if diagnostics/report fields are insufficient for
+      validation.
+- [ ] Add targeted tests for dynamic diagnostics projection, default selection filtering, and
+      renderer counters needed by manual validation.
 - [ ] Run full verification commands.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-27 dry run: `RuntimeSnapshot.dynamic` already carries the lightweight dynamic entity
+  summary DTO with source/effective residence, resources, playback, active omega, bounds, and
+  diagnostics. Phase 9A should not introduce a heavier runtime snapshot shape; add a compact
+  diagnostics-report domain or browser projection over the existing summary instead.
+- 2026-06-27 dry run: Renderer counters for dynamic visual resources, texture uses, instances, draw
+  calls, and skipped dynamic submissions are already in `RendererDiagnosticsSummary`. Phase 9A should
+  wire those into validation/report expectations, not add a parallel renderer diagnostics path.
+- 2026-06-27 dry run: `pickMergedSceneRay` already keeps dynamic hits out of `default-selection` and
+  allows them for debug/diagnostics modes. Phase 9A should preserve and test that caller-policy
+  split rather than adding a dynamic-object lookup adapter to the spatial index.
+- 2026-06-27 dry run: A dynamic bounds overlay is optional. Existing snapshot/report data may be
+  enough for Phase 9B; only add overlay primitives if manual validation cannot tell whether bad
+  picking/rendering is caused by bounds/index membership versus renderer output.
+- 2026-06-27: Phase 8F now precedes this diagnostics phase. Phase 9A should report env-cell and
+  outdoor dynamic records through one dynamic diagnostics family instead of preserving the old
+  env-cell renderer-gated special case.
+
+Debt and follow-up:
+
+- Dynamic transparent/additive render ordering remains a validation concern. Phase 9B should record
+  whether the first-cut targets expose visible ordering problems; a later render-quality pass can
+  share or generalize the static transparent sort machinery if needed.
+
+### Phase 9B: First-Cut Target Browser Validation
+
+Status: pending.
+
+Purpose:
+
+- Prove with real browser/DAT scene data that `0x020003e5` and `0x020005ac` are dynamic, animated,
+  indexed, rendered, and diagnosable for the right reasons.
+
+Deliverables:
+
+- Validate outdoor static-authored setup `0x020003e5` with animation `0x0300061b` in browser mode.
+- Validate outdoor static-authored setup `0x020005ac` with animation `0x03000751` and typed frame-0
+  `SetOmega` in browser mode.
+- Confirm dynamic query/debug inspection can find first-cut dynamic records while default browser
+  selection does not select them.
+- Compare dynamic runtime diagnostics, renderer counters, and visible motion against the
+  requirements-plan evidence.
+- Record evidence, concessions, failures, and any render-quality debt in this plan.
+
+Acceptance criteria:
+
+- The windmill target renders through dynamic renderer resources/instances, not static baked draw
+  units, and visibly animates from per-part origin/orientation frames.
+- The bird target renders through the same dynamic renderer path, visibly animates wing frames, and
+  shows continuous object/root motion from active `SetOmega`.
+- Runtime diagnostics identify the expected setup ids, animation ids, current animation frame/time,
+  source/effective residence, renderability, renderer counts, and dynamic query membership.
+- The bird target's `SetOmega` hook is supported and does not appear in unsupported-hook diagnostics.
+- First-cut dynamic targets remain excluded from default browser selection unless a caller explicitly
+  asks for debug/inspection dynamic hits.
+- Any dynamic transparent/additive ordering issue is captured as concrete evidence rather than vague
+  render debt.
+- No temporary DAT-dependent tests or one-off validation scripts are retained unless the plan records
+  why they are durable.
+
+Task checklist:
+
+- [ ] Run the browser app against real DAT/static scene data at coordinates containing both targets.
+- [ ] Inspect runtime/browser diagnostics for the windmill target.
+- [ ] Inspect runtime/browser diagnostics for the bird target and active `SetOmega`.
+- [ ] Verify default selection filtering separately from debug/inspection query membership.
+- [ ] Record validation evidence and visual concessions in this plan.
+- [ ] Run full verification commands after any validation fixes.
+
+Decisions and course corrections:
+
+- 2026-06-27 dry run: This phase should run after Phase 9A lands the diagnostics-report projection.
+  Manual validation without the compact dynamic report would be too much raw snapshot spelunking and
+  too easy to misread.
+- 2026-06-27 dry run, superseded: The validation target was previously outdoor-only while env-cell
+  dynamic render membership was gated by `residence-render-path-pending`.
+- 2026-06-27: Phase 8F now owns env-cell dynamic cutover before manual target validation. Phase 9B
+  still validates the two known first-cut outdoor targets, while env-cell dynamic correctness should
+  already be proven by Phase 8F tests and surfaced in Phase 9A diagnostics.
+- 2026-06-27 dry run: If either first-cut target is invisible, check diagnostics in this order:
+  classification seed emitted, dynamic resource readiness, renderability reasons, renderer resource
+  commit, renderer instance commit, draw calls/skipped submissions, then query/debug hit. That order
+  follows ownership boundaries and avoids blaming the renderer for missing upstream state.
+
+Debt and follow-up:
+
+- Phase 9B is not the env-cell cutover gate anymore. If env-cell dynamic behavior is still
+  renderer-gated by this point, Phase 8F failed and should be completed before browser validation is
+  treated as meaningful.
 
 ### Phase 10: Resteer For Broader Hook And Dynamic-System Gate
 
@@ -1697,30 +2150,33 @@ Decisions and course corrections:
 - Risk: static-authored dynamic registration remains split by source residence and accumulates
   outdoor-only branches.
   Mitigation: Phase 3B registers classified env-cell authored dynamic seeds in the same dynamic
-  runtime family before Phase 4A/4B resource readiness, while keeping placement/query/render behavior
-  staged by source residence.
+  runtime family before Phase 4A/4B resource readiness, and Phase 8F removes the renderer/query
+  special case by routing env-cell dynamics through the same dynamic resource, instance, diagnostics,
+  and merged query families.
 
 - Risk: env-cell parity becomes nominal rather than functional by mirroring every env-cell static
   object into dynamic state without evidence that it should behave dynamically.
   Mitigation: classify in the env-cell baker from `payload.sourceAssets`, emit a separate
   `env-cell-static-object-dynamic-seed` only for setup-model/default-animation seeds, prove
-  unclassified env-cell statics are not registered, and keep rendering cutover explicitly out of
-  Phase 3B.
+  unclassified env-cell statics are not registered, keep rendering cutover explicitly out of Phase
+  3B, and complete the functional render/query cutover in Phase 8F.
 
 - Risk: env-cell dynamic registration corrupts static env-cell scene/query membership by changing
   the meaning of `env-cell-static-object-seed`.
   Mitigation: keep `env-cell-static-object-seed` as the static membership record and add a separate
-  classified dynamic variant. Existing env-cell static scene query and system layer tests must pass
-  unchanged unless a later phase intentionally changes static cutover behavior.
+  classified dynamic variant. Phase 8F may intentionally change static cutover behavior for
+  classified dynamic seeds only, and tests must prove unclassified env-cell static membership remains
+  stable.
 
-- Risk: env-cell dynamic records poison outdoor-only placement, indexing, or renderer paths.
-  Mitigation: model source/effective residence explicitly and keep env-cell dynamic records
-  non-renderable or render-pending until env-cell placement/render membership is implemented and
-  tested.
+- Risk: env-cell dynamic records poison outdoor-only placement, indexing, or renderer paths, or
+  env-cell dynamics grow a second parallel renderer/query system.
+  Mitigation: model source/effective residence explicitly, implement Phase 8F with shared dynamic
+  resource/instance/diagnostics/query families, and isolate residence-specific code to placement,
+  visibility, render-pass membership, and index implementation details.
 
 - Risk: typed `SetOmega` state exists but is not consumed by bounds or rendering.
   Mitigation: Phase 5B added typed decode and active transform state; Phase 6 must compose it into
-  hook-aware bounds before Phase 8C renders the bird target.
+  hook-aware bounds before Phase 8E renders the bird target.
 
 ## Definition Of Done
 
@@ -1728,10 +2184,10 @@ Decisions and course corrections:
 - `0x020005ac` is rendered through the dynamic runtime with typed `SetOmega` transform behavior, not
   baked static geometry and not a final unsupported-hook compromise.
 - Static-authored dynamic registration supports both outdoor landblock and env-cell source
-  residence; outdoor rendering is first-cut complete, while classified env-cell records are at
-  least registered through the `env-cell-static-object-dynamic-seed` variant, diagnosable, retained,
-  and evicted through the shared dynamic runtime without changing env-cell static rendering until the
-  explicit env-cell render cutover phase.
+  residence. Classified outdoor and env-cell dynamic records are diverted from static output,
+  hydrated, animated, submitted, diagnosed, and queried through shared dynamic runtime families, with
+  residence-specific behavior isolated to placement, visibility, render-pass membership, and index
+  details.
 - The windmill target plays default animation `0x0300061b` with live per-part origin/orientation
   frames.
 - The bird target plays default animation `0x03000751` with live per-part wing frames and active

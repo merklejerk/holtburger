@@ -19,6 +19,8 @@ import type {
 	RendererFrameTelemetryListener,
 	RendererStaticLayerVisibility,
 	RendererSnapshot,
+	DynamicRendererResourceCommit,
+	DynamicRendererInstanceCommit,
 	EnvCellSystemLayerPayload,
 	OutdoorBuildingsLayerPayload,
 	OutdoorDetailsLayerPayload,
@@ -250,6 +252,154 @@ describe("browser client runtime", () => {
 		).toBe(false);
 
 		unsubscribe();
+		runtime.dispose();
+	});
+
+	it("commits ready dynamic visual resources to the renderer without static layer ownership", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const assetService = new DeferredAssetService();
+		const renderer = new FakeRenderer();
+		const runtime = createClientRuntime({
+			assetService,
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({ baker, resolver }),
+		});
+		const snapshots: RuntimeSnapshot[] = [];
+		const unsubscribe = runtime.subscribe((snapshot) => {
+			snapshots.push(snapshot);
+		});
+
+		updateOutdoorSceneInterest(runtime, {
+			domains: ["buildings", "terrain"],
+			lod: {
+				buildings: 0,
+				terrain: 0,
+			},
+		});
+		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
+		await flushPromises();
+		const workId = "1:landblock:da55ffff:outdoor-buildings";
+		baker.complete(workId, {
+			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord(workId)],
+		});
+		await flushRuntimeWork();
+
+		await resolvePendingDynamicAssetsUntil(
+			assetService,
+			() => renderer.createDiagnosticsSnapshot().dynamicVisualResources > 0,
+		);
+
+		const rendererSnapshot = renderer.createDiagnosticsSnapshot();
+		expect(rendererSnapshot).toMatchObject({
+			dynamicVisualResources: 1,
+			staticObjectRenderInstances: 0,
+			staticObjectVisualResources: 0,
+		});
+		expect(rendererSnapshot.recentDynamicResourceCommits.at(-1)).toMatchObject({
+			addedVisualResources: 1,
+			removedVisualResources: 0,
+			textureUses: 1,
+		});
+		const dynamicResource =
+			renderer.dynamicResourceCommits.at(-1)?.addedVisualResources[0];
+		expect(dynamicResource?.parts[0]).toMatchObject({
+			indexType: "uint16",
+			materialFamily: "texture-rgba",
+			materialPass: "opaque",
+			partIndex: 0,
+			sourceAssetId: "gfx-obj/01000020",
+			textureUseIds: [
+				dynamicResource.materialPlan.textureUses[0]?.textureUseId,
+			],
+			triangleCount: 1,
+			vertexCount: 3,
+		});
+		expect(Array.from(dynamicResource?.parts[0]?.positions ?? [])).toEqual([
+			0, 0, 0, 1, 0, 0, 0, 1, 0,
+		]);
+		expect(Array.from(dynamicResource?.parts[0]?.texCoords ?? [])).toEqual([
+			0, 0, 1, 0, 0, 1,
+		]);
+
+		runtime.updateFrameState({
+			camera: {
+				pitchRadians: 0,
+				position: [0, 0, 0],
+				yawRadians: 0,
+			},
+			timeSeconds: 1,
+		});
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicInstances: 1,
+			skippedDynamicSubmissions: 0,
+		});
+		expect(snapshots.at(-1)?.renderer).toMatchObject({
+			dynamicInstances: 1,
+			dynamicVisualResources: 1,
+		});
+
+		unsubscribe();
+		runtime.dispose();
+	});
+
+	it("commits active SetOmega object-root transforms into dynamic instances", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const renderer = new FakeRenderer();
+		const runtime = createClientRuntime({
+			assetService: createResolvingSetOmegaAssetService(),
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({ baker, resolver }),
+		});
+
+		updateOutdoorSceneInterest(runtime, {
+			domains: ["buildings", "terrain"],
+			lod: {
+				buildings: 0,
+				terrain: 0,
+			},
+		});
+		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
+		await flushPromises();
+		const workId = "1:landblock:da55ffff:outdoor-buildings";
+		baker.complete(workId, {
+			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord(workId)],
+		});
+		await flushRuntimeWork();
+
+		runtime.updateFrameState({
+			camera: {
+				pitchRadians: 0,
+				position: [0, 0, 0],
+				yawRadians: 0,
+			},
+			timeSeconds: 1,
+		});
+		runtime.updateFrameState({
+			camera: {
+				pitchRadians: 0,
+				position: [0, 0, 0],
+				yawRadians: 0,
+			},
+			timeSeconds: 2,
+		});
+
+		const instance =
+			renderer.dynamicInstanceCommits.at(-1)?.instances[0] ?? null;
+		expect(instance?.objectToRenderMatrix[0]).toBeCloseTo(
+			Math.cos(-0.03836006671190262),
+			7,
+		);
+		expect(instance?.objectToRenderMatrix[2]).toBeCloseTo(
+			-Math.sin(-0.03836006671190262),
+			7,
+		);
+
 		runtime.dispose();
 	});
 
@@ -2098,6 +2248,8 @@ function createPlacement() {
 }
 
 class FakeRenderer implements Renderer {
+	readonly dynamicResourceCommits: DynamicRendererResourceCommit[] = [];
+	readonly dynamicInstanceCommits: DynamicRendererInstanceCommit[] = [];
 	readonly staticAnchorLandblockIds: (number | null)[] = [];
 	readonly debugOverlayUpdates: readonly DebugOverlayPrimitive[][] = [];
 	readonly textureUpdates: TexturePlacementUpdate[] = [];
@@ -2123,6 +2275,7 @@ class FakeRenderer implements Renderer {
 	readonly staticLayerVisibilityUpdates: RendererStaticLayerVisibility[] = [];
 	readonly events: string[] = [];
 	readonly #telemetryListeners = new Set<RendererFrameTelemetryListener>();
+	readonly #residentDynamicResourceIds = new Set<string>();
 	diagnosticsSnapshotCount = 0;
 	#snapshot: RendererSnapshot = {
 		backend: "webgl2",
@@ -2141,6 +2294,12 @@ class FakeRenderer implements Renderer {
 		},
 		renderedTriangles: 0,
 		directEnvCellDrawCalls: 0,
+		dynamicVisualResources: 0,
+		dynamicVisualResourceTextureUses: 0,
+		dynamicDrawCalls: 0,
+		dynamicInstances: 0,
+		skippedDynamicSubmissions: 0,
+		recentDynamicResourceCommits: [],
 		sceneDomainTargets: {
 			active: false,
 			apertureBatchDrawCalls: 0,
@@ -2214,6 +2373,56 @@ class FakeRenderer implements Renderer {
 		payload: EnvCellSystemLayerPayload | null,
 	): void {
 		this.envCellSystemLayerUpdates.push([landblockId, payload]);
+	}
+	commitDynamicResources(commit: DynamicRendererResourceCommit): void {
+		this.dynamicResourceCommits.push(commit);
+		for (const resourceId of commit.removedVisualResourceIds) {
+			this.#residentDynamicResourceIds.delete(resourceId);
+		}
+		for (const resource of commit.addedVisualResources) {
+			this.#residentDynamicResourceIds.add(resource.resourceId);
+		}
+		this.#snapshot = {
+			...this.#snapshot,
+			dynamicVisualResources: this.#residentDynamicResourceIds.size,
+			dynamicVisualResourceTextureUses:
+				this.#snapshot.dynamicVisualResourceTextureUses +
+				commit.addedVisualResources.reduce(
+					(total, resource) =>
+						total + resource.materialPlan.textureUses.length,
+					0,
+				),
+			recentDynamicResourceCommits: [
+				...this.#snapshot.recentDynamicResourceCommits,
+				{
+					addedVisualResources: commit.addedVisualResources.length,
+					removedVisualResources: commit.removedVisualResourceIds.length,
+					revision: commit.revision,
+					skippedMaterials: commit.addedVisualResources.reduce(
+						(total, resource) =>
+							total + resource.materialPlan.skipped.length,
+						0,
+					),
+					textureUses: commit.addedVisualResources.reduce(
+						(total, resource) =>
+							total + resource.materialPlan.textureUses.length,
+						0,
+					),
+				},
+			],
+		};
+	}
+	commitDynamicInstances(commit: DynamicRendererInstanceCommit): void {
+		this.dynamicInstanceCommits.push(commit);
+		const submitted = commit.instances.filter((instance) =>
+			this.#residentDynamicResourceIds.has(instance.resourceId),
+		);
+		this.#snapshot = {
+			...this.#snapshot,
+			dynamicDrawCalls: 0,
+			dynamicInstances: submitted.length,
+			skippedDynamicSubmissions: commit.instances.length - submitted.length,
+		};
 	}
 	applyTexturePlacementUpdate(update: TexturePlacementUpdate): void {
 		this.textureUpdates.push(update);
@@ -2328,10 +2537,33 @@ class ResolvingAssetRuntimeHost implements RuntimeHost {
 	}
 }
 
+class ResolvingSetOmegaAssetRuntimeHost implements RuntimeHost {
+	lookupAsset(key: HostAssetKey, revision: number): Promise<PreparedAsset> {
+		return Promise.resolve({
+			...createPreparedAsset(key, revision),
+			payload:
+				key.kind === "animation"
+					? createDynamicSetOmegaAnimationPayload()
+					: createDynamicPreparedPayload(key),
+		});
+	}
+
+	createSnapshot(): RuntimeHostSnapshot {
+		return {
+			failure: null,
+			isAvailable: true,
+		};
+	}
+}
+
 class DeferredAssetService implements AssetService {
 	readonly pendingKeys: HostAssetKey[] = [];
 	pruneCalls = 0;
 	readonly #pending: DeferredAssetRequest[] = [];
+
+	get pendingCount(): number {
+		return this.#pending.length;
+	}
 
 	requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
 		this.pendingKeys.push(key);
@@ -2388,6 +2620,12 @@ interface DeferredAssetRequest {
 function createResolvingAssetService(): HostBackedAssetService {
 	return new HostBackedAssetService({
 		host: new ResolvingAssetRuntimeHost(),
+	});
+}
+
+function createResolvingSetOmegaAssetService(): HostBackedAssetService {
+	return new HostBackedAssetService({
+		host: new ResolvingSetOmegaAssetRuntimeHost(),
 	});
 }
 
@@ -3171,6 +3409,33 @@ function createPreparedAsset(key: HostAssetKey, revision = 1): PreparedAsset {
 	};
 }
 
+async function resolvePendingDynamicAssetsUntil(
+	assetService: DeferredAssetService,
+	done: () => boolean,
+): Promise<void> {
+	let resolvedCount = 0;
+	for (let attempt = 0; attempt < 40; attempt += 1) {
+		await flushRuntimeWork();
+		if (done()) {
+			return;
+		}
+		while (assetService.pendingCount > 0) {
+			const key = assetService.pendingKeys[resolvedCount] ?? failKey();
+			resolvedCount += 1;
+			assetService.resolveNext(
+				key.kind === "prepared-texture"
+					? createPreparedTextureAsset(key)
+					: createPreparedAsset(key),
+			);
+			await flushRuntimeWork();
+			if (done()) {
+				return;
+			}
+		}
+	}
+	throw new Error("Dynamic renderer resource sync did not complete.");
+}
+
 function createDynamicPreparedPayload(key: HostAssetKey): unknown {
 	switch (key.kind) {
 		case "animation":
@@ -3221,6 +3486,33 @@ function createDynamicAnimationPayload(): AnimationPayloadDto {
 		provenance: createProvenance("animation"),
 		residencyKind: "unknown",
 		sourceAssetKind: "animation",
+	};
+}
+
+function createDynamicSetOmegaAnimationPayload(): AnimationPayloadDto {
+	return {
+		...createDynamicAnimationPayload(),
+		partFrames: [
+			{
+				frameIndex: 0,
+				hooks: [
+					{
+						direction: 0,
+						directionName: "Both",
+						hookName: "SetOmega",
+						hookType: 22,
+						payload: {
+							omega: { x: 0, y: 0, z: -0.03836006671190262 },
+						},
+						payloadKind: "set-omega",
+						rawPayloadBytes: [
+							0, 0, 0, 0, 0, 0, 0, 0, 0x72, 0x20, 0x1d, 0xbd,
+						],
+					},
+				],
+				localPlacements: [createPlacement()],
+			},
+		],
 	};
 }
 
@@ -3306,7 +3598,7 @@ function createDynamicGfxObjPayload() {
 			bounds: createBounds(),
 			invalidPolygons: [],
 			normals: [],
-			positions: [],
+			positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 			skippedPolygonCount: 0,
 			sourceId: 0x01000020,
 			surfaceIds: [0x08000010],
@@ -3319,7 +3611,7 @@ function createDynamicGfxObjPayload() {
 					surfaceId: 0x08000010,
 				},
 			],
-			uvs: [],
+			uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
 			vertexCount: 3,
 		},
 		residencyKind: "unknown",

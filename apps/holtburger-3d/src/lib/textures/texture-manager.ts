@@ -17,10 +17,13 @@ import type {
 	StaticObjectTextureRolePageKind,
 	StaticTextureBinding,
 	TerrainTextureRolePageKind,
+	TextureBinding,
+	TextureBindingOwner,
 	TexturePlacementUpdate,
 	TextureUsePlacement,
 } from "../renderer/types";
 import {
+	createTextureBindingOwnerKey,
 	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
 	MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW,
 	MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW,
@@ -42,7 +45,6 @@ import type {
 import {
 	collectStaticDrawUnitResourceIds,
 	collectStaticObjectVisualResourceIds,
-	createStaticTextureUseOwnerKey,
 } from "../static/contracts";
 import { AtlasTexturePacker, type TexturePacker } from "./packing/packer";
 import type {
@@ -74,6 +76,22 @@ interface TextureManagerOptions {
 	readonly filteringMode?: TextureFilteringMode;
 	readonly packGroupMaxConcurrency?: number;
 	readonly texturePacker?: TexturePacker;
+}
+
+export interface DynamicTextureUseCommit {
+	readonly atlasDomain: StaticDomain;
+	readonly atlasBatchId: string;
+	readonly owner: TextureBindingOwner & {
+		readonly kind: "dynamic-visual-resource";
+	};
+	readonly samplingPolicy?: StaticBakeTextureUse["samplingPolicy"];
+	readonly source: MaterialTextureDataUseIdentity;
+	readonly textureUseId: string;
+}
+
+export interface DynamicTextureUseCommitDelta {
+	readonly removedOwners: readonly DynamicTextureUseCommit["owner"][];
+	readonly textureUses: readonly DynamicTextureUseCommit[];
 }
 
 export class TextureManager {
@@ -257,22 +275,42 @@ export class TextureManager {
 	async applyStaticCommitDelta(
 		delta: StaticCoordinatorCommitDelta,
 	): Promise<TexturePlacementUpdate | null> {
-		const removedTextureRefIds = this.#removeOwnerTextureRefs([
-			...collectStaticDrawUnitResourceIds(delta.removedResources).map(
-				(drawUnitId): StaticTextureUseOwner => ({
-					drawUnitId,
-					kind: "draw-unit",
-				}),
-			),
-			...collectStaticObjectVisualResourceIds(delta.removedResources).map(
-				(resourceId): StaticTextureUseOwner => ({
-					kind: "static-object-visual-resource",
-					resourceId,
-				}),
-			),
-		]);
+		return this.#applyVisualTextureUseDelta({
+			removedOwners: [
+				...collectStaticDrawUnitResourceIds(delta.removedResources).map(
+					(drawUnitId): StaticTextureUseOwner => ({
+						drawUnitId,
+						kind: "draw-unit",
+					}),
+				),
+				...collectStaticObjectVisualResourceIds(delta.removedResources).map(
+					(resourceId): StaticTextureUseOwner => ({
+						kind: "static-object-visual-resource",
+						resourceId,
+					}),
+				),
+			],
+			textureUses: delta.textureUses.map(createVisualTextureUseCommit),
+		});
+	}
+
+	async applyDynamicTextureUseDelta(
+		delta: DynamicTextureUseCommitDelta,
+	): Promise<TexturePlacementUpdate | null> {
+		return this.#applyVisualTextureUseDelta({
+			removedOwners: delta.removedOwners,
+			textureUses: delta.textureUses.map(createVisualTextureUseCommit),
+		});
+	}
+
+	async #applyVisualTextureUseDelta(
+		delta: VisualTextureUseCommitDelta,
+	): Promise<TexturePlacementUpdate | null> {
+		const removedTextureRefIds = this.#removeOwnerTextureRefs(
+			delta.removedOwners,
+		);
 		const placements: RuntimeTexturePlacement[] = [];
-		const textureBindings: StaticTextureBinding[] = [];
+		const textureBindings: TextureBinding[] = [];
 		const textureUsePlacements: TextureUsePlacement[] = [];
 		const terrainRolePageSlots = new TerrainDrawUnitRolePageSlots(
 			(overflow) => {
@@ -300,7 +338,7 @@ export class TextureManager {
 				pendingPlacements,
 			);
 			for (const owner of textureUse.owners) {
-				const ownerKey = createStaticTextureUseOwnerKey(owner);
+				const ownerKey = createTextureBindingOwnerKey(owner);
 				let textureKeys = this.#textureKeysByOwnerKey.get(ownerKey);
 				if (!textureKeys) {
 					textureKeys = new Set<StaticBatchTextureKey>();
@@ -394,12 +432,12 @@ export class TextureManager {
 	}
 
 	#removeOwnerTextureRefs(
-		removedOwners: readonly StaticTextureUseOwner[],
+		removedOwners: readonly TextureBindingOwner[],
 	): readonly string[] {
 		const removedTextureRefIds: string[] = [];
 
 		for (const owner of removedOwners) {
-			const ownerKey = createStaticTextureUseOwnerKey(owner);
+			const ownerKey = createTextureBindingOwnerKey(owner);
 			const textureKeys = this.#textureKeysByOwnerKey.get(ownerKey);
 			if (!textureKeys) {
 				continue;
@@ -430,7 +468,7 @@ export class TextureManager {
 	}
 
 	async #stageTexturePlacement(
-		textureUse: StaticBakeTextureUse,
+		textureUse: VisualTextureUseCommit,
 		pendingPlacements: Map<string, PendingTexturePlacement>,
 	): Promise<StagedTexturePlacement> {
 		const source = textureUse.source;
@@ -497,7 +535,7 @@ export class TextureManager {
 			staticBatchId: textureUse.staticBatchId,
 			textureKeys: new Set([textureKey]),
 			textureUse,
-			ownerKeys: new Set(textureUse.owners.map(createStaticTextureUseOwnerKey)),
+			ownerKeys: new Set(textureUse.owners.map(createTextureBindingOwnerKey)),
 		};
 		pendingPlacements.set(placementKey, staged);
 		pendingPlacements.set(textureKey, staged);
@@ -764,6 +802,20 @@ export class TextureManager {
 
 type RuntimeTexturePlacement = TexturePlacementUpdate["placements"][number];
 
+interface VisualTextureUseCommit {
+	readonly domain: StaticDomain;
+	readonly owners: readonly TextureBindingOwner[];
+	readonly samplingPolicy?: StaticBakeTextureUse["samplingPolicy"];
+	readonly source: MaterialTextureDataUseIdentity;
+	readonly staticBatchId: string;
+	readonly textureUseId: string;
+}
+
+interface VisualTextureUseCommitDelta {
+	readonly removedOwners: readonly TextureBindingOwner[];
+	readonly textureUses: readonly VisualTextureUseCommit[];
+}
+
 type StaticBatchRegistryKey = string & {
 	readonly __brand: "StaticBatchRegistryKey";
 };
@@ -840,7 +892,7 @@ interface PendingStagedTexturePlacement {
 interface PendingTexturePlacement {
 	readonly domain: StaticDomain;
 	readonly staticBatchId: string;
-	readonly textureUse: StaticBakeTextureUse;
+	readonly textureUse: VisualTextureUseCommit;
 	readonly textureKeys: Set<StaticBatchTextureKey>;
 	readonly source: DirectMaterialTextureSource;
 	readonly pagePolicy: RuntimeTexturePagePolicy;
@@ -894,6 +946,29 @@ function collectPayloadTextureUses(
 	}
 
 	return [];
+}
+
+function createVisualTextureUseCommit(
+	textureUse: StaticBakeTextureUse,
+): VisualTextureUseCommit;
+function createVisualTextureUseCommit(
+	textureUse: DynamicTextureUseCommit,
+): VisualTextureUseCommit;
+function createVisualTextureUseCommit(
+	textureUse: StaticBakeTextureUse | DynamicTextureUseCommit,
+): VisualTextureUseCommit {
+	if ("staticBatchId" in textureUse) {
+		return textureUse;
+	}
+
+	return {
+		domain: textureUse.atlasDomain,
+		owners: [textureUse.owner],
+		samplingPolicy: textureUse.samplingPolicy,
+		source: textureUse.source,
+		staticBatchId: textureUse.atlasBatchId,
+		textureUseId: textureUse.textureUseId,
+	};
 }
 
 function createStaticBatchRegistryKey(
@@ -1101,7 +1176,7 @@ function createPaletteTextureSubPalettesKey(
 }
 
 function createStaticBatchTextureKey(
-	textureUse: StaticBakeTextureUse,
+	textureUse: VisualTextureUseCommit,
 ): StaticBatchTextureKey {
 	return [
 		textureUse.domain,
@@ -1111,7 +1186,7 @@ function createStaticBatchTextureKey(
 }
 
 function createStaticBatchSourcePlacementKey(
-	textureUse: StaticBakeTextureUse,
+	textureUse: VisualTextureUseCommit,
 ): string {
 	return [
 		textureUse.domain,
@@ -1121,7 +1196,7 @@ function createStaticBatchSourcePlacementKey(
 	].join(":");
 }
 
-function createTextureUseSamplingKey(textureUse: StaticBakeTextureUse): string {
+function createTextureUseSamplingKey(textureUse: VisualTextureUseCommit): string {
 	const samplingPolicy = textureUse.samplingPolicy;
 	if (!samplingPolicy) {
 		return "sampling:default";
@@ -1145,7 +1220,7 @@ function isPreparedRgbaRenderSurfaceTextureUse(
 function createTextureRefId(
 	domain: StaticDomain,
 	staticBatchId: string,
-	textureUse: StaticBakeTextureUse,
+	textureUse: Pick<VisualTextureUseCommit, "textureUseId">,
 ): string {
 	return ["texture-ref", domain, staticBatchId, textureUse.textureUseId].join(
 		":",
@@ -1204,10 +1279,10 @@ function uniquePendingTexturePlacements(
 
 function addPendingPlacementOwners(
 	placement: PendingTexturePlacement,
-	owners: readonly StaticTextureUseOwner[],
+	owners: readonly TextureBindingOwner[],
 ): void {
 	for (const owner of owners) {
-		placement.ownerKeys.add(createStaticTextureUseOwnerKey(owner));
+		placement.ownerKeys.add(createTextureBindingOwnerKey(owner));
 	}
 }
 
@@ -1590,7 +1665,7 @@ function createTerrainTextureRolePageKind(
 
 function resolveTextureRolePageSlot(options: {
 	readonly domain: StaticDomain;
-	readonly owner: StaticTextureUseOwner;
+	readonly owner: TextureBindingOwner;
 	readonly source: MaterialTextureDataUseIdentity;
 	readonly staticObjectRolePageSlots: StaticObjectOwnerRolePageSlots;
 	readonly terrainRolePageSlots: TerrainDrawUnitRolePageSlots;
@@ -1610,7 +1685,7 @@ function resolveTextureRolePageSlot(options: {
 	}
 
 	return options.staticObjectRolePageSlots.resolveSlot({
-		ownerKey: createStaticTextureUseOwnerKey(options.owner),
+		ownerKey: createTextureBindingOwnerKey(options.owner),
 		source: options.source,
 		textureRefId: options.textureRefId,
 	});

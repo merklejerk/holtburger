@@ -49,6 +49,35 @@ describe("dynamic entity resource manager", () => {
 			"ready",
 			"ready",
 		]);
+		expect(records[0]?.resources.visual).toMatchObject({
+			renderParts: [
+				{
+					indexType: "uint16",
+					materialFamily: "texture-rgba",
+					materialPass: "opaque",
+					partIndex: 0,
+					sourceAssetId: "gfx-obj/01000020",
+					triangleCount: 1,
+					vertexCount: 3,
+				},
+			],
+			textureRequirements: [
+				{
+					textureUseId:
+						"dynamic-texture:08000011:base-color:06000010?cs=linear&mips=none&out=rgba8&usage=color",
+				},
+			],
+		});
+		const renderPart =
+			records[0]?.resources.visual.status === "ready"
+				? records[0].resources.visual.renderParts[0]
+				: null;
+		expect(Array.from(renderPart?.positions ?? [])).toEqual([
+			0, 0, 0, 1, 0, 0, 0, 1, 0,
+		]);
+		expect(renderPart?.textureUseIds).toEqual([
+			"dynamic-texture:08000011:base-color:06000010?cs=linear&mips=none&out=rgba8&usage=color",
+		]);
 		expect(records.map((record) => record.renderability.reasons)).toEqual([
 			["residence-render-path-pending"],
 			[],
@@ -378,7 +407,7 @@ function createGfxObjPayload(): GfxObjPayloadDto {
 			},
 			invalidPolygons: [],
 			normals: [],
-			positions: [],
+			positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 			skippedPolygonCount: 0,
 			sourceId: 0x01000020,
 			surfaceIds: [0x08000010],
@@ -391,7 +420,7 @@ function createGfxObjPayload(): GfxObjPayloadDto {
 					surfaceId: 0x08000010,
 				},
 			],
-			uvs: [],
+			uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
 			vertexCount: 3,
 		},
 		residencyKind: "unknown",

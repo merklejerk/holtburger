@@ -5,9 +5,11 @@ import type {
 	StaticBakeTextureSamplingPolicy,
 	StaticAuthoredDynamicSeedRecord,
 	StaticBounds,
+	StaticMaterialTableEntry,
 	StaticObjectMaterialSourceFacts,
 	StaticObjectPaletteSourceFacts,
 	StaticObjectPartMaterialSlotFacts,
+	StaticObjectRenderState,
 	StaticObjectSourceAssetFacts,
 	StaticObjectTextureRefFacts,
 	StaticResourceIdentity,
@@ -192,10 +194,29 @@ interface DynamicEntityVisualResourcesReadyState {
 	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
 	readonly materialSlots: readonly DynamicEntityMaterialSlotRequirement[];
 	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
+	readonly renderParts: readonly DynamicEntityRenderPart[];
 	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
 	readonly status: "ready";
 	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
+}
+
+export interface DynamicEntityRenderPart {
+	readonly bounds: StaticBounds | null;
+	readonly indices: Uint16Array | Uint32Array;
+	readonly indexType: "uint16" | "uint32";
+	readonly materialEntries: readonly StaticMaterialTableEntry[];
+	readonly materialFamily: "flat-color" | "indexed-paletted" | "texture-rgba";
+	readonly materialPass: "opaque" | "alpha-test" | "transparent" | "additive";
+	readonly materialSlotIndices: Float32Array;
+	readonly partIndex: number;
+	readonly positions: Float32Array;
+	readonly renderState: StaticObjectRenderState;
+	readonly sourceAssetId: string;
+	readonly texCoords: Float32Array;
+	readonly textureUseIds: readonly string[];
+	readonly triangleCount: number;
+	readonly vertexCount: number;
 }
 
 interface DynamicEntityVisualResourcesFailedState {
@@ -220,6 +241,7 @@ export interface DynamicEntityTextureRequirement {
 		| "detail-overlay"
 		| "palette-rgba";
 	readonly samplingPolicy: StaticBakeTextureSamplingPolicy;
+	readonly textureUseId: string;
 }
 
 export interface DynamicEntityUnsupportedMaterialReason {
@@ -324,6 +346,7 @@ export interface DynamicRuntimeSnapshot {
 
 export interface DynamicEntitySummaryDto {
 	readonly animation: DynamicEntityAnimationSummaryDto;
+	readonly baseTransform: DynamicEntityTransformState;
 	readonly bounds: DynamicEntityBoundsState;
 	readonly diagnostics: readonly DynamicEntityIssue[];
 	readonly effectiveResidence: DynamicEntityResidence;

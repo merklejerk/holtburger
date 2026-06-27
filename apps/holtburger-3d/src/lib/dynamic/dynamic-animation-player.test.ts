@@ -223,6 +223,10 @@ describe("dynamic animation player", () => {
 				?.objectRootRotation.z ?? 0;
 
 		expect(firstRotation).toBeLessThan(0);
+		expect(firstRotation).toBeCloseTo(
+			Math.sin(-0.03836006671190262 / 2),
+			7,
+		);
 		expect(secondRotation).toBeLessThan(firstRotation);
 		expect(
 			secondLoop.record.animation.playback.transformEffects.activeOmega,

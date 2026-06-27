@@ -252,7 +252,10 @@ function integrateOmegaRotation(
 	if (speed === 0) {
 		return rotation;
 	}
-	const halfAngle = (speed * deltaSeconds) / 2;
+	// Retail static-object animation applies SetOmega through Frame::grotate once
+	// per animation update, not as a raw radians-per-second velocity.
+	const angle = speed * deltaSeconds * DEFAULT_FRAME_RATE_FPS;
+	const halfAngle = angle / 2;
 	const sinHalfAngle = Math.sin(halfAngle);
 	const deltaRotation = normalizeQuaternion({
 		w: Math.cos(halfAngle),

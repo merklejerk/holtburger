@@ -115,11 +115,12 @@ describe("browser client runtime", () => {
 	it("ingests outdoor static-authored dynamic seeds and evicts them with source scopes", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
+		const renderer = new FakeRenderer();
 		const runtime = createClientRuntime({
 			assetService: createResolvingAssetService(),
 			diagnostics: silentDiagnostics,
 			host: new FakeRuntimeHost(),
-			renderer: new FakeRenderer(),
+			renderer,
 			staticCoordinator: createImmediateStaticCoordinator({ baker, resolver }),
 		});
 		const snapshots: RuntimeSnapshot[] = [];
@@ -166,6 +167,25 @@ describe("browser client runtime", () => {
 				},
 			},
 		});
+
+		updateRuntimeFrame(runtime, 1);
+		const entityId = snapshots.at(-1)?.dynamic.records[0]?.id;
+		if (!entityId) {
+			throw new Error("Expected an ingested dynamic entity id.");
+		}
+		runtime.setSceneDebugSelection({
+			entityId,
+			kind: "dynamic",
+		});
+		expect(renderer.debugOverlayUpdates.at(-1)).toEqual([
+			{
+				color: [1, 0.85, 0.1, 1],
+				id: `dynamic:${entityId}`,
+				kind: "aabb",
+				max: [1, 1, 1],
+				min: [0, 0, 0],
+			},
+		]);
 
 		runtime.updateSceneInterest({ kind: "none" });
 
@@ -1368,7 +1388,10 @@ describe("browser client runtime", () => {
 			quadIndex: 0,
 		});
 
-		runtime.setStaticDebugSelection(selectionKey);
+		runtime.setSceneDebugSelection({
+			kind: "static",
+			selectionKey,
+		});
 		expect(renderer.debugOverlayUpdates.at(-1)).toEqual([]);
 
 		updateOutdoorSceneInterest(runtime);
@@ -1387,7 +1410,7 @@ describe("browser client runtime", () => {
 			},
 		]);
 
-		runtime.setStaticDebugSelection(null);
+		runtime.setSceneDebugSelection(null);
 		expect(renderer.debugOverlayUpdates.at(-1)).toEqual([]);
 		runtime.dispose();
 	});
@@ -1405,12 +1428,13 @@ describe("browser client runtime", () => {
 			}),
 		});
 
-		runtime.setStaticDebugSelection(
-			createTerrainQuadSelectionKey({
+		runtime.setSceneDebugSelection({
+			kind: "static",
+			selectionKey: createTerrainQuadSelectionKey({
 				landblockId: 0xda55ffff,
 				quadIndex: 0,
 			}),
-		);
+		});
 		updateOutdoorSceneInterest(runtime);
 		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "", {
 			scope: createTerrainSourceScopePayload({

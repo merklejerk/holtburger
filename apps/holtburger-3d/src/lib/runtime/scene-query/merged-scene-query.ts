@@ -70,7 +70,7 @@ function pickOutdoorDynamicHits(
 	sources: MergedSceneQuerySources,
 	request: ScenePickRequest,
 ): readonly ScenePickHit[] {
-	if (request.context.kind !== "outdoor" || request.mode === "default-selection") {
+	if (request.context.kind !== "outdoor") {
 		return [];
 	}
 	const ray = normalizeRay(request.ray);
@@ -91,7 +91,7 @@ function pickOutdoorDynamicHits(
 			}
 			const hit: ScenePickHit = {
 				bounds,
-				defaultSelectable: false,
+				defaultSelectable: request.mode === "default-selection",
 				distance,
 				entityId: record.entityId,
 				hitPoint: pointOnRay(ray, distance),
@@ -117,7 +117,7 @@ function pickEnvCellDynamicHits(
 	sources: MergedSceneQuerySources,
 	request: ScenePickRequest,
 ): readonly ScenePickHit[] {
-	if (request.context.kind !== "env-cell" || request.mode === "default-selection") {
+	if (request.context.kind !== "env-cell") {
 		return [];
 	}
 	const acceptedEnvCellIds =
@@ -136,7 +136,7 @@ function pickEnvCellDynamicHits(
 			return [
 				{
 					bounds: record.bounds,
-					defaultSelectable: false,
+					defaultSelectable: request.mode === "default-selection",
 					distance,
 					entityId: record.entityId,
 					hitPoint: pointOnRay(ray, distance),

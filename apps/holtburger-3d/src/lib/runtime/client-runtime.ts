@@ -138,8 +138,10 @@ import { DynamicEntityController } from "../dynamic/dynamic-entity-controller";
 import { DynamicEntityResourceManager } from "../dynamic/dynamic-entity-resource-manager";
 import type {
 	DynamicEntitySummaryDto,
+	DynamicEntityId,
 	DynamicRuntimeSnapshot,
 } from "../dynamic/contracts";
+import { translateBounds } from "./scene-query/geometry";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
@@ -499,7 +501,7 @@ export interface ClientRuntime {
 		selectionKey: StaticSceneSelectionKey,
 		options?: { readonly pickDistance?: number | null },
 	): StaticSelectionDiagnosticsReport;
-	setStaticDebugSelection(selectionKey: StaticSceneSelectionKey | null): void;
+	setSceneDebugSelection(selection: RuntimeSceneDebugSelection | null): void;
 	setEnvCellAabbDebugOverlayVisible(visible: boolean): void;
 	setEnvCellPortalDebugOverlayVisible(visible: boolean): void;
 	setDirectEnvCellPortalMaxDepth(maxDepth: number): void;
@@ -514,6 +516,17 @@ export interface ClientRuntime {
 	subscribeEvents(listener: RuntimeEventListener): () => void;
 	dispose(): void;
 }
+
+/** Browser-selected scene identity whose current bounds should be rendered as a debug overlay. */
+export type RuntimeSceneDebugSelection =
+	| {
+			readonly kind: "static";
+			readonly selectionKey: StaticSceneSelectionKey;
+	  }
+	| {
+			readonly entityId: DynamicEntityId;
+			readonly kind: "dynamic";
+	  };
 
 export interface ClientRuntimeOptions {
 	readonly renderer: Renderer;
@@ -599,7 +612,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	>();
 	readonly #materializedDrawUnitsById = new Map<string, StaticDrawUnit>();
 	#recentTerrainTextureFallbacks: TerrainTextureFallbackDiagnostics[] = [];
-	#staticDebugSelectionKey: StaticSceneSelectionKey | null = null;
+	#sceneDebugSelection: RuntimeSceneDebugSelection | null = null;
 	#envCellResourceMembership: readonly EnvCellResourceMembership[] = [];
 	#envCellResourceMembershipByLandblock = createEnvCellResourceMembershipIndex(
 		this.#envCellResourceMembership,
@@ -684,7 +697,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				this.#staticSceneQuery.ingestSourcePayload(delta.payload, {
 					outdoorAnchorLandblockId: this.#renderAnchorLandblockId,
 				});
-				this.#refreshStaticDebugOverlay();
+				this.#refreshSceneDebugOverlay();
 				this.#emit();
 			});
 		this.#assetMaintenanceIntervalId = globalThis.setInterval(() => {
@@ -725,7 +738,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		} finally {
 			this.#sceneInterestReconciliationActive = false;
 		}
-		this.#refreshStaticDebugOverlay();
+		this.#refreshSceneDebugOverlay();
 		this.#emit();
 		this.#maybeEmitSceneInterestSettled();
 	}
@@ -783,7 +796,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#currentCameraResidency = normalized;
 		this.#refreshPortalOverlapResidency();
 		this.#updateRenderPassPlan();
-		this.#refreshStaticDebugOverlay();
+		this.#refreshSceneDebugOverlay();
 		this.#emit();
 	}
 
@@ -848,10 +861,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 		};
 	}
 
-	setStaticDebugSelection(selectionKey: StaticSceneSelectionKey | null): void {
+	setSceneDebugSelection(selection: RuntimeSceneDebugSelection | null): void {
 		this.#assertActive();
-		this.#staticDebugSelectionKey = selectionKey;
-		this.#refreshStaticDebugOverlay();
+		this.#sceneDebugSelection = selection;
+		this.#refreshSceneDebugOverlay();
 		this.#emit();
 	}
 
@@ -861,7 +874,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			return;
 		}
 		this.#envCellAabbDebugOverlayVisible = visible;
-		this.#refreshStaticDebugOverlay();
+		this.#refreshSceneDebugOverlay();
 		this.#emit();
 	}
 
@@ -871,7 +884,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			return;
 		}
 		this.#envCellPortalDebugOverlayVisible = visible;
-		this.#refreshStaticDebugOverlay();
+		this.#refreshSceneDebugOverlay();
 		this.#emit();
 	}
 
@@ -941,6 +954,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		const dynamicPlaybackChanged =
 			this.#dynamicEntityController.tick(timeSeconds);
 		this.#commitDynamicRendererInstances(timeSeconds);
+		if (dynamicPlaybackChanged) {
+			this.#refreshSceneDebugOverlay();
+		}
 		const portalOverlapChanged = this.#refreshPortalOverlapResidency();
 		if (portalOverlapChanged) {
 			this.#updateRenderPassPlan();
@@ -1053,7 +1069,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#staticSceneQuery.setOutdoorAnchorLandblockId(nextAnchorLandblockId);
 		this.#renderer.setStaticRenderAnchorLandblockId(nextAnchorLandblockId);
 		this.#updateRenderPassPlan();
-		this.#refreshStaticDebugOverlay();
+		this.#refreshSceneDebugOverlay();
 	}
 
 	#reconcileStaticRetention(
@@ -1563,7 +1579,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		);
 		this.#enqueueDynamicRendererResourceSync();
 		this.#updateRenderPassPlan();
-		this.#refreshStaticDebugOverlay();
+		this.#refreshSceneDebugOverlay();
 		this.#pendingStaticMaterializations.delete(delta.revision);
 		this.#committedStaticMaterializations = appendBoundedRevision(
 			this.#committedStaticMaterializations,
@@ -1908,7 +1924,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 	}
 
-	#refreshStaticDebugOverlay(): void {
+	#refreshSceneDebugOverlay(): void {
 		const primitives: DebugOverlayPrimitive[] = [];
 		if (this.#envCellAabbDebugOverlayVisible) {
 			for (const debugBounds of this.#staticSceneQuery.queryEnvCellAabbDebugBounds()) {
@@ -1942,33 +1958,74 @@ class ClientRuntimeImpl implements ClientRuntime {
 			}
 		}
 
-		if (!this.#staticDebugSelectionKey) {
+		if (!this.#sceneDebugSelection) {
 			this.#renderer.setDebugOverlayPrimitives(primitives);
 			return;
 		}
 
-		const debugBounds = this.#queryStaticSelectionDebugBounds(
-			this.#staticDebugSelectionKey,
+		const debugBounds = this.#querySceneSelectionDebugBounds(
+			this.#sceneDebugSelection,
 		);
 		if (!debugBounds) {
-			const selectionKey = describeStaticSceneSelectionKey(
-				this.#staticDebugSelectionKey,
-			);
-			this.#diagnostics.warn({
-				kind: "static-debug-selection-unresolved",
-				reason: "missing-query-bounds",
-				selectionKey,
-			});
+			if (this.#sceneDebugSelection.kind === "static") {
+				const selectionKey = describeStaticSceneSelectionKey(
+					this.#sceneDebugSelection.selectionKey,
+				);
+				this.#diagnostics.warn({
+					kind: "static-debug-selection-unresolved",
+					reason: "missing-query-bounds",
+					selectionKey,
+				});
+			}
 			this.#renderer.setDebugOverlayPrimitives(primitives);
 			return;
 		}
 
 		primitives.push(
-			createStaticDebugBoundsOverlayPrimitive(debugBounds.bounds, {
-				id: describeStaticSceneSelectionKey(debugBounds.selectionKey),
+			createSelectionDebugBoundsOverlayPrimitive(debugBounds.bounds, {
+				id: debugBounds.id,
 			}),
 		);
 		this.#renderer.setDebugOverlayPrimitives(primitives);
+	}
+
+	#querySceneSelectionDebugBounds(selection: RuntimeSceneDebugSelection): {
+		readonly bounds: StaticBounds;
+		readonly id: string;
+	} | null {
+		if (selection.kind === "static") {
+			const debugBounds = this.#queryStaticSelectionDebugBounds(
+				selection.selectionKey,
+			);
+			return debugBounds === null
+				? null
+				: {
+						bounds: debugBounds.bounds,
+						id: describeStaticSceneSelectionKey(debugBounds.selectionKey),
+					};
+		}
+
+		const currentBounds = this.#dynamicEntityController.queryDynamicCurrentBounds(
+			selection.entityId,
+		);
+		if (currentBounds === null) {
+			return null;
+		}
+		const bounds =
+			currentBounds.kind === "outdoor-landblock"
+				? translateBounds(
+						currentBounds.bounds,
+						createOutdoorLandblockRootTranslation(
+							currentBounds.sourceLandblockId,
+							this.#renderAnchorLandblockId,
+						),
+					)
+				: currentBounds.bounds;
+
+		return {
+			bounds,
+			id: `dynamic:${selection.entityId}`,
+		};
 	}
 
 	#queryStaticSelectionDebugBounds(selectionKey: StaticSceneSelectionKey): {
@@ -2428,7 +2485,7 @@ function matchesStaticObjectSourceMappingCoverage(
 	);
 }
 
-function createStaticDebugBoundsOverlayPrimitive(
+function createSelectionDebugBoundsOverlayPrimitive(
 	bounds: StaticBounds,
 	options: { readonly id: string },
 ): DebugOverlayPrimitive {

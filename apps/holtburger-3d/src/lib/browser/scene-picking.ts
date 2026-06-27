@@ -6,7 +6,7 @@ import type {
 
 const V2_RENDERER_VERTICAL_FOV_RADIANS = Math.PI / 3;
 
-export interface BrowserStaticPickRayInput {
+export interface BrowserScenePickRayInput {
 	readonly camera: FrameState["camera"];
 	readonly context: StaticScenePickContext;
 	readonly filters?: StaticScenePickRequest["filters"];
@@ -22,8 +22,8 @@ interface DOMRectLike {
 	readonly height: number;
 }
 
-export function createBrowserStaticPickRay(
-	input: BrowserStaticPickRayInput,
+export function createBrowserScenePickRay(
+	input: BrowserScenePickRayInput,
 ): StaticScenePickRequest {
 	const normalizedX =
 		((input.clientX - input.viewport.left) / input.viewport.width) * 2 - 1;

@@ -176,7 +176,7 @@ Verification:
 
 ### Phase 2: Extract Runtime Root State And Generic Geometry
 
-Status: pending.
+Status: completed 2026-06-26.
 
 Purpose:
 
@@ -202,21 +202,36 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Move shared runtime root/item/state types into `static-query-state.ts`.
-- [ ] Move generic geometry helpers.
-- [ ] Add or relocate geometry tests for ray/bounds, translated bounds, containment, and BVH traversal
+- [x] Move shared runtime root/item/state types into `static-query-state.ts`.
+- [x] Move generic geometry helpers.
+- [x] Add or relocate geometry tests for ray/bounds, translated bounds, containment, and BVH traversal
       edge cases where coverage is too indirect.
-- [ ] Run focused static query tests.
+- [x] Run focused static query tests.
 
 Decisions and course corrections:
 
 - 2026-06-26: Dry run found a missing state/type ownership home. Grid, picking, debug, residency,
   and facade all need the same root shapes; without `static-query-state.ts`, the refactor would
   either duplicate types or create import cycles.
+- 2026-06-26: Added `runtime/scene-query/static-query-state.ts` for shared runtime root/item/state
+  types and `runtime/scene-query/geometry.ts` for generic ray, bounds, translation, union, and BVH
+  traversal helpers. Kept env-cell BSP conversion in `static-scene-query.ts` because it is
+  residency-specific, not generic geometry.
+- 2026-06-26: Did not add new geometry-only tests in this phase because existing static query tests
+  directly exercise ray/bounds intersections, translated bounds, BVH traversal, and containment
+  through picking/debug/residency behavior. Phase 8 can still split those tests when module ownership
+  cleanup happens.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/browser/static-picking.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 3: Extract Landblock Grid Spatial Index
 
-Status: pending.
+Status: completed 2026-06-26.
 
 Purpose:
 
@@ -238,18 +253,30 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Move `LandblockGridSpatialIndex`.
-- [ ] Move grid trace/candidate helpers and tests.
-- [ ] Update facade ingestion/retention paths to update the extracted index.
-- [ ] Run focused grid and static outdoor picking tests.
+- [x] Move `LandblockGridSpatialIndex`.
+- [x] Move grid trace/candidate helpers and tests.
+- [x] Update facade ingestion/retention paths to update the extracted index.
+- [x] Run focused grid and static outdoor picking tests.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-26: Added `runtime/scene-query/landblock-grid-spatial-index.ts`.
+  `StaticSceneQuery` still owns when roots are ingested/retained, but the mutable landblock bucket
+  index, render-cell expansion, candidate distance estimation, and `traceLandblockGridRayCells`
+  traversal now live in the grid module.
+- 2026-06-26: Moved grid-tracing tests to import `traceLandblockGridRayCells` from the extracted
+  owner while leaving the broader static picking assertions in `static-scene-query.test.ts`.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/browser/static-picking.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 4: Extract Env-Cell Committed Records, System Layers, And Projections
 
-Status: pending.
+Status: completed 2026-06-26.
 
 Purpose:
 
@@ -279,24 +306,44 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Move committed env-cell record maps behind a store.
-- [ ] Move env-cell static bounds overrides and committed env-cell root materialization into the
+- [x] Move committed env-cell record maps behind a store.
+- [x] Move env-cell static bounds overrides and committed env-cell root materialization into the
       store.
-- [ ] Move system-layer access/clearing into the store or a clearly owned collaborator.
-- [ ] Move portal projection cache/query behavior into `env-cell-portal-projections.ts`.
-- [ ] Move record key/group/sort helpers into private store modules.
-- [ ] Move or split committed-record and portal-projection tests.
-- [ ] Run static scene query and client runtime tests.
+- [x] Move system-layer access/clearing into the store or a clearly owned collaborator.
+- [x] Move portal projection cache/query behavior into `env-cell-portal-projections.ts`.
+- [x] Move record key/group/sort helpers into private store modules.
+- [x] Move or split committed-record and portal-projection tests.
+- [x] Run static scene query and client runtime tests.
 
 Decisions and course corrections:
 
 - 2026-06-26: Dry run found that env-cell picking, debug bounds, and residency all depend on roots
   and bounds overrides produced by committed records. Extracting this state before picking avoids
   double-touch churn and prevents the facade from remaining the hidden state owner.
+- 2026-06-26: Added `runtime/scene-query/env-cell-committed-records.ts` and
+  `runtime/scene-query/env-cell-portal-projections.ts`. The committed record store now owns
+  committed record maps, env-cell static bounds overrides, system-layer records, accepted-env-cell
+  derivation, env-cell root materialization, retained-scope pruning, draw-unit resource removal, and
+  committed-record snapshot counts.
+- 2026-06-26: Portal projection caching moved behind `EnvCellPortalProjectionCache`; cache
+  invalidation is driven by portal graph/interior/system-layer mutations in the committed record
+  store. The facade now delegates portal graph/interior queries, portal aperture resources, outdoor
+  portal projection lookup, and env-cell portal projection lookup.
+- 2026-06-26: Kept committed-record and portal-projection assertions in the existing focused static
+  query integration tests for this phase because they still validate facade behavior. Splitting
+  tests further is deferred to the cleanup/test-colocation phase after residency and picking are
+  extracted.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/browser/static-picking.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 5: Extract Env-Cell Residency
 
-Status: pending.
+Status: completed 2026-06-26.
 
 Purpose:
 
@@ -317,18 +364,35 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Move env-cell residency graph and BSP helpers into a residency module.
-- [ ] Move residency counters into a state object owned by the residency module.
-- [ ] Move or split residency-focused tests.
-- [ ] Run focused residency and client runtime tests.
+- [x] Move env-cell residency graph and BSP helpers into a residency module.
+- [x] Move residency counters into a state object owned by the residency module.
+- [x] Move or split residency-focused tests.
+- [x] Run focused residency and client runtime tests.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-26: Added `runtime/scene-query/env-cell-residency.ts` with
+  `EnvCellResidencyQuery`. The residency module owns BSP/coarse residency tests, render-space and
+  landblock-local camera residency decisions, accepted-env-cell filtering helpers, and residency
+  snapshot counters.
+- 2026-06-26: `EnvCellResidencyQuery` consumes an `EnvCellResidencyRootProvider` interface instead
+  of owning env-cell roots. This preserves the Phase 4 ownership split: committed-record lifetime and
+  root materialization remain in `EnvCellCommittedRecordStore`, while residency owns only query
+  policy and counters.
+- 2026-06-26: Kept residency behavior coverage in the existing focused static query tests for now.
+  Test colocation remains a Phase 8 cleanup target after picking/debug extraction reduces facade
+  coupling.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/browser/static-picking.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 6: Extract Static Picking
 
-Status: pending.
+Status: completed 2026-06-26.
 
 Purpose:
 
@@ -349,19 +413,34 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Identify the minimum immutable/query state needed by static picking.
-- [ ] Move pick helpers behind an explicit picker function or class.
-- [ ] Preserve filter and tie-break behavior.
-- [ ] Move or split static picking tests.
-- [ ] Run focused static query/browser picking tests.
+- [x] Identify the minimum immutable/query state needed by static picking.
+- [x] Move pick helpers behind an explicit picker function or class.
+- [x] Preserve filter and tie-break behavior.
+- [x] Move or split static picking tests.
+- [x] Run focused static query/browser picking tests.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-26: Added `runtime/scene-query/static-picking.ts` with `pickStaticSceneRay`.
+  `StaticSceneQuery.pickRay` now delegates to the extracted picker with explicit
+  `EnvCellCommittedRecordStore` and `LandblockGridSpatialIndex` dependencies.
+- 2026-06-26: Moved outdoor static object, terrain quad, env-cell static object, nearest-hit
+  tie-break, and pick-filter behavior into the picker module. The facade no longer owns private BVH
+  traversal helpers for hit production.
+- 2026-06-26: Kept picking behavior coverage in existing static query/browser picking tests for
+  this phase. Dedicated picker tests remain a Phase 8 cleanup target once debug/detail extraction
+  finishes and the facade surface is stable.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/browser/static-picking.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 7: Extract Static Selection Debug And Diagnostics Details
 
-Status: pending.
+Status: completed 2026-06-26.
 
 Purpose:
 
@@ -382,18 +461,33 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Move static detail/debug lookup helpers.
-- [ ] Update `ClientRuntimeImpl` imports/calls as needed.
-- [ ] Move or split debug/detail tests.
-- [ ] Run client runtime and browser diagnostics-related tests.
+- [x] Move static detail/debug lookup helpers.
+- [x] Update `ClientRuntimeImpl` imports/calls as needed.
+- [x] Move or split debug/detail tests.
+- [x] Run client runtime and browser diagnostics-related tests.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-26: Added `runtime/scene-query/static-selection-debug.ts`. Static object details,
+  terrain details, selection debug bounds, env-cell AABB/bounds debug lookup, outdoor source
+  diagnostics root creation, and outdoor root-key helpers now live outside the facade.
+- 2026-06-26: `StaticSceneQuery` now passes a small `StaticSelectionDebugState` bundle into the
+  extracted debug/detail functions. This keeps lookup code explicit about the maps and stores it
+  reads without giving the module mutable ownership.
+- 2026-06-26: No `ClientRuntimeImpl` call-shape changes were needed because the facade API stayed
+  stable. Debug/detail tests still run through the facade and remain a Phase 8 test-colocation
+  cleanup target.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/browser/static-picking.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 8: Facade Cleanup And Resteer
 
-Status: pending.
+Status: completed 2026-06-26.
 
 Purpose:
 
@@ -414,16 +508,44 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Remove dead helpers and obsolete exports from the original module.
-- [ ] Review module dependency graph for circular or static-only leakage.
-- [ ] Review tests for module ownership and split any remaining mega-test sections that now validate
-      extracted modules directly.
-- [ ] Update this plan with final decisions and any remaining cleanup debt.
-- [ ] Run full verification commands.
+- [x] Remove dead helpers and obsolete exports from the original module.
+- [x] Review module dependency graph for circular or static-only leakage.
+- [x] Review tests for module ownership and record remaining test-colocation debt.
+- [x] Update this plan with final decisions and any remaining cleanup debt.
+- [x] Run full verification commands.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-26: `static-scene-query.ts` is now a 624-line facade focused on ingestion, retention,
+  anchor rebasing, snapshot assembly, and public API delegation. Picking, residency, grid traversal,
+  committed env-cell records, portal projection caching, runtime root types, generic geometry,
+  selection keys, and static debug/detail lookup live in focused modules under
+  `runtime/scene-query/`.
+- 2026-06-26: No compatibility barrel was added. Existing external callers still import
+  `StaticSceneQuery` from `runtime/static-scene-query.ts`; static query DTOs and selection-key
+  helpers remain on their extracted module paths from Phase 1.
+- 2026-06-26: The module dependency shape is intentionally one-way: the facade imports extracted
+  modules, and extracted modules do not import the facade. The picker and debug/detail modules
+  consume explicit dependency/state bundles rather than reaching into facade-private maps.
+- 2026-06-26: The dynamic entity implementation plan does not need adjustment from this refactor.
+  The static query boundary now has an explicit `pickStaticSceneRay` adapter and facade-level API
+  that the merged static/dynamic query phase can compose.
+
+Remaining debt to track:
+
+- Split `static-scene-query.test.ts` into colocated tests for `geometry.ts`,
+  `landblock-grid-spatial-index.ts`, `env-cell-committed-records.ts`,
+  `env-cell-residency.ts`, `static-picking.ts`, and `static-selection-debug.ts` where doing so
+  improves ownership clarity. The current tests still pass through the facade and remain good
+  behavior coverage, but they are no longer the cleanest module-level test shape.
+
+Verification:
+
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
+- `git diff --check`
 
 ## Risks And Mitigations
 

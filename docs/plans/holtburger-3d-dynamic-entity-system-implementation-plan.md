@@ -238,7 +238,9 @@ Verification commands:
 ## Proposed Module Shape
 
 Initial TypeScript homes should stay in `apps/holtburger-3d/src/lib/dynamic/` unless implementation
-evidence proves a narrower or shared location:
+evidence proves a narrower or shared location. The merged static/dynamic query surface is runtime
+scene-query infrastructure and should live under `apps/holtburger-3d/src/lib/runtime/scene-query/`,
+not in the dynamic module tree:
 
 ```text
 apps/holtburger-3d/src/lib/dynamic/
@@ -250,8 +252,11 @@ apps/holtburger-3d/src/lib/dynamic/
   dynamic-hook-dispatcher.ts
   dynamic-placement-tracker.ts
   outdoor-dynamic-spatial-index.ts
-  dynamic-scene-query.ts
   dynamic-diagnostics.ts
+
+apps/holtburger-3d/src/lib/runtime/scene-query/
+  merged-scene-query-contracts.ts
+  merged-scene-query.ts
 ```
 
 Renderer-facing dynamic contracts belong with renderer contracts, not the dynamic store:
@@ -1090,8 +1095,9 @@ Debt and follow-up:
   learn the package API.
 - Phase 7 still needs the merged scene-query adapter that turns indexed dynamic AABBs into debug and
   selection-filtered query hits.
-- Phase 6.5 must decompose the static scene-query module before Phase 7 adds merged query behavior.
-  Do not add dynamic query code to the current 4k-line static-only module.
+- Phase 6.5 decomposed the static scene-query module before Phase 7. Phase 7 should compose through
+  the extracted static query facade/adapters rather than reintroducing dynamic query behavior into
+  static-only modules.
 - Dynamic bounds are current-frame AABBs from source part bounds, not vertex/triangle precise bounds.
   Keep the precision metadata visible and upgrade only when a target proves this is insufficient.
 - `npm install` reported 4 audit findings after adding the dependency. They were not auto-fixed during
@@ -1099,7 +1105,7 @@ Debt and follow-up:
 
 ### Phase 6.5: Static Scene Query Decomposition Detour
 
-Status: pending.
+Status: completed 2026-06-27.
 
 Purpose:
 
@@ -1123,15 +1129,38 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Complete the static scene-query refactor plan.
-- [ ] Update this dynamic implementation plan with final module names and any Phase 7 adjustments.
-- [ ] Confirm no dynamic query behavior was introduced during the refactor.
+- [x] Complete the static scene-query refactor plan.
+- [x] Update this dynamic implementation plan with final module names and any Phase 7 adjustments.
+- [x] Confirm no dynamic query behavior was introduced during the refactor.
 
 Decisions and course corrections:
 
 - 2026-06-26: Added as a deliberate detour after reviewing the next Phase 7 surface. Targeted
   extraction would risk strengthening `static-scene-query.ts` as a god module; this detour gives the
   static query boundary a full responsibility-based decomposition before dynamic query composition.
+- 2026-06-27: Completed
+  [docs/plans/holtburger-3d-static-scene-query-refactor-plan.md](holtburger-3d-static-scene-query-refactor-plan.md).
+  `StaticSceneQuery` remains the runtime-facing facade, while static query internals now live under
+  `apps/holtburger-3d/src/lib/runtime/scene-query/`.
+- 2026-06-27: Final static query module names available for Phase 7 composition are
+  `contracts.ts`, `static-selection-keys.ts`, `static-query-state.ts`, `geometry.ts`,
+  `landblock-grid-spatial-index.ts`, `env-cell-committed-records.ts`,
+  `env-cell-portal-projections.ts`, `env-cell-residency.ts`, `static-picking.ts`, and
+  `static-selection-debug.ts`.
+- 2026-06-27: The detour did not introduce dynamic query behavior. It preserved the existing
+  `StaticSceneQuery` public API while moving static picking, residency, grid traversal, committed
+  env-cell records, portal projection caching, debug/detail lookup, runtime root types, selection
+  keys, and geometry into focused static modules.
+- 2026-06-27: Verification for the detour passed from `apps/holtburger-3d`: focused
+  `npm run test:ts -- --run src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/browser/static-picking.test.ts`,
+  full `npm run test:ts`, `npm run check`, `npm run lint:ts`, `npm run lint:dead`, and repository
+  `git diff --check`.
+
+Debt and follow-up:
+
+- Extracted static query module tests are still mostly covered through
+  `static-scene-query.test.ts`. This is acceptable Phase 7 input because behavior coverage is intact,
+  but module-level test colocation remains tracked in the static refactor plan.
 
 ### Phase 7: Merged Scene Query Surface
 
@@ -1144,11 +1173,17 @@ Purpose:
 
 Deliverables:
 
-- Add scene-query request/hit types with static and dynamic variants.
-- Preserve existing static hit behavior as one variant through the decomposed static query facade.
+- Add merged scene-query request/hit types with static and dynamic variants under
+  `apps/holtburger-3d/src/lib/runtime/scene-query/`. The merged surface is runtime composition, not
+  a dynamic-only module.
+- Keep merged query contracts separate from static-only contracts unless the static contract module
+  is deliberately renamed and re-scoped. Prefer a merged contracts module that wraps static hit
+  variants and dynamic hit variants.
+- Preserve existing static hit behavior as one variant through the decomposed `StaticSceneQuery`
+  facade and the extracted static query contracts.
 - Add dynamic hit records with semantic dynamic entity id, source/setup metadata, optional part
   metadata, bounds, distance, hit point, precision, and filter metadata.
-- Add caller filters for default browser selection, debug inspection, and diagnostics.
+- Add explicit caller filter modes for default browser selection, debug inspection, and diagnostics.
 - Migrate runtime/browser call sites from `pickStaticRay` toward the merged query surface.
 - Keep a temporary static compatibility wrapper only if needed for small-step migration, and mark it
   as cleanup debt.
@@ -1157,25 +1192,53 @@ Deliverables:
 
 Acceptance criteria:
 
+- The merged query implementation lives in `runtime/scene-query/` and imports dynamic state through a
+  dynamic adapter; it is not hidden inside `dynamic/` as a debug-only helper.
 - Existing static picking tests pass through the merged query path.
 - Dynamic AABB hits are ordered with static hits by nearest distance.
 - Default browser selection filters exclude the two static-authored dynamic scenery targets.
 - Debug/inspection filters can return those same dynamic targets.
+- Browser picking calls the merged scene-query surface even when the default selection filter excludes
+  first-cut dynamic scenery; otherwise the merged query is not considered wired into the runtime.
 - Any remaining `pickStaticRay` wrapper is documented as temporary cleanup debt with no new callers
   added.
 
 Task checklist:
 
-- [ ] Define merged query contracts.
-- [ ] Add static adapter from the decomposed `StaticSceneQuery` facade.
+- [ ] Define merged query contracts in a new runtime scene-query module rather than extending
+      static-only contracts in place.
+- [ ] Add static adapter from the decomposed `StaticSceneQuery` facade and
+      `runtime/scene-query/contracts.ts`.
+- [ ] Use `runtime/scene-query/static-picking.ts` only when lower-level static hit composition is
+      cleaner than calling the facade; do not import old static query internals.
+- [ ] Route static detail/debug lookup through `runtime/scene-query/static-selection-debug.ts` or
+      facade methods rather than reimplementing static selection-key handling.
 - [ ] Add dynamic query adapter from `OutdoorDynamicSpatialIndex`.
-- [ ] Update browser picking and diagnostics call sites.
-- [ ] Add tests for hit ordering and filter policy.
+- [ ] Update browser picking and diagnostics call sites to use the merged surface.
+- [ ] Add tests proving hit ordering, default-selection exclusion for first-cut dynamic scenery, and
+      debug/inspection inclusion for the same dynamic targets.
 - [ ] Run phase verification commands.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-27: Phase 7 should compose static hits through the completed static query boundary.
+  `StaticSceneQuery` is now small enough to adapt directly for runtime-facing behavior, and
+  `pickStaticSceneRay` is available for lower-level composition with explicit
+  `EnvCellCommittedRecordStore` and `LandblockGridSpatialIndex` dependencies if the merged query
+  implementation needs that shape.
+- 2026-06-27: Static DTOs, filters, hit variants, and selection-key helpers are now imported from
+  `runtime/scene-query/contracts.ts` and `runtime/scene-query/static-selection-keys.ts`. Phase 7
+  should not add compatibility imports from `runtime/static-scene-query.ts` for those contracts.
+- 2026-06-27: Static debug/detail behavior is now isolated in
+  `runtime/scene-query/static-selection-debug.ts`. Dynamic inspection should add a parallel dynamic
+  detail provider or merged detail layer rather than extending static selection labels.
+- 2026-06-27: The merged query home should be `runtime/scene-query/`, not
+  `dynamic/dynamic-scene-query.ts`, because it composes static and dynamic results for runtime and
+  browser callers. Dynamic-specific lookup should remain behind an adapter that consumes
+  `OutdoorDynamicSpatialIndex`.
+- 2026-06-27: Phase 7 must prove selection policy separately from query membership. The two
+  first-cut dynamic scenery targets should be queryable for debug/inspection but excluded by the
+  default browser selection filter.
 
 ### Phase 8: Dynamic Renderer Resource And Instance Commits
 

@@ -1,4 +1,5 @@
 import type {
+	StaticBounds,
 	StaticAuthoredDynamicSeedRecord,
 	StaticScopeOwnerKey,
 	StaticWorkPeerRecordOwner,
@@ -21,6 +22,7 @@ import {
 	type DynamicEntityResourceChange,
 } from "./dynamic-entity-resource-manager";
 import { DynamicPlacementTracker } from "./dynamic-placement-tracker";
+import type { OutdoorDynamicSpatialIndexRecord } from "./outdoor-dynamic-spatial-index";
 
 const FIRST_SLICE_REQUIRED_RESOURCES = ["setup-model", "animation"] as const;
 const PHASE_4B_REQUIRED_RESOURCES = [
@@ -117,6 +119,17 @@ export class DynamicEntityController {
 
 	createSnapshot(): DynamicRuntimeSnapshot {
 		return this.#store.createSnapshot();
+	}
+
+	queryOutdoorDynamicBounds(options: {
+		readonly landblockId: number;
+		readonly bounds: StaticBounds;
+	}): readonly OutdoorDynamicSpatialIndexRecord[] {
+		return this.#placementTracker.queryOutdoorBounds(options);
+	}
+
+	queryOutdoorDynamicLandblockIds(): readonly number[] {
+		return this.#placementTracker.outdoorLandblockIds();
 	}
 
 	#upsertPlacementUpdate(record: DynamicEntityRecord): void {

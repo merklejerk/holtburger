@@ -85,6 +85,25 @@ describe("outdoor dynamic spatial index", () => {
 		expect(index.records()).toEqual([]);
 		expect(index.landblockIdsForEntity("dynamic-cross-boundary")).toEqual([]);
 	});
+
+	it("lists indexed landblocks without exposing records", () => {
+		const sourceLandblockId = makeOutdoorLandblockId(0xda, 0x55);
+		const eastLandblockId = makeOutdoorLandblockId(0xdb, 0x55);
+		const index = new OutdoorDynamicSpatialIndex();
+
+		index.upsert({
+			bounds: createBounds({
+				max: { x: 205, y: 3, z: -70 },
+				min: { x: 180, y: 1, z: -90 },
+			}),
+			entityId: "dynamic-cross-boundary",
+			landblockIds: [eastLandblockId, sourceLandblockId],
+			precision: "current-frame-source-part-bounds-aabb",
+			sourceLandblockId,
+		});
+
+		expect(index.landblockIds()).toEqual([sourceLandblockId, eastLandblockId]);
+	});
 });
 
 function createBounds(bounds: StaticBounds): StaticBounds {

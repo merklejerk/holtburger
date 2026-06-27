@@ -17,7 +17,10 @@ import type {
 	DynamicEntityPartBounds,
 	DynamicEntityRecord,
 } from "./contracts";
-import { OutdoorDynamicSpatialIndex } from "./outdoor-dynamic-spatial-index";
+import {
+	OutdoorDynamicSpatialIndex,
+	type OutdoorDynamicSpatialIndexRecord,
+} from "./outdoor-dynamic-spatial-index";
 
 const CURRENT_FRAME_BOUNDS_PRECISION =
 	"current-frame-source-part-bounds-aabb" as const;
@@ -62,6 +65,17 @@ export class DynamicPlacementTracker {
 
 	outdoorIndex(): OutdoorDynamicSpatialIndex {
 		return this.#outdoorIndex;
+	}
+
+	queryOutdoorBounds(options: {
+		readonly landblockId: number;
+		readonly bounds: StaticBounds;
+	}): readonly OutdoorDynamicSpatialIndexRecord[] {
+		return this.#outdoorIndex.search(options.landblockId, options.bounds);
+	}
+
+	outdoorLandblockIds(): readonly number[] {
+		return this.#outdoorIndex.landblockIds();
 	}
 }
 

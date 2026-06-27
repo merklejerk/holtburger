@@ -1247,7 +1247,7 @@ Debt and follow-up:
 
 ### Phase 7B: Merged Static/Dynamic Scene Query Surface
 
-Status: pending.
+Status: completed 2026-06-27.
 
 Purpose:
 
@@ -1301,24 +1301,24 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Define merged query contracts in a new runtime scene-query module rather than extending
+- [x] Define merged query contracts in a new runtime scene-query module rather than extending
       static-only contracts in place.
-- [ ] Add static query source composition through the Phase 7A `StaticSceneQuery` API.
-- [ ] Use `runtime/scene-query/static-picking.ts` only when lower-level static hit composition is
+- [x] Add static query source composition through the Phase 7A `StaticSceneQuery` API.
+- [x] Use `runtime/scene-query/static-picking.ts` only when lower-level static hit composition is
       cleaner than calling the facade; do not import old static query internals.
-- [ ] Route static detail/debug lookup through `runtime/scene-query/static-selection-debug.ts` or
+- [x] Route static detail/debug lookup through `runtime/scene-query/static-selection-debug.ts` or
       facade methods rather than reimplementing static selection-key handling.
-- [ ] Add a narrow dynamic bounds query method that returns indexed outdoor dynamic bounds records
+- [x] Add a narrow dynamic bounds query method that returns indexed outdoor dynamic bounds records
       keyed by entity id.
-- [ ] Add dynamic query source logic that uses indexed bounds as broadphase candidates and ray/AABB
+- [x] Add dynamic query source logic that uses indexed bounds as broadphase candidates and ray/AABB
       math as the narrow phase.
-- [ ] Add tests proving dynamic hits are stable across render-anchor changes and cross-landblock
+- [x] Add tests proving dynamic hits are stable across render-anchor changes and cross-landblock
       indexed bounds.
-- [ ] Update browser picking and diagnostics call sites to use the merged surface.
-- [ ] Add tests proving hit ordering, no dynamic snapshot scans for picking, default-selection
+- [x] Update browser picking and diagnostics call sites to use the merged surface.
+- [x] Add tests proving hit ordering, no dynamic snapshot scans for picking, default-selection
       exclusion for first-cut dynamic scenery, debug/inspection inclusion for the same dynamic
       targets, and env-cell dynamic exclusion until a real query path exists.
-- [ ] Run phase verification commands.
+- [x] Run phase verification commands.
 
 Decisions and course corrections:
 
@@ -1335,6 +1335,33 @@ Decisions and course corrections:
 - 2026-06-27: Phase 7A completed the static query surface cleanup. Phase 7B should call
   `StaticSceneQuery.pickRay` with merged-query-derived filters instead of reimplementing or
   special-casing env-cell portal aperture hits.
+- 2026-06-27: Implemented merged query contracts and source composition in
+  `runtime/scene-query/merged-scene-query-contracts.ts` and
+  `runtime/scene-query/merged-scene-query.ts`. Static hits are wrapped as static scene hits, and
+  dynamic hits carry lightweight `entityId`, bounds, distance, precision, source residence, and
+  selectability metadata.
+- 2026-06-27: Added narrow dynamic query methods on `DynamicEntityController` and
+  `DynamicPlacementTracker`, plus `OutdoorDynamicSpatialIndex.landblockIds()`. Merged query consumes
+  keyed indexed bounds through those methods rather than scanning `DynamicRuntimeSnapshot.records` or
+  reaching into private controller/tracker fields.
+- 2026-06-27: Browser terrain grounding and click selection now call `pickSceneRay` in
+  `default-selection` mode. The compatibility `pickStaticRay` wrapper remains only for existing
+  runtime callers/tests and delegates through the merged query surface.
+- 2026-06-27: Default browser selection excludes first-cut static-authored dynamic scenery while
+  `debug-inspection` and `diagnostics` scene query modes can return those dynamic hits. Env-cell
+  dynamic records remain excluded until an explicit env-cell dynamic query/index path exists.
+
+Debt and follow-up:
+
+- Remove the temporary `ClientRuntime.pickStaticRay` compatibility wrapper during Phase 11 once
+  remaining tests and any internal callers are migrated to `pickSceneRay`.
+- Browser selected-diagnostics UI still presents static selections because default browser selection
+  intentionally excludes first-cut dynamic scenery. A future debug/inspection UI can request dynamic
+  scene hits by `entityId` without depending on static selection-key labels.
+- Dynamic broadphase now uses indexed landblock ids plus conservative per-landblock RBush searches
+  before ray/AABB narrowing. This avoids snapshot scans and keeps spatial-index ownership intact, but
+  a later performance pass can tighten the RBush search bounds to the ray segment inside each
+  landblock if needed.
 
 ### Phase 8: Dynamic Renderer Resource And Instance Commits
 

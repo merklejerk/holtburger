@@ -115,6 +115,39 @@ describe("dynamic entity controller tick", () => {
 			precision: "current-frame-source-part-bounds-aabb",
 		});
 	});
+
+	it("exposes indexed outdoor dynamic bounds through a narrow query surface", () => {
+		const store = new DynamicEntityStore();
+		const sourceLandblockId = makeOutdoorLandblockId(0xda, 0x55);
+		store.upsert(
+			createReadyRecord({
+				partPose: createPlacement({ x: 20, y: 0, z: -20 }),
+				sourceLandblockId,
+			}),
+		);
+		const controller = new DynamicEntityController({ store });
+
+		controller.tick(0);
+
+		expect(controller.queryOutdoorDynamicLandblockIds()).toEqual([
+			sourceLandblockId,
+		]);
+		expect(
+			controller.queryOutdoorDynamicBounds({
+				bounds: {
+					max: { x: 45, y: 10, z: -95 },
+					min: { x: 15, y: -10, z: -125 },
+				},
+				landblockId: sourceLandblockId,
+			}),
+		).toMatchObject([
+			{
+				entityId: "dynamic-test-entity",
+				landblockId: sourceLandblockId,
+				precision: "current-frame-source-part-bounds-aabb",
+			},
+		]);
+	});
 });
 
 function createReadyRecord(

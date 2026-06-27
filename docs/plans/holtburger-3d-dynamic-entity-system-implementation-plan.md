@@ -1958,7 +1958,7 @@ Debt and follow-up:
 
 ### Phase 8G: Continuous Dynamic Pose Sampling
 
-Status: pending.
+Status: completed on 2026-06-27.
 
 Purpose:
 
@@ -1987,8 +1987,11 @@ Deliverables:
 
 Acceptance criteria:
 
-- A dynamic animation sampled between two authored frames reports interpolated object/root and
-  per-part poses instead of snapping to the floored frame pose.
+- A dynamic animation sampled between two authored frames inside the authored range reports
+  interpolated object/root and per-part poses instead of snapping to the floored frame pose.
+- The loop seam does not interpolate from the final authored pose back to frame 0. Same-index parts
+  are not guaranteed to form valid interpolation pairs across that boundary, so the player holds the
+  final authored pose until the sampled frame wraps.
 - Hooks do not fire every render tick. Hook dispatch follows crossed authored frames, catches up
   normal hitches in order, and does not skip intermediate hooks unless the bounded missed-hook window
   is exceeded.
@@ -2003,19 +2006,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add or reuse small placement interpolation helpers in the dynamic animation player boundary.
-- [ ] Update frame sampling to expose `nextFrameIndex` and `frameAlpha`.
-- [ ] Interpolate object position frames when present and well-formed.
-- [ ] Interpolate matching per-part local placements across adjacent part frames.
-- [ ] Replace sampled-frame-only hook dispatch with ordered crossed-frame dispatch.
-- [ ] Add bounded missed-hook catch-up with an initial eight-frame replay window and non-durable
+- [x] Add or reuse small placement interpolation helpers in the dynamic animation player boundary.
+- [x] Update frame sampling to expose `nextFrameIndex` and `frameAlpha`.
+- [x] Interpolate object position frames when present and well-formed, excluding the loop seam.
+- [x] Interpolate matching per-part local placements across adjacent part frames, excluding the loop
+      seam.
+- [x] Replace sampled-frame-only hook dispatch with ordered crossed-frame dispatch.
+- [x] Add bounded missed-hook catch-up with an initial eight-frame replay window and non-durable
       console/developer warning for truncation.
-- [ ] Advance the hook-dispatch cursor across hookless crossed frames.
-- [ ] Preserve existing unsupported-hook diagnostics for dispatched hook frames.
-- [ ] Add focused interpolation, crossed-frame hook dispatch, bounded truncation behavior, and
+- [x] Advance the hook-dispatch cursor across hookless crossed frames.
+- [x] Preserve existing unsupported-hook diagnostics for dispatched hook frames.
+- [x] Add focused interpolation, crossed-frame hook dispatch, bounded truncation behavior, and
       hookless cursor advancement, and SetOmega loop stability tests. Do not add tests whose only
       assertion is debug-oriented logging.
-- [ ] Run full verification commands.
+- [x] Run full verification commands.
 
 Decisions and course corrections:
 
@@ -2034,6 +2038,23 @@ Decisions and course corrections:
 - 2026-06-27 dry run follow-up: Crossed-frame dispatch must advance its cursor through hookless
   frames too. Leaving cursor advancement conditional on hooks or issues preserves the current
   sampled-frame shortcut and can make later ticks reconsider old frame ranges.
+- 2026-06-27: Implemented interpolation inside `DynamicAnimationPlayer` only. Placement tracking,
+  renderer instance submission, and WebGL draw code continue to consume already evaluated poses.
+- 2026-06-27: Crossed-frame hook dispatch now processes authored frames in order and integrates
+  active `SetOmega` up to each hook's authored frame time before applying that hook, then integrates
+  to the current runtime tick. This avoids applying a missed transform hook only after old omega has
+  already been integrated across the whole hitch.
+- 2026-06-27: Large hook catch-up is capped to the latest eight crossed authored frames. Truncation
+  emits only a non-durable console/developer warning; no runtime issue, snapshot field, or durable
+  diagnostics record was added.
+- 2026-06-27 follow-up: Pose interpolation now holds the final authored frame across the loop seam
+  instead of interpolating `last -> frame 0`. Windmill animation `0x0300061b` proves same-index part
+  frames can be spatially discontinuous across the seam even though the visual cycle is continuous.
+- 2026-06-27: Verification from `apps/holtburger-3d`: focused
+  `npm run test:ts -- dynamic-animation-player.test.ts`, focused
+  `npm run test:ts -- client-runtime.test.ts dynamic-placement-tracker.test.ts`, plus
+  `npm run check`, `npm run lint:ts`, `npm run test:ts` (61 files / 499 tests),
+  `npm run lint:dead`, and root `git diff --check` pass.
 
 Debt and follow-up:
 

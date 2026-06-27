@@ -1380,6 +1380,108 @@ describe("static scene query", () => {
 		});
 	});
 
+	it("picks env-cell portal apertures only when debug pick filters include them", () => {
+		const query = new StaticSceneQuery();
+		const owner = createEnvCellWorkOwner("work-env-portals", 0xda55ffff);
+		query.applyStaticPeerRecords({
+			portalInteriorRecords: [
+				createSinglePortalInteriorRecord(owner, {
+					envCellId: 0xda550100,
+					landblockId: 0xda55ffff,
+				}),
+			],
+		});
+
+		const request = {
+			context: {
+				envCellId: 0xda550100,
+				kind: "env-cell" as const,
+				landblockId: 0xda55ffff,
+			},
+			ray: {
+				direction: { x: 0, y: 0, z: -1 },
+				origin: { x: 0.25, y: 0.25, z: 1 },
+			},
+		};
+
+		expect(query.pickRay(request)).toBeNull();
+		expect(
+			query.pickRay({
+				...request,
+				filters: { includeEnvCellPortals: true },
+			}),
+		).toMatchObject({
+			distance: 1,
+			selectionKey: {
+				envCellId: 0xda550100,
+				itemKind: "env-cell-portal",
+				landblockId: 0xda55ffff,
+				portalId: "portal-a",
+			},
+		});
+		expect(
+			query.pickRay({
+				...request,
+				context: {
+					acceptedEnvCellIds: [0xda550101],
+					envCellId: 0xda550100,
+					kind: "env-cell" as const,
+					landblockId: 0xda55ffff,
+				},
+				filters: { includeEnvCellPortals: true },
+			}),
+		).toBeNull();
+	});
+
+	it("picks env-cell portal apertures in render space after anchor translation", () => {
+		const query = new StaticSceneQuery();
+		const owner = createEnvCellWorkOwner("work-env-portals", 0xdb55ffff);
+		query.setOutdoorAnchorLandblockId(0xda55ffff);
+		query.applyStaticPeerRecords({
+			portalInteriorRecords: [
+				createSinglePortalInteriorRecord(owner, {
+					envCellId: 0xdb550100,
+					landblockId: 0xdb55ffff,
+				}),
+			],
+		});
+
+		const hit = query.pickRay({
+			context: { kind: "outdoor" },
+			filters: { includeEnvCellPortals: true },
+			ray: {
+				direction: { x: 0, y: 0, z: -1 },
+				origin: { x: 192.25, y: 0.25, z: 1 },
+			},
+		});
+
+		expect(hit).toMatchObject({
+			distance: 1,
+			selectionKey: {
+				envCellId: 0xdb550100,
+				itemKind: "env-cell-portal",
+				landblockId: 0xdb55ffff,
+				portalId: "portal-a",
+			},
+		});
+		if (hit === null || hit.selectionKey.itemKind !== "env-cell-portal") {
+			throw new Error("Expected env-cell portal hit.");
+		}
+		expect(query.querySelectionDebugBounds(hit.selectionKey)).toEqual({
+			bounds: {
+				max: { x: 193, y: 1, z: 0 },
+				min: { x: 192, y: 0, z: 0 },
+			},
+			selectionKey: hit.selectionKey,
+		});
+		expect(query.queryEnvCellPortalDetails(hit.selectionKey)).toEqual({
+			envCellId: 0xdb550100,
+			landblockId: 0xdb55ffff,
+			portal: null,
+			portalAperture: expect.objectContaining({ portalId: "portal-a" }),
+		});
+	});
+
 	it("commits and prunes static portal graphs by retained scope", () => {
 		const query = new StaticSceneQuery();
 		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
@@ -2429,6 +2531,41 @@ function createProjectionPortalInteriorRecord(
 		})),
 		kind: "env-cell-portal-interior",
 		landblockId,
+		owner,
+		portalLinks: [],
+	};
+}
+
+function createSinglePortalInteriorRecord(
+	owner: StaticWorkPeerRecordOwner,
+	options: {
+		readonly envCellId: number;
+		readonly landblockId: number;
+	},
+): StaticPortalInteriorRecord {
+	return {
+		envCells: [
+			{
+				envCellId: options.envCellId,
+				localPlacement: createPlacement(),
+				portalApertures: [
+					{
+						plane: null,
+						points: [
+							{ x: 0, y: 0, z: 0 },
+							{ x: 1, y: 0, z: 0 },
+							{ x: 0, y: 1, z: 0 },
+						],
+						polygonId: null,
+						portalId: "portal-a",
+						sourceIndex: 0,
+					},
+				],
+				portals: [],
+			},
+		],
+		kind: "env-cell-portal-interior",
+		landblockId: options.landblockId,
 		owner,
 		portalLinks: [],
 	};

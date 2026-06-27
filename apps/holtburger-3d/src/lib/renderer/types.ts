@@ -1,11 +1,14 @@
 import type {
 	StaticAuthoredDynamicSeedRecord,
 	StaticBakeTextureUse,
+	StaticBounds,
 	StaticDomain,
 	StaticPortalApertureResource,
 	StaticMaterialCoverageReport,
+	StaticMaterialTableEntry,
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectRenderInstance,
+	StaticObjectRenderState,
 	StaticObjectVisualResource,
 	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
@@ -191,7 +194,7 @@ export interface TexturePlacementUpdate {
 	readonly placements: readonly TexturePlacement[];
 	readonly removedTextureRefIds: readonly string[];
 	readonly textureUsePlacements: readonly TextureUsePlacement[];
-	readonly textureBindings: readonly StaticTextureBinding[];
+	readonly textureBindings: readonly TextureBinding[];
 	readonly revision: number;
 }
 
@@ -213,17 +216,119 @@ interface TexturePlacement {
 	readonly rect: readonly [number, number, number, number];
 }
 
+type DynamicTextureBindingOwner = {
+	/** Texture residency owned by a dynamic renderer visual resource. */
+	readonly kind: "dynamic-visual-resource";
+	readonly resourceId: string;
+};
+
+export type TextureBindingOwner =
+	| StaticTextureUseOwner
+	| DynamicTextureBindingOwner;
+
 export type StaticTextureBindingOwner = StaticTextureUseOwner;
 
-export interface StaticTextureBinding {
+export function createTextureBindingOwnerKey(owner: TextureBindingOwner): string {
+	switch (owner.kind) {
+		case "draw-unit":
+			return `draw-unit:${owner.drawUnitId}`;
+		case "static-object-visual-resource":
+			return `static-object-visual-resource:${owner.resourceId}`;
+		case "dynamic-visual-resource":
+			return `dynamic-visual-resource:${owner.resourceId}`;
+	}
+}
+
+export interface TextureBinding {
 	/** Resource that owns the shader role-page slot assignment. */
-	readonly owner: StaticTextureBindingOwner;
+	readonly owner: TextureBindingOwner;
 	readonly textureUseId: string;
 	readonly textureRefId: string;
 	readonly rolePage: TextureRolePageSlot;
 	readonly textureWidth: number;
 	readonly textureHeight: number;
 	readonly rect: readonly [number, number, number, number];
+}
+
+export type StaticTextureBinding = TextureBinding;
+
+type DynamicRendererResourceId = string;
+type DynamicRendererEntityId = string;
+type DynamicRendererInstanceId = string;
+
+export interface DynamicRendererResourceCommit {
+	/** Dynamic visual resources to install or refresh in renderer-owned residency. */
+	readonly addedVisualResources: readonly DynamicRendererVisualResource[];
+	/** Dynamic visual resource ids whose renderer residency should be released. */
+	readonly removedVisualResourceIds: readonly DynamicRendererResourceId[];
+	readonly revision: number;
+}
+
+export interface DynamicRendererInstanceCommit {
+	/** Frame time used to derive the submitted dynamic poses. */
+	readonly frameTimeSeconds: number;
+	readonly instances: readonly DynamicRendererInstance[];
+	readonly revision: number;
+}
+
+export interface DynamicRendererVisualResource {
+	/** Renderer resource id; distinct from semantic dynamic entity id. */
+	readonly resourceId: DynamicRendererResourceId;
+	/** Semantic dynamic entity that caused this visual resource to be resident. */
+	readonly entityId: DynamicRendererEntityId;
+	readonly materialPlan: DynamicRendererMaterialPlan;
+	readonly parts: readonly DynamicRendererVisualPart[];
+}
+
+export interface DynamicRendererVisualPart {
+	readonly bounds: StaticBounds | null;
+	readonly indices: Uint16Array | Uint32Array;
+	readonly indexType: "uint16" | "uint32";
+	readonly materialEntries: readonly StaticMaterialTableEntry[];
+	readonly materialFamily: "flat-color" | "indexed-paletted" | "texture-rgba";
+	readonly materialPass: "opaque" | "alpha-test" | "transparent" | "additive";
+	readonly materialSlotIndices: Float32Array;
+	readonly partIndex: number;
+	readonly positions: Float32Array;
+	readonly renderState: StaticObjectRenderState;
+	readonly sourceAssetId: string;
+	readonly texCoords: Float32Array;
+	readonly textureUseIds: readonly string[];
+	readonly triangleCount: number;
+	readonly vertexCount: number;
+}
+
+interface DynamicRendererMaterialPlan {
+	readonly skipped: readonly DynamicRendererSkippedMaterial[];
+	readonly textureUses: readonly DynamicRendererTextureUse[];
+}
+
+interface DynamicRendererTextureUse {
+	readonly role: string;
+	readonly samplingPolicy?: StaticBakeTextureUse["samplingPolicy"];
+	readonly source: StaticBakeTextureUse["source"];
+	readonly textureUseId: string;
+}
+
+interface DynamicRendererSkippedMaterial {
+	readonly code: string;
+	readonly message: string;
+}
+
+export interface DynamicRendererInstance {
+	/** Renderer instance id; distinct from semantic dynamic entity id. */
+	readonly instanceId: DynamicRendererInstanceId;
+	readonly entityId: DynamicRendererEntityId;
+	/** Landblock anchor used to translate the landblock-local dynamic transform into render space. */
+	readonly landblockId: number;
+	readonly resourceId: DynamicRendererResourceId;
+	readonly objectToRenderMatrix: readonly number[];
+	readonly partToObjectMatrices: readonly DynamicRendererPartTransform[];
+}
+
+interface DynamicRendererPartTransform {
+	readonly matrix: readonly number[];
+	readonly partIndex: number;
 }
 
 export interface TextureUsePlacement {
@@ -304,6 +409,12 @@ export interface RendererSnapshot {
 	readonly recentStaticObjectUploads: readonly StaticObjectUploadDiagnostics[];
 	readonly terrainDrawUnits: number;
 	readonly directEnvCellDrawCalls: number;
+	readonly dynamicVisualResources: number;
+	readonly dynamicVisualResourceTextureUses: number;
+	readonly dynamicInstances: number;
+	readonly dynamicDrawCalls: number;
+	readonly skippedDynamicSubmissions: number;
+	readonly recentDynamicResourceCommits: readonly DynamicRendererResourceCommitDiagnostics[];
 	readonly renderedTriangles: number;
 	readonly debugOverlayPrimitives: number;
 }
@@ -322,6 +433,14 @@ export interface StaticObjectUploadDiagnostics {
 	readonly drawUnitCount: number;
 	readonly uploadedBufferBytes: number;
 	readonly uploadMs: number;
+}
+
+export interface DynamicRendererResourceCommitDiagnostics {
+	readonly addedVisualResources: number;
+	readonly removedVisualResources: number;
+	readonly revision: number;
+	readonly skippedMaterials: number;
+	readonly textureUses: number;
 }
 
 export interface RendererFrameTelemetry {
@@ -571,6 +690,8 @@ export interface Renderer {
 		landblockId: number,
 		payload: EnvCellSystemLayerPayload | null,
 	): void;
+	commitDynamicResources(commit: DynamicRendererResourceCommit): void;
+	commitDynamicInstances(commit: DynamicRendererInstanceCommit): void;
 	setStaticLayerVisibility(visibility: RendererStaticLayerVisibility): void;
 	setStaticRenderAnchorLandblockId(anchorLandblockId: number | null): void;
 	setFlatVisionModeEnabled(enabled: boolean): void;

@@ -10,10 +10,12 @@ import {
 	createStaticMaterialTextureSamplingPolicy,
 	resolveRepeatedStaticMaterialPrimaryWrapMode,
 } from "../static/bake/static-material-texture-policy";
+import { createStaticMaterialTableEntry } from "../static/bake/static-material-adapter";
 import type {
 	MaterialTextureDataUseIdentity,
 	StaticMaterialSlotIdentity,
 	StaticObjectInstanceIdentity,
+	StaticMaterialTableEntry,
 	StaticObjectMaterialSlotFacts,
 	StaticObjectPartMaterialSlotFacts,
 	StaticObjectSourceAssetFacts,
@@ -28,11 +30,13 @@ import { resolveStaticObjectSourceClosure } from "../static/objects/static-objec
 import {
 	animationPayloadDtoSchema,
 	type AnimationPayloadDto,
+	type GfxObjPayloadDto,
 } from "../host/contracts";
 import type {
 	DynamicEntityAnimationResource,
 	DynamicEntityId,
 	DynamicEntityIssue,
+	DynamicEntityRenderPart,
 	DynamicEntityResourceKey,
 	DynamicEntityResourceState,
 	DynamicEntityRequiredResource,
@@ -87,6 +91,17 @@ interface TrackedDynamicEntityResources {
 	readonly setupHostKey: HostAssetKey;
 	readonly setupResourceKey: DynamicEntityResourceKey;
 	readonly seed: StaticAuthoredDynamicSeedFacts;
+}
+
+interface DynamicVisualHostAssetRequestResult {
+	readonly issues: readonly DynamicEntityIssue[];
+	readonly preparedAssets: ReadonlyMap<string, PreparedAsset>;
+}
+
+interface DynamicMaterialRenderEntry {
+	readonly entry: StaticMaterialTableEntry;
+	readonly family: "flat-color" | "indexed-paletted" | "texture-rgba";
+	readonly pass: "opaque" | "alpha-test" | "transparent" | "additive";
 }
 
 const SETUP_ANIMATION_REQUIRED_RESOURCES = [
@@ -296,16 +311,14 @@ export class DynamicEntityResourceManager {
 		const unsupportedReasons = createUnsupportedMaterialReasons(
 			materialPlans.fallbackReasons,
 		);
-		const textureRequirements = createTextureRequirements(
-			materialPlans.materialPlans,
-		);
+		const textureRequirements = createTextureRequirements(materialPlans.materialPlans);
 		const resourceKeys = createVisualHostAssetKeys({
 			closure,
 			seed: tracked.seed,
 			setupAppearanceIsMissing: closure.missingRefs.some(isSetupAppearanceRef),
 			textureRequirements,
 		});
-		const loadIssues = await this.#requestVisualHostAssets(resourceKeys);
+		const visualHostAssets = await this.#requestVisualHostAssets(resourceKeys);
 		const current = this.#trackedByEntityId.get(entityId);
 		if (!current || current.generation !== generation) {
 			return;
@@ -314,13 +327,13 @@ export class DynamicEntityResourceManager {
 		if (
 			missingRefs.length > 0 ||
 			unsupportedReasons.length > 0 ||
-			loadIssues.length > 0
+			visualHostAssets.issues.length > 0
 		) {
 			this.#onResourcesChanged?.({
 				entityId,
-				issues: [
-					...createMissingRefIssues(missingRefs),
-					...loadIssues,
+					issues: [
+						...createMissingRefIssues(missingRefs),
+						...visualHostAssets.issues,
 					...(unsupportedReasons.length > 0
 						? [
 								{
@@ -353,6 +366,35 @@ export class DynamicEntityResourceManager {
 				this.#assetService.acquirePreparedAssetLease(key),
 			),
 		);
+		let renderParts: readonly DynamicEntityRenderPart[];
+		try {
+			renderParts = createDynamicRenderParts({
+				materialPlans: materialPlans.materialPlans,
+				preparedAssets: visualHostAssets.preparedAssets,
+				sourceAssets,
+				textureRequirements,
+			});
+		} catch (error) {
+			this.#onResourcesChanged?.({
+				entityId,
+				issues: [createDynamicRenderPartExtractionIssue(error)],
+				kind: "visual-resources-failed",
+				resources: {
+					required: [
+						...SETUP_ANIMATION_REQUIRED_RESOURCES,
+						...VISUAL_REQUIRED_RESOURCES,
+					],
+					setupAnimation: createReadySetupAnimationResourceState(tracked),
+					status: "failed",
+					visual: {
+						missingRefs: [],
+						status: "failed",
+						unsupportedReasons: [],
+					},
+				},
+			});
+			return;
+		}
 		this.#onResourcesChanged?.({
 			entityId,
 			kind: "visual-resources-ready",
@@ -371,6 +413,7 @@ export class DynamicEntityResourceManager {
 					})),
 					materialSources: closure.materialSources,
 					paletteSources: closure.paletteSources,
+					renderParts,
 					sourceAssets,
 					status: "ready",
 					textureRefs: closure.textureRefs,
@@ -382,39 +425,30 @@ export class DynamicEntityResourceManager {
 
 	async #requestVisualHostAssets(
 		keys: readonly HostAssetKey[],
-	): Promise<readonly DynamicEntityIssue[]> {
-		const results = await Promise.allSettled(
-			uniqueHostAssetKeys(keys).map((key) =>
-				this.#assetService.requestPreparedAsset(key).then(
-					() => ({
-						key,
-						status: "fulfilled" as const,
-					}),
-					(error: unknown) => ({
-						error,
-						key,
-						status: "rejected" as const,
-					}),
-				),
-			),
+	): Promise<DynamicVisualHostAssetRequestResult> {
+		const issues: DynamicEntityIssue[] = [];
+		const preparedAssets = new Map<string, PreparedAsset>();
+		await Promise.all(
+			uniqueHostAssetKeys(keys).map(async (key) => {
+				try {
+					preparedAssets.set(
+						describeHostAssetKey(key),
+						await this.#assetService.requestPreparedAsset(key),
+					);
+				} catch (error) {
+					issues.push({
+						kind: "dynamic-resource-load-failed",
+						message: formatErrorMessage(error),
+						resource: createRequiredResourceFromHostKey(key),
+						resourceKey: createResourceKeyFromHostKey(key),
+					});
+				}
+			}),
 		);
-		return results.flatMap((result) => {
-			if (
-				result.status !== "fulfilled" ||
-				result.value.status === "fulfilled"
-			) {
-				return [];
-			}
-			const key = result.value.key;
-			return [
-				{
-					kind: "dynamic-resource-load-failed" as const,
-					message: formatErrorMessage(result.value.error),
-					resource: createRequiredResourceFromHostKey(key),
-					resourceKey: createResourceKeyFromHostKey(key),
-				},
-			];
-		});
+		return {
+			issues,
+			preparedAssets,
+		};
 	}
 
 	#nextGeneration(): number {
@@ -598,9 +632,24 @@ function createTextureRequirements(
 					dataUse: role.dataUse,
 					wrapMode,
 				}),
+				textureUseId: createDynamicTextureUseId(plan, role),
 			}),
 		);
 	});
+}
+
+function createDynamicTextureUseId(
+	plan: StaticMaterialPlan,
+	role: StaticMaterialPlan["textureRoles"][number],
+): string {
+	return [
+		"dynamic-texture",
+		plan.material.materialId.toString(16).padStart(8, "0"),
+		role.role,
+		role.dataUse.kind === "palette-texture-use"
+			? role.dataUse.palette.paletteId.toString(16).padStart(8, "0")
+			: createPreparedTextureHostKey(role.dataUse).id,
+	].join(":");
 }
 
 function createTextureRequirementKey(
@@ -627,6 +676,327 @@ function createUnsupportedMaterialReasons(
 		material: reason.material,
 		message: reason.message,
 	}));
+}
+
+function createDynamicRenderParts(options: {
+	readonly materialPlans: readonly StaticMaterialPlan[];
+	readonly preparedAssets: ReadonlyMap<string, PreparedAsset>;
+	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
+	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
+}): readonly DynamicEntityRenderPart[] {
+	const materialEntryByMaterialId = createDynamicMaterialEntriesByMaterialId(
+		options.materialPlans,
+		options.textureRequirements,
+	);
+	const parts: DynamicEntityRenderPart[] = [];
+	for (const sourceAsset of options.sourceAssets) {
+		for (const part of sourceAsset.parts) {
+			const key = createHostAssetKey("gfx-obj", part.gfxObj.sourceDid);
+			const prepared = options.preparedAssets.get(describeHostAssetKey(key));
+			if (!prepared) {
+				throw new Error(
+					`Dynamic render part ${part.partIndex} missing prepared gfx asset ${describeHostAssetKey(key)}.`,
+				);
+			}
+			const gfxObj = resolveGfxObjPayload(prepared, part.partIndex);
+			parts.push(
+				createDynamicRenderPart({
+					gfxObj,
+					materialEntryByMaterialId,
+					part,
+				}),
+			);
+		}
+	}
+	return parts;
+}
+
+function resolveGfxObjPayload(
+	prepared: PreparedAsset,
+	partIndex: number,
+): GfxObjPayloadDto {
+	if (
+		typeof prepared.payload !== "object" ||
+		prepared.payload === null ||
+		!("kind" in prepared.payload) ||
+		prepared.payload.kind !== "gfx-obj"
+	) {
+		throw new Error(
+			`Dynamic render part ${partIndex} expected prepared gfx-obj payload for ${describeHostAssetKey(prepared.key)}.`,
+		);
+	}
+	return prepared.payload as GfxObjPayloadDto;
+}
+
+function createDynamicRenderPart(options: {
+	readonly gfxObj: GfxObjPayloadDto;
+	readonly materialEntryByMaterialId: ReadonlyMap<
+		number,
+		DynamicMaterialRenderEntry
+	>;
+	readonly part: StaticObjectSourceAssetFacts["parts"][number];
+}): DynamicEntityRenderPart {
+	const triangles = options.part.triangles;
+	const sourcePositions = asFloat32Array(options.gfxObj.renderGeometry.positions);
+	const sourceTexCoords = asFloat32Array(options.gfxObj.renderGeometry.uvs);
+	const positions = new Float32Array(triangles.length * 9);
+	const texCoords = new Float32Array(triangles.length * 6);
+	const materialSlotIndices = new Float32Array(triangles.length * 3);
+	const indices =
+		triangles.length * 3 > 65535
+			? new Uint32Array(triangles.length * 3)
+			: new Uint16Array(triangles.length * 3);
+	const renderEntries = uniqueMaterialRenderEntries(
+		options.part.materialSlots.flatMap((slot) => {
+			const renderEntry = options.materialEntryByMaterialId.get(
+				slot.material.materialId,
+			);
+			if (!renderEntry) {
+				throw new Error(
+					`Dynamic render part ${options.part.partIndex} has no material entry for material 0x${slot.material.materialId.toString(16).padStart(8, "0")}.`,
+				);
+			}
+			return [renderEntry];
+		}),
+	);
+	if (renderEntries.length === 0) {
+		throw new Error(
+			`Dynamic render part ${options.part.partIndex} has no material entries.`,
+		);
+	}
+	const materialEntries = renderEntries.map((entry) => entry.entry);
+	const materialSlotEntries = options.part.materialSlots.flatMap((slot) => {
+			const materialEntryIndex = renderEntries.findIndex((entry) =>
+				entry.entry.materialIds.includes(slot.material.materialId),
+			);
+			if (materialEntryIndex < 0) {
+				throw new Error(
+					`Dynamic render part ${options.part.partIndex} cannot map surface ${slot.geometrySurfaceId} to a material entry.`,
+				);
+			}
+			return uniqueNumbers([
+				slot.geometrySurfaceId,
+				slot.materialSurfaceId,
+			]).map((surfaceId) => [surfaceId, materialEntryIndex] as const);
+		});
+	const materialSlotBySurfaceId = new Map(materialSlotEntries);
+	for (let triangleIndex = 0; triangleIndex < triangles.length; triangleIndex += 1) {
+		const triangle = triangles[triangleIndex];
+		if (!triangle) {
+			continue;
+		}
+		const materialSlot = resolveDynamicTriangleMaterialSlot({
+			materialSlotBySurfaceId,
+			partIndex: options.part.partIndex,
+			triangleGeometrySurfaceId: triangle.geometrySurfaceId,
+		});
+		for (let vertex = 0; vertex < 3; vertex += 1) {
+			const sourceVertexIndex = triangle.firstVertex + vertex;
+			const targetVertexIndex = triangleIndex * 3 + vertex;
+			assertDynamicSourceVertexAvailable({
+				partIndex: options.part.partIndex,
+				sourcePositions,
+				sourceTexCoords,
+				sourceVertexIndex,
+			});
+			positions[targetVertexIndex * 3] =
+				sourcePositions[sourceVertexIndex * 3] as number;
+			positions[targetVertexIndex * 3 + 1] =
+				sourcePositions[sourceVertexIndex * 3 + 1] as number;
+			positions[targetVertexIndex * 3 + 2] =
+				sourcePositions[sourceVertexIndex * 3 + 2] as number;
+			texCoords[targetVertexIndex * 2] =
+				sourceTexCoords[sourceVertexIndex * 2] as number;
+			texCoords[targetVertexIndex * 2 + 1] =
+				sourceTexCoords[sourceVertexIndex * 2 + 1] as number;
+			materialSlotIndices[targetVertexIndex] = materialSlot;
+			indices[targetVertexIndex] = targetVertexIndex;
+		}
+	}
+	const firstMaterial = renderEntries[0] as DynamicMaterialRenderEntry;
+	return {
+		bounds: options.part.bounds,
+		indexType: indices instanceof Uint16Array ? "uint16" : "uint32",
+		indices,
+		materialEntries,
+		materialFamily: firstMaterial.family,
+		materialPass: firstMaterial.pass,
+		materialSlotIndices,
+		partIndex: options.part.partIndex,
+		positions,
+		renderState: firstMaterial.entry.renderState,
+		sourceAssetId: `gfx-obj/${options.part.gfxObj.sourceDid.toString(16).padStart(8, "0")}`,
+		texCoords,
+		textureUseIds: uniqueSortedStrings(
+			materialEntries.flatMap((entry) =>
+				[
+					entry.primaryTextureUseId,
+					entry.indexTextureUseId,
+					entry.paletteTextureUseId,
+					entry.detailTextureUseId,
+				].filter((textureUseId): textureUseId is string => textureUseId !== null),
+			),
+		),
+		triangleCount: triangles.length,
+		vertexCount: triangles.length * 3,
+	};
+}
+
+function resolveDynamicTriangleMaterialSlot(options: {
+	readonly materialSlotBySurfaceId: ReadonlyMap<number, number>;
+	readonly partIndex: number;
+	readonly triangleGeometrySurfaceId: number | null;
+}): number {
+	if (options.triangleGeometrySurfaceId === null) {
+		if (options.materialSlotBySurfaceId.size === 1) {
+			return [...options.materialSlotBySurfaceId.values()][0] as number;
+		}
+		throw new Error(
+			`Dynamic render part ${options.partIndex} has a triangle without geometry surface id and ${options.materialSlotBySurfaceId.size} material slots.`,
+		);
+	}
+	const materialSlot = options.materialSlotBySurfaceId.get(
+		options.triangleGeometrySurfaceId,
+	);
+	if (materialSlot === undefined) {
+		throw new Error(
+			`Dynamic render part ${options.partIndex} has no material slot for geometry surface ${options.triangleGeometrySurfaceId}.`,
+		);
+	}
+	return materialSlot;
+}
+
+function assertDynamicSourceVertexAvailable(options: {
+	readonly partIndex: number;
+	readonly sourcePositions: Float32Array;
+	readonly sourceTexCoords: Float32Array;
+	readonly sourceVertexIndex: number;
+}): void {
+	const positionOffset = options.sourceVertexIndex * 3;
+	const texCoordOffset = options.sourceVertexIndex * 2;
+	if (positionOffset + 2 >= options.sourcePositions.length) {
+		throw new Error(
+			`Dynamic render part ${options.partIndex} triangle references missing position vertex ${options.sourceVertexIndex}.`,
+		);
+	}
+	if (texCoordOffset + 1 >= options.sourceTexCoords.length) {
+		throw new Error(
+			`Dynamic render part ${options.partIndex} triangle references missing texcoord vertex ${options.sourceVertexIndex}.`,
+		);
+	}
+}
+
+function createDynamicMaterialEntriesByMaterialId(
+	materialPlans: readonly StaticMaterialPlan[],
+	textureRequirements: readonly DynamicEntityTextureRequirement[],
+): ReadonlyMap<number, DynamicMaterialRenderEntry> {
+	return new Map(
+		materialPlans.map((plan, slot): [number, DynamicMaterialRenderEntry] => [
+			plan.material.materialId,
+			createDynamicMaterialEntry(plan, slot, textureRequirements),
+		]),
+	);
+}
+
+function resolveDynamicTextureUseId(options: {
+	readonly dataUse: MaterialTextureDataUseIdentity;
+	readonly materialId: number;
+	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
+}): string {
+	const key = createTextureRequirementKey(options.dataUse);
+	const requirement = options.textureRequirements.find(
+		(candidate) =>
+			candidate.material.materialId === options.materialId &&
+			candidate.key.kind === key.kind &&
+			candidate.key.id === key.id,
+	);
+	if (!requirement) {
+		throw new Error(
+			`Dynamic material 0x${options.materialId.toString(16).padStart(8, "0")} has no texture use id for ${key.kind}:${key.id}.`,
+		);
+	}
+	return requirement.textureUseId;
+}
+
+function createDynamicMaterialEntry(
+	plan: StaticMaterialPlan,
+	slot: number,
+	textureRequirements: readonly DynamicEntityTextureRequirement[],
+): DynamicMaterialRenderEntry {
+	const dataUses = plan.textureRoles.map((role) => role.dataUse);
+	const textureWrapMode = resolveRepeatedStaticMaterialPrimaryWrapMode(dataUses);
+	return {
+		entry: createStaticMaterialTableEntry({
+			createTextureUseId: (dataUse) =>
+				resolveDynamicTextureUseId({
+					dataUse,
+					materialId: plan.material.materialId,
+					textureRequirements,
+				}),
+			materialIds: [plan.material.materialId],
+			plan,
+			slot,
+			textureWrapMode,
+		}),
+		family: resolveDynamicRenderableMaterialFamily(plan),
+		pass: plan.pass,
+	};
+}
+
+function asFloat32Array(values: readonly number[] | Float32Array): Float32Array {
+	return values instanceof Float32Array ? values : new Float32Array(values);
+}
+
+function resolveDynamicRenderableMaterialFamily(
+	plan: StaticMaterialPlan,
+): DynamicMaterialRenderEntry["family"] {
+	if (
+		plan.family === "flat-color" ||
+		plan.family === "indexed-paletted" ||
+		plan.family === "texture-rgba"
+	) {
+		return plan.family;
+	}
+	throw new Error(
+		`Dynamic material 0x${plan.material.materialId.toString(16).padStart(8, "0")} has unrenderable family ${plan.family}.`,
+	);
+}
+
+function uniqueMaterialRenderEntries(
+	entries: readonly DynamicMaterialRenderEntry[],
+): readonly DynamicMaterialRenderEntry[] {
+	const byMaterialId = new Map<number, DynamicMaterialRenderEntry>();
+	for (const entry of entries) {
+		const materialId = entry.entry.materialIds[0];
+		if (materialId !== undefined) {
+			byMaterialId.set(materialId, entry);
+		}
+	}
+	return [...byMaterialId.values()].sort(
+		(left, right) => left.entry.slot - right.entry.slot,
+	);
+}
+
+function uniqueNumbers(values: readonly number[]): readonly number[] {
+	return [...new Set(values)];
+}
+
+function uniqueSortedStrings(values: readonly string[]): readonly string[] {
+	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
+function createDynamicRenderPartExtractionIssue(
+	error: unknown,
+): DynamicEntityIssue {
+	return {
+		kind: "dynamic-resource-load-failed",
+		message: formatErrorMessage(error),
+		resource: "gfx",
+		resourceKey: {
+			id: "dynamic-render-parts",
+			kind: "gfx",
+		},
+	};
 }
 
 function createMissingRefIssues(

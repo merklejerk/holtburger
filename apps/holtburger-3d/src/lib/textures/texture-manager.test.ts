@@ -19,7 +19,7 @@ import type {
 	TexturePackingResult,
 } from "./packing/protocol";
 import { MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW } from "../renderer/types";
-import { TextureManager } from "./texture-manager";
+import { TextureManager, type DynamicTextureUseCommit } from "./texture-manager";
 
 const STABLE_TEXTURE_REF_ID =
 	"texture-ref:outdoor-terrain:batch-a:terrain-a:prepared-texture:06000010";
@@ -1175,6 +1175,113 @@ describe("browser texture manager", () => {
 		]);
 	});
 
+	it("shares atlas entries across compatible static and dynamic visual owners", async () => {
+		const texturePacker = new FixtureTexturePacker();
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+			texturePacker,
+		});
+
+		const staticUpdate = await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [],
+			revision: 1,
+			staticBatchId: "batch-a",
+			textureUses: [
+				createTextureUseCommit({
+					domain: "outdoor-detail",
+					drawUnitId: "detail-a",
+					renderSurfaceId: 0x06000010,
+					samplingPolicy: {
+						wrapS: "clamp-to-edge",
+						wrapT: "clamp-to-edge",
+					},
+					textureUseId: "detail-a:06000010",
+					usage: "rgba-color",
+				}),
+			],
+		});
+		const dynamicUpdate = await textureManager.applyDynamicTextureUseDelta({
+			removedOwners: [],
+			textureUses: [
+				createDynamicTextureUseCommit({
+					atlasBatchId: "batch-a",
+					atlasDomain: "outdoor-detail",
+					renderSurfaceId: 0x06000010,
+					resourceId: "dynamic-windmill-part-0",
+					samplingPolicy: {
+						wrapS: "clamp-to-edge",
+						wrapT: "clamp-to-edge",
+					},
+					textureUseId: "dynamic-windmill-part-0:06000010",
+				}),
+			],
+		});
+
+		expect(texturePacker.jobs).toHaveLength(1);
+		expect(dynamicUpdate?.placements).toEqual([]);
+		expect(dynamicUpdate?.textureBindings).toMatchObject([
+			{
+				owner: {
+					kind: "dynamic-visual-resource",
+					resourceId: "dynamic-windmill-part-0",
+				},
+				textureRefId: staticUpdate?.placements[0]?.textureRefId,
+				textureUseId: "dynamic-windmill-part-0:06000010",
+			},
+		]);
+	});
+
+	it("keeps static atlas pages leased after releasing a dynamic visual owner", async () => {
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+			texturePacker: new FixtureTexturePacker(),
+		});
+
+			await textureManager.applyStaticCommitDelta({
+			addedDrawUnits: [],
+			removedResources: [],
+			revision: 1,
+			staticBatchId: "batch-a",
+			textureUses: [
+				createTextureUseCommit({
+					domain: "outdoor-detail",
+					drawUnitId: "detail-a",
+					renderSurfaceId: 0x06000010,
+					textureUseId: "detail-a:06000010",
+					usage: "rgba-color",
+				}),
+			],
+		});
+		await textureManager.applyDynamicTextureUseDelta({
+			removedOwners: [],
+			textureUses: [
+				createDynamicTextureUseCommit({
+					atlasBatchId: "batch-a",
+					atlasDomain: "outdoor-detail",
+					renderSurfaceId: 0x06000010,
+					resourceId: "dynamic-windmill-part-0",
+					textureUseId: "dynamic-windmill-part-0:06000010",
+				}),
+			],
+		});
+
+		const releaseUpdate = await textureManager.applyDynamicTextureUseDelta({
+			removedOwners: [
+				{
+					kind: "dynamic-visual-resource",
+					resourceId: "dynamic-windmill-part-0",
+				},
+			],
+			textureUses: [],
+		});
+
+		expect(releaseUpdate).toBeNull();
+		expect(textureManager.createDiagnosticsReport().summary.texturePageCount).toBe(
+			1,
+		);
+	});
+
 	it("carries nearest filtering as placement policy instead of rebaking geometry", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),
@@ -1719,6 +1826,35 @@ function createTextureUseCommit(options: {
 		},
 		samplingPolicy: options.samplingPolicy,
 		staticBatchId: options.staticBatchId ?? "batch-a",
+		textureUseId: options.textureUseId,
+	};
+}
+
+function createDynamicTextureUseCommit(options: {
+	readonly atlasBatchId: string;
+	readonly atlasDomain: StaticCoordinatorCommitDelta["textureUses"][number]["domain"];
+	readonly renderSurfaceId: number;
+	readonly resourceId: string;
+	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
+	readonly textureUseId: string;
+	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
+}): DynamicTextureUseCommit {
+	return {
+		atlasBatchId: options.atlasBatchId,
+		atlasDomain: options.atlasDomain,
+		owner: {
+			kind: "dynamic-visual-resource",
+			resourceId: options.resourceId,
+		},
+		samplingPolicy: options.samplingPolicy,
+		source: {
+			kind: "prepared-render-surface-texture-use",
+			renderSurface: {
+				kind: "render-surface",
+				renderSurfaceId: options.renderSurfaceId,
+			},
+			usage: options.usage ?? "rgba-color",
+		},
 		textureUseId: options.textureUseId,
 	};
 }

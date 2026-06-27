@@ -96,6 +96,11 @@ export interface RendererDiagnosticsSummary {
 	readonly staticDrawUnits: number;
 	readonly terrainDrawUnits: number;
 	readonly directEnvCellDrawCalls: number;
+	readonly dynamicVisualResources: number;
+	readonly dynamicVisualResourceTextureUses: number;
+	readonly dynamicInstances: number;
+	readonly dynamicDrawCalls: number;
+	readonly skippedDynamicSubmissions: number;
 	readonly renderedTriangles: number;
 	readonly debugOverlayPrimitives: number;
 	readonly staticObjectResources: number;
@@ -319,9 +324,17 @@ export interface StaticObjectRolePageOverflowDiagnostics {
 
 type RuntimeWarningEvent =
 	| StaticMaterializationFailedWarning
+	| DynamicRendererResourceSyncFailedWarning
 	| StaticMaterialCoverageDeferredWarning
 	| TerrainRenderableFallbackWarning
 	| StaticDebugSelectionUnresolvedWarning;
+
+interface DynamicRendererResourceSyncFailedWarning {
+	readonly error: unknown;
+	readonly kind: "dynamic-renderer-resource-sync-failed";
+	readonly message: string;
+	readonly revision: number;
+}
 
 interface StaticMaterializationFailedWarning {
 	readonly kind: "static-materialization-failed";
@@ -384,6 +397,12 @@ class ConsoleRuntimeDiagnostics implements RuntimeDiagnostics {
 
 	warn(event: RuntimeWarningEvent): void {
 		switch (event.kind) {
+			case "dynamic-renderer-resource-sync-failed":
+				console.error(
+					`dynamic renderer resource sync revision ${event.revision} failed; dynamic visual resources from this sync were not committed.`,
+					event.error,
+				);
+				return;
 			case "static-materialization-failed":
 				console.error(
 					`static materialization revision ${event.revision} failed; draw units from this commit were not added to renderer residency.`,

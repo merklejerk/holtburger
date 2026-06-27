@@ -110,9 +110,7 @@ export type StaticTextureUseOwner =
 			readonly resourceId: string;
 	  };
 
-export function createStaticTextureUseOwnerKey(
-	owner: StaticTextureUseOwner,
-): string {
+function createStaticTextureUseOwnerKey(owner: StaticTextureUseOwner): string {
 	return owner.kind === "draw-unit"
 		? `draw-unit:${owner.drawUnitId}`
 		: `static-object-visual-resource:${owner.resourceId}`;

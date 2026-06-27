@@ -15,6 +15,8 @@ import {
 } from "../types";
 import type {
 	EnvCellSystemLayerPayload,
+	DynamicRendererResourceCommit,
+	DynamicRendererInstance,
 	OutdoorDetailsLayerPayload,
 	PortalBaseOverlapPlan,
 	PortalFrameWorkPlan,
@@ -1464,6 +1466,95 @@ describe("WebGL2 structured interior rendering", () => {
 		renderer.dispose();
 	});
 
+	it("tracks dynamic visual resource residency separately from static layer replacement", () => {
+		const gl = createFakeWebgl2Context();
+		const canvas = createFakeCanvas(gl);
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+			pendingFrame = callback;
+			return 1;
+		});
+		vi.stubGlobal("cancelAnimationFrame", () => {});
+		vi.stubGlobal("window", { devicePixelRatio: 1 });
+		const renderer = createWebgl2Renderer(canvas);
+
+		renderer.commitDynamicResources(
+			createDynamicResourceCommit({
+				resourceId: "dynamic-windmill-part-0",
+				revision: 1,
+				textureUseIds: ["dynamic-windmill-part-0:06000010"],
+			}),
+		);
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicVisualResourceTextureUses: 1,
+			dynamicVisualResources: 1,
+			outdoorDetailStaticObjectResources: 0,
+			staticDrawUnits: 0,
+			staticObjectRenderInstances: 0,
+			staticObjectVisualResources: 0,
+		});
+		renderer.commitDynamicInstances({
+			frameTimeSeconds: 1,
+			instances: [
+				createDynamicRendererInstance("dynamic-windmill-part-0"),
+				createDynamicRendererInstance("missing-dynamic-resource"),
+			],
+			revision: 2,
+		});
+			expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+				dynamicDrawCalls: 0,
+				dynamicInstances: 1,
+				skippedDynamicSubmissions: 1,
+			});
+			pendingFrame?.(16);
+			expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+				dynamicDrawCalls: 1,
+				dynamicInstances: 1,
+				skippedDynamicSubmissions: 1,
+			});
+			expect(gl.drawElementsCalls.at(-1)).toMatchObject({
+				count: 3,
+				mode: gl.TRIANGLES,
+				type: gl.UNSIGNED_SHORT,
+			});
+
+			renderer.setOutdoorDetailsLayer(0xda55ffff, createOutdoorDetailsLayerPayload());
+		renderer.setOutdoorDetailsLayer(0xda55ffff, null);
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicVisualResources: 1,
+			outdoorDetailStaticObjectResources: 0,
+			staticDrawUnits: 0,
+			staticObjectRenderInstances: 0,
+			staticObjectVisualResources: 0,
+		});
+
+			renderer.commitDynamicResources({
+				addedVisualResources: [],
+				removedVisualResourceIds: ["dynamic-windmill-part-0"],
+				revision: 2,
+			});
+			pendingFrame?.(32);
+			expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+				dynamicDrawCalls: 0,
+				dynamicVisualResources: 0,
+				recentDynamicResourceCommits: [
+				{
+					addedVisualResources: 1,
+					removedVisualResources: 0,
+					revision: 1,
+					textureUses: 1,
+				},
+				{
+					addedVisualResources: 0,
+					removedVisualResources: 1,
+					revision: 2,
+					textureUses: 0,
+				},
+			],
+		});
+
+		renderer.dispose();
+	});
+
 	it("replaces and clears terrain layers without static delta remove lists", () => {
 		const gl = createFakeWebgl2Context();
 		const canvas = createFakeCanvas(gl);
@@ -2071,6 +2162,88 @@ function createOutdoorDetailsLayerPayload(): OutdoorDetailsLayerPayload {
 		sourceMappingRecords: [],
 		spatialRecords: [],
 		textureUses: [],
+	};
+}
+
+function createDynamicResourceCommit(options: {
+	readonly resourceId: string;
+	readonly revision: number;
+	readonly textureUseIds: readonly string[];
+}): DynamicRendererResourceCommit {
+	const drawUnit = createOutdoorDetailStaticObjectDrawUnit(
+		"dynamic-visual-source",
+	);
+	return {
+		addedVisualResources: [
+			{
+				entityId: "dynamic-entity:windmill",
+				materialPlan: {
+					skipped: [],
+					textureUses: options.textureUseIds.map((textureUseId) => ({
+						role: "base-color",
+						source: {
+							kind: "prepared-render-surface-texture-use",
+							renderSurface: {
+								kind: "render-surface",
+								renderSurfaceId: 0x06000010,
+							},
+							usage: "rgba-color",
+						},
+						textureUseId,
+					})),
+				},
+					parts: [
+						{
+							bounds: null,
+							indexType: drawUnit.indexType,
+							indices: drawUnit.indices,
+							materialEntries: drawUnit.materialEntries,
+							materialFamily: drawUnit.materialFamily,
+							materialPass: drawUnit.materialPass,
+							materialSlotIndices: drawUnit.materialSlotIndices,
+							partIndex: 0,
+							positions: drawUnit.positions,
+							renderState: drawUnit.renderState,
+							sourceAssetId: "gfx-obj/01000010",
+							texCoords: drawUnit.texCoords,
+							textureUseIds: options.textureUseIds,
+							triangleCount: drawUnit.triangleCount,
+							vertexCount: drawUnit.vertexCount,
+						},
+					],
+					resourceId: options.resourceId,
+			},
+		],
+		removedVisualResourceIds: [],
+		revision: options.revision,
+	};
+}
+
+function createDynamicRendererInstance(
+	resourceId: string,
+): DynamicRendererInstance {
+		return {
+			entityId: "dynamic-entity:windmill",
+			instanceId: `dynamic-instance:${resourceId}`,
+			landblockId: 0xda55ffff,
+			objectToRenderMatrix: [
+			1, 0, 0, 0,
+			0, 1, 0, 0,
+			0, 0, 1, 0,
+			0, 0, 0, 1,
+		],
+		partToObjectMatrices: [
+			{
+				matrix: [
+					1, 0, 0, 0,
+					0, 1, 0, 0,
+					0, 0, 1, 0,
+					0, 0, 0, 1,
+				],
+				partIndex: 0,
+			},
+		],
+		resourceId,
 	};
 }
 

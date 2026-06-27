@@ -18,6 +18,8 @@ import type {
 	OutdoorBuildingsLayerPayload,
 	OutdoorDetailsLayerPayload,
 	StaticObjectUploadDiagnostics,
+	DynamicRendererResourceCommit,
+	DynamicRendererVisualResource,
 } from "../renderer/types";
 import {
 	createStaticLandblockLayerGenerationId,
@@ -33,7 +35,15 @@ import {
 	createPortalProjectionFramePlan,
 } from "./direct-env-cell-frame-plan";
 import { formatHex32, normalizeOutdoorLandblockId } from "../../lib/landblocks";
-import { TextureManager } from "../textures/texture-manager";
+import {
+	AC_UNIT_SCALE,
+	buildAcPlacementMatrix,
+	multiplyMat4,
+} from "../math/ac-placement-transform";
+import {
+	TextureManager,
+	type DynamicTextureUseCommit,
+} from "../textures/texture-manager";
 import type { TexturePacker } from "../textures/packing/packer";
 import type { TextureFilteringMode } from "../textures/sampling-policy";
 import {
@@ -75,10 +85,10 @@ import type {
 	StaticObjectBakeDiagnostics,
 } from "../static/contracts";
 import {
-	AC_UNIT_SCALE,
-	buildAcPlacementMatrix,
-} from "../math/ac-placement-transform";
-import { collectStaticDrawUnitResourceIds } from "../static/contracts";
+	collectStaticDrawUnitResourceIds,
+	type StaticAuthoredDynamicSeedRecord,
+	type StaticDomain,
+} from "../static/contracts";
 import {
 	materializeStaticCommit,
 	type StaticMaterializationResult,
@@ -126,7 +136,10 @@ import {
 } from "./portal-base-overlap";
 import { DynamicEntityController } from "../dynamic/dynamic-entity-controller";
 import { DynamicEntityResourceManager } from "../dynamic/dynamic-entity-resource-manager";
-import type { DynamicRuntimeSnapshot } from "../dynamic/contracts";
+import type {
+	DynamicEntitySummaryDto,
+	DynamicRuntimeSnapshot,
+} from "../dynamic/contracts";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
 const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
@@ -593,8 +606,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #envCellSystemLayerAssembly = new EnvCellSystemLayerAssemblyStore();
 	readonly #staticLayersByKey = new Map<string, StaticLandblockLayerPayload>();
 	readonly #staticLayerKeyByResourceId = new Map<string, string>();
+	readonly #staticBatchIdBySourceScope = new Map<string, string>();
 	#envCellResourceMembershipRevision = 0;
 	readonly #dynamicEntityController: DynamicEntityController;
+	readonly #committedDynamicVisualResourceIds = new Set<string>();
+	#dynamicRendererResourceQueue: Promise<void> = Promise.resolve();
+	#dynamicRendererResourceRevision = 0;
 	#envCellAabbDebugOverlayVisible = false;
 	#envCellPortalDebugOverlayVisible = false;
 	#flatVisionModeEnabled = false;
@@ -621,6 +638,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#dynamicEntityController = new DynamicEntityController({
 			onResourcesChanged: () => {
 				if (!this.#disposed) {
+					this.#enqueueDynamicRendererResourceSync();
 					this.#emit();
 				}
 			},
@@ -696,6 +714,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			this.#dynamicEntityController.retainStaticScopes(
 				reconciliation.retainedScopes,
 			);
+			this.#enqueueDynamicRendererResourceSync();
 			this.#activeSceneWorkIds = new Set(
 				reconciliation.activeWork.map((work) => work.workId),
 			);
@@ -897,6 +916,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		const dynamicPlaybackChanged = this.#dynamicEntityController.tick(
 			state.timeSeconds,
 		);
+		this.#commitDynamicRendererInstances(state.timeSeconds);
 		const portalOverlapChanged = this.#refreshPortalOverlapResidency();
 		if (portalOverlapChanged) {
 			this.#updateRenderPassPlan();
@@ -1510,9 +1530,14 @@ class ClientRuntimeImpl implements ClientRuntime {
 			spatialRecords: materialized.staticSpatialRecords,
 			visibilityRecords: materialized.staticVisibilityRecords,
 		});
+		this.#recordDynamicSeedStaticBatchIds(
+			delta.staticBatchId,
+			materialized.staticAuthoredDynamicSeeds,
+		);
 		this.#dynamicEntityController.ingestStaticSeeds(
 			materialized.staticAuthoredDynamicSeeds,
 		);
+		this.#enqueueDynamicRendererResourceSync();
 		this.#updateRenderPassPlan();
 		this.#refreshStaticDebugOverlay();
 		this.#pendingStaticMaterializations.delete(delta.revision);
@@ -1536,6 +1561,97 @@ class ClientRuntimeImpl implements ClientRuntime {
 		});
 		this.#emit();
 		this.#maybeEmitSceneInterestSettled();
+	}
+
+	#enqueueDynamicRendererResourceSync(): void {
+		if (this.#disposed) {
+			return;
+		}
+		this.#dynamicRendererResourceQueue = this.#dynamicRendererResourceQueue
+			.then(() => this.#syncDynamicRendererResources())
+			.catch((error: unknown) => {
+				const message = error instanceof Error ? error.message : String(error);
+				this.#diagnostics.warn({
+					error,
+					kind: "dynamic-renderer-resource-sync-failed",
+					message: `dynamic renderer resource sync failed: ${message}`,
+					revision: this.#dynamicRendererResourceRevision,
+				});
+			});
+	}
+
+	async #syncDynamicRendererResources(): Promise<void> {
+		if (this.#disposed) {
+			return;
+		}
+		const snapshot = this.#dynamicEntityController.createSnapshot();
+		const resources = snapshot.records.flatMap((record) =>
+			createDynamicRendererVisualResource(record),
+		);
+		const nextResourceIds = new Set(resources.map((resource) => resource.resourceId));
+		const removedResourceIds = [...this.#committedDynamicVisualResourceIds].filter(
+			(resourceId) => !nextResourceIds.has(resourceId),
+		);
+
+		const textureUpdate = await this.#textureManager.applyDynamicTextureUseDelta({
+			removedOwners: removedResourceIds.map((resourceId) => ({
+				kind: "dynamic-visual-resource",
+				resourceId,
+			})),
+			textureUses: resources.flatMap((resource) =>
+				createDynamicTextureUseCommits(
+					resource,
+					snapshot.records,
+					this.#staticBatchIdBySourceScope,
+				),
+			),
+		});
+		if (this.#disposed) {
+			return;
+		}
+		if (textureUpdate) {
+			this.#renderer.applyTexturePlacementUpdate(textureUpdate);
+		}
+
+		this.#dynamicRendererResourceRevision += 1;
+		const commit: DynamicRendererResourceCommit = {
+			addedVisualResources: resources,
+			removedVisualResourceIds: removedResourceIds,
+			revision: this.#dynamicRendererResourceRevision,
+		};
+		this.#renderer.commitDynamicResources(commit);
+		this.#committedDynamicVisualResourceIds.clear();
+		for (const resourceId of nextResourceIds) {
+			this.#committedDynamicVisualResourceIds.add(resourceId);
+		}
+		this.#refreshRendererDiagnosticsSnapshot();
+		this.#emit();
+	}
+
+	#commitDynamicRendererInstances(frameTimeSeconds: number): void {
+		const snapshot = this.#dynamicEntityController.createSnapshot();
+		this.#dynamicRendererResourceRevision += 1;
+		this.#renderer.commitDynamicInstances({
+			frameTimeSeconds,
+			instances: snapshot.records.flatMap(createDynamicRendererInstances),
+			revision: this.#dynamicRendererResourceRevision,
+		});
+		this.#refreshRendererDiagnosticsSnapshot();
+	}
+
+	#recordDynamicSeedStaticBatchIds(
+		staticBatchId: string,
+		seeds: readonly StaticAuthoredDynamicSeedRecord[],
+	): void {
+		for (const seed of seeds) {
+			if (seed.owner.kind !== "work") {
+				continue;
+			}
+			this.#staticBatchIdBySourceScope.set(
+				createStaticBatchLookupKey(seed.owner.domain, seed.owner.scopeKey),
+				staticBatchId,
+			);
+		}
 	}
 
 	#updateMaterializedDrawUnitIdMappings(
@@ -3183,6 +3299,11 @@ function createRendererDiagnosticsSummary(
 		canvasWidth: snapshot.canvasWidth,
 		debugOverlayPrimitives: snapshot.debugOverlayPrimitives,
 		directEnvCellDrawCalls: snapshot.directEnvCellDrawCalls,
+		dynamicDrawCalls: snapshot.dynamicDrawCalls,
+		dynamicInstances: snapshot.dynamicInstances,
+		dynamicVisualResources: snapshot.dynamicVisualResources,
+		dynamicVisualResourceTextureUses:
+			snapshot.dynamicVisualResourceTextureUses,
 		error: snapshot.error,
 		frameCount: snapshot.frameCount,
 		frameHandlerMs: snapshot.frameHandlerMs,
@@ -3202,6 +3323,7 @@ function createRendererDiagnosticsSummary(
 		renderedTriangles: snapshot.renderedTriangles,
 		renderPassKind: snapshot.renderPassPlan.kind,
 		staticDrawUnits: snapshot.staticDrawUnits,
+		skippedDynamicSubmissions: snapshot.skippedDynamicSubmissions,
 		staticObjectBakedDirectDrawCalls: snapshot.staticObjectBakedDirectDrawCalls,
 		staticObjectDirectRenderInstanceDrawCalls:
 			snapshot.staticObjectDirectRenderInstanceDrawCalls,
@@ -3226,6 +3348,186 @@ function createRendererDiagnosticsSummary(
 		staticObjectVisualResources: snapshot.staticObjectVisualResources,
 		terrainDrawUnits: snapshot.terrainDrawUnits,
 	};
+}
+
+function createDynamicRendererVisualResource(
+	record: DynamicEntitySummaryDto,
+): readonly DynamicRendererVisualResource[] {
+	const visual = record.resources.visual;
+	if (visual.status !== "ready" || !isDynamicRendererEligible(record)) {
+		return [];
+	}
+	return [
+		{
+			entityId: record.id,
+			materialPlan: {
+				skipped: [],
+				textureUses: visual.textureRequirements.map((requirement) => ({
+					role: requirement.role,
+					samplingPolicy: requirement.samplingPolicy,
+					source: requirement.dataUse,
+					textureUseId: requirement.textureUseId,
+				})),
+			},
+			parts: visual.renderParts.map((part) => ({
+				bounds: part.bounds,
+				indices: part.indices,
+				indexType: part.indexType,
+				materialEntries: part.materialEntries,
+				materialFamily: part.materialFamily,
+				materialPass: part.materialPass,
+				materialSlotIndices: part.materialSlotIndices,
+				partIndex: part.partIndex,
+				positions: part.positions,
+				renderState: part.renderState,
+				sourceAssetId: part.sourceAssetId,
+				texCoords: part.texCoords,
+				textureUseIds: part.textureUseIds,
+				triangleCount: part.triangleCount,
+				vertexCount: part.vertexCount,
+			})),
+			resourceId: createDynamicRendererVisualResourceId(record),
+		},
+	];
+}
+
+function createDynamicTextureUseCommits(
+	resource: DynamicRendererVisualResource,
+	records: readonly DynamicEntitySummaryDto[],
+	staticBatchIdsBySourceScope: ReadonlyMap<string, string>,
+): readonly DynamicTextureUseCommit[] {
+	const record = records.find((candidate) => candidate.id === resource.entityId);
+	if (!record) {
+		throw new Error(
+			`Cannot create dynamic texture uses for unknown entity ${resource.entityId}.`,
+		);
+	}
+	const atlasDomain = createDynamicRendererAtlasDomain(record);
+	const atlasBatchId =
+		staticBatchIdsBySourceScope.get(
+			createStaticBatchLookupKey(
+				record.provenance.owner.domain,
+				record.provenance.owner.scopeKey,
+			),
+		) ?? `dynamic:${record.provenance.sourceScopeKey}`;
+	return resource.materialPlan.textureUses.map((textureUse) => ({
+		atlasBatchId,
+		atlasDomain,
+		owner: {
+			kind: "dynamic-visual-resource",
+			resourceId: resource.resourceId,
+		},
+		samplingPolicy: textureUse.samplingPolicy,
+		source: textureUse.source,
+		textureUseId: textureUse.textureUseId,
+	}));
+}
+
+function createDynamicRendererInstances(
+	record: DynamicEntitySummaryDto,
+): readonly {
+	readonly entityId: string;
+	readonly instanceId: string;
+	readonly landblockId: number;
+	readonly objectToRenderMatrix: readonly number[];
+	readonly partToObjectMatrices: readonly {
+		readonly matrix: readonly number[];
+		readonly partIndex: number;
+	}[];
+	readonly resourceId: string;
+}[] {
+	if (
+		record.resources.visual.status !== "ready" ||
+		record.animation.playback.status !== "playing" ||
+		!isDynamicRendererEligible(record)
+	) {
+		return [];
+	}
+	const playback = record.animation.playback;
+	const objectToRenderMatrix = multiplyMat4(
+		multiplyMat4(
+			buildAcPlacementMatrix(
+				record.baseTransform.baseLocalPlacement,
+				record.baseTransform.sourceScale,
+			),
+			buildAcPlacementMatrix(playback.objectRootPose, AC_UNIT_SCALE),
+		),
+		buildAcPlacementMatrix(
+			createDynamicObjectRootOmegaPlacement(
+				playback.transformEffects.activeOmega?.objectRootRotation ?? null,
+			),
+			AC_UNIT_SCALE,
+		),
+	);
+	return [
+		{
+			entityId: record.id,
+			instanceId: `dynamic-instance:${record.id}`,
+			landblockId: record.effectiveResidence.landblockId,
+			objectToRenderMatrix: Array.from(objectToRenderMatrix),
+			partToObjectMatrices: playback.partPoses.map((pose) => ({
+				matrix: Array.from(
+					buildAcPlacementMatrix(pose.localPlacement, AC_UNIT_SCALE),
+				),
+				partIndex: pose.partIndex,
+			})),
+			resourceId: createDynamicRendererVisualResourceId(record),
+		},
+	];
+}
+
+function createDynamicObjectRootOmegaPlacement(
+	objectRootRotation: {
+		readonly w: number;
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	} | null,
+): {
+	readonly orientation: {
+		readonly w: number;
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	};
+	readonly origin: { readonly x: number; readonly y: number; readonly z: number };
+} {
+	return {
+		orientation: objectRootRotation ?? {
+			w: 1,
+			x: 0,
+			y: 0,
+			z: 0,
+		},
+		origin: { x: 0, y: 0, z: 0 },
+	};
+}
+
+function isDynamicRendererEligible(record: DynamicEntitySummaryDto): boolean {
+	return record.renderability.reasons.length === 0;
+}
+
+function createDynamicRendererAtlasDomain(
+	record: DynamicEntitySummaryDto,
+): StaticDomain {
+	if (record.effectiveResidence.kind === "env-cell") {
+		return "landblock-env-cells";
+	}
+	const ownerDomain = record.provenance.owner.domain;
+	return ownerDomain === "outdoor-buildings" ? ownerDomain : "outdoor-detail";
+}
+
+function createDynamicRendererVisualResourceId(
+	record: Pick<DynamicEntitySummaryDto, "id">,
+): string {
+	return `dynamic-visual-resource:${record.id}`;
+}
+
+function createStaticBatchLookupKey(
+	domain: StaticDomain,
+	scopeKey: string,
+): string {
+	return `${domain}:${scopeKey}`;
 }
 
 function createPortalFrameWorkPlanDiagnostics(plan: PortalFrameWorkPlan) {

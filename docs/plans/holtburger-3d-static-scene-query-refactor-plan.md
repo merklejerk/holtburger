@@ -122,7 +122,7 @@ State ownership rules:
 
 ### Phase 1: Carve Out Contracts And Selection Keys
 
-Status: pending.
+Status: completed 2026-06-26.
 
 Purpose:
 
@@ -146,15 +146,33 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Move static ray, pick context, pick request, pick filters, hit variants, details, snapshot,
+- [x] Move static ray, pick context, pick request, pick filters, hit variants, details, snapshot,
       camera residency, committed env-cell record DTO, and debug-bound contracts.
-- [ ] Move static selection key create/compare/describe helpers.
-- [ ] Update all imports.
-- [ ] Run focused static query/browser/runtime tests.
+- [x] Move static selection key create/compare/describe helpers.
+- [x] Update all imports.
+- [x] Run focused static query/browser/runtime tests.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-26: Added `runtime/scene-query/contracts.ts` and
+  `runtime/scene-query/static-selection-keys.ts`. External callers now import static query contracts
+  and selection-key helpers from those modules; `static-scene-query.ts` remains the Phase 1 facade
+  home only for `StaticSceneQuery` and not-yet-extracted grid tracing.
+- 2026-06-26: Made `StaticScenePickFilters` and `EnvCellPortalScenePickHit` explicit exports instead
+  of private-public union members. `ClientRuntimeImpl` now names `EnvCellPortalScenePickHit` when it
+  creates portal debug hits so the public contract is exercised and not dead-code lint noise.
+- 2026-06-26: Diagnostic nested shapes for outdoor static source diagnostics moved with the public
+  contracts because `OutdoorStaticObjectSourceDiagnostics` exposes them. The algorithms that build
+  those diagnostics still live in `static-scene-query.ts` until the later debug/detail extraction
+  phase.
+
+Verification:
+
+- `npm run test:ts -- --run src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/browser/static-picking.test.ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
+- `npm run test:ts`
 
 ### Phase 2: Extract Runtime Root State And Generic Geometry
 

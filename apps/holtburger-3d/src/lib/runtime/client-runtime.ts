@@ -83,22 +83,27 @@ import {
 	materializeStaticCommit,
 	type StaticMaterializationResult,
 } from "./static-materializer";
+import type {
+	EnvCellPortalScenePickHit,
+	EnvCellStaticScenePickDetails,
+	OutdoorStaticObjectScenePickDetails,
+	OutdoorStaticObjectSourceDiagnostics,
+	StaticSceneCameraResidency,
+	StaticSceneEnvCellBounds,
+	StaticScenePickHit,
+	StaticScenePickRequest,
+	StaticSceneQuerySnapshot,
+	StaticSceneSelectionKey,
+	StaticSceneTerrainLandblockBounds,
+	TerrainQuadScenePickDetails,
+	Vec3,
+} from "./scene-query/contracts";
 import {
-	StaticSceneQuery,
 	createEnvCellPortalSelectionKey,
 	describeStaticSceneSelectionKey,
-	type EnvCellStaticScenePickDetails,
-	type OutdoorStaticObjectSourceDiagnostics,
-	type OutdoorStaticObjectScenePickDetails,
-	type StaticScenePickRequest,
-	type StaticScenePickHit,
-	type StaticSceneCameraResidency,
-	type StaticSceneEnvCellBounds,
-	type StaticSceneQuerySnapshot,
-	type StaticSceneSelectionKey,
-	type StaticSceneTerrainLandblockBounds,
-	type Vec3,
-	type TerrainQuadScenePickDetails,
+} from "./scene-query/static-selection-keys";
+import {
+	StaticSceneQuery,
 } from "./static-scene-query";
 import { createOutdoorLandblockRootTranslation } from "./static-placement";
 import {
@@ -1870,7 +1875,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 				) {
 					continue;
 				}
-				const hit: StaticScenePickHit = {
+				const hit: EnvCellPortalScenePickHit = {
 					bounds: target.bounds,
 					distance,
 					hitPoint: pointOnRay(request.ray, distance),

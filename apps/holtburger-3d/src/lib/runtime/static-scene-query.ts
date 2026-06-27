@@ -48,236 +48,39 @@ import {
 	parseRenderCellKey,
 	projectLandblockIdToRenderCell,
 } from "./outdoor-landblock-grid";
-
-export interface StaticSceneRay {
-	readonly origin: Vec3;
-	readonly direction: Vec3;
-}
-
-export type StaticScenePickContext =
-	| {
-			readonly kind: "outdoor";
-	  }
-	| {
-			readonly kind: "env-cell";
-			readonly landblockId: number;
-			readonly envCellId: number;
-			readonly acceptedEnvCellIds?: readonly number[];
-	  };
-
-export interface StaticScenePickRequest {
-	readonly context: StaticScenePickContext;
-	readonly ray: StaticSceneRay;
-	readonly filters?: StaticScenePickFilters;
-}
-
-interface StaticScenePickFilters {
-	readonly itemKinds?: readonly StaticSceneSelectionKey["itemKind"][];
-	readonly domains?: readonly StaticSceneSelectionKey["domain"][];
-	readonly ignoreContainingOrigin?: boolean;
-}
-
-export type StaticScenePickHit =
-	| OutdoorStaticObjectScenePickHit
-	| EnvCellStaticScenePickHit
-	| EnvCellPortalScenePickHit
-	| TerrainQuadScenePickHit;
-
-export type StaticSceneSelectionKey =
-	| OutdoorStaticObjectSceneSelectionKey
-	| EnvCellStaticSceneSelectionKey
-	| EnvCellPortalSceneSelectionKey
-	| TerrainQuadSceneSelectionKey;
-
-export interface OutdoorStaticObjectSceneSelectionKey {
-	readonly itemKind: "outdoor-static-object";
-	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
-	readonly landblockId: number;
-	readonly instanceId: string;
-}
-
-export interface EnvCellStaticSceneSelectionKey {
-	readonly itemKind: "env-cell-static-object";
-	readonly domain: "landblock-env-cells";
-	readonly landblockId: number;
-	readonly envCellId: number;
-	readonly instanceId: string;
-}
-
-export interface EnvCellPortalSceneSelectionKey {
-	readonly itemKind: "env-cell-portal";
-	readonly domain: "landblock-env-cells";
-	readonly landblockId: number;
-	readonly envCellId: number;
-	readonly portalId: string;
-}
-
-export interface TerrainQuadSceneSelectionKey {
-	readonly itemKind: "terrain-quad";
-	readonly domain: "outdoor-terrain";
-	readonly landblockId: number;
-	readonly quadIndex: number;
-}
-
-export interface OutdoorStaticObjectScenePickHit {
-	readonly kind: "static-scene-pick-hit";
-	readonly distance: number;
-	readonly hitPoint: Vec3;
-	readonly bounds: StaticBounds;
-	readonly selectionKey: OutdoorStaticObjectSceneSelectionKey;
-}
-
-export interface EnvCellStaticScenePickHit {
-	readonly kind: "static-scene-pick-hit";
-	readonly distance: number;
-	readonly hitPoint: Vec3;
-	readonly bounds: StaticBounds;
-	readonly selectionKey: EnvCellStaticSceneSelectionKey;
-}
-
-interface EnvCellPortalScenePickHit {
-	readonly kind: "static-scene-pick-hit";
-	readonly distance: number;
-	readonly hitPoint: Vec3;
-	readonly bounds: StaticBounds;
-	readonly selectionKey: EnvCellPortalSceneSelectionKey;
-}
-
-export interface TerrainQuadScenePickHit {
-	readonly kind: "static-scene-pick-hit";
-	readonly distance: number;
-	readonly hitPoint: Vec3;
-	readonly bounds: StaticBounds;
-	readonly selectionKey: TerrainQuadSceneSelectionKey;
-}
-
-export interface OutdoorStaticObjectScenePickDetails {
-	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
-	readonly landblockId: number;
-	readonly instanceId: string;
-	readonly object: StaticObjectInstanceFacts;
-	readonly bvhItemIndex: number;
-	readonly bvhItemKind: "static" | "building";
-}
-
-export interface OutdoorStaticObjectSourceDiagnostics {
-	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
-	readonly instanceId: string;
-	readonly landblockId: number;
-	readonly materialSources: readonly StaticObjectMaterialSourceFacts[];
-	readonly materialSlots: readonly OutdoorStaticObjectMaterialSlotDiagnostics[];
-	readonly object: StaticObjectInstanceFacts;
-	readonly sourceAsset: OutdoorStaticObjectSourceAssetDiagnostics | null;
-	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
-}
-
-type OutdoorStaticObjectPartDiagnostics = Omit<
-	StaticObjectPartSourceFacts,
-	"normals" | "positions" | "texCoords" | "triangles"
->;
-
-type OutdoorStaticObjectSourceAssetDiagnostics = Omit<
-	OutdoorStaticObjectsScopePayload["sourceAssets"][number],
-	"parts"
-> & {
-	readonly parts: readonly OutdoorStaticObjectPartDiagnostics[];
-};
-
-interface OutdoorStaticObjectMaterialSlotDiagnostics {
-	readonly material: StaticObjectMaterialSourceFacts | null;
-	readonly slot: OutdoorStaticObjectsScopePayload["materialSlots"][number];
-}
-
-export interface EnvCellStaticScenePickDetails {
-	readonly landblockId: number;
-	readonly envCellId: number;
-	readonly instanceId: string;
-	readonly seed: LandblockEnvCellsStaticScopePayload["envCells"][number]["staticObjectSeeds"][number];
-}
-
-export interface TerrainQuadScenePickDetails {
-	readonly landblockId: number;
-	readonly quad: TerrainMeshQuadFacts;
-	readonly bvhItemIndex: number;
-}
-
-export interface StaticSceneSelectionDebugBounds {
-	readonly bounds: StaticBounds;
-	readonly selectionKey: StaticSceneSelectionKey;
-}
-
-export interface StaticSceneEnvCellBounds {
-	readonly bounds: StaticBounds;
-	readonly envCellId: number;
-	readonly landblockId: number;
-}
-
-export interface StaticSceneTerrainLandblockBounds {
-	readonly bounds: StaticBounds;
-	readonly landblockId: number;
-}
-
-export interface StaticSceneEnvCellAabbDebugBounds {
-	readonly bounds: StaticBounds;
-	readonly envCellId: number;
-	readonly landblockId: number;
-	readonly memberId: string;
-	readonly source: "env-cell-root" | "derived";
-}
-
-export interface StaticSceneQuerySnapshot {
-	readonly landblockBucketCount: number;
-	readonly terrainLandblockCount: number;
-	readonly terrainRecordCount: number;
-	readonly outdoorRecordCount: number;
-	readonly envCellRecordCount: number;
-	readonly envCellLandblockCount: number;
-	readonly committedEnvCellLandblockCount: number;
-	readonly committedEnvCellPortalGraphRecordCount: number;
-	readonly committedEnvCellPortalInteriorRecordCount: number;
-	readonly committedEnvCellSourceMappingRecordCount: number;
-	readonly committedEnvCellSpatialRecordCount: number;
-	readonly committedEnvCellVisibilityRecordCount: number;
-	readonly envCellResidencyBspAcceptedCandidateCount: number;
-	readonly envCellResidencyBspFallbackCount: number;
-	readonly envCellResidencyBspTestedCandidateCount: number;
-	readonly envCellResidencyCoarseCandidateCount: number;
-}
-
-export interface RetainedOutdoorSourceLandblock {
-	readonly landblockId: number;
-	readonly domains: {
-		readonly terrain: boolean;
-		readonly buildings: boolean;
-		readonly detail: boolean;
-		readonly envCells: boolean;
-	};
-}
-
-export interface StaticSceneQuerySourcePayloadOptions {
-	readonly outdoorAnchorLandblockId?: number | null;
-}
-
-export interface Vec3 {
-	readonly x: number;
-	readonly y: number;
-	readonly z: number;
-}
-
-export type StaticSceneCameraResidency =
-	| {
-			readonly kind: "outdoor-landblock";
-			readonly landblockId: number;
-	  }
-	| {
-			readonly kind: "env-cell";
-			readonly landblockId: number;
-			readonly envCellId: number;
-	  }
-	| {
-			readonly kind: "unknown";
-			readonly landblockId: number | null;
-	  };
+import type {
+	EnvCellStaticScenePickDetails,
+	EnvCellStaticScenePickHit,
+	OutdoorStaticObjectMaterialSlotDiagnostics,
+	OutdoorStaticObjectPartDiagnostics,
+	OutdoorStaticObjectScenePickDetails,
+	OutdoorStaticObjectScenePickHit,
+	OutdoorStaticObjectSourceAssetDiagnostics,
+	OutdoorStaticObjectSourceDiagnostics,
+	RetainedOutdoorSourceLandblock,
+	StaticSceneCameraResidency,
+	StaticSceneCommittedEnvCellRecords,
+	StaticSceneEnvCellAabbDebugBounds,
+	StaticSceneEnvCellBounds,
+	StaticScenePickFilters,
+	StaticScenePickHit,
+	StaticScenePickRequest,
+	StaticSceneQuerySnapshot,
+	StaticSceneQuerySourcePayloadOptions,
+	StaticSceneRay,
+	StaticSceneSelectionDebugBounds,
+	StaticSceneSelectionKey,
+	StaticSceneTerrainLandblockBounds,
+	TerrainQuadScenePickDetails,
+	TerrainQuadScenePickHit,
+	Vec3,
+} from "./scene-query/contracts";
+import {
+	compareStaticSceneSelectionKeys,
+	createEnvCellStaticObjectSelectionKey,
+	createOutdoorStaticObjectSelectionKey,
+	createTerrainQuadSelectionKey,
+} from "./scene-query/static-selection-keys";
 
 type TerrainBvh = TerrainStaticScopePayload["sourceSpatial"]["terrainBvh"];
 type EnvCellInteriorPortal =
@@ -403,16 +206,6 @@ type EnvCellBvhRuntimeItem = {
 interface EnvCellStaticSeedRuntimeRecord {
 	readonly envCellId: number;
 	readonly seed: LandblockEnvCellsStaticScopePayload["envCells"][number]["staticObjectSeeds"][number];
-}
-
-export interface StaticSceneCommittedEnvCellRecords {
-	readonly authoredDynamicSeeds: readonly StaticAuthoredDynamicSeedRecord[];
-	readonly landblockId: number;
-	readonly portalGraphs: readonly StaticPortalGraphRecord[];
-	readonly portalInteriorRecords: readonly StaticPortalInteriorRecord[];
-	readonly sourceMappings: readonly StaticSourceMappingRecord[];
-	readonly spatialRecords: readonly StaticSpatialRecord[];
-	readonly visibilityRecords: readonly StaticVisibilityRecord[];
 }
 
 interface CommittedRecordEntry<TRecord> {
@@ -3515,106 +3308,6 @@ function comparePickHits(
 		left.selectionKey.itemKind.localeCompare(right.selectionKey.itemKind) ||
 		compareStaticSceneSelectionKeys(left.selectionKey, right.selectionKey)
 	);
-}
-
-export function createOutdoorStaticObjectSelectionKey(options: {
-	readonly domain: OutdoorStaticObjectsScopePayload["domain"];
-	readonly landblockId: number;
-	readonly instanceId: string;
-}): OutdoorStaticObjectSceneSelectionKey {
-	return {
-		domain: options.domain,
-		instanceId: options.instanceId,
-		itemKind: "outdoor-static-object",
-		landblockId: options.landblockId,
-	};
-}
-
-export function createEnvCellStaticObjectSelectionKey(options: {
-	readonly landblockId: number;
-	readonly envCellId: number;
-	readonly instanceId: string;
-}): EnvCellStaticSceneSelectionKey {
-	return {
-		domain: "landblock-env-cells",
-		envCellId: options.envCellId,
-		instanceId: options.instanceId,
-		itemKind: "env-cell-static-object",
-		landblockId: options.landblockId,
-	};
-}
-
-export function createEnvCellPortalSelectionKey(options: {
-	readonly landblockId: number;
-	readonly envCellId: number;
-	readonly portalId: string;
-}): EnvCellPortalSceneSelectionKey {
-	return {
-		domain: "landblock-env-cells",
-		envCellId: options.envCellId,
-		itemKind: "env-cell-portal",
-		landblockId: options.landblockId,
-		portalId: options.portalId,
-	};
-}
-
-export function createTerrainQuadSelectionKey(options: {
-	readonly landblockId: number;
-	readonly quadIndex: number;
-}): TerrainQuadSceneSelectionKey {
-	return {
-		domain: "outdoor-terrain",
-		itemKind: "terrain-quad",
-		landblockId: options.landblockId,
-		quadIndex: options.quadIndex,
-	};
-}
-
-export function compareStaticSceneSelectionKeys(
-	left: StaticSceneSelectionKey,
-	right: StaticSceneSelectionKey,
-): number {
-	return describeStaticSceneSelectionKey(left).localeCompare(
-		describeStaticSceneSelectionKey(right),
-	);
-}
-
-export function describeStaticSceneSelectionKey(
-	selectionKey: StaticSceneSelectionKey,
-): string {
-	if (selectionKey.itemKind === "outdoor-static-object") {
-		return [
-			selectionKey.itemKind,
-			selectionKey.domain,
-			selectionKey.landblockId.toString(16),
-			selectionKey.instanceId,
-		].join(":");
-	}
-	if (selectionKey.itemKind === "terrain-quad") {
-		return [
-			selectionKey.itemKind,
-			selectionKey.domain,
-			selectionKey.landblockId.toString(16),
-			selectionKey.quadIndex,
-		].join(":");
-	}
-	if (selectionKey.itemKind === "env-cell-portal") {
-		return [
-			selectionKey.itemKind,
-			selectionKey.domain,
-			selectionKey.landblockId.toString(16),
-			selectionKey.envCellId.toString(16),
-			selectionKey.portalId,
-		].join(":");
-	}
-
-	return [
-		selectionKey.itemKind,
-		selectionKey.domain,
-		selectionKey.landblockId.toString(16),
-		selectionKey.envCellId.toString(16),
-		selectionKey.instanceId,
-	].join(":");
 }
 
 function createOutdoorRootKey(

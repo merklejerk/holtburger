@@ -16,12 +16,14 @@ import {
 	createStaticPortalProjection,
 } from "../static/portal-graphs";
 import {
-	StaticSceneQuery,
 	compareStaticSceneSelectionKeys,
 	createEnvCellStaticObjectSelectionKey,
 	createOutdoorStaticObjectSelectionKey,
 	createTerrainQuadSelectionKey,
 	describeStaticSceneSelectionKey,
+} from "./scene-query/static-selection-keys";
+import {
+	StaticSceneQuery,
 	traceLandblockGridRayCells,
 } from "./static-scene-query";
 

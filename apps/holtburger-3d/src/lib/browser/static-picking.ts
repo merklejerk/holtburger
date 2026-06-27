@@ -2,7 +2,7 @@ import type { FrameState } from "../renderer/types";
 import type {
 	StaticScenePickContext,
 	StaticScenePickRequest,
-} from "../runtime/static-scene-query";
+} from "../runtime/scene-query/contracts";
 
 const V2_RENDERER_VERTICAL_FOV_RADIANS = Math.PI / 3;
 

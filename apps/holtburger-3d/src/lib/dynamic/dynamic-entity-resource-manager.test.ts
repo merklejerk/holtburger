@@ -84,6 +84,45 @@ describe("dynamic entity resource manager", () => {
 		]);
 	});
 
+	it("splits mixed-material source parts into compatible dynamic render slices", async () => {
+		const assetService = createAssetService({ mixedMaterialPart: true });
+		const controller = createController(assetService);
+
+		controller.ingestStaticSeeds([createOutdoorSeedRecord()]);
+		await flushPromises();
+
+		const visual = controller.createSnapshot().records[0]?.resources.visual;
+		expect(visual?.status).toBe("ready");
+		if (visual?.status !== "ready") {
+			throw new Error("expected dynamic visual resources to be ready");
+		}
+
+		expect(
+			visual.renderParts.map((part) => ({
+				materialFamily: part.materialFamily,
+				partIndex: part.partIndex,
+				sourceAssetId: part.sourceAssetId,
+				triangleCount: part.triangleCount,
+			})),
+		).toEqual([
+			{
+				materialFamily: "texture-rgba",
+				partIndex: 0,
+				sourceAssetId: "gfx-obj/01000020",
+				triangleCount: 1,
+			},
+			{
+				materialFamily: "flat-color",
+				partIndex: 0,
+				sourceAssetId: "gfx-obj/01000020",
+				triangleCount: 1,
+			},
+		]);
+		expect(Array.from(visual.renderParts[1]?.materialSlotIndices ?? [])).toEqual([
+			1, 1, 1,
+		]);
+	});
+
 	it("dedupes shared setup and animation host assets while holding per-entity leases", async () => {
 		const host = new ResolvingRuntimeHost();
 		const assetService = new HostBackedAssetService({ host });
@@ -231,17 +270,30 @@ function createController(
 }
 
 function createAssetService(
-	options: { readonly failKeys?: ReadonlySet<string> } = {},
+	options: {
+		readonly failKeys?: ReadonlySet<string>;
+		readonly mixedMaterialPart?: boolean;
+	} = {},
 ): HostBackedAssetService {
 	return new HostBackedAssetService({
-		host: new ResolvingRuntimeHost(options.failKeys),
+		host: new ResolvingRuntimeHost(options),
 	});
+}
+
+interface ResolvingRuntimeHostOptions {
+	readonly failKeys?: ReadonlySet<string>;
+	readonly mixedMaterialPart?: boolean;
 }
 
 class ResolvingRuntimeHost implements RuntimeHost {
 	readonly lookupCountByKey = new Map<string, number>();
+	readonly #failKeys: ReadonlySet<string>;
+	readonly #mixedMaterialPart: boolean;
 
-	constructor(private readonly failKeys: ReadonlySet<string> = new Set()) {}
+	constructor(options: ResolvingRuntimeHostOptions = {}) {
+		this.#failKeys = options.failKeys ?? new Set();
+		this.#mixedMaterialPart = options.mixedMaterialPart ?? false;
+	}
 
 	lookupAsset(key: HostAssetKey, revision: number): Promise<PreparedAsset> {
 		const keyString = `${key.kind}:${key.id}`;
@@ -249,12 +301,12 @@ class ResolvingRuntimeHost implements RuntimeHost {
 			keyString,
 			(this.lookupCountByKey.get(keyString) ?? 0) + 1,
 		);
-		if (this.failKeys.has(keyString)) {
+		if (this.#failKeys.has(keyString)) {
 			return Promise.reject(new Error(`missing ${keyString}`));
 		}
 		return Promise.resolve({
 			key,
-			payload: createPayload(key),
+			payload: createPayload(key, { mixedMaterialPart: this.#mixedMaterialPart }),
 			preparedAt: "2026-06-26T00:00:00.000Z",
 			revision,
 			sourceAssetId: `${key.kind}/${key.id}`,
@@ -269,18 +321,21 @@ class ResolvingRuntimeHost implements RuntimeHost {
 	}
 }
 
-function createPayload(key: HostAssetKey): unknown {
+function createPayload(
+	key: HostAssetKey,
+	options: { readonly mixedMaterialPart: boolean },
+): unknown {
 	switch (key.kind) {
 		case "animation":
 			return createAnimationPayload();
 		case "setup-model":
 			return createSetupModelPayload();
 		case "setup-appearance":
-			return createSetupAppearancePayload();
+			return createSetupAppearancePayload(options);
 		case "gfx-obj":
-			return createGfxObjPayload();
+			return createGfxObjPayload(options);
 		case "material":
-			return createMaterialPayload();
+			return createMaterialPayload(key);
 		case "surface-texture":
 			return createSurfaceTexturePayload();
 		case "render-surface":
@@ -356,12 +411,16 @@ function createAnimationPayload(): AnimationPayloadDto {
 	};
 }
 
-function createSetupAppearancePayload(): SetupAppearancePayloadDto {
+function createSetupAppearancePayload(options: {
+	readonly mixedMaterialPart: boolean;
+}): SetupAppearancePayloadDto {
 	return {
 		animPartChanges: [],
 		appearanceKey: "setup-appearance/020003e5",
 		dependencies: {
-			materialAssetIds: ["material/08000011"],
+			materialAssetIds: options.mixedMaterialPart
+				? ["material/08000011", "material/08000012"]
+				: ["material/08000011"],
 			paletteAssetIds: [],
 		},
 		kind: "setup-appearance",
@@ -376,6 +435,15 @@ function createSetupAppearancePayload(): SetupAppearancePayloadDto {
 						slotIndex: 0,
 						surfaceId: 0x08000010,
 					},
+					...(options.mixedMaterialPart
+						? [
+								{
+									materialAssetId: "material/08000012",
+									slotIndex: 1,
+									surfaceId: 0x08000012,
+								},
+							]
+						: []),
 				],
 				partIndex: 0,
 			},
@@ -389,9 +457,15 @@ function createSetupAppearancePayload(): SetupAppearancePayloadDto {
 	};
 }
 
-function createGfxObjPayload(): GfxObjPayloadDto {
+function createGfxObjPayload(options: {
+	readonly mixedMaterialPart: boolean;
+}): GfxObjPayloadDto {
 	return {
-		dependencies: { materialAssetIds: ["material/08000010"] },
+		dependencies: {
+			materialAssetIds: options.mixedMaterialPart
+				? ["material/08000010", "material/08000012"]
+				: ["material/08000010"],
+		},
 		didDegrade: null,
 		drawingBsp: null,
 		drawingPolygons: [],
@@ -407,11 +481,15 @@ function createGfxObjPayload(): GfxObjPayloadDto {
 			},
 			invalidPolygons: [],
 			normals: [],
-			positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+			positions: options.mixedMaterialPart
+				? new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 2, 1, 0, 1, 2, 0])
+				: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 			skippedPolygonCount: 0,
 			sourceId: 0x01000020,
-			surfaceIds: [0x08000010],
-			triangleCount: 1,
+			surfaceIds: options.mixedMaterialPart
+				? [0x08000010, 0x08000012]
+				: [0x08000010],
+			triangleCount: options.mixedMaterialPart ? 2 : 1,
 			triangles: [
 				{
 					firstVertex: 0,
@@ -419,19 +497,56 @@ function createGfxObjPayload(): GfxObjPayloadDto {
 					polygonId: 7,
 					surfaceId: 0x08000010,
 				},
+				...(options.mixedMaterialPart
+					? [
+							{
+								firstVertex: 3,
+								materialVariantSignature: null,
+								polygonId: 8,
+								surfaceId: 0x08000012,
+							},
+						]
+					: []),
 			],
-			uvs: new Float32Array([0, 0, 1, 0, 0, 1]),
-			vertexCount: 3,
+			uvs: options.mixedMaterialPart
+				? new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1])
+				: new Float32Array([0, 0, 1, 0, 0, 1]),
+			vertexCount: options.mixedMaterialPart ? 6 : 3,
 		},
 		residencyKind: "unknown",
 		sortCenter: null,
 		sourceAssetKind: "gfx-obj",
-		surfaceIds: [0x08000010],
+		surfaceIds: options.mixedMaterialPart
+			? [0x08000010, 0x08000012]
+			: [0x08000010],
 		vertexArray: { vertices: [] },
 	};
 }
 
-function createMaterialPayload(): MaterialRecipePayloadDto {
+function createMaterialPayload(key: HostAssetKey): MaterialRecipePayloadDto {
+	const materialId = Number.parseInt(key.id, 16);
+	if (materialId === 0x08000012) {
+		return {
+			dependencies: {
+				paletteAssetIds: [],
+				renderSurfaceAssetIds: [],
+				surfaceTextureAssetIds: [],
+			},
+			diffuse: 1,
+			kind: "material-recipe",
+			luminosity: 0,
+			provenance: createProvenance("material-recipe"),
+			residencyKind: "unknown",
+			source: {
+				argb: 0xff604b2b,
+				kind: "solid-color",
+			},
+			sourceAssetKind: "material-recipe",
+			surfaceId: 0x08000012,
+			surfaceType: 0,
+			translucency: 0,
+		};
+	}
 	return {
 		dependencies: {
 			paletteAssetIds: ["palette/04000010"],

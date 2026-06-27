@@ -700,7 +700,7 @@ function createDynamicRenderParts(options: {
 			}
 			const gfxObj = resolveGfxObjPayload(prepared, part.partIndex);
 			parts.push(
-				createDynamicRenderPart({
+				...createDynamicRenderPartSlices({
 					gfxObj,
 					materialEntryByMaterialId,
 					part,
@@ -728,24 +728,22 @@ function resolveGfxObjPayload(
 	return prepared.payload as GfxObjPayloadDto;
 }
 
-function createDynamicRenderPart(options: {
+interface DynamicTriangleRenderCandidate {
+	readonly materialEntry: DynamicMaterialRenderEntry;
+	readonly triangle: StaticObjectSourceAssetFacts["parts"][number]["triangles"][number];
+}
+
+function createDynamicRenderPartSlices(options: {
 	readonly gfxObj: GfxObjPayloadDto;
 	readonly materialEntryByMaterialId: ReadonlyMap<
 		number,
 		DynamicMaterialRenderEntry
 	>;
 	readonly part: StaticObjectSourceAssetFacts["parts"][number];
-}): DynamicEntityRenderPart {
+}): readonly DynamicEntityRenderPart[] {
 	const triangles = options.part.triangles;
 	const sourcePositions = asFloat32Array(options.gfxObj.renderGeometry.positions);
 	const sourceTexCoords = asFloat32Array(options.gfxObj.renderGeometry.uvs);
-	const positions = new Float32Array(triangles.length * 9);
-	const texCoords = new Float32Array(triangles.length * 6);
-	const materialSlotIndices = new Float32Array(triangles.length * 3);
-	const indices =
-		triangles.length * 3 > 65535
-			? new Uint32Array(triangles.length * 3)
-			: new Uint16Array(triangles.length * 3);
 	const renderEntries = uniqueMaterialRenderEntries(
 		options.part.materialSlots.flatMap((slot) => {
 			const renderEntry = options.materialEntryByMaterialId.get(
@@ -764,12 +762,12 @@ function createDynamicRenderPart(options: {
 			`Dynamic render part ${options.part.partIndex} has no material entries.`,
 		);
 	}
-	const materialEntries = renderEntries.map((entry) => entry.entry);
-	const materialSlotEntries = options.part.materialSlots.flatMap((slot) => {
-			const materialEntryIndex = renderEntries.findIndex((entry) =>
+	const materialEntryBySurfaceId = new Map(
+		options.part.materialSlots.flatMap((slot) => {
+			const renderEntry = renderEntries.find((entry) =>
 				entry.entry.materialIds.includes(slot.material.materialId),
 			);
-			if (materialEntryIndex < 0) {
+			if (!renderEntry) {
 				throw new Error(
 					`Dynamic render part ${options.part.partIndex} cannot map surface ${slot.geometrySurfaceId} to a material entry.`,
 				);
@@ -777,39 +775,86 @@ function createDynamicRenderPart(options: {
 			return uniqueNumbers([
 				slot.geometrySurfaceId,
 				slot.materialSurfaceId,
-			]).map((surfaceId) => [surfaceId, materialEntryIndex] as const);
-		});
-	const materialSlotBySurfaceId = new Map(materialSlotEntries);
+			]).map((surfaceId) => [surfaceId, renderEntry] as const);
+		}),
+	);
+	const candidateSlices = new Map<string, DynamicTriangleRenderCandidate[]>();
 	for (let triangleIndex = 0; triangleIndex < triangles.length; triangleIndex += 1) {
 		const triangle = triangles[triangleIndex];
 		if (!triangle) {
 			continue;
 		}
-		const materialSlot = resolveDynamicTriangleMaterialSlot({
-			materialSlotBySurfaceId,
+		const materialEntry = resolveDynamicTriangleMaterialEntry({
+			materialEntryBySurfaceId,
 			partIndex: options.part.partIndex,
 			triangleGeometrySurfaceId: triangle.geometrySurfaceId,
 		});
+		const compatibilityKey = createDynamicMaterialCompatibilityKey(materialEntry);
+		const existing = candidateSlices.get(compatibilityKey);
+		const candidate = { materialEntry, triangle };
+		if (existing) {
+			existing.push(candidate);
+		} else {
+			candidateSlices.set(compatibilityKey, [candidate]);
+		}
+	}
+	return [...candidateSlices.values()].map((candidates) =>
+		createDynamicRenderPartSlice({
+			candidates,
+			part: options.part,
+			sourcePositions,
+			sourceTexCoords,
+		}),
+	);
+}
+
+function createDynamicRenderPartSlice(options: {
+	readonly candidates: readonly DynamicTriangleRenderCandidate[];
+	readonly part: StaticObjectSourceAssetFacts["parts"][number];
+	readonly sourcePositions: Float32Array;
+	readonly sourceTexCoords: Float32Array;
+}): DynamicEntityRenderPart {
+	const positions = new Float32Array(options.candidates.length * 9);
+	const texCoords = new Float32Array(options.candidates.length * 6);
+	const materialSlotIndices = new Float32Array(options.candidates.length * 3);
+	const indices =
+		options.candidates.length * 3 > 65535
+			? new Uint32Array(options.candidates.length * 3)
+			: new Uint16Array(options.candidates.length * 3);
+	const renderEntries = uniqueMaterialRenderEntries(
+		options.candidates.map((candidate) => candidate.materialEntry),
+	);
+	const materialEntries = renderEntries.map((entry) => entry.entry);
+	for (
+		let triangleIndex = 0;
+		triangleIndex < options.candidates.length;
+		triangleIndex += 1
+	) {
+		const candidate = options.candidates[triangleIndex];
+		if (!candidate) {
+			continue;
+		}
+		const { materialEntry, triangle } = candidate;
 		for (let vertex = 0; vertex < 3; vertex += 1) {
 			const sourceVertexIndex = triangle.firstVertex + vertex;
 			const targetVertexIndex = triangleIndex * 3 + vertex;
 			assertDynamicSourceVertexAvailable({
 				partIndex: options.part.partIndex,
-				sourcePositions,
-				sourceTexCoords,
+				sourcePositions: options.sourcePositions,
+				sourceTexCoords: options.sourceTexCoords,
 				sourceVertexIndex,
 			});
 			positions[targetVertexIndex * 3] =
-				sourcePositions[sourceVertexIndex * 3] as number;
+				options.sourcePositions[sourceVertexIndex * 3] as number;
 			positions[targetVertexIndex * 3 + 1] =
-				sourcePositions[sourceVertexIndex * 3 + 1] as number;
+				options.sourcePositions[sourceVertexIndex * 3 + 1] as number;
 			positions[targetVertexIndex * 3 + 2] =
-				sourcePositions[sourceVertexIndex * 3 + 2] as number;
+				options.sourcePositions[sourceVertexIndex * 3 + 2] as number;
 			texCoords[targetVertexIndex * 2] =
-				sourceTexCoords[sourceVertexIndex * 2] as number;
+				options.sourceTexCoords[sourceVertexIndex * 2] as number;
 			texCoords[targetVertexIndex * 2 + 1] =
-				sourceTexCoords[sourceVertexIndex * 2 + 1] as number;
-			materialSlotIndices[targetVertexIndex] = materialSlot;
+				options.sourceTexCoords[sourceVertexIndex * 2 + 1] as number;
+			materialSlotIndices[targetVertexIndex] = materialEntry.entry.slot;
 			indices[targetVertexIndex] = targetVertexIndex;
 		}
 	}
@@ -837,33 +882,48 @@ function createDynamicRenderPart(options: {
 				].filter((textureUseId): textureUseId is string => textureUseId !== null),
 			),
 		),
-		triangleCount: triangles.length,
-		vertexCount: triangles.length * 3,
+		triangleCount: options.candidates.length,
+		vertexCount: options.candidates.length * 3,
 	};
 }
 
-function resolveDynamicTriangleMaterialSlot(options: {
-	readonly materialSlotBySurfaceId: ReadonlyMap<number, number>;
+function resolveDynamicTriangleMaterialEntry(options: {
+	readonly materialEntryBySurfaceId: ReadonlyMap<
+		number,
+		DynamicMaterialRenderEntry
+	>;
 	readonly partIndex: number;
 	readonly triangleGeometrySurfaceId: number | null;
-}): number {
+}): DynamicMaterialRenderEntry {
 	if (options.triangleGeometrySurfaceId === null) {
-		if (options.materialSlotBySurfaceId.size === 1) {
-			return [...options.materialSlotBySurfaceId.values()][0] as number;
+		if (options.materialEntryBySurfaceId.size === 1) {
+			return [...options.materialEntryBySurfaceId.values()][0] as DynamicMaterialRenderEntry;
 		}
 		throw new Error(
-			`Dynamic render part ${options.partIndex} has a triangle without geometry surface id and ${options.materialSlotBySurfaceId.size} material slots.`,
+			`Dynamic render part ${options.partIndex} has a triangle without geometry surface id and ${options.materialEntryBySurfaceId.size} material slots.`,
 		);
 	}
-	const materialSlot = options.materialSlotBySurfaceId.get(
+	const materialEntry = options.materialEntryBySurfaceId.get(
 		options.triangleGeometrySurfaceId,
 	);
-	if (materialSlot === undefined) {
+	if (materialEntry === undefined) {
 		throw new Error(
 			`Dynamic render part ${options.partIndex} has no material slot for geometry surface ${options.triangleGeometrySurfaceId}.`,
 		);
 	}
-	return materialSlot;
+	return materialEntry;
+}
+
+function createDynamicMaterialCompatibilityKey(
+	entry: DynamicMaterialRenderEntry,
+): string {
+	const { blend, depthTest, depthWrite } = entry.entry.renderState;
+	return [
+		`family:${entry.family}`,
+		`pass:${entry.pass}`,
+		`blend:${blend.enabled}:${blend.mode}:${blend.srcFactor ?? "none"}:${blend.dstFactor ?? "none"}`,
+		`depth:${depthTest}:${depthWrite}`,
+	].join("|");
 }
 
 function assertDynamicSourceVertexAvailable(options: {

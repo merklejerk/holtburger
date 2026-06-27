@@ -40,7 +40,7 @@ describe("merged scene query", () => {
 		});
 	});
 
-	it("excludes dynamic scenery from default selection while keeping it queryable for debug", () => {
+	it("returns dynamic scenery for default browser selection and debug inspection", () => {
 		const landblockId = makeOutdoorLandblockId(0xda, 0x55);
 		const sources = createSources({
 			dynamicRecords: [
@@ -68,7 +68,11 @@ describe("merged scene query", () => {
 				...request,
 				mode: "default-selection",
 			}),
-		).toBeNull();
+		).toMatchObject({
+			defaultSelectable: true,
+			entityId: "dynamic-test-entity",
+			source: "dynamic",
+		});
 		expect(
 			pickMergedSceneRay(sources, {
 				...request,
@@ -119,7 +123,7 @@ describe("merged scene query", () => {
 		});
 	});
 
-	it("returns env-cell dynamic hits through debug modes while default selection excludes them", () => {
+	it("returns env-cell dynamic hits through default browser selection and debug modes", () => {
 		const sources = createSources({
 			envCellDynamicRecords: [
 				createEnvCellDynamicRecord({
@@ -150,7 +154,12 @@ describe("merged scene query", () => {
 				...request,
 				mode: "default-selection",
 			}),
-		).toBeNull();
+		).toMatchObject({
+			defaultSelectable: true,
+			distance: 4,
+			entityId: "dynamic-test-entity",
+			source: "dynamic",
+		});
 		expect(
 			pickMergedSceneRay(sources, {
 				...request,

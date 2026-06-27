@@ -21,7 +21,7 @@
 		type FreeCameraState,
 	} from "../lib/camera/free-camera";
 	import { createBrowserRuntime } from "../lib/browser/create-browser-runtime";
-	import { createBrowserStaticPickRay } from "../lib/browser/static-picking";
+	import { createBrowserScenePickRay } from "../lib/browser/scene-picking";
 	import {
 		createSceneInterestFromLocation,
 		inferLandblockInputMode,
@@ -42,6 +42,7 @@
 		ManualStaticDomain,
 		RuntimeCameraResidency,
 		RuntimeEvent,
+		RuntimeSceneDebugSelection,
 		RuntimeSceneInterestSource,
 		RuntimeSnapshot,
 	} from "../lib/runtime/client-runtime";
@@ -53,6 +54,7 @@
 	import type { EnvCellResourceMembership } from "../lib/runtime/env-cell-resource-membership";
 	import type { RuntimePortalOverlapResidency } from "../lib/runtime/portal-base-overlap";
 	import type { StaticSceneSelectionKey } from "../lib/runtime/scene-query/contracts";
+	import type { ScenePickHit } from "../lib/runtime/scene-query/merged-scene-query-contracts";
 	import {
 		describeStaticSceneSelectionKey,
 	} from "../lib/runtime/scene-query/static-selection-keys";
@@ -65,6 +67,21 @@
 	} from "../lib/ui/performance-metrics";
 
 	type BrowserPanelTab = "navigate" | "settings" | "debug";
+	type SelectedScenePick =
+		| {
+				readonly distance: number;
+				readonly kind: "static";
+				readonly selectionKey: StaticSceneSelectionKey;
+		  }
+		| {
+				readonly distance: number;
+				readonly entityId: string;
+				readonly kind: "dynamic";
+				readonly sourceResidence: Extract<
+					ScenePickHit,
+					{ readonly source: "dynamic" }
+				>["sourceResidence"];
+		  };
 	type CameraFocusStatus =
 		| "idle"
 		| "waiting"
@@ -135,8 +152,7 @@
 	let cameraState = $state<FreeCameraState>(createFreeCameraState());
 	let diagnosticsReportText = $state<string | null>(null);
 	let selectedStaticDiagnosticsReportText = $state<string | null>(null);
-	let selectedStaticSelectionKey = $state<StaticSceneSelectionKey | null>(null);
-	let selectedStaticPickDistance = $state<number | null>(null);
+	let selectedScenePick = $state<SelectedScenePick | null>(null);
 	let pendingCameraFocus = $state<PendingCameraFocus | null>(null);
 	let cameraFocusStatus = $state<CameraFocusStatus>("idle");
 	let pickPointerCandidate: {
@@ -255,7 +271,7 @@
 		}
 
 		submittedStaticLocation = parsedLocation;
-		clearStaticDebugSelection();
+		clearSceneDebugSelection();
 		updateSceneInterestForLocation(parsedLocation, "manual");
 	}
 
@@ -290,7 +306,7 @@
 	function clearSceneInterest(): void {
 		clearStaticInterestRefresh();
 		submittedStaticLocation = null;
-		clearStaticDebugSelection();
+		clearSceneDebugSelection();
 		cancelPendingCameraFocus("idle");
 		followModeEnabled = false;
 		runtime?.updateSceneInterest({ kind: "none" });
@@ -462,15 +478,16 @@
 	}
 
 	function openSelectedStaticDiagnosticsReport(): void {
-		if (!runtime || !selectedStaticSelectionKey) {
+		const selectedStaticPick = getSelectedStaticPick(selectedScenePick);
+		if (!runtime || !selectedStaticPick) {
 			return;
 		}
 
 		selectedStaticDiagnosticsReportText = JSON.stringify(
 			runtime.createStaticSelectionDiagnosticsReport(
-				selectedStaticSelectionKey,
+				selectedStaticPick.selectionKey,
 				{
-					pickDistance: selectedStaticPickDistance,
+					pickDistance: selectedStaticPick.distance,
 				},
 			),
 			null,
@@ -1100,7 +1117,7 @@
 			event.preventDefault();
 		}
 		if (pickCandidate && shouldPickFromPointerUp(event, pickCandidate)) {
-			pickStaticAtPointer(event, pickCandidate.context);
+			pickSceneAtPointer(event, pickCandidate.context);
 		}
 	}
 
@@ -1179,12 +1196,12 @@
 		);
 	}
 
-	function pickStaticAtPointer(
+	function pickSceneAtPointer(
 		event: PointerEvent,
 		contextLocation: ParsedLocationInput | null,
 	): void {
 		if (!runtime || !canvasElement || !contextLocation) {
-			clearStaticDebugSelection();
+			clearSceneDebugSelection();
 			return;
 		}
 
@@ -1205,7 +1222,7 @@
 			cameraController?.createFrameStateCamera() ??
 			createFreeCameraFrameStateCamera(cameraState);
 		const viewport = canvasElement.getBoundingClientRect();
-		const pickRequest = createBrowserStaticPickRay({
+		const pickRequest = createBrowserScenePickRay({
 			camera,
 			clientX: event.clientX,
 			clientY: event.clientY,
@@ -1217,31 +1234,87 @@
 			...pickRequest,
 			mode: "default-selection",
 		});
-		selectedStaticSelectionKey =
-			hit?.source === "static" ? hit.staticHit.selectionKey : null;
-		selectedStaticPickDistance =
-			hit?.source === "static" ? hit.staticHit.distance : null;
+		const selection = createSelectedScenePick(hit);
+		selectedScenePick = selection;
 		selectedStaticDiagnosticsReportText = null;
-		runtime.setStaticDebugSelection(selectedStaticSelectionKey);
+		runtime.setSceneDebugSelection(createRuntimeSceneDebugSelection(selection));
 	}
 
-	function clearStaticDebugSelection(): void {
-		selectedStaticSelectionKey = null;
-		selectedStaticPickDistance = null;
+	function clearSceneDebugSelection(): void {
+		selectedScenePick = null;
 		selectedStaticDiagnosticsReportText = null;
-		runtime?.setStaticDebugSelection(null);
+		runtime?.setSceneDebugSelection(null);
 	}
 
-	function formatStaticPickSummary(
-		selectionKey: StaticSceneSelectionKey | null,
-		distance: number | null,
-	): string {
-		if (!selectionKey) {
+	function createSelectedScenePick(hit: ScenePickHit | null): SelectedScenePick | null {
+		if (hit === null) {
+			return null;
+		}
+		if (hit.source === "static") {
+			return {
+				distance: hit.staticHit.distance,
+				kind: "static",
+				selectionKey: hit.staticHit.selectionKey,
+			};
+		}
+		return {
+			distance: hit.distance,
+			entityId: hit.entityId,
+			kind: "dynamic",
+			sourceResidence: hit.sourceResidence,
+		};
+	}
+
+	function createRuntimeSceneDebugSelection(
+		selection: SelectedScenePick | null,
+	): RuntimeSceneDebugSelection | null {
+		if (selection === null) {
+			return null;
+		}
+		if (selection.kind === "static") {
+			return {
+				kind: "static",
+				selectionKey: selection.selectionKey,
+			};
+		}
+		return {
+			entityId: selection.entityId,
+			kind: "dynamic",
+		};
+	}
+
+	function getSelectedStaticPick(
+		selection: SelectedScenePick | null,
+	): Extract<SelectedScenePick, { readonly kind: "static" }> | null {
+		return selection?.kind === "static" ? selection : null;
+	}
+
+	function formatScenePickSummary(selection: SelectedScenePick | null): string {
+		if (selection === null) {
 			return "none";
 		}
+		if (selection.kind === "static") {
+			return `${describeStaticSceneSelectionKey(selection.selectionKey)} d=${selection.distance.toFixed(2)}`;
+		}
+		return `${selection.entityId} ${formatDynamicPickResidence(selection.sourceResidence)} d=${selection.distance.toFixed(2)}`;
+	}
 
-		const distanceText = distance === null ? "" : ` d=${distance.toFixed(2)}`;
-		return `${describeStaticSceneSelectionKey(selectionKey)}${distanceText}`;
+	function formatDynamicPickResidence(
+		residence:
+			| {
+					readonly kind: "outdoor-landblock";
+					readonly landblockId: number;
+			  }
+			| {
+					readonly envCellId: number;
+					readonly kind: "env-cell";
+					readonly landblockId: number;
+			  },
+	): string {
+		if (residence.kind === "env-cell") {
+			return `env ${formatHexId(residence.landblockId)} / ${formatHexId(residence.envCellId)}`;
+		}
+		return `out ${formatHexId(residence.landblockId)}`;
 	}
 
 	function formatHexId(value: number): string {
@@ -1851,23 +1924,17 @@
 							)}
 						</div>
 						<div class="browser-display__status-row--action">
-							<dt>Selected static</dt>
+							<dt>Selected</dt>
 							<dd>
 								<span class="browser-display__copy-target">
-									{formatStaticPickSummary(
-										selectedStaticSelectionKey,
-										selectedStaticPickDistance,
-									)}
+									{formatScenePickSummary(selectedScenePick)}
 									{@render copyOverlay(
-										formatStaticPickSummary(
-											selectedStaticSelectionKey,
-											selectedStaticPickDistance,
-										),
-										"Selected static",
+										formatScenePickSummary(selectedScenePick),
+										"Selected",
 									)}
 								</span>
 								<button
-									disabled={!selectedStaticSelectionKey}
+									disabled={!getSelectedStaticPick(selectedScenePick)}
 									type="button"
 									onclick={openSelectedStaticDiagnosticsReport}
 								>

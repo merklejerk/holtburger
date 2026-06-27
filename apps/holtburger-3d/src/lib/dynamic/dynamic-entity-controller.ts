@@ -6,6 +6,7 @@ import type {
 } from "../static/contracts";
 import {
 	createStaticScopeOwnerKey,
+	type DynamicEntityCurrentBounds,
 	type DynamicEntityIssue,
 	isEnvCellDynamicSeedRecord,
 	isOutdoorDynamicSeedRecord,
@@ -140,6 +141,13 @@ export class DynamicEntityController {
 		readonly landblockId: number;
 	}): readonly EnvCellDynamicSpatialIndexRecord[] {
 		return this.#placementTracker.queryEnvCellBounds(options);
+	}
+
+	/** Returns current render-query bounds for identity-driven browser selection overlays. */
+	queryDynamicCurrentBounds(
+		entityId: DynamicEntityId,
+	): DynamicEntityCurrentBounds | null {
+		return this.#store.get(entityId)?.bounds.currentBounds ?? null;
 	}
 
 	#upsertPlacementUpdate(record: DynamicEntityRecord): void {

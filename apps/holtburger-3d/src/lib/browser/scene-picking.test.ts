@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createBrowserStaticPickRay } from "./static-picking";
+import { createBrowserScenePickRay } from "./scene-picking";
 
-describe("browser static picking", () => {
+describe("browser scene picking", () => {
 	it("builds a center pick ray from the browser camera convention", () => {
-		const request = createBrowserStaticPickRay({
+		const request = createBrowserScenePickRay({
 			camera: {
 				pitchRadians: 0,
 				position: [1, 2, 3],
@@ -27,7 +27,7 @@ describe("browser static picking", () => {
 	});
 
 	it("offsets rays by viewport position", () => {
-		const request = createBrowserStaticPickRay({
+		const request = createBrowserScenePickRay({
 			camera: {
 				pitchRadians: 0,
 				position: [0, 0, 0],
@@ -49,8 +49,8 @@ describe("browser static picking", () => {
 		expect(request.ray.direction.z).toBeLessThan(0);
 	});
 
-	it("passes caller-owned filters through to the static scene query", () => {
-		const request = createBrowserStaticPickRay({
+	it("passes caller-owned filters through to the scene query", () => {
+		const request = createBrowserScenePickRay({
 			camera: {
 				pitchRadians: 0,
 				position: [0, 0, 0],

@@ -394,11 +394,11 @@ describe("browser client runtime", () => {
 		const instance =
 			renderer.dynamicInstanceCommits.at(-1)?.instances[0] ?? null;
 		expect(instance?.objectToRenderMatrix[0]).toBeCloseTo(
-			Math.cos(-0.03836006671190262),
+			Math.cos(-0.03836006671190262 * 30),
 			7,
 		);
 		expect(instance?.objectToRenderMatrix[2]).toBeCloseTo(
-			-Math.sin(-0.03836006671190262),
+			-Math.sin(-0.03836006671190262 * 30),
 			7,
 		);
 

@@ -107,6 +107,10 @@ export class OutdoorDynamicSpatialIndex {
 			);
 	}
 
+	landblockIds(): readonly number[] {
+		return [...this.#treesByLandblockId.keys()].sort((left, right) => left - right);
+	}
+
 	landblockIdsForEntity(entityId: DynamicEntityId): readonly number[] {
 		return (
 			this.#itemsByEntityId.get(entityId)?.map((item) => item.landblockId) ?? []

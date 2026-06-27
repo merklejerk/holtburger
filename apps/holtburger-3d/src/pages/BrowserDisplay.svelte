@@ -689,9 +689,10 @@
 		readonly x: number;
 		readonly z: number;
 	}): number {
-		const hit = runtime?.pickStaticRay({
+		const hit = runtime?.pickSceneRay({
 			context: { kind: "outdoor" },
 			filters: { itemKinds: ["terrain-quad"] },
+			mode: "default-selection",
 			ray: {
 				direction: { x: 0, y: -1, z: 0 },
 				origin: {
@@ -702,8 +703,9 @@
 			},
 		});
 
-		return hit?.selectionKey.itemKind === "terrain-quad"
-			? hit.hitPoint.y
+		return hit?.source === "static" &&
+			hit.staticHit.selectionKey.itemKind === "terrain-quad"
+			? hit.staticHit.hitPoint.y
 			: options.bounds.max.y;
 	}
 
@@ -1191,9 +1193,14 @@
 			filters: { ignoreContainingOrigin: true },
 			viewport,
 		});
-		const hit = runtime.pickStaticRay(pickRequest);
-		selectedStaticSelectionKey = hit?.selectionKey ?? null;
-		selectedStaticPickDistance = hit?.distance ?? null;
+		const hit = runtime.pickSceneRay({
+			...pickRequest,
+			mode: "default-selection",
+		});
+		selectedStaticSelectionKey =
+			hit?.source === "static" ? hit.staticHit.selectionKey : null;
+		selectedStaticPickDistance =
+			hit?.source === "static" ? hit.staticHit.distance : null;
 		selectedStaticDiagnosticsReportText = null;
 		runtime.setStaticDebugSelection(selectedStaticSelectionKey);
 	}

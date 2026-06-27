@@ -99,6 +99,11 @@ import type {
 	Vec3,
 } from "./scene-query/contracts";
 import { triangulateEnvCellPortalAperture } from "./scene-query/env-cell-portal-picking";
+import { pickMergedSceneRay } from "./scene-query/merged-scene-query";
+import type {
+	ScenePickHit,
+	ScenePickRequest,
+} from "./scene-query/merged-scene-query-contracts";
 import { describeStaticSceneSelectionKey } from "./scene-query/static-selection-keys";
 import {
 	StaticSceneQuery,
@@ -475,6 +480,7 @@ export interface ClientRuntime {
 		readonly landblockId: number;
 	}): EnvCellResourceMembership | null;
 	setCurrentCameraResidency(residency: RuntimeCameraResidency): void;
+	pickSceneRay(request: ScenePickRequest): ScenePickHit | null;
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null;
 	createStaticSelectionDiagnosticsReport(
 		selectionKey: StaticSceneSelectionKey,
@@ -762,14 +768,35 @@ class ClientRuntimeImpl implements ClientRuntime {
 	}
 
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null {
-		this.#assertActive();
-		return this.#staticSceneQuery.pickRay({
-			...request,
-			filters: {
-				...request.filters,
-				includeEnvCellPortals: this.#envCellPortalDebugOverlayVisible,
-			},
+		const hit = this.pickSceneRay({
+			context: request.context,
+			filters: request.filters,
+			mode: "default-selection",
+			ray: request.ray,
 		});
+		return hit?.source === "static" ? hit.staticHit : null;
+	}
+
+	pickSceneRay(request: ScenePickRequest): ScenePickHit | null {
+		this.#assertActive();
+		return pickMergedSceneRay(
+			{
+				outdoorAnchorLandblockId: this.#renderAnchorLandblockId,
+				pickStaticRay: (staticRequest) =>
+					this.#staticSceneQuery.pickRay({
+						...staticRequest,
+						filters: {
+							...staticRequest.filters,
+							includeEnvCellPortals: this.#envCellPortalDebugOverlayVisible,
+						},
+					}),
+				queryOutdoorDynamicBounds: (options) =>
+					this.#dynamicEntityController.queryOutdoorDynamicBounds(options),
+				queryOutdoorDynamicLandblockIds: () =>
+					this.#dynamicEntityController.queryOutdoorDynamicLandblockIds(),
+			},
+			request,
+		);
 	}
 
 	createStaticSelectionDiagnosticsReport(

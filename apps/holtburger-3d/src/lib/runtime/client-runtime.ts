@@ -84,7 +84,7 @@ import {
 	type StaticMaterializationResult,
 } from "./static-materializer";
 import type {
-	EnvCellPortalScenePickHit,
+	EnvCellPortalScenePickDetails,
 	EnvCellStaticScenePickDetails,
 	OutdoorStaticObjectScenePickDetails,
 	OutdoorStaticObjectSourceDiagnostics,
@@ -98,10 +98,8 @@ import type {
 	TerrainQuadScenePickDetails,
 	Vec3,
 } from "./scene-query/contracts";
-import {
-	createEnvCellPortalSelectionKey,
-	describeStaticSceneSelectionKey,
-} from "./scene-query/static-selection-keys";
+import { triangulateEnvCellPortalAperture } from "./scene-query/env-cell-portal-picking";
+import { describeStaticSceneSelectionKey } from "./scene-query/static-selection-keys";
 import {
 	StaticSceneQuery,
 } from "./static-scene-query";
@@ -289,14 +287,7 @@ type StaticSelectionDiagnosticsDetails =
 			readonly detail: TerrainQuadScenePickDetails;
 	  };
 
-interface EnvCellPortalSelectionDetails {
-	readonly envCellId: number;
-	readonly landblockId: number;
-	readonly portal:
-		| StaticPortalInteriorRecord["envCells"][number]["portals"][number]
-		| null;
-	readonly portalAperture: StaticPortalInteriorRecord["envCells"][number]["portalApertures"][number];
-}
+type EnvCellPortalSelectionDetails = EnvCellPortalScenePickDetails;
 
 interface OutdoorStaticObjectSelectionDetails {
 	readonly bvhItemIndex: number;
@@ -442,18 +433,6 @@ interface StaticSelectionTextureRefSummary {
 interface MatchedStaticSelectionDrawUnitDiagnostics {
 	readonly diagnostics: StaticSelectionDrawUnitDiagnostics;
 	readonly sourceMappingCoverage: readonly StaticObjectSourceMappingCoverage[];
-}
-
-interface EnvCellPortalPickTarget {
-	readonly bounds: StaticBounds;
-	readonly portal:
-		| StaticPortalInteriorRecord["envCells"][number]["portals"][number]
-		| null;
-	readonly portalAperture: StaticPortalInteriorRecord["envCells"][number]["portalApertures"][number];
-	readonly selectionKey: StaticSceneSelectionKey & {
-		readonly itemKind: "env-cell-portal";
-	};
-	readonly vertices: readonly (readonly [number, number, number])[];
 }
 
 type RuntimeSnapshotListener = (snapshot: RuntimeSnapshot) => void;
@@ -784,13 +763,13 @@ class ClientRuntimeImpl implements ClientRuntime {
 
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null {
 		this.#assertActive();
-		const sceneHit = this.#staticSceneQuery.pickRay(request);
-		if (!this.#envCellPortalDebugOverlayVisible) {
-			return sceneHit;
-		}
-
-		const portalHit = this.#pickEnvCellPortalRay(request, sceneHit);
-		return chooseNearestStaticSceneHit(sceneHit, portalHit);
+		return this.#staticSceneQuery.pickRay({
+			...request,
+			filters: {
+				...request.filters,
+				includeEnvCellPortals: this.#envCellPortalDebugOverlayVisible,
+			},
+		});
 	}
 
 	createStaticSelectionDiagnosticsReport(
@@ -1829,134 +1808,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		readonly bounds: StaticBounds;
 		readonly selectionKey: StaticSceneSelectionKey;
 	} | null {
-		if (selectionKey.itemKind !== "env-cell-portal") {
-			return this.#staticSceneQuery.querySelectionDebugBounds(selectionKey);
-		}
-
-		const target = this.#queryEnvCellPortalPickTarget(selectionKey);
-		return target === null
-			? null
-			: {
-					bounds: target.bounds,
-					selectionKey,
-				};
-	}
-
-	#pickEnvCellPortalRay(
-		request: StaticScenePickRequest,
-		currentNearestHit: StaticScenePickHit | null,
-	): StaticScenePickHit | null {
-		let nearestHit: StaticScenePickHit | null = null;
-		for (const target of this.#queryEnvCellPortalPickTargets(request)) {
-			if (!matchesPortalPickFilters(target, request)) {
-				continue;
-			}
-			for (let index = 0; index < target.vertices.length; index += 3) {
-				const first = target.vertices[index];
-				const second = target.vertices[index + 1];
-				const third = target.vertices[index + 2];
-				if (!first || !second || !third) {
-					throw new Error(
-						`Env-cell portal ${target.selectionKey.portalId} did not triangulate to complete triangles.`,
-					);
-				}
-				const distance = intersectRayTriangle(
-					request.ray,
-					first,
-					second,
-					third,
-				);
-				if (distance === null) {
-					continue;
-				}
-				if (
-					currentNearestHit !== null &&
-					distance > currentNearestHit.distance
-				) {
-					continue;
-				}
-				const hit: EnvCellPortalScenePickHit = {
-					bounds: target.bounds,
-					distance,
-					hitPoint: pointOnRay(request.ray, distance),
-					kind: "static-scene-pick-hit",
-					selectionKey: target.selectionKey,
-				};
-				nearestHit = chooseNearestStaticSceneHit(nearestHit, hit);
-			}
-		}
-
-		return nearestHit;
-	}
-
-	#queryEnvCellPortalPickTarget(
-		selectionKey: StaticSceneSelectionKey & {
-			readonly itemKind: "env-cell-portal";
-		},
-	): EnvCellPortalPickTarget | null {
-		for (const target of this.#queryEnvCellPortalPickTargets()) {
-			if (
-				target.selectionKey.landblockId === selectionKey.landblockId &&
-				target.selectionKey.envCellId === selectionKey.envCellId &&
-				target.selectionKey.portalId === selectionKey.portalId
-			) {
-				return target;
-			}
-		}
-
-		return null;
-	}
-
-	#queryEnvCellPortalPickTargets(
-		request?: StaticScenePickRequest,
-	): readonly EnvCellPortalPickTarget[] {
-		const targets: EnvCellPortalPickTarget[] = [];
-		for (const record of this.#staticSceneQuery.queryPortalInteriorRecords()) {
-			if (request?.context.kind === "env-cell") {
-				if (record.landblockId !== request.context.landblockId) {
-					continue;
-				}
-			}
-			const translation = createOutdoorLandblockRootTranslation(
-				record.landblockId,
-				this.#renderAnchorLandblockId,
-			);
-			for (const envCell of record.envCells) {
-				if (!envCellMatchesPortalPickRequest(envCell.envCellId, request)) {
-					continue;
-				}
-				const matrix = buildAcPlacementMatrix(
-					envCell.localPlacement,
-					AC_UNIT_SCALE,
-				);
-				for (const aperture of envCell.portalApertures) {
-					const vertices = triangulateEnvCellPortalAperture(
-						aperture.points,
-						matrix,
-						translation,
-					);
-					if (vertices.length === 0) {
-						continue;
-					}
-					targets.push({
-						bounds: createBoundsForVertices(vertices),
-						portal:
-							envCell.portals.find(
-								(portal) => portal.portalId === aperture.portalId,
-							) ?? null,
-						portalAperture: aperture,
-						selectionKey: createEnvCellPortalSelectionKey({
-							envCellId: envCell.envCellId,
-							landblockId: record.landblockId,
-							portalId: aperture.portalId,
-						}),
-						vertices,
-					});
-				}
-			}
-		}
-
-		return targets;
+		return this.#staticSceneQuery.querySelectionDebugBounds(selectionKey);
 	}
 
 	#queryStaticSelectionDiagnosticsDetails(
@@ -1990,16 +1842,11 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 
 		if (selectionKey.itemKind === "env-cell-portal") {
-			const target = this.#queryEnvCellPortalPickTarget(selectionKey);
-			return target === null
+			const detail = this.#staticSceneQuery.queryEnvCellPortalDetails(selectionKey);
+			return detail === null
 				? null
 				: {
-						detail: {
-							envCellId: selectionKey.envCellId,
-							landblockId: selectionKey.landblockId,
-							portal: target.portal,
-							portalAperture: target.portalAperture,
-						},
+						detail,
 						kind: "env-cell-portal",
 					};
 		}
@@ -2414,173 +2261,6 @@ function matchesStaticObjectSourceMappingCoverage(
 	);
 }
 
-function chooseNearestStaticSceneHit(
-	left: StaticScenePickHit | null,
-	right: StaticScenePickHit | null,
-): StaticScenePickHit | null {
-	if (left === null) {
-		return right;
-	}
-	if (right === null) {
-		return left;
-	}
-	if (left.distance !== right.distance) {
-		return left.distance < right.distance ? left : right;
-	}
-
-	return describeStaticSceneSelectionKey(left.selectionKey).localeCompare(
-		describeStaticSceneSelectionKey(right.selectionKey),
-	) <= 0
-		? left
-		: right;
-}
-
-function envCellMatchesPortalPickRequest(
-	envCellId: number,
-	request: StaticScenePickRequest | undefined,
-): boolean {
-	if (request?.context.kind !== "env-cell") {
-		return true;
-	}
-	const acceptedEnvCellIds = request.context.acceptedEnvCellIds ?? [
-		request.context.envCellId,
-	];
-	return (
-		acceptedEnvCellIds.length === 0 || acceptedEnvCellIds.includes(envCellId)
-	);
-}
-
-function matchesPortalPickFilters(
-	target: EnvCellPortalPickTarget,
-	request: StaticScenePickRequest,
-): boolean {
-	const filters = request.filters;
-	return (
-		(!filters?.itemKinds ||
-			filters.itemKinds.includes(target.selectionKey.itemKind)) &&
-		(!filters?.domains ||
-			filters.domains.includes(target.selectionKey.domain)) &&
-		(!filters?.ignoreContainingOrigin ||
-			!containsPoint(target.bounds, request.ray.origin))
-	);
-}
-
-function createBoundsForVertices(
-	vertices: readonly (readonly [number, number, number])[],
-): StaticBounds {
-	if (vertices.length === 0) {
-		throw new Error("Cannot create debug bounds for empty vertex list.");
-	}
-
-	let minX = Number.POSITIVE_INFINITY;
-	let minY = Number.POSITIVE_INFINITY;
-	let minZ = Number.POSITIVE_INFINITY;
-	let maxX = Number.NEGATIVE_INFINITY;
-	let maxY = Number.NEGATIVE_INFINITY;
-	let maxZ = Number.NEGATIVE_INFINITY;
-	for (const [x, y, z] of vertices) {
-		minX = Math.min(minX, x);
-		minY = Math.min(minY, y);
-		minZ = Math.min(minZ, z);
-		maxX = Math.max(maxX, x);
-		maxY = Math.max(maxY, y);
-		maxZ = Math.max(maxZ, z);
-	}
-
-	return {
-		max: { x: maxX, y: maxY, z: maxZ },
-		min: { x: minX, y: minY, z: minZ },
-	};
-}
-
-function containsPoint(bounds: StaticBounds, point: Vec3): boolean {
-	return (
-		point.x >= bounds.min.x &&
-		point.x <= bounds.max.x &&
-		point.y >= bounds.min.y &&
-		point.y <= bounds.max.y &&
-		point.z >= bounds.min.z &&
-		point.z <= bounds.max.z
-	);
-}
-
-function pointOnRay(
-	ray: StaticScenePickRequest["ray"],
-	distance: number,
-): Vec3 {
-	return {
-		x: ray.origin.x + ray.direction.x * distance,
-		y: ray.origin.y + ray.direction.y * distance,
-		z: ray.origin.z + ray.direction.z * distance,
-	};
-}
-
-function intersectRayTriangle(
-	ray: StaticScenePickRequest["ray"],
-	first: readonly [number, number, number],
-	second: readonly [number, number, number],
-	third: readonly [number, number, number],
-): number | null {
-	const epsilon = 1e-6;
-	const edge1 = subtractTuple(second, first);
-	const edge2 = subtractTuple(third, first);
-	const pvec = cross(ray.direction, edge2);
-	const determinant = dot(edge1, pvec);
-	if (Math.abs(determinant) < epsilon) {
-		return null;
-	}
-
-	const inverseDeterminant = 1 / determinant;
-	const tvec = subtractVec3Tuple(ray.origin, first);
-	const u = dot(tvec, pvec) * inverseDeterminant;
-	if (u < -epsilon || u > 1 + epsilon) {
-		return null;
-	}
-
-	const qvec = cross(tvec, edge1);
-	const v = dot(ray.direction, qvec) * inverseDeterminant;
-	if (v < -epsilon || u + v > 1 + epsilon) {
-		return null;
-	}
-
-	const distance = dot(edge2, qvec) * inverseDeterminant;
-	return distance >= epsilon ? distance : null;
-}
-
-function subtractTuple(
-	left: readonly [number, number, number],
-	right: readonly [number, number, number],
-): Vec3 {
-	return {
-		x: left[0] - right[0],
-		y: left[1] - right[1],
-		z: left[2] - right[2],
-	};
-}
-
-function subtractVec3Tuple(
-	left: Vec3,
-	right: readonly [number, number, number],
-): Vec3 {
-	return {
-		x: left.x - right[0],
-		y: left.y - right[1],
-		z: left.z - right[2],
-	};
-}
-
-function cross(left: Vec3, right: Vec3): Vec3 {
-	return {
-		x: left.y * right.z - left.z * right.y,
-		y: left.z * right.x - left.x * right.z,
-		z: left.x * right.y - left.y * right.x,
-	};
-}
-
-function dot(left: Vec3, right: Vec3): number {
-	return left.x * right.x + left.y * right.y + left.z * right.z;
-}
-
 function createStaticDebugBoundsOverlayPrimitive(
 	bounds: StaticBounds,
 	options: { readonly id: string },
@@ -2745,49 +2425,6 @@ function createEnvCellPortalDebugOverlayPrimitives(
 		}
 	}
 	return primitives;
-}
-
-function triangulateEnvCellPortalAperture(
-	points: StaticPortalInteriorRecord["envCells"][number]["portalApertures"][number]["points"],
-	matrix: Float32Array,
-	translation: readonly [number, number, number],
-): readonly (readonly [number, number, number])[] {
-	if (points.length < 3) {
-		return [];
-	}
-	const vertices: Array<readonly [number, number, number]> = [];
-	for (let index = 1; index < points.length - 1; index += 1) {
-		vertices.push(
-			transformEnvCellPortalPoint(points[0], matrix, translation),
-			transformEnvCellPortalPoint(points[index], matrix, translation),
-			transformEnvCellPortalPoint(points[index + 1], matrix, translation),
-		);
-	}
-	return vertices;
-}
-
-function transformEnvCellPortalPoint(
-	point: StaticPortalInteriorRecord["envCells"][number]["portalApertures"][number]["points"][number],
-	matrix: Float32Array,
-	translation: readonly [number, number, number],
-): readonly [number, number, number] {
-	return [
-		matrix[0] * point.x +
-			matrix[4] * point.y +
-			matrix[8] * point.z +
-			matrix[12] +
-			translation[0],
-		matrix[1] * point.x +
-			matrix[5] * point.y +
-			matrix[9] * point.z +
-			matrix[13] +
-			translation[1],
-		matrix[2] * point.x +
-			matrix[6] * point.y +
-			matrix[10] * point.z +
-			matrix[14] +
-			translation[2],
-	];
 }
 
 function countBuildingTransitionApertures(

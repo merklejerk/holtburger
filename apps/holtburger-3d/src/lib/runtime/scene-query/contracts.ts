@@ -49,6 +49,8 @@ export interface StaticScenePickRequest {
 export interface StaticScenePickFilters {
 	readonly itemKinds?: readonly StaticSceneSelectionKey["itemKind"][];
 	readonly domains?: readonly StaticSceneSelectionKey["domain"][];
+	/** Includes debug-only env-cell portal aperture triangles in static ray picking. */
+	readonly includeEnvCellPortals?: boolean;
 	readonly ignoreContainingOrigin?: boolean;
 }
 
@@ -174,6 +176,15 @@ export interface TerrainQuadScenePickDetails {
 	readonly landblockId: number;
 	readonly quad: TerrainMeshQuadFacts;
 	readonly bvhItemIndex: number;
+}
+
+export interface EnvCellPortalScenePickDetails {
+	readonly landblockId: number;
+	readonly envCellId: number;
+	readonly portal:
+		| StaticPortalInteriorRecord["envCells"][number]["portals"][number]
+		| null;
+	readonly portalAperture: StaticPortalInteriorRecord["envCells"][number]["portalApertures"][number];
 }
 
 export interface StaticSceneSelectionDebugBounds {

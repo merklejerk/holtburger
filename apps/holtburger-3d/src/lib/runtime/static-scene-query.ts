@@ -17,6 +17,7 @@ import type {
 import type { EnvCellSystemLayerPayload } from "../renderer/types";
 import { createOutdoorLandblockRootTranslation } from "./static-placement";
 import type {
+	EnvCellPortalScenePickDetails,
 	EnvCellStaticScenePickDetails,
 	OutdoorStaticObjectScenePickDetails,
 	OutdoorStaticObjectSourceDiagnostics,
@@ -36,6 +37,7 @@ import type {
 	Vec3,
 } from "./scene-query/contracts";
 import { EnvCellCommittedRecordStore } from "./scene-query/env-cell-committed-records";
+import { queryEnvCellPortalPickTarget } from "./scene-query/env-cell-portal-picking";
 import { EnvCellResidencyQuery } from "./scene-query/env-cell-residency";
 import { LandblockGridSpatialIndex } from "./scene-query/landblock-grid-spatial-index";
 import {
@@ -311,6 +313,7 @@ export class StaticSceneQuery {
 			{
 				envCellCommittedRecords: this.#envCellCommittedRecords,
 				landblockGridIndex: this.#landblockGridIndex,
+				outdoorAnchorLandblockId: this.#outdoorAnchorLandblockId,
 			},
 			request,
 		);
@@ -460,9 +463,40 @@ export class StaticSceneQuery {
 		return queryTerrainLandblockBounds(this.#selectionDebugState(), options);
 	}
 
+	queryEnvCellPortalDetails(
+		selectionKey: StaticSceneSelectionKey & {
+			readonly itemKind: "env-cell-portal";
+		},
+	): EnvCellPortalScenePickDetails | null {
+		const target = queryEnvCellPortalPickTarget({
+			envCellCommittedRecords: this.#envCellCommittedRecords,
+			outdoorAnchorLandblockId: this.#outdoorAnchorLandblockId,
+			selectionKey,
+		});
+		return target === null
+			? null
+			: {
+					envCellId: selectionKey.envCellId,
+					landblockId: selectionKey.landblockId,
+					portal: target.portal,
+					portalAperture: target.portalAperture,
+				};
+	}
+
 	querySelectionDebugBounds(
 		selectionKey: StaticSceneSelectionKey,
 	): StaticSceneSelectionDebugBounds | null {
+		if (selectionKey.itemKind === "env-cell-portal") {
+			const target = queryEnvCellPortalPickTarget({
+				envCellCommittedRecords: this.#envCellCommittedRecords,
+				outdoorAnchorLandblockId: this.#outdoorAnchorLandblockId,
+				selectionKey,
+			});
+			return target === null
+				? null
+				: { bounds: target.bounds, selectionKey };
+		}
+
 		return querySelectionDebugBounds(
 			this.#selectionDebugState(),
 			selectionKey,

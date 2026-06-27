@@ -1166,7 +1166,7 @@ Debt and follow-up:
 
 ### Phase 7A: Complete Static Query Surface
 
-Status: pending.
+Status: completed 2026-06-27.
 
 Purpose:
 
@@ -1198,18 +1198,18 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Extend static scene query contracts with explicit portal/debug pick filters.
-- [ ] Move env-cell portal aperture pick target construction and ray intersection into the static
+- [x] Extend static scene query contracts with explicit portal/debug pick filters.
+- [x] Move env-cell portal aperture pick target construction and ray intersection into the static
       query module boundary.
-- [ ] Thread render-anchor translation through the static portal aperture query path without adding a
+- [x] Thread render-anchor translation through the static portal aperture query path without adding a
       second runtime-side picking path.
-- [ ] Update `ClientRuntimeImpl.pickStaticRay` to pass filters instead of running a second static
+- [x] Update `ClientRuntimeImpl.pickStaticRay` to pass filters instead of running a second static
       pick pass.
-- [ ] Keep portal aperture detail/debug lookup reachable through existing static selection
+- [x] Keep portal aperture detail/debug lookup reachable through existing static selection
       diagnostics.
-- [ ] Add or update tests proving portal aperture hits are returned only when their filter is enabled
+- [x] Add or update tests proving portal aperture hits are returned only when their filter is enabled
       and still merge by nearest distance with other static hits.
-- [ ] Run phase verification commands.
+- [x] Run phase verification commands.
 
 Decisions and course corrections:
 
@@ -1228,6 +1228,22 @@ Decisions and course corrections:
 - 2026-06-27: Static debug/detail behavior is now isolated in
   `runtime/scene-query/static-selection-debug.ts`. Dynamic inspection should add a parallel dynamic
   detail provider or merged detail layer rather than extending static selection labels.
+- 2026-06-27: Implemented the portal aperture query cutover. `StaticScenePickFilters` now has
+  `includeEnvCellPortals`, `StaticSceneQuery.pickRay` owns regular static and env-cell portal
+  aperture hits, and `ClientRuntimeImpl.pickStaticRay` only derives the portal filter from the
+  existing debug overlay state.
+- 2026-06-27: Added `runtime/scene-query/env-cell-portal-picking.ts` so portal target construction,
+  render-anchor translation, and portal aperture triangulation live under the static query boundary.
+  Runtime debug overlay rendering reuses the same triangulation helper rather than carrying a second
+  geometry copy.
+- 2026-06-27: `StaticSceneQuery.querySelectionDebugBounds` and
+  `StaticSceneQuery.queryEnvCellPortalDetails` now serve env-cell portal selections, so selected
+  static diagnostics no longer call runtime-private portal query helpers.
+
+Debt and follow-up:
+
+- No Phase 7A-specific compatibility wrapper remains. Phase 7B still needs the planned migration from
+  `pickStaticRay` to the merged static/dynamic scene-query surface.
 
 ### Phase 7B: Merged Static/Dynamic Scene Query Surface
 
@@ -1316,6 +1332,9 @@ Decisions and course corrections:
 - 2026-06-27: Dynamic hit results should not carry deep dynamic records. The spatial index returns
   keys and bounds; richer dynamic diagnostics remain a separate lookup by entity id so query results
   stay lightweight and selection does not accidentally become diagnostics transport.
+- 2026-06-27: Phase 7A completed the static query surface cleanup. Phase 7B should call
+  `StaticSceneQuery.pickRay` with merged-query-derived filters instead of reimplementing or
+  special-casing env-cell portal aperture hits.
 
 ### Phase 8: Dynamic Renderer Resource And Instance Commits
 

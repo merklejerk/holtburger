@@ -15,6 +15,7 @@ import type {
 	AnimationPayloadDto,
 	PreparedTexturePayloadDto,
 } from "../host/contracts";
+import { DYNAMIC_ANIMATION_FRAME_RATE_FPS } from "../dynamic/dynamic-animation-player";
 import type {
 	DebugOverlayPrimitive,
 	Renderer,
@@ -67,6 +68,12 @@ import {
 	createTerrainQuadSelectionKey,
 } from "./scene-query/static-selection-keys";
 import type { RuntimeDiagnostics } from "./diagnostics";
+
+const TEST_SET_OMEGA_HOOK_TYPE = 22;
+const TEST_SET_OMEGA_Z = -0.03836006671190262;
+const TEST_SET_OMEGA_RAW_PAYLOAD_BYTES = [
+	0, 0, 0, 0, 0, 0, 0, 0, 0x72, 0x20, 0x1d, 0xbd,
+] as const;
 
 const silentDiagnostics: RuntimeDiagnostics = {
 	warn() {},
@@ -394,11 +401,11 @@ describe("browser client runtime", () => {
 		const instance =
 			renderer.dynamicInstanceCommits.at(-1)?.instances[0] ?? null;
 		expect(instance?.objectToRenderMatrix[0]).toBeCloseTo(
-			Math.cos(-0.03836006671190262 * 30),
+			Math.cos(TEST_SET_OMEGA_Z * DYNAMIC_ANIMATION_FRAME_RATE_FPS),
 			7,
 		);
 		expect(instance?.objectToRenderMatrix[2]).toBeCloseTo(
-			-Math.sin(-0.03836006671190262 * 30),
+			-Math.sin(TEST_SET_OMEGA_Z * DYNAMIC_ANIMATION_FRAME_RATE_FPS),
 			7,
 		);
 
@@ -3617,14 +3624,12 @@ function createDynamicSetOmegaAnimationPayload(): AnimationPayloadDto {
 						direction: 0,
 						directionName: "Both",
 						hookName: "SetOmega",
-						hookType: 22,
+						hookType: TEST_SET_OMEGA_HOOK_TYPE,
 						payload: {
-							omega: { x: 0, y: 0, z: -0.03836006671190262 },
+							omega: { x: 0, y: 0, z: TEST_SET_OMEGA_Z },
 						},
 						payloadKind: "set-omega",
-						rawPayloadBytes: [
-							0, 0, 0, 0, 0, 0, 0, 0, 0x72, 0x20, 0x1d, 0xbd,
-						],
+						rawPayloadBytes: TEST_SET_OMEGA_RAW_PAYLOAD_BYTES,
 					},
 				],
 				localPlacements: [createPlacement()],

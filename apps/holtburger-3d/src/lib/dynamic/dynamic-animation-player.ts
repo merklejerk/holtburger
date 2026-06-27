@@ -9,7 +9,7 @@ import type {
 	DynamicEntityRecord,
 } from "./contracts";
 
-const DEFAULT_FRAME_RATE_FPS = 30;
+export const DYNAMIC_ANIMATION_FRAME_RATE_FPS = 30;
 const IDENTITY_PLACEMENT: PlacementTransformDto = {
 	orientation: { w: 1, x: 0, y: 0, z: 0 },
 	origin: { x: 0, y: 0, z: 0 },
@@ -114,7 +114,7 @@ export class DynamicAnimationPlayer {
 					elapsedSeconds: sampled.elapsedSeconds,
 					frameCount: payload.frameCount,
 					frameNumber: sampled.frameNumber,
-					frameRateFps: DEFAULT_FRAME_RATE_FPS,
+					frameRateFps: DYNAMIC_ANIMATION_FRAME_RATE_FPS,
 					lastDispatchedHookFrame:
 						hookDispatch.issues.length > 0 || partFrame.hooks.length > 0
 							? hookFrame
@@ -254,7 +254,7 @@ function integrateOmegaRotation(
 	}
 	// Retail static-object animation applies SetOmega through Frame::grotate once
 	// per animation update, not as a raw radians-per-second velocity.
-	const angle = speed * deltaSeconds * DEFAULT_FRAME_RATE_FPS;
+	const angle = speed * deltaSeconds * DYNAMIC_ANIMATION_FRAME_RATE_FPS;
 	const halfAngle = angle / 2;
 	const sinHalfAngle = Math.sin(halfAngle);
 	const deltaRotation = normalizeQuaternion({
@@ -309,7 +309,7 @@ function sampleAnimationFrame(options: {
 		0,
 		options.timeSeconds - options.startedAtSeconds,
 	);
-	const frameNumber = elapsedSeconds * DEFAULT_FRAME_RATE_FPS;
+	const frameNumber = elapsedSeconds * DYNAMIC_ANIMATION_FRAME_RATE_FPS;
 	const absoluteFrameIndex = Math.floor(frameNumber);
 	return {
 		currentFrameIndex: absoluteFrameIndex % options.frameCount,

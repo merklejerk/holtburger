@@ -506,7 +506,8 @@ export interface ClientRuntime {
 	setFlatVisionModeEnabled(enabled: boolean): void;
 	setStaticLayerVisibility(visibility: RendererStaticLayerVisibility): void;
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void;
-	updateFrameState(state: FrameState): void;
+	updateCameraState(camera: FrameState["camera"]): void;
+	tickFrame(timeSeconds: number): void;
 	createDiagnosticsReport(): RuntimeDiagnosticsReport;
 	subscribe(listener: RuntimeSnapshotListener): () => void;
 	subscribeFrameTelemetry(listener: RuntimeFrameTelemetryListener): () => void;
@@ -911,14 +912,35 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#emit();
 	}
 
-	updateFrameState(state: FrameState): void {
+	updateCameraState(camera: FrameState["camera"]): void {
 		this.#assertActive();
+		const state: FrameState = {
+			camera,
+			timeSeconds: this.#lastFrameState?.timeSeconds ?? 0,
+		};
 		this.#lastFrameState = state;
 		this.#renderer.updateFrameState(state);
-		const dynamicPlaybackChanged = this.#dynamicEntityController.tick(
-			state.timeSeconds,
-		);
-		this.#commitDynamicRendererInstances(state.timeSeconds);
+		const portalOverlapChanged = this.#refreshPortalOverlapResidency();
+		if (portalOverlapChanged) {
+			this.#updateRenderPassPlan();
+		}
+		if (portalOverlapChanged) {
+			this.#emit();
+		}
+	}
+
+	tickFrame(timeSeconds: number): void {
+		this.#assertActive();
+		if (this.#lastFrameState !== null) {
+			this.#lastFrameState = {
+				...this.#lastFrameState,
+				timeSeconds,
+			};
+			this.#renderer.updateFrameState(this.#lastFrameState);
+		}
+		const dynamicPlaybackChanged =
+			this.#dynamicEntityController.tick(timeSeconds);
+		this.#commitDynamicRendererInstances(timeSeconds);
 		const portalOverlapChanged = this.#refreshPortalOverlapResidency();
 		if (portalOverlapChanged) {
 			this.#updateRenderPassPlan();

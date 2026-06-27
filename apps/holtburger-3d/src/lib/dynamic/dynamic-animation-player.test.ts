@@ -4,7 +4,16 @@ import type {
 	PlacementTransformDto,
 } from "../host/contracts";
 import type { DynamicEntityRecord } from "./contracts";
-import { DynamicAnimationPlayer } from "./dynamic-animation-player";
+import {
+	DYNAMIC_ANIMATION_FRAME_RATE_FPS,
+	DynamicAnimationPlayer,
+} from "./dynamic-animation-player";
+
+const TEST_SET_OMEGA_HOOK_TYPE = 22;
+const TEST_SET_OMEGA_Z = -0.03836006671190262;
+const TEST_SET_OMEGA_RAW_PAYLOAD_BYTES = [
+	0, 0, 0, 0, 0, 0, 0, 0, 0x72, 0x20, 0x1d, 0xbd,
+] as const;
 
 describe("dynamic animation player", () => {
 	it("samples object root and all part poses from the setup animation", () => {
@@ -25,7 +34,7 @@ describe("dynamic animation player", () => {
 
 		expect(started.record.animation.playback).toMatchObject({
 			currentFrameIndex: 0,
-			frameRateFps: 30,
+			frameRateFps: DYNAMIC_ANIMATION_FRAME_RATE_FPS,
 			objectRootPose: createPlacement({ x: 0, y: 0, z: 0 }),
 			partCount: 5,
 		});
@@ -175,11 +184,11 @@ describe("dynamic animation player", () => {
 					animationId: 0x0300061b,
 					entityId: "dynamic-test-entity",
 					hookName: "SetOmega",
-					hookType: 22,
+					hookType: TEST_SET_OMEGA_HOOK_TYPE,
 					lastAppliedFrameIndex: 0,
 					lastAppliedLoopIteration: 0,
-					omega: { x: 0, y: 0, z: -0.03836006671190262 },
-					rawPayloadBytes: [0, 0, 0, 0, 0, 0, 0, 0, 0x72, 0x20, 0x1d, 0xbd],
+					omega: { x: 0, y: 0, z: TEST_SET_OMEGA_Z },
+					rawPayloadBytes: TEST_SET_OMEGA_RAW_PAYLOAD_BYTES,
 				},
 			},
 		});
@@ -223,10 +232,7 @@ describe("dynamic animation player", () => {
 				?.objectRootRotation.z ?? 0;
 
 		expect(firstRotation).toBeLessThan(0);
-		expect(firstRotation).toBeCloseTo(
-			Math.sin(-0.03836006671190262 / 2),
-			7,
-		);
+		expect(firstRotation).toBeCloseTo(Math.sin(TEST_SET_OMEGA_Z / 2), 7);
 		expect(secondRotation).toBeLessThan(firstRotation);
 		expect(
 			secondLoop.record.animation.playback.transformEffects.activeOmega,
@@ -419,12 +425,12 @@ function createSetOmegaHook(): AnimationPayloadDto["partFrames"][number]["hooks"
 		direction: 0,
 		directionName: "Both",
 		hookName: "SetOmega",
-		hookType: 22,
+		hookType: TEST_SET_OMEGA_HOOK_TYPE,
 		payload: {
-			omega: { x: 0, y: 0, z: -0.03836006671190262 },
+			omega: { x: 0, y: 0, z: TEST_SET_OMEGA_Z },
 		},
 		payloadKind: "set-omega",
-		rawPayloadBytes: [0, 0, 0, 0, 0, 0, 0, 0, 0x72, 0x20, 0x1d, 0xbd],
+		rawPayloadBytes: TEST_SET_OMEGA_RAW_PAYLOAD_BYTES,
 	};
 }
 

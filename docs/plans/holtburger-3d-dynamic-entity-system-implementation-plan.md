@@ -147,7 +147,7 @@ In scope:
 - Outdoor static-authored dynamic seed records for setup-backed sources with `defaultAnimation`.
 - First-class animation asset lookup through host/content/Tauri/frontend asset contracts.
 - A browser frontend dynamic runtime for static-authored seeds.
-- Setup default animation playback using integer part-frame sampling.
+- Setup default animation playback using continuous pose sampling over authored 30 FPS frames.
 - A hook-generic dispatcher shape with unsupported-hook diagnostics.
 - Typed `SetOmega` decoding and the first supported transform-hook handler.
 - Dynamic current-frame bounds, effective outdoor residence, and spatial query records.
@@ -1955,6 +1955,90 @@ Debt and follow-up:
   translation is applied after the dynamic object matrix. If later visual validation finds a
   static/dynamic mismatch, compare against static env-cell object bake matrices before adding any
   correction factor.
+
+### Phase 8G: Continuous Dynamic Pose Sampling
+
+Status: pending.
+
+Purpose:
+
+- Smooth dynamic object/root and part animation poses between authored 30 FPS frames while keeping
+  animation hooks on the discrete authored-frame event cadence.
+
+Deliverables:
+
+- Extend `DynamicAnimationPlayer` sampling to retain fractional frame state: current frame, next
+  frame, loop iteration, and interpolation alpha.
+- Interpolate object root placements and per-part local placements for the current runtime tick.
+  Use linear interpolation for origins and normalized quaternion slerp for orientations.
+- Keep hook dispatch keyed to authored frame crossings. Dispatch crossed authored-frame hooks in
+  order, with bounded catch-up after large runtime gaps.
+- Use a bounded missed-hook policy for large jumps: replay only the most recent small window of
+  crossed authored frames, initially eight frames. If older crossed hooks are intentionally dropped,
+  emit only a non-durable console/developer warning rather than adding a persistent runtime issue.
+- Advance the hook-dispatch cursor across crossed authored frames even when those frames have no
+  hooks, so later ticks do not reconsider already-crossed hookless frames.
+- `SetOmega` remains continuous transform state, while hook execution still happens on the 30 FPS
+  frame lattice.
+- Keep `DynamicPlacementTracker`, renderer instance submission, and WebGL draw paths consuming
+  already evaluated poses. Do not move tweening into renderer code.
+- Add focused tests for midpoint origin interpolation, midpoint orientation interpolation, loop
+  interpolation, and discrete hook dispatch stability.
+
+Acceptance criteria:
+
+- A dynamic animation sampled between two authored frames reports interpolated object/root and
+  per-part poses instead of snapping to the floored frame pose.
+- Hooks do not fire every render tick. Hook dispatch follows crossed authored frames, catches up
+  normal hitches in order, and does not skip intermediate hooks unless the bounded missed-hook window
+  is exceeded.
+- When the bounded missed-hook window is exceeded, only the most recent eight crossed authored
+  frames are dispatched. The truncation is not stored in dynamic runtime records or snapshot DTOs.
+- Hookless crossed frames still advance the last-dispatched frame cursor, preventing repeated
+  reconsideration of the same authored frame range.
+- `SetOmega` frame-0 loop behavior still does not reset accumulated rotation.
+- Renderer/resource/placement APIs do not gain interpolation-specific state; they continue to
+  consume evaluated poses and matrices.
+- Full TypeScript verification passes.
+
+Task checklist:
+
+- [ ] Add or reuse small placement interpolation helpers in the dynamic animation player boundary.
+- [ ] Update frame sampling to expose `nextFrameIndex` and `frameAlpha`.
+- [ ] Interpolate object position frames when present and well-formed.
+- [ ] Interpolate matching per-part local placements across adjacent part frames.
+- [ ] Replace sampled-frame-only hook dispatch with ordered crossed-frame dispatch.
+- [ ] Add bounded missed-hook catch-up with an initial eight-frame replay window and non-durable
+      console/developer warning for truncation.
+- [ ] Advance the hook-dispatch cursor across hookless crossed frames.
+- [ ] Preserve existing unsupported-hook diagnostics for dispatched hook frames.
+- [ ] Add focused interpolation, crossed-frame hook dispatch, bounded truncation behavior, and
+      hookless cursor advancement, and SetOmega loop stability tests. Do not add tests whose only
+      assertion is debug-oriented logging.
+- [ ] Run full verification commands.
+
+Decisions and course corrections:
+
+- 2026-06-27: Added before Phase 9A because the animation player already recomputes poses every
+  runtime tick. Smoothing pose evaluation here avoids renderer changes and keeps diagnostics/manual
+  validation from baking in avoidable 30 FPS pose snapping.
+- 2026-06-27: Hooks remain authored-frame events. Continuous sampling applies only to pose
+  evaluation and existing `SetOmega` transform integration.
+- 2026-06-27: Crossed-frame hook dispatch is now in scope because sampled-frame-only dispatch can
+  already skip authored hooks during hitches, hidden-tab resumes, devtools pauses, or asset stalls.
+  The first implementation should cap catch-up to the most recent eight authored frames instead of
+  replaying unbounded sounds/scripts/particles after long gaps.
+- 2026-06-27: Hook catch-up truncation should not become a durable dynamic issue or runtime snapshot
+  field. If surfaced at all, it should use non-durable console/developer diagnostics because this is
+  an operational warning, not state the browser or validation workflow should persist and inspect.
+- 2026-06-27 dry run follow-up: Crossed-frame dispatch must advance its cursor through hookless
+  frames too. Leaving cursor advancement conditional on hooks or issues preserves the current
+  sampled-frame shortcut and can make later ticks reconsider old frame ranges.
+
+Debt and follow-up:
+
+- The initial eight-frame catch-up window is a pragmatic first-cut policy. Revisit it once broader
+  hook families land and real long-gap behavior can be compared against retail expectations.
 
 ### Phase 9A: Dynamic Diagnostics And Inspection Readiness
 

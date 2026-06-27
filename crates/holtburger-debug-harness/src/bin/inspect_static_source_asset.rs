@@ -431,6 +431,10 @@ fn format_animation_hook_payload(payload: &AnimationHookPayload) -> String {
             "textureVelocityPart(part={},u={:.6},v={:.6})",
             payload.part_index, payload.u_speed, payload.v_speed,
         ),
+        AnimationHookPayload::SetOmega(payload) => format!(
+            "setOmega(x={:.6},y={:.6},z={:.6})",
+            payload.omega.x, payload.omega.y, payload.omega.z,
+        ),
     }
 }
 

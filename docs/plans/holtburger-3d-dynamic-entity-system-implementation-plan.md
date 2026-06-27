@@ -126,10 +126,10 @@ The phase order is viable, but several implementation details need to be pinned 
   atlas/cache entry; ownership and lifetime must remain dynamic-resource-owned instead of borrowing
   static draw-unit or static visual-resource placement.
 - Query migration affects browser picking and diagnostics, not only `StaticSceneQuery`. Existing
-  browser code builds `StaticScenePickRequest` and displays static selection diagnostics. Phase 7
+  browser code builds `StaticScenePickRequest` and displays static selection diagnostics. Phase 7B
   must include compatibility naming and UI diagnostics cleanup in its migration debt.
 - `apps/holtburger-3d/src/lib/runtime/static-scene-query.ts` is too broad to be the place where
-  merged static/dynamic query behavior is born. Before Phase 7, decompose it through
+  merged static/dynamic query behavior is born. Before Phase 7B, decompose it through
   [docs/plans/holtburger-3d-static-scene-query-refactor-plan.md](holtburger-3d-static-scene-query-refactor-plan.md)
   so merged query composition can depend on a static query facade instead of a static-only god
   module.
@@ -1091,12 +1091,14 @@ Decisions and course corrections:
 
 Debt and follow-up:
 
-- Phase 7 should consume `OutdoorDynamicSpatialIndex` through its local wrapper; callers should not
+- Phase 7A must move env-cell portal aperture pickables into the static query surface so Phase 7B can
+  compose one complete static query source.
+- Phase 7B should consume `OutdoorDynamicSpatialIndex` through its local wrapper; callers should not
   learn the package API.
-- Phase 7 still needs the merged scene-query adapter that turns indexed dynamic AABBs into debug and
+- Phase 7B still needs the merged scene-query source that turns indexed dynamic AABBs into debug and
   selection-filtered query hits.
-- Phase 6.5 decomposed the static scene-query module before Phase 7. Phase 7 should compose through
-  the extracted static query facade/adapters rather than reintroducing dynamic query behavior into
+- Phase 6.5 decomposed the static scene-query module before Phase 7A/7B. Phase 7B should compose
+  through the extracted static query facade rather than reintroducing dynamic query behavior into
   static-only modules.
 - Dynamic bounds are current-frame AABBs from source part bounds, not vertex/triangle precise bounds.
   Keep the precision metadata visible and upgrade only when a target proves this is insufficient.
@@ -1117,7 +1119,7 @@ Deliverables:
 - Execute
   [docs/plans/holtburger-3d-static-scene-query-refactor-plan.md](holtburger-3d-static-scene-query-refactor-plan.md).
 - Preserve existing static query, picking, diagnostics, env-cell residency, and portal debug behavior.
-- Leave `StaticSceneQuery` as a facade that Phase 7 can adapt cleanly.
+- Leave `StaticSceneQuery` as a facade that Phase 7A can complete and Phase 7B can compose cleanly.
 - Keep dynamic query behavior out of this detour.
 
 Acceptance criteria:
@@ -1125,12 +1127,12 @@ Acceptance criteria:
 - The static scene-query refactor plan reaches its definition of done.
 - Full static query/browser/runtime verification passes or unrelated pre-existing failures are
   documented.
-- Phase 7 has a clear static adapter boundary and no need to import static-only internals.
+- Phase 7A/7B have a clear static query boundary and no need to import static-only internals.
 
 Task checklist:
 
 - [x] Complete the static scene-query refactor plan.
-- [x] Update this dynamic implementation plan with final module names and any Phase 7 adjustments.
+- [x] Update this dynamic implementation plan with final module names and any Phase 7A/7B adjustments.
 - [x] Confirm no dynamic query behavior was introduced during the refactor.
 
 Decisions and course corrections:
@@ -1159,10 +1161,75 @@ Decisions and course corrections:
 Debt and follow-up:
 
 - Extracted static query module tests are still mostly covered through
-  `static-scene-query.test.ts`. This is acceptable Phase 7 input because behavior coverage is intact,
-  but module-level test colocation remains tracked in the static refactor plan.
+  `static-scene-query.test.ts`. This is acceptable Phase 7A/7B input because behavior coverage is
+  intact, but module-level test colocation remains tracked in the static refactor plan.
 
-### Phase 7: Merged Scene Query Surface
+### Phase 7A: Complete Static Query Surface
+
+Status: pending.
+
+Purpose:
+
+- Move all static pickable families behind the static query API so merged query composition does not
+  inherit runtime-only side channels.
+
+Deliverables:
+
+- Move env-cell portal aperture pick targets into the static scene query surface instead of adding
+  them as a runtime-only pass after `StaticSceneQuery.pickRay`.
+- Add explicit static query filters for debug-only static pickable families, including portal
+  apertures.
+- Preserve render-anchor translation for portal aperture vertices inside the static query boundary.
+  `StaticSceneQuery` already tracks the outdoor anchor; Phase 7A must not leave that transform as
+  hidden runtime-only state.
+- Keep runtime/browser policy responsible for choosing filters from UI/debug-overlay state; the
+  query API owns static pickable discovery and ordering.
+- Preserve existing static hit ordering, tie-break behavior, and selected static diagnostics.
+
+Acceptance criteria:
+
+- `StaticSceneQuery.pickRay` is the complete static picking surface used by `ClientRuntimeImpl` for
+  regular static hits and env-cell portal aperture debug hits.
+- Runtime no longer has a separate `#pickEnvCellPortalRay`-style static hit pass after
+  `StaticSceneQuery.pickRay`.
+- Portal aperture pickability is controlled by static query filters derived from existing portal
+  debug-overlay state.
+- Existing static picking and selected static diagnostics tests continue to pass.
+
+Task checklist:
+
+- [ ] Extend static scene query contracts with explicit portal/debug pick filters.
+- [ ] Move env-cell portal aperture pick target construction and ray intersection into the static
+      query module boundary.
+- [ ] Thread render-anchor translation through the static portal aperture query path without adding a
+      second runtime-side picking path.
+- [ ] Update `ClientRuntimeImpl.pickStaticRay` to pass filters instead of running a second static
+      pick pass.
+- [ ] Keep portal aperture detail/debug lookup reachable through existing static selection
+      diagnostics.
+- [ ] Add or update tests proving portal aperture hits are returned only when their filter is enabled
+      and still merge by nearest distance with other static hits.
+- [ ] Run phase verification commands.
+
+Decisions and course corrections:
+
+- 2026-06-27: Split the former merged scene-query phase into 7A and 7B after dry-running the current
+  runtime picking path. Env-cell portal aperture picking was a runtime-only side pass, which made the
+  planned static query source incomplete. 7A closes that static ownership issue before dynamic hits
+  are merged.
+- 2026-06-27: Phase 7B should compose static hits through the completed static query boundary.
+  `StaticSceneQuery` is now small enough to adapt directly for runtime-facing behavior, and
+  `pickStaticSceneRay` is available for lower-level composition with explicit
+  `EnvCellCommittedRecordStore` and `LandblockGridSpatialIndex` dependencies if the merged query
+  implementation needs that shape.
+- 2026-06-27: Static DTOs, filters, hit variants, and selection-key helpers are now imported from
+  `runtime/scene-query/contracts.ts` and `runtime/scene-query/static-selection-keys.ts`. Phase 7A/7B
+  should not add compatibility imports from `runtime/static-scene-query.ts` for those contracts.
+- 2026-06-27: Static debug/detail behavior is now isolated in
+  `runtime/scene-query/static-selection-debug.ts`. Dynamic inspection should add a parallel dynamic
+  detail provider or merged detail layer rather than extending static selection labels.
+
+### Phase 7B: Merged Static/Dynamic Scene Query Surface
 
 Status: pending.
 
@@ -1179,10 +1246,16 @@ Deliverables:
 - Keep merged query contracts separate from static-only contracts unless the static contract module
   is deliberately renamed and re-scoped. Prefer a merged contracts module that wraps static hit
   variants and dynamic hit variants.
-- Preserve existing static hit behavior as one variant through the decomposed `StaticSceneQuery`
-  facade and the extracted static query contracts.
-- Add dynamic hit records with semantic dynamic entity id, source/setup metadata, optional part
-  metadata, bounds, distance, hit point, precision, and filter metadata.
+- Query static hits through the complete Phase 7A static query API.
+- Add a narrow dynamic query method owned by the dynamic runtime/controller boundary that queries
+  indexed outdoor dynamic bounds and returns lightweight records keyed by dynamic entity id. The
+  spatial index should return keys/bounds/precision, not deep dynamic entity records.
+- Add dynamic hit records with semantic dynamic entity id, bounds, distance, hit point, precision,
+  source residence, and filter/selectability metadata. Richer dynamic diagnostics are looked up
+  separately by entity id only when requested.
+- Preserve coordinate-space metadata through dynamic broadphase and narrow-phase picking. Indexed
+  bounds are landblock-local records; merged query hit math must translate them to render space using
+  the current outdoor render anchor before comparing against static hits.
 - Add explicit caller filter modes for default browser selection, debug inspection, and diagnostics.
 - Migrate runtime/browser call sites from `pickStaticRay` toward the merged query surface.
 - Keep a temporary static compatibility wrapper only if needed for small-step migration, and mark it
@@ -1192,14 +1265,21 @@ Deliverables:
 
 Acceptance criteria:
 
-- The merged query implementation lives in `runtime/scene-query/` and imports dynamic state through a
-  dynamic adapter; it is not hidden inside `dynamic/` as a debug-only helper.
+- The merged query implementation lives in `runtime/scene-query/` and consumes static hits through
+  the Phase 7A static query API.
+- Dynamic broadphase queries use `OutdoorDynamicSpatialIndex` through a narrow dynamic query method;
+  merged query code does not scan `DynamicRuntimeSnapshot.records` for picking and does not reach
+  through private controller/tracker fields.
+- Dynamic AABB candidates are translated into the same render-space frame as static hits and narrowed
+  with ray/bounds intersection before they become hits.
 - Existing static picking tests pass through the merged query path.
 - Dynamic AABB hits are ordered with static hits by nearest distance.
 - Default browser selection filters exclude the two static-authored dynamic scenery targets.
 - Debug/inspection filters can return those same dynamic targets.
 - Browser picking calls the merged scene-query surface even when the default selection filter excludes
   first-cut dynamic scenery; otherwise the merged query is not considered wired into the runtime.
+- Env-cell dynamic records remain absent from merged query hits until an explicit env-cell dynamic
+  query/index path exists.
 - Any remaining `pickStaticRay` wrapper is documented as temporary cleanup debt with no new callers
   added.
 
@@ -1207,38 +1287,35 @@ Task checklist:
 
 - [ ] Define merged query contracts in a new runtime scene-query module rather than extending
       static-only contracts in place.
-- [ ] Add static adapter from the decomposed `StaticSceneQuery` facade and
-      `runtime/scene-query/contracts.ts`.
+- [ ] Add static query source composition through the Phase 7A `StaticSceneQuery` API.
 - [ ] Use `runtime/scene-query/static-picking.ts` only when lower-level static hit composition is
       cleaner than calling the facade; do not import old static query internals.
 - [ ] Route static detail/debug lookup through `runtime/scene-query/static-selection-debug.ts` or
       facade methods rather than reimplementing static selection-key handling.
-- [ ] Add dynamic query adapter from `OutdoorDynamicSpatialIndex`.
+- [ ] Add a narrow dynamic bounds query method that returns indexed outdoor dynamic bounds records
+      keyed by entity id.
+- [ ] Add dynamic query source logic that uses indexed bounds as broadphase candidates and ray/AABB
+      math as the narrow phase.
+- [ ] Add tests proving dynamic hits are stable across render-anchor changes and cross-landblock
+      indexed bounds.
 - [ ] Update browser picking and diagnostics call sites to use the merged surface.
-- [ ] Add tests proving hit ordering, default-selection exclusion for first-cut dynamic scenery, and
-      debug/inspection inclusion for the same dynamic targets.
+- [ ] Add tests proving hit ordering, no dynamic snapshot scans for picking, default-selection
+      exclusion for first-cut dynamic scenery, debug/inspection inclusion for the same dynamic
+      targets, and env-cell dynamic exclusion until a real query path exists.
 - [ ] Run phase verification commands.
 
 Decisions and course corrections:
 
-- 2026-06-27: Phase 7 should compose static hits through the completed static query boundary.
-  `StaticSceneQuery` is now small enough to adapt directly for runtime-facing behavior, and
-  `pickStaticSceneRay` is available for lower-level composition with explicit
-  `EnvCellCommittedRecordStore` and `LandblockGridSpatialIndex` dependencies if the merged query
-  implementation needs that shape.
-- 2026-06-27: Static DTOs, filters, hit variants, and selection-key helpers are now imported from
-  `runtime/scene-query/contracts.ts` and `runtime/scene-query/static-selection-keys.ts`. Phase 7
-  should not add compatibility imports from `runtime/static-scene-query.ts` for those contracts.
-- 2026-06-27: Static debug/detail behavior is now isolated in
-  `runtime/scene-query/static-selection-debug.ts`. Dynamic inspection should add a parallel dynamic
-  detail provider or merged detail layer rather than extending static selection labels.
 - 2026-06-27: The merged query home should be `runtime/scene-query/`, not
   `dynamic/dynamic-scene-query.ts`, because it composes static and dynamic results for runtime and
-  browser callers. Dynamic-specific lookup should remain behind an adapter that consumes
-  `OutdoorDynamicSpatialIndex`.
-- 2026-06-27: Phase 7 must prove selection policy separately from query membership. The two
+  browser callers. Dynamic-specific lookup should remain behind a narrow query method that consumes
+  `OutdoorDynamicSpatialIndex` and returns lightweight keyed bounds records.
+- 2026-06-27: Phase 7B must prove selection policy separately from query membership. The two
   first-cut dynamic scenery targets should be queryable for debug/inspection but excluded by the
   default browser selection filter.
+- 2026-06-27: Dynamic hit results should not carry deep dynamic records. The spatial index returns
+  keys and bounds; richer dynamic diagnostics remain a separate lookup by entity id so query results
+  stay lightweight and selection does not accidentally become diagnostics transport.
 
 ### Phase 8: Dynamic Renderer Resource And Instance Commits
 
@@ -1444,8 +1521,8 @@ Decisions and course corrections:
   selection as filters.
 
 - Risk: merged query integration reinforces the current static scene-query god module.
-  Mitigation: complete the static scene-query decomposition detour before Phase 7 and compose merged
-  query behavior through the resulting static facade.
+  Mitigation: complete the static scene-query decomposition detour and Phase 7A static query surface
+  cleanup before Phase 7B composes merged query behavior through the resulting static facade.
 
 - Risk: current-frame AABB bounds are too conservative or visibly wrong.
   Mitigation: expose precision metadata and part bounds diagnostics; defer per-part sphere/polygon

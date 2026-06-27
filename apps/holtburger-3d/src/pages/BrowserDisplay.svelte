@@ -107,6 +107,7 @@
 	let rootElement: HTMLElement | null = $state(null);
 	let runtime: ClientRuntime | null = $state(null);
 	let cameraController: BrowserCameraController | null = null;
+	let runtimeFrameId: number | null = null;
 	let staticInterestRefreshTimer: number | null = null;
 	let startupError = $state<string | null>(null);
 	let activeTab = $state<BrowserPanelTab>("navigate");
@@ -210,7 +211,7 @@
 					if (nextCameraState.hasManualControl) {
 						cancelPendingCameraFocus("manual-control");
 					}
-					pushCameraFrameState();
+					pushCameraState();
 				},
 			});
 			const unsubscribeSnapshot = runtime.subscribe((nextSnapshot) => {
@@ -224,12 +225,14 @@
 				},
 			);
 			const unsubscribeEvents = runtime.subscribeEvents(handleRuntimeEvent);
-			pushCameraFrameState();
+			pushCameraState();
+			startRuntimeFrameLoop();
 			const policySyncInterval = window.setInterval(() => {
 				syncCameraPolicy();
 			}, CAMERA_POLICY_SYNC_INTERVAL_MS);
 
 			return () => {
+				stopRuntimeFrameLoop();
 				window.clearInterval(policySyncInterval);
 				clearStaticInterestRefresh();
 				unsubscribeSnapshot();
@@ -298,7 +301,7 @@
 		cameraController?.reset();
 	}
 
-	function pushCameraFrameState(): void {
+	function pushCameraState(): void {
 		if (!runtime) {
 			return;
 		}
@@ -306,10 +309,27 @@
 		const camera =
 			cameraController?.createFrameStateCamera() ??
 			createFreeCameraFrameStateCamera(cameraState);
-		runtime.updateFrameState({
-			camera,
-			timeSeconds: performance.now() / 1000,
-		});
+		runtime.updateCameraState(camera);
+	}
+
+	function startRuntimeFrameLoop(): void {
+		if (runtimeFrameId !== null) {
+			return;
+		}
+
+		const pushRuntimeFrame = (timestampMilliseconds: number): void => {
+			runtimeFrameId = window.requestAnimationFrame(pushRuntimeFrame);
+			runtime?.tickFrame(timestampMilliseconds / 1000);
+		};
+		runtimeFrameId = window.requestAnimationFrame(pushRuntimeFrame);
+	}
+
+	function stopRuntimeFrameLoop(): void {
+		if (runtimeFrameId === null) {
+			return;
+		}
+		window.cancelAnimationFrame(runtimeFrameId);
+		runtimeFrameId = null;
 	}
 
 	function handleLocationInput(event: Event): void {
@@ -903,7 +923,7 @@
 		};
 		runtime.updateSceneInterest(rebase.sceneInterest);
 		if (!cameraController) {
-			pushCameraFrameState();
+			pushCameraState();
 		}
 
 		return {

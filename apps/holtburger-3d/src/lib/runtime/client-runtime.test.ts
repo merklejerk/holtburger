@@ -327,14 +327,7 @@ describe("browser client runtime", () => {
 			0, 0, 1, 0, 0, 1,
 		]);
 
-		runtime.updateFrameState({
-			camera: {
-				pitchRadians: 0,
-				position: [0, 0, 0],
-				yawRadians: 0,
-			},
-			timeSeconds: 1,
-		});
+		updateRuntimeFrame(runtime, 1);
 		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
 			dynamicInstances: 1,
 			skippedDynamicSubmissions: 0,
@@ -375,22 +368,8 @@ describe("browser client runtime", () => {
 		});
 		await flushRuntimeWork();
 
-		runtime.updateFrameState({
-			camera: {
-				pitchRadians: 0,
-				position: [0, 0, 0],
-				yawRadians: 0,
-			},
-			timeSeconds: 1,
-		});
-		runtime.updateFrameState({
-			camera: {
-				pitchRadians: 0,
-				position: [0, 0, 0],
-				yawRadians: 0,
-			},
-			timeSeconds: 2,
-		});
+		updateRuntimeFrame(runtime, 1);
+		updateRuntimeFrame(runtime, 2);
 
 		const instance =
 			renderer.dynamicInstanceCommits.at(-1)?.instances[0] ?? null;
@@ -488,22 +467,8 @@ describe("browser client runtime", () => {
 			);
 		}
 		expect(warnings).toEqual([]);
-		runtime.updateFrameState({
-			camera: {
-				pitchRadians: 0,
-				position: [0, 0, 0],
-				yawRadians: 0,
-			},
-			timeSeconds: 1,
-		});
-		runtime.updateFrameState({
-			camera: {
-				pitchRadians: 0,
-				position: [0, 0, 0],
-				yawRadians: 0,
-			},
-			timeSeconds: 2,
-		});
+		updateRuntimeFrame(runtime, 1);
+		updateRuntimeFrame(runtime, 2);
 		expect(renderer.dynamicInstanceCommits.at(-1)?.instances[0]).toMatchObject({
 			renderResidence: {
 				envCellId: 0xda550100,
@@ -1989,6 +1954,18 @@ function updateInteriorSceneInterest(
 		landblockId: 0xda55ffff,
 		source: "manual",
 	});
+}
+
+function updateRuntimeFrame(
+	runtime: ReturnType<typeof createClientRuntime>,
+	timeSeconds: number,
+): void {
+	runtime.updateCameraState({
+		pitchRadians: 0,
+		position: [0, 0, 0],
+		yawRadians: 0,
+	});
+	runtime.tickFrame(timeSeconds);
 }
 
 function completeResolverRequest(

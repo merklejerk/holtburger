@@ -4065,16 +4065,21 @@ Purpose:
 Deliverables:
 
 - Add a projected resource tracking input based on `DynamicVisualSource` and
-  `DynamicPresentationPolicy`.
+  `DynamicPresentationPolicy`. Prefer indexed `DynamicEntityRecord["presentation"]` shapes unless
+  production code genuinely benefits from exported named types.
 - Refactor static-authored dynamic tracking to enter resource readiness through the same projected
-  input after static seed projection has run.
+  input after static seed projection has run. Static-authored dynamics may still use the existing
+  static-material identity path internally until Phase 12C.2C lifts material identities.
 - Add a runtime-spawn tracking path from create/update/remove that can request setup/animation
-  resources and then attempt visual resource readiness.
+  resources without a static seed. Runtime visual resource readiness should stop before material
+  planning while `materialPlanningIdentity` is still `pending`.
 - Preserve an explicit pending/non-renderable stop when runtime material planning identity is still
-  `pending`; log the blocker to the console and do not create durable warning/failure records for
-  that unsupported runtime path.
+  `pending`; log the blocker to the console and do not create durable warning/failure records or a
+  broad pending-material subsystem for that unsupported runtime path.
 - Keep `setup-default` animation from silently becoming animation id `0`. Runtime spawns must use an
-  explicit animation or provide proven setup-default evidence before they can become renderable.
+  explicit animation in this phase unless proven setup-default evidence is added before
+  implementation. If the evidence is not present, `setup-default` is logged/rejected for resource
+  tracking rather than converted to animation id `0`.
 
 Acceptance criteria:
 
@@ -4082,6 +4087,14 @@ Acceptance criteria:
   presentation source/policy shape.
 - Runtime spawns can request setup/animation resources without static seed records or source-scope
   facts.
+- Runtime spawns with explicit animation can request setup/animation resources through projected
+  visual source facts.
+- Runtime spawns with `setup-default` animation do not request animation id `0`; they remain
+  pending/non-renderable with a console log unless setup-default evidence has been proven.
+- Runtime `setup-default` initial resource state does not expose `animationKey: { kind:
+  "animation", id: 0 }` as if animation `0` were a valid asset. The state must either represent
+  unresolved setup-default animation explicitly or avoid presenting an animation key until a real
+  animation id is known.
 - Runtime spawns with pending material identity remain non-renderable with a console log rather than
   flowing into `StaticObjectInstanceIdentity` or `static-material-slot` material planning.
 - Runtime `setup-default` animation is explicitly rejected/logged for renderable readiness unless
@@ -4093,9 +4106,14 @@ Task checklist:
 - [ ] Add a resource-manager entry point that accepts projected dynamic visual source/policy.
 - [ ] Refactor static-authored dynamic resource tracking to use the projected entry point.
 - [ ] Wire runtime create/update/remove into projected resource tracking and release.
+- [ ] Keep static-authored visual readiness on the existing material path until Phase 12C.2C lifts
+      material identities.
 - [ ] Add explicit pending/logging behavior for runtime material planning identities that are still
-      unsupported.
-- [ ] Add explicit-animation coverage and setup-default rejection or evidence coverage.
+      unsupported, without adding durable warning/failure records or a pending-material diary.
+- [ ] Add explicit-animation coverage and setup-default rejection coverage. Only replace rejection
+      with setup-default evidence coverage if implementation proves a real prepared-source default.
+- [ ] Remove the runtime `setup-default` initial-state animation id `0` leak by representing
+      unresolved setup-default animation honestly.
 - [ ] Add focused runtime-spawn tracking tests proving no static seed/source-scope/object identity is
       required.
 - [ ] Run focused TypeScript verification for dynamic resource-manager/controller tests.
@@ -4111,6 +4129,13 @@ Risks and mitigations:
 - Risk: runtime pending becomes a durable diagnostic diary.
   Mitigation: log unsupported runtime facts when encountered, update current resource/renderability
   state, and avoid persistent warning/error records for unsupported runtime facts.
+- Risk: this phase builds a temporary material-readiness subsystem that Phase 12C.2C immediately
+  deletes.
+  Mitigation: stop runtime visual readiness at the pending material identity boundary; only
+  static-authored visuals continue through the existing material path until the neutral material lift.
+- Risk: exported presentation helper types are added only to satisfy tests.
+  Mitigation: use production call paths and indexed record types where practical; export named types
+  only when shared production code needs them.
 
 Dry-run findings:
 
@@ -4123,6 +4148,16 @@ Dry-run findings:
 - 2026-06-28 dry run: `DynamicEntitySummaryDto` is part of the projected policy cleanup because
   renderer/runtime consumers use summaries. The projected policy must stay available on summaries so
   consumers do not fall back to provenance.
+- 2026-06-28 steering: Phase 12C.2B should not try to solve neutral material identity. Runtime
+  visual readiness stops at `materialPlanningIdentity: pending` with a console log; Phase 12C.2C
+  owns the wholesale lift of the existing material path.
+- 2026-06-28 steering: Runtime `setup-default` must not silently request animation id `0`. Unless
+  setup-default evidence is proven during implementation, runtime resource tracking is
+  explicit-animation-only.
+- 2026-06-28 dry run: runtime `setup-default` also leaks animation id `0` through initial
+  `resources.setupAnimation.animationKey`, even before resource tracking starts. Phase 12C.2B should
+  fix the state shape or initialization path so unresolved setup-default animation is not presented
+  as a real animation asset.
 
 ### Phase 12C.2C: Lift Dynamic Material Planning To Neutral Visual Identities
 

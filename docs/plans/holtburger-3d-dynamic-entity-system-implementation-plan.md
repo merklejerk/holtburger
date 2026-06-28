@@ -2440,7 +2440,7 @@ Debt and follow-up:
 
 ### Phase 10: Resteer For Broader Hook And Dynamic-System Gate
 
-Status: pending.
+Status: completed on 2026-06-28.
 
 Purpose:
 
@@ -2466,28 +2466,228 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Review implementation diff and diagnostics.
-- [ ] Compare both first-cut targets against requirements evidence.
-- [ ] Review whether `SetOmega` transform state, bounds, query, and rendering created reusable hook
+- [x] Review implementation diff and diagnostics.
+- [x] Compare both first-cut targets against requirements evidence.
+- [x] Review whether `SetOmega` transform state, bounds, query, and rendering created reusable hook
       handler structure.
-- [ ] Update future phases before proceeding.
+- [x] Update future phases before proceeding.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-28: Local architecture review found the first-cut dynamic runtime held its main ownership
+  boundaries. Dynamic entity state owns playback, transform effects, current bounds, and resource
+  readiness; renderer state owns visual-resource residency and submitted instances; browser
+  selection/inspection remains a projection over runtime state.
+- 2026-06-28: `SetOmega` created a useful transform-hook path. The system is not intentionally
+  `SetOmega`-shaped; `SetOmega` is simply the only supported non-no-op hook so far. The hook cursor,
+  crossed-frame dispatch, active transform state, bounds consumption, and renderer matrix
+  composition are reusable for object/root transform effects. Non-transform effects such as
+  particles, sounds, scripts, material transitions, texture velocity, and replacement visuals still
+  need evidence and a separate lifecycle/subsystem design before implementation.
+- 2026-06-28: Unsupported hooks are currently console-owned during dynamic animation resource
+  validation and do not create durable runtime diagnostics. Keep that boundary; do not add
+  unsupported-hook counts or warning histories to support the next hook family.
+- 2026-06-28: The merged query path works for first-cut dynamic selection, but `ScenePickMode`
+  values such as `debug-inspection` and `diagnostics` remain caller-intent names. They are not
+  blocking, but cleanup should replace behavior-by-debug-name with explicit inclusion/filter policy
+  if query modes continue to grow.
+- 2026-06-28: `DynamicRuntimeSnapshot.records` and `DynamicEntitySummaryDto` are doing double duty
+  as renderer/runtime submission state and selected-inspection input. This is acceptable for the
+  first cut because selected diagnostics project compactly from the DTO, but cleanup should split
+  operational render/runtime DTOs from inspection views before diagnostics become a primary DTO
+  consumer.
+- 2026-06-28: Dynamic material extraction reuses the static material planner, material-table adapter,
+  texture sampling policy, and WebGL static-material shader path. That is the correct behavior
+  reuse, but static-only names now describe shared static/dynamic machinery poorly. Prefer cleanup
+  renaming/generalization over introducing duplicate dynamic material logic.
+- 2026-06-28: Bounds and cadence behavior are accepted for first-cut browser validation. The known
+  tradeoff remains stale far animated bounds and renderer transforms by distance cadence; this is a
+  presentation-quality follow-up only if later browser scenes make it visible.
+- 2026-06-28: Resteer recommendation: run Phase 11 cleanup before adding another broad hook/effect
+  family unless a concrete live-entity target preempts it. No fundamentally bad architecture smell
+  was found in the first-cut path, but temporary naming/DTO/query seams should be trimmed before they
+  harden into future expansion points. Do not start a texture-velocity, particles, sound, material
+  transition, replacement-visual, or script-chaining phase without a concrete target/evidence pass.
+- 2026-06-28: Most unimplemented hook/effect families are likely to appear on server-spawned/live
+  entities or script-driven behavior rather than the first static-authored scenery targets. Before
+  choosing another hook family, run an evidence pass over landblocks/assets for better candidates.
+  The marker-like objects tracked in
+  [docs/plans/holtburger-3d-frontend-v2-implementation-plan.md](holtburger-3d-frontend-v2-implementation-plan.md)
+  may be useful candidates to revisit, but they remain an evidence problem first, not a hidden
+  dynamic classification shortcut.
+- 2026-06-28: Scenery distance cadence buckets are accepted as the universal dynamic update policy
+  for now. Future live player/creature work can reuse the policy initially unless gameplay evidence
+  proves it needs stricter ownership.
 
-### Phase 11: Cleanup And Cutover Hardening
+Remaining decisions for user/agent discussion:
+
+- Whether Phase 11 cleanup is the immediate next work item, or whether a concrete live-entity target
+  preempts cleanup.
+- Which evidence pass should identify the next hook/effect candidate: DAT landblock scanning,
+  marker-family validation, server-spawned entity capture, or a narrower ACE/ACViewer/reference
+  audit.
+
+### Phase 10B: Static/Dynamic Pipeline Shape Convergence Audit
+
+Status: completed on 2026-06-28.
+
+Purpose:
+
+- Identify where static and dynamic visual/material/renderer paths should share neutral codepaths or
+  DTO shapes before cleanup becomes cosmetic renaming.
+
+Scope:
+
+- In scope: compare static visual resources, dynamic render parts, renderer visual resources,
+  material planning, texture-use commits, geometry flattening, and WebGL upload/draw resource shapes.
+- Out of scope: collapsing static layer/materialization ownership into dynamic entity ownership, or
+  making dynamic resources depend on static batch lifetime.
+
+Initial findings:
+
+- `StaticObjectVisualResource`, `DynamicEntityRenderPart`, and `DynamicRendererVisualPart` carry
+  nearly isomorphic geometry/material payloads: positions, texcoords, indices, material slot
+  indices, material entries, material family/pass, render state, texture-use ids, bounds, and
+  triangle/vertex counts.
+- `createStaticObjectVisualGeometryResource()` and `createDynamicVisualGeometryResource()` in the
+  WebGL2 renderer are near copy-paste upload paths with different owner/id fields and error text.
+- Dynamic render-part slicing in `dynamic-entity-resource-manager.ts` and static visual-resource
+  geometry baking in `static-object-compatibility-baker.ts` both flatten source gfx positions/UVs
+  into indexed renderer geometry with material-slot attributes. Static has additional partition,
+  cutover, source-mapping, and transparent-policy concerns that should not leak into dynamic
+  extraction.
+- Dynamic already reuses the static material planner, material-table adapter, texture sampling
+  policy, and WebGL static-material shader path. The convergence problem is mostly neutral shape and
+  helper ownership, not a need for duplicate dynamic material logic.
+
+Acceptance criteria:
+
+- The plan records a concrete `share now / rename now / keep separate / defer` map before Phase 11
+  edits code.
+- Shared candidates preserve ownership boundaries: static draw units/resources remain
+  layer/materialization-owned; dynamic visual resources remain entity/resource-owned.
+- Any proposed shared helper has a neutral name and a caller-supplied owner/id policy rather than
+  static-specific lifetime assumptions.
+
+Task checklist:
+
+- [x] Audit static and dynamic geometry/material DTO fields and identify a neutral visual-geometry
+      payload shape, if one is justified.
+- [x] Audit WebGL2 static/dynamic visual geometry upload paths and decide whether to extract a shared
+      upload helper before broader renaming.
+- [x] Audit static and dynamic source-triangle flattening helpers and decide what can be shared
+      without importing static partition/cutover policy into dynamic resources.
+- [x] Audit texture-use commit creation and atlas owner flow for neutral helper opportunities.
+- [x] Update Phase 11 cleanup targets based on the convergence map.
+
+Decisions and course corrections:
+
+- 2026-06-28 dry run: Share now: introduce a neutral visual geometry payload shape for the common
+  buffer/material fields shared by `StaticObjectVisualResource`, `DynamicEntityRenderPart`, and
+  `DynamicRendererVisualPart`: bounds, positions, texcoords, material slot indices, indices,
+  index type, material entries, material family/pass, render state, texture-use ids, triangle count,
+  and vertex count. Keep owner/id/source metadata outside that shared payload.
+- 2026-06-28 dry run: Share now: extract a WebGL2 helper that uploads a neutral visual geometry
+  payload into GPU buffers/VAO and returns the common GPU resource fields. Static visual resources
+  and dynamic visual parts can then wrap those fields with their distinct owner ids, domain/part
+  metadata, prepared payload state, and disposal hooks. This is the clearest code-dedupe win.
+- 2026-06-28 dry run: Share now, narrowly: add or reuse neutral byte/count helpers for visual
+  geometry buffer payloads. Static and dynamic currently compute uploaded/typed-array bytes through
+  parallel field sums.
+- 2026-06-28 dry run: Rename now: WebGL `StaticMaterialGeometryResource`,
+  `createStaticObjectPreparedDrawPayloadState`, `uploadStaticObjectRolePageBindings`, and related
+  static-object shader helper names now describe shared static/dynamic object-material drawing.
+  Rename/generalize in cleanup only after the neutral upload helper exists, so renaming follows a
+  real shared abstraction.
+- 2026-06-28 dry run: Keep separate: static draw units, static visual resources, dynamic visual
+  resources, and dynamic renderer instances need distinct ownership and lifetime types. Static
+  resources are layer/materialization-owned; dynamic resources are entity/resource-owned. Do not
+  merge commit APIs or let dynamic resources borrow static batch ownership.
+- 2026-06-28 dry run: Keep separate: static partition/cutover/source-mapping/transparent retention
+  policy must stay in the static bake path. Dynamic render-part extraction should not import static
+  partition semantics just to share a geometry builder.
+- 2026-06-28 dry run: Defer: a low-level source-triangle flattening helper may be worthwhile, but it
+  is less obvious than the renderer upload helper. Static sorts and resolves triangles through
+  partition/source-index records; dynamic slices by material compatibility over one source part.
+  Revisit after the neutral visual geometry payload exists and the duplication is easier to see.
+- 2026-06-28 dry run: Defer: texture-use commit helpers can probably share a small owner/batch
+  adapter later, but static `StaticBakeTextureUse` creation and dynamic `DynamicTextureUseCommit`
+  creation currently differ in batch timing and owner delta semantics. Keep the texture ownership
+  split until the visual geometry convergence is complete.
+- 2026-06-28 dry run: Phase 11 should start with the neutral visual geometry payload and WebGL2
+  upload-helper extraction, then proceed to naming cleanup. That makes cleanup structural rather than
+  cosmetic.
+
+### Phase 11A: Static/Dynamic Visual Geometry Convergence
 
 Status: pending.
 
 Purpose:
 
-- Remove transitional naming, wrappers, and duplication introduced during the first cut.
+- Convert the static/dynamic visual geometry overlap found in Phase 10B into a small shared
+  renderer/material substrate before broader cleanup renames the surrounding code.
+
+Deliverables:
+
+- Introduce a neutral visual geometry payload shape for shared buffer/material fields:
+  bounds, positions, texcoords, material slot indices, indices, index type, material entries,
+  material family/pass, render state, texture-use ids, triangle count, and vertex count.
+- Adapt `StaticObjectVisualResource`, `DynamicEntityRenderPart`, and `DynamicRendererVisualPart` to
+  use or project through that neutral payload while keeping their owner/id/source metadata separate.
+- Extract a WebGL2 visual geometry upload helper that accepts the neutral payload and returns common
+  GPU resource fields plus disposal behavior.
+- Keep static and dynamic commit/lifetime APIs separate: static layer/materialization ownership stays
+  static-owned; dynamic visual-resource ownership stays entity/resource-owned.
+- Add or reuse neutral byte/count helpers for visual geometry buffers.
+- Apply only the naming cleanup directly unlocked by the shared payload/upload helper. Leave broader
+  query/DTO/diagnostics cleanup for Phase 11B.
+
+Acceptance criteria:
+
+- Static visual resources and dynamic visual parts share one neutral geometry/material payload shape
+  or a clearly documented projection to one.
+- WebGL2 static visual-resource upload and dynamic visual-part upload no longer duplicate buffer/VAO
+  creation logic.
+- Static/dynamic ownership boundaries remain explicit in types and renderer commits.
+- Static object visual-resource tests, dynamic renderer/resource tests, and full TypeScript checks
+  pass.
+
+Task checklist:
+
+- [ ] Add the neutral visual geometry payload type in an app-local renderer/static/dynamic-neutral
+      home.
+- [ ] Convert or project static visual resources and dynamic render parts through the neutral payload.
+- [ ] Extract the shared WebGL2 visual geometry upload helper.
+- [ ] Replace static/dynamic visual upload call sites with wrappers around the shared helper.
+- [ ] Add or update focused tests for static visual uploads, dynamic visual uploads, and byte/count
+      accounting.
+- [ ] Run focused and full verification commands.
+
+Decisions and course corrections:
+
+- Pending.
+
+Debt and follow-up:
+
+- Low-level source-triangle flattening remains deferred until the neutral payload exists and the
+  remaining duplication is easier to isolate.
+- Texture-use commit helper convergence remains deferred because static and dynamic differ in batch
+  timing and owner delta semantics.
+
+### Phase 11B: Cleanup And Cutover Hardening
+
+Status: pending.
+
+Purpose:
+
+- Remove remaining transitional naming, wrappers, hollow tests, and diagnostics/reporting debt after
+  structural static/dynamic visual convergence is complete.
 
 Cleanup targets:
 
 - Temporary `pickStaticRay` compatibility wrappers after merged query migration.
-- Static-only visual-resource helper names that now serve dynamic rendering too.
+- Remaining static-only visual-resource/material helper names that serve dynamic rendering too after
+  Phase 11A.
 - `prepareV2StaticAssetPayload` if Phase 1 leaves that name in place after adding animation assets.
 - Redundant dynamic/static material interpretation helpers.
 - Diagnostics fields that were useful during bring-up but are hollow or misleading.
@@ -2514,6 +2714,11 @@ Acceptance criteria:
 Task checklist:
 
 - [ ] Remove temporary wrappers and stale names.
+- [ ] Replace caller-intent scene-query modes with explicit inclusion/filter policy if still
+      warranted after Phase 11A.
+- [ ] Split or rename dynamic runtime/renderer/inspection DTOs if selected inspection is still
+      pressuring operational DTO shape.
+- [ ] Scrub stale plan/docs wording that suggests durable diagnostics-owned warning/error state.
 - [ ] Delete hollow or legacy-path tests.
 - [ ] Re-run full verification commands.
 - [ ] Update this plan with final first-cut status.

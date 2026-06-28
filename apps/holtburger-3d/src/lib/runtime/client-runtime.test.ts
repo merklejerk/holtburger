@@ -89,14 +89,16 @@ describe("browser client runtime", () => {
 			renderer,
 		});
 
-		const initialSnapshot = runtime.createDiagnosticsSnapshot();
+		const initialDiagnosticsSnapshot = runtime.createDiagnosticsSnapshot();
 		runtime.setTextureFilteringMode("nearest");
-		const updatedSnapshot = runtime.createDiagnosticsSnapshot();
+		const updatedDiagnosticsSnapshot = runtime.createDiagnosticsSnapshot();
 
-		expect(initialSnapshot.renderPolicy.textureFilteringMode).toBe(
+		expect(initialDiagnosticsSnapshot.renderPolicy.textureFilteringMode).toBe(
 			"anisotropic-4x",
 		);
-		expect(updatedSnapshot.renderPolicy.textureFilteringMode).toBe("nearest");
+		expect(updatedDiagnosticsSnapshot.renderPolicy.textureFilteringMode).toBe(
+			"nearest",
+		);
 		expect(renderer.diagnosticsSnapshotCount).toBeGreaterThanOrEqual(3);
 		runtime.dispose();
 	});
@@ -123,14 +125,14 @@ describe("browser client runtime", () => {
 		const rendererDiagnosticsBeforeOverview = renderer.diagnosticsSnapshotCount;
 
 		runtime.setTextureFilteringMode("nearest");
-		const overview = runtime.createOverviewSnapshot();
+		const overviewSnapshot = runtime.createOverviewSnapshot();
 
-		expect(overview.renderPolicy.textureFilteringMode).toBe("nearest");
-		expect(overview.assets).toEqual({
+		expect(overviewSnapshot.renderPolicy.textureFilteringMode).toBe("nearest");
+		expect(overviewSnapshot.assets).toEqual({
 			committedCount: 0,
 			pendingCount: 0,
 		});
-		expect(overview.staticSceneQuery).toEqual({
+		expect(overviewSnapshot.staticSceneQuery).toEqual({
 			envCellLandblockCount: 0,
 			envCellRecordCount: 0,
 			outdoorRecordCount: 0,
@@ -212,13 +214,13 @@ describe("browser client runtime", () => {
 		});
 		await flushRuntimeWork();
 
-		const loadedSnapshot = runtime.createDiagnosticsSnapshot();
-		expect(loadedSnapshot.dynamic).toMatchObject({
+		const loadedDiagnosticsSnapshot = runtime.createDiagnosticsSnapshot();
+		expect(loadedDiagnosticsSnapshot.dynamic).toMatchObject({
 			activeEntityCount: 1,
 			nonRenderableEntityCount: 0,
 			staticSeedCount: 1,
 		});
-		expect(loadedSnapshot.dynamic.records[0]).toMatchObject({
+		expect(loadedDiagnosticsSnapshot.dynamic.records[0]).toMatchObject({
 			animation: {
 				defaultAnimationId: 0x0300061b,
 			},
@@ -313,8 +315,8 @@ describe("browser client runtime", () => {
 		);
 		await flushRuntimeWork();
 
-		const readySnapshot = runtime.createDiagnosticsSnapshot();
-		expect(readySnapshot.dynamic.records[0]).toMatchObject({
+		const readyDiagnosticsSnapshot = runtime.createDiagnosticsSnapshot();
+		expect(readyDiagnosticsSnapshot.dynamic.records[0]).toMatchObject({
 			animation: {
 				status: "ready",
 			},
@@ -336,7 +338,8 @@ describe("browser client runtime", () => {
 		});
 		expect(
 			"payload" in
-				(readySnapshot.dynamic.records[0]?.resources.setupAnimation ?? {}),
+				(readyDiagnosticsSnapshot.dynamic.records[0]?.resources
+					.setupAnimation ?? {}),
 		).toBe(false);
 
 		runtime.dispose();
@@ -537,14 +540,14 @@ describe("browser client runtime", () => {
 		});
 		await flushRuntimeWork();
 
-		const loadedSnapshot = runtime.createDiagnosticsSnapshot();
-		expect(loadedSnapshot.dynamic).toMatchObject({
+		const loadedDiagnosticsSnapshot = runtime.createDiagnosticsSnapshot();
+		expect(loadedDiagnosticsSnapshot.dynamic).toMatchObject({
 			activeEntityCount: 1,
 			issueCount: 0,
 			nonRenderableEntityCount: 0,
 			staticSeedCount: 1,
 		});
-		expect(loadedSnapshot.dynamic.records[0]).toMatchObject({
+		expect(loadedDiagnosticsSnapshot.dynamic.records[0]).toMatchObject({
 			id: "static-authored-env-cell:landblock-env-cells:landblock:da55ffff:env-cell:da550100:object:building:env-cell-static-0:setup:020003e5",
 			provenance: {
 				kind: "static-authored-env-cell",
@@ -696,9 +699,9 @@ describe("browser client runtime", () => {
 
 		runtime.setFlatVisionModeEnabled(true);
 
-		const snapshot = runtime.createDiagnosticsSnapshot();
-		expect(snapshot.debugOverlays.flatVisionModeEnabled).toBe(true);
-		expect(snapshot.portalFrameWorkPlan).toEqual({
+		const diagnosticsSnapshot = runtime.createDiagnosticsSnapshot();
+		expect(diagnosticsSnapshot.debugOverlays.flatVisionModeEnabled).toBe(true);
+		expect(diagnosticsSnapshot.portalFrameWorkPlan).toEqual({
 			kind: "legacy-render-pass",
 			mode: "flat-resident-diagnostic",
 			renderPassPlan: { kind: "single-surface-resident" },
@@ -1999,9 +2002,9 @@ describe("browser client runtime", () => {
 				revision: 1,
 			},
 		);
-		const snapshot = runtime.createDiagnosticsSnapshot();
-		expect(snapshot.static.failed).toBe(1);
-		expect(JSON.stringify(snapshot)).not.toContain(
+		const diagnosticsSnapshot = runtime.createDiagnosticsSnapshot();
+		expect(diagnosticsSnapshot.static.failed).toBe(1);
+		expect(JSON.stringify(diagnosticsSnapshot)).not.toContain(
 			"landblock env-cell bundle unavailable",
 		);
 		runtime.dispose();

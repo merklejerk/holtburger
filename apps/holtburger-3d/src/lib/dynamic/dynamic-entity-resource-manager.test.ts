@@ -118,9 +118,9 @@ describe("dynamic entity resource manager", () => {
 				triangleCount: 1,
 			},
 		]);
-		expect(Array.from(visual.renderParts[1]?.materialSlotIndices ?? [])).toEqual([
-			1, 1, 1,
-		]);
+		expect(
+			Array.from(visual.renderParts[1]?.materialSlotIndices ?? []),
+		).toEqual([1, 1, 1]);
 	});
 
 	it("dedupes shared setup and animation host assets while holding per-entity leases", async () => {
@@ -165,7 +165,6 @@ describe("dynamic entity resource manager", () => {
 		await flushPromises();
 
 		expect(controller.createSnapshot().records[0]).toMatchObject({
-			diagnostics: [],
 			resources: {
 				status: "ready",
 				visual: {
@@ -175,7 +174,7 @@ describe("dynamic entity resource manager", () => {
 		});
 	});
 
-	it("records concrete visual resource diagnostics when material textures are missing", async () => {
+	it("records concrete visual resource failures when material textures are missing", async () => {
 		const assetService = createAssetService({
 			failKeys: new Set(["render-surface:06000010"]),
 		});
@@ -185,34 +184,34 @@ describe("dynamic entity resource manager", () => {
 		await flushPromises();
 
 		expect(controller.createSnapshot().records[0]).toMatchObject({
-			diagnostics: [
-				{
-					kind: "dynamic-resource-load-failed",
-					resource: "render-surface",
-					resourceKey: {
-						id: 0x06000010,
-						kind: "render-surface",
-					},
-				},
-				{
-					kind: "visual-resources-unsupported",
-					reasons: [
+			renderability: {
+				reasons: ["resource-load-failed", "visual-resources-failed"],
+				status: "non-renderable",
+			},
+			resources: {
+				status: "failed",
+				visual: {
+					failures: [
+						{
+							resource: "render-surface",
+							resourceKey: {
+								id: 0x06000010,
+								kind: "render-surface",
+							},
+						},
+					],
+					status: "failed",
+					unsupportedReasons: [
 						{
 							code: "missing-render-surface",
 						},
 					],
 				},
-			],
-			resources: {
-				status: "failed",
-				visual: {
-					status: "failed",
-				},
 			},
 		});
 	});
 
-	it("records explicit missing setup diagnostics and keeps the entity non-renderable", async () => {
+	it("records explicit missing setup failures and keeps the entity non-renderable", async () => {
 		const assetService = createAssetService({
 			failKeys: new Set(["setup-model:020003e5"]),
 		});
@@ -222,23 +221,22 @@ describe("dynamic entity resource manager", () => {
 		await flushPromises();
 
 		expect(controller.createSnapshot().records[0]).toMatchObject({
-			diagnostics: [
-				{
-					kind: "dynamic-resource-load-failed",
-					message: "missing setup-model:020003e5",
-					resource: "setup-model",
-					resourceKey: {
-						id: 0x020003e5,
-						kind: "setup-model",
-					},
-				},
-			],
 			renderability: {
-				reasons: ["resources-pending"],
+				reasons: ["resource-load-failed"],
 				status: "non-renderable",
 			},
 			resources: {
 				setupAnimation: {
+					failures: [
+						{
+							message: "missing setup-model:020003e5",
+							resource: "setup-model",
+							resourceKey: {
+								id: 0x020003e5,
+								kind: "setup-model",
+							},
+						},
+					],
 					status: "failed",
 				},
 				status: "failed",
@@ -306,7 +304,9 @@ class ResolvingRuntimeHost implements RuntimeHost {
 		}
 		return Promise.resolve({
 			key,
-			payload: createPayload(key, { mixedMaterialPart: this.#mixedMaterialPart }),
+			payload: createPayload(key, {
+				mixedMaterialPart: this.#mixedMaterialPart,
+			}),
 			preparedAt: "2026-06-26T00:00:00.000Z",
 			revision,
 			sourceAssetId: `${key.kind}/${key.id}`,
@@ -482,7 +482,9 @@ function createGfxObjPayload(options: {
 			invalidPolygons: [],
 			normals: [],
 			positions: options.mixedMaterialPart
-				? new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 2, 1, 0, 1, 2, 0])
+				? new Float32Array([
+						0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 2, 1, 0, 1, 2, 0,
+					])
 				: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
 			skippedPolygonCount: 0,
 			sourceId: 0x01000020,

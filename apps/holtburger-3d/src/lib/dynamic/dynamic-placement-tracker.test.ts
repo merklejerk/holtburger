@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { makeOutdoorLandblockId } from "../../lib/landblocks";
 import type { PlacementTransformDto } from "../host/contracts";
 import type {
@@ -103,10 +103,12 @@ describe("dynamic placement tracker", () => {
 			indexed: true,
 			precision: "current-frame-source-part-bounds-aabb",
 		});
-		expect(tracker.queryEnvCellBounds({
-			envCellIds: [0xda550100],
-			landblockId: 0xda55ffff,
-		})).toMatchObject([
+		expect(
+			tracker.queryEnvCellBounds({
+				envCellIds: [0xda550100],
+				landblockId: 0xda55ffff,
+			}),
+		).toMatchObject([
 			{
 				entityId: update.record.id,
 				envCellId: 0xda550100,
@@ -138,6 +140,27 @@ describe("dynamic entity controller tick", () => {
 			indexed: true,
 			precision: "current-frame-source-part-bounds-aabb",
 		});
+	});
+
+	it("does not stringify placement state while detecting unchanged bounds", () => {
+		const store = new DynamicEntityStore();
+		store.upsert(
+			createReadyRecord({
+				partPose: createPlacement({ x: 20, y: 0, z: -20 }),
+			}),
+		);
+		const controller = new DynamicEntityController({ store });
+
+		controller.tick(0);
+		const stringify = vi.spyOn(JSON, "stringify").mockImplementation(() => {
+			throw new Error("Placement hot-path equality must not stringify.");
+		});
+		try {
+			const changed = controller.tick(0);
+			expect(changed).toBe(false);
+		} finally {
+			stringify.mockRestore();
+		}
 	});
 
 	it("exposes indexed outdoor dynamic bounds through a narrow query surface", () => {
@@ -252,7 +275,6 @@ function createReadyRecord(
 			indexed: false,
 			precision: "none",
 		},
-		diagnostics: [],
 		effectiveResidence: sourceResidence,
 		id: "dynamic-test-entity",
 		provenance: {

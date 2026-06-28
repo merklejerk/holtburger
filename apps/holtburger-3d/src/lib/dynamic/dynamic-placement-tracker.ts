@@ -68,7 +68,7 @@ export class DynamicPlacementTracker {
 			this.#outdoorIndex,
 			this.#envCellRecordsByEntityId,
 		);
-		return { changed: !sameBoundsAndResidence(record, next), record: next };
+		return { changed: !placementStatesEqual(record, next), record: next };
 	}
 
 	release(entityId: string): void {
@@ -128,10 +128,18 @@ function derivePlacedRecord(
 	}
 
 	if (record.sourceResidence.kind === "env-cell") {
-		return deriveEnvCellPlacedRecord(record, outdoorIndex, envCellRecordsByEntityId);
+		return deriveEnvCellPlacedRecord(
+			record,
+			outdoorIndex,
+			envCellRecordsByEntityId,
+		);
 	}
 
-	return deriveOutdoorPlacedRecord(record, outdoorIndex, envCellRecordsByEntityId);
+	return deriveOutdoorPlacedRecord(
+		record,
+		outdoorIndex,
+		envCellRecordsByEntityId,
+	);
 }
 
 function deriveOutdoorPlacedRecord(
@@ -141,7 +149,9 @@ function deriveOutdoorPlacedRecord(
 ): DynamicEntityRecord {
 	envCellRecordsByEntityId.delete(record.id);
 	if (record.resources.visual.status !== "ready") {
-		throw new Error("Cannot derive outdoor dynamic placement without visual resources.");
+		throw new Error(
+			"Cannot derive outdoor dynamic placement without visual resources.",
+		);
 	}
 
 	const currentBounds = deriveOutdoorCurrentBounds({
@@ -191,10 +201,14 @@ function deriveEnvCellPlacedRecord(
 ): DynamicEntityRecord {
 	outdoorIndex.remove(record.id);
 	if (record.sourceResidence.kind !== "env-cell") {
-		throw new Error("Cannot derive env-cell dynamic placement for outdoor record.");
+		throw new Error(
+			"Cannot derive env-cell dynamic placement for outdoor record.",
+		);
 	}
 	if (record.resources.visual.status !== "ready") {
-		throw new Error("Cannot derive env-cell dynamic placement without visual resources.");
+		throw new Error(
+			"Cannot derive env-cell dynamic placement without visual resources.",
+		);
 	}
 	const partBounds = derivePartBounds({
 		record,
@@ -242,7 +256,10 @@ function deriveOutdoorCurrentBounds(options: {
 	readonly record: DynamicEntityRecord;
 	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
 	readonly sourceLandblockId: number;
-}): Extract<DynamicEntityCurrentBounds, { readonly kind: "outdoor-landblock" }> | null {
+}): Extract<
+	DynamicEntityCurrentBounds,
+	{ readonly kind: "outdoor-landblock" }
+> | null {
 	const partBounds = derivePartBounds({
 		record: options.record,
 		sourceAssets: options.sourceAssets,
@@ -293,11 +310,7 @@ function derivePartBounds(options: {
 					{
 						bounds: transformBoundsByMat4(
 							sourcePart.bounds,
-							createPartMatrix(
-								options.record,
-								sourcePart,
-								pose.localPlacement,
-							),
+							createPartMatrix(options.record, sourcePart, pose.localPlacement),
 						),
 						partIndex: pose.partIndex,
 						sourceBounds: sourcePart.bounds,
@@ -401,13 +414,144 @@ function resolvePrimaryEffectiveLandblockId(options: {
 		: (options.effectiveOutdoorLandblockIds[0] ?? options.sourceLandblockId);
 }
 
-function sameBoundsAndResidence(
+function placementStatesEqual(
 	left: DynamicEntityRecord,
 	right: DynamicEntityRecord,
 ): boolean {
 	return (
-		JSON.stringify(left.bounds) === JSON.stringify(right.bounds) &&
-		JSON.stringify(left.effectiveResidence) ===
-			JSON.stringify(right.effectiveResidence)
+		sameBoundsState(left.bounds, right.bounds) &&
+		sameResidence(left.effectiveResidence, right.effectiveResidence)
+	);
+}
+
+function sameBoundsState(
+	left: DynamicEntityRecord["bounds"],
+	right: DynamicEntityRecord["bounds"],
+): boolean {
+	return (
+		left.indexed === right.indexed &&
+		left.precision === right.precision &&
+		sameIndexMembership(left.indexMembership, right.indexMembership) &&
+		sameCurrentBounds(left.currentBounds, right.currentBounds)
+	);
+}
+
+function sameIndexMembership(
+	left: DynamicEntityRecord["bounds"]["indexMembership"],
+	right: DynamicEntityRecord["bounds"]["indexMembership"],
+): boolean {
+	if (left.kind !== right.kind) {
+		return false;
+	}
+	if (left.kind === "none" && right.kind === "none") {
+		return true;
+	}
+	if (
+		left.kind === "outdoor-landblocks" &&
+		right.kind === "outdoor-landblocks"
+	) {
+		return sameNumberArray(left.landblockIds, right.landblockIds);
+	}
+	if (left.kind === "env-cells" && right.kind === "env-cells") {
+		return (
+			left.landblockId === right.landblockId &&
+			sameNumberArray(left.envCellIds, right.envCellIds)
+		);
+	}
+	return false;
+}
+
+function sameCurrentBounds(
+	left: DynamicEntityCurrentBounds | null,
+	right: DynamicEntityCurrentBounds | null,
+): boolean {
+	if (left === null || right === null) {
+		return left === right;
+	}
+	if (left.kind !== right.kind || left.precision !== right.precision) {
+		return false;
+	}
+	if (
+		!sameStaticBounds(left.bounds, right.bounds) ||
+		!samePartBounds(left.partBounds, right.partBounds)
+	) {
+		return false;
+	}
+	if (left.kind === "outdoor-landblock" && right.kind === "outdoor-landblock") {
+		return (
+			left.coordinateSpace === right.coordinateSpace &&
+			left.sourceLandblockId === right.sourceLandblockId &&
+			sameNumberArray(
+				left.effectiveOutdoorLandblockIds,
+				right.effectiveOutdoorLandblockIds,
+			)
+		);
+	}
+	if (left.kind === "env-cell" && right.kind === "env-cell") {
+		return (
+			left.coordinateSpace === right.coordinateSpace &&
+			left.envCellId === right.envCellId &&
+			left.landblockId === right.landblockId
+		);
+	}
+	return false;
+}
+
+function samePartBounds(
+	left: readonly DynamicEntityPartBounds[],
+	right: readonly DynamicEntityPartBounds[],
+): boolean {
+	return (
+		left.length === right.length &&
+		left.every(
+			(leftPart, index) =>
+				leftPart.partIndex === right[index]?.partIndex &&
+				sameStaticBounds(leftPart.bounds, right[index]?.bounds) &&
+				sameStaticBounds(leftPart.sourceBounds, right[index]?.sourceBounds),
+		)
+	);
+}
+
+function sameStaticBounds(
+	left: StaticBounds,
+	right: StaticBounds | undefined,
+): boolean {
+	return (
+		right !== undefined &&
+		left.min.x === right.min.x &&
+		left.min.y === right.min.y &&
+		left.min.z === right.min.z &&
+		left.max.x === right.max.x &&
+		left.max.y === right.max.y &&
+		left.max.z === right.max.z
+	);
+}
+
+function sameResidence(
+	left: DynamicEntityRecord["effectiveResidence"],
+	right: DynamicEntityRecord["effectiveResidence"],
+): boolean {
+	if (left.kind !== right.kind) {
+		return false;
+	}
+	if (left.kind === "outdoor-landblock" && right.kind === "outdoor-landblock") {
+		return left.landblockId === right.landblockId;
+	}
+	if (left.kind === "env-cell" && right.kind === "env-cell") {
+		return (
+			left.envCellId === right.envCellId &&
+			left.landblockId === right.landblockId
+		);
+	}
+	return false;
+}
+
+function sameNumberArray(
+	left: readonly number[],
+	right: readonly number[],
+): boolean {
+	return (
+		left.length === right.length &&
+		left.every((leftValue, index) => leftValue === right[index])
 	);
 }

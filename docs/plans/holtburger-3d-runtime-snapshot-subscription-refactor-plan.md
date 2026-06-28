@@ -602,7 +602,7 @@ Decisions and course corrections:
 
 ## Phase 10: Promote Dynamic Behavior State And Remove Hot-Path Stringify Equality
 
-Status: pending.
+Status: complete.
 
 Purpose:
 
@@ -646,32 +646,32 @@ Acceptance criteria:
 - Unsupported hooks and malformed animation/content observations are reported through a deduped
   warning path and do not make animated entities dirty every frame.
 - Dynamic animation and placement tick paths do not call `JSON.stringify` for equality checks.
-- `DynamicEntityController.tick()` no longer exposes one overloaded `changed` boolean for playback,
-  placement, diagnostics, and overlay refresh.
+- `DynamicEntityController.tick()` is no longer affected by diagnostic-record mutation; it remains a
+  boolean because `ClientRuntime.tickFrame()` has only one caller-observed decision to make.
 - Existing dynamic rendering, selection overlays, spatial queries, and diagnostics reports preserve
   their user-visible behavior unless a diagnostic-history field is intentionally removed.
 
 Task checklist:
 
-- [ ] Define the promoted dynamic behavior-state shape in `dynamic/contracts.ts`.
-- [ ] Add or thread a small dynamic warning reporter through dynamic resource/animation setup.
-- [ ] Migrate resource/renderability state in `dynamic-entity-controller.ts` and
+- [x] Define the promoted dynamic behavior-state shape in `dynamic/contracts.ts`.
+- [x] Add or thread a small dynamic warning reporter through dynamic resource/animation setup.
+- [x] Migrate resource/renderability state in `dynamic-entity-controller.ts` and
       `dynamic-entity-resource-manager.ts`.
-- [ ] Validate animation-resource facts at resource acceptance where possible, including unsupported
+- [x] Validate animation-resource facts at resource acceptance where possible, including unsupported
       hooks and malformed object-position frame counts.
-- [ ] Replace `DynamicAnimationPlayer` durable diagnostic mutation with deduped warnings.
-- [ ] Replace `samePlaybackState()` with explicit playback/update-result logic.
-- [ ] Replace `sameBoundsAndResidence()` with typed bounds/residence equality or derivation-time
+- [x] Replace `DynamicAnimationPlayer` durable diagnostic mutation with deduped warnings.
+- [x] Replace `samePlaybackState()` with explicit playback/update-result logic.
+- [x] Replace `sameBoundsAndResidence()` with typed bounds/residence equality or derivation-time
       change detection.
-- [ ] Reassess `DynamicEntityController.tick()`'s return value after diagnostics are removed from
+- [x] Reassess `DynamicEntityController.tick()`'s return value after diagnostics are removed from
       dynamic records; keep it boolean if the only caller-observed behavior is debug-overlay refresh.
-- [ ] Update runtime overlay refresh to consume the final tick result shape.
-- [ ] Update dynamic/runtime snapshots and tests for promoted behavior state.
-- [ ] Add focused regression coverage proving dynamic tick paths do not stringify playback or
+- [x] Update runtime overlay refresh to consume the final tick result shape.
+- [x] Update dynamic/runtime snapshots and tests for promoted behavior state.
+- [x] Add focused regression coverage proving dynamic tick paths do not stringify playback or
       placement state for equality.
-- [ ] Avoid tests that assert debug warning/log text; test behavior state and no-stringify hot paths
+- [x] Avoid tests that assert debug warning/log text; test behavior state and no-stringify hot paths
       instead.
-- [ ] Run `npm run check`, `npm run lint:ts`, focused dynamic/runtime tests, and root
+- [x] Run `npm run check`, `npm run lint:ts`, focused dynamic/runtime tests, and root
       `git diff --check`.
 
 Decisions and course corrections:
@@ -714,6 +714,20 @@ Decisions and course corrections:
   behavior-state tests. Do not add tests that assert debug warning text; add focused tests that make
   `JSON.stringify` throw around dynamic animation/placement ticks to prove hot-path equality no
   longer stringifies.
+- 2026-06-28 implementation: Removed durable `DynamicEntityIssue` records from dynamic entity state
+  and snapshots. Resource failures now live on explicit setup/visual resource state, and
+  renderability is derived from resource behavior state instead of diagnostic records.
+- 2026-06-28 implementation: Added module-local, deduped animation-resource warnings at animation
+  payload acceptance for malformed object-position frame counts and unsupported hook signatures.
+  This intentionally keeps warning emission out of `DynamicAnimationPlayer.update()`.
+- 2026-06-28 implementation: Replaced animation and placement `JSON.stringify` equality with typed
+  comparisons. Added focused regressions that make `JSON.stringify` throw during duplicate playback
+  and placement ticks.
+- 2026-06-28 implementation: Kept `DynamicEntityController.tick()` as a boolean because
+  `ClientRuntime.tickFrame()` only uses it to decide whether to refresh scene debug overlays. No
+  public typed tick result was added.
+- 2026-06-28 verification: `npm run check`, `npm run lint:ts`, focused dynamic/runtime tests, full
+  `npm run test:ts`, and `npm run lint:dead` passed.
 
 ## Risks And Mitigations
 

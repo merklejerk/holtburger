@@ -7,7 +7,6 @@ import type {
 import {
 	createStaticScopeOwnerKey,
 	type DynamicEntityCurrentBounds,
-	type DynamicEntityIssue,
 	isEnvCellDynamicSeedRecord,
 	isOutdoorDynamicSeedRecord,
 	type DynamicEntityId,
@@ -29,15 +28,6 @@ import {
 import type { OutdoorDynamicSpatialIndexRecord } from "./outdoor-dynamic-spatial-index";
 
 const FIRST_SLICE_REQUIRED_RESOURCES = ["setup-model", "animation"] as const;
-const PHASE_4B_REQUIRED_RESOURCES = [
-	"setup-appearance",
-	"gfx",
-	"material",
-	"palette",
-	"render-surface",
-	"prepared-texture",
-] as const;
-
 export interface DynamicEntityControllerOptions {
 	readonly onResourcesChanged?: () => void;
 	readonly placementTracker?: DynamicPlacementTracker;
@@ -203,12 +193,6 @@ function createDynamicEntityRecord(
 			indexed: false,
 			precision: "none",
 		},
-		diagnostics: [
-			{
-				kind: "resources-pending",
-				required: FIRST_SLICE_REQUIRED_RESOURCES,
-			},
-		],
 		effectiveResidence: sourceResidence,
 		id: createDynamicEntityId(record, sourceScopeKey),
 		provenance: {
@@ -236,37 +220,28 @@ function applyResourceChange(
 	change: DynamicEntityResourceChange,
 ): DynamicEntityRecord {
 	if (change.kind === "setup-animation-ready") {
-		const diagnostics = [
-			createVisualResourcesPendingIssue(),
-			...createResidenceDiagnostics(),
-		];
 		return {
 			...record,
 			animation: {
 				...record.animation,
 				status: "ready",
 			},
-			diagnostics,
-			renderability: createRenderability(diagnostics),
+			renderability: createRenderability(change.resources),
 			resources: change.resources,
 		};
 	}
 
 	if (change.kind === "visual-resources-ready") {
-		const diagnostics = createResidenceDiagnostics();
 		return {
 			...record,
-			diagnostics,
-			renderability: createRenderability(diagnostics),
+			renderability: createRenderability(change.resources),
 			resources: change.resources,
 		};
 	}
 
-	const diagnostics = [...change.issues, ...createResidenceDiagnostics()];
 	return {
 		...record,
-		diagnostics,
-		renderability: createRenderability(diagnostics),
+		renderability: createRenderability(change.resources),
 		resources: change.resources,
 	};
 }
@@ -294,21 +269,10 @@ function createFallbackInitialResourceState(
 	};
 }
 
-function createResidenceDiagnostics(): readonly DynamicEntityIssue[] {
-	return [];
-}
-
-function createVisualResourcesPendingIssue(): DynamicEntityIssue {
-	return {
-		kind: "visual-resources-pending",
-		required: PHASE_4B_REQUIRED_RESOURCES,
-	};
-}
-
 function createRenderability(
-	diagnostics: readonly DynamicEntityIssue[],
+	resources: DynamicEntityResourceState,
 ): DynamicEntityRecord["renderability"] {
-	const reasons = createRenderabilityReasons(diagnostics);
+	const reasons = createRenderabilityReasons(resources);
 	return {
 		reasons,
 		status: reasons.length === 0 ? "renderable" : "non-renderable",
@@ -316,20 +280,32 @@ function createRenderability(
 }
 
 function createRenderabilityReasons(
-	diagnostics: readonly DynamicEntityIssue[],
+	resources: DynamicEntityResourceState,
 ): DynamicEntityRecord["renderability"]["reasons"] {
 	const reasons = new Set<
 		DynamicEntityRecord["renderability"]["reasons"][number]
 	>();
-	for (const diagnostic of diagnostics) {
-		if (diagnostic.kind === "resources-pending") {
-			reasons.add("resources-pending");
+	if (resources.status === "pending") {
+		reasons.add("resources-pending");
+	}
+	if (resources.status === "setup-animation-ready") {
+		reasons.add("visual-resources-pending");
+	}
+	if (
+		resources.setupAnimation.status === "failed" &&
+		resources.setupAnimation.failures.length > 0
+	) {
+		reasons.add("resource-load-failed");
+	}
+	if (resources.visual.status === "failed") {
+		if (resources.visual.failures.length > 0) {
+			reasons.add("resource-load-failed");
 		}
-		if (diagnostic.kind === "visual-resources-pending") {
-			reasons.add("visual-resources-pending");
-		}
-		if (diagnostic.kind === "dynamic-resource-load-failed") {
-			reasons.add("resources-pending");
+		if (
+			resources.visual.missingRefs.length > 0 ||
+			resources.visual.unsupportedReasons.length > 0
+		) {
+			reasons.add("visual-resources-failed");
 		}
 	}
 	return [...reasons];

@@ -51,10 +51,6 @@ export class DynamicEntityStore {
 		const records = this.records();
 		return {
 			activeEntityCount: records.length,
-			issueCount: records.reduce(
-				(count, record) => count + record.diagnostics.length,
-				0,
-			),
 			nonRenderableEntityCount: records.filter(
 				(record) => record.renderability.status === "non-renderable",
 			).length,
@@ -75,7 +71,6 @@ function createDynamicEntitySummaryDto(
 		},
 		baseTransform: record.baseTransform,
 		bounds: record.bounds,
-		diagnostics: record.diagnostics,
 		effectiveResidence: record.effectiveResidence,
 		id: record.id,
 		provenance: record.provenance,

@@ -14,7 +14,6 @@ describe("dynamic entity controller", () => {
 
 		expect(controller.createSnapshot()).toMatchObject({
 			activeEntityCount: 1,
-			issueCount: 1,
 			nonRenderableEntityCount: 1,
 			staticSeedCount: 1,
 		});
@@ -49,16 +48,20 @@ describe("dynamic entity controller", () => {
 		const controller = new DynamicEntityController();
 
 		controller.ingestStaticSeeds([
-			createOutdoorSeedRecord({ workId: "1:landblock:da55ffff:outdoor-buildings" }),
+			createOutdoorSeedRecord({
+				workId: "1:landblock:da55ffff:outdoor-buildings",
+			}),
 		]);
 		controller.ingestStaticSeeds([
-			createOutdoorSeedRecord({ workId: "7:landblock:da55ffff:outdoor-buildings" }),
+			createOutdoorSeedRecord({
+				workId: "7:landblock:da55ffff:outdoor-buildings",
+			}),
 		]);
 
 		expect(controller.createSnapshot().records).toHaveLength(1);
-		expect(controller.createSnapshot().records[0]?.provenance.owner.workId).toBe(
-			"7:landblock:da55ffff:outdoor-buildings",
-		);
+		expect(
+			controller.createSnapshot().records[0]?.provenance.owner.workId,
+		).toBe("7:landblock:da55ffff:outdoor-buildings");
 	});
 
 	it("removes records whose static source scope is no longer retained", () => {
@@ -97,7 +100,6 @@ describe("dynamic entity controller", () => {
 
 		expect(controller.createSnapshot()).toMatchObject({
 			activeEntityCount: 1,
-			issueCount: 1,
 			nonRenderableEntityCount: 1,
 			staticSeedCount: 1,
 		});
@@ -106,12 +108,6 @@ describe("dynamic entity controller", () => {
 				defaultAnimationId: 0x0300061b,
 				status: "pending-resource",
 			},
-			diagnostics: [
-				{
-					kind: "resources-pending",
-					required: ["setup-model", "animation"],
-				},
-			],
 			id: "static-authored-env-cell:landblock-env-cells:landblock:da55ffff:env-cell:da550100:object:building:seed-0:setup:020003e5",
 			provenance: {
 				kind: "static-authored-env-cell",
@@ -160,8 +156,7 @@ function createOutdoorSeedRecord(
 		owner: createOwner({
 			landblockId,
 			scopeKey,
-			workId:
-				options.workId ?? "1:landblock:da55ffff:outdoor-buildings",
+			workId: options.workId ?? "1:landblock:da55ffff:outdoor-buildings",
 		}),
 		seed: {
 			classificationReason: "setup-default-animation",
@@ -268,14 +263,12 @@ function createRetainedScope(): StaticScopeOwnerKey {
 	};
 }
 
-function createOwner(
-	options: {
-		readonly domain?: StaticWorkPeerRecordOwner["domain"];
-		readonly landblockId?: number;
-		readonly scopeKey?: string;
-		readonly workId: string;
-	},
-): StaticWorkPeerRecordOwner {
+function createOwner(options: {
+	readonly domain?: StaticWorkPeerRecordOwner["domain"];
+	readonly landblockId?: number;
+	readonly scopeKey?: string;
+	readonly workId: string;
+}): StaticWorkPeerRecordOwner {
 	const landblockId = options.landblockId ?? 0xda55ffff;
 	return {
 		domain: options.domain ?? "outdoor-buildings",

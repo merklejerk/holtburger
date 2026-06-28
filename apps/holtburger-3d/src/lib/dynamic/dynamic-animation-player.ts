@@ -5,7 +5,6 @@ import type {
 import type {
 	DynamicEntityActiveOmegaState,
 	DynamicAnimationHookFrameKey,
-	DynamicEntityIssue,
 	DynamicEntityRecord,
 } from "./contracts";
 
@@ -41,15 +40,17 @@ interface CrossedHookFrame {
 type AnimationHookDto =
 	AnimationPayloadDto["partFrames"][number]["hooks"][number];
 type QuaternionDto = PlacementTransformDto["orientation"];
+type PlayingPlayback = Extract<
+	DynamicEntityRecord["animation"]["playback"],
+	{ readonly status: "playing" }
+>;
 
 interface HookDispatchResult {
 	readonly activeOmega: DynamicEntityActiveOmegaState | null;
-	readonly issues: readonly DynamicEntityIssue[];
 }
 
 interface CrossedHookDispatchResult {
 	readonly activeOmega: DynamicEntityActiveOmegaState | null;
-	readonly issues: readonly DynamicEntityIssue[];
 	readonly lastDispatchedHookFrame: DynamicAnimationHookFrameKey | null;
 }
 
@@ -78,10 +79,6 @@ export class DynamicAnimationPlayer {
 			startedAtSeconds,
 			timeSeconds,
 		});
-		const objectFrameDiagnostic = createObjectPositionFrameDiagnostic({
-			animationAssetId: animationResource.assetId,
-			payload,
-		});
 		const objectRootPose = sampleObjectRootPose({
 			currentFrameIndex: sampled.currentFrameIndex,
 			frameAlpha: sampled.frameAlpha,
@@ -89,7 +86,8 @@ export class DynamicAnimationPlayer {
 			payload,
 		});
 		const partFrame = payload.partFrames[sampled.currentFrameIndex];
-		const nextPartFrame = payload.partFrames[sampled.nextFrameIndex] ?? partFrame;
+		const nextPartFrame =
+			payload.partFrames[sampled.nextFrameIndex] ?? partFrame;
 		const previousHookFrame =
 			record.animation.playback.status === "playing" &&
 			record.animation.playback.animationAssetId === animationResource.assetId
@@ -111,10 +109,6 @@ export class DynamicAnimationPlayer {
 			startedAtSeconds,
 			timeSeconds,
 		});
-		const diagnostics = appendUniqueDiagnostics(record.diagnostics, [
-			...(objectFrameDiagnostic === null ? [] : [objectFrameDiagnostic]),
-			...hookDispatch.issues,
-		]);
 		const next: DynamicEntityRecord = {
 			...record,
 			animation: {
@@ -149,9 +143,8 @@ export class DynamicAnimationPlayer {
 				},
 				status: "ready",
 			},
-			diagnostics,
 		};
-		return { changed: !samePlaybackState(record, next), record: next };
+		return { changed: !animationStatesEqual(record, next), record: next };
 	}
 
 	#dispatchCrossedHooks(options: {
@@ -166,7 +159,6 @@ export class DynamicAnimationPlayer {
 		readonly timeSeconds: number;
 	}): CrossedHookDispatchResult {
 		let activeOmega = options.activeOmega;
-		const issues: DynamicEntityIssue[] = [];
 		let lastDispatchedHookFrame = options.previousHookFrame;
 		const crossedFrames = createCrossedHookFrames({
 			animationAssetId: options.animationAssetId,
@@ -192,7 +184,6 @@ export class DynamicAnimationPlayer {
 					timeSeconds: crossedFrame.timeSeconds,
 				});
 				activeOmega = dispatch.activeOmega;
-				issues.push(...dispatch.issues);
 			}
 			lastDispatchedHookFrame = {
 				frameIndex: crossedFrame.frameIndex,
@@ -202,7 +193,6 @@ export class DynamicAnimationPlayer {
 
 		return {
 			activeOmega: integrateActiveOmega(activeOmega, options.timeSeconds),
-			issues,
 			lastDispatchedHookFrame,
 		};
 	}
@@ -219,7 +209,6 @@ class DynamicHookDispatcher {
 		readonly payload: AnimationPayloadDto;
 		readonly timeSeconds: number;
 	}): HookDispatchResult {
-		const issues: DynamicEntityIssue[] = [];
 		let activeOmega = options.activeOmega;
 		for (const hook of options.hooks) {
 			if (hook.payloadKind === "none") {
@@ -238,20 +227,8 @@ class DynamicHookDispatcher {
 				});
 				continue;
 			}
-			issues.push({
-				animationAssetId: options.animationAssetId,
-				animationId: options.payload.animationId,
-				entityId: options.entityId,
-				frameIndex: options.frameIndex,
-				hookName: hook.hookName,
-				hookType: hook.hookType,
-				kind: "dynamic-animation-hook-unsupported",
-				loopIteration: options.loopIteration,
-				payloadKind: hook.payloadKind,
-				skippedEffect: "unsupported animation hook effect",
-			});
 		}
-		return { activeOmega, issues };
+		return { activeOmega };
 	}
 }
 
@@ -445,7 +422,10 @@ function sampleAnimationFrame(options: {
 		frameAlpha: frameNumber - absoluteFrameIndex,
 		frameNumber,
 		loopIteration: Math.floor(absoluteFrameIndex / options.frameCount),
-		nextFrameIndex: createNextPoseFrameIndex(currentFrameIndex, options.frameCount),
+		nextFrameIndex: createNextPoseFrameIndex(
+			currentFrameIndex,
+			options.frameCount,
+		),
 	};
 }
 
@@ -473,7 +453,9 @@ function sampleObjectRootPose(options: {
 	const current =
 		options.payload.objectPositionFrames[options.currentFrameIndex] ??
 		IDENTITY_PLACEMENT;
-	if (options.payload.objectPositionFrames.length !== options.payload.frameCount) {
+	if (
+		options.payload.objectPositionFrames.length !== options.payload.frameCount
+	) {
 		return current;
 	}
 	return interpolatePlacement(
@@ -542,42 +524,11 @@ function createAbsoluteFrameIndex(
 	return frame.loopIteration * frameCount + frame.frameIndex;
 }
 
-function createObjectPositionFrameDiagnostic(options: {
-	readonly animationAssetId: string;
-	readonly payload: AnimationPayloadDto;
-}): DynamicEntityIssue | null {
-	if (
-		options.payload.objectPositionFrames.length === 0 ||
-		options.payload.objectPositionFrames.length === options.payload.frameCount
-	) {
-		return null;
-	}
-	return {
-		animationAssetId: options.animationAssetId,
-		animationId: options.payload.animationId,
-		expectedFrameCount: options.payload.frameCount,
-		kind: "dynamic-animation-invalid",
-		message:
-			"Animation object position frame count does not match animation frame count.",
-		objectPositionFrameCount: options.payload.objectPositionFrames.length,
-		reason: "malformed-object-position-frames",
-	};
-}
-
 function failZeroFrameAnimation(
 	record: DynamicEntityRecord,
 	animationAssetId: string,
 	payload: AnimationPayloadDto,
 ): PlaybackUpdate {
-	const issue: DynamicEntityIssue = {
-		animationAssetId,
-		animationId: payload.animationId,
-		expectedFrameCount: 1,
-		kind: "dynamic-animation-invalid",
-		message: "Animation payload has no frames to sample.",
-		objectPositionFrameCount: payload.objectPositionFrames.length,
-		reason: "zero-frame",
-	};
 	const next: DynamicEntityRecord = {
 		...record,
 		animation: {
@@ -590,58 +541,157 @@ function failZeroFrameAnimation(
 			},
 			status: "failed",
 		},
-		diagnostics: appendUniqueDiagnostics(record.diagnostics, [issue]),
 	};
-	return { changed: !samePlaybackState(record, next), record: next };
+	return { changed: !animationStatesEqual(record, next), record: next };
 }
 
-function appendUniqueDiagnostics(
-	current: readonly DynamicEntityIssue[],
-	additions: readonly DynamicEntityIssue[],
-): readonly DynamicEntityIssue[] {
-	const diagnostics = [...current];
-	const keys = new Set(current.map(createDiagnosticKey));
-	for (const issue of additions) {
-		const key = createDiagnosticKey(issue);
-		if (!keys.has(key)) {
-			keys.add(key);
-			diagnostics.push(issue);
-		}
-	}
-	return diagnostics;
-}
-
-function createDiagnosticKey(issue: DynamicEntityIssue): string {
-	if (issue.kind === "dynamic-animation-invalid") {
-		return [
-			issue.kind,
-			issue.animationAssetId,
-			issue.reason,
-			issue.expectedFrameCount,
-			issue.objectPositionFrameCount ?? "null",
-		].join(":");
-	}
-	if (issue.kind === "dynamic-animation-hook-unsupported") {
-		return [
-			issue.kind,
-			issue.entityId,
-			issue.animationAssetId,
-			issue.frameIndex,
-			issue.loopIteration,
-			issue.hookType,
-			issue.hookName,
-			issue.payloadKind,
-		].join(":");
-	}
-	return JSON.stringify(issue);
-}
-
-function samePlaybackState(
+function animationStatesEqual(
 	left: DynamicEntityRecord,
 	right: DynamicEntityRecord,
 ): boolean {
+	return sameAnimationState(left.animation, right.animation);
+}
+
+function sameAnimationState(
+	left: DynamicEntityRecord["animation"],
+	right: DynamicEntityRecord["animation"],
+): boolean {
 	return (
-		JSON.stringify(left.animation) === JSON.stringify(right.animation) &&
-		left.diagnostics.length === right.diagnostics.length
+		left.defaultAnimationId === right.defaultAnimationId &&
+		left.status === right.status &&
+		sameAnimationPlayback(left.playback, right.playback)
+	);
+}
+
+function sameAnimationPlayback(
+	left: DynamicEntityRecord["animation"]["playback"],
+	right: DynamicEntityRecord["animation"]["playback"],
+): boolean {
+	if (left.status !== right.status) {
+		return false;
+	}
+	if (
+		left.status === "pending-resource" &&
+		right.status === "pending-resource"
+	) {
+		return true;
+	}
+	if (left.status === "failed" && right.status === "failed") {
+		return (
+			left.animationAssetId === right.animationAssetId &&
+			left.animationId === right.animationId &&
+			left.reason === right.reason
+		);
+	}
+	if (left.status !== "playing" || right.status !== "playing") {
+		return false;
+	}
+	return (
+		left.animationAssetId === right.animationAssetId &&
+		left.animationId === right.animationId &&
+		left.currentFrameIndex === right.currentFrameIndex &&
+		left.elapsedSeconds === right.elapsedSeconds &&
+		left.frameCount === right.frameCount &&
+		left.frameNumber === right.frameNumber &&
+		left.frameRateFps === right.frameRateFps &&
+		sameHookFrame(
+			left.lastDispatchedHookFrame,
+			right.lastDispatchedHookFrame,
+		) &&
+		left.loopIteration === right.loopIteration &&
+		samePlacement(left.objectRootPose, right.objectRootPose) &&
+		left.partCount === right.partCount &&
+		samePartPoses(left.partPoses, right.partPoses) &&
+		left.startedAtSeconds === right.startedAtSeconds &&
+		sameActiveOmega(
+			left.transformEffects.activeOmega,
+			right.transformEffects.activeOmega,
+		)
+	);
+}
+
+function sameHookFrame(
+	left: DynamicAnimationHookFrameKey | null,
+	right: DynamicAnimationHookFrameKey | null,
+): boolean {
+	if (left === null || right === null) {
+		return left === right;
+	}
+	return (
+		left.frameIndex === right.frameIndex &&
+		left.loopIteration === right.loopIteration
+	);
+}
+
+function samePartPoses(
+	left: PlayingPlayback["partPoses"],
+	right: PlayingPlayback["partPoses"],
+): boolean {
+	return (
+		left.length === right.length &&
+		left.every(
+			(leftPose, index) =>
+				leftPose.partIndex === right[index]?.partIndex &&
+				samePlacement(leftPose.localPlacement, right[index]?.localPlacement),
+		)
+	);
+}
+
+function samePlacement(
+	left: PlacementTransformDto,
+	right: PlacementTransformDto | undefined,
+): boolean {
+	return (
+		right !== undefined &&
+		left.origin.x === right.origin.x &&
+		left.origin.y === right.origin.y &&
+		left.origin.z === right.origin.z &&
+		left.orientation.w === right.orientation.w &&
+		left.orientation.x === right.orientation.x &&
+		left.orientation.y === right.orientation.y &&
+		left.orientation.z === right.orientation.z
+	);
+}
+
+function sameActiveOmega(
+	left: DynamicEntityActiveOmegaState | null,
+	right: DynamicEntityActiveOmegaState | null,
+): boolean {
+	if (left === null || right === null) {
+		return left === right;
+	}
+	return (
+		left.animationAssetId === right.animationAssetId &&
+		left.animationId === right.animationId &&
+		left.entityId === right.entityId &&
+		left.hookName === right.hookName &&
+		left.hookType === right.hookType &&
+		left.lastAppliedFrameIndex === right.lastAppliedFrameIndex &&
+		left.lastAppliedLoopIteration === right.lastAppliedLoopIteration &&
+		left.lastIntegratedAtSeconds === right.lastIntegratedAtSeconds &&
+		sameQuaternion(left.objectRootRotation, right.objectRootRotation) &&
+		left.omega.x === right.omega.x &&
+		left.omega.y === right.omega.y &&
+		left.omega.z === right.omega.z &&
+		sameNumberArray(left.rawPayloadBytes, right.rawPayloadBytes)
+	);
+}
+
+function sameQuaternion(left: QuaternionDto, right: QuaternionDto): boolean {
+	return (
+		left.w === right.w &&
+		left.x === right.x &&
+		left.y === right.y &&
+		left.z === right.z
+	);
+}
+
+function sameNumberArray(
+	left: readonly number[],
+	right: readonly number[],
+): boolean {
+	return (
+		left.length === right.length &&
+		left.every((leftValue, index) => leftValue === right[index])
 	);
 }

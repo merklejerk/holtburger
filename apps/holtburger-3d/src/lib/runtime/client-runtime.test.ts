@@ -320,11 +320,6 @@ describe("browser client runtime", () => {
 			animation: {
 				status: "ready",
 			},
-			diagnostics: [
-				{
-					kind: "visual-resources-pending",
-				},
-			],
 			renderability: {
 				reasons: ["visual-resources-pending"],
 			},
@@ -543,7 +538,6 @@ describe("browser client runtime", () => {
 		const loadedDiagnosticsSnapshot = runtime.createDiagnosticsSnapshot();
 		expect(loadedDiagnosticsSnapshot.dynamic).toMatchObject({
 			activeEntityCount: 1,
-			issueCount: 0,
 			nonRenderableEntityCount: 0,
 			staticSeedCount: 1,
 		});

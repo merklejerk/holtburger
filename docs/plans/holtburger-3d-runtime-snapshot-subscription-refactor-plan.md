@@ -95,7 +95,7 @@ Profiler evidence from browser devtools showed frame work passing through:
 
 ## Phase 1: Introduce Explicit Runtime Snapshot API
 
-Status: pending.
+Status: complete.
 
 Purpose:
 
@@ -117,21 +117,27 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add the explicit snapshot read method to `ClientRuntime`.
-- [ ] Route `createDiagnosticsReport()` through the explicit method.
-- [ ] Add focused tests for explicit snapshot reads if existing tests only cover subscription
+- [x] Add the explicit snapshot read method to `ClientRuntime`.
+- [x] Route `createDiagnosticsReport()` through the explicit method.
+- [x] Add focused tests for explicit snapshot reads if existing tests only cover subscription
       delivery.
-- [ ] Run focused runtime tests.
+- [x] Run focused runtime tests.
 
 Decisions and course corrections:
 
 - 2026-06-27 dry run: Keep Phase 1 API-only. Moving browser startup to explicit snapshot reads
   belongs with the polling cutover in Phase 2; mixing it into Phase 1 would create a half-migrated
   production path.
+- 2026-06-28 implementation: Added public `ClientRuntime.createSnapshot()`, routed
+  `createDiagnosticsReport()` and the temporary legacy full-snapshot subscription through it, and
+  added a focused runtime test proving explicit reads observe render-policy changes. Subscription
+  removal intentionally remains Phase 3 work.
+- 2026-06-28 verification: `npm run test:ts -- src/lib/runtime/client-runtime.test.ts` passed
+  with 34 tests.
 
 ## Phase 2: Replace Broad Snapshot Subscription With Pull/Poll Consumption
 
-Status: pending.
+Status: complete.
 
 Purpose:
 
@@ -161,22 +167,29 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add `RUNTIME_SNAPSHOT_POLL_INTERVAL_MS = 500` in the browser runtime owner.
-- [ ] Add browser polling setup and teardown next to the existing runtime frame loop.
-- [ ] Pull an initial full runtime snapshot after runtime creation.
-- [ ] Pull after explicit user/config actions where waiting for the interval would feel stale.
-- [ ] Remove the broad runtime snapshot subscription from `BrowserDisplay.svelte`.
-- [ ] Update BrowserDisplay tests or runtime integration tests that assumed pushed full snapshots.
+- [x] Add `RUNTIME_SNAPSHOT_POLL_INTERVAL_MS = 500` in the browser runtime owner.
+- [x] Add browser polling setup and teardown next to the existing runtime frame loop.
+- [x] Pull an initial full runtime snapshot after runtime creation.
+- [x] Pull after explicit user/config actions where waiting for the interval would feel stale.
+- [x] Remove the broad runtime snapshot subscription from `BrowserDisplay.svelte`.
+- [x] Update BrowserDisplay tests or runtime integration tests that assumed pushed full snapshots.
 
 Decisions and course corrections:
 
 - 2026-06-27 dry run: BrowserDisplay is the only production full-snapshot subscriber. The production
   cutover can be small: replace that subscription with `refreshRuntimeSnapshot()`, call it once after
   runtime setup, poll it every `500ms`, and call it after browser-owned user/config handlers.
+- 2026-06-28 implementation: Replaced the `BrowserDisplay.svelte` full-snapshot subscription with a
+  browser-local `RUNTIME_SNAPSHOT_POLL_INTERVAL_MS = 500`, explicit startup snapshot read, polling
+  setup/teardown beside the frame loop, and immediate refreshes after scene-interest, render-policy,
+  visibility/debug overlay, and selection actions. `subscribeFrameTelemetry` and `subscribeEvents`
+  remain as narrow push streams.
+- 2026-06-28 verification: `npm run check` passed with `svelte-check` reporting 0 errors and
+  0 warnings.
 
 ## Phase 3: Cut Over Runtime Subscription Semantics
 
-Status: pending.
+Status: complete.
 
 Purpose:
 
@@ -208,16 +221,16 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Remove `RuntimeSnapshotListener`.
-- [ ] Remove `ClientRuntime.subscribe`.
-- [ ] Remove `#listeners` and `#emit()` if no full-snapshot push path remains.
-- [ ] Preserve existing `subscribeFrameTelemetry` and `subscribeEvents` behavior.
-- [ ] Update runtime tests to call the explicit snapshot method after state-changing operations.
-- [ ] Add a regression test proving dynamic playback ticks update renderer submissions without
+- [x] Remove `RuntimeSnapshotListener`.
+- [x] Remove `ClientRuntime.subscribe`.
+- [x] Remove `#listeners` and `#emit()` if no full-snapshot push path remains.
+- [x] Preserve existing `subscribeFrameTelemetry` and `subscribeEvents` behavior.
+- [x] Update runtime tests to call the explicit snapshot method after state-changing operations.
+- [x] Add a regression test proving dynamic playback ticks update renderer submissions without
       invoking full snapshot construction/listeners.
-- [ ] Add or update coverage proving static coordinator and dynamic resource changes are observable
+- [x] Add or update coverage proving static coordinator and dynamic resource changes are observable
       through explicit `createSnapshot()` reads.
-- [ ] Run focused runtime and browser tests.
+- [x] Run focused runtime and browser tests.
 
 Decisions and course corrections:
 
@@ -228,10 +241,22 @@ Decisions and course corrections:
 - 2026-06-27 dry run: Do not leave a vestigial full-snapshot bus. If production polling is in place
   and tests are migrated, delete `#listeners`, `RuntimeSnapshotListener`, `subscribe()`, and
   `#emit()` instead of narrowing them without a real caller.
+- 2026-06-28 implementation: Deleted the full runtime snapshot subscription API, listener set, and
+  emit path. Static coordinator updates, static source payload ingestion, dynamic resource readiness,
+  user/config changes, camera residency changes, materialization completion/failure, and dynamic
+  playback now update runtime state without pushing full `RuntimeSnapshot` objects. Existing
+  `subscribeFrameTelemetry` and `subscribeEvents` remain unchanged.
+- 2026-06-28 implementation: Migrated runtime tests from `runtime.subscribe(...)` to explicit
+  `runtime.createSnapshot()` reads after the actions under test. Added a regression test proving
+  frame ticks still commit dynamic renderer instances while avoiding full runtime snapshot builders.
+- 2026-06-28 verification: `rg` found no remaining production/test calls to the deleted full
+  runtime snapshot subscription. `npm run test:ts -- src/lib/runtime/client-runtime.test.ts`
+  passed with 35 tests. `npm run check` passed with `svelte-check` reporting 0 errors and
+  0 warnings.
 
 ## Phase 4: Resteer Snapshot Shape And Cadence
 
-Status: pending.
+Status: complete.
 
 Purpose:
 
@@ -254,17 +279,37 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Inspect actual browser snapshot consumers after Phase 3.
-- [ ] Profile or instrument snapshot creation only if the code still suggests meaningful cost.
-- [ ] Update this plan with retained snapshot fields, candidate split fields, and cleanup targets.
+- [x] Inspect actual browser snapshot consumers after Phase 3.
+- [x] Profile or instrument snapshot creation only if the code still suggests meaningful cost.
+- [x] Update this plan with retained snapshot fields, candidate split fields, and cleanup targets.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-28 review: Keep one full `RuntimeSnapshot` API for now because browser polling is capped
+  at `500ms` and diagnostics report generation still benefits from one coherent on-demand shape.
+  Splitting it immediately would add API surface before there is a second production consumer.
+- 2026-06-28 retained default fields: `BrowserDisplay.svelte` directly consumes `sceneInterest`,
+  `currentCameraResidency`, `currentPortalOverlapResidency`, `portalFrameWorkPlan`,
+  `debugOverlays`, `assets` counts, `static` coordinator summary/latest payloads, and
+  `staticSceneQuery` counts for navigation/debug panels.
+- 2026-06-28 candidate split fields: `dynamic`, `host`, `renderer`, `renderPassPlan`, and
+  `staticMaterialization` are not direct BrowserDisplay panel dependencies after the cutover. They
+  are still used by tests or `createDiagnosticsReport()`, so the next cleanup should consider a
+  diagnostics-only pull such as `createDiagnosticsSnapshot()` or `createRuntimeDiagnosticsSnapshot()`
+  before removing them from the default full snapshot.
+- 2026-06-28 expensive/default cleanup targets: `staticSceneQuery.createSnapshot()` still walks
+  committed query records for debug counts, and `assetService.createSnapshot()` still sorts detailed
+  pending/committed entries when the browser panel only displays counts. If snapshot creation remains
+  visible after this refactor, move static scene query counts and detailed asset entries behind a
+  diagnostics/debug-tab pull or expose cheaper count-only overview fields.
+- 2026-06-28 instrumentation decision: No temporary profiling hooks were added in Phase 4. The code
+  now removes frame-cadence full snapshot construction, and remaining snapshot creation is explicit
+  startup/action/`500ms` polling work. Add profiling only if the polled snapshot path remains hot in
+  browser devtools.
 
 ## Phase 5: Cleanup And Verification
 
-Status: pending.
+Status: complete.
 
 Purpose:
 
@@ -288,17 +333,23 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Remove dead code and misleading names.
-- [ ] Update docs if any runtime/snapshot guidance became stale.
-- [ ] Run `npm run check`.
-- [ ] Run `npm run lint:ts`.
-- [ ] Run `npm run test:ts`.
-- [ ] Run `npm run lint:dead`.
-- [ ] Run root `git diff --check`.
+- [x] Remove dead code and misleading names.
+- [x] Update docs if any runtime/snapshot guidance became stale.
+- [x] Run `npm run check`.
+- [x] Run `npm run lint:ts`.
+- [x] Run `npm run test:ts`.
+- [x] Run `npm run lint:dead`.
+- [x] Run root `git diff --check`.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-28 cleanup: Removed the legacy full runtime snapshot listener API and updated the older
+  v2 render-pipeline correction plan so it no longer points at runtime snapshot subscription cleanup
+  as unresolved follow-up work.
+- 2026-06-28 verification: `npm run check`, `npm run lint:ts`, full `npm run test:ts` (61 files,
+  501 tests), `npm run lint:dead`, and root `git diff --check` passed. Repo-wide
+  `npm run format:check` still reports pre-existing formatting issues in unrelated files, so only
+  the touched files were formatted and checked with Prettier.
 
 ## Risks And Mitigations
 

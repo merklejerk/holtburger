@@ -55,9 +55,7 @@
 	import type { RuntimePortalOverlapResidency } from "../lib/runtime/portal-base-overlap";
 	import type { StaticSceneSelectionKey } from "../lib/runtime/scene-query/contracts";
 	import type { ScenePickHit } from "../lib/runtime/scene-query/merged-scene-query-contracts";
-	import {
-		describeStaticSceneSelectionKey,
-	} from "../lib/runtime/scene-query/static-selection-keys";
+	import { describeStaticSceneSelectionKey } from "../lib/runtime/scene-query/static-selection-keys";
 	import type { TextureFilteringMode } from "../lib/textures/sampling-policy";
 	import DiagnosticsModal from "../lib/ui/DiagnosticsModal.svelte";
 	import PerformanceOverlay from "../lib/ui/PerformanceOverlay.svelte";
@@ -108,6 +106,7 @@
 	const CAMERA_POLICY_SYNC_INTERVAL_MS = 1000 / 30;
 	const PERF_OVERLAY_SAMPLE_MS = 500;
 	const PERF_OVERLAY_EMA_ALPHA = 0.18;
+	const RUNTIME_SNAPSHOT_POLL_INTERVAL_MS = 500;
 	const STATIC_PICK_CLICK_DRAG_THRESHOLD_PX = 3;
 	const INTERIOR_CAMERA_FOCUS_YAW_RADIANS = 0;
 	const INTERIOR_CAMERA_FOCUS_PITCH_RADIANS = 0;
@@ -125,6 +124,7 @@
 	let runtime: ClientRuntime | null = $state(null);
 	let cameraController: BrowserCameraController | null = null;
 	let runtimeFrameId: number | null = null;
+	let runtimeSnapshotPollIntervalId: number | null = null;
 	let staticInterestRefreshTimer: number | null = null;
 	let startupError = $state<string | null>(null);
 	let activeTab = $state<BrowserPanelTab>("navigate");
@@ -230,11 +230,6 @@
 					pushCameraState();
 				},
 			});
-			const unsubscribeSnapshot = runtime.subscribe((nextSnapshot) => {
-				snapshot = nextSnapshot;
-				selectedTextureFilteringMode =
-					nextSnapshot.renderPolicy.textureFilteringMode;
-			});
 			const unsubscribeFrameTelemetry = runtime.subscribeFrameTelemetry(
 				(telemetry) => {
 					performanceMetrics = performanceMetricsTracker.update(telemetry);
@@ -242,16 +237,18 @@
 			);
 			const unsubscribeEvents = runtime.subscribeEvents(handleRuntimeEvent);
 			pushCameraState();
+			refreshRuntimeSnapshot();
 			startRuntimeFrameLoop();
+			startRuntimeSnapshotPolling();
 			const policySyncInterval = window.setInterval(() => {
 				syncCameraPolicy();
 			}, CAMERA_POLICY_SYNC_INTERVAL_MS);
 
 			return () => {
 				stopRuntimeFrameLoop();
+				stopRuntimeSnapshotPolling();
 				window.clearInterval(policySyncInterval);
 				clearStaticInterestRefresh();
-				unsubscribeSnapshot();
 				unsubscribeFrameTelemetry();
 				unsubscribeEvents();
 				cameraController?.dispose();
@@ -296,6 +293,7 @@
 				source,
 			),
 		);
+		refreshRuntimeSnapshot();
 	}
 
 	function handleStaticWorkSubmit(event: SubmitEvent): void {
@@ -310,6 +308,7 @@
 		cancelPendingCameraFocus("idle");
 		followModeEnabled = false;
 		runtime?.updateSceneInterest({ kind: "none" });
+		refreshRuntimeSnapshot();
 	}
 
 	function resetCamera(): void {
@@ -346,6 +345,36 @@
 		}
 		window.cancelAnimationFrame(runtimeFrameId);
 		runtimeFrameId = null;
+	}
+
+	function startRuntimeSnapshotPolling(): void {
+		if (runtimeSnapshotPollIntervalId !== null) {
+			return;
+		}
+
+		runtimeSnapshotPollIntervalId = window.setInterval(() => {
+			refreshRuntimeSnapshot();
+		}, RUNTIME_SNAPSHOT_POLL_INTERVAL_MS);
+	}
+
+	function stopRuntimeSnapshotPolling(): void {
+		if (runtimeSnapshotPollIntervalId === null) {
+			return;
+		}
+
+		window.clearInterval(runtimeSnapshotPollIntervalId);
+		runtimeSnapshotPollIntervalId = null;
+	}
+
+	function refreshRuntimeSnapshot(): void {
+		if (!runtime) {
+			return;
+		}
+
+		const nextSnapshot = runtime.createSnapshot();
+		snapshot = nextSnapshot;
+		selectedTextureFilteringMode =
+			nextSnapshot.renderPolicy.textureFilteringMode;
 	}
 
 	function handleLocationInput(event: Event): void {
@@ -451,6 +480,7 @@
 
 	function syncStaticLayerVisibility(): void {
 		runtime?.setStaticLayerVisibility(createStaticLayerVisibility());
+		refreshRuntimeSnapshot();
 	}
 
 	function togglePanelCollapsed(): void {
@@ -500,22 +530,26 @@
 			.value as TextureFilteringMode;
 		selectedTextureFilteringMode = nextMode;
 		runtime?.setTextureFilteringMode(nextMode);
+		refreshRuntimeSnapshot();
 	}
 
 	function handleEnvCellAabbDebugToggle(event: Event): void {
 		envCellAabbDebugVisible = (event.currentTarget as HTMLInputElement).checked;
 		runtime?.setEnvCellAabbDebugOverlayVisible(envCellAabbDebugVisible);
+		refreshRuntimeSnapshot();
 	}
 
 	function handleEnvCellPortalDebugToggle(event: Event): void {
 		envCellPortalDebugVisible = (event.currentTarget as HTMLInputElement)
 			.checked;
 		runtime?.setEnvCellPortalDebugOverlayVisible(envCellPortalDebugVisible);
+		refreshRuntimeSnapshot();
 	}
 
 	function handleFlatVisionModeToggle(event: Event): void {
 		flatVisionModeEnabled = (event.currentTarget as HTMLInputElement).checked;
 		runtime?.setFlatVisionModeEnabled(flatVisionModeEnabled);
+		refreshRuntimeSnapshot();
 	}
 
 	function handleDirectEnvCellPortalMaxDepthInput(event: Event): void {
@@ -523,6 +557,7 @@
 			(event.currentTarget as HTMLInputElement).value,
 		);
 		runtime?.setDirectEnvCellPortalMaxDepth(directEnvCellPortalMaxDepth);
+		refreshRuntimeSnapshot();
 	}
 
 	function cancelPendingCameraFocus(status: CameraFocusStatus): void {
@@ -1238,15 +1273,19 @@
 		selectedScenePick = selection;
 		selectedStaticDiagnosticsReportText = null;
 		runtime.setSceneDebugSelection(createRuntimeSceneDebugSelection(selection));
+		refreshRuntimeSnapshot();
 	}
 
 	function clearSceneDebugSelection(): void {
 		selectedScenePick = null;
 		selectedStaticDiagnosticsReportText = null;
 		runtime?.setSceneDebugSelection(null);
+		refreshRuntimeSnapshot();
 	}
 
-	function createSelectedScenePick(hit: ScenePickHit | null): SelectedScenePick | null {
+	function createSelectedScenePick(
+		hit: ScenePickHit | null,
+	): SelectedScenePick | null {
 		if (hit === null) {
 			return null;
 		}

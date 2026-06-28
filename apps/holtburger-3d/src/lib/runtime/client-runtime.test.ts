@@ -80,6 +80,26 @@ const silentDiagnostics: RuntimeDiagnostics = {
 };
 
 describe("browser client runtime", () => {
+	it("creates explicit runtime snapshots on demand", () => {
+		const renderer = new FakeRenderer();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+		});
+
+		const initialSnapshot = runtime.createSnapshot();
+		runtime.setTextureFilteringMode("nearest");
+		const updatedSnapshot = runtime.createSnapshot();
+
+		expect(initialSnapshot.renderPolicy.textureFilteringMode).toBe(
+			"anisotropic-4x",
+		);
+		expect(updatedSnapshot.renderPolicy.textureFilteringMode).toBe("nearest");
+		expect(renderer.diagnosticsSnapshotCount).toBeGreaterThanOrEqual(3);
+		runtime.dispose();
+	});
+
 	it("passes manual domain coverage radii into static demand planning", () => {
 		const resolver = new DeferredStaticResolver();
 		const runtime = createClientRuntime({
@@ -130,10 +150,6 @@ describe("browser client runtime", () => {
 			renderer,
 			staticCoordinator: createImmediateStaticCoordinator({ baker, resolver }),
 		});
-		const snapshots: RuntimeSnapshot[] = [];
-		const unsubscribe = runtime.subscribe((snapshot) => {
-			snapshots.push(snapshot);
-		});
 
 		updateOutdoorSceneInterest(runtime, {
 			domains: ["buildings", "terrain"],
@@ -151,12 +167,13 @@ describe("browser client runtime", () => {
 		});
 		await flushRuntimeWork();
 
-		expect(snapshots.at(-1)?.dynamic).toMatchObject({
+		const loadedSnapshot = runtime.createSnapshot();
+		expect(loadedSnapshot.dynamic).toMatchObject({
 			activeEntityCount: 1,
 			nonRenderableEntityCount: 0,
 			staticSeedCount: 1,
 		});
-		expect(snapshots.at(-1)?.dynamic.records[0]).toMatchObject({
+		expect(loadedSnapshot.dynamic.records[0]).toMatchObject({
 			animation: {
 				defaultAnimationId: 0x0300061b,
 			},
@@ -176,7 +193,7 @@ describe("browser client runtime", () => {
 		});
 
 		updateRuntimeFrame(runtime, 1);
-		const entityId = snapshots.at(-1)?.dynamic.records[0]?.id;
+		const entityId = runtime.createSnapshot().dynamic.records[0]?.id;
 		if (!entityId) {
 			throw new Error("Expected an ingested dynamic entity id.");
 		}
@@ -196,15 +213,14 @@ describe("browser client runtime", () => {
 
 		runtime.updateSceneInterest({ kind: "none" });
 
-		expect(snapshots.at(-1)?.dynamic).toMatchObject({
+		expect(runtime.createSnapshot().dynamic).toMatchObject({
 			activeEntityCount: 0,
 			staticSeedCount: 0,
 		});
-		unsubscribe();
 		runtime.dispose();
 	});
 
-	it("emits a runtime snapshot when dynamic setup and animation resources become ready", async () => {
+	it("exposes dynamic setup and animation resource readiness through explicit snapshots", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const assetService = new DeferredAssetService();
@@ -214,10 +230,6 @@ describe("browser client runtime", () => {
 			host: new FakeRuntimeHost(),
 			renderer: new FakeRenderer(),
 			staticCoordinator: createImmediateStaticCoordinator({ baker, resolver }),
-		});
-		const snapshots: RuntimeSnapshot[] = [];
-		const unsubscribe = runtime.subscribe((snapshot) => {
-			snapshots.push(snapshot);
 		});
 
 		updateOutdoorSceneInterest(runtime, {
@@ -235,8 +247,9 @@ describe("browser client runtime", () => {
 		});
 		await flushPromises();
 
-		const snapshotCountBeforeResourcesReady = snapshots.length;
-		expect(snapshots.at(-1)?.dynamic.records[0]?.resources).toMatchObject({
+		expect(
+			runtime.createSnapshot().dynamic.records[0]?.resources,
+		).toMatchObject({
 			setupAnimation: {
 				status: "pending",
 			},
@@ -255,8 +268,8 @@ describe("browser client runtime", () => {
 		);
 		await flushRuntimeWork();
 
-		expect(snapshots.length).toBeGreaterThan(snapshotCountBeforeResourcesReady);
-		expect(snapshots.at(-1)?.dynamic.records[0]).toMatchObject({
+		const readySnapshot = runtime.createSnapshot();
+		expect(readySnapshot.dynamic.records[0]).toMatchObject({
 			animation: {
 				status: "ready",
 			},
@@ -278,10 +291,9 @@ describe("browser client runtime", () => {
 		});
 		expect(
 			"payload" in
-				(snapshots.at(-1)?.dynamic.records[0]?.resources.setupAnimation ?? {}),
+				(readySnapshot.dynamic.records[0]?.resources.setupAnimation ?? {}),
 		).toBe(false);
 
-		unsubscribe();
 		runtime.dispose();
 	});
 
@@ -296,10 +308,6 @@ describe("browser client runtime", () => {
 			host: new FakeRuntimeHost(),
 			renderer,
 			staticCoordinator: createImmediateStaticCoordinator({ baker, resolver }),
-		});
-		const snapshots: RuntimeSnapshot[] = [];
-		const unsubscribe = runtime.subscribe((snapshot) => {
-			snapshots.push(snapshot);
 		});
 
 		updateOutdoorSceneInterest(runtime, {
@@ -359,12 +367,54 @@ describe("browser client runtime", () => {
 			dynamicInstances: 1,
 			skippedDynamicSubmissions: 0,
 		});
-		expect(snapshots.at(-1)?.renderer).toMatchObject({
+		expect(runtime.createSnapshot().renderer).toMatchObject({
 			dynamicInstances: 1,
 			dynamicVisualResources: 1,
 		});
 
-		unsubscribe();
+		runtime.dispose();
+	});
+
+	it("updates dynamic renderer submissions from frame ticks without creating full runtime snapshots", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const assetService = new DeferredAssetService();
+		const renderer = new FakeRenderer();
+		const runtime = createClientRuntime({
+			assetService,
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator: createImmediateStaticCoordinator({ baker, resolver }),
+		});
+
+		updateOutdoorSceneInterest(runtime, {
+			domains: ["buildings", "terrain"],
+			lod: {
+				buildings: 0,
+				terrain: 0,
+			},
+		});
+		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
+		await flushPromises();
+		const workId = "1:landblock:da55ffff:outdoor-buildings";
+		baker.complete(workId, {
+			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord(workId)],
+		});
+		await flushRuntimeWork();
+
+		await resolvePendingDynamicAssetsUntil(
+			assetService,
+			() => renderer.createDiagnosticsSnapshot().dynamicVisualResources > 0,
+		);
+		const assetSnapshotCountBeforeFrames = assetService.snapshotCount;
+
+		updateRuntimeFrame(runtime, 1);
+		updateRuntimeFrame(runtime, 2);
+
+		expect(renderer.dynamicInstanceCommits).toHaveLength(2);
+		expect(renderer.dynamicInstanceCommits.at(-1)?.instances).toHaveLength(1);
+		expect(assetService.snapshotCount).toBe(assetSnapshotCountBeforeFrames);
 		runtime.dispose();
 	});
 
@@ -428,10 +478,6 @@ describe("browser client runtime", () => {
 			renderer,
 			staticCoordinator: createImmediateStaticCoordinator({ baker, resolver }),
 		});
-		const snapshots: RuntimeSnapshot[] = [];
-		const unsubscribe = runtime.subscribe((snapshot) => {
-			snapshots.push(snapshot);
-		});
 
 		updateInteriorSceneInterest(runtime);
 		completeResolverRequest(resolver, "landblock-env-cells", 0xda55ffff);
@@ -446,13 +492,14 @@ describe("browser client runtime", () => {
 		});
 		await flushRuntimeWork();
 
-		expect(snapshots.at(-1)?.dynamic).toMatchObject({
+		const loadedSnapshot = runtime.createSnapshot();
+		expect(loadedSnapshot.dynamic).toMatchObject({
 			activeEntityCount: 1,
 			issueCount: 0,
 			nonRenderableEntityCount: 0,
 			staticSeedCount: 1,
 		});
-		expect(snapshots.at(-1)?.dynamic.records[0]).toMatchObject({
+		expect(loadedSnapshot.dynamic.records[0]).toMatchObject({
 			id: "static-authored-env-cell:landblock-env-cells:landblock:da55ffff:env-cell:da550100:object:building:env-cell-static-0:setup:020003e5",
 			provenance: {
 				kind: "static-authored-env-cell",
@@ -506,11 +553,10 @@ describe("browser client runtime", () => {
 
 		runtime.updateSceneInterest({ kind: "none" });
 
-		expect(snapshots.at(-1)?.dynamic).toMatchObject({
+		expect(runtime.createSnapshot().dynamic).toMatchObject({
 			activeEntityCount: 0,
 			staticSeedCount: 0,
 		});
-		unsubscribe();
 		runtime.dispose();
 	});
 
@@ -525,10 +571,6 @@ describe("browser client runtime", () => {
 				resolver: new DeferredStaticResolver(),
 			}),
 		});
-		const snapshots: RuntimeSnapshot[] = [];
-		const unsubscribe = runtime.subscribe((nextSnapshot) => {
-			snapshots.push(nextSnapshot);
-		});
 
 		runtime.setCurrentCameraResidency({
 			envCellId: 0xda550100,
@@ -541,15 +583,13 @@ describe("browser client runtime", () => {
 			landblockId: 0xda55ffff,
 		});
 
-		expect(snapshots).toHaveLength(2);
-		expect(snapshots.at(-1)?.currentCameraResidency).toEqual({
+		expect(runtime.createSnapshot().currentCameraResidency).toEqual({
 			envCellId: 0xda550100,
 			kind: "env-cell",
 			landblockId: 0xda55ffff,
 		});
 		expect(renderer.renderPassPlans).toEqual([]);
 
-		unsubscribe();
 		runtime.dispose();
 	});
 
@@ -564,11 +604,7 @@ describe("browser client runtime", () => {
 				resolver: new DeferredStaticResolver(),
 			}),
 		});
-		const snapshots: RuntimeSnapshot[] = [];
 		const frameTelemetry: RendererFrameTelemetry[] = [];
-		const unsubscribeSnapshot = runtime.subscribe((nextSnapshot) => {
-			snapshots.push(nextSnapshot);
-		});
 		const unsubscribeFrameTelemetry = runtime.subscribeFrameTelemetry(
 			(telemetry) => {
 				frameTelemetry.push(telemetry);
@@ -591,7 +627,6 @@ describe("browser client runtime", () => {
 				frameHandlerMs: 1.5,
 			},
 		]);
-		expect(snapshots).toHaveLength(1);
 		expect(renderer.diagnosticsSnapshotCount).toBe(diagnosticsSnapshotCount);
 		expect(renderer.renderPassPlans).toHaveLength(renderPassPlanCount);
 		expect(renderer.portalFrameWorkPlans).toHaveLength(
@@ -599,7 +634,6 @@ describe("browser client runtime", () => {
 		);
 
 		unsubscribeFrameTelemetry();
-		unsubscribeSnapshot();
 		runtime.dispose();
 	});
 
@@ -614,15 +648,12 @@ describe("browser client runtime", () => {
 				resolver: new DeferredStaticResolver(),
 			}),
 		});
-		const snapshots: RuntimeSnapshot[] = [];
-		const unsubscribe = runtime.subscribe((nextSnapshot) => {
-			snapshots.push(nextSnapshot);
-		});
 
 		runtime.setFlatVisionModeEnabled(true);
 
-		expect(snapshots.at(-1)?.debugOverlays.flatVisionModeEnabled).toBe(true);
-		expect(snapshots.at(-1)?.portalFrameWorkPlan).toEqual({
+		const snapshot = runtime.createSnapshot();
+		expect(snapshot.debugOverlays.flatVisionModeEnabled).toBe(true);
+		expect(snapshot.portalFrameWorkPlan).toEqual({
 			kind: "legacy-render-pass",
 			mode: "flat-resident-diagnostic",
 			renderPassPlan: { kind: "single-surface-resident" },
@@ -636,7 +667,6 @@ describe("browser client runtime", () => {
 			},
 		]);
 
-		unsubscribe();
 		runtime.dispose();
 	});
 
@@ -650,10 +680,6 @@ describe("browser client runtime", () => {
 				baker: new DeferredStaticBaker(),
 				resolver: new DeferredStaticResolver(),
 			}),
-		});
-		const snapshots: RuntimeSnapshot[] = [];
-		const unsubscribe = runtime.subscribe((nextSnapshot) => {
-			snapshots.push(nextSnapshot);
 		});
 
 		runtime.setStaticLayerVisibility({
@@ -673,9 +699,7 @@ describe("browser client runtime", () => {
 		]);
 		expect(renderer.renderPassPlans).toEqual([]);
 		expect(renderer.portalFrameWorkPlans).toEqual([]);
-		expect(snapshots).toHaveLength(2);
 
-		unsubscribe();
 		runtime.dispose();
 	});
 
@@ -1705,10 +1729,6 @@ describe("browser client runtime", () => {
 			renderer,
 			staticCoordinator,
 		});
-		const snapshots: ReturnType<typeof runtimeSnapshotSummary>[] = [];
-		const unsubscribe = runtime.subscribe((snapshot) => {
-			snapshots.push(runtimeSnapshotSummary(snapshot));
-		});
 		const textureUse = createPreparedTextureUse();
 		const drawUnit = createTerrainDrawUnit("terrain-textured", 0xda55ffff, {
 			primaryTextureUseId: "terrain-textured:prepared-texture:06000010",
@@ -1726,9 +1746,10 @@ describe("browser client runtime", () => {
 
 		expect(renderer.terrainLayerUpdates).toEqual([]);
 		expect(renderer.textureUpdates).toEqual([]);
-		expect(snapshots.at(-1)?.staticMaterialization.pendingRevisions).toEqual([
-			1,
-		]);
+		expect(
+			runtimeSnapshotSummary(runtime.createSnapshot()).staticMaterialization
+				.pendingRevisions,
+		).toEqual([1]);
 		assetService.resolveNext(
 			createPreparedTextureAsset(assetService.pendingKeys[0] ?? failKey()),
 		);
@@ -1738,14 +1759,15 @@ describe("browser client runtime", () => {
 			"texture:1:terrain-textured",
 			"terrain-layer:3663069183:terrain-textured",
 		]);
-		expect(snapshots.at(-1)?.staticMaterialization).toEqual({
+		expect(
+			runtimeSnapshotSummary(runtime.createSnapshot()).staticMaterialization,
+		).toEqual({
 			committedRevisions: [1],
 			envCellResourceMembershipRevision: 0,
 			materializedDrawUnits: 1,
 			pendingRevisions: [],
 			sourceDrawUnits: 1,
 		});
-		unsubscribe();
 		runtime.dispose();
 	});
 
@@ -1822,10 +1844,6 @@ describe("browser client runtime", () => {
 			renderer,
 			staticCoordinator,
 		});
-		const snapshots: ReturnType<typeof runtimeSnapshotSummary>[] = [];
-		const unsubscribe = runtime.subscribe((snapshot) => {
-			snapshots.push(runtimeSnapshotSummary(snapshot));
-		});
 		const textureUse = createPreparedTextureUse();
 		const drawUnit = createTerrainDrawUnit("terrain-textured", 0xda55ffff, {
 			primaryTextureUseId: "terrain-textured:prepared-texture:06000010",
@@ -1846,14 +1864,15 @@ describe("browser client runtime", () => {
 
 		expect(renderer.terrainLayerUpdates).toEqual([]);
 		expect(renderer.textureUpdates).toEqual([]);
-		expect(snapshots.at(-1)?.staticMaterialization).toEqual({
+		expect(
+			runtimeSnapshotSummary(runtime.createSnapshot()).staticMaterialization,
+		).toEqual({
 			committedRevisions: [],
 			envCellResourceMembershipRevision: 0,
 			materializedDrawUnits: 0,
 			pendingRevisions: [],
 			sourceDrawUnits: 0,
 		});
-		unsubscribe();
 		runtime.dispose();
 	});
 
@@ -1919,11 +1938,6 @@ describe("browser client runtime", () => {
 				resolver,
 			}),
 		});
-		let latestSnapshot: RuntimeSnapshot | null = null;
-		const unsubscribe = runtime.subscribe((snapshot) => {
-			latestSnapshot = snapshot;
-		});
-
 		updateOutdoorSceneInterest(runtime);
 		resolver.fail(
 			resolver.pendingRequests[0]?.requestId ?? "",
@@ -1938,11 +1952,11 @@ describe("browser client runtime", () => {
 				revision: 1,
 			},
 		);
-		expect(latestSnapshot?.static.failed).toBe(1);
-		expect(JSON.stringify(latestSnapshot)).not.toContain(
+		const snapshot = runtime.createSnapshot();
+		expect(snapshot.static.failed).toBe(1);
+		expect(JSON.stringify(snapshot)).not.toContain(
 			"landblock env-cell bundle unavailable",
 		);
-		unsubscribe();
 		runtime.dispose();
 		consoleError.mockRestore();
 	});
@@ -2444,8 +2458,7 @@ class FakeRenderer implements Renderer {
 			dynamicVisualResourceTextureUses:
 				this.#snapshot.dynamicVisualResourceTextureUses +
 				commit.addedVisualResources.reduce(
-					(total, resource) =>
-						total + resource.materialPlan.textureUses.length,
+					(total, resource) => total + resource.materialPlan.textureUses.length,
 					0,
 				),
 			recentDynamicResourceCommits: [
@@ -2455,8 +2468,7 @@ class FakeRenderer implements Renderer {
 					removedVisualResources: commit.removedVisualResourceIds.length,
 					revision: commit.revision,
 					skippedMaterials: commit.addedVisualResources.reduce(
-						(total, resource) =>
-							total + resource.materialPlan.skipped.length,
+						(total, resource) => total + resource.materialPlan.skipped.length,
 						0,
 					),
 					textureUses: commit.addedVisualResources.reduce(
@@ -2615,6 +2627,7 @@ class ResolvingSetOmegaAssetRuntimeHost implements RuntimeHost {
 class DeferredAssetService implements AssetService {
 	readonly pendingKeys: HostAssetKey[] = [];
 	pruneCalls = 0;
+	snapshotCount = 0;
 	readonly #pending: DeferredAssetRequest[] = [];
 
 	get pendingCount(): number {
@@ -2657,6 +2670,7 @@ class DeferredAssetService implements AssetService {
 	}
 
 	createSnapshot(): AssetServiceSnapshot {
+		this.snapshotCount += 1;
 		return {
 			committed: [],
 			pending: this.pendingKeys.map((key, index) => ({
@@ -3447,7 +3461,9 @@ function createPreparedTextureAsset(key: HostAssetKey): PreparedAsset {
 	};
 }
 
-function parsePreparedTexturePolicyFromKey(key: HostAssetKey): Pick<
+function parsePreparedTexturePolicyFromKey(
+	key: HostAssetKey,
+): Pick<
 	PreparedTexturePayloadDto,
 	"colorSpace" | "mipPolicy" | "outputFormat" | "usage"
 > {

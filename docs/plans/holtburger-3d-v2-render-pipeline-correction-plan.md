@@ -2423,7 +2423,9 @@ Implementation update (2026-06-21):
 - Spicy bits:
   - Superseded by the follow-up unification below: `TransitionApertureBatch` no longer exists in active app/test source.
   - `static/portal-aperture-resources.ts` remains because it builds durable source-tagged portal aperture resources. It is no longer a frame-local dynamic VBO path.
-  - legacy renderer/runtime snapshot subscription cleanup was not tackled in this slice; no active `StaticResidencyDelta` compatibility remains, but broader snapshot API cleanup belongs in a follow-up if Phase 16 still finds dead consumers.
+  - Superseded by the runtime snapshot subscription refactor: `ClientRuntime.subscribe` and the
+    full runtime snapshot listener path were deleted in
+    `holtburger-3d-runtime-snapshot-subscription-refactor-plan.md`.
 - Debt carried to Phase 16/resteering:
   - resolved by the follow-up unification below: transition batch source DTOs were removed rather than renamed.
 - Validation for this slice:

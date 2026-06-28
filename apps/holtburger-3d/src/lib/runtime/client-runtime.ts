@@ -115,9 +115,7 @@ import type {
 	ScenePickRequest,
 } from "./scene-query/merged-scene-query-contracts";
 import { describeStaticSceneSelectionKey } from "./scene-query/static-selection-keys";
-import {
-	StaticSceneQuery,
-} from "./static-scene-query";
+import { StaticSceneQuery } from "./static-scene-query";
 import { createOutdoorLandblockRootTranslation } from "./static-placement";
 import {
 	createEnvCellResourceMembershipIndex,
@@ -455,7 +453,6 @@ interface MatchedStaticSelectionDrawUnitDiagnostics {
 	readonly sourceMappingCoverage: readonly StaticObjectSourceMappingCoverage[];
 }
 
-type RuntimeSnapshotListener = (snapshot: RuntimeSnapshot) => void;
 type RuntimeEventListener = (event: RuntimeEvent) => void;
 type RuntimeFrameTelemetryListener = (
 	telemetry: RendererFrameTelemetry,
@@ -510,8 +507,8 @@ export interface ClientRuntime {
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void;
 	updateCameraState(camera: FrameState["camera"]): void;
 	tickFrame(timeSeconds: number): void;
+	createSnapshot(): RuntimeSnapshot;
 	createDiagnosticsReport(): RuntimeDiagnosticsReport;
-	subscribe(listener: RuntimeSnapshotListener): () => void;
 	subscribeFrameTelemetry(listener: RuntimeFrameTelemetryListener): () => void;
 	subscribeEvents(listener: RuntimeEventListener): () => void;
 	dispose(): void;
@@ -569,7 +566,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #textureManager: TextureManager;
 	readonly #staticCoordinator: StaticCoordinator;
 	readonly #staticSceneQuery = new StaticSceneQuery();
-	readonly #listeners = new Set<RuntimeSnapshotListener>();
 	readonly #frameTelemetryListeners = new Set<RuntimeFrameTelemetryListener>();
 	readonly #eventListeners = new Set<RuntimeEventListener>();
 	readonly #unsubscribeRendererTelemetry: () => void;
@@ -653,7 +649,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 			onResourcesChanged: () => {
 				if (!this.#disposed) {
 					this.#enqueueDynamicRendererResourceSync();
-					this.#emit();
 				}
 			},
 			resourceManager: new DynamicEntityResourceManager({ assetService }),
@@ -680,7 +675,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#unsubscribeStaticCoordinator = staticCoordinator.subscribe(
 			(snapshot) => {
 				this.#lastStaticSnapshot = snapshot;
-				this.#emit();
 				this.#maybeEmitSceneInterestSettled();
 			},
 		);
@@ -698,7 +692,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 					outdoorAnchorLandblockId: this.#renderAnchorLandblockId,
 				});
 				this.#refreshSceneDebugOverlay();
-				this.#emit();
 			});
 		this.#assetMaintenanceIntervalId = globalThis.setInterval(() => {
 			this.#pruneExpiredWarmAssets();
@@ -739,7 +732,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 			this.#sceneInterestReconciliationActive = false;
 		}
 		this.#refreshSceneDebugOverlay();
-		this.#emit();
 		this.#maybeEmitSceneInterestSettled();
 	}
 
@@ -797,7 +789,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#refreshPortalOverlapResidency();
 		this.#updateRenderPassPlan();
 		this.#refreshSceneDebugOverlay();
-		this.#emit();
 	}
 
 	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null {
@@ -865,7 +856,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#assertActive();
 		this.#sceneDebugSelection = selection;
 		this.#refreshSceneDebugOverlay();
-		this.#emit();
 	}
 
 	setEnvCellAabbDebugOverlayVisible(visible: boolean): void {
@@ -875,7 +865,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 		this.#envCellAabbDebugOverlayVisible = visible;
 		this.#refreshSceneDebugOverlay();
-		this.#emit();
 	}
 
 	setEnvCellPortalDebugOverlayVisible(visible: boolean): void {
@@ -885,7 +874,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 		this.#envCellPortalDebugOverlayVisible = visible;
 		this.#refreshSceneDebugOverlay();
-		this.#emit();
 	}
 
 	setDirectEnvCellPortalMaxDepth(maxDepth: number): void {
@@ -896,7 +884,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 		this.#directEnvCellPortalMaxDepth = normalizedMaxDepth;
 		this.#updateRenderPassPlan();
-		this.#emit();
 	}
 
 	setFlatVisionModeEnabled(enabled: boolean): void {
@@ -907,13 +894,11 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#flatVisionModeEnabled = enabled;
 		this.#renderer.setFlatVisionModeEnabled(enabled);
 		this.#updateRenderPassPlan();
-		this.#emit();
 	}
 
 	setStaticLayerVisibility(visibility: RendererStaticLayerVisibility): void {
 		this.#assertActive();
 		this.#renderer.setStaticLayerVisibility(visibility);
-		this.#emit();
 	}
 
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void {
@@ -922,7 +907,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		if (samplerUpdate) {
 			this.#renderer.applySamplerPolicyUpdate(samplerUpdate);
 		}
-		this.#emit();
 	}
 
 	updateCameraState(camera: FrameState["camera"]): void {
@@ -936,9 +920,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		const portalOverlapChanged = this.#refreshPortalOverlapResidency();
 		if (portalOverlapChanged) {
 			this.#updateRenderPassPlan();
-		}
-		if (portalOverlapChanged) {
-			this.#emit();
 		}
 	}
 
@@ -961,13 +942,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 		if (portalOverlapChanged) {
 			this.#updateRenderPassPlan();
 		}
-		if (portalOverlapChanged || dynamicPlaybackChanged) {
-			this.#emit();
-		}
 	}
 
 	createDiagnosticsReport(): RuntimeDiagnosticsReport {
-		const snapshot = this.#createSnapshot();
+		const snapshot = this.createSnapshot();
 
 		return {
 			domains: [
@@ -1007,15 +985,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		};
 	}
 
-	subscribe(listener: RuntimeSnapshotListener): () => void {
-		this.#listeners.add(listener);
-		listener(this.#createSnapshot());
-
-		return () => {
-			this.#listeners.delete(listener);
-		};
-	}
-
 	subscribeFrameTelemetry(listener: RuntimeFrameTelemetryListener): () => void {
 		this.#frameTelemetryListeners.add(listener);
 
@@ -1048,8 +1017,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#dynamicEntityController.dispose();
 		this.#textureManager.dispose();
 		this.#renderer.dispose();
-		this.#emit();
-		this.#listeners.clear();
 		this.#frameTelemetryListeners.clear();
 		this.#eventListeners.clear();
 	}
@@ -1358,7 +1325,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		return this.#lastRendererSnapshot;
 	}
 
-	#createSnapshot(): RuntimeSnapshot {
+	createSnapshot(): RuntimeSnapshot {
 		const rendererSnapshot = this.#refreshRendererDiagnosticsSnapshot();
 		return {
 			assets: this.#assetService.createSnapshot(),
@@ -1409,14 +1376,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 					? "static-active"
 					: "idle",
 		};
-	}
-
-	#emit(): void {
-		const snapshot = this.#createSnapshot();
-
-		for (const listener of this.#listeners) {
-			listener(snapshot);
-		}
 	}
 
 	#emitFrameTelemetry(telemetry: RendererFrameTelemetry): void {
@@ -1494,16 +1453,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 			return;
 		}
 
-		const pruned = this.#assetService.pruneExpiredWarmAssets();
-		if (typeof pruned === "number" && pruned > 0) {
-			this.#emit();
-		}
+		this.#assetService.pruneExpiredWarmAssets();
 	}
 
 	#enqueueStaticMaterialization(delta: StaticCoordinatorCommitDelta): void {
 		this.#warnAboutDeferredStaticMaterialCoverage(delta);
 		this.#pendingStaticMaterializations.add(delta.revision);
-		this.#emit();
 		this.#staticMaterializationQueue = this.#staticMaterializationQueue
 			.then(() => this.#materializeStaticCommit(delta))
 			.catch((error: unknown) => {
@@ -1585,7 +1540,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 			this.#committedStaticMaterializations,
 			delta.revision,
 		);
-		this.#emit();
 		this.#maybeEmitSceneInterestSettled();
 	}
 
@@ -1599,7 +1553,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 			message,
 			revision,
 		});
-		this.#emit();
 		this.#maybeEmitSceneInterestSettled();
 	}
 
@@ -1628,24 +1581,27 @@ class ClientRuntimeImpl implements ClientRuntime {
 		const resources = snapshot.records.flatMap((record) =>
 			createDynamicRendererVisualResource(record),
 		);
-		const nextResourceIds = new Set(resources.map((resource) => resource.resourceId));
-		const removedResourceIds = [...this.#committedDynamicVisualResourceIds].filter(
-			(resourceId) => !nextResourceIds.has(resourceId),
+		const nextResourceIds = new Set(
+			resources.map((resource) => resource.resourceId),
 		);
+		const removedResourceIds = [
+			...this.#committedDynamicVisualResourceIds,
+		].filter((resourceId) => !nextResourceIds.has(resourceId));
 
-		const textureUpdate = await this.#textureManager.applyDynamicTextureUseDelta({
-			removedOwners: removedResourceIds.map((resourceId) => ({
-				kind: "dynamic-visual-resource",
-				resourceId,
-			})),
-			textureUses: resources.flatMap((resource) =>
-				createDynamicTextureUseCommits(
-					resource,
-					snapshot.records,
-					this.#staticBatchIdBySourceScope,
+		const textureUpdate =
+			await this.#textureManager.applyDynamicTextureUseDelta({
+				removedOwners: removedResourceIds.map((resourceId) => ({
+					kind: "dynamic-visual-resource",
+					resourceId,
+				})),
+				textureUses: resources.flatMap((resource) =>
+					createDynamicTextureUseCommits(
+						resource,
+						snapshot.records,
+						this.#staticBatchIdBySourceScope,
+					),
 				),
-			),
-		});
+			});
 		if (this.#disposed) {
 			return;
 		}
@@ -1665,7 +1621,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 			this.#committedDynamicVisualResourceIds.add(resourceId);
 		}
 		this.#refreshRendererDiagnosticsSnapshot();
-		this.#emit();
 	}
 
 	#commitDynamicRendererInstances(frameTimeSeconds: number): void {
@@ -2005,9 +1960,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 					};
 		}
 
-		const currentBounds = this.#dynamicEntityController.queryDynamicCurrentBounds(
-			selection.entityId,
-		);
+		const currentBounds =
+			this.#dynamicEntityController.queryDynamicCurrentBounds(
+				selection.entityId,
+			);
 		if (currentBounds === null) {
 			return null;
 		}
@@ -2066,7 +2022,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 
 		if (selectionKey.itemKind === "env-cell-portal") {
-			const detail = this.#staticSceneQuery.queryEnvCellPortalDetails(selectionKey);
+			const detail =
+				this.#staticSceneQuery.queryEnvCellPortalDetails(selectionKey);
 			return detail === null
 				? null
 				: {
@@ -3383,8 +3340,7 @@ function createRendererDiagnosticsSummary(
 		dynamicDrawCalls: snapshot.dynamicDrawCalls,
 		dynamicInstances: snapshot.dynamicInstances,
 		dynamicVisualResources: snapshot.dynamicVisualResources,
-		dynamicVisualResourceTextureUses:
-			snapshot.dynamicVisualResourceTextureUses,
+		dynamicVisualResourceTextureUses: snapshot.dynamicVisualResourceTextureUses,
 		error: snapshot.error,
 		frameCount: snapshot.frameCount,
 		frameHandlerMs: snapshot.frameHandlerMs,
@@ -3477,7 +3433,9 @@ function createDynamicTextureUseCommits(
 	records: readonly DynamicEntitySummaryDto[],
 	staticBatchIdsBySourceScope: ReadonlyMap<string, string>,
 ): readonly DynamicTextureUseCommit[] {
-	const record = records.find((candidate) => candidate.id === resource.entityId);
+	const record = records.find(
+		(candidate) => candidate.id === resource.entityId,
+	);
 	if (!record) {
 		throw new Error(
 			`Cannot create dynamic texture uses for unknown entity ${resource.entityId}.`,
@@ -3580,7 +3538,11 @@ function createDynamicObjectRootOmegaPlacement(
 		readonly y: number;
 		readonly z: number;
 	};
-	readonly origin: { readonly x: number; readonly y: number; readonly z: number };
+	readonly origin: {
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	};
 } {
 	return {
 		orientation: objectRootRotation ?? {

@@ -4054,7 +4054,7 @@ Verification:
 
 ### Phase 12C.2B: Projected Dynamic Resource Tracking
 
-Status: pending.
+Status: completed 2026-06-28.
 
 Purpose:
 
@@ -4103,20 +4103,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add a resource-manager entry point that accepts projected dynamic visual source/policy.
-- [ ] Refactor static-authored dynamic resource tracking to use the projected entry point.
-- [ ] Wire runtime create/update/remove into projected resource tracking and release.
-- [ ] Keep static-authored visual readiness on the existing material path until Phase 12C.2C lifts
+- [x] Add a resource-manager entry point that accepts projected dynamic visual source/policy.
+- [x] Refactor static-authored dynamic resource tracking to use the projected entry point.
+- [x] Wire runtime create/update/remove into projected resource tracking and release.
+- [x] Keep static-authored visual readiness on the existing material path until Phase 12C.2C lifts
       material identities.
-- [ ] Add explicit pending/logging behavior for runtime material planning identities that are still
+- [x] Add explicit pending/logging behavior for runtime material planning identities that are still
       unsupported, without adding durable warning/failure records or a pending-material diary.
-- [ ] Add explicit-animation coverage and setup-default rejection coverage. Only replace rejection
+- [x] Add explicit-animation coverage and setup-default rejection coverage. Only replace rejection
       with setup-default evidence coverage if implementation proves a real prepared-source default.
-- [ ] Remove the runtime `setup-default` initial-state animation id `0` leak by representing
+- [x] Remove the runtime `setup-default` initial-state animation id `0` leak by representing
       unresolved setup-default animation honestly.
-- [ ] Add focused runtime-spawn tracking tests proving no static seed/source-scope/object identity is
+- [x] Add focused runtime-spawn tracking tests proving no static seed/source-scope/object identity is
       required.
-- [ ] Run focused TypeScript verification for dynamic resource-manager/controller tests.
+- [x] Run focused TypeScript verification for dynamic resource-manager/controller tests.
 
 Risks and mitigations:
 
@@ -4158,6 +4158,82 @@ Dry-run findings:
   `resources.setupAnimation.animationKey`, even before resource tracking starts. Phase 12C.2B should
   fix the state shape or initialization path so unresolved setup-default animation is not presented
   as a real animation asset.
+
+Decisions and course corrections:
+
+- 2026-06-28 implementation: Replaced the static-seed resource-manager entry point with
+  `trackProjectedVisualResources(entityId, presentation)`. The tracked state now stores projected
+  presentation facts instead of `StaticAuthoredDynamicSeedFacts`.
+- 2026-06-28 implementation: Static-authored dynamics now enter resource tracking through projected
+  presentation policy/source facts, while still using the existing static material-planning identity
+  internally. The full neutral material identity lift remains Phase 12C.2C.
+- 2026-06-28 implementation: Runtime spawns with explicit animation now request setup-model and
+  animation assets, acquire/release leases, and stop before visual material planning while
+  `materialPlanningIdentity` is pending. The stop is console-owned and does not create durable
+  warning/failure records.
+- 2026-06-28 implementation: Runtime `setup-default` no longer exposes `animationKey` id `0` in
+  initial resource state and does not request animation `0`. It remains pending with
+  `setup-default-animation-unresolved` until setup-default evidence is proven later.
+- 2026-06-28 debt: `DynamicEntityRecord.animation.defaultAnimationId` still uses numeric `0` for
+  runtime `setup-default` records because the broader animation state shape requires a concrete
+  number. Resource tracking no longer presents or requests animation `0`; clean up the remaining
+  summary/animation-state placeholder when setup-default evidence is lifted into a neutral
+  animation-selection model.
+- 2026-06-28 spicy bit: Runtime explicit-animation spawns can now reach
+  `setup-animation-ready`, but still cannot become renderable. Phase 12C.2C must lift material
+  planning to neutral visual identities before runtime visuals can prepare material/gfx/texture
+  resources.
+
+Verification:
+
+- 2026-06-28: `npm run test:ts -- dynamic-entity-resource-manager`
+- 2026-06-28: `npm run test:ts -- dynamic-entity-controller`
+- 2026-06-28: `npm run check`
+- 2026-06-28: `npm run test:ts`
+- 2026-06-28: `npm run lint`
+- 2026-06-28: `npm run build` passed with Vite's existing chunk-size warning.
+
+### Phase 12C.2B.1: Name Dynamic Record Component Types
+
+Status: completed on 2026-06-28.
+
+Purpose:
+
+- Remove the growing `DynamicEntityRecord["..."]` indexed-access pattern from dynamic package
+  boundaries before the neutral material lift in Phase 12C.2C.
+- Make projected dynamic concepts visible as named contract types so helpers consume the domain
+  shape they actually need instead of coupling to `DynamicEntityRecord` storage layout.
+
+Completed:
+
+- Exported named dynamic component types for cross-module concepts, including presentation, visual
+  source, residence, source facts, animation state/playback, bounds state/index membership,
+  setup-animation resource state, renderability, summary source, and summary playback/setup
+  resource shapes.
+- Replaced dynamic package uses of `DynamicEntityRecord["..."]`,
+  `DynamicEntitySummaryDto["..."]`, `DynamicEntityResourceState["..."]`, and
+  `DynamicPresentationPolicy["..."]` with named contract types where the referenced shape is a
+  dynamic domain concept.
+- Kept private leaf types private when no module imports them. `knip` is the guardrail here:
+  exported names should be real package API, not ceremony.
+- Left external DTO element extraction alone where it names host/static payload internals rather
+  than dynamic record concepts, such as `AnimationPayloadDto["partFrames"][number]` and static
+  source part array element types.
+
+Debt and spicy bits:
+
+- `DynamicEntityTransformState` still derives placement/scale types from static-authored seed fact
+  types because `StaticPlacementTransform` is not exported from static contracts. That is less bad
+  than record indexing, but it still hints that dynamic placement inputs need a more neutral
+  contract if runtime/server spawns stop being shaped like static seeds.
+- `DynamicEntityRecord.animation.defaultAnimationId` still carries the broader `setup-default`
+  placeholder debt called out in Phase 12C.2B.
+
+Verification:
+
+- 2026-06-28: `npm run check`
+- 2026-06-28: `npm run test:ts -- dynamic-entity-resource-manager dynamic-entity-controller dynamic-entity-store dynamic-placement-tracker dynamic-animation-player`
+- 2026-06-28: `npm run lint`
 
 ### Phase 12C.2C: Lift Dynamic Material Planning To Neutral Visual Identities
 

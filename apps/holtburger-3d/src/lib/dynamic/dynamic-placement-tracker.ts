@@ -13,10 +13,13 @@ import type {
 } from "../static/contracts";
 import { outdoorLandblockIdsForSourceLocalBounds } from "../runtime/outdoor-landblock-grid";
 import type {
+	DynamicEntityBoundsState,
 	DynamicEntityCurrentBounds,
+	DynamicEntityIndexMembership,
 	DynamicEntityPartBounds,
 	DynamicEntityRecord,
 	DynamicEntityBoundsPrecision,
+	DynamicEntityResidence,
 } from "./contracts";
 import {
 	OutdoorDynamicSpatialIndex,
@@ -425,8 +428,8 @@ function placementStatesEqual(
 }
 
 function sameBoundsState(
-	left: DynamicEntityRecord["bounds"],
-	right: DynamicEntityRecord["bounds"],
+	left: DynamicEntityBoundsState,
+	right: DynamicEntityBoundsState,
 ): boolean {
 	return (
 		left.indexed === right.indexed &&
@@ -437,8 +440,8 @@ function sameBoundsState(
 }
 
 function sameIndexMembership(
-	left: DynamicEntityRecord["bounds"]["indexMembership"],
-	right: DynamicEntityRecord["bounds"]["indexMembership"],
+	left: DynamicEntityIndexMembership,
+	right: DynamicEntityIndexMembership,
 ): boolean {
 	if (left.kind !== right.kind) {
 		return false;
@@ -528,8 +531,8 @@ function sameStaticBounds(
 }
 
 function sameResidence(
-	left: DynamicEntityRecord["effectiveResidence"],
-	right: DynamicEntityRecord["effectiveResidence"],
+	left: DynamicEntityResidence,
+	right: DynamicEntityResidence,
 ): boolean {
 	if (left.kind !== right.kind) {
 		return false;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { HostBackedAssetService } from "../assets/asset-service";
 import type { HostAssetKey, PreparedAsset } from "../assets/contracts";
 import type {
@@ -257,6 +257,118 @@ describe("dynamic entity resource manager", () => {
 		expect(
 			assetService.createSnapshot().committed.map((entry) => entry.leaseCount),
 		).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0]);
+	});
+
+	it("tracks explicit-animation runtime spawns without static source facts", async () => {
+		const host = new ResolvingRuntimeHost();
+		const assetService = new HostBackedAssetService({ host });
+		const controller = createController(assetService);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		try {
+			const runtimeId = controller.createRuntimeSpawn({
+				animationSelection: { animationId: 0x0300061b, kind: "explicit" },
+				baseLocalPlacement: createPlacement(),
+				setupModelId: 0x020003e5,
+				sourceResidence: {
+					kind: "outdoor-landblock",
+					landblockId: 0xda55ffff,
+				},
+			});
+			await flushPromises();
+
+			expect(host.lookupCountByKey).toEqual(
+				new Map([
+					["animation:0300061b", 1],
+					["setup-model:020003e5", 1],
+				]),
+			);
+			expect(controller.queryDynamicEntitySummary(runtimeId)).toMatchObject({
+				renderability: {
+					reasons: ["visual-resources-pending"],
+					status: "non-renderable",
+				},
+				resources: {
+					setupAnimation: {
+						animationKey: { id: 0x0300061b, kind: "animation" },
+						setupModelKey: { id: 0x020003e5, kind: "setup-model" },
+						status: "ready",
+					},
+					status: "setup-animation-ready",
+					visual: {
+						status: "pending",
+					},
+				},
+				source: {
+					kind: "runtime-spawn",
+					runtimeEntityId: runtimeId,
+				},
+			});
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	it("does not expose or request animation zero for runtime setup-default spawns", async () => {
+		const host = new ResolvingRuntimeHost();
+		const assetService = new HostBackedAssetService({ host });
+		const controller = createController(assetService);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		try {
+			const runtimeId = controller.createRuntimeSpawn({
+				baseLocalPlacement: createPlacement(),
+				setupModelId: 0x020003e5,
+				sourceResidence: {
+					kind: "outdoor-landblock",
+					landblockId: 0xda55ffff,
+				},
+			});
+			await flushPromises();
+
+			expect(host.lookupCountByKey).toEqual(new Map());
+			const setupAnimation =
+				controller.queryDynamicEntitySummary(runtimeId)?.resources
+					.setupAnimation;
+			expect(setupAnimation).toMatchObject({
+				pendingReason: "setup-default-animation-unresolved",
+				setupModelKey: { id: 0x020003e5, kind: "setup-model" },
+				status: "pending",
+			});
+			expect(
+				setupAnimation !== undefined && "animationKey" in setupAnimation,
+			).toBe(false);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
+	it("releases runtime setup and animation leases on explicit removal", async () => {
+		const assetService = createAssetService();
+		const controller = createController(assetService);
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+		try {
+			const runtimeId = controller.createRuntimeSpawn({
+				animationSelection: { animationId: 0x0300061b, kind: "explicit" },
+				baseLocalPlacement: createPlacement(),
+				setupModelId: 0x020003e5,
+				sourceResidence: {
+					kind: "outdoor-landblock",
+					landblockId: 0xda55ffff,
+				},
+			});
+			await flushPromises();
+
+			expect(
+				assetService.createSnapshot().committed.map((entry) => entry.leaseCount),
+			).toEqual([1, 1]);
+
+			expect(controller.removeRuntimeSpawn(runtimeId)).toBe(true);
+
+			expect(
+				assetService.createSnapshot().committed.map((entry) => entry.leaseCount),
+			).toEqual([0, 0]);
+		} finally {
+			warn.mockRestore();
+		}
 	});
 });
 

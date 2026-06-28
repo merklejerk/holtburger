@@ -13,6 +13,7 @@ import {
 import { createStaticMaterialTableEntry } from "../static/bake/static-material-adapter";
 import type {
 	MaterialTextureDataUseIdentity,
+	LandblockSourceIdentity,
 	StaticMaterialSlotIdentity,
 	StaticObjectInstanceIdentity,
 	StaticMaterialTableEntry,
@@ -35,14 +36,17 @@ import {
 import type {
 	DynamicEntityAnimationResource,
 	DynamicEntityId,
+	DynamicEntityPresentation,
 	DynamicEntityRenderPart,
 	DynamicEntityResourceFailure,
 	DynamicEntityResourceKey,
 	DynamicEntityResourceState,
 	DynamicEntityRequiredResource,
+	DynamicEntitySetupAnimationResourceState,
 	DynamicEntityTextureRequirement,
 	DynamicEntityUnsupportedMaterialReason,
-	StaticAuthoredDynamicSeedFacts,
+	DynamicPendingMaterialPlanningReason,
+	DynamicVisualSource,
 } from "./contracts";
 
 export interface DynamicEntityResourceManagerOptions {
@@ -88,9 +92,9 @@ interface TrackedDynamicEntityResources {
 	readonly animationResourceKey: DynamicEntityResourceKey;
 	readonly generation: number;
 	readonly leases: PreparedAssetLease[];
+	readonly presentation: DynamicEntityPresentation;
 	readonly setupHostKey: HostAssetKey;
 	readonly setupResourceKey: DynamicEntityResourceKey;
-	readonly seed: StaticAuthoredDynamicSeedFacts;
 }
 
 interface DynamicVisualHostAssetRequestResult {
@@ -100,9 +104,14 @@ interface DynamicVisualHostAssetRequestResult {
 
 interface DynamicMaterialRenderEntry {
 	readonly entry: StaticMaterialTableEntry;
-	readonly family: "flat-color" | "indexed-paletted" | "texture-rgba";
+	readonly family: DynamicMaterialRenderFamily;
 	readonly pass: "opaque" | "alpha-test" | "transparent" | "additive";
 }
+
+type DynamicMaterialRenderFamily =
+	| "flat-color"
+	| "indexed-paletted"
+	| "texture-rgba";
 
 const SETUP_ANIMATION_REQUIRED_RESOURCES = [
 	"setup-model",
@@ -142,38 +151,25 @@ export class DynamicEntityResourceManager {
 		this.#onResourcesChanged = onResourcesChanged;
 	}
 
-	createInitialResourceState(
-		seed: StaticAuthoredDynamicSeedFacts,
-	): DynamicEntityResourceState {
-		const keys = createSetupAnimationResourceKeys(seed);
-		return {
-			required: SETUP_ANIMATION_REQUIRED_RESOURCES,
-			setupAnimation: {
-				animationKey: keys.animationResourceKey,
-				setupModelKey: keys.setupResourceKey,
-				status: "pending",
-			},
-			status: "pending",
-			visual: {
-				status: "pending",
-			},
-		};
-	}
-
-	trackSetupAnimationResources(
+	trackProjectedVisualResources(
 		entityId: DynamicEntityId,
-		seed: StaticAuthoredDynamicSeedFacts,
+		presentation: DynamicEntityPresentation,
 	): void {
 		this.releaseEntity(entityId);
 
-		const keys = createSetupAnimationResourceKeys(seed);
+		const keys = createSetupAnimationResourceKeys(presentation.visualSource);
+		if (keys.kind === "setup-default-unresolved") {
+			reportUnresolvedSetupDefaultAnimation(entityId);
+			return;
+		}
+
 		const generation = this.#nextGeneration();
 		this.#trackedByEntityId.set(entityId, {
 			...keys,
 			animationResource: null,
 			generation,
 			leases: [],
-			seed,
+			presentation,
 		});
 
 		void Promise.allSettled([
@@ -302,12 +298,20 @@ export class DynamicEntityResourceManager {
 		generation: number,
 		tracked: TrackedDynamicEntityResources,
 	): Promise<void> {
+		const materialPlanningIdentity =
+			tracked.presentation.policy.materialPlanningIdentity;
+		if (materialPlanningIdentity.kind === "pending") {
+			reportPendingRuntimeMaterialPlanning(entityId, materialPlanningIdentity.reason);
+			return;
+		}
+
+		const visualSource = tracked.presentation.visualSource;
 		const closure = await resolveStaticObjectSourceClosure({
 			assetService: this.#assetService,
-			sourceAssetIds: [tracked.seed.sourceAssetId],
+			sourceAssetIds: visualSource.sourceAssetIds,
 		});
 		const sourceAssets = closure.sourceAssets.filter(
-			(source) => source.identity.sourceDid === tracked.seed.setupModelId,
+			(source) => source.identity.sourceDid === visualSource.setupModelId,
 		);
 		const missingRefs = closure.missingRefs.filter(
 			(ref) =>
@@ -317,12 +321,12 @@ export class DynamicEntityResourceManager {
 				),
 		);
 		const materialSlots = createDynamicMaterialSlotRequirements(
-			tracked.seed.object,
+			materialPlanningIdentity.object,
 			sourceAssets,
 		);
 		const materialPlans = planStaticObjectMaterials({
-			domain: createDynamicMaterialPlanningDomain(tracked.seed),
-			landblock: tracked.seed.sourceResidence,
+			domain: createDynamicMaterialPlanningDomain(tracked.presentation),
+			landblock: createMaterialPlanningLandblockSource(visualSource),
 			materialSlots: materialSlots.map((slot) => slot.slotFacts),
 			materialSources: closure.materialSources,
 			paletteSources: closure.paletteSources,
@@ -337,7 +341,7 @@ export class DynamicEntityResourceManager {
 		);
 		const resourceKeys = createVisualHostAssetKeys({
 			closure,
-			seed: tracked.seed,
+			visualSource,
 			setupAppearanceIsMissing: closure.missingRefs.some(isSetupAppearanceRef),
 			textureRequirements,
 		});
@@ -475,34 +479,99 @@ export class DynamicEntityResourceManager {
 	}
 }
 
+type SetupAnimationResourceKeys =
+	| {
+			readonly kind: "explicit-animation";
+			readonly animationHostKey: HostAssetKey;
+			readonly animationResourceKey: DynamicEntityResourceKey;
+			readonly setupHostKey: HostAssetKey;
+			readonly setupResourceKey: DynamicEntityResourceKey;
+	  }
+	| {
+			readonly kind: "setup-default-unresolved";
+			readonly setupHostKey: HostAssetKey;
+			readonly setupResourceKey: DynamicEntityResourceKey;
+	  };
+
 function createSetupAnimationResourceKeys(
-	seed: StaticAuthoredDynamicSeedFacts,
-): {
-	readonly animationHostKey: HostAssetKey;
-	readonly animationResourceKey: DynamicEntityResourceKey;
-	readonly setupHostKey: HostAssetKey;
-	readonly setupResourceKey: DynamicEntityResourceKey;
-} {
+	visualSource: DynamicVisualSource,
+): SetupAnimationResourceKeys {
+	const setupHostKey = createHostAssetKey("setup-model", visualSource.setupModelId);
+	const setupResourceKey = {
+		id: visualSource.setupModelId,
+		kind: "setup-model" as const,
+	};
+	if (visualSource.animationSelection.kind === "setup-default") {
+		return {
+			kind: "setup-default-unresolved",
+			setupHostKey,
+			setupResourceKey,
+		};
+	}
+
 	return {
-		animationHostKey: createHostAssetKey("animation", seed.defaultAnimationId),
+		animationHostKey: createHostAssetKey(
+			"animation",
+			visualSource.animationSelection.animationId,
+		),
 		animationResourceKey: {
-			id: seed.defaultAnimationId,
+			id: visualSource.animationSelection.animationId,
 			kind: "animation",
 		},
-		setupHostKey: createHostAssetKey("setup-model", seed.setupModelId),
-		setupResourceKey: {
-			id: seed.setupModelId,
-			kind: "setup-model",
-		},
+		kind: "explicit-animation",
+		setupHostKey,
+		setupResourceKey,
 	};
+}
+
+function createMaterialPlanningLandblockSource(
+	visualSource: DynamicVisualSource,
+): LandblockSourceIdentity {
+	return {
+		kind: "landblock-source",
+		landblockId: visualSource.effectiveResidence.landblockId,
+		source:
+			visualSource.effectiveResidence.kind === "env-cell"
+				? "env-cells"
+				: "outdoor",
+	};
+}
+
+function createDynamicMaterialPlanningDomain(
+	presentation: DynamicEntityPresentation,
+): "landblock-env-cells" | "outdoor-buildings" | "outdoor-detail" {
+	if (presentation.visualSource.effectiveResidence.kind === "env-cell") {
+		return "landblock-env-cells";
+	}
+
+	const domain = presentation.policy.textureDomain;
+	if (domain === "outdoor-buildings" || domain === "outdoor-detail") {
+		return domain;
+	}
+
+	throw new Error(
+		`Unsupported static-authored dynamic material planning domain ${domain}.`,
+	);
+}
+
+function reportUnresolvedSetupDefaultAnimation(entityId: DynamicEntityId): void {
+	console.warn(
+		`[holtburger-3d][dynamic-resources] ${entityId} requested setup-default animation, but setup-default animation evidence is not available yet. Runtime resource tracking requires an explicit animation id.`,
+	);
+}
+
+function reportPendingRuntimeMaterialPlanning(
+	entityId: DynamicEntityId,
+	reason: DynamicPendingMaterialPlanningReason,
+): void {
+	console.warn(
+		`[holtburger-3d][dynamic-resources] ${entityId} cannot prepare visual resources yet: ${reason}.`,
+	);
 }
 
 function createReadySetupAnimationResourceState(
 	tracked: TrackedDynamicEntityResources,
-): Extract<
-	DynamicEntityResourceState["setupAnimation"],
-	{ readonly status: "ready" }
-> {
+): Extract<DynamicEntitySetupAnimationResourceState, { readonly status: "ready" }> {
 	if (tracked.animationResource === null) {
 		throw new Error("dynamic setup animation resource is not ready");
 	}
@@ -1120,7 +1189,7 @@ function asFloat32Array(
 
 function resolveDynamicRenderableMaterialFamily(
 	plan: StaticMaterialPlan,
-): DynamicMaterialRenderEntry["family"] {
+): DynamicMaterialRenderFamily {
 	if (
 		plan.family === "flat-color" ||
 		plan.family === "indexed-paletted" ||
@@ -1242,14 +1311,19 @@ function createVisualHostAssetKeys(options: {
 	readonly closure: Awaited<
 		ReturnType<typeof resolveStaticObjectSourceClosure>
 	>;
-	readonly seed: StaticAuthoredDynamicSeedFacts;
+	readonly visualSource: DynamicVisualSource;
 	readonly setupAppearanceIsMissing: boolean;
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
 }): readonly HostAssetKey[] {
 	return uniqueHostAssetKeys([
 		...(options.setupAppearanceIsMissing
 			? []
-			: [createHostAssetKey("setup-appearance", options.seed.setupModelId)]),
+			: [
+					createHostAssetKey(
+						"setup-appearance",
+						options.visualSource.setupModelId,
+					),
+				]),
 		...options.closure.sourceAssets.flatMap((source) =>
 			source.parts.map((part) =>
 				createHostAssetKey("gfx-obj", part.gfxObj.sourceDid),
@@ -1275,16 +1349,6 @@ function createVisualHostAssetKeys(options: {
 			createTextureRequirementHostKeys(requirement.dataUse),
 		),
 	]);
-}
-
-function createDynamicMaterialPlanningDomain(
-	seed: StaticAuthoredDynamicSeedFacts,
-): "landblock-env-cells" | "outdoor-buildings" | "outdoor-detail" {
-	return seed.sourceResidence.source === "env-cells"
-		? "landblock-env-cells"
-		: "domain" in seed
-			? seed.domain
-			: "outdoor-buildings";
 }
 
 function isSetupAppearanceRef(ref: StaticResourceIdentity): boolean {

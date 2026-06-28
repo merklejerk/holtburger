@@ -5,6 +5,8 @@ import type {
 import type {
 	DynamicEntityActiveOmegaState,
 	DynamicAnimationHookFrameKey,
+	DynamicEntityAnimationPlaybackState,
+	DynamicEntityAnimationState,
 	DynamicEntityRecord,
 } from "./contracts";
 
@@ -41,7 +43,7 @@ type AnimationHookDto =
 	AnimationPayloadDto["partFrames"][number]["hooks"][number];
 type QuaternionDto = PlacementTransformDto["orientation"];
 type PlayingPlayback = Extract<
-	DynamicEntityRecord["animation"]["playback"],
+	DynamicEntityAnimationPlaybackState,
 	{ readonly status: "playing" }
 >;
 
@@ -553,8 +555,8 @@ function animationStatesEqual(
 }
 
 function sameAnimationState(
-	left: DynamicEntityRecord["animation"],
-	right: DynamicEntityRecord["animation"],
+	left: DynamicEntityAnimationState,
+	right: DynamicEntityAnimationState,
 ): boolean {
 	return (
 		left.defaultAnimationId === right.defaultAnimationId &&
@@ -564,8 +566,8 @@ function sameAnimationState(
 }
 
 function sameAnimationPlayback(
-	left: DynamicEntityRecord["animation"]["playback"],
-	right: DynamicEntityRecord["animation"]["playback"],
+	left: DynamicEntityAnimationPlaybackState,
+	right: DynamicEntityAnimationPlaybackState,
 ): boolean {
 	if (left.status !== right.status) {
 		return false;

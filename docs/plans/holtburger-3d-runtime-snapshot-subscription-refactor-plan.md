@@ -351,6 +351,171 @@ Decisions and course corrections:
   `npm run format:check` still reports pre-existing formatting issues in unrelated files, so only
   the touched files were formatted and checked with Prettier.
 
+## Phase 6: Add Cheap Runtime Overview Snapshot
+
+Status: pending.
+
+Purpose:
+
+- Split browser polling data from full diagnostics so the `500ms` browser poll reads a cheap,
+  intentionally small overview instead of the full diagnostic bundle.
+
+Deliverables:
+
+- Add a `RuntimeOverviewSnapshot` type for browser panel state that is expected to refresh on a
+  slow polling cadence.
+- Add `createOverviewSnapshot()` to `ClientRuntime`.
+- Keep `createSnapshot()` as the full diagnostic snapshot API for now; consider renaming only after
+  callers are migrated and the diagnostics boundary is settled.
+- Add cheap overview/count APIs for dependencies that currently build expensive detail only to show
+  counts, starting with assets, static coordinator state, and static scene query state.
+- Keep real-time streams unchanged: `subscribeFrameTelemetry` for frame metrics and
+  `subscribeEvents` for discrete runtime events.
+
+Acceptance criteria:
+
+- `createOverviewSnapshot()` does not call full diagnostic builders such as
+  `assetService.createSnapshot()` just to display counts.
+- The overview DTO contains only fields directly needed by always-polled browser UI.
+- Full diagnostics remain available through the explicit full snapshot/report path.
+- Runtime tests prove overview reads observe state changes without rebuilding full diagnostic
+  snapshots.
+
+Task checklist:
+
+- [ ] Define `RuntimeOverviewSnapshot` in `client-runtime.ts`.
+- [ ] Add `ClientRuntime.createOverviewSnapshot()`.
+- [ ] Add count/overview APIs for asset service state.
+- [ ] Add count/overview APIs for static coordinator state.
+- [ ] Add count/overview APIs for static scene query state.
+- [ ] Add focused tests proving overview reads do not invoke full snapshot builders.
+- [ ] Run focused runtime tests.
+
+Decisions and course corrections:
+
+- 2026-06-28 follow-up steering: Prefer one cheap overview pull plus one full diagnostics pull over
+  many panel-specific APIs. More splits should wait for evidence from real consumers or profiling.
+- 2026-06-28 dry run: The overview DTO still needs several debug-panel fields, not just navigation
+  state: scene interest, camera residency, portal frame/overlap state, debug overlay counts, static
+  coordinator counts plus latest terrain/env-cell payload summaries, static scene query counts, and
+  asset pending/committed counts.
+- 2026-06-28 dry run: Add a `StaticCoordinatorOverviewSnapshot` instead of reusing full
+  `StaticCoordinatorSnapshot`. `StaticCoordinator.createSnapshot()` sorts material coverage and
+  static object bake diagnostics; BrowserDisplay only needs `revision`, requested/resolving/baking/
+  committed counts, and latest terrain/env-cell payload summaries.
+- 2026-06-28 dry run: Add an `AssetServiceOverviewSnapshot` with counts only. This requires changing
+  the `AssetService` interface and every test fake that implements it. Keep this in Phase 6 so
+  Phase 7 can be a browser cutover rather than a mixed interface migration.
+- 2026-06-28 dry run: `StaticSceneQuery.createSnapshot()` is already count-oriented, but it computes
+  more counts than BrowserDisplay displays and still walks committed record roots. Add a narrower
+  overview/count method first; only add mutation-maintained cached counts if profiling shows the
+  narrower read is still visible.
+- 2026-06-28 dry run: `debugOverlays.envCellAabbCount` and `debugOverlays.portalCount` still require
+  query/count work when their toggles are enabled. Keep that behavior in the overview because those
+  numbers are explicitly shown beside the toggles; do not move overlay counts behind full
+  diagnostics unless the UI also stops showing them live.
+
+## Phase 7: Move Browser Polling To Runtime Overview
+
+Status: pending.
+
+Purpose:
+
+- Make `BrowserDisplay.svelte` poll the cheap overview snapshot while keeping full diagnostics
+  opt-in.
+
+Deliverables:
+
+- Replace BrowserDisplay polling of `runtime.createSnapshot()` with
+  `runtime.createOverviewSnapshot()`.
+- Rename browser state from generic `snapshot` to an overview-oriented name if the type split makes
+  the distinction clearer.
+- Keep the Diagnostics Report button on the full diagnostic path.
+- Preserve immediate overview refreshes after user/config actions.
+
+Acceptance criteria:
+
+- Browser diagnostics/status panels still populate after startup and refresh within the `500ms`
+  cadence.
+- Texture filtering mode, debug overlay toggles, render policy controls, scene-interest changes,
+  and selection state remain responsive after explicit user/config actions.
+- Opening the diagnostics report still pulls the full diagnostic shape on demand.
+- Browser polling no longer builds dynamic records, full renderer diagnostics, host state, detailed
+  asset entries, or static materialization details unless the overview explicitly needs them.
+
+Task checklist:
+
+- [ ] Update BrowserDisplay state and polling to use `RuntimeOverviewSnapshot`.
+- [ ] Rename `refreshRuntimeSnapshot()` to an overview-specific helper such as
+      `refreshRuntimeOverview()`.
+- [ ] Keep full diagnostics report generation on the explicit full snapshot/report path.
+- [ ] Update browser/runtime tests that assumed polling used `RuntimeSnapshot`.
+- [ ] Run `npm run check`.
+- [ ] Run focused runtime/browser tests.
+
+Decisions and course corrections:
+
+- 2026-06-28 dry run: This phase should be mostly mechanical if Phase 6 lands cleanly. The browser
+  currently stores `let snapshot = $state<RuntimeSnapshot | null>(null)` and uses it throughout the
+  navigate/debug panels; after the split, rename this to `runtimeOverview` or `overviewSnapshot` to
+  prevent future code from casually reaching for full diagnostics in the polled path.
+- 2026-06-28 dry run: `openDiagnosticsReport()` already calls `runtime.createDiagnosticsReport()`,
+  so the full diagnostic path can stay isolated while polling moves to overview. Do not make the
+  diagnostics modal consume the cheap overview; it should remain an explicit heavy read.
+- 2026-06-28 dry run: Picking uses the current camera residency from the polled state to choose an
+  env-cell context fallback. The overview must keep `currentCameraResidency` or this path will
+  silently regress.
+- 2026-06-28 dry run: Keep immediate refreshes after scene-interest, render-policy, debug overlay,
+  static visibility, and selection actions, but call the renamed overview refresh helper. Do not add
+  refreshes to RAF or camera policy sync; that would recreate the hot path with a cheaper DTO.
+
+## Phase 8: Reassess Full Diagnostic Snapshot Naming And Cost
+
+Status: pending.
+
+Purpose:
+
+- Decide whether `createSnapshot()` should remain the full diagnostic API name or be renamed to make
+  expensive diagnostic work impossible to call casually.
+
+Deliverables:
+
+- Inspect remaining `createSnapshot()` callers after BrowserDisplay moves to overview polling.
+- Decide whether to rename full runtime snapshot reads to `createDiagnosticsSnapshot()` or
+  `createFullDiagnosticsSnapshot()`.
+- Decide whether `createDiagnosticsReport()` should consume a full diagnostic snapshot DTO or build
+  directly from narrower diagnostic helpers.
+- Record any remaining expensive default fields with an owner and cleanup trigger.
+
+Acceptance criteria:
+
+- Full diagnostic snapshot naming makes cost and intended use clear.
+- Any retained expensive diagnostic fields are justified by an actual diagnostics consumer.
+- Any fields not needed by production diagnostics are removed or scheduled with a concrete follow-up.
+
+Task checklist:
+
+- [ ] Inspect post-overview full diagnostic snapshot callers.
+- [ ] Rename full diagnostic snapshot API if the current `createSnapshot()` name is too generic.
+- [ ] Update tests and docs for the chosen naming.
+- [ ] Record retained expensive fields and cleanup triggers.
+- [ ] Run `npm run check`, `npm run lint:ts`, and focused runtime tests.
+
+Decisions and course corrections:
+
+- 2026-06-28 dry run: Do not rename `createSnapshot()` in Phase 6. Keeping the full diagnostic API
+  stable while introducing `createOverviewSnapshot()` reduces blast radius and keeps the browser
+  cutover reviewable.
+- 2026-06-28 dry run: After Phase 7, expected full snapshot callers should be runtime tests,
+  `createDiagnosticsReport()`, and intentionally diagnostic tools. If BrowserDisplay polling still
+  calls `createSnapshot()`, Phase 7 is incomplete.
+- 2026-06-28 dry run: A rename to `createDiagnosticsSnapshot()` is probably worth doing if
+  `createSnapshot()` has no production browser polling caller after Phase 7. The spicy bit is test
+  churn, not runtime behavior; schedule the rename only after confirming callers are diagnostic.
+- 2026-06-28 dry run: `createDiagnosticsReport()` may not need to materialize the entire full
+  `RuntimeSnapshot` forever. If Phase 8 shows report fields are narrower than `RuntimeSnapshot`,
+  prefer direct diagnostics helpers over carrying an expensive DTO just because it exists.
+
 ## Risks And Mitigations
 
 - Risk: Browser UI panels become stale after actions that previously caused an immediate push.
@@ -367,8 +532,7 @@ Decisions and course corrections:
 
 - Risk: Polling still creates too much snapshot work.
   Mitigation: keep the first cut simple with unconditional `500ms` polling while `BrowserDisplay` is
-  mounted; after the cutover, split expensive diagnostics into panel-specific pull APIs if profiling
-  still shows meaningful cost.
+  mounted; Phase 6 and Phase 7 split expensive diagnostics out of the polled path.
 
 - Risk: A narrow structural event channel recreates the same overloaded bus with a different name.
   Mitigation: structural events should carry revisions or small reason payloads, not full
@@ -387,8 +551,8 @@ Decisions and course corrections:
 
 ## Open Questions
 
-- Should the first implementation keep one full runtime snapshot or immediately split static query
-  and asset diagnostics into panel-specific pull APIs?
+- Should the full diagnostic snapshot API keep the generic `createSnapshot()` name after the cheap
+  overview path exists, or should it be renamed to advertise diagnostic cost?
 
 ## Resolved Decisions
 
@@ -397,3 +561,5 @@ Decisions and course corrections:
   first cut.
 - "Full runtime snapshot" means the existing `RuntimeSnapshot` DTO consumed by browser runtime
   panels and diagnostics. It is not the picker snapshot or a picking-specific data structure.
+- Follow-up correction should split browser polling into a cheap runtime overview snapshot before
+  considering narrower panel-specific APIs.

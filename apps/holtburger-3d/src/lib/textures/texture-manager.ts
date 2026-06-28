@@ -290,7 +290,7 @@ export class TextureManager {
 					}),
 				),
 			],
-			textureUses: delta.textureUses.map(createVisualTextureUseCommit),
+			textureUses: delta.textureUses.map(createStaticVisualTextureUseCommit),
 		});
 	}
 
@@ -299,7 +299,7 @@ export class TextureManager {
 	): Promise<TexturePlacementUpdate | null> {
 		return this.#applyVisualTextureUseDelta({
 			removedOwners: delta.removedOwners,
-			textureUses: delta.textureUses.map(createVisualTextureUseCommit),
+			textureUses: delta.textureUses.map(createDynamicVisualTextureUseCommit),
 		});
 	}
 
@@ -948,26 +948,22 @@ function collectPayloadTextureUses(
 	return [];
 }
 
-function createVisualTextureUseCommit(
+function createStaticVisualTextureUseCommit(
 	textureUse: StaticBakeTextureUse,
-): VisualTextureUseCommit;
-function createVisualTextureUseCommit(
-	textureUse: DynamicTextureUseCommit,
-): VisualTextureUseCommit;
-function createVisualTextureUseCommit(
-	textureUse: StaticBakeTextureUse | DynamicTextureUseCommit,
 ): VisualTextureUseCommit {
-	if ("staticBatchId" in textureUse) {
-		return {
-			domain: textureUse.domain,
-			owners: textureUse.owners,
-			samplingPolicy: textureUse.samplingPolicy,
-			source: textureUse.source,
-			textureBatchId: textureUse.staticBatchId,
-			textureUseId: textureUse.textureUseId,
-		};
-	}
+	return {
+		domain: textureUse.domain,
+		owners: textureUse.owners,
+		samplingPolicy: textureUse.samplingPolicy,
+		source: textureUse.source,
+		textureBatchId: textureUse.staticBatchId,
+		textureUseId: textureUse.textureUseId,
+	};
+}
 
+function createDynamicVisualTextureUseCommit(
+	textureUse: DynamicTextureUseCommit,
+): VisualTextureUseCommit {
 	return {
 		domain: textureUse.textureDomain,
 		owners: [textureUse.owner],

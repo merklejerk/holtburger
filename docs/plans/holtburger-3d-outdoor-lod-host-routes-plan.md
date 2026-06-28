@@ -2,23 +2,23 @@
 
 ## Context And Boundaries
 
-Goal: replace the coarse `landblock/{id}/outdoor` dependency used by multiple frontend static layers with LoD-scoped outdoor host routes that avoid resolving and baking unused outdoor detail.
+Goal: replace coarse per-layer landblock static dependencies with a LoD-scoped landblock scene product that avoids resolving and baking unused detail.
 
 The current 3D frontend schedules `outdoor-terrain`, `outdoor-buildings`, and `outdoor-detail` independently. Each resolver asks the host for the same `landblock-outdoor` payload, then slices it locally. Host asset caching avoids some duplicate host reads, but the frontend still performs duplicate resolver work, source-closure work, and materialization over a payload that may contain data outside the active LoD interest.
 
-The target frontend shape is source-first for landblock products: plan one outdoor landblock source product for a landblock and LoD, then fan out the terrain/building/detail layer payloads that the renderer needs. Layer-specific bake and retention can remain layer-oriented, but source resolution should not be layer-first.
+The target frontend shape is source-first for landblock products: plan one landblock scene source product for a landblock and LoD, then fan out the terrain/building/detail/env-cell layer payloads that the renderer needs. Output domains remain renderer layer labels, but the landblock source product is the lifecycle unit.
 
-The target shape is a clean cutover to outdoor LoD host assets, not a compatibility shim around the current broad route. The existing `landblock/{id}/outdoor` route and its frontend dependents should be purged after cutover rather than retained as a parallel full-debug path.
+The target shape is a clean cutover to landblock scene LoD host assets, not a compatibility shim around the current broad route. The existing `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, and stale `landblock/{id}/topology` routes and their frontend dependents should be purged after cutover rather than retained as parallel full-debug paths.
 
 ### Proposed Route Family
 
 Use:
 
 ```text
-landblock/{id}/outdoor-lod/{level}
+landblock/{id}/lod/{level}
 ```
 
-The route payload should be named independently from the existing full outdoor payload, for example `landblock-outdoor-lod`, so callers cannot accidentally treat it as the full current `landblock-outdoor` bundle.
+The route payload should be named independently from the existing full outdoor/env-cell payloads, for example `landblock-scene-lod`, so callers cannot accidentally treat it as the full current `landblock-outdoor` or `landblock-env-cells` bundle.
 
 Initial levels:
 
@@ -28,24 +28,24 @@ Initial levels:
 | `1` | Level 0 plus building static members and building transition apertures. | LandblockInfo building facts and building source data. |
 | `2` | Level 1 plus explicit outdoor objects. | LandblockInfo explicit object facts. |
 | `3` | Level 2 plus generated scenery after terrain, road, slope, object bounds, building occupancy, and object spacing filters. | Full outdoor scene inputs: terrain, LandblockInfo buildings/objects, region scene tables, scene files, and renderable source bounds. |
+| `4` | Level 3 plus landblock env-cell system payloads. | Env-cell structures, portals, visibility, static seeds, and env-cell source geometry. |
 
-The exact level names and cut lines can change during implementation if evidence says another split is cleaner, but the final contract must be explicit and tested.
+In dungeon/interior contexts, levels below the env-cell LoD may emit no outdoor layers; the landblock scene product can request LoD `4` to obtain env-cell output without implying terrain/building/detail renderer layers are retained. The exact level names and cut lines can change during implementation if evidence says another split is cleaner, but the final contract must be explicit and tested.
 
 ### In Scope
 
-- Adding typed host/content support for `landblock/{id}/outdoor-lod/{level}`.
+- Adding typed host/content support for `landblock/{id}/lod/{level}`.
 - Preserving generated scenery correctness by using shared outdoor scene assembly inputs even when a lower-detail payload omits some emitted object families.
-- Replacing layer-first outdoor resolver work with source-first landblock outdoor resolver products.
-- Letting one landblock outdoor resolver product emit the requested terrain/building/detail layer payloads from one selected outdoor LoD source asset.
+- Replacing layer-first outdoor/env-cell resolver work with source-first landblock scene resolver products.
+- Letting one landblock scene resolver product emit the requested terrain/building/detail/env-cell layer payloads from one selected landblock scene LoD source asset.
 - Exposing LoD `2` explicit outdoor detail as a separate scene-interest axis from generated outdoor detail.
 - Updating payload schemas, binary serialization, asset key parsing, resolver tests, and integration tests.
 - Removing frontend reliance on the broad `landblock-outdoor` payload for normal outdoor terrain/building/detail layers.
-- Removing the old `landblock/{id}/outdoor` route and dead dependents once normal frontend rendering uses outdoor LoD routes.
-- Removing the stale `landblock/{id}/topology` route if the cutover audit confirms it remains host-test/helper-only and superseded by `landblock/{id}/env-cells` for 3D needs.
+- Removing frontend reliance on `landblock-env-cells` as a separate landblock source route.
+- Removing the old `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, and `landblock/{id}/topology` routes and dead dependents once normal frontend rendering uses landblock scene LoD routes.
 
 ### Out Of Scope
 
-- Reworking `landblock-env-cells` or dungeon/env-cell LoD routes.
 - Changing generated scenery placement rules beyond preserving the current semantics.
 - Adding screen-space or frustum-driven LoD.
 - Optimizing texture atlas packing or WebGL draw submission beyond what is needed for route cutover.
@@ -108,12 +108,12 @@ Key validated facts:
 
 ### Shared Outdoor Scene Logic, Level-Gated Assembly
 
-Content-side route implementation should keep one shared outdoor-scene understanding path, but it must not blindly build the full current outdoor payload and filter the result afterward:
+Content-side route implementation should keep one shared landblock-scene understanding path, but it must not blindly build the full current outdoor/env-cell payloads and filter the result afterward:
 
 ```text
 CellLandblock + LandblockInfo + RegionDesc + Scene files + source bounds
   -> StaticOutdoorScene / prepared outdoor components
-  -> outdoor-lod payload projection
+  -> landblock scene LoD payload projection
 ```
 
 The LoD route should share the same derivation rules while gating expensive family work before it happens. Terrain-only work should not derive outdoor static source bounds. Building-only work should not derive explicit/generated static bounds. Explicit-only detail should not derive generated scenery. Level `3` may use full generated-source context, but only because generated scenery correctness requires terrain, building/object occupancy, scene tables, and source bounds.
@@ -129,17 +129,17 @@ load common landblock context
   -> build only the BVH/spatial records needed by emitted families
 ```
 
-Do not implement outdoor LoD by calling today's full `LandblockOutdoorAssetAssembler` and deleting higher-level fields from the serialized payload. That would preserve the CPU problem under a smaller JSON shape, which is fake progress.
+Do not implement landblock scene LoD by calling today's full `LandblockOutdoorAssetAssembler` plus `LandblockEnvCellsAssetAssembler` and deleting higher-level fields from the serialized payload. That would preserve the CPU problem under a smaller JSON shape, which is fake progress.
 
 ### Frontend Resolvers Consume Minimal Payloads
 
-The frontend should stop treating outdoor landblock source resolution as one resolver job per renderer layer. A landblock outdoor source product should be planned from scene interest, select the highest source LoD needed for that landblock, and emit only the layer payloads requested by that source product:
+The frontend should stop treating landblock source resolution as one resolver job per renderer layer. A landblock scene source product should be planned from scene interest, select the highest source LoD needed for that landblock, and emit the layer payloads for that product:
 
 ```text
-Outdoor scene interest
-  -> landblock outdoor source product { landblockId, sourceLod, outputLayers }
-  -> resolver loads landblock/{id}/outdoor-lod/{sourceLod} once
-  -> resolver emits terrain/building/detail payloads for requested outputLayers
+Scene interest
+  -> landblock scene source product { landblockId, sourceLod, context }
+  -> resolver loads landblock/{id}/lod/{sourceLod} once
+  -> resolver emits terrain/building/detail/env-cell payloads for the product
   -> coordinator enqueues layer-oriented bake/materialization results
 ```
 
@@ -151,35 +151,39 @@ The source LoD should be selected from requested output layers:
 | `outdoor-buildings` | `1` |
 | explicit outdoor detail scene interest | `2` |
 | generated outdoor detail scene interest | `3` |
+| `landblock-env-cells` | `4` |
 
-If terrain, buildings, and generated detail are all needed for a landblock, the planned source product should request source LoD `3` once and emit all three layer payloads. If only terrain is needed, it should request LoD `0` and emit only terrain. The implementation should avoid adding implicit fallback behavior; unsupported or mismatched levels should fail loudly.
+If terrain, buildings, generated detail, and env-cells are all needed for a landblock, the planned source product should request source LoD `4` once and emit the full layer set. If only terrain is needed, it should request LoD `0` and emit only terrain. In dungeon/interior context, the product can request LoD `4` and emit env-cell outputs while lower outdoor layer outputs are empty. The implementation should avoid adding implicit fallback behavior; unsupported or mismatched levels should fail loudly.
 
-Layer outputs should still carry explicit ownership/domain metadata so existing renderer cleanup, texture residency, diagnostics, and static selection remain understandable. The refactor changes the resolver input and output shape, not the fact that terrain/building/detail are separate render and retention products.
+Layer outputs should still carry explicit renderer domain metadata so texture residency, diagnostics, and static selection remain understandable. They should not be independent lifecycle owners. The landblock scene source product is the lifecycle and cleanup unit: changing desired LoD replaces the product bundle rather than partially retaining individual lower layers.
 
 ### Decisions
 
 - Expose LoD `2` immediately as an explicit-detail scene interest axis instead of treating it as a hidden intermediate level.
-- Purge `landblock/{id}/outdoor` and frontend dependents after the outdoor LoD route cutover.
-- Replace layer-first outdoor resolver jobs with source-first landblock outdoor resolver products that accept source LoD and requested output layers.
-- Keep layer-oriented bake/materialization/retention outputs unless implementation evidence shows those should be source-first too.
-- Do not add frontend topology-route support as part of this work. `landblock/{id}/env-cells` covers the current 3D renderer's env-cell needs and more; remove the existing topology route during cleanup if no non-test owner is found.
+- Treat env-cells as the highest landblock scene LoD.
+- Purge `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, `landblock/{id}/topology`, and frontend dependents after the landblock scene LoD route cutover.
+- Replace layer-first outdoor/env-cell resolver jobs with source-first landblock scene resolver products that accept source LoD and scene context.
+- Do not support partial cleanup of individual lower layers within one landblock scene product. Product changes replace the product-owned output bundle.
+- Keep layer-oriented bake/materialization outputs unless implementation evidence shows those should be source-first too.
 
 ### Explicit Payload Contract
 
-The frontend should not treat `landblock-outdoor-lod` as full `landblock-outdoor`. The contract should encode which families are present, for example:
+The frontend should not treat `landblock-scene-lod` as full `landblock-outdoor` or `landblock-env-cells`. The contract should encode which families are present, for example:
 
 ```ts
-interface LandblockOutdoorLodPayloadDto {
-  readonly kind: "landblock-outdoor-lod";
+interface LandblockSceneLodPayloadDto {
+  readonly kind: "landblock-scene-lod";
   readonly landblockId: number;
-  readonly level: 0 | 1 | 2 | 3;
+  readonly level: 0 | 1 | 2 | 3 | 4;
+  readonly context: "outdoor" | "interior";
   readonly includes: {
     readonly terrain: boolean;
     readonly buildings: boolean;
     readonly explicitObjects: boolean;
     readonly generatedScenery: boolean;
+    readonly envCells: boolean;
   };
-  // Terrain/source/static fields follow the selected level.
+  // Terrain/static/env-cell fields follow the selected level and context.
 }
 ```
 
@@ -191,14 +195,14 @@ Dry-run date: 2026-06-28.
 
 - The current static worker API is single-job-shaped: `StaticResolverWorkerClient.resolve(job)` posts one `StaticResolverJob`, and the worker handler resolves exactly that job. Highest-LoD-per-landblock reuse cannot see "the work batch" inside the worker without changing the resolver shape.
 - `StaticCoordinator.reconcileStaticDemand` and `planStaticDemand` are the earliest existing frontend seams that see the full per-revision outdoor work set. After review, this is being treated as evidence for planning source-first landblock products instead of optimizing several independent layer-first jobs.
-- `StaticDomain` and `ManualStaticDomain` currently model one `outdoor-detail` domain/radius. Splitting explicit and generated detail requires either new static domains or a detail policy on scheduled work. The renderer can still keep one `outdoor-detail` layer if the split is only an interest/source-payload distinction.
-- `HostAssetKey` currently assumes `landblock-outdoor` and `landblock-env-cells` are hex32 landblock ids with no route parameter. `landblock/{id}/outdoor-lod/{level}` needs an explicit key shape and parser/formatter support rather than trying to hide the level inside the existing id normalization.
+- `StaticDomain` and `ManualStaticDomain` currently model one `outdoor-detail` domain/radius. Splitting explicit and generated detail requires either new static domains or a detail policy on planned landblock scene products. The renderer can still keep one `outdoor-detail` layer if the split is only an interest/source-payload distinction.
+- `HostAssetKey` currently assumes `landblock-outdoor` and `landblock-env-cells` are hex32 landblock ids with no route parameter. `landblock/{id}/lod/{level}` needs an explicit key shape and parser/formatter support rather than trying to hide the level inside the existing id normalization.
 - Browser binary lookup routing, Tauri route parsing, content request enums, binary serialization, JSON serialization, route-to-schema preparation, and tests all enumerate the old `outdoor`/`topology`/`env-cells` route set. Route work must be treated as an end-to-end contract change.
 - Topology removal has a concrete cleanup surface: `ContentAssetRequest::LandblockTopology`, Tauri parsing/serialization/service cache keys, frontend `landblocks.ts` topology helpers, and route tests. The dry run did not find a normal 3D static-render dependency on topology, but the final audit should be done before deleting it.
 
 Course corrections from the dry run:
 
-- Add a route/key contract phase before resolver cutovers so `outdoor-lod` does not become an ad hoc raw asset id.
+- Add a route/key contract phase before resolver cutovers so `landblock-scene-lod` does not become an ad hoc raw asset id.
 - Replace the previous "coalescing seam" phase with a source-first landblock resolver refactor. Coalescing becomes a property of planning one source product per landblock, not an optimization over several independent layer jobs.
 - Treat explicit/generated detail split as scene-interest and scheduled-work policy first; only split renderer layers if a later implementation need proves it.
 - Keep the old broad `landblock-outdoor` route only until every normal frontend resolver is cut over, then delete it in the cleanup phase.
@@ -207,33 +211,33 @@ Course corrections from the dry run:
 
 Dry-run date: 2026-06-28.
 
-- `StaticScopePayload` currently embeds one `StaticResolverJob`, and `StaticBakeBatchItem` embeds one `ScheduledStaticWork`. A source-first resolver cannot simply "return an array" without separating source work from emitted layer work.
-- `ScheduledStaticWorkStatus` currently has a single `domain: StaticDomain`. Source products do not map cleanly to one renderer domain, so source-product status and emitted layer status need distinct types or a tagged status union.
-- Resource eviction is keyed by layer desired keys such as `landblock:da55ffff:outdoor-detail`. If source work replaces layer work without preserving desired layer keys, partial eviction can remove too much or retain stale detail. Desired layer ownership must remain explicit even when source resolution is shared.
-- Bake batching is domain-oriented (`createPendingBatchKey` uses revision plus `work.job.domain`, and `StaticBakeBatchResult.domain` is singular). Multi-output resolver fanout should enqueue separate layer-owned bake items per emitted domain rather than trying to bake mixed domains in one batch.
+- `StaticScopePayload` currently embeds one `StaticResolverJob`, and `StaticBakeBatchItem` embeds one `ScheduledStaticWork`. A source-first resolver cannot simply "return an array" without separating source-product work from output-layer bake items.
+- `ScheduledStaticWorkStatus` currently has a single `domain: StaticDomain`. Source products do not map cleanly to one renderer domain, so source-product status needs a product key and selected LoD rather than a renderer domain.
+- Resource eviction is currently keyed by layer desired keys such as `landblock:da55ffff:outdoor-detail`. Since partial cleanup is intentionally out of scope, the coordinator should move to product-owned resource groups and evict/reinstall the whole product output bundle when desired LoD changes.
+- Bake batching is domain-oriented (`createPendingBatchKey` uses revision plus `work.job.domain`, and `StaticBakeBatchResult.domain` is singular). Multi-output resolver fanout should enqueue separate domain bake inputs for emitted layer types, while product lifecycle tracks the combined output bundle.
 - `StaticCoordinatorSourcePayloadDelta` and `StaticSceneQuery.ingestSourcePayload` are single-payload oriented, but they can likely remain layer-payload oriented if the coordinator emits one delta per resolved layer output.
-- `BrowserStaticResolver`, worker protocol messages, and the worker router all route by `StaticResolverJob.domain`. Source-first work needs a new resolver input/result contract and browser/worker routing for landblock outdoor source products.
-- Interior-cell demand currently needs same-landblock outdoor building portal facts plus env-cells, but not terrain rendering. With cumulative LoD levels, an interior building source product would request source LoD `1` and emit only buildings; that still loads terrain source data because LoD `1` includes level `0`. If this is too wasteful, the route family needs non-cumulative product profiles rather than numeric cumulative LoD.
+- `BrowserStaticResolver`, worker protocol messages, and the worker router all route by `StaticResolverJob.domain`. Source-first work needs a new resolver input/result contract and browser/worker routing for landblock scene source products.
+- Env-cells should be modeled as the highest landblock scene LoD. In outdoor context, LoD `4` implies the full outdoor scene plus env-cells. In dungeon/interior context, LoD `4` may emit env-cell outputs while lower outdoor outputs are empty.
 
 Course corrections from the source-first dry run:
 
 - Introduce explicit source-work and emitted-layer-work types before changing resolver worker protocol.
-- Keep retained scopes and resident resources keyed by emitted layer ownership, not by source-product ownership.
-- Keep bake workers and static-scene query layer-oriented for this plan; only source resolution becomes source-first.
-- Add an open question about whether cumulative LoD is acceptable for building-only/interior portal use.
+- Keep bake workers and static-scene query layer-oriented for this plan, but make coordinator cleanup product-oriented.
+- Remove the partial cleanup requirement; product lifecycle changes replace the product-owned output bundle.
+- Include env-cells in the landblock scene LoD product instead of preserving `landblock-env-cells` as a separate source route.
 
 ## Phased Implementation
 
-### Phase 1: Define Outdoor LoD Contract
+### Phase 1: Define Landblock Scene LoD Contract
 
 Status: pending.
 
 Deliverables:
 
-- Add a Rust `OutdoorLodLevel` or equivalent typed enum in the content/core boundary.
-- Add a content payload shape for `LandblockOutdoorLodAsset` or an equivalent projection type.
-- Add TypeScript/Zod DTO schemas for `landblock-outdoor-lod`.
-- Add route parsing/formatting support for `landblock/{id}/outdoor-lod/{level}`.
+- Add a Rust `LandblockSceneLodLevel` or equivalent typed enum in the content/core boundary.
+- Add a content payload shape for `LandblockSceneLodAsset` or an equivalent projection type.
+- Add TypeScript/Zod DTO schemas for `landblock-scene-lod`.
+- Add route parsing/formatting support for `landblock/{id}/lod/{level}`.
 - Add a frontend host asset key representation that carries both landblock id and level without bypassing validation.
 
 Acceptance criteria:
@@ -241,32 +245,33 @@ Acceptance criteria:
 - Route parsing accepts valid normalized landblock ids and supported levels.
 - Route parsing rejects invalid levels and malformed ids.
 - TS payload parsing rejects mismatched `kind`, missing level data, and inconsistent included families.
-- `formatHostAssetId` and `parseHostAssetId` round-trip `landblock/{id}/outdoor-lod/{level}` without using `raw` keys.
+- `formatHostAssetId` and `parseHostAssetId` round-trip `landblock/{id}/lod/{level}` without using `raw` keys.
 - No frontend resolver behavior changes yet.
 
 Task checklist:
 
 - [ ] Add Rust enum/type comments describing each level's emitted content.
-- [ ] Add `ContentAssetRequest::LandblockOutdoorLod`.
-- [ ] Add `ContentAsset::LandblockOutdoorLod`.
+- [ ] Add `ContentAssetRequest::LandblockSceneLod`.
+- [ ] Add `ContentAsset::LandblockSceneLod`.
 - [ ] Add Tauri route parser tests.
 - [ ] Add TS asset key tests.
 - [ ] Add host contract tests.
-- [ ] Update browser binary lookup routing for the new outdoor LoD route.
+- [ ] Update browser binary lookup routing for the new landblock scene LoD route.
 
 Decisions and course corrections:
 
-- Dry run found that `HostAssetKey` needs first-class route-parameter support for outdoor LoD. Do not encode the level as an unvalidated suffix in a raw key.
+- Dry run found that `HostAssetKey` needs first-class route-parameter support for landblock scene LoD. Do not encode the level as an unvalidated suffix in a raw key.
 
-### Phase 2: Build Content-Side Outdoor LoD Projection
+### Phase 2: Build Content-Side Landblock Scene LoD Projection
 
 Status: pending.
 
 Deliverables:
 
-- Refactor `LandblockOutdoorAssetAssembler` internals so shared outdoor scene assembly can emit full and LoD-projected payloads without duplicating generation logic.
+- Refactor `LandblockOutdoorAssetAssembler` and `LandblockEnvCellsAssetAssembler` internals so shared landblock scene assembly can emit LoD-projected payloads without duplicating generation logic.
 - Gate expensive per-family assembly before source bounds, static mesh, generated scenery, transition aperture, and BVH work for omitted families.
 - Ensure level `3` generated scenery uses the same terrain, building occupancy, explicit object spacing, road, slope, and bounds checks as today's full outdoor path.
+- Ensure level `4` env-cell output preserves today's env-cell structure, visibility, portal, static seed, and geometry semantics.
 - Serialize the LoD payload through binary host lookup.
 
 Acceptance criteria:
@@ -278,6 +283,8 @@ Acceptance criteria:
 - Level `2` contains level `1` plus explicit outdoor objects.
 - Level `2` does not run generated scenery derivation.
 - Level `3` matches the current `landblock-outdoor` emitted outdoor static families for terrain/buildings/explicit/generated coverage.
+- Level `4` includes level `3` plus current `landblock-env-cells` emitted families in outdoor context.
+- Level `4` can emit env-cell output with empty lower outdoor outputs in interior context.
 - Focused Rust tests prove generated scenery output is unchanged for representative synthetic inputs.
 
 Task checklist:
@@ -285,7 +292,7 @@ Task checklist:
 - [ ] Extract shared outdoor assembly result if needed.
 - [ ] Add level-gated assembly helpers for levels `0` through `3`.
 - [ ] Add diagnostics or test hooks proving omitted families do not load their source bounds.
-- [ ] Add serializer for `landblock-outdoor-lod`.
+- [ ] Add serializer for `landblock-scene-lod`.
 - [ ] Add binary response handling.
 - [ ] Add tests for family inclusion/exclusion.
 - [ ] Add tests for generated scenery preservation.
@@ -300,18 +307,19 @@ Status: pending.
 
 Deliverables:
 
-- Add `landblock-outdoor-lod` to `HostAssetKeyKind`.
+- Add `landblock-scene-lod` to `HostAssetKeyKind`.
 - Add `createHostAssetKey` formatting and parsing support.
 - Add Zod schema routing in `prepareV2AssetPayload`.
 - Add resolver-view helpers only if workers need smaller transfer views.
-- Keep the old `landblock-outdoor` preparation path temporarily until all normal resolvers are cut over.
+- Keep the old `landblock-outdoor` and `landblock-env-cells` preparation paths temporarily until all normal resolvers are cut over.
 
 Acceptance criteria:
 
-- `HostBackedAssetService` can request and commit `landblock/{id}/outdoor-lod/{level}` assets.
+- `HostBackedAssetService` can request and commit `landblock/{id}/lod/{level}` assets.
 - Static resolver worker asset bridge can transfer the payload without losing typed-array/binary-section expectations.
 - Existing `landblock-outdoor` preparation tests remain valid for the old route.
-- `landblock-outdoor-lod` preparation tests prove payload `kind`, route, landblock id, and level agree.
+- Existing `landblock-env-cells` preparation tests remain valid for the old route.
+- `landblock-scene-lod` preparation tests prove payload `kind`, route, landblock id, level, and context agree.
 
 Task checklist:
 
@@ -331,45 +339,46 @@ Status: pending.
 
 Deliverables:
 
-- Replace layer-first outdoor scheduled work with a landblock outdoor source product model.
-- Add typed requested output layers for terrain, buildings, explicit detail, and generated detail.
+- Replace layer-first outdoor/env-cell scheduled work with a landblock scene source product model.
+- Add typed scene contexts and selected LoD for outdoor and interior demand.
 - Add source-LoD selection rules that choose the highest required `OutdoorLodLevel` for the requested output layers.
-- Keep layer ownership metadata explicit so downstream bake, retention, diagnostics, and renderer cleanup can remain layer-oriented.
-- Introduce separate source-work and emitted-layer ownership concepts instead of overloading `ScheduledStaticWork` for both.
+- Make product keys, not layer keys, the cleanup lifecycle unit.
+- Introduce separate source-product work and output-layer bake concepts instead of overloading `ScheduledStaticWork` for both.
 
 Acceptance criteria:
 
 - Scene interest for terrain-only landblocks plans one landblock outdoor source product with source LoD `0` and terrain output only.
 - Scene interest for terrain plus buildings plans one product with source LoD `1` and terrain/buildings outputs.
 - Scene interest for explicit detail plans source LoD `2`; generated detail plans source LoD `3`.
-- Planned work no longer contains separate outdoor terrain/building/detail resolver jobs for the same landblock source.
-- Retained scopes and desired resource keys still enumerate the emitted layer ownership needed for cleanup and static scene query retention.
-- Existing env-cell/interior work remains unchanged.
+- Outdoor scene interest with env-cells plans source LoD `4`.
+- Interior-cell demand plans one landblock scene source product at LoD `4` in interior context.
+- Planned work no longer contains separate outdoor terrain/building/detail/env-cell resolver jobs for the same landblock source.
+- Desired resource keys are product keys, so LoD changes replace the prior product output bundle.
 
 Task checklist:
 
 - [ ] Add source product types near `StaticDemandPlan`/`ScheduledStaticWork` or a new colocated planning module.
-- [ ] Add emitted layer work/ownership types for bake, retention, and diagnostics.
-- [ ] Add requested output layer and selected source LoD types with comments.
-- [ ] Update demand planner tests for terrain/building/detail combinations.
-- [ ] Update interior-cell demand tests to prove building portal facts are emitted without terrain layer retention.
-- [ ] Preserve stable retained-scope ownership for layer cleanup.
-- [ ] Add negative tests proving env-cell work does not get folded into outdoor source products.
+- [ ] Add output layer bake item types for domain-oriented bake/materialization.
+- [ ] Add selected source LoD and scene context types with comments.
+- [ ] Update demand planner tests for terrain/building/detail/env-cell combinations.
+- [ ] Update interior-cell demand tests to prove LoD `4` interior context emits env-cell output without retaining lower outdoor layers.
+- [ ] Remove tests or expectations that require partial layer cleanup within one landblock product.
 
 Decisions and course corrections:
 
-- Steered after review feedback: do not coalesce several layer-first jobs as an optimization. Plan one source-first landblock product and fan out layer outputs from it.
+- Steered after review feedback: do not coalesce several layer-first jobs as an optimization. Plan one source-first landblock scene product and fan out layer outputs from it. Do not support partial cleanup below the product lifecycle unit.
 
-### Phase 5: Build Source-First Landblock Outdoor Resolver
+### Phase 5: Build Source-First Landblock Scene Resolver
 
 Status: pending.
 
 Deliverables:
 
-- Add a source-first outdoor landblock resolver that accepts `{ landblockId, sourceLod, outputLayers }`.
-- Load `landblock/{id}/outdoor-lod/{sourceLod}` exactly once per source product.
+- Add a source-first landblock scene resolver that accepts `{ landblockId, sourceLod, context }`.
+- Load `landblock/{id}/lod/{sourceLod}` exactly once per source product.
 - Reuse existing terrain and outdoor static object projection logic behind smaller functions instead of duplicating resolver code.
-- Emit zero or more layer payloads for terrain, buildings, explicit detail, and generated detail.
+- Reuse existing landblock env-cell projection logic behind smaller functions.
+- Emit layer payloads for the selected product: terrain, buildings, explicit detail, generated detail, env-cells, or empty lower outdoor outputs in interior context.
 - Replace the resolver worker request/response shape with a source-work input and multi-output result, while keeping env-cell resolver support explicit.
 
 Acceptance criteria:
@@ -378,6 +387,8 @@ Acceptance criteria:
 - Building source product requests LoD `1`, emits terrain/building payloads when both are requested, and preserves building transition apertures.
 - Explicit-detail source product requests LoD `2` and does not include generated scenery.
 - Generated-detail source product requests LoD `3` and preserves generated scenery identities/source mappings.
+- Env-cell source product requests LoD `4` and preserves current env-cell identities/source mappings.
+- Interior LoD `4` source product emits env-cell payloads and empty lower outdoor layer outputs.
 - Source closure runs once per emitted object family, not once per old layer resolver job.
 - Source payload deltas can be emitted per layer output so `StaticSceneQuery` remains layer-oriented.
 
@@ -385,6 +396,7 @@ Task checklist:
 
 - [ ] Extract terrain projection from `TerrainStaticScopeResolver` into a source-payload projection helper.
 - [ ] Extract building/detail projection from `OutdoorStaticObjectsResolver` into source-payload projection helpers.
+- [ ] Extract env-cell projection from `LandblockEnvCellsResolver` into a source-payload projection helper.
 - [ ] Add the source-first resolver worker protocol/client shape.
 - [ ] Update `BrowserStaticResolver` and worker router routing to recognize landblock outdoor source work separately from env-cell work.
 - [ ] Add tests for LoD selection, one host asset request, and multi-output payload emission.
@@ -394,7 +406,7 @@ Decisions and course corrections:
 
 - This phase intentionally changes resolver shape rather than relying on asset-service dedupe to paper over duplicate layer jobs.
 
-### Phase 6: Fan Out Source Products Into Layer-Oriented Bake And Retention
+### Phase 6: Fan Out Source Products Into Layer-Oriented Bake And Product Cleanup
 
 Status: pending.
 
@@ -403,31 +415,32 @@ Deliverables:
 - Update `StaticCoordinator` to accept resolver results containing multiple layer payloads for one source product.
 - Enqueue emitted payloads into existing domain-oriented bake batches, preserving layer domains for renderer ownership.
 - Track source-product status and emitted layer statuses without losing stale-work/revision determinism.
-- Keep texture residency, draw-unit ownership, portal resources, and static selection keyed by emitted layer domains.
+- Keep texture residency, draw-unit ownership, portal resources, and static selection tagged by emitted layer domains.
+- Group committed resources under the landblock scene product key for cleanup.
 - Do not pass source-product work directly into `StaticBakeBatchItem`; bake items must remain layer-owned or use an equivalent emitted-layer work type.
 
 Acceptance criteria:
 
 - One landblock source product can resolve into multiple bake items.
 - Terrain/building/detail draw units retain their existing layer domains.
-- Evicting detail interest removes detail resources without removing retained terrain/buildings for the same source product when those outputs remain desired.
+- Changing desired LoD for a landblock evicts the previous product output bundle and installs the new product output bundle.
 - Stale source-product results and stale emitted layer bake results are rejected deterministically.
-- `collectCommittedResourceKeysByDesiredKey`, `filterStaticBakeResultForWorks`, and resource eviction continue to operate on emitted layer desired keys.
+- `collectCommittedResourceKeysByDesiredKey`, `filterStaticBakeResultForWorks`, and resource eviction are updated or replaced to operate on product desired keys while preserving layer domain tags inside committed resources.
 
 Task checklist:
 
 - [ ] Add a resolver result type that can contain multiple `StaticScopePayload` outputs with domain/owner metadata.
 - [ ] Split coordinator status bookkeeping between source work and emitted layer bake work, or add a tagged status union that keeps the distinction explicit.
 - [ ] Update coordinator source-payload and bake enqueue paths.
-- [ ] Update batch id, desired key, and retained-scope helpers as needed for source product plus emitted layer ownership.
-- [ ] Add coordinator tests for multi-output resolution, stale rejection, and partial output eviction.
+- [ ] Update batch id, desired key, and retained-scope helpers for source product ownership plus emitted layer domain tags.
+- [ ] Add coordinator tests for multi-output resolution, stale rejection, full product replacement, and old bundle eviction.
 - [ ] Keep existing bake workers domain-oriented unless a follow-up proves they should also become source-first.
 
 Decisions and course corrections:
 
 - Keep the renderer/baker layer-oriented for this plan. Source-first resolution fixes the duplicate source work without forcing a renderer ownership rewrite in the same move.
 
-### Phase 7: Split Outdoor Detail Scene Interest On The Source-First Path
+### Phase 7: Split Outdoor Detail And Env-Cell Interest On The Source-First Path
 
 Status: pending.
 
@@ -436,7 +449,9 @@ Deliverables:
 - Add explicit outdoor detail as a separate scene-interest axis from generated outdoor detail.
 - Request source LoD `2` when explicit detail is desired without generated detail.
 - Request source LoD `3` when generated detail is desired.
+- Request source LoD `4` when env-cells are desired.
 - Keep generated detail semantics source-backed and occupancy-filtered by content assembly.
+- Treat env-cells as the top LoD, not a parallel source route.
 - Prefer one renderer `outdoor-detail` layer unless separate explicit/generated layers are needed for selection, diagnostics, or material policy.
 
 Acceptance criteria:
@@ -444,19 +459,22 @@ Acceptance criteria:
 - Scene-interest planning can request explicit outdoor detail without generated outdoor detail.
 - Detail resolver tests prove explicit detail output does not pull generated scenery.
 - Detail resolver tests prove generated detail output includes generated scenery and source mappings.
+- Env-cell resolver tests prove LoD `4` includes env-cell output and removes separate `landblock-env-cells` source requests from normal rendering.
 - Generated scenery object identities remain stable relative to today's route.
 
 Task checklist:
 
 - [ ] Add explicit/generated detail scene-interest axes near demand planning.
 - [ ] Thread the requested detail layer policy into the landblock source product.
+- [ ] Thread env-cell interest into the landblock source product as LoD `4`.
 - [ ] Decide whether emitted explicit/generated detail share `outdoor-detail` domain or need separate `StaticDomain` values.
 - [ ] Add LoD `2` and LoD `3` resolver tests.
+- [ ] Add LoD `4` env-cell source-product tests for outdoor and interior contexts.
 - [ ] Update diagnostics to distinguish explicit/generated source outputs even if renderer domain remains shared.
 
 Decisions and course corrections:
 
-- Dry run found one current `detailRadius` and one `outdoor-detail` domain. The source-first plan lets detail interest choose source LoD without immediately forcing a renderer-layer split.
+- Dry run found one current `detailRadius` and one `outdoor-detail` domain. The source-first plan lets detail interest choose source LoD without immediately forcing a renderer-layer split. Env-cells are now modeled as the highest landblock scene LoD.
 
 ### Phase 8: Resteer, Cut Over, And Measure
 

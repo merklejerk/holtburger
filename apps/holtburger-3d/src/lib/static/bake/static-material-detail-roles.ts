@@ -20,7 +20,8 @@ import {
 export type StaticMaterialDetailRoleDomain =
 	| "outdoor-buildings"
 	| "outdoor-detail"
-	| "landblock-env-cells";
+	| "landblock-env-cells"
+	| "runtime-authored-dynamic-object-material";
 
 export interface StaticMaterialDetailRolePlan {
 	readonly role: RegionDetailRoleFacts["role"];

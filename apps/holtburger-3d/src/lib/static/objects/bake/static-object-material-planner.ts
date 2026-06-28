@@ -68,16 +68,19 @@ type PaletteDataUseIdentity = Extract<
 >;
 
 export interface StaticObjectMaterialPipelinePlan {
-	readonly domain: StaticMaterialPlanningPayload["domain"];
+	readonly domain: StaticMaterialPlanningDomain;
 	readonly materialPlans: readonly StaticMaterialPlan[];
 	readonly detailRoles: readonly StaticMaterialDetailRolePlan[];
 	readonly fallbackReasons: readonly StaticMaterialFallbackReason[];
 }
 
+export type StaticMaterialPlanningDomain =
+	| OutdoorStaticObjectsScopePayload["domain"]
+	| "landblock-env-cells"
+	| "runtime-authored-dynamic-object-material";
+
 export interface StaticMaterialPlanningPayload {
-	readonly domain:
-		| OutdoorStaticObjectsScopePayload["domain"]
-		| "landblock-env-cells";
+	readonly domain: StaticMaterialPlanningDomain;
 	readonly landblock: LandblockSourceIdentity;
 	readonly materialSources: OutdoorStaticObjectsScopePayload["materialSources"];
 	readonly materialSlots: readonly StaticMaterialPlanningSlotFacts[];

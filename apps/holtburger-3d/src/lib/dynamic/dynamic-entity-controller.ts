@@ -12,6 +12,9 @@ import {
 	type DynamicEntityAnimationSelection,
 	isEnvCellDynamicSeedRecord,
 	isOutdoorDynamicSeedRecord,
+	RUNTIME_AUTHORED_DYNAMIC_DETAIL_ROLE_POLICY,
+	RUNTIME_AUTHORED_DYNAMIC_DIAGNOSTICS_BUCKET,
+	RUNTIME_AUTHORED_DYNAMIC_RESOURCE_FAMILY,
 	type DynamicEntityId,
 	type DynamicEntityRecord,
 	type DynamicEntityRenderability,
@@ -435,14 +438,23 @@ function createStaticAuthoredPresentation(options: {
 			sourceScopeKey,
 		},
 		policy: {
+			diagnosticsBucket: "static-authored-dynamic",
 			materialPlanningIdentity: {
 				kind: "setup-backed-visual",
 				visualObject,
+			},
+			materialPlanningDomain: createStaticAuthoredMaterialPlanningDomain(
+				record.owner,
+			),
+			materialDetailRolePolicy: {
+				domain: createStaticAuthoredMaterialPlanningDomain(record.owner),
+				kind: "static-domain",
 			},
 			ownershipPolicy: {
 				kind: "dynamic-visual-resource",
 				resourceId: visualObject.resourceId,
 			},
+			resourceFamily: "static-authored-dynamic-object-material",
 			retentionPolicy: {
 				kind: "static-source-scope",
 				sourceScopeKey,
@@ -477,18 +489,24 @@ function createRuntimeSpawnPresentation(options: {
 			sourceKind: source.sourceKind,
 		},
 		policy: {
+			diagnosticsBucket: RUNTIME_AUTHORED_DYNAMIC_DIAGNOSTICS_BUCKET,
 			materialPlanningIdentity: {
 				kind: "setup-backed-visual",
 				visualObject,
+			},
+			materialPlanningDomain: RUNTIME_AUTHORED_DYNAMIC_RESOURCE_FAMILY,
+			materialDetailRolePolicy: {
+				kind: RUNTIME_AUTHORED_DYNAMIC_DETAIL_ROLE_POLICY,
 			},
 			ownershipPolicy: {
 				kind: "dynamic-visual-resource",
 				resourceId: visualObject.resourceId,
 			},
+			resourceFamily: RUNTIME_AUTHORED_DYNAMIC_RESOURCE_FAMILY,
 			retentionPolicy: {
 				kind: "explicit-runtime-lifetime",
 			},
-			textureBatchId: `dynamic:${id}`,
+			textureBatchId: `runtime-dynamic:${id}`,
 			textureDomain: createRuntimeSpawnTextureDomain(),
 		},
 		visualSource: {
@@ -516,6 +534,17 @@ function createDynamicVisualObjectIdentity(
 function createStaticAuthoredTextureDomain(
 	owner: StaticWorkPeerRecordOwner,
 ): DynamicEntityTextureDomain {
+	if (owner.domain === "landblock-env-cells") {
+		return "landblock-env-cells";
+	}
+	return owner.domain === "outdoor-buildings"
+		? "outdoor-buildings"
+		: "outdoor-detail";
+}
+
+function createStaticAuthoredMaterialPlanningDomain(
+	owner: StaticWorkPeerRecordOwner,
+): "landblock-env-cells" | "outdoor-buildings" | "outdoor-detail" {
 	if (owner.domain === "landblock-env-cells") {
 		return "landblock-env-cells";
 	}

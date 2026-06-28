@@ -318,6 +318,7 @@ describe("dynamic entity resource manager", () => {
 		expect(controller.queryDynamicEntitySummary(runtimeId)).toMatchObject({
 			presentation: {
 				policy: {
+					diagnosticsBucket: "runtime-authored-dynamic",
 					materialPlanningIdentity: {
 						kind: "setup-backed-visual",
 						visualObject: {
@@ -326,7 +327,12 @@ describe("dynamic entity resource manager", () => {
 							resourceId: `dynamic-visual-resource:${runtimeId}`,
 						},
 					},
-					textureBatchId: `dynamic:${runtimeId}`,
+					materialDetailRolePolicy: {
+						kind: "runtime-authored-none",
+					},
+					materialPlanningDomain: "runtime-authored-dynamic-object-material",
+					resourceFamily: "runtime-authored-dynamic-object-material",
+					textureBatchId: `runtime-dynamic:${runtimeId}`,
 					textureDomain: "runtime-object-material",
 				},
 				visualSource: {
@@ -405,6 +411,18 @@ describe("dynamic entity resource manager", () => {
 		await flushPromises();
 
 		expect(controller.queryDynamicEntitySummary(runtimeId)).toMatchObject({
+			presentation: {
+				policy: {
+					diagnosticsBucket: "runtime-authored-dynamic",
+					materialDetailRolePolicy: {
+						kind: "runtime-authored-none",
+					},
+					materialPlanningDomain: "runtime-authored-dynamic-object-material",
+					resourceFamily: "runtime-authored-dynamic-object-material",
+					textureBatchId: `runtime-dynamic:${runtimeId}`,
+					textureDomain: "runtime-object-material",
+				},
+			},
 			renderability: {
 				reasons: [],
 				status: "renderable",

@@ -3905,8 +3905,8 @@ Risks and mitigations:
 - Risk: the dynamic texture domain cutover balloons into a renderer-wide rename of static atlas
   terms.
   Mitigation: keep the cutover narrow. Introduce a dynamic-capable domain type at texture commit and
-  placement boundaries, leave truly static layer domains named static, and record any remaining
-  `staticBatchId` naming debt explicitly instead of renaming unrelated static code.
+  placement boundaries, leave truly static layer domains named static, and convert static bake
+  `staticBatchId` values at the texture-manager boundary into the shared `textureBatchId` shape.
 - Risk: the dynamic texture-domain cutover breaks static-authored dynamic atlas sharing by treating
   every dynamic source like a runtime spawn.
   Mitigation: keep policy source-aware. Static-authored dynamics may retain static-derived
@@ -4474,7 +4474,7 @@ Verification:
 
 ### Phase 12C.2D.1: Runtime-Authored Dynamic Resource Domains
 
-Status: pending.
+Status: completed on 2026-06-28.
 
 Purpose:
 
@@ -4531,21 +4531,21 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add a runtime-authored dynamic material planning domain/policy shape.
-- [ ] Add or rename runtime bucket constants/contract fields to expose
+- [x] Add a runtime-authored dynamic material planning domain/policy shape.
+- [x] Add or rename runtime bucket constants/contract fields to expose
       `runtime-authored-dynamic-object-material`, `runtime-object-material`,
       `runtime-dynamic:<dynamic-entity-id>`, `runtime-authored-none`, and
       `runtime-authored-dynamic` where relevant.
-- [ ] Refactor `createDynamicMaterialPlanningDomain()` or replace it with a policy helper that cannot
+- [x] Refactor `createDynamicMaterialPlanningDomain()` or replace it with a policy helper that cannot
       return static domains for runtime-authored visuals.
-- [ ] Keep runtime authored texture/atlas batch identity separate from static source-scope batch
+- [x] Keep runtime authored texture/atlas batch identity separate from static source-scope batch
       identity.
-- [ ] Add runtime outdoor/env-cell assertions proving material planning/resource diagnostics use the
+- [x] Add runtime outdoor/env-cell assertions proving material planning/resource diagnostics use the
       runtime-authored domain/bucket.
-- [ ] Add static-authored regression assertions proving existing static domains still flow for real
+- [x] Add static-authored regression assertions proving existing static domains still flow for real
       static-authored dynamics.
-- [ ] Run focused dynamic resource/controller tests.
-- [ ] Run full app verification commands from `apps/holtburger-3d`.
+- [x] Run focused dynamic resource/controller tests.
+- [x] Run full app verification commands from `apps/holtburger-3d`.
 
 Risks and mitigations:
 
@@ -4562,6 +4562,42 @@ Risks and mitigations:
   Mitigation: each bucket name maps to one concern only: resource family, material planning,
   texture/atlas placement, texture batch identity, ownership node, detail-role policy, or
   diagnostics. Do not reuse one bucket string as a generic "runtime" label everywhere.
+
+Decisions and course corrections:
+
+- 2026-06-28 implementation: Added runtime-authored dynamic bucket policy fields to projected
+  dynamic presentation: resource family, material planning domain, material detail-role policy, and
+  diagnostics bucket.
+- 2026-06-28 implementation: Runtime setup-backed visuals now use
+  `runtime-authored-dynamic-object-material` for resource family and material planning domain,
+  `runtime-authored-none` for material detail-role policy, `runtime-authored-dynamic` for
+  diagnostics, `runtime-object-material` for texture/atlas domain, and
+  `runtime-dynamic:<dynamic-entity-id>` for texture batch id.
+- 2026-06-28 implementation: `planStaticObjectMaterials()` now accepts
+  `runtime-authored-dynamic-object-material` as a material planning domain, and detail-role
+  composition treats that domain as explicit no-static-detail-role policy.
+- 2026-06-28 implementation: Static-authored dynamics keep static resource family,
+  material-planning domains, static-domain detail-role policy, static texture domains, and static
+  source-scope texture batch ids.
+- 2026-06-28 implementation: Runtime outdoor and env-cell resource-readiness coverage now proves
+  both residences use the runtime-authored material/resource buckets while keeping residence as
+  source-closure/placement context only.
+- 2026-06-28 implementation cleanup: The texture manager no longer uses a generic
+  `staticBatchId` compatibility sniff when adapting visual texture commits. Static bake texture
+  uses and dynamic texture uses now enter through separate explicit adapters before becoming the
+  normalized `domain` plus `textureBatchId` texture-manager shape.
+
+Verification:
+
+- 2026-06-28: `npm run check`
+- 2026-06-28: `npm run test:ts -- dynamic-entity-resource-manager dynamic-entity-controller texture-manager`
+- 2026-06-28: `npm run test:ts`
+- 2026-06-28: `npm run lint`
+- 2026-06-28: `npm run build` passed with Vite's existing chunk-size warning.
+- 2026-06-28 cleanup: `npm run check`
+- 2026-06-28 cleanup:
+  `npm run test:ts -- texture-manager dynamic-entity-resource-manager dynamic-entity-controller`
+- 2026-06-28 cleanup: `npm run lint`
 
 ### Phase 12C.2E: Dynamic Visual Ownership, Atlas Churn, And Fixture Neutrality Checkpoint
 

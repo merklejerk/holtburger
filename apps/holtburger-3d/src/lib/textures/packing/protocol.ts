@@ -1,10 +1,10 @@
-import type { StaticDomain } from "../../static/contracts";
+import type { VisualTextureDomain } from "../../static/contracts";
 
 export type TexturePackingPageFormat = "rgba8" | "r8" | "rg8";
 
 export interface TexturePackingJob {
 	readonly jobId: string;
-	readonly domain: StaticDomain;
+	readonly domain: VisualTextureDomain;
 	readonly placementRevision: number;
 	readonly page: TexturePackingPageConstraints;
 	readonly cohorts?: readonly TexturePackingCohort[];
@@ -43,7 +43,7 @@ export interface TexturePackingPixelSource {
 
 export interface TexturePackingResult {
 	readonly jobId: string;
-	readonly domain: StaticDomain;
+	readonly domain: VisualTextureDomain;
 	readonly placementRevision: number;
 	readonly pages: readonly TexturePackingPagePixels[];
 	readonly rects: readonly TexturePackingRect[];

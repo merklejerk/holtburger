@@ -11,6 +11,13 @@ export type StaticDomain =
 	| "outdoor-detail"
 	| "landblock-env-cells";
 
+/**
+ * Texture atlas placement domain used by renderer/resource policy. Static
+ * scenery currently defines the available domains, but texture placement is
+ * shared by static and dynamic visual resources.
+ */
+export type VisualTextureDomain = StaticDomain;
+
 export interface StaticResolverScope {
 	readonly kind: "landblock";
 	readonly landblockId: number;

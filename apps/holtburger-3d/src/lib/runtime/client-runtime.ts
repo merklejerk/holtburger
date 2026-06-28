@@ -93,7 +93,7 @@ import type {
 import {
 	collectStaticDrawUnitResourceIds,
 	type StaticAuthoredDynamicSeedRecord,
-	type StaticDomain,
+	type VisualTextureDomain,
 } from "../static/contracts";
 import {
 	materializeStaticCommit,
@@ -746,7 +746,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #envCellSystemLayerAssembly = new EnvCellSystemLayerAssemblyStore();
 	readonly #staticLayersByKey = new Map<string, StaticLandblockLayerPayload>();
 	readonly #staticLayerKeyByResourceId = new Map<string, string>();
-	readonly #staticBatchIdBySourceScope = new Map<string, string>();
+	readonly #textureBatchIdByStaticSourceScope = new Map<string, string>();
 	#envCellResourceMembershipRevision = 0;
 	readonly #dynamicEntityController: DynamicEntityController;
 	readonly #committedDynamicVisualResourceIds = new Set<string>();
@@ -1719,7 +1719,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 			spatialRecords: materialized.staticSpatialRecords,
 			visibilityRecords: materialized.staticVisibilityRecords,
 		});
-		this.#recordDynamicSeedStaticBatchIds(
+		this.#recordDynamicSeedTextureBatchIds(
 			delta.staticBatchId,
 			materialized.staticAuthoredDynamicSeeds,
 		);
@@ -1792,7 +1792,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					createDynamicTextureUseCommits(
 						resource,
 						snapshot.records,
-						this.#staticBatchIdBySourceScope,
+						this.#textureBatchIdByStaticSourceScope,
 					),
 				),
 			});
@@ -1828,7 +1828,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#refreshRendererDiagnosticsSnapshot();
 	}
 
-	#recordDynamicSeedStaticBatchIds(
+	#recordDynamicSeedTextureBatchIds(
 		staticBatchId: string,
 		seeds: readonly StaticAuthoredDynamicSeedRecord[],
 	): void {
@@ -1836,8 +1836,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 			if (seed.owner.kind !== "work") {
 				continue;
 			}
-			this.#staticBatchIdBySourceScope.set(
-				createStaticBatchLookupKey(seed.owner.domain, seed.owner.scopeKey),
+			this.#textureBatchIdByStaticSourceScope.set(
+				createStaticSourceScopeTextureBatchLookupKey(seed.owner.domain, seed.owner.scopeKey),
 				staticBatchId,
 			);
 		}
@@ -3739,7 +3739,7 @@ function createDynamicRendererVisualResource(
 function createDynamicTextureUseCommits(
 	resource: DynamicRendererVisualResource,
 	records: readonly DynamicEntitySummaryDto[],
-	staticBatchIdsBySourceScope: ReadonlyMap<string, string>,
+	textureBatchIdsByStaticSourceScope: ReadonlyMap<string, string>,
 ): readonly DynamicTextureUseCommit[] {
 	const record = records.find(
 		(candidate) => candidate.id === resource.entityId,
@@ -3749,14 +3749,14 @@ function createDynamicTextureUseCommits(
 			`Cannot create dynamic texture uses for unknown entity ${resource.entityId}.`,
 		);
 	}
-	const atlasDomain = createDynamicRendererAtlasDomain(record);
-	const atlasBatchId = createDynamicRendererAtlasBatchId(
+	const textureDomain = createDynamicRendererTextureDomain(record);
+	const textureBatchId = createDynamicRendererTextureBatchId(
 		record,
-		staticBatchIdsBySourceScope,
+		textureBatchIdsByStaticSourceScope,
 	);
 	return resource.materialPlan.textureUses.map((textureUse) => ({
-		atlasBatchId,
-		atlasDomain,
+		textureBatchId,
+		textureDomain,
 		owner: {
 			kind: "dynamic-visual-resource",
 			resourceId: resource.resourceId,
@@ -3864,9 +3864,9 @@ function isDynamicRendererEligible(record: DynamicEntitySummaryDto): boolean {
 	return record.renderability.reasons.length === 0;
 }
 
-function createDynamicRendererAtlasDomain(
+function createDynamicRendererTextureDomain(
 	record: DynamicEntitySummaryDto,
-): StaticDomain {
+): VisualTextureDomain {
 	if (record.effectiveResidence.kind === "env-cell") {
 		return "landblock-env-cells";
 	}
@@ -3877,16 +3877,16 @@ function createDynamicRendererAtlasDomain(
 	return ownerDomain === "outdoor-buildings" ? ownerDomain : "outdoor-detail";
 }
 
-function createDynamicRendererAtlasBatchId(
+function createDynamicRendererTextureBatchId(
 	record: DynamicEntitySummaryDto,
-	staticBatchIdsBySourceScope: ReadonlyMap<string, string>,
+	textureBatchIdsByStaticSourceScope: ReadonlyMap<string, string>,
 ): string {
 	if (record.provenance.kind === "runtime-spawn") {
 		return `dynamic:${record.id}`;
 	}
 	return (
-		staticBatchIdsBySourceScope.get(
-			createStaticBatchLookupKey(
+		textureBatchIdsByStaticSourceScope.get(
+			createStaticSourceScopeTextureBatchLookupKey(
 				record.provenance.owner.domain,
 				record.provenance.owner.scopeKey,
 			),
@@ -3906,8 +3906,8 @@ function createDynamicRendererInstanceId(
 	return `dynamic-instance:${record.id}`;
 }
 
-function createStaticBatchLookupKey(
-	domain: StaticDomain,
+function createStaticSourceScopeTextureBatchLookupKey(
+	domain: VisualTextureDomain,
 	scopeKey: string,
 ): string {
 	return `${domain}:${scopeKey}`;

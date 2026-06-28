@@ -12,6 +12,7 @@ import type {
 	StaticBakeTextureSamplingPolicy,
 	StaticCoordinatorCommitDelta,
 	StaticScopePayload,
+	VisualTextureDomain,
 } from "../static/contracts";
 import { AtlasTexturePacker, type TexturePacker } from "./packing/packer";
 import type {
@@ -1208,8 +1209,8 @@ describe("browser texture manager", () => {
 			removedOwners: [],
 			textureUses: [
 				createDynamicTextureUseCommit({
-					atlasBatchId: "batch-a",
-					atlasDomain: "outdoor-detail",
+					textureBatchId: "batch-a",
+					textureDomain: "outdoor-detail",
 					renderSurfaceId: 0x06000010,
 					resourceId: "dynamic-windmill-part-0",
 					samplingPolicy: {
@@ -1260,8 +1261,8 @@ describe("browser texture manager", () => {
 			removedOwners: [],
 			textureUses: [
 				createDynamicTextureUseCommit({
-					atlasBatchId: "batch-a",
-					atlasDomain: "outdoor-detail",
+					textureBatchId: "batch-a",
+					textureDomain: "outdoor-detail",
 					renderSurfaceId: 0x06000010,
 					resourceId: "dynamic-windmill-part-0",
 					textureUseId: "dynamic-windmill-part-0:06000010",
@@ -1841,8 +1842,8 @@ function createTextureUseCommit(options: {
 }
 
 function createDynamicTextureUseCommit(options: {
-	readonly atlasBatchId: string;
-	readonly atlasDomain: StaticCoordinatorCommitDelta["textureUses"][number]["domain"];
+	readonly textureBatchId: string;
+	readonly textureDomain: VisualTextureDomain;
 	readonly renderSurfaceId: number;
 	readonly resourceId: string;
 	readonly samplingPolicy?: StaticBakeTextureSamplingPolicy;
@@ -1850,8 +1851,8 @@ function createDynamicTextureUseCommit(options: {
 	readonly usage?: PreparedRgbaRenderSurfaceTextureUsage;
 }): DynamicTextureUseCommit {
 	return {
-		atlasBatchId: options.atlasBatchId,
-		atlasDomain: options.atlasDomain,
+		textureBatchId: options.textureBatchId,
+		textureDomain: options.textureDomain,
 		owner: {
 			kind: "dynamic-visual-resource",
 			resourceId: options.resourceId,

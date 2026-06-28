@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AssetLookupResponseDto } from "../../lib/host/contracts";
 import type { HostAssetKey } from "./contracts";
-import { prepareV2StaticAssetPayload } from "./preparation/route-payloads";
+import { prepareV2AssetPayload } from "./preparation/route-payloads";
 import {
 	createHostAssetLookupRequest,
 	prepareHostAssetResponse,
@@ -106,7 +106,7 @@ describe("host asset preparation", () => {
 
 		for (const [assetId, expectedKind] of routes) {
 			expect(() =>
-				prepareV2StaticAssetPayload({
+				prepareV2AssetPayload({
 					assetId,
 					payload: { kind: "definitely-wrong" },
 					payloadKind: "json",
@@ -121,7 +121,7 @@ describe("host asset preparation", () => {
 	it("prepares animation payloads with typed SetOmega hook bytes intact", () => {
 		const payload = createAnimationPayload();
 
-		const prepared = prepareV2StaticAssetPayload({
+		const prepared = prepareV2AssetPayload({
 			assetId: "animation/03000751",
 			payload,
 			payloadKind: "json",
@@ -154,7 +154,7 @@ describe("host asset preparation", () => {
 
 	it("rejects malformed animation frame counts", () => {
 		expect(() =>
-			prepareV2StaticAssetPayload({
+			prepareV2AssetPayload({
 				assetId: "animation/03000751",
 				payload: {
 					...createAnimationPayload(),
@@ -170,7 +170,7 @@ describe("host asset preparation", () => {
 
 	it("rejects routes outside the static preparation set", () => {
 		expect(() =>
-			prepareV2StaticAssetPayload({
+			prepareV2AssetPayload({
 				assetId: "unknown-static/01000001",
 				payload: {},
 				payloadKind: "json",
@@ -183,7 +183,7 @@ describe("host asset preparation", () => {
 		const payload = createLandblockEnvCellsPayload();
 
 		expect(
-			prepareV2StaticAssetPayload({
+			prepareV2AssetPayload({
 				assetId: "landblock/da55ffff/env-cells",
 				payload,
 				payloadKind: "json",
@@ -197,7 +197,7 @@ describe("host asset preparation", () => {
 		});
 
 		expect(() =>
-			prepareV2StaticAssetPayload({
+			prepareV2AssetPayload({
 				assetId: "landblock/da55ffff/env-cells",
 				payload: {
 					...payload,
@@ -213,7 +213,7 @@ describe("host asset preparation", () => {
 		);
 
 		expect(() =>
-			prepareV2StaticAssetPayload({
+			prepareV2AssetPayload({
 				assetId: "landblock/da55ffff/env-cells",
 				payload: {
 					...payload,
@@ -233,7 +233,7 @@ describe("host asset preparation", () => {
 		);
 
 		expect(() =>
-			prepareV2StaticAssetPayload({
+			prepareV2AssetPayload({
 				assetId: "landblock/da55ffff/env-cells",
 				payload: {
 					...payload,

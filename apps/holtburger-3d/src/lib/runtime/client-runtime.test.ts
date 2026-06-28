@@ -1493,25 +1493,6 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("exposes runtime-owned static ray picking", async () => {
-		const runtime = createClientRuntime({
-			diagnostics: silentDiagnostics,
-			host: new FakeRuntimeHost(),
-			renderer: new FakeRenderer(),
-		});
-
-		expect(
-			runtime.pickStaticRay({
-				context: { kind: "outdoor" },
-				ray: {
-					direction: { x: 0, y: 0, z: -1 },
-					origin: { x: 0, y: 0, z: 0 },
-				},
-			}),
-		).toBeNull();
-		runtime.dispose();
-	});
-
 	it("refreshes static debug overlays when selected source bounds arrive", async () => {
 		const renderer = new FakeRenderer();
 		const resolver = new DeferredStaticResolver();

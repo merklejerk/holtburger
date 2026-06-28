@@ -28,7 +28,6 @@ describe("merged scene query", () => {
 			}),
 			{
 				context: { kind: "outdoor" },
-				mode: "debug-inspection",
 				ray: {
 					direction: { x: 0, y: 0, z: -1 },
 					origin: { x: 0, y: 0, z: 0 },
@@ -69,7 +68,7 @@ describe("merged scene query", () => {
 		expect(
 			pickMergedSceneRay(sources, {
 				...request,
-				mode: "default-selection",
+				dynamic: { defaultSelectable: true },
 			}),
 		).toMatchObject({
 			defaultSelectable: true,
@@ -79,7 +78,6 @@ describe("merged scene query", () => {
 		expect(
 			pickMergedSceneRay(sources, {
 				...request,
-				mode: "debug-inspection",
 			}),
 		).toMatchObject({
 			defaultSelectable: false,
@@ -108,7 +106,6 @@ describe("merged scene query", () => {
 			}),
 			{
 				context: { kind: "outdoor" },
-				mode: "diagnostics",
 				ray: {
 					direction: { x: 0, y: 0, z: -1 },
 					origin: { x: 192, y: 0, z: 0 },
@@ -155,7 +152,7 @@ describe("merged scene query", () => {
 		expect(
 			pickMergedSceneRay(sources, {
 				...request,
-				mode: "default-selection",
+				dynamic: { defaultSelectable: true },
 			}),
 		).toMatchObject({
 			defaultSelectable: true,
@@ -166,7 +163,6 @@ describe("merged scene query", () => {
 		expect(
 			pickMergedSceneRay(sources, {
 				...request,
-				mode: "debug-inspection",
 			}),
 		).toMatchObject({
 			defaultSelectable: false,
@@ -203,7 +199,6 @@ describe("merged scene query", () => {
 					kind: "env-cell",
 					landblockId: 0xda55ffff,
 				},
-				mode: "debug-inspection",
 				ray: {
 					direction: { x: 0, y: 0, z: -1 },
 					origin: { x: 0, y: 0, z: 0 },
@@ -226,7 +221,7 @@ function createSources(options: {
 	const envCellDynamicRecords = options.envCellDynamicRecords ?? [];
 	return {
 		outdoorAnchorLandblockId: options.outdoorAnchorLandblockId ?? null,
-		pickStaticRay: () => options.staticHit ?? null,
+		pickStaticSceneRay: () => options.staticHit ?? null,
 		queryEnvCellDynamicBounds: (query) =>
 			envCellDynamicRecords.filter(
 				(record) =>

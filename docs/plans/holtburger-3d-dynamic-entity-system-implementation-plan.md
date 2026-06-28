@@ -2357,7 +2357,7 @@ Debt and follow-up:
 
 ### Phase 9C: First-Cut Target Browser Validation
 
-Status: pending.
+Status: completed on 2026-06-28.
 
 Purpose:
 
@@ -2395,13 +2395,14 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Run the browser app against real DAT/static scene data at coordinates containing both targets.
-- [ ] Inspect runtime/browser diagnostics for the windmill target.
-- [ ] Inspect runtime/browser diagnostics for the bird target and active `SetOmega`.
-- [ ] Verify browser selection finds dynamic targets for inspection while any future
+- [x] Run the browser app against real DAT/static scene data at coordinates containing both targets.
+- [x] Inspect runtime/browser diagnostics for the windmill target.
+- [x] Inspect runtime/browser diagnostics for the bird target and active `SetOmega`.
+- [x] Verify browser selection finds dynamic targets for inspection while any future
       retail/gameplay targeting filter remains explicit and separate.
-- [ ] Record validation evidence and visual concessions in this plan.
-- [ ] Run full verification commands after any validation fixes.
+- [x] Record validation evidence and visual concessions in this plan.
+- [x] Run full verification commands after any validation fixes. Not applicable for the manual
+      validation close; Phase 9B verification was already clean and no validation fixes were made.
 
 Decisions and course corrections:
 
@@ -2417,12 +2418,25 @@ Decisions and course corrections:
   classification seed emitted, dynamic resource readiness, renderability reasons, renderer resource
   commit, renderer instance commit, skipped submissions, then query/debug hit. Treat draw-call counts
   as renderer-local telemetry until their completed-frame semantics are tightened.
+- 2026-06-28: Manual browser validation passed for the first-cut targets. The windmill and bird
+  dynamic paths look visually correct in real browser/DAT scene data, including dynamic rendering,
+  visible animation, browser selection/inspection, and the bird's active `SetOmega` motion.
+- 2026-06-28: Phase 9B cadence behavior did not require a selected-entity override,
+  debug/full-fidelity mode, or cadence telemetry to validate the targets. Selected diagnostics remain
+  accepted as last-evaluated state, not a fresh-state request.
+- 2026-06-28: No validation fixes were needed from this phase. The next phase should resteer before
+  expanding hook support or broadening the dynamic entity target set.
 
 Debt and follow-up:
 
 - Phase 9C is not the env-cell cutover gate anymore. If env-cell dynamic behavior is still
   renderer-gated by this point, Phase 8F failed and should be completed before browser validation is
   treated as meaningful.
+- Keep `dynamicDrawCalls` out of report-facing validation until renderer telemetry can distinguish
+  completed-frame draw counts from post-commit reset state.
+- If later scenes expose distance-cadence stepping, delayed first appearance, or stale far-selection
+  bounds as visible UX problems, handle that as a focused render/update quality pass rather than
+  adding diagnostics-driven refresh paths.
 
 ### Phase 10: Resteer For Broader Hook And Dynamic-System Gate
 

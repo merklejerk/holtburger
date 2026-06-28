@@ -3964,7 +3964,7 @@ Verification:
 
 ### Phase 12C.2A: Runtime Visual Texture Domain Cutover
 
-Status: pending.
+Status: completed 2026-06-28.
 
 Purpose:
 
@@ -3997,14 +3997,14 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Change `VisualTextureDomain` so runtime visual domains do not pollute `StaticDomain`.
-- [ ] Add the runtime object-material visual texture domain.
-- [ ] Change runtime-spawn presentation policy to use the runtime visual texture domain.
-- [ ] Include the runtime visual texture domain in object-material packing/role-page behavior and
+- [x] Change `VisualTextureDomain` so runtime visual domains do not pollute `StaticDomain`.
+- [x] Add the runtime object-material visual texture domain.
+- [x] Change runtime-spawn presentation policy to use the runtime visual texture domain.
+- [x] Include the runtime visual texture domain in object-material packing/role-page behavior and
       diagnostics.
-- [ ] Add texture-manager and dynamic-controller coverage for runtime texture-domain projection and
+- [x] Add texture-manager and dynamic-controller coverage for runtime texture-domain projection and
       static-authored domain stability.
-- [ ] Run focused TypeScript verification for texture-manager and dynamic-controller tests.
+- [x] Run focused TypeScript verification for texture-manager and dynamic-controller tests.
 
 Risks and mitigations:
 
@@ -4025,6 +4025,32 @@ Dry-run findings:
   include the runtime visual domain.
 - 2026-06-28 steering: static-authored dynamics should keep static domain/batching/ownership
   policy. Only runtime-authored dynamic visuals get the runtime visual texture domain.
+
+Decisions and course corrections:
+
+- 2026-06-28 implementation: Added the runtime visual texture domain as
+  `runtime-object-material` under `VisualTextureDomain` only. `StaticDomain` remains unchanged, so
+  static resolver/work contracts cannot accidentally request runtime visual work.
+- 2026-06-28 implementation: Runtime-spawn presentation policy now always uses
+  `runtime-object-material` for texture placement. Outdoor/env-cell residence still describes where
+  the entity exists; it no longer selects `outdoor-detail` or `landblock-env-cells` as a fake
+  texture provenance.
+- 2026-06-28 implementation: Texture manager now treats `runtime-object-material` as an
+  object-material domain for independent role-page packing and binding. The texture diagnostics
+  report now exposes per-batch domain facts so runtime-domain placement can be inspected rather than
+  hidden behind aggregate summary counts.
+- 2026-06-28 spicy bit: This phase only fixes texture-domain policy. Runtime spawns are still
+  pending/non-renderable until Phase 12C.2B tracks projected visual resources and Phase 12C.2C lifts
+  material planning to neutral visual identities.
+
+Verification:
+
+- 2026-06-28: `npm run test:ts -- dynamic-entity-controller`
+- 2026-06-28: `npm run test:ts -- texture-manager`
+- 2026-06-28: `npm run check`
+- 2026-06-28: `npm run test:ts`
+- 2026-06-28: `npm run lint`
+- 2026-06-28: `npm run build` passed with Vite's existing chunk-size warning.
 
 ### Phase 12C.2B: Projected Dynamic Resource Tracking
 

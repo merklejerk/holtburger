@@ -232,7 +232,7 @@ describe("dynamic entity controller", () => {
 						kind: "explicit-runtime-lifetime",
 					},
 					textureBatchId: "dynamic:runtime-spawn:1",
-					textureDomain: "outdoor-detail",
+					textureDomain: "runtime-object-material",
 				},
 				visualSource: {
 					setupModelId: 0x020003e5,
@@ -328,6 +328,12 @@ describe("dynamic entity controller", () => {
 				envCellId: 0xda550100,
 				kind: "env-cell",
 				landblockId: 0xda55ffff,
+			},
+			presentation: {
+				policy: {
+					textureBatchId: "dynamic:runtime-spawn:1",
+					textureDomain: "runtime-object-material",
+				},
 			},
 		});
 		expect(

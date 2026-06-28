@@ -2094,7 +2094,7 @@ Deliverables:
   enough to validate spatial/query membership. Do not add a decorative overlay just because this
   phase mentions bounds.
 - Add targeted smoke coverage for the compact dynamic summary, selected dynamic entity inspection,
-  and renderer diagnostics fields needed by Phase 9B.
+  and renderer diagnostics fields needed by Phase 9C.
 - Record any remaining validation debt in this plan before moving to browser/manual checks.
 
 Acceptance criteria:
@@ -2149,7 +2149,7 @@ Decisions and course corrections:
   hits in normal browser click picking. Phase 9A should document and test that browser inspection
   policy instead of pretending it is retail gameplay targetability.
 - 2026-06-27 dry run: A dynamic bounds overlay is optional. Existing snapshot/report data may be
-  enough for Phase 9B; only add overlay primitives if manual validation cannot tell whether bad
+  enough for Phase 9C; only add overlay primitives if manual validation cannot tell whether bad
   picking/rendering is caused by bounds/index membership versus renderer output.
 - 2026-06-27: Phase 8F now precedes this diagnostics phase. Phase 9A should report env-cell and
   outdoor dynamic records through one dynamic diagnostics family instead of preserving the old
@@ -2173,7 +2173,7 @@ Decisions and course corrections:
 - 2026-06-28 dry run: Renderer per-entity residency is not directly queryable today; dynamic renderer
   resource and instance ids are deterministic from the entity id. Selected dynamic diagnostics should
   report those deterministic ids plus global renderer counters first. Add renderer-private
-  per-entity lookup only if Phase 9B proves the counters and deterministic ids are insufficient.
+  per-entity lookup only if Phase 9C proves the counters and deterministic ids are insufficient.
 - 2026-06-28 dry run: The selected dynamic debug overlay already works through
   `RuntimeSceneDebugSelection` and `queryDynamicCurrentBounds`, so a dynamic bounds overlay is not
   needed for 9A unless manual validation finds a bounds/query mismatch.
@@ -2189,7 +2189,7 @@ Decisions and course corrections:
   dynamic renderer resource/instance ids, and global dynamic renderer counters.
 - 2026-06-28: Renderer-private per-entity residency lookup was not added. Dynamic renderer
   resource/instance ids are deterministic from the entity id, and global renderer counters are enough
-  for Phase 9B unless manual validation proves otherwise.
+  for Phase 9C unless manual validation proves otherwise.
 - 2026-06-28: No new dynamic bounds overlay was added. The existing selected dynamic debug overlay
   already uses current dynamic bounds through `RuntimeSceneDebugSelection`.
 - 2026-06-28: Focused test coverage proves the compact dynamic report does not expose itemized
@@ -2213,16 +2213,114 @@ Verification:
 
 Debt and follow-up:
 
-- Dynamic transparent/additive render ordering remains a validation concern. Phase 9B should record
+- Dynamic transparent/additive render ordering remains a validation concern. Phase 9C should record
   whether the first-cut targets expose visible ordering problems; a later render-quality pass can
   share or generalize the static transparent sort machinery if needed.
 - Selected dynamic diagnostics report deterministic renderer ids and global renderer dynamic
-  counters, not renderer-owned per-entity residency. Add renderer-private lookup only if Phase 9B
+  counters, not renderer-owned per-entity residency. Add renderer-private lookup only if Phase 9C
   cannot validate a real failure without it.
 - Report-facing diagnostics intentionally omit dynamic draw-call counts until renderer telemetry can
   distinguish last completed frame draw calls from post-commit reset state.
 
-### Phase 9B: First-Cut Target Browser Validation
+### Phase 9B: Distance-Based Dynamic Animation Update Cadence
+
+Status: pending.
+
+Purpose:
+
+- Reduce dynamic animation, bounds, and index update cost for distant animated dynamic entities while
+  preserving accurate near-field motion.
+
+Deliverables:
+
+- Add app/runtime-local update cadence policy for animated dynamic entities:
+  - Within `64m` of the active camera: update every frame.
+  - Within `128m` of the active camera: update at `10Hz`.
+  - Beyond `128m`: update at `1Hz`.
+- Base distance checks on render-space distance from the active camera to the entity's current bounds
+  center when current bounds exist. Fall back to the entity base placement translated into render
+  space when no current bounds exist yet.
+- Apply the policy to all animated dynamic entities, not only static-authored dynamic scenery. The
+  current implementation may only have static-authored dynamic records, but the policy and APIs must
+  not encode that limitation.
+- Keep the policy in browser/app runtime orchestration. Do not put camera-distance presentation
+  cadence into shared entity truth, content data, protocol state, or renderer-owned animation.
+- Avoid renderer-side hidden animation. Renderer submissions should still consume the latest dynamic
+  runtime pose/bounds state.
+- Do not add a debug/full-fidelity toggle or selected-entity cadence override in this phase.
+  Selection/inspection reads the last evaluated dynamic state at the entity's distance-based cadence.
+- Keep source residence, effective residence, bounds/index membership, and renderer submissions
+  consistent with the latest evaluated pose even when cadence throttles updates.
+
+Acceptance criteria:
+
+- Entities within `64m` update animation playback, current bounds, index membership, and renderer
+  instance submissions every frame.
+- Entities between `64m` and `128m` update no faster than `10Hz`.
+- Entities beyond `128m` update no faster than `1Hz`.
+- Selecting or inspecting a dynamic entity does not alter update cadence. Selected diagnostics may
+  show last evaluated state, including distance-throttled stale state.
+- The policy applies through dynamic runtime/controller entry points that can support future live
+  animated entities, not through static-authored seed special cases.
+- Query/picking behavior remains coherent: stale far bounds are an explicit presentation tradeoff,
+  and selected diagnostics/debug bounds report the same last evaluated state used by renderer/query.
+- Renderer resources and instances are not recreated just because cadence changes; only pose/bounds
+  updates are throttled.
+- If there is no current camera frame state, dynamic updates continue every frame rather than
+  stalling startup/resource readiness.
+
+Task checklist:
+
+- [ ] Add a pure dynamic animation update cadence policy helper and tests for the `64m`, `128m`,
+      `10Hz`, and `1Hz` thresholds.
+- [ ] Add render-space distance helpers for outdoor and env-cell dynamic records, using current
+      bounds center first and translated base placement as fallback.
+- [ ] Feed active camera position/render-anchor context into dynamic update scheduling from
+      `ClientRuntimeImpl.tickFrame()`.
+- [ ] Extend `DynamicEntityController.tick()` with scheduling input so animation playback,
+      placement/bounds/index updates, and dynamic renderer instance commits only run for due records.
+- [ ] Prove selected dynamic inspection does not alter cadence and reports last evaluated state.
+- [ ] Prove the policy does not depend on static-authored provenance.
+- [ ] Prove skipped far updates preserve existing render/query state rather than clearing resources,
+      bounds, or index membership.
+- [ ] Prove startup/no-camera-frame behavior still updates every dynamic entity.
+- [ ] Run full verification commands.
+
+Decisions and course corrections:
+
+- 2026-06-28: Added as an immediate phase before first-cut browser validation after the first
+  dynamic diagnostics pass showed dozens of active animated dynamics in one scene. Performance policy
+  should land before manual validation so validation observes the intended update behavior.
+- 2026-06-28: This is presentation/update scheduling, not world truth. The dynamic runtime remains
+  capable of exact animation and bounds updates; browser/app runtime decides how often to evaluate
+  each animated entity based on camera distance.
+- 2026-06-28: No debug/full-fidelity toggle and no selected-entity cadence override. Selection is a
+  read/inspection concern, not scheduler control.
+- 2026-06-28 dry run: `DynamicEntityController.tick()` currently updates every record as one batch.
+  The cadence policy should be passed into the controller as scheduling input and applied before
+  `DynamicAnimationPlayer.update()` and `DynamicPlacementTracker.update()`. Filtering only renderer
+  instance commits would leave animation and spatial indexes updating every frame, which misses the
+  goal.
+- 2026-06-28 dry run: Camera positions are render-space, while outdoor dynamic bounds are
+  source-landblock-local. Scheduling distance must translate outdoor records through the current
+  render anchor before comparison. Env-cell dynamic bounds are already landblock render-local for the
+  interior context.
+- 2026-06-28 dry run: Throttling animation evaluation also throttles `SetOmega` integration and
+  current-frame bounds. That is acceptable for far presentation. Selected diagnostics and debug
+  bounds intentionally report the last evaluated state rather than forcing a refresh.
+- 2026-06-28 dry run: Add a pure scheduler helper first. The runtime fixtures are heavy, and cadence
+  threshold math should be tested without needing static resolver/baker setup.
+
+Debt and follow-up:
+
+- The first scheduler should use current bounds center when available and base placement as fallback.
+  If this proves too conservative for large animated entities, add a later focused pass that uses
+  better bounds-distance estimates without changing the cadence policy.
+- Future live players/creatures may need stricter near-field or gameplay-owned policies. Do not
+  reuse the ambient dynamic scenery cadence blindly for authoritative gameplay entities without a
+  separate review.
+
+### Phase 9C: First-Cut Target Browser Validation
 
 Status: pending.
 
@@ -2277,7 +2375,7 @@ Decisions and course corrections:
   would require too much raw snapshot spelunking and would be too easy to misread.
 - 2026-06-27 dry run, superseded: The validation target was previously outdoor-only while env-cell
   dynamic render membership was gated by a temporary render-path-pending diagnostic.
-- 2026-06-27: Phase 8F now owns env-cell dynamic cutover before manual target validation. Phase 9B
+- 2026-06-27: Phase 8F now owns env-cell dynamic cutover before manual target validation. Phase 9C
   still validates the two known first-cut outdoor targets, while env-cell dynamic correctness should
   already be proven by Phase 8F tests and surfaced in Phase 9A diagnostics.
 - 2026-06-27 dry run: If either first-cut target is invisible, check diagnostics in this order:
@@ -2287,7 +2385,7 @@ Decisions and course corrections:
 
 Debt and follow-up:
 
-- Phase 9B is not the env-cell cutover gate anymore. If env-cell dynamic behavior is still
+- Phase 9C is not the env-cell cutover gate anymore. If env-cell dynamic behavior is still
   renderer-gated by this point, Phase 8F failed and should be completed before browser validation is
   treated as meaningful.
 
@@ -2344,12 +2442,23 @@ Cleanup targets:
 - `prepareV2StaticAssetPayload` if Phase 1 leaves that name in place after adding animation assets.
 - Redundant dynamic/static material interpretation helpers.
 - Diagnostics fields that were useful during bring-up but are hollow or misleading.
+- `ScenePickMode` caller-intent names such as `debug-inspection` or `diagnostics` if they start
+  driving query behavior. Prefer explicit query inclusion/filter policy over routing behavior by
+  diagnostic/debug caller names.
+- `DynamicRuntimeSnapshot.records`/`DynamicEntitySummaryDto` shape if it keeps accumulating fields
+  for selected inspection. Split renderer/runtime operational state from selected inspection
+  projections before diagnostics become the primary DTO consumer.
+- Historical plan language that still suggests durable unsupported-hook counts, warning/error
+  histories, or diagnostics-owned bookkeeping. Keep diagnostics as projections over operational
+  state; console warnings remain console-owned.
 - Any tests that only assert removed behavior or debug-only logging.
 
 Acceptance criteria:
 
 - No dead transitional wrappers remain unless this plan records a concrete reason and owner.
 - Shared helpers have honest names and ownership.
+- Diagnostics and inspection APIs remain projections over runtime/renderer state rather than owning
+  bookkeeping that the animation, query, or renderer pipelines must preserve.
 - Lint/dead-code checks pass or existing unrelated findings are documented.
 - The implementation plan is updated with completed decisions and remaining full-system gates.
 

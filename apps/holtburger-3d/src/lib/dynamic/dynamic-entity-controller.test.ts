@@ -44,6 +44,47 @@ describe("dynamic entity controller", () => {
 		expect(controller.createSnapshot().records).toHaveLength(1);
 	});
 
+	it("projects static-authored presentation policy from source facts and texture batch lookup", () => {
+		const controller = new DynamicEntityController();
+
+		controller.ingestStaticSeeds(
+			[createOutdoorSeedRecord()],
+			new Map([
+				[
+					"outdoor-buildings:landblock:da55ffff",
+					"static-batch:outdoor-buildings",
+				],
+			]),
+		);
+
+		expect(controller.createSnapshot().records[0]?.presentation).toMatchObject({
+			diagnostics: {
+				kind: "static-authored",
+				sourceScopeKey: "outdoor-buildings:landblock:da55ffff",
+			},
+			policy: {
+				materialPlanningIdentity: {
+					kind: "static-authored-object",
+				},
+				ownershipPolicy: {
+					kind: "dynamic-visual-resource",
+					resourceId:
+						"dynamic-visual-resource:static-authored-outdoor:outdoor-buildings:landblock:da55ffff:object:building:windmill-0:setup:020003e5",
+				},
+				retentionPolicy: {
+					kind: "static-source-scope",
+					sourceScopeKey: "outdoor-buildings:landblock:da55ffff",
+				},
+				textureBatchId: "static-batch:outdoor-buildings",
+				textureDomain: "outdoor-buildings",
+			},
+			visualSource: {
+				setupModelId: 0x020003e5,
+				sourceAssetIds: ["setup-model/020003e5"],
+			},
+		});
+	});
+
 	it("replaces records for the same source identity when the static work owner changes", () => {
 		const controller = new DynamicEntityController();
 
@@ -125,20 +166,20 @@ describe("dynamic entity controller", () => {
 		});
 	});
 
-		it("removes classified env-cell records with unretained env-cell scopes", () => {
-			const controller = new DynamicEntityController();
-			controller.ingestStaticSeeds([
-				createOutdoorSeedRecord(),
-				createEnvCellDynamicSeedRecord(),
+	it("removes classified env-cell records with unretained env-cell scopes", () => {
+		const controller = new DynamicEntityController();
+		controller.ingestStaticSeeds([
+			createOutdoorSeedRecord(),
+			createEnvCellDynamicSeedRecord(),
 		]);
 
 		controller.retainStaticScopes([createRetainedScope()]);
 
 		expect(controller.createSnapshot().records).toHaveLength(1);
-			expect(controller.createSnapshot().records[0]?.provenance.kind).toBe(
-				"static-authored-outdoor",
-			);
-		});
+		expect(controller.createSnapshot().records[0]?.provenance.kind).toBe(
+			"static-authored-outdoor",
+		);
+	});
 
 	it("creates runtime spawns with internal ids and server ids as metadata", () => {
 		const controller = new DynamicEntityController();
@@ -173,6 +214,31 @@ describe("dynamic entity controller", () => {
 		});
 		expect(controller.queryDynamicEntitySummary(firstId)).toMatchObject({
 			id: firstId,
+			presentation: {
+				diagnostics: {
+					kind: "runtime-spawn",
+					serverInstanceIdMetadata: { id: "server-object:5001" },
+				},
+				policy: {
+					materialPlanningIdentity: {
+						kind: "pending",
+						reason: "runtime-material-planning-identity-unsupported",
+					},
+					ownershipPolicy: {
+						kind: "dynamic-visual-resource",
+						resourceId: "dynamic-visual-resource:runtime-spawn:1",
+					},
+					retentionPolicy: {
+						kind: "explicit-runtime-lifetime",
+					},
+					textureBatchId: "dynamic:runtime-spawn:1",
+					textureDomain: "outdoor-detail",
+				},
+				visualSource: {
+					setupModelId: 0x020003e5,
+					sourceAssetIds: ["setup-model/020003e5"],
+				},
+			},
 			provenance: {
 				kind: "runtime-spawn",
 				sourceKind: "browser-authored-server-shaped",
@@ -184,6 +250,10 @@ describe("dynamic entity controller", () => {
 				setupModelId: 0x020003e5,
 			},
 		});
+		expect(
+			controller.queryDynamicEntitySummary(firstId)?.presentation.policy
+				.textureBatchId,
+		).not.toContain("server-object:5001");
 	});
 
 	it("keeps runtime spawns across static retention until explicit removal", () => {
@@ -271,7 +341,7 @@ describe("dynamic entity controller", () => {
 			}),
 		).toBe(false);
 	});
-	});
+});
 
 function createOutdoorSeedRecord(
 	options: {

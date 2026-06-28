@@ -3519,7 +3519,7 @@ Deliverables:
   renderability.
 - Do not call the current static-shaped `DynamicEntityResourceManager.trackSetupAnimationResources()`
   for runtime spawns in Phase 12B. Resource tracking for runtime setup visual sources belongs to
-  Phase 12C.2.
+  Phase 12C.2B.
 - Add tests proving runtime spawns do not fabricate static seed records, static source scopes, static
   object identities, or static draw units.
 
@@ -3569,7 +3569,8 @@ Risks and mitigations:
 - Risk: this phase accidentally implements visual loading through fake static seed facts to get a
   rendered result.
   Mitigation: stop at lifecycle/source ownership if the neutral setup visual source projection is
-  not ready. Resource readiness moves to Phase 12C.2 and rendering moves to Phase 12C.3.
+  not ready. Resource tracking/readiness moves to Phase 12C.2B/12C.2C and rendering moves to Phase
+  12C.3.
 - Risk: static retention removes runtime spawns during ordinary scene-interest changes.
   Mitigation: make static retention provenance-aware and add a regression test where a runtime spawn
   survives `retainStaticScopes([])` or the equivalent static-retention call.
@@ -3595,14 +3596,14 @@ Decisions and course corrections:
 - 2026-06-28 implementation: Runtime spawns intentionally remain pending/non-renderable in Phase
   12B. They do not call `DynamicEntityResourceManager.trackSetupAnimationResources()`, because that
   path is still static-seed-shaped. Dynamic presentation policy projection, neutral setup visual
-  readiness, and runtime renderer integration remain Phase 12C.1 through 12C.3 work.
+  readiness, first rendering, and rendering breadth remain Phase 12C.1 through 12C.4 work.
 - 2026-06-28 implementation: Dynamic snapshots now expose `staticAuthoredCount` and
   `runtimeSpawnCount` while retaining `staticSeedCount` as a compatibility alias for static-authored
   count. Runtime diagnostics now read the explicit static-authored count.
 - 2026-06-28 spicy bit: `client-runtime.ts` has a type-safe runtime-spawn atlas fallback branch even
   though runtime spawns are not renderable yet. This keeps the source union honest at compile time,
   but the real dynamic texture-domain, correctness-first runtime batching, and shared ownership
-  policy is still Phase 12C.1/12C.2 debt.
+  policy is still Phase 12C.1 through 12C.2C debt.
 
 Verification:
 
@@ -3757,7 +3758,7 @@ Verification:
 
 ### Phase 12C.1: Dynamic Presentation Policy Projection
 
-Status: pending.
+Status: completed.
 
 Purpose:
 
@@ -3857,27 +3858,27 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Define `DynamicPresentationPolicy`, `DynamicVisualSource`, and
+- [x] Define `DynamicPresentationPolicy`, `DynamicVisualSource`, and
       `DynamicDiagnosticContext`-style types with documented fields for retention, texture domain,
       texture batch id, ownership, material planning identity/pending reason, source assets, setup
       id, animation selection/default evidence, effective residence, supported model-data subset,
       and optional correlation context.
-- [ ] Add projected presentation policy/visual/diagnostic context to `DynamicEntityRecord` and
+- [x] Add projected presentation policy/visual/diagnostic context to `DynamicEntityRecord` and
       `DynamicEntitySummaryDto`.
-- [ ] Add source-specific projection functions for static-authored and runtime-spawn records.
-- [ ] Move dynamic retention and dynamic texture policy derivation to consume projected policy fields
+- [x] Add source-specific projection functions for static-authored and runtime-spawn records.
+- [x] Move dynamic retention and dynamic texture policy derivation to consume projected policy fields
       instead of raw `provenance.kind`, full static owner facts, or server-authored ids.
-- [ ] Preserve static-authored dynamic domain/batch reuse where it is backed by real static source
+- [x] Preserve static-authored dynamic domain/batch reuse where it is backed by real static source
       evidence, while keeping texture owners and leases dynamic-resource-owned.
-- [ ] Add or plan the minimal `VisualTextureDomain` extension so runtime-spawn texture policy is not
+- [x] Add or plan the minimal `VisualTextureDomain` extension so runtime-spawn texture policy is not
       represented as static resolver/work domain policy by default.
-- [ ] Add runtime-spawn per-entity texture batch coverage proving server ids are not used for
+- [x] Add runtime-spawn per-entity texture batch coverage proving server ids are not used for
       texture identity, and record visual-recipe batching as follow-up debt if it is not implemented.
-- [ ] Add coverage proving diagnostic/correlation metadata is not used as store, renderer, lease,
+- [x] Add coverage proving diagnostic/correlation metadata is not used as store, renderer, lease,
       removal, or texture identity.
-- [ ] Run focused TypeScript verification for dynamic contracts/controller/store/runtime policy
+- [x] Run focused TypeScript verification for dynamic contracts/controller/store/runtime policy
       projection tests.
-- [ ] Run full app verification commands from `apps/holtburger-3d`.
+- [x] Run full app verification commands from `apps/holtburger-3d`.
 
 Risks and mitigations:
 
@@ -3924,114 +3925,313 @@ Risks and mitigations:
   containment, equipment, inventory, replacement, prediction, and cancellation semantics remain host
   runtime concerns that project visual facts into the browser renderer.
 
-### Phase 12C.2: Neutral Setup Visual Resource Readiness
+Decisions and course corrections:
+
+- 2026-06-28 implementation: Added projected presentation context to dynamic records and summaries.
+  The shape is stored under `presentation` and carries `policy`, `visualSource`, and `diagnostics`.
+  `provenance` remains on summaries for diagnostics/backward inspection, but it is no longer the
+  source of dynamic retention or renderer texture policy.
+- 2026-06-28 implementation: Static-authored projection keeps real static evidence static while
+  deriving static-scope retention, static-derived `textureDomain`/`textureBatchId`, dynamic
+  visual-resource ownership, setup visual source asset ids, and static-authored material planning
+  identity. `ClientRuntime` now passes the static source-scope texture batch map into seed ingestion
+  so this policy is decided at projection time.
+- 2026-06-28 implementation: Runtime-spawn projection uses explicit runtime lifetime, dynamic
+  visual-resource ownership, deterministic per-runtime-entity `textureBatchId`, local dynamic visual
+  resource id, and diagnostic server-instance metadata. Server-authored ids are not used for store,
+  renderer, lease, removal, or texture identity.
+- 2026-06-28 implementation: Dynamic store retention now consumes
+  `presentation.policy.retentionPolicy`, and runtime dynamic texture commit creation consumes
+  `record.presentation.policy.textureDomain` and `textureBatchId` instead of deriving them from
+  `record.provenance`.
+- 2026-06-28 concession: Runtime outdoor spawns still project to the current `outdoor-detail`
+  `VisualTextureDomain`. Phase 12C.1 moved the policy decision out of provenance, but runtime
+  spawns need their own runtime visual texture domain before they render. That cutover belongs to
+  Phase 12C.2A, before Phase 12C.3 renderer integration and before Phase 12D browser UX.
+- 2026-06-28 spicy bit: Runtime material planning identity is explicitly pending with
+  `runtime-material-planning-identity-unsupported`. That is intentional. Phase 12C.1 did not fake
+  `StaticObjectInstanceIdentity`; Phase 12C.2B/12C.2C own the real material identity work.
+
+Verification:
+
+- 2026-06-28: `npm run test:ts -- dynamic-entity-controller`
+- 2026-06-28: `npm run test:ts -- dynamic`
+- 2026-06-28: `npm run test:ts -- client-runtime`
+- 2026-06-28: `npm run check`
+- 2026-06-28: `npm run test:ts`
+- 2026-06-28: `npm run lint`
+- 2026-06-28: `npm run build` passed with Vite's existing chunk-size warning.
+
+### Phase 12C.2A: Runtime Visual Texture Domain Cutover
 
 Status: pending.
 
 Purpose:
 
-- Make dynamic resource readiness consume the projected visual source and policies from 12C.1, so
-  runtime spawns can prepare setup/gfx/material resources without pretending to be static object
-  instances.
+- Give runtime-authored dynamic visuals their own texture placement domain before they can become
+  resource-ready or renderable. This phase is only the visual-domain cutover; it must not solve
+  material planning, renderer integration, browser UX, or server gameplay semantics.
 
 Deliverables:
 
-- Refactor `DynamicEntityResourceManager` to track the projected `DynamicVisualSource` and
-  `DynamicPresentationPolicy` rather than `StaticAuthoredDynamicSeedFacts` or source-specific
-  runtime facts.
-- Reuse existing setup model, setup appearance, gfx, material, palette, render-surface, and
-  object-material preparation behavior after the projection has produced neutral visual facts.
-- Introduce the neutral material planning identity needed by object-material preparation, or keep
-  runtime spawns explicitly pending with a clear console log if the identity cannot be represented
-  yet. Do not fabricate `StaticObjectInstanceIdentity` for runtime spawns.
-- Treat `createDynamicMaterialSlotRequirements()` and its `StaticObjectInstanceIdentity` /
-  `static-material-slot` output as the main material-planning blocker. The neutral identity shape
-  should describe what object-material planning actually needs; it should not be a renamed static
-  identity with runtime values stuffed into it.
-- Split texture lifetime from entity identity by adding a dynamic visual-resource ownership node or
-  equivalent reference-counted/graph-owned model. Dynamic entities reference visual resources;
-  visual resources own prepared-asset leases and texture-use owners; atlas entries remain resident
-  while the visual-resource refcount is nonzero.
-- Keep full `ModelData` composition bounded: support only the subset needed for Phase 12D fixture
-  spawns, and skip unsupported model-data facts with console logs instead of durable diagnostics.
-- Prove the runtime `setup-default` animation path from available setup/motion evidence. If the
-  evidence is not available in current prepared payloads, require explicit animation for renderable
-  runtime spawns or fail/log clearly; do not silently treat animation id `0` as a valid default.
+- Extend `VisualTextureDomain` with a runtime visual/object-material domain without adding that
+  value to `StaticDomain`. Static resolver/work domains remain static-only.
+- Update runtime-spawn presentation policy to use the runtime visual texture domain for all
+  runtime-authored object-material visuals. Residence still describes where the entity renders; it
+  does not select a static texture domain.
+- Wire the runtime visual texture domain through texture packing, role-page routing, diagnostics,
+  dynamic texture commits, and texture-manager tests.
+- Preserve static-authored dynamic texture policy: static-authored dynamics still use the static
+  domains/batches projected from their static source scope.
 
 Acceptance criteria:
 
-- Runtime-spawn visual source records can enter dynamic resource readiness without static seed
-  records, static source scopes, static object identities, or static draw units.
-- Runtime-spawn visual readiness does not call material planning through fabricated
-  `StaticObjectInstanceIdentity` or `static-material-slot` identities. If neutral material planning
-  identity is not complete, runtime spawns stay explicitly pending/non-renderable with console
-  logging.
-- A runtime-spawn dynamic entity can become resource-ready when it supplies supported setup,
-  material, model-data, and animation facts.
-- Removing one dynamic entity releases only its dynamic visual-resource ownership. If a dynamic
-  visual resource or atlas entry is shared, removal must not evict resources still referenced by
-  another dynamic entity; if per-entity runtime batches are still used, the plan records duplicate
-  atlas/cache placement as follow-up debt.
-- Runtime setup-default animation either uses proven prepared source facts or is explicitly rejected
-  for renderable spawns with console logging.
+- `VisualTextureDomain` can represent a runtime object-material domain while `StaticDomain` remains
+  unchanged.
+- Runtime-spawn presentation policy no longer maps runtime spawns through `outdoor-detail`,
+  `landblock-env-cells`, or any other static resolver/work domain.
+- Texture packing and binding treat the runtime visual texture domain as an object-material domain,
+  not terrain and not static resolver work.
+- Static-authored dynamic texture policy remains unchanged and continues to use static-derived
+  domains and static-source batch ids.
+
+Task checklist:
+
+- [ ] Change `VisualTextureDomain` so runtime visual domains do not pollute `StaticDomain`.
+- [ ] Add the runtime object-material visual texture domain.
+- [ ] Change runtime-spawn presentation policy to use the runtime visual texture domain.
+- [ ] Include the runtime visual texture domain in object-material packing/role-page behavior and
+      diagnostics.
+- [ ] Add texture-manager and dynamic-controller coverage for runtime texture-domain projection and
+      static-authored domain stability.
+- [ ] Run focused TypeScript verification for texture-manager and dynamic-controller tests.
+
+Risks and mitigations:
+
+- Risk: the runtime domain leaks into static resolver or static bake contracts.
+  Mitigation: make the new value part of `VisualTextureDomain` only, and keep static demand/work
+  APIs typed as `StaticDomain`.
+- Risk: runtime domain is only renamed policy while packing still assumes the old static domain set.
+  Mitigation: add texture-manager coverage around placement, binding, diagnostics, and independent
+  role-page packing for the runtime visual domain.
+
+Dry-run findings:
+
+- 2026-06-28 dry run: `VisualTextureDomain` is currently a direct alias of `StaticDomain`, so adding
+  a runtime value to `StaticDomain` would blur static resolver/work policy with runtime visual
+  policy.
+- 2026-06-28 dry run: texture role-page routing already sends every non-terrain domain through
+  object-material role pages, but independent role-page packing hard-codes static domains and must
+  include the runtime visual domain.
+- 2026-06-28 steering: static-authored dynamics should keep static domain/batching/ownership
+  policy. Only runtime-authored dynamic visuals get the runtime visual texture domain.
+
+### Phase 12C.2B: Projected Dynamic Resource Tracking
+
+Status: pending.
+
+Purpose:
+
+- Make `DynamicEntityResourceManager` consume projected presentation facts instead of static seed
+  facts, and let runtime spawns enter resource tracking without fabricating static source scopes,
+  static object identities, or static draw units.
+
+Deliverables:
+
+- Add a projected resource tracking input based on `DynamicVisualSource` and
+  `DynamicPresentationPolicy`.
+- Refactor static-authored dynamic tracking to enter resource readiness through the same projected
+  input after static seed projection has run.
+- Add a runtime-spawn tracking path from create/update/remove that can request setup/animation
+  resources and then attempt visual resource readiness.
+- Preserve an explicit pending/non-renderable stop when runtime material planning identity is still
+  `pending`; log the blocker to the console and do not create durable warning/failure records for
+  that unsupported runtime path.
+- Keep `setup-default` animation from silently becoming animation id `0`. Runtime spawns must use an
+  explicit animation or provide proven setup-default evidence before they can become renderable.
+
+Acceptance criteria:
+
+- Static-authored and runtime-authored dynamic records enter resource tracking through the projected
+  presentation source/policy shape.
+- Runtime spawns can request setup/animation resources without static seed records or source-scope
+  facts.
+- Runtime spawns with pending material identity remain non-renderable with a console log rather than
+  flowing into `StaticObjectInstanceIdentity` or `static-material-slot` material planning.
+- Runtime `setup-default` animation is explicitly rejected/logged for renderable readiness unless
+  this phase proves the default animation from prepared source facts.
 - Existing static-authored dynamic resource readiness remains stable.
 
 Task checklist:
 
-- [ ] Refactor dynamic resource readiness to track projected visual source/policy shapes instead of
-      static-authored source evidence.
-- [ ] Add neutral material planning identity support or explicit pending/rejection behavior for
-      runtime spawns.
-- [ ] Refactor or wrap `createDynamicMaterialSlotRequirements()` so runtime material planning either
-      uses neutral material identity or stops at an explicit pending state.
-- [ ] Add dynamic visual-resource ownership/refcount coverage proving create/remove churn does not
-      leak prepared-asset leases or texture owners.
-- [ ] Add focused setup-default animation evidence coverage, or explicit rejection/logging coverage
-      proving runtime setup-default does not silently use animation id `0`.
-- [ ] Add focused runtime-spawn resource-readiness tests.
-- [ ] Run focused TypeScript verification for dynamic resource tests.
-- [ ] Run full app verification commands from `apps/holtburger-3d`.
+- [ ] Add a resource-manager entry point that accepts projected dynamic visual source/policy.
+- [ ] Refactor static-authored dynamic resource tracking to use the projected entry point.
+- [ ] Wire runtime create/update/remove into projected resource tracking and release.
+- [ ] Add explicit pending/logging behavior for runtime material planning identities that are still
+      unsupported.
+- [ ] Add explicit-animation coverage and setup-default rejection or evidence coverage.
+- [ ] Add focused runtime-spawn tracking tests proving no static seed/source-scope/object identity is
+      required.
+- [ ] Run focused TypeScript verification for dynamic resource-manager/controller tests.
 
 Risks and mitigations:
 
 - Risk: the neutral visual source boundary lands too low and becomes a pile of per-call adapters.
   Mitigation: make `DynamicEntityResourceManager` consume the projected visual source/policy shape
   directly.
-- Risk: static-source facts get renamed or generalized prematurely.
-  Mitigation: keep static-authored facts static; only project into neutral visual facts where
-  setup/gfx/material readiness needs shared inputs.
-- Risk: material planning identity becomes fake static identity with nicer names.
-  Mitigation: require neutral fields to describe what material planning actually needs, and keep
-  unsupported runtime spawns pending rather than manufacturing static object evidence.
+- Risk: this phase accidentally implements renderer visibility.
+  Mitigation: keep output limited to resource state changes; renderer/query/selection remains
+  Phase 12C.3.
+- Risk: runtime pending becomes a durable diagnostic diary.
+  Mitigation: log unsupported runtime facts when encountered, update current resource/renderability
+  state, and avoid persistent warning/error records for unsupported runtime facts.
 
 Dry-run findings:
 
-- 2026-06-28 dry run: `DynamicEntitySummaryDto` is part of the 12C.1 control-plane cleanup because
-  runtime renderer sync currently receives summaries and derives texture domain/batch from
-  `record.provenance`. The projected policy must be available on summaries or consumers will keep
-  taking the old path.
-- 2026-06-28 dry run: setup/animation resource keys can be neutralized before visual readiness, but
-  visual material planning is blocked by `createDynamicMaterialSlotRequirements()` requiring
-  `StaticObjectInstanceIdentity` and producing `static-material-slot` identities. This is the
-  critical 12C.2 material identity target.
-- 2026-06-28 dry run: merged dynamic query/selection already works by dynamic entity id and bounds.
-  Phase 12C.3 should mainly depend on 12C.2 making runtime spawns resource-ready, animated, and
-  indexed; it should not require a new query architecture.
+- 2026-06-28 dry run: runtime spawns currently receive an initial pending resource state but do not
+  call `DynamicEntityResourceManager.trackSetupAnimationResources()`, so they cannot become ready
+  until a projected runtime tracking path exists.
+- 2026-06-28 dry run: `TrackedDynamicEntityResources` stores `StaticAuthoredDynamicSeedFacts`, and
+  setup/visual resource requests read directly from that seed. This is the main resource tracking
+  shape to replace.
+- 2026-06-28 dry run: `DynamicEntitySummaryDto` is part of the projected policy cleanup because
+  renderer/runtime consumers use summaries. The projected policy must stay available on summaries so
+  consumers do not fall back to provenance.
 
-### Phase 12C.3: Runtime Renderer Query And Selection Integration
+### Phase 12C.2C: Lift Dynamic Material Planning To Neutral Visual Identities
 
 Status: pending.
 
 Purpose:
 
-- Wire resource-ready runtime spawns through the existing dynamic renderer, placement, query,
-  playback, and selection flows using projected policies from 12C.1 and resource readiness from
-  12C.2.
+- Lift the existing dynamic setup/gfx/material readiness path from static object identities to
+  neutral visual object identities. Static-authored dynamics must keep their current material
+  coverage, and runtime-authored setup-backed spawns should reuse that same material planning,
+  palette, render-surface, texture, atlas, and renderer-material behavior instead of getting a
+  gated mini-path.
 
 Deliverables:
 
-- Wire runtime spawns through playback, placement/index, renderer resource sync, renderer instance
-  sync, merged query, browser inspection, and selected diagnostics.
+- Introduce neutral visual object, part, and material-slot identities that describe what
+  object-material planning actually needs.
+- Refactor or wrap `createDynamicMaterialSlotRequirements()` so static-authored and runtime-authored
+  visuals both project source assets into neutral material slot facts without fabricating
+  `StaticObjectInstanceIdentity`.
+- Reuse existing setup model, setup appearance, gfx, material, palette, render-surface, and
+  object-material preparation behavior after neutral projection. Do not fork a reduced runtime
+  material path unless the source data is genuinely unsupported.
+- Keep current dynamic material coverage intact for static-authored dynamics, and make runtime
+  setup-backed spawns eligible for that same coverage when they supply the same setup/gfx/material
+  source closure facts.
+- Keep server-authored object composition features that are not already part of the setup-backed
+  visual material path separate: equipment/clothing layering, object-description overlays, and
+  unsupported `ModelData` variants should log/skip or reject according to validation until their
+  source semantics are proven.
+- Split texture lifetime from semantic entity identity using the existing dynamic visual-resource
+  ownership policy as the first ownership node. If this still uses per-entity runtime batches,
+  record duplicate atlas/cache placement as follow-up debt rather than building a broad sharing
+  graph prematurely.
+- Prove setup-default animation from available prepared source facts or keep explicit animation as
+  the only renderable runtime path.
+- Keep one runtime-spawn rendering fixture for 12C.3 as proof of the lifted path, not as the boundary
+  of supported material behavior.
+
+Acceptance criteria:
+
+- Runtime-spawn visual readiness does not call material planning through fabricated
+  `StaticObjectInstanceIdentity` or `static-material-slot` identities.
+- Static-authored dynamic material plans and render parts remain equivalent after the identity lift,
+  including palette, render-surface, texture requirement, texture atlas, and skipped-material
+  behavior.
+- Runtime-authored setup-backed spawns can become resource-ready through the same setup/gfx/material
+  closure, material planning, texture requirement, prepared-texture, and renderer-material behavior
+  already used by static-authored dynamics.
+- Resource-ready runtime spawns use both the runtime visual texture domain from 12C.2A and the
+  neutral material planning identity from this phase.
+- Removing one dynamic entity releases only its dynamic visual-resource ownership. If runtime visual
+  resources or atlas entries are still per-entity, duplicate placement is documented as follow-up
+  debt.
+- Unsupported server composition facts outside the lifted setup-backed material path are logged and
+  skipped or rejected according to validation; they do not create durable warning/error records.
+- Existing static-authored dynamic resource readiness remains stable.
+
+Task checklist:
+
+- [ ] Add neutral visual object, part, and material-slot identity types.
+- [ ] Refactor dynamic material slot requirement generation to use neutral identities.
+- [ ] Adapt object-material planning/resource preparation so neutral dynamic material facts can reuse
+      the existing material classification and texture requirement behavior.
+- [ ] Add static-authored dynamic equivalence coverage for material plans/render parts before and
+      after the identity lift.
+- [ ] Add runtime-authored setup-backed readiness coverage across the existing supported material
+      feature set represented by current dynamic material tests.
+- [ ] Add bounded runtime `ModelData` handling only where it is already part of setup-backed visual
+      source facts; log/skip or reject unsupported server composition facts.
+- [ ] Add dynamic visual-resource ownership/refcount coverage proving create/remove churn does not
+      leak prepared-asset leases or texture owners.
+- [ ] Add focused runtime-spawn resource-readiness tests using the lifted material path.
+- [ ] Run focused TypeScript verification for dynamic resource tests.
+- [ ] Run full app verification commands from `apps/holtburger-3d`.
+
+Risks and mitigations:
+
+- Risk: material planning identity becomes fake static identity with nicer names.
+  Mitigation: require neutral fields to describe material source, object/part/slot identity, palette
+  overrides, and surface ids directly; runtime values must not be stuffed into
+  `StaticObjectInstanceIdentity`.
+- Risk: full shared runtime visual-resource graph expands the phase too far.
+  Mitigation: use the existing dynamic visual-resource ownership node first; keep per-entity runtime
+  batches acceptable for 12C, and document shared atlas/cache reuse as cleanup debt.
+- Risk: the lift regresses material coverage by accidentally creating a runtime-only subset.
+  Mitigation: make static-authored material equivalence and runtime setup-backed reuse acceptance
+  criteria for this phase, and treat reduced runtime material support as a failure unless source
+  evidence is genuinely missing.
+- Risk: first rendering gets delayed by server object composition work that is not part of the
+  existing setup-backed material path.
+  Mitigation: lift the existing material path wholesale, but defer equipment/clothing layering,
+  object-description overlays, unsupported `ModelData` variants, and other unproven server
+  composition facts.
+- Risk: existing static-authored readiness regresses during the identity cutover.
+  Mitigation: add regression coverage that static-authored dynamics project into neutral material
+  identities and still produce equivalent readiness/render-part output.
+
+Dry-run findings:
+
+- 2026-06-28 dry run: `planStaticObjectMaterials()` is mostly material-source classification and
+  detail-role composition. The static-specific pressure comes from slot identity/facts and downstream
+  texture-use identity, not from the whole material classification algorithm.
+- 2026-06-28 dry run: `createDynamicMaterialSlotRequirements()` requires
+  `StaticObjectInstanceIdentity` and produces `static-material-slot` identities. This is the
+  critical material identity target before runtime spawns can become resource-ready without lying.
+- 2026-06-28 dry run: texture ownership already has `dynamic-visual-resource` lease keys, but
+  prepared-asset leases are still tracked per entity. Per-entity runtime batches are acceptable for
+  first readiness; shared visual-resource/atlas reuse remains follow-up debt unless this phase stays
+  small enough to include it.
+- 2026-06-28 dry run: merged dynamic query/selection already works by dynamic entity id and bounds.
+  Phase 12C.3 should mainly depend on 12C.2C making runtime setup-backed spawns resource-ready,
+  animated, and indexed through the lifted material path; it should not require a new query
+  architecture.
+- 2026-06-28 steering: do not introduce a reduced "first cut" runtime material path. We already have
+  broad material behavior for setup-backed dynamics; this phase should neutralize identity and reuse
+  that behavior rather than gate features we effectively get from the existing path.
+
+### Phase 12C.3: First Runtime Spawn Rendering
+
+Status: pending.
+
+Purpose:
+
+- Render one setup-backed runtime-spawn fixture through the existing dynamic renderer path using
+  projected policies from 12C.1, the runtime texture domain from 12C.2A, projected resource tracking
+  from 12C.2B, and lifted material readiness from 12C.2C. This is the visible runtime-spawn
+  milestone; Phase 12D should not be allowed to start while this is still theoretical.
+
+Deliverables:
+
+- Wire a resource-ready runtime-spawn fixture through playback, placement/index, renderer resource
+  sync, renderer instance sync, merged query, browser inspection, and selected diagnostics.
+- Add a programmatic runtime-spawn smoke path or test harness path that creates the fixture, renders
+  it in-scene, and removes it without refreshing static scenery.
 - Use the same dynamic renderer resource and instance commit APIs as static-authored dynamic records.
 - Ensure picking/query results expose enough correlation metadata for the browser host to map a
   selected presentation entity back to an optional server-authored object/instance id without making
@@ -4040,10 +4240,13 @@ Deliverables:
 
 Acceptance criteria:
 
-- A resource-ready runtime-spawn dynamic entity renders through existing dynamic renderer resource
-  and instance commit APIs.
-- The runtime spawn animates through the existing playback path when an explicit animation is
-  provided or setup-default evidence was proven by 12C.2.
+- A programmatically created runtime-spawn fixture is visible in the 3D scene through existing
+  dynamic renderer resource and instance commit APIs using the runtime visual texture domain
+  introduced in 12C.2A.
+- The fixture animates through the existing playback path when an explicit animation is provided or
+  setup-default evidence was proven by 12C.2B/12C.2C.
+- The fixture can be removed, and removal releases renderer instance/resource state, dynamic
+  visual-resource texture ownership, placement/index membership, and prepared-asset leases.
 - Bounds, effective residence, cadence scheduling, merged dynamic query hits, browser inspection,
   and selected dynamic diagnostics work for runtime spawns without static source keys.
 - Picking/query results preserve local presentation id and optional server/host correlation metadata
@@ -4052,9 +4255,10 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Wire runtime spawns through playback, placement, renderer resource/instance commits, merged
+- [ ] Add the programmatic first-render runtime-spawn fixture path.
+- [ ] Wire the fixture through playback, placement, renderer resource/instance commits, merged
       query, and selected diagnostics.
-- [ ] Add focused runtime-spawn renderer/query/selection tests.
+- [ ] Add focused runtime-spawn first-render, removal, renderer/query/selection tests.
 - [ ] Add regression coverage proving static-authored dynamic renderer/query behavior remains
       stable.
 - [ ] Run focused TypeScript verification for dynamic runtime/query/renderer tests.
@@ -4070,6 +4274,59 @@ Risks and mitigations:
   Mitigation: keep this phase scoped to presentation records. Server object authority, sequence,
   containment, equipment, inventory, replacement, prediction, and cancellation semantics remain host
   runtime concerns that project visual facts into the browser renderer.
+- Risk: first rendering becomes blocked by broad runtime object composition.
+  Mitigation: 12C.2C lifts the existing setup-backed material path wholesale; broader server
+  composition semantics outside that path move to Phase 12C.4.
+
+### Phase 12C.4: Runtime Spawn Server Composition Breadth And Debt
+
+Status: pending.
+
+Purpose:
+
+- Broaden runtime-spawn rendering after the first fixture renders by adding server composition
+  semantics that are not part of the existing setup-backed material path. This phase pays down
+  equipment/clothing/object-description/model-data/resource ownership gaps without moving the
+  first-render goalpost or reducing material support.
+
+Deliverables:
+
+- Expand supported runtime server composition facts beyond setup-backed object materials based on
+  ACE spawn evidence and browser spawn needs.
+- Evaluate shared dynamic visual-resource ownership and atlas/cache reuse once per-entity runtime
+  batches have proven the first-render path.
+- Add broader create/update/remove churn coverage around multiple runtime spawns, shared setup
+  models, repeated materials, and unsupported facts.
+- Keep unsupported facts console-owned unless they represent hard validation failures for accepted
+  runtime-spawn requests.
+
+Acceptance criteria:
+
+- At least two distinct runtime spawn shapes can render or fail explicitly based on documented
+  support limits for server composition facts beyond the lifted setup-backed material path.
+- Multiple runtime spawns can coexist and be removed independently without leaking renderer,
+  placement, texture, or prepared-asset state.
+- Any duplicated per-entity atlas/cache placement is either resolved through shared ownership or
+  documented as deliberate remaining debt.
+- Existing first-render fixture behavior and static-authored dynamic behavior remain stable.
+
+Task checklist:
+
+- [ ] Expand runtime server composition/model-data support based on the first browser-spawn targets.
+- [ ] Add multi-spawn create/update/remove churn coverage.
+- [ ] Decide whether to implement shared dynamic visual-resource/atlas ownership now or record it as
+      cleanup debt with measured impact.
+- [ ] Run focused TypeScript verification for runtime-spawn breadth tests.
+- [ ] Run full app verification commands from `apps/holtburger-3d`.
+
+Risks and mitigations:
+
+- Risk: broadening reintroduces fake static provenance to support additional cases quickly.
+  Mitigation: all new runtime shapes must enter through projected presentation/resource facts and
+  neutral material identities.
+- Risk: broadening blocks browser UX.
+  Mitigation: Phase 12D may start once 12C.3's first fixture render is stable; 12C.4 work should be
+  ordered by what the browser spawn form actually needs next.
 
 ### Phase 12D: Browser Spawn Form And Fixture Resolver
 
@@ -4078,7 +4335,9 @@ Status: pending.
 Purpose:
 
 - Give browser mode a real manual presentation-spawn workflow using the runtime source model, with
-  optional WCID seed application through a resolver that does not know spawn support limits.
+  optional WCID seed application through a resolver that does not know spawn support limits. This
+  phase consumes the renderable runtime-spawn path from 12C.3; it should not introduce renderer,
+  texture-domain, or material-planning architecture.
 
 Deliverables:
 
@@ -4101,7 +4360,8 @@ Deliverables:
 Acceptance criteria:
 
 - Browser-mode spawn UX can add at least one setup-backed dynamic entity to the current scene and
-  remove it again without refreshing the static scene.
+  remove it again without refreshing the static scene, using the already-renderable 12C.3 runtime
+  path.
 - Browser-mode spawn UX can seed the same full spawn form from at least one WCID-backed resolver
   result, allow edits after seeding, and submit through the same dynamic spawn request path as manual
   input.

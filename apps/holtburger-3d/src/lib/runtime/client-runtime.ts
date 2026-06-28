@@ -93,7 +93,6 @@ import type {
 import {
 	collectStaticDrawUnitResourceIds,
 	type StaticAuthoredDynamicSeedRecord,
-	type VisualTextureDomain,
 } from "../static/contracts";
 import {
 	materializeStaticCommit,
@@ -139,6 +138,7 @@ import {
 } from "./portal-base-overlap";
 import { DynamicEntityController } from "../dynamic/dynamic-entity-controller";
 import { DynamicEntityResourceManager } from "../dynamic/dynamic-entity-resource-manager";
+import { createDynamicVisualResourceId } from "../dynamic/contracts";
 import type {
 	DynamicEntitySummaryDto,
 	DynamicEntityId,
@@ -1725,6 +1725,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		);
 		this.#dynamicEntityController.ingestStaticSeeds(
 			materialized.staticAuthoredDynamicSeeds,
+			this.#textureBatchIdByStaticSourceScope,
 		);
 		this.#enqueueDynamicRendererResourceSync();
 		this.#updateRenderPassPlan();
@@ -1789,11 +1790,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 					resourceId,
 				})),
 				textureUses: resources.flatMap((resource) =>
-					createDynamicTextureUseCommits(
-						resource,
-						snapshot.records,
-						this.#textureBatchIdByStaticSourceScope,
-					),
+					createDynamicTextureUseCommits(resource, snapshot.records),
 				),
 			});
 		if (this.#disposed) {
@@ -1837,7 +1834,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 				continue;
 			}
 			this.#textureBatchIdByStaticSourceScope.set(
-				createStaticSourceScopeTextureBatchLookupKey(seed.owner.domain, seed.owner.scopeKey),
+				createStaticSourceScopeTextureBatchLookupKey(
+					seed.owner.domain,
+					seed.owner.scopeKey,
+				),
 				staticBatchId,
 			);
 		}
@@ -3739,7 +3739,6 @@ function createDynamicRendererVisualResource(
 function createDynamicTextureUseCommits(
 	resource: DynamicRendererVisualResource,
 	records: readonly DynamicEntitySummaryDto[],
-	textureBatchIdsByStaticSourceScope: ReadonlyMap<string, string>,
 ): readonly DynamicTextureUseCommit[] {
 	const record = records.find(
 		(candidate) => candidate.id === resource.entityId,
@@ -3749,11 +3748,7 @@ function createDynamicTextureUseCommits(
 			`Cannot create dynamic texture uses for unknown entity ${resource.entityId}.`,
 		);
 	}
-	const textureDomain = createDynamicRendererTextureDomain(record);
-	const textureBatchId = createDynamicRendererTextureBatchId(
-		record,
-		textureBatchIdsByStaticSourceScope,
-	);
+	const { textureBatchId, textureDomain } = record.presentation.policy;
 	return resource.materialPlan.textureUses.map((textureUse) => ({
 		textureBatchId,
 		textureDomain,
@@ -3864,40 +3859,10 @@ function isDynamicRendererEligible(record: DynamicEntitySummaryDto): boolean {
 	return record.renderability.reasons.length === 0;
 }
 
-function createDynamicRendererTextureDomain(
-	record: DynamicEntitySummaryDto,
-): VisualTextureDomain {
-	if (record.effectiveResidence.kind === "env-cell") {
-		return "landblock-env-cells";
-	}
-	if (record.provenance.kind === "runtime-spawn") {
-		return "outdoor-detail";
-	}
-	const ownerDomain = record.provenance.owner.domain;
-	return ownerDomain === "outdoor-buildings" ? ownerDomain : "outdoor-detail";
-}
-
-function createDynamicRendererTextureBatchId(
-	record: DynamicEntitySummaryDto,
-	textureBatchIdsByStaticSourceScope: ReadonlyMap<string, string>,
-): string {
-	if (record.provenance.kind === "runtime-spawn") {
-		return `dynamic:${record.id}`;
-	}
-	return (
-		textureBatchIdsByStaticSourceScope.get(
-			createStaticSourceScopeTextureBatchLookupKey(
-				record.provenance.owner.domain,
-				record.provenance.owner.scopeKey,
-			),
-		) ?? `dynamic:${record.provenance.sourceScopeKey}`
-	);
-}
-
 function createDynamicRendererVisualResourceId(
 	record: Pick<DynamicEntitySummaryDto, "id">,
 ): string {
-	return `dynamic-visual-resource:${record.id}`;
+	return createDynamicVisualResourceId(record.id);
 }
 
 function createDynamicRendererInstanceId(
@@ -3907,7 +3872,7 @@ function createDynamicRendererInstanceId(
 }
 
 function createStaticSourceScopeTextureBatchLookupKey(
-	domain: VisualTextureDomain,
+	domain: string,
 	scopeKey: string,
 ): string {
 	return `${domain}:${scopeKey}`;

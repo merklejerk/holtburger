@@ -5,6 +5,7 @@ import type {
 	StaticWorkPeerRecordOwner,
 } from "../static/contracts";
 import {
+	createDynamicVisualResourceId,
 	createStaticScopeOwnerKey,
 	type DynamicEntityCurrentBounds,
 	isEnvCellDynamicSeedRecord,
@@ -85,7 +86,10 @@ export class DynamicEntityController {
 		});
 	}
 
-	ingestStaticSeeds(records: readonly StaticAuthoredDynamicSeedRecord[]): void {
+	ingestStaticSeeds(
+		records: readonly StaticAuthoredDynamicSeedRecord[],
+		textureBatchIdsByStaticSourceScope: ReadonlyMap<string, string> = new Map(),
+	): void {
 		for (const record of records) {
 			if (
 				!isOutdoorDynamicSeedRecord(record) &&
@@ -96,6 +100,7 @@ export class DynamicEntityController {
 			const entityRecord = createDynamicEntityRecord(
 				record,
 				this.#resourceManager,
+				textureBatchIdsByStaticSourceScope,
 			);
 			this.#store.upsert(entityRecord);
 			this.#resourceManager?.trackSetupAnimationResources(
@@ -255,6 +260,7 @@ function createDynamicEntityRecord(
 		}
 	>,
 	resourceManager: DynamicEntityResourceManager | null,
+	textureBatchIdsByStaticSourceScope: ReadonlyMap<string, string>,
 ): DynamicEntityRecord {
 	const sourceScopeKey = createSourceScopeKey(record.owner);
 	const sourceResidence =
@@ -271,6 +277,7 @@ function createDynamicEntityRecord(
 	const resourceState =
 		resourceManager?.createInitialResourceState(record.seed) ??
 		createFallbackInitialResourceState(record.seed);
+	const id = createDynamicEntityId(record, sourceScopeKey);
 
 	return {
 		animation: {
@@ -291,7 +298,20 @@ function createDynamicEntityRecord(
 			precision: "none",
 		},
 		effectiveResidence: sourceResidence,
-		id: createDynamicEntityId(record, sourceScopeKey),
+		id,
+		presentation: createStaticAuthoredPresentation({
+			id,
+			record,
+			sourceResidence,
+			sourceScopeKey,
+			textureBatchId:
+				textureBatchIdsByStaticSourceScope.get(
+					createStaticTextureBatchLookupKey(
+						record.owner.domain,
+						record.owner.scopeKey,
+					),
+				) ?? `dynamic:${sourceScopeKey}`,
+		}),
 		provenance: {
 			kind:
 				record.kind === "env-cell-static-object-dynamic-seed"
@@ -304,16 +324,16 @@ function createDynamicEntityRecord(
 			reasons: ["resources-pending"],
 			status: "non-renderable",
 		},
-			resources: {
-				...resourceState,
-			},
-			source: {
-				kind: "static-authored",
-				seed: record.seed,
-			},
-			sourceResidence,
-		};
-	}
+		resources: {
+			...resourceState,
+		},
+		source: {
+			kind: "static-authored",
+			seed: record.seed,
+		},
+		sourceResidence,
+	};
+}
 
 function createRuntimeDynamicEntityRecord(
 	id: DynamicEntityId,
@@ -328,6 +348,15 @@ function createRuntimeDynamicEntityRecord(
 		animationId: defaultAnimationId,
 		setupModelId: request.setupModelId,
 	});
+	const source = {
+		animationSelection,
+		kind: "runtime-spawn" as const,
+		modelData: null,
+		runtimeEntityId: id,
+		serverInstanceIdMetadata: request.serverInstanceIdMetadata ?? null,
+		setupModelId: request.setupModelId,
+		sourceKind: "browser-authored-server-shaped" as const,
+	};
 
 	return {
 		animation: {
@@ -349,6 +378,11 @@ function createRuntimeDynamicEntityRecord(
 		},
 		effectiveResidence: request.sourceResidence,
 		id,
+		presentation: createRuntimeSpawnPresentation({
+			id,
+			source,
+			sourceResidence: request.sourceResidence,
+		}),
 		provenance: {
 			kind: "runtime-spawn",
 			sourceKind: "browser-authored-server-shaped",
@@ -358,17 +392,122 @@ function createRuntimeDynamicEntityRecord(
 			status: "non-renderable",
 		},
 		resources: resourceState,
-		source: {
-			animationSelection,
-			kind: "runtime-spawn",
-			modelData: null,
-			runtimeEntityId: id,
-			serverInstanceIdMetadata: request.serverInstanceIdMetadata ?? null,
-			setupModelId: request.setupModelId,
-			sourceKind: "browser-authored-server-shaped",
-		},
+		source,
 		sourceResidence: request.sourceResidence,
 	};
+}
+
+function createStaticAuthoredPresentation(options: {
+	readonly id: DynamicEntityId;
+	readonly record: Extract<
+		StaticAuthoredDynamicSeedRecord,
+		{
+			readonly kind:
+				| "env-cell-static-object-dynamic-seed"
+				| "outdoor-static-object-dynamic-seed";
+		}
+	>;
+	readonly sourceResidence: DynamicEntityRecord["sourceResidence"];
+	readonly sourceScopeKey: string;
+	readonly textureBatchId: string;
+}): DynamicEntityRecord["presentation"] {
+	const { id, record, sourceResidence, sourceScopeKey, textureBatchId } =
+		options;
+	const animationSelection = {
+		animationId: record.seed.defaultAnimationId,
+		kind: "explicit" as const,
+	};
+	return {
+		diagnostics: {
+			kind: "static-authored",
+			owner: record.owner,
+			sourceScopeKey,
+		},
+		policy: {
+			materialPlanningIdentity: {
+				kind: "static-authored-object",
+				object: record.seed.object,
+			},
+			ownershipPolicy: {
+				kind: "dynamic-visual-resource",
+				resourceId: createDynamicVisualResourceId(id),
+			},
+			retentionPolicy: {
+				kind: "static-source-scope",
+				sourceScopeKey,
+			},
+			textureBatchId,
+			textureDomain: createStaticAuthoredTextureDomain(record.owner),
+		},
+		visualSource: {
+			animationSelection,
+			effectiveResidence: sourceResidence,
+			modelData: null,
+			setupModelId: record.seed.setupModelId,
+			sourceAssetIds: [record.seed.sourceAssetId],
+		},
+	};
+}
+
+function createRuntimeSpawnPresentation(options: {
+	readonly id: DynamicEntityId;
+	readonly source: Extract<
+		DynamicEntityRecord["source"],
+		{ readonly kind: "runtime-spawn" }
+	>;
+	readonly sourceResidence: DynamicEntityRecord["sourceResidence"];
+}): DynamicEntityRecord["presentation"] {
+	const { id, source, sourceResidence } = options;
+	return {
+		diagnostics: {
+			kind: "runtime-spawn",
+			serverInstanceIdMetadata: source.serverInstanceIdMetadata,
+			sourceKind: source.sourceKind,
+		},
+		policy: {
+			materialPlanningIdentity: {
+				kind: "pending",
+				reason: "runtime-material-planning-identity-unsupported",
+			},
+			ownershipPolicy: {
+				kind: "dynamic-visual-resource",
+				resourceId: createDynamicVisualResourceId(id),
+			},
+			retentionPolicy: {
+				kind: "explicit-runtime-lifetime",
+			},
+			textureBatchId: `dynamic:${id}`,
+			textureDomain: createRuntimeSpawnTextureDomain(sourceResidence),
+		},
+		visualSource: {
+			animationSelection: source.animationSelection,
+			effectiveResidence: sourceResidence,
+			modelData: source.modelData,
+			setupModelId: source.setupModelId,
+			sourceAssetIds: [
+				`setup-model/${source.setupModelId.toString(16).padStart(8, "0")}`,
+			],
+		},
+	};
+}
+
+function createStaticAuthoredTextureDomain(
+	owner: StaticWorkPeerRecordOwner,
+): DynamicEntityRecord["presentation"]["policy"]["textureDomain"] {
+	if (owner.domain === "landblock-env-cells") {
+		return "landblock-env-cells";
+	}
+	return owner.domain === "outdoor-buildings"
+		? "outdoor-buildings"
+		: "outdoor-detail";
+}
+
+function createRuntimeSpawnTextureDomain(
+	sourceResidence: DynamicEntityRecord["sourceResidence"],
+): DynamicEntityRecord["presentation"]["policy"]["textureDomain"] {
+	return sourceResidence.kind === "env-cell"
+		? "landblock-env-cells"
+		: "outdoor-detail";
 }
 
 function applyResourceChange(
@@ -520,6 +659,13 @@ function createSourceScopeKey(owner: StaticWorkPeerRecordOwner): string {
 		domain: owner.domain,
 		scopeKey: owner.scopeKey,
 	});
+}
+
+function createStaticTextureBatchLookupKey(
+	domain: StaticWorkPeerRecordOwner["domain"],
+	scopeKey: string,
+): string {
+	return `${domain}:${scopeKey}`;
 }
 
 function formatHex32(value: number): string {

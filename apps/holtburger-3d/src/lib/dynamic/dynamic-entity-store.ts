@@ -40,10 +40,11 @@ export class DynamicEntityStore {
 	): readonly DynamicEntityRecord[] {
 		const removed: DynamicEntityRecord[] = [];
 		for (const [id, record] of this.#recordsById) {
-			if (
-				record.provenance.kind !== "runtime-spawn" &&
-				!retainedScopeKeys.has(record.provenance.sourceScopeKey)
-			) {
+			const retentionPolicy = record.presentation.policy.retentionPolicy;
+			if (retentionPolicy.kind === "explicit-runtime-lifetime") {
+				continue;
+			}
+			if (!retainedScopeKeys.has(retentionPolicy.sourceScopeKey)) {
 				removed.push(record);
 				this.#recordsById.delete(id);
 			}
@@ -98,6 +99,7 @@ function createDynamicEntitySummaryDto(
 		bounds: record.bounds,
 		effectiveResidence: record.effectiveResidence,
 		id: record.id,
+		presentation: record.presentation,
 		provenance: record.provenance,
 		renderability: record.renderability,
 		resources: {
@@ -108,10 +110,10 @@ function createDynamicEntitySummaryDto(
 			status: record.resources.status,
 			visual: record.resources.visual,
 		},
-			source: createDynamicEntitySourceSummary(record.source),
-			sourceResidence: record.sourceResidence,
-		};
-	}
+		source: createDynamicEntitySourceSummary(record.source),
+		sourceResidence: record.sourceResidence,
+	};
+}
 
 function createDynamicEntitySourceSummary(
 	source: DynamicEntityRecord["source"],

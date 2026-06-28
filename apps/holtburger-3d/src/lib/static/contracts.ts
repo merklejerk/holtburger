@@ -1763,6 +1763,23 @@ export interface StaticCoordinatorSnapshot {
 	readonly recentTiming: readonly StaticCoordinatorTimingDiagnostics[];
 }
 
+export interface StaticCoordinatorOverviewSnapshot {
+	/** Coordinator revision for browser-facing status summaries. */
+	readonly revision: number;
+	/** Number of active static work items not yet settled. */
+	readonly requested: number;
+	/** Number of active work items currently resolving source payloads. */
+	readonly resolving: number;
+	/** Number of active work items currently baking renderable payloads. */
+	readonly baking: number;
+	/** Number of static work items committed since coordinator creation. */
+	readonly committed: number;
+	/** Most recent terrain payload summary for browser diagnostics. */
+	readonly latestTerrainPayload: TerrainStaticScopePayloadSummary | null;
+	/** Most recent env-cell payload summary for browser diagnostics. */
+	readonly latestLandblockEnvCellsPayload: LandblockEnvCellsPayloadSummary | null;
+}
+
 export interface StaticCoordinatorTimingDiagnostics {
 	readonly kind: "static-coordinator-timing";
 	readonly staticBatchId: string;

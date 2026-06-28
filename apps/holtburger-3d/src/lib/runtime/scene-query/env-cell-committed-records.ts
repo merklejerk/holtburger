@@ -514,6 +514,10 @@ export class EnvCellCommittedRecordStore {
 		};
 	}
 
+	envCellLandblockCount(): number {
+		return this.#envCellRootsByLandblockId.size;
+	}
+
 	#clearEnvCellSystemLayerRecords(landblockId: number): void {
 		const normalizedLandblockId = landblockId >>> 0;
 		this.#envCellSystemLayersByLandblockId.delete(normalizedLandblockId);
@@ -597,9 +601,7 @@ export class EnvCellCommittedRecordStore {
 		}
 	}
 
-	#deleteDrawUnitOwnedCommittedRecords(
-		drawUnitIds: ReadonlySet<string>,
-	): void {
+	#deleteDrawUnitOwnedCommittedRecords(drawUnitIds: ReadonlySet<string>): void {
 		const affectedPortalLandblockIds = new Set<number>();
 		for (const recordsByKey of [
 			this.#spatialRecordsByKey,
@@ -826,7 +828,9 @@ export class EnvCellCommittedRecordStore {
 		}
 	}
 
-	#upsertCommittedSpatialRecords(records: readonly StaticSpatialRecord[]): void {
+	#upsertCommittedSpatialRecords(
+		records: readonly StaticSpatialRecord[],
+	): void {
 		const replacementKeys = new Set(
 			records.map(createCommittedSpatialRecordKey),
 		);
@@ -868,7 +872,10 @@ export class EnvCellCommittedRecordStore {
 	#upsertCommittedVisibilityRecords(
 		records: readonly StaticVisibilityRecord[],
 	): void {
-		this.#deleteCommittedRecordsForOwners(this.#visibilityRecordsByKey, records);
+		this.#deleteCommittedRecordsForOwners(
+			this.#visibilityRecordsByKey,
+			records,
+		);
 		for (const record of records) {
 			this.#visibilityRecordsByKey.set(
 				createCommittedVisibilityRecordKey(record),
@@ -1242,7 +1249,9 @@ function isEnvCellRecord(record: unknown): boolean {
 	);
 }
 
-function isRecordWithKind(record: unknown): record is { readonly kind: string } {
+function isRecordWithKind(
+	record: unknown,
+): record is { readonly kind: string } {
 	return (
 		typeof record === "object" &&
 		record !== null &&

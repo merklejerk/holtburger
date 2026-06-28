@@ -558,6 +558,13 @@ class FixtureAssetService implements AssetService {
 			pending: [],
 		};
 	}
+
+	createOverviewSnapshot() {
+		return {
+			committedCount: 0,
+			pendingCount: 0,
+		};
+	}
 }
 
 function createPreparedAsset(

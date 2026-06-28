@@ -26,12 +26,24 @@ export class DynamicEntityStore {
 		return updated;
 	}
 
-	retainSourceScopeKeys(
+	remove(id: DynamicEntityId): DynamicEntityRecord | null {
+		const record = this.#recordsById.get(id) ?? null;
+		if (record === null) {
+			return null;
+		}
+		this.#recordsById.delete(id);
+		return record;
+	}
+
+	retainStaticSourceScopeKeys(
 		retainedScopeKeys: ReadonlySet<string>,
 	): readonly DynamicEntityRecord[] {
 		const removed: DynamicEntityRecord[] = [];
 		for (const [id, record] of this.#recordsById) {
-			if (!retainedScopeKeys.has(record.provenance.sourceScopeKey)) {
+			if (
+				record.provenance.kind !== "runtime-spawn" &&
+				!retainedScopeKeys.has(record.provenance.sourceScopeKey)
+			) {
 				removed.push(record);
 				this.#recordsById.delete(id);
 			}
@@ -54,13 +66,21 @@ export class DynamicEntityStore {
 
 	createSnapshot(): DynamicRuntimeSnapshot {
 		const records = this.records();
+		const staticAuthoredCount = records.filter(
+			(record) => record.source.kind === "static-authored",
+		).length;
+		const runtimeSpawnCount = records.filter(
+			(record) => record.source.kind === "runtime-spawn",
+		).length;
 		return {
 			activeEntityCount: records.length,
 			nonRenderableEntityCount: records.filter(
 				(record) => record.renderability.status === "non-renderable",
 			).length,
 			records: records.map(createDynamicEntitySummaryDto),
-			staticSeedCount: records.length,
+			runtimeSpawnCount,
+			staticAuthoredCount,
+			staticSeedCount: staticAuthoredCount,
 		};
 	}
 }
@@ -88,13 +108,23 @@ function createDynamicEntitySummaryDto(
 			status: record.resources.status,
 			visual: record.resources.visual,
 		},
-		source: {
-			defaultAnimationId: record.sourceSeed.defaultAnimationId,
-			object: record.sourceSeed.object,
-			setupModelId: record.sourceSeed.setupModelId,
-			sourceAssetId: record.sourceSeed.sourceAssetId,
-		},
-		sourceResidence: record.sourceResidence,
+			source: createDynamicEntitySourceSummary(record.source),
+			sourceResidence: record.sourceResidence,
+		};
+	}
+
+function createDynamicEntitySourceSummary(
+	source: DynamicEntityRecord["source"],
+): DynamicEntitySummaryDto["source"] {
+	if (source.kind === "runtime-spawn") {
+		return source;
+	}
+	return {
+		defaultAnimationId: source.seed.defaultAnimationId,
+		kind: "static-authored",
+		object: source.seed.object,
+		setupModelId: source.seed.setupModelId,
+		sourceAssetId: source.seed.sourceAssetId,
 	};
 }
 

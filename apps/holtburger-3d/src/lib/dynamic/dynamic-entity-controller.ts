@@ -12,6 +12,7 @@ import {
 	type DynamicEntityId,
 	type DynamicEntityRecord,
 	type DynamicEntityResourceState,
+	type DynamicEntityServerInstanceMetadata,
 	type StaticAuthoredDynamicSeedFacts,
 	type DynamicRuntimeSnapshot,
 } from "./contracts";
@@ -32,6 +33,7 @@ import {
 import type { OutdoorDynamicSpatialIndexRecord } from "./outdoor-dynamic-spatial-index";
 
 const FIRST_SLICE_REQUIRED_RESOURCES = ["setup-model", "animation"] as const;
+const RUNTIME_SPAWN_ID_PREFIX = "runtime-spawn";
 export interface DynamicEntityControllerOptions {
 	readonly onResourcesChanged?: () => void;
 	readonly placementTracker?: DynamicPlacementTracker;
@@ -44,6 +46,22 @@ export interface DynamicEntityTickOptions {
 	readonly animationCadenceContext?: DynamicAnimationUpdateCadenceContext | null;
 }
 
+export interface RuntimeDynamicSpawnRequest {
+	readonly animationSelection?:
+		| {
+				readonly kind: "setup-default";
+		  }
+		| {
+				readonly animationId: number;
+				readonly kind: "explicit";
+		  };
+	readonly baseLocalPlacement: DynamicEntityRecord["baseTransform"]["baseLocalPlacement"];
+	readonly serverInstanceIdMetadata?: DynamicEntityServerInstanceMetadata | null;
+	readonly setupModelId: number;
+	readonly sourceResidence: DynamicEntityRecord["sourceResidence"];
+	readonly sourceScale?: DynamicEntityRecord["baseTransform"]["sourceScale"];
+}
+
 export class DynamicEntityController {
 	readonly #animationPlayer = new DynamicAnimationPlayer();
 	readonly #lastAnimationUpdateAtSecondsByEntityId = new Map<
@@ -54,6 +72,7 @@ export class DynamicEntityController {
 	readonly #resourceManager: DynamicEntityResourceManager | null;
 	readonly #store: DynamicEntityStore;
 	readonly #onResourcesChanged: () => void;
+	#nextRuntimeSpawnOrdinal = 1;
 
 	constructor(options: DynamicEntityControllerOptions = {}) {
 		this.#placementTracker =
@@ -81,20 +100,47 @@ export class DynamicEntityController {
 			this.#store.upsert(entityRecord);
 			this.#resourceManager?.trackSetupAnimationResources(
 				entityRecord.id,
-				entityRecord.sourceSeed,
+				record.seed,
 			);
 		}
 	}
 
 	retainStaticScopes(scopes: readonly StaticScopeOwnerKey[]): void {
-		const removed = this.#store.retainSourceScopeKeys(
+		const removed = this.#store.retainStaticSourceScopeKeys(
 			new Set(scopes.map(createStaticScopeOwnerKey)),
 		);
 		for (const record of removed) {
-			this.#lastAnimationUpdateAtSecondsByEntityId.delete(record.id);
-			this.#placementTracker.release(record.id);
-			this.#resourceManager?.releaseEntity(record.id);
+			this.#releaseRecordState(record);
 		}
+	}
+
+	createRuntimeSpawn(request: RuntimeDynamicSpawnRequest): DynamicEntityId {
+		const id = this.#allocateRuntimeSpawnId();
+		this.#store.upsert(createRuntimeDynamicEntityRecord(id, request));
+		return id;
+	}
+
+	removeRuntimeSpawn(entityId: DynamicEntityId): boolean {
+		const record = this.#store.get(entityId);
+		if (record === null || record.source.kind !== "runtime-spawn") {
+			return false;
+		}
+		this.#store.remove(entityId);
+		this.#releaseRecordState(record);
+		return true;
+	}
+
+	updateRuntimeSpawn(
+		entityId: DynamicEntityId,
+		request: RuntimeDynamicSpawnRequest,
+	): boolean {
+		const record = this.#store.get(entityId);
+		if (record === null || record.source.kind !== "runtime-spawn") {
+			return false;
+		}
+		this.#releaseRecordState(record);
+		this.#store.upsert(createRuntimeDynamicEntityRecord(entityId, request));
+		return true;
 	}
 
 	applyResourceChange(change: DynamicEntityResourceChange): void {
@@ -163,6 +209,18 @@ export class DynamicEntityController {
 		entityId: DynamicEntityId,
 	): DynamicEntityCurrentBounds | null {
 		return this.#store.get(entityId)?.bounds.currentBounds ?? null;
+	}
+
+	#allocateRuntimeSpawnId(): DynamicEntityId {
+		const id = `${RUNTIME_SPAWN_ID_PREFIX}:${this.#nextRuntimeSpawnOrdinal}`;
+		this.#nextRuntimeSpawnOrdinal += 1;
+		return id;
+	}
+
+	#releaseRecordState(record: DynamicEntityRecord): void {
+		this.#lastAnimationUpdateAtSecondsByEntityId.delete(record.id);
+		this.#placementTracker.release(record.id);
+		this.#resourceManager?.releaseEntity(record.id);
 	}
 
 	#upsertPlacementUpdate(record: DynamicEntityRecord): void {
@@ -246,11 +304,70 @@ function createDynamicEntityRecord(
 			reasons: ["resources-pending"],
 			status: "non-renderable",
 		},
-		resources: {
-			...resourceState,
+			resources: {
+				...resourceState,
+			},
+			source: {
+				kind: "static-authored",
+				seed: record.seed,
+			},
+			sourceResidence,
+		};
+	}
+
+function createRuntimeDynamicEntityRecord(
+	id: DynamicEntityId,
+	request: RuntimeDynamicSpawnRequest,
+): DynamicEntityRecord {
+	const animationSelection = request.animationSelection ?? {
+		kind: "setup-default" as const,
+	};
+	const defaultAnimationId =
+		animationSelection.kind === "explicit" ? animationSelection.animationId : 0;
+	const resourceState = createRuntimeSpawnInitialResourceState({
+		animationId: defaultAnimationId,
+		setupModelId: request.setupModelId,
+	});
+
+	return {
+		animation: {
+			defaultAnimationId,
+			playback: {
+				status: "pending-resource",
+			},
+			status: "pending-resource",
 		},
-		sourceResidence,
-		sourceSeed: record.seed,
+		baseTransform: {
+			baseLocalPlacement: request.baseLocalPlacement,
+			sourceScale: request.sourceScale ?? { x: 1, y: 1, z: 1 },
+		},
+		bounds: {
+			currentBounds: null,
+			indexMembership: { kind: "none" },
+			indexed: false,
+			precision: "none",
+		},
+		effectiveResidence: request.sourceResidence,
+		id,
+		provenance: {
+			kind: "runtime-spawn",
+			sourceKind: "browser-authored-server-shaped",
+		},
+		renderability: {
+			reasons: ["resources-pending"],
+			status: "non-renderable",
+		},
+		resources: resourceState,
+		source: {
+			animationSelection,
+			kind: "runtime-spawn",
+			modelData: null,
+			runtimeEntityId: id,
+			serverInstanceIdMetadata: request.serverInstanceIdMetadata ?? null,
+			setupModelId: request.setupModelId,
+			sourceKind: "browser-authored-server-shaped",
+		},
+		sourceResidence: request.sourceResidence,
 	};
 }
 
@@ -288,15 +405,32 @@ function applyResourceChange(
 function createFallbackInitialResourceState(
 	seed: StaticAuthoredDynamicSeedFacts,
 ): DynamicEntityResourceState {
+	return createInitialPendingResourceState({
+		animationId: seed.defaultAnimationId,
+		setupModelId: seed.setupModelId,
+	});
+}
+
+function createRuntimeSpawnInitialResourceState(options: {
+	readonly animationId: number;
+	readonly setupModelId: number;
+}): DynamicEntityResourceState {
+	return createInitialPendingResourceState(options);
+}
+
+function createInitialPendingResourceState(options: {
+	readonly animationId: number;
+	readonly setupModelId: number;
+}): DynamicEntityResourceState {
 	return {
 		required: FIRST_SLICE_REQUIRED_RESOURCES,
 		setupAnimation: {
 			animationKey: {
-				id: seed.defaultAnimationId,
+				id: options.animationId,
 				kind: "animation",
 			},
 			setupModelKey: {
-				id: seed.setupModelId,
+				id: options.setupModelId,
 				kind: "setup-model",
 			},
 			status: "pending",

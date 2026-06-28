@@ -37,15 +37,21 @@ export interface DynamicEntityRecord {
 	readonly provenance: DynamicEntityProvenance;
 	readonly renderability: DynamicEntityRenderability;
 	readonly resources: DynamicEntityResourceState;
+	readonly source: DynamicEntitySourceFacts;
 	readonly sourceResidence: DynamicEntityResidence;
-	readonly sourceSeed: StaticAuthoredDynamicSeedFacts;
 }
 
-interface DynamicEntityProvenance {
-	readonly kind: "static-authored-env-cell" | "static-authored-outdoor";
-	readonly owner: StaticWorkPeerRecordOwner;
-	readonly sourceScopeKey: string;
-}
+type DynamicEntityProvenance =
+	| {
+			readonly kind: "static-authored-env-cell" | "static-authored-outdoor";
+			readonly owner: StaticWorkPeerRecordOwner;
+			readonly sourceScopeKey: string;
+	  }
+	| {
+			/** Browser/runtime-authored entity shaped like future server-authored spawns. */
+			readonly kind: "runtime-spawn";
+			readonly sourceKind: "browser-authored-server-shaped";
+	  };
 
 type DynamicEntityResidence =
 	| {
@@ -56,7 +62,40 @@ type DynamicEntityResidence =
 	| {
 			readonly kind: "outdoor-landblock";
 			readonly landblockId: number;
+		  };
+
+type DynamicEntityAnimationSelection =
+	| {
+			readonly kind: "setup-default";
+	  }
+	| {
+			readonly animationId: number;
+			readonly kind: "explicit";
 	  };
+
+export interface DynamicEntityServerInstanceMetadata {
+	/** Server-authored object/instance id retained for correlation only, never local identity. */
+	readonly id: string;
+}
+
+interface RuntimeSpawnDynamicEntitySourceFacts {
+	readonly animationSelection: DynamicEntityAnimationSelection;
+	readonly kind: "runtime-spawn";
+	readonly modelData: null;
+	readonly runtimeEntityId: DynamicEntityId;
+	readonly serverInstanceIdMetadata: DynamicEntityServerInstanceMetadata | null;
+	readonly setupModelId: number;
+	readonly sourceKind: "browser-authored-server-shaped";
+}
+
+interface StaticAuthoredDynamicEntitySourceFacts {
+	readonly kind: "static-authored";
+	readonly seed: StaticAuthoredDynamicSeedFacts;
+}
+
+type DynamicEntitySourceFacts =
+	| RuntimeSpawnDynamicEntitySourceFacts
+	| StaticAuthoredDynamicEntitySourceFacts;
 
 interface DynamicEntityAnimationState {
 	readonly defaultAnimationId: number;
@@ -322,6 +361,8 @@ export interface DynamicRuntimeSnapshot {
 	readonly activeEntityCount: number;
 	readonly nonRenderableEntityCount: number;
 	readonly records: readonly DynamicEntitySummaryDto[];
+	readonly runtimeSpawnCount: number;
+	readonly staticAuthoredCount: number;
 	readonly staticSeedCount: number;
 }
 
@@ -408,12 +449,23 @@ type DynamicEntitySetupAnimationResourceSummaryDto =
 			readonly status: "ready";
 	  };
 
-interface DynamicEntitySourceSummaryDto {
-	readonly defaultAnimationId: number;
-	readonly object: StaticAuthoredDynamicSeedFacts["object"];
-	readonly setupModelId: number;
-	readonly sourceAssetId: string;
-}
+type DynamicEntitySourceSummaryDto =
+	| {
+			readonly defaultAnimationId: number;
+			readonly kind: "static-authored";
+			readonly object: StaticAuthoredDynamicSeedFacts["object"];
+			readonly setupModelId: number;
+			readonly sourceAssetId: string;
+	  }
+	| {
+			readonly animationSelection: DynamicEntityAnimationSelection;
+			readonly kind: "runtime-spawn";
+			readonly modelData: null;
+			readonly runtimeEntityId: DynamicEntityId;
+			readonly serverInstanceIdMetadata: DynamicEntityServerInstanceMetadata | null;
+			readonly setupModelId: number;
+			readonly sourceKind: "browser-authored-server-shaped";
+	  };
 
 export function isOutdoorDynamicSeedRecord(
 	record: StaticAuthoredDynamicSeedRecord,

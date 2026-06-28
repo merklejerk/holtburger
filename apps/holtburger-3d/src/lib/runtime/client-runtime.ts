@@ -3750,13 +3750,10 @@ function createDynamicTextureUseCommits(
 		);
 	}
 	const atlasDomain = createDynamicRendererAtlasDomain(record);
-	const atlasBatchId =
-		staticBatchIdsBySourceScope.get(
-			createStaticBatchLookupKey(
-				record.provenance.owner.domain,
-				record.provenance.owner.scopeKey,
-			),
-		) ?? `dynamic:${record.provenance.sourceScopeKey}`;
+	const atlasBatchId = createDynamicRendererAtlasBatchId(
+		record,
+		staticBatchIdsBySourceScope,
+	);
 	return resource.materialPlan.textureUses.map((textureUse) => ({
 		atlasBatchId,
 		atlasDomain,
@@ -3873,8 +3870,28 @@ function createDynamicRendererAtlasDomain(
 	if (record.effectiveResidence.kind === "env-cell") {
 		return "landblock-env-cells";
 	}
+	if (record.provenance.kind === "runtime-spawn") {
+		return "outdoor-detail";
+	}
 	const ownerDomain = record.provenance.owner.domain;
 	return ownerDomain === "outdoor-buildings" ? ownerDomain : "outdoor-detail";
+}
+
+function createDynamicRendererAtlasBatchId(
+	record: DynamicEntitySummaryDto,
+	staticBatchIdsBySourceScope: ReadonlyMap<string, string>,
+): string {
+	if (record.provenance.kind === "runtime-spawn") {
+		return `dynamic:${record.id}`;
+	}
+	return (
+		staticBatchIdsBySourceScope.get(
+			createStaticBatchLookupKey(
+				record.provenance.owner.domain,
+				record.provenance.owner.scopeKey,
+			),
+		) ?? `dynamic:${record.provenance.sourceScopeKey}`
+	);
 }
 
 function createDynamicRendererVisualResourceId(

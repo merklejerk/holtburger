@@ -511,13 +511,16 @@ function createRecord(options: {
 				status: "pending",
 			},
 		},
-		sourceResidence: {
-			kind: "outdoor-landblock",
-			landblockId: 0xda55ffff,
-		},
-		sourceSeed: seed,
-	};
-}
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+			source: {
+				kind: "static-authored",
+				seed,
+			},
+		};
+	}
 
 function createAnimationPayload(options: {
 	readonly frameCount: number;

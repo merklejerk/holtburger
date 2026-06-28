@@ -125,21 +125,153 @@ describe("dynamic entity controller", () => {
 		});
 	});
 
-	it("removes classified env-cell records with unretained env-cell scopes", () => {
-		const controller = new DynamicEntityController();
-		controller.ingestStaticSeeds([
-			createOutdoorSeedRecord(),
-			createEnvCellDynamicSeedRecord(),
+		it("removes classified env-cell records with unretained env-cell scopes", () => {
+			const controller = new DynamicEntityController();
+			controller.ingestStaticSeeds([
+				createOutdoorSeedRecord(),
+				createEnvCellDynamicSeedRecord(),
 		]);
 
 		controller.retainStaticScopes([createRetainedScope()]);
 
 		expect(controller.createSnapshot().records).toHaveLength(1);
-		expect(controller.createSnapshot().records[0]?.provenance.kind).toBe(
-			"static-authored-outdoor",
-		);
+			expect(controller.createSnapshot().records[0]?.provenance.kind).toBe(
+				"static-authored-outdoor",
+			);
+		});
+
+	it("creates runtime spawns with internal ids and server ids as metadata", () => {
+		const controller = new DynamicEntityController();
+
+		const firstId = controller.createRuntimeSpawn({
+			baseLocalPlacement: createPlacement(),
+			serverInstanceIdMetadata: { id: "server-object:5001" },
+			setupModelId: 0x020003e5,
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+		});
+		const secondId = controller.createRuntimeSpawn({
+			baseLocalPlacement: createPlacement(),
+			serverInstanceIdMetadata: { id: "server-object:5001" },
+			setupModelId: 0x020003e5,
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+		});
+
+		expect(firstId).toBe("runtime-spawn:1");
+		expect(secondId).toBe("runtime-spawn:2");
+		expect(controller.createSnapshot()).toMatchObject({
+			activeEntityCount: 2,
+			nonRenderableEntityCount: 2,
+			runtimeSpawnCount: 2,
+			staticAuthoredCount: 0,
+			staticSeedCount: 0,
+		});
+		expect(controller.queryDynamicEntitySummary(firstId)).toMatchObject({
+			id: firstId,
+			provenance: {
+				kind: "runtime-spawn",
+				sourceKind: "browser-authored-server-shaped",
+			},
+			source: {
+				kind: "runtime-spawn",
+				runtimeEntityId: firstId,
+				serverInstanceIdMetadata: { id: "server-object:5001" },
+				setupModelId: 0x020003e5,
+			},
+		});
 	});
-});
+
+	it("keeps runtime spawns across static retention until explicit removal", () => {
+		const controller = new DynamicEntityController();
+		controller.ingestStaticSeeds([createOutdoorSeedRecord()]);
+		const runtimeId = controller.createRuntimeSpawn({
+			baseLocalPlacement: createPlacement(),
+			setupModelId: 0x020003e5,
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+		});
+
+		controller.retainStaticScopes([]);
+
+		expect(controller.createSnapshot()).toMatchObject({
+			activeEntityCount: 1,
+			runtimeSpawnCount: 1,
+			staticAuthoredCount: 0,
+			staticSeedCount: 0,
+		});
+		expect(controller.queryDynamicEntitySummary(runtimeId)?.id).toBe(runtimeId);
+
+		expect(controller.removeRuntimeSpawn(runtimeId)).toBe(true);
+		expect(controller.removeRuntimeSpawn(runtimeId)).toBe(false);
+		expect(controller.createSnapshot()).toMatchObject({
+			activeEntityCount: 0,
+			runtimeSpawnCount: 0,
+			staticAuthoredCount: 0,
+		});
+	});
+
+	it("updates runtime spawns without changing internal identity", () => {
+		const controller = new DynamicEntityController();
+		const runtimeId = controller.createRuntimeSpawn({
+			baseLocalPlacement: createPlacement(),
+			setupModelId: 0x020003e5,
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+		});
+
+		expect(
+			controller.updateRuntimeSpawn(runtimeId, {
+				animationSelection: { animationId: 0x0300061b, kind: "explicit" },
+				baseLocalPlacement: createPlacement(),
+				serverInstanceIdMetadata: { id: "server-object:7007" },
+				setupModelId: 0x02000400,
+				sourceResidence: {
+					envCellId: 0xda550100,
+					kind: "env-cell",
+					landblockId: 0xda55ffff,
+				},
+			}),
+		).toBe(true);
+
+		expect(controller.queryDynamicEntitySummary(runtimeId)).toMatchObject({
+			animation: {
+				defaultAnimationId: 0x0300061b,
+			},
+			id: runtimeId,
+			source: {
+				animationSelection: { animationId: 0x0300061b, kind: "explicit" },
+				kind: "runtime-spawn",
+				runtimeEntityId: runtimeId,
+				serverInstanceIdMetadata: { id: "server-object:7007" },
+				setupModelId: 0x02000400,
+			},
+			sourceResidence: {
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+		});
+		expect(
+			controller.updateRuntimeSpawn("static-authored-outdoor:nope", {
+				baseLocalPlacement: createPlacement(),
+				setupModelId: 0x020003e5,
+				sourceResidence: {
+					kind: "outdoor-landblock",
+					landblockId: 0xda55ffff,
+				},
+			}),
+		).toBe(false);
+	});
+	});
 
 function createOutdoorSeedRecord(
 	options: {

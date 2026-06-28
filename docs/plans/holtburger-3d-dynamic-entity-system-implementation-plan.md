@@ -70,9 +70,9 @@ Selection and query evidence:
 
 - User retail-client visual checks confirm both `0x020003e5` and `0x020005ac` are not selectable in
   retail.
-- Dynamic query membership therefore must not imply default browser selection. The dynamic query
-  path must support inspection/debug hits while caller filters decide selection, targeting, or
-  gameplay behavior.
+- Dynamic query membership therefore must not imply retail gameplay targetability. Browser mode may
+  still select dynamic scenery for inspection; caller policy decides browser inspection, gameplay
+  targeting, and retail-parity filtering separately.
 
 Phase-order rationale:
 
@@ -81,7 +81,8 @@ Phase-order rationale:
 - Runtime/resource/playback work comes before renderer commits because renderer submissions should
   consume current semantic dynamic state, not create it.
 - Query/index work comes before validation because the first visible target must be inspectable and
-  must prove that default selection is caller policy over query results.
+  must prove that browser inspection, diagnostics, and gameplay targeting remain caller policies over
+  query results.
 - Renderer work comes after shared-resource boundaries are clear so dynamic entities do not become
   static outdoor-detail instances with animated-looking transforms.
 
@@ -169,8 +170,9 @@ Out of scope for this first implementation plan:
 - Dynamic atlas page allocation policy changes, VAO compaction, WebGL2 instanced draws, or dynamic
   workers. Dynamic entities may still consume existing shared prepared texture atlas/cache entries
   through independent dynamic ownership.
-- Treating dynamic scenery as default browser-selectable. The first targets are inspectable/debug
-  query records but not default selection targets.
+- Treating browser dynamic selection as proof of retail gameplay targetability. The first targets may
+  be selectable in browser mode for inspection even though retail visual checks showed they are not
+  gameplay-selectable.
 
 ## Ground Truth
 
@@ -1291,10 +1293,10 @@ Acceptance criteria:
   with ray/bounds intersection before they become hits.
 - Existing static picking tests pass through the merged query path.
 - Dynamic AABB hits are ordered with static hits by nearest distance.
-- Default browser selection filters exclude the two static-authored dynamic scenery targets.
-- Debug/inspection filters can return those same dynamic targets.
-- Browser picking calls the merged scene-query surface even when the default selection filter excludes
-  first-cut dynamic scenery; otherwise the merged query is not considered wired into the runtime.
+- Browser picking can return the two static-authored dynamic scenery targets for inspection.
+- Debug/inspection filters can also return those same dynamic targets.
+- Browser picking calls the merged scene-query surface; otherwise the merged query is not considered
+  wired into the runtime.
 - Env-cell dynamic records remain absent from merged query hits until Phase 8F adds an explicit
   env-cell dynamic query/index path behind the same merged dynamic query family.
 - Any remaining `pickStaticRay` wrapper is documented as temporary cleanup debt with no new callers
@@ -1316,8 +1318,8 @@ Task checklist:
 - [x] Add tests proving dynamic hits are stable across render-anchor changes and cross-landblock
       indexed bounds.
 - [x] Update browser picking and diagnostics call sites to use the merged surface.
-- [x] Add tests proving hit ordering, no dynamic snapshot scans for picking, default-selection
-      exclusion for first-cut dynamic scenery, debug/inspection inclusion for the same dynamic
+- [x] Add tests proving hit ordering, no dynamic snapshot scans for picking, browser-selection
+      inclusion for dynamic scenery inspection, debug/inspection inclusion for the same dynamic
       targets, and env-cell dynamic exclusion until Phase 8F adds a real query path.
 - [x] Run phase verification commands.
 
@@ -1327,9 +1329,10 @@ Decisions and course corrections:
   `dynamic/dynamic-scene-query.ts`, because it composes static and dynamic results for runtime and
   browser callers. Dynamic-specific lookup should remain behind a narrow query method that consumes
   `OutdoorDynamicSpatialIndex` and returns lightweight keyed bounds records.
-- 2026-06-27: Phase 7B must prove selection policy separately from query membership. The two
-  first-cut dynamic scenery targets should be queryable for debug/inspection but excluded by the
-  default browser selection filter.
+- 2026-06-27: Phase 7B must prove selection policy separately from query membership. The original
+  dry-run expectation excluded the two first-cut dynamic scenery targets from default browser
+  selection; later implementation allows browser click selection for inspection while keeping retail
+  gameplay targeting as a separate caller policy.
 - 2026-06-27: Dynamic hit results should not carry deep dynamic records. The spatial index returns
   keys and bounds; richer dynamic diagnostics remain a separate lookup by entity id so query results
   stay lightweight and selection does not accidentally become diagnostics transport.
@@ -1348,17 +1351,17 @@ Decisions and course corrections:
 - 2026-06-27: Browser terrain grounding and click selection now call `pickSceneRay` in
   `default-selection` mode. The compatibility `pickStaticRay` wrapper remains only for existing
   runtime callers/tests and delegates through the merged query surface.
-- 2026-06-27: Default browser selection excludes first-cut static-authored dynamic scenery while
-  `debug-inspection` and `diagnostics` scene query modes can return those dynamic hits. Env-cell
-  dynamic records remain excluded until Phase 8F adds the env-cell dynamic query/index path.
+- 2026-06-27: Browser `default-selection`, `debug-inspection`, and `diagnostics` scene query modes
+  can return first-cut static-authored dynamic scenery for inspection. Env-cell dynamic records remain
+  excluded until Phase 8F adds the env-cell dynamic query/index path.
 
 Debt and follow-up:
 
 - Remove the temporary `ClientRuntime.pickStaticRay` compatibility wrapper during Phase 11 once
   remaining tests and any internal callers are migrated to `pickSceneRay`.
-- Browser selected-diagnostics UI still presents static selections because default browser selection
-  intentionally excludes first-cut dynamic scenery. A future debug/inspection UI can request dynamic
-  scene hits by `entityId` without depending on static selection-key labels.
+- Browser selected-diagnostics UI originally presented static-only selections. Dynamic browser
+  selection now exists for inspection; richer per-entity diagnostics should be looked up by
+  `entityId` without depending on static selection-key labels.
 - Dynamic broadphase now uses indexed landblock ids plus conservative per-landblock RBush searches
   before ray/AABB narrowing. This avoids snapshot scans and keeps spatial-index ownership intact, but
   a later performance pass can tighten the RBush search bounds to the ray segment inside each
@@ -1836,8 +1839,8 @@ Deliverables:
 - Use the existing env-cell pick/query context, including `acceptedEnvCellIds` where present, as the
   visibility filter for env-cell dynamic debug hits. Do not create a second portal-visibility policy
   beside the merged scene-query context.
-- Preserve default browser selection policy: dynamic scenery remains debug/inspection-queryable but
-  not default-selectable unless caller policy explicitly asks for it.
+- Preserve explicit caller policy: browser mode may select dynamic scenery for inspection, while
+  retail/gameplay targeting semantics must remain a separate filter.
 - Keep source residence, effective residence, and render-pass membership explicit. Do not fake
   env-cell dynamics as outdoor landblock dynamics just to reuse code.
 - Add diagnostics that can prove an env-cell dynamic was classified, removed from static output,
@@ -1860,7 +1863,7 @@ Acceptance criteria:
   and does not use outdoor landblock-anchor assumptions where they do not apply.
 - Env-cell dynamic query/debug hits are available through the merged scene-query family with
   residence-aware filtering, use `acceptedEnvCellIds` for env-cell visibility when available, and
-  default selection still excludes dynamic scenery.
+  browser click selection can return dynamic scenery for inspection.
 - Tests prove classified env-cell dynamic statics are not emitted as static env-cell draw units once
   cut over.
 - Existing outdoor dynamic windmill/bird behavior and static env-cell rendering for unclassified
@@ -1884,8 +1887,8 @@ Task checklist:
 - [x] Add env-cell dynamic query/index membership behind the merged scene-query surface.
 - [x] Use merged scene-query env-cell context and `acceptedEnvCellIds` for env-cell dynamic debug
       filtering.
-- [x] Add tests for no double-render, dynamic renderer commit eligibility, query membership,
-      default-selection exclusion, and unclassified env-cell static stability.
+- [x] Add tests for no double-render, dynamic renderer commit eligibility, query membership, browser
+      selection of dynamic scenery for inspection, and unclassified env-cell static stability.
 - [x] Update diagnostics/report fields so env-cell dynamic cutover can be inspected.
 - [x] Run full verification commands.
 
@@ -1928,8 +1931,8 @@ Decisions and course corrections:
   landblock-anchor translation only for outdoor instances and draws env-cell dynamic instances in
   interior domain passes without adding an env-cell-only renderer API.
 - 2026-06-27: Env-cell dynamic query records are exposed through the merged scene-query family.
-  Debug/query modes can return env-cell dynamic hits, `acceptedEnvCellIds` filters visibility, and
-  `default-selection` still excludes dynamic scenery.
+  Browser selection and debug/query modes can return env-cell dynamic hits for inspection, and
+  `acceptedEnvCellIds` filters visibility.
 - 2026-06-27: Renderability status is now honest: records with no renderability reasons report
   `status: "renderable"` and no longer count as non-renderable. This prevents Phase 9 diagnostics
   from carrying a contradiction after the env-cell cutover.
@@ -2067,34 +2070,41 @@ Status: pending.
 
 Purpose:
 
-- Make the dynamic runtime/render path reviewable before manual DAT validation. This phase should
-  expose enough state to explain why an entity is dynamic, whether it is renderable, whether it is
-  indexed/queryable, what animation/hook state is active, and what the renderer submitted or skipped.
+- Make the dynamic runtime/render path reviewable before manual DAT validation without adding
+  another broad itemized diagnostics surface. This phase should keep global diagnostics compact and
+  use picker/selected-entity inspection for entity-level detail.
 
 Deliverables:
 
-- Add or harden dynamic diagnostics projection in runtime snapshots/reports.
-- Surface classification reason, source residence, effective residence, setup id, animation id,
-  current frame/time, part count, active `SetOmega` summary, bounds, index membership, resource
-  readiness, renderer resource/instance ids, renderer submission counts, skipped dynamic submissions,
-  and issues.
-- Preserve the merged query distinction between dynamic query membership and default browser
-  selection policy in visible diagnostics or tests.
+- Reuse the existing runtime dynamic snapshot and renderer snapshot/report counters. Do not add a
+  parallel dynamic diagnostics-report domain unless existing surfaces cannot answer a concrete Phase
+  9B validation question.
+- Keep global dynamic diagnostics to compact operational counts, such as active, renderable,
+  non-renderable, indexed/queryable, resource-pending, resource-failed, and unsupported-hook counts.
+  Do not add sampled entity lists or hook-specific global counters such as `SetOmega` counts.
+- Surface entity-level detail through picker/selected-dynamic-entity inspection: classification
+  reason, source residence, effective residence, setup id, animation id, current frame/time, part
+  count, active transform effects, bounds, index membership, resource readiness, renderer
+  resource/instance ids, and issues.
+- Update plan/tests to match current browser behavior: dynamic hits are selectable in normal browser
+  click picking. Treat this as browser inspection policy, not retail gameplay targeting parity.
 - Add debug overlay support for dynamic bounds only if existing runtime/selection diagnostics are not
   enough to validate spatial/query membership. Do not add a decorative overlay just because this
   phase mentions bounds.
-- Add targeted smoke coverage for the dynamic report projection and renderer diagnostics fields
-  needed by Phase 9B.
+- Add targeted smoke coverage for the compact dynamic summary, selected dynamic entity inspection,
+  and renderer diagnostics fields needed by Phase 9B.
 - Record any remaining validation debt in this plan before moving to browser/manual checks.
 
 Acceptance criteria:
 
-- Diagnostics can explain why the windmill is dynamic and currently renderable.
-- Diagnostics can explain why the bird is dynamic, has active `SetOmega`, and is currently
-  renderable.
+- Selected-entity diagnostics can explain why the windmill is dynamic and currently renderable.
+- Selected-entity diagnostics can explain why the bird is dynamic, has an active transform effect
+  from `SetOmega`, and is currently renderable.
 - Diagnostics expose whether dynamic renderer resources, instances, draw calls, and skipped
   submissions are nonzero/zero for the expected reasons.
-- Dynamic entities are debug/inspection-queryable but not default browser-selectable.
+- Dynamic entities are queryable and selectable through normal browser picking for inspection.
+  Documentation must call out that this is browser tooling policy and does not prove retail gameplay
+  targetability.
 - Missing dynamic dependencies or unsupported hooks are visible in diagnostics and console output;
   the bird target's `SetOmega` hook is not reported as unsupported.
 - Env-cell dynamic records use the Phase 8F cutover path and are diagnosable through the same dynamic
@@ -2103,11 +2113,15 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add diagnostics projection and browser report fields.
+- [ ] Audit existing runtime dynamic snapshot, renderer snapshot, and browser selection diagnostics
+      before adding any new report fields.
+- [ ] Add only missing compact global dynamic counts required for Phase 9B validation.
+- [ ] Add selected dynamic entity inspection for per-entity validation details if the existing picker
+      selection state is insufficient.
 - [ ] Add dynamic bounds debug overlay only if diagnostics/report fields are insufficient for
       validation.
-- [ ] Add targeted tests for dynamic diagnostics projection, default selection filtering, and
-      renderer counters needed by manual validation.
+- [ ] Add targeted tests for compact dynamic diagnostics, dynamic browser selection behavior,
+      selected entity inspection, and renderer counters needed by manual validation.
 - [ ] Run full verification commands.
 
 Decisions and course corrections:
@@ -2119,15 +2133,20 @@ Decisions and course corrections:
 - 2026-06-27 dry run: Renderer counters for dynamic visual resources, texture uses, instances, draw
   calls, and skipped dynamic submissions are already in `RendererDiagnosticsSummary`. Phase 9A should
   wire those into validation/report expectations, not add a parallel renderer diagnostics path.
-- 2026-06-27 dry run: `pickMergedSceneRay` already keeps dynamic hits out of `default-selection` and
-  allows them for debug/diagnostics modes. Phase 9A should preserve and test that caller-policy
-  split rather than adding a dynamic-object lookup adapter to the spatial index.
+- 2026-06-27 dry run, superseded by implementation reality: earlier text expected dynamic hits to be
+  excluded from `default-selection`, but the current merged query and browser picker select dynamic
+  hits in normal browser click picking. Phase 9A should document and test that browser inspection
+  policy instead of pretending it is retail gameplay targetability.
 - 2026-06-27 dry run: A dynamic bounds overlay is optional. Existing snapshot/report data may be
   enough for Phase 9B; only add overlay primitives if manual validation cannot tell whether bad
   picking/rendering is caused by bounds/index membership versus renderer output.
 - 2026-06-27: Phase 8F now precedes this diagnostics phase. Phase 9A should report env-cell and
   outdoor dynamic records through one dynamic diagnostics family instead of preserving the old
   env-cell renderer-gated special case.
+- 2026-06-28: Tightened Phase 9A away from itemized report expansion. Global diagnostics should stay
+  count-oriented and hook-generic; per-entity facts belong behind picker/selected-entity inspection.
+  Do not add sampled entity lists, global `SetOmega` counts, or duplicated dynamic report objects
+  when existing runtime and renderer snapshots already expose the needed state.
 
 Debt and follow-up:
 
@@ -2150,7 +2169,7 @@ Deliverables:
 - Validate outdoor static-authored setup `0x020005ac` with animation `0x03000751` and typed frame-0
   `SetOmega` in browser mode.
 - Confirm dynamic query/debug inspection can find first-cut dynamic records while default browser
-  selection does not select them.
+  picking can select them for inspection.
 - Compare dynamic runtime diagnostics, renderer counters, and visible motion against the
   requirements-plan evidence.
 - Record evidence, concessions, failures, and any render-quality debt in this plan.
@@ -2164,8 +2183,8 @@ Acceptance criteria:
 - Runtime diagnostics identify the expected setup ids, animation ids, current animation frame/time,
   source/effective residence, renderability, renderer counts, and dynamic query membership.
 - The bird target's `SetOmega` hook is supported and does not appear in unsupported-hook diagnostics.
-- First-cut dynamic targets remain excluded from default browser selection unless a caller explicitly
-  asks for debug/inspection dynamic hits.
+- First-cut dynamic targets can be selected by browser picking for inspection. Retail/gameplay
+  targeting semantics remain a separate caller policy.
 - Any dynamic transparent/additive ordering issue is captured as concrete evidence rather than vague
   render debt.
 - No temporary DAT-dependent tests or one-off validation scripts are retained unless the plan records
@@ -2377,8 +2396,8 @@ Decisions and course corrections:
 - Dynamic renderer texture use shares compatible prepared texture atlas/cache entries with static
   consumers while using dynamic or neutral owner keys and dynamic leases.
 - Dynamic current-frame bounds are indexed and queryable through the merged scene-query surface.
-- Browser default selection excludes both static-authored dynamic scenery targets, while
-  debug/inspection queries can report them.
+- Browser selection can return both static-authored dynamic scenery targets for inspection. Retail
+  gameplay targetability remains a separate caller policy.
 - Diagnostics explain dynamic classification, readiness, playback, bounds, index membership, and
   renderer submission state.
 - Unsupported hooks are preserved and diagnosed; supported `SetOmega` is reported as active transform

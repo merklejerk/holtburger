@@ -13,6 +13,7 @@ import type {
 	StaticResourceIdentity,
 	StaticScopeOwnerKey,
 	StaticWorkPeerRecordOwner,
+	VisualTextureDomain,
 } from "../static/contracts";
 import type { VisualGeometryPayload } from "../visual/visual-geometry";
 import type {
@@ -22,6 +23,12 @@ import type {
 } from "../host/contracts";
 
 export type DynamicEntityId = string;
+
+export function createDynamicVisualResourceId(
+	entityId: DynamicEntityId,
+): string {
+	return `dynamic-visual-resource:${entityId}`;
+}
 
 /** Static-authored seed fact shapes that can become dynamic runtime records. */
 export type StaticAuthoredDynamicSeedFacts =
@@ -34,12 +41,75 @@ export interface DynamicEntityRecord {
 	readonly bounds: DynamicEntityBoundsState;
 	readonly effectiveResidence: DynamicEntityResidence;
 	readonly id: DynamicEntityId;
+	readonly presentation: DynamicEntityPresentation;
 	readonly provenance: DynamicEntityProvenance;
 	readonly renderability: DynamicEntityRenderability;
 	readonly resources: DynamicEntityResourceState;
 	readonly source: DynamicEntitySourceFacts;
 	readonly sourceResidence: DynamicEntityResidence;
 }
+
+/** Projected presentation facts consumed by renderer/resource policy code. */
+interface DynamicEntityPresentation {
+	readonly diagnostics: DynamicDiagnosticContext;
+	readonly policy: DynamicPresentationPolicy;
+	readonly visualSource: DynamicVisualSource;
+}
+
+/** Operational presentation policies derived once from source-specific facts. */
+interface DynamicPresentationPolicy {
+	readonly materialPlanningIdentity: DynamicMaterialPlanningIdentity;
+	readonly ownershipPolicy: DynamicVisualOwnershipPolicy;
+	readonly retentionPolicy: DynamicRetentionPolicy;
+	readonly textureBatchId: string;
+	readonly textureDomain: VisualTextureDomain;
+}
+
+type DynamicRetentionPolicy =
+	| {
+			readonly kind: "static-source-scope";
+			readonly sourceScopeKey: string;
+	  }
+	| {
+			readonly kind: "explicit-runtime-lifetime";
+	  };
+
+type DynamicVisualOwnershipPolicy = {
+	readonly kind: "dynamic-visual-resource";
+	readonly resourceId: string;
+};
+
+type DynamicMaterialPlanningIdentity =
+	| {
+			readonly kind: "static-authored-object";
+			readonly object: StaticAuthoredDynamicSeedFacts["object"];
+	  }
+	| {
+			readonly kind: "pending";
+			readonly reason: "runtime-material-planning-identity-unsupported";
+	  };
+
+/** Source-neutral visual inputs; deeper setup/material readiness lands in Phase 12C.2. */
+interface DynamicVisualSource {
+	readonly animationSelection: DynamicEntityAnimationSelection;
+	readonly effectiveResidence: DynamicEntityResidence;
+	readonly modelData: null;
+	readonly setupModelId: number;
+	readonly sourceAssetIds: readonly string[];
+}
+
+/** Diagnostic/correlation facts retained outside renderer/resource identity. */
+type DynamicDiagnosticContext =
+	| {
+			readonly kind: "static-authored";
+			readonly owner: StaticWorkPeerRecordOwner;
+			readonly sourceScopeKey: string;
+	  }
+	| {
+			readonly kind: "runtime-spawn";
+			readonly serverInstanceIdMetadata: DynamicEntityServerInstanceMetadata | null;
+			readonly sourceKind: "browser-authored-server-shaped";
+	  };
 
 type DynamicEntityProvenance =
 	| {
@@ -62,7 +132,7 @@ type DynamicEntityResidence =
 	| {
 			readonly kind: "outdoor-landblock";
 			readonly landblockId: number;
-		  };
+	  };
 
 type DynamicEntityAnimationSelection =
 	| {
@@ -372,6 +442,7 @@ export interface DynamicEntitySummaryDto {
 	readonly bounds: DynamicEntityBoundsState;
 	readonly effectiveResidence: DynamicEntityResidence;
 	readonly id: DynamicEntityId;
+	readonly presentation: DynamicEntityPresentation;
 	readonly provenance: DynamicEntityProvenance;
 	readonly renderability: DynamicEntityRenderability;
 	readonly resources: DynamicEntityResourceSummaryDto;

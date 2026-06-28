@@ -550,6 +550,9 @@ function createDynamicMaterialPlanningDomain(
 	if (domain === "outdoor-buildings" || domain === "outdoor-detail") {
 		return domain;
 	}
+	if (domain === "runtime-object-material") {
+		return "outdoor-detail";
+	}
 
 	throw new Error(
 		`Unsupported static-authored dynamic material planning domain ${domain}.`,

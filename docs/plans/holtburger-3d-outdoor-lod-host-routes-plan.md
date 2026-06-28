@@ -203,6 +203,25 @@ Course corrections from the dry run:
 - Treat explicit/generated detail split as scene-interest and scheduled-work policy first; only split renderer layers if a later implementation need proves it.
 - Keep the old broad `landblock-outdoor` route only until every normal frontend resolver is cut over, then delete it in the cleanup phase.
 
+## Source-First Resteer Dry Run
+
+Dry-run date: 2026-06-28.
+
+- `StaticScopePayload` currently embeds one `StaticResolverJob`, and `StaticBakeBatchItem` embeds one `ScheduledStaticWork`. A source-first resolver cannot simply "return an array" without separating source work from emitted layer work.
+- `ScheduledStaticWorkStatus` currently has a single `domain: StaticDomain`. Source products do not map cleanly to one renderer domain, so source-product status and emitted layer status need distinct types or a tagged status union.
+- Resource eviction is keyed by layer desired keys such as `landblock:da55ffff:outdoor-detail`. If source work replaces layer work without preserving desired layer keys, partial eviction can remove too much or retain stale detail. Desired layer ownership must remain explicit even when source resolution is shared.
+- Bake batching is domain-oriented (`createPendingBatchKey` uses revision plus `work.job.domain`, and `StaticBakeBatchResult.domain` is singular). Multi-output resolver fanout should enqueue separate layer-owned bake items per emitted domain rather than trying to bake mixed domains in one batch.
+- `StaticCoordinatorSourcePayloadDelta` and `StaticSceneQuery.ingestSourcePayload` are single-payload oriented, but they can likely remain layer-payload oriented if the coordinator emits one delta per resolved layer output.
+- `BrowserStaticResolver`, worker protocol messages, and the worker router all route by `StaticResolverJob.domain`. Source-first work needs a new resolver input/result contract and browser/worker routing for landblock outdoor source products.
+- Interior-cell demand currently needs same-landblock outdoor building portal facts plus env-cells, but not terrain rendering. With cumulative LoD levels, an interior building source product would request source LoD `1` and emit only buildings; that still loads terrain source data because LoD `1` includes level `0`. If this is too wasteful, the route family needs non-cumulative product profiles rather than numeric cumulative LoD.
+
+Course corrections from the source-first dry run:
+
+- Introduce explicit source-work and emitted-layer-work types before changing resolver worker protocol.
+- Keep retained scopes and resident resources keyed by emitted layer ownership, not by source-product ownership.
+- Keep bake workers and static-scene query layer-oriented for this plan; only source resolution becomes source-first.
+- Add an open question about whether cumulative LoD is acceptable for building-only/interior portal use.
+
 ## Phased Implementation
 
 ### Phase 1: Define Outdoor LoD Contract
@@ -316,6 +335,7 @@ Deliverables:
 - Add typed requested output layers for terrain, buildings, explicit detail, and generated detail.
 - Add source-LoD selection rules that choose the highest required `OutdoorLodLevel` for the requested output layers.
 - Keep layer ownership metadata explicit so downstream bake, retention, diagnostics, and renderer cleanup can remain layer-oriented.
+- Introduce separate source-work and emitted-layer ownership concepts instead of overloading `ScheduledStaticWork` for both.
 
 Acceptance criteria:
 
@@ -323,13 +343,16 @@ Acceptance criteria:
 - Scene interest for terrain plus buildings plans one product with source LoD `1` and terrain/buildings outputs.
 - Scene interest for explicit detail plans source LoD `2`; generated detail plans source LoD `3`.
 - Planned work no longer contains separate outdoor terrain/building/detail resolver jobs for the same landblock source.
+- Retained scopes and desired resource keys still enumerate the emitted layer ownership needed for cleanup and static scene query retention.
 - Existing env-cell/interior work remains unchanged.
 
 Task checklist:
 
 - [ ] Add source product types near `StaticDemandPlan`/`ScheduledStaticWork` or a new colocated planning module.
+- [ ] Add emitted layer work/ownership types for bake, retention, and diagnostics.
 - [ ] Add requested output layer and selected source LoD types with comments.
 - [ ] Update demand planner tests for terrain/building/detail combinations.
+- [ ] Update interior-cell demand tests to prove building portal facts are emitted without terrain layer retention.
 - [ ] Preserve stable retained-scope ownership for layer cleanup.
 - [ ] Add negative tests proving env-cell work does not get folded into outdoor source products.
 
@@ -347,6 +370,7 @@ Deliverables:
 - Load `landblock/{id}/outdoor-lod/{sourceLod}` exactly once per source product.
 - Reuse existing terrain and outdoor static object projection logic behind smaller functions instead of duplicating resolver code.
 - Emit zero or more layer payloads for terrain, buildings, explicit detail, and generated detail.
+- Replace the resolver worker request/response shape with a source-work input and multi-output result, while keeping env-cell resolver support explicit.
 
 Acceptance criteria:
 
@@ -355,12 +379,14 @@ Acceptance criteria:
 - Explicit-detail source product requests LoD `2` and does not include generated scenery.
 - Generated-detail source product requests LoD `3` and preserves generated scenery identities/source mappings.
 - Source closure runs once per emitted object family, not once per old layer resolver job.
+- Source payload deltas can be emitted per layer output so `StaticSceneQuery` remains layer-oriented.
 
 Task checklist:
 
 - [ ] Extract terrain projection from `TerrainStaticScopeResolver` into a source-payload projection helper.
 - [ ] Extract building/detail projection from `OutdoorStaticObjectsResolver` into source-payload projection helpers.
 - [ ] Add the source-first resolver worker protocol/client shape.
+- [ ] Update `BrowserStaticResolver` and worker router routing to recognize landblock outdoor source work separately from env-cell work.
 - [ ] Add tests for LoD selection, one host asset request, and multi-output payload emission.
 - [ ] Add assertions that omitted output layers do not resolve source closures or texture/material dependencies.
 
@@ -378,6 +404,7 @@ Deliverables:
 - Enqueue emitted payloads into existing domain-oriented bake batches, preserving layer domains for renderer ownership.
 - Track source-product status and emitted layer statuses without losing stale-work/revision determinism.
 - Keep texture residency, draw-unit ownership, portal resources, and static selection keyed by emitted layer domains.
+- Do not pass source-product work directly into `StaticBakeBatchItem`; bake items must remain layer-owned or use an equivalent emitted-layer work type.
 
 Acceptance criteria:
 
@@ -385,10 +412,12 @@ Acceptance criteria:
 - Terrain/building/detail draw units retain their existing layer domains.
 - Evicting detail interest removes detail resources without removing retained terrain/buildings for the same source product when those outputs remain desired.
 - Stale source-product results and stale emitted layer bake results are rejected deterministically.
+- `collectCommittedResourceKeysByDesiredKey`, `filterStaticBakeResultForWorks`, and resource eviction continue to operate on emitted layer desired keys.
 
 Task checklist:
 
 - [ ] Add a resolver result type that can contain multiple `StaticScopePayload` outputs with domain/owner metadata.
+- [ ] Split coordinator status bookkeeping between source work and emitted layer bake work, or add a tagged status union that keeps the distinction explicit.
 - [ ] Update coordinator source-payload and bake enqueue paths.
 - [ ] Update batch id, desired key, and retained-scope helpers as needed for source product plus emitted layer ownership.
 - [ ] Add coordinator tests for multi-output resolution, stale rejection, and partial output eviction.
@@ -514,6 +543,10 @@ Mitigation: model source-product revision and emitted layer ownership together. 
 
 Mitigation: select the source LoD from requested output layers, not from a global landblock maximum. Terrain-only interest must still request level `0`; level `3` is only valid when generated detail is actually requested.
 
+### Risk: Cumulative LoD Is Wasteful For Building-Only Use
+
+Mitigation: dry-run the interior/building portal path before locking the route contract. If LoD `1` always carrying terrain is too expensive for building-only products, replace numeric cumulative LoD with explicit source product profiles or add a non-cumulative building profile.
+
 ### Risk: Route Proliferation Leaks Frontend Policy Into Content
 
 Mitigation: model route levels as source product profiles, not browser UI toggles. Browser-specific interest policy remains in `apps/holtburger-3d`; content only defines what each source profile contains.
@@ -542,4 +575,5 @@ Mitigation: update tests to use the minimal route for the behavior under test. D
 ## Open Questions
 
 - Should explicit and generated outdoor detail share the existing `outdoor-detail` renderer domain, or should implementation evidence force separate `StaticDomain` values?
+- Is cumulative LoD acceptable for building-only/interior portal use, or do we need non-cumulative source product profiles before implementation?
 - Does the topology cleanup audit find any non-test owner that blocks removing `landblock/{id}/topology`?

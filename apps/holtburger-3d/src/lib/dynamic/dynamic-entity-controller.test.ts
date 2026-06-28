@@ -226,8 +226,12 @@ describe("dynamic entity controller", () => {
 				},
 				policy: {
 					materialPlanningIdentity: {
-						kind: "pending",
-						reason: "runtime-material-planning-identity-unsupported",
+						kind: "setup-backed-visual",
+						visualObject: {
+							entityId: firstId,
+							kind: "dynamic-visual-object",
+							resourceId: "dynamic-visual-resource:runtime-spawn:1",
+						},
 					},
 					ownershipPolicy: {
 						kind: "dynamic-visual-resource",

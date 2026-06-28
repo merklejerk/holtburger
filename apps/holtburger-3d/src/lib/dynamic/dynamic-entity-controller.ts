@@ -478,8 +478,8 @@ function createRuntimeSpawnPresentation(options: {
 		},
 		policy: {
 			materialPlanningIdentity: {
-				kind: "pending",
-				reason: "runtime-material-planning-identity-unsupported",
+				kind: "setup-backed-visual",
+				visualObject,
 			},
 			ownershipPolicy: {
 				kind: "dynamic-visual-resource",

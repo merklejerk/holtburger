@@ -284,53 +284,178 @@ describe("dynamic entity resource manager", () => {
 		).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0]);
 	});
 
-	it("tracks explicit-animation runtime spawns without static source facts", async () => {
+	it("prepares explicit-animation runtime spawns through setup-model visual resources", async () => {
 		const host = new ResolvingRuntimeHost();
 		const assetService = new HostBackedAssetService({ host });
 		const controller = createController(assetService);
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-		try {
-			const runtimeId = controller.createRuntimeSpawn({
-				animationSelection: { animationId: 0x0300061b, kind: "explicit" },
-				baseLocalPlacement: createPlacement(),
-				setupModelId: 0x020003e5,
-				sourceResidence: {
-					kind: "outdoor-landblock",
-					landblockId: 0xda55ffff,
-				},
-			});
-			await flushPromises();
+		const runtimeId = controller.createRuntimeSpawn({
+			animationSelection: { animationId: 0x0300061b, kind: "explicit" },
+			baseLocalPlacement: createPlacement(),
+			setupModelId: 0x020003e5,
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+		});
+		await flushPromises();
 
-			expect(host.lookupCountByKey).toEqual(
-				new Map([
-					["animation:0300061b", 1],
-					["setup-model:020003e5", 1],
-				]),
-			);
-			expect(controller.queryDynamicEntitySummary(runtimeId)).toMatchObject({
-				renderability: {
-					reasons: ["visual-resources-pending"],
-					status: "non-renderable",
-				},
-				resources: {
-					setupAnimation: {
-						animationKey: { id: 0x0300061b, kind: "animation" },
-						setupModelKey: { id: 0x020003e5, kind: "setup-model" },
-						status: "ready",
+		expect(host.lookupCountByKey).toEqual(
+			new Map([
+				["animation:0300061b", 1],
+				["gfx-obj:01000020", 1],
+				["material:08000011", 1],
+				["palette:04000010", 1],
+				[
+					"prepared-texture:06000010?cs=linear&mips=none&out=rgba8&usage=color",
+					1,
+				],
+				["render-surface:06000010", 1],
+				["setup-appearance:020003e5", 1],
+				["setup-model:020003e5", 1],
+				["surface-texture:05000010", 1],
+			]),
+		);
+		expect(controller.queryDynamicEntitySummary(runtimeId)).toMatchObject({
+			presentation: {
+				policy: {
+					materialPlanningIdentity: {
+						kind: "setup-backed-visual",
+						visualObject: {
+							entityId: runtimeId,
+							kind: "dynamic-visual-object",
+							resourceId: `dynamic-visual-resource:${runtimeId}`,
+						},
 					},
-					status: "setup-animation-ready",
-					visual: {
-						status: "pending",
-					},
+					textureBatchId: `dynamic:${runtimeId}`,
+					textureDomain: "runtime-object-material",
 				},
-				source: {
-					kind: "runtime-spawn",
-					runtimeEntityId: runtimeId,
+				visualSource: {
+					modelData: null,
+					setupModelId: 0x020003e5,
+					sourceAssetIds: ["setup-model/020003e5"],
 				},
-			});
-		} finally {
-			warn.mockRestore();
-		}
+			},
+			renderability: {
+				reasons: [],
+				status: "renderable",
+			},
+			resources: {
+				setupAnimation: {
+					animationKey: { id: 0x0300061b, kind: "animation" },
+					setupModelKey: { id: 0x020003e5, kind: "setup-model" },
+					status: "ready",
+				},
+				status: "ready",
+				visual: {
+					materialSlots: [
+						{
+							identity: {
+								kind: "dynamic-visual-material-slot",
+								part: {
+									object: {
+										kind: "dynamic-visual-object",
+										resourceId: `dynamic-visual-resource:${runtimeId}`,
+									},
+								},
+							},
+						},
+					],
+					renderParts: [
+						{
+							materialFamily: "texture-rgba",
+							materialPass: "opaque",
+							partIndex: 0,
+							sourceAssetId: "gfx-obj/01000020",
+							triangleCount: 1,
+						},
+					],
+					status: "ready",
+					textureRequirements: [
+						{
+							textureUseId:
+								"dynamic-texture:08000011:base-color:06000010?cs=linear&mips=none&out=rgba8&usage=color",
+						},
+					],
+				},
+			},
+			source: {
+				kind: "runtime-spawn",
+				runtimeEntityId: runtimeId,
+			},
+		});
+		expect(
+			assetService.createSnapshot().committed.map((entry) => entry.leaseCount),
+		).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1]);
+	});
+
+	it("prepares env-cell runtime spawns through setup-model visual resources", async () => {
+		const host = new ResolvingRuntimeHost();
+		const assetService = new HostBackedAssetService({ host });
+		const controller = createController(assetService);
+		const runtimeId = controller.createRuntimeSpawn({
+			animationSelection: { animationId: 0x0300061b, kind: "explicit" },
+			baseLocalPlacement: createPlacement(),
+			setupModelId: 0x020003e5,
+			sourceResidence: {
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+		});
+		await flushPromises();
+
+		expect(controller.queryDynamicEntitySummary(runtimeId)).toMatchObject({
+			renderability: {
+				reasons: [],
+				status: "renderable",
+			},
+			resources: {
+				setupAnimation: {
+					status: "ready",
+				},
+				status: "ready",
+				visual: {
+					renderParts: [
+						{
+							materialFamily: "texture-rgba",
+							materialPass: "opaque",
+							partIndex: 0,
+						},
+					],
+					status: "ready",
+				},
+			},
+		});
+	});
+
+	it("releases runtime visual resource leases on explicit removal", async () => {
+		const assetService = createAssetService();
+		const controller = createController(assetService);
+		const runtimeId = controller.createRuntimeSpawn({
+			animationSelection: { animationId: 0x0300061b, kind: "explicit" },
+			baseLocalPlacement: createPlacement(),
+			setupModelId: 0x020003e5,
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+		});
+		await flushPromises();
+
+		expect(controller.queryDynamicEntitySummary(runtimeId)).toMatchObject({
+			resources: {
+				status: "ready",
+			},
+		});
+		expect(
+			assetService.createSnapshot().committed.map((entry) => entry.leaseCount),
+		).toEqual([1, 1, 1, 1, 1, 1, 1, 1, 1]);
+
+		expect(controller.removeRuntimeSpawn(runtimeId)).toBe(true);
+
+		expect(
+			assetService.createSnapshot().committed.map((entry) => entry.leaseCount),
+		).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0]);
 	});
 
 	it("does not expose or request animation zero for runtime setup-default spawns", async () => {
@@ -361,36 +486,6 @@ describe("dynamic entity resource manager", () => {
 			expect(
 				setupAnimation !== undefined && "animationKey" in setupAnimation,
 			).toBe(false);
-		} finally {
-			warn.mockRestore();
-		}
-	});
-
-	it("releases runtime setup and animation leases on explicit removal", async () => {
-		const assetService = createAssetService();
-		const controller = createController(assetService);
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-		try {
-			const runtimeId = controller.createRuntimeSpawn({
-				animationSelection: { animationId: 0x0300061b, kind: "explicit" },
-				baseLocalPlacement: createPlacement(),
-				setupModelId: 0x020003e5,
-				sourceResidence: {
-					kind: "outdoor-landblock",
-					landblockId: 0xda55ffff,
-				},
-			});
-			await flushPromises();
-
-			expect(
-				assetService.createSnapshot().committed.map((entry) => entry.leaseCount),
-			).toEqual([1, 1]);
-
-			expect(controller.removeRuntimeSpawn(runtimeId)).toBe(true);
-
-			expect(
-				assetService.createSnapshot().committed.map((entry) => entry.leaseCount),
-			).toEqual([0, 0]);
 		} finally {
 			warn.mockRestore();
 		}

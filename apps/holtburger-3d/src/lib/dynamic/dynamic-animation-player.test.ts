@@ -237,7 +237,7 @@ describe("dynamic animation player", () => {
 				activeOmega: {
 					animationAssetId: "animation/0300061b",
 					animationId: 0x0300061b,
-					entityId: "dynamic-test-entity",
+					entityId: "runtime-spawn:animation-test",
 					hookName: "SetOmega",
 					hookType: TEST_SET_OMEGA_HOOK_TYPE,
 					lastAppliedFrameIndex: 0,
@@ -427,32 +427,8 @@ describe("dynamic animation player", () => {
 function createRecord(options: {
 	readonly payload: AnimationPayloadDto;
 }): DynamicEntityRecord {
-	const seed = {
-		classificationReason: "setup-default-animation" as const,
-		defaultAnimationId: 0x0300061b,
-		domain: "outdoor-buildings",
-		landblockId: 0xda55ffff,
-		localPlacement: createPlacement({ x: 7, y: 8, z: 9 }),
-		object: {
-			instanceId: "windmill-0",
-			kind: "static-object-instance" as const,
-			landblockId: 0xda55ffff,
-			objectKind: "building" as const,
-		},
-		setupModelId: 0x020003e5,
-		source: {
-			kind: "static-object-source" as const,
-			sourceAssetKind: "setup-model" as const,
-			sourceDid: 0x020003e5,
-		},
-		sourceAssetId: "setup-model/020003e5",
-		sourceResidence: {
-			kind: "landblock-source" as const,
-			landblockId: 0xda55ffff,
-			source: "outdoor" as const,
-		},
-		sourceScale: { x: 1, y: 1, z: 1 },
-	};
+	const entityId = "runtime-spawn:animation-test";
+	const visualResourceId = `dynamic-visual-resource:${entityId}`;
 	return {
 		animation: {
 			defaultAnimationId: 0x0300061b,
@@ -462,8 +438,8 @@ function createRecord(options: {
 			status: "ready",
 		},
 		baseTransform: {
-			baseLocalPlacement: seed.localPlacement,
-			sourceScale: seed.sourceScale,
+			baseLocalPlacement: createPlacement({ x: 7, y: 8, z: 9 }),
+			sourceScale: { x: 1, y: 1, z: 1 },
 		},
 		bounds: {
 			currentBounds: null,
@@ -475,15 +451,52 @@ function createRecord(options: {
 			kind: "outdoor-landblock",
 			landblockId: 0xda55ffff,
 		},
-		id: "dynamic-test-entity",
-		provenance: {
-			kind: "static-authored-outdoor",
-			owner: {
-				domain: "outdoor-buildings",
-				scopeKey: "landblock:da55ffff",
-				workId: "1:landblock:da55ffff:outdoor-buildings",
+		id: entityId,
+		presentation: {
+			diagnostics: {
+				kind: "runtime-spawn",
+				serverInstanceIdMetadata: null,
+				sourceKind: "browser-authored-server-shaped",
 			},
-			sourceScopeKey: "outdoor-buildings:landblock:da55ffff",
+			policy: {
+				diagnosticsBucket: "runtime-authored-dynamic",
+				materialDetailRolePolicy: {
+					kind: "runtime-authored-none",
+				},
+				materialPlanningDomain: "runtime-authored-dynamic-object-material",
+				materialPlanningIdentity: {
+					kind: "setup-backed-visual",
+					visualObject: {
+						entityId,
+						kind: "dynamic-visual-object",
+						resourceId: visualResourceId,
+					},
+				},
+				ownershipPolicy: {
+					kind: "dynamic-visual-resource",
+					resourceId: visualResourceId,
+				},
+				resourceFamily: "runtime-authored-dynamic-object-material",
+				retentionPolicy: {
+					kind: "explicit-runtime-lifetime",
+				},
+				textureBatchId: `runtime-dynamic:${entityId}`,
+				textureDomain: "runtime-object-material",
+			},
+			visualSource: {
+				animationSelection: { animationId: 0x0300061b, kind: "explicit" },
+				effectiveResidence: {
+					kind: "outdoor-landblock",
+					landblockId: 0xda55ffff,
+				},
+				modelData: null,
+				setupModelId: 0x020003e5,
+				sourceAssetIds: ["setup-model/020003e5"],
+			},
+		},
+		provenance: {
+			kind: "runtime-spawn",
+			sourceKind: "browser-authored-server-shaped",
 		},
 		renderability: {
 			reasons: [],
@@ -511,16 +524,21 @@ function createRecord(options: {
 				status: "pending",
 			},
 		},
-			sourceResidence: {
-				kind: "outdoor-landblock",
-				landblockId: 0xda55ffff,
-			},
-			source: {
-				kind: "static-authored",
-				seed,
-			},
-		};
-	}
+		sourceResidence: {
+			kind: "outdoor-landblock",
+			landblockId: 0xda55ffff,
+		},
+		source: {
+			animationSelection: { animationId: 0x0300061b, kind: "explicit" },
+			kind: "runtime-spawn",
+			modelData: null,
+			runtimeEntityId: entityId,
+			serverInstanceIdMetadata: null,
+			setupModelId: 0x020003e5,
+			sourceKind: "browser-authored-server-shaped",
+		},
+	};
+}
 
 function createAnimationPayload(options: {
 	readonly frameCount: number;

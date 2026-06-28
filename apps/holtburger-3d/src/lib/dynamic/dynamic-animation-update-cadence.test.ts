@@ -173,12 +173,8 @@ function createReadyDynamicRecord(options: {
 	readonly frameCount: number;
 }): DynamicEntityRecord {
 	const source = createSourceIdentity(0x020003e5);
-	const object = {
-		instanceId: "dynamic-test",
-		kind: "static-object-instance" as const,
-		landblockId: 0xda55ffff,
-		objectKind: "building" as const,
-	};
+	const entityId = "runtime-spawn:cadence-test";
+	const visualResourceId = `dynamic-visual-resource:${entityId}`;
 	return {
 		animation: {
 			defaultAnimationId: 0x0300061b,
@@ -201,17 +197,52 @@ function createReadyDynamicRecord(options: {
 			kind: "outdoor-landblock",
 			landblockId: 0xda55ffff,
 		},
-		id: "dynamic-test-entity",
-		provenance: {
-			kind: "static-authored-outdoor",
-			owner: {
-				domain: "outdoor-buildings",
-				kind: "work",
-				scope: { kind: "landblock", landblockId: 0xda55ffff },
-				scopeKey: "landblock:da55ffff",
-				workId: "1:dynamic-test",
+		id: entityId,
+		presentation: {
+			diagnostics: {
+				kind: "runtime-spawn",
+				serverInstanceIdMetadata: null,
+				sourceKind: "browser-authored-server-shaped",
 			},
-			sourceScopeKey: "dynamic-test-scope",
+			policy: {
+				diagnosticsBucket: "runtime-authored-dynamic",
+				materialDetailRolePolicy: {
+					kind: "runtime-authored-none",
+				},
+				materialPlanningDomain: "runtime-authored-dynamic-object-material",
+				materialPlanningIdentity: {
+					kind: "setup-backed-visual",
+					visualObject: {
+						entityId,
+						kind: "dynamic-visual-object",
+						resourceId: visualResourceId,
+					},
+				},
+				ownershipPolicy: {
+					kind: "dynamic-visual-resource",
+					resourceId: visualResourceId,
+				},
+				resourceFamily: "runtime-authored-dynamic-object-material",
+				retentionPolicy: {
+					kind: "explicit-runtime-lifetime",
+				},
+				textureBatchId: `runtime-dynamic:${entityId}`,
+				textureDomain: "runtime-object-material",
+			},
+			visualSource: {
+				animationSelection: { animationId: 0x0300061b, kind: "explicit" },
+				effectiveResidence: {
+					kind: "outdoor-landblock",
+					landblockId: 0xda55ffff,
+				},
+				modelData: null,
+				setupModelId: 0x020003e5,
+				sourceAssetIds: ["setup-model/020003e5"],
+			},
+		},
+		provenance: {
+			kind: "runtime-spawn",
+			sourceKind: "browser-authored-server-shaped",
 		},
 		renderability: {
 			reasons: [],
@@ -249,32 +280,21 @@ function createReadyDynamicRecord(options: {
 				textureRequirements: [],
 			},
 		},
-			sourceResidence: {
-				kind: "outdoor-landblock",
-				landblockId: 0xda55ffff,
-			},
-			source: {
-				kind: "static-authored",
-				seed: {
-					classificationReason: "setup-default-animation",
-					defaultAnimationId: 0x0300061b,
-					domain: "outdoor-buildings",
-					landblockId: 0xda55ffff,
-					localPlacement: createPlacement(options.baseOrigin),
-					object,
-					setupModelId: 0x020003e5,
-					source,
-					sourceAssetId: "setup-model/020003e5",
-					sourceResidence: {
-						kind: "landblock-source",
-						landblockId: 0xda55ffff,
-						source: "outdoor",
-					},
-					sourceScale: { x: 1, y: 1, z: 1 },
-				},
-			},
-		};
-	}
+		sourceResidence: {
+			kind: "outdoor-landblock",
+			landblockId: 0xda55ffff,
+		},
+		source: {
+			animationSelection: { animationId: 0x0300061b, kind: "explicit" },
+			kind: "runtime-spawn",
+			modelData: null,
+			runtimeEntityId: entityId,
+			serverInstanceIdMetadata: null,
+			setupModelId: 0x020003e5,
+			sourceKind: "browser-authored-server-shaped",
+		},
+	};
+}
 
 function createAnimationPayload(frameCount: number): AnimationPayloadDto {
 	return {

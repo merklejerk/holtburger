@@ -4601,7 +4601,7 @@ Verification:
 
 ### Phase 12C.2E: Dynamic Visual Ownership, Atlas Churn, And Fixture Neutrality Checkpoint
 
-Status: pending / conditional.
+Status: completed on 2026-06-28.
 
 Purpose:
 
@@ -4634,14 +4634,50 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit runtime resource-ready create/remove ownership behavior after Phase 12C.2D/12C.2D.1.
-- [ ] Add focused ownership/refcount tests only if existing coverage does not prove the behavior.
-- [ ] Audit dynamic placement/cadence fixtures that still construct `StaticObjectInstanceIdentity`
+- [x] Audit runtime resource-ready create/remove ownership behavior after Phase 12C.2D/12C.2D.1.
+- [x] Add focused ownership/refcount tests only if existing coverage does not prove the behavior.
+- [x] Audit dynamic placement/cadence fixtures that still construct `StaticObjectInstanceIdentity`
       records.
-- [ ] Replace static-shaped dynamic placement fixtures with source-neutral builders where they would
+- [x] Replace static-shaped dynamic placement fixtures with source-neutral builders where they would
       mask runtime placement/index behavior.
-- [ ] Document duplicate atlas/cache placement as debt if it remains per-entity by design.
-- [ ] Decide whether 12C.3 can proceed or whether ownership cleanup is required first.
+- [x] Document duplicate atlas/cache placement as debt if it remains per-entity by design.
+- [x] Decide whether 12C.3 can proceed or whether ownership cleanup is required first.
+
+Decisions and course corrections:
+
+- 2026-06-28 implementation: Added runtime-spawn placement removal coverage proving explicit
+  runtime removal clears outdoor and env-cell dynamic index membership through
+  `DynamicEntityController`.
+- 2026-06-28 implementation: Added runtime-authored texture-owner release coverage proving
+  `runtime-object-material` pages in `runtime-dynamic:<dynamic-entity-id>` batches are released when
+  the dynamic visual-resource owner is removed.
+- 2026-06-28 implementation: Converted generic dynamic placement, animation cadence, and animation
+  player fixtures from static-authored source/provenance records to runtime-spawn-shaped records.
+  Static-authored seed fixtures remain static where the test is actually about static seed
+  projection or retention.
+- 2026-06-28 concession: Runtime-authored visual resources still use per-entity runtime texture
+  batches. Shared runtime atlas/cache ownership remains Phase 12C.4 debt, not a blocker for first
+  rendering.
+- 2026-06-28 spicy bit: Renderer-resource create/remove cleanup for browser-created runtime spawns
+  is still only indirectly covered because the browser/runtime first-render spawn path does not exist
+  until Phase 12C.3. Phase 12C.3 must include an end-to-end create-render-remove assertion that
+  drains renderer dynamic resources, dynamic instances, texture owners, placement/index membership,
+  and prepared-asset leases.
+- 2026-06-28 decision: Phase 12C.3 can proceed. No ownership graph or shared runtime atlas bucket is
+  required before first rendering.
+
+Verification:
+
+- 2026-06-28 dry run:
+  `npm run test:ts -- dynamic-entity-resource-manager dynamic-placement-tracker dynamic-animation-update-cadence texture-manager client-runtime`
+- 2026-06-28 implementation:
+  `npm run test:ts -- dynamic-placement-tracker dynamic-animation-update-cadence dynamic-animation-player texture-manager`
+- 2026-06-28 implementation: `npm run check`
+- 2026-06-28 implementation:
+  `npm run test:ts -- dynamic-entity-resource-manager dynamic-placement-tracker dynamic-animation-update-cadence dynamic-animation-player texture-manager client-runtime`
+- 2026-06-28 implementation: `npm run lint`
+- 2026-06-28 implementation: `npm run test:ts`
+- 2026-06-28 implementation: `npm run build` passed with Vite's existing chunk-size warning.
 
 ### Phase 12C.3: First Runtime Spawn Rendering
 

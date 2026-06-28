@@ -1320,6 +1320,74 @@ describe("browser texture manager", () => {
 		]);
 	});
 
+	it("releases runtime object-material texture pages when the runtime visual owner is removed", async () => {
+		const rectsByTextureUseId = new Map<
+			string,
+			FixtureTexturePackerRectPlacement
+		>([
+			[
+				"runtime-spawn:1:base:0",
+				{
+					pageHeight: 512,
+					pageId: "runtime-base-page:0",
+					pageWidth: 512,
+					rect: [96, 96, 1, 1],
+				},
+			],
+			[
+				"runtime-spawn:1:base:1",
+				{
+					pageHeight: 512,
+					pageId: "runtime-base-page:1",
+					pageWidth: 512,
+					rect: [96, 96, 1, 1],
+				},
+			],
+		]);
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+			texturePacker: new FixtureTexturePacker({ rectsByTextureUseId }),
+		});
+
+		await textureManager.applyDynamicTextureUseDelta({
+			removedOwners: [],
+			textureUses: [
+				createDynamicTextureUseCommit({
+					textureBatchId: "runtime-dynamic:runtime-spawn:1",
+					textureDomain: "runtime-object-material",
+					renderSurfaceId: 0x06000010,
+					resourceId: "dynamic-visual-resource:runtime-spawn:1",
+					textureUseId: "runtime-spawn:1:base:0",
+				}),
+				createDynamicTextureUseCommit({
+					textureBatchId: "runtime-dynamic:runtime-spawn:1",
+					textureDomain: "runtime-object-material",
+					renderSurfaceId: 0x06000020,
+					resourceId: "dynamic-visual-resource:runtime-spawn:1",
+					textureUseId: "runtime-spawn:1:base:1",
+				}),
+			],
+		});
+
+		const releaseUpdate = await textureManager.applyDynamicTextureUseDelta({
+			removedOwners: [
+				{
+					kind: "dynamic-visual-resource",
+					resourceId: "dynamic-visual-resource:runtime-spawn:1",
+				},
+			],
+			textureUses: [],
+		});
+
+		expect(releaseUpdate?.removedTextureRefIds).toEqual([
+			"texture-ref:runtime-object-material:runtime-dynamic:runtime-spawn:1:runtime-spawn:1:base:0",
+			"texture-ref:runtime-object-material:runtime-dynamic:runtime-spawn:1:runtime-spawn:1:base:1",
+		]);
+		expect(textureManager.createDiagnosticsReport().summary).toMatchObject({
+			texturePageCount: 0,
+		});
+	});
+
 	it("keeps static atlas pages leased after releasing a dynamic visual owner", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),

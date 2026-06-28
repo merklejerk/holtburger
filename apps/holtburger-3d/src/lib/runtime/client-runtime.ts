@@ -53,6 +53,7 @@ import type { TextureFilteringMode } from "../textures/sampling-policy";
 import {
 	createAssetServiceDiagnosticsReport,
 	createConsoleRuntimeDiagnostics,
+	createDynamicDiagnosticsReport,
 	type RendererDiagnosticsSummary,
 	type RuntimeDiagnostics,
 	type RuntimeDiagnosticsReport,
@@ -316,6 +317,101 @@ interface StaticSelectionDiagnosticsReport {
 	};
 }
 
+interface DynamicSelectionDiagnosticsReport {
+	readonly kind: "dynamic-selection-diagnostics-report";
+	readonly selection: {
+		readonly entityId: DynamicEntityId;
+		readonly pickDistance: number | null;
+	};
+	readonly debugBounds: StaticBounds | null;
+	readonly entity: DynamicSelectionEntityDiagnostics | null;
+	readonly renderer: DynamicSelectionRendererDiagnostics;
+	readonly runtime: {
+		readonly renderAnchorLandblockId: number | null;
+		readonly sceneInterest: string | null;
+	};
+}
+
+interface DynamicSelectionEntityDiagnostics {
+	readonly animation: DynamicSelectionAnimationDiagnostics;
+	readonly bounds: DynamicSelectionBoundsDiagnostics;
+	readonly effectiveResidence: DynamicEntitySummaryDto["effectiveResidence"];
+	readonly provenance: DynamicEntitySummaryDto["provenance"];
+	readonly renderability: DynamicEntitySummaryDto["renderability"];
+	readonly rendererIdentity: DynamicSelectionRendererIdentityDiagnostics;
+	readonly resources: DynamicSelectionResourceDiagnostics;
+	readonly source: DynamicEntitySummaryDto["source"];
+	readonly sourceResidence: DynamicEntitySummaryDto["sourceResidence"];
+}
+
+interface DynamicSelectionAnimationDiagnostics {
+	readonly activeTransformEffects: readonly DynamicSelectionTransformEffectDiagnostics[];
+	readonly currentFrameIndex: number | null;
+	readonly elapsedSeconds: number | null;
+	readonly frameCount: number | null;
+	readonly frameNumber: number | null;
+	readonly partCount: number | null;
+	readonly status: DynamicEntitySummaryDto["animation"]["status"];
+}
+
+type DynamicSelectionTransformEffectDiagnostics = {
+	readonly hookName: string;
+	readonly hookType: number;
+	readonly kind: "omega";
+	readonly lastAppliedFrameIndex: number;
+	readonly lastAppliedLoopIteration: number;
+	readonly omega: { readonly x: number; readonly y: number; readonly z: number };
+};
+
+interface DynamicSelectionBoundsDiagnostics {
+	readonly currentBounds: DynamicEntitySummaryDto["bounds"]["currentBounds"];
+	readonly indexed: boolean;
+	readonly indexMembership: DynamicEntitySummaryDto["bounds"]["indexMembership"];
+	readonly precision: DynamicEntitySummaryDto["bounds"]["precision"];
+}
+
+interface DynamicSelectionResourceDiagnostics {
+	readonly required: readonly string[];
+	readonly setupAnimation: DynamicSelectionSetupAnimationDiagnostics;
+	readonly status: DynamicEntitySummaryDto["resources"]["status"];
+	readonly visual: DynamicSelectionVisualDiagnostics;
+}
+
+type DynamicSelectionSetupAnimationDiagnostics =
+	| DynamicEntitySummaryDto["resources"]["setupAnimation"];
+
+type DynamicSelectionVisualDiagnostics =
+	| {
+			readonly status: "blocked" | "pending";
+	  }
+	| {
+			readonly materialSlotCount: number;
+			readonly renderPartCount: number;
+			readonly sourceAssetCount: number;
+			readonly status: "ready";
+			readonly textureRequirementCount: number;
+	  }
+	| {
+			readonly failureCount: number;
+			readonly missingRefCount: number;
+			readonly status: "failed";
+			readonly unsupportedReasonCount: number;
+	  };
+
+interface DynamicSelectionRendererIdentityDiagnostics {
+	readonly eligible: boolean;
+	readonly instanceId: string;
+	readonly visualResourceId: string;
+}
+
+interface DynamicSelectionRendererDiagnostics {
+	readonly dynamicDrawCalls: number;
+	readonly dynamicInstances: number;
+	readonly dynamicVisualResources: number;
+	readonly dynamicVisualResourceTextureUses: number;
+	readonly skippedDynamicSubmissions: number;
+}
+
 type StaticSelectionDiagnosticsDetails =
 	| {
 			readonly kind: "outdoor-static-object";
@@ -527,6 +623,10 @@ export interface ClientRuntime {
 		selectionKey: StaticSceneSelectionKey,
 		options?: { readonly pickDistance?: number | null },
 	): StaticSelectionDiagnosticsReport;
+	createDynamicSelectionDiagnosticsReport(
+		entityId: DynamicEntityId,
+		options?: { readonly pickDistance?: number | null },
+	): DynamicSelectionDiagnosticsReport;
 	setSceneDebugSelection(selection: RuntimeSceneDebugSelection | null): void;
 	setEnvCellAabbDebugOverlayVisible(visible: boolean): void;
 	setEnvCellPortalDebugOverlayVisible(visible: boolean): void;
@@ -882,6 +982,36 @@ class ClientRuntimeImpl implements ClientRuntime {
 		};
 	}
 
+	createDynamicSelectionDiagnosticsReport(
+		entityId: DynamicEntityId,
+		options: { readonly pickDistance?: number | null } = {},
+	): DynamicSelectionDiagnosticsReport {
+		this.#assertActive();
+		const entity = this.#dynamicEntityController.queryDynamicEntitySummary(entityId);
+		const debugBounds =
+			this.#querySceneSelectionDebugBounds({
+				entityId,
+				kind: "dynamic",
+			})?.bounds ?? null;
+		const rendererSnapshot = this.#refreshRendererDiagnosticsSnapshot();
+
+		return {
+			debugBounds,
+			entity:
+				entity === null ? null : createDynamicSelectionEntityDiagnostics(entity),
+			kind: "dynamic-selection-diagnostics-report",
+			renderer: createDynamicSelectionRendererDiagnostics(rendererSnapshot),
+			runtime: {
+				renderAnchorLandblockId: this.#renderAnchorLandblockId,
+				sceneInterest: createSceneInterestSummary(this.#sceneInterest),
+			},
+			selection: {
+				entityId,
+				pickDistance: options.pickDistance ?? null,
+			},
+		};
+	}
+
 	setSceneDebugSelection(selection: RuntimeSceneDebugSelection | null): void {
 		this.#assertActive();
 		this.#sceneDebugSelection = selection;
@@ -980,6 +1110,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		return {
 			domains: [
 				createAssetServiceDiagnosticsReport(snapshot.assets),
+				createDynamicDiagnosticsReport(snapshot.dynamic),
 				{
 					kind: "renderer",
 					summary: createRendererDiagnosticsSummary(snapshot.renderer),
@@ -3445,6 +3576,123 @@ function createRendererDiagnosticsSummary(
 	};
 }
 
+function createDynamicSelectionEntityDiagnostics(
+	record: DynamicEntitySummaryDto,
+): DynamicSelectionEntityDiagnostics {
+	return {
+		animation: createDynamicSelectionAnimationDiagnostics(record),
+		bounds: {
+			currentBounds: record.bounds.currentBounds,
+			indexed: record.bounds.indexed,
+			indexMembership: record.bounds.indexMembership,
+			precision: record.bounds.precision,
+		},
+		effectiveResidence: record.effectiveResidence,
+		provenance: record.provenance,
+		renderability: record.renderability,
+		rendererIdentity: {
+			eligible: isDynamicRendererEligible(record),
+			instanceId: createDynamicRendererInstanceId(record),
+			visualResourceId: createDynamicRendererVisualResourceId(record),
+		},
+		resources: {
+			required: record.resources.required,
+			setupAnimation: record.resources.setupAnimation,
+			status: record.resources.status,
+			visual: createDynamicSelectionVisualDiagnostics(record),
+		},
+		source: record.source,
+		sourceResidence: record.sourceResidence,
+	};
+}
+
+function createDynamicSelectionAnimationDiagnostics(
+	record: DynamicEntitySummaryDto,
+): DynamicSelectionAnimationDiagnostics {
+	const playback = record.animation.playback;
+	if (playback.status !== "playing") {
+		return {
+			activeTransformEffects: [],
+			currentFrameIndex: null,
+			elapsedSeconds: null,
+			frameCount: null,
+			frameNumber: null,
+			partCount: null,
+			status: record.animation.status,
+		};
+	}
+
+	return {
+		activeTransformEffects: createDynamicSelectionTransformEffects(playback),
+		currentFrameIndex: playback.currentFrameIndex,
+		elapsedSeconds: playback.elapsedSeconds,
+		frameCount: playback.frameCount,
+		frameNumber: playback.frameNumber,
+		partCount: playback.partCount,
+		status: record.animation.status,
+	};
+}
+
+function createDynamicSelectionTransformEffects(
+	playback: Extract<
+		DynamicEntitySummaryDto["animation"]["playback"],
+		{ readonly status: "playing" }
+	>,
+): readonly DynamicSelectionTransformEffectDiagnostics[] {
+	const activeOmega = playback.transformEffects.activeOmega;
+	return activeOmega === null
+		? []
+		: [
+				{
+					hookName: activeOmega.hookName,
+					hookType: activeOmega.hookType,
+					kind: "omega",
+					lastAppliedFrameIndex: activeOmega.lastAppliedFrameIndex,
+					lastAppliedLoopIteration: activeOmega.lastAppliedLoopIteration,
+					omega: activeOmega.omega,
+				},
+			];
+}
+
+function createDynamicSelectionVisualDiagnostics(
+	record: DynamicEntitySummaryDto,
+): DynamicSelectionVisualDiagnostics {
+	const visual = record.resources.visual;
+	if (visual.status === "ready") {
+		return {
+			materialSlotCount: visual.materialSlots.length,
+			renderPartCount: visual.renderParts.length,
+			sourceAssetCount: visual.sourceAssets.length,
+			status: "ready",
+			textureRequirementCount: visual.textureRequirements.length,
+		};
+	}
+	if (visual.status === "failed") {
+		return {
+			failureCount: visual.failures.length,
+			missingRefCount: visual.missingRefs.length,
+			status: "failed",
+			unsupportedReasonCount: visual.unsupportedReasons.length,
+		};
+	}
+	return {
+		status: visual.status,
+	};
+}
+
+function createDynamicSelectionRendererDiagnostics(
+	snapshot: RendererSnapshot,
+): DynamicSelectionRendererDiagnostics {
+	return {
+		dynamicDrawCalls: snapshot.dynamicDrawCalls,
+		dynamicInstances: snapshot.dynamicInstances,
+		dynamicVisualResources: snapshot.dynamicVisualResources,
+		dynamicVisualResourceTextureUses:
+			snapshot.dynamicVisualResourceTextureUses,
+		skippedDynamicSubmissions: snapshot.skippedDynamicSubmissions,
+	};
+}
+
 function createDynamicRendererVisualResource(
 	record: DynamicEntitySummaryDto,
 ): readonly DynamicRendererVisualResource[] {
@@ -3568,7 +3816,7 @@ function createDynamicRendererInstances(
 	return [
 		{
 			entityId: record.id,
-			instanceId: `dynamic-instance:${record.id}`,
+			instanceId: createDynamicRendererInstanceId(record),
 			objectToRenderMatrix: Array.from(objectToRenderMatrix),
 			partToObjectMatrices: playback.partPoses.map((pose) => ({
 				matrix: Array.from(
@@ -3631,6 +3879,12 @@ function createDynamicRendererVisualResourceId(
 	record: Pick<DynamicEntitySummaryDto, "id">,
 ): string {
 	return `dynamic-visual-resource:${record.id}`;
+}
+
+function createDynamicRendererInstanceId(
+	record: Pick<DynamicEntitySummaryDto, "id">,
+): string {
+	return `dynamic-instance:${record.id}`;
 }
 
 function createStaticBatchLookupKey(

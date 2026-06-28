@@ -43,6 +43,11 @@ export class DynamicEntityStore {
 		return this.#recordsById.get(id) ?? null;
 	}
 
+	getSummary(id: DynamicEntityId): DynamicEntitySummaryDto | null {
+		const record = this.get(id);
+		return record === null ? null : createDynamicEntitySummaryDto(record);
+	}
+
 	records(): readonly DynamicEntityRecord[] {
 		return [...this.#recordsById.values()].sort(compareDynamicEntityRecords);
 	}

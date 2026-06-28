@@ -13,6 +13,7 @@ import type {
 	TerrainMaterialFallbackReason,
 } from "../static/contracts";
 import type { TextureFilteringMode } from "../textures/sampling-policy";
+import type { DynamicRuntimeSnapshot } from "../dynamic/contracts";
 
 export interface RuntimeDiagnostics {
 	warn(event: RuntimeWarningEvent): void;
@@ -61,6 +62,7 @@ type PortalFrameWorkPlanDiagnostics =
 
 type RuntimeDiagnosticsDomainReport =
 	| AssetServiceDiagnosticsReport
+	| DynamicDiagnosticsReport
 	| RendererDiagnosticsReport
 	| StaticCoordinatorDiagnosticsReport
 	| TerrainTextureDiagnosticsReport
@@ -77,6 +79,21 @@ interface AssetServiceDiagnosticsSummary {
 	readonly committed: number;
 	readonly leased: number;
 	readonly warmRetained: number;
+}
+
+export interface DynamicDiagnosticsReport {
+	readonly kind: "dynamic";
+	readonly summary: DynamicDiagnosticsSummary;
+}
+
+interface DynamicDiagnosticsSummary {
+	readonly active: number;
+	readonly indexed: number;
+	readonly nonRenderable: number;
+	readonly renderable: number;
+	readonly resourceFailed: number;
+	readonly resourcePending: number;
+	readonly staticAuthoredSeeds: number;
 }
 
 interface RendererDiagnosticsReport {
@@ -386,6 +403,30 @@ export function createAssetServiceDiagnosticsReport(
 			warmRetained: snapshot.committed.filter(
 				(entry) => entry.warmRetainedUntilMs !== null,
 			).length,
+		},
+	};
+}
+
+export function createDynamicDiagnosticsReport(
+	snapshot: DynamicRuntimeSnapshot,
+): DynamicDiagnosticsReport {
+	return {
+		kind: "dynamic",
+		summary: {
+			active: snapshot.activeEntityCount,
+			indexed: snapshot.records.filter((record) => record.bounds.indexed).length,
+			nonRenderable: snapshot.nonRenderableEntityCount,
+			renderable:
+				snapshot.activeEntityCount - snapshot.nonRenderableEntityCount,
+			resourceFailed: snapshot.records.filter(
+				(record) => record.resources.status === "failed",
+			).length,
+			resourcePending: snapshot.records.filter(
+				(record) =>
+					record.resources.status === "pending" ||
+					record.resources.status === "setup-animation-ready",
+			).length,
+			staticAuthoredSeeds: snapshot.staticSeedCount,
 		},
 	};
 }

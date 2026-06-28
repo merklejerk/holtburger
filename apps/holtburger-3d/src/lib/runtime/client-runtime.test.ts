@@ -238,12 +238,80 @@ describe("browser client runtime", () => {
 				},
 			},
 		});
+		const diagnosticsReport = runtime.createDiagnosticsReport();
+		const dynamicReport = diagnosticsReport.domains.find(
+			(domain) => domain.kind === "dynamic",
+		);
+		expect(dynamicReport).toEqual({
+			kind: "dynamic",
+			summary: {
+				active: 1,
+				indexed: 0,
+				nonRenderable: 0,
+				renderable: 1,
+				resourceFailed: 0,
+				resourcePending: 0,
+				staticAuthoredSeeds: 1,
+			},
+		});
+		expect(dynamicReport).not.toHaveProperty("records");
 
 		updateRuntimeFrame(runtime, 1);
+		const tickedDynamicReport = runtime
+			.createDiagnosticsReport()
+			.domains.find((domain) => domain.kind === "dynamic");
+		expect(tickedDynamicReport).toMatchObject({
+			summary: {
+				indexed: 1,
+			},
+		});
 		const entityId = runtime.createDiagnosticsSnapshot().dynamic.records[0]?.id;
 		if (!entityId) {
 			throw new Error("Expected an ingested dynamic entity id.");
 		}
+		const dynamicSelectionReport =
+			runtime.createDynamicSelectionDiagnosticsReport(entityId, {
+				pickDistance: 4,
+			});
+		expect(dynamicSelectionReport).toMatchObject({
+			debugBounds: {
+				max: { x: 1, y: 1, z: 1 },
+				min: { x: 0, y: 0, z: 0 },
+			},
+			entity: {
+				animation: {
+					frameCount: 1,
+					partCount: 1,
+					status: "ready",
+				},
+				renderability: {
+					reasons: [],
+					status: "renderable",
+				},
+				rendererIdentity: {
+					eligible: true,
+					instanceId: `dynamic-instance:${entityId}`,
+					visualResourceId: `dynamic-visual-resource:${entityId}`,
+				},
+				resources: {
+					status: "ready",
+					visual: {
+						renderPartCount: 1,
+						status: "ready",
+					},
+				},
+				source: {
+					setupModelId: 0x020003e5,
+				},
+			},
+			kind: "dynamic-selection-diagnostics-report",
+			selection: {
+				entityId,
+				pickDistance: 4,
+			},
+		});
+		expect(JSON.stringify(dynamicSelectionReport)).not.toContain("partPoses");
+		expect(JSON.stringify(dynamicSelectionReport)).not.toContain("renderParts");
 		runtime.setSceneDebugSelection({
 			entityId,
 			kind: "dynamic",

@@ -6,6 +6,7 @@ import type {
 	StaticBakeBatchItem,
 	StaticBaker,
 	StaticCoordinatorCommitDelta,
+	StaticCoordinatorOverviewSnapshot,
 	StaticCoordinatorSourcePayloadDelta,
 	StaticCoordinatorSnapshot,
 	StaticCoordinatorTimingDiagnostics,
@@ -244,6 +245,20 @@ export class StaticCoordinator {
 			staticObjectBakeDiagnostics: Array.from(
 				this.#latestStaticObjectBakeDiagnosticsByKey.values(),
 			).sort(compareStaticObjectBakeDiagnostics),
+		};
+	}
+
+	createOverviewSnapshot(): StaticCoordinatorOverviewSnapshot {
+		const activeWork = Array.from(this.#activeWork.values());
+		return {
+			baking: activeWork.filter((work) => work.status === "baking").length,
+			committed: this.#committed,
+			latestLandblockEnvCellsPayload: this.#latestLandblockEnvCellsPayload,
+			latestTerrainPayload: this.#latestTerrainPayload,
+			requested: activeWork.length,
+			resolving: activeWork.filter((work) => work.status === "resolving")
+				.length,
+			revision: this.#revision,
 		};
 	}
 

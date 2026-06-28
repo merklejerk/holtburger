@@ -44,7 +44,7 @@
 		RuntimeEvent,
 		RuntimeSceneDebugSelection,
 		RuntimeSceneInterestSource,
-		RuntimeSnapshot,
+		RuntimeOverviewSnapshot,
 	} from "../lib/runtime/client-runtime";
 	import type {
 		PortalFrameNodeResources,
@@ -106,7 +106,7 @@
 	const CAMERA_POLICY_SYNC_INTERVAL_MS = 1000 / 30;
 	const PERF_OVERLAY_SAMPLE_MS = 500;
 	const PERF_OVERLAY_EMA_ALPHA = 0.18;
-	const RUNTIME_SNAPSHOT_POLL_INTERVAL_MS = 500;
+	const RUNTIME_OVERVIEW_POLL_INTERVAL_MS = 500;
 	const STATIC_PICK_CLICK_DRAG_THRESHOLD_PX = 3;
 	const INTERIOR_CAMERA_FOCUS_YAW_RADIANS = 0;
 	const INTERIOR_CAMERA_FOCUS_PITCH_RADIANS = 0;
@@ -124,7 +124,7 @@
 	let runtime: ClientRuntime | null = $state(null);
 	let cameraController: BrowserCameraController | null = null;
 	let runtimeFrameId: number | null = null;
-	let runtimeSnapshotPollIntervalId: number | null = null;
+	let runtimeOverviewPollIntervalId: number | null = null;
 	let staticInterestRefreshTimer: number | null = null;
 	let startupError = $state<string | null>(null);
 	let activeTab = $state<BrowserPanelTab>("navigate");
@@ -148,7 +148,7 @@
 	let buildingRadius = $state(DEFAULT_BUILDING_LOD_RADIUS);
 	let detailRadius = $state(DEFAULT_DETAIL_LOD_RADIUS);
 	let envCellRadius = $state(DEFAULT_ENV_CELL_LOD_RADIUS);
-	let snapshot = $state<RuntimeSnapshot | null>(null);
+	let runtimeOverview = $state<RuntimeOverviewSnapshot | null>(null);
 	let cameraState = $state<FreeCameraState>(createFreeCameraState());
 	let diagnosticsReportText = $state<string | null>(null);
 	let selectedStaticDiagnosticsReportText = $state<string | null>(null);
@@ -237,16 +237,16 @@
 			);
 			const unsubscribeEvents = runtime.subscribeEvents(handleRuntimeEvent);
 			pushCameraState();
-			refreshRuntimeSnapshot();
+			refreshRuntimeOverview();
 			startRuntimeFrameLoop();
-			startRuntimeSnapshotPolling();
+			startRuntimeOverviewPolling();
 			const policySyncInterval = window.setInterval(() => {
 				syncCameraPolicy();
 			}, CAMERA_POLICY_SYNC_INTERVAL_MS);
 
 			return () => {
 				stopRuntimeFrameLoop();
-				stopRuntimeSnapshotPolling();
+				stopRuntimeOverviewPolling();
 				window.clearInterval(policySyncInterval);
 				clearStaticInterestRefresh();
 				unsubscribeFrameTelemetry();
@@ -293,7 +293,7 @@
 				source,
 			),
 		);
-		refreshRuntimeSnapshot();
+		refreshRuntimeOverview();
 	}
 
 	function handleStaticWorkSubmit(event: SubmitEvent): void {
@@ -308,7 +308,7 @@
 		cancelPendingCameraFocus("idle");
 		followModeEnabled = false;
 		runtime?.updateSceneInterest({ kind: "none" });
-		refreshRuntimeSnapshot();
+		refreshRuntimeOverview();
 	}
 
 	function resetCamera(): void {
@@ -347,34 +347,34 @@
 		runtimeFrameId = null;
 	}
 
-	function startRuntimeSnapshotPolling(): void {
-		if (runtimeSnapshotPollIntervalId !== null) {
+	function startRuntimeOverviewPolling(): void {
+		if (runtimeOverviewPollIntervalId !== null) {
 			return;
 		}
 
-		runtimeSnapshotPollIntervalId = window.setInterval(() => {
-			refreshRuntimeSnapshot();
-		}, RUNTIME_SNAPSHOT_POLL_INTERVAL_MS);
+		runtimeOverviewPollIntervalId = window.setInterval(() => {
+			refreshRuntimeOverview();
+		}, RUNTIME_OVERVIEW_POLL_INTERVAL_MS);
 	}
 
-	function stopRuntimeSnapshotPolling(): void {
-		if (runtimeSnapshotPollIntervalId === null) {
+	function stopRuntimeOverviewPolling(): void {
+		if (runtimeOverviewPollIntervalId === null) {
 			return;
 		}
 
-		window.clearInterval(runtimeSnapshotPollIntervalId);
-		runtimeSnapshotPollIntervalId = null;
+		window.clearInterval(runtimeOverviewPollIntervalId);
+		runtimeOverviewPollIntervalId = null;
 	}
 
-	function refreshRuntimeSnapshot(): void {
+	function refreshRuntimeOverview(): void {
 		if (!runtime) {
 			return;
 		}
 
-		const nextSnapshot = runtime.createSnapshot();
-		snapshot = nextSnapshot;
+		const nextOverview = runtime.createOverviewSnapshot();
+		runtimeOverview = nextOverview;
 		selectedTextureFilteringMode =
-			nextSnapshot.renderPolicy.textureFilteringMode;
+			nextOverview.renderPolicy.textureFilteringMode;
 	}
 
 	function handleLocationInput(event: Event): void {
@@ -480,7 +480,7 @@
 
 	function syncStaticLayerVisibility(): void {
 		runtime?.setStaticLayerVisibility(createStaticLayerVisibility());
-		refreshRuntimeSnapshot();
+		refreshRuntimeOverview();
 	}
 
 	function togglePanelCollapsed(): void {
@@ -530,26 +530,26 @@
 			.value as TextureFilteringMode;
 		selectedTextureFilteringMode = nextMode;
 		runtime?.setTextureFilteringMode(nextMode);
-		refreshRuntimeSnapshot();
+		refreshRuntimeOverview();
 	}
 
 	function handleEnvCellAabbDebugToggle(event: Event): void {
 		envCellAabbDebugVisible = (event.currentTarget as HTMLInputElement).checked;
 		runtime?.setEnvCellAabbDebugOverlayVisible(envCellAabbDebugVisible);
-		refreshRuntimeSnapshot();
+		refreshRuntimeOverview();
 	}
 
 	function handleEnvCellPortalDebugToggle(event: Event): void {
 		envCellPortalDebugVisible = (event.currentTarget as HTMLInputElement)
 			.checked;
 		runtime?.setEnvCellPortalDebugOverlayVisible(envCellPortalDebugVisible);
-		refreshRuntimeSnapshot();
+		refreshRuntimeOverview();
 	}
 
 	function handleFlatVisionModeToggle(event: Event): void {
 		flatVisionModeEnabled = (event.currentTarget as HTMLInputElement).checked;
 		runtime?.setFlatVisionModeEnabled(flatVisionModeEnabled);
-		refreshRuntimeSnapshot();
+		refreshRuntimeOverview();
 	}
 
 	function handleDirectEnvCellPortalMaxDepthInput(event: Event): void {
@@ -557,7 +557,7 @@
 			(event.currentTarget as HTMLInputElement).value,
 		);
 		runtime?.setDirectEnvCellPortalMaxDepth(directEnvCellPortalMaxDepth);
-		refreshRuntimeSnapshot();
+		refreshRuntimeOverview();
 	}
 
 	function cancelPendingCameraFocus(status: CameraFocusStatus): void {
@@ -997,7 +997,7 @@
 	}
 
 	function formatCameraPositionWithCell(): string {
-		const residency = snapshot?.currentCameraResidency;
+		const residency = runtimeOverview?.currentCameraResidency;
 		if (residency?.kind === "env-cell") {
 			return `${formatHexId(residency.envCellId)} ${formatCameraPosition(cameraState.position)}`;
 		}
@@ -1015,7 +1015,7 @@
 	}
 
 	function formatCameraMapCoords(): string {
-		const residency = snapshot?.currentCameraResidency;
+		const residency = runtimeOverview?.currentCameraResidency;
 		if (residency?.kind === "env-cell") {
 			return "indoor";
 		}
@@ -1090,12 +1090,12 @@
 	}
 
 	function formatRequestedStaticScope(): string {
-		if (snapshot?.sceneInterest.kind === "outdoor-anchor") {
-			return `anchor ${formatHexId(snapshot.sceneInterest.anchorLandblockId)} ${snapshot.sceneInterest.domains.join(", ") || "no domains"} [${snapshot.sceneInterest.source}]`;
+		if (runtimeOverview?.sceneInterest.kind === "outdoor-anchor") {
+			return `anchor ${formatHexId(runtimeOverview.sceneInterest.anchorLandblockId)} ${runtimeOverview.sceneInterest.domains.join(", ") || "no domains"} [${runtimeOverview.sceneInterest.source}]`;
 		}
 
-		if (snapshot?.sceneInterest.kind === "interior-cell") {
-			return `env ${formatHexId(snapshot.sceneInterest.landblockId)} / ${formatHexId(snapshot.sceneInterest.envCellId)} [${snapshot.sceneInterest.source}]`;
+		if (runtimeOverview?.sceneInterest.kind === "interior-cell") {
+			return `env ${formatHexId(runtimeOverview.sceneInterest.landblockId)} / ${formatHexId(runtimeOverview.sceneInterest.envCellId)} [${runtimeOverview.sceneInterest.source}]`;
 		}
 
 		return "none";
@@ -1244,10 +1244,10 @@
 			contextLocation.kind === "interior-cell"
 				? {
 						envCellId:
-							snapshot?.currentCameraResidency.kind === "env-cell" &&
-							snapshot.currentCameraResidency.landblockId ===
+							runtimeOverview?.currentCameraResidency.kind === "env-cell" &&
+							runtimeOverview.currentCameraResidency.landblockId ===
 								contextLocation.landblockId
-								? snapshot.currentCameraResidency.envCellId
+								? runtimeOverview.currentCameraResidency.envCellId
 								: contextLocation.envCellId,
 						kind: "env-cell" as const,
 						landblockId: contextLocation.landblockId,
@@ -1273,14 +1273,14 @@
 		selectedScenePick = selection;
 		selectedStaticDiagnosticsReportText = null;
 		runtime.setSceneDebugSelection(createRuntimeSceneDebugSelection(selection));
-		refreshRuntimeSnapshot();
+		refreshRuntimeOverview();
 	}
 
 	function clearSceneDebugSelection(): void {
 		selectedScenePick = null;
 		selectedStaticDiagnosticsReportText = null;
 		runtime?.setSceneDebugSelection(null);
-		refreshRuntimeSnapshot();
+		refreshRuntimeOverview();
 	}
 
 	function createSelectedScenePick(
@@ -1454,12 +1454,12 @@
 		readonly envCellId: number;
 		readonly landblockId: number;
 	} | null {
-		if (snapshot?.currentCameraResidency.kind !== "env-cell") {
+		if (runtimeOverview?.currentCameraResidency.kind !== "env-cell") {
 			return null;
 		}
 		return {
-			envCellId: snapshot.currentCameraResidency.envCellId,
-			landblockId: snapshot.currentCameraResidency.landblockId,
+			envCellId: runtimeOverview.currentCameraResidency.envCellId,
+			landblockId: runtimeOverview.currentCameraResidency.landblockId,
 		};
 	}
 
@@ -1882,7 +1882,8 @@
 							onchange={handleEnvCellAabbDebugToggle}
 						/>
 						<span>Env-cell AABBs</span>
-						<small>{snapshot?.debugOverlays.envCellAabbCount ?? 0}</small>
+						<small>{runtimeOverview?.debugOverlays.envCellAabbCount ?? 0}</small
+						>
 					</label>
 					<label class="browser-display__checkbox-row">
 						<input
@@ -1893,7 +1894,7 @@
 						/>
 						<span>Portals</span>
 						<small>
-							{snapshot?.debugOverlays.portalCount ?? 0}
+							{runtimeOverview?.debugOverlays.portalCount ?? 0}
 						</small>
 					</label>
 					<label class="browser-display__checkbox-row">
@@ -1905,7 +1906,9 @@
 						/>
 						<span>Flat vision</span>
 						<small>
-							{snapshot?.debugOverlays.flatVisionModeEnabled ? "on" : "off"}
+							{runtimeOverview?.debugOverlays.flatVisionModeEnabled
+								? "on"
+								: "off"}
 						</small>
 					</label>
 					<label class="browser-display__range">
@@ -1929,17 +1932,19 @@
 						<div>
 							<dt>Static</dt>
 							<dd>
-								{#if snapshot}
-									r{snapshot.static.revision} req {snapshot.static.requested} res
-									{snapshot.static.resolving} bake {snapshot.static.baking} commit
-									{snapshot.static.committed}
+								{#if runtimeOverview}
+									r{runtimeOverview.static.revision} req {runtimeOverview.static
+										.requested} res
+									{runtimeOverview.static.resolving} bake {runtimeOverview
+										.static.baking} commit
+									{runtimeOverview.static.committed}
 								{:else}
 									pending
 								{/if}
 							</dd>
 							{@render copyOverlay(
-								snapshot
-									? `r${snapshot.static.revision} req ${snapshot.static.requested} res ${snapshot.static.resolving} bake ${snapshot.static.baking} commit ${snapshot.static.committed}`
+								runtimeOverview
+									? `r${runtimeOverview.static.revision} req ${runtimeOverview.static.requested} res ${runtimeOverview.static.resolving} bake ${runtimeOverview.static.baking} commit ${runtimeOverview.static.committed}`
 									: "pending",
 								"Static",
 							)}
@@ -1947,17 +1952,17 @@
 						<div>
 							<dt>Scene query</dt>
 							<dd>
-								{#if snapshot}
-									out {snapshot.staticSceneQuery.outdoorRecordCount} env
-									{snapshot.staticSceneQuery.envCellRecordCount} lb
-									{snapshot.staticSceneQuery.envCellLandblockCount}
+								{#if runtimeOverview}
+									out {runtimeOverview.staticSceneQuery.outdoorRecordCount} env
+									{runtimeOverview.staticSceneQuery.envCellRecordCount} lb
+									{runtimeOverview.staticSceneQuery.envCellLandblockCount}
 								{:else}
 									pending
 								{/if}
 							</dd>
 							{@render copyOverlay(
-								snapshot
-									? `out ${snapshot.staticSceneQuery.outdoorRecordCount} env ${snapshot.staticSceneQuery.envCellRecordCount} lb ${snapshot.staticSceneQuery.envCellLandblockCount}`
+								runtimeOverview
+									? `out ${runtimeOverview.staticSceneQuery.outdoorRecordCount} env ${runtimeOverview.staticSceneQuery.envCellRecordCount} lb ${runtimeOverview.staticSceneQuery.envCellLandblockCount}`
 									: "pending",
 								"Scene query",
 							)}
@@ -1984,16 +1989,16 @@
 						<div>
 							<dt>Assets</dt>
 							<dd>
-								{#if snapshot}
-									p{snapshot.assets.pending.length} c{snapshot.assets.committed
-										.length}
+								{#if runtimeOverview}
+									p{runtimeOverview.assets.pendingCount} c{runtimeOverview
+										.assets.committedCount}
 								{:else}
 									pending
 								{/if}
 							</dd>
 							{@render copyOverlay(
-								snapshot
-									? `p${snapshot.assets.pending.length} c${snapshot.assets.committed.length}`
+								runtimeOverview
+									? `p${runtimeOverview.assets.pendingCount} c${runtimeOverview.assets.committedCount}`
 									: "pending",
 								"Assets",
 							)}
@@ -2001,22 +2006,23 @@
 						<div>
 							<dt>Terrain payload</dt>
 							<dd>
-								{#if snapshot?.static.latestTerrainPayload}
-									lb {snapshot.static.latestTerrainPayload.landblockId
+								{#if runtimeOverview?.static.latestTerrainPayload}
+									lb {runtimeOverview.static.latestTerrainPayload.landblockId
 										.toString(16)
 										.padStart(8, "0")} region
-									{snapshot.static.latestTerrainPayload.regionNumber} mesh
-									{snapshot.static.latestTerrainPayload.vertexCount}v/{snapshot
-										.static.latestTerrainPayload.triangleCount}t tex
-									{snapshot.static.latestTerrainPayload.textureUseCount} missing
-									{snapshot.static.latestTerrainPayload.missingRefCount}
+									{runtimeOverview.static.latestTerrainPayload.regionNumber} mesh
+									{runtimeOverview.static.latestTerrainPayload
+										.vertexCount}v/{runtimeOverview.static.latestTerrainPayload
+										.triangleCount}t tex
+									{runtimeOverview.static.latestTerrainPayload.textureUseCount} missing
+									{runtimeOverview.static.latestTerrainPayload.missingRefCount}
 								{:else}
 									none
 								{/if}
 							</dd>
 							{@render copyOverlay(
-								snapshot?.static.latestTerrainPayload
-									? `lb ${snapshot.static.latestTerrainPayload.landblockId.toString(16).padStart(8, "0")} region ${snapshot.static.latestTerrainPayload.regionNumber} mesh ${snapshot.static.latestTerrainPayload.vertexCount}v/${snapshot.static.latestTerrainPayload.triangleCount}t tex ${snapshot.static.latestTerrainPayload.textureUseCount} missing ${snapshot.static.latestTerrainPayload.missingRefCount}`
+								runtimeOverview?.static.latestTerrainPayload
+									? `lb ${runtimeOverview.static.latestTerrainPayload.landblockId.toString(16).padStart(8, "0")} region ${runtimeOverview.static.latestTerrainPayload.regionNumber} mesh ${runtimeOverview.static.latestTerrainPayload.vertexCount}v/${runtimeOverview.static.latestTerrainPayload.triangleCount}t tex ${runtimeOverview.static.latestTerrainPayload.textureUseCount} missing ${runtimeOverview.static.latestTerrainPayload.missingRefCount}`
 									: "none",
 								"Terrain payload",
 							)}
@@ -2024,33 +2030,35 @@
 						<div>
 							<dt>Env-cell payload</dt>
 							<dd>
-								{#if snapshot?.static.latestLandblockEnvCellsPayload}
-									lb {snapshot.static.latestLandblockEnvCellsPayload.landblockId
+								{#if runtimeOverview?.static.latestLandblockEnvCellsPayload}
+									lb {runtimeOverview.static.latestLandblockEnvCellsPayload.landblockId
 										.toString(16)
 										.padStart(8, "0")}
 									cells
-									{snapshot.static.latestLandblockEnvCellsPayload.envCellCount}
+									{runtimeOverview.static.latestLandblockEnvCellsPayload
+										.envCellCount}
 									accepted
-									{snapshot.static.latestLandblockEnvCellsPayload
+									{runtimeOverview.static.latestLandblockEnvCellsPayload
 										.acceptedEnvCellCount} visible
-									{snapshot.static.latestLandblockEnvCellsPayload
+									{runtimeOverview.static.latestLandblockEnvCellsPayload
 										.visibleCellCount} portals
-									{snapshot.static.latestLandblockEnvCellsPayload.portalCount}
+									{runtimeOverview.static.latestLandblockEnvCellsPayload
+										.portalCount}
 									links
-									{snapshot.static.latestLandblockEnvCellsPayload
+									{runtimeOverview.static.latestLandblockEnvCellsPayload
 										.portalLinkCount}
 									seeds
-									{snapshot.static.latestLandblockEnvCellsPayload
+									{runtimeOverview.static.latestLandblockEnvCellsPayload
 										.staticObjectSeedCount} missing
-									{snapshot.static.latestLandblockEnvCellsPayload
+									{runtimeOverview.static.latestLandblockEnvCellsPayload
 										.missingRefCount}
 								{:else}
 									none
 								{/if}
 							</dd>
 							{@render copyOverlay(
-								snapshot?.static.latestLandblockEnvCellsPayload
-									? `lb ${snapshot.static.latestLandblockEnvCellsPayload.landblockId.toString(16).padStart(8, "0")} cells ${snapshot.static.latestLandblockEnvCellsPayload.envCellCount} accepted ${snapshot.static.latestLandblockEnvCellsPayload.acceptedEnvCellCount} visible ${snapshot.static.latestLandblockEnvCellsPayload.visibleCellCount} portals ${snapshot.static.latestLandblockEnvCellsPayload.portalCount} links ${snapshot.static.latestLandblockEnvCellsPayload.portalLinkCount} seeds ${snapshot.static.latestLandblockEnvCellsPayload.staticObjectSeedCount} missing ${snapshot.static.latestLandblockEnvCellsPayload.missingRefCount}`
+								runtimeOverview?.static.latestLandblockEnvCellsPayload
+									? `lb ${runtimeOverview.static.latestLandblockEnvCellsPayload.landblockId.toString(16).padStart(8, "0")} cells ${runtimeOverview.static.latestLandblockEnvCellsPayload.envCellCount} accepted ${runtimeOverview.static.latestLandblockEnvCellsPayload.acceptedEnvCellCount} visible ${runtimeOverview.static.latestLandblockEnvCellsPayload.visibleCellCount} portals ${runtimeOverview.static.latestLandblockEnvCellsPayload.portalCount} links ${runtimeOverview.static.latestLandblockEnvCellsPayload.portalLinkCount} seeds ${runtimeOverview.static.latestLandblockEnvCellsPayload.staticObjectSeedCount} missing ${runtimeOverview.static.latestLandblockEnvCellsPayload.missingRefCount}`
 									: "none",
 								"Env-cell payload",
 							)}
@@ -2070,13 +2078,17 @@
 						<div>
 							<dt>Camera residency</dt>
 							<dd>
-								{snapshot
-									? formatCameraResidency(snapshot.currentCameraResidency)
+								{runtimeOverview
+									? formatCameraResidency(
+											runtimeOverview.currentCameraResidency,
+										)
 									: "pending"}
 							</dd>
 							{@render copyOverlay(
-								snapshot
-									? formatCameraResidency(snapshot.currentCameraResidency)
+								runtimeOverview
+									? formatCameraResidency(
+											runtimeOverview.currentCameraResidency,
+										)
 									: "pending",
 								"Camera residency",
 							)}
@@ -2084,14 +2096,14 @@
 						<div>
 							<dt>Camera env resources</dt>
 							<dd>
-								{snapshot
+								{runtimeOverview
 									? formatEnvCellResourceMembership(
 											currentCameraEnvCellResourceTarget(),
 										)
 									: "pending"}
 							</dd>
 							{@render copyOverlay(
-								snapshot
+								runtimeOverview
 									? formatEnvCellResourceMembership(
 											currentCameraEnvCellResourceTarget(),
 										)
@@ -2102,17 +2114,19 @@
 						<div>
 							<dt>Portal frame & overlap</dt>
 							<dd>
-								{#if snapshot}
-									{formatPortalFrameWorkPlan(snapshot.portalFrameWorkPlan)} | {formatPortalOverlapResidency(
-										snapshot.currentPortalOverlapResidency,
+								{#if runtimeOverview}
+									{formatPortalFrameWorkPlan(
+										runtimeOverview.portalFrameWorkPlan,
+									)} | {formatPortalOverlapResidency(
+										runtimeOverview.currentPortalOverlapResidency,
 									)}
 								{:else}
 									pending
 								{/if}
 							</dd>
 							{@render copyOverlay(
-								snapshot
-									? `${formatPortalFrameWorkPlan(snapshot.portalFrameWorkPlan)} | ${formatPortalOverlapResidency(snapshot.currentPortalOverlapResidency)}`
+								runtimeOverview
+									? `${formatPortalFrameWorkPlan(runtimeOverview.portalFrameWorkPlan)} | ${formatPortalOverlapResidency(runtimeOverview.currentPortalOverlapResidency)}`
 									: "pending",
 								"Portal frame & overlap",
 							)}

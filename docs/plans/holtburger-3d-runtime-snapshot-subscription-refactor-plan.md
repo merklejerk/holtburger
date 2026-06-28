@@ -353,7 +353,7 @@ Decisions and course corrections:
 
 ## Phase 6: Add Cheap Runtime Overview Snapshot
 
-Status: pending.
+Status: complete.
 
 Purpose:
 
@@ -383,13 +383,13 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Define `RuntimeOverviewSnapshot` in `client-runtime.ts`.
-- [ ] Add `ClientRuntime.createOverviewSnapshot()`.
-- [ ] Add count/overview APIs for asset service state.
-- [ ] Add count/overview APIs for static coordinator state.
-- [ ] Add count/overview APIs for static scene query state.
-- [ ] Add focused tests proving overview reads do not invoke full snapshot builders.
-- [ ] Run focused runtime tests.
+- [x] Define `RuntimeOverviewSnapshot` in `client-runtime.ts`.
+- [x] Add `ClientRuntime.createOverviewSnapshot()`.
+- [x] Add count/overview APIs for asset service state.
+- [x] Add count/overview APIs for static coordinator state.
+- [x] Add count/overview APIs for static scene query state.
+- [x] Add focused tests proving overview reads do not invoke full snapshot builders.
+- [x] Run focused runtime tests.
 
 Decisions and course corrections:
 
@@ -414,10 +414,20 @@ Decisions and course corrections:
   query/count work when their toggles are enabled. Keep that behavior in the overview because those
   numbers are explicitly shown beside the toggles; do not move overlay counts behind full
   diagnostics unless the UI also stops showing them live.
+- 2026-06-28 implementation: Added `RuntimeOverviewSnapshot`,
+  `ClientRuntime.createOverviewSnapshot()`, `AssetServiceOverviewSnapshot`,
+  `StaticCoordinatorOverviewSnapshot`, and `StaticSceneQueryOverviewSnapshot`. The runtime overview
+  reads cheap dependency overview/count APIs and does not build full asset, static coordinator,
+  renderer, host, dynamic, or static-materialization diagnostics.
+- 2026-06-28 implementation: Added a focused runtime regression test that spies on the static
+  coordinator full snapshot builder and checks asset/renderer diagnostic builder counters while
+  reading overview state.
+- 2026-06-28 verification: `npm run test:ts -- src/lib/runtime/client-runtime.test.ts` passed with
+  36 tests. `npm run check` passed with `svelte-check` reporting 0 errors and 0 warnings.
 
 ## Phase 7: Move Browser Polling To Runtime Overview
 
-Status: pending.
+Status: complete.
 
 Purpose:
 
@@ -445,13 +455,13 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Update BrowserDisplay state and polling to use `RuntimeOverviewSnapshot`.
-- [ ] Rename `refreshRuntimeSnapshot()` to an overview-specific helper such as
+- [x] Update BrowserDisplay state and polling to use `RuntimeOverviewSnapshot`.
+- [x] Rename `refreshRuntimeSnapshot()` to an overview-specific helper such as
       `refreshRuntimeOverview()`.
-- [ ] Keep full diagnostics report generation on the explicit full snapshot/report path.
-- [ ] Update browser/runtime tests that assumed polling used `RuntimeSnapshot`.
-- [ ] Run `npm run check`.
-- [ ] Run focused runtime/browser tests.
+- [x] Keep full diagnostics report generation on the explicit full snapshot/report path.
+- [x] Update browser/runtime tests that assumed polling used `RuntimeSnapshot`.
+- [x] Run `npm run check`.
+- [x] Run focused runtime/browser tests.
 
 Decisions and course corrections:
 
@@ -468,10 +478,21 @@ Decisions and course corrections:
 - 2026-06-28 dry run: Keep immediate refreshes after scene-interest, render-policy, debug overlay,
   static visibility, and selection actions, but call the renamed overview refresh helper. Do not add
   refreshes to RAF or camera policy sync; that would recreate the hot path with a cheaper DTO.
+- 2026-06-28 implementation: Moved `BrowserDisplay.svelte` polling and immediate user/config
+  refreshes from `runtime.createSnapshot()` to `runtime.createOverviewSnapshot()`. Renamed the
+  browser state to `runtimeOverview` and the refresh/poll helpers to overview-specific names.
+- 2026-06-28 implementation: Updated browser asset status rendering to use overview asset counts
+  instead of full pending/committed arrays. `openDiagnosticsReport()` remains on
+  `runtime.createDiagnosticsReport()`.
+- 2026-06-28 verification: `npm run check` passed with `svelte-check` reporting 0 errors and
+  0 warnings. `npm run lint:ts` passed. `npm run test:ts -- src/lib/runtime/client-runtime.test.ts`
+  passed with 36 tests.
+- 2026-06-28 final verification: Full `npm run test:ts` passed with 61 files and 502 tests.
+  `npm run lint:dead` passed. Root `git diff --check` passed.
 
 ## Phase 8: Reassess Full Diagnostic Snapshot Naming And Cost
 
-Status: pending.
+Status: complete.
 
 Purpose:
 
@@ -495,11 +516,11 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Inspect post-overview full diagnostic snapshot callers.
-- [ ] Rename full diagnostic snapshot API if the current `createSnapshot()` name is too generic.
-- [ ] Update tests and docs for the chosen naming.
-- [ ] Record retained expensive fields and cleanup triggers.
-- [ ] Run `npm run check`, `npm run lint:ts`, and focused runtime tests.
+- [x] Inspect post-overview full diagnostic snapshot callers.
+- [x] Rename full diagnostic snapshot API if the current `createSnapshot()` name is too generic.
+- [x] Update tests and docs for the chosen naming.
+- [x] Record retained expensive fields and cleanup triggers.
+- [x] Run `npm run check`, `npm run lint:ts`, and focused runtime tests.
 
 Decisions and course corrections:
 
@@ -515,11 +536,67 @@ Decisions and course corrections:
 - 2026-06-28 dry run: `createDiagnosticsReport()` may not need to materialize the entire full
   `RuntimeSnapshot` forever. If Phase 8 shows report fields are narrower than `RuntimeSnapshot`,
   prefer direct diagnostics helpers over carrying an expensive DTO just because it exists.
+- 2026-06-28 implementation: BrowserDisplay no longer calls the full runtime snapshot API after
+  Phase 7. Remaining full snapshot callers were runtime tests and `createDiagnosticsReport()`, so
+  the full API was renamed from `createSnapshot()` to `createDiagnosticsSnapshot()` and the DTO was
+  renamed from `RuntimeSnapshot` to `RuntimeDiagnosticsSnapshot`.
+- 2026-06-28 implementation: Kept `createDiagnosticsReport()` backed by the full diagnostic snapshot
+  for now because it still consumes broad diagnostic domains: assets, renderer, static coordinator,
+  texture manager, terrain texture fallbacks, render pass/portal plan, materialization counts, and
+  runtime status. A direct report-builder split is lower priority now that browser polling is on the
+  cheap overview path.
+- 2026-06-28 debt: Full diagnostic snapshot fields that remain intentionally expensive are
+  `assets`, `renderer`, `dynamic`, `host`, `static`, `staticSceneQuery`, and
+  `staticMaterialization`. Keep them diagnostic-only; revisit direct report helpers only if
+  diagnostic report generation itself shows measurable cost.
+- 2026-06-28 verification: `npm run check` passed with `svelte-check` reporting 0 errors and
+  0 warnings. `npm run test:ts -- src/lib/runtime/client-runtime.test.ts` passed with 36 tests.
+
+## Phase 9: Final Naming And Documentation Cleanup
+
+Status: pending.
+
+Purpose:
+
+- Remove stale wording and loose naming left behind by the overview/diagnostics split without
+  reopening the architecture.
+
+Deliverables:
+
+- Update current plan/doc wording where old `RuntimeSnapshot`, `runtime.createSnapshot()`, or
+  `refreshRuntimeSnapshot()` references now read like active architecture instead of historical
+  context.
+- Rename local runtime test variables from generic `snapshot` to `diagnosticsSnapshot` or
+  `overviewSnapshot` where the distinction helps reviewers.
+- Re-scan runtime/browser docs and tests for generic snapshot language that could mislead future
+  work.
+- Keep repo-wide unrelated Prettier churn out of this cleanup unless it is explicitly requested.
+
+Acceptance criteria:
+
+- Active docs describe browser polling as `RuntimeOverviewSnapshot` and full diagnostic reads as
+  `RuntimeDiagnosticsSnapshot`.
+- Historical notes can keep old names only when clearly describing pre-refactor behavior.
+- Runtime tests use names that make overview-vs-diagnostics intent clear.
+- No unrelated formatting churn is introduced.
+
+Task checklist:
+
+- [ ] Clean stale active-voice `RuntimeSnapshot` and `createSnapshot()` wording in this plan.
+- [ ] Rename ambiguous runtime test locals where they now refer to diagnostics snapshots.
+- [ ] Search runtime/browser docs and tests for misleading generic snapshot language.
+- [ ] Run scoped Prettier check for touched files.
+- [ ] Run `npm run check`, `npm run lint:ts`, and focused runtime tests.
+- [ ] Run root `git diff --check`.
+
+Decisions and course corrections:
+
+- Pending.
 
 ## Risks And Mitigations
 
 - Risk: Browser UI panels become stale after actions that previously caused an immediate push.
-  Mitigation: centralize browser-side `refreshRuntimeSnapshot()` and call it immediately after
+  Mitigation: centralize browser-side `refreshRuntimeOverview()` and call it immediately after
   user/config actions, while retaining `500ms` polling for passive diagnostics.
 
 - Risk: Tests keep the old architecture alive because subscription assertions are convenient.
@@ -536,13 +613,13 @@ Decisions and course corrections:
 
 - Risk: A narrow structural event channel recreates the same overloaded bus with a different name.
   Mitigation: structural events should carry revisions or small reason payloads, not full
-  `RuntimeSnapshot` objects.
+  `RuntimeDiagnosticsSnapshot` objects.
 
 ## Definition Of Done
 
-- `requestAnimationFrame` driven `tickFrame` no longer creates full `RuntimeSnapshot` objects just
-  because dynamic animation playback changes.
-- Full runtime snapshots are requested explicitly by browser diagnostics or tests.
+- `requestAnimationFrame` driven `tickFrame` no longer creates full `RuntimeDiagnosticsSnapshot`
+  objects just because dynamic animation playback changes.
+- Full runtime diagnostics snapshots are requested explicitly by diagnostics or tests.
 - Real-time subscriptions remain narrow and cheap.
 - Browser diagnostics still refresh at a documented slower cadence.
 - Dynamic animation, dynamic renderer submissions, portal overlap updates, and frame telemetry still
@@ -551,15 +628,15 @@ Decisions and course corrections:
 
 ## Open Questions
 
-- Should the full diagnostic snapshot API keep the generic `createSnapshot()` name after the cheap
-  overview path exists, or should it be renamed to advertise diagnostic cost?
+- None currently.
 
 ## Resolved Decisions
 
 - Browser full runtime snapshot polling cadence is `500ms`.
 - Polling runs unconditionally while `BrowserDisplay` is mounted; no panel-visibility gating in the
   first cut.
-- "Full runtime snapshot" means the existing `RuntimeSnapshot` DTO consumed by browser runtime
-  panels and diagnostics. It is not the picker snapshot or a picking-specific data structure.
+- The cheap browser-polled runtime state is `RuntimeOverviewSnapshot`.
+- The expensive full runtime diagnostic state is `RuntimeDiagnosticsSnapshot`, read through
+  `ClientRuntime.createDiagnosticsSnapshot()`.
 - Follow-up correction should split browser polling into a cheap runtime overview snapshot before
   considering narrower panel-specific APIs.

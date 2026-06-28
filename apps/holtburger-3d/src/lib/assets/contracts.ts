@@ -40,7 +40,15 @@ export interface PreparedAssetReader {
 export interface AssetService extends PreparedAssetReader {
 	acquirePreparedAssetLease(key: HostAssetKey): PreparedAssetLease;
 	pruneExpiredWarmAssets(nowMs?: number): number;
+	createOverviewSnapshot(): AssetServiceOverviewSnapshot;
 	createSnapshot(): AssetServiceSnapshot;
+}
+
+export interface AssetServiceOverviewSnapshot {
+	/** Number of asset requests currently waiting on host resolution. */
+	readonly pendingCount: number;
+	/** Number of prepared assets currently retained by the asset service. */
+	readonly committedCount: number;
 }
 
 export interface AssetServiceSnapshot {

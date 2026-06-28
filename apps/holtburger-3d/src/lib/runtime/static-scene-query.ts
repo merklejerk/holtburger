@@ -28,6 +28,7 @@ import type {
 	StaticSceneEnvCellBounds,
 	StaticScenePickHit,
 	StaticScenePickRequest,
+	StaticSceneQueryOverviewSnapshot,
 	StaticSceneQuerySnapshot,
 	StaticSceneQuerySourcePayloadOptions,
 	StaticSceneSelectionDebugBounds,
@@ -346,7 +347,10 @@ export class StaticSceneQuery {
 		readonly envCellId: number;
 		readonly instanceId: string;
 	}): EnvCellStaticScenePickDetails | null {
-		return queryEnvCellStaticObjectDetails(this.#selectionDebugState(), options);
+		return queryEnvCellStaticObjectDetails(
+			this.#selectionDebugState(),
+			options,
+		);
 	}
 
 	queryPortalInteriorRecords(
@@ -401,7 +405,8 @@ export class StaticSceneQuery {
 						"outdoor-detail",
 						landblockId,
 					),
-					envCells: this.#envCellCommittedRecords.hasEnvCellSystemLayer(landblockId),
+					envCells:
+						this.#envCellCommittedRecords.hasEnvCellSystemLayer(landblockId),
 					terrain: this.#terrainBvhRootsByLandblockId.has(landblockId),
 				},
 				landblockId,
@@ -492,15 +497,10 @@ export class StaticSceneQuery {
 				outdoorAnchorLandblockId: this.#outdoorAnchorLandblockId,
 				selectionKey,
 			});
-			return target === null
-				? null
-				: { bounds: target.bounds, selectionKey };
+			return target === null ? null : { bounds: target.bounds, selectionKey };
 		}
 
-		return querySelectionDebugBounds(
-			this.#selectionDebugState(),
-			selectionKey,
-		);
+		return querySelectionDebugBounds(this.#selectionDebugState(), selectionKey);
 	}
 
 	queryEnvCellAtPoint(options: {
@@ -597,6 +597,26 @@ export class StaticSceneQuery {
 			outdoorRecordCount: outdoorBvhRecordCount,
 			terrainLandblockCount: this.#terrainBvhRootsByLandblockId.size,
 			terrainRecordCount,
+		};
+	}
+
+	createOverviewSnapshot(): StaticSceneQueryOverviewSnapshot {
+		let envCellRecordCount = 0;
+		for (const root of this.#envCellCommittedRecords.envCellRoots()) {
+			for (const cellRoot of root.cellsByEnvCellId.values()) {
+				envCellRecordCount += cellRoot.items.length;
+			}
+		}
+
+		const outdoorRecordCount = [
+			...this.#outdoorBvhRootsByDomainAndLandblock.values(),
+		].reduce((count, root) => count + root.items.filter(Boolean).length, 0);
+
+		return {
+			envCellLandblockCount:
+				this.#envCellCommittedRecords.envCellLandblockCount(),
+			envCellRecordCount,
+			outdoorRecordCount,
 		};
 	}
 

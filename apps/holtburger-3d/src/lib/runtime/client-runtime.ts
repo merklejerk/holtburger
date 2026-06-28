@@ -1,5 +1,9 @@
 import { HostBackedAssetService } from "../assets/asset-service";
-import type { AssetService, AssetServiceSnapshot } from "../assets/contracts";
+import type {
+	AssetService,
+	AssetServiceOverviewSnapshot,
+	AssetServiceSnapshot,
+} from "../assets/contracts";
 import type {
 	RuntimeHost,
 	RuntimeHostSnapshot,
@@ -82,6 +86,7 @@ import type {
 	StaticPortalProjectionRecord,
 	StaticResourceKey,
 	StaticCoordinatorTimingDiagnostics,
+	StaticCoordinatorOverviewSnapshot,
 	StaticObjectBakeDiagnostics,
 } from "../static/contracts";
 import {
@@ -103,6 +108,7 @@ import type {
 	StaticScenePickHit,
 	StaticScenePickRequest,
 	StaticSceneQuerySnapshot,
+	StaticSceneQueryOverviewSnapshot,
 	StaticSceneSelectionKey,
 	StaticSceneTerrainLandblockBounds,
 	TerrainQuadScenePickDetails,
@@ -244,7 +250,7 @@ interface RetainedOutdoorPortalFramePlan {
 	readonly sourceKey: string;
 }
 
-export interface RuntimeSnapshot {
+export interface RuntimeDiagnosticsSnapshot {
 	readonly status: "idle" | "static-active" | "disposed";
 	readonly renderPolicy: RuntimeRenderPolicySnapshot;
 	readonly sceneInterest: RuntimeSceneInterest;
@@ -260,6 +266,29 @@ export interface RuntimeSnapshot {
 	readonly static: StaticCoordinatorSnapshot;
 	readonly staticSceneQuery: StaticSceneQuerySnapshot;
 	readonly staticMaterialization: StaticMaterializationSnapshot;
+}
+
+export interface RuntimeOverviewSnapshot {
+	/** Runtime lifecycle state shown in browser status panels. */
+	readonly status: "idle" | "static-active" | "disposed";
+	/** Browser-visible render policy controls. */
+	readonly renderPolicy: RuntimeRenderPolicySnapshot;
+	/** Current static scene interest requested by browser controls or follow mode. */
+	readonly sceneInterest: RuntimeSceneInterest;
+	/** Current camera residency used by browser status and picking fallback logic. */
+	readonly currentCameraResidency: RuntimeCameraResidency;
+	/** Current portal overlap state summarized by the browser debug panel. */
+	readonly currentPortalOverlapResidency: RuntimePortalOverlapResidency;
+	/** Current portal work plan summarized by the browser debug panel. */
+	readonly portalFrameWorkPlan: PortalFrameWorkPlan;
+	/** Debug overlay visibility and displayed overlay counts. */
+	readonly debugOverlays: RuntimeDebugOverlaySnapshot;
+	/** Cheap asset counts for browser diagnostics. */
+	readonly assets: AssetServiceOverviewSnapshot;
+	/** Cheap static coordinator counts and latest payload summaries. */
+	readonly static: StaticCoordinatorOverviewSnapshot;
+	/** Cheap static scene query counts for browser diagnostics. */
+	readonly staticSceneQuery: StaticSceneQueryOverviewSnapshot;
 }
 
 interface RuntimeDebugOverlaySnapshot {
@@ -507,7 +536,8 @@ export interface ClientRuntime {
 	setTextureFilteringMode(filteringMode: TextureFilteringMode): void;
 	updateCameraState(camera: FrameState["camera"]): void;
 	tickFrame(timeSeconds: number): void;
-	createSnapshot(): RuntimeSnapshot;
+	createOverviewSnapshot(): RuntimeOverviewSnapshot;
+	createDiagnosticsSnapshot(): RuntimeDiagnosticsSnapshot;
 	createDiagnosticsReport(): RuntimeDiagnosticsReport;
 	subscribeFrameTelemetry(listener: RuntimeFrameTelemetryListener): () => void;
 	subscribeEvents(listener: RuntimeEventListener): () => void;
@@ -945,7 +975,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	}
 
 	createDiagnosticsReport(): RuntimeDiagnosticsReport {
-		const snapshot = this.createSnapshot();
+		const snapshot = this.createDiagnosticsSnapshot();
 
 		return {
 			domains: [
@@ -1325,28 +1355,31 @@ class ClientRuntimeImpl implements ClientRuntime {
 		return this.#lastRendererSnapshot;
 	}
 
-	createSnapshot(): RuntimeSnapshot {
+	createOverviewSnapshot(): RuntimeOverviewSnapshot {
+		const staticOverview = this.#staticCoordinator.createOverviewSnapshot();
+		return {
+			assets: this.#assetService.createOverviewSnapshot(),
+			currentCameraResidency: this.#currentCameraResidency,
+			currentPortalOverlapResidency: this.#currentPortalOverlapResidency,
+			debugOverlays: this.#createDebugOverlaySnapshot(),
+			portalFrameWorkPlan: this.#currentPortalFrameWorkPlan,
+			renderPolicy: {
+				textureFilteringMode: this.#textureManager.filteringMode,
+			},
+			sceneInterest: this.#sceneInterest,
+			static: staticOverview,
+			staticSceneQuery: this.#staticSceneQuery.createOverviewSnapshot(),
+			status: this.#createRuntimeStatus(staticOverview.requested),
+		};
+	}
+
+	createDiagnosticsSnapshot(): RuntimeDiagnosticsSnapshot {
 		const rendererSnapshot = this.#refreshRendererDiagnosticsSnapshot();
 		return {
 			assets: this.#assetService.createSnapshot(),
 			currentCameraResidency: this.#currentCameraResidency,
 			currentPortalOverlapResidency: this.#currentPortalOverlapResidency,
-			debugOverlays: {
-				envCellAabbCount: this.#envCellAabbDebugOverlayVisible
-					? this.#staticSceneQuery.queryEnvCellAabbDebugBounds().length
-					: 0,
-				envCellAabbsVisible: this.#envCellAabbDebugOverlayVisible,
-				flatVisionModeEnabled: this.#flatVisionModeEnabled,
-				portalCount: this.#envCellPortalDebugOverlayVisible
-					? countEnvCellPortalApertures(
-							this.#staticSceneQuery.queryPortalInteriorRecords(),
-						) +
-						countBuildingTransitionApertures(
-							this.#staticSceneQuery.queryEnvCellSystemLayers(),
-						)
-					: 0,
-				portalsVisible: this.#envCellPortalDebugOverlayVisible,
-			},
+			debugOverlays: this.#createDebugOverlaySnapshot(),
 			dynamic: this.#dynamicEntityController.createSnapshot(),
 			host: this.#host.createSnapshot(),
 			portalFrameWorkPlan: this.#currentPortalFrameWorkPlan,
@@ -1370,12 +1403,37 @@ class ClientRuntimeImpl implements ClientRuntime {
 				),
 				sourceDrawUnits: this.#materializedDrawUnitIdsBySourceDrawUnitId.size,
 			},
-			status: this.#disposed
-				? "disposed"
-				: this.#lastStaticSnapshot.requested > 0
-					? "static-active"
-					: "idle",
+			status: this.#createRuntimeStatus(this.#lastStaticSnapshot.requested),
 		};
+	}
+
+	#createDebugOverlaySnapshot(): RuntimeDebugOverlaySnapshot {
+		return {
+			envCellAabbCount: this.#envCellAabbDebugOverlayVisible
+				? this.#staticSceneQuery.queryEnvCellAabbDebugBounds().length
+				: 0,
+			envCellAabbsVisible: this.#envCellAabbDebugOverlayVisible,
+			flatVisionModeEnabled: this.#flatVisionModeEnabled,
+			portalCount: this.#envCellPortalDebugOverlayVisible
+				? countEnvCellPortalApertures(
+						this.#staticSceneQuery.queryPortalInteriorRecords(),
+					) +
+					countBuildingTransitionApertures(
+						this.#staticSceneQuery.queryEnvCellSystemLayers(),
+					)
+				: 0,
+			portalsVisible: this.#envCellPortalDebugOverlayVisible,
+		};
+	}
+
+	#createRuntimeStatus(
+		requestedStaticWorkCount: number,
+	): RuntimeDiagnosticsSnapshot["status"] {
+		return this.#disposed
+			? "disposed"
+			: requestedStaticWorkCount > 0
+				? "static-active"
+				: "idle";
 	}
 
 	#emitFrameTelemetry(telemetry: RendererFrameTelemetry): void {

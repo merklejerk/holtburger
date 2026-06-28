@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
 	AssetService,
+	AssetServiceOverviewSnapshot,
 	AssetServiceSnapshot,
 	HostAssetKey,
 	PreparedAsset,
@@ -61,7 +62,7 @@ import { createEnvCellStaticPortalGraph } from "../static/portal-graphs";
 import {
 	createClientRuntime,
 	type RuntimeEvent,
-	type RuntimeSnapshot,
+	type RuntimeDiagnosticsSnapshot,
 } from "./client-runtime";
 import {
 	createOutdoorStaticObjectSelectionKey,
@@ -80,7 +81,7 @@ const silentDiagnostics: RuntimeDiagnostics = {
 };
 
 describe("browser client runtime", () => {
-	it("creates explicit runtime snapshots on demand", () => {
+	it("creates explicit runtime diagnostics snapshots on demand", () => {
 		const renderer = new FakeRenderer();
 		const runtime = createClientRuntime({
 			diagnostics: silentDiagnostics,
@@ -88,15 +89,59 @@ describe("browser client runtime", () => {
 			renderer,
 		});
 
-		const initialSnapshot = runtime.createSnapshot();
+		const initialSnapshot = runtime.createDiagnosticsSnapshot();
 		runtime.setTextureFilteringMode("nearest");
-		const updatedSnapshot = runtime.createSnapshot();
+		const updatedSnapshot = runtime.createDiagnosticsSnapshot();
 
 		expect(initialSnapshot.renderPolicy.textureFilteringMode).toBe(
 			"anisotropic-4x",
 		);
 		expect(updatedSnapshot.renderPolicy.textureFilteringMode).toBe("nearest");
 		expect(renderer.diagnosticsSnapshotCount).toBeGreaterThanOrEqual(3);
+		runtime.dispose();
+	});
+
+	it("creates cheap runtime overview snapshots without full diagnostic builders", () => {
+		const assetService = new DeferredAssetService();
+		const renderer = new FakeRenderer();
+		const staticCoordinator = createImmediateStaticCoordinator({
+			baker: new DeferredStaticBaker(),
+			resolver: new DeferredStaticResolver(),
+		});
+		const runtime = createClientRuntime({
+			assetService,
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+			staticCoordinator,
+		});
+		const staticSnapshotSpy = vi
+			.spyOn(staticCoordinator, "createSnapshot")
+			.mockImplementation(() => {
+				throw new Error("Full static coordinator snapshot should not run.");
+			});
+		const rendererDiagnosticsBeforeOverview = renderer.diagnosticsSnapshotCount;
+
+		runtime.setTextureFilteringMode("nearest");
+		const overview = runtime.createOverviewSnapshot();
+
+		expect(overview.renderPolicy.textureFilteringMode).toBe("nearest");
+		expect(overview.assets).toEqual({
+			committedCount: 0,
+			pendingCount: 0,
+		});
+		expect(overview.staticSceneQuery).toEqual({
+			envCellLandblockCount: 0,
+			envCellRecordCount: 0,
+			outdoorRecordCount: 0,
+		});
+		expect(assetService.snapshotCount).toBe(0);
+		expect(renderer.diagnosticsSnapshotCount).toBe(
+			rendererDiagnosticsBeforeOverview,
+		);
+		expect(staticSnapshotSpy).not.toHaveBeenCalled();
+
+		staticSnapshotSpy.mockRestore();
 		runtime.dispose();
 	});
 
@@ -167,7 +212,7 @@ describe("browser client runtime", () => {
 		});
 		await flushRuntimeWork();
 
-		const loadedSnapshot = runtime.createSnapshot();
+		const loadedSnapshot = runtime.createDiagnosticsSnapshot();
 		expect(loadedSnapshot.dynamic).toMatchObject({
 			activeEntityCount: 1,
 			nonRenderableEntityCount: 0,
@@ -193,7 +238,7 @@ describe("browser client runtime", () => {
 		});
 
 		updateRuntimeFrame(runtime, 1);
-		const entityId = runtime.createSnapshot().dynamic.records[0]?.id;
+		const entityId = runtime.createDiagnosticsSnapshot().dynamic.records[0]?.id;
 		if (!entityId) {
 			throw new Error("Expected an ingested dynamic entity id.");
 		}
@@ -213,7 +258,7 @@ describe("browser client runtime", () => {
 
 		runtime.updateSceneInterest({ kind: "none" });
 
-		expect(runtime.createSnapshot().dynamic).toMatchObject({
+		expect(runtime.createDiagnosticsSnapshot().dynamic).toMatchObject({
 			activeEntityCount: 0,
 			staticSeedCount: 0,
 		});
@@ -248,7 +293,7 @@ describe("browser client runtime", () => {
 		await flushPromises();
 
 		expect(
-			runtime.createSnapshot().dynamic.records[0]?.resources,
+			runtime.createDiagnosticsSnapshot().dynamic.records[0]?.resources,
 		).toMatchObject({
 			setupAnimation: {
 				status: "pending",
@@ -268,7 +313,7 @@ describe("browser client runtime", () => {
 		);
 		await flushRuntimeWork();
 
-		const readySnapshot = runtime.createSnapshot();
+		const readySnapshot = runtime.createDiagnosticsSnapshot();
 		expect(readySnapshot.dynamic.records[0]).toMatchObject({
 			animation: {
 				status: "ready",
@@ -367,7 +412,7 @@ describe("browser client runtime", () => {
 			dynamicInstances: 1,
 			skippedDynamicSubmissions: 0,
 		});
-		expect(runtime.createSnapshot().renderer).toMatchObject({
+		expect(runtime.createDiagnosticsSnapshot().renderer).toMatchObject({
 			dynamicInstances: 1,
 			dynamicVisualResources: 1,
 		});
@@ -492,7 +537,7 @@ describe("browser client runtime", () => {
 		});
 		await flushRuntimeWork();
 
-		const loadedSnapshot = runtime.createSnapshot();
+		const loadedSnapshot = runtime.createDiagnosticsSnapshot();
 		expect(loadedSnapshot.dynamic).toMatchObject({
 			activeEntityCount: 1,
 			issueCount: 0,
@@ -553,7 +598,7 @@ describe("browser client runtime", () => {
 
 		runtime.updateSceneInterest({ kind: "none" });
 
-		expect(runtime.createSnapshot().dynamic).toMatchObject({
+		expect(runtime.createDiagnosticsSnapshot().dynamic).toMatchObject({
 			activeEntityCount: 0,
 			staticSeedCount: 0,
 		});
@@ -583,7 +628,7 @@ describe("browser client runtime", () => {
 			landblockId: 0xda55ffff,
 		});
 
-		expect(runtime.createSnapshot().currentCameraResidency).toEqual({
+		expect(runtime.createDiagnosticsSnapshot().currentCameraResidency).toEqual({
 			envCellId: 0xda550100,
 			kind: "env-cell",
 			landblockId: 0xda55ffff,
@@ -651,7 +696,7 @@ describe("browser client runtime", () => {
 
 		runtime.setFlatVisionModeEnabled(true);
 
-		const snapshot = runtime.createSnapshot();
+		const snapshot = runtime.createDiagnosticsSnapshot();
 		expect(snapshot.debugOverlays.flatVisionModeEnabled).toBe(true);
 		expect(snapshot.portalFrameWorkPlan).toEqual({
 			kind: "legacy-render-pass",
@@ -1747,8 +1792,8 @@ describe("browser client runtime", () => {
 		expect(renderer.terrainLayerUpdates).toEqual([]);
 		expect(renderer.textureUpdates).toEqual([]);
 		expect(
-			runtimeSnapshotSummary(runtime.createSnapshot()).staticMaterialization
-				.pendingRevisions,
+			runtimeDiagnosticsSnapshotSummary(runtime.createDiagnosticsSnapshot())
+				.staticMaterialization.pendingRevisions,
 		).toEqual([1]);
 		assetService.resolveNext(
 			createPreparedTextureAsset(assetService.pendingKeys[0] ?? failKey()),
@@ -1760,7 +1805,8 @@ describe("browser client runtime", () => {
 			"terrain-layer:3663069183:terrain-textured",
 		]);
 		expect(
-			runtimeSnapshotSummary(runtime.createSnapshot()).staticMaterialization,
+			runtimeDiagnosticsSnapshotSummary(runtime.createDiagnosticsSnapshot())
+				.staticMaterialization,
 		).toEqual({
 			committedRevisions: [1],
 			envCellResourceMembershipRevision: 0,
@@ -1865,7 +1911,8 @@ describe("browser client runtime", () => {
 		expect(renderer.terrainLayerUpdates).toEqual([]);
 		expect(renderer.textureUpdates).toEqual([]);
 		expect(
-			runtimeSnapshotSummary(runtime.createSnapshot()).staticMaterialization,
+			runtimeDiagnosticsSnapshotSummary(runtime.createDiagnosticsSnapshot())
+				.staticMaterialization,
 		).toEqual({
 			committedRevisions: [],
 			envCellResourceMembershipRevision: 0,
@@ -1952,7 +1999,7 @@ describe("browser client runtime", () => {
 				revision: 1,
 			},
 		);
-		const snapshot = runtime.createSnapshot();
+		const snapshot = runtime.createDiagnosticsSnapshot();
 		expect(snapshot.static.failed).toBe(1);
 		expect(JSON.stringify(snapshot)).not.toContain(
 			"landblock env-cell bundle unavailable",
@@ -2678,6 +2725,13 @@ class DeferredAssetService implements AssetService {
 				revision: index + 1,
 				waiterCount: 1,
 			})),
+		};
+	}
+
+	createOverviewSnapshot(): AssetServiceOverviewSnapshot {
+		return {
+			committedCount: 0,
+			pendingCount: this.#pending.length,
 		};
 	}
 }
@@ -3530,9 +3584,9 @@ function parsePreparedTextureUsage(
 	return "color";
 }
 
-function runtimeSnapshotSummary(
-	snapshot: RuntimeSnapshot,
-): Pick<RuntimeSnapshot, "staticMaterialization" | "status"> {
+function runtimeDiagnosticsSnapshotSummary(
+	snapshot: RuntimeDiagnosticsSnapshot,
+): Pick<RuntimeDiagnosticsSnapshot, "staticMaterialization" | "status"> {
 	return {
 		staticMaterialization: snapshot.staticMaterialization,
 		status: snapshot.status,

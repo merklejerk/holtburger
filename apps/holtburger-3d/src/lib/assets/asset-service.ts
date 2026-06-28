@@ -1,6 +1,7 @@
 import type { RuntimeHost } from "../host/runtime-contracts";
 import type {
 	AssetService,
+	AssetServiceOverviewSnapshot,
 	AssetServiceSnapshot,
 	HostAssetKey,
 	PreparedAsset,
@@ -128,6 +129,13 @@ export class HostBackedAssetService implements AssetService {
 		return {
 			committed: this.#sortCommittedSnapshot(),
 			pending: this.#sortPendingSnapshot(),
+		};
+	}
+
+	createOverviewSnapshot(): AssetServiceOverviewSnapshot {
+		return {
+			committedCount: this.#committed.size,
+			pendingCount: this.#pending.size,
 		};
 	}
 

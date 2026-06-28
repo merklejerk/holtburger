@@ -230,6 +230,15 @@ export interface StaticSceneQuerySnapshot {
 	readonly envCellResidencyCoarseCandidateCount: number;
 }
 
+export interface StaticSceneQueryOverviewSnapshot {
+	/** Outdoor static/query records shown in the browser debug panel. */
+	readonly outdoorRecordCount: number;
+	/** Env-cell static/query records shown in the browser debug panel. */
+	readonly envCellRecordCount: number;
+	/** Env-cell landblocks with committed query roots. */
+	readonly envCellLandblockCount: number;
+}
+
 export interface RetainedOutdoorSourceLandblock {
 	readonly landblockId: number;
 	readonly domains: {

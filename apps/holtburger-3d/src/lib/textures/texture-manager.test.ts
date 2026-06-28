@@ -19,7 +19,10 @@ import type {
 	TexturePackingResult,
 } from "./packing/protocol";
 import { MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW } from "../renderer/types";
-import { TextureManager, type DynamicTextureUseCommit } from "./texture-manager";
+import {
+	TextureManager,
+	type DynamicTextureUseCommit,
+} from "./texture-manager";
 
 const STABLE_TEXTURE_REF_ID =
 	"texture-ref:outdoor-terrain:batch-a:terrain-a:prepared-texture:06000010";
@@ -1238,7 +1241,7 @@ describe("browser texture manager", () => {
 			texturePacker: new FixtureTexturePacker(),
 		});
 
-			await textureManager.applyStaticCommitDelta({
+		await textureManager.applyStaticCommitDelta({
 			addedDrawUnits: [],
 			removedResources: [],
 			revision: 1,
@@ -1277,9 +1280,9 @@ describe("browser texture manager", () => {
 		});
 
 		expect(releaseUpdate).toBeNull();
-		expect(textureManager.createDiagnosticsReport().summary.texturePageCount).toBe(
-			1,
-		);
+		expect(
+			textureManager.createDiagnosticsReport().summary.texturePageCount,
+		).toBe(1);
 	});
 
 	it("carries nearest filtering as placement policy instead of rebaking geometry", async () => {
@@ -1561,6 +1564,13 @@ class FixtureAssetService implements AssetService {
 		return {
 			committed: [],
 			pending: [],
+		};
+	}
+
+	createOverviewSnapshot() {
+		return {
+			committedCount: 0,
+			pendingCount: 0,
 		};
 	}
 }

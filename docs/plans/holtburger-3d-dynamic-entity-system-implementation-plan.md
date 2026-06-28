@@ -2076,16 +2076,18 @@ Purpose:
 
 Deliverables:
 
-- Reuse the existing runtime dynamic snapshot and renderer snapshot/report counters. Do not add a
-  parallel dynamic diagnostics-report domain unless existing surfaces cannot answer a concrete Phase
-  9B validation question.
-- Keep global dynamic diagnostics to compact operational counts, such as active, renderable,
-  non-renderable, indexed/queryable, resource-pending, resource-failed, and unsupported-hook counts.
-  Do not add sampled entity lists or hook-specific global counters such as `SetOmega` counts.
-- Surface entity-level detail through picker/selected-dynamic-entity inspection: classification
-  reason, source residence, effective residence, setup id, animation id, current frame/time, part
-  count, active transform effects, bounds, index membership, resource readiness, renderer
-  resource/instance ids, and issues.
+- Reuse the existing runtime dynamic snapshot and renderer snapshot/report counters. Add a compact
+  dynamic summary to `createDiagnosticsReport()` because the on-demand runtime report currently has
+  no dynamic domain at all.
+- Keep the dynamic report summary to compact operational counts derived from the existing dynamic
+  runtime state: active, renderable, non-renderable, indexed/queryable, resource-pending, and
+  resource-failed counts. Do not put `dynamic.records`, sampled entity lists, part poses, visual
+  resource arrays, warning/error histories, unsupported-hook counts, or hook-specific global counters
+  such as `SetOmega` counts in the global report.
+- Surface entity-level detail through picker/selected-dynamic-entity inspection, not the global
+  runtime report: classification reason, source residence, effective residence, setup id, animation
+  id, current frame/time, part count, active transform effects, bounds, index membership, resource
+  readiness, deterministic renderer resource/instance ids, and issues.
 - Update plan/tests to match current browser behavior: dynamic hits are selectable in normal browser
   click picking. Treat this as browser inspection policy, not retail gameplay targeting parity.
 - Add debug overlay support for dynamic bounds only if existing runtime/selection diagnostics are not
@@ -2097,6 +2099,9 @@ Deliverables:
 
 Acceptance criteria:
 
+- The on-demand runtime diagnostics report has a compact dynamic summary domain and does not include
+  `DynamicRuntimeSnapshot.records`, per-part poses, typed array-backed visual resources, or sampled
+  entity lists.
 - Selected-entity diagnostics can explain why the windmill is dynamic and currently renderable.
 - Selected-entity diagnostics can explain why the bird is dynamic, has an active transform effect
   from `SetOmega`, and is currently renderable.
@@ -2105,8 +2110,9 @@ Acceptance criteria:
 - Dynamic entities are queryable and selectable through normal browser picking for inspection.
   Documentation must call out that this is browser tooling policy and does not prove retail gameplay
   targetability.
-- Missing dynamic dependencies or unsupported hooks are visible in diagnostics and console output;
-  the bird target's `SetOmega` hook is not reported as unsupported.
+- Missing dynamic dependencies are visible through current operational resource/renderability state.
+  Unsupported hooks remain console warnings, not durable diagnostics; the bird target's `SetOmega`
+  hook is not warned as unsupported.
 - Env-cell dynamic records use the Phase 8F cutover path and are diagnosable through the same dynamic
   report family as outdoor dynamic records.
 - No runtime asset dependent tests are retained in the repo.
@@ -2115,9 +2121,12 @@ Task checklist:
 
 - [ ] Audit existing runtime dynamic snapshot, renderer snapshot, and browser selection diagnostics
       before adding any new report fields.
-- [ ] Add only missing compact global dynamic counts required for Phase 9B validation.
-- [ ] Add selected dynamic entity inspection for per-entity validation details if the existing picker
-      selection state is insufficient.
+- [ ] Add a compact dynamic diagnostics report domain derived from active dynamic records without
+      embedding itemized records or visual/pose payloads.
+- [ ] Add selected dynamic entity inspection because browser selection currently supports dynamic
+      picks but the Inspect button only opens static selection diagnostics.
+- [ ] Keep selected dynamic inspection on the runtime boundary, backed by entity id lookup, rather
+      than teaching browser UI to spelunk `RuntimeSnapshot.dynamic.records`.
 - [ ] Add dynamic bounds debug overlay only if diagnostics/report fields are insufficient for
       validation.
 - [ ] Add targeted tests for compact dynamic diagnostics, dynamic browser selection behavior,
@@ -2147,6 +2156,25 @@ Decisions and course corrections:
   count-oriented and hook-generic; per-entity facts belong behind picker/selected-entity inspection.
   Do not add sampled entity lists, global `SetOmega` counts, or duplicated dynamic report objects
   when existing runtime and renderer snapshots already expose the needed state.
+- 2026-06-28 dry run: `ClientRuntime.createDiagnosticsReport()` currently includes asset-service,
+  renderer, static-coordinator, texture-atlas, and terrain-texture domains, but no dynamic domain.
+  Add one compact dynamic summary domain; do not copy `RuntimeSnapshot.dynamic.records` into the
+  report because records already include itemized playback state and can carry per-part pose data.
+- 2026-06-28 dry run: `RuntimeSnapshot.dynamic` already exposes enough per-record information for
+  implementation internals, but BrowserDisplay only enables the selected diagnostics modal for
+  static selections. Phase 9A should add a selected dynamic diagnostics report path rather than a
+  broad report dump.
+- 2026-06-28 dry run, superseded by steering: Unsupported hook visibility exists as `console.warn`
+  during dynamic animation resource validation. Do not add durable unsupported-hook report counts or
+  selected-entity warning summaries; diagnostics should project current operational state, while
+  warning/error histories stay in the console.
+- 2026-06-28 dry run: Renderer per-entity residency is not directly queryable today; dynamic renderer
+  resource and instance ids are deterministic from the entity id. Selected dynamic diagnostics should
+  report those deterministic ids plus global renderer counters first. Add renderer-private
+  per-entity lookup only if Phase 9B proves the counters and deterministic ids are insufficient.
+- 2026-06-28 dry run: The selected dynamic debug overlay already works through
+  `RuntimeSceneDebugSelection` and `queryDynamicCurrentBounds`, so a dynamic bounds overlay is not
+  needed for 9A unless manual validation finds a bounds/query mismatch.
 
 Debt and follow-up:
 
@@ -2195,15 +2223,16 @@ Task checklist:
 - [ ] Run the browser app against real DAT/static scene data at coordinates containing both targets.
 - [ ] Inspect runtime/browser diagnostics for the windmill target.
 - [ ] Inspect runtime/browser diagnostics for the bird target and active `SetOmega`.
-- [ ] Verify default selection filtering separately from debug/inspection query membership.
+- [ ] Verify browser selection finds dynamic targets for inspection while any future
+      retail/gameplay targeting filter remains explicit and separate.
 - [ ] Record validation evidence and visual concessions in this plan.
 - [ ] Run full verification commands after any validation fixes.
 
 Decisions and course corrections:
 
-- 2026-06-27 dry run: This phase should run after Phase 9A lands the diagnostics-report projection.
-  Manual validation without the compact dynamic report would be too much raw snapshot spelunking and
-  too easy to misread.
+- 2026-06-27 dry run: This phase should run after Phase 9A lands the compact dynamic report summary
+  and selected dynamic entity inspection. Manual validation without those small inspection surfaces
+  would require too much raw snapshot spelunking and would be too easy to misread.
 - 2026-06-27 dry run, superseded: The validation target was previously outdoor-only while env-cell
   dynamic render membership was gated by a temporary render-path-pending diagnostic.
 - 2026-06-27: Phase 8F now owns env-cell dynamic cutover before manual target validation. Phase 9B

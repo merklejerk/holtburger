@@ -14,16 +14,14 @@ import { createStaticMaterialTableEntry } from "../static/bake/static-material-a
 import type {
 	MaterialTextureDataUseIdentity,
 	LandblockSourceIdentity,
-	StaticMaterialSlotIdentity,
-	StaticObjectInstanceIdentity,
 	StaticMaterialTableEntry,
-	StaticObjectMaterialSlotFacts,
 	StaticObjectPartMaterialSlotFacts,
 	StaticObjectSourceAssetFacts,
 	StaticResourceIdentity,
 } from "../static/contracts";
 import {
 	planStaticObjectMaterials,
+	type StaticMaterialPlanningSlotFacts,
 	type StaticMaterialFallbackReason,
 	type StaticMaterialPlan,
 } from "../static/objects/bake/static-object-material-planner";
@@ -46,6 +44,9 @@ import type {
 	DynamicEntityTextureRequirement,
 	DynamicEntityUnsupportedMaterialReason,
 	DynamicPendingMaterialPlanningReason,
+	DynamicVisualMaterialSlotIdentity,
+	DynamicVisualObjectIdentity,
+	DynamicVisualPartIdentity,
 	DynamicVisualSource,
 } from "./contracts";
 
@@ -321,13 +322,13 @@ export class DynamicEntityResourceManager {
 				),
 		);
 		const materialSlots = createDynamicMaterialSlotRequirements(
-			materialPlanningIdentity.object,
+			materialPlanningIdentity.visualObject,
 			sourceAssets,
 		);
 		const materialPlans = planStaticObjectMaterials({
 			domain: createDynamicMaterialPlanningDomain(tracked.presentation),
 			landblock: createMaterialPlanningLandblockSource(visualSource),
-			materialSlots: materialSlots.map((slot) => slot.slotFacts),
+			materialSlots: materialSlots.map((slot) => slot.planningFacts),
 			materialSources: closure.materialSources,
 			paletteSources: closure.paletteSources,
 			regionRenderProfile: { detailRoles: [] },
@@ -430,7 +431,8 @@ export class DynamicEntityResourceManager {
 				status: "ready",
 				visual: {
 					materialSlots: materialSlots.map((slot) => ({
-						material: slot.slotFacts.material,
+						identity: slot.identity,
+						material: slot.planningFacts.material,
 						partIndex: slot.partIndex,
 						slot: slot.partSlot,
 					})),
@@ -722,58 +724,66 @@ function formatErrorMessage(error: unknown): string {
 }
 
 interface DynamicMaterialSlotFacts {
+	readonly identity: DynamicVisualMaterialSlotIdentity;
 	readonly partIndex: number;
 	readonly partSlot: StaticObjectPartMaterialSlotFacts;
-	readonly slotFacts: StaticObjectMaterialSlotFacts;
+	readonly planningFacts: StaticMaterialPlanningSlotFacts;
 }
 
 function createDynamicMaterialSlotRequirements(
-	object: StaticObjectInstanceIdentity,
+	visualObject: DynamicVisualObjectIdentity,
 	sourceAssets: readonly StaticObjectSourceAssetFacts[],
 ): readonly DynamicMaterialSlotFacts[] {
 	return sourceAssets.flatMap((source) =>
 		source.parts.flatMap((part) =>
-			part.materialSlots.map((slot) => ({
-				partIndex: part.partIndex,
-				partSlot: slot,
-				slotFacts: {
-					gfxObj: part.gfxObj,
-					identity: createStaticMaterialSlotIdentity({
-						geometrySurfaceId: slot.geometrySurfaceId,
-						materialSurfaceId: slot.materialSurfaceId,
-						object,
-						partIndex: part.partIndex,
-						slotIndex: slot.slotIndex,
+			part.materialSlots.map((slot) => {
+				const visualPart = createDynamicVisualPartIdentity({
+					part,
+					source,
+					visualObject,
+				});
+				return {
+					identity: createDynamicVisualMaterialSlotIdentity({
+						part: visualPart,
+						slot,
 					}),
-					material: slot.material,
-					materialVariantSignature: slot.materialVariantSignature,
-					object,
-					paletteOverride: slot.paletteOverride,
-					paletteViews: slot.paletteViews,
-					source: source.identity,
-				},
-			})),
+					partIndex: part.partIndex,
+					partSlot: slot,
+					planningFacts: {
+						material: slot.material,
+						paletteOverride: slot.paletteOverride,
+						paletteViews: slot.paletteViews,
+					},
+				};
+			}),
 		),
 	);
 }
 
-function createStaticMaterialSlotIdentity(options: {
-	readonly geometrySurfaceId: number;
-	readonly materialSurfaceId: number;
-	readonly object: StaticObjectInstanceIdentity;
-	readonly partIndex: number;
-	readonly slotIndex: number;
-}): StaticMaterialSlotIdentity {
+function createDynamicVisualPartIdentity(options: {
+	readonly part: StaticObjectSourceAssetFacts["parts"][number];
+	readonly source: StaticObjectSourceAssetFacts;
+	readonly visualObject: DynamicVisualObjectIdentity;
+}): DynamicVisualPartIdentity {
 	return {
-		geometrySurfaceId: options.geometrySurfaceId,
-		kind: "static-material-slot",
-		materialSurfaceId: options.materialSurfaceId,
-		part: {
-			kind: "static-object-part",
-			object: options.object,
-			partIndex: options.partIndex,
-		},
-		slotIndex: options.slotIndex,
+		gfxObj: options.part.gfxObj,
+		kind: "dynamic-visual-part",
+		object: options.visualObject,
+		partIndex: options.part.partIndex,
+		source: options.source.identity,
+	};
+}
+
+function createDynamicVisualMaterialSlotIdentity(options: {
+	readonly part: DynamicVisualPartIdentity;
+	readonly slot: StaticObjectPartMaterialSlotFacts;
+}): DynamicVisualMaterialSlotIdentity {
+	return {
+		geometrySurfaceId: options.slot.geometrySurfaceId,
+		kind: "dynamic-visual-material-slot",
+		materialSurfaceId: options.slot.materialSurfaceId,
+		part: options.part,
+		slotIndex: options.slot.slotIndex,
 	};
 }
 

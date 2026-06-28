@@ -8,6 +8,7 @@ import type {
 	StaticObjectMaterialSourceFacts,
 	StaticObjectPaletteSourceFacts,
 	StaticObjectPartMaterialSlotFacts,
+	StaticObjectSourceIdentity,
 	StaticObjectSourceAssetFacts,
 	StaticObjectTextureRefFacts,
 	StaticResourceIdentity,
@@ -81,8 +82,8 @@ type DynamicVisualOwnershipPolicy = {
 
 type DynamicMaterialPlanningIdentity =
 	| {
-			readonly kind: "static-authored-object";
-			readonly object: StaticAuthoredDynamicSeedFacts["object"];
+			readonly kind: "setup-backed-visual";
+			readonly visualObject: DynamicVisualObjectIdentity;
 	  }
 	| {
 			readonly kind: "pending";
@@ -99,6 +100,31 @@ export interface DynamicVisualSource {
 	readonly modelData: null;
 	readonly setupModelId: number;
 	readonly sourceAssetIds: readonly string[];
+}
+
+/** Runtime-local visual object identity for dynamic setup-backed material planning. */
+export interface DynamicVisualObjectIdentity {
+	readonly entityId: DynamicEntityId;
+	readonly kind: "dynamic-visual-object";
+	readonly resourceId: string;
+}
+
+/** Runtime-local visual part identity independent from static object instances. */
+export interface DynamicVisualPartIdentity {
+	readonly gfxObj: StaticObjectSourceIdentity;
+	readonly kind: "dynamic-visual-part";
+	readonly object: DynamicVisualObjectIdentity;
+	readonly partIndex: number;
+	readonly source: StaticObjectSourceIdentity;
+}
+
+/** Runtime-local material slot identity used by dynamic visual material planning. */
+export interface DynamicVisualMaterialSlotIdentity {
+	readonly geometrySurfaceId: number;
+	readonly kind: "dynamic-visual-material-slot";
+	readonly materialSurfaceId: number;
+	readonly part: DynamicVisualPartIdentity;
+	readonly slotIndex: number;
 }
 
 /** Diagnostic/correlation facts retained outside renderer/resource identity. */
@@ -372,6 +398,7 @@ interface DynamicEntityVisualResourcesFailedState {
 }
 
 interface DynamicEntityMaterialSlotRequirement {
+	readonly identity: DynamicVisualMaterialSlotIdentity;
 	readonly material: StaticObjectMaterialSourceFacts["identity"];
 	readonly partIndex: number;
 	readonly slot: StaticObjectPartMaterialSlotFacts;

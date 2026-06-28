@@ -49,7 +49,32 @@ describe("dynamic entity resource manager", () => {
 			"ready",
 			"ready",
 		]);
-		expect(records[0]?.resources.visual).toMatchObject({
+		const outdoorRecord = records.find(
+			(record) => record.sourceResidence.kind === "outdoor-landblock",
+		);
+		expect(outdoorRecord?.resources.visual).toMatchObject({
+			materialSlots: [
+				{
+					identity: {
+						kind: "dynamic-visual-material-slot",
+						part: {
+							kind: "dynamic-visual-part",
+							object: {
+								kind: "dynamic-visual-object",
+								resourceId:
+									"dynamic-visual-resource:static-authored-outdoor:outdoor-buildings:landblock:da55ffff:object:building:windmill-0:setup:020003e5",
+							},
+							partIndex: 0,
+						},
+						slotIndex: 0,
+					},
+					material: {
+						kind: "static-material-source",
+						materialId: 0x08000011,
+					},
+					partIndex: 0,
+				},
+			],
 			renderParts: [
 				{
 					indexType: "uint16",

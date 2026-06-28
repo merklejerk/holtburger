@@ -64,7 +64,12 @@ describe("dynamic entity controller", () => {
 			},
 			policy: {
 				materialPlanningIdentity: {
-					kind: "static-authored-object",
+					kind: "setup-backed-visual",
+					visualObject: {
+						kind: "dynamic-visual-object",
+						resourceId:
+							"dynamic-visual-resource:static-authored-outdoor:outdoor-buildings:landblock:da55ffff:object:building:windmill-0:setup:020003e5",
+					},
 				},
 				ownershipPolicy: {
 					kind: "dynamic-visual-resource",

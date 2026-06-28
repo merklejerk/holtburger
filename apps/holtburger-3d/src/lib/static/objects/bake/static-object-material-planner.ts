@@ -80,12 +80,19 @@ export interface StaticMaterialPlanningPayload {
 		| "landblock-env-cells";
 	readonly landblock: LandblockSourceIdentity;
 	readonly materialSources: OutdoorStaticObjectsScopePayload["materialSources"];
-	readonly materialSlots: OutdoorStaticObjectsScopePayload["materialSlots"];
+	readonly materialSlots: readonly StaticMaterialPlanningSlotFacts[];
 	readonly paletteSources: readonly StaticObjectPaletteSourceFacts[];
 	readonly textureRefs: readonly StaticObjectTextureRefFacts[];
 	readonly regionRenderProfile: {
 		readonly detailRoles: readonly RegionDetailRoleFacts[];
 	};
+}
+
+/** Minimal material-slot projection consumed by static object material classification. */
+export interface StaticMaterialPlanningSlotFacts {
+	readonly material: StaticMaterialSourceIdentity;
+	readonly paletteOverride: PaletteIdentity | null;
+	readonly paletteViews: readonly StaticObjectPaletteViewFacts[];
 }
 
 export interface StaticMaterialPlan {

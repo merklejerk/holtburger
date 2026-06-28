@@ -4240,7 +4240,7 @@ Verification:
 
 ### Phase 12C.2C: Neutral Dynamic Visual Material Identities
 
-Status: pending.
+Status: completed on 2026-06-28.
 
 Purpose:
 
@@ -4279,15 +4279,15 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add neutral visual object, part, and material-slot identity types.
-- [ ] Refactor static-authored dynamic material slot requirement generation to use neutral
+- [x] Add neutral visual object, part, and material-slot identity types.
+- [x] Refactor static-authored dynamic material slot requirement generation to use neutral
       identities.
-- [ ] Adapt object-material planning/resource preparation so neutral dynamic material facts can reuse
+- [x] Adapt object-material planning/resource preparation so neutral dynamic material facts can reuse
       the existing material classification and texture requirement behavior.
-- [ ] Add static-authored dynamic equivalence coverage for material plans/render parts before and
+- [x] Add static-authored dynamic equivalence coverage for material plans/render parts before and
       after the identity lift.
-- [ ] Run focused TypeScript verification for dynamic resource tests.
-- [ ] Run full app verification commands from `apps/holtburger-3d`.
+- [x] Run focused TypeScript verification for dynamic resource tests.
+- [x] Run full app verification commands from `apps/holtburger-3d`.
 
 Risks and mitigations:
 
@@ -4323,6 +4323,39 @@ Dry-run findings:
   static-authored equivalence as the oracle; Phase 12C.2D should add runtime readiness through that
   same path rather than gate features we effectively get from the existing path.
 
+Decisions and course corrections:
+
+- 2026-06-28 implementation: Added neutral dynamic visual object, part, and material-slot identity
+  types. Static-authored dynamic material planning identity now points at a
+  `dynamic-visual-object` instead of carrying `StaticObjectInstanceIdentity`.
+- 2026-06-28 implementation: Replaced dynamic material slot projection with dynamic visual
+  material-slot identities. Static-authored visual readiness no longer creates
+  `static-material-slot` identities or passes `StaticObjectInstanceIdentity` into dynamic material
+  slot requirement generation.
+- 2026-06-28 implementation: Narrowed `planStaticObjectMaterials()` input to
+  `StaticMaterialPlanningSlotFacts`, the minimal facts the classifier actually consumes:
+  material identity, palette override, and palette views. Static object scope slots remain
+  structurally compatible, and dynamic slots can now enter without static object identity.
+- 2026-06-28 implementation: Added regression coverage that resource-ready static-authored dynamic
+  visuals expose `dynamic-visual-material-slot` identities while preserving render parts and texture
+  requirements.
+- 2026-06-28 spicy bit: `createDynamicMaterialPlanningDomain()` still returns the existing static
+  object-material planning domains. That is acceptable for static-authored equivalence, but Phase
+  12C.2D must decide how supported runtime setup-backed visuals map domain/batch policy without
+  reintroducing fake static provenance.
+- 2026-06-28 debt: dynamic placement tests still use `StaticObjectInstanceIdentity` fixtures for
+  static-authored source records. That is outside the material planning path, but it remains part of
+  the broader static-shaped fixture surface. Phase 12C.2E owns deciding whether to replace these
+  with source-neutral dynamic fixture builders before first rendering.
+
+Verification:
+
+- 2026-06-28: `npm run test:ts -- dynamic-entity-resource-manager dynamic-entity-controller`
+- 2026-06-28: `npm run test:ts`
+- 2026-06-28: `npm run check`
+- 2026-06-28: `npm run lint`
+- 2026-06-28: `npm run build` passed with Vite's existing chunk-size warning.
+
 ### Phase 12C.2D: Runtime Spawn Material Readiness
 
 Status: pending.
@@ -4337,9 +4370,15 @@ Deliverables:
 
 - Replace the current runtime `materialPlanningIdentity: pending` stop with a neutral runtime visual
   material identity when the runtime spawn supplies setup-backed visual source facts.
+- Scope supported runtime readiness to setup-model-sourced visuals: `modelData: null`, explicit
+  animation, residence, setup model id, and source closure derived from `DynamicVisualSource`
+  `sourceAssetIds` / `setupModelId`. Broader server composition facts are not inputs to this phase.
 - Reuse the existing material classification, texture requirement, prepared-texture, atlas, and
   renderer-material behavior through the neutral facts introduced in Phase 12C.2C. Do not add a
   reduced runtime-only material subset.
+- Keep runtime `textureBatchId` per entity, such as `dynamic:<entity-id>`, unless implementation
+  proves a cleaner shared ownership node without broadening the phase. Shared atlas/cache reuse
+  remains Phase 12C.2E/12C.4 debt.
 - Keep explicit animation as the renderable runtime path unless setup-default animation evidence is
   proven from prepared source facts during this phase.
 - Keep unsupported server composition facts outside the setup-backed visual path separate:
@@ -4353,6 +4392,8 @@ Acceptance criteria:
 - Runtime-authored setup-backed spawns can become resource-ready through the same setup/gfx/material
   closure, material planning, texture requirement, prepared-texture, and renderer-material behavior
   already used by static-authored dynamics.
+- Runtime readiness is proven from setup-model source closure facts, not from equipment/clothing,
+  object-description overlays, or unsupported `ModelData` variants.
 - Resource-ready runtime spawns use both the runtime visual texture domain from 12C.2A and the
   neutral material planning identity from 12C.2C.
 - Runtime-spawn visual readiness does not call material planning through fabricated
@@ -4367,6 +4408,8 @@ Task checklist:
       Phase 12C.2C.
 - [ ] Remove the runtime `materialPlanningIdentity: pending` stop for supported setup-backed visual
       sources.
+- [ ] Keep runtime readiness setup-model sourced by deriving the visual source closure from
+      `DynamicVisualSource.sourceAssetIds` / `setupModelId`.
 - [ ] Add runtime-authored setup-backed readiness coverage across the existing supported material
       feature set represented by current dynamic material tests.
 - [ ] Add bounded runtime `ModelData` handling only where it is already part of setup-backed visual
@@ -4380,6 +4423,14 @@ Risks and mitigations:
 - Risk: runtime readiness becomes a second dynamic material pipeline.
   Mitigation: runtime visuals must enter through the neutral identities from Phase 12C.2C and reuse
   the same material planning/preparation functions as static-authored dynamics.
+- Risk: runtime material readiness expands into server composition semantics.
+  Mitigation: support only setup-model-sourced visuals with `modelData: null` and explicit animation
+  in this phase; unsupported server composition facts stay logged/skipped/rejected according to
+  validation and remain Phase 12C.4 work.
+- Risk: runtime texture batching turns into a shared ownership rewrite.
+  Mitigation: keep per-entity runtime texture batches acceptable for 12C.2D and push shared
+  atlas/cache reuse decisions to Phase 12C.2E/12C.4 unless a narrow ownership node falls out
+  naturally.
 - Risk: setup-default animation sneaks back in as animation id `0`.
   Mitigation: keep explicit animation as the only renderable runtime path unless setup-default
   evidence is proven from source facts; unresolved setup-default remains pending and logs only.
@@ -4388,15 +4439,15 @@ Risks and mitigations:
   Mitigation: lift the existing setup-backed material path wholesale; broader server composition
   semantics outside that path remain Phase 12C.4 work.
 
-### Phase 12C.2E: Dynamic Visual Ownership And Atlas Churn Checkpoint
+### Phase 12C.2E: Dynamic Visual Ownership, Atlas Churn, And Fixture Neutrality Checkpoint
 
 Status: pending / conditional.
 
 Purpose:
 
-- Decide whether runtime visual-resource ownership, prepared-asset leases, and atlas placement need
-  a dedicated cleanup before first rendering, or whether per-entity runtime batches remain acceptable
-  debt for 12C.
+- Decide whether runtime visual-resource ownership, prepared-asset leases, atlas placement, and
+  static-shaped dynamic test fixtures need dedicated cleanup before first rendering, or whether
+  specific leftovers remain acceptable debt for 12C.
 
 Deliverables:
 
@@ -4405,13 +4456,18 @@ Deliverables:
 - Confirm removing one dynamic entity releases only its dynamic visual-resource ownership.
 - If runtime visual resources or atlas entries are still per-entity, document duplicate atlas/cache
   placement as follow-up debt rather than building a broad sharing graph prematurely.
-- Execute this phase before 12C.3 only if 12C.2D exposes leaks, unstable ownership, or atlas churn
-  that would make first rendering misleading.
+- Audit dynamic placement/cadence fixture builders that still require `StaticObjectInstanceIdentity`
+  for source records. Replace them with source-neutral dynamic fixture builders if they would hide
+  runtime placement/index bugs during 12C.3.
+- Execute this phase before 12C.3 if 12C.2D exposes leaks, unstable ownership, atlas churn, or
+  static-shaped fixture assumptions that would make first rendering misleading.
 
 Acceptance criteria:
 
 - Create/remove churn for resource-ready runtime spawns does not leak prepared-asset leases,
   texture owners, renderer resources, or placement/index records.
+- Placement/index tests either use source-neutral dynamic fixtures where runtime placement behavior
+  is under test, or explicitly document why a static-authored fixture remains the right oracle.
 - Any remaining per-entity runtime atlas/cache duplication is explicitly documented and does not
   block first rendering.
 
@@ -4419,6 +4475,10 @@ Task checklist:
 
 - [ ] Audit runtime resource-ready create/remove ownership behavior after Phase 12C.2D.
 - [ ] Add focused ownership/refcount tests only if existing coverage does not prove the behavior.
+- [ ] Audit dynamic placement/cadence fixtures that still construct `StaticObjectInstanceIdentity`
+      records.
+- [ ] Replace static-shaped dynamic placement fixtures with source-neutral builders where they would
+      mask runtime placement/index behavior.
 - [ ] Document duplicate atlas/cache placement as debt if it remains per-entity by design.
 - [ ] Decide whether 12C.3 can proceed or whether ownership cleanup is required first.
 

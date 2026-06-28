@@ -24,6 +24,7 @@ import {
 	type DynamicEntityResidence,
 	type DynamicEntityPresentation,
 	type DynamicEntityTransformState,
+	type DynamicVisualObjectIdentity,
 	type DynamicVisualSource,
 	type StaticAuthoredDynamicSeedFacts,
 	type DynamicRuntimeSnapshot,
@@ -426,6 +427,7 @@ function createStaticAuthoredPresentation(options: {
 		animationId: record.seed.defaultAnimationId,
 		kind: "explicit" as const,
 	};
+	const visualObject = createDynamicVisualObjectIdentity(id);
 	return {
 		diagnostics: {
 			kind: "static-authored",
@@ -434,12 +436,12 @@ function createStaticAuthoredPresentation(options: {
 		},
 		policy: {
 			materialPlanningIdentity: {
-				kind: "static-authored-object",
-				object: record.seed.object,
+				kind: "setup-backed-visual",
+				visualObject,
 			},
 			ownershipPolicy: {
 				kind: "dynamic-visual-resource",
-				resourceId: createDynamicVisualResourceId(id),
+				resourceId: visualObject.resourceId,
 			},
 			retentionPolicy: {
 				kind: "static-source-scope",
@@ -467,6 +469,7 @@ function createRuntimeSpawnPresentation(options: {
 	readonly sourceResidence: DynamicEntityResidence;
 }): DynamicEntityPresentation {
 	const { id, source, sourceResidence } = options;
+	const visualObject = createDynamicVisualObjectIdentity(id);
 	return {
 		diagnostics: {
 			kind: "runtime-spawn",
@@ -480,7 +483,7 @@ function createRuntimeSpawnPresentation(options: {
 			},
 			ownershipPolicy: {
 				kind: "dynamic-visual-resource",
-				resourceId: createDynamicVisualResourceId(id),
+				resourceId: visualObject.resourceId,
 			},
 			retentionPolicy: {
 				kind: "explicit-runtime-lifetime",
@@ -497,6 +500,16 @@ function createRuntimeSpawnPresentation(options: {
 				`setup-model/${source.setupModelId.toString(16).padStart(8, "0")}`,
 			],
 		},
+	};
+}
+
+function createDynamicVisualObjectIdentity(
+	entityId: DynamicEntityId,
+): DynamicVisualObjectIdentity {
+	return {
+		entityId,
+		kind: "dynamic-visual-object",
+		resourceId: createDynamicVisualResourceId(entityId),
 	};
 }
 

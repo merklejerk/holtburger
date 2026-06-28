@@ -1,39 +1,39 @@
 import type { StaticMaterialTableEntry } from "../../static/contracts";
-import type { StaticTextureBinding } from "../types";
+import type { TextureBinding } from "../types";
 import {
-	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
-	MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW,
-	MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW,
-	MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
-	MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
+	MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW,
+	MAX_OBJECT_MATERIAL_DETAIL_PAGES_PER_DRAW,
+	MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW,
+	MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW,
 } from "../types";
 
 const DEFAULT_TEXTURE_RECT = [0, 0, 1, 1] as const;
 
-export interface StaticObjectMaterialPayloadResource {
+export interface ObjectMaterialPayloadResource {
 	readonly drawUnitId: string;
 	readonly materialFamily: "flat-color" | "indexed-paletted" | "texture-rgba";
 	readonly materialEntries: readonly StaticMaterialTableEntry[];
 }
 
-export interface StaticObjectPreparedDrawPayload {
-	readonly materialUniforms: StaticObjectPreparedMaterialUniforms;
-	readonly rolePages: StaticObjectPreparedRolePageBindingsByRole;
+export interface ObjectMaterialPreparedDrawPayload {
+	readonly materialUniforms: ObjectMaterialPreparedUniforms;
+	readonly rolePages: ObjectMaterialRolePageBindingsByRole;
 }
 
-interface StaticObjectPreparedRolePageBindingsByRole {
-	readonly baseColor: StaticObjectPreparedRolePageBindings;
-	readonly detail: StaticObjectPreparedRolePageBindings;
-	readonly index: StaticObjectPreparedRolePageBindings;
-	readonly palette: StaticObjectPreparedRolePageBindings;
+interface ObjectMaterialRolePageBindingsByRole {
+	readonly baseColor: ObjectMaterialRolePageBindings;
+	readonly detail: ObjectMaterialRolePageBindings;
+	readonly index: ObjectMaterialRolePageBindings;
+	readonly palette: ObjectMaterialRolePageBindings;
 }
 
-export interface StaticObjectPreparedRolePageBindings {
+export interface ObjectMaterialRolePageBindings {
 	readonly sizes: Float32Array;
 	readonly textures: (WebGLTexture | null)[];
 }
 
-export interface StaticObjectPreparedMaterialUniforms {
+export interface ObjectMaterialPreparedUniforms {
 	readonly alphaTests: Float32Array;
 	readonly baseColorPages: Int32Array;
 	readonly baseColorRects: Float32Array;
@@ -54,79 +54,79 @@ export interface StaticObjectPreparedMaterialUniforms {
 	readonly wrapModes: Int32Array;
 }
 
-export interface StaticObjectPreparedDrawPayloadState {
-	readonly payload: StaticObjectPreparedDrawPayload;
+export interface ObjectMaterialPreparedDrawPayloadState {
+	readonly payload: ObjectMaterialPreparedDrawPayload;
 	isDirty: boolean;
 }
 
-export function createStaticObjectPreparedDrawPayloadState(): StaticObjectPreparedDrawPayloadState {
+export function createObjectMaterialPreparedDrawPayloadState(): ObjectMaterialPreparedDrawPayloadState {
 	return {
 		isDirty: true,
-		payload: createStaticObjectPreparedDrawPayload(),
+		payload: createObjectMaterialPreparedDrawPayload(),
 	};
 }
 
-export function markStaticObjectPreparedDrawPayloadDirty(
-	state: StaticObjectPreparedDrawPayloadState,
+export function markObjectMaterialPreparedDrawPayloadDirty(
+	state: ObjectMaterialPreparedDrawPayloadState,
 ): void {
 	state.isDirty = true;
 }
 
-export function prepareStaticObjectDrawPayloadState(
-	state: StaticObjectPreparedDrawPayloadState,
-	resource: StaticObjectMaterialPayloadResource,
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
+export function prepareObjectMaterialDrawPayloadState(
+	state: ObjectMaterialPreparedDrawPayloadState,
+	resource: ObjectMaterialPayloadResource,
+	bindings: ReadonlyMap<string, TextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
-): StaticObjectPreparedDrawPayload {
+): ObjectMaterialPreparedDrawPayload {
 	if (state.isDirty) {
-		prepareStaticObjectDrawPayload(state.payload, resource, bindings, textures);
+		prepareObjectMaterialDrawPayload(state.payload, resource, bindings, textures);
 		state.isDirty = false;
 	}
 
 	return state.payload;
 }
 
-export function createStaticObjectPreparedDrawPayload(): StaticObjectPreparedDrawPayload {
+export function createObjectMaterialPreparedDrawPayload(): ObjectMaterialPreparedDrawPayload {
 	return {
-		materialUniforms: createStaticObjectMaterialUniformScratch(),
+		materialUniforms: createObjectMaterialUniformScratch(),
 		rolePages: {
-			baseColor: createStaticObjectRolePageScratch(
-				MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
+			baseColor: createObjectMaterialRolePageScratch(
+				MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW,
 			),
-			detail: createStaticObjectRolePageScratch(
-				MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW,
+			detail: createObjectMaterialRolePageScratch(
+				MAX_OBJECT_MATERIAL_DETAIL_PAGES_PER_DRAW,
 			),
-			index: createStaticObjectRolePageScratch(
-				MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW,
+			index: createObjectMaterialRolePageScratch(
+				MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW,
 			),
-			palette: createStaticObjectRolePageScratch(
-				MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
+			palette: createObjectMaterialRolePageScratch(
+				MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW,
 			),
 		},
 	};
 }
 
-export function prepareStaticObjectDrawPayload(
-	target: StaticObjectPreparedDrawPayload,
-	resource: StaticObjectMaterialPayloadResource,
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
+export function prepareObjectMaterialDrawPayload(
+	target: ObjectMaterialPreparedDrawPayload,
+	resource: ObjectMaterialPayloadResource,
+	bindings: ReadonlyMap<string, TextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): void {
 	if (resource.materialEntries.length === 0) {
 		throw new Error(
-			`Static object resource ${resource.drawUnitId} has no material table entries.`,
+			`Object material resource ${resource.drawUnitId} has no material table entries.`,
 		);
 	}
 
-	resetStaticObjectRolePageBindings(target.rolePages);
-	resetStaticObjectMaterialUniforms(target.materialUniforms);
-	fillStaticObjectRolePageBindings(
+	resetObjectMaterialRolePageBindings(target.rolePages);
+	resetObjectMaterialUniforms(target.materialUniforms);
+	fillObjectMaterialRolePageBindings(
 		target.rolePages,
 		resource,
 		bindings,
 		textures,
 	);
-	fillStaticObjectMaterialUniforms(
+	fillObjectMaterialUniforms(
 		target.materialUniforms,
 		resource,
 		bindings,
@@ -134,67 +134,67 @@ export function prepareStaticObjectDrawPayload(
 	);
 }
 
-function createStaticObjectRolePageScratch(
+function createObjectMaterialRolePageScratch(
 	slotCount: number,
-): StaticObjectPreparedRolePageBindings {
+): ObjectMaterialRolePageBindings {
 	return {
 		sizes: new Float32Array(slotCount * 2),
 		textures: Array.from({ length: slotCount }, () => null),
 	};
 }
 
-function createStaticObjectMaterialUniformScratch(): StaticObjectPreparedMaterialUniforms {
+function createObjectMaterialUniformScratch(): ObjectMaterialPreparedUniforms {
 	return {
-		alphaTests: new Float32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
-		baseColorPages: new Int32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
+		alphaTests: new Float32Array(MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
+		baseColorPages: new Int32Array(MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
 		baseColorRects: new Float32Array(
-			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
+			MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
 		),
-		colors: new Float32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4),
-		detailEnabled: new Int32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
-		detailPages: new Int32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
+		colors: new Float32Array(MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4),
+		detailEnabled: new Int32Array(MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
+		detailPages: new Int32Array(MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
 		detailRects: new Float32Array(
-			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
+			MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
 		),
 		detailTilings: new Float32Array(
-			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+			MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
 		),
 		emissiveColors: new Float32Array(
-			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 3,
+			MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 3,
 		),
 		indexedClipThresholds: new Float32Array(
-			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+			MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
 		),
 		indexedTextureFormats: new Int32Array(
-			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+			MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
 		),
-		indexPages: new Int32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
+		indexPages: new Int32Array(MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
 		indexRects: new Float32Array(
-			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
+			MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
 		),
-		materialModes: new Int32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
+		materialModes: new Int32Array(MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
 		paletteFirstIndices: new Float32Array(
-			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+			MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
 		),
-		palettePages: new Int32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
+		palettePages: new Int32Array(MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
 		paletteRects: new Float32Array(
-			MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
+			MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW * 4,
 		),
-		wrapModes: new Int32Array(MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
+		wrapModes: new Int32Array(MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW),
 	};
 }
 
-function resetStaticObjectRolePageBindings(
-	rolePages: StaticObjectPreparedRolePageBindingsByRole,
+function resetObjectMaterialRolePageBindings(
+	rolePages: ObjectMaterialRolePageBindingsByRole,
 ): void {
-	resetStaticObjectRolePage(rolePages.baseColor);
-	resetStaticObjectRolePage(rolePages.detail);
-	resetStaticObjectRolePage(rolePages.index);
-	resetStaticObjectRolePage(rolePages.palette);
+	resetObjectMaterialRolePage(rolePages.baseColor);
+	resetObjectMaterialRolePage(rolePages.detail);
+	resetObjectMaterialRolePage(rolePages.index);
+	resetObjectMaterialRolePage(rolePages.palette);
 }
 
-function resetStaticObjectRolePage(
-	rolePage: StaticObjectPreparedRolePageBindings,
+function resetObjectMaterialRolePage(
+	rolePage: ObjectMaterialRolePageBindings,
 ): void {
 	rolePage.textures.fill(null);
 	for (let slot = 0; slot < rolePage.textures.length; slot += 1) {
@@ -203,8 +203,8 @@ function resetStaticObjectRolePage(
 	}
 }
 
-function resetStaticObjectMaterialUniforms(
-	uniforms: StaticObjectPreparedMaterialUniforms,
+function resetObjectMaterialUniforms(
+	uniforms: ObjectMaterialPreparedUniforms,
 ): void {
 	uniforms.alphaTests.fill(0);
 	uniforms.baseColorPages.fill(0);
@@ -229,44 +229,44 @@ function resetStaticObjectMaterialUniforms(
 function fillDefaultMaterialRectTable(rects: Float32Array): void {
 	for (
 		let slot = 0;
-		slot < MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW;
+		slot < MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW;
 		slot += 1
 	) {
 		rects.set(DEFAULT_TEXTURE_RECT, slot * 4);
 	}
 }
 
-function fillStaticObjectRolePageBindings(
-	target: StaticObjectPreparedRolePageBindingsByRole,
-	resource: StaticObjectMaterialPayloadResource,
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
+function fillObjectMaterialRolePageBindings(
+	target: ObjectMaterialRolePageBindingsByRole,
+	resource: ObjectMaterialPayloadResource,
+	bindings: ReadonlyMap<string, TextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): void {
 	for (const entry of resource.materialEntries) {
-		collectStaticObjectPageBinding(
+		collectObjectMaterialPageBinding(
 			entry.primaryTextureUseId,
-			"static-base-color",
+			"object-base-color",
 			bindings,
 			textures,
 			target.baseColor,
 		);
-		collectStaticObjectPageBinding(
+		collectObjectMaterialPageBinding(
 			entry.indexTextureUseId,
-			"static-index",
+			"object-index",
 			bindings,
 			textures,
 			target.index,
 		);
-		collectStaticObjectPageBinding(
+		collectObjectMaterialPageBinding(
 			entry.paletteTextureUseId,
-			"static-palette",
+			"object-palette",
 			bindings,
 			textures,
 			target.palette,
 		);
-		collectStaticObjectPageBinding(
+		collectObjectMaterialPageBinding(
 			entry.detailTextureUseId,
-			"static-detail",
+			"object-detail",
 			bindings,
 			textures,
 			target.detail,
@@ -274,12 +274,12 @@ function fillStaticObjectRolePageBindings(
 	}
 }
 
-function collectStaticObjectPageBinding(
+function collectObjectMaterialPageBinding(
 	textureUseId: string | null,
-	expectedKind: StaticTextureBinding["rolePage"]["kind"],
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
+	expectedKind: TextureBinding["rolePage"]["kind"],
+	bindings: ReadonlyMap<string, TextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
-	target: StaticObjectPreparedRolePageBindings,
+	target: ObjectMaterialRolePageBindings,
 ): void {
 	if (!textureUseId) {
 		return;
@@ -302,15 +302,15 @@ function collectStaticObjectPageBinding(
 	target.sizes[slot * 2 + 1] = binding.textureHeight;
 }
 
-function fillStaticObjectMaterialUniforms(
-	target: StaticObjectPreparedMaterialUniforms,
-	resource: StaticObjectMaterialPayloadResource,
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
+function fillObjectMaterialUniforms(
+	target: ObjectMaterialPreparedUniforms,
+	resource: ObjectMaterialPayloadResource,
+	bindings: ReadonlyMap<string, TextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): void {
 	const materialEntryCount = Math.min(
 		resource.materialEntries.length,
-		MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+		MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
 	);
 	for (let entryIndex = 0; entryIndex < materialEntryCount; entryIndex += 1) {
 		const entry = resource.materialEntries[entryIndex];
@@ -318,7 +318,7 @@ function fillStaticObjectMaterialUniforms(
 			continue;
 		}
 		const slot = entry.slot;
-		if (slot < 0 || slot >= MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW) {
+		if (slot < 0 || slot >= MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW) {
 			continue;
 		}
 		target.alphaTests[slot] = entry.alphaTest;
@@ -328,7 +328,7 @@ function fillStaticObjectMaterialUniforms(
 		target.indexedTextureFormats[slot] =
 			entry.indexedTextureFormat === "index16" ? 1 : 0;
 		target.indexedClipThresholds[slot] = entry.indexedClipThreshold;
-		target.materialModes[slot] = resolveStaticObjectMaterialEntryMode(
+		target.materialModes[slot] = resolveObjectMaterialEntryMode(
 			resource,
 			entry,
 			bindings,
@@ -337,37 +337,37 @@ function fillStaticObjectMaterialUniforms(
 		target.paletteFirstIndices[slot] = entry.paletteFirstIndex;
 		target.wrapModes[slot] = entry.primaryTextureWrapMode === "repeat" ? 1 : 0;
 
-		writeStaticObjectTextureEntry(
+		writeObjectMaterialTextureEntry(
 			entry.primaryTextureUseId,
-			"static-base-color",
-			MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
+			"object-base-color",
+			MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW,
 			bindings,
 			target.baseColorPages,
 			target.baseColorRects,
 			slot,
 		);
-		writeStaticObjectTextureEntry(
+		writeObjectMaterialTextureEntry(
 			entry.indexTextureUseId,
-			"static-index",
-			MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW,
+			"object-index",
+			MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW,
 			bindings,
 			target.indexPages,
 			target.indexRects,
 			slot,
 		);
-		writeStaticObjectTextureEntry(
+		writeObjectMaterialTextureEntry(
 			entry.paletteTextureUseId,
-			"static-palette",
-			MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
+			"object-palette",
+			MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW,
 			bindings,
 			target.palettePages,
 			target.paletteRects,
 			slot,
 		);
-		const detailBinding = writeStaticObjectTextureEntry(
+		const detailBinding = writeObjectMaterialTextureEntry(
 			entry.detailTextureUseId,
-			"static-detail",
-			MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW,
+			"object-detail",
+			MAX_OBJECT_MATERIAL_DETAIL_PAGES_PER_DRAW,
 			bindings,
 			target.detailPages,
 			target.detailRects,
@@ -378,10 +378,10 @@ function fillStaticObjectMaterialUniforms(
 	}
 }
 
-function resolveStaticObjectMaterialEntryMode(
-	resource: StaticObjectMaterialPayloadResource,
+function resolveObjectMaterialEntryMode(
+	resource: ObjectMaterialPayloadResource,
 	materialEntry: StaticMaterialTableEntry,
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
+	bindings: ReadonlyMap<string, TextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): number {
 	if (resource.materialFamily === "flat-color") {
@@ -390,15 +390,15 @@ function resolveStaticObjectMaterialEntryMode(
 	if (resource.materialFamily === "indexed-paletted") {
 		return hasResidentBinding(
 			materialEntry.indexTextureUseId,
-			"static-index",
-			MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW,
+			"object-index",
+			MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW,
 			bindings,
 			textures,
 		) &&
 			hasResidentBinding(
 				materialEntry.paletteTextureUseId,
-				"static-palette",
-				MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
+				"object-palette",
+				MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW,
 				bindings,
 				textures,
 			)
@@ -408,8 +408,8 @@ function resolveStaticObjectMaterialEntryMode(
 
 	return hasResidentBinding(
 		materialEntry.primaryTextureUseId,
-		"static-base-color",
-		MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
+		"object-base-color",
+		MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW,
 		bindings,
 		textures,
 	)
@@ -419,9 +419,9 @@ function resolveStaticObjectMaterialEntryMode(
 
 function hasResidentBinding(
 	textureUseId: string | null,
-	expectedKind: StaticTextureBinding["rolePage"]["kind"],
+	expectedKind: TextureBinding["rolePage"]["kind"],
 	maxSlots: number,
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
+	bindings: ReadonlyMap<string, TextureBinding>,
 	textures: ReadonlyMap<string, WebGLTexture>,
 ): boolean {
 	if (!textureUseId) {
@@ -437,15 +437,15 @@ function hasResidentBinding(
 		: false;
 }
 
-function writeStaticObjectTextureEntry(
+function writeObjectMaterialTextureEntry(
 	textureUseId: string | null,
-	expectedKind: StaticTextureBinding["rolePage"]["kind"],
+	expectedKind: TextureBinding["rolePage"]["kind"],
 	maxSlots: number,
-	bindings: ReadonlyMap<string, StaticTextureBinding>,
+	bindings: ReadonlyMap<string, TextureBinding>,
 	pages: Int32Array,
 	rects: Float32Array,
 	slot: number,
-): StaticTextureBinding | null {
+): TextureBinding | null {
 	if (!textureUseId) {
 		return null;
 	}

@@ -1,9 +1,9 @@
 import {
-	MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
-	MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW,
-	MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW,
-	MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
-	MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW,
+	MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW,
+	MAX_OBJECT_MATERIAL_DETAIL_PAGES_PER_DRAW,
+	MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW,
+	MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW,
+	MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW,
 } from "../renderer/types";
 import type {
 	StaticTextureBinding,
@@ -257,7 +257,7 @@ function canAddStaticObjectMaterialEntry(
 	entry: StaticMaterialTableEntry,
 	bindings: ReadonlyMap<string, StaticTextureBindingFacts>,
 ): boolean {
-	if (entries.length >= MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW) {
+	if (entries.length >= MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW) {
 		return false;
 	}
 
@@ -265,10 +265,10 @@ function canAddStaticObjectMaterialEntry(
 	addStaticObjectMaterialEntryPages(nextPages, entry, bindings);
 
 	return (
-		nextPages.baseColor.size <= MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW &&
-		nextPages.detail.size <= MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW &&
-		nextPages.index.size <= MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW &&
-		nextPages.palette.size <= MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW
+		nextPages.baseColor.size <= MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW &&
+		nextPages.detail.size <= MAX_OBJECT_MATERIAL_DETAIL_PAGES_PER_DRAW &&
+		nextPages.index.size <= MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW &&
+		nextPages.palette.size <= MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW
 	);
 }
 
@@ -633,10 +633,10 @@ function uniqueNumbers(values: readonly number[]): readonly number[] {
 }
 
 type StaticRolePageKind =
-	| "static-base-color"
-	| "static-detail"
-	| "static-index"
-	| "static-palette";
+	| "object-base-color"
+	| "object-detail"
+	| "object-index"
+	| "object-palette";
 
 interface StaticRoleTextureUse {
 	readonly kind: StaticRolePageKind;
@@ -649,25 +649,25 @@ function createStaticRoleTextureUses(
 	const uses: StaticRoleTextureUse[] = [];
 	if (entry.primaryTextureUseId) {
 		uses.push({
-			kind: "static-base-color",
+			kind: "object-base-color",
 			textureUseId: entry.primaryTextureUseId,
 		});
 	}
 	if (entry.indexTextureUseId) {
 		uses.push({
-			kind: "static-index",
+			kind: "object-index",
 			textureUseId: entry.indexTextureUseId,
 		});
 	}
 	if (entry.paletteTextureUseId) {
 		uses.push({
-			kind: "static-palette",
+			kind: "object-palette",
 			textureUseId: entry.paletteTextureUseId,
 		});
 	}
 	if (entry.detailTextureUseId) {
 		uses.push({
-			kind: "static-detail",
+			kind: "object-detail",
 			textureUseId: entry.detailTextureUseId,
 		});
 	}
@@ -700,27 +700,27 @@ function getStaticRolePageSet(
 	kind: StaticRolePageKind,
 ): Set<string> {
 	switch (kind) {
-		case "static-base-color":
+		case "object-base-color":
 			return pages.baseColor;
-		case "static-detail":
+		case "object-detail":
 			return pages.detail;
-		case "static-index":
+		case "object-index":
 			return pages.index;
-		case "static-palette":
+		case "object-palette":
 			return pages.palette;
 	}
 }
 
 function getMaxStaticRolePageSlots(kind: StaticRolePageKind): number {
 	switch (kind) {
-		case "static-base-color":
-			return MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW;
-		case "static-detail":
-			return MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW;
-		case "static-index":
-			return MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW;
-		case "static-palette":
-			return MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW;
+		case "object-base-color":
+			return MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW;
+		case "object-detail":
+			return MAX_OBJECT_MATERIAL_DETAIL_PAGES_PER_DRAW;
+		case "object-index":
+			return MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW;
+		case "object-palette":
+			return MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW;
 	}
 }
 

@@ -130,23 +130,23 @@ describe("static materializer", () => {
 		expect(materialized.textureUpdate?.textureBindings).toMatchObject([
 			{
 				owner: { drawUnitId: "static-table", kind: "draw-unit" },
-				rolePage: { kind: "static-base-color", slot: 0 },
+				rolePage: { kind: "object-base-color", slot: 0 },
 			},
 			{
 				owner: { drawUnitId: "static-table", kind: "draw-unit" },
-				rolePage: { kind: "static-base-color", slot: 1 },
+				rolePage: { kind: "object-base-color", slot: 1 },
 			},
 			{
 				owner: { drawUnitId: "static-table", kind: "draw-unit" },
-				rolePage: { kind: "static-base-color", slot: 2 },
+				rolePage: { kind: "object-base-color", slot: 2 },
 			},
 			{
 				owner: { drawUnitId: "static-table", kind: "draw-unit" },
-				rolePage: { kind: "static-base-color", slot: 3 },
+				rolePage: { kind: "object-base-color", slot: 3 },
 			},
 			{
 				owner: { drawUnitId: "static-table#fine-1", kind: "draw-unit" },
-				rolePage: { kind: "static-base-color", slot: 0 },
+				rolePage: { kind: "object-base-color", slot: 0 },
 			},
 		]);
 		expect(materialized.staticSourceMappings).toEqual([]);
@@ -216,7 +216,7 @@ describe("static materializer", () => {
 				},
 				rect: [0, 0, 1, 1] as const,
 				rolePage: {
-					kind: "static-base-color" as const,
+					kind: "object-base-color" as const,
 					slot: index,
 				},
 				textureHeight: 1,
@@ -241,7 +241,7 @@ describe("static materializer", () => {
 					kind: "static-object-visual-resource",
 					resourceId: "visual-static-table",
 				},
-				rolePage: { kind: "static-base-color", slot: 0 },
+				rolePage: { kind: "object-base-color", slot: 0 },
 				textureUseId: "static-table:prepared-texture:0",
 			},
 			{
@@ -249,7 +249,7 @@ describe("static materializer", () => {
 					kind: "static-object-visual-resource",
 					resourceId: "visual-static-table",
 				},
-				rolePage: { kind: "static-base-color", slot: 1 },
+				rolePage: { kind: "object-base-color", slot: 1 },
 				textureUseId: "static-table:prepared-texture:1",
 			},
 		]);

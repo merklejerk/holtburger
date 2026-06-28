@@ -405,7 +405,6 @@ interface DynamicSelectionRendererIdentityDiagnostics {
 }
 
 interface DynamicSelectionRendererDiagnostics {
-	readonly dynamicDrawCalls: number;
 	readonly dynamicInstances: number;
 	readonly dynamicVisualResources: number;
 	readonly dynamicVisualResourceTextureUses: number;
@@ -3526,7 +3525,6 @@ function createRendererDiagnosticsSummary(
 		canvasWidth: snapshot.canvasWidth,
 		debugOverlayPrimitives: snapshot.debugOverlayPrimitives,
 		directEnvCellDrawCalls: snapshot.directEnvCellDrawCalls,
-		dynamicDrawCalls: snapshot.dynamicDrawCalls,
 		dynamicInstances: snapshot.dynamicInstances,
 		dynamicVisualResources: snapshot.dynamicVisualResources,
 		dynamicVisualResourceTextureUses: snapshot.dynamicVisualResourceTextureUses,
@@ -3684,7 +3682,6 @@ function createDynamicSelectionRendererDiagnostics(
 	snapshot: RendererSnapshot,
 ): DynamicSelectionRendererDiagnostics {
 	return {
-		dynamicDrawCalls: snapshot.dynamicDrawCalls,
 		dynamicInstances: snapshot.dynamicInstances,
 		dynamicVisualResources: snapshot.dynamicVisualResources,
 		dynamicVisualResourceTextureUses:

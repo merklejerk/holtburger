@@ -2105,8 +2105,10 @@ Acceptance criteria:
 - Selected-entity diagnostics can explain why the windmill is dynamic and currently renderable.
 - Selected-entity diagnostics can explain why the bird is dynamic, has an active transform effect
   from `SetOmega`, and is currently renderable.
-- Diagnostics expose whether dynamic renderer resources, instances, draw calls, and skipped
-  submissions are nonzero/zero for the expected reasons.
+- Diagnostics expose whether dynamic renderer resources, instances, and skipped submissions are
+  nonzero/zero for the expected reasons. Draw-call counts remain renderer-local telemetry and are
+  not part of the Phase 9 report-facing validation surface because commit timing can reset them
+  before the next completed render pass.
 - Dynamic entities are queryable and selectable through normal browser picking for inspection.
   Documentation must call out that this is browser tooling policy and does not prove retail gameplay
   targetability.
@@ -2193,6 +2195,10 @@ Decisions and course corrections:
 - 2026-06-28: Focused test coverage proves the compact dynamic report does not expose itemized
   records, that indexed count becomes nonzero after playback/placement tick, and that selected
   dynamic diagnostics avoid `partPoses` and `renderParts` payload dumps.
+- 2026-06-28 follow-up: Removed `dynamicDrawCalls` from report-facing diagnostics after browser
+  validation showed it can read as zero when dynamic instances are committed after the previous
+  completed render pass. Renderer-local draw-call telemetry and Phase 8 renderer tests remain, but
+  Phase 9 validation should use resource/instance/skipped-submission counters plus visible rendering.
 
 Verification:
 
@@ -2213,6 +2219,8 @@ Debt and follow-up:
 - Selected dynamic diagnostics report deterministic renderer ids and global renderer dynamic
   counters, not renderer-owned per-entity residency. Add renderer-private lookup only if Phase 9B
   cannot validate a real failure without it.
+- Report-facing diagnostics intentionally omit dynamic draw-call counts until renderer telemetry can
+  distinguish last completed frame draw calls from post-commit reset state.
 
 ### Phase 9B: First-Cut Target Browser Validation
 
@@ -2230,7 +2238,8 @@ Deliverables:
   `SetOmega` in browser mode.
 - Confirm dynamic query/debug inspection can find first-cut dynamic records while default browser
   picking can select them for inspection.
-- Compare dynamic runtime diagnostics, renderer counters, and visible motion against the
+- Compare dynamic runtime diagnostics, renderer resource/instance/skipped-submission counters, and
+  visible motion against the
   requirements-plan evidence.
 - Record evidence, concessions, failures, and any render-quality debt in this plan.
 
@@ -2241,7 +2250,8 @@ Acceptance criteria:
 - The bird target renders through the same dynamic renderer path, visibly animates wing frames, and
   shows continuous object/root motion from active `SetOmega`.
 - Runtime diagnostics identify the expected setup ids, animation ids, current animation frame/time,
-  source/effective residence, renderability, renderer counts, and dynamic query membership.
+  source/effective residence, renderability, renderer resource/instance/skipped-submission counts,
+  and dynamic query membership.
 - The bird target's `SetOmega` hook is supported and does not appear in unsupported-hook diagnostics.
 - First-cut dynamic targets can be selected by browser picking for inspection. Retail/gameplay
   targeting semantics remain a separate caller policy.
@@ -2272,8 +2282,8 @@ Decisions and course corrections:
   already be proven by Phase 8F tests and surfaced in Phase 9A diagnostics.
 - 2026-06-27 dry run: If either first-cut target is invisible, check diagnostics in this order:
   classification seed emitted, dynamic resource readiness, renderability reasons, renderer resource
-  commit, renderer instance commit, draw calls/skipped submissions, then query/debug hit. That order
-  follows ownership boundaries and avoids blaming the renderer for missing upstream state.
+  commit, renderer instance commit, skipped submissions, then query/debug hit. Treat draw-call counts
+  as renderer-local telemetry until their completed-frame semantics are tightened.
 
 Debt and follow-up:
 

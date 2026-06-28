@@ -5,17 +5,16 @@ import type {
 	StaticBakeTextureSamplingPolicy,
 	StaticAuthoredDynamicSeedRecord,
 	StaticBounds,
-	StaticMaterialTableEntry,
 	StaticObjectMaterialSourceFacts,
 	StaticObjectPaletteSourceFacts,
 	StaticObjectPartMaterialSlotFacts,
-	StaticObjectRenderState,
 	StaticObjectSourceAssetFacts,
 	StaticObjectTextureRefFacts,
 	StaticResourceIdentity,
 	StaticScopeOwnerKey,
 	StaticWorkPeerRecordOwner,
 } from "../static/contracts";
+import type { VisualGeometryPayload } from "../visual/visual-geometry";
 import type {
 	AnimationPayloadDto,
 	PlacementTransformDto,
@@ -234,22 +233,9 @@ interface DynamicEntityVisualResourcesReadyState {
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
 }
 
-export interface DynamicEntityRenderPart {
-	readonly bounds: StaticBounds | null;
-	readonly indices: Uint16Array | Uint32Array;
-	readonly indexType: "uint16" | "uint32";
-	readonly materialEntries: readonly StaticMaterialTableEntry[];
-	readonly materialFamily: "flat-color" | "indexed-paletted" | "texture-rgba";
-	readonly materialPass: "opaque" | "alpha-test" | "transparent" | "additive";
-	readonly materialSlotIndices: Float32Array;
+export interface DynamicEntityRenderPart extends VisualGeometryPayload {
 	readonly partIndex: number;
-	readonly positions: Float32Array;
-	readonly renderState: StaticObjectRenderState;
 	readonly sourceAssetId: string;
-	readonly texCoords: Float32Array;
-	readonly textureUseIds: readonly string[];
-	readonly triangleCount: number;
-	readonly vertexCount: number;
 }
 
 interface DynamicEntityVisualResourcesFailedState {

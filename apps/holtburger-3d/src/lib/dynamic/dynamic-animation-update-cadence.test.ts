@@ -109,6 +109,9 @@ describe("dynamic animation update cadence", () => {
 	});
 
 	it("throttles controller animation and placement updates without clearing stale state", () => {
+		const skippedTickSeconds =
+			DYNAMIC_ANIMATION_FAR_UPDATE_INTERVAL_SECONDS / 2;
+		const nextAllowedTickSeconds = DYNAMIC_ANIMATION_FAR_UPDATE_INTERVAL_SECONDS;
 		const store = new DynamicEntityStore();
 		store.upsert(
 			createReadyDynamicRecord({
@@ -134,7 +137,7 @@ describe("dynamic animation update cadence", () => {
 		expect(first?.bounds.indexed).toBe(true);
 
 		expect(
-			controller.tick(0.5, {
+			controller.tick(skippedTickSeconds, {
 				animationCadenceContext: {
 					cameraPosition: [0, 0, 0],
 					renderAnchorLandblockId: 0xda55ffff,
@@ -149,7 +152,7 @@ describe("dynamic animation update cadence", () => {
 		expect(skipped?.bounds).toEqual(first?.bounds);
 
 		expect(
-			controller.tick(1, {
+			controller.tick(nextAllowedTickSeconds, {
 				animationCadenceContext: {
 					cameraPosition: [0, 0, 0],
 					renderAnchorLandblockId: 0xda55ffff,
@@ -159,7 +162,7 @@ describe("dynamic animation update cadence", () => {
 		expect(
 			controller.createSnapshot().records[0]?.animation.playback,
 		).toMatchObject({
-			currentFrameIndex: 30,
+			currentFrameIndex: Math.floor(nextAllowedTickSeconds * 30),
 			status: "playing",
 		});
 	});

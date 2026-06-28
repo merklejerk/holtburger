@@ -2620,7 +2620,7 @@ Decisions and course corrections:
 
 ### Phase 11A: Static/Dynamic Visual Geometry Convergence
 
-Status: pending.
+Status: completed.
 
 Purpose:
 
@@ -2654,18 +2654,35 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add the neutral visual geometry payload type in an app-local renderer/static/dynamic-neutral
+- [x] Add the neutral visual geometry payload type in an app-local renderer/static/dynamic-neutral
       home.
-- [ ] Convert or project static visual resources and dynamic render parts through the neutral payload.
-- [ ] Extract the shared WebGL2 visual geometry upload helper.
-- [ ] Replace static/dynamic visual upload call sites with wrappers around the shared helper.
-- [ ] Add or update focused tests for static visual uploads, dynamic visual uploads, and byte/count
+- [x] Convert or project static visual resources and dynamic render parts through the neutral payload.
+- [x] Extract the shared WebGL2 visual geometry upload helper.
+- [x] Replace static/dynamic visual upload call sites with wrappers around the shared helper.
+- [x] Add or update focused tests for static visual uploads, dynamic visual uploads, and byte/count
       accounting.
-- [ ] Run focused and full verification commands.
+- [x] Run focused and full verification commands.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-28 implementation: Added
+  `apps/holtburger-3d/src/lib/visual/visual-geometry.ts` as the neutral payload home. The public
+  surface is intentionally only `VisualGeometryPayload` plus byte accounting; helper aliases remain
+  module-private so static/dynamic ownership shapes do not grow a second exported contract family.
+- 2026-06-28 implementation: `StaticObjectVisualResource`, `DynamicEntityRenderPart`, and
+  `DynamicRendererVisualPart` now extend the neutral payload while retaining their owner/id/source
+  metadata separately. This preserves static layer/materialization ownership and dynamic
+  entity/resource ownership.
+- 2026-06-28 implementation: `createStaticObjectVisualGeometryResource()` and
+  `createDynamicVisualGeometryResource()` now wrap a shared `createUploadedVisualGeometryResource()`
+  helper for VAO/buffer creation, attribute binding, index type conversion, disposal, and uploaded
+  byte accounting.
+- 2026-06-28 implementation: Avoided a type-level static/visual import cycle by keeping the neutral
+  visual geometry structural aliases local to the visual module rather than importing static
+  contract helper types back into the neutral home.
+- 2026-06-28 implementation: Full TypeScript tests exposed brittle Phase 9B test timing that had
+  hard-coded cadence assumptions. The test was changed to derive skipped/allowed ticks from the
+  runtime cadence constants so manual tuning does not require test magic-number edits.
 
 Debt and follow-up:
 
@@ -2673,6 +2690,8 @@ Debt and follow-up:
   remaining duplication is easier to isolate.
 - Texture-use commit helper convergence remains deferred because static and dynamic differ in batch
   timing and owner delta semantics.
+- Static-object shader/payload helper names remain broader cleanup work for Phase 11B; Phase 11A
+  only extracted the shared upload primitive and did not rename the surrounding material pipeline.
 
 ### Phase 11B: Cleanup And Cutover Hardening
 

@@ -3,6 +3,7 @@ import type {
 	LandblockOutdoorPayloadDto,
 	PlacementTransformDto,
 } from "../../lib/host/contracts";
+import type { VisualGeometryPayload } from "../visual/visual-geometry";
 
 export type StaticDomain =
 	| "outdoor-terrain"
@@ -1460,7 +1461,7 @@ export interface StaticObjectVisualResourceKey {
 	readonly textureUseIds: readonly string[];
 }
 
-export interface StaticObjectVisualResource {
+export interface StaticObjectVisualResource extends VisualGeometryPayload {
 	readonly kind: "static-object-visual-resource";
 	readonly resourceId: StaticObjectVisualResourceId;
 	readonly key: StaticObjectVisualResourceKey;
@@ -1470,19 +1471,6 @@ export interface StaticObjectVisualResource {
 	 * Per-instance placement and scale are applied by the render instance.
 	 */
 	readonly coordinateSpace: "static-object-source-local";
-	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
-	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
-	readonly renderState: StaticObjectRenderState;
-	readonly materialEntries: readonly StaticMaterialTableEntry[];
-	readonly positions: Float32Array;
-	readonly texCoords: Float32Array;
-	readonly materialSlotIndices: Float32Array;
-	readonly indices: Uint16Array | Uint32Array;
-	readonly indexType: StaticObjectGeometryStaticDrawUnit["indexType"];
-	readonly vertexCount: number;
-	readonly triangleCount: number;
-	readonly bounds: StaticBounds | null;
-	readonly textureUseIds: readonly string[];
 }
 
 export interface StaticObjectRenderInstance {

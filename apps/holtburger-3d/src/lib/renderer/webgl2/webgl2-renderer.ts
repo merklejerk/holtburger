@@ -58,6 +58,10 @@ import {
 	type TextureFilteringMode,
 	type TextureWrapMode,
 } from "../../textures/sampling-policy";
+import {
+	estimateVisualGeometryPayloadBufferBytes,
+	type VisualGeometryPayload,
+} from "../../visual/visual-geometry";
 import { createOutdoorLandblockRootTranslation } from "../../static/placement";
 import {
 	Webgl2StateCache,
@@ -3673,6 +3677,19 @@ interface DynamicVisualGeometryResource {
 	dispose(): void;
 }
 
+interface UploadedVisualGeometryResource {
+	readonly vertexArray: WebGLVertexArrayObject;
+	readonly positionBuffer: WebGLBuffer;
+	readonly texCoordBuffer: WebGLBuffer;
+	readonly materialSlotBuffer: WebGLBuffer;
+	readonly indexBuffer: WebGLBuffer;
+	readonly uploadedBufferBytes: number;
+	readonly indexCount: number;
+	readonly indexType: GLenum;
+	readonly triangleCount: number;
+	dispose(): void;
+}
+
 interface StaticObjectInstanceDrawResource {
 	readonly instance: StaticObjectRenderInstance;
 	readonly resource: StaticObjectVisualGeometryResource;
@@ -4663,87 +4680,33 @@ function createStaticObjectVisualGeometryResource(
 	gl: WebGL2RenderingContext,
 	resource: StaticObjectVisualResource,
 ): StaticObjectVisualGeometryResource {
-	const vertexArray = gl.createVertexArray();
-	const positionBuffer = gl.createBuffer();
-	const texCoordBuffer = gl.createBuffer();
-	const materialSlotBuffer = gl.createBuffer();
-	const indexBuffer = gl.createBuffer();
-	if (
-		!vertexArray ||
-		!positionBuffer ||
-		!texCoordBuffer ||
-		!materialSlotBuffer ||
-		!indexBuffer
-	) {
-		if (vertexArray) {
-			gl.deleteVertexArray(vertexArray);
-		}
-		if (positionBuffer) {
-			gl.deleteBuffer(positionBuffer);
-		}
-		if (texCoordBuffer) {
-			gl.deleteBuffer(texCoordBuffer);
-		}
-		if (materialSlotBuffer) {
-			gl.deleteBuffer(materialSlotBuffer);
-		}
-		if (indexBuffer) {
-			gl.deleteBuffer(indexBuffer);
-		}
-		throw new Error(
-			`Failed to create GPU buffers for static object visual resource ${resource.resourceId}.`,
-		);
-	}
-
-	gl.bindVertexArray(vertexArray);
-	gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-	gl.bufferData(gl.ARRAY_BUFFER, resource.positions, gl.STATIC_DRAW);
-	gl.enableVertexAttribArray(0);
-	gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
-
-	gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
-	gl.bufferData(gl.ARRAY_BUFFER, resource.texCoords, gl.STATIC_DRAW);
-	gl.enableVertexAttribArray(1);
-	gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
-
-	gl.bindBuffer(gl.ARRAY_BUFFER, materialSlotBuffer);
-	gl.bufferData(gl.ARRAY_BUFFER, resource.materialSlotIndices, gl.STATIC_DRAW);
-	gl.enableVertexAttribArray(2);
-	gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
-
-	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, resource.indices, gl.STATIC_DRAW);
-	gl.bindVertexArray(null);
-	gl.bindBuffer(gl.ARRAY_BUFFER, null);
-	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+	const uploadedGeometry = createUploadedVisualGeometryResource({
+		gl,
+		label: `static object visual resource ${resource.resourceId}`,
+		payload: resource,
+	});
 
 	return {
 		domain: "outdoor-detail",
 		drawUnitId: resource.resourceId,
-		indexBuffer,
-		indexCount: resource.indices.length,
-		indexType:
-			resource.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
+		indexBuffer: uploadedGeometry.indexBuffer,
+		indexCount: uploadedGeometry.indexCount,
+		indexType: uploadedGeometry.indexType,
 		landblockId: null,
 		materialEntries: resource.materialEntries,
 		materialFamily: resource.materialFamily,
 		materialPass: resource.materialPass,
-		materialSlotBuffer,
-		positionBuffer,
+		materialSlotBuffer: uploadedGeometry.materialSlotBuffer,
+		positionBuffer: uploadedGeometry.positionBuffer,
 		preparedDrawPayloadState: createStaticObjectPreparedDrawPayloadState(),
 		renderState: resource.renderState,
 		resourceId: resource.resourceId,
-		texCoordBuffer,
+		texCoordBuffer: uploadedGeometry.texCoordBuffer,
 		triangleCount: resource.triangleCount,
-		uploadedBufferBytes:
-			estimateStaticObjectVisualResourceUploadedBufferBytes(resource),
-		vertexArray,
+		uploadedBufferBytes: uploadedGeometry.uploadedBufferBytes,
+		vertexArray: uploadedGeometry.vertexArray,
 		dispose() {
-			gl.deleteBuffer(positionBuffer);
-			gl.deleteBuffer(texCoordBuffer);
-			gl.deleteBuffer(materialSlotBuffer);
-			gl.deleteBuffer(indexBuffer);
-			gl.deleteVertexArray(vertexArray);
+			uploadedGeometry.dispose();
 		},
 	};
 }
@@ -4753,6 +4716,43 @@ function createDynamicVisualGeometryResource(
 	resource: DynamicRendererVisualResource,
 	part: DynamicRendererVisualPart,
 ): DynamicVisualGeometryResource {
+	const uploadedGeometry = createUploadedVisualGeometryResource({
+		gl,
+		label: `dynamic visual resource ${resource.resourceId} part ${part.partIndex}`,
+		payload: part,
+	});
+
+	return {
+		drawUnitId: `${resource.resourceId}:part:${part.partIndex}`,
+		dynamicResourceId: resource.resourceId,
+		indexBuffer: uploadedGeometry.indexBuffer,
+		indexCount: uploadedGeometry.indexCount,
+		indexType: uploadedGeometry.indexType,
+		landblockId: null,
+		materialEntries: part.materialEntries,
+		materialFamily: part.materialFamily,
+		materialPass: part.materialPass,
+		materialSlotBuffer: uploadedGeometry.materialSlotBuffer,
+		partIndex: part.partIndex,
+		positionBuffer: uploadedGeometry.positionBuffer,
+		preparedDrawPayloadState: createStaticObjectPreparedDrawPayloadState(),
+		renderState: part.renderState,
+		texCoordBuffer: uploadedGeometry.texCoordBuffer,
+		triangleCount: part.triangleCount,
+		uploadedBufferBytes: uploadedGeometry.uploadedBufferBytes,
+		vertexArray: uploadedGeometry.vertexArray,
+		dispose() {
+			uploadedGeometry.dispose();
+		},
+	};
+}
+
+function createUploadedVisualGeometryResource(options: {
+	readonly gl: WebGL2RenderingContext;
+	readonly label: string;
+	readonly payload: VisualGeometryPayload;
+}): UploadedVisualGeometryResource {
+	const { gl, label, payload } = options;
 	const vertexArray = gl.createVertexArray();
 	const positionBuffer = gl.createBuffer();
 	const texCoordBuffer = gl.createBuffer();
@@ -4780,56 +4780,41 @@ function createDynamicVisualGeometryResource(
 		if (indexBuffer) {
 			gl.deleteBuffer(indexBuffer);
 		}
-		throw new Error(
-			`Failed to create GPU buffers for dynamic visual resource ${resource.resourceId} part ${part.partIndex}.`,
-		);
+		throw new Error(`Failed to create GPU buffers for ${label}.`);
 	}
 
 	gl.bindVertexArray(vertexArray);
 	gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-	gl.bufferData(gl.ARRAY_BUFFER, part.positions, gl.STATIC_DRAW);
+	gl.bufferData(gl.ARRAY_BUFFER, payload.positions, gl.STATIC_DRAW);
 	gl.enableVertexAttribArray(0);
 	gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
 
 	gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
-	gl.bufferData(gl.ARRAY_BUFFER, part.texCoords, gl.STATIC_DRAW);
+	gl.bufferData(gl.ARRAY_BUFFER, payload.texCoords, gl.STATIC_DRAW);
 	gl.enableVertexAttribArray(1);
 	gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
 
 	gl.bindBuffer(gl.ARRAY_BUFFER, materialSlotBuffer);
-	gl.bufferData(gl.ARRAY_BUFFER, part.materialSlotIndices, gl.STATIC_DRAW);
+	gl.bufferData(gl.ARRAY_BUFFER, payload.materialSlotIndices, gl.STATIC_DRAW);
 	gl.enableVertexAttribArray(2);
 	gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
 
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
-	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, part.indices, gl.STATIC_DRAW);
+	gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, payload.indices, gl.STATIC_DRAW);
 	gl.bindVertexArray(null);
 	gl.bindBuffer(gl.ARRAY_BUFFER, null);
 	gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
 
 	return {
-		drawUnitId: `${resource.resourceId}:part:${part.partIndex}`,
-		dynamicResourceId: resource.resourceId,
 		indexBuffer,
-		indexCount: part.indices.length,
+		indexCount: payload.indices.length,
 		indexType:
-			part.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
-		landblockId: null,
-		materialEntries: part.materialEntries,
-		materialFamily: part.materialFamily,
-		materialPass: part.materialPass,
+			payload.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
 		materialSlotBuffer,
-		partIndex: part.partIndex,
 		positionBuffer,
-		preparedDrawPayloadState: createStaticObjectPreparedDrawPayloadState(),
-		renderState: part.renderState,
 		texCoordBuffer,
-		triangleCount: part.triangleCount,
-		uploadedBufferBytes:
-			part.positions.byteLength +
-			part.texCoords.byteLength +
-			part.materialSlotIndices.byteLength +
-			part.indices.byteLength,
+		triangleCount: payload.triangleCount,
+		uploadedBufferBytes: estimateVisualGeometryPayloadBufferBytes(payload),
 		vertexArray,
 		dispose() {
 			gl.deleteBuffer(positionBuffer);
@@ -5159,12 +5144,7 @@ function nowMs(): number {
 function estimateStaticObjectVisualResourceUploadedBufferBytes(
 	resource: StaticObjectVisualResource,
 ): number {
-	return (
-		resource.positions.byteLength +
-		resource.texCoords.byteLength +
-		resource.materialSlotIndices.byteLength +
-		resource.indices.byteLength
-	);
+	return estimateVisualGeometryPayloadBufferBytes(resource);
 }
 
 function createStencilState(

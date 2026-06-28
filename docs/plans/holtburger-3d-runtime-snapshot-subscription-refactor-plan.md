@@ -17,14 +17,14 @@ created and delivered to Svelte snapshot subscribers at render-frame cadence.
 The target architecture is:
 
 - Push subscriptions are for low-latency streams where near-real-time delivery matters.
-- Full runtime inspection snapshots are pull-based and can be polled at a slower cadence by browser
+- Full runtime snapshots are pull-based and can be polled at a slower cadence by browser
   diagnostics.
 - Per-frame rendering, animation, placement, bounds, and renderer submissions continue to run every
   frame without forcing every diagnostic panel to refresh.
 
 ## Goal
 
-Split real-time runtime streams from slower inspection snapshots so animated dynamics no longer
+Split real-time runtime streams from slower full runtime snapshots so animated dynamics no longer
 force full browser diagnostics snapshot creation every frame.
 
 ## Scope
@@ -33,10 +33,9 @@ In scope:
 
 - Refactor `ClientRuntime.subscribe` usage so full `RuntimeSnapshot` delivery is no longer the
   render-loop invalidation path.
-- Add an explicit public snapshot read API, or rename the existing private snapshot creator into a
-  clearly inspection-oriented API.
-- Move browser diagnostics/state panels to slow polling, with explicit refreshes for structural UI
-  actions where needed.
+- Add an explicit public full runtime snapshot read API.
+- Move browser diagnostics/state panels to `500ms` polling, with explicit refreshes after user/config
+  actions where immediate UI feedback matters.
 - Keep `subscribeFrameTelemetry` as the real-time frame telemetry stream.
 - Keep `subscribeEvents` for discrete runtime events.
 - Add or adjust tests so dynamic animation ticks update renderer state without emitting full runtime
@@ -91,30 +90,30 @@ Profiler evidence from browser devtools showed frame work passing through:
 - Do not solve this by only adding a throttle to `#emit`; throttling can be a browser polling
   policy, but the runtime API should expose the correct ownership model.
 - Keep real-time DTOs narrow and cheap.
-- Keep inspection snapshots coherent, but make callers request them deliberately.
+- Keep full runtime snapshots coherent, but make callers request them deliberately.
 - Prefer clean cutover over backwards-compatible duplicate channels.
 
-## Phase 1: Introduce Explicit Inspection Snapshot API
+## Phase 1: Introduce Explicit Runtime Snapshot API
 
 Status: pending.
 
 Purpose:
 
-- Make full `RuntimeSnapshot` creation a deliberate inspection operation instead of an implicit
-  push side effect.
+- Make full `RuntimeSnapshot` creation a deliberate pull operation instead of an implicit push side
+  effect.
 
 Deliverables:
 
-- Add a public `createInspectionSnapshot()` or `createSnapshot()` method to `ClientRuntime`.
-- Rename private `#createSnapshot()` if needed so call sites read as inspection/diagnostics work.
-- Keep `createDiagnosticsReport()` using the inspection snapshot path.
-- Update the initial runtime UI setup to request an initial snapshot through the explicit API.
+- Add a public `createSnapshot()` method to `ClientRuntime`.
+- Rename private `#createSnapshot()` if needed so call sites read as deliberate full snapshot work.
+- Keep `createDiagnosticsReport()` using the explicit snapshot path.
 
 Acceptance criteria:
 
 - Full snapshot creation has a public, intentionally named pull API.
 - `createDiagnosticsReport()` still returns the same report shape.
-- No behavior changes yet to frame ticking or subscriptions unless the type boundary requires it.
+- No behavior changes yet to frame ticking, browser polling, or subscriptions unless the type
+  boundary requires it.
 
 Task checklist:
 
@@ -126,7 +125,9 @@ Task checklist:
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-27 dry run: Keep Phase 1 API-only. Moving browser startup to explicit snapshot reads
+  belongs with the polling cutover in Phase 2; mixing it into Phase 1 would create a half-migrated
+  production path.
 
 ## Phase 2: Replace Broad Snapshot Subscription With Pull/Poll Consumption
 
@@ -140,11 +141,12 @@ Purpose:
 Deliverables:
 
 - Replace `BrowserDisplay.svelte` full snapshot subscription with a polling loop.
-- Use an explicit browser-local polling interval constant, initially in the `250ms` to `500ms`
-  range unless profiling justifies another value.
-- Trigger an immediate poll after structural browser actions that should refresh UI state promptly,
-  such as debug overlay toggles, render policy changes, scene-interest changes, and selection
-  changes.
+- Use an explicit browser-local `500ms` polling interval constant.
+- Pull an initial full runtime snapshot after runtime creation.
+- Trigger an immediate full-snapshot refresh after user/config actions that should refresh UI state
+  promptly, such as debug overlay toggles, render policy changes, scene-interest changes, and
+  selection changes. This means "do not wait up to 500ms for user-driven UI feedback"; it does not
+  mean refresh after animation pose changes.
 - Keep `subscribeFrameTelemetry` for FPS/frame-handler metrics.
 - Keep `subscribeEvents` for discrete runtime events.
 
@@ -159,15 +161,18 @@ Acceptance criteria:
 
 Task checklist:
 
+- [ ] Add `RUNTIME_SNAPSHOT_POLL_INTERVAL_MS = 500` in the browser runtime owner.
 - [ ] Add browser polling setup and teardown next to the existing runtime frame loop.
-- [ ] Pull an initial inspection snapshot after runtime creation.
-- [ ] Pull after explicit structural actions where waiting for the interval would feel stale.
+- [ ] Pull an initial full runtime snapshot after runtime creation.
+- [ ] Pull after explicit user/config actions where waiting for the interval would feel stale.
 - [ ] Remove the broad runtime snapshot subscription from `BrowserDisplay.svelte`.
 - [ ] Update BrowserDisplay tests or runtime integration tests that assumed pushed full snapshots.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-27 dry run: BrowserDisplay is the only production full-snapshot subscriber. The production
+  cutover can be small: replace that subscription with `refreshRuntimeSnapshot()`, call it once after
+  runtime setup, poll it every `500ms`, and call it after browser-owned user/config handlers.
 
 ## Phase 3: Cut Over Runtime Subscription Semantics
 
@@ -180,9 +185,13 @@ Purpose:
 
 Deliverables:
 
-- Delete `subscribe(listener: RuntimeSnapshotListener)` if no production caller remains.
-- If a structural push channel is still required, replace it with a narrow event or revision
-  subscription that does not carry a full snapshot.
+- Delete `subscribe(listener: RuntimeSnapshotListener)`.
+- Delete `RuntimeSnapshotListener`, `#listeners`, and `#emit()` if no other full-snapshot push path
+  remains.
+- Remove full-snapshot emit calls from static coordinator, static source payload, dynamic resource,
+  user/config, camera-residency, and dynamic playback paths. Those paths should still update runtime
+  state; callers observe them through the next explicit `createSnapshot()` call or through existing
+  narrow event/telemetry streams.
 - Rename listener types to reflect their actual purpose.
 - Update tests away from `runtime.subscribe` unless they are specifically testing the new structural
   event channel.
@@ -194,18 +203,31 @@ Acceptance criteria:
 - Tests use explicit snapshot reads after actions rather than preserving the old subscription model
   for convenience.
 - Type names no longer imply that full snapshots are a normal push stream.
+- Static coordinator changes, static source payload changes, dynamic resource readiness, and
+  user/config changes remain visible through the next explicit `createSnapshot()` call.
 
 Task checklist:
 
-- [ ] Remove or narrow `RuntimeSnapshotListener`.
-- [ ] Remove or narrow `ClientRuntime.subscribe`.
+- [ ] Remove `RuntimeSnapshotListener`.
+- [ ] Remove `ClientRuntime.subscribe`.
+- [ ] Remove `#listeners` and `#emit()` if no full-snapshot push path remains.
+- [ ] Preserve existing `subscribeFrameTelemetry` and `subscribeEvents` behavior.
 - [ ] Update runtime tests to call the explicit snapshot method after state-changing operations.
-- [ ] Add a regression test proving dynamic playback ticks do not emit full runtime snapshots.
+- [ ] Add a regression test proving dynamic playback ticks update renderer submissions without
+      invoking full snapshot construction/listeners.
+- [ ] Add or update coverage proving static coordinator and dynamic resource changes are observable
+      through explicit `createSnapshot()` reads.
 - [ ] Run focused runtime and browser tests.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-27 dry run: This is the blast-radius phase. Production has one broad full-snapshot
+  subscriber, but `client-runtime.test.ts` uses `runtime.subscribe(...)` heavily as a convenient
+  state getter. Most of those tests should become action/flush/`runtime.createSnapshot()` assertions
+  rather than preserving a bad push API for test convenience.
+- 2026-06-27 dry run: Do not leave a vestigial full-snapshot bus. If production polling is in place
+  and tests are migrated, delete `#listeners`, `RuntimeSnapshotListener`, `subscribe()`, and
+  `#emit()` instead of narrowing them without a real caller.
 
 ## Phase 4: Resteer Snapshot Shape And Cadence
 
@@ -219,10 +241,10 @@ Purpose:
 Deliverables:
 
 - Review browser consumers of `RuntimeSnapshot` after the subscription cutover.
-- Decide whether to keep one inspection snapshot or split it into narrower pull APIs, such as
+- Decide whether to keep one full runtime snapshot or split it into narrower pull APIs, such as
   `createRuntimeOverviewSnapshot`, `createDiagnosticsSnapshot`, or `createSelectionSnapshot`.
 - Record any fields that are expensive enough to deserve lazy or panel-specific loading.
-- Decide whether static scene query counts should remain in the default inspection snapshot or move
+- Decide whether static scene query counts should remain in the default full runtime snapshot or move
   behind a diagnostics-only pull.
 
 Acceptance criteria:
@@ -251,8 +273,8 @@ Purpose:
 Deliverables:
 
 - Remove dead listener fields, types, helpers, and tests.
-- Rename variables in browser UI from generic `snapshot` where a narrower diagnostic/inspection name
-  is clearer.
+- Rename variables in browser UI from generic `snapshot` only if a narrower name is clearer after
+  the cutover.
 - Update any plan docs that still describe runtime snapshots as a real-time subscription mechanism.
 - Run full app verification.
 
@@ -281,8 +303,8 @@ Decisions and course corrections:
 ## Risks And Mitigations
 
 - Risk: Browser UI panels become stale after actions that previously caused an immediate push.
-  Mitigation: centralize browser-side `refreshInspectionSnapshot()` and call it immediately after
-  structural user actions, while retaining slower polling for passive diagnostics.
+  Mitigation: centralize browser-side `refreshRuntimeSnapshot()` and call it immediately after
+  user/config actions, while retaining `500ms` polling for passive diagnostics.
 
 - Risk: Tests keep the old architecture alive because subscription assertions are convenient.
   Mitigation: update tests to call the explicit snapshot read API after actions; keep push tests only
@@ -290,11 +312,12 @@ Decisions and course corrections:
 
 - Risk: Selection/debug overlays require per-frame dynamic bounds.
   Mitigation: keep overlay and renderer update paths inside `tickFrame`; only stop full browser
-  inspection snapshot emission from riding along.
+  runtime snapshot emission from riding along.
 
-- Risk: Polling still creates too much snapshot work when diagnostics panels are hidden.
-  Mitigation: after the first cutover, consider tying polling cadence to panel visibility or split
-  expensive diagnostics into panel-specific pull APIs.
+- Risk: Polling still creates too much snapshot work.
+  Mitigation: keep the first cut simple with unconditional `500ms` polling while `BrowserDisplay` is
+  mounted; after the cutover, split expensive diagnostics into panel-specific pull APIs if profiling
+  still shows meaningful cost.
 
 - Risk: A narrow structural event channel recreates the same overloaded bus with a different name.
   Mitigation: structural events should carry revisions or small reason payloads, not full
@@ -304,7 +327,7 @@ Decisions and course corrections:
 
 - `requestAnimationFrame` driven `tickFrame` no longer creates full `RuntimeSnapshot` objects just
   because dynamic animation playback changes.
-- Full runtime inspection snapshots are requested explicitly by browser diagnostics or tests.
+- Full runtime snapshots are requested explicitly by browser diagnostics or tests.
 - Real-time subscriptions remain narrow and cheap.
 - Browser diagnostics still refresh at a documented slower cadence.
 - Dynamic animation, dynamic renderer submissions, portal overlap updates, and frame telemetry still
@@ -313,9 +336,13 @@ Decisions and course corrections:
 
 ## Open Questions
 
-- What initial browser diagnostics polling cadence should we use: `250ms`, `500ms`, or another value
-  after quick profiling?
-- Should polling run unconditionally while `BrowserDisplay` is mounted, or only while diagnostics
-  panels are visible?
-- Should the first implementation keep one inspection snapshot or immediately split static query and
-  asset diagnostics into panel-specific pull APIs?
+- Should the first implementation keep one full runtime snapshot or immediately split static query
+  and asset diagnostics into panel-specific pull APIs?
+
+## Resolved Decisions
+
+- Browser full runtime snapshot polling cadence is `500ms`.
+- Polling runs unconditionally while `BrowserDisplay` is mounted; no panel-visibility gating in the
+  first cut.
+- "Full runtime snapshot" means the existing `RuntimeSnapshot` DTO consumed by browser runtime
+  panels and diagnostics. It is not the picker snapshot or a picking-specific data structure.

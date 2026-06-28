@@ -413,7 +413,8 @@ export function createDynamicDiagnosticsReport(
 		kind: "dynamic",
 		summary: {
 			active: snapshot.activeEntityCount,
-			indexed: snapshot.records.filter((record) => record.bounds.indexed).length,
+			indexed: snapshot.records.filter((record) => record.bounds.indexed)
+				.length,
 			nonRenderable: snapshot.nonRenderableEntityCount,
 			renderable:
 				snapshot.activeEntityCount - snapshot.nonRenderableEntityCount,

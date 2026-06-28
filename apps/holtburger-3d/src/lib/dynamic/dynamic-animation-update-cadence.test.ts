@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { AnimationPayloadDto, PlacementTransformDto } from "../host/contracts";
+import type {
+	AnimationPayloadDto,
+	PlacementTransformDto,
+} from "../host/contracts";
 import type {
 	StaticObjectSourceAssetFacts,
 	StaticObjectSourceIdentity,
@@ -28,11 +31,11 @@ describe("dynamic animation update cadence", () => {
 				DYNAMIC_ANIMATION_NEAR_UPDATE_DISTANCE + 0.001,
 			),
 		).toBe(DYNAMIC_ANIMATION_MID_UPDATE_INTERVAL_SECONDS);
-		expect(intervalSecondsForDynamicAnimationDistance(
-			DYNAMIC_ANIMATION_MID_UPDATE_DISTANCE,
-		)).toBe(
-			DYNAMIC_ANIMATION_MID_UPDATE_INTERVAL_SECONDS,
-		);
+		expect(
+			intervalSecondsForDynamicAnimationDistance(
+				DYNAMIC_ANIMATION_MID_UPDATE_DISTANCE,
+			),
+		).toBe(DYNAMIC_ANIMATION_MID_UPDATE_INTERVAL_SECONDS);
 		expect(
 			intervalSecondsForDynamicAnimationDistance(
 				DYNAMIC_ANIMATION_MID_UPDATE_DISTANCE + 0.001,
@@ -153,7 +156,9 @@ describe("dynamic animation update cadence", () => {
 				},
 			}),
 		).toBe(true);
-		expect(controller.createSnapshot().records[0]?.animation.playback).toMatchObject({
+		expect(
+			controller.createSnapshot().records[0]?.animation.playback,
+		).toMatchObject({
 			currentFrameIndex: 30,
 			status: "playing",
 		});

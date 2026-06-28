@@ -360,7 +360,11 @@ type DynamicSelectionTransformEffectDiagnostics = {
 	readonly kind: "omega";
 	readonly lastAppliedFrameIndex: number;
 	readonly lastAppliedLoopIteration: number;
-	readonly omega: { readonly x: number; readonly y: number; readonly z: number };
+	readonly omega: {
+		readonly x: number;
+		readonly y: number;
+		readonly z: number;
+	};
 };
 
 interface DynamicSelectionBoundsDiagnostics {
@@ -378,7 +382,7 @@ interface DynamicSelectionResourceDiagnostics {
 }
 
 type DynamicSelectionSetupAnimationDiagnostics =
-	| DynamicEntitySummaryDto["resources"]["setupAnimation"];
+	DynamicEntitySummaryDto["resources"]["setupAnimation"];
 
 type DynamicSelectionVisualDiagnostics =
 	| {
@@ -986,7 +990,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 		options: { readonly pickDistance?: number | null } = {},
 	): DynamicSelectionDiagnosticsReport {
 		this.#assertActive();
-		const entity = this.#dynamicEntityController.queryDynamicEntitySummary(entityId);
+		const entity =
+			this.#dynamicEntityController.queryDynamicEntitySummary(entityId);
 		const debugBounds =
 			this.#querySceneSelectionDebugBounds({
 				entityId,
@@ -997,7 +1002,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		return {
 			debugBounds,
 			entity:
-				entity === null ? null : createDynamicSelectionEntityDiagnostics(entity),
+				entity === null
+					? null
+					: createDynamicSelectionEntityDiagnostics(entity),
 			kind: "dynamic-selection-diagnostics-report",
 			renderer: createDynamicSelectionRendererDiagnostics(rendererSnapshot),
 			runtime: {
@@ -1091,8 +1098,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 			};
 			this.#renderer.updateFrameState(this.#lastFrameState);
 		}
-		const dynamicPlaybackChanged =
-			this.#dynamicEntityController.tick(timeSeconds, {
+		const dynamicPlaybackChanged = this.#dynamicEntityController.tick(
+			timeSeconds,
+			{
 				animationCadenceContext:
 					this.#lastFrameState === null
 						? null
@@ -1100,7 +1108,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 								cameraPosition: this.#lastFrameState.camera.position,
 								renderAnchorLandblockId: this.#renderAnchorLandblockId,
 							},
-			});
+			},
+		);
 		if (dynamicPlaybackChanged) {
 			this.#commitDynamicRendererInstances(timeSeconds);
 		}
@@ -3694,8 +3703,7 @@ function createDynamicSelectionRendererDiagnostics(
 	return {
 		dynamicInstances: snapshot.dynamicInstances,
 		dynamicVisualResources: snapshot.dynamicVisualResources,
-		dynamicVisualResourceTextureUses:
-			snapshot.dynamicVisualResourceTextureUses,
+		dynamicVisualResourceTextureUses: snapshot.dynamicVisualResourceTextureUses,
 		skippedDynamicSubmissions: snapshot.skippedDynamicSubmissions,
 	};
 }

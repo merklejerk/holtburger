@@ -11,10 +11,7 @@ import type {
 	Vec3,
 } from "./contracts";
 
-type ScenePickMode =
-	| "default-selection"
-	| "debug-inspection"
-	| "diagnostics";
+type ScenePickMode = "default-selection" | "debug-inspection" | "diagnostics";
 
 export interface ScenePickRequest {
 	readonly context: StaticScenePickContext;
@@ -43,12 +40,14 @@ interface DynamicScenePickHit {
 	readonly kind: "scene-pick-hit";
 	readonly precision: DynamicEntityBoundsPrecision;
 	readonly source: "dynamic";
-	readonly sourceResidence: {
-		readonly kind: "outdoor-landblock";
-		readonly landblockId: number;
-	} | {
-		readonly envCellId: number;
-		readonly kind: "env-cell";
-		readonly landblockId: number;
-	};
+	readonly sourceResidence:
+		| {
+				readonly kind: "outdoor-landblock";
+				readonly landblockId: number;
+		  }
+		| {
+				readonly envCellId: number;
+				readonly kind: "env-cell";
+				readonly landblockId: number;
+		  };
 }

@@ -110,9 +110,7 @@ export class DynamicEntityController {
 	tick(timeSeconds: number, options: DynamicEntityTickOptions = {}): boolean {
 		let changed = false;
 		for (const record of this.#store.records()) {
-			if (
-				!this.#shouldTickRecordAnimation(record, timeSeconds, options)
-			) {
+			if (!this.#shouldTickRecordAnimation(record, timeSeconds, options)) {
 				continue;
 			}
 			const update = this.#animationPlayer.update(record, timeSeconds);

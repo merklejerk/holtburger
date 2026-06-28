@@ -4,7 +4,10 @@ import type { EnvCellDynamicSpatialIndexRecord } from "../../dynamic/dynamic-pla
 import type { OutdoorDynamicSpatialIndexRecord } from "../../dynamic/outdoor-dynamic-spatial-index";
 import type { StaticBounds } from "../../static/contracts";
 import type { StaticScenePickHit } from "./contracts";
-import { pickMergedSceneRay, type MergedSceneQuerySources } from "./merged-scene-query";
+import {
+	pickMergedSceneRay,
+	type MergedSceneQuerySources,
+} from "./merged-scene-query";
 
 describe("merged scene query", () => {
 	it("orders dynamic AABB hits with static hits by nearest distance", () => {
@@ -231,14 +234,18 @@ function createSources(options: {
 					query.envCellIds.includes(record.envCellId),
 			),
 		queryOutdoorDynamicBounds: (query) =>
-			dynamicRecords.filter((record) => record.landblockId === query.landblockId),
+			dynamicRecords.filter(
+				(record) => record.landblockId === query.landblockId,
+			),
 		queryOutdoorDynamicLandblockIds:
 			options.dynamicLandblockQuery ??
 			(() => [...new Set(dynamicRecords.map((record) => record.landblockId))]),
 	};
 }
 
-function createStaticHit(options: { readonly distance: number }): StaticScenePickHit {
+function createStaticHit(options: {
+	readonly distance: number;
+}): StaticScenePickHit {
 	return {
 		bounds: createBounds({
 			max: { x: 1, y: 1, z: -9 },

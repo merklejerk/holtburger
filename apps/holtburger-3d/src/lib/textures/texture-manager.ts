@@ -1196,7 +1196,9 @@ function createStaticBatchSourcePlacementKey(
 	].join(":");
 }
 
-function createTextureUseSamplingKey(textureUse: VisualTextureUseCommit): string {
+function createTextureUseSamplingKey(
+	textureUse: VisualTextureUseCommit,
+): string {
 	const samplingPolicy = textureUse.samplingPolicy;
 	if (!samplingPolicy) {
 		return "sampling:default";

@@ -18,7 +18,7 @@ import type {
 	TexturePackingJob,
 	TexturePackingResult,
 } from "./packing/protocol";
-import { MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW } from "../renderer/types";
+import { MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW } from "../renderer/types";
 import {
 	TextureManager,
 	type DynamicTextureUseCommit,
@@ -646,12 +646,12 @@ describe("browser texture manager", () => {
 		expect(update?.textureBindings).toEqual([
 			expect.objectContaining({
 				owner: { drawUnitId: "static-a", kind: "draw-unit" },
-				rolePage: { kind: "static-base-color", slot: 0 },
+				rolePage: { kind: "object-base-color", slot: 0 },
 				textureUseId: "static-a:base:0",
 			}),
 			expect.objectContaining({
 				owner: { drawUnitId: "static-a", kind: "draw-unit" },
-				rolePage: { kind: "static-base-color", slot: 1 },
+				rolePage: { kind: "object-base-color", slot: 1 },
 				textureUseId: "static-a:base:1",
 			}),
 		]);
@@ -725,7 +725,7 @@ describe("browser texture manager", () => {
 					drawUnitId: "structured-interior-a",
 					kind: "draw-unit",
 				},
-				rolePage: { kind: "static-base-color", slot: 0 },
+				rolePage: { kind: "object-base-color", slot: 0 },
 				textureUseId: "structured-interior-a:base:0",
 			}),
 			expect.objectContaining({
@@ -733,7 +733,7 @@ describe("browser texture manager", () => {
 					drawUnitId: "structured-interior-a",
 					kind: "draw-unit",
 				},
-				rolePage: { kind: "static-base-color", slot: 1 },
+				rolePage: { kind: "object-base-color", slot: 1 },
 				textureUseId: "structured-interior-a:base:1",
 			}),
 		]);
@@ -762,7 +762,7 @@ describe("browser texture manager", () => {
 		try {
 			const assetService = new FixtureAssetService();
 			const textureUses = Array.from(
-				{ length: MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW + 1 },
+				{ length: MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW + 1 },
 				(_, index) =>
 					createTextureUseCommit({
 						domain: "outdoor-buildings",
@@ -801,7 +801,7 @@ describe("browser texture manager", () => {
 			});
 
 			expect(update?.textureBindings).toHaveLength(
-				MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW,
+				MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW,
 			);
 			expect(
 				update?.textureUsePlacements.map((placement) => placement.textureUseId),
@@ -809,10 +809,10 @@ describe("browser texture manager", () => {
 			expect(
 				update?.textureBindings.map((binding) => binding.rolePage),
 			).toEqual([
-				{ kind: "static-base-color", slot: 0 },
-				{ kind: "static-base-color", slot: 1 },
-				{ kind: "static-base-color", slot: 2 },
-				{ kind: "static-base-color", slot: 3 },
+				{ kind: "object-base-color", slot: 0 },
+				{ kind: "object-base-color", slot: 1 },
+				{ kind: "object-base-color", slot: 2 },
+				{ kind: "object-base-color", slot: 3 },
 			]);
 		} finally {
 			warnSpy.mockRestore();
@@ -1445,12 +1445,12 @@ describe("browser texture manager", () => {
 		expect(update?.textureBindings).toMatchObject([
 			{
 				owner: { drawUnitId: "static-a", kind: "draw-unit" },
-				rolePage: { kind: "static-index", slot: 0 },
+				rolePage: { kind: "object-index", slot: 0 },
 				textureUseId: "static-a:index",
 			},
 			{
 				owner: { drawUnitId: "static-a", kind: "draw-unit" },
-				rolePage: { kind: "static-palette", slot: 0 },
+				rolePage: { kind: "object-palette", slot: 0 },
 				textureUseId: "static-a:palette",
 			},
 		]);

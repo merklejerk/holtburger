@@ -2,7 +2,7 @@ import type {
 	PortalFrameWorkPlan,
 	RenderPassPlan,
 	RendererSnapshot,
-	StaticObjectTextureRolePageKind,
+	ObjectMaterialTextureRolePageKind,
 	TerrainTextureRolePageKind,
 } from "../renderer/types";
 import type { AssetServiceSnapshot } from "../assets/contracts";
@@ -287,7 +287,7 @@ interface TextureAtlasDiagnosticsSummary {
 
 type TextureAtlasWarningDiagnostics =
 	| TerrainRolePageOverflowSummaryDiagnostics
-	| StaticObjectRolePageOverflowSummaryDiagnostics;
+	| ObjectMaterialRolePageOverflowSummaryDiagnostics;
 
 export type TextureAtlasWarningReportDiagnostics =
 	TextureAtlasWarningDiagnostics;
@@ -299,11 +299,11 @@ interface TerrainRolePageOverflowSummaryDiagnostics {
 	readonly latestRole: TerrainTextureRolePageKind | null;
 }
 
-interface StaticObjectRolePageOverflowSummaryDiagnostics {
-	readonly kind: "static-object-role-page-overflow";
+interface ObjectMaterialRolePageOverflowSummaryDiagnostics {
+	readonly kind: "object-material-role-page-overflow";
 	readonly count: number;
 	readonly latestOwnerKey: string | null;
-	readonly latestRole: StaticObjectTextureRolePageKind | null;
+	readonly latestRole: ObjectMaterialTextureRolePageKind | null;
 }
 
 export interface TerrainTextureDiagnosticsReport {
@@ -331,9 +331,9 @@ export interface TerrainRolePageOverflowDiagnostics {
 	readonly textureRefId: string;
 }
 
-export interface StaticObjectRolePageOverflowDiagnostics {
+export interface ObjectMaterialRolePageOverflowDiagnostics {
 	readonly ownerKey: string;
-	readonly kind: StaticObjectTextureRolePageKind;
+	readonly kind: ObjectMaterialTextureRolePageKind;
 	readonly maxSlots: number;
 	readonly textureRefId: string;
 }

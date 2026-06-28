@@ -2772,7 +2772,7 @@ Debt and follow-up:
 
 ### Phase 11C: WebGL Object Material Naming And Role-Page Cutover
 
-Status: pending.
+Status: completed on 2026-06-28.
 
 Purpose:
 
@@ -2898,18 +2898,74 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Rename the WebGL object-material payload file, test file, exports, imports, and helper names.
-- [ ] Rename object-material shader limit constants and update payload construction tests.
-- [ ] Rename `TextureRolePageKind` object-material values and related texture-manager role-page
+- [x] Rename the WebGL object-material payload file, test file, exports, imports, and helper names.
+- [x] Rename object-material shader limit constants and update payload construction tests.
+- [x] Rename `TextureRolePageKind` object-material values and related texture-manager role-page
       allocator types, fields, warning diagnostics, and tests.
-- [ ] Rename shared renderer program/resource/payload/render-state helpers while preserving true
+- [x] Rename shared renderer program/resource/payload/render-state helpers while preserving true
       static-layer resource and diagnostic names.
-- [ ] Audit transparent draw helper names and rename only helpers that are now shared with dynamic
+- [x] Audit transparent draw helper names and rename only helpers that are now shared with dynamic
       or structured-interior material resources.
-- [ ] Run focused verification:
+- [x] Run focused verification:
       `npm run test:ts -- webgl2-object-material-payloads.test.ts webgl2-renderer.test.ts texture-manager.test.ts static-materializer.test.ts`.
-- [ ] Run full verification commands from `apps/holtburger-3d`: `npm run check`,
+- [x] Run full verification commands from `apps/holtburger-3d`: `npm run check`,
       `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts`.
+
+Decisions and course corrections:
+
+- 2026-06-28 implementation: Renamed
+  `apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-static-object-payloads.ts` and its test to
+  `webgl2-object-material-payloads.ts` / `webgl2-object-material-payloads.test.ts`. No compatibility
+  re-export was left behind.
+- 2026-06-28 implementation: Renamed the shared prepared draw payload, material uniform, role-page
+  binding, dirtying, and preparation helpers from `StaticObject*` vocabulary to
+  `ObjectMaterial*` vocabulary. The object-material payload module now imports neutral
+  `TextureBinding` rather than the old `StaticTextureBinding` compatibility alias.
+- 2026-06-28 implementation: Renamed non-terrain object-material role-page values from
+  `"static-base-color"`, `"static-detail"`, `"static-index"`, and `"static-palette"` to
+  `"object-base-color"`, `"object-detail"`, `"object-index"`, and `"object-palette"` in renderer
+  contracts, texture-manager allocation, runtime static materializer mapping, tests, and warning
+  diagnostics.
+- 2026-06-28 implementation: Renamed shared WebGL renderer helpers and resource unions such as
+  `StaticObjectGeometryProgram`, `StaticMaterialGeometryResource`,
+  `uploadStaticObjectRolePageBindings`, `uploadStaticObjectMaterialTableUniforms`,
+  `resolveStaticObjectBlendFactor`, `applyStaticObjectRenderState`, and
+  `restoreStaticObjectRenderState` to object-material names.
+- 2026-06-28 implementation: Renamed object-material shader constants, texture-unit constants,
+  uniforms, and GLSL sampling helpers from `Static*`/`uStatic*` vocabulary to `Object*`/`uObject*`
+  vocabulary. Static instance transform constants stayed static because they are still specific to
+  static-object instanced drawing.
+- 2026-06-28 implementation: Kept true static ownership and telemetry names in place, including
+  `StaticObjectVisualResource`, `StaticObjectRenderInstance`, static layer payloads,
+  `staticObjectResources`, `recentStaticObjectUploads`, and static material pass draw-call counters.
+  Those names still describe static-layer work rather than the shared shader/material substrate.
+- 2026-06-28 implementation: Transparent draw sorting remains partially static-named where the
+  actual draw-list ownership is still static-layer-specific. Shared resource tests now import
+  `resolveObjectMaterialBlendFactor`; no fake generic transparent sorting subsystem was introduced.
+- 2026-06-28 implementation: `npm install` was required before verification because declared
+  `rbush` dependencies were missing from local `node_modules`; the first sandboxed install failed on
+  DNS and the approved network install succeeded. npm reported four audit findings. `npm audit fix`
+  was not run because it would mutate unrelated package versions outside this cleanup phase.
+
+Verification:
+
+- 2026-06-28: `npm run test:ts -- webgl2-object-material-payloads.test.ts webgl2-renderer.test.ts texture-manager.test.ts static-materializer.test.ts`
+- 2026-06-28: `npm run check`
+- 2026-06-28: `npm run lint:ts`
+- 2026-06-28: `npm run lint:dead`
+- 2026-06-28: `npm run test:ts` (63 files / 507 tests)
+- 2026-06-28: `npm run check:rust`
+- 2026-06-28: `npm run lint:rust`
+- 2026-06-28: `git diff --check`
+
+Debt and follow-up:
+
+- Static material source/planner names remain static where they describe static-authored source
+  facts and static bake policy. Phase 12A should audit whether non-static dynamic sources need a
+  neutral setup visual source adapter instead of renaming those facts preemptively.
+- Static transparent draw-list ownership remains static. If dynamic transparent sorting later needs
+  the same list machinery, add a real shared transparent ordering phase rather than renaming static
+  lists speculatively.
 
 Risks and mitigations:
 

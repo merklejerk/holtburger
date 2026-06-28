@@ -26,11 +26,11 @@ import type {
 
 export const MAX_TERRAIN_COLOR_PAGES_PER_DRAW = 4;
 export const MAX_TERRAIN_MASK_PAGES_PER_DRAW = 4;
-export const MAX_STATIC_OBJECT_BASE_COLOR_PAGES_PER_DRAW = 4;
-export const MAX_STATIC_OBJECT_DETAIL_PAGES_PER_DRAW = 4;
-export const MAX_STATIC_OBJECT_INDEX_PAGES_PER_DRAW = 4;
-export const MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW = 8;
-export const MAX_STATIC_OBJECT_PALETTE_PAGES_PER_DRAW = 4;
+export const MAX_OBJECT_MATERIAL_BASE_COLOR_PAGES_PER_DRAW = 4;
+export const MAX_OBJECT_MATERIAL_DETAIL_PAGES_PER_DRAW = 4;
+export const MAX_OBJECT_MATERIAL_INDEX_PAGES_PER_DRAW = 4;
+export const MAX_OBJECT_MATERIAL_ENTRIES_PER_DRAW = 8;
+export const MAX_OBJECT_MATERIAL_PALETTE_PAGES_PER_DRAW = 4;
 
 export interface FrameState {
 	readonly camera: {
@@ -341,19 +341,19 @@ type TextureRolePageKind =
 	| "color"
 	| "detail"
 	| "mask"
-	| "static-base-color"
-	| "static-detail"
-	| "static-index"
-	| "static-palette";
+	| "object-base-color"
+	| "object-detail"
+	| "object-index"
+	| "object-palette";
 
 export type TerrainTextureRolePageKind = Extract<
 	TextureRolePageKind,
 	"color" | "detail" | "mask"
 >;
 
-export type StaticObjectTextureRolePageKind = Extract<
+export type ObjectMaterialTextureRolePageKind = Extract<
 	TextureRolePageKind,
-	"static-base-color" | "static-detail" | "static-index" | "static-palette"
+	"object-base-color" | "object-detail" | "object-index" | "object-palette"
 >;
 
 interface TextureRolePageSlot {

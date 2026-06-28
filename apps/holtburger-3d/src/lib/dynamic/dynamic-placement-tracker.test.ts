@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { makeOutdoorLandblockId } from "../../lib/landblocks";
 import type { PlacementTransformDto } from "../host/contracts";
 import type {
-	StaticObjectInstanceIdentity,
 	StaticObjectSourceAssetFacts,
 	StaticObjectSourceIdentity,
 } from "../static/contracts";
@@ -189,11 +188,72 @@ describe("dynamic entity controller tick", () => {
 			}),
 		).toMatchObject([
 			{
-				entityId: "dynamic-test-entity",
+				entityId: "runtime-spawn:test",
 				landblockId: sourceLandblockId,
 				precision: "current-frame-source-part-bounds-aabb",
 			},
 		]);
+	});
+
+	it("releases runtime outdoor index membership on explicit removal", () => {
+		const store = new DynamicEntityStore();
+		const sourceLandblockId = makeOutdoorLandblockId(0xda, 0x55);
+		store.upsert(
+			createReadyRecord({
+				partPose: createPlacement({ x: 20, y: 0, z: -20 }),
+				sourceLandblockId,
+			}),
+		);
+		const controller = new DynamicEntityController({ store });
+
+		expect(controller.tick(0)).toBe(true);
+		expect(controller.queryOutdoorDynamicLandblockIds()).toEqual([
+			sourceLandblockId,
+		]);
+
+		expect(controller.removeRuntimeSpawn("runtime-spawn:test")).toBe(true);
+
+		expect(controller.queryOutdoorDynamicLandblockIds()).toEqual([]);
+		expect(
+			controller.queryOutdoorDynamicBounds({
+				bounds: {
+					max: { x: 45, y: 10, z: -95 },
+					min: { x: 15, y: -10, z: -125 },
+				},
+				landblockId: sourceLandblockId,
+			}),
+		).toEqual([]);
+	});
+
+	it("releases runtime env-cell index membership on explicit removal", () => {
+		const store = new DynamicEntityStore();
+		store.upsert(
+			createReadyRecord({
+				sourceResidence: {
+					envCellId: 0xda550100,
+					kind: "env-cell",
+					landblockId: 0xda55ffff,
+				},
+			}),
+		);
+		const controller = new DynamicEntityController({ store });
+
+		expect(controller.tick(0)).toBe(true);
+		expect(
+			controller.queryEnvCellDynamicBounds({
+				envCellIds: [0xda550100],
+				landblockId: 0xda55ffff,
+			}),
+		).toHaveLength(1);
+
+		expect(controller.removeRuntimeSpawn("runtime-spawn:test")).toBe(true);
+
+		expect(
+			controller.queryEnvCellDynamicBounds({
+				envCellIds: [0xda550100],
+				landblockId: 0xda55ffff,
+			}),
+		).toEqual([]);
 	});
 });
 
@@ -217,13 +277,9 @@ function createReadyRecord(
 			landblockId: sourceLandblockId,
 		} satisfies DynamicEntityResidence);
 	const source = createSourceIdentity(0x020003e5);
-	const object: StaticObjectInstanceIdentity = {
-		instanceId: "dynamic-test-object",
-		kind: "static-object-instance",
-		landblockId: sourceLandblockId,
-		objectKind: "building",
-	};
 	const partPose = options.partPose ?? createPlacement({ x: 0, y: 0, z: 0 });
+	const entityId = "runtime-spawn:test";
+	const visualResourceId = `dynamic-visual-resource:${entityId}`;
 
 	return {
 		animation: {
@@ -248,7 +304,7 @@ function createReadyRecord(
 						? {
 								animationAssetId: "animation/03000751",
 								animationId: 0x03000751,
-								entityId: "dynamic-test-entity",
+								entityId,
 								hookName: "SetOmega",
 								hookType: 22,
 								lastAppliedFrameIndex: 0,
@@ -276,23 +332,49 @@ function createReadyRecord(
 			precision: "none",
 		},
 		effectiveResidence: sourceResidence,
-		id: "dynamic-test-entity",
-		provenance: {
-			kind:
-				sourceResidence.kind === "env-cell"
-					? "static-authored-env-cell"
-					: "static-authored-outdoor",
-			owner: {
-				domain:
-					sourceResidence.kind === "env-cell"
-						? "landblock-env-cells"
-						: "outdoor-buildings",
-				kind: "work",
-				scope: { kind: "landblock", landblockId: sourceLandblockId },
-				scopeKey: `landblock:${sourceLandblockId.toString(16)}`,
-				workId: "1:dynamic-test",
+		id: entityId,
+		presentation: {
+			diagnostics: {
+				kind: "runtime-spawn",
+				serverInstanceIdMetadata: null,
+				sourceKind: "browser-authored-server-shaped",
 			},
-			sourceScopeKey: "dynamic-test-scope",
+			policy: {
+				diagnosticsBucket: "runtime-authored-dynamic",
+				materialDetailRolePolicy: {
+					kind: "runtime-authored-none",
+				},
+				materialPlanningDomain: "runtime-authored-dynamic-object-material",
+				materialPlanningIdentity: {
+					kind: "setup-backed-visual",
+					visualObject: {
+						entityId,
+						kind: "dynamic-visual-object",
+						resourceId: visualResourceId,
+					},
+				},
+				ownershipPolicy: {
+					kind: "dynamic-visual-resource",
+					resourceId: visualResourceId,
+				},
+				resourceFamily: "runtime-authored-dynamic-object-material",
+				retentionPolicy: {
+					kind: "explicit-runtime-lifetime",
+				},
+				textureBatchId: `runtime-dynamic:${entityId}`,
+				textureDomain: "runtime-object-material",
+			},
+			visualSource: {
+				animationSelection: { animationId: 0x0300061b, kind: "explicit" },
+				effectiveResidence: sourceResidence,
+				modelData: null,
+				setupModelId: 0x020003e5,
+				sourceAssetIds: ["setup-model/020003e5"],
+			},
+		},
+		provenance: {
+			kind: "runtime-spawn",
+			sourceKind: "browser-authored-server-shaped",
 		},
 		renderability: {
 			reasons: [],
@@ -352,31 +434,19 @@ function createReadyRecord(
 				textureRefs: [],
 				textureRequirements: [],
 			},
-			},
-			sourceResidence,
-			source: {
-				kind: "static-authored",
-				seed: {
-					classificationReason: "setup-default-animation",
-					defaultAnimationId: 0x0300061b,
-					domain: "outdoor-buildings",
-					landblockId: sourceLandblockId,
-					localPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
-					object,
-					setupModelId: 0x020003e5,
-					source,
-					sourceAssetId: "setup-model/020003e5",
-					sourceResidence: {
-						kind: "landblock-source",
-						landblockId: sourceLandblockId,
-						source:
-							sourceResidence.kind === "env-cell" ? "env-cells" : "outdoor",
-					},
-					sourceScale: { x: 1, y: 1, z: 1 },
-				},
-			},
-		};
-	}
+		},
+		sourceResidence,
+		source: {
+			animationSelection: { animationId: 0x0300061b, kind: "explicit" },
+			kind: "runtime-spawn",
+			modelData: null,
+			runtimeEntityId: entityId,
+			serverInstanceIdMetadata: null,
+			setupModelId: 0x020003e5,
+			sourceKind: "browser-authored-server-shaped",
+		},
+	};
+}
 
 function createSourceAsset(
 	source: StaticObjectSourceIdentity,

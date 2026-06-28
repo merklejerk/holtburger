@@ -228,7 +228,9 @@ export type TextureBindingOwner =
 
 export type StaticTextureBindingOwner = StaticTextureUseOwner;
 
-export function createTextureBindingOwnerKey(owner: TextureBindingOwner): string {
+export function createTextureBindingOwnerKey(
+	owner: TextureBindingOwner,
+): string {
 	switch (owner.kind) {
 		case "draw-unit":
 			return `draw-unit:${owner.drawUnitId}`;

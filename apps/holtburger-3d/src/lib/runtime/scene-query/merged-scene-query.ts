@@ -10,7 +10,10 @@ import {
 	pointOnRay,
 	translateBounds,
 } from "./geometry";
-import type { ScenePickHit, ScenePickRequest } from "./merged-scene-query-contracts";
+import type {
+	ScenePickHit,
+	ScenePickRequest,
+} from "./merged-scene-query-contracts";
 import { compareStaticSceneSelectionKeys } from "./static-selection-keys";
 
 const DYNAMIC_LANDBLOCK_SEARCH_BOUNDS: StaticBounds = {
@@ -28,7 +31,9 @@ const DYNAMIC_LANDBLOCK_SEARCH_BOUNDS: StaticBounds = {
 
 export interface MergedSceneQuerySources {
 	readonly outdoorAnchorLandblockId: number | null;
-	readonly pickStaticRay: (request: StaticScenePickRequest) => StaticScenePickHit | null;
+	readonly pickStaticRay: (
+		request: StaticScenePickRequest,
+	) => StaticScenePickHit | null;
 	readonly queryOutdoorDynamicBounds: (options: {
 		readonly landblockId: number;
 		readonly bounds: StaticBounds;
@@ -120,8 +125,9 @@ function pickEnvCellDynamicHits(
 	if (request.context.kind !== "env-cell") {
 		return [];
 	}
-	const acceptedEnvCellIds =
-		request.context.acceptedEnvCellIds ?? [request.context.envCellId];
+	const acceptedEnvCellIds = request.context.acceptedEnvCellIds ?? [
+		request.context.envCellId,
+	];
 	const ray = normalizeRay(request.ray);
 	return sources
 		.queryEnvCellDynamicBounds({
@@ -161,7 +167,10 @@ function compareScenePickHits(left: ScenePickHit, right: ScenePickHit): number {
 	);
 }
 
-function compareScenePickHitIdentity(left: ScenePickHit, right: ScenePickHit): number {
+function compareScenePickHitIdentity(
+	left: ScenePickHit,
+	right: ScenePickHit,
+): number {
 	if (left.source === "static" && right.source === "static") {
 		return compareStaticSceneSelectionKeys(
 			left.staticHit.selectionKey,

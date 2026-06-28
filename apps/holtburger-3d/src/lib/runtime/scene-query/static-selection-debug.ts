@@ -197,7 +197,9 @@ export function querySelectionDebugBounds(
 	}
 
 	if (selectionKey.itemKind === "terrain-quad") {
-		const root = state.terrainBvhRootsByLandblockId.get(selectionKey.landblockId);
+		const root = state.terrainBvhRootsByLandblockId.get(
+			selectionKey.landblockId,
+		);
 		if (!root) {
 			return null;
 		}

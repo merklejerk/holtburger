@@ -251,8 +251,8 @@ function createLandblockSpatialCandidate(
 	bucket: LandblockSpatialBucket,
 	distance: number,
 ): LandblockSpatialCandidate | null {
-	const outdoorRoots = [...bucket.outdoorRootsByDomain.values()].sort((left, right) =>
-		left.domain.localeCompare(right.domain),
+	const outdoorRoots = [...bucket.outdoorRootsByDomain.values()].sort(
+		(left, right) => left.domain.localeCompare(right.domain),
 	);
 	if (
 		bucket.envCellRoot === null &&
@@ -366,9 +366,13 @@ export function* traceLandblockGridRayCells(
 		cellSize,
 	);
 	const deltaDistanceX =
-		stepX === 0 ? Number.POSITIVE_INFINITY : cellSize / Math.abs(ray.direction.x);
+		stepX === 0
+			? Number.POSITIVE_INFINITY
+			: cellSize / Math.abs(ray.direction.x);
 	const deltaDistanceZ =
-		stepZ === 0 ? Number.POSITIVE_INFINITY : cellSize / Math.abs(ray.direction.z);
+		stepZ === 0
+			? Number.POSITIVE_INFINITY
+			: cellSize / Math.abs(ray.direction.z);
 
 	let currentDistance = startDistance;
 	while (containsGridCell(bounds, cellX, cellZ)) {

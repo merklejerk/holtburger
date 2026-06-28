@@ -1500,24 +1500,27 @@ describe("WebGL2 structured interior rendering", () => {
 			],
 			revision: 2,
 		});
-			expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
-				dynamicDrawCalls: 0,
-				dynamicInstances: 1,
-				skippedDynamicSubmissions: 1,
-			});
-			pendingFrame?.(16);
-			expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
-				dynamicDrawCalls: 1,
-				dynamicInstances: 1,
-				skippedDynamicSubmissions: 1,
-			});
-			expect(gl.drawElementsCalls.at(-1)).toMatchObject({
-				count: 3,
-				mode: gl.TRIANGLES,
-				type: gl.UNSIGNED_SHORT,
-			});
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicDrawCalls: 0,
+			dynamicInstances: 1,
+			skippedDynamicSubmissions: 1,
+		});
+		pendingFrame?.(16);
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicDrawCalls: 1,
+			dynamicInstances: 1,
+			skippedDynamicSubmissions: 1,
+		});
+		expect(gl.drawElementsCalls.at(-1)).toMatchObject({
+			count: 3,
+			mode: gl.TRIANGLES,
+			type: gl.UNSIGNED_SHORT,
+		});
 
-			renderer.setOutdoorDetailsLayer(0xda55ffff, createOutdoorDetailsLayerPayload());
+		renderer.setOutdoorDetailsLayer(
+			0xda55ffff,
+			createOutdoorDetailsLayerPayload(),
+		);
 		renderer.setOutdoorDetailsLayer(0xda55ffff, null);
 		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
 			dynamicVisualResources: 1,
@@ -1527,16 +1530,16 @@ describe("WebGL2 structured interior rendering", () => {
 			staticObjectVisualResources: 0,
 		});
 
-			renderer.commitDynamicResources({
-				addedVisualResources: [],
-				removedVisualResourceIds: ["dynamic-windmill-part-0"],
-				revision: 2,
-			});
-			pendingFrame?.(32);
-			expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
-				dynamicDrawCalls: 0,
-				dynamicVisualResources: 0,
-				recentDynamicResourceCommits: [
+		renderer.commitDynamicResources({
+			addedVisualResources: [],
+			removedVisualResourceIds: ["dynamic-windmill-part-0"],
+			revision: 2,
+		});
+		pendingFrame?.(32);
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicDrawCalls: 0,
+			dynamicVisualResources: 0,
+			recentDynamicResourceCommits: [
 				{
 					addedVisualResources: 1,
 					removedVisualResources: 0,
@@ -1601,7 +1604,9 @@ describe("WebGL2 structured interior rendering", () => {
 			dynamicDrawCalls: 1,
 			dynamicInstances: 1,
 		});
-		expect(renderer.createDiagnosticsSnapshot().sceneDomainTargets).toMatchObject({
+		expect(
+			renderer.createDiagnosticsSnapshot().sceneDomainTargets,
+		).toMatchObject({
 			active: true,
 			interiorDrawCalls: 1,
 		});
@@ -2251,26 +2256,26 @@ function createDynamicResourceCommit(options: {
 						textureUseId,
 					})),
 				},
-					parts: [
-						{
-							bounds: null,
-							indexType: drawUnit.indexType,
-							indices: drawUnit.indices,
-							materialEntries: drawUnit.materialEntries,
-							materialFamily: drawUnit.materialFamily,
-							materialPass: drawUnit.materialPass,
-							materialSlotIndices: drawUnit.materialSlotIndices,
-							partIndex: 0,
-							positions: drawUnit.positions,
-							renderState: drawUnit.renderState,
-							sourceAssetId: "gfx-obj/01000010",
-							texCoords: drawUnit.texCoords,
-							textureUseIds: options.textureUseIds,
-							triangleCount: drawUnit.triangleCount,
-							vertexCount: drawUnit.vertexCount,
-						},
-					],
-					resourceId: options.resourceId,
+				parts: [
+					{
+						bounds: null,
+						indexType: drawUnit.indexType,
+						indices: drawUnit.indices,
+						materialEntries: drawUnit.materialEntries,
+						materialFamily: drawUnit.materialFamily,
+						materialPass: drawUnit.materialPass,
+						materialSlotIndices: drawUnit.materialSlotIndices,
+						partIndex: 0,
+						positions: drawUnit.positions,
+						renderState: drawUnit.renderState,
+						sourceAssetId: "gfx-obj/01000010",
+						texCoords: drawUnit.texCoords,
+						textureUseIds: options.textureUseIds,
+						triangleCount: drawUnit.triangleCount,
+						vertexCount: drawUnit.vertexCount,
+					},
+				],
+				resourceId: options.resourceId,
 			},
 		],
 		removedVisualResourceIds: [],
@@ -2287,20 +2292,10 @@ function createDynamicRendererInstance(
 	return {
 		entityId: "dynamic-entity:windmill",
 		instanceId: `dynamic-instance:${resourceId}`,
-		objectToRenderMatrix: [
-			1, 0, 0, 0,
-			0, 1, 0, 0,
-			0, 0, 1, 0,
-			0, 0, 0, 1,
-		],
+		objectToRenderMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
 		partToObjectMatrices: [
 			{
-				matrix: [
-					1, 0, 0, 0,
-					0, 1, 0, 0,
-					0, 0, 1, 0,
-					0, 0, 0, 1,
-				],
+				matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
 				partIndex: 0,
 			},
 		],

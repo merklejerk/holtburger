@@ -176,7 +176,8 @@ export class OutdoorStaticObjectsResolver {
 			dynamicSeedFacts.map((seed) => createObjectInstanceKey(seed.object)),
 		);
 		const objects = allObjects.filter(
-			(object) => !dynamicObjectKeys.has(createObjectInstanceKey(object.identity)),
+			(object) =>
+				!dynamicObjectKeys.has(createObjectInstanceKey(object.identity)),
 		);
 		const objectsByInstanceId = new Map(
 			objects.map((object) => [object.identity.instanceId, object]),
@@ -310,7 +311,9 @@ function createOutdoorDynamicSeedFacts(options: {
 	});
 }
 
-function createObjectInstanceKey(identity: StaticObjectInstanceIdentity): string {
+function createObjectInstanceKey(
+	identity: StaticObjectInstanceIdentity,
+): string {
 	return [
 		identity.landblockId >>> 0,
 		identity.objectKind,

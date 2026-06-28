@@ -777,15 +777,15 @@ class Webgl2Renderer implements Renderer {
 		string,
 		StaticObjectVisualGeometryResource
 	>();
-		readonly #dynamicVisualResources = new Map<
-			string,
-			DynamicRendererVisualResource
-		>();
-		readonly #dynamicGeometryResources = new Map<
-			string,
-			DynamicVisualGeometryResource[]
-		>();
-		readonly #dynamicInstances = new Map<string, DynamicRendererInstance>();
+	readonly #dynamicVisualResources = new Map<
+		string,
+		DynamicRendererVisualResource
+	>();
+	readonly #dynamicGeometryResources = new Map<
+		string,
+		DynamicVisualGeometryResource[]
+	>();
+	readonly #dynamicInstances = new Map<string, DynamicRendererInstance>();
 	readonly #staticObjectRenderInstances = new Map<
 		string,
 		StaticObjectRenderInstance
@@ -820,7 +820,8 @@ class Webgl2Renderer implements Renderer {
 		StaticLayerResourceOwnership
 	>();
 	readonly #recentStaticObjectUploads: StaticObjectUploadDiagnostics[] = [];
-	#recentDynamicResourceCommits: DynamicRendererResourceCommitDiagnostics[] = [];
+	#recentDynamicResourceCommits: DynamicRendererResourceCommitDiagnostics[] =
+		[];
 	#lastDynamicDrawCalls = 0;
 	#lastSkippedDynamicSubmissions = 0;
 	readonly #warnedLayeredFallbackDrawUnitIds = new Set<string>();
@@ -1107,16 +1108,16 @@ class Webgl2Renderer implements Renderer {
 		);
 	}
 
-		commitDynamicResources(commit: DynamicRendererResourceCommit): void {
-			if (this.#disposed) {
-				return;
-			}
-			for (const resourceId of commit.removedVisualResourceIds) {
-				this.#dynamicVisualResources.delete(resourceId);
-				this.#disposeDynamicGeometryResources(resourceId);
-				for (const [instanceId, instance] of this.#dynamicInstances) {
-					if (instance.resourceId === resourceId) {
-						this.#dynamicInstances.delete(instanceId);
+	commitDynamicResources(commit: DynamicRendererResourceCommit): void {
+		if (this.#disposed) {
+			return;
+		}
+		for (const resourceId of commit.removedVisualResourceIds) {
+			this.#dynamicVisualResources.delete(resourceId);
+			this.#disposeDynamicGeometryResources(resourceId);
+			for (const [instanceId, instance] of this.#dynamicInstances) {
+				if (instance.resourceId === resourceId) {
+					this.#dynamicInstances.delete(instanceId);
 				}
 			}
 			this.#textureBindings.delete(
@@ -1124,38 +1125,38 @@ class Webgl2Renderer implements Renderer {
 					kind: "dynamic-visual-resource",
 					resourceId,
 				}),
-				);
-			}
-			for (const resource of commit.addedVisualResources) {
-				this.#disposeDynamicGeometryResources(resource.resourceId);
-				this.#dynamicVisualResources.set(resource.resourceId, resource);
-				this.#dynamicGeometryResources.set(
-					resource.resourceId,
-					resource.parts.map((part) =>
-						createDynamicVisualGeometryResource(this.#gl, resource, part),
-					),
-				);
-			}
+			);
+		}
+		for (const resource of commit.addedVisualResources) {
+			this.#disposeDynamicGeometryResources(resource.resourceId);
+			this.#dynamicVisualResources.set(resource.resourceId, resource);
+			this.#dynamicGeometryResources.set(
+				resource.resourceId,
+				resource.parts.map((part) =>
+					createDynamicVisualGeometryResource(this.#gl, resource, part),
+				),
+			);
+		}
 		this.#recentDynamicResourceCommits = appendBounded(
 			this.#recentDynamicResourceCommits,
 			createDynamicResourceCommitDiagnostics(commit),
 			RECENT_DYNAMIC_RESOURCE_COMMIT_DIAGNOSTICS_LIMIT,
-			);
-			this.#stateCache.invalidate();
-		}
+		);
+		this.#stateCache.invalidate();
+	}
 
-		#disposeDynamicGeometryResources(resourceId: string): void {
-			const resources = this.#dynamicGeometryResources.get(resourceId);
-			if (!resources) {
-				return;
-			}
-			for (const resource of resources) {
-				resource.dispose();
-			}
-			this.#dynamicGeometryResources.delete(resourceId);
+	#disposeDynamicGeometryResources(resourceId: string): void {
+		const resources = this.#dynamicGeometryResources.get(resourceId);
+		if (!resources) {
+			return;
 		}
+		for (const resource of resources) {
+			resource.dispose();
+		}
+		this.#dynamicGeometryResources.delete(resourceId);
+	}
 
-		commitDynamicInstances(commit: DynamicRendererInstanceCommit): void {
+	commitDynamicInstances(commit: DynamicRendererInstanceCommit): void {
 		if (this.#disposed) {
 			return;
 		}
@@ -1249,7 +1250,7 @@ class Webgl2Renderer implements Renderer {
 			this.#stateCache.invalidate();
 		}
 
-			for (const binding of update.textureBindings) {
+		for (const binding of update.textureBindings) {
 			const ownerKey = createTextureBindingOwnerKey(binding.owner);
 			const bindings = this.#textureBindings.get(ownerKey) ?? new Map();
 			bindings.set(binding.textureUseId, binding);
@@ -1318,17 +1319,17 @@ class Webgl2Renderer implements Renderer {
 		for (const resource of this.#staticObjectResources.values()) {
 			resource.dispose();
 		}
-			for (const resource of this.#staticObjectVisualResources.values()) {
+		for (const resource of this.#staticObjectVisualResources.values()) {
+			resource.dispose();
+		}
+		for (const resources of this.#dynamicGeometryResources.values()) {
+			for (const resource of resources) {
 				resource.dispose();
 			}
-			for (const resources of this.#dynamicGeometryResources.values()) {
-				for (const resource of resources) {
-					resource.dispose();
-				}
-			}
-			for (const resource of this.#structuredInteriorResources.values()) {
-				resource.dispose();
-			}
+		}
+		for (const resource of this.#structuredInteriorResources.values()) {
+			resource.dispose();
+		}
 		for (const resource of this.#portalApertureResources.values()) {
 			resource.dispose();
 		}
@@ -1336,11 +1337,11 @@ class Webgl2Renderer implements Renderer {
 			this.#gl.deleteTexture(texture);
 		}
 		this.#terrainResources.clear();
-			this.#staticObjectResources.clear();
-			this.#staticObjectVisualResources.clear();
-			this.#dynamicVisualResources.clear();
-			this.#dynamicGeometryResources.clear();
-			this.#dynamicInstances.clear();
+		this.#staticObjectResources.clear();
+		this.#staticObjectVisualResources.clear();
+		this.#dynamicVisualResources.clear();
+		this.#dynamicGeometryResources.clear();
+		this.#dynamicInstances.clear();
 		this.#staticObjectRenderInstances.clear();
 		this.#structuredInteriorResources.clear();
 		this.#structuredInteriorResourceIdsByEnvCellKey.clear();
@@ -1419,11 +1420,11 @@ class Webgl2Renderer implements Renderer {
 		this.#lastStaticObjectDirectRenderInstanceDrawCalls = 0;
 		this.#lastStaticObjectInstancedRenderInstanceDrawCalls = 0;
 		this.#lastStaticObjectInstancedRenderInstances = 0;
-			this.#lastStaticObjectNearTransparentDirectRenderInstanceDrawCalls = 0;
-			this.#lastStaticObjectFarTransparentDirectRenderInstanceDrawCalls = 0;
-			this.#lastStaticObjectFarTransparentInstancedRenderInstanceDrawCalls = 0;
-			this.#lastStaticObjectFarTransparentInstancedRenderInstances = 0;
-			this.#lastDynamicDrawCalls = 0;
+		this.#lastStaticObjectNearTransparentDirectRenderInstanceDrawCalls = 0;
+		this.#lastStaticObjectFarTransparentDirectRenderInstanceDrawCalls = 0;
+		this.#lastStaticObjectFarTransparentInstancedRenderInstanceDrawCalls = 0;
+		this.#lastStaticObjectFarTransparentInstancedRenderInstances = 0;
+		this.#lastDynamicDrawCalls = 0;
 
 		const effectiveRenderPassPlan = this.#getEffectiveRenderPassPlan();
 		const directEnvCellFramePlan = this.#getEffectiveDirectEnvCellFramePlan();
@@ -1982,19 +1983,19 @@ class Webgl2Renderer implements Renderer {
 				? []
 				: [...this.#structuredInteriorResources.values()];
 
-			const staticDrawCalls = this.#drawStaticMaterialResourceSet(
-				staticObjectResources,
-				staticObjectInstanceResources,
-				structuredInteriorResources,
-				aspectRatio,
-			);
-			return staticDrawCalls + this.#drawDynamicResources(domain);
-		}
+		const staticDrawCalls = this.#drawStaticMaterialResourceSet(
+			staticObjectResources,
+			staticObjectInstanceResources,
+			structuredInteriorResources,
+			aspectRatio,
+		);
+		return staticDrawCalls + this.#drawDynamicResources(domain);
+	}
 
-		#createDrawableStaticObjectInstanceResources(
-			domain: RenderStaticDomain,
-		): readonly StaticObjectInstanceDrawResource[] {
-			if (!this.#staticLayerVisibility.outdoorDetail || domain === "interior") {
+	#createDrawableStaticObjectInstanceResources(
+		domain: RenderStaticDomain,
+	): readonly StaticObjectInstanceDrawResource[] {
+		if (!this.#staticLayerVisibility.outdoorDetail || domain === "interior") {
 			return [];
 		}
 		return [...this.#staticObjectRenderInstances.values()].flatMap(
@@ -2003,68 +2004,68 @@ class Webgl2Renderer implements Renderer {
 					instance.resourceId,
 				);
 				return resource ? [{ instance, resource }] : [];
-				},
-			);
-		}
+			},
+		);
+	}
 
-		#drawDynamicResources(domain: RenderStaticDomain): number {
-			const gl = this.#gl;
-			let drawCalls = 0;
-			let skipped = 0;
-			for (const instance of this.#dynamicInstances.values()) {
-				if (!shouldDrawDynamicInstanceInDomain(instance, domain)) {
-					continue;
-				}
-				const resources = this.#dynamicGeometryResources.get(instance.resourceId);
-				if (!resources || resources.length === 0) {
+	#drawDynamicResources(domain: RenderStaticDomain): number {
+		const gl = this.#gl;
+		let drawCalls = 0;
+		let skipped = 0;
+		for (const instance of this.#dynamicInstances.values()) {
+			if (!shouldDrawDynamicInstanceInDomain(instance, domain)) {
+				continue;
+			}
+			const resources = this.#dynamicGeometryResources.get(instance.resourceId);
+			if (!resources || resources.length === 0) {
+				skipped += 1;
+				continue;
+			}
+			const partMatrixByIndex = new Map(
+				instance.partToObjectMatrices.map((part) => [
+					part.partIndex,
+					new Float32Array(part.matrix),
+				]),
+			);
+			const objectToRenderMatrix = multiplyMat4(
+				this.#createDynamicInstanceResidenceTransform(instance),
+				new Float32Array(instance.objectToRenderMatrix),
+			);
+			for (const resource of resources) {
+				const partMatrix = partMatrixByIndex.get(resource.partIndex);
+				if (!partMatrix) {
 					skipped += 1;
 					continue;
 				}
-				const partMatrixByIndex = new Map(
-					instance.partToObjectMatrices.map((part) => [
-						part.partIndex,
-						new Float32Array(part.matrix),
-					]),
+				applyStaticObjectRenderState(
+					gl,
+					this.#stateCache,
+					resource.renderState,
 				);
-				const objectToRenderMatrix = multiplyMat4(
-					this.#createDynamicInstanceResidenceTransform(instance),
-					new Float32Array(instance.objectToRenderMatrix),
+				this.#drawStaticMaterialResource(
+					resource,
+					multiplyMat4(objectToRenderMatrix, partMatrix),
 				);
-				for (const resource of resources) {
-					const partMatrix = partMatrixByIndex.get(resource.partIndex);
-					if (!partMatrix) {
-						skipped += 1;
-						continue;
-					}
-					applyStaticObjectRenderState(
-						gl,
-						this.#stateCache,
-						resource.renderState,
-					);
-					this.#drawStaticMaterialResource(
-						resource,
-						multiplyMat4(objectToRenderMatrix, partMatrix),
-					);
-					drawCalls += 1;
-				}
+				drawCalls += 1;
 			}
-			this.#lastDynamicDrawCalls += drawCalls;
-			this.#lastSkippedDynamicSubmissions += skipped;
-			return drawCalls;
 		}
+		this.#lastDynamicDrawCalls += drawCalls;
+		this.#lastSkippedDynamicSubmissions += skipped;
+		return drawCalls;
+	}
 
-		#createDynamicInstanceResidenceTransform(
-			instance: DynamicRendererInstance,
-		): Float32Array {
-			if (instance.renderResidence.kind === "env-cell") {
-				return createTranslationMatrix([0, 0, 0]);
-			}
-			return createTranslationMatrix(
-				this.#createLandblockTranslation(instance.renderResidence.landblockId),
-			);
+	#createDynamicInstanceResidenceTransform(
+		instance: DynamicRendererInstance,
+	): Float32Array {
+		if (instance.renderResidence.kind === "env-cell") {
+			return createTranslationMatrix([0, 0, 0]);
 		}
+		return createTranslationMatrix(
+			this.#createLandblockTranslation(instance.renderResidence.landblockId),
+		);
+	}
 
-		#drawPortalProjectionFrameResources(
+	#drawPortalProjectionFrameResources(
 		plan: DirectEnvCellPortalProjectionFrameWorkPlan,
 		aspectRatio: number,
 	): number {
@@ -2887,37 +2888,38 @@ class Webgl2Renderer implements Renderer {
 		}
 	}
 
-		#markStaticObjectVisualResourcePreparedPayloadDirty(
-			resourceId: string,
-		): void {
-			const resource = this.#staticObjectVisualResources.get(resourceId);
+	#markStaticObjectVisualResourcePreparedPayloadDirty(
+		resourceId: string,
+	): void {
+		const resource = this.#staticObjectVisualResources.get(resourceId);
 		if (resource) {
 			markStaticObjectPreparedDrawPayloadDirty(
 				resource.preparedDrawPayloadState,
 			);
-			}
 		}
+	}
 
-		#markDynamicVisualResourcePreparedPayloadDirty(resourceId: string): void {
-			for (const resource of this.#dynamicGeometryResources.get(resourceId) ?? []) {
-				markStaticObjectPreparedDrawPayloadDirty(
-					resource.preparedDrawPayloadState,
-				);
-			}
+	#markDynamicVisualResourcePreparedPayloadDirty(resourceId: string): void {
+		for (const resource of this.#dynamicGeometryResources.get(resourceId) ??
+			[]) {
+			markStaticObjectPreparedDrawPayloadDirty(
+				resource.preparedDrawPayloadState,
+			);
 		}
+	}
 
-		#markPreparedPayloadDirtyForTextureBindingOwner(
-			owner: TextureBindingOwner,
-		): void {
+	#markPreparedPayloadDirtyForTextureBindingOwner(
+		owner: TextureBindingOwner,
+	): void {
 		if (owner.kind === "draw-unit") {
 			this.#markStaticObjectPreparedPayloadDirty(owner.drawUnitId);
 			this.#markTerrainPreparedPayloadDirty(owner.drawUnitId);
 			return;
-			}
-			if (owner.kind === "dynamic-visual-resource") {
-				this.#markDynamicVisualResourcePreparedPayloadDirty(owner.resourceId);
-				return;
-			}
+		}
+		if (owner.kind === "dynamic-visual-resource") {
+			this.#markDynamicVisualResourcePreparedPayloadDirty(owner.resourceId);
+			return;
+		}
 		this.#markStaticObjectVisualResourcePreparedPayloadDirty(owner.resourceId);
 	}
 
@@ -2927,21 +2929,21 @@ class Webgl2Renderer implements Renderer {
 				resource.preparedDrawPayloadState,
 			);
 		}
-			for (const resource of this.#staticObjectVisualResources.values()) {
+		for (const resource of this.#staticObjectVisualResources.values()) {
+			markStaticObjectPreparedDrawPayloadDirty(
+				resource.preparedDrawPayloadState,
+			);
+		}
+		for (const resources of this.#dynamicGeometryResources.values()) {
+			for (const resource of resources) {
 				markStaticObjectPreparedDrawPayloadDirty(
 					resource.preparedDrawPayloadState,
 				);
 			}
-			for (const resources of this.#dynamicGeometryResources.values()) {
-				for (const resource of resources) {
-					markStaticObjectPreparedDrawPayloadDirty(
-						resource.preparedDrawPayloadState,
-					);
-				}
-			}
-			for (const resource of this.#structuredInteriorResources.values()) {
-				markStaticObjectPreparedDrawPayloadDirty(
-					resource.preparedDrawPayloadState,
+		}
+		for (const resource of this.#structuredInteriorResources.values()) {
+			markStaticObjectPreparedDrawPayloadDirty(
+				resource.preparedDrawPayloadState,
 			);
 		}
 	}
@@ -3295,11 +3297,11 @@ class Webgl2Renderer implements Renderer {
 
 	#createResourceTranslation(
 		resource:
-				| TerrainGeometryResource
-				| StaticObjectGeometryResource
-				| StaticObjectVisualGeometryResource
-				| DynamicVisualGeometryResource
-				| StructuredInteriorGeometryResource,
+			| TerrainGeometryResource
+			| StaticObjectGeometryResource
+			| StaticObjectVisualGeometryResource
+			| DynamicVisualGeometryResource
+			| StructuredInteriorGeometryResource,
 	): readonly [number, number, number] {
 		if (resource.landblockId === null) {
 			return [0, 0, 0];
@@ -3550,11 +3552,7 @@ function createDynamicResourceCommitDiagnostics(
 	};
 }
 
-function appendBounded<T>(
-	values: readonly T[],
-	value: T,
-	limit: number,
-): T[] {
+function appendBounded<T>(values: readonly T[], value: T, limit: number): T[] {
 	return [...values, value].slice(-limit);
 }
 
@@ -4747,8 +4745,8 @@ function createStaticObjectVisualGeometryResource(
 			gl.deleteBuffer(indexBuffer);
 			gl.deleteVertexArray(vertexArray);
 		},
-		};
-	}
+	};
+}
 
 function createDynamicVisualGeometryResource(
 	gl: WebGL2RenderingContext,
@@ -4814,7 +4812,8 @@ function createDynamicVisualGeometryResource(
 		dynamicResourceId: resource.resourceId,
 		indexBuffer,
 		indexCount: part.indices.length,
-		indexType: part.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
+		indexType:
+			part.indexType === "uint16" ? gl.UNSIGNED_SHORT : gl.UNSIGNED_INT,
 		landblockId: null,
 		materialEntries: part.materialEntries,
 		materialFamily: part.materialFamily,

@@ -130,7 +130,10 @@ function pickOutdoorRoot(
 					continue;
 				}
 
-				const distance = intersectRayBounds(localRay, item.object.instanceBounds);
+				const distance = intersectRayBounds(
+					localRay,
+					item.object.instanceBounds,
+				);
 				if (distance === null) {
 					continue;
 				}
@@ -254,7 +257,10 @@ function pickEnvCellLandblockRoot(
 ): EnvCellStaticScenePickHit | null {
 	let nearestHit: EnvCellStaticScenePickHit | null =
 		isEnvCellStaticScenePickHit(currentNearestHit) ? currentNearestHit : null;
-	const localRay = translateRay(ray, negateTranslation(landblockRoot.translation));
+	const localRay = translateRay(
+		ray,
+		negateTranslation(landblockRoot.translation),
+	);
 
 	traverseBvhNearest(landblockRoot.nodes, localRay, {
 		getMaxDistance: () => nearestHit?.distance ?? null,

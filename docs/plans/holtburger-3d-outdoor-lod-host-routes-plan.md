@@ -49,6 +49,7 @@ In dungeon/interior contexts, levels below the env-cell LoD may emit no outdoor 
 - Changing generated scenery placement rules beyond preserving the current semantics.
 - Adding screen-space or frustum-driven LoD.
 - Optimizing texture atlas packing or WebGL draw submission beyond what is needed for route cutover.
+- Adding durable issue records, persisted migration diagnostics, or long-lived audit logs for this cutover.
 - Preserving backwards compatibility for frontend static rendering if the new route proves cleaner.
 
 ## Ground Truth
@@ -167,6 +168,7 @@ Layer outputs should still carry explicit renderer domain metadata so texture re
 - Replace layer-first outdoor/env-cell resolver jobs with source-first landblock scene resolver products that accept source LoD and scene context.
 - Do not support partial cleanup of individual lower layers within one landblock scene product. Product changes replace the product-owned output bundle.
 - Keep layer-oriented bake/materialization outputs unless implementation evidence shows those should be source-first too.
+- Do not create durable issue records for this migration. Use tests for invariants, console errors/warnings for unexpected runtime violations, and temporary counters/logs only while measuring the cutover.
 
 ### Explicit Payload Contract
 
@@ -514,26 +516,26 @@ Status: pending.
 Deliverables:
 
 - Compare before/after host lookup counts, resolver source-closure counts, and bake counts for representative outdoor movement.
-- Reassess whether the explicit/generated scene-interest split needs different naming, scheduling priority, or diagnostic surfacing after LoD route support is real.
-- Record any unexpected payload-size or worker-transfer regressions.
+- Reassess whether the explicit/generated scene-interest split needs different naming or scheduling priority after LoD route support is real.
+- Surface unexpected payload-size, worker-transfer, or route-selection regressions with temporary console warnings/errors and lightweight counters.
 - Remove normal frontend use of old layer-first outdoor/env-cell resolver jobs once the source-first path is equivalent.
 
 Acceptance criteria:
 
-- Diagnostics show one landblock scene source resolve per desired landblock source product.
-- Diagnostics show fewer unnecessary source closures for terrain/building-only interest.
+- Temporary diagnostics show one landblock scene source resolve per desired landblock source product.
+- Temporary diagnostics show fewer unnecessary source closures for terrain/building-only interest.
 - No correctness regression is observed in terrain/building/detail rendering for sampled landblocks.
 - Normal frontend rendering no longer schedules independent layer-first outdoor/env-cell resolver jobs for landblock scene work.
-- The plan is updated with discovered implementation debt and any changed phase ordering.
+- Any discovered scope, architecture, or phase-ordering change is reflected before continuing.
 
 Task checklist:
 
-- [ ] Add temporary or permanent diagnostics for landblock scene LoD route requests.
+- [ ] Add temporary route/source counters or console warnings only where needed to measure the cutover.
 - [ ] Capture representative movement samples.
 - [ ] Compare old layer-first outdoor/env-cell request counts against new source-first source-product counts.
 - [ ] Disable/remove the old layer-first outdoor/env-cell resolver path after equivalence is proven.
-- [ ] Update this plan with measured outcomes.
-- [ ] Decide whether remaining phases need subdivision.
+- [ ] Remove temporary measurement logs/counters unless they prove useful as existing-style runtime diagnostics.
+- [ ] Update this plan only if the implementation direction changes.
 
 Decisions and course corrections:
 
@@ -548,7 +550,7 @@ Deliverables:
 - Remove frontend static-render reliance on broad `landblock-outdoor` and separate `landblock-env-cells`.
 - Remove the `landblock/{id}/outdoor` and `landblock/{id}/env-cells` host routes and content/core request variants if no non-frontend consumer remains.
 - Delete obsolete resolver fixture fields and compatibility helpers.
-- Update docs and diagnostics labels to stop implying that `outdoor-detail` is a host asset.
+- Update user-facing docs or runtime labels only where stale names would mislead implementation or debugging.
 - Remove `landblock/{id}/topology` host/core/content/frontend helpers if the cleanup audit confirms no non-test consumer remains. Do not add new 3D frontend topology use unless a current consumer proves it is needed.
 
 Acceptance criteria:
@@ -563,7 +565,7 @@ Task checklist:
 - [ ] Remove stale `landblock-outdoor` and `landblock-env-cells` resolver fixtures.
 - [ ] Remove `ContentAssetRequest::LandblockTopology`, Tauri route parsing/serialization/service cache branches, frontend topology helpers, and route tests if no non-test consumer remains.
 - [ ] Remove old helper code that only exists for the pre-LoD route shape.
-- [ ] Update README/design docs if they describe outdoor static host assets.
+- [ ] Update docs only if they contain actively misleading route/domain names.
 - [ ] Run targeted and broad verification.
 
 Decisions and course corrections:
@@ -583,6 +585,10 @@ Mitigation: keep generated derivation inside shared `StaticOutdoorSceneAssembler
 ### Risk: Product Lifecycle Blurs Layer Diagnostics
 
 Mitigation: keep emitted layer payloads and resources domain-tagged for renderer residency, diagnostics, and selection, even though cleanup is product-owned.
+
+### Risk: Migration Diagnostics Become Stale Lore
+
+Mitigation: do not persist issue records for this migration. Fail loudly with console errors/warnings for invariant violations, use tests for durable guarantees, and delete temporary measurement logs/counters during cleanup unless they fit existing runtime diagnostics.
 
 ### Risk: Multi-Output Resolver Results Complicate Stale Work Handling
 
@@ -620,8 +626,10 @@ Mitigation: update tests to use the minimal landblock scene LoD route for the be
 - Normal frontend static rendering no longer depends on full `landblock-outdoor` or separate `landblock-env-cells`, and the old `landblock/{id}/outdoor` and `landblock/{id}/env-cells` routes/dependents are removed unless a concrete non-frontend owner is documented.
 - `landblock/{id}/topology` is removed if it remains host-test/helper-only after audit, with any surviving owner documented if removal is blocked.
 - Tests prove route parsing, payload validation, source LoD selection, multi-output resolver fanout, product-owned cleanup, generated scenery preservation, and env-cell preservation.
+- No new durable issue-record storage or persisted migration audit trail is introduced.
+- Temporary migration logs/counters are removed or promoted only if they are useful existing-style runtime diagnostics.
 - `cargo check`, relevant Rust tests, relevant TS tests, and lint/clippy checks pass for touched areas.
-- This plan is updated with completed statuses, decisions, and cleanup notes during execution.
+- This plan is updated only for scope, architecture, or phase-ordering changes.
 
 ## Open Questions
 

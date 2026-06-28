@@ -1,7 +1,13 @@
 import type {
+	DynamicEntityAnimationPlaybackState,
+	DynamicEntityAnimationPlaybackSummaryDto,
 	DynamicEntitySummaryDto,
 	DynamicEntityId,
 	DynamicEntityRecord,
+	DynamicEntitySetupAnimationResourceState,
+	DynamicEntitySetupAnimationResourceSummaryDto,
+	DynamicEntitySourceFacts,
+	DynamicEntitySourceSummaryDto,
 	DynamicRuntimeSnapshot,
 } from "./contracts";
 
@@ -116,8 +122,8 @@ function createDynamicEntitySummaryDto(
 }
 
 function createDynamicEntitySourceSummary(
-	source: DynamicEntityRecord["source"],
-): DynamicEntitySummaryDto["source"] {
+	source: DynamicEntitySourceFacts,
+): DynamicEntitySourceSummaryDto {
 	if (source.kind === "runtime-spawn") {
 		return source;
 	}
@@ -131,8 +137,8 @@ function createDynamicEntitySourceSummary(
 }
 
 function createAnimationPlaybackSummary(
-	playback: DynamicEntityRecord["animation"]["playback"],
-): DynamicEntitySummaryDto["animation"]["playback"] {
+	playback: DynamicEntityAnimationPlaybackState,
+): DynamicEntityAnimationPlaybackSummaryDto {
 	if (playback.status !== "playing") {
 		return playback;
 	}
@@ -175,8 +181,8 @@ function createAnimationPlaybackSummary(
 }
 
 function createSetupAnimationResourceSummary(
-	setupAnimation: DynamicEntityRecord["resources"]["setupAnimation"],
-): DynamicEntitySummaryDto["resources"]["setupAnimation"] {
+	setupAnimation: DynamicEntitySetupAnimationResourceState,
+): DynamicEntitySetupAnimationResourceSummaryDto {
 	if (setupAnimation.status !== "ready") {
 		return setupAnimation;
 	}

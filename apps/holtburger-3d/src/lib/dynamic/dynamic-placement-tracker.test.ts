@@ -6,7 +6,7 @@ import type {
 	StaticObjectSourceAssetFacts,
 	StaticObjectSourceIdentity,
 } from "../static/contracts";
-import type { DynamicEntityRecord } from "./contracts";
+import type { DynamicEntityRecord, DynamicEntityResidence } from "./contracts";
 import { DynamicEntityController } from "./dynamic-entity-controller";
 import { DynamicEntityStore } from "./dynamic-entity-store";
 import { DynamicPlacementTracker } from "./dynamic-placement-tracker";
@@ -202,7 +202,7 @@ function createReadyRecord(
 		readonly activeOmegaRotation?: PlacementTransformDto["orientation"];
 		readonly partPose?: PlacementTransformDto;
 		readonly sourceLandblockId?: number;
-		readonly sourceResidence?: DynamicEntityRecord["sourceResidence"];
+		readonly sourceResidence?: DynamicEntityResidence;
 	} = {},
 ): DynamicEntityRecord {
 	const sourceLandblockId =
@@ -215,7 +215,7 @@ function createReadyRecord(
 		({
 			kind: "outdoor-landblock",
 			landblockId: sourceLandblockId,
-		} satisfies DynamicEntityRecord["sourceResidence"]);
+		} satisfies DynamicEntityResidence);
 	const source = createSourceIdentity(0x020003e5);
 	const object: StaticObjectInstanceIdentity = {
 		instanceId: "dynamic-test-object",

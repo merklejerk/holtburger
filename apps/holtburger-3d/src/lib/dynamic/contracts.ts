@@ -50,7 +50,7 @@ export interface DynamicEntityRecord {
 }
 
 /** Projected presentation facts consumed by renderer/resource policy code. */
-interface DynamicEntityPresentation {
+export interface DynamicEntityPresentation {
 	readonly diagnostics: DynamicDiagnosticContext;
 	readonly policy: DynamicPresentationPolicy;
 	readonly visualSource: DynamicVisualSource;
@@ -89,8 +89,11 @@ type DynamicMaterialPlanningIdentity =
 			readonly reason: "runtime-material-planning-identity-unsupported";
 	  };
 
-/** Source-neutral visual inputs; deeper setup/material readiness lands in Phase 12C.2. */
-interface DynamicVisualSource {
+export type DynamicPendingMaterialPlanningReason =
+	"runtime-material-planning-identity-unsupported";
+
+/** Source-neutral visual inputs consumed by dynamic resource and renderer pipelines. */
+export interface DynamicVisualSource {
 	readonly animationSelection: DynamicEntityAnimationSelection;
 	readonly effectiveResidence: DynamicEntityResidence;
 	readonly modelData: null;
@@ -123,7 +126,7 @@ type DynamicEntityProvenance =
 			readonly sourceKind: "browser-authored-server-shaped";
 	  };
 
-type DynamicEntityResidence =
+export type DynamicEntityResidence =
 	| {
 			readonly kind: "env-cell";
 			readonly envCellId: number;
@@ -134,7 +137,7 @@ type DynamicEntityResidence =
 			readonly landblockId: number;
 	  };
 
-type DynamicEntityAnimationSelection =
+export type DynamicEntityAnimationSelection =
 	| {
 			readonly kind: "setup-default";
 	  }
@@ -163,17 +166,19 @@ interface StaticAuthoredDynamicEntitySourceFacts {
 	readonly seed: StaticAuthoredDynamicSeedFacts;
 }
 
-type DynamicEntitySourceFacts =
+export type DynamicEntitySourceFacts =
 	| RuntimeSpawnDynamicEntitySourceFacts
 	| StaticAuthoredDynamicEntitySourceFacts;
 
-interface DynamicEntityAnimationState {
+export interface DynamicEntityAnimationState {
 	readonly defaultAnimationId: number;
 	readonly playback: DynamicEntityAnimationPlaybackState;
-	readonly status: "failed" | "pending-resource" | "ready";
+	readonly status: DynamicEntityAnimationStatus;
 }
 
-type DynamicEntityAnimationPlaybackState =
+type DynamicEntityAnimationStatus = "failed" | "pending-resource" | "ready";
+
+export type DynamicEntityAnimationPlaybackState =
 	| {
 			readonly status: "pending-resource";
 	  }
@@ -231,7 +236,7 @@ export interface DynamicAnimationHookFrameKey {
 	readonly loopIteration: number;
 }
 
-interface DynamicEntityTransformState {
+export interface DynamicEntityTransformState {
 	readonly baseLocalPlacement: StaticAuthoredDynamicSeedFacts["localPlacement"];
 	readonly sourceScale: StaticAuthoredDynamicSeedFacts["sourceScale"];
 }
@@ -240,14 +245,14 @@ export type DynamicEntityBoundsPrecision =
 	| "none"
 	| "current-frame-source-part-bounds-aabb";
 
-interface DynamicEntityBoundsState {
+export interface DynamicEntityBoundsState {
 	readonly currentBounds: DynamicEntityCurrentBounds | null;
 	readonly indexMembership: DynamicEntityIndexMembership;
 	readonly indexed: boolean;
 	readonly precision: DynamicEntityBoundsPrecision;
 }
 
-type DynamicEntityIndexMembership =
+export type DynamicEntityIndexMembership =
 	| {
 			readonly kind: "none";
 	  }
@@ -296,11 +301,17 @@ export interface DynamicEntityPartBounds {
 export interface DynamicEntityResourceState {
 	readonly required: readonly DynamicEntityRequiredResource[];
 	readonly setupAnimation: DynamicEntitySetupAnimationResourceState;
-	readonly status: "failed" | "pending" | "ready" | "setup-animation-ready";
+	readonly status: DynamicEntityResourceStatus;
 	readonly visual: DynamicEntityVisualResourceState;
 }
 
-type DynamicEntitySetupAnimationResourceState =
+type DynamicEntityResourceStatus =
+	| "failed"
+	| "pending"
+	| "ready"
+	| "setup-animation-ready";
+
+export type DynamicEntitySetupAnimationResourceState =
 	| {
 			readonly animationKey: DynamicEntityResourceKey;
 			readonly failures: readonly DynamicEntityResourceFailure[];
@@ -309,6 +320,12 @@ type DynamicEntitySetupAnimationResourceState =
 	  }
 	| {
 			readonly animationKey: DynamicEntityResourceKey;
+			readonly setupModelKey: DynamicEntityResourceKey;
+			readonly status: "pending";
+	  }
+	| {
+			/** Setup-default animation has not been resolved to a real animation asset id. */
+			readonly pendingReason: "setup-default-animation-unresolved";
 			readonly setupModelKey: DynamicEntityResourceKey;
 			readonly status: "pending";
 	  }
@@ -410,12 +427,12 @@ export type DynamicEntityResourceKey =
 			readonly id: number | string;
 	  };
 
-interface DynamicEntityRenderability {
+export interface DynamicEntityRenderability {
 	readonly reasons: readonly DynamicEntityRenderabilityReason[];
 	readonly status: "non-renderable" | "renderable";
 }
 
-type DynamicEntityRenderabilityReason =
+export type DynamicEntityRenderabilityReason =
 	| "resource-load-failed"
 	| "resources-pending"
 	| "visual-resources-failed"
@@ -453,10 +470,10 @@ export interface DynamicEntitySummaryDto {
 interface DynamicEntityAnimationSummaryDto {
 	readonly defaultAnimationId: number;
 	readonly playback: DynamicEntityAnimationPlaybackSummaryDto;
-	readonly status: DynamicEntityAnimationState["status"];
+	readonly status: DynamicEntityAnimationStatus;
 }
 
-type DynamicEntityAnimationPlaybackSummaryDto =
+export type DynamicEntityAnimationPlaybackSummaryDto =
 	| {
 			readonly status: "pending-resource";
 	  }
@@ -494,11 +511,11 @@ type DynamicEntityActiveOmegaSummaryDto = Omit<
 interface DynamicEntityResourceSummaryDto {
 	readonly required: readonly DynamicEntityRequiredResource[];
 	readonly setupAnimation: DynamicEntitySetupAnimationResourceSummaryDto;
-	readonly status: DynamicEntityResourceState["status"];
+	readonly status: DynamicEntityResourceStatus;
 	readonly visual: DynamicEntityVisualResourceState;
 }
 
-type DynamicEntitySetupAnimationResourceSummaryDto =
+export type DynamicEntitySetupAnimationResourceSummaryDto =
 	| {
 			readonly animationKey: DynamicEntityResourceKey;
 			readonly failures: readonly DynamicEntityResourceFailure[];
@@ -507,6 +524,11 @@ type DynamicEntitySetupAnimationResourceSummaryDto =
 	  }
 	| {
 			readonly animationKey: DynamicEntityResourceKey;
+			readonly setupModelKey: DynamicEntityResourceKey;
+			readonly status: "pending";
+	  }
+	| {
+			readonly pendingReason: "setup-default-animation-unresolved";
 			readonly setupModelKey: DynamicEntityResourceKey;
 			readonly status: "pending";
 	  }
@@ -520,7 +542,7 @@ type DynamicEntitySetupAnimationResourceSummaryDto =
 			readonly status: "ready";
 	  };
 
-type DynamicEntitySourceSummaryDto =
+export type DynamicEntitySourceSummaryDto =
 	| {
 			readonly defaultAnimationId: number;
 			readonly kind: "static-authored";

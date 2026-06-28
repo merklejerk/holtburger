@@ -3015,10 +3015,17 @@ In scope:
 - Compare the proposed source contract against existing host/live entity data in
   `holtburger-core` and world/entity DTOs so the debug/browser spike does not contradict the future
   live entity pipeline.
+- Compare the proposed source contract against ACE server-authored create-object evidence and the
+  Holtburger client/runtime entity event shapes before naming the browser producer contract.
 - Identify which static resource helpers should be extracted or wrapped behind neutral setup visual
   source adapters before a non-static dynamic spawn consumes setup/gfx/material facts.
-- Decide whether the first implementation slice should use browser/debug-authored spawns, a narrow
-  host-spawned fixture, or both.
+- Define browser-mode spawn UX as the first real consumer. The UX should accept inputs that resemble
+  server-authored spawn inputs and then route through the same source contract expected for future
+  live host spawns.
+- Define a weenie spawn seed resolver boundary for browser-mode UX. The resolver should abstract
+  over its backing source, such as an in-memory LUT, generated catalog, ACE SQL export, or future
+  Tauri-backed database lookup, and should return resolved weenie/template facts without knowing
+  which facts the Phase 12B spawn pipeline supports.
 
 Out of scope:
 
@@ -3050,6 +3057,23 @@ Survey targets:
 - `crates/holtburger-common/src/properties/world_object.rs` and
   `crates/holtburger-common/src/position.rs` for setup/model/position fields likely to feed future
   live dynamic visual sources.
+- [ACE/Source/ACE.Server.Tests/SyntheticProtocolTests.cs](../../ACE/Source/ACE.Server.Tests/SyntheticProtocolTests.cs)
+  for server create-object fixture evidence covering setup, motion table, sound table, physics
+  script, default scale, location, and object-description override fields.
+- [ACE/Database/Base/WorldBase.sql](../../ACE/Database/Base/WorldBase.sql) for the ACE world schema
+  behind `weenie`, `weenie_properties_*`, `landblock_instance`, and
+  `landblock_instance_link` records.
+- [ACE/Source/ACE.Database/Adapter/WeenieConverter.cs](../../ACE/Source/ACE.Database/Adapter/WeenieConverter.cs)
+  for ACE's conversion from normalized weenie SQL rows into property maps, position facts,
+  object-description override lists, generator facts, create lists, emotes, and other entity facts.
+- [ACE/Source/ACE.Server/Factories/WorldObjectFactory.cs](../../ACE/Source/ACE.Server/Factories/WorldObjectFactory.cs)
+  for server construction of runtime world objects from a WCID-backed weenie template plus instance
+  position.
+- ACE server create/update object serialization paths for the authoritative field set behind live
+  server-authored dynamic objects. Locate the production paths during the Phase 12A evidence pass
+  rather than copying only the synthetic fixture shape.
+- Holtburger protocol/common object-description, model-data, position, and object id types for the
+  narrowest typed browser spawn request that can stay compatible with future server-authored input.
 
 Acceptance criteria:
 
@@ -3057,8 +3081,12 @@ Acceptance criteria:
   required for the first explicit-spawn slice versus deferred live/entity composition.
 - The plan records every static-source assumption that would force a non-static source to fabricate
   static identities or static scope ownership.
-- The selected first implementation target is justified as either browser/debug-authored,
-  host-fixture-authored, or both, with clear limits.
+- The selected first implementation target is browser-mode spawn UX backed by a server-shaped
+  source contract unless the evidence pass proves that contract is wrong. Any deviation must be
+  recorded here with the ACE/client evidence that forced it.
+- The plan defines a `WeenieSpawnSeedResolver`-style boundary whose contract is source/resolution
+  oriented, not Phase-12B-support oriented. Spawn validation owns accepted, rejected, and
+  unsupported-spawn diagnostics.
 - The next implementation phase can be executed without guessing whether to reuse, extract, or
   replace static source closure helpers.
 
@@ -3068,10 +3096,173 @@ Task checklist:
       assumptions and record concrete blockers.
 - [ ] Audit `holtburger-core` live entity/runtime message shapes for setup id, model data, position,
       motion, and lifecycle facts relevant to a future source adapter.
+- [ ] Audit ACE create-object production paths and existing synthetic protocol fixtures for
+      server-authored object fields: object id, object description/model overrides, location,
+      setup id, motion table, sound table, physics script/intensity, default scale, and lifecycle
+      replacement/removal semantics.
+- [ ] Audit ACE weenie SQL/schema and converter paths for a WCID-backed browser spawn seed:
+      core weenie metadata, DID/float/string properties, position facts, palette changes, texture
+      changes, anim-part changes, generator facts, create lists, emotes, and landblock instance
+      placement.
 - [ ] Define the first non-static dynamic source contract and removal/lifetime semantics.
-- [ ] Decide the first implementation target: browser/debug explicit spawn, host fixture spawn, or
-      a split where the contract is host-shaped and the first producer is browser/debug-authored.
+- [ ] Define the browser-mode spawn request shape as the first producer of the source contract:
+      setup id, object id policy, residence/position, transform/orientation, scale, optional
+      animation/motion selection, and explicit remove/replacement behavior.
+- [ ] Define the weenie spawn seed resolver contract and the first backend strategy. The contract
+      must allow in-memory fixtures, generated catalogs, SQL-backed lookup, and future live/host
+      resolvers without changing the browser spawn form.
+- [ ] Decide which server-shaped fields are supported in Phase 12B and which are explicitly
+      rejected or preserved as unsupported evidence. Unsupported fields must not be silently ignored.
 - [ ] Update Phase 12B with any revised implementation details discovered by this evidence pass.
+
+Decisions and course corrections:
+
+- 2026-06-28 steering: The first implementation consumer should be browser-mode spawn UX, not a
+  private unit-test-only fixture. The browser producer should gather inputs that resemble server
+  spawn inputs, then feed a neutral dynamic source contract. This gives us a real app-local workflow
+  while keeping the boundary shaped by live/server evidence instead of static-authored scenery.
+- 2026-06-28 steering: The source contract should be host/server-shaped even when browser-authored.
+  Static-authored dynamic records may continue to exist, but browser spawns must not fake
+  `StaticAuthoredDynamicSeedRecord`, `StaticObjectInstanceIdentity`, static source scopes, or static
+  scene retention ownership.
+- 2026-06-28 steering: ACE and Holtburger client crates are mandatory evidence for this phase. The
+  current evidence points at setup id, object description/model override data, position/location,
+  motion table, sound table, physics script/intensity, and default scale as fields to consciously
+  include, reject, or defer. Phase 12A should prove the production paths before Phase 12B freezes the
+  exact browser request DTO.
+- 2026-06-28 steering: Browser spawn UX should be one full spawn form that can optionally be seeded
+  by WCID. Applying a weenie seed may populate setup, scale, visual overrides, motion/audio/physics
+  facts, display metadata, or richer template facts, but the user should still be able to edit the
+  resulting form before spawning.
+- 2026-06-28 steering: The resolver must not know what the dynamic spawn pipeline currently
+  supports. It should return resolved source facts plus resolver diagnostics. The browser form,
+  spawn adapter, or runtime boundary should then produce accepted facts, rejected facts, and
+  unsupported-spawn diagnostics for Phase 12B limitations.
+
+Target shape illustrations:
+
+Resolver and form boundary:
+
+```text
+manual fields ------------------------------+
+                                            |
+WCID seed -> WeenieSpawnSeedResolver -> resolved facts
+                                            |
+                                            v
+                                 editable browser spawn form
+                                            |
+                                            v
+                              ServerShapedDynamicSpawnRequest
+```
+
+The resolver is source-facing. It may read from an in-memory fixture, a generated catalog, an ACE SQL
+export, or a future Tauri/database adapter. It does not filter facts based on the current renderer,
+resource manager, or dynamic spawn support.
+
+```text
+WeenieSpawnSeedResolver
+  input:
+    weenieClassId
+    optional source selector / catalog selector
+
+  output:
+    resolved identity facts
+      weenieClassId
+      className
+      weenieType
+      displayName?
+
+    resolved visual facts
+      setupId?
+      defaultScale?
+      paletteId?
+      subPaletteChanges[]
+      textureChanges[]
+      animPartChanges[]
+
+    resolved motion/audio/physics facts
+      motionTableId?
+      soundTableId?
+      physicsScriptId?
+      physicsScriptIntensity?
+
+    resolved richer template facts
+      positions[]
+      generators[]
+      createList[]
+      emotes[]
+      inventory/equipment facts when proven
+
+    resolver diagnostics
+      missing source
+      missing WCID
+      malformed source rows
+      duplicate/conflicting source rows
+```
+
+The editable browser form owns user intent. Applying a seed copies resolved facts into form fields,
+but the form remains editable. The same form can also be filled manually with no seed.
+
+```text
+BrowserDynamicSpawnFormState
+  seed:
+    requestedWeenieClassId?
+    resolvedSeedSummary?
+    resolverDiagnostics[]
+
+  editable spawn fields:
+    objectIdPolicy
+    sourceResidence
+    baseTransform
+    setupId
+    scale
+    animationMode
+    objectDescriptionOverrides
+    motion/audio/physics fields when exposed
+```
+
+Spawn validation is consumer-facing. It decides what Phase 12B can turn into an actual dynamic spawn
+request and what must be rejected or surfaced as unsupported-spawn evidence.
+
+```text
+BrowserDynamicSpawnFormState
+        |
+        v
+validateBrowserDynamicSpawnRequest()
+        |
+        +--> accepted facts -> ServerShapedDynamicSpawnRequest
+        |
+        +--> rejected facts
+        |      invalid cell/residence
+        |      missing setup id
+        |      malformed object-description override
+        |
+        +--> unsupported-spawn diagnostics
+               physics script present but not executed
+               generator children present but not spawned
+               create-list/inventory present but not composed
+               emote/audio behavior present but not played
+```
+
+Runtime ownership after validation:
+
+```text
+ServerShapedDynamicSpawnRequest
+        |
+        v
+DynamicEntityController.createRuntimeSpawn()
+        |
+        +--> DynamicEntityRecord
+        |      provenance: browser-authored/server-shaped
+        |      no static seed identity
+        |      no static scope ownership
+        |
+        +--> DynamicEntityResourceManager
+        |      setup visual source adapter
+        |      object-material resources
+        |
+        +--> Dynamic placement/query/scheduler/renderer families
+```
 
 ### Phase 12B: Minimal Explicit-Spawn Dynamic Entity Slice
 
@@ -3079,14 +3270,23 @@ Status: pending.
 
 Purpose:
 
-- Prove a dynamic entity can be created, animated, rendered, queried, inspected, and destroyed
-  without originating from static-authored dynamic seeds or static scope retention.
+- Prove a browser-mode user can create, inspect, query, render, animate, and destroy a dynamic entity
+  through a server-shaped source request without originating from static-authored dynamic seeds or
+  static scope retention.
 
 Deliverables:
 
-- Add a non-static dynamic source/provenance variant for explicit runtime/browser-authored dynamic
-  spawns. The contract should be compatible with a future host-spawned adapter even if the first
-  producer is browser/debug tooling.
+- Add a non-static dynamic source/provenance variant for server-shaped runtime dynamic spawns. The
+  first producer is browser-mode UX, but the source fields should be compatible with a future
+  host-spawned adapter.
+- Add a browser-mode spawn panel or equivalent app-local UX for creating and removing dynamic
+  entities. It should be one full editable spawn form with an optional WCID seed input. Inputs should
+  resemble server spawn inputs rather than static seed facts: setup id, object id policy,
+  residence/position, orientation, scale, optional animation/motion choice, object-description
+  override facts, and explicit remove/replacement action.
+- Add a `WeenieSpawnSeedResolver`-style component boundary consumed by the browser spawn form. The
+  first implementation may be in-memory or catalog-backed, but the interface must permit SQL-backed
+  or Tauri-backed ACE world DB resolution later.
 - Add an explicit create/update/remove API at the runtime/controller boundary. Removal must be
   explicit and must release resource leases, spatial/query membership, renderer resources, renderer
   instances, and scheduler state.
@@ -3096,10 +3296,19 @@ Deliverables:
 - Reuse existing dynamic resource readiness, animation playback, placement, cadence, renderer
   resource/instance commits, merged query, and selected diagnostics after the source adapter has
   produced the required dynamic runtime facts.
-- Support a first explicit spawn with setup id, optional animation id or setup default animation,
-  base transform, scale, source residence, and debug provenance.
-- Keep browser/debug spawn UI or harness controls minimal and app-local. The goal is proving the
-  pipeline, not building a gameplay spawn editor.
+- Support a first browser spawn with setup id, optional animation id or setup default animation,
+  base transform/orientation, scale, source residence, explicit object id policy, and browser-authored
+  provenance.
+- Support seeding the form from a resolved weenie/WCID fact set without requiring the resolver to
+  know Phase 12B spawn support. The spawn adapter/runtime validation should decide which resolved
+  facts become spawn inputs and which become rejected or unsupported-spawn diagnostics.
+- Decide Phase 12B behavior for resolved but unsupported server-shaped fields. Either reject them
+  loudly at the browser request/runtime boundary or preserve them in diagnostics as unsupported
+  spawn evidence; do not accept-and-ignore fields that imply model overrides, physics scripts,
+  sound, lighting, generator children, inventory/create-list, emote, or authoritative motion
+  behavior.
+- Keep the browser spawn UX minimal and app-local. The goal is proving the pipeline and giving us a
+  real manual probe, not building a gameplay spawn editor.
 - Add tests proving explicit dynamic spawns do not appear in static bake output, static scene query
   records, static source retention, or static scope eviction.
 
@@ -3111,10 +3320,20 @@ Acceptance criteria:
   when setup default animation is selected by the source contract.
 - Bounds, effective residence, cadence scheduling, merged dynamic query hits, browser inspection,
   and selected dynamic diagnostics work for the explicit spawn without static source keys.
+- Browser-mode spawn UX can add at least one setup-backed dynamic entity to the current scene and
+  remove it again without refreshing the static scene.
+- Browser-mode spawn UX can seed the same full spawn form from at least one WCID-backed resolver
+  result, allow edits after seeding, and submit through the same dynamic spawn request path as manual
+  input.
 - Explicit removal tears down resources, renderer state, query/index membership, and scheduler state
   without relying on static scope retention.
 - No explicit-spawn path fabricates static seed records, static source scopes, static object
   identities, or static draw units.
+- The resolver contract is tested separately from spawn validation. Resolver tests assert resolved
+  facts and resolver diagnostics; spawn validation tests assert accepted, rejected, and
+  unsupported-spawn facts.
+- The browser/runtime boundary validates supported server-shaped fields and fails loudly or reports
+  explicit unsupported-spawn diagnostics for resolved/requested fields Phase 12B does not implement.
 - Existing static-authored dynamic scenery behavior remains stable.
 - The implementation records what still blocks host-spawned players/creatures: model-data
   overrides, equipment composition, motion-table selection, authority/cancellation semantics, or
@@ -3122,14 +3341,22 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add non-static dynamic provenance/source contract and controller create/remove APIs.
+- [ ] Add server-shaped non-static dynamic provenance/source contract and controller
+      create/remove APIs.
+- [ ] Add app-local browser-mode spawn UX and runtime command plumbing for creating/removing one or
+      more setup-backed dynamic entities.
+- [ ] Add the weenie spawn seed resolver interface and first backend, keeping resolver output
+      independent from Phase 12B support decisions.
+- [ ] Wire WCID seed application into the same editable spawn form used for manual spawns.
 - [ ] Add explicit-spawn id/lifetime tests covering create, idempotent update or rejection policy,
       and removal.
 - [ ] Extract or introduce the neutral setup visual source adapter identified in Phase 12A.
 - [ ] Wire explicit spawns through resource readiness, playback, placement/index, renderer resource
       sync, renderer instance sync, query, and selected diagnostics.
-- [ ] Add a focused browser/debug harness or runtime test producer for one setup-backed explicit
-      spawn. Do not run the TUI client.
+- [ ] Add focused browser/runtime tests for one setup-backed explicit spawn. Do not run the TUI
+      client.
+- [ ] Add validation/diagnostic tests for resolved/requested server-shaped fields that Phase 12B
+      rejects or preserves as unsupported-spawn evidence.
 - [ ] Add regression coverage proving the explicit spawn does not enter static bake/query/scope
       retention paths.
 - [ ] Run focused TypeScript verification for dynamic controller/resource/runtime/query/renderer
@@ -3142,6 +3369,11 @@ Risks and mitigations:
   Mitigation: Phase 12A must compare the source contract against `holtburger-core` live entity
   shapes before Phase 12B implementation, and Phase 12B should keep host-shaped fields even if the
   first producer is browser/debug-authored.
+- Risk: the weenie resolver learns Phase 12B support limits and becomes a browser-spawn-specific
+  filter instead of a reusable source resolver.
+  Mitigation: keep the resolver contract source/resolution-oriented. It returns resolved facts and
+  resolver diagnostics only; the browser form, spawn adapter, or runtime validation owns accepted,
+  rejected, and unsupported-spawn decisions.
 - Risk: static-source facts get renamed or generalized prematurely.
   Mitigation: keep static-authored facts static; extract a neutral adapter only at the boundary where
   setup/gfx/material facts become dynamic visual readiness inputs.

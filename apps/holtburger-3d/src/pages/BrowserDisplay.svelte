@@ -151,7 +151,8 @@
 	let runtimeOverview = $state<RuntimeOverviewSnapshot | null>(null);
 	let cameraState = $state<FreeCameraState>(createFreeCameraState());
 	let diagnosticsReportText = $state<string | null>(null);
-	let selectedStaticDiagnosticsReportText = $state<string | null>(null);
+	let selectedDiagnosticsReportText = $state<string | null>(null);
+	let selectedDiagnosticsReportTitle = $state("Selection");
 	let selectedScenePick = $state<SelectedScenePick | null>(null);
 	let pendingCameraFocus = $state<PendingCameraFocus | null>(null);
 	let cameraFocusStatus = $state<CameraFocusStatus>("idle");
@@ -503,26 +504,41 @@
 		diagnosticsReportText = null;
 	}
 
-	function closeSelectedStaticDiagnosticsReport(): void {
-		selectedStaticDiagnosticsReportText = null;
+	function closeSelectedDiagnosticsReport(): void {
+		selectedDiagnosticsReportText = null;
 	}
 
-	function openSelectedStaticDiagnosticsReport(): void {
-		const selectedStaticPick = getSelectedStaticPick(selectedScenePick);
-		if (!runtime || !selectedStaticPick) {
+	function openSelectedDiagnosticsReport(): void {
+		if (!runtime || !selectedScenePick) {
 			return;
 		}
 
-		selectedStaticDiagnosticsReportText = JSON.stringify(
-			runtime.createStaticSelectionDiagnosticsReport(
-				selectedStaticPick.selectionKey,
+		if (selectedScenePick.kind === "static") {
+			selectedDiagnosticsReportText = JSON.stringify(
+				runtime.createStaticSelectionDiagnosticsReport(
+					selectedScenePick.selectionKey,
+					{
+						pickDistance: selectedScenePick.distance,
+					},
+				),
+				null,
+				2,
+			);
+			selectedDiagnosticsReportTitle = "Static Selection";
+			return;
+		}
+
+		selectedDiagnosticsReportText = JSON.stringify(
+			runtime.createDynamicSelectionDiagnosticsReport(
+				selectedScenePick.entityId,
 				{
-					pickDistance: selectedStaticPick.distance,
+					pickDistance: selectedScenePick.distance,
 				},
 			),
 			null,
 			2,
 		);
+		selectedDiagnosticsReportTitle = "Dynamic Selection";
 	}
 
 	function setTextureFilteringMode(event: Event): void {
@@ -1271,14 +1287,14 @@
 		});
 		const selection = createSelectedScenePick(hit);
 		selectedScenePick = selection;
-		selectedStaticDiagnosticsReportText = null;
+		selectedDiagnosticsReportText = null;
 		runtime.setSceneDebugSelection(createRuntimeSceneDebugSelection(selection));
 		refreshRuntimeOverview();
 	}
 
 	function clearSceneDebugSelection(): void {
 		selectedScenePick = null;
-		selectedStaticDiagnosticsReportText = null;
+		selectedDiagnosticsReportText = null;
 		runtime?.setSceneDebugSelection(null);
 		refreshRuntimeOverview();
 	}
@@ -1320,12 +1336,6 @@
 			entityId: selection.entityId,
 			kind: "dynamic",
 		};
-	}
-
-	function getSelectedStaticPick(
-		selection: SelectedScenePick | null,
-	): Extract<SelectedScenePick, { readonly kind: "static" }> | null {
-		return selection?.kind === "static" ? selection : null;
 	}
 
 	function formatScenePickSummary(selection: SelectedScenePick | null): string {
@@ -1978,9 +1988,9 @@
 									)}
 								</span>
 								<button
-									disabled={!getSelectedStaticPick(selectedScenePick)}
+									disabled={!selectedScenePick}
 									type="button"
-									onclick={openSelectedStaticDiagnosticsReport}
+									onclick={openSelectedDiagnosticsReport}
 								>
 									Inspect
 								</button>
@@ -2179,13 +2189,13 @@
 		/>
 	{/if}
 
-	{#if selectedStaticDiagnosticsReportText !== null}
+	{#if selectedDiagnosticsReportText !== null}
 		<DiagnosticsModal
 			eyebrow="Selected item diagnostics"
-			text={selectedStaticDiagnosticsReportText}
-			title="Static Selection"
+			text={selectedDiagnosticsReportText}
+			title={selectedDiagnosticsReportTitle}
 			titleId="browser-display-selection-diagnostics-title"
-			onClose={closeSelectedStaticDiagnosticsReport}
+			onClose={closeSelectedDiagnosticsReport}
 		/>
 	{/if}
 </section>

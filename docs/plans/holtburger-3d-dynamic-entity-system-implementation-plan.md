@@ -2066,7 +2066,7 @@ Debt and follow-up:
 
 ### Phase 9A: Dynamic Diagnostics And Inspection Readiness
 
-Status: pending.
+Status: completed on 2026-06-28.
 
 Purpose:
 
@@ -2119,19 +2119,19 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit existing runtime dynamic snapshot, renderer snapshot, and browser selection diagnostics
+- [x] Audit existing runtime dynamic snapshot, renderer snapshot, and browser selection diagnostics
       before adding any new report fields.
-- [ ] Add a compact dynamic diagnostics report domain derived from active dynamic records without
+- [x] Add a compact dynamic diagnostics report domain derived from active dynamic records without
       embedding itemized records or visual/pose payloads.
-- [ ] Add selected dynamic entity inspection because browser selection currently supports dynamic
+- [x] Add selected dynamic entity inspection because browser selection currently supports dynamic
       picks but the Inspect button only opens static selection diagnostics.
-- [ ] Keep selected dynamic inspection on the runtime boundary, backed by entity id lookup, rather
+- [x] Keep selected dynamic inspection on the runtime boundary, backed by entity id lookup, rather
       than teaching browser UI to spelunk `RuntimeSnapshot.dynamic.records`.
-- [ ] Add dynamic bounds debug overlay only if diagnostics/report fields are insufficient for
-      validation.
-- [ ] Add targeted tests for compact dynamic diagnostics, dynamic browser selection behavior,
+- [x] Confirm no new dynamic bounds debug overlay is needed because selected dynamic debug bounds
+      already use current runtime bounds.
+- [x] Add targeted tests for compact dynamic diagnostics, dynamic browser selection behavior,
       selected entity inspection, and renderer counters needed by manual validation.
-- [ ] Run full verification commands.
+- [x] Run full verification commands.
 
 Decisions and course corrections:
 
@@ -2175,12 +2175,44 @@ Decisions and course corrections:
 - 2026-06-28 dry run: The selected dynamic debug overlay already works through
   `RuntimeSceneDebugSelection` and `queryDynamicCurrentBounds`, so a dynamic bounds overlay is not
   needed for 9A unless manual validation finds a bounds/query mismatch.
+- 2026-06-28: Implemented `createDynamicDiagnosticsReport()` as a compact runtime report domain with
+  active, renderable, non-renderable, indexed, resource-pending, resource-failed, and static-authored
+  seed counts. The report deliberately does not include dynamic records, per-part poses, visual
+  resource arrays, warning histories, unsupported-hook counts, or hook-family-specific counters.
+- 2026-06-28: Added `ClientRuntime.createDynamicSelectionDiagnosticsReport(entityId)` and a narrow
+  `DynamicEntityController.queryDynamicEntitySummary()` lookup so BrowserDisplay can inspect dynamic
+  selections without reading `RuntimeSnapshot.dynamic.records` directly.
+- 2026-06-28: BrowserDisplay now uses one selected-item Inspect action for static and dynamic picks.
+  Dynamic selection reports include current operational entity state, debug bounds, deterministic
+  dynamic renderer resource/instance ids, and global dynamic renderer counters.
+- 2026-06-28: Renderer-private per-entity residency lookup was not added. Dynamic renderer
+  resource/instance ids are deterministic from the entity id, and global renderer counters are enough
+  for Phase 9B unless manual validation proves otherwise.
+- 2026-06-28: No new dynamic bounds overlay was added. The existing selected dynamic debug overlay
+  already uses current dynamic bounds through `RuntimeSceneDebugSelection`.
+- 2026-06-28: Focused test coverage proves the compact dynamic report does not expose itemized
+  records, that indexed count becomes nonzero after playback/placement tick, and that selected
+  dynamic diagnostics avoid `partPoses` and `renderParts` payload dumps.
+
+Verification:
+
+- 2026-06-28: `npm run test:ts -- client-runtime.test.ts`
+- 2026-06-28: `npm run check`
+- 2026-06-28: `npm run lint:ts`
+- 2026-06-28: `npm run lint:dead`
+- 2026-06-28: `npm run test:ts`
+- 2026-06-28: `npm run check:rust`
+- 2026-06-28: `npm run lint:rust`
+- 2026-06-28: `git diff --check`
 
 Debt and follow-up:
 
 - Dynamic transparent/additive render ordering remains a validation concern. Phase 9B should record
   whether the first-cut targets expose visible ordering problems; a later render-quality pass can
   share or generalize the static transparent sort machinery if needed.
+- Selected dynamic diagnostics report deterministic renderer ids and global renderer dynamic
+  counters, not renderer-owned per-entity residency. Add renderer-private lookup only if Phase 9B
+  cannot validate a real failure without it.
 
 ### Phase 9B: First-Cut Target Browser Validation
 

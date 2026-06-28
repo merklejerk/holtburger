@@ -115,6 +115,12 @@ export class DynamicEntityController {
 		return this.#store.createSnapshot();
 	}
 
+	queryDynamicEntitySummary(
+		entityId: DynamicEntityId,
+	): DynamicRuntimeSnapshot["records"][number] | null {
+		return this.#store.getSummary(entityId);
+	}
+
 	queryOutdoorDynamicBounds(options: {
 		readonly landblockId: number;
 		readonly bounds: StaticBounds;

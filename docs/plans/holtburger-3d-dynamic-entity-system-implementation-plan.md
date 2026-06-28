@@ -2224,7 +2224,7 @@ Debt and follow-up:
 
 ### Phase 9B: Distance-Based Dynamic Animation Update Cadence
 
-Status: pending.
+Status: completed on 2026-06-28.
 
 Purpose:
 
@@ -2271,20 +2271,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add a pure dynamic animation update cadence policy helper and tests for the `64m`, `128m`,
+- [x] Add a pure dynamic animation update cadence policy helper and tests for the `64m`, `128m`,
       `10Hz`, and `1Hz` thresholds.
-- [ ] Add render-space distance helpers for outdoor and env-cell dynamic records, using current
+- [x] Add render-space distance helpers for outdoor and env-cell dynamic records, using current
       bounds center first and translated base placement as fallback.
-- [ ] Feed active camera position/render-anchor context into dynamic update scheduling from
+- [x] Feed active camera position/render-anchor context into dynamic update scheduling from
       `ClientRuntimeImpl.tickFrame()`.
-- [ ] Extend `DynamicEntityController.tick()` with scheduling input so animation playback,
+- [x] Extend `DynamicEntityController.tick()` with scheduling input so animation playback,
       placement/bounds/index updates, and dynamic renderer instance commits only run for due records.
-- [ ] Prove selected dynamic inspection does not alter cadence and reports last evaluated state.
-- [ ] Prove the policy does not depend on static-authored provenance.
-- [ ] Prove skipped far updates preserve existing render/query state rather than clearing resources,
+- [x] Prove selected dynamic inspection does not alter cadence and reports last evaluated state.
+- [x] Prove the policy does not depend on static-authored provenance.
+- [x] Prove skipped far updates preserve existing render/query state rather than clearing resources,
       bounds, or index membership.
-- [ ] Prove startup/no-camera-frame behavior still updates every dynamic entity.
-- [ ] Run full verification commands.
+- [x] Prove startup/no-camera-frame behavior still updates every dynamic entity.
+- [x] Run full verification commands.
 
 Decisions and course corrections:
 
@@ -2310,6 +2310,38 @@ Decisions and course corrections:
   bounds intentionally report the last evaluated state rather than forcing a refresh.
 - 2026-06-28 dry run: Add a pure scheduler helper first. The runtime fixtures are heavy, and cadence
   threshold math should be tested without needing static resolver/baker setup.
+- 2026-06-28: Added `dynamic-animation-update-cadence.ts` as a pure app/runtime policy helper. It
+  maps `<=64m` to every-frame evaluation, `>64m && <=128m` to `10Hz`, and `>128m` to `1Hz`.
+- 2026-06-28: Distance resolution uses current dynamic bounds center first. Outdoor bounds and
+  outdoor base-placement fallbacks are translated from source-landblock-local space through the
+  current render anchor before comparing to the render-space camera. Env-cell records use their
+  landblock render-local positions directly.
+- 2026-06-28: `DynamicEntityController.tick()` now accepts optional animation cadence context and
+  owns a small `lastAnimationUpdateAtSecondsByEntityId` scheduler map. This is runtime scheduling
+  state, not diagnostics state; it is cleared when records are retained out or the controller is
+  disposed.
+- 2026-06-28: `ClientRuntimeImpl.tickFrame()` passes the active camera position and render anchor
+  into the dynamic controller when a frame state exists. With no camera frame state, cadence context
+  is `null` and dynamic entities continue evaluating every frame so startup/resource readiness does
+  not stall.
+- 2026-06-28: Renderer instance commits are now tied to dynamic evaluation changes. Skipped cadence
+  frames leave existing renderer instances resident with their last evaluated transforms instead of
+  clearing/recreating instances. Dynamic resource residency sync remains separate.
+- 2026-06-28: No selected-entity override or debug/full-fidelity path was added. Selected dynamic
+  inspection and debug bounds continue to read the same last evaluated state used by renderer/query.
+- 2026-06-28: `lint:dead` initially caught exported threshold constants that were only used
+  internally. The tests now assert against the exported policy constants directly so the public
+  threshold names remain reviewable without dead exports.
+
+Verification:
+
+- 2026-06-28: `npm run test:ts -- dynamic-animation-update-cadence.test.ts
+  dynamic-entity-controller.test.ts client-runtime.test.ts`
+- 2026-06-28: `npm run check`
+- 2026-06-28: `npm run lint:ts`
+- 2026-06-28: `npm run test:ts`
+- 2026-06-28: `npm run lint:dead`
+- 2026-06-28: `git diff --check`
 
 Debt and follow-up:
 
@@ -2319,6 +2351,9 @@ Debt and follow-up:
 - Future live players/creatures may need stricter near-field or gameplay-owned policies. Do not
   reuse the ambient dynamic scenery cadence blindly for authoritative gameplay entities without a
   separate review.
+- Phase 9B did not add renderer telemetry for skipped cadence evaluations. If browser validation
+  needs to distinguish "stale by cadence" from "not ticking because broken", add a compact runtime
+  projection from scheduler state rather than durable diagnostic bookkeeping in the pipeline.
 
 ### Phase 9C: First-Cut Target Browser Validation
 

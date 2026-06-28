@@ -1092,8 +1092,18 @@ class ClientRuntimeImpl implements ClientRuntime {
 			this.#renderer.updateFrameState(this.#lastFrameState);
 		}
 		const dynamicPlaybackChanged =
-			this.#dynamicEntityController.tick(timeSeconds);
-		this.#commitDynamicRendererInstances(timeSeconds);
+			this.#dynamicEntityController.tick(timeSeconds, {
+				animationCadenceContext:
+					this.#lastFrameState === null
+						? null
+						: {
+								cameraPosition: this.#lastFrameState.camera.position,
+								renderAnchorLandblockId: this.#renderAnchorLandblockId,
+							},
+			});
+		if (dynamicPlaybackChanged) {
+			this.#commitDynamicRendererInstances(timeSeconds);
+		}
 		if (dynamicPlaybackChanged) {
 			this.#refreshSceneDebugOverlay();
 		}

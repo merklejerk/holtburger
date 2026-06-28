@@ -22,6 +22,10 @@ import {
 	type DynamicEntityResourceChange,
 } from "./dynamic-entity-resource-manager";
 import {
+	shouldUpdateDynamicAnimationForCadence,
+	type DynamicAnimationUpdateCadenceContext,
+} from "./dynamic-animation-update-cadence";
+import {
 	DynamicPlacementTracker,
 	type EnvCellDynamicSpatialIndexRecord,
 } from "./dynamic-placement-tracker";
@@ -35,8 +39,17 @@ export interface DynamicEntityControllerOptions {
 	readonly store?: DynamicEntityStore;
 }
 
+export interface DynamicEntityTickOptions {
+	/** Browser/app-local camera cadence context; null keeps dynamic evaluation full-rate. */
+	readonly animationCadenceContext?: DynamicAnimationUpdateCadenceContext | null;
+}
+
 export class DynamicEntityController {
 	readonly #animationPlayer = new DynamicAnimationPlayer();
+	readonly #lastAnimationUpdateAtSecondsByEntityId = new Map<
+		DynamicEntityId,
+		number
+	>();
 	readonly #placementTracker: DynamicPlacementTracker;
 	readonly #resourceManager: DynamicEntityResourceManager | null;
 	readonly #store: DynamicEntityStore;
@@ -78,6 +91,7 @@ export class DynamicEntityController {
 			new Set(scopes.map(createStaticScopeOwnerKey)),
 		);
 		for (const record of removed) {
+			this.#lastAnimationUpdateAtSecondsByEntityId.delete(record.id);
 			this.#placementTracker.release(record.id);
 			this.#resourceManager?.releaseEntity(record.id);
 		}
@@ -93,11 +107,17 @@ export class DynamicEntityController {
 		}
 	}
 
-	tick(timeSeconds: number): boolean {
+	tick(timeSeconds: number, options: DynamicEntityTickOptions = {}): boolean {
 		let changed = false;
 		for (const record of this.#store.records()) {
+			if (
+				!this.#shouldTickRecordAnimation(record, timeSeconds, options)
+			) {
+				continue;
+			}
 			const update = this.#animationPlayer.update(record, timeSeconds);
 			const placementUpdate = this.#placementTracker.update(update.record);
+			this.#lastAnimationUpdateAtSecondsByEntityId.set(record.id, timeSeconds);
 			if (update.changed || placementUpdate.changed) {
 				this.#store.upsert(placementUpdate.record);
 				changed = true;
@@ -107,6 +127,7 @@ export class DynamicEntityController {
 	}
 
 	dispose(): void {
+		this.#lastAnimationUpdateAtSecondsByEntityId.clear();
 		this.#placementTracker.releaseAll();
 		this.#resourceManager?.releaseAll();
 	}
@@ -151,6 +172,20 @@ export class DynamicEntityController {
 		if (placementUpdate.changed) {
 			this.#store.upsert(placementUpdate.record);
 		}
+	}
+
+	#shouldTickRecordAnimation(
+		record: DynamicEntityRecord,
+		timeSeconds: number,
+		options: DynamicEntityTickOptions,
+	): boolean {
+		return shouldUpdateDynamicAnimationForCadence({
+			context: options.animationCadenceContext ?? null,
+			lastUpdatedAtSeconds:
+				this.#lastAnimationUpdateAtSecondsByEntityId.get(record.id) ?? null,
+			record,
+			timeSeconds,
+		}).shouldUpdate;
 	}
 }
 

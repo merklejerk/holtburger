@@ -12,11 +12,17 @@ export type StaticDomain =
 	| "landblock-env-cells";
 
 /**
- * Texture atlas placement domain used by renderer/resource policy. Static
- * scenery currently defines the available domains, but texture placement is
- * shared by static and dynamic visual resources.
+ * Runtime-authored object-material texture placement is not a static resolver
+ * domain; it only describes renderer atlas ownership/policy.
  */
-export type VisualTextureDomain = StaticDomain;
+type RuntimeVisualTextureDomain = "runtime-object-material";
+
+/**
+ * Texture atlas placement domain used by renderer/resource policy. Static
+ * scenery and runtime visual resources share texture placement machinery, but
+ * runtime-only domains must not leak into static resolver/work contracts.
+ */
+export type VisualTextureDomain = StaticDomain | RuntimeVisualTextureDomain;
 
 export interface StaticResolverScope {
 	readonly kind: "landblock";

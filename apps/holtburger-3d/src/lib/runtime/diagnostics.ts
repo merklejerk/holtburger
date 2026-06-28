@@ -11,8 +11,13 @@ import type {
 	StaticMaterialUnrenderedBucket,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialFallbackReason,
+	VisualTextureDomain,
 } from "../static/contracts";
-import type { TextureFilteringMode } from "../textures/sampling-policy";
+import type {
+	TextureFilteringMode,
+	TexturePageSampleClass,
+	TextureWrapMode,
+} from "../textures/sampling-policy";
 import type { DynamicRuntimeSnapshot } from "../dynamic/contracts";
 
 export interface RuntimeDiagnostics {
@@ -269,8 +274,33 @@ interface StaticCoordinatorTimingSampleDiagnostics {
 
 export interface TextureAtlasDiagnosticsReport {
 	readonly kind: "texture-atlas";
+	readonly batches: readonly TextureAtlasBatchDiagnostics[];
 	readonly summary: TextureAtlasDiagnosticsSummary;
 	readonly warnings?: readonly TextureAtlasWarningDiagnostics[];
+}
+
+interface TextureAtlasBatchDiagnostics {
+	readonly batchId: string;
+	readonly domain: VisualTextureDomain;
+	readonly entryAliasCount: number;
+	readonly uniqueSourceCount: number;
+	readonly texturePageCount: number;
+	readonly multiSourcePageCount: number;
+	readonly approximateBytes: number;
+	readonly pages: readonly TextureAtlasPageDiagnostics[];
+	readonly wrapModes: Record<TextureWrapMode, number>;
+}
+
+interface TextureAtlasPageDiagnostics {
+	readonly pageId: string;
+	readonly approximateBytes: number;
+	readonly format: "rgba8" | "r8" | "rg8";
+	readonly uniqueSourceCount: number;
+	readonly sampleClass: TexturePageSampleClass;
+	readonly mipmapsGenerated: boolean;
+	readonly samplerPolicyKey: string;
+	readonly wrapS: TextureWrapMode;
+	readonly wrapT: TextureWrapMode;
 }
 
 interface TextureAtlasDiagnosticsSummary {

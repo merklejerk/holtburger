@@ -206,6 +206,7 @@ export class TextureManager {
 		});
 
 		return {
+			batches,
 			kind: "texture-atlas",
 			summary: {
 				approximateBytes: sumNumbers(
@@ -1373,7 +1374,8 @@ function shouldUseIndependentRolePagePacking(
 				group.pagePolicy.sampleClass === "rgba-mask")) ||
 		group.domain === "outdoor-buildings" ||
 		group.domain === "outdoor-detail" ||
-		group.domain === "landblock-env-cells"
+		group.domain === "landblock-env-cells" ||
+		group.domain === "runtime-object-material"
 	);
 }
 

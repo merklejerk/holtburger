@@ -35,6 +35,9 @@ import type { OutdoorDynamicSpatialIndexRecord } from "./outdoor-dynamic-spatial
 
 const FIRST_SLICE_REQUIRED_RESOURCES = ["setup-model", "animation"] as const;
 const RUNTIME_SPAWN_ID_PREFIX = "runtime-spawn";
+type DynamicEntityTextureDomain =
+	DynamicEntityRecord["presentation"]["policy"]["textureDomain"];
+
 export interface DynamicEntityControllerOptions {
 	readonly onResourcesChanged?: () => void;
 	readonly placementTracker?: DynamicPlacementTracker;
@@ -477,7 +480,7 @@ function createRuntimeSpawnPresentation(options: {
 				kind: "explicit-runtime-lifetime",
 			},
 			textureBatchId: `dynamic:${id}`,
-			textureDomain: createRuntimeSpawnTextureDomain(sourceResidence),
+			textureDomain: createRuntimeSpawnTextureDomain(),
 		},
 		visualSource: {
 			animationSelection: source.animationSelection,
@@ -493,7 +496,7 @@ function createRuntimeSpawnPresentation(options: {
 
 function createStaticAuthoredTextureDomain(
 	owner: StaticWorkPeerRecordOwner,
-): DynamicEntityRecord["presentation"]["policy"]["textureDomain"] {
+): DynamicEntityTextureDomain {
 	if (owner.domain === "landblock-env-cells") {
 		return "landblock-env-cells";
 	}
@@ -502,12 +505,8 @@ function createStaticAuthoredTextureDomain(
 		: "outdoor-detail";
 }
 
-function createRuntimeSpawnTextureDomain(
-	sourceResidence: DynamicEntityRecord["sourceResidence"],
-): DynamicEntityRecord["presentation"]["policy"]["textureDomain"] {
-	return sourceResidence.kind === "env-cell"
-		? "landblock-env-cells"
-		: "outdoor-detail";
+function createRuntimeSpawnTextureDomain(): DynamicEntityTextureDomain {
+	return "runtime-object-material";
 }
 
 function applyResourceChange(

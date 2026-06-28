@@ -1236,6 +1236,90 @@ describe("browser texture manager", () => {
 		]);
 	});
 
+	it("packs runtime object-material dynamic texture refs in their own visual domain", async () => {
+		const rectsByTextureUseId = new Map<
+			string,
+			FixtureTexturePackerRectPlacement
+		>([
+			[
+				"runtime-spawn:1:base:0",
+				{
+					pageHeight: 512,
+					pageId: "runtime-base-page:0",
+					pageWidth: 512,
+					rect: [96, 96, 1, 1],
+				},
+			],
+			[
+				"runtime-spawn:1:base:1",
+				{
+					pageHeight: 512,
+					pageId: "runtime-base-page:1",
+					pageWidth: 512,
+					rect: [96, 96, 1, 1],
+				},
+			],
+		]);
+		const texturePacker = new FixtureTexturePacker({ rectsByTextureUseId });
+		const textureManager = new TextureManager({
+			assetService: new FixtureAssetService(),
+			texturePacker,
+		});
+
+		const update = await textureManager.applyDynamicTextureUseDelta({
+			removedOwners: [],
+			textureUses: [
+				createDynamicTextureUseCommit({
+					textureBatchId: "dynamic:runtime-spawn:1",
+					textureDomain: "runtime-object-material",
+					renderSurfaceId: 0x06000010,
+					resourceId: "dynamic-visual-resource:runtime-spawn:1",
+					textureUseId: "runtime-spawn:1:base:0",
+				}),
+				createDynamicTextureUseCommit({
+					textureBatchId: "dynamic:runtime-spawn:1",
+					textureDomain: "runtime-object-material",
+					renderSurfaceId: 0x06000020,
+					resourceId: "dynamic-visual-resource:runtime-spawn:1",
+					textureUseId: "runtime-spawn:1:base:1",
+				}),
+			],
+		});
+
+		expect(texturePacker.jobs).toHaveLength(1);
+		expect(texturePacker.jobs[0]).toMatchObject({
+			cohorts: undefined,
+			domain: "runtime-object-material",
+			page: {
+				gutterPixels: 4,
+			},
+		});
+		expect(textureManager.createDiagnosticsReport().batches).toMatchObject([
+			{
+				domain: "runtime-object-material",
+				texturePageCount: 2,
+			},
+		]);
+		expect(update?.textureBindings).toEqual([
+			expect.objectContaining({
+				owner: {
+					kind: "dynamic-visual-resource",
+					resourceId: "dynamic-visual-resource:runtime-spawn:1",
+				},
+				rolePage: { kind: "object-base-color", slot: 0 },
+				textureUseId: "runtime-spawn:1:base:0",
+			}),
+			expect.objectContaining({
+				owner: {
+					kind: "dynamic-visual-resource",
+					resourceId: "dynamic-visual-resource:runtime-spawn:1",
+				},
+				rolePage: { kind: "object-base-color", slot: 1 },
+				textureUseId: "runtime-spawn:1:base:1",
+			}),
+		]);
+	});
+
 	it("keeps static atlas pages leased after releasing a dynamic visual owner", async () => {
 		const textureManager = new TextureManager({
 			assetService: new FixtureAssetService(),

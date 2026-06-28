@@ -2706,7 +2706,7 @@ Cleanup targets:
 - Temporary `pickStaticRay` compatibility wrappers after merged query migration. Completed in
   Phase 11B.
 - Remaining static-only visual-resource/material helper names that serve dynamic rendering too after
-  Phase 11A.
+  Phase 11A. Carried forward to Phase 11C.
 - `prepareV2StaticAssetPayload` if Phase 1 leaves that name in place after adding animation assets.
   Completed in Phase 11B by renaming the route parser to `prepareV2AssetPayload`.
 - Redundant dynamic/static material interpretation helpers.
@@ -2764,10 +2764,337 @@ Decisions and course corrections:
 
 Debt and follow-up:
 
-- WebGL object-material prepared payload names still say `StaticObject*` even though dynamic visual
-  parts use the same shader/material path. Rename in a dedicated renderer-material cleanup pass.
+- WebGL object-material prepared payload, role-page, and render-state names still say
+  `StaticObject*` even though dynamic visual parts use the same shader/material path. Rename in
+  Phase 11C.
 - Dynamic runtime summary DTOs can stay as-is for the first cut. Split operational render/runtime
   DTOs from selected inspection views only if inspection starts driving additional fields.
+
+### Phase 11C: WebGL Object Material Naming And Role-Page Cutover
+
+Status: pending.
+
+Purpose:
+
+- Rename the shared WebGL object-material shader, prepared-payload, role-page, and render-state
+  substrate so it no longer presents dynamic rendering as a static-object special case.
+
+Scope:
+
+In scope:
+
+- Shared WebGL object-material payload preparation used by static object draw units, static visual
+  resources, structured interiors, and dynamic visual resources.
+- Shared role-page slot allocation for non-terrain object-style material textures, including dynamic
+  `TextureBindingOwner` values.
+- Shared object-material render-state helpers, blend-factor helpers, transparent draw sort helpers,
+  and prepared-payload dirtying helpers where they already accept dynamic visual resources.
+- Tests whose names and assertions encode the old static-only role-page and payload terminology.
+
+Out of scope:
+
+- Static-authored source facts, static bake/materialization ownership, static layer payloads,
+  `StaticObjectRenderInstance`, `StaticObjectVisualResource`, static scene-query records, and static
+  diagnostics that genuinely describe static-layer work.
+- Terrain role-page naming. Terrain remains a separate shader/role-page family.
+- Dynamic entity resource ownership, renderer dynamic commit APIs, or new material behavior.
+- Texture velocity, material transitions, lighting, particle, sound, or replacement-object hook
+  behavior. This phase is naming and boundary hardening only.
+
+Survey findings:
+
+- [apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-static-object-payloads.ts](../../apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-static-object-payloads.ts)
+  is now a shared object-material payload builder, not a static-object-only helper. It prepares
+  material uniforms and role-page bindings consumed by static object draw units, static visual
+  resources, structured interiors, and dynamic visual resources.
+- The exported payload symbols are misleading and should be renamed together:
+  `StaticObjectMaterialPayloadResource`, `StaticObjectPreparedDrawPayload`,
+  `StaticObjectPreparedRolePageBindings`, `StaticObjectPreparedMaterialUniforms`,
+  `StaticObjectPreparedDrawPayloadState`, `createStaticObjectPreparedDrawPayloadState`,
+  `markStaticObjectPreparedDrawPayloadDirty`, `prepareStaticObjectDrawPayloadState`,
+  `createStaticObjectPreparedDrawPayload`, and `prepareStaticObjectDrawPayload`.
+- The private helpers in the same file are also shared and should follow the same rename:
+  `createStaticObjectRolePageScratch`, `createStaticObjectMaterialUniformScratch`,
+  `resetStaticObjectRolePageBindings`, `resetStaticObjectRolePage`,
+  `resetStaticObjectMaterialUniforms`, `fillStaticObjectRolePageBindings`,
+  `collectStaticObjectPageBinding`, `fillStaticObjectMaterialUniforms`,
+  `resolveStaticObjectMaterialEntryMode`, and `writeStaticObjectTextureEntry`.
+- The `MAX_STATIC_OBJECT_*_PAGES_PER_DRAW` and `MAX_STATIC_OBJECT_MATERIAL_ENTRIES_PER_DRAW`
+  constants in [apps/holtburger-3d/src/lib/renderer/types.ts](../../apps/holtburger-3d/src/lib/renderer/types.ts)
+  are object-material shader limits, not static-layer limits. Rename them to an object-material
+  vocabulary unless implementation finds a public compatibility cost that is not worth paying.
+- `TextureRolePageKind` currently uses `"static-base-color"`, `"static-detail"`, `"static-index"`,
+  and `"static-palette"` for role pages also assigned to dynamic visual-resource owners. Rename
+  these values to object-material role names such as `"object-base-color"`, `"object-detail"`,
+  `"object-index"`, and `"object-palette"` in one decisive cutover.
+- `StaticObjectTextureRolePageKind`, `StaticObjectRolePageOverflowDiagnostics`, the
+  `staticObjectRolePageOverflows` texture-manager field, `StaticObjectOwnerRolePageSlots`,
+  `StaticObjectRolePageSlotInput`, `createStaticObjectTextureRolePageKind`, and
+  `getMaxStaticObjectRolePageSlots` should become object-material role-page names. The warning kind
+  `"static-object-role-page-overflow"` should be renamed to an object-material warning kind unless a
+  caller relies on the old report string.
+- [apps/holtburger-3d/src/lib/runtime/static-materializer.ts](../../apps/holtburger-3d/src/lib/runtime/static-materializer.ts)
+  has local role-page typing and mapping for the same `"static-..."` values. Update it with the
+  renderer role-page rename rather than leaving a compatibility translation layer.
+- [apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-renderer.ts](../../apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-renderer.ts)
+  still uses shared dynamic/static material names such as `StaticObjectGeometryProgram`,
+  `StaticMaterialGeometryResource`, `createStaticTextureBindingOwnerForResource`,
+  `uploadStaticObjectRolePageBindings`, `uploadStaticObjectMaterialTableUniforms`,
+  `#getStaticObjectPreparedPayload`, `#markAllStaticObjectPreparedPayloadsDirty`,
+  `resolveStaticObjectBlendFactor`, `applyStaticObjectRenderState`, and
+  `restoreStaticObjectRenderState`. These are shared object-material paths and should be renamed.
+- Transparent draw sorting still uses static-object naming and data structures. This is partly
+  accurate for static layer draw lists, but helper names such as
+  `StaticObjectTransparentDrawSortEntry`, `compareStaticObjectTransparentDrawEntries`,
+  `isTransparentStaticObjectResource`, and render-state/blend helpers should be audited while
+  renaming the material path. Rename only the portions that accept `DynamicVisualGeometryResource`
+  or `StructuredInteriorGeometryResource`; keep static draw-list ownership names where the list is
+  still static-layer-specific.
+- Renderer diagnostics such as `staticObjectResources`, `recentStaticObjectUploads`, and
+  `outdoorDetailStaticObjectBakedDirectDrawCallsByPass` remain static diagnostics and should not be
+  renamed in this phase. They describe static-layer work, not the shared shader substrate.
+- Tests to update include
+  [apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-static-object-payloads.test.ts](../../apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-static-object-payloads.test.ts),
+  [apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-renderer.test.ts](../../apps/holtburger-3d/src/lib/renderer/webgl2/webgl2-renderer.test.ts),
+  [apps/holtburger-3d/src/lib/textures/texture-manager.test.ts](../../apps/holtburger-3d/src/lib/textures/texture-manager.test.ts),
+  and [apps/holtburger-3d/src/lib/runtime/static-materializer.test.ts](../../apps/holtburger-3d/src/lib/runtime/static-materializer.test.ts).
+
+Suggested naming direction:
+
+- File rename: `webgl2-static-object-payloads.ts` to `webgl2-object-material-payloads.ts`.
+- Test rename: `webgl2-static-object-payloads.test.ts` to
+  `webgl2-object-material-payloads.test.ts`.
+- Public payload/resource vocabulary: `ObjectMaterialPayloadResource`,
+  `ObjectMaterialPreparedDrawPayload`, `ObjectMaterialRolePageBindings`,
+  `ObjectMaterialPreparedUniforms`, `ObjectMaterialPreparedDrawPayloadState`,
+  `createObjectMaterialPreparedDrawPayloadState`, `markObjectMaterialPreparedDrawPayloadDirty`,
+  `prepareObjectMaterialDrawPayloadState`, `createObjectMaterialPreparedDrawPayload`, and
+  `prepareObjectMaterialDrawPayload`.
+- Renderer vocabulary: `ObjectMaterialGeometryProgram`, `ObjectMaterialGeometryResource`,
+  `createTextureBindingOwnerForObjectMaterialResource`, `uploadObjectMaterialRolePageBindings`,
+  `uploadObjectMaterialUniforms`, `#getObjectMaterialPreparedPayload`,
+  `#markObjectMaterialPreparedPayloadDirty`, `#markAllObjectMaterialPreparedPayloadsDirty`,
+  `resolveObjectMaterialBlendFactor`, `applyObjectMaterialRenderState`, and
+  `restoreObjectMaterialRenderState`.
+- Role-page vocabulary: `ObjectMaterialTextureRolePageKind`, `ObjectMaterialRolePageSlotInput`,
+  `ObjectMaterialOwnerRolePageSlots`, `ObjectMaterialRolePageOverflowDiagnostics`,
+  `objectMaterialRolePageOverflows`, and role-page values `"object-base-color"`,
+  `"object-detail"`, `"object-index"`, and `"object-palette"`.
+
+Acceptance criteria:
+
+- Dynamic visual resources no longer flow through types, functions, or diagnostics whose names imply
+  they are static object resources, except where the name describes true static-layer ownership.
+- `webgl2-static-object-payloads.ts` and its test are renamed to object-material names, and imports
+  are updated without compatibility re-exports.
+- Shared object-material shader limits, payloads, role-page bindings, dirtying helpers, uniform
+  upload helpers, render-state helpers, and blend helpers use neutral object-material names.
+- Dynamic, static visual-resource, static draw-unit, and structured-interior draw paths all continue
+  to use the same object-material payload path after the rename.
+- Role-page kind values used by non-terrain object-material textures no longer contain
+  `"static-"`, and texture-manager/runtime tests are updated in the same cutover.
+- Static-layer ownership names and diagnostics remain intact where they are semantically correct.
+- No new behavior, hook support, renderer feature, or compatibility shim is introduced.
+
+Task checklist:
+
+- [ ] Rename the WebGL object-material payload file, test file, exports, imports, and helper names.
+- [ ] Rename object-material shader limit constants and update payload construction tests.
+- [ ] Rename `TextureRolePageKind` object-material values and related texture-manager role-page
+      allocator types, fields, warning diagnostics, and tests.
+- [ ] Rename shared renderer program/resource/payload/render-state helpers while preserving true
+      static-layer resource and diagnostic names.
+- [ ] Audit transparent draw helper names and rename only helpers that are now shared with dynamic
+      or structured-interior material resources.
+- [ ] Run focused verification:
+      `npm run test:ts -- webgl2-object-material-payloads.test.ts webgl2-renderer.test.ts texture-manager.test.ts static-materializer.test.ts`.
+- [ ] Run full verification commands from `apps/holtburger-3d`: `npm run check`,
+      `npm run lint:ts`, `npm run lint:dead`, and `npm run test:ts`.
+
+Risks and mitigations:
+
+- Risk: a mechanical rename blurs static-layer ownership.
+  Mitigation: keep static source facts, static layer payloads, static render instances, static
+  visual resources, and static diagnostics named static. Rename only the shared shader/material
+  substrate and object-material role-page allocator.
+- Risk: role-page kind value renames cause broad fixture churn.
+  Mitigation: make the value cutover once, update tests in the same phase, and do not add
+  compatibility aliases unless a real external contract is discovered.
+- Risk: transparent draw sorting grows a fake shared abstraction.
+  Mitigation: rename only the helpers/resources that are already shared. Keep static draw-list
+  ownership names if dynamic transparent sorting is not yet using that list.
+
+### Phase 12A: Non-Static Dynamic Source Boundary Evidence
+
+Status: pending.
+
+Purpose:
+
+- Define the first non-static-authored dynamic entity source boundary before static-authored scenery
+  facts become accidental dynamic runtime architecture.
+
+Context:
+
+- The first dynamic vertical slice intentionally used static-authored dynamic scenery. That means
+  current dynamic readiness can lean on static seed facts, static source identities, and static source
+  closure helpers without immediately being wrong.
+- Future dynamic entities are not guaranteed to be static sourced. Host-spawned players, creatures,
+  items, projectiles, equipment, browser-authored debug spawns, and future client-mode local entities
+  need a dynamic source path that does not fabricate `StaticAuthoredDynamicSeedRecord`,
+  `StaticObjectInstanceIdentity`, static source scopes, or `StaticObjectSourceAssetFacts` as their
+  root model.
+- The renderer-facing side is already closer to the right shape after Phase 11A and Phase 11C:
+  neutral visual geometry and object-material payloads should accept static and non-static dynamic
+  sources through explicit adapters.
+
+Scope:
+
+In scope:
+
+- Audit current dynamic record creation, resource readiness, placement, renderer commit, query,
+  diagnostics, and removal paths for static-source assumptions.
+- Identify the minimal non-static source contract needed for a first explicit dynamic spawn:
+  runtime-assigned or caller-provided dynamic entity id, provenance, source residence, setup id,
+  optional animation id/timeline start, base transform, scale, and explicit destruction.
+- Compare the proposed source contract against existing host/live entity data in
+  `holtburger-core` and world/entity DTOs so the debug/browser spike does not contradict the future
+  live entity pipeline.
+- Identify which static resource helpers should be extracted or wrapped behind neutral setup visual
+  source adapters before a non-static dynamic spawn consumes setup/gfx/material facts.
+- Decide whether the first implementation slice should use browser/debug-authored spawns, a narrow
+  host-spawned fixture, or both.
+
+Out of scope:
+
+- Implementing live player, creature, equipment, projectile, inventory, combat, or authoritative
+  spawn/despawn semantics.
+- Full `ModelData` palette/sub-palette/texture/model-change composition.
+- Motion-table selection, physics scripts, particles, sounds, lights, replacement visuals, or
+  material transition hooks.
+- Treating a browser/debug spawn as a retail gameplay entity. It is an architecture probe and
+  diagnostics harness unless a later phase connects it to host authority.
+
+Survey targets:
+
+- [apps/holtburger-3d/src/lib/dynamic/dynamic-entity-controller.ts](../../apps/holtburger-3d/src/lib/dynamic/dynamic-entity-controller.ts)
+  for static-authored seed ingestion, id construction, retention, removal, and tick scheduling.
+- [apps/holtburger-3d/src/lib/dynamic/dynamic-entity-resource-manager.ts](../../apps/holtburger-3d/src/lib/dynamic/dynamic-entity-resource-manager.ts)
+  for assumptions around `StaticObjectSourceAssetFacts`, `StaticObjectInstanceIdentity`,
+  `resolveStaticObjectSourceClosure()`, and material-slot extraction.
+- [apps/holtburger-3d/src/lib/dynamic/contracts.ts](../../apps/holtburger-3d/src/lib/dynamic/contracts.ts)
+  for provenance, source residence, renderability, visual readiness, and summary DTO coupling.
+- [apps/holtburger-3d/src/lib/runtime/client-runtime.ts](../../apps/holtburger-3d/src/lib/runtime/client-runtime.ts)
+  for runtime-owned orchestration, frame ticking, dynamic renderer sync, query, diagnostics, and
+  browser/runtime command boundaries.
+- [apps/holtburger-3d/src/lib/runtime/scene-query/merged-scene-query.ts](../../apps/holtburger-3d/src/lib/runtime/scene-query/merged-scene-query.ts)
+  for whether dynamic query membership already depends only on dynamic ids/bounds/residence.
+- `crates/holtburger-core/src/client/runtime.rs`, `crates/holtburger-core/src/client/types.rs`, and
+  `crates/holtburger-core/src/client/messages.rs` for existing host/live entity event and body-view
+  shapes.
+- `crates/holtburger-common/src/properties/world_object.rs` and
+  `crates/holtburger-common/src/position.rs` for setup/model/position fields likely to feed future
+  live dynamic visual sources.
+
+Acceptance criteria:
+
+- The plan records a concrete non-static dynamic source contract and identifies which fields are
+  required for the first explicit-spawn slice versus deferred live/entity composition.
+- The plan records every static-source assumption that would force a non-static source to fabricate
+  static identities or static scope ownership.
+- The selected first implementation target is justified as either browser/debug-authored,
+  host-fixture-authored, or both, with clear limits.
+- The next implementation phase can be executed without guessing whether to reuse, extract, or
+  replace static source closure helpers.
+
+Task checklist:
+
+- [ ] Audit dynamic controller/store/resource/placement/query/runtime code for static-source
+      assumptions and record concrete blockers.
+- [ ] Audit `holtburger-core` live entity/runtime message shapes for setup id, model data, position,
+      motion, and lifecycle facts relevant to a future source adapter.
+- [ ] Define the first non-static dynamic source contract and removal/lifetime semantics.
+- [ ] Decide the first implementation target: browser/debug explicit spawn, host fixture spawn, or
+      a split where the contract is host-shaped and the first producer is browser/debug-authored.
+- [ ] Update Phase 12B with any revised implementation details discovered by this evidence pass.
+
+### Phase 12B: Minimal Explicit-Spawn Dynamic Entity Slice
+
+Status: pending.
+
+Purpose:
+
+- Prove a dynamic entity can be created, animated, rendered, queried, inspected, and destroyed
+  without originating from static-authored dynamic seeds or static scope retention.
+
+Deliverables:
+
+- Add a non-static dynamic source/provenance variant for explicit runtime/browser-authored dynamic
+  spawns. The contract should be compatible with a future host-spawned adapter even if the first
+  producer is browser/debug tooling.
+- Add an explicit create/update/remove API at the runtime/controller boundary. Removal must be
+  explicit and must release resource leases, spatial/query membership, renderer resources, renderer
+  instances, and scheduler state.
+- Add a neutral setup visual source adapter or extraction boundary so explicit spawns do not create
+  fake `StaticAuthoredDynamicSeedRecord`, `StaticObjectInstanceIdentity`, static source scopes, or
+  static object instance facts.
+- Reuse existing dynamic resource readiness, animation playback, placement, cadence, renderer
+  resource/instance commits, merged query, and selected diagnostics after the source adapter has
+  produced the required dynamic runtime facts.
+- Support a first explicit spawn with setup id, optional animation id or setup default animation,
+  base transform, scale, source residence, and debug provenance.
+- Keep browser/debug spawn UI or harness controls minimal and app-local. The goal is proving the
+  pipeline, not building a gameplay spawn editor.
+- Add tests proving explicit dynamic spawns do not appear in static bake output, static scene query
+  records, static source retention, or static scope eviction.
+
+Acceptance criteria:
+
+- An explicit non-static dynamic spawn can become resource-ready and render through the same dynamic
+  renderer resource and instance commit APIs as static-authored dynamic records.
+- The explicit spawn can animate through the existing playback path when an animation is provided or
+  when setup default animation is selected by the source contract.
+- Bounds, effective residence, cadence scheduling, merged dynamic query hits, browser inspection,
+  and selected dynamic diagnostics work for the explicit spawn without static source keys.
+- Explicit removal tears down resources, renderer state, query/index membership, and scheduler state
+  without relying on static scope retention.
+- No explicit-spawn path fabricates static seed records, static source scopes, static object
+  identities, or static draw units.
+- Existing static-authored dynamic scenery behavior remains stable.
+- The implementation records what still blocks host-spawned players/creatures: model-data
+  overrides, equipment composition, motion-table selection, authority/cancellation semantics, or
+  other live-specific gaps.
+
+Task checklist:
+
+- [ ] Add non-static dynamic provenance/source contract and controller create/remove APIs.
+- [ ] Add explicit-spawn id/lifetime tests covering create, idempotent update or rejection policy,
+      and removal.
+- [ ] Extract or introduce the neutral setup visual source adapter identified in Phase 12A.
+- [ ] Wire explicit spawns through resource readiness, playback, placement/index, renderer resource
+      sync, renderer instance sync, query, and selected diagnostics.
+- [ ] Add a focused browser/debug harness or runtime test producer for one setup-backed explicit
+      spawn. Do not run the TUI client.
+- [ ] Add regression coverage proving the explicit spawn does not enter static bake/query/scope
+      retention paths.
+- [ ] Run focused TypeScript verification for dynamic controller/resource/runtime/query/renderer
+      tests.
+- [ ] Run full app verification commands from `apps/holtburger-3d`.
+
+Risks and mitigations:
+
+- Risk: the explicit-spawn path becomes a toy that future host-spawned entities cannot reuse.
+  Mitigation: Phase 12A must compare the source contract against `holtburger-core` live entity
+  shapes before Phase 12B implementation, and Phase 12B should keep host-shaped fields even if the
+  first producer is browser/debug-authored.
+- Risk: static-source facts get renamed or generalized prematurely.
+  Mitigation: keep static-authored facts static; extract a neutral adapter only at the boundary where
+  setup/gfx/material facts become dynamic visual readiness inputs.
+- Risk: explicit spawns introduce a second dynamic renderer/query pipeline.
+  Mitigation: after source adaptation, reuse the existing dynamic resource manager, placement
+  tracker, renderer dynamic commits, cadence policy, merged query family, and selected diagnostics.
+- Risk: explicit destruction leaks leases or renderer state.
+  Mitigation: make removal acceptance tests cover resource leases, spatial membership, renderer
+  resources, renderer instances, and scheduler state together.
 
 ## Risks And Mitigations
 

@@ -426,7 +426,7 @@ export function createDynamicDiagnosticsReport(
 					record.resources.status === "pending" ||
 					record.resources.status === "setup-animation-ready",
 			).length,
-			staticAuthoredSeeds: snapshot.staticSeedCount,
+				staticAuthoredSeeds: snapshot.staticAuthoredCount,
 		},
 	};
 }

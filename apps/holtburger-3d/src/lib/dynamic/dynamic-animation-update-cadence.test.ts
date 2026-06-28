@@ -249,29 +249,32 @@ function createReadyDynamicRecord(options: {
 				textureRequirements: [],
 			},
 		},
-		sourceResidence: {
-			kind: "outdoor-landblock",
-			landblockId: 0xda55ffff,
-		},
-		sourceSeed: {
-			classificationReason: "setup-default-animation",
-			defaultAnimationId: 0x0300061b,
-			domain: "outdoor-buildings",
-			landblockId: 0xda55ffff,
-			localPlacement: createPlacement(options.baseOrigin),
-			object,
-			setupModelId: 0x020003e5,
-			source,
-			sourceAssetId: "setup-model/020003e5",
 			sourceResidence: {
-				kind: "landblock-source",
+				kind: "outdoor-landblock",
 				landblockId: 0xda55ffff,
-				source: "outdoor",
 			},
-			sourceScale: { x: 1, y: 1, z: 1 },
-		},
-	};
-}
+			source: {
+				kind: "static-authored",
+				seed: {
+					classificationReason: "setup-default-animation",
+					defaultAnimationId: 0x0300061b,
+					domain: "outdoor-buildings",
+					landblockId: 0xda55ffff,
+					localPlacement: createPlacement(options.baseOrigin),
+					object,
+					setupModelId: 0x020003e5,
+					source,
+					sourceAssetId: "setup-model/020003e5",
+					sourceResidence: {
+						kind: "landblock-source",
+						landblockId: 0xda55ffff,
+						source: "outdoor",
+					},
+					sourceScale: { x: 1, y: 1, z: 1 },
+				},
+			},
+		};
+	}
 
 function createAnimationPayload(frameCount: number): AnimationPayloadDto {
 	return {

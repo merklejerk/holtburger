@@ -352,27 +352,31 @@ function createReadyRecord(
 				textureRefs: [],
 				textureRequirements: [],
 			},
-		},
-		sourceResidence,
-		sourceSeed: {
-			classificationReason: "setup-default-animation",
-			defaultAnimationId: 0x0300061b,
-			domain: "outdoor-buildings",
-			landblockId: sourceLandblockId,
-			localPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
-			object,
-			setupModelId: 0x020003e5,
-			source,
-			sourceAssetId: "setup-model/020003e5",
-			sourceResidence: {
-				kind: "landblock-source",
-				landblockId: sourceLandblockId,
-				source: sourceResidence.kind === "env-cell" ? "env-cells" : "outdoor",
 			},
-			sourceScale: { x: 1, y: 1, z: 1 },
-		},
-	};
-}
+			sourceResidence,
+			source: {
+				kind: "static-authored",
+				seed: {
+					classificationReason: "setup-default-animation",
+					defaultAnimationId: 0x0300061b,
+					domain: "outdoor-buildings",
+					landblockId: sourceLandblockId,
+					localPlacement: createPlacement({ x: 0, y: 0, z: 0 }),
+					object,
+					setupModelId: 0x020003e5,
+					source,
+					sourceAssetId: "setup-model/020003e5",
+					sourceResidence: {
+						kind: "landblock-source",
+						landblockId: sourceLandblockId,
+						source:
+							sourceResidence.kind === "env-cell" ? "env-cells" : "outdoor",
+					},
+					sourceScale: { x: 1, y: 1, z: 1 },
+				},
+			},
+		};
+	}
 
 function createSourceAsset(
 	source: StaticObjectSourceIdentity,

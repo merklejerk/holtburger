@@ -21,6 +21,7 @@ import type {
 } from "../static/contracts";
 import {
 	planStaticObjectMaterials,
+	type StaticMaterialPlanningDomain,
 	type StaticMaterialPlanningSlotFacts,
 	type StaticMaterialFallbackReason,
 	type StaticMaterialPlan,
@@ -541,22 +542,8 @@ function createMaterialPlanningLandblockSource(
 
 function createDynamicMaterialPlanningDomain(
 	presentation: DynamicEntityPresentation,
-): "landblock-env-cells" | "outdoor-buildings" | "outdoor-detail" {
-	if (presentation.visualSource.effectiveResidence.kind === "env-cell") {
-		return "landblock-env-cells";
-	}
-
-	const domain = presentation.policy.textureDomain;
-	if (domain === "outdoor-buildings" || domain === "outdoor-detail") {
-		return domain;
-	}
-	if (domain === "runtime-object-material") {
-		return "outdoor-detail";
-	}
-
-	throw new Error(
-		`Unsupported static-authored dynamic material planning domain ${domain}.`,
-	);
+): StaticMaterialPlanningDomain {
+	return presentation.policy.materialPlanningDomain;
 }
 
 function reportUnresolvedSetupDefaultAnimation(entityId: DynamicEntityId): void {

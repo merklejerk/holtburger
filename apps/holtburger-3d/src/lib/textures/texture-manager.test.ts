@@ -1270,14 +1270,14 @@ describe("browser texture manager", () => {
 			removedOwners: [],
 			textureUses: [
 				createDynamicTextureUseCommit({
-					textureBatchId: "dynamic:runtime-spawn:1",
+					textureBatchId: "runtime-dynamic:runtime-spawn:1",
 					textureDomain: "runtime-object-material",
 					renderSurfaceId: 0x06000010,
 					resourceId: "dynamic-visual-resource:runtime-spawn:1",
 					textureUseId: "runtime-spawn:1:base:0",
 				}),
 				createDynamicTextureUseCommit({
-					textureBatchId: "dynamic:runtime-spawn:1",
+					textureBatchId: "runtime-dynamic:runtime-spawn:1",
 					textureDomain: "runtime-object-material",
 					renderSurfaceId: 0x06000020,
 					resourceId: "dynamic-visual-resource:runtime-spawn:1",

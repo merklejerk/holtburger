@@ -16,6 +16,7 @@ import type {
 	StaticWorkPeerRecordOwner,
 	VisualTextureDomain,
 } from "../static/contracts";
+import type { StaticMaterialPlanningDomain } from "../static/objects/bake/static-object-material-planner";
 import type { VisualGeometryPayload } from "../visual/visual-geometry";
 import type {
 	AnimationPayloadDto,
@@ -24,6 +25,12 @@ import type {
 } from "../host/contracts";
 
 export type DynamicEntityId = string;
+export const RUNTIME_AUTHORED_DYNAMIC_RESOURCE_FAMILY =
+	"runtime-authored-dynamic-object-material" as const;
+export const RUNTIME_AUTHORED_DYNAMIC_DETAIL_ROLE_POLICY =
+	"runtime-authored-none" as const;
+export const RUNTIME_AUTHORED_DYNAMIC_DIAGNOSTICS_BUCKET =
+	"runtime-authored-dynamic" as const;
 
 export function createDynamicVisualResourceId(
 	entityId: DynamicEntityId,
@@ -59,12 +66,38 @@ export interface DynamicEntityPresentation {
 
 /** Operational presentation policies derived once from source-specific facts. */
 interface DynamicPresentationPolicy {
+	readonly diagnosticsBucket: DynamicDiagnosticsBucket;
 	readonly materialPlanningIdentity: DynamicMaterialPlanningIdentity;
+	readonly materialPlanningDomain: DynamicMaterialPlanningDomain;
+	readonly materialDetailRolePolicy: DynamicMaterialDetailRolePolicy;
 	readonly ownershipPolicy: DynamicVisualOwnershipPolicy;
+	readonly resourceFamily: DynamicResourceFamily;
 	readonly retentionPolicy: DynamicRetentionPolicy;
 	readonly textureBatchId: string;
 	readonly textureDomain: VisualTextureDomain;
 }
+
+type DynamicResourceFamily =
+	| "static-authored-dynamic-object-material"
+	| typeof RUNTIME_AUTHORED_DYNAMIC_RESOURCE_FAMILY;
+
+type DynamicMaterialPlanningDomain = StaticMaterialPlanningDomain;
+
+type DynamicMaterialDetailRolePolicy =
+	| {
+			readonly kind: "static-domain";
+			readonly domain: Exclude<
+				StaticMaterialPlanningDomain,
+				typeof RUNTIME_AUTHORED_DYNAMIC_RESOURCE_FAMILY
+			>;
+	  }
+	| {
+			readonly kind: typeof RUNTIME_AUTHORED_DYNAMIC_DETAIL_ROLE_POLICY;
+	  };
+
+type DynamicDiagnosticsBucket =
+	| "static-authored-dynamic"
+	| typeof RUNTIME_AUTHORED_DYNAMIC_DIAGNOSTICS_BUCKET;
 
 type DynamicRetentionPolicy =
 	| {

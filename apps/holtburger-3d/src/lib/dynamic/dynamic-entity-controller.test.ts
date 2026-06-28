@@ -63,6 +63,7 @@ describe("dynamic entity controller", () => {
 				sourceScopeKey: "outdoor-buildings:landblock:da55ffff",
 			},
 			policy: {
+				diagnosticsBucket: "static-authored-dynamic",
 				materialPlanningIdentity: {
 					kind: "setup-backed-visual",
 					visualObject: {
@@ -71,11 +72,17 @@ describe("dynamic entity controller", () => {
 							"dynamic-visual-resource:static-authored-outdoor:outdoor-buildings:landblock:da55ffff:object:building:windmill-0:setup:020003e5",
 					},
 				},
+				materialDetailRolePolicy: {
+					domain: "outdoor-buildings",
+					kind: "static-domain",
+				},
+				materialPlanningDomain: "outdoor-buildings",
 				ownershipPolicy: {
 					kind: "dynamic-visual-resource",
 					resourceId:
 						"dynamic-visual-resource:static-authored-outdoor:outdoor-buildings:landblock:da55ffff:object:building:windmill-0:setup:020003e5",
 				},
+				resourceFamily: "static-authored-dynamic-object-material",
 				retentionPolicy: {
 					kind: "static-source-scope",
 					sourceScopeKey: "outdoor-buildings:landblock:da55ffff",
@@ -159,6 +166,18 @@ describe("dynamic entity controller", () => {
 				kind: "static-authored-env-cell",
 				sourceScopeKey: "landblock-env-cells:landblock:da55ffff",
 			},
+			presentation: {
+				policy: {
+					diagnosticsBucket: "static-authored-dynamic",
+					materialDetailRolePolicy: {
+						domain: "landblock-env-cells",
+						kind: "static-domain",
+					},
+					materialPlanningDomain: "landblock-env-cells",
+					resourceFamily: "static-authored-dynamic-object-material",
+					textureDomain: "landblock-env-cells",
+				},
+			},
 			renderability: {
 				reasons: ["resources-pending"],
 				status: "non-renderable",
@@ -225,6 +244,7 @@ describe("dynamic entity controller", () => {
 					serverInstanceIdMetadata: { id: "server-object:5001" },
 				},
 				policy: {
+					diagnosticsBucket: "runtime-authored-dynamic",
 					materialPlanningIdentity: {
 						kind: "setup-backed-visual",
 						visualObject: {
@@ -233,14 +253,19 @@ describe("dynamic entity controller", () => {
 							resourceId: "dynamic-visual-resource:runtime-spawn:1",
 						},
 					},
+					materialDetailRolePolicy: {
+						kind: "runtime-authored-none",
+					},
+					materialPlanningDomain: "runtime-authored-dynamic-object-material",
 					ownershipPolicy: {
 						kind: "dynamic-visual-resource",
 						resourceId: "dynamic-visual-resource:runtime-spawn:1",
 					},
+					resourceFamily: "runtime-authored-dynamic-object-material",
 					retentionPolicy: {
 						kind: "explicit-runtime-lifetime",
 					},
-					textureBatchId: "dynamic:runtime-spawn:1",
+					textureBatchId: "runtime-dynamic:runtime-spawn:1",
 					textureDomain: "runtime-object-material",
 				},
 				visualSource: {
@@ -340,7 +365,7 @@ describe("dynamic entity controller", () => {
 			},
 			presentation: {
 				policy: {
-					textureBatchId: "dynamic:runtime-spawn:1",
+					textureBatchId: "runtime-dynamic:runtime-spawn:1",
 					textureDomain: "runtime-object-material",
 				},
 			},

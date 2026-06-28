@@ -106,8 +106,6 @@ import type {
 	OutdoorStaticObjectSourceDiagnostics,
 	StaticSceneCameraResidency,
 	StaticSceneEnvCellBounds,
-	StaticScenePickHit,
-	StaticScenePickRequest,
 	StaticSceneQuerySnapshot,
 	StaticSceneQueryOverviewSnapshot,
 	StaticSceneSelectionKey,
@@ -621,7 +619,6 @@ export interface ClientRuntime {
 	}): EnvCellResourceMembership | null;
 	setCurrentCameraResidency(residency: RuntimeCameraResidency): void;
 	pickSceneRay(request: ScenePickRequest): ScenePickHit | null;
-	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null;
 	createStaticSelectionDiagnosticsReport(
 		selectionKey: StaticSceneSelectionKey,
 		options?: { readonly pickDistance?: number | null },
@@ -924,22 +921,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#refreshSceneDebugOverlay();
 	}
 
-	pickStaticRay(request: StaticScenePickRequest): StaticScenePickHit | null {
-		const hit = this.pickSceneRay({
-			context: request.context,
-			filters: request.filters,
-			mode: "default-selection",
-			ray: request.ray,
-		});
-		return hit?.source === "static" ? hit.staticHit : null;
-	}
-
 	pickSceneRay(request: ScenePickRequest): ScenePickHit | null {
 		this.#assertActive();
 		return pickMergedSceneRay(
 			{
 				outdoorAnchorLandblockId: this.#renderAnchorLandblockId,
-				pickStaticRay: (staticRequest) =>
+				pickStaticSceneRay: (staticRequest) =>
 					this.#staticSceneQuery.pickRay({
 						...staticRequest,
 						filters: {

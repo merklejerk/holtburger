@@ -2487,10 +2487,9 @@ Decisions and course corrections:
 - 2026-06-28: Unsupported hooks are currently console-owned during dynamic animation resource
   validation and do not create durable runtime diagnostics. Keep that boundary; do not add
   unsupported-hook counts or warning histories to support the next hook family.
-- 2026-06-28: The merged query path works for first-cut dynamic selection, but `ScenePickMode`
-  values such as `debug-inspection` and `diagnostics` remain caller-intent names. They are not
-  blocking, but cleanup should replace behavior-by-debug-name with explicit inclusion/filter policy
-  if query modes continue to grow.
+- 2026-06-28: The merged query path works for first-cut dynamic selection. Phase 11B removed
+  caller-intent `ScenePickMode` names and now uses explicit dynamic pick policy for default
+  selectability.
 - 2026-06-28: `DynamicRuntimeSnapshot.records` and `DynamicEntitySummaryDto` are doing double duty
   as renderer/runtime submission state and selected-inspection input. This is acceptable for the
   first cut because selected diagnostics project compactly from the DTO, but cleanup should split
@@ -2695,7 +2694,7 @@ Debt and follow-up:
 
 ### Phase 11B: Cleanup And Cutover Hardening
 
-Status: pending.
+Status: completed.
 
 Purpose:
 
@@ -2704,15 +2703,18 @@ Purpose:
 
 Cleanup targets:
 
-- Temporary `pickStaticRay` compatibility wrappers after merged query migration.
+- Temporary `pickStaticRay` compatibility wrappers after merged query migration. Completed in
+  Phase 11B.
 - Remaining static-only visual-resource/material helper names that serve dynamic rendering too after
   Phase 11A.
 - `prepareV2StaticAssetPayload` if Phase 1 leaves that name in place after adding animation assets.
+  Completed in Phase 11B by renaming the route parser to `prepareV2AssetPayload`.
 - Redundant dynamic/static material interpretation helpers.
 - Diagnostics fields that were useful during bring-up but are hollow or misleading.
 - `ScenePickMode` caller-intent names such as `debug-inspection` or `diagnostics` if they start
   driving query behavior. Prefer explicit query inclusion/filter policy over routing behavior by
-  diagnostic/debug caller names.
+  diagnostic/debug caller names. Completed in Phase 11B by replacing modes with explicit dynamic
+  pick policy.
 - `DynamicRuntimeSnapshot.records`/`DynamicEntitySummaryDto` shape if it keeps accumulating fields
   for selected inspection. Split renderer/runtime operational state from selected inspection
   projections before diagnostics become the primary DTO consumer.
@@ -2732,19 +2734,40 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Remove temporary wrappers and stale names.
-- [ ] Replace caller-intent scene-query modes with explicit inclusion/filter policy if still
+- [x] Remove temporary wrappers and stale names.
+- [x] Replace caller-intent scene-query modes with explicit inclusion/filter policy if still
       warranted after Phase 11A.
-- [ ] Split or rename dynamic runtime/renderer/inspection DTOs if selected inspection is still
-      pressuring operational DTO shape.
-- [ ] Scrub stale plan/docs wording that suggests durable diagnostics-owned warning/error state.
-- [ ] Delete hollow or legacy-path tests.
-- [ ] Re-run full verification commands.
-- [ ] Update this plan with final first-cut status.
+- [x] Audit dynamic runtime/renderer/inspection DTO split pressure.
+- [x] Scrub stale plan/docs wording that suggests durable diagnostics-owned warning/error state.
+- [x] Delete hollow or legacy-path tests.
+- [x] Re-run full verification commands.
+- [x] Update this plan with final first-cut status.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-28 implementation: Removed the public `ClientRuntime.pickStaticRay` compatibility wrapper
+  and its legacy-path test. Browser/runtime picking now uses `pickSceneRay`; merged query internals
+  still call a narrowly named `pickStaticSceneRay` source adapter for static-hit composition.
+- 2026-06-28 implementation: Replaced `ScenePickMode` caller-intent strings with explicit dynamic
+  pick policy: callers opt dynamic hits into normal browser selectability with
+  `dynamic: { defaultSelectable: true }`. Diagnostics/inspection behavior no longer routes through
+  `debug-inspection` or `diagnostics` mode names.
+- 2026-06-28 implementation: Renamed `prepareV2StaticAssetPayload` to `prepareV2AssetPayload`
+  because the route parser now covers animation and other non-static asset payloads.
+- 2026-06-28 implementation: Did not split `DynamicRuntimeSnapshot.records` or
+  `DynamicEntitySummaryDto`. The current selected-entity diagnostics remain a compact projection and
+  are not adding new required fields in this phase, so forcing a DTO split now would be churn.
+- 2026-06-28 implementation: Did not rename the WebGL static-object prepared payload/shader helper
+  family. Those helpers now serve dynamic drawing too, but the rename crosses shader payload tests,
+  renderer resource interfaces, and texture binding invalidation. Keep that as tracked renderer
+  naming debt rather than burying a wide mechanical rename in cleanup.
+
+Debt and follow-up:
+
+- WebGL object-material prepared payload names still say `StaticObject*` even though dynamic visual
+  parts use the same shader/material path. Rename in a dedicated renderer-material cleanup pass.
+- Dynamic runtime summary DTOs can stay as-is for the first cut. Split operational render/runtime
+  DTOs from selected inspection views only if inspection starts driving additional fields.
 
 ## Risks And Mitigations
 

@@ -129,7 +129,7 @@ const V2_PAYLOAD_PARSERS: readonly RoutePayloadParser<V2PreparedAssetPayload>[] 
 		},
 	];
 
-export function prepareV2StaticAssetPayload(
+export function prepareV2AssetPayload(
 	response: AssetLookupResponseDto,
 ): V2PreparedAssetPayload {
 	const parser = V2_PAYLOAD_PARSERS.find((candidate) =>

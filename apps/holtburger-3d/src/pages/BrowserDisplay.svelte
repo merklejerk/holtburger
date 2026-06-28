@@ -779,8 +779,8 @@
 	}): number {
 		const hit = runtime?.pickSceneRay({
 			context: { kind: "outdoor" },
+			dynamic: { defaultSelectable: true },
 			filters: { itemKinds: ["terrain-quad"] },
-			mode: "default-selection",
 			ray: {
 				direction: { x: 0, y: -1, z: 0 },
 				origin: {
@@ -1283,7 +1283,7 @@
 		});
 		const hit = runtime.pickSceneRay({
 			...pickRequest,
-			mode: "default-selection",
+			dynamic: { defaultSelectable: true },
 		});
 		const selection = createSelectedScenePick(hit);
 		selectedScenePick = selection;

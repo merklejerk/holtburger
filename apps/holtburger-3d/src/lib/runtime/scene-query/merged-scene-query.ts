@@ -31,7 +31,7 @@ const DYNAMIC_LANDBLOCK_SEARCH_BOUNDS: StaticBounds = {
 
 export interface MergedSceneQuerySources {
 	readonly outdoorAnchorLandblockId: number | null;
-	readonly pickStaticRay: (
+	readonly pickStaticSceneRay: (
 		request: StaticScenePickRequest,
 	) => StaticScenePickHit | null;
 	readonly queryOutdoorDynamicBounds: (options: {
@@ -50,7 +50,7 @@ export function pickMergedSceneRay(
 	request: ScenePickRequest,
 ): ScenePickHit | null {
 	const hits: ScenePickHit[] = [];
-	const staticHit = sources.pickStaticRay({
+	const staticHit = sources.pickStaticSceneRay({
 		context: request.context,
 		filters: request.filters,
 		ray: request.ray,
@@ -96,7 +96,7 @@ function pickOutdoorDynamicHits(
 			}
 			const hit: ScenePickHit = {
 				bounds,
-				defaultSelectable: request.mode === "default-selection",
+				defaultSelectable: request.dynamic?.defaultSelectable ?? false,
 				distance,
 				entityId: record.entityId,
 				hitPoint: pointOnRay(ray, distance),
@@ -142,7 +142,7 @@ function pickEnvCellDynamicHits(
 			return [
 				{
 					bounds: record.bounds,
-					defaultSelectable: request.mode === "default-selection",
+					defaultSelectable: request.dynamic?.defaultSelectable ?? false,
 					distance,
 					entityId: record.entityId,
 					hitPoint: pointOnRay(ray, distance),

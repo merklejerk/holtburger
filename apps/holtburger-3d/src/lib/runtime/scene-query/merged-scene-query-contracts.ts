@@ -11,12 +11,15 @@ import type {
 	Vec3,
 } from "./contracts";
 
-type ScenePickMode = "default-selection" | "debug-inspection" | "diagnostics";
+interface ScenePickDynamicPolicy {
+	/** Whether dynamic hits should be marked selectable by normal browser selection. */
+	readonly defaultSelectable: boolean;
+}
 
 export interface ScenePickRequest {
 	readonly context: StaticScenePickContext;
+	readonly dynamic?: ScenePickDynamicPolicy;
 	readonly filters?: StaticScenePickFilters;
-	readonly mode: ScenePickMode;
 	readonly ray: StaticSceneRay;
 }
 

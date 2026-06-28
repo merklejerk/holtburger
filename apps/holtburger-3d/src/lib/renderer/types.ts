@@ -1,14 +1,11 @@
 import type {
 	StaticAuthoredDynamicSeedRecord,
 	StaticBakeTextureUse,
-	StaticBounds,
 	StaticDomain,
 	StaticPortalApertureResource,
 	StaticMaterialCoverageReport,
-	StaticMaterialTableEntry,
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectRenderInstance,
-	StaticObjectRenderState,
 	StaticObjectVisualResource,
 	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
@@ -20,6 +17,7 @@ import type {
 	StructuredInteriorGeometryStaticDrawUnit,
 	TerrainGeometryStaticDrawUnit,
 } from "../static/contracts";
+import type { VisualGeometryPayload } from "../visual/visual-geometry";
 import type {
 	TextureFilteringMode,
 	TexturePageSampleClass,
@@ -282,22 +280,9 @@ export interface DynamicRendererVisualResource {
 	readonly parts: readonly DynamicRendererVisualPart[];
 }
 
-export interface DynamicRendererVisualPart {
-	readonly bounds: StaticBounds | null;
-	readonly indices: Uint16Array | Uint32Array;
-	readonly indexType: "uint16" | "uint32";
-	readonly materialEntries: readonly StaticMaterialTableEntry[];
-	readonly materialFamily: "flat-color" | "indexed-paletted" | "texture-rgba";
-	readonly materialPass: "opaque" | "alpha-test" | "transparent" | "additive";
-	readonly materialSlotIndices: Float32Array;
+export interface DynamicRendererVisualPart extends VisualGeometryPayload {
 	readonly partIndex: number;
-	readonly positions: Float32Array;
-	readonly renderState: StaticObjectRenderState;
 	readonly sourceAssetId: string;
-	readonly texCoords: Float32Array;
-	readonly textureUseIds: readonly string[];
-	readonly triangleCount: number;
-	readonly vertexCount: number;
 }
 
 interface DynamicRendererMaterialPlan {

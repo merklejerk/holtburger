@@ -35,8 +35,8 @@ import {
 import type {
 	DynamicEntityAnimationResource,
 	DynamicEntityId,
-	DynamicEntityIssue,
 	DynamicEntityRenderPart,
+	DynamicEntityResourceFailure,
 	DynamicEntityResourceKey,
 	DynamicEntityResourceState,
 	DynamicEntityRequiredResource,
@@ -64,7 +64,7 @@ interface DynamicEntitySetupAnimationReadyChange {
 
 interface DynamicEntitySetupAnimationFailedChange {
 	readonly entityId: DynamicEntityId;
-	readonly issues: readonly DynamicEntityIssue[];
+	readonly failures: readonly DynamicEntityResourceFailure[];
 	readonly kind: "setup-animation-failed";
 	readonly resources: DynamicEntityResourceState;
 }
@@ -77,7 +77,7 @@ interface DynamicEntityVisualResourcesReadyChange {
 
 interface DynamicEntityVisualResourcesFailedChange {
 	readonly entityId: DynamicEntityId;
-	readonly issues: readonly DynamicEntityIssue[];
+	readonly failures: readonly DynamicEntityResourceFailure[];
 	readonly kind: "visual-resources-failed";
 	readonly resources: DynamicEntityResourceState;
 }
@@ -94,7 +94,7 @@ interface TrackedDynamicEntityResources {
 }
 
 interface DynamicVisualHostAssetRequestResult {
-	readonly issues: readonly DynamicEntityIssue[];
+	readonly failures: readonly DynamicEntityResourceFailure[];
 	readonly preparedAssets: ReadonlyMap<string, PreparedAsset>;
 }
 
@@ -116,6 +116,7 @@ const VISUAL_REQUIRED_RESOURCES = [
 	"render-surface",
 	"prepared-texture",
 ] as const satisfies readonly DynamicEntityRequiredResource[];
+const reportedAnimationResourceWarnings = new Set<string>();
 
 /** Owns dynamic semantic resource state and leases over host-prepared assets. */
 export class DynamicEntityResourceManager {
@@ -211,16 +212,15 @@ export class DynamicEntityResourceManager {
 			return;
 		}
 
-		const issues = createSetupAnimationLoadIssues(tracked, results);
+		const failures = createSetupAnimationLoadFailures(tracked, results);
 		const animationAsset =
-			issues.length === 0 ? resolveAnimationAssetResult(results[1]) : null;
+			failures.length === 0 ? resolveAnimationAssetResult(results[1]) : null;
 		const animationPayload =
 			animationAsset === null ? null : resolveAnimationPayload(animationAsset);
-		const payloadIssues =
-			issues.length === 0 && animationPayload === null
+		const payloadFailures =
+			failures.length === 0 && animationPayload === null
 				? [
 						{
-							kind: "dynamic-resource-load-failed" as const,
 							message:
 								"Prepared animation asset did not contain an animation payload.",
 							resource: "animation" as const,
@@ -228,16 +228,33 @@ export class DynamicEntityResourceManager {
 						},
 					]
 				: [];
-		const setupIssues = [...issues, ...payloadIssues];
-		if (setupIssues.length > 0) {
+		const animationFailures =
+			failures.length === 0 &&
+			animationPayload !== null &&
+			animationPayload.frameCount === 0
+				? [
+						{
+							message: "Animation payload has no frames to sample.",
+							resource: "animation" as const,
+							resourceKey: tracked.animationResourceKey,
+						},
+					]
+				: [];
+		const setupFailures = [
+			...failures,
+			...payloadFailures,
+			...animationFailures,
+		];
+		if (setupFailures.length > 0) {
 			this.#onResourcesChanged?.({
 				entityId,
-				issues: setupIssues,
+				failures: setupFailures,
 				kind: "setup-animation-failed",
 				resources: {
 					required: SETUP_ANIMATION_REQUIRED_RESOURCES,
 					setupAnimation: {
 						animationKey: tracked.animationResourceKey,
+						failures: setupFailures,
 						setupModelKey: tracked.setupResourceKey,
 						status: "failed",
 					},
@@ -257,6 +274,10 @@ export class DynamicEntityResourceManager {
 			assetId: animationAsset.sourceAssetId,
 			payload: animationPayload,
 		};
+		reportAnimationResourceWarnings(
+			animationAsset.sourceAssetId,
+			animationPayload,
+		);
 		tracked.leases.push(
 			this.#assetService.acquirePreparedAssetLease(tracked.setupHostKey),
 			this.#assetService.acquirePreparedAssetLease(tracked.animationHostKey),
@@ -311,7 +332,9 @@ export class DynamicEntityResourceManager {
 		const unsupportedReasons = createUnsupportedMaterialReasons(
 			materialPlans.fallbackReasons,
 		);
-		const textureRequirements = createTextureRequirements(materialPlans.materialPlans);
+		const textureRequirements = createTextureRequirements(
+			materialPlans.materialPlans,
+		);
 		const resourceKeys = createVisualHostAssetKeys({
 			closure,
 			seed: tracked.seed,
@@ -327,22 +350,15 @@ export class DynamicEntityResourceManager {
 		if (
 			missingRefs.length > 0 ||
 			unsupportedReasons.length > 0 ||
-			visualHostAssets.issues.length > 0
+			visualHostAssets.failures.length > 0
 		) {
+			const failures = [
+				...createMissingRefFailures(missingRefs),
+				...visualHostAssets.failures,
+			];
 			this.#onResourcesChanged?.({
 				entityId,
-					issues: [
-						...createMissingRefIssues(missingRefs),
-						...visualHostAssets.issues,
-					...(unsupportedReasons.length > 0
-						? [
-								{
-									kind: "visual-resources-unsupported" as const,
-									reasons: unsupportedReasons,
-								},
-							]
-						: []),
-				],
+				failures,
 				kind: "visual-resources-failed",
 				resources: {
 					required: [
@@ -352,6 +368,7 @@ export class DynamicEntityResourceManager {
 					setupAnimation: createReadySetupAnimationResourceState(tracked),
 					status: "failed",
 					visual: {
+						failures,
 						missingRefs,
 						status: "failed",
 						unsupportedReasons,
@@ -375,9 +392,10 @@ export class DynamicEntityResourceManager {
 				textureRequirements,
 			});
 		} catch (error) {
+			const failures = [createDynamicRenderPartExtractionFailure(error)];
 			this.#onResourcesChanged?.({
 				entityId,
-				issues: [createDynamicRenderPartExtractionIssue(error)],
+				failures,
 				kind: "visual-resources-failed",
 				resources: {
 					required: [
@@ -387,6 +405,7 @@ export class DynamicEntityResourceManager {
 					setupAnimation: createReadySetupAnimationResourceState(tracked),
 					status: "failed",
 					visual: {
+						failures,
 						missingRefs: [],
 						status: "failed",
 						unsupportedReasons: [],
@@ -426,7 +445,7 @@ export class DynamicEntityResourceManager {
 	async #requestVisualHostAssets(
 		keys: readonly HostAssetKey[],
 	): Promise<DynamicVisualHostAssetRequestResult> {
-		const issues: DynamicEntityIssue[] = [];
+		const failures: DynamicEntityResourceFailure[] = [];
 		const preparedAssets = new Map<string, PreparedAsset>();
 		await Promise.all(
 			uniqueHostAssetKeys(keys).map(async (key) => {
@@ -436,8 +455,7 @@ export class DynamicEntityResourceManager {
 						await this.#assetService.requestPreparedAsset(key),
 					);
 				} catch (error) {
-					issues.push({
-						kind: "dynamic-resource-load-failed",
+					failures.push({
 						message: formatErrorMessage(error),
 						resource: createRequiredResourceFromHostKey(key),
 						resourceKey: createResourceKeyFromHostKey(key),
@@ -446,7 +464,7 @@ export class DynamicEntityResourceManager {
 			}),
 		);
 		return {
-			issues,
+			failures,
 			preparedAssets,
 		};
 	}
@@ -527,17 +545,92 @@ function isAnimationPayload(value: unknown): value is AnimationPayloadDto {
 	return animationPayloadDtoSchema.safeParse(value).success;
 }
 
-function createSetupAnimationLoadIssues(
+function reportAnimationResourceWarnings(
+	animationAssetId: string,
+	payload: AnimationPayloadDto,
+): void {
+	if (
+		payload.objectPositionFrames.length > 0 &&
+		payload.objectPositionFrames.length !== payload.frameCount
+	) {
+		warnOnce(
+			[
+				"malformed-object-position-frames",
+				animationAssetId,
+				payload.animationId,
+				payload.frameCount,
+				payload.objectPositionFrames.length,
+			].join("|"),
+			() => {
+				console.warn(
+					"[holtburger-3d][dynamic-animation-malformed-object-position-frames]",
+					{
+						animationAssetId,
+						animationId: payload.animationId,
+						expectedFrameCount: payload.frameCount,
+						objectPositionFrameCount: payload.objectPositionFrames.length,
+					},
+				);
+			},
+		);
+	}
+
+	for (
+		let frameIndex = 0;
+		frameIndex < payload.partFrames.length;
+		frameIndex += 1
+	) {
+		const partFrame = payload.partFrames[frameIndex];
+		if (!partFrame) {
+			continue;
+		}
+		for (const hook of partFrame.hooks) {
+			if (hook.payloadKind === "none" || hook.payloadKind === "set-omega") {
+				continue;
+			}
+			warnOnce(
+				[
+					"unsupported-hook",
+					animationAssetId,
+					payload.animationId,
+					frameIndex,
+					hook.hookType,
+					hook.hookName,
+					hook.payloadKind,
+				].join("|"),
+				() => {
+					console.warn("[holtburger-3d][dynamic-animation-hook-unsupported]", {
+						animationAssetId,
+						animationId: payload.animationId,
+						frameIndex,
+						hookName: hook.hookName,
+						hookType: hook.hookType,
+						payloadKind: hook.payloadKind,
+					});
+				},
+			);
+		}
+	}
+}
+
+function warnOnce(warningKey: string, warn: () => void): void {
+	if (reportedAnimationResourceWarnings.has(warningKey)) {
+		return;
+	}
+	reportedAnimationResourceWarnings.add(warningKey);
+	warn();
+}
+
+function createSetupAnimationLoadFailures(
 	tracked: TrackedDynamicEntityResources,
 	results: readonly PromiseSettledResult<unknown>[],
-): readonly DynamicEntityIssue[] {
-	const issues: DynamicEntityIssue[] = [];
+): readonly DynamicEntityResourceFailure[] {
+	const failures: DynamicEntityResourceFailure[] = [];
 	const setupResult = results[0];
 	const animationResult = results[1];
 
 	if (setupResult?.status === "rejected") {
-		issues.push({
-			kind: "dynamic-resource-load-failed",
+		failures.push({
 			message: formatErrorMessage(setupResult.reason),
 			resource: "setup-model",
 			resourceKey: tracked.setupResourceKey,
@@ -545,15 +638,14 @@ function createSetupAnimationLoadIssues(
 	}
 
 	if (animationResult?.status === "rejected") {
-		issues.push({
-			kind: "dynamic-resource-load-failed",
+		failures.push({
 			message: formatErrorMessage(animationResult.reason),
 			resource: "animation",
 			resourceKey: tracked.animationResourceKey,
 		});
 	}
 
-	return issues;
+	return failures;
 }
 
 function formatErrorMessage(error: unknown): string {
@@ -742,7 +834,9 @@ function createDynamicRenderPartSlices(options: {
 	readonly part: StaticObjectSourceAssetFacts["parts"][number];
 }): readonly DynamicEntityRenderPart[] {
 	const triangles = options.part.triangles;
-	const sourcePositions = asFloat32Array(options.gfxObj.renderGeometry.positions);
+	const sourcePositions = asFloat32Array(
+		options.gfxObj.renderGeometry.positions,
+	);
 	const sourceTexCoords = asFloat32Array(options.gfxObj.renderGeometry.uvs);
 	const renderEntries = uniqueMaterialRenderEntries(
 		options.part.materialSlots.flatMap((slot) => {
@@ -779,7 +873,11 @@ function createDynamicRenderPartSlices(options: {
 		}),
 	);
 	const candidateSlices = new Map<string, DynamicTriangleRenderCandidate[]>();
-	for (let triangleIndex = 0; triangleIndex < triangles.length; triangleIndex += 1) {
+	for (
+		let triangleIndex = 0;
+		triangleIndex < triangles.length;
+		triangleIndex += 1
+	) {
 		const triangle = triangles[triangleIndex];
 		if (!triangle) {
 			continue;
@@ -789,7 +887,8 @@ function createDynamicRenderPartSlices(options: {
 			partIndex: options.part.partIndex,
 			triangleGeometrySurfaceId: triangle.geometrySurfaceId,
 		});
-		const compatibilityKey = createDynamicMaterialCompatibilityKey(materialEntry);
+		const compatibilityKey =
+			createDynamicMaterialCompatibilityKey(materialEntry);
 		const existing = candidateSlices.get(compatibilityKey);
 		const candidate = { materialEntry, triangle };
 		if (existing) {
@@ -844,16 +943,21 @@ function createDynamicRenderPartSlice(options: {
 				sourceTexCoords: options.sourceTexCoords,
 				sourceVertexIndex,
 			});
-			positions[targetVertexIndex * 3] =
-				options.sourcePositions[sourceVertexIndex * 3] as number;
-			positions[targetVertexIndex * 3 + 1] =
-				options.sourcePositions[sourceVertexIndex * 3 + 1] as number;
-			positions[targetVertexIndex * 3 + 2] =
-				options.sourcePositions[sourceVertexIndex * 3 + 2] as number;
-			texCoords[targetVertexIndex * 2] =
-				options.sourceTexCoords[sourceVertexIndex * 2] as number;
-			texCoords[targetVertexIndex * 2 + 1] =
-				options.sourceTexCoords[sourceVertexIndex * 2 + 1] as number;
+			positions[targetVertexIndex * 3] = options.sourcePositions[
+				sourceVertexIndex * 3
+			] as number;
+			positions[targetVertexIndex * 3 + 1] = options.sourcePositions[
+				sourceVertexIndex * 3 + 1
+			] as number;
+			positions[targetVertexIndex * 3 + 2] = options.sourcePositions[
+				sourceVertexIndex * 3 + 2
+			] as number;
+			texCoords[targetVertexIndex * 2] = options.sourceTexCoords[
+				sourceVertexIndex * 2
+			] as number;
+			texCoords[targetVertexIndex * 2 + 1] = options.sourceTexCoords[
+				sourceVertexIndex * 2 + 1
+			] as number;
 			materialSlotIndices[targetVertexIndex] = materialEntry.entry.slot;
 			indices[targetVertexIndex] = targetVertexIndex;
 		}
@@ -879,7 +983,9 @@ function createDynamicRenderPartSlice(options: {
 					entry.indexTextureUseId,
 					entry.paletteTextureUseId,
 					entry.detailTextureUseId,
-				].filter((textureUseId): textureUseId is string => textureUseId !== null),
+				].filter(
+					(textureUseId): textureUseId is string => textureUseId !== null,
+				),
 			),
 		),
 		triangleCount: options.candidates.length,
@@ -897,7 +1003,9 @@ function resolveDynamicTriangleMaterialEntry(options: {
 }): DynamicMaterialRenderEntry {
 	if (options.triangleGeometrySurfaceId === null) {
 		if (options.materialEntryBySurfaceId.size === 1) {
-			return [...options.materialEntryBySurfaceId.values()][0] as DynamicMaterialRenderEntry;
+			return [
+				...options.materialEntryBySurfaceId.values(),
+			][0] as DynamicMaterialRenderEntry;
 		}
 		throw new Error(
 			`Dynamic render part ${options.partIndex} has a triangle without geometry surface id and ${options.materialEntryBySurfaceId.size} material slots.`,
@@ -984,7 +1092,8 @@ function createDynamicMaterialEntry(
 	textureRequirements: readonly DynamicEntityTextureRequirement[],
 ): DynamicMaterialRenderEntry {
 	const dataUses = plan.textureRoles.map((role) => role.dataUse);
-	const textureWrapMode = resolveRepeatedStaticMaterialPrimaryWrapMode(dataUses);
+	const textureWrapMode =
+		resolveRepeatedStaticMaterialPrimaryWrapMode(dataUses);
 	return {
 		entry: createStaticMaterialTableEntry({
 			createTextureUseId: (dataUse) =>
@@ -1003,7 +1112,9 @@ function createDynamicMaterialEntry(
 	};
 }
 
-function asFloat32Array(values: readonly number[] | Float32Array): Float32Array {
+function asFloat32Array(
+	values: readonly number[] | Float32Array,
+): Float32Array {
 	return values instanceof Float32Array ? values : new Float32Array(values);
 }
 
@@ -1045,11 +1156,10 @@ function uniqueSortedStrings(values: readonly string[]): readonly string[] {
 	return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
-function createDynamicRenderPartExtractionIssue(
+function createDynamicRenderPartExtractionFailure(
 	error: unknown,
-): DynamicEntityIssue {
+): DynamicEntityResourceFailure {
 	return {
-		kind: "dynamic-resource-load-failed",
 		message: formatErrorMessage(error),
 		resource: "gfx",
 		resourceKey: {
@@ -1059,13 +1169,12 @@ function createDynamicRenderPartExtractionIssue(
 	};
 }
 
-function createMissingRefIssues(
+function createMissingRefFailures(
 	missingRefs: readonly StaticResourceIdentity[],
-): readonly DynamicEntityIssue[] {
+): readonly DynamicEntityResourceFailure[] {
 	return missingRefs.map((ref) => {
 		const resourceKey = createResourceKeyFromMissingRef(ref);
 		return {
-			kind: "dynamic-resource-load-failed" as const,
 			message: `Missing dynamic visual resource ${formatMissingRef(ref)}.`,
 			resource: resourceKey.kind,
 			resourceKey,

@@ -33,7 +33,6 @@ export interface DynamicEntityRecord {
 	readonly animation: DynamicEntityAnimationState;
 	readonly baseTransform: DynamicEntityTransformState;
 	readonly bounds: DynamicEntityBoundsState;
-	readonly diagnostics: readonly DynamicEntityIssue[];
 	readonly effectiveResidence: DynamicEntityResidence;
 	readonly id: DynamicEntityId;
 	readonly provenance: DynamicEntityProvenance;
@@ -196,8 +195,14 @@ export interface DynamicEntityResourceState {
 type DynamicEntitySetupAnimationResourceState =
 	| {
 			readonly animationKey: DynamicEntityResourceKey;
+			readonly failures: readonly DynamicEntityResourceFailure[];
 			readonly setupModelKey: DynamicEntityResourceKey;
-			readonly status: "failed" | "pending";
+			readonly status: "failed";
+	  }
+	| {
+			readonly animationKey: DynamicEntityResourceKey;
+			readonly setupModelKey: DynamicEntityResourceKey;
+			readonly status: "pending";
 	  }
 	| {
 			readonly animation: DynamicEntityAnimationResource;
@@ -248,6 +253,7 @@ export interface DynamicEntityRenderPart {
 }
 
 interface DynamicEntityVisualResourcesFailedState {
+	readonly failures: readonly DynamicEntityResourceFailure[];
 	readonly missingRefs: readonly StaticResourceIdentity[];
 	readonly status: "failed";
 	readonly unsupportedReasons: readonly DynamicEntityUnsupportedMaterialReason[];
@@ -315,53 +321,19 @@ interface DynamicEntityRenderability {
 }
 
 type DynamicEntityRenderabilityReason =
+	| "resource-load-failed"
 	| "resources-pending"
+	| "visual-resources-failed"
 	| "visual-resources-pending";
 
-export type DynamicEntityIssue =
-	| {
-			readonly kind: "dynamic-resource-load-failed";
-			readonly message: string;
-			readonly resource: DynamicEntityRequiredResource;
-			readonly resourceKey: DynamicEntityResourceKey;
-	  }
-	| {
-			readonly animationAssetId: string;
-			readonly animationId: number | null;
-			readonly kind: "dynamic-animation-invalid";
-			readonly message: string;
-			readonly objectPositionFrameCount: number | null;
-			readonly reason: "malformed-object-position-frames" | "zero-frame";
-			readonly expectedFrameCount: number;
-	  }
-	| {
-			readonly animationAssetId: string;
-			readonly animationId: number;
-			readonly entityId: DynamicEntityId;
-			readonly frameIndex: number;
-			readonly hookName: string;
-			readonly hookType: number;
-			readonly kind: "dynamic-animation-hook-unsupported";
-			readonly loopIteration: number;
-			readonly payloadKind: AnimationPayloadDto["partFrames"][number]["hooks"][number]["payloadKind"];
-			readonly skippedEffect: string;
-	  }
-	| {
-			readonly kind: "resources-pending";
-			readonly required: readonly DynamicEntityRequiredResource[];
-	  }
-	| {
-			readonly kind: "visual-resources-pending";
-			readonly required: readonly DynamicEntityRequiredResource[];
-	  }
-	| {
-			readonly kind: "visual-resources-unsupported";
-			readonly reasons: readonly DynamicEntityUnsupportedMaterialReason[];
-	  };
+export interface DynamicEntityResourceFailure {
+	readonly message: string;
+	readonly resource: DynamicEntityRequiredResource;
+	readonly resourceKey: DynamicEntityResourceKey;
+}
 
 export interface DynamicRuntimeSnapshot {
 	readonly activeEntityCount: number;
-	readonly issueCount: number;
 	readonly nonRenderableEntityCount: number;
 	readonly records: readonly DynamicEntitySummaryDto[];
 	readonly staticSeedCount: number;
@@ -371,7 +343,6 @@ export interface DynamicEntitySummaryDto {
 	readonly animation: DynamicEntityAnimationSummaryDto;
 	readonly baseTransform: DynamicEntityTransformState;
 	readonly bounds: DynamicEntityBoundsState;
-	readonly diagnostics: readonly DynamicEntityIssue[];
 	readonly effectiveResidence: DynamicEntityResidence;
 	readonly id: DynamicEntityId;
 	readonly provenance: DynamicEntityProvenance;
@@ -432,8 +403,14 @@ interface DynamicEntityResourceSummaryDto {
 type DynamicEntitySetupAnimationResourceSummaryDto =
 	| {
 			readonly animationKey: DynamicEntityResourceKey;
+			readonly failures: readonly DynamicEntityResourceFailure[];
 			readonly setupModelKey: DynamicEntityResourceKey;
-			readonly status: "failed" | "pending";
+			readonly status: "failed";
+	  }
+	| {
+			readonly animationKey: DynamicEntityResourceKey;
+			readonly setupModelKey: DynamicEntityResourceKey;
+			readonly status: "pending";
 	  }
 	| {
 			readonly animationAssetId: string;

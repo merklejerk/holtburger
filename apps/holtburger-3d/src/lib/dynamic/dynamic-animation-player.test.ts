@@ -63,6 +63,29 @@ describe("dynamic animation player", () => {
 		]);
 	});
 
+	it("does not stringify playback state while detecting duplicate updates", () => {
+		const player = new DynamicAnimationPlayer();
+		const started = player.update(
+			createRecord({
+				payload: createAnimationPayload({
+					frameCount: 1,
+					objectPositionFrames: [],
+					partCount: 1,
+				}),
+			}),
+			0,
+		);
+		const stringify = vi.spyOn(JSON, "stringify").mockImplementation(() => {
+			throw new Error("Playback hot-path equality must not stringify.");
+		});
+		try {
+			const duplicate = player.update(started.record, 0);
+			expect(duplicate.changed).toBe(false);
+		} finally {
+			stringify.mockRestore();
+		}
+	});
+
 	it("holds the final authored pose instead of interpolating across the loop seam", () => {
 		const player = new DynamicAnimationPlayer();
 		const record = createRecord({
@@ -126,14 +149,12 @@ describe("dynamic animation player", () => {
 		if (update.record.animation.playback.status !== "playing") {
 			throw new Error("expected playing playback");
 		}
-		expect(update.record.animation.playback.objectRootPose.orientation.w).toBeCloseTo(
-			Math.SQRT1_2,
-			7,
-		);
-		expect(update.record.animation.playback.objectRootPose.orientation.z).toBeCloseTo(
-			Math.SQRT1_2,
-			7,
-		);
+		expect(
+			update.record.animation.playback.objectRootPose.orientation.w,
+		).toBeCloseTo(Math.SQRT1_2, 7);
+		expect(
+			update.record.animation.playback.objectRootPose.orientation.z,
+		).toBeCloseTo(Math.SQRT1_2, 7);
 	});
 
 	it("uses identity object root pose when object position frames are empty", () => {
@@ -155,10 +176,9 @@ describe("dynamic animation player", () => {
 				activeOmega: null,
 			},
 		});
-		expect(update.record.diagnostics).toEqual([]);
 	});
 
-	it("diagnoses malformed object position frame counts without stopping playback", () => {
+	it("samples malformed object position frame counts without stopping playback", () => {
 		const player = new DynamicAnimationPlayer();
 		const update = player.update(
 			createRecord({
@@ -175,17 +195,9 @@ describe("dynamic animation player", () => {
 			currentFrameIndex: 0,
 			status: "playing",
 		});
-		expect(update.record.diagnostics).toMatchObject([
-			{
-				expectedFrameCount: 2,
-				kind: "dynamic-animation-invalid",
-				objectPositionFrameCount: 1,
-				reason: "malformed-object-position-frames",
-			},
-		]);
 	});
 
-	it("diagnoses zero-frame animations explicitly", () => {
+	it("marks zero-frame animations as failed playback", () => {
 		const player = new DynamicAnimationPlayer();
 		const update = player.update(
 			createRecord({
@@ -205,32 +217,6 @@ describe("dynamic animation player", () => {
 			},
 			status: "failed",
 		});
-		expect(update.record.diagnostics).toMatchObject([
-			{
-				kind: "dynamic-animation-invalid",
-				reason: "zero-frame",
-			},
-		]);
-	});
-
-	it("does not emit unsupported-hook diagnostics for hook-free frames", () => {
-		const player = new DynamicAnimationPlayer();
-		const update = player.update(
-			createRecord({
-				payload: createAnimationPayload({
-					frameCount: 1,
-					objectPositionFrames: [],
-					partCount: 1,
-				}),
-			}),
-			0,
-		);
-
-		expect(
-			update.record.diagnostics.filter(
-				(issue) => issue.kind === "dynamic-animation-hook-unsupported",
-			),
-		).toEqual([]);
 	});
 
 	it("stores and integrates SetOmega as active object-root transform state", () => {
@@ -245,7 +231,6 @@ describe("dynamic animation player", () => {
 		const started = player.update(createRecord({ payload }), 0);
 		const advanced = player.update(started.record, 0.1);
 
-		expect(unsupportedHookIssues(started.record)).toEqual([]);
 		expect(started.record.animation.playback).toMatchObject({
 			status: "playing",
 			transformEffects: {
@@ -310,10 +295,9 @@ describe("dynamic animation player", () => {
 			lastAppliedFrameIndex: 0,
 			lastAppliedLoopIteration: 2,
 		});
-		expect(unsupportedHookIssues(secondLoop.record)).toEqual([]);
 	});
 
-	it("dispatches unsupported hook diagnostics once per sampled frame and loop", () => {
+	it("advances hook cursors for unsupported hooks without durable diagnostics", () => {
 		const player = new DynamicAnimationPlayer();
 		const payload = createAnimationPayload({
 			frameCount: 1,
@@ -336,27 +320,24 @@ describe("dynamic animation player", () => {
 		const duplicate = player.update(first.record, 0);
 		const looped = player.update(duplicate.record, 1 / 30);
 
-		expect(unsupportedHookIssues(first.record)).toHaveLength(1);
-		expect(unsupportedHookIssues(duplicate.record)).toHaveLength(1);
-		expect(unsupportedHookIssues(looped.record)).toMatchObject([
-			{
-				animationAssetId: "animation/0300061b",
-				entityId: "dynamic-test-entity",
+		expect(first.record.animation.playback).toMatchObject({
+			lastDispatchedHookFrame: {
 				frameIndex: 0,
-				hookName: "SetOmega",
-				hookType: 22,
 				loopIteration: 0,
-				payloadKind: "raw",
-				skippedEffect: "unsupported animation hook effect",
 			},
-			{
+			status: "playing",
+		});
+		expect(duplicate.changed).toBe(false);
+		expect(looped.record.animation.playback).toMatchObject({
+			lastDispatchedHookFrame: {
 				frameIndex: 0,
 				loopIteration: 1,
 			},
-		]);
+			status: "playing",
+		});
 	});
 
-	it("dispatches crossed authored-frame hooks in order after a hitch", () => {
+	it("advances the hook cursor across unsupported crossed authored-frame hooks", () => {
 		const player = new DynamicAnimationPlayer();
 		const payload = createAnimationPayload({
 			frameCount: 5,
@@ -377,18 +358,13 @@ describe("dynamic animation player", () => {
 			4 / DYNAMIC_ANIMATION_FRAME_RATE_FPS,
 		);
 
-		expect(
-			unsupportedHookIssues(hitched.record).map((issue) => ({
-				frameIndex: issue.frameIndex,
-				hookType: issue.hookType,
-				loopIteration: issue.loopIteration,
-			})),
-		).toEqual([
-			{ frameIndex: 1, hookType: 101, loopIteration: 0 },
-			{ frameIndex: 2, hookType: 102, loopIteration: 0 },
-			{ frameIndex: 3, hookType: 103, loopIteration: 0 },
-			{ frameIndex: 4, hookType: 104, loopIteration: 0 },
-		]);
+		expect(hitched.record.animation.playback).toMatchObject({
+			lastDispatchedHookFrame: {
+				frameIndex: 4,
+				loopIteration: 0,
+			},
+			status: "playing",
+		});
 	});
 
 	it("caps crossed hook catch-up to the latest eight authored frames", () => {
@@ -412,21 +388,13 @@ describe("dynamic animation player", () => {
 				12 / DYNAMIC_ANIMATION_FRAME_RATE_FPS,
 			);
 
-			expect(
-				unsupportedHookIssues(hitched.record).map((issue) => ({
-					frameIndex: issue.frameIndex,
-					hookType: issue.hookType,
-				})),
-			).toEqual([
-				{ frameIndex: 5, hookType: 205 },
-				{ frameIndex: 6, hookType: 206 },
-				{ frameIndex: 7, hookType: 207 },
-				{ frameIndex: 8, hookType: 208 },
-				{ frameIndex: 9, hookType: 209 },
-				{ frameIndex: 10, hookType: 210 },
-				{ frameIndex: 11, hookType: 211 },
-				{ frameIndex: 12, hookType: 212 },
-			]);
+			expect(hitched.record.animation.playback).toMatchObject({
+				lastDispatchedHookFrame: {
+					frameIndex: 12,
+					loopIteration: 0,
+				},
+				status: "playing",
+			});
 		} finally {
 			warn.mockRestore();
 		}
@@ -455,12 +423,6 @@ describe("dynamic animation player", () => {
 		});
 	});
 });
-
-function unsupportedHookIssues(record: DynamicEntityRecord) {
-	return record.diagnostics.filter(
-		(issue) => issue.kind === "dynamic-animation-hook-unsupported",
-	);
-}
 
 function createRecord(options: {
 	readonly payload: AnimationPayloadDto;
@@ -509,7 +471,6 @@ function createRecord(options: {
 			indexed: false,
 			precision: "none",
 		},
-		diagnostics: [],
 		effectiveResidence: {
 			kind: "outdoor-landblock",
 			landblockId: 0xda55ffff,

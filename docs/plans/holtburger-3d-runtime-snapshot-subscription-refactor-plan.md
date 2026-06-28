@@ -2,40 +2,39 @@
 
 ## Context
 
-The browser runtime currently uses `ClientRuntime.subscribe` as a broad push channel for
-`RuntimeSnapshot`. That snapshot is useful for browser panels, diagnostics, tests, and coarse
-application state, but it is also expensive to build because it includes asset service summaries,
-renderer diagnostics, static coordinator state, static scene query counts, dynamic summaries, host
-state, portal/render-pass state, and debug overlay counts.
+Before this refactor, the browser runtime used `ClientRuntime.subscribe` as a broad push channel for
+the full runtime snapshot shape. That snapshot was useful for browser panels, diagnostics, tests,
+and coarse application state, but it was also expensive to build because it included asset service
+summaries, renderer diagnostics, static coordinator state, static scene query counts, dynamic
+summaries, host state, portal/render-pass state, and debug overlay counts.
 
-Dynamic entity animation made this pattern visibly wrong. `BrowserDisplay.svelte` drives
-`runtime.tickFrame(...)` from `requestAnimationFrame`. `ClientRuntime.tickFrame` updates dynamic
-playback and renderer submissions every frame, then calls `#emit()` whenever dynamic playback
-changes. Because animated dynamic pose state changes each frame, a full `RuntimeSnapshot` is now
-created and delivered to Svelte snapshot subscribers at render-frame cadence.
+Dynamic entity animation made this pattern visibly wrong. `BrowserDisplay.svelte` drove
+`runtime.tickFrame(...)` from `requestAnimationFrame`. `ClientRuntime.tickFrame` updated dynamic
+playback and renderer submissions every frame, then called `#emit()` whenever dynamic playback
+changed. Because animated dynamic pose state changed each frame, a full runtime snapshot was created
+and delivered to Svelte snapshot subscribers at render-frame cadence.
 
-The target architecture is:
+The corrected architecture is:
 
 - Push subscriptions are for low-latency streams where near-real-time delivery matters.
-- Full runtime snapshots are pull-based and can be polled at a slower cadence by browser
-  diagnostics.
+- Browser panel state uses a cheap pull-based `RuntimeOverviewSnapshot` on a slower polling cadence.
+- Full runtime diagnostics use explicit `RuntimeDiagnosticsSnapshot` reads.
 - Per-frame rendering, animation, placement, bounds, and renderer submissions continue to run every
   frame without forcing every diagnostic panel to refresh.
 
 ## Goal
 
-Split real-time runtime streams from slower full runtime snapshots so animated dynamics no longer
-force full browser diagnostics snapshot creation every frame.
+Split real-time runtime streams from slower overview and diagnostics reads so animated dynamics no
+longer force full browser diagnostics snapshot creation every frame.
 
 ## Scope
 
 In scope:
 
-- Refactor `ClientRuntime.subscribe` usage so full `RuntimeSnapshot` delivery is no longer the
-  render-loop invalidation path.
-- Add an explicit public full runtime snapshot read API.
-- Move browser diagnostics/state panels to `500ms` polling, with explicit refreshes after user/config
-  actions where immediate UI feedback matters.
+- Remove `ClientRuntime.subscribe` usage as a full runtime snapshot delivery path.
+- Add explicit public overview and full diagnostics snapshot read APIs.
+- Move browser diagnostics/state panels to cheap `500ms` overview polling, with explicit refreshes
+  after user/config actions where immediate UI feedback matters.
 - Keep `subscribeFrameTelemetry` as the real-time frame telemetry stream.
 - Keep `subscribeEvents` for discrete runtime events.
 - Add or adjust tests so dynamic animation ticks update renderer state without emitting full runtime
@@ -554,7 +553,7 @@ Decisions and course corrections:
 
 ## Phase 9: Final Naming And Documentation Cleanup
 
-Status: pending.
+Status: complete.
 
 Purpose:
 
@@ -582,16 +581,24 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Clean stale active-voice `RuntimeSnapshot` and `createSnapshot()` wording in this plan.
-- [ ] Rename ambiguous runtime test locals where they now refer to diagnostics snapshots.
-- [ ] Search runtime/browser docs and tests for misleading generic snapshot language.
-- [ ] Run scoped Prettier check for touched files.
-- [ ] Run `npm run check`, `npm run lint:ts`, and focused runtime tests.
-- [ ] Run root `git diff --check`.
+- [x] Clean stale active-voice `RuntimeSnapshot` and `createSnapshot()` wording in this plan.
+- [x] Rename ambiguous runtime test locals where they now refer to diagnostics snapshots.
+- [x] Search runtime/browser docs and tests for misleading generic snapshot language.
+- [x] Run scoped Prettier check for touched files.
+- [x] Run `npm run check`, `npm run lint:ts`, and focused runtime tests.
+- [x] Run root `git diff --check`.
 
 Decisions and course corrections:
 
-- Pending.
+- 2026-06-28 cleanup: Updated the plan's active context and resolved decisions to describe the
+  current `RuntimeOverviewSnapshot` polling path and explicit `RuntimeDiagnosticsSnapshot` read path.
+  Earlier phase notes still preserve old names where they document pre-refactor behavior or migration
+  steps.
+- 2026-06-28 cleanup: Renamed ambiguous runtime test locals so diagnostics reads use
+  `*DiagnosticsSnapshot` names and the cheap overview read uses `overviewSnapshot`.
+- 2026-06-28 verification: Scoped Prettier check passed for this plan and
+  `client-runtime.test.ts`. `npm run check`, `npm run lint:ts`, and
+  `npm run test:ts -- src/lib/runtime/client-runtime.test.ts` passed.
 
 ## Risks And Mitigations
 
@@ -632,11 +639,11 @@ Decisions and course corrections:
 
 ## Resolved Decisions
 
-- Browser full runtime snapshot polling cadence is `500ms`.
+- Browser runtime overview polling cadence is `500ms`.
 - Polling runs unconditionally while `BrowserDisplay` is mounted; no panel-visibility gating in the
   first cut.
 - The cheap browser-polled runtime state is `RuntimeOverviewSnapshot`.
 - The expensive full runtime diagnostic state is `RuntimeDiagnosticsSnapshot`, read through
   `ClientRuntime.createDiagnosticsSnapshot()`.
-- Follow-up correction should split browser polling into a cheap runtime overview snapshot before
-  considering narrower panel-specific APIs.
+- The completed follow-up correction split browser polling into a cheap runtime overview snapshot
+  before considering narrower panel-specific APIs.

@@ -116,7 +116,6 @@ export interface RendererDiagnosticsSummary {
 	readonly dynamicVisualResources: number;
 	readonly dynamicVisualResourceTextureUses: number;
 	readonly dynamicInstances: number;
-	readonly dynamicDrawCalls: number;
 	readonly skippedDynamicSubmissions: number;
 	readonly renderedTriangles: number;
 	readonly debugOverlayPrimitives: number;

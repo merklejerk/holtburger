@@ -252,6 +252,94 @@ describe("static coordinator", () => {
 		).not.toContain("workId");
 	});
 
+	it("dispatches grouped source requests into owner-keyed bake inputs", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+
+		activeWorkForDemand(
+			coordinator,
+			createSingleOutdoorObjectDemand(0xda55ffff),
+		);
+
+		expect(resolver.pendingSourceRequests).toHaveLength(1);
+		expect(resolver.pendingSourceRequests[0]?.request).toMatchObject({
+			context: "outdoor",
+			landblockId: 0xda55ffff,
+			sourceLod: 3,
+			requestedLayers: [
+				{
+					kind: "terrain",
+					targetOwnerKey: { kind: "terrain", landblockId: 0xda55ffff },
+				},
+				{
+					kind: "outdoor-explicit-objects",
+					targetOwnerKey: {
+						kind: "outdoor-explicit-objects",
+						landblockId: 0xda55ffff,
+					},
+				},
+				{
+					kind: "outdoor-generated-scenery",
+					targetOwnerKey: {
+						kind: "outdoor-generated-scenery",
+						landblockId: 0xda55ffff,
+					},
+				},
+			],
+		});
+
+		resolver.completeSource(resolver.pendingSourceRequests[0]?.requestId ?? "");
+		await flushPromises();
+
+		expect(baker.pendingInputs.map((input) => input.domain).sort()).toEqual([
+			"outdoor-explicit-objects",
+			"outdoor-generated-scenery",
+			"outdoor-terrain",
+		]);
+		expect(
+			baker.pendingInputs.flatMap((input) =>
+				input.items.map((item) => item.targetOwnerKey),
+			),
+		).toEqual([
+			{ kind: "terrain", landblockId: 0xda55ffff },
+			{ kind: "outdoor-explicit-objects", landblockId: 0xda55ffff },
+			{ kind: "outdoor-generated-scenery", landblockId: 0xda55ffff },
+		]);
+	});
+
+	it("drops late source recipes when their layer owners are no longer demanded", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+
+		activeWorkForDemand(
+			coordinator,
+			createSingleOutdoorObjectDemand(0xda55ffff),
+		);
+		const sourceRequestId = resolver.pendingSourceRequests[0]?.requestId ?? "";
+
+		activeWorkForDemand(coordinator, {
+			location: null,
+			lod: { buildings: -1, detail: -1, envCells: -1, terrain: -1 },
+		});
+		resolver.completeSource(sourceRequestId);
+		await flushPromises();
+
+		expect(baker.pendingInputs).toHaveLength(0);
+		expect(coordinator.createSnapshot()).toMatchObject({
+			staleResolverResults: 3,
+		});
+	});
+
 	it("reports layer owner lifecycle transitions without changing work identity", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -577,24 +665,37 @@ describe("static coordinator", () => {
 		const terrainWork = work.filter(
 			(item) => item.job.domain === "outdoor-terrain",
 		);
+		const completedTerrainRequests = resolver.pendingRequests.slice(0, 2);
+		const completedTerrainWork = completedTerrainRequests.map((request) => {
+			const match = terrainWork.find(
+				(item) => item.job.scope.landblockId === request.job.scope.landblockId,
+			);
+			if (!match) {
+				throw new Error("Expected completed terrain request to match work.");
+			}
+			return match;
+		});
 
-		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
-		resolver.complete(resolver.pendingRequests[1]?.requestId ?? "");
+		resolver.complete(completedTerrainRequests[0]?.requestId ?? "");
+		resolver.complete(completedTerrainRequests[1]?.requestId ?? "");
 		await flushPromises();
 
+		const firstTerrainScopeKey = `landblock:${completedTerrainWork[0]?.job.scope.landblockId
+			.toString(16)
+			.padStart(8, "0")}`;
 		expect(baker.pendingInputs).toHaveLength(1);
 		expect(baker.pendingInputs[0]).toMatchObject({
 			domain: "outdoor-terrain",
 			revision: 1,
-			staticBatchId: "static-batch:1:outdoor-terrain:landblock:da55ffff:2",
+			staticBatchId: `static-batch:1:outdoor-terrain:${firstTerrainScopeKey}:2`,
 		});
 		expect(
 			baker.pendingInputs[0]?.items.map((item) => item.work.workId),
-		).toEqual(terrainWork.slice(0, 2).map((item) => item.workId));
+		).toEqual(completedTerrainWork.map((item) => item.workId));
 		expect(
 			baker.pendingInputs[0]?.items.map((item) => item.targetOwnerKey),
 		).toEqual(
-			terrainWork.slice(0, 2).map((item) => ({
+			completedTerrainWork.map((item) => ({
 				kind: "terrain",
 				landblockId: item.job.scope.landblockId,
 			})),

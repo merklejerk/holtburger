@@ -2,15 +2,28 @@ import type {
 	StaticBakeBatchInput,
 	StaticBakeBatchResult,
 	StaticBaker,
+	StaticDomain,
+	StaticLandblockSceneLodLayerRequest,
+	StaticLandblockSceneLodResolution,
+	StaticLandblockSceneLodSourceRequest,
+	StaticLandblockSceneLodSourceResolver,
+	StaticLayerRecipe,
 	StaticResolver,
 	StaticResolverJob,
 	StaticScopePayload,
 } from "./contracts";
 
-export class DeferredStaticResolver implements StaticResolver {
+export class DeferredStaticResolver
+	implements StaticResolver, StaticLandblockSceneLodSourceResolver
+{
 	readonly #pending: {
 		readonly requestId: string;
 		readonly job: StaticResolverJob;
+		readonly revision: number;
+	}[] = [];
+	readonly #pendingSourceRequests: {
+		readonly requestId: string;
+		readonly request: StaticLandblockSceneLodSourceRequest;
 		readonly revision: number;
 	}[] = [];
 	readonly #resolvers = new Map<
@@ -18,6 +31,24 @@ export class DeferredStaticResolver implements StaticResolver {
 		{
 			readonly resolve: (payload: StaticScopePayload) => void;
 			readonly reject: (error: Error) => void;
+		}
+	>();
+	readonly #sourceResolvers = new Map<
+		string,
+		{
+			readonly resolve: (
+				resolution: StaticLandblockSceneLodResolution,
+			) => void;
+			readonly reject: (error: Error) => void;
+		}
+	>();
+	readonly #sourceLayerRequests = new Map<
+		string,
+		{
+			readonly layer: StaticLandblockSceneLodLayerRequest;
+			readonly request: StaticLandblockSceneLodSourceRequest;
+			readonly sourceRequestId: string;
+			readonly revision: number;
 		}
 	>();
 
@@ -32,12 +63,56 @@ export class DeferredStaticResolver implements StaticResolver {
 		});
 	}
 
+	resolveSource(
+		request: StaticLandblockSceneLodSourceRequest,
+	): Promise<StaticLandblockSceneLodResolution> {
+		const revision = this.#pendingSourceRequests.length + 1;
+		const requestId = `fake-source-resolver:${revision}:landblock:${formatHex32(
+			request.landblockId,
+		)}:lod:${request.sourceLod}`;
+
+		this.#pendingSourceRequests.push({ request, requestId, revision });
+		for (const layer of request.requestedLayers) {
+			const job: StaticResolverJob = {
+				domain: staticDomainForFakeSourceLayer(layer.kind),
+				scope: {
+					kind: "landblock",
+					landblockId: request.landblockId,
+				},
+			};
+			const layerRequestId = `${requestId}:${layer.kind}`;
+			this.#pending.push({
+				job,
+				requestId: layerRequestId,
+				revision,
+			});
+			this.#sourceLayerRequests.set(layerRequestId, {
+				layer,
+				request,
+				revision,
+				sourceRequestId: requestId,
+			});
+		}
+
+		return new Promise((resolve, reject) => {
+			this.#sourceResolvers.set(requestId, { reject, resolve });
+		});
+	}
+
 	get pendingRequests(): readonly {
 		readonly requestId: string;
 		readonly job: StaticResolverJob;
 		readonly revision: number;
 	}[] {
 		return this.#pending;
+	}
+
+	get pendingSourceRequests(): readonly {
+		readonly requestId: string;
+		readonly request: StaticLandblockSceneLodSourceRequest;
+		readonly revision: number;
+	}[] {
+		return this.#pendingSourceRequests;
 	}
 
 	complete(
@@ -51,18 +126,56 @@ export class DeferredStaticResolver implements StaticResolver {
 		);
 		const resolver = this.#resolvers.get(requestId);
 
+		if (!resolver) {
+			const sourceLayerRequest = this.#sourceLayerRequests.get(requestId);
+			if (sourceLayerRequest) {
+				this.completeSource(sourceLayerRequest.sourceRequestId, [
+					createFakeLayerRecipe(
+						sourceLayerRequest.request,
+						sourceLayerRequest.layer,
+						sourceLayerRequest.revision,
+						payload,
+					),
+				]);
+				return;
+			}
+		}
+
 		if (!request || !resolver) {
 			throw new Error(`No pending resolver request exists for ${requestId}.`);
 		}
 
 		this.#resolvers.delete(requestId);
+		resolver.resolve(
+			createFakeStaticScopePayload(request.job, request.revision, payload),
+		);
+	}
+
+	completeSource(
+		requestId: string,
+		recipes: readonly StaticLayerRecipe[] | null = null,
+	): void {
+		const sourceRequest = this.#pendingSourceRequests.find(
+			(candidate) => candidate.requestId === requestId,
+		);
+		const resolver = this.#sourceResolvers.get(requestId);
+
+		if (!sourceRequest || !resolver) {
+			throw new Error(`No pending source resolver request exists for ${requestId}.`);
+		}
+
+		this.#sourceResolvers.delete(requestId);
 		resolver.resolve({
-			job: request.job,
-			scope: payload.scope ?? {
-				kind: "placeholder",
-				referencedTextureUses: [],
-			},
-			sourceRevision: payload.sourceRevision ?? request.revision,
+			recipes:
+				recipes ??
+				sourceRequest.request.requestedLayers.map((layer) =>
+					createFakeLayerRecipe(
+						sourceRequest.request,
+						layer,
+						sourceRequest.revision,
+					),
+				),
+			request: sourceRequest.request,
 		});
 	}
 
@@ -74,6 +187,17 @@ export class DeferredStaticResolver implements StaticResolver {
 		}
 
 		this.#resolvers.delete(requestId);
+		resolver.reject(error);
+	}
+
+	failSource(requestId: string, error: Error): void {
+		const resolver = this.#sourceResolvers.get(requestId);
+
+		if (!resolver) {
+			throw new Error(`No pending source resolver request exists for ${requestId}.`);
+		}
+
+		this.#sourceResolvers.delete(requestId);
 		resolver.reject(error);
 	}
 }
@@ -141,105 +265,28 @@ export class DeferredStaticBaker implements StaticBaker {
 	}
 }
 
-export class ImmediateStaticResolver implements StaticResolver {
+export class ImmediateStaticResolver
+	implements StaticResolver, StaticLandblockSceneLodSourceResolver
+{
 	async resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
-		if (
-			job.domain === "landblock-env-cells" &&
-			job.scope.kind === "landblock"
-		) {
-			return {
-				job,
-				scope: {
-					acceptedEnvCellIds: [],
-					envCells: [],
-					kind: "landblock-env-cells",
-					landblock: {
-						kind: "landblock-source",
-						landblockId: job.scope.landblockId,
-						source: "env-cells",
-					},
-					materialSources: [],
-					missingRefs: [],
-					paletteSources: [],
-					portalLinks: [],
-					regionRenderProfile: {
-						detailRoles: [],
-						identity: {
-							kind: "region-render-profile",
-							regionNumber: 0,
-						},
-					},
-					residencySpatial: {
-						landblockEnvCellBvhItemCount: 0,
-						landblockEnvCellBvhNodeCount: 0,
-						landblockEnvCellBvh: {
-							items: [],
-							nodes: [],
-						},
-					},
-					sourceAssets: [],
-					textureRefs: [],
-					visibilityDiagnostics: [],
-				},
-				sourceRevision: createStableFakeRenderSurfaceId(job),
-			};
-		}
-
-		if (job.domain === "outdoor-buildings" && job.scope.kind === "landblock") {
-			return {
-				job,
-				scope: {
-					authoredDynamicSeeds: [],
-					buildingTransitionApertures: [],
-					domain: "outdoor-buildings",
-					kind: "outdoor-static-objects",
-					landblock: {
-						kind: "landblock-source",
-						landblockId: job.scope.landblockId,
-						source: "outdoor",
-					},
-					materialSlots: [],
-					materialSources: [],
-					missingRefs: [],
-					objects: [],
-					paletteSources: [],
-					regionRenderProfile: {
-						detailRoles: [],
-						identity: {
-							kind: "region-render-profile",
-							regionNumber: 0,
-						},
-					},
-					sourceAssets: [],
-					sourceSpatial: {
-						bounds: null,
-						coordinateSpace: "landblock-render-local",
-						outdoorBvh: null,
-						outdoorBvhItemCount: 0,
-						outdoorBvhNodeCount: 0,
-					},
-					textureRefs: [],
-				},
-				sourceRevision: createStableFakeRenderSurfaceId(job),
-			};
-		}
-
-		return {
+		return createFakeStaticScopePayload(
 			job,
-			scope: {
-				kind: "placeholder",
-				referencedTextureUses: [
-					{
-						kind: "prepared-render-surface-texture-use",
-						renderSurface: {
-							kind: "render-surface",
-							renderSurfaceId: createStableFakeRenderSurfaceId(job),
-						},
-						usage: "rgba-color",
-					},
-				],
-			},
-			sourceRevision: createStableFakeRenderSurfaceId(job),
+			createStableFakeRenderSurfaceId(job),
+		);
+	}
+
+	async resolveSource(
+		request: StaticLandblockSceneLodSourceRequest,
+	): Promise<StaticLandblockSceneLodResolution> {
+		return {
+			recipes: request.requestedLayers.map((layer) =>
+				createFakeLayerRecipe(
+					request,
+					layer,
+					createStableFakeSourceRevision(request),
+				),
+			),
+			request,
 		};
 	}
 }
@@ -284,6 +331,147 @@ function createFakeStaticBakeResult(
 	};
 }
 
+function createFakeLayerRecipe(
+	request: StaticLandblockSceneLodSourceRequest,
+	layer: StaticLandblockSceneLodLayerRequest,
+	revision: number,
+	payload: Partial<Omit<StaticScopePayload, "job" | "scope">> & {
+		readonly scope?: StaticScopePayload["scope"];
+	} = {},
+): StaticLayerRecipe {
+	const job: StaticResolverJob = {
+		domain: staticDomainForFakeSourceLayer(layer.kind),
+		scope: {
+			kind: "landblock",
+			landblockId: request.landblockId,
+		},
+	};
+
+	return {
+		payload: createFakeStaticScopePayload(job, revision, payload),
+		targetOwnerKey: layer.targetOwnerKey,
+	};
+}
+
+function staticDomainForFakeSourceLayer(
+	kind: StaticLandblockSceneLodLayerRequest["kind"],
+): StaticDomain {
+	switch (kind) {
+		case "terrain":
+			return "outdoor-terrain";
+		case "outdoor-buildings":
+			return "outdoor-buildings";
+		case "outdoor-explicit-objects":
+			return "outdoor-explicit-objects";
+		case "outdoor-generated-scenery":
+			return "outdoor-generated-scenery";
+		case "env-cell-system":
+			return "landblock-env-cells";
+	}
+}
+
+function createFakeStaticScopePayload(
+	job: StaticResolverJob,
+	revision: number,
+	payload: Partial<Omit<StaticScopePayload, "job" | "scope">> & {
+		readonly scope?: StaticScopePayload["scope"];
+	} = {},
+): StaticScopePayload {
+	return {
+		job,
+		scope: payload.scope ?? createFakeStaticScopePayloadBody(job),
+		sourceRevision: payload.sourceRevision ?? revision,
+	};
+}
+
+function createFakeStaticScopePayloadBody(
+	job: StaticResolverJob,
+): StaticScopePayload["scope"] {
+	if (job.domain === "landblock-env-cells" && job.scope.kind === "landblock") {
+		return {
+			acceptedEnvCellIds: [],
+			envCells: [],
+			kind: "landblock-env-cells",
+			landblock: {
+				kind: "landblock-source",
+				landblockId: job.scope.landblockId,
+				source: "env-cells",
+			},
+			materialSources: [],
+			missingRefs: [],
+			paletteSources: [],
+			portalLinks: [],
+			regionRenderProfile: {
+				detailRoles: [],
+				identity: {
+					kind: "region-render-profile",
+					regionNumber: 0,
+				},
+			},
+			residencySpatial: {
+				landblockEnvCellBvhItemCount: 0,
+				landblockEnvCellBvhNodeCount: 0,
+				landblockEnvCellBvh: {
+					items: [],
+					nodes: [],
+				},
+			},
+			sourceAssets: [],
+			textureRefs: [],
+			visibilityDiagnostics: [],
+		};
+	}
+
+	if (job.domain === "outdoor-buildings" && job.scope.kind === "landblock") {
+		return {
+			authoredDynamicSeeds: [],
+			buildingTransitionApertures: [],
+			domain: "outdoor-buildings",
+			kind: "outdoor-static-objects",
+			landblock: {
+				kind: "landblock-source",
+				landblockId: job.scope.landblockId,
+				source: "outdoor",
+			},
+			materialSlots: [],
+			materialSources: [],
+			missingRefs: [],
+			objects: [],
+			paletteSources: [],
+			regionRenderProfile: {
+				detailRoles: [],
+				identity: {
+					kind: "region-render-profile",
+					regionNumber: 0,
+				},
+			},
+			sourceAssets: [],
+			sourceSpatial: {
+				bounds: null,
+				coordinateSpace: "landblock-render-local",
+				outdoorBvh: null,
+				outdoorBvhItemCount: 0,
+				outdoorBvhNodeCount: 0,
+			},
+			textureRefs: [],
+		};
+	}
+
+	return {
+		kind: "placeholder",
+		referencedTextureUses: [
+			{
+				kind: "prepared-render-surface-texture-use",
+				renderSurface: {
+					kind: "render-surface",
+					renderSurfaceId: createStableFakeRenderSurfaceId(job),
+				},
+				usage: "rgba-color",
+			},
+		],
+	};
+}
+
 function describeFakeResolverRequestId(job: StaticResolverJob): string {
 	return `${describeFakeScope(job.scope)}:${job.domain}`;
 }
@@ -294,6 +482,14 @@ function describeFakeScope(scope: StaticResolverJob["scope"]): string {
 
 function createStableFakeRenderSurfaceId(job: StaticResolverJob): number {
 	return hashText(`${describeFakeScope(job.scope)}:${job.domain}`);
+}
+
+function createStableFakeSourceRevision(
+	request: StaticLandblockSceneLodSourceRequest,
+): number {
+	return hashText(
+		`landblock:${formatHex32(request.landblockId)}:lod:${request.sourceLod}:${request.context}`,
+	);
 }
 
 function hashText(value: string): number {

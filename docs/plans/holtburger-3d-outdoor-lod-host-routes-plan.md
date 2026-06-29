@@ -216,7 +216,7 @@ Each phase should leave the repo in a buildable state. If a phase discovers that
 
 Dry-run findings from 2026-06-29:
 
-- The new route can be added without immediate renderer cutover, but any temporary old-route bridge must be isolated and deleted in Phase 7D as soon as source-first resolver fanout and bake integration are ready for browser cutover.
+- The new route can be added without immediate renderer cutover, but any temporary old-route bridge must be isolated and deleted in Phase 7F as soon as source-first coordinator execution and browser worker wiring are ready for cutover.
 - `ContentAssetService` owns the right lifetime for the prepared LoD source cache. `ContentDecodeCache` is source-record cache only and must not grow prepared scene semantics.
 - The frontend currently has one browser interest/visibility axis for `detail`; explicit outdoor objects and generated scenery need separate interest, visibility, diagnostics, and retained-layer identities.
 - The worker resolver protocol currently returns one `StaticScopePayload` for one `StaticResolverJob`; source-first fanout needs a protocol shape that can return multiple layer recipes from one source request.
@@ -730,29 +730,29 @@ Decisions and course corrections:
 
 Status: completed on 2026-06-29.
 
-Goal: isolate old-route loading behind an adapter that targets layer owners and is explicitly deleted by Phase 7D.
+Goal: isolate old-route loading behind an adapter that targets layer owners and is explicitly deleted by Phase 7F.
 
 Deliverables:
 
 - Keep existing old-route resolvers only through an isolated temporary adapter.
 - Make adapter output target layer owner keys rather than treating route/domain jobs as durable ownership.
-- Add the adapter to the Phase 7D deletion checklist.
+- Add the adapter to the Phase 7F deletion checklist.
 
 Acceptance criteria:
 
-- Temporary old-route adapter tests cover only owner translation and are deleted or rewritten in Phase 7D; they must not bless old route behavior as a stable path.
+- Temporary old-route adapter tests cover only owner translation and are deleted or rewritten in Phase 7F; they must not bless old route behavior as a stable path.
 - No browser/domain split work remains in this phase beyond wiring split domains into owner records.
 
 Task checklist:
 
-- [x] Isolate old route loading behind a temporary adapter and add it to the Phase 7D deletion checklist.
+- [x] Isolate old route loading behind a temporary adapter and add it to the Phase 7F deletion checklist.
 - [x] Add adapter tests that verify owner translation only.
-- [x] Confirm normal path still compiles and behaves before Phase 7D replaces the temporary adapter with source fanout.
+- [x] Confirm normal path still compiles and behaves before Phase 7E bypasses the temporary adapter with source fanout.
 
 Decisions and course corrections:
 
 - Added `TemporaryLayerOwnerTargetingResolverAdapter` as the only normal-path old-route bridge. It translates existing `StaticResolverJob` values into target layer owner keys before delegating to the current resolver.
-- Wired `BrowserStaticResolver` through the temporary adapter without changing old-route payload behavior. This keeps Phase 6C focused on ownership targeting; Phase 7D must delete the adapter when source-first fanout becomes the normal browser path.
+- Wired `BrowserStaticResolver` through the temporary adapter without changing old-route payload behavior. This keeps Phase 6C focused on ownership targeting; Phase 7F must delete the adapter when source-first fanout becomes the normal browser path.
 - Adapter tests intentionally verify owner-key translation and delegation only. They do not assert old `landblock-outdoor` or `landblock-env-cells` route behavior as a stable contract.
 - Validation: `npm run test:ts -- src/lib/static/layer-owner-source-adapter.test.ts src/lib/browser/create-browser-runtime.test.ts`; `npm run check`.
 
@@ -780,7 +780,7 @@ Task checklist:
 - [x] Update `planStaticDemand` or replace it with source-first planning.
 - [x] Add source-first request and requested-layer types.
 - [x] Add source-first planner tests for minimum LoD selection and layer owner targets.
-- [x] Keep the Phase 6C temporary adapter wired as the production bridge until Phase 7D.
+- [x] Keep the Phase 6C temporary adapter wired as the production bridge until Phase 7E.
 
 Decisions and course corrections:
 
@@ -844,7 +844,7 @@ Acceptance criteria:
 - Runtime drops unwanted recipes before bake enqueue if the target owner is no longer demanded.
 - Bake batching remains domain/layer-oriented for terrain, buildings, explicit objects, generated scenery, and env-cell system output.
 - Bake item tests verify owner keys survive from resolver recipe to bake input.
-- No old-route deletion happens in this phase; deletion is reserved for Phase 7D.
+- No old-route deletion happens in this phase; deletion is reserved for Phase 7F.
 
 Task checklist:
 
@@ -861,33 +861,100 @@ Decisions and course corrections:
 - Added tests proving coordinator bake inputs carry owner keys and source-first resolver recipes can be passed to existing terrain/object/env-cell bakers without requesting broad old route payloads.
 - Validation: `npm run test:ts -- src/lib/static/resolver/landblock-scene-lod-source-resolver.test.ts src/lib/static/coordinator/static-coordinator.test.ts`; `npm run check`.
 
-### Phase 7D: Browser Source-First Cutover And Old Adapter Deletion
+### Phase 7D: Coordinator Source-First Execution
 
-Status: pending.
+Status: completed on 2026-06-29.
 
-Goal: switch normal browser static resolution to source-first landblock scene LoD requests and delete the temporary old-route bridge.
+Goal: make `StaticCoordinator` execute Phase 7A source requests through the Phase 7B source resolver and Phase 7C owner-keyed bake batches.
 
 Deliverables:
 
-- Wire browser static demand execution to Phase 7A source requests, Phase 7B resolver fanout, and Phase 7C bake integration.
-- Ensure each source request loads `landblock/{id}/lod/{sourceLod}` exactly once.
-- Delete the Phase 6C temporary old-route adapter from production code and delete or rewrite its tests.
-- Remove normal browser usage of old `landblock-outdoor` and `landblock-env-cells` source requests.
+- Route new demanded work through `StaticDemandPlan.sourceRequests` instead of one resolver call per `ScheduledStaticWork`.
+- Map returned source recipes back to active demanded work by owner/layer identity before bake enqueue.
+- Preserve existing batch/materialization behavior while carrying recipe-owned target owner keys.
+- Add the minimum browser resolver source delegate required for `StaticCoordinator` to compile against the source resolver contract; keep adapter deletion and browser route assertions in later phases.
 
 Acceptance criteria:
 
-- Normal browser static resolution no longer requests `landblock-outdoor` or `landblock-env-cells`.
+- New coordinator work invokes `resolveSource` with landblock scene LoD source requests.
+- Coordinator tests prove source recipes enqueue domain-oriented bake items with the recipe `targetOwnerKey`.
+- Late or no-longer-demanded recipes are dropped before bake enqueue.
+- No temporary adapter deletion or browser old-route audit happens in this phase.
+
+Task checklist:
+
+- [x] Replace coordinator per-work resolver dispatch with source-request dispatch.
+- [x] Add/adjust fake resolver support for source requests without blessing old broad-route behavior.
+- [x] Add coordinator tests for grouped source dispatch, owner-keyed bake inputs, and stale recipe drops.
+- [x] Verify existing materialization and diagnostics remain buildable after the execution change.
+
+Decisions and course corrections:
+
+- `StaticCoordinator` now dispatches new demanded work through `StaticDemandPlan.sourceRequests` and calls `resolveSource` instead of resolving each `ScheduledStaticWork` directly.
+- Source resolutions are mapped back to active work by layer/domain identity, then enqueued into the existing domain-oriented bake queues with the recipe's `targetOwnerKey`.
+- Late or no-longer-demanded recipes are dropped before bake enqueue and counted as stale resolver results.
+- `DeferredStaticResolver` and `ImmediateStaticResolver` now implement source resolution. `DeferredStaticResolver` exposes source request handles for source-first tests while retaining per-layer test handles so existing coordinator behavior tests do not become protocol-noise tests.
+- Course correction: making the coordinator require `StaticLandblockSceneLodSourceResolver` forced a minimal browser construction bridge in this phase. `BrowserStaticResolver.resolveSource` delegates to the worker source resolver, while the Phase 6C temporary adapter remains only on the old direct `resolve(job)` path for Phase 7F deletion.
+- Validation: `npm run test:ts -- src/lib/static/coordinator/static-coordinator.test.ts`; `npm run test:ts -- src/lib/static/coordinator/static-coordinator.test.ts src/lib/static/resolver/worker-client.test.ts src/lib/static/resolver/landblock-scene-lod-source-resolver.test.ts src/lib/browser/create-browser-runtime.test.ts`; `npm run check`.
+
+### Phase 7E: Browser Worker Source-First Wiring
+
+Status: pending.
+
+Goal: route normal browser static resolution through worker `landblock-scene-lod` source requests.
+
+Deliverables:
+
+- Verify the browser worker static resolver path uses `resolveSource` for normal static demand.
+- Add browser/runtime assertions around the `BrowserStaticResolver` source delegate introduced in Phase 7D.
+- Ensure each source request results in one worker `resolve-landblock-scene-lod-source` request for `landblock/{id}/lod/{sourceLod}`.
+- Keep the temporary old-route adapter present but bypassed by normal browser source execution so Phase 7F can delete it cleanly.
+
+Acceptance criteria:
+
+- Browser/runtime tests assert source-first worker messages for normal static demand.
+- Tests assert normal browser static resolution does not post old `landblock-outdoor` or `landblock-env-cells` broad-route requests.
+- Direct per-domain resolver calls are not used by normal browser coordinator execution.
+- No compatibility switch or fallback route is introduced.
+
+Task checklist:
+
+- [x] Update browser resolver types and runtime construction for `StaticLandblockSceneLodSourceResolver`.
+- [ ] Update worker-client/browser-runtime tests to observe source-first route usage.
+- [ ] Add no-old-route assertions for normal browser static resolution.
+- [ ] Confirm fake worker behavior still supports focused coordinator/runtime tests.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 7F: Temporary Adapter Deletion And Route Audit
+
+Status: pending.
+
+Goal: delete the Phase 6C temporary bridge and prove no normal browser escape hatch to old broad routes remains.
+
+Deliverables:
+
+- Delete `TemporaryLayerOwnerTargetingResolverAdapter` from production code.
+- Delete or rewrite its focused adapter tests so they do not preserve old-route behavior.
+- Remove normal-path old broad route requests from browser static resolution.
+- Run and record a focused route audit for `landblock-outdoor` and `landblock-env-cells` production browser usage.
+
+Acceptance criteria:
+
 - The `TemporaryLayerOwnerTargetingResolverAdapter` symbol and its test file are gone, not merely unused.
-- Browser/runtime tests assert source-first route usage and absence of old broad route requests.
+- Normal browser static resolution no longer requests `landblock-outdoor` or `landblock-env-cells`.
+- Browser/runtime tests still assert source-first route usage and absence of old broad route requests after adapter deletion.
 - No compatibility switch, fallback route, or escape hatch remains for normal browser static rendering.
 
 Task checklist:
 
-- [ ] Wire browser runtime to source-first resolver fanout.
 - [ ] Delete `TemporaryLayerOwnerTargetingResolverAdapter` and its focused adapter tests.
-- [ ] Remove normal-path old broad route requests from browser static resolution.
-- [ ] Add no-old-route assertions for browser static resolution.
-- [ ] Run a focused route audit for `landblock-outdoor` and `landblock-env-cells` production browser usage before entering Phase 8.
+- [ ] Remove all normal-path imports and construction of the temporary adapter.
+- [ ] Run focused browser/runtime and coordinator tests after deletion.
+- [ ] Run route audits for old broad-route strings in production browser static paths.
+- [ ] Record any remaining compatibility-only old-route surfaces as Phase 11 deletion targets.
 
 Decisions and course corrections:
 
@@ -943,7 +1010,7 @@ Review checklist:
 - [ ] Confirm no parallel lifecycle truth remains in retained scopes, desired keys, durable work owners, or scene-interest readiness tracking.
 - [ ] Confirm lower retained layers survive LoD churn without re-materialization.
 - [ ] Confirm dynamic seed ownership and runtime dynamic no-residence behavior are covered.
-- [ ] Confirm Phase 7D removed old-route resolvers from the normal browser static path; Phase 11 should be deleting compatibility surfaces, not changing behavior.
+- [ ] Confirm Phase 7F removed old-route resolvers from the normal browser static path; Phase 11 should be deleting compatibility surfaces, not changing behavior.
 - [ ] Run a vestigial-code audit for old routes, old payload kinds, old host asset keys, old renderer layer names, old lifecycle ownership, and stale tests before route deletion.
 - [ ] Identify any executable code path, schema, parser, resolver, baker, lifecycle store, diagnostic surface, or test fixture that could keep the old model alive.
 - [ ] Update Phase 10 and Phase 11 with discovered deletion targets.

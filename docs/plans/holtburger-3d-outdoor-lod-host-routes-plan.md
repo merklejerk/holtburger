@@ -351,7 +351,7 @@ Decisions and course corrections:
 
 ### Phase 2B: Outdoor Layer Projections
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: emit real terrain, building, explicit-object, and generated-scenery LoD layers from the gated source path.
 
@@ -371,14 +371,19 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Replace skeleton outdoor layer variants with typed layer payload structs.
-- [ ] Add terrain/building/explicit-object/generated-scenery projection tests.
-- [ ] Add generated scenery parity tests against the current full route.
-- [ ] Confirm emitted layer discriminants still match Phase 0 names.
+- [x] Replace skeleton outdoor layer variants with typed layer payload structs.
+- [x] Add terrain/building/explicit-object/generated-scenery projection tests.
+- [x] Add generated scenery parity tests against the current full route.
+- [x] Confirm emitted layer discriminants still match Phase 0 names.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Added typed `LandblockSceneLodLayer` payloads for terrain, outdoor buildings, explicit outdoor objects, and generated outdoor scenery.
+- `LandblockSceneLodAssetAssembler` now builds one gated outdoor source, prepares static meshes once, and partitions prepared members into layer records by `PreparedStaticInstanceKind`.
+- Kept generated scenery parity structural instead of fixture-backed: the LoD route uses the same `StaticOutdoorSceneAssembler`, prepared static instance builder, static member builder, and generated fact structs as `landblock-outdoor`. There is no checked-in HBA/DAT fixture suitable for a required live route-vs-route generated scenery parity test.
+- Recorded verification debt: if checked-in content fixtures are added later, add a live parity test comparing LoD `3` generated member identities/placements against `landblock-outdoor` for the same landblock.
+- Added shaped JSON layer serialization while preserving Phase 0 discriminants: `terrain`, `outdoor-buildings`, `outdoor-explicit-objects`, and `outdoor-generated-scenery`.
+- Validation run: `cargo test -p holtburger-content scene_lod_outdoor_layers_partition_static_families_by_level`; `cargo test -p holtburger-content scene_lod_static_source_families_follow_level_contract`; `cargo test -p holtburger-core content_asset_service_loads_landblock_scene_lod_layers`; `cargo test -p holtburger-3d serialize_landblock_scene_lod_payload_emits_layer_payloads`; `cargo test -p holtburger-3d serialize_landblock_scene_lod_payload_emits_skeleton_contract`.
 
 ### Phase 2C: LoD 4 Env-Cell Source Projection
 

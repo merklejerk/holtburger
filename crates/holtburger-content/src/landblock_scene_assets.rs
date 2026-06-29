@@ -131,11 +131,35 @@ pub struct LandblockSceneLodAsset {
 
 #[derive(Debug, Clone)]
 pub enum LandblockSceneLodLayer {
-    Terrain,
-    OutdoorBuildings,
-    OutdoorExplicitObjects,
-    OutdoorGeneratedScenery,
+    Terrain(LandblockSceneLodTerrainLayer),
+    OutdoorBuildings(LandblockSceneLodOutdoorBuildingsLayer),
+    OutdoorExplicitObjects(LandblockSceneLodOutdoorStaticLayer),
+    OutdoorGeneratedScenery(LandblockSceneLodOutdoorStaticLayer),
     EnvCellSystem,
+}
+
+#[derive(Debug, Clone)]
+pub struct LandblockSceneLodTerrainLayer {
+    /// Terrain mesh for the requested landblock, or `None` when source records were unavailable.
+    pub terrain_mesh: Option<PreparedTerrainMesh>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LandblockSceneLodOutdoorBuildingsLayer {
+    /// Prepared outdoor building members for this landblock LoD layer.
+    pub statics: Vec<LandblockOutdoorStaticMember>,
+    /// Transition apertures derived from building portal geometry.
+    pub building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
+    /// Layer-local BVH for building members with finite instance bounds.
+    pub outdoor_bvh: Option<PreparedBvh>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LandblockSceneLodOutdoorStaticLayer {
+    /// Prepared static members for this landblock LoD layer.
+    pub statics: Vec<LandblockOutdoorStaticMember>,
+    /// Layer-local BVH for static members with finite instance bounds.
+    pub outdoor_bvh: Option<PreparedBvh>,
 }
 
 #[derive(Debug, Clone)]
@@ -1270,37 +1294,125 @@ impl LandblockSceneLodAssetAssembler {
         decode_cache: &ContentDecodeCache,
         request: LandblockSceneLodRequest,
     ) -> LandblockSceneLodAsset {
-        let mut diagnostics = PreparedContentSourceDiagnostics::default();
-        let static_families = scene_lod_static_source_families(request.level);
-        if request.context == LandblockSceneLodContext::Outdoor && !static_families.is_empty() {
-            let mut source = ContentSourceReader::with_decode_cache(content, decode_cache);
-            if let Err(error) = StaticOutdoorSceneAssembler::new()
-                .assemble_landblock_with_source_families(
-                    &mut source,
-                    request.landblock_id,
-                    static_families,
-                )
-            {
-                diagnostics.errors.push(SourceLoadError {
-                    namespace: EOR_CELL_NAMESPACE,
-                    file_id: request.landblock_id,
-                    role: "landblock-scene-lod",
-                    error_code: "asset-decode-failed",
-                    detail: format!(
-                        "Could not assemble scene LoD {} for landblock 0x{:08X}: {error:#}",
-                        request.level.as_u8(),
-                        request.landblock_id
-                    ),
-                });
+        let mut context = PreparedContentAssemblyContext::with_decode_cache(content, decode_cache);
+        let layers = match request.context {
+            LandblockSceneLodContext::Outdoor => {
+                self.assemble_outdoor_layers(&mut context, request)
             }
-        }
+            LandblockSceneLodContext::Interior => Vec::new(),
+        };
+        let diagnostics = context.into_diagnostics();
 
         LandblockSceneLodAsset {
             landblock_id: request.landblock_id,
             level: request.level,
             context: request.context,
-            layers: Vec::new(),
+            layers,
             diagnostics,
+        }
+    }
+
+    fn assemble_outdoor_layers(
+        &self,
+        context: &mut PreparedContentAssemblyContext<'_>,
+        request: LandblockSceneLodRequest,
+    ) -> Vec<LandblockSceneLodLayer> {
+        let landblock_id = request.landblock_id;
+        let cell_landblock_source = context.load_cell_landblock(landblock_id);
+        let terrain_mesh = cell_landblock_source
+            .as_ref()
+            .map(CellLandblockFact::from_landblock)
+            .map(|cell_landblock| build_terrain_mesh(&cell_landblock));
+        let static_families = scene_lod_static_source_families(request.level);
+        let landblock_info_source = if static_families.is_empty() {
+            None
+        } else {
+            context.load_landblock_info(landblock_id)
+        };
+        let outdoor_scene = self.assemble_gated_outdoor_scene(
+            context,
+            request,
+            cell_landblock_source.as_ref(),
+            landblock_info_source.as_ref(),
+            static_families,
+        );
+        let instances =
+            build_prepared_outdoor_static_instances(outdoor_scene.as_ref()).collect::<Vec<_>>();
+        let static_meshes = build_prepared_static_meshes(context, instances.iter(), true);
+        let statics = build_landblock_outdoor_static_members(
+            outdoor_scene.as_ref(),
+            instances,
+            &static_meshes,
+        );
+        let building_transition_apertures =
+            build_prepared_building_transition_apertures(context, outdoor_scene.as_ref());
+
+        build_scene_lod_outdoor_layers(
+            landblock_id,
+            request.level,
+            terrain_mesh,
+            statics,
+            building_transition_apertures,
+        )
+    }
+
+    fn assemble_gated_outdoor_scene(
+        &self,
+        context: &mut PreparedContentAssemblyContext<'_>,
+        request: LandblockSceneLodRequest,
+        cell_landblock: Option<&CellLandblock>,
+        landblock_info: Option<&LandblockInfo>,
+        static_families: StaticOutdoorSceneSourceFamilies,
+    ) -> Option<StaticOutdoorScene> {
+        if static_families.is_empty() {
+            return None;
+        }
+        let region = if static_families.generated_scenery {
+            match context.source.region_desc() {
+                Ok(region) => Some(region),
+                Err(error) => {
+                    context.report_source_error(
+                        EOR_CELL_NAMESPACE,
+                        request.landblock_id,
+                        "region-desc",
+                        "asset-decode-failed",
+                        format!(
+                            "Could not load RegionDesc for scene LoD {} landblock 0x{:08X}: {error:#}",
+                            request.level.as_u8(),
+                            request.landblock_id
+                        ),
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let region_ref = region.as_ref();
+        match StaticOutdoorSceneAssembler::new().assemble_from_loaded(
+            &mut context.source,
+            request.landblock_id,
+            cell_landblock,
+            landblock_info,
+            None,
+            region_ref,
+            static_families,
+        ) {
+            Ok(scene) => Some(scene),
+            Err(error) => {
+                context.report_source_error(
+                    EOR_CELL_NAMESPACE,
+                    request.landblock_id,
+                    "landblock-scene-lod",
+                    "asset-decode-failed",
+                    format!(
+                        "Could not assemble scene LoD {} for landblock 0x{:08X}: {error:#}",
+                        request.level.as_u8(),
+                        request.landblock_id
+                    ),
+                );
+                None
+            }
         }
     }
 }
@@ -1318,6 +1430,59 @@ fn scene_lod_static_source_families(
             StaticOutdoorSceneSourceFamilies::ALL
         }
     }
+}
+
+fn build_scene_lod_outdoor_layers(
+    landblock_id: u32,
+    level: LandblockSceneLodLevel,
+    terrain_mesh: Option<PreparedTerrainMesh>,
+    statics: Vec<LandblockOutdoorStaticMember>,
+    building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
+) -> Vec<LandblockSceneLodLayer> {
+    let mut building_statics = Vec::new();
+    let mut explicit_statics = Vec::new();
+    let mut generated_statics = Vec::new();
+    for member in statics {
+        match member.instance.kind {
+            PreparedStaticInstanceKind::Building => building_statics.push(member),
+            PreparedStaticInstanceKind::Scenery => explicit_statics.push(member),
+            PreparedStaticInstanceKind::GeneratedScenery => generated_statics.push(member),
+            PreparedStaticInstanceKind::IndoorStatic => {}
+        }
+    }
+
+    let mut layers = vec![LandblockSceneLodLayer::Terrain(
+        LandblockSceneLodTerrainLayer { terrain_mesh },
+    )];
+    if level.as_u8() >= LandblockSceneLodLevel::Level1.as_u8() {
+        let spatial_items = build_outdoor_member_spatial_items(landblock_id, &building_statics);
+        layers.push(LandblockSceneLodLayer::OutdoorBuildings(
+            LandblockSceneLodOutdoorBuildingsLayer {
+                statics: building_statics,
+                building_transition_apertures,
+                outdoor_bvh: build_prepared_bvh(landblock_id, &spatial_items),
+            },
+        ));
+    }
+    if level.as_u8() >= LandblockSceneLodLevel::Level2.as_u8() {
+        let spatial_items = build_outdoor_member_spatial_items(landblock_id, &explicit_statics);
+        layers.push(LandblockSceneLodLayer::OutdoorExplicitObjects(
+            LandblockSceneLodOutdoorStaticLayer {
+                statics: explicit_statics,
+                outdoor_bvh: build_prepared_bvh(landblock_id, &spatial_items),
+            },
+        ));
+    }
+    if level.as_u8() >= LandblockSceneLodLevel::Level3.as_u8() {
+        let spatial_items = build_outdoor_member_spatial_items(landblock_id, &generated_statics);
+        layers.push(LandblockSceneLodLayer::OutdoorGeneratedScenery(
+            LandblockSceneLodOutdoorStaticLayer {
+                statics: generated_statics,
+                outdoor_bvh: build_prepared_bvh(landblock_id, &spatial_items),
+            },
+        ));
+    }
+    layers
 }
 
 fn empty_landblock_env_cells_asset(
@@ -4751,6 +4916,76 @@ mod tests {
     }
 
     #[test]
+    fn scene_lod_outdoor_layers_partition_static_families_by_level() {
+        let layers = build_scene_lod_outdoor_layers(
+            0xda55ffff,
+            LandblockSceneLodLevel::Level3,
+            None,
+            vec![
+                synthetic_outdoor_static_member(
+                    "building",
+                    PreparedStaticInstanceKind::Building,
+                    Some(LandblockOutdoorBuildingFacts {
+                        num_leaves: 1,
+                        portals: Vec::new(),
+                    }),
+                    None,
+                ),
+                synthetic_outdoor_static_member(
+                    "explicit",
+                    PreparedStaticInstanceKind::Scenery,
+                    None,
+                    None,
+                ),
+                synthetic_outdoor_static_member(
+                    "generated",
+                    PreparedStaticInstanceKind::GeneratedScenery,
+                    None,
+                    Some(LandblockGeneratedSceneryFacts {
+                        terrain_index: 4,
+                        scene_id: 0x1200_0001,
+                        scene_template_index: 9,
+                    }),
+                ),
+            ],
+            Vec::new(),
+        );
+
+        assert_eq!(layers.len(), 4);
+        assert!(matches!(layers[0], LandblockSceneLodLayer::Terrain(_)));
+        let LandblockSceneLodLayer::OutdoorBuildings(buildings) = &layers[1] else {
+            panic!("level 3 should include an outdoor building layer");
+        };
+        let LandblockSceneLodLayer::OutdoorExplicitObjects(explicit) = &layers[2] else {
+            panic!("level 3 should include an explicit outdoor object layer");
+        };
+        let LandblockSceneLodLayer::OutdoorGeneratedScenery(generated) = &layers[3] else {
+            panic!("level 3 should include a generated scenery layer");
+        };
+        assert_eq!(buildings.statics[0].instance.instance_id, "building");
+        assert_eq!(explicit.statics[0].instance.instance_id, "explicit");
+        assert_eq!(generated.statics[0].instance.instance_id, "generated");
+
+        let level_1 = build_scene_lod_outdoor_layers(
+            0xda55ffff,
+            LandblockSceneLodLevel::Level1,
+            None,
+            vec![synthetic_outdoor_static_member(
+                "explicit",
+                PreparedStaticInstanceKind::Scenery,
+                None,
+                None,
+            )],
+            Vec::new(),
+        );
+        assert_eq!(level_1.len(), 2);
+        assert!(matches!(
+            level_1[1],
+            LandblockSceneLodLayer::OutdoorBuildings(_)
+        ));
+    }
+
+    #[test]
     fn static_instance_bounds_include_setup_part_placements() {
         let instance = Frame {
             origin: holtburger_common::Vector3 {
@@ -4921,5 +5156,33 @@ mod tests {
         assert!((bounds.min.y - 2.0).abs() < 0.001);
         assert!((bounds.min.z + 19.0).abs() < 0.001);
         assert_eq!(bounds.max, bounds.min);
+    }
+
+    fn synthetic_outdoor_static_member(
+        instance_id: &str,
+        kind: PreparedStaticInstanceKind,
+        building: Option<LandblockOutdoorBuildingFacts>,
+        generated: Option<LandblockGeneratedSceneryFacts>,
+    ) -> LandblockOutdoorStaticMember {
+        LandblockOutdoorStaticMember {
+            instance: PreparedStaticInstance {
+                instance_id: instance_id.to_string(),
+                kind,
+                owning_landblock_id: 0xda55ffff,
+                owning_env_cell_id: None,
+                source_did: 0x0100_0001,
+                source_asset_id: "gfx-obj/01000001".to_string(),
+                source_index: 0,
+                local_placement: Frame {
+                    origin: holtburger_common::Vector3::zero(),
+                    orientation: holtburger_common::Quaternion::identity(),
+                },
+                source_scale: unit_prepared_vec3(),
+            },
+            source_bounds: None,
+            instance_bounds: None,
+            building,
+            generated,
+        }
     }
 }

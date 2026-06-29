@@ -437,7 +437,7 @@ mod tests {
     }
 
     #[test]
-    fn content_asset_service_loads_landblock_scene_lod_skeleton() {
+    fn content_asset_service_loads_landblock_scene_lod_layers() {
         let repository =
             ContentRepository::from_mounts(vec![Arc::new(InMemoryResourceSource::default())]);
         let service =
@@ -450,7 +450,7 @@ mod tests {
                     holtburger_content::LandblockSceneLodLevel::Level3,
                 ),
             ))
-            .expect("landblock scene LoD skeleton should load");
+            .expect("landblock scene LoD should load");
         let ContentAsset::LandblockSceneLod(asset) = asset else {
             panic!("content asset service returned mismatched landblock scene LoD asset");
         };
@@ -460,7 +460,23 @@ mod tests {
             asset.level,
             holtburger_content::LandblockSceneLodLevel::Level3
         );
-        assert!(asset.layers.is_empty());
+        assert_eq!(asset.layers.len(), 4);
+        assert!(matches!(
+            asset.layers[0],
+            holtburger_content::LandblockSceneLodLayer::Terrain(_)
+        ));
+        assert!(matches!(
+            asset.layers[1],
+            holtburger_content::LandblockSceneLodLayer::OutdoorBuildings(_)
+        ));
+        assert!(matches!(
+            asset.layers[2],
+            holtburger_content::LandblockSceneLodLayer::OutdoorExplicitObjects(_)
+        ));
+        assert!(matches!(
+            asset.layers[3],
+            holtburger_content::LandblockSceneLodLayer::OutdoorGeneratedScenery(_)
+        ));
     }
 
     fn animation_bytes(animation_id: u32) -> Vec<u8> {

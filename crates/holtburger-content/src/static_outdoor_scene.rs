@@ -24,6 +24,36 @@ pub struct StaticOutdoorScene {
     pub diagnostics: StaticOutdoorSceneDiagnostics,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StaticOutdoorSceneSourceFamilies {
+    /// Includes explicit static objects declared by the landblock info record.
+    pub explicit_objects: bool,
+    /// Includes outdoor building records and their portal metadata.
+    pub buildings: bool,
+    /// Includes procedurally selected scenery derived from terrain and scene records.
+    pub generated_scenery: bool,
+}
+
+impl StaticOutdoorSceneSourceFamilies {
+    pub const ALL: Self = Self {
+        explicit_objects: true,
+        buildings: true,
+        generated_scenery: true,
+    };
+
+    pub const fn new(explicit_objects: bool, buildings: bool, generated_scenery: bool) -> Self {
+        Self {
+            explicit_objects,
+            buildings,
+            generated_scenery,
+        }
+    }
+
+    pub const fn is_empty(self) -> bool {
+        !self.explicit_objects && !self.buildings && !self.generated_scenery
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StaticOutdoorInstance {
     pub identity: StaticOutdoorInstanceIdentity,
@@ -195,32 +225,54 @@ impl StaticOutdoorSceneAssembler {
         source: &mut ContentSourceReader<'_>,
         raw_landblock_id: u32,
     ) -> Result<StaticOutdoorScene> {
+        self.assemble_landblock_with_source_families(
+            source,
+            raw_landblock_id,
+            StaticOutdoorSceneSourceFamilies::ALL,
+        )
+    }
+
+    pub(crate) fn assemble_landblock_with_source_families(
+        &self,
+        source: &mut ContentSourceReader<'_>,
+        raw_landblock_id: u32,
+        families: StaticOutdoorSceneSourceFamilies,
+    ) -> Result<StaticOutdoorScene> {
         let landblock_id = normalize_landblock_id(raw_landblock_id);
-        let landblock = source.cell_landblock(landblock_id)?;
+        let landblock = if families.generated_scenery {
+            Some(source.cell_landblock(landblock_id)?)
+        } else {
+            None
+        };
         let landblock_info_id = normalize_landblock_id(landblock_id) & 0xffff_fffe;
         let landblock_info = match source.landblock_info(landblock_info_id) {
             Ok(info) => Some(info),
             Err(error) => {
-                let region = source.region_desc()?;
                 return self.assemble_from_loaded(
                     source,
                     landblock_id,
-                    &landblock,
+                    landblock.as_ref(),
                     None,
                     Some(error.to_string()),
-                    &region,
+                    None,
+                    families,
                 );
             }
         };
-        let region = source.region_desc()?;
+        let region = if families.generated_scenery {
+            Some(source.region_desc()?)
+        } else {
+            None
+        };
 
         self.assemble_from_loaded(
             source,
             landblock_id,
-            &landblock,
+            landblock.as_ref(),
             landblock_info.as_ref(),
             None,
-            &region,
+            region.as_ref(),
+            families,
         )
     }
 
@@ -228,10 +280,11 @@ impl StaticOutdoorSceneAssembler {
         &self,
         source: &mut ContentSourceReader<'_>,
         landblock_id: u32,
-        landblock: &CellLandblock,
+        landblock: Option<&CellLandblock>,
         landblock_info: Option<&LandblockInfo>,
         landblock_info_error: Option<String>,
-        region: &RegionDesc,
+        region: Option<&RegionDesc>,
+        families: StaticOutdoorSceneSourceFamilies,
     ) -> Result<StaticOutdoorScene> {
         let mut diagnostics = StaticOutdoorSceneDiagnostics {
             landblock_info_available: landblock_info.is_some(),
@@ -239,17 +292,34 @@ impl StaticOutdoorSceneAssembler {
             ..StaticOutdoorSceneDiagnostics::default()
         };
 
-        let explicit_objects =
-            derive_explicit_objects(landblock_id, landblock_info, &mut diagnostics.explicit);
-        let buildings = derive_buildings(landblock_id, landblock_info, &mut diagnostics.buildings);
-        let generated_scenery = derive_generated_scenery(
-            source,
-            landblock_id,
-            landblock,
-            landblock_info,
-            region,
-            &mut diagnostics.generated,
-        )?;
+        let explicit_objects = if families.explicit_objects {
+            derive_explicit_objects(landblock_id, landblock_info, &mut diagnostics.explicit)
+        } else {
+            Vec::new()
+        };
+        let buildings = if families.buildings {
+            derive_buildings(landblock_id, landblock_info, &mut diagnostics.buildings)
+        } else {
+            Vec::new()
+        };
+        let generated_scenery = if families.generated_scenery {
+            let Some(landblock) = landblock else {
+                anyhow::bail!("generated scenery source requires CellLandblock");
+            };
+            let Some(region) = region else {
+                anyhow::bail!("generated scenery source requires RegionDesc");
+            };
+            derive_generated_scenery(
+                source,
+                landblock_id,
+                landblock,
+                landblock_info,
+                region,
+                &mut diagnostics.generated,
+            )?
+        } else {
+            Vec::new()
+        };
 
         Ok(StaticOutdoorScene {
             landblock_id,
@@ -891,6 +961,7 @@ mod tests {
     use holtburger_common::Sphere;
     use holtburger_dat::file_type::setup_model::CylSphere;
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     #[test]
     fn stable_ids_do_not_use_frontend_asset_families() {
@@ -934,6 +1005,72 @@ mod tests {
             normalize_landblock_env_cell_id(0xda550123, 0x012e),
             0xda55012e
         );
+    }
+
+    #[test]
+    fn source_family_gates_skip_static_families_below_requested_lod() {
+        let repository =
+            ContentRepository::from_mounts(Vec::<Arc<dyn holtburger_dat::ResourceSource>>::new());
+        let mut source = ContentSourceReader::new(&repository);
+        let landblock_info = synthetic_landblock_info();
+
+        let level_0 = StaticOutdoorSceneAssembler::new()
+            .assemble_from_loaded(
+                &mut source,
+                0xda55ffff,
+                None,
+                Some(&landblock_info),
+                None,
+                None,
+                StaticOutdoorSceneSourceFamilies::new(false, false, false),
+            )
+            .expect("empty static family set should assemble without source reads");
+        assert!(level_0.explicit_objects.is_empty());
+        assert!(level_0.buildings.is_empty());
+        assert!(level_0.generated_scenery.is_empty());
+        assert_eq!(level_0.diagnostics.explicit.attempted, 0);
+        assert_eq!(level_0.diagnostics.buildings.attempted, 0);
+        assert_eq!(level_0.diagnostics.generated.attempted, 0);
+
+        let level_1 = StaticOutdoorSceneAssembler::new()
+            .assemble_from_loaded(
+                &mut source,
+                0xda55ffff,
+                None,
+                Some(&landblock_info),
+                None,
+                None,
+                StaticOutdoorSceneSourceFamilies::new(false, true, false),
+            )
+            .expect(
+                "building-only static family set should assemble without generated source reads",
+            );
+        assert!(level_1.explicit_objects.is_empty());
+        assert_eq!(level_1.buildings.len(), 1);
+        assert!(level_1.generated_scenery.is_empty());
+        assert_eq!(level_1.diagnostics.explicit.attempted, 0);
+        assert_eq!(level_1.diagnostics.buildings.attempted, 1);
+        assert_eq!(level_1.diagnostics.generated.attempted, 0);
+
+        let level_2 = StaticOutdoorSceneAssembler::new()
+            .assemble_from_loaded(
+                &mut source,
+                0xda55ffff,
+                None,
+                Some(&landblock_info),
+                None,
+                None,
+                StaticOutdoorSceneSourceFamilies::new(true, true, false),
+            )
+            .expect(
+                "object/building static family set should assemble without generated source reads",
+            );
+        assert_eq!(level_2.explicit_objects.len(), 1);
+        assert_eq!(level_2.buildings.len(), 1);
+        assert!(level_2.generated_scenery.is_empty());
+        assert_eq!(level_2.diagnostics.explicit.attempted, 1);
+        assert_eq!(level_2.diagnostics.buildings.attempted, 1);
+        assert_eq!(level_2.diagnostics.generated.attempted, 0);
     }
 
     #[test]
@@ -999,5 +1136,35 @@ mod tests {
         let heading_degrees = orientation.to_heading().to_degrees();
 
         assert!((heading_degrees - 180.0).abs() < 0.01);
+    }
+
+    fn synthetic_landblock_info() -> LandblockInfo {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0xda55fffeu32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        push_stab(&mut bytes, 0x0100_2222, Vector3::new(24.0, 24.0, 0.0));
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        bytes.extend_from_slice(&0x0100_3333u32.to_le_bytes());
+        push_frame(&mut bytes, Vector3::new(48.0, 48.0, 0.0));
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&0u32.to_le_bytes());
+
+        LandblockInfo::unpack(&bytes).expect("synthetic landblock info should unpack")
+    }
+
+    fn push_stab(bytes: &mut Vec<u8>, id: u32, origin: Vector3) {
+        bytes.extend_from_slice(&id.to_le_bytes());
+        push_frame(bytes, origin);
+    }
+
+    fn push_frame(bytes: &mut Vec<u8>, origin: Vector3) {
+        for value in [origin.x, origin.y, origin.z] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+        for value in [1.0f32, 0.0, 0.0, 0.0] {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
     }
 }

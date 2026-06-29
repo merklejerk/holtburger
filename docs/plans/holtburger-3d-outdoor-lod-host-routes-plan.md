@@ -316,7 +316,7 @@ Decisions and course corrections:
 
 ### Phase 2A: Source Assembly Gates
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: make source-family derivation explicit so lower LoD requests do not secretly execute full outdoor assembly work.
 
@@ -335,14 +335,19 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Split or parameterize `StaticOutdoorSceneAssembler` source-family derivation.
-- [ ] Add focused content tests for level-specific gating.
-- [ ] Confirm no `landblock-scene-lod` implementation path calls the old full route assemblers and filters afterward.
+- [x] Split or parameterize `StaticOutdoorSceneAssembler` source-family derivation.
+- [x] Add focused content tests for level-specific gating.
+- [x] Confirm no `landblock-scene-lod` implementation path calls the old full route assemblers and filters afterward.
 
 Decisions and course corrections:
 
 - Broke the original Phase 2 into 2A-2D on 2026-06-29. The previous scope mixed source gates, payload parity, env-cell preservation, and cache behavior into one oversized commit.
 - Cache key dimensions remain intentionally narrow: normalized landblock id, source LoD, and scene context only if context changes emitted source semantics. Requested output layers are not cache identity.
+- Added `StaticOutdoorSceneSourceFamilies` so explicit objects, outdoor buildings, and generated scenery are requested as explicit source-family gates.
+- Kept the full `landblock-outdoor` route on `StaticOutdoorSceneSourceFamilies::ALL` to preserve current behavior while the new LoD route opts into only the families implied by the requested source LoD.
+- Wired `LandblockSceneLodAssetAssembler` through the gated static outdoor source path for LoD `1` through `4`; LoD `0` does not touch static outdoor source-family assembly.
+- Real `landblock-scene-lod` layer payloads remain Phase 2B/2C work. Phase 2A intentionally proves source gating without pretending the skeleton payload is complete.
+- Validation run: `cargo test -p holtburger-content source_family_gates_skip_static_families_below_requested_lod`; `cargo test -p holtburger-content scene_lod_static_source_families_follow_level_contract`; `cargo test -p holtburger-core content_asset_service_loads_landblock_scene_lod_skeleton`.
 
 ### Phase 2B: Outdoor Layer Projections
 

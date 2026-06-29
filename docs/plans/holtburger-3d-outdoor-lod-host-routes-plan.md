@@ -244,7 +244,7 @@ Eviction requirements:
 - When LoD decreases for an already resident landblock, layers above the desired LoD must be evicted without re-fetching, rebuilding, or recreating the lower retained layers.
 - When scene context changes in a way that invalidates lower layers, the invalidation must be explicit and tested. It must not be hidden behind a generic product replacement path.
 - Evicting a layer owner must release all static resources, static-scene-query records, material coverage, diagnostics, texture leases, static-authored dynamic seeds, and renderer layer payloads owned or leased by that layer.
-- Runtime-owned dynamics are not owned by static layers. If a runtime-owned dynamic's render residence was inside an evicted static layer, eviction must move it to an explicit no-residence/unrendered state rather than deleting it.
+- Runtime-owned dynamics are not owned by static layers. If a runtime-owned dynamic's render residence was inside an evicted static layer, eviction must clear only that residence and move the dynamic to an explicit no-residence/unrendered state. It must not delete the dynamic or release runtime-owned state.
 
 This replaces the earlier product-bundle cleanup idea. Full product replacement on every LoD change is not acceptable because it creates unnecessary scene and asset churn.
 
@@ -259,7 +259,19 @@ Requirements:
 - A LoD decrease must not leave dynamic seeds from evicted upper layers alive.
 - A LoD increase must not duplicate dynamic seeds already owned by retained lower layers.
 - Ownership must be structural, not inferred from naming conventions or renderer-only resource IDs.
-- Runtime-authored/runtime-owned dynamics must never be owned by static layer owners. They may reference a static layer as their current render residence, but layer eviction only clears that residence and moves them to the no-residence/unrendered bucket.
+
+## Runtime-Authored Dynamic Requirements
+
+Runtime-authored/runtime-owned dynamics must have explicit runtime lifetime independent from static layer ownership.
+
+The model must separate lifetime ownership from render residence:
+
+- Runtime-authored dynamics are owned by runtime systems, not by static landblock layers.
+- A runtime-authored dynamic may have a current render residence in a static layer, env-cell, outdoor landblock, or no residence.
+- Static layer eviction must clear residence for runtime-authored dynamics currently resident in that layer, move them to an explicit no-residence/unrendered bucket, and leave runtime identity, simulation state, animation state, and runtime-owned resources alive.
+- Runtime-authored dynamics in no-residence state must stop rendering until they are rehomed by explicit frontend/runtime action or by compatible layer materialization.
+- Rehoming must be explicit enough to avoid accidental resurrection into an unrelated layer after LoD or scene-interest churn.
+- Diagnostics and snapshots must expose no-residence runtime dynamics and the reason they are unrendered.
 
 ## Resolver And Bake Requirements
 
@@ -294,6 +306,8 @@ Targets:
 - Replace stale bake filtering by current `workId` with final owner-demand gates before enqueue and commit.
 - Replace scene-interest settled readiness accounting based on active work IDs, work revisions, and pending materialization revisions with readiness derived from demanded `LayerOwnerState` values.
 - Replace dynamic `sourceScopeKey` strings such as `outdoor-buildings:landblock:da55ffff` with static layer owner keys for static-authored dynamic retention.
+- Separate dynamic lifetime ownership from render residence. Static layer owners should prune static-authored dynamic seeds; runtime-authored dynamics should use explicit runtime lifetime and clear only residence on layer eviction.
+- Replace any retention path that treats runtime-authored dynamics as static-scope-owned. Static scope/layer retention may affect render residence, but not runtime dynamic lifetime.
 - Replace runtime resource-to-layer reverse lookup as the primary lifetime authority with direct layer owner resource/lease lists. Reverse indexes may remain as acceleration structures, but not as ownership truth.
 - Delete or substantially shrink `EnvCellSystemLayerAssemblyStore` by making LoD `4` emit a self-contained env-cell layer recipe.
 - Collapse the current single `outdoor-detail` domain into separate explicit-object and generated-scenery domains/layers aligned with LoD `2` and LoD `3`.
@@ -365,8 +379,10 @@ Tests and diagnostics must prove:
 - LoD increase retains lower resident layers and adds only newly desired layers.
 - LoD decrease evicts upper layers without re-fetching, rebuilding, or recreating lower resident layers.
 - Static-authored dynamic seeds are pruned when their owning layer is evicted.
+- Static layer eviction moves runtime-authored dynamics resident in that layer to no-residence/unrendered without deleting runtime identity, simulation state, animation state, or runtime-owned resources.
+- No-residence runtime-authored dynamics are diagnosable and can be rehomed later without being accidentally recreated from static output.
 - Product/source cache reuse avoids rebuilding lower LoD preparation when extending to higher LoD.
-- Material coverage, static-object diagnostics, static-scene-query records, dynamic authored seeds, and env-cell system layers are pruned correctly when their owning layer is evicted.
+- Material coverage, static-object diagnostics, static-scene-query records, static-authored dynamic seeds, and env-cell system layers are pruned correctly when their owning layer is evicted.
 - Current ownership abstractions are collapsed or tightened so retained scopes, resident resource groups, durable work owners, stale-work filters, scene-interest readiness tracking, dynamic static-source scope strings, and renderer reverse indexes do not remain parallel sources of lifecycle truth.
 - Clippy, Rust tests, TypeScript tests, and lint pass for touched areas.
 
@@ -402,6 +418,10 @@ Mitigation: model desired scene state as retained landblock layers. A LoD decrea
 
 Mitigation: make dynamic seed ownership explicit and layer-granular. Prune dynamic seeds through the same retained-layer reconciliation path as static scene resources.
 
+### Risk: Runtime-Owned Dynamics Are Accidentally Treated As Static-Owned
+
+Mitigation: separate dynamic lifetime ownership from render residence in the contract and implementation. Static layer eviction may clear render residence for runtime-owned dynamics, but only runtime lifetime policy may delete them or release their runtime-owned state. Add focused coverage for no-residence transitions and rehoming.
+
 ### Risk: Prepared Cache Becomes A Hidden Fallback
 
 Mitigation: cache compatibility must be typed and explicit. Incompatible cached entries must not be silently projected into mismatched contexts.
@@ -431,6 +451,8 @@ Mitigation: update tests to use the minimal landblock scene LoD route for the be
 - LoD increases retain lower resident layers and add higher layers.
 - LoD decreases evict higher layers without rebuilding or recreating lower resident layers.
 - Static-authored dynamic seeds are leased or owned by the layer that emitted them and are evicted with that layer.
+- Runtime-authored dynamics have explicit runtime lifetime separate from static layer ownership.
+- Static layer eviction clears runtime-authored dynamic residence without deleting runtime identity, state, animation, or runtime-owned resources, and no-residence dynamics are visible in diagnostics.
 - Env-cells are modeled as the highest landblock scene LoD.
 - Normal frontend rendering no longer schedules independent layer-first terrain/building/detail/env-cell resolver jobs for the same landblock source.
 - Explicit outdoor objects and generated outdoor scenery are separate scene-interest axes, separate retained layers, and separate domain/layer names.

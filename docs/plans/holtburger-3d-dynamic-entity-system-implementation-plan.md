@@ -4962,6 +4962,14 @@ render.y]` and has regression coverage that converts the form fields back to the
 - 2026-06-29 UX correction: Removed visible translation and yaw inputs from the spawn form. Spawn
   origin/yaw are camera-owned at create time; scale remains editable because it does not override
   camera-relative placement.
+- 2026-06-29 visual finding: WCID `1` / setup `0x02000001` can render with black head/arm parts
+  because the Phase 12D fixture only supplies a setup id. ACE calculates creature/player appearance
+  through ObjDesc/model-data facts (`AddBaseModelData`, palette/subpalette changes, texture changes,
+  and anim-part changes) and sends those facts in creation/model-update data. The current runtime
+  spawn source hardcodes `modelData: null`, so the browser path requests only the base
+  `setup-appearance/02000001` instead of a WCID/player appearance variant. Do not fix this with a
+  renderer color fallback; Phase 12E must thread source appearance facts through the resolver/runtime
+  path.
 - 2026-06-29 verification: `npm run check`, `npm run test:ts`, `npm run lint`,
   `npm run check:rust`, Prettier check on touched files, and `npm run build` passed from
   `apps/holtburger-3d`. `npm run build` still reports the main bundle larger than 500 kB; Phase 12D
@@ -4982,38 +4990,159 @@ Risks and mitigations:
 
 Status: pending.
 
+Steering:
+
+- 2026-06-29 resteer: Use an optional Tauri-side ACE world SQL resolver as the first real backing.
+  The browser must not connect to SQL directly or learn ACE table names. Tauri reads
+  `ACE_WORLD_SQL_URL` from the environment, exposes a lookup capability/status to the frontend, and
+  resolves WCID requests through a typed command. If the URL is absent or invalid, WCID lookup is
+  disabled and the `Spawns` tab keeps manual setup entry available.
+- 2026-06-29 resolver steering: Reuse the existing app-local `WeenieSpawnSeedResolver` boundary from
+  Phase 12D. Phase 12E should widen the resolved seed facts and add a Tauri-backed implementation; it
+  must not add a parallel WCID lookup path in `BrowserDisplay` or make the spawn form understand SQL
+  capability, property ids, or ACE table names.
+- 2026-06-29 investigation: A local ACE world DB at `ace_world` had `43,913` weenie rows. The direct
+  visual projection is tractable, but explicit palette/texture/anim-part weenie override rows are
+  sparse (`12` WCIDs with palette rows, `11` with texture rows, `11` with anim-part rows). WCID `1`
+  proves setup/motion/sound/combat/physics/icon lookup but is not a good first appearance-override
+  fixture because its human appearance is character-generation/base-model derived. WCID `42810`
+  (`ace42810-xiaohongthebarkeeper`) is a better first override fixture because it has setup, motion,
+  sound, palette, texture-map, and anim-part rows.
+
+SQL projection map:
+
+- `weenie`
+  - `class_Id` -> `weenieClassId`
+  - `class_Name` -> source class/catalog name
+  - `type` -> ACE `WeenieType`
+- `weenie_properties_string`
+  - `type = 1` / `PropertyString.Name` -> display label when present
+  - `type = 5` / `PropertyString.LongDesc` -> optional descriptive label/diagnostic text
+- `weenie_properties_d_i_d`
+  - `type = 1` / `PropertyDataId.Setup` -> setup model id
+  - `type = 2` / `PropertyDataId.MotionTable` -> motion table id
+  - `type = 3` / `PropertyDataId.SoundTable` -> sound table id
+  - `type = 4` / `PropertyDataId.CombatTable` -> combat table id
+  - `type = 6` / `PropertyDataId.PaletteBase` -> base palette id
+  - `type = 7` / `PropertyDataId.ClothingBase` -> clothing table id, retained as source fact only
+  - `type = 8` / `PropertyDataId.Icon` -> icon id
+  - `type = 9` / `PropertyDataId.EyesTexture` -> eyes texture override
+  - `type = 10` / `PropertyDataId.NoseTexture` -> nose texture override
+  - `type = 11` / `PropertyDataId.MouthTexture` -> mouth texture override
+  - `type = 12` / `PropertyDataId.DefaultEyesTexture` -> default eyes texture
+  - `type = 13` / `PropertyDataId.DefaultNoseTexture` -> default nose texture
+  - `type = 14` / `PropertyDataId.DefaultMouthTexture` -> default mouth texture
+  - `type = 15` / `PropertyDataId.HairPalette` -> hair palette id
+  - `type = 16` / `PropertyDataId.EyesPalette` -> eyes palette id
+  - `type = 17` / `PropertyDataId.SkinPalette` -> skin palette id
+  - `type = 18` / `PropertyDataId.HeadObject` -> head part id
+  - `type = 22` / `PropertyDataId.PhysicsEffectTable` -> physics effect table id
+- `weenie_properties_float`
+  - `type = 12` / `PropertyFloat.Shade` -> shade
+  - `type = 39` / `PropertyFloat.DefaultScale` -> default scale
+- `weenie_properties_int`
+  - `type = 1` / `PropertyInt.ItemType` -> item type
+  - `type = 2` / `PropertyInt.CreatureType` -> creature type
+  - `type = 3` / `PropertyInt.PaletteTemplate` -> palette template, retained as source fact only
+  - `type = 113` / `PropertyInt.Gender` -> gender
+  - `type = 131` / `PropertyInt.MaterialType` -> material type, retained for later loot/material
+    composition
+- `weenie_properties_palette`
+  - `sub_Palette_Id`, `offset`, `length` -> ObjDesc subpalette rows
+- `weenie_properties_texture_map`
+  - `index`, `old_Id`, `new_Id` -> ObjDesc texture-map changes
+- `weenie_properties_anim_part`
+  - `index`, `animation_Id` -> ObjDesc anim-part changes
+
+Projection boundaries:
+
+- The first SQL resolver projects visual seed facts only. It does not attempt full ACE object
+  construction.
+- `ClothingBase`, `PaletteTemplate`, `MaterialType`, and face/hair/skin DIDs should be preserved as
+  source facts even when Phase 12E cannot yet compose them into ObjDesc rows.
+- Clothing-table composition, char-gen/player appearance construction, equipped inventory,
+  treasure/loot mutation, generator/create-list expansion, and landblock-instance spawning are
+  explicitly later breadth.
+
 Purpose:
 
 - Let browser-mode spawn UX seed believable entities from the same WCID-backed data family ACE uses
-  without coupling the browser form to SQL parsing or a specific database transport.
+  without coupling the browser form to SQL parsing or a specific database transport. The existing
+  `WeenieSpawnSeedResolver` remains the frontend boundary; this phase replaces the fake in-memory
+  facts with optional live ACE SQL-backed facts while preserving manual setup entry.
 
 Deliverables:
 
-- Add a tooling or Tauri-side catalog source that can load an ACE world export or generated catalog
-  into the `WeenieSpawnSeedResolver` interface from Phase 12D.
+- Add a Tauri-side ACE world SQL resolver configured by `ACE_WORLD_SQL_URL`, using a URL shape like
+  `mysql://user:password@host:port/ace_world`. The command should normalize DB rows into
+  `WeenieSpawnSeedResolver` facts and should never propagate SQL credentials, SQL strings, or ACE
+  table names to Svelte/browser code.
+- Extend `WeenieSpawnSeed` beyond the Phase 12D setup-only shape. The widened seed should retain
+  `weenieClassId`, `label`, and `setupModelId`, and add optional visual facts such as motion table,
+  sound table, combat table, physics effect table, icon, default scale, shade, raw source appearance
+  DIDs, and direct ObjDesc rows.
+- Add a Tauri-backed `WeenieSpawnSeedResolver` implementation or adapter. `BrowserDisplay` and the
+  spawn form should continue to call `resolver.resolve(weenieClassId)` or an equivalent typed
+  resolver facade instead of branching on SQL/catalog implementation details.
+- Add frontend lookup capability plumbing. The `Spawns` tab should show WCID lookup as unavailable
+  when the Tauri resolver is not configured, while preserving manual setup-backed spawn entry.
 - Preserve the resolver boundary: the backing implementation may understand ACE SQL/schema, but the
   browser form only sees resolved weenie facts or no result.
-- Support at least the visual-first weenie facts proven in Phase 12A: WCID/class/name/type, DID
-  setup/motion/sound/physics fields, default scale, palette/texture/model-change records, position
-  rows, generator/create-list/emote summaries, and landblock-instance placement facts.
+- Support at least the first visual-first SQL fields: WCID/class/name/type, DID setup, motion, sound,
+  combat, physics effect, icon, palette base, clothing base, face/hair/skin/head DIDs where present,
+  default scale, shade, and direct palette/texture-map/anim-part rows. Position rows,
+  generator/create-list/emote summaries, landblock-instance placement facts, and full generated
+  catalog export remain follow-up breadth unless required to prove the first lookup path.
+- Add an appearance-aware resolver output for ObjDesc/model-data facts: base palette id,
+  subpalettes, texture changes, and anim-part changes. This is required for player/creature-shaped
+  WCID seeds when those facts are directly available; setup-only fixtures are allowed only as
+  explicitly diagnosed fallback rows.
+- Thread resolved appearance facts into browser-created runtime spawn requests and runtime visual
+  source facts, then resolve a per-spawn setup appearance through the existing host-side
+  runtime-appearance resolver or an equivalent typed asset key.
+- Keep a generated all-weenie visual catalog as a later optimization/offline mode. The first phase
+  should prove live SQL lookup through Tauri without requiring a full dump or browser-side catalog
+  ingestion.
 
 Acceptance criteria:
 
-- The browser spawn form can seed from a real ACE-derived WCID catalog without changing form or spawn
-  validation code.
-- Missing or malformed catalog rows log at the resolver/catalog boundary and return no result; they
-  do not become spawn validation errors or durable diagnostics.
-- SQL/catalog-backed resolution remains optional; the app still works with the Phase 12D fixture
-  resolver when no external ACE world data is configured.
+- With `ACE_WORLD_SQL_URL` configured, the browser spawn form can seed from a real ACE world WCID
+  lookup without changing form or spawn validation code.
+- Without `ACE_WORLD_SQL_URL`, WCID lookup is visibly unavailable/disabled and manual setup-backed
+  spawn entry still works.
+- The existing Phase 12D resolver boundary is still the only browser-facing WCID resolution surface.
+  No Svelte component imports SQL row shapes, SQL property-id maps, or Tauri command DTOs directly
+  except through a small resolver adapter.
+- WCID `42810` resolves setup `0x0200004E`, motion `0x09000001`, sound `0x20000002`, plus direct
+  palette/texture-map/anim-part rows, and can drive the appearance-aware runtime-spawn path.
+- WCID `1` resolves setup `0x02000001`, motion `0x09000001`, sound `0x20000001`, combat
+  `0x30000000`, physics `0x34000004`, and icon `0x06001036`, but diagnostics must clearly show when
+  no direct appearance override rows are present.
+- Missing or malformed SQL rows log at the resolver boundary and return no result without becoming
+  spawn validation errors or durable diagnostics.
+- SQL-backed resolution remains optional; the app still works with the Phase 12D fixture/manual
+  path when no ACE world SQL URL is configured.
 
 Task checklist:
 
-- [ ] Decide whether the first backing is a generated catalog file, SQLite/catalog cache, Tauri-side
-      SQL lookup, or tooling-generated JSON.
-- [ ] Add catalog loading behind the existing resolver interface.
+- [x] Decide whether the first backing is a generated catalog file, SQLite/catalog cache, Tauri-side
+      SQL lookup, or tooling-generated JSON. Decision: Tauri-side SQL lookup behind
+      `ACE_WORLD_SQL_URL`, with generated catalog/offline export deferred.
+- [ ] Add Tauri configuration/capability plumbing for optional `ACE_WORLD_SQL_URL`.
+- [ ] Add a Tauri command that resolves one WCID from ACE world SQL into normalized visual spawn
+      facts.
+- [ ] Widen `WeenieSpawnSeed` and resolver tests to cover optional SQL-backed visual facts while
+      preserving the Phase 12D in-memory fixture behavior.
+- [ ] Add a Tauri-backed resolver adapter consumed through the same browser resolver boundary.
+- [ ] Wire browser WCID lookup through the existing resolver/form boundary, disabled when the Tauri
+      capability says lookup is unavailable.
+- [ ] Extend resolver, spawn validation, runtime source facts, and dynamic visual resource loading so
+      ObjDesc/model-data appearance facts can select a per-spawn setup appearance instead of the base
+      setup-only appearance.
 - [ ] Add resolver behavior for missing source, missing WCID, malformed rows, and conflicting
       property rows: log to the console and return no result without durable diagnostics.
-- [ ] Add tests with a small ACE-derived fixture export.
+- [ ] Add tests with a small ACE-derived fixture or SQL-row adapter fixture covering WCID `42810` and
+      setup-only WCID `1`.
 
 ### Phase 12F: Host Presentation Projection Resteer
 

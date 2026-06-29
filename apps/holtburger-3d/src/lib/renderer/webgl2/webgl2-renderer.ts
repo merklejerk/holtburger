@@ -1999,11 +1999,23 @@ class Webgl2Renderer implements Renderer {
 	#createDrawableStaticObjectInstanceResources(
 		domain: RenderStaticDomain,
 	): readonly StaticObjectInstanceDrawResource[] {
-		if (!this.#staticLayerVisibility.outdoorDetail || domain === "interior") {
+		if (
+			domain === "interior" ||
+			(!this.#staticLayerVisibility.outdoorExplicitObjects &&
+				!this.#staticLayerVisibility.outdoorGeneratedScenery)
+		) {
 			return [];
 		}
 		return [...this.#staticObjectRenderInstances.values()].flatMap(
 			(instance) => {
+				if (
+					!shouldDrawOutdoorObjectDomain(
+						instance.domain,
+						this.#staticLayerVisibility,
+					)
+				) {
+					return [];
+				}
 				const resource = this.#staticObjectVisualResources.get(
 					instance.resourceId,
 				);
@@ -3642,7 +3654,7 @@ interface StaticObjectVisualGeometryResource {
 	readonly drawUnitId: string;
 	readonly resourceId: StaticObjectVisualResource["resourceId"];
 	readonly landblockId: number | null;
-	readonly domain: "outdoor-detail";
+	readonly domain: StaticObjectRenderInstance["domain"];
 	readonly materialFamily: StaticObjectVisualResource["materialFamily"];
 	readonly materialPass: StaticObjectVisualResource["materialPass"];
 	readonly materialEntries: StaticObjectVisualResource["materialEntries"];
@@ -3765,7 +3777,8 @@ function staticLayerVisibilityEquals(
 	return (
 		left.envCellInteriors === right.envCellInteriors &&
 		left.outdoorBuildings === right.outdoorBuildings &&
-		left.outdoorDetail === right.outdoorDetail &&
+		left.outdoorExplicitObjects === right.outdoorExplicitObjects &&
+		left.outdoorGeneratedScenery === right.outdoorGeneratedScenery &&
 		left.terrain === right.terrain
 	);
 }
@@ -4021,10 +4034,10 @@ function shouldDrawStaticObjectResourceInDomain(
 		if (resource.domain === "outdoor-buildings") {
 			return visibility.outdoorBuildings;
 		}
-		if (resource.domain === "outdoor-detail") {
-			return visibility.outdoorDetail;
+		if (resource.domain === "landblock-env-cells") {
+			return visibility.envCellInteriors;
 		}
-		return visibility.envCellInteriors;
+		return shouldDrawOutdoorObjectDomain(resource.domain, visibility);
 	}
 	const isInteriorStaticObject = resource.domain === "landblock-env-cells";
 	if (domain === "interior") {
@@ -4033,9 +4046,26 @@ function shouldDrawStaticObjectResourceInDomain(
 	if (isInteriorStaticObject) {
 		return false;
 	}
-	return resource.domain === "outdoor-buildings"
-		? visibility.outdoorBuildings
-		: visibility.outdoorDetail;
+	return shouldDrawOutdoorObjectDomain(resource.domain, visibility);
+}
+
+function shouldDrawOutdoorObjectDomain(
+	domain: Exclude<StaticObjectGeometryResource["domain"], "landblock-env-cells">,
+	visibility: RendererStaticLayerVisibility,
+): boolean {
+	switch (domain) {
+		case "outdoor-buildings":
+			return visibility.outdoorBuildings;
+		case "outdoor-explicit-objects":
+			return visibility.outdoorExplicitObjects;
+		case "outdoor-generated-scenery":
+			return visibility.outdoorGeneratedScenery;
+		case "outdoor-detail":
+			return (
+				visibility.outdoorExplicitObjects ||
+				visibility.outdoorGeneratedScenery
+			);
+	}
 }
 
 function shouldDrawDynamicInstanceInDomain(

@@ -1060,7 +1060,8 @@ describe("browser client runtime", () => {
 		runtime.setStaticLayerVisibility({
 			envCellInteriors: true,
 			outdoorBuildings: false,
-			outdoorDetail: true,
+			outdoorExplicitObjects: true,
+			outdoorGeneratedScenery: false,
 			terrain: false,
 		});
 
@@ -1068,7 +1069,8 @@ describe("browser client runtime", () => {
 			{
 				envCellInteriors: true,
 				outdoorBuildings: false,
-				outdoorDetail: true,
+				outdoorExplicitObjects: true,
+				outdoorGeneratedScenery: false,
 				terrain: false,
 			},
 		]);
@@ -1911,7 +1913,7 @@ describe("browser client runtime", () => {
 
 		updateOutdoorSceneInterest(runtime, {
 			anchorLandblockId: landblockId,
-			domains: ["terrain", "detail"],
+			domains: ["terrain", "generated-scenery"],
 			lod: { detail: 0, terrain: 0 },
 		});
 		const detailRequest = resolver.pendingRequests.find(
@@ -1957,7 +1959,7 @@ describe("browser client runtime", () => {
 		});
 
 		updateOutdoorSceneInterest(runtime, {
-			domains: ["terrain", "buildings", "detail"],
+			domains: ["terrain", "buildings", "generated-scenery"],
 			lod: { buildings: 0, detail: 0, terrain: 0 },
 		});
 		const detailRequest = resolver.pendingRequests.find(
@@ -2326,8 +2328,9 @@ function updateOutdoorSceneInterest(
 		readonly anchorLandblockId?: number;
 		readonly domains?: readonly (
 			| "buildings"
-			| "detail"
 			| "env-cells"
+			| "explicit-objects"
+			| "generated-scenery"
 			| "terrain"
 		)[];
 		readonly lod?: {

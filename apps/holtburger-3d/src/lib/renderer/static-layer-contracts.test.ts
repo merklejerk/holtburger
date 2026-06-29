@@ -47,19 +47,21 @@ describe("static landblock layer contracts", () => {
 	it("keeps renderer visibility separate from layer residency", () => {
 		const visibility = {
 			...DEFAULT_RENDERER_STATIC_LAYER_VISIBILITY,
-			outdoorDetail: false,
+			outdoorGeneratedScenery: false,
 		};
 
 		expect(DEFAULT_RENDERER_STATIC_LAYER_VISIBILITY).toEqual({
 			envCellInteriors: true,
 			outdoorBuildings: true,
-			outdoorDetail: true,
+			outdoorExplicitObjects: true,
+			outdoorGeneratedScenery: true,
 			terrain: true,
 		});
 		expect(visibility).toEqual({
 			envCellInteriors: true,
 			outdoorBuildings: true,
-			outdoorDetail: false,
+			outdoorExplicitObjects: true,
+			outdoorGeneratedScenery: false,
 			terrain: true,
 		});
 		expect(visibility).not.toHaveProperty("domains");

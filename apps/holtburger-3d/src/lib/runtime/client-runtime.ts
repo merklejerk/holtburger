@@ -172,7 +172,8 @@ const DEFAULT_PORTAL_BASE_OVERLAP_APERTURE_PADDING = 0.25;
 export type ManualStaticDomain =
 	| "terrain"
 	| "buildings"
-	| "detail"
+	| "explicit-objects"
+	| "generated-scenery"
 	| "env-cells";
 
 export type RuntimeSceneInterest =
@@ -4483,9 +4484,7 @@ function createStaticDemandFromSceneInterest(
 		buildings: interest.domains.includes("buildings")
 			? (interest.lod?.buildings ?? 0)
 			: -1,
-		detail: interest.domains.includes("detail")
-			? (interest.lod?.detail ?? 0)
-			: -1,
+		detail: createLegacyDetailLodRadius(interest),
 		terrain: interest.domains.includes("terrain")
 			? (interest.lod?.terrain ?? 0)
 			: -1,
@@ -4501,4 +4500,16 @@ function createStaticDemandFromSceneInterest(
 		},
 		lod,
 	};
+}
+
+function createLegacyDetailLodRadius(
+	interest: Extract<RuntimeSceneInterest, { readonly kind: "outdoor-anchor" }>,
+): number {
+	const explicitObjectRadius = interest.domains.includes("explicit-objects")
+		? (interest.lod?.detail ?? 0)
+		: -1;
+	const generatedSceneryRadius = interest.domains.includes("generated-scenery")
+		? (interest.lod?.detail ?? 0)
+		: -1;
+	return Math.max(explicitObjectRadius, generatedSceneryRadius);
 }

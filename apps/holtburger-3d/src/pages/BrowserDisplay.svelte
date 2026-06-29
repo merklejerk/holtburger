@@ -2,7 +2,8 @@
 	import { onMount } from "svelte";
 	import {
 		DEFAULT_BUILDING_LOD_RADIUS,
-		DEFAULT_DETAIL_LOD_RADIUS,
+		DEFAULT_EXPLICIT_OBJECT_LOD_RADIUS,
+		DEFAULT_GENERATED_SCENERY_LOD_RADIUS,
 		DEFAULT_ENV_CELL_LOD_RADIUS,
 		DEFAULT_TERRAIN_LOD_RADIUS,
 		MAX_OUTDOOR_SCENE_LOD_RADIUS,
@@ -152,7 +153,8 @@
 	let followModeEnabled = $state(false);
 	let terrainVisible = $state(true);
 	let buildingsVisible = $state(true);
-	let detailVisible = $state(true);
+	let explicitObjectsVisible = $state(true);
+	let generatedSceneryVisible = $state(true);
 	let envCellsVisible = $state(true);
 	let envCellAabbDebugVisible = $state(false);
 	let envCellPortalDebugVisible = $state(false);
@@ -163,7 +165,8 @@
 	let envCellResourceInspectionInput = $state("");
 	let terrainRadius = $state(DEFAULT_TERRAIN_LOD_RADIUS);
 	let buildingRadius = $state(DEFAULT_BUILDING_LOD_RADIUS);
-	let detailRadius = $state(DEFAULT_DETAIL_LOD_RADIUS);
+	let explicitObjectRadius = $state(DEFAULT_EXPLICIT_OBJECT_LOD_RADIUS);
+	let generatedSceneryRadius = $state(DEFAULT_GENERATED_SCENERY_LOD_RADIUS);
 	let envCellRadius = $state(DEFAULT_ENV_CELL_LOD_RADIUS);
 	let runtimeOverview = $state<RuntimeOverviewSnapshot | null>(null);
 	let cameraState = $state<FreeCameraState>(createFreeCameraState());
@@ -321,7 +324,7 @@
 				selectedDemandDomains(),
 				{
 					buildings: buildingRadius,
-					detail: detailRadius,
+					detail: Math.max(explicitObjectRadius, generatedSceneryRadius),
 					terrain: terrainRadius,
 					envCells: envCellRadius,
 				},
@@ -426,7 +429,8 @@
 		const nextTerrainRadius = clampOutdoorSceneLodRadius(Number(input.value));
 		terrainRadius = nextTerrainRadius;
 		buildingRadius = Math.min(buildingRadius, nextTerrainRadius);
-		detailRadius = Math.min(detailRadius, buildingRadius);
+		explicitObjectRadius = Math.min(explicitObjectRadius, buildingRadius);
+		generatedSceneryRadius = Math.min(generatedSceneryRadius, buildingRadius);
 		envCellRadius = Math.min(envCellRadius, nextTerrainRadius);
 		scheduleStaticInterestRefresh();
 	}
@@ -438,13 +442,23 @@
 			terrainRadius,
 		);
 		buildingRadius = nextBuildingRadius;
-		detailRadius = Math.min(detailRadius, nextBuildingRadius);
+		explicitObjectRadius = Math.min(explicitObjectRadius, nextBuildingRadius);
+		generatedSceneryRadius = Math.min(generatedSceneryRadius, nextBuildingRadius);
 		scheduleStaticInterestRefresh();
 	}
 
-	function handleDetailRadiusInput(event: Event): void {
+	function handleExplicitObjectRadiusInput(event: Event): void {
 		const input = event.currentTarget as HTMLInputElement;
-		detailRadius = Math.min(
+		explicitObjectRadius = Math.min(
+			clampOutdoorSceneLodRadius(Number(input.value)),
+			buildingRadius,
+		);
+		scheduleStaticInterestRefresh();
+	}
+
+	function handleGeneratedSceneryRadiusInput(event: Event): void {
+		const input = event.currentTarget as HTMLInputElement;
+		generatedSceneryRadius = Math.min(
 			clampOutdoorSceneLodRadius(Number(input.value)),
 			buildingRadius,
 		);
@@ -501,14 +515,21 @@
 	}
 
 	function selectedDemandDomains(): ManualStaticDomain[] {
-		return ["terrain", "buildings", "detail", "env-cells"];
+		return [
+			"terrain",
+			"buildings",
+			"explicit-objects",
+			"generated-scenery",
+			"env-cells",
+		];
 	}
 
 	function createStaticLayerVisibility(): RendererStaticLayerVisibility {
 		return {
 			envCellInteriors: envCellsVisible,
 			outdoorBuildings: buildingsVisible,
-			outdoorDetail: detailVisible,
+			outdoorExplicitObjects: explicitObjectsVisible,
+			outdoorGeneratedScenery: generatedSceneryVisible,
 			terrain: terrainVisible,
 		};
 	}
@@ -1175,7 +1196,7 @@
 			enabled: followModeEnabled,
 			lod: {
 				buildings: buildingRadius,
-				detail: detailRadius,
+				detail: Math.max(explicitObjectRadius, generatedSceneryRadius),
 				terrain: terrainRadius,
 				envCells: envCellRadius,
 			},
@@ -1960,11 +1981,19 @@
 						</label>
 						<label>
 							<input
-								bind:checked={detailVisible}
+								bind:checked={explicitObjectsVisible}
 								type="checkbox"
 								onchange={handleStaticVisibilityChange}
 							/>
-							<span>Detail</span>
+							<span>Explicit objects</span>
+						</label>
+						<label>
+							<input
+								bind:checked={generatedSceneryVisible}
+								type="checkbox"
+								onchange={handleStaticVisibilityChange}
+							/>
+							<span>Generated scenery</span>
 						</label>
 						<label>
 							<input
@@ -2022,9 +2051,11 @@
 					</label>
 
 					<label class="browser-display__range">
-						<span>Detail distance</span>
+						<span>Explicit object distance</span>
 						<strong>
-							{detailRadius} out ({countOutdoorSceneLodTiles(detailRadius)} tiles)
+							{explicitObjectRadius} out ({countOutdoorSceneLodTiles(
+								explicitObjectRadius,
+							)} tiles)
 						</strong>
 						<input
 							disabled={parsedIsInterior}
@@ -2032,8 +2063,26 @@
 							min={MIN_OUTDOOR_SCENE_LOD_RADIUS}
 							step="1"
 							type="range"
-							value={detailRadius}
-							oninput={handleDetailRadiusInput}
+							value={explicitObjectRadius}
+							oninput={handleExplicitObjectRadiusInput}
+						/>
+					</label>
+
+					<label class="browser-display__range">
+						<span>Generated scenery distance</span>
+						<strong>
+							{generatedSceneryRadius} out ({countOutdoorSceneLodTiles(
+								generatedSceneryRadius,
+							)} tiles)
+						</strong>
+						<input
+							disabled={parsedIsInterior}
+							max={buildingRadius}
+							min={MIN_OUTDOOR_SCENE_LOD_RADIUS}
+							step="1"
+							type="range"
+							value={generatedSceneryRadius}
+							oninput={handleGeneratedSceneryRadiusInput}
 						/>
 					</label>
 

@@ -1,4 +1,6 @@
-use holtburger_content::normalize_landblock_id;
+use holtburger_content::{
+    LandblockSceneLodLevel, LandblockSceneLodRequest, normalize_landblock_id,
+};
 use holtburger_core::{ContentAssetRequest, SetupAppearanceRequest};
 use holtburger_dat::file_type::DatFileType;
 
@@ -82,6 +84,19 @@ pub fn parse_landblock_env_cells_asset_id(asset_id: &str) -> Option<u32> {
     parse_landblock_child_asset_id(asset_id, "/env-cells")
 }
 
+pub fn parse_landblock_scene_lod_asset_id(asset_id: &str) -> Option<LandblockSceneLodRequest> {
+    let rest = asset_id.strip_prefix("landblock/")?;
+    let (raw_hex, raw_level) = rest.split_once("/lod/")?;
+    let landblock_id = (raw_hex.len() == 8 && raw_hex.chars().all(|ch| ch.is_ascii_hexdigit()))
+        .then(|| u32::from_str_radix(raw_hex, 16).ok())
+        .flatten()?;
+    let level = (raw_level.len() == 1)
+        .then(|| raw_level.parse::<u8>().ok())
+        .flatten()
+        .and_then(LandblockSceneLodLevel::from_u8)?;
+    Some(LandblockSceneLodRequest::outdoor(landblock_id, level))
+}
+
 pub fn parse_env_cell_asset_id(asset_id: &str) -> Option<u32> {
     asset_id
         .strip_prefix("env-cell/")
@@ -112,6 +127,9 @@ pub fn content_asset_request_from_asset_id(asset_id: &str) -> Option<ContentAsse
         })
         .or_else(|| {
             parse_landblock_env_cells_asset_id(asset_id).map(ContentAssetRequest::LandblockEnvCells)
+        })
+        .or_else(|| {
+            parse_landblock_scene_lod_asset_id(asset_id).map(ContentAssetRequest::LandblockSceneLod)
         })
         .or_else(|| parse_env_cell_asset_id(asset_id).map(ContentAssetRequest::EnvCell))
         .or_else(|| {
@@ -151,6 +169,41 @@ mod tests {
             content_asset_request_from_asset_id("landblock/da550123/env-cells"),
             Some(ContentAssetRequest::LandblockEnvCells(0xda55ffff))
         );
+    }
+
+    #[test]
+    fn parses_landblock_scene_lod_route_with_supported_levels() {
+        for level in 0..=4 {
+            assert_eq!(
+                parse_landblock_scene_lod_asset_id(&format!("landblock/da550123/lod/{level}")),
+                Some(LandblockSceneLodRequest::outdoor(
+                    0xda55ffff,
+                    LandblockSceneLodLevel::from_u8(level).expect("level should be supported")
+                ))
+            );
+        }
+
+        assert_eq!(
+            content_asset_request_from_asset_id("landblock/da550123/lod/2"),
+            Some(ContentAssetRequest::LandblockSceneLod(
+                LandblockSceneLodRequest::outdoor(0xda55ffff, LandblockSceneLodLevel::Level2)
+            ))
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_landblock_scene_lod_routes() {
+        for asset_id in [
+            "landblock/da550123/lod/5",
+            "landblock/da550123/lod/-1",
+            "landblock/da550123/lod/02",
+            "landblock/da55012/lod/2",
+            "landblock/not-hex/lod/2",
+            "landblock/da550123/lod/2/extra",
+        ] {
+            assert_eq!(parse_landblock_scene_lod_asset_id(asset_id), None);
+            assert_eq!(content_asset_request_from_asset_id(asset_id), None);
+        }
     }
 
     #[test]

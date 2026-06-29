@@ -18,6 +18,8 @@ pub use landblock_scene_assets::{
     LandblockEnvCellsAsset, LandblockEnvCellsAssetAssembler, LandblockGeneratedSceneryFacts,
     LandblockInfoFact, LandblockOutdoorAsset, LandblockOutdoorAssetAssembler,
     LandblockOutdoorBuildingFacts, LandblockOutdoorStaticMember, LandblockRestriction,
+    LandblockSceneLodAsset, LandblockSceneLodAssetAssembler, LandblockSceneLodContext,
+    LandblockSceneLodLayer, LandblockSceneLodLevel, LandblockSceneLodRequest,
     LandblockTopologyAsset, LandblockTopologyAssetAssembler, PreparedAabb,
     PreparedBuildingTransitionAperture, PreparedBvh, PreparedBvhKindMask, PreparedBvhNode,
     PreparedBvhScope, PreparedContentSourceDiagnostics, PreparedInteriorCell,

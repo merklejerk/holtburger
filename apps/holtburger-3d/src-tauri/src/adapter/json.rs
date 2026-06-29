@@ -735,6 +735,44 @@ where
     })
 }
 
+pub fn serialize_landblock_scene_lod_payload(asset: &LandblockSceneLodAsset) -> serde_json::Value {
+    serde_json::json!({
+        "kind": "landblock-scene-lod",
+        "landblockId": asset.landblock_id,
+        "source": {
+            "context": serialize_landblock_scene_lod_context(asset.context),
+            "level": asset.level.as_u8(),
+        },
+        "layers": asset.layers.iter().map(serialize_landblock_scene_lod_layer).collect::<Vec<_>>(),
+        "diagnostics": serialize_prepared_content_diagnostics(&asset.diagnostics),
+        "provenance": {
+            "source": "repo-local-hba",
+            "sourceAssetKind": "landblock-scene-lod",
+            "errorCode": asset.diagnostics.errors.first().map(|error| error.error_code),
+            "detail": asset.diagnostics.errors.first().map(|error| error.detail.clone())
+        }
+    })
+}
+
+fn serialize_landblock_scene_lod_context(context: LandblockSceneLodContext) -> &'static str {
+    match context {
+        LandblockSceneLodContext::Outdoor => "outdoor",
+        LandblockSceneLodContext::Interior => "interior",
+    }
+}
+
+fn serialize_landblock_scene_lod_layer(layer: &LandblockSceneLodLayer) -> serde_json::Value {
+    let kind = match layer {
+        LandblockSceneLodLayer::Terrain => "terrain",
+        LandblockSceneLodLayer::OutdoorBuildings => "outdoor-buildings",
+        LandblockSceneLodLayer::OutdoorExplicitObjects => "outdoor-explicit-objects",
+        LandblockSceneLodLayer::OutdoorGeneratedScenery => "outdoor-generated-scenery",
+        LandblockSceneLodLayer::EnvCellSystem => "env-cell-system",
+    };
+
+    serde_json::json!({ "kind": kind })
+}
+
 pub fn landblock_outdoor_terrain_asset(
     outdoor: &LandblockOutdoorAsset,
 ) -> SerializedOutdoorTerrainSource {
@@ -1758,11 +1796,33 @@ pub fn serialize_bsp_node(node: &BspNode) -> serde_json::Value {
 mod tests {
     use super::*;
     use holtburger_content::{
-        CellLandblockFact, LandblockOutdoorAsset, LandblockOutdoorStaticMember, PreparedAabb,
+        CellLandblockFact, LandblockOutdoorAsset, LandblockOutdoorStaticMember,
+        LandblockSceneLodAsset, LandblockSceneLodContext, LandblockSceneLodLevel, PreparedAabb,
         PreparedBuildingTransitionAperture, PreparedBvh, PreparedBvhNode,
         PreparedContentSourceDiagnostics, PreparedStaticInstance, PreparedStaticInstanceKind,
         PreparedTerrainMesh, PreparedVec3,
     };
+
+    #[test]
+    fn serialize_landblock_scene_lod_payload_emits_skeleton_contract() {
+        let payload = serialize_landblock_scene_lod_payload(&LandblockSceneLodAsset {
+            landblock_id: 0xda55ffff,
+            level: LandblockSceneLodLevel::Level2,
+            context: LandblockSceneLodContext::Outdoor,
+            layers: Vec::new(),
+            diagnostics: PreparedContentSourceDiagnostics::default(),
+        });
+
+        assert_eq!(payload["kind"], "landblock-scene-lod");
+        assert_eq!(payload["landblockId"].as_u64(), Some(0xda55ffff));
+        assert_eq!(payload["source"]["context"], "outdoor");
+        assert_eq!(payload["source"]["level"], 2);
+        assert_eq!(payload["layers"].as_array().map(Vec::len), Some(0));
+        assert_eq!(
+            payload["provenance"]["sourceAssetKind"],
+            "landblock-scene-lod"
+        );
+    }
 
     #[test]
     fn terrain_pcode_packs_southwest_to_northwest_order_used_by_texmerge_pal_codes() {

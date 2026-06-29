@@ -58,6 +58,84 @@ pub struct LandblockEnvCellsAsset {
     pub diagnostics: PreparedContentSourceDiagnostics,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LandblockSceneLodLevel {
+    /// Terrain source only.
+    Level0,
+    /// Terrain plus outdoor building source.
+    Level1,
+    /// Level 1 plus explicit outdoor object source.
+    Level2,
+    /// Level 2 plus generated outdoor scenery source.
+    Level3,
+    /// Level 3 plus env-cell system source.
+    Level4,
+}
+
+impl LandblockSceneLodLevel {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Level0),
+            1 => Some(Self::Level1),
+            2 => Some(Self::Level2),
+            3 => Some(Self::Level3),
+            4 => Some(Self::Level4),
+            _ => None,
+        }
+    }
+
+    pub fn as_u8(self) -> u8 {
+        match self {
+            Self::Level0 => 0,
+            Self::Level1 => 1,
+            Self::Level2 => 2,
+            Self::Level3 => 3,
+            Self::Level4 => 4,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LandblockSceneLodContext {
+    Outdoor,
+    Interior,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LandblockSceneLodRequest {
+    pub landblock_id: u32,
+    pub level: LandblockSceneLodLevel,
+    pub context: LandblockSceneLodContext,
+}
+
+impl LandblockSceneLodRequest {
+    pub fn outdoor(raw_landblock_id: u32, level: LandblockSceneLodLevel) -> Self {
+        Self {
+            landblock_id: normalize_landblock_id(raw_landblock_id),
+            level,
+            context: LandblockSceneLodContext::Outdoor,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LandblockSceneLodAsset {
+    pub landblock_id: u32,
+    pub level: LandblockSceneLodLevel,
+    pub context: LandblockSceneLodContext,
+    pub layers: Vec<LandblockSceneLodLayer>,
+    pub diagnostics: PreparedContentSourceDiagnostics,
+}
+
+#[derive(Debug, Clone)]
+pub enum LandblockSceneLodLayer {
+    Terrain,
+    OutdoorBuildings,
+    OutdoorExplicitObjects,
+    OutdoorGeneratedScenery,
+    EnvCellSystem,
+}
+
 #[derive(Debug, Clone)]
 pub struct LandblockEnvCellBundleCell {
     pub env_cell: EnvCellFact,
@@ -523,6 +601,9 @@ pub struct LandblockTopologyAssetAssembler;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LandblockEnvCellsAssetAssembler;
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct LandblockSceneLodAssetAssembler;
 
 struct PreparedContentAssemblyContext<'a> {
     source: ContentSourceReader<'a>,
@@ -1172,6 +1253,27 @@ impl LandblockEnvCellsAssetAssembler {
             landblock_bvh,
             diagnostics,
         })
+    }
+}
+
+impl LandblockSceneLodAssetAssembler {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub fn assemble_landblock_with_cache(
+        &self,
+        _content: &ContentRepository,
+        _decode_cache: &ContentDecodeCache,
+        request: LandblockSceneLodRequest,
+    ) -> LandblockSceneLodAsset {
+        LandblockSceneLodAsset {
+            landblock_id: request.landblock_id,
+            level: request.level,
+            context: request.context,
+            layers: Vec::new(),
+            diagnostics: PreparedContentSourceDiagnostics::default(),
+        }
     }
 }
 

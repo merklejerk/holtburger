@@ -662,32 +662,86 @@ Decisions and course corrections:
 - Surviving executable `outdoor-detail` references are compatibility surfaces for old detail payloads, WebGL2 old-detail diagnostics/counters, and old route/source tests. Phase 11 must delete or rename them after layer ownership and old-route removal make the compatibility path unreachable.
 - Validation: `npm run check`; `npm run test:ts -- src/lib/static/demand-planner.test.ts src/lib/static/objects/outdoor-static-objects-resolver.test.ts src/lib/static/objects/static-object-instance-inventory.test.ts src/lib/static/objects/bake/static-object-compatibility-partitioner.test.ts src/lib/runtime/client-runtime.test.ts src/lib/browser/create-browser-runtime.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts`.
 
-### Phase 6: Layer Owner Foundation
+### Phase 6A: Layer Owner Contract And Reconciliation Model
 
 Status: pending.
 
-Goal: add landblock-layer lifecycle identity after public domains are split and before source-first resolver fanout lands.
+Goal: introduce typed landblock-layer owner identity and pure reconciliation semantics before changing coordinator lifecycle behavior.
 
 Deliverables:
 
-- Add typed landblock layer owner keys and owner states.
-- Introduce owner records as the dedupe and lifecycle authority for desired, resolving, baking, materialized, empty, and failed layers.
-- Keep existing old-route resolvers only through an isolated temporary adapter, make their work target layer owners, and record the adapter as a Phase 7 deletion target.
+- Add `LayerOwnerKey` and `LayerOwnerState` types for terrain, buildings, explicit objects, generated scenery, and env-cell systems.
+- Add pure owner reconciliation helpers that classify retained, added, evicted, and unchanged layer owners.
+- Keep work ids out of owner identity; owner keys must be stable across work revisions.
 
 Acceptance criteria:
 
 - LoD `2` explicit-object and LoD `3` generated-scenery work have separate retained scopes and resource ownership.
 - Tests prove LoD increase/decrease decisions can be represented as layer owner changes.
+- Reconciliation tests cover retain/add/evict/unchanged without requiring resolver, baker, or WebGL behavior.
+- No coordinator lifecycle behavior changes in this phase.
+
+Task checklist:
+
+- [ ] Add `LayerOwnerKey` and `LayerOwnerState` types.
+- [ ] Add owner-state reconciliation tests for retain/add/evict/unchanged cases.
+- [ ] Wire split explicit-object and generated-scenery domains into owner-key mapping.
+- [ ] Keep work ids transient; do not make them durable owner identity.
+
+Decisions and course corrections:
+
+- Split original Phase 6 on 2026-06-29 because it combined owner contract design, coordinator state mutation, and temporary adapter policy.
+
+### Phase 6B: Coordinator Owner State Index
+
+Status: pending.
+
+Goal: make layer owners visible to the static coordinator without replacing source-first routing yet.
+
+Deliverables:
+
+- Introduce owner records as coordinator-visible lifecycle state for desired, resolving, baking, materialized, empty, and failed layers.
+- Index current work and committed resources by layer owner key in addition to the existing work-id/resource paths.
+- Keep old route resolver jobs as the temporary source of data, but make their produced records target layer owners.
+
+Acceptance criteria:
+
+- Coordinator snapshots can report owner states for split explicit-object and generated-scenery owners separately.
+- Existing work ids remain transient execution ids and are not used as durable owner identity.
+- Tests cover owner state transitions through resolving, baking, materialized, empty, failed, and evicted states.
+
+Task checklist:
+
+- [ ] Add owner state index to static coordinator snapshots/deltas.
+- [ ] Record owner keys on work or work-adjacent metadata without changing route source behavior.
+- [ ] Update coordinator tests for owner lifecycle transitions.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 6C: Temporary Old-Route Owner Adapter
+
+Status: pending.
+
+Goal: isolate old-route loading behind an adapter that targets layer owners and is explicitly deleted by Phase 7.
+
+Deliverables:
+
+- Keep existing old-route resolvers only through an isolated temporary adapter.
+- Make adapter output target layer owner keys rather than treating route/domain jobs as durable ownership.
+- Add the adapter to the Phase 7 deletion checklist.
+
+Acceptance criteria:
+
 - Temporary old-route adapter tests cover only owner translation and are deleted or rewritten in Phase 7; they must not bless old route behavior as a stable path.
 - No browser/domain split work remains in this phase beyond wiring split domains into owner records.
 
 Task checklist:
 
-- [ ] Add `LayerOwnerKey` and `LayerOwnerState` types.
-- [ ] Add owner-state reconciliation tests for retain/add/evict cases.
 - [ ] Isolate old route loading behind a temporary adapter and add it to the Phase 7 deletion checklist.
-- [ ] Wire split explicit-object and generated-scenery domains into owner records.
-- [ ] Keep work ids transient; do not make them durable owner identity.
+- [ ] Add adapter tests that verify owner translation only.
+- [ ] Confirm normal path still compiles and behaves before Phase 7 replaces source fanout.
 
 Decisions and course corrections:
 

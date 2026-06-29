@@ -198,6 +198,10 @@ export type DynamicEntityResidence =
 
 export type DynamicEntityAnimationSelection =
 	| {
+			/** Render from setup/default part placements without animation playback. */
+			readonly kind: "none";
+	  }
+	| {
 			readonly kind: "setup-default";
 	  }
 	| {
@@ -372,7 +376,7 @@ type DynamicEntityResourceStatus =
 
 export type DynamicEntitySetupAnimationResourceState =
 	| {
-			readonly animationKey: DynamicEntityResourceKey;
+			readonly animationKey?: DynamicEntityResourceKey;
 			readonly failures: readonly DynamicEntityResourceFailure[];
 			readonly setupModelKey: DynamicEntityResourceKey;
 			readonly status: "failed";
@@ -381,6 +385,12 @@ export type DynamicEntitySetupAnimationResourceState =
 			readonly animationKey: DynamicEntityResourceKey;
 			readonly setupModelKey: DynamicEntityResourceKey;
 			readonly status: "pending";
+	  }
+	| {
+			/** No animation was selected; visual resources may still render in setup/default pose. */
+			readonly reason: "animation-not-selected";
+			readonly setupModelKey: DynamicEntityResourceKey;
+			readonly status: "not-required";
 	  }
 	| {
 			/** Setup-default animation has not been resolved to a real animation asset id. */
@@ -577,7 +587,7 @@ interface DynamicEntityResourceSummaryDto {
 
 export type DynamicEntitySetupAnimationResourceSummaryDto =
 	| {
-			readonly animationKey: DynamicEntityResourceKey;
+			readonly animationKey?: DynamicEntityResourceKey;
 			readonly failures: readonly DynamicEntityResourceFailure[];
 			readonly setupModelKey: DynamicEntityResourceKey;
 			readonly status: "failed";
@@ -591,6 +601,11 @@ export type DynamicEntitySetupAnimationResourceSummaryDto =
 			readonly pendingReason: "setup-default-animation-unresolved";
 			readonly setupModelKey: DynamicEntityResourceKey;
 			readonly status: "pending";
+	  }
+	| {
+			readonly reason: "animation-not-selected";
+			readonly setupModelKey: DynamicEntityResourceKey;
+			readonly status: "not-required";
 	  }
 	| {
 			readonly animationAssetId: string;

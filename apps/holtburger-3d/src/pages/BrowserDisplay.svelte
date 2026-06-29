@@ -21,7 +21,20 @@
 		type FreeCameraState,
 	} from "../lib/camera/free-camera";
 	import { createBrowserRuntime } from "../lib/browser/create-browser-runtime";
+	import { placeBrowserSpawnFormInFrontOfCamera } from "../lib/browser/runtime-spawn-camera-placement";
+	import {
+		applyWeenieSpawnSeedToForm,
+		createDefaultBrowserSpawnFormState,
+		formatBrowserSpawnRecordSummary,
+		parseWeenieClassIdInput,
+		validateBrowserSpawnForm,
+		type BrowserRuntimeSpawnRecord,
+		type BrowserSpawnAnimationMode,
+		type BrowserSpawnFormState,
+		type BrowserSpawnResidenceMode,
+	} from "../lib/browser/runtime-spawn-form";
 	import { createBrowserScenePickRay } from "../lib/browser/scene-picking";
+	import { createInMemoryWeenieSpawnSeedResolver } from "../lib/browser/weenie-spawn-seed-resolver";
 	import {
 		createSceneInterestFromLocation,
 		inferLandblockInputMode,
@@ -64,7 +77,10 @@
 		type PerformanceMetricsSnapshot,
 	} from "../lib/ui/performance-metrics";
 
-	type BrowserPanelTab = "navigate" | "settings" | "debug";
+	type BrowserPanelTab = "navigate" | "settings" | "spawns" | "debug";
+	type BrowserRuntimeSpawnRow = BrowserRuntimeSpawnRecord & {
+		readonly entityId: string;
+	};
 	type SelectedScenePick =
 		| {
 				readonly distance: number;
@@ -154,6 +170,12 @@
 	let selectedDiagnosticsReportText = $state<string | null>(null);
 	let selectedDiagnosticsReportTitle = $state("Selection");
 	let selectedScenePick = $state<SelectedScenePick | null>(null);
+	let spawnForm = $state<BrowserSpawnFormState>(
+		createDefaultBrowserSpawnFormState(),
+	);
+	let spawnRows = $state<readonly BrowserRuntimeSpawnRow[]>([]);
+	let spawnStatus = $state<string | null>(null);
+	let spawnValidationErrors = $state<readonly string[]>([]);
 	let pendingCameraFocus = $state<PendingCameraFocus | null>(null);
 	let cameraFocusStatus = $state<CameraFocusStatus>("idle");
 	let pickPointerCandidate: {
@@ -175,6 +197,7 @@
 		emaAlpha: PERF_OVERLAY_EMA_ALPHA,
 		sampleMs: PERF_OVERLAY_SAMPLE_MS,
 	});
+	const weenieSpawnSeedResolver = createInMemoryWeenieSpawnSeedResolver();
 
 	let copiedField = $state<string | null>(null);
 	let copyTimeout: number | null = null;
@@ -506,6 +529,169 @@
 
 	function closeSelectedDiagnosticsReport(): void {
 		selectedDiagnosticsReportText = null;
+	}
+
+	function updateSpawnFormField<K extends keyof BrowserSpawnFormState>(
+		field: K,
+		value: BrowserSpawnFormState[K],
+	): void {
+		spawnForm = {
+			...spawnForm,
+			[field]: value,
+		};
+	}
+
+	function handleSpawnTextInput<K extends keyof BrowserSpawnFormState>(
+		field: K,
+		event: Event,
+	): void {
+		updateSpawnFormField(
+			field,
+			(event.currentTarget as HTMLInputElement)
+				.value as BrowserSpawnFormState[K],
+		);
+	}
+
+	function handleSpawnAnimationModeChange(event: Event): void {
+		updateSpawnFormField(
+			"animationMode",
+			(event.currentTarget as HTMLSelectElement)
+				.value as BrowserSpawnAnimationMode,
+		);
+	}
+
+	function handleSpawnResidenceModeChange(event: Event): void {
+		updateSpawnFormField(
+			"residenceMode",
+			(event.currentTarget as HTMLSelectElement)
+				.value as BrowserSpawnResidenceMode,
+		);
+	}
+
+	function applySpawnWeenieSeed(): void {
+		const weenieClassId = parseWeenieClassIdInput(spawnForm.weenieClassId);
+		if (weenieClassId === null) {
+			spawnValidationErrors = ["WCID must be a non-negative integer."];
+			spawnStatus = null;
+			return;
+		}
+
+		const seed = weenieSpawnSeedResolver.resolve(weenieClassId);
+		if (seed === null) {
+			spawnValidationErrors = [
+				`No spawn seed found for WCID ${weenieClassId}.`,
+			];
+			spawnStatus = null;
+			return;
+		}
+
+		spawnForm = applyWeenieSpawnSeedToForm(spawnForm, seed);
+		spawnValidationErrors = [];
+		spawnStatus = `Applied WCID ${weenieClassId} to the editable spawn form.`;
+	}
+
+	function handleRuntimeSpawnSubmit(event: SubmitEvent): void {
+		event.preventDefault();
+		if (!runtime) {
+			spawnValidationErrors = ["Runtime is not ready."];
+			spawnStatus = null;
+			return;
+		}
+
+		const overview = runtime.createOverviewSnapshot();
+		const camera =
+			cameraController?.createFrameStateCamera() ??
+			createFreeCameraFrameStateCamera(cameraState);
+		const cameraPlacedForm = placeBrowserSpawnFormInFrontOfCamera({
+			camera,
+			currentCameraResidency: overview.currentCameraResidency,
+			form: spawnForm,
+			sceneInterest: overview.sceneInterest,
+		});
+		if (cameraPlacedForm === null) {
+			spawnValidationErrors = [
+				"Load an outdoor or env-cell scene before creating a camera-relative spawn.",
+			];
+			spawnStatus = null;
+			return;
+		}
+
+		spawnForm = cameraPlacedForm;
+		const result = validateBrowserSpawnForm(cameraPlacedForm);
+		if (result.kind === "rejected") {
+			console.warn("Rejected browser runtime spawn request", result.errors);
+			spawnValidationErrors = result.errors;
+			spawnStatus = null;
+			return;
+		}
+
+		const entityId = runtime.createRuntimeSpawn(result.request);
+		const row = {
+			...result.record,
+			entityId,
+		};
+		spawnRows = [row, ...spawnRows];
+		spawnValidationErrors = [];
+		spawnStatus = `Created ${entityId}.`;
+		selectRuntimeSpawn(row);
+		refreshRuntimeOverview();
+	}
+
+	function removeRuntimeSpawn(row: BrowserRuntimeSpawnRow): void {
+		if (!runtime) {
+			return;
+		}
+
+		const removed = runtime.removeRuntimeSpawn(row.entityId);
+		if (!removed) {
+			spawnValidationErrors = [`Runtime did not remove ${row.entityId}.`];
+			spawnStatus = null;
+			return;
+		}
+
+		spawnRows = spawnRows.filter(
+			(existing) => existing.entityId !== row.entityId,
+		);
+		if (
+			selectedScenePick?.kind === "dynamic" &&
+			selectedScenePick.entityId === row.entityId
+		) {
+			clearSceneDebugSelection();
+		}
+		spawnValidationErrors = [];
+		spawnStatus = `Removed ${row.entityId}.`;
+		refreshRuntimeOverview();
+	}
+
+	function selectRuntimeSpawn(row: BrowserRuntimeSpawnRow): void {
+		selectedScenePick = {
+			distance: 0,
+			entityId: row.entityId,
+			kind: "dynamic",
+			sourceResidence: row.sourceResidence,
+		};
+		selectedDiagnosticsReportText = null;
+		runtime?.setSceneDebugSelection({
+			entityId: row.entityId,
+			kind: "dynamic",
+		});
+		refreshRuntimeOverview();
+	}
+
+	function inspectRuntimeSpawn(row: BrowserRuntimeSpawnRow): void {
+		selectRuntimeSpawn(row);
+		if (!runtime) {
+			return;
+		}
+
+		selectedDiagnosticsReportText = JSON.stringify(
+			runtime.createDynamicSelectionDiagnosticsReport(row.entityId, {
+				pickDistance: 0,
+			}),
+			null,
+			2,
+		);
+		selectedDiagnosticsReportTitle = "Dynamic Selection";
 	}
 
 	function openSelectedDiagnosticsReport(): void {
@@ -1613,6 +1799,19 @@
 					<span aria-hidden="true">⚙</span>
 				</button>
 				<button
+					class:active={activeTab === "spawns"}
+					type="button"
+					role="tab"
+					aria-selected={activeTab === "spawns"}
+					aria-label="Spawns"
+					title="Spawns"
+					onclick={() => {
+						activeTab = "spawns";
+					}}
+				>
+					<span aria-hidden="true">⊕</span>
+				</button>
+				<button
 					class:active={activeTab === "debug"}
 					type="button"
 					role="tab"
@@ -1869,6 +2068,226 @@
 							Reset Camera
 						</button>
 					</div>
+				</div>
+			{:else if activeTab === "spawns"}
+				<div class="browser-display__tab-panel" role="tabpanel">
+					<form
+						class="browser-display__form"
+						onsubmit={handleRuntimeSpawnSubmit}
+					>
+						<section class="browser-display__control-group">
+							<h2>WCID Seed</h2>
+							<div class="browser-display__inline-action">
+								<label class="browser-display__field">
+									<span>WCID</span>
+									<input
+										autocomplete="off"
+										spellcheck="false"
+										value={spawnForm.weenieClassId}
+										oninput={(event) =>
+											handleSpawnTextInput("weenieClassId", event)}
+									/>
+								</label>
+								<button type="button" onclick={applySpawnWeenieSeed}>
+									Apply
+								</button>
+							</div>
+						</section>
+
+						<section class="browser-display__control-group">
+							<h2>Spawn</h2>
+							<label class="browser-display__field">
+								<span>Label</span>
+								<input
+									autocomplete="off"
+									spellcheck="false"
+									value={spawnForm.label}
+									oninput={(event) => handleSpawnTextInput("label", event)}
+								/>
+							</label>
+							<div class="browser-display__field-grid">
+								<label class="browser-display__field">
+									<span>Residence</span>
+									<select
+										value={spawnForm.residenceMode}
+										onchange={handleSpawnResidenceModeChange}
+									>
+										<option value="outdoor">Outdoor</option>
+										<option value="env-cell">Env cell</option>
+									</select>
+								</label>
+								<label class="browser-display__field">
+									<span>Setup</span>
+									<input
+										autocomplete="off"
+										spellcheck="false"
+										value={spawnForm.setupModelId}
+										oninput={(event) =>
+											handleSpawnTextInput("setupModelId", event)}
+									/>
+								</label>
+							</div>
+							<div class="browser-display__field-grid">
+								<label class="browser-display__field">
+									<span>Server id</span>
+									<input
+										autocomplete="off"
+										placeholder="optional"
+										spellcheck="false"
+										value={spawnForm.serverInstanceId}
+										oninput={(event) =>
+											handleSpawnTextInput("serverInstanceId", event)}
+									/>
+								</label>
+								<label class="browser-display__field">
+									<span>Landblock</span>
+									<input
+										autocomplete="off"
+										spellcheck="false"
+										value={spawnForm.landblockId}
+										oninput={(event) =>
+											handleSpawnTextInput("landblockId", event)}
+									/>
+								</label>
+							</div>
+							{#if spawnForm.residenceMode === "env-cell"}
+								<label class="browser-display__field">
+									<span>Env cell</span>
+									<input
+										autocomplete="off"
+										spellcheck="false"
+										value={spawnForm.envCellId}
+										oninput={(event) =>
+											handleSpawnTextInput("envCellId", event)}
+									/>
+								</label>
+							{/if}
+						</section>
+
+						<section class="browser-display__control-group">
+							<h2>Scale</h2>
+							<div
+								class="browser-display__field-grid browser-display__field-grid--thirds"
+							>
+								<label class="browser-display__field">
+									<span>Scale X</span>
+									<input
+										autocomplete="off"
+										value={spawnForm.scaleX}
+										oninput={(event) => handleSpawnTextInput("scaleX", event)}
+									/>
+								</label>
+								<label class="browser-display__field">
+									<span>Scale Y</span>
+									<input
+										autocomplete="off"
+										value={spawnForm.scaleY}
+										oninput={(event) => handleSpawnTextInput("scaleY", event)}
+									/>
+								</label>
+								<label class="browser-display__field">
+									<span>Scale Z</span>
+									<input
+										autocomplete="off"
+										value={spawnForm.scaleZ}
+										oninput={(event) => handleSpawnTextInput("scaleZ", event)}
+									/>
+								</label>
+							</div>
+						</section>
+
+						<section class="browser-display__control-group">
+							<h2>Animation</h2>
+							<div class="browser-display__field-grid">
+								<label class="browser-display__field">
+									<span>Mode</span>
+									<select
+										value={spawnForm.animationMode}
+										onchange={handleSpawnAnimationModeChange}
+									>
+										<option value="none">None</option>
+										<option value="explicit">Explicit</option>
+									</select>
+								</label>
+								<label class="browser-display__field">
+									<span>Animation</span>
+									<input
+										autocomplete="off"
+										disabled={spawnForm.animationMode !== "explicit"}
+										placeholder="0x03000000"
+										spellcheck="false"
+										value={spawnForm.animationId}
+										oninput={(event) =>
+											handleSpawnTextInput("animationId", event)}
+									/>
+								</label>
+							</div>
+						</section>
+
+						{#if spawnValidationErrors.length > 0}
+							<ul class="browser-display__validation">
+								{#each spawnValidationErrors as error}
+									<li>{error}</li>
+								{/each}
+							</ul>
+						{:else if spawnStatus}
+							<p class="browser-display__spawn-status">{spawnStatus}</p>
+						{/if}
+
+						<button
+							class="browser-display__request"
+							disabled={!runtime}
+							type="submit"
+						>
+							Create Spawn
+						</button>
+					</form>
+
+					<section class="browser-display__control-group">
+						<h2>Active Spawns</h2>
+						{#if spawnRows.length === 0}
+							<dl class="browser-display__status">
+								<div>
+									<dt>Runtime</dt>
+									<dd>none</dd>
+								</div>
+							</dl>
+						{:else}
+							<div class="browser-display__spawn-list">
+								{#each spawnRows as row (row.entityId)}
+									<div class="browser-display__spawn-row">
+										<div>
+											<strong>{row.entityId}</strong>
+											<small>{formatBrowserSpawnRecordSummary(row)}</small>
+										</div>
+										<div class="browser-display__spawn-row-actions">
+											<button
+												disabled={!runtime}
+												type="button"
+												onclick={() => selectRuntimeSpawn(row)}
+											>
+												Select
+											</button>
+											<button
+												disabled={!runtime}
+												type="button"
+												onclick={() => inspectRuntimeSpawn(row)}
+											>
+												Inspect
+											</button>
+											<button
+												disabled={!runtime}
+												type="button"
+												onclick={() => removeRuntimeSpawn(row)}
+											>
+												Remove
+											</button>
+										</div>
+									</div>
+								{/each}
+							</div>
+						{/if}
+					</section>
 				</div>
 			{:else}
 				<div class="browser-display__tab-panel" role="tabpanel">
@@ -2319,7 +2738,7 @@
 
 	.browser-display__tabs {
 		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
+		grid-template-columns: repeat(4, minmax(0, 1fr));
 		gap: 5px;
 		margin-bottom: 10px;
 	}
@@ -2363,6 +2782,28 @@
 	.browser-display__range {
 		display: grid;
 		gap: 5px;
+	}
+
+	.browser-display__inline-action {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: end;
+		gap: 6px;
+	}
+
+	.browser-display__inline-action button {
+		min-height: 32px;
+		padding: 0 10px;
+	}
+
+	.browser-display__field-grid {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 6px;
+	}
+
+	.browser-display__field-grid--thirds {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 	}
 
 	.browser-display__field span,
@@ -2540,6 +2981,74 @@
 		font-size: 11px;
 	}
 
+	.browser-display__spawn-list {
+		display: grid;
+		gap: 6px;
+	}
+
+	.browser-display__spawn-row {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr);
+		gap: 6px;
+		padding: 7px;
+		border: 1px solid rgba(91, 255, 187, 0.22);
+		border-radius: 4px;
+		background: rgba(1, 9, 8, 0.42);
+	}
+
+	.browser-display__spawn-row strong,
+	.browser-display__spawn-row small {
+		display: block;
+		overflow-wrap: anywhere;
+	}
+
+	.browser-display__spawn-row strong {
+		color: #fff7cf;
+		font-size: 12px;
+		font-weight: 700;
+	}
+
+	.browser-display__spawn-row small {
+		margin-top: 3px;
+		color: rgba(241, 255, 246, 0.76);
+		font-size: 11px;
+		line-height: 1.35;
+	}
+
+	.browser-display__spawn-row-actions {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 5px;
+	}
+
+	.browser-display__spawn-row-actions button {
+		min-height: 26px;
+		padding: 0 5px;
+		font-size: 11px;
+	}
+
+	.browser-display__validation {
+		display: grid;
+		gap: 4px;
+		margin: 0;
+		padding: 7px 7px 7px 22px;
+		border: 1px solid rgba(255, 112, 112, 0.55);
+		border-radius: 4px;
+		background: rgba(61, 10, 10, 0.62);
+		color: #ffd2d2;
+		font-size: 12px;
+	}
+
+	.browser-display__spawn-status {
+		margin: 0;
+		padding: 7px;
+		border: 1px solid rgba(91, 255, 187, 0.22);
+		border-radius: 4px;
+		background: rgba(1, 9, 8, 0.42);
+		color: #fff7cf;
+		font-size: 12px;
+	}
+
 	:global(.browser-display__copy-overlay) {
 		position: absolute;
 		inset: 0;
@@ -2634,6 +3143,10 @@
 		}
 
 		.browser-display__actions,
+		.browser-display__field-grid,
+		.browser-display__field-grid--thirds,
+		.browser-display__inline-action,
+		.browser-display__spawn-row-actions,
 		.browser-display__toggles {
 			grid-template-columns: 1fr;
 		}

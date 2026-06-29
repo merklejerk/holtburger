@@ -691,6 +691,55 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
+	it("requests runtime setup appearance assets for browser spawns with model data", async () => {
+		const assetService = new DeferredAssetService();
+		const renderer = new FakeRenderer();
+		const runtime = createClientRuntime({
+			assetService,
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+		});
+		const result = validateBrowserSpawnForm(
+			applyWeenieSpawnSeedToForm(createDefaultBrowserSpawnFormState(), {
+				appearance: {
+					animPartChanges: [{ partId: 0x01001234, partIndex: 16 }],
+					paletteId: 0x04000001,
+					subPalettes: [{ numColors: 24, offset: 0, subId: 0x04000101 }],
+					textureChanges: [
+						{
+							newTexture: 0x05002222,
+							oldTexture: 0x05001111,
+							partIndex: 16,
+						},
+					],
+				},
+				label: "Runtime appearance bartender",
+				setupModelId: 0x0200004e,
+				weenieClassId: 42810,
+			}),
+		);
+		if (result.kind !== "accepted") {
+			throw new Error("expected accepted browser runtime spawn form request");
+		}
+
+		runtime.createRuntimeSpawn(result.request);
+		await resolvePendingDynamicAssetsUntil(
+			assetService,
+			() => renderer.createDiagnosticsSnapshot().dynamicVisualResources > 0,
+		);
+
+		expect(
+			assetService.pendingKeys.some(
+				(key) =>
+					key.kind === "raw" &&
+					key.id.startsWith("runtime-setup-appearance/0200004e/"),
+			),
+		).toBe(true);
+
+		runtime.dispose();
+	});
+
 	it("updates dynamic renderer submissions from frame ticks without creating full runtime snapshots", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -3935,6 +3984,11 @@ function createDynamicPreparedPayload(key: HostAssetKey): unknown {
 			};
 		case "prepared-texture":
 			return createPreparedTextureAsset(key).payload;
+		case "raw":
+			if (key.id.startsWith("runtime-setup-appearance/")) {
+				return createDynamicRuntimeSetupAppearancePayload(key);
+			}
+			return { kind: key.kind };
 		default:
 			return { kind: key.kind };
 	}
@@ -4025,9 +4079,25 @@ function createDynamicSetupModelPayload(key: HostAssetKey) {
 
 function createDynamicSetupAppearancePayload(key: HostAssetKey) {
 	const setupModelId = Number.parseInt(key.id, 16);
+	return createDynamicSetupAppearancePayloadForSetup(
+		setupModelId,
+		`setup-appearance/${key.id}`,
+	);
+}
+
+function createDynamicRuntimeSetupAppearancePayload(key: HostAssetKey) {
+	const setupHex = key.id.split("/")[1] ?? failKey();
+	const setupModelId = Number.parseInt(setupHex, 16);
+	return createDynamicSetupAppearancePayloadForSetup(setupModelId, key.id);
+}
+
+function createDynamicSetupAppearancePayloadForSetup(
+	setupModelId: number,
+	appearanceKey: string,
+) {
 	return {
 		animPartChanges: [],
-		appearanceKey: `setup-appearance/${key.id}`,
+		appearanceKey,
 		dependencies: {
 			materialAssetIds: ["material/08000011"],
 			paletteAssetIds: [],

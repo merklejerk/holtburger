@@ -5128,21 +5128,66 @@ Task checklist:
 - [x] Decide whether the first backing is a generated catalog file, SQLite/catalog cache, Tauri-side
       SQL lookup, or tooling-generated JSON. Decision: Tauri-side SQL lookup behind
       `ACE_WORLD_SQL_URL`, with generated catalog/offline export deferred.
-- [ ] Add Tauri configuration/capability plumbing for optional `ACE_WORLD_SQL_URL`.
-- [ ] Add a Tauri command that resolves one WCID from ACE world SQL into normalized visual spawn
+- [x] Add Tauri configuration/capability plumbing for optional `ACE_WORLD_SQL_URL`.
+- [x] Add a Tauri command that resolves one WCID from ACE world SQL into normalized visual spawn
       facts.
-- [ ] Widen `WeenieSpawnSeed` and resolver tests to cover optional SQL-backed visual facts while
+- [x] Widen `WeenieSpawnSeed` and resolver tests to cover optional SQL-backed visual facts while
       preserving the Phase 12D in-memory fixture behavior.
-- [ ] Add a Tauri-backed resolver adapter consumed through the same browser resolver boundary.
-- [ ] Wire browser WCID lookup through the existing resolver/form boundary, disabled when the Tauri
+- [x] Add a Tauri-backed resolver adapter consumed through the same browser resolver boundary.
+- [x] Wire browser WCID lookup through the existing resolver/form boundary, disabled when the Tauri
       capability says lookup is unavailable.
-- [ ] Extend resolver, spawn validation, runtime source facts, and dynamic visual resource loading so
+- [x] Extend resolver, spawn validation, runtime source facts, and dynamic visual resource loading so
       ObjDesc/model-data appearance facts can select a per-spawn setup appearance instead of the base
       setup-only appearance.
-- [ ] Add resolver behavior for missing source, missing WCID, malformed rows, and conflicting
+- [x] Add resolver behavior for missing source, missing WCID, malformed rows, and conflicting
       property rows: log to the console and return no result without durable diagnostics.
-- [ ] Add tests with a small ACE-derived fixture or SQL-row adapter fixture covering WCID `42810` and
+- [x] Add tests with a small ACE-derived fixture or SQL-row adapter fixture covering WCID `42810` and
       setup-only WCID `1`.
+
+Implementation notes:
+
+- 2026-06-29 implementation: Added a Tauri-side ACE world SQL resolver configured by
+  `ACE_WORLD_SQL_URL`. The resolver exposes `get_weenie_lookup_capability` and
+  `resolve_weenie_spawn_seed` commands, runs blocking MySQL work on `tokio::task::spawn_blocking`,
+  and normalizes the first visual projection into typed spawn seed DTOs. The browser never sees SQL
+  connection strings, table names, or raw property rows.
+- 2026-06-29 implementation: Added frontend DTO schemas and a Tauri-backed
+  `WeenieSpawnSeedResolver` adapter. `BrowserDisplay` now queries lookup capability on mount,
+  disables the WCID apply button when `ACE_WORLD_SQL_URL` is absent/invalid, and keeps manual
+  setup-backed spawn entry available.
+- 2026-06-29 implementation: Widened `WeenieSpawnSeed` and browser spawn validation so resolved
+  default scale and direct ObjDesc-style appearance facts flow into `RuntimeDynamicSpawnRequest` as
+  hidden `modelData` rather than visible form controls. Runtime source facts and diagnostics can now
+  carry non-null model data for browser-authored spawns.
+- 2026-06-29 implementation: Dynamic resource loading now consumes runtime `modelData` by routing
+  affected setup-model closures through a synthetic `runtime-setup-appearance/<setup>/<payload>` raw
+  asset key. The Tauri adapter decodes that raw key into the existing runtime appearance resolver, so
+  per-spawn ObjDesc facts produce a setup appearance without teaching the browser about ACE SQL rows
+  or adding a separate prepared-payload kind.
+- 2026-06-29 follow-up: WCID `42810` proved the route was active because part geometry changed, but
+  the model rendered fully black. The SQL resolver now expands ACE `weenie_properties_palette`
+  `offset` / `length` values from packed ObjDesc units into client color-index ranges by multiplying
+  by 8 before handing them to the setup appearance resolver. ACE DatLoader performs the same
+  expansion when unpacking ObjDesc sub-palettes.
+- 2026-06-29 follow-up: The all-black WCID `42810` render persisted after range expansion. The next
+  bad assumption was projecting ACE `PaletteBase` DID into runtime render `paletteId`, which made the
+  material planner treat it as a global palette override for every indexed material. ACViewer starts
+  from each texture/default palette and applies sub-palette patches instead, so the resolver now
+  preserves PaletteBase in `sourceDids` but leaves render `appearance.paletteId` null until PaletteID
+  semantics are modeled precisely.
+- 2026-06-29 spicy bit: The runtime setup-appearance route encodes a compact JSON request as hex in a
+  raw asset id. This is app-local and deterministic, but it is not cute. It keeps the prepared asset
+  pipeline typed and avoids a second one-off host command path for closure hydration.
+- 2026-06-29 verification: `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`,
+  `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml ace_world_sql`,
+  `cargo fmt --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --check`, `npm run check`,
+  `npm run lint`, focused runtime/browser Vitest, and full `npm run test:ts` passed after the runtime
+  setup-appearance consumption fix. Full
+  `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml` still fails in the existing
+  `adapter::service::tests::env_cell_binary_lookup_allows_real_renderless_cell_structures` assertion
+  at `apps/holtburger-3d/src-tauri/src/adapter/service.rs:1020` with
+  `left: Number(36), right: 0`; the new ACE SQL resolver tests pass and this phase did not
+  change env-cell binary lookup behavior.
 
 ### Phase 12F: Host Presentation Projection Resteer
 

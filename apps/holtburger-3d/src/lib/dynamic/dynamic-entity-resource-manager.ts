@@ -5,7 +5,11 @@ import type {
 	PreparedAssetLease,
 } from "../assets/contracts";
 import { createPreparedTextureHostKey } from "../assets/preparation/prepared-texture-source";
-import { createHostAssetKey, describeHostAssetKey } from "../assets/keys";
+import {
+	createHostAssetKey,
+	createRawHostAssetKey,
+	describeHostAssetKey,
+} from "../assets/keys";
 import {
 	createStaticMaterialTextureSamplingPolicy,
 	resolveRepeatedStaticMaterialPrimaryWrapMode,
@@ -34,6 +38,7 @@ import {
 } from "../host/contracts";
 import type {
 	DynamicEntityAnimationResource,
+	DynamicEntityAppearanceOverride,
 	DynamicEntityId,
 	DynamicEntityPresentation,
 	DynamicEntityRenderPart,
@@ -330,9 +335,17 @@ export class DynamicEntityResourceManager {
 		}
 
 		const visualSource = tracked.presentation.visualSource;
+		const setupAppearanceHostKey = createRuntimeSetupAppearanceHostKey(
+			visualSource.setupModelId,
+			visualSource.modelData,
+		);
 		const closure = await resolveStaticObjectSourceClosure({
 			assetService: this.#assetService,
 			sourceAssetIds: visualSource.sourceAssetIds,
+			setupAppearanceHostKeys:
+				setupAppearanceHostKey === null
+					? undefined
+					: new Map([[visualSource.setupModelId, setupAppearanceHostKey]]),
 		});
 		const sourceAssets = closure.sourceAssets.filter(
 			(source) => source.identity.sourceDid === visualSource.setupModelId,
@@ -365,6 +378,7 @@ export class DynamicEntityResourceManager {
 		);
 		const resourceKeys = createVisualHostAssetKeys({
 			closure,
+			setupAppearanceHostKey,
 			visualSource,
 			setupAppearanceIsMissing: closure.missingRefs.some(isSetupAppearanceRef),
 			textureRequirements,
@@ -562,6 +576,38 @@ function createSetupAnimationResourceKeys(
 		setupHostKey,
 		setupResourceKey,
 	};
+}
+
+function createRuntimeSetupAppearanceHostKey(
+	setupModelId: number,
+	modelData: DynamicEntityAppearanceOverride | null,
+): HostAssetKey | null {
+	if (modelData === null) {
+		return null;
+	}
+	const request = {
+		objDesc: {
+			animPartChanges: modelData.animPartChanges,
+			paletteId: modelData.paletteId,
+			subPalettes: modelData.subPalettes,
+			textureChanges: modelData.textureChanges,
+		},
+		setupModelId,
+	};
+	return createRawHostAssetKey(
+		`runtime-setup-appearance/${formatHex32(setupModelId)}/${encodeJsonHex(request)}`,
+	);
+}
+
+function formatHex32(value: number): string {
+	return value.toString(16).padStart(8, "0");
+}
+
+function encodeJsonHex(value: unknown): string {
+	const bytes = new TextEncoder().encode(JSON.stringify(value));
+	return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
+		"",
+	);
 }
 
 function createMaterialPlanningLandblockSource(
@@ -1390,6 +1436,7 @@ function createVisualHostAssetKeys(options: {
 	readonly closure: Awaited<
 		ReturnType<typeof resolveStaticObjectSourceClosure>
 	>;
+	readonly setupAppearanceHostKey: HostAssetKey | null;
 	readonly visualSource: DynamicVisualSource;
 	readonly setupAppearanceIsMissing: boolean;
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
@@ -1398,10 +1445,11 @@ function createVisualHostAssetKeys(options: {
 		...(options.setupAppearanceIsMissing
 			? []
 			: [
-					createHostAssetKey(
-						"setup-appearance",
-						options.visualSource.setupModelId,
-					),
+					options.setupAppearanceHostKey ??
+						createHostAssetKey(
+							"setup-appearance",
+							options.visualSource.setupModelId,
+						),
 				]),
 		...options.closure.sourceAssets.flatMap((source) =>
 			source.parts.map((part) =>

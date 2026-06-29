@@ -126,11 +126,36 @@ type DynamicMaterialPlanningIdentity =
 export type DynamicPendingMaterialPlanningReason =
 	"runtime-material-planning-identity-unsupported";
 
+interface DynamicEntityAppearanceSubPalette {
+	readonly subId: number;
+	readonly offset: number;
+	readonly numColors: number;
+}
+
+interface DynamicEntityAppearanceTextureChange {
+	readonly partIndex: number;
+	readonly oldTexture: number;
+	readonly newTexture: number;
+}
+
+interface DynamicEntityAppearanceAnimPartChange {
+	readonly partIndex: number;
+	readonly partId: number;
+}
+
+/** ObjDesc-shaped per-entity appearance facts projected from server/ACE source data. */
+export interface DynamicEntityAppearanceOverride {
+	readonly paletteId: number | null;
+	readonly subPalettes: readonly DynamicEntityAppearanceSubPalette[];
+	readonly textureChanges: readonly DynamicEntityAppearanceTextureChange[];
+	readonly animPartChanges: readonly DynamicEntityAppearanceAnimPartChange[];
+}
+
 /** Source-neutral visual inputs consumed by dynamic resource and renderer pipelines. */
 export interface DynamicVisualSource {
 	readonly animationSelection: DynamicEntityAnimationSelection;
 	readonly effectiveResidence: DynamicEntityResidence;
-	readonly modelData: null;
+	readonly modelData: DynamicEntityAppearanceOverride | null;
 	readonly setupModelId: number;
 	readonly sourceAssetIds: readonly string[];
 }
@@ -217,7 +242,7 @@ export interface DynamicEntityServerInstanceMetadata {
 interface RuntimeSpawnDynamicEntitySourceFacts {
 	readonly animationSelection: DynamicEntityAnimationSelection;
 	readonly kind: "runtime-spawn";
-	readonly modelData: null;
+	readonly modelData: DynamicEntityAppearanceOverride | null;
 	readonly runtimeEntityId: DynamicEntityId;
 	readonly serverInstanceIdMetadata: DynamicEntityServerInstanceMetadata | null;
 	readonly setupModelId: number;
@@ -628,7 +653,7 @@ export type DynamicEntitySourceSummaryDto =
 	| {
 			readonly animationSelection: DynamicEntityAnimationSelection;
 			readonly kind: "runtime-spawn";
-			readonly modelData: null;
+			readonly modelData: DynamicEntityAppearanceOverride | null;
 			readonly runtimeEntityId: DynamicEntityId;
 			readonly serverInstanceIdMetadata: DynamicEntityServerInstanceMetadata | null;
 			readonly setupModelId: number;

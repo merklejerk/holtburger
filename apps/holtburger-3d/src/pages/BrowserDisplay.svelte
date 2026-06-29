@@ -34,7 +34,8 @@
 		type BrowserSpawnResidenceMode,
 	} from "../lib/browser/runtime-spawn-form";
 	import { createBrowserScenePickRay } from "../lib/browser/scene-picking";
-	import { createInMemoryWeenieSpawnSeedResolver } from "../lib/browser/weenie-spawn-seed-resolver";
+	import { createTauriWeenieSpawnSeedResolver } from "../lib/browser/weenie-spawn-seed-resolver";
+	import type { WeenieLookupCapabilityDto } from "../lib/host/contracts";
 	import {
 		createSceneInterestFromLocation,
 		inferLandblockInputMode,
@@ -176,6 +177,11 @@
 	let spawnRows = $state<readonly BrowserRuntimeSpawnRow[]>([]);
 	let spawnStatus = $state<string | null>(null);
 	let spawnValidationErrors = $state<readonly string[]>([]);
+	let weenieLookupCapability = $state<WeenieLookupCapabilityDto>({
+		available: false,
+		reason: "lookup status pending",
+	});
+	let weenieLookupPending = $state(false);
 	let pendingCameraFocus = $state<PendingCameraFocus | null>(null);
 	let cameraFocusStatus = $state<CameraFocusStatus>("idle");
 	let pickPointerCandidate: {
@@ -197,7 +203,7 @@
 		emaAlpha: PERF_OVERLAY_EMA_ALPHA,
 		sampleMs: PERF_OVERLAY_SAMPLE_MS,
 	});
-	const weenieSpawnSeedResolver = createInMemoryWeenieSpawnSeedResolver();
+	const weenieSpawnSeedResolver = createTauriWeenieSpawnSeedResolver();
 
 	let copiedField = $state<string | null>(null);
 	let copyTimeout: number | null = null;
@@ -264,6 +270,7 @@
 			refreshRuntimeOverview();
 			startRuntimeFrameLoop();
 			startRuntimeOverviewPolling();
+			void refreshWeenieLookupCapability();
 			const policySyncInterval = window.setInterval(() => {
 				syncCameraPolicy();
 			}, CAMERA_POLICY_SYNC_INTERVAL_MS);
@@ -284,6 +291,10 @@
 			startupError = error instanceof Error ? error.message : String(error);
 		}
 	});
+
+	async function refreshWeenieLookupCapability(): Promise<void> {
+		weenieLookupCapability = await weenieSpawnSeedResolver.capability();
+	}
 
 	function requestSceneInterest(): void {
 		clearStaticInterestRefresh();
@@ -568,7 +579,7 @@
 		);
 	}
 
-	function applySpawnWeenieSeed(): void {
+	async function applySpawnWeenieSeed(): Promise<void> {
 		const weenieClassId = parseWeenieClassIdInput(spawnForm.weenieClassId);
 		if (weenieClassId === null) {
 			spawnValidationErrors = ["WCID must be a non-negative integer."];
@@ -576,7 +587,12 @@
 			return;
 		}
 
-		const seed = weenieSpawnSeedResolver.resolve(weenieClassId);
+		weenieLookupPending = true;
+		const seed = await weenieSpawnSeedResolver
+			.resolve(weenieClassId)
+			.finally(() => {
+				weenieLookupPending = false;
+			});
 		if (seed === null) {
 			spawnValidationErrors = [
 				`No spawn seed found for WCID ${weenieClassId}.`,
@@ -2088,10 +2104,20 @@
 											handleSpawnTextInput("weenieClassId", event)}
 									/>
 								</label>
-								<button type="button" onclick={applySpawnWeenieSeed}>
-									Apply
+								<button
+									disabled={!weenieLookupCapability.available || weenieLookupPending}
+									type="button"
+									onclick={applySpawnWeenieSeed}
+								>
+									{weenieLookupPending ? "Resolving" : "Apply"}
 								</button>
 							</div>
+							{#if !weenieLookupCapability.available}
+								<p class="browser-display__spawn-status">
+									WCID lookup unavailable: {weenieLookupCapability.reason ??
+										"not configured"}
+								</p>
+							{/if}
 						</section>
 
 						<section class="browser-display__control-group">

@@ -45,6 +45,67 @@ pub struct DebugConfigDto {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WeenieLookupCapabilityDto {
+    pub available: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveWeenieSpawnSeedRequestDto {
+    pub weenie_class_id: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WeenieSpawnSeedSourceDidDto {
+    pub combat_table_id: Option<u32>,
+    pub clothing_base_id: Option<u32>,
+    pub default_eyes_texture_id: Option<u32>,
+    pub default_mouth_texture_id: Option<u32>,
+    pub default_nose_texture_id: Option<u32>,
+    pub eyes_palette_id: Option<u32>,
+    pub eyes_texture_id: Option<u32>,
+    pub hair_palette_id: Option<u32>,
+    pub head_object_id: Option<u32>,
+    pub icon_id: Option<u32>,
+    pub motion_table_id: Option<u32>,
+    pub mouth_texture_id: Option<u32>,
+    pub nose_texture_id: Option<u32>,
+    pub palette_base_id: Option<u32>,
+    pub physics_effect_table_id: Option<u32>,
+    pub setup_model_id: u32,
+    pub skin_palette_id: Option<u32>,
+    pub sound_table_id: Option<u32>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WeenieSpawnSeedSourceIntDto {
+    pub creature_type: Option<i32>,
+    pub gender: Option<i32>,
+    pub item_type: Option<i32>,
+    pub material_type: Option<i32>,
+    pub palette_template: Option<i32>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WeenieSpawnSeedDto {
+    pub weenie_class_id: u32,
+    pub class_name: String,
+    pub label: String,
+    pub long_description: Option<String>,
+    pub weenie_type: i32,
+    pub source_dids: WeenieSpawnSeedSourceDidDto,
+    pub source_ints: WeenieSpawnSeedSourceIntDto,
+    pub default_scale: Option<f64>,
+    pub shade: Option<f64>,
+    pub appearance: RuntimeAppearanceObjDescDto,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RuntimeAppearanceSubPaletteDto {
     pub sub_id: u32,
     pub offset: u32,

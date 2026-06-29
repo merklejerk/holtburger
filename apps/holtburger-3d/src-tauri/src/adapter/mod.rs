@@ -1,3 +1,4 @@
+pub mod ace_world_sql;
 pub mod binary;
 pub mod ids;
 pub mod json;

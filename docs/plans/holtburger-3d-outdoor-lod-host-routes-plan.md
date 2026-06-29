@@ -34,7 +34,7 @@ landblock/{id}/lod/{level}
 
 The route payload must be named independently from the existing full outdoor/env-cell payloads, for example `landblock-scene-lod`, so callers cannot accidentally treat it as the full current `landblock-outdoor` or `landblock-env-cells` bundle.
 
-Initial levels:
+Required levels:
 
 | Level | Emitted render content | Internal source context allowed |
 | --- | --- | --- |
@@ -42,11 +42,11 @@ Initial levels:
 | `1` | Level 0 plus building static members and building transition apertures. | LandblockInfo building facts and building source data. |
 | `2` | Level 1 plus explicit outdoor object layer. | LandblockInfo explicit object facts. |
 | `3` | Level 2 plus generated outdoor scenery layer after terrain, road, slope, object bounds, building occupancy, and object spacing filters. | Full outdoor scene inputs: terrain, LandblockInfo buildings/objects, region scene tables, scene files, and renderable source bounds. |
-| `4` | Level 3 plus self-contained landblock env-cell system layer. | Env-cell structures, portals, visibility, static seeds, env-cell source geometry, and any source facts needed to make the emitted env-cell layer independent of separately materialized frontend building layers. |
+| `4` | In outdoor context, level 3 plus self-contained landblock env-cell system layer. | Env-cell structures, portals, visibility, static seeds, env-cell source geometry, and any source facts needed to make the emitted env-cell layer independent of separately materialized frontend building layers. |
 
-In dungeon/interior contexts, levels below the env-cell LoD may emit no outdoor layers. An interior request can use LoD `4` to obtain env-cell output without implying terrain/building/detail renderer layers are retained.
+In dungeon/interior contexts, levels below the env-cell LoD may emit no outdoor layers. An interior request can use LoD `4` to obtain env-cell output without implying terrain, building, explicit-object, or generated-scenery renderer layers are retained.
 
-The exact level names and cut lines can change during implementation if evidence says another split is cleaner, but the final contract must be explicit and tested.
+The exact type names can change during implementation, but the level semantics are requirements unless new evidence leads to an explicit spec update. The final contract must be explicit and tested.
 
 ## In Scope
 
@@ -62,7 +62,8 @@ The exact level names and cut lines can change during implementation if evidence
 - Updating payload schemas, binary serialization, asset key parsing, resolver tests, and integration tests.
 - Removing frontend reliance on the broad `landblock-outdoor` payload for normal outdoor terrain/building/detail layers.
 - Removing frontend reliance on `landblock-env-cells` as a separate landblock source route.
-- Removing the old `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, and `landblock/{id}/topology` routes and dead dependents once normal frontend rendering uses landblock scene LoD routes.
+- Removing the old `landblock/{id}/outdoor` and `landblock/{id}/env-cells` routes and dead dependents once normal frontend rendering uses landblock scene LoD routes.
+- Removing the old `landblock/{id}/topology` route if the cleanup audit confirms no non-test consumer remains.
 
 ## Out Of Scope
 
@@ -175,8 +176,8 @@ The host asset pipeline must maintain a large LRU cache for prepared landblock s
 
 Requirements:
 
-- The cache capacity must be 256 normalized landblocks unless measurement proves another value is better.
-- The cache must store the highest prepared LoD for each cached landblock/context key.
+- The cache capacity must be 256 normalized landblock slots unless measurement proves another value is better.
+- Each cached landblock slot must store the highest prepared LoD for each compatible typed context/profile variant needed by that landblock.
 - Higher-LoD preparation must build on lower-LoD preparation already present in the cache.
 - A request for a lower or equal LoD must project from the cached highest prepared asset without rebuilding the landblock.
 - A request for a higher LoD must extend the cached prepared asset with only the missing higher layers where possible.
@@ -197,9 +198,9 @@ Minimum source LoD by requested output:
 | `outdoor-buildings` | `1` |
 | explicit outdoor object layer | `2` |
 | generated outdoor scenery layer | `3` |
-| `landblock-env-cells` | `4` |
+| landblock env-cell system layer | `4` |
 
-If terrain, buildings, generated detail, and env-cells are all needed for a landblock, the planned source work should request LoD `4` once and emit the full requested layer set. If only terrain is needed, it should request LoD `0` and emit only terrain. In dungeon/interior context, the source work can request LoD `4` and emit env-cell outputs while lower outdoor outputs are empty.
+If terrain, buildings, generated scenery, and env-cells are all needed for a landblock, the planned source work should request LoD `4` once and emit the full requested layer set. If only terrain is needed, it should request LoD `0` and emit only terrain. In dungeon/interior context, the source work can request LoD `4` and emit env-cell outputs while lower outdoor outputs are empty.
 
 The implementation must avoid implicit fallback behavior. Unsupported or mismatched levels must fail loudly.
 
@@ -228,14 +229,17 @@ type LayerOwnerState =
   | "resolving"
   | "baking"
   | "materialized"
+  | "empty"
   | "failed";
 ```
 
 The exact type name can change, but the state machine requirement is firm. Resolver recipes and bake outputs must carry the target layer owner key. Runtime must gate every commit on current owner demand before creating resources: if the owner no longer exists or no longer demands that layer, the output is dropped before materialization.
 
-Layer owner records should also be the primary in-flight dedupe mechanism. The runtime should not maintain separate durable work ownership just to answer whether a landblock layer is already requested, resolving, baking, or materialized. Transient job ids can exist for diagnostics and async correlation, but they must not become lifecycle ownership.
+Layer owner records should also be the primary in-flight dedupe mechanism. The runtime should not maintain separate durable work ownership just to answer whether a landblock layer is already requested, resolving, baking, materialized, empty, or failed. Transient job ids can exist for diagnostics and async correlation, but they must not become lifecycle ownership.
 
-Scene-interest readiness should be derived from the demanded layer owner records. The runtime may still emit a `scene-interest-settled` style event for UI and caller ergonomics, but readiness must not require a parallel work-id/revision tracking component. A scene interest is ready when every demanded layer owner is materialized, failed, or intentionally empty, and no demanded owner is resolving, baking, or waiting on materialization.
+Scene-interest readiness should be derived from the demanded layer owner records. The runtime may still emit a `scene-interest-settled` style event for UI and caller ergonomics, but readiness must not require a parallel work-id/revision tracking component. A scene interest is ready when every demanded layer owner is materialized, failed, or empty, and no demanded owner is resolving, baking, or waiting on materialization.
+
+Separate owner generations are not required by default. Late resolver or bake output should be judged by the current layer owner key and final owner-demand gate. Add generations only if implementation evidence proves that owner key plus demanded state cannot distinguish a stale output from a still-valid idempotent output.
 
 Eviction requirements:
 
@@ -446,7 +450,7 @@ Mitigation: update tests to use the minimal landblock scene LoD route for the be
 
 - `landblock/{id}/lod/{level}` is implemented and typed end to end.
 - Landblock source resolution is source-first and selects the minimum sufficient LoD from scene interest.
-- The host prepared asset pipeline caches the highest prepared LoD for up to 256 recently used landblocks and extends cached lower LoDs when higher LoDs are requested.
+- The host prepared asset pipeline caches prepared LoD state for up to 256 recently used normalized landblock slots and extends cached lower LoDs when higher LoDs are requested.
 - Scene ownership and eviction are landblock-layer granular.
 - LoD increases retain lower resident layers and add higher layers.
 - LoD decreases evict higher layers without rebuilding or recreating lower resident layers.

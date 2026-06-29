@@ -1,8 +1,15 @@
 import type {
 	AssetLookupRequestDto,
 	AssetLookupResponseDto,
+	ResolveWeenieSpawnSeedRequestDto,
+	WeenieLookupCapabilityDto,
+	WeenieSpawnSeedDto,
 } from "./contracts";
-import { assetLookupResponseDtoSchema } from "./contracts";
+import {
+	assetLookupResponseDtoSchema,
+	weenieLookupCapabilityDtoSchema,
+	weenieSpawnSeedDtoSchema,
+} from "./contracts";
 import { decodeBinaryAssetBatchEnvelope } from "./binary-asset-envelope";
 import type { ZodType } from "zod";
 
@@ -45,6 +52,25 @@ export async function lookupAsset(
 		throw new Error(`No lookup response returned for ${request.assetId}.`);
 	}
 	return response;
+}
+
+export async function getWeenieLookupCapability(): Promise<WeenieLookupCapabilityDto> {
+	requireTauriRuntime();
+	return invokeCommand(
+		"get_weenie_lookup_capability",
+		weenieLookupCapabilityDtoSchema,
+	);
+}
+
+export async function resolveWeenieSpawnSeed(
+	request: ResolveWeenieSpawnSeedRequestDto,
+): Promise<WeenieSpawnSeedDto | null> {
+	requireTauriRuntime();
+	return invokeCommand(
+		"resolve_weenie_spawn_seed",
+		weenieSpawnSeedDtoSchema.nullable(),
+		{ request },
+	);
 }
 
 async function lookupAssets(

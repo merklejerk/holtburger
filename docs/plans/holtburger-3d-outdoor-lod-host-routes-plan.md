@@ -1396,20 +1396,20 @@ Decisions and course corrections:
 
 ### Phase 9: Resteering Checkpoint - Lifecycle Cutover
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: validate the ownership cutover before deleting old routes and env-cell assembly scaffolding.
 
 Review checklist:
 
-- [ ] Confirm no parallel lifecycle truth remains in retained scopes, desired keys, durable work owners, or scene-interest readiness tracking.
-- [ ] Confirm lower retained layers survive LoD churn without re-materialization.
-- [ ] Confirm dynamic seed ownership and runtime dynamic no-residence behavior are covered.
-- [ ] Confirm `StaticCoordinator` `desiredKey` is still only transient active-work/bake-result bookkeeping; remove or rename it if it has become lifecycle ownership.
-- [ ] Confirm Phase 7F removed old-route resolvers from the normal browser static path; Phase 11 should be deleting compatibility surfaces, not changing behavior.
-- [ ] Run a vestigial-code audit for old routes, old payload kinds, old host asset keys, old renderer layer names, old lifecycle ownership, and stale tests before route deletion.
-- [ ] Identify any executable code path, schema, parser, resolver, baker, lifecycle store, diagnostic surface, or test fixture that could keep the old model alive.
-- [ ] Update Phase 10 and Phase 11 with discovered deletion targets.
+- [x] Confirm no parallel lifecycle truth remains in retained scopes, desired keys, durable work owners, or scene-interest readiness tracking.
+- [x] Confirm lower retained layers survive LoD churn without re-materialization.
+- [x] Confirm dynamic seed ownership and runtime dynamic no-residence behavior are covered.
+- [x] Confirm `StaticCoordinator` `desiredKey` is still only transient active-work/bake-result bookkeeping; remove or rename it if it has become lifecycle ownership.
+- [x] Confirm Phase 7F removed old-route resolvers from the normal browser static path; Phase 11 should be deleting compatibility surfaces, not changing behavior.
+- [x] Run a vestigial-code audit for old routes, old payload kinds, old host asset keys, old renderer layer names, old lifecycle ownership, and stale tests before route deletion.
+- [x] Identify any executable code path, schema, parser, resolver, baker, lifecycle store, diagnostic surface, or test fixture that could keep the old model alive.
+- [x] Update Phase 10 and Phase 11 with discovered deletion targets.
 
 Acceptance criteria:
 
@@ -1418,7 +1418,12 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Phase 8E proved retained scopes, durable work owners, source-scope dynamic retention, and scene-interest work-id readiness are gone from production dynamic/runtime/static paths.
+- `StaticCoordinator.desiredKey` remains transient active-work/bake-result bookkeeping only. It is not resident resource ownership, layer lifecycle ownership, dynamic retention, or scene-interest readiness state.
+- Normal browser source resolution remains on `landblock-scene-lod` source requests; old direct `landblock-outdoor` / `landblock-env-cells` prepared asset requests survive in old resolver classes, tests, route-preparation contracts, and compatibility helpers scheduled for Phase 11 deletion.
+- Phase 10 should focus on deleting `EnvCellSystemLayerAssemblyStore` and removing the runtime cross-layer merge for env-cell system publication. The old env-cell geometry attachment provider no longer performs direct host requests but remains named around the old env-cell payload and should be re-evaluated during Phase 10/11 cleanup.
+- Phase 11 deletion targets remain broad and executable: old route DTO schemas and preparation branches, old host asset key variants/parsers/formatters/tests, topology content route and helpers, old terrain/object/env-cell direct resolvers and tests, executable `outdoor-detail` static/renderer/runtime compatibility, and obsolete route fixtures.
+- Validation: `npm run test:ts -- src/lib/static/demand-planner.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts src/lib/dynamic/dynamic-placement-tracker.test.ts`; `npm run check`.
 
 ### Phase 10: Self-Contained LoD 4 Env-Cell Cutover
 

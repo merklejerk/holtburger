@@ -10,7 +10,7 @@ import type {
 	StaticSourceMappingRecord,
 	StaticSpatialRecord,
 	StaticResourceKey,
-	StaticScopeOwnerKey,
+	LayerOwnerKey,
 	TerrainStaticScopePayload,
 	StaticVisibilityRecord,
 } from "../static/contracts";
@@ -108,26 +108,20 @@ export class StaticSceneQuery {
 		this.#setOutdoorAnchorLandblockId(outdoorAnchorLandblockId);
 	}
 
-	retainScopes(scopes: readonly StaticScopeOwnerKey[]): void {
+	retainLayerOwners(layerOwners: readonly LayerOwnerKey[]): void {
 		const terrainLandblockIds = new Set(
-			scopes
-				.filter((scope) => scope.domain === "outdoor-terrain")
-				.map((scope) => scope.scope.landblockId),
+			layerOwners
+				.filter((owner) => owner.kind === "terrain")
+				.map((owner) => owner.landblockId),
 		);
 		const outdoorRootKeys = new Set(
-			scopes
-				.filter(
-					(
-						scope,
-					): scope is StaticScopeOwnerKey & {
-						readonly domain: OutdoorStaticObjectsScopePayload["domain"];
-					} =>
-						scope.domain === "outdoor-buildings" ||
-						scope.domain === "outdoor-detail",
-				)
-				.map((scope) =>
-					createOutdoorRootKey(scope.domain, scope.scope.landblockId),
-				),
+			layerOwners
+				.map((owner) => createOutdoorDomainRetentionRootKey(owner))
+				.filter((key): key is string => key !== null),
+		);
+		this.#envCellCommittedRecords.retainLayerOwners(
+			layerOwners.filter((owner) => owner.kind === "env-cell-system"),
+			this.#outdoorAnchorLandblockId,
 		);
 		for (const landblockId of this.#terrainBvhRootsByLandblockId.keys()) {
 			if (!terrainLandblockIds.has(landblockId)) {
@@ -144,10 +138,6 @@ export class StaticSceneQuery {
 				this.#outdoorSourceDiagnosticsByDomainAndLandblock.delete(key);
 			}
 		}
-		this.#envCellCommittedRecords.retainScopes(
-			scopes,
-			this.#outdoorAnchorLandblockId,
-		);
 		this.#rebuildLandblockGridIndex();
 	}
 
@@ -674,5 +664,17 @@ export class StaticSceneQuery {
 		for (const root of this.#envCellCommittedRecords.envCellRoots()) {
 			this.#landblockGridIndex.upsertEnvCellRoot(root);
 		}
+	}
+}
+
+function createOutdoorDomainRetentionRootKey(owner: LayerOwnerKey): string | null {
+	switch (owner.kind) {
+		case "outdoor-buildings":
+		case "outdoor-explicit-objects":
+		case "outdoor-generated-scenery":
+			return createOutdoorRootKey(owner.kind, owner.landblockId);
+		case "env-cell-system":
+		case "terrain":
+			return null;
 	}
 }

@@ -1149,7 +1149,7 @@ Decisions and course corrections:
 
 ### Phase 8C: Scene Query And Static Dynamic Retention
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: make scene-query retention and static-authored dynamic retention consume layer owners instead of retained scope/work keys.
 
@@ -1168,14 +1168,21 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Update `StaticRetentionReconciliation` to carry retained layer owners.
-- [ ] Update `ClientRuntime` retention calls.
-- [ ] Update `StaticSceneQuery` and `EnvCellCommittedRecordStore` retention APIs.
-- [ ] Update `DynamicEntityController` static seed retention and tests.
+- [x] Update `StaticRetentionReconciliation` to carry retained layer owners.
+- [x] Update `ClientRuntime` retention calls.
+- [x] Update `StaticSceneQuery` and `EnvCellCommittedRecordStore` retention APIs.
+- [x] Update `DynamicEntityController` static seed retention and tests.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Replaced `StaticDemandPlan.retainedScopes` and `StaticRetentionReconciliation.retainedScopes` with `retainedLayerOwners`.
+- Updated `planStaticDemand` to derive retained `LayerOwnerKey` values directly from scheduled work; source fanout target owner keys now use the same helper.
+- Replaced `StaticSceneQuery.retainScopes` with `retainLayerOwners` and updated outdoor/terrain/env-cell pruning to consume `LayerOwnerKey` values.
+- Replaced `EnvCellCommittedRecordStore.retainScopes` with `retainLayerOwners`; committed env-cell records now prune by stored layer owner ids rather than reconstructing scope/domain strings from records.
+- Replaced `DynamicEntityController.retainStaticScopes` with `retainLayerOwners`; static-authored dynamic retention now consumes owner ids directly.
+- Removed `retainScopes`, `retainStaticScopes`, and `retainedScopes` references from static/runtime/dynamic implementation and focused tests. `StaticScopeOwnerKey` remains only as a helper input shape for deriving layer owner keys, not as retention state.
+- Naming debt: dynamic presentation still uses `sourceScopeKey` field names, but the value is now the layer owner id. This should be renamed in Phase 8E unless Phase 8D removes the field first.
+- Validation: `npm run test:ts -- src/lib/static/demand-planner.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts`; `npm run check`.
 
 ### Phase 8D: Runtime Readiness And No-Residence Dynamics
 

@@ -14,11 +14,12 @@ import type {
 	StaticPortalInteriorRecord,
 	StaticPortalProjectionRecord,
 	StaticResourceKey,
-	StaticScopeOwnerKey,
+	LayerOwnerKey,
 	StaticSourceMappingRecord,
 	StaticSpatialRecord,
 	StaticVisibilityRecord,
 } from "../../static/contracts";
+import { createLayerOwnerKeyId } from "../../static/layer-owners";
 import { createOutdoorLandblockRootTranslation } from "../static-placement";
 import type { StaticSceneCommittedEnvCellRecords } from "./contracts";
 import { EnvCellPortalProjectionCache } from "./env-cell-portal-projections";
@@ -356,18 +357,20 @@ export class EnvCellCommittedRecordStore {
 		}
 	}
 
-	retainScopes(
-		scopes: readonly StaticScopeOwnerKey[],
+	retainLayerOwners(
+		layerOwners: readonly LayerOwnerKey[],
 		outdoorAnchorLandblockId: number | null,
 	): void {
-		this.#pruneCommittedRecordsByRetainedScopes(scopes);
+		this.#pruneCommittedRecordsByRetainedLayerOwners(layerOwners);
+		const retainedLandblockIds = new Set(
+			layerOwners
+				.filter((owner) => owner.kind === "env-cell-system")
+				.map((owner) => owner.landblockId),
+		);
 		for (const key of this.#envCellStaticBoundsOverridesByKey.keys()) {
 			const landblockId = parseEnvCellStaticObjectBoundsKeyLandblockId(key);
-			const retained = scopes.some(
-				(scope) =>
-					scope.domain === "landblock-env-cells" &&
-					scope.scope.landblockId === landblockId,
-			);
+			const retained =
+				landblockId !== null && retainedLandblockIds.has(landblockId);
 			if (landblockId !== null && !retained) {
 				this.#envCellStaticBoundsOverridesByKey.delete(key);
 			}
@@ -712,14 +715,10 @@ export class EnvCellCommittedRecordStore {
 		return graphEvidenceByEnvCellId;
 	}
 
-	#pruneCommittedRecordsByRetainedScopes(
-		scopes: readonly StaticScopeOwnerKey[],
+	#pruneCommittedRecordsByRetainedLayerOwners(
+		layerOwners: readonly LayerOwnerKey[],
 	): void {
-		const retainedScopeKeys = new Set(
-			scopes.map((scope) =>
-				createRetainedScopeKey(scope.domain, scope.scope.landblockId),
-			),
-		);
+		const retainedOwnerKeys = new Set(layerOwners.map(createLayerOwnerKeyId));
 		const affectedPortalLandblockIds = new Set<number>();
 		for (const recordsByKey of [
 			this.#spatialRecordsByKey,
@@ -729,14 +728,7 @@ export class EnvCellCommittedRecordStore {
 			this.#sourceMappingsByKey,
 		]) {
 			for (const [key, entry] of recordsByKey) {
-				if (
-					!retainedScopeKeys.has(
-						createRetainedScopeKey(
-							getCommittedRecordDomain(entry.record),
-							getCommittedRecordLandblockId(entry.record),
-						),
-					)
-				) {
+				if (!retainedOwnerKeys.has(entry.ownerKey)) {
 					if (
 						recordsByKey === this.#portalInteriorRecordsByKey ||
 						recordsByKey === this.#portalGraphsByKey
@@ -1078,13 +1070,6 @@ function createInverseEnvCellRenderMatrix(
 	localPlacement: StaticEnvCellSpatialRecord["localPlacement"],
 ): EnvCellLandblockBvhRuntimeItem["inverseCellRenderMatrix"] {
 	return invertMat4(buildAcPlacementMatrix(localPlacement, AC_UNIT_SCALE));
-}
-
-function createRetainedScopeKey(
-	domain: StaticDomain,
-	landblockId: number | null,
-): string {
-	return `${domain}:${landblockId ?? "none"}`;
 }
 
 function createStaticPeerOwnerKey(owner: {

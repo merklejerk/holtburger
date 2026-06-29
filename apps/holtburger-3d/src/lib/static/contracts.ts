@@ -112,7 +112,7 @@ export interface LayerOwnerState {
 }
 
 export interface StaticDemandPlan {
-	readonly retainedScopes: readonly StaticScopeOwnerKey[];
+	readonly retainedLayerOwners: readonly LayerOwnerKey[];
 	readonly sourceRequests: readonly StaticLandblockSceneLodSourceRequest[];
 	readonly work: readonly ScheduledStaticWork[];
 }
@@ -155,7 +155,7 @@ export interface StaticLandblockSceneLodSourceResolver {
 
 export interface StaticRetentionReconciliation {
 	readonly activeWork: readonly ScheduledStaticWork[];
-	readonly retainedScopes: readonly StaticScopeOwnerKey[];
+	readonly retainedLayerOwners: readonly LayerOwnerKey[];
 	readonly removedResources: readonly StaticResourceKey[];
 }
 

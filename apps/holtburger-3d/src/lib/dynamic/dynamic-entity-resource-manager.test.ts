@@ -280,7 +280,7 @@ describe("dynamic entity resource manager", () => {
 		await flushPromises();
 		expect(assetService.createSnapshot().committed[0]?.leaseCount).toBe(1);
 
-		controller.retainStaticScopes([]);
+		controller.retainLayerOwners([]);
 
 		expect(
 			assetService.createSnapshot().committed.map((entry) => entry.leaseCount),

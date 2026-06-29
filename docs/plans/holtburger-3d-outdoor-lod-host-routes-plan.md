@@ -418,32 +418,66 @@ Decisions and course corrections:
 - Recorded cutover debt for Phase 10: LoD `4` still wraps the existing env-cell bundle assembler internally. Later cutover must remove runtime dependence on direct `landblock-env-cells` host lookups and delete old env-cell assembly store paths after source-first scheduling is in place.
 - Validation run: `cargo test -p holtburger-content scene_lod_level_4_includes_env_cell_system_layer`; `cargo test -p holtburger-content scene_lod_lower_levels_do_not_include_env_cell_system_layer`; `cargo test -p holtburger-3d serialize_landblock_scene_lod_payload_emits_env_cell_system_layer`.
 
-### Phase 2D: Prepared LoD Cache
+### Phase 2D: Prepared LoD Cache Projection
 
-Status: pending.
+Status: completed on 2026-06-29.
 
-Goal: add the prepared source cache after source semantics are stable, with no extra key dimensions for requested output layers.
+Goal: add the prepared scene LoD cache after source semantics are stable, with no extra key dimensions for requested output layers.
 
 Deliverables:
 
 - Add a prepared LoD cache owned by `ContentAssetService` with 256 normalized landblock slots.
 - Store the highest prepared LoD per normalized landblock and compatible scene context only when context changes emitted source semantics.
-- Ensure higher-LoD preparation extends cached lower-LoD state where possible.
-- Ensure concurrent identical or compatible LoD requests dedupe through the existing `ContentAssetRuntime` in-flight request behavior plus the prepared LoD cache.
+- Ensure lower/equal LoD requests project from cached higher-LoD state.
+- Ensure identical concurrent requests dedupe through the existing `ContentAssetRuntime` in-flight request behavior while compatible lower/equal follow-up requests reuse the prepared LoD cache.
 
 Acceptance criteria:
 
 - Cache tests prove lower/equal requests project from cached higher state.
-- Cache tests prove higher requests extend lower cached state instead of recomputing lower source families.
-- Concurrency/reuse tests prove compatible requests do not duplicate source preparation.
+- Cache tests prove higher requests replace lower cached state, after which lower/equal requests project from the higher cached state.
+- Concurrency/reuse tests prove identical in-flight requests dedupe and compatible lower/equal follow-up requests do not duplicate source preparation.
 - Requested output layers are excluded from cache identity.
 
 Task checklist:
 
-- [ ] Add the `ContentAssetService` prepared LoD cache and cache reuse tests.
-- [ ] Add a concurrency/reuse test proving in-flight and prepared-cache behavior do not duplicate source preparation for compatible requests.
-- [ ] Confirm the cache key excludes requested output layers.
-- [ ] Record any cache eviction or invalidation debt discovered during implementation.
+- [x] Add the `ContentAssetService` prepared LoD cache and cache reuse tests.
+- [x] Add a concurrency/reuse test proving in-flight and prepared-cache behavior do not duplicate source preparation for identical requests and compatible lower/equal follow-up requests.
+- [x] Confirm the cache key excludes requested output layers.
+- [x] Record any cache eviction or invalidation debt discovered during implementation.
+
+Decisions and course corrections:
+
+- Added a 256-entry prepared LoD cache owned by `ContentAssetService`.
+- Cache identity is only normalized landblock id plus `LandblockSceneLodContext`. Requested output layers are not part of the key.
+- Cached assets retain the highest prepared LoD for a key. Lower/equal requests project from the cached higher asset instead of re-reading source records.
+- Higher requests replace lower cached state. They do not yet incrementally extend lower prepared state without recomputing lower source families.
+- Split the original "higher extends lower cached state" requirement into Phase 2E because it requires assembler-level partial preparation, not just service-level projection. Keeping it inside Phase 2D would either overfit the cache or create fake coverage.
+- Validation run: `cargo test -p holtburger-core landblock_scene_lod_cache_projects_lower_requests_from_cached_higher_lod`; `cargo test -p holtburger-core landblock_scene_lod_cache_replaces_lower_cached_lod_with_higher_lod`; `cargo test -p holtburger-core content_asset_runtime_dedupes_identical_landblock_scene_lod_requests`.
+
+### Phase 2E: Incremental Higher-LoD Extension
+
+Status: pending.
+
+Goal: teach higher LoD preparation to reuse already prepared lower source-family state instead of recomputing lower families.
+
+Deliverables:
+
+- Introduce an internal prepared source state that can hold terrain, building, explicit-object, generated-scenery, and env-cell-system preparation independently.
+- Change higher-LoD assembly to extend missing source-family state from the cached lower preparation where possible.
+- Keep final public `LandblockSceneLodAsset` projection unchanged.
+
+Acceptance criteria:
+
+- Cache tests prove a higher request after a lower cached request does not recompute lower source families.
+- The cache key remains normalized landblock id plus context only.
+- Final projected layer payloads remain identical to Phase 2B/2C output for the same requested LoD.
+
+Task checklist:
+
+- [ ] Add internal prepared source-state structs.
+- [ ] Teach the assembler/cache handoff to extend missing source families.
+- [ ] Add read-count or instrumentation tests proving higher-after-lower avoids lower-family recomputation.
+- [ ] Confirm no requested output-layer dimension enters cache identity.
 
 Decisions and course corrections:
 

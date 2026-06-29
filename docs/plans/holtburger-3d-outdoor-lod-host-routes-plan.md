@@ -1078,7 +1078,7 @@ Decisions and course corrections:
 
 ### Phase 8B3: Runtime Peer-Owner Readers
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: update runtime consumers so layer-owned durable records are the normal path while old work owners are not kept as an executable escape hatch.
 
@@ -1096,15 +1096,21 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Update scene-query committed-record owner keying.
-- [ ] Update runtime materialization filters and texture lookup helpers.
-- [ ] Update dynamic entity controller static-authored provenance and retention inputs.
-- [ ] Update resolver/test fakes that still model source-first requests as independent layer jobs.
-- [ ] Run focused runtime and dynamic tests.
+- [x] Update scene-query committed-record owner keying.
+- [x] Update runtime materialization filters and texture lookup helpers.
+- [x] Update dynamic entity controller static-authored provenance and retention inputs.
+- [x] Update resolver/test fakes that still model source-first requests as independent layer jobs.
+- [x] Run focused runtime and dynamic tests.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Updated env-cell committed record owner keys to prefer `layer-owner.ownerId`; the old work-owner reader remains as explicit compatibility until the Phase 8B4 audit removes or documents every survivor.
+- Updated runtime materialization filters to select durable spatial/source records by layer-owner domain and landblock id.
+- Updated static-authored dynamic source identity and texture-batch lookup to use layer owner ids. `DynamicEntityController.retainStaticScopes` still accepts the old scope-shaped API until Phase 8C, but it now translates those scopes to layer owner ids so static-authored dynamics are not immediately pruned after the peer-owner cutover.
+- Updated runtime and dynamic tests to create layer-owned durable seed/portal records. Work ids may still appear as transient bake-completion handles in tests, but no updated static-authored dynamic fixture uses work ownership as the durable record contract.
+- Updated `DeferredStaticResolver` so completing a synthetic source-layer request resolves the owning source request with all requested layer recipes. Later synthetic completions for the same resolved source are no-ops, matching source-first ownership instead of preserving per-layer resolver ownership.
+- Audit note for Phase 8B4: `StaticWorkPeerRecordOwner` still appears in static-scene-query/static-materializer/resource-manager tests and in committed-record compatibility readers. Those are now explicit audit targets rather than hidden normal-path dependencies.
+- Validation: `npm run test:ts -- src/lib/runtime/static-scene-query.test.ts src/lib/runtime/static-materializer.test.ts src/lib/runtime/client-runtime.test.ts src/lib/runtime/env-cell-system-layer-assembly.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts`; `npm run check`.
 
 ### Phase 8B4: Peer-Owner Cutover Audit
 

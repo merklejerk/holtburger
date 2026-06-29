@@ -1221,7 +1221,7 @@ function filterStaticBakeResultForWorks(
 		),
 		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds.filter(
 			(record) =>
-				isPeerRecordOwnedByCurrentWork(record.owner, {
+				isPeerRecordOwnedByRetainedWork(record.owner, {
 					drawUnitIds,
 					ownerIds,
 					workIds,
@@ -1234,35 +1234,35 @@ function filterStaticBakeResultForWorks(
 		),
 		staticPortalInteriorRecords: result.staticPortalInteriorRecords.filter(
 			(record) =>
-				isPeerRecordOwnedByCurrentWork(record.owner, {
+				isPeerRecordOwnedByRetainedWork(record.owner, {
 					drawUnitIds,
 					ownerIds,
 					workIds,
 				}),
 		),
 		staticPortalGraphs: result.staticPortalGraphs.filter((record) =>
-			isPeerRecordOwnedByCurrentWork(record.owner, {
+			isPeerRecordOwnedByRetainedWork(record.owner, {
 				drawUnitIds,
 				ownerIds,
 				workIds,
 			}),
 		),
 		staticSourceMappings: result.staticSourceMappings.filter((record) =>
-			isPeerRecordOwnedByCurrentWork(record.owner, {
+			isPeerRecordOwnedByRetainedWork(record.owner, {
 				drawUnitIds,
 				ownerIds,
 				workIds,
 			}),
 		),
 		staticSpatialRecords: result.staticSpatialRecords.filter((record) =>
-			isPeerRecordOwnedByCurrentWork(record.owner, {
+			isPeerRecordOwnedByRetainedWork(record.owner, {
 				drawUnitIds,
 				ownerIds,
 				workIds,
 			}),
 		),
 		staticVisibilityRecords: result.staticVisibilityRecords.filter((record) =>
-			isPeerRecordOwnedByCurrentWork(record.owner, {
+			isPeerRecordOwnedByRetainedWork(record.owner, {
 				drawUnitIds,
 				ownerIds,
 				workIds,
@@ -1279,7 +1279,7 @@ function filterStaticBakeResultForWorks(
 	};
 }
 
-function isPeerRecordOwnedByCurrentWork(
+function isPeerRecordOwnedByRetainedWork(
 	owner: StaticPeerRecordOwner,
 	retained: {
 		readonly drawUnitIds: ReadonlySet<string>;

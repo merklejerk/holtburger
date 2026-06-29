@@ -13,7 +13,7 @@ import type {
 	StaticObjectTextureRefFacts,
 	StaticResourceIdentity,
 	StaticScopeOwnerKey,
-	StaticWorkPeerRecordOwner,
+	StaticLayerPeerRecordOwner,
 	VisualTextureDomain,
 } from "../static/contracts";
 import type { StaticMaterialPlanningDomain } from "../static/objects/bake/static-object-material-planner";
@@ -189,7 +189,7 @@ export interface DynamicVisualMaterialSlotIdentity {
 type DynamicDiagnosticContext =
 	| {
 			readonly kind: "static-authored";
-			readonly owner: StaticWorkPeerRecordOwner;
+			readonly owner: StaticLayerPeerRecordOwner;
 			readonly sourceScopeKey: string;
 	  }
 	| {
@@ -201,7 +201,7 @@ type DynamicDiagnosticContext =
 type DynamicEntityProvenance =
 	| {
 			readonly kind: "static-authored-env-cell" | "static-authored-outdoor";
-			readonly owner: StaticWorkPeerRecordOwner;
+			readonly owner: StaticLayerPeerRecordOwner;
 			readonly sourceScopeKey: string;
 	  }
 	| {

@@ -56,7 +56,7 @@ import type {
 	StructuredInteriorGeometryStaticDrawUnit,
 	StaticAuthoredDynamicSeedRecord,
 	StaticDomain,
-	StaticWorkPeerRecordOwner,
+	StaticLayerPeerRecordOwner,
 	TerrainStaticScopePayload,
 	TerrainGeometryStaticDrawUnit,
 	TerrainMaterialFallbackReason,
@@ -877,10 +877,10 @@ describe("browser client runtime", () => {
 			staticSeedCount: 1,
 		});
 		expect(loadedDiagnosticsSnapshot.dynamic.records[0]).toMatchObject({
-			id: "static-authored-env-cell:landblock-env-cells:landblock:da55ffff:env-cell:da550100:object:building:env-cell-static-0:setup:020003e5",
+			id: "static-authored-env-cell:env-cell-system:0xda55ffff:env-cell:da550100:object:building:env-cell-static-0:setup:020003e5",
 			provenance: {
 				kind: "static-authored-env-cell",
-				sourceScopeKey: "landblock-env-cells:landblock:da55ffff",
+				sourceScopeKey: "env-cell-system:0xda55ffff",
 			},
 			renderability: {
 				reasons: [],
@@ -1152,7 +1152,7 @@ describe("browser client runtime", () => {
 			],
 			staticPortalGraphs: [
 				createEnvCellStaticPortalGraph(
-					createEnvCellWorkOwner("work-env-portals", 0xda55ffff),
+					createEnvCellLayerOwner(0xda55ffff),
 					portalInteriorRecord,
 				),
 			],
@@ -2463,7 +2463,7 @@ function createPortalInteriorRecord(options: {
 		})),
 		kind: "env-cell-portal-interior",
 		landblockId,
-		owner: createEnvCellWorkOwner("work-env-portals", landblockId),
+		owner: createEnvCellLayerOwner(landblockId),
 		portalLinks: options.portalLinks,
 	};
 }
@@ -2555,36 +2555,34 @@ function createBuildingTransitionPortalApertureResource(options: {
 	};
 }
 
-function createEnvCellWorkOwner(
-	workId: string,
+function createEnvCellLayerOwner(
 	landblockId: number,
-): StaticWorkPeerRecordOwner {
+): StaticLayerPeerRecordOwner {
 	return {
 		domain: "landblock-env-cells",
-		kind: "work",
-		scope: {
-			kind: "landblock",
+		key: {
+			kind: "env-cell-system",
 			landblockId,
 		},
-		scopeKey: `landblock:${landblockId.toString(16).padStart(8, "0")}`,
-		workId,
+		kind: "layer-owner",
+		ownerId: `env-cell-system:0x${landblockId.toString(16).padStart(8, "0")}`,
 	};
 }
 
-function createOutdoorWorkOwner(
-	workId: string,
+function createOutdoorLayerOwner(
 	landblockId: number,
 	domain: "outdoor-buildings" | "outdoor-detail" = "outdoor-buildings",
-): StaticWorkPeerRecordOwner {
+): StaticLayerPeerRecordOwner {
+	const keyKind =
+		domain === "outdoor-detail" ? "outdoor-generated-scenery" : domain;
 	return {
 		domain,
-		kind: "work",
-		scope: {
-			kind: "landblock",
+		key: {
+			kind: keyKind,
 			landblockId,
 		},
-		scopeKey: `landblock:${landblockId.toString(16).padStart(8, "0")}`,
-		workId,
+		kind: "layer-owner",
+		ownerId: `${keyKind}:0x${landblockId.toString(16).padStart(8, "0")}`,
 	};
 }
 
@@ -2593,7 +2591,7 @@ function createOutdoorDynamicSeedRecord(
 ): StaticAuthoredDynamicSeedRecord {
 	return {
 		kind: "outdoor-static-object-dynamic-seed",
-		owner: createOutdoorWorkOwner(workId, 0xda55ffff),
+		owner: createOutdoorLayerOwner(0xda55ffff),
 		seed: {
 			classificationReason: "setup-default-animation",
 			defaultAnimationId: 0x0300061b,
@@ -2630,7 +2628,7 @@ function createEnvCellStaticSeedRecord(
 		envCellId: 0xda550100,
 		kind: "env-cell-static-object-seed",
 		landblockId: 0xda55ffff,
-		owner: createEnvCellWorkOwner(workId, 0xda55ffff),
+		owner: createEnvCellLayerOwner(0xda55ffff),
 		seed: {
 			debug: { sourceAssetId: "setup-model/020003e5" },
 			identity: {
@@ -2656,7 +2654,7 @@ function createEnvCellDynamicSeedRecord(
 ): StaticAuthoredDynamicSeedRecord {
 	return {
 		kind: "env-cell-static-object-dynamic-seed",
-		owner: createEnvCellWorkOwner(workId, 0xda55ffff),
+		owner: createEnvCellLayerOwner(0xda55ffff),
 		seed: {
 			classificationReason: "setup-default-animation",
 			defaultAnimationId: 0x0300061b,

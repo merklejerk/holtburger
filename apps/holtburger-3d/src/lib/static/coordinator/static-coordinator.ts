@@ -88,7 +88,7 @@ export class StaticCoordinator {
 	readonly #activeWork = new Map<string, MutableScheduledStaticWorkStatus>();
 	readonly #pendingBatches = new Map<string, PendingStaticBakeBatch>();
 	readonly #residentDrawUnitIds = new Set<string>();
-	readonly #residentResourcesByDesiredKey = new Map<
+	readonly #residentResourcesByOwnerId = new Map<
 		string,
 		StaticResourceKey[]
 	>();
@@ -144,6 +144,9 @@ export class StaticCoordinator {
 		this.#revision += 1;
 		const demandPlan = planStaticDemand(demand, this.#revision);
 		const desiredKeys = new Set(demandPlan.work.map(createDesiredWorkKey));
+		const desiredOwnerIds = new Set(
+			demandPlan.work.map((work) => createLayerOwnerKeyIdForWork(work)),
+		);
 		const newWorkItems: ScheduledStaticWork[] = [];
 
 		for (const status of Array.from(this.#activeWork.values())) {
@@ -151,12 +154,12 @@ export class StaticCoordinator {
 				this.#activeWork.delete(status.workId);
 			}
 		}
-		const removedResources = this.#evictResidentResourcesExcept(desiredKeys);
+		const removedResources = this.#evictResidentResourcesExcept(desiredOwnerIds);
 		if (removedResources.length > 0) {
 			this.#emitEvictionCommitDelta({ removedResources });
 		}
-		this.#pruneMaterialCoverageByDesiredKeys(desiredKeys);
-		this.#pruneStaticObjectBakeDiagnosticsByDesiredKeys(desiredKeys);
+		this.#pruneMaterialCoverageByOwnerIds(desiredOwnerIds);
+		this.#pruneStaticObjectBakeDiagnosticsByOwnerIds(desiredOwnerIds);
 
 		for (const work of demandPlan.work) {
 			const desiredKey = createDesiredWorkKey(work);
@@ -170,6 +173,8 @@ export class StaticCoordinator {
 			this.#activeWork.set(work.workId, {
 				desiredKey,
 				domain: work.job.domain,
+				ownerId: createLayerOwnerKeyIdForWork(work),
+				ownerKey: createLayerOwnerKeyForWork(work),
 				workId: work.workId,
 				revision: work.revision,
 				scopeKey: describeStaticScopeKey(work.job.scope),
@@ -467,7 +472,9 @@ export class StaticCoordinator {
 		}
 		const bakeMs = nowMs() - bakeStartedAt;
 
-		const currentWorks = result.works.filter((work) => this.#isCurrent(work));
+		const currentWorks = result.works.filter(
+			(work) => this.#isCurrent(work) && this.#isWorkOwnerDemanded(work),
+		);
 		if (currentWorks.length !== result.works.length) {
 			this.#staleBakeResults += result.works.length - currentWorks.length;
 			result = filterStaticBakeResultForWorks(result, currentWorks);
@@ -506,8 +513,7 @@ export class StaticCoordinator {
 		},
 	): void {
 		const commitStartedAt = nowMs();
-		const resourcesByDesiredKey =
-			collectCommittedResourceKeysByDesiredKey(result);
+		const resourcesByOwnerId = collectCommittedResourceKeysByOwnerId(result);
 
 		for (const work of result.works) {
 			const status = this.#activeWork.get(work.workId);
@@ -517,10 +523,10 @@ export class StaticCoordinator {
 			status.status = "committed";
 			this.#committed += 1;
 		}
-		for (const [desiredKey, resources] of resourcesByDesiredKey) {
+		for (const [ownerId, resources] of resourcesByOwnerId) {
 			const residentResources =
-				this.#residentResourcesByDesiredKey.get(desiredKey) ?? [];
-			this.#residentResourcesByDesiredKey.set(desiredKey, [
+				this.#residentResourcesByOwnerId.get(ownerId) ?? [];
+			this.#residentResourcesByOwnerId.set(ownerId, [
 				...residentResources,
 				...resources,
 			]);
@@ -575,17 +581,17 @@ export class StaticCoordinator {
 	}
 
 	#evictResidentResourcesExcept(
-		desiredKeys: ReadonlySet<string>,
+		ownerIds: ReadonlySet<string>,
 	): readonly StaticResourceKey[] {
 		const removedResources: StaticResourceKey[] = [];
-		for (const [desiredKey, resources] of Array.from(
-			this.#residentResourcesByDesiredKey,
+		for (const [ownerId, resources] of Array.from(
+			this.#residentResourcesByOwnerId,
 		)) {
-			if (desiredKeys.has(desiredKey)) {
+			if (ownerIds.has(ownerId)) {
 				continue;
 			}
 			removedResources.push(...resources);
-			this.#residentResourcesByDesiredKey.delete(desiredKey);
+			this.#residentResourcesByOwnerId.delete(ownerId);
 		}
 
 		for (const resource of removedResources) {
@@ -631,30 +637,37 @@ export class StaticCoordinator {
 		return null;
 	}
 
-	#pruneMaterialCoverageByDesiredKeys(desiredKeys: ReadonlySet<string>): void {
+	#pruneMaterialCoverageByOwnerIds(ownerIds: ReadonlySet<string>): void {
 		for (const coverage of Array.from(
 			this.#latestMaterialCoverageByKey.values(),
 		)) {
-			const hasDesiredDomain = Array.from(desiredKeys).some((desiredKey) =>
-				desiredKey.endsWith(`:${coverage.domain}`),
-			);
-			if (!hasDesiredDomain) {
+			if (coverage.landblockId === null) {
+				if (!hasDemandedOwnerForDomain(ownerIds, coverage.domain)) {
+					this.#latestMaterialCoverageByKey.delete(coverage.coverageKey);
+				}
+				continue;
+			}
+			const ownerId = createLayerOwnerIdForDomainLandblock({
+				domain: coverage.domain,
+				landblockId: coverage.landblockId,
+			});
+			if (!ownerIds.has(ownerId)) {
 				this.#latestMaterialCoverageByKey.delete(coverage.coverageKey);
 			}
 		}
 	}
 
-	#pruneStaticObjectBakeDiagnosticsByDesiredKeys(
-		desiredKeys: ReadonlySet<string>,
+	#pruneStaticObjectBakeDiagnosticsByOwnerIds(
+		ownerIds: ReadonlySet<string>,
 	): void {
 		for (const diagnostics of Array.from(
 			this.#latestStaticObjectBakeDiagnosticsByKey.values(),
 		)) {
-			const desiredKey = createDesiredKeyForDrawUnit({
+			const ownerId = createLayerOwnerIdForDomainLandblock({
 				domain: diagnostics.domain,
 				landblockId: diagnostics.landblockId,
 			});
-			if (!desiredKeys.has(desiredKey)) {
+			if (!ownerIds.has(ownerId)) {
 				this.#latestStaticObjectBakeDiagnosticsByKey.delete(
 					createStaticObjectBakeDiagnosticsKey(diagnostics),
 				);
@@ -765,14 +778,10 @@ export class StaticCoordinator {
 	#createOwnerStates(): readonly LayerOwnerState[] {
 		return Array.from(this.#activeWork.values())
 			.map((status) => ({
-				key: createLayerOwnerKeyForStaticScope({
-					domain: status.work.job.domain,
-					scope: status.work.job.scope,
-					scopeKey: status.scopeKey,
-				}),
+				key: status.ownerKey,
 				lifecycle: createLayerOwnerLifecycle(
 					status,
-					this.#residentResourcesByDesiredKey,
+					this.#residentResourcesByOwnerId,
 				),
 				revision: status.revision,
 			}))
@@ -785,6 +794,10 @@ export class StaticCoordinator {
 
 	#isCurrent(work: ScheduledStaticWork): boolean {
 		return !this.#disposed && this.#activeWork.has(work.workId);
+	}
+
+	#isWorkOwnerDemanded(work: ScheduledStaticWork): boolean {
+		return this.#isLayerOwnerDemanded(createLayerOwnerKeyForWork(work));
 	}
 
 	#assertActive(): void {
@@ -816,15 +829,7 @@ export class StaticCoordinator {
 	#isLayerOwnerDemanded(ownerKey: LayerOwnerState["key"]): boolean {
 		const ownerId = createLayerOwnerKeyId(ownerKey);
 		for (const status of this.#activeWork.values()) {
-			if (
-				createLayerOwnerKeyId(
-					createLayerOwnerKeyForStaticScope({
-						domain: status.work.job.domain,
-						scope: status.work.job.scope,
-						scopeKey: status.scopeKey,
-					}),
-				) === ownerId
-			) {
+			if (status.ownerId === ownerId) {
 				return true;
 			}
 		}
@@ -836,6 +841,8 @@ type MutableScheduledStaticWorkStatus = {
 	-readonly [Key in keyof ScheduledStaticWorkStatus]: ScheduledStaticWorkStatus[Key];
 } & {
 	readonly desiredKey: string;
+	readonly ownerId: string;
+	readonly ownerKey: LayerOwnerState["key"];
 	readonly work: ScheduledStaticWork;
 };
 
@@ -1001,20 +1008,98 @@ function getDrawUnitDesiredKey(drawUnit: StaticDrawUnit): string {
 	);
 }
 
-function collectCommittedResourceKeysByDesiredKey(
+function getDrawUnitOwnerId(drawUnit: StaticDrawUnit): string {
+	if (
+		drawUnit.kind === "terrain-geometry" ||
+		drawUnit.kind === "static-object-geometry" ||
+		drawUnit.kind === "structured-interior-geometry"
+	) {
+		return createLayerOwnerIdForDomainLandblock({
+			domain: drawUnit.domain,
+			landblockId: drawUnit.landblockId,
+		});
+	}
+
+	throw new Error(
+		`Static coordinator cannot commit ownerless draw unit ${String((drawUnit as { drawUnitId?: unknown }).drawUnitId ?? "unknown")}.`,
+	);
+}
+
+function createLayerOwnerKeyForWork(
+	work: ScheduledStaticWork,
+): LayerOwnerState["key"] {
+	return createLayerOwnerKeyForStaticScope({
+		domain: work.job.domain,
+		scope: work.job.scope,
+		scopeKey: describeStaticScopeKey(work.job.scope),
+	});
+}
+
+function createLayerOwnerKeyIdForWork(work: ScheduledStaticWork): string {
+	return createLayerOwnerKeyId(createLayerOwnerKeyForWork(work));
+}
+
+function createLayerOwnerIdForDomainLandblock(input: {
+	readonly domain: StaticDomain;
+	readonly landblockId: number;
+}): string {
+	return createLayerOwnerKeyId(
+		createLayerOwnerKeyForStaticScope({
+			domain: input.domain,
+			scope: {
+				kind: "landblock",
+				landblockId: input.landblockId,
+			},
+			scopeKey: `landblock:${formatHex32(input.landblockId)}`,
+		}),
+	);
+}
+
+function hasDemandedOwnerForDomain(
+	ownerIds: ReadonlySet<string>,
+	domain: StaticDomain,
+): boolean {
+	const ownerKind = createLayerOwnerKindForDomain(domain);
+	for (const ownerId of ownerIds) {
+		if (ownerId.startsWith(`${ownerKind}:`)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function createLayerOwnerKindForDomain(
+	domain: StaticDomain,
+): LayerOwnerState["key"]["kind"] {
+	switch (domain) {
+		case "outdoor-terrain":
+			return "terrain";
+		case "outdoor-buildings":
+			return "outdoor-buildings";
+		case "outdoor-explicit-objects":
+			return "outdoor-explicit-objects";
+		case "outdoor-generated-scenery":
+		case "outdoor-detail":
+			return "outdoor-generated-scenery";
+		case "landblock-env-cells":
+			return "env-cell-system";
+	}
+}
+
+function collectCommittedResourceKeysByOwnerId(
 	result: StaticBakeBatchResult,
 ): Map<string, StaticResourceKey[]> {
-	const resourcesByDesiredKey = new Map<string, StaticResourceKey[]>();
+	const resourcesByOwnerId = new Map<string, StaticResourceKey[]>();
 	for (const drawUnit of result.drawUnits) {
-		addResourceKey(resourcesByDesiredKey, getDrawUnitDesiredKey(drawUnit), {
+		addResourceKey(resourcesByOwnerId, getDrawUnitOwnerId(drawUnit), {
 			drawUnitId: drawUnit.drawUnitId,
 			kind: "draw-unit",
 		});
 	}
 	for (const resource of result.portalApertureResources) {
 		addResourceKey(
-			resourcesByDesiredKey,
-			createDesiredKeyForDrawUnit({
+			resourcesByOwnerId,
+			createLayerOwnerIdForDomainLandblock({
 				domain: resource.sourceDomain,
 				landblockId: resource.landblockId,
 			}),
@@ -1043,8 +1128,8 @@ function collectCommittedResourceKeysByDesiredKey(
 			continue;
 		}
 		addResourceKey(
-			resourcesByDesiredKey,
-			createDesiredKeyForDrawUnit({
+			resourcesByOwnerId,
+			createLayerOwnerIdForDomainLandblock({
 				domain: owner.domain,
 				landblockId: owner.landblockId,
 			}),
@@ -1054,17 +1139,17 @@ function collectCommittedResourceKeysByDesiredKey(
 			},
 		);
 	}
-	return resourcesByDesiredKey;
+	return resourcesByOwnerId;
 }
 
 function addResourceKey(
-	resourcesByDesiredKey: Map<string, StaticResourceKey[]>,
-	desiredKey: string,
+	resourcesByOwnerId: Map<string, StaticResourceKey[]>,
+	ownerId: string,
 	resource: StaticResourceKey,
 ): void {
-	const resources = resourcesByDesiredKey.get(desiredKey) ?? [];
+	const resources = resourcesByOwnerId.get(ownerId) ?? [];
 	resources.push(resource);
-	resourcesByDesiredKey.set(desiredKey, resources);
+	resourcesByOwnerId.set(ownerId, resources);
 }
 
 function compareMaterialCoverageReports(
@@ -1195,7 +1280,7 @@ function toScheduledStaticWorkStatus(
 
 function createLayerOwnerLifecycle(
 	status: MutableScheduledStaticWorkStatus,
-	residentResourcesByDesiredKey: ReadonlyMap<string, readonly StaticResourceKey[]>,
+	residentResourcesByOwnerId: ReadonlyMap<string, readonly StaticResourceKey[]>,
 ): LayerOwnerLifecycle {
 	switch (status.status) {
 		case "requested":
@@ -1206,7 +1291,7 @@ function createLayerOwnerLifecycle(
 		case "baking":
 			return "baking";
 		case "committed":
-			return (residentResourcesByDesiredKey.get(status.desiredKey)?.length ?? 0) >
+			return (residentResourcesByOwnerId.get(status.ownerId)?.length ?? 0) >
 				0
 				? "materialized"
 				: "empty";

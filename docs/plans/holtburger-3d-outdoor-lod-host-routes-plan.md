@@ -971,7 +971,7 @@ Decisions and course corrections:
 
 ### Phase 8A: Coordinator Owner-Attached Residency
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: make `StaticCoordinator` attach resident resources and diagnostics to layer owners instead of desired work keys.
 
@@ -986,18 +986,25 @@ Acceptance criteria:
 
 - LoD decrease evicts upper layers without re-fetching, re-baking, or recreating retained lower layers.
 - Late resolver and bake outputs are dropped before resource creation when their target owner is gone or no longer demanded.
-- `StaticCoordinator` no longer groups resident resources by desired work key or filters durable peer records by current work id.
+- `StaticCoordinator` no longer groups resident resources by desired work key.
+- Durable peer-record work ownership remains explicitly reserved for Phase 8B.
 
 Task checklist:
 
-- [ ] Update `StaticCoordinator` resource residency to owner-attached resources.
-- [ ] Replace material coverage and diagnostics pruning by desired key.
-- [ ] Add owner-gated stale bake materialization tests.
-- [ ] Preserve existing active-work diagnostics while removing durable desired-key residency.
+- [x] Update `StaticCoordinator` resource residency to owner-attached resources.
+- [x] Replace material coverage and diagnostics pruning by desired key.
+- [x] Add owner-gated stale bake materialization tests.
+- [x] Preserve existing active-work diagnostics while removing durable desired-key residency.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Replaced resident resource grouping with owner-id grouping. `desiredKey` remains only as an active-work lookup bridge until later Phase 8 cleanup.
+- Owner states now read materialization from owner-keyed resident resources instead of desired-key buckets.
+- Material coverage and static object bake diagnostics are pruned by layer owner. Domain-level coverage with `landblockId: null` is retained only while that domain has at least one demanded owner.
+- Added a regression test proving material coverage for an evicted terrain owner is pruned while retained owner coverage survives.
+- Added a final post-bake owner-demand gate before commit. Peer-record filtering still uses work owners because `StaticPeerRecordOwner` is not layer-owned until Phase 8B.
+- Audit result: no `residentResourcesByDesiredKey`, `collectCommittedResourceKeysByDesiredKey`, `pruneMaterialCoverageByDesiredKeys`, or `pruneStaticObjectBakeDiagnosticsByDesiredKeys` references remain.
+- Validation: `npm run test:ts -- src/lib/static/coordinator/static-coordinator.test.ts`; `npm run check`.
 
 ### Phase 8B: Layer-Owned Peer Records
 

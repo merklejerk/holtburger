@@ -4988,7 +4988,7 @@ Risks and mitigations:
 
 ### Phase 12E: ACE Weenie Catalog Resolver Backing
 
-Status: pending.
+Status: complete.
 
 Steering:
 
@@ -5214,7 +5214,7 @@ Implementation notes:
 
 ### Phase 12E.1: Runtime Spawn Setup Default Animation Autopopulation
 
-Status: pending.
+Status: complete.
 
 Purpose:
 
@@ -5259,22 +5259,23 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Change runtime-facing dynamic animation state/summary contracts so `defaultAnimationId` can be
+- [x] Change runtime-facing dynamic animation state/summary contracts so `defaultAnimationId` can be
       absent for runtime spawns until setup-default resolution produces a concrete setup animation.
-- [ ] Add a setup-default animation resolver that consumes prepared setup model facts and returns a
+- [x] Add a setup-default animation resolver that consumes prepared setup model facts and returns a
       concrete animation id or a typed no-default result.
-- [ ] Route setup default animation ids through the existing `animation/0300....` asset lookup and
+- [x] Route setup default animation ids through the existing `animation/0300....` asset lookup and
       dynamic setup/animation readiness path.
-- [ ] Update browser spawn validation/request construction so `setup-default` represents this narrow
+- [x] Update browser spawn validation/request construction so `setup-default` represents this narrow
       setup-default-animation mode, while explicit and none remain explicit user choices.
-- [ ] Update WCID apply behavior to select `setup-default` after applying a setup id, leaving
+- [x] Update WCID apply behavior to select `setup-default` after applying a setup id, leaving
       no-default fallback to runtime resource resolution.
-- [ ] Replace runtime `setup-default-animation-unresolved` diagnostics with setup-default ready or
+- [x] Replace runtime `setup-default-animation-unresolved` diagnostics with setup-default ready or
       setup-default none/fallback diagnostics.
-- [ ] Add diagnostics that show selected animation source, selected animation id, setup model id, and
+- [x] Add diagnostics that show selected animation source, selected animation id, setup model id, and
       fallback reason where applicable.
-- [ ] Verify with focused TypeScript tests, Tauri/Rust resolver tests, `npm run check`, and
-      `npm run lint`.
+- [x] Verify with focused TypeScript tests, full TypeScript tests, `npm run check`, and
+      `npm run lint`. No Tauri/Rust resolver changes were needed because setup-model
+      `defaultAnimation` was already serialized in the setup-model payload.
 
 Implementation notes:
 
@@ -5292,6 +5293,19 @@ Implementation notes:
   typed no-animation state when absent. The dry run also found that `defaultAnimationId: 0` is a
   sentinel leak; this phase must change runtime-facing animation state/summaries to use `null` or
   typed no-animation states for unresolved/absent setup defaults.
+- 2026-06-29 implementation: Browser runtime spawns now default to `setup-default`, WCID apply
+  selects `setup-default`, and explicit `none` remains the user-facing no-animation override.
+  Runtime setup-default resolution now requests the setup-model first, validates the prepared
+  setup-model payload, then either routes the concrete `defaultAnimation` through the existing
+  `animation/0300....` readiness/playback path or emits
+  `setup-default-animation-missing` with `animation.status: "not-required"` and setup-pose visual
+  rendering. Runtime-facing dynamic animation summaries now carry `defaultAnimationId: null` until a
+  concrete setup default animation is proven, removing the old zero sentinel from runtime source
+  facts, resource keys, diagnostics, and summaries.
+- 2026-06-29 verification: Focused Vitest coverage for browser spawn form, dynamic resource manager,
+  dynamic controller, and client runtime passed; full `npm run test:ts`, `npm run check`, and
+  `npm run lint` passed. No Rust verification was necessary for this phase because the host
+  setup-model DTO already exposed `defaultAnimation`.
 
 ### Phase 12F: Host Presentation Projection Resteer
 

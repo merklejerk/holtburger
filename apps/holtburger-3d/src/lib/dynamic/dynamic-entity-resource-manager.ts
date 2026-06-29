@@ -33,8 +33,10 @@ import {
 import { resolveStaticObjectSourceClosure } from "../static/objects/static-object-source-closure";
 import {
 	animationPayloadDtoSchema,
+	setupModelPayloadDtoSchema,
 	type AnimationPayloadDto,
 	type GfxObjPayloadDto,
+	type SetupModelPayloadDto,
 } from "../host/contracts";
 import type {
 	DynamicEntityAnimationResource,
@@ -94,9 +96,10 @@ interface DynamicEntityVisualResourcesFailedChange {
 }
 
 interface TrackedDynamicEntityResources {
+	readonly animationResolution: "explicit" | "none" | "setup-default";
 	animationResource: DynamicEntityAnimationResource | null;
-	readonly animationHostKey?: HostAssetKey;
-	readonly animationResourceKey?: DynamicEntityResourceKey;
+	animationHostKey?: HostAssetKey;
+	animationResourceKey?: DynamicEntityResourceKey;
 	readonly generation: number;
 	readonly leases: PreparedAssetLease[];
 	readonly presentation: DynamicEntityPresentation;
@@ -165,10 +168,6 @@ export class DynamicEntityResourceManager {
 		this.releaseEntity(entityId);
 
 		const keys = createSetupAnimationResourceKeys(presentation.visualSource);
-		if (keys.kind === "setup-default-unresolved") {
-			reportUnresolvedSetupDefaultAnimation(entityId);
-			return;
-		}
 
 		const generation = this.#nextGeneration();
 		this.#trackedByEntityId.set(entityId, {
@@ -220,14 +219,90 @@ export class DynamicEntityResourceManager {
 		}
 
 		const failures = createSetupAnimationLoadFailures(tracked, results);
+		if (failures.length > 0) {
+			this.#emitSetupAnimationFailure(entityId, tracked, failures);
+			return;
+		}
+
+		const setupAsset = resolvePreparedAssetResult(results[0]);
+		if (setupAsset === null) {
+			this.#emitSetupAnimationFailure(entityId, tracked, [
+				{
+					message: "Prepared setup-model asset was expected after validation.",
+					resource: "setup-model",
+					resourceKey: tracked.setupResourceKey,
+				},
+			]);
+			return;
+		}
+
+		if (
+			tracked.animationResolution === "setup-default" &&
+			tracked.animationHostKey === undefined
+		) {
+			const setupPayload = resolveSetupModelPayload(setupAsset);
+			if (setupPayload === null) {
+				this.#emitSetupAnimationFailure(entityId, tracked, [
+					{
+						message:
+							"Prepared setup-model asset did not contain a setup-model payload.",
+						resource: "setup-model",
+						resourceKey: tracked.setupResourceKey,
+					},
+				]);
+				return;
+			}
+
+			if (setupPayload.defaultAnimation === null) {
+				tracked.leases.push(
+					this.#assetService.acquirePreparedAssetLease(tracked.setupHostKey),
+				);
+				this.#onResourcesChanged?.({
+					entityId,
+					kind: "setup-animation-ready",
+					resources: {
+						required: createDynamicRequiredResources(tracked),
+						setupAnimation: createResolvedSetupAnimationResourceState(tracked),
+						status: "setup-animation-ready",
+						visual: {
+							status: "pending",
+						},
+					},
+				});
+				void this.#requestVisualResources(entityId, generation, tracked);
+				return;
+			}
+
+			tracked.animationHostKey = createHostAssetKey(
+				"animation",
+				setupPayload.defaultAnimation,
+			);
+			tracked.animationResourceKey = {
+				id: setupPayload.defaultAnimation,
+				kind: "animation",
+			};
+			void this.#assetService
+				.requestPreparedAsset(tracked.animationHostKey)
+				.then(
+					(asset) => ({ status: "fulfilled" as const, value: asset }),
+					(reason: unknown) => ({ reason, status: "rejected" as const }),
+				)
+				.then((animationResult) => {
+					this.#completeSetupAnimationRequest(entityId, generation, [
+						{ status: "fulfilled", value: setupAsset },
+						animationResult,
+					]);
+				});
+			return;
+		}
+
 		const animationAsset =
-			failures.length === 0 && tracked.animationHostKey !== undefined
+			tracked.animationHostKey !== undefined
 				? resolveAnimationAssetResult(results[1])
 				: null;
 		const animationPayload =
 			animationAsset === null ? null : resolveAnimationPayload(animationAsset);
 		const payloadFailures =
-			failures.length === 0 &&
 			tracked.animationHostKey !== undefined &&
 			animationPayload === null
 				? [
@@ -240,7 +315,6 @@ export class DynamicEntityResourceManager {
 					]
 				: [];
 		const animationFailures =
-			failures.length === 0 &&
 			tracked.animationHostKey !== undefined &&
 			animationPayload !== null &&
 			animationPayload.frameCount === 0
@@ -252,30 +326,9 @@ export class DynamicEntityResourceManager {
 						},
 					]
 				: [];
-		const setupFailures = [
-			...failures,
-			...payloadFailures,
-			...animationFailures,
-		];
+		const setupFailures = [...payloadFailures, ...animationFailures];
 		if (setupFailures.length > 0) {
-			this.#onResourcesChanged?.({
-				entityId,
-				failures: setupFailures,
-				kind: "setup-animation-failed",
-				resources: {
-					required: createDynamicRequiredResources(tracked),
-					setupAnimation: {
-						animationKey: tracked.animationResourceKey,
-						failures: setupFailures,
-						setupModelKey: tracked.setupResourceKey,
-						status: "failed",
-					},
-					status: "failed",
-					visual: {
-						status: "blocked",
-					},
-				},
-			});
+			this.#emitSetupAnimationFailure(entityId, tracked, setupFailures);
 			return;
 		}
 
@@ -317,6 +370,31 @@ export class DynamicEntityResourceManager {
 			},
 		});
 		void this.#requestVisualResources(entityId, generation, tracked);
+	}
+
+	#emitSetupAnimationFailure(
+		entityId: DynamicEntityId,
+		tracked: TrackedDynamicEntityResources,
+		failures: readonly DynamicEntityResourceFailure[],
+	): void {
+		this.#onResourcesChanged?.({
+			entityId,
+			failures,
+			kind: "setup-animation-failed",
+			resources: {
+				required: createDynamicRequiredResources(tracked),
+				setupAnimation: {
+					animationKey: tracked.animationResourceKey,
+					failures,
+					setupModelKey: tracked.setupResourceKey,
+					status: "failed",
+				},
+				status: "failed",
+				visual: {
+					status: "blocked",
+				},
+			},
+		});
 	}
 
 	async #requestVisualResources(
@@ -520,6 +598,7 @@ export class DynamicEntityResourceManager {
 
 type SetupAnimationResourceKeys =
 	| {
+			readonly animationResolution: "explicit";
 			readonly kind: "explicit-animation";
 			readonly animationHostKey: HostAssetKey;
 			readonly animationResourceKey: DynamicEntityResourceKey;
@@ -527,12 +606,14 @@ type SetupAnimationResourceKeys =
 			readonly setupResourceKey: DynamicEntityResourceKey;
 	  }
 	| {
+			readonly animationResolution: "none";
 			readonly kind: "no-animation";
 			readonly setupHostKey: HostAssetKey;
 			readonly setupResourceKey: DynamicEntityResourceKey;
 	  }
 	| {
-			readonly kind: "setup-default-unresolved";
+			readonly animationResolution: "setup-default";
+			readonly kind: "setup-default";
 			readonly setupHostKey: HostAssetKey;
 			readonly setupResourceKey: DynamicEntityResourceKey;
 	  };
@@ -550,13 +631,15 @@ function createSetupAnimationResourceKeys(
 	};
 	if (visualSource.animationSelection.kind === "setup-default") {
 		return {
-			kind: "setup-default-unresolved",
+			animationResolution: "setup-default",
+			kind: "setup-default",
 			setupHostKey,
 			setupResourceKey,
 		};
 	}
 	if (visualSource.animationSelection.kind === "none") {
 		return {
+			animationResolution: "none",
 			kind: "no-animation",
 			setupHostKey,
 			setupResourceKey,
@@ -564,6 +647,7 @@ function createSetupAnimationResourceKeys(
 	}
 
 	return {
+		animationResolution: "explicit",
 		animationHostKey: createHostAssetKey(
 			"animation",
 			visualSource.animationSelection.animationId,
@@ -678,14 +762,6 @@ function createDynamicMaterialPlanningDomain(
 	return presentation.policy.materialPlanningDomain;
 }
 
-function reportUnresolvedSetupDefaultAnimation(
-	entityId: DynamicEntityId,
-): void {
-	console.warn(
-		`[holtburger-3d][dynamic-resources] ${entityId} requested setup-default animation, but setup-default animation evidence is not available yet. Runtime resource tracking requires an explicit animation id.`,
-	);
-}
-
 function reportPendingRuntimeMaterialPlanning(
 	entityId: DynamicEntityId,
 	reason: DynamicPendingMaterialPlanningReason,
@@ -721,7 +797,10 @@ function createResolvedSetupAnimationResourceState(
 > {
 	if (tracked.animationHostKey === undefined) {
 		return {
-			reason: "animation-not-selected",
+			reason:
+				tracked.animationResolution === "setup-default"
+					? "setup-default-animation-missing"
+					: "animation-not-selected",
 			setupModelKey: tracked.setupResourceKey,
 			status: "not-required",
 		};
@@ -749,6 +828,12 @@ function requireAnimationResourceKey(
 function resolveAnimationAssetResult(
 	result: PromiseSettledResult<unknown> | undefined,
 ): PreparedAsset | null {
+	return resolvePreparedAssetResult(result);
+}
+
+function resolvePreparedAssetResult(
+	result: PromiseSettledResult<unknown> | undefined,
+): PreparedAsset | null {
 	if (result?.status !== "fulfilled") {
 		return null;
 	}
@@ -759,6 +844,12 @@ function resolveAnimationPayload(
 	asset: PreparedAsset,
 ): AnimationPayloadDto | null {
 	return isAnimationPayload(asset.payload) ? asset.payload : null;
+}
+
+function resolveSetupModelPayload(
+	asset: PreparedAsset,
+): SetupModelPayloadDto | null {
+	return isSetupModelPayload(asset.payload) ? asset.payload : null;
 }
 
 function isPreparedAsset(value: unknown): value is PreparedAsset {
@@ -775,6 +866,10 @@ function isPreparedAsset(value: unknown): value is PreparedAsset {
 
 function isAnimationPayload(value: unknown): value is AnimationPayloadDto {
 	return animationPayloadDtoSchema.safeParse(value).success;
+}
+
+function isSetupModelPayload(value: unknown): value is SetupModelPayloadDto {
+	return setupModelPayloadDtoSchema.safeParse(value).success;
 }
 
 function reportAnimationResourceWarnings(

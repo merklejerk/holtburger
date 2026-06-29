@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { HostBackedAssetService } from "../assets/asset-service";
 import type { HostAssetKey, PreparedAsset } from "../assets/contracts";
 import type {
@@ -542,37 +542,40 @@ describe("dynamic entity resource manager", () => {
 		).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0]);
 	});
 
-	it("does not expose or request animation zero for runtime setup-default spawns", async () => {
-		const host = new ResolvingRuntimeHost();
+	it("falls back to setup pose when runtime setup-default has no setup default animation", async () => {
+		const host = new ResolvingRuntimeHost({ setupDefaultAnimation: null });
 		const assetService = new HostBackedAssetService({ host });
 		const controller = createController(assetService);
-		const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-		try {
-			const runtimeId = controller.createRuntimeSpawn({
-				baseLocalPlacement: createPlacement(),
-				setupModelId: 0x020003e5,
-				sourceResidence: {
-					kind: "outdoor-landblock",
-					landblockId: 0xda55ffff,
-				},
-			});
-			await flushPromises();
+		const runtimeId = controller.createRuntimeSpawn({
+			baseLocalPlacement: createPlacement(),
+			setupModelId: 0x020003e5,
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+		});
+		await flushPromises();
 
-			expect(host.lookupCountByKey).toEqual(new Map());
-			const setupAnimation =
-				controller.queryDynamicEntitySummary(runtimeId)?.resources
-					.setupAnimation;
-			expect(setupAnimation).toMatchObject({
-				pendingReason: "setup-default-animation-unresolved",
-				setupModelKey: { id: 0x020003e5, kind: "setup-model" },
-				status: "pending",
-			});
-			expect(
-				setupAnimation !== undefined && "animationKey" in setupAnimation,
-			).toBe(false);
-		} finally {
-			warn.mockRestore();
-		}
+		expect(host.lookupCountByKey.get("setup-model:020003e5")).toBe(1);
+		expect(host.lookupCountByKey.has("animation:00000000")).toBe(false);
+		expect(host.lookupCountByKey.has("animation:0300061b")).toBe(false);
+		expect(controller.queryDynamicEntitySummary(runtimeId)).toMatchObject({
+			animation: {
+				defaultAnimationId: null,
+				playback: {
+					reason: "setup-default-animation-missing",
+					status: "not-required",
+				},
+				status: "not-required",
+			},
+			resources: {
+				setupAnimation: {
+					reason: "setup-default-animation-missing",
+					setupModelKey: { id: 0x020003e5, kind: "setup-model" },
+					status: "not-required",
+				},
+			},
+		});
 	});
 });
 
@@ -599,6 +602,7 @@ interface ResolvingRuntimeHostOptions {
 	readonly indexedMaterial?: boolean;
 	readonly mixedMaterialPart?: boolean;
 	readonly setupAppearanceOverrideSubPalettes?: SetupAppearancePayloadDto["subPalettes"];
+	readonly setupDefaultAnimation?: number | null;
 }
 
 class ResolvingRuntimeHost implements RuntimeHost {
@@ -607,6 +611,7 @@ class ResolvingRuntimeHost implements RuntimeHost {
 	readonly #indexedMaterial: boolean;
 	readonly #mixedMaterialPart: boolean;
 	readonly #setupAppearanceOverrideSubPalettes: SetupAppearancePayloadDto["subPalettes"];
+	readonly #setupDefaultAnimation: number | null;
 
 	constructor(options: ResolvingRuntimeHostOptions = {}) {
 		this.#failKeys = options.failKeys ?? new Set();
@@ -614,6 +619,10 @@ class ResolvingRuntimeHost implements RuntimeHost {
 		this.#mixedMaterialPart = options.mixedMaterialPart ?? false;
 		this.#setupAppearanceOverrideSubPalettes =
 			options.setupAppearanceOverrideSubPalettes ?? [];
+		this.#setupDefaultAnimation =
+			options.setupDefaultAnimation === undefined
+				? 0x0300061b
+				: options.setupDefaultAnimation;
 	}
 
 	lookupAsset(key: HostAssetKey, revision: number): Promise<PreparedAsset> {
@@ -630,6 +639,7 @@ class ResolvingRuntimeHost implements RuntimeHost {
 			payload: createPayload(key, {
 				indexedMaterial: this.#indexedMaterial,
 				mixedMaterialPart: this.#mixedMaterialPart,
+				setupDefaultAnimation: this.#setupDefaultAnimation,
 				setupAppearanceOverrideSubPalettes:
 					this.#setupAppearanceOverrideSubPalettes,
 			}),
@@ -652,6 +662,7 @@ function createPayload(
 	options: {
 		readonly indexedMaterial: boolean;
 		readonly mixedMaterialPart: boolean;
+		readonly setupDefaultAnimation: number | null;
 		readonly setupAppearanceOverrideSubPalettes: SetupAppearancePayloadDto["subPalettes"];
 	},
 ): unknown {
@@ -666,7 +677,7 @@ function createPayload(
 		case "animation":
 			return createAnimationPayload();
 		case "setup-model":
-			return createSetupModelPayload();
+			return createSetupModelPayload(options.setupDefaultAnimation);
 		case "setup-appearance":
 			return createSetupAppearancePayload({
 				mixedMaterialPart: options.mixedMaterialPart,
@@ -694,11 +705,16 @@ function createPayload(
 	}
 }
 
-function createSetupModelPayload(): SetupModelPayloadDto {
+function createSetupModelPayload(
+	defaultAnimation: number | null = 0x0300061b,
+): SetupModelPayloadDto {
 	return {
+		collisionWitness: { cylSphereCount: 0, sphereCount: 0 },
 		connectionPoints: [],
-		defaultAnimation: 0x0300061b,
+		defaultAnimation,
+		defaultMotionTable: null,
 		defaultScript: null,
+		defaultScriptTable: null,
 		defaultSoundTable: null,
 		dependencies: { gfxObjAssetIds: ["gfx-obj/01000020"] },
 		flags: null,

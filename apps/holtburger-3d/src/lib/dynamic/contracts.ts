@@ -259,7 +259,7 @@ export type DynamicEntitySourceFacts =
 	| StaticAuthoredDynamicEntitySourceFacts;
 
 export interface DynamicEntityAnimationState {
-	readonly defaultAnimationId: number;
+	readonly defaultAnimationId: number | null;
 	readonly playback: DynamicEntityAnimationPlaybackState;
 	readonly status: DynamicEntityAnimationStatus;
 }
@@ -270,13 +270,17 @@ type DynamicEntityAnimationStatus =
 	| "pending-resource"
 	| "ready";
 
+type DynamicEntityAnimationNotRequiredReason =
+	| "animation-not-selected"
+	| "setup-default-animation-missing";
+
 export type DynamicEntityAnimationPlaybackState =
 	| {
 			readonly status: "pending-resource";
 	  }
 	| {
 			/** No animation was selected; renderers should use the setup/default pose. */
-			readonly reason: "animation-not-selected";
+			readonly reason: DynamicEntityAnimationNotRequiredReason;
 			readonly status: "not-required";
 	  }
 	| {
@@ -421,16 +425,16 @@ export type DynamicEntitySetupAnimationResourceState =
 			readonly status: "pending";
 	  }
 	| {
-			/** No animation was selected; visual resources may still render in setup/default pose. */
-			readonly reason: "animation-not-selected";
-			readonly setupModelKey: DynamicEntityResourceKey;
-			readonly status: "not-required";
-	  }
-	| {
-			/** Setup-default animation has not been resolved to a real animation asset id. */
-			readonly pendingReason: "setup-default-animation-unresolved";
+			/** Setup-default animation is being resolved from the prepared setup model. */
+			readonly pendingReason: "setup-default-animation-resolving";
 			readonly setupModelKey: DynamicEntityResourceKey;
 			readonly status: "pending";
+	  }
+	| {
+			/** No animation was selected; visual resources may still render in setup/default pose. */
+			readonly reason: DynamicEntityAnimationNotRequiredReason;
+			readonly setupModelKey: DynamicEntityResourceKey;
+			readonly status: "not-required";
 	  }
 	| {
 			readonly animation: DynamicEntityAnimationResource;
@@ -572,7 +576,7 @@ export interface DynamicEntitySummaryDto {
 }
 
 interface DynamicEntityAnimationSummaryDto {
-	readonly defaultAnimationId: number;
+	readonly defaultAnimationId: number | null;
 	readonly playback: DynamicEntityAnimationPlaybackSummaryDto;
 	readonly status: DynamicEntityAnimationStatus;
 }
@@ -583,7 +587,7 @@ export type DynamicEntityAnimationPlaybackSummaryDto =
 	  }
 	| {
 			/** No animation was selected; renderers should use the setup/default pose. */
-			readonly reason: "animation-not-selected";
+			readonly reason: DynamicEntityAnimationNotRequiredReason;
 			readonly status: "not-required";
 	  }
 	| {
@@ -637,12 +641,12 @@ export type DynamicEntitySetupAnimationResourceSummaryDto =
 			readonly status: "pending";
 	  }
 	| {
-			readonly pendingReason: "setup-default-animation-unresolved";
+			readonly pendingReason: "setup-default-animation-resolving";
 			readonly setupModelKey: DynamicEntityResourceKey;
 			readonly status: "pending";
 	  }
 	| {
-			readonly reason: "animation-not-selected";
+			readonly reason: DynamicEntityAnimationNotRequiredReason;
 			readonly setupModelKey: DynamicEntityResourceKey;
 			readonly status: "not-required";
 	  }

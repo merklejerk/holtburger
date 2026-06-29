@@ -4049,9 +4049,12 @@ function createDynamicSetOmegaAnimationPayload(): AnimationPayloadDto {
 function createDynamicSetupModelPayload(key: HostAssetKey) {
 	const setupModelId = Number.parseInt(key.id, 16);
 	return {
+		collisionWitness: { cylSphereCount: 0, sphereCount: 0 },
 		connectionPoints: [],
 		defaultAnimation: 0x0300061b,
+		defaultMotionTable: null,
 		defaultScript: null,
+		defaultScriptTable: null,
 		defaultSoundTable: null,
 		dependencies: { gfxObjAssetIds: ["gfx-obj/01000020"] },
 		flags: null,

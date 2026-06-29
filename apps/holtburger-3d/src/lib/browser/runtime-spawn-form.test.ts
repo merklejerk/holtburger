@@ -38,7 +38,7 @@ describe("browser runtime spawn form", () => {
 				weenieClassId: null,
 			},
 			request: {
-				animationSelection: { kind: "none" },
+				animationSelection: { kind: "setup-default" },
 				baseLocalPlacement: {
 					origin: { x: 1.5, y: 2.5, z: 3.5 },
 					orientation: {
@@ -66,6 +66,20 @@ describe("browser runtime spawn form", () => {
 		);
 	});
 
+	it("keeps explicit none as a no-animation override", () => {
+		expect(
+			validateBrowserSpawnForm({
+				...createDefaultBrowserSpawnFormState(),
+				animationMode: "none",
+			}),
+		).toMatchObject({
+			kind: "accepted",
+			request: {
+				animationSelection: { kind: "none" },
+			},
+		});
+	});
+
 	it("applies WCID seed facts to the editable form without creating a request", () => {
 		const seededForm = applyWeenieSpawnSeedToForm(
 			{
@@ -82,6 +96,7 @@ describe("browser runtime spawn form", () => {
 		);
 
 		expect(seededForm).toMatchObject({
+			animationMode: "setup-default",
 			label: FIRST_RUNTIME_SPAWN_FIXTURE.label,
 			setupModelId: "0x02000001",
 			weenieClassId: "1",

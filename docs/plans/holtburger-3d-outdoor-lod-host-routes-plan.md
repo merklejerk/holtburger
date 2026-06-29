@@ -1,10 +1,10 @@
-# Holtburger 3D Landblock Scene LoD Requirements
+# Holtburger 3D Landblock Scene LoD Implementation Plan
 
 ## Purpose
 
-Define the requirements for replacing broad per-layer landblock static asset requests with a source-first landblock scene LoD asset pipeline that supports layer-granular ownership, stable scene retention, and low-churn LoD changes.
+Replace broad per-layer landblock static asset requests with a source-first landblock scene LoD asset pipeline that supports layer-granular ownership, stable scene retention, and low-churn LoD changes.
 
-This document is intentionally a requirements/specification document, not an implementation phase plan. Implementation sequencing should be derived after the lifecycle and ownership model is settled.
+Status: draft implementation plan, converted from the validated requirements/specification on 2026-06-29. The phase order is intended to keep the project buildable while cutting over decisively; if implementation evidence invalidates a phase boundary, update this document before continuing.
 
 ## Context And Boundaries
 
@@ -210,6 +210,416 @@ Validated current facts:
 - `ContentDecodeCache` is an LRU for decoded source records. It is not the prepared landblock scene LoD cache required by this spec.
 - `StaticOutdoorSceneAssembler::assemble_from_loaded` currently derives explicit objects, buildings, and generated scenery together. Terrain-only or building-only LoD assembly therefore needs new gating in the shared source assembly path, not just projection from the existing full outdoor asset.
 
+## Phased Implementation
+
+Each phase should leave the repo in a buildable state. If a phase discovers that the current code shape makes a later phase cheaper or riskier than expected, update the affected future phase before implementing around the surprise.
+
+### Phase 0: Contract Worksheet And Naming Lock
+
+Status: pending.
+
+Goal: settle the names and type boundaries before code starts spreading temporary shapes.
+
+Deliverables:
+
+- Add Rust and TypeScript TODO-level contract notes or test fixtures that pin the chosen names for LoD levels, layer names, domain names, and payload layer discriminants.
+- Decide final names for the new explicit-object and generated-scenery static domains/layers.
+- Decide final names for Rust request/asset types, expected to be close to `LandblockSceneLodLevel`, `LandblockSceneLodRequest`, and `LandblockSceneLodAsset`.
+- Add a short progress entry under this phase when the naming cut is complete.
+
+Acceptance criteria:
+
+- The plan contains the final domain/layer/type names before Phase 1 starts.
+- No implementation code depends on placeholder names that are expected to be renamed later.
+
+Task checklist:
+
+- [ ] Choose final LoD level type names in Rust and TypeScript.
+- [ ] Choose final static domains for LoD `2` explicit objects and LoD `3` generated scenery.
+- [ ] Choose final layer DTO discriminants for `landblock-scene-lod`.
+- [ ] Record any naming concessions in this phase.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 1: Rust Route And Payload Skeleton
+
+Status: pending.
+
+Goal: introduce the new route family end to end without moving frontend rendering to it yet.
+
+Deliverables:
+
+- `crates/holtburger-core/src/content_assets.rs`
+  - Add a typed `ContentAssetRequest` variant for `landblock/{id}/lod/{level}`.
+  - Add a typed `ContentAsset` variant for the scene LoD asset.
+- `crates/holtburger-content/src/landblock_scene_assets.rs`
+  - Add the scene LoD asset/request structs and a skeleton assembler path.
+  - Add level validation and normalized landblock id handling.
+- `apps/holtburger-3d/src-tauri/src/adapter/ids.rs`
+  - Parse `landblock/{id}/lod/{level}` and reject malformed ids/unsupported levels.
+- `apps/holtburger-3d/src-tauri/src/adapter/json.rs`
+  - Add JSON serialization for the skeleton payload shape.
+- `apps/holtburger-3d/src-tauri/src/adapter/binary.rs`
+  - Route binary host responses for the new request variant.
+
+Acceptance criteria:
+
+- Rust tests prove route parsing accepts levels `0` through `4` and rejects invalid levels.
+- The new request can return a structurally valid empty/skeleton `landblock-scene-lod` payload.
+- Existing `landblock-outdoor`, `landblock-env-cells`, and topology behavior remains unchanged during this phase.
+
+Task checklist:
+
+- [ ] Add Rust LoD level type with comments pinning emitted families.
+- [ ] Add `ContentAssetRequest` and `ContentAsset` variants.
+- [ ] Add Tauri route parsing and binary response routing.
+- [ ] Add skeleton JSON serializer.
+- [ ] Add focused route/parser tests.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 2: Source Assembly Gating And Prepared LoD Cache
+
+Status: pending.
+
+Goal: build real content-side LoD preparation without calling the full current outdoor/env-cell assemblers and filtering afterward.
+
+Deliverables:
+
+- Refactor the outdoor source assembly path so explicit objects, buildings, generated scenery, and source bounds can be gated by requested LoD.
+- Implement terrain, building, explicit-object, generated-scenery, and env-cell projections in the scene LoD asset.
+- Add a host/content prepared LoD cache with 256 normalized landblock slots.
+- Store the highest prepared LoD per normalized landblock and compatible scene context only when context changes emitted source semantics.
+- Ensure higher-LoD preparation extends cached lower-LoD state where possible.
+
+Acceptance criteria:
+
+- Level `0` does not derive outdoor static source bounds.
+- Level `1` does not derive explicit/generated object bounds.
+- Level `2` does not run generated scenery derivation.
+- Level `3` preserves current generated scenery identities/placements relative to `landblock-outdoor`.
+- Level `4` preserves current env-cell structure, portals, visibility, static seeds, and geometry facts.
+- Cache tests prove lower/equal requests project from cached higher state and higher requests extend lower state.
+
+Task checklist:
+
+- [ ] Split or parameterize `StaticOutdoorSceneAssembler` so family derivation is explicit.
+- [ ] Add content tests for level-specific gating.
+- [ ] Add generated scenery parity tests against the current full route.
+- [ ] Add env-cell preservation tests for LoD `4`.
+- [ ] Add the prepared LoD cache and cache reuse tests.
+- [ ] Confirm the cache key excludes requested output layers.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 3: Frontend Host Contract And Asset Key Support
+
+Status: pending.
+
+Goal: make the browser app understand `landblock-scene-lod` as a first-class prepared asset while keeping existing render scheduling intact.
+
+Deliverables:
+
+- `apps/holtburger-3d/src/lib/host/contracts.ts`
+  - Add Zod contracts for structural `landblock-scene-lod` payloads.
+  - Represent emitted layers with discriminated layer records, not `includes` booleans.
+- `apps/holtburger-3d/src/lib/assets/contracts.ts`
+  - Add the new host asset key kind.
+- `apps/holtburger-3d/src/lib/assets/keys.ts`
+  - Add format/parse round-trip support for `landblock/{id}/lod/{level}`.
+- `apps/holtburger-3d/src/lib/assets/preparation/route-payloads.ts`
+  - Add route-to-schema preparation for `landblock-scene-lod`.
+- `apps/holtburger-3d/src/lib/host/tauri.ts`
+  - Recognize the new route for binary lookup if the payload needs binary envelope support.
+
+Acceptance criteria:
+
+- TypeScript tests prove route/key round-tripping for all supported levels.
+- Payload parsing rejects duplicate layer records, impossible layers for declared source LoD/context, malformed layers, and wrong `kind`.
+- Existing frontend render paths still use old routes until source-first scheduling lands.
+
+Task checklist:
+
+- [ ] Add TS source LoD and layer DTO types.
+- [ ] Add Zod contracts for all layer records.
+- [ ] Add host asset key formatting/parsing tests.
+- [ ] Add route payload preparation tests.
+- [ ] Confirm topology remains untyped and scheduled for deletion, not revived as a first-class frontend asset.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 4: Resteering Checkpoint - Contract And Source Shape
+
+Status: pending.
+
+Goal: pause after the host/content/frontend contract exists and verify the remaining frontend cutover still matches reality.
+
+Review checklist:
+
+- [ ] Confirm the LoD route does not hide full-route CPU work behind a smaller payload.
+- [ ] Confirm the prepared LoD cache key stayed minimal.
+- [ ] Confirm `landblock-scene-lod` layer records are enough for all planned frontend recipes.
+- [ ] Reassess whether env-cell LoD `4` is self-contained enough to remove `EnvCellSystemLayerAssemblyStore`.
+- [ ] Update Phase 5 through Phase 9 if new evidence changes the cutover path.
+
+Acceptance criteria:
+
+- The plan is updated with any course corrections before frontend lifecycle work begins.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 5: Static Domain Split And Layer Owner Foundation
+
+Status: pending.
+
+Goal: split lifecycle identity before changing source scheduling so old work can migrate to new owners without source-first complexity landing at the same time.
+
+Deliverables:
+
+- Replace `outdoor-detail` with separate explicit-object and generated-scenery domains/layers across static contracts, renderer layer contracts, texture residency, diagnostics, and selection.
+- Add typed landblock layer owner keys and owner states.
+- Introduce owner records as the dedupe and lifecycle authority for desired, resolving, baking, materialized, empty, and failed layers.
+- Keep existing old-route resolvers temporarily, but make their work target layer owners.
+
+Acceptance criteria:
+
+- LoD `2` explicit-object and LoD `3` generated-scenery work have separate retained scopes, resource ownership, diagnostics, and renderer layer identities.
+- Existing object baking can still share implementation where useful, but public domain/layer identity is distinct.
+- Tests prove LoD increase/decrease decisions can be represented as layer owner changes.
+
+Task checklist:
+
+- [ ] Update `StaticDomain`, `ManualStaticDomain`, renderer layer kinds, texture domains, and material planning domains.
+- [ ] Split `outdoor-detail` tests and fixtures into explicit-object/generated-scenery cases.
+- [ ] Add `LayerOwnerKey` and `LayerOwnerState` types.
+- [ ] Add owner-state reconciliation tests for retain/add/evict cases.
+- [ ] Keep old route loading behind the new owners until Phase 6.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 6: Source-First Resolver Fanout
+
+Status: pending.
+
+Goal: replace one resolver job per renderer layer with one source request per landblock and requested layer set.
+
+Deliverables:
+
+- Change scene-interest planning so it computes desired layer owners per landblock and selects one minimum source LoD.
+- Replace single-domain resolver jobs with source-first jobs that carry normalized landblock id, selected source LoD, scene context, requested output layers, and target owner keys.
+- Update the resolver worker API so one source request may return multiple layer recipes.
+- Route layer recipes into existing domain-oriented bake queues while preserving owner keys.
+- Ensure each source request loads `landblock/{id}/lod/{sourceLod}` exactly once.
+
+Acceptance criteria:
+
+- Terrain-only interest requests LoD `0`.
+- Terrain/buildings/detail/env-cell interest requests LoD `4` once for that landblock.
+- Resolver fanout can emit multiple layer recipes from one source result.
+- Runtime drops unwanted recipes before bake enqueue if the target owner is no longer demanded.
+
+Task checklist:
+
+- [ ] Update `planStaticDemand` or replace it with source-first planning.
+- [ ] Update static resolver protocol/client/worker handler for multi-recipe output.
+- [ ] Add source-first resolver tests for minimum LoD selection.
+- [ ] Add worker tests proving one host route load per source request.
+- [ ] Preserve bake batching by emitted domain/layer.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 7: Layer-Owned Commit, Eviction, And Readiness
+
+Status: pending.
+
+Goal: make layer owners the durable lifecycle authority and demote work ids to transient diagnostics.
+
+Deliverables:
+
+- Attach draw units, portal resources, material coverage, texture leases, static-scene-query records, diagnostics, and dynamic seeds to layer owner records.
+- Replace resident resource grouping by desired key with owner-attached resources/leases.
+- Replace stale resolver/bake filtering by `workId` with final owner-demand gates before enqueue and before materialization.
+- Replace scene-interest readiness accounting with demanded layer owner state checks.
+- Update static-authored dynamic retention to use layer owners instead of `sourceScopeKey`.
+- Add explicit no-residence/unrendered state for runtime-authored dynamics when their render residence is evicted.
+
+Acceptance criteria:
+
+- LoD decrease evicts upper layers without re-fetching, re-baking, or recreating retained lower layers.
+- Late resolver and bake outputs are dropped before resource creation when their target owner is gone or no longer demanded.
+- Static-authored dynamic seeds are pruned with their owning layer.
+- Runtime-authored dynamics survive static layer eviction and become diagnosable no-residence records.
+- `scene-interest-settled` readiness is derived from owner states, not active work ids/revisions.
+
+Task checklist:
+
+- [ ] Replace retained-scope plumbing with layer owner records.
+- [ ] Update `StaticCoordinator` resource residency to owner-attached resources.
+- [ ] Update `StaticSceneQuery` retention APIs.
+- [ ] Update `DynamicEntityController` static seed retention.
+- [ ] Add no-residence runtime dynamic state and diagnostics.
+- [ ] Add owner-gated stale output tests.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 8: Resteering Checkpoint - Lifecycle Cutover
+
+Status: pending.
+
+Goal: validate the ownership cutover before deleting old routes and env-cell assembly scaffolding.
+
+Review checklist:
+
+- [ ] Confirm no parallel lifecycle truth remains in retained scopes, desired keys, durable work owners, or scene-interest readiness tracking.
+- [ ] Confirm lower retained layers survive LoD churn without re-materialization.
+- [ ] Confirm dynamic seed ownership and runtime dynamic no-residence behavior are covered.
+- [ ] Run a vestigial-code audit for old routes, old payload kinds, old host asset keys, old renderer layer names, old lifecycle ownership, and stale tests before route deletion.
+- [ ] Identify any executable code path, schema, parser, resolver, baker, lifecycle store, diagnostic surface, or test fixture that could keep the old model alive.
+- [ ] Update Phase 9 and Phase 10 with discovered deletion targets.
+
+Acceptance criteria:
+
+- The plan has an updated deletion target list before old route deletion begins.
+- Every discovered vestigial code path is either deleted in Phase 9/10 or explicitly moved earlier because it blocks a clean cutover.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 9: Self-Contained LoD 4 Env-Cell Cutover
+
+Status: pending.
+
+Goal: remove runtime dependence on separately materialized building layers and direct `landblock-env-cells` host lookups for env-cell system output.
+
+Deliverables:
+
+- Make LoD `4` source output include all facts needed by env-cell bake attachments and env-cell system publication.
+- Replace `LandblockEnvCellGeometryAttachmentProvider` direct `landblock-env-cells` requests with LoD `4` source data.
+- Delete `EnvCellSystemLayerAssemblyStore`.
+- Ensure env-cell system layers publish from one self-contained layer recipe.
+
+Acceptance criteria:
+
+- Env-cell bake/materialization does not request `landblock-env-cells`.
+- Env-cell system publication does not wait on separately materialized `outdoor-buildings`.
+- No runtime cross-layer merge store remains for env-cell system publication.
+- Outdoor LoD `4` contains level `3` output plus env-cell system output.
+- Interior LoD `4` can emit env-cell output with lower outdoor layers absent or empty.
+
+Task checklist:
+
+- [ ] Move env-cell geometry attachment facts into LoD `4` source/layer data.
+- [ ] Replace attachment provider host lookups.
+- [ ] Replace runtime cross-layer merge with self-contained env-cell layer publication.
+- [ ] Add tests for outdoor and interior LoD `4`.
+- [ ] Add tests proving building-layer materialization is not required for env-cell publication.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 10: Old Route And Compatibility Cleanup
+
+Status: pending.
+
+Goal: remove old broad routes, helper surfaces, and compatibility ballast after normal rendering uses `landblock-scene-lod`.
+
+Deliverables:
+
+- Remove normal frontend reliance on `landblock-outdoor`.
+- Remove normal frontend reliance on `landblock-env-cells`.
+- Remove `landblock/{id}/topology` route support, helpers, serializers, and tests.
+- Remove `landblock/{id}/outdoor` and `landblock/{id}/env-cells` route support, helpers, serializers, and tests.
+- Remove old route-facing `ContentAssetRequest` and `ContentAsset` variants for `LandblockOutdoor`, `LandblockTopology`, and `LandblockEnvCells`.
+- Remove TypeScript host asset key variants, formatters, parsers, schemas, route payload preparation, and binary lookup detection for old landblock outdoor/env-cell/topology assets.
+- Remove frontend resolvers, bakers, attachment providers, and asset views that consume `LandblockOutdoorPayloadDto` or `LandblockEnvCellsPayloadDto` as route payloads.
+- Remove `outdoor-detail` as a renderer/static domain and replace it with the split explicit-object and generated-scenery domains everywhere.
+- Remove retained-scope, desired-key, durable work-owner, active-work-id, and source-scope lifecycle paths after layer owners become authoritative.
+- Remove route-specific diagnostics, snapshots, UI counters, and test helpers that mention the old route/domain names unless they describe an intentionally retained internal source fact.
+- Delete obsolete resolver fixture fields, compatibility helpers, and hollow tests.
+- Remove temporary route/source counters or promote them to existing-style diagnostics only if useful.
+
+Acceptance criteria:
+
+- Static frontend rendering does not request old broad routes.
+- Topology route parsing/serialization is gone from production code.
+- Old outdoor/env-cell route parsing/serialization is gone from production code.
+- The old route-facing host payload schemas are gone from frontend contracts.
+- No executable code path can request or prepare `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, or `landblock/{id}/topology`.
+- No test remains solely to preserve old route behavior, old payload kinds, old host asset key kinds, or the unsplit `outdoor-detail` domain.
+- No compatibility tests exist solely to prove removed behavior still exists.
+- TypeScript tests, lint, Rust tests, and clippy pass for touched areas.
+
+Task checklist:
+
+- [ ] Audit production route references after Phase 9.
+- [ ] Delete topology route implementation and frontend helpers/tests.
+- [ ] Delete old outdoor/env-cell route implementations and frontend helpers/tests.
+- [ ] Delete old `ContentAssetRequest` and `ContentAsset` variants or rename surviving internal source structs so they are not route-facing compatibility surfaces.
+- [ ] Delete old frontend host asset key kinds, DTO schemas, route payload preparation, and binary lookup branches.
+- [ ] Delete old env-cell resolver/attachment/store paths that request or merge `landblock-env-cells`.
+- [ ] Delete old `outdoor-detail` layer/domain naming and diagnostics after explicit/generated layers replace it.
+- [ ] Delete retained-scope, desired-key, active-work-id, and source-scope ownership paths after layer owners replace them.
+- [ ] Run zero-reference searches for old route and lifecycle names; classify any surviving source vocabulary in this plan.
+- [ ] Delete obsolete fixtures and compatibility helpers.
+- [ ] Run required validation commands.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 11: Final Verification And Documentation Cleanup
+
+Status: pending.
+
+Goal: prove the full cutover and leave the implementation plan accurate for posterity.
+
+Deliverables:
+
+- Run the full relevant Rust and TypeScript validation suite for touched areas.
+- Run and record zero-reference audits for old route-facing names, old lifecycle abstractions, and old unsplit renderer/domain names.
+- Update this plan with completed phase notes, course corrections, and any deferred debt.
+- Update architecture docs only where the implementation changes durable boundaries.
+
+Acceptance criteria:
+
+- Definition of Done is satisfied.
+- No old broad route remains.
+- No old host asset key, payload schema, resolver, attachment provider, scheduler branch, lifecycle owner, diagnostic counter, or test fixture keeps the removed route/domain model executable.
+- Any surviving mention of old terminology is documented as non-executable historical prose or internal source vocabulary, not a compatibility path.
+- No old-ownership cleanup target remains without an explicit follow-up owner.
+- The plan accurately records final behavior and any concessions.
+
+Task checklist:
+
+- [ ] Run Rust tests for `holtburger-content`, `holtburger-core`, and Tauri adapter changes.
+- [ ] Run app TypeScript tests and lint for `apps/holtburger-3d`.
+- [ ] Run clippy for touched Rust crates.
+- [ ] Run zero-reference audits for `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, `landblock/{id}/topology`, `landblock-outdoor`, `landblock-env-cells`, route-facing `LandblockOutdoor`, route-facing `LandblockEnvCells`, route-facing `LandblockTopology`, `outdoor-detail`, `EnvCellSystemLayerAssemblyStore`, `LandblockEnvCellGeometryAttachmentProvider`, retained scopes, desired keys, active work ids, and source scope keys.
+- [ ] Update completed status/progress notes.
+- [ ] Record any remaining cleanup in a dedicated follow-up plan only if it is intentionally deferred.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
 ## Source Assembly Requirements
 
 Content-side route implementation must keep one shared landblock-scene understanding path, but it must not blindly build the full current outdoor/env-cell payloads and filter the result afterward:
@@ -386,7 +796,7 @@ Targets:
 - Separate dynamic lifetime ownership from render residence. Static layer owners should prune static-authored dynamic seeds; runtime-authored dynamics should use explicit runtime lifetime and clear only residence on layer eviction.
 - Replace any retention path that treats runtime-authored dynamics as static-scope-owned. Static scope/layer retention may affect render residence, but not runtime dynamic lifetime.
 - Replace runtime resource-to-layer reverse lookup as the primary lifetime authority with direct layer owner resource/lease lists. Reverse indexes may remain as acceleration structures, but not as ownership truth.
-- Delete or substantially shrink `EnvCellSystemLayerAssemblyStore` by making LoD `4` emit a self-contained env-cell layer recipe.
+- Delete `EnvCellSystemLayerAssemblyStore` by making LoD `4` emit a self-contained env-cell layer recipe.
 - Collapse the current single `outdoor-detail` domain into separate explicit-object and generated-scenery domains/layers aligned with LoD `2` and LoD `3`.
 - Keep texture and prepared-asset lease counting, but make layer owners the lease holders for static output instead of draw-unit/work strings wherever possible.
 - Keep renderer layer payloads and resource IDs as renderer implementation details, but make them subordinate to layer owner records.
@@ -435,9 +845,14 @@ After the source-first LoD route is the normal frontend path:
 - Normal frontend static rendering must no longer request full `landblock-outdoor` for landblock scene work.
 - Normal frontend static rendering must no longer request separate `landblock-env-cells` for landblock scene work.
 - The env-cell geometry attachment provider must no longer directly request `landblock-env-cells`.
-- The old `landblock/{id}/outdoor` and `landblock/{id}/env-cells` routes must be removed unless a concrete non-frontend owner is documented.
+- The old `landblock/{id}/outdoor` and `landblock/{id}/env-cells` routes must be removed.
 - The old `landblock/{id}/topology` route must be removed after LoD `4` owns the env-cell/topology facts needed by frontend rendering.
+- Route-facing request variants, response variants, host asset key kinds, DTO schemas, route payload preparation, binary lookup branches, route helpers, and serializers for the old routes must be removed.
+- The unsplit `outdoor-detail` renderer/static domain must be removed after explicit-object and generated-scenery domains replace it.
+- Retained-scope, desired-key, durable work-owner, active-work-id, and source-scope lifecycle paths must be removed or demoted to transient diagnostics after layer owners become authoritative.
+- `EnvCellSystemLayerAssemblyStore` and direct `LandblockEnvCellGeometryAttachmentProvider` host lookups must be removed after LoD `4` carries the required env-cell facts.
 - Obsolete resolver fixture fields and compatibility helpers must be deleted rather than retained as dead compatibility ballast.
+- Tests must be rewritten around the new LoD route and layer-owner model or deleted; compatibility tests that keep old route/domain behavior executable are not allowed.
 
 ## Verification Requirements
 
@@ -457,6 +872,7 @@ Tests and diagnostics must prove:
 - One source request can emit multiple layer payloads.
 - Resolver recipes and bake outputs carry layer owner keys rather than durable work ownership.
 - Runtime drops resolver and bake output before resource creation when the target owner no longer exists or no longer demands that layer.
+- Zero-reference audits prove removed route-facing strings, host asset key kinds, DTO schemas, old resolver/attachment/store paths, unsplit `outdoor-detail` domain names, and old lifecycle ownership paths are absent from executable code and tests.
 - Scene-interest readiness/settled events are derived from demanded layer owner states rather than separate work-id/revision accounting.
 - LoD increase retains lower resident layers and adds only newly desired layers.
 - LoD decrease evicts upper layers without re-fetching, rebuilding, or recreating lower resident layers.
@@ -524,6 +940,10 @@ Mitigation: model route levels as landblock scene source levels, not browser UI 
 
 Mitigation: update tests to use the minimal landblock scene LoD route for the behavior under test. Delete hollow compatibility tests rather than preserving old fixtures for nostalgia.
 
+### Risk: Vestigial Code Survives As Non-Route Helpers
+
+Mitigation: Phase 8 must identify old executable surfaces before deletion starts, Phase 10 must delete route-facing helpers and stale lifecycle paths, and Phase 11 must run zero-reference audits. Any surviving old terminology must be classified as non-executable historical prose or internal source vocabulary in this plan.
+
 ## Definition Of Done
 
 - `landblock/{id}/lod/{level}` is implemented and typed end to end.
@@ -541,10 +961,12 @@ Mitigation: update tests to use the minimal landblock scene LoD route for the be
 - Generated scenery in level `3` preserves current terrain, road, slope, occupancy, overlap, bounds, and identity semantics.
 - Env-cell output in level `4` preserves current env-cell structure, visibility, portal, static seed, and geometry semantics while being self-contained from the frontend/runtime layer perspective.
 - Normal frontend static rendering no longer depends on full `landblock-outdoor` or separate `landblock-env-cells`.
-- `EnvCellSystemLayerAssemblyStore` is deleted or substantially reduced because LoD `4` no longer needs runtime assembly with a materialized building layer.
+- `EnvCellSystemLayerAssemblyStore` is deleted because LoD `4` no longer needs runtime assembly with a materialized building layer.
 - Scene-interest readiness is derived from demanded layer owner states instead of active work IDs, work revisions, and pending materialization revision sets.
 - Current retained-scope, desired-key, durable work-owner, dynamic source-scope, readiness-tracking, and resource-to-layer lifetime abstractions are replaced or demoted under layer owner records.
-- Old broad routes and stale helpers, including `landblock/{id}/topology`, are deleted after the LoD route owns the required frontend facts.
+- Old broad routes and stale helpers, including `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, and `landblock/{id}/topology`, are deleted after the LoD route owns the required facts.
+- Old route-facing asset variants, host asset key kinds, DTO schemas, resolver/baker/attachment paths, binary lookup branches, diagnostics, stale tests, and unsplit `outdoor-detail` public domain/layer names are deleted.
+- Zero-reference audits prove removed route/domain/lifecycle names do not survive in executable code or tests except where explicitly documented as internal source vocabulary.
 - Tests prove route parsing, payload validation, source LoD selection, multi-output resolver fanout, layer-owned eviction, prepared-cache reuse, generated scenery preservation, and env-cell preservation.
 
 ## Resolved Decisions

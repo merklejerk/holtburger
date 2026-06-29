@@ -4681,7 +4681,7 @@ Verification:
 
 ### Phase 12C.3: First Runtime Spawn Rendering
 
-Status: completed on 2026-06-29.
+Status: completed on 2026-06-29; env-cell residence correction completed on 2026-06-29.
 
 Purpose:
 
@@ -4832,7 +4832,7 @@ Risks and mitigations:
 
 ### Phase 12D: Browser Spawn Form And Fixture Resolver
 
-Status: pending, next execution phase after Phase 12C.3.
+Status: completed on 2026-06-29.
 
 Steering:
 
@@ -4845,6 +4845,10 @@ Steering:
   additional controls inside the already crowded debug panel. Keep the tab dense and operational:
   active runtime spawn list, WCID seed row, editable spawn form, validation/status, and explicit
   remove/select actions.
+- 2026-06-29 correction: Do not gate env-cell runtime spawns out of the browser form. The runtime
+  already supports env-cell dynamic residence and indexing; making env-cell residence unsupported in
+  the UX adds more complexity than a residence selector and validation for the existing
+  `{ kind: "env-cell", landblockId, envCellId }` shape.
 
 Purpose:
 
@@ -4900,22 +4904,68 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add a dedicated app-local browser-mode `Spawns` tab and runtime command plumbing for
+- [x] Add a dedicated app-local browser-mode `Spawns` tab and runtime command plumbing for
       creating/removing one or more setup-backed dynamic entities.
-- [ ] Add an active runtime spawn list in the `Spawns` tab with remove and select/inspect affordances
+- [x] Add an active runtime spawn list in the `Spawns` tab with remove and select/inspect affordances
       where existing runtime selection plumbing makes that practical.
-- [ ] Add the weenie spawn seed resolver interface and first backend, keeping resolver output
+- [x] Add the weenie spawn seed resolver interface and first backend, keeping resolver output
       independent from spawn support decisions.
-- [ ] Add the initial fake in-memory WCID resolver backend seeded with WCID `1` / setup
+- [x] Add the initial fake in-memory WCID resolver backend seeded with WCID `1` / setup
       `0x02000001`.
-- [ ] Wire WCID seed application into the same editable spawn form used for manual spawns, with no
+- [x] Wire WCID seed application into the same editable spawn form used for manual spawns, with no
       direct spawn shortcut.
-- [ ] Add validation tests for resolved/requested server-shaped fields that Phase 12D accepts,
+- [x] Add validation tests for resolved/requested server-shaped fields that Phase 12D accepts,
       rejects, or skips. Do not test debug-oriented console logging.
-- [ ] Add browser/runtime tests for manual and WCID-seeded setup-backed spawns. Do not run the TUI
+- [x] Add browser/runtime tests for manual and WCID-seeded setup-backed spawns. Do not run the TUI
       client.
-- [ ] Run focused TypeScript verification for browser/runtime spawn tests.
-- [ ] Run full app verification commands from `apps/holtburger-3d`.
+- [x] Add env-cell residence selection to the same browser spawn form and cover it in validation and
+      runtime tests.
+- [x] Run focused TypeScript verification for browser/runtime spawn tests.
+- [x] Run full app verification commands from `apps/holtburger-3d`.
+
+Implementation notes:
+
+- 2026-06-29 execution: Started Phase 12D with app-local browser UX and validation boundaries. The
+  resolver/validation work should stay under `apps/holtburger-3d/src/lib/browser/` because this is
+  browser-mode spawn tooling, not shared runtime world semantics.
+- 2026-06-29 implementation: Added `runtime-spawn-form` validation and
+  `weenie-spawn-seed-resolver` under the browser module. The resolver returns source facts/null only;
+  the form validator owns support decisions and emits `RuntimeDynamicSpawnRequest` only after required
+  setup, outdoor residence, transform, scale, server metadata, and animation fields validate.
+- 2026-06-29 implementation: Added a dedicated `Spawns` tab to `BrowserDisplay` with active
+  browser-created runtime spawn rows, select/inspect/remove actions, WCID seed application into the
+  same editable form, and one create path through form validation. The tab keeps its own
+  browser-created spawn list instead of pretending the runtime overview is an authoritative entity
+  browser.
+- 2026-06-29 test coverage: Added resolver/validation tests plus a client-runtime regression proving
+  manual and WCID-seeded browser form requests can coexist, render, preserve optional server metadata
+  in diagnostics, and remove independently.
+- 2026-06-29 spicy bit: Phase 12D initially gated env-cell spawns out of the browser form even though
+  the runtime already supports env-cell dynamic residence. That gate was removed; object-description
+  override facts, replacement/removal semantics beyond explicit runtime despawn, ACE-backed catalog
+  lookup, and broad animation/motion-table selection remain future work rather than being silently
+  accepted by the form.
+- 2026-06-29 correction implementation: Added `Outdoor` / `Env cell` residence selection to the same
+  spawn form. Env-cell mode validates `envCellId` and emits the existing runtime residence shape
+  `{ kind: "env-cell", landblockId, envCellId }`; outdoor mode does not require or submit an env-cell
+  id. Focused validation/runtime tests now cover env-cell browser spawn requests rendering and
+  retaining env-cell residence in runtime snapshots.
+- 2026-06-29 UX correction: Browser-created spawns are now placed one meter in front of the live
+  browser camera at create time. The create path updates the editable form with the actual
+  camera-derived residence/origin/yaw before validation; if no outdoor or env-cell camera residence
+  is known, creation rejects instead of silently using stale default coordinates.
+- 2026-06-29 bug fix: Camera-relative placement originally wrote render-local `[x, y, z]` directly
+  into AC placement origin fields. Runtime placement maps AC origin to render space as
+  `[origin.x, origin.z, -origin.y]`, so the browser helper now writes `[render.x, -render.z,
+render.y]` and has regression coverage that converts the form fields back to the expected
+  camera-forward render point.
+- 2026-06-29 UX correction: Removed visible translation and yaw inputs from the spawn form. Spawn
+  origin/yaw are camera-owned at create time; scale remains editable because it does not override
+  camera-relative placement.
+- 2026-06-29 verification: `npm run check`, `npm run test:ts`, `npm run lint`,
+  `npm run check:rust`, Prettier check on touched files, and `npm run build` passed from
+  `apps/holtburger-3d`. `npm run build` still reports the main bundle larger than 500 kB; Phase 12D
+  did not address bundle code splitting.
 
 Risks and mitigations:
 

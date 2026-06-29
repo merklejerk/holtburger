@@ -16,6 +16,11 @@ import type {
 	AnimationPayloadDto,
 	PreparedTexturePayloadDto,
 } from "../host/contracts";
+import {
+	applyWeenieSpawnSeedToForm,
+	createDefaultBrowserSpawnFormState,
+	validateBrowserSpawnForm,
+} from "../browser/runtime-spawn-form";
 import { DYNAMIC_ANIMATION_FRAME_RATE_FPS } from "../dynamic/dynamic-animation-player";
 import type {
 	DebugOverlayPrimitive,
@@ -579,6 +584,109 @@ describe("browser client runtime", () => {
 			dynamicInstances: 0,
 			dynamicVisualResources: 0,
 		});
+
+		runtime.dispose();
+	});
+
+	it("renders manual, WCID-seeded, and env-cell browser spawn requests independently", async () => {
+		const renderer = new FakeRenderer();
+		const runtime = createClientRuntime({
+			assetService: createResolvingAssetService(),
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+		});
+		const manualResult = validateBrowserSpawnForm({
+			...createDefaultBrowserSpawnFormState(),
+			label: "Manual runtime human",
+			originX: "4",
+			serverInstanceId: "server-object:manual",
+			weenieClassId: "",
+		});
+		const seededResult = validateBrowserSpawnForm(
+			applyWeenieSpawnSeedToForm(createDefaultBrowserSpawnFormState(), {
+				label: FIRST_RUNTIME_SPAWN_FIXTURE.label,
+				setupModelId: FIRST_RUNTIME_SPAWN_FIXTURE.setupModelId,
+				weenieClassId: FIRST_RUNTIME_SPAWN_FIXTURE.weenieClassId,
+			}),
+		);
+		const envCellResult = validateBrowserSpawnForm({
+			...createDefaultBrowserSpawnFormState(),
+			envCellId: "0xda550100",
+			label: "Env-cell runtime human",
+			residenceMode: "env-cell",
+			serverInstanceId: "server-object:env-cell",
+		});
+		if (
+			manualResult.kind !== "accepted" ||
+			seededResult.kind !== "accepted" ||
+			envCellResult.kind !== "accepted"
+		) {
+			throw new Error("expected accepted browser runtime spawn form requests");
+		}
+		expect(envCellResult.request.sourceResidence).toEqual({
+			envCellId: 0xda550100,
+			kind: "env-cell",
+			landblockId: 0xda55ffff,
+		});
+
+		const manualEntityId = runtime.createRuntimeSpawn(manualResult.request);
+		const seededEntityId = runtime.createRuntimeSpawn(seededResult.request);
+		const envCellEntityId = runtime.createRuntimeSpawn(envCellResult.request);
+		await flushDynamicRendererResourceCount(renderer, 3);
+		updateRuntimeFrame(runtime, 1);
+
+		const dynamicSnapshot = runtime.createDiagnosticsSnapshot().dynamic;
+		expect(dynamicSnapshot).toMatchObject({
+			activeEntityCount: 3,
+			runtimeSpawnCount: 3,
+		});
+		expect(
+			dynamicSnapshot.records.find((record) => record.id === envCellEntityId),
+		).toMatchObject({
+			sourceResidence: {
+				envCellId: 0xda550100,
+				kind: "env-cell",
+				landblockId: 0xda55ffff,
+			},
+		});
+		expect(
+			runtime.createDynamicSelectionDiagnosticsReport(manualEntityId),
+		).toMatchObject({
+			entity: {
+				source: {
+					serverInstanceIdMetadata: { id: "server-object:manual" },
+				},
+			},
+		});
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicInstances: 3,
+			dynamicVisualResources: 3,
+		});
+		expect(
+			runtime.createDynamicSelectionDiagnosticsReport(envCellEntityId),
+		).toMatchObject({
+			entity: {
+				source: {
+					serverInstanceIdMetadata: { id: "server-object:env-cell" },
+				},
+			},
+		});
+
+		expect(runtime.removeRuntimeSpawn(manualEntityId)).toBe(true);
+		await flushRuntimeWork();
+		updateRuntimeFrame(runtime, 2);
+
+		expect(runtime.createDiagnosticsSnapshot().dynamic).toMatchObject({
+			activeEntityCount: 2,
+			runtimeSpawnCount: 2,
+		});
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicInstances: 2,
+			dynamicVisualResources: 2,
+		});
+		expect(runtime.removeRuntimeSpawn(seededEntityId)).toBe(true);
+		expect(runtime.removeRuntimeSpawn(envCellEntityId)).toBe(true);
 
 		runtime.dispose();
 	});
@@ -3787,6 +3895,19 @@ async function flushDynamicRendererResources(
 		}
 	}
 	throw new Error("Dynamic renderer visual resources did not commit.");
+}
+
+async function flushDynamicRendererResourceCount(
+	renderer: FakeRenderer,
+	count: number,
+): Promise<void> {
+	for (let attempt = 0; attempt < 40; attempt += 1) {
+		await flushRuntimeWork();
+		if (renderer.createDiagnosticsSnapshot().dynamicVisualResources >= count) {
+			return;
+		}
+	}
+	throw new Error(`Dynamic renderer visual resources did not reach ${count}.`);
 }
 
 function createDynamicPreparedPayload(key: HostAssetKey): unknown {

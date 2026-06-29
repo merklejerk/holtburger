@@ -17,6 +17,7 @@ import type {
 	LandblockEnvCellsPayloadSummary,
 	OutdoorStaticObjectsPayloadSummary,
 	StaticObjectBakeDiagnostics,
+	StaticObjectRenderInstance,
 	StaticResolver,
 	StaticPeerRecordOwner,
 	StaticResourceKey,
@@ -854,7 +855,10 @@ function collectCommittedResourceKeysByDesiredKey(
 	}
 	const visualResourceDomains = new Map<
 		string,
-		{ readonly domain: "outdoor-detail"; readonly landblockId: number }
+		{
+			readonly domain: StaticObjectRenderInstance["domain"];
+			readonly landblockId: number;
+		}
 	>();
 	for (const instance of result.staticObjectRenderInstances) {
 		visualResourceDomains.set(instance.resourceId, {

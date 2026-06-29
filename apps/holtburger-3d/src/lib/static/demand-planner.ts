@@ -16,6 +16,8 @@ import type {
 const domainPriorities: Record<StaticDomain, number> = {
 	"outdoor-terrain": 0,
 	"outdoor-buildings": 5,
+	"outdoor-explicit-objects": 15,
+	"outdoor-generated-scenery": 20,
 	"landblock-env-cells": 10,
 	"outdoor-detail": 20,
 };

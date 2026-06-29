@@ -1,4 +1,5 @@
 import type {
+	OutdoorStaticObjectDomain,
 	PreparedRgbaRenderSurfaceTextureUseIdentity,
 	RegionDetailRoleFacts,
 	RenderSurfaceIdentity,
@@ -18,8 +19,7 @@ import {
 } from "./static-material-plan-primitives";
 
 export type StaticMaterialDetailRoleDomain =
-	| "outdoor-buildings"
-	| "outdoor-detail"
+	| OutdoorStaticObjectDomain
 	| "landblock-env-cells"
 	| "runtime-authored-dynamic-object-material";
 

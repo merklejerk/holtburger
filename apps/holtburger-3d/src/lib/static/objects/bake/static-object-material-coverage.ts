@@ -1,5 +1,6 @@
 import type {
 	LandblockSourceIdentity,
+	OutdoorStaticObjectDomain,
 	StaticDomain,
 	StaticMaterialCoverageBucket,
 	StaticMaterialCoverageFamily,
@@ -26,7 +27,7 @@ export function createStaticObjectMaterialCoverageReport(options: {
 	readonly payload: {
 		readonly domain: Extract<
 			StaticDomain,
-			"outdoor-buildings" | "outdoor-detail" | "landblock-env-cells"
+			OutdoorStaticObjectDomain | "landblock-env-cells"
 		>;
 		readonly landblock: LandblockSourceIdentity;
 	};

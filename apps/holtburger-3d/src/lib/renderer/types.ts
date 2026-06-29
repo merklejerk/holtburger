@@ -2,6 +2,7 @@ import type {
 	StaticAuthoredDynamicSeedRecord,
 	StaticBakeTextureUse,
 	StaticDomain,
+	OutdoorStaticObjectLayerDomain,
 	StaticPortalApertureResource,
 	StaticMaterialCoverageReport,
 	StaticObjectGeometryStaticDrawUnit,
@@ -44,6 +45,7 @@ export interface FrameState {
 export type StaticLandblockLayerKind =
 	| "terrain"
 	| "outdoor-buildings"
+	| OutdoorStaticObjectLayerDomain
 	| "outdoor-detail"
 	| "env-cell-system";
 
@@ -57,6 +59,8 @@ export type StaticLandblockLayerGenerationId = string;
 export type StaticLandblockLayerPayload =
 	| TerrainLayerPayload
 	| OutdoorBuildingsLayerPayload
+	| OutdoorExplicitObjectsLayerPayload
+	| OutdoorGeneratedSceneryLayerPayload
 	| OutdoorDetailsLayerPayload
 	| EnvCellSystemLayerPayload;
 
@@ -77,6 +81,24 @@ export interface TerrainLayerPayload extends StaticLandblockLayerPayloadBase {
 export interface OutdoorBuildingsLayerPayload extends StaticLandblockLayerPayloadBase {
 	readonly kind: "outdoor-buildings";
 	readonly drawUnits: readonly OutdoorStaticObjectLayerDrawUnit<"outdoor-buildings">[];
+	readonly sourceMappingRecords: readonly StaticSourceMappingRecord[];
+	readonly spatialRecords: readonly StaticSpatialRecord[];
+}
+
+export interface OutdoorExplicitObjectsLayerPayload
+	extends StaticLandblockLayerPayloadBase {
+	readonly kind: "outdoor-explicit-objects";
+	readonly drawUnits: readonly OutdoorStaticObjectLayerDrawUnit<"outdoor-explicit-objects">[];
+	readonly sourceMappingRecords: readonly StaticSourceMappingRecord[];
+	readonly spatialRecords: readonly StaticSpatialRecord[];
+}
+
+export interface OutdoorGeneratedSceneryLayerPayload
+	extends StaticLandblockLayerPayloadBase {
+	readonly kind: "outdoor-generated-scenery";
+	readonly drawUnits: readonly OutdoorStaticObjectLayerDrawUnit<"outdoor-generated-scenery">[];
+	readonly instancedObjectInstances: readonly StaticObjectRenderInstance[];
+	readonly instancedObjectResources: readonly StaticObjectVisualResource[];
 	readonly sourceMappingRecords: readonly StaticSourceMappingRecord[];
 	readonly spatialRecords: readonly StaticSpatialRecord[];
 }
@@ -140,6 +162,10 @@ export function staticLayerKindForStaticDomain(
 			return "terrain";
 		case "outdoor-buildings":
 			return "outdoor-buildings";
+		case "outdoor-explicit-objects":
+			return "outdoor-explicit-objects";
+		case "outdoor-generated-scenery":
+			return "outdoor-generated-scenery";
 		case "outdoor-detail":
 			return "outdoor-detail";
 		case "landblock-env-cells":

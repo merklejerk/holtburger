@@ -1,6 +1,7 @@
 import type {
 	MaterialTextureDataUseIdentity,
 	LandblockSourceIdentity,
+	OutdoorStaticObjectDomain,
 	OutdoorStaticObjectsScopePayload,
 	RegionDetailRoleFacts,
 	StaticDomain,
@@ -41,7 +42,7 @@ export interface StaticObjectCompatibilityPartitionPlan {
 export interface StaticObjectCompatibilityPayload {
 	readonly domain: Extract<
 		StaticDomain,
-		"outdoor-buildings" | "outdoor-detail" | "landblock-env-cells"
+		OutdoorStaticObjectDomain | "landblock-env-cells"
 	>;
 	readonly landblock: LandblockSourceIdentity;
 	readonly regionRenderProfile: {

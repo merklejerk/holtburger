@@ -8,8 +8,28 @@ import type { VisualGeometryPayload } from "../visual/visual-geometry";
 export type StaticDomain =
 	| "outdoor-terrain"
 	| "outdoor-buildings"
+	| OutdoorStaticObjectLayerDomain
 	| "outdoor-detail"
 	| "landblock-env-cells";
+
+/**
+ * Public outdoor object layer domains. Explicit object instances and generated
+ * scenery have different LoD ownership even while older resolver plumbing is
+ * still being retired.
+ */
+export type OutdoorStaticObjectLayerDomain =
+	| "outdoor-explicit-objects"
+	| "outdoor-generated-scenery";
+
+/**
+ * Outdoor static-object domains accepted by materialization contracts. The
+ * combined detail domain remains only for the old resolver path scheduled for
+ * removal in the source-first cutover phases.
+ */
+export type OutdoorStaticObjectDomain =
+	| "outdoor-buildings"
+	| OutdoorStaticObjectLayerDomain
+	| "outdoor-detail";
 
 /**
  * Runtime-authored object-material texture placement is not a static resolver
@@ -482,7 +502,7 @@ interface TerrainRenderLocalBvh {
 
 export interface OutdoorStaticObjectsScopePayload {
 	readonly kind: "outdoor-static-objects";
-	readonly domain: "outdoor-buildings" | "outdoor-detail";
+	readonly domain: OutdoorStaticObjectDomain;
 	readonly authoredDynamicSeeds: readonly OutdoorStaticObjectDynamicSeedFacts[];
 	readonly buildingTransitionApertures: LandblockOutdoorPayloadDto["buildingTransitionApertures"];
 	readonly landblock: LandblockSourceIdentity;
@@ -1265,7 +1285,7 @@ export interface StaticObjectBakeDiagnostics {
 	readonly staticBatchId: string;
 	readonly domain: Extract<
 		StaticDomain,
-		"outdoor-buildings" | "outdoor-detail" | "landblock-env-cells"
+		OutdoorStaticObjectDomain | "landblock-env-cells"
 	>;
 	readonly landblockId: number;
 	readonly objectCount: number;
@@ -1412,8 +1432,7 @@ export interface StaticObjectGeometryStaticDrawUnit {
 	readonly drawUnitId: string;
 	readonly landblockId: number;
 	readonly domain:
-		| "outdoor-buildings"
-		| "outdoor-detail"
+		| OutdoorStaticObjectDomain
 		| "landblock-env-cells";
 	readonly ownership: StaticObjectDrawUnitOwnership;
 	readonly materialFamily: "flat-color" | "indexed-paletted" | "texture-rgba";
@@ -1490,7 +1509,7 @@ export interface StaticObjectRenderInstance {
 	readonly kind: "static-object-render-instance";
 	readonly instanceId: string;
 	readonly resourceId: StaticObjectVisualResourceId;
-	readonly domain: "outdoor-detail";
+	readonly domain: OutdoorStaticObjectLayerDomain | "outdoor-detail";
 	readonly landblockId: number;
 	readonly transform: StaticPlacementTransform;
 	/**
@@ -1522,7 +1541,7 @@ export type StaticObjectDrawUnitOwnership =
 	| {
 			readonly kind: "outdoor-static-objects";
 			readonly landblockId: number;
-			readonly domain: "outdoor-buildings" | "outdoor-detail";
+			readonly domain: OutdoorStaticObjectDomain;
 	  }
 	| {
 			readonly kind: "env-cell-static-object-seeds";

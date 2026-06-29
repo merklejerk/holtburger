@@ -216,7 +216,7 @@ Each phase should leave the repo in a buildable state. If a phase discovers that
 
 Dry-run findings from 2026-06-29:
 
-- The new route can be added without immediate renderer cutover, but any temporary old-route bridge must be isolated and deleted as soon as source-first resolver fanout lands.
+- The new route can be added without immediate renderer cutover, but any temporary old-route bridge must be isolated and deleted in Phase 7D as soon as source-first resolver fanout and bake integration are ready for browser cutover.
 - `ContentAssetService` owns the right lifetime for the prepared LoD source cache. `ContentDecodeCache` is source-record cache only and must not grow prepared scene semantics.
 - The frontend currently has one browser interest/visibility axis for `detail`; explicit outdoor objects and generated scenery need separate interest, visibility, diagnostics, and retained-layer identities.
 - The worker resolver protocol currently returns one `StaticScopePayload` for one `StaticResolverJob`; source-first fanout needs a protocol shape that can return multiple layer recipes from one source request.
@@ -728,64 +728,153 @@ Decisions and course corrections:
 
 ### Phase 6C: Temporary Old-Route Owner Adapter
 
-Status: pending.
+Status: completed on 2026-06-29.
 
-Goal: isolate old-route loading behind an adapter that targets layer owners and is explicitly deleted by Phase 7.
+Goal: isolate old-route loading behind an adapter that targets layer owners and is explicitly deleted by Phase 7D.
 
 Deliverables:
 
 - Keep existing old-route resolvers only through an isolated temporary adapter.
 - Make adapter output target layer owner keys rather than treating route/domain jobs as durable ownership.
-- Add the adapter to the Phase 7 deletion checklist.
+- Add the adapter to the Phase 7D deletion checklist.
 
 Acceptance criteria:
 
-- Temporary old-route adapter tests cover only owner translation and are deleted or rewritten in Phase 7; they must not bless old route behavior as a stable path.
+- Temporary old-route adapter tests cover only owner translation and are deleted or rewritten in Phase 7D; they must not bless old route behavior as a stable path.
 - No browser/domain split work remains in this phase beyond wiring split domains into owner records.
 
 Task checklist:
 
-- [ ] Isolate old route loading behind a temporary adapter and add it to the Phase 7 deletion checklist.
-- [ ] Add adapter tests that verify owner translation only.
-- [ ] Confirm normal path still compiles and behaves before Phase 7 replaces source fanout.
+- [x] Isolate old route loading behind a temporary adapter and add it to the Phase 7D deletion checklist.
+- [x] Add adapter tests that verify owner translation only.
+- [x] Confirm normal path still compiles and behaves before Phase 7D replaces the temporary adapter with source fanout.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Added `TemporaryLayerOwnerTargetingResolverAdapter` as the only normal-path old-route bridge. It translates existing `StaticResolverJob` values into target layer owner keys before delegating to the current resolver.
+- Wired `BrowserStaticResolver` through the temporary adapter without changing old-route payload behavior. This keeps Phase 6C focused on ownership targeting; Phase 7D must delete the adapter when source-first fanout becomes the normal browser path.
+- Adapter tests intentionally verify owner-key translation and delegation only. They do not assert old `landblock-outdoor` or `landblock-env-cells` route behavior as a stable contract.
+- Validation: `npm run test:ts -- src/lib/static/layer-owner-source-adapter.test.ts src/lib/browser/create-browser-runtime.test.ts`; `npm run check`.
 
-### Phase 7: Source-First Resolver Fanout
+### Phase 7A: Source-First Demand Planning
 
 Status: pending.
 
-Goal: replace one resolver job per renderer layer with one source request per landblock and requested layer set.
+Goal: compute landblock source requests and layer-owner targets before changing worker or browser runtime execution.
 
 Deliverables:
 
 - Change scene-interest planning so it computes desired layer owners per landblock and selects one minimum source LoD.
-- Replace single-domain resolver jobs with source-first jobs that carry normalized landblock id, selected source LoD, scene context, requested output layers, and target owner keys.
-- Update the resolver worker API so one source request may return multiple layer recipes.
-- Route layer recipes into existing domain-oriented bake queues while preserving owner keys.
-- Ensure each source request loads `landblock/{id}/lod/{sourceLod}` exactly once.
-- Delete the temporary old-route resolver adapter from the normal browser static path once source-first fanout can emit all required layer recipes.
+- Add source-first request and requested-layer contract types that carry normalized landblock id, selected source LoD, scene context, requested output layers, and target owner keys.
+- Keep the existing old-route adapter as the execution path during this phase; this phase only makes source intent explicit and testable.
 
 Acceptance criteria:
 
 - Terrain-only interest requests LoD `0`.
 - Terrain/buildings/explicit-object/generated-scenery/env-cell interest requests LoD `4` once for that landblock.
-- Resolver fanout can emit multiple layer recipes from one source result.
-- Runtime drops unwanted recipes before bake enqueue if the target owner is no longer demanded.
-- Normal browser static resolution no longer requests `landblock-outdoor` or `landblock-env-cells`.
-- Worker/fake resolver tests assert source-first multi-recipe output rather than one old route per static domain.
+- Planner output contains one source request per landblock/context, with all requested layer owner keys attached.
+- No normal browser execution changes from old-route loading in this phase.
 
 Task checklist:
 
 - [ ] Update `planStaticDemand` or replace it with source-first planning.
+- [ ] Add source-first request and requested-layer types.
+- [ ] Add source-first planner tests for minimum LoD selection and layer owner targets.
+- [ ] Keep the Phase 6C temporary adapter wired as the production bridge until Phase 7D.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 7B: Resolver Protocol And Layer Recipe Fanout
+
+Status: pending.
+
+Goal: make resolver workers capable of resolving one landblock scene LoD source into multiple layer recipes.
+
+Deliverables:
+
+- Update the static resolver protocol, client, fake resolver, and worker handler for source-first multi-recipe output.
+- Add a landblock scene LoD source resolver that loads `landblock/{id}/lod/{sourceLod}` and emits requested layer recipes tagged with target owner keys.
+- Delete or rewrite normal-path usage of `TerrainStaticScopeResolver`, `OutdoorStaticObjectsResolver`, and `LandblockEnvCellsResolver` inside source fanout so they consume scene LoD layer data or disappear.
+- Preserve emitted domain/layer tags so existing bake queues can remain domain-oriented in Phase 7C.
+
+Acceptance criteria:
+
+- Resolver fanout can emit multiple layer recipes from one source result.
+- Worker/fake resolver tests assert source-first multi-recipe output rather than one old route per static domain.
+- Worker tests prove one host route load per source request.
+- Resolver output contains target layer owner keys for every emitted recipe.
+
+Task checklist:
+
 - [ ] Update static resolver protocol/client/worker handler for multi-recipe output.
-- [ ] Delete or rewrite `TerrainStaticScopeResolver`, `OutdoorStaticObjectsResolver`, and `LandblockEnvCellsResolver` normal-path usage so they consume scene LoD layer data or disappear.
-- [ ] Delete the Phase 6 temporary old-route adapter from production code.
-- [ ] Add source-first resolver tests for minimum LoD selection.
+- [ ] Add source-first resolver tests for multi-layer fanout.
 - [ ] Add worker tests proving one host route load per source request.
+- [ ] Replace old domain resolvers in the source fanout path, or delete them if no longer needed.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 7C: Owner-Gated Bake Integration
+
+Status: pending.
+
+Goal: route source-first layer recipes into existing bake queues without letting transient work ids become durable ownership.
+
+Deliverables:
+
+- Route layer recipes into existing domain-oriented bake queues while preserving owner keys.
+- Add owner-demand gates before bake enqueue so unwanted recipes are dropped if their target owner is no longer demanded.
+- Ensure bake inputs carry target layer owner keys alongside any transient work diagnostics still needed by the current coordinator.
+- Keep browser runtime on the temporary adapter until bake integration is verified.
+
+Acceptance criteria:
+
+- Runtime drops unwanted recipes before bake enqueue if the target owner is no longer demanded.
+- Bake batching remains domain/layer-oriented for terrain, buildings, explicit objects, generated scenery, and env-cell system output.
+- Bake item tests verify owner keys survive from resolver recipe to bake input.
+- No old-route deletion happens in this phase; deletion is reserved for Phase 7D.
+
+Task checklist:
+
 - [ ] Preserve bake batching by emitted domain/layer.
+- [ ] Stamp bake inputs with target owner keys.
+- [ ] Add owner-gated stale recipe drop tests.
+- [ ] Confirm source-first resolver output can feed current bake workers without broad route payload fallbacks.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 7D: Browser Source-First Cutover And Old Adapter Deletion
+
+Status: pending.
+
+Goal: switch normal browser static resolution to source-first landblock scene LoD requests and delete the temporary old-route bridge.
+
+Deliverables:
+
+- Wire browser static demand execution to Phase 7A source requests, Phase 7B resolver fanout, and Phase 7C bake integration.
+- Ensure each source request loads `landblock/{id}/lod/{sourceLod}` exactly once.
+- Delete the Phase 6C temporary old-route adapter from production code and delete or rewrite its tests.
+- Remove normal browser usage of old `landblock-outdoor` and `landblock-env-cells` source requests.
+
+Acceptance criteria:
+
+- Normal browser static resolution no longer requests `landblock-outdoor` or `landblock-env-cells`.
+- The `TemporaryLayerOwnerTargetingResolverAdapter` symbol and its test file are gone, not merely unused.
+- Browser/runtime tests assert source-first route usage and absence of old broad route requests.
+- No compatibility switch, fallback route, or escape hatch remains for normal browser static rendering.
+
+Task checklist:
+
+- [ ] Wire browser runtime to source-first resolver fanout.
+- [ ] Delete `TemporaryLayerOwnerTargetingResolverAdapter` and its focused adapter tests.
+- [ ] Remove normal-path old broad route requests from browser static resolution.
+- [ ] Add no-old-route assertions for browser static resolution.
+- [ ] Run a focused route audit for `landblock-outdoor` and `landblock-env-cells` production browser usage before entering Phase 8.
 
 Decisions and course corrections:
 
@@ -841,7 +930,7 @@ Review checklist:
 - [ ] Confirm no parallel lifecycle truth remains in retained scopes, desired keys, durable work owners, or scene-interest readiness tracking.
 - [ ] Confirm lower retained layers survive LoD churn without re-materialization.
 - [ ] Confirm dynamic seed ownership and runtime dynamic no-residence behavior are covered.
-- [ ] Confirm Phase 7 removed old-route resolvers from the normal browser static path; Phase 11 should be deleting compatibility surfaces, not changing behavior.
+- [ ] Confirm Phase 7D removed old-route resolvers from the normal browser static path; Phase 11 should be deleting compatibility surfaces, not changing behavior.
 - [ ] Run a vestigial-code audit for old routes, old payload kinds, old host asset keys, old renderer layer names, old lifecycle ownership, and stale tests before route deletion.
 - [ ] Identify any executable code path, schema, parser, resolver, baker, lifecycle store, diagnostic surface, or test fixture that could keep the old model alive.
 - [ ] Update Phase 10 and Phase 11 with discovered deletion targets.

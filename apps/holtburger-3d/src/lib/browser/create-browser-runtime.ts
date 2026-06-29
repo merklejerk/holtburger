@@ -30,6 +30,7 @@ import {
 	createStaticResolverMainAssetBridge,
 	type StaticResolverMainAssetBridge,
 } from "../static/resolver/asset-bridge";
+import { TemporaryLayerOwnerTargetingResolverAdapter } from "../static/layer-owner-source-adapter";
 import {
 	StaticResolverWorkerClient,
 	WorkerPoolStaticResolver,
@@ -195,7 +196,9 @@ class BrowserStaticResolver implements StaticResolver {
 		readonly terrainResolver: StaticResolver;
 		readonly placeholderResolver: StaticResolver;
 	}) {
-		this.#sourceResolver = options.terrainResolver;
+		this.#sourceResolver = new TemporaryLayerOwnerTargetingResolverAdapter({
+			resolver: options.terrainResolver,
+		});
 		this.#placeholderResolver = options.placeholderResolver;
 	}
 

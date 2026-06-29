@@ -23,6 +23,7 @@ describe("Tauri host commands", () => {
 			createRequest("f", "env-cell/01030100"),
 			createRequest("g", "palette/04000001"),
 			createRequest("h", "landblock/0103ffff/env-cells"),
+			createRequest("i", "landblock/0103ffff/lod/4"),
 		]);
 
 		expect(
@@ -37,6 +38,7 @@ describe("Tauri host commands", () => {
 				"env-cell/01030100",
 				"palette/04000001",
 				"landblock/0103ffff/env-cells",
+				"landblock/0103ffff/lod/4",
 			],
 		]);
 	});

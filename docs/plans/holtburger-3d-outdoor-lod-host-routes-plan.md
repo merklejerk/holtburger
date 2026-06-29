@@ -489,7 +489,7 @@ Decisions and course corrections:
 
 ### Phase 3: Frontend Host Contract And Asset Key Support
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: make the browser app understand `landblock-scene-lod` as a first-class prepared asset while keeping existing render scheduling intact.
 
@@ -517,15 +517,21 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add TS source LoD and layer DTO types.
-- [ ] Add Zod contracts for all layer records.
-- [ ] Add host asset key formatting/parsing tests.
-- [ ] Add route payload preparation tests.
-- [ ] Confirm topology remains untyped and scheduled for deletion, not revived as a first-class frontend asset.
+- [x] Add TS source LoD and layer DTO types.
+- [x] Add Zod contracts for all layer records.
+- [x] Add host asset key formatting/parsing tests.
+- [x] Add route payload preparation tests.
+- [x] Confirm topology remains untyped and scheduled for deletion, not revived as a first-class frontend asset.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Added `landblock-scene-lod` as a typed `HostAssetKeyKind` with a dedicated `createLandblockSceneLodHostAssetKey(landblockId, level)` helper. The key id is normalized as `hex32:level`; the host route remains `landblock/{id}/lod/{level}`.
+- Added `LandblockSceneLodLevelDto`, `LandblockSceneLodSourceDto`, `LandblockSceneLodLayerDto`, and `LandblockSceneLodPayloadDto` Zod contracts.
+- Layer parsing rejects duplicate layer records, layers above the declared source LoD, and outdoor layer records on interior source context. The contract uses discriminated layer records and does not add `includes` ceremony.
+- Added `landblock-scene-lod` route preparation as a first-class payload kind. It is not a fallback or union alias for `landblock-outdoor` or `landblock-env-cells`.
+- Added frontend binary lookup routing for `landblock/{id}/lod/{level}`.
+- Left `landblock-outdoor`, `landblock-env-cells`, and topology frontend surfaces in place as temporary compatibility paths for later source-first scheduling and Phase 11 deletion. Topology was not promoted into a new first-class frontend asset.
+- Validation run: `npm run test:ts -- src/lib/assets/keys.test.ts src/lib/assets/preparation.test.ts src/lib/host/tauri.test.ts`; `npm run check`.
 
 ### Phase 4: Resteering Checkpoint - Contract And Source Shape
 

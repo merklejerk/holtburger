@@ -542,6 +542,136 @@ export type LandblockEnvCellsPayloadDto = z.infer<
 	typeof landblockEnvCellsPayloadDtoSchema
 >;
 
+export const landblockSceneLodLevelDtoSchema = z.union([
+	z.literal(0),
+	z.literal(1),
+	z.literal(2),
+	z.literal(3),
+	z.literal(4),
+]);
+export type LandblockSceneLodLevelDto = z.infer<
+	typeof landblockSceneLodLevelDtoSchema
+>;
+
+export const landblockSceneLodSourceDtoSchema = z
+	.object({
+		context: z.enum(["outdoor", "interior"]),
+		level: landblockSceneLodLevelDtoSchema,
+	})
+	.strict();
+export type LandblockSceneLodSourceDto = z.infer<
+	typeof landblockSceneLodSourceDtoSchema
+>;
+
+const landblockSceneLodTerrainLayerDtoSchema = z
+	.object({
+		kind: z.literal("terrain"),
+		terrain: landblockTerrainDtoSchema,
+	})
+	.strict();
+
+const landblockSceneLodOutdoorBuildingsLayerDtoSchema = z
+	.object({
+		kind: z.literal("outdoor-buildings"),
+		statics: z.array(landblockOutdoorStaticMemberDtoSchema),
+		buildingTransitionApertures: z.array(
+			landblockBuildingTransitionApertureDtoSchema,
+		),
+		outdoorBvh: preparedOutdoorBvhDtoSchema.nullable(),
+	})
+	.strict();
+
+const landblockSceneLodOutdoorStaticLayerDtoSchema = <
+	TKind extends "outdoor-explicit-objects" | "outdoor-generated-scenery",
+>(
+	kind: TKind,
+) =>
+	z
+		.object({
+			kind: z.literal(kind),
+			statics: z.array(landblockOutdoorStaticMemberDtoSchema),
+			outdoorBvh: preparedOutdoorBvhDtoSchema.nullable(),
+		})
+		.strict();
+
+const landblockSceneLodEnvCellSystemLayerDtoSchema = z
+	.object({
+		kind: z.literal("env-cell-system"),
+		landblockInfoId: z.number().int().nonnegative(),
+		envCells: z.array(landblockEnvCellDtoSchema),
+		portalLinks: z.array(landblockScenePortalLinkDtoSchema),
+		landblockEnvCellBvh: preparedLandblockEnvCellBvhDtoSchema,
+		diagnostics: landblockPackDiagnosticsDtoSchema,
+	})
+	.strict();
+
+export const landblockSceneLodLayerDtoSchema = z.discriminatedUnion("kind", [
+	landblockSceneLodTerrainLayerDtoSchema,
+	landblockSceneLodOutdoorBuildingsLayerDtoSchema,
+	landblockSceneLodOutdoorStaticLayerDtoSchema("outdoor-explicit-objects"),
+	landblockSceneLodOutdoorStaticLayerDtoSchema("outdoor-generated-scenery"),
+	landblockSceneLodEnvCellSystemLayerDtoSchema,
+]);
+export type LandblockSceneLodLayerDto = z.infer<
+	typeof landblockSceneLodLayerDtoSchema
+>;
+
+const landblockSceneLodLayerLevels: Record<
+	LandblockSceneLodLayerDto["kind"],
+	LandblockSceneLodLevelDto
+> = {
+	"env-cell-system": 4,
+	"outdoor-buildings": 1,
+	"outdoor-explicit-objects": 2,
+	"outdoor-generated-scenery": 3,
+	terrain: 0,
+};
+
+export const landblockSceneLodPayloadDtoSchema = z
+	.object({
+		kind: z.literal("landblock-scene-lod"),
+		landblockId: z.number().int().nonnegative(),
+		source: landblockSceneLodSourceDtoSchema,
+		layers: z.array(landblockSceneLodLayerDtoSchema),
+		diagnostics: landblockPackDiagnosticsDtoSchema,
+		provenance: assetProvenanceDtoSchema,
+	})
+	.strict()
+	.superRefine((payload, ctx) => {
+		const seenLayers = new Set<LandblockSceneLodLayerDto["kind"]>();
+		for (const [index, layer] of payload.layers.entries()) {
+			if (seenLayers.has(layer.kind)) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: `duplicate landblock scene LoD layer ${layer.kind}`,
+					path: ["layers", index, "kind"],
+				});
+			}
+			seenLayers.add(layer.kind);
+
+			if (landblockSceneLodLayerLevels[layer.kind] > payload.source.level) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: `layer ${layer.kind} requires source LoD ${landblockSceneLodLayerLevels[layer.kind]}`,
+					path: ["layers", index, "kind"],
+				});
+			}
+			if (
+				payload.source.context === "interior" &&
+				layer.kind !== "env-cell-system"
+			) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: `interior scene LoD cannot include ${layer.kind}`,
+					path: ["layers", index, "kind"],
+				});
+			}
+		}
+	});
+export type LandblockSceneLodPayloadDto = z.infer<
+	typeof landblockSceneLodPayloadDtoSchema
+>;
+
 const regionRenderProfileDetailRoleDtoSchema = z.object({
 	role: z.enum(["landscape", "building", "environment", "object"]),
 	sourceTerrainDescIndex: z.number().int().nonnegative(),

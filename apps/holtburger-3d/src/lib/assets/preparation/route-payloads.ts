@@ -4,6 +4,7 @@ import type {
 	AnimationPayloadDto,
 	LandblockEnvCellsPayloadDto,
 	LandblockOutdoorPayloadDto,
+	LandblockSceneLodPayloadDto,
 	GfxObjPayloadDto,
 	MaterialRecipePayloadDto,
 	PalettePayloadDto,
@@ -20,6 +21,7 @@ import {
 	gfxObjPayloadDtoSchema,
 	landblockEnvCellsPayloadDtoSchema,
 	landblockOutdoorPayloadDtoSchema,
+	landblockSceneLodPayloadDtoSchema,
 	materialRecipePayloadDtoSchema,
 	palettePayloadDtoSchema,
 	preparedTexturePayloadDtoSchema,
@@ -34,6 +36,7 @@ import {
 export type V2PreparedAssetPayload =
 	| LandblockOutdoorPayloadDto
 	| LandblockEnvCellsPayloadDto
+	| LandblockSceneLodPayloadDto
 	| AnimationPayloadDto
 	| GfxObjPayloadDto
 	| SetupModelPayloadDto
@@ -76,6 +79,11 @@ const V2_PAYLOAD_PARSERS: readonly RoutePayloadParser<V2PreparedAssetPayload>[] 
 			expectedKind: "landblock-env-cells",
 			route: /^landblock\/[0-9a-fA-F]{8}\/env-cells$/,
 			schema: landblockEnvCellsPayloadDtoSchema,
+		},
+		{
+			expectedKind: "landblock-scene-lod",
+			route: /^landblock\/[0-9a-fA-F]{8}\/lod\/[0-4]$/,
+			schema: landblockSceneLodPayloadDtoSchema,
 		},
 		{
 			expectedKind: "animation",

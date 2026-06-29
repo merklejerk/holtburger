@@ -91,6 +91,7 @@ describe("host asset preparation", () => {
 		const routes = [
 			["landblock/da55ffff/outdoor", "landblock-outdoor"],
 			["landblock/da55ffff/env-cells", "landblock-env-cells"],
+			["landblock/da55ffff/lod/3", "landblock-scene-lod"],
 			["animation/0300061b", "animation"],
 			["gfx-obj/01000001", "gfx-obj"],
 			["setup-model/02000001", "setup-model"],
@@ -179,6 +180,69 @@ describe("host asset preparation", () => {
 		).toThrow("asset preparation does not support host asset route");
 	});
 
+	it("prepares landblock scene LoD payloads as their own contract", () => {
+		const payload = createLandblockSceneLodPayload();
+
+		const prepared = prepareV2AssetPayload({
+			assetId: "landblock/da55ffff/lod/2",
+			payload,
+			payloadKind: "json",
+			requestId: "request-lod",
+		});
+
+		expect(prepared).toMatchObject({
+			kind: "landblock-scene-lod",
+			source: { context: "outdoor", level: 2 },
+		});
+		if (prepared.kind !== "landblock-scene-lod") {
+			throw new Error("expected landblock scene LoD payload");
+		}
+		expect(prepared.layers.map((layer) => layer.kind)).toEqual([
+			"terrain",
+			"outdoor-buildings",
+			"outdoor-explicit-objects",
+		]);
+	});
+
+	it("rejects duplicate and impossible landblock scene LoD layers", () => {
+		const payload = createLandblockSceneLodPayload();
+
+		expect(() =>
+			prepareV2AssetPayload({
+				assetId: "landblock/da55ffff/lod/2",
+				payload: {
+					...payload,
+					layers: [...payload.layers, payload.layers[0]],
+				},
+				payloadKind: "json",
+				requestId: "request-lod-duplicate",
+			}),
+		).toThrow(
+			"Asset landblock/da55ffff/lod/2 matched the landblock-scene-lod route but its payload failed the landblock-scene-lod contract",
+		);
+
+		expect(() =>
+			prepareV2AssetPayload({
+				assetId: "landblock/da55ffff/lod/2",
+				payload: {
+					...payload,
+					layers: [
+						...payload.layers,
+						{
+							kind: "outdoor-generated-scenery",
+							outdoorBvh: null,
+							statics: [],
+						},
+					],
+				},
+				payloadKind: "json",
+				requestId: "request-lod-impossible",
+			}),
+		).toThrow(
+			"Asset landblock/da55ffff/lod/2 matched the landblock-scene-lod route but its payload failed the landblock-scene-lod contract",
+		);
+	});
+
 	it("accepts only the normalized browser landblock env-cell bundle shape", () => {
 		const payload = createLandblockEnvCellsPayload();
 
@@ -253,6 +317,59 @@ describe("host asset preparation", () => {
 		);
 	});
 });
+
+function createLandblockSceneLodPayload() {
+	return {
+		diagnostics: createDiagnostics(),
+		kind: "landblock-scene-lod",
+		landblockId: 0xda55ffff,
+		layers: [
+			{
+				kind: "terrain",
+				terrain: createEmptyTerrain(),
+			},
+			{
+				buildingTransitionApertures: [],
+				kind: "outdoor-buildings",
+				outdoorBvh: null,
+				statics: [],
+			},
+			{
+				kind: "outdoor-explicit-objects",
+				outdoorBvh: null,
+				statics: [],
+			},
+		],
+		provenance: {
+			detail: null,
+			errorCode: null,
+			source: "repo-local-hba",
+			sourceAssetKind: "landblock-scene-lod",
+		},
+		source: {
+			context: "outdoor",
+			level: 2,
+		},
+	};
+}
+
+function createEmptyTerrain() {
+	return {
+		bounds: null,
+		gridSize: 9,
+		maxHeight: 0,
+		minHeight: 0,
+		quads: [],
+		terrainBvh: {
+			coordinateSpace: "landblock-outdoor-terrain-local",
+			items: [],
+			nodes: [],
+		},
+		tileSize: 24,
+		triangles: [],
+		vertices: [],
+	};
+}
 
 function createLandblockEnvCellsPayload() {
 	return {

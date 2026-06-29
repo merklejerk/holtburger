@@ -208,6 +208,144 @@ describe("static coordinator", () => {
 		expect(JSON.stringify(coordinator.createSnapshot())).not.toContain("lease");
 	});
 
+	it("reports layer owner states for split static domains", () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+
+		activeWorkForDemand(coordinator, createSingleOutdoorObjectDemand(0xda55ffff));
+
+		expect(coordinator.createSnapshot().ownerStates).toEqual([
+			{
+				key: {
+					kind: "outdoor-explicit-objects",
+					landblockId: 0xda55ffff,
+				},
+				lifecycle: "resolving",
+				revision: 1,
+			},
+			{
+				key: {
+					kind: "outdoor-generated-scenery",
+					landblockId: 0xda55ffff,
+				},
+				lifecycle: "resolving",
+				revision: 1,
+			},
+			{
+				key: {
+					kind: "terrain",
+					landblockId: 0xda55ffff,
+				},
+				lifecycle: "resolving",
+				revision: 1,
+			},
+		]);
+		expect(
+			coordinator
+				.createSnapshot()
+				.ownerStates.map((state) => JSON.stringify(state.key)),
+		).not.toContain("workId");
+	});
+
+	it("reports layer owner lifecycle transitions without changing work identity", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver,
+		});
+
+		const [work] = activeWorkForDemand(
+			coordinator,
+			createSingleTerrainDemand(0xda55ffff),
+		);
+		expect(coordinator.createSnapshot().ownerStates).toMatchObject([
+			{
+				key: { kind: "terrain", landblockId: 0xda55ffff },
+				lifecycle: "resolving",
+			},
+		]);
+
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
+		await flushPromises();
+		expect(coordinator.createSnapshot().ownerStates).toMatchObject([
+			{
+				key: { kind: "terrain", landblockId: 0xda55ffff },
+				lifecycle: "baking",
+			},
+		]);
+
+		baker.complete(work.workId, {
+			drawUnits: [createTerrainDrawUnit("terrain-a", 0xda55ffff)],
+		});
+		await flushPromises();
+		expect(coordinator.createSnapshot().ownerStates).toMatchObject([
+			{
+				key: { kind: "terrain", landblockId: 0xda55ffff },
+				lifecycle: "materialized",
+			},
+		]);
+
+		activeWorkForDemand(coordinator, {
+			location: null,
+			lod: { buildings: -1, detail: -1, envCells: -1, terrain: -1 },
+		});
+		expect(coordinator.createSnapshot().ownerStates).toEqual([]);
+	});
+
+	it("reports empty and failed layer owner states", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
+		const emptyResolver = new DeferredStaticResolver();
+		const emptyBaker = new DeferredStaticBaker();
+		const emptyCoordinator = new StaticCoordinator({
+			baker: emptyBaker,
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver: emptyResolver,
+		});
+		const [emptyWork] = activeWorkForDemand(
+			emptyCoordinator,
+			createSingleTerrainDemand(0xda55ffff),
+		);
+		emptyResolver.complete(emptyResolver.pendingRequests[0]?.requestId ?? "");
+		await flushPromises();
+		emptyBaker.complete(emptyWork.workId, { drawUnits: [] });
+		await flushPromises();
+
+		expect(emptyCoordinator.createSnapshot().ownerStates).toMatchObject([
+			{
+				key: { kind: "terrain", landblockId: 0xda55ffff },
+				lifecycle: "empty",
+			},
+		]);
+
+		const failedResolver = new DeferredStaticResolver();
+		const failedCoordinator = new StaticCoordinator({
+			attachmentProvider: new RejectingAttachmentProvider("geometry offline"),
+			baker: new DeferredStaticBaker(),
+			batching: { maxPayloadsPerBatch: 8, maxWaitMs: 0 },
+			resolver: failedResolver,
+		});
+		activeWorkForDemand(failedCoordinator, createSingleTerrainDemand(0xda55ffff));
+		failedResolver.complete(failedResolver.pendingRequests[0]?.requestId ?? "");
+		await flushPromises();
+
+		expect(failedCoordinator.createSnapshot().ownerStates).toMatchObject([
+			{
+				key: { kind: "terrain", landblockId: 0xda55ffff },
+				lifecycle: "failed",
+			},
+		]);
+		consoleError.mockRestore();
+	});
+
 	it("returns retained scopes separately from active work", () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -315,14 +453,14 @@ describe("static coordinator", () => {
 		});
 		const work = activeWorkForDemand(
 			coordinator,
-			createSingleOutdoorDetailDemand(0xda55ffff),
-		).find((candidate) => candidate.job.domain === "outdoor-detail");
+			createSingleOutdoorObjectDemand(0xda55ffff),
+		).find((candidate) => candidate.job.domain === "outdoor-generated-scenery");
 		const diagnostics = createStaticObjectBakeDiagnostics();
 
 		expect(work).toBeDefined();
 		resolver.complete(
 			resolver.pendingRequests.find(
-				(request) => request.job.domain === "outdoor-detail",
+				(request) => request.job.domain === "outdoor-generated-scenery",
 			)?.requestId ?? "",
 		);
 		await flushPromises();
@@ -335,11 +473,12 @@ describe("static coordinator", () => {
 		expect(snapshot.staticObjectBakeDiagnostics).toEqual([diagnostics]);
 		expect(snapshot.recentTiming).toHaveLength(1);
 		expect(snapshot.recentTiming[0]).toMatchObject({
-			domain: "outdoor-detail",
+			domain: "outdoor-generated-scenery",
 			itemCount: 1,
 			kind: "static-coordinator-timing",
 			revision: 1,
-			staticBatchId: "static-batch:1:outdoor-detail:landblock:da55ffff:1",
+			staticBatchId:
+				"static-batch:1:outdoor-generated-scenery:landblock:da55ffff:1",
 		});
 		expect(snapshot.recentTiming[0]?.resolverMs).toEqual(expect.any(Number));
 		expect(snapshot.recentTiming[0]?.attachmentMs).toEqual(expect.any(Number));
@@ -1044,7 +1183,7 @@ function createSingleTerrainDemand(landblockId: number): StaticDemand {
 	};
 }
 
-function createSingleOutdoorDetailDemand(landblockId: number): StaticDemand {
+function createSingleOutdoorObjectDemand(landblockId: number): StaticDemand {
 	return {
 		location: {
 			kind: "outdoor-landblock",
@@ -1062,7 +1201,7 @@ function createSingleOutdoorDetailDemand(landblockId: number): StaticDemand {
 function createStaticObjectBakeDiagnostics(): StaticObjectBakeDiagnostics {
 	return {
 		buildingObjectCount: 0,
-		domain: "outdoor-detail",
+		domain: "outdoor-generated-scenery",
 		drawUnitCount: 1,
 		estimatedAvoidedFlattenedTriangleCount: 0,
 		estimatedAvoidedFlattenedTypedArrayBytes: 0,
@@ -1089,7 +1228,8 @@ function createStaticObjectBakeDiagnostics(): StaticObjectBakeDiagnostics {
 			unsupportedMaterialBucket: 0,
 		},
 		skippedPartitionCount: 0,
-		staticBatchId: "static-batch:1:outdoor-detail:landblock:da55ffff:1",
+		staticBatchId:
+			"static-batch:1:outdoor-generated-scenery:landblock:da55ffff:1",
 		uniqueSourceCount: 1,
 		uniqueSourcePartGeometryCount: 1,
 		uniqueSourceTriangleCount: 1,

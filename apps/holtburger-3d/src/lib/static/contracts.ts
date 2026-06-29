@@ -1799,6 +1799,7 @@ export interface StaticCoordinatorSnapshot {
 	readonly staleResolverResults: number;
 	readonly staleBakeResults: number;
 	readonly committedDrawUnits: number;
+	readonly ownerStates: readonly LayerOwnerState[];
 	readonly activeWork: readonly ScheduledStaticWorkStatus[];
 	readonly latestTerrainPayload: TerrainStaticScopePayloadSummary | null;
 	readonly latestOutdoorStaticObjectsPayload: OutdoorStaticObjectsPayloadSummary | null;

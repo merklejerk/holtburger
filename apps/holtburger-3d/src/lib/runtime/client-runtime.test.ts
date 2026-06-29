@@ -2335,6 +2335,51 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 		consoleError.mockRestore();
 	});
+
+	it("emits failed scene interest settlement from failed owner states", async () => {
+		const consoleError = vi
+			.spyOn(console, "error")
+			.mockImplementation(() => {});
+		const resolver = new DeferredStaticResolver();
+		const runtime = createClientRuntime({
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer: new FakeRenderer(),
+			staticCoordinator: createImmediateStaticCoordinator({
+				baker: new DeferredStaticBaker(),
+				resolver,
+			}),
+		});
+		const events: RuntimeEvent[] = [];
+		const unsubscribe = runtime.subscribeEvents((event) => {
+			events.push(event);
+		});
+
+		updateOutdoorSceneInterest(runtime, { domains: ["terrain"] });
+		resolver.fail(
+			resolver.pendingRequests[0]?.requestId ?? failKey(),
+			new Error("terrain unavailable"),
+		);
+		await flushRuntimeWork();
+
+		expect(events).toEqual([
+			expect.objectContaining({
+				kind: "scene-interest-updated",
+				revision: 1,
+				source: "manual",
+			}),
+			expect.objectContaining({
+				kind: "scene-interest-settled",
+				result: "failed",
+				revision: 1,
+				source: "manual",
+			}),
+		]);
+
+		unsubscribe();
+		runtime.dispose();
+		consoleError.mockRestore();
+	});
 });
 
 function updateOutdoorSceneInterest(

@@ -1008,7 +1008,7 @@ Decisions and course corrections:
 
 ### Phase 8B1: Peer Owner Contract Shape
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: add the durable layer-owned peer record contract without changing every producer and consumer in the same step.
 
@@ -1016,25 +1016,29 @@ Deliverables:
 
 - Add a layer-owner variant to `StaticPeerRecordOwner`.
 - Add a helper that derives the layer peer owner from scheduled work using the same owner key rules as coordinator residency.
-- Narrow durable peer-record interfaces that are known to outlive a transient work item to the layer owner shape.
+- Update existing peer-record filtering to classify the new layer owner variant without changing emitted record ownership yet.
 - Keep `StaticWorkPeerRecordOwner` only as an explicitly temporary compatibility type until producer/consumer cutover finishes.
 
 Acceptance criteria:
 
 - The peer-owner contract can represent layer ownership directly.
-- Durable record type declarations no longer require `workId` ownership.
-- No runtime behavior changes are hidden in this phase.
+- Existing peer-record stale-output filtering understands layer owner ids once later phases begin emitting them.
+- No producer emits layer-owned durable records until Phase 8B2.
 
 Task checklist:
 
-- [ ] Add typed layer owner peer-record owner shape.
-- [ ] Add scheduled-work-to-layer-peer-owner helper.
-- [ ] Update durable peer-record owner field types.
-- [ ] Run typecheck to expose remaining producer/consumer call sites.
+- [x] Add typed layer owner peer-record owner shape.
+- [x] Add scheduled-work-to-layer-peer-owner helper.
+- [x] Update existing peer-record stale-output filtering to handle layer owners.
+- [x] Run typecheck.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Added `StaticLayerPeerRecordOwner` and included it in `StaticPeerRecordOwner`.
+- Added `createLayerPeerRecordOwnerForStaticWork` so baker cutover can reuse the same owner-key derivation as coordinator residency.
+- Adding the union exposed an existing exhaustiveness assumption in `StaticCoordinator` stale-output filtering. The filter now accepts draw-unit owners, layer owners, and temporary work owners; no baker emits layer owners until Phase 8B2.
+- Moved durable record field narrowing from this contract-only phase into Phase 8B2 because narrowing without producer migration would make the repository unbuildable between phase commits.
+- Validation: `npm run check`.
 
 ### Phase 8B2: Baker Peer-Owner Emission
 
@@ -1045,6 +1049,7 @@ Goal: cut static producers over so durable records emitted by terrain/object/env
 Deliverables:
 
 - Update terrain/object/env-cell bakers and portal-graph helpers to emit layer-owned durable records.
+- Narrow durable peer-record interfaces that are known to outlive a transient work item to the layer owner shape.
 - Update tests that construct durable peer records through baker fixtures.
 - Keep work ids only as transient diagnostic/timing metadata where useful.
 
@@ -1057,6 +1062,7 @@ Acceptance criteria:
 Task checklist:
 
 - [ ] Replace baker-local work peer owner constructors.
+- [ ] Update durable peer-record owner field types.
 - [ ] Update portal graph and env-cell source-mapping owner arguments.
 - [ ] Update baker-focused tests and fixtures.
 - [ ] Run focused static baker tests.

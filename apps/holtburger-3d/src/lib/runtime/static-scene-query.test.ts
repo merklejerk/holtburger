@@ -675,7 +675,7 @@ describe("static scene query", () => {
 			},
 		});
 
-		query.retainScopes([]);
+		query.retainLayerOwners([]);
 
 		expect(query.createSnapshot()).toMatchObject({
 			committedEnvCellSpatialRecordCount: 0,
@@ -1231,7 +1231,7 @@ describe("static scene query", () => {
 	it("does not infer env-cell camera residency from source BVHs after committed records are gone", () => {
 		const query = new StaticSceneQuery();
 		commitLandblockEnvCells(query, createLandblockEnvCellsPayload());
-		query.retainScopes([]);
+		query.retainLayerOwners([]);
 
 		expect(
 			query.queryCameraResidencyAtPoint({
@@ -1365,7 +1365,7 @@ describe("static scene query", () => {
 			envCellRecordCount: 0,
 		});
 
-		query.retainScopes([]);
+		query.retainLayerOwners([]);
 
 		expect(
 			query.queryCommittedEnvCellRecords({ landblockId: 0xda55ffff }),
@@ -1505,7 +1505,7 @@ describe("static scene query", () => {
 			committedEnvCellPortalGraphRecordCount: 1,
 		});
 
-		query.retainScopes([]);
+		query.retainLayerOwners([]);
 
 		expect(query.queryPortalGraphs({ landblockId: 0xda55ffff })).toEqual([]);
 		expect(
@@ -1728,7 +1728,7 @@ describe("static scene query", () => {
 			query.hasCommittedPortalInteriorScene({ landblockId: 0xdb55ffff }),
 		).toBe(false);
 
-		query.retainScopes([]);
+		query.retainLayerOwners([]);
 
 		expect(
 			query.hasCommittedPortalInteriorScene({ landblockId: 0xda55ffff }),

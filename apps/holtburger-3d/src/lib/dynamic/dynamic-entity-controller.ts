@@ -2,8 +2,8 @@ import type {
 	StaticBounds,
 	StaticAuthoredDynamicSeedRecord,
 	OutdoorStaticObjectDomain,
-	StaticScopeOwnerKey,
 	StaticLayerPeerRecordOwner,
+	LayerOwnerKey,
 	VisualTextureDomain,
 } from "../static/contracts";
 import {
@@ -34,10 +34,7 @@ import {
 	type StaticAuthoredDynamicSeedFacts,
 	type DynamicRuntimeSnapshot,
 } from "./contracts";
-import {
-	createLayerOwnerKeyForStaticScope,
-	createLayerOwnerKeyId,
-} from "../static/layer-owners";
+import { createLayerOwnerKeyId } from "../static/layer-owners";
 import { DynamicAnimationPlayer } from "./dynamic-animation-player";
 import { DynamicEntityStore } from "./dynamic-entity-store";
 import {
@@ -123,13 +120,9 @@ export class DynamicEntityController {
 		}
 	}
 
-	retainStaticScopes(scopes: readonly StaticScopeOwnerKey[]): void {
+	retainLayerOwners(layerOwners: readonly LayerOwnerKey[]): void {
 		const removed = this.#store.retainStaticSourceScopeKeys(
-			new Set(
-				scopes.map((scope) =>
-					createLayerOwnerKeyId(createLayerOwnerKeyForStaticScope(scope)),
-				),
-			),
+			new Set(layerOwners.map(createLayerOwnerKeyId)),
 		);
 		for (const record of removed) {
 			this.#releaseRecordState(record);

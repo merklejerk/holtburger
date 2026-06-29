@@ -209,7 +209,7 @@ export class StaticCoordinator {
 		return {
 			activeWork,
 			removedResources,
-			retainedScopes: demandPlan.retainedScopes,
+			retainedLayerOwners: demandPlan.retainedLayerOwners,
 		};
 	}
 

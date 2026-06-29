@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type {
+	LayerOwnerKey,
 	StaticAuthoredDynamicSeedRecord,
 	StaticLayerPeerRecordOwner,
-	StaticScopeOwnerKey,
 } from "../static/contracts";
 import { DynamicEntityController } from "./dynamic-entity-controller";
 
@@ -119,7 +119,7 @@ describe("dynamic entity controller", () => {
 			}),
 		]);
 
-		controller.retainStaticScopes([createRetainedScope()]);
+		controller.retainLayerOwners([createRetainedLayerOwner()]);
 
 		expect(controller.createSnapshot().records).toHaveLength(1);
 		expect(controller.createSnapshot().records[0]?.sourceResidence).toEqual({
@@ -187,7 +187,7 @@ describe("dynamic entity controller", () => {
 			createEnvCellDynamicSeedRecord(),
 		]);
 
-		controller.retainStaticScopes([createRetainedScope()]);
+		controller.retainLayerOwners([createRetainedLayerOwner()]);
 
 		expect(controller.createSnapshot().records).toHaveLength(1);
 		expect(controller.createSnapshot().records[0]?.provenance.kind).toBe(
@@ -292,7 +292,7 @@ describe("dynamic entity controller", () => {
 			},
 		});
 
-		controller.retainStaticScopes([]);
+		controller.retainLayerOwners([]);
 
 		expect(controller.createSnapshot()).toMatchObject({
 			activeEntityCount: 1,
@@ -477,14 +477,10 @@ function createEnvCellDynamicSeedRecord(): StaticAuthoredDynamicSeedRecord {
 	};
 }
 
-function createRetainedScope(): StaticScopeOwnerKey {
+function createRetainedLayerOwner(): LayerOwnerKey {
 	return {
-		domain: "outdoor-buildings",
-		scope: {
-			kind: "landblock",
-			landblockId: 0xda55ffff,
-		},
-		scopeKey: "landblock:da55ffff",
+		kind: "outdoor-buildings",
+		landblockId: 0xda55ffff,
 	};
 }
 

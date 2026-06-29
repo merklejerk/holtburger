@@ -435,7 +435,7 @@ describe("static coordinator", () => {
 		consoleError.mockRestore();
 	});
 
-	it("returns retained scopes separately from active work", () => {
+	it("returns retained layer owners separately from active work", () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
 		const coordinator = new StaticCoordinator({
@@ -448,11 +448,10 @@ describe("static coordinator", () => {
 			createSingleTerrainDemand(0xda55ffff),
 		);
 
-		expect(reconciliation.retainedScopes).toEqual([
+		expect(reconciliation.retainedLayerOwners).toEqual([
 			{
-				domain: "outdoor-terrain",
-				scope: { kind: "landblock", landblockId: 0xda55ffff },
-				scopeKey: "landblock:da55ffff",
+				kind: "terrain",
+				landblockId: 0xda55ffff,
 			},
 		]);
 		expect(reconciliation.activeWork).toHaveLength(1);
@@ -597,7 +596,7 @@ describe("static coordinator", () => {
 			},
 		});
 
-		expect(reconciliation.retainedScopes).toEqual([]);
+		expect(reconciliation.retainedLayerOwners).toEqual([]);
 		expect(reconciliation.removedResources).toEqual([]);
 		expect(deltas).toEqual([]);
 	});

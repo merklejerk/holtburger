@@ -178,7 +178,7 @@ describe("static demand planner", () => {
 	});
 
 	it("plans outdoor env-cell demand from env-cell coverage radius", () => {
-		const { retainedScopes, work } = planStaticDemand(
+		const { retainedLayerOwners, work } = planStaticDemand(
 			createOutdoorDemand(0xda55ffff, {
 				buildings: -1,
 				detail: -1,
@@ -204,18 +204,14 @@ describe("static demand planner", () => {
 			priority: 10,
 			workId: "4:landblock:da55ffff:landblock-env-cells",
 		});
-		expect(retainedScopes).toContainEqual({
-			domain: "landblock-env-cells",
-			scope: {
-				kind: "landblock",
-				landblockId: 0xda55ffff,
-			},
-			scopeKey: "landblock:da55ffff",
+		expect(retainedLayerOwners).toContainEqual({
+			kind: "env-cell-system",
+			landblockId: 0xda55ffff,
 		});
 	});
 
 	it("plans dungeon/interior demand with same-landblock building portal facts before env-cells", () => {
-		const { retainedScopes, work } = planStaticDemand(
+		const { retainedLayerOwners, work } = planStaticDemand(
 			{
 				location: {
 					envCellId: 0xda550123,
@@ -258,22 +254,14 @@ describe("static demand planner", () => {
 				workId: "12:landblock:da55ffff:landblock-env-cells",
 			},
 		]);
-		expect(retainedScopes).toEqual([
+		expect(retainedLayerOwners).toEqual([
 			{
-				domain: "outdoor-buildings",
-				scope: {
-					kind: "landblock",
-					landblockId: 0xda55ffff,
-				},
-				scopeKey: "landblock:da55ffff",
+				kind: "outdoor-buildings",
+				landblockId: 0xda55ffff,
 			},
 			{
-				domain: "landblock-env-cells",
-				scope: {
-					kind: "landblock",
-					landblockId: 0xda55ffff,
-				},
-				scopeKey: "landblock:da55ffff",
+				kind: "env-cell-system",
+				landblockId: 0xda55ffff,
 			},
 		]);
 		expect(
@@ -319,7 +307,7 @@ describe("static demand planner", () => {
 	});
 
 	it("does not expand interior-cell demand into neighboring outdoor source landblocks", () => {
-		const { retainedScopes, work } = planStaticDemand(
+		const { retainedLayerOwners, work } = planStaticDemand(
 			{
 				location: {
 					envCellId: 0xda550123,
@@ -355,7 +343,7 @@ describe("static demand planner", () => {
 		expect(new Set(work.map((item) => item.job.scope.landblockId))).toEqual(
 			new Set([0xda55ffff]),
 		);
-		expect(retainedScopes.map((scope) => scope.scope.landblockId)).toEqual([
+		expect(retainedLayerOwners.map((owner) => owner.landblockId)).toEqual([
 			0xda55ffff, 0xda55ffff,
 		]);
 	});

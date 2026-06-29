@@ -11,7 +11,6 @@ import type {
 	StaticLodRadii,
 	StaticResolverJob,
 	StaticResolverScope,
-	StaticScopeOwnerKey,
 	ScheduledStaticWork,
 } from "./contracts";
 import { createLayerOwnerKeyForStaticScope } from "./layer-owners";
@@ -30,7 +29,7 @@ export function planStaticDemand(
 	revision: number,
 ): StaticDemandPlan {
 	if (!demand.location) {
-		return { retainedScopes: [], sourceRequests: [], work: [] };
+		return { retainedLayerOwners: [], sourceRequests: [], work: [] };
 	}
 
 	if (demand.location.kind === "interior-cell") {
@@ -54,7 +53,7 @@ export function planStaticDemand(
 		].sort(compareScheduledStaticWork);
 
 		return {
-			retainedScopes: work.map(createRetainedScopeFromWork),
+			retainedLayerOwners: work.map(createLayerOwnerKeyFromWork),
 			sourceRequests: createLandblockSceneLodSourceRequests(work, "outdoor"),
 			work,
 		};
@@ -98,7 +97,7 @@ export function planStaticDemand(
 	const sortedWork = work.sort(compareScheduledStaticWork);
 
 	return {
-		retainedScopes: sortedWork.map(createRetainedScopeFromWork),
+		retainedLayerOwners: sortedWork.map(createLayerOwnerKeyFromWork),
 		sourceRequests: createLandblockSceneLodSourceRequests(
 			sortedWork,
 			"outdoor",
@@ -170,14 +169,12 @@ export function describeStaticScopeKey(scope: StaticResolverScope): string {
 	return `landblock:${formatHex32(scope.landblockId)}`;
 }
 
-function createRetainedScopeFromWork(
-	work: ScheduledStaticWork,
-): StaticScopeOwnerKey {
-	return {
+function createLayerOwnerKeyFromWork(work: ScheduledStaticWork) {
+	return createLayerOwnerKeyForStaticScope({
 		domain: work.job.domain,
 		scope: work.job.scope,
 		scopeKey: describeStaticScopeKey(work.job.scope),
-	};
+	});
 }
 
 function createLandblockSceneLodSourceRequests(
@@ -216,9 +213,7 @@ function createLandblockSceneLodSourceRequests(
 		}
 		request.requestedLayersByKind.set(layerKind, {
 			kind: layerKind,
-			targetOwnerKey: createLayerOwnerKeyForStaticScope(
-				createRetainedScopeFromWork(item),
-			),
+			targetOwnerKey: createLayerOwnerKeyFromWork(item),
 		});
 	}
 

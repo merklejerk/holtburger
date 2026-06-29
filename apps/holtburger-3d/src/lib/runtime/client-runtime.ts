@@ -930,8 +930,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 		let reconciliation: StaticRetentionReconciliation;
 		try {
 			reconciliation = this.#reconcileStaticRetention(this.#sceneInterest);
-			this.#dynamicEntityController.retainStaticScopes(
-				reconciliation.retainedScopes,
+			this.#dynamicEntityController.retainLayerOwners(
+				reconciliation.retainedLayerOwners,
 			);
 			this.#enqueueDynamicRendererResourceSync();
 			this.#activeSceneWorkIds = new Set(
@@ -1293,7 +1293,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		const reconciliation = this.#staticCoordinator.reconcileStaticDemand(
 			createStaticDemandFromSceneInterest(interest),
 		);
-		this.#staticSceneQuery.retainScopes(reconciliation.retainedScopes);
+		this.#staticSceneQuery.retainLayerOwners(reconciliation.retainedLayerOwners);
 		this.#updateRenderPassPlan();
 		return reconciliation;
 	}

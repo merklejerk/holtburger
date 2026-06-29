@@ -785,7 +785,30 @@ fn serialize_landblock_scene_lod_layer(layer: &LandblockSceneLodLayer) -> serde_
             "statics": layer.statics.iter().map(serialize_landblock_outdoor_static_member).collect::<Vec<_>>(),
             "outdoorBvh": serialize_landblock_scene_lod_static_bvh(&layer.statics, layer.outdoor_bvh.as_ref()),
         }),
-        LandblockSceneLodLayer::EnvCellSystem => serde_json::json!({ "kind": "env-cell-system" }),
+        LandblockSceneLodLayer::EnvCellSystem(layer) => {
+            let bundle = LandblockEnvCellsAsset {
+                landblock_id: layer.landblock_id,
+                landblock_info_id: layer.landblock_info_id,
+                env_cells: layer.env_cells.clone(),
+                landblock_bvh_items: layer.landblock_bvh_items.clone(),
+                landblock_bvh: layer.landblock_bvh.clone(),
+                diagnostics: layer.diagnostics.clone(),
+            };
+            serde_json::json!({
+                "kind": "env-cell-system",
+                "landblockInfoId": layer.landblock_info_id,
+                "envCells": layer.env_cells.iter().map(|cell| {
+                    serialize_landblock_env_cell_bundle_cell(
+                        cell,
+                        serialize_prepared_polygon_set_render_geometry_json(&cell.prepared_cell.render_geometry),
+                        |index, aperture| serialize_prepared_portal_aperture_json(index, aperture),
+                    )
+                }).collect::<Vec<_>>(),
+                "portalLinks": serialize_landblock_env_cell_bundle_portal_links(&bundle),
+                "landblockEnvCellBvh": serialize_landblock_env_cell_bundle_bvh(&bundle),
+                "diagnostics": serialize_prepared_content_diagnostics(&layer.diagnostics),
+            })
+        }
     }
 }
 
@@ -816,6 +839,43 @@ fn serialize_landblock_scene_lod_static_bvh(
         "coordinateSpace": "landblock-render-local",
         "nodes": bvh.nodes.iter().map(serialize_prepared_bvh_node).collect::<Vec<_>>(),
         "items": items,
+    })
+}
+
+fn serialize_prepared_polygon_set_render_geometry_json(
+    geometry: &PreparedPolygonSetRenderGeometry,
+) -> serde_json::Value {
+    serde_json::json!({
+        "sourceId": geometry.source_id,
+        "vertexCount": geometry.vertex_count,
+        "triangleCount": geometry.triangle_count,
+        "positions": geometry.positions,
+        "normals": geometry.normals,
+        "uvs": geometry.uvs,
+        "triangles": geometry.triangles.iter().map(|triangle| serde_json::json!({
+            "polygonId": triangle.polygon_id,
+            "surfaceId": triangle.surface_id,
+            "materialVariantSignature": triangle.material_variant_signature,
+            "firstVertex": triangle.first_vertex,
+        })).collect::<Vec<_>>(),
+        "surfaceIds": geometry.surface_ids,
+        "invalidPolygons": geometry.invalid_polygons.iter().map(serialize_prepared_polygon_set_invalid_polygon).collect::<Vec<_>>(),
+        "skippedPolygonCount": geometry.skipped_polygon_count,
+        "bounds": geometry.bounds.as_ref().map(serialize_prepared_aabb),
+    })
+}
+
+fn serialize_prepared_portal_aperture_json(
+    aperture_index: usize,
+    aperture: &PreparedPortalAperture,
+) -> serde_json::Value {
+    serde_json::json!({
+        "apertureId": aperture.portal_id,
+        "sourceIndex": aperture.source_index,
+        "apertureIndex": aperture_index,
+        "polygonId": aperture.polygon_id,
+        "points": aperture.points.iter().map(serialize_prepared_vec3).collect::<Vec<_>>(),
+        "plane": aperture.plane.as_ref().map(serialize_prepared_portal_aperture_plane),
     })
 }
 
@@ -1843,8 +1903,8 @@ mod tests {
     use super::*;
     use holtburger_content::{
         CellLandblockFact, LandblockOutdoorAsset, LandblockOutdoorStaticMember,
-        LandblockSceneLodAsset, LandblockSceneLodContext, LandblockSceneLodLayer,
-        LandblockSceneLodLevel, LandblockSceneLodOutdoorBuildingsLayer,
+        LandblockSceneLodAsset, LandblockSceneLodContext, LandblockSceneLodEnvCellSystemLayer,
+        LandblockSceneLodLayer, LandblockSceneLodLevel, LandblockSceneLodOutdoorBuildingsLayer,
         LandblockSceneLodOutdoorStaticLayer, LandblockSceneLodTerrainLayer, PreparedAabb,
         PreparedBuildingTransitionAperture, PreparedBvh, PreparedBvhNode,
         PreparedContentSourceDiagnostics, PreparedStaticInstance, PreparedStaticInstanceKind,
@@ -1918,6 +1978,43 @@ mod tests {
         );
         assert_eq!(layers[2]["kind"], "outdoor-explicit-objects");
         assert_eq!(layers[3]["kind"], "outdoor-generated-scenery");
+    }
+
+    #[test]
+    fn serialize_landblock_scene_lod_payload_emits_env_cell_system_layer() {
+        let payload = serialize_landblock_scene_lod_payload(&LandblockSceneLodAsset {
+            landblock_id: 0xda55ffff,
+            level: LandblockSceneLodLevel::Level4,
+            context: LandblockSceneLodContext::Outdoor,
+            layers: vec![LandblockSceneLodLayer::EnvCellSystem(
+                LandblockSceneLodEnvCellSystemLayer {
+                    landblock_id: 0xda55ffff,
+                    landblock_info_id: 0xda55fffe,
+                    env_cells: Vec::new(),
+                    landblock_bvh_items: Vec::new(),
+                    landblock_bvh: None,
+                    diagnostics: PreparedContentSourceDiagnostics::default(),
+                },
+            )],
+            diagnostics: PreparedContentSourceDiagnostics::default(),
+        });
+
+        let layer = &payload["layers"][0];
+        assert_eq!(layer["kind"], "env-cell-system");
+        assert_eq!(layer["landblockInfoId"].as_u64(), Some(0xda55fffe));
+        assert_eq!(layer["envCells"].as_array().map(Vec::len), Some(0));
+        assert_eq!(
+            layer["landblockEnvCellBvh"]["nodes"]
+                .as_array()
+                .map(Vec::len),
+            Some(0)
+        );
+        assert_eq!(
+            layer["landblockEnvCellBvh"]["items"]
+                .as_array()
+                .map(Vec::len),
+            Some(0)
+        );
     }
 
     #[test]

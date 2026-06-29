@@ -387,7 +387,7 @@ Decisions and course corrections:
 
 ### Phase 2C: LoD 4 Env-Cell Source Projection
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: make LoD `4` carry env-cell source facts in the new payload without yet deleting the old env-cell route or runtime assembly store.
 
@@ -405,13 +405,18 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add env-cell system layer payload structs.
-- [ ] Add LoD `4` env-cell preservation tests.
-- [ ] Record any remaining env-cell cutover debt under Phase 10 or move it earlier if it blocks the new route.
+- [x] Add env-cell system layer payload structs.
+- [x] Add LoD `4` env-cell preservation tests.
+- [x] Record any remaining env-cell cutover debt under Phase 10 or move it earlier if it blocks the new route.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Added `LandblockSceneLodEnvCellSystemLayer` and changed `LandblockSceneLodLayer::EnvCellSystem` from a marker to a typed payload containing env cells, landblock env-cell BVH items, BVH, and diagnostics.
+- LoD `4` now emits LoD `3` outdoor output plus an env-cell system layer. Lower LoD levels do not emit or derive env-cell system output.
+- Reused `LandblockEnvCellsAssetAssembler` internally for Phase 2C to preserve current env-cell structure, portals, visibility, static seeds, geometry facts, and diagnostics without keeping the old host route as a normal-path dependency.
+- Added JSON serialization for `env-cell-system` layer records with env cells, portal links, landblock env-cell BVH, render geometry, and diagnostics.
+- Recorded cutover debt for Phase 10: LoD `4` still wraps the existing env-cell bundle assembler internally. Later cutover must remove runtime dependence on direct `landblock-env-cells` host lookups and delete old env-cell assembly store paths after source-first scheduling is in place.
+- Validation run: `cargo test -p holtburger-content scene_lod_level_4_includes_env_cell_system_layer`; `cargo test -p holtburger-content scene_lod_lower_levels_do_not_include_env_cell_system_layer`; `cargo test -p holtburger-3d serialize_landblock_scene_lod_payload_emits_env_cell_system_layer`.
 
 ### Phase 2D: Prepared LoD Cache
 

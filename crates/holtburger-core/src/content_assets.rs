@@ -285,11 +285,19 @@ impl ContentAssetService {
             return asset;
         }
 
-        let asset = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
-            &self.content,
-            &self.decode_cache,
-            request,
-        );
+        let cached = self
+            .landblock_scene_lod_cache
+            .lock()
+            .expect("landblock scene LoD cache lock should not be poisoned")
+            .get(key)
+            .cloned();
+        let asset = LandblockSceneLodAssetAssembler::new()
+            .assemble_landblock_extending_cached_asset(
+                &self.content,
+                &self.decode_cache,
+                request,
+                cached.as_ref(),
+            );
         let projected = project_landblock_scene_lod_asset(&asset, request.level);
         self.landblock_scene_lod_cache
             .lock()
@@ -338,6 +346,10 @@ impl LandblockSceneLodPreparedCache {
         let cached = self.entries.get(&key)?;
         (cached.level.as_u8() >= level.as_u8())
             .then(|| project_landblock_scene_lod_asset(cached, level))
+    }
+
+    fn get(&self, key: LandblockSceneLodCacheKey) -> Option<&LandblockSceneLodAsset> {
+        self.entries.get(&key)
     }
 
     fn insert(&mut self, key: LandblockSceneLodCacheKey, asset: LandblockSceneLodAsset) {
@@ -692,6 +704,47 @@ mod tests {
         );
     }
 
+    #[test]
+    fn higher_landblock_scene_lod_extends_cached_lower_layers() {
+        let landblock_id = 0xda55ffff;
+        let landblock_info_id = 0xda55fffe;
+        let source = Arc::new(InMemoryResourceSource::default().with_file(
+            EOR_CELL_NAMESPACE,
+            landblock_info_id,
+            landblock_info_with_one_building_bytes(landblock_info_id),
+        ));
+        let repository = ContentRepository::from_mounts(vec![source.clone()]);
+        let service =
+            ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new()));
+
+        let level_1 = service
+            .load(ContentAssetRequest::LandblockSceneLod(
+                LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level1),
+            ))
+            .expect("level 1 scene LoD should load");
+        let ContentAsset::LandblockSceneLod(level_1) = level_1 else {
+            panic!("expected level 1 scene LoD asset");
+        };
+        assert_eq!(building_layer_static_count(&level_1), Some(1));
+        let info_reads = source.read_count(EOR_CELL_NAMESPACE, landblock_info_id);
+
+        let level_3 = service
+            .load(ContentAssetRequest::LandblockSceneLod(
+                LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level3),
+            ))
+            .expect("level 3 scene LoD should extend cached level 1");
+        let ContentAsset::LandblockSceneLod(level_3) = level_3 else {
+            panic!("expected level 3 scene LoD asset");
+        };
+
+        assert_eq!(level_3.level, LandblockSceneLodLevel::Level3);
+        assert_eq!(building_layer_static_count(&level_3), Some(1));
+        assert_eq!(
+            source.read_count(EOR_CELL_NAMESPACE, landblock_info_id),
+            info_reads
+        );
+    }
+
     #[tokio::test]
     async fn content_asset_runtime_dedupes_identical_landblock_scene_lod_requests() {
         let landblock_id = 0xda55ffff;
@@ -734,6 +787,31 @@ mod tests {
         );
         bytes.extend_from_slice(&0_u32.to_le_bytes()); // hook count
         bytes
+    }
+
+    fn landblock_info_with_one_building_bytes(landblock_info_id: u32) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&landblock_info_id.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // num_cells
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // num_objects
+        bytes.extend_from_slice(&1_u16.to_le_bytes()); // num_buildings
+        bytes.extend_from_slice(&0_u16.to_le_bytes()); // pack_mask
+        bytes.extend_from_slice(&0x0100_3333_u32.to_le_bytes()); // model_id
+        push_frame(
+            &mut bytes,
+            Vector3::new(48.0, 48.0, 0.0),
+            Quaternion::identity(),
+        );
+        bytes.extend_from_slice(&1_u32.to_le_bytes()); // num_leaves
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // num_portals
+        bytes
+    }
+
+    fn building_layer_static_count(asset: &LandblockSceneLodAsset) -> Option<usize> {
+        asset.layers.iter().find_map(|layer| match layer {
+            LandblockSceneLodLayer::OutdoorBuildings(buildings) => Some(buildings.statics.len()),
+            _ => None,
+        })
     }
 
     fn push_frame(bytes: &mut Vec<u8>, origin: Vector3, orientation: Quaternion) {

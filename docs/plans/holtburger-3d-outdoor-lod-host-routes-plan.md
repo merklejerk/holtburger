@@ -456,13 +456,13 @@ Decisions and course corrections:
 
 ### Phase 2E: Incremental Higher-LoD Extension
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: teach higher LoD preparation to reuse already prepared lower source-family state instead of recomputing lower families.
 
 Deliverables:
 
-- Introduce an internal prepared source state that can hold terrain, building, explicit-object, generated-scenery, and env-cell-system preparation independently.
+- Reuse cached prepared lower layer state while preparing only missing terrain, building, explicit-object, generated-scenery, and env-cell-system families.
 - Change higher-LoD assembly to extend missing source-family state from the cached lower preparation where possible.
 - Keep final public `LandblockSceneLodAsset` projection unchanged.
 
@@ -474,14 +474,18 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add internal prepared source-state structs.
-- [ ] Teach the assembler/cache handoff to extend missing source families.
-- [ ] Add read-count or instrumentation tests proving higher-after-lower avoids lower-family recomputation.
-- [ ] Confirm no requested output-layer dimension enters cache identity.
+- [x] Reuse cached typed lower layer payloads as prepared lower source state.
+- [x] Teach the assembler/cache handoff to extend missing source families.
+- [x] Add read-count or instrumentation tests proving higher-after-lower avoids lower-family recomputation.
+- [x] Confirm no requested output-layer dimension enters cache identity.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Added `LandblockSceneLodAssetAssembler::assemble_landblock_extending_cached_asset` so `ContentAssetService` can pass a cached lower LoD asset when a higher LoD is requested.
+- Higher LoD extension reuses cached lower layer payloads and only asks the content assembler for missing source families. For example, Level `1` cached building output is retained when Level `3` later prepares explicit/generated output.
+- Chose not to add a separate internal source-state struct in this phase. The typed layer payloads are already the prepared reusable lower state for current terrain/building/explicit/generated/env-cell output, and a separate wrapper would add ceremony without improving cache correctness yet.
+- Cache identity remains normalized landblock id plus context only. Requested output layers still do not enter the key.
+- Validation run: `cargo test -p holtburger-core higher_landblock_scene_lod_extends_cached_lower_layers`; `cargo test -p holtburger-core landblock_scene_lod_cache_projects_lower_requests_from_cached_higher_lod`; `cargo test -p holtburger-core landblock_scene_lod_cache_replaces_lower_cached_lod_with_higher_lod`; `cargo test -p holtburger-content scene_lod_outdoor_layers_partition_static_families_by_level`; `cargo test -p holtburger-content scene_lod_static_source_families_follow_level_contract`.
 
 ### Phase 3: Frontend Host Contract And Asset Key Support
 

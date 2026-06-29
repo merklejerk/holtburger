@@ -828,7 +828,7 @@ Decisions and course corrections:
 
 ### Phase 7C: Owner-Gated Bake Integration
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: route source-first layer recipes into existing bake queues without letting transient work ids become durable ownership.
 
@@ -848,14 +848,18 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Preserve bake batching by emitted domain/layer.
-- [ ] Stamp bake inputs with target owner keys.
-- [ ] Add owner-gated stale recipe drop tests.
-- [ ] Confirm source-first resolver output can feed current bake workers without broad route payload fallbacks.
+- [x] Preserve bake batching by emitted domain/layer.
+- [x] Stamp bake inputs with target owner keys.
+- [x] Add owner-gated stale recipe drop tests.
+- [x] Confirm source-first resolver output can feed current bake workers without broad route payload fallbacks.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Added required `targetOwnerKey` ownership to `StaticBakeBatchItem`. Existing old-route execution derives it from the scheduled work domain/scope; source-first recipes already carry the same owner key directly.
+- `StaticCoordinator` now stamps bake items with layer owner keys and filters pending batch items by current owner demand before bake. Work ids remain transient execution diagnostics during this phase.
+- Existing batch keys remain domain/revision-oriented, so terrain, buildings, explicit objects, generated scenery, and env-cell system payloads continue to feed the current domain-specific bake workers.
+- Added tests proving coordinator bake inputs carry owner keys and source-first resolver recipes can be passed to existing terrain/object/env-cell bakers without requesting broad old route payloads.
+- Validation: `npm run test:ts -- src/lib/static/resolver/landblock-scene-lod-source-resolver.test.ts src/lib/static/coordinator/static-coordinator.test.ts`; `npm run check`.
 
 ### Phase 7D: Browser Source-First Cutover And Old Adapter Deletion
 

@@ -591,6 +591,14 @@ describe("static coordinator", () => {
 		expect(
 			baker.pendingInputs[0]?.items.map((item) => item.work.workId),
 		).toEqual(terrainWork.slice(0, 2).map((item) => item.workId));
+		expect(
+			baker.pendingInputs[0]?.items.map((item) => item.targetOwnerKey),
+		).toEqual(
+			terrainWork.slice(0, 2).map((item) => ({
+				kind: "terrain",
+				landblockId: item.job.scope.landblockId,
+			})),
+		);
 
 		baker.complete(baker.pendingInputs[0]?.staticBatchId ?? "");
 		await flushPromises();
@@ -599,6 +607,73 @@ describe("static coordinator", () => {
 			committed: 2,
 			committedDrawUnits: 0,
 		});
+	});
+
+	it("drops pending bake items whose layer owner is no longer demanded", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: {
+				maxPayloadsPerBatch: 2,
+				maxWaitMs: 10_000,
+			},
+			resolver,
+		});
+
+		const work = activeWorkForDemand(coordinator, {
+			location: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: -1,
+				terrain: 1,
+			},
+		});
+		const terrainWork = work.filter(
+			(item) => item.job.domain === "outdoor-terrain",
+		);
+		const evictedWork = terrainWork[0];
+		const retainedWork = terrainWork[1];
+		if (!evictedWork || !retainedWork) {
+			throw new Error("terrain radius 1 should create at least two work items");
+		}
+
+		resolver.complete(resolver.pendingRequests[0]?.requestId ?? "");
+		await flushPromises();
+		expect(baker.pendingInputs).toHaveLength(0);
+
+		activeWorkForDemand(coordinator, {
+			location: {
+				kind: "outdoor-landblock",
+				landblockId: retainedWork.job.scope.landblockId,
+			},
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: -1,
+				terrain: 0,
+			},
+		});
+
+		resolver.complete(resolver.pendingRequests[1]?.requestId ?? "");
+		await flushPromises();
+
+		expect(baker.pendingInputs).toHaveLength(1);
+		expect(baker.pendingInputs[0]?.items.map((item) => item.work.workId)).toEqual([
+			retainedWork.workId,
+		]);
+		expect(
+			baker.pendingInputs[0]?.items.map((item) => item.targetOwnerKey),
+		).toEqual([
+			{
+				kind: "terrain",
+				landblockId: retainedWork.job.scope.landblockId,
+			},
+		]);
 	});
 
 	it("records compact outdoor static object payload summaries", async () => {

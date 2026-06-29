@@ -335,7 +335,7 @@ export class DynamicEntityResourceManager {
 		}
 
 		const visualSource = tracked.presentation.visualSource;
-		const setupAppearanceHostKey = createRuntimeSetupAppearanceHostKey(
+		const setupAppearanceHostKey = createSetupAppearanceOverrideHostKey(
 			visualSource.setupModelId,
 			visualSource.modelData,
 		);
@@ -578,7 +578,7 @@ function createSetupAnimationResourceKeys(
 	};
 }
 
-function createRuntimeSetupAppearanceHostKey(
+function createSetupAppearanceOverrideHostKey(
 	setupModelId: number,
 	modelData: DynamicEntityAppearanceOverride | null,
 ): HostAssetKey | null {
@@ -586,8 +586,8 @@ function createRuntimeSetupAppearanceHostKey(
 		return null;
 	}
 	return createHostAssetKey(
-		"runtime-setup-appearance",
-		`${formatHex32(setupModelId)}${createRuntimeSetupAppearanceQuery(modelData)}`,
+		"setup-appearance",
+		`${formatHex32(setupModelId)}${createSetupAppearanceOverrideQuery(modelData)}`,
 	);
 }
 
@@ -602,7 +602,7 @@ function hasRuntimeAppearanceOverrides(
 	);
 }
 
-function createRuntimeSetupAppearanceQuery(
+function createSetupAppearanceOverrideQuery(
 	modelData: DynamicEntityAppearanceOverride,
 ): string {
 	const params: string[] = [];
@@ -1614,7 +1614,6 @@ function createRequiredResourceFromHostKey(
 ): DynamicEntityRequiredResource {
 	switch (key.kind) {
 		case "setup-appearance":
-		case "runtime-setup-appearance":
 			return "setup-appearance";
 		case "gfx-obj":
 			return "gfx";

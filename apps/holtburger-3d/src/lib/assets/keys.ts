@@ -14,7 +14,6 @@ const HEX32_ROUTE_KINDS = new Set<HostAssetKeyKind>([
 	"animation",
 	"gfx-obj",
 	"setup-model",
-	"setup-appearance",
 	"material",
 	"surface-texture",
 	"render-surface",
@@ -94,14 +93,11 @@ export function parseHostAssetId(assetId: string): HostAssetKey {
 		return createRawHostAssetKey(assetId);
 	}
 
-	if (
-		(kind === "prepared-texture" || kind === "runtime-setup-appearance") &&
-		id.includes("?")
-	) {
+	if (kind === "setup-appearance") {
 		return createHostAssetKey(kind, id);
 	}
 
-	if (kind === "runtime-setup-appearance") {
+	if (kind === "prepared-texture" && id.includes("?")) {
 		return createHostAssetKey(kind, id);
 	}
 
@@ -118,14 +114,21 @@ function normalizeAssetKeyId(
 ): string {
 	if (
 		kind === "raw" ||
-		((kind === "prepared-texture" || kind === "runtime-setup-appearance") &&
-			typeof id === "string")
+		(kind === "prepared-texture" && typeof id === "string")
 	) {
 		return `${id}`.trim();
 	}
 
+	if (kind === "setup-appearance" && typeof id === "string") {
+		return normalizeSetupAppearanceRouteId(id);
+	}
+
 	if (typeof id !== "number") {
 		throw new Error(`${kind} route id must be numeric: ${id}`);
+	}
+
+	if (kind === "setup-appearance") {
+		return formatHex32(id);
 	}
 
 	if (kind === "landblock-outdoor" || kind === "landblock-env-cells") {
@@ -162,6 +165,15 @@ function assertNonnegativeInteger(value: number, kind: string): number {
 	return value;
 }
 
+function normalizeSetupAppearanceRouteId(id: string): string {
+	const trimmed = id.trim();
+	if (!/^[0-9a-fA-F]{8}(?:\?.+)?$/.test(trimmed)) {
+		throw new Error(`setup-appearance route id must be hex32 with optional query: ${id}`);
+	}
+
+	return trimmed;
+}
+
 function isKnownHostAssetKeyKind(kind: string): kind is HostAssetKeyKind {
 	return (
 		kind === "landblock-outdoor" ||
@@ -171,7 +183,6 @@ function isKnownHostAssetKeyKind(kind: string): kind is HostAssetKeyKind {
 		kind === "gfx-obj" ||
 		kind === "setup-model" ||
 		kind === "setup-appearance" ||
-		kind === "runtime-setup-appearance" ||
 		kind === "material" ||
 		kind === "terrain-material" ||
 		kind === "region-render-profile" ||

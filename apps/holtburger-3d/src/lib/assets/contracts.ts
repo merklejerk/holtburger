@@ -6,7 +6,6 @@ export type HostAssetKeyKind =
 	| "gfx-obj"
 	| "setup-model"
 	| "setup-appearance"
-	| "runtime-setup-appearance"
 	| "material"
 	| "terrain-material"
 	| "region-render-profile"

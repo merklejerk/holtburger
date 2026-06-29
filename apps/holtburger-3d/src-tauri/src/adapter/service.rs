@@ -133,18 +133,23 @@ fn convert_runtime_appearance_obj_desc(dto: RuntimeAppearanceObjDescDto) -> ObjD
     }
 }
 
-fn parse_runtime_setup_appearance_asset_id(
+fn parse_setup_appearance_override_asset_id(
     asset_id: &str,
 ) -> anyhow::Result<Option<RuntimeAppearanceRequestDto>> {
-    let Some(rest) = asset_id.strip_prefix("runtime-setup-appearance/") else {
+    let Some(rest) = asset_id.strip_prefix("setup-appearance/") else {
         return Ok(None);
     };
-    let (setup_hex, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let Some((setup_hex, query)) = rest.split_once('?') else {
+        return Ok(None);
+    };
+    if query.is_empty() {
+        anyhow::bail!("setup appearance override query cannot be empty");
+    }
     if setup_hex.len() != 8 || !setup_hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        anyhow::bail!("runtime setup appearance route setup id must be hex32");
+        anyhow::bail!("setup appearance override route setup id must be hex32");
     }
     let setup_model_id = u32::from_str_radix(setup_hex, 16)
-        .with_context(|| format!("invalid runtime setup appearance setup id {setup_hex}"))?;
+        .with_context(|| format!("invalid setup appearance override setup id {setup_hex}"))?;
     let mut obj_desc = RuntimeAppearanceObjDescDto {
         palette_id: None,
         sub_palettes: Vec::new(),
@@ -155,10 +160,10 @@ fn parse_runtime_setup_appearance_asset_id(
     if !query.is_empty() {
         for pair in query.split('&') {
             let (key, value) = pair.split_once('=').ok_or_else(|| {
-                anyhow::anyhow!("runtime setup appearance query pair missing '='")
+                anyhow::anyhow!("setup appearance override query pair missing '='")
             })?;
             if !seen_params.insert(key) {
-                anyhow::bail!("runtime setup appearance query repeated parameter '{key}'");
+                anyhow::bail!("setup appearance override query repeated parameter '{key}'");
             }
             match key {
                 "palette" => {
@@ -173,7 +178,7 @@ fn parse_runtime_setup_appearance_asset_id(
                 "part" => {
                     obj_desc.anim_part_changes = parse_runtime_anim_part_change_query(value)?;
                 }
-                _ => anyhow::bail!("unknown runtime setup appearance query parameter '{key}'"),
+                _ => anyhow::bail!("unknown setup appearance override query parameter '{key}'"),
             }
         }
     }
@@ -233,7 +238,7 @@ fn parse_runtime_anim_part_change_query(
 
 fn parse_query_list<'a>(value: &'a str, name: &str) -> anyhow::Result<Vec<&'a str>> {
     if value.is_empty() {
-        anyhow::bail!("runtime setup appearance query parameter '{name}' cannot be empty");
+        anyhow::bail!("setup appearance override query parameter '{name}' cannot be empty");
     }
     Ok(value.split(',').collect())
 }
@@ -246,7 +251,7 @@ fn split_query_item_fields<'a>(
     let fields = item.split(':').collect::<Vec<_>>();
     if fields.len() != expected || fields.iter().any(|field| field.is_empty()) {
         anyhow::bail!(
-            "runtime setup appearance query parameter '{name}' has malformed item '{item}'"
+            "setup appearance override query parameter '{name}' has malformed item '{item}'"
         );
     }
     Ok(fields)
@@ -254,22 +259,22 @@ fn split_query_item_fields<'a>(
 
 fn parse_query_hex32(value: &str, name: &str) -> anyhow::Result<u32> {
     if value.len() != 8 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        anyhow::bail!("runtime setup appearance {name} must be hex32");
+        anyhow::bail!("setup appearance override {name} must be hex32");
     }
     u32::from_str_radix(value, 16)
-        .with_context(|| format!("invalid runtime setup appearance {name} '{value}'"))
+        .with_context(|| format!("invalid setup appearance override {name} '{value}'"))
 }
 
 fn parse_query_u32(value: &str, name: &str) -> anyhow::Result<u32> {
     value
         .parse::<u32>()
-        .with_context(|| format!("invalid runtime setup appearance {name} '{value}'"))
+        .with_context(|| format!("invalid setup appearance override {name} '{value}'"))
 }
 
 fn parse_query_u8(value: &str, name: &str) -> anyhow::Result<u8> {
     value
         .parse::<u8>()
-        .with_context(|| format!("invalid runtime setup appearance {name} '{value}'"))
+        .with_context(|| format!("invalid setup appearance override {name} '{value}'"))
 }
 
 impl HostBoundaryAdapter {
@@ -297,7 +302,8 @@ impl HostBoundaryAdapter {
         &self,
         request: AssetLookupRequestDto,
     ) -> anyhow::Result<AssetLookupResponseDto> {
-        if let Some(runtime_request) = parse_runtime_setup_appearance_asset_id(&request.asset_id)? {
+        if let Some(runtime_request) = parse_setup_appearance_override_asset_id(&request.asset_id)?
+        {
             let payload = self.resolve_runtime_appearance(runtime_request).await?;
             return Ok(AssetLookupResponseDto {
                 request_id: request.request_id,
@@ -437,7 +443,8 @@ impl HostBoundaryAdapter {
             );
         }
 
-        if let Some(runtime_request) = parse_runtime_setup_appearance_asset_id(&request.asset_id)? {
+        if let Some(runtime_request) = parse_setup_appearance_override_asset_id(&request.asset_id)?
+        {
             let payload =
                 tauri::async_runtime::block_on(self.resolve_runtime_appearance(runtime_request))?;
             return Ok(AssetLookupResponseDto {
@@ -805,12 +812,12 @@ mod tests {
     use holtburger_dat::file_type::{Palette, PixelFormatId, RenderSurface};
 
     #[test]
-    fn parses_runtime_setup_appearance_query_route() {
-        let request = parse_runtime_setup_appearance_asset_id(
-            "runtime-setup-appearance/020003e5?palette=0400007e&sub=0:192:040004a0,192:64:04001fd8&tex=16:05000010:05000020&part=16:01001a52",
+    fn parses_setup_appearance_override_query_route() {
+        let request = parse_setup_appearance_override_asset_id(
+            "setup-appearance/020003e5?palette=0400007e&sub=0:192:040004a0,192:64:04001fd8&tex=16:05000010:05000020&part=16:01001a52",
         )
-        .expect("runtime setup appearance route should parse")
-        .expect("runtime setup appearance route should match");
+        .expect("setup appearance override route should parse")
+        .expect("setup appearance override route should match");
 
         assert_eq!(request.setup_model_id, 0x0200_03e5);
         let obj_desc = request.obj_desc.expect("route should produce obj desc");

@@ -61,8 +61,8 @@ interface RoutePayloadParser<TPayload extends V2PreparedAssetPayload> {
 }
 
 const HEX32_ROUTE_SEGMENT = "[0-9a-fA-F]{8}";
-const RUNTIME_SETUP_APPEARANCE_ROUTE = new RegExp(
-	`^runtime-setup-appearance/${HEX32_ROUTE_SEGMENT}(?:\\?.*)?$`,
+const SETUP_APPEARANCE_ROUTE = new RegExp(
+	`^setup-appearance/${HEX32_ROUTE_SEGMENT}(?:\\?.*)?$`,
 );
 
 const V2_PAYLOAD_PARSERS: readonly RoutePayloadParser<V2PreparedAssetPayload>[] =
@@ -94,12 +94,7 @@ const V2_PAYLOAD_PARSERS: readonly RoutePayloadParser<V2PreparedAssetPayload>[] 
 		},
 		{
 			expectedKind: "setup-appearance",
-			route: /^setup-appearance\/[0-9a-fA-F]{8}$/,
-			schema: setupAppearancePayloadDtoSchema,
-		},
-		{
-			expectedKind: "setup-appearance",
-			route: RUNTIME_SETUP_APPEARANCE_ROUTE,
+			route: SETUP_APPEARANCE_ROUTE,
 			schema: setupAppearancePayloadDtoSchema,
 		},
 		{

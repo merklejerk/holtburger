@@ -402,7 +402,7 @@ function clearDynamicBounds(record: DynamicEntityRecord): DynamicEntityRecord {
 			indexed: false,
 			precision: "none",
 		},
-		effectiveResidence: record.sourceResidence,
+		effectiveResidence: record.effectiveResidence,
 	};
 }
 

@@ -3983,7 +3983,7 @@ function createDynamicRendererVisualResource(
 	record: DynamicEntitySummaryDto,
 ): readonly DynamicRendererVisualResource[] {
 	const visual = record.resources.visual;
-	if (visual.status !== "ready" || !isDynamicRendererEligible(record)) {
+	if (visual.status !== "ready") {
 		return [];
 	}
 	return [

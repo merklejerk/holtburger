@@ -497,6 +497,69 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
+	it("keeps no-residence runtime dynamic resources without committing renderer instances", async () => {
+		const renderer = new FakeRenderer();
+		const assetService = createResolvingAssetService();
+		const runtime = createClientRuntime({
+			assetService,
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+		});
+
+		const entityId = runtime.createRuntimeSpawn({
+			...createFirstRuntimeSpawnFixtureRequest(),
+			renderResidence: {
+				kind: "no-residence",
+				reason: "render-residence-unassigned",
+			},
+		});
+		await resolvePendingDynamicAssetsUntil(
+			assetService,
+			() => renderer.createDiagnosticsSnapshot().dynamicVisualResources > 0,
+		);
+
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicInstances: 0,
+			dynamicVisualResources: 1,
+		});
+		expect(renderer.dynamicResourceCommits.at(-1)).toMatchObject({
+			addedVisualResources: [
+				expect.objectContaining({
+					entityId,
+					resourceId: `dynamic-visual-resource:${entityId}`,
+				}),
+			],
+			removedVisualResourceIds: [],
+		});
+		expect(runtime.createDiagnosticsSnapshot().dynamic.records[0]).toMatchObject({
+			effectiveResidence: {
+				kind: "no-residence",
+				reason: "render-residence-unassigned",
+			},
+			renderability: {
+				reasons: ["no-render-residence"],
+				status: "non-renderable",
+			},
+			resources: {
+				status: "ready",
+				visual: {
+					status: "ready",
+				},
+			},
+		});
+
+		updateRuntimeFrame(runtime, 1);
+
+		expect(renderer.dynamicInstanceCommits.at(-1)?.instances).toEqual([]);
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicInstances: 0,
+			dynamicVisualResources: 1,
+		});
+
+		runtime.dispose();
+	});
+
 	it("renders and removes the ACE WCID 1 runtime spawn fixture without animation playback", async () => {
 		const renderer = new FakeRenderer();
 		const runtime = createClientRuntime({

@@ -5,7 +5,11 @@ import type {
 	StaticObjectSourceAssetFacts,
 	StaticObjectSourceIdentity,
 } from "../static/contracts";
-import type { DynamicEntityRecord, DynamicEntityResidence } from "./contracts";
+import type {
+	DynamicEntityRecord,
+	DynamicEntityRenderResidence,
+	DynamicEntityResidence,
+} from "./contracts";
 import { DynamicEntityController } from "./dynamic-entity-controller";
 import { DynamicEntityStore } from "./dynamic-entity-store";
 import { DynamicPlacementTracker } from "./dynamic-placement-tracker";
@@ -116,6 +120,78 @@ describe("dynamic placement tracker", () => {
 			},
 		]);
 		expect(index.records()).toEqual([]);
+	});
+
+	it("clears outdoor index membership when a ready record has no render residence", () => {
+		const sourceLandblockId = makeOutdoorLandblockId(0xda, 0x55);
+		const index = new OutdoorDynamicSpatialIndex();
+		const tracker = new DynamicPlacementTracker({ outdoorIndex: index });
+
+		tracker.update(
+			createReadyRecord({
+				partPose: createPlacement({ x: 20, y: 0, z: -20 }),
+				sourceLandblockId,
+			}),
+		);
+		const update = tracker.update(
+			createReadyRecord({
+				renderResidence: {
+					kind: "no-residence",
+					reason: "render-residence-evicted",
+				},
+				sourceLandblockId,
+			}),
+		);
+
+		expect(update.record.bounds).toEqual({
+			currentBounds: null,
+			indexMembership: { kind: "none" },
+			indexed: false,
+			precision: "none",
+		});
+		expect(update.record.effectiveResidence).toEqual({
+			kind: "no-residence",
+			reason: "render-residence-evicted",
+		});
+		expect(index.records()).toEqual([]);
+		expect(index.landblockIds()).toEqual([]);
+	});
+
+	it("clears env-cell index membership when a ready record has no render residence", () => {
+		const tracker = new DynamicPlacementTracker();
+		const sourceResidence = {
+			envCellId: 0xda550100,
+			kind: "env-cell",
+			landblockId: 0xda55ffff,
+		} as const;
+
+		tracker.update(createReadyRecord({ sourceResidence }));
+		const update = tracker.update(
+			createReadyRecord({
+				renderResidence: {
+					kind: "no-residence",
+					reason: "render-residence-evicted",
+				},
+				sourceResidence,
+			}),
+		);
+
+		expect(update.record.bounds).toEqual({
+			currentBounds: null,
+			indexMembership: { kind: "none" },
+			indexed: false,
+			precision: "none",
+		});
+		expect(update.record.effectiveResidence).toEqual({
+			kind: "no-residence",
+			reason: "render-residence-evicted",
+		});
+		expect(
+			tracker.queryEnvCellBounds({
+				envCellIds: [0xda550100],
+				landblockId: 0xda55ffff,
+			}),
+		).toEqual([]);
 	});
 });
 
@@ -261,6 +337,7 @@ function createReadyRecord(
 	options: {
 		readonly activeOmegaRotation?: PlacementTransformDto["orientation"];
 		readonly partPose?: PlacementTransformDto;
+		readonly renderResidence?: DynamicEntityRenderResidence;
 		readonly sourceLandblockId?: number;
 		readonly sourceResidence?: DynamicEntityResidence;
 	} = {},
@@ -331,7 +408,7 @@ function createReadyRecord(
 			indexed: false,
 			precision: "none",
 		},
-		effectiveResidence: sourceResidence,
+		effectiveResidence: options.renderResidence ?? sourceResidence,
 		id: entityId,
 		presentation: {
 			diagnostics: {

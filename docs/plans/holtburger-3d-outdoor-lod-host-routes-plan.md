@@ -1255,7 +1255,7 @@ Decisions and course corrections:
 
 ### Phase 8D3: No-Residence Placement And Renderer Filtering
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: make no-residence dynamics non-indexed and non-instanced while keeping their runtime-owned visual resources alive.
 
@@ -1275,14 +1275,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Update placement tracker no-residence handling.
-- [ ] Update dynamic renderer instance eligibility/filtering.
-- [ ] Add placement tracker tests for no-residence outdoor/env-cell clearing.
-- [ ] Add runtime renderer commit tests for no-residence records.
+- [x] Update placement tracker no-residence handling.
+- [x] Update dynamic renderer instance eligibility/filtering.
+- [x] Add placement tracker tests for no-residence outdoor/env-cell clearing.
+- [x] Add runtime renderer commit tests for no-residence records.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- `DynamicPlacementTracker` now treats `effectiveResidence.kind === "no-residence"` as unplaced: it clears current bounds, outdoor indexes, and env-cell index membership.
+- Fixed `clearDynamicBounds` to preserve the current render residence instead of resetting `effectiveResidence` back to `sourceResidence`; the previous behavior erased no-residence during placement updates.
+- Dynamic renderer visual resources now commit when visual resources are ready, independent from instance renderability. This preserves runtime-owned visual resources for no-residence records.
+- Dynamic renderer instances still require ready visual resources, render eligibility, and a concrete render residence, so no-residence records submit no `DynamicRendererInstance` rows.
+- Added placement tracker regressions for outdoor and env-cell no-residence clearing.
+- Added a runtime renderer regression proving a no-residence runtime spawn keeps one dynamic visual resource, remains non-renderable for `no-render-residence`, and submits zero dynamic instances on frame ticks.
+- Validation: `npm run test:ts -- src/lib/dynamic/dynamic-placement-tracker.test.ts src/lib/runtime/client-runtime.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts`; `npm run check`.
 
 ### Phase 8D4: Runtime Dynamic Residence Eviction And Rehome
 

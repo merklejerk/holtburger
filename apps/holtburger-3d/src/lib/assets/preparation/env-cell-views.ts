@@ -1,4 +1,7 @@
-import type { LandblockEnvCellsPayloadDto } from "../../../lib/host/contracts";
+import type {
+	LandblockEnvCellsPayloadDto,
+	LandblockOutdoorPayloadDto,
+} from "../../../lib/host/contracts";
 import type { PreparedAsset } from "../contracts";
 import { omitRenderGeometryVertexBuffers } from "./render-geometry-views";
 
@@ -18,6 +21,7 @@ export type ResolverLandblockEnvCellsPayloadDto = Omit<
 	LandblockEnvCellsPayloadDto,
 	"envCells"
 > & {
+	readonly buildingTransitionApertures: LandblockOutdoorPayloadDto["buildingTransitionApertures"];
 	readonly envCells: readonly ResolverLandblockEnvCellDto[];
 };
 
@@ -56,6 +60,7 @@ function createResolverLandblockEnvCellsPayloadView(
 ): ResolverLandblockEnvCellsPayloadDto {
 	return {
 		...payload,
+		buildingTransitionApertures: [],
 		envCells: payload.envCells.map(createResolverEnvCellPayloadView),
 	};
 }

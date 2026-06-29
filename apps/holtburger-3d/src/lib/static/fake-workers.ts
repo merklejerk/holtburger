@@ -403,6 +403,7 @@ function createFakeStaticScopePayloadBody(
 	if (job.domain === "landblock-env-cells" && job.scope.kind === "landblock") {
 		return {
 			acceptedEnvCellIds: [],
+			buildingTransitionApertures: [],
 			envCells: [],
 			kind: "landblock-env-cells",
 			landblock: {

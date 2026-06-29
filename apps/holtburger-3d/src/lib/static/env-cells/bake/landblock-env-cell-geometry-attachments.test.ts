@@ -124,6 +124,10 @@ function createScopePayload(
 ): LandblockEnvCellsStaticScopePayload {
 	return {
 		acceptedEnvCellIds: payload.envCells.map((cell) => cell.envCellId),
+		buildingTransitionApertures:
+			"buildingTransitionApertures" in payload
+				? payload.buildingTransitionApertures
+				: [],
 		envCells: payload.envCells.map((cell) => ({
 			cellBsp: cell.cellBsp,
 			cellStructure: {

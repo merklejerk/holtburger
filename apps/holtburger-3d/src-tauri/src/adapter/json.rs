@@ -803,6 +803,7 @@ fn serialize_landblock_scene_lod_layer(layer: &LandblockSceneLodLayer) -> serde_
             serde_json::json!({
                 "kind": "env-cell-system",
                 "landblockInfoId": layer.landblock_info_id,
+                "buildingTransitionApertures": layer.building_transition_apertures.iter().map(serialize_prepared_building_transition_aperture).collect::<Vec<_>>(),
                 "envCells": layer.env_cells.iter().map(|cell| {
                     serialize_landblock_env_cell_bundle_cell(
                         cell,
@@ -2009,6 +2010,7 @@ mod tests {
                     LandblockSceneLodEnvCellSystemLayer {
                         landblock_id: 0xda55ffff,
                         landblock_info_id: 0xda55fffe,
+                        building_transition_apertures: Vec::new(),
                         env_cells: Vec::new(),
                         landblock_bvh_items: Vec::new(),
                         landblock_bvh: None,
@@ -2024,6 +2026,12 @@ mod tests {
         let layer = &payload["layers"][0];
         assert_eq!(layer["kind"], "env-cell-system");
         assert_eq!(layer["landblockInfoId"].as_u64(), Some(0xda55fffe));
+        assert_eq!(
+            layer["buildingTransitionApertures"]
+                .as_array()
+                .map(Vec::len),
+            Some(0)
+        );
         assert_eq!(layer["envCells"].as_array().map(Vec::len), Some(0));
         assert_eq!(
             layer["landblockEnvCellBvh"]["nodes"]

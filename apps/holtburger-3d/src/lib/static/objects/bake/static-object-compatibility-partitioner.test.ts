@@ -1602,6 +1602,7 @@ function createEnvCellStaticScopePayload(): LandblockEnvCellsStaticScopePayload 
 	const payload = createEnvCellStaticPayload();
 	return {
 		acceptedEnvCellIds: [0xda550100, 0xda550101],
+		buildingTransitionApertures: [],
 		envCells: payload.objects.map((object) =>
 			createEnvCellStaticScopeEnvCell(object.owningEnvCellId ?? 0, object),
 		),

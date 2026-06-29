@@ -598,6 +598,9 @@ const landblockSceneLodEnvCellSystemLayerDtoSchema = z
 	.object({
 		kind: z.literal("env-cell-system"),
 		landblockInfoId: z.number().int().nonnegative(),
+		buildingTransitionApertures: z.array(
+			landblockBuildingTransitionApertureDtoSchema,
+		),
 		envCells: z.array(landblockEnvCellDtoSchema),
 		portalLinks: z.array(landblockScenePortalLinkDtoSchema),
 		landblockEnvCellBvh: preparedLandblockEnvCellBvhDtoSchema,

@@ -75,6 +75,92 @@ describe("static demand planner", () => {
 		expect(JSON.stringify(work?.job)).not.toContain("policy");
 	});
 
+	it("plans terrain-only interest as one LoD 0 source request", () => {
+		const { sourceRequests } = planStaticDemand(
+			createOutdoorDemand(0xda55ffff, {
+				buildings: -1,
+				detail: -1,
+				envCells: -1,
+				terrain: 0,
+			}),
+			3,
+		);
+
+		expect(sourceRequests).toEqual([
+			{
+				context: "outdoor",
+				landblockId: 0xda55ffff,
+				requestedLayers: [
+					{
+						kind: "terrain",
+						targetOwnerKey: {
+							kind: "terrain",
+							landblockId: 0xda55ffff,
+						},
+					},
+				],
+				sourceLod: 0,
+			},
+		]);
+	});
+
+	it("plans full outdoor layer interest as one LoD 4 source request per landblock", () => {
+		const { sourceRequests } = planStaticDemand(
+			createOutdoorDemand(0xda55ffff, {
+				buildings: 0,
+				detail: 0,
+				envCells: 0,
+				terrain: 0,
+			}),
+			3,
+		);
+
+		expect(sourceRequests).toEqual([
+			{
+				context: "outdoor",
+				landblockId: 0xda55ffff,
+				requestedLayers: [
+					{
+						kind: "terrain",
+						targetOwnerKey: {
+							kind: "terrain",
+							landblockId: 0xda55ffff,
+						},
+					},
+					{
+						kind: "outdoor-buildings",
+						targetOwnerKey: {
+							kind: "outdoor-buildings",
+							landblockId: 0xda55ffff,
+						},
+					},
+					{
+						kind: "outdoor-explicit-objects",
+						targetOwnerKey: {
+							kind: "outdoor-explicit-objects",
+							landblockId: 0xda55ffff,
+						},
+					},
+					{
+						kind: "outdoor-generated-scenery",
+						targetOwnerKey: {
+							kind: "outdoor-generated-scenery",
+							landblockId: 0xda55ffff,
+						},
+					},
+					{
+						kind: "env-cell-system",
+						targetOwnerKey: {
+							kind: "env-cell-system",
+							landblockId: 0xda55ffff,
+						},
+					},
+				],
+				sourceLod: 4,
+			},
+		]);
+	});
+
 	it("normalizes domain radii without letting non-terrain domains exceed terrain", () => {
 		expect(
 			normalizeOutdoorLodRadii({
@@ -188,6 +274,46 @@ describe("static demand planner", () => {
 					landblockId: 0xda55ffff,
 				},
 				scopeKey: "landblock:da55ffff",
+			},
+		]);
+		expect(
+			planStaticDemand(
+				{
+					location: {
+						envCellId: 0xda550123,
+						kind: "interior-cell",
+						landblockId: 0xda550123,
+					},
+					lod: {
+						buildings: -1,
+						detail: -1,
+						envCells: -1,
+						terrain: -1,
+					},
+				},
+				12,
+			).sourceRequests,
+		).toEqual([
+			{
+				context: "interior",
+				landblockId: 0xda55ffff,
+				requestedLayers: [
+					{
+						kind: "outdoor-buildings",
+						targetOwnerKey: {
+							kind: "outdoor-buildings",
+							landblockId: 0xda55ffff,
+						},
+					},
+					{
+						kind: "env-cell-system",
+						targetOwnerKey: {
+							kind: "env-cell-system",
+							landblockId: 0xda55ffff,
+						},
+					},
+				],
+				sourceLod: 4,
 			},
 		]);
 	});

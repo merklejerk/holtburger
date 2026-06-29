@@ -6,12 +6,15 @@ import type {
 	StaticDemand,
 	StaticDemandPlan,
 	StaticDomain,
+	StaticLandblockSceneLodLayerRequest,
+	StaticLandblockSceneLodSourceRequest,
 	StaticLodRadii,
 	StaticResolverJob,
 	StaticResolverScope,
 	StaticScopeOwnerKey,
 	ScheduledStaticWork,
 } from "./contracts";
+import { createLayerOwnerKeyForStaticScope } from "./layer-owners";
 
 const domainPriorities: Record<StaticDomain, number> = {
 	"outdoor-terrain": 0,
@@ -27,7 +30,7 @@ export function planStaticDemand(
 	revision: number,
 ): StaticDemandPlan {
 	if (!demand.location) {
-		return { retainedScopes: [], work: [] };
+		return { retainedScopes: [], sourceRequests: [], work: [] };
 	}
 
 	if (demand.location.kind === "interior-cell") {
@@ -52,6 +55,7 @@ export function planStaticDemand(
 
 		return {
 			retainedScopes: work.map(createRetainedScopeFromWork),
+			sourceRequests: createLandblockSceneLodSourceRequests(work, "interior"),
 			work,
 		};
 	}
@@ -95,6 +99,10 @@ export function planStaticDemand(
 
 	return {
 		retainedScopes: sortedWork.map(createRetainedScopeFromWork),
+		sourceRequests: createLandblockSceneLodSourceRequests(
+			sortedWork,
+			"outdoor",
+		),
 		work: sortedWork,
 	};
 }
@@ -170,6 +178,117 @@ function createRetainedScopeFromWork(
 		scope: work.job.scope,
 		scopeKey: describeStaticScopeKey(work.job.scope),
 	};
+}
+
+function createLandblockSceneLodSourceRequests(
+	work: readonly ScheduledStaticWork[],
+	context: StaticLandblockSceneLodSourceRequest["context"],
+): readonly StaticLandblockSceneLodSourceRequest[] {
+	const requestsByLandblock = new Map<
+		number,
+		{
+			readonly landblockId: number;
+			sourceLod: StaticLandblockSceneLodSourceRequest["sourceLod"];
+			readonly requestedLayersByKind: Map<
+				StaticLandblockSceneLodLayerRequest["kind"],
+				StaticLandblockSceneLodLayerRequest
+			>;
+		}
+	>();
+
+	for (const item of work) {
+		const landblockId = item.job.scope.landblockId;
+		const layerKind = landblockSceneLodLayerKindForStaticDomain(
+			item.job.domain,
+		);
+		const layerLod = sourceLodForLandblockSceneLayer(layerKind);
+		let request = requestsByLandblock.get(landblockId);
+		if (!request) {
+			request = {
+				landblockId,
+				requestedLayersByKind: new Map(),
+				sourceLod: layerLod,
+			};
+			requestsByLandblock.set(landblockId, request);
+		}
+		if (layerLod > request.sourceLod) {
+			request.sourceLod = layerLod;
+		}
+		request.requestedLayersByKind.set(layerKind, {
+			kind: layerKind,
+			targetOwnerKey: createLayerOwnerKeyForStaticScope(
+				createRetainedScopeFromWork(item),
+			),
+		});
+	}
+
+	return [...requestsByLandblock.values()]
+		.map((request) => ({
+			context,
+			landblockId: request.landblockId,
+			requestedLayers: [...request.requestedLayersByKind.values()].sort(
+				compareLandblockSceneLodLayerRequests,
+			),
+			sourceLod: request.sourceLod,
+		}))
+		.sort(compareLandblockSceneLodSourceRequests);
+}
+
+function landblockSceneLodLayerKindForStaticDomain(
+	domain: StaticDomain,
+): StaticLandblockSceneLodLayerRequest["kind"] {
+	switch (domain) {
+		case "outdoor-terrain":
+			return "terrain";
+		case "outdoor-buildings":
+			return "outdoor-buildings";
+		case "outdoor-explicit-objects":
+			return "outdoor-explicit-objects";
+		case "outdoor-generated-scenery":
+			return "outdoor-generated-scenery";
+		case "landblock-env-cells":
+			return "env-cell-system";
+		case "outdoor-detail":
+			return "outdoor-generated-scenery";
+	}
+}
+
+function sourceLodForLandblockSceneLayer(
+	kind: StaticLandblockSceneLodLayerRequest["kind"],
+): StaticLandblockSceneLodSourceRequest["sourceLod"] {
+	switch (kind) {
+		case "terrain":
+			return 0;
+		case "outdoor-buildings":
+			return 1;
+		case "outdoor-explicit-objects":
+			return 2;
+		case "outdoor-generated-scenery":
+			return 3;
+		case "env-cell-system":
+			return 4;
+	}
+}
+
+function compareLandblockSceneLodLayerRequests(
+	left: StaticLandblockSceneLodLayerRequest,
+	right: StaticLandblockSceneLodLayerRequest,
+): number {
+	const lodDelta =
+		sourceLodForLandblockSceneLayer(left.kind) -
+		sourceLodForLandblockSceneLayer(right.kind);
+	if (lodDelta !== 0) {
+		return lodDelta;
+	}
+
+	return left.kind.localeCompare(right.kind);
+}
+
+function compareLandblockSceneLodSourceRequests(
+	left: StaticLandblockSceneLodSourceRequest,
+	right: StaticLandblockSceneLodSourceRequest,
+): number {
+	return left.landblockId - right.landblockId;
 }
 
 function compareScheduledStaticWork(

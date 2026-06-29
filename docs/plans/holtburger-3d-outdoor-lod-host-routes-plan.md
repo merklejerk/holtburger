@@ -758,7 +758,7 @@ Decisions and course corrections:
 
 ### Phase 7A: Source-First Demand Planning
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: compute landblock source requests and layer-owner targets before changing worker or browser runtime execution.
 
@@ -777,14 +777,18 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Update `planStaticDemand` or replace it with source-first planning.
-- [ ] Add source-first request and requested-layer types.
-- [ ] Add source-first planner tests for minimum LoD selection and layer owner targets.
-- [ ] Keep the Phase 6C temporary adapter wired as the production bridge until Phase 7D.
+- [x] Update `planStaticDemand` or replace it with source-first planning.
+- [x] Add source-first request and requested-layer types.
+- [x] Add source-first planner tests for minimum LoD selection and layer owner targets.
+- [x] Keep the Phase 6C temporary adapter wired as the production bridge until Phase 7D.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Added `StaticLandblockSceneLodSourceRequest` and `StaticLandblockSceneLodLayerRequest` to `StaticDemandPlan`. These requests carry normalized landblock id, scene context, minimum source LoD, requested layer kinds, and target owner keys.
+- Kept `ScheduledStaticWork` as the current execution bridge. Phase 7A exposes source-first intent but does not route browser runtime or workers through the new requests yet.
+- Planner grouping now collapses all requested layers for a landblock/context into one source request and selects the maximum required layer LoD as the minimum sufficient source LoD.
+- Interior-cell demand produces an `interior` LoD `4` source request for the same normalized landblock because current rendering still needs env-cell system output plus building transition facts.
+- Validation: `npm run test:ts -- src/lib/static/demand-planner.test.ts`; `npm run check`.
 
 ### Phase 7B: Resolver Protocol And Layer Recipe Fanout
 

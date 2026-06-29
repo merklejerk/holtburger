@@ -10,6 +10,7 @@ import {
 	createStaticScopeOwnerKey,
 	type DynamicEntityCurrentBounds,
 	type DynamicEntityAnimationSelection,
+	type DynamicEntityAnimationState,
 	type DynamicEntityAppearanceOverride,
 	isEnvCellDynamicSeedRecord,
 	isOutdoorDynamicSeedRecord,
@@ -309,13 +310,10 @@ function createDynamicEntityRecord(
 	const resourceState = createInitialPendingResourceState(presentation);
 
 	return {
-		animation: {
+		animation: createInitialAnimationState({
+			animationSelection: presentation.visualSource.animationSelection,
 			defaultAnimationId: record.seed.defaultAnimationId,
-			playback: {
-				status: "pending-resource",
-			},
-			status: "pending-resource",
-		},
+		}),
 		baseTransform: {
 			baseLocalPlacement: record.seed.localPlacement,
 			sourceScale: record.seed.sourceScale,
@@ -378,13 +376,10 @@ function createRuntimeDynamicEntityRecord(
 	const resourceState = createInitialPendingResourceState(presentation);
 
 	return {
-		animation: {
+		animation: createInitialAnimationState({
+			animationSelection,
 			defaultAnimationId,
-			playback: {
-				status: "pending-resource",
-			},
-			status: "pending-resource",
-		},
+		}),
 		baseTransform: {
 			baseLocalPlacement: request.baseLocalPlacement,
 			sourceScale: request.sourceScale ?? { x: 1, y: 1, z: 1 },
@@ -409,6 +404,29 @@ function createRuntimeDynamicEntityRecord(
 		resources: resourceState,
 		source,
 		sourceResidence: request.sourceResidence,
+	};
+}
+
+function createInitialAnimationState(options: {
+	readonly animationSelection: DynamicEntityAnimationSelection;
+	readonly defaultAnimationId: number;
+}): DynamicEntityAnimationState {
+	if (options.animationSelection.kind === "none") {
+		return {
+			defaultAnimationId: options.defaultAnimationId,
+			playback: {
+				reason: "animation-not-selected",
+				status: "not-required",
+			},
+			status: "not-required",
+		};
+	}
+	return {
+		defaultAnimationId: options.defaultAnimationId,
+		playback: {
+			status: "pending-resource",
+		},
+		status: "pending-resource",
 	};
 }
 

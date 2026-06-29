@@ -578,6 +578,9 @@ function sameAnimationPlayback(
 	) {
 		return true;
 	}
+	if (left.status === "not-required" && right.status === "not-required") {
+		return left.reason === right.reason;
+	}
 	if (left.status === "failed" && right.status === "failed") {
 		return (
 			left.animationAssetId === right.animationAssetId &&

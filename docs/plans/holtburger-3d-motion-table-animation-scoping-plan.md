@@ -13,6 +13,11 @@ The current dynamic animation player can sample one concrete `animation/0300....
 part transforms. It is suitable for explicit clips and simple setup default animation, but it is not
 a full motion table interpreter or motion-state sequencer.
 
+This document now feeds Phase 12F/12G of
+[holtburger-3d-dynamic-entity-system-implementation-plan.md](holtburger-3d-dynamic-entity-system-implementation-plan.md).
+Phase 12F owns the host projection and visual-selection decision; Phase 12G is the proposed first
+implementation slice for default/rest visual state from motion-table evidence.
+
 ## Goal
 
 Define the requirements and ownership boundaries for robust motion-table-driven visual animation in
@@ -64,6 +69,9 @@ Out of scope:
   motion-table route for frontend presentation resolution.
 - The current frontend animation player plays a resolved animation payload. It does not choose
   cycles, links, transitions, stance changes, or multi-segment motion entries.
+- A spawned lifestone-style setup can have no setup `DefaultAnimation` while still showing retail
+  default motion through motion-table state. That target should validate the default-state resolver;
+  do not patch it with a hardcoded animation id or a guessed first motion-table segment.
 
 ## Ownership Model
 
@@ -132,6 +140,8 @@ Acceptance criteria:
 - A motion table id can be loaded through the asset service.
 - DTO tests prove default style/default substate/cycle anim data survive serialization.
 - Missing/malformed motion tables fail loudly with asset diagnostics.
+- The DTO can represent the lifestone/default-rest target discovered during Phase 12F without losing
+  style, substate, cycle, or segment provenance.
 
 ### Phase 2: Default State Resolver
 
@@ -147,6 +157,8 @@ Acceptance criteria:
 - Single-segment default cycles resolve to playable animation sequence input.
 - Missing default style, missing style default, and missing cycle each produce distinct diagnostics.
 - Multi-segment defaults are either explicitly sequenced or explicitly unsupported with diagnostics.
+- A no-setup-`DefaultAnimation` entity with valid motion-table default state resolves to motion-table
+  default visual selection instead of `animation-not-selected`.
 
 ### Phase 3: Sequence Playback Model
 

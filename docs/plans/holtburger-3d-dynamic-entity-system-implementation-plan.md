@@ -5313,25 +5313,44 @@ Status: pending.
 
 Purpose:
 
-- Validate that browser-authored server-shaped presentation spawns stayed aligned with the visual
-  facts available from actual Holtburger/ACE live entity events, without making the browser renderer
-  own authoritative gameplay lifecycle semantics.
+- Convert the current browser-authored runtime-spawn model into an evidence-backed host presentation
+  projection decision before adding live/server-authored dynamic entities or motion-table playback.
+  This phase is intentionally an assessment/resteer phase, not a renderer or host-ingestion
+  implementation phase.
+- Validate that browser-authored server-shaped presentation spawns stayed aligned with visual facts
+  available from actual Holtburger/ACE live entity events, without making the browser renderer own
+  authoritative gameplay lifecycle semantics.
 
 Deliverables:
 
 - Compare the Phase 12B runtime source model against `ObjectDescriptionData`, `EntitySpawned`,
   `EntityReplaced`, `EntityMoved`, `EntityMotionUpdated`, and runtime body-view events after browser
   spawn UX exists.
-- Decide which live-host facts should project directly into the runtime spawn presentation model,
-  which need a thin host presentation adapter, and which require another source variant.
-- Keep authoritative host/server ids as correlation metadata. Presentation ids, renderer ids,
-  resource leases, atlas ownership, and removal ownership remain internally consistent frontend
-  identities.
+- Produce a host-to-presentation field matrix covering setup id, `ModelData`/appearance overrides,
+  source residence, authoritative pose, projected pose, velocity, acceleration, omega, scale,
+  translucency, animation frame, motion table id, current motion snapshot, sound table id,
+  physics-effect table id, parent/child attachment facts, equipment facts, object sequence/correlation
+  ids, and public weenie description facts.
+- Decide which live-host facts should project directly into shared dynamic visual source records,
+  which need a thin host presentation adapter, and which require another source variant instead of
+  overloading `runtime-spawn`.
+- Decide whether the current `animationSelection: "setup-default"` name survives, is narrowed to
+  setup `DefaultAnimation`, or is replaced by a provenance-bearing visual selection concept that can
+  represent setup default animation, motion-table default state, explicit animation, and explicit
+  none without collapsing them into bare animation ids.
+- Keep authoritative host/server ids as correlation metadata/source identity inputs only.
+  Presentation ids, renderer ids, resource leases, atlas ownership, and removal ownership remain
+  internally consistent frontend identities.
 - Record visual projection gaps for players/creatures/items/equipment: model-data composition,
-  equipment attachment, motion-table selection, appearance overrides, and correlation metadata.
+  equipment attachment, motion-table selection, appearance overrides, animation/motion provenance,
+  and correlation metadata.
 - Record semantic gaps as host-runtime-owned, not renderer-owned: server object sequencing,
   create/update/delete meaning, replacement versus mutation, inventory/container ownership,
-  equipment gameplay state, local prediction, and cancellation.
+  equipment gameplay state, local prediction, timeline trigger authority, cancellation, and
+  authoritative motion semantics.
+- Select the next implementation slice explicitly. The expected default is a motion-table
+  presentation slice for default/rest visual state, but this phase may instead steer to a host
+  projection source variant first if the evidence shows live-entity ingestion is the sharper blocker.
 
 Acceptance criteria:
 
@@ -5340,9 +5359,84 @@ Acceptance criteria:
 - The plan records which visual fields and correlation metadata are shared with browser runtime
   spawns, which need host-specific projection, and which gameplay semantics must stay out of the
   renderer.
+- The plan records the specific representation decision for motion-table evidence: where a motion
+  table id comes from, how default/rest visual state is selected, and how current host motion state
+  enters frontend presentation without handing gameplay authority to the renderer.
+- The plan records whether `runtime-spawn` remains browser-authored only, is generalized, or is split
+  from a future host-authored dynamic source variant.
 - It remains acceptable for the browser renderer to recreate a presentation entity instead of
   mutating it in place when the host projection changes, provided picks preserve correlation metadata
   and renderer/resource cleanup remains leak-free.
+- No code changes are required for this phase; the output is a concrete plan update and decision log
+  that narrows the next implementation phase.
+
+Task checklist:
+
+- [ ] Audit current browser runtime-spawn source facts, dynamic visual source facts, and diagnostics
+      against the host/world facts listed in the requirements plan.
+- [ ] Audit current `ClientViewEvent` and runtime body-view projections to identify which pose,
+      kinematic, and motion facts already exist as frontend inputs.
+- [ ] Audit setup-model, setup-appearance, WCID/ACE SQL, and live object payload paths for motion table
+      id sources and precedence.
+- [ ] Record a source-identity decision for browser-authored versus host-authored dynamic entities.
+- [ ] Record a visual-selection decision that preserves provenance for setup default animation,
+      motion-table default state, explicit animation, and explicit none.
+- [ ] Pick and scope the next implementation phase.
+
+Implementation notes:
+
+- 2026-06-29 steering: A spawned lifestone-style setup can legitimately have no setup
+  `DefaultAnimation` while still animating in retail through motion-table default state. Treat this as
+  a plan-level gap in visual presentation evidence, not as proof that the spawn has no default visual
+  motion.
+- 2026-06-29 steering: The existing `RuntimeBodyViewCache` is already a mirrored read model over
+  host/world spatial state, not an owner of authoritative runtime state. Keep that boundary intact
+  when deciding how host motion state reaches browser presentation.
+- 2026-06-29 steering: Browser spawn UX should supply intent and debug overrides; it should not become
+  the owner of motion-table resolution, cycle/link interpretation, or prepared animation assets.
+- 2026-06-29 steering: If this phase selects the expected motion-table slice, the next implementation
+  should start with asset DTO exposure plus ACE-equivalent default-state resolution from
+  [holtburger-3d-motion-table-animation-scoping-plan.md](holtburger-3d-motion-table-animation-scoping-plan.md),
+  not with ad hoc per-WCID animation ids.
+
+### Phase 12G: Motion Table Default Presentation Slice
+
+Status: proposed.
+
+Purpose:
+
+- Implement the smallest motion-table-backed visual path needed for setup/WCID/browser runtime spawns
+  whose retail default/rest presentation comes from a motion table rather than setup `DefaultAnimation`.
+  This phase should only proceed after Phase 12F records the host projection and visual-selection
+  decisions.
+
+Deliverables:
+
+- Expose/load a typed motion-table presentation asset preserving default style, style defaults, cycles,
+  links, modifiers, and animation segments.
+- Implement ACE-equivalent default/rest visual selection from motion table evidence with provenance and
+  distinct diagnostics for missing style, missing style default, missing cycle, empty cycle, and
+  unsupported multi-segment cases.
+- Add a runtime presentation selection shape that can represent motion-table default state without
+  pretending it is the same as setup `DefaultAnimation` or manual explicit animation.
+- Route single-segment default selections into the current animation playback path or the minimal
+  sequence wrapper needed to preserve frame-range provenance.
+- Preserve explicit browser `none` and explicit animation overrides.
+- Keep motion-table resolution in app/runtime presentation modules, not Svelte form code or renderer
+  draw submission code.
+
+Acceptance criteria:
+
+- A setup/WCID-backed runtime spawn with a known motion table default cycle can animate from default
+  rest state without manual animation id entry.
+- A setup/WCID-backed runtime spawn with no setup `DefaultAnimation` no longer implies "no visual
+  default motion" when motion-table evidence exists.
+- Unsupported or incomplete motion-table defaults fail loudly through diagnostics instead of choosing
+  the first contained animation segment.
+- Existing explicit animation playback, setup `DefaultAnimation` playback, and explicit none behavior
+  remain supported with provenance-preserving diagnostics.
+- The browser renderer still consumes presentation/resource snapshots; it does not own authoritative
+  motion state or timeline trigger semantics.
 
 ## Risks And Mitigations
 

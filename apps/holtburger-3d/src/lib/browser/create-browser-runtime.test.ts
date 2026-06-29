@@ -11,39 +11,20 @@ import type {
 } from "../static/contracts";
 import {
 	createWorkerStaticResolver,
-	shouldUseBrowserSourceResolver,
 	shouldUseBrowserWorkerBaker,
 } from "./create-browser-runtime";
 
 describe("browser runtime routing", () => {
-	it("routes split outdoor object domains through source resolver and worker baker", () => {
+	it("routes split outdoor object domains through worker baking", () => {
 		for (const domain of [
 			"outdoor-explicit-objects",
 			"outdoor-generated-scenery",
 		] as const) {
-			expect(
-				shouldUseBrowserSourceResolver({
-					domain,
-					scope: {
-						kind: "landblock",
-						landblockId: 0xda55ffff,
-					},
-				}),
-			).toBe(true);
 			expect(shouldUseBrowserWorkerBaker(domain)).toBe(true);
 		}
 	});
 
-	it("routes env-cell bundles through source resolver and worker baking", () => {
-		expect(
-			shouldUseBrowserSourceResolver({
-				domain: "landblock-env-cells",
-				scope: {
-					kind: "landblock",
-					landblockId: 0xda55ffff,
-				},
-			}),
-		).toBe(true);
+	it("routes env-cell bundles through worker baking", () => {
 		expect(shouldUseBrowserWorkerBaker("landblock-env-cells")).toBe(true);
 	});
 

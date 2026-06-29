@@ -19,10 +19,7 @@ import type {
 	StaticResolver,
 	StaticScopePayload,
 } from "../static/contracts";
-import {
-	ImmediateStaticBaker,
-	ImmediateStaticResolver,
-} from "../static/fake-workers";
+import { ImmediateStaticBaker } from "../static/fake-workers";
 import { LandblockEnvCellGeometryAttachmentProvider } from "../static/env-cells/bake/landblock-env-cell-geometry-attachments";
 import { StaticObjectBakeAttachmentProvider } from "../static/objects/bake/static-object-bake-attachments";
 import {
@@ -33,7 +30,6 @@ import {
 	createStaticResolverMainAssetBridge,
 	type StaticResolverMainAssetBridge,
 } from "../static/resolver/asset-bridge";
-import { TemporaryLayerOwnerTargetingResolverAdapter } from "../static/layer-owner-source-adapter";
 import {
 	StaticResolverWorkerClient,
 	WorkerPoolStaticResolver,
@@ -81,9 +77,7 @@ function createTauriStaticCoordinator(
 		DEFAULT_STATIC_BAKER_WORKER_COUNT,
 	);
 	const placeholderBaker = new ImmediateStaticBaker();
-	const placeholderResolver = new ImmediateStaticResolver();
 	const resolver = new BrowserStaticResolver({
-		placeholderResolver,
 		terrainResolver,
 	});
 	const baker = new BrowserStaticBaker({
@@ -96,9 +90,7 @@ function createTauriStaticCoordinator(
 			new StaticObjectBakeAttachmentProvider({
 				assetReader,
 			}),
-			new LandblockEnvCellGeometryAttachmentProvider({
-				assetReader,
-			}),
+			new LandblockEnvCellGeometryAttachmentProvider(),
 		]),
 		baker,
 		resolver,
@@ -193,20 +185,13 @@ function assertPositiveInteger(value: number, label: string): void {
 class BrowserStaticResolver
 	implements StaticResolver, StaticLandblockSceneLodSourceResolver
 {
-	readonly #sourceResolver: StaticResolver;
 	readonly #sceneLodSourceResolver: StaticLandblockSceneLodSourceResolver;
-	readonly #placeholderResolver: StaticResolver;
 	#disposed = false;
 
 	constructor(options: {
 		readonly terrainResolver: StaticResolver & StaticLandblockSceneLodSourceResolver;
-		readonly placeholderResolver: StaticResolver;
 	}) {
-		this.#sourceResolver = new TemporaryLayerOwnerTargetingResolverAdapter({
-			resolver: options.terrainResolver,
-		});
 		this.#sceneLodSourceResolver = options.terrainResolver;
-		this.#placeholderResolver = options.placeholderResolver;
 	}
 
 	resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
@@ -216,11 +201,11 @@ class BrowserStaticResolver
 			);
 		}
 
-		if (shouldUseBrowserSourceResolver(job)) {
-			return this.#sourceResolver.resolve(job);
-		}
-
-		return this.#placeholderResolver.resolve(job);
+		return Promise.reject(
+			new Error(
+				`BrowserStaticResolver direct static-scope resolution is retired; use resolveSource for ${job.domain}.`,
+			),
+		);
 	}
 
 	resolveSource(
@@ -241,8 +226,7 @@ class BrowserStaticResolver
 		}
 
 		this.#disposed = true;
-		disposeIfAvailable(this.#sourceResolver);
-		disposeIfAvailable(this.#placeholderResolver);
+		disposeIfAvailable(this.#sceneLodSourceResolver);
 	}
 }
 
@@ -280,20 +264,6 @@ class BrowserStaticBaker implements StaticBaker {
 		disposeIfAvailable(this.#workerBaker);
 		disposeIfAvailable(this.#placeholderBaker);
 	}
-}
-
-export function shouldUseBrowserSourceResolver(
-	job: StaticResolverJob,
-): boolean {
-	return (
-		(job.domain === "outdoor-terrain" ||
-			job.domain === "outdoor-buildings" ||
-			job.domain === "outdoor-explicit-objects" ||
-			job.domain === "outdoor-generated-scenery" ||
-			job.domain === "outdoor-detail" ||
-			job.domain === "landblock-env-cells") &&
-		job.scope.kind === "landblock"
-	);
 }
 
 export function shouldUseBrowserWorkerBaker(

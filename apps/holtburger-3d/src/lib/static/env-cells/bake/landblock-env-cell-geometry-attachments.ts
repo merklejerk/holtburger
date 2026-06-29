@@ -1,6 +1,4 @@
 import type { LandblockEnvCellsPayloadDto } from "../../../../lib/host/contracts";
-import type { PreparedAssetReader } from "../../../assets/contracts";
-import { createHostAssetKey, describeHostAssetKey } from "../../../assets/keys";
 import { createEmptyStaticBakeAttachments } from "../../bake/attachments";
 import type {
 	EnvCellCellStructureGeometryAttachment,
@@ -12,12 +10,6 @@ import type {
 } from "../../contracts";
 
 export class LandblockEnvCellGeometryAttachmentProvider implements StaticBakeAttachmentProvider {
-	readonly #assetReader: PreparedAssetReader;
-
-	constructor(options: { readonly assetReader: PreparedAssetReader }) {
-		this.#assetReader = options.assetReader;
-	}
-
 	async createAttachments(
 		request: StaticBakeAttachmentRequest,
 	): Promise<StaticBakeBatchAttachments> {
@@ -30,14 +22,7 @@ export class LandblockEnvCellGeometryAttachmentProvider implements StaticBakeAtt
 			return createEmptyStaticBakeAttachments();
 		}
 
-		const payloads = await Promise.all(
-			collectLandblockIds(identities).map(async (landblockId) => {
-				const key = createHostAssetKey("landblock-env-cells", landblockId);
-				const asset = await this.#assetReader.requestPreparedAsset(key);
-				return requireLandblockEnvCellsPayload(asset.payload, key);
-			}),
-		);
-		const cellsByIdentity = createFullEnvCellsByIdentity(payloads);
+		const cellsByIdentity = createFullEnvCellsByIdentity(request);
 		const envCellCellStructureGeometry = identities.map((identity) => {
 			const cell = cellsByIdentity.get(
 				describeEnvCellCellStructureGeometryIdentity(identity),
@@ -46,7 +31,7 @@ export class LandblockEnvCellGeometryAttachmentProvider implements StaticBakeAtt
 				throw new Error(
 					`Missing env-cell geometry attachment ${describeEnvCellCellStructureGeometryIdentity(
 						identity,
-					)} in full landblock-env-cells payload.`,
+					)} in resolved landblock-scene-lod payload.`,
 				);
 			}
 
@@ -113,25 +98,23 @@ function collectEnvCellGeometryIdentities(
 	);
 }
 
-function collectLandblockIds(
-	identities: readonly EnvCellCellStructureGeometryIdentity[],
-): readonly number[] {
-	return [...new Set(identities.map((identity) => identity.landblockId))].sort(
-		(left, right) => left - right,
-	);
-}
-
 function createFullEnvCellsByIdentity(
-	payloads: readonly LandblockEnvCellsPayloadDto[],
-): ReadonlyMap<string, LandblockEnvCellsPayloadDto["envCells"][number]> {
+	request: StaticBakeAttachmentRequest,
+): ReadonlyMap<string, LandblockEnvCellStaticFacts> {
 	const cellsByIdentity = new Map<
 		string,
-		LandblockEnvCellsPayloadDto["envCells"][number]
+		LandblockEnvCellStaticFacts
 	>();
 
-	for (const payload of payloads) {
-		for (const cell of payload.envCells) {
-			const identity = createFullPayloadGeometryIdentity(payload, cell);
+	for (const item of request.items) {
+		if (item.payload.scope.kind !== "landblock-env-cells") {
+			continue;
+		}
+
+		for (const cell of item.payload.scope.envCells) {
+			const identity = createEnvCellCellStructureGeometryIdentity({
+				envCell: cell,
+			});
 			cellsByIdentity.set(
 				describeEnvCellCellStructureGeometryIdentity(identity),
 				cell,
@@ -142,31 +125,9 @@ function createFullEnvCellsByIdentity(
 	return cellsByIdentity;
 }
 
-function createFullPayloadGeometryIdentity(
-	payload: LandblockEnvCellsPayloadDto,
-	cell: LandblockEnvCellsPayloadDto["envCells"][number],
-): EnvCellCellStructureGeometryIdentity {
-	return {
-		cellStructure: {
-			cellStructureId: cell.cellStructureId,
-			kind: "cell-structure",
-		},
-		envCell: {
-			envCellId: cell.envCellId,
-			kind: "env-cell-source",
-		},
-		environment: {
-			environmentId: cell.environmentId,
-			kind: "environment",
-		},
-		kind: "env-cell-cell-structure-geometry",
-		landblockId: payload.landblockId,
-	};
-}
-
 function createEnvCellCellStructureGeometryAttachment(options: {
 	readonly identity: EnvCellCellStructureGeometryIdentity;
-	readonly cell: LandblockEnvCellsPayloadDto["envCells"][number];
+	readonly cell: LandblockEnvCellStaticFacts;
 }): EnvCellCellStructureGeometryAttachment {
 	const renderGeometry = options.cell.renderGeometry;
 	assertRenderGeometryVertexBuffers(options.identity, renderGeometry);
@@ -204,26 +165,6 @@ function assertRenderGeometryVertexBuffers(
 			)} resolved metadata-only render geometry; full positions, normals, and UVs are required for bake attachments.`,
 		);
 	}
-}
-
-function requireLandblockEnvCellsPayload(
-	payload: unknown,
-	key: Parameters<typeof describeHostAssetKey>[0],
-): LandblockEnvCellsPayloadDto {
-	if (
-		typeof payload === "object" &&
-		payload !== null &&
-		"kind" in payload &&
-		payload.kind === "landblock-env-cells"
-	) {
-		return payload as LandblockEnvCellsPayloadDto;
-	}
-
-	throw new Error(
-		`Env-cell geometry attachment expected ${describeHostAssetKey(
-			key,
-		)} to resolve to a landblock-env-cells payload.`,
-	);
 }
 
 function toFloat32Array(values: ArrayLike<number>): Float32Array {

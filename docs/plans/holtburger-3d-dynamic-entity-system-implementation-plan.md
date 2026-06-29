@@ -5160,10 +5160,10 @@ Implementation notes:
   hidden `modelData` rather than visible form controls. Runtime source facts and diagnostics can now
   carry non-null model data for browser-authored spawns.
 - 2026-06-29 implementation: Dynamic resource loading now consumes runtime `modelData` by routing
-  affected setup-model closures through a synthetic `runtime-setup-appearance/<setup>/<payload>` raw
-  asset key. The Tauri adapter decodes that raw key into the existing runtime appearance resolver, so
-  per-spawn ObjDesc facts produce a setup appearance without teaching the browser about ACE SQL rows
-  or adding a separate prepared-payload kind.
+  affected setup-model closures through `setup-appearance/<setup>?...` override query parameters.
+  The Tauri adapter decodes queried setup-appearance routes into the existing runtime appearance
+  resolver, so per-spawn ObjDesc facts produce a setup appearance without teaching the browser about
+  ACE SQL rows or adding a separate prepared-payload kind.
 - 2026-06-29 follow-up: WCID `42810` proved the route was active because part geometry changed, but
   the model rendered fully black. The SQL resolver now expands ACE `weenie_properties_palette`
   `offset` / `length` values from packed ObjDesc units into client color-index ranges by multiplying
@@ -5196,11 +5196,11 @@ Implementation notes:
   passing source slots through unchanged. Head marker parts using source slot `18` therefore sampled
   uninitialized material uniforms in one-entry dynamic draw units. Dynamic slices now localize both
   `materialSlotIndices` and uploaded material entry slots.
-- 2026-06-29 follow-up: The runtime setup-appearance route is now a typed
-  `runtime-setup-appearance` host key with canonical query parameters for PaletteID, sub-palettes,
-  texture changes, and animation part changes. Empty runtime ObjDesc overrides collapse back to the
-  base `setup-appearance` route. This keeps asset-service dedupe readable and avoids the earlier raw
-  hex-encoded JSON route while still reusing the host-side setup appearance resolver.
+- 2026-06-29 follow-up: The `setup-appearance` host key now accepts canonical optional query
+  parameters for PaletteID, sub-palettes, texture changes, and animation part changes. Empty runtime
+  ObjDesc overrides collapse back to the base `setup-appearance` route. This keeps asset-service
+  dedupe readable and avoids the earlier raw hex-encoded JSON route while still reusing the
+  host-side setup appearance resolver.
 - 2026-06-29 verification: `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`,
   `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml ace_world_sql`,
   `cargo fmt --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --check`, `npm run check`,
@@ -5211,6 +5211,76 @@ Implementation notes:
   at `apps/holtburger-3d/src-tauri/src/adapter/service.rs:1020` with
   `left: Number(36), right: 0`; the new ACE SQL resolver tests pass and this phase did not
   change env-cell binary lookup behavior.
+
+### Phase 12E.1: Runtime Spawn Setup Default Animation Autopopulation
+
+Status: pending.
+
+Purpose:
+
+- Narrowly populate and play setup `defaultAnimation` for browser-created runtime spawns when the
+  prepared setup model provides a concrete animation id, without introducing motion-table
+  interpretation or full motion-state presentation.
+
+Deliverables:
+
+- Add a setup-default animation resolution path that loads the setup model, reads its
+  `defaultAnimation`, and converts that concrete id into the existing explicit-animation resource
+  readiness path.
+- Replace unresolved runtime `setup-default` resource state with either
+  `setup-default-animation-ready` using the concrete setup default animation id or an explicit
+  "no setup default animation" state that renders setup pose.
+- Keep browser manual explicit animation as an override over setup default animation.
+- Keep browser `none` mode as an explicit no-animation override.
+- Update WCID apply behavior only as far as it benefits from setup id population: if the resolved
+  WCID setup model has `defaultAnimation`, use that setup default animation; if not, select `none`.
+- Preserve diagnostics that show setup model id, selected setup default animation id, and fallback
+  reason when no setup default exists.
+- Do not add a motion-table route, motion-table selector UI, cycle/link sequencing, or live motion
+  command interpretation in this phase. Those requirements move to
+  [holtburger-3d-motion-table-animation-scoping-plan.md](holtburger-3d-motion-table-animation-scoping-plan.md).
+
+Acceptance criteria:
+
+- A setup-backed runtime spawn whose setup model exposes `defaultAnimation` can play that animation
+  without manual animation id entry.
+- A WCID-backed runtime spawn can inherit setup default animation solely from its resolved setup id.
+- A runtime spawn whose setup model has no `defaultAnimation` reports
+  `animation.status: "not-required"` and `playback.status: "not-required"` instead of
+  `pending-resource`.
+- Runtime `setup-default` no longer leaks animation id `0` in source facts, resource keys,
+  diagnostics, or summaries.
+- Manual explicit animation remains supported and wins over setup default animation.
+- Manual `none` remains supported and suppresses setup default animation.
+- Focused tests cover setup-model default-animation resolution, WCID seed application through setup
+  id, runtime resource tracking, diagnostics, playback start, and fallback-to-none behavior.
+
+Task checklist:
+
+- [ ] Add a setup-default animation resolver that consumes prepared setup model facts and returns a
+      concrete animation id or a typed no-default result.
+- [ ] Route setup default animation ids through the existing `animation/0300....` asset lookup and
+      dynamic setup/animation readiness path.
+- [ ] Update browser spawn validation/request construction so `setup-default` represents this narrow
+      setup-default-animation mode, while explicit and none remain explicit user choices.
+- [ ] Update WCID apply behavior to preselect setup default animation when the resolved setup model
+      exposes one and preselect none otherwise.
+- [ ] Replace runtime `setup-default-animation-unresolved` diagnostics with setup-default ready or
+      setup-default none/fallback diagnostics.
+- [ ] Add diagnostics that show selected animation source, selected animation id, setup model id, and
+      fallback reason where applicable.
+- [ ] Verify with focused TypeScript tests, Tauri/Rust resolver tests, `npm run check`, and
+      `npm run lint`.
+
+Implementation notes:
+
+- 2026-06-29 resteer: This phase was narrowed after discovering that motion tables are not a simple
+  state-to-animation map. Motion-table default state, cycles, links, modifiers, multi-segment
+  sequences, and live motion command projection are now scoped separately in
+  [holtburger-3d-motion-table-animation-scoping-plan.md](holtburger-3d-motion-table-animation-scoping-plan.md).
+- 2026-06-29 planning: Setup model `defaultAnimation` is already serialized in setup-model payloads
+  and can feed the existing concrete animation playback path. Use that as the next low-risk browser
+  UX improvement before attempting motion-table interpretation.
 
 ### Phase 12F: Host Presentation Projection Resteer
 

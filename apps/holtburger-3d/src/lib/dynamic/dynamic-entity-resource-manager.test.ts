@@ -452,7 +452,7 @@ describe("dynamic entity resource manager", () => {
 	it("keeps runtime model-data palette uses distinct from raw material palette uses", async () => {
 		const host = new ResolvingRuntimeHost({
 			indexedMaterial: true,
-			runtimeSetupAppearanceSubPalettes: [
+			setupAppearanceOverrideSubPalettes: [
 				{
 					numColors: 32,
 					offset: 16,
@@ -598,7 +598,7 @@ interface ResolvingRuntimeHostOptions {
 	readonly failKeys?: ReadonlySet<string>;
 	readonly indexedMaterial?: boolean;
 	readonly mixedMaterialPart?: boolean;
-	readonly runtimeSetupAppearanceSubPalettes?: SetupAppearancePayloadDto["subPalettes"];
+	readonly setupAppearanceOverrideSubPalettes?: SetupAppearancePayloadDto["subPalettes"];
 }
 
 class ResolvingRuntimeHost implements RuntimeHost {
@@ -606,14 +606,14 @@ class ResolvingRuntimeHost implements RuntimeHost {
 	readonly #failKeys: ReadonlySet<string>;
 	readonly #indexedMaterial: boolean;
 	readonly #mixedMaterialPart: boolean;
-	readonly #runtimeSetupAppearanceSubPalettes: SetupAppearancePayloadDto["subPalettes"];
+	readonly #setupAppearanceOverrideSubPalettes: SetupAppearancePayloadDto["subPalettes"];
 
 	constructor(options: ResolvingRuntimeHostOptions = {}) {
 		this.#failKeys = options.failKeys ?? new Set();
 		this.#indexedMaterial = options.indexedMaterial ?? false;
 		this.#mixedMaterialPart = options.mixedMaterialPart ?? false;
-		this.#runtimeSetupAppearanceSubPalettes =
-			options.runtimeSetupAppearanceSubPalettes ?? [];
+		this.#setupAppearanceOverrideSubPalettes =
+			options.setupAppearanceOverrideSubPalettes ?? [];
 	}
 
 	lookupAsset(key: HostAssetKey, revision: number): Promise<PreparedAsset> {
@@ -630,8 +630,8 @@ class ResolvingRuntimeHost implements RuntimeHost {
 			payload: createPayload(key, {
 				indexedMaterial: this.#indexedMaterial,
 				mixedMaterialPart: this.#mixedMaterialPart,
-				runtimeSetupAppearanceSubPalettes:
-					this.#runtimeSetupAppearanceSubPalettes,
+				setupAppearanceOverrideSubPalettes:
+					this.#setupAppearanceOverrideSubPalettes,
 			}),
 			preparedAt: "2026-06-26T00:00:00.000Z",
 			revision,
@@ -652,13 +652,13 @@ function createPayload(
 	options: {
 		readonly indexedMaterial: boolean;
 		readonly mixedMaterialPart: boolean;
-		readonly runtimeSetupAppearanceSubPalettes: SetupAppearancePayloadDto["subPalettes"];
+		readonly setupAppearanceOverrideSubPalettes: SetupAppearancePayloadDto["subPalettes"];
 	},
 ): unknown {
-	if (key.kind === "runtime-setup-appearance") {
+	if (key.kind === "setup-appearance" && key.id.includes("?")) {
 		return createSetupAppearancePayload({
 			mixedMaterialPart: options.mixedMaterialPart,
-			subPalettes: options.runtimeSetupAppearanceSubPalettes,
+			subPalettes: options.setupAppearanceOverrideSubPalettes,
 		});
 	}
 

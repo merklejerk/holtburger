@@ -6,7 +6,7 @@ import type {
 import { FIRST_RUNTIME_SPAWN_FIXTURE } from "../runtime/runtime-spawn-fixtures";
 import type { WeenieSpawnSeed } from "./weenie-spawn-seed-resolver";
 
-export type BrowserSpawnAnimationMode = "none" | "explicit";
+export type BrowserSpawnAnimationMode = "setup-default" | "none" | "explicit";
 export type BrowserSpawnResidenceMode = "env-cell" | "outdoor";
 
 export interface BrowserSpawnFormState {
@@ -81,7 +81,7 @@ const DEFAULT_RUNTIME_SPAWN_SCALE = "1";
 export function createDefaultBrowserSpawnFormState(): BrowserSpawnFormState {
 	return {
 		animationId: "",
-		animationMode: "none",
+		animationMode: "setup-default",
 		envCellId: formatHex32(DEFAULT_RUNTIME_SPAWN_ENV_CELL_ID),
 		label: FIRST_RUNTIME_SPAWN_FIXTURE.label,
 		landblockId: formatHex32(DEFAULT_RUNTIME_SPAWN_LANDBLOCK_ID),
@@ -111,6 +111,7 @@ export function applyWeenieSpawnSeedToForm(
 		scaleX: seed.defaultScale == null ? form.scaleX : String(seed.defaultScale),
 		scaleY: seed.defaultScale == null ? form.scaleY : String(seed.defaultScale),
 		scaleZ: seed.defaultScale == null ? form.scaleZ : String(seed.defaultScale),
+		animationMode: "setup-default",
 		setupModelId: formatHex32(seed.setupModelId),
 		weenieClassId: String(seed.weenieClassId),
 	};
@@ -159,7 +160,11 @@ export function validateBrowserSpawnForm(
 			? parseRequiredUnsignedInteger(form.animationId, "Animation id", errors)
 			: null;
 
-	if (form.animationMode !== "none" && form.animationMode !== "explicit") {
+	if (
+		form.animationMode !== "setup-default" &&
+		form.animationMode !== "none" &&
+		form.animationMode !== "explicit"
+	) {
 		errors.push("Animation mode is not supported.");
 	}
 	if (form.residenceMode !== "outdoor" && form.residenceMode !== "env-cell") {
@@ -179,7 +184,7 @@ export function validateBrowserSpawnForm(
 		animationSelection:
 			form.animationMode === "explicit"
 				? { animationId: animationId as number, kind: "explicit" }
-				: { kind: "none" },
+				: { kind: form.animationMode },
 		baseLocalPlacement: {
 			orientation: createYawQuaternion(degreesToRadians(yawDegrees as number)),
 			origin: {

@@ -2231,6 +2231,7 @@
 										value={spawnForm.animationMode}
 										onchange={handleSpawnAnimationModeChange}
 									>
+										<option value="setup-default">Setup default</option>
 										<option value="none">None</option>
 										<option value="explicit">Explicit</option>
 									</select>

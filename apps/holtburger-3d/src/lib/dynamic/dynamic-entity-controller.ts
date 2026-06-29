@@ -358,7 +358,7 @@ function createRuntimeDynamicEntityRecord(
 		kind: "setup-default" as const,
 	};
 	const defaultAnimationId =
-		animationSelection.kind === "explicit" ? animationSelection.animationId : 0;
+		animationSelection.kind === "explicit" ? animationSelection.animationId : null;
 	const source = {
 		animationSelection,
 		kind: "runtime-spawn" as const,
@@ -409,7 +409,7 @@ function createRuntimeDynamicEntityRecord(
 
 function createInitialAnimationState(options: {
 	readonly animationSelection: DynamicEntityAnimationSelection;
-	readonly defaultAnimationId: number;
+	readonly defaultAnimationId: number | null;
 }): DynamicEntityAnimationState {
 	if (options.animationSelection.kind === "none") {
 		return {
@@ -584,10 +584,10 @@ function applyResourceChange(
 	if (change.kind === "setup-animation-ready") {
 		return {
 			...record,
-			animation: {
-				...record.animation,
-				status: "ready",
-			},
+			animation: createAnimationStateFromSetupAnimationResource(
+				record.animation,
+				change.resources.setupAnimation,
+			),
 			renderability: createRenderability(change.resources),
 			resources: change.resources,
 		};
@@ -606,6 +606,30 @@ function applyResourceChange(
 		renderability: createRenderability(change.resources),
 		resources: change.resources,
 	};
+}
+
+function createAnimationStateFromSetupAnimationResource(
+	current: DynamicEntityAnimationState,
+	setupAnimation: DynamicEntitySetupAnimationResourceState,
+): DynamicEntityAnimationState {
+	if (setupAnimation.status === "ready") {
+		return {
+			...current,
+			defaultAnimationId: setupAnimation.animation.payload.animationId,
+			status: "ready",
+		};
+	}
+	if (setupAnimation.status === "not-required") {
+		return {
+			defaultAnimationId: null,
+			playback: {
+				reason: setupAnimation.reason,
+				status: "not-required",
+			},
+			status: "not-required",
+		};
+	}
+	return current;
 }
 
 function createInitialPendingResourceState(
@@ -637,7 +661,7 @@ function createPendingSetupAnimationState(
 	}
 	if (visualSource.animationSelection.kind === "setup-default") {
 		return {
-			pendingReason: "setup-default-animation-unresolved",
+			pendingReason: "setup-default-animation-resolving",
 			setupModelKey,
 			status: "pending",
 		};

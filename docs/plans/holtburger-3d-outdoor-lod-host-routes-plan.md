@@ -561,7 +561,7 @@ Decisions and course corrections:
 
 ### Phase 5A: Static Domain Contract Split
 
-Status: pending.
+Status: complete.
 
 Goal: split public static domain and renderer layer names before browser-control and resolver behavior changes.
 
@@ -580,14 +580,19 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Update `StaticDomain`, renderer layer kinds, texture domains, and material planning domains.
-- [ ] Update diagnostics and selection key domain types.
-- [ ] Update contract-focused tests that assert public domain names.
-- [ ] Record any surviving `outdoor-detail` references as Phase 11 deletion targets unless they are historical prose.
+- [x] Update `StaticDomain`, renderer layer kinds, texture domains, and material planning domains.
+- [x] Update diagnostics and selection key domain types.
+- [x] Update contract-focused tests that assert public domain names.
+- [x] Record any surviving `outdoor-detail` references as Phase 11 deletion targets unless they are historical prose.
 
 Decisions and course corrections:
 
 - Split the original Phase 5 into 5A-5C on 2026-06-29 after discovery showed the phase combined public type contracts, browser controls, and resolver/baker behavior.
+- Added `OutdoorStaticObjectLayerDomain` for `outdoor-explicit-objects` and `outdoor-generated-scenery`, plus `OutdoorStaticObjectDomain` for static-object materialization contracts while the old combined detail resolver remains executable.
+- Added explicit-object and generated-scenery renderer layer payload contracts and mapped the new static domains to independent landblock layer kinds.
+- Updated material coverage, compatibility partitioning, static-object bake diagnostics, selection-facing payload domain types, and dynamic static-authored material-domain projection so they can preserve split object domains instead of collapsing them back to `outdoor-detail`.
+- Left demand scheduling, browser visibility, resolver fanout, baker behavior, and renderer upload methods on the old `outdoor-detail` path for Phase 5B/5C. This is compatibility debt, not an escape hatch.
+- Validation: `npm run check`; `npm run test:ts -- src/lib/renderer/static-layer-contracts.test.ts src/lib/static/objects/bake/static-object-material-planner.test.ts src/lib/static/objects/bake/static-object-compatibility-partitioner.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts`.
 
 ### Phase 5B: Browser Interest And Visibility Axis Split
 
@@ -828,6 +833,7 @@ Deliverables:
 - Remove TypeScript host asset key variants, formatters, parsers, schemas, route payload preparation, and binary lookup detection for old landblock outdoor/env-cell/topology assets.
 - Remove frontend resolvers, bakers, attachment providers, and asset views that consume `LandblockOutdoorPayloadDto` or `LandblockEnvCellsPayloadDto` as route payloads.
 - Remove `outdoor-detail` as a renderer/static domain and replace it with the split explicit-object and generated-scenery domains everywhere.
+- Remove Phase 5A compatibility surfaces that still accept or emit executable `outdoor-detail` domains, including demand scheduling, resolver/baker branching, renderer `OutdoorDetailsLayerPayload`/`setOutdoorDetailsLayer`, generated-instance inventory naming, runtime tests, diagnostics counters, and WebGL2 resource paths after Phase 5B/5C and layer-owner cutover replace them.
 - Remove retained-scope, desired-key, durable work-owner, active-work-id, and source-scope lifecycle paths after layer owners become authoritative.
 - Remove route-specific diagnostics, snapshots, UI counters, and test helpers that mention the old route/domain names unless they describe an intentionally retained internal source fact.
 - Delete obsolete resolver fixture fields, compatibility helpers, and hollow tests.

@@ -3177,7 +3177,9 @@ function collectStaticLayerResourceIds(
 	switch (payload.kind) {
 		case "terrain":
 		case "outdoor-buildings":
+		case "outdoor-explicit-objects":
 			return payload.drawUnits.map((drawUnit) => drawUnit.drawUnitId);
+		case "outdoor-generated-scenery":
 		case "outdoor-detail":
 			return [
 				...payload.drawUnits.map((drawUnit) => drawUnit.drawUnitId),

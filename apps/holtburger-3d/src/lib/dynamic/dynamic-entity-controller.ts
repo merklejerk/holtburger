@@ -1,6 +1,7 @@
 import type {
 	StaticBounds,
 	StaticAuthoredDynamicSeedRecord,
+	OutdoorStaticObjectDomain,
 	StaticScopeOwnerKey,
 	StaticWorkPeerRecordOwner,
 	VisualTextureDomain,
@@ -554,23 +555,32 @@ function createDynamicVisualObjectIdentity(
 function createStaticAuthoredTextureDomain(
 	owner: StaticWorkPeerRecordOwner,
 ): DynamicEntityTextureDomain {
-	if (owner.domain === "landblock-env-cells") {
-		return "landblock-env-cells";
-	}
-	return owner.domain === "outdoor-buildings"
-		? "outdoor-buildings"
-		: "outdoor-detail";
+	return createStaticAuthoredObjectMaterialDomain(owner);
 }
 
 function createStaticAuthoredMaterialPlanningDomain(
 	owner: StaticWorkPeerRecordOwner,
-): "landblock-env-cells" | "outdoor-buildings" | "outdoor-detail" {
+): "landblock-env-cells" | OutdoorStaticObjectDomain {
+	return createStaticAuthoredObjectMaterialDomain(owner);
+}
+
+function createStaticAuthoredObjectMaterialDomain(
+	owner: StaticWorkPeerRecordOwner,
+): "landblock-env-cells" | OutdoorStaticObjectDomain {
 	if (owner.domain === "landblock-env-cells") {
 		return "landblock-env-cells";
 	}
-	return owner.domain === "outdoor-buildings"
-		? "outdoor-buildings"
-		: "outdoor-detail";
+	if (
+		owner.domain === "outdoor-buildings" ||
+		owner.domain === "outdoor-explicit-objects" ||
+		owner.domain === "outdoor-generated-scenery" ||
+		owner.domain === "outdoor-detail"
+	) {
+		return owner.domain;
+	}
+	throw new Error(
+		`Static-authored dynamic object owner cannot use ${owner.domain} material domain.`,
+	);
 }
 
 function createRuntimeSpawnTextureDomain(): DynamicEntityTextureDomain {

@@ -14,6 +14,12 @@ describe("static landblock layer contracts", () => {
 		expect(staticLayerKindForStaticDomain("outdoor-buildings")).toBe(
 			"outdoor-buildings",
 		);
+		expect(staticLayerKindForStaticDomain("outdoor-explicit-objects")).toBe(
+			"outdoor-explicit-objects",
+		);
+		expect(staticLayerKindForStaticDomain("outdoor-generated-scenery")).toBe(
+			"outdoor-generated-scenery",
+		);
 		expect(staticLayerKindForStaticDomain("outdoor-detail")).toBe(
 			"outdoor-detail",
 		);

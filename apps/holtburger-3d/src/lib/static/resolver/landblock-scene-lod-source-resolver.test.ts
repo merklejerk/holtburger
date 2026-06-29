@@ -72,6 +72,16 @@ describe("landblock scene LoD source resolver", () => {
 					key.startsWith("landblock-env-cells:"),
 			),
 		).toBe(false);
+		const envCellRecipe = resolution.recipes.find(
+			(recipe) => recipe.payload.job.domain === "landblock-env-cells",
+		);
+		expect(
+			envCellRecipe?.payload.scope.kind === "landblock-env-cells"
+				? envCellRecipe.payload.scope.buildingTransitionApertures.map(
+						(aperture) => aperture.apertureId,
+					)
+				: [],
+		).toEqual(["building-transition-aperture:building-01:0"]);
 	});
 
 	it("emits recipes that feed existing domain bake workers with owner keys", async () => {
@@ -242,6 +252,7 @@ function createSceneLodPayload() {
 				statics: [],
 			},
 			{
+				buildingTransitionApertures: [createBuildingTransitionAperture()],
 				diagnostics: createDiagnostics(),
 				envCells: [],
 				kind: "env-cell-system",
@@ -259,6 +270,28 @@ function createSceneLodPayload() {
 		regionId: 1,
 		regionNumber: 2,
 		source: { context: "outdoor", level: 4 },
+	};
+}
+
+function createBuildingTransitionAperture() {
+	return {
+		apertureId: "building-transition-aperture:building-01:0",
+		buildingInstanceId: "building-01",
+		buildingPortalId: "building-portal-0",
+		buildingPortalSourceIndex: 0,
+		flags: 1,
+		linkedEnvCellIds: [0x01020100],
+		otherCellId: 0x0100,
+		otherPortalId: 0xffff,
+		points: [
+			{ x: 0, y: 0, z: 0 },
+			{ x: 1, y: 0, z: 0 },
+			{ x: 0, y: 1, z: 0 },
+		],
+		polyId: 42,
+		portalIndex: 0,
+		sourceAssetId: "gfxobj/02001234",
+		sourceDid: 0x02001234,
 	};
 }
 

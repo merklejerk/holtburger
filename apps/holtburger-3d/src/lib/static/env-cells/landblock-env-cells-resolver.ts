@@ -128,6 +128,7 @@ export class LandblockEnvCellsResolver {
 			acceptedEnvCellIds: envCells
 				.map((cell) => cell.identity.envCellId)
 				.sort(compareNumeric),
+			buildingTransitionApertures: landblock.payload.buildingTransitionApertures,
 			envCells,
 			kind: "landblock-env-cells",
 			landblock: {

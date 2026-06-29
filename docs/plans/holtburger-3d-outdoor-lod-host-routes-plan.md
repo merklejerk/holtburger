@@ -1421,38 +1421,131 @@ Decisions and course corrections:
 - Phase 8E proved retained scopes, durable work owners, source-scope dynamic retention, and scene-interest work-id readiness are gone from production dynamic/runtime/static paths.
 - `StaticCoordinator.desiredKey` remains transient active-work/bake-result bookkeeping only. It is not resident resource ownership, layer lifecycle ownership, dynamic retention, or scene-interest readiness state.
 - Normal browser source resolution remains on `landblock-scene-lod` source requests; old direct `landblock-outdoor` / `landblock-env-cells` prepared asset requests survive in old resolver classes, tests, route-preparation contracts, and compatibility helpers scheduled for Phase 11 deletion.
-- Phase 10 should focus on deleting `EnvCellSystemLayerAssemblyStore` and removing the runtime cross-layer merge for env-cell system publication. The old env-cell geometry attachment provider no longer performs direct host requests but remains named around the old env-cell payload and should be re-evaluated during Phase 10/11 cleanup.
+- Phases 10A through 10D should make LoD `4` env-cell output self-contained, then delete `EnvCellSystemLayerAssemblyStore` and the runtime cross-layer merge for env-cell system publication. The old env-cell geometry attachment provider no longer performs direct host requests but remains named around the old env-cell payload and should be re-evaluated during Phase 10D/11 cleanup.
 - Phase 11 deletion targets remain broad and executable: old route DTO schemas and preparation branches, old host asset key variants/parsers/formatters/tests, topology content route and helpers, old terrain/object/env-cell direct resolvers and tests, executable `outdoor-detail` static/renderer/runtime compatibility, and obsolete route fixtures.
 - Validation: `npm run test:ts -- src/lib/static/demand-planner.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts src/lib/dynamic/dynamic-placement-tracker.test.ts`; `npm run check`.
 
-### Phase 10: Self-Contained LoD 4 Env-Cell Cutover
+### Phase 10A: LoD 4 Env-Cell Source Completeness
 
-Status: pending.
+Status: completed on 2026-06-29.
 
-Goal: remove runtime dependence on separately materialized building layers and the old env-cell assembly store for env-cell system output.
+Goal: make the LoD `4` env-cell system layer source payload self-contained before changing runtime publication.
 
 Deliverables:
 
-- Make LoD `4` source output include all facts needed by env-cell system publication.
+- Make LoD `4` source output include the env-cell geometry attachment facts and building transition facts needed by env-cell system publication.
 - Keep the Phase 7F payload-local env-cell geometry attachment path intact; do not reintroduce direct `landblock-env-cells` host requests.
-- Delete `EnvCellSystemLayerAssemblyStore`.
-- Ensure env-cell system layers publish from one self-contained layer recipe.
+- Update Rust host/content DTO serialization and TypeScript host contracts for the added LoD `4` env-cell-system layer facts.
+- Update resolver projection so `env-cell-system` layer jobs receive those facts from `landblock-scene-lod`, not from a separate route.
 
 Acceptance criteria:
 
-- Env-cell bake/materialization does not request `landblock-env-cells`.
-- Env-cell system publication does not wait on separately materialized `outdoor-buildings`.
-- No runtime cross-layer merge store remains for env-cell system publication.
 - Outdoor LoD `4` contains level `3` output plus env-cell system output.
 - Interior LoD `4` can emit env-cell output with lower outdoor layers absent or empty.
+- The env-cell-system resolver payload contains the facts needed to build portal aperture resources without reading an `outdoor-buildings` materialized layer.
+- Env-cell bake/materialization still does not request `landblock-env-cells`.
 
 Task checklist:
 
-- [ ] Move env-cell geometry attachment facts into LoD `4` source/layer data.
-- [ ] Replace attachment provider host lookups.
-- [ ] Replace runtime cross-layer merge with self-contained env-cell layer publication.
-- [ ] Add tests for outdoor and interior LoD `4`.
-- [ ] Add tests proving building-layer materialization is not required for env-cell publication.
+- [x] Audit the current LoD `4` Rust and TypeScript env-cell-system layer DTOs for missing publication facts.
+- [x] Move remaining env-cell geometry attachment and building transition facts into LoD `4` source/layer data.
+- [x] Replace resolver projections that still depend on old env-cell route-shaped payload assumptions.
+- [x] Add or update tests for outdoor and interior LoD `4` source completeness.
+
+Decisions and course corrections:
+
+- Added `buildingTransitionApertures` to the LoD `4` `env-cell-system` source layer instead of requiring runtime consumers to read sibling `outdoor-buildings` materialized output.
+- The Rust LoD assembler now appends `env-cell-system` for any Level `4` context. Outdoor Level `4` collects building transition apertures from already-emitted or cached `outdoor-buildings` layers; interior Level `4` emits env-cell output with an empty transition-aperture list and no outdoor renderer layers.
+- The TypeScript source resolver now projects LoD env-cell-system output into a resolver-local env-cell payload view carrying `buildingTransitionApertures`. The old direct `landblock-env-cells` route view still supplies an empty list as a temporary compatibility surface scheduled for Phase 11 deletion.
+- Phase 10A did not move portal aperture resource baking. That remains Phase 10B work, now with the needed source facts available on `LandblockEnvCellsStaticScopePayload`.
+- Validation: `npm run test:ts -- src/lib/static/resolver/landblock-scene-lod-source-resolver.test.ts`; `npm run check`; `cargo test -p holtburger-content scene_lod`; `cargo test -p holtburger-3d serialize_landblock_scene_lod_payload_emits_env_cell_system_layer`.
+
+### Phase 10B: Self-Contained Env-Cell Layer Bake
+
+Status: pending.
+
+Goal: make env-cell-system materialization emit all renderer/query resources from one env-cell-system layer recipe.
+
+Deliverables:
+
+- Teach env-cell-system baking to emit env-cell portal resources, building transition portal resources, static portal graphs, static-authored dynamic seeds, and geometry attachments from its own layer payload.
+- Ensure emitted resource owners use the env-cell-system layer owner, not `outdoor-buildings`.
+- Keep source-local geometry attachment behavior from Phase 7F and Phase 10A.
+
+Acceptance criteria:
+
+- A single env-cell-system materialized commit contains the env-cell facts and building transition facts required for env-cell system publication.
+- Building transition aperture resources needed by env-cell publication are produced by the env-cell-system bake path.
+- No bake path performs direct `landblock-env-cells` host requests.
+- Tests prove env-cell-system baking does not require an `outdoor-buildings` materialized commit.
+
+Task checklist:
+
+- [ ] Extend env-cell-system bake inputs to carry LoD `4` transition and attachment facts.
+- [ ] Emit building transition portal aperture resources and static portal graphs from the env-cell-system bake path.
+- [ ] Verify resource ownership and diagnostics point at the env-cell-system layer owner.
+- [ ] Add focused bake/materialization tests for self-contained env-cell-system commits.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 10C: Runtime Env-Cell Publication Cutover
+
+Status: pending.
+
+Goal: remove runtime dependence on separately materialized building layers for env-cell system publication.
+
+Deliverables:
+
+- Replace `EnvCellSystemLayerAssemblyStore` with stateless publication from the env-cell-system materialized commit.
+- Remove runtime source-payload ingestion paths that only exist to feed cross-layer env-cell assembly.
+- Ensure env-cell system layers publish, update, and clear using env-cell-system layer owner/resource membership only.
+
+Acceptance criteria:
+
+- Env-cell system publication does not wait on separately materialized `outdoor-buildings`.
+- No runtime cross-layer merge store remains for env-cell system publication.
+- Runtime publication works for outdoor LoD `4` and interior LoD `4`.
+- Runtime clearing remains explicit and resource-driven.
+
+Task checklist:
+
+- [ ] Replace runtime cross-layer merge with direct env-cell-system layer publication.
+- [ ] Delete `EnvCellSystemLayerAssemblyStore`.
+- [ ] Remove source-payload subscription hooks whose only purpose was env-cell assembly.
+- [ ] Add runtime tests proving building-layer materialization is not required for env-cell publication.
+- [ ] Add runtime tests for interior LoD `4` env-cell publication with lower outdoor layers absent or empty.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 10D: Env-Cell Cutover Resteer And Validation
+
+Status: pending.
+
+Goal: audit the completed env-cell cutover before broad old-route deletion begins.
+
+Deliverables:
+
+- Re-run old env-cell route, assembly-store, and building-layer dependency searches.
+- Record any surviving compatibility-only env-cell surfaces as Phase 11 deletion targets or delete them immediately if they are now dead.
+- Validate TypeScript and Rust areas touched by Phases 10A through 10C.
+
+Acceptance criteria:
+
+- No normal runtime env-cell publication path depends on `landblock-env-cells`, `outdoor-buildings` materialization, or `EnvCellSystemLayerAssemblyStore`.
+- Remaining old env-cell route references are compatibility/deletion targets for Phase 11, not normal-path dependencies.
+- Validation commands for touched TypeScript and Rust areas pass.
+
+Task checklist:
+
+- [ ] Search for direct `landblock-env-cells` requests in static bake, resolver, runtime, and attachment paths.
+- [ ] Search for `EnvCellSystemLayerAssemblyStore` and remove any surviving production/test references.
+- [ ] Search for env-cell publication dependencies on `outdoor-buildings` materialized commits.
+- [ ] Update Phase 11 deletion targets with any remaining old-route env-cell surfaces.
+- [ ] Run required validation commands and record them here.
 
 Decisions and course corrections:
 
@@ -1493,7 +1586,7 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit production route references after Phase 10.
+- [ ] Audit production route references after Phase 10D.
 - [ ] Delete topology route implementation and frontend helpers/tests.
 - [ ] Delete old outdoor/env-cell route implementations and frontend helpers/tests.
 - [ ] Delete old `ContentAssetRequest` and `ContentAsset` variants or rename surviving internal source structs so they are not route-facing compatibility surfaces.

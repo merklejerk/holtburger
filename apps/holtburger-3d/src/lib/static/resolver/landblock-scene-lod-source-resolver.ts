@@ -1,9 +1,9 @@
 import type {
-	LandblockEnvCellsPayloadDto,
 	LandblockOutdoorPayloadDto,
 	LandblockSceneLodLayerDto,
 	LandblockSceneLodPayloadDto,
 } from "../../../lib/host/contracts";
+import type { ResolverLandblockEnvCellsPayloadDto } from "../../assets/preparation/env-cell-views";
 import type {
 	HostAssetKey,
 	PreparedAsset,
@@ -166,9 +166,10 @@ function createProjectedOutdoorPayload(
 
 function createProjectedEnvCellsPayload(
 	payload: LandblockSceneLodPayloadDto,
-): LandblockEnvCellsPayloadDto {
+): ResolverLandblockEnvCellsPayloadDto {
 	const layer = requireSceneLodLayer(payload, "env-cell-system");
 	return {
+		buildingTransitionApertures: layer.buildingTransitionApertures,
 		diagnostics: layer.diagnostics,
 		envCells: layer.envCells,
 		kind: "landblock-env-cells",

@@ -168,6 +168,8 @@ pub struct LandblockSceneLodEnvCellSystemLayer {
     pub landblock_id: u32,
     /// Normalized landblock-info record id used to discover env cells.
     pub landblock_info_id: u32,
+    /// Building transition apertures needed to connect outdoor building portals to env cells.
+    pub building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
     /// Prepared env-cell bundle cells for this landblock.
     pub env_cells: Vec<LandblockEnvCellBundleCell>,
     /// Landblock-space env-cell BVH item records.
@@ -1357,18 +1359,22 @@ impl LandblockSceneLodAssetAssembler {
             .map(|asset| asset.diagnostics.clone())
             .unwrap_or_default();
         diagnostics.extend(context.into_diagnostics());
-        if request.context == LandblockSceneLodContext::Outdoor
-            && request.level == LandblockSceneLodLevel::Level4
+        if request.level == LandblockSceneLodLevel::Level4
             && cached_level
                 .is_none_or(|level| level.as_u8() < LandblockSceneLodLevel::Level4.as_u8())
         {
+            let building_transition_apertures =
+                collect_scene_lod_building_transition_apertures(&layers);
             match LandblockEnvCellsAssetAssembler::new().assemble_landblock_with_cache(
                 content,
                 decode_cache,
                 request.landblock_id,
             ) {
                 Ok(env_cells) => layers.push(LandblockSceneLodLayer::EnvCellSystem(
-                    landblock_scene_lod_env_cell_system_layer(env_cells),
+                    landblock_scene_lod_env_cell_system_layer(
+                        env_cells,
+                        building_transition_apertures,
+                    ),
                 )),
                 Err(error) => diagnostics.errors.push(SourceLoadError {
                     namespace: EOR_CELL_NAMESPACE,
@@ -1509,15 +1515,35 @@ impl LandblockSceneLodAssetAssembler {
 
 fn landblock_scene_lod_env_cell_system_layer(
     asset: LandblockEnvCellsAsset,
+    building_transition_apertures: Vec<PreparedBuildingTransitionAperture>,
 ) -> LandblockSceneLodEnvCellSystemLayer {
     LandblockSceneLodEnvCellSystemLayer {
         landblock_id: asset.landblock_id,
         landblock_info_id: asset.landblock_info_id,
+        building_transition_apertures,
         env_cells: asset.env_cells,
         landblock_bvh_items: asset.landblock_bvh_items,
         landblock_bvh: asset.landblock_bvh,
         diagnostics: asset.diagnostics,
     }
+}
+
+fn collect_scene_lod_building_transition_apertures(
+    layers: &[LandblockSceneLodLayer],
+) -> Vec<PreparedBuildingTransitionAperture> {
+    layers
+        .iter()
+        .flat_map(|layer| match layer {
+            LandblockSceneLodLayer::OutdoorBuildings(layer) => {
+                layer.building_transition_apertures.as_slice()
+            }
+            LandblockSceneLodLayer::Terrain(_)
+            | LandblockSceneLodLayer::OutdoorExplicitObjects(_)
+            | LandblockSceneLodLayer::OutdoorGeneratedScenery(_)
+            | LandblockSceneLodLayer::EnvCellSystem(_) => &[],
+        })
+        .cloned()
+        .collect()
 }
 
 #[cfg(test)]
@@ -5150,6 +5176,7 @@ mod tests {
             panic!("level 4 should include env-cell system output");
         };
         assert_eq!(layer.landblock_info_id, 0xda55fffe);
+        assert!(layer.building_transition_apertures.is_empty());
         assert!(layer.env_cells.is_empty());
         assert_eq!(layer.diagnostics.source_records.len(), 1);
         assert_eq!(layer.diagnostics.source_records[0].role, "landblock-info");
@@ -5157,6 +5184,67 @@ mod tests {
             layer.diagnostics.source_records[0].status,
             SourceRecordStatus::Missing
         );
+    }
+
+    #[test]
+    fn scene_lod_level_4_carries_cached_building_transition_apertures() {
+        let source = Arc::new(CountingSource::new(HashMap::new()));
+        let repository = ContentRepository::from_mounts(vec![source]);
+        let decode_cache = ContentDecodeCache::new();
+        let cached = LandblockSceneLodAsset {
+            landblock_id: 0xda55ffff,
+            level: LandblockSceneLodLevel::Level3,
+            context: LandblockSceneLodContext::Outdoor,
+            layers: vec![LandblockSceneLodLayer::OutdoorBuildings(
+                LandblockSceneLodOutdoorBuildingsLayer {
+                    statics: Vec::new(),
+                    building_transition_apertures: vec![synthetic_building_transition_aperture()],
+                    outdoor_bvh: None,
+                },
+            )],
+            diagnostics: PreparedContentSourceDiagnostics::default(),
+        };
+
+        let asset = LandblockSceneLodAssetAssembler::new()
+            .assemble_landblock_extending_cached_asset(
+                &repository,
+                &decode_cache,
+                LandblockSceneLodRequest::outdoor(0xda55_0123, LandblockSceneLodLevel::Level4),
+                Some(&cached),
+            );
+
+        let LandblockSceneLodLayer::EnvCellSystem(layer) = asset.layers.last().unwrap() else {
+            panic!("level 4 cache extension should append env-cell system output");
+        };
+        assert_eq!(layer.building_transition_apertures.len(), 1);
+        assert_eq!(
+            layer.building_transition_apertures[0].aperture_id,
+            "building-transition-aperture:building-01:0"
+        );
+    }
+
+    #[test]
+    fn scene_lod_level_4_interior_emits_env_cells_without_outdoor_layers() {
+        let source = Arc::new(CountingSource::new(HashMap::new()));
+        let repository = ContentRepository::from_mounts(vec![source]);
+        let decode_cache = ContentDecodeCache::new();
+
+        let asset = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
+            &repository,
+            &decode_cache,
+            LandblockSceneLodRequest {
+                landblock_id: 0xda55ffff,
+                level: LandblockSceneLodLevel::Level4,
+                context: LandblockSceneLodContext::Interior,
+            },
+        );
+
+        assert_eq!(asset.context, LandblockSceneLodContext::Interior);
+        assert_eq!(asset.layers.len(), 1);
+        let LandblockSceneLodLayer::EnvCellSystem(layer) = &asset.layers[0] else {
+            panic!("interior level 4 should include env-cell system output");
+        };
+        assert!(layer.building_transition_apertures.is_empty());
     }
 
     #[test]
@@ -5377,6 +5465,40 @@ mod tests {
             instance_bounds: None,
             building,
             generated,
+        }
+    }
+
+    fn synthetic_building_transition_aperture() -> PreparedBuildingTransitionAperture {
+        PreparedBuildingTransitionAperture {
+            aperture_id: "building-transition-aperture:building-01:0".to_string(),
+            building_instance_id: "building-01".to_string(),
+            source_did: 0x0200_1234,
+            source_asset_id: "gfxobj/02001234".to_string(),
+            portal_index: 0,
+            poly_id: 42,
+            building_portal_id: "building-portal-0".to_string(),
+            building_portal_source_index: 0,
+            flags: 1,
+            other_cell_id: 0x0100,
+            other_portal_id: 0xffff,
+            linked_env_cell_ids: vec![0x0102_0100],
+            points: vec![
+                PreparedVec3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                PreparedVec3 {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                PreparedVec3 {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+            ],
         }
     }
 }

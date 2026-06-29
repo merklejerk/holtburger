@@ -76,6 +76,8 @@ export function bakeStaticObjectCompatibility(
 ): StaticBakeBatchResult {
 	if (
 		input.domain !== "outdoor-buildings" &&
+		input.domain !== "outdoor-explicit-objects" &&
+		input.domain !== "outdoor-generated-scenery" &&
 		input.domain !== "outdoor-detail" &&
 		input.domain !== "landblock-env-cells"
 	) {
@@ -554,7 +556,10 @@ function createRetainedTransparentOutdoorDetailPartitionReasons(options: {
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
 }): StaticObjectRetainedTransparentPartitionReasonCounts {
 	const counts = createEmptyRetainedTransparentPartitionReasonCounts();
-	if (options.payload.domain !== "outdoor-detail") {
+	if (
+		options.payload.domain !== "outdoor-generated-scenery" &&
+		options.payload.domain !== "outdoor-detail"
+	) {
 		return counts;
 	}
 
@@ -727,7 +732,10 @@ function createStaticObjectInstancedOutput(options: {
 	readonly resources: readonly StaticObjectVisualResource[];
 	readonly textureUses: readonly StaticBakeTextureUse[];
 } {
-	if (options.payload.domain !== "outdoor-detail") {
+	if (
+		options.payload.domain !== "outdoor-generated-scenery" &&
+		options.payload.domain !== "outdoor-detail"
+	) {
 		return {
 			cutoverPartitionSliceIds: new Set<string>(),
 			instances: [],
@@ -970,7 +978,7 @@ function createStaticObjectInstancedOutput(options: {
 		for (const candidate of cutoverCandidates) {
 			instances.push({
 				bounds: candidate.bounds,
-				domain: "outdoor-detail",
+				domain: options.payload.domain,
 				generated: candidate.generated,
 				instanceId: [
 					"static-object-render-instance",
@@ -1287,6 +1295,8 @@ function createStaticObjectCompatibilityPayload(
 ): StaticObjectCompatibilityPayload {
 	if (
 		(item.work.job.domain === "outdoor-buildings" ||
+			item.work.job.domain === "outdoor-explicit-objects" ||
+			item.work.job.domain === "outdoor-generated-scenery" ||
 			item.work.job.domain === "outdoor-detail") &&
 		item.payload.scope.kind === "outdoor-static-objects"
 	) {

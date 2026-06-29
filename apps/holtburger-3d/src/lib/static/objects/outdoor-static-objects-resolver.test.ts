@@ -366,7 +366,7 @@ describe("browser outdoor static object resolver", () => {
 		});
 	});
 
-	it("resolves outdoor-detail generated scenery without building detail roles", async () => {
+	it("resolves generated scenery without building detail roles", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-outdoor", 0xda55ffff),
@@ -403,14 +403,14 @@ describe("browser outdoor static object resolver", () => {
 
 		const payload = await new OutdoorStaticObjectsResolver({
 			assetService,
-		}).resolve(createDetailRequest());
+		}).resolve(createGeneratedSceneryRequest());
 
 		expect(payload.scope.kind).toBe("outdoor-static-objects");
 		if (payload.scope.kind !== "outdoor-static-objects") {
 			throw new Error("expected outdoor static object payload");
 		}
 
-		expect(payload.scope.domain).toBe("outdoor-detail");
+		expect(payload.scope.domain).toBe("outdoor-generated-scenery");
 		expect(payload.scope.regionRenderProfile.detailRoles).toEqual([]);
 		expect(payload.scope.objects).toEqual([
 			expect.objectContaining({
@@ -556,7 +556,7 @@ describe("browser outdoor static object resolver", () => {
 		expect(assetService.countRequests(duplicatedPaletteKey)).toBe(1);
 	});
 
-	it("returns an empty outdoor-detail payload when a landblock has no generated scenery", async () => {
+	it("returns an empty generated-scenery payload when a landblock has no generated scenery", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-outdoor", 0xda55ffff),
@@ -570,14 +570,14 @@ describe("browser outdoor static object resolver", () => {
 
 		const payload = await new OutdoorStaticObjectsResolver({
 			assetService,
-		}).resolve(createDetailRequest());
+		}).resolve(createGeneratedSceneryRequest());
 
 		expect(payload.scope.kind).toBe("outdoor-static-objects");
 		if (payload.scope.kind !== "outdoor-static-objects") {
 			throw new Error("expected outdoor static object payload");
 		}
 
-		expect(payload.scope.domain).toBe("outdoor-detail");
+		expect(payload.scope.domain).toBe("outdoor-generated-scenery");
 		expect(payload.scope.objects).toEqual([]);
 		expect(payload.scope.sourceAssets).toEqual([]);
 		expect(payload.scope.materialSlots).toEqual([]);
@@ -585,7 +585,7 @@ describe("browser outdoor static object resolver", () => {
 		expect(payload.scope.missingRefs).toEqual([]);
 	});
 
-	it("resolves outdoor-detail explicit objects through the static object pipeline", async () => {
+	it("resolves explicit objects through the static object pipeline", async () => {
 		const assetService = new FixtureAssetService([
 			createPreparedAsset(
 				createHostAssetKey("landblock-outdoor", 0xda55ffff),
@@ -625,14 +625,14 @@ describe("browser outdoor static object resolver", () => {
 
 		const payload = await new OutdoorStaticObjectsResolver({
 			assetService,
-		}).resolve(createDetailRequest());
+		}).resolve(createExplicitObjectsRequest());
 
 		expect(payload.scope.kind).toBe("outdoor-static-objects");
 		if (payload.scope.kind !== "outdoor-static-objects") {
 			throw new Error("expected outdoor static object payload");
 		}
 
-		expect(payload.scope.domain).toBe("outdoor-detail");
+		expect(payload.scope.domain).toBe("outdoor-explicit-objects");
 		expect(payload.scope.regionRenderProfile.detailRoles).toEqual([]);
 		expect(payload.scope.objects).toEqual([
 			expect.objectContaining({
@@ -686,7 +686,7 @@ describe("browser outdoor static object resolver", () => {
 
 		const payload = await new OutdoorStaticObjectsResolver({
 			assetService,
-		}).resolve(createDetailRequest());
+		}).resolve(createGeneratedSceneryRequest());
 
 		expect(payload.scope.kind).toBe("outdoor-static-objects");
 		if (payload.scope.kind !== "outdoor-static-objects") {
@@ -981,9 +981,19 @@ function createBuildingRequest(): StaticResolverJob {
 	};
 }
 
-function createDetailRequest(): StaticResolverJob {
+function createGeneratedSceneryRequest(): StaticResolverJob {
 	return {
-		domain: "outdoor-detail",
+		domain: "outdoor-generated-scenery",
+		scope: {
+			kind: "landblock",
+			landblockId: 0xda55ffff,
+		},
+	};
+}
+
+function createExplicitObjectsRequest(): StaticResolverJob {
+	return {
+		domain: "outdoor-explicit-objects",
 		scope: {
 			kind: "landblock",
 			landblockId: 0xda55ffff,

@@ -30,6 +30,8 @@ class StaticBakeWorkerRouter implements StaticBaker {
 		}
 		if (
 			input.domain === "outdoor-buildings" ||
+			input.domain === "outdoor-explicit-objects" ||
+			input.domain === "outdoor-generated-scenery" ||
 			input.domain === "outdoor-detail"
 		) {
 			return this.#staticObjectBaker.bake(input);

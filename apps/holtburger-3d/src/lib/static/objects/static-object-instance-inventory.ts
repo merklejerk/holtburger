@@ -4,7 +4,7 @@ import type {
 } from "../contracts";
 
 export interface GeneratedStaticObjectInstanceInventory {
-	readonly domain: "outdoor-detail";
+	readonly domain: "outdoor-generated-scenery";
 	readonly drawUnitCount: number;
 	readonly generatedCoverageCount: number;
 	readonly generatedObjectCount: number;
@@ -25,7 +25,7 @@ interface GeneratedStaticObjectInstanceCandidateGroup {
 	readonly sourceTriangleCount: number;
 }
 
-export function inventoryGeneratedOutdoorDetailInstances(
+export function inventoryGeneratedOutdoorSceneryInstances(
 	drawUnits: readonly StaticObjectGeometryStaticDrawUnit[],
 ): GeneratedStaticObjectInstanceInventory {
 	const candidateGroupsByKey = new Map<
@@ -36,7 +36,7 @@ export function inventoryGeneratedOutdoorDetailInstances(
 	let generatedCoverageCount = 0;
 
 	for (const drawUnit of drawUnits) {
-		if (drawUnit.domain !== "outdoor-detail") {
+		if (drawUnit.domain !== "outdoor-generated-scenery") {
 			continue;
 		}
 		for (const coverage of drawUnit.sourceMappingCoverage) {
@@ -77,9 +77,9 @@ export function inventoryGeneratedOutdoorDetailInstances(
 
 	return {
 		candidateGroups,
-		domain: "outdoor-detail",
+		domain: "outdoor-generated-scenery",
 		drawUnitCount: drawUnits.filter(
-			(drawUnit) => drawUnit.domain === "outdoor-detail",
+			(drawUnit) => drawUnit.domain === "outdoor-generated-scenery",
 		).length,
 		generatedCoverageCount,
 		generatedObjectCount: generatedObjectIds.size,

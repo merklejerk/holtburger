@@ -629,7 +629,7 @@ Decisions and course corrections:
 
 ### Phase 5C: Resolver, Baker, Diagnostics, And Selection Domain Split
 
-Status: pending.
+Status: complete.
 
 Goal: make resolver, baker, diagnostics, and selection behavior use the split explicit-object/generated-scenery public domains while still temporarily sourcing from old broad routes.
 
@@ -647,13 +647,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Split `outdoor-detail` resolver, baker, renderer, diagnostics, selection, and fixture tests into explicit-object/generated-scenery cases.
-- [ ] Keep old route source loading working only as temporary source plumbing for the split domains.
-- [ ] Record any surviving `outdoor-detail` references as Phase 11 deletion targets unless they are historical prose.
+- [x] Split `outdoor-detail` resolver, baker, renderer, diagnostics, selection, and fixture tests into explicit-object/generated-scenery cases.
+- [x] Keep old route source loading working only as temporary source plumbing for the split domains.
+- [x] Record any surviving `outdoor-detail` references as Phase 11 deletion targets unless they are historical prose.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Normal outdoor demand now schedules `outdoor-explicit-objects` and `outdoor-generated-scenery`; it no longer schedules `outdoor-detail` for browser object detail work.
+- The outdoor static object resolver filters explicit objects and generated scenery into separate payload domains while still reading the old `landblock-outdoor` source payload.
+- Static resolver/worker routing, browser runtime routing, bake attachment loading, and static object compatibility baking now accept split object domains.
+- Runtime materialization now projects split explicit-object and generated-scenery renderer layer payloads. Generated-scenery retains instanced visual-resource support.
+- WebGL2 exposes split object layer setters that share the existing static-object upload implementation.
+- Generated object inventory and representative resolver/partition/runtime tests now use `outdoor-generated-scenery` instead of `outdoor-detail` for new behavior.
+- Surviving executable `outdoor-detail` references are compatibility surfaces for old detail payloads, WebGL2 old-detail diagnostics/counters, and old route/source tests. Phase 11 must delete or rename them after layer ownership and old-route removal make the compatibility path unreachable.
+- Validation: `npm run check`; `npm run test:ts -- src/lib/static/demand-planner.test.ts src/lib/static/objects/outdoor-static-objects-resolver.test.ts src/lib/static/objects/static-object-instance-inventory.test.ts src/lib/static/objects/bake/static-object-compatibility-partitioner.test.ts src/lib/runtime/client-runtime.test.ts src/lib/browser/create-browser-runtime.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts`.
 
 ### Phase 6: Layer Owner Foundation
 

@@ -25,6 +25,8 @@ export class StaticObjectBakeAttachmentProvider implements StaticBakeAttachmentP
 	): Promise<StaticBakeBatchAttachments> {
 		if (
 			request.domain !== "outdoor-buildings" &&
+			request.domain !== "outdoor-explicit-objects" &&
+			request.domain !== "outdoor-generated-scenery" &&
 			request.domain !== "outdoor-detail" &&
 			request.domain !== "landblock-env-cells"
 		) {

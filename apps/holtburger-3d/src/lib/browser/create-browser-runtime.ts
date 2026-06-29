@@ -266,6 +266,8 @@ export function shouldUseBrowserSourceResolver(
 	return (
 		(job.domain === "outdoor-terrain" ||
 			job.domain === "outdoor-buildings" ||
+			job.domain === "outdoor-explicit-objects" ||
+			job.domain === "outdoor-generated-scenery" ||
 			job.domain === "outdoor-detail" ||
 			job.domain === "landblock-env-cells") &&
 		job.scope.kind === "landblock"
@@ -278,6 +280,8 @@ export function shouldUseBrowserWorkerBaker(
 	return (
 		domain === "outdoor-terrain" ||
 		domain === "outdoor-buildings" ||
+		domain === "outdoor-explicit-objects" ||
+		domain === "outdoor-generated-scenery" ||
 		domain === "outdoor-detail" ||
 		domain === "landblock-env-cells"
 	);

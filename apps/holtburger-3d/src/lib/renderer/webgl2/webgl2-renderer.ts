@@ -24,6 +24,8 @@ import type {
 	SamplerPolicyUpdate,
 	EnvCellSystemLayerPayload,
 	OutdoorBuildingsLayerPayload,
+	OutdoorExplicitObjectsLayerPayload,
+	OutdoorGeneratedSceneryLayerPayload,
 	OutdoorDetailsLayerPayload,
 	RendererStaticLayerVisibility,
 	TerrainLayerPayload,
@@ -994,12 +996,49 @@ class Webgl2Renderer implements Renderer {
 		);
 	}
 
+	setOutdoorExplicitObjectsLayer(
+		landblockId: number,
+		payload: OutdoorExplicitObjectsLayerPayload | null,
+	): void {
+		this.#setOutdoorStaticObjectLayer(
+			"outdoor-explicit-objects",
+			landblockId,
+			payload,
+		);
+	}
+
+	setOutdoorGeneratedSceneryLayer(
+		landblockId: number,
+		payload: OutdoorGeneratedSceneryLayerPayload | null,
+	): void {
+		this.#setOutdoorStaticObjectLayer(
+			"outdoor-generated-scenery",
+			landblockId,
+			payload,
+		);
+	}
+
 	setOutdoorDetailsLayer(
 		landblockId: number,
 		payload: OutdoorDetailsLayerPayload | null,
 	): void {
+		this.#setOutdoorStaticObjectLayer("outdoor-detail", landblockId, payload);
+	}
+
+	#setOutdoorStaticObjectLayer(
+		kind:
+			| "outdoor-detail"
+			| "outdoor-explicit-objects"
+			| "outdoor-generated-scenery",
+		landblockId: number,
+		payload:
+			| OutdoorDetailsLayerPayload
+			| OutdoorExplicitObjectsLayerPayload
+			| OutdoorGeneratedSceneryLayerPayload
+			| null,
+	): void {
 		this.#replaceStaticLayer(
-			{ kind: "outdoor-detail", landblockId },
+			{ kind, landblockId },
 			payload,
 			(ownership) => {
 				const uploadStartedAt = nowMs();
@@ -1021,7 +1060,9 @@ class Webgl2Renderer implements Renderer {
 						estimateStaticObjectUploadedBufferBytes(drawUnit);
 					drawUnitCount += 1;
 				}
-				for (const resource of payload?.instancedObjectResources ?? []) {
+				for (const resource of getOutdoorLayerInstancedObjectResources(
+					payload,
+				)) {
 					this.#removeStaticObjectVisualResource(resource.resourceId);
 					this.#addStaticObjectVisualResource(
 						createStaticObjectVisualGeometryResource(this.#gl, resource),
@@ -1036,13 +1077,15 @@ class Webgl2Renderer implements Renderer {
 					uploadedBufferBytes +=
 						estimateStaticObjectVisualResourceUploadedBufferBytes(resource);
 				}
-				for (const instance of payload?.instancedObjectInstances ?? []) {
+				for (const instance of getOutdoorLayerInstancedObjectInstances(
+					payload,
+				)) {
 					this.#staticObjectRenderInstances.set(instance.instanceId, instance);
 					ownership.staticObjectRenderInstanceIds.add(instance.instanceId);
 				}
 				if (payload && drawUnitCount > 0) {
 					this.#recordStaticObjectUpload({
-						domain: "outdoor-detail",
+						domain: kind,
 						drawUnitCount,
 						kind: "static-object-upload-diagnostics",
 						landblockId,
@@ -3781,6 +3824,30 @@ function staticLayerVisibilityEquals(
 		left.outdoorGeneratedScenery === right.outdoorGeneratedScenery &&
 		left.terrain === right.terrain
 	);
+}
+
+function getOutdoorLayerInstancedObjectResources(
+	payload:
+		| OutdoorDetailsLayerPayload
+		| OutdoorExplicitObjectsLayerPayload
+		| OutdoorGeneratedSceneryLayerPayload
+		| null,
+): readonly StaticObjectVisualResource[] {
+	return payload && "instancedObjectResources" in payload
+		? payload.instancedObjectResources
+		: [];
+}
+
+function getOutdoorLayerInstancedObjectInstances(
+	payload:
+		| OutdoorDetailsLayerPayload
+		| OutdoorExplicitObjectsLayerPayload
+		| OutdoorGeneratedSceneryLayerPayload
+		| null,
+): readonly StaticObjectRenderInstance[] {
+	return payload && "instancedObjectInstances" in payload
+		? payload.instancedObjectInstances
+		: [];
 }
 
 type ObjectMaterialGeometryResource =

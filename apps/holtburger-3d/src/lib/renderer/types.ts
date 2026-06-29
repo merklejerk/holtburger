@@ -708,6 +708,14 @@ export interface Renderer {
 		landblockId: number,
 		payload: OutdoorBuildingsLayerPayload | null,
 	): void;
+	setOutdoorExplicitObjectsLayer(
+		landblockId: number,
+		payload: OutdoorExplicitObjectsLayerPayload | null,
+	): void;
+	setOutdoorGeneratedSceneryLayer(
+		landblockId: number,
+		payload: OutdoorGeneratedSceneryLayerPayload | null,
+	): void;
 	setOutdoorDetailsLayer(
 		landblockId: number,
 		payload: OutdoorDetailsLayerPayload | null,

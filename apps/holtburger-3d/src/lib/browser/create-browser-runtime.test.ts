@@ -8,17 +8,22 @@ import {
 } from "./create-browser-runtime";
 
 describe("browser runtime routing", () => {
-	it("routes outdoor-detail through source resolver and worker baker", () => {
-		expect(
-			shouldUseBrowserSourceResolver({
-				domain: "outdoor-detail",
-				scope: {
-					kind: "landblock",
-					landblockId: 0xda55ffff,
-				},
-			}),
-		).toBe(true);
-		expect(shouldUseBrowserWorkerBaker("outdoor-detail")).toBe(true);
+	it("routes split outdoor object domains through source resolver and worker baker", () => {
+		for (const domain of [
+			"outdoor-explicit-objects",
+			"outdoor-generated-scenery",
+		] as const) {
+			expect(
+				shouldUseBrowserSourceResolver({
+					domain,
+					scope: {
+						kind: "landblock",
+						landblockId: 0xda55ffff,
+					},
+				}),
+			).toBe(true);
+			expect(shouldUseBrowserWorkerBaker(domain)).toBe(true);
+		}
 	});
 
 	it("routes env-cell bundles through source resolver and worker baking", () => {

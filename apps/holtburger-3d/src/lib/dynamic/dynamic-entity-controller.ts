@@ -3,12 +3,11 @@ import type {
 	StaticAuthoredDynamicSeedRecord,
 	OutdoorStaticObjectDomain,
 	StaticScopeOwnerKey,
-	StaticWorkPeerRecordOwner,
+	StaticLayerPeerRecordOwner,
 	VisualTextureDomain,
 } from "../static/contracts";
 import {
 	createDynamicVisualResourceId,
-	createStaticScopeOwnerKey,
 	type DynamicEntityCurrentBounds,
 	type DynamicEntityAnimationSelection,
 	type DynamicEntityAnimationState,
@@ -35,6 +34,10 @@ import {
 	type StaticAuthoredDynamicSeedFacts,
 	type DynamicRuntimeSnapshot,
 } from "./contracts";
+import {
+	createLayerOwnerKeyForStaticScope,
+	createLayerOwnerKeyId,
+} from "../static/layer-owners";
 import { DynamicAnimationPlayer } from "./dynamic-animation-player";
 import { DynamicEntityStore } from "./dynamic-entity-store";
 import {
@@ -122,7 +125,11 @@ export class DynamicEntityController {
 
 	retainStaticScopes(scopes: readonly StaticScopeOwnerKey[]): void {
 		const removed = this.#store.retainStaticSourceScopeKeys(
-			new Set(scopes.map(createStaticScopeOwnerKey)),
+			new Set(
+				scopes.map((scope) =>
+					createLayerOwnerKeyId(createLayerOwnerKeyForStaticScope(scope)),
+				),
+			),
 		);
 		for (const record of removed) {
 			this.#releaseRecordState(record);
@@ -302,10 +309,7 @@ function createDynamicEntityRecord(
 		sourceScopeKey,
 		textureBatchId:
 			textureBatchIdsByStaticSourceScope.get(
-				createStaticTextureBatchLookupKey(
-					record.owner.domain,
-					record.owner.scopeKey,
-				),
+				createStaticTextureBatchLookupKey(record.owner),
 			) ?? `dynamic:${sourceScopeKey}`,
 	});
 	const resourceState = createInitialPendingResourceState(presentation);
@@ -553,19 +557,19 @@ function createDynamicVisualObjectIdentity(
 }
 
 function createStaticAuthoredTextureDomain(
-	owner: StaticWorkPeerRecordOwner,
+	owner: StaticLayerPeerRecordOwner,
 ): DynamicEntityTextureDomain {
 	return createStaticAuthoredObjectMaterialDomain(owner);
 }
 
 function createStaticAuthoredMaterialPlanningDomain(
-	owner: StaticWorkPeerRecordOwner,
+	owner: StaticLayerPeerRecordOwner,
 ): "landblock-env-cells" | OutdoorStaticObjectDomain {
 	return createStaticAuthoredObjectMaterialDomain(owner);
 }
 
 function createStaticAuthoredObjectMaterialDomain(
-	owner: StaticWorkPeerRecordOwner,
+	owner: StaticLayerPeerRecordOwner,
 ): "landblock-env-cells" | OutdoorStaticObjectDomain {
 	if (owner.domain === "landblock-env-cells") {
 		return "landblock-env-cells";
@@ -758,18 +762,14 @@ function createDynamicEntityId(
 	].join(":");
 }
 
-function createSourceScopeKey(owner: StaticWorkPeerRecordOwner): string {
-	return createStaticScopeOwnerKey({
-		domain: owner.domain,
-		scopeKey: owner.scopeKey,
-	});
+function createSourceScopeKey(owner: StaticLayerPeerRecordOwner): string {
+	return owner.ownerId;
 }
 
 function createStaticTextureBatchLookupKey(
-	domain: StaticWorkPeerRecordOwner["domain"],
-	scopeKey: string,
+	owner: StaticLayerPeerRecordOwner,
 ): string {
-	return `${domain}:${scopeKey}`;
+	return `${owner.domain}:${owner.ownerId}`;
 }
 
 function formatHex32(value: number): string {

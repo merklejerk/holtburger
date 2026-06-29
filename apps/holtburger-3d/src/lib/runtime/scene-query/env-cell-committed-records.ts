@@ -1095,11 +1095,15 @@ function createStaticPeerOwnerKey(owner: {
 	readonly kind: string;
 	readonly drawUnitId?: string;
 	readonly domain?: StaticDomain;
+	readonly ownerId?: string;
 	readonly scopeKey?: string;
 	readonly workId?: string;
 }): string {
 	if (owner.kind === "draw-unit" && typeof owner.drawUnitId === "string") {
 		return `draw-unit:${owner.drawUnitId}`;
+	}
+	if (owner.kind === "layer-owner" && typeof owner.ownerId === "string") {
+		return owner.ownerId;
 	}
 	if (
 		owner.kind === "work" &&
@@ -1133,6 +1137,9 @@ function getCommittedRecordDomain(
 		| StaticVisibilityRecord
 		| unknown,
 ): StaticDomain {
+	if (isRecordWithLayerOwner(record)) {
+		return record.owner.domain;
+	}
 	if (isRecordWithWorkOwner(record)) {
 		return record.owner.domain;
 	}
@@ -1296,6 +1303,23 @@ function isRecordWithWorkOwner(record: unknown): record is {
 		record !== null &&
 		"owner" in record &&
 		(record as { owner?: { kind?: unknown } }).owner?.kind === "work" &&
+		typeof (record as { owner?: { domain?: unknown } }).owner?.domain ===
+			"string"
+	);
+}
+
+function isRecordWithLayerOwner(record: unknown): record is {
+	readonly owner: {
+		readonly kind: "layer-owner";
+		readonly domain: StaticDomain;
+	};
+} {
+	return (
+		typeof record === "object" &&
+		record !== null &&
+		"owner" in record &&
+		(record as { owner?: { kind?: unknown } }).owner?.kind ===
+			"layer-owner" &&
 		typeof (record as { owner?: { domain?: unknown } }).owner?.domain ===
 			"string"
 	);

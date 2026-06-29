@@ -234,7 +234,7 @@ function createEnvCellFactsByLandblock(
 					(record) =>
 						record.kind === "env-cell-static-object-seed" &&
 						record.owner.domain === "landblock-env-cells" &&
-						record.owner.scope.landblockId === landblockId,
+						record.owner.key.landblockId === landblockId,
 				),
 			envCellStaticObjectDrawUnits,
 			landblockId,
@@ -259,15 +259,15 @@ function createEnvCellFactsByLandblock(
 			),
 			sourceMappingRecords: materialized.staticSourceMappings.filter(
 				(record) =>
-					record.owner.kind === "work" &&
+					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "landblock-env-cells" &&
-					record.owner.scope.landblockId === landblockId,
+					record.owner.key.landblockId === landblockId,
 			),
 			spatialRecords: materialized.staticSpatialRecords.filter(
 				(record) =>
-					record.owner.kind === "work" &&
+					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "landblock-env-cells" &&
-					record.owner.scope.landblockId === landblockId,
+					record.owner.key.landblockId === landblockId,
 			),
 			structuredInteriorDrawUnits,
 			textureUses: delta.textureUses.filter(

@@ -129,12 +129,17 @@ export class DeferredStaticResolver
 		if (!resolver) {
 			const sourceLayerRequest = this.#sourceLayerRequests.get(requestId);
 			if (sourceLayerRequest) {
+				if (!this.#sourceResolvers.has(sourceLayerRequest.sourceRequestId)) {
+					return;
+				}
 				this.completeSource(sourceLayerRequest.sourceRequestId, [
-					createFakeLayerRecipe(
-						sourceLayerRequest.request,
-						sourceLayerRequest.layer,
-						sourceLayerRequest.revision,
-						payload,
+					...sourceLayerRequest.request.requestedLayers.map((layer) =>
+						createFakeLayerRecipe(
+							sourceLayerRequest.request,
+							layer,
+							sourceLayerRequest.revision,
+							layer.kind === sourceLayerRequest.layer.kind ? payload : {},
+						),
 					),
 				]);
 				return;
@@ -183,6 +188,14 @@ export class DeferredStaticResolver
 		const resolver = this.#resolvers.get(requestId);
 
 		if (!resolver) {
+			const sourceLayerRequest = this.#sourceLayerRequests.get(requestId);
+			if (sourceLayerRequest) {
+				if (!this.#sourceResolvers.has(sourceLayerRequest.sourceRequestId)) {
+					return;
+				}
+				this.failSource(sourceLayerRequest.sourceRequestId, error);
+				return;
+			}
 			throw new Error(`No pending resolver request exists for ${requestId}.`);
 		}
 

@@ -1917,13 +1917,10 @@ class ClientRuntimeImpl implements ClientRuntime {
 		seeds: readonly StaticAuthoredDynamicSeedRecord[],
 	): void {
 		for (const seed of seeds) {
-			if (seed.owner.kind !== "work") {
-				continue;
-			}
 			this.#textureBatchIdByStaticSourceScope.set(
 				createStaticSourceScopeTextureBatchLookupKey(
 					seed.owner.domain,
-					seed.owner.scopeKey,
+					seed.owner.ownerId,
 				),
 				staticBatchId,
 			);
@@ -3151,15 +3148,15 @@ function createMaterializedLandblockLayerPayloads(
 			),
 			sourceMappingRecords: materialized.staticSourceMappings.filter(
 				(record) =>
-					record.owner.kind === "work" &&
+					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "outdoor-buildings" &&
-					record.owner.scope.landblockId === landblockId,
+					record.owner.key.landblockId === landblockId,
 			),
 			spatialRecords: materialized.staticSpatialRecords.filter(
 				(record) =>
-					record.owner.kind === "work" &&
+					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "outdoor-buildings" &&
-					record.owner.scope.landblockId === landblockId,
+					record.owner.key.landblockId === landblockId,
 			),
 			textureUses: delta.textureUses.filter(
 				(textureUse) => textureUse.domain === "outdoor-buildings",
@@ -3183,15 +3180,15 @@ function createMaterializedLandblockLayerPayloads(
 			),
 			sourceMappingRecords: materialized.staticSourceMappings.filter(
 				(record) =>
-					record.owner.kind === "work" &&
+					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "outdoor-explicit-objects" &&
-					record.owner.scope.landblockId === landblockId,
+					record.owner.key.landblockId === landblockId,
 			),
 			spatialRecords: materialized.staticSpatialRecords.filter(
 				(record) =>
-					record.owner.kind === "work" &&
+					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "outdoor-explicit-objects" &&
-					record.owner.scope.landblockId === landblockId,
+					record.owner.key.landblockId === landblockId,
 			),
 			textureUses: delta.textureUses.filter(
 				(textureUse) => textureUse.domain === "outdoor-explicit-objects",
@@ -3229,15 +3226,15 @@ function createMaterializedLandblockLayerPayloads(
 			),
 			sourceMappingRecords: materialized.staticSourceMappings.filter(
 				(record) =>
-					record.owner.kind === "work" &&
+					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "outdoor-generated-scenery" &&
-					record.owner.scope.landblockId === landblockId,
+					record.owner.key.landblockId === landblockId,
 			),
 			spatialRecords: materialized.staticSpatialRecords.filter(
 				(record) =>
-					record.owner.kind === "work" &&
+					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "outdoor-generated-scenery" &&
-					record.owner.scope.landblockId === landblockId,
+					record.owner.key.landblockId === landblockId,
 			),
 			textureUses: delta.textureUses.filter(
 				(textureUse) => textureUse.domain === "outdoor-generated-scenery",
@@ -3274,15 +3271,15 @@ function createMaterializedLandblockLayerPayloads(
 			),
 			sourceMappingRecords: materialized.staticSourceMappings.filter(
 				(record) =>
-					record.owner.kind === "work" &&
+					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "outdoor-detail" &&
-					record.owner.scope.landblockId === landblockId,
+					record.owner.key.landblockId === landblockId,
 			),
 			spatialRecords: materialized.staticSpatialRecords.filter(
 				(record) =>
-					record.owner.kind === "work" &&
+					record.owner.kind === "layer-owner" &&
 					record.owner.domain === "outdoor-detail" &&
-					record.owner.scope.landblockId === landblockId,
+					record.owner.key.landblockId === landblockId,
 			),
 			textureUses: delta.textureUses.filter(
 				(textureUse) => textureUse.domain === "outdoor-detail",

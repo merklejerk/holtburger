@@ -204,8 +204,8 @@ Validated current facts:
 - Env-cell system layer clearing is resource-driven and explicit. Clearing the renderer env-cell layer also calls `StaticSceneQuery.clearEnvCellSystemLayer(landblockId)`.
 - The env-cell geometry attachment provider currently requests the full `landblock-env-cells` host asset directly to build cell-structure geometry attachments.
 - `EnvCellSystemLayerAssemblyStore` currently merges env-cell materialized output with building transition facts from the `outdoor-buildings` path before publishing the renderer env-cell system layer. The LoD `4` route should make that runtime cross-layer merge unnecessary.
-- Runtime-authored dynamics already have explicit runtime lifetime and are not pruned by `retainLayerOwners`. They still require a concrete `DynamicEntityResidence` (`outdoor-landblock` or `env-cell`) and do not yet support an explicit no-residence/unrendered state.
-- Static-authored dynamics are retained by layer owner ids, but several diagnostic/type field names still say `sourceScopeKey`.
+- Runtime-authored dynamics have explicit runtime lifetime, are not pruned by `retainLayerOwners`, and can now hold an explicit no-residence/unrendered render state.
+- Static-authored dynamics are retained by layer owner ids; dynamic diagnostics and retention policy names now use `layerOwnerId` / `static-layer-owner`.
 - Scene-interest readiness now tracks demanded layer owner states instead of active work ids/revisions.
 - `ContentDecodeCache` is an LRU for decoded source records. It is not the prepared landblock scene LoD cache required by this spec.
 - `StaticOutdoorSceneAssembler::assemble_from_loaded` currently derives explicit objects, buildings, and generated scenery together. Terrain-only or building-only LoD assembly therefore needs new gating in the shared source assembly path, not just projection from the existing full outdoor asset.
@@ -1144,7 +1144,7 @@ Decisions and course corrections:
 - Removed the dead dynamic `createStaticScopeOwnerKey` helper that preserved old `domain:scopeKey` identity construction.
 - Source-fanout-aware fake resolver behavior required coordinator tests to stop assuming a synthetic layer completion produces only one bake input; assertions now select the relevant domain batch while allowing source fanout to enqueue sibling layer work.
 - Audit result: `rg -n "StaticWorkPeerRecordOwner|kind: \"work\"|kind: 'work'|kind: \"work\" as const|createWorkPeerRecordOwner|createWorkOwner|createEnvCellWorkOwner|createOutdoorWorkOwner|owner\\.workId|owner\\.scope" apps/holtburger-3d/src/lib/static apps/holtburger-3d/src/lib/runtime apps/holtburger-3d/src/lib/dynamic` returns no matches.
-- Remaining `workId`, `scopeKey`, and `sourceScopeKey` references are not durable peer-record ownership: they are active-work scheduling/diagnostic handles, bake completion handles, terrain/draw-unit resource ids, or the still-existing static-authored dynamic retention field whose value is now a layer owner id. Broader cleanup remains Phase 8C/8D/8E work.
+- Remaining `workId` and `scopeKey` references are not durable peer-record ownership: they are active-work scheduling/diagnostic handles, bake completion handles, terrain/draw-unit resource ids, or historical plan prose. Broader cleanup remains Phase 8C/8D/8E work.
 - Validation: `npm run test:ts -- src/lib/static/coordinator/static-coordinator.test.ts src/lib/static/portal-graphs.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/static-materializer.test.ts src/lib/runtime/env-cell-system-layer-assembly.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/runtime/client-runtime.test.ts`; `npm run check`.
 
 ### Phase 8C: Scene Query And Static Dynamic Retention
@@ -1181,7 +1181,7 @@ Decisions and course corrections:
 - Replaced `EnvCellCommittedRecordStore.retainScopes` with `retainLayerOwners`; committed env-cell records now prune by stored layer owner ids rather than reconstructing scope/domain strings from records.
 - Replaced `DynamicEntityController.retainStaticScopes` with `retainLayerOwners`; static-authored dynamic retention now consumes owner ids directly.
 - Removed `retainScopes`, `retainStaticScopes`, and `retainedScopes` references from static/runtime/dynamic implementation and focused tests. `StaticScopeOwnerKey` remains only as a helper input shape for deriving layer owner keys, not as retention state.
-- Naming debt: dynamic presentation still uses `sourceScopeKey` field names, but the value is now the layer owner id. This should be renamed in Phase 8D5 or Phase 8E unless the no-residence work removes the field first.
+- Naming debt resolved in Phase 8D5: dynamic presentation/provenance/retention fields now use `layerOwnerId` and `static-layer-owner`.
 - Validation: `npm run test:ts -- src/lib/static/demand-planner.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts`; `npm run check`.
 
 ### Phase 8D1: Owner-State Scene Interest Readiness
@@ -1329,7 +1329,7 @@ Decisions and course corrections:
 
 ### Phase 8D5: No-Residence Diagnostics And Validation
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: make no-residence runtime dynamics visible and prove the split with focused validation before the Phase 8E audit.
 
@@ -1348,14 +1348,19 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Update dynamic runtime diagnostics and snapshots.
-- [ ] Rename misleading diagnostics if discovered during implementation.
-- [ ] Run focused dynamic/runtime/renderer test suite.
-- [ ] Record remaining vestigial cleanup targets for Phase 8E.
+- [x] Update dynamic runtime diagnostics and snapshots.
+- [x] Rename misleading diagnostics if discovered during implementation.
+- [x] Run focused dynamic/runtime/renderer test suite.
+- [x] Record remaining vestigial cleanup targets for Phase 8E.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Runtime dynamic diagnostics already exposed no-residence through `effectiveResidence` and `renderability.reasons`; Phase 8D2-8D4 tests now assert `no-residence` plus `no-render-residence` on ready runtime records.
+- Renamed dynamic static-authored diagnostic/retention fields from `sourceScopeKey` / `static-source-scope` to `layerOwnerId` / `static-layer-owner`.
+- Renamed the runtime dynamic texture-batch lookup cache from static source-scope terminology to static layer-owner terminology.
+- Audit result: `rg -n "sourceScopeKey|static-source-scope|createSourceScopeKey|textureBatchIdsByStaticSourceScope|retainStaticSourceScopeKeys|StaticSourceScope" apps/holtburger-3d/src/lib/dynamic apps/holtburger-3d/src/lib/runtime/client-runtime.ts apps/holtburger-3d/src/lib/runtime/client-runtime.test.ts` returns no matches.
+- Remaining cleanup target for Phase 8E: `desiredKey` still exists as an active-work scheduling bridge in `StaticCoordinator`; audit and either remove it or classify it as transient non-owner state.
+- Validation: `npm run test:ts -- src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/runtime/client-runtime.test.ts src/lib/dynamic/dynamic-placement-tracker.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts`; `npm run check`.
 
 ### Phase 8E: Layer Ownership Cutover Audit
 

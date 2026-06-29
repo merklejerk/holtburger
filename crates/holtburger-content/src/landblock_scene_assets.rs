@@ -8,7 +8,9 @@ use holtburger_dat::{EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE};
 
 use crate::material_variants::legacy_sampler_material_variant_signature;
 use crate::source_reader::ContentSourceReader;
-use crate::static_outdoor_scene::{StaticOutdoorScene, StaticOutdoorSceneAssembler};
+use crate::static_outdoor_scene::{
+    StaticOutdoorScene, StaticOutdoorSceneAssembler, StaticOutdoorSceneSourceFamilies,
+};
 use crate::{ContentDecodeCache, ContentRepository, normalize_landblock_id};
 
 pub const LANDBLOCK_GRID_SIZE: usize = 9;
@@ -1016,10 +1018,11 @@ impl LandblockOutdoorAssetAssembler {
                 Ok(region) => match StaticOutdoorSceneAssembler::new().assemble_from_loaded(
                     &mut context.source,
                     landblock_id,
-                    source_landblock,
+                    Some(source_landblock),
                     landblock_info_source.as_ref(),
                     None,
-                    &region,
+                    Some(&region),
+                    StaticOutdoorSceneSourceFamilies::ALL,
                 ) {
                     Ok(scene) => Some(scene),
                     Err(error) => {
@@ -1263,16 +1266,56 @@ impl LandblockSceneLodAssetAssembler {
 
     pub fn assemble_landblock_with_cache(
         &self,
-        _content: &ContentRepository,
-        _decode_cache: &ContentDecodeCache,
+        content: &ContentRepository,
+        decode_cache: &ContentDecodeCache,
         request: LandblockSceneLodRequest,
     ) -> LandblockSceneLodAsset {
+        let mut diagnostics = PreparedContentSourceDiagnostics::default();
+        let static_families = scene_lod_static_source_families(request.level);
+        if request.context == LandblockSceneLodContext::Outdoor && !static_families.is_empty() {
+            let mut source = ContentSourceReader::with_decode_cache(content, decode_cache);
+            if let Err(error) = StaticOutdoorSceneAssembler::new()
+                .assemble_landblock_with_source_families(
+                    &mut source,
+                    request.landblock_id,
+                    static_families,
+                )
+            {
+                diagnostics.errors.push(SourceLoadError {
+                    namespace: EOR_CELL_NAMESPACE,
+                    file_id: request.landblock_id,
+                    role: "landblock-scene-lod",
+                    error_code: "asset-decode-failed",
+                    detail: format!(
+                        "Could not assemble scene LoD {} for landblock 0x{:08X}: {error:#}",
+                        request.level.as_u8(),
+                        request.landblock_id
+                    ),
+                });
+            }
+        }
+
         LandblockSceneLodAsset {
             landblock_id: request.landblock_id,
             level: request.level,
             context: request.context,
             layers: Vec::new(),
-            diagnostics: PreparedContentSourceDiagnostics::default(),
+            diagnostics,
+        }
+    }
+}
+
+fn scene_lod_static_source_families(
+    level: LandblockSceneLodLevel,
+) -> StaticOutdoorSceneSourceFamilies {
+    match level {
+        LandblockSceneLodLevel::Level0 => {
+            StaticOutdoorSceneSourceFamilies::new(false, false, false)
+        }
+        LandblockSceneLodLevel::Level1 => StaticOutdoorSceneSourceFamilies::new(false, true, false),
+        LandblockSceneLodLevel::Level2 => StaticOutdoorSceneSourceFamilies::new(true, true, false),
+        LandblockSceneLodLevel::Level3 | LandblockSceneLodLevel::Level4 => {
+            StaticOutdoorSceneSourceFamilies::ALL
         }
     }
 }
@@ -4681,6 +4724,30 @@ mod tests {
         );
         assert!(spatial_items[0].bounds.min.x > 192.0);
         assert!(spatial_items[0].bounds.min.z > 0.0);
+    }
+
+    #[test]
+    fn scene_lod_static_source_families_follow_level_contract() {
+        assert_eq!(
+            scene_lod_static_source_families(LandblockSceneLodLevel::Level0),
+            StaticOutdoorSceneSourceFamilies::new(false, false, false)
+        );
+        assert_eq!(
+            scene_lod_static_source_families(LandblockSceneLodLevel::Level1),
+            StaticOutdoorSceneSourceFamilies::new(false, true, false)
+        );
+        assert_eq!(
+            scene_lod_static_source_families(LandblockSceneLodLevel::Level2),
+            StaticOutdoorSceneSourceFamilies::new(true, true, false)
+        );
+        assert_eq!(
+            scene_lod_static_source_families(LandblockSceneLodLevel::Level3),
+            StaticOutdoorSceneSourceFamilies::ALL
+        );
+        assert_eq!(
+            scene_lod_static_source_families(LandblockSceneLodLevel::Level4),
+            StaticOutdoorSceneSourceFamilies::ALL
+        );
     }
 
     #[test]

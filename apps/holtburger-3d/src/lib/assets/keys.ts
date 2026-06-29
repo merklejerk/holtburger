@@ -94,7 +94,14 @@ export function parseHostAssetId(assetId: string): HostAssetKey {
 		return createRawHostAssetKey(assetId);
 	}
 
-	if (kind === "prepared-texture" && id.includes("?")) {
+	if (
+		(kind === "prepared-texture" || kind === "runtime-setup-appearance") &&
+		id.includes("?")
+	) {
+		return createHostAssetKey(kind, id);
+	}
+
+	if (kind === "runtime-setup-appearance") {
 		return createHostAssetKey(kind, id);
 	}
 
@@ -111,7 +118,8 @@ function normalizeAssetKeyId(
 ): string {
 	if (
 		kind === "raw" ||
-		(kind === "prepared-texture" && typeof id === "string")
+		((kind === "prepared-texture" || kind === "runtime-setup-appearance") &&
+			typeof id === "string")
 	) {
 		return `${id}`.trim();
 	}
@@ -163,6 +171,7 @@ function isKnownHostAssetKeyKind(kind: string): kind is HostAssetKeyKind {
 		kind === "gfx-obj" ||
 		kind === "setup-model" ||
 		kind === "setup-appearance" ||
+		kind === "runtime-setup-appearance" ||
 		kind === "material" ||
 		kind === "terrain-material" ||
 		kind === "region-render-profile" ||

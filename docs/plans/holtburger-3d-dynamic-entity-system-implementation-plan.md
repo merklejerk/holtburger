@@ -5169,15 +5169,38 @@ Implementation notes:
   `offset` / `length` values from packed ObjDesc units into client color-index ranges by multiplying
   by 8 before handing them to the setup appearance resolver. ACE DatLoader performs the same
   expansion when unpacking ObjDesc sub-palettes.
-- 2026-06-29 follow-up: The all-black WCID `42810` render persisted after range expansion. The next
-  bad assumption was projecting ACE `PaletteBase` DID into runtime render `paletteId`, which made the
-  material planner treat it as a global palette override for every indexed material. ACViewer starts
-  from each texture/default palette and applies sub-palette patches instead, so the resolver now
-  preserves PaletteBase in `sourceDids` but leaves render `appearance.paletteId` null until PaletteID
-  semantics are modeled precisely.
-- 2026-06-29 spicy bit: The runtime setup-appearance route encodes a compact JSON request as hex in a
-  raw asset id. This is app-local and deterministic, but it is not cute. It keeps the prepared asset
-  pipeline typed and avoids a second one-off host command path for closure hydration.
+- 2026-06-29 follow-up: The all-black WCID `42810` render persisted after range expansion, so
+  PaletteBase projection was temporarily suppressed while isolating palette behavior. That
+  suppression was a diagnostic concession, not a faithful ObjDesc model.
+- 2026-06-29 follow-up: The all-black WCID `42810` render still persisted after `PaletteBase` was
+  removed from render `paletteId`. Selection diagnostics then exposed the real frontend failure:
+  dynamic palette texture requirements with the same material/base palette but different sub-palette
+  compositions were collapsing to the same `textureUseId`, and dynamic render entry lookup keyed
+  material entries by raw material id instead of the appearance-aware `materialUseKey`. Dynamic
+  resource planning now includes the palette range/sub-palette signature in palette texture-use ids,
+  resolves texture ids by exact data-use signature, and maps render slots through
+  `createStaticObjectMaterialUseKey` so model-data palette views select the intended material entry.
+- 2026-06-29 debt: The palette signature fix intentionally follows the existing string
+  `textureUseId` / `materialUseKey` contracts used by static material planning and texture
+  registration. This is cold resource-planning work, not the frame render loop, but high-frequency
+  runtime spawn rebuilds should eventually intern or structurally compare these identities instead
+  of expanding composite strings on every rebuild.
+- 2026-06-29 follow-up: With palette texture identity fixed, WCID `42810` no longer needs PaletteBase
+  suppression. ACE's `AddBaseModelData` writes `PaletteBaseDID` to `ObjDesc.PaletteID`, then appends
+  skin/hair/eye/weenie sub-palette ranges, so the SQL spawn seed now projects `PaletteBaseDID` back
+  into runtime `appearance.paletteId`. The earlier all-black behavior was caused by identity
+  collision, not by PaletteBase itself.
+- 2026-06-29 follow-up: WCID `42810` still showed black head/arms after the palette data was present.
+  The remaining dynamic-only bug was material slot remapping. Static draw-unit partitioning remaps
+  source material slots to local material-table slots before upload; dynamic render slices were
+  passing source slots through unchanged. Head marker parts using source slot `18` therefore sampled
+  uninitialized material uniforms in one-entry dynamic draw units. Dynamic slices now localize both
+  `materialSlotIndices` and uploaded material entry slots.
+- 2026-06-29 follow-up: The runtime setup-appearance route is now a typed
+  `runtime-setup-appearance` host key with canonical query parameters for PaletteID, sub-palettes,
+  texture changes, and animation part changes. Empty runtime ObjDesc overrides collapse back to the
+  base `setup-appearance` route. This keeps asset-service dedupe readable and avoids the earlier raw
+  hex-encoded JSON route while still reusing the host-side setup appearance resolver.
 - 2026-06-29 verification: `cargo check --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml`,
   `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml ace_world_sql`,
   `cargo fmt --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml --check`, `npm run check`,

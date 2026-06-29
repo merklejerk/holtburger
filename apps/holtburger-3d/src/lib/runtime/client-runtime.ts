@@ -79,6 +79,7 @@ import type {
 	StaticMaterialTableEntry,
 	StaticObjectSourceMappingCoverage,
 	StaticObjectSourceIdentity,
+	MaterialTextureDataUseIdentity,
 	StaticMaterialUnrenderedBucket,
 	ScheduledStaticWorkStatus,
 	StaticRetentionReconciliation,
@@ -395,10 +396,13 @@ type DynamicSelectionVisualDiagnostics =
 			readonly status: "blocked" | "pending";
 	  }
 	| {
+			readonly indexedMaterialEntries: readonly DynamicSelectionIndexedMaterialDiagnostics[];
 			readonly materialSlotCount: number;
+			readonly paletteSources: readonly DynamicSelectionPaletteSourceDiagnostics[];
 			readonly renderPartCount: number;
 			readonly sourceAssetCount: number;
 			readonly status: "ready";
+			readonly textureRequirements: readonly DynamicSelectionTextureRequirementDiagnostics[];
 			readonly textureRequirementCount: number;
 	  }
 	| {
@@ -413,6 +417,53 @@ interface DynamicSelectionRendererIdentityDiagnostics {
 	readonly instanceId: string;
 	readonly visualResourceId: string;
 }
+
+interface DynamicSelectionIndexedMaterialDiagnostics {
+	readonly detailTextureUseId: string | null;
+	readonly indexedTextureFormat: "index16" | "p8" | null;
+	readonly indexTextureUseId: string | null;
+	readonly materialIds: readonly number[];
+	readonly paletteFirstIndex: number;
+	readonly paletteTextureUseId: string | null;
+	readonly partIndex: number;
+	readonly sourceAssetId: string;
+	readonly slot: number;
+}
+
+interface DynamicSelectionPaletteSourceDiagnostics {
+	readonly colorCount: number;
+	readonly paletteId: number;
+}
+
+interface DynamicSelectionTextureRequirementDiagnostics {
+	readonly dataUse: DynamicSelectionTextureDataUseDiagnostics;
+	readonly key: {
+		readonly id: number | string;
+		readonly kind: string;
+	};
+	readonly materialId: number;
+	readonly role: string;
+	readonly textureUseId: string;
+}
+
+type DynamicSelectionTextureDataUseDiagnostics =
+	| {
+			readonly kind: "palette-texture-use";
+			readonly firstIndex: number;
+			readonly indexCount: number;
+			readonly paletteId: number;
+			readonly subPalettes: readonly {
+				readonly firstIndex: number;
+				readonly indexCount: number;
+				readonly paletteId: number;
+			}[];
+			readonly usage: string;
+	  }
+	| {
+			readonly kind: "prepared-render-surface-texture-use";
+			readonly renderSurfaceId: number;
+			readonly usage: string;
+	  };
 
 interface DynamicSelectionRendererDiagnostics {
 	readonly dynamicInstances: number;
@@ -3697,10 +3748,25 @@ function createDynamicSelectionVisualDiagnostics(
 	const visual = record.resources.visual;
 	if (visual.status === "ready") {
 		return {
+			indexedMaterialEntries:
+				createDynamicSelectionIndexedMaterialDiagnostics(visual),
 			materialSlotCount: visual.materialSlots.length,
+			paletteSources: visual.paletteSources.map((source) => ({
+				colorCount: source.colorCount,
+				paletteId: source.palette.paletteId,
+			})),
 			renderPartCount: visual.renderParts.length,
 			sourceAssetCount: visual.sourceAssets.length,
 			status: "ready",
+			textureRequirements: visual.textureRequirements.map((requirement) => ({
+				dataUse: createDynamicSelectionTextureDataUseDiagnostics(
+					requirement.dataUse,
+				),
+				key: requirement.key,
+				materialId: requirement.material.materialId,
+				role: requirement.role,
+				textureUseId: requirement.textureUseId,
+			})),
 			textureRequirementCount: visual.textureRequirements.length,
 		};
 	}
@@ -3714,6 +3780,54 @@ function createDynamicSelectionVisualDiagnostics(
 	}
 	return {
 		status: visual.status,
+	};
+}
+
+function createDynamicSelectionIndexedMaterialDiagnostics(
+	visual: Extract<
+		DynamicEntitySummaryDto["resources"]["visual"],
+		{ readonly status: "ready" }
+	>,
+): readonly DynamicSelectionIndexedMaterialDiagnostics[] {
+	return visual.renderParts.flatMap((part) =>
+		part.materialEntries
+			.filter((entry) => entry.indexedTextureFormat !== null)
+			.map((entry) => ({
+				detailTextureUseId: entry.detailTextureUseId,
+				indexedTextureFormat: entry.indexedTextureFormat,
+				indexTextureUseId: entry.indexTextureUseId,
+				materialIds: entry.materialIds,
+				paletteFirstIndex: entry.paletteFirstIndex,
+				paletteTextureUseId: entry.paletteTextureUseId,
+				partIndex: part.partIndex,
+				sourceAssetId: part.sourceAssetId,
+				slot: entry.slot,
+			})),
+	);
+}
+
+function createDynamicSelectionTextureDataUseDiagnostics(
+	dataUse: MaterialTextureDataUseIdentity,
+): DynamicSelectionTextureDataUseDiagnostics {
+	if (dataUse.kind === "palette-texture-use") {
+		return {
+			firstIndex: dataUse.firstIndex,
+			indexCount: dataUse.indexCount,
+			kind: dataUse.kind,
+			paletteId: dataUse.palette.paletteId,
+			subPalettes: (dataUse.subPalettes ?? []).map((subPalette) => ({
+				firstIndex: subPalette.firstIndex,
+				indexCount: subPalette.indexCount,
+				paletteId: subPalette.palette.paletteId,
+			})),
+			usage: dataUse.usage,
+		};
+	}
+
+	return {
+		kind: dataUse.kind,
+		renderSurfaceId: dataUse.renderSurface.renderSurfaceId,
+		usage: dataUse.usage,
 	};
 }
 

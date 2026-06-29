@@ -253,13 +253,10 @@ fn project_weenie_spawn_seed(rows: WeenieSqlRows) -> WeenieSpawnSeedDto {
 
     WeenieSpawnSeedDto {
         appearance: RuntimeAppearanceObjDescDto {
-            // ACE exposes PaletteBase as ObjDesc PaletteID on the wire, but treating it as a
-            // renderer-wide material palette override makes every indexed material sample from the
-            // same palette. ACViewer's object texture path instead starts from each texture/default
-            // palette and applies sub-palette patches. Preserve PaletteBase in source_dids for now,
-            // but do not project it into the render appearance until the client-side PaletteID
-            // semantics are modeled precisely.
-            palette_id: None,
+            // ACE projects PaletteBaseDID into ObjDesc.PaletteID before adding skin, hair, eye, and
+            // weenie palette ranges. Keep the runtime spawn seed faithful to that wire-level shape;
+            // the renderer can still use material/render-surface defaults when this field is absent.
+            palette_id: rows.dids.get(&PROPERTY_DID_PALETTE_BASE).copied(),
             sub_palettes: rows.sub_palettes,
             texture_changes: rows.texture_changes,
             anim_part_changes: rows.anim_part_changes,
@@ -352,7 +349,7 @@ mod tests {
         assert_eq!(seed.source_dids.icon_id, Some(0x0600_1036));
         assert_eq!(seed.default_scale, Some(3.0));
         assert_eq!(seed.source_ints.gender, Some(2));
-        assert_eq!(seed.appearance.palette_id, None);
+        assert_eq!(seed.appearance.palette_id, Some(0x0400_0001));
         assert_eq!(seed.appearance.sub_palettes.len(), 1);
         assert_eq!(seed.appearance.texture_changes.len(), 1);
         assert_eq!(seed.appearance.anim_part_changes.len(), 1);

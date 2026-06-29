@@ -145,7 +145,10 @@ describe("dynamic entity resource manager", () => {
 		]);
 		expect(
 			Array.from(visual.renderParts[1]?.materialSlotIndices ?? []),
-		).toEqual([1, 1, 1]);
+		).toEqual([0, 0, 0]);
+		expect(
+			visual.renderParts[1]?.materialEntries.map((entry) => entry.slot),
+		).toEqual([0]);
 	});
 
 	it("dedupes shared setup and animation host assets while holding per-entity leases", async () => {
@@ -446,6 +449,69 @@ describe("dynamic entity resource manager", () => {
 		});
 	});
 
+	it("keeps runtime model-data palette uses distinct from raw material palette uses", async () => {
+		const host = new ResolvingRuntimeHost({
+			indexedMaterial: true,
+			runtimeSetupAppearanceSubPalettes: [
+				{
+					numColors: 32,
+					offset: 16,
+					subId: 0x04000030,
+				},
+			],
+		});
+		const assetService = new HostBackedAssetService({ host });
+		const controller = createController(assetService);
+		const runtimeId = controller.createRuntimeSpawn({
+			animationSelection: { animationId: 0x0300061b, kind: "explicit" },
+			baseLocalPlacement: createPlacement(),
+			modelData: {
+				animPartChanges: [],
+				paletteId: null,
+				subPalettes: [
+					{
+						numColors: 32,
+						offset: 16,
+						subId: 0x04000030,
+					},
+				],
+				textureChanges: [],
+			},
+			setupModelId: 0x020003e5,
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+		});
+		await flushPromises();
+
+		const visual =
+			controller.queryDynamicEntitySummary(runtimeId)?.resources.visual;
+		expect(visual?.status).toBe("ready");
+		if (visual?.status !== "ready") {
+			throw new Error("expected runtime model-data visual resources to be ready");
+		}
+
+		const paletteRequirements = visual.textureRequirements.filter(
+			(requirement) =>
+				requirement.role === "palette-rgba" &&
+				requirement.material.materialId === 0x08000011,
+		);
+		expect(paletteRequirements).toHaveLength(2);
+		expect(
+			new Set(
+				paletteRequirements.map((requirement) => requirement.textureUseId),
+			).size,
+		).toBe(2);
+		const overrideTextureUseId = paletteRequirements.find(
+			(requirement) =>
+				requirement.dataUse.kind === "palette-texture-use" &&
+				requirement.dataUse.subPalettes.length === 1,
+		)?.textureUseId;
+		expect(overrideTextureUseId).toContain("04000030@16+32");
+		expect(visual.renderParts[0]?.textureUseIds).toContain(overrideTextureUseId);
+	});
+
 	it("releases runtime visual resource leases on explicit removal", async () => {
 		const assetService = createAssetService();
 		const controller = createController(assetService);
@@ -530,17 +596,24 @@ function createAssetService(
 
 interface ResolvingRuntimeHostOptions {
 	readonly failKeys?: ReadonlySet<string>;
+	readonly indexedMaterial?: boolean;
 	readonly mixedMaterialPart?: boolean;
+	readonly runtimeSetupAppearanceSubPalettes?: SetupAppearancePayloadDto["subPalettes"];
 }
 
 class ResolvingRuntimeHost implements RuntimeHost {
 	readonly lookupCountByKey = new Map<string, number>();
 	readonly #failKeys: ReadonlySet<string>;
+	readonly #indexedMaterial: boolean;
 	readonly #mixedMaterialPart: boolean;
+	readonly #runtimeSetupAppearanceSubPalettes: SetupAppearancePayloadDto["subPalettes"];
 
 	constructor(options: ResolvingRuntimeHostOptions = {}) {
 		this.#failKeys = options.failKeys ?? new Set();
+		this.#indexedMaterial = options.indexedMaterial ?? false;
 		this.#mixedMaterialPart = options.mixedMaterialPart ?? false;
+		this.#runtimeSetupAppearanceSubPalettes =
+			options.runtimeSetupAppearanceSubPalettes ?? [];
 	}
 
 	lookupAsset(key: HostAssetKey, revision: number): Promise<PreparedAsset> {
@@ -555,7 +628,10 @@ class ResolvingRuntimeHost implements RuntimeHost {
 		return Promise.resolve({
 			key,
 			payload: createPayload(key, {
+				indexedMaterial: this.#indexedMaterial,
 				mixedMaterialPart: this.#mixedMaterialPart,
+				runtimeSetupAppearanceSubPalettes:
+					this.#runtimeSetupAppearanceSubPalettes,
 			}),
 			preparedAt: "2026-06-26T00:00:00.000Z",
 			revision,
@@ -573,15 +649,29 @@ class ResolvingRuntimeHost implements RuntimeHost {
 
 function createPayload(
 	key: HostAssetKey,
-	options: { readonly mixedMaterialPart: boolean },
+	options: {
+		readonly indexedMaterial: boolean;
+		readonly mixedMaterialPart: boolean;
+		readonly runtimeSetupAppearanceSubPalettes: SetupAppearancePayloadDto["subPalettes"];
+	},
 ): unknown {
+	if (key.kind === "runtime-setup-appearance") {
+		return createSetupAppearancePayload({
+			mixedMaterialPart: options.mixedMaterialPart,
+			subPalettes: options.runtimeSetupAppearanceSubPalettes,
+		});
+	}
+
 	switch (key.kind) {
 		case "animation":
 			return createAnimationPayload();
 		case "setup-model":
 			return createSetupModelPayload();
 		case "setup-appearance":
-			return createSetupAppearancePayload(options);
+			return createSetupAppearancePayload({
+				mixedMaterialPart: options.mixedMaterialPart,
+				subPalettes: [],
+			});
 		case "gfx-obj":
 			return createGfxObjPayload(options);
 		case "material":
@@ -589,7 +679,7 @@ function createPayload(
 		case "surface-texture":
 			return createSurfaceTexturePayload();
 		case "render-surface":
-			return createRenderSurfacePayload();
+			return createRenderSurfacePayload(options);
 		case "palette":
 			return {
 				colorCount: 256,
@@ -663,6 +753,7 @@ function createAnimationPayload(): AnimationPayloadDto {
 
 function createSetupAppearancePayload(options: {
 	readonly mixedMaterialPart: boolean;
+	readonly subPalettes: SetupAppearancePayloadDto["subPalettes"];
 }): SetupAppearancePayloadDto {
 	return {
 		animPartChanges: [],
@@ -702,7 +793,7 @@ function createSetupAppearancePayload(options: {
 		residencyKind: "unknown",
 		setupModelId: 0x020003e5,
 		sourceAssetKind: "setup-appearance",
-		subPalettes: [],
+		subPalettes: options.subPalettes,
 		textureChanges: [],
 	};
 }
@@ -839,12 +930,14 @@ function createSurfaceTexturePayload(): SurfaceTexturePayloadDto {
 	};
 }
 
-function createRenderSurfacePayload(): RenderSurfacePayloadDto {
+function createRenderSurfacePayload(options: {
+	readonly indexedMaterial: boolean;
+}): RenderSurfacePayloadDto {
 	return {
 		defaultPaletteId: 0x04000010,
 		dependencies: { paletteAssetIds: ["palette/04000010"] },
-		format: "A8R8G8B8",
-		formatRaw: 0,
+		format: options.indexedMaterial ? "p8" : "A8R8G8B8",
+		formatRaw: options.indexedMaterial ? 0x29 : 0,
 		height: 1,
 		kind: "render-surface",
 		provenance: createProvenance("render-surface"),

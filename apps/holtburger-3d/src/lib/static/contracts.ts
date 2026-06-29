@@ -1,6 +1,9 @@
 import type {
 	LandblockEnvCellsPayloadDto,
 	LandblockOutdoorPayloadDto,
+	LandblockSceneLodLayerDto,
+	LandblockSceneLodLevelDto,
+	LandblockSceneLodSourceDto,
 	PlacementTransformDto,
 } from "../../lib/host/contracts";
 import type { VisualGeometryPayload } from "../visual/visual-geometry";
@@ -110,7 +113,26 @@ export interface LayerOwnerState {
 
 export interface StaticDemandPlan {
 	readonly retainedScopes: readonly StaticScopeOwnerKey[];
+	readonly sourceRequests: readonly StaticLandblockSceneLodSourceRequest[];
 	readonly work: readonly ScheduledStaticWork[];
+}
+
+export interface StaticLandblockSceneLodLayerRequest {
+	/** LoD layer requested from a landblock scene source payload. */
+	readonly kind: LandblockSceneLodLayerDto["kind"];
+	/** Layer owner that will receive the emitted recipe after source fanout. */
+	readonly targetOwnerKey: LayerOwnerKey;
+}
+
+export interface StaticLandblockSceneLodSourceRequest {
+	/** Normalized outdoor landblock id used by the `landblock/{id}/lod/{level}` route. */
+	readonly landblockId: number;
+	/** Scene context passed to the host LoD source assembler. */
+	readonly context: LandblockSceneLodSourceDto["context"];
+	/** Minimum LoD required to emit every requested layer for this landblock/context. */
+	readonly sourceLod: LandblockSceneLodLevelDto;
+	/** Layer recipes requested from the prepared source payload. */
+	readonly requestedLayers: readonly StaticLandblockSceneLodLayerRequest[];
 }
 
 export interface StaticRetentionReconciliation {

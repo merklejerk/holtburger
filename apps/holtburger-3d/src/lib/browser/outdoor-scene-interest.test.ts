@@ -12,14 +12,16 @@ describe("deriveOutdoorSceneInterest", () => {
 			focusLandblockId: 0x05050003,
 			terrainRadius: 2,
 			buildingRadius: 1,
-			detailRadius: 0,
+			explicitObjectRadius: 0,
+			generatedSceneryRadius: 1,
 			envCellRadius: 1,
 		});
 
 		expect(interest.focusLandblockId).toBe(0x0505ffff);
 		expect(interest.terrainLandblockIds).toHaveLength(21);
 		expect(interest.buildingLandblockIds).toHaveLength(9);
-		expect(interest.detailLandblockIds).toEqual([0x0505ffff]);
+		expect(interest.explicitObjectLandblockIds).toEqual([0x0505ffff]);
+		expect(interest.generatedSceneryLandblockIds).toHaveLength(9);
 		expect(interest.envCellLandblockIds).toHaveLength(9);
 		expect(interest.terrainLandblockIds[0]).toBe(0x0505ffff);
 		expect(interest.buildingLandblockIds[0]).toBe(0x0505ffff);
@@ -30,17 +32,20 @@ describe("deriveOutdoorSceneInterest", () => {
 			focusLandblockId: 0x0102ffff,
 			terrainRadius: 1.9,
 			buildingRadius: 4,
-			detailRadius: 3,
+			explicitObjectRadius: 3,
+			generatedSceneryRadius: 0,
 			envCellRadius: 5,
 		});
 
 		expect(interest.terrainRadius).toBe(1);
 		expect(interest.buildingRadius).toBe(1);
-		expect(interest.detailRadius).toBe(1);
+		expect(interest.explicitObjectRadius).toBe(1);
+		expect(interest.generatedSceneryRadius).toBe(0);
 		expect(interest.envCellRadius).toBe(1);
 		expect(interest.terrainLandblockIds).toHaveLength(9);
 		expect(interest.buildingLandblockIds).toHaveLength(9);
-		expect(interest.detailLandblockIds).toHaveLength(9);
+		expect(interest.explicitObjectLandblockIds).toHaveLength(9);
+		expect(interest.generatedSceneryLandblockIds).toEqual([0x0102ffff]);
 		expect(interest.envCellLandblockIds).toHaveLength(9);
 	});
 
@@ -49,7 +54,8 @@ describe("deriveOutdoorSceneInterest", () => {
 			focusLandblockId: 0x0505ffff,
 			terrainRadius: 2,
 			buildingRadius: 0,
-			detailRadius: 0,
+			explicitObjectRadius: 0,
+			generatedSceneryRadius: 0,
 			envCellRadius: 2,
 		});
 
@@ -64,7 +70,8 @@ describe("deriveOutdoorSceneInterest", () => {
 			focusLandblockId: makeOutdoorLandblockId(0, 0),
 			terrainRadius: 1,
 			buildingRadius: 1,
-			detailRadius: 1,
+			explicitObjectRadius: 1,
+			generatedSceneryRadius: 1,
 			envCellRadius: 1,
 		});
 

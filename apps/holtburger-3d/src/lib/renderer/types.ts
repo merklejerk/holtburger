@@ -142,7 +142,8 @@ interface EnvCellSystemLayerResourceMembership {
 export interface RendererStaticLayerVisibility {
 	readonly envCellInteriors: boolean;
 	readonly outdoorBuildings: boolean;
-	readonly outdoorDetail: boolean;
+	readonly outdoorExplicitObjects: boolean;
+	readonly outdoorGeneratedScenery: boolean;
 	readonly terrain: boolean;
 }
 
@@ -150,7 +151,8 @@ export const DEFAULT_RENDERER_STATIC_LAYER_VISIBILITY: RendererStaticLayerVisibi
 	Object.freeze({
 		envCellInteriors: true,
 		outdoorBuildings: true,
-		outdoorDetail: true,
+		outdoorExplicitObjects: true,
+		outdoorGeneratedScenery: true,
 		terrain: true,
 	});
 

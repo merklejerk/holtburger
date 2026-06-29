@@ -596,7 +596,7 @@ Decisions and course corrections:
 
 ### Phase 5B: Browser Interest And Visibility Axis Split
 
-Status: pending.
+Status: complete.
 
 Goal: replace browser `detail` control state with separate explicit-object and generated-scenery axes.
 
@@ -615,13 +615,17 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Update `BrowserDisplay`, `OutdoorSceneInterest`, and renderer visibility contracts to split explicit-object and generated-scenery controls/state.
-- [ ] Update manual/follow-mode domain controls.
-- [ ] Update browser interest and renderer visibility tests.
+- [x] Update `BrowserDisplay`, `OutdoorSceneInterest`, and renderer visibility contracts to split explicit-object and generated-scenery controls/state.
+- [x] Update manual/follow-mode domain controls.
+- [x] Update browser interest and renderer visibility tests.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Replaced browser `detailRadius`/`detailLandblockIds` with explicit-object and generated-scenery radii/landblock sets.
+- Replaced manual `detail` domain control with `explicit-objects` and `generated-scenery`.
+- Replaced renderer `outdoorDetail` visibility with `outdoorExplicitObjects` and `outdoorGeneratedScenery`, and updated WebGL2 visibility checks for split object domains.
+- Kept the temporary old-detail bridge in runtime demand by passing `lod.detail = max(explicitObjectRadius, generatedSceneryRadius)` until Phase 5C splits resolver and baker work. Legacy `outdoor-detail` resources remain visible when either split object visibility axis is enabled.
+- Validation: `npm run check`; `npm run test:ts -- src/lib/browser/outdoor-scene-interest.test.ts src/lib/renderer/static-layer-contracts.test.ts src/lib/runtime/client-runtime.test.ts src/lib/renderer/webgl2/webgl2-renderer.test.ts`.
 
 ### Phase 5C: Resolver, Baker, Diagnostics, And Selection Domain Split
 

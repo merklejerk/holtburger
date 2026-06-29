@@ -1882,7 +1882,8 @@ describe("WebGL2 structured interior rendering", () => {
 		renderer.setStaticLayerVisibility({
 			envCellInteriors: true,
 			outdoorBuildings: true,
-			outdoorDetail: true,
+			outdoorExplicitObjects: true,
+			outdoorGeneratedScenery: true,
 			terrain: false,
 		});
 		pendingFrame?.(16);

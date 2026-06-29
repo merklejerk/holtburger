@@ -8,14 +8,16 @@ export interface OutdoorSceneInterest {
 	focusLandblockId: number;
 	terrainRadius: number;
 	buildingRadius: number;
-	detailRadius: number;
+	explicitObjectRadius: number;
+	generatedSceneryRadius: number;
 	envCellRadius: number;
 }
 
 interface OutdoorSceneInterestLandblocks {
 	terrainLandblockIds: readonly number[];
 	buildingLandblockIds: readonly number[];
-	detailLandblockIds: readonly number[];
+	explicitObjectLandblockIds: readonly number[];
+	generatedSceneryLandblockIds: readonly number[];
 	envCellLandblockIds: readonly number[];
 }
 
@@ -26,7 +28,8 @@ export const MIN_OUTDOOR_SCENE_LOD_RADIUS = 0;
 export const MAX_OUTDOOR_SCENE_LOD_RADIUS = 8;
 export const DEFAULT_TERRAIN_LOD_RADIUS = 2;
 export const DEFAULT_BUILDING_LOD_RADIUS = 1;
-export const DEFAULT_DETAIL_LOD_RADIUS = 1;
+export const DEFAULT_EXPLICIT_OBJECT_LOD_RADIUS = 1;
+export const DEFAULT_GENERATED_SCENERY_LOD_RADIUS = 1;
 export const DEFAULT_ENV_CELL_LOD_RADIUS = 1;
 
 export function deriveOutdoorSceneInterest(
@@ -37,8 +40,12 @@ export function deriveOutdoorSceneInterest(
 		clampOutdoorSceneLodRadius(interest.buildingRadius),
 		terrainRadius,
 	);
-	const detailRadius = Math.min(
-		clampOutdoorSceneLodRadius(interest.detailRadius),
+	const explicitObjectRadius = Math.min(
+		clampOutdoorSceneLodRadius(interest.explicitObjectRadius),
+		buildingRadius,
+	);
+	const generatedSceneryRadius = Math.min(
+		clampOutdoorSceneLodRadius(interest.generatedSceneryRadius),
 		buildingRadius,
 	);
 	const envCellRadius = Math.min(
@@ -53,7 +60,8 @@ export function deriveOutdoorSceneInterest(
 		focusLandblockId,
 		terrainRadius,
 		buildingRadius,
-		detailRadius,
+		explicitObjectRadius,
+		generatedSceneryRadius,
 		envCellRadius,
 		terrainLandblockIds: buildOutdoorCoverageLandblockIds(
 			focusLandblockId,
@@ -63,9 +71,13 @@ export function deriveOutdoorSceneInterest(
 			focusLandblockId,
 			buildingRadius,
 		),
-		detailLandblockIds: buildOutdoorCoverageLandblockIds(
+		explicitObjectLandblockIds: buildOutdoorCoverageLandblockIds(
 			focusLandblockId,
-			detailRadius,
+			explicitObjectRadius,
+		),
+		generatedSceneryLandblockIds: buildOutdoorCoverageLandblockIds(
+			focusLandblockId,
+			generatedSceneryRadius,
 		),
 		envCellLandblockIds: buildOutdoorCoverageLandblockIds(
 			focusLandblockId,

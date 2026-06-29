@@ -762,15 +762,61 @@ fn serialize_landblock_scene_lod_context(context: LandblockSceneLodContext) -> &
 }
 
 fn serialize_landblock_scene_lod_layer(layer: &LandblockSceneLodLayer) -> serde_json::Value {
-    let kind = match layer {
-        LandblockSceneLodLayer::Terrain => "terrain",
-        LandblockSceneLodLayer::OutdoorBuildings => "outdoor-buildings",
-        LandblockSceneLodLayer::OutdoorExplicitObjects => "outdoor-explicit-objects",
-        LandblockSceneLodLayer::OutdoorGeneratedScenery => "outdoor-generated-scenery",
-        LandblockSceneLodLayer::EnvCellSystem => "env-cell-system",
-    };
+    match layer {
+        LandblockSceneLodLayer::Terrain(layer) => serde_json::json!({
+            "kind": "terrain",
+            "terrain": serialize_landblock_terrain(&SerializedOutdoorTerrainSource {
+                terrain_mesh: layer.terrain_mesh.clone(),
+            }),
+        }),
+        LandblockSceneLodLayer::OutdoorBuildings(layer) => serde_json::json!({
+            "kind": "outdoor-buildings",
+            "statics": layer.statics.iter().map(serialize_landblock_outdoor_static_member).collect::<Vec<_>>(),
+            "buildingTransitionApertures": layer.building_transition_apertures.iter().map(serialize_prepared_building_transition_aperture).collect::<Vec<_>>(),
+            "outdoorBvh": serialize_landblock_scene_lod_static_bvh(&layer.statics, layer.outdoor_bvh.as_ref()),
+        }),
+        LandblockSceneLodLayer::OutdoorExplicitObjects(layer) => serde_json::json!({
+            "kind": "outdoor-explicit-objects",
+            "statics": layer.statics.iter().map(serialize_landblock_outdoor_static_member).collect::<Vec<_>>(),
+            "outdoorBvh": serialize_landblock_scene_lod_static_bvh(&layer.statics, layer.outdoor_bvh.as_ref()),
+        }),
+        LandblockSceneLodLayer::OutdoorGeneratedScenery(layer) => serde_json::json!({
+            "kind": "outdoor-generated-scenery",
+            "statics": layer.statics.iter().map(serialize_landblock_outdoor_static_member).collect::<Vec<_>>(),
+            "outdoorBvh": serialize_landblock_scene_lod_static_bvh(&layer.statics, layer.outdoor_bvh.as_ref()),
+        }),
+        LandblockSceneLodLayer::EnvCellSystem => serde_json::json!({ "kind": "env-cell-system" }),
+    }
+}
 
-    serde_json::json!({ "kind": kind })
+fn serialize_landblock_scene_lod_static_bvh(
+    statics: &[LandblockOutdoorStaticMember],
+    bvh: Option<&PreparedBvh>,
+) -> serde_json::Value {
+    let Some(bvh) = bvh else {
+        return serde_json::Value::Null;
+    };
+    let mut sorted_statics = statics
+        .iter()
+        .filter(|member| member.instance_bounds.is_some())
+        .collect::<Vec<_>>();
+    sorted_statics
+        .sort_by(|left, right| left.instance.instance_id.cmp(&right.instance.instance_id));
+    let items = sorted_statics
+        .into_iter()
+        .map(|member| {
+            serde_json::json!({
+                "kind": serialize_landblock_outdoor_bvh_item_kind(member.instance.kind),
+                "instanceId": member.instance.instance_id,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    serde_json::json!({
+        "coordinateSpace": "landblock-render-local",
+        "nodes": bvh.nodes.iter().map(serialize_prepared_bvh_node).collect::<Vec<_>>(),
+        "items": items,
+    })
 }
 
 pub fn landblock_outdoor_terrain_asset(
@@ -1797,7 +1843,9 @@ mod tests {
     use super::*;
     use holtburger_content::{
         CellLandblockFact, LandblockOutdoorAsset, LandblockOutdoorStaticMember,
-        LandblockSceneLodAsset, LandblockSceneLodContext, LandblockSceneLodLevel, PreparedAabb,
+        LandblockSceneLodAsset, LandblockSceneLodContext, LandblockSceneLodLayer,
+        LandblockSceneLodLevel, LandblockSceneLodOutdoorBuildingsLayer,
+        LandblockSceneLodOutdoorStaticLayer, LandblockSceneLodTerrainLayer, PreparedAabb,
         PreparedBuildingTransitionAperture, PreparedBvh, PreparedBvhNode,
         PreparedContentSourceDiagnostics, PreparedStaticInstance, PreparedStaticInstanceKind,
         PreparedTerrainMesh, PreparedVec3,
@@ -1822,6 +1870,54 @@ mod tests {
             payload["provenance"]["sourceAssetKind"],
             "landblock-scene-lod"
         );
+    }
+
+    #[test]
+    fn serialize_landblock_scene_lod_payload_emits_layer_payloads() {
+        let payload = serialize_landblock_scene_lod_payload(&LandblockSceneLodAsset {
+            landblock_id: 0xda55ffff,
+            level: LandblockSceneLodLevel::Level3,
+            context: LandblockSceneLodContext::Outdoor,
+            layers: vec![
+                LandblockSceneLodLayer::Terrain(LandblockSceneLodTerrainLayer {
+                    terrain_mesh: None,
+                }),
+                LandblockSceneLodLayer::OutdoorBuildings(LandblockSceneLodOutdoorBuildingsLayer {
+                    statics: Vec::new(),
+                    building_transition_apertures: Vec::new(),
+                    outdoor_bvh: None,
+                }),
+                LandblockSceneLodLayer::OutdoorExplicitObjects(
+                    LandblockSceneLodOutdoorStaticLayer {
+                        statics: Vec::new(),
+                        outdoor_bvh: None,
+                    },
+                ),
+                LandblockSceneLodLayer::OutdoorGeneratedScenery(
+                    LandblockSceneLodOutdoorStaticLayer {
+                        statics: Vec::new(),
+                        outdoor_bvh: None,
+                    },
+                ),
+            ],
+            diagnostics: PreparedContentSourceDiagnostics::default(),
+        });
+
+        let layers = payload["layers"]
+            .as_array()
+            .expect("scene LoD payload should serialize layer array");
+        assert_eq!(layers.len(), 4);
+        assert_eq!(layers[0]["kind"], "terrain");
+        assert_eq!(layers[0]["terrain"]["gridSize"], 9);
+        assert_eq!(layers[1]["kind"], "outdoor-buildings");
+        assert_eq!(
+            layers[1]["buildingTransitionApertures"]
+                .as_array()
+                .map(Vec::len),
+            Some(0)
+        );
+        assert_eq!(layers[2]["kind"], "outdoor-explicit-objects");
+        assert_eq!(layers[3]["kind"], "outdoor-generated-scenery");
     }
 
     #[test]

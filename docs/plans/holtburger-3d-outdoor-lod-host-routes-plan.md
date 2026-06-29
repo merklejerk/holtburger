@@ -899,7 +899,7 @@ Decisions and course corrections:
 
 ### Phase 7E: Browser Worker Source-First Wiring
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: route normal browser static resolution through worker `landblock-scene-lod` source requests.
 
@@ -920,13 +920,17 @@ Acceptance criteria:
 Task checklist:
 
 - [x] Update browser resolver types and runtime construction for `StaticLandblockSceneLodSourceResolver`.
-- [ ] Update worker-client/browser-runtime tests to observe source-first route usage.
-- [ ] Add no-old-route assertions for normal browser static resolution.
-- [ ] Confirm fake worker behavior still supports focused coordinator/runtime tests.
+- [x] Update worker-client/browser-runtime tests to observe source-first route usage.
+- [x] Add no-old-route assertions for normal browser static resolution.
+- [x] Confirm fake worker behavior still supports focused coordinator/runtime tests.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Browser worker-pool tests now assert normal source resolution posts `resolve-landblock-scene-lod-source` and does not post old direct `resolve-static-scope` jobs.
+- Existing source resolver tests remain the host-route guard: source fanout must not request prepared `landblock-outdoor` or `landblock-env-cells` assets while resolving LoD source recipes.
+- The worker-client protocol tests continue to cover source-first request/response transport and multi-recipe resolution.
+- The temporary adapter still exists only for the old direct resolver surface and is now a Phase 7F deletion target, not part of normal source-first coordinator execution.
+- Validation: `npm run test:ts -- src/lib/browser/create-browser-runtime.test.ts src/lib/static/resolver/worker-client.test.ts src/lib/static/coordinator/static-coordinator.test.ts`; `npm run check`.
 
 ### Phase 7F: Temporary Adapter Deletion And Route Audit
 

@@ -4774,7 +4774,15 @@ Verification:
 
 ### Phase 12C.4: Runtime Spawn Server Composition Breadth And Debt
 
-Status: pending.
+Status: pending, deferred until after Phase 12D browser-spawn discovery.
+
+Steering:
+
+- 2026-06-29 resteer: Do not execute this as the immediate next phase after 12C.3. Phase 12C.3
+  proved a renderable setup-backed runtime spawn, and Phase 12D is now the better next step because
+  browser spawn UX will expose which composition facts matter first. Treat this phase as a
+  post-12D breadth/debt pass driven by concrete spawn-form findings, not as an open-ended server
+  object composition grab bag.
 
 Purpose:
 
@@ -4824,7 +4832,19 @@ Risks and mitigations:
 
 ### Phase 12D: Browser Spawn Form And Fixture Resolver
 
-Status: pending.
+Status: pending, next execution phase after Phase 12C.3.
+
+Steering:
+
+- 2026-06-29 resteer: Execute this before 12C.4. The renderable WCID-backed runtime-spawn path is
+  stable enough for a manual browser probe, and the spawn form/resolver should provide receipts for
+  any additional runtime server composition breadth. This phase should stay app-local and should not
+  opportunistically absorb 12C.4's equipment/clothing/cache-ownership debt unless the form cannot
+  create/remove a basic setup-backed spawn without it.
+- 2026-06-29 UX steering: Implement the spawn UX as a dedicated browser-mode `Spawns` tab, not as
+  additional controls inside the already crowded debug panel. Keep the tab dense and operational:
+  active runtime spawn list, WCID seed row, editable spawn form, validation/status, and explicit
+  remove/select actions.
 
 Purpose:
 
@@ -4835,16 +4855,19 @@ Purpose:
 
 Deliverables:
 
-- Add a browser-mode spawn panel or equivalent app-local UX for creating and removing dynamic
-  entities. It should be one full editable spawn form with an optional WCID seed input.
+- Add a dedicated browser-mode `Spawns` tab for creating and removing dynamic entities. It should
+  contain one full editable spawn form with two entry paths: manual setup-backed entry and WCID seed
+  application. WCID seeding must populate the same editable form instead of bypassing validation
+  through a separate "spawn by WCID" shortcut.
 - Inputs should resemble server spawn inputs rather than static seed facts: setup id, optional
   server-authored instance id metadata, residence/position, orientation, scale, optional
   animation/motion choice, object-description override facts, and explicit remove/replacement action.
 - Add a `WeenieSpawnSeedResolver`-style component boundary consumed by the browser spawn form. The
   first implementation should be in-memory or small-catalog-backed, and must not depend on a full
   ACE world DB dump being present in the repo.
-- Seed the first resolver backend with one or two checked-in WCID-like fixtures or catalog rows
-  sufficient to prove setup/scale/model-data population.
+- Seed the first resolver backend with a deliberately fake-but-ACE-backed in-memory catalog. Start
+  with WCID `1` / `W_HUMAN_CLASS` / `HUMAN` projected to setup `0x02000001`, and optionally one
+  second checked-in setup-backed catalog row only if it proves a distinct browser-spawn behavior.
 - Add spawn validation that turns form state into an accepted request or no request. Unsupported
   facts are skipped with console logs; invalid required facts reject the operation with console logs.
   The resolver returns resolved facts or no result only.
@@ -4856,9 +4879,14 @@ Acceptance criteria:
 - Browser-mode spawn UX can add at least one setup-backed dynamic entity to the current scene and
   remove it again without refreshing the static scene, using the already-renderable 12C.3 runtime
   path.
+- Browser-mode spawn UX is discoverable as its own `Spawns` tab and does not add more controls to
+  the existing crowded debug panel.
 - Browser-mode spawn UX can seed the same full spawn form from at least one WCID-backed resolver
   result, allow edits after seeding, and submit through the same dynamic spawn request path as manual
   input.
+- WCID seed application does not create a runtime entity directly. It only resolves source facts and
+  copies supported facts into the editable spawn form; the normal validation/submit path remains the
+  only way to create the runtime spawn.
 - The resolver contract is tested separately from spawn validation. Resolver tests assert resolved
   facts and null/no-result behavior; spawn validation tests assert accepted requests and rejected
   operations. Do not add tests whose only purpose is debug-oriented console logging.
@@ -4872,11 +4900,16 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add app-local browser-mode spawn UX and runtime command plumbing for creating/removing one or
-      more setup-backed dynamic entities.
+- [ ] Add a dedicated app-local browser-mode `Spawns` tab and runtime command plumbing for
+      creating/removing one or more setup-backed dynamic entities.
+- [ ] Add an active runtime spawn list in the `Spawns` tab with remove and select/inspect affordances
+      where existing runtime selection plumbing makes that practical.
 - [ ] Add the weenie spawn seed resolver interface and first backend, keeping resolver output
       independent from spawn support decisions.
-- [ ] Wire WCID seed application into the same editable spawn form used for manual spawns.
+- [ ] Add the initial fake in-memory WCID resolver backend seeded with WCID `1` / setup
+      `0x02000001`.
+- [ ] Wire WCID seed application into the same editable spawn form used for manual spawns, with no
+      direct spawn shortcut.
 - [ ] Add validation tests for resolved/requested server-shaped fields that Phase 12D accepts,
       rejects, or skips. Do not test debug-oriented console logging.
 - [ ] Add browser/runtime tests for manual and WCID-seeded setup-backed spawns. Do not run the TUI

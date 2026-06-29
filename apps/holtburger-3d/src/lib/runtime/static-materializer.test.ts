@@ -8,7 +8,7 @@ import type {
 	StaticObjectGeometryStaticDrawUnit,
 	StaticMaterialTableEntry,
 	StaticObjectVisualResource,
-	StaticWorkPeerRecordOwner,
+	StaticLayerPeerRecordOwner,
 	TerrainGeometryStaticDrawUnit,
 } from "../static/contracts";
 import { materializeStaticCommit } from "./static-materializer";
@@ -86,7 +86,7 @@ describe("static materializer", () => {
 						instanceId: "da550100:env-cell-static-0",
 						kind: "env-cell-static-object-bounds",
 						landblockId: 0xda55ffff,
-						owner: createEnvCellWorkOwner(),
+						owner: createEnvCellLayerOwner(),
 					},
 				],
 				textureUses: drawUnit.textureUseIds.map((textureUseId) =>
@@ -178,7 +178,7 @@ describe("static materializer", () => {
 				instanceId: "da550100:env-cell-static-0",
 				kind: "env-cell-static-object-bounds",
 				landblockId: 0xda55ffff,
-				owner: createEnvCellWorkOwner(),
+				owner: createEnvCellLayerOwner(),
 			},
 			{
 				drawUnitId: "static-table",
@@ -343,13 +343,12 @@ function createCommitDelta(options: {
 	};
 }
 
-function createEnvCellWorkOwner(): StaticWorkPeerRecordOwner {
+function createEnvCellLayerOwner(): StaticLayerPeerRecordOwner {
 	return {
 		domain: "landblock-env-cells",
-		kind: "work",
-		scope: { kind: "landblock", landblockId: 0xda55ffff },
-		scopeKey: "landblock:da55ffff",
-		workId: "7:landblock:da55ffff:landblock-env-cells",
+		key: { kind: "env-cell-system", landblockId: 0xda55ffff },
+		kind: "layer-owner",
+		ownerId: "env-cell-system:0xda55ffff",
 	};
 }
 

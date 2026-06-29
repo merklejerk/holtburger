@@ -1114,7 +1114,7 @@ Decisions and course corrections:
 
 ### Phase 8B4: Peer-Owner Cutover Audit
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: prove the peer-record ownership migration is complete before broader retention APIs move off retained scopes.
 
@@ -1132,13 +1132,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Run peer-owner zero-reference audit.
-- [ ] Remove or document every survivor.
-- [ ] Run Phase 8B validation suite.
+- [x] Run peer-owner zero-reference audit.
+- [x] Remove or document every survivor.
+- [x] Run Phase 8B validation suite.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Removed `StaticWorkPeerRecordOwner` from the static peer-record contract entirely. `StaticPeerRecordOwner` is now only draw-unit or layer-owner.
+- Removed production work-owner compatibility from `StaticCoordinator` stale peer-record filtering and `EnvCellCommittedRecordStore` committed-record owner keying. Unknown peer owners now fail instead of silently preserving old durable ownership.
+- Converted static-scene-query, static-materializer, portal-graph, env-cell assembly, dynamic resource-manager, and coordinator fixtures to layer-owned peer records.
+- Removed the dead dynamic `createStaticScopeOwnerKey` helper that preserved old `domain:scopeKey` identity construction.
+- Source-fanout-aware fake resolver behavior required coordinator tests to stop assuming a synthetic layer completion produces only one bake input; assertions now select the relevant domain batch while allowing source fanout to enqueue sibling layer work.
+- Audit result: `rg -n "StaticWorkPeerRecordOwner|kind: \"work\"|kind: 'work'|kind: \"work\" as const|createWorkPeerRecordOwner|createWorkOwner|createEnvCellWorkOwner|createOutdoorWorkOwner|owner\\.workId|owner\\.scope" apps/holtburger-3d/src/lib/static apps/holtburger-3d/src/lib/runtime apps/holtburger-3d/src/lib/dynamic` returns no matches.
+- Remaining `workId`, `scopeKey`, and `sourceScopeKey` references are not durable peer-record ownership: they are active-work scheduling/diagnostic handles, bake completion handles, terrain/draw-unit resource ids, or the still-existing static-authored dynamic retention field whose value is now a layer owner id. Broader cleanup remains Phase 8C/8D/8E work.
+- Validation: `npm run test:ts -- src/lib/static/coordinator/static-coordinator.test.ts src/lib/static/portal-graphs.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/static-materializer.test.ts src/lib/runtime/env-cell-system-layer-assembly.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/runtime/client-runtime.test.ts`; `npm run check`.
 
 ### Phase 8C: Scene Query And Static Dynamic Retention
 

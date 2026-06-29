@@ -16,7 +16,7 @@ import type {
 } from "../host/runtime-contracts";
 import type {
 	StaticAuthoredDynamicSeedRecord,
-	StaticWorkPeerRecordOwner,
+	StaticLayerPeerRecordOwner,
 } from "../static/contracts";
 import { DynamicEntityController } from "./dynamic-entity-controller";
 import { DynamicEntityResourceManager } from "./dynamic-entity-resource-manager";
@@ -62,7 +62,7 @@ describe("dynamic entity resource manager", () => {
 							object: {
 								kind: "dynamic-visual-object",
 								resourceId:
-									"dynamic-visual-resource:static-authored-outdoor:outdoor-buildings:landblock:da55ffff:object:building:windmill-0:setup:020003e5",
+									"dynamic-visual-resource:static-authored-outdoor:outdoor-buildings:0xda55ffff:object:building:windmill-0:setup:020003e5",
 							},
 							partIndex: 0,
 						},
@@ -1045,17 +1045,18 @@ function createEnvCellDynamicSeedRecord(): StaticAuthoredDynamicSeedRecord {
 }
 
 function createOwner(
-	domain: StaticWorkPeerRecordOwner["domain"],
-): StaticWorkPeerRecordOwner {
+	domain: StaticLayerPeerRecordOwner["domain"],
+): StaticLayerPeerRecordOwner {
+	const keyKind =
+		domain === "landblock-env-cells" ? "env-cell-system" : domain;
 	return {
 		domain,
-		kind: "work",
-		scope: {
-			kind: "landblock",
+		key: {
+			kind: keyKind,
 			landblockId: 0xda55ffff,
 		},
-		scopeKey: "landblock:da55ffff",
-		workId: `1:landblock:da55ffff:${domain}`,
+		kind: "layer-owner",
+		ownerId: `${keyKind}:0xda55ffff`,
 	};
 }
 

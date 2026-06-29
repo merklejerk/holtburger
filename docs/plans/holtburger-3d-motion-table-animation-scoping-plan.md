@@ -13,10 +13,10 @@ The current dynamic animation player can sample one concrete `animation/0300....
 part transforms. It is suitable for explicit clips and simple setup default animation, but it is not
 a full motion table interpreter or motion-state sequencer.
 
-This document now feeds Phase 12F/12G of
+This document owns the motion-table follow-up from Phase 12F of
 [holtburger-3d-dynamic-entity-system-implementation-plan.md](holtburger-3d-dynamic-entity-system-implementation-plan.md).
-Phase 12F owns the host projection and visual-selection decision; Phase 12G is the proposed first
-implementation slice for default/rest visual state from motion-table evidence.
+Phase 12F recorded the host projection and visual-selection decision; this plan owns the first
+default/rest visual-state implementation slice from motion-table evidence.
 
 ## Goal
 

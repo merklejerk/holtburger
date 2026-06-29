@@ -2010,6 +2010,10 @@ and broad hook execution remain open for later targets under the Full Dynamic Sy
 - Spawn intent belongs to host/runtime or browser/future client mode. The frontend runtime ingests
   explicit spawn/source facts and applies normalized dynamic lifecycle machinery, with source metadata
   preserving authority and ownership differences.
+- Browser-authored `runtime-spawn` entities are explicit-lifetime presentation/debug entities. Live
+  server-authored entities should use a host-authored dynamic source variant or adapter rather than
+  overloading browser-spawn identity. Host GUIDs, object sequences, and server lifecycle facts are
+  source/correlation facts, not renderer/resource identity.
 - Spawned dynamic residence links are weak and must not retain or induce scene interest.
 - Dynamic source and effective presentation residence are per entity, not per rendered part.
 - Parts, setup placements, replacement visuals, and part-anchored effects inherit their owning
@@ -2038,6 +2042,15 @@ and broad hook execution remain open for later targets under the Full Dynamic Sy
   concepts in the dynamic entity model.
 - Animation plus MotionTable is the primary authored animation path. PhysicsScript is the timed
   hook/effect path. PlayScript is a semantic cue that may resolve through a script table.
+- Visual motion selection must preserve provenance rather than collapse to a bare animation id.
+  Required selection sources include setup `DefaultAnimation`, motion-table default/rest state,
+  explicit animation override, and explicit none. Weenie/live `MotionTable` DID evidence is more
+  specific than setup-model `DefaultMotionTable`, with setup default used only as fallback.
+- Browser spawn UX supplies user intent and debug overrides; app/runtime presentation modules own
+  motion-table resolution, default-state selection, and prepared animation asset coordination.
+- Host-projected current motion state can feed later visual cycle/link selection, but it remains
+  host/runtime-owned motion evidence. Frontend presentation playback must not become an authoritative
+  gameplay motion evaluator.
 - Script-triggered render state must not be silently ignored. Unsupported script hooks should warn
   through diagnostics/console and render as if the hook did not exist until a supported handler is
   added.

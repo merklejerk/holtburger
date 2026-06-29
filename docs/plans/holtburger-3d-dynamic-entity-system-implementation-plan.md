@@ -5309,7 +5309,7 @@ Implementation notes:
 
 ### Phase 12F: Host Presentation Projection Resteer
 
-Status: pending.
+Status: complete.
 
 Purpose:
 
@@ -5372,16 +5372,62 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit current browser runtime-spawn source facts, dynamic visual source facts, and diagnostics
+- [x] Audit current browser runtime-spawn source facts, dynamic visual source facts, and diagnostics
       against the host/world facts listed in the requirements plan.
-- [ ] Audit current `ClientViewEvent` and runtime body-view projections to identify which pose,
+- [x] Audit current `ClientViewEvent` and runtime body-view projections to identify which pose,
       kinematic, and motion facts already exist as frontend inputs.
-- [ ] Audit setup-model, setup-appearance, WCID/ACE SQL, and live object payload paths for motion table
+- [x] Audit setup-model, setup-appearance, WCID/ACE SQL, and live object payload paths for motion table
       id sources and precedence.
-- [ ] Record a source-identity decision for browser-authored versus host-authored dynamic entities.
-- [ ] Record a visual-selection decision that preserves provenance for setup default animation,
+- [x] Record a source-identity decision for browser-authored versus host-authored dynamic entities.
+- [x] Record a visual-selection decision that preserves provenance for setup default animation,
       motion-table default state, explicit animation, and explicit none.
-- [ ] Pick and scope the next implementation phase.
+- [x] Pick and scope the next implementation phase.
+
+Host-to-presentation field matrix:
+
+| Host/world fact | Current browser/runtime support | Phase 12F decision |
+| --- | --- | --- |
+| Setup id | Present as `RuntimeDynamicSpawnRequest.setupModelId`, `DynamicVisualSource.setupModelId`, setup-model host asset key, and WCID seed `sourceDids.setupModelId`. | Keep shared visual source input. Host-authored dynamics should project setup id into the same setup-backed visual resource path. |
+| `ModelData` / appearance overrides | Present as `DynamicEntityAppearanceOverride`, canonical `setup-appearance` query params, and WCID SQL appearance seed. | Keep shared visual source input. Host projection should feed the same ObjDesc-shaped override model; do not reintroduce a dynamic-only texture route. |
+| Source residence and effective residence | Present for browser spawns as source/effective residence; runtime bodies already separate authoritative/projected runtime pose. | Keep source residence distinct from effective presentation residence. Host-authored entities need an adapter that derives effective residence from current projected pose/bounds. |
+| Authoritative pose and projected pose | Browser spawns only have a base placement. Host/core exposes `EntityMoved`, `RuntimeBody*`, and `RuntimeBodyViewCache` samples with authoritative and projected poses. | Host-authored dynamics need a separate source variant or adapter that accepts projected pose samples. Do not fold host pose ownership into browser `runtime-spawn`. |
+| Velocity, acceleration, omega | Browser spawns do not carry them. `Entity` carries velocity/acceleration/omega, runtime-body samples carry velocity/omega, and client events expose kinematics updates. | Keep kinematics host/runtime-owned. Presentation may consume projected velocity/omega for interpolation and motion selection; acceleration remains host/source metadata until a visual use is proven. |
+| Scale and translucency | Browser spawns support source scale; WCID seed carries default scale and shade. Entity properties expose object scale/translucency. | Project as presentation/material facts, but keep mutation policy host-owned. Do not let renderer hooks create durable scale/translucency truth. |
+| Animation frame | Browser spawns support setup default, explicit animation, and none; no host animation frame projection exists in dynamic source. | Defer direct animation-frame projection until motion-table/default selection is provenance-bearing. A raw frame is not a replacement for visual motion selection. |
+| Motion table id | WCID seed DTO and ACE SQL resolver already expose `motionTableId`; setup-model DTO exposes `defaultMotionTable`; world motion kinematics can resolve direct property or setup default for movement projection. Browser dynamic source drops it today. | Motion table evidence becomes a presentation input in the next slice. Precedence: live/entity `PropertyDataId.MotionTable` or WCID/weenie motion table first, setup-model `defaultMotionTable` second, none third. |
+| Current motion snapshot | `EntityMotionSnapshot` is parsed from ObjectDescription movement data and projected through `EntityMotionUpdated` / runtime-body samples. Browser spawns have no equivalent. | Host motion snapshot is host/runtime-owned input. The dedicated motion-table plan handles default/rest selection first; live cycle/link selection from current motion snapshot remains later motion-table scope. |
+| Sound table id | WCID seed and setup-model DTO expose sound table facts. Dynamic presentation does not consume sound. | Track as visual/audio gap. Out of 12G unless motion-table asset work exposes an adjacent typed table route by necessity. |
+| Physics-effect table id / scripts | WCID seed exposes physics-effect table; setup-model DTO exposes default script/script table. Dynamic runtime does not execute scripts/effects. | Keep host trigger authority separate. Script/effect playback remains future presentation timeline work, not part of 12G. |
+| Parent/child attachment facts | `ObjectDescriptionData` and `Entity` carry parent/child/physics parent facts, but browser dynamic presentation has no attachment model. | Record as host-authored dynamic gap. Do not block motion-table default slice on attachments. |
+| Equipment facts | World `Entity` stores equipment-related properties/profiles; browser dynamic visual source only supports raw appearance overrides. | Equipment composition needs a future host projection source/adapter. It is not solved by 12G. |
+| Object sequence/correlation ids | `Entity` stores sequences and `ClientViewEvent` deltas carry GUIDs; browser spawns only retain optional `serverInstanceIdMetadata`. | Split host source identity from browser runtime identity. Host GUID/sequence data are source/correlation facts, never renderer/resource identity. |
+| Public weenie description facts | World `Entity` stores WCID, flags, physics state, item type, icon id, profiles, and properties. Browser WCID seed stores a prepared subset. | Host projection should feed semantic/diagnostic context and selected visual facts only. Gameplay semantics stay in world/core. |
+
+Decisions:
+
+- Source identity: keep `runtime-spawn` browser-authored and explicit-lifetime only. Add a future
+  host-authored dynamic source variant or adapter for live/server entities rather than generalizing
+  `runtime-spawn` into a mixed browser/host identity bucket. Host GUIDs, sequences, and object
+  lifecycle facts are source/correlation inputs, not renderer ids.
+- Visual source shape: keep setup id, appearance override, and residence as shared visual inputs.
+  Add motion/presentation selection as a separate provenance-bearing composite instead of appending
+  more optional fields to `DynamicEntityAnimationSelection`.
+- Visual selection: retire the broad semantics of `animationSelection: "setup-default"` in the next
+  implementation slice. Preserve compatibility only as an internal migration step while introducing
+  an explicit selection model that can represent setup default animation, motion-table default state,
+  explicit animation, and explicit none with distinct diagnostics.
+- Motion table precedence: live/entity or WCID `PropertyDataId.MotionTable` wins over setup-model
+  `defaultMotionTable`; setup-model default is used only when no more specific motion table exists.
+  This matches the existing world kinematics lookup shape and ACViewer/ACE initialization evidence.
+- Host motion boundary: current style/commands/speeds from `EntityMotionSnapshot` are host/runtime
+  motion facts. Presentation can consume them for visual cycle/link selection later, but the next
+  motion-table slice is limited to default/rest selection so it does not accidentally become a
+  gameplay motion evaluator.
+- Next implementation: continue in
+  [holtburger-3d-motion-table-animation-scoping-plan.md](holtburger-3d-motion-table-animation-scoping-plan.md)
+  with the motion-table default/rest presentation slice. Do not start live host-authored dynamic
+  entity ingestion first; the visual selection model is already known to be incomplete and would force
+  churn in any host projection contract built on top of it.
 
 Implementation notes:
 
@@ -5398,45 +5444,25 @@ Implementation notes:
   should start with asset DTO exposure plus ACE-equivalent default-state resolution from
   [holtburger-3d-motion-table-animation-scoping-plan.md](holtburger-3d-motion-table-animation-scoping-plan.md),
   not with ad hoc per-WCID animation ids.
-
-### Phase 12G: Motion Table Default Presentation Slice
-
-Status: proposed.
-
-Purpose:
-
-- Implement the smallest motion-table-backed visual path needed for setup/WCID/browser runtime spawns
-  whose retail default/rest presentation comes from a motion table rather than setup `DefaultAnimation`.
-  This phase should only proceed after Phase 12F records the host projection and visual-selection
-  decisions.
-
-Deliverables:
-
-- Expose/load a typed motion-table presentation asset preserving default style, style defaults, cycles,
-  links, modifiers, and animation segments.
-- Implement ACE-equivalent default/rest visual selection from motion table evidence with provenance and
-  distinct diagnostics for missing style, missing style default, missing cycle, empty cycle, and
-  unsupported multi-segment cases.
-- Add a runtime presentation selection shape that can represent motion-table default state without
-  pretending it is the same as setup `DefaultAnimation` or manual explicit animation.
-- Route single-segment default selections into the current animation playback path or the minimal
-  sequence wrapper needed to preserve frame-range provenance.
-- Preserve explicit browser `none` and explicit animation overrides.
-- Keep motion-table resolution in app/runtime presentation modules, not Svelte form code or renderer
-  draw submission code.
-
-Acceptance criteria:
-
-- A setup/WCID-backed runtime spawn with a known motion table default cycle can animate from default
-  rest state without manual animation id entry.
-- A setup/WCID-backed runtime spawn with no setup `DefaultAnimation` no longer implies "no visual
-  default motion" when motion-table evidence exists.
-- Unsupported or incomplete motion-table defaults fail loudly through diagnostics instead of choosing
-  the first contained animation segment.
-- Existing explicit animation playback, setup `DefaultAnimation` playback, and explicit none behavior
-  remain supported with provenance-preserving diagnostics.
-- The browser renderer still consumes presentation/resource snapshots; it does not own authoritative
-  motion state or timeline trigger semantics.
+- 2026-06-29 implementation: Phase 12F completed as a documentation/resteer phase. Evidence came from
+  the dynamic visual source contract, `ClientViewEvent` entity/runtime-body deltas, `Entity` motion
+  state, setup-model and WCID DTOs, ACE `PropertyDataId.MotionTable`, ACViewer setup/default motion
+  table initialization, and the existing DAT motion-table parser. No runtime code changed.
+- 2026-06-29 debt: `animationSelection: "setup-default"` is now known misleading debt. It currently
+  means setup `DefaultAnimation` resolution, but normal AC default visual motion may come from motion
+  tables. The dedicated motion-table plan should replace that with a provenance-bearing visual
+  selection shape and remove the misleading public diagnostic wording.
+- 2026-06-29 debt: host-authored dynamic entity ingestion remains unimplemented. The selected route is
+  intentional: resolve the visual motion-selection model first, then build host projection on a shape
+  that can represent real AC default/rest motion.
+- 2026-06-29 not closed: equipment/attachment composition, script/effect timelines, sound-table
+  playback, live motion command cycle/link transitions, and direct host animation-frame projection
+  remain out of scope for the default/rest motion-table slice and must stay tracked as later dynamic
+  presentation work.
+- 2026-06-29 handoff: This implementation plan does not own a follow-on motion-table phase. Motion
+  table asset exposure, default-state resolution, sequence playback, host motion projection, and
+  inspection UX continue in
+  [holtburger-3d-motion-table-animation-scoping-plan.md](holtburger-3d-motion-table-animation-scoping-plan.md).
 
 ## Risks And Mitigations
 

@@ -969,40 +969,148 @@ Decisions and course corrections:
 - Remaining old broad-route compatibility surfaces are the old standalone resolver classes, route schemas/parsers/tests, and protocol support for direct `resolve-static-scope`; these are Phase 11 deletion targets after lifecycle and env-cell assembly store cutover.
 - Validation: `npm run test:ts -- src/lib/browser/create-browser-runtime.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/static/resolver/landblock-scene-lod-source-resolver.test.ts src/lib/static/env-cells/bake/landblock-env-cell-geometry-attachments.test.ts`; `npm run check`.
 
-### Phase 8: Layer-Owned Commit, Eviction, And Readiness
+### Phase 8A: Coordinator Owner-Attached Residency
 
 Status: pending.
 
-Goal: make layer owners the durable lifecycle authority and demote work ids to transient diagnostics.
+Goal: make `StaticCoordinator` attach resident resources and diagnostics to layer owners instead of desired work keys.
 
 Deliverables:
 
-- Attach draw units, portal resources, material coverage, texture leases, static-scene-query records, diagnostics, and dynamic seeds to layer owner records.
-- Replace resident resource grouping by desired key with owner-attached resources/leases.
-- Replace stale resolver/bake filtering by `workId` with final owner-demand gates before enqueue and before materialization.
-- Replace scene-interest readiness accounting with demanded layer owner state checks.
-- Update static-authored dynamic retention to use layer owners instead of `sourceScopeKey`.
-- Add explicit no-residence/unrendered state for runtime-authored dynamics when their render residence is evicted.
-- Replace `StaticPeerRecordOwner` work ownership with layer-owner ownership for durable records; keep `workId` only as transient diagnostic metadata where useful.
+- Replace `#residentResourcesByDesiredKey` with owner-keyed residency.
+- Replace material coverage and static object bake diagnostic pruning by desired key with owner-key retention.
+- Add final owner-demand gates before materialization so stale bake results cannot create resources after owner eviction.
+- Keep `workId` as transient timing/diagnostic metadata only.
 
 Acceptance criteria:
 
 - LoD decrease evicts upper layers without re-fetching, re-baking, or recreating retained lower layers.
 - Late resolver and bake outputs are dropped before resource creation when their target owner is gone or no longer demanded.
-- Static-authored dynamic seeds are pruned with their owning layer.
-- Runtime-authored dynamics survive static layer eviction and become diagnosable no-residence records.
-- `scene-interest-settled` readiness is derived from owner states, not active work ids/revisions.
 - `StaticCoordinator` no longer groups resident resources by desired work key or filters durable peer records by current work id.
 
 Task checklist:
 
-- [ ] Replace retained-scope plumbing with layer owner records.
 - [ ] Update `StaticCoordinator` resource residency to owner-attached resources.
-- [ ] Update `StaticSceneQuery` retention APIs.
-- [ ] Update `DynamicEntityController` static seed retention.
-- [ ] Replace durable `StaticPeerRecordOwner` work owners with layer owner keys.
-- [ ] Add no-residence runtime dynamic state and diagnostics.
-- [ ] Add owner-gated stale output tests.
+- [ ] Replace material coverage and diagnostics pruning by desired key.
+- [ ] Add owner-gated stale bake materialization tests.
+- [ ] Preserve existing active-work diagnostics while removing durable desired-key residency.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 8B: Layer-Owned Peer Records
+
+Status: pending.
+
+Goal: replace durable work-owned static peer records with layer-owned peer records.
+
+Deliverables:
+
+- Add a layer-owner variant to `StaticPeerRecordOwner`.
+- Update terrain/object/env-cell bakers to emit layer-owned durable records where records outlive a transient work item.
+- Keep work ids only as optional diagnostic metadata where useful.
+- Update tests that currently construct `StaticWorkPeerRecordOwner` for durable records.
+
+Acceptance criteria:
+
+- Durable spatial, visibility, portal, source-mapping, and static-authored dynamic seed records no longer require `workId` ownership.
+- Existing stale-output filtering remains owner-gated after peer record ownership changes.
+- Tests do not preserve work-owner records as a stable durable contract.
+
+Task checklist:
+
+- [ ] Add typed layer owner peer-record owner shape.
+- [ ] Update static bakers and helpers that create work peer owners.
+- [ ] Update coordinator and runtime tests to assert layer ownership.
+- [ ] Audit remaining `StaticWorkPeerRecordOwner` usage and document any transient diagnostic survivors.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 8C: Scene Query And Static Dynamic Retention
+
+Status: pending.
+
+Goal: make scene-query retention and static-authored dynamic retention consume layer owners instead of retained scope/work keys.
+
+Deliverables:
+
+- Replace `StaticSceneQuery.retainScopes` with owner-key retention APIs.
+- Replace `EnvCellCommittedRecordStore.retainScopes` with owner-key retention.
+- Update `DynamicEntityController.retainStaticScopes` to retain static-authored dynamic seeds by layer owner.
+- Remove `sourceScopeKey` retention as durable ownership.
+
+Acceptance criteria:
+
+- Static-authored dynamic seeds are pruned with their owning layer.
+- Static scene query records are retained by owner keys, not scope strings.
+- No retained-scope plumbing remains in runtime reconciliation except temporary diagnostics explicitly documented.
+
+Task checklist:
+
+- [ ] Update `StaticRetentionReconciliation` to carry retained layer owners.
+- [ ] Update `ClientRuntime` retention calls.
+- [ ] Update `StaticSceneQuery` and `EnvCellCommittedRecordStore` retention APIs.
+- [ ] Update `DynamicEntityController` static seed retention and tests.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 8D: Runtime Readiness And No-Residence Dynamics
+
+Status: pending.
+
+Goal: derive scene-interest readiness from owner states and make runtime-authored dynamics survive static residence eviction.
+
+Deliverables:
+
+- Replace scene-interest settled accounting based on active work ids/revisions with demanded owner-state checks.
+- Add explicit no-residence/unrendered state for runtime-authored dynamics when their render residence is evicted.
+- Update diagnostics and runtime events/tests for owner-state readiness and no-residence dynamics.
+
+Acceptance criteria:
+
+- Runtime-authored dynamics survive static layer eviction and become diagnosable no-residence records.
+- `scene-interest-settled` readiness is derived from owner states, not active work ids/revisions.
+- Failed owner states still produce failed settled events.
+
+Task checklist:
+
+- [ ] Replace `#activeSceneWorkIds` / `#activeSceneWorkRevisions` readiness with owner-state tracking.
+- [ ] Add runtime dynamic no-residence state and renderer sync behavior.
+- [ ] Update scene-interest settled tests.
+- [ ] Update dynamic diagnostics/tests for unrendered runtime-authored records.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 8E: Layer Ownership Cutover Audit
+
+Status: pending.
+
+Goal: prove Phase 8 removed parallel lifecycle truth before the Phase 9 resteering checkpoint.
+
+Deliverables:
+
+- Run zero-reference audits for desired-key residency, retained scopes, durable work peer owners, and scene-interest work-id readiness.
+- Update Phase 9/10/11 deletion targets with any remaining vestiges.
+- Run focused runtime, static coordinator, scene query, and dynamic controller tests.
+
+Acceptance criteria:
+
+- No durable owner path depends on desired keys, retained scope strings, or work ids.
+- Remaining work-id usage is explicitly transient diagnostic/timing behavior.
+- Phase 9 starts with an evidence-backed audit list instead of fresh spelunking.
+
+Task checklist:
+
+- [ ] Audit `desiredKey`, `retainedScopes`, `StaticWorkPeerRecordOwner`, `sourceScopeKey`, `activeSceneWorkIds`, and `activeSceneWorkRevisions`.
+- [ ] Remove or document every survivor.
+- [ ] Run Phase 8 validation suite.
 
 Decisions and course corrections:
 

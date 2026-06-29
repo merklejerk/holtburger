@@ -559,31 +559,85 @@ Decisions and course corrections:
 - LoD `4` is fact-complete enough to support removing `EnvCellSystemLayerAssemblyStore` later, but the implementation still wraps `LandblockEnvCellsAssetAssembler` internally. Phase 10 remains necessary to remove direct `landblock-env-cells` host lookups and old runtime merge/store paths.
 - Phase 5 through Phase 10 ordering still stands. No new compatibility escape hatch was added; old broad routes remain compatibility surfaces only until source-first scheduling and cleanup phases delete them.
 
-### Phase 5: Static Domain And Browser Axis Split
+### Phase 5A: Static Domain Contract Split
 
 Status: pending.
 
-Goal: split public domain, renderer, and browser-control identity before introducing the layer-owner lifecycle model.
+Goal: split public static domain and renderer layer names before browser-control and resolver behavior changes.
 
 Deliverables:
 
 - Replace `outdoor-detail` with separate explicit-object and generated-scenery domains/layers across static contracts, renderer layer contracts, texture residency, diagnostics, and selection.
-- Replace browser `detail` interest/visibility state with separate explicit-object and generated-scenery interest/visibility axes.
+- Update material planning and texture residency domain types so explicit objects and generated scenery are public separate domains.
+- Keep old `outdoor-detail` references only where they are historical prose or explicitly scheduled compatibility debt.
+
+Acceptance criteria:
+
+- Static domain contracts expose `outdoor-explicit-objects` and `outdoor-generated-scenery`.
+- Renderer layer key/domain types can represent explicit-object and generated-scenery layers independently.
+- Material planning and texture residency types no longer require `outdoor-detail` for new outdoor object behavior.
+- No resolver scheduling, layer-owner lifecycle, or source-first fanout behavior is introduced in this phase.
+
+Task checklist:
+
+- [ ] Update `StaticDomain`, renderer layer kinds, texture domains, and material planning domains.
+- [ ] Update diagnostics and selection key domain types.
+- [ ] Update contract-focused tests that assert public domain names.
+- [ ] Record any surviving `outdoor-detail` references as Phase 11 deletion targets unless they are historical prose.
+
+Decisions and course corrections:
+
+- Split the original Phase 5 into 5A-5C on 2026-06-29 after discovery showed the phase combined public type contracts, browser controls, and resolver/baker behavior.
+
+### Phase 5B: Browser Interest And Visibility Axis Split
+
+Status: pending.
+
+Goal: replace browser `detail` control state with separate explicit-object and generated-scenery axes.
+
+Deliverables:
+
+- Replace browser `detail` interest state with explicit-object and generated-scenery interest/radius state.
+- Replace renderer `outdoorDetail` visibility with explicit-object and generated-scenery visibility controls.
+- Update `BrowserDisplay`, follow/manual controls, and interest normalization tests.
+
+Acceptance criteria:
+
+- Browser interest can request explicit objects independently from generated scenery.
+- Renderer visibility can show/hide explicit objects independently from generated scenery.
+- Existing terrain/building/env-cell controls remain unchanged.
+- No layer-owner lifecycle behavior is introduced in this phase.
+
+Task checklist:
+
+- [ ] Update `BrowserDisplay`, `OutdoorSceneInterest`, and renderer visibility contracts to split explicit-object and generated-scenery controls/state.
+- [ ] Update manual/follow-mode domain controls.
+- [ ] Update browser interest and renderer visibility tests.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 5C: Resolver, Baker, Diagnostics, And Selection Domain Split
+
+Status: pending.
+
+Goal: make resolver, baker, diagnostics, and selection behavior use the split explicit-object/generated-scenery public domains while still temporarily sourcing from old broad routes.
+
+Deliverables:
+
 - Update resolver, baker, material planning, texture residency, diagnostics, and selection tests so explicit objects and generated scenery are public separate domains even if they still share old `landblock-outdoor` source loading temporarily.
 - Keep existing old-route source loading on the normal path only as the source provider for the newly split domains; do not introduce layer-owner adapters in this phase.
 
 Acceptance criteria:
 
-- LoD `2` explicit-object and LoD `3` generated-scenery work have separate renderer layer identities, domain names, diagnostics, selection, and visibility controls.
-- Browser interest and renderer visibility can request/show explicit objects independently from generated scenery.
+- LoD `2` explicit-object and LoD `3` generated-scenery work have separate retained scopes, renderer layer identities, domain names, diagnostics, and selection.
 - Existing object baking can still share implementation where useful, but public domain/layer identity is distinct.
 - Tests and fixtures no longer use `outdoor-detail` as the public domain for new behavior.
 - No layer-owner lifecycle behavior is introduced in this phase.
 
 Task checklist:
 
-- [ ] Update `StaticDomain`, `ManualStaticDomain`, renderer layer kinds, texture domains, and material planning domains.
-- [ ] Update `BrowserDisplay`, `OutdoorSceneInterest`, and renderer visibility contracts to split explicit-object and generated-scenery controls/state.
 - [ ] Split `outdoor-detail` resolver, baker, renderer, diagnostics, selection, and fixture tests into explicit-object/generated-scenery cases.
 - [ ] Keep old route source loading working only as temporary source plumbing for the split domains.
 - [ ] Record any surviving `outdoor-detail` references as Phase 11 deletion targets unless they are historical prose.

@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { PreparedAssetReader } from "../assets/contracts";
-import type { StaticResolverWorkerPort } from "../static/resolver/protocol";
+import type {
+	StaticResolverWorkerMainMessage,
+	StaticResolverWorkerPort,
+	StaticResolverWorkerThreadMessage,
+} from "../static/resolver/protocol";
+import type {
+	StaticLandblockSceneLodResolution,
+	StaticLandblockSceneLodSourceRequest,
+} from "../static/contracts";
 import {
 	createWorkerStaticResolver,
 	shouldUseBrowserSourceResolver,
@@ -81,27 +89,81 @@ describe("browser runtime routing", () => {
 			true,
 		]);
 	});
+
+	it("posts source-first worker requests without old direct static-scope jobs", async () => {
+		const assetReader: PreparedAssetReader = {
+			requestPreparedAsset: () =>
+				Promise.reject(new Error("test asset reader should not be called")),
+		};
+		const worker = new FixtureStaticResolverWorker();
+		const sourceRequest = createSourceRequest();
+		const resolver = createWorkerStaticResolver(assetReader, 1, {
+			createBridge: () => ({ dispose: () => {} }),
+			createWorker: () => worker,
+		});
+
+		const pending = resolver.resolveSource(sourceRequest);
+
+		expect(worker.messages).toEqual([
+			{
+				kind: "resolve-landblock-scene-lod-source",
+				requestId: "resolver-source:0",
+				sourceRequest,
+			},
+		]);
+		expect(
+			worker.messages.some((message) => message.kind === "resolve-static-scope"),
+		).toBe(false);
+
+		const resolution: StaticLandblockSceneLodResolution = {
+			recipes: [],
+			request: sourceRequest,
+		};
+		worker.emit({
+			kind: "landblock-scene-lod-source-resolved",
+			requestId: "resolver-source:0",
+			resolution,
+		});
+
+		await expect(pending).resolves.toBe(resolution);
+		disposeResolver(resolver);
+	});
 });
 
 class FixtureStaticResolverWorker implements StaticResolverWorkerPort {
+	readonly messages: StaticResolverWorkerMainMessage[] = [];
+	readonly #listeners = new Set<
+		(event: MessageEvent<StaticResolverWorkerThreadMessage>) => void
+	>();
 	terminated = false;
 
-	postMessage(): void {
-		throw new Error(
-			"Fixture static resolver worker does not process messages.",
-		);
+	postMessage(message: StaticResolverWorkerMainMessage): void {
+		this.messages.push(message);
 	}
 
-	addEventListener(): void {
-		// The worker client registers listeners during construction.
+	addEventListener(
+		_type: "message",
+		listener: (event: MessageEvent<StaticResolverWorkerThreadMessage>) => void,
+	): void {
+		this.#listeners.add(listener);
 	}
 
-	removeEventListener(): void {
-		// The worker client unregisters listeners during disposal.
+	removeEventListener(
+		_type: "message",
+		listener: (event: MessageEvent<StaticResolverWorkerThreadMessage>) => void,
+	): void {
+		this.#listeners.delete(listener);
 	}
 
 	terminate(): void {
 		this.terminated = true;
+	}
+
+	emit(message: StaticResolverWorkerThreadMessage): void {
+		const event = { data: message } as MessageEvent<StaticResolverWorkerThreadMessage>;
+		for (const listener of this.#listeners) {
+			listener(event);
+		}
 	}
 }
 
@@ -116,4 +178,28 @@ function disposeResolver(resolver: unknown): void {
 	}
 
 	resolver.dispose();
+}
+
+function createSourceRequest(): StaticLandblockSceneLodSourceRequest {
+	return {
+		context: "outdoor",
+		landblockId: 0xda55ffff,
+		requestedLayers: [
+			{
+				kind: "terrain",
+				targetOwnerKey: {
+					kind: "terrain",
+					landblockId: 0xda55ffff,
+				},
+			},
+			{
+				kind: "outdoor-generated-scenery",
+				targetOwnerKey: {
+					kind: "outdoor-generated-scenery",
+					landblockId: 0xda55ffff,
+				},
+			},
+		],
+		sourceLod: 3,
+	};
 }

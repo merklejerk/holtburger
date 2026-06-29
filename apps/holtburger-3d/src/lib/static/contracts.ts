@@ -83,6 +83,31 @@ export interface StaticScopeOwnerKey {
 	readonly scopeKey: string;
 }
 
+export type LayerOwnerKind =
+	| "terrain"
+	| "outdoor-buildings"
+	| OutdoorStaticObjectLayerDomain
+	| "env-cell-system";
+
+export interface LayerOwnerKey {
+	readonly kind: LayerOwnerKind;
+	readonly landblockId: number;
+}
+
+export type LayerOwnerLifecycle =
+	| "desired"
+	| "resolving"
+	| "baking"
+	| "materialized"
+	| "empty"
+	| "failed";
+
+export interface LayerOwnerState {
+	readonly key: LayerOwnerKey;
+	readonly lifecycle: LayerOwnerLifecycle;
+	readonly revision: number;
+}
+
 export interface StaticDemandPlan {
 	readonly retainedScopes: readonly StaticScopeOwnerKey[];
 	readonly work: readonly ScheduledStaticWork[];

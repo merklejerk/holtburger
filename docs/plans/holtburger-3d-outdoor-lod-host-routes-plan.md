@@ -664,7 +664,7 @@ Decisions and course corrections:
 
 ### Phase 6A: Layer Owner Contract And Reconciliation Model
 
-Status: pending.
+Status: complete.
 
 Goal: introduce typed landblock-layer owner identity and pure reconciliation semantics before changing coordinator lifecycle behavior.
 
@@ -683,14 +683,17 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add `LayerOwnerKey` and `LayerOwnerState` types.
-- [ ] Add owner-state reconciliation tests for retain/add/evict/unchanged cases.
-- [ ] Wire split explicit-object and generated-scenery domains into owner-key mapping.
-- [ ] Keep work ids transient; do not make them durable owner identity.
+- [x] Add `LayerOwnerKey` and `LayerOwnerState` types.
+- [x] Add owner-state reconciliation tests for retain/add/evict/unchanged cases.
+- [x] Wire split explicit-object and generated-scenery domains into owner-key mapping.
+- [x] Keep work ids transient; do not make them durable owner identity.
 
 Decisions and course corrections:
 
 - Split original Phase 6 on 2026-06-29 because it combined owner contract design, coordinator state mutation, and temporary adapter policy.
+- Added pure layer-owner mapping and reconciliation helpers without touching coordinator lifecycle behavior.
+- Mapped split explicit-object and generated-scenery static domains to distinct layer owner kinds; legacy `outdoor-detail` currently maps to generated-scenery only as compatibility debt for later deletion.
+- Validation: `npm run check`; `npm run test:ts -- src/lib/static/layer-owners.test.ts`.
 
 ### Phase 6B: Coordinator Owner State Index
 

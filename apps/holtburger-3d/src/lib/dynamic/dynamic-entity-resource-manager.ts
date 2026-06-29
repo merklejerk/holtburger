@@ -748,9 +748,9 @@ function createMaterialPlanningLandblockSource(
 ): LandblockSourceIdentity {
 	return {
 		kind: "landblock-source",
-		landblockId: visualSource.effectiveResidence.landblockId,
+		landblockId: visualSource.sourceResidence.landblockId,
 		source:
-			visualSource.effectiveResidence.kind === "env-cell"
+			visualSource.sourceResidence.kind === "env-cell"
 				? "env-cells"
 				: "outdoor",
 	};

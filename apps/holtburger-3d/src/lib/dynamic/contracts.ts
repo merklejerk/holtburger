@@ -46,7 +46,8 @@ export interface DynamicEntityRecord {
 	readonly animation: DynamicEntityAnimationState;
 	readonly baseTransform: DynamicEntityTransformState;
 	readonly bounds: DynamicEntityBoundsState;
-	readonly effectiveResidence: DynamicEntityResidence;
+	/** Current render residence. Runtime-authored records may temporarily have none. */
+	readonly effectiveResidence: DynamicEntityRenderResidence;
 	readonly id: DynamicEntityId;
 	readonly presentation: DynamicEntityPresentation;
 	readonly provenance: DynamicEntityProvenance;
@@ -153,10 +154,11 @@ export interface DynamicEntityAppearanceOverride {
 /** Source-neutral visual inputs consumed by dynamic resource and renderer pipelines. */
 export interface DynamicVisualSource {
 	readonly animationSelection: DynamicEntityAnimationSelection;
-	readonly effectiveResidence: DynamicEntityResidence;
 	readonly modelData: DynamicEntityAppearanceOverride | null;
 	readonly setupModelId: number;
 	readonly sourceAssetIds: readonly string[];
+	/** Concrete authoring/source residence used for resource lookup and planning. */
+	readonly sourceResidence: DynamicEntityResidence;
 }
 
 /** Runtime-local visual object identity for dynamic setup-backed material planning. */
@@ -219,6 +221,17 @@ export type DynamicEntityResidence =
 			readonly kind: "outdoor-landblock";
 			readonly landblockId: number;
 	  };
+
+export type DynamicEntityRenderResidence =
+	| DynamicEntityResidence
+	| {
+			readonly kind: "no-residence";
+			readonly reason: DynamicEntityNoResidenceReason;
+	  };
+
+export type DynamicEntityNoResidenceReason =
+	| "render-residence-evicted"
+	| "render-residence-unassigned";
 
 export type DynamicEntityAnimationSelection =
 	| {
@@ -540,6 +553,7 @@ export interface DynamicEntityRenderability {
 }
 
 export type DynamicEntityRenderabilityReason =
+	| "no-render-residence"
 	| "resource-load-failed"
 	| "resources-pending"
 	| "visual-resources-failed"
@@ -564,7 +578,7 @@ export interface DynamicEntitySummaryDto {
 	readonly animation: DynamicEntityAnimationSummaryDto;
 	readonly baseTransform: DynamicEntityTransformState;
 	readonly bounds: DynamicEntityBoundsState;
-	readonly effectiveResidence: DynamicEntityResidence;
+	readonly effectiveResidence: DynamicEntityRenderResidence;
 	readonly id: DynamicEntityId;
 	readonly presentation: DynamicEntityPresentation;
 	readonly provenance: DynamicEntityProvenance;

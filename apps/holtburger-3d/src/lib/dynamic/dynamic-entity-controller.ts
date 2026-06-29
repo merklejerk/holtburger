@@ -27,6 +27,7 @@ import {
 	type DynamicEntitySummaryDto,
 	type DynamicEntitySourceFacts,
 	type DynamicEntityResidence,
+	type DynamicEntityRenderResidence,
 	type DynamicEntityPresentation,
 	type DynamicEntityTransformState,
 	type DynamicVisualObjectIdentity,
@@ -71,6 +72,8 @@ export interface RuntimeDynamicSpawnRequest {
 	readonly animationSelection?: DynamicEntityAnimationSelection;
 	readonly baseLocalPlacement: DynamicEntityTransformState["baseLocalPlacement"];
 	readonly modelData?: DynamicEntityAppearanceOverride | null;
+	/** Current render residence; omitted means the entity renders from its source residence. */
+	readonly renderResidence?: DynamicEntityRenderResidence;
 	readonly serverInstanceIdMetadata?: DynamicEntityServerInstanceMetadata | null;
 	readonly setupModelId: number;
 	readonly sourceResidence: DynamicEntityResidence;
@@ -372,6 +375,7 @@ function createRuntimeDynamicEntityRecord(
 		sourceResidence: request.sourceResidence,
 	});
 	const resourceState = createInitialPendingResourceState(presentation);
+	const renderResidence = request.renderResidence ?? request.sourceResidence;
 
 	return {
 		animation: createInitialAnimationState({
@@ -388,7 +392,7 @@ function createRuntimeDynamicEntityRecord(
 			indexed: false,
 			precision: "none",
 		},
-		effectiveResidence: request.sourceResidence,
+		effectiveResidence: renderResidence,
 		id,
 		presentation,
 		provenance: {
@@ -396,7 +400,7 @@ function createRuntimeDynamicEntityRecord(
 			sourceKind: "browser-authored-server-shaped",
 		},
 		renderability: {
-			reasons: ["resources-pending"],
+			reasons: createRenderabilityReasons(resourceState, renderResidence),
 			status: "non-renderable",
 		},
 		resources: resourceState,
@@ -482,10 +486,10 @@ function createStaticAuthoredPresentation(options: {
 		},
 		visualSource: {
 			animationSelection,
-			effectiveResidence: sourceResidence,
 			modelData: null,
 			setupModelId: record.seed.setupModelId,
 			sourceAssetIds: [record.seed.sourceAssetId],
+			sourceResidence,
 		},
 	};
 }
@@ -529,12 +533,12 @@ function createRuntimeSpawnPresentation(options: {
 		},
 		visualSource: {
 			animationSelection: source.animationSelection,
-			effectiveResidence: sourceResidence,
 			modelData: source.modelData,
 			setupModelId: source.setupModelId,
 			sourceAssetIds: [
 				`setup-model/${source.setupModelId.toString(16).padStart(8, "0")}`,
 			],
+			sourceResidence,
 		},
 	};
 }
@@ -595,7 +599,10 @@ function applyResourceChange(
 				record.animation,
 				change.resources.setupAnimation,
 			),
-			renderability: createRenderability(change.resources),
+			renderability: createRenderability(
+				change.resources,
+				record.effectiveResidence,
+			),
 			resources: change.resources,
 		};
 	}
@@ -603,14 +610,17 @@ function applyResourceChange(
 	if (change.kind === "visual-resources-ready") {
 		return {
 			...record,
-			renderability: createRenderability(change.resources),
+			renderability: createRenderability(
+				change.resources,
+				record.effectiveResidence,
+			),
 			resources: change.resources,
 		};
 	}
 
 	return {
 		...record,
-		renderability: createRenderability(change.resources),
+		renderability: createRenderability(change.resources, record.effectiveResidence),
 		resources: change.resources,
 	};
 }
@@ -686,8 +696,9 @@ function createPendingSetupAnimationState(
 
 function createRenderability(
 	resources: DynamicEntityResourceState,
+	renderResidence: DynamicEntityRenderResidence,
 ): DynamicEntityRenderability {
-	const reasons = createRenderabilityReasons(resources);
+	const reasons = createRenderabilityReasons(resources, renderResidence);
 	return {
 		reasons,
 		status: reasons.length === 0 ? "renderable" : "non-renderable",
@@ -696,8 +707,12 @@ function createRenderability(
 
 function createRenderabilityReasons(
 	resources: DynamicEntityResourceState,
+	renderResidence: DynamicEntityRenderResidence,
 ): readonly DynamicEntityRenderabilityReason[] {
 	const reasons = new Set<DynamicEntityRenderabilityReason>();
+	if (renderResidence.kind === "no-residence") {
+		reasons.add("no-render-residence");
+	}
 	if (resources.status === "pending") {
 		reasons.add("resources-pending");
 	}

@@ -231,7 +231,7 @@ function createReadyDynamicRecord(options: {
 			},
 			visualSource: {
 				animationSelection: { animationId: 0x0300061b, kind: "explicit" },
-				effectiveResidence: {
+				sourceResidence: {
 					kind: "outdoor-landblock",
 					landblockId: 0xda55ffff,
 				},

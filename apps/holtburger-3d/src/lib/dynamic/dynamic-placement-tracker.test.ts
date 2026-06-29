@@ -366,10 +366,10 @@ function createReadyRecord(
 			},
 			visualSource: {
 				animationSelection: { animationId: 0x0300061b, kind: "explicit" },
-				effectiveResidence: sourceResidence,
 				modelData: null,
 				setupModelId: 0x020003e5,
 				sourceAssetIds: ["setup-model/020003e5"],
+				sourceResidence,
 			},
 		},
 		provenance: {

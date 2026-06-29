@@ -1219,7 +1219,7 @@ Decisions and course corrections:
 
 ### Phase 8D2: Dynamic Residence Contract Split
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: make dynamic render residence explicitly nullable without weakening source identity or runtime lifetime.
 
@@ -1238,14 +1238,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add explicit no-residence current render residence type and docs.
-- [ ] Add `no-render-residence` renderability reason or equivalent named reason.
-- [ ] Update dynamic summaries/store serialization for no-residence.
-- [ ] Update focused dynamic contract/controller tests.
+- [x] Add explicit no-residence current render residence type and docs.
+- [x] Add `no-render-residence` renderability reason or equivalent named reason.
+- [x] Update dynamic summaries/store serialization for no-residence.
+- [x] Update focused dynamic contract/controller tests.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Added `DynamicEntityRenderResidence` as the current render-residence union and kept `DynamicEntityResidence` as the concrete outdoor/env-cell source residence.
+- `DynamicEntityRecord.effectiveResidence` and `DynamicEntitySummaryDto.effectiveResidence` now accept `no-residence` with a named reason. `sourceResidence` remains concrete.
+- Renamed `DynamicVisualSource.effectiveResidence` to `sourceResidence` so dynamic resource/material planning remains anchored to source facts, not current render residence.
+- Added `no-render-residence` to dynamic renderability reasons. Runtime spawns can now be created with a concrete source residence and an explicit no-residence current render state.
+- Course correction: because the contract now admits `no-residence`, `DynamicPlacementTracker` and renderer instance creation received minimal guards to clear indexes and skip instance creation for that state. Phase 8D3 should deepen this coverage rather than reintroduce the behavior.
+- Added a focused controller regression proving runtime identity survives static retention while the record has concrete source residence and no current render residence.
+- Validation: `npm run test:ts -- src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/dynamic/dynamic-placement-tracker.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts src/lib/runtime/client-runtime.test.ts`; `npm run check`.
 
 ### Phase 8D3: No-Residence Placement And Renderer Filtering
 

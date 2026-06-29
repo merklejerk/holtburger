@@ -311,6 +311,42 @@ describe("dynamic entity controller", () => {
 		});
 	});
 
+	it("represents runtime spawns with source residence and no current render residence", () => {
+		const controller = new DynamicEntityController();
+		const runtimeId = controller.createRuntimeSpawn({
+			baseLocalPlacement: createPlacement(),
+			renderResidence: {
+				kind: "no-residence",
+				reason: "render-residence-unassigned",
+			},
+			setupModelId: 0x020003e5,
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+		});
+
+		expect(controller.queryDynamicEntitySummary(runtimeId)).toMatchObject({
+			effectiveResidence: {
+				kind: "no-residence",
+				reason: "render-residence-unassigned",
+			},
+			id: runtimeId,
+			renderability: {
+				reasons: ["no-render-residence", "resources-pending"],
+				status: "non-renderable",
+			},
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+		});
+
+		controller.retainLayerOwners([]);
+
+		expect(controller.queryDynamicEntitySummary(runtimeId)?.id).toBe(runtimeId);
+	});
+
 	it("updates runtime spawns without changing internal identity", () => {
 		const controller = new DynamicEntityController();
 		const runtimeId = controller.createRuntimeSpawn({

@@ -20,7 +20,7 @@ import type {
 	DynamicEntityPartBounds,
 	DynamicEntityRecord,
 	DynamicEntityBoundsPrecision,
-	DynamicEntityResidence,
+	DynamicEntityRenderResidence,
 } from "./contracts";
 import {
 	OutdoorDynamicSpatialIndex,
@@ -123,6 +123,11 @@ function derivePlacedRecord(
 	envCellRecordsByEntityId: Map<string, EnvCellDynamicSpatialIndexRecord>,
 ): DynamicEntityRecord {
 	if (record.resources.visual.status !== "ready") {
+		outdoorIndex.remove(record.id);
+		envCellRecordsByEntityId.delete(record.id);
+		return clearDynamicBounds(record);
+	}
+	if (record.effectiveResidence.kind === "no-residence") {
 		outdoorIndex.remove(record.id);
 		envCellRecordsByEntityId.delete(record.id);
 		return clearDynamicBounds(record);
@@ -549,11 +554,14 @@ function sameStaticBounds(
 }
 
 function sameResidence(
-	left: DynamicEntityResidence,
-	right: DynamicEntityResidence,
+	left: DynamicEntityRenderResidence,
+	right: DynamicEntityRenderResidence,
 ): boolean {
 	if (left.kind !== right.kind) {
 		return false;
+	}
+	if (left.kind === "no-residence" && right.kind === "no-residence") {
+		return left.reason === right.reason;
 	}
 	if (left.kind === "outdoor-landblock" && right.kind === "outdoor-landblock") {
 		return left.landblockId === right.landblockId;

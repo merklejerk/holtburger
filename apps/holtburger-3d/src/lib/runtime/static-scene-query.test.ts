@@ -7,7 +7,7 @@ import type {
 	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
 	StaticSourceMappingRecord,
-	StaticWorkPeerRecordOwner,
+	StaticLayerPeerRecordOwner,
 	TerrainStaticScopePayload,
 } from "../static/contracts";
 import type { EnvCellSystemLayerPayload } from "../renderer/types";
@@ -611,7 +611,7 @@ describe("static scene query", () => {
 					instanceId: "env-static-0",
 					kind: "env-cell-static-object-bounds",
 					landblockId: 0xda55ffff,
-					owner: createEnvCellWorkOwner("work-env-static-object", 0xda55ffff),
+					owner: createEnvCellLayerOwner(0xda55ffff),
 				},
 			],
 		});
@@ -1269,7 +1269,7 @@ describe("static scene query", () => {
 
 	it("stores committed env-cell peer records independently from source BVH payloads", () => {
 		const query = new StaticSceneQuery();
-		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+		const owner = createEnvCellLayerOwner(0xda55ffff);
 
 		query.applyStaticPeerRecords({
 			portalInteriorRecords: [
@@ -1382,7 +1382,7 @@ describe("static scene query", () => {
 
 	it("picks env-cell portal apertures only when debug pick filters include them", () => {
 		const query = new StaticSceneQuery();
-		const owner = createEnvCellWorkOwner("work-env-portals", 0xda55ffff);
+		const owner = createEnvCellLayerOwner(0xda55ffff);
 		query.applyStaticPeerRecords({
 			portalInteriorRecords: [
 				createSinglePortalInteriorRecord(owner, {
@@ -1435,7 +1435,7 @@ describe("static scene query", () => {
 
 	it("picks env-cell portal apertures in render space after anchor translation", () => {
 		const query = new StaticSceneQuery();
-		const owner = createEnvCellWorkOwner("work-env-portals", 0xdb55ffff);
+		const owner = createEnvCellLayerOwner(0xdb55ffff);
 		query.setOutdoorAnchorLandblockId(0xda55ffff);
 		query.applyStaticPeerRecords({
 			portalInteriorRecords: [
@@ -1484,7 +1484,7 @@ describe("static scene query", () => {
 
 	it("commits and prunes static portal graphs by retained scope", () => {
 		const query = new StaticSceneQuery();
-		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+		const owner = createEnvCellLayerOwner(0xda55ffff);
 		const graph = createStaticPortalGraphRecord(owner);
 
 		query.applyStaticPeerRecords({
@@ -1519,7 +1519,7 @@ describe("static scene query", () => {
 
 	it("returns null for outdoor portal projections without an env-cell-system layer", () => {
 		const query = new StaticSceneQuery();
-		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+		const owner = createEnvCellLayerOwner(0xda55ffff);
 		const portalInteriorRecord = createProjectionPortalInteriorRecord(owner);
 
 		query.applyStaticPeerRecords({
@@ -1608,7 +1608,7 @@ describe("static scene query", () => {
 
 	it("caches env-cell portal projections by committed semantic inputs and root env cell", () => {
 		const query = new StaticSceneQuery();
-		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+		const owner = createEnvCellLayerOwner(0xda55ffff);
 
 		query.applyStaticPeerRecords({
 			portalGraphs: [createStaticPortalGraphRecord(owner)],
@@ -1671,7 +1671,7 @@ describe("static scene query", () => {
 
 	it("returns null for env-cell portal projection roots without committed interiors", () => {
 		const query = new StaticSceneQuery();
-		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+		const owner = createEnvCellLayerOwner(0xda55ffff);
 
 		query.applyStaticPeerRecords({
 			portalGraphs: [createStaticPortalGraphRecord(owner)],
@@ -1688,7 +1688,7 @@ describe("static scene query", () => {
 
 	it("sorts committed records by typed keys without JSON stringification", () => {
 		const query = new StaticSceneQuery();
-		const owner = createEnvCellWorkOwner("work-env-a", 0xda55ffff);
+		const owner = createEnvCellLayerOwner(0xda55ffff);
 
 		query.applyStaticPeerRecords({
 			sourceMappings: [
@@ -2447,7 +2447,7 @@ function unionTestBounds(bounds: readonly StaticBounds[]): StaticBounds {
 }
 
 function createStaticPortalGraphRecord(
-	owner: StaticWorkPeerRecordOwner,
+	owner: StaticLayerPeerRecordOwner,
 	options: {
 		readonly landblockId?: number;
 		readonly sourceEnvCellId?: number;
@@ -2502,7 +2502,7 @@ function createStaticPortalGraphRecord(
 }
 
 function createProjectionPortalInteriorRecord(
-	owner: StaticWorkPeerRecordOwner,
+	owner: StaticLayerPeerRecordOwner,
 	options: {
 		readonly landblockId?: number;
 	} = {},
@@ -2537,7 +2537,7 @@ function createProjectionPortalInteriorRecord(
 }
 
 function createSinglePortalInteriorRecord(
-	owner: StaticWorkPeerRecordOwner,
+	owner: StaticLayerPeerRecordOwner,
 	options: {
 		readonly envCellId: number;
 		readonly landblockId: number;
@@ -2604,7 +2604,7 @@ function createProjectionOutdoorPortalProjection(
 	} = {},
 ): EnvCellSystemLayerPayload["portalProjectionRecords"][number] {
 	const landblockId = options.landblockId ?? 0xda55ffff;
-	const owner = createEnvCellWorkOwner("work-env-a", landblockId);
+	const owner = createEnvCellLayerOwner(landblockId);
 	const sourceEnvCellId = ((landblockId & 0xffff0000) | 0x0100) >>> 0;
 	const targetEnvCellId = ((landblockId & 0xffff0000) | 0x0101) >>> 0;
 	const projection = createStaticPortalProjection({
@@ -2698,19 +2698,17 @@ function createProjectionBuildingTransitionPortalApertureResource(options: {
 	};
 }
 
-function createEnvCellWorkOwner(
-	workId: string,
+function createEnvCellLayerOwner(
 	landblockId: number,
-): StaticWorkPeerRecordOwner {
+): StaticLayerPeerRecordOwner {
 	return {
 		domain: "landblock-env-cells",
-		kind: "work",
-		scope: {
-			kind: "landblock",
+		key: {
+			kind: "env-cell-system",
 			landblockId,
 		},
-		scopeKey: `landblock:${landblockId.toString(16).padStart(8, "0")}`,
-		workId,
+		kind: "layer-owner",
+		ownerId: `env-cell-system:0x${landblockId.toString(16).padStart(8, "0")}`,
 	};
 }
 
@@ -2718,7 +2716,7 @@ function createThrowingJsonEnvCellSourceMapping(options: {
 	readonly envCellId: number;
 	readonly landblockId?: number;
 	readonly memberId: string;
-	readonly owner: StaticWorkPeerRecordOwner;
+	readonly owner: StaticLayerPeerRecordOwner;
 }): StaticSourceMappingRecord {
 	return {
 		cellStructure: {
@@ -2746,7 +2744,7 @@ function commitLandblockEnvCells(
 	payload: LandblockEnvCellsStaticScopePayload,
 ): void {
 	const landblockId = payload.landblock.landblockId;
-	const owner = createEnvCellWorkOwner("work-env-residency", landblockId);
+	const owner = createEnvCellLayerOwner(landblockId);
 	query.applyStaticPeerRecords({
 		authoredDynamicSeeds: payload.envCells.flatMap((envCell) =>
 			envCell.staticObjectSeeds.map((seed) => ({
@@ -2817,7 +2815,7 @@ function commitEnvCellStaticObjectBounds(
 		readonly envCellId?: number;
 		readonly instanceId?: string;
 		readonly landblockId?: number;
-		readonly owner?: StaticWorkPeerRecordOwner;
+		readonly owner?: StaticLayerPeerRecordOwner;
 	} = {},
 ): void {
 	const landblockId = options.landblockId ?? 0xda55ffff;
@@ -2834,7 +2832,7 @@ function commitEnvCellStaticObjectBounds(
 				landblockId,
 				owner:
 					options.owner ??
-					createEnvCellWorkOwner("work-env-static-object", landblockId),
+					createEnvCellLayerOwner(landblockId),
 			},
 		],
 	});

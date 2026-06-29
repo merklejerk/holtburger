@@ -12,7 +12,6 @@ import type {
 	StaticObjectSourceAssetFacts,
 	StaticObjectTextureRefFacts,
 	StaticResourceIdentity,
-	StaticScopeOwnerKey,
 	StaticLayerPeerRecordOwner,
 	VisualTextureDomain,
 } from "../static/contracts";
@@ -694,10 +693,4 @@ export function isEnvCellDynamicSeedRecord(
 	{ readonly kind: "env-cell-static-object-dynamic-seed" }
 > {
 	return record.kind === "env-cell-static-object-dynamic-seed";
-}
-
-export function createStaticScopeOwnerKey(
-	owner: Pick<StaticScopeOwnerKey, "domain" | "scopeKey">,
-): string {
-	return `${owner.domain}:${owner.scopeKey}`;
 }

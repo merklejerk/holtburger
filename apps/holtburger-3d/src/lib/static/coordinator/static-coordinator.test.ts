@@ -15,6 +15,7 @@ import type {
 	StaticObjectBakeDiagnostics,
 } from "../contracts";
 import { StaticCoordinator } from "./static-coordinator";
+import { createLayerPeerRecordOwnerForStaticWork } from "../layer-owners";
 
 describe("static coordinator", () => {
 	it("rejects stale resolver results after a newer demand revision supersedes them", async () => {
@@ -947,7 +948,11 @@ describe("static coordinator", () => {
 		baker.complete(buildingWork?.workId ?? "");
 		await flushPromises();
 
-		expect(sourcePayloads).toMatchObject([
+		expect(
+			sourcePayloads.filter(
+				(item) => item.work.job.domain === "outdoor-buildings",
+			),
+		).toMatchObject([
 			{
 				payload: {
 					scope: {
@@ -1199,12 +1204,18 @@ describe("static coordinator", () => {
 		await flushPromises();
 
 		expect(work?.job.domain).toBe("landblock-env-cells");
-		expect(baker.pendingInputs).toHaveLength(1);
-		expect(baker.pendingInputs[0]).toMatchObject({
+		const envCellBakeInput = baker.pendingInputs.find(
+			(input) => input.domain === "landblock-env-cells",
+		);
+		expect(envCellBakeInput).toMatchObject({
 			domain: "landblock-env-cells",
 			staticBatchId: "static-batch:1:landblock-env-cells:landblock:da55ffff:1",
 		});
-		expect(sourcePayloads).toMatchObject([
+		expect(
+			sourcePayloads.filter(
+				(item) => item.work.job.domain === "landblock-env-cells",
+			),
+		).toMatchObject([
 			{
 				payload: {
 					scope: {
@@ -1221,7 +1232,7 @@ describe("static coordinator", () => {
 			},
 		]);
 		expect(coordinator.createSnapshot()).toMatchObject({
-			baking: 1,
+			baking: 2,
 			committed: 0,
 			committedDrawUnits: 0,
 			latestLandblockEnvCellsPayload: {
@@ -1236,7 +1247,7 @@ describe("static coordinator", () => {
 		await flushPromises();
 
 		expect(coordinator.createSnapshot()).toMatchObject({
-			baking: 0,
+			baking: 1,
 			committed: 1,
 			committedDrawUnits: 0,
 		});
@@ -1331,7 +1342,7 @@ describe("static coordinator", () => {
 				{
 					landblockId: 0xda55ffff,
 					owner: {
-						workId: focusItem.work.workId,
+						ownerId: "env-cell-system:0xda55ffff",
 					},
 				},
 			],
@@ -1339,7 +1350,7 @@ describe("static coordinator", () => {
 				{
 					landblockId: 0xda55ffff,
 					owner: {
-						workId: focusItem.work.workId,
+						ownerId: "env-cell-system:0xda55ffff",
 					},
 				},
 			],
@@ -1348,7 +1359,7 @@ describe("static coordinator", () => {
 			deltas
 				.at(-1)
 				?.staticSpatialRecords.some(
-					(record) => record.owner.workId === staleItem.work.workId,
+					(record) => record.owner.ownerId === "env-cell-system:0xdb55ffff",
 				),
 		).toBe(false);
 	});
@@ -1637,7 +1648,7 @@ function createEnvCellSpatialRecord(
 		kind: "env-cell-spatial",
 		landblockId: work.job.scope.landblockId,
 		memberId: `cell-${work.job.scope.landblockId.toString(16)}`,
-		owner: createWorkPeerRecordOwner(work),
+		owner: createLayerPeerRecordOwnerForStaticWork(work),
 		renderBounds: null,
 		residencyBvhItemCount: 0,
 		residencyBvhNodeCount: 0,
@@ -1652,18 +1663,8 @@ function createEnvCellVisibilityRecord(
 		diagnostics: [],
 		kind: "env-cell-visibility",
 		landblockId: work.job.scope.landblockId,
-		owner: createWorkPeerRecordOwner(work),
+		owner: createLayerPeerRecordOwnerForStaticWork(work),
 		visibleLinks: [],
-	};
-}
-
-function createWorkPeerRecordOwner(work: ScheduledStaticWork) {
-	return {
-		domain: work.job.domain,
-		kind: "work" as const,
-		scope: work.job.scope,
-		scopeKey: `landblock:${work.job.scope.landblockId.toString(16).padStart(8, "0")}`,
-		workId: work.workId,
 	};
 }
 

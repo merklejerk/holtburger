@@ -555,8 +555,6 @@ export class EnvCellCommittedRecordStore {
 				readonly kind: string;
 				readonly drawUnitId?: string;
 				readonly domain?: StaticDomain;
-				readonly scopeKey?: string;
-				readonly workId?: string;
 			};
 		},
 	>(
@@ -583,8 +581,6 @@ export class EnvCellCommittedRecordStore {
 				readonly kind: string;
 				readonly drawUnitId?: string;
 				readonly domain?: StaticDomain;
-				readonly scopeKey?: string;
-				readonly workId?: string;
 			};
 		},
 	>(
@@ -1096,8 +1092,6 @@ function createStaticPeerOwnerKey(owner: {
 	readonly drawUnitId?: string;
 	readonly domain?: StaticDomain;
 	readonly ownerId?: string;
-	readonly scopeKey?: string;
-	readonly workId?: string;
 }): string {
 	if (owner.kind === "draw-unit" && typeof owner.drawUnitId === "string") {
 		return `draw-unit:${owner.drawUnitId}`;
@@ -1105,26 +1099,9 @@ function createStaticPeerOwnerKey(owner: {
 	if (owner.kind === "layer-owner" && typeof owner.ownerId === "string") {
 		return owner.ownerId;
 	}
-	if (
-		owner.kind === "work" &&
-		typeof owner.domain === "string" &&
-		typeof owner.scopeKey === "string"
-	) {
-		return createStaticScopeOwnerKey({
-			domain: owner.domain,
-			scopeKey: owner.scopeKey,
-		});
-	}
 	throw new Error(
 		`Static scene query cannot commit peer record with unknown owner ${owner.kind}.`,
 	);
-}
-
-function createStaticScopeOwnerKey(owner: {
-	readonly domain: string;
-	readonly scopeKey: string;
-}): string {
-	return `${owner.domain}:${owner.scopeKey}`;
 }
 
 function getCommittedRecordDomain(
@@ -1138,9 +1115,6 @@ function getCommittedRecordDomain(
 		| unknown,
 ): StaticDomain {
 	if (isRecordWithLayerOwner(record)) {
-		return record.owner.domain;
-	}
-	if (isRecordWithWorkOwner(record)) {
 		return record.owner.domain;
 	}
 	if (isEnvCellRecord(record)) {
@@ -1283,8 +1257,6 @@ function isRecordWithPeerOwner(record: unknown): record is {
 		readonly kind: string;
 		readonly drawUnitId?: string;
 		readonly domain?: StaticDomain;
-		readonly scopeKey?: string;
-		readonly workId?: string;
 	};
 } {
 	return (
@@ -1292,19 +1264,6 @@ function isRecordWithPeerOwner(record: unknown): record is {
 		record !== null &&
 		"owner" in record &&
 		typeof (record as { owner?: { kind?: unknown } }).owner?.kind === "string"
-	);
-}
-
-function isRecordWithWorkOwner(record: unknown): record is {
-	readonly owner: { readonly kind: "work"; readonly domain: StaticDomain };
-} {
-	return (
-		typeof record === "object" &&
-		record !== null &&
-		"owner" in record &&
-		(record as { owner?: { kind?: unknown } }).owner?.kind === "work" &&
-		typeof (record as { owner?: { domain?: unknown } }).owner?.domain ===
-			"string"
 	);
 }
 

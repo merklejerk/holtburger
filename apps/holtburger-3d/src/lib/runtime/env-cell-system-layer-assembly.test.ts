@@ -123,7 +123,7 @@ function createEnvCellCommitDelta(
 ): StaticCoordinatorCommitDelta {
 	return createCommitDelta({
 		revision,
-		staticPortalInteriorRecords: [createPortalInteriorRecord(revision)],
+		staticPortalInteriorRecords: [createPortalInteriorRecord()],
 		staticBatchId: `static-batch:${revision}:landblock-env-cells`,
 	});
 }
@@ -182,7 +182,7 @@ function createEnvCellMaterialization(
 ): StaticMaterializationResult {
 	return createMaterializationResult({
 		revision,
-		staticPortalInteriorRecords: [createPortalInteriorRecord(revision)],
+		staticPortalInteriorRecords: [createPortalInteriorRecord()],
 	});
 }
 
@@ -240,14 +240,12 @@ function createMaterializationResult(
 	};
 }
 
-function createPortalInteriorRecord(
-	revision: number,
-): StaticPortalInteriorRecord {
+function createPortalInteriorRecord(): StaticPortalInteriorRecord {
 	return {
 		envCells: [],
 		kind: "env-cell-portal-interior",
 		landblockId: 0xda55ffff,
-		owner: createWorkPeerRecordOwner("landblock-env-cells", revision),
+		owner: createLayerPeerRecordOwner("landblock-env-cells"),
 		portalLinks: [],
 	};
 }
@@ -274,18 +272,18 @@ function createJob(domain: ScheduledStaticWork["job"]["domain"]) {
 	};
 }
 
-function createWorkPeerRecordOwner(
+function createLayerPeerRecordOwner(
 	domain: ScheduledStaticWork["job"]["domain"],
-	revision: number,
 ) {
+	const keyKind =
+		domain === "landblock-env-cells" ? "env-cell-system" : domain;
 	return {
 		domain,
-		kind: "work" as const,
-		scope: {
-			kind: "landblock" as const,
+		key: {
+			kind: keyKind,
 			landblockId: 0xda55ffff,
 		},
-		scopeKey: "landblock:da55ffff",
-		workId: `${revision}:landblock:da55ffff:${domain}`,
+		kind: "layer-owner" as const,
+		ownerId: `${keyKind}:0xda55ffff`,
 	};
 }

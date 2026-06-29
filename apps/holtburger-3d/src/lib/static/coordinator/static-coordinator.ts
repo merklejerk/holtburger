@@ -1168,7 +1168,6 @@ function filterStaticBakeResultForWorks(
 ): StaticBakeBatchResult {
 	const desiredKeys = new Set(works.map(createDesiredWorkKey));
 	const ownerIds = new Set(works.map(createLayerOwnerKeyIdForWork));
-	const workIds = new Set(works.map((work) => work.workId));
 	const drawUnitIds = new Set(
 		result.drawUnits
 			.filter((drawUnit) => desiredKeys.has(getDrawUnitDesiredKey(drawUnit)))
@@ -1224,7 +1223,6 @@ function filterStaticBakeResultForWorks(
 				isPeerRecordOwnedByRetainedWork(record.owner, {
 					drawUnitIds,
 					ownerIds,
-					workIds,
 				}),
 		),
 		staticObjectRenderInstances: retainedStaticObjectRenderInstances,
@@ -1237,35 +1235,30 @@ function filterStaticBakeResultForWorks(
 				isPeerRecordOwnedByRetainedWork(record.owner, {
 					drawUnitIds,
 					ownerIds,
-					workIds,
 				}),
 		),
 		staticPortalGraphs: result.staticPortalGraphs.filter((record) =>
 			isPeerRecordOwnedByRetainedWork(record.owner, {
 				drawUnitIds,
 				ownerIds,
-				workIds,
 			}),
 		),
 		staticSourceMappings: result.staticSourceMappings.filter((record) =>
 			isPeerRecordOwnedByRetainedWork(record.owner, {
 				drawUnitIds,
 				ownerIds,
-				workIds,
 			}),
 		),
 		staticSpatialRecords: result.staticSpatialRecords.filter((record) =>
 			isPeerRecordOwnedByRetainedWork(record.owner, {
 				drawUnitIds,
 				ownerIds,
-				workIds,
 			}),
 		),
 		staticVisibilityRecords: result.staticVisibilityRecords.filter((record) =>
 			isPeerRecordOwnedByRetainedWork(record.owner, {
 				drawUnitIds,
 				ownerIds,
-				workIds,
 			}),
 		),
 		textureUses: result.textureUses.filter((textureUse) =>
@@ -1284,17 +1277,12 @@ function isPeerRecordOwnedByRetainedWork(
 	retained: {
 		readonly drawUnitIds: ReadonlySet<string>;
 		readonly ownerIds: ReadonlySet<string>;
-		readonly workIds: ReadonlySet<string>;
 	},
 ): boolean {
 	if (owner.kind === "draw-unit") {
 		return retained.drawUnitIds.has(owner.drawUnitId);
 	}
-	if (owner.kind === "layer-owner") {
-		return retained.ownerIds.has(owner.ownerId);
-	}
-
-	return retained.workIds.has(owner.workId);
+	return retained.ownerIds.has(owner.ownerId);
 }
 
 function toScheduledStaticWorkStatus(

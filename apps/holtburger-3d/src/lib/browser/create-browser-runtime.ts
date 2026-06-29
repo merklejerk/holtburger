@@ -12,6 +12,9 @@ import type {
 	StaticBakeBatchInput,
 	StaticBakeBatchResult,
 	StaticBaker,
+	StaticLandblockSceneLodResolution,
+	StaticLandblockSceneLodSourceRequest,
+	StaticLandblockSceneLodSourceResolver,
 	StaticResolverJob,
 	StaticResolver,
 	StaticScopePayload,
@@ -118,7 +121,7 @@ export function createWorkerStaticResolver(
 	assetReader: PreparedAssetReader,
 	workerCount: number,
 	factories: WorkerStaticResolverFactories = {},
-): StaticResolver {
+): StaticResolver & StaticLandblockSceneLodSourceResolver {
 	assertPositiveInteger(workerCount, "static resolver worker count");
 	const createWorker =
 		factories.createWorker ?? createStaticResolverBrowserWorker;
@@ -187,18 +190,22 @@ function assertPositiveInteger(value: number, label: string): void {
 	}
 }
 
-class BrowserStaticResolver implements StaticResolver {
+class BrowserStaticResolver
+	implements StaticResolver, StaticLandblockSceneLodSourceResolver
+{
 	readonly #sourceResolver: StaticResolver;
+	readonly #sceneLodSourceResolver: StaticLandblockSceneLodSourceResolver;
 	readonly #placeholderResolver: StaticResolver;
 	#disposed = false;
 
 	constructor(options: {
-		readonly terrainResolver: StaticResolver;
+		readonly terrainResolver: StaticResolver & StaticLandblockSceneLodSourceResolver;
 		readonly placeholderResolver: StaticResolver;
 	}) {
 		this.#sourceResolver = new TemporaryLayerOwnerTargetingResolverAdapter({
 			resolver: options.terrainResolver,
 		});
+		this.#sceneLodSourceResolver = options.terrainResolver;
 		this.#placeholderResolver = options.placeholderResolver;
 	}
 
@@ -214,6 +221,18 @@ class BrowserStaticResolver implements StaticResolver {
 		}
 
 		return this.#placeholderResolver.resolve(job);
+	}
+
+	resolveSource(
+		request: StaticLandblockSceneLodSourceRequest,
+	): Promise<StaticLandblockSceneLodResolution> {
+		if (this.#disposed) {
+			return Promise.reject(
+				new Error("BrowserStaticResolver has been disposed."),
+			);
+		}
+
+		return this.#sceneLodSourceResolver.resolveSource(request);
 	}
 
 	dispose(): void {

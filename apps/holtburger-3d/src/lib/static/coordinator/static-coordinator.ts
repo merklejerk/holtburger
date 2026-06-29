@@ -15,6 +15,9 @@ import type {
 	StaticDrawUnit,
 	LayerOwnerLifecycle,
 	LayerOwnerState,
+	StaticLandblockSceneLodLayerRequest,
+	StaticLandblockSceneLodSourceRequest,
+	StaticLandblockSceneLodSourceResolver,
 	StaticMaterialCoverageReport,
 	LandblockEnvCellsPayloadSummary,
 	OutdoorStaticObjectsPayloadSummary,
@@ -54,7 +57,7 @@ export type StaticCoordinatorSourcePayloadListener = (
 ) => void;
 
 export interface StaticCoordinatorOptions {
-	readonly resolver: StaticResolver;
+	readonly resolver: StaticResolver & StaticLandblockSceneLodSourceResolver;
 	readonly baker: StaticBaker;
 	readonly attachmentProvider?: StaticBakeAttachmentProvider;
 	readonly batching?: Partial<StaticCoordinatorBatchingOptions>;
@@ -70,7 +73,7 @@ export interface StaticCoordinatorBatchingOptions {
 }
 
 export class StaticCoordinator {
-	readonly #resolver: StaticResolver;
+	readonly #resolver: StaticResolver & StaticLandblockSceneLodSourceResolver;
 	readonly #baker: StaticBaker;
 	readonly #attachmentProvider: StaticBakeAttachmentProvider;
 	readonly #batching: StaticCoordinatorBatchingOptions;
@@ -179,7 +182,14 @@ export class StaticCoordinator {
 		this.#emit();
 
 		for (const work of newWorkItems) {
-			void this.#resolveThenBake(work);
+			this.#setStatus(work, "resolving");
+		}
+
+		for (const sourceRequest of createSourceRequestsForNewWork(
+			demandPlan.sourceRequests,
+			newWorkItems,
+		)) {
+			void this.#resolveSourceThenBake(sourceRequest);
 		}
 
 		const activeWork = demandPlan.work
@@ -293,40 +303,62 @@ export class StaticCoordinator {
 		this.#sourcePayloadListeners.clear();
 	}
 
-	async #resolveThenBake(work: ScheduledStaticWork): Promise<void> {
-		this.#setStatus(work, "resolving");
-
-		let payload: StaticScopePayload;
-		const resolverStartedAt = nowMs();
-		try {
-			payload = await this.#resolver.resolve(work.job);
-		} catch (error: unknown) {
-			this.#markFailedIfCurrent(
-				work,
-				error instanceof Error ? error.message : String(error),
-			);
-			return;
-		}
-		this.#resolverMsByWorkId.set(work.workId, nowMs() - resolverStartedAt);
-
-		if (!this.#isCurrent(work)) {
-			this.#staleResolverResults += 1;
-			this.#emit();
-			return;
-		}
-
-		this.#recordResolvedPayload(payload);
-		this.#emitSourcePayloadDelta({
-			payload,
-			revision: work.revision,
-			work,
+	async #resolveSourceThenBake(
+		sourceRequest: StaticLandblockSceneLodSourceRequest,
+	): Promise<void> {
+		const works = sourceRequest.requestedLayers.flatMap((layer) => {
+			const work = this.#findActiveWorkByDesiredKey(
+				createDesiredWorkKeyForSourceLayer(sourceRequest.landblockId, layer),
+			)?.work;
+			return work ? [work] : [];
 		});
-		this.#enqueueBakePayload(work, payload);
+		const resolverStartedAt = nowMs();
+		let resolution: Awaited<
+			ReturnType<StaticLandblockSceneLodSourceResolver["resolveSource"]>
+		>;
+		try {
+			resolution = await this.#resolver.resolveSource(sourceRequest);
+		} catch (error: unknown) {
+			for (const work of works) {
+				this.#markFailedIfCurrent(
+					work,
+					error instanceof Error ? error.message : String(error),
+				);
+			}
+			return;
+		}
+		const resolverMs = nowMs() - resolverStartedAt;
+
+		for (const recipe of resolution.recipes) {
+			const work = this.#findActiveWorkByDesiredKey(
+				createDesiredWorkKeyForJob(recipe.payload.job),
+			)?.work;
+			if (
+				!work ||
+				!this.#isCurrent(work) ||
+				!this.#isLayerOwnerDemanded(recipe.targetOwnerKey)
+			) {
+				this.#staleResolverResults += 1;
+				this.#emit();
+				continue;
+			}
+
+			this.#resolverMsByWorkId.set(work.workId, resolverMs);
+
+			this.#recordResolvedPayload(recipe.payload);
+			this.#emitSourcePayloadDelta({
+				payload: recipe.payload,
+				revision: work.revision,
+				work,
+			});
+			this.#enqueueBakePayload(work, recipe.payload, recipe.targetOwnerKey);
+		}
 	}
 
 	#enqueueBakePayload(
 		work: ScheduledStaticWork,
 		payload: StaticScopePayload,
+		targetOwnerKey: LayerOwnerState["key"],
 	): void {
 		const batchKey = createPendingBatchKey(work);
 		let pendingBatch = this.#pendingBatches.get(batchKey);
@@ -352,7 +384,7 @@ export class StaticCoordinator {
 
 		pendingBatch.items.push({
 			payload,
-			targetOwnerKey: createTargetOwnerKeyForWork(work),
+			targetOwnerKey,
 			work,
 		});
 		if (pendingBatch.items.length >= this.#batching.maxPayloadsPerBatch) {
@@ -859,14 +891,90 @@ function createDesiredWorkKey(work: ScheduledStaticWork): string {
 	return `${describeStaticScopeKey(work.job.scope)}:${work.job.domain}`;
 }
 
-function createTargetOwnerKeyForWork(
-	work: ScheduledStaticWork,
-): LayerOwnerState["key"] {
-	return createLayerOwnerKeyForStaticScope({
-		domain: work.job.domain,
-		scope: work.job.scope,
-		scopeKey: describeStaticScopeKey(work.job.scope),
+function createDesiredWorkKeyForJob(job: ScheduledStaticWork["job"]): string {
+	return `${describeStaticScopeKey(job.scope)}:${job.domain}`;
+}
+
+function createDesiredWorkKeyForSourceLayer(
+	landblockId: number,
+	layer: StaticLandblockSceneLodLayerRequest,
+): string {
+	return `landblock:${formatHex32(landblockId)}:${staticDomainForSourceLayer(layer.kind)}`;
+}
+
+function createSourceRequestsForNewWork(
+	sourceRequests: readonly StaticLandblockSceneLodSourceRequest[],
+	newWorkItems: readonly ScheduledStaticWork[],
+): readonly StaticLandblockSceneLodSourceRequest[] {
+	const newDesiredKeys = new Set(newWorkItems.map(createDesiredWorkKey));
+	return sourceRequests.flatMap((sourceRequest) => {
+		const requestedLayers = sourceRequest.requestedLayers.filter((layer) =>
+			newDesiredKeys.has(
+				createDesiredWorkKeyForSourceLayer(sourceRequest.landblockId, layer),
+			),
+		);
+		if (requestedLayers.length === 0) {
+			return [];
+		}
+		return [
+			{
+				...sourceRequest,
+				requestedLayers,
+				sourceLod: maxSourceLodForSourceLayers(requestedLayers),
+			},
+		];
 	});
+}
+
+function maxSourceLodForSourceLayers(
+	layers: readonly StaticLandblockSceneLodLayerRequest[],
+): StaticLandblockSceneLodSourceRequest["sourceLod"] {
+	let sourceLod: StaticLandblockSceneLodSourceRequest["sourceLod"] = 0;
+	for (const layer of layers) {
+		const layerLod = sourceLodForSourceLayer(layer.kind);
+		if (layerLod > sourceLod) {
+			sourceLod = layerLod;
+		}
+	}
+	return sourceLod;
+}
+
+function staticDomainForSourceLayer(
+	kind: StaticLandblockSceneLodLayerRequest["kind"],
+): StaticDomain {
+	switch (kind) {
+		case "terrain":
+			return "outdoor-terrain";
+		case "outdoor-buildings":
+			return "outdoor-buildings";
+		case "outdoor-explicit-objects":
+			return "outdoor-explicit-objects";
+		case "outdoor-generated-scenery":
+			return "outdoor-generated-scenery";
+		case "env-cell-system":
+			return "landblock-env-cells";
+	}
+}
+
+function sourceLodForSourceLayer(
+	kind: StaticLandblockSceneLodLayerRequest["kind"],
+): StaticLandblockSceneLodSourceRequest["sourceLod"] {
+	switch (kind) {
+		case "terrain":
+			return 0;
+		case "outdoor-buildings":
+			return 1;
+		case "outdoor-explicit-objects":
+			return 2;
+		case "outdoor-generated-scenery":
+			return 3;
+		case "env-cell-system":
+			return 4;
+	}
+}
+
+function formatHex32(value: number): string {
+	return (value >>> 0).toString(16).padStart(8, "0");
 }
 
 function createDesiredKeyForDrawUnit(input: {

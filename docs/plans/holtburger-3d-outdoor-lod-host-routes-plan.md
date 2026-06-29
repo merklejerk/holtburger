@@ -1364,7 +1364,7 @@ Decisions and course corrections:
 
 ### Phase 8E: Layer Ownership Cutover Audit
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: prove Phase 8 removed parallel lifecycle truth before the Phase 9 resteering checkpoint.
 
@@ -1382,13 +1382,17 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Audit `desiredKey`, `retainedScopes`, `StaticWorkPeerRecordOwner`, `sourceScopeKey`, `activeSceneWorkIds`, and `activeSceneWorkRevisions`.
-- [ ] Remove or document every survivor.
-- [ ] Run Phase 8 validation suite.
+- [x] Audit `desiredKey`, `retainedScopes`, `StaticWorkPeerRecordOwner`, `sourceScopeKey`, `activeSceneWorkIds`, and `activeSceneWorkRevisions`.
+- [x] Remove or document every survivor.
+- [x] Run Phase 8 validation suite.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Zero-reference audit result: `retainedScopes`, `retainScopes`, `retainStaticScopes`, `StaticWorkPeerRecordOwner`, durable `kind: "work"` owners, `sourceScopeKey`, `activeSceneWorkIds`, and `activeSceneWorkRevisions` have no production references under `apps/holtburger-3d/src/lib/static`, `apps/holtburger-3d/src/lib/runtime`, or `apps/holtburger-3d/src/lib/dynamic`.
+- `desiredKey` remains only inside `StaticCoordinator` as an active-work deduplication/cancellation key and mixed bake-result partition key. Resident resource eviction, material coverage pruning, static-object bake diagnostic pruning, layer owner lifecycle, and static-authored dynamic retention are owner-id/layer-owner based.
+- Remaining `workId` references are transient scheduling, diagnostics, timing, bake completion, texture/draw-unit ids, tests, or worker batch handles. No durable peer-record owner path uses work ownership.
+- Phase 9 review target added: verify `StaticCoordinator` `desiredKey` remains transient batch/work bookkeeping or remove/rename it if it starts acting like lifecycle ownership.
+- Validation: `npm run test:ts -- src/lib/static/demand-planner.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts src/lib/dynamic/dynamic-placement-tracker.test.ts`; `npm run check`.
 
 ### Phase 9: Resteering Checkpoint - Lifecycle Cutover
 
@@ -1401,6 +1405,7 @@ Review checklist:
 - [ ] Confirm no parallel lifecycle truth remains in retained scopes, desired keys, durable work owners, or scene-interest readiness tracking.
 - [ ] Confirm lower retained layers survive LoD churn without re-materialization.
 - [ ] Confirm dynamic seed ownership and runtime dynamic no-residence behavior are covered.
+- [ ] Confirm `StaticCoordinator` `desiredKey` is still only transient active-work/bake-result bookkeeping; remove or rename it if it has become lifecycle ownership.
 - [ ] Confirm Phase 7F removed old-route resolvers from the normal browser static path; Phase 11 should be deleting compatibility surfaces, not changing behavior.
 - [ ] Run a vestigial-code audit for old routes, old payload kinds, old host asset keys, old renderer layer names, old lifecycle ownership, and stale tests before route deletion.
 - [ ] Identify any executable code path, schema, parser, resolver, baker, lifecycle store, diagnostic surface, or test fixture that could keep the old model alive.

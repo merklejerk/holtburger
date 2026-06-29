@@ -203,6 +203,21 @@ pub fn serialize_content_asset_binary_response(
                 request.asset_id
             ),
         },
+        ContentAssetRequest::LandblockSceneLod(requested) => match asset {
+            Ok(ContentAsset::LandblockSceneLod(asset)) => AssetLookupResponseDto {
+                request_id: request.request_id,
+                asset_id: request.asset_id,
+                payload_kind: AssetPayloadKindDto::Json,
+                payload: serialize_landblock_scene_lod_payload(&asset),
+            },
+            Ok(_) => unreachable!("content asset runtime returned mismatched landblock scene LoD"),
+            Err(error) => anyhow::bail!(
+                "failed to load landblock scene LoD {} 0x{:08X} for {}: {error:#}",
+                requested.level.as_u8(),
+                normalize_landblock_id(requested.landblock_id),
+                request.asset_id
+            ),
+        },
         ContentAssetRequest::EnvCell(env_cell_id) => match asset {
             Ok(ContentAsset::EnvCell {
                 cell,

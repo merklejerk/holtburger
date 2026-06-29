@@ -513,6 +513,7 @@ impl HostBoundaryAdapter {
             ContentAssetRequest::LandblockOutdoor(_)
             | ContentAssetRequest::LandblockTopology(_)
             | ContentAssetRequest::LandblockEnvCells(_)
+            | ContentAssetRequest::LandblockSceneLod(_)
             | ContentAssetRequest::EnvCell(_)
             | ContentAssetRequest::GfxObj(_)
             | ContentAssetRequest::RenderSurface(_)
@@ -772,6 +773,11 @@ fn binary_asset_lookup_required_message(
             "landblock env-cells 0x{:08X} for {asset_id} requires binary asset lookup",
             holtburger_content::normalize_landblock_id(*landblock_id)
         )),
+        ContentAssetRequest::LandblockSceneLod(request) => Some(format!(
+            "landblock scene LoD {} 0x{:08X} for {asset_id} requires binary asset lookup",
+            request.level.as_u8(),
+            holtburger_content::normalize_landblock_id(request.landblock_id)
+        )),
         ContentAssetRequest::EnvCell(env_cell_id) => Some(format!(
             "env-cell 0x{env_cell_id:08X} for {asset_id} requires binary asset lookup"
         )),
@@ -842,6 +848,7 @@ mod tests {
             ("landblock/da55ffff/outdoor", "landblock outdoor"),
             ("landblock/da55ffff/topology", "landblock topology"),
             ("landblock/da55ffff/env-cells", "landblock env-cells"),
+            ("landblock/da55ffff/lod/2", "landblock scene LoD"),
             ("env-cell/da550100", "env-cell"),
             ("gfx-obj/01000001", "gfx-obj"),
             ("render-surface/060041c0", "render-surface"),

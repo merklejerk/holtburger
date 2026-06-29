@@ -225,9 +225,25 @@ Dry-run findings from 2026-06-29:
 
 ### Phase 0: Contract Worksheet And Naming Lock
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: settle the names and type boundaries before code starts spreading temporary shapes.
+
+Final contract names:
+
+- Rust source level type: `LandblockSceneLodLevel`.
+- Rust request type: `LandblockSceneLodRequest`.
+- Rust asset type: `LandblockSceneLodAsset`.
+- Rust layer enum/type family: `LandblockSceneLodLayer`, with layer variants `Terrain`, `OutdoorBuildings`, `OutdoorExplicitObjects`, `OutdoorGeneratedScenery`, and `EnvCellSystem`.
+- TypeScript source level type: `LandblockSceneLodLevelDto`.
+- TypeScript payload type: `LandblockSceneLodPayloadDto`.
+- TypeScript source descriptor type: `LandblockSceneLodSourceDto`.
+- TypeScript layer union type: `LandblockSceneLodLayerDto`.
+- Static domain/layer name for LoD `2` explicit outdoor objects: `outdoor-explicit-objects`.
+- Static domain/layer name for LoD `3` generated scenery: `outdoor-generated-scenery`.
+- Payload `kind`: `landblock-scene-lod`.
+- Payload layer discriminants: `terrain`, `outdoor-buildings`, `outdoor-explicit-objects`, `outdoor-generated-scenery`, and `env-cell-system`.
+- Route shape: `landblock/{normalizedLandblockId}/lod/{level}` where `level` is `0`, `1`, `2`, `3`, or `4`.
 
 Deliverables:
 
@@ -243,18 +259,19 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Choose final LoD level type names in Rust and TypeScript.
-- [ ] Choose final static domains for LoD `2` explicit objects and LoD `3` generated scenery.
-- [ ] Choose final layer DTO discriminants for `landblock-scene-lod`.
-- [ ] Record any naming concessions in this phase.
+- [x] Choose final LoD level type names in Rust and TypeScript.
+- [x] Choose final static domains for LoD `2` explicit objects and LoD `3` generated scenery.
+- [x] Choose final layer DTO discriminants for `landblock-scene-lod`.
+- [x] Record any naming concessions in this phase.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Chose explicit names over shorter aliases: `outdoor-explicit-objects` and `outdoor-generated-scenery` are longer than `outdoor-objects` / `outdoor-scenery`, but they preserve the LoD split in diagnostics, tests, and future zero-reference audits.
+- Phase 1 should use these exact names unless implementation evidence forces a plan update before code changes.
 
 ### Phase 1: Rust Route And Payload Skeleton
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: introduce the new route family end to end without moving frontend rendering to it yet.
 
@@ -282,16 +299,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add Rust LoD level type with comments pinning emitted families.
-- [ ] Record or implement the typed prepared LoD cache owner at `ContentAssetService`; do not add unused fields and do not hide prepared scene state in `ContentDecodeCache`.
-- [ ] Add `ContentAssetRequest` and `ContentAsset` variants.
-- [ ] Add Tauri route parsing and binary response routing.
-- [ ] Add skeleton JSON serializer.
-- [ ] Add focused route/parser tests.
+- [x] Add Rust LoD level type with comments pinning emitted families.
+- [x] Record or implement the typed prepared LoD cache owner at `ContentAssetService`; do not add unused fields and do not hide prepared scene state in `ContentDecodeCache`.
+- [x] Add `ContentAssetRequest` and `ContentAsset` variants.
+- [x] Add Tauri route parsing and binary response routing.
+- [x] Add skeleton JSON serializer.
+- [x] Add focused route/parser tests.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Added `LandblockSceneLodLevel`, `LandblockSceneLodContext`, `LandblockSceneLodRequest`, `LandblockSceneLodAsset`, `LandblockSceneLodLayer`, and `LandblockSceneLodAssetAssembler` in `holtburger-content`.
+- Added route-facing `ContentAssetRequest::LandblockSceneLod` and `ContentAsset::LandblockSceneLod` in `holtburger-core`.
+- The skeleton assembler currently returns normalized landblock id, requested level/context, empty `layers`, and default diagnostics. Real source family assembly remains Phase 2 work.
+- Prepared LoD cache ownership is pinned to `ContentAssetService`, but no unused cache field was added in Phase 1.
+- Validation run: `cargo test -p holtburger-core content_asset_service_loads_landblock_scene_lod_skeleton`; `cargo test -p holtburger-3d landblock_scene_lod`; `cargo test -p holtburger-3d direct_json_lookup_rejects_binary_routed_assets`.
 
 ### Phase 2: Source Assembly Gating And Prepared LoD Cache
 

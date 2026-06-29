@@ -7,7 +7,8 @@ use futures::future::{BoxFuture, FutureExt, Shared};
 use holtburger_content::{
     ContentDecodeCache, ContentRepository, EnvCellAsset, EnvCellAssetAssembler,
     LandblockEnvCellsAsset, LandblockEnvCellsAssetAssembler, LandblockOutdoorAsset,
-    LandblockOutdoorAssetAssembler, LandblockTopologyAsset, LandblockTopologyAssetAssembler,
+    LandblockOutdoorAssetAssembler, LandblockSceneLodAsset, LandblockSceneLodAssetAssembler,
+    LandblockSceneLodRequest, LandblockTopologyAsset, LandblockTopologyAssetAssembler,
     MaterialAppearanceInput, ResolvedMaterialRecipe, ResolvedRegionRenderProfile,
     ResolvedSetupAppearance, ResolvedSurfaceTexture, ResolvedTerrainMaterialTable,
     normalize_landblock_id,
@@ -23,6 +24,7 @@ pub enum ContentAssetRequest {
     LandblockOutdoor(u32),
     LandblockTopology(u32),
     LandblockEnvCells(u32),
+    LandblockSceneLod(LandblockSceneLodRequest),
     EnvCell(u32),
     TerrainMaterial(u32),
     RegionRenderProfile(u32),
@@ -64,6 +66,7 @@ pub enum ContentAsset {
         region_id: u32,
         region_number: u32,
     },
+    LandblockSceneLod(Box<LandblockSceneLodAsset>),
     EnvCell {
         cell: Box<EnvCellAsset>,
         region_id: u32,
@@ -136,6 +139,15 @@ impl ContentAssetService {
                     region_id: region.id,
                     region_number: region.region_number,
                 })
+            }
+            ContentAssetRequest::LandblockSceneLod(request) => {
+                Ok(ContentAsset::LandblockSceneLod(Box::new(
+                    LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
+                        &self.content,
+                        &self.decode_cache,
+                        request,
+                    ),
+                )))
             }
             ContentAssetRequest::EnvCell(env_cell_id) => {
                 let asset = EnvCellAssetAssembler::new()
@@ -422,6 +434,33 @@ mod tests {
             .expect_err("missing animation should fail");
 
         assert!(error.to_string().contains("Could not load Animation"));
+    }
+
+    #[test]
+    fn content_asset_service_loads_landblock_scene_lod_skeleton() {
+        let repository =
+            ContentRepository::from_mounts(vec![Arc::new(InMemoryResourceSource::default())]);
+        let service =
+            ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new()));
+
+        let asset = service
+            .load(ContentAssetRequest::LandblockSceneLod(
+                LandblockSceneLodRequest::outdoor(
+                    0xda55_0123,
+                    holtburger_content::LandblockSceneLodLevel::Level3,
+                ),
+            ))
+            .expect("landblock scene LoD skeleton should load");
+        let ContentAsset::LandblockSceneLod(asset) = asset else {
+            panic!("content asset service returned mismatched landblock scene LoD asset");
+        };
+
+        assert_eq!(asset.landblock_id, 0xda55_ffff);
+        assert_eq!(
+            asset.level,
+            holtburger_content::LandblockSceneLodLevel::Level3
+        );
+        assert!(asset.layers.is_empty());
     }
 
     fn animation_bytes(animation_id: u32) -> Vec<u8> {

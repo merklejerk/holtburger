@@ -350,7 +350,11 @@ export class StaticCoordinator {
 			this.#pendingBatches.set(batchKey, pendingBatch);
 		}
 
-		pendingBatch.items.push({ payload, work });
+		pendingBatch.items.push({
+			payload,
+			targetOwnerKey: createTargetOwnerKeyForWork(work),
+			work,
+		});
 		if (pendingBatch.items.length >= this.#batching.maxPayloadsPerBatch) {
 			this.#flushPendingBatch(batchKey);
 		}
@@ -367,8 +371,10 @@ export class StaticCoordinator {
 			clearTimeout(pendingBatch.timeoutId);
 		}
 
-		const items = pendingBatch.items.filter((item) =>
-			this.#isCurrent(item.work),
+		const items = pendingBatch.items.filter(
+			(item) =>
+				this.#isCurrent(item.work) &&
+				this.#isLayerOwnerDemanded(item.targetOwnerKey),
 		);
 		if (items.length === 0) {
 			return;
@@ -774,6 +780,24 @@ export class StaticCoordinator {
 			listener(delta);
 		}
 	}
+
+	#isLayerOwnerDemanded(ownerKey: LayerOwnerState["key"]): boolean {
+		const ownerId = createLayerOwnerKeyId(ownerKey);
+		for (const status of this.#activeWork.values()) {
+			if (
+				createLayerOwnerKeyId(
+					createLayerOwnerKeyForStaticScope({
+						domain: status.work.job.domain,
+						scope: status.work.job.scope,
+						scopeKey: status.scopeKey,
+					}),
+				) === ownerId
+			) {
+				return true;
+			}
+		}
+		return false;
+	}
 }
 
 type MutableScheduledStaticWorkStatus = {
@@ -833,6 +857,16 @@ function createPendingBatchKey(work: ScheduledStaticWork): string {
 
 function createDesiredWorkKey(work: ScheduledStaticWork): string {
 	return `${describeStaticScopeKey(work.job.scope)}:${work.job.domain}`;
+}
+
+function createTargetOwnerKeyForWork(
+	work: ScheduledStaticWork,
+): LayerOwnerState["key"] {
+	return createLayerOwnerKeyForStaticScope({
+		domain: work.job.domain,
+		scope: work.job.scope,
+		scopeKey: describeStaticScopeKey(work.job.scope),
+	});
 }
 
 function createDesiredKeyForDrawUnit(input: {

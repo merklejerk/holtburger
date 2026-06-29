@@ -4,7 +4,15 @@ import type {
 	PreparedAssetReader,
 } from "../../assets/contracts";
 import { createHostAssetKey } from "../../assets/keys";
-import type { StaticLandblockSceneLodSourceRequest } from "../contracts";
+import type {
+	StaticBakeBatchInput,
+	StaticBaker,
+	StaticLandblockSceneLodSourceRequest,
+	StaticLayerRecipe,
+} from "../contracts";
+import { LandblockEnvCellsBaker } from "../env-cells/bake/landblock-env-cells-baker";
+import { StaticObjectCompatibilityBaker } from "../objects/bake/static-object-compatibility-baker";
+import { TerrainGeometryStaticBaker } from "../terrain/bake/terrain-geometry-baker";
 import { LandblockSceneLodSourceResolver } from "./landblock-scene-lod-source-resolver";
 
 describe("landblock scene LoD source resolver", () => {
@@ -64,6 +72,32 @@ describe("landblock scene LoD source resolver", () => {
 					key.startsWith("landblock-env-cells:"),
 			),
 		).toBe(false);
+	});
+
+	it("emits recipes that feed existing domain bake workers with owner keys", async () => {
+		const resolution = await new LandblockSceneLodSourceResolver({
+			assetService: new RecordingPreparedAssetReader([
+				createPreparedAsset(
+					"landblock-scene-lod",
+					"da55ffff:4",
+					createSceneLodPayload(),
+				),
+				createPreparedAsset("terrain-material", 2, createTerrainMaterialPayload()),
+				createPreparedAsset(
+					"region-render-profile",
+					2,
+					createRegionRenderProfilePayload(),
+				),
+			]),
+		}).resolveSource(createSourceRequest());
+
+		for (const recipe of resolution.recipes) {
+			await expect(
+				bakerForRecipe(recipe).bake(createBakeInput(recipe)),
+			).resolves.toMatchObject({
+				staticBatchId: `batch:${recipe.payload.job.domain}`,
+			});
+		}
 	});
 });
 
@@ -138,6 +172,47 @@ function createPreparedAsset(
 
 function assetKey(asset: PreparedAsset): string {
 	return `${asset.key.kind}:${asset.key.id}`;
+}
+
+function bakerForRecipe(recipe: StaticLayerRecipe): StaticBaker {
+	if (recipe.payload.job.domain === "outdoor-terrain") {
+		return new TerrainGeometryStaticBaker();
+	}
+	if (recipe.payload.job.domain === "landblock-env-cells") {
+		return new LandblockEnvCellsBaker();
+	}
+	return new StaticObjectCompatibilityBaker();
+}
+
+function createBakeInput(recipe: StaticLayerRecipe): StaticBakeBatchInput {
+	const staticBatchId = `batch:${recipe.payload.job.domain}`;
+	return {
+		atlasSnapshot: {
+			domain: recipe.payload.job.domain,
+			placements: [],
+			staticBatchId,
+			textureUses: [],
+		},
+		attachments: {
+			envCellCellStructureGeometry: [],
+			staticObjectSourceGeometry: [],
+		},
+		domain: recipe.payload.job.domain,
+		items: [
+			{
+				payload: recipe.payload,
+				targetOwnerKey: recipe.targetOwnerKey,
+				work: {
+					job: recipe.payload.job,
+					priority: 0,
+					revision: 1,
+					workId: `work:${recipe.payload.job.domain}`,
+				},
+			},
+		],
+		revision: 1,
+		staticBatchId,
+	};
 }
 
 function createSceneLodPayload() {

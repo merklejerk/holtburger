@@ -886,6 +886,7 @@ interface StaticAtlasBatchPlacementSnapshot {
 export interface StaticBakeBatchItem {
 	readonly work: ScheduledStaticWork;
 	readonly payload: StaticScopePayload;
+	readonly targetOwnerKey: LayerOwnerKey;
 }
 
 export interface StaticBakeBatchInput {

@@ -688,7 +688,7 @@ Decisions and course corrections:
 Verification:
 
 - 2026-06-26: `npm run test:ts -- dynamic-entity-resource-manager.test.ts
-  dynamic-entity-controller.test.ts client-runtime.test.ts`
+dynamic-entity-controller.test.ts client-runtime.test.ts`
 - 2026-06-26: `npm run check`
 - 2026-06-26: `npm run lint:ts`
 - 2026-06-26: `npm run test:ts`
@@ -793,7 +793,7 @@ Decisions and course corrections:
 Verification:
 
 - 2026-06-26: `npm run test:ts -- dynamic-entity-resource-manager.test.ts
-  dynamic-entity-controller.test.ts client-runtime.test.ts`
+dynamic-entity-controller.test.ts client-runtime.test.ts`
 - 2026-06-26: `npm run check`
 - 2026-06-26: `npm run lint:ts`
 - 2026-06-26: `npm run test:ts`
@@ -903,8 +903,8 @@ Decisions and course corrections:
 Verification:
 
 - 2026-06-26: `npm run test:ts -- --run src/lib/dynamic/dynamic-animation-player.test.ts
-  src/lib/dynamic/dynamic-entity-resource-manager.test.ts
-  src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/runtime/client-runtime.test.ts`
+src/lib/dynamic/dynamic-entity-resource-manager.test.ts
+src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/runtime/client-runtime.test.ts`
 - 2026-06-26: `npm run check`
 - 2026-06-26: `npm run lint:ts`
 
@@ -1519,7 +1519,7 @@ Decisions and course corrections:
 - 2026-06-27: Added a dynamic renderer resource sync warning event instead of reporting dynamic sync
   failures as static materialization failures.
 - 2026-06-27: Verification results: `npm run test:ts -- client-runtime.test.ts
-  webgl2-renderer.test.ts texture-manager.test.ts` and `npm run check` pass from
+webgl2-renderer.test.ts texture-manager.test.ts` and `npm run check` pass from
   `apps/holtburger-3d`.
 
 Debt and follow-up:
@@ -1586,8 +1586,8 @@ Decisions and course corrections:
   draw calls during Phase 8C. Phase 8E closed that handoff by uploading dynamic geometry and drawing
   matching resource/instance submissions.
 - 2026-06-27: Verification results so far: `npm run test:ts -- client-runtime.test.ts
-  webgl2-renderer.test.ts texture-manager.test.ts dynamic-entity-store.test.ts
-  dynamic-placement-tracker.test.ts` and `npm run check` pass from `apps/holtburger-3d`.
+webgl2-renderer.test.ts texture-manager.test.ts dynamic-entity-store.test.ts
+dynamic-placement-tracker.test.ts` and `npm run check` pass from `apps/holtburger-3d`.
 - 2026-06-27: Closed Phase 8C as the instance-submission milestone and split the remaining visual
   work into Phase 8D and Phase 8E. The prior phase title overloaded "animated poses" and "draw the
   targets"; the cleaner boundary is now instance summaries first, dynamic visual geometry extraction
@@ -1692,8 +1692,8 @@ Decisions and course corrections:
   `objectRootRotation` in the submitted object matrix. Bounds already consumed this state, but the
   renderer instance summary path had only consumed sampled `objectRootPose`.
 - 2026-06-27: Verification results: `npm run test:ts -- dynamic-entity-resource-manager.test.ts
-  client-runtime.test.ts webgl2-renderer.test.ts texture-manager.test.ts dynamic-entity-store.test.ts
-  dynamic-placement-tracker.test.ts` and `npm run check` pass from `apps/holtburger-3d`.
+client-runtime.test.ts webgl2-renderer.test.ts texture-manager.test.ts dynamic-entity-store.test.ts
+dynamic-placement-tracker.test.ts` and `npm run check` pass from `apps/holtburger-3d`.
 
 Debt and follow-up:
 
@@ -1783,8 +1783,8 @@ Decisions and course corrections:
   covered by the dynamic owner/atlas tests from Phase 8A plus the Phase 8E dynamic prepared-payload
   owner path.
 - 2026-06-27: Verification results: `npm run test:ts -- webgl2-renderer.test.ts
-  client-runtime.test.ts dynamic-entity-resource-manager.test.ts texture-manager.test.ts
-  dynamic-entity-store.test.ts dynamic-placement-tracker.test.ts` and `npm run check` pass from
+client-runtime.test.ts dynamic-entity-resource-manager.test.ts texture-manager.test.ts
+dynamic-entity-store.test.ts dynamic-placement-tracker.test.ts` and `npm run check` pass from
   `apps/holtburger-3d`.
 - 2026-06-27: Final Phase 8 verification results: `npm run lint:ts`, `npm run lint:dead`,
   `npm run test:ts` (61 files / 491 tests), `npm run check`, `npm run check:rust`,
@@ -1941,8 +1941,8 @@ Decisions and course corrections:
   the requested prepared-texture key, preserving the texture manager's strict policy validation.
 - 2026-06-27: Verification results from `apps/holtburger-3d`: focused
   `npm run test:ts -- landblock-env-cells-baker.test.ts dynamic-placement-tracker.test.ts
-  dynamic-entity-controller.test.ts dynamic-entity-resource-manager.test.ts client-runtime.test.ts
-  webgl2-renderer.test.ts merged-scene-query.test.ts`, plus `npm run check`, `npm run lint:ts`,
+dynamic-entity-controller.test.ts dynamic-entity-resource-manager.test.ts client-runtime.test.ts
+webgl2-renderer.test.ts merged-scene-query.test.ts`, plus `npm run check`, `npm run lint:ts`,
   `npm run lint:dead`, `npm run test:ts` (61 files / 493 tests), `npm run check:rust`, and
   `npm run lint:rust` pass.
 
@@ -2336,7 +2336,7 @@ Decisions and course corrections:
 Verification:
 
 - 2026-06-28: `npm run test:ts -- dynamic-animation-update-cadence.test.ts
-  dynamic-entity-controller.test.ts client-runtime.test.ts`
+dynamic-entity-controller.test.ts client-runtime.test.ts`
 - 2026-06-28: `npm run check`
 - 2026-06-28: `npm run lint:ts`
 - 2026-06-28: `npm run test:ts`
@@ -4094,7 +4094,7 @@ Acceptance criteria:
 - Runtime spawns with `setup-default` animation do not request animation id `0`; they remain
   pending/non-renderable with a console log unless setup-default evidence has been proven.
 - Runtime `setup-default` initial resource state does not expose `animationKey: { kind:
-  "animation", id: 0 }` as if animation `0` were a valid asset. The state must either represent
+"animation", id: 0 }` as if animation `0` were a valid asset. The state must either represent
   unresolved setup-default animation explicitly or avoid presenting an animation key until a real
   animation id is known.
 - Runtime spawns with pending material identity remain non-renderable with a console log rather than
@@ -4681,7 +4681,7 @@ Verification:
 
 ### Phase 12C.3: First Runtime Spawn Rendering
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Purpose:
 
@@ -4721,14 +4721,14 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add the programmatic first-render runtime-spawn fixture path.
-- [ ] Wire the fixture through playback, placement, renderer resource/instance commits, merged
+- [x] Add the programmatic first-render runtime-spawn fixture path.
+- [x] Wire the fixture through playback, placement, renderer resource/instance commits, merged
       query, and selected diagnostics.
-- [ ] Add focused runtime-spawn first-render, removal, renderer/query/selection tests.
-- [ ] Add regression coverage proving static-authored dynamic renderer/query behavior remains
+- [x] Add focused runtime-spawn first-render, removal, renderer/query/selection tests.
+- [x] Add regression coverage proving static-authored dynamic renderer/query behavior remains
       stable.
-- [ ] Run focused TypeScript verification for dynamic runtime/query/renderer tests.
-- [ ] Run full app verification commands from `apps/holtburger-3d`.
+- [x] Run focused TypeScript verification for dynamic runtime/query/renderer tests.
+- [x] Run full app verification commands from `apps/holtburger-3d`.
 
 Risks and mitigations:
 
@@ -4744,6 +4744,33 @@ Risks and mitigations:
   Mitigation: 12C.2D lifts the existing setup-backed runtime material path wholesale, and 12C.2D.1
   separates runtime-authored resource domains from static domains; broader server composition
   semantics outside that path move to Phase 12C.4.
+
+Decisions and course corrections:
+
+- 2026-06-29 implementation: Used ACE-backed WCID 1 (`W_HUMAN_CLASS` / `HUMAN`) as the first
+  runtime-spawn fixture, projected to `SetupConst.HumanMale` (`0x02000001`). The app-local fixture
+  lives in `apps/holtburger-3d/src/lib/runtime/runtime-spawn-fixtures.ts`.
+- 2026-06-29 implementation: Added explicit `animationSelection: none` for runtime spawns that
+  should render from setup/default part placements without pretending setup-default animation
+  evidence exists. `setup-default` remains an unresolved-authored-animation state until a later
+  phase proves setup-default animation selection from source/server facts.
+- 2026-06-29 implementation: Removed the old renderer/query assumption that dynamic records must
+  have `animation.playback.status === "playing"` before they can be submitted or indexed. Ready
+  visuals now submit and index from setup default part placements when no animation is selected.
+- 2026-06-29 implementation: Added app-local runtime methods for programmatic create/remove of
+  runtime spawns. These stay inside `apps/holtburger-3d`; no browser UX or shared-crate server
+  authority model was introduced.
+
+Verification:
+
+- 2026-06-29: `npm run test:ts -- client-runtime`
+- 2026-06-29: `npm run test:ts -- client-runtime dynamic-entity-resource-manager dynamic-entity-controller dynamic-placement-tracker`
+- 2026-06-29: `npm run check`
+- 2026-06-29: `npm run test:ts`
+- 2026-06-29: `npm run lint:ts`
+- 2026-06-29: `npm run lint:dead`
+- 2026-06-29: `npm run build`
+- 2026-06-29: `npm run lint`
 
 ### Phase 12C.4: Runtime Spawn Server Composition Breadth And Debt
 

@@ -608,6 +608,13 @@ function createPendingSetupAnimationState(
 		id: visualSource.setupModelId,
 		kind: "setup-model" as const,
 	};
+	if (visualSource.animationSelection.kind === "none") {
+		return {
+			reason: "animation-not-selected",
+			setupModelKey,
+			status: "not-required",
+		};
+	}
 	if (visualSource.animationSelection.kind === "setup-default") {
 		return {
 			pendingReason: "setup-default-animation-unresolved",

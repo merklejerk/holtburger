@@ -65,6 +65,10 @@ import {
 	type RuntimeDiagnosticsSnapshot,
 } from "./client-runtime";
 import {
+	FIRST_RUNTIME_SPAWN_FIXTURE,
+	createFirstRuntimeSpawnFixtureRequest,
+} from "./runtime-spawn-fixtures";
+import {
 	createOutdoorStaticObjectSelectionKey,
 	createTerrainQuadSelectionKey,
 } from "./scene-query/static-selection-keys";
@@ -246,7 +250,7 @@ describe("browser client runtime", () => {
 			kind: "dynamic",
 			summary: {
 				active: 1,
-				indexed: 0,
+				indexed: 1,
 				nonRenderable: 0,
 				renderable: 1,
 				resourceFailed: 0,
@@ -486,6 +490,99 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
+	it("renders and removes the ACE WCID 1 runtime spawn fixture without animation playback", async () => {
+		const renderer = new FakeRenderer();
+		const runtime = createClientRuntime({
+			assetService: createResolvingAssetService(),
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+		});
+
+		const entityId = runtime.createRuntimeSpawn(
+			createFirstRuntimeSpawnFixtureRequest(),
+		);
+		await flushDynamicRendererResources(renderer);
+
+		expect(
+			runtime.createDiagnosticsSnapshot().dynamic.records[0],
+		).toMatchObject({
+			presentation: {
+				diagnostics: {
+					kind: "runtime-spawn",
+				},
+			},
+			renderability: {
+				reasons: [],
+				status: "renderable",
+			},
+			resources: {
+				setupAnimation: {
+					reason: "animation-not-selected",
+					status: "not-required",
+				},
+				status: "ready",
+				visual: {
+					status: "ready",
+				},
+			},
+			source: {
+				animationSelection: { kind: "none" },
+				kind: "runtime-spawn",
+				runtimeEntityId: entityId,
+				setupModelId: FIRST_RUNTIME_SPAWN_FIXTURE.setupModelId,
+			},
+		});
+
+		updateRuntimeFrame(runtime, 1);
+
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicInstances: 1,
+			dynamicVisualResources: 1,
+			skippedDynamicSubmissions: 0,
+		});
+		expect(renderer.dynamicInstanceCommits.at(-1)?.instances[0]).toMatchObject({
+			entityId,
+			instanceId: `dynamic-instance:${entityId}`,
+			partToObjectMatrices: [
+				{
+					partIndex: 0,
+				},
+			],
+			resourceId: `dynamic-visual-resource:${entityId}`,
+		});
+		const dynamicSelectionReport =
+			runtime.createDynamicSelectionDiagnosticsReport(entityId);
+		expect(dynamicSelectionReport).toMatchObject({
+			debugBounds: {
+				max: { x: 1, y: 1, z: 1 },
+				min: { x: 0, y: 0, z: 0 },
+			},
+			entity: {
+				rendererIdentity: {
+					eligible: true,
+					instanceId: `dynamic-instance:${entityId}`,
+					visualResourceId: `dynamic-visual-resource:${entityId}`,
+				},
+			},
+		});
+
+		expect(runtime.removeRuntimeSpawn(entityId)).toBe(true);
+		await flushRuntimeWork();
+		updateRuntimeFrame(runtime, 2);
+
+		expect(runtime.createDiagnosticsSnapshot().dynamic).toMatchObject({
+			activeEntityCount: 0,
+			runtimeSpawnCount: 0,
+		});
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicInstances: 0,
+			dynamicVisualResources: 0,
+		});
+
+		runtime.dispose();
+	});
+
 	it("updates dynamic renderer submissions from frame ticks without creating full runtime snapshots", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -519,11 +616,15 @@ describe("browser client runtime", () => {
 			() => renderer.createDiagnosticsSnapshot().dynamicVisualResources > 0,
 		);
 		const assetSnapshotCountBeforeFrames = assetService.snapshotCount;
+		const instanceCommitCountBeforeFrames =
+			renderer.dynamicInstanceCommits.length;
 
 		updateRuntimeFrame(runtime, 1);
 		updateRuntimeFrame(runtime, 2);
 
-		expect(renderer.dynamicInstanceCommits).toHaveLength(2);
+		expect(renderer.dynamicInstanceCommits).toHaveLength(
+			instanceCommitCountBeforeFrames + 2,
+		);
 		expect(renderer.dynamicInstanceCommits.at(-1)?.instances).toHaveLength(1);
 		expect(assetService.snapshotCount).toBe(assetSnapshotCountBeforeFrames);
 		runtime.dispose();
@@ -3676,14 +3777,26 @@ async function resolvePendingDynamicAssetsUntil(
 	throw new Error("Dynamic renderer resource sync did not complete.");
 }
 
+async function flushDynamicRendererResources(
+	renderer: FakeRenderer,
+): Promise<void> {
+	for (let attempt = 0; attempt < 40; attempt += 1) {
+		await flushRuntimeWork();
+		if (renderer.createDiagnosticsSnapshot().dynamicVisualResources > 0) {
+			return;
+		}
+	}
+	throw new Error("Dynamic renderer visual resources did not commit.");
+}
+
 function createDynamicPreparedPayload(key: HostAssetKey): unknown {
 	switch (key.kind) {
 		case "animation":
 			return createDynamicAnimationPayload();
 		case "setup-model":
-			return createDynamicSetupModelPayload();
+			return createDynamicSetupModelPayload(key);
 		case "setup-appearance":
-			return createDynamicSetupAppearancePayload();
+			return createDynamicSetupAppearancePayload(key);
 		case "gfx-obj":
 			return createDynamicGfxObjPayload();
 		case "material":
@@ -3754,7 +3867,8 @@ function createDynamicSetOmegaAnimationPayload(): AnimationPayloadDto {
 	};
 }
 
-function createDynamicSetupModelPayload() {
+function createDynamicSetupModelPayload(key: HostAssetKey) {
+	const setupModelId = Number.parseInt(key.id, 16);
 	return {
 		connectionPoints: [],
 		defaultAnimation: 0x0300061b,
@@ -3780,7 +3894,7 @@ function createDynamicSetupModelPayload() {
 		radius: null,
 		residencyKind: "unknown",
 		selectionSphere: null,
-		setupModelId: 0x020003e5,
+		setupModelId,
 		sortingSphere: null,
 		sourceAssetKind: "setup-model",
 		stepDown: null,
@@ -3788,10 +3902,11 @@ function createDynamicSetupModelPayload() {
 	};
 }
 
-function createDynamicSetupAppearancePayload() {
+function createDynamicSetupAppearancePayload(key: HostAssetKey) {
+	const setupModelId = Number.parseInt(key.id, 16);
 	return {
 		animPartChanges: [],
-		appearanceKey: "setup-appearance/020003e5",
+		appearanceKey: `setup-appearance/${key.id}`,
 		dependencies: {
 			materialAssetIds: ["material/08000011"],
 			paletteAssetIds: [],
@@ -3814,7 +3929,7 @@ function createDynamicSetupAppearancePayload() {
 		],
 		provenance: createProvenance("setup-appearance"),
 		residencyKind: "unknown",
-		setupModelId: 0x020003e5,
+		setupModelId,
 		sourceAssetKind: "setup-appearance",
 		subPalettes: [],
 		textureChanges: [],

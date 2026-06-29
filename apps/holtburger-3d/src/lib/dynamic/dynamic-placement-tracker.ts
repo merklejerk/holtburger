@@ -11,6 +11,7 @@ import type {
 	StaticObjectPartSourceFacts,
 	StaticObjectSourceAssetFacts,
 } from "../static/contracts";
+import type { PlacementTransformDto } from "../host/contracts";
 import { outdoorLandblockIdsForSourceLocalBounds } from "../runtime/outdoor-landblock-grid";
 import type {
 	DynamicEntityBoundsState,
@@ -121,10 +122,7 @@ function derivePlacedRecord(
 	outdoorIndex: OutdoorDynamicSpatialIndex,
 	envCellRecordsByEntityId: Map<string, EnvCellDynamicSpatialIndexRecord>,
 ): DynamicEntityRecord {
-	if (
-		record.animation.playback.status !== "playing" ||
-		record.resources.visual.status !== "ready"
-	) {
+	if (record.resources.visual.status !== "ready") {
 		outdoorIndex.remove(record.id);
 		envCellRecordsByEntityId.delete(record.id);
 		return clearDynamicBounds(record);
@@ -303,50 +301,50 @@ function derivePartBounds(options: {
 	const partByIndex = new Map(
 		sourceAsset.parts.map((part) => [part.partIndex, part] as const),
 	);
-	return options.record.animation.playback.status === "playing"
-		? options.record.animation.playback.partPoses.flatMap((pose) => {
-				const sourcePart = partByIndex.get(pose.partIndex);
-				if (!sourcePart?.bounds) {
-					return [];
-				}
-				return [
-					{
-						bounds: transformBoundsByMat4(
-							sourcePart.bounds,
-							createPartMatrix(options.record, sourcePart, pose.localPlacement),
-						),
-						partIndex: pose.partIndex,
-						sourceBounds: sourcePart.bounds,
-					},
-				];
-			})
-		: [];
+	return createCurrentPartPoses(options.record).flatMap((pose) => {
+		const sourcePart = partByIndex.get(pose.partIndex);
+		if (!sourcePart?.bounds) {
+			return [];
+		}
+		return [
+			{
+				bounds: transformBoundsByMat4(
+					sourcePart.bounds,
+					createPartMatrix(options.record, sourcePart, pose.localPlacement),
+				),
+				partIndex: pose.partIndex,
+				sourceBounds: sourcePart.bounds,
+			},
+		];
+	});
 }
 
 function createPartMatrix(
 	record: DynamicEntityRecord,
 	sourcePart: StaticObjectPartSourceFacts,
-	partPlacement: StaticObjectPartSourceFacts["defaultPlacements"][number],
+	partPlacement: PlacementTransformDto,
 ): RenderMat4 {
-	if (record.animation.playback.status !== "playing") {
-		throw new Error("Cannot derive a dynamic part matrix without playback.");
-	}
-
 	const baseMatrix = buildAcPlacementMatrix(
 		record.baseTransform.baseLocalPlacement,
 		AC_UNIT_SCALE,
 	);
+	const objectRootPose =
+		record.animation.playback.status === "playing"
+			? record.animation.playback.objectRootPose
+			: IDENTITY_OBJECT_ROOT_POSE;
 	const objectRootMatrix = buildAcPlacementMatrix(
-		record.animation.playback.objectRootPose,
+		objectRootPose,
 		AC_UNIT_SCALE,
 	);
+	const activeOmega =
+		record.animation.playback.status === "playing"
+			? record.animation.playback.transformEffects.activeOmega
+			: null;
 	const omegaMatrix = buildAcPlacementMatrix(
-		record.animation.playback.transformEffects.activeOmega === null
+		activeOmega === null
 			? IDENTITY_OBJECT_ROOT_POSE
 			: {
-					orientation:
-						record.animation.playback.transformEffects.activeOmega
-							.objectRootRotation,
+					orientation: activeOmega.objectRootRotation,
 					origin: IDENTITY_OBJECT_ROOT_POSE.origin,
 				},
 		AC_UNIT_SCALE,
@@ -362,6 +360,26 @@ function createPartMatrix(
 		(matrix, next) => multiplyMat4(matrix, next),
 		baseMatrix,
 	);
+}
+
+function createCurrentPartPoses(record: DynamicEntityRecord): readonly {
+	readonly localPlacement: PlacementTransformDto;
+	readonly partIndex: number;
+}[] {
+	if (record.animation.playback.status === "playing") {
+		return record.animation.playback.partPoses;
+	}
+	if (record.resources.visual.status !== "ready") {
+		return [];
+	}
+	const sourceAsset = selectSourceAsset(record.resources.visual.sourceAssets);
+	if (!sourceAsset) {
+		return [];
+	}
+	return sourceAsset.parts.map((part) => ({
+		localPlacement: part.defaultPlacements[0] ?? IDENTITY_OBJECT_ROOT_POSE,
+		partIndex: part.partIndex,
+	}));
 }
 
 function selectSourceAsset(

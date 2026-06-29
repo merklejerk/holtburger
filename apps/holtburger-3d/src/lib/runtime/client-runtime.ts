@@ -136,7 +136,10 @@ import {
 	deriveRuntimePortalOverlapResidency,
 	type RuntimePortalOverlapResidency,
 } from "./portal-base-overlap";
-import { DynamicEntityController } from "../dynamic/dynamic-entity-controller";
+import {
+	DynamicEntityController,
+	type RuntimeDynamicSpawnRequest,
+} from "../dynamic/dynamic-entity-controller";
 import { DynamicEntityResourceManager } from "../dynamic/dynamic-entity-resource-manager";
 import { createDynamicVisualResourceId } from "../dynamic/contracts";
 import type {
@@ -144,6 +147,7 @@ import type {
 	DynamicEntityId,
 	DynamicRuntimeSnapshot,
 } from "../dynamic/contracts";
+import type { PlacementTransformDto } from "../host/contracts";
 import { translateBounds } from "./scene-query/geometry";
 
 const STATIC_DIAGNOSTICS_FAILURE_LIMIT = 8;
@@ -151,6 +155,10 @@ const TERRAIN_TEXTURE_DIAGNOSTICS_EVENT_LIMIT = 8;
 const BLENDED_STATIC_AUDIT_WARNING_BUCKET_LIMIT = 8;
 const DEFAULT_ASSET_MAINTENANCE_INTERVAL_MS = 5_000;
 const DEFAULT_TRANSITION_PORTAL_MAX_DEPTH = 4;
+const IDENTITY_DYNAMIC_PART_PLACEMENT: PlacementTransformDto = {
+	orientation: { w: 1, x: 0, y: 0, z: 0 },
+	origin: { x: 0, y: 0, z: 0 },
+};
 export const MIN_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 0;
 export const DEFAULT_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 18;
 export const MAX_DIRECT_ENV_CELL_PORTAL_MAX_DEPTH = 24;
@@ -597,6 +605,8 @@ interface StaticMaterializationSnapshot {
 }
 
 export interface ClientRuntime {
+	createRuntimeSpawn(request: RuntimeDynamicSpawnRequest): DynamicEntityId;
+	removeRuntimeSpawn(entityId: DynamicEntityId): boolean;
 	updateSceneInterest(interest: RuntimeSceneInterest): void;
 	queryCameraResidencyAtPoint(options: {
 		readonly outdoorAnchorLandblockId: number;
@@ -827,6 +837,24 @@ class ClientRuntimeImpl implements ClientRuntime {
 			this.#pruneExpiredWarmAssets();
 		}, assetMaintenanceIntervalMs);
 		unrefTimerIfAvailable(this.#assetMaintenanceIntervalId);
+	}
+
+	createRuntimeSpawn(request: RuntimeDynamicSpawnRequest): DynamicEntityId {
+		this.#assertActive();
+		const entityId = this.#dynamicEntityController.createRuntimeSpawn(request);
+		this.#enqueueDynamicRendererResourceSync();
+		this.#refreshSceneDebugOverlay();
+		return entityId;
+	}
+
+	removeRuntimeSpawn(entityId: DynamicEntityId): boolean {
+		this.#assertActive();
+		const removed = this.#dynamicEntityController.removeRuntimeSpawn(entityId);
+		if (removed) {
+			this.#enqueueDynamicRendererResourceSync();
+			this.#refreshSceneDebugOverlay();
+		}
+		return removed;
 	}
 
 	updateSceneInterest(interest: RuntimeSceneInterest): void {
@@ -1810,6 +1838,11 @@ class ClientRuntimeImpl implements ClientRuntime {
 		this.#committedDynamicVisualResourceIds.clear();
 		for (const resourceId of nextResourceIds) {
 			this.#committedDynamicVisualResourceIds.add(resourceId);
+		}
+		if (resources.length > 0 || removedResourceIds.length > 0) {
+			this.#commitDynamicRendererInstances(
+				this.#lastFrameState?.timeSeconds ?? 0,
+			);
 		}
 		this.#refreshRendererDiagnosticsSnapshot();
 	}
@@ -3786,18 +3819,41 @@ function createDynamicRendererInstances(
 }[] {
 	if (
 		record.resources.visual.status !== "ready" ||
-		record.animation.playback.status !== "playing" ||
 		!isDynamicRendererEligible(record)
 	) {
 		return [];
 	}
+	const objectToRenderMatrix = createDynamicObjectToRenderMatrix(record);
+	const partToObjectMatrices = createDynamicPartToObjectMatrices(record);
+	if (partToObjectMatrices.length === 0) {
+		return [];
+	}
+	return [
+		{
+			entityId: record.id,
+			instanceId: createDynamicRendererInstanceId(record),
+			objectToRenderMatrix: Array.from(objectToRenderMatrix),
+			partToObjectMatrices,
+			renderResidence: record.effectiveResidence,
+			resourceId: createDynamicRendererVisualResourceId(record),
+		},
+	];
+}
+
+function createDynamicObjectToRenderMatrix(
+	record: DynamicEntitySummaryDto,
+): Float32Array {
+	const baseMatrix = buildAcPlacementMatrix(
+		record.baseTransform.baseLocalPlacement,
+		record.baseTransform.sourceScale,
+	);
+	if (record.animation.playback.status !== "playing") {
+		return baseMatrix;
+	}
 	const playback = record.animation.playback;
-	const objectToRenderMatrix = multiplyMat4(
+	return multiplyMat4(
 		multiplyMat4(
-			buildAcPlacementMatrix(
-				record.baseTransform.baseLocalPlacement,
-				record.baseTransform.sourceScale,
-			),
+			baseMatrix,
 			buildAcPlacementMatrix(playback.objectRootPose, AC_UNIT_SCALE),
 		),
 		buildAcPlacementMatrix(
@@ -3807,21 +3863,40 @@ function createDynamicRendererInstances(
 			AC_UNIT_SCALE,
 		),
 	);
-	return [
-		{
-			entityId: record.id,
-			instanceId: createDynamicRendererInstanceId(record),
-			objectToRenderMatrix: Array.from(objectToRenderMatrix),
-			partToObjectMatrices: playback.partPoses.map((pose) => ({
-				matrix: Array.from(
-					buildAcPlacementMatrix(pose.localPlacement, AC_UNIT_SCALE),
-				),
-				partIndex: pose.partIndex,
-			})),
-			renderResidence: record.effectiveResidence,
-			resourceId: createDynamicRendererVisualResourceId(record),
-		},
-	];
+}
+
+function createDynamicPartToObjectMatrices(
+	record: DynamicEntitySummaryDto,
+): readonly {
+	readonly matrix: readonly number[];
+	readonly partIndex: number;
+}[] {
+	if (record.animation.playback.status === "playing") {
+		return record.animation.playback.partPoses.map((pose) => ({
+			matrix: Array.from(
+				buildAcPlacementMatrix(pose.localPlacement, AC_UNIT_SCALE),
+			),
+			partIndex: pose.partIndex,
+		}));
+	}
+	if (record.resources.visual.status !== "ready") {
+		return [];
+	}
+	const sourceAsset = record.resources.visual.sourceAssets[0] ?? null;
+	if (sourceAsset === null) {
+		return [];
+	}
+	return record.resources.visual.renderParts.map((part) => {
+		const sourcePart = sourceAsset.parts.find(
+			(candidate) => candidate.partIndex === part.partIndex,
+		);
+		const partPlacement =
+			sourcePart?.defaultPlacements[0] ?? IDENTITY_DYNAMIC_PART_PLACEMENT;
+		return {
+			matrix: Array.from(buildAcPlacementMatrix(partPlacement, AC_UNIT_SCALE)),
+			partIndex: part.partIndex,
+		};
+	});
 }
 
 function createDynamicObjectRootOmegaPlacement(

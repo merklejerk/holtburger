@@ -264,11 +264,20 @@ export interface DynamicEntityAnimationState {
 	readonly status: DynamicEntityAnimationStatus;
 }
 
-type DynamicEntityAnimationStatus = "failed" | "pending-resource" | "ready";
+type DynamicEntityAnimationStatus =
+	| "failed"
+	| "not-required"
+	| "pending-resource"
+	| "ready";
 
 export type DynamicEntityAnimationPlaybackState =
 	| {
 			readonly status: "pending-resource";
+	  }
+	| {
+			/** No animation was selected; renderers should use the setup/default pose. */
+			readonly reason: "animation-not-selected";
+			readonly status: "not-required";
 	  }
 	| {
 			readonly animationAssetId: string;
@@ -571,6 +580,11 @@ interface DynamicEntityAnimationSummaryDto {
 export type DynamicEntityAnimationPlaybackSummaryDto =
 	| {
 			readonly status: "pending-resource";
+	  }
+	| {
+			/** No animation was selected; renderers should use the setup/default pose. */
+			readonly reason: "animation-not-selected";
+			readonly status: "not-required";
 	  }
 	| {
 			readonly animationAssetId: string;

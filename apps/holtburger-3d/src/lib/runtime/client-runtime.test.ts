@@ -512,6 +512,13 @@ describe("browser client runtime", () => {
 		expect(
 			runtime.createDiagnosticsSnapshot().dynamic.records[0],
 		).toMatchObject({
+			animation: {
+				playback: {
+					reason: "animation-not-selected",
+					status: "not-required",
+				},
+				status: "not-required",
+			},
 			presentation: {
 				diagnostics: {
 					kind: "runtime-spawn",

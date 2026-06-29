@@ -135,7 +135,7 @@ pub enum LandblockSceneLodLayer {
     OutdoorBuildings(LandblockSceneLodOutdoorBuildingsLayer),
     OutdoorExplicitObjects(LandblockSceneLodOutdoorStaticLayer),
     OutdoorGeneratedScenery(LandblockSceneLodOutdoorStaticLayer),
-    EnvCellSystem,
+    EnvCellSystem(LandblockSceneLodEnvCellSystemLayer),
 }
 
 #[derive(Debug, Clone)]
@@ -160,6 +160,22 @@ pub struct LandblockSceneLodOutdoorStaticLayer {
     pub statics: Vec<LandblockOutdoorStaticMember>,
     /// Layer-local BVH for static members with finite instance bounds.
     pub outdoor_bvh: Option<PreparedBvh>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LandblockSceneLodEnvCellSystemLayer {
+    /// Normalized outdoor landblock id that owns this env-cell system.
+    pub landblock_id: u32,
+    /// Normalized landblock-info record id used to discover env cells.
+    pub landblock_info_id: u32,
+    /// Prepared env-cell bundle cells for this landblock.
+    pub env_cells: Vec<LandblockEnvCellBundleCell>,
+    /// Landblock-space env-cell BVH item records.
+    pub landblock_bvh_items: Vec<LandblockEnvCellBvhItem>,
+    /// Landblock-space env-cell BVH.
+    pub landblock_bvh: Option<PreparedBvh>,
+    /// Diagnostics collected while preparing the env-cell system layer.
+    pub diagnostics: PreparedContentSourceDiagnostics,
 }
 
 #[derive(Debug, Clone)]
@@ -1295,13 +1311,36 @@ impl LandblockSceneLodAssetAssembler {
         request: LandblockSceneLodRequest,
     ) -> LandblockSceneLodAsset {
         let mut context = PreparedContentAssemblyContext::with_decode_cache(content, decode_cache);
-        let layers = match request.context {
+        let mut layers = match request.context {
             LandblockSceneLodContext::Outdoor => {
                 self.assemble_outdoor_layers(&mut context, request)
             }
             LandblockSceneLodContext::Interior => Vec::new(),
         };
-        let diagnostics = context.into_diagnostics();
+        let mut diagnostics = context.into_diagnostics();
+        if request.context == LandblockSceneLodContext::Outdoor
+            && request.level == LandblockSceneLodLevel::Level4
+        {
+            match LandblockEnvCellsAssetAssembler::new().assemble_landblock_with_cache(
+                content,
+                decode_cache,
+                request.landblock_id,
+            ) {
+                Ok(env_cells) => layers.push(LandblockSceneLodLayer::EnvCellSystem(
+                    landblock_scene_lod_env_cell_system_layer(env_cells),
+                )),
+                Err(error) => diagnostics.errors.push(SourceLoadError {
+                    namespace: EOR_CELL_NAMESPACE,
+                    file_id: request.landblock_id,
+                    role: "landblock-scene-lod-env-cell-system",
+                    error_code: "asset-decode-failed",
+                    detail: format!(
+                        "Could not assemble scene LoD 4 env-cell system for landblock 0x{:08X}: {error:#}",
+                        request.landblock_id
+                    ),
+                }),
+            }
+        }
 
         LandblockSceneLodAsset {
             landblock_id: request.landblock_id,
@@ -1414,6 +1453,19 @@ impl LandblockSceneLodAssetAssembler {
                 None
             }
         }
+    }
+}
+
+fn landblock_scene_lod_env_cell_system_layer(
+    asset: LandblockEnvCellsAsset,
+) -> LandblockSceneLodEnvCellSystemLayer {
+    LandblockSceneLodEnvCellSystemLayer {
+        landblock_id: asset.landblock_id,
+        landblock_info_id: asset.landblock_info_id,
+        env_cells: asset.env_cells,
+        landblock_bvh_items: asset.landblock_bvh_items,
+        landblock_bvh: asset.landblock_bvh,
+        diagnostics: asset.diagnostics,
     }
 }
 
@@ -4983,6 +5035,57 @@ mod tests {
             level_1[1],
             LandblockSceneLodLayer::OutdoorBuildings(_)
         ));
+    }
+
+    #[test]
+    fn scene_lod_level_4_includes_env_cell_system_layer() {
+        let source = Arc::new(CountingSource::new(HashMap::new()));
+        let repository = ContentRepository::from_mounts(vec![source]);
+        let decode_cache = ContentDecodeCache::new();
+
+        let asset = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
+            &repository,
+            &decode_cache,
+            LandblockSceneLodRequest::outdoor(0xda55_0123, LandblockSceneLodLevel::Level4),
+        );
+
+        assert_eq!(asset.landblock_id, 0xda55ffff);
+        assert_eq!(asset.layers.len(), 5);
+        assert!(matches!(
+            asset.layers[4],
+            LandblockSceneLodLayer::EnvCellSystem(_)
+        ));
+        let LandblockSceneLodLayer::EnvCellSystem(layer) = &asset.layers[4] else {
+            panic!("level 4 should include env-cell system output");
+        };
+        assert_eq!(layer.landblock_info_id, 0xda55fffe);
+        assert!(layer.env_cells.is_empty());
+        assert_eq!(layer.diagnostics.source_records.len(), 1);
+        assert_eq!(layer.diagnostics.source_records[0].role, "landblock-info");
+        assert_eq!(
+            layer.diagnostics.source_records[0].status,
+            SourceRecordStatus::Missing
+        );
+    }
+
+    #[test]
+    fn scene_lod_lower_levels_do_not_include_env_cell_system_layer() {
+        let source = Arc::new(CountingSource::new(HashMap::new()));
+        let repository = ContentRepository::from_mounts(vec![source]);
+        let decode_cache = ContentDecodeCache::new();
+
+        let asset = LandblockSceneLodAssetAssembler::new().assemble_landblock_with_cache(
+            &repository,
+            &decode_cache,
+            LandblockSceneLodRequest::outdoor(0xda55_0123, LandblockSceneLodLevel::Level3),
+        );
+
+        assert!(
+            asset
+                .layers
+                .iter()
+                .all(|layer| !matches!(layer, LandblockSceneLodLayer::EnvCellSystem(_)))
+        );
     }
 
     #[test]

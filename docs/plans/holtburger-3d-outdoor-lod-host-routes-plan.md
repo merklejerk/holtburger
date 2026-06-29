@@ -535,17 +535,17 @@ Decisions and course corrections:
 
 ### Phase 4: Resteering Checkpoint - Contract And Source Shape
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: pause after the host/content/frontend contract exists and verify the remaining frontend cutover still matches reality.
 
 Review checklist:
 
-- [ ] Confirm the LoD route does not hide full-route CPU work behind a smaller payload.
-- [ ] Confirm the prepared LoD cache key stayed minimal.
-- [ ] Confirm `landblock-scene-lod` layer records are enough for all planned frontend recipes.
-- [ ] Reassess whether env-cell LoD `4` is self-contained enough to remove `EnvCellSystemLayerAssemblyStore`.
-- [ ] Update Phase 5 through Phase 10 if new evidence changes the cutover path.
+- [x] Confirm the LoD route does not hide full-route CPU work behind a smaller payload.
+- [x] Confirm the prepared LoD cache key stayed minimal.
+- [x] Confirm `landblock-scene-lod` layer records are enough for all planned frontend recipes.
+- [x] Reassess whether env-cell LoD `4` is self-contained enough to remove `EnvCellSystemLayerAssemblyStore`.
+- [x] Update Phase 5 through Phase 10 if new evidence changes the cutover path.
 
 Acceptance criteria:
 
@@ -553,7 +553,11 @@ Acceptance criteria:
 
 Decisions and course corrections:
 
-- Pending implementation.
+- LoD source assembly is no longer just a smaller payload over full-route work. Static families are gated, lower cached layers are reused during higher-LoD extension, and LoD `0` avoids static outdoor source-family assembly.
+- The prepared LoD cache key stayed minimal: normalized landblock id plus scene context. Requested output layers remain excluded from cache identity.
+- The `landblock-scene-lod` layer records are sufficient for planned frontend recipe fanout: terrain carries terrain mesh, outdoor layers carry static members/BVH/transition apertures where applicable, and LoD `4` carries env cells, portal links, render geometry, landblock env-cell BVH, and diagnostics.
+- LoD `4` is fact-complete enough to support removing `EnvCellSystemLayerAssemblyStore` later, but the implementation still wraps `LandblockEnvCellsAssetAssembler` internally. Phase 10 remains necessary to remove direct `landblock-env-cells` host lookups and old runtime merge/store paths.
+- Phase 5 through Phase 10 ordering still stands. No new compatibility escape hatch was added; old broad routes remain compatibility surfaces only until source-first scheduling and cleanup phases delete them.
 
 ### Phase 5: Static Domain And Browser Axis Split
 

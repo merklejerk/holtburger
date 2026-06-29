@@ -1,11 +1,21 @@
 import type { HostAssetKey, PreparedAsset } from "../../assets/contracts";
-import type { StaticResolverJob, StaticScopePayload } from "../contracts";
+import type {
+	StaticLandblockSceneLodResolution,
+	StaticLandblockSceneLodSourceRequest,
+	StaticResolverJob,
+	StaticScopePayload,
+} from "../contracts";
 
 export type StaticResolverWorkerMainMessage =
 	| {
 			readonly kind: "resolve-static-scope";
 			readonly requestId: string;
 			readonly job: StaticResolverJob;
+	  }
+	| {
+			readonly kind: "resolve-landblock-scene-lod-source";
+			readonly requestId: string;
+			readonly sourceRequest: StaticLandblockSceneLodSourceRequest;
 	  }
 	| {
 			readonly kind: "prepared-asset-request-resolved";
@@ -25,6 +35,11 @@ export type StaticResolverWorkerThreadMessage =
 			readonly payload: StaticScopePayload;
 	  }
 	| {
+			readonly kind: "landblock-scene-lod-source-resolved";
+			readonly requestId: string;
+			readonly resolution: StaticLandblockSceneLodResolution;
+	  }
+	| {
 			readonly kind: "static-scope-resolve-failed";
 			readonly requestId: string;
 			readonly message: string;
@@ -37,12 +52,21 @@ export type StaticResolverWorkerThreadMessage =
 
 export type StaticResolverWorkerRequest = Extract<
 	StaticResolverWorkerMainMessage,
-	{ readonly kind: "resolve-static-scope" }
+	{
+		readonly kind:
+			| "resolve-static-scope"
+			| "resolve-landblock-scene-lod-source";
+	}
 >;
 
 export type StaticResolverWorkerResponse = Extract<
 	StaticResolverWorkerThreadMessage,
-	{ readonly kind: "static-scope-resolved" | "static-scope-resolve-failed" }
+	{
+		readonly kind:
+			| "static-scope-resolved"
+			| "landblock-scene-lod-source-resolved"
+			| "static-scope-resolve-failed";
+	}
 >;
 
 export type StaticResolverPreparedAssetResponse = Extract<

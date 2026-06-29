@@ -3,12 +3,16 @@
 import type { PreparedAssetReader } from "../../assets/contracts";
 import type {
 	StaticResolver,
+	StaticLandblockSceneLodResolution,
+	StaticLandblockSceneLodSourceRequest,
+	StaticLandblockSceneLodSourceResolver,
 	StaticResolverJob,
 	StaticScopePayload,
 } from "../contracts";
 import { LandblockEnvCellsResolver } from "../env-cells/landblock-env-cells-resolver";
 import { OutdoorStaticObjectsResolver } from "../objects/outdoor-static-objects-resolver";
 import { TerrainStaticScopeResolver } from "../terrain/terrain-resolver";
+import { LandblockSceneLodSourceResolver } from "./landblock-scene-lod-source-resolver";
 import { handleStaticResolverWorkerRequest } from "./worker-handler";
 import type {
 	StaticResolverWorkerGlobalPort,
@@ -21,19 +25,25 @@ import {
 
 const workerPort = self as unknown as StaticResolverWorkerGlobalPort;
 
-class StaticResolverRouter implements StaticResolver {
+class StaticResolverRouter
+	implements StaticResolver, StaticLandblockSceneLodSourceResolver
+{
 	readonly #terrainResolver: StaticResolver;
 	readonly #outdoorStaticObjectsResolver: StaticResolver;
 	readonly #landblockEnvCellsResolver: StaticResolver;
+	readonly #landblockSceneLodSourceResolver: StaticLandblockSceneLodSourceResolver;
 
 	constructor(options: {
 		readonly terrainResolver: StaticResolver;
 		readonly outdoorStaticObjectsResolver: StaticResolver;
 		readonly landblockEnvCellsResolver: StaticResolver;
+		readonly landblockSceneLodSourceResolver: StaticLandblockSceneLodSourceResolver;
 	}) {
 		this.#terrainResolver = options.terrainResolver;
 		this.#outdoorStaticObjectsResolver = options.outdoorStaticObjectsResolver;
 		this.#landblockEnvCellsResolver = options.landblockEnvCellsResolver;
+		this.#landblockSceneLodSourceResolver =
+			options.landblockSceneLodSourceResolver;
 	}
 
 	resolve(job: StaticResolverJob): Promise<StaticScopePayload> {
@@ -56,6 +66,12 @@ class StaticResolverRouter implements StaticResolver {
 			new Error(`Static resolver worker does not support ${job.domain}.`),
 		);
 	}
+
+	resolveSource(
+		request: StaticLandblockSceneLodSourceRequest,
+	): Promise<StaticLandblockSceneLodResolution> {
+		return this.#landblockSceneLodSourceResolver.resolveSource(request);
+	}
 }
 
 const workerAssetReader = new StaticResolverWorkerPreparedAssetReader(
@@ -67,6 +83,9 @@ function createStaticResolver(
 ): StaticResolver {
 	return new StaticResolverRouter({
 		landblockEnvCellsResolver: new LandblockEnvCellsResolver({
+			assetService: assetReader,
+		}),
+		landblockSceneLodSourceResolver: new LandblockSceneLodSourceResolver({
 			assetService: assetReader,
 		}),
 		outdoorStaticObjectsResolver: new OutdoorStaticObjectsResolver({

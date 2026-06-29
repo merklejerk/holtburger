@@ -135,6 +135,24 @@ export interface StaticLandblockSceneLodSourceRequest {
 	readonly requestedLayers: readonly StaticLandblockSceneLodLayerRequest[];
 }
 
+export interface StaticLayerRecipe {
+	/** Layer owner that must still be desired before this recipe can be baked. */
+	readonly targetOwnerKey: LayerOwnerKey;
+	/** Domain-specific payload emitted from source-first resolver fanout. */
+	readonly payload: StaticScopePayload;
+}
+
+export interface StaticLandblockSceneLodResolution {
+	readonly request: StaticLandblockSceneLodSourceRequest;
+	readonly recipes: readonly StaticLayerRecipe[];
+}
+
+export interface StaticLandblockSceneLodSourceResolver {
+	resolveSource(
+		request: StaticLandblockSceneLodSourceRequest,
+	): Promise<StaticLandblockSceneLodResolution>;
+}
+
 export interface StaticRetentionReconciliation {
 	readonly activeWork: readonly ScheduledStaticWork[];
 	readonly retainedScopes: readonly StaticScopeOwnerKey[];

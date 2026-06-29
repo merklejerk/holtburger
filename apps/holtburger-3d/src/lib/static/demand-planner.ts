@@ -55,7 +55,7 @@ export function planStaticDemand(
 
 		return {
 			retainedScopes: work.map(createRetainedScopeFromWork),
-			sourceRequests: createLandblockSceneLodSourceRequests(work, "interior"),
+			sourceRequests: createLandblockSceneLodSourceRequests(work, "outdoor"),
 			work,
 		};
 	}

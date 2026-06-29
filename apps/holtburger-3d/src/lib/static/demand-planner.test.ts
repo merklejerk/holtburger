@@ -295,7 +295,7 @@ describe("static demand planner", () => {
 			).sourceRequests,
 		).toEqual([
 			{
-				context: "interior",
+				context: "outdoor",
 				landblockId: 0xda55ffff,
 				requestedLayers: [
 					{

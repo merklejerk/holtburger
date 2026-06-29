@@ -69,7 +69,11 @@ pub enum ContentAsset {
         region_id: u32,
         region_number: u32,
     },
-    LandblockSceneLod(Box<LandblockSceneLodAsset>),
+    LandblockSceneLod {
+        scene_lod: Box<LandblockSceneLodAsset>,
+        region_id: u32,
+        region_number: u32,
+    },
     EnvCell {
         cell: Box<EnvCellAsset>,
         region_id: u32,
@@ -147,9 +151,15 @@ impl ContentAssetService {
                     region_number: region.region_number,
                 })
             }
-            ContentAssetRequest::LandblockSceneLod(request) => Ok(ContentAsset::LandblockSceneLod(
-                Box::new(self.load_landblock_scene_lod(request)),
-            )),
+            ContentAssetRequest::LandblockSceneLod(request) => {
+                let scene_lod = self.load_landblock_scene_lod(request);
+                let region = self.decode_cache.region_desc(&self.content)?;
+                Ok(ContentAsset::LandblockSceneLod {
+                    scene_lod: Box::new(scene_lod),
+                    region_id: region.id,
+                    region_number: region.region_number,
+                })
+            }
             ContentAssetRequest::EnvCell(env_cell_id) => {
                 let asset = EnvCellAssetAssembler::new()
                     .try_assemble_env_cell_with_cache(
@@ -489,6 +499,7 @@ impl ContentAssetRuntime {
 mod tests {
     use super::*;
     use holtburger_common::{Quaternion, Vector3};
+    use holtburger_dat::file_type::REGION_DESC_FILE_ID;
     use holtburger_dat::{DatError, EOR_CELL_NAMESPACE, FileMetadata, ResourceSource};
     use std::collections::HashMap;
 
@@ -587,8 +598,7 @@ mod tests {
 
     #[test]
     fn content_asset_service_loads_landblock_scene_lod_layers() {
-        let repository =
-            ContentRepository::from_mounts(vec![Arc::new(InMemoryResourceSource::default())]);
+        let repository = ContentRepository::from_mounts(vec![Arc::new(scene_lod_test_source())]);
         let service =
             ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new()));
 
@@ -600,7 +610,10 @@ mod tests {
                 ),
             ))
             .expect("landblock scene LoD should load");
-        let ContentAsset::LandblockSceneLod(asset) = asset else {
+        let ContentAsset::LandblockSceneLod {
+            scene_lod: asset, ..
+        } = asset
+        else {
             panic!("content asset service returned mismatched landblock scene LoD asset");
         };
 
@@ -630,7 +643,7 @@ mod tests {
 
     #[test]
     fn landblock_scene_lod_cache_projects_lower_requests_from_cached_higher_lod() {
-        let source = Arc::new(InMemoryResourceSource::default());
+        let source = Arc::new(scene_lod_test_source());
         let repository = ContentRepository::from_mounts(vec![source.clone()]);
         let service =
             ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new()));
@@ -650,7 +663,11 @@ mod tests {
                 LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level2),
             ))
             .expect("lower scene LoD should project from cached level 4");
-        let ContentAsset::LandblockSceneLod(projected) = projected else {
+        let ContentAsset::LandblockSceneLod {
+            scene_lod: projected,
+            ..
+        } = projected
+        else {
             panic!("expected projected scene LoD asset");
         };
 
@@ -668,7 +685,7 @@ mod tests {
 
     #[test]
     fn landblock_scene_lod_cache_replaces_lower_cached_lod_with_higher_lod() {
-        let source = Arc::new(InMemoryResourceSource::default());
+        let source = Arc::new(scene_lod_test_source());
         let repository = ContentRepository::from_mounts(vec![source.clone()]);
         let service =
             ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new()));
@@ -708,7 +725,7 @@ mod tests {
     fn higher_landblock_scene_lod_extends_cached_lower_layers() {
         let landblock_id = 0xda55ffff;
         let landblock_info_id = 0xda55fffe;
-        let source = Arc::new(InMemoryResourceSource::default().with_file(
+        let source = Arc::new(scene_lod_test_source().with_file(
             EOR_CELL_NAMESPACE,
             landblock_info_id,
             landblock_info_with_one_building_bytes(landblock_info_id),
@@ -722,7 +739,10 @@ mod tests {
                 LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level1),
             ))
             .expect("level 1 scene LoD should load");
-        let ContentAsset::LandblockSceneLod(level_1) = level_1 else {
+        let ContentAsset::LandblockSceneLod {
+            scene_lod: level_1, ..
+        } = level_1
+        else {
             panic!("expected level 1 scene LoD asset");
         };
         assert_eq!(building_layer_static_count(&level_1), Some(1));
@@ -733,7 +753,10 @@ mod tests {
                 LandblockSceneLodRequest::outdoor(landblock_id, LandblockSceneLodLevel::Level3),
             ))
             .expect("level 3 scene LoD should extend cached level 1");
-        let ContentAsset::LandblockSceneLod(level_3) = level_3 else {
+        let ContentAsset::LandblockSceneLod {
+            scene_lod: level_3, ..
+        } = level_3
+        else {
             panic!("expected level 3 scene LoD asset");
         };
 
@@ -748,7 +771,7 @@ mod tests {
     #[tokio::test]
     async fn content_asset_runtime_dedupes_identical_landblock_scene_lod_requests() {
         let landblock_id = 0xda55ffff;
-        let source = Arc::new(InMemoryResourceSource::default().with_file(
+        let source = Arc::new(scene_lod_test_source().with_file(
             EOR_CELL_NAMESPACE,
             landblock_id,
             vec![0; 4],
@@ -787,6 +810,46 @@ mod tests {
         );
         bytes.extend_from_slice(&0_u32.to_le_bytes()); // hook count
         bytes
+    }
+
+    fn scene_lod_test_source() -> InMemoryResourceSource {
+        InMemoryResourceSource::default().with_file(
+            EOR_PORTAL_NAMESPACE,
+            REGION_DESC_FILE_ID,
+            empty_region_desc_bytes(),
+        )
+    }
+
+    fn empty_region_desc_bytes() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&REGION_DESC_FILE_ID.to_le_bytes());
+        bytes.extend_from_slice(&1_u32.to_le_bytes()); // region number
+        bytes.extend_from_slice(&1_u32.to_le_bytes()); // version
+        push_pstring(&mut bytes, "");
+        bytes.resize(bytes.len() + 32 + 256 * 4, 0); // LandDefs
+        bytes.resize(bytes.len() + 8 + 4 + 4 + 4, 0); // GameTime scalars
+        push_pstring(&mut bytes, "");
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // time of day list
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // weekday list
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // season list
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // parts mask
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // terrain type count
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // land surf type
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // base texture size
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // corner terrain maps
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // side terrain maps
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // road maps
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // terrain descs
+        bytes
+    }
+
+    fn push_pstring(bytes: &mut Vec<u8>, value: &str) {
+        let len = u16::try_from(value.len()).expect("test pstring should fit u16");
+        bytes.extend_from_slice(&len.to_le_bytes());
+        bytes.extend_from_slice(value.as_bytes());
+        while bytes.len() % 4 != 0 {
+            bytes.push(0);
+        }
     }
 
     fn landblock_info_with_one_building_bytes(landblock_info_id: u32) -> Vec<u8> {

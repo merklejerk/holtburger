@@ -204,11 +204,19 @@ pub fn serialize_content_asset_binary_response(
             ),
         },
         ContentAssetRequest::LandblockSceneLod(requested) => match asset {
-            Ok(ContentAsset::LandblockSceneLod(asset)) => AssetLookupResponseDto {
+            Ok(ContentAsset::LandblockSceneLod {
+                scene_lod,
+                region_id,
+                region_number,
+            }) => AssetLookupResponseDto {
                 request_id: request.request_id,
                 asset_id: request.asset_id,
                 payload_kind: AssetPayloadKindDto::Json,
-                payload: serialize_landblock_scene_lod_payload(&asset),
+                payload: serialize_landblock_scene_lod_payload(
+                    &scene_lod,
+                    region_id,
+                    region_number,
+                ),
             },
             Ok(_) => unreachable!("content asset runtime returned mismatched landblock scene LoD"),
             Err(error) => anyhow::bail!(

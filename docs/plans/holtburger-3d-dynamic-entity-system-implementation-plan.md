@@ -5232,8 +5232,9 @@ Deliverables:
   "no setup default animation" state that renders setup pose.
 - Keep browser manual explicit animation as an override over setup default animation.
 - Keep browser `none` mode as an explicit no-animation override.
-- Update WCID apply behavior only as far as it benefits from setup id population: if the resolved
-  WCID setup model has `defaultAnimation`, use that setup default animation; if not, select `none`.
+- Update WCID apply behavior to select the narrow `setup-default` mode when it populates a setup id.
+  Do not make the browser form fetch setup-model assets just to decide whether the setup has a
+  default animation; the runtime setup-model resource resolver owns that fallback decision.
 - Preserve diagnostics that show setup model id, selected setup default animation id, and fallback
   reason when no setup default exists.
 - Do not add a motion-table route, motion-table selector UI, cycle/link sequencing, or live motion
@@ -5249,7 +5250,8 @@ Acceptance criteria:
   `animation.status: "not-required"` and `playback.status: "not-required"` instead of
   `pending-resource`.
 - Runtime `setup-default` no longer leaks animation id `0` in source facts, resource keys,
-  diagnostics, or summaries.
+  diagnostics, or summaries. Runtime animation state and summaries should represent unresolved or
+  absent setup defaults as `null` / typed no-animation states instead of a numeric sentinel.
 - Manual explicit animation remains supported and wins over setup default animation.
 - Manual `none` remains supported and suppresses setup default animation.
 - Focused tests cover setup-model default-animation resolution, WCID seed application through setup
@@ -5257,14 +5259,16 @@ Acceptance criteria:
 
 Task checklist:
 
+- [ ] Change runtime-facing dynamic animation state/summary contracts so `defaultAnimationId` can be
+      absent for runtime spawns until setup-default resolution produces a concrete setup animation.
 - [ ] Add a setup-default animation resolver that consumes prepared setup model facts and returns a
       concrete animation id or a typed no-default result.
 - [ ] Route setup default animation ids through the existing `animation/0300....` asset lookup and
       dynamic setup/animation readiness path.
 - [ ] Update browser spawn validation/request construction so `setup-default` represents this narrow
       setup-default-animation mode, while explicit and none remain explicit user choices.
-- [ ] Update WCID apply behavior to preselect setup default animation when the resolved setup model
-      exposes one and preselect none otherwise.
+- [ ] Update WCID apply behavior to select `setup-default` after applying a setup id, leaving
+      no-default fallback to runtime resource resolution.
 - [ ] Replace runtime `setup-default-animation-unresolved` diagnostics with setup-default ready or
       setup-default none/fallback diagnostics.
 - [ ] Add diagnostics that show selected animation source, selected animation id, setup model id, and
@@ -5281,6 +5285,13 @@ Implementation notes:
 - 2026-06-29 planning: Setup model `defaultAnimation` is already serialized in setup-model payloads
   and can feed the existing concrete animation playback path. Use that as the next low-risk browser
   UX improvement before attempting motion-table interpretation.
+- 2026-06-29 dry-run steering: The browser WCID seed only carries setup id and appearance/source
+  facts, not a prepared setup-model payload. Keep WCID apply form-local by selecting
+  `setup-default`; do not duplicate setup-model asset lookup in browser form code. Runtime resource
+  resolution should load the setup model, choose the setup default animation when present, and emit a
+  typed no-animation state when absent. The dry run also found that `defaultAnimationId: 0` is a
+  sentinel leak; this phase must change runtime-facing animation state/summaries to use `null` or
+  typed no-animation states for unresolved/absent setup defaults.
 
 ### Phase 12F: Host Presentation Projection Resteer
 

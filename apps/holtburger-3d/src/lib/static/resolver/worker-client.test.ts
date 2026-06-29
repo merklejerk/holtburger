@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { StaticResolverJob, StaticScopePayload } from "../contracts";
+import type {
+	StaticLandblockSceneLodResolution,
+	StaticLandblockSceneLodSourceRequest,
+	StaticResolverJob,
+	StaticScopePayload,
+} from "../contracts";
 import type {
 	StaticResolverWorkerPort,
 	StaticResolverWorkerRequest,
@@ -59,6 +64,62 @@ describe("static resolver worker protocol", () => {
 				kind: "static-scope-resolve-failed",
 				message: "missing terrain root",
 				requestId: "transport:1",
+			},
+		]);
+	});
+
+	it("posts source-first requests and resolves multi-recipe responses", async () => {
+		const port = new FixtureWorkerPort();
+		const client = new StaticResolverWorkerClient(port);
+		const sourceRequest = createSourceRequest();
+		const resolution = createSourceResolution(sourceRequest);
+		const pending = client.resolveSource(sourceRequest);
+
+		expect(port.requests).toEqual([
+			{
+				kind: "resolve-landblock-scene-lod-source",
+				requestId: "resolver-source:0",
+				sourceRequest,
+			},
+		]);
+
+		port.emit({
+			kind: "landblock-scene-lod-source-resolved",
+			requestId: "resolver-source:0",
+			resolution,
+		});
+
+		await expect(pending).resolves.toBe(resolution);
+		client.dispose();
+	});
+
+	it("handles source-first worker requests with source-capable resolvers", async () => {
+		const sourceRequest = createSourceRequest();
+		const resolution = createSourceResolution(sourceRequest);
+		const responses: StaticResolverWorkerResponse[] = [];
+
+		await handleStaticResolverWorkerRequest(
+			() => ({
+				async resolve(): Promise<StaticScopePayload> {
+					throw new Error("static-scope path should not run");
+				},
+				async resolveSource(): Promise<StaticLandblockSceneLodResolution> {
+					return resolution;
+				},
+			}),
+			{
+				kind: "resolve-landblock-scene-lod-source",
+				requestId: "transport:source",
+				sourceRequest,
+			},
+			(response) => responses.push(response),
+		);
+
+		expect(responses).toEqual([
+			{
+				kind: "landblock-scene-lod-source-resolved",
+				requestId: "transport:source",
+				resolution,
 			},
 		]);
 	});
@@ -158,5 +219,40 @@ function createPayload(job: StaticResolverJob): StaticScopePayload {
 			referencedTextureUses: [],
 		},
 		sourceRevision: 1,
+	};
+}
+
+function createSourceRequest(): StaticLandblockSceneLodSourceRequest {
+	return {
+		context: "outdoor",
+		landblockId: 0xda55ffff,
+		requestedLayers: [
+			{
+				kind: "terrain",
+				targetOwnerKey: {
+					kind: "terrain",
+					landblockId: 0xda55ffff,
+				},
+			},
+		],
+		sourceLod: 0,
+	};
+}
+
+function createSourceResolution(
+	request: StaticLandblockSceneLodSourceRequest,
+): StaticLandblockSceneLodResolution {
+	const job = createJob();
+	return {
+		recipes: [
+			{
+				payload: createPayload(job),
+				targetOwnerKey: {
+					kind: "terrain",
+					landblockId: 0xda55ffff,
+				},
+			},
+		],
+		request,
 	};
 }

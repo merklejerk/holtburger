@@ -1,4 +1,7 @@
 import type {
+	StaticLandblockSceneLodResolution,
+	StaticLandblockSceneLodSourceRequest,
+	StaticLandblockSceneLodSourceResolver,
 	StaticResolverJob,
 	StaticResolver,
 	StaticScopePayload,
@@ -9,7 +12,7 @@ import type {
 } from "./protocol";
 
 interface PendingResolverRequest {
-	readonly resolve: (payload: StaticScopePayload) => void;
+	readonly resolve: (payload: unknown) => void;
 	readonly reject: (error: Error) => void;
 }
 
@@ -17,7 +20,9 @@ interface StaticResolverWorkerClientOptions {
 	readonly disposePort?: () => void;
 }
 
-export class StaticResolverWorkerClient implements StaticResolver {
+export class StaticResolverWorkerClient
+	implements StaticResolver, StaticLandblockSceneLodSourceResolver
+{
 	readonly #port: StaticResolverWorkerPort;
 	readonly #disposePort: (() => void) | null;
 	readonly #pending = new Map<string, PendingResolverRequest>();
@@ -49,11 +54,40 @@ export class StaticResolverWorkerClient implements StaticResolver {
 		this.#nextRequestIndex += 1;
 
 		return new Promise((resolve, reject) => {
-			this.#pending.set(requestId, { reject, resolve });
+			this.#pending.set(requestId, {
+				reject,
+				resolve: (payload) => resolve(payload as StaticScopePayload),
+			});
 			this.#port.postMessage({
 				job,
 				kind: "resolve-static-scope",
 				requestId,
+			});
+		});
+	}
+
+	resolveSource(
+		sourceRequest: StaticLandblockSceneLodSourceRequest,
+	): Promise<StaticLandblockSceneLodResolution> {
+		if (this.#disposed) {
+			return Promise.reject(
+				new Error("Static resolver worker client was disposed."),
+			);
+		}
+
+		const requestId = `resolver-source:${this.#nextRequestIndex}`;
+		this.#nextRequestIndex += 1;
+
+		return new Promise((resolve, reject) => {
+			this.#pending.set(requestId, {
+				reject,
+				resolve: (payload) =>
+					resolve(payload as StaticLandblockSceneLodResolution),
+			});
+			this.#port.postMessage({
+				kind: "resolve-landblock-scene-lod-source",
+				requestId,
+				sourceRequest,
 			});
 		});
 	}
@@ -75,6 +109,7 @@ export class StaticResolverWorkerClient implements StaticResolver {
 	#handleResponse(response: StaticResolverWorkerThreadMessage): void {
 		if (
 			response.kind !== "static-scope-resolved" &&
+			response.kind !== "landblock-scene-lod-source-resolved" &&
 			response.kind !== "static-scope-resolve-failed"
 		) {
 			return;
@@ -91,16 +126,26 @@ export class StaticResolverWorkerClient implements StaticResolver {
 			return;
 		}
 
-		pending.resolve(response.payload);
+		pending.resolve(
+			response.kind === "static-scope-resolved"
+				? response.payload
+				: response.resolution,
+		);
 	}
 }
 
-export class WorkerPoolStaticResolver implements StaticResolver {
-	readonly #resolvers: readonly StaticResolver[];
+export class WorkerPoolStaticResolver
+	implements StaticResolver, StaticLandblockSceneLodSourceResolver
+{
+	readonly #resolvers: readonly (StaticResolver &
+		Partial<StaticLandblockSceneLodSourceResolver>)[];
 	#nextResolverIndex = 0;
 	#disposed = false;
 
-	constructor(resolvers: readonly StaticResolver[]) {
+	constructor(
+		resolvers: readonly (StaticResolver &
+			Partial<StaticLandblockSceneLodSourceResolver>)[],
+	) {
 		if (resolvers.length === 0) {
 			throw new Error(
 				"WorkerPoolStaticResolver requires at least one resolver.",
@@ -128,6 +173,35 @@ export class WorkerPoolStaticResolver implements StaticResolver {
 			(this.#nextResolverIndex + 1) % this.#resolvers.length;
 
 		return resolver.resolve(job);
+	}
+
+	resolveSource(
+		request: StaticLandblockSceneLodSourceRequest,
+	): Promise<StaticLandblockSceneLodResolution> {
+		if (this.#disposed) {
+			return Promise.reject(
+				new Error("WorkerPoolStaticResolver has been disposed."),
+			);
+		}
+
+		const resolver = this.#resolvers[this.#nextResolverIndex];
+		if (!resolver) {
+			return Promise.reject(
+				new Error("WorkerPoolStaticResolver has no active resolver."),
+			);
+		}
+		if (!resolver.resolveSource) {
+			return Promise.reject(
+				new Error(
+					"WorkerPoolStaticResolver source resolution requires source-capable workers.",
+				),
+			);
+		}
+
+		this.#nextResolverIndex =
+			(this.#nextResolverIndex + 1) % this.#resolvers.length;
+
+		return resolver.resolveSource(request);
 	}
 
 	dispose(): void {

@@ -323,6 +323,8 @@ function createLandblockSceneLodPayload() {
 		diagnostics: createDiagnostics(),
 		kind: "landblock-scene-lod",
 		landblockId: 0xda55ffff,
+		regionId: 1,
+		regionNumber: 2,
 		layers: [
 			{
 				kind: "terrain",

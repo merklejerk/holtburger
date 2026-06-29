@@ -735,10 +735,16 @@ where
     })
 }
 
-pub fn serialize_landblock_scene_lod_payload(asset: &LandblockSceneLodAsset) -> serde_json::Value {
+pub fn serialize_landblock_scene_lod_payload(
+    asset: &LandblockSceneLodAsset,
+    region_id: u32,
+    region_number: u32,
+) -> serde_json::Value {
     serde_json::json!({
         "kind": "landblock-scene-lod",
         "landblockId": asset.landblock_id,
+        "regionId": region_id,
+        "regionNumber": region_number,
         "source": {
             "context": serialize_landblock_scene_lod_context(asset.context),
             "level": asset.level.as_u8(),
@@ -1913,16 +1919,22 @@ mod tests {
 
     #[test]
     fn serialize_landblock_scene_lod_payload_emits_skeleton_contract() {
-        let payload = serialize_landblock_scene_lod_payload(&LandblockSceneLodAsset {
-            landblock_id: 0xda55ffff,
-            level: LandblockSceneLodLevel::Level2,
-            context: LandblockSceneLodContext::Outdoor,
-            layers: Vec::new(),
-            diagnostics: PreparedContentSourceDiagnostics::default(),
-        });
+        let payload = serialize_landblock_scene_lod_payload(
+            &LandblockSceneLodAsset {
+                landblock_id: 0xda55ffff,
+                level: LandblockSceneLodLevel::Level2,
+                context: LandblockSceneLodContext::Outdoor,
+                layers: Vec::new(),
+                diagnostics: PreparedContentSourceDiagnostics::default(),
+            },
+            1,
+            2,
+        );
 
         assert_eq!(payload["kind"], "landblock-scene-lod");
         assert_eq!(payload["landblockId"].as_u64(), Some(0xda55ffff));
+        assert_eq!(payload["regionId"].as_u64(), Some(1));
+        assert_eq!(payload["regionNumber"].as_u64(), Some(2));
         assert_eq!(payload["source"]["context"], "outdoor");
         assert_eq!(payload["source"]["level"], 2);
         assert_eq!(payload["layers"].as_array().map(Vec::len), Some(0));
@@ -1934,34 +1946,40 @@ mod tests {
 
     #[test]
     fn serialize_landblock_scene_lod_payload_emits_layer_payloads() {
-        let payload = serialize_landblock_scene_lod_payload(&LandblockSceneLodAsset {
-            landblock_id: 0xda55ffff,
-            level: LandblockSceneLodLevel::Level3,
-            context: LandblockSceneLodContext::Outdoor,
-            layers: vec![
-                LandblockSceneLodLayer::Terrain(LandblockSceneLodTerrainLayer {
-                    terrain_mesh: None,
-                }),
-                LandblockSceneLodLayer::OutdoorBuildings(LandblockSceneLodOutdoorBuildingsLayer {
-                    statics: Vec::new(),
-                    building_transition_apertures: Vec::new(),
-                    outdoor_bvh: None,
-                }),
-                LandblockSceneLodLayer::OutdoorExplicitObjects(
-                    LandblockSceneLodOutdoorStaticLayer {
-                        statics: Vec::new(),
-                        outdoor_bvh: None,
-                    },
-                ),
-                LandblockSceneLodLayer::OutdoorGeneratedScenery(
-                    LandblockSceneLodOutdoorStaticLayer {
-                        statics: Vec::new(),
-                        outdoor_bvh: None,
-                    },
-                ),
-            ],
-            diagnostics: PreparedContentSourceDiagnostics::default(),
-        });
+        let payload = serialize_landblock_scene_lod_payload(
+            &LandblockSceneLodAsset {
+                landblock_id: 0xda55ffff,
+                level: LandblockSceneLodLevel::Level3,
+                context: LandblockSceneLodContext::Outdoor,
+                layers: vec![
+                    LandblockSceneLodLayer::Terrain(LandblockSceneLodTerrainLayer {
+                        terrain_mesh: None,
+                    }),
+                    LandblockSceneLodLayer::OutdoorBuildings(
+                        LandblockSceneLodOutdoorBuildingsLayer {
+                            statics: Vec::new(),
+                            building_transition_apertures: Vec::new(),
+                            outdoor_bvh: None,
+                        },
+                    ),
+                    LandblockSceneLodLayer::OutdoorExplicitObjects(
+                        LandblockSceneLodOutdoorStaticLayer {
+                            statics: Vec::new(),
+                            outdoor_bvh: None,
+                        },
+                    ),
+                    LandblockSceneLodLayer::OutdoorGeneratedScenery(
+                        LandblockSceneLodOutdoorStaticLayer {
+                            statics: Vec::new(),
+                            outdoor_bvh: None,
+                        },
+                    ),
+                ],
+                diagnostics: PreparedContentSourceDiagnostics::default(),
+            },
+            1,
+            2,
+        );
 
         let layers = payload["layers"]
             .as_array()
@@ -1982,22 +2000,26 @@ mod tests {
 
     #[test]
     fn serialize_landblock_scene_lod_payload_emits_env_cell_system_layer() {
-        let payload = serialize_landblock_scene_lod_payload(&LandblockSceneLodAsset {
-            landblock_id: 0xda55ffff,
-            level: LandblockSceneLodLevel::Level4,
-            context: LandblockSceneLodContext::Outdoor,
-            layers: vec![LandblockSceneLodLayer::EnvCellSystem(
-                LandblockSceneLodEnvCellSystemLayer {
-                    landblock_id: 0xda55ffff,
-                    landblock_info_id: 0xda55fffe,
-                    env_cells: Vec::new(),
-                    landblock_bvh_items: Vec::new(),
-                    landblock_bvh: None,
-                    diagnostics: PreparedContentSourceDiagnostics::default(),
-                },
-            )],
-            diagnostics: PreparedContentSourceDiagnostics::default(),
-        });
+        let payload = serialize_landblock_scene_lod_payload(
+            &LandblockSceneLodAsset {
+                landblock_id: 0xda55ffff,
+                level: LandblockSceneLodLevel::Level4,
+                context: LandblockSceneLodContext::Outdoor,
+                layers: vec![LandblockSceneLodLayer::EnvCellSystem(
+                    LandblockSceneLodEnvCellSystemLayer {
+                        landblock_id: 0xda55ffff,
+                        landblock_info_id: 0xda55fffe,
+                        env_cells: Vec::new(),
+                        landblock_bvh_items: Vec::new(),
+                        landblock_bvh: None,
+                        diagnostics: PreparedContentSourceDiagnostics::default(),
+                    },
+                )],
+                diagnostics: PreparedContentSourceDiagnostics::default(),
+            },
+            1,
+            2,
+        );
 
         let layer = &payload["layers"][0];
         assert_eq!(layer["kind"], "env-cell-system");

@@ -631,6 +631,8 @@ export const landblockSceneLodPayloadDtoSchema = z
 	.object({
 		kind: z.literal("landblock-scene-lod"),
 		landblockId: z.number().int().nonnegative(),
+		regionId: z.number().int().nonnegative(),
+		regionNumber: z.number().int().nonnegative(),
 		source: landblockSceneLodSourceDtoSchema,
 		layers: z.array(landblockSceneLodLayerDtoSchema),
 		diagnostics: landblockPackDiagnosticsDtoSchema,

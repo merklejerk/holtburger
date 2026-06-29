@@ -787,12 +787,12 @@ Decisions and course corrections:
 - Added `StaticLandblockSceneLodSourceRequest` and `StaticLandblockSceneLodLayerRequest` to `StaticDemandPlan`. These requests carry normalized landblock id, scene context, minimum source LoD, requested layer kinds, and target owner keys.
 - Kept `ScheduledStaticWork` as the current execution bridge. Phase 7A exposes source-first intent but does not route browser runtime or workers through the new requests yet.
 - Planner grouping now collapses all requested layers for a landblock/context into one source request and selects the maximum required layer LoD as the minimum sufficient source LoD.
-- Interior-cell demand produces an `interior` LoD `4` source request for the same normalized landblock because current rendering still needs env-cell system output plus building transition facts.
+- Course correction during Phase 7B: interior-cell demand currently produces an `outdoor` LoD `4` source request for the same normalized landblock because it still asks for both env-cell system output and outdoor-building transition facts. The host `interior` LoD contract forbids outdoor layers, so Phase 10 must remove the building-layer dependency before interior-context source requests can become normal.
 - Validation: `npm run test:ts -- src/lib/static/demand-planner.test.ts`; `npm run check`.
 
 ### Phase 7B: Resolver Protocol And Layer Recipe Fanout
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: make resolver workers capable of resolving one landblock scene LoD source into multiple layer recipes.
 
@@ -812,14 +812,19 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Update static resolver protocol/client/worker handler for multi-recipe output.
-- [ ] Add source-first resolver tests for multi-layer fanout.
-- [ ] Add worker tests proving one host route load per source request.
-- [ ] Replace old domain resolvers in the source fanout path, or delete them if no longer needed.
+- [x] Update static resolver protocol/client/worker handler for multi-recipe output.
+- [x] Add source-first resolver tests for multi-layer fanout.
+- [x] Add worker tests proving one host route load per source request.
+- [x] Replace old domain resolvers in the source fanout path, or delete them if no longer needed.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Added source-first resolver contracts: `StaticLandblockSceneLodSourceResolver`, `StaticLandblockSceneLodResolution`, and owner-tagged `StaticLayerRecipe`.
+- Extended the worker protocol/client/handler with `resolve-landblock-scene-lod-source` and `landblock-scene-lod-source-resolved` messages while keeping existing static-scope messages for the temporary Phase 6C/7D bridge.
+- Added `LandblockSceneLodSourceResolver`. It loads one `landblock-scene-lod` prepared asset for the source request, projects requested LoD layers into resolver-compatible in-memory payloads, and emits existing domain payloads tagged with target layer owner keys.
+- The source fanout path reuses existing terrain/object/env-cell resolver logic through projected LoD-layer asset readers. This is a deliberate rewrite of the source input, not an old-route host fallback: tests assert the fanout does not request `landblock-outdoor` or `landblock-env-cells` prepared assets.
+- Pulled a stale route-contract fix into this phase: `landblock-scene-lod` payloads now include `regionId` and `regionNumber`, matching old outdoor/env-cell payloads. Without this, source fanout would have to query broad old routes or guess terrain/material profile dependencies.
+- Validation: `npm run test:ts -- src/lib/static/demand-planner.test.ts src/lib/static/resolver/landblock-scene-lod-source-resolver.test.ts src/lib/static/resolver/worker-client.test.ts src/lib/assets/preparation.test.ts`; `npm run check`; `npm run check:rust`; `cargo test -p holtburger-core content_assets`; `cargo test --manifest-path apps/holtburger-3d/src-tauri/Cargo.toml adapter::json`.
 
 ### Phase 7C: Owner-Gated Bake Integration
 

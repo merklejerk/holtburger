@@ -1462,7 +1462,7 @@ Decisions and course corrections:
 
 ### Phase 10B: Self-Contained Env-Cell Layer Bake
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: make env-cell-system materialization emit all renderer/query resources from one env-cell-system layer recipe.
 
@@ -1481,14 +1481,17 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Extend env-cell-system bake inputs to carry LoD `4` transition and attachment facts.
-- [ ] Emit building transition portal aperture resources and static portal graphs from the env-cell-system bake path.
-- [ ] Verify resource ownership and diagnostics point at the env-cell-system layer owner.
-- [ ] Add focused bake/materialization tests for self-contained env-cell-system commits.
+- [x] Extend env-cell-system bake inputs to carry LoD `4` transition and attachment facts.
+- [x] Emit building transition portal aperture resources and static portal graphs from the env-cell-system bake path.
+- [x] Verify resource ownership and diagnostics point at the env-cell-system layer owner.
+- [x] Add focused bake/materialization tests for self-contained env-cell-system commits.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Reused the existing building-transition portal aperture derivation and static portal graph builder for env-cell-system scopes instead of adding a second aperture format.
+- `sourceDomain` on building transition aperture resources remains `outdoor-buildings` because it describes the source aperture vocabulary. The owning peer record for graphs emitted by env-cell-system bake is the env-cell-system layer owner.
+- `LandblockEnvCellsBaker` now merges portal aperture resources and static portal graphs emitted by its static-object compatibility pass, so a single env-cell-system materialized commit carries both env-cell portal resources and building transition portal resources.
+- Validation: `npm run test:ts -- src/lib/static/env-cells/bake/landblock-env-cells-baker.test.ts`; `npm run check`.
 
 ### Phase 10C: Runtime Env-Cell Publication Cutover
 

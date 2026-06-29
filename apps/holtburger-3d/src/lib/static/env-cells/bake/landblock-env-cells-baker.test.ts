@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
 	EnvCellCellStructureGeometryAttachment,
 	LandblockEnvCellStaticFacts,
+	LandblockEnvCellsStaticScopePayload,
 	RegionDetailRoleFacts,
 	StaticBakeBatchInput,
 	StaticObjectMaterialSourceFacts,
@@ -101,6 +102,48 @@ describe("browser landblock env-cell baker", () => {
 				}),
 			}),
 		]);
+	});
+
+	it("emits building transition portal resources from env-cell layer facts", () => {
+		const input = createInput({
+			buildingTransitionApertures: [createBuildingTransitionAperture()],
+		});
+		const result = bakeLandblockEnvCells(input);
+
+		expect(result.portalApertureResources).toEqual([
+			expect.objectContaining({
+				apertureResourceId:
+					"portal-aperture-resource:building-transition:0xda55ffff",
+				landblockId: 0xda55ffff,
+				sourceDomain: "outdoor-buildings",
+				ranges: [
+					expect.objectContaining({
+						source: expect.objectContaining({
+							buildingInstanceId: "building-01",
+							kind: "building-transition",
+							targetEnvCellId: 0xda550100,
+						}),
+						sourceKind: "building-transition",
+					}),
+				],
+			}),
+		]);
+		expect(result.staticPortalGraphs).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					edges: [
+						expect.objectContaining({
+							sceneCrossing: {
+								envCellId: 0xda550100,
+								kind: "outdoor-to-env-cell",
+								outdoorLandblockId: 0xda55ffff,
+							},
+						}),
+					],
+					owner: expectedEnvCellLayerOwner(),
+				}),
+			]),
+		);
 	});
 
 	it("rejects non-env-cell batches", () => {
@@ -1421,7 +1464,11 @@ function expectedEnvCellLayerOwner() {
 	};
 }
 
-function createInput(): StaticBakeBatchInput {
+function createInput(
+	options: {
+		readonly buildingTransitionApertures?: LandblockEnvCellsStaticScopePayload["buildingTransitionApertures"];
+	} = {},
+): StaticBakeBatchInput {
 	const work = {
 		job: {
 			domain: "landblock-env-cells" as const,
@@ -1453,6 +1500,8 @@ function createInput(): StaticBakeBatchInput {
 					job: work.job,
 					scope: {
 						acceptedEnvCellIds: [0xda550100],
+						buildingTransitionApertures:
+							options.buildingTransitionApertures ?? [],
 						envCells: [
 							{
 								cellBsp: {
@@ -1572,5 +1621,27 @@ function createInput(): StaticBakeBatchInput {
 		],
 		revision: 7,
 		staticBatchId: "env-batch-a",
+	};
+}
+
+function createBuildingTransitionAperture() {
+	return {
+		apertureId: "building-transition-aperture:building-01:0",
+		buildingInstanceId: "building-01",
+		buildingPortalId: "building-portal-0",
+		buildingPortalSourceIndex: 0,
+		flags: 1,
+		linkedEnvCellIds: [0xda550100],
+		otherCellId: 0x0100,
+		otherPortalId: 0xffff,
+		points: [
+			{ x: 0, y: 0, z: 0 },
+			{ x: 1, y: 0, z: 0 },
+			{ x: 0, y: 1, z: 0 },
+		],
+		polyId: 42,
+		portalIndex: 0,
+		sourceAssetId: "gfxobj/02001234",
+		sourceDid: 0x02001234,
 	};
 }

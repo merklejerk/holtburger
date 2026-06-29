@@ -200,13 +200,13 @@ Validated current facts:
 - Current renderer layers, material planning, texture residency, diagnostics, and selection paths branch by static domain. That supports giving LoD `2` explicit objects and LoD `3` generated scenery separate domains/layers instead of sharing a renamed `outdoor-detail` bucket.
 - Resource eviction is currently keyed by layer desired keys such as `landblock:da55ffff:outdoor-detail`.
 - Bake batching is domain-oriented; source-first resolver fanout must still feed domain-oriented bake inputs unless that pipeline is intentionally redesigned.
-- `StaticSceneQuery.retainScopes` and `DynamicEntityController.retainStaticScopes` currently consume owner keys keyed by renderer domain plus scope.
+- `StaticSceneQuery.retainLayerOwners` and `DynamicEntityController.retainLayerOwners` now consume layer owner keys directly.
 - Env-cell system layer clearing is resource-driven and explicit. Clearing the renderer env-cell layer also calls `StaticSceneQuery.clearEnvCellSystemLayer(landblockId)`.
 - The env-cell geometry attachment provider currently requests the full `landblock-env-cells` host asset directly to build cell-structure geometry attachments.
 - `EnvCellSystemLayerAssemblyStore` currently merges env-cell materialized output with building transition facts from the `outdoor-buildings` path before publishing the renderer env-cell system layer. The LoD `4` route should make that runtime cross-layer merge unnecessary.
-- Runtime-authored dynamics already have explicit runtime lifetime and are not pruned by `retainStaticScopes`. They still require a concrete `DynamicEntityResidence` (`outdoor-landblock` or `env-cell`) and do not yet support an explicit no-residence/unrendered state.
-- Static-authored dynamics are still retained through `sourceScopeKey` strings derived from `StaticWorkPeerRecordOwner`, so the layer-owner cutover remains necessary for static-authored seed eviction.
-- Scene-interest readiness still depends on active work ids, active work revisions, and pending/failed materialization revisions in `ClientRuntime`, not on a layer-owner state machine.
+- Runtime-authored dynamics already have explicit runtime lifetime and are not pruned by `retainLayerOwners`. They still require a concrete `DynamicEntityResidence` (`outdoor-landblock` or `env-cell`) and do not yet support an explicit no-residence/unrendered state.
+- Static-authored dynamics are retained by layer owner ids, but several diagnostic/type field names still say `sourceScopeKey`.
+- Scene-interest readiness now tracks demanded layer owner states instead of active work ids/revisions.
 - `ContentDecodeCache` is an LRU for decoded source records. It is not the prepared landblock scene LoD cache required by this spec.
 - `StaticOutdoorSceneAssembler::assemble_from_loaded` currently derives explicit objects, buildings, and generated scenery together. Terrain-only or building-only LoD assembly therefore needs new gating in the shared source assembly path, not just projection from the existing full outdoor asset.
 
@@ -1181,7 +1181,7 @@ Decisions and course corrections:
 - Replaced `EnvCellCommittedRecordStore.retainScopes` with `retainLayerOwners`; committed env-cell records now prune by stored layer owner ids rather than reconstructing scope/domain strings from records.
 - Replaced `DynamicEntityController.retainStaticScopes` with `retainLayerOwners`; static-authored dynamic retention now consumes owner ids directly.
 - Removed `retainScopes`, `retainStaticScopes`, and `retainedScopes` references from static/runtime/dynamic implementation and focused tests. `StaticScopeOwnerKey` remains only as a helper input shape for deriving layer owner keys, not as retention state.
-- Naming debt: dynamic presentation still uses `sourceScopeKey` field names, but the value is now the layer owner id. This should be renamed in Phase 8E unless Phase 8D removes the field first.
+- Naming debt: dynamic presentation still uses `sourceScopeKey` field names, but the value is now the layer owner id. This should be renamed in Phase 8D5 or Phase 8E unless the no-residence work removes the field first.
 - Validation: `npm run test:ts -- src/lib/static/demand-planner.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts`; `npm run check`.
 
 ### Phase 8D1: Owner-State Scene Interest Readiness
@@ -1217,30 +1217,122 @@ Decisions and course corrections:
 - Audit result: `#activeSceneWorkIds` and `#activeSceneWorkRevisions` no longer exist.
 - Validation: `npm run test:ts -- src/lib/runtime/client-runtime.test.ts src/lib/static/coordinator/static-coordinator.test.ts`; `npm run check`.
 
-### Phase 8D2: Runtime Dynamic No-Residence State
+### Phase 8D2: Dynamic Residence Contract Split
 
 Status: pending.
 
-Goal: make runtime-authored dynamics survive static residence eviction as explicit no-residence/unrendered records.
+Goal: make dynamic render residence explicitly nullable without weakening source identity or runtime lifetime.
 
 Deliverables:
 
-- Add explicit no-residence/unrendered state for runtime-authored dynamics when their render residence is evicted.
-- Prevent no-residence runtime dynamics from being submitted as renderer instances while preserving their records/resources.
-- Update dynamic diagnostics, placement indexes, renderer sync, and tests for unrendered runtime-authored records.
+- Split the current residence model so `sourceResidence` remains the source/authoring home while the current render residence can be `no-residence`.
+- Add a named renderability reason for dynamics that are otherwise resource-ready but cannot render because they have no current residence.
+- Update dynamic record summaries and type-level docs so diagnostics can expose no-residence without overloading outdoor/env-cell residence.
+- Update low-level contract/controller tests for the new state shape without changing eviction behavior yet.
 
 Acceptance criteria:
 
-- Runtime-authored dynamics survive static layer eviction and become diagnosable no-residence records.
-- No-residence runtime dynamics are not indexed as outdoor/env-cell occupants or committed as renderer instances.
-- Restoring a compatible static residence can make the runtime dynamic renderable again without recreating the runtime entity id.
+- A dynamic record can represent source residence and current no-residence at the same time.
+- Runtime-authored dynamic identity and resource ownership remain independent from static layer ownership.
+- Existing outdoor/env-cell dynamic behavior remains unchanged when a render residence is present.
 
 Task checklist:
 
-- [ ] Add runtime dynamic no-residence state to dynamic contracts/controller/store.
-- [ ] Update renderer instance commit filtering and placement tracking.
-- [ ] Update runtime dynamic diagnostics/tests for unrendered records.
-- [ ] Run focused dynamic/runtime renderer sync tests.
+- [ ] Add explicit no-residence current render residence type and docs.
+- [ ] Add `no-render-residence` renderability reason or equivalent named reason.
+- [ ] Update dynamic summaries/store serialization for no-residence.
+- [ ] Update focused dynamic contract/controller tests.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 8D3: No-Residence Placement And Renderer Filtering
+
+Status: pending.
+
+Goal: make no-residence dynamics non-indexed and non-instanced while keeping their runtime-owned visual resources alive.
+
+Deliverables:
+
+- Teach `DynamicPlacementTracker` to clear bounds and outdoor/env-cell index membership for no-residence records.
+- Teach runtime dynamic renderer instance submission to skip no-residence records even when their resources are ready.
+- Preserve dynamic visual resource commits for runtime-owned no-residence records unless resource policy proves they should be released.
+- Add focused placement and renderer-sync tests proving no-residence records do not leak into outdoor/env-cell indexes or renderer instances.
+
+Acceptance criteria:
+
+- No-residence runtime dynamics are not indexed as outdoor landblock occupants.
+- No-residence runtime dynamics are not indexed as env-cell occupants.
+- No-residence runtime dynamics do not produce `DynamicRendererInstance` commits.
+- Runtime-owned resources are not released merely because render residence is absent.
+
+Task checklist:
+
+- [ ] Update placement tracker no-residence handling.
+- [ ] Update dynamic renderer instance eligibility/filtering.
+- [ ] Add placement tracker tests for no-residence outdoor/env-cell clearing.
+- [ ] Add runtime renderer commit tests for no-residence records.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 8D4: Runtime Dynamic Residence Eviction And Rehome
+
+Status: pending.
+
+Goal: move runtime-authored dynamics to no-residence when their static render residence is evicted, and allow them to become resident again without changing identity.
+
+Deliverables:
+
+- Add controller/runtime APIs for clearing current render residence on runtime-authored dynamics without deleting the record or releasing runtime-owned state.
+- Wire static retention/eviction reconciliation to clear affected runtime-authored dynamic render residence.
+- Add explicit rehome/update behavior that restores a compatible outdoor/env-cell render residence while preserving the runtime entity id.
+- Add tests covering eviction, survival, and rehome.
+
+Acceptance criteria:
+
+- Static layer eviction clears only current render residence for affected runtime-authored dynamics.
+- Runtime-authored entity id, source facts, animation state, and runtime-owned resources survive residence eviction.
+- Restoring a compatible residence can make the same runtime entity renderable again without recreating the entity id.
+
+Task checklist:
+
+- [ ] Add controller/runtime residence-clear API for runtime-authored dynamics.
+- [ ] Connect static retention/eviction to runtime dynamic residence clearing.
+- [ ] Add residence rehome/update path that preserves entity identity.
+- [ ] Add focused controller/runtime tests for eviction and rehome.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 8D5: No-Residence Diagnostics And Validation
+
+Status: pending.
+
+Goal: make no-residence runtime dynamics visible and prove the split with focused validation before the Phase 8E audit.
+
+Deliverables:
+
+- Update dynamic diagnostics/snapshots to expose no-residence runtime-authored records and the reason they are unrendered.
+- Remove or rename any diagnostic field that still implies runtime-authored dynamic lifetime is static-scope owned.
+- Run focused dynamic/runtime/renderer validation.
+- Record discovered cleanup targets before Phase 8E.
+
+Acceptance criteria:
+
+- Runtime diagnostics show no-residence runtime-authored dynamics without classifying them as deleted, static-owned, or resource-failed.
+- No-residence appears as an explicit state/reason in snapshots.
+- Focused dynamic, runtime, and renderer tests pass.
+
+Task checklist:
+
+- [ ] Update dynamic runtime diagnostics and snapshots.
+- [ ] Rename misleading diagnostics if discovered during implementation.
+- [ ] Run focused dynamic/runtime/renderer test suite.
+- [ ] Record remaining vestigial cleanup targets for Phase 8E.
 
 Decisions and course corrections:
 

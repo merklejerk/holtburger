@@ -1531,7 +1531,7 @@ Decisions and course corrections:
 
 ### Phase 10D: Env-Cell Cutover Resteer And Validation
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: audit the completed env-cell cutover before broad old-route deletion begins.
 
@@ -1549,15 +1549,19 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Search for direct `landblock-env-cells` requests in static bake, resolver, runtime, and attachment paths.
-- [ ] Search for `EnvCellSystemLayerAssemblyStore` and remove any surviving production/test references.
-- [ ] Search for env-cell publication dependencies on `outdoor-buildings` materialized commits.
-- [ ] Update Phase 11 deletion targets with any remaining old-route env-cell surfaces.
-- [ ] Run required validation commands and record them here.
+- [x] Search for direct `landblock-env-cells` requests in static bake, resolver, runtime, and attachment paths.
+- [x] Search for `EnvCellSystemLayerAssemblyStore` and remove any surviving production/test references.
+- [x] Search for env-cell publication dependencies on `outdoor-buildings` materialized commits.
+- [x] Update Phase 11 deletion targets with any remaining old-route env-cell surfaces.
+- [x] Run required validation commands and record them here.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- No executable `EnvCellSystemLayerAssemblyStore`, `env-cell-system-layer-assembly`, or `envCellSystemLayerAssembly` references remain.
+- Runtime env-cell system publication is direct from env-cell materialized commits. It does not subscribe to building source payloads and does not wait on `outdoor-buildings` materialization.
+- The `landblock-env-cells` domain name remains legitimate for env-cell-system bake/materialization and runtime peer-record ownership until a separate domain rename is justified. The old route-facing `landblock-env-cells` DTO/schema/key/preparation/direct resolver surfaces remain Phase 11 deletion targets.
+- `LandblockEnvCellsResolver` still contains direct `createHostAssetKey("landblock-env-cells", ...)` compatibility behavior for standalone resolver jobs and tests. Normal source-first LoD resolution intercepts that request through the projected payload asset service; Phase 11 should delete the standalone old-route resolver path rather than preserve it.
+- Validation: `npm run test:ts -- src/lib/runtime/env-cell-system-layer-publication.test.ts src/lib/runtime/client-runtime.test.ts`; `npm run check`; zero-reference search for `EnvCellSystemLayerAssembly`, `env-cell-system-layer-assembly`, and `envCellSystemLayerAssembly`; audit searches for `landblock-env-cells` route-facing surfaces and `outdoor-buildings` dependencies in env-cell publication paths.
 
 ### Phase 11: Old Route And Compatibility Cleanup
 
@@ -1574,6 +1578,7 @@ Deliverables:
 - Remove old route-facing `ContentAssetRequest` and `ContentAsset` variants for `LandblockOutdoor`, `LandblockTopology`, and `LandblockEnvCells`.
 - Remove TypeScript host asset key variants, formatters, parsers, schemas, route payload preparation, and binary lookup detection for old landblock outdoor/env-cell/topology assets.
 - Remove frontend resolvers, bakers, attachment providers, and asset views that consume `LandblockOutdoorPayloadDto` or `LandblockEnvCellsPayloadDto` as route payloads.
+- Delete standalone `LandblockEnvCellsResolver` direct-route loading or replace it with a LoD-projected-only resolver surface; normal browser source-first resolution should not need a route-capable env-cell resolver after Phase 10D.
 - Remove `outdoor-detail` as a renderer/static domain and replace it with the split explicit-object and generated-scenery domains everywhere.
 - Remove Phase 5A compatibility surfaces that still accept or emit executable `outdoor-detail` domains, including demand scheduling, resolver/baker branching, renderer `OutdoorDetailsLayerPayload`/`setOutdoorDetailsLayer`, generated-instance inventory naming, runtime tests, diagnostics counters, and WebGL2 resource paths after Phase 5B/5C and layer-owner cutover replace them.
 - Remove retained-scope, desired-key, durable work-owner, active-work-id, and source-scope lifecycle paths after layer owners become authoritative.
@@ -1600,6 +1605,7 @@ Task checklist:
 - [ ] Delete old `ContentAssetRequest` and `ContentAsset` variants or rename surviving internal source structs so they are not route-facing compatibility surfaces.
 - [ ] Delete old frontend host asset key kinds, DTO schemas, route payload preparation, and binary lookup branches.
 - [ ] Delete old env-cell resolver/attachment/store paths that request or merge `landblock-env-cells`.
+- [ ] Delete standalone env-cell direct-route resolver behavior and tests after LoD-projected env-cell payloads are the only supported resolver input.
 - [ ] Delete old `outdoor-detail` layer/domain naming and diagnostics after explicit/generated layers replace it.
 - [ ] Delete retained-scope, desired-key, active-work-id, and source-scope ownership paths after layer owners replace them.
 - [ ] Run zero-reference searches for old route and lifecycle names; classify any surviving source vocabulary in this plan.

@@ -314,39 +314,121 @@ Decisions and course corrections:
 - Prepared LoD cache ownership is pinned to `ContentAssetService`, but no unused cache field was added in Phase 1.
 - Validation run: `cargo test -p holtburger-core content_asset_service_loads_landblock_scene_lod_skeleton`; `cargo test -p holtburger-3d landblock_scene_lod`; `cargo test -p holtburger-3d direct_json_lookup_rejects_binary_routed_assets`.
 
-### Phase 2: Source Assembly Gating And Prepared LoD Cache
+### Phase 2A: Source Assembly Gates
 
 Status: pending.
 
-Goal: build real content-side LoD preparation without calling the full current outdoor/env-cell assemblers and filtering afterward.
+Goal: make source-family derivation explicit so lower LoD requests do not secretly execute full outdoor assembly work.
 
 Deliverables:
 
-- Refactor the outdoor source assembly path so explicit objects, buildings, generated scenery, and source bounds can be gated by requested LoD.
-- Implement terrain, building, explicit-object, generated-scenery, and env-cell projections in the scene LoD asset.
-- Add a prepared LoD cache owned by `ContentAssetService` with 256 normalized landblock slots.
-- Store the highest prepared LoD per normalized landblock and compatible scene context only when context changes emitted source semantics.
-- Ensure higher-LoD preparation extends cached lower-LoD state where possible.
-- Ensure concurrent identical or compatible LoD requests dedupe through the existing `ContentAssetRuntime` in-flight request behavior plus the prepared LoD cache, without making requested output layers part of the cache identity.
+- Split or parameterize `StaticOutdoorSceneAssembler` so terrain, outdoor buildings, explicit outdoor objects, generated scenery, source bounds, and env-cell inputs are independent source-family gates.
+- Wire `LandblockSceneLodAssetAssembler` through the gated source path instead of calling the full `landblock-outdoor` or `landblock-env-cells` assemblers and filtering afterward.
+- Keep the skeleton `LandblockSceneLodLayer` payload shape stable while the phase proves source gating.
 
 Acceptance criteria:
 
 - Level `0` does not derive outdoor static source bounds.
-- Level `1` does not derive explicit/generated object bounds.
-- Level `2` does not run generated scenery derivation.
-- Level `3` preserves current generated scenery identities/placements relative to `landblock-outdoor`.
-- Level `4` preserves current env-cell structure, portals, visibility, static seeds, and geometry facts.
-- Cache tests prove lower/equal requests project from cached higher state and higher requests extend lower state.
+- Level `1` derives building facts without explicit/generated object bounds.
+- Level `2` derives explicit object facts without generated scenery derivation.
+- Tests fail if a lower level accidentally calls a higher source-family derivation path.
 
 Task checklist:
 
-- [ ] Split or parameterize `StaticOutdoorSceneAssembler` so family derivation is explicit.
-- [ ] Add content tests for level-specific gating.
+- [ ] Split or parameterize `StaticOutdoorSceneAssembler` source-family derivation.
+- [ ] Add focused content tests for level-specific gating.
+- [ ] Confirm no `landblock-scene-lod` implementation path calls the old full route assemblers and filters afterward.
+
+Decisions and course corrections:
+
+- Broke the original Phase 2 into 2A-2D on 2026-06-29. The previous scope mixed source gates, payload parity, env-cell preservation, and cache behavior into one oversized commit.
+- Cache key dimensions remain intentionally narrow: normalized landblock id, source LoD, and scene context only if context changes emitted source semantics. Requested output layers are not cache identity.
+
+### Phase 2B: Outdoor Layer Projections
+
+Status: pending.
+
+Goal: emit real terrain, building, explicit-object, and generated-scenery LoD layers from the gated source path.
+
+Deliverables:
+
+- Populate `LandblockSceneLodLayer::Terrain`, `OutdoorBuildings`, `OutdoorExplicitObjects`, and `OutdoorGeneratedScenery` with enough typed data for the frontend host contract and later resolver fanout.
+- Preserve current terrain/building/static object facts where the old route is still the parity reference.
+- Keep explicit-object and generated-scenery domains separate in emitted layer records.
+
+Acceptance criteria:
+
+- Level `0` emits only terrain layer output.
+- Level `1` emits terrain plus outdoor building layer output.
+- Level `2` emits terrain, buildings, and explicit outdoor object output.
+- Level `3` emits terrain, buildings, explicit outdoor objects, and generated scenery.
+- Level `3` preserves current generated scenery identities/placements relative to `landblock-outdoor`.
+
+Task checklist:
+
+- [ ] Replace skeleton outdoor layer variants with typed layer payload structs.
+- [ ] Add terrain/building/explicit-object/generated-scenery projection tests.
 - [ ] Add generated scenery parity tests against the current full route.
-- [ ] Add env-cell preservation tests for LoD `4`.
+- [ ] Confirm emitted layer discriminants still match Phase 0 names.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 2C: LoD 4 Env-Cell Source Projection
+
+Status: pending.
+
+Goal: make LoD `4` carry env-cell source facts in the new payload without yet deleting the old env-cell route or runtime assembly store.
+
+Deliverables:
+
+- Populate `LandblockSceneLodLayer::EnvCellSystem` from the gated LoD `4` source path.
+- Preserve env-cell structure, portals, visibility, static seeds, geometry facts, diagnostics, and source provenance needed by the later self-contained env-cell cutover.
+- Identify any facts still only available through the old `landblock-env-cells` route and record them as Phase 10 blockers or pull them forward immediately if they block LoD `4` projection.
+
+Acceptance criteria:
+
+- Level `4` emits level `3` output plus env-cell system source output.
+- Env-cell projection tests cover structure, portals, visibility, static seeds, geometry facts, and diagnostics.
+- No lower LoD level derives env-cell system output.
+
+Task checklist:
+
+- [ ] Add env-cell system layer payload structs.
+- [ ] Add LoD `4` env-cell preservation tests.
+- [ ] Record any remaining env-cell cutover debt under Phase 10 or move it earlier if it blocks the new route.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 2D: Prepared LoD Cache
+
+Status: pending.
+
+Goal: add the prepared source cache after source semantics are stable, with no extra key dimensions for requested output layers.
+
+Deliverables:
+
+- Add a prepared LoD cache owned by `ContentAssetService` with 256 normalized landblock slots.
+- Store the highest prepared LoD per normalized landblock and compatible scene context only when context changes emitted source semantics.
+- Ensure higher-LoD preparation extends cached lower-LoD state where possible.
+- Ensure concurrent identical or compatible LoD requests dedupe through the existing `ContentAssetRuntime` in-flight request behavior plus the prepared LoD cache.
+
+Acceptance criteria:
+
+- Cache tests prove lower/equal requests project from cached higher state.
+- Cache tests prove higher requests extend lower cached state instead of recomputing lower source families.
+- Concurrency/reuse tests prove compatible requests do not duplicate source preparation.
+- Requested output layers are excluded from cache identity.
+
+Task checklist:
+
 - [ ] Add the `ContentAssetService` prepared LoD cache and cache reuse tests.
 - [ ] Add a concurrency/reuse test proving in-flight and prepared-cache behavior do not duplicate source preparation for compatible requests.
 - [ ] Confirm the cache key excludes requested output layers.
+- [ ] Record any cache eviction or invalidation debt discovered during implementation.
 
 Decisions and course corrections:
 

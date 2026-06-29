@@ -105,7 +105,7 @@ export class DynamicEntityController {
 
 	ingestStaticSeeds(
 		records: readonly StaticAuthoredDynamicSeedRecord[],
-		textureBatchIdsByStaticSourceScope: ReadonlyMap<string, string> = new Map(),
+		textureBatchIdsByStaticLayerOwner: ReadonlyMap<string, string> = new Map(),
 	): void {
 		for (const record of records) {
 			if (
@@ -116,7 +116,7 @@ export class DynamicEntityController {
 			}
 			const entityRecord = createDynamicEntityRecord(
 				record,
-				textureBatchIdsByStaticSourceScope,
+				textureBatchIdsByStaticLayerOwner,
 			);
 			this.#store.upsert(entityRecord);
 			this.#trackRecordResources(entityRecord);
@@ -124,7 +124,7 @@ export class DynamicEntityController {
 	}
 
 	retainLayerOwners(layerOwners: readonly LayerOwnerKey[]): void {
-		const removed = this.#store.retainStaticSourceScopeKeys(
+		const removed = this.#store.retainStaticLayerOwnerIds(
 			new Set(layerOwners.map(createLayerOwnerKeyId)),
 		);
 		for (const record of removed) {
@@ -324,9 +324,9 @@ function createDynamicEntityRecord(
 				| "outdoor-static-object-dynamic-seed";
 		}
 	>,
-	textureBatchIdsByStaticSourceScope: ReadonlyMap<string, string>,
+	textureBatchIdsByStaticLayerOwner: ReadonlyMap<string, string>,
 ): DynamicEntityRecord {
-	const sourceScopeKey = createSourceScopeKey(record.owner);
+	const layerOwnerId = createStaticLayerOwnerId(record.owner);
 	const sourceResidence =
 		record.kind === "env-cell-static-object-dynamic-seed"
 			? {
@@ -338,16 +338,16 @@ function createDynamicEntityRecord(
 					kind: "outdoor-landblock" as const,
 					landblockId: record.seed.sourceResidence.landblockId,
 				};
-	const id = createDynamicEntityId(record, sourceScopeKey);
+	const id = createDynamicEntityId(record, layerOwnerId);
 	const presentation = createStaticAuthoredPresentation({
 		id,
+		layerOwnerId,
 		record,
 		sourceResidence,
-		sourceScopeKey,
 		textureBatchId:
-			textureBatchIdsByStaticSourceScope.get(
+			textureBatchIdsByStaticLayerOwner.get(
 				createStaticTextureBatchLookupKey(record.owner),
-			) ?? `dynamic:${sourceScopeKey}`,
+			) ?? `dynamic:${layerOwnerId}`,
 	});
 	const resourceState = createInitialPendingResourceState(presentation);
 
@@ -374,8 +374,8 @@ function createDynamicEntityRecord(
 				record.kind === "env-cell-static-object-dynamic-seed"
 					? "static-authored-env-cell"
 					: "static-authored-outdoor",
+			layerOwnerId,
 			owner: record.owner,
-			sourceScopeKey,
 		},
 		renderability: {
 			reasons: ["resources-pending"],
@@ -475,6 +475,7 @@ function createInitialAnimationState(options: {
 
 function createStaticAuthoredPresentation(options: {
 	readonly id: DynamicEntityId;
+	readonly layerOwnerId: string;
 	readonly record: Extract<
 		StaticAuthoredDynamicSeedRecord,
 		{
@@ -484,11 +485,9 @@ function createStaticAuthoredPresentation(options: {
 		}
 	>;
 	readonly sourceResidence: DynamicEntityResidence;
-	readonly sourceScopeKey: string;
 	readonly textureBatchId: string;
 }): DynamicEntityPresentation {
-	const { id, record, sourceResidence, sourceScopeKey, textureBatchId } =
-		options;
+	const { id, layerOwnerId, record, sourceResidence, textureBatchId } = options;
 	const animationSelection = {
 		animationId: record.seed.defaultAnimationId,
 		kind: "explicit" as const,
@@ -497,8 +496,8 @@ function createStaticAuthoredPresentation(options: {
 	return {
 		diagnostics: {
 			kind: "static-authored",
+			layerOwnerId,
 			owner: record.owner,
-			sourceScopeKey,
 		},
 		policy: {
 			diagnosticsBucket: "static-authored-dynamic",
@@ -519,8 +518,8 @@ function createStaticAuthoredPresentation(options: {
 			},
 			resourceFamily: "static-authored-dynamic-object-material",
 			retentionPolicy: {
-				kind: "static-source-scope",
-				sourceScopeKey,
+				kind: "static-layer-owner",
+				layerOwnerId,
 			},
 			textureBatchId,
 			textureDomain: createStaticAuthoredTextureDomain(record.owner),
@@ -822,13 +821,13 @@ function createDynamicEntityId(
 				| "outdoor-static-object-dynamic-seed";
 		}
 	>,
-	sourceScopeKey: string,
+	layerOwnerId: string,
 ): DynamicEntityId {
 	if (record.kind === "env-cell-static-object-dynamic-seed") {
 		const seed = record.seed;
 		return [
 			"static-authored-env-cell",
-			sourceScopeKey,
+			layerOwnerId,
 			`env-cell:${formatHex32(seed.envCellId)}`,
 			`object:${seed.object.objectKind}:${seed.object.instanceId}`,
 			`setup:${formatHex32(seed.setupModelId)}`,
@@ -838,13 +837,13 @@ function createDynamicEntityId(
 	const seed: StaticAuthoredDynamicSeedFacts = record.seed;
 	return [
 		"static-authored-outdoor",
-		sourceScopeKey,
+		layerOwnerId,
 		`object:${seed.object.objectKind}:${seed.object.instanceId}`,
 		`setup:${formatHex32(seed.setupModelId)}`,
 	].join(":");
 }
 
-function createSourceScopeKey(owner: StaticLayerPeerRecordOwner): string {
+function createStaticLayerOwnerId(owner: StaticLayerPeerRecordOwner): string {
 	return owner.ownerId;
 }
 

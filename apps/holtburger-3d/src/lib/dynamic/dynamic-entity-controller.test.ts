@@ -60,7 +60,7 @@ describe("dynamic entity controller", () => {
 		expect(controller.createSnapshot().records[0]?.presentation).toMatchObject({
 			diagnostics: {
 				kind: "static-authored",
-				sourceScopeKey: "outdoor-buildings:0xda55ffff",
+				layerOwnerId: "outdoor-buildings:0xda55ffff",
 			},
 			policy: {
 				diagnosticsBucket: "static-authored-dynamic",
@@ -84,8 +84,8 @@ describe("dynamic entity controller", () => {
 				},
 				resourceFamily: "static-authored-dynamic-object-material",
 				retentionPolicy: {
-					kind: "static-source-scope",
-					sourceScopeKey: "outdoor-buildings:0xda55ffff",
+					kind: "static-layer-owner",
+					layerOwnerId: "outdoor-buildings:0xda55ffff",
 				},
 				textureBatchId: "static-batch:outdoor-buildings",
 				textureDomain: "outdoor-buildings",
@@ -154,7 +154,7 @@ describe("dynamic entity controller", () => {
 			id: "static-authored-env-cell:env-cell-system:0xda55ffff:env-cell:da550100:object:building:seed-0:setup:020003e5",
 			provenance: {
 				kind: "static-authored-env-cell",
-				sourceScopeKey: "env-cell-system:0xda55ffff",
+				layerOwnerId: "env-cell-system:0xda55ffff",
 			},
 			presentation: {
 				policy: {

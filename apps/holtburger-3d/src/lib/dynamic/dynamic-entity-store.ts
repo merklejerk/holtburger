@@ -41,8 +41,8 @@ export class DynamicEntityStore {
 		return record;
 	}
 
-	retainStaticSourceScopeKeys(
-		retainedScopeKeys: ReadonlySet<string>,
+	retainStaticLayerOwnerIds(
+		retainedLayerOwnerIds: ReadonlySet<string>,
 	): readonly DynamicEntityRecord[] {
 		const removed: DynamicEntityRecord[] = [];
 		for (const [id, record] of this.#recordsById) {
@@ -50,7 +50,7 @@ export class DynamicEntityStore {
 			if (retentionPolicy.kind === "explicit-runtime-lifetime") {
 				continue;
 			}
-			if (!retainedScopeKeys.has(retentionPolicy.sourceScopeKey)) {
+			if (!retainedLayerOwnerIds.has(retentionPolicy.layerOwnerId)) {
 				removed.push(record);
 				this.#recordsById.delete(id);
 			}

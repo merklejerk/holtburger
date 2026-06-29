@@ -101,8 +101,8 @@ type DynamicDiagnosticsBucket =
 
 type DynamicRetentionPolicy =
 	| {
-			readonly kind: "static-source-scope";
-			readonly sourceScopeKey: string;
+			readonly kind: "static-layer-owner";
+			readonly layerOwnerId: string;
 	  }
 	| {
 			readonly kind: "explicit-runtime-lifetime";
@@ -190,8 +190,8 @@ export interface DynamicVisualMaterialSlotIdentity {
 type DynamicDiagnosticContext =
 	| {
 			readonly kind: "static-authored";
+			readonly layerOwnerId: string;
 			readonly owner: StaticLayerPeerRecordOwner;
-			readonly sourceScopeKey: string;
 	  }
 	| {
 			readonly kind: "runtime-spawn";
@@ -202,8 +202,8 @@ type DynamicDiagnosticContext =
 type DynamicEntityProvenance =
 	| {
 			readonly kind: "static-authored-env-cell" | "static-authored-outdoor";
+			readonly layerOwnerId: string;
 			readonly owner: StaticLayerPeerRecordOwner;
-			readonly sourceScopeKey: string;
 	  }
 	| {
 			/** Browser/runtime-authored entity shaped like future server-authored spawns. */

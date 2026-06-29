@@ -815,7 +815,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	readonly #envCellSystemLayerAssembly = new EnvCellSystemLayerAssemblyStore();
 	readonly #staticLayersByKey = new Map<string, StaticLandblockLayerPayload>();
 	readonly #staticLayerKeyByResourceId = new Map<string, string>();
-	readonly #textureBatchIdByStaticSourceScope = new Map<string, string>();
+	readonly #textureBatchIdByStaticLayerOwner = new Map<string, string>();
 	#envCellResourceMembershipRevision = 0;
 	readonly #dynamicEntityController: DynamicEntityController;
 	readonly #committedDynamicVisualResourceIds = new Set<string>();
@@ -1836,7 +1836,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		);
 		this.#dynamicEntityController.ingestStaticSeeds(
 			materialized.staticAuthoredDynamicSeeds,
-			this.#textureBatchIdByStaticSourceScope,
+			this.#textureBatchIdByStaticLayerOwner,
 		);
 		this.#enqueueDynamicRendererResourceSync();
 		this.#updateRenderPassPlan();
@@ -1946,8 +1946,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 		seeds: readonly StaticAuthoredDynamicSeedRecord[],
 	): void {
 		for (const seed of seeds) {
-			this.#textureBatchIdByStaticSourceScope.set(
-				createStaticSourceScopeTextureBatchLookupKey(
+			this.#textureBatchIdByStaticLayerOwner.set(
+				createStaticLayerOwnerTextureBatchLookupKey(
 					seed.owner.domain,
 					seed.owner.ownerId,
 				),
@@ -4223,11 +4223,11 @@ function createDynamicRendererInstanceId(
 	return `dynamic-instance:${record.id}`;
 }
 
-function createStaticSourceScopeTextureBatchLookupKey(
+function createStaticLayerOwnerTextureBatchLookupKey(
 	domain: string,
-	scopeKey: string,
+	layerOwnerId: string,
 ): string {
-	return `${domain}:${scopeKey}`;
+	return `${domain}:${layerOwnerId}`;
 }
 
 function createPortalFrameWorkPlanDiagnostics(plan: PortalFrameWorkPlan) {

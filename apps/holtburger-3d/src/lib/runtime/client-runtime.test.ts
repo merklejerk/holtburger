@@ -1024,7 +1024,7 @@ describe("browser client runtime", () => {
 			id: "static-authored-env-cell:env-cell-system:0xda55ffff:env-cell:da550100:object:building:env-cell-static-0:setup:020003e5",
 			provenance: {
 				kind: "static-authored-env-cell",
-				sourceScopeKey: "env-cell-system:0xda55ffff",
+				layerOwnerId: "env-cell-system:0xda55ffff",
 			},
 			renderability: {
 				reasons: [],

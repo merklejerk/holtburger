@@ -4,7 +4,8 @@ mod contracts;
 use adapter::HostRuntimeService;
 use contracts::{
     AssetLookupBatchRequestDto, AssetLookupRequestDto, AssetLookupResponseDto, DebugConfigDto,
-    RuntimeAppearanceRequestDto,
+    ResolveWeenieSpawnSeedRequestDto, RuntimeAppearanceRequestDto, WeenieLookupCapabilityDto,
+    WeenieSpawnSeedDto,
 };
 
 #[tauri::command]
@@ -38,6 +39,25 @@ fn get_debug_config(runtime: tauri::State<'_, HostRuntimeService>) -> DebugConfi
 }
 
 #[tauri::command]
+fn get_weenie_lookup_capability(
+    runtime: tauri::State<'_, HostRuntimeService>,
+) -> WeenieLookupCapabilityDto {
+    runtime.weenie_lookup_capability()
+}
+
+#[tauri::command]
+async fn resolve_weenie_spawn_seed(
+    runtime: tauri::State<'_, HostRuntimeService>,
+    request: ResolveWeenieSpawnSeedRequestDto,
+) -> Result<Option<WeenieSpawnSeedDto>, String> {
+    let runtime = runtime.inner().clone();
+    runtime
+        .resolve_weenie_spawn_seed(request)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn resolve_runtime_appearance(
     runtime: tauri::State<'_, HostRuntimeService>,
     request: RuntimeAppearanceRequestDto,
@@ -63,6 +83,8 @@ fn main() {
             lookup_asset,
             lookup_assets_binary,
             get_debug_config,
+            get_weenie_lookup_capability,
+            resolve_weenie_spawn_seed,
             resolve_runtime_appearance,
         ])
         .run(tauri::generate_context!())

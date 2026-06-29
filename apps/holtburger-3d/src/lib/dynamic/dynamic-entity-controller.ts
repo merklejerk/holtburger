@@ -10,6 +10,7 @@ import {
 	createStaticScopeOwnerKey,
 	type DynamicEntityCurrentBounds,
 	type DynamicEntityAnimationSelection,
+	type DynamicEntityAppearanceOverride,
 	isEnvCellDynamicSeedRecord,
 	isOutdoorDynamicSeedRecord,
 	RUNTIME_AUTHORED_DYNAMIC_DETAIL_ROLE_POLICY,
@@ -67,6 +68,7 @@ export interface DynamicEntityTickOptions {
 export interface RuntimeDynamicSpawnRequest {
 	readonly animationSelection?: DynamicEntityAnimationSelection;
 	readonly baseLocalPlacement: DynamicEntityTransformState["baseLocalPlacement"];
+	readonly modelData?: DynamicEntityAppearanceOverride | null;
 	readonly serverInstanceIdMetadata?: DynamicEntityServerInstanceMetadata | null;
 	readonly setupModelId: number;
 	readonly sourceResidence: DynamicEntityResidence;
@@ -362,7 +364,7 @@ function createRuntimeDynamicEntityRecord(
 	const source = {
 		animationSelection,
 		kind: "runtime-spawn" as const,
-		modelData: null,
+		modelData: request.modelData ?? null,
 		runtimeEntityId: id,
 		serverInstanceIdMetadata: request.serverInstanceIdMetadata ?? null,
 		setupModelId: request.setupModelId,

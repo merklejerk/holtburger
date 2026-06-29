@@ -1,5 +1,8 @@
 import type { RuntimeDynamicSpawnRequest } from "../dynamic/dynamic-entity-controller";
-import type { DynamicEntityResidence } from "../dynamic/contracts";
+import type {
+	DynamicEntityAppearanceOverride,
+	DynamicEntityResidence,
+} from "../dynamic/contracts";
 import { FIRST_RUNTIME_SPAWN_FIXTURE } from "../runtime/runtime-spawn-fixtures";
 import type { WeenieSpawnSeed } from "./weenie-spawn-seed-resolver";
 
@@ -11,6 +14,8 @@ export interface BrowserSpawnFormState {
 	readonly label: string;
 	/** Optional WCID seed lookup input. It never creates a spawn directly. */
 	readonly weenieClassId: string;
+	/** Hidden ObjDesc-shaped appearance facts populated by WCID lookup when available. */
+	readonly modelData: DynamicEntityAppearanceOverride | null;
 	/** Required setup model id, accepted as decimal or `0x` hex. */
 	readonly setupModelId: string;
 	/** Optional server-authored correlation id kept separate from runtime entity id. */
@@ -80,6 +85,7 @@ export function createDefaultBrowserSpawnFormState(): BrowserSpawnFormState {
 		envCellId: formatHex32(DEFAULT_RUNTIME_SPAWN_ENV_CELL_ID),
 		label: FIRST_RUNTIME_SPAWN_FIXTURE.label,
 		landblockId: formatHex32(DEFAULT_RUNTIME_SPAWN_LANDBLOCK_ID),
+		modelData: null,
 		originX: "0",
 		originY: "0",
 		originZ: "0",
@@ -101,6 +107,10 @@ export function applyWeenieSpawnSeedToForm(
 	return {
 		...form,
 		label: seed.label,
+		modelData: seed.appearance ?? null,
+		scaleX: seed.defaultScale == null ? form.scaleX : String(seed.defaultScale),
+		scaleY: seed.defaultScale == null ? form.scaleY : String(seed.defaultScale),
+		scaleZ: seed.defaultScale == null ? form.scaleZ : String(seed.defaultScale),
 		setupModelId: formatHex32(seed.setupModelId),
 		weenieClassId: String(seed.weenieClassId),
 	};
@@ -178,6 +188,7 @@ export function validateBrowserSpawnForm(
 				z: originZ as number,
 			},
 		},
+		modelData: form.modelData,
 		serverInstanceIdMetadata: createServerInstanceMetadata(
 			form.serverInstanceId,
 		),

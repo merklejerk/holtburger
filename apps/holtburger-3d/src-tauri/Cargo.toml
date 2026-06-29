@@ -21,6 +21,7 @@ holtburger-content.workspace = true
 holtburger-core.workspace = true
 holtburger-dat.workspace = true
 holtburger-world.workspace = true
+mysql = "28.0.0"
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2", features = [] }

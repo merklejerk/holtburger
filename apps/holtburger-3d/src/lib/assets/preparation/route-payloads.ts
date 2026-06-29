@@ -93,6 +93,11 @@ const V2_PAYLOAD_PARSERS: readonly RoutePayloadParser<V2PreparedAssetPayload>[] 
 			schema: setupAppearancePayloadDtoSchema,
 		},
 		{
+			expectedKind: "setup-appearance",
+			route: /^runtime-setup-appearance\/[0-9a-fA-F]{8}\/[0-9a-fA-F]+$/,
+			schema: setupAppearancePayloadDtoSchema,
+		},
+		{
 			expectedKind: "material-recipe",
 			route: /^material\/[0-9a-fA-F]{8}$/,
 			schema: materialRecipePayloadDtoSchema,

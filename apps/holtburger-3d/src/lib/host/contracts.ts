@@ -63,6 +63,84 @@ export type AssetLookupResponseDto = z.infer<
 	typeof assetLookupResponseDtoSchema
 >;
 
+export const weenieLookupCapabilityDtoSchema = z.object({
+	available: z.boolean(),
+	reason: z.string().nullable(),
+});
+export type WeenieLookupCapabilityDto = z.infer<
+	typeof weenieLookupCapabilityDtoSchema
+>;
+
+export interface ResolveWeenieSpawnSeedRequestDto {
+	weenieClassId: number;
+}
+
+const runtimeAppearanceSubPaletteDtoSchema = z.object({
+	subId: z.number().int().nonnegative(),
+	offset: z.number().int().nonnegative(),
+	numColors: z.number().int().nonnegative(),
+});
+
+const runtimeAppearanceTextureChangeDtoSchema = z.object({
+	partIndex: z.number().int().nonnegative(),
+	oldTexture: z.number().int().nonnegative(),
+	newTexture: z.number().int().nonnegative(),
+});
+
+const runtimeAppearanceAnimPartChangeDtoSchema = z.object({
+	partIndex: z.number().int().nonnegative(),
+	partId: z.number().int().nonnegative(),
+});
+
+const runtimeAppearanceObjDescDtoSchema = z.object({
+	paletteId: z.number().int().nonnegative().nullable(),
+	subPalettes: z.array(runtimeAppearanceSubPaletteDtoSchema),
+	textureChanges: z.array(runtimeAppearanceTextureChangeDtoSchema),
+	animPartChanges: z.array(runtimeAppearanceAnimPartChangeDtoSchema),
+});
+const nullableNonnegativeIntSchema = z.number().int().nonnegative().nullable();
+const nullableIntSchema = z.number().int().nullable();
+const nullableFiniteNumberSchema = z.number().finite().nullable();
+
+export const weenieSpawnSeedDtoSchema = z.object({
+	weenieClassId: z.number().int().nonnegative(),
+	className: z.string().min(1),
+	label: z.string().min(1),
+	longDescription: z.string().nullable(),
+	weenieType: z.number().int(),
+	sourceDids: z.object({
+		combatTableId: nullableNonnegativeIntSchema,
+		clothingBaseId: nullableNonnegativeIntSchema,
+		defaultEyesTextureId: nullableNonnegativeIntSchema,
+		defaultMouthTextureId: nullableNonnegativeIntSchema,
+		defaultNoseTextureId: nullableNonnegativeIntSchema,
+		eyesPaletteId: nullableNonnegativeIntSchema,
+		eyesTextureId: nullableNonnegativeIntSchema,
+		hairPaletteId: nullableNonnegativeIntSchema,
+		headObjectId: nullableNonnegativeIntSchema,
+		iconId: nullableNonnegativeIntSchema,
+		motionTableId: nullableNonnegativeIntSchema,
+		mouthTextureId: nullableNonnegativeIntSchema,
+		noseTextureId: nullableNonnegativeIntSchema,
+		paletteBaseId: nullableNonnegativeIntSchema,
+		physicsEffectTableId: nullableNonnegativeIntSchema,
+		setupModelId: z.number().int().nonnegative(),
+		skinPaletteId: nullableNonnegativeIntSchema,
+		soundTableId: nullableNonnegativeIntSchema,
+	}),
+	sourceInts: z.object({
+		creatureType: nullableIntSchema,
+		gender: nullableIntSchema,
+		itemType: nullableIntSchema,
+		materialType: nullableIntSchema,
+		paletteTemplate: nullableIntSchema,
+	}),
+	defaultScale: nullableFiniteNumberSchema,
+	shade: nullableFiniteNumberSchema,
+	appearance: runtimeAppearanceObjDescDtoSchema,
+});
+export type WeenieSpawnSeedDto = z.infer<typeof weenieSpawnSeedDtoSchema>;
+
 const assetProvenanceDtoSchema = z.object({
 	source: assetProvenanceSourceValueSchema,
 	sourceAssetKind: z.string().nullable(),

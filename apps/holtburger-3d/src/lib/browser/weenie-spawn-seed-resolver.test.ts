@@ -6,22 +6,22 @@ import {
 } from "./weenie-spawn-seed-resolver";
 
 describe("weenie spawn seed resolver", () => {
-	it("resolves the first ACE-backed fake fixture by WCID", () => {
+	it("resolves the first ACE-backed fake fixture by WCID", async () => {
 		const resolver = createInMemoryWeenieSpawnSeedResolver();
 
-		expect(resolver.resolve(FIRST_RUNTIME_SPAWN_FIXTURE.weenieClassId)).toEqual(
-			{
-				label: FIRST_RUNTIME_SPAWN_FIXTURE.label,
-				setupModelId: FIRST_RUNTIME_SPAWN_FIXTURE.setupModelId,
-				weenieClassId: FIRST_RUNTIME_SPAWN_FIXTURE.weenieClassId,
-			},
-		);
+		await expect(
+			resolver.resolve(FIRST_RUNTIME_SPAWN_FIXTURE.weenieClassId),
+		).resolves.toEqual({
+			label: FIRST_RUNTIME_SPAWN_FIXTURE.label,
+			setupModelId: FIRST_RUNTIME_SPAWN_FIXTURE.setupModelId,
+			weenieClassId: FIRST_RUNTIME_SPAWN_FIXTURE.weenieClassId,
+		});
 		expect(DEFAULT_WEENIE_SPAWN_SEEDS).toHaveLength(1);
 	});
 
-	it("returns no result for unknown WCIDs", () => {
+	it("returns no result for unknown WCIDs", async () => {
 		const resolver = createInMemoryWeenieSpawnSeedResolver();
 
-		expect(resolver.resolve(999_999)).toBeNull();
+		await expect(resolver.resolve(999_999)).resolves.toBeNull();
 	});
 });

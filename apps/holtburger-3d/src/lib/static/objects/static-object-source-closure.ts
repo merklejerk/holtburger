@@ -90,11 +90,13 @@ interface StaticObjectMaterialSlotInput {
 export async function resolveStaticObjectSourceClosure(options: {
 	readonly assetService: PreparedAssetReader;
 	readonly sourceAssetIds: readonly string[];
+	readonly setupAppearanceHostKeys?: ReadonlyMap<number, HostAssetKey>;
 }): Promise<StaticObjectSourceClosure> {
 	const closure = await resolveStaticObjectAndMaterialSourceClosure({
 		assetService: options.assetService,
 		materialIds: [],
 		sourceAssetIds: options.sourceAssetIds,
+		setupAppearanceHostKeys: options.setupAppearanceHostKeys,
 	});
 
 	return closure;
@@ -104,6 +106,7 @@ export async function resolveStaticObjectAndMaterialSourceClosure(options: {
 	readonly assetService: PreparedAssetReader;
 	readonly sourceAssetIds: readonly string[];
 	readonly materialIds: readonly number[];
+	readonly setupAppearanceHostKeys?: ReadonlyMap<number, HostAssetKey>;
 }): Promise<StaticObjectSourceClosure> {
 	const accumulator = createStaticSourceClosureAccumulator();
 
@@ -126,6 +129,7 @@ export async function resolveStaticObjectAndMaterialSourceClosure(options: {
 				materialSources: accumulator.materialSources,
 				missingRefs: accumulator.missingRefs,
 				paletteSources: accumulator.paletteSources,
+				setupAppearanceHostKeys: options.setupAppearanceHostKeys,
 				source,
 				textureRefs: accumulator.textureRefs,
 			});
@@ -196,6 +200,7 @@ export async function resolveStaticObjectSurfaceTextureRef(options: {
 	readonly selectedRenderSurfaceId: number | null;
 	readonly palette: PaletteIdentity | null;
 	readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
+	readonly setupAppearanceHostKeys?: ReadonlyMap<number, HostAssetKey>;
 	readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
 	readonly missingRefs: StaticResourceIdentity[];
 }): Promise<number> {
@@ -283,6 +288,7 @@ async function createSourceAssetFacts(options: {
 	readonly source: LoadedPayload<"gfx-obj" | "setup-model">;
 	readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
 	readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
+	readonly setupAppearanceHostKeys?: ReadonlyMap<number, HostAssetKey>;
 	readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
 	readonly missingRefs: StaticResourceIdentity[];
 }): Promise<StaticObjectSourceAssetFacts> {
@@ -304,6 +310,10 @@ async function createSourceAssetFacts(options: {
 					missingRefs: options.missingRefs,
 					paletteSources: options.paletteSources,
 					setupModel: options.source.payload,
+					setupAppearanceHostKey:
+						options.setupAppearanceHostKeys?.get(
+							options.source.payload.setupModelId,
+						) ?? null,
 					source: options.identity,
 					textureRefs: options.textureRefs,
 				});
@@ -358,6 +368,7 @@ async function createSetupModelParts(options: {
 	readonly assetService: PreparedAssetReader;
 	readonly source: StaticObjectSourceIdentity;
 	readonly setupModel: SetupModelPayloadDto;
+	readonly setupAppearanceHostKey: HostAssetKey | null;
 	readonly materialSources: Map<string, StaticObjectMaterialSourceFacts>;
 	readonly paletteSources: Map<string, StaticObjectPaletteSourceFacts>;
 	readonly textureRefs: Map<string, StaticObjectTextureRefFacts>;
@@ -366,6 +377,7 @@ async function createSetupModelParts(options: {
 	const setupAppearance = await tryLoadSetupAppearance(
 		options.assetService,
 		options.setupModel.setupModelId,
+		options.setupAppearanceHostKey,
 		options.missingRefs,
 	);
 	const parts = setupAppearance?.payload.parts ?? options.setupModel.parts;
@@ -713,6 +725,7 @@ async function loadPaletteViews(
 async function tryLoadSetupAppearance(
 	assetService: PreparedAssetReader,
 	setupModelId: number,
+	setupAppearanceHostKey: HostAssetKey | null,
 	missingRefs: StaticResourceIdentity[],
 ): Promise<LoadedPayload<"setup-appearance"> | null> {
 	const identity: StaticObjectSourceIdentity = {
@@ -723,7 +736,7 @@ async function tryLoadSetupAppearance(
 	try {
 		return await loadPayload(
 			assetService,
-			createHostAssetKey("setup-appearance", setupModelId),
+			setupAppearanceHostKey ?? createHostAssetKey("setup-appearance", setupModelId),
 			"setup-appearance",
 		);
 	} catch {

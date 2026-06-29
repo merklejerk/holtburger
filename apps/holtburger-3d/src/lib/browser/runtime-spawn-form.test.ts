@@ -93,6 +93,60 @@ describe("browser runtime spawn form", () => {
 		});
 	});
 
+	it("preserves resolved appearance facts and default scale as hidden spawn request inputs", () => {
+		const seededForm = applyWeenieSpawnSeedToForm(
+			createDefaultBrowserSpawnFormState(),
+			{
+				appearance: {
+					animPartChanges: [{ partId: 0x01001234, partIndex: 16 }],
+					paletteId: 0x04000001,
+					subPalettes: [{ numColors: 24, offset: 0, subId: 0x04000101 }],
+					textureChanges: [
+						{
+							newTexture: 0x05002222,
+							oldTexture: 0x05001111,
+							partIndex: 16,
+						},
+					],
+				},
+				defaultScale: 3,
+				label: "Xiao Hong the Barkeeper",
+				setupModelId: 0x0200004e,
+				weenieClassId: 42810,
+			},
+		);
+
+		expect(seededForm).toMatchObject({
+			label: "Xiao Hong the Barkeeper",
+			scaleX: "3",
+			scaleY: "3",
+			scaleZ: "3",
+			setupModelId: "0x0200004e",
+			weenieClassId: "42810",
+		});
+
+		const result = validateBrowserSpawnForm(seededForm);
+
+		expect(result).toMatchObject({
+			kind: "accepted",
+			request: {
+				modelData: {
+					animPartChanges: [{ partId: 0x01001234, partIndex: 16 }],
+					paletteId: 0x04000001,
+					subPalettes: [{ numColors: 24, offset: 0, subId: 0x04000101 }],
+					textureChanges: [
+						{
+							newTexture: 0x05002222,
+							oldTexture: 0x05001111,
+							partIndex: 16,
+						},
+					],
+				},
+				sourceScale: { x: 3, y: 3, z: 3 },
+			},
+		});
+	});
+
 	it("turns env-cell residence inputs into env-cell runtime spawn requests", () => {
 		const result = validateBrowserSpawnForm({
 			...createDefaultBrowserSpawnFormState(),

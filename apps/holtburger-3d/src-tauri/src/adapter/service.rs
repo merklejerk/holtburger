@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::adapter::ace_world_sql::AceWorldSqlResolver;
 use crate::adapter::binary::*;
 use crate::adapter::ids::*;
 use crate::adapter::json::*;
@@ -8,6 +9,7 @@ use crate::adapter::prepared_texture::{
     PreparedTexturePayload, PreparedTextureRequest, parse_prepared_texture_asset_id,
     prepare_texture,
 };
+use anyhow::Context;
 use holtburger_content::{ContentDecodeCache, ContentRepository, MaterialAppearanceInput};
 use holtburger_core::{
     ContentAsset, ContentAssetRequest, ContentAssetRuntime, ContentAssetService,
@@ -18,7 +20,8 @@ use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 
 use crate::contracts::{
     AssetLookupRequestDto, AssetLookupResponseDto, AssetPayloadKindDto, DebugConfigDto,
-    RuntimeAppearanceObjDescDto, RuntimeAppearanceRequestDto,
+    ResolveWeenieSpawnSeedRequestDto, RuntimeAppearanceObjDescDto, RuntimeAppearanceRequestDto,
+    WeenieLookupCapabilityDto, WeenieSpawnSeedDto,
 };
 use tokio::sync::Semaphore;
 
@@ -28,6 +31,7 @@ pub const ASSET_BINARY_HEADER_LEN: usize = 16;
 const DEFAULT_PREPARED_TEXTURE_WORKERS: usize = 3;
 
 pub struct HostBoundaryAdapter {
+    ace_world_sql: AceWorldSqlResolver,
     content: Arc<ContentRepository>,
     content_asset_runtime: ContentAssetRuntime,
     prepared_texture_worker_slots: Arc<Semaphore>,
@@ -64,6 +68,22 @@ impl HostRuntimeService {
         request: RuntimeAppearanceRequestDto,
     ) -> anyhow::Result<serde_json::Value> {
         self.adapter.resolve_runtime_appearance(request).await
+    }
+
+    pub fn weenie_lookup_capability(&self) -> WeenieLookupCapabilityDto {
+        self.adapter.ace_world_sql.capability()
+    }
+
+    pub async fn resolve_weenie_spawn_seed(
+        &self,
+        request: ResolveWeenieSpawnSeedRequestDto,
+    ) -> anyhow::Result<Option<WeenieSpawnSeedDto>> {
+        let resolver = self.adapter.ace_world_sql.clone();
+        tokio::task::spawn_blocking(move || {
+            resolver.resolve_weenie_spawn_seed_blocking(request.weenie_class_id)
+        })
+        .await
+        .context("ACE world SQL lookup task failed")?
     }
 
     #[cfg(test)]
@@ -112,6 +132,52 @@ fn convert_runtime_appearance_obj_desc(dto: RuntimeAppearanceObjDescDto) -> ObjD
     }
 }
 
+fn parse_runtime_setup_appearance_asset_id(
+    asset_id: &str,
+) -> anyhow::Result<Option<RuntimeAppearanceRequestDto>> {
+    let Some(rest) = asset_id.strip_prefix("runtime-setup-appearance/") else {
+        return Ok(None);
+    };
+    let mut parts = rest.split('/');
+    let setup_hex = parts
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("runtime setup appearance route missing setup id"))?;
+    let request_hex = parts
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("runtime setup appearance route missing request payload"))?;
+    if parts.next().is_some() {
+        anyhow::bail!("runtime setup appearance route has too many path segments");
+    }
+    if setup_hex.len() != 8 || !setup_hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        anyhow::bail!("runtime setup appearance route setup id must be hex32");
+    }
+    let setup_model_id = u32::from_str_radix(setup_hex, 16)
+        .with_context(|| format!("invalid runtime setup appearance setup id {setup_hex}"))?;
+    let request_bytes = decode_hex_bytes(request_hex)?;
+    let request: RuntimeAppearanceRequestDto = serde_json::from_slice(&request_bytes)
+        .context("failed to decode runtime setup appearance request JSON")?;
+    if request.setup_model_id != setup_model_id {
+        anyhow::bail!(
+            "runtime setup appearance route setup id 0x{setup_model_id:08X} did not match payload setup id 0x{:08X}",
+            request.setup_model_id
+        );
+    }
+    Ok(Some(request))
+}
+
+fn decode_hex_bytes(hex: &str) -> anyhow::Result<Vec<u8>> {
+    if hex.is_empty() || !hex.len().is_multiple_of(2) {
+        anyhow::bail!("hex payload must have a positive even length");
+    }
+    let mut bytes = Vec::with_capacity(hex.len() / 2);
+    for index in (0..hex.len()).step_by(2) {
+        let byte = u8::from_str_radix(&hex[index..index + 2], 16)
+            .with_context(|| format!("invalid hex byte at offset {index}"))?;
+        bytes.push(byte);
+    }
+    Ok(bytes)
+}
+
 impl HostBoundaryAdapter {
     pub fn new(verbose: bool) -> Self {
         let content = ContentRepository::from_hba_path(repo_assets_hba_path())
@@ -123,6 +189,7 @@ impl HostBoundaryAdapter {
             Arc::clone(&decode_cache),
         ));
         Self {
+            ace_world_sql: AceWorldSqlResolver::from_env(),
             content,
             content_asset_runtime,
             prepared_texture_worker_slots: Arc::new(Semaphore::new(
@@ -136,6 +203,16 @@ impl HostBoundaryAdapter {
         &self,
         request: AssetLookupRequestDto,
     ) -> anyhow::Result<AssetLookupResponseDto> {
+        if let Some(runtime_request) = parse_runtime_setup_appearance_asset_id(&request.asset_id)? {
+            let payload = self.resolve_runtime_appearance(runtime_request).await?;
+            return Ok(AssetLookupResponseDto {
+                request_id: request.request_id,
+                asset_id: request.asset_id,
+                payload_kind: AssetPayloadKindDto::Json,
+                payload,
+            });
+        }
+
         if let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id) {
             if let Some(message) =
                 binary_asset_lookup_required_message(&request.asset_id, &content_request)

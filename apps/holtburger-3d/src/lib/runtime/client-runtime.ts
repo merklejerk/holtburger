@@ -4070,7 +4070,8 @@ function createDynamicRendererInstances(
 }[] {
 	if (
 		record.resources.visual.status !== "ready" ||
-		!isDynamicRendererEligible(record)
+		!isDynamicRendererEligible(record) ||
+		record.effectiveResidence.kind === "no-residence"
 	) {
 		return [];
 	}

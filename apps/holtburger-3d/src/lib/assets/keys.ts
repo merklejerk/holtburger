@@ -38,6 +38,16 @@ export function createRawHostAssetKey(assetId: string): HostAssetKey {
 	};
 }
 
+export function createLandblockSceneLodHostAssetKey(
+	landblockId: number,
+	level: number,
+): HostAssetKey {
+	return createHostAssetKey(
+		"landblock-scene-lod",
+		`${formatHex32(normalizeOutdoorLandblockId(landblockId))}:${normalizeSceneLodLevel(level)}`,
+	);
+}
+
 export function describeHostAssetKey(key: HostAssetKey): string {
 	return `${key.kind}:${key.id}`;
 }
@@ -53,6 +63,11 @@ export function formatHostAssetId(key: HostAssetKey): string {
 
 	if (key.kind === "landblock-env-cells") {
 		return formatLandblockEnvCellsAssetId(parseHex32RouteId(key));
+	}
+
+	if (key.kind === "landblock-scene-lod") {
+		const { landblockId, level } = parseLandblockSceneLodRouteId(key);
+		return `landblock/${formatHex32(landblockId)}/lod/${level}`;
 	}
 
 	if (key.kind === "env-cell") {
@@ -78,6 +93,14 @@ export function parseHostAssetId(assetId: string): HostAssetKey {
 		return createHostAssetKey(
 			routeKind === "outdoor" ? "landblock-outdoor" : "landblock-env-cells",
 			Number.parseInt(landblockMatch[1] as string, 16),
+		);
+	}
+
+	const lodMatch = /^landblock\/([0-9a-fA-F]{8})\/lod\/([0-4])$/.exec(assetId);
+	if (lodMatch) {
+		return createLandblockSceneLodHostAssetKey(
+			Number.parseInt(lodMatch[1] as string, 16),
+			Number.parseInt(lodMatch[2] as string, 10),
 		);
 	}
 
@@ -123,6 +146,10 @@ function normalizeAssetKeyId(
 		return normalizeSetupAppearanceRouteId(id);
 	}
 
+	if (kind === "landblock-scene-lod" && typeof id === "string") {
+		return normalizeLandblockSceneLodRouteId(id);
+	}
+
 	if (typeof id !== "number") {
 		throw new Error(`${kind} route id must be numeric: ${id}`);
 	}
@@ -133,6 +160,10 @@ function normalizeAssetKeyId(
 
 	if (kind === "landblock-outdoor" || kind === "landblock-env-cells") {
 		return formatHex32(normalizeOutdoorLandblockId(id));
+	}
+
+	if (kind === "landblock-scene-lod") {
+		throw new Error("landblock-scene-lod route id requires landblock hex and LoD level.");
 	}
 
 	if (HEX32_ROUTE_KINDS.has(kind)) {
@@ -174,10 +205,46 @@ function normalizeSetupAppearanceRouteId(id: string): string {
 	return trimmed;
 }
 
+function normalizeLandblockSceneLodRouteId(id: string): string {
+	const trimmed = id.trim();
+	const match = /^([0-9a-fA-F]{8}):([0-4])$/.exec(trimmed);
+	if (!match) {
+		throw new Error(`landblock-scene-lod route id must be hex32:level with level 0..4: ${id}`);
+	}
+
+	return `${formatHex32(normalizeOutdoorLandblockId(Number.parseInt(match[1] as string, 16)))}:${match[2]}`;
+}
+
+function parseLandblockSceneLodRouteId(key: HostAssetKey): {
+	readonly landblockId: number;
+	readonly level: number;
+} {
+	const match = /^([0-9a-fA-F]{8}):([0-4])$/.exec(key.id);
+	if (!match) {
+		throw new Error(
+			`Host asset key ${describeHostAssetKey(key)} needs hex32:level id.`,
+		);
+	}
+
+	return {
+		landblockId: Number.parseInt(match[1] as string, 16) >>> 0,
+		level: Number.parseInt(match[2] as string, 10),
+	};
+}
+
+function normalizeSceneLodLevel(level: number): number {
+	if (!Number.isInteger(level) || level < 0 || level > 4) {
+		throw new Error(`landblock-scene-lod level must be an integer from 0 through 4: ${level}`);
+	}
+
+	return level;
+}
+
 function isKnownHostAssetKeyKind(kind: string): kind is HostAssetKeyKind {
 	return (
 		kind === "landblock-outdoor" ||
 		kind === "landblock-env-cells" ||
+		kind === "landblock-scene-lod" ||
 		kind === "env-cell" ||
 		kind === "animation" ||
 		kind === "gfx-obj" ||

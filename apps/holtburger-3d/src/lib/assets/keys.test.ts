@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	createLandblockSceneLodHostAssetKey,
 	createHostAssetKey,
 	createRawHostAssetKey,
 	describeHostAssetKey,
@@ -40,6 +41,32 @@ describe("host asset keys", () => {
 		});
 		expect(formatHostAssetId(createHostAssetKey("animation", 0x0300061b))).toBe(
 			"animation/0300061b",
+		);
+	});
+
+	it("round-trips landblock scene LoD route ids for every supported level", () => {
+		for (const level of [0, 1, 2, 3, 4]) {
+			const key = createLandblockSceneLodHostAssetKey(0xda550123, level);
+			expect(key).toEqual({
+				id: `da55ffff:${level}`,
+				kind: "landblock-scene-lod",
+			});
+			expect(describeHostAssetKey(key)).toBe(
+				`landblock-scene-lod:da55ffff:${level}`,
+			);
+			expect(formatHostAssetId(key)).toBe(`landblock/da55ffff/lod/${level}`);
+			expect(parseHostAssetId(`landblock/da55ffff/lod/${level}`)).toEqual(
+				key,
+			);
+		}
+	});
+
+	it("rejects unsupported landblock scene LoD levels", () => {
+		expect(() => createLandblockSceneLodHostAssetKey(0xda55ffff, 5)).toThrow(
+			"landblock-scene-lod level must be an integer from 0 through 4",
+		);
+		expect(parseHostAssetId("landblock/da55ffff/lod/5")).toEqual(
+			createRawHostAssetKey("landblock/da55ffff/lod/5"),
 		);
 	});
 

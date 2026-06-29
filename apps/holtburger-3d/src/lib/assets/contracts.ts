@@ -1,6 +1,7 @@
 export type HostAssetKeyKind =
 	| "landblock-outdoor"
 	| "landblock-env-cells"
+	| "landblock-scene-lod"
 	| "env-cell"
 	| "animation"
 	| "gfx-obj"

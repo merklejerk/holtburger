@@ -38,11 +38,7 @@ describe("browser landblock env-cell baker", () => {
 				envCellId: 0xda550100,
 				kind: "env-cell-spatial",
 				landblockId: 0xda55ffff,
-				owner: expect.objectContaining({
-					kind: "work",
-					scopeKey: "landblock:da55ffff",
-					workId: "7:landblock:da55ffff:landblock-env-cells",
-				}),
+				owner: expectedEnvCellLayerOwner(),
 				renderBounds: {
 					max: { x: 1, y: 2, z: 3 },
 					min: { x: -1, y: -2, z: -3 },
@@ -136,10 +132,7 @@ describe("browser landblock env-cell baker", () => {
 		expect(result.staticAuthoredDynamicSeeds).toEqual([
 			{
 				kind: "env-cell-static-object-dynamic-seed",
-				owner: expect.objectContaining({
-					domain: "landblock-env-cells",
-					workId: "7:landblock:da55ffff:landblock-env-cells",
-				}),
+				owner: expectedEnvCellLayerOwner(),
 				seed: {
 					classificationReason: "setup-default-animation",
 					defaultAnimationId: 0x0300061b,
@@ -858,12 +851,7 @@ describe("browser landblock env-cell baker", () => {
 					instanceId: "da550100:env-cell-static-0",
 					kind: "env-cell-static-object-bounds",
 					landblockId: 0xda55ffff,
-					owner: expect.objectContaining({
-						domain: "landblock-env-cells",
-						kind: "work",
-						scopeKey: "landblock:da55ffff",
-						workId: "7:landblock:da55ffff:landblock-env-cells",
-					}),
+					owner: expectedEnvCellLayerOwner(),
 				}),
 			]),
 		);
@@ -1419,6 +1407,18 @@ function createStaticObjectGeometry() {
 
 function formatHex32(value: number): string {
 	return (value >>> 0).toString(16).padStart(8, "0");
+}
+
+function expectedEnvCellLayerOwner() {
+	return {
+		domain: "landblock-env-cells",
+		key: {
+			kind: "env-cell-system",
+			landblockId: 0xda55ffff,
+		},
+		kind: "layer-owner",
+		ownerId: "env-cell-system:0xda55ffff",
+	};
 }
 
 function createInput(): StaticBakeBatchInput {

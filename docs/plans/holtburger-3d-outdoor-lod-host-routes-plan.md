@@ -1042,7 +1042,7 @@ Decisions and course corrections:
 
 ### Phase 8B2: Baker Peer-Owner Emission
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: cut static producers over so durable records emitted by terrain/object/env-cell bakers are owned by layers, not work items.
 
@@ -1061,15 +1061,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Replace baker-local work peer owner constructors.
-- [ ] Update durable peer-record owner field types.
-- [ ] Update portal graph and env-cell source-mapping owner arguments.
-- [ ] Update baker-focused tests and fixtures.
-- [ ] Run focused static baker tests.
+- [x] Replace baker-local work peer owner constructors.
+- [x] Update durable peer-record owner field types.
+- [x] Update portal graph and env-cell source-mapping owner arguments.
+- [x] Update baker-focused tests and fixtures.
+- [x] Run focused static baker tests.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Narrowed durable peer record owner fields for env-cell spatial, visibility, portal, source-mapping, and static-authored dynamic seed records to `StaticLayerPeerRecordOwner`.
+- Updated env-cell and static-object compatibility bakers to derive durable owners through `createLayerPeerRecordOwnerForStaticWork`.
+- Updated portal-graph helpers to accept layer-owned records so building transition and env-cell portal graphs no longer carry work ownership.
+- Removed the obsolete env-cell baker `describeStaticScopeKey` helper after owner construction moved to `layer-owners.ts`.
+- Updated env-cell baker tests to assert the layer owner shape (`env-cell-system:0xda55ffff`) instead of work ids.
+- Validation: `npm run test:ts -- src/lib/static/env-cells/bake/landblock-env-cells-baker.test.ts src/lib/static/objects/bake/static-object-compatibility-baker.test.ts src/lib/static/portal-graphs.test.ts src/lib/static/coordinator/static-coordinator.test.ts`; `npm run check`.
 
 ### Phase 8B3: Runtime Peer-Owner Readers
 

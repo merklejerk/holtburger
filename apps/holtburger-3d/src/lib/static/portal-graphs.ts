@@ -17,7 +17,7 @@ import type {
 	StaticPortalGraphRecord,
 	StaticPortalGraphScene,
 	StaticPortalInteriorRecord,
-	StaticWorkPeerRecordOwner,
+	StaticLayerPeerRecordOwner,
 } from "./contracts";
 import {
 	createEnvCellPortalApertureRangeId,
@@ -33,7 +33,7 @@ type MutableProjectionDiagnostics = {
 const OUTDOOR_ROOT_NODE_ID_PREFIX = "outdoor";
 
 export function createEnvCellStaticPortalGraph(
-	owner: StaticWorkPeerRecordOwner,
+	owner: StaticLayerPeerRecordOwner,
 	record: StaticPortalInteriorRecord,
 ): StaticPortalGraphRecord {
 	const nodesById = new Map<string, StaticPortalGraphNode>();
@@ -60,7 +60,7 @@ export function createEnvCellStaticPortalGraph(
 }
 
 export function createBuildingTransitionStaticPortalGraph(
-	owner: StaticWorkPeerRecordOwner,
+	owner: StaticLayerPeerRecordOwner,
 	resource: StaticPortalApertureResource,
 ): StaticPortalGraphRecord {
 	const nodesById = new Map<string, StaticPortalGraphNode>();

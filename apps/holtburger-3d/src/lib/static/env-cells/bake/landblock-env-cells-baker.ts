@@ -20,9 +20,10 @@ import type {
 	StaticSpatialRecord,
 	StructuredInteriorGeometryStaticDrawUnit,
 	StaticVisibilityRecord,
-	StaticWorkPeerRecordOwner,
+	StaticLayerPeerRecordOwner,
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
+import { createLayerPeerRecordOwnerForStaticWork } from "../../layer-owners";
 import { createEnvCellPortalApertureResource } from "../../portal-aperture-resources";
 import { createEnvCellStaticPortalGraph } from "../../portal-graphs";
 import {
@@ -205,7 +206,7 @@ function bakeLandblockEnvCellItem(
 		);
 	}
 
-	const owner = createWorkPeerRecordOwner(item.work);
+	const owner = createLayerPeerRecordOwner(item.work);
 	const payload = item.payload.scope;
 	const materialPlansByEnvCellId = createStructuredInteriorMaterialPlans(
 		payload,
@@ -1019,7 +1020,7 @@ function mergeTextureUses(
 }
 
 function createSpatialRecords(
-	owner: StaticWorkPeerRecordOwner,
+	owner: StaticLayerPeerRecordOwner,
 	payload: LandblockEnvCellsStaticScopePayload,
 ): readonly StaticSpatialRecord[] {
 	return payload.envCells.map((envCell) => ({
@@ -1042,7 +1043,7 @@ function createSpatialRecords(
 }
 
 function createVisibilityRecord(
-	owner: StaticWorkPeerRecordOwner,
+	owner: StaticLayerPeerRecordOwner,
 	payload: LandblockEnvCellsStaticScopePayload,
 ): StaticVisibilityRecord {
 	return {
@@ -1061,7 +1062,7 @@ function createVisibilityRecord(
 }
 
 function createPortalInteriorRecord(
-	owner: StaticWorkPeerRecordOwner,
+	owner: StaticLayerPeerRecordOwner,
 	payload: LandblockEnvCellsStaticScopePayload,
 ): StaticPortalInteriorRecord {
 	return {
@@ -1080,7 +1081,7 @@ function createPortalInteriorRecord(
 }
 
 function createSourceMappingRecords(
-	owner: StaticWorkPeerRecordOwner,
+	owner: StaticLayerPeerRecordOwner,
 	payload: LandblockEnvCellsStaticScopePayload,
 ): readonly StaticSourceMappingRecord[] {
 	return payload.envCells.map((envCell) => ({
@@ -1096,7 +1097,7 @@ function createSourceMappingRecords(
 }
 
 function createAuthoredDynamicSeedRecords(
-	owner: StaticWorkPeerRecordOwner,
+	owner: StaticLayerPeerRecordOwner,
 	payload: LandblockEnvCellsStaticScopePayload,
 ): readonly StaticAuthoredDynamicSeedRecord[] {
 	const sourceByKey = new Map(
@@ -1119,7 +1120,7 @@ function createAuthoredDynamicSeedRecords(
 }
 
 function createAuthoredDynamicSeedRecordsForSeed(
-	owner: StaticWorkPeerRecordOwner,
+	owner: StaticLayerPeerRecordOwner,
 	payload: LandblockEnvCellsStaticScopePayload,
 	envCell: LandblockEnvCellStaticFacts,
 	seed: LandblockEnvCellStaticFacts["staticObjectSeeds"][number],
@@ -1145,7 +1146,7 @@ function createAuthoredDynamicSeedRecordsForSeed(
 
 function createEnvCellStaticObjectDynamicSeedRecord(options: {
 	readonly envCell: LandblockEnvCellStaticFacts;
-	readonly owner: StaticWorkPeerRecordOwner;
+	readonly owner: StaticLayerPeerRecordOwner;
 	readonly payload: LandblockEnvCellsStaticScopePayload;
 	readonly seed: LandblockEnvCellStaticFacts["staticObjectSeeds"][number];
 	readonly sourceByKey: ReadonlyMap<string, StaticObjectSourceAssetFacts>;
@@ -1178,22 +1179,10 @@ function createEnvCellStaticObjectDynamicSeedRecord(options: {
 	};
 }
 
-function createWorkPeerRecordOwner(
+function createLayerPeerRecordOwner(
 	work: ScheduledStaticWork,
-): StaticWorkPeerRecordOwner {
-	return {
-		domain: work.job.domain,
-		kind: "work",
-		scope: work.job.scope,
-		scopeKey: describeStaticScopeKey(work.job.scope),
-		workId: work.workId,
-	};
-}
-
-function describeStaticScopeKey(
-	scope: ScheduledStaticWork["job"]["scope"],
-): string {
-	return `landblock:${formatHex32(scope.landblockId)}`;
+): StaticLayerPeerRecordOwner {
+	return createLayerPeerRecordOwnerForStaticWork(work);
 }
 
 function createSourceKey(

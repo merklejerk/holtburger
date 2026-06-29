@@ -115,15 +115,15 @@ export function bakeLandblockEnvCells(
 		],
 		portalApertureResources: itemResults.flatMap((result) =>
 			result.portalApertureResource ? [result.portalApertureResource] : [],
-		),
+		).concat(staticObjectResult.portalApertureResources),
 		revision: input.revision,
 		staticAuthoredDynamicSeeds: itemResults.flatMap(
 			(result) => result.staticAuthoredDynamicSeeds,
 		),
 		staticBatchId: input.staticBatchId,
-		staticPortalGraphs: itemResults.flatMap(
-			(result) => result.staticPortalGraphs,
-		),
+		staticPortalGraphs: itemResults
+			.flatMap((result) => result.staticPortalGraphs)
+			.concat(staticObjectResult.staticPortalGraphs),
 		staticPortalInteriorRecords: itemResults.flatMap(
 			(result) => result.staticPortalInteriorRecords,
 		),

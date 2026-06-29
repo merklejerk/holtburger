@@ -269,7 +269,8 @@ function bakeStaticObjectCompatibilityItem(
 } {
 	const scope = createStaticObjectCompatibilityPayload(item);
 	const buildingTransitionPortalApertureResource =
-		item.payload.scope.kind === "outdoor-static-objects"
+		item.payload.scope.kind === "outdoor-static-objects" ||
+		item.payload.scope.kind === "landblock-env-cells"
 			? deriveBuildingTransitionPortalApertureResource(item.payload.scope)
 			: null;
 	const partitionPlan = partitionStaticObjectCompatibility(scope);

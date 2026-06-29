@@ -1,4 +1,5 @@
 import type {
+	LandblockEnvCellsStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
 	StaticBuildingTransitionApertureRange,
 	StaticPortalApertureResource,
@@ -13,10 +14,17 @@ import {
 
 type TransitionPortalVisibleSide = "positive" | "negative";
 
+type BuildingTransitionPortalAperturePayload =
+	| OutdoorStaticObjectsScopePayload
+	| LandblockEnvCellsStaticScopePayload;
+
 export function deriveBuildingTransitionPortalApertureResource(
-	payload: OutdoorStaticObjectsScopePayload,
+	payload: BuildingTransitionPortalAperturePayload,
 ): StaticPortalApertureResource | null {
-	if (payload.domain !== "outdoor-buildings") {
+	if (
+		payload.kind === "outdoor-static-objects" &&
+		payload.domain !== "outdoor-buildings"
+	) {
 		return null;
 	}
 

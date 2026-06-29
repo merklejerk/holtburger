@@ -97,6 +97,7 @@ import {
 	collectStaticDrawUnitResourceIds,
 	type StaticAuthoredDynamicSeedRecord,
 } from "../static/contracts";
+import { createLayerOwnerKeyId } from "../static/layer-owners";
 import {
 	materializeStaticCommit,
 	type StaticMaterializationResult,
@@ -781,8 +782,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#sceneInterest: RuntimeSceneInterest = { kind: "none" };
 	#sceneInterestRevision = 0;
 	#settledSceneInterestRevision = 0;
-	#activeSceneWorkIds = new Set<string>();
-	#activeSceneWorkRevisions = new Set<number>();
+	#activeSceneOwnerIds = new Set<string>();
 	#sceneInterestReconciliationActive = false;
 	#currentCameraResidency: RuntimeCameraResidency = {
 		kind: "unknown",
@@ -934,11 +934,8 @@ class ClientRuntimeImpl implements ClientRuntime {
 				reconciliation.retainedLayerOwners,
 			);
 			this.#enqueueDynamicRendererResourceSync();
-			this.#activeSceneWorkIds = new Set(
-				reconciliation.activeWork.map((work) => work.workId),
-			);
-			this.#activeSceneWorkRevisions = new Set(
-				reconciliation.activeWork.map((work) => work.revision),
+			this.#activeSceneOwnerIds = new Set(
+				reconciliation.retainedLayerOwners.map(createLayerOwnerKeyId),
 			);
 		} finally {
 			this.#sceneInterestReconciliationActive = false;
@@ -1685,27 +1682,34 @@ class ClientRuntimeImpl implements ClientRuntime {
 			return;
 		}
 
-		const sceneWork = this.#lastStaticSnapshot.activeWork.filter((work) =>
-			this.#activeSceneWorkIds.has(work.workId),
+		const sceneOwnerStates = this.#lastStaticSnapshot.ownerStates.filter((state) =>
+			this.#activeSceneOwnerIds.has(createLayerOwnerKeyId(state.key)),
 		);
-		if (sceneWork.length !== this.#activeSceneWorkIds.size) {
+		if (sceneOwnerStates.length !== this.#activeSceneOwnerIds.size) {
 			return;
 		}
 
-		const unsettledWork = sceneWork.filter(
-			(work) => work.status !== "committed" && work.status !== "failed",
+		const unsettledOwners = sceneOwnerStates.filter(
+			(state) =>
+				state.lifecycle !== "materialized" &&
+				state.lifecycle !== "empty" &&
+				state.lifecycle !== "failed",
 		);
-		if (unsettledWork.length > 0) {
+		if (unsettledOwners.length > 0) {
 			return;
 		}
 
-		const failedWork = sceneWork.filter((work) => work.status === "failed");
+		const failedOwners = sceneOwnerStates.filter(
+			(state) => state.lifecycle === "failed",
+		);
 		const failedMaterialization = Array.from(
 			this.#failedStaticMaterializationRevisions,
-		).some((revision) => this.#activeSceneWorkRevisions.has(revision));
+		).some((revision) =>
+			sceneOwnerStates.some((state) => state.revision === revision),
+		);
 		this.#emitSceneInterestSettled({
 			result:
-				failedWork.length > 0 || failedMaterialization ? "failed" : "ready",
+				failedOwners.length > 0 || failedMaterialization ? "failed" : "ready",
 			source,
 		});
 	}

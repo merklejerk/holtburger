@@ -1186,7 +1186,7 @@ Decisions and course corrections:
 
 ### Phase 8D1: Owner-State Scene Interest Readiness
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: derive scene-interest readiness from demanded layer owner states instead of active work ids/revisions.
 
@@ -1204,13 +1204,18 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Replace `#activeSceneWorkIds` / `#activeSceneWorkRevisions` readiness with owner-state tracking.
-- [ ] Update scene-interest settled tests.
-- [ ] Run focused runtime settled-event tests.
+- [x] Replace `#activeSceneWorkIds` / `#activeSceneWorkRevisions` readiness with owner-state tracking.
+- [x] Update scene-interest settled tests.
+- [x] Run focused runtime settled-event tests.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Replaced runtime scene-interest readiness state with `#activeSceneOwnerIds`, derived from `StaticRetentionReconciliation.retainedLayerOwners`.
+- `#maybeEmitSceneInterestSettled` now matches active owner ids against `StaticCoordinatorSnapshot.ownerStates` and waits until every demanded owner is `materialized`, `empty`, or `failed`.
+- Failed settled events now come from failed owner lifecycles or failed materialization revisions attached to active owner-state revisions, not active work ids.
+- Added a runtime event regression test proving a failed demanded owner emits `scene-interest-settled` with `result: "failed"`.
+- Audit result: `#activeSceneWorkIds` and `#activeSceneWorkRevisions` no longer exist.
+- Validation: `npm run test:ts -- src/lib/runtime/client-runtime.test.ts src/lib/static/coordinator/static-coordinator.test.ts`; `npm run check`.
 
 ### Phase 8D2: Runtime Dynamic No-Residence State
 

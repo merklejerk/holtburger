@@ -22,7 +22,64 @@ Scene interest
 
 The landblock source product is a resolver and cache unit. It is not the scene cleanup unit. Scene cleanup must operate at landblock-layer granularity so LoD changes can add or remove detail without recreating retained lower layers.
 
-The target shape is a clean cutover to landblock scene LoD host assets, not a compatibility shim around the current broad route. The existing `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, and stale `landblock/{id}/topology` routes and frontend dependents should be purged after cutover unless a concrete non-frontend owner is documented.
+The target shape is a clean cutover to landblock scene LoD host assets, not a compatibility shim around the current broad route. The existing `landblock/{id}/outdoor`, `landblock/{id}/env-cells`, and stale `landblock/{id}/topology` routes and frontend dependents should be purged after cutover.
+
+## Target Architecture Illustrations
+
+The route is source-first, but resolver output and runtime ownership remain layer-first. One source request should do the shared source work once, then fan out only the layer payloads currently demanded by scene interest.
+
+```mermaid
+flowchart LR
+    interest["Scene interest"] --> desired["Desired landblock layer set"]
+    desired --> select["Select minimum source LoD"]
+    select --> route["landblock/{id}/lod/{level}"]
+    route --> prepared["Prepared landblock scene LoD source"]
+    prepared --> resolver["Resolver layer fanout"]
+    resolver --> terrain["Terrain layer recipe"]
+    resolver --> buildings["Building layer recipe"]
+    resolver --> explicit["Explicit object layer recipe"]
+    resolver --> generated["Generated scenery layer recipe"]
+    resolver --> envcells["Env-cell system layer recipe"]
+    terrain --> bake["Domain-oriented bake queues"]
+    buildings --> bake
+    explicit --> bake
+    generated --> bake
+    envcells --> bake
+    bake --> commit["Layer-owner-gated materialization"]
+```
+
+The prepared source cache is a CPU reuse mechanism. It must not become the owner of scene resources. Layer owner records are the lifecycle authority for renderer resources, static-scene-query records, texture leases, and static-authored dynamic seeds.
+
+```mermaid
+flowchart TB
+    source["Prepared LoD source cache<br/>highest compatible LoD per landblock/context"] --> fanout["Resolver fanout"]
+    fanout --> terrainOwner["Layer owner: terrain"]
+    fanout --> buildingOwner["Layer owner: buildings"]
+    fanout --> explicitOwner["Layer owner: explicit objects"]
+    fanout --> generatedOwner["Layer owner: generated scenery"]
+    fanout --> envOwner["Layer owner: env-cell system"]
+
+    terrainOwner --> terrainResources["Terrain draw units<br/>terrain query records<br/>texture leases"]
+    buildingOwner --> buildingResources["Building draw units<br/>transition apertures<br/>static-authored dynamics"]
+    explicitOwner --> explicitResources["Explicit object draw units<br/>object diagnostics<br/>static-authored dynamics"]
+    generatedOwner --> generatedResources["Generated scenery draw units<br/>generated diagnostics<br/>static-authored dynamics"]
+    envOwner --> envResources["Env-cell layer payload<br/>portal records<br/>visibility records<br/>static-authored dynamics"]
+```
+
+LoD changes should mutate only the layers whose desired state changed. Lower layers retained across an LoD increase or decrease must not be re-fetched, re-baked, or re-materialized.
+
+```mermaid
+flowchart LR
+    resident["Resident layers<br/>terrain + buildings"] --> increase["LoD increases to generated scenery"]
+    increase --> retainLower["Retain terrain + buildings"]
+    increase --> addUpper["Resolve and bake missing explicit/generated layers"]
+    addUpper --> higherResident["Resident layers<br/>terrain + buildings + explicit + generated"]
+
+    higherResident --> decrease["LoD decreases to buildings"]
+    decrease --> keepLower["Keep terrain + buildings installed"]
+    decrease --> evictUpper["Evict explicit/generated owners and their resources"]
+    evictUpper --> lowerResident["Resident layers<br/>terrain + buildings"]
+```
 
 ## Proposed Route Family
 
@@ -63,7 +120,7 @@ The exact type names can change during implementation, but the level semantics a
 - Removing frontend reliance on the broad `landblock-outdoor` payload for normal outdoor terrain/building/detail layers.
 - Removing frontend reliance on `landblock-env-cells` as a separate landblock source route.
 - Removing the old `landblock/{id}/outdoor` and `landblock/{id}/env-cells` routes and dead dependents once normal frontend rendering uses landblock scene LoD routes.
-- Removing the old `landblock/{id}/topology` route if the cleanup audit confirms no non-test consumer remains.
+- Removing the old `landblock/{id}/topology` route and its helper/test surfaces after LoD `4` owns the env-cell/topology facts needed by the frontend.
 
 ## Out Of Scope
 
@@ -118,24 +175,40 @@ Frontend static paths:
 - `apps/holtburger-3d/src/lib/static/objects/static-object-source-closure.ts`
 - `apps/holtburger-3d/src/lib/static/bake/static-bake.worker.ts`
 - `apps/holtburger-3d/src/lib/runtime/client-runtime.ts`
+- `apps/holtburger-3d/src/lib/runtime/env-cell-system-layer-assembly.ts`
+- `apps/holtburger-3d/src/lib/runtime/static-scene-query.ts`
+- `apps/holtburger-3d/src/lib/runtime/scene-query/env-cell-committed-records.ts`
+- `apps/holtburger-3d/src/lib/dynamic/contracts.ts`
+- `apps/holtburger-3d/src/lib/dynamic/dynamic-entity-controller.ts`
+- `apps/holtburger-3d/src/lib/dynamic/dynamic-entity-store.ts`
 - `apps/holtburger-3d/src/lib/renderer/types.ts`
 
 Validated current facts:
 
+- Validation refreshed on 2026-06-29 against the current repository state. The target architecture remains valid, but several current-state facts are now more nuanced than the original draft.
+- No `landblock/{id}/lod/{level}` route, `LandblockSceneLod` content request, or `landblock-scene-lod` frontend contract exists yet.
 - `landblock/{id}/outdoor` currently contains terrain, statics, building transition apertures, and outdoor BVH.
 - Generated scenery depends on raw terrain data and `LandblockInfo` building/object positions for occupancy and overlap filtering.
 - Generated scenery does not need already-baked frontend terrain or building geometry, but it must be assembled with equivalent source context to preserve placement.
-- The current frontend `HostAssetKey` parser does not model `landblock/{id}/topology`, even though the Tauri host can parse and serve it.
+- The current `HostAssetKey` parser still does not model `landblock/{id}/topology` as a typed host asset key. However, `apps/holtburger-3d/src/lib/landblocks.ts` now has topology format/parse helpers and `apps/holtburger-3d/src/lib/host/tauri.ts` recognizes topology routes for binary lookup ordering. Cleanup should remove both the generic route machinery and those helper/test surfaces once LoD `4` replaces the route.
 - The current 3D static render path does not consume `landblock/{id}/topology`; `landblock/{id}/env-cells` carries the richer env-cell data needed by the frontend renderer.
+- `apps/holtburger-3d/src/lib/assets/preparation/route-payloads.ts` still does not prepare a typed topology payload for the normal frontend prepared-asset path.
+- A 2026-06-29 production-code audit found no normal frontend static-rendering consumer of `landblock/{id}/topology`; surviving topology references are the content/host route implementation, generic binary route detection, route helpers, tests, and historical plan docs. LoD `4` should replace the route rather than preserve it.
 - The current static worker API is single-job-shaped: `StaticResolverWorkerClient.resolve(job)` posts one `StaticResolverJob`, and the worker handler resolves exactly that job.
 - `StaticCoordinator.reconcileStaticDemand` and `planStaticDemand` are the earliest existing frontend seams that see the full per-revision outdoor work set.
 - `StaticDomain` and `ManualStaticDomain` currently model one `outdoor-detail` domain/radius.
+- Current renderer layers, material planning, texture residency, diagnostics, and selection paths branch by static domain. That supports giving LoD `2` explicit objects and LoD `3` generated scenery separate domains/layers instead of sharing a renamed `outdoor-detail` bucket.
 - Resource eviction is currently keyed by layer desired keys such as `landblock:da55ffff:outdoor-detail`.
 - Bake batching is domain-oriented; source-first resolver fanout must still feed domain-oriented bake inputs unless that pipeline is intentionally redesigned.
 - `StaticSceneQuery.retainScopes` and `DynamicEntityController.retainStaticScopes` currently consume owner keys keyed by renderer domain plus scope.
 - Env-cell system layer clearing is resource-driven and explicit. Clearing the renderer env-cell layer also calls `StaticSceneQuery.clearEnvCellSystemLayer(landblockId)`.
 - The env-cell geometry attachment provider currently requests the full `landblock-env-cells` host asset directly to build cell-structure geometry attachments.
 - `EnvCellSystemLayerAssemblyStore` currently merges env-cell materialized output with building transition facts from the `outdoor-buildings` path before publishing the renderer env-cell system layer. The LoD `4` route should make that runtime cross-layer merge unnecessary.
+- Runtime-authored dynamics already have explicit runtime lifetime and are not pruned by `retainStaticScopes`. They still require a concrete `DynamicEntityResidence` (`outdoor-landblock` or `env-cell`) and do not yet support an explicit no-residence/unrendered state.
+- Static-authored dynamics are still retained through `sourceScopeKey` strings derived from `StaticWorkPeerRecordOwner`, so the layer-owner cutover remains necessary for static-authored seed eviction.
+- Scene-interest readiness still depends on active work ids, active work revisions, and pending/failed materialization revisions in `ClientRuntime`, not on a layer-owner state machine.
+- `ContentDecodeCache` is an LRU for decoded source records. It is not the prepared landblock scene LoD cache required by this spec.
+- `StaticOutdoorSceneAssembler::assemble_from_loaded` currently derives explicit objects, buildings, and generated scenery together. Terrain-only or building-only LoD assembly therefore needs new gating in the shared source assembly path, not just projection from the existing full outdoor asset.
 
 ## Source Assembly Requirements
 
@@ -177,11 +250,11 @@ The host asset pipeline must maintain a large LRU cache for prepared landblock s
 Requirements:
 
 - The cache capacity must be 256 normalized landblock slots unless measurement proves another value is better.
-- Each cached landblock slot must store the highest prepared LoD for each compatible typed context/profile variant needed by that landblock.
+- Each cached landblock slot must store the highest prepared LoD for each compatible scene context variant needed by that landblock.
 - Higher-LoD preparation must build on lower-LoD preparation already present in the cache.
 - A request for a lower or equal LoD must project from the cached highest prepared asset without rebuilding the landblock.
 - A request for a higher LoD must extend the cached prepared asset with only the missing higher layers where possible.
-- Cache keys must include the normalized landblock id and any context/profile dimension that changes emitted layer semantics.
+- Cache keys must include the normalized landblock id and the scene context only when that context changes source semantics. Do not add profile dimensions speculatively; introduce a new key dimension only when a concrete typed option changes emitted source facts.
 - The cache must not become an implicit correctness fallback. If a cached prepared asset is incompatible with the requested context or contract, fail loudly or rebuild through an explicit typed path.
 
 The prepared asset cache is a CPU/work reuse mechanism. It is not the frontend scene ownership model.
@@ -204,7 +277,7 @@ If terrain, buildings, generated scenery, and env-cells are all needed for a lan
 
 The implementation must avoid implicit fallback behavior. Unsupported or mismatched levels must fail loudly.
 
-The current `outdoor-detail` renderer/domain concept must be split. LoD `2` explicit outdoor objects and LoD `3` generated outdoor scenery are separate retained layers and should have separate domain/layer names unless implementation evidence proves a different naming split is clearer. They must not share one lifecycle owner.
+The current `outdoor-detail` renderer/domain concept must be split. LoD `2` explicit outdoor objects and LoD `3` generated outdoor scenery are separate retained layers with separate domain/layer names. They must not share one lifecycle owner.
 
 ## Layer Ownership And Eviction Requirements
 
@@ -322,31 +395,36 @@ Targets:
 
 The frontend must not treat `landblock-scene-lod` as full `landblock-outdoor` or `landblock-env-cells`.
 
-The contract must encode which families are present. A DTO shape like this is acceptable if the final implementation does not find a cleaner discriminated structure:
+The contract must encode which families were emitted, but it should avoid parallel `includes` booleans. Layer presence should be structural: if a layer record exists, that layer was emitted; if it is absent, that layer was not emitted. Empty-but-emitted layers should be represented by a present layer record with empty arrays.
 
 ```ts
 interface LandblockSceneLodPayloadDto {
   readonly kind: "landblock-scene-lod";
   readonly landblockId: number;
-  readonly level: 0 | 1 | 2 | 3 | 4;
-  readonly context: "outdoor" | "interior";
-  readonly includes: {
-    readonly terrain: boolean;
-    readonly buildings: boolean;
-    readonly explicitObjects: boolean;
-    readonly generatedScenery: boolean;
-    readonly envCells: boolean;
-  };
+  readonly source: LandblockSceneLodSourceDto;
+  readonly layers: readonly LandblockSceneLodLayerDto[];
 }
+
+interface LandblockSceneLodSourceDto {
+  readonly context: "outdoor" | "interior";
+  readonly level: 0 | 1 | 2 | 3 | 4;
+}
+
+type LandblockSceneLodLayerDto =
+  | LandblockTerrainLayerDto
+  | LandblockBuildingLayerDto
+  | LandblockExplicitOutdoorObjectLayerDto
+  | LandblockGeneratedSceneryLayerDto
+  | LandblockEnvCellSystemLayerDto;
 ```
 
-The final shape should prefer interdependent composite types over loose boolean fields if the implementation makes that cleaner.
+The final shape should prefer composite/discriminated types over loose fields when data is interdependent. A derived diagnostic summary is acceptable, but it must not become a second source of truth for emitted layers.
 
 Validation requirements:
 
 - Route parsing must accept valid normalized landblock ids and supported levels.
 - Route parsing must reject invalid levels and malformed ids.
-- TypeScript payload parsing must reject mismatched `kind`, missing level data, and inconsistent included families.
+- TypeScript payload parsing must reject mismatched `kind`, missing source level/context data, duplicate layer records, layers that are impossible for the declared source level/context, and malformed layer bodies.
 - `formatHostAssetId` and `parseHostAssetId` must round-trip `landblock/{id}/lod/{level}` without using raw keys.
 - Browser binary lookup routing, Tauri route parsing, content request enums, binary serialization, JSON serialization, route-to-schema preparation, and tests must all recognize the new route family.
 
@@ -358,7 +436,7 @@ After the source-first LoD route is the normal frontend path:
 - Normal frontend static rendering must no longer request separate `landblock-env-cells` for landblock scene work.
 - The env-cell geometry attachment provider must no longer directly request `landblock-env-cells`.
 - The old `landblock/{id}/outdoor` and `landblock/{id}/env-cells` routes must be removed unless a concrete non-frontend owner is documented.
-- The old `landblock/{id}/topology` route must be removed if the cleanup audit confirms no non-test consumer remains.
+- The old `landblock/{id}/topology` route must be removed after LoD `4` owns the env-cell/topology facts needed by frontend rendering.
 - Obsolete resolver fixture fields and compatibility helpers must be deleted rather than retained as dead compatibility ballast.
 
 ## Verification Requirements
@@ -440,7 +518,7 @@ Mitigation: select the source LoD from requested scene interest, not from a glob
 
 ### Risk: Route Proliferation Leaks Frontend Policy Into Content
 
-Mitigation: model route levels as landblock scene product profiles, not browser UI toggles. Browser-specific interest policy remains in `apps/holtburger-3d`; content only defines what each source profile contains.
+Mitigation: model route levels as landblock scene source levels, not browser UI toggles. Browser-specific interest policy remains in `apps/holtburger-3d`; content only defines what each source level contains.
 
 ### Risk: Existing Tests Depend On Full `landblock-outdoor` Fixtures
 
@@ -466,10 +544,15 @@ Mitigation: update tests to use the minimal landblock scene LoD route for the be
 - `EnvCellSystemLayerAssemblyStore` is deleted or substantially reduced because LoD `4` no longer needs runtime assembly with a materialized building layer.
 - Scene-interest readiness is derived from demanded layer owner states instead of active work IDs, work revisions, and pending materialization revision sets.
 - Current retained-scope, desired-key, durable work-owner, dynamic source-scope, readiness-tracking, and resource-to-layer lifetime abstractions are replaced or demoted under layer owner records.
-- Old broad routes and stale helpers are deleted unless a concrete surviving owner is documented.
+- Old broad routes and stale helpers, including `landblock/{id}/topology`, are deleted after the LoD route owns the required frontend facts.
 - Tests prove route parsing, payload validation, source LoD selection, multi-output resolver fanout, layer-owned eviction, prepared-cache reuse, generated scenery preservation, and env-cell preservation.
+
+## Resolved Decisions
+
+- The prepared LoD source cache key starts with normalized landblock id. Scene context may be part of the key only if it changes emitted source semantics. LoD is cached slot state, not a separate identity dimension for every request; requested output layers are projection/fanout inputs, not cache key dimensions.
+- `landblock/{id}/topology` is a removal target, not an open compatibility question. Current production code has route machinery and helpers but no normal frontend static-rendering consumer.
+- LoD `2` explicit outdoor objects and LoD `3` generated scenery must map to separate domains/layers. The shared implementation details can stay shared behind those contracts, but domain/layer identity must be distinct.
 
 ## Open Questions
 
-- What exact context/profile dimensions must be part of the host prepared asset cache key?
-- Does the topology cleanup audit find any non-test owner that blocks removing `landblock/{id}/topology`?
+- None currently.

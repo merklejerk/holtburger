@@ -971,7 +971,7 @@ interface StaticDrawUnitSpatialRecord {
 
 export interface StaticEnvCellStaticObjectSpatialRecord {
 	readonly kind: "env-cell-static-object-bounds";
-	readonly owner: StaticWorkPeerRecordOwner;
+	readonly owner: StaticLayerPeerRecordOwner;
 	readonly landblockId: number;
 	readonly envCellId: number;
 	readonly instanceId: string;
@@ -980,7 +980,7 @@ export interface StaticEnvCellStaticObjectSpatialRecord {
 
 export interface StaticEnvCellSpatialRecord {
 	readonly kind: "env-cell-spatial";
-	readonly owner: StaticWorkPeerRecordOwner;
+	readonly owner: StaticLayerPeerRecordOwner;
 	readonly landblockId: number;
 	readonly envCellId: number;
 	readonly memberId: string;
@@ -998,7 +998,7 @@ export type StaticVisibilityRecord = StaticEnvCellVisibilityRecord;
 
 interface StaticEnvCellVisibilityRecord {
 	readonly kind: "env-cell-visibility";
-	readonly owner: StaticWorkPeerRecordOwner;
+	readonly owner: StaticLayerPeerRecordOwner;
 	readonly landblockId: number;
 	readonly acceptedEnvCellIds: readonly number[];
 	readonly visibleLinks: readonly StaticEnvCellVisibleLink[];
@@ -1014,7 +1014,7 @@ export type StaticPortalInteriorRecord = StaticEnvCellPortalInteriorRecord;
 
 export interface StaticPortalGraphRecord {
 	readonly kind: "static-portal-graph";
-	readonly owner: StaticWorkPeerRecordOwner;
+	readonly owner: StaticLayerPeerRecordOwner;
 	readonly landblockId: number;
 	readonly nodes: readonly StaticPortalGraphNode[];
 	readonly edges: readonly StaticPortalGraphEdge[];
@@ -1228,7 +1228,7 @@ type StaticPortalGraphSceneCrossing =
 
 interface StaticEnvCellPortalInteriorRecord {
 	readonly kind: "env-cell-portal-interior";
-	readonly owner: StaticWorkPeerRecordOwner;
+	readonly owner: StaticLayerPeerRecordOwner;
 	readonly landblockId: number;
 	readonly portalLinks: readonly LandblockPortalLinkFacts[];
 	readonly envCells: readonly StaticEnvCellPortalSummary[];
@@ -1255,7 +1255,7 @@ interface StaticTerrainSourceTriangleMappingRecord {
 
 interface StaticEnvCellSourceMappingRecord {
 	readonly kind: "env-cell-source";
-	readonly owner: StaticWorkPeerRecordOwner;
+	readonly owner: StaticLayerPeerRecordOwner;
 	readonly landblockId: number;
 	readonly envCellId: number;
 	readonly memberId: string;
@@ -1271,7 +1271,7 @@ export type StaticAuthoredDynamicSeedRecord =
 
 interface OutdoorStaticObjectDynamicSeedRecord {
 	readonly kind: "outdoor-static-object-dynamic-seed";
-	readonly owner: StaticWorkPeerRecordOwner;
+	readonly owner: StaticLayerPeerRecordOwner;
 	readonly seed: OutdoorStaticObjectDynamicSeedFacts;
 }
 
@@ -1292,7 +1292,7 @@ export interface OutdoorStaticObjectDynamicSeedFacts {
 /** Classified env-cell authored static that should enter dynamic runtime registration. */
 interface StaticEnvCellStaticObjectDynamicSeedRecord {
 	readonly kind: "env-cell-static-object-dynamic-seed";
-	readonly owner: StaticWorkPeerRecordOwner;
+	readonly owner: StaticLayerPeerRecordOwner;
 	readonly seed: EnvCellStaticObjectDynamicSeedFacts;
 }
 
@@ -1313,7 +1313,7 @@ export interface EnvCellStaticObjectDynamicSeedFacts {
 
 interface StaticEnvCellStaticObjectSeedRecord {
 	readonly kind: "env-cell-static-object-seed";
-	readonly owner: StaticWorkPeerRecordOwner;
+	readonly owner: StaticLayerPeerRecordOwner;
 	readonly landblockId: number;
 	readonly envCellId: number;
 	readonly seed: LandblockEnvCellStaticObjectSeedFacts;

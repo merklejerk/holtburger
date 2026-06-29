@@ -23,7 +23,7 @@ import type {
 	StaticObjectSourceIdentity,
 	StaticPortalApertureResource,
 	StaticSpatialRecord,
-	StaticWorkPeerRecordOwner,
+	StaticLayerPeerRecordOwner,
 	StaticObjectRenderInstance,
 	StaticObjectVisualResource,
 	StaticObjectSourceGeometryIdentity,
@@ -32,7 +32,7 @@ import type {
 	StaticObjectDynamicSeedClassificationReasonCounts,
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
-import { describeStaticScopeKey } from "../../demand-planner";
+import { createLayerPeerRecordOwnerForStaticWork } from "../../layer-owners";
 import { createBuildingTransitionStaticPortalGraph } from "../../portal-graphs";
 import {
 	AC_UNIT_SCALE,
@@ -125,7 +125,7 @@ export function bakeStaticObjectCompatibility(
 			result.buildingTransitionPortalApertureResource
 				? [
 						createBuildingTransitionStaticPortalGraph(
-							createWorkPeerRecordOwner(result.work),
+							createLayerPeerRecordOwner(result.work),
 							result.buildingTransitionPortalApertureResource,
 						),
 					]
@@ -477,7 +477,7 @@ function createOutdoorAuthoredDynamicSeedRecords(
 	if (payload.kind !== "outdoor-static-objects") {
 		return [];
 	}
-	const owner = createWorkPeerRecordOwner(work);
+	const owner = createLayerPeerRecordOwner(work);
 	return payload.authoredDynamicSeeds.map((seed) => ({
 		kind: "outdoor-static-object-dynamic-seed",
 		owner,
@@ -1424,7 +1424,7 @@ function createStaticObjectGeometryBakeOutput(options: {
 		objectSpatialRecords: createEnvCellStaticObjectSpatialRecords({
 			geometry,
 			payload: options.payload,
-			workOwner: createWorkPeerRecordOwner(options.work),
+			workOwner: createLayerPeerRecordOwner(options.work),
 		}),
 	};
 }
@@ -1432,7 +1432,7 @@ function createStaticObjectGeometryBakeOutput(options: {
 function createEnvCellStaticObjectSpatialRecords(options: {
 	readonly geometry: ReturnType<typeof bakeStaticObjectPartitionGeometry>;
 	readonly payload: StaticObjectCompatibilityPayload;
-	readonly workOwner: StaticWorkPeerRecordOwner;
+	readonly workOwner: StaticLayerPeerRecordOwner;
 }): readonly StaticEnvCellStaticObjectSpatialRecord[] {
 	if (options.payload.domain !== "landblock-env-cells") {
 		return [];
@@ -1471,16 +1471,10 @@ function createEnvCellStaticObjectSpatialRecords(options: {
 	);
 }
 
-function createWorkPeerRecordOwner(
+function createLayerPeerRecordOwner(
 	work: ScheduledStaticWork,
-): StaticWorkPeerRecordOwner {
-	return {
-		domain: work.job.domain,
-		kind: "work",
-		scope: work.job.scope,
-		scopeKey: describeStaticScopeKey(work.job.scope),
-		workId: work.workId,
-	};
+): StaticLayerPeerRecordOwner {
+	return createLayerPeerRecordOwnerForStaticWork(work);
 }
 
 function createStaticObjectMaterialTableEntries(options: {

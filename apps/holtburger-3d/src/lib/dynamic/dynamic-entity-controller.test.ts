@@ -347,6 +347,51 @@ describe("dynamic entity controller", () => {
 		expect(controller.queryDynamicEntitySummary(runtimeId)?.id).toBe(runtimeId);
 	});
 
+	it("clears and restores runtime render residence without changing identity", () => {
+		const controller = new DynamicEntityController();
+		const runtimeId = controller.createRuntimeSpawn({
+			baseLocalPlacement: createPlacement(),
+			setupModelId: 0x020003e5,
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+		});
+
+		expect(controller.clearEvictedRuntimeRenderResidences([])).toBe(1);
+		expect(controller.queryDynamicEntitySummary(runtimeId)).toMatchObject({
+			effectiveResidence: {
+				kind: "no-residence",
+				reason: "render-residence-evicted",
+			},
+			id: runtimeId,
+			sourceResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+		});
+
+		expect(
+			controller.updateRuntimeSpawnRenderResidence(runtimeId, {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			}),
+		).toBe(true);
+		expect(controller.queryDynamicEntitySummary(runtimeId)).toMatchObject({
+			effectiveResidence: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+			id: runtimeId,
+		});
+		expect(
+			controller.updateRuntimeSpawnRenderResidence("static-authored:nope", {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			}),
+		).toBe(false);
+	});
+
 	it("updates runtime spawns without changing internal identity", () => {
 		const controller = new DynamicEntityController();
 		const runtimeId = controller.createRuntimeSpawn({

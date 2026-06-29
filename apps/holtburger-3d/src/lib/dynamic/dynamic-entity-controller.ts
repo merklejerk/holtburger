@@ -165,6 +165,47 @@ export class DynamicEntityController {
 		return true;
 	}
 
+	updateRuntimeSpawnRenderResidence(
+		entityId: DynamicEntityId,
+		renderResidence: DynamicEntityRenderResidence,
+	): boolean {
+		const updated = this.#store.update(entityId, (record) => {
+			if (record.source.kind !== "runtime-spawn") {
+				return record;
+			}
+			return withRuntimeRenderResidence(record, renderResidence);
+		});
+		if (updated === null || updated.source.kind !== "runtime-spawn") {
+			return false;
+		}
+		this.#upsertPlacementUpdate(updated);
+		return true;
+	}
+
+	clearEvictedRuntimeRenderResidences(
+		retainedLayerOwners: readonly LayerOwnerKey[],
+	): number {
+		let changed = 0;
+		for (const record of this.#store.records()) {
+			if (
+				record.source.kind !== "runtime-spawn" ||
+				record.effectiveResidence.kind === "no-residence" ||
+				isRenderResidenceRetained(record.effectiveResidence, retainedLayerOwners)
+			) {
+				continue;
+			}
+			if (
+				this.updateRuntimeSpawnRenderResidence(record.id, {
+					kind: "no-residence",
+					reason: "render-residence-evicted",
+				})
+			) {
+				changed += 1;
+			}
+		}
+		return changed;
+	}
+
 	applyResourceChange(change: DynamicEntityResourceChange): void {
 		const updated = this.#store.update(change.entityId, (record) =>
 			applyResourceChange(record, change),
@@ -623,6 +664,39 @@ function applyResourceChange(
 		renderability: createRenderability(change.resources, record.effectiveResidence),
 		resources: change.resources,
 	};
+}
+
+function withRuntimeRenderResidence(
+	record: DynamicEntityRecord,
+	renderResidence: DynamicEntityRenderResidence,
+): DynamicEntityRecord {
+	if (record.source.kind !== "runtime-spawn") {
+		return record;
+	}
+	return {
+		...record,
+		effectiveResidence: renderResidence,
+		renderability: createRenderability(record.resources, renderResidence),
+	};
+}
+
+function isRenderResidenceRetained(
+	renderResidence: DynamicEntityResidence,
+	retainedLayerOwners: readonly LayerOwnerKey[],
+): boolean {
+	if (renderResidence.kind === "env-cell") {
+		return retainedLayerOwners.some(
+			(owner) =>
+				owner.kind === "env-cell-system" &&
+				owner.landblockId === renderResidence.landblockId,
+		);
+	}
+
+	return retainedLayerOwners.some(
+		(owner) =>
+			owner.kind !== "env-cell-system" &&
+			owner.landblockId === renderResidence.landblockId,
+	);
 }
 
 function createAnimationStateFromSetupAnimationResource(

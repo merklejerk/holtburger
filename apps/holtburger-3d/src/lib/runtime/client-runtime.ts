@@ -149,6 +149,7 @@ import { createDynamicVisualResourceId } from "../dynamic/contracts";
 import type {
 	DynamicEntitySummaryDto,
 	DynamicEntityId,
+	DynamicEntityRenderResidence,
 	DynamicRuntimeSnapshot,
 } from "../dynamic/contracts";
 import type { PlacementTransformDto } from "../host/contracts";
@@ -662,6 +663,10 @@ interface StaticMaterializationSnapshot {
 export interface ClientRuntime {
 	createRuntimeSpawn(request: RuntimeDynamicSpawnRequest): DynamicEntityId;
 	removeRuntimeSpawn(entityId: DynamicEntityId): boolean;
+	updateRuntimeSpawnRenderResidence(
+		entityId: DynamicEntityId,
+		renderResidence: DynamicEntityRenderResidence,
+	): boolean;
 	updateSceneInterest(interest: RuntimeSceneInterest): void;
 	queryCameraResidencyAtPoint(options: {
 		readonly outdoorAnchorLandblockId: number;
@@ -911,6 +916,23 @@ class ClientRuntimeImpl implements ClientRuntime {
 		return removed;
 	}
 
+	updateRuntimeSpawnRenderResidence(
+		entityId: DynamicEntityId,
+		renderResidence: DynamicEntityRenderResidence,
+	): boolean {
+		this.#assertActive();
+		const updated =
+			this.#dynamicEntityController.updateRuntimeSpawnRenderResidence(
+				entityId,
+				renderResidence,
+			);
+		if (updated) {
+			this.#enqueueDynamicRendererResourceSync();
+			this.#refreshSceneDebugOverlay();
+		}
+		return updated;
+	}
+
 	updateSceneInterest(interest: RuntimeSceneInterest): void {
 		this.#assertActive();
 		this.#sceneInterest = normalizeSceneInterest(interest);
@@ -931,6 +953,9 @@ class ClientRuntimeImpl implements ClientRuntime {
 		try {
 			reconciliation = this.#reconcileStaticRetention(this.#sceneInterest);
 			this.#dynamicEntityController.retainLayerOwners(
+				reconciliation.retainedLayerOwners,
+			);
+			this.#dynamicEntityController.clearEvictedRuntimeRenderResidences(
 				reconciliation.retainedLayerOwners,
 			);
 			this.#enqueueDynamicRendererResourceSync();

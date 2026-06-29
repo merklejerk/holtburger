@@ -560,6 +560,87 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
+	it("evicts and rehomes runtime dynamic render residence without recreating the entity", async () => {
+		const renderer = new FakeRenderer();
+		const assetService = createResolvingAssetService();
+		const runtime = createClientRuntime({
+			assetService,
+			diagnostics: silentDiagnostics,
+			host: new FakeRuntimeHost(),
+			renderer,
+		});
+		const entityId = runtime.createRuntimeSpawn(
+			createFirstRuntimeSpawnFixtureRequest(),
+		);
+		await resolvePendingDynamicAssetsUntil(
+			assetService,
+			() => renderer.createDiagnosticsSnapshot().dynamicVisualResources > 0,
+		);
+		updateRuntimeFrame(runtime, 1);
+		expect(renderer.dynamicInstanceCommits.at(-1)?.instances).toHaveLength(1);
+
+		runtime.updateSceneInterest({ kind: "none" });
+		await flushRuntimeWork();
+		updateRuntimeFrame(runtime, 2);
+
+		expect(runtime.createDiagnosticsSnapshot().dynamic.records[0]).toMatchObject({
+			effectiveResidence: {
+				kind: "no-residence",
+				reason: "render-residence-evicted",
+			},
+			id: entityId,
+			renderability: {
+				reasons: ["no-render-residence"],
+				status: "non-renderable",
+			},
+			resources: {
+				status: "ready",
+			},
+		});
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicInstances: 0,
+			dynamicVisualResources: 1,
+		});
+		expect(renderer.dynamicInstanceCommits.at(-1)?.instances).toEqual([]);
+
+		updateOutdoorSceneInterest(runtime, {
+			domains: ["terrain"],
+			lod: { terrain: 0 },
+		});
+		expect(
+			runtime.updateRuntimeSpawnRenderResidence(entityId, {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			}),
+		).toBe(true);
+		await flushRuntimeWork();
+		updateRuntimeFrame(runtime, 3);
+
+		expect(runtime.createDiagnosticsSnapshot().dynamic.records[0]).toMatchObject({
+			effectiveResidence: {
+				kind: "outdoor-landblock",
+			},
+			id: entityId,
+			renderability: {
+				reasons: [],
+				status: "renderable",
+			},
+			resources: {
+				status: "ready",
+			},
+		});
+		expect(renderer.createDiagnosticsSnapshot()).toMatchObject({
+			dynamicInstances: 1,
+			dynamicVisualResources: 1,
+		});
+		expect(renderer.dynamicInstanceCommits.at(-1)?.instances[0]).toMatchObject({
+			entityId,
+			instanceId: `dynamic-instance:${entityId}`,
+		});
+
+		runtime.dispose();
+	});
+
 	it("renders and removes the ACE WCID 1 runtime spawn fixture without animation playback", async () => {
 		const renderer = new FakeRenderer();
 		const runtime = createClientRuntime({

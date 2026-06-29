@@ -1292,7 +1292,7 @@ Decisions and course corrections:
 
 ### Phase 8D4: Runtime Dynamic Residence Eviction And Rehome
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: move runtime-authored dynamics to no-residence when their static render residence is evicted, and allow them to become resident again without changing identity.
 
@@ -1311,14 +1311,21 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add controller/runtime residence-clear API for runtime-authored dynamics.
-- [ ] Connect static retention/eviction to runtime dynamic residence clearing.
-- [ ] Add residence rehome/update path that preserves entity identity.
-- [ ] Add focused controller/runtime tests for eviction and rehome.
+- [x] Add controller/runtime residence-clear API for runtime-authored dynamics.
+- [x] Connect static retention/eviction to runtime dynamic residence clearing.
+- [x] Add residence rehome/update path that preserves entity identity.
+- [x] Add focused controller/runtime tests for eviction and rehome.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Added `DynamicEntityController.updateRuntimeSpawnRenderResidence` and `ClientRuntime.updateRuntimeSpawnRenderResidence` for explicit rehome without recreating the runtime entity id.
+- Added `DynamicEntityController.clearEvictedRuntimeRenderResidences(retainedLayerOwners)` and wired it into scene-interest static retention reconciliation after static-authored dynamic seed pruning.
+- Retention mapping decision: concrete env-cell render residence is retained by a matching `env-cell-system` layer owner for the landblock; concrete outdoor render residence is retained by any matching non-env-cell layer owner for the landblock.
+- Residence eviction updates only `effectiveResidence`, renderability, and placement indexes. It does not delete runtime records, release runtime-owned visual resources, or recreate source facts.
+- Rehome updates the current render residence in place and recomputes renderability from existing resources, so ready runtime-owned resources can render again under the same entity id.
+- Added controller coverage for clear/rehome identity preservation.
+- Added runtime coverage proving scene-interest `none` evicts a ready runtime spawn to no-residence while preserving resources, and explicit rehome restores renderer instances for the same entity id.
+- Validation: `npm run test:ts -- src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/runtime/client-runtime.test.ts src/lib/dynamic/dynamic-placement-tracker.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts`; `npm run check`.
 
 ### Phase 8D5: No-Residence Diagnostics And Validation
 

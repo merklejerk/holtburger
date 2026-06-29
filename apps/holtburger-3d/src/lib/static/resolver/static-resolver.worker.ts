@@ -40,7 +40,12 @@ class StaticResolverRouter implements StaticResolver {
 		if (job.domain === "outdoor-terrain") {
 			return this.#terrainResolver.resolve(job);
 		}
-		if (job.domain === "outdoor-buildings" || job.domain === "outdoor-detail") {
+		if (
+			job.domain === "outdoor-buildings" ||
+			job.domain === "outdoor-explicit-objects" ||
+			job.domain === "outdoor-generated-scenery" ||
+			job.domain === "outdoor-detail"
+		) {
 			return this.#outdoorStaticObjectsResolver.resolve(job);
 		}
 		if (job.domain === "landblock-env-cells") {

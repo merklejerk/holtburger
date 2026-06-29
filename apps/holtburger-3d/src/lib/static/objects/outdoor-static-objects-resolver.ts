@@ -324,16 +324,28 @@ function createObjectInstanceKey(
 function isOutdoorStaticObjectDomain(
 	domain: StaticResolverJob["domain"],
 ): domain is OutdoorStaticObjectsScopePayload["domain"] {
-	return domain === "outdoor-buildings" || domain === "outdoor-detail";
+	return (
+		domain === "outdoor-buildings" ||
+		domain === "outdoor-explicit-objects" ||
+		domain === "outdoor-generated-scenery" ||
+		domain === "outdoor-detail"
+	);
 }
 
 function shouldIncludeOutdoorStaticObject(
 	domain: OutdoorStaticObjectsScopePayload["domain"],
 	objectKind: LandblockOutdoorPayloadDto["statics"][number]["kind"],
 ): boolean {
-	return domain === "outdoor-buildings"
-		? objectKind === "building"
-		: objectKind === "generated-scenery" || objectKind === "explicit-object";
+	switch (domain) {
+		case "outdoor-buildings":
+			return objectKind === "building";
+		case "outdoor-explicit-objects":
+			return objectKind === "explicit-object";
+		case "outdoor-generated-scenery":
+			return objectKind === "generated-scenery";
+		case "outdoor-detail":
+			return objectKind === "generated-scenery" || objectKind === "explicit-object";
+	}
 }
 
 function createOutdoorStaticBvhFacts(
@@ -432,7 +444,11 @@ function createRegionDetailRolesForDomain(
 	domain: OutdoorStaticObjectsScopePayload["domain"],
 	profile: RegionRenderProfilePayloadDto,
 ): readonly RegionDetailRoleFacts[] {
-	if (domain === "outdoor-detail") {
+	if (
+		domain === "outdoor-explicit-objects" ||
+		domain === "outdoor-generated-scenery" ||
+		domain === "outdoor-detail"
+	) {
 		return [];
 	}
 

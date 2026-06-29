@@ -634,9 +634,9 @@ describe("static object compatibility partitioner", () => {
 		).toBe(8);
 	});
 
-	it("bakes outdoor-detail alpha-test generated scenery into rendered draw units", () => {
+	it("bakes generated-scenery alpha-test objects into rendered draw units", () => {
 		const payload = createPayload({
-			domain: "outdoor-detail",
+			domain: "outdoor-generated-scenery",
 			instanceBounds: createBounds(),
 			materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x4 })],
 			textureRefs: createRgbaTextureRefs(),
@@ -647,19 +647,19 @@ describe("static object compatibility partitioner", () => {
 		const drawUnit = result.drawUnits[0];
 
 		expect(drawUnit).toMatchObject({
-			domain: "outdoor-detail",
+			domain: "outdoor-generated-scenery",
 			kind: "static-object-geometry",
 			materialFamily: "texture-rgba",
 			materialPass: "alpha-test",
 		});
 		expect(result.materialCoverage[0]).toMatchObject({
-			domain: "outdoor-detail",
+			domain: "outdoor-generated-scenery",
 			renderedTriangleCount: 1,
 			triangleCount: 1,
 		});
 		expect(result.staticObjectBakeDiagnostics).toEqual([
 			expect.objectContaining({
-				domain: "outdoor-detail",
+				domain: "outdoor-generated-scenery",
 				drawUnitCount: 1,
 				estimatedAvoidedFlattenedTriangleCount: 0,
 				estimatedAvoidedFlattenedTypedArrayBytes: 0,
@@ -686,10 +686,10 @@ describe("static object compatibility partitioner", () => {
 		expect(result.textureUses).toHaveLength(1);
 	});
 
-	it("emits shared visual resources and render instances for repeated generated outdoor detail", () => {
+	it("emits shared visual resources and render instances for repeated generated scenery", () => {
 		const payload = duplicateObjectInstance(
 			createPayload({
-				domain: "outdoor-detail",
+				domain: "outdoor-generated-scenery",
 				instanceBounds: createBounds(),
 				materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x4 })],
 				textureRefs: createRgbaTextureRefs(),
@@ -703,7 +703,7 @@ describe("static object compatibility partitioner", () => {
 		expect(result.staticObjectRenderInstances).toMatchObject([
 			{
 				bounds: createBounds(),
-				domain: "outdoor-detail",
+				domain: "outdoor-generated-scenery",
 				generated: { sceneId: 1, sceneTemplateIndex: 0, terrainIndex: 0 },
 				landblockId: 0xda55ffff,
 				source: createObjectIdentity({
@@ -713,7 +713,7 @@ describe("static object compatibility partitioner", () => {
 			},
 			{
 				bounds: createBounds(),
-				domain: "outdoor-detail",
+				domain: "outdoor-generated-scenery",
 				generated: { sceneId: 1, sceneTemplateIndex: 0, terrainIndex: 0 },
 				landblockId: 0xda55ffff,
 				source: createObjectIdentity({
@@ -1054,10 +1054,10 @@ describe("static object compatibility partitioner", () => {
 		]);
 	});
 
-	it("cuts over repeated transparent generated outdoor-detail partitions to shared instances", () => {
+	it("cuts over repeated transparent generated-scenery partitions to shared instances", () => {
 		const payload = duplicateObjectInstance(
 			createPayload({
-				domain: "outdoor-detail",
+				domain: "outdoor-generated-scenery",
 				instanceBounds: createBounds(),
 				materials: [createTexturedMaterial(0x08000010, { surfaceType: 0x10 })],
 				textureRefs: createRgbaTextureRefs(),
@@ -1800,9 +1800,11 @@ function createPayload(options: {
 	readonly textureRefs?: readonly StaticObjectTextureRefFacts[];
 }): OutdoorStaticObjectsScopePayload {
 	const domain = options.domain ?? "outdoor-buildings";
+	const isGeneratedScenery =
+		domain === "outdoor-generated-scenery" || domain === "outdoor-detail";
 	const objectIdentity = createObjectIdentity({
-		instanceId: domain === "outdoor-detail" ? "detail-0" : "building-0",
-		objectKind: domain === "outdoor-detail" ? "generated-scenery" : "building",
+		instanceId: isGeneratedScenery ? "detail-0" : "building-0",
+		objectKind: isGeneratedScenery ? "generated-scenery" : "building",
 	});
 
 	return {
@@ -1841,6 +1843,7 @@ function createPayload(options: {
 			{
 				debug: { sourceAssetId: "setup-model/02000010" },
 				generated:
+					domain === "outdoor-generated-scenery" ||
 					domain === "outdoor-detail"
 						? { sceneId: 1, sceneTemplateIndex: 0, terrainIndex: 0 }
 						: null,

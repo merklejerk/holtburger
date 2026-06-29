@@ -73,7 +73,13 @@ export function planStaticDemand(
 		revision,
 	});
 	addOutdoorDomainRequests(work, {
-		domain: "outdoor-detail",
+		domain: "outdoor-explicit-objects",
+		focusLandblockId: landblockId,
+		radius: lod.detail,
+		revision,
+	});
+	addOutdoorDomainRequests(work, {
+		domain: "outdoor-generated-scenery",
 		focusLandblockId: landblockId,
 		radius: lod.detail,
 		revision,

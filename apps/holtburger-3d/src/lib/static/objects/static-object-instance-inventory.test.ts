@@ -3,11 +3,11 @@ import type {
 	StaticObjectGeometryStaticDrawUnit,
 	StaticObjectSourceMappingCoverage,
 } from "../contracts";
-import { inventoryGeneratedOutdoorDetailInstances } from "./static-object-instance-inventory";
+import { inventoryGeneratedOutdoorSceneryInstances } from "./static-object-instance-inventory";
 
 describe("generated static object instance inventory", () => {
-	it("groups repeated generated outdoor-detail coverage by retained source identity", () => {
-		const inventory = inventoryGeneratedOutdoorDetailInstances([
+	it("groups repeated generated-scenery coverage by retained source identity", () => {
+		const inventory = inventoryGeneratedOutdoorSceneryInstances([
 			createDrawUnit({
 				coverage: [
 					createCoverage({ instanceId: "tree-a" }),
@@ -42,8 +42,8 @@ describe("generated static object instance inventory", () => {
 		});
 	});
 
-	it("ignores explicit objects and non-outdoor-detail draw units", () => {
-		const inventory = inventoryGeneratedOutdoorDetailInstances([
+	it("ignores explicit objects and non-generated-scenery draw units", () => {
+		const inventory = inventoryGeneratedOutdoorSceneryInstances([
 			createDrawUnit({
 				coverage: [
 					createCoverage({
@@ -62,7 +62,7 @@ describe("generated static object instance inventory", () => {
 					}),
 					createCoverage({ instanceId: "one-off-generated" }),
 				],
-				drawUnitId: "detail-du",
+				drawUnitId: "generated-du",
 			}),
 		]);
 
@@ -84,7 +84,7 @@ function createDrawUnit(options: {
 }): StaticObjectGeometryStaticDrawUnit {
 	return {
 		coordinateSpace: "landblock-render-local",
-		domain: options.domain ?? "outdoor-detail",
+		domain: options.domain ?? "outdoor-generated-scenery",
 		drawUnitId: options.drawUnitId,
 		indexType: "uint16",
 		indices: new Uint16Array([0, 1, 2]),
@@ -118,7 +118,7 @@ function createDrawUnit(options: {
 			domain:
 				options.domain === "outdoor-buildings"
 					? "outdoor-buildings"
-					: "outdoor-detail",
+					: "outdoor-generated-scenery",
 			kind: "outdoor-static-objects",
 			landblockId: 0xda56ffff,
 		},

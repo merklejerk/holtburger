@@ -33,6 +33,8 @@ import type {
 	DynamicRendererInstanceCommit,
 	EnvCellSystemLayerPayload,
 	OutdoorBuildingsLayerPayload,
+	OutdoorExplicitObjectsLayerPayload,
+	OutdoorGeneratedSceneryLayerPayload,
 	OutdoorDetailsLayerPayload,
 	PortalFrameWorkPlan,
 	RenderPassPlan,
@@ -1887,7 +1889,7 @@ describe("browser client runtime", () => {
 		runtime.dispose();
 	});
 
-	it("forwards instanced-only outdoor detail layers to the renderer", async () => {
+	it("forwards instanced-only generated scenery layers to the renderer", async () => {
 		const renderer = new FakeRenderer();
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -1916,28 +1918,35 @@ describe("browser client runtime", () => {
 			domains: ["terrain", "generated-scenery"],
 			lod: { detail: 0, terrain: 0 },
 		});
-		const detailRequest = resolver.pendingRequests.find(
-			(request) => request.job.domain === "outdoor-detail",
+		const generatedSceneryRequest = resolver.pendingRequests.find(
+			(request) => request.job.domain === "outdoor-generated-scenery",
 		);
-		resolver.complete(detailRequest?.requestId ?? "", {
-			scope: createOutdoorStaticObjectsPayload({ landblockId }),
+		resolver.complete(generatedSceneryRequest?.requestId ?? "", {
+			scope: createOutdoorStaticObjectsPayload({
+				domain: "outdoor-generated-scenery",
+				landblockId,
+			}),
 		});
 		await flushPromises();
-		baker.complete("1:landblock:dc59ffff:outdoor-detail", {
+		baker.complete("1:landblock:dc59ffff:outdoor-generated-scenery", {
 			drawUnits: [],
-			staticObjectRenderInstances: [instance],
+			staticObjectRenderInstances: [
+				{ ...instance, domain: "outdoor-generated-scenery" },
+			],
 			staticObjectVisualResources: [resource],
 		});
 		await flushPromises();
 
-		expect(renderer.outdoorDetailsLayerUpdates).toEqual([
+		expect(renderer.outdoorGeneratedSceneryLayerUpdates).toEqual([
 			[
 				landblockId,
 				expect.objectContaining({
 					drawUnits: [],
-					instancedObjectInstances: [instance],
+					instancedObjectInstances: [
+						{ ...instance, domain: "outdoor-generated-scenery" },
+					],
 					instancedObjectResources: [resource],
-					kind: "outdoor-detail",
+					kind: "outdoor-generated-scenery",
 					landblockId,
 				}),
 			],
@@ -1962,21 +1971,27 @@ describe("browser client runtime", () => {
 			domains: ["terrain", "buildings", "generated-scenery"],
 			lod: { buildings: 0, detail: 0, terrain: 0 },
 		});
-		const detailRequest = resolver.pendingRequests.find(
-			(request) => request.job.domain === "outdoor-detail",
+		const generatedSceneryRequest = resolver.pendingRequests.find(
+			(request) => request.job.domain === "outdoor-generated-scenery",
 		);
-		resolver.complete(detailRequest?.requestId ?? "", {
-			scope: createOutdoorStaticObjectsPayload(),
+		resolver.complete(generatedSceneryRequest?.requestId ?? "", {
+			scope: createOutdoorStaticObjectsPayload({
+				domain: "outdoor-generated-scenery",
+			}),
 		});
 		await flushPromises();
-		baker.complete("1:landblock:da55ffff:outdoor-detail", {
-			drawUnits: [createStaticObjectDrawUnit("static-draw-a")],
+		baker.complete("1:landblock:da55ffff:outdoor-generated-scenery", {
+			drawUnits: [
+				createStaticObjectDrawUnit("static-draw-a", {
+					domain: "outdoor-generated-scenery",
+				}),
+			],
 		});
 		await flushPromises();
 
 		const report = runtime.createStaticSelectionDiagnosticsReport(
 			createOutdoorStaticObjectSelectionKey({
-				domain: "outdoor-detail",
+				domain: "outdoor-generated-scenery",
 				instanceId: "outdoor-static-0",
 				landblockId: 0xda55ffff,
 			}),
@@ -2695,6 +2710,14 @@ class FakeRenderer implements Renderer {
 		number,
 		OutdoorBuildingsLayerPayload | null,
 	][] = [];
+	readonly outdoorExplicitObjectsLayerUpdates: readonly [
+		number,
+		OutdoorExplicitObjectsLayerPayload | null,
+	][] = [];
+	readonly outdoorGeneratedSceneryLayerUpdates: readonly [
+		number,
+		OutdoorGeneratedSceneryLayerPayload | null,
+	][] = [];
 	readonly outdoorDetailsLayerUpdates: readonly [
 		number,
 		OutdoorDetailsLayerPayload | null,
@@ -2792,6 +2815,18 @@ class FakeRenderer implements Renderer {
 		payload: OutdoorBuildingsLayerPayload | null,
 	): void {
 		this.outdoorBuildingsLayerUpdates.push([landblockId, payload]);
+	}
+	setOutdoorExplicitObjectsLayer(
+		landblockId: number,
+		payload: OutdoorExplicitObjectsLayerPayload | null,
+	): void {
+		this.outdoorExplicitObjectsLayerUpdates.push([landblockId, payload]);
+	}
+	setOutdoorGeneratedSceneryLayer(
+		landblockId: number,
+		payload: OutdoorGeneratedSceneryLayerPayload | null,
+	): void {
+		this.outdoorGeneratedSceneryLayerUpdates.push([landblockId, payload]);
 	}
 	setOutdoorDetailsLayer(
 		landblockId: number,

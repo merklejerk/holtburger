@@ -22,9 +22,20 @@ describe("static demand planner", () => {
 		const buildingWork = work.filter(
 			(item) => item.job.domain === "outdoor-buildings",
 		);
+		const explicitObjectWork = work.filter(
+			(item) => item.job.domain === "outdoor-explicit-objects",
+		);
+		const generatedSceneryWork = work.filter(
+			(item) => item.job.domain === "outdoor-generated-scenery",
+		);
 
 		expect(terrainWork).toHaveLength(9);
 		expect(buildingWork).toHaveLength(9);
+		expect(explicitObjectWork).toHaveLength(9);
+		expect(generatedSceneryWork).toHaveLength(9);
+		expect(work.some((item) => item.job.domain === "outdoor-detail")).toBe(
+			false,
+		);
 		expect(work.every((item) => item.revision === 7)).toBe(true);
 		expect(work.every((item) => item.job.scope.kind === "landblock")).toBe(
 			true,

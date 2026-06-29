@@ -20,6 +20,8 @@ import type {
 	StaticLandblockLayerKind,
 	TerrainLayerPayload,
 	OutdoorBuildingsLayerPayload,
+	OutdoorExplicitObjectsLayerPayload,
+	OutdoorGeneratedSceneryLayerPayload,
 	OutdoorDetailsLayerPayload,
 	StaticObjectUploadDiagnostics,
 	DynamicRendererResourceCommit,
@@ -2004,6 +2006,18 @@ class ClientRuntimeImpl implements ClientRuntime {
 			case "outdoor-buildings":
 				this.#renderer.setOutdoorBuildingsLayer(payload.landblockId, payload);
 				break;
+			case "outdoor-explicit-objects":
+				this.#renderer.setOutdoorExplicitObjectsLayer(
+					payload.landblockId,
+					payload,
+				);
+				break;
+			case "outdoor-generated-scenery":
+				this.#renderer.setOutdoorGeneratedSceneryLayer(
+					payload.landblockId,
+					payload,
+				);
+				break;
 			case "outdoor-detail":
 				this.#renderer.setOutdoorDetailsLayer(payload.landblockId, payload);
 				break;
@@ -2042,6 +2056,12 @@ class ClientRuntimeImpl implements ClientRuntime {
 				break;
 			case "outdoor-buildings":
 				this.#renderer.setOutdoorBuildingsLayer(payload.landblockId, null);
+				break;
+			case "outdoor-explicit-objects":
+				this.#renderer.setOutdoorExplicitObjectsLayer(payload.landblockId, null);
+				break;
+			case "outdoor-generated-scenery":
+				this.#renderer.setOutdoorGeneratedSceneryLayer(payload.landblockId, null);
 				break;
 			case "outdoor-detail":
 				this.#renderer.setOutdoorDetailsLayer(payload.landblockId, null);
@@ -2992,11 +3012,15 @@ function createMaterializedLandblockLayerPayloads(
 ): readonly (
 	| TerrainLayerPayload
 	| OutdoorBuildingsLayerPayload
+	| OutdoorExplicitObjectsLayerPayload
+	| OutdoorGeneratedSceneryLayerPayload
 	| OutdoorDetailsLayerPayload
 )[] {
 	const payloads: (
 		| TerrainLayerPayload
 		| OutdoorBuildingsLayerPayload
+		| OutdoorExplicitObjectsLayerPayload
+		| OutdoorGeneratedSceneryLayerPayload
 		| OutdoorDetailsLayerPayload
 	)[] = [];
 	const terrainByLandblock = new Map<
@@ -3010,6 +3034,14 @@ function createMaterializedLandblockLayerPayloads(
 	const detailByLandblock = new Map<
 		number,
 		OutdoorDetailsLayerPayload["drawUnits"]
+	>();
+	const explicitObjectsByLandblock = new Map<
+		number,
+		OutdoorExplicitObjectsLayerPayload["drawUnits"]
+	>();
+	const generatedSceneryByLandblock = new Map<
+		number,
+		OutdoorGeneratedSceneryLayerPayload["drawUnits"]
 	>();
 
 	for (const drawUnit of materialized.materializedDrawUnits) {
@@ -3035,14 +3067,37 @@ function createMaterializedLandblockLayerPayloads(
 				...(detailByLandblock.get(drawUnit.landblockId) ?? []),
 				drawUnit as OutdoorDetailsLayerPayload["drawUnits"][number],
 			]);
+			continue;
+		}
+		if (drawUnit.domain === "outdoor-explicit-objects") {
+			explicitObjectsByLandblock.set(drawUnit.landblockId, [
+				...(explicitObjectsByLandblock.get(drawUnit.landblockId) ?? []),
+				drawUnit as OutdoorExplicitObjectsLayerPayload["drawUnits"][number],
+			]);
+			continue;
+		}
+		if (drawUnit.domain === "outdoor-generated-scenery") {
+			generatedSceneryByLandblock.set(drawUnit.landblockId, [
+				...(generatedSceneryByLandblock.get(drawUnit.landblockId) ?? []),
+				drawUnit as OutdoorGeneratedSceneryLayerPayload["drawUnits"][number],
+			]);
 		}
 	}
 	for (const instance of materialized.staticObjectRenderInstances) {
-		if (instance.domain !== "outdoor-detail") {
-			continue;
+		if (instance.domain === "outdoor-detail") {
+			if (!detailByLandblock.has(instance.landblockId)) {
+				detailByLandblock.set(instance.landblockId, []);
+			}
 		}
-		if (!detailByLandblock.has(instance.landblockId)) {
-			detailByLandblock.set(instance.landblockId, []);
+		if (instance.domain === "outdoor-generated-scenery") {
+			if (!generatedSceneryByLandblock.has(instance.landblockId)) {
+				generatedSceneryByLandblock.set(instance.landblockId, []);
+			}
+		}
+		if (instance.domain === "outdoor-explicit-objects") {
+			if (!explicitObjectsByLandblock.has(instance.landblockId)) {
+				explicitObjectsByLandblock.set(instance.landblockId, []);
+			}
 		}
 	}
 
@@ -3108,6 +3163,84 @@ function createMaterializedLandblockLayerPayloads(
 			),
 			textureUses: delta.textureUses.filter(
 				(textureUse) => textureUse.domain === "outdoor-buildings",
+			),
+		});
+	}
+	for (const [landblockId, drawUnits] of explicitObjectsByLandblock) {
+		payloads.push({
+			drawUnits,
+			generationId: createStaticLandblockLayerGenerationIdForRuntime(
+				"outdoor-explicit-objects",
+				landblockId,
+				delta.revision,
+			),
+			kind: "outdoor-explicit-objects",
+			landblockId,
+			materialCoverage: delta.materialCoverage.filter(
+				(coverage) =>
+					coverage.domain === "outdoor-explicit-objects" &&
+					coverage.landblockId === landblockId,
+			),
+			sourceMappingRecords: materialized.staticSourceMappings.filter(
+				(record) =>
+					record.owner.kind === "work" &&
+					record.owner.domain === "outdoor-explicit-objects" &&
+					record.owner.scope.landblockId === landblockId,
+			),
+			spatialRecords: materialized.staticSpatialRecords.filter(
+				(record) =>
+					record.owner.kind === "work" &&
+					record.owner.domain === "outdoor-explicit-objects" &&
+					record.owner.scope.landblockId === landblockId,
+			),
+			textureUses: delta.textureUses.filter(
+				(textureUse) => textureUse.domain === "outdoor-explicit-objects",
+			),
+		});
+	}
+	for (const [landblockId, drawUnits] of generatedSceneryByLandblock) {
+		payloads.push({
+			drawUnits,
+			generationId: createStaticLandblockLayerGenerationIdForRuntime(
+				"outdoor-generated-scenery",
+				landblockId,
+				delta.revision,
+			),
+			instancedObjectInstances: materialized.staticObjectRenderInstances.filter(
+				(instance) =>
+					instance.domain === "outdoor-generated-scenery" &&
+					instance.landblockId === landblockId,
+			),
+			instancedObjectResources: materialized.staticObjectVisualResources.filter(
+				(resource) =>
+					materialized.staticObjectRenderInstances.some(
+						(instance) =>
+							instance.domain === "outdoor-generated-scenery" &&
+							instance.landblockId === landblockId &&
+							instance.resourceId === resource.resourceId,
+					),
+			),
+			kind: "outdoor-generated-scenery",
+			landblockId,
+			materialCoverage: delta.materialCoverage.filter(
+				(coverage) =>
+					coverage.domain === "outdoor-generated-scenery" &&
+					coverage.landblockId === landblockId,
+			),
+			sourceMappingRecords: materialized.staticSourceMappings.filter(
+				(record) =>
+					record.owner.kind === "work" &&
+					record.owner.domain === "outdoor-generated-scenery" &&
+					record.owner.scope.landblockId === landblockId,
+			),
+			spatialRecords: materialized.staticSpatialRecords.filter(
+				(record) =>
+					record.owner.kind === "work" &&
+					record.owner.domain === "outdoor-generated-scenery" &&
+					record.owner.scope.landblockId === landblockId,
+			),
+			textureUses: delta.textureUses.filter(
+				(textureUse) => textureUse.domain === "outdoor-generated-scenery",
 			),
 		});
 	}

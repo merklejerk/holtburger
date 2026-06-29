@@ -1184,30 +1184,58 @@ Decisions and course corrections:
 - Naming debt: dynamic presentation still uses `sourceScopeKey` field names, but the value is now the layer owner id. This should be renamed in Phase 8E unless Phase 8D removes the field first.
 - Validation: `npm run test:ts -- src/lib/static/demand-planner.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/runtime/static-scene-query.test.ts src/lib/runtime/client-runtime.test.ts src/lib/dynamic/dynamic-entity-controller.test.ts src/lib/dynamic/dynamic-entity-resource-manager.test.ts`; `npm run check`.
 
-### Phase 8D: Runtime Readiness And No-Residence Dynamics
+### Phase 8D1: Owner-State Scene Interest Readiness
 
 Status: pending.
 
-Goal: derive scene-interest readiness from owner states and make runtime-authored dynamics survive static residence eviction.
+Goal: derive scene-interest readiness from demanded layer owner states instead of active work ids/revisions.
 
 Deliverables:
 
 - Replace scene-interest settled accounting based on active work ids/revisions with demanded owner-state checks.
-- Add explicit no-residence/unrendered state for runtime-authored dynamics when their render residence is evicted.
-- Update diagnostics and runtime events/tests for owner-state readiness and no-residence dynamics.
+- Track the retained layer owners for the active scene interest revision.
+- Update runtime settled-event tests for owner-state readiness and failed owner states.
 
 Acceptance criteria:
 
-- Runtime-authored dynamics survive static layer eviction and become diagnosable no-residence records.
 - `scene-interest-settled` readiness is derived from owner states, not active work ids/revisions.
 - Failed owner states still produce failed settled events.
+- No scene-interest settled path depends on `#activeSceneWorkIds` or `#activeSceneWorkRevisions`.
 
 Task checklist:
 
 - [ ] Replace `#activeSceneWorkIds` / `#activeSceneWorkRevisions` readiness with owner-state tracking.
-- [ ] Add runtime dynamic no-residence state and renderer sync behavior.
 - [ ] Update scene-interest settled tests.
-- [ ] Update dynamic diagnostics/tests for unrendered runtime-authored records.
+- [ ] Run focused runtime settled-event tests.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 8D2: Runtime Dynamic No-Residence State
+
+Status: pending.
+
+Goal: make runtime-authored dynamics survive static residence eviction as explicit no-residence/unrendered records.
+
+Deliverables:
+
+- Add explicit no-residence/unrendered state for runtime-authored dynamics when their render residence is evicted.
+- Prevent no-residence runtime dynamics from being submitted as renderer instances while preserving their records/resources.
+- Update dynamic diagnostics, placement indexes, renderer sync, and tests for unrendered runtime-authored records.
+
+Acceptance criteria:
+
+- Runtime-authored dynamics survive static layer eviction and become diagnosable no-residence records.
+- No-residence runtime dynamics are not indexed as outdoor/env-cell occupants or committed as renderer instances.
+- Restoring a compatible static residence can make the runtime dynamic renderable again without recreating the runtime entity id.
+
+Task checklist:
+
+- [ ] Add runtime dynamic no-residence state to dynamic contracts/controller/store.
+- [ ] Update renderer instance commit filtering and placement tracking.
+- [ ] Update runtime dynamic diagnostics/tests for unrendered records.
+- [ ] Run focused dynamic/runtime renderer sync tests.
 
 Decisions and course corrections:
 

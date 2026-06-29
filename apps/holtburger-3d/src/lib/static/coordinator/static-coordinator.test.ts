@@ -1026,6 +1026,90 @@ describe("static coordinator", () => {
 		expect(coordinator.createSnapshot().materialCoverage).toEqual([]);
 	});
 
+	it("prunes material coverage by retained layer owner", async () => {
+		const resolver = new DeferredStaticResolver();
+		const baker = new DeferredStaticBaker();
+		const coordinator = new StaticCoordinator({
+			baker,
+			batching: { maxPayloadsPerBatch: 1, maxWaitMs: 0 },
+			resolver,
+		});
+
+		const work = activeWorkForDemand(coordinator, {
+			location: {
+				kind: "outdoor-landblock",
+				landblockId: 0xda55ffff,
+			},
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: -1,
+				terrain: 1,
+			},
+		}).filter((item) => item.job.domain === "outdoor-terrain");
+		const completedRequests = resolver.pendingRequests.slice(0, 2);
+		const completedWork = completedRequests.map((request) => {
+			const match = work.find(
+				(item) => item.job.scope.landblockId === request.job.scope.landblockId,
+			);
+			if (!match) {
+				throw new Error("Expected completed terrain request to match work.");
+			}
+			return match;
+		});
+		const firstWork = completedWork[0];
+		const secondWork = completedWork[1];
+		if (!firstWork || !secondWork) {
+			throw new Error("terrain radius 1 should create multiple owners");
+		}
+
+		for (const request of completedRequests) {
+			resolver.complete(request.requestId);
+		}
+		await flushPromises();
+
+		for (const input of baker.pendingInputs.slice(0, 2)) {
+			const workItem = input.items[0]?.work;
+			if (!workItem) {
+				throw new Error("Expected one terrain work item per bake input.");
+			}
+			baker.complete(input.staticBatchId, {
+				materialCoverage: [
+					createMaterialCoverage("outdoor-terrain", {
+						coverageKey: `outdoor-terrain:${workItem.job.scope.landblockId.toString(16)}`,
+						coverageKind: "terrain",
+						landblockId: workItem.job.scope.landblockId,
+					}),
+				],
+			});
+		}
+		await flushPromises();
+
+		expect(coordinator.createSnapshot().materialCoverage).toHaveLength(2);
+
+		activeWorkForDemand(coordinator, {
+			location: {
+				kind: "outdoor-landblock",
+				landblockId: secondWork.job.scope.landblockId,
+			},
+			lod: {
+				buildings: -1,
+				detail: -1,
+				envCells: -1,
+				terrain: 0,
+			},
+		});
+
+		expect(coordinator.createSnapshot().materialCoverage).toEqual([
+			createMaterialCoverage("outdoor-terrain", {
+				coverageKey: `outdoor-terrain:${secondWork.job.scope.landblockId.toString(16)}`,
+				coverageKind: "terrain",
+				landblockId: secondWork.job.scope.landblockId,
+			}),
+		]);
+		expect(firstWork.workId).not.toBe(secondWork.workId);
+	});
+
 	it("retains multiple latest material coverage reports for one static domain", async () => {
 		const resolver = new DeferredStaticResolver();
 		const baker = new DeferredStaticBaker();
@@ -1515,6 +1599,7 @@ function createMaterialCoverage(
 	options: {
 		readonly coverageKey?: string;
 		readonly coverageKind?: StaticMaterialCoverageReport["coverageKind"];
+		readonly landblockId?: number;
 	} = {},
 ): StaticMaterialCoverageReport {
 	return {
@@ -1526,7 +1611,7 @@ function createMaterialCoverage(
 		domain,
 		fallbackReasonCount: 0,
 		fallbackReasonCounts: [],
-		landblockId: 0xda55ffff,
+		landblockId: options.landblockId ?? 0xda55ffff,
 		materialCount: 0,
 		partitionCount: 0,
 		renderedTriangleCount: 0,

@@ -1167,6 +1167,7 @@ function filterStaticBakeResultForWorks(
 	works: readonly ScheduledStaticWork[],
 ): StaticBakeBatchResult {
 	const desiredKeys = new Set(works.map(createDesiredWorkKey));
+	const ownerIds = new Set(works.map(createLayerOwnerKeyIdForWork));
 	const workIds = new Set(works.map((work) => work.workId));
 	const drawUnitIds = new Set(
 		result.drawUnits
@@ -1220,7 +1221,11 @@ function filterStaticBakeResultForWorks(
 		),
 		staticAuthoredDynamicSeeds: result.staticAuthoredDynamicSeeds.filter(
 			(record) =>
-				isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
+				isPeerRecordOwnedByCurrentWork(record.owner, {
+					drawUnitIds,
+					ownerIds,
+					workIds,
+				}),
 		),
 		staticObjectRenderInstances: retainedStaticObjectRenderInstances,
 		staticObjectVisualResources: result.staticObjectVisualResources.filter(
@@ -1229,19 +1234,39 @@ function filterStaticBakeResultForWorks(
 		),
 		staticPortalInteriorRecords: result.staticPortalInteriorRecords.filter(
 			(record) =>
-				isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
+				isPeerRecordOwnedByCurrentWork(record.owner, {
+					drawUnitIds,
+					ownerIds,
+					workIds,
+				}),
 		),
 		staticPortalGraphs: result.staticPortalGraphs.filter((record) =>
-			isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
+			isPeerRecordOwnedByCurrentWork(record.owner, {
+				drawUnitIds,
+				ownerIds,
+				workIds,
+			}),
 		),
 		staticSourceMappings: result.staticSourceMappings.filter((record) =>
-			isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
+			isPeerRecordOwnedByCurrentWork(record.owner, {
+				drawUnitIds,
+				ownerIds,
+				workIds,
+			}),
 		),
 		staticSpatialRecords: result.staticSpatialRecords.filter((record) =>
-			isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
+			isPeerRecordOwnedByCurrentWork(record.owner, {
+				drawUnitIds,
+				ownerIds,
+				workIds,
+			}),
 		),
 		staticVisibilityRecords: result.staticVisibilityRecords.filter((record) =>
-			isPeerRecordOwnedByCurrentWork(record.owner, workIds, drawUnitIds),
+			isPeerRecordOwnedByCurrentWork(record.owner, {
+				drawUnitIds,
+				ownerIds,
+				workIds,
+			}),
 		),
 		textureUses: result.textureUses.filter((textureUse) =>
 			textureUse.owners.some((owner) =>
@@ -1256,14 +1281,20 @@ function filterStaticBakeResultForWorks(
 
 function isPeerRecordOwnedByCurrentWork(
 	owner: StaticPeerRecordOwner,
-	workIds: ReadonlySet<string>,
-	drawUnitIds: ReadonlySet<string>,
+	retained: {
+		readonly drawUnitIds: ReadonlySet<string>;
+		readonly ownerIds: ReadonlySet<string>;
+		readonly workIds: ReadonlySet<string>;
+	},
 ): boolean {
 	if (owner.kind === "draw-unit") {
-		return drawUnitIds.has(owner.drawUnitId);
+		return retained.drawUnitIds.has(owner.drawUnitId);
+	}
+	if (owner.kind === "layer-owner") {
+		return retained.ownerIds.has(owner.ownerId);
 	}
 
-	return workIds.has(owner.workId);
+	return retained.workIds.has(owner.workId);
 }
 
 function toScheduledStaticWorkStatus(

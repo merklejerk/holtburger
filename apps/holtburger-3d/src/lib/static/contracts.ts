@@ -934,6 +934,7 @@ export interface StaticObjectSourceGeometryAttachment {
 
 export type StaticPeerRecordOwner =
 	| StaticDrawUnitPeerRecordOwner
+	| StaticLayerPeerRecordOwner
 	| StaticWorkPeerRecordOwner;
 
 interface StaticDrawUnitPeerRecordOwner {
@@ -947,6 +948,13 @@ export interface StaticWorkPeerRecordOwner {
 	readonly domain: StaticDomain;
 	readonly scope: StaticResolverScope;
 	readonly scopeKey: string;
+}
+
+export interface StaticLayerPeerRecordOwner {
+	readonly kind: "layer-owner";
+	readonly key: LayerOwnerKey;
+	readonly ownerId: string;
+	readonly domain: StaticDomain;
 }
 
 export type StaticSpatialRecord =

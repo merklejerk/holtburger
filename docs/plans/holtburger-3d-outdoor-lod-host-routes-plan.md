@@ -1006,31 +1006,118 @@ Decisions and course corrections:
 - Audit result: no `residentResourcesByDesiredKey`, `collectCommittedResourceKeysByDesiredKey`, `pruneMaterialCoverageByDesiredKeys`, or `pruneStaticObjectBakeDiagnosticsByDesiredKeys` references remain.
 - Validation: `npm run test:ts -- src/lib/static/coordinator/static-coordinator.test.ts`; `npm run check`.
 
-### Phase 8B: Layer-Owned Peer Records
+### Phase 8B1: Peer Owner Contract Shape
 
 Status: pending.
 
-Goal: replace durable work-owned static peer records with layer-owned peer records.
+Goal: add the durable layer-owned peer record contract without changing every producer and consumer in the same step.
 
 Deliverables:
 
 - Add a layer-owner variant to `StaticPeerRecordOwner`.
-- Update terrain/object/env-cell bakers to emit layer-owned durable records where records outlive a transient work item.
-- Keep work ids only as optional diagnostic metadata where useful.
-- Update tests that currently construct `StaticWorkPeerRecordOwner` for durable records.
+- Add a helper that derives the layer peer owner from scheduled work using the same owner key rules as coordinator residency.
+- Narrow durable peer-record interfaces that are known to outlive a transient work item to the layer owner shape.
+- Keep `StaticWorkPeerRecordOwner` only as an explicitly temporary compatibility type until producer/consumer cutover finishes.
 
 Acceptance criteria:
 
-- Durable spatial, visibility, portal, source-mapping, and static-authored dynamic seed records no longer require `workId` ownership.
-- Existing stale-output filtering remains owner-gated after peer record ownership changes.
-- Tests do not preserve work-owner records as a stable durable contract.
+- The peer-owner contract can represent layer ownership directly.
+- Durable record type declarations no longer require `workId` ownership.
+- No runtime behavior changes are hidden in this phase.
 
 Task checklist:
 
 - [ ] Add typed layer owner peer-record owner shape.
-- [ ] Update static bakers and helpers that create work peer owners.
-- [ ] Update coordinator and runtime tests to assert layer ownership.
-- [ ] Audit remaining `StaticWorkPeerRecordOwner` usage and document any transient diagnostic survivors.
+- [ ] Add scheduled-work-to-layer-peer-owner helper.
+- [ ] Update durable peer-record owner field types.
+- [ ] Run typecheck to expose remaining producer/consumer call sites.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 8B2: Baker Peer-Owner Emission
+
+Status: pending.
+
+Goal: cut static producers over so durable records emitted by terrain/object/env-cell bakers are owned by layers, not work items.
+
+Deliverables:
+
+- Update terrain/object/env-cell bakers and portal-graph helpers to emit layer-owned durable records.
+- Update tests that construct durable peer records through baker fixtures.
+- Keep work ids only as transient diagnostic/timing metadata where useful.
+
+Acceptance criteria:
+
+- Durable spatial, visibility, portal, source-mapping, and static-authored dynamic seed records emitted by bakers have layer-owner ownership.
+- Baker tests assert the layer-owner shape instead of preserving work-owner records as stable output.
+- Existing stale-output filtering still rejects records for no-longer-demanded owners.
+
+Task checklist:
+
+- [ ] Replace baker-local work peer owner constructors.
+- [ ] Update portal graph and env-cell source-mapping owner arguments.
+- [ ] Update baker-focused tests and fixtures.
+- [ ] Run focused static baker tests.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 8B3: Runtime Peer-Owner Readers
+
+Status: pending.
+
+Goal: update runtime consumers so layer-owned durable records are the normal path while old work owners are not kept as an executable escape hatch.
+
+Deliverables:
+
+- Update committed record stores, materialization filters, texture-batch lookup keys, and static-authored dynamic seed creation to read layer owners.
+- Update test fakes and runtime fixtures that still assume per-work source-scope identity.
+- Keep any temporary work-owner read branch explicit and scheduled for the Phase 8B4/8E audit.
+
+Acceptance criteria:
+
+- Runtime materialization and static-authored dynamic seed paths consume layer-owned records.
+- Source-scope and texture-batch lookup identity comes from the layer owner id.
+- Runtime tests do not depend on work-owner records as durable output.
+
+Task checklist:
+
+- [ ] Update scene-query committed-record owner keying.
+- [ ] Update runtime materialization filters and texture lookup helpers.
+- [ ] Update dynamic entity controller static-authored provenance and retention inputs.
+- [ ] Update resolver/test fakes that still model source-first requests as independent layer jobs.
+- [ ] Run focused runtime and dynamic tests.
+
+Decisions and course corrections:
+
+- Pending implementation.
+
+### Phase 8B4: Peer-Owner Cutover Audit
+
+Status: pending.
+
+Goal: prove the peer-record ownership migration is complete before broader retention APIs move off retained scopes.
+
+Deliverables:
+
+- Audit `StaticWorkPeerRecordOwner`, `kind: "work"`, `workId`, and `sourceScopeKey` references in static, runtime, and dynamic paths.
+- Remove survivors that are vestigial rather than diagnostic or temporary compatibility.
+- Document remaining temporary compatibility branches with the phase that deletes them.
+
+Acceptance criteria:
+
+- No durable peer-record producer emits work-owned records.
+- No test fixture preserves work ownership as the stable durable contract.
+- Remaining work-owner compatibility is explicitly named, isolated, and scheduled for deletion.
+
+Task checklist:
+
+- [ ] Run peer-owner zero-reference audit.
+- [ ] Remove or document every survivor.
+- [ ] Run Phase 8B validation suite.
 
 Decisions and course corrections:
 

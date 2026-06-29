@@ -13,6 +13,8 @@ import type {
 	StaticDemand,
 	StaticDomain,
 	StaticDrawUnit,
+	LayerOwnerLifecycle,
+	LayerOwnerState,
 	StaticMaterialCoverageReport,
 	LandblockEnvCellsPayloadSummary,
 	OutdoorStaticObjectsPayloadSummary,
@@ -29,6 +31,10 @@ import type {
 } from "../contracts";
 import { describeStaticScopeKey, planStaticDemand } from "../demand-planner";
 import { createEmptyStaticBakeAttachments } from "../bake/attachments";
+import {
+	createLayerOwnerKeyForStaticScope,
+	createLayerOwnerKeyId,
+} from "../layer-owners";
 
 const DEFAULT_STATIC_BATCH_MAX_PAYLOADS = 10;
 const DEFAULT_STATIC_BATCH_COALESCE_DELAY_MS = 500;
@@ -223,6 +229,7 @@ export class StaticCoordinator {
 		const activeWork = Array.from(this.#activeWork.values()).map(
 			toScheduledStaticWorkStatus,
 		);
+		const ownerStates = this.#createOwnerStates();
 
 		return {
 			activeWork,
@@ -237,6 +244,7 @@ export class StaticCoordinator {
 			latestOutdoorStaticObjectsPayload:
 				this.#latestOutdoorStaticObjectsPayload,
 			latestTerrainPayload: this.#latestTerrainPayload,
+			ownerStates,
 			recentTiming: [...this.#recentTiming],
 			requested: activeWork.length,
 			resolving: countStatus(activeWork, "resolving"),
@@ -716,6 +724,27 @@ export class StaticCoordinator {
 		this.#emit();
 	}
 
+	#createOwnerStates(): readonly LayerOwnerState[] {
+		return Array.from(this.#activeWork.values())
+			.map((status) => ({
+				key: createLayerOwnerKeyForStaticScope({
+					domain: status.work.job.domain,
+					scope: status.work.job.scope,
+					scopeKey: status.scopeKey,
+				}),
+				lifecycle: createLayerOwnerLifecycle(
+					status,
+					this.#residentResourcesByDesiredKey,
+				),
+				revision: status.revision,
+			}))
+			.sort((left, right) =>
+				createLayerOwnerKeyId(left.key).localeCompare(
+					createLayerOwnerKeyId(right.key),
+				),
+			);
+	}
+
 	#isCurrent(work: ScheduledStaticWork): boolean {
 		return !this.#disposed && this.#activeWork.has(work.workId);
 	}
@@ -1020,6 +1049,28 @@ function toScheduledStaticWorkStatus(
 		status: status.status,
 		workId: status.workId,
 	};
+}
+
+function createLayerOwnerLifecycle(
+	status: MutableScheduledStaticWorkStatus,
+	residentResourcesByDesiredKey: ReadonlyMap<string, readonly StaticResourceKey[]>,
+): LayerOwnerLifecycle {
+	switch (status.status) {
+		case "requested":
+			return "desired";
+		case "resolving":
+		case "source-committed":
+			return "resolving";
+		case "baking":
+			return "baking";
+		case "committed":
+			return (residentResourcesByDesiredKey.get(status.desiredKey)?.length ?? 0) >
+				0
+				? "materialized"
+				: "empty";
+		case "failed":
+			return "failed";
+	}
 }
 
 function createEvictionStaticBatchId(revision: number): string {

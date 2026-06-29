@@ -697,7 +697,7 @@ Decisions and course corrections:
 
 ### Phase 6B: Coordinator Owner State Index
 
-Status: pending.
+Status: complete.
 
 Goal: make layer owners visible to the static coordinator without replacing source-first routing yet.
 
@@ -715,13 +715,16 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add owner state index to static coordinator snapshots/deltas.
-- [ ] Record owner keys on work or work-adjacent metadata without changing route source behavior.
-- [ ] Update coordinator tests for owner lifecycle transitions.
+- [x] Add owner state index to static coordinator snapshots/deltas.
+- [x] Record owner keys on work or work-adjacent metadata without changing route source behavior.
+- [x] Update coordinator tests for owner lifecycle transitions.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Added `ownerStates` to `StaticCoordinatorSnapshot`; owner state projection is derived from existing active work and resident resources without changing resolver or baker execution.
+- Owner lifecycles map active work to `desired`, `resolving`, `baking`, `materialized`, `empty`, and `failed`. Eviction is represented by removing the owner from the snapshot after demand reconciliation evicts its resources.
+- Existing work ids remain execution-local. Owner keys are derived from landblock layer identity and do not include work ids or revisions.
+- Validation: `npm run check`; `npm run test:ts -- src/lib/static/layer-owners.test.ts src/lib/static/coordinator/static-coordinator.test.ts`.
 
 ### Phase 6C: Temporary Old-Route Owner Adapter
 

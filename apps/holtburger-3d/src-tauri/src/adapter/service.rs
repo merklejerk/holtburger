@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -138,44 +139,137 @@ fn parse_runtime_setup_appearance_asset_id(
     let Some(rest) = asset_id.strip_prefix("runtime-setup-appearance/") else {
         return Ok(None);
     };
-    let mut parts = rest.split('/');
-    let setup_hex = parts
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("runtime setup appearance route missing setup id"))?;
-    let request_hex = parts
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("runtime setup appearance route missing request payload"))?;
-    if parts.next().is_some() {
-        anyhow::bail!("runtime setup appearance route has too many path segments");
-    }
+    let (setup_hex, query) = rest.split_once('?').unwrap_or((rest, ""));
     if setup_hex.len() != 8 || !setup_hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         anyhow::bail!("runtime setup appearance route setup id must be hex32");
     }
     let setup_model_id = u32::from_str_radix(setup_hex, 16)
         .with_context(|| format!("invalid runtime setup appearance setup id {setup_hex}"))?;
-    let request_bytes = decode_hex_bytes(request_hex)?;
-    let request: RuntimeAppearanceRequestDto = serde_json::from_slice(&request_bytes)
-        .context("failed to decode runtime setup appearance request JSON")?;
-    if request.setup_model_id != setup_model_id {
-        anyhow::bail!(
-            "runtime setup appearance route setup id 0x{setup_model_id:08X} did not match payload setup id 0x{:08X}",
-            request.setup_model_id
-        );
+    let mut obj_desc = RuntimeAppearanceObjDescDto {
+        palette_id: None,
+        sub_palettes: Vec::new(),
+        texture_changes: Vec::new(),
+        anim_part_changes: Vec::new(),
+    };
+    let mut seen_params = HashSet::new();
+    if !query.is_empty() {
+        for pair in query.split('&') {
+            let (key, value) = pair.split_once('=').ok_or_else(|| {
+                anyhow::anyhow!("runtime setup appearance query pair missing '='")
+            })?;
+            if !seen_params.insert(key) {
+                anyhow::bail!("runtime setup appearance query repeated parameter '{key}'");
+            }
+            match key {
+                "palette" => {
+                    obj_desc.palette_id = Some(parse_query_hex32(value, "palette")?);
+                }
+                "sub" => {
+                    obj_desc.sub_palettes = parse_runtime_sub_palette_query(value)?;
+                }
+                "tex" => {
+                    obj_desc.texture_changes = parse_runtime_texture_change_query(value)?;
+                }
+                "part" => {
+                    obj_desc.anim_part_changes = parse_runtime_anim_part_change_query(value)?;
+                }
+                _ => anyhow::bail!("unknown runtime setup appearance query parameter '{key}'"),
+            }
+        }
     }
-    Ok(Some(request))
+
+    Ok(Some(RuntimeAppearanceRequestDto {
+        setup_model_id,
+        obj_desc: Some(obj_desc),
+    }))
 }
 
-fn decode_hex_bytes(hex: &str) -> anyhow::Result<Vec<u8>> {
-    if hex.is_empty() || !hex.len().is_multiple_of(2) {
-        anyhow::bail!("hex payload must have a positive even length");
+fn parse_runtime_sub_palette_query(
+    value: &str,
+) -> anyhow::Result<Vec<crate::contracts::RuntimeAppearanceSubPaletteDto>> {
+    parse_query_list(value, "sub")?
+        .into_iter()
+        .map(|item| {
+            let fields = split_query_item_fields(item, "sub", 3)?;
+            Ok(crate::contracts::RuntimeAppearanceSubPaletteDto {
+                offset: parse_query_u32(fields[0], "sub offset")?,
+                num_colors: parse_query_u32(fields[1], "sub num colors")?,
+                sub_id: parse_query_hex32(fields[2], "sub palette id")?,
+            })
+        })
+        .collect()
+}
+
+fn parse_runtime_texture_change_query(
+    value: &str,
+) -> anyhow::Result<Vec<crate::contracts::RuntimeAppearanceTextureChangeDto>> {
+    parse_query_list(value, "tex")?
+        .into_iter()
+        .map(|item| {
+            let fields = split_query_item_fields(item, "tex", 3)?;
+            Ok(crate::contracts::RuntimeAppearanceTextureChangeDto {
+                part_index: parse_query_u8(fields[0], "texture change part index")?,
+                old_texture: parse_query_hex32(fields[1], "texture change old texture")?,
+                new_texture: parse_query_hex32(fields[2], "texture change new texture")?,
+            })
+        })
+        .collect()
+}
+
+fn parse_runtime_anim_part_change_query(
+    value: &str,
+) -> anyhow::Result<Vec<crate::contracts::RuntimeAppearanceAnimPartChangeDto>> {
+    parse_query_list(value, "part")?
+        .into_iter()
+        .map(|item| {
+            let fields = split_query_item_fields(item, "part", 2)?;
+            Ok(crate::contracts::RuntimeAppearanceAnimPartChangeDto {
+                part_index: parse_query_u8(fields[0], "animation part index")?,
+                part_id: parse_query_hex32(fields[1], "animation part id")?,
+            })
+        })
+        .collect()
+}
+
+fn parse_query_list<'a>(value: &'a str, name: &str) -> anyhow::Result<Vec<&'a str>> {
+    if value.is_empty() {
+        anyhow::bail!("runtime setup appearance query parameter '{name}' cannot be empty");
     }
-    let mut bytes = Vec::with_capacity(hex.len() / 2);
-    for index in (0..hex.len()).step_by(2) {
-        let byte = u8::from_str_radix(&hex[index..index + 2], 16)
-            .with_context(|| format!("invalid hex byte at offset {index}"))?;
-        bytes.push(byte);
+    Ok(value.split(',').collect())
+}
+
+fn split_query_item_fields<'a>(
+    item: &'a str,
+    name: &str,
+    expected: usize,
+) -> anyhow::Result<Vec<&'a str>> {
+    let fields = item.split(':').collect::<Vec<_>>();
+    if fields.len() != expected || fields.iter().any(|field| field.is_empty()) {
+        anyhow::bail!(
+            "runtime setup appearance query parameter '{name}' has malformed item '{item}'"
+        );
     }
-    Ok(bytes)
+    Ok(fields)
+}
+
+fn parse_query_hex32(value: &str, name: &str) -> anyhow::Result<u32> {
+    if value.len() != 8 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        anyhow::bail!("runtime setup appearance {name} must be hex32");
+    }
+    u32::from_str_radix(value, 16)
+        .with_context(|| format!("invalid runtime setup appearance {name} '{value}'"))
+}
+
+fn parse_query_u32(value: &str, name: &str) -> anyhow::Result<u32> {
+    value
+        .parse::<u32>()
+        .with_context(|| format!("invalid runtime setup appearance {name} '{value}'"))
+}
+
+fn parse_query_u8(value: &str, name: &str) -> anyhow::Result<u8> {
+    value
+        .parse::<u8>()
+        .with_context(|| format!("invalid runtime setup appearance {name} '{value}'"))
 }
 
 impl HostBoundaryAdapter {
@@ -341,6 +435,17 @@ impl HostBoundaryAdapter {
                 "[holtburger-3d][asset.lookup] request_id={} asset_id={} priority={:?}",
                 request.request_id, request.asset_id, request.priority
             );
+        }
+
+        if let Some(runtime_request) = parse_runtime_setup_appearance_asset_id(&request.asset_id)? {
+            let payload =
+                tauri::async_runtime::block_on(self.resolve_runtime_appearance(runtime_request))?;
+            return Ok(AssetLookupResponseDto {
+                request_id: request.request_id,
+                asset_id: request.asset_id,
+                payload_kind: AssetPayloadKindDto::Json,
+                payload,
+            });
         }
 
         if let Some(content_request) = content_asset_request_from_asset_id(&request.asset_id) {
@@ -698,6 +803,30 @@ fn repo_assets_hba_path() -> PathBuf {
 mod tests {
     use super::*;
     use holtburger_dat::file_type::{Palette, PixelFormatId, RenderSurface};
+
+    #[test]
+    fn parses_runtime_setup_appearance_query_route() {
+        let request = parse_runtime_setup_appearance_asset_id(
+            "runtime-setup-appearance/020003e5?palette=0400007e&sub=0:192:040004a0,192:64:04001fd8&tex=16:05000010:05000020&part=16:01001a52",
+        )
+        .expect("runtime setup appearance route should parse")
+        .expect("runtime setup appearance route should match");
+
+        assert_eq!(request.setup_model_id, 0x0200_03e5);
+        let obj_desc = request.obj_desc.expect("route should produce obj desc");
+        assert_eq!(obj_desc.palette_id, Some(0x0400_007e));
+        assert_eq!(obj_desc.sub_palettes.len(), 2);
+        assert_eq!(obj_desc.sub_palettes[0].offset, 0);
+        assert_eq!(obj_desc.sub_palettes[0].num_colors, 192);
+        assert_eq!(obj_desc.sub_palettes[0].sub_id, 0x0400_04a0);
+        assert_eq!(obj_desc.texture_changes.len(), 1);
+        assert_eq!(obj_desc.texture_changes[0].part_index, 16);
+        assert_eq!(obj_desc.texture_changes[0].old_texture, 0x0500_0010);
+        assert_eq!(obj_desc.texture_changes[0].new_texture, 0x0500_0020);
+        assert_eq!(obj_desc.anim_part_changes.len(), 1);
+        assert_eq!(obj_desc.anim_part_changes[0].part_index, 16);
+        assert_eq!(obj_desc.anim_part_changes[0].part_id, 0x0100_1a52);
+    }
 
     #[test]
     fn direct_json_lookup_rejects_binary_routed_assets() {

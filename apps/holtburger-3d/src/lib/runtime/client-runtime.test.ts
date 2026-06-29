@@ -732,8 +732,8 @@ describe("browser client runtime", () => {
 		expect(
 			assetService.pendingKeys.some(
 				(key) =>
-					key.kind === "raw" &&
-					key.id.startsWith("runtime-setup-appearance/0200004e/"),
+					key.kind === "runtime-setup-appearance" &&
+					key.id.startsWith("0200004e?"),
 			),
 		).toBe(true);
 
@@ -3984,10 +3984,9 @@ function createDynamicPreparedPayload(key: HostAssetKey): unknown {
 			};
 		case "prepared-texture":
 			return createPreparedTextureAsset(key).payload;
+		case "runtime-setup-appearance":
+			return createDynamicRuntimeSetupAppearancePayload(key);
 		case "raw":
-			if (key.id.startsWith("runtime-setup-appearance/")) {
-				return createDynamicRuntimeSetupAppearancePayload(key);
-			}
 			return { kind: key.kind };
 		default:
 			return { kind: key.kind };
@@ -4086,9 +4085,12 @@ function createDynamicSetupAppearancePayload(key: HostAssetKey) {
 }
 
 function createDynamicRuntimeSetupAppearancePayload(key: HostAssetKey) {
-	const setupHex = key.id.split("/")[1] ?? failKey();
+	const setupHex = key.id.split("?")[0] ?? failKey();
 	const setupModelId = Number.parseInt(setupHex, 16);
-	return createDynamicSetupAppearancePayloadForSetup(setupModelId, key.id);
+	return createDynamicSetupAppearancePayloadForSetup(
+		setupModelId,
+		`runtime-setup-appearance/${key.id}`,
+	);
 }
 
 function createDynamicSetupAppearancePayloadForSetup(

@@ -7,7 +7,6 @@ import type {
 import { createPreparedTextureHostKey } from "../assets/preparation/prepared-texture-source";
 import {
 	createHostAssetKey,
-	createRawHostAssetKey,
 	describeHostAssetKey,
 } from "../assets/keys";
 import {
@@ -25,6 +24,7 @@ import type {
 } from "../static/contracts";
 import {
 	planStaticObjectMaterials,
+	createStaticObjectMaterialUseKey,
 	type StaticMaterialPlanningDomain,
 	type StaticMaterialPlanningSlotFacts,
 	type StaticMaterialFallbackReason,
@@ -582,32 +582,81 @@ function createRuntimeSetupAppearanceHostKey(
 	setupModelId: number,
 	modelData: DynamicEntityAppearanceOverride | null,
 ): HostAssetKey | null {
-	if (modelData === null) {
+	if (modelData === null || !hasRuntimeAppearanceOverrides(modelData)) {
 		return null;
 	}
-	const request = {
-		objDesc: {
-			animPartChanges: modelData.animPartChanges,
-			paletteId: modelData.paletteId,
-			subPalettes: modelData.subPalettes,
-			textureChanges: modelData.textureChanges,
-		},
-		setupModelId,
-	};
-	return createRawHostAssetKey(
-		`runtime-setup-appearance/${formatHex32(setupModelId)}/${encodeJsonHex(request)}`,
+	return createHostAssetKey(
+		"runtime-setup-appearance",
+		`${formatHex32(setupModelId)}${createRuntimeSetupAppearanceQuery(modelData)}`,
 	);
+}
+
+function hasRuntimeAppearanceOverrides(
+	modelData: DynamicEntityAppearanceOverride,
+): boolean {
+	return (
+		modelData.paletteId !== null ||
+		modelData.subPalettes.length > 0 ||
+		modelData.textureChanges.length > 0 ||
+		modelData.animPartChanges.length > 0
+	);
+}
+
+function createRuntimeSetupAppearanceQuery(
+	modelData: DynamicEntityAppearanceOverride,
+): string {
+	const params: string[] = [];
+	if (modelData.paletteId !== null) {
+		params.push(`palette=${formatHex32(modelData.paletteId)}`);
+	}
+	const subPalettes = [...modelData.subPalettes].sort(
+		(left, right) =>
+			left.offset - right.offset ||
+			left.numColors - right.numColors ||
+			left.subId - right.subId,
+	);
+	if (subPalettes.length > 0) {
+		params.push(
+			`sub=${subPalettes
+				.map(
+					(subPalette) =>
+						`${subPalette.offset}:${subPalette.numColors}:${formatHex32(subPalette.subId)}`,
+				)
+				.join(",")}`,
+		);
+	}
+	const textureChanges = [...modelData.textureChanges].sort(
+		(left, right) =>
+			left.partIndex - right.partIndex ||
+			left.oldTexture - right.oldTexture ||
+			left.newTexture - right.newTexture,
+	);
+	if (textureChanges.length > 0) {
+		params.push(
+			`tex=${textureChanges
+				.map(
+					(change) =>
+						`${change.partIndex}:${formatHex32(change.oldTexture)}:${formatHex32(change.newTexture)}`,
+				)
+				.join(",")}`,
+		);
+	}
+	const animPartChanges = [...modelData.animPartChanges].sort(
+		(left, right) =>
+			left.partIndex - right.partIndex || left.partId - right.partId,
+	);
+	if (animPartChanges.length > 0) {
+		params.push(
+			`part=${animPartChanges
+				.map((change) => `${change.partIndex}:${formatHex32(change.partId)}`)
+				.join(",")}`,
+		);
+	}
+	return params.length === 0 ? "" : `?${params.join("&")}`;
 }
 
 function formatHex32(value: number): string {
 	return value.toString(16).padStart(8, "0");
-}
-
-function encodeJsonHex(value: unknown): string {
-	const bytes = new TextEncoder().encode(JSON.stringify(value));
-	return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(
-		"",
-	);
 }
 
 function createMaterialPlanningLandblockSource(
@@ -933,8 +982,43 @@ function createDynamicTextureUseId(
 		plan.material.materialId.toString(16).padStart(8, "0"),
 		role.role,
 		role.dataUse.kind === "palette-texture-use"
-			? role.dataUse.palette.paletteId.toString(16).padStart(8, "0")
+			? createMaterialTextureDataUseSignature(role.dataUse)
 			: createPreparedTextureHostKey(role.dataUse).id,
+	].join(":");
+}
+
+function createMaterialTextureDataUseSignature(
+	dataUse: MaterialTextureDataUseIdentity,
+): string {
+	if (dataUse.kind !== "palette-texture-use") {
+		return [
+			dataUse.kind,
+			dataUse.usage,
+			createPreparedTextureHostKey(dataUse).id,
+		].join(":");
+	}
+
+	const subPaletteSignature =
+		dataUse.subPalettes.length === 0
+			? "none"
+			: [...dataUse.subPalettes]
+					.sort(
+						(left, right) =>
+							left.firstIndex - right.firstIndex ||
+							left.indexCount - right.indexCount ||
+							left.palette.paletteId - right.palette.paletteId,
+					)
+					.map(
+						(subPalette) =>
+							`${formatHex32(subPalette.palette.paletteId)}@${subPalette.firstIndex}+${subPalette.indexCount}`,
+					)
+					.join(",");
+	return [
+		dataUse.kind,
+		dataUse.usage,
+		formatHex32(dataUse.palette.paletteId),
+		`${dataUse.firstIndex}+${dataUse.indexCount}`,
+		subPaletteSignature,
 	].join(":");
 }
 
@@ -970,7 +1054,7 @@ function createDynamicRenderParts(options: {
 	readonly sourceAssets: readonly StaticObjectSourceAssetFacts[];
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
 }): readonly DynamicEntityRenderPart[] {
-	const materialEntryByMaterialId = createDynamicMaterialEntriesByMaterialId(
+	const materialEntryByUseKey = createDynamicMaterialEntriesByUseKey(
 		options.materialPlans,
 		options.textureRequirements,
 	);
@@ -988,7 +1072,7 @@ function createDynamicRenderParts(options: {
 			parts.push(
 				...createDynamicRenderPartSlices({
 					gfxObj,
-					materialEntryByMaterialId,
+					materialEntryByUseKey,
 					part,
 				}),
 			);
@@ -1021,8 +1105,8 @@ interface DynamicTriangleRenderCandidate {
 
 function createDynamicRenderPartSlices(options: {
 	readonly gfxObj: GfxObjPayloadDto;
-	readonly materialEntryByMaterialId: ReadonlyMap<
-		number,
+	readonly materialEntryByUseKey: ReadonlyMap<
+		string,
 		DynamicMaterialRenderEntry
 	>;
 	readonly part: StaticObjectSourceAssetFacts["parts"][number];
@@ -1034,12 +1118,11 @@ function createDynamicRenderPartSlices(options: {
 	const sourceTexCoords = asFloat32Array(options.gfxObj.renderGeometry.uvs);
 	const renderEntries = uniqueMaterialRenderEntries(
 		options.part.materialSlots.flatMap((slot) => {
-			const renderEntry = options.materialEntryByMaterialId.get(
-				slot.material.materialId,
-			);
+			const materialUseKey = createDynamicSlotMaterialUseKey(slot);
+			const renderEntry = options.materialEntryByUseKey.get(materialUseKey);
 			if (!renderEntry) {
 				throw new Error(
-					`Dynamic render part ${options.part.partIndex} has no material entry for material 0x${slot.material.materialId.toString(16).padStart(8, "0")}.`,
+					`Dynamic render part ${options.part.partIndex} has no material entry for material use ${materialUseKey}.`,
 				);
 			}
 			return [renderEntry];
@@ -1117,7 +1200,16 @@ function createDynamicRenderPartSlice(options: {
 	const renderEntries = uniqueMaterialRenderEntries(
 		options.candidates.map((candidate) => candidate.materialEntry),
 	);
-	const materialEntries = renderEntries.map((entry) => entry.entry);
+	const localSlotByEntryKey = new Map(
+		renderEntries.map((entry, localSlot) => [
+			createDynamicMaterialRenderEntryKey(entry),
+			localSlot,
+		]),
+	);
+	const materialEntries = renderEntries.map((entry, localSlot) => ({
+		...entry.entry,
+		slot: localSlot,
+	}));
 	for (
 		let triangleIndex = 0;
 		triangleIndex < options.candidates.length;
@@ -1152,7 +1244,15 @@ function createDynamicRenderPartSlice(options: {
 			texCoords[targetVertexIndex * 2 + 1] = options.sourceTexCoords[
 				sourceVertexIndex * 2 + 1
 			] as number;
-			materialSlotIndices[targetVertexIndex] = materialEntry.entry.slot;
+			const materialLocalSlot = localSlotByEntryKey.get(
+				createDynamicMaterialRenderEntryKey(materialEntry),
+			);
+			if (materialLocalSlot === undefined) {
+				throw new Error(
+					`Dynamic render part ${options.part.partIndex} cannot remap material slot ${materialEntry.entry.slot}.`,
+				);
+			}
+			materialSlotIndices[targetVertexIndex] = materialLocalSlot;
 			indices[targetVertexIndex] = targetVertexIndex;
 		}
 	}
@@ -1228,6 +1328,16 @@ function createDynamicMaterialCompatibilityKey(
 	].join("|");
 }
 
+function createDynamicSlotMaterialUseKey(
+	slot: StaticObjectPartMaterialSlotFacts,
+): string {
+	return createStaticObjectMaterialUseKey(
+		slot.material,
+		slot.paletteOverride,
+		slot.paletteViews,
+	);
+}
+
 function assertDynamicSourceVertexAvailable(options: {
 	readonly partIndex: number;
 	readonly sourcePositions: Float32Array;
@@ -1248,13 +1358,13 @@ function assertDynamicSourceVertexAvailable(options: {
 	}
 }
 
-function createDynamicMaterialEntriesByMaterialId(
+function createDynamicMaterialEntriesByUseKey(
 	materialPlans: readonly StaticMaterialPlan[],
 	textureRequirements: readonly DynamicEntityTextureRequirement[],
-): ReadonlyMap<number, DynamicMaterialRenderEntry> {
+): ReadonlyMap<string, DynamicMaterialRenderEntry> {
 	return new Map(
-		materialPlans.map((plan, slot): [number, DynamicMaterialRenderEntry] => [
-			plan.material.materialId,
+		materialPlans.map((plan, slot): [string, DynamicMaterialRenderEntry] => [
+			plan.materialUseKey,
 			createDynamicMaterialEntry(plan, slot, textureRequirements),
 		]),
 	);
@@ -1265,16 +1375,16 @@ function resolveDynamicTextureUseId(options: {
 	readonly materialId: number;
 	readonly textureRequirements: readonly DynamicEntityTextureRequirement[];
 }): string {
-	const key = createTextureRequirementKey(options.dataUse);
+	const dataUseSignature = createMaterialTextureDataUseSignature(options.dataUse);
 	const requirement = options.textureRequirements.find(
 		(candidate) =>
 			candidate.material.materialId === options.materialId &&
-			candidate.key.kind === key.kind &&
-			candidate.key.id === key.id,
+			createMaterialTextureDataUseSignature(candidate.dataUse) ===
+				dataUseSignature,
 	);
 	if (!requirement) {
 		throw new Error(
-			`Dynamic material 0x${options.materialId.toString(16).padStart(8, "0")} has no texture use id for ${key.kind}:${key.id}.`,
+			`Dynamic material 0x${options.materialId.toString(16).padStart(8, "0")} has no texture use id for ${dataUseSignature}.`,
 		);
 	}
 	return requirement.textureUseId;
@@ -1330,16 +1440,30 @@ function resolveDynamicRenderableMaterialFamily(
 function uniqueMaterialRenderEntries(
 	entries: readonly DynamicMaterialRenderEntry[],
 ): readonly DynamicMaterialRenderEntry[] {
-	const byMaterialId = new Map<number, DynamicMaterialRenderEntry>();
+	const byEntryKey = new Map<string, DynamicMaterialRenderEntry>();
 	for (const entry of entries) {
-		const materialId = entry.entry.materialIds[0];
-		if (materialId !== undefined) {
-			byMaterialId.set(materialId, entry);
-		}
+		byEntryKey.set(createDynamicMaterialRenderEntryKey(entry), entry);
 	}
-	return [...byMaterialId.values()].sort(
+	return [...byEntryKey.values()].sort(
 		(left, right) => left.entry.slot - right.entry.slot,
 	);
+}
+
+function createDynamicMaterialRenderEntryKey(
+	entry: DynamicMaterialRenderEntry,
+): string {
+	const materialIds = entry.entry.materialIds
+		.map((materialId) => materialId.toString(16).padStart(8, "0"))
+		.join(",");
+	return [
+		materialIds,
+		entry.entry.primaryTextureUseId ?? "none",
+		entry.entry.indexTextureUseId ?? "none",
+		entry.entry.paletteTextureUseId ?? "none",
+		entry.entry.detailTextureUseId ?? "none",
+		entry.family,
+		entry.pass,
+	].join("|");
 }
 
 function uniqueNumbers(values: readonly number[]): readonly number[] {
@@ -1490,6 +1614,7 @@ function createRequiredResourceFromHostKey(
 ): DynamicEntityRequiredResource {
 	switch (key.kind) {
 		case "setup-appearance":
+		case "runtime-setup-appearance":
 			return "setup-appearance";
 		case "gfx-obj":
 			return "gfx";

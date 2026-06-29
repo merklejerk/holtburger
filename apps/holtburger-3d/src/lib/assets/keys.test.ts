@@ -49,4 +49,23 @@ describe("host asset keys", () => {
 		expect(formatHostAssetId(key)).toBe("experimental/shape");
 		expect(parseHostAssetId("experimental/shape")).toEqual(key);
 	});
+
+	it("round-trips runtime setup appearance query routes as typed keys", () => {
+		const key = createHostAssetKey(
+			"runtime-setup-appearance",
+			"020003e5?palette=0400007e&sub=0:192:040004a0",
+		);
+
+		expect(describeHostAssetKey(key)).toBe(
+			"runtime-setup-appearance:020003e5?palette=0400007e&sub=0:192:040004a0",
+		);
+		expect(formatHostAssetId(key)).toBe(
+			"runtime-setup-appearance/020003e5?palette=0400007e&sub=0:192:040004a0",
+		);
+		expect(
+			parseHostAssetId(
+				"runtime-setup-appearance/020003e5?palette=0400007e&sub=0:192:040004a0",
+			),
+		).toEqual(key);
+	});
 });

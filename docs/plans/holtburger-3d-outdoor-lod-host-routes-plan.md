@@ -1495,7 +1495,7 @@ Decisions and course corrections:
 
 ### Phase 10C: Runtime Env-Cell Publication Cutover
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: remove runtime dependence on separately materialized building layers for env-cell system publication.
 
@@ -1514,15 +1514,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Replace runtime cross-layer merge with direct env-cell-system layer publication.
-- [ ] Delete `EnvCellSystemLayerAssemblyStore`.
-- [ ] Remove source-payload subscription hooks whose only purpose was env-cell assembly.
-- [ ] Add runtime tests proving building-layer materialization is not required for env-cell publication.
-- [ ] Add runtime tests for interior LoD `4` env-cell publication with lower outdoor layers absent or empty.
+- [x] Replace runtime cross-layer merge with direct env-cell-system layer publication.
+- [x] Delete `EnvCellSystemLayerAssemblyStore`.
+- [x] Remove source-payload subscription hooks whose only purpose was env-cell assembly.
+- [x] Add runtime tests proving building-layer materialization is not required for env-cell publication.
+- [x] Add runtime tests for interior LoD `4` env-cell publication with lower outdoor layers absent or empty.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Replaced the stateful assembly store with `createEnvCellSystemLayerPublications(delta, materialized)`, which publishes directly from env-cell-owned materialized records.
+- Runtime source-payload subscriptions no longer feed env-cell publication. They only update `StaticSceneQuery` source facts and diagnostics.
+- Building transition aperture resources are included in env-cell publication when they are present in the env-cell materialized commit. Outdoor-building-only materialization does not publish env-cell system layers.
+- Deleted executable `EnvCellSystemLayerAssemblyStore` references and renamed the helper/test surface to env-cell system layer publication.
+- Runtime projection fixtures now put transition portal resources and graphs on `landblock-env-cells` bake completions instead of `outdoor-buildings` completions.
+- Validation: `npm run test:ts -- src/lib/runtime/env-cell-system-layer-publication.test.ts src/lib/runtime/client-runtime.test.ts`; `npm run check`; zero-reference search for `EnvCellSystemLayerAssembly`, `env-cell-system-layer-assembly`, and `envCellSystemLayerAssembly`.
 
 ### Phase 10D: Env-Cell Cutover Resteer And Validation
 

@@ -132,9 +132,9 @@ import {
 	type EnvCellResourceMembership,
 } from "./env-cell-resource-membership";
 import {
-	EnvCellSystemLayerAssemblyStore,
-	type EnvCellSystemLayerAssemblyPublication,
-} from "./env-cell-system-layer-assembly";
+	createEnvCellSystemLayerPublications,
+	type EnvCellSystemLayerPublication,
+} from "./env-cell-system-layer-publication";
 import {
 	EMPTY_RUNTIME_PORTAL_OVERLAP_RESIDENCY,
 	deriveRuntimePortalOverlapResidency,
@@ -812,7 +812,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 	#envCellResourceMembershipByLandblock = createEnvCellResourceMembershipIndex(
 		this.#envCellResourceMembership,
 	);
-	readonly #envCellSystemLayerAssembly = new EnvCellSystemLayerAssemblyStore();
 	readonly #staticLayersByKey = new Map<string, StaticLandblockLayerPayload>();
 	readonly #staticLayerKeyByResourceId = new Map<string, string>();
 	readonly #textureBatchIdByStaticLayerOwner = new Map<string, string>();
@@ -884,9 +883,6 @@ class ClientRuntimeImpl implements ClientRuntime {
 		);
 		this.#unsubscribeStaticSourcePayloads =
 			staticCoordinator.subscribeSourcePayloads((delta) => {
-				this.#applyEnvCellSystemLayerPublication(
-					this.#envCellSystemLayerAssembly.ingestSourcePayload(delta),
-				);
 				this.#staticSceneQuery.ingestSourcePayload(delta.payload, {
 					outdoorAnchorLandblockId: this.#renderAnchorLandblockId,
 				});
@@ -1814,10 +1810,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 		}
 		this.#applyMaterializedStaticLayers(delta, materialized);
 		this.#applyEnvCellSystemLayerPublications(
-			this.#envCellSystemLayerAssembly.ingestMaterializedCommit(
-				delta,
-				materialized,
-			),
+			createEnvCellSystemLayerPublications(delta, materialized),
 		);
 		this.#refreshEnvCellResourceMembership();
 		this.#warnAboutStaticFallbacks(delta);
@@ -1996,7 +1989,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	}
 
 	#applyEnvCellSystemLayerPublications(
-		publications: readonly EnvCellSystemLayerAssemblyPublication[],
+		publications: readonly EnvCellSystemLayerPublication[],
 	): void {
 		for (const publication of publications) {
 			this.#applyEnvCellSystemLayerPublication(publication);
@@ -2004,7 +1997,7 @@ class ClientRuntimeImpl implements ClientRuntime {
 	}
 
 	#applyEnvCellSystemLayerPublication(
-		publication: EnvCellSystemLayerAssemblyPublication | null,
+		publication: EnvCellSystemLayerPublication | null,
 	): void {
 		if (!publication) {
 			return;

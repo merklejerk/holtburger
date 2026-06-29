@@ -9,7 +9,6 @@ import {
 import type {
 	StaticBakeTextureUse,
 	StaticCoordinatorCommitDelta,
-	StaticCoordinatorSourcePayloadDelta,
 	StaticMaterialCoverageReport,
 	StaticPortalApertureResource,
 	StaticPortalGraphRecord,
@@ -22,18 +21,8 @@ import type {
 } from "../static/contracts";
 import type { StaticMaterializationResult } from "./static-materializer";
 
-export interface EnvCellSystemLayerAssemblyPublication {
-	readonly key: string;
+export interface EnvCellSystemLayerPublication {
 	readonly payload: EnvCellSystemLayerPayload;
-}
-
-interface BuildingTransitionFacts {
-	readonly landblockId: number;
-	readonly materializedRevision: number | null;
-	readonly portalApertureResources: readonly StaticPortalApertureResource[];
-	readonly portalGraphs: readonly StaticPortalGraphRecord[];
-	readonly sourceRevision: number;
-	readonly sourceTransitionApertureCount: number;
 }
 
 interface EnvCellFacts {
@@ -52,158 +41,45 @@ interface EnvCellFacts {
 	readonly visibilityRecords: readonly StaticVisibilityRecord[];
 }
 
-export class EnvCellSystemLayerAssemblyStore {
-	readonly #buildingFactsByLandblock = new Map<
-		number,
-		BuildingTransitionFacts
-	>();
-	readonly #envCellFactsByLandblock = new Map<number, EnvCellFacts>();
-	readonly #publishedGenerationByLandblock = new Map<number, string>();
-
-	ingestSourcePayload(
-		delta: StaticCoordinatorSourcePayloadDelta,
-	): EnvCellSystemLayerAssemblyPublication | null {
-		if (
-			delta.payload.scope.kind !== "outdoor-static-objects" ||
-			delta.payload.scope.domain !== "outdoor-buildings"
-		) {
-			return null;
-		}
-
-		const landblockId = delta.payload.scope.landblock.landblockId >>> 0;
-		const existing = this.#buildingFactsByLandblock.get(landblockId);
-		this.#buildingFactsByLandblock.set(landblockId, {
-			landblockId,
-			materializedRevision: null,
-			portalApertureResources: [],
-			portalGraphs: [],
-			sourceRevision: delta.payload.sourceRevision,
-			sourceTransitionApertureCount:
-				delta.payload.scope.buildingTransitionApertures.length,
-			...(existing
-				? {
-						materializedRevision: existing.materializedRevision,
-						portalApertureResources: existing.portalApertureResources,
-						portalGraphs: existing.portalGraphs,
-					}
-				: {}),
-		});
-
-		return this.#publishIfReady(landblockId);
-	}
-
-	ingestMaterializedCommit(
-		delta: StaticCoordinatorCommitDelta,
-		materialized: StaticMaterializationResult,
-	): readonly EnvCellSystemLayerAssemblyPublication[] {
-		const publications: EnvCellSystemLayerAssemblyPublication[] = [];
-		const buildingLandblockIds = collectBuildingLandblockIds(
-			delta,
-			materialized,
-		);
-		for (const landblockId of buildingLandblockIds) {
-			const existing = this.#buildingFactsByLandblock.get(landblockId);
-			this.#buildingFactsByLandblock.set(landblockId, {
+export function createEnvCellSystemLayerPublications(
+	delta: StaticCoordinatorCommitDelta,
+	materialized: StaticMaterializationResult,
+): readonly EnvCellSystemLayerPublication[] {
+	return [...createEnvCellFactsByLandblock(delta, materialized).entries()].map(
+		([landblockId, envCellFacts]) => {
+			const portalProjectionRecords = createPortalProjectionRecords({
+				envCellFacts,
 				landblockId,
-				materializedRevision: delta.revision,
-				portalApertureResources: materialized.portalApertureResources.filter(
-					(resource) =>
-						resource.sourceDomain === "outdoor-buildings" &&
-						resource.landblockId === landblockId,
-				),
-				portalGraphs: materialized.staticPortalGraphs.filter(
-					(record) =>
-						record.owner.domain === "outdoor-buildings" &&
-						record.landblockId === landblockId,
-				),
-				sourceRevision: existing?.sourceRevision ?? delta.revision,
-				sourceTransitionApertureCount:
-					existing?.sourceTransitionApertureCount ??
-					countBuildingTransitionApertureRanges(
-						materialized.portalApertureResources.filter(
-							(resource) =>
-								resource.sourceDomain === "outdoor-buildings" &&
-								resource.landblockId === landblockId,
-						),
-					),
 			});
-			appendPublication(publications, this.#publishIfReady(landblockId));
-		}
-
-		const envCellFacts = createEnvCellFactsByLandblock(delta, materialized);
-		for (const [landblockId, facts] of envCellFacts) {
-			this.#envCellFactsByLandblock.set(landblockId, facts);
-			appendPublication(publications, this.#publishIfReady(landblockId));
-		}
-
-		return publications;
-	}
-
-	#publishIfReady(
-		landblockId: number,
-	): EnvCellSystemLayerAssemblyPublication | null {
-		const envCellFacts = this.#envCellFactsByLandblock.get(landblockId);
-		const buildingFacts = this.#buildingFactsByLandblock.get(landblockId);
-		if (!envCellFacts || !buildingFacts) {
-			return null;
-		}
-		if (
-			buildingFacts.sourceTransitionApertureCount > 0 &&
-			buildingFacts.materializedRevision === null
-		) {
-			return null;
-		}
-
-		const portalProjectionRecords = createPortalProjectionRecords({
-			buildingFacts,
-			envCellFacts,
-			landblockId,
-		});
-		const generationId = createEnvCellSystemLayerGenerationId({
-			buildingFacts,
-			envCellFacts,
-			landblockId,
-			portalProjectionRecords,
-		});
-		if (
-			this.#publishedGenerationByLandblock.get(landblockId) === generationId
-		) {
-			return null;
-		}
-		this.#publishedGenerationByLandblock.set(landblockId, generationId);
-
-		return {
-			key: createEnvCellSystemLayerAssemblyKey(landblockId),
-			payload: {
-				authoredDynamicSeedRecords: envCellFacts.authoredDynamicSeedRecords,
-				envCellStaticObjectDrawUnits: envCellFacts.envCellStaticObjectDrawUnits,
-				generationId,
-				kind: "env-cell-system",
-				landblockId,
-				materialCoverage: envCellFacts.materialCoverage,
-				portalApertureResources: [
-					...envCellFacts.portalApertureResources,
-					...buildingFacts.portalApertureResources,
-				],
-				portalGraphRecords: [
-					...envCellFacts.portalGraphs,
-					...buildingFacts.portalGraphs,
-				],
-				portalInteriorRecords: envCellFacts.portalInteriorRecords,
-				portalProjectionRecords,
-				resourceMembership: createResourceMembership(envCellFacts),
-				sourceMappingRecords: envCellFacts.sourceMappingRecords,
-				spatialRecords: envCellFacts.spatialRecords,
-				structuredInteriorDrawUnits: envCellFacts.structuredInteriorDrawUnits,
-				textureUses: envCellFacts.textureUses,
-				visibilityRecords: envCellFacts.visibilityRecords,
-			},
-		};
-	}
-}
-
-function createEnvCellSystemLayerAssemblyKey(landblockId: number): string {
-	return `env-cell-system:0x${(landblockId >>> 0).toString(16).padStart(8, "0")}`;
+			return {
+				payload: {
+					authoredDynamicSeedRecords:
+						envCellFacts.authoredDynamicSeedRecords,
+					envCellStaticObjectDrawUnits:
+						envCellFacts.envCellStaticObjectDrawUnits,
+					generationId: createEnvCellSystemLayerGenerationId({
+						envCellFacts,
+						landblockId,
+						portalProjectionRecords,
+					}),
+					kind: "env-cell-system",
+					landblockId,
+					materialCoverage: envCellFacts.materialCoverage,
+					portalApertureResources: envCellFacts.portalApertureResources,
+					portalGraphRecords: envCellFacts.portalGraphs,
+					portalInteriorRecords: envCellFacts.portalInteriorRecords,
+					portalProjectionRecords,
+					resourceMembership: createResourceMembership(envCellFacts),
+					sourceMappingRecords: envCellFacts.sourceMappingRecords,
+					spatialRecords: envCellFacts.spatialRecords,
+					structuredInteriorDrawUnits:
+						envCellFacts.structuredInteriorDrawUnits,
+					textureUses: envCellFacts.textureUses,
+					visibilityRecords: envCellFacts.visibilityRecords,
+				},
+			};
+		},
+	);
 }
 
 function createEnvCellFactsByLandblock(
@@ -246,8 +122,11 @@ function createEnvCellFactsByLandblock(
 			materializedRevision: delta.revision,
 			portalApertureResources: materialized.portalApertureResources.filter(
 				(resource) =>
-					resource.sourceDomain === "landblock-env-cells" &&
-					resource.landblockId === landblockId,
+					resource.landblockId === landblockId &&
+					(resource.sourceDomain === "landblock-env-cells" ||
+						resource.ranges.some(
+							(range) => range.sourceKind === "building-transition",
+						)),
 			),
 			portalGraphs: materialized.staticPortalGraphs.filter(
 				(record) =>
@@ -282,20 +161,13 @@ function createEnvCellFactsByLandblock(
 }
 
 function createPortalProjectionRecords(options: {
-	readonly buildingFacts: BuildingTransitionFacts;
 	readonly envCellFacts: EnvCellFacts;
 	readonly landblockId: number;
 }): readonly StaticPortalProjectionRecord[] {
 	const projection = createStaticPortalProjection({
 		landblockId: options.landblockId,
-		portalApertureResources: [
-			...options.envCellFacts.portalApertureResources,
-			...options.buildingFacts.portalApertureResources,
-		],
-		portalGraphs: [
-			...options.envCellFacts.portalGraphs,
-			...options.buildingFacts.portalGraphs,
-		],
+		portalApertureResources: options.envCellFacts.portalApertureResources,
+		portalGraphs: options.envCellFacts.portalGraphs,
 		portalInteriorRecords: options.envCellFacts.portalInteriorRecords,
 		root: createOutdoorPortalProjectionRoot(options.landblockId),
 	});
@@ -303,7 +175,6 @@ function createPortalProjectionRecords(options: {
 }
 
 function createEnvCellSystemLayerGenerationId(options: {
-	readonly buildingFacts: BuildingTransitionFacts;
 	readonly envCellFacts: EnvCellFacts;
 	readonly landblockId: number;
 	readonly portalProjectionRecords: readonly StaticPortalProjectionRecord[];
@@ -313,14 +184,8 @@ function createEnvCellSystemLayerGenerationId(options: {
 		landblockId: options.landblockId,
 		sourceKey: [
 			`env:${options.envCellFacts.materializedRevision}`,
-			`building-source:${options.buildingFacts.sourceRevision}`,
-			`building-materialized:${options.buildingFacts.materializedRevision ?? "empty"}`,
-			`transition-apertures:${options.buildingFacts.portalApertureResources
-				.flatMap((resource) =>
-					resource.ranges
-						.filter((range) => range.sourceKind === "building-transition")
-						.map((range) => range.rangeId),
-				)
+			`portal-apertures:${options.envCellFacts.portalApertureResources
+				.flatMap((resource) => resource.ranges.map((range) => range.rangeId))
 				.sort(compareStrings)
 				.join(",")}`,
 			`projections:${options.portalProjectionRecords.map((record) => record.sourceRevisionKey).join(",")}`,
@@ -391,47 +256,6 @@ function getOrCreateMembership(
 	return created;
 }
 
-function collectBuildingLandblockIds(
-	delta: StaticCoordinatorCommitDelta,
-	materialized: StaticMaterializationResult,
-): readonly number[] {
-	return uniqueNumbers([
-		...delta.materialCoverage.flatMap((record) =>
-			record.domain === "outdoor-buildings" && record.landblockId !== null
-				? [record.landblockId]
-				: [],
-		),
-		...materialized.materializedDrawUnits.flatMap((drawUnit) =>
-			drawUnit.kind === "static-object-geometry" &&
-			drawUnit.domain === "outdoor-buildings"
-				? [drawUnit.landblockId]
-				: [],
-		),
-		...materialized.portalApertureResources.flatMap((resource) =>
-			resource.sourceDomain === "outdoor-buildings" &&
-			countBuildingTransitionApertureRanges([resource]) > 0
-				? [resource.landblockId]
-				: [],
-		),
-		...materialized.staticPortalGraphs.flatMap((record) =>
-			record.owner.domain === "outdoor-buildings" ? [record.landblockId] : [],
-		),
-	]);
-}
-
-function countBuildingTransitionApertureRanges(
-	resources: readonly StaticPortalApertureResource[],
-): number {
-	return resources.reduce(
-		(count, resource) =>
-			count +
-			resource.ranges.filter(
-				(range) => range.sourceKind === "building-transition",
-			).length,
-		0,
-	);
-}
-
 function collectEnvCellLandblockIds(
 	materialized: StaticMaterializationResult,
 ): readonly number[] {
@@ -450,15 +274,6 @@ function collectEnvCellLandblockIds(
 			record.owner.domain === "landblock-env-cells" ? [record.landblockId] : [],
 		),
 	]);
-}
-
-function appendPublication(
-	publications: EnvCellSystemLayerAssemblyPublication[],
-	publication: EnvCellSystemLayerAssemblyPublication | null,
-): void {
-	if (publication) {
-		publications.push(publication);
-	}
 }
 
 function uniqueNumbers(values: readonly number[]): readonly number[] {

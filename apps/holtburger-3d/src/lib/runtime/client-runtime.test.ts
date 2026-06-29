@@ -52,6 +52,7 @@ import type {
 	StaticObjectRenderInstance,
 	StaticObjectVisualResource,
 	StaticPortalApertureResource,
+	StaticPortalGraphRecord,
 	StaticPortalInteriorRecord,
 	StructuredInteriorGeometryStaticDrawUnit,
 	StaticAuthoredDynamicSeedRecord,
@@ -1425,19 +1426,24 @@ describe("browser client runtime", () => {
 		});
 		completeResolverRequest(resolver, "landblock-env-cells", 0xda55ffff);
 		await flushPromises();
-		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff, {
+		completeBakerWork(baker, "outdoor-buildings", 0xda55ffff);
+		completeBakerWork(baker, "landblock-env-cells", 0xda55ffff, {
+			drawUnits: [
+				createStructuredInteriorDrawUnit({
+					drawUnitId: "structured:da550100",
+					envCellId: 0xda550100,
+				}),
+			],
 			portalApertureResources: [
 				createBuildingTransitionPortalApertureResource({
 					landblockId: 0xda55ffff,
 					targetEnvCellId: 0xda550100,
 				}),
 			],
-		});
-		completeBakerWork(baker, "landblock-env-cells", 0xda55ffff, {
-			drawUnits: [
-				createStructuredInteriorDrawUnit({
-					drawUnitId: "structured:da550100",
-					envCellId: 0xda550100,
+			staticPortalGraphs: [
+				createBuildingTransitionStaticPortalGraph({
+					landblockId: 0xda55ffff,
+					targetEnvCellId: 0xda550100,
 				}),
 			],
 			staticPortalInteriorRecords: [
@@ -1562,13 +1568,7 @@ describe("browser client runtime", () => {
 			},
 		});
 		await flushPromises();
-		baker.complete("1:landblock:da55ffff:outdoor-buildings", {
-			portalApertureResources: [
-				createBuildingTransitionPortalApertureResource({
-					targetEnvCellId: 0xda550100,
-				}),
-			],
-		});
+		baker.complete("1:landblock:da55ffff:outdoor-buildings");
 		await flushPromises();
 		const envCellRequest = resolver.pendingRequests.find(
 			(request) => request.job.domain === "landblock-env-cells",
@@ -1581,6 +1581,16 @@ describe("browser client runtime", () => {
 				createStructuredInteriorDrawUnit({
 					drawUnitId: "structured:da550100",
 					envCellId: 0xda550100,
+				}),
+			],
+			portalApertureResources: [
+				createBuildingTransitionPortalApertureResource({
+					targetEnvCellId: 0xda550100,
+				}),
+			],
+			staticPortalGraphs: [
+				createBuildingTransitionStaticPortalGraph({
+					targetEnvCellId: 0xda550100,
 				}),
 			],
 			staticPortalInteriorRecords: [
@@ -1658,20 +1668,25 @@ describe("browser client runtime", () => {
 		await flushPromises();
 
 		completeBakerWork(baker, "outdoor-terrain", 0xdb55ffff);
-		completeBakerWork(baker, "outdoor-buildings", 0xdb55ffff, {
-			portalApertureResources: [
-				createBuildingTransitionPortalApertureResource({
-					landblockId: 0xdb55ffff,
-					targetEnvCellId: 0xdb550100,
-				}),
-			],
-		});
+		completeBakerWork(baker, "outdoor-buildings", 0xdb55ffff);
 		completeBakerWork(baker, "landblock-env-cells", 0xdb55ffff, {
 			drawUnits: [
 				createStructuredInteriorDrawUnit({
 					drawUnitId: "structured:db550100",
 					envCellId: 0xdb550100,
 					landblockId: 0xdb55ffff,
+				}),
+			],
+			portalApertureResources: [
+				createBuildingTransitionPortalApertureResource({
+					landblockId: 0xdb55ffff,
+					targetEnvCellId: 0xdb550100,
+				}),
+			],
+			staticPortalGraphs: [
+				createBuildingTransitionStaticPortalGraph({
+					landblockId: 0xdb55ffff,
+					targetEnvCellId: 0xdb550100,
 				}),
 			],
 			staticPortalInteriorRecords: [
@@ -2741,6 +2756,61 @@ function createBuildingTransitionPortalApertureResource(options: {
 			{ x: 1, y: 0, z: 0 },
 			{ x: 0, y: 1, z: 0 },
 		],
+	};
+}
+
+function createBuildingTransitionStaticPortalGraph(options: {
+	readonly landblockId?: number;
+	readonly targetEnvCellId: number;
+}): StaticPortalGraphRecord {
+	const landblockId = options.landblockId ?? 0xda55ffff;
+	return {
+		edges: [
+			{
+				direction: "directed",
+				edgeId: `building-transition:${landblockId}:${options.targetEnvCellId}`,
+				flags: 0,
+				linkId: `transition:${landblockId}:${options.targetEnvCellId}`,
+				polygonId: 7,
+				provenance: {
+					apertureResourceId: `portal-aperture-resource:building-transition:0x${landblockId
+						.toString(16)
+						.padStart(8, "0")}`,
+					buildingInstanceId: "building-0",
+					buildingPortalId: "building-portal-0",
+					kind: "building-transition",
+					portalId: "transition-portal:0",
+					targetEnvCellId: options.targetEnvCellId,
+				},
+				sceneCrossing: {
+					envCellId: options.targetEnvCellId,
+					kind: "outdoor-to-env-cell",
+					outdoorLandblockId: landblockId,
+				},
+				sourceIndex: 0,
+				sourceNodeId: `outdoor:${landblockId}`,
+				targetNodeId: `env-cell:${options.targetEnvCellId}`,
+			},
+		],
+		kind: "static-portal-graph",
+		landblockId,
+		nodes: [
+			{
+				nodeId: `outdoor:${landblockId}`,
+				scene: {
+					kind: "outdoor",
+					landblockId,
+				},
+			},
+			{
+				nodeId: `env-cell:${options.targetEnvCellId}`,
+				scene: {
+					envCellId: options.targetEnvCellId,
+					kind: "env-cell",
+				},
+			},
+		],
+		owner: createEnvCellLayerOwner(landblockId),
 	};
 }
 

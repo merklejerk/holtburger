@@ -934,7 +934,7 @@ Decisions and course corrections:
 
 ### Phase 7F: Temporary Adapter Deletion And Route Audit
 
-Status: pending.
+Status: completed on 2026-06-29.
 
 Goal: delete the Phase 6C temporary bridge and prove no normal browser escape hatch to old broad routes remains.
 
@@ -954,15 +954,20 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Delete `TemporaryLayerOwnerTargetingResolverAdapter` and its focused adapter tests.
-- [ ] Remove all normal-path imports and construction of the temporary adapter.
-- [ ] Run focused browser/runtime and coordinator tests after deletion.
-- [ ] Run route audits for old broad-route strings in production browser static paths.
-- [ ] Record any remaining compatibility-only old-route surfaces as Phase 11 deletion targets.
+- [x] Delete `TemporaryLayerOwnerTargetingResolverAdapter` and its focused adapter tests.
+- [x] Remove all normal-path imports and construction of the temporary adapter.
+- [x] Run focused browser/runtime and coordinator tests after deletion.
+- [x] Run route audits for old broad-route strings in production browser static paths.
+- [x] Record any remaining compatibility-only old-route surfaces as Phase 11 deletion targets.
 
 Decisions and course corrections:
 
-- Pending implementation.
+- Deleted `TemporaryLayerOwnerTargetingResolverAdapter` and its focused tests. The browser resolver no longer delegates direct static-scope jobs to old per-domain source resolvers.
+- `BrowserStaticResolver.resolve(job)` now fails loudly and tells callers to use `resolveSource`; normal coordinator execution uses source requests, so this is a guardrail rather than a fallback.
+- Pulled `LandblockEnvCellGeometryAttachmentProvider` cleanup forward from Phase 10 because the route audit found it still directly requested `landblock-env-cells` in a normal bake path. The provider now builds geometry attachments from the resolved env-cell source payload and fails if the payload is resolver-light.
+- Route audit result: no `TemporaryLayerOwnerTargetingResolverAdapter`, `layer-owner-source-adapter`, or `shouldUseBrowserSourceResolver` references remain under `apps/holtburger-3d/src`; no `createHostAssetKey("landblock-outdoor")` or `createHostAssetKey("landblock-env-cells")` calls remain in browser runtime, `StaticCoordinator`, the source-first resolver, or env-cell geometry attachment provider production paths.
+- Remaining old broad-route compatibility surfaces are the old standalone resolver classes, route schemas/parsers/tests, and protocol support for direct `resolve-static-scope`; these are Phase 11 deletion targets after lifecycle and env-cell assembly store cutover.
+- Validation: `npm run test:ts -- src/lib/browser/create-browser-runtime.test.ts src/lib/static/coordinator/static-coordinator.test.ts src/lib/static/resolver/landblock-scene-lod-source-resolver.test.ts src/lib/static/env-cells/bake/landblock-env-cell-geometry-attachments.test.ts`; `npm run check`.
 
 ### Phase 8: Layer-Owned Commit, Eviction, And Readiness
 
@@ -1032,12 +1037,12 @@ Decisions and course corrections:
 
 Status: pending.
 
-Goal: remove runtime dependence on separately materialized building layers and direct `landblock-env-cells` host lookups for env-cell system output.
+Goal: remove runtime dependence on separately materialized building layers and the old env-cell assembly store for env-cell system output.
 
 Deliverables:
 
-- Make LoD `4` source output include all facts needed by env-cell bake attachments and env-cell system publication.
-- Replace `LandblockEnvCellGeometryAttachmentProvider` direct `landblock-env-cells` requests with LoD `4` source data.
+- Make LoD `4` source output include all facts needed by env-cell system publication.
+- Keep the Phase 7F payload-local env-cell geometry attachment path intact; do not reintroduce direct `landblock-env-cells` host requests.
 - Delete `EnvCellSystemLayerAssemblyStore`.
 - Ensure env-cell system layers publish from one self-contained layer recipe.
 

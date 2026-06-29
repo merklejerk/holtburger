@@ -3,7 +3,6 @@ import type { LandblockEnvCellsPayloadDto } from "../../../../lib/host/contracts
 import type {
 	HostAssetKey,
 	PreparedAsset,
-	PreparedAssetReader,
 } from "../../../assets/contracts";
 import type { ResolverLandblockEnvCellsPayloadDto } from "../../../assets/preparation/env-cell-views";
 import { createResolverEnvCellPreparedAssetView } from "../../../assets/preparation/env-cell-views";
@@ -15,30 +14,19 @@ import type {
 import { LandblockEnvCellGeometryAttachmentProvider } from "./landblock-env-cell-geometry-attachments";
 
 describe("browser landblock env-cell geometry attachments", () => {
-	it("attaches full cell-structure geometry from the host asset while resolver facts stay light", async () => {
+	it("attaches full cell-structure geometry from resolved source payloads", async () => {
 		const key = createHostAssetKey("landblock-env-cells", 0xda55ffff);
 		const fullAsset = createPreparedAsset(
 			key,
 			createLandblockEnvCellsPayload(),
 		);
-		const resolverAsset = createResolverEnvCellPreparedAssetView(fullAsset);
-		const resolverPayload =
-			resolverAsset.payload as ResolverLandblockEnvCellsPayloadDto;
-		const resolverGeometry = resolverPayload.envCells[0]?.renderGeometry;
-		expect(resolverGeometry).not.toHaveProperty("positions");
-		expect(resolverGeometry).not.toHaveProperty("normals");
-		expect(resolverGeometry).not.toHaveProperty("uvs");
-
-		const assetReader = new FixturePreparedAssetReader([fullAsset]);
-		const provider = new LandblockEnvCellGeometryAttachmentProvider({
-			assetReader,
-		});
+		const fullPayload = fullAsset.payload as LandblockEnvCellsPayloadDto;
+		const provider = new LandblockEnvCellGeometryAttachmentProvider();
 
 		const attachments = await provider.createAttachments(
-			createAttachmentRequest(resolverPayload),
+			createAttachmentRequest(fullPayload),
 		);
 
-		expect(assetReader.requests).toEqual([key]);
 		expect(attachments.staticObjectSourceGeometry).toEqual([]);
 		expect(attachments.envCellCellStructureGeometry).toEqual([
 			expect.objectContaining({
@@ -86,10 +74,7 @@ describe("browser landblock env-cell geometry attachments", () => {
 		const resolverAsset = createResolverEnvCellPreparedAssetView(fullAsset);
 		const resolverPayload =
 			resolverAsset.payload as ResolverLandblockEnvCellsPayloadDto;
-		const assetReader = new FixturePreparedAssetReader([resolverAsset]);
-		const provider = new LandblockEnvCellGeometryAttachmentProvider({
-			assetReader,
-		});
+		const provider = new LandblockEnvCellGeometryAttachmentProvider();
 
 		await expect(
 			provider.createAttachments(createAttachmentRequest(resolverPayload)),
@@ -99,31 +84,8 @@ describe("browser landblock env-cell geometry attachments", () => {
 	});
 });
 
-class FixturePreparedAssetReader implements PreparedAssetReader {
-	readonly #assets = new Map<string, PreparedAsset>();
-	readonly requests: HostAssetKey[] = [];
-
-	constructor(assets: readonly PreparedAsset[]) {
-		for (const asset of assets) {
-			this.#assets.set(describeHostAssetKey(asset.key), asset);
-		}
-	}
-
-	requestPreparedAsset(key: HostAssetKey): Promise<PreparedAsset> {
-		this.requests.push(key);
-		const asset = this.#assets.get(describeHostAssetKey(key));
-		if (!asset) {
-			return Promise.reject(
-				new Error(`Missing fixture asset ${describeHostAssetKey(key)}.`),
-			);
-		}
-
-		return Promise.resolve(asset);
-	}
-}
-
 function createAttachmentRequest(
-	payload: ResolverLandblockEnvCellsPayloadDto,
+	payload: LandblockEnvCellsPayloadDto | ResolverLandblockEnvCellsPayloadDto,
 ): StaticBakeAttachmentRequest {
 	const domain = "landblock-env-cells";
 	const job = {
@@ -158,7 +120,7 @@ function createAttachmentRequest(
 }
 
 function createScopePayload(
-	payload: ResolverLandblockEnvCellsPayloadDto,
+	payload: LandblockEnvCellsPayloadDto | ResolverLandblockEnvCellsPayloadDto,
 ): LandblockEnvCellsStaticScopePayload {
 	return {
 		acceptedEnvCellIds: payload.envCells.map((cell) => cell.envCellId),

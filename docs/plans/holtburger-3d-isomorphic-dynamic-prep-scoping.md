@@ -1389,6 +1389,33 @@ Acceptance criteria:
 
 - The plan is updated with concrete course corrections before Phase 6 starts.
 
+Review outcome:
+
+- Completed after Phase 5.
+- Runtime-authored dynamic prep now uses the same recipe and bake contracts as static-authored
+  dynamics will use later. Runtime-specific behavior stayed in runtime closure/currentness,
+  residence, lifetime, and renderer commit timing.
+- Browser runtime uses worker-backed dynamic visual recipe resolution and dynamic visual baking.
+  `createClientRuntime(...)` keeps direct in-process defaults for tests and non-browser
+  construction, but the browser path no longer relies on `DynamicEntityResourceManager` for
+  runtime-authored visual prep.
+- The dynamic visual baker remains asset-fetch-free. `createDynamicVisualBakeSourceGeometry(...)`
+  performs attachment collection before the bake worker boundary, matching the static bake
+  attachment pattern.
+- No durable diagnostics ledger was added. Runtime closure failures are reported to the console and
+  converted to skipped/failed visual state on the affected runtime-authored entity.
+- Existing runtime-authored tests remain behavior-oriented enough to preserve. The new stale-result
+  test covers currentness rejection without encoding old manager events.
+
+Course corrections before Phase 6:
+
+- Static-authored dynamic recipes should reuse the explicit controller result application methods
+  added in Phase 5 rather than introducing another resource-change event path.
+- Phase 6 should produce static-authored recipe sibling outputs and placement/activation records.
+  Do not route static-authored visuals back through `DynamicEntityResourceManager`.
+- The direct resolver/baker defaults in `createClientRuntime(...)` should be revisited during final
+  cleanup. They are useful for tests, but browser runtime must remain worker-backed.
+
 ### Phase 6: Emit Static-Authored Dynamic Recipes During Static Source Resolution
 
 Goal: discover and resolve static-authored dynamic visual recipes before static materialization.

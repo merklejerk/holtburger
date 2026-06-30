@@ -468,7 +468,7 @@ Verification:
 
 ### Phase 4A: Replace Bake Work Contracts With Task Identity
 
-Status: pending.
+Status: completed 2026-06-30.
 
 Purpose:
 
@@ -495,19 +495,36 @@ Acceptance criteria:
 
 Task checklist:
 
-- [ ] Add owner/task identity to bake item/result contracts.
-- [ ] Replace all `item.work` and `result.works` compile errors with `item.task` and
+- [x] Add owner/task identity to bake item/result contracts.
+- [x] Replace all `item.work` and `result.works` compile errors with `item.task` and
       `result.tasks`.
-- [ ] Replace `createLayerPeerRecordOwnerForStaticWork` call sites inside touched bakers with owner
+- [x] Replace `createLayerPeerRecordOwnerForStaticWork` call sites inside touched bakers with owner
       creation from bake task identity.
-- [ ] Update deferred baker test harnesses to complete by owner key/domain/landblock or task id.
-- [ ] Update runtime tests that currently complete bakes by string-shaped static work id.
-- [ ] Run focused bake/coordinator/runtime tests touched by the contract change.
+- [x] Update deferred baker test harnesses to complete by owner key/domain/landblock or task id.
+- [x] Update runtime tests that currently complete bakes by string-shaped static work id.
+- [x] Run focused bake/coordinator/runtime tests touched by the contract change.
 
 Decisions and course corrections:
 
-- Record any baked output that still derives owner identity indirectly and why it survives this
-  phase.
+- 2026-06-30: Added `StaticBakeTask` and cut over `StaticBakeBatchItem` from `work` to `task`.
+  `StaticBakeBatchResult` now returns `tasks`, not `works`.
+- 2026-06-30: Removed `targetOwnerKey` from bake items because it duplicated `task.ownerKey`.
+  Source requests and source recipes still keep `targetOwnerKey`; that is source fanout identity,
+  not bake identity.
+- 2026-06-30: Terrain, static-object, and env-cell bakers now derive owner ids, peer-record owners,
+  texture namespaces, diagnostics, and dynamic seed ownership from bake task identity.
+- 2026-06-30: Deleted `createLayerPeerRecordOwnerForStaticWork`; bake peer owners now use
+  `createLayerPeerRecordOwnerForStaticBakeTask`.
+- 2026-06-30: Deferred fake baker completion and runtime/coordinator tests now complete by task id
+  or by task domain/scope lookup. Remaining private coordinator `ScheduledStaticWork` state belongs
+  to Phase 4B/4C and demand-planner cleanup.
+
+Verification:
+
+- `npm run test:ts`
+- `npm run check`
+- `npm run lint:ts`
+- `npm run lint:dead`
 
 ### Phase 4B: Replace Coordinator Pending Batches With Task Groups
 

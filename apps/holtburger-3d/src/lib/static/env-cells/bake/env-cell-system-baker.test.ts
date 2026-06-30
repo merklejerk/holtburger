@@ -5,6 +5,7 @@ import type {
 	EnvCellSystemStaticScopePayload,
 	RegionDetailRoleFacts,
 	StaticBakeBatchInput,
+	StaticBakeTask,
 	StaticObjectMaterialSourceFacts,
 	StaticObjectPaletteSourceFacts,
 	StaticObjectTextureRefFacts,
@@ -32,7 +33,7 @@ describe("browser landblock env-cell baker", () => {
 			],
 			staticBatchId: "env-batch-a",
 			textureUses: [],
-			works: [input.items[0]?.work],
+			tasks: [input.items[0]?.task],
 		});
 		expect(result.staticSpatialRecords).toEqual([
 			expect.objectContaining({
@@ -1449,17 +1450,20 @@ function createInput(
 		readonly portalConnectivityGraph?: EnvCellSystemStaticScopePayload["portalConnectivityGraph"];
 	} = {},
 ): StaticBakeBatchInput {
-	const work = {
-		job: {
-			domain: "env-cell-system" as const,
-			scope: {
-				kind: "landblock" as const,
-				landblockId: 0xda55ffff,
-			},
+	const task: StaticBakeTask = {
+		domain: "env-cell-system",
+		ownerId: "env-cell-system:0xda55ffff",
+		ownerKey: {
+			kind: "env-cell-system",
+			landblockId: 0xda55ffff,
 		},
-		priority: 5,
 		revision: 7,
-		staticWorkId: "7:landblock:da55ffff:env-cell-system",
+		scope: {
+			kind: "landblock",
+			landblockId: 0xda55ffff,
+		},
+		scopeKey: "landblock:da55ffff",
+		taskId: "7:landblock:da55ffff:env-cell-system",
 	};
 
 	return {
@@ -1477,7 +1481,10 @@ function createInput(
 		items: [
 			{
 				payload: {
-					job: work.job,
+					job: {
+						domain: task.domain,
+						scope: task.scope,
+					},
 					scope: {
 						acceptedEnvCellIds: [0xda550100],
 						envCells: [
@@ -1598,11 +1605,7 @@ function createInput(
 					},
 					sourceRevision: 42,
 				},
-				targetOwnerKey: {
-					kind: "env-cell-system" as const,
-					landblockId: 0xda55ffff,
-				},
-				work,
+				task,
 			},
 		],
 		revision: 7,

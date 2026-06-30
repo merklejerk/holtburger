@@ -4,6 +4,7 @@ import type {
 	StaticBakeBatchInput,
 	StaticBakeBatchResult,
 	StaticBakeBatchItem,
+	StaticBakeTask,
 	StaticBaker,
 	StaticCoordinatorCommitDelta,
 	StaticCoordinatorOverviewSnapshot,
@@ -367,15 +368,15 @@ export class StaticCoordinator {
 				revision: task.revision,
 				task: toStaticLayerTaskStatus(task),
 			});
-			this.#enqueueBakePayload(task.work, recipe.payload, recipe.targetOwnerKey);
+			this.#enqueueBakePayload(task, recipe.payload);
 		}
 	}
 
 	#enqueueBakePayload(
-		work: ScheduledStaticWork,
+		taskStatus: MutableScheduledStaticWorkStatus,
 		payload: StaticScopePayload,
-		targetOwnerKey: LayerOwnerState["key"],
 	): void {
+		const { work } = taskStatus;
 		const batchKey = createPendingBatchKey(work);
 		let pendingBatch = this.#pendingBatches.get(batchKey);
 		if (!pendingBatch) {
@@ -400,8 +401,7 @@ export class StaticCoordinator {
 
 		pendingBatch.items.push({
 			payload,
-			targetOwnerKey,
-			work,
+			task: createStaticBakeTask(taskStatus),
 		});
 		if (pendingBatch.items.length >= this.#batching.maxPayloadsPerBatch) {
 			this.#flushPendingBatch(batchKey);
@@ -420,16 +420,21 @@ export class StaticCoordinator {
 		}
 
 		const items = pendingBatch.items.filter(
-			(item) =>
-				this.#isCurrent(item.work) &&
-				this.#isLayerOwnerDemanded(item.targetOwnerKey),
+			(item) => {
+				const task = this.#inFlightStaticWork.get(item.task.taskId);
+				return (
+					task !== undefined &&
+					this.#isTaskCurrent(task) &&
+					this.#isLayerOwnerDemanded(item.task.ownerKey)
+				);
+			},
 		);
 		if (items.length === 0) {
 			return;
 		}
 
 		for (const item of items) {
-			this.#setStatus(item.work, "baking");
+			this.#setTaskStatus(item.task.taskId, "baking");
 		}
 
 		const staticBatchId = createStaticBatchId({
@@ -448,8 +453,8 @@ export class StaticCoordinator {
 			});
 		} catch (error: unknown) {
 			for (const item of items) {
-				this.#markFailedIfCurrent(
-					item.work,
+				this.#markTaskIdFailedIfCurrent(
+					item.task.taskId,
 					error instanceof Error ? error.message : String(error),
 				);
 			}
@@ -474,8 +479,8 @@ export class StaticCoordinator {
 			result = await this.#baker.bake(bakeInput);
 		} catch (error: unknown) {
 			for (const item of items) {
-				this.#markFailedIfCurrent(
-					item.work,
+				this.#markTaskIdFailedIfCurrent(
+					item.task.taskId,
 					error instanceof Error ? error.message : String(error),
 				);
 			}
@@ -483,13 +488,13 @@ export class StaticCoordinator {
 		}
 		const bakeMs = nowMs() - bakeStartedAt;
 
-		const currentWorks = result.works.filter(
-			(work) => this.#isCurrent(work) && this.#isWorkOwnerDemanded(work),
+		const currentTasks = result.tasks.filter(
+			(task) => this.#isBakeTaskCurrent(task) && this.#isLayerOwnerDemanded(task.ownerKey),
 		);
-		if (currentWorks.length !== result.works.length) {
-			this.#staleBakeResults += result.works.length - currentWorks.length;
-			result = filterStaticBakeResultForWorks(result, currentWorks);
-			if (currentWorks.length === 0) {
+		if (currentTasks.length !== result.tasks.length) {
+			this.#staleBakeResults += result.tasks.length - currentTasks.length;
+			result = filterStaticBakeResultForTasks(result, currentTasks);
+			if (currentTasks.length === 0) {
 				this.#emit();
 				return;
 			}
@@ -500,15 +505,15 @@ export class StaticCoordinator {
 				attachmentMs,
 				bakeMs,
 				resolverMs: sumNullableNumbers(
-					currentWorks.map(
-						(work) => this.#resolverMsByTaskId.get(work.staticWorkId) ?? null,
+					currentTasks.map(
+						(task) => this.#resolverMsByTaskId.get(task.taskId) ?? null,
 					),
 				),
 			});
 		} catch (error: unknown) {
-			for (const work of currentWorks) {
-				this.#markFailedIfCurrent(
-					work,
+			for (const task of currentTasks) {
+				this.#markTaskIdFailedIfCurrent(
+					task.taskId,
 					error instanceof Error ? error.message : String(error),
 				);
 			}
@@ -526,8 +531,8 @@ export class StaticCoordinator {
 		const commitStartedAt = nowMs();
 		const resourcesByOwnerId = collectCommittedResourceKeysByOwnerId(result);
 
-		for (const work of result.works) {
-			const status = this.#inFlightStaticWork.get(work.staticWorkId);
+		for (const task of result.tasks) {
+			const status = this.#inFlightStaticWork.get(task.taskId);
 			if (!status) {
 				continue;
 			}
@@ -557,15 +562,15 @@ export class StaticCoordinator {
 			);
 		}
 		this.#committedDrawUnits = this.#residentDrawUnitIds.size;
-		for (const work of result.works) {
-			this.#resolverMsByTaskId.delete(work.staticWorkId);
+		for (const task of result.tasks) {
+			this.#resolverMsByTaskId.delete(task.taskId);
 		}
 		this.#recordTiming({
 			attachmentMs: timing.attachmentMs,
 			bakeMs: timing.bakeMs,
 			commitMs: nowMs() - commitStartedAt,
 			domain: result.domain,
-			itemCount: result.works.length,
+			itemCount: result.tasks.length,
 			kind: "static-coordinator-timing",
 			resolverMs: timing.resolverMs,
 			revision: result.revision,
@@ -698,18 +703,6 @@ export class StaticCoordinator {
 		}
 	}
 
-	#markFailedIfCurrent(work: ScheduledStaticWork, message: string): void {
-		if (!this.#isCurrent(work)) {
-			return;
-		}
-
-		const status = this.#inFlightStaticWork.get(work.staticWorkId);
-
-		if (status) {
-			this.#markTaskFailed(status, message);
-		}
-	}
-
 	#markTaskFailedIfCurrent(
 		task: MutableScheduledStaticWorkStatus,
 		message: string,
@@ -719,6 +712,15 @@ export class StaticCoordinator {
 		}
 
 		this.#markTaskFailed(task, message);
+	}
+
+	#markTaskIdFailedIfCurrent(taskId: string, message: string): void {
+		const task = this.#inFlightStaticWork.get(taskId);
+		if (!task) {
+			return;
+		}
+
+		this.#markTaskFailedIfCurrent(task, message);
 	}
 
 	#markTaskFailed(
@@ -808,6 +810,20 @@ export class StaticCoordinator {
 		this.#emit();
 	}
 
+	#setTaskStatus(
+		taskId: string,
+		status: MutableScheduledStaticWorkStatus["status"],
+	): void {
+		const current = this.#inFlightStaticWork.get(taskId);
+
+		if (!current || !this.#isTaskCurrent(current)) {
+			return;
+		}
+
+		current.status = status;
+		this.#emit();
+	}
+
 	#createOwnerStates(): readonly LayerOwnerState[] {
 		return Array.from(this.#inFlightStaticWork.values())
 			.map((status) => ({
@@ -836,8 +852,9 @@ export class StaticCoordinator {
 		);
 	}
 
-	#isWorkOwnerDemanded(work: ScheduledStaticWork): boolean {
-		return this.#isLayerOwnerDemanded(createLayerOwnerKeyForWork(work));
+	#isBakeTaskCurrent(task: StaticBakeTask): boolean {
+		const current = this.#inFlightStaticWork.get(task.taskId);
+		return current !== undefined && this.#isTaskCurrent(current);
 	}
 
 	#assertActive(): void {
@@ -932,7 +949,7 @@ function createStaticBatchId(input: {
 	readonly items: readonly StaticBakeBatchItem[];
 }): string {
 	const scopeKeys = input.items.map((item) =>
-		describeStaticScopeKey(item.work.job.scope),
+		item.task.scopeKey,
 	);
 	return [
 		"static-batch",
@@ -951,8 +968,18 @@ function createStaticReconciliationRunId(revision: number): string {
 	return `static-run:${revision}`;
 }
 
-function createDemandWorkKey(work: ScheduledStaticWork): string {
-	return `${describeStaticScopeKey(work.job.scope)}:${work.job.domain}`;
+function createStaticBakeTask(
+	status: MutableScheduledStaticWorkStatus,
+): StaticBakeTask {
+	return {
+		domain: status.domain,
+		ownerId: status.ownerId,
+		ownerKey: status.ownerKey,
+		revision: status.revision,
+		scope: status.work.job.scope,
+		scopeKey: status.scopeKey,
+		taskId: status.staticWorkId,
+	};
 }
 
 function createSourceRequestsForNewWork(
@@ -1188,12 +1215,12 @@ function compareMaterialCoverageReports(
 	);
 }
 
-function filterStaticBakeResultForWorks(
+function filterStaticBakeResultForTasks(
 	result: StaticBakeBatchResult,
-	works: readonly ScheduledStaticWork[],
+	tasks: readonly StaticBakeTask[],
 ): StaticBakeBatchResult {
-	const demandKeys = new Set(works.map(createDemandWorkKey));
-	const ownerIds = new Set(works.map(createLayerOwnerKeyIdForWork));
+	const demandKeys = new Set(tasks.map(createDemandKeyForTask));
+	const ownerIds = new Set(tasks.map((task) => task.ownerId));
 	const drawUnitIds = new Set(
 		result.drawUnits
 			.filter((drawUnit) => demandKeys.has(getDrawUnitDemandKey(drawUnit)))
@@ -1239,7 +1266,7 @@ function filterStaticBakeResultForWorks(
 				),
 		),
 		materialCoverage: result.materialCoverage.filter((coverage) =>
-			works.some((work) => work.job.domain === coverage.domain),
+			tasks.some((task) => task.domain === coverage.domain),
 		),
 		portalApertureResources: result.portalApertureResources.filter((resource) =>
 			retainedPortalApertureResourceIds.has(resource.apertureResourceId),
@@ -1294,8 +1321,12 @@ function filterStaticBakeResultForWorks(
 					: retainedStaticObjectVisualResourceIds.has(owner.resourceId),
 			),
 		),
-		works,
+		tasks,
 	};
+}
+
+function createDemandKeyForTask(task: StaticBakeTask): string {
+	return `${task.scopeKey}:${task.domain}`;
 }
 
 function isPeerRecordOwnedByRetainedWork(

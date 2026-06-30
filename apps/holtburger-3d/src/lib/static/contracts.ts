@@ -883,10 +883,22 @@ interface StaticAtlasBatchPlacementSnapshot {
 	readonly texture: PreparedRgbaRenderSurfaceTextureUseIdentity;
 }
 
+export interface StaticBakeTask {
+	/** Opaque async task id used for diagnostics and test harness completion. */
+	readonly taskId: string;
+	/** Layer owner whose static resources this task produces. */
+	readonly ownerKey: LayerOwnerKey;
+	/** Stable string form of `ownerKey` for resource ownership and map keys. */
+	readonly ownerId: string;
+	readonly domain: StaticDomain;
+	readonly scope: StaticResolverScope;
+	readonly scopeKey: string;
+	readonly revision: number;
+}
+
 export interface StaticBakeBatchItem {
-	readonly work: ScheduledStaticWork;
+	readonly task: StaticBakeTask;
 	readonly payload: StaticScopePayload;
-	readonly targetOwnerKey: LayerOwnerKey;
 }
 
 export interface StaticBakeBatchInput {
@@ -1327,7 +1339,7 @@ export interface StaticBakeBatchResult {
 	readonly staticBatchId: string;
 	readonly domain: StaticDomain;
 	readonly revision: number;
-	readonly works: readonly ScheduledStaticWork[];
+	readonly tasks: readonly StaticBakeTask[];
 	readonly drawUnits: readonly StaticDrawUnit[];
 	readonly staticObjectBakeDiagnostics: readonly StaticObjectBakeDiagnostics[];
 	readonly portalApertureResources: readonly StaticPortalApertureResource[];

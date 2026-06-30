@@ -6,11 +6,13 @@ import type {
 import { createHostAssetKey } from "../../assets/keys";
 import type {
 	StaticBakeBatchInput,
+	StaticBakeTask,
 	StaticBaker,
 	StaticLandblockSceneLodSourceRequest,
 	StaticLayerRecipe,
 } from "../contracts";
 import { EnvCellSystemBaker } from "../env-cells/bake/env-cell-system-baker";
+import { createLayerOwnerKeyId } from "../layer-owners";
 import { StaticObjectBatchBaker } from "../objects/bake/static-object-batch-baker";
 import { TerrainGeometryStaticBaker } from "../terrain/bake/terrain-geometry-baker";
 import { LandblockSceneLodSourceResolver } from "./landblock-scene-lod-source-resolver";
@@ -197,6 +199,15 @@ function bakerForRecipe(recipe: StaticLayerRecipe): StaticBaker {
 
 function createBakeInput(recipe: StaticLayerRecipe): StaticBakeBatchInput {
 	const staticBatchId = `batch:${recipe.payload.job.domain}`;
+	const task: StaticBakeTask = {
+		domain: recipe.payload.job.domain,
+		ownerId: createLayerOwnerKeyId(recipe.targetOwnerKey),
+		ownerKey: recipe.targetOwnerKey,
+		revision: 1,
+		scope: recipe.payload.job.scope,
+		scopeKey: `landblock:${recipe.payload.job.scope.landblockId.toString(16).padStart(8, "0")}`,
+		taskId: `task:${recipe.payload.job.domain}`,
+	};
 	return {
 		atlasSnapshot: {
 			domain: recipe.payload.job.domain,
@@ -212,13 +223,7 @@ function createBakeInput(recipe: StaticLayerRecipe): StaticBakeBatchInput {
 		items: [
 			{
 				payload: recipe.payload,
-				targetOwnerKey: recipe.targetOwnerKey,
-				work: {
-					job: recipe.payload.job,
-					priority: 0,
-					revision: 1,
-					staticWorkId: `work:${recipe.payload.job.domain}`,
-				},
+				task,
 			},
 		],
 		revision: 1,

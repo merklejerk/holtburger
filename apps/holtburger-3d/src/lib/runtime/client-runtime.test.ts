@@ -222,8 +222,8 @@ describe("browser client runtime", () => {
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
 
-		const staticWorkId = "1:landblock:da55ffff:outdoor-buildings";
-		baker.complete(staticWorkId, {
+		const taskId = "1:landblock:da55ffff:outdoor-buildings";
+		baker.complete(taskId, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
@@ -370,8 +370,8 @@ describe("browser client runtime", () => {
 		});
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
-		const staticWorkId = "1:landblock:da55ffff:outdoor-buildings";
-		baker.complete(staticWorkId, {
+		const taskId = "1:landblock:da55ffff:outdoor-buildings";
+		baker.complete(taskId, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushPromises();
@@ -444,8 +444,8 @@ describe("browser client runtime", () => {
 		});
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
-		const staticWorkId = "1:landblock:da55ffff:outdoor-buildings";
-		baker.complete(staticWorkId, {
+		const taskId = "1:landblock:da55ffff:outdoor-buildings";
+		baker.complete(taskId, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
@@ -918,8 +918,8 @@ describe("browser client runtime", () => {
 		});
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
-		const staticWorkId = "1:landblock:da55ffff:outdoor-buildings";
-		baker.complete(staticWorkId, {
+		const taskId = "1:landblock:da55ffff:outdoor-buildings";
+		baker.complete(taskId, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
@@ -964,8 +964,8 @@ describe("browser client runtime", () => {
 		});
 		completeResolverRequest(resolver, "outdoor-buildings", 0xda55ffff);
 		await flushPromises();
-		const staticWorkId = "1:landblock:da55ffff:outdoor-buildings";
-		baker.complete(staticWorkId, {
+		const taskId = "1:landblock:da55ffff:outdoor-buildings";
+		baker.complete(taskId, {
 			staticAuthoredDynamicSeeds: [createOutdoorDynamicSeedRecord()],
 		});
 		await flushRuntimeWork();
@@ -1008,8 +1008,8 @@ describe("browser client runtime", () => {
 		completeResolverRequest(resolver, "env-cell-system", 0xda55ffff);
 		await flushPromises();
 
-		const staticWorkId = "1:landblock:da55ffff:env-cell-system";
-		baker.complete(staticWorkId, {
+		const taskId = "1:landblock:da55ffff:env-cell-system";
+		baker.complete(taskId, {
 			staticAuthoredDynamicSeeds: [
 				createEnvCellStaticSeedRecord(),
 				createEnvCellDynamicSeedRecord(),
@@ -2481,11 +2481,11 @@ describe("browser client runtime", () => {
 		);
 		await flushPromises();
 
-		expect(consoleError).toHaveBeenCalledWith(
-			"static resolver work 1:landblock:da55ffff:outdoor-terrain failed; static content for landblock:da55ffff/outdoor-terrain was not resolved.",
-			{
-				message: "landblock env-cell bundle unavailable",
-				revision: 1,
+	expect(consoleError).toHaveBeenCalledWith(
+		"static layer task 1:landblock:da55ffff:outdoor-terrain failed; static content for landblock:da55ffff/outdoor-terrain was not resolved.",
+		{
+			message: "landblock env-cell bundle unavailable",
+			revision: 1,
 			},
 		);
 		const diagnosticsSnapshot = runtime.createDiagnosticsSnapshot();
@@ -2619,18 +2619,18 @@ function completeBakerWork(
 	const input = baker.pendingInputs.find((candidate) =>
 		candidate.items.some(
 			(item) =>
-				item.work.job.domain === domain &&
-				item.work.job.scope.kind === "landblock" &&
-				item.work.job.scope.landblockId === landblockId,
+				item.task.domain === domain &&
+				item.task.scope.kind === "landblock" &&
+				item.task.scope.landblockId === landblockId,
 		),
 	);
 	const work = input?.items.find(
 		(item) =>
-			item.work.job.domain === domain &&
-			item.work.job.scope.kind === "landblock" &&
-			item.work.job.scope.landblockId === landblockId,
+			item.task.domain === domain &&
+			item.task.scope.kind === "landblock" &&
+			item.task.scope.landblockId === landblockId,
 	);
-	baker.complete(work?.work.staticWorkId ?? failKey(), result);
+	baker.complete(work?.task.taskId ?? failKey(), result);
 }
 
 function createPortalInteriorRecord(options: {

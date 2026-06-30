@@ -3,6 +3,7 @@ import type {
 	EnvCellSystemStaticScopePayload,
 	OutdoorStaticObjectsScopePayload,
 	StaticBakeBatchInput,
+	StaticBakeTask,
 	StaticBounds,
 	StaticMaterialSourceIdentity,
 	StaticObjectMaterialSourceFacts,
@@ -1471,17 +1472,20 @@ function createEnvCellStaticPayload(): StaticObjectBatchPayload &
 
 function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 	const payload = createEnvCellStaticScopePayload();
-	const work = {
-		job: {
-			domain: "env-cell-system" as const,
-			scope: {
-				kind: "landblock" as const,
-				landblockId: 0xda55ffff,
-			},
+	const task: StaticBakeTask = {
+		domain: "env-cell-system",
+		ownerId: "env-cell-system:0xda55ffff",
+		ownerKey: {
+			kind: "env-cell-system",
+			landblockId: 0xda55ffff,
 		},
-		priority: 0,
 		revision: 1,
-		staticWorkId: "1:landblock:da55ffff:env-cell-system",
+		scope: {
+			kind: "landblock",
+			landblockId: 0xda55ffff,
+		},
+		scopeKey: "landblock:da55ffff",
+		taskId: "1:landblock:da55ffff:env-cell-system",
 	};
 
 	return {
@@ -1511,15 +1515,14 @@ function createEnvCellStaticBakeInput(): StaticBakeBatchInput {
 		items: [
 			{
 				payload: {
-					job: work.job,
+					job: {
+						domain: task.domain,
+						scope: task.scope,
+					},
 					scope: payload,
 					sourceRevision: 1,
 				},
-				targetOwnerKey: {
-					kind: "env-cell-system" as const,
-					landblockId: 0xda55ffff,
-				},
-				work,
+				task,
 			},
 		],
 		revision: 1,
@@ -1864,17 +1867,21 @@ function createBakeInput(
 	payload: OutdoorStaticObjectsScopePayload,
 ): StaticBakeBatchInput {
 	const domain = payload.domain;
-	const work = {
-		job: {
-			domain,
-			scope: {
-				kind: "landblock" as const,
-				landblockId: 0xda55ffff,
-			},
-		},
-		priority: 0,
+	const ownerKey = {
+		kind: staticObjectLayerOwnerKindForDomain(domain),
+		landblockId: payload.landblock.landblockId,
+	} as const;
+	const task: StaticBakeTask = {
+		domain,
+		ownerId: `${ownerKey.kind}:0xda55ffff`,
+		ownerKey,
 		revision: 1,
-		staticWorkId: `1:landblock:da55ffff:${domain}`,
+		scope: {
+			kind: "landblock",
+			landblockId: 0xda55ffff,
+		},
+		scopeKey: "landblock:da55ffff",
+		taskId: `1:landblock:da55ffff:${domain}`,
 	};
 
 	return {
@@ -1904,15 +1911,14 @@ function createBakeInput(
 		items: [
 			{
 				payload: {
-					job: work.job,
+					job: {
+						domain: task.domain,
+						scope: task.scope,
+					},
 					scope: payload,
 					sourceRevision: 1,
 				},
-				targetOwnerKey: {
-					kind: staticObjectLayerOwnerKindForDomain(domain),
-					landblockId: payload.landblock.landblockId,
-				},
-				work,
+				task,
 			},
 		],
 		revision: 1,

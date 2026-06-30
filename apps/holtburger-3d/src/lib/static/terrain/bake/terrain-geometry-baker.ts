@@ -17,7 +17,6 @@ import type {
 	TerrainTextureUseFacts,
 } from "../../contracts";
 import { uniqueSortedStaticTextureUseOwners } from "../../contracts";
-import { createLayerOwnerKeyId } from "../../layer-owners";
 import { classifyTerrainMaterialFamily } from "./terrain-material-family-classifier";
 import { buildTerrainMaterialLayerPlan } from "./terrain-material-layer-planner";
 
@@ -64,8 +63,8 @@ export function bakeTerrainGeometry(
 		staticSpatialRecords: createTerrainSpatialRecords(drawUnits),
 		staticVisibilityRecords: [],
 		staticBatchId: input.staticBatchId,
+		tasks: input.items.map((item) => item.task),
 		textureUses: itemResults.flatMap((result) => result.textureUses),
-		works: input.items.map((item) => item.work),
 	};
 }
 
@@ -107,15 +106,15 @@ function bakeTerrainGeometryItem(
 	readonly textureUses: readonly StaticBakeTextureUse[];
 } {
 	if (
-		item.work.job.domain !== "outdoor-terrain" ||
+		item.task.domain !== "outdoor-terrain" ||
 		item.payload.scope.kind !== "terrain"
 	) {
 		throw new Error(
-			`Terrain geometry baker only supports outdoor terrain payloads. Received ${item.work.job.domain}/${item.payload.scope.kind}.`,
+			`Terrain geometry baker only supports outdoor terrain payloads. Received ${item.task.domain}/${item.payload.scope.kind}.`,
 		);
 	}
 
-	const textureUseScopeId = createLayerOwnerKeyId(item.targetOwnerKey);
+	const textureUseScopeId = item.task.ownerId;
 	const drawUnits = createTerrainGeometryDrawUnits(
 		textureUseScopeId,
 		item.payload.scope,
@@ -406,7 +405,7 @@ function createTerrainBakeTextureUses(
 				continue;
 			}
 			const textureUseId = createTerrainTextureUseId(
-				createLayerOwnerKeyId(item.targetOwnerKey),
+				item.task.ownerId,
 				textureUse,
 			);
 			if (!boundTextureUseIds.has(textureUseId)) {

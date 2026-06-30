@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { StaticBakeBatchInput, StaticBakeBatchResult } from "../contracts";
+import type {
+	StaticBakeBatchInput,
+	StaticBakeBatchResult,
+	StaticBakeTask,
+} from "../contracts";
 import { StaticBakeWorkerClient } from "./worker-client";
 import type {
 	StaticBakeWorkerPort,
@@ -31,7 +35,7 @@ describe("static bake worker protocol", () => {
 
 		await expect(pending).resolves.toMatchObject({
 			drawUnits: [],
-			works: [input.items[0]?.work],
+			tasks: [input.items[0]?.task],
 		});
 		client.dispose();
 	});
@@ -97,17 +101,20 @@ class FixtureWorkerPort implements StaticBakeWorkerPort {
 }
 
 function createInput(): StaticBakeBatchInput {
-	const work = {
-		job: {
-			domain: "outdoor-terrain" as const,
-			scope: {
-				kind: "landblock" as const,
-				landblockId: 0xda55ffff,
-			},
+	const task: StaticBakeTask = {
+		domain: "outdoor-terrain",
+		ownerId: "terrain:0xda55ffff",
+		ownerKey: {
+			kind: "terrain",
+			landblockId: 0xda55ffff,
 		},
-		priority: 0,
 		revision: 1,
-		staticWorkId: "1:landblock:da55ffff:outdoor-terrain",
+		scope: {
+			kind: "landblock",
+			landblockId: 0xda55ffff,
+		},
+		scopeKey: "landblock:da55ffff",
+		taskId: "1:landblock:da55ffff:outdoor-terrain",
 	};
 
 	return {
@@ -125,14 +132,17 @@ function createInput(): StaticBakeBatchInput {
 		items: [
 			{
 				payload: {
-					job: work.job,
+					job: {
+						domain: task.domain,
+						scope: task.scope,
+					},
 					scope: {
 						kind: "placeholder",
 						referencedTextureUses: [],
 					},
 					sourceRevision: 1,
 				},
-				work,
+				task,
 			},
 		],
 		revision: 1,
@@ -158,7 +168,7 @@ function createResult(input: StaticBakeBatchInput): StaticBakeBatchResult {
 		staticSpatialRecords: [],
 		staticVisibilityRecords: [],
 		staticBatchId: input.staticBatchId,
+		tasks: input.items.map((item) => item.task),
 		textureUses: [],
-		works: input.items.map((item) => item.work),
 	};
 }

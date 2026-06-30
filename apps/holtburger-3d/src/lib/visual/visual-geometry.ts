@@ -14,13 +14,13 @@ interface VisualGeometryVec3 {
 /** GPU index element width for a visual geometry payload. */
 type VisualGeometryIndexType = "uint16" | "uint32";
 
-/** Renderer shader family selected by material compatibility planning. */
+/** Renderer shader family selected by material batching planning. */
 type VisualGeometryMaterialFamily =
 	| "flat-color"
 	| "indexed-paletted"
 	| "texture-rgba";
 
-/** Renderer pass selected by material compatibility planning. */
+/** Renderer pass selected by material batching planning. */
 type VisualGeometryMaterialPass =
 	| "opaque"
 	| "alpha-test"

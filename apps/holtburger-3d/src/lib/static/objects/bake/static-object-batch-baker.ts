@@ -52,11 +52,11 @@ import {
 import { createStaticMaterialTextureUseId } from "../../bake/static-material-texture-policy";
 import { describeStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
 import {
-	partitionStaticObjectCompatibility,
-	type StaticObjectCompatibilityPayload,
-	type StaticObjectCompatibilityPartition,
-	type StaticObjectCompatibilityTriangle,
-} from "./static-object-compatibility-partitioner";
+	partitionStaticObjectBatches,
+	type StaticObjectBatchPayload,
+	type StaticObjectBatchPartition,
+	type StaticObjectBatchTriangle,
+} from "./static-object-batch-partitioner";
 import {
 	isCurrentlyStageableStaticObjectDataUse,
 	isRenderableStaticObjectPartition,
@@ -68,13 +68,13 @@ import {
 	createStaticObjectVisualResourceKeyString,
 } from "../static-object-visual-resource-key";
 
-export class StaticObjectCompatibilityBaker implements StaticBaker {
+export class StaticObjectBatchBaker implements StaticBaker {
 	async bake(input: StaticBakeBatchInput): Promise<StaticBakeBatchResult> {
-		return bakeStaticObjectCompatibility(input);
+		return bakeStaticObjectBatch(input);
 	}
 }
 
-export function bakeStaticObjectCompatibility(
+export function bakeStaticObjectBatch(
 	input: StaticBakeBatchInput,
 ): StaticBakeBatchResult {
 	if (
@@ -84,12 +84,12 @@ export function bakeStaticObjectCompatibility(
 		input.domain !== "env-cell-system"
 	) {
 		throw new Error(
-			`Static object compatibility baker only supports static object batches. Received ${input.domain}.`,
+			`Static object batch baker only supports static object batches. Received ${input.domain}.`,
 		);
 	}
 
 	const itemResults = input.items.map((item) =>
-		bakeStaticObjectCompatibilityItem(input, item),
+		bakeStaticObjectBatchItem(input, item),
 	);
 	const drawUnits = itemResults.flatMap((result) => result.drawUnits);
 	const buildingTransitionPortalApertureResources = itemResults.flatMap(
@@ -149,7 +149,7 @@ export function bakeStaticObjectCompatibility(
 }
 
 function createStaticObjectSourceMappingCoverage(
-	partition: StaticObjectCompatibilityPartition,
+	partition: StaticObjectBatchPartition,
 ): readonly StaticObjectSourceMappingCoverage[] {
 	const materialSlotByEntryKey = new Map(
 		partition.coarseTablePlan.entries.map((entry, slot) => [
@@ -253,7 +253,7 @@ function createStaticObjectSourceMappingCoverage(
 		.sort(compareSourceMappingCoverage);
 }
 
-function bakeStaticObjectCompatibilityItem(
+function bakeStaticObjectBatchItem(
 	input: StaticBakeBatchInput,
 	item: StaticBakeBatchItem,
 ): {
@@ -269,13 +269,13 @@ function bakeStaticObjectCompatibilityItem(
 	readonly buildingTransitionPortalApertureResource: StaticPortalApertureResource | null;
 	readonly work: StaticBakeBatchItem["work"];
 } {
-	const scope = createStaticObjectCompatibilityPayload(item);
+	const scope = createStaticObjectBatchPayload(item);
 	const buildingTransitionPortalApertureResource =
 		item.payload.scope.kind === "outdoor-static-objects" ||
 		item.payload.scope.kind === "env-cell-system"
 			? deriveBuildingTransitionPortalApertureResource(item.payload.scope)
 			: null;
-	const partitionPlan = partitionStaticObjectCompatibility(scope);
+	const partitionPlan = partitionStaticObjectBatches(scope);
 	const sourceIndex = new StaticObjectBakeSourceIndex(scope, input.attachments);
 	const resourceIdPrefix = createLayerOwnerKeyId(item.targetOwnerKey);
 	const renderablePartitions = partitionPlan.partitions.filter((partition) => {
@@ -388,9 +388,9 @@ function createStaticObjectBakeDiagnostics(options: {
 		readonly instances: readonly StaticObjectRenderInstance[];
 		readonly resources: readonly StaticObjectVisualResource[];
 	};
-	readonly payload: StaticObjectCompatibilityPayload;
-	readonly partitionPlan: ReturnType<typeof partitionStaticObjectCompatibility>;
-	readonly retainedBakedPartitions: readonly StaticObjectCompatibilityPartition[];
+	readonly payload: StaticObjectBatchPayload;
+	readonly partitionPlan: ReturnType<typeof partitionStaticObjectBatches>;
+	readonly retainedBakedPartitions: readonly StaticObjectBatchPartition[];
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
 	readonly renderablePartitionCount: number;
 	readonly drawUnits: readonly StaticObjectGeometryStaticDrawUnit[];
@@ -558,8 +558,8 @@ function createStaticObjectInstancingBakeDiagnostics(input: {
 }
 
 function createRetainedTransparentOutdoorGeneratedSceneryPartitionReasons(options: {
-	readonly partitions: readonly StaticObjectCompatibilityPartition[];
-	readonly payload: StaticObjectCompatibilityPayload;
+	readonly partitions: readonly StaticObjectBatchPartition[];
+	readonly payload: StaticObjectBatchPayload;
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
 }): StaticObjectRetainedTransparentPartitionReasonCounts {
 	const counts = createEmptyRetainedTransparentPartitionReasonCounts();
@@ -589,7 +589,7 @@ function createRetainedTransparentOutdoorGeneratedSceneryPartitionReasons(option
 }
 
 function createGeneratedObjectCountBySourceLocalTriangleKey(
-	partitions: readonly StaticObjectCompatibilityPartition[],
+	partitions: readonly StaticObjectBatchPartition[],
 ): ReadonlyMap<string, number> {
 	const objectKeysBySourceLocalTriangleKey = new Map<string, Set<string>>();
 	for (const partition of partitions) {
@@ -637,7 +637,7 @@ function classifyRetainedTransparentPartition(options: {
 		string,
 		number
 	>;
-	readonly partition: StaticObjectCompatibilityPartition;
+	readonly partition: StaticObjectBatchPartition;
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
 }): RetainedTransparentPartitionReason {
 	const { partition, sourceIndex } = options;
@@ -725,8 +725,8 @@ function sumNumbers(values: readonly number[]): number {
 }
 
 function createStaticObjectInstancedOutput(options: {
-	readonly partitions: readonly StaticObjectCompatibilityPartition[];
-	readonly payload: StaticObjectCompatibilityPayload;
+	readonly partitions: readonly StaticObjectBatchPartition[];
+	readonly payload: StaticObjectBatchPayload;
 	readonly resourceIdPrefix: string;
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
 	readonly staticBatchId: string;
@@ -1053,10 +1053,10 @@ interface StaticObjectVisualResourceTriangleGroup {
 	readonly materialEntry: StaticMaterialTableEntry;
 	readonly materialFamily: StaticObjectGeometryStaticDrawUnit["materialFamily"];
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
-	readonly sourceTrianglesById: Map<string, StaticObjectCompatibilityTriangle>;
+	readonly sourceTrianglesById: Map<string, StaticObjectBatchTriangle>;
 	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
 	readonly textureUseIds: readonly string[];
-	readonly textureWrapMode: StaticObjectCompatibilityPartition["textureWrapMode"];
+	readonly textureWrapMode: StaticObjectBatchPartition["textureWrapMode"];
 }
 
 function selectCutoverStaticObjectInstanceCandidates(options: {
@@ -1133,8 +1133,8 @@ function createStaticObjectVisualResourceTriangleGroupKey(input: {
 }
 
 function createStaticObjectTriangleCoverageKey(
-	partition: StaticObjectCompatibilityPartition,
-	triangle: StaticObjectCompatibilityTriangle,
+	partition: StaticObjectBatchPartition,
+	triangle: StaticObjectBatchTriangle,
 ): string {
 	return [
 		partition.sliceId,
@@ -1145,7 +1145,7 @@ function createStaticObjectTriangleCoverageKey(
 }
 
 function createStaticObjectSourceLocalTriangleKey(
-	triangle: StaticObjectCompatibilityTriangle,
+	triangle: StaticObjectBatchTriangle,
 ): string {
 	return [
 		createSourceKey(triangle.source),
@@ -1162,7 +1162,7 @@ function createStaticObjectSourceLocalTriangleKey(
 function bakeStaticObjectVisualResourceGeometry(options: {
 	readonly materialSlot: number;
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
-	readonly triangles: readonly StaticObjectCompatibilityTriangle[];
+	readonly triangles: readonly StaticObjectBatchTriangle[];
 }): {
 	readonly bounds: StaticBounds | null;
 	readonly positions: Float32Array;
@@ -1225,7 +1225,7 @@ function bakeStaticObjectVisualResourceGeometry(options: {
 
 function findStaticObjectSourceTriangle(
 	part: StaticObjectPartSourceFacts,
-	triangle: StaticObjectCompatibilityTriangle,
+	triangle: StaticObjectBatchTriangle,
 ): StaticObjectPartSourceFacts["triangles"][number] {
 	const sourceTriangle = part.triangles.find(
 		(candidate) =>
@@ -1292,9 +1292,9 @@ function dedupeStaticObjectVisualResources(
 	);
 }
 
-function createStaticObjectCompatibilityPayload(
+function createStaticObjectBatchPayload(
 	item: StaticBakeBatchItem,
-): StaticObjectCompatibilityPayload {
+): StaticObjectBatchPayload {
 	if (
 		(item.work.job.domain === "outdoor-buildings" ||
 			item.work.job.domain === "outdoor-explicit-objects" ||
@@ -1307,11 +1307,11 @@ function createStaticObjectCompatibilityPayload(
 		item.work.job.domain === "env-cell-system" &&
 		item.payload.scope.kind === "env-cell-system"
 	) {
-		return createEnvCellStaticObjectCompatibilityPayload(item.payload.scope);
+		return createEnvCellStaticObjectBatchPayload(item.payload.scope);
 	}
 
 	throw new Error(
-		`Static object compatibility baker only supports static object payloads. Received ${item.work.job.domain}/${item.payload.scope.kind}.`,
+		`Static object batch baker only supports static object payloads. Received ${item.work.job.domain}/${item.payload.scope.kind}.`,
 	);
 }
 
@@ -1332,8 +1332,8 @@ function createDrawUnitSpatialRecord(
 
 function warnAboutSkippedStaticObjectPartition(
 	work: ScheduledStaticWork,
-	payload: StaticObjectCompatibilityPayload,
-	partition: StaticObjectCompatibilityPartition,
+	payload: StaticObjectBatchPayload,
+	partition: StaticObjectBatchPartition,
 ): void {
 	console.warn(
 		`browser skipped non-renderable static object partition ${partition.sliceId}.`,
@@ -1358,8 +1358,8 @@ interface StaticObjectGeometryBakeOutput {
 
 function createStaticObjectGeometryBakeOutput(options: {
 	readonly work: ScheduledStaticWork;
-	readonly payload: StaticObjectCompatibilityPayload;
-	readonly partition: StaticObjectCompatibilityPartition;
+	readonly payload: StaticObjectBatchPayload;
+	readonly partition: StaticObjectBatchPartition;
 	readonly resourceIdPrefix: string;
 	readonly sourceIndex: StaticObjectBakeSourceIndex;
 }): StaticObjectGeometryBakeOutput {
@@ -1408,7 +1408,7 @@ function createStaticObjectGeometryBakeOutput(options: {
 			options.payload,
 			options.partition,
 		),
-		materialBucketKey: options.partition.compatibilityKey,
+		materialBucketKey: options.partition.batchKey,
 		materialEntries,
 		materialFamily: resolveRenderableStaticObjectFamily(options.partition),
 		materialIds: options.partition.materialIds,
@@ -1436,7 +1436,7 @@ function createStaticObjectGeometryBakeOutput(options: {
 
 function createEnvCellStaticObjectSpatialRecords(options: {
 	readonly geometry: ReturnType<typeof bakeStaticObjectPartitionGeometry>;
-	readonly payload: StaticObjectCompatibilityPayload;
+	readonly payload: StaticObjectBatchPayload;
 	readonly workOwner: StaticLayerPeerRecordOwner;
 }): readonly StaticEnvCellStaticObjectSpatialRecord[] {
 	if (options.payload.domain !== "env-cell-system") {
@@ -1483,7 +1483,7 @@ function createLayerPeerRecordOwner(
 }
 
 function createStaticObjectMaterialTableEntries(options: {
-	readonly partition: StaticObjectCompatibilityPartition;
+	readonly partition: StaticObjectBatchPartition;
 	readonly textureUseScopeId: string;
 }): readonly StaticMaterialTableEntry[] {
 	return options.partition.coarseTablePlan.entries.map((entry, slot) =>
@@ -1503,7 +1503,7 @@ function createStaticObjectMaterialTableEntries(options: {
 }
 
 function resolveRenderableStaticObjectFamily(
-	partition: StaticObjectCompatibilityPartition,
+	partition: StaticObjectBatchPartition,
 ): StaticObjectGeometryStaticDrawUnit["materialFamily"] {
 	if (
 		partition.family === "flat-color" ||
@@ -1519,7 +1519,7 @@ function resolveRenderableStaticObjectFamily(
 }
 
 function resolveRenderableStaticObjectPass(
-	partition: StaticObjectCompatibilityPartition,
+	partition: StaticObjectBatchPartition,
 ): StaticObjectGeometryStaticDrawUnit["materialPass"] {
 	if (
 		partition.pass === "opaque" ||
@@ -1536,7 +1536,7 @@ function resolveRenderableStaticObjectPass(
 }
 
 function createStaticObjectSortMetadata(
-	partition: StaticObjectCompatibilityPartition,
+	partition: StaticObjectBatchPartition,
 	positions: Float32Array,
 ): StaticObjectSortMetadata {
 	const bounds = computePositionBounds(positions);
@@ -1628,11 +1628,11 @@ function centerOfBounds(
 class StaticObjectBakeSourceIndex {
 	readonly #objectsByKey = new Map<
 		string,
-		StaticObjectCompatibilityPayload["objects"][number]
+		StaticObjectBatchPayload["objects"][number]
 	>();
 	readonly #sourcesByKey = new Map<
 		string,
-		StaticObjectCompatibilityPayload["sourceAssets"][number]
+		StaticObjectBatchPayload["sourceAssets"][number]
 	>();
 	readonly #geometryByKey = new Map<
 		string,
@@ -1640,7 +1640,7 @@ class StaticObjectBakeSourceIndex {
 	>();
 
 	constructor(
-		payload: StaticObjectCompatibilityPayload,
+		payload: StaticObjectBatchPayload,
 		attachments: StaticBakeBatchInput["attachments"],
 	) {
 		for (const object of payload.objects) {
@@ -1659,7 +1659,7 @@ class StaticObjectBakeSourceIndex {
 
 	getObject(
 		identity: StaticObjectInstanceIdentity,
-	): StaticObjectCompatibilityPayload["objects"][number] {
+	): StaticObjectBatchPayload["objects"][number] {
 		const object = this.#objectsByKey.get(createObjectKey(identity));
 		if (!object) {
 			throw new Error(
@@ -1715,7 +1715,7 @@ class StaticObjectBakeSourceIndex {
 }
 
 function bakeStaticObjectPartitionGeometry(
-	triangles: readonly StaticObjectCompatibilityTriangle[],
+	triangles: readonly StaticObjectBatchTriangle[],
 	sourceIndex: StaticObjectBakeSourceIndex,
 	materialSlotByEntryKey: ReadonlyMap<string, number>,
 ): {
@@ -1790,7 +1790,7 @@ function createStaticObjectBakeTextureUses(options: {
 	readonly work: ScheduledStaticWork;
 	readonly resourceIdPrefix: string;
 	readonly staticBatchId: string;
-	readonly partitions: readonly StaticObjectCompatibilityPartition[];
+	readonly partitions: readonly StaticObjectBatchPartition[];
 }): readonly StaticBakeTextureUse[] {
 	return createStaticMaterialTextureUses({
 		createTextureUseId: (dataUse, wrapMode) =>
@@ -1819,7 +1819,7 @@ function createStaticObjectBakeTextureUses(options: {
 function createStaticObjectTextureUseId(options: {
 	readonly dataUse: MaterialTextureDataUseIdentity;
 	readonly textureUseScopeId: string;
-	readonly wrapMode: StaticObjectCompatibilityPartition["textureWrapMode"];
+	readonly wrapMode: StaticObjectBatchPartition["textureWrapMode"];
 }): string {
 	return createStaticMaterialTextureUseId({
 		dataUse: options.dataUse,
@@ -1865,7 +1865,7 @@ function createIndexArray(vertexCount: number): Uint16Array | Uint32Array {
 }
 
 function createStaticObjectSourcePartMatrix(
-	object: StaticObjectCompatibilityPayload["objects"][number],
+	object: StaticObjectBatchPayload["objects"][number],
 	part: StaticObjectPartSourceFacts,
 ): Float32Array {
 	let matrix = buildAcPlacementMatrix(object.localPlacement, AC_UNIT_SCALE);
@@ -1886,9 +1886,9 @@ function createStaticObjectSourcePartMatrix(
 	);
 }
 
-function createEnvCellStaticObjectCompatibilityPayload(
+function createEnvCellStaticObjectBatchPayload(
 	payload: EnvCellSystemStaticScopePayload,
-): StaticObjectCompatibilityPayload {
+): StaticObjectBatchPayload {
 	const sourceByKey = new Map(
 		(payload.sourceAssets ?? []).map((source) => [
 			createSourceKey(source.identity),
@@ -1931,7 +1931,7 @@ function createEnvCellStaticObjectCompatibilityPayload(
 }
 
 function isEnvCellStaticObjectDynamicSource(
-	source: StaticObjectCompatibilityPayload["sourceAssets"][number],
+	source: StaticObjectBatchPayload["sourceAssets"][number],
 ): boolean {
 	return (
 		source.sourceAssetKind === "setup-model" && source.defaultAnimation !== null
@@ -1939,8 +1939,8 @@ function isEnvCellStaticObjectDynamicSource(
 }
 
 function createStaticObjectDrawUnitOwnership(
-	payload: StaticObjectCompatibilityPayload,
-	partition: StaticObjectCompatibilityPartition,
+	payload: StaticObjectBatchPayload,
+	partition: StaticObjectBatchPartition,
 ): StaticObjectDrawUnitOwnership {
 	if (payload.domain !== "env-cell-system") {
 		return {

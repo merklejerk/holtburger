@@ -1533,7 +1533,7 @@ export interface StaticObjectVisualResourceKey {
 	readonly materialPass: StaticObjectGeometryStaticDrawUnit["materialPass"];
 	/**
 	 * Render state affects depth/blend/cull-equivalent behavior and is part of
-	 * resource compatibility. Current camera distance and transparent sort bucket
+	 * resource batch. Current camera distance and transparent sort bucket
 	 * are instance/draw-list state instead.
 	 */
 	readonly renderState: StaticObjectRenderState;

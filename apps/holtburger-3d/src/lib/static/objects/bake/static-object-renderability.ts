@@ -1,5 +1,5 @@
 import type { MaterialTextureDataUseIdentity } from "../../contracts";
-import type { StaticObjectCompatibilityPartition } from "./static-object-compatibility-partitioner";
+import type { StaticObjectBatchPartition } from "./static-object-batch-partitioner";
 import type { StaticMaterialPlan } from "./static-object-material-planner";
 
 export function isRenderableStaticMaterialPlan(
@@ -25,7 +25,7 @@ export function isRenderableStaticMaterialPlan(
 }
 
 export function isRenderableStaticObjectPartition(
-	partition: StaticObjectCompatibilityPartition,
+	partition: StaticObjectBatchPartition,
 ): boolean {
 	if (
 		partition.family === "flat-color" &&

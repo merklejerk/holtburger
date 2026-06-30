@@ -4,7 +4,7 @@ import type {
 	StaticBaker,
 } from "../contracts";
 import { EnvCellSystemBaker } from "../env-cells/bake/env-cell-system-baker";
-import { StaticObjectCompatibilityBaker } from "../objects/bake/static-object-compatibility-baker";
+import { StaticObjectBatchBaker } from "../objects/bake/static-object-batch-baker";
 import { TerrainGeometryStaticBaker } from "../terrain/bake/terrain-geometry-baker";
 import { handleStaticBakeWorkerRequest } from "./worker-handler";
 import type { StaticBakeWorkerGlobalPort } from "./protocol";
@@ -48,7 +48,7 @@ class StaticBakeWorkerRouter implements StaticBaker {
 const workerPort = self as unknown as StaticBakeWorkerGlobalPort;
 const baker = new StaticBakeWorkerRouter({
 	landblockEnvCellsBaker: new EnvCellSystemBaker(),
-	staticObjectBaker: new StaticObjectCompatibilityBaker(),
+	staticObjectBaker: new StaticObjectBatchBaker(),
 	terrainBaker: new TerrainGeometryStaticBaker(),
 });
 

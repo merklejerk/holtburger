@@ -19,7 +19,7 @@ import {
 	createStaticMaterialTextureRoleSchemaKey,
 	resolveStaticMaterialDetailTextureTiling,
 } from "../../bake/static-material-adapter";
-import { sliceStaticMaterialCompatibilityCandidates } from "../../bake/static-material-compatibility-slicer";
+import { sliceStaticMaterialBatchCandidates } from "../../bake/static-material-batch-slicer";
 import { createMaterialTextureDataUseKey } from "../../bake/static-material-texture-policy";
 import { createStaticObjectMaterialCoverageReport } from "./static-object-material-coverage";
 import {
@@ -32,14 +32,14 @@ import {
 
 export const STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE = 8;
 
-export interface StaticObjectCompatibilityPartitionPlan {
-	readonly domain: StaticObjectCompatibilityPayload["domain"];
-	readonly partitions: readonly StaticObjectCompatibilityPartition[];
+export interface StaticObjectBatchPartitionPlan {
+	readonly domain: StaticObjectBatchPayload["domain"];
+	readonly partitions: readonly StaticObjectBatchPartition[];
 	readonly fallbackReasons: readonly StaticMaterialFallbackReason[];
 	readonly materialCoverage: StaticMaterialCoverageReport;
 }
 
-export interface StaticObjectCompatibilityPayload {
+export interface StaticObjectBatchPayload {
 	readonly domain: Extract<
 		StaticDomain,
 		OutdoorStaticObjectDomain | "env-cell-system"
@@ -48,7 +48,7 @@ export interface StaticObjectCompatibilityPayload {
 	readonly regionRenderProfile: {
 		readonly detailRoles: readonly RegionDetailRoleFacts[];
 	};
-	readonly objects: readonly StaticObjectCompatibilityObject[];
+	readonly objects: readonly StaticObjectBatchObject[];
 	readonly sourceAssets: OutdoorStaticObjectsScopePayload["sourceAssets"];
 	readonly paletteSources: OutdoorStaticObjectsScopePayload["paletteSources"];
 	readonly materialSlots: OutdoorStaticObjectsScopePayload["materialSlots"];
@@ -56,15 +56,15 @@ export interface StaticObjectCompatibilityPayload {
 	readonly textureRefs: OutdoorStaticObjectsScopePayload["textureRefs"];
 }
 
-type StaticObjectCompatibilityObject =
+type StaticObjectBatchObject =
 	OutdoorStaticObjectsScopePayload["objects"][number] & {
 		readonly owningEnvCellId?: number | null;
 	};
 
-export interface StaticObjectCompatibilityPartition {
+export interface StaticObjectBatchPartition {
 	readonly sliceId: string;
-	readonly compatibilityKey: string;
-	readonly partitionAxes: StaticObjectCompatibilityPartitionAxes;
+	readonly batchKey: string;
+	readonly partitionAxes: StaticObjectBatchPartitionAxes;
 	readonly coarseTablePlan: StaticObjectCoarseTablePlan;
 	readonly family: StaticMaterialPlan["family"];
 	readonly renderCoverage: StaticMaterialPlan["renderCoverage"];
@@ -81,7 +81,7 @@ export interface StaticObjectCompatibilityPartition {
 	readonly materialIds: readonly number[];
 	readonly materialEntryKeys: readonly string[];
 	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
-	readonly triangles: readonly StaticObjectCompatibilityTriangle[];
+	readonly triangles: readonly StaticObjectBatchTriangle[];
 	readonly sourceTriangleIds: readonly string[];
 	readonly triangleCount: number;
 	readonly reason: string;
@@ -116,14 +116,14 @@ interface StaticObjectCoarseMaterialEntry {
 	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
 }
 
-interface StaticObjectCompatibilityPartitionAxes {
-	readonly material: StaticObjectMaterialCompatibilityAxis;
+interface StaticObjectBatchPartitionAxes {
+	readonly material: StaticObjectMaterialBatchAxis;
 	readonly ownership: StaticObjectOwnershipAxis;
 	readonly sort: StaticObjectSortAxis;
 	readonly visibility: StaticObjectVisibilityAxis;
 }
 
-interface StaticObjectMaterialCompatibilityAxis {
+interface StaticObjectMaterialBatchAxis {
 	readonly key: string;
 	readonly family: StaticMaterialPlan["family"];
 	readonly renderCoverage: StaticMaterialPlan["renderCoverage"];
@@ -139,7 +139,7 @@ interface StaticObjectMaterialCompatibilityAxis {
 
 interface StaticObjectOwnershipAxis {
 	readonly key: string;
-	readonly domain: StaticObjectCompatibilityPayload["domain"];
+	readonly domain: StaticObjectBatchPayload["domain"];
 	readonly landblockId: number;
 	readonly envCellId: number | null;
 	readonly sourceKey: string;
@@ -162,7 +162,7 @@ interface StaticObjectVisibilityAxis {
 	readonly key: string;
 }
 
-export interface StaticObjectCompatibilityTriangle {
+export interface StaticObjectBatchTriangle {
 	readonly sourceTriangleId: string;
 	readonly object: StaticObjectInstanceIdentity;
 	readonly source: StaticObjectSourceIdentity;
@@ -180,8 +180,8 @@ type StaticObjectTextureWrapMode = "clamp" | "repeat";
 
 interface StaticObjectTriangleCandidate {
 	readonly sourceTriangleId: string;
-	readonly compatibilityKey: string;
-	readonly partitionAxes: StaticObjectCompatibilityPartitionAxes;
+	readonly batchKey: string;
+	readonly partitionAxes: StaticObjectBatchPartitionAxes;
 	readonly object: StaticObjectInstanceIdentity;
 	readonly source: StaticObjectSourceIdentity;
 	readonly gfxObj: StaticObjectSourceIdentity;
@@ -204,9 +204,9 @@ interface StaticObjectTriangleCandidate {
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 }
 
-export function partitionStaticObjectCompatibility(
-	payload: StaticObjectCompatibilityPayload,
-): StaticObjectCompatibilityPartitionPlan {
+export function partitionStaticObjectBatches(
+	payload: StaticObjectBatchPayload,
+): StaticObjectBatchPartitionPlan {
 	const materialPlan = planStaticObjectMaterials(payload);
 	const materialById = new Map(
 		materialPlan.materialPlans.map((plan) => [plan.materialUseKey, plan]),
@@ -214,14 +214,14 @@ export function partitionStaticObjectCompatibility(
 	const candidates = [...createTriangleCandidates(payload, materialById)].sort(
 		compareTriangleCandidates,
 	);
-	const partitions = sliceStaticMaterialCompatibilityCandidates({
+	const partitions = sliceStaticMaterialBatchCandidates({
 		candidates,
 		maxMaterialEntriesPerSlice: STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE,
 	}).map((slice) =>
-		createCompatibilityPartition({
+		createBatchPartition({
 			candidates: slice.candidates,
-			compatibilityIndex: slice.compatibilityIndex,
-			compatibilityKey: slice.compatibilityKey,
+			batchIndex: slice.batchIndex,
+			batchKey: slice.batchKey,
 			sliceIndex: slice.sliceIndex,
 		}),
 	);
@@ -239,7 +239,7 @@ export function partitionStaticObjectCompatibility(
 }
 
 function createTriangleCandidates(
-	payload: StaticObjectCompatibilityPayload,
+	payload: StaticObjectBatchPayload,
 	materialById: ReadonlyMap<string, StaticMaterialPlan>,
 ): readonly StaticObjectTriangleCandidate[] {
 	const sourceByKey = new Map(
@@ -336,10 +336,10 @@ function createTriangleCandidates(
 					textureRoleLayoutKey,
 					textureWrapMode,
 				});
-				const compatibilityKey = createPartitionCompatibilityKey(partitionAxes);
+				const batchKey = createPartitionBatchKey(partitionAxes);
 
 				candidates.push({
-					compatibilityKey,
+					batchKey,
 					geometrySurfaceId: triangle.geometrySurfaceId,
 					gfxObj: part.gfxObj,
 					gfxKey,
@@ -383,7 +383,7 @@ class MaterialSlotIndex {
 		StaticObjectMaterialSlotFacts
 	>();
 
-	constructor(payload: StaticObjectCompatibilityPayload) {
+	constructor(payload: StaticObjectBatchPayload) {
 		for (const slot of payload.materialSlots) {
 			this.#slotsByObjectPartSurface.set(
 				createMaterialSlotKey({
@@ -431,15 +431,15 @@ class MaterialSlotIndex {
 	}
 }
 
-function createCompatibilityPartition(options: {
+function createBatchPartition(options: {
 	readonly candidates: readonly StaticObjectTriangleCandidate[];
-	readonly compatibilityKey: string;
-	readonly compatibilityIndex: number;
+	readonly batchKey: string;
+	readonly batchIndex: number;
 	readonly sliceIndex: number;
-}): StaticObjectCompatibilityPartition {
+}): StaticObjectBatchPartition {
 	const first = options.candidates[0];
 	if (!first) {
-		throw new Error("Static object compatibility slice cannot be empty.");
+		throw new Error("Static object batch slice cannot be empty.");
 	}
 
 	const materialIds = uniqueSorted(
@@ -465,7 +465,7 @@ function createCompatibilityPartition(options: {
 		alphaMode: first.materialPlan.alphaPolicy.mode,
 		alphaTest: first.materialPlan.alphaPolicy.alphaTest,
 		indexedClipThreshold: first.materialPlan.alphaPolicy.indexedClipThreshold,
-		compatibilityKey: options.compatibilityKey,
+		batchKey: options.batchKey,
 		coarseTablePlan: createCoarseTablePlan({
 			candidates: options.candidates,
 			partitionAxes,
@@ -487,7 +487,7 @@ function createCompatibilityPartition(options: {
 		detailTextureTiling: resolveStaticMaterialDetailTextureTiling(
 			first.materialPlan,
 		),
-		sliceId: `slice/${options.compatibilityIndex}/${options.sliceIndex}`,
+		sliceId: `slice/${options.batchIndex}/${options.sliceIndex}`,
 		sourceTriangleIds,
 		textureWrapMode: first.textureWrapMode,
 		triangles: options.candidates.map((candidate) => ({
@@ -512,7 +512,7 @@ function createCompatibilityPartition(options: {
 
 function createCoarseTablePlan(options: {
 	readonly candidates: readonly StaticObjectTriangleCandidate[];
-	readonly partitionAxes: StaticObjectCompatibilityPartitionAxes;
+	readonly partitionAxes: StaticObjectBatchPartitionAxes;
 	readonly sourceTriangleIds: readonly string[];
 	readonly textureDataUses: readonly MaterialTextureDataUseIdentity[];
 }): StaticObjectCoarseTablePlan {
@@ -574,9 +574,9 @@ function createCoarseTablePlan(options: {
 }
 
 function createPartitionSliceAxes(
-	axes: StaticObjectCompatibilityPartitionAxes,
+	axes: StaticObjectBatchPartitionAxes,
 	candidates: readonly StaticObjectTriangleCandidate[],
-): StaticObjectCompatibilityPartitionAxes {
+): StaticObjectBatchPartitionAxes {
 	return {
 		...axes,
 		ownership: {
@@ -592,7 +592,7 @@ function createPartitionSliceAxes(
 }
 
 function createPartitionAxes(options: {
-	readonly domain: StaticObjectCompatibilityPayload["domain"];
+	readonly domain: StaticObjectBatchPayload["domain"];
 	readonly plan: StaticMaterialPlan;
 	readonly landblockId: number;
 	readonly sourceKey: string;
@@ -605,9 +605,9 @@ function createPartitionAxes(options: {
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly textureRoleSchemaKey: string;
 	readonly textureRoleLayoutKey: string;
-}): StaticObjectCompatibilityPartitionAxes {
+}): StaticObjectBatchPartitionAxes {
 	const sort = createSortAxis(options.plan);
-	const material = createMaterialCompatibilityAxis({
+	const material = createMaterialBatchAxis({
 		...options,
 		includeConcreteEntryInKey:
 			sort.policy === "transparent-object-part-sortable",
@@ -626,7 +626,7 @@ function createPartitionAxes(options: {
 	};
 }
 
-function createMaterialCompatibilityAxis(options: {
+function createMaterialBatchAxis(options: {
 	readonly plan: StaticMaterialPlan;
 	readonly materialEntryKey: string;
 	readonly materialColorKey: string;
@@ -634,7 +634,7 @@ function createMaterialCompatibilityAxis(options: {
 	readonly textureWrapMode: StaticObjectTextureWrapMode;
 	readonly textureRoleSchemaKey: string;
 	readonly textureRoleLayoutKey: string;
-}): StaticObjectMaterialCompatibilityAxis {
+}): StaticObjectMaterialBatchAxis {
 	const key = [
 		`family:${options.plan.family}`,
 		`coverage:${options.plan.renderCoverage}`,
@@ -662,7 +662,7 @@ function createMaterialCompatibilityAxis(options: {
 }
 
 function createOwnershipAxis(options: {
-	readonly domain: StaticObjectCompatibilityPayload["domain"];
+	readonly domain: StaticObjectBatchPayload["domain"];
 	readonly landblockId: number;
 	readonly sourceKey: string;
 	readonly gfxKey: string;
@@ -732,10 +732,10 @@ function createVisibilityAxis(): StaticObjectVisibilityAxis {
 	};
 }
 
-function createPartitionCompatibilityKey(
-	axes: StaticObjectCompatibilityPartitionAxes,
+function createPartitionBatchKey(
+	axes: StaticObjectBatchPartitionAxes,
 ): string {
-	const compatibilityKeyParts = [
+	const batchKeyParts = [
 		axes.material.key,
 		axes.sort.key,
 		axes.visibility.key,
@@ -745,13 +745,13 @@ function createPartitionCompatibilityKey(
 	if (axes.sort.policy === "transparent-object-part-sortable") {
 		if (!axes.ownership.objectPartKey) {
 			throw new Error(
-				"Transparent static object compatibility requires an object/part ownership key.",
+				"Transparent static object batch partitioning requires an object/part ownership key.",
 			);
 		}
-		compatibilityKeyParts.push(`object-part:${axes.ownership.objectPartKey}`);
+		batchKeyParts.push(`object-part:${axes.ownership.objectPartKey}`);
 	}
 
-	return compatibilityKeyParts.join("|");
+	return batchKeyParts.join("|");
 }
 
 function uniqueTextureDataUses(
@@ -780,7 +780,7 @@ function compareTriangleCandidates(
 	right: StaticObjectTriangleCandidate,
 ): number {
 	return (
-		left.compatibilityKey.localeCompare(right.compatibilityKey) ||
+		left.batchKey.localeCompare(right.batchKey) ||
 		left.objectKey.localeCompare(right.objectKey) ||
 		left.partIndex - right.partIndex ||
 		left.polygonId - right.polygonId ||

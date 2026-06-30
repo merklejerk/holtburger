@@ -10,7 +10,7 @@ import type {
 	StaticMaterialRenderOutcome,
 	StaticMaterialUnrenderedBucket,
 } from "../../contracts";
-import type { StaticObjectCompatibilityPartition } from "./static-object-compatibility-partitioner";
+import type { StaticObjectBatchPartition } from "./static-object-batch-partitioner";
 import type {
 	StaticMaterialFallbackReason,
 	StaticObjectMaterialPipelinePlan,
@@ -32,7 +32,7 @@ export function createStaticObjectMaterialCoverageReport(options: {
 		readonly landblock: LandblockSourceIdentity;
 	};
 	readonly materialPlan: StaticObjectMaterialPipelinePlan;
-	readonly partitions: readonly StaticObjectCompatibilityPartition[];
+	readonly partitions: readonly StaticObjectBatchPartition[];
 }): StaticMaterialCoverageReport {
 	const bucketBuilders = new Map<string, MutableCoverageBucket>();
 	const materialKeysByBucket = new Map<string, Set<number>>();
@@ -116,7 +116,7 @@ function resolveMaterialPlanOutcome(
 }
 
 function resolvePartitionOutcome(
-	partition: StaticObjectCompatibilityPartition,
+	partition: StaticObjectBatchPartition,
 ): StaticMaterialRenderOutcome {
 	if (partition.renderCoverage === "unsupported") {
 		return "unsupported";

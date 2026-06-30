@@ -1259,14 +1259,14 @@ function createDynamicRenderPartSlices(options: {
 			partIndex: options.part.partIndex,
 			triangleGeometrySurfaceId: triangle.geometrySurfaceId,
 		});
-		const compatibilityKey =
-			createDynamicMaterialCompatibilityKey(materialEntry);
-		const existing = candidateSlices.get(compatibilityKey);
+		const batchKey =
+			createDynamicMaterialBatchKey(materialEntry);
+		const existing = candidateSlices.get(batchKey);
 		const candidate = { materialEntry, triangle };
 		if (existing) {
 			existing.push(candidate);
 		} else {
-			candidateSlices.set(compatibilityKey, [candidate]);
+			candidateSlices.set(batchKey, [candidate]);
 		}
 	}
 	return [...candidateSlices.values()].map((candidates) =>
@@ -1411,7 +1411,7 @@ function resolveDynamicTriangleMaterialEntry(options: {
 	return materialEntry;
 }
 
-function createDynamicMaterialCompatibilityKey(
+function createDynamicMaterialBatchKey(
 	entry: DynamicMaterialRenderEntry,
 ): string {
 	const { blend, depthTest, depthWrite } = entry.entry.renderState;

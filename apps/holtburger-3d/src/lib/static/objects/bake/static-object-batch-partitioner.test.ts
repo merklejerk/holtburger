@@ -9,15 +9,15 @@ import type {
 	StaticObjectPaletteViewFacts,
 	StaticObjectTextureRefFacts,
 } from "../../contracts";
-import { bakeStaticObjectCompatibility } from "./static-object-compatibility-baker";
+import { bakeStaticObjectBatch } from "./static-object-batch-baker";
 import {
-	partitionStaticObjectCompatibility,
+	partitionStaticObjectBatches,
 	STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE,
-	type StaticObjectCompatibilityPayload,
-} from "./static-object-compatibility-partitioner";
+	type StaticObjectBatchPayload,
+} from "./static-object-batch-partitioner";
 import { createStaticObjectSourceGeometryIdentity } from "../static-object-source-assets";
 
-describe("static object compatibility partitioner", () => {
+describe("static object batch partitioner", () => {
 	it("partitions compatible solid materials by bounded material table capacity", () => {
 		const materialCount = STATIC_OBJECT_MAX_MATERIALS_PER_DRAW_SLICE + 1;
 		const payload = createPayload({
@@ -29,7 +29,7 @@ describe("static object compatibility partitioner", () => {
 			),
 		});
 
-		const plan = partitionStaticObjectCompatibility(payload);
+		const plan = partitionStaticObjectBatches(payload);
 
 		expect(plan.partitions).toHaveLength(2);
 		expect(plan.partitions.map((partition) => partition.materialIds)).toEqual([
@@ -49,7 +49,7 @@ describe("static object compatibility partitioner", () => {
 			materials: [createSolidMaterial(0x08000010, { surfaceType: 0x20000 })],
 		});
 
-		const plan = partitionStaticObjectCompatibility(payload);
+		const plan = partitionStaticObjectBatches(payload);
 
 		expect(plan.partitions).toEqual([
 			expect.objectContaining({
@@ -67,7 +67,7 @@ describe("static object compatibility partitioner", () => {
 			materials: [createSolidMaterial(0x08000010)],
 		});
 
-		const plan = partitionStaticObjectCompatibility(payload);
+		const plan = partitionStaticObjectBatches(payload);
 
 		expect(plan.partitions).toHaveLength(1);
 		expect(plan.partitions[0]).toMatchObject({
@@ -102,7 +102,7 @@ describe("static object compatibility partitioner", () => {
 			],
 		} satisfies OutdoorStaticObjectsScopePayload;
 
-		expect(() => partitionStaticObjectCompatibility(payload)).toThrow(
+		expect(() => partitionStaticObjectBatches(payload)).toThrow(
 			/has no resolved material slot/,
 		);
 	});
@@ -114,7 +114,7 @@ describe("static object compatibility partitioner", () => {
 		});
 		const input = createBakeInput(payload);
 
-		const result = bakeStaticObjectCompatibility(input);
+		const result = bakeStaticObjectBatch(input);
 
 		expect(result.drawUnits).toEqual([
 			expect.objectContaining({
@@ -237,7 +237,7 @@ describe("static object compatibility partitioner", () => {
 	it("partitions env-cell static objects by owning env cell before material batching", () => {
 		const payload = createEnvCellStaticPayload();
 
-		const plan = partitionStaticObjectCompatibility(payload);
+		const plan = partitionStaticObjectBatches(payload);
 
 		expect(plan.partitions).toHaveLength(2);
 		expect(
@@ -249,7 +249,7 @@ describe("static object compatibility partitioner", () => {
 			[1, 1],
 		);
 		expect(
-			plan.partitions.map((partition) => partition.compatibilityKey),
+			plan.partitions.map((partition) => partition.batchKey),
 		).toEqual([
 			expect.stringContaining("env-cell:da550100"),
 			expect.stringContaining("env-cell:da550101"),
@@ -257,7 +257,7 @@ describe("static object compatibility partitioner", () => {
 	});
 
 	it("bakes env-cell static objects into cell-scoped draw units", () => {
-		const result = bakeStaticObjectCompatibility(
+		const result = bakeStaticObjectBatch(
 			createEnvCellStaticBakeInput(),
 		);
 
@@ -329,7 +329,7 @@ describe("static object compatibility partitioner", () => {
 			materials: [],
 		});
 
-		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+		const result = bakeStaticObjectBatch(createBakeInput(payload));
 
 		expect(result.portalApertureResources).toEqual([
 			{
@@ -391,7 +391,7 @@ describe("static object compatibility partitioner", () => {
 			},
 		};
 
-		expect(() => bakeStaticObjectCompatibility(input)).toThrow(
+		expect(() => bakeStaticObjectBatch(input)).toThrow(
 			/missing geometry attachment/,
 		);
 	});
@@ -413,7 +413,7 @@ describe("static object compatibility partitioner", () => {
 			materials: [createTexturedMaterial(0x08000010)],
 			textureRefs: [...createRgbaTextureRefs(), ...createDetailTextureRefs()],
 		});
-		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+		const result = bakeStaticObjectBatch(createBakeInput(payload));
 		const drawUnit = result.drawUnits.find(
 			(candidate) => candidate.kind === "static-object-geometry",
 		);
@@ -479,7 +479,7 @@ describe("static object compatibility partitioner", () => {
 		});
 		const input = createBakeInput(payload);
 
-		const result = bakeStaticObjectCompatibility(input);
+		const result = bakeStaticObjectBatch(input);
 
 		expect(result.drawUnits).toEqual([
 			expect.objectContaining({
@@ -518,7 +518,7 @@ describe("static object compatibility partitioner", () => {
 			textureRefs: createRgbaTextureRefs(),
 		});
 
-		const plan = partitionStaticObjectCompatibility(payload);
+		const plan = partitionStaticObjectBatches(payload);
 
 		expect(plan.partitions).toHaveLength(1);
 		expect(
@@ -538,7 +538,7 @@ describe("static object compatibility partitioner", () => {
 		});
 		const input = createBakeInput(payload);
 
-		const result = bakeStaticObjectCompatibility(input);
+		const result = bakeStaticObjectBatch(input);
 		const drawUnit = result.drawUnits[0];
 
 		expect(drawUnit).toMatchObject({
@@ -583,7 +583,7 @@ describe("static object compatibility partitioner", () => {
 			objects: [],
 		} satisfies OutdoorStaticObjectsScopePayload;
 
-		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+		const result = bakeStaticObjectBatch(createBakeInput(payload));
 
 		expect(result.drawUnits).toEqual([]);
 		expect(result.staticObjectRenderInstances).toEqual([]);
@@ -615,7 +615,7 @@ describe("static object compatibility partitioner", () => {
 		});
 		const input = createBakeInput(payload);
 
-		const result = bakeStaticObjectCompatibility(input);
+		const result = bakeStaticObjectBatch(input);
 		const drawUnit = result.drawUnits[0];
 
 		expect(drawUnit).toMatchObject({
@@ -644,7 +644,7 @@ describe("static object compatibility partitioner", () => {
 		});
 		const input = createBakeInput(payload);
 
-		const result = bakeStaticObjectCompatibility(input);
+		const result = bakeStaticObjectBatch(input);
 		const drawUnit = result.drawUnits[0];
 
 		expect(drawUnit).toMatchObject({
@@ -697,7 +697,7 @@ describe("static object compatibility partitioner", () => {
 			}),
 		);
 
-		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+		const result = bakeStaticObjectBatch(createBakeInput(payload));
 
 		expect(result.drawUnits).toHaveLength(0);
 		expect(result.staticObjectVisualResources).toHaveLength(1);
@@ -779,7 +779,7 @@ describe("static object compatibility partitioner", () => {
 			}),
 		);
 
-		const plan = partitionStaticObjectCompatibility(payload);
+		const plan = partitionStaticObjectBatches(payload);
 
 		expect(plan.partitions).toHaveLength(1);
 		expect(plan.partitions[0]).toMatchObject({
@@ -811,7 +811,7 @@ describe("static object compatibility partitioner", () => {
 			}),
 		);
 
-		const plan = partitionStaticObjectCompatibility(payload);
+		const plan = partitionStaticObjectBatches(payload);
 
 		expect(plan.partitions).toHaveLength(1);
 		expect(plan.partitions[0]).toMatchObject({
@@ -861,7 +861,7 @@ describe("static object compatibility partitioner", () => {
 			}),
 		);
 
-		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+		const result = bakeStaticObjectBatch(createBakeInput(payload));
 
 		expect(result.drawUnits).toHaveLength(1);
 		expect(result.staticSourceMappings).toEqual([]);
@@ -891,7 +891,7 @@ describe("static object compatibility partitioner", () => {
 			}),
 		);
 
-		const plan = partitionStaticObjectCompatibility(payload);
+		const plan = partitionStaticObjectBatches(payload);
 
 		expect(plan.partitions).toHaveLength(1);
 		expect(plan.partitions[0]).toMatchObject({
@@ -930,7 +930,7 @@ describe("static object compatibility partitioner", () => {
 			],
 		});
 
-		const plan = partitionStaticObjectCompatibility(payload);
+		const plan = partitionStaticObjectBatches(payload);
 
 		expect(plan.partitions).toHaveLength(1);
 		expect(
@@ -968,7 +968,7 @@ describe("static object compatibility partitioner", () => {
 			},
 		]);
 
-		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+		const result = bakeStaticObjectBatch(createBakeInput(payload));
 		const drawUnit = result.drawUnits[0];
 		if (!drawUnit || drawUnit.kind !== "static-object-geometry") {
 			throw new Error("Expected static object geometry draw unit.");
@@ -997,7 +997,7 @@ describe("static object compatibility partitioner", () => {
 			}),
 		);
 
-		const plan = partitionStaticObjectCompatibility(payload);
+		const plan = partitionStaticObjectBatches(payload);
 
 		expect(plan.partitions).toHaveLength(2);
 		expect(
@@ -1024,7 +1024,7 @@ describe("static object compatibility partitioner", () => {
 			[1, 1],
 		);
 
-		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+		const result = bakeStaticObjectBatch(createBakeInput(payload));
 		expect(result.drawUnits).toEqual([
 			expect.objectContaining({
 				kind: "static-object-geometry",
@@ -1065,7 +1065,7 @@ describe("static object compatibility partitioner", () => {
 			}),
 		);
 
-		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+		const result = bakeStaticObjectBatch(createBakeInput(payload));
 
 		expect(result.drawUnits).toHaveLength(0);
 		expect(result.staticObjectVisualResources).toHaveLength(1);
@@ -1140,7 +1140,7 @@ describe("static object compatibility partitioner", () => {
 		});
 		const input = createBakeInput(payload);
 
-		const result = bakeStaticObjectCompatibility(input);
+		const result = bakeStaticObjectBatch(input);
 
 		expect(result.materialCoverage).toEqual([
 			expect.objectContaining({
@@ -1209,7 +1209,7 @@ describe("static object compatibility partitioner", () => {
 			materials: [createIndexedMaterial(0x08000013)],
 			textureRefs: createIndexedTextureRefs(),
 		});
-		const result = bakeStaticObjectCompatibility(createBakeInput(payload));
+		const result = bakeStaticObjectBatch(createBakeInput(payload));
 		const drawUnit = result.drawUnits[0];
 
 		expect(drawUnit).toMatchObject({
@@ -1257,7 +1257,7 @@ describe("static object compatibility partitioner", () => {
 			textureRefs: createIndexedTextureRefs(),
 		});
 
-		const plan = partitionStaticObjectCompatibility(payload);
+		const plan = partitionStaticObjectBatches(payload);
 
 		expect(plan.partitions).toHaveLength(1);
 		expect(
@@ -1306,7 +1306,7 @@ describe("static object compatibility partitioner", () => {
 		});
 		const input = createBakeInput(payload);
 
-		const result = bakeStaticObjectCompatibility(input);
+		const result = bakeStaticObjectBatch(input);
 		const drawUnit = result.drawUnits[0];
 
 		expect(drawUnit).toMatchObject({ kind: "static-object-geometry" });
@@ -1352,7 +1352,7 @@ describe("static object compatibility partitioner", () => {
 			sourceAssets: [{ ...source, parts: [updatedPart] }],
 		});
 
-		const result = bakeStaticObjectCompatibility(input);
+		const result = bakeStaticObjectBatch(input);
 		const drawUnits = result.drawUnits.filter(
 			(drawUnit) => drawUnit.kind === "static-object-geometry",
 		);
@@ -1462,7 +1462,7 @@ describe("static object compatibility partitioner", () => {
 			],
 		});
 
-		const result = bakeStaticObjectCompatibility(input);
+		const result = bakeStaticObjectBatch(input);
 		const drawUnit = result.drawUnits.find(
 			(candidate) => candidate.kind === "static-object-geometry",
 		);
@@ -1490,7 +1490,7 @@ describe("static object compatibility partitioner", () => {
 	});
 });
 
-function createEnvCellStaticPayload(): StaticObjectCompatibilityPayload &
+function createEnvCellStaticPayload(): StaticObjectBatchPayload &
 	OutdoorStaticObjectsScopePayload {
 	const payload = duplicateObjectInstance(
 		createPayload({
@@ -1640,7 +1640,7 @@ function createEnvCellStaticScopePayload(): EnvCellSystemStaticScopePayload {
 
 function createEnvCellStaticScopeEnvCell(
 	envCellId: number,
-	object: StaticObjectCompatibilityPayload["objects"][number],
+	object: StaticObjectBatchPayload["objects"][number],
 ): EnvCellSystemStaticScopePayload["envCells"][number] {
 	return {
 		cellBsp: {
